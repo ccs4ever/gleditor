@@ -1,1 +1,4 @@
-* Finish tests for glyphpalette
+* Replace logo.png with something cooler
+* finish porting GlyphCache
+* hook GlyphCache into the render thread
+* document everything
