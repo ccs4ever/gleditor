@@ -1,0 +1,17 @@
+CompileFlags:
+  Compiler: clang++
+Index:
+  StandardLibrary: Yes
+Diagnostics:
+  ClangTidy:
+    Add: 
+      - modernize*
+      - bugprone-*
+      - cppcoreguidlines-*
+      - performance-*
+      - readability-*
+      - portability-*
+    Remove:
+      - modernize-use-trailing-return-type
+      - readability-magic-numbers
+    FastCheckFilter: Loose

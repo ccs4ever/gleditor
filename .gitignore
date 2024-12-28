@@ -1,5 +1,10 @@
 # Prerequisites
 *.d
+*.j
+*.dep
+
+# Compile Commands file (used by clangd)
+compile_commands.json
 
 # Compiled Object files
 *.slo
