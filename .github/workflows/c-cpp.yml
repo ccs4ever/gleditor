@@ -14,7 +14,7 @@ jobs:
     steps:
     - uses: actions/checkout@v4
     - name: packages
-      run: apt-get install libspdlog-dev libpangomm-2.48-dev libsdl2-dev libsdl2-image-dev libglew-dev clang make google-mock libgtest-dev
+      run: sudo apt-get install libspdlog-dev libpangomm-2.48-dev libsdl2-dev libsdl2-image-dev libglew-dev clang make google-mock libgtest-dev
     - name: make
       run: make
     - name: make test
