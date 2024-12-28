@@ -1,0 +1,21 @@
+name: C/C++ CI
+
+on:
+  push:
+    branches: [ "main" ]
+  pull_request:
+    branches: [ "main" ]
+
+jobs:
+  build:
+
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v4
+    - name: packages
+      run: apt-get install libspdlog-dev libpangomm-2.48-dev libsdl2-dev libsdl2-image-dev libglew-dev clang make google-mock libgtest-dev
+    - name: make
+      run: make
+    - name: make test
+      run: make test
