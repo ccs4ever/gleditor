@@ -29,18 +29,20 @@ gleditor_test: $(TEST_OBJS)
 test: gleditor_test
 	./gleditor_test
 
+# produces gleditor_test.prof (a human-readable code coverage report) and
+# coverage.lcov (a coverage report in lcov format) suitable for feeding into other tools like NeoVim
 profile: gleditor_test
 	set -e; \
-	raw=gleditor_test.profraw; prof=gleditor_test.profdata; \
-	trap "rm -f $${raw}" EXIT HUP KILL TERM; \
+	raw=gleditor_test.profraw; data=gleditor_test.profdata; \
+	trap "rm -f $${raw} $${data}" EXIT HUP KILL TERM; \
 	seq 1 100 | while read f; do \
 		echo "*\c"; LLVM_PROFILE_FILE=$${raw} ./gleditor_test 2>&1 >/dev/null; \
 	done; echo; \
-	llvm-profdata merge -sparse $${raw} -o $${prof}; \
-	llvm-cov show ./gleditor_test -instr-profile=$${prof} \
+	llvm-profdata merge -sparse $${raw} -o $${data}; \
+	llvm-cov show ./gleditor_test -instr-profile=$${data} \
 		-show-line-counts-or-regions -show-branches=count -show-expansions > gleditor_test.prof; \
-	llvm-cov export ./gleditor_test --format=lcov --instr-profile=$${prof} > coverage.lcov; \
-	rm $${raw};
+	llvm-cov export ./gleditor_test --format=lcov --instr-profile=$${data} > coverage.lcov; \
+	rm -f $${raw} $${data};
 
 
 run: gleditor
