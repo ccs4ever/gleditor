@@ -6,6 +6,8 @@ OpenGL Text Editor
 [![C/C++ CI](https://github.com/ccs4ever/gleditor/actions/workflows/c-cpp.yml/badge.svg)](https://github.com/ccs4ever/gleditor/actions/workflows/c-cpp.yml)
 
 
+Still a work in progress at this time.
+
 ## Building
 
 ### Prerequisites
