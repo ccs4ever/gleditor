@@ -1,6 +1,10 @@
 # gleditor
 
+
 OpenGL Text Editor
+
+[![C/C++ CI](https://github.com/ccs4ever/gleditor/actions/workflows/c-cpp.yml/badge.svg)](https://github.com/ccs4ever/gleditor/actions/workflows/c-cpp.yml)
+
 
 ## Building
 
