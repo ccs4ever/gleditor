@@ -14,6 +14,7 @@ Still a work in progress at this time.
 
 To run and test, the following packages are needed:
 
+* GLM
 * SPDLog
 * pangomm/cairomm
 * SDL2
@@ -31,7 +32,7 @@ To build documentation, you will need:
 On Ubuntu run:
 
 ```
-apt-get install doxygen libspdlog-dev libpangomm-2.48-dev libsdl2-dev libsdl2-image-dev libglew-dev clang make libgmock-dev google-mock libgtest-dev
+apt-get install doxygen libglm-dev libspdlog-dev libpangomm-2.48-dev libsdl2-dev libsdl2-image-dev libglew-dev clang make libgmock-dev google-mock libgtest-dev
 ```
 
 ### Build executable
