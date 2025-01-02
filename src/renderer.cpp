@@ -1,6 +1,7 @@
 #include "renderer.hpp"
 
 #include "GL/glew.h"
+#include "GLState.hpp"
 #include "SDLwrap.hpp"
 #include "pangomm/attributes.h"
 #include "pangomm/attrlist.h"
@@ -20,6 +21,7 @@
 #include <glm/gtc/type_ptr.hpp>
 #include <iomanip>
 #include <iostream>
+#include <mutex>
 #include <ostream>
 #include <pango/pangocairo.h>
 #include <pangomm.h>
@@ -29,27 +31,31 @@
 #include <string>
 #include <unordered_map>
 
-void setupGL(const AppState &state) {
+void setupGL(AppState &state, const GLState &glState) {
 
-  auto program = state.programs.at("main");
+  auto program = glState.programs.at("main");
 
   glUseProgram(program.id);
 
   glUniform1i(program["texUnit"], 0);
 
-  glm::mat4 projection{glm::perspective(
-      glm::radians(state.fov),
-      (float)state.screenWidth / (float)state.screenHeight, 0.1F, 100.0F)};
-  glm::mat4 view{glm::lookAt(state.camera.pos,
-                             state.camera.pos + state.camera.front,
-                             state.camera.upward)};
+  {
+    std::lock_guard locker(state.view);
 
-  glUniformMatrix4fv(program["projection"], 1, GL_FALSE,
-                     glm::value_ptr(projection));
-  glUniformMatrix4fv(program["view"], 1, GL_FALSE, glm::value_ptr(view));
+    glm::mat4 projection{glm::perspective(glm::radians(state.view.fov),
+                                          (float)state.view.screenWidth /
+                                              (float)state.view.screenHeight,
+                                          0.1F, 100.0F)};
+    glm::mat4 view{glm::lookAt(
+        state.view.pos, state.view.pos + state.view.front, state.view.upward)};
+
+    glUniformMatrix4fv(program["projection"], 1, GL_FALSE,
+                       glm::value_ptr(projection));
+    glUniformMatrix4fv(program["view"], 1, GL_FALSE, glm::value_ptr(view));
+  }
 }
 
-void newDoc(AppState &state, AutoSDLWindow &window) {
+void newDoc(GLState &glState, AutoSDLWindow &window) {
 #if 0
   auto tempSurf =
       Cairo::ImageSurface::create(Cairo::Surface::Format::ARGB32, 0, 0);
@@ -100,15 +106,15 @@ void newDoc(AppState &state, AutoSDLWindow &window) {
   layout->show_in_cairo_context(layCtx);
   layoutSurf->write_to_png("/tmp/page.png");
 #endif
-  if (state.docs.empty()) {
+  if (glState.docs.empty()) {
     auto docPtr = Doc::create(glm::mat4(1.0));
-    state.docs.push_back(docPtr->getPtr());
+    glState.docs.push_back(docPtr->getPtr());
   }
-  std::shared_ptr<Doc> doc = state.docs.back()->getPtr();
+  std::shared_ptr<Doc> doc = glState.docs.back()->getPtr();
 
   std::cerr << "doc use count: " << doc.use_count() << "\n";
 
-  doc->newPage(state);
+  doc->newPage(glState);
 }
 
 inline GLenum getShaderType(const std::string &stage) {
@@ -125,7 +131,7 @@ inline GLenum getShaderType(const std::string &stage) {
       std::format("Error: Unknown shader type: {}", stage));
 }
 
-void setupShaders(AppState &state) {
+void setupShaders(GLState &state) {
 
   static std::regex uniformsReg(
       R"(^\s*(uniform|in)\s+\D+(\d+)?\S*?\s+(\w+)\s*;)",
@@ -152,7 +158,7 @@ void setupShaders(AppState &state) {
         }
         std::cerr << "creating program name/id: " << progName << "/" << pid
                   << "\n";
-        state.programs.emplace(progName, AppState::Program{pid, {}});
+        state.programs.emplace(progName, GLState::Program{pid, {}});
       }
       auto &prog = state.programs[progName];
       std::ifstream stream(path, std::ios::ate);
@@ -211,7 +217,7 @@ void setupShaders(AppState &state) {
         std::cerr << "found " << type << ": (" << it->str(2) << "/" << size
                   << ")/" << std::quoted(name) << "\n"
                   << std::flush;
-        prog.locs.emplace(name, AppState::Loc{0, type, size});
+        prog.locs.emplace(name, GLState::Loc{0, type, size});
       }
       const auto pid = state.programs[progName].id;
       glAttachShader(pid, shader);
@@ -315,9 +321,8 @@ void debugCbAMD(GLuint id, GLenum type, GLenum severity, GLsizei length,
 #endif
 }
 
-void initGL(AppState &state) {
+void initGL() {
 
-  std::cerr << "initting glew\n";
   glewExperimental = GL_TRUE;
   GLenum err       = glewInit();
   if (GLEW_OK != err) {
@@ -325,7 +330,6 @@ void initGL(AppState &state) {
         std::string("Error initializing GLEW: ") +
         reinterpret_cast<const char *>(glewGetErrorString(err)));
   }
-  std::cerr << "init glew\n";
 
   glEnable(GL_DEBUG_OUTPUT);
   if (GL_TRUE == glIsEnabled(GL_DEBUG_OUTPUT)) {
@@ -340,43 +344,43 @@ void initGL(AppState &state) {
     while (GL_NO_ERROR != glGetError()) {
     };
   }
-  std::cerr << "initted gl debug\n";
 
   glClearColor(0, 0, 0, 1);
-
-  setupShaders(state);
 }
 
-void Renderer::operator()(AppState &state) {
+void Renderer::operator()(AppState &appState, AutoSDLWindow& window) {
 
-  AutoSDLSurface icon("logo.png");
-
-  AutoSDLWindow window("GL Editor", SDL_WINDOWPOS_UNDEFINED,
-                       SDL_WINDOWPOS_UNDEFINED, 640, 480,
-                       SDL_WINDOW_OPENGL | SDL_WINDOW_MAXIMIZED, icon.surface);
+  GLState glState;
 
   AutoSDLGL glCtx(window.window);
 
-  initGL(state);
+  initGL();
 
-  while (state.alive) {
+  setupShaders(glState);
+
+  while (appState.alive) {
     // application logic here
     glClear(GL_COLOR_BUFFER_BIT);
 
-    setupGL(state);
+    setupGL(appState, glState);
 
-    while (auto item = state.renderQueue.pop()) {
+    while (auto item = appState.renderQueue.pop()) {
       switch (item->type) {
       case RenderItem::Type::NewDoc:
-        newDoc(state, window);
+        newDoc(glState, window);
         break;
       default:
         break;
       }
     }
 
-    for (const std::shared_ptr<Doc> &doc : state.docs) {
-      doc->draw(state);
+    // avoid expensive rendering if we are dead
+    if (!appState.alive) {
+      break;
+    }
+
+    for (const std::shared_ptr<Doc> &doc : glState.docs) {
+      doc->draw(glState);
     }
 
     // swap buffers;

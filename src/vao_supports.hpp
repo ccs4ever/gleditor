@@ -6,7 +6,7 @@
 #include <string>
 #include <utility>
 
-struct AppState;
+struct GLState;
 
 class VAOSupports {
 public:
@@ -48,7 +48,7 @@ protected:
   };
   struct AutoProgram {
     const VAOSupports *support;
-    AutoProgram(const VAOSupports *aSupport, const AppState &state,
+    AutoProgram(const VAOSupports *aSupport, const GLState &state,
                 const std::string &progName)
         : support(aSupport) {
       support->useProgram(state, progName);
@@ -60,7 +60,7 @@ protected:
 
   unsigned int vao, vbo, ibo;
   Handle reserve(long vboQuads, long iboQuads);
-  void useProgram(const AppState &state, const std::string &progName) const;
+  void useProgram(const GLState &state, const std::string &progName) const;
   static void clearProgram();
   void bindVAO() const;
   static void clearVAO();

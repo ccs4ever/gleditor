@@ -1,5 +1,5 @@
 #include "vao_supports.hpp"
-#include "state.hpp"
+#include "GLState.hpp"
 
 #include <GL/glew.h>
 #include <algorithm>
@@ -107,20 +107,20 @@ void VAOSupports::bindVAO() const {
   glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, ibo);
 }
 void VAOSupports::clearProgram() { glUseProgram(0); }
-void VAOSupports::useProgram(const AppState &state,
+void VAOSupports::useProgram(const GLState &state,
                              const std::string &progName) const {
   //std::cerr << std::format("setting up {} attribs\n", progName);
   if ("main" == progName) {
     auto program = state.programs.at("main");
     glUseProgram(program.id);
-    std::vector<std::pair<std::string, AppState::Loc>> pairs(
+    std::vector<std::pair<std::string, GLState::Loc>> pairs(
         program.locs.begin(), program.locs.end());
     std::ranges::sort(pairs, {},
                       [](const auto &par) { return par.second.loc; });
     GLint offset = 0;
     for (const auto &[attr, loc] :
          pairs | std::views::filter(
-                     [](const std::pair<std::string, AppState::Loc> &loc) {
+                     [](const std::pair<std::string, GLState::Loc> &loc) {
                        return loc.second.type == "in";
                      })) {
       glEnableVertexAttribArray(loc);

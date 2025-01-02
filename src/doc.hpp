@@ -7,7 +7,7 @@
 #include <vector>
 
 class Doc;
-struct AppState;
+struct GLState;
 
 class Page : public Drawable {
 private:
@@ -17,7 +17,7 @@ private:
 
 public:
   Page(std::shared_ptr<Doc> doc, glm::mat4 &model);
-  void draw(const AppState &state, const glm::mat4 &docModel) const;
+  void draw(const GLState &state, const glm::mat4 &docModel) const;
   ~Page() override = default;
 };
 
@@ -39,8 +39,8 @@ public:
     return std::make_shared<Doc>(model, Private());
   }
   std::shared_ptr<Doc> getPtr() { return shared_from_this(); }
-  void draw(const AppState &state) const;
-  void newPage(AppState& state);
+  void draw(const GLState &state) const;
+  void newPage(GLState& state);
 
   friend class Page;
 };

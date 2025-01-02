@@ -4,6 +4,7 @@
 #include "SDL.h"
 #include "SDL_events.h"
 #include <iostream>
+#include <mutex>
 #include <pangomm/init.h>
 #include <thread>
 
@@ -12,8 +13,9 @@
 #include "renderer.hpp"
 
 void handleMouseMove(SDL_Event &evt, AppState &state) {
-  state.mouse.x = evt.motion.x;
-  state.mouse.y = evt.motion.y;
+  std::lock_guard locker(state.view);
+  state.view.x = evt.motion.x;
+  state.view.y = evt.motion.y;
 }
 
 void handleKeyPress(SDL_Event &evt, AppState &state) {
@@ -43,17 +45,22 @@ int main(int argc, char **argv) {
     AutoSDL sdlScoped(SDL_INIT_VIDEO);
     AutoSDLImg sdlImgScoped(IMG_INIT_PNG);
 
+    AutoSDLSurface icon("logo.png");
+
+    AutoSDLWindow window(
+        "GL Editor", SDL_WINDOWPOS_UNDEFINED, SDL_WINDOWPOS_UNDEFINED, 640, 480,
+        SDL_WINDOW_OPENGL | SDL_WINDOW_MAXIMIZED, icon.surface);
+
     Renderer rend;
 
-    std::jthread renderer(rend, std::ref(state));
+    std::jthread renderer(rend, std::ref(state), std::ref(window));
 
     while (state.alive) {
       SDL_Event evt;
-      while (bool(SDL_PollEvent(&evt))) {
+      while (state.alive && bool(SDL_PollEvent(&evt))) {
         switch (evt.type) {
         case SDL_QUIT: {
           state.alive = false;
-          goto end_loop;
         }
         case SDL_KEYDOWN: {
           handleKeyPress(evt, state);
@@ -68,8 +75,6 @@ int main(int argc, char **argv) {
         }
       }
     }
-  end_loop:
-
   } catch (const std::exception &e) {
     std::cerr << "Error: " << e.what() << "\n";
     return 1;

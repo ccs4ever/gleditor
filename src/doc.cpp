@@ -1,5 +1,5 @@
 #include "doc.hpp"
-#include "state.hpp"
+#include "GLState.hpp"
 #include "vao_supports.hpp"
 #include <GL/glew.h>
 
@@ -49,7 +49,7 @@ Page::Page(std::shared_ptr<Doc> aDoc, glm::mat4 &model)
                   pageBackingHandle.ibo.size, indexData.data());
 }
 
-void Page::draw(const AppState &state, const glm::mat4 &docModel) const {
+void Page::draw(const GLState &state, const glm::mat4 &docModel) const {
   glUniformMatrix4fv(state.programs.at("main")["model"], 1, GL_FALSE,
                      glm::value_ptr(docModel * model));
   // TODO: add glyph boxes
@@ -57,7 +57,7 @@ void Page::draw(const AppState &state, const glm::mat4 &docModel) const {
   }
 }
 
-void Doc::draw(const AppState &state) const {
+void Doc::draw(const GLState &state) const {
   AutoVAO binder(this);
 
   AutoProgram progBinder(this, state, "main");
@@ -75,7 +75,7 @@ Doc::Doc(glm::mat4x4 model, [[maybe_unused]] Doc::Private _priv)
           VAOSupports::VAOBuffers::Ibo(
               static_cast<unsigned long>(6) * sizeof(unsigned int), 10000))) {}
 
-void Doc::newPage(AppState& state) {
+void Doc::newPage(GLState& state) {
   AutoVAO binder(this);
 
   AutoProgram progBinder(this, state, "main");

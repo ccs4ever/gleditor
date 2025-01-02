@@ -2,4 +2,3 @@
 * finish porting GlyphCache
 * hook GlyphCache into the render thread
 * document everything
-* Move all GL-only state out of AppState, keep that solely with the renderer

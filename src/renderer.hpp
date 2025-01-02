@@ -6,6 +6,8 @@
 #include "log.hpp"
 #include "state.hpp"
 
+struct AutoSDLWindow;
+
 struct RenderItem {
   enum class Type : std::uint8_t {
     NewDoc,
@@ -19,7 +21,7 @@ struct RenderItemNewDoc : public RenderItem {
 };
 
 struct Renderer : public Loggable {
-  void operator()(AppState &state);
+  void operator()(AppState &state, AutoSDLWindow& window);
 };
 
 #endif // GLEDITOR_RENDERER_H
