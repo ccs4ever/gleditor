@@ -15,11 +15,11 @@ private:
 
 public:
   [[nodiscard]] unsigned long size() const {
-    std::lock_guard<std::mutex> lock(mutex);
+    std::lock_guard lock(mutex);
     return queue.size();
   }
   value pop() {
-    std::lock_guard<std::mutex> lock(mutex);
+    std::lock_guard lock(mutex);
     if (isEmpty()) {
       return nullptr;
     }
@@ -29,7 +29,7 @@ public:
   }
 
   void push(const T &item) {
-    std::lock_guard<std::mutex> lock(mutex);
+    std::lock_guard lock(mutex);
     queue.push(std::make_unique<T>(item));
   }
 };
