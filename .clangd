@@ -13,5 +13,6 @@ Diagnostics:
       - portability-*
     Remove:
       - modernize-use-trailing-return-type
+      - modernize-use-std-print # <print> header is not widely supported yet
       - readability-magic-numbers
     FastCheckFilter: Loose
