@@ -11,6 +11,11 @@
 #include "SDLwrap.hpp"
 #include "renderer.hpp"
 
+void handleMouseMove(SDL_Event &evt, AppState &state) {
+  state.mouse.x = evt.motion.x;
+  state.mouse.y = evt.motion.y;
+}
+
 void handleKeyPress(SDL_Event &evt, AppState &state) {
   switch (evt.key.keysym.scancode) {
   case SDL_SCANCODE_Q: {
@@ -46,12 +51,18 @@ int main(int argc, char **argv) {
       SDL_Event evt;
       while (bool(SDL_PollEvent(&evt))) {
         switch (evt.type) {
-        case SDL_QUIT:
+        case SDL_QUIT: {
           state.alive = false;
           goto end_loop;
-        case SDL_KEYDOWN:
+        }
+        case SDL_KEYDOWN: {
           handleKeyPress(evt, state);
           break;
+        }
+        case SDL_MOUSEMOTION: {
+          handleMouseMove(evt, state);
+          break;
+        }
         default:
           break;
         }

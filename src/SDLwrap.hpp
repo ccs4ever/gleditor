@@ -20,13 +20,13 @@ struct AutoSDLImg {
 struct AutoSDLWindow {
   SDL_Window *window;
   AutoSDLWindow(const char *title, int x, int y, int width, int height,
-                std::uint32_t flags);
+                std::uint32_t flags, SDL_Surface* icon = nullptr);
   ~AutoSDLWindow();
 };
 
 struct AutoSDLGL {
   void *ctx;
-  AutoSDLGL(AutoSDLWindow &window);
+  AutoSDLGL(SDL_Window *window);
   ~AutoSDLGL();
 };
 

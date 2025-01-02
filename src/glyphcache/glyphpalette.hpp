@@ -1,6 +1,7 @@
 #ifndef GLYPH_PALETTE_H
 #define GLYPH_PALETTE_H
 
+#include <algorithm>
 #include <atomic>
 #include <compare>
 #include <iostream>
@@ -29,7 +30,7 @@ private:
 protected:
   void print(std::ostream &ost) const override {
     ost << "GlyphPalette(lanes: ";
-    std::for_each(lanes.cbegin(), lanes.cend(),
+    std::ranges::for_each(lanes.cbegin(), lanes.cend(),
                           [&ost](auto lane) { ost << lane << "\n"; });
     ost << ", w: " << paletteDims.width << ", h: " << paletteDims.height
         << ", availH: " << availHeight() << ")";
