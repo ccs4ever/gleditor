@@ -1,4 +1,4 @@
-#version 330
+#version 330 core
 
 // attributes and uniforms are provided to the shader by the external program
 // attributes are per-vertex, taken from the VBO or vertex array data

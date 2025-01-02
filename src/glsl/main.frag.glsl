@@ -1,4 +1,4 @@
-#version 330
+#version 330 core
 
 // version 130 == opengl 3.0
 // the texture unit that we will pull texture data from, starts at 0
