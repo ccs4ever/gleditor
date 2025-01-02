@@ -2,10 +2,16 @@ CXX = clang++
 PKGS := pangomm-2.48 spdlog sdl2 SDL2_image gl glu glew
 TEST_PKGS := gmock_main
 #ifdef DEBUG
-DEBUG_OPTS := -g -gembed-source -fdebug-macro -O0 -fprofile-instr-generate -fcoverage-mapping
+SANITIZE_ADDR_OPTS := -fsanitize=address,undefined,integer -fno-omit-frame-pointer -fsanitize-address-use-after-return=runtime \
+	         -fsanitize-address-use-after-scope 
+SANITIZE_THR_OPTS := -fsanitize=thread,undefined,integer -fno-omit-frame-pointer 
+SANITIZE_MEM_OPTS := -fsanitize=memory,undefined,integer -fPIE -pie -fno-omit-frame-pointer \
+		     -fsanitize-memory-track-origins
+DEBUG_OPTS := -g -gembed-source -fdebug-macro -O0 \
+	      -fprofile-instr-generate -fcoverage-mapping 
 #endif
 CXXFLAGS = $(DEBUG_OPTS) -std=c++23 -Wall -Wextra $(shell pkg-config --cflags $(PKGS))
-LDFLAGS = $(DEBUG_OPTS)
+LDFLAGS = $(DEBUG_OPTS) -rtlib=compiler-rt 
 LIBS := $(shell pkg-config --libs $(PKGS))
 SHARED_SRCS := $(shell find src/ -name '*.cpp' -a ! -name main.cpp )
 SRCS := $(SHARED_SRCS) src/main.cpp
@@ -22,6 +28,30 @@ $(TEST_OBJS): CXXFLAGS += $(shell pkg-config --cflags $(TEST_PKGS))
 
 gleditor: $(OBJS)
 	$(CXX) $(LIBS) $(LDFLAGS) $(OBJS) -o gleditor
+
+sanitize/address: CXXFLAGS += $(SANITIZE_ADDR_OPTS)
+sanitize/address: LDFLAGS += $(SANITIZE_ADDR_OPTS)
+sanitize/address: gleditor
+
+sanitize/address/run: sanitize/address
+	ASAN_OPTIONS=check_initialization_order=1:detect_leaks=1:strict_string_checks=1 ./gleditor
+
+sanitize/thread: CXXFLAGS += $(SANITIZE_THR_OPTS)
+sanitize/thread: LDFLAGS += $(SANITIZE_THR_OPTS)
+sanitize/thread: gleditor
+
+sanitize/thread/run: sanitize/thread
+	TSAN_OPTIONS=second_deadlock_stack=1:detect_leaks=1:strict_string_checks=1 ./gleditor
+
+# Only use if your entire library chain has been compiled with MSAN
+# otherwise it will generate a neverending wave of false positives from SDL/stdlib
+sanitize/memory: CXXFLAGS += $(SANITIZE_MEM_OPTS)
+sanitize/memory: LDFLAGS += $(SANITIZE_MEM_OPTS)
+sanitize/memory: gleditor
+
+sanitize/memory/run: sanitize/memory
+	MSAN_OPTIONS=check_initialization_order=1:detect_leaks=1:strict_string_checks=1 ./gleditor
+
 
 gleditor_test: $(TEST_OBJS)
 	$(CXX) $(LIBS) $(LDFLAGS) $(shell pkg-config --libs $(TEST_PKGS)) $(TEST_OBJS) -o gleditor_test
@@ -54,7 +84,8 @@ doc:
 clean:
 	rm -rf gleditor gleditor_test $(shell find src tests -name '*.[oj]' -o -name '*.dep' -o -name '*.dep.[0-9]*')
 
-.PHONY: clean doc run test profile
+.PHONY: clean doc run test profile sanitize/address sanitize/address/run sanitize/thread sanitize/thread/run \
+	sanitize/memory sanitize/memory/run
 
 %.dep: %.cpp
 	set -e; rm -f $@; \
