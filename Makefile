@@ -7,8 +7,8 @@ SANITIZE_ADDR_OPTS := -fsanitize=address,undefined,integer -fno-omit-frame-point
 SANITIZE_THR_OPTS := -fsanitize=thread,undefined,integer -fno-omit-frame-pointer 
 SANITIZE_MEM_OPTS := -fsanitize=memory,undefined,integer -fPIE -pie -fno-omit-frame-pointer \
 		     -fsanitize-memory-track-origins
-DEBUG_OPTS := -g -gembed-source -fdebug-macro -O0 \
-	      -fprofile-instr-generate -fcoverage-mapping 
+DEBUG_OPTS := -g -gembed-source -fdebug-macro -O0
+PROFILE_OPTS := -fprofile-instr-generate -fcoverage-mapping 
 #endif
 CXXFLAGS = $(DEBUG_OPTS) -std=c++23 -Wall -Wextra $(shell pkg-config --cflags $(PKGS))
 LDFLAGS = $(DEBUG_OPTS) -rtlib=compiler-rt 
@@ -61,6 +61,8 @@ test: gleditor_test
 
 # produces gleditor_test.prof (a human-readable code coverage report) and
 # coverage.lcov (a coverage report in lcov format) suitable for feeding into other tools like NeoVim
+profile: CXXFLAGS += $(PROFILE_OPTS)
+profile: LDFLAGS += $(PROFILE_OPTS)
 profile: gleditor_test
 	set -e; \
 	raw=gleditor_test.profraw; data=gleditor_test.profdata; \
