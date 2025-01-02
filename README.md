@@ -84,3 +84,28 @@ Or
 make compile_commands.json
 ```
 
+## Running with different Sanitizers enabled
+
+### AddressSanitizer
+
+```
+make clean
+make sanitize/address
+./gleditor
+```
+
+### ThreadSanitizer
+
+```
+make clean
+make sanitize/thread
+./gleditor
+```
+
+### MemorySanitizer
+
+```
+make clean
+make sanitize/memory
+./gleditor
+```
