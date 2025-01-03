@@ -1,5 +1,6 @@
 CXX = clang++
-PKGS := pangomm-2.48 spdlog sdl2 SDL2_image gl glu glew
+# removed spdlog
+PKGS := pangomm-2.48 sdl2 SDL2_image gl glu glew
 TEST_PKGS := gmock_main
 #ifdef DEBUG
 SANITIZE_ADDR_OPTS := -fsanitize=address,undefined,integer -fno-omit-frame-pointer -fsanitize-address-use-after-return=runtime \
@@ -10,8 +11,8 @@ SANITIZE_MEM_OPTS := -fsanitize=memory,undefined,integer -fPIE -pie -fno-omit-fr
 DEBUG_OPTS := -g -gembed-source -fdebug-macro -O0
 PROFILE_OPTS := -fprofile-instr-generate -fcoverage-mapping 
 #endif
-CXXFLAGS = $(DEBUG_OPTS) -std=c++23 -Wall -Wextra $(shell pkg-config --cflags $(PKGS))
-LDFLAGS = $(DEBUG_OPTS) -rtlib=compiler-rt 
+CXXFLAGS = $(DEBUG_OPTS) -stdlib=libc++ -fexperimental-library -std=c++23 -Wall -Wextra $(shell pkg-config --cflags $(PKGS))
+LDFLAGS = $(DEBUG_OPTS) -v -stdlib=libc++ -fexperimental-library -rtlib=compiler-rt 
 LIBS := $(shell pkg-config --libs $(PKGS))
 SHARED_SRCS := $(shell find src/ -name '*.cpp' -a ! -name main.cpp )
 SRCS := $(SHARED_SRCS) src/main.cpp

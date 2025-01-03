@@ -13,12 +13,8 @@ inline int clampTextureLayers(int layers) { return std::min(10, layers); }
 
 GlyphCache::GlyphCache(std::shared_ptr<GL> &ogl) : gl{ogl} {
   gl->getIntegerv(GL_MAX_TEXTURE_SIZE, &size);
-  logger->warn("max texture size: {} clamped: {}", size,
-               clampTextureSize(size));
   size = clampTextureSize(size);
   gl->getIntegerv(GL_MAX_ARRAY_TEXTURE_LAYERS, &maxLayers);
-  logger->warn("max array texture layers: {} clamped: {}", maxLayers,
-               clampTextureLayers(maxLayers));
   maxLayers = clampTextureLayers(maxLayers);
 }
 

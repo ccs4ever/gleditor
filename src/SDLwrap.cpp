@@ -1,5 +1,6 @@
 #include "SDLwrap.hpp"
 
+#include <string>
 #include <cstdint>
 #include <stdexcept>
 #include <sys/wait.h>

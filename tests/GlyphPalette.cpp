@@ -180,7 +180,6 @@ TEST_F(GlyphPaletteTest, cannotFitInLaneOrMoreLanes) {
                       nullptr),
             std::nullopt)
       << alice;
-  logger->info("alice put1: {}", alice);
   EXPECT_FALSE(
       alice.canFit(Rect{Length{std::to_underlying(dims.width) / 2 + 1},
                         Length{std::to_underlying(dims.height) / 2 + 1}}))
@@ -190,7 +189,6 @@ TEST_F(GlyphPaletteTest, cannotFitInLaneOrMoreLanes) {
                       nullptr),
             std::nullopt)
       << alice;
-  logger->info("alice put2: {}", alice);
 }
 
 TEST_F(GlyphPaletteTest, toString) {

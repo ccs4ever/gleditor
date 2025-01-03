@@ -1,7 +1,7 @@
 #include <gmock/gmock.h>
 #include <gtest/gtest.h>
 #include <memory>
-#include <spdlog/spdlog-inl.h>
+//#include <spdlog/spdlog-inl.h>
 #include <stdexcept>
 #include <vector>
 
@@ -10,7 +10,7 @@
 using testing::ElementsAre;
 using testing::WhenSorted;
 
-std::shared_ptr<spdlog::logger> logger = spdlog::default_logger();
+//std::shared_ptr<spdlog::logger> logger = spdlog::default_logger();
 
 TEST(GlyphLane, equality) {
   GlyphLane alice(Offset{1}, Rect{Length{0}, Length{1}});
