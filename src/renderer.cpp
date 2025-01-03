@@ -137,7 +137,7 @@ void setupShaders(GLState &state) {
       R"(^\s*(uniform|in)\s+\D+(\d+)?\S*?\s+(\w+)\s*;)",
       std::regex_constants::multiline);
 
-  const std::filesystem::path glslDir{"src/glsl"};
+  const std::filesystem::path glslDir{"assets/glsl"};
 
   std::vector<std::pair<unsigned int, unsigned int>> shadersToDelete;
 
