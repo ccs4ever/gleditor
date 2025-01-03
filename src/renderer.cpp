@@ -30,6 +30,7 @@
 #include <stdexcept>
 #include <string>
 #include <unordered_map>
+#include "doc.hpp"
 
 void setupGL(AppState &state, const GLState &glState) {
 
@@ -359,6 +360,7 @@ void Renderer::operator()(AppState &appState, AutoSDLWindow& window) {
   setupShaders(glState);
 
   while (appState.alive) {
+    const auto start = std::chrono::steady_clock::now();
     // application logic here
     glClear(GL_COLOR_BUFFER_BIT);
 
@@ -385,5 +387,8 @@ void Renderer::operator()(AppState &appState, AutoSDLWindow& window) {
 
     // swap buffers;
     SDL_GL_SwapWindow(window.window);
+    
+    const auto end = std::chrono::steady_clock::now();
+    appState.frameTimeDelta = end - start;
   }
 }

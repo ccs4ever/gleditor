@@ -3,6 +3,9 @@
 #include "GL/glew.h"
 #include "SDL.h"
 #include "SDL_events.h"
+#include <glm/ext.hpp>
+#include <glm/geometric.hpp>
+#include <glm/gtx/string_cast.hpp>
 #include <iostream>
 #include <mutex>
 #include <pangomm/init.h>
@@ -13,12 +16,14 @@
 #include "renderer.hpp"
 
 void handleMouseMove(SDL_Event &evt, AppState &state) {
-  std::lock_guard locker(state.view);
-  state.view.x = evt.motion.x;
-  state.view.y = evt.motion.y;
+  state.mouseX = evt.motion.x;
+  state.mouseY = evt.motion.y;
 }
 
 void handleKeyPress(SDL_Event &evt, AppState &state) {
+  std::lock_guard locker(state.view);
+  const auto speed = state.view.speed;
+  std::cout << "camera pos before: " << glm::to_string(state.view.pos) << " speed: " << speed << "\n";
   switch (evt.key.keysym.scancode) {
   case SDL_SCANCODE_Q: {
     state.alive = false;
@@ -28,10 +33,32 @@ void handleKeyPress(SDL_Event &evt, AppState &state) {
     state.renderQueue.push(RenderItemNewDoc());
     break;
   }
+  case SDL_SCANCODE_W: {
+    state.view.pos += (speed * state.view.front);
+    break;
+  }
+  case SDL_SCANCODE_S: {
+    state.view.pos -= (speed * state.view.front);
+    break;
+  }
+  case SDL_SCANCODE_A: {
+    state.view.pos -=
+        glm::normalize(glm::cross(state.view.front, state.view.upward)) * speed;
+    break;
+  }
+  case SDL_SCANCODE_D: {
+    state.view.pos +=
+        glm::normalize(glm::cross(state.view.front, state.view.upward)) * speed;
+    break;
+  }
+  case SDL_SCANCODE_C: {
+    break;
+  }
   default: {
     break;
   }
   }
+  std::cout << "camera pos after: " << glm::to_string(state.view.pos) << "\n";
 }
 
 int main(int argc, char **argv) {

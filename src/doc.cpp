@@ -5,8 +5,10 @@
 
 #include <array>
 #include <cstddef>
+#include <glm/ext.hpp>
 #include <glm/ext/matrix_transform.hpp>
 #include <glm/gtc/type_ptr.hpp>
+#include <glm/gtx/string_cast.hpp>
 #include <iostream>
 #include <memory>
 
@@ -33,11 +35,11 @@ Page::Page(std::shared_ptr<Doc> aDoc, glm::mat4 &model)
       0, 0, 0, 1.0, 1.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0,
       // right-top, white, black, tex: right-bottom, layer0
       2.0, 0, 1.0, 1.0, 1.0, 1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0};
-  std::array<GLuint, static_cast<std::size_t>(3 * 4)> indexData = {
+  std::array<GLuint, 6> indexData = {
       0, 1, 2, // (lb, rb, lt) ccw
       3, 2, 1, // (rt, lt, rb) ccw
   };
-  pageBackingHandle = this->doc->reserve(1, 1);
+  pageBackingHandle = this->doc->reserve(4, 1);
   std::cerr << "page backing handle: vbo: " << pageBackingHandle.vbo.offset
             << " " << pageBackingHandle.vbo.size
             << " ibo: " << pageBackingHandle.ibo.offset << " "
@@ -52,6 +54,10 @@ Page::Page(std::shared_ptr<Doc> aDoc, glm::mat4 &model)
 void Page::draw(const GLState &state, const glm::mat4 &docModel) const {
   glUniformMatrix4fv(state.programs.at("main")["model"], 1, GL_FALSE,
                      glm::value_ptr(docModel * model));
+  /*std::cout << "docModel: " << glm::to_string(docModel)
+            << "\npageModel: " << glm::to_string(model)
+            << "\nmult: " << glm::to_string(docModel * model) << "\n";*/
+  glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_INT, 0);
   // TODO: add glyph boxes
   for (const auto &handle : glyphs) {
   }
@@ -70,19 +76,17 @@ void Doc::draw(const GLState &state) const {
 Doc::Doc(glm::mat4x4 model, [[maybe_unused]] Doc::Private _priv)
     : Drawable(model),
       VAOSupports(VAOSupports::VAOBuffers(
-          VAOSupports::VAOBuffers::Vbo(
-              static_cast<unsigned long>(4 * 12) * sizeof(float), 10000),
-          VAOSupports::VAOBuffers::Ibo(
-              static_cast<unsigned long>(6) * sizeof(unsigned int), 10000))) {}
+          VAOSupports::VAOBuffers::Vbo(12 * sizeof(float), 10000),
+          VAOSupports::VAOBuffers::Ibo(6 * sizeof(unsigned int), 10000))) {}
 
-void Doc::newPage(GLState& state) {
+void Doc::newPage(GLState &state) {
   AutoVAO binder(this);
 
   AutoProgram progBinder(this, state, "main");
 
   const auto numPages = pages.size();
   glm::mat4 trans     = glm::translate(
-      glm::mat4(), glm::vec3(0.0F, 5.0F * static_cast<float>(numPages), 0.0F));
+      glm::mat4(1.0),
+      glm::vec3(0.0F, 5.0F * static_cast<float>(numPages), 0.0F));
   pages.emplace_back(getPtr(), trans);
-
 }
