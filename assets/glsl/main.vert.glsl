@@ -4,10 +4,18 @@
 // attributes are per-vertex, taken from the VBO or vertex array data
 // uniforms are set once, and remain constant for a given draw call
 
-in vec3 position; // highp, mediump, lowp
-in vec3 fgcolor;  // precision of the given floats
-in vec3 bgcolor;
+// layout must match order of attributes in the combined buffer
+// as we calculate the offset between between each field based
+// on their positions
+layout (location = 0)
+in vec3 position;
+layout (location = 1)
+in uint fgcolor;
+layout (location = 2)
+in uint bgcolor;
+layout (location = 3)
 in vec2 texcoord;
+layout (location = 4)
 in float layer;
 
 // mvp == projection view model matrix
@@ -35,10 +43,16 @@ out vec3 v_bgcolor;
 out vec2 v_texcoord;
 out float v_layer;
 
+vec3 c(uint i) { 
+    return vec3(uint(i >> 24) / 255.0, 
+                (uint(i >> 16) & uint(255)) / 255.0, 
+                (uint(i >> 8) & uint(255)) / 255.0);
+}
+
 void main()
 {
-    v_fgcolor = fgcolor;
-    v_bgcolor = bgcolor;
+    v_fgcolor = c(fgcolor);
+    v_bgcolor = c(bgcolor);
     v_texcoord = texcoord;
     v_layer = layer;
     // the first three values of the position vector are the familiar (x,y,z)

@@ -116,7 +116,7 @@ int main(int argc, char **argv) {
     AutoSDLSurface icon("logo.png");
 
     AutoSDLWindow window("GL Editor", SDL_WINDOWPOS_UNDEFINED,
-                         SDL_WINDOWPOS_UNDEFINED, 640, 480, SDL_WINDOW_OPENGL,
+                         SDL_WINDOWPOS_UNDEFINED, state.view.screenWidth, state.view.screenHeight, SDL_WINDOW_OPENGL,
                          icon.surface);
 
     Renderer rend;

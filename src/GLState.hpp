@@ -13,6 +13,7 @@ struct GLState {
   struct Loc {
     int loc{};
     std::string type;
+    std::string varType;
     int size{};
     operator int() const { return loc; }
   };

@@ -28,10 +28,12 @@ private:
   // NOLINTBEGIN (modernize-avoid-c-arrays)
   struct VBORow {
     float pos[3];
-    float fg[3];
-    float bg[3];
+    unsigned int fg;
+    unsigned int bg;
     float texcoord[2];
     float layer;
+    static unsigned int color3(unsigned int red, unsigned int green, unsigned int blue) { return red << 24 | green << 16 | blue << 8 | 255; }
+    static unsigned int color(unsigned int rgb) { return rgb << 24 | rgb << 16 | rgb << 8 | 255; }
   };
   // NOLINTEND
   int maxQuads = 10000;

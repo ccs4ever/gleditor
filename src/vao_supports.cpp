@@ -120,17 +120,38 @@ void VAOSupports::useProgram(const GLState &state,
     GLint offset = 0;
     for (const auto &[attr, loc] :
          pairs | std::views::filter(
-                     [](const std::pair<std::string, GLState::Loc> &loc) {
-                       return loc.second.type == "in";
+                     [](const std::pair<std::string, GLState::Loc> &pair) {
+                       return pair.second.type == "in";
                      })) {
-      // std::cerr << "setting up vertex attrib: " << int(loc) << " size: " <<
-      // loc.size << " stride: " << bufferInfos.vbo.stride << " offset: " <<
-      // offset << "\n";
+      GLenum typ;
+      if (loc.varType == "uint" || loc.varType.contains("uvec")) {
+        typ = GL_UNSIGNED_INT;
+      } else if (loc.varType == "int" || loc.varType.contains("ivec")) {
+        typ = GL_INT;
+      } else if (loc.varType == "double" || loc.varType.contains("dvec")) {
+        typ = GL_DOUBLE;
+      } else if (loc.varType == "bool" || loc.varType.contains("bvec")) {
+        typ = GL_BOOL;
+      } else {
+        typ = GL_FLOAT;
+      }
+      /*std::cerr << "setting up vertex attrib: " << int(loc)
+                << " size: " << loc.size
+                << " stride: " << bufferInfos.vbo.stride
+                << " offset: " << offset << " varType: " << loc.varType
+                << " isInt: " << isInt << "\n";*/
       glEnableVertexAttribArray(loc);
-      glVertexAttribPointer(loc, loc.size, GL_FLOAT, GL_FALSE,
-                            bufferInfos.vbo.stride,
-                            /* NOLINTNEXTLINE(performance-no-int-to-ptr) */
-                            reinterpret_cast<void *>(offset));
+      if (typ != GL_FLOAT) {
+        glVertexAttribIPointer(loc, loc.size, typ,
+                               bufferInfos.vbo.stride,
+                               /* NOLINTNEXTLINE(performance-no-int-to-ptr) */
+                               reinterpret_cast<void *>(offset));
+      } else {
+        glVertexAttribPointer(loc, loc.size, GL_FLOAT, GL_FALSE,
+                              bufferInfos.vbo.stride,
+                              /* NOLINTNEXTLINE(performance-no-int-to-ptr) */
+                              reinterpret_cast<void *>(offset));
+      }
       offset += loc.size * 4;
     }
   } else {

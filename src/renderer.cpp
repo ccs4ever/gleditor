@@ -139,7 +139,7 @@ inline GLenum getShaderType(const std::string &stage) {
 void setupShaders(GLState &state) {
 
   static std::regex uniformsReg(
-      R"(^\s*(uniform|in)\s+\D+(\d+)?\S*?\s+(\w+)\s*;)",
+      R"(^\s*(uniform|in)\s+([a-zA-Z]+)(\d+)?\S*?\s+(\w+)\s*;)",
       std::regex_constants::multiline);
 
   const std::filesystem::path glslDir{"assets/glsl"};
@@ -193,7 +193,7 @@ void setupShaders(GLState &state) {
       glCompileShader(shader);
       GLint shaderCompiled = GL_FALSE;
       glGetShaderiv(shader, GL_COMPILE_STATUS, &shaderCompiled);
-      std::cerr << "shader compiled: " << (shaderCompiled == GL_TRUE) << "\n"
+      std::cerr << "shader compiled: " << bool(shaderCompiled == GL_TRUE) << "\n"
                 << std::flush;
       if (GL_FALSE == shaderCompiled) {
         int logLen = 0;
@@ -215,14 +215,15 @@ void setupShaders(GLState &state) {
         if ("vert" != shaderStage && "in" == type) {
           continue;
         }
-        auto sizeFromVarType = std::atoi(it->str(2).c_str());
-        sizeFromVarType      = 0 != sizeFromVarType ? sizeFromVarType : 1;
-        const auto size      = type == "in" ? sizeFromVarType : 0;
-        const auto name      = it->str(3);
-        std::cerr << "found " << type << ": (" << it->str(2) << "/" << size
+        auto varType = it->str(2);
+        auto sizeFromVarNum = std::atoi(it->str(3).c_str());
+        sizeFromVarNum      = 0 != sizeFromVarNum ? sizeFromVarNum : 1;
+        const auto size      = type == "in" ? sizeFromVarNum : 0;
+        const auto name      = it->str(4);
+        std::cerr << "found " << type << ": (" << (varType+it->str(3)) << "/" << size
                   << ")/" << std::quoted(name) << "\n"
                   << std::flush;
-        prog.locs.emplace(name, GLState::Loc{0, type, size});
+        prog.locs.emplace(name, GLState::Loc{0, type, varType, size});
       }
       const auto pid = state.programs[progName].id;
       glAttachShader(pid, shader);
@@ -241,8 +242,8 @@ void setupShaders(GLState &state) {
           isUniform ? glGetUniformLocation(pid, nameToLoc.first.c_str())
                     : glGetAttribLocation(pid, nameToLoc.first.c_str());
       nameToLoc.second.loc = locId;
-      std::cerr << std::format("attr name: {} uniform: {} loc: {}/{}\n",
-                               nameToLoc.first, isUniform, nameToLoc.second.loc,
+      std::cerr << std::format("attr name: {} type: {} vartype: {} uniform: {} loc: {}/{}\n",
+                               nameToLoc.first, nameToLoc.second.type, nameToLoc.second.varType, isUniform, nameToLoc.second.loc,
                                int(nameToLoc.second));
       if (-1 == locId) {
         throw std::runtime_error(std::format(

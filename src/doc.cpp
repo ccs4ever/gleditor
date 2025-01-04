@@ -41,18 +41,20 @@ Page::Page(std::shared_ptr<Doc> aDoc, glm::mat4 &model)
       3, 2, 1, // (rt, lt, rb) ccw
   };
   */
+  auto color = Doc::VBORow::color;
+  auto color3 = Doc::VBORow::color3;
   std::array<Doc::VBORow, 4> vertexData = {
       // left-bottom,  white, black, tex: left-top, layer0
       Doc::VBORow{
-          {0.0, -2.0, 1.0}, {1.0, 1.0, 1.0}, {0.0, 0.0, 0.0}, {0.0, 1.0}, 0},
+          {0.0, -2.0, 1.0}, color(255), color(0), {0.0, 1.0}, 0},
       // right-bottom, white, black, tex: right-top, layer0
       Doc::VBORow{
-          {2.0, -2.0, 1.0}, {1.0, 1.0, 1.0}, {0.0, 0.0, 0.0}, {1.0, 1.0}, 0},
+          {2.0, -2.0, 1.0}, color(255), color(0), {1.0, 1.0}, 0},
       // left-top, white, black, tex: left-bottom, layer0
-      Doc::VBORow{{0, 0, 0}, {1.0, 1.0, 1.0}, {0.0, 0.0, 0.0}, {0.0, 0.0}, 0},
+      Doc::VBORow{{0, 0, 0}, color(255), color(0), {0.0, 0.0}, 0},
       // right-top, white, black, tex: right-bottom, layer0
       Doc::VBORow{
-          {2.0, 0, 1.0}, {1.0, 1.0, 1.0}, {0.0, 0.0, 0.0}, {1.0, 0.0}, 0}};
+          {2.0, 0, 1.0}, color(255), color(0), {1.0, 0.0}, 0}};
   std::array<GLuint, 6> indexData = {
       0, 1, 2, // (lb, rb, lt) ccw
       3, 2, 1, // (rt, lt, rb) ccw
