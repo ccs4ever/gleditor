@@ -56,6 +56,10 @@ void setupGL(AppState &state, const GLState &glState) {
   }
 }
 
+void resize(AppState& appState) {
+  glViewport(0, 0, appState.view.screenWidth, appState.view.screenHeight);
+}
+
 void newDoc(GLState &glState, AutoSDLWindow &window) {
 #if 0
   auto tempSurf =
@@ -370,6 +374,9 @@ void Renderer::operator()(AppState &appState, AutoSDLWindow& window) {
       switch (item->type) {
       case RenderItem::Type::NewDoc:
         newDoc(glState, window);
+        break;
+      case RenderItem::Type::Resize:
+        resize(appState);
         break;
       default:
         break;

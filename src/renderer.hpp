@@ -10,7 +10,7 @@ struct AutoSDLWindow;
 
 struct RenderItem {
   enum class Type : std::uint8_t {
-    NewDoc,
+    NewDoc, Resize,
   };
   Type type;
 
@@ -18,6 +18,11 @@ struct RenderItem {
 };
 struct RenderItemNewDoc : public RenderItem {
   RenderItemNewDoc() : RenderItem(RenderItem::Type::NewDoc) {}
+};
+
+struct RenderItemResize : public RenderItem {
+	int width, height;
+  RenderItemResize(int width, int height) : RenderItem(RenderItem::Type::Resize), width(width), height(height) {}
 };
 
 struct Renderer : public Loggable {

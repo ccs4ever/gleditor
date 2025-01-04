@@ -15,6 +15,24 @@
 #include "SDLwrap.hpp"
 #include "renderer.hpp"
 
+void handleWindowChange(SDL_Event &evt, AppState &state, SDL_Window *win) {
+  switch (evt.window.event) {
+  case SDL_WINDOWEVENT_RESIZED:
+  case SDL_WINDOWEVENT_SIZE_CHANGED:
+  case SDL_WINDOWEVENT_MAXIMIZED: {
+    const auto width  = evt.window.data1;
+    const auto height = evt.window.data2;
+    std::cout << "window size changed(w/h): " << width << "/" << height << "\n";
+    state.view.screenWidth  = width;
+    state.view.screenHeight = height;
+    state.renderQueue.push(RenderItemResize(width, height));
+    break;
+  }
+  default:
+    break;
+  }
+}
+
 void handleMouseMove(SDL_Event &evt, AppState &state) {
   state.mouseX = evt.motion.x;
   state.mouseY = evt.motion.y;
@@ -89,9 +107,9 @@ int main(int argc, char **argv) {
 
     AutoSDLSurface icon("logo.png");
 
-    AutoSDLWindow window(
-        "GL Editor", SDL_WINDOWPOS_UNDEFINED, SDL_WINDOWPOS_UNDEFINED, 640, 480,
-        SDL_WINDOW_OPENGL | SDL_WINDOW_MAXIMIZED, icon.surface);
+    AutoSDLWindow window("GL Editor", SDL_WINDOWPOS_UNDEFINED,
+                         SDL_WINDOWPOS_UNDEFINED, 640, 480, SDL_WINDOW_OPENGL,
+                         icon.surface);
 
     Renderer rend;
 
@@ -112,6 +130,8 @@ int main(int argc, char **argv) {
           handleMouseMove(evt, state);
           break;
         }
+        case SDL_WINDOWEVENT:
+          handleWindowChange(evt, state, window.window);
         default:
           break;
         }
