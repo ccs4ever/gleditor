@@ -23,7 +23,8 @@ void handleMouseMove(SDL_Event &evt, AppState &state) {
 void handleKeyPress(SDL_Event &evt, AppState &state) {
   std::lock_guard locker(state.view);
   const auto speed = state.view.speed;
-  std::cout << "camera pos before: " << glm::to_string(state.view.pos) << " speed: " << speed << "\n";
+  std::cout << "camera pos before: " << glm::to_string(state.view.pos)
+            << " speed: " << speed << "\n";
   switch (evt.key.keysym.scancode) {
   case SDL_SCANCODE_Q: {
     state.alive = false;
@@ -33,25 +34,39 @@ void handleKeyPress(SDL_Event &evt, AppState &state) {
     state.renderQueue.push(RenderItemNewDoc());
     break;
   }
-  case SDL_SCANCODE_W: {
-    state.view.pos += (speed * state.view.front);
+  case SDL_SCANCODE_R: {
+    state.view.pos    = glm::vec3(0.0F, 0.0F, 3.0F);
+    state.view.front  = glm::vec3(0.0F, 0.0F, -1.0F);
+    state.view.upward = glm::vec3(0.0F, 1.0F, 0.0F);
+    break;
+  }
+  case SDL_SCANCODE_E: {
+    state.view.pos -= glm::normalize(glm::cross(state.view.front,
+                                                glm::vec3(1.0F, 0.0F, 0.0F))) *
+                      speed;
+  } break;
+  case SDL_SCANCODE_D: {
+    if (0 != (evt.key.keysym.mod & KMOD_SHIFT)) {
+      state.view.pos += (speed * state.view.front);
+    } else {
+      state.view.pos -= (speed * state.view.front);
+    }
+    break;
+  }
+  case SDL_SCANCODE_C: {
+    state.view.pos += glm::normalize(glm::cross(state.view.front,
+                                                glm::vec3(1.0F, 0.0F, 0.0F))) *
+                      speed;
     break;
   }
   case SDL_SCANCODE_S: {
-    state.view.pos -= (speed * state.view.front);
-    break;
-  }
-  case SDL_SCANCODE_A: {
     state.view.pos -=
         glm::normalize(glm::cross(state.view.front, state.view.upward)) * speed;
     break;
   }
-  case SDL_SCANCODE_D: {
+  case SDL_SCANCODE_F: {
     state.view.pos +=
         glm::normalize(glm::cross(state.view.front, state.view.upward)) * speed;
-    break;
-  }
-  case SDL_SCANCODE_C: {
     break;
   }
   default: {
