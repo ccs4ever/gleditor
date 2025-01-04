@@ -57,7 +57,11 @@ void Page::draw(const GLState &state, const glm::mat4 &docModel) const {
   /*std::cout << "docModel: " << glm::to_string(docModel)
             << "\npageModel: " << glm::to_string(model)
             << "\nmult: " << glm::to_string(docModel * model) << "\n";*/
-  glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_INT, 0);
+  // make the compiler happy, reinterpret_cast<void*> of long would introduce
+  // performance penalties apparently
+  char *offset = nullptr;
+  glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_INT,
+                 offset + pageBackingHandle.ibo.offset);
   // TODO: add glyph boxes
   for (const auto &handle : glyphs) {
   }
@@ -85,8 +89,9 @@ void Doc::newPage(GLState &state) {
   AutoProgram progBinder(this, state, "main");
 
   const auto numPages = pages.size();
-  glm::mat4 trans     = glm::translate(
-      glm::mat4(1.0),
-      glm::vec3(0.0F, 5.0F * static_cast<float>(numPages), 0.0F));
+  glm::mat4 trans     = 
+      glm::translate(
+          glm::mat4(1.0),
+          glm::vec3(0.0F, -5.0F * static_cast<float>(numPages), 0.0F));
   pages.emplace_back(getPtr(), trans);
 }
