@@ -141,4 +141,6 @@ The following keys are currently bound to actions other than movement:
 | n   | Create a new page |
 | r   | Reset view back to start |
 | q   | Quit the application |
+| g   | Increment fov by 1 (max 360) |
+| G   | Decrement fov by 1 (min 1) |
 
