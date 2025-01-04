@@ -11,8 +11,11 @@ SANITIZE_MEM_OPTS := -fsanitize=memory,undefined,integer -fPIE -pie -fno-omit-fr
 DEBUG_OPTS := -g -gembed-source -fdebug-macro -O0
 PROFILE_OPTS := -fprofile-instr-generate -fcoverage-mapping 
 #endif
-CXXFLAGS = $(DEBUG_OPTS) -stdlib=libc++ -fexperimental-library -std=c++23 -Wall -Wextra $(shell pkg-config --cflags $(PKGS))
-LDFLAGS = $(DEBUG_OPTS) -v -stdlib=libc++ -fexperimental-library -rtlib=compiler-rt 
+CXXFLAGS = $(DEBUG_OPTS) -std=c++23 -Wall -Wextra $(shell pkg-config --cflags $(PKGS))
+LDFLAGS = $(DEBUG_OPTS) -rtlib=compiler-rt 
+# XXX: work on this in a separate branch, get tests working again for now
+#CXXFLAGS += -stdlib=libc++ -fexperimental-library 
+#LDFLAGS += -v -stdlib=libc++ -fexperimental-library 
 LIBS := $(shell pkg-config --libs $(PKGS))
 SHARED_SRCS := $(shell find src/ -name '*.cpp' -a ! -name main.cpp )
 SRCS := $(SHARED_SRCS) src/main.cpp
