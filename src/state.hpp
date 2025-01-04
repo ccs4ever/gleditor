@@ -19,14 +19,14 @@ struct AppState {
   struct ViewPerspective : public std::mutex {
     int screenWidth  = 800;
     int screenHeight = 600;
-    float fov        = 30.0;
+    float fov        = 5.0;
     glm::vec3 pos;
     glm::vec3 front;
     glm::vec3 upward;
     float speed = 15.0;
     ViewPerspective() { resetPos(); }
     void resetPos() {
-      pos    = glm::vec3(0.0F, 0.0F, 6.0F);
+      pos    = glm::vec3(0.0F, 0.0F, 10.0F);
       front  = glm::vec3(0.0F, 0.0F, -1.0F);
       upward = glm::vec3(0.0F, 1.0F, 0.0F);
     }

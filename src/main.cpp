@@ -85,6 +85,16 @@ void handleKeyPress(SDL_Event &evt, AppState &state) {
         glm::normalize(glm::cross(state.view.front, state.view.upward)) * speed;
     break;
   }
+  case SDL_SCANCODE_G: {
+    auto fov = state.view.fov;
+    if (0 != (evt.key.keysym.mod & KMOD_SHIFT)) {
+      fov -= 1; if (fov < 1) { fov = 1; }
+    } else {
+      fov += 1; if (fov > 360) { fov = 360; }
+    }
+    state.view.fov = fov;
+    break;
+  }
   default: {
     break;
   }
