@@ -15,10 +15,12 @@ in vec3 v_bgcolor;
 in vec2 v_texcoord;
 in float v_layer;
 
+out vec4 outColor;
+
 void main()
 {
 		//gl_FragColor = vec4(1,0,0,1);
-		gl_FragColor = vec4(
+		outColor = vec4(
 				mix(v_fgcolor, v_bgcolor, texture(texUnit, 
 						vec3(v_texcoord, floor(v_layer+0.5))).r), 1);
 }
