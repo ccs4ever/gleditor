@@ -28,24 +28,25 @@ template <typename... Args> inline void clearBuffers(Args... args) {
 VAOSupports::VAOSupports(VAOBuffers bufferInfos)
     : bufferInfos(std::move(bufferInfos)) {
 
-  this->bufferInfos.vbo.free.emplace_back(0, this->bufferInfos.vbo.maxQuads);
-  this->bufferInfos.ibo.free.emplace_back(0, this->bufferInfos.ibo.maxQuads);
+  this->bufferInfos.vbo.free.emplace_back(0, this->bufferInfos.vbo.maxVertices);
+  this->bufferInfos.ibo.free.emplace_back(0,
+                                          this->bufferInfos.ibo.maxTriangles);
 
   genVertexArrays(&vao);
 
   allocateBuffers();
 }
 void VAOSupports::allocateBuffers() {
-  
+
   genBuffers(&vbo, &ibo);
 
   AutoVAO binder(this);
-  
+
   glBufferData(GL_ARRAY_BUFFER,
-               bufferInfos.vbo.maxQuads * bufferInfos.vbo.stride, nullptr,
+               bufferInfos.vbo.maxVertices * bufferInfos.vbo.stride, nullptr,
                GL_STATIC_DRAW);
   glBufferData(GL_ELEMENT_ARRAY_BUFFER,
-               bufferInfos.ibo.maxQuads * bufferInfos.ibo.stride, nullptr,
+               bufferInfos.ibo.maxTriangles * bufferInfos.ibo.stride, nullptr,
                GL_STATIC_DRAW);
 }
 
@@ -58,17 +59,17 @@ void VAOSupports::reallocate(long vboQuads, long iboQuads) {
   const unsigned int origVbo = vbo;
   const unsigned int origIbo = ibo;
 
-  const long origVboMaxQuads = bufferInfos.vbo.maxQuads;
-  const long origIboMaxQuads = bufferInfos.ibo.maxQuads;
-  long origVboEnd            = origVboMaxQuads * bufferInfos.vbo.stride;
-  long origIboEnd            = origIboMaxQuads * bufferInfos.ibo.stride;
+  const long origVboMaxVertices  = bufferInfos.vbo.maxVertices;
+  const long origIboMaxTriangles = bufferInfos.ibo.maxTriangles;
+  long origVboEnd                = origVboMaxVertices * bufferInfos.vbo.stride;
+  long origIboEnd                = origIboMaxTriangles * bufferInfos.ibo.stride;
 
   // XXX: naively double the space for now
-  bufferInfos.vbo.maxQuads *= 2;
-  bufferInfos.ibo.maxQuads *= 2;
+  bufferInfos.vbo.maxVertices *= 2;
+  bufferInfos.ibo.maxTriangles *= 2;
 
   allocateBuffers();
-  
+
   AutoVAO binder(this);
 
   // GL_COPY_{READ,WRITE}_BUFFER are just slots to hold buffers, with no
@@ -84,13 +85,12 @@ void VAOSupports::reallocate(long vboQuads, long iboQuads) {
   std::array<unsigned int, 2> origBufs = {origVbo, origIbo};
   glDeleteBuffers(2, origBufs.data());
 
-  bufferInfos.vbo.free.emplace_back(origVboEnd + 1,
-                                    bufferInfos.vbo.maxQuads - origVboMaxQuads);
-  bufferInfos.ibo.free.emplace_back(origIboEnd + 1,
-                                    bufferInfos.ibo.maxQuads - origIboMaxQuads);
+  bufferInfos.vbo.free.emplace_back(
+      origVboEnd + 1, bufferInfos.vbo.maxVertices - origVboMaxVertices);
+  bufferInfos.ibo.free.emplace_back(
+      origIboEnd + 1, bufferInfos.ibo.maxTriangles - origIboMaxTriangles);
 
   defragmentFreeLists();
-
 }
 
 auto VAOSupports::findFreeOffset(FreeList &freeList, long rows) {
@@ -109,7 +109,7 @@ void VAOSupports::bindVAO() const {
 void VAOSupports::clearProgram() { glUseProgram(0); }
 void VAOSupports::useProgram(const GLState &state,
                              const std::string &progName) const {
-  //std::cerr << std::format("setting up {} attribs\n", progName);
+  // std::cerr << std::format("setting up {} attribs\n", progName);
   if ("main" == progName) {
     auto program = state.programs.at("main");
     glUseProgram(program.id);
@@ -123,7 +123,9 @@ void VAOSupports::useProgram(const GLState &state,
                      [](const std::pair<std::string, GLState::Loc> &loc) {
                        return loc.second.type == "in";
                      })) {
-      //std::cerr << "setting up vertex attrib: " << int(loc) << " size: " << loc.size << " stride: " << bufferInfos.vbo.stride << " offset: " << offset << "\n";
+      // std::cerr << "setting up vertex attrib: " << int(loc) << " size: " <<
+      // loc.size << " stride: " << bufferInfos.vbo.stride << " offset: " <<
+      // offset << "\n";
       glEnableVertexAttribArray(loc);
       glVertexAttribPointer(loc, loc.size, GL_FLOAT, GL_FALSE,
                             bufferInfos.vbo.stride,
@@ -135,31 +137,38 @@ void VAOSupports::useProgram(const GLState &state,
     throw std::runtime_error(
         "useProgram: No attribs to set: unknown program: " + progName);
   }
-  //std::cerr << std::format("setup {} attribs\n", progName);
+  // std::cerr << std::format("setup {} attribs\n", progName);
 }
 
-VAOSupports::Handle VAOSupports::reserve(long vboQuads, long iboQuads) {
+VAOSupports::Handle VAOSupports::reserveTriangles(long triangles) {
+  return reserve(triangles * 3, triangles);
+}
+VAOSupports::Handle VAOSupports::reserveQuads(long quads) {
+  return reserve(quads * 4, quads * 2);
+}
 
-  auto vboIt = findFreeOffset(bufferInfos.vbo.free, vboQuads);
-  auto iboIt = findFreeOffset(bufferInfos.ibo.free, iboQuads);
+VAOSupports::Handle VAOSupports::reserve(long vboVertices, long iboTriangles) {
+
+  auto vboIt = findFreeOffset(bufferInfos.vbo.free, vboVertices);
+  auto iboIt = findFreeOffset(bufferInfos.ibo.free, iboTriangles);
 
   if (bufferInfos.vbo.free.cend() == vboIt ||
       bufferInfos.ibo.free.cend() == iboIt) {
-    reallocate(vboQuads, iboQuads);
-    vboIt = findFreeOffset(bufferInfos.vbo.free, vboQuads);
-    iboIt = findFreeOffset(bufferInfos.ibo.free, iboQuads);
+    reallocate(vboVertices, iboTriangles);
+    vboIt = findFreeOffset(bufferInfos.vbo.free, vboVertices);
+    iboIt = findFreeOffset(bufferInfos.ibo.free, iboTriangles);
   }
 
   auto ret = VAOSupports::Handle{
       {static_cast<long>(vboIt->first * bufferInfos.vbo.stride),
-       vboQuads * bufferInfos.vbo.stride},
+       vboVertices * bufferInfos.vbo.stride},
       {static_cast<long>(iboIt->first * bufferInfos.ibo.stride),
-       iboQuads * bufferInfos.ibo.stride}};
+       iboTriangles * bufferInfos.ibo.stride}};
 
-  vboIt->first += vboQuads;
-  vboIt->second -= vboQuads;
-  iboIt->first += iboQuads;
-  iboIt->second -= iboQuads;
+  vboIt->first += vboVertices;
+  vboIt->second -= vboVertices;
+  iboIt->first += iboTriangles;
+  iboIt->second -= iboTriangles;
 
   if (vboIt->second <= 0) {
     bufferInfos.vbo.free.erase(vboIt);

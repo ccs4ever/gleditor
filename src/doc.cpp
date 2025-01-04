@@ -26,6 +26,7 @@ Page::Page(std::shared_ptr<Doc> aDoc, glm::mat4 &model)
   // counter-clockwise indicates "its facing you" while clockwise indicates that
   // the back face is pointing at you. Face culling is enabled with
   // glEnable(GL_CULL_FACE)
+  /*
   std::array<GLfloat, static_cast<std::size_t>(12 * 4)> vertexData = {
       // left-bottom,  white, black, tex: left-top, layer0
       0, -2.0, 1.0, 1.0, 1.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0,
@@ -39,7 +40,24 @@ Page::Page(std::shared_ptr<Doc> aDoc, glm::mat4 &model)
       0, 1, 2, // (lb, rb, lt) ccw
       3, 2, 1, // (rt, lt, rb) ccw
   };
-  pageBackingHandle = this->doc->reserve(4, 1);
+  */
+  std::array<Doc::VBORow, 4> vertexData = {
+      // left-bottom,  white, black, tex: left-top, layer0
+      Doc::VBORow{
+          {0.0, -2.0, 1.0}, {1.0, 1.0, 1.0}, {0.0, 0.0, 0.0}, {0.0, 1.0}, 0},
+      // right-bottom, white, black, tex: right-top, layer0
+      Doc::VBORow{
+          {2.0, -2.0, 1.0}, {1.0, 1.0, 1.0}, {0.0, 0.0, 0.0}, {1.0, 1.0}, 0},
+      // left-top, white, black, tex: left-bottom, layer0
+      Doc::VBORow{{0, 0, 0}, {1.0, 1.0, 1.0}, {0.0, 0.0, 0.0}, {0.0, 0.0}, 0},
+      // right-top, white, black, tex: right-bottom, layer0
+      Doc::VBORow{
+          {2.0, 0, 1.0}, {1.0, 1.0, 1.0}, {0.0, 0.0, 0.0}, {1.0, 0.0}, 0}};
+  std::array<GLuint, 6> indexData = {
+      0, 1, 2, // (lb, rb, lt) ccw
+      3, 2, 1, // (rt, lt, rb) ccw
+  };
+  pageBackingHandle = this->doc->reserveQuads(1);
   std::cerr << "page backing handle: vbo: " << pageBackingHandle.vbo.offset
             << " " << pageBackingHandle.vbo.size
             << " ibo: " << pageBackingHandle.ibo.offset << " "
@@ -80,8 +98,8 @@ void Doc::draw(const GLState &state) const {
 Doc::Doc(glm::mat4x4 model, [[maybe_unused]] Doc::Private _priv)
     : Drawable(model),
       VAOSupports(VAOSupports::VAOBuffers(
-          VAOSupports::VAOBuffers::Vbo(12 * sizeof(float), 10000),
-          VAOSupports::VAOBuffers::Ibo(6 * sizeof(unsigned int), 10000))) {}
+          VAOSupports::VAOBuffers::Vbo(sizeof(VBORow), 10000),
+          VAOSupports::VAOBuffers::Ibo(3 * sizeof(unsigned int), 10000))) {}
 
 void Doc::newPage(GLState &state) {
   AutoVAO binder(this);
@@ -89,9 +107,8 @@ void Doc::newPage(GLState &state) {
   AutoProgram progBinder(this, state, "main");
 
   const auto numPages = pages.size();
-  glm::mat4 trans     = 
-      glm::translate(
-          glm::mat4(1.0),
-          glm::vec3(0.0F, -5.0F * static_cast<float>(numPages), 0.0F));
+  glm::mat4 trans     = glm::translate(
+      glm::mat4(1.0),
+      glm::vec3(0.0F, -5.0F * static_cast<float>(numPages), 0.0F));
   pages.emplace_back(getPtr(), trans);
 }

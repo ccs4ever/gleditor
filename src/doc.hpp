@@ -25,6 +25,15 @@ class Doc : public Drawable,
             public VAOSupports,
             public std::enable_shared_from_this<Doc> {
 private:
+  // NOLINTBEGIN (modernize-avoid-c-arrays)
+  struct VBORow {
+    float pos[3];
+    float fg[3];
+    float bg[3];
+    float texcoord[2];
+    float layer;
+  };
+  // NOLINTEND
   int maxQuads = 10000;
   std::vector<Page> pages;
   // token to keep anything other than Doc::create from using our constructor

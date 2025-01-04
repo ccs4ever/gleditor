@@ -25,15 +25,15 @@ protected:
   using FreeList = std::list<std::pair<std::uint32_t, std::uint32_t>>;
   struct VAOBuffers {
     struct Vbo {
-      Vbo(int stride, long maxQuads) : stride(stride), maxQuads(maxQuads) {}
+      Vbo(int stride, long maxQuads) : stride(stride), maxVertices(maxQuads) {}
       int stride{};
-      long maxQuads{};
+      long maxVertices{};
       FreeList free;
     } vbo;
     struct Ibo {
-      Ibo(int stride, long maxQuads) : stride(stride), maxQuads(maxQuads) {}
+      Ibo(int stride, long maxQuads) : stride(stride), maxTriangles(maxQuads) {}
       int stride{};
-      long maxQuads{};
+      long maxTriangles{};
       FreeList free;
     } ibo;
     VAOBuffers(Vbo vbo, Ibo ibo) : vbo(std::move(vbo)), ibo(std::move(ibo)) {}
@@ -59,17 +59,19 @@ protected:
   virtual ~VAOSupports() = default;
 
   unsigned int vao, vbo, ibo;
-  Handle reserve(long vboQuads, long iboQuads);
   void useProgram(const GLState &state, const std::string &progName) const;
   static void clearProgram();
   void bindVAO() const;
   static void clearVAO();
   VAOSupports(VAOBuffers bufferInfos);
+  Handle reserveTriangles(long triangles);
+  Handle reserveQuads(long quads);
 
 private:
   VAOBuffers bufferInfos;
+  Handle reserve(long vboVertices, long iboTriangles);
   static auto findFreeOffset(FreeList &freeList, long rows);
-  void reallocate(long vboQuads, long iboQuads);
+  void reallocate(long vboVertices, long iboTriangles);
   void allocateBuffers();
   void allocateBuffers(unsigned int vboTarget, unsigned int iboTarget);
   void defragmentFreeLists();
