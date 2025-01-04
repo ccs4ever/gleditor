@@ -40,7 +40,7 @@ void handleMouseMove(SDL_Event &evt, AppState &state) {
 
 void handleKeyPress(SDL_Event &evt, AppState &state) {
   std::lock_guard locker(state.view);
-  const auto speed = state.view.speed;
+  const float speed = state.view.speed * state.frameTimeDelta.load().count();
   std::cout << "camera pos before: " << glm::to_string(state.view.pos)
             << " speed: " << speed << "\n";
   switch (evt.key.keysym.scancode) {
@@ -53,9 +53,7 @@ void handleKeyPress(SDL_Event &evt, AppState &state) {
     break;
   }
   case SDL_SCANCODE_R: {
-    state.view.pos    = glm::vec3(0.0F, 0.0F, 3.0F);
-    state.view.front  = glm::vec3(0.0F, 0.0F, -1.0F);
-    state.view.upward = glm::vec3(0.0F, 1.0F, 0.0F);
+    state.view.resetPos();
     break;
   }
   case SDL_SCANCODE_E: {

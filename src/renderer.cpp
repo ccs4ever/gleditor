@@ -43,12 +43,12 @@ void setupGL(AppState &state, const GLState &glState) {
   {
     std::lock_guard locker(state.view);
 
-    glm::mat4 projection{glm::perspective(glm::radians(state.view.fov),
+    glm::mat4 projection = glm::perspective(glm::radians(state.view.fov),
                                           (float)state.view.screenWidth /
                                               (float)state.view.screenHeight,
-                                          0.1F, 100.0F)};
-    glm::mat4 view{glm::lookAt(
-        state.view.pos, state.view.pos + state.view.front, state.view.upward)};
+                                          0.1F, 1000.0F);
+    glm::mat4 view = glm::lookAt(
+        state.view.pos, state.view.pos + state.view.front, state.view.upward);
 
     glUniformMatrix4fv(program["projection"], 1, GL_FALSE,
                        glm::value_ptr(projection));

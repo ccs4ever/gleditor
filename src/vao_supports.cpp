@@ -123,7 +123,7 @@ void VAOSupports::useProgram(const GLState &state,
                      [](const std::pair<std::string, GLState::Loc> &loc) {
                        return loc.second.type == "in";
                      })) {
-      std::cerr << "setting up vertex attrib: " << int(loc) << " size: " << loc.size << " stride: " << bufferInfos.vbo.stride << " offset: " << offset << "\n";
+      //std::cerr << "setting up vertex attrib: " << int(loc) << " size: " << loc.size << " stride: " << bufferInfos.vbo.stride << " offset: " << offset << "\n";
       glEnableVertexAttribArray(loc);
       glVertexAttribPointer(loc, loc.size, GL_FLOAT, GL_FALSE,
                             bufferInfos.vbo.stride,
