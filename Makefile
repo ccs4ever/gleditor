@@ -13,9 +13,8 @@ PROFILE_OPTS := -fprofile-instr-generate -fcoverage-mapping
 #endif
 CXXFLAGS = $(DEBUG_OPTS) -std=c++23 -Wall -Wextra $(shell pkg-config --cflags $(PKGS))
 LDFLAGS = $(DEBUG_OPTS) -rtlib=compiler-rt 
-# XXX: work on this in a separate branch, get tests working again for now
-#CXXFLAGS += -stdlib=libc++ -fexperimental-library 
-#LDFLAGS += -v -stdlib=libc++ -fexperimental-library 
+CXXFLAGS += -stdlib=libc++ -fexperimental-library 
+LDFLAGS += -v -stdlib=libc++ -fexperimental-library 
 LIBS := $(shell pkg-config --libs $(PKGS))
 SHARED_SRCS := $(shell find src/ -name '*.cpp' -a ! -name main.cpp )
 SRCS := $(SHARED_SRCS) src/main.cpp
