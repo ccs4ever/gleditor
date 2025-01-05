@@ -27,15 +27,22 @@ void main() {
 
 
     // bottom left
+    f_texcoord = vec2(0, 1) - v_texcoord[0];
     gl_Position = gl_in[0].gl_Position + vec4(0, -30, 0, 0);
     EmitVertex();
+    
     // bottom right
+    f_texcoord = vec2(1, 1) - v_texcoord[0];
     gl_Position = gl_in[0].gl_Position + vec4(30, -30, 0, 0);
     EmitVertex();
-    // top left
+    
+    // top left {0, 1}
+    f_texcoord = v_texcoord[0];
     gl_Position = gl_in[0].gl_Position;
     EmitVertex();
+    
     // top right
+    f_texcoord = vec2(1, 2) - v_texcoord[0];
     gl_Position = gl_in[0].gl_Position + vec4(30, 0, 0, 0);
     EmitVertex();
 

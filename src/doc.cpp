@@ -3,8 +3,11 @@
 #include "vao_supports.hpp"
 #include <GL/glew.h>
 
+#include <algorithm>
 #include <array>
+#include <chrono>
 #include <cstddef>
+#include <cstdlib>
 #include <glm/ext.hpp>
 #include <glm/ext/matrix_transform.hpp>
 #include <glm/gtc/type_ptr.hpp>
@@ -45,19 +48,29 @@ Page::Page(std::shared_ptr<Doc> aDoc, glm::mat4 &model)
   auto color3                           = Doc::VBORow::color3;
   std::array<Doc::VBORow, 1> vertexData = {
       // left-bottom,  white, black, tex: left-top, layer0
-      //Doc::VBORow{{0.0, -2.0, 1.0}, color(255), color(0), {0.0, 1.0}, 0},
+      // Doc::VBORow{{0.0, -2.0, 1.0}, color(255), color(0), {0.0, 1.0}, 0},
       // right-bottom, white, black, tex: right-top, layer0
-      //Doc::VBORow{{2.0, -2.0, 1.0}, color(255), color(0), {1.0, 1.0}, 0},
+      // Doc::VBORow{{2.0, -2.0, 1.0}, color(255), color(0), {1.0, 1.0}, 0},
       // left-top, white, black, tex: left-bottom, layer0
-      Doc::VBORow{{0, 0, 0}, color3(0, 255, 0), color(0), {0.0, 0.0}, 0}//,
+      Doc::VBORow{{0, 0, 0}, color(255), color(0), {0.0, 1.0}, 0} //,
       // right-top, white, black, tex: right-bottom, layer0
-      //Doc::VBORow{{2.0, 0, 1.0}, color(255), color(0), {1.0, 0.0}, 0}
-      };
+      // Doc::VBORow{{2.0, 0, 1.0}, color(255), color(0), {1.0, 0.0}, 0}
+  };
+  glGenTextures(1, &tex);
+  std::array<unsigned char, 256L * 256> arr;
+  std::srand(std::time(nullptr));
+  std::ranges::generate(arr, []() { return std::rand() % 255; });
+  glBindTexture(GL_TEXTURE_2D_ARRAY, tex);
+  glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
+  glPixelStorei(GL_PACK_ALIGNMENT, 1);
+  glTexParameteri(GL_TEXTURE_2D_ARRAY, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+  glTexParameteri(GL_TEXTURE_2D_ARRAY, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+  glTexParameteri(GL_TEXTURE_2D_ARRAY, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+  glTexParameteri(GL_TEXTURE_2D_ARRAY, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+  glTexImage3D(GL_TEXTURE_2D_ARRAY, 0, GL_R8, 256, 256, 1, 0, GL_RED,
+               GL_UNSIGNED_BYTE, arr.data());
+  glBindTexture(GL_TEXTURE_2D_ARRAY, 0);
   pageBackingHandle = this->doc->reservePoints(1);
-  const auto off = pageBackingHandle.ibo.offset;
-  /*std::array<GLuint, 1> indexData = {
-      off + 0
-  };*/
   std::cerr << "page backing handle: vbo: " << pageBackingHandle.vbo.offset
             << " " << pageBackingHandle.vbo.size
             << " ibo: " << pageBackingHandle.ibo.offset << " "
@@ -65,8 +78,8 @@ Page::Page(std::shared_ptr<Doc> aDoc, glm::mat4 &model)
             << std::flush;
   glBufferSubData(GL_ARRAY_BUFFER, pageBackingHandle.vbo.offset,
                   pageBackingHandle.vbo.size, vertexData.data());
-  //glBufferSubData(GL_ELEMENT_ARRAY_BUFFER, pageBackingHandle.ibo.offset,
-  //                pageBackingHandle.ibo.size, indexData.data());
+  // glBufferSubData(GL_ELEMENT_ARRAY_BUFFER, pageBackingHandle.ibo.offset,
+  //                 pageBackingHandle.ibo.size, indexData.data());
 }
 
 void Page::draw(const GLState &state, const glm::mat4 &docModel) const {
@@ -77,7 +90,10 @@ void Page::draw(const GLState &state, const glm::mat4 &docModel) const {
             << "\nmult: " << glm::to_string(docModel * model) << "\n";*/
   // make the compiler happy, reinterpret_cast<void*> of long would introduce
   // performance penalties apparently
-  glDrawArrays(GL_POINTS, (int)pageBackingHandle.vbo.offset, 1);
+  glBindTexture(GL_TEXTURE_2D_ARRAY, tex);
+  glDrawArrays(GL_POINTS,
+               (int)pageBackingHandle.vbo.offset / sizeof(Doc::VBORow), 1);
+  glBindTexture(GL_TEXTURE_2D_ARRAY, 0);
   // TODO: add glyph boxes
   for (const auto &handle : glyphs) {
   }
@@ -106,7 +122,6 @@ void Doc::newPage(GLState &state) {
 
   const auto numPages = pages.size();
   glm::mat4 trans     = glm::translate(
-      glm::mat4(1.0),
-      glm::vec3(0.0F, -5.0F * static_cast<float>(numPages), 0.0F));
+      glm::mat4(1.0), glm::vec3(0, -5.0F * static_cast<float>(numPages), 0.0F));
   pages.emplace_back(getPtr(), trans);
 }

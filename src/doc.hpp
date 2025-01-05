@@ -14,6 +14,7 @@ private:
   std::shared_ptr<Doc> doc;
   VAOSupports::Handle pageBackingHandle;
   std::vector<VAOSupports::Handle> glyphs;
+  unsigned int tex{};
 
 public:
   Page(std::shared_ptr<Doc> doc, glm::mat4 &model);
