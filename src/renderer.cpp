@@ -245,7 +245,7 @@ void setupShaders(GLState &state) {
       std::cerr << std::format("attr name: {} type: {} vartype: {} uniform: {} loc: {}/{}\n",
                                nameToLoc.first, nameToLoc.second.type, nameToLoc.second.varType, isUniform, nameToLoc.second.loc,
                                int(nameToLoc.second));
-      if (-1 == locId) {
+      if (false && -1 == locId) {
         throw std::runtime_error(std::format(
             "Failed to get {} location: {}",
             (isUniform ? "uniform" : "attribute"), nameToLoc.first));

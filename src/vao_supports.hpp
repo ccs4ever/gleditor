@@ -31,9 +31,9 @@ protected:
       FreeList free;
     } vbo;
     struct Ibo {
-      Ibo(int stride, long maxQuads) : stride(stride), maxTriangles(maxQuads) {}
+      Ibo(int stride, long maxQuads) : stride(stride), maxIndices(maxQuads) {}
       int stride{};
-      long maxTriangles{};
+      long maxIndices{};
       FreeList free;
     } ibo;
     VAOBuffers(Vbo vbo, Ibo ibo) : vbo(std::move(vbo)), ibo(std::move(ibo)) {}
@@ -66,12 +66,13 @@ protected:
   VAOSupports(VAOBuffers bufferInfos);
   Handle reserveTriangles(long triangles);
   Handle reserveQuads(long quads);
+  Handle reservePoints(long points);
 
 private:
   VAOBuffers bufferInfos;
-  Handle reserve(long vboVertices, long iboTriangles);
+  Handle reserve(unsigned int type, long res);
   static auto findFreeOffset(FreeList &freeList, long rows);
-  void reallocate(long vboVertices, long iboTriangles);
+  void reallocate(long vertexRes, long indexRes);
   void allocateBuffers();
   void allocateBuffers(unsigned int vboTarget, unsigned int iboTarget);
   void defragmentFreeLists();

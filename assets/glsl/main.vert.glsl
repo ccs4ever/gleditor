@@ -38,21 +38,15 @@ uniform mat4 model;
 // in the fragment shader for every "fragment" of color that makes up the
 // triangle
 
-out vec3 v_fgcolor;
-out vec3 v_bgcolor;
+out uint v_fgcolor;
+out uint v_bgcolor;
 out vec2 v_texcoord;
 out float v_layer;
 
-vec3 c(uint i) { 
-    return vec3(uint(i >> 24) / 255.0, 
-                (uint(i >> 16) & uint(255)) / 255.0, 
-                (uint(i >> 8) & uint(255)) / 255.0);
-}
-
 void main()
 {
-    v_fgcolor = c(fgcolor);
-    v_bgcolor = c(bgcolor);
+    v_fgcolor = fgcolor;
+    v_bgcolor = bgcolor;
     v_texcoord = texcoord;
     v_layer = layer;
     // the first three values of the position vector are the familiar (x,y,z)

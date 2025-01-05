@@ -10,10 +10,10 @@
 
 uniform sampler2DArray texUnit;
 
-in vec3 v_fgcolor;
-in vec3 v_bgcolor;
-in vec2 v_texcoord;
-in float v_layer;
+in vec3 f_fgcolor;
+in vec3 f_bgcolor;
+in vec2 f_texcoord;
+in float f_layer;
 
 out vec4 outColor;
 
@@ -21,6 +21,6 @@ void main()
 {
 		//gl_FragColor = vec4(1,0,0,1);
 		outColor = vec4(
-				mix(v_fgcolor, v_bgcolor, texture(texUnit, 
-						vec3(v_texcoord, floor(v_layer+0.5))).r), 1);
+				mix(f_fgcolor, f_bgcolor, texture(texUnit, 
+						vec3(f_texcoord, floor(f_layer+0.5))).r), 1);
 }

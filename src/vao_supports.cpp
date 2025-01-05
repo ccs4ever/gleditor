@@ -30,7 +30,7 @@ VAOSupports::VAOSupports(VAOBuffers bufferInfos)
 
   this->bufferInfos.vbo.free.emplace_back(0, this->bufferInfos.vbo.maxVertices);
   this->bufferInfos.ibo.free.emplace_back(0,
-                                          this->bufferInfos.ibo.maxTriangles);
+                                          this->bufferInfos.ibo.maxIndices);
 
   genVertexArrays(&vao);
 
@@ -46,7 +46,7 @@ void VAOSupports::allocateBuffers() {
                bufferInfos.vbo.maxVertices * bufferInfos.vbo.stride, nullptr,
                GL_STATIC_DRAW);
   glBufferData(GL_ELEMENT_ARRAY_BUFFER,
-               bufferInfos.ibo.maxTriangles * bufferInfos.ibo.stride, nullptr,
+               bufferInfos.ibo.maxIndices * bufferInfos.ibo.stride, nullptr,
                GL_STATIC_DRAW);
 }
 
@@ -54,19 +54,19 @@ void VAOSupports::defragmentFreeLists() {}
 
 /** vboQuads/iboQuads of the failed allocation, use as hints for reallocating
  * buffers */
-void VAOSupports::reallocate(long vboQuads, long iboQuads) {
+void VAOSupports::reallocate(long vertexRes, long indexRes) {
 
   const unsigned int origVbo = vbo;
   const unsigned int origIbo = ibo;
 
   const long origVboMaxVertices  = bufferInfos.vbo.maxVertices;
-  const long origIboMaxTriangles = bufferInfos.ibo.maxTriangles;
+  const long origIboMaxIndices = bufferInfos.ibo.maxIndices;
   long origVboEnd                = origVboMaxVertices * bufferInfos.vbo.stride;
-  long origIboEnd                = origIboMaxTriangles * bufferInfos.ibo.stride;
+  long origIboEnd                = origIboMaxIndices * bufferInfos.ibo.stride;
 
   // XXX: naively double the space for now
   bufferInfos.vbo.maxVertices *= 2;
-  bufferInfos.ibo.maxTriangles *= 2;
+  bufferInfos.ibo.maxIndices *= 2;
 
   allocateBuffers();
 
@@ -88,7 +88,7 @@ void VAOSupports::reallocate(long vboQuads, long iboQuads) {
   bufferInfos.vbo.free.emplace_back(
       origVboEnd + 1, bufferInfos.vbo.maxVertices - origVboMaxVertices);
   bufferInfos.ibo.free.emplace_back(
-      origIboEnd + 1, bufferInfos.ibo.maxTriangles - origIboMaxTriangles);
+      origIboEnd + 1, bufferInfos.ibo.maxIndices - origIboMaxIndices);
 
   defragmentFreeLists();
 }
@@ -128,8 +128,6 @@ void VAOSupports::useProgram(const GLState &state,
         typ = GL_UNSIGNED_INT;
       } else if (loc.varType == "int" || loc.varType.contains("ivec")) {
         typ = GL_INT;
-      } else if (loc.varType == "double" || loc.varType.contains("dvec")) {
-        typ = GL_DOUBLE;
       } else if (loc.varType == "bool" || loc.varType.contains("bvec")) {
         typ = GL_BOOL;
       } else {
@@ -142,8 +140,7 @@ void VAOSupports::useProgram(const GLState &state,
                 << " isInt: " << isInt << "\n";*/
       glEnableVertexAttribArray(loc);
       if (typ != GL_FLOAT) {
-        glVertexAttribIPointer(loc, loc.size, typ,
-                               bufferInfos.vbo.stride,
+        glVertexAttribIPointer(loc, loc.size, typ, bufferInfos.vbo.stride,
                                /* NOLINTNEXTLINE(performance-no-int-to-ptr) */
                                reinterpret_cast<void *>(offset));
       } else {
@@ -162,39 +159,64 @@ void VAOSupports::useProgram(const GLState &state,
 }
 
 VAOSupports::Handle VAOSupports::reserveTriangles(long triangles) {
-  return reserve(triangles * 3, triangles);
+  return reserve(GL_TRIANGLES, triangles);
 }
 VAOSupports::Handle VAOSupports::reserveQuads(long quads) {
-  return reserve(quads * 4, quads * 2);
+  return reserve(GL_QUADS, quads);
+}
+VAOSupports::Handle VAOSupports::reservePoints(long points) {
+  return reserve(GL_POINTS, points);
+}
+constexpr int typeToSize(const GLenum type) {
+  switch (type) {
+  case GL_POINTS:
+    return 1;
+  case GL_TRIANGLES:
+    return 3;
+  case GL_QUADS:
+    return 4;
+  default:
+    throw std::runtime_error(std::format(
+        "Unexpected OpenGL type: {}. Must be GL_POINTS/GL_TRIANGLES/GL_QUADS.",
+        type));
+  }
 }
 
-VAOSupports::Handle VAOSupports::reserve(long vboVertices, long iboTriangles) {
+VAOSupports::Handle VAOSupports::reserve(unsigned int type, long res) {
 
-  auto vboIt = findFreeOffset(bufferInfos.vbo.free, vboVertices);
-  auto iboIt = findFreeOffset(bufferInfos.ibo.free, iboTriangles);
+  const int pointsPer  = typeToSize(type);
+  const long numPoints = pointsPer * res;
+  auto vboIt           = findFreeOffset(bufferInfos.vbo.free, numPoints);
+  auto iboIt           = GL_QUADS != type ? bufferInfos.ibo.free.end()
+                                          : findFreeOffset(bufferInfos.ibo.free, 6 * res);
 
   if (bufferInfos.vbo.free.cend() == vboIt ||
-      bufferInfos.ibo.free.cend() == iboIt) {
-    reallocate(vboVertices, iboTriangles);
-    vboIt = findFreeOffset(bufferInfos.vbo.free, vboVertices);
-    iboIt = findFreeOffset(bufferInfos.ibo.free, iboTriangles);
+      (GL_QUADS == type && bufferInfos.ibo.free.cend() == iboIt)) {
+    reallocate(numPoints, GL_QUADS == type ? 6 * res : 0);
+    vboIt = findFreeOffset(bufferInfos.vbo.free, numPoints);
+    iboIt = GL_QUADS != type ? bufferInfos.ibo.free.end()
+                             : findFreeOffset(bufferInfos.ibo.free, 6 * res);
   }
 
-  auto ret = VAOSupports::Handle{
-      {static_cast<long>(vboIt->first * bufferInfos.vbo.stride),
-       vboVertices * bufferInfos.vbo.stride},
-      {static_cast<long>(iboIt->first * bufferInfos.ibo.stride),
-       iboTriangles * bufferInfos.ibo.stride}};
+  VAOSupports::Handle ret;
+  ret.vbo = {static_cast<long>(vboIt->first * bufferInfos.vbo.stride),
+       numPoints * bufferInfos.vbo.stride};
+  if (GL_QUADS != type) { ret.ibo = {0, 0}; 
+  } else {
+    const auto iboQuadStride = 6 * res * bufferInfos.ibo.stride;
+      ret.ibo = {static_cast<long>(iboIt->first * bufferInfos.ibo.stride),
+       static_cast<long>(iboQuadStride)};
+  iboIt->first += iboQuadStride;
+  iboIt->second -= iboQuadStride;
+}
 
-  vboIt->first += vboVertices;
-  vboIt->second -= vboVertices;
-  iboIt->first += iboTriangles;
-  iboIt->second -= iboTriangles;
+  vboIt->first += numPoints;
+  vboIt->second -= numPoints;
 
   if (vboIt->second <= 0) {
     bufferInfos.vbo.free.erase(vboIt);
   }
-  if (iboIt->second <= 0) {
+  if (GL_QUADS == type && iboIt->second <= 0) {
     bufferInfos.ibo.free.erase(iboIt);
   }
   return ret;
