@@ -15,6 +15,7 @@ out vec3 f_bgcolor;
 out vec2 f_texcoord;
 out float f_layer;
 
+// GL 4.1 provies unpackUNorm for this purpose
 vec3 c(uint i) { 
     return vec3(uint(i >> 24) / 255.0, 
                 (uint(i >> 16) & uint(255)) / 255.0, 
