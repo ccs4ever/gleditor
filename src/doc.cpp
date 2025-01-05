@@ -12,6 +12,7 @@
 #include <glm/ext/matrix_transform.hpp>
 #include <glm/gtc/type_ptr.hpp>
 #include <glm/gtx/string_cast.hpp>
+#include <glm/trigonometric.hpp>
 #include <iostream>
 #include <memory>
 
@@ -123,5 +124,7 @@ void Doc::newPage(GLState &state) {
   const auto numPages = pages.size();
   glm::mat4 trans     = glm::translate(
       glm::mat4(1.0), glm::vec3(0, -5.0F * static_cast<float>(numPages), 0.0F));
+  trans = glm::rotate(trans, glm::radians(5.0F*numPages), glm::vec3(0, 1, 0));
+  trans = glm::scale(trans, glm::vec3(1+numPages, 1+numPages, 1));
   pages.emplace_back(getPtr(), trans);
 }
