@@ -7,16 +7,17 @@
 // layout must match order of attributes in the combined buffer
 // as we calculate the offset between between each field based
 // on their positions
-layout (location = 0)
+// layout (...) must be on its own line for our introspection to work
+layout(location = 0)
 in vec3 position;
-layout (location = 1)
+layout(location = 1)
 in uint fgcolor;
-layout (location = 2)
+layout(location = 2)
 in uint bgcolor;
-layout (location = 3)
+layout(location = 3)
 in vec2 texcoord;
-layout (location = 4)
-in float layer;
+layout(location = 4)
+in uint layer;
 
 // mvp == projection view model matrix
 // model translates model local coordinates to world space
@@ -41,7 +42,7 @@ uniform mat4 model;
 out uint v_fgcolor;
 out uint v_bgcolor;
 out vec2 v_texcoord;
-out float v_layer;
+out uint v_layer;
 
 void main()
 {

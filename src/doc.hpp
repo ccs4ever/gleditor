@@ -18,7 +18,7 @@ private:
 
 public:
   Page(std::shared_ptr<Doc> doc, glm::mat4 &model);
-  void draw(const GLState &state, const glm::mat4 &docModel) const;
+  void draw(const GLState &state, const glm::mat4 &docModel);
   ~Page() override = default;
 };
 
@@ -32,9 +32,10 @@ private:
     unsigned int fg;
     unsigned int bg;
     float texcoord[2];
-    float layer;
-    static unsigned int color3(unsigned int red, unsigned int green, unsigned int blue) { return red << 24 | green << 16 | blue << 8 | 255; }
-    static unsigned int color(unsigned int rgb) { return rgb << 24 | rgb << 16 | rgb << 8 | 255; }
+    unsigned int layer;
+    static unsigned int color3(unsigned char red, unsigned char green, unsigned char blue) { return red << 24 | green << 16 | blue << 8 | 255; }
+    static unsigned int color(unsigned char rgb) { return color3(rgb, rgb, rgb); }
+    static constexpr unsigned int layerWidthHeight(unsigned char layer, unsigned int width, unsigned int height) { assert(width < 4096 && height < 4096); return layer << 24 | width << 12 | height; }
   };
   // NOLINTEND
   int maxQuads = 10000;
@@ -51,7 +52,7 @@ public:
     return std::make_shared<Doc>(model, Private());
   }
   std::shared_ptr<Doc> getPtr() { return shared_from_this(); }
-  void draw(const GLState &state) const;
+  void draw(const GLState &state);
   void newPage(GLState& state);
 
   friend class Page;

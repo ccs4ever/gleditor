@@ -9,6 +9,7 @@
 // glGetIntegerv(GL_MAX_TEXTURE_IMAGE_UNITS, &v)
 
 uniform sampler2DArray texUnit;
+uniform float cubeDepth;
 
 in vec3 f_fgcolor;
 in vec3 f_bgcolor;
@@ -20,7 +21,11 @@ out vec4 outColor;
 void main()
 {
 		//gl_FragColor = vec4(1,0,0,1);
+        if (0 != cubeDepth) {
+            outColor = vec4(f_bgcolor, 1);
+        } else {
 		outColor = vec4(
-				mix(f_fgcolor, f_bgcolor, texture(texUnit, 
+				mix(f_bgcolor, f_fgcolor, texture(texUnit, 
 						vec3(f_texcoord, floor(f_layer+0.5))).r), 1);
+        }
 }

@@ -246,9 +246,9 @@ void setupShaders(GLState &state) {
                                nameToLoc.first, nameToLoc.second.type, nameToLoc.second.varType, isUniform, nameToLoc.second.loc,
                                int(nameToLoc.second));
       if (-1 == locId) {
-        throw std::runtime_error(std::format(
-            "Failed to get {} location: {}",
-            (isUniform ? "uniform" : "attribute"), nameToLoc.first));
+        std::cerr << std::format(
+            "Failed to get {} location: {}. Linker may have elided it.\n\n",
+            (isUniform ? "uniform" : "attribute"), nameToLoc.first);
       }
       std::cerr << "got location for " << key << "/" << nameToLoc.first << ": "
                 << locId << "\n"
@@ -351,6 +351,8 @@ void initGL() {
     };
   }
 
+  //glEnable(GL_CULL_FACE);
+  //glEnable(GL_DEPTH_TEST);
   glClearColor(0, 0, 0, 1);
 }
 
@@ -367,7 +369,7 @@ void Renderer::operator()(AppState &appState, AutoSDLWindow& window) {
   while (appState.alive) {
     const auto start = std::chrono::steady_clock::now();
     // application logic here
-    glClear(GL_COLOR_BUFFER_BIT);
+    glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
     setupGL(appState, glState);
 

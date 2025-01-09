@@ -29,8 +29,7 @@ VAOSupports::VAOSupports(VAOBuffers bufferInfos)
     : bufferInfos(std::move(bufferInfos)) {
 
   this->bufferInfos.vbo.free.emplace_back(0, this->bufferInfos.vbo.maxVertices);
-  this->bufferInfos.ibo.free.emplace_back(0,
-                                          this->bufferInfos.ibo.maxIndices);
+  this->bufferInfos.ibo.free.emplace_back(0, this->bufferInfos.ibo.maxIndices);
 
   genVertexArrays(&vao);
 
@@ -59,10 +58,10 @@ void VAOSupports::reallocate(long vertexRes, long indexRes) {
   const unsigned int origVbo = vbo;
   const unsigned int origIbo = ibo;
 
-  const long origVboMaxVertices  = bufferInfos.vbo.maxVertices;
-  const long origIboMaxIndices = bufferInfos.ibo.maxIndices;
-  long origVboEnd                = origVboMaxVertices * bufferInfos.vbo.stride;
-  long origIboEnd                = origIboMaxIndices * bufferInfos.ibo.stride;
+  const long origVboMaxVertices = bufferInfos.vbo.maxVertices;
+  const long origIboMaxIndices  = bufferInfos.ibo.maxIndices;
+  long origVboEnd               = origVboMaxVertices * bufferInfos.vbo.stride;
+  long origIboEnd               = origIboMaxIndices * bufferInfos.ibo.stride;
 
   // XXX: naively double the space for now
   bufferInfos.vbo.maxVertices *= 2;
@@ -87,10 +86,15 @@ void VAOSupports::reallocate(long vertexRes, long indexRes) {
 
   bufferInfos.vbo.free.emplace_back(
       origVboEnd + 1, bufferInfos.vbo.maxVertices - origVboMaxVertices);
-  bufferInfos.ibo.free.emplace_back(
-      origIboEnd + 1, bufferInfos.ibo.maxIndices - origIboMaxIndices);
+  bufferInfos.ibo.free.emplace_back(origIboEnd + 1, bufferInfos.ibo.maxIndices -
+                                                        origIboMaxIndices);
 
   defragmentFreeLists();
+}
+
+unsigned int fixupAttr(const auto& pair) {
+  static constexpr std::array<std::string, 5> arr = {"position", "fgcolor", "bgcolor", "texcoord", "layer"};
+  return std::distance(arr.begin(), std::ranges::find(arr, pair.first));
 }
 
 auto VAOSupports::findFreeOffset(FreeList &freeList, long rows) {
@@ -116,38 +120,40 @@ void VAOSupports::useProgram(const GLState &state,
     std::vector<std::pair<std::string, GLState::Loc>> pairs(
         program.locs.begin(), program.locs.end());
     std::ranges::sort(pairs, {},
-                      [](const auto &par) { return par.second.loc; });
+                      [](const auto &par) { return -1 == par.second ? fixupAttr(par) : par.second.loc; });
     GLint offset = 0;
     for (const auto &[attr, loc] :
          pairs | std::views::filter(
                      [](const std::pair<std::string, GLState::Loc> &pair) {
                        return pair.second.type == "in";
                      })) {
-      GLenum typ;
-      if (loc.varType == "uint" || loc.varType.contains("uvec")) {
-        typ = GL_UNSIGNED_INT;
-      } else if (loc.varType == "int" || loc.varType.contains("ivec")) {
-        typ = GL_INT;
-      } else if (loc.varType == "bool" || loc.varType.contains("bvec")) {
-        typ = GL_BOOL;
-      } else {
-        typ = GL_FLOAT;
-      }
-      /*std::cerr << "setting up vertex attrib: " << int(loc)
-                << " size: " << loc.size
-                << " stride: " << bufferInfos.vbo.stride
-                << " offset: " << offset << " varType: " << loc.varType
-                << " isInt: " << isInt << "\n";*/
-      glEnableVertexAttribArray(loc);
-      if (typ != GL_FLOAT) {
-        glVertexAttribIPointer(loc, loc.size, typ, bufferInfos.vbo.stride,
-                               /* NOLINTNEXTLINE(performance-no-int-to-ptr) */
-                               reinterpret_cast<void *>(offset));
-      } else {
-        glVertexAttribPointer(loc, loc.size, GL_FLOAT, GL_FALSE,
-                              bufferInfos.vbo.stride,
-                              /* NOLINTNEXTLINE(performance-no-int-to-ptr) */
-                              reinterpret_cast<void *>(offset));
+      //std::cout << "offset: " << offset << "\n";
+      if (-1 != loc) {
+        GLenum typ;
+        if (loc.varType == "uint" || loc.varType.contains("uvec")) {
+          typ = GL_UNSIGNED_INT;
+        } else if (loc.varType == "int" || loc.varType.contains("ivec")) {
+          typ = GL_INT;
+        } else if (loc.varType == "bool" || loc.varType.contains("bvec")) {
+          typ = GL_BOOL;
+        } else {
+          typ = GL_FLOAT;
+        }
+        /*std::cerr << "setting up vertex attrib: " << int(loc)
+                  << " size: " << loc.size
+                  << " stride: " << bufferInfos.vbo.stride
+                  << " offset: " << offset << " varType: " << loc.varType << "\n";*/
+        glEnableVertexAttribArray(loc);
+        if (typ != GL_FLOAT) {
+          glVertexAttribIPointer(loc, loc.size, typ, bufferInfos.vbo.stride,
+                                 /* NOLINTNEXTLINE(performance-no-int-to-ptr) */
+                                 reinterpret_cast<void *>(offset));
+        } else {
+          glVertexAttribPointer(loc, loc.size, GL_FLOAT, GL_FALSE,
+                                bufferInfos.vbo.stride,
+                                /* NOLINTNEXTLINE(performance-no-int-to-ptr) */
+                                reinterpret_cast<void *>(offset));
+        }
       }
       offset += loc.size * 4;
     }
@@ -200,15 +206,16 @@ VAOSupports::Handle VAOSupports::reserve(unsigned int type, long res) {
 
   VAOSupports::Handle ret;
   ret.vbo = {static_cast<long>(vboIt->first * bufferInfos.vbo.stride),
-       numPoints * bufferInfos.vbo.stride};
-  if (GL_QUADS != type) { ret.ibo = {0, 0}; 
+             numPoints * bufferInfos.vbo.stride};
+  if (GL_QUADS != type) {
+    ret.ibo = {0, 0};
   } else {
     const auto iboQuadStride = 6 * res * bufferInfos.ibo.stride;
-      ret.ibo = {static_cast<long>(iboIt->first * bufferInfos.ibo.stride),
-       static_cast<long>(iboQuadStride)};
-  iboIt->first += iboQuadStride;
-  iboIt->second -= iboQuadStride;
-}
+    ret.ibo = {static_cast<long>(iboIt->first * bufferInfos.ibo.stride),
+               static_cast<long>(iboQuadStride)};
+    iboIt->first += iboQuadStride;
+    iboIt->second -= iboQuadStride;
+  }
 
   vboIt->first += numPoints;
   vboIt->second -= numPoints;
