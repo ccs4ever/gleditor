@@ -93,7 +93,7 @@ void VAOSupports::reallocate(long vertexRes, long indexRes) {
 }
 
 unsigned int fixupAttr(const auto& pair) {
-  static constexpr std::array<std::string, 5> arr = {"position", "fgcolor", "bgcolor", "texcoord", "layer"};
+  static constexpr std::array<std::string, 6> arr = {"position", "fgcolor", "bgcolor", "texcoord", "texBox", "layer"};
   return std::distance(arr.begin(), std::ranges::find(arr, pair.first));
 }
 

@@ -1,13 +1,16 @@
 #ifndef GLEDITOR_GLSTATE_H
 #define GLEDITOR_GLSTATE_H
 
-#include <vector>
-#include <unordered_map>
 #include <memory>
+#include <unordered_map>
+#include <vector>
+
+#include "glyphcache/GlyphCache.hpp"
 
 class Doc;
 
 struct GLState {
+  GLState(std::shared_ptr<GL> aGl) : glyphCache(aGl) {}
   /// State exclusive to the render thread
   std::vector<std::shared_ptr<Doc>> docs;
   struct Loc {
@@ -24,6 +27,7 @@ struct GLState {
     const Loc &operator[](const std::string &loc) const { return locs.at(loc); }
   };
   std::unordered_map<std::string, Program> programs;
+  GlyphCache glyphCache;
   ///
 };
 

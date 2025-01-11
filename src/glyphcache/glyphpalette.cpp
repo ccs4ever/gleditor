@@ -1,6 +1,8 @@
 #include "glyphpalette.hpp"
 
 #include <algorithm>
+#include <format>
+#include <iostream>
 #include <iterator>
 
 using std::make_optional;
@@ -32,14 +34,16 @@ optional<TextureCoords> GlyphPalette::put(const Rect &charBox,
     return std::nullopt;
   }
   const auto point = lane->put(charBox.width);
-  gl->texSubImage3D(GL_TEXTURE_2D_ARRAY, 0, GLint(point.x), GLint(point.y),
+  std::cerr << std::format("lane point: {}/{} layer: {} box: {}/{}\n", int(point.x), int(point.y), layer, int(charBox.width), int(charBox.height));
+  auto y = GLint(paletteDims.height) - GLint(point.y) - GLint(charBox.height);
+  glTexSubImage3D(GL_TEXTURE_2D_ARRAY, 0, GLint(point.x), y,
                     layer, GLint(charBox.width), GLint(charBox.height), 1,
-                    GL_RED, GL_UNSIGNED_BYTE, data);
+                    GL_BGRA, GL_UNSIGNED_BYTE, data);
   std::ranges::sort(lanes);
   const auto wid = float(paletteDims.width);
   const auto hgt = float(paletteDims.height);
   return make_optional(TextureCoords{
-      PointF{float(point.x) / wid, 1 - (float(point.y) / hgt)},
+      PointF{float(point.x) / wid, (y / hgt)},
       RectF{float(charBox.width) / wid, float(charBox.height) / hgt}});
 }
 

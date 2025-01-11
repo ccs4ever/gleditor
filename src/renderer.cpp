@@ -3,6 +3,7 @@
 #include "GL/glew.h"
 #include "GLState.hpp"
 #include "SDLwrap.hpp"
+#include "doc.hpp"
 #include "pangomm/attributes.h"
 #include "pangomm/attrlist.h"
 #include "pangomm/fontdescription.h"
@@ -30,7 +31,6 @@
 #include <stdexcept>
 #include <string>
 #include <unordered_map>
-#include "doc.hpp"
 
 void setupGL(AppState &state, const GLState &glState) {
 
@@ -44,10 +44,10 @@ void setupGL(AppState &state, const GLState &glState) {
     std::lock_guard locker(state.view);
 
     glm::mat4 projection = glm::perspective(glm::radians(state.view.fov),
-                                          (float)state.view.screenWidth /
-                                              (float)state.view.screenHeight,
-                                          0.1F, 1000.0F);
-    glm::mat4 view = glm::lookAt(
+                                            (float)state.view.screenWidth /
+                                                (float)state.view.screenHeight,
+                                            0.1F, 1000.0F);
+    glm::mat4 view       = glm::lookAt(
         state.view.pos, state.view.pos + state.view.front, state.view.upward);
 
     glUniformMatrix4fv(program["projection"], 1, GL_FALSE,
@@ -56,7 +56,7 @@ void setupGL(AppState &state, const GLState &glState) {
   }
 }
 
-void resize(AppState& appState) {
+void resize(AppState &appState) {
   glViewport(0, 0, appState.view.screenWidth, appState.view.screenHeight);
 }
 
@@ -193,7 +193,8 @@ void setupShaders(GLState &state) {
       glCompileShader(shader);
       GLint shaderCompiled = GL_FALSE;
       glGetShaderiv(shader, GL_COMPILE_STATUS, &shaderCompiled);
-      std::cerr << "shader compiled: " << bool(shaderCompiled == GL_TRUE) << "\n"
+      std::cerr << "shader compiled: " << bool(shaderCompiled == GL_TRUE)
+                << "\n"
                 << std::flush;
       if (GL_FALSE == shaderCompiled) {
         int logLen = 0;
@@ -215,13 +216,13 @@ void setupShaders(GLState &state) {
         if ("vert" != shaderStage && "in" == type) {
           continue;
         }
-        auto varType = it->str(2);
+        auto varType        = it->str(2);
         auto sizeFromVarNum = std::atoi(it->str(3).c_str());
         sizeFromVarNum      = 0 != sizeFromVarNum ? sizeFromVarNum : 1;
-        const auto size      = type == "in" ? sizeFromVarNum : 0;
-        const auto name      = it->str(4);
-        std::cerr << "found " << type << ": (" << (varType+it->str(3)) << "/" << size
-                  << ")/" << std::quoted(name) << "\n"
+        const auto size     = type == "in" ? sizeFromVarNum : 0;
+        const auto name     = it->str(4);
+        std::cerr << "found " << type << ": (" << (varType + it->str(3)) << "/"
+                  << size << ")/" << std::quoted(name) << "\n"
                   << std::flush;
         prog.locs.emplace(name, GLState::Loc{0, type, varType, size});
       }
@@ -242,9 +243,10 @@ void setupShaders(GLState &state) {
           isUniform ? glGetUniformLocation(pid, nameToLoc.first.c_str())
                     : glGetAttribLocation(pid, nameToLoc.first.c_str());
       nameToLoc.second.loc = locId;
-      std::cerr << std::format("attr name: {} type: {} vartype: {} uniform: {} loc: {}/{}\n",
-                               nameToLoc.first, nameToLoc.second.type, nameToLoc.second.varType, isUniform, nameToLoc.second.loc,
-                               int(nameToLoc.second));
+      std::cerr << std::format(
+          "attr name: {} type: {} vartype: {} uniform: {} loc: {}/{}\n",
+          nameToLoc.first, nameToLoc.second.type, nameToLoc.second.varType,
+          isUniform, nameToLoc.second.loc, int(nameToLoc.second));
       if (-1 == locId) {
         std::cerr << std::format(
             "Failed to get {} location: {}. Linker may have elided it.\n\n",
@@ -351,18 +353,19 @@ void initGL() {
     };
   }
 
-  //glEnable(GL_CULL_FACE);
-  //glEnable(GL_DEPTH_TEST);
+  // glEnable(GL_CULL_FACE);
+  // glEnable(GL_DEPTH_TEST);
   glClearColor(0, 0, 0, 1);
 }
 
-void Renderer::operator()(AppState &appState, AutoSDLWindow& window) {
-
-  GLState glState;
+void Renderer::operator()(AppState &appState, AutoSDLWindow &window) {
 
   AutoSDLGL glCtx(window.window);
 
   initGL();
+
+  // needs to come after initGL so we can initialize GlyphCache
+  GLState glState(std::make_shared<GL>());
 
   setupShaders(glState);
 
@@ -397,8 +400,8 @@ void Renderer::operator()(AppState &appState, AutoSDLWindow& window) {
 
     // swap buffers;
     SDL_GL_SwapWindow(window.window);
-    
-    const auto end = std::chrono::steady_clock::now();
+
+    const auto end          = std::chrono::steady_clock::now();
     appState.frameTimeDelta = end - start;
   }
 }

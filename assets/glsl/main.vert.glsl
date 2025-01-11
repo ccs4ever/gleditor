@@ -17,6 +17,8 @@ in uint bgcolor;
 layout(location = 3)
 in vec2 texcoord;
 layout(location = 4)
+in vec2 texBox;
+layout(location = 5)
 in uint layer;
 
 // mvp == projection view model matrix
@@ -42,6 +44,7 @@ uniform mat4 model;
 out uint v_fgcolor;
 out uint v_bgcolor;
 out vec2 v_texcoord;
+out vec2 v_texBox;
 out uint v_layer;
 
 void main()
@@ -49,6 +52,7 @@ void main()
     v_fgcolor = fgcolor;
     v_bgcolor = bgcolor;
     v_texcoord = texcoord;
+    v_texBox = texBox;
     v_layer = layer;
     // the first three values of the position vector are the familiar (x,y,z)
     // the fourth is w, when w == 1.0, it indicates that the x, y, and z refer to

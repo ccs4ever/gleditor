@@ -17,7 +17,7 @@ private:
   unsigned int tex{};
 
 public:
-  Page(std::shared_ptr<Doc> doc, glm::mat4 &model);
+  Page(std::shared_ptr<Doc> doc, GLState& state, glm::mat4 &model);
   void draw(const GLState &state, const glm::mat4 &docModel);
   ~Page() override = default;
 };
@@ -32,6 +32,7 @@ private:
     unsigned int fg;
     unsigned int bg;
     float texcoord[2];
+    float texBox[2];
     unsigned int layer;
     static unsigned int color3(unsigned char red, unsigned char green, unsigned char blue) { return red << 24 | green << 16 | blue << 8 | 255; }
     static unsigned int color(unsigned char rgb) { return color3(rgb, rgb, rgb); }

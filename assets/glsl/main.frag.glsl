@@ -5,7 +5,7 @@
 // there are a limited number of units and thus a limited number of
 // textures that can be active at the same time, 2d texture arrays
 // and other such things can be used to pack more textures into a
-// single unit, check total number with 
+// single unit, check total number with
 // glGetIntegerv(GL_MAX_TEXTURE_IMAGE_UNITS, &v)
 
 uniform sampler2DArray texUnit;
@@ -20,12 +20,12 @@ out vec4 outColor;
 
 void main()
 {
-		//gl_FragColor = vec4(1,0,0,1);
-        if (0 != cubeDepth) {
-            outColor = vec4(f_bgcolor, 1);
-        } else {
-		outColor = vec4(
-				mix(f_bgcolor, f_fgcolor, texture(texUnit, 
-						vec3(f_texcoord, floor(f_layer+0.5))).r), 1);
-        }
+    //gl_FragColor = vec4(1,0,0,1);
+    if (0 != cubeDepth) {
+        outColor = vec4(f_bgcolor, 1);
+    } else {
+        outColor = vec4(
+                mix(f_bgcolor, f_fgcolor, texture(texUnit,
+                        vec3(f_texcoord, floor(f_layer + 0.5))).r), 1);
+    }
 }
