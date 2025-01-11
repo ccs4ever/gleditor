@@ -1,4 +1,3 @@
 * Replace logo.png with something cooler
-* finish porting GlyphCache
-* hook GlyphCache into the render thread
+* port over the gleditor code, enable glyph by glyph creation
 * document everything
