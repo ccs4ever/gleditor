@@ -3,6 +3,9 @@
 #include "GL/glew.h"
 #include "SDL.h"
 #include "SDL_events.h"
+#include "argparse/argparse.hpp"
+#include "config.h"
+#include <exception>
 #include <glm/ext.hpp>
 #include <glm/geometric.hpp>
 #include <glm/gtx/string_cast.hpp>
@@ -88,9 +91,15 @@ void handleKeyPress(SDL_Event &evt, AppState &state) {
   case SDL_SCANCODE_G: {
     auto fov = state.view.fov;
     if (0 != (evt.key.keysym.mod & KMOD_SHIFT)) {
-      fov -= 1; if (fov < 1) { fov = 1; }
+      fov -= 1;
+      if (fov < 1) {
+        fov = 1;
+      }
     } else {
-      fov += 1; if (fov > 360) { fov = 360; }
+      fov += 1;
+      if (fov > 360) {
+        fov = 360;
+      }
     }
     state.view.fov = fov;
     break;
@@ -102,11 +111,44 @@ void handleKeyPress(SDL_Event &evt, AppState &state) {
   std::cout << "camera pos after: " << glm::to_string(state.view.pos) << "\n";
 }
 
-int main(int argc, char **argv) {
+int handleArgs(AppState &state, int argc, char **argv) {
+
+#ifndef GLEDITOR_VERSION
+#error GLEDITOR_VERSION must be defined
+#endif
+
+  argparse::ArgumentParser parser("gleditor", TOSTRING(GLEDITOR_VERSION));
+  parser.add_argument("--font")
+      .default_value("Monospace 16")
+      .help("default font to use for display");
+  parser.add_argument("-f", "--file").help("path to document to open");
 
   try {
 
-    AppState state;
+    parser.parse_args(argc, argv);
+
+    state.defaultFontName = parser.get("--font");
+    if (parser.present("--file")) {
+      state.renderQueue.push(RenderItemOpenDoc(parser.get("--file")));
+    }
+
+  } catch (const std::exception &e) {
+    std::cerr << e.what() << "\n";
+    std::cerr << parser;
+    return 1;
+  }
+  return 0;
+}
+
+int main(int argc, char **argv) {
+
+  AppState state;
+
+  if (0 != handleArgs(state, argc, argv)) {
+    return 1;
+  }
+
+  try {
 
     Pango::init();
 
@@ -116,7 +158,8 @@ int main(int argc, char **argv) {
     AutoSDLSurface icon("logo.png");
 
     AutoSDLWindow window("GL Editor", SDL_WINDOWPOS_UNDEFINED,
-                         SDL_WINDOWPOS_UNDEFINED, state.view.screenWidth, state.view.screenHeight, SDL_WINDOW_OPENGL,
+                         SDL_WINDOWPOS_UNDEFINED, state.view.screenWidth,
+                         state.view.screenHeight, SDL_WINDOW_OPENGL,
                          icon.surface);
 
     Renderer rend;

@@ -22,6 +22,7 @@
 #include <glm/gtc/type_ptr.hpp>
 #include <iomanip>
 #include <iostream>
+#include <memory>
 #include <mutex>
 #include <ostream>
 #include <pango/pangocairo.h>
@@ -58,6 +59,11 @@ void setupGL(AppState &state, const GLState &glState) {
 
 void resize(AppState &appState) {
   glViewport(0, 0, appState.view.screenWidth, appState.view.screenHeight);
+}
+
+void openDoc(GLState &glState, AutoSDLWindow &window, std::string &fileName) {
+  auto docPtr = Doc::create(glm::mat4(1.0), fileName);
+  glState.docs.push_back(docPtr->getPtr());
 }
 
 void newDoc(GLState &glState, AutoSDLWindow &window) {
@@ -384,6 +390,13 @@ void Renderer::operator()(AppState &appState, AutoSDLWindow &window) {
       case RenderItem::Type::Resize:
         resize(appState);
         break;
+      case RenderItem::Type::OpenDoc: {
+	auto *ptr = item.get();
+        auto *docItem =
+            dynamic_cast<RenderItemOpenDoc *>(ptr);
+        openDoc(glState, window, docItem->docFile);
+        break;
+      }
       default:
         break;
       }

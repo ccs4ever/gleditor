@@ -1,0 +1,9 @@
+// this is an auto-generated file, do not edit.
+#ifndef GLEDITOR_CONFIG_H
+
+#define STRINGIFY(x) #x
+#define TOSTRING(x) STRINGIFY(x)
+
+#define GLEDITOR_VERSION @@VERS@@
+
+#endif // GLEDITOR_CONFIG_H

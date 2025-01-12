@@ -41,6 +41,7 @@ private:
   // NOLINTEND
   int maxQuads = 10000;
   std::vector<Page> pages;
+  std::string docFile;
   // token to keep anything other than Doc::create from using our constructor
   struct Private {
     explicit Private() = default;
@@ -48,9 +49,13 @@ private:
 
 public:
   Doc(glm::mat4 model, Private);
+  Doc(glm::mat4 model, std::string& fileName, Private);
   ~Doc() override = default;
   static std::shared_ptr<Doc> create(glm::mat4 model) {
     return std::make_shared<Doc>(model, Private());
+  }
+  static std::shared_ptr<Doc> create(glm::mat4 model, std::string& fileName) {
+    return std::make_shared<Doc>(model, fileName, Private());
   }
   std::shared_ptr<Doc> getPtr() { return shared_from_this(); }
   void draw(const GLState &state);

@@ -1,6 +1,7 @@
 #ifndef GLEDITOR_QUEUE_H
 #define GLEDITOR_QUEUE_H
 
+#include <concepts>
 #include <memory>
 #include <mutex>
 #include <queue>
@@ -28,9 +29,10 @@ public:
     return ret;
   }
 
-  void push(const T &item) {
+  template <typename U> requires std::derived_from<U, T>
+  void push(const U &item) {
     std::lock_guard lock(mutex);
-    queue.push(std::make_unique<T>(item));
+    queue.push(std::make_unique<U>(item));
   }
 };
 

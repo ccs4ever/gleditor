@@ -2,6 +2,7 @@ CXX = clang++
 # removed spdlog
 PKGS := pangomm-2.48 sdl2 SDL2_image gl glu glew
 TEST_PKGS := gmock_main
+VERS := $(shell git describe --tags --always --match "v[0-9]*.[0-9]*.[0-9]*" HEAD | tr -d v)
 #ifdef DEBUG
 SANITIZE_ADDR_OPTS := -fsanitize=address,undefined,integer -fno-omit-frame-pointer -fsanitize-address-use-after-return=runtime \
 	         -fsanitize-address-use-after-scope 
@@ -11,7 +12,7 @@ SANITIZE_MEM_OPTS := -fsanitize=memory,undefined,integer -fPIE -pie -fno-omit-fr
 DEBUG_OPTS := -g -gembed-source -fdebug-macro -O0
 PROFILE_OPTS := -fprofile-instr-generate -fcoverage-mapping 
 #endif
-CXXFLAGS = $(DEBUG_OPTS) -std=c++23 -Wall -Wextra $(shell pkg-config --cflags $(PKGS))
+CXXFLAGS = $(DEBUG_OPTS) -std=c++23 -Ithirdparty/argparse/include -Wall -Wextra $(shell pkg-config --cflags $(PKGS))
 LDFLAGS = $(DEBUG_OPTS) -rtlib=compiler-rt 
 # XXX: work on this in a separate branch, get tests working again for now
 #CXXFLAGS += -stdlib=libc++ -fexperimental-library 
@@ -29,6 +30,17 @@ JFILES := $(sort $(patsubst %.cpp,%.j,$(TEST_SRCS) $(SRCS)))
 all: gleditor gleditor_test compile_commands.json
 
 $(TEST_OBJS): CXXFLAGS += $(shell pkg-config --cflags $(TEST_PKGS))
+
+ifeq (,$(filter clean,$(MAKECMDGOALS)))
+$(VERS): .git/refs/tags/v$(VERS)
+MKCFG = sed 's/\@\@VERS\@\@/$(VERS)/'
+src/config.h: src/config.h.in $(VERS)
+	@[ "`$(MKCFG) $< | cksum`" = "`cat $@ 2>/dev/null | cksum`" ] || \
+	$(MKCFG) $< > $@
+.PHONY: $(VERS)
+endif
+
+src/main.o src/main.dep: src/config.h
 
 gleditor: $(OBJS)
 	$(CXX) $(LIBS) $(LDFLAGS) $(OBJS) -o gleditor
@@ -88,15 +100,13 @@ doc:
 	doxygen
 
 clean:
-	rm -rf gleditor gleditor_test $(shell find src tests -name '*.[oj]' -o -name '*.dep' -o -name '*.dep.[0-9]*')
+	@rm -rf gleditor gleditor_test $(shell find src tests -name '*.[oj]' -o -name '*.dep' -o -name '*.dep.[0-9]*')
 
-.PHONY: clean doc run test profile sanitize/address sanitize/address/run sanitize/thread sanitize/thread/run \
-	sanitize/memory sanitize/memory/run
 
 %.dep: %.cpp
 	set -e; rm -f $@; \
 	$(CXX) -MM $(CXXFLAGS) $< > $@.$$$$; \
-	sed 's,\($(*F)\)\.o[ :]*,$*.o $*.j $@ : ,g' < $@.$$$$ > $@; \
+	sed 's,\($(*F)\)\.o[ :]*,$*.o $*.j : ,g' < $@.$$$$ > $@; \
 	rm -f $@.$$$$
 
 %.j: %.cpp
@@ -104,6 +114,10 @@ clean:
 		
 compile_commands.json: $(JFILES)
 	{ echo '['; find . -name '*.j' -exec cat '{}' +; echo ']'; } > compile_commands.json
+
+
+.PHONY: clean doc run test profile sanitize/address sanitize/address/run sanitize/thread sanitize/thread/run \
+	sanitize/memory sanitize/memory/run
 
 ifeq (,$(filter clean,$(MAKECMDGOALS)))
 include $(DEPS)

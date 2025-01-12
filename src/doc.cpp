@@ -50,27 +50,32 @@ Page::Page(std::shared_ptr<Doc> aDoc, GLState &state, glm::mat4 &model)
       3, 2, 1, // (rt, lt, rb) ccw
   };
   */
-  auto fonts   = Pango::CairoFontMap::get_default();
-  auto font    = fonts->load_font(fonts->create_context(),
-                                  Pango::FontDescription("Serif 16"));
-  auto [coords,extents]  = state.glyphCache.put("The quick brown fox jumped over the lazy dog.", font);
-  std::cerr << std::format("coords: pt: {}/{} box: {}/{}\n", coords.topLeft.x, coords.topLeft.y, coords.box.width, coords.box.height);
-  std::cerr << std::format("extents: {}/{}\n", int(extents.width), int(extents.height));
-  auto color   = Doc::VBORow::color;
-  auto color3  = Doc::VBORow::color3;
-  auto layerWH = Doc::VBORow::layerWidthHeight;
+  auto fonts             = Pango::CairoFontMap::get_default();
+  auto font              = fonts->load_font(fonts->create_context(),
+                                            Pango::FontDescription("Serif 16"));
+  auto [coords, extents] = state.glyphCache.put(
+      "The quick brown fox jumped over the lazy dog.", font);
+  std::cerr << std::format("coords: pt: {}/{} box: {}/{}\n", coords.topLeft.x,
+                           coords.topLeft.y, coords.box.width,
+                           coords.box.height);
+  std::cerr << std::format("extents: {}/{}\n", int(extents.width),
+                           int(extents.height));
+  auto color                            = Doc::VBORow::color;
+  auto color3                           = Doc::VBORow::color3;
+  auto layerWH                          = Doc::VBORow::layerWidthHeight;
   std::array<Doc::VBORow, 2> vertexData = {
       // left-bottom,  white, black, tex: left-top, layer0
       // Doc::VBORow{{0.0, -2.0, 1.0}, color(255), color(0), {0.0, 1.0}, 0},
       // right-bottom, white, black, tex: right-top, layer0
       // Doc::VBORow{{2.0, -2.0, 1.0}, color(255), color(0), {1.0, 1.0}, 0},
       // left-top, white, black, tex: left-bottom, layer0
-      Doc::VBORow{{0, 0, 0}, color(0), color(255), {0, 0}, {}, layerWH(0, 30, 30)},
+      Doc::VBORow{
+          {0, 0, 0}, color(0), color(255), {0, 0}, {}, layerWH(0, 30, 30)},
       Doc::VBORow{{0, 0, 0},
-                  color3(0,255,0),
+                  color3(0, 255, 0),
                   color3(0, 0, 255),
                   {coords.topLeft.x, coords.topLeft.y},
-		  {coords.box.width, coords.box.height},
+                  {coords.box.width, coords.box.height},
                   layerWH(0, int(extents.width), int(extents.height))} //,
       // right-top, white, black, tex: right-bottom, layer0
       // Doc::VBORow{{2.0, 0, 1.0}, color(255), color(0), {1.0, 0.0}, 0}
@@ -104,7 +109,7 @@ Page::Page(std::shared_ptr<Doc> aDoc, GLState &state, glm::mat4 &model)
 }
 
 void Page::draw(const GLState &state, const glm::mat4 &docModel) {
-  //model = glm::rotate(model, glm::radians(1.0F), glm::vec3(0, 0, 1));
+  // model = glm::rotate(model, glm::radians(1.0F), glm::vec3(0, 0, 1));
   glUniformMatrix4fv(state.programs.at("main")["model"], 1, GL_FALSE,
                      glm::value_ptr(docModel * model));
   glUniform1f(state.programs.at("main")["cubeDepth"], 2.0F);
@@ -138,6 +143,10 @@ void Doc::draw(const GLState &state) {
     page.draw(state, model);
   }
 }
+
+Doc::Doc(glm::mat4 model, std::string &fileName,
+         [[maybe_unused]] Doc::Private _priv)
+    : Doc(model, _priv) { docFile = fileName; }
 
 Doc::Doc(glm::mat4 model, [[maybe_unused]] Doc::Private _priv)
     : Drawable(model),

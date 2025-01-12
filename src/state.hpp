@@ -11,6 +11,8 @@ struct RenderItem;
 
 struct AppState {
   /// Shared state between main and renderer threads
+  // set before the render thread starts, no need to synchronize
+  std::string defaultFontName;
   std::atomic_bool alive{true};
   std::atomic<std::chrono::duration<float>> frameTimeDelta;
   TQueue<RenderItem> renderQueue;
