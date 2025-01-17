@@ -32,7 +32,6 @@ all: gleditor gleditor_test compile_commands.json
 $(TEST_OBJS): CXXFLAGS += $(shell pkg-config --cflags $(TEST_PKGS))
 
 ifeq (,$(filter clean,$(MAKECMDGOALS)))
-$(VERS): .git/refs/tags/v$(VERS)
 MKCFG = sed 's/\@\@VERS\@\@/$(VERS)/'
 src/config.h: src/config.h.in $(VERS)
 	@[ "`$(MKCFG) $< | cksum`" = "`cat $@ 2>/dev/null | cksum`" ] || \
