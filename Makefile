@@ -12,13 +12,13 @@ SANITIZE_MEM_OPTS := -fsanitize=memory,undefined,integer -fPIE -pie -fno-omit-fr
 DEBUG_OPTS := -g -gembed-source -fdebug-macro -O0
 PROFILE_OPTS := -fprofile-instr-generate -fcoverage-mapping 
 #endif
-CXXFLAGS = $(DEBUG_OPTS) -std=c++23 -Ithirdparty/argparse/include -Wall -Wextra $(shell pkg-config --cflags $(PKGS))
+CXXFLAGS = $(DEBUG_OPTS) -std=c++23 -Ithirdparty/Choreograph/src -Ithirdparty/argparse/include -Wall -Wextra $(shell pkg-config --cflags $(PKGS))
 LDFLAGS = $(DEBUG_OPTS) -rtlib=compiler-rt 
 # XXX: work on this in a separate branch, get tests working again for now
 #CXXFLAGS += -stdlib=libc++ -fexperimental-library 
 #LDFLAGS += -v -stdlib=libc++ -fexperimental-library 
 LIBS := $(shell pkg-config --libs $(PKGS))
-SHARED_SRCS := $(shell find src/ -name '*.cpp' -a ! -name main.cpp )
+SHARED_SRCS := $(shell find thirdparty/Choreograph/src/ src/ -name '*.cpp' -a ! -name main.cpp )
 SRCS := $(SHARED_SRCS) src/main.cpp
 TEST_SRCS := $(SHARED_SRCS) $(shell find tests/ -name '*.cpp')
 OBJS := $(patsubst %.cpp,%.o,$(SRCS))
