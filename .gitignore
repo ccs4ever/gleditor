@@ -3,6 +3,10 @@
 *.j
 *.dep
 
+# Generated/Runtime files
+config.h
+.cache
+
 # Compile Commands file (used by clangd)
 compile_commands.json
 
