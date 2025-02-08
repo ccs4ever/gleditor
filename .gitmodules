@@ -3,4 +3,4 @@
 	url = https://github.com/p-ranav/argparse
 [submodule "thirdparty/Choreograph"]
 	path = thirdparty/Choreograph
-	url = https://github.com/sansumbrella/Choreograph.git
+	url = ssh+git://git@github.com/ccs4ever/Choreograph.git
