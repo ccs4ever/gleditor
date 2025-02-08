@@ -66,7 +66,7 @@ void openDoc(GLState &glState, AutoSDLWindow &window, std::string &fileName) {
   glState.docs.push_back(docPtr->getPtr());
 }
 
-void newDoc(GLState &glState, AutoSDLWindow &window) {
+void newDoc(AppState& appState, GLState &glState, AutoSDLWindow &window) {
 #if 0
   auto tempSurf =
       Cairo::ImageSurface::create(Cairo::Surface::Format::ARGB32, 0, 0);
@@ -125,7 +125,7 @@ void newDoc(GLState &glState, AutoSDLWindow &window) {
 
   std::cerr << "doc use count: " << doc.use_count() << "\n";
 
-  doc->newPage(glState);
+  doc->newPage(appState, glState);
 }
 
 inline GLenum getShaderType(const std::string &stage) {
@@ -385,7 +385,7 @@ void Renderer::operator()(AppState &appState, AutoSDLWindow &window) {
     while (auto item = appState.renderQueue.pop()) {
       switch (item->type) {
       case RenderItem::Type::NewDoc:
-        newDoc(glState, window);
+        newDoc(appState, glState, window);
         break;
       case RenderItem::Type::Resize:
         resize(appState);

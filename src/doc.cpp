@@ -1,16 +1,25 @@
 #include "doc.hpp"
 #include "GLState.hpp"
 #include "cairomm/surface.h"
+#include "glibmm/convert.h"
+#include "pango/pango-types.h"
 #include "pango/pangocairo.h"
+#include "pangomm/attributes.h"
 #include "pangomm/fontdescription.h"
 #include "vao_supports.hpp"
 #include <GL/glew.h>
+#include <cstring>
+#include <format>
+#include <locale>
+#include <pangomm/glyphstring.h>
+#include <pangomm/item.h>
 
 #include <algorithm>
 #include <array>
 #include <chrono>
 #include <cstddef>
 #include <cstdlib>
+#include <fstream>
 #include <glm/ext.hpp>
 #include <glm/ext/matrix_transform.hpp>
 #include <glm/gtc/type_ptr.hpp>
@@ -20,8 +29,10 @@
 #include <memory>
 #include <pangomm.h>
 #include <pangomm/cairofontmap.h>
+#include <string>
 
-Page::Page(std::shared_ptr<Doc> aDoc, GLState &state, glm::mat4 &model)
+Page::Page(std::shared_ptr<Doc> aDoc, AppState &appState, GLState &state,
+           glm::mat4 &model)
     : Drawable(model), doc(std::move(aDoc)) {
   // interleaved data --
   // https://www.opengl.org/wiki/Vertex_Specification#Interleaved_arrays pos
@@ -50,11 +61,51 @@ Page::Page(std::shared_ptr<Doc> aDoc, GLState &state, glm::mat4 &model)
       3, 2, 1, // (rt, lt, rb) ccw
   };
   */
-  auto fonts             = Pango::CairoFontMap::get_default();
-  auto font              = fonts->load_font(fonts->create_context(),
-                                            Pango::FontDescription("Serif 16"));
-  auto [coords, extents] = state.glyphCache.put(
-      "The quick brown fox jumped over the lazy dog.", font);
+  auto fontDesc = Pango::FontDescription(appState.defaultFontName);
+  auto fonts    = Pango::CairoFontMap::get_default();
+  auto ctx      = fonts->create_context();
+  ctx->set_font_description(fontDesc);
+  auto font     = ctx->load_font(fontDesc);
+  Glib::ustring text;
+  if ("" != doc->docFile) {
+    std::string tmpStr;
+    std::ifstream istr(doc->docFile, std::ios::ate);
+    const long size = istr.tellg();
+    tmpStr.resize(size + 1);
+    istr.seekg(0);
+    istr.read(tmpStr.data(), size);
+    text = std::move(tmpStr);
+  } else {
+    text = "The quick brown fox jumped over the lazy dog.";
+  }
+  Pango::AttrList attrs;
+  auto fontAttr = Pango::Attribute::create_attr_font_desc(fontDesc);
+  attrs.change(fontAttr);
+  std::string loc;
+  Glib::get_charset(loc);
+  std::cerr << "text: " << Glib::convert_with_fallback(text.raw(), loc, "UTF-8")
+            << " pango attrs: "
+            << Glib::convert_with_fallback(attrs.to_string().raw(), loc,
+                                           "UTF-8")
+            << " valid?: " << bool(attrs) << "\n";
+  const char* ttt = "floor fir faer foo bar";
+  text = ttt;
+  auto items = ctx->itemize(text, attrs);
+  for (const auto &item : items) {
+    Glib::ustring seg{item.get_segment(text)};
+    auto glyphStr = item.shape(seg);
+    for (auto i = 0UL; i < glyphStr.get_glyphs().size(); i++) {
+      std::cerr << std::format("log cluster {}: {}\n", i, glyphStr.gobj()->log_clusters[i]);
+    }
+    auto glyphs   = glyphStr.get_glyphs();
+    std::cerr << "seg: " << Glib::convert_with_fallback(seg.raw(), loc, "UTF-8") << " text: " << Glib::convert_with_fallback(text.raw(), loc, "UTF-8") << " len: " << seg.length() << " " << text.length() << " " << glyphStr.get_width() << " " << glyphs.size() << "\n";
+    for (const auto &glyphInfo : glyphs) {
+      std::cerr << std::format("got glyph: {} is_cluster_start: {}\n",
+                               glyphInfo.get_glyph(),
+                               glyphInfo.get_attr().is_cluster_start);
+    }
+  }
+  auto [coords, extents] = state.glyphCache.put(text, font);
   std::cerr << std::format("coords: pt: {}/{} box: {}/{}\n", coords.topLeft.x,
                            coords.topLeft.y, coords.box.width,
                            coords.box.height);
@@ -146,7 +197,9 @@ void Doc::draw(const GLState &state) {
 
 Doc::Doc(glm::mat4 model, std::string &fileName,
          [[maybe_unused]] Doc::Private _priv)
-    : Doc(model, _priv) { docFile = fileName; }
+    : Doc(model, _priv) {
+  docFile = fileName;
+}
 
 Doc::Doc(glm::mat4 model, [[maybe_unused]] Doc::Private _priv)
     : Drawable(model),
@@ -154,7 +207,7 @@ Doc::Doc(glm::mat4 model, [[maybe_unused]] Doc::Private _priv)
           VAOSupports::VAOBuffers::Vbo(sizeof(VBORow), 10000),
           VAOSupports::VAOBuffers::Ibo(sizeof(unsigned int), 15000))) {}
 
-void Doc::newPage(GLState &state) {
+void Doc::newPage(AppState &appState, GLState &state) {
   AutoVAO binder(this);
 
   AutoProgram progBinder(this, state, "main");
@@ -164,5 +217,5 @@ void Doc::newPage(GLState &state) {
       glm::mat4(1.0), glm::vec3(0, -5.0F * static_cast<float>(numPages), 0.0F));
   // trans = glm::rotate(trans, glm::radians(20.0F*numPages), glm::vec3(0.5, 1,
   // 0)); trans = glm::scale(trans, glm::vec3(1+numPages, 1+numPages, 1));
-  pages.emplace_back(getPtr(), state, trans);
+  pages.emplace_back(getPtr(), appState, state, trans);
 }

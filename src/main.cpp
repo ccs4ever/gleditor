@@ -1,5 +1,6 @@
 
 
+#include <langinfo.h>
 #include "GL/glew.h"
 #include "SDL.h"
 #include "SDL_events.h"
@@ -10,12 +11,16 @@
 #include <glm/geometric.hpp>
 #include <glm/gtx/string_cast.hpp>
 #include <iostream>
+#include <locale>
 #include <mutex>
 #include <pangomm/init.h>
 #include <thread>
 
 #include "SDL_image.h"
 #include "SDLwrap.hpp"
+#include "glibmm/init.h"
+#include "glibmm/ustring.h"
+#include "glibmm/convert.h"
 #include "renderer.hpp"
 
 void handleWindowChange(SDL_Event &evt, AppState &state, SDL_Window *win) {
@@ -142,6 +147,13 @@ int handleArgs(AppState &state, int argc, char **argv) {
 
 int main(int argc, char **argv) {
 
+  // "" signals that LC_ALL should be set from the environment
+  std::setlocale(LC_ALL, ""); // for C and C++ where synced with stdio
+  std::locale::global(std::locale("")); // for C++
+  std::cerr.imbue(std::locale());
+  std::cin.imbue(std::locale());
+  std::cout.imbue(std::locale());
+
   AppState state;
 
   if (0 != handleArgs(state, argc, argv)) {
@@ -150,6 +162,7 @@ int main(int argc, char **argv) {
 
   try {
 
+    Glib::init();
     Pango::init();
 
     AutoSDL sdlScoped(SDL_INIT_VIDEO);
