@@ -7,7 +7,9 @@
 #include <cairomm/surface.h>
 #include <cstddef>
 #include <exception>
+#include <format>
 #include <iostream>
+#include <iterator>
 #include <optional>
 #include <pango/pangocairo.h>
 #include <pangomm.h>
@@ -65,19 +67,19 @@ void GlyphCache::initTextureArray() {
   glBindTexture(GL_TEXTURE_2D_ARRAY, 0);
 }
 
-GlyphPalette &GlyphCache::getBestPalette(const Rect &charBox) {
-  for (GlyphPalette &palette : palettes) {
-    if (palette.canFit(charBox)) {
-      return palette;
+auto GlyphCache::getBestPalette(const Rect &charBox) {
+  for (auto it = palettes.begin(); it != palettes.end(); it++) {
+    if (it->canFit(charBox)) {
+      return it;
     }
   }
   if (palettes.size() >= (unsigned long)maxLayers) {
     throw new std::overflow_error("Out of Palettes!!!");
   }
-  GlyphPalette &newPalette =
-      palettes.emplace_back(Rect{Length{size}, Length{size}}, gl);
+  std::cout << "creating palette\n";
+  palettes.emplace_back(Rect{Length{size}, Length{size}}, gl);
   std::sort(palettes.begin(), palettes.end());
-  return newPalette;
+  return std::prev(palettes.end());
 }
 
 inline Glib::RefPtr<Pango::Layout> getLayout(const Glib::ustring &chr,
@@ -116,6 +118,7 @@ GlyphCache::Sizes GlyphCache::addToCache(const Glib::ustring &chr,
   auto layout = getLayout(chr, font, format);
 
   auto [width, height, stride] = getLayoutInfo(layout, format);
+  std::cout << std::format("layout w/h/s: {}/{}/{}\n", width, height, stride);
   auto extents                 = Rect{Length{width}, Length{height}};
 
   // create layout drawing context
@@ -138,13 +141,13 @@ GlyphCache::Sizes GlyphCache::addToCache(const Glib::ustring &chr,
   layout->show_in_cairo_context(layCtx);
 
   // debugging
-  layoutSurf->write_to_png("/tmp/page.png");
+  //layoutSurf->write_to_png("/tmp/page.png");
 
   auto palette = getBestPalette(extents);
   glActiveTexture(GL_TEXTURE0);
   bindTexture();
   auto coords = glyphs[chr][font] =
-      GlyphCache::Sizes{palette.put(extents, data.data()).value(), extents};
+      GlyphCache::Sizes{palette->put(extents, data.data()).value(), extents};
   clearTexture();
   return coords;
 }
