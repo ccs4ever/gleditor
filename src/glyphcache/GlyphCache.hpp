@@ -80,7 +80,7 @@ private:
   int size, maxLayers;
   GLuint textArrId;
 
-  GlyphPalette &getBestPalette(const Rect &charBox);
+  auto getBestPalette(const Rect &charBox);
   void initTextureArray();
   Sizes addToCache(const Glib::ustring &chr, const FontPtr &font);
 };

@@ -3,6 +3,7 @@
 
 #include <compare>
 #include <exception>
+#include <format>
 #include <iostream>
 #include <stdexcept>
 #include <tuple>
@@ -45,8 +46,10 @@ public:
           "Character width too large or small to hold in lane");
     }
     auto ret = Point{Offset{std::to_underlying(usedWidth)}, paletteYOffset};
+    std::cout << "put usedWidth: " << usedWidth << "\n";
     usedWidth =
         Length{std::to_underlying(usedWidth) + std::to_underlying(charWidth)};
+    std::cout << "put usedWidth after: " << usedWidth << "\n";
     return ret;
   }
 

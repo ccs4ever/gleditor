@@ -12,12 +12,15 @@ std::atomic<int> GlyphPalette::layerCount{};
 
 auto GlyphPalette::getBestLane(const Rect &charBox) {
   const auto val = std::ranges::find_if(
-      lanes, [charBox](const auto &lane) { return lane.canFit(charBox); });
+      lanes, [&charBox](const auto &lane) { return lane.canFit(charBox); });
   if (lanes.cend() == val && availHeight() >= charBox.height) {
+    std::cout << "creating lane\n";
     lanes.emplace_back(Offset{std::to_underlying(usedHeight)},
                        Rect{paletteDims.width, charBox.height});
+    std::cout << "put usedHeight: " << usedHeight << "\n";
     usedHeight = Length{std::to_underlying(usedHeight) +
                         std::to_underlying(charBox.height)};
+    std::cout << "put usedHeight after: " << usedHeight << "\n";
     return std::prev(lanes.end());
   }
   return val;

@@ -6,6 +6,7 @@
 #include "pango/pangocairo.h"
 #include "pangomm/attributes.h"
 #include "pangomm/fontdescription.h"
+#include "pangomm/layout.h"
 #include "vao_supports.hpp"
 #include <GL/glew.h>
 #include <cstring>
@@ -30,6 +31,10 @@
 #include <pangomm.h>
 #include <pangomm/cairofontmap.h>
 #include <string>
+
+glm::vec3 lwh(uint i) {
+  return {i >> uint(24), (i >> uint(12)) & uint(4095), i & uint(4095)};
+}
 
 Page::Page(std::shared_ptr<Doc> aDoc, AppState &appState, GLState &state,
            glm::mat4 &model)
@@ -65,7 +70,7 @@ Page::Page(std::shared_ptr<Doc> aDoc, AppState &appState, GLState &state,
   auto fonts    = Pango::CairoFontMap::get_default();
   auto ctx      = fonts->create_context();
   ctx->set_font_description(fontDesc);
-  auto font     = ctx->load_font(fontDesc);
+  auto font = ctx->load_font(fontDesc);
   Glib::ustring text;
   if ("" != doc->docFile) {
     std::string tmpStr;
@@ -88,8 +93,100 @@ Page::Page(std::shared_ptr<Doc> aDoc, AppState &appState, GLState &state,
             << Glib::convert_with_fallback(attrs.to_string().raw(), loc,
                                            "UTF-8")
             << " valid?: " << bool(attrs) << "\n";
-  const char* ttt = "floor fir faer foo bar";
-  text = ttt;
+  auto lay = Pango::Layout::create(ctx);
+  lay->set_font_description(fontDesc);
+  lay->set_text(text);
+  auto color   = Doc::VBORow::color;
+  auto color3  = Doc::VBORow::color3;
+  auto layerWH = Doc::VBORow::layerWidthHeight;
+  auto xMargin = 2;
+  auto yMargin = 2;
+  auto layW    = lay->get_pixel_logical_extents().get_width() + xMargin*2;
+  auto layH    = lay->get_pixel_logical_extents().get_height() + yMargin*2;
+  std::vector<Doc::VBORow> vertexData = {
+      // left-bottom,  white, black, tex: left-top, layer0
+      // Doc::VBORow{{0.0, -2.0, 1.0}, color(255), color(0), {0.0, 1.0}, 0},
+      // right-bottom, white, black, tex: right-top, layer0
+      // Doc::VBORow{{2.0, -2.0, 1.0}, color(255), color(0), {1.0, 1.0}, 0},
+      // left-top, white, black, tex: left-bottom, layer0
+      Doc::VBORow{{float(layW) / 32.0F, -float(layH) / 32.0F, 0},
+                  color(0),
+                  color(255),
+                  {0, 0},
+                  {1, 1},
+                  layerWH(0, layW, layH)},
+  };
+  auto logAttrs = lay->get_log_attrs();
+  auto iter     = lay->get_iter();
+  std::cout << "char count: " << lay->get_character_count()
+            << " attrs size: " << logAttrs.size() << "\n";
+  for (const auto &attr : logAttrs) {
+    std::cout << std::format(
+        "Glyph: attr.backspace_deletes_character {}, attr.break_inserts_hyphen "
+        "{}, attr.break_removes_preceding {}, attr.is_char_break {}, "
+        "attr.is_line_break {}, attr.is_mandatory_break {}, "
+        "attr.is_cursor_position {}, attr.is_expandable_space {}, "
+        "attr.is_sentence_boundary {}, attr.is_sentence_end {}, "
+        "attr.is_sentence_start {}, attr.is_word_boundary {}, attr.is_word_end "
+        "{}, attr.is_word_start {}, attr.is_white {}, attr.reserved {}\n",
+        attr.backspace_deletes_character, attr.break_inserts_hyphen,
+        attr.break_removes_preceding, attr.is_char_break, attr.is_line_break,
+        attr.is_mandatory_break, attr.is_cursor_position,
+        attr.is_expandable_space, attr.is_sentence_boundary,
+        attr.is_sentence_end, attr.is_sentence_start, attr.is_word_boundary,
+        attr.is_word_end, attr.is_word_start, attr.is_white, attr.reserved);
+  }
+  int lastIdx  = -1;
+  bool plusOne = true;
+  auto xpen = float(xMargin);
+  auto ypen = float(iter.get_line_logical_extents().get_height())/PANGO_SCALE+float(yMargin);
+  std::cout << "ypen: " << ypen << "\n";
+  Pango::Rectangle rInk;
+  Pango::Rectangle rLog;
+  do {
+    int idx = lastIdx == iter.get_index() ? lay->get_text().size() : iter.get_index();
+    ypen = float(iter.get_baseline())/PANGO_SCALE+float(yMargin);
+    std::cout << lay->get_text().size() << " " << idx << (unsigned char)lay->get_text()[idx] << (lay->get_text()[idx] == '\n') << "\n";
+    int len = idx - lastIdx;
+    if (-1 != lastIdx && idx != lay->get_text().size() && lay->get_text().substr(
+          lastIdx, len == 0 ? Glib::ustring::npos : len).rfind('\n') != Glib::ustring::npos) {
+      std::cout << "GOT newline\n";
+      xpen = float(xMargin);
+      //idx += 1; // skip
+    } else if (-1 != lastIdx) {
+      Glib::ustring tmp =
+          text.substr(lastIdx, len == 0 ? Glib::ustring::npos : len);
+      std::cout << "iter index: " << idx - len << " char: " << tmp << " "
+                << " cluster width: "
+                << iter.get_cluster_ink_extents().get_width() / PANGO_SCALE
+                << "\n";
+      const auto [coords, extents] = state.glyphCache.put(tmp, font);
+      std::cerr << std::format("coords: pt: {}/{} box: {}/{}\n",
+                               coords.topLeft.x, coords.topLeft.y,
+                               coords.box.width, coords.box.height);
+      std::cerr << std::format("extents: {}/{} {}\n", int(extents.width),
+                               int(extents.height), xpen);
+      auto vec = lwh(layerWH(0, int(extents.width), int(extents.height)));
+      vec      = (doc->model * model * glm::vec4(vec, 0));
+      std::cerr << std::format("vec: {} {}/{}\n", vec.x, vec.y, vec.z);
+      xpen += float(int(extents.width)) / 35.0F;
+      std::cout << "xpen sent: " << xpen << "\n";
+      vertexData.push_back(
+          Doc::VBORow{{xpen, -ypen/30.0F, 0},
+                      color(0),
+                      color(255),
+                      {coords.topLeft.x, coords.topLeft.y},
+                      {coords.box.width, coords.box.height},
+                      layerWH(0, uint(extents.width), uint(extents.height))});
+      xpen += float(int(extents.width)) / 35.0F;
+      std::cout << "xpen after: " << xpen << "\n";
+    }
+    lastIdx = idx;
+    iter.get_cluster_extents(rInk, rLog);
+    iter.next_cluster();
+  } while (lastIdx < lay->get_text().size());
+
+#if 0
   auto items = ctx->itemize(text, attrs);
   for (const auto &item : items) {
     Glib::ustring seg{item.get_segment(text)};
@@ -105,32 +202,7 @@ Page::Page(std::shared_ptr<Doc> aDoc, AppState &appState, GLState &state,
                                glyphInfo.get_attr().is_cluster_start);
     }
   }
-  auto [coords, extents] = state.glyphCache.put(text, font);
-  std::cerr << std::format("coords: pt: {}/{} box: {}/{}\n", coords.topLeft.x,
-                           coords.topLeft.y, coords.box.width,
-                           coords.box.height);
-  std::cerr << std::format("extents: {}/{}\n", int(extents.width),
-                           int(extents.height));
-  auto color                            = Doc::VBORow::color;
-  auto color3                           = Doc::VBORow::color3;
-  auto layerWH                          = Doc::VBORow::layerWidthHeight;
-  std::array<Doc::VBORow, 2> vertexData = {
-      // left-bottom,  white, black, tex: left-top, layer0
-      // Doc::VBORow{{0.0, -2.0, 1.0}, color(255), color(0), {0.0, 1.0}, 0},
-      // right-bottom, white, black, tex: right-top, layer0
-      // Doc::VBORow{{2.0, -2.0, 1.0}, color(255), color(0), {1.0, 1.0}, 0},
-      // left-top, white, black, tex: left-bottom, layer0
-      Doc::VBORow{
-          {0, 0, 0}, color(0), color(255), {0, 0}, {}, layerWH(0, 30, 30)},
-      Doc::VBORow{{0, 0, 0},
-                  color3(0, 255, 0),
-                  color3(0, 0, 255),
-                  {coords.topLeft.x, coords.topLeft.y},
-                  {coords.box.width, coords.box.height},
-                  layerWH(0, int(extents.width), int(extents.height))} //,
-      // right-top, white, black, tex: right-bottom, layer0
-      // Doc::VBORow{{2.0, 0, 1.0}, color(255), color(0), {1.0, 0.0}, 0}
-  };
+#endif
 #if 0
   glGenTextures(1, &tex);
   std::array<unsigned char, 256L * 256> arr;
@@ -163,22 +235,24 @@ void Page::draw(const GLState &state, const glm::mat4 &docModel) {
   // model = glm::rotate(model, glm::radians(1.0F), glm::vec3(0, 0, 1));
   glUniformMatrix4fv(state.programs.at("main")["model"], 1, GL_FALSE,
                      glm::value_ptr(docModel * model));
-  glUniform1f(state.programs.at("main")["cubeDepth"], 2.0F);
+  glUniform1f(state.programs.at("main")["cubeDepth"], /*2.0F*/ 0);
   /*std::cout << "docModel: " << glm::to_string(docModel)
             << "\npageModel: " << glm::to_string(model)
             << "\nmult: " << glm::to_string(docModel * model) << "\n";*/
   // make the compiler happy, reinterpret_cast<void*> of long would introduce
   // performance penalties apparently
-  /*glDrawArrays(GL_POINTS,
-               (int)pageBackingHandle.vbo.offset / sizeof(Doc::VBORow), 1);*/
+  state.glyphCache.bindTexture();
+  glDrawArrays(GL_POINTS,
+               (int)pageBackingHandle.vbo.offset / sizeof(Doc::VBORow), 1);
   glUniform1f(state.programs.at("main")["cubeDepth"], 0);
   glUniformMatrix4fv(
       state.programs.at("main")["model"], 1, GL_FALSE,
-      glm::value_ptr(docModel *
-                     glm::translate(model, glm::vec3(-0.1F, 0.1F, 0.1F))));
-  state.glyphCache.bindTexture();
+      glm::value_ptr(docModel * model
+                     // glm::translate(model, glm::vec3(-0.1F, 0.1F, 0.1F))
+                     ));
   glDrawArrays(GL_POINTS,
-               (int)pageBackingHandle.vbo.offset / sizeof(Doc::VBORow) + 1, 1);
+               (int)pageBackingHandle.vbo.offset / sizeof(Doc::VBORow) + 1,
+               pageBackingHandle.vbo.size / sizeof(Doc::VBORow) - 1);
   GlyphCache::clearTexture();
   // TODO: add glyph boxes
   for (const auto &handle : glyphs) {
@@ -214,7 +288,8 @@ void Doc::newPage(AppState &appState, GLState &state) {
 
   const auto numPages = pages.size();
   glm::mat4 trans     = glm::translate(
-      glm::mat4(1.0), glm::vec3(0, -5.0F * static_cast<float>(numPages), 0.0F));
+      glm::mat4(1.0),
+      glm::vec3(0, -5.0F / 16.0F * static_cast<float>(numPages), 0.0F));
   // trans = glm::rotate(trans, glm::radians(20.0F*numPages), glm::vec3(0.5, 1,
   // 0)); trans = glm::scale(trans, glm::vec3(1+numPages, 1+numPages, 1));
   pages.emplace_back(getPtr(), appState, state, trans);
