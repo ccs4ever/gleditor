@@ -25,7 +25,7 @@ vec3 c(uint i) {
 }
 
 vec3 lwh(uint i) {
-    return vec3(i >> uint(24), uint(i >> 12) & uint(4095), i & uint(4095));
+    return vec3(i >> uint(24), (i >> uint(12)) & uint(4095), i & uint(4095));
 }
 
 vec4 f(vec4 fin) {
@@ -42,8 +42,8 @@ void main() {
     }
 
     f_layer = l.x;
-    float width = l.y / 2.0;
-    float height = l.z / 2.0;
+    float width = l.y/2.0;
+    float height = l.z/2.0;
     //f_fgcolor = vec3(0, 0, 1);
     //f_bgcolor = vec3(0, 0, 1);
 
