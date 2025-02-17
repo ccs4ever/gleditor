@@ -76,7 +76,7 @@ auto GlyphCache::getBestPalette(const Rect &charBox) {
   if (palettes.size() >= (unsigned long)maxLayers) {
     throw new std::overflow_error("Out of Palettes!!!");
   }
-  std::cout << "creating palette\n";
+  //std::cout << "creating palette\n";
   palettes.emplace_back(Rect{Length{size}, Length{size}}, gl);
   std::sort(palettes.begin(), palettes.end());
   return std::prev(palettes.end());
@@ -118,7 +118,7 @@ GlyphCache::Sizes GlyphCache::addToCache(const Glib::ustring &chr,
   auto layout = getLayout(chr, font, format);
 
   auto [width, height, stride] = getLayoutInfo(layout, format);
-  std::cout << std::format("layout w/h/s: {}/{}/{}\n", width, height, stride);
+  //std::cout << std::format("layout w/h/s: {}/{}/{}\n", width, height, stride);
   auto extents                 = Rect{Length{width}, Length{height}};
 
   // create layout drawing context

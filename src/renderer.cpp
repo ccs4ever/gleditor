@@ -61,11 +61,6 @@ void resize(AppState &appState) {
   glViewport(0, 0, appState.view.screenWidth, appState.view.screenHeight);
 }
 
-void openDoc(GLState &glState, AutoSDLWindow &window, std::string &fileName) {
-  auto docPtr = Doc::create(glm::mat4(1.0), fileName);
-  glState.docs.push_back(docPtr->getPtr());
-}
-
 void newDoc(AppState& appState, GLState &glState, AutoSDLWindow &window) {
 #if 0
   auto tempSurf =
@@ -126,6 +121,12 @@ void newDoc(AppState& appState, GLState &glState, AutoSDLWindow &window) {
   std::cerr << "doc use count: " << doc.use_count() << "\n";
 
   doc->newPage(appState, glState);
+}
+
+void openDoc(AppState& appState, GLState &glState, AutoSDLWindow &window, std::string &fileName) {
+  auto docPtr = Doc::create(glm::mat4(1.0), fileName);
+  glState.docs.push_back(docPtr->getPtr());
+  newDoc(appState, glState, window);
 }
 
 inline GLenum getShaderType(const std::string &stage) {
@@ -374,6 +375,9 @@ void Renderer::operator()(AppState &appState, AutoSDLWindow &window) {
   GLState glState(std::make_shared<GL>());
 
   setupShaders(glState);
+    
+  glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+  SDL_GL_SwapWindow(window.window);
 
   while (appState.alive) {
     const auto start = std::chrono::steady_clock::now();
@@ -394,7 +398,7 @@ void Renderer::operator()(AppState &appState, AutoSDLWindow &window) {
 	auto *ptr = item.get();
         auto *docItem =
             dynamic_cast<RenderItemOpenDoc *>(ptr);
-        openDoc(glState, window, docItem->docFile);
+        openDoc(appState, glState, window, docItem->docFile);
         break;
       }
       default:
@@ -416,5 +420,11 @@ void Renderer::operator()(AppState &appState, AutoSDLWindow &window) {
 
     const auto end          = std::chrono::steady_clock::now();
     appState.frameTimeDelta = end - start;
+    
+    if (appState.profiling) {
+      appState.alive = false;
+      break;
+    }
+
   }
 }

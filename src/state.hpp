@@ -14,6 +14,7 @@ struct AppState {
   // set before the render thread starts, no need to synchronize
   std::string defaultFontName;
   std::atomic_bool alive{true};
+  bool profiling{};
   std::atomic<std::chrono::duration<float>> frameTimeDelta;
   TQueue<RenderItem> renderQueue;
   std::atomic_int mouseX;

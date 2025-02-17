@@ -3,7 +3,7 @@ CXX = clang++
 PKGS := pangomm-2.48 sdl2 SDL2_image gl glu glew
 TEST_PKGS := gmock_main
 VERS := $(shell git describe --tags --always --match "v[0-9]*.[0-9]*.[0-9]*" HEAD | tr -d v)
-#ifdef DEBUG
+ifdef DEBUG
 SANITIZE_ADDR_OPTS := -fsanitize=address,undefined,integer -fno-omit-frame-pointer -fsanitize-address-use-after-return=runtime \
 	         -fsanitize-address-use-after-scope 
 SANITIZE_THR_OPTS := -fsanitize=thread,undefined,integer -fno-omit-frame-pointer 
@@ -11,7 +11,9 @@ SANITIZE_MEM_OPTS := -fsanitize=memory,undefined,integer -fPIE -pie -fno-omit-fr
 		     -fsanitize-memory-track-origins
 DEBUG_OPTS := -g -gembed-source -fdebug-macro -O0
 PROFILE_OPTS := -fprofile-instr-generate -fcoverage-mapping 
-#endif
+else
+DEBUG_OPTS := -O3 -flto
+endif
 CXXFLAGS = $(DEBUG_OPTS) -std=c++23 -Ithirdparty/Choreograph/src -Ithirdparty/argparse/include -Wall -Wextra $(shell pkg-config --cflags $(PKGS))
 LDFLAGS = $(DEBUG_OPTS) -rtlib=compiler-rt 
 # XXX: work on this in a separate branch, get tests working again for now
@@ -89,6 +91,21 @@ profile: gleditor_test
 	llvm-cov show ./gleditor_test -instr-profile=$${data} \
 		-show-line-counts-or-regions -show-branches=count -show-expansions > gleditor_test.prof; \
 	llvm-cov export ./gleditor_test --format=lcov --instr-profile=$${data} > coverage.lcov; \
+	rm -f $${raw} $${data};
+
+profile/main: CXXFLAGS += $(PROFILE_OPTS)
+profile/main: LDFLAGS += $(PROFILE_OPTS)
+profile/main: gleditor
+	set -e; \
+	raw=gleditor.profraw; data=gleditor.profdata; \
+	trap "rm -f $${raw} $${data}" EXIT HUP KILL TERM; \
+	seq 1 1 | while read f; do \
+		echo "*\c"; LLVM_PROFILE_FILE=$${raw} ./gleditor --font "Serif 16" --profile --file kjv.txt 2>&1 >/dev/null; \
+	done; echo; \
+	llvm-profdata merge -sparse $${raw} -o $${data}; \
+	llvm-cov show ./gleditor -instr-profile=$${data} \
+		-show-line-counts-or-regions -show-branches=count -show-expansions > gleditor.prof; \
+	llvm-cov export ./gleditor --format=lcov --instr-profile=$${data} > coverage.lcov; \
 	rm -f $${raw} $${data};
 
 

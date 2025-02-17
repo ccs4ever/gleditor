@@ -11,6 +11,8 @@
 #include <GL/glew.h>
 #include <cstring>
 #include <format>
+#include <glm/common.hpp>
+#include <glm/ext/scalar_common.hpp>
 #include <locale>
 #include <pangomm/glyphstring.h>
 #include <pangomm/item.h>
@@ -75,7 +77,7 @@ Page::Page(std::shared_ptr<Doc> aDoc, AppState &appState, GLState &state,
   if ("" != doc->docFile) {
     std::string tmpStr;
     std::ifstream istr(doc->docFile, std::ios::ate);
-    const long size = istr.tellg();
+    auto size = std::min(ulong(1 << 16), ulong(istr.tellg()));
     tmpStr.resize(size + 1);
     istr.seekg(0);
     istr.read(tmpStr.data(), size);
@@ -88,11 +90,11 @@ Page::Page(std::shared_ptr<Doc> aDoc, AppState &appState, GLState &state,
   attrs.change(fontAttr);
   std::string loc;
   Glib::get_charset(loc);
-  std::cerr << "text: " << Glib::convert_with_fallback(text.raw(), loc, "UTF-8")
+  /*std::cerr << "text: " << Glib::convert_with_fallback(text.raw(), loc, "UTF-8")
             << " pango attrs: "
             << Glib::convert_with_fallback(attrs.to_string().raw(), loc,
                                            "UTF-8")
-            << " valid?: " << bool(attrs) << "\n";
+            << " valid?: " << bool(attrs) << "\n";*/
   auto lay = Pango::Layout::create(ctx);
   lay->set_font_description(fontDesc);
   lay->set_text(text);
@@ -101,26 +103,28 @@ Page::Page(std::shared_ptr<Doc> aDoc, AppState &appState, GLState &state,
   auto layerWH = Doc::VBORow::layerWidthHeight;
   auto xMargin = 2;
   auto yMargin = 2;
-  auto layW    = lay->get_pixel_logical_extents().get_width() + xMargin*2;
-  auto layH    = lay->get_pixel_logical_extents().get_height() + yMargin*2;
+  auto layW =
+      float(lay->get_logical_extents().get_width()) / PANGO_SCALE + float(xMargin) * 2;
+  auto layH = float(lay->get_logical_extents().get_height()) / PANGO_SCALE +
+              float(yMargin) * 2;
   std::vector<Doc::VBORow> vertexData = {
       // left-bottom,  white, black, tex: left-top, layer0
       // Doc::VBORow{{0.0, -2.0, 1.0}, color(255), color(0), {0.0, 1.0}, 0},
       // right-bottom, white, black, tex: right-top, layer0
       // Doc::VBORow{{2.0, -2.0, 1.0}, color(255), color(0), {1.0, 1.0}, 0},
       // left-top, white, black, tex: left-bottom, layer0
-      Doc::VBORow{{float(layW) / 32.0F, -float(layH) / 32.0F, 0},
+      Doc::VBORow{{layW / 32.0F, -layH / 48.0F, 0},
                   color(0),
                   color(255),
                   {0, 0},
                   {1, 1},
-                  layerWH(0, layW, layH)},
+                  layerWH(0, std::min(4095U, uint(layW)), std::min(4095U, uint(layH)))},
   };
   auto logAttrs = lay->get_log_attrs();
   auto iter     = lay->get_iter();
   std::cout << "char count: " << lay->get_character_count()
             << " attrs size: " << logAttrs.size() << "\n";
-  for (const auto &attr : logAttrs) {
+  /*for (const auto &attr : logAttrs) {
     std::cout << std::format(
         "Glyph: attr.backspace_deletes_character {}, attr.break_inserts_hyphen "
         "{}, attr.break_removes_preceding {}, attr.is_char_break {}, "
@@ -135,51 +139,69 @@ Page::Page(std::shared_ptr<Doc> aDoc, AppState &appState, GLState &state,
         attr.is_expandable_space, attr.is_sentence_boundary,
         attr.is_sentence_end, attr.is_sentence_start, attr.is_word_boundary,
         attr.is_word_end, attr.is_word_start, attr.is_white, attr.reserved);
-  }
+  }*/
   int lastIdx  = -1;
   bool plusOne = true;
-  auto xpen = float(xMargin);
-  auto ypen = float(iter.get_line_logical_extents().get_height())/PANGO_SCALE+float(yMargin);
-  std::cout << "ypen: " << ypen << "\n";
+  auto xpen    = float(xMargin);
+  auto ypenF   = [&iter, yMargin]() {
+    return (float(iter.get_baseline()) -
+            iter.get_line_logical_extents().get_ascent() / 2) /
+               PANGO_SCALE +
+           float(yMargin * 2);
+  };
+  auto ypen = ypenF();
   Pango::Rectangle rInk;
   Pango::Rectangle rLog;
   do {
-    int idx = lastIdx == iter.get_index() ? lay->get_text().size() : iter.get_index();
-    ypen = float(iter.get_baseline())/PANGO_SCALE+float(yMargin);
-    std::cout << lay->get_text().size() << " " << idx << (unsigned char)lay->get_text()[idx] << (lay->get_text()[idx] == '\n') << "\n";
+    int idx =
+        lastIdx == iter.get_index() ? lay->get_text().size() : iter.get_index();
+    /*std::cout << "xoff: " << iter.get_line_logical_extents().get_x()
+              << " yoff: " << iter.get_line_logical_extents().get_y()
+              << " base: " << iter.get_baseline() << " ypen: " << ypen
+              << " ypen calc: " << ypenF() << " log height: "
+              << float(iter.get_line_logical_extents().get_height()) /
+                     PANGO_SCALE
+              << "\n";
+    std::cout << lay->get_text().size() << " " << idx
+              << (unsigned char)lay->get_text()[idx]
+              << (lay->get_text()[idx] == '\n') << "\n";*/
     int len = idx - lastIdx;
-    if (-1 != lastIdx && idx != lay->get_text().size() && lay->get_text().substr(
-          lastIdx, len == 0 ? Glib::ustring::npos : len).rfind('\n') != Glib::ustring::npos) {
-      std::cout << "GOT newline\n";
+    if (-1 != lastIdx && idx != lay->get_text().size() &&
+        lay->get_text()
+                .substr(lastIdx, len == 0 ? Glib::ustring::npos : len)
+                .rfind('\n') != Glib::ustring::npos) {
+      //std::cout << "GOT newline\n";
       xpen = float(xMargin);
-      //idx += 1; // skip
+      ypen = ypenF() + float(lay->get_spacing()) / PANGO_SCALE;
+      // idx += 1; // skip
     } else if (-1 != lastIdx) {
       Glib::ustring tmp =
           text.substr(lastIdx, len == 0 ? Glib::ustring::npos : len);
-      std::cout << "iter index: " << idx - len << " char: " << tmp << " "
+      /*std::cout << "iter index: " << idx - len << " char: " << tmp << " "
                 << " cluster width: "
                 << iter.get_cluster_ink_extents().get_width() / PANGO_SCALE
-                << "\n";
+                << "\n";*/
       const auto [coords, extents] = state.glyphCache.put(tmp, font);
-      std::cerr << std::format("coords: pt: {}/{} box: {}/{}\n",
+      /*std::cerr << std::format("coords: pt: {}/{} box: {}/{}\n",
                                coords.topLeft.x, coords.topLeft.y,
                                coords.box.width, coords.box.height);
       std::cerr << std::format("extents: {}/{} {}\n", int(extents.width),
-                               int(extents.height), xpen);
+                               int(extents.height), xpen);*/
       auto vec = lwh(layerWH(0, int(extents.width), int(extents.height)));
       vec      = (doc->model * model * glm::vec4(vec, 0));
-      std::cerr << std::format("vec: {} {}/{}\n", vec.x, vec.y, vec.z);
+      /*std::cerr << std::format("vec: {} {}/{} {}\n", vec.x, vec.y, vec.z,
+                               -ypen / 30.0F);*/
       xpen += float(int(extents.width)) / 35.0F;
-      std::cout << "xpen sent: " << xpen << "\n";
+      //std::cout << "xpen sent: " << xpen << "\n";
       vertexData.push_back(
-          Doc::VBORow{{xpen, -ypen/30.0F, 0},
+          Doc::VBORow{{xpen, -ypen / 30.0F, 0},
                       color(0),
                       color(255),
                       {coords.topLeft.x, coords.topLeft.y},
                       {coords.box.width, coords.box.height},
                       layerWH(0, uint(extents.width), uint(extents.height))});
       xpen += float(int(extents.width)) / 35.0F;
-      std::cout << "xpen after: " << xpen << "\n";
+      //std::cout << "xpen after: " << xpen << "\n";
     }
     lastIdx = idx;
     iter.get_cluster_extents(rInk, rLog);
@@ -278,8 +300,8 @@ Doc::Doc(glm::mat4 model, std::string &fileName,
 Doc::Doc(glm::mat4 model, [[maybe_unused]] Doc::Private _priv)
     : Drawable(model),
       VAOSupports(VAOSupports::VAOBuffers(
-          VAOSupports::VAOBuffers::Vbo(sizeof(VBORow), 10000),
-          VAOSupports::VAOBuffers::Ibo(sizeof(unsigned int), 15000))) {}
+          VAOSupports::VAOBuffers::Vbo(sizeof(VBORow), 10000000),
+          VAOSupports::VAOBuffers::Ibo(sizeof(unsigned int), 1))) {}
 
 void Doc::newPage(AppState &appState, GLState &state) {
   AutoVAO binder(this);

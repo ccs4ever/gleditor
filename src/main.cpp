@@ -127,6 +127,7 @@ int handleArgs(AppState &state, int argc, char **argv) {
       .default_value("Monospace 16")
       .help("default font to use for display");
   parser.add_argument("-f", "--file").help("path to document to open");
+  parser.add_argument("--profile").help("open document specified by -f/--file then quit").flag();
 
   try {
 
@@ -136,6 +137,7 @@ int handleArgs(AppState &state, int argc, char **argv) {
     if (parser.present("--file")) {
       state.renderQueue.push(RenderItemOpenDoc(parser.get("--file")));
     }
+    state.profiling = parser["--profile"] == true;
 
   } catch (const std::exception &e) {
     std::cerr << e.what() << "\n";
