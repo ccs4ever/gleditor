@@ -10,7 +10,7 @@ SANITIZE_THR_OPTS := -fsanitize=thread,undefined,integer -fno-omit-frame-pointer
 SANITIZE_MEM_OPTS := -fsanitize=memory,undefined,integer -fPIE -pie -fno-omit-frame-pointer \
 		     -fsanitize-memory-track-origins
 DEBUG_OPTS := -g -gembed-source -fdebug-macro -O0
-PROFILE_OPTS := -fprofile-instr-generate -fcoverage-mapping 
+PROFILE_OPTS := -fprofile-instr-generate -fcoverage-mapping -fcoverage-mcdc
 else
 DEBUG_OPTS := -O3 -flto
 endif
@@ -103,9 +103,12 @@ profile/main: gleditor
 		echo "*\c"; LLVM_PROFILE_FILE=$${raw} ./gleditor --font "Serif 16" --profile --file kjv.txt 2>&1 >/dev/null; \
 	done; echo; \
 	llvm-profdata merge -sparse $${raw} -o $${data}; \
+	export DEBUGINFOD_URLS=https://debuginfod.ubuntu.com; \
 	llvm-cov show ./gleditor -instr-profile=$${data} \
-		-show-line-counts-or-regions -show-branches=count -show-expansions > gleditor.prof; \
-	llvm-cov export ./gleditor --format=lcov --instr-profile=$${data} > coverage.lcov; \
+	        -debuginfod \
+		-show-line-counts-or-regions -show-mcdc \
+		-show-branches=count -show-expansions > gleditor.prof; \
+	llvm-cov export ./gleditor --format=lcov -debuginfod -instr-profile=$${data} > coverage.lcov; \
 	rm -f $${raw} $${data};
 
 
