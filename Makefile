@@ -12,7 +12,7 @@ SANITIZE_MEM_OPTS := -fsanitize=memory,undefined,integer -fPIE -pie -fno-omit-fr
 DEBUG_OPTS := -g -gembed-source -fdebug-macro -O0
 PROFILE_OPTS := -fprofile-instr-generate -fcoverage-mapping -fcoverage-mcdc
 else
-DEBUG_OPTS := -O3 -flto
+DEBUG_OPTS := -O3 -flto -g
 endif
 CXXFLAGS = $(DEBUG_OPTS) -std=c++23 -Ithirdparty/Choreograph/src -Ithirdparty/argparse/include -Wall -Wextra $(shell pkg-config --cflags $(PKGS))
 LDFLAGS = $(DEBUG_OPTS) -rtlib=compiler-rt 
