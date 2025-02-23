@@ -82,7 +82,7 @@ auto GlyphCache::getBestPalette(const Rect &charBox) {
   return std::prev(palettes.end());
 }
 
-inline Glib::RefPtr<Pango::Layout> getLayout(const Glib::ustring &chr,
+inline Glib::RefPtr<Pango::Layout> getLayout(const std::string &chr,
                                              const FontPtr &font,
                                              Cairo::Surface::Format format) {
   auto tempSurf = Cairo::ImageSurface::create(format, 0, 0);
@@ -112,7 +112,7 @@ inline auto getFontOptions() {
   return opts;
 }
 
-GlyphCache::Sizes GlyphCache::addToCache(const Glib::ustring &chr,
+GlyphCache::Sizes GlyphCache::addToCache(const std::string &chr,
                                          const FontPtr &font) {
   auto format = Cairo::Surface::Format::ARGB32;
   auto layout = getLayout(chr, font, format);
@@ -152,7 +152,7 @@ GlyphCache::Sizes GlyphCache::addToCache(const Glib::ustring &chr,
   return coords;
 }
 
-GlyphCache::Sizes GlyphCache::put(const Glib::ustring &chr,
+GlyphCache::Sizes GlyphCache::put(const std::string_view &chr,
                                   const FontPtr &font) {
   if (auto pair = glyphs.find(chr); pair != glyphs.end()) {
     if (auto pair2 = pair->second.find(FontMapKeyAdapter{font});
@@ -160,5 +160,5 @@ GlyphCache::Sizes GlyphCache::put(const Glib::ustring &chr,
       return pair2->second;
     }
   }
-  return addToCache(chr, font);
+  return addToCache(std::string{chr}, font);
 }

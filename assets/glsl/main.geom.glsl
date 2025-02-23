@@ -25,7 +25,7 @@ vec3 c(uint i) {
 }
 
 vec3 lwh(uint i) {
-    return vec3(i >> uint(24), (i >> uint(12)) & uint(4095), i & uint(4095));
+    return vec3(i >> uint(28), (i >> uint(14)) & uint(16383), i & uint(16383));
 }
 
 vec4 f(vec4 fin) {

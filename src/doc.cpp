@@ -33,6 +33,7 @@
 #include <pangomm.h>
 #include <pangomm/cairofontmap.h>
 #include <string>
+#include <string_view>
 
 glm::vec3 lwh(uint i) {
   return {i >> uint(24), (i >> uint(12)) & uint(4095), i & uint(4095)};
@@ -41,6 +42,7 @@ glm::vec3 lwh(uint i) {
 Page::Page(std::shared_ptr<Doc> aDoc, AppState &appState, GLState &state,
            glm::mat4 &model)
     : Drawable(model), doc(std::move(aDoc)) {
+  static_assert(sizeof(Doc::VBORow) == 40);
   // interleaved data --
   // https://www.opengl.org/wiki/Vertex_Specification#Interleaved_arrays pos
   // (3-vector), fg color (3-vector), bg color (3-vector),
@@ -73,15 +75,13 @@ Page::Page(std::shared_ptr<Doc> aDoc, AppState &appState, GLState &state,
   auto ctx      = fonts->create_context();
   ctx->set_font_description(fontDesc);
   auto font = ctx->load_font(fontDesc);
-  Glib::ustring text;
+  std::string text;
   if ("" != doc->docFile) {
-    std::string tmpStr;
     std::ifstream istr(doc->docFile, std::ios::ate);
     auto size = std::min(ulong(1 << 16), ulong(istr.tellg()));
-    tmpStr.resize(size + 1);
+    text.resize(size + 1);
     istr.seekg(0);
-    istr.read(tmpStr.data(), size);
-    text = std::move(tmpStr);
+    istr.read(text.data(), size);
   } else {
     text = "The quick brown fox jumped over the lazy dog.";
   }
@@ -90,7 +90,8 @@ Page::Page(std::shared_ptr<Doc> aDoc, AppState &appState, GLState &state,
   attrs.change(fontAttr);
   std::string loc;
   Glib::get_charset(loc);
-  /*std::cerr << "text: " << Glib::convert_with_fallback(text.raw(), loc, "UTF-8")
+  /*std::cerr << "text: " << Glib::convert_with_fallback(text.raw(), loc,
+     "UTF-8")
             << " pango attrs: "
             << Glib::convert_with_fallback(attrs.to_string().raw(), loc,
                                            "UTF-8")
@@ -103,8 +104,8 @@ Page::Page(std::shared_ptr<Doc> aDoc, AppState &appState, GLState &state,
   auto layerWH = Doc::VBORow::layerWidthHeight;
   auto xMargin = 2;
   auto yMargin = 2;
-  auto layW =
-      float(lay->get_logical_extents().get_width()) / PANGO_SCALE + float(xMargin) * 2;
+  auto layW    = float(lay->get_logical_extents().get_width()) / PANGO_SCALE +
+              float(xMargin) * 2;
   auto layH = float(lay->get_logical_extents().get_height()) / PANGO_SCALE +
               float(yMargin) * 2;
   std::vector<Doc::VBORow> vertexData = {
@@ -118,32 +119,60 @@ Page::Page(std::shared_ptr<Doc> aDoc, AppState &appState, GLState &state,
                   color(255),
                   {0, 0},
                   {1, 1},
-                  layerWH(0, std::min(4095U, uint(layW)), std::min(4095U, uint(layH)))},
+                  layerWH(0, std::min(16383U, uint(layW)),
+                          std::min(16383U, uint(layH)))},
   };
+  vertexData.reserve(text.size() + 1);
   auto logAttrs = lay->get_log_attrs();
   auto iter     = lay->get_iter();
   std::cout << "char count: " << lay->get_character_count()
             << " attrs size: " << logAttrs.size() << "\n";
+  auto textIter = text.begin();
   /*for (const auto &attr : logAttrs) {
+    if (textIter == text.end()) break;
     std::cout << std::format(
-        "Glyph: attr.backspace_deletes_character {}, attr.break_inserts_hyphen "
+        "Glyph: {} attr.backspace_deletes_character {}, "
+        "attr.break_inserts_hyphen "
         "{}, attr.break_removes_preceding {}, attr.is_char_break {}, "
         "attr.is_line_break {}, attr.is_mandatory_break {}, "
         "attr.is_cursor_position {}, attr.is_expandable_space {}, "
         "attr.is_sentence_boundary {}, attr.is_sentence_end {}, "
         "attr.is_sentence_start {}, attr.is_word_boundary {}, attr.is_word_end "
         "{}, attr.is_word_start {}, attr.is_white {}, attr.reserved {}\n",
+        (char)*(textIter == text.begin() ? textIter : textIter++),
         attr.backspace_deletes_character, attr.break_inserts_hyphen,
         attr.break_removes_preceding, attr.is_char_break, attr.is_line_break,
         attr.is_mandatory_break, attr.is_cursor_position,
         attr.is_expandable_space, attr.is_sentence_boundary,
         attr.is_sentence_end, attr.is_sentence_start, attr.is_word_boundary,
         attr.is_word_end, attr.is_word_start, attr.is_white, attr.reserved);
+    if (textIter == text.begin()) textIter++;
   }*/
-  int lastIdx  = -1;
-  bool plusOne = true;
-  auto xpen    = float(xMargin);
-  auto ypenF   = [&iter, yMargin]() {
+  /*for (const auto &line : lay->get_const_lines()) {
+    const auto startIdx = line->get_start_index();
+    const auto endIdx   = startIdx + line->get_length();
+    const auto runs     = line->get_x_ranges(startIdx, endIdx);
+    for (const auto &run : runs) {
+      int runStartIdx;
+      int runStartTrailing;
+      int runEndIdx;
+      int runEndTrailing;
+      bool inOrOutStart =
+          line->x_to_index(run.first, runStartIdx, runStartTrailing);
+      bool inOrOutEnd = line->x_to_index(run.second, runEndIdx, runEndTrailing);
+      std::cout << " st: " << runStartIdx << " " << runStartTrailing
+                << " en: " << runEndIdx << " " << runEndTrailing << "\n";
+      std::cout << " NEW run: "
+                << text.substr(runStartIdx, runEndIdx - runStartIdx) << "\n";
+      int idx = runStartIdx;
+      int idxTr = runStartTrailing;
+
+    }
+  }*/
+  int lastIdx = 0;
+  int idx     = 0;
+  auto xpen   = float(xMargin);
+  auto ypenF  = [&iter, yMargin]() {
     return (float(iter.get_baseline()) -
             iter.get_line_logical_extents().get_ascent() / 2) /
                PANGO_SCALE +
@@ -152,9 +181,10 @@ Page::Page(std::shared_ptr<Doc> aDoc, AppState &appState, GLState &state,
   auto ypen = ypenF();
   Pango::Rectangle rInk;
   Pango::Rectangle rLog;
-  do {
-    int idx =
-        lastIdx == iter.get_index() ? lay->get_text().size() : iter.get_index();
+  auto size = text.size();
+  iter.next_cluster();
+  while (lastIdx != (idx = iter.get_index())) {
+    iter.get_cluster_extents(rInk, rLog);
     /*std::cout << "xoff: " << iter.get_line_logical_extents().get_x()
               << " yoff: " << iter.get_line_logical_extents().get_y()
               << " base: " << iter.get_baseline() << " ypen: " << ypen
@@ -162,51 +192,48 @@ Page::Page(std::shared_ptr<Doc> aDoc, AppState &appState, GLState &state,
               << float(iter.get_line_logical_extents().get_height()) /
                      PANGO_SCALE
               << "\n";
-    std::cout << lay->get_text().size() << " " << idx
-              << (unsigned char)lay->get_text()[idx]
-              << (lay->get_text()[idx] == '\n') << "\n";*/
-    int len = idx - lastIdx;
-    if (-1 != lastIdx && idx != lay->get_text().size() &&
-        lay->get_text()
-                .substr(lastIdx, len == 0 ? Glib::ustring::npos : len)
-                .rfind('\n') != Glib::ustring::npos) {
-      //std::cout << "GOT newline\n";
+    std::cout << size << " " << idx
+              << (unsigned char)text[idx]
+              << (text[idx] == '\n') << "\n";*/
+    // std::cout << std::format("lidx: {} idx: {}\n", lastIdx, idx);
+    bool hasNewLine = text.at(idx - 1) == '\n';
+    std::string_view tmp(text.cbegin() + lastIdx,
+                         text.cbegin() + (hasNewLine ? (idx - 1) : idx));
+    /*std::cout << "has nl: " << hasNewLine << " cluster: [" << tmp << "] "
+              << " end: [" << text.at(idx-1) << "]\n";*/
+    /*std::cout << "iter index: " << idx - len << " char: " << tmp << " "
+              << " cluster width: "
+              << iter.get_cluster_ink_extents().get_width() / PANGO_SCALE
+              << "\n";*/
+    const auto [coords, extents] = state.glyphCache.put(tmp, font);
+    /*std::cerr << std::format("coords: pt: {}/{} box: {}/{}\n",
+                             coords.topLeft.x, coords.topLeft.y,
+                             coords.box.width, coords.box.height);
+    std::cerr << std::format("extents: {}/{} {}\n", int(extents.width),
+                             int(extents.height), xpen);*/
+    /*auto vec = lwh(layerWH(0, int(extents.width), int(extents.height)));
+    vec      = (doc->model * model * glm::vec4(vec, 0));*/
+    /*std::cerr << std::format("vec: {} {}/{} {}\n", vec.x, vec.y, vec.z,
+                             -ypen / 30.0F);*/
+    xpen += float(int(extents.width)) / 35.0F;
+    // std::cout << "xpen sent: " << xpen << "\n";
+    vertexData.push_back(
+        Doc::VBORow{{xpen, -ypen / 30.0F, 0},
+                    color(0),
+                    color(255),
+                    {coords.topLeft.x, coords.topLeft.y},
+                    {coords.box.width, coords.box.height},
+                    layerWH(0, uint(extents.width), uint(extents.height))});
+    xpen += float(int(extents.width)) / 35.0F;
+    // std::cout << "xpen after: " << xpen << "\n";
+    if (hasNewLine) {
+      //std::cout << "GOT newline: [" << tmp << "]\n";
       xpen = float(xMargin);
       ypen = ypenF() + float(lay->get_spacing()) / PANGO_SCALE;
-      // idx += 1; // skip
-    } else if (-1 != lastIdx) {
-      Glib::ustring tmp =
-          text.substr(lastIdx, len == 0 ? Glib::ustring::npos : len);
-      /*std::cout << "iter index: " << idx - len << " char: " << tmp << " "
-                << " cluster width: "
-                << iter.get_cluster_ink_extents().get_width() / PANGO_SCALE
-                << "\n";*/
-      const auto [coords, extents] = state.glyphCache.put(tmp, font);
-      /*std::cerr << std::format("coords: pt: {}/{} box: {}/{}\n",
-                               coords.topLeft.x, coords.topLeft.y,
-                               coords.box.width, coords.box.height);
-      std::cerr << std::format("extents: {}/{} {}\n", int(extents.width),
-                               int(extents.height), xpen);*/
-      auto vec = lwh(layerWH(0, int(extents.width), int(extents.height)));
-      vec      = (doc->model * model * glm::vec4(vec, 0));
-      /*std::cerr << std::format("vec: {} {}/{} {}\n", vec.x, vec.y, vec.z,
-                               -ypen / 30.0F);*/
-      xpen += float(int(extents.width)) / 35.0F;
-      //std::cout << "xpen sent: " << xpen << "\n";
-      vertexData.push_back(
-          Doc::VBORow{{xpen, -ypen / 30.0F, 0},
-                      color(0),
-                      color(255),
-                      {coords.topLeft.x, coords.topLeft.y},
-                      {coords.box.width, coords.box.height},
-                      layerWH(0, uint(extents.width), uint(extents.height))});
-      xpen += float(int(extents.width)) / 35.0F;
-      //std::cout << "xpen after: " << xpen << "\n";
     }
     lastIdx = idx;
-    iter.get_cluster_extents(rInk, rLog);
     iter.next_cluster();
-  } while (lastIdx < lay->get_text().size());
+  }
 
 #if 0
   auto items = ctx->itemize(text, attrs);

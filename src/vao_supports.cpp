@@ -136,7 +136,9 @@ void VAOSupports::useProgram(const GLState &state,
           typ = GL_INT;
         } else if (loc.varType == "bool" || loc.varType.contains("bvec")) {
           typ = GL_BOOL;
-        } else {
+        //} else if ("position" == attr && loc.varType == "vec") {
+	//  typ = GL_HALF_FLOAT;
+	} else {
           typ = GL_FLOAT;
         }
         /*std::cerr << "setting up vertex attrib: " << int(loc)
@@ -144,12 +146,12 @@ void VAOSupports::useProgram(const GLState &state,
                   << " stride: " << bufferInfos.vbo.stride
                   << " offset: " << offset << " varType: " << loc.varType << "\n";*/
         glEnableVertexAttribArray(loc);
-        if (typ != GL_FLOAT) {
+        if (typ != GL_FLOAT && typ != GL_HALF_FLOAT) {
           glVertexAttribIPointer(loc, loc.size, typ, bufferInfos.vbo.stride,
                                  /* NOLINTNEXTLINE(performance-no-int-to-ptr) */
                                  reinterpret_cast<void *>(offset));
         } else {
-          glVertexAttribPointer(loc, loc.size, GL_FLOAT, GL_FALSE,
+          glVertexAttribPointer(loc, loc.size, typ, GL_FALSE,
                                 bufferInfos.vbo.stride,
                                 /* NOLINTNEXTLINE(performance-no-int-to-ptr) */
                                 reinterpret_cast<void *>(offset));

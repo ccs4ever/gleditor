@@ -14,6 +14,29 @@
 #include "glyphpalette.hpp"
 #include "types.hpp"
 
+
+template<typename ... Bases>
+struct overload : Bases ...
+{
+    using is_transparent = void;
+    using Bases::operator() ... ;
+};
+
+
+struct char_pointer_hash
+{
+    auto operator()( const char* ptr ) const noexcept
+    {
+        return std::hash<std::string_view>{}( ptr );
+    }
+};
+
+using transparent_string_hash = overload<
+    std::hash<std::string>,
+    std::hash<std::string_view>,
+    char_pointer_hash
+>;
+
 using FontPtr = Glib::RefPtr<Pango::Font>;
 
 class FontMapKeyAdapter {
@@ -50,7 +73,7 @@ public:
 
 template <> struct std::hash<FontMapKeyAdapter> {
   std::size_t operator()(const FontMapKeyAdapter &adapter) const {
-    return std::hash<Glib::ustring>{}(
+    return std::hash<std::string>{}(
         adapter.font()->describe_with_absolute_size().to_string().casefold());
   }
 };
@@ -67,14 +90,16 @@ public:
   GlyphCache(GlyphCache &oth)           = delete;
   void operator=(const GlyphCache &oth) = delete;
 
-  Sizes put(const Glib::ustring &chr, const FontPtr &font);
+  Sizes put(const std::string_view &chr, const FontPtr &font);
   void bindTexture() const { glBindTexture(GL_TEXTURE_2D_ARRAY, textArrId); }
   static void clearTexture() { glBindTexture(GL_TEXTURE_2D_ARRAY, 0); }
 
 private:
   std::vector<GlyphPalette> palettes;
-  std::unordered_map<Glib::ustring,
-                     std::unordered_map<FontMapKeyAdapter, Sizes>>
+  std::unordered_map<std::string,
+                     std::unordered_map<FontMapKeyAdapter, Sizes>,
+                     transparent_string_hash,
+                     std::equal_to<>>
       glyphs;
   std::shared_ptr<GL> gl;
   int size, maxLayers;
@@ -82,7 +107,7 @@ private:
 
   auto getBestPalette(const Rect &charBox);
   void initTextureArray();
-  Sizes addToCache(const Glib::ustring &chr, const FontPtr &font);
+  Sizes addToCache(const std::string &chr, const FontPtr &font);
 };
 
 #endif // GLEDITOR_GLYPH_CACHE_H
