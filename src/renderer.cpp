@@ -2,6 +2,7 @@
 
 #include "GL/glew.h"
 #include "GLState.hpp"
+#include "SDL_error.h"
 #include "SDLwrap.hpp"
 #include "doc.hpp"
 #include "pangomm/attributes.h"
@@ -58,10 +59,37 @@ void setupGL(AppState &state, const GLState &glState) {
 }
 
 void resize(AppState &appState) {
-  glViewport(0, 0, appState.view.screenWidth, appState.view.screenHeight);
+  auto *win = SDL_GL_GetCurrentWindow();
+  if (nullptr == win) {
+    throw std::logic_error{
+        std::format("gl_getcurrentwindow error: {}", SDL_GetError())};
+  }
+  int idx = SDL_GetWindowDisplayIndex(win);
+  if (idx < 0) {
+    throw std::logic_error{
+        std::format("getwindowdisplayindex error: {}", SDL_GetError())};
+  }
+  float ddpi, hdpi, vdpi;
+  if (0 != SDL_GetDisplayDPI(idx, &ddpi, &hdpi, &vdpi)) {
+    throw std::logic_error{
+        std::format("getdisplaydpi error: {}", SDL_GetError())};
+  }
+  std::cout << std::format("dpis: {:.02f} {:.02f} {:.02f}\n", ddpi, hdpi, vdpi);
+  int w, h;
+  SDL_GL_GetDrawableSize(SDL_GL_GetCurrentWindow(), &w, &h);
+  if (0 == w) {
+    std::cout << "width null\n";
+    w = appState.view.screenWidth;
+  }
+  if (0 == h) {
+    std::cout << "height null\n";
+    h = appState.view.screenHeight;
+  }
+  std::cout << "renderer resize: " << w << " " << h << "\n";
+  glViewport(0, 0, w, h);
 }
 
-void newDoc(AppState& appState, GLState &glState, AutoSDLWindow &window) {
+void newDoc(AppState &appState, GLState &glState, AutoSDLWindow &window) {
 #if 0
   auto tempSurf =
       Cairo::ImageSurface::create(Cairo::Surface::Format::ARGB32, 0, 0);
@@ -113,7 +141,7 @@ void newDoc(AppState& appState, GLState &glState, AutoSDLWindow &window) {
   layoutSurf->write_to_png("/tmp/page.png");
 #endif
   if (glState.docs.empty()) {
-    auto docPtr = Doc::create(glm::mat4(1.0));
+    auto docPtr = Doc::create(glm::mat4(1.0), appState);
     glState.docs.push_back(docPtr->getPtr());
   }
   std::shared_ptr<Doc> doc = glState.docs.back()->getPtr();
@@ -123,8 +151,9 @@ void newDoc(AppState& appState, GLState &glState, AutoSDLWindow &window) {
   doc->newPage(appState, glState);
 }
 
-void openDoc(AppState& appState, GLState &glState, AutoSDLWindow &window, std::string &fileName) {
-  auto docPtr = Doc::create(glm::mat4(1.0), fileName);
+void openDoc(AppState &appState, GLState &glState, AutoSDLWindow &window,
+             std::string &fileName) {
+  auto docPtr = Doc::create(glm::mat4(1.0), appState, fileName);
   glState.docs.push_back(docPtr->getPtr());
   newDoc(appState, glState, window);
 }
@@ -375,7 +404,8 @@ void Renderer::operator()(AppState &appState, AutoSDLWindow &window) {
   GLState glState(std::make_shared<GL>());
 
   setupShaders(glState);
-    
+
+  resize(appState);
   glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
   SDL_GL_SwapWindow(window.window);
 
@@ -395,9 +425,8 @@ void Renderer::operator()(AppState &appState, AutoSDLWindow &window) {
         resize(appState);
         break;
       case RenderItem::Type::OpenDoc: {
-	auto *ptr = item.get();
-        auto *docItem =
-            dynamic_cast<RenderItemOpenDoc *>(ptr);
+        auto *ptr     = item.get();
+        auto *docItem = dynamic_cast<RenderItemOpenDoc *>(ptr);
         openDoc(appState, glState, window, docItem->docFile);
         break;
       }
@@ -420,11 +449,10 @@ void Renderer::operator()(AppState &appState, AutoSDLWindow &window) {
 
     const auto end          = std::chrono::steady_clock::now();
     appState.frameTimeDelta = end - start;
-    
+
     if (appState.profiling) {
       appState.alive = false;
       break;
     }
-
   }
 }
