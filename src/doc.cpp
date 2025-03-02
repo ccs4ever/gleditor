@@ -4,8 +4,6 @@
 #include "glibmm/convert.h"
 #include "glibmm/unicode.h"
 #include "glibmm/ustring.h"
-#include <glibmm.h>
-#include <giomm.h>
 #include "pango/pango-types.h"
 #include "pango/pango-utils.h"
 #include "pango/pangocairo.h"
@@ -16,6 +14,8 @@
 #include <GL/glew.h>
 #include <cstring>
 #include <format>
+#include <giomm.h>
+#include <glibmm.h>
 #include <glm/common.hpp>
 #include <glm/ext/scalar_common.hpp>
 #include <iterator>
@@ -358,13 +358,14 @@ Doc::Doc(glm::mat4 model, AppState &appState, std::string &fileName,
   auto fonts    = Pango::CairoFontMap::get_default();
   auto ctx      = fonts->create_context();
   ctx->set_font_description(fontDesc);
-  auto font = ctx->load_font(fontDesc);
+  auto font           = ctx->load_font(fontDesc);
   std::string tmpText = Glib::file_get_contents(docFile);
   std::cout << std::format("bom: {:x} {:x} {:x}\n", tmpText[0], tmpText[1],
                            tmpText[2]);
-  if (tmpText.size() >= 3 && (unsigned char)tmpText[0] == 0xEF && (unsigned char)tmpText[1] == 0xBB &&
-      (unsigned char)tmpText[2] == 0xBF) {
-    std::cout << "found utf8 bom: " << tmpText.size() << " " << tmpText.capacity() << "\n";
+  if (tmpText.size() >= 3 && (unsigned char)tmpText[0] == 0xEF &&
+      (unsigned char)tmpText[1] == 0xBB && (unsigned char)tmpText[2] == 0xBF) {
+    std::cout << "found utf8 bom: " << tmpText.size() << " "
+              << tmpText.capacity() << "\n";
     text = Glib::ustring(tmpText.data() + 3, tmpText.data() + tmpText.size());
     auto iter = text.begin();
     std::cout << "validate: " << text.validate(iter) << " "
@@ -377,9 +378,9 @@ Doc::Doc(glm::mat4 model, AppState &appState, std::string &fileName,
                (int)tmpText[2] == 0x0 && (int)tmpText[3] == 0x0))) {
     throw std::logic_error("utf32 not supported yet");
   } else if (tmpText.size() >= 2 && ((/*utf16BE*/ (int)tmpText[0] == 0xFE &&
-                            (int)tmpText[1] == 0xFF) ||
-                           (/*utf16LE*/ (int)tmpText[0] == 0xFF &&
-                            (int)tmpText[1] == 0xFE))) {
+                                      (int)tmpText[1] == 0xFF) ||
+                                     (/*utf16LE*/ (int)tmpText[0] == 0xFF &&
+                                      (int)tmpText[1] == 0xFE))) {
     throw std::logic_error("utf16 not supported yet");
   } else {
     text = tmpText;
@@ -397,31 +398,47 @@ Doc::Doc(glm::mat4 model, AppState &appState, std::string &fileName,
   int paraEnd       = -1;
   int paraNextStart = -1;
   auto offset       = 0UL;
-  auto lay          = Pango::Layout::create(ctx);
-  lay->set_font_description(fontDesc);
-  lay->set_height(std::ceil(139.70 * 11 * PANGO_SCALE));
-  lay->set_width(std::ceil(139.70 * 8.5 * PANGO_SCALE));
-  lay->set_ellipsize(Pango::EllipsizeMode::END);
-  lay->set_text(text);
-  for (const auto &line : lay->get_const_lines()) {
-    std::cout << "line: " << line->get_start_index() << " "
-              << line->get_length() << " str: ("
-              << text.substr(line->get_start_index(), line->get_length())
-              << ") ";
-    auto xs = line->get_x_ranges(line->get_start_index(),
-                                 line->get_start_index() + line->get_length());
-    std::ranges::transform(
-        xs, std::ostream_iterator<std::string>(std::cout, ", "),
-        [&lay, &line](const auto &t) {
-          int idx, trail, idx2, trail2;
-          bool xin  = line->x_to_index(t.first, idx, trail);
-          bool xin2 = line->x_to_index(t.second - 1, idx2, trail2);
-          return std::format("{}*{}*{}/{}*{}*{}%{:.02f}@{:.02f}", idx, trail,
-                             xin, idx2, trail2, xin2,
-                             float(t.first) / PANGO_SCALE,
-                             float(t.second) / PANGO_SCALE);
-        });
-    std::cout << "\n";
+  while (0 != tmpText.size()) {
+    std::cout << "BEGIN layout creation: " << offset << " " << tmpText.size()
+              << "\n";
+    auto lay = Pango::Layout::create(ctx);
+    lay->set_font_description(fontDesc);
+    lay->set_single_paragraph_mode(false);
+    lay->set_height(std::ceil(139.70 * 11 * PANGO_SCALE));
+    lay->set_width(std::ceil(139.70 * 8.5 * PANGO_SCALE));
+    lay->set_ellipsize(Pango::EllipsizeMode::END);
+    if (0 != offset) {
+      std::cout << "erasing: " << tmpText.size() << " || " << tmpText.substr(0, offset) << "\n";
+      tmpText.erase(tmpText.begin(), tmpText.begin()+offset);
+      std::cout << "erased: " << tmpText.size() << "\n";
+    }
+    lay->set_text(tmpText);
+    offset = 0UL;
+    for (const auto &line : lay->get_const_lines()) {
+      std::cout << "line: " << line->get_start_index() << " "
+                << line->get_length() << " str: ("
+                << tmpText.substr(line->get_start_index(), line->get_length())
+                << ") ";
+      auto xs =
+          line->get_x_ranges(line->get_start_index(),
+                             line->get_start_index() + line->get_length());
+      std::ranges::transform(
+          xs, std::ostream_iterator<std::string>(std::cout, ", "),
+          [&lay, &line](const auto &t) {
+            int idx, trail, idx2, trail2;
+            bool xin  = line->x_to_index(t.first, idx, trail);
+            bool xin2 = line->x_to_index(t.second - 1, idx2, trail2);
+            return std::format("{}*{}*{}/{}*{}*{}%{:.02f}@{:.02f}", idx, trail,
+                               xin, idx2, trail2, xin2,
+                               float(t.first) / PANGO_SCALE,
+                               float(t.second) / PANGO_SCALE);
+          });
+      std::cout << "\n";
+      int len = line->get_length();
+      offset += len == 0 ? 1 : len;
+    }
+    std::cout << "END layout creation: " << offset << " " << tmpText.size()
+              << "\n";
   }
   /*while (offset != size) {
     pango_find_paragraph_boundary(text.c_str() + offset, -1, &paraEnd,
