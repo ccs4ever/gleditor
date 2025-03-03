@@ -398,8 +398,10 @@ Doc::Doc(glm::mat4 model, AppState &appState, std::string &fileName,
   int paraEnd       = -1;
   int paraNextStart = -1;
   auto offset       = 0UL;
-  while (0 != tmpText.size()) {
-    std::cout << "BEGIN layout creation: " << offset << " " << tmpText.size()
+  auto tSize = 0UL;
+  const char* txt = text.raw().c_str();
+  while (tSize < text.bytes()) {
+    std::cout << "BEGIN layout creation: " << offset << " " << text.bytes()
               << "\n";
     auto lay = Pango::Layout::create(ctx);
     lay->set_font_description(fontDesc);
@@ -407,17 +409,11 @@ Doc::Doc(glm::mat4 model, AppState &appState, std::string &fileName,
     lay->set_height(std::ceil(139.70 * 11 * PANGO_SCALE));
     lay->set_width(std::ceil(139.70 * 8.5 * PANGO_SCALE));
     lay->set_ellipsize(Pango::EllipsizeMode::END);
-    if (0 != offset) {
-      std::cout << "erasing: " << tmpText.size() << " || " << tmpText.substr(0, offset) << "\n";
-      tmpText.erase(tmpText.begin(), tmpText.begin()+offset);
-      std::cout << "erased: " << tmpText.size() << "\n";
-    }
-    lay->set_text(tmpText);
-    offset = 0UL;
+    pango_layout_set_text(lay->gobj(), txt + tSize, text.size()-tSize);
     for (const auto &line : lay->get_const_lines()) {
       std::cout << "line: " << line->get_start_index() << " "
                 << line->get_length() << " str: ("
-                << tmpText.substr(line->get_start_index(), line->get_length())
+                << std::string(txt + tSize + line->get_start_index(), txt + tSize + line->get_start_index() + line->get_length())
                 << ") ";
       auto xs =
           line->get_x_ranges(line->get_start_index(),
@@ -435,10 +431,12 @@ Doc::Doc(glm::mat4 model, AppState &appState, std::string &fileName,
           });
       std::cout << "\n";
       int len = line->get_length();
-      offset += len == 0 ? 1 : len;
+      offset = line->get_start_index() + (0 == len ? 1 : len);
     }
-    std::cout << "END layout creation: " << offset << " " << tmpText.size()
+    std::cout << "END layout creation: " << offset << " " << text.bytes()
               << "\n";
+    //txt += offset;
+    tSize += offset;
   }
   /*while (offset != size) {
     pango_find_paragraph_boundary(text.c_str() + offset, -1, &paraEnd,
