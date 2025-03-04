@@ -148,14 +148,12 @@ void newDoc(AppState &appState, GLState &glState, AutoSDLWindow &window) {
 
   std::cerr << "doc use count: " << doc.use_count() << "\n";
 
-  doc->newPage(appState, glState);
 }
 
 void openDoc(AppState &appState, GLState &glState, AutoSDLWindow &window,
              std::string &fileName) {
-  auto docPtr = Doc::create(glm::mat4(1.0), appState, fileName);
+  auto docPtr = Doc::create(glm::mat4(1.0), appState, glState, fileName);
   glState.docs.push_back(docPtr->getPtr());
-  newDoc(appState, glState, window);
 }
 
 inline GLenum getShaderType(const std::string &stage) {

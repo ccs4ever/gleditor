@@ -154,6 +154,7 @@ GlyphCache::Sizes GlyphCache::addToCache(const std::string &chr,
 
 GlyphCache::Sizes GlyphCache::put(const std::string_view &chr,
                                   const FontPtr &font) {
+  if (chr.size() > 3) { throw std::invalid_argument(std::format("GlyphCache: bad character: {}", chr)); }
   if (auto pair = glyphs.find(chr); pair != glyphs.end()) {
     if (auto pair2 = pair->second.find(FontMapKeyAdapter{font});
         pair2 != pair->second.end()) {

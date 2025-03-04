@@ -2,7 +2,9 @@
 #define GLEDITOR_DOC_H
 
 #include "drawable.hpp"
+#include "glibmm/refptr.h"
 #include "glibmm/ustring.h"
+#include "pangomm/layout.h"
 #include "state.hpp"
 #include "vao_supports.hpp"
 #include <memory>
@@ -17,10 +19,11 @@ private:
   VAOSupports::Handle pageBackingHandle;
   std::vector<VAOSupports::Handle> glyphs;
   unsigned int tex{};
+  Glib::RefPtr<Pango::Layout> layout;
 
 public:
   Page(std::shared_ptr<Doc> doc, AppState &appState, GLState &state,
-       glm::mat4 &model);
+       glm::mat4 &model, Glib::RefPtr<Pango::Layout>& layout);
   void draw(const GLState &state, const glm::mat4 &docModel);
   ~Page() override = default;
 };
@@ -65,17 +68,20 @@ private:
 
 public:
   Doc(glm::mat4 model, AppState& appState, Private);
-  Doc(glm::mat4 model, AppState& appState, std::string &fileName, Private);
+  Doc(glm::mat4 model, AppState& appState, GLState &glState, std::string &fileName, Private);
   ~Doc() override = default;
+  void makePages(AppState &appState, GLState &glState);
   static std::shared_ptr<Doc> create(glm::mat4 model, AppState& appState) {
     return std::make_shared<Doc>(model, appState, Private());
   }
-  static std::shared_ptr<Doc> create(glm::mat4 model, AppState& appState, std::string &fileName) {
-    return std::make_shared<Doc>(model, appState, fileName, Private());
+  static std::shared_ptr<Doc> create(glm::mat4 model, AppState& appState, GLState &glState, std::string &fileName) {
+    auto ret = std::make_shared<Doc>(model, appState, glState, fileName, Private());
+    ret->makePages(appState, glState);
+    return ret;
   }
   std::shared_ptr<Doc> getPtr() { return shared_from_this(); }
   void draw(const GLState &state);
-  void newPage(AppState &appState, GLState &state);
+  void newPage(AppState &appState, GLState &state, Glib::RefPtr<Pango::Layout>& layout);
 
   friend class Page;
 };

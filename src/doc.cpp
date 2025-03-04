@@ -1,7 +1,9 @@
 #include "doc.hpp"
 #include "GLState.hpp"
+#include "SDL_video.h"
 #include "cairomm/surface.h"
 #include "glibmm/convert.h"
+#include "glibmm/refptr.h"
 #include "glibmm/unicode.h"
 #include "glibmm/ustring.h"
 #include "pango/pango-types.h"
@@ -20,6 +22,7 @@
 #include <glm/ext/scalar_common.hpp>
 #include <iterator>
 #include <locale>
+#include <ostream>
 #include <pangomm/glyphstring.h>
 #include <pangomm/item.h>
 
@@ -46,9 +49,13 @@ glm::vec3 lwh(uint i) {
 }
 
 Page::Page(std::shared_ptr<Doc> aDoc, AppState &appState, GLState &state,
-           glm::mat4 &model)
+           glm::mat4 &model, Glib::RefPtr<Pango::Layout> &layout)
     : Drawable(model), doc(std::move(aDoc)) {
   static_assert(sizeof(Doc::VBORow) == 40);
+  this->layout      = layout;
+  const auto &line  = layout->get_const_line(layout->get_line_count() - 1);
+  int len           = line->get_length();
+  const int charCnt = line->get_start_index() + (0 == len ? 1 : len);
   // interleaved data --
   // https://www.opengl.org/wiki/Vertex_Specification#Interleaved_arrays pos
   // (3-vector), fg color (3-vector), bg color (3-vector),
@@ -76,44 +83,14 @@ Page::Page(std::shared_ptr<Doc> aDoc, AppState &appState, GLState &state,
       3, 2, 1, // (rt, lt, rb) ccw
   };
   */
-  auto fontDesc = Pango::FontDescription(appState.defaultFontName);
-  auto fonts    = Pango::CairoFontMap::get_default();
-  auto ctx      = fonts->create_context();
-  ctx->set_font_description(fontDesc);
-  auto font = ctx->load_font(fontDesc);
-  std::string text;
-  if ("" != doc->docFile) {
-    std::ifstream istr(doc->docFile, std::ios::ate);
-    // auto size = std::min(ulong(1 << 16), ulong(istr.tellg()));
-    auto size = ulong(istr.tellg());
-    text.resize(size + 1);
-    istr.seekg(0);
-    istr.read(text.data(), size);
-  } else {
-    text = "The quick brown fox jumped over the lazy dog.";
-  }
-  Pango::AttrList attrs;
-  auto fontAttr = Pango::Attribute::create_attr_font_desc(fontDesc);
-  attrs.change(fontAttr);
-  std::string loc;
-  Glib::get_charset(loc);
-  /*std::cerr << "text: " << Glib::convert_with_fallback(text.raw(), loc,
-     "UTF-8")
-            << " pango attrs: "
-            << Glib::convert_with_fallback(attrs.to_string().raw(), loc,
-                                           "UTF-8")
-            << " valid?: " << bool(attrs) << "\n";*/
-  auto lay = Pango::Layout::create(ctx);
-  lay->set_font_description(fontDesc);
-  lay->set_text(text);
   auto color   = Doc::VBORow::color;
   auto color3  = Doc::VBORow::color3;
   auto layerWH = Doc::VBORow::layerWidthHeight;
   auto xMargin = 2;
   auto yMargin = 2;
-  auto layW    = float(lay->get_logical_extents().get_width()) / PANGO_SCALE +
+  auto layW = float(layout->get_logical_extents().get_width()) / PANGO_SCALE +
               float(xMargin) * 2;
-  auto layH = float(lay->get_logical_extents().get_height()) / PANGO_SCALE +
+  auto layH = float(layout->get_logical_extents().get_height()) / PANGO_SCALE +
               float(yMargin) * 2;
   std::vector<Doc::VBORow> vertexData = {
       // left-bottom,  white, black, tex: left-top, layer0
@@ -129,12 +106,12 @@ Page::Page(std::shared_ptr<Doc> aDoc, AppState &appState, GLState &state,
                   layerWH(0, std::min(16383U, uint(layW)),
                           std::min(16383U, uint(layH)))},
   };
-  auto vertMax = std::min(text.size(), 100000UL);
+  auto vertMax = std::min(charCnt, 100000);
   vertexData.reserve(vertMax);
-  auto logAttrs = lay->get_log_attrs();
-  auto iter     = lay->get_iter();
-  std::cout << "char count: " << lay->get_character_count()
-            << " attrs size: " << logAttrs.size() << "\n";
+  auto logAttrs = layout->get_log_attrs();
+  auto iter     = layout->get_iter();
+  /*std::cout << "char count: " << charCnt << " attrs size: " << logAttrs.size()
+            << "\n";*/
   // auto textIter = text.begin();
   /*for (const auto &attr : logAttrs) {
     if (textIter == text.end()) break;
@@ -156,7 +133,7 @@ Page::Page(std::shared_ptr<Doc> aDoc, AppState &appState, GLState &state,
         attr.is_word_end, attr.is_word_start, attr.is_white, attr.reserved);
     if (textIter == text.begin()) textIter++;
   }*/
-  /*for (const auto &line : lay->get_const_lines()) {
+  /*for (const auto &line : layout->get_const_lines()) {
     const auto startIdx = line->get_start_index();
     const auto endIdx   = startIdx + line->get_length();
     const auto runs     = line->get_x_ranges(startIdx, endIdx);
@@ -191,8 +168,9 @@ Page::Page(std::shared_ptr<Doc> aDoc, AppState &appState, GLState &state,
   Pango::Rectangle rInk;
   Pango::Rectangle rLog;
   auto vertIter     = vertexData.begin() + 1;
-  const int charCnt = lay->get_character_count();
   pageBackingHandle = doc->reservePoints(charCnt + charCnt / 4);
+  auto text         = layout->get_text().raw();
+  auto font = layout->get_context()->load_font(layout->get_font_description());
   iter.next_cluster();
   while (lastIdx != (idx = iter.get_index())) {
     iter.get_cluster_extents(rInk, rLog);
@@ -206,10 +184,18 @@ Page::Page(std::shared_ptr<Doc> aDoc, AppState &appState, GLState &state,
     std::cout << size << " " << idx
               << (unsigned char)text[idx]
               << (text[idx] == '\n') << "\n";*/
-    // std::cout << std::format("lidx: {} idx: {}\n", lastIdx, idx);
     bool hasNewLine = text.at(idx - 1) == '\n';
-    std::string_view tmp(text.cbegin() + lastIdx,
-                         text.cbegin() + (hasNewLine ? (idx - 1) : idx));
+    std::string_view tmp(
+        text.cbegin() + lastIdx,
+        text.cbegin() + ((idx-lastIdx) > 3 ? (lastIdx + 3)
+                                             : (hasNewLine ? (idx - 1) : idx)));
+    if (idx-lastIdx > 3) {
+    /*std::string_view tmp2(
+        text.cbegin() + lastIdx,
+        text.cbegin() + (hasNewLine ? (idx - 1) : idx));
+      std::cout << std::format("lidx: {} idx: {} sz: {} clust: {}\n", lastIdx,
+                               idx, idx - lastIdx, tmp2);*/
+    }
     /*std::cout << "has nl: " << hasNewLine << " cluster: [" << tmp << "] "
               << " end: [" << text.at(idx-1) << "]\n";*/
     /*std::cout << "iter index: " << idx - len << " char: " << tmp << " "
@@ -240,14 +226,14 @@ Page::Page(std::shared_ptr<Doc> aDoc, AppState &appState, GLState &state,
     if (hasNewLine) {
       // std::cout << "GOT newline: [" << tmp << "]\n";
       xpen = float(xMargin);
-      ypen = ypenF() + float(lay->get_spacing()) / PANGO_SCALE;
+      ypen = ypenF() + float(layout->get_spacing()) / PANGO_SCALE;
     }
     // std::cout << "distance: " << std::distance(vertexData.begin(), vertIter)
     //           << "\n";
     if (std::distance(vertexData.begin(), vertIter) == vertMax) {
-      std::cout << "OUT calling glBufferSubData: " << vertMax
+      /*std::cout << "OUT calling glBufferSubData: " << vertMax
                 << " dist: " << std::distance(vertexData.begin(), vertIter)
-                << " pos: " << vboPos << "\n";
+                << " pos: " << vboPos << "\n";*/
       vertIter = vertexData.begin();
       glBufferSubData(GL_ARRAY_BUFFER,
                       pageBackingHandle.vbo.offset +
@@ -259,8 +245,8 @@ Page::Page(std::shared_ptr<Doc> aDoc, AppState &appState, GLState &state,
   }
   if (vertexData.cbegin() != vertIter) {
     const auto dist = std::distance(vertexData.begin(), vertIter);
-    std::cout << "OUT calling glBufferSubData: " << vertMax << " dist: " << dist
-              << " pos: " << vboPos << "\n";
+    /*std::cout << "remain OUT calling glBufferSubData: " << vertMax
+              << " dist: " << dist << " pos: " << vboPos << "\n";*/
     vertIter = vertexData.begin();
     glBufferSubData(GL_ARRAY_BUFFER,
                     pageBackingHandle.vbo.offset +
@@ -301,11 +287,11 @@ Page::Page(std::shared_ptr<Doc> aDoc, AppState &appState, GLState &state,
                GL_UNSIGNED_BYTE, arr.data());
   glBindTexture(GL_TEXTURE_2D_ARRAY, 0);
 #endif
-  std::cerr << "page backing handle: vbo: " << pageBackingHandle.vbo.offset
+  /*std::cerr << "page backing handle: vbo: " << pageBackingHandle.vbo.offset
             << " " << pageBackingHandle.vbo.size
             << " ibo: " << pageBackingHandle.ibo.offset << " "
             << pageBackingHandle.ibo.size << "\n"
-            << std::flush;
+            << std::flush;*/
   // glBufferSubData(GL_ARRAY_BUFFER, pageBackingHandle.vbo.offset,
   //                 pageBackingHandle.vbo.size, vertexData.data());
   //  glBufferSubData(GL_ELEMENT_ARRAY_BUFFER, pageBackingHandle.ibo.offset,
@@ -350,10 +336,13 @@ void Doc::draw(const GLState &state) {
   }
 }
 
-Doc::Doc(glm::mat4 model, AppState &appState, std::string &fileName,
-         [[maybe_unused]] Doc::Private _priv)
+Doc::Doc(glm::mat4 model, AppState &appState, GLState &glState,
+         std::string &fileName, [[maybe_unused]] Doc::Private _priv)
     : Doc(model, appState, _priv) {
-  docFile       = fileName;
+  docFile = fileName;
+}
+
+void Doc::makePages(AppState &appState, GLState &glState) {
   auto fontDesc = Pango::FontDescription(appState.defaultFontName);
   auto fonts    = Pango::CairoFontMap::get_default();
   auto ctx      = fonts->create_context();
@@ -395,30 +384,38 @@ Doc::Doc(glm::mat4 model, AppState &appState, std::string &fileName,
   attrs.change(fontAttr);
   std::string loc;
   Glib::get_charset(loc);
-  int paraEnd       = -1;
-  int paraNextStart = -1;
-  auto offset       = 0UL;
-  auto tSize = 0UL;
-  const char* txt = text.raw().c_str();
+  auto tSize      = 0UL;
+  const char *txt = text.raw().c_str();
   while (tSize < text.bytes()) {
-    std::cout << "BEGIN layout creation: " << offset << " " << text.bytes()
-              << "\n";
+    /*std::cout << "BEGIN layout creation: " << offset << " " << text.bytes()
+              << "\n";*/
     auto lay = Pango::Layout::create(ctx);
     lay->set_font_description(fontDesc);
     lay->set_single_paragraph_mode(false);
     lay->set_height(std::ceil(139.70 * 11 * PANGO_SCALE));
     lay->set_width(std::ceil(139.70 * 8.5 * PANGO_SCALE));
     lay->set_ellipsize(Pango::EllipsizeMode::END);
-    pango_layout_set_text(lay->gobj(), txt + tSize, text.size()-tSize);
+    pango_layout_set_text(lay->gobj(), txt + tSize, text.bytes() - tSize);
+    const auto &line = lay->get_const_line(lay->get_line_count() - 1);
+    /*std::cout << "START: " << tSize << " " << line->get_start_index() << " "
+              << line->get_length() << "\n"
+              << std::flush;*/
+    newPage(appState, glState, lay);
+    draw(glState);
+    SDL_GL_SwapWindow(SDL_GL_GetCurrentWindow());
+    int len = line->get_length();
+    tSize += line->get_start_index() + (0 == len ? 1 : len);
+  }
+#if 0
     for (const auto &line : lay->get_const_lines()) {
-      std::cout << "line: " << line->get_start_index() << " "
+      /*std::cout << "line: " << line->get_start_index() << " "
                 << line->get_length() << " str: ("
                 << std::string(txt + tSize + line->get_start_index(), txt + tSize + line->get_start_index() + line->get_length())
-                << ") ";
+                << ") ";*/
       auto xs =
           line->get_x_ranges(line->get_start_index(),
                              line->get_start_index() + line->get_length());
-      std::ranges::transform(
+      /*std::ranges::transform(
           xs, std::ostream_iterator<std::string>(std::cout, ", "),
           [&lay, &line](const auto &t) {
             int idx, trail, idx2, trail2;
@@ -429,12 +426,12 @@ Doc::Doc(glm::mat4 model, AppState &appState, std::string &fileName,
                                float(t.first) / PANGO_SCALE,
                                float(t.second) / PANGO_SCALE);
           });
-      std::cout << "\n";
+      std::cout << "\n";*/
       int len = line->get_length();
       offset = line->get_start_index() + (0 == len ? 1 : len);
     }
-    std::cout << "END layout creation: " << offset << " " << text.bytes()
-              << "\n";
+    /*std::cout << "END layout creation: " << offset << " " << text.bytes()
+              << "\n";*/
     //txt += offset;
     tSize += offset;
   }
@@ -448,6 +445,7 @@ Doc::Doc(glm::mat4 model, AppState &appState, std::string &fileName,
     offset += paraNextStart;
   }*/
   std::exit(1);
+#endif
   /*std::cerr << "text: " << Glib::convert_with_fallback(text.raw(), loc,
      "UTF-8")
             << " pango attrs: "
@@ -463,16 +461,16 @@ Doc::Doc(glm::mat4 model, [[maybe_unused]] AppState &appState,
           VAOSupports::VAOBuffers::Vbo(sizeof(VBORow), 10000000),
           VAOSupports::VAOBuffers::Ibo(sizeof(unsigned int), 1))) {}
 
-void Doc::newPage(AppState &appState, GLState &state) {
+void Doc::newPage(AppState &appState, GLState &state,
+                  Glib::RefPtr<Pango::Layout> &layout) {
   AutoVAO binder(this);
 
   AutoProgram progBinder(this, state, "main");
 
   const auto numPages = pages.size();
   glm::mat4 trans     = glm::translate(
-      glm::mat4(1.0),
-      glm::vec3(0, -5.0F / 16.0F * static_cast<float>(numPages), 0.0F));
+      glm::mat4(1.0), glm::vec3(0, -100 * static_cast<float>(numPages), 0.0F));
   // trans = glm::rotate(trans, glm::radians(20.0F*numPages), glm::vec3(0.5, 1,
   // 0)); trans = glm::scale(trans, glm::vec3(1+numPages, 1+numPages, 1));
-  pages.emplace_back(getPtr(), appState, state, trans);
+  pages.emplace_back(getPtr(), appState, state, trans, layout);
 }
