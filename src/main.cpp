@@ -1,6 +1,5 @@
 
 
-#include <langinfo.h>
 #include "GL/glew.h"
 #include "SDL.h"
 #include "SDL_events.h"
@@ -11,7 +10,9 @@
 #include <glm/geometric.hpp>
 #include <glm/gtx/string_cast.hpp>
 #include <iostream>
+#include <langinfo.h>
 #include <locale>
+#include <memory>
 #include <mutex>
 #include <pangomm/init.h>
 #include <thread>
@@ -19,11 +20,10 @@
 #include "SDL_image.h"
 #include "SDLwrap.hpp"
 #include "glibmm/init.h"
-#include "glibmm/ustring.h"
-#include "glibmm/convert.h"
 #include "renderer.hpp"
 
-void handleWindowChange(SDL_Event &evt, AppState &state, SDL_Window *win) {
+void handleWindowChange(SDL_Event &evt, const AppStateRef &state,
+                        SDL_Window *win) {
   switch (evt.window.event) {
   case SDL_WINDOWEVENT_RESIZED:
   case SDL_WINDOWEVENT_SIZE_CHANGED:
@@ -31,9 +31,9 @@ void handleWindowChange(SDL_Event &evt, AppState &state, SDL_Window *win) {
     const auto width  = evt.window.data1;
     const auto height = evt.window.data2;
     std::cout << "window size changed(w/h): " << width << "/" << height << "\n";
-    state.view.screenWidth  = width;
-    state.view.screenHeight = height;
-    state.renderQueue.push(RenderItemResize(width, height));
+    state->view.screenWidth  = width;
+    state->view.screenHeight = height;
+    state->renderQueue.push(RenderItemResize(width, height));
     break;
   }
   default:
@@ -41,60 +41,65 @@ void handleWindowChange(SDL_Event &evt, AppState &state, SDL_Window *win) {
   }
 }
 
-void handleMouseMove(SDL_Event &evt, AppState &state) {
-  state.mouseX = evt.motion.x;
-  state.mouseY = evt.motion.y;
+void handleMouseMove(SDL_Event &evt, const AppStateRef &state) {
+  state->mouseX = evt.motion.x;
+  state->mouseY = evt.motion.y;
 }
 
-void handleKeyPress(SDL_Event &evt, AppState &state) {
-  std::lock_guard locker(state.view);
-  const float speed = state.view.speed * state.frameTimeDelta.load().count();
-  std::cout << "camera pos before: " << glm::to_string(state.view.pos)
+void handleKeyPress(SDL_Event &evt, const AppStateRef &state) {
+  std::lock_guard locker(state->view);
+  float speed = 1;//state->view.speed * state->frameTimeDelta.load().count();
+  if (0 == speed) {
+    speed = 1;
+  }
+  std::cout << "camera pos before: " << glm::to_string(state->view.pos)
             << " speed: " << speed << "\n";
   switch (evt.key.keysym.scancode) {
   case SDL_SCANCODE_Q: {
-    state.alive = false;
+    state->alive = false;
     break;
   }
   case SDL_SCANCODE_N: {
-    state.renderQueue.push(RenderItemNewDoc());
+    state->renderQueue.push(RenderItemNewDoc());
     break;
   }
   case SDL_SCANCODE_R: {
-    state.view.resetPos();
+    state->view.resetPos();
     break;
   }
   case SDL_SCANCODE_E: {
-    state.view.pos -= glm::normalize(glm::cross(state.view.front,
-                                                glm::vec3(1.0F, 0.0F, 0.0F))) *
-                      speed;
+    state->view.pos -= glm::normalize(glm::cross(state->view.front,
+                                                 glm::vec3(1.0F, 0.0F, 0.0F))) *
+                       speed;
   } break;
   case SDL_SCANCODE_D: {
     if (0 != (evt.key.keysym.mod & KMOD_SHIFT)) {
-      state.view.pos += (speed * state.view.front);
+      state->view.pos += (speed * state->view.front);
     } else {
-      state.view.pos -= (speed * state.view.front);
+      state->view.pos -= (speed * state->view.front);
     }
     break;
   }
   case SDL_SCANCODE_C: {
-    state.view.pos += glm::normalize(glm::cross(state.view.front,
-                                                glm::vec3(1.0F, 0.0F, 0.0F))) *
-                      speed;
+    state->view.pos += glm::normalize(glm::cross(state->view.front,
+                                                 glm::vec3(1.0F, 0.0F, 0.0F))) *
+                       speed;
     break;
   }
   case SDL_SCANCODE_S: {
-    state.view.pos -=
-        glm::normalize(glm::cross(state.view.front, state.view.upward)) * speed;
+    state->view.pos -=
+        glm::normalize(glm::cross(state->view.front, state->view.upward)) *
+        speed;
     break;
   }
   case SDL_SCANCODE_F: {
-    state.view.pos +=
-        glm::normalize(glm::cross(state.view.front, state.view.upward)) * speed;
+    state->view.pos +=
+        glm::normalize(glm::cross(state->view.front, state->view.upward)) *
+        speed;
     break;
   }
   case SDL_SCANCODE_G: {
-    auto fov = state.view.fov;
+    auto fov = state->view.fov;
     if (0 != (evt.key.keysym.mod & KMOD_SHIFT)) {
       fov -= 1;
       if (fov < 1) {
@@ -106,17 +111,17 @@ void handleKeyPress(SDL_Event &evt, AppState &state) {
         fov = 360;
       }
     }
-    state.view.fov = fov;
+    state->view.fov = fov;
     break;
   }
   default: {
     break;
   }
   }
-  std::cout << "camera pos after: " << glm::to_string(state.view.pos) << "\n";
+  std::cout << "camera pos after: " << glm::to_string(state->view.pos) << "\n";
 }
 
-int handleArgs(AppState &state, int argc, char **argv) {
+int handleArgs(const AppStateRef &state, int argc, char **argv) {
 
 #ifndef GLEDITOR_VERSION
 #error GLEDITOR_VERSION must be defined
@@ -127,17 +132,19 @@ int handleArgs(AppState &state, int argc, char **argv) {
       .default_value("Monospace 16")
       .help("default font to use for display");
   parser.add_argument("-f", "--file").help("path to document to open");
-  parser.add_argument("--profile").help("open document specified by -f/--file then quit").flag();
+  parser.add_argument("--profile")
+      .help("open document specified by -f/--file then quit")
+      .flag();
 
   try {
 
     parser.parse_args(argc, argv);
 
-    state.defaultFontName = parser.get("--font");
+    state->defaultFontName = parser.get("--font");
     if (parser.present("--file")) {
-      state.renderQueue.push(RenderItemOpenDoc(parser.get("--file")));
+      state->renderQueue.push(RenderItemOpenDoc(parser.get("--file")));
     }
-    state.profiling = parser["--profile"] == true;
+    state->profiling = parser["--profile"] == true;
 
   } catch (const std::exception &e) {
     std::cerr << e.what() << "\n";
@@ -150,13 +157,13 @@ int handleArgs(AppState &state, int argc, char **argv) {
 int main(int argc, char **argv) {
 
   // "" signals that LC_ALL should be set from the environment
-  std::setlocale(LC_ALL, ""); // for C and C++ where synced with stdio
+  std::setlocale(LC_ALL, "");           // for C and C++ where synced with stdio
   std::locale::global(std::locale("")); // for C++
   std::cerr.imbue(std::locale());
   std::cin.imbue(std::locale());
   std::cout.imbue(std::locale());
 
-  AppState state;
+  auto state = std::make_shared<AppState>();
 
   if (0 != handleArgs(state, argc, argv)) {
     return 1;
@@ -173,20 +180,20 @@ int main(int argc, char **argv) {
     AutoSDLSurface icon("logo.png");
 
     AutoSDLWindow window("GL Editor", SDL_WINDOWPOS_UNDEFINED,
-                         SDL_WINDOWPOS_UNDEFINED, state.view.screenWidth,
-                         state.view.screenHeight, SDL_WINDOW_OPENGL,
+                         SDL_WINDOWPOS_UNDEFINED, state->view.screenWidth,
+                         state->view.screenHeight, SDL_WINDOW_OPENGL,
                          icon.surface);
 
-    Renderer rend;
+    RendererRef rend = Renderer::create(state);
 
-    std::jthread renderer(rend, std::ref(state), std::ref(window));
+    std::jthread renderer(std::ref(*rend.get()), std::ref(window));
 
-    while (state.alive) {
+    while (state->alive) {
       SDL_Event evt;
-      while (state.alive && bool(SDL_PollEvent(&evt))) {
+      while (state->alive && bool(SDL_PollEvent(&evt))) {
         switch (evt.type) {
         case SDL_QUIT: {
-          state.alive = false;
+          state->alive = false;
         }
         case SDL_KEYDOWN: {
           handleKeyPress(evt, state);

@@ -22,8 +22,8 @@ private:
   Glib::RefPtr<Pango::Layout> layout;
 
 public:
-  Page(std::shared_ptr<Doc> doc, AppState &appState, GLState &state,
-       glm::mat4 &model, Glib::RefPtr<Pango::Layout>& layout);
+  Page(std::shared_ptr<Doc> doc, GLState &state, glm::mat4 &model,
+       Glib::RefPtr<Pango::Layout> layout);
   void draw(const GLState &state, const glm::mat4 &docModel);
   ~Page() override = default;
 };
@@ -67,21 +67,21 @@ private:
   };
 
 public:
-  Doc(glm::mat4 model, AppState& appState, Private);
-  Doc(glm::mat4 model, AppState& appState, GLState &glState, std::string &fileName, Private);
-  ~Doc() override = default;
-  void makePages(AppState &appState, GLState &glState);
-  static std::shared_ptr<Doc> create(glm::mat4 model, AppState& appState) {
-    return std::make_shared<Doc>(model, appState, Private());
+  static std::shared_ptr<Doc> create(RendererRef renderer, glm::mat4 model) {
+    return std::make_shared<Doc>(renderer, model, Private());
   }
-  static std::shared_ptr<Doc> create(glm::mat4 model, AppState& appState, GLState &glState, std::string &fileName) {
-    auto ret = std::make_shared<Doc>(model, appState, glState, fileName, Private());
-    ret->makePages(appState, glState);
-    return ret;
+  static std::shared_ptr<Doc> create(RendererRef renderer, glm::mat4 model,
+                                     std::string &fileName) {
+    return std::make_shared<Doc>(renderer, model, fileName, Private());
   }
   std::shared_ptr<Doc> getPtr() { return shared_from_this(); }
+  Doc(RendererRef renderer, glm::mat4 model, Private);
+  Doc(RendererRef renderer, glm::mat4 model, std::string &fileName, Private);
+  ~Doc() override = default;
+  void makePages(GLState &glState);
   void draw(const GLState &state);
-  void newPage(AppState &appState, GLState &state, Glib::RefPtr<Pango::Layout>& layout);
+  void newPage(GLState &state, Glib::RefPtr<Pango::Layout> &layout);
+  size_t numPages() { return pages.size(); }
 
   friend class Page;
 };

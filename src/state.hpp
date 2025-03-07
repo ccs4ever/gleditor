@@ -37,4 +37,6 @@ struct AppState {
   ///
 };
 
+using AppStateRef = std::shared_ptr<AppState>;
+
 #endif // GLEDITOR_STATE_H

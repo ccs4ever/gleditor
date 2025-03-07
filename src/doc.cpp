@@ -12,6 +12,7 @@
 #include "pangomm/attributes.h"
 #include "pangomm/fontdescription.h"
 #include "pangomm/layout.h"
+#include "renderer.hpp"
 #include "vao_supports.hpp"
 #include <GL/glew.h>
 #include <cstring>
@@ -43,16 +44,16 @@
 #include <pangomm/cairofontmap.h>
 #include <string>
 #include <string_view>
+#include <utility>
 
 glm::vec3 lwh(uint i) {
   return {i >> uint(24), (i >> uint(12)) & uint(4095), i & uint(4095)};
 }
 
-Page::Page(std::shared_ptr<Doc> aDoc, AppState &appState, GLState &state,
-           glm::mat4 &model, Glib::RefPtr<Pango::Layout> &layout)
-    : Drawable(model), doc(std::move(aDoc)) {
+Page::Page(std::shared_ptr<Doc> aDoc, GLState &state, glm::mat4 &model,
+           Glib::RefPtr<Pango::Layout> aLayout)
+    : Drawable(model), doc(std::move(aDoc)), layout(std::move(aLayout)) {
   static_assert(sizeof(Doc::VBORow) == 40);
-  this->layout      = layout;
   const auto &line  = layout->get_const_line(layout->get_line_count() - 1);
   int len           = line->get_length();
   const int charCnt = line->get_start_index() + (0 == len ? 1 : len);
@@ -187,14 +188,14 @@ Page::Page(std::shared_ptr<Doc> aDoc, AppState &appState, GLState &state,
     bool hasNewLine = text.at(idx - 1) == '\n';
     std::string_view tmp(
         text.cbegin() + lastIdx,
-        text.cbegin() + ((idx-lastIdx) > 3 ? (lastIdx + 3)
+        text.cbegin() + ((idx - lastIdx) > 3 ? (lastIdx + 3)
                                              : (hasNewLine ? (idx - 1) : idx)));
-    if (idx-lastIdx > 3) {
-    /*std::string_view tmp2(
-        text.cbegin() + lastIdx,
-        text.cbegin() + (hasNewLine ? (idx - 1) : idx));
-      std::cout << std::format("lidx: {} idx: {} sz: {} clust: {}\n", lastIdx,
-                               idx, idx - lastIdx, tmp2);*/
+    if (idx - lastIdx > 3) {
+      /*std::string_view tmp2(
+          text.cbegin() + lastIdx,
+          text.cbegin() + (hasNewLine ? (idx - 1) : idx));
+        std::cout << std::format("lidx: {} idx: {} sz: {} clust: {}\n", lastIdx,
+                                 idx, idx - lastIdx, tmp2);*/
     }
     /*std::cout << "has nl: " << hasNewLine << " cluster: [" << tmp << "] "
               << " end: [" << text.at(idx-1) << "]\n";*/
@@ -216,7 +217,7 @@ Page::Page(std::shared_ptr<Doc> aDoc, AppState &appState, GLState &state,
     // std::cout << "xpen sent: " << xpen << "\n";
     vboPos++;
     *vertIter =
-        Doc::VBORow({xpen, -ypen / 30.0F, 0}, color(0), color(255),
+        Doc::VBORow({xpen, -ypen / 30.0F, 0.1}, color(0), color(255),
                     {coords.topLeft.x, coords.topLeft.y},
                     {coords.box.width, coords.box.height},
                     layerWH(0, uint(extents.width), uint(extents.height)));
@@ -298,6 +299,7 @@ Page::Page(std::shared_ptr<Doc> aDoc, AppState &appState, GLState &state,
   //                  pageBackingHandle.ibo.size, indexData.data());
 }
 
+// Always called from the render thread
 void Page::draw(const GLState &state, const glm::mat4 &docModel) {
   // model = glm::rotate(model, glm::radians(1.0F), glm::vec3(0, 0, 1));
   glUniformMatrix4fv(state.programs.at("main")["model"], 1, GL_FALSE,
@@ -326,6 +328,7 @@ void Page::draw(const GLState &state, const glm::mat4 &docModel) {
   }
 }
 
+// Always called from the render thread
 void Doc::draw(const GLState &state) {
   AutoVAO binder(this);
 
@@ -336,18 +339,10 @@ void Doc::draw(const GLState &state) {
   }
 }
 
-Doc::Doc(glm::mat4 model, AppState &appState, GLState &glState,
-         std::string &fileName, [[maybe_unused]] Doc::Private _priv)
-    : Doc(model, appState, _priv) {
-  docFile = fileName;
-}
-
-void Doc::makePages(AppState &appState, GLState &glState) {
-  auto fontDesc = Pango::FontDescription(appState.defaultFontName);
-  auto fonts    = Pango::CairoFontMap::get_default();
-  auto ctx      = fonts->create_context();
-  ctx->set_font_description(fontDesc);
-  auto font           = ctx->load_font(fontDesc);
+Doc::Doc(RendererRef aRenderer, glm::mat4 model, std::string &fileName,
+         [[maybe_unused]] Doc::Private _priv)
+    : Doc(std::move(aRenderer), model, _priv) {
+  docFile             = fileName;
   std::string tmpText = Glib::file_get_contents(docFile);
   std::cout << std::format("bom: {:x} {:x} {:x}\n", tmpText[0], tmpText[1],
                            tmpText[2]);
@@ -379,6 +374,14 @@ void Doc::makePages(AppState &appState, GLState &glState) {
             << (text == text.make_valid()) << "\n";
   std::cout << "first bad: " << *iter << "\n";
   std::cout << "bom: " << text[0] << " " << text[1] << " " << text[2] << "\n";
+}
+
+void Doc::makePages(GLState &glState) {
+  auto fontDesc = Pango::FontDescription(renderer->defaultFontName().data());
+  auto fonts    = Pango::CairoFontMap::get_default();
+  auto ctx      = fonts->create_context();
+  ctx->set_font_description(fontDesc);
+  auto font = ctx->load_font(fontDesc);
   Pango::AttrList attrs;
   auto fontAttr = Pango::Attribute::create_attr_font_desc(fontDesc);
   attrs.change(fontAttr);
@@ -387,8 +390,8 @@ void Doc::makePages(AppState &appState, GLState &glState) {
   auto tSize      = 0UL;
   const char *txt = text.raw().c_str();
   while (tSize < text.bytes()) {
-    /*std::cout << "BEGIN layout creation: " << offset << " " << text.bytes()
-              << "\n";*/
+    std::cout << "BEGIN layout creation: " << tSize << " " << text.bytes()
+              << "\n";
     auto lay = Pango::Layout::create(ctx);
     lay->set_font_description(fontDesc);
     lay->set_single_paragraph_mode(false);
@@ -400,11 +403,11 @@ void Doc::makePages(AppState &appState, GLState &glState) {
     /*std::cout << "START: " << tSize << " " << line->get_start_index() << " "
               << line->get_length() << "\n"
               << std::flush;*/
-    newPage(appState, glState, lay);
-    draw(glState);
-    SDL_GL_SwapWindow(SDL_GL_GetCurrentWindow());
+    newPage(glState, lay);
     int len = line->get_length();
     tSize += line->get_start_index() + (0 == len ? 1 : len);
+    std::cout << "END layout creation: " << tSize << " " << text.bytes()
+              << "\n";
   }
 #if 0
     for (const auto &line : lay->get_const_lines()) {
@@ -454,23 +457,26 @@ void Doc::makePages(AppState &appState, GLState &glState) {
             << " valid?: " << bool(attrs) << "\n";*/
 }
 
-Doc::Doc(glm::mat4 model, [[maybe_unused]] AppState &appState,
+Doc::Doc(RendererRef renderer, glm::mat4 model,
          [[maybe_unused]] Doc::Private _priv)
     : Drawable(model),
-      VAOSupports(VAOSupports::VAOBuffers(
-          VAOSupports::VAOBuffers::Vbo(sizeof(VBORow), 10000000),
-          VAOSupports::VAOBuffers::Ibo(sizeof(unsigned int), 1))) {}
+      VAOSupports(std::move(renderer),
+                  VAOSupports::VAOBuffers(
+                      VAOSupports::VAOBuffers::Vbo(sizeof(VBORow), 10000000),
+                      VAOSupports::VAOBuffers::Ibo(sizeof(unsigned int), 1))) {}
 
-void Doc::newPage(AppState &appState, GLState &state,
-                  Glib::RefPtr<Pango::Layout> &layout) {
-  AutoVAO binder(this);
+void Doc::newPage(GLState &state, Glib::RefPtr<Pango::Layout> &layout) {
+  renderer->run([this, &state, layout] {
+    AutoVAO binder(this);
 
-  AutoProgram progBinder(this, state, "main");
+    AutoProgram progBinder(this, state, "main");
 
-  const auto numPages = pages.size();
-  glm::mat4 trans     = glm::translate(
-      glm::mat4(1.0), glm::vec3(0, -100 * static_cast<float>(numPages), 0.0F));
-  // trans = glm::rotate(trans, glm::radians(20.0F*numPages), glm::vec3(0.5, 1,
-  // 0)); trans = glm::scale(trans, glm::vec3(1+numPages, 1+numPages, 1));
-  pages.emplace_back(getPtr(), appState, state, trans, layout);
+    const auto numPages = this->pages.size();
+    glm::mat4 trans =
+        glm::translate(glm::mat4(1.0),
+                       glm::vec3(0, -100 * static_cast<float>(numPages), 0.0F));
+    // trans = glm::rotate(trans, glm::radians(20.0F*numPages), glm::vec3(0.5,
+    // 1, 0)); trans = glm::scale(trans, glm::vec3(1+numPages, 1+numPages, 1));
+    pages.emplace_back(this->getPtr(), state, trans, layout);
+  });
 }

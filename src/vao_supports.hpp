@@ -1,8 +1,10 @@
 #ifndef GLEDITOR_VAO_SUPPORTS_H
 #define GLEDITOR_VAO_SUPPORTS_H
 
+#include "renderer.hpp"
 #include <cstdint>
 #include <list>
+#include <memory>
 #include <string>
 #include <utility>
 
@@ -56,17 +58,19 @@ protected:
 
     ~AutoProgram() { VAOSupports::clearProgram(); }
   };
+  
+  VAOSupports(RendererRef renderer, VAOBuffers bufferInfos);
   virtual ~VAOSupports() = default;
-
-  unsigned int vao, vbo, ibo;
   void useProgram(const GLState &state, const std::string &progName) const;
   static void clearProgram();
   void bindVAO() const;
   static void clearVAO();
-  VAOSupports(VAOBuffers bufferInfos);
   Handle reserveTriangles(long triangles);
   Handle reserveQuads(long quads);
   Handle reservePoints(long points);
+
+  unsigned int vao, vbo, ibo;
+  RendererRef renderer;
 
 private:
   VAOBuffers bufferInfos;

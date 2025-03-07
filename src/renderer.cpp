@@ -14,10 +14,12 @@
 #include <cairomm/context.h>
 #include <cairomm/surface.h>
 #include <chrono>
+#include <concepts>
 #include <cstddef>
 #include <filesystem>
 #include <format>
 #include <fstream>
+#include <future>
 #include <glm/glm.hpp>
 #include <glm/gtc/matrix_transform.hpp>
 #include <glm/gtc/type_ptr.hpp>
@@ -32,9 +34,10 @@
 #include <regex>
 #include <stdexcept>
 #include <string>
+#include <thread>
 #include <unordered_map>
 
-void setupGL(AppState &state, const GLState &glState) {
+void Renderer::setupGL(const GLState &glState) {
 
   auto program = glState.programs.at("main");
 
@@ -43,14 +46,15 @@ void setupGL(AppState &state, const GLState &glState) {
   glUniform1i(program["texUnit"], 0);
 
   {
-    std::lock_guard locker(state.view);
+    std::lock_guard locker(state->view);
 
-    glm::mat4 projection = glm::perspective(glm::radians(state.view.fov),
-                                            (float)state.view.screenWidth /
-                                                (float)state.view.screenHeight,
+    glm::mat4 projection = glm::perspective(glm::radians(state->view.fov),
+                                            (float)state->view.screenWidth /
+                                                (float)state->view.screenHeight,
                                             0.1F, 1000.0F);
-    glm::mat4 view       = glm::lookAt(
-        state.view.pos, state.view.pos + state.view.front, state.view.upward);
+    glm::mat4 view =
+        glm::lookAt(state->view.pos, state->view.pos + state->view.front,
+                    state->view.upward);
 
     glUniformMatrix4fv(program["projection"], 1, GL_FALSE,
                        glm::value_ptr(projection));
@@ -58,7 +62,7 @@ void setupGL(AppState &state, const GLState &glState) {
   }
 }
 
-void resize(AppState &appState) {
+void Renderer::resize() {
   auto *win = SDL_GL_GetCurrentWindow();
   if (nullptr == win) {
     throw std::logic_error{
@@ -79,17 +83,17 @@ void resize(AppState &appState) {
   SDL_GL_GetDrawableSize(SDL_GL_GetCurrentWindow(), &w, &h);
   if (0 == w) {
     std::cout << "width null\n";
-    w = appState.view.screenWidth;
+    w = state->view.screenWidth;
   }
   if (0 == h) {
     std::cout << "height null\n";
-    h = appState.view.screenHeight;
+    h = state->view.screenHeight;
   }
   std::cout << "renderer resize: " << w << " " << h << "\n";
   glViewport(0, 0, w, h);
 }
 
-void newDoc(AppState &appState, GLState &glState, AutoSDLWindow &window) {
+void Renderer::newDoc(GLState &glState, AutoSDLWindow &window) {
 #if 0
   auto tempSurf =
       Cairo::ImageSurface::create(Cairo::Surface::Format::ARGB32, 0, 0);
@@ -140,19 +144,18 @@ void newDoc(AppState &appState, GLState &glState, AutoSDLWindow &window) {
   layout->show_in_cairo_context(layCtx);
   layoutSurf->write_to_png("/tmp/page.png");
 #endif
-  if (glState.docs.empty()) {
-    auto docPtr = Doc::create(glm::mat4(1.0), appState);
-    glState.docs.push_back(docPtr->getPtr());
-  }
-  std::shared_ptr<Doc> doc = glState.docs.back()->getPtr();
+  auto docPtr = Doc::create(getPtr(), glm::mat4(1.0));
+  glState.docs.push_back(docPtr->getPtr());
+  std::shared_ptr<Doc> doc = docPtr->getPtr();
 
   std::cerr << "doc use count: " << doc.use_count() << "\n";
-
 }
 
-void openDoc(AppState &appState, GLState &glState, AutoSDLWindow &window,
-             std::string &fileName) {
-  auto docPtr = Doc::create(glm::mat4(1.0), appState, glState, fileName);
+void Renderer::openDoc(GLState &glState, AutoSDLWindow &window,
+                       std::string &fileName) {
+  auto docPtr = Doc::create(getPtr(), glm::mat4(1.0), fileName);
+  static std::future<void> fut = std::async(
+      std::launch::async, [&glState, docPtr] { docPtr->makePages(glState); });
   glState.docs.push_back(docPtr->getPtr());
 }
 
@@ -170,7 +173,7 @@ inline GLenum getShaderType(const std::string &stage) {
       std::format("Error: Unknown shader type: {}", stage));
 }
 
-void setupShaders(GLState &state) {
+void setupShaders(GLState &glState) {
 
   static std::regex uniformsReg(
       R"(^\s*(uniform|in)\s+([a-zA-Z]+)(\d+)?\S*?\s+(\w+)\s*;)",
@@ -190,16 +193,16 @@ void setupShaders(GLState &state) {
       const auto progName = path.stem().stem().string();
       std::cerr << "processing glsl name/stage: " << progName << "/"
                 << shaderStage << "\n";
-      if (!state.programs.contains(progName)) {
+      if (!glState.programs.contains(progName)) {
         unsigned int pid = glCreateProgram();
         if (0 == pid) {
           throw std::runtime_error("Failed to create GL program object");
         }
         std::cerr << "creating program name/id: " << progName << "/" << pid
                   << "\n";
-        state.programs.emplace(progName, GLState::Program{pid, {}});
+        glState.programs.emplace(progName, GLState::Program{pid, {}});
       }
-      auto &prog = state.programs[progName];
+      auto &prog = glState.programs[progName];
       std::ifstream stream(path, std::ios::ate);
       if (!stream.is_open()) {
         throw std::runtime_error("Failed to open file: " +
@@ -260,14 +263,14 @@ void setupShaders(GLState &state) {
                   << std::flush;
         prog.locs.emplace(name, GLState::Loc{0, type, varType, size});
       }
-      const auto pid = state.programs[progName].id;
+      const auto pid = glState.programs[progName].id;
       glAttachShader(pid, shader);
       std::cerr << "shader attached\n";
       shadersToDelete.emplace_back(pid, shader);
     }
   }
-  for (const auto &[key, _v] : state.programs) {
-    auto &program  = state.programs[key];
+  for (const auto &[key, _v] : glState.programs) {
+    auto &program  = glState.programs[key];
     const auto pid = program.id;
     glLinkProgram(pid);
     glValidateProgram(pid);
@@ -387,12 +390,45 @@ void initGL() {
     };
   }
 
-  // glEnable(GL_CULL_FACE);
-  // glEnable(GL_DEPTH_TEST);
+  glEnable(GL_CULL_FACE);
+  glEnable(GL_DEPTH_TEST);
+  glFrontFace(GL_CW);
   glClearColor(0, 0, 0, 1);
 }
 
-void Renderer::operator()(AppState &appState, AutoSDLWindow &window) {
+bool Renderer::update(GLState &glState, AutoSDLWindow &window) {
+  std::cout << "calling update\n" << std::flush;
+  const auto start = std::chrono::steady_clock::now();
+  // application logic here
+  glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+
+  setupGL(glState);
+
+  // avoid expensive rendering if we are dead
+  if (!state->alive) {
+    return false;
+  }
+
+  for (const std::shared_ptr<Doc> &doc : glState.docs) {
+    std::cout << "draw doc: " << doc->numPages() << "\n";
+    doc->draw(glState);
+  }
+
+  // swap buffers;
+  SDL_GL_SwapWindow(window.window);
+
+  const auto end        = std::chrono::steady_clock::now();
+  state->frameTimeDelta = end - start;
+
+  if (state->profiling) {
+    state->alive = false;
+  }
+  return state->alive;
+}
+
+void Renderer::operator()(AutoSDLWindow &window) {
+
+  this->renderThreadId = std::this_thread::get_id();
 
   AutoSDLGL glCtx(window.window);
 
@@ -403,54 +439,38 @@ void Renderer::operator()(AppState &appState, AutoSDLWindow &window) {
 
   setupShaders(glState);
 
-  resize(appState);
+  resize();
   glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
   SDL_GL_SwapWindow(window.window);
 
-  while (appState.alive) {
-    const auto start = std::chrono::steady_clock::now();
-    // application logic here
-    glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+  while (state->alive) {
 
-    setupGL(appState, glState);
-
-    while (auto item = appState.renderQueue.pop()) {
+    int numProc = 0;
+    bool dirty  = false;
+    while (auto item = state->renderQueue.pop()) {
       switch (item->type) {
       case RenderItem::Type::NewDoc:
-        newDoc(appState, glState, window);
+        newDoc(glState, window);
         break;
       case RenderItem::Type::Resize:
-        resize(appState);
+        resize();
         break;
       case RenderItem::Type::OpenDoc: {
-        auto *ptr     = item.get();
-        auto *docItem = dynamic_cast<RenderItemOpenDoc *>(ptr);
-        openDoc(appState, glState, window, docItem->docFile);
+        auto *docItem = dynamic_cast<RenderItemOpenDoc *>(item.get());
+        openDoc(glState, window, docItem->docFile);
+        break;
+      }
+      case RenderItem::Type::Run: {
+        auto *runItem = dynamic_cast<RenderItemRun *>(item.get());
+        (*runItem)();
         break;
       }
       default:
         break;
       }
-    }
-
-    // avoid expensive rendering if we are dead
-    if (!appState.alive) {
-      break;
-    }
-
-    for (const std::shared_ptr<Doc> &doc : glState.docs) {
-      doc->draw(glState);
-    }
-
-    // swap buffers;
-    SDL_GL_SwapWindow(window.window);
-
-    const auto end          = std::chrono::steady_clock::now();
-    appState.frameTimeDelta = end - start;
-
-    if (appState.profiling) {
-      appState.alive = false;
-      break;
+      if (!update(glState, window)) {
+        break;
+      }
     }
   }
 }

@@ -1,5 +1,6 @@
 #include "vao_supports.hpp"
 #include "GLState.hpp"
+#include "renderer.hpp"
 
 #include <GL/glew.h>
 #include <algorithm>
@@ -25,15 +26,17 @@ template <typename... Args> inline void clearBuffers(Args... args) {
 }
 ///
 
-VAOSupports::VAOSupports(VAOBuffers bufferInfos)
-    : bufferInfos(std::move(bufferInfos)) {
+VAOSupports::VAOSupports(RendererRef renderer, VAOBuffers bufferInfos)
+    : renderer(std::move(renderer)), bufferInfos(std::move(bufferInfos)) {
 
   this->bufferInfos.vbo.free.emplace_back(0, this->bufferInfos.vbo.maxVertices);
   this->bufferInfos.ibo.free.emplace_back(0, this->bufferInfos.ibo.maxIndices);
 
-  genVertexArrays(&vao);
+  this->renderer->run([&] {
+    genVertexArrays(&vao);
 
-  allocateBuffers();
+    allocateBuffers();
+  });
 }
 void VAOSupports::allocateBuffers() {
 
@@ -67,22 +70,24 @@ void VAOSupports::reallocate(long vertexRes, long indexRes) {
   bufferInfos.vbo.maxVertices *= 2;
   bufferInfos.ibo.maxIndices *= 2;
 
-  allocateBuffers();
+  renderer->run([=, this]() {
+    allocateBuffers();
 
-  AutoVAO binder(this);
+    AutoVAO binder(this);
 
-  // GL_COPY_{READ,WRITE}_BUFFER are just slots to hold buffers, with no
-  // semantic meaning to OpenGL, hence why we can write to a "read" buffer
-  glBindBuffer(GL_COPY_READ_BUFFER, origVbo);
-  glBindBuffer(GL_COPY_WRITE_BUFFER, origIbo);
-  glBindBuffer(GL_ARRAY_BUFFER, vbo);
-  glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, ibo);
-  glCopyBufferSubData(GL_COPY_READ_BUFFER, GL_ARRAY_BUFFER, 0, 0, origVboEnd);
-  glCopyBufferSubData(GL_COPY_WRITE_BUFFER, GL_ELEMENT_ARRAY_BUFFER, 0, 0,
-                      origIboEnd);
-  clearBuffers(GL_COPY_READ_BUFFER, GL_COPY_WRITE_BUFFER);
-  std::array<unsigned int, 2> origBufs = {origVbo, origIbo};
-  glDeleteBuffers(2, origBufs.data());
+    // GL_COPY_{READ,WRITE}_BUFFER are just slots to hold buffers, with no
+    // semantic meaning to OpenGL, hence why we can write to a "read" buffer
+    glBindBuffer(GL_COPY_READ_BUFFER, origVbo);
+    glBindBuffer(GL_COPY_WRITE_BUFFER, origIbo);
+    glBindBuffer(GL_ARRAY_BUFFER, vbo);
+    glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, ibo);
+    glCopyBufferSubData(GL_COPY_READ_BUFFER, GL_ARRAY_BUFFER, 0, 0, origVboEnd);
+    glCopyBufferSubData(GL_COPY_WRITE_BUFFER, GL_ELEMENT_ARRAY_BUFFER, 0, 0,
+                        origIboEnd);
+    clearBuffers(GL_COPY_READ_BUFFER, GL_COPY_WRITE_BUFFER);
+    std::array<unsigned int, 2> origBufs = {origVbo, origIbo};
+    glDeleteBuffers(2, origBufs.data());
+  });
 
   bufferInfos.vbo.free.emplace_back(
       origVboEnd + 1, bufferInfos.vbo.maxVertices - origVboMaxVertices);
@@ -92,8 +97,9 @@ void VAOSupports::reallocate(long vertexRes, long indexRes) {
   defragmentFreeLists();
 }
 
-unsigned int fixupAttr(const auto& pair) {
-  static constexpr std::array<std::string, 6> arr = {"position", "fgcolor", "bgcolor", "texcoord", "texBox", "layer"};
+unsigned int fixupAttr(const auto &pair) {
+  static constexpr std::array<std::string, 6> arr = {
+      "position", "fgcolor", "bgcolor", "texcoord", "texBox", "layer"};
   return std::distance(arr.begin(), std::ranges::find(arr, pair.first));
 }
 
@@ -119,15 +125,16 @@ void VAOSupports::useProgram(const GLState &state,
     glUseProgram(program.id);
     std::vector<std::pair<std::string, GLState::Loc>> pairs(
         program.locs.begin(), program.locs.end());
-    std::ranges::sort(pairs, {},
-                      [](const auto &par) { return -1 == par.second ? fixupAttr(par) : par.second.loc; });
+    std::ranges::sort(pairs, {}, [](const auto &par) {
+      return -1 == par.second ? fixupAttr(par) : par.second.loc;
+    });
     GLint offset = 0;
     for (const auto &[attr, loc] :
          pairs | std::views::filter(
                      [](const std::pair<std::string, GLState::Loc> &pair) {
                        return pair.second.type == "in";
                      })) {
-      //std::cout << "offset: " << offset << "\n";
+      // std::cout << "offset: " << offset << "\n";
       if (-1 != loc) {
         GLenum typ;
         if (loc.varType == "uint" || loc.varType.contains("uvec")) {
@@ -136,15 +143,16 @@ void VAOSupports::useProgram(const GLState &state,
           typ = GL_INT;
         } else if (loc.varType == "bool" || loc.varType.contains("bvec")) {
           typ = GL_BOOL;
-        //} else if ("position" == attr && loc.varType == "vec") {
-	//  typ = GL_HALF_FLOAT;
-	} else {
+          //} else if ("position" == attr && loc.varType == "vec") {
+          //  typ = GL_HALF_FLOAT;
+        } else {
           typ = GL_FLOAT;
         }
         /*std::cerr << "setting up vertex attrib: " << int(loc)
                   << " size: " << loc.size
                   << " stride: " << bufferInfos.vbo.stride
-                  << " offset: " << offset << " varType: " << loc.varType << "\n";*/
+                  << " offset: " << offset << " varType: " << loc.varType <<
+           "\n";*/
         glEnableVertexAttribArray(loc);
         if (typ != GL_FLOAT && typ != GL_HALF_FLOAT) {
           glVertexAttribIPointer(loc, loc.size, typ, bufferInfos.vbo.stride,
