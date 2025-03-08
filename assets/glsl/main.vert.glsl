@@ -20,6 +20,8 @@ layout(location = 4)
 in vec2 texBox;
 layout(location = 5)
 in uint layer;
+layout(location = 6)
+in ivec2 tag;
 
 // mvp == projection view model matrix
 // model translates model local coordinates to world space
@@ -41,19 +43,23 @@ uniform mat4 model;
 // in the fragment shader for every "fragment" of color that makes up the
 // triangle
 
-out uint v_fgcolor;
-out uint v_bgcolor;
-out vec2 v_texcoord;
-out vec2 v_texBox;
-out uint v_layer;
+out Vertex {
+    uint fgcolor;
+    uint bgcolor;
+    vec2 texcoord;
+    vec2 texBox;
+    uint layer;
+    ivec2 tag;
+} v;
 
 void main()
 {
-    v_fgcolor = fgcolor;
-    v_bgcolor = bgcolor;
-    v_texcoord = texcoord;
-    v_texBox = texBox;
-    v_layer = layer;
+    v.fgcolor = fgcolor;
+    v.bgcolor = bgcolor;
+    v.texcoord = texcoord;
+    v.texBox = texBox;
+    v.layer = layer;
+    v.tag = tag;
     // the first three values of the position vector are the familiar (x,y,z)
     // the fourth is w, when w == 1.0, it indicates that the x, y, and z refer to
     // a position, when w == 0.0, it indicates that they refer to a *direction*,

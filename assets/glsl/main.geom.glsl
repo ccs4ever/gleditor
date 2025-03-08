@@ -6,16 +6,22 @@ layout(triangle_strip, max_vertices = 14) out;
 uniform mat4 model;
 uniform float cubeDepth;
 
-in uint v_fgcolor[];
-in uint v_bgcolor[];
-in vec2 v_texcoord[];
-in vec2 v_texBox[];
-in uint v_layer[];
+in Vertex {
+    uint fgcolor;
+    uint bgcolor;
+    vec2 texcoord;
+    vec2 texBox;
+    uint layer;
+    ivec2 tag;
+} v[];
 
-out vec3 f_fgcolor;
-out vec3 f_bgcolor;
-out vec2 f_texcoord;
-out float f_layer;
+out Frag {
+    vec3 fgcolor;
+    vec3 bgcolor;
+    vec2 texcoord;
+    float layer;
+    flat ivec2 tag;
+} f;
 
 // GL 4.1 provies unpackUNorm for this purpose
 vec3 c(uint i) {
@@ -28,24 +34,24 @@ vec3 lwh(uint i) {
     return vec3(i >> uint(28), (i >> uint(14)) & uint(16383), i & uint(16383));
 }
 
-vec4 f(vec4 fin) {
+vec4 addPos(vec4 fin) {
     return gl_in[0].gl_Position + (model * fin);
 }
 
 void main() {
-    vec3 fgcolor = c(v_fgcolor[0]);
-    vec3 bgcolor = c(v_bgcolor[0]);
-    vec3 l = lwh(v_layer[0]);
+    vec3 fgcolor = c(v[0].fgcolor);
+    vec3 bgcolor = c(v[0].bgcolor);
+    vec3 l = lwh(v[0].layer);
 
     if (0 == l.y || 0 == l.z) {
         return;
     }
 
-    f_layer = l.x;
-    float width = l.y/2.0;
-    float height = l.z/2.0;
-    //f_fgcolor = vec3(0, 0, 1);
-    //f_bgcolor = vec3(0, 0, 1);
+    f.layer = l.x;
+    float width = l.y / 2.0;
+    float height = l.z / 2.0;
+    //f.fgcolor = vec3(0, 0, 1);
+    //f.bgcolor = vec3(0, 0, 1);
 
     if (0 != cubeDepth) {
         vec3 foo[14] = vec3[](
@@ -66,41 +72,46 @@ void main() {
             );
 
         for (int i = 0; i < 14; i++) {
-            f_fgcolor = fgcolor;
-            f_bgcolor = bgcolor;
-            gl_Position = f(vec4(foo[i], 0));
-            //f_texcoord = vec2(foo[i].xy / (i+1));
-            //f_fgcolor = mix(vec3(1,0,0),vec3(0,0,1), i%2);
+            f.fgcolor = fgcolor;
+            f.bgcolor = bgcolor;
+            f.tag = v[0].tag;
+            gl_Position = addPos(vec4(foo[i], 0));
+            //f.texcoord = vec2(foo[i].xy / (i+1));
+            //f.fgcolor = mix(vec3(1,0,0),vec3(0,0,1), i%2);
             EmitVertex();
         }
     } else {
         const float z = 0;
         // top left {0, 1}
-        f_fgcolor = fgcolor;
-        f_bgcolor = bgcolor;
-        f_texcoord = v_texcoord[0] + vec2(0, v_texBox[0].y);
-        gl_Position = f(vec4(-width, height, z, 0));
+        f.fgcolor = fgcolor;
+        f.bgcolor = bgcolor;
+        f.tag = v[0].tag;
+        f.texcoord = v[0].texcoord + vec2(0, v[0].texBox.y);
+        gl_Position = addPos(vec4(-width, height, z, 0));
         EmitVertex();
 
         // top right
-        f_fgcolor = fgcolor;
-        f_bgcolor = bgcolor;
-        f_texcoord = v_texcoord[0] + v_texBox[0];
-        gl_Position = f(vec4(width, height, z, 0));
+        f.fgcolor = fgcolor;
+        f.bgcolor = bgcolor;
+	f.tag = v[0].tag;
+        f.texcoord = v[0].texcoord + v[0].texBox;
+        gl_Position = addPos(vec4(width, height, z, 0));
         EmitVertex();
 
         // bottom left
-        f_fgcolor = fgcolor;
-        f_bgcolor = bgcolor;
-        f_texcoord = v_texcoord[0];
-        gl_Position = f(vec4(-width, -height, z, 0));
+        f.fgcolor = fgcolor;
+        f.bgcolor = bgcolor;
+	f.tag = v[0].tag;
+        f.texcoord = v[0].texcoord;
+        gl_Position = addPos(vec4(-width, -height, z, 0));
         EmitVertex();
 
         // bottom right
-        f_fgcolor = fgcolor;
-        f_bgcolor = bgcolor;
-        f_texcoord = v_texcoord[0] + vec2(v_texBox[0].x, 0);
-        gl_Position = f(vec4(width, -height, z, 0));
+        f.fgcolor = fgcolor;
+        f.bgcolor = bgcolor;
+	f.tag = v[0].tag;
+        f.texcoord = v[0].texcoord + vec2(v[0].texBox.x, 0);
+        gl_Position = addPos(vec4(width, -height, z, 0));
         EmitVertex();
     }
 
