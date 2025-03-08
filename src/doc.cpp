@@ -390,8 +390,8 @@ void Doc::makePages(GLState &glState) {
   auto tSize      = 0UL;
   const char *txt = text.raw().c_str();
   while (tSize < text.bytes()) {
-    std::cout << "BEGIN layout creation: " << tSize << " " << text.bytes()
-              << "\n";
+    //std::cout << "BEGIN layout creation: " << tSize << " " << text.bytes()
+    //          << "\n";
     auto lay = Pango::Layout::create(ctx);
     lay->set_font_description(fontDesc);
     lay->set_single_paragraph_mode(false);
@@ -406,8 +406,8 @@ void Doc::makePages(GLState &glState) {
     newPage(glState, lay);
     int len = line->get_length();
     tSize += line->get_start_index() + (0 == len ? 1 : len);
-    std::cout << "END layout creation: " << tSize << " " << text.bytes()
-              << "\n";
+    //std::cout << "END layout creation: " << tSize << " " << text.bytes()
+    //          << "\n";
   }
 #if 0
     for (const auto &line : lay->get_const_lines()) {

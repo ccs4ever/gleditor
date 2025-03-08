@@ -397,8 +397,9 @@ void initGL() {
 }
 
 bool Renderer::update(GLState &glState, AutoSDLWindow &window) {
-  std::cout << "calling update\n" << std::flush;
-  const auto start = std::chrono::steady_clock::now();
+  // std::cout << "calling update\n" << std::flush;
+  static auto fullStart = std::chrono::steady_clock::now();
+  const auto start      = std::chrono::steady_clock::now();
   // application logic here
   glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
@@ -410,7 +411,6 @@ bool Renderer::update(GLState &glState, AutoSDLWindow &window) {
   }
 
   for (const std::shared_ptr<Doc> &doc : glState.docs) {
-    std::cout << "draw doc: " << doc->numPages() << "\n";
     doc->draw(glState);
   }
 
@@ -445,9 +445,12 @@ void Renderer::operator()(AutoSDLWindow &window) {
 
   while (state->alive) {
 
-    int numProc = 0;
-    bool dirty  = false;
-    while (auto item = state->renderQueue.pop()) {
+    // still want to update once even if we don't have anything in the render
+    // queue
+    if (!update(glState, window)) {
+      break;
+    }
+    while (auto item = renderQueue.pop()) {
       switch (item->type) {
       case RenderItem::Type::NewDoc:
         newDoc(glState, window);

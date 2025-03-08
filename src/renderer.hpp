@@ -53,39 +53,54 @@ struct RenderItemRun : public RenderItem {
   void operator()() const { fun(); }
 };
 
-class Renderer : public Loggable, public std::enable_shared_from_this<Renderer> {
+class Renderer : public Loggable,
+                 public std::enable_shared_from_this<Renderer> {
 private:
   std::mutex mtx;
+  TQueue<RenderItem> renderQueue;
   AppStateRef state;
   std::thread::id renderThreadId;
-  // token to keep anything other than Renderer::create from using our constructor
+  // token to keep anything other than Renderer::create from using our
+  // constructor
   struct Private {
     explicit Private() = default;
   };
+
 protected:
   void openDoc(GLState &glState, AutoSDLWindow &window, std::string &fileName);
   void newDoc(GLState &glState, AutoSDLWindow &window);
   void setupGL(const GLState &glState);
   void resize();
   bool update(GLState &glState, AutoSDLWindow &window);
+
 public:
   static std::shared_ptr<Renderer> create(AppStateRef appState) {
     return std::make_shared<Renderer>(appState, Private());
   }
   std::shared_ptr<Renderer> getPtr() { return shared_from_this(); }
-  Renderer(AppStateRef state, [[maybe_unused]] Private _priv) : state(std::move(state)) {}
+  Renderer(AppStateRef state, [[maybe_unused]] Private _priv)
+      : state(std::move(state)) {}
   void operator()(AutoSDLWindow &window);
   void run(std::invocable auto fun) {
     if (std::this_thread::get_id() == renderThreadId) {
       fun();
     } else {
-      state->renderQueue.push(RenderItemRun(fun));
+      renderQueue.push(RenderItemRun(fun));
     }
   }
-  std::string_view defaultFontName() { return state->defaultFontName; }
-
+  void run(std::invocable<Renderer *> auto fun) {
+    if (std::this_thread::get_id() == renderThreadId) {
+      fun(this);
+    } else {
+      renderQueue.push(RenderItemRun(std::bind(fun, this)));
+    }
+  }
+  template <typename Item> requires std::derived_from<Item, RenderItem>
+  void push(const Item &item) { renderQueue.push(item); }
+  std::string_view defaultFontName() const { return state->defaultFontName; }
 };
 
 using RendererRef = std::shared_ptr<Renderer>;
+
 
 #endif // GLEDITOR_RENDERER_H

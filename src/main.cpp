@@ -23,7 +23,7 @@
 #include "renderer.hpp"
 
 void handleWindowChange(SDL_Event &evt, const AppStateRef &state,
-                        SDL_Window *win) {
+                        RendererRef &renderer) {
   switch (evt.window.event) {
   case SDL_WINDOWEVENT_RESIZED:
   case SDL_WINDOWEVENT_SIZE_CHANGED:
@@ -33,7 +33,7 @@ void handleWindowChange(SDL_Event &evt, const AppStateRef &state,
     std::cout << "window size changed(w/h): " << width << "/" << height << "\n";
     state->view.screenWidth  = width;
     state->view.screenHeight = height;
-    state->renderQueue.push(RenderItemResize(width, height));
+    renderer->push(RenderItemResize(width, height));
     break;
   }
   default:
@@ -46,9 +46,10 @@ void handleMouseMove(SDL_Event &evt, const AppStateRef &state) {
   state->mouseY = evt.motion.y;
 }
 
-void handleKeyPress(SDL_Event &evt, const AppStateRef &state) {
+void handleKeyPress(SDL_Event &evt, const AppStateRef &state,
+                    RendererRef &renderer) {
   std::lock_guard locker(state->view);
-  float speed = 1;//state->view.speed * state->frameTimeDelta.load().count();
+  float speed = 1; // state->view.speed * state->frameTimeDelta.load().count();
   if (0 == speed) {
     speed = 1;
   }
@@ -60,7 +61,7 @@ void handleKeyPress(SDL_Event &evt, const AppStateRef &state) {
     break;
   }
   case SDL_SCANCODE_N: {
-    state->renderQueue.push(RenderItemNewDoc());
+    renderer->push(RenderItemNewDoc());
     break;
   }
   case SDL_SCANCODE_R: {
@@ -121,7 +122,8 @@ void handleKeyPress(SDL_Event &evt, const AppStateRef &state) {
   std::cout << "camera pos after: " << glm::to_string(state->view.pos) << "\n";
 }
 
-int handleArgs(const AppStateRef &state, int argc, char **argv) {
+int handleArgs(const AppStateRef &state, RendererRef &renderer, int argc,
+               char **argv) {
 
 #ifndef GLEDITOR_VERSION
 #error GLEDITOR_VERSION must be defined
@@ -142,7 +144,7 @@ int handleArgs(const AppStateRef &state, int argc, char **argv) {
 
     state->defaultFontName = parser.get("--font");
     if (parser.present("--file")) {
-      state->renderQueue.push(RenderItemOpenDoc(parser.get("--file")));
+      renderer->push(RenderItemOpenDoc(parser.get("--file")));
     }
     state->profiling = parser["--profile"] == true;
 
@@ -165,7 +167,9 @@ int main(int argc, char **argv) {
 
   auto state = std::make_shared<AppState>();
 
-  if (0 != handleArgs(state, argc, argv)) {
+  RendererRef rend = Renderer::create(state);
+
+  if (0 != handleArgs(state, rend, argc, argv)) {
     return 1;
   }
 
@@ -184,9 +188,7 @@ int main(int argc, char **argv) {
                          state->view.screenHeight, SDL_WINDOW_OPENGL,
                          icon.surface);
 
-    RendererRef rend = Renderer::create(state);
-
-    std::jthread renderer(std::ref(*rend.get()), std::ref(window));
+    std::jthread renderer(std::ref(*rend), std::ref(window));
 
     while (state->alive) {
       SDL_Event evt;
@@ -196,7 +198,7 @@ int main(int argc, char **argv) {
           state->alive = false;
         }
         case SDL_KEYDOWN: {
-          handleKeyPress(evt, state);
+          handleKeyPress(evt, state, rend);
           break;
         }
         case SDL_MOUSEMOTION: {
@@ -204,7 +206,7 @@ int main(int argc, char **argv) {
           break;
         }
         case SDL_WINDOWEVENT:
-          handleWindowChange(evt, state, window.window);
+          handleWindowChange(evt, state, rend);
         default:
           break;
         }
