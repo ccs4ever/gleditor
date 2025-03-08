@@ -18,6 +18,9 @@
 template <typename... Args> inline void genBuffers(Args... args) {
   (glGenBuffers(1, args), ...);
 }
+template <typename... Args> inline void delBuffers(Args... args) {
+  (glDeleteBuffers(1, &args), ...);
+}
 template <typename... Args> inline void genVertexArrays(Args... args) {
   (glGenVertexArrays(1, args), ...);
 }
@@ -32,14 +35,14 @@ VAOSupports::VAOSupports(RendererRef renderer, VAOBuffers bufferInfos)
   this->bufferInfos.vbo.free.emplace_back(0, this->bufferInfos.vbo.maxVertices);
   this->bufferInfos.ibo.free.emplace_back(0, this->bufferInfos.ibo.maxIndices);
 
-  this->renderer->run([&] {
-    genVertexArrays(&vao);
-
-    allocateBuffers();
-  });
+  this->renderer->run([this] { allocateBuffers(); });
+}
+VAOSupports::~VAOSupports() {
+  renderer->run([this] { deallocateBuffers(); });
 }
 void VAOSupports::allocateBuffers() {
 
+  genVertexArrays(&vao);
   genBuffers(&vbo, &ibo);
 
   AutoVAO binder(this);
@@ -50,6 +53,17 @@ void VAOSupports::allocateBuffers() {
   glBufferData(GL_ELEMENT_ARRAY_BUFFER,
                bufferInfos.ibo.maxIndices * bufferInfos.ibo.stride, nullptr,
                GL_STATIC_DRAW);
+}
+
+void VAOSupports::deallocateBuffers() {
+
+  clearBuffers();
+
+  delBuffers(vbo, ibo);
+
+  glDeleteVertexArrays(1, &vao);
+
+  vao = vbo = ibo = 0;
 }
 
 void VAOSupports::defragmentFreeLists() {}

@@ -4,7 +4,6 @@
 #include "renderer.hpp"
 #include <cstdint>
 #include <list>
-#include <memory>
 #include <string>
 #include <utility>
 
@@ -60,7 +59,7 @@ protected:
   };
   
   VAOSupports(RendererRef renderer, VAOBuffers bufferInfos);
-  virtual ~VAOSupports() = default;
+  virtual ~VAOSupports();
   void useProgram(const GLState &state, const std::string &progName) const;
   static void clearProgram();
   void bindVAO() const;
@@ -79,6 +78,7 @@ private:
   void reallocate(long vertexRes, long indexRes);
   void allocateBuffers();
   void allocateBuffers(unsigned int vboTarget, unsigned int iboTarget);
+  void deallocateBuffers();
   void defragmentFreeLists();
 };
 
