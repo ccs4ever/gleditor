@@ -310,7 +310,7 @@ void Page::draw(const GLState &state, const glm::mat4 &docModel) {
             << "\nmult: " << glm::to_string(docModel * model) << "\n";*/
   // make the compiler happy, reinterpret_cast<void*> of long would introduce
   // performance penalties apparently
-  state.glyphCache.bindTexture();
+  state.glyphCache.bindTexture(0);
   glDrawArrays(GL_POINTS,
                (int)pageBackingHandle.vbo.offset / sizeof(Doc::VBORow), 1);
   glUniform1f(state.programs.at("main")["cubeDepth"], 0);

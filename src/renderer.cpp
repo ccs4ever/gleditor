@@ -43,7 +43,7 @@ void Renderer::setupGL(const GLState &glState) {
 
   glUseProgram(program.id);
 
-  glUniform1i(program["texUnit"], 0);
+  glUniform1i(program["texGlyphCache"], 0);
 
   {
     std::lock_guard locker(state->view);
@@ -366,7 +366,7 @@ void debugCbAMD(GLuint id, GLenum type, GLenum severity, GLsizei length,
 #endif
 }
 
-void initGL() {
+void Renderer::initGL() {
 
   glewExperimental = GL_TRUE;
   GLenum err       = glewInit();
@@ -390,6 +390,31 @@ void initGL() {
     };
   }
 
+  glGenFramebuffers(1, &pickingFBO);
+  glGenRenderbuffers(1, &colorRBO);
+  glGenRenderbuffers(1, &pickingRBO);
+
+  AutoFBO bindFbo(this, GL_FRAMEBUFFER);
+
+  glBindRenderbuffer(GL_RENDERBUFFER, colorRBO);
+  glRenderbufferStorage(GL_RENDERBUFFER, GL_RGBA, state->view.screenWidth,
+                        state->view.screenHeight);
+  glBindRenderbuffer(GL_RENDERBUFFER, pickingRBO);
+  glRenderbufferStorage(GL_RENDERBUFFER, GL_RG32UI, state->view.screenWidth,
+                        state->view.screenHeight);
+  glBindRenderbuffer(GL_RENDERBUFFER, 0);
+
+  glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0 + 0,
+                            GL_RENDERBUFFER, colorRBO);
+  glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0 + 1,
+                            GL_RENDERBUFFER, pickingRBO);
+
+  const auto check = glCheckFramebufferStatus(GL_FRAMEBUFFER);
+  if (GL_FRAMEBUFFER_COMPLETE != check) {
+    throw std::runtime_error(
+        std::format("Picking FBO is incomplete: {}", check));
+  }
+
   glEnable(GL_CULL_FACE);
   glEnable(GL_DEPTH_TEST);
   glFrontFace(GL_CW);
@@ -400,6 +425,9 @@ bool Renderer::update(GLState &glState, AutoSDLWindow &window) {
   // std::cout << "calling update\n" << std::flush;
   static auto fullStart = std::chrono::steady_clock::now();
   const auto start      = std::chrono::steady_clock::now();
+  
+  AutoFBO fbo(this, GL_FRAMEBUFFER);
+
   // application logic here
   glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
@@ -413,6 +441,14 @@ bool Renderer::update(GLState &glState, AutoSDLWindow &window) {
   for (const std::shared_ptr<Doc> &doc : glState.docs) {
     doc->draw(glState);
   }
+
+  glBindFramebuffer(GL_READ_FRAMEBUFFER, pickingFBO);
+  glBindFramebuffer(GL_DRAW_FRAMEBUFFER, 0);
+  const int w = state->view.screenWidth;
+  const int h = state->view.screenHeight;
+  glReadBuffer(GL_COLOR_ATTACHMENT0);
+  glDrawBuffer(GL_BACK);
+  glBlitFramebuffer(0, 0, w, h, 0, 0, w, h, GL_COLOR_BUFFER_BIT, GL_NEAREST);
 
   // swap buffers;
   SDL_GL_SwapWindow(window.window);
@@ -440,8 +476,6 @@ void Renderer::operator()(AutoSDLWindow &window) {
   setupShaders(glState);
 
   resize();
-  glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
-  SDL_GL_SwapWindow(window.window);
 
   while (state->alive) {
 

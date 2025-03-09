@@ -8,8 +8,7 @@
 // single unit, check total number with
 // glGetIntegerv(GL_MAX_TEXTURE_IMAGE_UNITS, &v)
 
-uniform sampler2DArray texUnit;
-uniform sampler2DArray texTagged;
+uniform sampler2DArray texGlyphCache;
 uniform float cubeDepth;
 
 in Frag {
@@ -17,13 +16,13 @@ in Frag {
     vec3 bgcolor;
     vec2 texcoord;
     float layer;
-    flat ivec2 tag;
+    flat uvec2 tag;
 } f;
 
 layout(location = 0)
 out vec4 outColor;
 layout(location = 1)
-out ivec2 tag;
+out uvec2 tag;
 
 void main()
 {
@@ -32,7 +31,7 @@ void main()
         outColor = vec4(f.bgcolor, 1);
     } else {
         outColor = vec4(
-                mix(f.bgcolor, f.fgcolor, texture(texUnit,
+                mix(f.bgcolor, f.fgcolor, texture(texGlyphCache,
                         vec3(f.texcoord, floor(f.layer + 0.5))).r), 1);
     }
     tag = f.tag;

@@ -12,7 +12,7 @@ in Vertex {
     vec2 texcoord;
     vec2 texBox;
     uint layer;
-    ivec2 tag;
+    uvec2 tag;
 } v[];
 
 out Frag {
@@ -20,7 +20,7 @@ out Frag {
     vec3 bgcolor;
     vec2 texcoord;
     float layer;
-    flat ivec2 tag;
+    flat uvec2 tag;
 } f;
 
 // GL 4.1 provies unpackUNorm for this purpose

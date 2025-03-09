@@ -22,6 +22,10 @@ struct GLState {
   };
   struct Program {
     unsigned int id;
+    struct Texture {
+      unsigned int id;
+    };
+    std::vector<Texture> texs;
     std::unordered_map<std::string, Loc> locs;
     Loc &operator[](const std::string &loc) { return locs[loc]; }
     const Loc &operator[](const std::string &loc) const { return locs.at(loc); }

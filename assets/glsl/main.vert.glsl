@@ -21,7 +21,7 @@ in vec2 texBox;
 layout(location = 5)
 in uint layer;
 layout(location = 6)
-in ivec2 tag;
+in uvec2 tag;
 
 // mvp == projection view model matrix
 // model translates model local coordinates to world space
@@ -49,7 +49,7 @@ out Vertex {
     vec2 texcoord;
     vec2 texBox;
     uint layer;
-    ivec2 tag;
+    uvec2 tag;
 } v;
 
 void main()

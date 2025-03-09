@@ -9,6 +9,7 @@
 #include <utility>
 
 #include "GLState.hpp"
+#include "gl/GL.hpp"
 #include "log.hpp"
 #include "state.hpp"
 
@@ -56,6 +57,7 @@ struct RenderItemRun : public RenderItem {
 class Renderer : public Loggable,
                  public std::enable_shared_from_this<Renderer> {
 private:
+  unsigned int pickingFBO, pickingRBO, colorRBO;
   std::mutex mtx;
   TQueue<RenderItem> renderQueue;
   AppStateRef state;
@@ -72,8 +74,26 @@ protected:
   void setupGL(const GLState &glState);
   void resize();
   bool update(GLState &glState, AutoSDLWindow &window);
+  void initGL();
 
 public:
+  struct AutoFBO {
+    const Renderer *renderer;
+    GLenum target;
+    AutoFBO(const Renderer *aRenderer, GLenum aTarget)
+        : renderer(aRenderer), target(aTarget) {
+      renderer->bindFBO(target);
+    }
+    ~AutoFBO() { Renderer::clearFBO(target); }
+  };
+  void bindFBO(GLenum target) const {
+    glBindFramebuffer(target, pickingFBO);
+    std::array<unsigned int, 2> arr = {GL_COLOR_ATTACHMENT0, GL_COLOR_ATTACHMENT1};
+    glDrawBuffers(2, arr.data());
+  }
+  static void clearFBO(GLenum target) {
+    glBindFramebuffer(target, 0);
+  }
   static std::shared_ptr<Renderer> create(AppStateRef appState) {
     return std::make_shared<Renderer>(appState, Private());
   }
@@ -95,12 +115,14 @@ public:
       renderQueue.push(RenderItemRun(std::bind(fun, this)));
     }
   }
-  template <typename Item> requires std::derived_from<Item, RenderItem>
-  void push(const Item &item) { renderQueue.push(item); }
+  template <typename Item>
+    requires std::derived_from<Item, RenderItem>
+  void push(const Item &item) {
+    renderQueue.push(item);
+  }
   std::string_view defaultFontName() const { return state->defaultFontName; }
 };
 
 using RendererRef = std::shared_ptr<Renderer>;
-
 
 #endif // GLEDITOR_RENDERER_H

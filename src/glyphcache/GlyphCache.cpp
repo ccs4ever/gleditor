@@ -144,8 +144,7 @@ GlyphCache::Sizes GlyphCache::addToCache(const std::string &chr,
   //layoutSurf->write_to_png("/tmp/page.png");
 
   auto palette = getBestPalette(extents);
-  glActiveTexture(GL_TEXTURE0);
-  bindTexture();
+  bindTexture(0);
   auto coords = glyphs[chr][font] =
       GlyphCache::Sizes{palette->put(extents, data.data()).value(), extents};
   clearTexture();
