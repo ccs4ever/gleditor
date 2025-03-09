@@ -118,11 +118,14 @@ make sanitize/memory
 To run the application just do:
 
 ```
-./gleditor
+./gleditor --file your_file.txt --font "Serif 16"
 ```
 
-You will be greeted with a black screen at first. Press `n` to create a new "page"--just a blank white rectangle for now. 
-Each new page will be created below the last one. 
+To see the help screen run:
+
+```
+./gleditor --help
+```
 
 ### Movement and Commands
 
