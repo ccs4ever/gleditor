@@ -40,6 +40,7 @@ private:
     std::array<float, 2> texcoord;
     std::array<float, 2> texBox;
     unsigned int layer;
+    std::array<unsigned int, 2> tag;
     static unsigned int color3(unsigned char red, unsigned char green,
                                unsigned char blue) {
       return (unsigned int)(red << 24) | green << 16 | blue << 8 | 255;

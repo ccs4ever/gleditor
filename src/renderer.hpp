@@ -57,7 +57,7 @@ struct RenderItemRun : public RenderItem {
 class Renderer : public Loggable,
                  public std::enable_shared_from_this<Renderer> {
 private:
-  unsigned int pickingFBO, pickingRBO, colorRBO;
+  unsigned int pickingFBO, pickingRBO, colorRBO, depthRBO;
   std::mutex mtx;
   TQueue<RenderItem> renderQueue;
   AppStateRef state;

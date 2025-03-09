@@ -43,7 +43,7 @@ void handleWindowChange(SDL_Event &evt, const AppStateRef &state,
 
 void handleMouseMove(SDL_Event &evt, const AppStateRef &state) {
   state->mouseX = evt.motion.x;
-  state->mouseY = evt.motion.y;
+  state->mouseY = state->view.screenHeight - evt.motion.y;
 }
 
 void handleKeyPress(SDL_Event &evt, const AppStateRef &state,

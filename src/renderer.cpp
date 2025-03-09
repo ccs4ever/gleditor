@@ -393,6 +393,7 @@ void Renderer::initGL() {
   glGenFramebuffers(1, &pickingFBO);
   glGenRenderbuffers(1, &colorRBO);
   glGenRenderbuffers(1, &pickingRBO);
+  glGenRenderbuffers(1, &depthRBO);
 
   AutoFBO bindFbo(this, GL_FRAMEBUFFER);
 
@@ -402,12 +403,17 @@ void Renderer::initGL() {
   glBindRenderbuffer(GL_RENDERBUFFER, pickingRBO);
   glRenderbufferStorage(GL_RENDERBUFFER, GL_RG32UI, state->view.screenWidth,
                         state->view.screenHeight);
+  glBindRenderbuffer(GL_RENDERBUFFER, depthRBO);
+  glRenderbufferStorage(GL_RENDERBUFFER, GL_DEPTH_COMPONENT, state->view.screenWidth,
+                        state->view.screenHeight);
   glBindRenderbuffer(GL_RENDERBUFFER, 0);
 
   glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0 + 0,
                             GL_RENDERBUFFER, colorRBO);
   glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0 + 1,
                             GL_RENDERBUFFER, pickingRBO);
+  glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT,
+                            GL_RENDERBUFFER, depthRBO);
 
   const auto check = glCheckFramebufferStatus(GL_FRAMEBUFFER);
   if (GL_FRAMEBUFFER_COMPLETE != check) {
@@ -429,7 +435,12 @@ bool Renderer::update(GLState &glState, AutoSDLWindow &window) {
   AutoFBO fbo(this, GL_FRAMEBUFFER);
 
   // application logic here
+  /*glDrawBuffer(GL_COLOR_ATTACHMENT1);
   glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+  glDrawBuffer(GL_COLOR_ATTACHMENT0);*/
+  /*std::array<unsigned int, 4> zero = {0,0,0,0};
+  glClearBufferuiv(GL_COLOR, pickingRBO, zero.data());*/
+  glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT | GL_STENCIL_BUFFER_BIT);
 
   setupGL(glState);
 
@@ -452,6 +463,15 @@ bool Renderer::update(GLState &glState, AutoSDLWindow &window) {
 
   // swap buffers;
   SDL_GL_SwapWindow(window.window);
+
+  glm::uvec2 tag(0,0);
+  glClampColor(GL_CLAMP_READ_COLOR, GL_FALSE);
+  glReadBuffer(GL_COLOR_ATTACHMENT1);
+  glReadPixels(state->mouseX, state->mouseY, 1, 1, GL_RG_INTEGER, GL_UNSIGNED_INT, glm::value_ptr(tag));
+
+  if (tag.r != 0 || tag.g != 0) {
+    std::cout << "tagged object: " << tag.r << " " << tag.g << "\n";
+  }
 
   const auto end        = std::chrono::steady_clock::now();
   state->frameTimeDelta = end - start;

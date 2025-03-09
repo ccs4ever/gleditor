@@ -53,7 +53,7 @@ glm::vec3 lwh(uint i) {
 Page::Page(std::shared_ptr<Doc> aDoc, GLState &state, glm::mat4 &model,
            Glib::RefPtr<Pango::Layout> aLayout)
     : Drawable(model), doc(std::move(aDoc)), layout(std::move(aLayout)) {
-  static_assert(sizeof(Doc::VBORow) == 40);
+  static_assert(sizeof(Doc::VBORow) == 48);
   const auto &line  = layout->get_const_line(layout->get_line_count() - 1);
   int len           = line->get_length();
   const int charCnt = line->get_start_index() + (0 == len ? 1 : len);
@@ -105,7 +105,8 @@ Page::Page(std::shared_ptr<Doc> aDoc, GLState &state, glm::mat4 &model,
                   {0, 0},
                   {1, 1},
                   layerWH(0, std::min(16383U, uint(layW)),
-                          std::min(16383U, uint(layH)))},
+                          std::min(16383U, uint(layH))),
+                  {2, 1}},
   };
   auto vertMax = std::min(charCnt, 100000);
   vertexData.reserve(vertMax);
@@ -220,7 +221,7 @@ Page::Page(std::shared_ptr<Doc> aDoc, GLState &state, glm::mat4 &model,
         Doc::VBORow({xpen, -ypen / 30.0F, 0.1}, color(0), color(255),
                     {coords.topLeft.x, coords.topLeft.y},
                     {coords.box.width, coords.box.height},
-                    layerWH(0, uint(extents.width), uint(extents.height)));
+                    layerWH(0, uint(extents.width), uint(extents.height)), {3, (unsigned int)idx});
     vertIter++;
     xpen += float(int(extents.width)) / 35.0F;
     // std::cout << "xpen after: " << xpen << "\n";
