@@ -43,7 +43,7 @@ VAOSupports::~VAOSupports() {
 void VAOSupports::allocateBuffers() {
 
   genVertexArrays(&vao);
-  genBuffers(&vbo, &ibo);
+  genBuffers(&vbo, &ibo, &ubo);
 
   AutoVAO binder(this);
 
@@ -53,13 +53,40 @@ void VAOSupports::allocateBuffers() {
   glBufferData(GL_ELEMENT_ARRAY_BUFFER,
                bufferInfos.ibo.maxIndices * bufferInfos.ibo.stride, nullptr,
                GL_STATIC_DRAW);
+#define STR(x) #x
+
+  int ret;
+  glGetIntegerv(GL_UNIFORM_BUFFER_OFFSET_ALIGNMENT, &ret);
+  std::cout << STR(GL_UNIFORM_BUFFER_OFFSET_ALIGNMENT) ": " << ret << "\n";
+  glGetIntegerv(GL_MAX_UNIFORM_BLOCK_SIZE, &ret);
+  std::cout << STR(GL_MAX_UNIFORM_BLOCK_SIZE) ": " << ret << "\n";
+  glGetIntegerv(GL_MAX_VERTEX_UNIFORM_BLOCKS, &ret);
+  std::cout << STR(GL_MAX_VERTEX_UNIFORM_BLOCKS) ": " << ret << "\n";
+  glGetIntegerv(GL_MAX_FRAGMENT_UNIFORM_BLOCKS, &ret);
+  std::cout << STR(GL_MAX_FRAGMENT_UNIFORM_BLOCKS) ": " << ret << "\n";
+  glGetIntegerv(GL_MAX_GEOMETRY_UNIFORM_BLOCKS, &ret);
+  std::cout << STR(GL_MAX_GEOMETRY_UNIFORM_BLOCKS) ": " << ret << "\n";
+  glGenBuffers(1, &ubo);
+  glBindBuffer(GL_UNIFORM_BUFFER, ubo);
+  glBufferData(GL_UNIFORM_BUFFER, sizeof(Highlight) * 2048, nullptr,
+               GL_STATIC_DRAW);
+  std::vector<Highlight> high{
+      {{0U, 4U, 0x0000ff00U}, {5U, 8U, 0x00ff0000U}, {0U, 0U, 0U}}};
+  std::for_each(high.begin(), high.end(), [](auto i) {
+    std::cout << std::format("start: {} end: {} data: {:x}\n", i.start, i.end,
+                             i.data);
+  });
+  glBufferSubData(GL_UNIFORM_BUFFER, 0, sizeof(Highlight) * high.size(),
+                  high.data());
+  glBindBufferBase(GL_UNIFORM_BUFFER, 0, ubo);
+  glBindBuffer(GL_UNIFORM_BUFFER, 0);
 }
 
 void VAOSupports::deallocateBuffers() {
 
   clearBuffers();
 
-  delBuffers(vbo, ibo);
+  delBuffers(vbo, ibo, ubo);
 
   glDeleteVertexArrays(1, &vao);
 
@@ -123,12 +150,13 @@ auto VAOSupports::findFreeOffset(FreeList &freeList, long rows) {
 }
 void VAOSupports::clearVAO() {
   glBindVertexArray(0);
-  clearBuffers(GL_ARRAY_BUFFER, GL_ELEMENT_ARRAY_BUFFER);
+  clearBuffers(GL_ARRAY_BUFFER, GL_ELEMENT_ARRAY_BUFFER, GL_UNIFORM_BUFFER);
 }
 void VAOSupports::bindVAO() const {
   glBindVertexArray(vao);
   glBindBuffer(GL_ARRAY_BUFFER, vbo);
   glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, ibo);
+  glBindBuffer(GL_UNIFORM_BUFFER, ubo);
 }
 void VAOSupports::clearProgram() { glUseProgram(0); }
 void VAOSupports::useProgram(const GLState &state,
@@ -137,6 +165,10 @@ void VAOSupports::useProgram(const GLState &state,
   if ("main" == progName) {
     auto program = state.programs.at("main");
     glUseProgram(program.id);
+    int hBlockIdx = glGetUniformBlockIndex(program.id, "Highlights");
+    glUniformBlockBinding(program.id, hBlockIdx,
+                          0); // not strictly necessary as 0 is the default
+
     std::vector<std::pair<std::string, GLState::Loc>> pairs(
         program.locs.begin(), program.locs.end());
     std::ranges::sort(pairs, {}, [](const auto &par) {

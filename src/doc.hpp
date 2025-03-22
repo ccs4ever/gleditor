@@ -28,36 +28,34 @@ public:
   ~Page() override = default;
 };
 
+struct DocVBORow {
+  std::array<float, 3> pos;
+  unsigned int fg;
+  unsigned int bg;
+  std::array<float, 2> texcoord;
+  std::array<float, 2> texBox;
+  unsigned int layer;
+  std::array<unsigned int, 2> tag;
+  static unsigned int color3(unsigned char red, unsigned char green,
+                             unsigned char blue) {
+    return (unsigned int)(red << 24) | green << 16 | blue << 8 | 255;
+  }
+  static unsigned int color(unsigned char rgb) { return color3(rgb, rgb, rgb); }
+  static constexpr unsigned int layerWidthHeight(unsigned char layer,
+                                                 unsigned int width,
+                                                 unsigned int height) {
+    assert(layer <= 10);
+    assert(width < 16384);
+    assert(height < 16384);
+    return layer << 28 | width << 14 | height;
+  }
+};
+// NOLINTEND
+
 class Doc : public Drawable,
-            public VAOSupports,
+            public VAOSupports<DocVBORow>,
             public std::enable_shared_from_this<Doc> {
 private:
-  // NOLINTBEGIN (modernize-avoid-c-arrays)
-  struct VBORow {
-    std::array<float, 3> pos;
-    unsigned int fg;
-    unsigned int bg;
-    std::array<float, 2> texcoord;
-    std::array<float, 2> texBox;
-    unsigned int layer;
-    std::array<unsigned int, 2> tag;
-    static unsigned int color3(unsigned char red, unsigned char green,
-                               unsigned char blue) {
-      return (unsigned int)(red << 24) | green << 16 | blue << 8 | 255;
-    }
-    static unsigned int color(unsigned char rgb) {
-      return color3(rgb, rgb, rgb);
-    }
-    static constexpr unsigned int layerWidthHeight(unsigned char layer,
-                                                   unsigned int width,
-                                                   unsigned int height) {
-      assert(layer <= 10);
-      assert(width < 16384);
-      assert(height < 16384);
-      return layer << 28 | width << 14 | height;
-    }
-  };
-  // NOLINTEND
   int maxQuads = 10000;
   std::vector<Page> pages;
   std::string docFile;

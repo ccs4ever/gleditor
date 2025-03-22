@@ -23,6 +23,13 @@ public:
   };
 
 protected:
+  // array elements in uniform blocks are always padded to 16 bytes (sizeof a vec4)
+  struct Highlight {
+    uint start;
+    uint end;
+    uint data;
+    uint data2{};
+  };
   using FreeList = std::list<std::pair<std::uint32_t, std::uint32_t>>;
   struct VAOBuffers {
     struct Vbo {
@@ -68,7 +75,7 @@ protected:
   Handle reserveQuads(long quads);
   Handle reservePoints(long points);
 
-  unsigned int vao, vbo, ibo;
+  unsigned int vao, vbo, ibo, ubo;
   RendererRef renderer;
 
 private:

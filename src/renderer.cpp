@@ -390,6 +390,7 @@ void Renderer::initGL() {
     };
   }
 
+
   glGenFramebuffers(1, &pickingFBO);
   glGenRenderbuffers(1, &colorRBO);
   glGenRenderbuffers(1, &pickingRBO);
@@ -470,7 +471,7 @@ bool Renderer::update(GLState &glState, AutoSDLWindow &window) {
   glReadPixels(state->mouseX, state->mouseY, 1, 1, GL_RG_INTEGER, GL_UNSIGNED_INT, glm::value_ptr(tag));
 
   if (tag.r != 0 || tag.g != 0) {
-    std::cout << "tagged object: " << tag.r << " " << tag.g << "\n";
+    std::cout << std::format("tagged object: {:x} {:x}\n", tag.r, tag.g);
   }
 
   const auto end        = std::chrono::steady_clock::now();

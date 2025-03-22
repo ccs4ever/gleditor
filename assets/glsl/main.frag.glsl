@@ -30,9 +30,11 @@ void main()
     if (0 != cubeDepth) {
         outColor = vec4(f.bgcolor, 1);
     } else {
+        float bgFgRatio = texture(texGlyphCache,
+                vec3(f.texcoord, floor(f.layer + 0.5))).r;
         outColor = vec4(
-                mix(f.bgcolor, f.fgcolor, texture(texGlyphCache,
-                        vec3(f.texcoord, floor(f.layer + 0.5))).r), 1);
+                mix(f.bgcolor, f.fgcolor, bgFgRatio
+                ), 1);
     }
     tag = f.tag;
 }
