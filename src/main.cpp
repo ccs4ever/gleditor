@@ -23,7 +23,7 @@
 #include "renderer.hpp"
 
 void handleWindowChange(SDL_Event &evt, const AppStateRef &state,
-                        RendererRef &renderer) {
+                        AbstractRendererRef &renderer) {
   switch (evt.window.event) {
   case SDL_WINDOWEVENT_RESIZED:
   case SDL_WINDOWEVENT_SIZE_CHANGED:
@@ -47,7 +47,7 @@ void handleMouseMove(SDL_Event &evt, const AppStateRef &state) {
 }
 
 void handleKeyPress(SDL_Event &evt, const AppStateRef &state,
-                    RendererRef &renderer) {
+                    AbstractRendererRef &renderer) {
   std::lock_guard locker(state->view);
   float speed = 1; // state->view.speed * state->frameTimeDelta.load().count();
   if (0 == speed) {
@@ -122,7 +122,7 @@ void handleKeyPress(SDL_Event &evt, const AppStateRef &state,
   std::cout << "camera pos after: " << glm::to_string(state->view.pos) << "\n";
 }
 
-int handleArgs(const AppStateRef &state, RendererRef &renderer, int argc,
+int handleArgs(const AppStateRef &state, AbstractRendererRef &renderer, int argc,
                char **argv) {
 
 #ifndef GLEDITOR_VERSION
@@ -167,7 +167,7 @@ int main(int argc, char **argv) {
 
   auto state = std::make_shared<AppState>();
 
-  RendererRef rend = Renderer::create(state);
+  AbstractRendererRef rend = Renderer::create(state);
 
   if (0 != handleArgs(state, rend, argc, argv)) {
     return 1;

@@ -2,14 +2,17 @@
 #define GLEDITOR_VAO_SUPPORTS_H
 
 #include "renderer.hpp"
+#include "renderer/buffer.hpp"
 #include <cstdint>
 #include <list>
+#include <memory>
 #include <string>
 #include <utility>
+#include <vector>
 
 struct GLState;
 
-class VAOSupports {
+template <typename Elem> class VAOSupports {
 public:
   struct Handle {
     struct Vbo {
@@ -23,7 +26,8 @@ public:
   };
 
 protected:
-  // array elements in uniform blocks are always padded to 16 bytes (sizeof a vec4)
+  // array elements in uniform blocks are always padded to 16 bytes (sizeof a
+  // vec4)
   struct Highlight {
     uint start;
     uint end;
@@ -31,55 +35,27 @@ protected:
     uint data2{};
   };
   using FreeList = std::list<std::pair<std::uint32_t, std::uint32_t>>;
-  struct VAOBuffers {
-    struct Vbo {
-      Vbo(int stride, long maxQuads) : stride(stride), maxVertices(maxQuads) {}
-      int stride{};
-      long maxVertices{};
-      FreeList free;
-    } vbo;
-    struct Ibo {
-      Ibo(int stride, long maxQuads) : stride(stride), maxIndices(maxQuads) {}
-      int stride{};
-      long maxIndices{};
-      FreeList free;
-    } ibo;
-    VAOBuffers(Vbo vbo, Ibo ibo) : vbo(std::move(vbo)), ibo(std::move(ibo)) {}
-  };
-  struct AutoVAO {
-    const VAOSupports *support;
-    AutoVAO(const VAOSupports *aSupport) : support(aSupport) {
-      support->bindVAO();
-    }
 
-    ~AutoVAO() { VAOSupports::clearVAO(); }
-  };
-  struct AutoProgram {
-    const VAOSupports *support;
-    AutoProgram(const VAOSupports *aSupport, const GLState &state,
-                const std::string &progName)
-        : support(aSupport) {
-      support->useProgram(state, progName);
-    }
-
-    ~AutoProgram() { VAOSupports::clearProgram(); }
-  };
-  
-  VAOSupports(RendererRef renderer, VAOBuffers bufferInfos);
+  VAOSupports(AbstractRendererRef renderer);
   virtual ~VAOSupports();
-  void useProgram(const GLState &state, const std::string &progName) const;
-  static void clearProgram();
   void bindVAO() const;
   static void clearVAO();
   Handle reserveTriangles(long triangles);
   Handle reserveQuads(long quads);
   Handle reservePoints(long points);
 
-  unsigned int vao, vbo, ibo, ubo;
-  RendererRef renderer;
+  unsigned int vao;
+  struct TypedBuffer {
+    unsigned int type;
+    std::shared_ptr<gledit::renderer::AbstractBuffer<T>> buf;
+  };
+  std::vector<std::shared_ptr<TypedBuffer>> buffers;
+  std::shared_ptr<gledit::renderer::AbstractBuffer<Elem>> vbo;
+  std::shared_ptr<gledit::renderer::AbstractBuffer<unsigned int>> ibo;
+  std::shared_ptr<gledit::renderer::AbstractBuffer<Highlight>> ubo;
+  AbstractRendererRef renderer;
 
 private:
-  VAOBuffers bufferInfos;
   Handle reserve(unsigned int type, long res);
   static auto findFreeOffset(FreeList &freeList, long rows);
   void reallocate(long vertexRes, long indexRes);

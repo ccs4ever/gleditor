@@ -29,11 +29,8 @@ template <typename... Args> inline void clearBuffers(Args... args) {
 }
 ///
 
-VAOSupports::VAOSupports(RendererRef renderer, VAOBuffers bufferInfos)
-    : renderer(std::move(renderer)), bufferInfos(std::move(bufferInfos)) {
-
-  this->bufferInfos.vbo.free.emplace_back(0, this->bufferInfos.vbo.maxVertices);
-  this->bufferInfos.ibo.free.emplace_back(0, this->bufferInfos.ibo.maxIndices);
+VAOSupports::VAOSupports(AbstractRendererRef renderer)
+    : renderer(std::move(renderer)) {
 
   this->renderer->run([this] { allocateBuffers(); });
 }

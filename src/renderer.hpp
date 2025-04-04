@@ -12,6 +12,7 @@
 #include "gl/GL.hpp"
 #include "log.hpp"
 #include "state.hpp"
+#include "vao_supports.hpp"
 
 struct AutoSDLWindow;
 
@@ -54,52 +55,37 @@ struct RenderItemRun : public RenderItem {
   void operator()() const { fun(); }
 };
 
-class Renderer : public Loggable,
-                 public std::enable_shared_from_this<Renderer> {
-private:
-  unsigned int pickingFBO, pickingRBO, colorRBO, depthRBO;
+class AbstractRenderer : public Loggable,
+                         public std::enable_shared_from_this<AbstractRenderer> {
+protected:
   std::mutex mtx;
   TQueue<RenderItem> renderQueue;
   AppStateRef state;
   std::thread::id renderThreadId;
-  // token to keep anything other than Renderer::create from using our
+  // token to keep anything other than *Renderer::create from using our
   // constructor
   struct Private {
     explicit Private() = default;
   };
 
-protected:
-  void openDoc(GLState &glState, AutoSDLWindow &window, std::string &fileName);
-  void newDoc(GLState &glState, AutoSDLWindow &window);
-  void setupGL(const GLState &glState);
-  void resize();
-  bool update(GLState &glState, AutoSDLWindow &window);
-  void initGL();
-
 public:
-  struct AutoFBO {
-    const Renderer *renderer;
-    GLenum target;
-    AutoFBO(const Renderer *aRenderer, GLenum aTarget)
-        : renderer(aRenderer), target(aTarget) {
-      renderer->bindFBO(target);
+  struct AutoProgram {
+    const AbstractRenderer *renderer;
+    AutoProgram(const AbstractRenderer *aRenderer, const std::string &progName)
+        : renderer(aRenderer) {
+      renderer->useProgram(progName);
     }
-    ~AutoFBO() { Renderer::clearFBO(target); }
+    ~AutoProgram() { renderer->clearProgram(); }
   };
-  void bindFBO(GLenum target) const {
-    glBindFramebuffer(target, pickingFBO);
-    std::array<unsigned int, 2> arr = {GL_COLOR_ATTACHMENT0, GL_COLOR_ATTACHMENT1};
-    glDrawBuffers(2, arr.data());
+  virtual void useProgram(const std::string &progName) const = 0;
+  virtual void clearProgram() const                          = 0;
+  std::shared_ptr<AbstractRenderer> getPtr() { return shared_from_this(); }
+  AbstractRenderer(AppStateRef aState, [[maybe_unused]] Private _priv)
+      : state(std::move(aState)) {}
+  ~AbstractRenderer() override = default;
+  static std::shared_ptr<AbstractRenderer> create(AppStateRef appState) {
+    return std::make_shared<AbstractRenderer>(appState, Private());
   }
-  static void clearFBO(GLenum target) {
-    glBindFramebuffer(target, 0);
-  }
-  static std::shared_ptr<Renderer> create(AppStateRef appState) {
-    return std::make_shared<Renderer>(appState, Private());
-  }
-  std::shared_ptr<Renderer> getPtr() { return shared_from_this(); }
-  Renderer(AppStateRef state, [[maybe_unused]] Private _priv)
-      : state(std::move(state)) {}
   void operator()(AutoSDLWindow &window);
   void run(std::invocable auto fun) {
     if (std::this_thread::get_id() == renderThreadId) {
@@ -108,7 +94,7 @@ public:
       renderQueue.push(RenderItemRun(fun));
     }
   }
-  void run(std::invocable<Renderer *> auto fun) {
+  void run(std::invocable<AbstractRenderer *> auto fun) {
     if (std::this_thread::get_id() == renderThreadId) {
       fun(this);
     } else {
@@ -123,6 +109,44 @@ public:
   std::string_view defaultFontName() const { return state->defaultFontName; }
 };
 
-using RendererRef = std::shared_ptr<Renderer>;
+using AbstractRendererRef = std::shared_ptr<AbstractRenderer>;
+
+class Renderer : public AbstractRenderer {
+
+protected:
+  unsigned int pickingFBO, pickingRBO, colorRBO, depthRBO;
+  void openDoc(GLState &glState, AutoSDLWindow &window, std::string &fileName);
+  void newDoc(GLState &glState, AutoSDLWindow &window);
+  void setupGL(const GLState &glState);
+  void resize();
+  bool update(GLState &glState, AutoSDLWindow &window);
+  void initGL();
+
+public:
+  template <typename VBORow> struct AutoVAO {
+    const VAOSupports<VBORow> *support;
+    AutoVAO(const VAOSupports<VBORow> *aSupport) : support(aSupport) {
+      support->bindVAO();
+    }
+
+    ~AutoVAO() { VAOSupports<VBORow>::clearVAO(); }
+  };
+  struct AutoFBO {
+    const Renderer *renderer;
+    GLenum target;
+    AutoFBO(const Renderer *aRenderer, GLenum aTarget)
+        : renderer(aRenderer), target(aTarget) {
+      renderer->bindFBO(target);
+    }
+    ~AutoFBO() { Renderer::clearFBO(target); }
+  };
+  void bindFBO(GLenum target) const {
+    glBindFramebuffer(target, pickingFBO);
+    std::array<unsigned int, 2> arr = {GL_COLOR_ATTACHMENT0,
+                                       GL_COLOR_ATTACHMENT1};
+    glDrawBuffers(2, arr.data());
+  }
+  static void clearFBO(GLenum target) { glBindFramebuffer(target, 0); }
+};
 
 #endif // GLEDITOR_RENDERER_H

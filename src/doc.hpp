@@ -13,21 +13,6 @@
 class Doc;
 struct GLState;
 
-class Page : public Drawable {
-private:
-  std::shared_ptr<Doc> doc;
-  VAOSupports::Handle pageBackingHandle;
-  std::vector<VAOSupports::Handle> glyphs;
-  unsigned int tex{};
-  Glib::RefPtr<Pango::Layout> layout;
-
-public:
-  Page(std::shared_ptr<Doc> doc, GLState &state, glm::mat4 &model,
-       Glib::RefPtr<Pango::Layout> layout);
-  void draw(const GLState &state, const glm::mat4 &docModel);
-  ~Page() override = default;
-};
-
 struct DocVBORow {
   std::array<float, 3> pos;
   unsigned int fg;
@@ -50,7 +35,23 @@ struct DocVBORow {
     return layer << 28 | width << 14 | height;
   }
 };
-// NOLINTEND
+  
+class Page : public Drawable {
+private:
+  using Handle = VAOSupports<DocVBORow>::Handle;
+  std::shared_ptr<Doc> doc;
+  Handle pageBackingHandle;
+  std::vector<Handle> glyphs;
+  unsigned int tex{};
+  Glib::RefPtr<Pango::Layout> layout;
+
+public:
+  Page(std::shared_ptr<Doc> doc, GLState &state, glm::mat4 &model,
+       Glib::RefPtr<Pango::Layout> layout);
+  void draw(const GLState &state, const glm::mat4 &docModel);
+  ~Page() override = default;
+};
+
 
 class Doc : public Drawable,
             public VAOSupports<DocVBORow>,
@@ -66,16 +67,16 @@ private:
   };
 
 public:
-  static std::shared_ptr<Doc> create(RendererRef renderer, glm::mat4 model) {
+  static std::shared_ptr<Doc> create(AbstractRendererRef renderer, glm::mat4 model) {
     return std::make_shared<Doc>(renderer, model, Private());
   }
-  static std::shared_ptr<Doc> create(RendererRef renderer, glm::mat4 model,
+  static std::shared_ptr<Doc> create(AbstractRendererRef renderer, glm::mat4 model,
                                      std::string &fileName) {
     return std::make_shared<Doc>(renderer, model, fileName, Private());
   }
   std::shared_ptr<Doc> getPtr() { return shared_from_this(); }
-  Doc(RendererRef renderer, glm::mat4 model, Private);
-  Doc(RendererRef renderer, glm::mat4 model, std::string &fileName, Private);
+  Doc(AbstractRendererRef renderer, glm::mat4 model, Private);
+  Doc(AbstractRendererRef renderer, glm::mat4 model, std::string &fileName, Private);
   ~Doc() override = default;
   void makePages(GLState &glState);
   void draw(const GLState &state);
