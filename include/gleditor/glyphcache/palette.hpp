@@ -1,19 +1,15 @@
 #ifndef GLYPH_PALETTE_H
 #define GLYPH_PALETTE_H
 
-#include <algorithm>
 #include <atomic>
-#include <compare>
 #include <iostream>
-#include <memory>
 #include <optional>
-#include <utility>
 #include <vector>
+#include <algorithm>
 
-//#include "../custom_concepts.hpp"
-#include "../gl/GL.hpp"
-#include "../log.hpp"
-#include "glyphLane.hpp"
+#include <gleditor/gl/gl.hpp>
+#include <gleditor/log.hpp>
+#include <gleditor/glyphcache/lane.hpp>
 
 class GlyphPalette : public Loggable {
 private:

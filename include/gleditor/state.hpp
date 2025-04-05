@@ -1,7 +1,7 @@
 #ifndef GLEDITOR_STATE_H
 #define GLEDITOR_STATE_H
 
-#include "tqueue.hpp"
+#include <gleditor/tqueue.hpp>
 #include <atomic>
 #include <chrono>
 #include <glm/ext/matrix_float4x4.hpp>

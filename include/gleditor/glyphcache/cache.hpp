@@ -2,17 +2,13 @@
 #define GLEDITOR_GLYPH_CACHE_H
 
 #include <glibmm/ustring_hash.h>
-#include <map>
-#include <memory>
-#include <optional>
 #include <pangomm/font.h>
-#include <utility>
 
-#include "../gl/GL.hpp"
-#include "../log.hpp"
+#include <gleditor/gl/gl.hpp>
+#include <gleditor/log.hpp>
 #include "glibmm/ustring.h"
-#include "glyphpalette.hpp"
-#include "types.hpp"
+#include <gleditor/glyphcache/palette.hpp>
+#include <gleditor/glyphcache/types.hpp>
 
 template <typename... Bases> struct overload : Bases... {
   using is_transparent = void;

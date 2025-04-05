@@ -1,7 +1,7 @@
-#include "GlyphCache.hpp"
+#include <gleditor/glyphcache/cache.hpp>
 #include "cairomm/enums.h"
 #include "cairomm/fontoptions.h"
-#include "types.hpp"
+#include <gleditor/glyphcache/types.hpp>
 #include <algorithm>
 #include <cairomm/context.h>
 #include <cairomm/surface.h>

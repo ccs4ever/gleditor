@@ -1,4 +1,4 @@
-#include "glyphLane.hpp"
+#include <gleditor/glyphcache/lane.hpp>
 
 [[nodiscard]] std::partial_ordering operator<=>(const GlyphLane &left,
                                                 const GlyphLane &right) {

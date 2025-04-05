@@ -7,9 +7,9 @@
 #include <sstream>
 #include <utility>
 
-#include "../src/glyphcache/glyphpalette.hpp"
-#include "../src/log.hpp"
-#include "mocks/GL.hpp"
+#include <gleditor/glyphcache/palette.hpp>
+#include <gleditor/log.hpp>
+#include "mocks/gl.hpp"
 
 using testing::ElementsAre;
 using testing::WhenSorted;

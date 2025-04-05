@@ -3,7 +3,7 @@
 
 #include <gmock/gmock.h>
 
-#include "../../src/gl/GL.hpp"
+#include <gleditor/gl/gl.hpp>
 
 class GLMock : public GL {
 public:

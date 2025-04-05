@@ -1,4 +1,4 @@
-#include "SDLwrap.hpp"
+#include <gleditor/sdl_wrap.hpp>
 
 #include <string>
 #include <cstdint>

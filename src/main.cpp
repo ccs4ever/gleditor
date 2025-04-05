@@ -1,5 +1,3 @@
-
-
 #include "GL/glew.h"
 #include "SDL.h"
 #include "SDL_events.h"
@@ -18,9 +16,9 @@
 #include <thread>
 
 #include "SDL_image.h"
-#include "SDLwrap.hpp"
+#include <gleditor/sdl_wrap.hpp>
 #include "glibmm/init.h"
-#include "renderer.hpp"
+#include <gleditor/renderer.hpp>
 
 void handleWindowChange(SDL_Event &evt, const AppStateRef &state,
                         RendererRef &renderer) {

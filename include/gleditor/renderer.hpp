@@ -1,17 +1,16 @@
 #ifndef GLEDITOR_RENDERER_H
 #define GLEDITOR_RENDERER_H
 
-#include <concepts>
 #include <cstdint>
 #include <functional>
 #include <memory>
 #include <thread>
 #include <utility>
 
-#include "GLState.hpp"
-#include "gl/GL.hpp"
-#include "log.hpp"
-#include "state.hpp"
+#include <gleditor/gl/state.hpp>
+#include <gleditor/gl/gl.hpp>
+#include <gleditor/log.hpp>
+#include <gleditor/state.hpp>
 
 struct AutoSDLWindow;
 

@@ -14,7 +14,7 @@ PROFILE_OPTS := -fprofile-instr-generate -fcoverage-mapping -fcoverage-mcdc
 else
 DEBUG_OPTS := -O3 -flto -g
 endif
-CXXFLAGS = $(DEBUG_OPTS) -std=c++23 -Ithirdparty/Choreograph/src -Ithirdparty/argparse/include -Wall -Wextra $(shell pkg-config --cflags $(PKGS))
+CXXFLAGS = $(DEBUG_OPTS) -std=c++23 -Iinclude -Ithirdparty/Choreograph/src -Ithirdparty/argparse/include -Wall -Wextra $(shell pkg-config --cflags $(PKGS))
 LDFLAGS = $(DEBUG_OPTS) -rtlib=compiler-rt 
 # XXX: work on this in a separate branch, get tests working again for now
 #CXXFLAGS += -stdlib=libc++ -fexperimental-library 

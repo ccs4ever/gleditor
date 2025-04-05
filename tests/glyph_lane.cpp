@@ -5,7 +5,7 @@
 #include <stdexcept>
 #include <vector>
 
-#include "../src/glyphcache/glyphLane.hpp"
+#include <gleditor/glyphcache/lane.hpp>
 
 using testing::ElementsAre;
 using testing::WhenSorted;

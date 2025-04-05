@@ -5,7 +5,7 @@
 #include <unordered_map>
 #include <vector>
 
-#include "glyphcache/GlyphCache.hpp"
+#include <gleditor/glyphcache/cache.hpp>
 
 class Doc;
 

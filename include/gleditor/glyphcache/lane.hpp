@@ -1,18 +1,11 @@
 #ifndef GLYPH_LANE_H
 #define GLYPH_LANE_H
 
-#include <compare>
-#include <exception>
-#include <format>
 #include <iostream>
 #include <stdexcept>
-#include <tuple>
-#include <type_traits>
-#include <utility>
 
-// #include "../custom_concepts.hpp"
-#include "../log.hpp"
-#include "types.hpp"
+#include <gleditor/log.hpp>
+#include <gleditor/glyphcache/types.hpp>
 
 class GlyphLane : public Loggable {
 

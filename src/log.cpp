@@ -1,4 +1,4 @@
-#include "log.hpp"
+#include <gleditor/log.hpp>
 #include <fmt/format.h>
 #include <sstream>
 

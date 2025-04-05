@@ -1,13 +1,12 @@
 #ifndef GLEDITOR_DOC_H
 #define GLEDITOR_DOC_H
 
-#include "drawable.hpp"
-#include "glibmm/refptr.h"
-#include "glibmm/ustring.h"
-#include "pangomm/layout.h"
-#include "state.hpp"
-#include "vao_supports.hpp"
+#include <gleditor/drawable.hpp>
+#include <gleditor/vao_supports.hpp>
+#include <glibmm/refptr.h>
+#include <glibmm/ustring.h>
 #include <memory>
+#include <pangomm/layout.h>
 #include <vector>
 
 class Doc;
@@ -28,32 +27,10 @@ public:
   ~Page() override = default;
 };
 
-struct DocVBORow {
-  std::array<float, 3> pos;
-  unsigned int fg;
-  unsigned int bg;
-  std::array<float, 2> texcoord;
-  std::array<float, 2> texBox;
-  unsigned int layer;
-  std::array<unsigned int, 2> tag;
-  static unsigned int color3(unsigned char red, unsigned char green,
-                             unsigned char blue) {
-    return (unsigned int)(red << 24) | green << 16 | blue << 8 | 255;
-  }
-  static unsigned int color(unsigned char rgb) { return color3(rgb, rgb, rgb); }
-  static constexpr unsigned int layerWidthHeight(unsigned char layer,
-                                                 unsigned int width,
-                                                 unsigned int height) {
-    assert(layer <= 10);
-    assert(width < 16384);
-    assert(height < 16384);
-    return layer << 28 | width << 14 | height;
-  }
-};
 // NOLINTEND
 
 class Doc : public Drawable,
-            public VAOSupports<DocVBORow>,
+            public VAOSupports,
             public std::enable_shared_from_this<Doc> {
 private:
   int maxQuads = 10000;
@@ -66,6 +43,30 @@ private:
   };
 
 public:
+  struct VBORow {
+    std::array<float, 3> pos;
+    unsigned int fg;
+    unsigned int bg;
+    std::array<float, 2> texcoord;
+    std::array<float, 2> texBox;
+    unsigned int layer;
+    std::array<unsigned int, 2> tag;
+    static unsigned int color3(unsigned char red, unsigned char green,
+                               unsigned char blue) {
+      return (unsigned int)(red << 24) | green << 16 | blue << 8 | 255;
+    }
+    static unsigned int color(unsigned char rgb) {
+      return color3(rgb, rgb, rgb);
+    }
+    static constexpr unsigned int layerWidthHeight(unsigned char layer,
+                                                   unsigned int width,
+                                                   unsigned int height) {
+      assert(layer <= 10);
+      assert(width < 16384);
+      assert(height < 16384);
+      return layer << 28 | width << 14 | height;
+    }
+  };
   static std::shared_ptr<Doc> create(RendererRef renderer, glm::mat4 model) {
     return std::make_shared<Doc>(renderer, model, Private());
   }

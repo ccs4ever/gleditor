@@ -1,7 +1,6 @@
 #ifndef GLEDITOR_QUEUE_H
 #define GLEDITOR_QUEUE_H
 
-#include <concepts>
 #include <memory>
 #include <mutex>
 #include <queue>

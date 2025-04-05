@@ -1,6 +1,6 @@
-#include "vao_supports.hpp"
-#include "GLState.hpp"
-#include "renderer.hpp"
+#include <gleditor/vao_supports.hpp>
+#include <gleditor/gl/state.hpp>
+#include <gleditor/renderer.hpp>
 
 #include <GL/glew.h>
 #include <algorithm>

@@ -2,7 +2,7 @@
 #define GLEDITOR_GL_GL_H
 
 #include <GL/glew.h>
-#include "../log.hpp"
+#include <gleditor/log.hpp>
 
 /* Interface for mocking and portability */
 class GL : public Loggable {

@@ -1,5 +1,5 @@
-#include "doc.hpp"
-#include "GLState.hpp"
+#include <gleditor/doc.hpp>
+#include <gleditor/gl/state.hpp>
 #include "SDL_video.h"
 #include "cairomm/surface.h"
 #include "glibmm/convert.h"
@@ -12,8 +12,8 @@
 #include "pangomm/attributes.h"
 #include "pangomm/fontdescription.h"
 #include "pangomm/layout.h"
-#include "renderer.hpp"
-#include "vao_supports.hpp"
+#include <gleditor/renderer.hpp>
+#include <gleditor/vao_supports.hpp>
 #include <GL/glew.h>
 #include <cstring>
 #include <format>

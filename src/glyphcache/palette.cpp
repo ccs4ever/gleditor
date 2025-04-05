@@ -1,4 +1,4 @@
-#include "glyphpalette.hpp"
+#include <gleditor/glyphcache/palette.hpp>
 
 #include <algorithm>
 #include <format>

@@ -1,14 +1,14 @@
-#include "renderer.hpp"
+#include <gleditor/renderer.hpp>
 
 #include "GL/glew.h"
-#include "GLState.hpp"
+#include <gleditor/gl/state.hpp>
 #include "SDL_error.h"
-#include "SDLwrap.hpp"
-#include "doc.hpp"
-#include "pangomm/attributes.h"
-#include "pangomm/attrlist.h"
-#include "pangomm/fontdescription.h"
-#include "state.hpp"
+#include <gleditor/sdl_wrap.hpp>
+#include <gleditor/doc.hpp>
+#include <pangomm/attributes.h>
+#include <pangomm/attrlist.h>
+#include <pangomm/fontdescription.h>
+#include <gleditor/state.hpp>
 #include <SDL_video.h>
 #include <algorithm>
 #include <cairomm/context.h>

@@ -1,4 +1,4 @@
-#include "GL.hpp"
+#include <gleditor/gl/state.hpp>
 #include <iostream>
 #include <ostream>
 

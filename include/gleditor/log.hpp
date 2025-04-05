@@ -8,8 +8,6 @@
 #include <string_view>
 #include <type_traits>
 
-#include "glyphcache/types.hpp"
-
 // XXX: transition away from spdlog, as it fails to link with clang+libc++
 
 class Loggable {

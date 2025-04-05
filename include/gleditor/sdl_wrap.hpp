@@ -1,7 +1,7 @@
 #ifndef GLEDITOR_SDL_WRAP_H
 #define GLEDITOR_SDL_WRAP_H
 
-#include "cstdint"
+#include <cstdint>
 
 struct SDL_Window;
 struct SDL_Surface;

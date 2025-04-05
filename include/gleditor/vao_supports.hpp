@@ -1,7 +1,7 @@
 #ifndef GLEDITOR_VAO_SUPPORTS_H
 #define GLEDITOR_VAO_SUPPORTS_H
 
-#include "renderer.hpp"
+#include <gleditor/renderer.hpp>
 #include <cstdint>
 #include <list>
 #include <string>
