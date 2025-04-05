@@ -1,15 +1,21 @@
 // #include <fuzztest/fuzztest.h>
-#include <gmock/gmock.h>
-#include <gtest/gtest.h>
-#include <iostream>
-#include <memory>
-#include <optional>
-#include <sstream>
-#include <utility>
+#include <gtest/gtest.h>                    // for TestInfo (ptr only), TEST_F
+#include <gleditor/glyphcache/palette.hpp>  // for GlyphPalette
+#include <gleditor/log.hpp>                 // for operator<<, Loggable
+#include <gleditor/glyphcache/types.hpp>    // for Rect
+#include <memory>                           // for allocator, shared_ptr
+#include <optional>                         // for nullopt
+#include <sstream>                          // for basic_stringstream, char_...
+#include <utility>                          // for to_underlying, move
+#include <vector>                           // for vector
+#include <tuple>                            // for tuple
 
-#include "mocks/gl.hpp"
-#include <gleditor/glyphcache/palette.hpp>
-#include <gleditor/log.hpp>
+#include "mocks/gl.hpp"                     // for GLMock
+#include "gmock/gmock.h"                    // for NiceMock, EXPECT_CALL
+#include "gtest/gtest.h"                    // for AssertionResult, Message
+
+class GL;
+enum class Length : int;
 
 using testing::ElementsAre;
 using testing::WhenSorted;

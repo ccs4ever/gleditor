@@ -1,50 +1,43 @@
-#include "SDL_video.h"
-#include "cairomm/surface.h"
-#include "glibmm/convert.h"
-#include "glibmm/refptr.h"
-#include "glibmm/unicode.h"
-#include "glibmm/ustring.h"
-#include "pango/pango-types.h"
-#include "pango/pango-utils.h"
-#include "pango/pangocairo.h"
-#include "pangomm/attributes.h"
-#include "pangomm/fontdescription.h"
-#include "pangomm/layout.h"
-#include <GL/glew.h>
-#include <cstring>
-#include <format>
-#include <giomm.h>
-#include <gleditor/doc.hpp>
-#include <gleditor/gl/state.hpp>
-#include <gleditor/renderer.hpp>
-#include <gleditor/vao_supports.hpp>
-#include <glibmm.h>
-#include <glm/common.hpp>
-#include <glm/ext/scalar_common.hpp>
-#include <iterator>
-#include <locale>
-#include <ostream>
-#include <pangomm/glyphstring.h>
-#include <pangomm/item.h>
-
-#include <algorithm>
-#include <array>
-#include <chrono>
-#include <cstddef>
-#include <cstdlib>
-#include <fstream>
-#include <glm/ext.hpp>
-#include <glm/ext/matrix_transform.hpp>
+#include <GL/glew.h>                      // for glDrawArrays, GL_ARRAY_BUFFER
+#include <gleditor/doc.hpp>               // for Page, Doc
+#include <gleditor/gl/state.hpp>          // for GLState
+#include <gleditor/renderer.hpp>          // for Renderer, RendererRef
+#include <gleditor/vao_supports.hpp>      // for VAOSupports
+#include <glm/ext/matrix_float4x4.hpp>    // for mat4
+#include <glm/ext/vector_float3.hpp>      // for vec3
 #include <glm/gtc/type_ptr.hpp>
-#include <glm/gtx/string_cast.hpp>
-#include <glm/trigonometric.hpp>
-#include <iostream>
-#include <memory>
-#include <pangomm.h>
-#include <pangomm/cairofontmap.h>
-#include <string>
-#include <string_view>
-#include <utility>
+#include <pangomm/cairofontmap.h>         // for CairoFontMap
+#include <sys/types.h>                    // for uint
+#include <glm/detail/qualifier.hpp>       // for qualifier
+#include <cmath>                          // for ceil
+#include <format>                         // for format
+#include <iterator>                       // for distance
+#include <algorithm>                      // for min
+#include <iostream>                       // for basic_ostream, operator<<
+#include <memory>                         // for __shared_ptr_access, shared...
+#include <stdexcept>                      // for logic_error
+#include <string>                         // for char_traits, basic_string
+#include <string_view>                    // for string_view
+#include <utility>                        // for move
+#include <vector>                         // for vector
+#include <unordered_map>                  // for unordered_map
+
+#include <gleditor/drawable.hpp>          // for Drawable
+#include <gleditor/glyphcache/cache.hpp>  // for GlyphCache
+#include "glibmm/convert.h"               // for get_charset
+#include "glibmm/fileutils.h"             // for file_get_contents
+#include "glibmm/refptr.h"                // for RefPtr
+#include "glibmm/ustring.h"               // for ustring, operator==, UStrin...
+#include "pango/pango-layout.h"           // for pango_layout_set_text
+#include "pango/pango-types.h"            // for PANGO_SCALE
+#include "pangomm/attributes.h"           // for AttrFontDesc, Attribute
+#include "pangomm/attrlist.h"             // for AttrList
+#include "pangomm/fontdescription.h"      // for FontDescription
+#include "pangomm/layout.h"               // for Layout, EllipsizeMode
+#include "pangomm/rectangle.h"            // for Rectangle
+#include <gleditor/glyphcache/types.hpp>  // for TextureCoords, PointF, Rect
+#include "pangomm/layoutiter.h"           // for LayoutIter
+#include "pangomm/layoutline.h"           // for LayoutLine
 
 glm::vec3 lwh(uint i) {
   return {i >> uint(24), (i >> uint(12)) & uint(4095), i & uint(4095)};

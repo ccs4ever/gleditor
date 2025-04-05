@@ -1,12 +1,10 @@
 #ifndef GLEDITOR_LOG_H
 #define GLEDITOR_LOG_H
 
-#include <memory>
 // #include <spdlog/fmt/ostr.h>
 // #include <spdlog/logger.h>
 // #include <spdlog/spdlog.h>
-#include <string_view>
-#include <type_traits>
+#include <ostream>
 
 // XXX: transition away from spdlog, as it fails to link with clang+libc++
 

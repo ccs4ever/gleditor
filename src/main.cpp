@@ -1,24 +1,31 @@
-#include "GL/glew.h"
-#include "SDL.h"
-#include "SDL_events.h"
-#include "argparse/argparse.hpp"
-#include "config.h"
-#include <exception>
-#include <glm/ext.hpp>
-#include <glm/geometric.hpp>
+#include <pangomm/init.h>                 // for init
+#include <gleditor/renderer.hpp>          // for RenderItemNewDoc, Renderer
+#include <gleditor/sdl_wrap.hpp>          // for AutoSDLSurface, AutoSDL
+#include <glm/detail/type_vec3.hpp>       // for vec
+#include <glm/fwd.hpp>                    // for vec3
 #include <glm/gtx/string_cast.hpp>
-#include <iostream>
-#include <langinfo.h>
-#include <locale>
-#include <memory>
-#include <mutex>
-#include <pangomm/init.h>
-#include <thread>
+#include <clocale>                        // for setlocale, LC_ALL
+#include <exception>                      // for exception
+#include <functional>                     // for reference_wrapper, ref
+#include <iostream>                       // for basic_ostream, char_traits
+#include <locale>                         // for locale
+#include <memory>                         // for __shared_ptr_access, shared...
+#include <mutex>                          // for lock_guard
+#include <thread>                         // for jthread
+#include <atomic>                         // for __atomic_base
+#include <optional>                       // for optional
+#include <string>                         // for operator<<, basic_string
 
-#include "SDL_image.h"
-#include "glibmm/init.h"
-#include <gleditor/renderer.hpp>
-#include <gleditor/sdl_wrap.hpp>
+#include "SDL.h"                          // for SDL_INIT_VIDEO
+#include "SDL_events.h"                   // for SDL_Event, SDL_PollEvent
+#include "SDL_keycode.h"                  // for KMOD_SHIFT
+#include "SDL_scancode.h"                 // for SDL_SCANCODE_C, SDL_SCANCODE_D
+#include "SDL_video.h"                    // for SDL_WINDOWPOS_UNDEFINED
+#include <argparse/argparse.hpp>          // for ArgumentParser, Argument
+#include "config.h"                       // for GLEDITOR_VERSION, TOSTRING
+#include "SDL_image.h"                    // for IMG_INIT_PNG
+#include <gleditor/state.hpp>             // for AppState, AppStateRef
+#include <glibmm/init.h>                  // for init
 
 void handleWindowChange(SDL_Event &evt, const AppStateRef &state,
                         RendererRef &renderer) {

@@ -1,7 +1,9 @@
 #ifndef GLEDITOR_GLSTATE_H
 #define GLEDITOR_GLSTATE_H
 
+#include <gleditor/gl/gl.hpp>
 #include <memory>
+#include <string>
 #include <unordered_map>
 #include <vector>
 

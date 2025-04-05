@@ -1,23 +1,33 @@
-#include "cairomm/enums.h"
-#include "cairomm/fontoptions.h"
-#include <algorithm>
-#include <cairomm/context.h>
-#include <cairomm/surface.h>
-#include <cstddef>
-#include <exception>
-#include <format>
-#include <gleditor/glyphcache/cache.hpp>
-#include <gleditor/glyphcache/types.hpp>
-#include <iostream>
-#include <iterator>
-#include <optional>
-#include <pango/pangocairo.h>
-#include <pangomm.h>
-#include <stdexcept>
-#include <tuple>
-#include <type_traits>
-#include <utility>
-#include <vector>
+#include <cairomm/context.h>                // for Context
+#include <cairomm/surface.h>                // for ImageSurface, Surface
+#include <gleditor/glyphcache/cache.hpp>    // for GlyphCache, FontMapKeyAda...
+#include <gleditor/glyphcache/types.hpp>    // for TextureCoords, Rect
+#include <GL/glew.h>                        // for glTexParameteri, GL_TEXTU...
+#include <gleditor/gl/gl.hpp>               // for GL
+#include <gleditor/glyphcache/palette.hpp>  // for GlyphPalette, operator<=>
+#include <algorithm>                        // for min, sort
+#include <format>                           // for format
+#include <iostream>                         // for basic_ostream, operator<<
+#include <iterator>                         // for prev
+#include <memory>                           // for __shared_ptr_access, shar...
+#include <optional>                         // for optional
+#include <stdexcept>                        // for invalid_argument, overflo...
+#include <string>                           // for char_traits, string, oper...
+#include <string_view>                      // for operator==, string_view
+#include <tuple>                            // for make_tuple, tuple
+#include <utility>                          // for pair
+#include <vector>                           // for vector
+#include <unordered_map>                    // for unordered_map, operator==
+#include <functional>                       // for equal_to
+
+#include "cairomm/enums.h"                  // for ANTIALIAS_SUBPIXEL, Antia...
+#include "cairomm/fontoptions.h"            // for FontOptions
+#include "cairomm/matrix.h"                 // for Matrix
+#include "glibmm/refptr.h"                  // for RefPtr
+#include "pangomm/layout.h"                 // for Layout
+#include "pangomm/font.h"                   // for Font
+
+enum class Length : int;
 
 // GlyphCache
 

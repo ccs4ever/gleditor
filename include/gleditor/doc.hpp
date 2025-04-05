@@ -1,12 +1,18 @@
 #ifndef GLEDITOR_DOC_H
 #define GLEDITOR_DOC_H
 
+#include <gleditor/renderer.hpp>
+#include <array>
+#include <cassert>
+#include <cstddef>
 #include <gleditor/drawable.hpp>
 #include <gleditor/vao_supports.hpp>
 #include <glibmm/refptr.h>
 #include <glibmm/ustring.h>
+#include <glm/ext/matrix_float4x4.hpp>
 #include <memory>
 #include <pangomm/layout.h>
+#include <string>
 #include <vector>
 
 class Doc;

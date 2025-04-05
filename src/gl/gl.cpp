@@ -1,6 +1,5 @@
-#include <gleditor/gl/state.hpp>
-#include <iostream>
-#include <ostream>
+#include <gleditor/gl/gl.hpp>
+#include <iostream>  // for operator<<, basic_ostream, cerr
 
 void GL::texSubImage2D(GLenum target, GLint level, GLint xoffset, GLint yoffset,
                        GLsizei width, GLsizei height, GLenum format,

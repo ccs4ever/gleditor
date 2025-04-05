@@ -5,6 +5,7 @@
 #include <gleditor/renderer.hpp>
 #include <list>
 #include <string>
+#include <sys/types.h>
 #include <utility>
 
 struct GLState;

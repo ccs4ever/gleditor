@@ -1,15 +1,20 @@
 #ifndef GLYPH_PALETTE_H
 #define GLYPH_PALETTE_H
 
-#include <algorithm>
-#include <atomic>
-#include <iostream>
-#include <optional>
-#include <vector>
+#include <gleditor/glyphcache/types.hpp>  // for Rect, operator<<, TextureCo...
+#include <gleditor/glyphcache/lane.hpp>   // for GlyphLane
+#include <gleditor/log.hpp>               // for Loggable, operator<<
+#include <algorithm>                      // for __for_each_fn, for_each
+#include <atomic>                         // for atomic
+#include <compare>                        // for partial_ordering
+#include <iostream>                       // for basic_ostream, operator<<
+#include <memory>                         // for shared_ptr
+#include <optional>                       // for optional
+#include <utility>                        // for to_underlying, move
+#include <vector>                         // for vector
 
-#include <gleditor/gl/gl.hpp>
-#include <gleditor/glyphcache/lane.hpp>
-#include <gleditor/log.hpp>
+class GL;
+enum class Length : int;
 
 class GlyphPalette : public Loggable {
 private:

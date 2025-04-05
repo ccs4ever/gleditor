@@ -1,11 +1,14 @@
 #ifndef GLYPH_LANE_H
 #define GLYPH_LANE_H
 
-#include <iostream>
-#include <stdexcept>
+#include <gleditor/glyphcache/types.hpp>  // for operator<<, Rect, Point
+#include <gleditor/log.hpp>               // for Loggable
+#include <compare>                        // for partial_ordering
+#include <iostream>                       // for basic_ostream, char_traits
+#include <stdexcept>                      // for invalid_argument
+#include <utility>                        // for to_underlying
 
-#include <gleditor/glyphcache/types.hpp>
-#include <gleditor/log.hpp>
+enum class Length : int;
 
 class GlyphLane : public Loggable {
 

@@ -1,7 +1,7 @@
 #ifndef GLEDITOR_DRAWABLE_H
 #define GLEDITOR_DRAWABLE_H
 
-#include <glm/mat4x4.hpp>
+#include <glm/ext/matrix_float4x4.hpp>
 
 class Drawable {
 protected:

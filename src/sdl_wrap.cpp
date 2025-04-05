@@ -1,11 +1,10 @@
 #include <gleditor/sdl_wrap.hpp>
-
 #include <cstdint>
 #include <stdexcept>
 #include <string>
-#include <sys/wait.h>
 
 #include "SDL.h"
+#include "SDL_error.h"
 #include "SDL_image.h"
 #include "SDL_surface.h"
 #include "SDL_video.h"

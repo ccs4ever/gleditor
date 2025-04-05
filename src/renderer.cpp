@@ -1,41 +1,39 @@
-#include <gleditor/renderer.hpp>
-
-#include "GL/glew.h"
-#include "SDL_error.h"
-#include <SDL_video.h>
-#include <algorithm>
-#include <cairomm/context.h>
-#include <cairomm/surface.h>
-#include <chrono>
-#include <concepts>
-#include <cstddef>
-#include <filesystem>
-#include <format>
-#include <fstream>
-#include <future>
-#include <gleditor/doc.hpp>
-#include <gleditor/gl/state.hpp>
-#include <gleditor/sdl_wrap.hpp>
-#include <gleditor/state.hpp>
-#include <glm/glm.hpp>
-#include <glm/gtc/matrix_transform.hpp>
+#include <gleditor/renderer.hpp>              // for Renderer, RenderItem
+#include <SDL_video.h>                        // for SDL_GL_GetCurrentWindow
+#include <gleditor/doc.hpp>                   // for Doc
+#include <gleditor/gl/state.hpp>              // for GLState
+#include <gleditor/sdl_wrap.hpp>              // for AutoSDLGL, AutoSDLWindow
+#include <gleditor/state.hpp>                 // for AppState
+#include <glm/ext/matrix_float4x4.hpp>        // for mat4
+#include <glm/ext/vector_uint2.hpp>           // for uvec2
+#include <bits/chrono.h>                      // for duration, steady_clock
+#include <glm/detail/qualifier.hpp>           // for qualifier
+#include <glm/detail/type_vec3.hpp>           // for vec
 #include <glm/gtc/type_ptr.hpp>
-#include <iomanip>
-#include <iostream>
-#include <memory>
-#include <mutex>
-#include <ostream>
-#include <pango/pangocairo.h>
-#include <pangomm.h>
-#include <pangomm/attributes.h>
-#include <pangomm/attrlist.h>
-#include <pangomm/fontdescription.h>
-#include <ranges>
-#include <regex>
-#include <stdexcept>
-#include <string>
-#include <thread>
-#include <unordered_map>
+#include <cstdio>                             // for fprintf, stderr
+#include <cstdlib>                            // for atoi
+#include <filesystem>                         // for path, directory_iterator
+#include <format>                             // for format
+#include <fstream>                            // for basic_ostream, operator<<
+#include <future>                             // for async, launch, future
+#include <iomanip>                            // for operator<<, quoted
+#include <iostream>                           // for cerr, cout
+#include <map>                                // for map
+#include <memory>                             // for allocator, shared_ptr
+#include <mutex>                              // for lock_guard
+#include <regex>                              // for regex_iterator, sregex_...
+#include <stdexcept>                          // for runtime_error, logic_error
+#include <string>                             // for basic_string, char_traits
+#include <thread>                             // for get_id
+#include <unordered_map>                      // for unordered_map, _Node_it...
+#include <utility>                            // for pair
+#include <vector>                             // for vector
+#include <atomic>                             // for atomic
+
+#include "GL/glew.h"                          // for GL_RENDERBUFFER, GLenum
+#include "SDL_error.h"                        // for SDL_GetError
+#include <gleditor/gl/gl.hpp>                 // for GL
+#include <gleditor/tqueue.hpp>                // for TQueue
 
 void Renderer::setupGL(const GLState &glState) {
 

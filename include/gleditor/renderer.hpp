@@ -1,9 +1,15 @@
 #ifndef GLEDITOR_RENDERER_H
 #define GLEDITOR_RENDERER_H
 
+#include <gleditor/tqueue.hpp>
+#include <array>
+#include <concepts>
 #include <cstdint>
 #include <functional>
 #include <memory>
+#include <mutex>
+#include <string>
+#include <string_view>
 #include <thread>
 #include <utility>
 

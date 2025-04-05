@@ -1,6 +1,3 @@
-#include <fmt/format.h>
-#include <gleditor/log.hpp>
-#include <sstream>
 
 /*
 fmt::format_context::iterator

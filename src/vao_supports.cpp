@@ -1,18 +1,21 @@
-#include <gleditor/gl/state.hpp>
-#include <gleditor/renderer.hpp>
-#include <gleditor/vao_supports.hpp>
-
-#include <GL/glew.h>
-#include <algorithm>
-#include <array>
-#include <cstddef>
-#include <format>
-#include <glm/ext/matrix_transform.hpp>
-#include <glm/gtc/type_ptr.hpp>
-#include <iostream>
-#include <ranges>
-#include <stdexcept>
-#include <utility>
+#include <gleditor/gl/state.hpp>      // for GLState
+#include <gleditor/renderer.hpp>      // for Renderer, RendererRef
+#include <gleditor/vao_supports.hpp>  // for VAOSupports
+#include <GL/glew.h>                  // for glBindBuffer, glGetIntegerv
+#include <algorithm>                  // for for_each, __sort_fn, sort
+#include <array>                      // for array
+#include <format>                     // for format
+#include <iostream>                   // for basic_ostream, operator<<, basi...
+#include <ranges>                     // for _Filter, _Partial, operator|
+#include <stdexcept>                  // for runtime_error
+#include <string>                     // for char_traits, basic_string, oper...
+#include <utility>                    // for pair, move
+#include <vector>                     // for vector
+#include <functional>                 // for less
+#include <iterator>                   // for distance
+#include <list>                       // for _List_iterator, operator==
+#include <memory>                     // for __shared_ptr_access
+#include <unordered_map>              // for unordered_map, operator==
 
 /// Utilities
 template <typename... Args> inline void genBuffers(Args... args) {

@@ -3,9 +3,10 @@
 
 #include <atomic>
 #include <chrono>
-#include <gleditor/tqueue.hpp>
-#include <glm/ext/matrix_float4x4.hpp>
+#include <glm/ext/vector_float3.hpp>
+#include <memory>
 #include <mutex>
+#include <string>
 
 struct RenderItem;
 

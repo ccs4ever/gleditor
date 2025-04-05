@@ -1,9 +1,18 @@
-#include <gleditor/glyphcache/palette.hpp>
+#include <gleditor/glyphcache/palette.hpp>  // for GlyphPalette, operator<=>
+#include <GL/glew.h>                      // for GLint, GL_BGRA, GL_TEXTURE_...
+#include <gleditor/glyphcache/types.hpp>  // for Rect, Point, TextureCoords
+#include <gleditor/glyphcache/lane.hpp>   // for GlyphLane, operator<=>
+#include <atomic>                         // for atomic
+#include <compare>                        // for strong_ordering, partial_or...
+#include <algorithm>                      // for __sort_fn, sort
+#include <iterator>                       // for prev
+#include <optional>                       // for optional, make_optional
+#include <utility>                        // for to_underlying
+#include <ranges>                         // for __find_if_fn, find_if
+#include <vector>                         // for vector
 
-#include <algorithm>
-#include <format>
-#include <iostream>
-#include <iterator>
+enum class Length : int;
+enum class Offset : int;
 
 using std::make_optional;
 using std::optional;

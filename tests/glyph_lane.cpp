@@ -1,11 +1,17 @@
-#include <gmock/gmock.h>
-#include <gtest/gtest.h>
-#include <memory>
+#include <gtest/gtest.h>                  // for Test, TestInfo (ptr only)
+#include <gleditor/glyphcache/lane.hpp>   // for GlyphLane
+#include <gleditor/glyphcache/types.hpp>  // for Rect, Point
 // #include <spdlog/spdlog-inl.h>
-#include <stdexcept>
-#include <vector>
+#include <stdexcept>                      // for invalid_argument
+#include <utility>                        // for to_underlying
+#include <vector>                         // for vector
+#include <tuple>                          // for tuple
 
-#include <gleditor/glyphcache/lane.hpp>
+#include "gmock/gmock.h"                  // for ElementsAreMatcher, Element...
+#include "gtest/gtest.h"                  // for Message, AssertionResult
+
+enum class Length : int;
+enum class Offset : int;
 
 using testing::ElementsAre;
 using testing::WhenSorted;
