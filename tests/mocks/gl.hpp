@@ -7,7 +7,6 @@
 
 class GLMock : public GL {
 public:
-
   MOCK_METHOD(void, texSubImage2D,
               (GLenum target, GLint level, GLint xoffset, GLint yoffset,
                GLsizei width, GLsizei height, GLenum format, GLenum type,

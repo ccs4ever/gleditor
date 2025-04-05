@@ -1,8 +1,8 @@
 #include <gleditor/sdl_wrap.hpp>
 
-#include <string>
 #include <cstdint>
 #include <stdexcept>
+#include <string>
 #include <sys/wait.h>
 
 #include "SDL.h"

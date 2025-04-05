@@ -6,6 +6,7 @@
 class Drawable {
 protected:
   glm::mat4 model;
+
 public:
   Drawable(glm::mat4 model) : model(model) {}
   virtual ~Drawable() = default;

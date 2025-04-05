@@ -1,13 +1,13 @@
-#include <gleditor/glyphcache/cache.hpp>
 #include "cairomm/enums.h"
 #include "cairomm/fontoptions.h"
-#include <gleditor/glyphcache/types.hpp>
 #include <algorithm>
 #include <cairomm/context.h>
 #include <cairomm/surface.h>
 #include <cstddef>
 #include <exception>
 #include <format>
+#include <gleditor/glyphcache/cache.hpp>
+#include <gleditor/glyphcache/types.hpp>
 #include <iostream>
 #include <iterator>
 #include <optional>
@@ -76,7 +76,7 @@ auto GlyphCache::getBestPalette(const Rect &charBox) {
   if (palettes.size() >= (unsigned long)maxLayers) {
     throw new std::overflow_error("Out of Palettes!!!");
   }
-  //std::cout << "creating palette\n";
+  // std::cout << "creating palette\n";
   palettes.emplace_back(Rect{Length{size}, Length{size}}, gl);
   std::sort(palettes.begin(), palettes.end());
   return std::prev(palettes.end());
@@ -118,8 +118,9 @@ GlyphCache::Sizes GlyphCache::addToCache(const std::string &chr,
   auto layout = getLayout(chr, font, format);
 
   auto [width, height, stride] = getLayoutInfo(layout, format);
-  //std::cout << std::format("layout w/h/s: {}/{}/{}\n", width, height, stride);
-  auto extents                 = Rect{Length{width}, Length{height}};
+  // std::cout << std::format("layout w/h/s: {}/{}/{}\n", width, height,
+  // stride);
+  auto extents = Rect{Length{width}, Length{height}};
 
   // create layout drawing context
   std::vector<unsigned char> data(static_cast<long>(height) * stride);
@@ -141,7 +142,7 @@ GlyphCache::Sizes GlyphCache::addToCache(const std::string &chr,
   layout->show_in_cairo_context(layCtx);
 
   // debugging
-  //layoutSurf->write_to_png("/tmp/page.png");
+  // layoutSurf->write_to_png("/tmp/page.png");
 
   auto palette = getBestPalette(extents);
   bindTexture(0);
@@ -153,7 +154,10 @@ GlyphCache::Sizes GlyphCache::addToCache(const std::string &chr,
 
 GlyphCache::Sizes GlyphCache::put(const std::string_view &chr,
                                   const FontPtr &font) {
-  if (chr.size() > 3) { throw std::invalid_argument(std::format("GlyphCache: bad character: {}", chr)); }
+  if (chr.size() > 3) {
+    throw std::invalid_argument(
+        std::format("GlyphCache: bad character: {}", chr));
+  }
   if (auto pair = glyphs.find(chr); pair != glyphs.end()) {
     if (auto pair2 = pair->second.find(FontMapKeyAdapter{font});
         pair2 != pair->second.end()) {

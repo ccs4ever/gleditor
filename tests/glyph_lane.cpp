@@ -1,7 +1,7 @@
 #include <gmock/gmock.h>
 #include <gtest/gtest.h>
 #include <memory>
-//#include <spdlog/spdlog-inl.h>
+// #include <spdlog/spdlog-inl.h>
 #include <stdexcept>
 #include <vector>
 
@@ -10,7 +10,7 @@
 using testing::ElementsAre;
 using testing::WhenSorted;
 
-//std::shared_ptr<spdlog::logger> logger = spdlog::default_logger();
+// std::shared_ptr<spdlog::logger> logger = spdlog::default_logger();
 
 TEST(GlyphLane, equality) {
   GlyphLane alice(Offset{1}, Rect{Length{0}, Length{1}});
@@ -40,13 +40,12 @@ TEST(GlyphLane, ordering) {
 }
 
 TEST(GlyphLane, availWidth) {
-  const auto width = Length{100};
+  const auto width   = Length{100};
   const int putWidth = 10;
   GlyphLane alice(Offset{0}, Rect{width, Length{100}});
   GlyphLane bob(Offset{0}, Rect{width, Length{100}});
-  const auto point = bob.put(Length{putWidth});
-  const auto availWidth =
-      Length{std::to_underlying(width) - putWidth};
+  const auto point      = bob.put(Length{putWidth});
+  const auto availWidth = Length{std::to_underlying(width) - putWidth};
   EXPECT_EQ(alice.availWidth(), width);
   EXPECT_EQ(availWidth, Length{90});
   EXPECT_EQ(bob.availWidth(), availWidth);
@@ -56,27 +55,27 @@ TEST(GlyphLane, availWidth) {
 TEST(GlyphLane, putAtZero) {
   GlyphLane alice(Offset{0}, Rect{Length{100}, Length{100}});
   EXPECT_EQ(alice.put(Length{10}), (Point{Offset{0}, Offset{0}}));
-  EXPECT_EQ(alice.availWidth(), Length {90});
+  EXPECT_EQ(alice.availWidth(), Length{90});
 }
 
 TEST(GlyphLane, putAt10) {
   GlyphLane alice(Offset{10}, Rect{Length{100}, Length{100}});
   EXPECT_EQ(alice.put(Length{10}), (Point{Offset{0}, Offset{10}}));
   EXPECT_EQ(alice.put(Length{10}), (Point{Offset{10}, Offset{10}}));
-  EXPECT_EQ(alice.availWidth(), Length {80});
+  EXPECT_EQ(alice.availWidth(), Length{80});
 }
 
 TEST(GlyphLane, putMaxSize) {
   const int width = 100;
   GlyphLane alice(Offset{10}, Rect{Length{width}, Length{100}});
   EXPECT_EQ(alice.put(Length{width}), (Point{Offset{0}, Offset{10}}));
-  EXPECT_EQ(alice.availWidth(), Length {0});
+  EXPECT_EQ(alice.availWidth(), Length{0});
 }
 
 TEST(GlyphLane, putOverMaxSize) {
   const int width = 100;
   GlyphLane alice(Offset{10}, Rect{Length{width}, Length{100}});
-  EXPECT_THROW(alice.put(Length{width*2}), std::invalid_argument);
+  EXPECT_THROW(alice.put(Length{width * 2}), std::invalid_argument);
 }
 
 TEST(GlyphLane, canFit) {

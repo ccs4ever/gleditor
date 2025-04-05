@@ -28,7 +28,8 @@ public:
     return ret;
   }
 
-  template <typename U> requires std::derived_from<U, T>
+  template <typename U>
+    requires std::derived_from<U, T>
   void push(const U &item) {
     std::lock_guard lock(mutex);
     queue.push(std::make_unique<U>(item));

@@ -4,7 +4,6 @@
 #include <iostream>
 #include <utility>
 
-
 enum class Length : int;
 enum class Offset : int;
 
@@ -46,7 +45,7 @@ inline std::ostream &operator<<(std::ostream &out, const Offset &off) {
   out << std::to_underlying(off);
   return out;
 }
-inline bool operator==(const Point& left, const Point &right) {
+inline bool operator==(const Point &left, const Point &right) {
   return left.x == right.x && left.y == right.y;
 }
 inline std::ostream &operator<<(std::ostream &out, const Point &point) {

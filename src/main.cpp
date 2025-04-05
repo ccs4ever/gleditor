@@ -16,9 +16,9 @@
 #include <thread>
 
 #include "SDL_image.h"
-#include <gleditor/sdl_wrap.hpp>
 #include "glibmm/init.h"
 #include <gleditor/renderer.hpp>
+#include <gleditor/sdl_wrap.hpp>
 
 void handleWindowChange(SDL_Event &evt, const AppStateRef &state,
                         RendererRef &renderer) {

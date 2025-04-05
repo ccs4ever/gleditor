@@ -20,7 +20,7 @@ struct AutoSDLImg {
 struct AutoSDLWindow {
   SDL_Window *window;
   AutoSDLWindow(const char *title, int x, int y, int width, int height,
-                std::uint32_t flags, SDL_Surface* icon = nullptr);
+                std::uint32_t flags, SDL_Surface *icon = nullptr);
   ~AutoSDLWindow();
 };
 

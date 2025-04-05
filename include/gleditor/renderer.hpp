@@ -7,8 +7,8 @@
 #include <thread>
 #include <utility>
 
-#include <gleditor/gl/state.hpp>
 #include <gleditor/gl/gl.hpp>
+#include <gleditor/gl/state.hpp>
 #include <gleditor/log.hpp>
 #include <gleditor/state.hpp>
 
@@ -87,12 +87,11 @@ public:
   };
   void bindFBO(GLenum target) const {
     glBindFramebuffer(target, pickingFBO);
-    std::array<unsigned int, 2> arr = {GL_COLOR_ATTACHMENT0, GL_COLOR_ATTACHMENT1};
+    std::array<unsigned int, 2> arr = {GL_COLOR_ATTACHMENT0,
+                                       GL_COLOR_ATTACHMENT1};
     glDrawBuffers(2, arr.data());
   }
-  static void clearFBO(GLenum target) {
-    glBindFramebuffer(target, 0);
-  }
+  static void clearFBO(GLenum target) { glBindFramebuffer(target, 0); }
   static std::shared_ptr<Renderer> create(AppStateRef appState) {
     return std::make_shared<Renderer>(appState, Private());
   }

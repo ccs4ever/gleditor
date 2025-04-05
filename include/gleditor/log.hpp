@@ -2,9 +2,9 @@
 #define GLEDITOR_LOG_H
 
 #include <memory>
-//#include <spdlog/fmt/ostr.h>
-//#include <spdlog/logger.h>
-//#include <spdlog/spdlog.h>
+// #include <spdlog/fmt/ostr.h>
+// #include <spdlog/logger.h>
+// #include <spdlog/spdlog.h>
 #include <string_view>
 #include <type_traits>
 
@@ -12,12 +12,12 @@
 
 class Loggable {
 protected:
-  //std::shared_ptr<spdlog::logger> logger;
+  // std::shared_ptr<spdlog::logger> logger;
 
   virtual void print(std::ostream &ost) const { ost << "LOG ME!!!"; };
 
 public:
-  //Loggable() : logger(spdlog::default_logger()) {}
+  // Loggable() : logger(spdlog::default_logger()) {}
   virtual ~Loggable() = default;
   friend std::ostream &operator<<(std::ostream &ost, const Loggable &oth) {
     oth.print(ost);

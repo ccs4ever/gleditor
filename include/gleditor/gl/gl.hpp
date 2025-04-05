@@ -13,13 +13,13 @@ public:
   GL& operator =(const GL&) = default;*/
 
   virtual void texSubImage2D(GLenum target, GLint level, GLint xoffset,
-                               GLint yoffset, GLsizei width, GLsizei height,
-                               GLenum format, GLenum type, const void *pixels);
+                             GLint yoffset, GLsizei width, GLsizei height,
+                             GLenum format, GLenum type, const void *pixels);
 
   virtual void texSubImage3D(GLenum target, GLint level, GLint xoffset,
-                               GLint yoffset, GLint zoffset, GLsizei width,
-                               GLsizei height, GLsizei depth, GLenum format,
-                               GLenum type, const void *pixels);
+                             GLint yoffset, GLint zoffset, GLsizei width,
+                             GLsizei height, GLsizei depth, GLenum format,
+                             GLenum type, const void *pixels);
 
   virtual void getIntegerv(GLenum pname, GLint *params);
 

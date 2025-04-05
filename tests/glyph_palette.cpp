@@ -1,4 +1,4 @@
-//#include <fuzztest/fuzztest.h>
+// #include <fuzztest/fuzztest.h>
 #include <gmock/gmock.h>
 #include <gtest/gtest.h>
 #include <iostream>
@@ -7,9 +7,9 @@
 #include <sstream>
 #include <utility>
 
+#include "mocks/gl.hpp"
 #include <gleditor/glyphcache/palette.hpp>
 #include <gleditor/log.hpp>
-#include "mocks/gl.hpp"
 
 using testing::ElementsAre;
 using testing::WhenSorted;

@@ -1,5 +1,5 @@
-#include <gleditor/log.hpp>
 #include <fmt/format.h>
+#include <gleditor/log.hpp>
 #include <sstream>
 
 /*

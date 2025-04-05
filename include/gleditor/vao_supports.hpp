@@ -1,8 +1,8 @@
 #ifndef GLEDITOR_VAO_SUPPORTS_H
 #define GLEDITOR_VAO_SUPPORTS_H
 
-#include <gleditor/renderer.hpp>
 #include <cstdint>
+#include <gleditor/renderer.hpp>
 #include <list>
 #include <string>
 #include <utility>
@@ -23,7 +23,8 @@ public:
   };
 
 protected:
-  // array elements in uniform blocks are always padded to 16 bytes (sizeof a vec4)
+  // array elements in uniform blocks are always padded to 16 bytes (sizeof a
+  // vec4)
   struct Highlight {
     uint start;
     uint end;
@@ -64,7 +65,7 @@ protected:
 
     ~AutoProgram() { VAOSupports::clearProgram(); }
   };
-  
+
   VAOSupports(RendererRef renderer, VAOBuffers bufferInfos);
   virtual ~VAOSupports();
   void useProgram(const GLState &state, const std::string &progName) const;

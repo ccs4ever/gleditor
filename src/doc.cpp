@@ -1,5 +1,3 @@
-#include <gleditor/doc.hpp>
-#include <gleditor/gl/state.hpp>
 #include "SDL_video.h"
 #include "cairomm/surface.h"
 #include "glibmm/convert.h"
@@ -12,12 +10,14 @@
 #include "pangomm/attributes.h"
 #include "pangomm/fontdescription.h"
 #include "pangomm/layout.h"
-#include <gleditor/renderer.hpp>
-#include <gleditor/vao_supports.hpp>
 #include <GL/glew.h>
 #include <cstring>
 #include <format>
 #include <giomm.h>
+#include <gleditor/doc.hpp>
+#include <gleditor/gl/state.hpp>
+#include <gleditor/renderer.hpp>
+#include <gleditor/vao_supports.hpp>
 #include <glibmm.h>
 #include <glm/common.hpp>
 #include <glm/ext/scalar_common.hpp>
@@ -221,7 +221,8 @@ Page::Page(std::shared_ptr<Doc> aDoc, GLState &state, glm::mat4 &model,
         Doc::VBORow({xpen, -ypen / 30.0F, 0.1}, color(0), color(255),
                     {coords.topLeft.x, coords.topLeft.y},
                     {coords.box.width, coords.box.height},
-                    layerWH(0, uint(extents.width), uint(extents.height)), {3, (unsigned int)idx});
+                    layerWH(0, uint(extents.width), uint(extents.height)),
+                    {3, (unsigned int)idx});
     vertIter++;
     xpen += float(int(extents.width)) / 35.0F;
     // std::cout << "xpen after: " << xpen << "\n";
@@ -391,8 +392,8 @@ void Doc::makePages(GLState &glState) {
   auto tSize      = 0UL;
   const char *txt = text.raw().c_str();
   while (tSize < text.bytes()) {
-    //std::cout << "BEGIN layout creation: " << tSize << " " << text.bytes()
-    //          << "\n";
+    // std::cout << "BEGIN layout creation: " << tSize << " " << text.bytes()
+    //           << "\n";
     auto lay = Pango::Layout::create(ctx);
     lay->set_font_description(fontDesc);
     lay->set_single_paragraph_mode(false);
@@ -407,8 +408,8 @@ void Doc::makePages(GLState &glState) {
     newPage(glState, lay);
     int len = line->get_length();
     tSize += line->get_start_index() + (0 == len ? 1 : len);
-    //std::cout << "END layout creation: " << tSize << " " << text.bytes()
-    //          << "\n";
+    // std::cout << "END layout creation: " << tSize << " " << text.bytes()
+    //           << "\n";
   }
 #if 0
     for (const auto &line : lay->get_const_lines()) {

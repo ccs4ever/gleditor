@@ -4,11 +4,11 @@
 #include <glibmm/ustring_hash.h>
 #include <pangomm/font.h>
 
-#include <gleditor/gl/gl.hpp>
-#include <gleditor/log.hpp>
 #include "glibmm/ustring.h"
+#include <gleditor/gl/gl.hpp>
 #include <gleditor/glyphcache/palette.hpp>
 #include <gleditor/glyphcache/types.hpp>
+#include <gleditor/log.hpp>
 
 template <typename... Bases> struct overload : Bases... {
   using is_transparent = void;

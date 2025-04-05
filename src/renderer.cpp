@@ -1,14 +1,7 @@
 #include <gleditor/renderer.hpp>
 
 #include "GL/glew.h"
-#include <gleditor/gl/state.hpp>
 #include "SDL_error.h"
-#include <gleditor/sdl_wrap.hpp>
-#include <gleditor/doc.hpp>
-#include <pangomm/attributes.h>
-#include <pangomm/attrlist.h>
-#include <pangomm/fontdescription.h>
-#include <gleditor/state.hpp>
 #include <SDL_video.h>
 #include <algorithm>
 #include <cairomm/context.h>
@@ -20,6 +13,10 @@
 #include <format>
 #include <fstream>
 #include <future>
+#include <gleditor/doc.hpp>
+#include <gleditor/gl/state.hpp>
+#include <gleditor/sdl_wrap.hpp>
+#include <gleditor/state.hpp>
 #include <glm/glm.hpp>
 #include <glm/gtc/matrix_transform.hpp>
 #include <glm/gtc/type_ptr.hpp>
@@ -30,6 +27,9 @@
 #include <ostream>
 #include <pango/pangocairo.h>
 #include <pangomm.h>
+#include <pangomm/attributes.h>
+#include <pangomm/attrlist.h>
+#include <pangomm/fontdescription.h>
 #include <ranges>
 #include <regex>
 #include <stdexcept>
@@ -390,7 +390,6 @@ void Renderer::initGL() {
     };
   }
 
-
   glGenFramebuffers(1, &pickingFBO);
   glGenRenderbuffers(1, &colorRBO);
   glGenRenderbuffers(1, &pickingRBO);
@@ -405,8 +404,8 @@ void Renderer::initGL() {
   glRenderbufferStorage(GL_RENDERBUFFER, GL_RG32UI, state->view.screenWidth,
                         state->view.screenHeight);
   glBindRenderbuffer(GL_RENDERBUFFER, depthRBO);
-  glRenderbufferStorage(GL_RENDERBUFFER, GL_DEPTH_COMPONENT, state->view.screenWidth,
-                        state->view.screenHeight);
+  glRenderbufferStorage(GL_RENDERBUFFER, GL_DEPTH_COMPONENT,
+                        state->view.screenWidth, state->view.screenHeight);
   glBindRenderbuffer(GL_RENDERBUFFER, 0);
 
   glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0 + 0,
@@ -432,7 +431,7 @@ bool Renderer::update(GLState &glState, AutoSDLWindow &window) {
   // std::cout << "calling update\n" << std::flush;
   static auto fullStart = std::chrono::steady_clock::now();
   const auto start      = std::chrono::steady_clock::now();
-  
+
   AutoFBO fbo(this, GL_FRAMEBUFFER);
 
   // application logic here
@@ -465,10 +464,11 @@ bool Renderer::update(GLState &glState, AutoSDLWindow &window) {
   // swap buffers;
   SDL_GL_SwapWindow(window.window);
 
-  glm::uvec2 tag(0,0);
+  glm::uvec2 tag(0, 0);
   glClampColor(GL_CLAMP_READ_COLOR, GL_FALSE);
   glReadBuffer(GL_COLOR_ATTACHMENT1);
-  glReadPixels(state->mouseX, state->mouseY, 1, 1, GL_RG_INTEGER, GL_UNSIGNED_INT, glm::value_ptr(tag));
+  glReadPixels(state->mouseX, state->mouseY, 1, 1, GL_RG_INTEGER,
+               GL_UNSIGNED_INT, glm::value_ptr(tag));
 
   if (tag.r != 0 || tag.g != 0) {
     std::cout << std::format("tagged object: {:x} {:x}\n", tag.r, tag.g);
