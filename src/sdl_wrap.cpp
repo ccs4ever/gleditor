@@ -1,4 +1,4 @@
-#include <gleditor/sdl_wrap.hpp>
+#include <gleditor/sdl_wrap.hpp> // IWYU pragma: associated
 #include <cstdint>
 #include <stdexcept>
 #include <string>

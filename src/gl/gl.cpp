@@ -1,4 +1,4 @@
-#include <gleditor/gl/gl.hpp>
+#include <gleditor/gl/gl.hpp> // IWYU pragma: associated
 #include <iostream>  // for operator<<, basic_ostream, cerr
 
 void GL::texSubImage2D(GLenum target, GLint level, GLint xoffset, GLint yoffset,

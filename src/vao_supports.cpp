@@ -1,6 +1,6 @@
 #include <gleditor/gl/state.hpp>      // for GLState
 #include <gleditor/renderer.hpp>      // for Renderer, RendererRef
-#include <gleditor/vao_supports.hpp>  // for VAOSupports
+#include <gleditor/vao_supports.hpp>  // IWYU pragma: associated
 #include <GL/glew.h>                  // for glBindBuffer, glGetIntegerv
 #include <algorithm>                  // for for_each, __sort_fn, sort
 #include <array>                      // for array

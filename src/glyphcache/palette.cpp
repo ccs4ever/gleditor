@@ -1,4 +1,4 @@
-#include <gleditor/glyphcache/palette.hpp>  // for GlyphPalette, operator<=>
+#include <gleditor/glyphcache/palette.hpp>  // IWYU pragma: associated
 #include <GL/glew.h>                      // for GLint, GL_BGRA, GL_TEXTURE_...
 #include <gleditor/glyphcache/types.hpp>  // for Rect, Point, TextureCoords
 #include <gleditor/glyphcache/lane.hpp>   // for GlyphLane, operator<=>

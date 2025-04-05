@@ -1,4 +1,4 @@
-#include <gleditor/renderer.hpp>              // for Renderer, RenderItem
+#include <gleditor/renderer.hpp>              // IWYU pragma: associated
 #include <SDL_video.h>                        // for SDL_GL_GetCurrentWindow
 #include <gleditor/doc.hpp>                   // for Doc
 #include <gleditor/gl/state.hpp>              // for GLState

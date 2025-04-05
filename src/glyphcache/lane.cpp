@@ -1,4 +1,4 @@
-#include <gleditor/glyphcache/lane.hpp>
+#include <gleditor/glyphcache/lane.hpp> // IWYU pragma: associated
 #include <compare>
 
 [[nodiscard]] std::partial_ordering operator<=>(const GlyphLane &left,

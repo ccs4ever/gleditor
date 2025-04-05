@@ -1,5 +1,5 @@
 #include <GL/glew.h>                      // for glDrawArrays, GL_ARRAY_BUFFER
-#include <gleditor/doc.hpp>               // for Page, Doc
+#include <gleditor/doc.hpp>               // IWYU pragma: associated
 #include <gleditor/gl/state.hpp>          // for GLState
 #include <gleditor/renderer.hpp>          // for Renderer, RendererRef
 #include <gleditor/vao_supports.hpp>      // for VAOSupports

@@ -1,6 +1,6 @@
 #include <cairomm/context.h>                // for Context
 #include <cairomm/surface.h>                // for ImageSurface, Surface
-#include <gleditor/glyphcache/cache.hpp>    // for GlyphCache, FontMapKeyAda...
+#include <gleditor/glyphcache/cache.hpp>    // IWYU pragma: associated
 #include <gleditor/glyphcache/types.hpp>    // for TextureCoords, Rect
 #include <GL/glew.h>                        // for glTexParameteri, GL_TEXTU...
 #include <gleditor/gl/gl.hpp>               // for GL
