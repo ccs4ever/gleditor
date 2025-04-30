@@ -15,7 +15,6 @@ coverage.lcov
 gleditor_test.prof
 
 # Executables
-gleditor
 gleditor_test
 
 # Compiled Object files
