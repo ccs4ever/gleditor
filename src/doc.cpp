@@ -46,7 +46,7 @@ glm::vec3 lwh(uint i) {
 Page::Page(std::shared_ptr<Doc> aDoc, GLState &state, glm::mat4 &model,
            Glib::RefPtr<Pango::Layout> aLayout)
     : Drawable(model), doc(std::move(aDoc)), layout(std::move(aLayout)) {
-  static_assert(sizeof(Doc::VBORow) == 48);
+  static_assert(sizeof(DocVBORow) == 48);
   const auto &line  = layout->get_const_line(layout->get_line_count() - 1);
   int len           = line->get_length();
   const int charCnt = line->get_start_index() + (0 == len ? 1 : len);
@@ -77,22 +77,22 @@ Page::Page(std::shared_ptr<Doc> aDoc, GLState &state, glm::mat4 &model,
       3, 2, 1, // (rt, lt, rb) ccw
   };
   */
-  auto color   = Doc::VBORow::color;
-  auto color3  = Doc::VBORow::color3;
-  auto layerWH = Doc::VBORow::layerWidthHeight;
+  auto color   = DocVBORow::color;
+  auto color3  = DocVBORow::color3;
+  auto layerWH = DocVBORow::layerWidthHeight;
   auto xMargin = 2;
   auto yMargin = 2;
   auto layW = float(layout->get_logical_extents().get_width()) / PANGO_SCALE +
               float(xMargin) * 2;
   auto layH = float(layout->get_logical_extents().get_height()) / PANGO_SCALE +
               float(yMargin) * 2;
-  std::vector<Doc::VBORow> vertexData = {
+  std::vector<DocVBORow> vertexData = {
       // left-bottom,  white, black, tex: left-top, layer0
-      // Doc::VBORow{{0.0, -2.0, 1.0}, color(255), color(0), {0.0, 1.0}, 0},
+      // DocVBORow{{0.0, -2.0, 1.0}, color(255), color(0), {0.0, 1.0}, 0},
       // right-bottom, white, black, tex: right-top, layer0
-      // Doc::VBORow{{2.0, -2.0, 1.0}, color(255), color(0), {1.0, 1.0}, 0},
+      // DocVBORow{{2.0, -2.0, 1.0}, color(255), color(0), {1.0, 1.0}, 0},
       // left-top, white, black, tex: left-bottom, layer0
-      Doc::VBORow{{layW / 32.0F, -layH / 48.0F, 0},
+      DocVBORow{{layW / 32.0F, -layH / 48.0F, 0},
                   color(0),
                   color(255),
                   {0, 0},
@@ -211,7 +211,7 @@ Page::Page(std::shared_ptr<Doc> aDoc, GLState &state, glm::mat4 &model,
     // std::cout << "xpen sent: " << xpen << "\n";
     vboPos++;
     *vertIter =
-        Doc::VBORow({xpen, -ypen / 30.0F, 0.1}, color(0), color(255),
+        DocVBORow({xpen, -ypen / 30.0F, 0.1}, color(0), color(255),
                     {coords.topLeft.x, coords.topLeft.y},
                     {coords.box.width, coords.box.height},
                     layerWH(0, uint(extents.width), uint(extents.height)),
@@ -233,8 +233,8 @@ Page::Page(std::shared_ptr<Doc> aDoc, GLState &state, glm::mat4 &model,
       vertIter = vertexData.begin();
       glBufferSubData(GL_ARRAY_BUFFER,
                       pageBackingHandle.vbo.offset +
-                          (vboPos - (vertMax - 1)) * sizeof(Doc::VBORow),
-                      vertMax * sizeof(Doc::VBORow), vertexData.data());
+                          (vboPos - (vertMax - 1)) * sizeof(DocVBORow),
+                      vertMax * sizeof(DocVBORow), vertexData.data());
     }
     lastIdx = idx;
     iter.next_cluster();
@@ -246,8 +246,8 @@ Page::Page(std::shared_ptr<Doc> aDoc, GLState &state, glm::mat4 &model,
     vertIter = vertexData.begin();
     glBufferSubData(GL_ARRAY_BUFFER,
                     pageBackingHandle.vbo.offset +
-                        (vboPos - (dist - 1)) * sizeof(Doc::VBORow),
-                    dist * sizeof(Doc::VBORow), vertexData.data());
+                        (vboPos - (dist - 1)) * sizeof(DocVBORow),
+                    dist * sizeof(DocVBORow), vertexData.data());
   }
 
 #if 0
@@ -307,7 +307,7 @@ void Page::draw(const GLState &state, const glm::mat4 &docModel) {
   // performance penalties apparently
   state.glyphCache.bindTexture(0);
   glDrawArrays(GL_POINTS,
-               (int)pageBackingHandle.vbo.offset / sizeof(Doc::VBORow), 1);
+               (int)pageBackingHandle.vbo.offset / sizeof(DocVBORow), 1);
   glUniform1f(state.programs.at("main")["cubeDepth"], 0);
   glUniformMatrix4fv(
       state.programs.at("main")["model"], 1, GL_FALSE,
@@ -315,8 +315,8 @@ void Page::draw(const GLState &state, const glm::mat4 &docModel) {
                      // glm::translate(model, glm::vec3(-0.1F, 0.1F, 0.1F))
                      ));
   glDrawArrays(GL_POINTS,
-               (int)pageBackingHandle.vbo.offset / sizeof(Doc::VBORow) + 1,
-               pageBackingHandle.vbo.size / sizeof(Doc::VBORow) - 1);
+               (int)pageBackingHandle.vbo.offset / sizeof(DocVBORow) + 1,
+               pageBackingHandle.vbo.size / sizeof(DocVBORow) - 1);
   GlyphCache::clearTexture();
   // TODO: add glyph boxes
   for (const auto &handle : glyphs) {
@@ -334,7 +334,7 @@ void Doc::draw(const GLState &state) {
   }
 }
 
-Doc::Doc(RendererRef aRenderer, glm::mat4 model, std::string &fileName,
+Doc::Doc(AbstractRendererRef aRenderer, glm::mat4 model, std::string &fileName,
          [[maybe_unused]] Doc::Private _priv)
     : Doc(std::move(aRenderer), model, _priv) {
   docFile             = fileName;
@@ -452,12 +452,12 @@ void Doc::makePages(GLState &glState) {
             << " valid?: " << bool(attrs) << "\n";*/
 }
 
-Doc::Doc(RendererRef renderer, glm::mat4 model,
+Doc::Doc(AbstractRendererRef renderer, glm::mat4 model,
          [[maybe_unused]] Doc::Private _priv)
     : Drawable(model),
       VAOSupports(std::move(renderer),
                   VAOSupports::VAOBuffers(
-                      VAOSupports::VAOBuffers::Vbo(sizeof(VBORow), 10000000),
+                      VAOSupports::VAOBuffers::Vbo(sizeof(DocVBORow), 10000000),
                       VAOSupports::VAOBuffers::Ibo(sizeof(unsigned int), 1))) {}
 
 void Doc::newPage(GLState &state, Glib::RefPtr<Pango::Layout> &layout) {

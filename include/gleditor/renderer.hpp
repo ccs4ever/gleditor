@@ -1,11 +1,11 @@
 #ifndef GLEDITOR_RENDERER_H
 #define GLEDITOR_RENDERER_H
 
-#include <gleditor/tqueue.hpp>
 #include <array>
 #include <concepts>
 #include <cstdint>
 #include <functional>
+#include <gleditor/tqueue.hpp>
 #include <memory>
 #include <mutex>
 #include <string>
@@ -18,7 +18,10 @@
 #include <gleditor/log.hpp>
 #include <gleditor/state.hpp>
 
+namespace gledit {
+
 struct AutoSDLWindow;
+class RenderSupports;
 
 struct RenderItem {
   enum class Type : std::uint8_t {
@@ -59,21 +62,66 @@ struct RenderItemRun : public RenderItem {
   void operator()() const { fun(); }
 };
 
-class Renderer : public Loggable,
-                 public std::enable_shared_from_this<Renderer> {
-private:
-  unsigned int pickingFBO, pickingRBO, colorRBO, depthRBO;
+class AbstractRenderer : public Loggable,
+                         public std::enable_shared_from_this<AbstractRenderer> {
+protected:
   std::mutex mtx;
   TQueue<RenderItem> renderQueue;
   AppStateRef state;
   std::thread::id renderThreadId;
-  // token to keep anything other than Renderer::create from using our
+  // token to keep anything other than *Renderer::create from using our
   // constructor
   struct Private {
     explicit Private() = default;
   };
 
+public:
+  struct AutoProgram {
+    const AbstractRenderer *renderer;
+    AutoProgram(const AbstractRenderer *aRenderer, const std::string &progName)
+        : renderer(aRenderer) {
+      renderer->useProgram(progName);
+    }
+    ~AutoProgram() { renderer->clearProgram(); }
+  };
+  virtual void useProgram(const std::string &progName) const = 0;
+  virtual void clearProgram() const                          = 0;
+  std::shared_ptr<AbstractRenderer> getPtr() { return shared_from_this(); }
+  AbstractRenderer(AppStateRef aState, [[maybe_unused]] Private _priv)
+      : state(std::move(aState)) {}
+  ~AbstractRenderer() override = default;
+  static std::shared_ptr<AbstractRenderer> create(AppStateRef appState) {
+    return std::make_shared<AbstractRenderer>(appState, Private());
+  }
+  void operator()(AutoSDLWindow &window);
+  void run(std::invocable auto fun) {
+    if (std::this_thread::get_id() == renderThreadId) {
+      fun();
+    } else {
+      renderQueue.push(RenderItemRun(fun));
+    }
+  }
+  void run(std::invocable<AbstractRenderer *> auto fun) {
+    if (std::this_thread::get_id() == renderThreadId) {
+      fun(this);
+    } else {
+      renderQueue.push(RenderItemRun(std::bind(fun, this)));
+    }
+  }
+  template <typename Item>
+    requires std::derived_from<Item, RenderItem>
+  void push(const Item &item) {
+    renderQueue.push(item);
+  }
+  std::string_view defaultFontName() const { return state->defaultFontName; }
+};
+
+using AbstractRendererRef = std::shared_ptr<AbstractRenderer>;
+
+class Renderer : public AbstractRenderer {
+
 protected:
+  unsigned int pickingFBO, pickingRBO, colorRBO, depthRBO;
   void openDoc(GLState &glState, AutoSDLWindow &window, std::string &fileName);
   void newDoc(GLState &glState, AutoSDLWindow &window);
   void setupGL(const GLState &glState);
@@ -82,6 +130,14 @@ protected:
   void initGL();
 
 public:
+  struct AutoVAO {
+    const RenderSupports *support;
+    AutoVAO(const RenderSupports *aSupport) : support(aSupport) {
+      support->bindVAO();
+    }
+
+    ~AutoVAO() { RenderSupports::clearVAO(); }
+  };
   struct AutoFBO {
     const Renderer *renderer;
     GLenum target;
@@ -98,35 +154,8 @@ public:
     glDrawBuffers(2, arr.data());
   }
   static void clearFBO(GLenum target) { glBindFramebuffer(target, 0); }
-  static std::shared_ptr<Renderer> create(AppStateRef appState) {
-    return std::make_shared<Renderer>(appState, Private());
-  }
-  std::shared_ptr<Renderer> getPtr() { return shared_from_this(); }
-  Renderer(AppStateRef state, [[maybe_unused]] Private _priv)
-      : state(std::move(state)) {}
-  void operator()(AutoSDLWindow &window);
-  void run(std::invocable auto fun) {
-    if (std::this_thread::get_id() == renderThreadId) {
-      fun();
-    } else {
-      renderQueue.push(RenderItemRun(fun));
-    }
-  }
-  void run(std::invocable<Renderer *> auto fun) {
-    if (std::this_thread::get_id() == renderThreadId) {
-      fun(this);
-    } else {
-      renderQueue.push(RenderItemRun(std::bind(fun, this)));
-    }
-  }
-  template <typename Item>
-    requires std::derived_from<Item, RenderItem>
-  void push(const Item &item) {
-    renderQueue.push(item);
-  }
-  std::string_view defaultFontName() const { return state->defaultFontName; }
 };
 
-using RendererRef = std::shared_ptr<Renderer>;
+} // namespace gledit
 
 #endif // GLEDITOR_RENDERER_H

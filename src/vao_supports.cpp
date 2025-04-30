@@ -32,18 +32,17 @@ template <typename... Args> inline void clearBuffers(Args... args) {
 }
 ///
 
-VAOSupports::VAOSupports(RendererRef renderer, VAOBuffers bufferInfos)
-    : renderer(std::move(renderer)), bufferInfos(std::move(bufferInfos)) {
+namespace gledit {
 
-  this->bufferInfos.vbo.free.emplace_back(0, this->bufferInfos.vbo.maxVertices);
-  this->bufferInfos.ibo.free.emplace_back(0, this->bufferInfos.ibo.maxIndices);
+RenderSupports::RenderSupports(AbstractRendererRef renderer)
+    : renderer(std::move(renderer)) {
 
   this->renderer->run([this] { allocateBuffers(); });
 }
-VAOSupports::~VAOSupports() {
+RenderSupports::~RenderSupports() {
   renderer->run([this] { deallocateBuffers(); });
 }
-void VAOSupports::allocateBuffers() {
+void RenderSupports::allocateBuffers() {
 
   genVertexArrays(&vao);
   genBuffers(&vbo, &ibo, &ubo);
@@ -85,7 +84,7 @@ void VAOSupports::allocateBuffers() {
   glBindBuffer(GL_UNIFORM_BUFFER, 0);
 }
 
-void VAOSupports::deallocateBuffers() {
+void RenderSupports::deallocateBuffers() {
 
   clearBuffers();
 
@@ -287,3 +286,5 @@ VAOSupports::Handle VAOSupports::reserve(unsigned int type, long res) {
   }
   return ret;
 }
+
+} // gledit namespace
