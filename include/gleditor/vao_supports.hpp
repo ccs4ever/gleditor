@@ -1,21 +1,16 @@
-#ifndef GLEDITOR_RENDER_SUPPORTS_H
-#define GLEDITOR_RENDER_SUPPORTS_H
+#ifndef GLEDITOR_VAO_SUPPORTS_H
+#define GLEDITOR_VAO_SUPPORTS_H
 
 #include <cstdint>
 #include <gleditor/renderer.hpp>
-#include <gleditor/renderer/buffer.hpp>
 #include <list>
-#include <memory>
 #include <string>
 #include <sys/types.h>
 #include <utility>
-#include <vector>
 
 struct GLState;
 
-namespace gledit {
-
-class RenderSupports {
+class VAOSupports {
 public:
   struct Handle {
     struct Vbo {
@@ -38,20 +33,55 @@ protected:
     uint data2{};
   };
   using FreeList = std::list<std::pair<std::uint32_t, std::uint32_t>>;
+  struct VAOBuffers {
+    struct Vbo {
+      Vbo(int stride, long maxQuads) : stride(stride), maxVertices(maxQuads) {}
+      int stride{};
+      long maxVertices{};
+      FreeList free;
+    } vbo;
+    struct Ibo {
+      Ibo(int stride, long maxQuads) : stride(stride), maxIndices(maxQuads) {}
+      int stride{};
+      long maxIndices{};
+      FreeList free;
+    } ibo;
+    VAOBuffers(Vbo vbo, Ibo ibo) : vbo(std::move(vbo)), ibo(std::move(ibo)) {}
+  };
+  struct AutoVAO {
+    const VAOSupports *support;
+    AutoVAO(const VAOSupports *aSupport) : support(aSupport) {
+      support->bindVAO();
+    }
 
-  RenderSupports(AbstractRendererRef renderer);
-  virtual ~RenderSupports();
+    ~AutoVAO() { VAOSupports::clearVAO(); }
+  };
+  struct AutoProgram {
+    const VAOSupports *support;
+    AutoProgram(const VAOSupports *aSupport, const GLState &state,
+                const std::string &progName)
+        : support(aSupport) {
+      support->useProgram(state, progName);
+    }
+
+    ~AutoProgram() { VAOSupports::clearProgram(); }
+  };
+
+  VAOSupports(RendererRef renderer, VAOBuffers bufferInfos);
+  virtual ~VAOSupports();
+  void useProgram(const GLState &state, const std::string &progName) const;
+  static void clearProgram();
   void bindVAO() const;
   static void clearVAO();
   Handle reserveTriangles(long triangles);
   Handle reserveQuads(long quads);
   Handle reservePoints(long points);
 
-  unsigned int vao;
-  std::vector<std::shared_ptr<renderer::AbstractBuffer>> buffers;
-  AbstractRendererRef renderer;
+  unsigned int vao, vbo, ibo, ubo;
+  RendererRef renderer;
 
 private:
+  VAOBuffers bufferInfos;
   Handle reserve(unsigned int type, long res);
   static auto findFreeOffset(FreeList &freeList, long rows);
   void reallocate(long vertexRes, long indexRes);
@@ -61,6 +91,4 @@ private:
   void defragmentFreeLists();
 };
 
-} // namespace gledit
-
-#endif // GLEDITOR_RENDER_SUPPORTS_H
+#endif // GLEDITOR_VAO_SUPPORTS_H
