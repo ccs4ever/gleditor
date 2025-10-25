@@ -1,4 +1,23 @@
-CXX = clang++
+
+#SHELL = thirdparty/cosmocc/bin/cocmd
+SHELL = thirdparty/cosmos/bin/dash
+
+#STATIC = --static
+STATIC =
+
+CXX = $(shell which clang++)
+#CXX = thirdparty/cosmocc-4.0.2/bin/cosmoc++ -mclang
+#CXX = thirdparty/cosmocc/bin/x86_64-linux-cosmo-gcc
+# cocmd gives us a builtin in-process sed hook
+#SED = thirdparty/cosmos/bin/sed
+SED = sed
+# cocmd builtin rm doesn't currently support -r
+#RM = thirdparty/cosmos/bin/rm
+RM = rm
+CKSUM = thirdparty/cosmos/bin/cksum
+# cocmd builtin mkdir is sufficient for our needs
+#MKDIR = thirdparty/cosmos/bin/mkdir
+MKDIR = mkdir
 # removed spdlog
 PKGS := pangomm-2.48 sdl2 SDL2_image gl glu glew
 TEST_PKGS := gmock_main
@@ -12,53 +31,98 @@ SANITIZE_MEM_OPTS := -fsanitize=memory,undefined,integer -fPIE -pie -fno-omit-fr
 DEBUG_OPTS := -g -gembed-source -fdebug-macro -O0
 PROFILE_OPTS := -fprofile-instr-generate -fcoverage-mapping -fcoverage-mcdc
 else
-DEBUG_OPTS := -O3 -flto -g
+DEBUG_OPTS := -O3 -g
 endif
-override CXXFLAGS += $(DEBUG_OPTS) -std=c++23 -Iinclude -Ithirdparty/Choreograph/src -Ithirdparty/argparse/include -Wall -Wextra $(shell pkg-config --cflags $(PKGS))
-override LDFLAGS += $(DEBUG_OPTS) -rtlib=compiler-rt 
+override CXXFLAGS += $(DEBUG_OPTS) -std=c++23 -Ibuild/src -Iinclude -Ithirdparty/Choreograph/src -Ithirdparty/argparse/include -Wall -Wextra $(shell pkg-config $(STATIC) --cflags $(PKGS))
+override LDFLAGS += $(DEBUG_OPTS) $(findstring $(STATIC),-static) -rtlib=compiler-rt 
 # XXX: work on this in a separate branch, get tests working again for now
 #CXXFLAGS += -stdlib=libc++ -fexperimental-library 
 #LDFLAGS += -v -stdlib=libc++ -fexperimental-library 
-LIBS := $(shell pkg-config --libs $(PKGS))
+LIBS := $(shell pkg-config $(STATIC) --libs $(PKGS))
 SHARED_SRCS := $(shell find thirdparty/Choreograph/src/ src/ -name '*.cpp' -a ! -name main.cpp )
 SRCS := $(SHARED_SRCS) src/main.cpp
 TEST_SRCS := $(SHARED_SRCS) $(shell find tests/ -name '*.cpp')
-OBJS := $(patsubst %.cpp,%.o,$(SRCS))
-TEST_OBJS := $(patsubst %.cpp,%.o,$(TEST_SRCS))
+OBJDIR := build/
+OBJS := $(addprefix $(OBJDIR)/,$(patsubst %.cpp,%.o,$(SRCS)))
+TEST_OBJS := $(addprefix $(OBJDIR)/,$(patsubst %.cpp,%.o,$(TEST_SRCS)))
+OBJ_DIRS := $(sort $(dir $(OBJS)))
+TEST_OBJ_DIRS := $(sort $(dir $(TEST_OBJS)))
 ALL_OBJS := $(sort $(OBJS) $(TEST_OBJS))
-DEPS := $(sort $(patsubst %.cpp,%.dep,$(TEST_SRCS) $(SRCS)))
-JFILES := $(sort $(patsubst %.cpp,%.j,$(TEST_SRCS) $(SRCS)))
+ALL_OBJ_DIRS := $(sort $(OBJDIR)/ $(OBJDIR)/tmp/ $(OBJ_DIRS) $(TEST_OBJ_DIRS))
+DEPS := $(sort $(patsubst %.o,%.dep,$(TEST_OBJS) $(OBJS)))
+JFILES := $(sort $(patsubst %.o,%.j,$(TEST_OBJS) $(OBJS)))
 
-all: gleditor gleditor_test compile_commands.json
+ifneq ($(LANDLOCKMAKE_VERSION),)
+.STRICT = 1
+.UNVEIL = \
+	rwcx:$(OBJDIR)/ \
+	rwcx:$(OBJDIR)/src/ \
+	rwcx:$(OBJDIR)/tmp/ \
+	rx:thirdparty/ \
+	include/ src/ tests/ \
+	rw:/dev/null \
+	rx:/usr/bin/ \
+	rx:/usr/include/ \
+	$(shell pkg-config $(STATIC) --cflags-only-I $(PKGS) $(TEST_PKGS) | $(SED) 's/ *-I\([^ ]*\)/\1\n/g')
 
-$(TEST_OBJS): CXXFLAGS += $(shell pkg-config --cflags $(TEST_PKGS))
+.PLEDGE = exec proc prot_exec stdio rpath wpath cpath
+
+endif
+
+.FEATURES = output-sync
+
+
+all: gleditor gleditor_test $(OBJDIR)/compile_commands.json
+
+# cannot unveil a nonexistant directory, have to remove the sandbox for
+# just the directory creation
+$(ALL_OBJ_DIRS): private .UNSANDBOXED = 1
+$(ALL_OBJ_DIRS):
+	[ -d "$@" ] || $(MKDIR) -p "$@"
+
+$(TEST_OBJS): | $(OBJDIR)/ $(OBJDIR)/tmp/ $(TEST_OBJ_DIRS)
+$(OBJS): | $(OBJDIR)/ $(OBJDIR)/tmp/ $(OBJ_DIRS)
+$(DEPS) $(JFILES) $(OBJDIR)/src/config.h: | $(OBJDIR)/ $(OBJDIR)/tmp/ $(OBJ_DIRS) $(TEST_OBJ_DIRS)
+$(TEST_OBJS): CXXFLAGS += $(shell pkg-config $(STATIC) --cflags $(TEST_PKGS))
 
 ifeq (,$(filter clean,$(MAKECMDGOALS)))
-MKCFG = sed 's/\@\@VERS\@\@/$(VERS)/'
-src/config.h: src/config.h.in $(VERS)
-	@[ "`$(MKCFG) $< | cksum`" = "`cat $@ 2>/dev/null | cksum`" ] || \
+MKCFG = $(SED) 's/\@\@VERS\@\@/$(VERS)/'
+# cmd ... | read var is the only way to mimic subshells in cocmd
+# only supported elsewhere in zsh and possibly ksh
+ifeq ($(findstring cocmd,$(SHELL)),cocmd)
+$(OBJDIR)/src/config.h: src/config.h.in $(VERS)
+	@$(MKCFG) $< | read cfg; \
+	[ -e $@ ] && cat $@ | read origCfg; \
+	[ "$$cfg" = "$$origCfg" ] || \
+	echo $$cfg > $@
+else
+$(OBJDIR)/src/config.h: src/config.h.in $(VERS)
+	@[ "`$(MKCFG) $< | $(CKSUM)`" = "`cat $@ 2>/dev/null | $(CKSUM)`" ] || \
 	$(MKCFG) $< > $@
+endif
 .PHONY: $(VERS)
 endif
 
-src/main.o src/main.dep: src/config.h
+$(OBJDIR)/src/main.o $(OBJDIR)/src/main.dep: $(OBJDIR)/src/config.h
 
-gleditor: $(OBJS)
-	$(CXX) $(LIBS) $(LDFLAGS) $(OBJS) -o gleditor
+gleditor: $(OBJDIR)/gleditor
+$(OBJDIR)/gleditor: $(OBJS)
+	$(CXX) $(LIBS) $(LDFLAGS) -o $@ $^
+.PHONY: gleditor
 
 sanitize/address: CXXFLAGS += $(SANITIZE_ADDR_OPTS)
 sanitize/address: LDFLAGS += $(SANITIZE_ADDR_OPTS)
 sanitize/address: gleditor
 
 sanitize/address/run: sanitize/address
-	ASAN_OPTIONS=check_initialization_order=1:detect_leaks=1:strict_string_checks=1 ./gleditor
+	ASAN_OPTIONS=check_initialization_order=1:detect_leaks=1:strict_string_checks=1 $(OBJDIR)/gleditor
 
 sanitize/thread: CXXFLAGS += $(SANITIZE_THR_OPTS)
 sanitize/thread: LDFLAGS += $(SANITIZE_THR_OPTS)
 sanitize/thread: gleditor
 
 sanitize/thread/run: sanitize/thread
-	TSAN_OPTIONS=second_deadlock_stack=1:detect_leaks=1:strict_string_checks=1 ./gleditor
+	TSAN_OPTIONS=second_deadlock_stack=1:detect_leaks=1:strict_string_checks=1 $(OBJDIR)/gleditor
 
 # Only use if your entire library chain has been compiled with MSAN
 # otherwise it will generate a neverending wave of false positives from SDL/stdlib
@@ -67,14 +131,16 @@ sanitize/memory: LDFLAGS += $(SANITIZE_MEM_OPTS)
 sanitize/memory: gleditor
 
 sanitize/memory/run: sanitize/memory
-	MSAN_OPTIONS=check_initialization_order=1:detect_leaks=1:strict_string_checks=1 ./gleditor
+	MSAN_OPTIONS=check_initialization_order=1:detect_leaks=1:strict_string_checks=1 $(OBJDIR)/gleditor
 
 
-gleditor_test: $(TEST_OBJS)
-	$(CXX) $(LIBS) $(LDFLAGS) $(shell pkg-config --libs $(TEST_PKGS)) $(TEST_OBJS) -o gleditor_test
+.PHONY: gleditor_test
+gleditor_test: $(OBJDIR)/gleditor_test
+$(OBJDIR)/gleditor_test: $(TEST_OBJS)
+	$(CXX) $(LIBS) $(LDFLAGS) $(shell pkg-config $(STATIC) --libs $(TEST_PKGS)) -o $@ $^
 
-test: gleditor_test
-	./gleditor_test
+test: $(OBJDIR)/gleditor_test
+	$(OBJDIR)/gleditor_test
 
 # produces gleditor_test.prof (a human-readable code coverage report) and
 # coverage.lcov (a coverage report in lcov format) suitable for feeding into other tools like NeoVim
@@ -83,56 +149,60 @@ profile: LDFLAGS += $(PROFILE_OPTS)
 profile: gleditor_test
 	set -e; \
 	raw=gleditor_test.profraw; data=gleditor_test.profdata; \
-	trap "rm -f $${raw} $${data}" EXIT HUP KILL TERM; \
+	trap "$(RM) -f $${raw} $${data}" EXIT HUP KILL TERM; \
 	seq 1 100 | while read f; do \
-		echo "*\c"; LLVM_PROFILE_FILE=$${raw} ./gleditor_test 2>&1 >/dev/null; \
+		echo "*\c"; LLVM_PROFILE_FILE=$${raw} $(OBJDIR)/gleditor_test 2>&1 >/dev/null; \
 	done; echo; \
 	llvm-profdata merge -sparse $${raw} -o $${data}; \
-	llvm-cov show ./gleditor_test -instr-profile=$${data} \
+	llvm-cov show $(OBJDIR)/gleditor_test -instr-profile=$${data} \
 		-show-line-counts-or-regions -show-branches=count -show-expansions > gleditor_test.prof; \
-	llvm-cov export ./gleditor_test --format=lcov --instr-profile=$${data} > coverage.lcov; \
-	rm -f $${raw} $${data};
+	llvm-cov export $(OBJDIR)/gleditor_test --format=lcov --instr-profile=$${data} > coverage.lcov; \
+	$(RM) -f $${raw} $${data};
 
 profile/main: CXXFLAGS += $(PROFILE_OPTS)
 profile/main: LDFLAGS += $(PROFILE_OPTS)
 profile/main: gleditor
 	set -e; \
 	raw=gleditor.profraw; data=gleditor.profdata; \
-	trap "rm -f $${raw} $${data}" EXIT HUP KILL TERM; \
+	trap "$(RM) -f $${raw} $${data}" EXIT HUP KILL TERM; \
 	seq 1 1 | while read f; do \
-		echo "*\c"; LLVM_PROFILE_FILE=$${raw} ./gleditor --font "Serif 16" --profile --file kjv.txt 2>&1 >/dev/null; \
+		echo "*\c"; LLVM_PROFILE_FILE=$${raw} $(OBJDIR)/gleditor --font "Serif 16" --profile --file kjv.txt 2>&1 >/dev/null; \
 	done; echo; \
 	llvm-profdata merge -sparse $${raw} -o $${data}; \
 	export DEBUGINFOD_URLS=https://debuginfod.ubuntu.com; \
-	llvm-cov show ./gleditor -instr-profile=$${data} \
+	llvm-cov show $(OBJDIR)/gleditor -instr-profile=$${data} \
 	        -debuginfod \
 		-show-line-counts-or-regions -show-mcdc \
 		-show-branches=count -show-expansions > gleditor.prof; \
-	llvm-cov export ./gleditor --format=lcov -debuginfod -instr-profile=$${data} > coverage.lcov; \
-	rm -f $${raw} $${data};
+	llvm-cov export $(OBJDIR)/gleditor --format=lcov -debuginfod -instr-profile=$${data} > coverage.lcov; \
+	$(RM) -f $${raw} $${data};
 
 
-run: gleditor
-	./gleditor
+run: private .UNVEIL += rx:gleditor
+run: $(OBJDIR)/gleditor
+	$(OBJDIR)/gleditor
 
 doc:
 	doxygen
 
+clean: private .UNVEIL += w:gleditor w:gleditor_test
 clean:
-	@rm -rf gleditor gleditor_test $(shell find src tests -name '*.[oj]' -o -name '*.dep' -o -name '*.dep.[0-9]*')
+	@$(RM) -rf gleditor gleditor_test build
 
+$(OBJDIR)/%.o: %.cpp
+	$(COMPILE.cpp) $(OUTPUT_OPTION) $<
 
-%.dep: %.cpp
-	set -e; rm -f $@; \
+$(OBJDIR)/%.dep: %.cpp
+	set -e; $(RM) -f $@; \
 	$(CXX) -MM $(CXXFLAGS) $< > $@.$$$$; \
-	sed 's,\($(*F)\)\.o[ :]*,$*.o $*.j : ,g' < $@.$$$$ > $@; \
-	rm -f $@.$$$$
+	$(SED) 's,\($(*F)\)\.o[ :]*,$*.o $*.j : ,g' < $@.$$$$ > $@; \
+	$(RM) -f $@.$$$$
 
-%.j: %.cpp
+$(OBJDIR)/%.j: %.cpp
 	$(CXX) -MJ $@ $(CXXFLAGS) -E $< > /dev/null
 		
-compile_commands.json: $(JFILES)
-	{ echo '['; find . -name '*.j' -exec cat '{}' +; echo ']'; } > compile_commands.json
+$(OBJDIR)/compile_commands.json: $(JFILES)
+	{ echo '['; cat $^; echo ']'; } > $@
 
 
 .PHONY: clean doc run test profile sanitize/address sanitize/address/run sanitize/thread sanitize/thread/run \
