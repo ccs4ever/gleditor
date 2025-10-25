@@ -138,18 +138,20 @@ int handleArgs(const AppStateRef &state, RendererRef &renderer, int argc,
   parser.add_argument("--font")
       .default_value("Monospace 16")
       .help("default font to use for display");
-  parser.add_argument("-f", "--file").help("path to document to open");
   parser.add_argument("--profile")
       .help("open document specified by -f/--file then quit")
       .flag();
+  parser.add_argument("files").help("input files").remaining();
 
   try {
 
     parser.parse_args(argc, argv);
 
     state->defaultFontName = parser.get("--font");
-    if (parser.present("--file")) {
-      renderer->push(RenderItemOpenDoc(parser.get("--file")));
+    auto files = parser.get<std::vector<std::string>>("files");
+    for (const auto& file : files) {
+      std::cout << "file: " << file << "\n";
+      renderer->push(RenderItemOpenDoc(file));
     }
     state->profiling = parser["--profile"] == true;
 
@@ -190,7 +192,8 @@ int main(int argc, char **argv) {
 
     AutoSDLWindow window("GL Editor", SDL_WINDOWPOS_UNDEFINED,
                          SDL_WINDOWPOS_UNDEFINED, state->view.screenWidth,
-                         state->view.screenHeight, SDL_WINDOW_OPENGL,
+                         state->view.screenHeight,
+                         SDL_WINDOW_OPENGL|SDL_WINDOW_RESIZABLE|SDL_WINDOW_ALLOW_HIGHDPI,
                          icon.surface);
 
     std::jthread renderer(std::ref(*rend), std::ref(window));
