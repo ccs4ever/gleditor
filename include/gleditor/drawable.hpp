@@ -10,6 +10,7 @@ protected:
 public:
   Drawable(glm::mat4 model) : model(model) {}
   virtual ~Drawable() = default;
+  [[nodiscard]] glm::mat4 getModel() const { return model; }
 };
 
 #endif // GLEDITOR_DRAWABLE_H

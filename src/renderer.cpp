@@ -34,6 +34,7 @@
 #include "SDL_error.h"                        // for SDL_GetError
 #include <gleditor/gl/gl.hpp>                 // for GL
 #include <gleditor/tqueue.hpp>                // for TQueue
+#include <glm/gtx/string_cast.hpp>
 
 void Renderer::setupGL(const GLState &glState) {
 
@@ -49,7 +50,7 @@ void Renderer::setupGL(const GLState &glState) {
     glm::mat4 projection = glm::perspective(glm::radians(state->view.fov),
                                             (float)state->view.screenWidth /
                                                 (float)state->view.screenHeight,
-                                            0.1F, 1000.0F);
+                                            0.1F, 10000.0F);
     glm::mat4 view =
         glm::lookAt(state->view.pos, state->view.pos + state->view.front,
                     state->view.upward);
@@ -151,9 +152,13 @@ void Renderer::newDoc(GLState &glState, AutoSDLWindow &window) {
 
 void Renderer::openDoc(GLState &glState, AutoSDLWindow &window,
                        std::string &fileName) {
-  auto docPtr = Doc::create(getPtr(), glm::mat4(1.0), fileName);
-  static std::future<void> fut = std::async(
-      std::launch::async, [&glState, docPtr] { docPtr->makePages(glState); });
+  static std::vector<std::future<void>> futs;
+  auto num = glState.docs.size();
+  auto mat = glm::translate(glm::mat4(1.0), glm::vec3(50.0 * num, 0.0, 0.0));
+  std::cout << "doc pos: " << num << " " << glm::to_string(mat) << "\n";
+  auto docPtr = Doc::create(getPtr(), mat, fileName);
+  futs.push_back(std::async(
+      std::launch::async, [&glState, docPtr] { docPtr->makePages(glState); }));
   glState.docs.push_back(docPtr->getPtr());
 }
 
@@ -448,6 +453,7 @@ bool Renderer::update(GLState &glState, AutoSDLWindow &window) {
   }
 
   for (const std::shared_ptr<Doc> &doc : glState.docs) {
+    //std::cout << "drawing doc " << &doc << ": " << glm::to_string(doc->getModel()) << "\n";
     doc->draw(glState);
   }
 
@@ -505,12 +511,14 @@ void Renderer::operator()(AutoSDLWindow &window) {
     }
     while (auto item = renderQueue.pop()) {
       switch (item->type) {
-      case RenderItem::Type::NewDoc:
+      case RenderItem::Type::NewDoc: {
         newDoc(glState, window);
         break;
-      case RenderItem::Type::Resize:
+      }
+      case RenderItem::Type::Resize: {
         resize();
         break;
+      }
       case RenderItem::Type::OpenDoc: {
         auto *docItem = dynamic_cast<RenderItemOpenDoc *>(item.get());
         openDoc(glState, window, docItem->docFile);
