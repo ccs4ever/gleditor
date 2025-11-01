@@ -1,0 +1,76 @@
+# Conan v2 configuration for gleditor
+# This project uses GNU Make and pkg-config. We rely on Conan to provide
+# pkg-config files via the PkgConfigDeps generator and to set up build/run
+# environments. No CMake is required.
+#
+# Usage (example):
+#   - Install dependencies into an output folder (e.g., build/conan):
+#       conan profile detect --force
+#       conan install . -of build/conan -s build_type=Release --build=missing
+#   - Activate build environment and pkg-config path for Make:
+#       source build/conan/conanbuild.sh
+#   - Build as usual:
+#       make
+#   - To run binaries that need Conan-provided runtime libs:
+#       source build/conan/conanrun.sh
+#       ./build/gleditor
+#
+# Notes:
+#   - If your system already provides some libs (e.g., OpenGL/GLU), you can
+#     remove or comment them in [requires]. When present, Conan will generate
+#     consistent pkg-config files for them.
+#   - Some packages may be platform-specific or versions may evolve on ConanCenter.
+#     If a given version is unavailable for your platform, you can adjust the
+#     version constraint or remove it to accept the latest.
+
+[requires]
+# Windowing/Input
+sdl/2.30.7
+sdl_image/2.8.2
+
+# OpenGL stack
+opengl/system
+# GLU is typically system-provided; if unavailable, consider adding a package
+# that provides it for your platform. Uncomment if needed and available:
+# glu/system
+glew/2.2.0
+
+# Math
+glm/1.0.1
+
+# Text shaping and rendering
+# Core C libs
+cairo/1.18.0
+pango/1.50.14
+# C++ bindings
+cairomm/1.16.2
+pangomm/2.48.1
+
+# Testing
+gtest/1.14.0
+
+[tool_requires]
+make
+# pkg-config implementation for dependency discovery
+pkgconf/2.3.0
+# Documentation generator (optional, for `make doc` if you want reproducible toolchain)
+doxygen/1.11.0
+
+[generators]
+# Generate pkg-config .pc files for all requirements
+PkgConfigDeps
+MakeDeps
+# Provide activation scripts for compilers/linkers and PATH/LD_LIBRARY_PATH
+VirtualBuildEnv
+VirtualRunEnv
+
+[layout]
+# Place generated files under the specified output folder passed with -of
+# This section is optional; kept here for clarity.
+# The default layout already matches the -of directory.
+
+[conf]
+# Ensure pkg-config can find Conan-generated .pc files when activating envs
+tools.build:pkg_config=pkgconf
+
+# End of conanfile.txt
