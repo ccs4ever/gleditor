@@ -29,7 +29,7 @@ struct AppState {
     float speed = 60.0;
     ViewPerspective() { resetPos(); }
     void resetPos() {
-      pos    = glm::vec3(0.0F, 0.0F, 100.0F);
+      pos    = glm::vec3(0.0F, 0.0F, 1000.0F);
       front  = glm::vec3(0.0F, 0.0F, -1.0F);
       upward = glm::vec3(0.0F, 1.0F, 0.0F);
     }

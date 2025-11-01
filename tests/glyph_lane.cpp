@@ -7,8 +7,8 @@
 #include <vector>                         // for vector
 #include <tuple>                          // for tuple
 
-#include "gmock/gmock.h"                  // for ElementsAreMatcher, Element...
-#include "gtest/gtest.h"                  // for Message, AssertionResult
+#include <gmock/gmock.h>                  // for ElementsAreMatcher, Element...
+#include <gtest/gtest.h>                  // for Message, AssertionResult
 
 enum class Length : int;
 enum class Offset : int;

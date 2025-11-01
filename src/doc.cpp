@@ -38,6 +38,7 @@
 #include <gleditor/glyphcache/types.hpp>  // for TextureCoords, PointF, Rect
 #include "pangomm/layoutiter.h"           // for LayoutIter
 #include "pangomm/layoutline.h"           // for LayoutLine
+#include <glm/gtx/string_cast.hpp>
 
 glm::vec3 lwh(uint i) {
   return {i >> uint(24), (i >> uint(12)) & uint(4095), i & uint(4095)};
@@ -47,6 +48,7 @@ Page::Page(std::shared_ptr<Doc> aDoc, GLState &state, glm::mat4 &model,
            Glib::RefPtr<Pango::Layout> aLayout)
     : Drawable(model), doc(std::move(aDoc)), layout(std::move(aLayout)) {
   static_assert(sizeof(Doc::VBORow) == 48);
+  std::cout << "NEW PAGE: " << &doc << " " << glm::to_string(model) << "\n";
   const auto &line  = layout->get_const_line(layout->get_line_count() - 1);
   int len           = line->get_length();
   const int charCnt = line->get_start_index() + (0 == len ? 1 : len);
@@ -297,10 +299,11 @@ Page::Page(std::shared_ptr<Doc> aDoc, GLState &state, glm::mat4 &model,
 // Always called from the render thread
 void Page::draw(const GLState &state, const glm::mat4 &docModel) {
   // model = glm::rotate(model, glm::radians(1.0F), glm::vec3(0, 0, 1));
+  const auto mat = docModel * model;
   glUniformMatrix4fv(state.programs.at("main")["model"], 1, GL_FALSE,
-                     glm::value_ptr(docModel * model));
+                     glm::value_ptr(mat));
   glUniform1f(state.programs.at("main")["cubeDepth"], /*2.0F*/ 0);
-  /*std::cout << "docModel: " << glm::to_string(docModel)
+  /*std::cout << "doc: " << &doc << " docModel: " << glm::to_string(docModel)
             << "\npageModel: " << glm::to_string(model)
             << "\nmult: " << glm::to_string(docModel * model) << "\n";*/
   // make the compiler happy, reinterpret_cast<void*> of long would introduce
@@ -311,7 +314,7 @@ void Page::draw(const GLState &state, const glm::mat4 &docModel) {
   glUniform1f(state.programs.at("main")["cubeDepth"], 0);
   glUniformMatrix4fv(
       state.programs.at("main")["model"], 1, GL_FALSE,
-      glm::value_ptr(docModel * model
+      glm::value_ptr(mat
                      // glm::translate(model, glm::vec3(-0.1F, 0.1F, 0.1F))
                      ));
   glDrawArrays(GL_POINTS,
@@ -338,6 +341,7 @@ Doc::Doc(RendererRef aRenderer, glm::mat4 model, std::string &fileName,
          [[maybe_unused]] Doc::Private _priv)
     : Doc(std::move(aRenderer), model, _priv) {
   docFile             = fileName;
+  std::cout << "NEW DOC: " << this << " " << fileName << " " << glm::to_string(model) << "\n";
   std::string tmpText = Glib::file_get_contents(docFile);
   std::cout << std::format("bom: {:x} {:x} {:x}\n", tmpText[0], tmpText[1],
                            tmpText[2]);
@@ -372,6 +376,7 @@ Doc::Doc(RendererRef aRenderer, glm::mat4 model, std::string &fileName,
 }
 
 void Doc::makePages(GLState &glState) {
+  std::cout << "MAKING PAGES: " << this << " " << glm::to_string(model) << "\n";
   auto fontDesc = Pango::FontDescription(renderer->defaultFontName().data());
   auto fonts    = Pango::CairoFontMap::get_default();
   auto ctx      = fonts->create_context();
@@ -458,7 +463,7 @@ Doc::Doc(RendererRef renderer, glm::mat4 model,
       VAOSupports(std::move(renderer),
                   VAOSupports::VAOBuffers(
                       VAOSupports::VAOBuffers::Vbo(sizeof(VBORow), 10000000),
-                      VAOSupports::VAOBuffers::Ibo(sizeof(unsigned int), 1))) {}
+                      VAOSupports::VAOBuffers::Ibo(sizeof(unsigned int), 1))) { }
 
 void Doc::newPage(GLState &state, Glib::RefPtr<Pango::Layout> &layout) {
   renderer->run([this, &state, layout] {
@@ -469,7 +474,7 @@ void Doc::newPage(GLState &state, Glib::RefPtr<Pango::Layout> &layout) {
     const auto numPages = this->pages.size();
     glm::mat4 trans =
         glm::translate(glm::mat4(1.0),
-                       glm::vec3(0, -100 * static_cast<float>(numPages), 0.0F));
+                       glm::vec3(0.0F, -100 * static_cast<float>(numPages), 0.0F));
     // trans = glm::rotate(trans, glm::radians(20.0F*numPages), glm::vec3(0.5,
     // 1, 0)); trans = glm::scale(trans, glm::vec3(1+numPages, 1+numPages, 1));
     pages.emplace_back(this->getPtr(), state, trans, layout);

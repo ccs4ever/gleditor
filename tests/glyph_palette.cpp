@@ -1,5 +1,5 @@
 // #include <fuzztest/fuzztest.h>
-#include <gtest/gtest.h>                    // for TestInfo (ptr only), TEST_F
+#include <gtest/gtest.h>                    // for TestInfo (ptr only), TEST_F, for AssertionResult, Message
 #include <gleditor/glyphcache/palette.hpp>  // for GlyphPalette
 #include <gleditor/log.hpp>                 // for operator<<, Loggable
 #include <gleditor/glyphcache/types.hpp>    // for Rect
@@ -11,8 +11,7 @@
 #include <tuple>                            // for tuple
 
 #include "mocks/gl.hpp"                     // for GLMock
-#include "gmock/gmock.h"                    // for NiceMock, EXPECT_CALL
-#include "gtest/gtest.h"                    // for AssertionResult, Message
+#include <gmock/gmock.h>                    // for NiceMock, EXPECT_CALL
 
 class GL;
 enum class Length : int;
