@@ -180,7 +180,7 @@ profile/main: gleditor
 
 run: private .UNVEIL += rx:gleditor
 run: $(OBJDIR)/gleditor
-	$(OBJDIR)/gleditor
+	$(OBJDIR)/gleditor test.txt
 
 doc:
 	doxygen
