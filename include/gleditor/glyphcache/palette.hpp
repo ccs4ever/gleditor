@@ -1,3 +1,11 @@
+/**
+ * @file palette.hpp
+ * @brief Glyph texture palette that packs glyph bitmaps into lanes and layers.
+ *
+ * GlyphPalette manages a single 2D layer within a GL texture array used by the
+ * glyph cache. It organizes glyphs into GlyphLane rows and uploads glyph bitmap
+ * data into the appropriate sub-rect of the texture.
+ */
 #ifndef GLYPH_PALETTE_H
 #define GLYPH_PALETTE_H
 
@@ -16,6 +24,10 @@
 class GL;
 enum class Length : int;
 
+/**
+ * @class GlyphPalette
+ * @brief Packs glyph rectangles into lanes within a single texture layer.
+ */
 class GlyphPalette : public Loggable {
 private:
   int layer;
@@ -62,17 +74,35 @@ public:
   /** Get the height of the remaining free space that isn't occupied
         by characters. The free width can be found on a per-GlyphLane basis
         by iterating over freeLanes. **/
+  /**
+   * @brief Height remaining in the palette layer that is not yet occupied by lanes.
+   */
   [[nodiscard]] Length availHeight() const {
     return Length{std::to_underlying(paletteDims.height) -
                   std::to_underlying(usedHeight)};
   }
+  /**
+   * @brief Check if a rectangle can be placed in this palette.
+   *
+   * Either there must be enough remaining height to create a new lane of the
+   * rectangle's height, or there must exist an existing lane that can fit it.
+   */
   bool canFit(const Rect &rect);
+  /**
+   * @brief Insert a glyph rectangle and upload its pixel data to the GL texture.
+   * @param charBox Dimensions of the rectangle to insert.
+   * @param data Pointer to pixel data (format compatible with GL_BGRA/GL_UNSIGNED_BYTE).
+   * @return Normalized texture coordinates of the inserted rectangle, or nullopt if no space.
+   */
   std::optional<TextureCoords> put(const Rect &charBox,
                                    const unsigned char *data);
 
-  // order by most full to least full to ensure best usage
+  /**
+   * @brief Order palettes by most full to least full to improve packing.
+   */
   friend std::partial_ordering operator<=>(const GlyphPalette &left,
                                            const GlyphPalette &right);
+  /// Equality based on used height.
   friend bool operator==(const GlyphPalette &left, const GlyphPalette &right);
 };
 

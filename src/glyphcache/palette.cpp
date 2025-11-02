@@ -1,3 +1,7 @@
+/**
+ * @file palette.cpp
+ * @brief Implementation of GlyphPalette lane management and GL uploads.
+ */
 #include <gleditor/glyphcache/palette.hpp>  // IWYU pragma: associated
 #include <GL/glew.h>                      // for GLint, GL_BGRA, GL_TEXTURE_...
 #include <gleditor/glyphcache/types.hpp>  // for Rect, Point, TextureCoords

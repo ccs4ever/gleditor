@@ -1,3 +1,10 @@
+/**
+ * @file cache.cpp
+ * @brief Implementation of the glyph cache: rasterization and texture packing.
+ *
+ * Implements GlyphCache helpers to rasterize text via Pango/Cairo, manage the
+ * OpenGL texture array, and pack glyphs into palettes and lanes.
+ */
 #include <cairomm/context.h>                // for Context
 #include <cairomm/surface.h>                // for ImageSurface, Surface
 #include <gleditor/glyphcache/cache.hpp>    // IWYU pragma: associated

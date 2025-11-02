@@ -1,3 +1,7 @@
+/**
+ * @file lane.cpp
+ * @brief Implementation of GlyphLane packing and comparisons.
+ */
 #include <gleditor/glyphcache/lane.hpp> // IWYU pragma: associated
 #include <compare>
 
