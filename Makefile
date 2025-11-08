@@ -33,7 +33,7 @@ PROFILE_OPTS := -fprofile-instr-generate -fcoverage-mapping -fcoverage-mcdc
 else
 DEBUG_OPTS := -O3 -g
 endif
-override CXXFLAGS += $(DEBUG_OPTS) -std=c++23 -Ibuild/src -Iinclude -Ithirdparty/Choreograph/src -Ithirdparty/argparse/include -Wall -Wextra $(shell pkg-config $(STATIC) --cflags $(PKGS))
+override CXXFLAGS += $(DEBUG_OPTS) -std=c++23 -DGLEDITOR_ENABLE_VULKAN=1 -Ibuild/src -Iinclude -Ithirdparty/Choreograph/src -Ithirdparty/argparse/include -Wall -Wextra $(shell pkg-config $(STATIC) --cflags $(PKGS))
 override LDFLAGS += $(DEBUG_OPTS) $(findstring $(STATIC),-static) -rtlib=compiler-rt 
 # XXX: work on this in a separate branch, get tests working again for now
 #CXXFLAGS += -stdlib=libc++ -fexperimental-library 

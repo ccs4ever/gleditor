@@ -26,6 +26,12 @@
 #include "SDL_image.h"                    // for IMG_INIT_PNG
 #include <gleditor/state.hpp>             // for AppState, AppStateRef
 #include <glibmm/init.h>                  // for init
+#ifdef GLEDITOR_ENABLE_VULKAN
+#include "SDL.h"
+#include "SDL_vulkan.h"
+#include <vulkan/vulkan.h>
+#include <gleditor/vulkan/renderer_vk.hpp>
+#endif
 
 void handleWindowChange(SDL_Event &evt, const AppStateRef &state,
                         RendererRef &renderer) {
@@ -127,7 +133,7 @@ void handleKeyPress(SDL_Event &evt, const AppStateRef &state,
   std::cout << "camera pos after: " << glm::to_string(state->view.pos) << "\n";
 }
 
-int handleArgs(const AppStateRef &state, RendererRef &renderer, int argc,
+RendererRef handleArgs(const AppStateRef &state, int argc,
                char **argv) {
 
 #ifndef GLEDITOR_VERSION
@@ -139,13 +145,24 @@ int handleArgs(const AppStateRef &state, RendererRef &renderer, int argc,
       .default_value("Monospace 16")
       .help("default font to use for display");
   parser.add_argument("--profile")
-      .help("open document specified by -f/--file then quit")
+      .help("perform initial setup, then quit")
       .flag();
+#ifdef GLEDITOR_ENABLE_VULKAN
+  parser.add_argument("--vulkan")
+      .help("use the vulkan renderer")
+      .flag();
+#endif
   parser.add_argument("files").help("input files").remaining();
 
   try {
 
     parser.parse_args(argc, argv);
+
+    RendererRef renderer =
+#ifdef GLEDITOR_ENABLE_VULKAN
+      parser["--vulkan"] == true ? RendererVK::create(state) :
+#endif
+      Renderer::create(state);
 
     state->defaultFontName = parser.get("--font");
     auto files = parser.get<std::vector<std::string>>("files");
@@ -155,12 +172,13 @@ int handleArgs(const AppStateRef &state, RendererRef &renderer, int argc,
     }
     state->profiling = parser["--profile"] == true;
 
+    return renderer;
+
   } catch (const std::exception &e) {
     std::cerr << e.what() << "\n";
     std::cerr << parser;
-    return 1;
+    return RendererRef(nullptr);
   }
-  return 0;
 }
 
 int main(int argc, char **argv) {
@@ -174,9 +192,9 @@ int main(int argc, char **argv) {
 
   auto state = std::make_shared<AppState>();
 
-  RendererRef rend = Renderer::create(state);
+  RendererRef rend;
 
-  if (0 != handleArgs(state, rend, argc, argv)) {
+  if ((rend = handleArgs(state, argc, argv))) {
     return 1;
   }
 
