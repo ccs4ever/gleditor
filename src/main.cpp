@@ -16,41 +16,23 @@
 #include <optional>                       // for optional
 #include <string>                         // for operator<<, basic_string
 
-#include "SDL.h"                          // for SDL_INIT_VIDEO
-#include "SDL_events.h"                   // for SDL_Event, SDL_PollEvent
-#include "SDL_keycode.h"                  // for KMOD_SHIFT
-#include "SDL_scancode.h"                 // for SDL_SCANCODE_C, SDL_SCANCODE_D
-#include "SDL_video.h"                    // for SDL_WINDOWPOS_UNDEFINED
+#include <SDL3/SDL.h>                          // for SDL_INIT_VIDEO
+#include <SDL3/SDL_events.h>                   // for SDL_Event, SDL_PollEvent
+#include <SDL3/SDL_keycode.h>                  // for KMOD_SHIFT
+#include <SDL3/SDL_scancode.h>                 // for SDL_SCANCODE_C, SDL_SCANCODE_D
+#include <SDL3/SDL_video.h>                    // for SDL_WINDOWPOS_UNDEFINED
+#include <SDL3/SDL_main.h>
 #include <argparse/argparse.hpp>          // for ArgumentParser, Argument
 #include "config.h"                       // for GLEDITOR_VERSION, TOSTRING
-#include "SDL_image.h"                    // for IMG_INIT_PNG
+#include <SDL3_image/SDL_image.h>                    // for IMG_INIT_PNG
 #include <gleditor/state.hpp>             // for AppState, AppStateRef
 #include <glibmm/init.h>                  // for init
 #ifdef GLEDITOR_ENABLE_VULKAN
-#include "SDL.h"
-#include "SDL_vulkan.h"
+#include <SDL3/SDL.h>
+#include <SDL3/SDL_vulkan.h>
 #include <vulkan/vulkan.h>
 #include <gleditor/vulkan/renderer_vk.hpp>
 #endif
-
-void handleWindowChange(SDL_Event &evt, const AppStateRef &state,
-                        RendererRef &renderer) {
-  switch (evt.window.event) {
-  case SDL_WINDOWEVENT_RESIZED:
-  case SDL_WINDOWEVENT_SIZE_CHANGED:
-  case SDL_WINDOWEVENT_MAXIMIZED: {
-    const auto width  = evt.window.data1;
-    const auto height = evt.window.data2;
-    std::cout << "window size changed(w/h): " << width << "/" << height << "\n";
-    state->view.screenWidth  = width;
-    state->view.screenHeight = height;
-    renderer->push(RenderItemResize(width, height));
-    break;
-  }
-  default:
-    break;
-  }
-}
 
 void handleMouseMove(SDL_Event &evt, const AppStateRef &state) {
   state->mouseX = evt.motion.x;
@@ -66,7 +48,7 @@ void handleKeyPress(SDL_Event &evt, const AppStateRef &state,
   }
   std::cout << "camera pos before: " << glm::to_string(state->view.pos)
             << " speed: " << speed << "\n";
-  switch (evt.key.keysym.scancode) {
+  switch (evt.key.scancode) {
   case SDL_SCANCODE_Q: {
     state->alive = false;
     break;
@@ -85,7 +67,7 @@ void handleKeyPress(SDL_Event &evt, const AppStateRef &state,
                        speed;
   } break;
   case SDL_SCANCODE_D: {
-    if (0 != (evt.key.keysym.mod & KMOD_SHIFT)) {
+    if (0 != (evt.key.mod & SDL_KMOD_SHIFT)) {
       state->view.pos += (speed * state->view.front);
     } else {
       state->view.pos -= (speed * state->view.front);
@@ -112,7 +94,7 @@ void handleKeyPress(SDL_Event &evt, const AppStateRef &state,
   }
   case SDL_SCANCODE_G: {
     auto fov = state->view.fov;
-    if (0 != (evt.key.keysym.mod & KMOD_SHIFT)) {
+    if (0 != (evt.key.mod & SDL_KMOD_SHIFT)) {
       fov -= 1;
       if (fov < 1) {
         fov = 1;
@@ -194,7 +176,7 @@ int main(int argc, char **argv) {
 
   RendererRef rend;
 
-  if ((rend = handleArgs(state, argc, argv))) {
+  if (nullptr == (rend = handleArgs(state, argc, argv))) {
     return 1;
   }
 
@@ -204,35 +186,43 @@ int main(int argc, char **argv) {
     Pango::init();
 
     AutoSDL sdlScoped(SDL_INIT_VIDEO);
-    AutoSDLImg sdlImgScoped(IMG_INIT_PNG);
 
     AutoSDLSurface icon("logo.png");
 
     AutoSDLWindow window("GL Editor", SDL_WINDOWPOS_UNDEFINED,
                          SDL_WINDOWPOS_UNDEFINED, state->view.screenWidth,
                          state->view.screenHeight,
-                         SDL_WINDOW_OPENGL|SDL_WINDOW_RESIZABLE|SDL_WINDOW_ALLOW_HIGHDPI,
+                         SDL_WINDOW_OPENGL|SDL_WINDOW_RESIZABLE|SDL_WINDOW_HIGH_PIXEL_DENSITY,
                          icon.surface);
 
     std::jthread renderer(std::ref(*rend), std::ref(window));
 
     while (state->alive) {
       SDL_Event evt;
-      while (state->alive && bool(SDL_PollEvent(&evt))) {
+      while (state->alive && SDL_PollEvent(&evt)) {
         switch (evt.type) {
-        case SDL_QUIT: {
+        case SDL_EVENT_QUIT: {
           state->alive = false;
         }
-        case SDL_KEYDOWN: {
+        case SDL_EVENT_KEY_DOWN: {
           handleKeyPress(evt, state, rend);
           break;
         }
-        case SDL_MOUSEMOTION: {
+        case SDL_EVENT_MOUSE_MOTION: {
           handleMouseMove(evt, state);
           break;
         }
-        case SDL_WINDOWEVENT:
-          handleWindowChange(evt, state, rend);
+        case SDL_EVENT_WINDOW_RESIZED:
+        case SDL_EVENT_WINDOW_PIXEL_SIZE_CHANGED:
+        case SDL_EVENT_WINDOW_MAXIMIZED: {
+          const auto width  = evt.window.data1;
+          const auto height = evt.window.data2;
+          std::cout << "window size changed(w/h): " << width << "/" << height << "\n";
+          state->view.screenWidth  = width;
+          state->view.screenHeight = height;
+          rend->push(RenderItemResize(width, height));
+          break;
+        }
         default:
           break;
         }

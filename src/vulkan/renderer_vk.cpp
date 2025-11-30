@@ -9,10 +9,13 @@
 
 #include <gleditor/sdl_wrap.hpp>
 
+class AbstractRenderer;
+
+
 // We only include SDL and Vulkan headers when Vulkan support is enabled.
 #ifdef GLEDITOR_ENABLE_VULKAN
-  #include "SDL.h"
-  #include "SDL_vulkan.h"
+  #include <SDL3/SDL.h>
+  #include <SDL3/SDL_vulkan.h>
   #include <vulkan/vulkan.h>
 #endif
 
@@ -20,9 +23,12 @@
 struct RendererVK::VulkanHandles {
   VkInstance instance{VK_NULL_HANDLE};
   VkSurfaceKHR surface{VK_NULL_HANDLE};
+  ~VulkanHandles() = default;
 };
 #endif
 
+RendererVK::RendererVK(const AppStateRef &state, [[maybe_unused]] Private _priv)
+    : AbstractRenderer(state, _priv) {}
 RendererVK::~RendererVK() { shutdownVulkan(); }
 
 void RendererVK::initVulkan([[maybe_unused]] SDL_Window *window) {
@@ -34,13 +40,12 @@ void RendererVK::initVulkan([[maybe_unused]] SDL_Window *window) {
 
   // Query required instance extensions from SDL for surface creation
   unsigned int extCount = 0;
-  if (!SDL_Vulkan_GetInstanceExtensions(window, &extCount, nullptr)) {
+  char const * const * ext = SDL_Vulkan_GetInstanceExtensions(&extCount);
+  if (nullptr == ext) {
     throw std::runtime_error(std::format("SDL_Vulkan_GetInstanceExtensions count failed: {}", SDL_GetError()));
   }
-  std::vector<const char *> extensions(extCount);
-  if (!SDL_Vulkan_GetInstanceExtensions(window, &extCount, extensions.data())) {
-    throw std::runtime_error(std::format("SDL_Vulkan_GetInstanceExtensions names failed: {}", SDL_GetError()));
-  }
+  const std::vector<char const *> extensions(ext, ext + extCount);
+
 
   VkApplicationInfo appInfo{};
   appInfo.sType = VK_STRUCTURE_TYPE_APPLICATION_INFO;
@@ -63,7 +68,7 @@ void RendererVK::initVulkan([[maybe_unused]] SDL_Window *window) {
   }
 
   // Create the surface via SDL
-  if (!SDL_Vulkan_CreateSurface(window, vk_->instance, &vk_->surface)) {
+  if (!SDL_Vulkan_CreateSurface(window, vk_->instance, nullptr, &vk_->surface)) {
     vkDestroyInstance(vk_->instance, nullptr);
     vk_->instance = VK_NULL_HANDLE;
     throw std::runtime_error(std::format("SDL_Vulkan_CreateSurface failed: {}", SDL_GetError()));

@@ -1,5 +1,5 @@
 #include <gleditor/renderer.hpp>              // IWYU pragma: associated
-#include <SDL_video.h>                        // for SDL_GL_GetCurrentWindow
+#include <SDL3/SDL_video.h>                        // for SDL_GL_GetCurrentWindow
 #include <gleditor/doc.hpp>                   // for Doc
 #include <gleditor/gl/state.hpp>              // for GLState
 #include <gleditor/sdl_wrap.hpp>              // for AutoSDLGL, AutoSDLWindow
@@ -31,7 +31,7 @@
 #include <atomic>                             // for atomic
 
 #include "GL/glew.h"                          // for GL_RENDERBUFFER, GLenum
-#include "SDL_error.h"                        // for SDL_GetError
+#include <SDL3/SDL_error.h>                        // for SDL_GetError
 #include <gleditor/gl/gl.hpp>                 // for GL
 #include <gleditor/tqueue.hpp>                // for TQueue
 #include <glm/gtx/string_cast.hpp>
@@ -67,19 +67,12 @@ void Renderer::resize() {
     throw std::logic_error{
         std::format("gl_getcurrentwindow error: {}", SDL_GetError())};
   }
-  int idx = SDL_GetWindowDisplayIndex(win);
-  if (idx < 0) {
-    throw std::logic_error{
-        std::format("getwindowdisplayindex error: {}", SDL_GetError())};
-  }
-  float ddpi, hdpi, vdpi;
-  if (0 != SDL_GetDisplayDPI(idx, &ddpi, &hdpi, &vdpi)) {
-    throw std::logic_error{
-        std::format("getdisplaydpi error: {}", SDL_GetError())};
-  }
-  std::cout << std::format("dpis: {:.02f} {:.02f} {:.02f}\n", ddpi, hdpi, vdpi);
+  float dpi = SDL_GetWindowDisplayScale(win) * 96;
+  std::cout << std::format("dpis: {:.02f}\n", dpi);
   int w, h;
-  SDL_GL_GetDrawableSize(SDL_GL_GetCurrentWindow(), &w, &h);
+  if (!SDL_GetWindowSizeInPixels(win, &w, &h)) {
+   std::cout << std::format("getwindowsize error: {}", SDL_GetError());
+  }
   if (0 == w) {
     std::cout << "width null\n";
     w = state->view.screenWidth;
@@ -430,7 +423,7 @@ void Renderer::initGL() {
   glClearColor(0, 0, 0, 1);
 }
 
-bool Renderer::update(GLState &glState, AutoSDLWindow &window) {
+bool Renderer::update(const GLState &glState, const AutoSDLWindow &window) {
   // std::cout << "calling update\n" << std::flush;
   static auto fullStart = std::chrono::steady_clock::now();
   const auto start      = std::chrono::steady_clock::now();

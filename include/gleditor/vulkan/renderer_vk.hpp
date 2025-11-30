@@ -23,12 +23,11 @@ class RendererVK : public AbstractRenderer, public Loggable {
 public:
   using Ptr = std::shared_ptr<RendererVK>;
 
-  static Ptr create(const AppStateRef &appState) {
+  static RendererRef create(const AppStateRef &appState) {
     return std::make_shared<RendererVK>(appState, Private());
   }
 
-  RendererVK(const AppStateRef &state, [[maybe_unused]] Private _priv)
-      : AbstractRenderer(state, _priv) {}
+  RendererVK(const AppStateRef &state, [[maybe_unused]] Private _priv);
   ~RendererVK() override;
 
   // Entry point for the render thread function.

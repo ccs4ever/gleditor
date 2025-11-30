@@ -25,8 +25,8 @@
 
 [requires]
 # Windowing/Input
-sdl/2.30.7
-sdl_image/2.8.2
+sdl/3.2.20
+sdl_image/3.2.4
 
 # OpenGL stack
 opengl/system
@@ -41,9 +41,9 @@ glm/1.0.1
 # Text shaping and rendering
 # Core C libs
 cairo/1.18.0
-pango/1.50.14
+pango/1.54.0
 # C++ bindings
-cairomm/1.16.2
+cairomm/1.18.0
 pangomm/2.48.1
 
 # Testing

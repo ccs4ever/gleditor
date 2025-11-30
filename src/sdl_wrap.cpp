@@ -3,43 +3,37 @@
 #include <stdexcept>
 #include <string>
 
-#include "SDL.h"
-#include "SDL_error.h"
-#include "SDL_image.h"
-#include "SDL_surface.h"
-#include "SDL_video.h"
+#include <SDL3/SDL.h>
+#include <SDL3/SDL_error.h>
+#include <SDL3/SDL_surface.h>
+#include <SDL3/SDL_video.h>
+
+#include <SDL3_image/SDL_image.h>
 
 AutoSDL::AutoSDL(std::uint32_t flags) : flags(flags) {
-  if (0 != SDL_Init(flags)) {
+  if (!SDL_InitSubSystem(flags)) {
     throw std::runtime_error(std::string("SDL init failed: ") + SDL_GetError());
   }
 }
 AutoSDL::~AutoSDL() {
   if (flags == SDL_WasInit(flags)) {
-    SDL_Quit();
+    SDL_QuitSubSystem(flags);
   }
 }
 
-AutoSDLImg::AutoSDLImg(int flags) {
-  if ((flags & IMG_Init(flags)) != flags) {
-    throw std::runtime_error(std::string("Failed to load SDL image: ") +
-                             IMG_GetError() + "\n");
-  }
-}
-AutoSDLImg::~AutoSDLImg() { IMG_Quit(); }
 
 // NOLINTNEXTLINE(readability-identifier-length)
 AutoSDLWindow::AutoSDLWindow(const char *title, int x, int y, int width,
                              int height, std::uint32_t flags,
                              SDL_Surface *icon) {
-  SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, 3);
-  SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION, 3);
+  SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, 4);
+  SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION, 5);
   SDL_GL_SetAttribute(SDL_GL_CONTEXT_PROFILE_MASK, SDL_GL_CONTEXT_PROFILE_CORE);
   SDL_GL_SetAttribute(SDL_GL_CONTEXT_FLAGS,
                       SDL_GL_CONTEXT_DEBUG_FLAG |
                           SDL_GL_CONTEXT_FORWARD_COMPATIBLE_FLAG);
 
-  window = SDL_CreateWindow(title, x, y, width, height, flags);
+  window = SDL_CreateWindow(title, width, height, flags);
 
   if (nullptr == window) {
     throw std::runtime_error(std::string("SDL create window failed: ") +
@@ -68,7 +62,7 @@ AutoSDLGL::AutoSDLGL(SDL_Window *window) {
 }
 AutoSDLGL::~AutoSDLGL() {
   if (nullptr != ctx) {
-    SDL_GL_DeleteContext(ctx);
+    SDL_GL_DestroyContext(ctx);
     ctx = nullptr;
   }
 }
@@ -76,11 +70,11 @@ AutoSDLGL::~AutoSDLGL() {
 AutoSDLSurface::AutoSDLSurface(const char *fileName) {
   surface = IMG_Load(fileName);
   if (nullptr == surface) {
-    throw std::runtime_error(std::string("IMG_load failed: ") + IMG_GetError() +
+    throw std::runtime_error(std::string("IMG_load failed: ") + SDL_GetError() +
                              "\n");
   }
 }
 AutoSDLSurface::~AutoSDLSurface() {
-  SDL_FreeSurface(surface);
+  SDL_DestroySurface(surface);
   surface = nullptr;
 }

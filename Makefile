@@ -19,7 +19,10 @@ CKSUM = thirdparty/cosmos/bin/cksum
 #MKDIR = thirdparty/cosmos/bin/mkdir
 MKDIR = mkdir
 # removed spdlog
-PKGS := pangomm-2.48 sdl2 SDL2_image gl glu glew
+PKGS := pangomm-2.48 sdl3 sdl3-image gl glu glew
+ifdef GLEDITOR_ENABLE_VULKAN
+PKGS += vulkan
+endif
 TEST_PKGS := gmock_main
 VERS := $(shell git describe --tags --always --match "v[0-9]*.[0-9]*.[0-9]*" HEAD | tr -d v)
 ifdef DEBUG
@@ -33,7 +36,10 @@ PROFILE_OPTS := -fprofile-instr-generate -fcoverage-mapping -fcoverage-mcdc
 else
 DEBUG_OPTS := -O3 -g
 endif
-override CXXFLAGS += $(DEBUG_OPTS) -std=c++23 -DGLEDITOR_ENABLE_VULKAN=1 -Ibuild/src -Iinclude -Ithirdparty/Choreograph/src -Ithirdparty/argparse/include -Wall -Wextra $(shell pkg-config $(STATIC) --cflags $(PKGS))
+override CXXFLAGS += $(DEBUG_OPTS) -std=c++2c -Ibuild/src -Iinclude -Ithirdparty/Choreograph/src -Ithirdparty/argparse/include -Wall -Wextra $(shell pkg-config $(STATIC) --cflags $(PKGS))
+ifdef GLEDITOR_ENABLE_VULKAN
+override CXXFLAGS += -DGLEDITOR_ENABLE_VULKAN=1
+endif
 override LDFLAGS += $(DEBUG_OPTS) $(findstring $(STATIC),-static) -rtlib=compiler-rt 
 # XXX: work on this in a separate branch, get tests working again for now
 #CXXFLAGS += -stdlib=libc++ -fexperimental-library 

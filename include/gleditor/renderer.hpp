@@ -123,6 +123,8 @@ public:
 
 };
 
+using RendererRef = std::shared_ptr<AbstractRenderer>;
+
 /**
  * @class Renderer
  * @brief Manages the rendering loop, OpenGL state, and render-queue processing.
@@ -184,7 +186,7 @@ protected:
    * @param window SDL window wrapper associated with the render context.
    * @return true if the render loop should continue, false to exit.
    */
-  bool update(GLState &glState, AutoSDLWindow &window);
+  bool update(const GLState &glState, const AutoSDLWindow &window);
 
   /**
    * Initialize OpenGL extensions, debug output, and static GL resources.
@@ -237,7 +239,7 @@ public:
    * @param appState Shared application state used by the renderer.
    * @return Shared pointer to a new Renderer.
    */
-  static std::shared_ptr<Renderer> create(const AppStateRef& appState) {
+  static RendererRef create(const AppStateRef& appState) {
     return std::make_shared<Renderer>(appState, Private());
   }
 
@@ -266,6 +268,5 @@ public:
 
 };
 
-using RendererRef = std::shared_ptr<AbstractRenderer>;
 
 #endif // GLEDITOR_RENDERER_H

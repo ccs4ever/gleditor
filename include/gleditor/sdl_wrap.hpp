@@ -1,6 +1,7 @@
 #ifndef GLEDITOR_SDL_WRAP_H
 #define GLEDITOR_SDL_WRAP_H
 
+#include <SDL3/SDL_video.h>
 #include <cstdint>
 
 struct SDL_Window;
@@ -25,7 +26,7 @@ struct AutoSDLWindow {
 };
 
 struct AutoSDLGL {
-  void *ctx;
+  SDL_GLContext ctx;
   AutoSDLGL(SDL_Window *window);
   ~AutoSDLGL();
 };
