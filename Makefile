@@ -187,7 +187,7 @@ profile/main: gleditor
 
 run: private .UNVEIL += rx:gleditor
 run: $(OBJDIR)/gleditor
-	$(OBJDIR)/gleditor test.txt
+	$(OBJDIR)/gleditor tests/samples/quick_brown_fox.txt
 
 doc:
 	doxygen
