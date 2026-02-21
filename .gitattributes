@@ -5,3 +5,4 @@
 *.glsl text
 
 *.png binary
+tests/samples/kjv.txt binary

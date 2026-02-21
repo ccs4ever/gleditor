@@ -46,3 +46,7 @@ gleditor_test
 *.exe
 *.out
 *.app
+
+.idea
+build
+docs
