@@ -9,19 +9,19 @@
 #ifndef GLYPH_PALETTE_H
 #define GLYPH_PALETTE_H
 
-#include <gleditor/glyphcache/types.hpp>  // for Rect, operator<<, TextureCo...
-#include <gleditor/glyphcache/lane.hpp>   // for GlyphLane
-#include <gleditor/log.hpp>               // for Loggable, operator<<
-#include <algorithm>                      // for __for_each_fn, for_each
-#include <atomic>                         // for atomic
-#include <compare>                        // for partial_ordering
-#include <iostream>                       // for basic_ostream, operator<<
-#include <memory>                         // for shared_ptr
-#include <optional>                       // for optional
-#include <utility>                        // for to_underlying, move
-#include <vector>                         // for vector
+#include "gleditor/gl/gl.hpp"
 
-class GL;
+#include <algorithm>                     // for __for_each_fn, for_each
+#include <atomic>                        // for atomic
+#include <compare>                       // for partial_ordering
+#include <gleditor/glyphcache/lane.hpp>  // for GlyphLane
+#include <gleditor/glyphcache/types.hpp> // for Rect, operator<<, TextureCo...
+#include <gleditor/log.hpp>              // for Loggable, operator<<
+#include <memory>                        // for shared_ptr
+#include <optional>                      // for optional
+#include <utility>                       // for to_underlying, move
+#include <vector>                        // for vector
+
 enum class Length : int;
 
 /**
@@ -44,7 +44,7 @@ protected:
   void print(std::ostream &ost) const override {
     ost << "GlyphPalette(lanes: ";
     std::ranges::for_each(lanes.cbegin(), lanes.cend(),
-                          [&ost](auto lane) { ost << lane << "\n"; });
+                          [&ost](const auto& lane) { ost << lane << "\n"; });
     ost << ", w: " << paletteDims.width << ", h: " << paletteDims.height
         << ", availH: " << availHeight() << ")";
   }
