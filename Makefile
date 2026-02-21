@@ -1,6 +1,6 @@
 
 #SHELL = thirdparty/cosmocc/bin/cocmd
-SHELL = thirdparty/cosmos/bin/dash
+SHELL = dash
 
 #STATIC = --static
 STATIC =
@@ -14,7 +14,8 @@ SED = sed
 # cocmd builtin rm doesn't currently support -r
 #RM = thirdparty/cosmos/bin/rm
 RM = rm
-CKSUM = thirdparty/cosmos/bin/cksum
+#CKSUM = thirdparty/cosmos/bin/cksum
+CKSUM = cksum
 # cocmd builtin mkdir is sufficient for our needs
 #MKDIR = thirdparty/cosmos/bin/mkdir
 MKDIR = mkdir
