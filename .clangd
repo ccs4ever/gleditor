@@ -1,5 +1,6 @@
 CompileFlags:
   Compiler: clang++
+  Add: [-xc++, -Wall, -Wextra, -std=c++2c]
 Index:
   StandardLibrary: Yes
 Diagnostics:
