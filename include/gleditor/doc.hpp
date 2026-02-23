@@ -1,11 +1,10 @@
 #ifndef GLEDITOR_DOC_H
 #define GLEDITOR_DOC_H
 
-#include <gleditor/renderer.hpp>
 #include <array>
 #include <cassert>
-#include <cstddef>
 #include <gleditor/drawable.hpp>
+#include <gleditor/renderer.hpp>
 #include <gleditor/vao_supports.hpp>
 #include <glibmm/refptr.h>
 #include <glibmm/ustring.h>
@@ -21,7 +20,7 @@ struct GLState;
 class Page : public Drawable {
 private:
   std::shared_ptr<Doc> doc;
-  VAOSupports::Handle pageBackingHandle;
+  VAOSupports::Handle pageBackingHandle{};
   std::vector<VAOSupports::Handle> glyphs;
   unsigned int tex{};
   Glib::RefPtr<Pango::Layout> layout;
@@ -29,7 +28,7 @@ private:
 public:
   Page(std::shared_ptr<Doc> doc, GLState &state, glm::mat4 &model,
        Glib::RefPtr<Pango::Layout> layout);
-  void draw(const GLState &state, const glm::mat4 &docModel);
+  void draw(const GLState &state, const glm::mat4 &docModel) const;
   ~Page() override = default;
 };
 
@@ -57,37 +56,43 @@ public:
     std::array<float, 2> texBox;
     unsigned int layer;
     std::array<unsigned int, 2> tag;
-    static unsigned int color3(unsigned char red, unsigned char green,
-                               unsigned char blue) {
-      return (unsigned int)(red << 24) | green << 16 | blue << 8 | 255;
+
+    static unsigned int color3(const unsigned char red,
+                               const unsigned char green,
+                               const unsigned char blue) {
+      return static_cast<unsigned int>(red << 24) | green << 16 | blue << 8 |
+             255;
     }
     static unsigned int color(unsigned char rgb) {
       return color3(rgb, rgb, rgb);
     }
-    static constexpr unsigned int layerWidthHeight(unsigned char layer,
-                                                   unsigned int width,
-                                                   unsigned int height) {
+    static constexpr unsigned int layerWidthHeight(const unsigned char layer,
+                                                   const unsigned int width,
+                                                   const unsigned int height) {
       assert(layer <= 10);
       assert(width < 16384);
       assert(height < 16384);
       return layer << 28 | width << 14 | height;
     }
   };
-  static std::shared_ptr<Doc> create(RendererRef renderer, glm::mat4 model) {
+
+  static std::shared_ptr<Doc> create(const RendererRef &renderer,
+                                     const glm::mat4 &model) {
     return std::make_shared<Doc>(renderer, model, Private());
   }
-  static std::shared_ptr<Doc> create(RendererRef renderer, glm::mat4 model,
+  static std::shared_ptr<Doc> create(const RendererRef &renderer,
+                                     const glm::mat4 &model,
                                      std::string &fileName) {
     return std::make_shared<Doc>(renderer, model, fileName, Private());
   }
   std::shared_ptr<Doc> getPtr() { return shared_from_this(); }
-  Doc(RendererRef renderer, glm::mat4 model, Private);
-  Doc(RendererRef renderer, glm::mat4 model, std::string &fileName, Private);
+  Doc(const RendererRef& renderer, const glm::mat4& model, Private);
+  Doc(const RendererRef& renderer, const glm::mat4& model, const std::string &fileName, Private);
   ~Doc() override = default;
   void makePages(GLState &glState);
-  void draw(const GLState &state);
+  void draw(const GLState &state) const;
   void newPage(GLState &state, Glib::RefPtr<Pango::Layout> &layout);
-  size_t numPages() { return pages.size(); }
+  size_t numPages() const { return pages.size(); }
 
   friend class Page;
 };

@@ -50,7 +50,7 @@ protected:
   }
 
 public:
-  GlyphPalette(Rect paletteDims, std::shared_ptr<GL> &ogl)
+  GlyphPalette(const Rect &paletteDims, const std::shared_ptr<GL> &ogl)
       : layer(layerCount.fetch_add(1)), paletteDims(paletteDims), gl{ogl} {}
   ~GlyphPalette() override = default;
   GlyphPalette(GlyphPalette &&oth) noexcept

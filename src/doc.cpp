@@ -1,55 +1,57 @@
-#include <GL/glew.h>                      // for glDrawArrays, GL_ARRAY_BUFFER
-#include <gleditor/doc.hpp>               // IWYU pragma: associated
-#include <gleditor/gl/state.hpp>          // for GLState
-#include <gleditor/renderer.hpp>          // for Renderer, RendererRef
-#include <gleditor/vao_supports.hpp>      // for VAOSupports
-#include <glm/ext/matrix_float4x4.hpp>    // for mat4
-#include <glm/ext/vector_float3.hpp>      // for vec3
+#include <GL/glew.h>                   // for glDrawArrays, GL_ARRAY_BUFFER
+#include <algorithm>                   // for min
+#include <cmath>                       // for ceil
+#include <format>                      // for format
+#include <gleditor/doc.hpp>            // IWYU pragma: associated
+#include <gleditor/gl/state.hpp>       // for GLState
+#include <gleditor/renderer.hpp>       // for Renderer, RendererRef
+#include <gleditor/vao_supports.hpp>   // for VAOSupports
+#include <glm/detail/qualifier.hpp>    // for qualifier
+#include <glm/ext/matrix_float4x4.hpp> // for mat4
+#include <glm/ext/vector_float3.hpp>   // for vec3
 #include <glm/gtc/type_ptr.hpp>
-#include <pangomm/cairofontmap.h>         // for CairoFontMap
-#include <sys/types.h>                    // for uint
-#include <glm/detail/qualifier.hpp>       // for qualifier
-#include <cmath>                          // for ceil
-#include <format>                         // for format
-#include <iterator>                       // for distance
-#include <algorithm>                      // for min
-#include <iostream>                       // for basic_ostream, operator<<
-#include <memory>                         // for __shared_ptr_access, shared...
-#include <stdexcept>                      // for logic_error
-#include <string>                         // for char_traits, basic_string
-#include <string_view>                    // for string_view
-#include <utility>                        // for move
-#include <vector>                         // for vector
-#include <unordered_map>                  // for unordered_map
+#include <iostream>               // for basic_ostream, operator<<
+#include <iterator>               // for distance
+#include <memory>                 // for __shared_ptr_access, shared...
+#include <pangomm/cairofontmap.h> // for CairoFontMap
+#include <stdexcept>              // for logic_error
+#include <string>                 // for char_traits, basic_string
+#include <string_view>            // for string_view
+#include <sys/types.h>            // for uint
+#include <unordered_map>          // for unordered_map
+#include <utility>                // for move
+#include <vector>                 // for vector
 
-#include <gleditor/drawable.hpp>          // for Drawable
-#include <gleditor/glyphcache/cache.hpp>  // for GlyphCache
-#include "glibmm/convert.h"               // for get_charset
-#include "glibmm/fileutils.h"             // for file_get_contents
-#include "glibmm/refptr.h"                // for RefPtr
-#include "glibmm/ustring.h"               // for ustring, operator==, UStrin...
-#include "pango/pango-layout.h"           // for pango_layout_set_text
-#include "pango/pango-types.h"            // for PANGO_SCALE
-#include "pangomm/attributes.h"           // for AttrFontDesc, Attribute
-#include "pangomm/attrlist.h"             // for AttrList
-#include "pangomm/fontdescription.h"      // for FontDescription
-#include "pangomm/layout.h"               // for Layout, EllipsizeMode
-#include "pangomm/rectangle.h"            // for Rectangle
-#include <gleditor/glyphcache/types.hpp>  // for TextureCoords, PointF, Rect
-#include "pangomm/layoutiter.h"           // for LayoutIter
-#include "pangomm/layoutline.h"           // for LayoutLine
+#include "glibmm/convert.h"              // for get_charset
+#include "glibmm/fileutils.h"            // for file_get_contents
+#include "glibmm/refptr.h"               // for RefPtr
+#include "glibmm/ustring.h"              // for ustring, operator==, UStrin...
+#include "pango/pango-layout.h"          // for pango_layout_set_text
+#include "pango/pango-types.h"           // for PANGO_SCALE
+#include "pangomm/attributes.h"          // for AttrFontDesc, Attribute
+#include "pangomm/attrlist.h"            // for AttrList
+#include "pangomm/fontdescription.h"     // for FontDescription
+#include "pangomm/layout.h"              // for Layout, EllipsizeMode
+#include "pangomm/layoutiter.h"          // for LayoutIter
+#include "pangomm/layoutline.h"          // for LayoutLine
+#include "pangomm/rectangle.h"           // for Rectangle
+#include <gleditor/drawable.hpp>         // for Drawable
+#include <gleditor/glyphcache/cache.hpp> // for GlyphCache
+#include <gleditor/glyphcache/types.hpp> // for TextureCoords, PointF, Rect
 #include <glm/gtx/string_cast.hpp>
 
-glm::vec3 lwh(uint i) {
-  return {i >> uint(24), (i >> uint(12)) & uint(4095), i & uint(4095)};
+glm::vec3 lwh(const uint packed3DDims) {
+  return {packed3DDims >> static_cast<uint>(24),
+          packed3DDims >> static_cast<uint>(12) & static_cast<uint>(4095),
+          packed3DDims & static_cast<uint>(4095)};
 }
 
-Page::Page(std::shared_ptr<Doc> aDoc, GLState &state, glm::mat4 &model,
-           Glib::RefPtr<Pango::Layout> aLayout)
-    : Drawable(model), doc(std::move(aDoc)), layout(std::move(aLayout)) {
+Page::Page(std::shared_ptr<Doc> doc, GLState &state, glm::mat4 &model,
+           Glib::RefPtr<Pango::Layout> layout)
+    : Drawable(model), doc(std::move(doc)), layout(std::move(layout)) {
   static_assert(sizeof(Doc::VBORow) == 48);
-  std::cout << "NEW PAGE: " << &doc << " " << glm::to_string(model) << "\n";
-  const auto &line  = layout->get_const_line(layout->get_line_count() - 1);
+  std::cout << "NEW PAGE: " << &this->doc << " " << glm::to_string(model) << "\n";
+  const auto &line  = this->layout->get_const_line(this->layout->get_line_count() - 1);
   int len           = line->get_length();
   const int charCnt = line->get_start_index() + (0 == len ? 1 : len);
   // interleaved data --
@@ -79,16 +81,18 @@ Page::Page(std::shared_ptr<Doc> aDoc, GLState &state, glm::mat4 &model,
       3, 2, 1, // (rt, lt, rb) ccw
   };
   */
-  auto color   = Doc::VBORow::color;
-  auto color3  = Doc::VBORow::color3;
+  auto color = Doc::VBORow::color;
+  // auto color3  = Doc::VBORow::color3;
   auto layerWH = Doc::VBORow::layerWidthHeight;
   auto xMargin = 2;
   auto yMargin = 2;
-  auto layW = float(layout->get_logical_extents().get_width()) / PANGO_SCALE +
-              float(xMargin) * 2;
-  auto layH = float(layout->get_logical_extents().get_height()) / PANGO_SCALE +
-              float(yMargin) * 2;
-  std::vector<Doc::VBORow> vertexData = {
+  auto layW    = static_cast<float>(layout->get_logical_extents().get_width()) /
+                  PANGO_SCALE +
+              static_cast<float>(xMargin) * 2;
+  auto layH = static_cast<float>(layout->get_logical_extents().get_height()) /
+                  PANGO_SCALE +
+              static_cast<float>(yMargin) * 2;
+  std::vector vertexData = {
       // left-bottom,  white, black, tex: left-top, layer0
       // Doc::VBORow{{0.0, -2.0, 1.0}, color(255), color(0), {0.0, 1.0}, 0},
       // right-bottom, white, black, tex: right-top, layer0
@@ -99,8 +103,8 @@ Page::Page(std::shared_ptr<Doc> aDoc, GLState &state, glm::mat4 &model,
                   color(255),
                   {0, 0},
                   {1, 1},
-                  layerWH(0, std::min(16383U, uint(layW)),
-                          std::min(16383U, uint(layH))),
+                  layerWH(0, std::min(16383U, static_cast<uint>(layW)),
+                          std::min(16383U, static_cast<uint>(layH))),
                   {2, 1}},
   };
   auto vertMax = std::min(charCnt, 100000);
@@ -154,20 +158,20 @@ Page::Page(std::shared_ptr<Doc> aDoc, GLState &state, glm::mat4 &model,
   int lastIdx = 0;
   int idx     = 0;
   int vboPos  = 0;
-  auto xpen   = float(xMargin);
-  auto ypenF  = [&iter, yMargin]() {
-    return (float(iter.get_baseline()) -
-            iter.get_line_logical_extents().get_ascent() / 2) /
+  auto xpen   = static_cast<float>(xMargin);
+  auto ypenF  = [&iter, yMargin] -> double {
+    return (static_cast<float>(iter.get_baseline()) -
+            iter.get_line_logical_extents().get_ascent() / 2.0) /
                PANGO_SCALE +
-           float(yMargin * 2);
+           static_cast<float>(yMargin * 2);
   };
   auto ypen = ypenF();
   Pango::Rectangle rInk;
   Pango::Rectangle rLog;
   auto vertIter     = vertexData.begin() + 1;
-  pageBackingHandle = doc->reservePoints(charCnt + charCnt / 4);
+  pageBackingHandle = this->doc->reservePoints(charCnt + charCnt / 4);
   auto text         = layout->get_text().raw();
-  auto font = layout->get_context()->load_font(layout->get_font_description());
+  auto font = layout->get_context()->load_font(this->layout->get_font_description());
   iter.next_cluster();
   while (lastIdx != (idx = iter.get_index())) {
     iter.get_cluster_extents(rInk, rLog);
@@ -182,10 +186,10 @@ Page::Page(std::shared_ptr<Doc> aDoc, GLState &state, glm::mat4 &model,
               << (unsigned char)text[idx]
               << (text[idx] == '\n') << "\n";*/
     bool hasNewLine = text.at(idx - 1) == '\n';
-    std::string_view tmp(
-        text.cbegin() + lastIdx,
-        text.cbegin() + ((idx - lastIdx) > 3 ? (lastIdx + 3)
-                                             : (hasNewLine ? (idx - 1) : idx)));
+    std::string_view tmp(text.cbegin() + lastIdx,
+                         text.cbegin() + (idx - lastIdx > 3 ? lastIdx + 3
+                                          : hasNewLine      ? idx - 1
+                                                            : idx));
     if (idx - lastIdx > 3) {
       /*std::string_view tmp2(
           text.cbegin() + lastIdx,
@@ -209,22 +213,24 @@ Page::Page(std::shared_ptr<Doc> aDoc, GLState &state, glm::mat4 &model,
     vec      = (doc->model * model * glm::vec4(vec, 0));*/
     /*std::cerr << std::format("vec: {} {}/{} {}\n", vec.x, vec.y, vec.z,
                              -ypen / 30.0F);*/
-    xpen += float(int(extents.width)) / 35.0F;
+    xpen += static_cast<float>(static_cast<int>(extents.width)) / 35.0F;
     // std::cout << "xpen sent: " << xpen << "\n";
     vboPos++;
-    *vertIter =
-        Doc::VBORow({xpen, -ypen / 30.0F, 0.1}, color(0), color(255),
-                    {coords.topLeft.x, coords.topLeft.y},
-                    {coords.box.width, coords.box.height},
-                    layerWH(0, uint(extents.width), uint(extents.height)),
-                    {3, (unsigned int)idx});
-    vertIter++;
-    xpen += float(int(extents.width)) / 35.0F;
+    *vertIter = {{xpen, static_cast<float>(-ypen) / 30.0F, 0.1F},
+                 color(0),
+                 color(255),
+                 {coords.topLeft.x, coords.topLeft.y},
+                 {coords.box.width, coords.box.height},
+                 layerWH(0, static_cast<uint>(extents.width),
+                         static_cast<uint>(extents.height)),
+                 {3, static_cast<unsigned int>(idx)}};
+    ++vertIter;
+    xpen += static_cast<float>(static_cast<int>(extents.width)) / 35.0F;
     // std::cout << "xpen after: " << xpen << "\n";
     if (hasNewLine) {
       // std::cout << "GOT newline: [" << tmp << "]\n";
-      xpen = float(xMargin);
-      ypen = ypenF() + float(layout->get_spacing()) / PANGO_SCALE;
+      xpen = static_cast<float>(xMargin);
+      ypen = ypenF() + static_cast<float>(layout->get_spacing()) / PANGO_SCALE;
     }
     // std::cout << "distance: " << std::distance(vertexData.begin(), vertIter)
     //           << "\n";
@@ -233,10 +239,12 @@ Page::Page(std::shared_ptr<Doc> aDoc, GLState &state, glm::mat4 &model,
                 << " dist: " << std::distance(vertexData.begin(), vertIter)
                 << " pos: " << vboPos << "\n";*/
       vertIter = vertexData.begin();
-      glBufferSubData(GL_ARRAY_BUFFER,
-                      pageBackingHandle.vbo.offset +
-                          (vboPos - (vertMax - 1)) * sizeof(Doc::VBORow),
-                      vertMax * sizeof(Doc::VBORow), vertexData.data());
+      glBufferSubData(
+          GL_ARRAY_BUFFER,
+          static_cast<GLintptr>(pageBackingHandle.vbo.offset +
+                                (vboPos - (vertMax - 1)) * sizeof(Doc::VBORow)),
+          static_cast<GLsizeiptr>(vertMax * sizeof(Doc::VBORow)),
+          vertexData.data());
     }
     lastIdx = idx;
     iter.next_cluster();
@@ -245,11 +253,12 @@ Page::Page(std::shared_ptr<Doc> aDoc, GLState &state, glm::mat4 &model,
     const auto dist = std::distance(vertexData.begin(), vertIter);
     /*std::cout << "remain OUT calling glBufferSubData: " << vertMax
               << " dist: " << dist << " pos: " << vboPos << "\n";*/
-    vertIter = vertexData.begin();
-    glBufferSubData(GL_ARRAY_BUFFER,
-                    pageBackingHandle.vbo.offset +
-                        (vboPos - (dist - 1)) * sizeof(Doc::VBORow),
-                    dist * sizeof(Doc::VBORow), vertexData.data());
+    // vertIter = vertexData.begin();
+    glBufferSubData(
+        GL_ARRAY_BUFFER,
+        static_cast<GLintptr>(pageBackingHandle.vbo.offset +
+                              (vboPos - (dist - 1)) * sizeof(Doc::VBORow)),
+        static_cast<GLsizeiptr>(dist * sizeof(Doc::VBORow)), vertexData.data());
   }
 
 #if 0
@@ -297,7 +306,7 @@ Page::Page(std::shared_ptr<Doc> aDoc, GLState &state, glm::mat4 &model,
 }
 
 // Always called from the render thread
-void Page::draw(const GLState &state, const glm::mat4 &docModel) {
+void Page::draw(const GLState &state, const glm::mat4 &docModel) const {
   // model = glm::rotate(model, glm::radians(1.0F), glm::vec3(0, 0, 1));
   const auto mat = docModel * model;
   glUniformMatrix4fv(state.programs.at("main")["model"], 1, GL_FALSE,
@@ -309,8 +318,10 @@ void Page::draw(const GLState &state, const glm::mat4 &docModel) {
   // make the compiler happy, reinterpret_cast<void*> of long would introduce
   // performance penalties apparently
   state.glyphCache.bindTexture(0);
-  glDrawArrays(GL_POINTS,
-               (int)pageBackingHandle.vbo.offset / sizeof(Doc::VBORow), 1);
+  glDrawArrays(
+      GL_POINTS,
+      static_cast<GLint>(pageBackingHandle.vbo.offset / sizeof(Doc::VBORow)),
+      1);
   glUniform1f(state.programs.at("main")["cubeDepth"], 0);
   glUniformMatrix4fv(
       state.programs.at("main")["model"], 1, GL_FALSE,
@@ -318,16 +329,18 @@ void Page::draw(const GLState &state, const glm::mat4 &docModel) {
                      // glm::translate(model, glm::vec3(-0.1F, 0.1F, 0.1F))
                      ));
   glDrawArrays(GL_POINTS,
-               (int)pageBackingHandle.vbo.offset / sizeof(Doc::VBORow) + 1,
-               pageBackingHandle.vbo.size / sizeof(Doc::VBORow) - 1);
+               static_cast<GLint>(
+                   pageBackingHandle.vbo.offset / sizeof(Doc::VBORow) + 1),
+               static_cast<GLsizei>(
+                   pageBackingHandle.vbo.size / sizeof(Doc::VBORow) - 1));
   GlyphCache::clearTexture();
   // TODO: add glyph boxes
-  for (const auto &handle : glyphs) {
+  for ([[maybe_unused]] const auto &handle : glyphs) {
   }
 }
 
 // Always called from the render thread
-void Doc::draw(const GLState &state) {
+void Doc::draw(const GLState &state) const {
   AutoVAO binder(this);
 
   AutoProgram progBinder(this, state, "main");
@@ -337,16 +350,18 @@ void Doc::draw(const GLState &state) {
   }
 }
 
-Doc::Doc(RendererRef aRenderer, glm::mat4 model, std::string &fileName,
-         [[maybe_unused]] Doc::Private _priv)
-    : Doc(std::move(aRenderer), model, _priv) {
-  docFile             = fileName;
-  std::cout << "NEW DOC: " << this << " " << fileName << " " << glm::to_string(model) << "\n";
+Doc::Doc(const RendererRef &renderer, const glm::mat4 &model,
+         const std::string &fileName, [[maybe_unused]] const Private _priv)
+    : Doc(renderer, model, _priv) {
+  docFile = fileName;
+  std::cout << "NEW DOC: " << this << " " << fileName << " "
+            << glm::to_string(model) << "\n";
   std::string tmpText = Glib::file_get_contents(docFile);
   std::cout << std::format("bom: {:x} {:x} {:x}\n", tmpText[0], tmpText[1],
                            tmpText[2]);
-  if (tmpText.size() >= 3 && (unsigned char)tmpText[0] == 0xEF &&
-      (unsigned char)tmpText[1] == 0xBB && (unsigned char)tmpText[2] == 0xBF) {
+  if (tmpText.size() >= 3 && static_cast<unsigned char>(tmpText[0]) == 0xEF &&
+      static_cast<unsigned char>(tmpText[1]) == 0xBB &&
+      static_cast<unsigned char>(tmpText[2]) == 0xBF) {
     std::cout << "found utf8 bom: " << tmpText.size() << " "
               << tmpText.capacity() << "\n";
     text = Glib::ustring(tmpText.data() + 3, tmpText.data() + tmpText.size());
@@ -355,15 +370,20 @@ Doc::Doc(RendererRef aRenderer, glm::mat4 model, std::string &fileName,
               << (text == text.make_valid() ? "" : text.make_valid()) << "\n";
     std::cout << "first bad: " << *iter << "\n";
   } else if (tmpText.size() >= 4 &&
-             ((/*utf32BE*/ (int)tmpText[0] == 0x0 && (int)tmpText[1] == 0x0 &&
-               (int)tmpText[2] == 0xFE && (int)tmpText[3] == 0xFF) ||
-              (/*utf32LE*/ (int)tmpText[0] == 0xFF && (int)tmpText[1] == 0xFE &&
-               (int)tmpText[2] == 0x0 && (int)tmpText[3] == 0x0))) {
+             ((/*utf32BE*/ static_cast<int>(tmpText[0]) == 0x0 &&
+               static_cast<int>(tmpText[1]) == 0x0 &&
+               static_cast<int>(tmpText[2]) == 0xFE &&
+               static_cast<int>(tmpText[3]) == 0xFF) ||
+              (/*utf32LE*/ static_cast<int>(tmpText[0]) == 0xFF &&
+               static_cast<int>(tmpText[1]) == 0xFE &&
+               static_cast<int>(tmpText[2]) == 0x0 &&
+               static_cast<int>(tmpText[3]) == 0x0))) {
     throw std::logic_error("utf32 not supported yet");
-  } else if (tmpText.size() >= 2 && ((/*utf16BE*/ (int)tmpText[0] == 0xFE &&
-                                      (int)tmpText[1] == 0xFF) ||
-                                     (/*utf16LE*/ (int)tmpText[0] == 0xFF &&
-                                      (int)tmpText[1] == 0xFE))) {
+  } else if (tmpText.size() >= 2 &&
+             ((/*utf16BE*/ static_cast<int>(tmpText[0]) == 0xFE &&
+               static_cast<int>(tmpText[1]) == 0xFF) ||
+              (/*utf16LE*/ static_cast<int>(tmpText[0]) == 0xFF &&
+               static_cast<int>(tmpText[1]) == 0xFE))) {
     throw std::logic_error("utf16 not supported yet");
   } else {
     text = tmpText;
@@ -377,11 +397,12 @@ Doc::Doc(RendererRef aRenderer, glm::mat4 model, std::string &fileName,
 
 void Doc::makePages(GLState &glState) {
   std::cout << "MAKING PAGES: " << this << " " << glm::to_string(model) << "\n";
-  auto fontDesc = Pango::FontDescription(renderer->defaultFontName().data());
-  auto fonts    = Pango::CairoFontMap::get_default();
-  auto ctx      = fonts->create_context();
+  const auto fontDesc =
+      Pango::FontDescription(renderer->defaultFontName().data());
+  const auto fonts = Pango::CairoFontMap::get_default();
+  const auto ctx   = fonts->create_context();
   ctx->set_font_description(fontDesc);
-  auto font = ctx->load_font(fontDesc);
+  // auto font = ctx->load_font(fontDesc);
   Pango::AttrList attrs;
   auto fontAttr = Pango::Attribute::create_attr_font_desc(fontDesc);
   attrs.change(fontAttr);
@@ -398,13 +419,14 @@ void Doc::makePages(GLState &glState) {
     lay->set_height(std::ceil(139.70 * 11 * PANGO_SCALE));
     lay->set_width(std::ceil(139.70 * 8.5 * PANGO_SCALE));
     lay->set_ellipsize(Pango::EllipsizeMode::END);
-    pango_layout_set_text(lay->gobj(), txt + tSize, text.bytes() - tSize);
+    pango_layout_set_text(lay->gobj(), txt + tSize,
+                          static_cast<int>(text.bytes() - tSize));
     const auto &line = lay->get_const_line(lay->get_line_count() - 1);
     /*std::cout << "START: " << tSize << " " << line->get_start_index() << " "
               << line->get_length() << "\n"
               << std::flush;*/
     newPage(glState, lay);
-    int len = line->get_length();
+    const int len = line->get_length();
     tSize += line->get_start_index() + (0 == len ? 1 : len);
     // std::cout << "END layout creation: " << tSize << " " << text.bytes()
     //           << "\n";
@@ -457,13 +479,12 @@ void Doc::makePages(GLState &glState) {
             << " valid?: " << bool(attrs) << "\n";*/
 }
 
-Doc::Doc(RendererRef renderer, glm::mat4 model,
-         [[maybe_unused]] Doc::Private _priv)
+Doc::Doc(const RendererRef &renderer, const glm::mat4 &model,
+         [[maybe_unused]] Private _priv)
     : Drawable(model),
-      VAOSupports(std::move(renderer),
-                  VAOSupports::VAOBuffers(
-                      VAOSupports::VAOBuffers::Vbo(sizeof(VBORow), 10000000),
-                      VAOSupports::VAOBuffers::Ibo(sizeof(unsigned int), 1))) { }
+      VAOSupports(renderer,
+                  VAOBuffers(VAOBuffers::Vbo(sizeof(VBORow), 10000000),
+                             VAOBuffers::Ibo(sizeof(unsigned int), 1))) {}
 
 void Doc::newPage(GLState &state, Glib::RefPtr<Pango::Layout> &layout) {
   renderer->run([this, &state, layout] {
@@ -472,9 +493,9 @@ void Doc::newPage(GLState &state, Glib::RefPtr<Pango::Layout> &layout) {
     AutoProgram progBinder(this, state, "main");
 
     const auto numPages = this->pages.size();
-    glm::mat4 trans =
-        glm::translate(glm::mat4(1.0),
-                       glm::vec3(0.0F, -100 * static_cast<float>(numPages), 0.0F));
+    glm::mat4 trans     = glm::translate(
+        glm::mat4(1.0),
+        glm::vec3(0.0F, -100 * static_cast<float>(numPages), 0.0F));
     // trans = glm::rotate(trans, glm::radians(20.0F*numPages), glm::vec3(0.5,
     // 1, 0)); trans = glm::scale(trans, glm::vec3(1+numPages, 1+numPages, 1));
     pages.emplace_back(this->getPtr(), state, trans, layout);

@@ -1,13 +1,11 @@
 #ifndef GLEDITOR_RENDERER_H
 #define GLEDITOR_RENDERER_H
 
-#include <gleditor/tqueue.hpp>
 #include <array>
 #include <concepts>
-#include <cstdint>
 #include <functional>
+#include <gleditor/tqueue.hpp>
 #include <memory>
-#include <mutex>
 #include <string>
 #include <string_view>
 #include <thread>
@@ -29,32 +27,32 @@ struct RenderItem {
   };
   Type type;
 
-  explicit RenderItem(Type type) : type(type) {}
+  explicit RenderItem(const Type type) : type(type) {}
   virtual ~RenderItem() = default;
 };
-struct RenderItemNewDoc : public RenderItem {
-  RenderItemNewDoc() : RenderItem(RenderItem::Type::NewDoc) {}
+struct RenderItemNewDoc : RenderItem {
+  RenderItemNewDoc() : RenderItem(Type::NewDoc) {}
   ~RenderItemNewDoc() override = default;
 };
 
-struct RenderItemResize : public RenderItem {
+struct RenderItemResize : RenderItem {
   int width, height;
-  RenderItemResize(int width, int height)
-      : RenderItem(RenderItem::Type::Resize), width(width), height(height) {}
+  RenderItemResize(const int width, const int height)
+      : RenderItem(Type::Resize), width(width), height(height) {}
   ~RenderItemResize() override = default;
 };
 
-struct RenderItemOpenDoc : public RenderItem {
+struct RenderItemOpenDoc : RenderItem {
   std::string docFile;
-  explicit RenderItemOpenDoc(std::string  fileName)
-      : RenderItem(RenderItem::Type::OpenDoc), docFile(std::move(fileName)) {}
+  explicit RenderItemOpenDoc(const std::string &fileName)
+      : RenderItem(Type::OpenDoc), docFile(std::move(fileName)) {}
   ~RenderItemOpenDoc() override = default;
 };
 
-struct RenderItemRun : public RenderItem {
+struct RenderItemRun : RenderItem {
   std::function<void()> fun;
   explicit RenderItemRun(std::invocable auto fun)
-      : RenderItem(RenderItem::Type::Run), fun(fun) {}
+      : RenderItem(Type::Run), fun(fun) {}
   ~RenderItemRun() override = default;
   void operator()() const { fun(); }
 };
@@ -71,10 +69,12 @@ protected:
   struct Private {
     explicit Private() = default;
   };
+
 public:
   /**
    * @brief Construct a Renderer.
-   * Prefer using concrete subclass' ::create() method to enforce correct ownership semantics.
+   * Prefer using concrete subclass' ::create() method to enforce correct
+   * ownership semantics.
    * @param state Application state reference.
    * @param _priv Private tag to restrict construction.
    */
@@ -120,7 +120,6 @@ public:
    * @brief Get the default font name from application state.
    */
   std::string_view defaultFontName() const { return state->defaultFontName; }
-
 };
 
 using RendererRef = std::shared_ptr<AbstractRenderer>;
@@ -145,18 +144,16 @@ protected:
    * Open an existing document file and prepare it for rendering.
    *
    * @param glState Current OpenGL state wrapper.
-   * @param window SDL window wrapper associated with the render context.
    * @param fileName Path to the document file to open (modified as needed).
    */
-  void openDoc(GLState &glState, AutoSDLWindow &window, std::string &fileName);
+  void openDoc(GLState &glState, std::string &fileName);
 
   /**
    * Create a new empty document and initialize any default resources.
    *
    * @param glState Current OpenGL state wrapper.
-   * @param window SDL window wrapper associated with the render context.
    */
-  void newDoc(GLState &glState, AutoSDLWindow &window);
+  void newDoc(GLState &glState);
 
   /**
    * Perform GL setup that depends on window/context size or state.
@@ -166,7 +163,7 @@ protected:
    *
    * @param glState Read-only OpenGL state wrapper.
    */
-  void setupGL(const GLState &glState);
+  void setupGL(const GLState &glState) const;
 
   /**
    * Handle window or framebuffer resize events.
@@ -174,7 +171,7 @@ protected:
    * Recreates dependent GL resources (e.g., renderbuffers) and updates
    * viewport-related values.
    */
-  void resize();
+  void resize() const;
 
   /**
    * Update application and rendering state for one frame.
@@ -186,7 +183,7 @@ protected:
    * @param window SDL window wrapper associated with the render context.
    * @return true if the render loop should continue, false to exit.
    */
-  bool update(const GLState &glState, const AutoSDLWindow &window);
+  bool update(const GLState &glState, const AutoSDLWindow &window) const;
 
   /**
    * Initialize OpenGL extensions, debug output, and static GL resources.
@@ -202,8 +199,8 @@ public:
    * target (e.g., GL_DRAW_FRAMEBUFFER) within a scope.
    */
   struct AutoFBO {
-    const Renderer *renderer;  ///< Owning renderer whose FBO will be bound.
-    GLenum target;             ///< Framebuffer binding target.
+    const Renderer *renderer; ///< Owning renderer whose FBO will be bound.
+    GLenum target;            ///< Framebuffer binding target.
     /**
      * Construct and bind the renderer's FBO to the specified target.
      * @param aRenderer Renderer that owns the FBO.
@@ -219,17 +216,19 @@ public:
     ~AutoFBO() { Renderer::clearFBO(target); }
   };
   /**
-   * @brief Bind the internal picking FBO to the given target and set draw buffers.
+   * @brief Bind the internal picking FBO to the given target and set draw
+   * buffers.
    * @param target GL framebuffer target (e.g., GL_DRAW_FRAMEBUFFER).
    */
   void bindFBO(GLenum target) const {
     glBindFramebuffer(target, pickingFBO);
-    std::array<unsigned int, 2> arr = {GL_COLOR_ATTACHMENT0,
-                                       GL_COLOR_ATTACHMENT1};
+    constexpr std::array<unsigned int, 2> arr = {GL_COLOR_ATTACHMENT0,
+                                                 GL_COLOR_ATTACHMENT1};
     glDrawBuffers(2, arr.data());
   }
   /**
-   * @brief Unbind any FBO from the specified target (binds default framebuffer).
+   * @brief Unbind any FBO from the specified target (binds default
+   * framebuffer).
    * @param target GL framebuffer target (e.g., GL_DRAW_FRAMEBUFFER).
    */
   static void clearFBO(GLenum target) { glBindFramebuffer(target, 0); }
@@ -239,7 +238,7 @@ public:
    * @param appState Shared application state used by the renderer.
    * @return Shared pointer to a new Renderer.
    */
-  static RendererRef create(const AppStateRef& appState) {
+  static RendererRef create(const AppStateRef &appState) {
     return std::make_shared<Renderer>(appState, Private());
   }
 
@@ -259,14 +258,11 @@ public:
       : AbstractRenderer(state, _priv) {}
 
   /**
-   * @brief Main render loop entry point; runs until the application requests exit.
+   * @brief Main render loop entry point; runs until the application requests
+   * exit.
    * @param window SDL window wrapper associated with the GL context.
    */
   void operator()(AutoSDLWindow &window) override;
-
-
-
 };
-
 
 #endif // GLEDITOR_RENDERER_H

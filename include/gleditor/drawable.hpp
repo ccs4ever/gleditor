@@ -8,7 +8,7 @@ protected:
   glm::mat4 model;
 
 public:
-  Drawable(glm::mat4 model) : model(model) {}
+  explicit Drawable(const glm::mat4 &model) : model(std::move(model)) {}
   virtual ~Drawable() = default;
   [[nodiscard]] glm::mat4 getModel() const { return model; }
 };

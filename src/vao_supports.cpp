@@ -1,33 +1,33 @@
-#include <gleditor/gl/state.hpp>      // for GLState
-#include <gleditor/renderer.hpp>      // for Renderer, RendererRef
-#include <gleditor/vao_supports.hpp>  // IWYU pragma: associated
-#include <GL/glew.h>                  // for glBindBuffer, glGetIntegerv
-#include <algorithm>                  // for for_each, __sort_fn, sort
-#include <array>                      // for array
-#include <format>                     // for format
-#include <iostream>                   // for basic_ostream, operator<<, basi...
-#include <ranges>                     // for _Filter, _Partial, operator|
-#include <stdexcept>                  // for runtime_error
-#include <string>                     // for char_traits, basic_string, oper...
-#include <utility>                    // for pair, move
-#include <vector>                     // for vector
-#include <functional>                 // for less
-#include <iterator>                   // for distance
-#include <list>                       // for _List_iterator, operator==
-#include <memory>                     // for __shared_ptr_access
-#include <unordered_map>              // for unordered_map, operator==
+#include <GL/glew.h>                 // for glBindBuffer, glGetIntegerv
+#include <algorithm>                 // for for_each, __sort_fn, sort
+#include <array>                     // for array
+#include <format>                    // for format
+#include <functional>                // for less
+#include <gleditor/gl/state.hpp>     // for GLState
+#include <gleditor/renderer.hpp>     // for Renderer, RendererRef
+#include <gleditor/vao_supports.hpp> // IWYU pragma: associated
+#include <iostream>                  // for basic_ostream, operator<<, basi...
+#include <iterator>                  // for distance
+#include <list>                      // for _List_iterator, operator==
+#include <memory>                    // for __shared_ptr_access
+#include <ranges>                    // for _Filter, _Partial, operator|
+#include <stdexcept>                 // for runtime_error
+#include <string>                    // for char_traits, basic_string, oper...
+#include <unordered_map>             // for unordered_map, operator==
+#include <utility>                   // for pair, move
+#include <vector>                    // for vector
 
 /// Utilities
-template <typename... Args> inline void genBuffers(Args... args) {
+template <typename... Args> void genBuffers(Args... args) {
   (glGenBuffers(1, args), ...);
 }
-template <typename... Args> inline void delBuffers(Args... args) {
+template <typename... Args> void delBuffers(Args... args) {
   (glDeleteBuffers(1, &args), ...);
 }
-template <typename... Args> inline void genVertexArrays(Args... args) {
+template <typename... Args> void genVertexArrays(Args... args) {
   (glGenVertexArrays(1, args), ...);
 }
-template <typename... Args> inline void clearBuffers(Args... args) {
+template <typename... Args> void clearBuffers(Args... args) {
   ((glBindBuffer(args, 0)), ...);
 }
 ///
@@ -75,11 +75,13 @@ void VAOSupports::allocateBuffers() {
                GL_STATIC_DRAW);
   std::vector<Highlight> high{
       {{0U, 4U, 0x0000ff00U}, {5U, 8U, 0x00ff0000U}, {0U, 0U, 0U}}};
-  std::for_each(high.begin(), high.end(), [](auto i) {
+  std::ranges::for_each(high, [](auto i) {
     std::cout << std::format("start: {} end: {} data: {:x}\n", i.start, i.end,
                              i.data);
   });
-  glBufferSubData(GL_UNIFORM_BUFFER, 0, sizeof(Highlight) * high.size(),
+  glBufferSubData(GL_UNIFORM_BUFFER, 0,
+                  static_cast<GLsizeiptr>(sizeof(Highlight) *
+                      high.size()),
                   high.data());
   glBindBufferBase(GL_UNIFORM_BUFFER, 0, ubo);
   glBindBuffer(GL_UNIFORM_BUFFER, 0);
@@ -96,25 +98,27 @@ void VAOSupports::deallocateBuffers() {
   vao = vbo = ibo = 0;
 }
 
+// TODO: implement
+// ReSharper disable once CppMemberFunctionMayBeStatic
 void VAOSupports::defragmentFreeLists() {}
 
 /** vboQuads/iboQuads of the failed allocation, use as hints for reallocating
  * buffers */
-void VAOSupports::reallocate(long vertexRes, long indexRes) {
+void VAOSupports::reallocate(long /*vertexRes*/, long /*indexRes*/) {
 
   const unsigned int origVbo = vbo;
   const unsigned int origIbo = ibo;
 
   const long origVboMaxVertices = bufferInfos.vbo.maxVertices;
   const long origIboMaxIndices  = bufferInfos.ibo.maxIndices;
-  long origVboEnd               = origVboMaxVertices * bufferInfos.vbo.stride;
-  long origIboEnd               = origIboMaxIndices * bufferInfos.ibo.stride;
+  const long origVboEnd         = origVboMaxVertices * bufferInfos.vbo.stride;
+  const long origIboEnd         = origIboMaxIndices * bufferInfos.ibo.stride;
 
   // XXX: naively double the space for now
   bufferInfos.vbo.maxVertices *= 2;
   bufferInfos.ibo.maxIndices *= 2;
 
-  renderer->run([=, this]() {
+  renderer->run([=, this] {
     allocateBuffers();
 
     AutoVAO binder(this);
@@ -129,7 +133,7 @@ void VAOSupports::reallocate(long vertexRes, long indexRes) {
     glCopyBufferSubData(GL_COPY_WRITE_BUFFER, GL_ELEMENT_ARRAY_BUFFER, 0, 0,
                         origIboEnd);
     clearBuffers(GL_COPY_READ_BUFFER, GL_COPY_WRITE_BUFFER);
-    std::array<unsigned int, 2> origBufs = {origVbo, origIbo};
+    const std::array origBufs = {origVbo, origIbo};
     glDeleteBuffers(2, origBufs.data());
   });
 
@@ -168,7 +172,7 @@ void VAOSupports::useProgram(const GLState &state,
   if ("main" == progName) {
     auto program = state.programs.at("main");
     glUseProgram(program.id);
-    int hBlockIdx = glGetUniformBlockIndex(program.id, "Highlights");
+    const int hBlockIdx = glGetUniformBlockIndex(program.id, "Highlights");
     glUniformBlockBinding(program.id, hBlockIdx,
                           0); // not strictly necessary as 0 is the default
 
@@ -203,7 +207,7 @@ void VAOSupports::useProgram(const GLState &state,
                   << " offset: " << offset << " varType: " << loc.varType <<
            "\n";*/
         glEnableVertexAttribArray(loc);
-        if (typ != GL_FLOAT && typ != GL_HALF_FLOAT) {
+        if (typ != GL_FLOAT /* && typ != GL_HALF_FLOAT*/) {
           glVertexAttribIPointer(loc, loc.size, typ, bufferInfos.vbo.stride,
                                  /* NOLINTNEXTLINE(performance-no-int-to-ptr) */
                                  reinterpret_cast<void *>(offset));
@@ -223,16 +227,17 @@ void VAOSupports::useProgram(const GLState &state,
   // std::cerr << std::format("setup {} attribs\n", progName);
 }
 
-VAOSupports::Handle VAOSupports::reserveTriangles(long triangles) {
+VAOSupports::Handle VAOSupports::reserveTriangles(const long triangles) {
   return reserve(GL_TRIANGLES, triangles);
 }
-VAOSupports::Handle VAOSupports::reserveQuads(long quads) {
+VAOSupports::Handle VAOSupports::reserveQuads(const long quads) {
   return reserve(GL_QUADS, quads);
 }
-VAOSupports::Handle VAOSupports::reservePoints(long points) {
+VAOSupports::Handle VAOSupports::reservePoints(const long points) {
   return reserve(GL_POINTS, points);
 }
-constexpr int typeToSize(const GLenum type) {
+
+int typeToSize(const GLenum type) {
   switch (type) {
   case GL_POINTS:
     return 1;
@@ -247,8 +252,8 @@ constexpr int typeToSize(const GLenum type) {
   }
 }
 
-VAOSupports::Handle VAOSupports::reserve(unsigned int type, long res) {
-
+VAOSupports::Handle VAOSupports::reserve(const unsigned int type,
+                                         const long res) {
   const int pointsPer  = typeToSize(type);
   const long numPoints = pointsPer * res;
   auto vboIt           = findFreeOffset(bufferInfos.vbo.free, numPoints);
@@ -263,7 +268,7 @@ VAOSupports::Handle VAOSupports::reserve(unsigned int type, long res) {
                              : findFreeOffset(bufferInfos.ibo.free, 6 * res);
   }
 
-  VAOSupports::Handle ret;
+  Handle ret{};
   ret.vbo = {static_cast<long>(vboIt->first * bufferInfos.vbo.stride),
              numPoints * bufferInfos.vbo.stride};
   if (GL_QUADS != type) {

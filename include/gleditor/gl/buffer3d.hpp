@@ -151,9 +151,9 @@ protected:
 template <typename Elem> class Buffer3DGL : public Buffer3DTyped<Elem> {
 public: // types
   using base   = Buffer3DTyped<Elem>;
-  using Type   = base::Type;
-  using Access = base::Access;
-  using Usage  = base::Usage;
+  using Type   = typename base::Type;
+  using Access = typename base::Access;
+  using Usage  = typename base::Usage;
 
 private:
   GLuint id{}; ///< OpenGL buffer object ID.

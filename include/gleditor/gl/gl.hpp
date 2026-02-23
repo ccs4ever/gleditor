@@ -1,7 +1,7 @@
 #ifndef GLEDITOR_GL_GL_H
 #define GLEDITOR_GL_GL_H
 
-#include <GL/gl.h>
+#include <GL/glew.h>
 #include <gleditor/log.hpp>
 
 /* Interface for mocking and portability */

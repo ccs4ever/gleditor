@@ -10,7 +10,7 @@
 
 #include <SDL3_image/SDL_image.h>
 
-AutoSDL::AutoSDL(std::uint32_t flags) : flags(flags) {
+AutoSDL::AutoSDL(const std::uint32_t flags) : flags(flags) {
   if (!SDL_InitSubSystem(flags)) {
     throw std::runtime_error(std::string("SDL init failed: ") + SDL_GetError());
   }
@@ -23,8 +23,8 @@ AutoSDL::~AutoSDL() {
 
 
 // NOLINTNEXTLINE(readability-identifier-length)
-AutoSDLWindow::AutoSDLWindow(const char *title, int x, int y, int width,
-                             int height, std::uint32_t flags,
+AutoSDLWindow::AutoSDLWindow(const char *title, const int /*x*/, const int /*y*/, const int width,
+                             const int height, const std::uint32_t flags,
                              SDL_Surface *icon) {
   SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, 4);
   SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION, 5);

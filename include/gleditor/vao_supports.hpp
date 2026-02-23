@@ -35,13 +35,13 @@ protected:
   using FreeList = std::list<std::pair<std::uint32_t, std::uint32_t>>;
   struct VAOBuffers {
     struct Vbo {
-      Vbo(int stride, long maxQuads) : stride(stride), maxVertices(maxQuads) {}
+      Vbo(const int stride, const long maxQuads) : stride(stride), maxVertices(maxQuads) {}
       int stride{};
       long maxVertices{};
       FreeList free;
     } vbo;
     struct Ibo {
-      Ibo(int stride, long maxQuads) : stride(stride), maxIndices(maxQuads) {}
+      Ibo(const int stride, const long maxQuads) : stride(stride), maxIndices(maxQuads) {}
       int stride{};
       long maxIndices{};
       FreeList free;
@@ -50,7 +50,7 @@ protected:
   };
   struct AutoVAO {
     const VAOSupports *support;
-    AutoVAO(const VAOSupports *aSupport) : support(aSupport) {
+    explicit AutoVAO(const VAOSupports *aSupport) : support(aSupport) {
       support->bindVAO();
     }
 
@@ -77,7 +77,7 @@ protected:
   Handle reserveQuads(long quads);
   Handle reservePoints(long points);
 
-  unsigned int vao, vbo, ibo, ubo;
+  unsigned int vao{}, vbo{}, ibo{}, ubo{};
   RendererRef renderer;
 
 private:
@@ -86,7 +86,6 @@ private:
   static auto findFreeOffset(FreeList &freeList, long rows);
   void reallocate(long vertexRes, long indexRes);
   void allocateBuffers();
-  void allocateBuffers(unsigned int vboTarget, unsigned int iboTarget);
   void deallocateBuffers();
   void defragmentFreeLists();
 };

@@ -12,7 +12,6 @@
 #include <gleditor/glyphcache/types.hpp>  // for operator<<, Rect, Point
 #include <gleditor/log.hpp>               // for Loggable
 #include <compare>                        // for partial_ordering
-#include <iostream>                       // for basic_ostream, char_traits
 #include <stdexcept>                      // for invalid_argument
 #include <utility>                        // for to_underlying
 
@@ -45,7 +44,7 @@ public:
    * @param paletteYOffset Vertical offset of the lane within the palette texture.
    * @param box Width of the lane (box.width) and max character height (box.height).
    */
-  GlyphLane(Offset paletteYOffset, const Rect &box)
+  GlyphLane(const Offset paletteYOffset, const Rect &box)
       : maxCharHeight(box.height), paletteYOffset(paletteYOffset),
         paletteWidth(box.width) {}
   ~GlyphLane() override = default;
@@ -76,7 +75,7 @@ public:
       throw std::invalid_argument(
           "Character width too large or small to hold in lane");
     }
-    auto ret = Point{Offset{std::to_underlying(usedWidth)}, paletteYOffset};
+    const auto ret = Point{Offset{std::to_underlying(usedWidth)}, paletteYOffset};
     // std::cout << "put usedWidth: " << usedWidth << "\n";
     usedWidth =
         Length{std::to_underlying(usedWidth) + std::to_underlying(charWidth)};

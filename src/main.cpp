@@ -1,51 +1,50 @@
-#include <pangomm/init.h>                 // for init
-#include <gleditor/renderer.hpp>          // for RenderItemNewDoc, Renderer
-#include <gleditor/sdl_wrap.hpp>          // for AutoSDLSurface, AutoSDL
-#include <glm/detail/type_vec3.hpp>       // for vec
-#include <glm/fwd.hpp>                    // for vec3
+#include <atomic>                   // for __atomic_base
+#include <clocale>                  // for setlocale, LC_ALL
+#include <exception>                // for exception
+#include <functional>               // for reference_wrapper, ref
+#include <gleditor/renderer.hpp>    // for RenderItemNewDoc, Renderer
+#include <gleditor/sdl_wrap.hpp>    // for AutoSDLSurface, AutoSDL
+#include <glm/detail/type_vec3.hpp> // for vec
+#include <glm/fwd.hpp>              // for vec3
 #include <glm/gtx/string_cast.hpp>
-#include <clocale>                        // for setlocale, LC_ALL
-#include <exception>                      // for exception
-#include <functional>                     // for reference_wrapper, ref
-#include <iostream>                       // for basic_ostream, char_traits
-#include <locale>                         // for locale
-#include <memory>                         // for __shared_ptr_access, shared...
-#include <mutex>                          // for lock_guard
-#include <thread>                         // for jthread
-#include <atomic>                         // for __atomic_base
-#include <optional>                       // for optional
-#include <string>                         // for operator<<, basic_string
+#include <iostream>       // for basic_ostream, char_traits
+#include <locale>         // for locale
+#include <memory>         // for __shared_ptr_access, shared...
+#include <mutex>          // for lock_guard
+#include <pangomm/init.h> // for init
+#include <string>         // for operator<<, basic_string
+#include <thread>         // for jthread
 
-#include <SDL3/SDL.h>                          // for SDL_INIT_VIDEO
-#include <SDL3/SDL_events.h>                   // for SDL_Event, SDL_PollEvent
-#include <SDL3/SDL_keycode.h>                  // for KMOD_SHIFT
-#include <SDL3/SDL_scancode.h>                 // for SDL_SCANCODE_C, SDL_SCANCODE_D
-#include <SDL3/SDL_video.h>                    // for SDL_WINDOWPOS_UNDEFINED
+#include "config.h"           // for GLEDITOR_VERSION, TOSTRING
+#include <SDL3/SDL.h>         // for SDL_INIT_VIDEO
+#include <SDL3/SDL_events.h>  // for SDL_Event, SDL_PollEvent
+#include <SDL3/SDL_keycode.h> // for KMOD_SHIFT
 #include <SDL3/SDL_main.h>
-#include <argparse/argparse.hpp>          // for ArgumentParser, Argument
-#include "config.h"                       // for GLEDITOR_VERSION, TOSTRING
-#include <SDL3_image/SDL_image.h>                    // for IMG_INIT_PNG
-#include <gleditor/state.hpp>             // for AppState, AppStateRef
-#include <glibmm/init.h>                  // for init
+#include <SDL3/SDL_scancode.h>   // for SDL_SCANCODE_C, SDL_SCANCODE_D
+#include <SDL3/SDL_video.h>      // for SDL_WINDOWPOS_UNDEFINED
+#include <argparse/argparse.hpp> // for ArgumentParser, Argument
+#include <gleditor/state.hpp>    // for AppState, AppStateRef
+#include <glibmm/init.h>         // for init
 #ifdef GLEDITOR_ENABLE_VULKAN
 #include <SDL3/SDL.h>
 #include <SDL3/SDL_vulkan.h>
-#include <vulkan/vulkan.h>
 #include <gleditor/vulkan/renderer_vk.hpp>
+#include <vulkan/vulkan.h>
 #endif
 
-void handleMouseMove(SDL_Event &evt, const AppStateRef &state) {
-  state->mouseX = evt.motion.x;
-  state->mouseY = state->view.screenHeight - evt.motion.y;
+void handleMouseMove(const SDL_Event &evt, const AppStateRef &state) {
+  state->mouseX = static_cast<int>(evt.motion.x);
+  state->mouseY = state->view.screenHeight - static_cast<int>(evt.motion.y);
 }
 
-void handleKeyPress(SDL_Event &evt, const AppStateRef &state,
-                    RendererRef &renderer) {
+void handleKeyPress(const SDL_Event &evt, const AppStateRef &state,
+                    const RendererRef &renderer) {
   std::lock_guard locker(state->view);
-  float speed = 1; // state->view.speed * state->frameTimeDelta.load().count();
-  if (0 == speed) {
+  const float speed =
+      1; // state->view.speed * state->frameTimeDelta.load().count();
+  /*if (0 == speed) {
     speed = 1;
-  }
+  }*/
   std::cout << "camera pos before: " << glm::to_string(state->view.pos)
             << " speed: " << speed << "\n";
   switch (evt.key.scancode) {
@@ -65,12 +64,13 @@ void handleKeyPress(SDL_Event &evt, const AppStateRef &state,
     state->view.pos -= glm::normalize(glm::cross(state->view.front,
                                                  glm::vec3(1.0F, 0.0F, 0.0F))) *
                        speed;
-  } break;
+    break;
+  }
   case SDL_SCANCODE_D: {
     if (0 != (evt.key.mod & SDL_KMOD_SHIFT)) {
-      state->view.pos += (speed * state->view.front);
+      state->view.pos += speed * state->view.front;
     } else {
-      state->view.pos -= (speed * state->view.front);
+      state->view.pos -= speed * state->view.front;
     }
     break;
   }
@@ -115,8 +115,8 @@ void handleKeyPress(SDL_Event &evt, const AppStateRef &state,
   std::cout << "camera pos after: " << glm::to_string(state->view.pos) << "\n";
 }
 
-RendererRef handleArgs(const AppStateRef &state, int argc,
-               char **argv) {
+RendererRef handleArgs(const AppStateRef &state, const int argc,
+                       const char *const *const argv) {
 
 #ifndef GLEDITOR_VERSION
 #error GLEDITOR_VERSION must be defined
@@ -130,9 +130,7 @@ RendererRef handleArgs(const AppStateRef &state, int argc,
       .help("perform initial setup, then quit")
       .flag();
 #ifdef GLEDITOR_ENABLE_VULKAN
-  parser.add_argument("--vulkan")
-      .help("use the vulkan renderer")
-      .flag();
+  parser.add_argument("--vulkan").help("use the vulkan renderer").flag();
 #endif
   parser.add_argument("files").help("input files").remaining();
 
@@ -142,13 +140,13 @@ RendererRef handleArgs(const AppStateRef &state, int argc,
 
     RendererRef renderer =
 #ifdef GLEDITOR_ENABLE_VULKAN
-      parser["--vulkan"] == true ? RendererVK::create(state) :
+        parser["--vulkan"] == true ? RendererVK::create(state) :
 #endif
-      Renderer::create(state);
+                                   Renderer::create(state);
 
     state->defaultFontName = parser.get("--font");
-    auto files = parser.get<std::vector<std::string>>("files");
-    for (const auto& file : files) {
+    for (const auto &files = parser.get<std::vector<std::string>>("files");
+         const auto &file : files) {
       std::cout << "file: " << file << "\n";
       renderer->push(RenderItemOpenDoc(file));
     }
@@ -159,11 +157,11 @@ RendererRef handleArgs(const AppStateRef &state, int argc,
   } catch (const std::exception &e) {
     std::cerr << e.what() << "\n";
     std::cerr << parser;
-    return RendererRef(nullptr);
+    return {nullptr};
   }
 }
 
-int main(int argc, char **argv) {
+int main(const int argc, char **argv) {
 
   // "" signals that LC_ALL should be set from the environment
   std::setlocale(LC_ALL, "");           // for C and C++ where synced with stdio
@@ -172,7 +170,7 @@ int main(int argc, char **argv) {
   std::cin.imbue(std::locale());
   std::cout.imbue(std::locale());
 
-  auto state = std::make_shared<AppState>();
+  const auto state = std::make_shared<AppState>();
 
   RendererRef rend;
 
@@ -187,12 +185,13 @@ int main(int argc, char **argv) {
 
     AutoSDL sdlScoped(SDL_INIT_VIDEO);
 
-    AutoSDLSurface icon("logo.png");
+    const AutoSDLSurface icon("logo.png");
 
     AutoSDLWindow window("GL Editor", SDL_WINDOWPOS_UNDEFINED,
                          SDL_WINDOWPOS_UNDEFINED, state->view.screenWidth,
                          state->view.screenHeight,
-                         SDL_WINDOW_OPENGL|SDL_WINDOW_RESIZABLE|SDL_WINDOW_HIGH_PIXEL_DENSITY,
+                         SDL_WINDOW_OPENGL | SDL_WINDOW_RESIZABLE |
+                             SDL_WINDOW_HIGH_PIXEL_DENSITY,
                          icon.surface);
 
     std::jthread renderer(std::ref(*rend), std::ref(window));
@@ -217,7 +216,8 @@ int main(int argc, char **argv) {
         case SDL_EVENT_WINDOW_MAXIMIZED: {
           const auto width  = evt.window.data1;
           const auto height = evt.window.data2;
-          std::cout << "window size changed(w/h): " << width << "/" << height << "\n";
+          std::cout << "window size changed(w/h): " << width << "/" << height
+                    << "\n";
           state->view.screenWidth  = width;
           state->view.screenHeight = height;
           rend->push(RenderItemResize(width, height));

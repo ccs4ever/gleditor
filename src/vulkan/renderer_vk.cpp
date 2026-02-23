@@ -27,7 +27,7 @@ struct RendererVK::VulkanHandles {
 };
 #endif
 
-RendererVK::RendererVK(const AppStateRef &state, [[maybe_unused]] Private _priv)
+RendererVK::RendererVK(const AppStateRef &state, [[maybe_unused]] const Private _priv)
     : AbstractRenderer(state, _priv) {}
 RendererVK::~RendererVK() { shutdownVulkan(); }
 
@@ -139,8 +139,7 @@ void RendererVK::operator()(AutoSDLWindow &window) {
         break;
       }
       case RenderItem::Type::Run: {
-        auto *runItem = dynamic_cast<RenderItemRun *>(item.get());
-        if (runItem) {
+        if (const auto *runItem = dynamic_cast<RenderItemRun *>(item.get())) {
           (*runItem)();
         }
         break;

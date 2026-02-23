@@ -9,12 +9,12 @@ struct SDL_Surface;
 
 struct AutoSDL {
   std::uint32_t flags;
-  AutoSDL(std::uint32_t flags);
+  explicit AutoSDL(std::uint32_t flags);
   ~AutoSDL();
 };
 
 struct AutoSDLImg {
-  AutoSDLImg(int flags);
+  explicit AutoSDLImg(int flags);
   ~AutoSDLImg();
 };
 
@@ -27,13 +27,13 @@ struct AutoSDLWindow {
 
 struct AutoSDLGL {
   SDL_GLContext ctx;
-  AutoSDLGL(SDL_Window *window);
+  explicit AutoSDLGL(SDL_Window *window);
   ~AutoSDLGL();
 };
 
 struct AutoSDLSurface {
   SDL_Surface *surface;
-  AutoSDLSurface(const char *fileName);
+  explicit AutoSDLSurface(const char *fileName);
   ~AutoSDLSurface();
 };
 

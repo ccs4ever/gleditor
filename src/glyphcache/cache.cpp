@@ -5,43 +5,42 @@
  * Implements GlyphCache helpers to rasterize text via Pango/Cairo, manage the
  * OpenGL texture array, and pack glyphs into palettes and lanes.
  */
-#include <cairomm/context.h>                // for Context
-#include <cairomm/surface.h>                // for ImageSurface, Surface
-#include <gleditor/glyphcache/cache.hpp>    // IWYU pragma: associated
-#include <gleditor/glyphcache/types.hpp>    // for TextureCoords, Rect
-#include <GL/glew.h>                        // for glTexParameteri, GL_TEXTU...
-#include <gleditor/gl/gl.hpp>               // for GL
-#include <gleditor/glyphcache/palette.hpp>  // for GlyphPalette, operator<=>
-#include <algorithm>                        // for min, sort
-#include <format>                           // for format
-#include <iostream>                         // for basic_ostream, operator<<
-#include <iterator>                         // for prev
-#include <memory>                           // for __shared_ptr_access, shar...
-#include <optional>                         // for optional
-#include <stdexcept>                        // for invalid_argument, overflo...
-#include <string>                           // for char_traits, string, oper...
-#include <string_view>                      // for operator==, string_view
-#include <tuple>                            // for make_tuple, tuple
-#include <utility>                          // for pair
-#include <vector>                           // for vector
-#include <unordered_map>                    // for unordered_map, operator==
-#include <functional>                       // for equal_to
+#include <GL/glew.h>                       // for glTexParameteri, GL_TEXTU...
+#include <algorithm>                       // for min, sort
+#include <cairomm/context.h>               // for Context
+#include <cairomm/surface.h>               // for ImageSurface, Surface
+#include <format>                          // for format
+#include <gleditor/gl/gl.hpp>              // for GL
+#include <gleditor/glyphcache/cache.hpp>   // IWYU pragma: associated
+#include <gleditor/glyphcache/palette.hpp> // for GlyphPalette, operator<=>
+#include <gleditor/glyphcache/types.hpp>   // for TextureCoords, Rect
+#include <iostream>                        // for basic_ostream, operator<<
+#include <iterator>                        // for prev
+#include <memory>                          // for __shared_ptr_access, shar...
+#include <optional>                        // for optional
+#include <stdexcept>                       // for invalid_argument, overflo...
+#include <string>                          // for char_traits, string, oper...
+#include <string_view>                     // for operator==, string_view
+#include <tuple>                           // for make_tuple, tuple
+#include <unordered_map>                   // for unordered_map, operator==
+#include <utility>                         // for pair
+#include <vector>                          // for vector
 
-#include "cairomm/enums.h"                  // for ANTIALIAS_SUBPIXEL, Antia...
-#include "cairomm/fontoptions.h"            // for FontOptions
-#include "cairomm/matrix.h"                 // for Matrix
-#include "glibmm/refptr.h"                  // for RefPtr
-#include "pangomm/layout.h"                 // for Layout
-#include "pangomm/font.h"                   // for Font
+#include "cairomm/enums.h"       // for ANTIALIAS_SUBPIXEL, Antia...
+#include "cairomm/fontoptions.h" // for FontOptions
+#include "cairomm/matrix.h"      // for Matrix
+#include "glibmm/refptr.h"       // for RefPtr
+#include "pangomm/font.h"        // for Font
+#include "pangomm/layout.h"      // for Layout
 
 enum class Length : int;
 
 // GlyphCache
 
-inline int clampTextureSize(int size) { return std::min(2048, size); }
-inline int clampTextureLayers(int layers) { return std::min(10, layers); }
+inline int clampTextureSize(const int size) { return std::min(2048, size); }
+inline int clampTextureLayers(const int layers) { return std::min(10, layers); }
 
-GlyphCache::GlyphCache(std::shared_ptr<GL> &ogl) : gl{ogl} {
+GlyphCache::GlyphCache(const std::shared_ptr<GL> &ogl) : gl{ogl} {
   gl->getIntegerv(GL_MAX_TEXTURE_SIZE, &size);
   std::cerr << "max texture size: " << size << "\n";
   size = clampTextureSize(size);
@@ -85,35 +84,35 @@ void GlyphCache::initTextureArray() {
 }
 
 auto GlyphCache::getBestPalette(const Rect &charBox) {
-  for (auto it = palettes.begin(); it != palettes.end(); it++) {
+  for (auto it = palettes.begin(); it != palettes.end(); ++it) {
     if (it->canFit(charBox)) {
-      return it;
+      return it + 0;
     }
   }
-  if (palettes.size() >= (unsigned long)maxLayers) {
-    throw new std::overflow_error("Out of Palettes!!!");
+  if (palettes.size() >= static_cast<unsigned long>(maxLayers)) {
+    throw std::overflow_error("Out of Palettes!!!");
   }
   // std::cout << "creating palette\n";
   palettes.emplace_back(Rect{Length{size}, Length{size}}, gl);
-  std::sort(palettes.begin(), palettes.end());
+  std::ranges::sort(palettes);
   return std::prev(palettes.end());
 }
 
-inline Glib::RefPtr<Pango::Layout> getLayout(const std::string &chr,
-                                             const FontPtr &font,
-                                             Cairo::Surface::Format format) {
-  auto tempSurf = Cairo::ImageSurface::create(format, 0, 0);
-  auto ctx      = Cairo::Context::create(tempSurf);
-  auto layout   = Pango::Layout::create(ctx);
-  auto desc     = font->describe_with_absolute_size();
+inline Glib::RefPtr<Pango::Layout>
+getLayout(const std::string &chr, const FontPtr &font,
+          const Cairo::Surface::Format format) {
+  const auto tempSurf = Cairo::ImageSurface::create(format, 0, 0);
+  const auto ctx      = Cairo::Context::create(tempSurf);
+  auto layout         = Pango::Layout::create(ctx);
+  const auto desc     = font->describe_with_absolute_size();
   layout->set_font_description(desc);
   layout->set_text(chr);
   return layout;
 }
 
 inline std::tuple<int, int, int>
-getLayoutInfo(Glib::RefPtr<Pango::Layout> &layout,
-              Cairo::Surface::Format format) {
+getLayoutInfo(const Glib::RefPtr<Pango::Layout> &layout,
+              const Cairo::Surface::Format format) {
   int width;
   int height;
   layout->get_pixel_size(width, height);
@@ -131,19 +130,19 @@ inline auto getFontOptions() {
 
 GlyphCache::Sizes GlyphCache::addToCache(const std::string &chr,
                                          const FontPtr &font) {
-  auto format = Cairo::Surface::Format::ARGB32;
-  auto layout = getLayout(chr, font, format);
+  constexpr auto format = Cairo::Surface::Format::ARGB32;
+  const auto layout           = getLayout(chr, font, format);
 
   auto [width, height, stride] = getLayoutInfo(layout, format);
   // std::cout << std::format("layout w/h/s: {}/{}/{}\n", width, height,
   // stride);
-  auto extents = Rect{Length{width}, Length{height}};
+  const auto extents = Rect{Length{width}, Length{height}};
 
   // create layout drawing context
   std::vector<unsigned char> data(static_cast<long>(height) * stride);
-  auto layoutSurf =
+  const auto layoutSurf =
       Cairo::ImageSurface::create(data.data(), format, width, height, stride);
-  auto layCtx = Cairo::Context::create(layoutSurf);
+  const auto layCtx = Cairo::Context::create(layoutSurf);
 
   // clear surface
   layCtx->set_source_rgba(0, 0, 0, 0);
@@ -151,7 +150,7 @@ GlyphCache::Sizes GlyphCache::addToCache(const std::string &chr,
   layCtx->fill();
 
   // flip the image vertically, texSubImage always draws from bottom to top
-  Cairo::Matrix matrix(1.0, 0.0, 0.0, -1.0, 0.0, height);
+  const Cairo::Matrix matrix(1.0, 0.0, 0.0, -1.0, 0.0, height);
   layCtx->transform(matrix);
   // draw text cluster
   layCtx->set_source_rgba(1, 0, 0, 1);
@@ -161,10 +160,10 @@ GlyphCache::Sizes GlyphCache::addToCache(const std::string &chr,
   // debugging
   // layoutSurf->write_to_png("/tmp/page.png");
 
-  auto palette = getBestPalette(extents);
+  const auto palette = getBestPalette(extents);
   bindTexture(0);
-  auto coords = glyphs[chr][font] =
-      GlyphCache::Sizes{palette->put(extents, data.data()).value(), extents};
+  const auto coords = glyphs[chr][FontMapKeyAdapter(font)] =
+      Sizes{palette->put(extents, data.data()).value(), extents};
   clearTexture();
   return coords;
 }
@@ -175,10 +174,12 @@ GlyphCache::Sizes GlyphCache::put(const std::string_view &chr,
     throw std::invalid_argument(
         std::format("GlyphCache: bad character: {}", chr));
   }
-  if (auto pair = glyphs.find(chr); pair != glyphs.end()) {
-    if (auto pair2 = pair->second.find(FontMapKeyAdapter{font});
-        pair2 != pair->second.end()) {
-      return pair2->second;
+  if (const auto &chrToFontMap = glyphs.find(chr);
+      chrToFontMap != glyphs.cend()) {
+    if (const auto &fontMapToGlyphSizes =
+            chrToFontMap->second.find(FontMapKeyAdapter(font));
+        fontMapToGlyphSizes != chrToFontMap->second.cend()) {
+      return fontMapToGlyphSizes->second;
     }
   }
   return addToCache(std::string{chr}, font);

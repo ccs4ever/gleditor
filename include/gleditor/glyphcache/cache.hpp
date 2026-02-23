@@ -69,7 +69,7 @@ private:
   FontPtr font_;
 
 public:
-  FontMapKeyAdapter(FontPtr font) : font_(std::move(font)) {}
+  explicit FontMapKeyAdapter(FontPtr font) : font_(std::move(font)) {}
   FontMapKeyAdapter(const FontMapKeyAdapter &oth)            = default;
   FontMapKeyAdapter &operator=(const FontMapKeyAdapter &oth) = default;
   FontMapKeyAdapter(FontMapKeyAdapter &&oth)                 = default;
@@ -91,10 +91,10 @@ public:
    * @brief Three-way comparison using the casefolded font description.
    */
   std::partial_ordering operator<=>(const FontMapKeyAdapter &oth) const {
-    auto myStr = font_->describe_with_absolute_size().to_string().casefold();
-    auto othStr =
+    const auto myStr = font_->describe_with_absolute_size().to_string().casefold();
+    const auto othStr =
         oth.font_->describe_with_absolute_size().to_string().casefold();
-    auto cmp = myStr.compare(othStr);
+    const auto cmp = myStr.compare(othStr);
     if (0 == cmp) {
       return std::partial_ordering::equivalent;
     }
@@ -109,7 +109,7 @@ public:
  * @brief std::hash specialization for FontMapKeyAdapter based on font description.
  */
 template <> struct std::hash<FontMapKeyAdapter> {
-  std::size_t operator()(const FontMapKeyAdapter &adapter) const {
+  std::size_t operator()(const FontMapKeyAdapter &adapter) const noexcept {
     return std::hash<std::string>{}(
         adapter.font()->describe_with_absolute_size().to_string().casefold());
   }
@@ -139,7 +139,7 @@ public:
    * @brief Construct the glyph cache and initialize the GL texture array.
    * @param ogl Shared GL wrapper used for querying limits and issuing commands.
    */
-  GlyphCache(std::shared_ptr<GL> &ogl);
+  explicit GlyphCache(const std::shared_ptr<GL> &ogl);
   ~GlyphCache() override = default;
 
   GlyphCache(GlyphCache &oth)           = delete;
@@ -157,7 +157,7 @@ public:
    * @brief Bind the internal texture array to an active texture unit.
    * @param active Active texture unit index (0-based).
    */
-  void bindTexture(int active) const {
+  void bindTexture(const int active) const {
     glActiveTexture(GL_TEXTURE0 + active);
     glBindTexture(GL_TEXTURE_2D_ARRAY, textArrId);
   }
@@ -172,8 +172,8 @@ private:
                      transparent_string_hash, std::equal_to<>>
       glyphs; ///< Map: character string -> (font -> cached sizes).
   std::shared_ptr<GL> gl; ///< GL wrapper.
-  int size, maxLayers;    ///< Texture side length and max array layers.
-  GLuint textArrId;       ///< GL texture array object id.
+  int size{}, maxLayers{};    ///< Texture side length and max array layers.
+  GLuint textArrId{};       ///< GL texture array object id.
 
   /**
    * @brief Find or create a palette capable of fitting the given rectangle.

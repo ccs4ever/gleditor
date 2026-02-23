@@ -1,56 +1,61 @@
-#include <gleditor/renderer.hpp>              // IWYU pragma: associated
-#include <SDL3/SDL_video.h>                        // for SDL_GL_GetCurrentWindow
-#include <gleditor/doc.hpp>                   // for Doc
-#include <gleditor/gl/state.hpp>              // for GLState
-#include <gleditor/sdl_wrap.hpp>              // for AutoSDLGL, AutoSDLWindow
-#include <gleditor/state.hpp>                 // for AppState
-#include <glm/ext/matrix_float4x4.hpp>        // for mat4
-#include <glm/ext/vector_uint2.hpp>           // for uvec2
-#include <bits/chrono.h>                      // for duration, steady_clock
-#include <glm/detail/qualifier.hpp>           // for qualifier
-#include <glm/detail/type_vec3.hpp>           // for vec
+#include <SDL3/SDL_video.h>            // for SDL_GL_GetCurrentWindow
+#include <atomic>                      // for atomic
+#include <bits/chrono.h>               // for duration, steady_clock
+#include <cstdio>                      // for fprintf, stderr
+#include <filesystem>                  // for path, directory_iterator
+#include <format>                      // for format
+#include <fstream>                     // for basic_ostream, operator<<
+#include <future>                      // for async, launch, future
+#include <gleditor/doc.hpp>            // for Doc
+#include <gleditor/gl/state.hpp>       // for GLState
+#include <gleditor/renderer.hpp>       // IWYU pragma: associated
+#include <gleditor/sdl_wrap.hpp>       // for AutoSDLGL, AutoSDLWindow
+#include <gleditor/state.hpp>          // for AppState
+#include <glm/detail/qualifier.hpp>    // for qualifier
+#include <glm/detail/type_vec3.hpp>    // for vec
+#include <glm/ext/matrix_float4x4.hpp> // for mat4
+#include <glm/ext/vector_uint2.hpp>    // for uvec2
 #include <glm/gtc/type_ptr.hpp>
-#include <cstdio>                             // for fprintf, stderr
-#include <cstdlib>                            // for atoi
-#include <filesystem>                         // for path, directory_iterator
-#include <format>                             // for format
-#include <fstream>                            // for basic_ostream, operator<<
-#include <future>                             // for async, launch, future
-#include <iomanip>                            // for operator<<, quoted
-#include <iostream>                           // for cerr, cout
-#include <map>                                // for map
-#include <memory>                             // for allocator, shared_ptr
-#include <mutex>                              // for lock_guard
-#include <regex>                              // for regex_iterator, sregex_...
-#include <stdexcept>                          // for runtime_error, logic_error
-#include <string>                             // for basic_string, char_traits
-#include <thread>                             // for get_id
-#include <unordered_map>                      // for unordered_map, _Node_it...
-#include <utility>                            // for pair
-#include <vector>                             // for vector
-#include <atomic>                             // for atomic
+#include <iomanip>       // for operator<<, quoted
+#include <iostream>      // for cerr, cout
+#include <map>           // for map
+#include <memory>        // for allocator, shared_ptr
+#include <mutex>         // for lock_guard
+#include <regex>         // for regex_iterator, sregex_...
+#include <stdexcept>     // for runtime_error, logic_error
+#include <string>        // for basic_string, char_traits
+#include <thread>        // for get_id
+#include <unordered_map> // for unordered_map, _Node_it...
+#include <utility>       // for pair
+#include <vector>        // for vector
 
-#include "GL/glew.h"                          // for GL_RENDERBUFFER, GLenum
-#include <SDL3/SDL_error.h>                        // for SDL_GetError
-#include <gleditor/gl/gl.hpp>                 // for GL
-#include <gleditor/tqueue.hpp>                // for TQueue
+#include "GL/glew.h" // for GL_RENDERBUFFER, GLenum
+
+#include <SDL3/SDL_error.h>    // for SDL_GetError
+#include <gleditor/gl/gl.hpp>  // for GL
+#include <gleditor/tqueue.hpp> // for TQueue
 #include <glm/gtx/string_cast.hpp>
+#include <ranges>
 
-void Renderer::setupGL(const GLState &glState) {
+using namespace std::literals::string_literals; // ""s for easy std::string
+                                                // creation from ""
 
-  auto program = glState.programs.at("main");
+void Renderer::setupGL(const GLState &glState) const {
 
-  glUseProgram(program.id);
+  const auto &program = glState["main"];
+
+  glUseProgram(program);
 
   glUniform1i(program["texGlyphCache"], 0);
 
   {
     std::lock_guard locker(state->view);
 
-    glm::mat4 projection = glm::perspective(glm::radians(state->view.fov),
-                                            (float)state->view.screenWidth /
-                                                (float)state->view.screenHeight,
-                                            0.1F, 10000.0F);
+    glm::mat4 projection =
+        glm::perspective(glm::radians(state->view.fov),
+                         static_cast<float>(state->view.screenWidth) /
+                             static_cast<float>(state->view.screenHeight),
+                         0.1F, 10000.0F);
     glm::mat4 view =
         glm::lookAt(state->view.pos, state->view.pos + state->view.front,
                     state->view.upward);
@@ -61,7 +66,7 @@ void Renderer::setupGL(const GLState &glState) {
   }
 }
 
-void Renderer::resize() {
+void Renderer::resize() const {
   auto *win = SDL_GL_GetCurrentWindow();
   if (nullptr == win) {
     throw std::logic_error{
@@ -71,7 +76,7 @@ void Renderer::resize() {
   std::cout << std::format("dpis: {:.02f}\n", dpi);
   int w, h;
   if (!SDL_GetWindowSizeInPixels(win, &w, &h)) {
-   std::cout << std::format("getwindowsize error: {}", SDL_GetError());
+    std::cout << std::format("getwindowsize error: {}", SDL_GetError());
   }
   if (0 == w) {
     std::cout << "width null\n";
@@ -85,7 +90,7 @@ void Renderer::resize() {
   glViewport(0, 0, w, h);
 }
 
-void Renderer::newDoc(GLState &glState, AutoSDLWindow &window) {
+void Renderer::newDoc(GLState &glState) {
 #if 0
   auto tempSurf =
       Cairo::ImageSurface::create(Cairo::Surface::Format::ARGB32, 0, 0);
@@ -136,20 +141,21 @@ void Renderer::newDoc(GLState &glState, AutoSDLWindow &window) {
   layout->show_in_cairo_context(layCtx);
   layoutSurf->write_to_png("/tmp/page.png");
 #endif
-  auto docPtr = Doc::create(getPtr(), glm::mat4(1.0));
+  const auto docPtr = Doc::create(getPtr(), glm::mat4(1.0));
   glState.docs.push_back(docPtr->getPtr());
-  std::shared_ptr<Doc> doc = docPtr->getPtr();
+  const std::shared_ptr<Doc> doc = docPtr->getPtr();
 
   std::cerr << "doc use count: " << doc.use_count() << "\n";
 }
 
-void Renderer::openDoc(GLState &glState, AutoSDLWindow &window,
-                       std::string &fileName) {
+void Renderer::openDoc(GLState &glState, std::string &fileName) {
   static std::vector<std::future<void>> futs;
-  auto num = glState.docs.size();
-  auto mat = glm::translate(glm::mat4(1.0), glm::vec3(50.0 * num, 0.0, 0.0));
-  std::cout << "doc pos: " << num << " " << glm::to_string(mat) << "\n";
-  auto docPtr = Doc::create(getPtr(), mat, fileName);
+  const auto numDocsOpened = static_cast<double>(glState.docs.size());
+  const auto newDocPosition =
+      glm::translate(glm::mat4(1.0), glm::vec3(50.0 * numDocsOpened, 0.0, 0.0));
+  std::cout << "doc pos: " << numDocsOpened << " "
+            << glm::to_string(newDocPosition) << "\n";
+  auto docPtr = Doc::create(getPtr(), newDocPosition, fileName);
   futs.push_back(std::async(
       std::launch::async, [&glState, docPtr] { docPtr->makePages(glState); }));
   glState.docs.push_back(docPtr->getPtr());
@@ -196,7 +202,7 @@ void setupShaders(GLState &glState) {
         }
         std::cerr << "creating program name/id: " << progName << "/" << pid
                   << "\n";
-        glState.programs.emplace(progName, GLState::Program{pid, {}});
+        glState.programs.emplace(progName, GLState::Program{pid, {}, {}});
       }
       auto &prog = glState.programs[progName];
       std::ifstream stream(path, std::ios::ate);
@@ -207,33 +213,31 @@ void setupShaders(GLState &glState) {
       std::cerr << "creating shader type: "
                 << (getShaderType(shaderStage) == GL_FRAGMENT_SHADER
                         ? "fragment"
-                        : (getShaderType(shaderStage) == GL_VERTEX_SHADER
-                               ? "vertex"
-                               : ""))
+                    : getShaderType(shaderStage) == GL_VERTEX_SHADER ? "vertex"
+                                                                     : "")
                 << "\n";
       const auto shader = glCreateShader(getShaderType(shaderStage));
       std::cerr << "created shader: " << shader << "\n";
-      // slurp entire file into string
+      // slurp the entire file into string
       std::string glslSource;
-      const auto size = (int)stream.tellg();
-      std::cerr << "reading shader file size: " << size << "\n";
-      glslSource.resize(size + 1);
+      const auto shaderFileLength = static_cast<int>(stream.tellg());
+      std::cerr << "reading shader file size: " << shaderFileLength << "\n";
+      glslSource.resize(shaderFileLength + 1);
       stream.seekg(0);
-      stream.read(glslSource.data(), size);
-      std::cerr << "read shader file size: " << size << "\n";
+      stream.read(glslSource.data(), shaderFileLength);
+      std::cerr << "read shader file size: " << shaderFileLength << "\n";
       const char *cstr = glslSource.c_str();
       glShaderSource(shader, 1, &cstr, nullptr);
       glCompileShader(shader);
       GLint shaderCompiled = GL_FALSE;
       glGetShaderiv(shader, GL_COMPILE_STATUS, &shaderCompiled);
-      std::cerr << "shader compiled: " << bool(shaderCompiled == GL_TRUE)
-                << "\n"
+      std::cerr << "shader compiled: " << (shaderCompiled == GL_TRUE) << "\n"
                 << std::flush;
       if (GL_FALSE == shaderCompiled) {
         int logLen = 0;
         glGetShaderiv(shader, GL_INFO_LOG_LENGTH, &logLen);
         if (logLen > 0) {
-          char *buf = new char[logLen];
+          auto buf = new char[logLen];
           glGetShaderInfoLog(shader, logLen, &logLen, buf);
           std::cerr << "shader log: " << buf << "\n" << std::flush;
           delete[] buf;
@@ -250,7 +254,7 @@ void setupShaders(GLState &glState) {
           continue;
         }
         auto varType        = it->str(2);
-        auto sizeFromVarNum = std::atoi(it->str(3).c_str());
+        auto sizeFromVarNum = std::stoi(it->str(3));
         sizeFromVarNum      = 0 != sizeFromVarNum ? sizeFromVarNum : 1;
         const auto size     = type == "in" ? sizeFromVarNum : 0;
         const auto name     = it->str(4);
@@ -259,34 +263,31 @@ void setupShaders(GLState &glState) {
                   << std::flush;
         prog.locs.emplace(name, GLState::Loc{0, type, varType, size});
       }
-      const auto pid = glState.programs[progName].id;
+      const auto pid = glState[progName];
       glAttachShader(pid, shader);
       std::cerr << "shader attached\n";
       shadersToDelete.emplace_back(pid, shader);
     }
   }
-  for (const auto &[key, _v] : glState.programs) {
-    auto &program  = glState.programs[key];
-    const auto pid = program.id;
-    glLinkProgram(pid);
-    glValidateProgram(pid);
-    for (auto &nameToLoc : program.locs) {
-      const bool isUniform = nameToLoc.second.type == "uniform";
-      const auto locId =
-          isUniform ? glGetUniformLocation(pid, nameToLoc.first.c_str())
-                    : glGetAttribLocation(pid, nameToLoc.first.c_str());
-      nameToLoc.second.loc = locId;
+  for (const auto &key : glState.programs | std::views::keys) {
+    auto &program = glState.programs[key];
+    glLinkProgram(program);
+    glValidateProgram(program);
+    for (auto &[name, loc] : program.locs) {
+      const bool isUniform = loc.type == "uniform";
+      const auto locId = isUniform ? glGetUniformLocation(program, name.c_str())
+                                   : glGetAttribLocation(program, name.c_str());
+      loc.loc          = locId;
       std::cerr << std::format(
-          "attr name: {} type: {} vartype: {} uniform: {} loc: {}/{}\n",
-          nameToLoc.first, nameToLoc.second.type, nameToLoc.second.varType,
-          isUniform, nameToLoc.second.loc, int(nameToLoc.second));
+          "attr name: {} type: {} vartype: {} uniform: {} loc: {}\n", name,
+          loc.type, loc.varType, isUniform, loc.loc);
       if (-1 == locId) {
         std::cerr << std::format(
             "Failed to get {} location: {}. Linker may have elided it.\n\n",
-            (isUniform ? "uniform" : "attribute"), nameToLoc.first);
+            isUniform ? "uniform" : "attribute", name);
       }
-      std::cerr << "got location for " << key << "/" << nameToLoc.first << ": "
-                << locId << "\n"
+      std::cerr << "got location for " << key << "/" << name << ": " << locId
+                << "\n"
                 << std::flush;
     }
   }
@@ -299,74 +300,127 @@ void setupShaders(GLState &glState) {
 inline std::string getSeverity(GLenum severity) {
   switch (severity) {
   case GL_DEBUG_SEVERITY_LOW:
-    return "low";
+    return "low"s;
   case GL_DEBUG_SEVERITY_MEDIUM:
-    return "medium";
+    return "medium"s;
   case GL_DEBUG_SEVERITY_HIGH:
-    return "high";
+    return "high"s;
   case GL_DEBUG_SEVERITY_NOTIFICATION:
-    return "notice";
+    return "notice"s;
   default:
     return std::format("{:x}", severity);
   }
 }
 
 // cannot change this interface, so stop linter complaining about it
-// NOLINTBEGIN
 
-void debugCb(GLenum source, GLenum type, GLuint id, GLenum severity,
-             GLsizei length, const GLchar *message, const void *userParam) {
-  // NOLINTEND
+/**
+ * Callback function for processing OpenGL debug messages.
+ *
+ * This function is intended to handle OpenGL debug output, process its content,
+ * and act accordingly based on the message type, severity, and content. It
+ * prints the debug information to stderr and throws exceptions for critical
+ * error types.
+ *
+ * @param type Type of the debug message (e.g., error, undefined behavior).
+ * @param severity Severity level of the debug message (e.g., high, medium,
+ * low).
+ * @param message The actual debug message string.
+ *
+ * @throws std::runtime_error If a critical error or behavior type is
+ * encountered, such as GL_DEBUG_TYPE_ERROR, GL_DEBUG_TYPE_UNDEFINED_BEHAVIOR,
+ * or GL_DEBUG_TYPE_DEPRECATED_BEHAVIOR (if in debug mode).
+ */
+void debugCb(GLenum /*id*/, const GLenum type, GLuint, const GLenum severity,
+             GLsizei /*length*/, const GLchar *message,
+             const void * /*userdata*/) {
   std::fprintf(stderr,
                "GL CALLBACK: %s type = 0x%x, severity = %s, message = %s\n",
-               (type == GL_DEBUG_TYPE_ERROR ? "** GL ERROR **" : ""), type,
+               type == GL_DEBUG_TYPE_ERROR ? "** GL ERROR **" : "", type,
                getSeverity(severity).c_str(), message);
   std::flush(std::cerr);
-  if (type == GL_DEBUG_TYPE_ERROR) {
-    throw std::runtime_error(std::string("Got GL error: ") + message);
-  }
-  if (type == GL_DEBUG_TYPE_UNDEFINED_BEHAVIOR) {
-    throw std::runtime_error(std::string("Got GL undefined behavior: ") +
-                             message);
-  }
+  switch (type) {
+  case GL_DEBUG_TYPE_ERROR:
+    throw std::runtime_error("Got GL error: "s + message);
+  case GL_DEBUG_TYPE_UNDEFINED_BEHAVIOR:
+    throw std::runtime_error("Got GL undefined behavior: "s + message);
 #ifndef NDEBUG
-  if (type == GL_DEBUG_TYPE_DEPRECATED_BEHAVIOR) {
-    throw std::runtime_error(std::string("Got GL deprecation: ") + message);
-  }
+  case GL_DEBUG_TYPE_DEPRECATED_BEHAVIOR:
+    throw std::runtime_error("Got GL deprecation: "s + message);
 #endif
+  default:
+  }
 }
 
-// NOLINTBEGIN
-void debugCbAMD(GLuint id, GLenum type, GLenum severity, GLsizei length,
-                const GLchar *message, void *userParam) {
-  // NOLINTEND
-  const bool isErr =
-      type == GL_DEBUG_TYPE_ERROR || type == GL_DEBUG_CATEGORY_API_ERROR_AMD;
+/**
+ * Callback function for handling OpenGL debug messages using the AMD debug
+ * extension.
+ *
+ * This function processes debug messages emitted by OpenGL when the AMD debug
+ * output extension is enabled. It prints debug information to stderr and throws
+ * exceptions for critical errors, undefined behaviors, or deprecated behaviors
+ * (in debug mode). The severity and type of the messages determine the
+ * subsequent actions taken.
+ *
+ * @param type The type of the debug message. Can indicate errors, undefined
+ * behaviors, API errors, or deprecation warnings.
+ * @param severity The severity level of the debug message, such as high,
+ * medium, low, or notifications.
+ * @param message The actual debug message string.
+ *
+ * @throws std::runtime_error If a critical error, undefined behavior, or
+ * (in debug mode) deprecated behavior is encountered based on the message type.
+ */
+void debugCbAMD(GLuint /*id*/, const GLenum type, const GLenum severity,
+                GLsizei /*length*/, const GLchar *message,
+                void * /*userdata*/) {
+  const char *errStr =
+      type == GL_DEBUG_TYPE_ERROR || type == GL_DEBUG_CATEGORY_API_ERROR_AMD
+          ? "** GL ERROR **"
+          : "";
   std::fprintf(stderr,
                "GL CALLBACK: %s type = 0x%x, severity = %s, message = %s\n",
-               (isErr ? "** GL ERROR **" : ""), type,
-               getSeverity(severity).c_str(), message);
-  if (isErr) {
-    throw std::runtime_error(std::string("Got GL error: ") + message);
-  }
-  if (type == GL_DEBUG_TYPE_UNDEFINED_BEHAVIOR ||
-      type == GL_DEBUG_CATEGORY_UNDEFINED_BEHAVIOR_AMD) {
-    throw std::runtime_error(std::string("Got GL undefined behavior: ") +
-                             message);
-  }
+               errStr, type, getSeverity(severity).c_str(), message);
+  switch (type) {
+  case GL_DEBUG_TYPE_ERROR:
+  case GL_DEBUG_CATEGORY_API_ERROR_AMD:
+    throw std::runtime_error("Got GL error: "s + message);
+  case GL_DEBUG_TYPE_UNDEFINED_BEHAVIOR:
+  case GL_DEBUG_CATEGORY_UNDEFINED_BEHAVIOR_AMD:
+    throw std::runtime_error("Got GL undefined behavior: "s + message);
 #ifndef NDEBUG
-  if (type == GL_DEBUG_TYPE_DEPRECATED_BEHAVIOR ||
-      type == GL_DEBUG_CATEGORY_DEPRECATION_AMD) {
-    throw std::runtime_error(std::string("Got GL deprecation: ") + message);
-  }
+  case GL_DEBUG_TYPE_DEPRECATED_BEHAVIOR:
+  case GL_DEBUG_CATEGORY_DEPRECATION_AMD:
+    throw std::runtime_error("Got GL deprecation: "s + message);
 #endif
+  default:
+  }
 }
 
+/**
+ * Initializes OpenGL configurations and resources for the renderer.
+ *
+ * This method sets up essential OpenGL settings and resources, including
+ * enabling required extensions, configuring debug message callbacks, generating
+ * and initializing framebuffers and renderbuffers, and applying rendering
+ * states. It ensures that the renderer is properly configured to handle OpenGL
+ * operations.
+ *
+ * The method performs the following tasks:
+ * - Initializes GLEW for OpenGL extension handling.
+ * - Configures OpenGL debug output and sets the appropriate debug callback.
+ * - Creates framebuffers and renderbuffers required for rendering operations.
+ * - Validates framebuffer status and throws an exception on failure.
+ * - Configures common rendering states such as face culling, depth testing,
+ *   front face winding, and clearing color.
+ *
+ * @throws std::runtime_error If an OpenGL error occurs during initialization
+ * (e.g., GLEW initialization fails, the framebuffer is incomplete).
+ */
 void Renderer::initGL() {
 
   glewExperimental = GL_TRUE;
-  GLenum err       = glewInit();
-  if (GLEW_OK != err) {
+  if (const GLenum err = glewInit(); GLEW_OK != err) {
     throw std::runtime_error(
         std::string("Error initializing GLEW: ") +
         reinterpret_cast<const char *>(glewGetErrorString(err)));
@@ -374,16 +428,16 @@ void Renderer::initGL() {
 
   glEnable(GL_DEBUG_OUTPUT);
   if (GL_TRUE == glIsEnabled(GL_DEBUG_OUTPUT)) {
-    if (GL_KHR_debug) {
+    if constexpr (GL_KHR_debug) {
       glDebugMessageCallback(debugCb, nullptr);
-    } else if (GL_ARB_debug_output) {
+    } else if constexpr (GL_ARB_debug_output) {
       glDebugMessageCallbackARB(debugCb, nullptr);
-    } else if (GL_AMD_debug_output) {
+    } else if constexpr (GL_AMD_debug_output) {
       glDebugMessageCallbackAMD(debugCbAMD, nullptr);
     }
   } else {
     while (GL_NO_ERROR != glGetError()) {
-    };
+    }
   }
 
   glGenFramebuffers(1, &pickingFBO);
@@ -411,8 +465,8 @@ void Renderer::initGL() {
   glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT,
                             GL_RENDERBUFFER, depthRBO);
 
-  const auto check = glCheckFramebufferStatus(GL_FRAMEBUFFER);
-  if (GL_FRAMEBUFFER_COMPLETE != check) {
+  if (const auto check = glCheckFramebufferStatus(GL_FRAMEBUFFER);
+      GL_FRAMEBUFFER_COMPLETE != check) {
     throw std::runtime_error(
         std::format("Picking FBO is incomplete: {}", check));
   }
@@ -423,10 +477,29 @@ void Renderer::initGL() {
   glClearColor(0, 0, 0, 1);
 }
 
-bool Renderer::update(const GLState &glState, const AutoSDLWindow &window) {
-  // std::cout << "calling update\n" << std::flush;
-  static auto fullStart = std::chrono::steady_clock::now();
-  const auto start      = std::chrono::steady_clock::now();
+/**
+ * Updates the rendering process and handles OpenGL framebuffer operations,
+ * drawing, and buffer swapping within the given OpenGL state and window
+ * context.
+ *
+ * This function performs the following key tasks:
+ * - Configures and clears the framebuffer.
+ * - Iterates over and renders documents stored in the OpenGL state.
+ * - Handles framebuffer blitting and swaps buffers using SDL.
+ * - Reads and processes object tags based on user interaction.
+ * - Updates frame timing metrics and manages profiling state.
+ *
+ * @param glState The OpenGL state containing the current rendering context,
+ *                loaded documents, and other rendering-related parameters.
+ * @param window The SDL window wrapper providing access to the OpenGL context
+ *               and window swapping functionality.
+ * @return True if the rendering process should continue, false if the
+ * application has marked itself as no longer alive or profiling mode dictates
+ * termination.
+ */
+bool Renderer::update(const GLState &glState,
+                      const AutoSDLWindow &window) const {
+  const auto start = std::chrono::steady_clock::now();
 
   AutoFBO fbo(this, GL_FRAMEBUFFER);
 
@@ -446,7 +519,8 @@ bool Renderer::update(const GLState &glState, const AutoSDLWindow &window) {
   }
 
   for (const std::shared_ptr<Doc> &doc : glState.docs) {
-    //std::cout << "drawing doc " << &doc << ": " << glm::to_string(doc->getModel()) << "\n";
+    // std::cout << "drawing doc " << &doc << ": " <<
+    // glm::to_string(doc->getModel()) << "\n";
     doc->draw(glState);
   }
 
@@ -505,7 +579,7 @@ void Renderer::operator()(AutoSDLWindow &window) {
     while (auto item = renderQueue.pop()) {
       switch (item->type) {
       case RenderItem::Type::NewDoc: {
-        newDoc(glState, window);
+        newDoc(glState);
         break;
       }
       case RenderItem::Type::Resize: {
@@ -514,11 +588,11 @@ void Renderer::operator()(AutoSDLWindow &window) {
       }
       case RenderItem::Type::OpenDoc: {
         auto *docItem = dynamic_cast<RenderItemOpenDoc *>(item.get());
-        openDoc(glState, window, docItem->docFile);
+        openDoc(glState, docItem->docFile);
         break;
       }
       case RenderItem::Type::Run: {
-        auto *runItem = dynamic_cast<RenderItemRun *>(item.get());
+        const auto *runItem = dynamic_cast<RenderItemRun *>(item.get());
         (*runItem)();
         break;
       }
