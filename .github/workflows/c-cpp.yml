@@ -13,10 +13,12 @@ jobs:
 
     steps:
     - uses: actions/checkout@v4
+    - name: sdl3 ppa add
+      run: sudo add-apt-repository ppa:hrzhu/sdl3-backport
     - name: update apt
       run: sudo apt-get update
     - name: packages
-      run: sudo apt-get install libsdl3-doc libglm-dev libspdlog-dev libpangomm-2.48-dev libsdl2-dev libsdl2-image-dev libglew-dev clang make libgmock-dev google-mock libgtest-dev
+      run: sudo apt-get install libsdl3-dev libglm-dev libspdlog-dev libpangomm-2.48-dev libsdl2-dev libsdl2-image-dev libglew-dev clang make libgmock-dev google-mock libgtest-dev
     - name: make
       run: make
     - name: make test
