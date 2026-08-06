@@ -82,7 +82,9 @@ are compared.
 - Package discovery: pkg-config
 - Libraries (via pkg-config):
   - pangomm-2.48 (Pango) and cairomm
-  - SDL3, SDL3_image
+  - SDL3
+  - SDL3_image (optional; supplies the window icon and nothing else, and is
+    skipped when pkg-config cannot find it)
   - Vulkan (only with `GLEDITOR_ENABLE_VULKAN=1`)
   - GLM (headers)
   - The OpenGL and OpenGL ES entry points are resolved at run time through
@@ -109,7 +111,7 @@ On Ubuntu/Debian, for example:
 sudo apt-get update && sudo apt-get install \
   clang libclang-rt-dev make pkg-config doxygen \
   libglm-dev libpangomm-2.48-dev \
-  libsdl3-dev libsdl3-image-dev \
+  libsdl3-dev \
   libgl-dev libgl1-mesa-dev libglu1-mesa-dev \
   libgtest-dev libgmock-dev
 ```
@@ -124,8 +126,10 @@ sudo apt-get install mesa-vulkan-drivers vulkan-validationlayers
 
 Notes:
 - SDL3 is not yet in the Ubuntu archive; the CI workflow pulls it from the
-  `ppa:hrzhu/sdl3-backport` PPA. Building SDL3 and SDL3_image from source works
-  equally well.
+  `ppa:hrzhu/sdl3-backport` PPA. Building SDL3 from source works equally well.
+- That PPA has no SDL3_image, which is why the dependency is optional: without
+  it the window simply has no icon. Install `libsdl3-image-dev`, or build
+  SDL3_image from source, to get one.
 - The default `LDFLAGS` include `-rtlib=compiler-rt`, which needs the LLVM
   runtime package (`libclang-rt-dev` on Debian/Ubuntu).
 - spdlog is not used at present (it was removed due to libc++ linking issues).

@@ -23,9 +23,16 @@ MKDIR = mkdir
 # The GL/GLES entry points are resolved at runtime through SDL rather than
 # linked, so no GL library is needed here; `gl` is still listed because the
 # backend includes GL/glcorearb.h for its typedefs and enum values.
-PKGS := pangomm-2.48 sdl3 sdl3-image gl
+PKGS := pangomm-2.48 sdl3 gl
 ifdef GLEDITOR_ENABLE_VULKAN
 PKGS += vulkan
+endif
+# SDL3_image supplies the window icon and nothing else, and is not packaged
+# everywhere SDL3 itself is. Use it when it is present and carry on without it
+# when it is not.
+HAVE_SDL_IMAGE := $(shell pkg-config --exists sdl3-image && echo 1)
+ifeq ($(HAVE_SDL_IMAGE),1)
+PKGS += sdl3-image
 endif
 TEST_PKGS := gmock_main
 VERS := $(shell git describe --tags --always --match "v[0-9]*.[0-9]*.[0-9]*" HEAD | tr -d v)
@@ -43,6 +50,9 @@ endif
 override CXXFLAGS += $(DEBUG_OPTS) -std=c++2c -Ibuild/src -Iinclude -Ithirdparty/Choreograph/src -Ithirdparty/argparse/include -Wall -Wextra $(shell pkg-config $(STATIC) --cflags $(PKGS))
 ifdef GLEDITOR_ENABLE_VULKAN
 override CXXFLAGS += -DGLEDITOR_ENABLE_VULKAN=1
+endif
+ifeq ($(HAVE_SDL_IMAGE),1)
+override CXXFLAGS += -DGLEDITOR_HAVE_SDL_IMAGE=1
 endif
 override LDFLAGS += $(DEBUG_OPTS) $(findstring $(STATIC),-static) -rtlib=compiler-rt 
 # XXX: work on this in a separate branch, get tests working again for now

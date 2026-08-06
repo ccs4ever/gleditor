@@ -19,8 +19,10 @@ jobs:
       run: sudo add-apt-repository ppa:hrzhu/sdl3-backport
     - name: update apt
       run: sudo apt-get update
-    # PKGS in the Makefile is: pangomm-2.48 sdl3 sdl3-image gl (+ vulkan when
-    # GLEDITOR_ENABLE_VULKAN is set). The GL and GLES entry points are resolved
+    # PKGS in the Makefile is: pangomm-2.48 sdl3 gl (+ vulkan when
+    # GLEDITOR_ENABLE_VULKAN is set). SDL3_image is optional and is not in the
+    # SDL3 backport PPA, so it is left out; the window icon is skipped without
+    # it. The GL and GLES entry points are resolved
     # at runtime through SDL, so no GL library is linked; libgl-dev is still
     # needed for GL/glcorearb.h. mesa-vulkan-drivers provides lavapipe, a
     # software Vulkan device, and the validation layers catch API misuse that
@@ -28,7 +30,7 @@ jobs:
     - name: packages
       run: >-
         sudo apt-get install -y
-        libsdl3-dev libsdl3-image-dev
+        libsdl3-dev
         libglm-dev libpangomm-2.48-dev
         libgl-dev libgl1-mesa-dev libglu1-mesa-dev
         libvulkan-dev glslang-tools

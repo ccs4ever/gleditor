@@ -44,8 +44,16 @@ struct AutoSDLGL {
   GLEDITOR_NON_COPYABLE(AutoSDLGL);
 };
 
+/**
+ * @brief Optionally-loaded image, used for the window icon.
+ *
+ * `surface` is null when the image could not be loaded, including when the
+ * build has no SDL3_image. Callers must treat that as "no icon" rather than as
+ * an error: SDL3_image is a whole image decoding library and the only thing
+ * this program asks of it is a decorative icon.
+ */
 struct AutoSDLSurface {
-  SDL_Surface *surface;
+  SDL_Surface *surface{};
   explicit AutoSDLSurface(const char *fileName);
   ~AutoSDLSurface();
   GLEDITOR_NON_COPYABLE(AutoSDLSurface);
