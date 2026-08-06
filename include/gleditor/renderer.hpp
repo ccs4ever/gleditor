@@ -18,6 +18,7 @@
 // renderer holds a unique_ptr to one and create() instantiates the destructor
 // in every translation unit that builds a renderer. The header names no
 // graphics API, so this costs nothing in coupling.
+#include <gleditor/caret.hpp>
 #include <gleditor/render/device.hpp>
 #include <gleditor/render/types.hpp>
 #include <gleditor/state.hpp>
@@ -153,6 +154,11 @@ private:
   /// Notifications drawn over the documents. Built once the device is up, and
   /// destroyed before it goes down: it owns device storage.
   std::unique_ptr<ToastOverlay> toasts;
+  /// The editing caret, likewise built and destroyed around the device.
+  std::unique_ptr<Caret> caret;
+  /// Pixel of a click whose picking result has not come back yet. Picking is
+  /// asynchronous, so the click cannot be answered in the frame that saw it.
+  std::optional<std::pair<int, int>> awaitingClick;
   /// In-flight background document loads. These capture the render thread's
   /// RenderState by reference, so the render loop waits on them before
   /// returning.
@@ -168,6 +174,10 @@ private:
   std::size_t nextPick{};
   /// How many of those queries have come back.
   std::size_t picksReported{};
+  /// Index of the next AppState::requestedClicks entry to issue, and how many
+  /// have been answered.
+  std::size_t nextClick{};
+  std::size_t clicksReported{};
   /// Drop loads that have already finished, so the list cannot grow without
   /// bound over the lifetime of the process.
   void reapFinishedDocLoads();
@@ -177,7 +187,9 @@ private:
   /// Run one queued command.
   void dispatch(RenderState &state, RenderItem &item);
   /// Drain picking reads that have completed since the last frame.
-  void collectPickingResults();
+  void collectPickingResults(RenderState &state);
+  /// Place the caret from a picking result that answered a click.
+  void placeCaretFromPick(RenderState &state, const render::PickingResult &pick);
   /// Turn driver diagnostics recorded since the last frame into notifications.
   /// The device has already logged them; this is what puts them on screen.
   void collectDiagnostics(RenderState &state);

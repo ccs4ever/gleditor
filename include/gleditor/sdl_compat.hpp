@@ -51,7 +51,9 @@
 // -- renamed symbols ---------------------------------------------------------
 #define SDL_EVENT_QUIT         SDL_QUIT
 #define SDL_EVENT_KEY_DOWN     SDL_KEYDOWN
-#define SDL_EVENT_MOUSE_MOTION SDL_MOUSEMOTION
+#define SDL_EVENT_MOUSE_MOTION      SDL_MOUSEMOTION
+#define SDL_EVENT_MOUSE_BUTTON_DOWN SDL_MOUSEBUTTONDOWN
+#define SDL_EVENT_TEXT_INPUT        SDL_TEXTINPUT
 #define SDL_KMOD_SHIFT         KMOD_SHIFT
 // SDL3 renamed this to say what it does; SDL2's spelling says what you are
 // allowed to do.
@@ -141,6 +143,28 @@ inline bool windowSizeChanged(const SDL_Event &event, int &width, int &height) {
   width  = event.window.data1;
   height = event.window.data2;
   return true;
+}
+
+/**
+ * @brief Begin or end delivery of composed text events.
+ *
+ * SDL3 takes the window the text is destined for, since it tracks input focus
+ * per window; SDL2 has one global input context and takes nothing.
+ */
+inline void startTextInput([[maybe_unused]] SDL_Window *window) {
+#if GLEDITOR_SDL_MAJOR == 3
+  SDL_StartTextInput(window);
+#else
+  SDL_StartTextInput();
+#endif
+}
+
+inline void stopTextInput([[maybe_unused]] SDL_Window *window) {
+#if GLEDITOR_SDL_MAJOR == 3
+  SDL_StopTextInput(window);
+#else
+  SDL_StopTextInput();
+#endif
 }
 
 /// Scancode of a key event. SDL3 flattened away the SDL_Keysym wrapper.

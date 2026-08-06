@@ -160,6 +160,13 @@ RendererRef handleArgs(const AppStateRef &state, render::Backend &backend,
   parser.add_argument("--backend")
       .default_value(std::string{"opengl"})
       .help("rendering backend: opengl, opengles or vulkan");
+  parser.add_argument("--click")
+      .append()
+      .help("click at X,Y once the document has settled, moving the caret "
+            "there, and print where it landed; may be given more than once");
+  parser.add_argument("--type")
+      .default_value(std::string{})
+      .help("text to insert at the caret once it has been placed");
   parser.add_argument("--toast")
       .append()
       .help("show a notification once the first frame is drawn, as "
@@ -207,6 +214,19 @@ RendererRef handleArgs(const AppStateRef &state, render::Backend &backend,
         state->requestedToasts.emplace_back(parseToast(toast));
       }
     }
+
+    if (parser.present<std::vector<std::string>>("--click")) {
+      for (const auto &click :
+           parser.get<std::vector<std::string>>("--click")) {
+        const auto comma = click.find(',');
+        if (std::string::npos == comma) {
+          throw std::runtime_error("--click expects X,Y, got: " + click);
+        }
+        state->requestedClicks.emplace_back(std::stoi(click.substr(0, comma)),
+                                            std::stoi(click.substr(comma + 1)));
+      }
+    }
+    state->typedText = parser.get<std::string>("--type");
 
     if (parser.present<std::vector<std::string>>("--pick")) {
       for (const auto &pick :
@@ -268,6 +288,11 @@ int main(const int argc, char **argv) {
                              SDL_WINDOW_HIGH_PIXEL_DENSITY,
                          icon.surface);
 
+    // Composed text rather than raw key events: this is what gives dead keys,
+    // input methods and anything else the platform composes before it becomes
+    // a character.
+    sdl::startTextInput(window.window);
+
     std::jthread renderer(std::ref(*rend), std::ref(window));
 
     // Milliseconds to block in SDL_WaitEventTimeout. Waiting rather than
@@ -292,6 +317,20 @@ int main(const int argc, char **argv) {
         }
         case SDL_EVENT_MOUSE_MOTION: {
           handleMouseMove(evt, state);
+          break;
+        }
+        case SDL_EVENT_MOUSE_BUTTON_DOWN: {
+          // The render thread answers this: where a click lands in the text is
+          // a question only the picking attachment can answer, and that read
+          // is asynchronous.
+          state->clickX       = static_cast<int>(evt.button.x);
+          state->clickY       = static_cast<int>(evt.button.y);
+          state->clickPending = true;
+          break;
+        }
+        case SDL_EVENT_TEXT_INPUT: {
+          const std::lock_guard locker(state->typedMutex);
+          state->typedText += evt.text.text;
           break;
         }
         default: {
