@@ -44,7 +44,7 @@ fi
 
 # Pixels the picking query is compared at. The first is page background, the
 # rest land on glyphs, so agreement covers both tag kinds.
-PICK_PIXELS="10,10 400,300 500,250 600,300 700,350"
+PICK_PIXELS="200,240 300,265 420,265 250,305 400,345"
 
 # The notification overlay is drawn in window pixels through an orthographic
 # projection rather than the document camera, so it exercises a transform the

@@ -24,6 +24,25 @@ namespace render {
 class RenderDevice;
 }
 
+/**
+ * @brief One shaped cluster of the page's text.
+ *
+ * A cluster is Pango's unit of indivisible shaping: a ligature such as "ffi",
+ * a base letter with its combining marks, or an emoji sequence is one cluster
+ * drawn as one quad, while covering several characters of the text. Hit
+ * testing has to know both, which is why the byte range and the character
+ * count are kept rather than assuming one quad is one character.
+ */
+struct ClusterBox {
+  /// Byte offset of the cluster within the page's own text.
+  std::uint32_t byteStart{};
+  /// Length of the cluster in bytes.
+  std::uint32_t byteLength{};
+  /// Characters the cluster covers. Greater than one for a ligature, which is
+  /// what makes a click inside the quad ambiguous without interpolation.
+  std::uint32_t charCount{};
+};
+
 class Page : public Drawable {
 private:
   std::shared_ptr<Doc> doc;
@@ -32,12 +51,22 @@ private:
   /// emitted per row.
   std::uint32_t instanceCount{};
   Glib::RefPtr<Pango::Layout> layout;
+  /// Byte offset of this page's text within the whole document, so a picking
+  /// result can name a position in the document rather than in the page.
+  std::uint32_t textOffset{};
+  /// Every cluster on the page, in text order.
+  std::vector<ClusterBox> clusters;
 
 public:
   Page(std::shared_ptr<Doc> aDoc, RenderState &state, glm::mat4 &model,
-       Glib::RefPtr<Pango::Layout> aLayout);
+       Glib::RefPtr<Pango::Layout> aLayout, std::uint32_t aTextOffset);
   /// @param docTransform projection * view * document model.
   void draw(RenderState &state, const glm::mat4 &docTransform) const;
+
+  [[nodiscard]] std::uint32_t baseOffset() const { return textOffset; }
+  [[nodiscard]] const std::vector<ClusterBox> &clusterBoxes() const {
+    return clusters;
+  }
   ~Page() override = default;
 };
 
@@ -92,6 +121,17 @@ public:
   /// Per-instance vertex layout describing VBORow to the device.
   static render::VertexLayout vertexLayout();
 
+  /**
+   * @brief Scale from layout pixels to world units.
+   *
+   * Pages are laid out in the pixel space Pango works in and shrunk here, so
+   * that a glyph's quad and the pen advance that positions it are expressed in
+   * the same unit. They previously were not -- quads carried raw pixel sizes
+   * while the pen advanced by a seventeenth of one -- which drew every glyph
+   * overlapping its neighbours.
+   */
+  static constexpr float pixelsToWorld = 1.0F / 18.0F;
+
   static std::shared_ptr<Doc> create(const RendererRef &renderer,
                                      render::RenderDevice *device,
                                      const glm::mat4 &model) {
@@ -113,7 +153,8 @@ public:
   /// @param viewProjection projection * view; the document's own model matrix
   ///        is applied on top of it here.
   void draw(RenderState &state, const glm::mat4 &viewProjection) const;
-  void newPage(RenderState &state, Glib::RefPtr<Pango::Layout> &layout);
+  void newPage(RenderState &state, Glib::RefPtr<Pango::Layout> &layout,
+               std::uint32_t textOffset);
   [[nodiscard]] size_t numPages() const { return pages.size(); }
 
   friend class Page;
