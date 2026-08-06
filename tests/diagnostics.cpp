@@ -12,6 +12,29 @@ using render::DiagnosticSeverity;
 using render::DiagnosticSink;
 using testing::HasSubstr;
 
+// "Report it and log it" -- the logging half had no test, so a refactor could
+// have dropped it silently.
+TEST(Diagnostics, aRecordedMessageIsWrittenToTheLog) {
+  DiagnosticSink sink;
+  testing::internal::CaptureStderr();
+  sink.record(DiagnosticSeverity::Error, "written to the log");
+  const std::string logged = testing::internal::GetCapturedStderr();
+
+  EXPECT_THAT(logged, HasSubstr("written to the log"));
+  EXPECT_THAT(logged, HasSubstr("error")) << "severity should be named";
+}
+
+TEST(Diagnostics, loggingCanBeTurnedOff) {
+  DiagnosticSink sink;
+  sink.setLogging(false);
+  testing::internal::CaptureStderr();
+  sink.record(DiagnosticSeverity::Error, "not written to the log");
+  EXPECT_EQ(testing::internal::GetCapturedStderr(), "");
+  // Silencing the log must not silence the sink itself.
+  EXPECT_TRUE(sink.hasError());
+  EXPECT_EQ(sink.drain().size(), 1U);
+}
+
 TEST(Diagnostics, startsWithNothingRecorded) {
   DiagnosticSink sink;
   EXPECT_FALSE(sink.hasError());
@@ -86,6 +109,9 @@ TEST(Diagnostics, distinctMessagesAreEachKept) {
 // A driver emitting endlessly varying text must not grow the sink forever.
 TEST(Diagnostics, rememberedMessagesAreBounded) {
   DiagnosticSink sink;
+  // Thousands of deliberate messages; logging them would bury a real CI
+  // failure under noise this test does not care about.
+  sink.setLogging(false);
   for (int i = 0; i < 2000; i++) {
     sink.record(DiagnosticSeverity::Warning, "message " + std::to_string(i));
   }
@@ -96,6 +122,9 @@ TEST(Diagnostics, rememberedMessagesAreBounded) {
 // a noisy driver could hide a real fault.
 TEST(Diagnostics, errorsAreStillCaughtAfterTheDedupeCapIsReached) {
   DiagnosticSink sink;
+  // Thousands of deliberate messages; logging them would bury a real CI
+  // failure under noise this test does not care about.
+  sink.setLogging(false);
   sink.setStrict(true);
   for (int i = 0; i < 2000; i++) {
     sink.record(DiagnosticSeverity::Warning, "noise " + std::to_string(i));
@@ -156,6 +185,9 @@ TEST(Diagnostics, drainDoesNotRepeatADeduplicatedMessage) {
 // Nothing guarantees anyone drains: a headless run displays nothing at all.
 TEST(Diagnostics, undrainedMessagesAreBounded) {
   DiagnosticSink sink;
+  // Thousands of deliberate messages; logging them would bury a real CI
+  // failure under noise this test does not care about.
+  sink.setLogging(false);
   for (int i = 0; i < 2000; i++) {
     sink.record(DiagnosticSeverity::Warning, "message " + std::to_string(i));
   }
@@ -175,6 +207,9 @@ TEST(Diagnostics, clearForgetsEverything) {
 // has to be safe under concurrency.
 TEST(Diagnostics, concurrentRecordingIsSafe) {
   DiagnosticSink sink;
+  // Thousands of deliberate messages; logging them would bury a real CI
+  // failure under noise this test does not care about.
+  sink.setLogging(false);
   std::vector<std::jthread> threads;
   threads.reserve(4);
   for (int t = 0; t < 4; t++) {

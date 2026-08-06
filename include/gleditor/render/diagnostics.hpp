@@ -86,6 +86,15 @@ public:
   [[nodiscard]] bool strict() const;
 
   /**
+   * @brief Whether record() also writes each message to the error stream.
+   *
+   * On by default. Tests that record thousands of messages to reach the caps
+   * below turn it off: the log is where a CI failure is read from, and burying
+   * it under deliberate noise costs more than the noise is worth.
+   */
+  void setLogging(bool value);
+
+  /**
    * @brief Consume the first recorded error, throwing it in strict mode.
    *
    * Always clears the pending error, so one bad call cannot keep failing every
@@ -119,6 +128,7 @@ private:
   std::string firstError;
   bool errorPending{};
   bool strictMode{};
+  bool logging{true};
 };
 
 } // namespace render
