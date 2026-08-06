@@ -3,9 +3,10 @@
 
 #include <array>
 #include <cassert>
+#include <cstdint>
+#include <gleditor/buffer_pool.hpp>
 #include <gleditor/drawable.hpp>
 #include <gleditor/renderer.hpp>
-#include <gleditor/vao_supports.hpp>
 #include <glibmm/refptr.h>
 #include <glibmm/ustring.h>
 #include <glm/ext/matrix_float4x4.hpp>
@@ -14,38 +15,51 @@
 #include <string>
 #include <vector>
 
+#include <gleditor/render/types.hpp>
+
 class Doc;
-struct GLState;
+struct RenderState;
+
+namespace render {
+class RenderDevice;
+}
 
 class Page : public Drawable {
 private:
   std::shared_ptr<Doc> doc;
-  VAOSupports::Handle pageBackingHandle{};
-  std::vector<VAOSupports::Handle> glyphs;
+  BufferPool::Allocation pageBacking{};
+  /// Glyph rows actually written, which is what gets drawn. One instance is
+  /// emitted per row.
+  std::uint32_t instanceCount{};
   Glib::RefPtr<Pango::Layout> layout;
 
 public:
-  Page(std::shared_ptr<Doc> aDoc, GLState &state, glm::mat4 &model,
+  Page(std::shared_ptr<Doc> aDoc, RenderState &state, glm::mat4 &model,
        Glib::RefPtr<Pango::Layout> aLayout);
-  void draw(const GLState &state, const glm::mat4 &docModel) const;
+  void draw(RenderState &state, const glm::mat4 &docModel) const;
   ~Page() override = default;
 };
 
-// NOLINTEND
-
-class Doc : public Drawable,
-            public VAOSupports,
-            public std::enable_shared_from_this<Doc> {
+class Doc : public Drawable, public std::enable_shared_from_this<Doc> {
 private:
   std::vector<Page> pages;
   std::string docFile;
   Glib::ustring text;
+  RendererRef renderer;
+  /// Vertex storage shared by every page of this document.
+  std::unique_ptr<BufferPool> pool;
   // token to keep anything other than Doc::create from using our constructor
   struct Private {
     explicit Private() = default;
   };
 
 public:
+  /**
+   * @brief One glyph instance.
+   *
+   * Field order and offsets must stay in step with Doc::vertexLayout() and
+   * with the attribute locations in assets/shaders/glyph.vert.glsl.
+   */
   struct VBORow {
     std::array<float, 3> pos;
     unsigned int fg;
@@ -74,23 +88,30 @@ public:
     }
   };
 
+  /// Per-instance vertex layout describing VBORow to the device.
+  static render::VertexLayout vertexLayout();
+
   static std::shared_ptr<Doc> create(const RendererRef &renderer,
+                                     render::RenderDevice *device,
                                      const glm::mat4 &model) {
-    return std::make_shared<Doc>(renderer, model, Private());
+    return std::make_shared<Doc>(renderer, device, model, Private());
   }
   static std::shared_ptr<Doc> create(const RendererRef &renderer,
+                                     render::RenderDevice *device,
                                      const glm::mat4 &model,
                                      std::string &fileName) {
-    return std::make_shared<Doc>(renderer, model, fileName, Private());
+    return std::make_shared<Doc>(renderer, device, model, fileName, Private());
   }
   std::shared_ptr<Doc> getPtr() { return shared_from_this(); }
-  Doc(const RendererRef& renderer, const glm::mat4& model, Private);
-  Doc(const RendererRef& renderer, const glm::mat4& model, const std::string &fileName, Private);
+  Doc(const RendererRef &renderer, render::RenderDevice *device,
+      const glm::mat4 &model, Private);
+  Doc(const RendererRef &renderer, render::RenderDevice *device,
+      const glm::mat4 &model, const std::string &fileName, Private);
   ~Doc() override = default;
-  void makePages(GLState &glState);
-  void draw(const GLState &state) const;
-  void newPage(GLState &state, Glib::RefPtr<Pango::Layout> &layout);
-  size_t numPages() const { return pages.size(); }
+  void makePages(RenderState &state);
+  void draw(RenderState &state) const;
+  void newPage(RenderState &state, Glib::RefPtr<Pango::Layout> &layout);
+  [[nodiscard]] size_t numPages() const { return pages.size(); }
 
   friend class Page;
 };

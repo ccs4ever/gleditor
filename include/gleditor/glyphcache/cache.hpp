@@ -1,11 +1,12 @@
 /**
  * @file cache.hpp
- * @brief Glyph cache that renders and packs glyphs into a GL texture array.
+ * @brief Glyph cache that renders and packs glyphs into a device array texture.
  *
  * Exposes a GlyphCache used by rendering code to request glyph texture
  * coordinates for character clusters in specific fonts. Internally, the cache
  * uses GlyphPalette and GlyphLane to bin-pack rectangles and maintains a
- * per-font map of cached entries.
+ * per-font map of cached entries. All device interaction goes through
+ * RenderDevice, so the cache is the same on every backend.
  */
 #ifndef GLEDITOR_GLYPH_CACHE_H
 #define GLEDITOR_GLYPH_CACHE_H
@@ -18,15 +19,19 @@
 
 #include "glibmm/refptr.h"
 #include "glibmm/ustring.h"
-#include <gleditor/gl/gl.hpp>
 #include <gleditor/glyphcache/palette.hpp>
 #include <gleditor/glyphcache/types.hpp>
 #include <gleditor/log.hpp>
+#include <gleditor/render/types.hpp>
 #include <string>
 #include <string_view>
 #include <unordered_map>
 #include <utility>
 #include <vector>
+
+namespace render {
+class RenderDevice;
+}
 
 /**
  * @brief Helper for creating an overload set of call operators.
@@ -117,30 +122,32 @@ template <> struct std::hash<FontMapKeyAdapter> {
 
 /**
  * @class GlyphCache
- * @brief Caches rendered glyphs into an OpenGL texture array and returns UVs.
+ * @brief Caches rendered glyphs into a device array texture and returns UVs.
  *
- * GlyphCache uses Pango/Cairo to rasterize text for a given Pango::Font and
- * packs the resulting rectangles into a layered texture via GlyphPalette. The
- * put() API returns normalized texture coordinates and pixel dimensions for
- * rendering.
+ * GlyphCache uses Pango/Cairo to rasterize text for a given Pango::Font,
+ * converts the result to single-channel coverage, and packs it into a layered
+ * texture via GlyphPalette. The put() API returns normalized texture
+ * coordinates and pixel dimensions for rendering.
  */
 class GlyphCache : public Loggable {
 public:
   /**
    * @brief Return values for a cached glyph.
-   * texCoords are normalized UVs within the GL texture array; dims are the
+   * texCoords are normalized UVs within the device texture array; dims are the
    * pixel rectangle sizes used for placement and rendering calculations.
    */
   struct Sizes {
     TextureCoords texCoords; ///< Normalized UVs within the texture layer.
     Rect dims;               ///< Pixel dimensions of the rasterized glyph.
+    int layer{};             ///< Array texture layer holding the glyph.
   };
   /**
-   * @brief Construct the glyph cache and initialize the GL texture array.
-   * @param ogl Shared GL wrapper used for querying limits and issuing commands.
+   * @brief Construct the glyph cache and allocate its device array texture.
+   * @param aDevice Device used to size and upload the atlas. Not owned; must
+   *        outlive the cache.
    */
-  explicit GlyphCache(const std::shared_ptr<GL> &ogl);
-  ~GlyphCache() override = default;
+  explicit GlyphCache(render::RenderDevice *aDevice);
+  ~GlyphCache() override;
 
   GlyphCache(GlyphCache &oth)           = delete;
   void operator=(const GlyphCache &oth) = delete;
@@ -154,36 +161,23 @@ public:
    * @throws std::invalid_argument if the provided sequence is too long.
    */
   Sizes put(const std::string_view &chr, const FontPtr &font);
-  /**
-   * @brief Bind the internal texture array to an active texture unit.
-   * @param active Active texture unit index (0-based).
-   */
-  void bindTexture(const int active) const {
-    glActiveTexture(GL_TEXTURE0 + active);
-    glBindTexture(GL_TEXTURE_2D_ARRAY, textArrId);
-  }
-  /**
-   * @brief Unbind any array texture from the active binding point.
-   */
-  static void clearTexture() { glBindTexture(GL_TEXTURE_2D_ARRAY, 0); }
+
+  /// Handle of the array texture holding every cached glyph.
+  [[nodiscard]] render::TextureHandle textureHandle() const { return texture; }
 
 private:
   std::vector<GlyphPalette> palettes; ///< Palette layers used for packing.
   std::unordered_map<std::string, std::unordered_map<FontMapKeyAdapter, Sizes>,
                      transparent_string_hash, std::equal_to<>>
       glyphs; ///< Map: character string -> (font -> cached sizes).
-  std::shared_ptr<GL> gl; ///< GL wrapper.
-  int size{}, maxLayers{};    ///< Texture side length and max array layers.
-  GLuint textArrId{};       ///< GL texture array object id.
+  render::RenderDevice *device;   ///< Device the atlas lives on.
+  render::TextureHandle texture{}; ///< Array texture holding the glyph atlas.
+  int size{}, maxLayers{};        ///< Texture side length and max array layers.
 
   /**
    * @brief Find or create a palette capable of fitting the given rectangle.
    */
   auto getBestPalette(const Rect &charBox);
-  /**
-   * @brief Initialize the GL texture array object.
-   */
-  void initTextureArray();
   /**
    * @brief Rasterize and pack a new glyph into the cache.
    */

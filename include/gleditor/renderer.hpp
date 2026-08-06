@@ -1,7 +1,6 @@
 #ifndef GLEDITOR_RENDERER_H
 #define GLEDITOR_RENDERER_H
 
-#include <array>
 #include <concepts>
 #include <functional>
 #include <future>
@@ -13,12 +12,17 @@
 #include <utility>
 #include <vector>
 
-#include <gleditor/gl/gl.hpp>
-#include <gleditor/gl/state.hpp>
 #include <gleditor/log.hpp>
+// The full device declaration is needed here, not a forward declaration: the
+// renderer holds a unique_ptr to one and create() instantiates the destructor
+// in every translation unit that builds a renderer. The header names no
+// graphics API, so this costs nothing in coupling.
+#include <gleditor/render/device.hpp>
+#include <gleditor/render/types.hpp>
 #include <gleditor/state.hpp>
 
 struct AutoSDLWindow;
+struct RenderState;
 
 struct RenderItem {
   enum class Type : std::uint8_t {
@@ -121,27 +125,32 @@ public:
   /**
    * @brief Get the default font name from application state.
    */
-  std::string_view defaultFontName() const { return state->defaultFontName; }
+  [[nodiscard]] std::string_view defaultFontName() const {
+    return state->defaultFontName;
+  }
 };
 
 using RendererRef = std::shared_ptr<AbstractRenderer>;
 
 /**
  * @class Renderer
- * @brief Manages the rendering loop, OpenGL state, and render-queue processing.
+ * @brief Drives the render loop against a backend-neutral RenderDevice.
  *
- * Renderer owns an internal render thread context, a queue of RenderItem
- * commands, and utilities for creating and binding an off-screen framebuffer
- * used for color/picking passes. Use Renderer::create() to construct an
- * instance and call operator()(AutoSDLWindow&) to run the render loop.
+ * There is one renderer for every graphics API: the device abstraction hides
+ * the differences, so the loop, the queue handling and the document management
+ * are shared rather than duplicated per backend.
  */
 class Renderer : public AbstractRenderer,
                  public Loggable,
                  public std::enable_shared_from_this<Renderer> {
 private:
-  unsigned int pickingFBO{}, pickingRBO{}, colorRBO{}, depthRBO{};
+  /// Which API this renderer's device drives.
+  render::Backend backendKind;
+  /// Device owned for the lifetime of the render loop.
+  std::unique_ptr<render::RenderDevice> device;
   /// In-flight background document loads. These capture the render thread's
-  /// GLState by reference, so the render loop waits on them before returning.
+  /// RenderState by reference, so the render loop waits on them before
+  /// returning.
   std::vector<std::future<void>> pendingDocLoads;
 
   /// Drop loads that have already finished, so the list cannot grow without
@@ -151,130 +160,52 @@ private:
   /// running.
   [[nodiscard]] bool hasPendingWork() const;
   /// Run one queued command.
-  void dispatch(GLState &glState, RenderItem &item);
+  void dispatch(RenderState &state, RenderItem &item);
 
 protected:
   /**
    * Open an existing document file and prepare it for rendering.
-   *
-   * @param glState Current OpenGL state wrapper.
-   * @param fileName Path to the document file to open (modified as needed).
    */
-  void openDoc(GLState &glState, std::string &fileName);
+  void openDoc(RenderState &state, std::string &fileName);
 
   /**
    * Create a new empty document and initialize any default resources.
-   *
-   * @param glState Current OpenGL state wrapper.
    */
-  void newDoc(GLState &glState);
+  void newDoc(RenderState &state);
 
   /**
-   * Perform GL setup that depends on window/context size or state.
-   *
-   * Creates off-screen framebuffers, configures attachments, and prepares
-   * state for subsequent rendering.
-   *
-   * @param glState Read-only OpenGL state wrapper.
-   */
-  void setupGL(const GLState &glState) const;
-
-  /**
-   * Handle window or framebuffer resize events.
-   *
-   * Recreates dependent GL resources (e.g., renderbuffers) and updates
-   * viewport-related values.
-   */
-  void resize() const;
-
-  /**
-   * Update application and rendering state for one frame.
-   *
-   * Processes the render queue, handles input-driven actions, and may request
-   * window swaps.
-   *
-   * @param glState Current OpenGL state wrapper.
-   * @param window SDL window wrapper associated with the render context.
+   * Draw one frame.
+   * @param settled True when nothing is queued and every document has finished
+   *        loading, so the frame shows the finished result.
    * @return true if the render loop should continue, false to exit.
    */
-  bool update(const GLState &glState, const AutoSDLWindow &window) const;
+  bool update(RenderState &state, bool settled);
 
-  /**
-   * Initialize OpenGL extensions, debug output, and static GL resources.
-   */
-  void initGL();
+  /// Build the glyph pipeline from the portable shader sources.
+  void createPipeline(RenderState &state) const;
 
 public:
   /**
-   * @brief RAII helper that binds a framebuffer on construction and restores
-   *        the previous binding on destruction.
-   *
-   * Use this to temporarily bind the Renderer-managed picking FBO to a given
-   * target (e.g., GL_DRAW_FRAMEBUFFER) within a scope.
+   * @brief Factory method; constructs a Renderer for @p backend.
    */
-  struct AutoFBO {
-    const Renderer *renderer; ///< Owning renderer whose FBO will be bound.
-    GLenum target;            ///< Framebuffer binding target.
-    /**
-     * Construct and bind the renderer's FBO to the specified target.
-     * @param aRenderer Renderer that owns the FBO.
-     * @param aTarget GL framebuffer target to bind (e.g., GL_DRAW_FRAMEBUFFER).
-     */
-    AutoFBO(const Renderer *aRenderer, GLenum aTarget)
-        : renderer(aRenderer), target(aTarget) {
-      renderer->bindFBO(target);
-    }
-    /**
-     * Destructor unbinds the FBO from the target (binds 0).
-     */
-    ~AutoFBO() { Renderer::clearFBO(target); }
-  };
-  /**
-   * @brief Bind the internal picking FBO to the given target and set draw
-   * buffers.
-   * @param target GL framebuffer target (e.g., GL_DRAW_FRAMEBUFFER).
-   */
-  void bindFBO(GLenum target) const {
-    glBindFramebuffer(target, pickingFBO);
-    constexpr std::array<unsigned int, 2> arr = {GL_COLOR_ATTACHMENT0,
-                                                 GL_COLOR_ATTACHMENT1};
-    glDrawBuffers(2, arr.data());
-  }
-  /**
-   * @brief Unbind any FBO from the specified target (binds default
-   * framebuffer).
-   * @param target GL framebuffer target (e.g., GL_DRAW_FRAMEBUFFER).
-   */
-  static void clearFBO(GLenum target) { glBindFramebuffer(target, 0); }
-
-  /**
-   * @brief Factory method; constructs a Renderer instance.
-   * @param appState Shared application state used by the renderer.
-   * @return Shared pointer to a new Renderer.
-   */
-  static RendererRef create(const AppStateRef &appState) {
-    return std::make_shared<Renderer>(appState, Private());
+  static RendererRef create(const AppStateRef &appState,
+                            render::Backend backend) {
+    return std::make_shared<Renderer>(appState, backend, Private());
   }
 
   /**
    * @brief Convenience to get a shared_ptr to this instance.
-   * Requires that this object was created via shared_ptr (see create()).
    */
   std::shared_ptr<Renderer> getPtr() { return shared_from_this(); }
 
-  /**
-   * @brief Construct a Renderer.
-   * Prefer using Renderer::create() to enforce correct ownership semantics.
-   * @param state Application state reference.
-   * @param _priv Private tag to restrict construction.
-   */
-  Renderer(const AppStateRef &state, [[maybe_unused]] Private _priv)
-      : AbstractRenderer(state, _priv) {}
+  Renderer(const AppStateRef &state, render::Backend backend,
+           [[maybe_unused]] Private _priv)
+      : AbstractRenderer(state, _priv), backendKind(backend) {}
+  ~Renderer() override;
 
   /**
    * @brief Main render loop entry point; runs until the application requests
    * exit.
-   * @param window SDL window wrapper associated with the GL context.
    */
   void operator()(AutoSDLWindow &window) override;
 };

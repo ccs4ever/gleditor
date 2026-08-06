@@ -20,7 +20,10 @@ CKSUM = cksum
 #MKDIR = thirdparty/cosmos/bin/mkdir
 MKDIR = mkdir
 # removed spdlog
-PKGS := pangomm-2.48 sdl3 sdl3-image gl glu glew
+# The GL/GLES entry points are resolved at runtime through SDL rather than
+# linked, so no GL library is needed here; `gl` is still listed because the
+# backend includes GL/glcorearb.h for its typedefs and enum values.
+PKGS := pangomm-2.48 sdl3 sdl3-image gl
 ifdef GLEDITOR_ENABLE_VULKAN
 PKGS += vulkan
 endif

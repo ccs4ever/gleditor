@@ -26,13 +26,10 @@ AutoSDL::~AutoSDL() {
 AutoSDLWindow::AutoSDLWindow(const char *title, const int /*x*/, const int /*y*/, const int width,
                              const int height, const std::uint32_t flags,
                              SDL_Surface *icon) {
-  SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, 4);
-  SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION, 5);
-  SDL_GL_SetAttribute(SDL_GL_CONTEXT_PROFILE_MASK, SDL_GL_CONTEXT_PROFILE_CORE);
-  SDL_GL_SetAttribute(SDL_GL_CONTEXT_FLAGS,
-                      SDL_GL_CONTEXT_DEBUG_FLAG |
-                          SDL_GL_CONTEXT_FORWARD_COMPATIBLE_FLAG);
-
+  // The context version and profile belong to the chosen backend, which sets
+  // them through render::configureBackendWindowAttributes() before getting
+  // here. Forcing a desktop core profile in this constructor would silently
+  // defeat a request for OpenGL ES.
   window = SDL_CreateWindow(title, width, height, flags);
 
   if (nullptr == window) {

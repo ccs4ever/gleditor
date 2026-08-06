@@ -1,0 +1,125 @@
+/**
+ * @file device_gl.hpp
+ * @brief RenderDevice implementation for desktop OpenGL and OpenGL ES.
+ *
+ * One class serves both: the entry points the renderer uses exist in OpenGL
+ * 3.3 core and OpenGL ES 3.0 alike, and the only real divergence -- the GLSL
+ * dialect -- is handled by the shader preamble. The active profile is recorded
+ * so that the few places where the APIs genuinely differ can branch on it.
+ */
+#ifndef GLEDITOR_RENDER_GL_DEVICE_H
+#define GLEDITOR_RENDER_GL_DEVICE_H
+
+#include <cstdint>
+#include <string>
+#include <unordered_map>
+#include <vector>
+
+#include <gleditor/render/device.hpp>
+#include <gleditor/render/gl/gl_api.hpp>
+
+namespace render::gl {
+
+/**
+ * @class DeviceGL
+ * @brief OpenGL / OpenGL ES device.
+ */
+class DeviceGL final : public RenderDevice {
+public:
+  explicit DeviceGL(Backend backend);
+  ~DeviceGL() override;
+
+  [[nodiscard]] Backend backend() const override { return backendKind; }
+
+  void initialize(AutoSDLWindow &window) override;
+  void shutdown() override;
+  void resize(int width, int height) override;
+
+  BufferHandle createBuffer(BufferKind kind, std::size_t bytes) override;
+  void destroyBuffer(BufferHandle buffer) override;
+  void updateBuffer(BufferHandle buffer, std::size_t offset,
+                    std::span<const std::byte> data) override;
+  BufferHandle growBuffer(BufferHandle buffer, std::size_t bytes) override;
+
+  TextureHandle createTextureArray(int size, int layers,
+                                   TextureFormat format) override;
+  void destroyTexture(TextureHandle texture) override;
+  void updateTextureLayer(TextureHandle texture, int layer, int xOffset,
+                          int yOffset, int width, int height,
+                          std::span<const std::byte> data) override;
+  [[nodiscard]] TextureLimits textureLimits() const override { return limits; }
+
+  PipelineHandle createPipeline(const PipelineDesc &desc) override;
+
+  bool beginFrame() override;
+  void endFrame() override;
+  void bindPipeline(PipelineHandle pipeline) override;
+  void setFrameUniforms(const FrameUniforms &uniforms) override;
+  void bindGlyphTexture(TextureHandle texture) override;
+  void setHighlights(std::span<const HighlightRange> ranges) override;
+  void drawGlyphs(const DrawUniforms &uniforms, BufferHandle vertices,
+                  std::size_t vertexByteOffset,
+                  std::uint32_t instanceCount) override;
+  FrameImage captureColorTarget() override;
+  void waitIdle() override;
+
+private:
+  /// A buffer object plus the metadata growBuffer() needs to copy it forward.
+  struct BufferRecord {
+    GLuint name{};
+    GLenum target{};
+    std::size_t bytes{};
+  };
+
+  struct TextureRecord {
+    GLuint name{};
+    int size{};
+    int layers{};
+  };
+
+  struct PipelineRecord {
+    GLuint program{};
+    GLuint vao{};
+    VertexLayout layout;
+    GLint projectionLoc{-1};
+    GLint viewLoc{-1};
+    GLint modelLoc{-1};
+    GLint atlasLoc{-1};
+  };
+
+  /// Compile one stage, throwing with the driver's log on failure.
+  [[nodiscard]] GLuint compileStage(GLenum stage, const std::string &source,
+                                    const std::string &name) const;
+
+  /// Create the offscreen colour/picking/depth target the frame renders into.
+  void createOffscreenTarget(int width, int height);
+  void destroyOffscreenTarget();
+
+  Backend backendKind;
+  GLApi api;
+  void *glContext{};
+  AutoSDLWindow *targetWindow{};
+
+  TextureLimits limits{};
+
+  std::unordered_map<std::uint32_t, BufferRecord> buffers;
+  std::unordered_map<std::uint32_t, TextureRecord> textures;
+  std::unordered_map<std::uint32_t, PipelineRecord> pipelines;
+  std::uint32_t nextHandleId{1};
+
+  PipelineHandle boundPipeline{};
+
+  GLuint highlightUbo{};
+  GLuint offscreenFbo{};
+  GLuint colourRbo{};
+  GLuint pickingRbo{};
+  GLuint depthRbo{};
+  int targetWidth{};
+  int targetHeight{};
+  bool initialised{};
+};
+
+} // namespace render::gl
+
+#endif // GLEDITOR_RENDER_GL_DEVICE_H
+// vi: set sw=2 sts=2 ts=2 et:
