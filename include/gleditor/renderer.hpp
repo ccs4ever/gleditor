@@ -21,6 +21,7 @@
 #include <gleditor/render/device.hpp>
 #include <gleditor/render/types.hpp>
 #include <gleditor/state.hpp>
+#include <gleditor/toast.hpp>
 
 struct AutoSDLWindow;
 struct RenderState;
@@ -149,6 +150,9 @@ private:
   render::Backend backendKind;
   /// Device owned for the lifetime of the render loop.
   std::unique_ptr<render::RenderDevice> device;
+  /// Notifications drawn over the documents. Built once the device is up, and
+  /// destroyed before it goes down: it owns device storage.
+  std::unique_ptr<ToastOverlay> toasts;
   /// In-flight background document loads. These capture the render thread's
   /// RenderState by reference, so the render loop waits on them before
   /// returning.
@@ -174,6 +178,9 @@ private:
   void dispatch(RenderState &state, RenderItem &item);
   /// Drain picking reads that have completed since the last frame.
   void collectPickingResults();
+  /// Turn driver diagnostics recorded since the last frame into notifications.
+  /// The device has already logged them; this is what puts them on screen.
+  void collectDiagnostics(RenderState &state);
 
 protected:
   /**
@@ -194,7 +201,8 @@ protected:
    */
   bool update(RenderState &state, bool settled);
 
-  /// Build the glyph pipeline from the portable shader sources.
+  /// Build the glyph pipeline from the portable shader sources, and the
+  /// overlay pipeline that shares them.
   void createPipeline(RenderState &state) const;
 
   /// The loop proper. Separated from operator() so that everything it does,

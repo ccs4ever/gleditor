@@ -45,9 +45,16 @@ it does not mean touching the document code.
   The SPIR-V the Vulkan backend loads is produced at build time from those same
   bodies through that same generator, so the two forms cannot drift apart.
 - **Clip space differs and the backend absorbs it.** Vulkan's +Y points down;
-  `DeviceVK` negates the projection's Y scale so callers hand every backend the
-  same conventional matrix. Framebuffer rows likewise: picking coordinates are
-  window coordinates, top-down, and the OpenGL backend flips them internally.
+  `DeviceVK` negates the row of the transform that produces clip-space Y, so
+  callers hand every backend the same conventional matrix. Framebuffer rows
+  likewise: picking coordinates are window coordinates, top-down, and the
+  OpenGL backend flips them internally.
+- **One transform per draw, not a per-frame camera.** `DrawUniforms` carries
+  `projection * view * model` outright. A per-frame camera would live in
+  storage every draw of the frame shares -- a descriptor-backed block on
+  Vulkan, which a recorded command buffer cannot rewrite between draws -- and
+  the notification overlay could then not use a different projection from the
+  documents behind it.
 
 ### Driver diagnostics
 
@@ -67,10 +74,29 @@ it.
 - **Vulkan** records through its debug messenger when the validation layers are
   installed.
 
-API errors and undefined behaviour end the frame; warnings and notices are
-logged once each, deduplicated so a driver complaining every draw call does not
-bury the log. A render thread that stops this way sets the process exit status,
-so a renderer that dies is not reported as a successful run.
+Everything recorded is logged once, deduplicated so a driver complaining every
+draw call does not bury the log, and everything above a notice is also shown in
+the window as a notification. The editor keeps running: a driver objecting to
+something it can survive should not close the document you are editing.
+
+`--strict-diagnostics` puts that back to fatal, and the render thread that stops
+this way sets the process exit status. Automated runs want it, and
+`tools/compare-backends.sh` passes it: a frame rendered while the driver was
+reporting errors has proved nothing, however plausible it looks.
+
+### Notifications
+
+`ToastOverlay` draws a stack of expiring panels in the bottom-left corner,
+through the same glyph pipeline the documents use. Two things make that
+possible: the transform is per draw, so the overlay can pass an orthographic
+projection in window pixels while the documents pass a perspective camera; and
+its pipeline is created with `depthTest` off, so being submitted last is what
+puts it on top.
+
+The panel behind the text is one more glyph instance with its foreground and
+background set to the same colour, which makes the fragment stage's blend
+between them independent of whatever atlas coverage it samples. That gives a
+solid panel without a blend state, a second shader or a reserved blank texel.
 
 ### Picking
 
@@ -203,6 +229,12 @@ Command-line options (from `argparse` in `src/main.cpp`):
 - `--screenshot <path>` write the first settled frame to `<path>` as a binary PPM
 - `--pick X,Y`        print the picking tag at that pixel once the document has
   settled, then exit
+- `--toast [severity:]text`  show a notification over the document; severity is
+  `info`, `warning` (the default) or `error`. Driver diagnostics raise these on
+  their own; this is how the overlay is exercised on demand and compared
+  between backends
+- `--strict-diagnostics`  treat a driver error as fatal instead of showing it
+  as a notification
 - `files...`          one or more input files to open at startup
 
 Help:

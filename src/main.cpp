@@ -1,3 +1,4 @@
+#include <array>                    // for array
 #include <atomic>                   // for __atomic_base
 #include <clocale>                  // for setlocale, LC_ALL
 #include <exception>                // for exception
@@ -14,7 +15,9 @@
 #include <mutex>          // for lock_guard
 #include <pangomm/init.h> // for init
 #include <string>         // for operator<<, basic_string
+#include <string_view>    // for string_view
 #include <thread>         // for jthread
+#include <utility>        // for pair
 
 #include "config.h"           // for GLEDITOR_VERSION, TOSTRING
 #include <SDL3/SDL.h>         // for SDL_INIT_VIDEO
@@ -115,6 +118,25 @@ void handleKeyPress(const SDL_Event &evt, const AppStateRef &state,
   std::cout << "camera pos after: " << glm::to_string(state->view.pos) << "\n";
 }
 
+/// Split a `--toast` argument into its severity and its text. An unprefixed
+/// argument is a warning, which is what a message worth showing but not worth
+/// stopping for amounts to.
+std::pair<render::DiagnosticSeverity, std::string>
+parseToast(const std::string &argument) {
+  using render::DiagnosticSeverity;
+  static const std::array<std::pair<std::string_view, DiagnosticSeverity>, 3>
+      prefixes = {std::pair{"info:", DiagnosticSeverity::Info},
+                  std::pair{"warning:", DiagnosticSeverity::Warning},
+                  std::pair{"error:", DiagnosticSeverity::Error}};
+
+  for (const auto &[prefix, severity] : prefixes) {
+    if (argument.starts_with(prefix)) {
+      return {severity, argument.substr(prefix.size())};
+    }
+  }
+  return {DiagnosticSeverity::Warning, argument};
+}
+
 /**
  * @brief Parse the command line and build the renderer it asks for.
  * @param[out] backend Receives the selected graphics backend.
@@ -143,6 +165,14 @@ RendererRef handleArgs(const AppStateRef &state, render::Backend &backend,
   parser.add_argument("--backend")
       .default_value(std::string{"opengl"})
       .help("rendering backend: opengl, opengles or vulkan");
+  parser.add_argument("--toast")
+      .append()
+      .help("show a notification once the first frame is drawn, as "
+            "[info:|warning:|error:]TEXT; may be given more than once");
+  parser.add_argument("--strict-diagnostics")
+      .help("treat a driver error as fatal instead of showing it as a "
+            "notification")
+      .flag();
   parser.add_argument("files").help("input files").remaining();
 
   try {
@@ -170,8 +200,15 @@ RendererRef handleArgs(const AppStateRef &state, render::Backend &backend,
         renderer->push(RenderItemOpenDoc(file));
       }
     }
-    state->profiling      = parser["--profile"] == true;
-    state->screenshotPath = parser.get<std::string>("--screenshot");
+    state->profiling         = parser["--profile"] == true;
+    state->screenshotPath    = parser.get<std::string>("--screenshot");
+    state->strictDiagnostics = parser["--strict-diagnostics"] == true;
+
+    if (parser.present<std::vector<std::string>>("--toast")) {
+      for (const auto &toast : parser.get<std::vector<std::string>>("--toast")) {
+        state->requestedToasts.emplace_back(parseToast(toast));
+      }
+    }
 
     if (parser.present<std::vector<std::string>>("--pick")) {
       for (const auto &pick :
