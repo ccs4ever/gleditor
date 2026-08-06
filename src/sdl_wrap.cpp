@@ -8,7 +8,11 @@
 #include <SDL3/SDL_surface.h>
 #include <SDL3/SDL_video.h>
 
+#ifdef GLEDITOR_HAVE_SDL_IMAGE
 #include <SDL3_image/SDL_image.h>
+#endif
+
+#include <iostream>
 
 AutoSDL::AutoSDL(const std::uint32_t flags) : flags(flags) {
   if (!SDL_InitSubSystem(flags)) {
@@ -65,13 +69,22 @@ AutoSDLGL::~AutoSDLGL() {
 }
 
 AutoSDLSurface::AutoSDLSurface(const char *fileName) {
+  // The window icon is decoration. Failing to load it must not stop the editor
+  // from starting -- which it used to, both when SDL3_image was unavailable and
+  // whenever the program was run from a directory that does not hold the file.
+#ifdef GLEDITOR_HAVE_SDL_IMAGE
   surface = IMG_Load(fileName);
   if (nullptr == surface) {
-    throw std::runtime_error(std::string("IMG_load failed: ") + SDL_GetError() +
-                             "\n");
+    std::cerr << "could not load window icon " << fileName << ": "
+              << SDL_GetError() << "\n";
   }
+#else
+  (void)fileName;
+#endif
 }
 AutoSDLSurface::~AutoSDLSurface() {
-  SDL_DestroySurface(surface);
-  surface = nullptr;
+  if (nullptr != surface) {
+    SDL_DestroySurface(surface);
+    surface = nullptr;
+  }
 }
