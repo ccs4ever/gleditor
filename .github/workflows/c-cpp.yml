@@ -34,6 +34,25 @@ jobs:
       run: sudo add-apt-repository ppa:hrzhu/sdl3-backport
     - name: update apt
       run: sudo apt-get update
+    # apt on the hosted runners is configured to delete each .deb as soon as it
+    # is unpacked, so there is nothing to cache until it is told otherwise.
+    - name: keep downloaded packages
+      run: >-
+        echo 'Binary::apt::APT::Keep-Downloaded-Packages "true";'
+        | sudo tee /etc/apt/apt.conf.d/99keep-downloads
+    # Cached under the runner's home rather than /var/cache/apt/archives:
+    # actions/cache restores as the runner user and cannot write into a
+    # root-owned directory. The package step copies between the two.
+    #
+    # The key covers this file, so editing the package list starts a fresh
+    # cache. A stale entry is not a correctness problem either way -- apt
+    # verifies what it finds and downloads whatever is missing or superseded.
+    - name: package cache
+      uses: actions/cache@v4
+      with:
+        path: ~/apt-archives
+        key: apt-sdl${{ matrix.sdl }}-${{ hashFiles('.github/workflows/c-cpp.yml') }}
+        restore-keys: apt-sdl${{ matrix.sdl }}-
     # PKGS in the Makefile is: pangomm-2.48 <sdl2|sdl3> gl (+ vulkan when
     # GLEDITOR_ENABLE_VULKAN is set). SDL_image is optional and SDL3_image is
     # in neither the archive nor the SDL3 backport PPA, so it is left out of
@@ -44,16 +63,32 @@ jobs:
     # validation layers catch API misuse that would otherwise only show up as a
     # blank window.
     - name: packages
-      run: >-
-        sudo apt-get install -y
-        ${{ matrix.sdl == 3 && 'libsdl3-dev' || 'libsdl2-dev' }}
-        libglm-dev libpangomm-2.48-dev
-        libgl-dev libgl1-mesa-dev libglu1-mesa-dev
-        libvulkan-dev glslang-tools
-        mesa-vulkan-drivers vulkan-validationlayers
-        libgmock-dev libgtest-dev
-        xvfb
-        clang libclang-rt-dev make
+      run: |
+        set -eu
+        # Seed apt's archive from the cache before resolving. Anything already
+        # present is not fetched again.
+        sudo mkdir -p /var/cache/apt/archives
+        if [ -d ~/apt-archives ]; then
+          sudo cp -n ~/apt-archives/*.deb /var/cache/apt/archives/ 2>/dev/null || true
+        fi
+
+        sudo apt-get install -y \
+          ${{ matrix.sdl == 3 && 'libsdl3-dev' || 'libsdl2-dev' }} \
+          libglm-dev libpangomm-2.48-dev \
+          libgl-dev libgl1-mesa-dev libglu1-mesa-dev \
+          libvulkan-dev glslang-tools \
+          mesa-vulkan-drivers vulkan-validationlayers \
+          libgmock-dev libgtest-dev \
+          xvfb \
+          clang libclang-rt-dev make
+
+        # autoclean drops .debs the archive no longer offers, so the cache does
+        # not accumulate superseded versions run after run.
+        sudo apt-get autoclean -y
+        mkdir -p ~/apt-archives
+        sudo cp -f /var/cache/apt/archives/*.deb ~/apt-archives/ 2>/dev/null || true
+        sudo chown -R "$(id -u):$(id -g)" ~/apt-archives
+        echo "cached $(ls ~/apt-archives | wc -l) packages, $(du -sh ~/apt-archives | cut -f1)"
     # GLEDITOR_SDL is set explicitly rather than left to the Makefile's probe:
     # "whichever is installed" would silently make both jobs build the same
     # thing if a runner image ever gained the other one.

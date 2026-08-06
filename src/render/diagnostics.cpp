@@ -33,6 +33,7 @@ void DiagnosticSink::record(const DiagnosticSeverity severity,
   // outcome; letting an exception escape into the driver's stack is not.
   try {
     std::string text{message};
+    bool shouldLog = false;
 
     {
       const std::lock_guard lock(mutex);
@@ -55,9 +56,12 @@ void DiagnosticSink::record(const DiagnosticSeverity severity,
       if (undrained.size() < maxUndrained) {
         undrained.push_back(Diagnostic{severity, text});
       }
+      shouldLog = logging;
     }
 
-    std::cerr << std::format("driver {}: {}\n", severityName(severity), text);
+    if (shouldLog) {
+      std::cerr << std::format("driver {}: {}\n", severityName(severity), text);
+    }
   } catch (...) { // NOLINT(bugprone-empty-catch)
     // Deliberately swallowed: see above.
   }
@@ -76,6 +80,11 @@ void DiagnosticSink::setStrict(const bool value) {
 bool DiagnosticSink::strict() const {
   const std::lock_guard lock(mutex);
   return strictMode;
+}
+
+void DiagnosticSink::setLogging(const bool value) {
+  const std::lock_guard lock(mutex);
+  logging = value;
 }
 
 bool DiagnosticSink::hasError() const {
