@@ -128,6 +128,7 @@ bool Renderer::update(RenderState &state, const bool settled) {
   // immediately as much as on one that is not.
   collectPickingResults(state);
   collectDiagnostics(state);
+  applySelectionRequest(settled);
   applyTypedText(state);
 
   if (!device->beginFrame()) {
@@ -153,6 +154,8 @@ bool Renderer::update(RenderState &state, const bool settled) {
 
     viewProjection = projection * camera;
   }
+
+  updateHighlights(state);
 
   device->bindPipeline(state.glyphPipeline);
   device->bindGlyphTexture(state.glyphCache.textureHandle());
@@ -191,12 +194,21 @@ bool Renderer::update(RenderState &state, const bool settled) {
       awaitingClick                = std::pair{clickX, clickY};
       device->requestPickingTag(clickX, clickY);
       nextClick++;
+    } else if (this->state->dragPending.exchange(false)) {
+      // A drag reuses the click machinery; only what happens with the answer
+      // differs, so the pending pixel is remembered as a drag.
+      const auto dragX = this->state->dragX.load();
+      const auto dragY = this->state->dragY.load();
+      awaitingClick    = std::pair{dragX, dragY};
+      awaitingDrag     = true;
+      device->requestPickingTag(dragX, dragY);
     } else if (this->state->clickPending.exchange(false)) {
       // A click takes priority over the hover query: only one read is issued
       // per frame, and the click is the one somebody is waiting on.
       const auto clickX = this->state->clickX.load();
       const auto clickY = this->state->clickY.load();
       awaitingClick     = std::pair{clickX, clickY};
+      awaitingDrag      = false;
       device->requestPickingTag(clickX, clickY);
     } else if (this->state->requestedPicks.empty()) {
       device->requestPickingTag(this->state->mouseX, this->state->mouseY);
@@ -231,7 +243,9 @@ void Renderer::placeCaretFromPick(RenderState &state,
   // out of a sequence of clicks entirely, which is exactly the misreading this
   // is here to prevent.
   if (pick.tag.empty()) {
-    // Clicking away from any document puts the editor back to navigating.
+    // Nothing was drawn at that pixel: the click landed outside every
+    // document. That puts the editor back to navigating, dropping the caret
+    // and any selection with it.
     caret->clear();
     std::cout << std::format("caret {},{}: none\n", pick.x, pick.y);
     return;
@@ -254,6 +268,15 @@ void Renderer::placeCaretFromPick(RenderState &state,
   const auto offset = doc->offsetForPick(pick.tag);
   if (!offset) {
     std::cout << std::format("caret {},{}: unresolved\n", pick.x, pick.y);
+    return;
+  }
+  if (awaitingDrag) {
+    // Dragging keeps the anchor where the press landed and moves the caret,
+    // which is what grows the selection.
+    caret->extendTo(*offset);
+    std::cout << std::format("select {},{}: doc {} [{},{})\n", pick.x, pick.y,
+                             pick.tag.docIndex, caret->selectionStart(),
+                             caret->selectionEnd());
     return;
   }
   caret->placeAt(pick.tag.docIndex, *offset);
@@ -290,6 +313,37 @@ void Renderer::collectPickingResults(RenderState &state) {
       }
     }
   }
+}
+
+void Renderer::applySelectionRequest(const bool settled) {
+  // Applied only once every requested click has been answered. A click
+  // replaces a selection rather than extending one, so applying this at
+  // startup meant a later --click silently threw it away -- and the frame that
+  // was supposed to show a partly highlighted quad showed none.
+  if (selectionApplied || !settled || !this->state->requestedSelection ||
+      clicksReported < this->state->requestedClicks.size()) {
+    return;
+  }
+  const auto &[from, to] = *this->state->requestedSelection;
+  caret->placeAt(0, from);
+  caret->anchorSelection();
+  caret->extendTo(to);
+  selectionApplied = true;
+  std::cout << std::format("select: doc 0 [{},{})\n", caret->selectionStart(),
+                           caret->selectionEnd());
+}
+
+void Renderer::updateHighlights(RenderState &state) {
+  // Rebuilt every frame rather than cached: a drag moves the selection each
+  // frame anyway, and the table is a handful of entries -- one per page the
+  // selection touches.
+  highlights.clear();
+  if (caret->hasSelection() && caret->documentIndex() < state.docs.size()) {
+    state.docs[caret->documentIndex()]->highlightsFor(
+        caret->selectionStart(), caret->selectionEnd(), selectionColour,
+        highlights);
+  }
+  device->setHighlights(highlights);
 }
 
 void Renderer::applyTypedText(RenderState &state) {

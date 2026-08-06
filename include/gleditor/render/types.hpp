@@ -291,23 +291,44 @@ struct PickingResult {
 };
 
 /**
- * @brief A highlight range, matching the shader's std140 block element.
+ * @brief One highlighted span of text, matching the shader's std140 element.
  *
- * Array members of a std140 uniform block are padded to 16 bytes, so the
- * trailing member is present to make the C++ and GLSL layouts agree.
+ * A span is named in cluster indices rather than characters because that is
+ * what a glyph instance carries, plus a fraction at each end for the case the
+ * boundary falls inside a cluster. One quad can be a whole ligature, so a
+ * selection ending between the "f" and the "i" of "fi" has to cover part of a
+ * quad -- highlighting the whole cluster would show the user a selection they
+ * did not make.
+ *
+ * The fractions are quantised on the host to k/charCount, so an edge always
+ * lands on a character boundary and never mid-glyph.
+ *
+ * Eight words, so the std140 array stride is a multiple of 16 and the C++ and
+ * GLSL layouts agree without padding members.
  */
 struct HighlightRange {
-  std::uint32_t start{};
-  std::uint32_t end{};
-  std::uint32_t colour{};
-  std::uint32_t reserved{};
+  /// Identity word of the glyphs this applies to: kind, document and page, as
+  /// packTagIdentity() builds it. Zero terminates the list.
+  std::uint32_t identity{};
+  std::uint32_t firstCluster{};
+  std::uint32_t lastCluster{}; ///< Inclusive.
+  std::uint32_t colour{};      ///< Packed RGBA8 background for the span.
+  /// Where the span starts within firstCluster, and ends within lastCluster.
+  float startFraction{};
+  float endFraction{1.0F};
+  std::uint32_t reserved0{};
+  std::uint32_t reserved1{};
 };
 
-/// Number of highlight ranges the uniform block holds. 1024 entries at 16
-/// bytes each is exactly 16 KiB, the smallest maximum uniform block size any
-/// Vulkan implementation is permitted to advertise, so the block fits
-/// everywhere without a capability check.
-inline constexpr int maxHighlightRanges = 1024;
+/**
+ * @brief Highlight spans the uniform block holds.
+ *
+ * One span per page a selection touches, so a handful is ample -- far fewer
+ * than the thousand the old whole-cluster scheme needed. The block is read per
+ * fragment now, and at eight words an element a larger table would also risk
+ * the 16 KB uniform block size OpenGL ES 3.0 guarantees.
+ */
+inline constexpr int maxHighlightRanges = 64;
 
 } // namespace render
 

@@ -52,6 +52,9 @@ PICK_PIXELS="200,240 300,265 420,265 250,305 400,345"
 # getting the overlay wrong while drawing documents correctly.
 # Pixel the overlay run clicks, to place the caret inside a word.
 CARET_CLICK="300,265"
+# A selection whose end falls inside a cluster, so the compared frame includes
+# a partially highlighted quad rather than only whole ones.
+SELECT_SPAN="20,34"
 TOAST_ONE="error:GL_INVALID_ENUM in glEnable(0xdead)"
 TOAST_TWO="warning:overlay parity check"
 
@@ -69,6 +72,7 @@ for backend in $backends; do
   # and in coordinate spaces the plain document frame never exercises.
   "$BIN" --backend "$backend" --profile $STRICT \
       --toast "$TOAST_ONE" --toast "$TOAST_TWO" --click "$CARET_CLICK" \
+      --select "$SELECT_SPAN" \
       --screenshot "$OUT/$backend.toast.ppm" "$SAMPLE" \
       >"$OUT/$backend.toastlog" 2>&1 ||
     { echo "FAIL: $backend overlay run exited non-zero"

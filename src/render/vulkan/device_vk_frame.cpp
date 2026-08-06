@@ -176,7 +176,18 @@ void DeviceVK::setHighlights(const std::span<const HighlightRange> ranges) {
   }
   const auto count = std::min<std::size_t>(ranges.size(), maxHighlightRanges);
   ensureIdleForMutation();
-  std::memcpy(it->second.mapped, ranges.data(), count * sizeof(HighlightRange));
+  auto *dst = static_cast<std::byte *>(it->second.mapped);
+  if (0 != count) {
+    std::memcpy(dst, ranges.data(), count * sizeof(HighlightRange));
+  }
+  // The shader stops at the first zeroed entry, so one has to be written after
+  // the last real range. Without it a shorter list than last frame's leaves the
+  // tail of the old one in place -- clearing a selection left it on screen.
+  if (count < static_cast<std::size_t>(maxHighlightRanges)) {
+    const HighlightRange terminator{};
+    std::memcpy(dst + (count * sizeof(HighlightRange)), &terminator,
+                sizeof(terminator));
+  }
 }
 
 void DeviceVK::drawGlyphs(const DrawUniforms &uniforms,

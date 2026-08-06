@@ -6,6 +6,7 @@
 #include <glm/ext/vector_float3.hpp>
 #include <memory>
 #include <mutex>
+#include <optional>
 #include <string>
 #include <utility>
 #include <vector>
@@ -50,10 +51,19 @@ struct AppState {
   std::atomic_int clickX{-1};
   std::atomic_int clickY{-1};
   std::atomic_bool clickPending{false};
+  /// Pixel a drag has reached with the button still down. Answered like a
+  /// click, but it extends the selection instead of replacing it.
+  std::atomic_int dragX{-1};
+  std::atomic_int dragY{-1};
+  std::atomic_bool dragPending{false};
   /// Clicks to perform once the document has settled, each reported as its
   /// picking result comes back. Driven by --click so that caret placement can
   /// be compared between backends the way picking already is.
   std::vector<std::pair<int, int>> requestedClicks;
+  /// Selection to apply once the document has settled, as document-global byte
+  /// offsets. Drives the highlight without a mouse, so that what a drag would
+  /// produce can be compared between backends.
+  std::optional<std::pair<std::uint32_t, std::uint32_t>> requestedSelection;
   /// Text typed since the render thread last drained it, in UTF-8. Guarded by
   /// its own mutex: SDL delivers it on the event thread and the edit is
   /// applied on the render thread.

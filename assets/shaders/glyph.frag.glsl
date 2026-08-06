@@ -16,10 +16,46 @@ GLEDITOR_FRAG_OUT(0) vec4 outColor;
 // identity word, cluster index, fractional position across the quad, unused.
 GLEDITOR_FRAG_OUT(1) uvec4 outTag;
 
+vec4 unpackColor(uint bits) {
+    return vec4(float((bits >> 24) & 255u),
+                float((bits >> 16) & 255u),
+                float((bits >> 8) & 255u),
+                float(bits & 255u)) / 255.0;
+}
+
+// Background for this fragment, which is the selection colour when the
+// fragment falls inside a highlighted span.
+//
+// A span names clusters, because that is what a glyph instance carries, plus a
+// fraction at each end for when the boundary falls inside one. vQuadU says
+// where across the quad this fragment sits, so a span ending between the "f"
+// and the "i" of an "fi" ligature highlights the "f" alone -- the two share a
+// single quad and have no geometry to tell them apart.
+vec3 selectedBackground(vec3 base) {
+    for (int i = 0; i < GLEDITOR_MAX_HIGHLIGHTS; i++) {
+        // Identity zero is not a glyph, so it terminates the list.
+        if (0u == uRanges[i].identity) {
+            break;
+        }
+        if (uRanges[i].identity != vTag.x) {
+            continue;
+        }
+        if (vTag.y < uRanges[i].firstCluster || vTag.y > uRanges[i].lastCluster) {
+            continue;
+        }
+        float lo = (vTag.y == uRanges[i].firstCluster) ? uRanges[i].startFraction : 0.0;
+        float hi = (vTag.y == uRanges[i].lastCluster) ? uRanges[i].endFraction : 1.0;
+        if (vQuadU >= lo && vQuadU < hi) {
+            return unpackColor(uRanges[i].colour).rgb;
+        }
+    }
+    return base;
+}
+
 void main() {
     float coverage =
         texture(uGlyphAtlas, vec3(vTexCoord, floor(vLayer + 0.5))).r;
-    outColor = vec4(mix(vBgColor, vFgColor, coverage), 1.0);
+    outColor = vec4(mix(selectedBackground(vBgColor), vFgColor, coverage), 1.0);
     // Fixed point: the attachment holds unsigned integers. The scale must
     // match render::tagFractionScale.
     outTag = uvec4(vTag, uint(clamp(vQuadU, 0.0, 1.0) * 65535.0), 0u);
