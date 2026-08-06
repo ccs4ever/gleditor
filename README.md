@@ -123,6 +123,40 @@ is never answered within the frame that made it.
 `--pick X,Y` prints the tag at one pixel and exits, which is how the backends
 are compared.
 
+### Editing: caret, clusters and reflow
+
+Clicking on text places the caret. The caret is a byte offset into the
+document, not a page and a coordinate: pages are a presentation that reflows,
+and an offset survives that.
+
+**One quad is one cluster, and a cluster is not a character.** Pango shapes
+"ffi" into a single ligature, and a letter with its combining marks into a
+single cluster; each is drawn as one quad covering several characters. The
+character boundaries inside it have no geometry to click on. So the fragment
+stage writes out how far across its quad each fragment sits, and the cluster's
+character count says how many boundaries to divide that among -- subdividing a
+cluster's width evenly, which is what Pango's own `x_to_index` does. Caret
+geometry comes back from Pango's `get_cursor_pos`, which already knows about
+right-to-left runs.
+
+**Reflow stops where pagination re-syncs.** Typing splices the text
+immediately and schedules the layout onto the render thread. A page that still
+ends where it did, shifted by the bytes inserted, means every later page holds
+byte-identical text: unchanged shaping, unchanged glyphs, unchanged vertex
+rows, and only the offset it reports moves. An insertion that does not spill
+its page rebuilds one page however long the document is -- 1 of 1152 pages on
+the 4.6 MB sample.
+
+The reflow reports its scope so the fast path is observable rather than merely
+claimed: `line` when no line break moved, `page` when they moved but the page
+still ends where it did, `document` when it did not. Line and page both confine
+the work to one page; the distinction is diagnostic, since Pango cannot lay out
+one line of a page again in isolation. A genuinely line-local relayout would
+want a layout object per line.
+
+`--click X,Y` and `--type TEXT` drive both without a mouse or a keyboard, which
+is how caret placement is compared between backends.
+
 ## SDL2 and SDL3
 
 Either major version works, chosen at build time with `GLEDITOR_SDL=2` or
@@ -271,6 +305,9 @@ Command-line options (from `argparse` in `src/main.cpp`):
   `info`, `warning` (the default) or `error`. Driver diagnostics raise these on
   their own; this is how the overlay is exercised on demand and compared
   between backends
+- `--click X,Y`       click there once the document has settled, moving the
+  caret, and print where it landed; may be given more than once
+- `--type TEXT`       insert TEXT at the caret once it has been placed
 - `--strict-diagnostics`  treat a driver error as fatal instead of showing it
   as a notification
 - `files...`          one or more input files to open at startup
