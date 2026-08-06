@@ -211,6 +211,14 @@ struct PickingTag {
   bool operator==(const PickingTag &oth) const = default;
 };
 
+/// Tag kinds. Zero means nothing was drawn, so it is not usable as an
+/// identity: an overlay tagged zero would report "no object" and be
+/// indistinguishable from empty space.
+inline constexpr std::uint32_t tagKindNone    = 0;
+inline constexpr std::uint32_t tagKindOverlay = 1;
+inline constexpr std::uint32_t tagKindPage    = 2;
+inline constexpr std::uint32_t tagKindGlyph   = 3;
+
 /// Bit widths of the identity word a glyph instance carries. Packed rather
 /// than given a word each because the attachment is four words wide and the
 /// cluster index and the fraction need one each.
@@ -230,6 +238,30 @@ inline constexpr std::uint32_t packTagIdentity(const std::uint32_t kind,
 /// Scale the fragment stage encodes the quad fraction with. Fixed point rather
 /// than a float because the attachment holds unsigned integers.
 inline constexpr std::uint32_t tagFractionScale = 65535;
+
+/**
+ * @brief How many character boundaries into a cluster a fraction falls.
+ *
+ * A cluster drawn as one quad may cover several characters -- a ligature, or a
+ * letter with combining marks -- and the boundaries between them have no
+ * geometry of their own to pick. Dividing the quad evenly is what Pango's own
+ * x_to_index does, so a click resolves the way Pango would resolve it.
+ *
+ * Rounding rather than truncating puts the caret on the nearer boundary, so the
+ * left half of a character lands before it and the right half after it. For a
+ * three-character cluster that puts the steps at a sixth, a half and five
+ * sixths of the quad.
+ */
+inline std::uint32_t clusterCharStep(const std::uint32_t charCount,
+                                     const float fraction) {
+  if (0 == charCount) {
+    return 0;
+  }
+  const auto clamped = fraction < 0.0F ? 0.0F : (fraction > 1.0F ? 1.0F : fraction);
+  const auto scaled  = static_cast<double>(clamped) * charCount;
+  const auto steps   = static_cast<std::uint32_t>(scaled + 0.5);
+  return steps > charCount ? charCount : steps;
+}
 
 /// Decode the four words read back from the picking attachment.
 inline PickingTag unpackPickingTag(const std::uint32_t identity,

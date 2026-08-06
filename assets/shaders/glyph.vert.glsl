@@ -87,7 +87,7 @@ void main() {
     // holds for a glyph row; the loop is bounded by the block size so it
     // cannot read past the end of the array. tag.x packs kind, document and
     // page, so the kind is its top field rather than the whole word.
-    if (3u == (tag.x >> 28)) {
+    if (3u == (tag.x >> 28)) { // tagKindGlyph
         for (int i = 0; i < GLEDITOR_MAX_HIGHLIGHTS; i++) {
             if (0u == (uRanges[i].start | uRanges[i].end | uRanges[i].colour)) {
                 break;

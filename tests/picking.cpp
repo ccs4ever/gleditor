@@ -100,3 +100,42 @@ TEST(Picking, adifferentFractionIsStillTheSameObject) {
   EXPECT_NE(left, right) << "the fraction differs, so equality should differ";
   EXPECT_TRUE(left.sameObject(right));
 }
+
+// A cluster drawn as one quad can cover several characters -- "ffi" shaped as
+// a ligature is one quad and three characters -- and the boundaries between
+// them have no geometry to pick. These pin the subdivision that resolves a
+// click inside one, independently of any font being installed.
+TEST(Picking, aSingleCharacterClusterHasTwoBoundaries) {
+  EXPECT_EQ(render::clusterCharStep(1, 0.0F), 0U);
+  EXPECT_EQ(render::clusterCharStep(1, 0.49F), 0U) << "left half lands before";
+  EXPECT_EQ(render::clusterCharStep(1, 0.51F), 1U) << "right half lands after";
+  EXPECT_EQ(render::clusterCharStep(1, 1.0F), 1U);
+}
+
+// "fi", "fl" and "ff": one quad, two characters, three caret positions at the
+// quarter points.
+TEST(Picking, aTwoCharacterLigatureSplitsAtTheQuarters) {
+  EXPECT_EQ(render::clusterCharStep(2, 0.20F), 0U);
+  EXPECT_EQ(render::clusterCharStep(2, 0.30F), 1U);
+  EXPECT_EQ(render::clusterCharStep(2, 0.70F), 1U);
+  EXPECT_EQ(render::clusterCharStep(2, 0.80F), 2U);
+}
+
+// "ffi" and "ffl": one quad, three characters, four caret positions at a
+// sixth, a half and five sixths.
+TEST(Picking, aThreeCharacterLigatureSplitsAtSixths) {
+  EXPECT_EQ(render::clusterCharStep(3, 0.15F), 0U);
+  EXPECT_EQ(render::clusterCharStep(3, 0.20F), 1U);
+  EXPECT_EQ(render::clusterCharStep(3, 0.45F), 1U);
+  EXPECT_EQ(render::clusterCharStep(3, 0.55F), 2U);
+  EXPECT_EQ(render::clusterCharStep(3, 0.80F), 2U);
+  EXPECT_EQ(render::clusterCharStep(3, 0.90F), 3U);
+}
+
+// The step can never run past the cluster, however the fraction arrives: it
+// indexes a walk through the cluster's bytes.
+TEST(Picking, theStepNeverEscapesTheCluster) {
+  EXPECT_EQ(render::clusterCharStep(3, 2.0F), 3U);
+  EXPECT_EQ(render::clusterCharStep(3, -1.0F), 0U);
+  EXPECT_EQ(render::clusterCharStep(0, 0.5F), 0U) << "an empty cluster";
+}

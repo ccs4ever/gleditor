@@ -8,10 +8,6 @@
 #include <cstddef>
 #include <span>
 
-#include <format>
-#include <iostream>
-#include <format>
-#include <iostream>
 #include <glm/gtc/type_ptr.hpp>
 
 #include <gleditor/doc.hpp>
@@ -80,9 +76,16 @@ void Caret::setGeometry(const float posX, const float posY,
       {0, 0},
       {0, 0},
       Doc::VBORow::layerWidthHeight(0, pixelWidth, pixelHeight),
-      // Tag zero: the caret is not something to pick. Clicking where it sits
-      // should report the glyph underneath, not the caret itself.
-      {0, 0}};
+      // The caret writes the picking attachment like every other quad, and it
+      // is drawn last, so it covers the tag of the glyph beneath it. Tagged
+      // zero that reads as empty space, and clicking the caret reported
+      // "nothing there" and cleared it.
+      //
+      // Being transparent to picking instead would mean masking writes to the
+      // second colour attachment alone, which OpenGL ES 3.0 cannot do --
+      // per-attachment colour masks arrive in ES 3.2. So the caret carries an
+      // identity of its own and the click handler leaves it where it is.
+      {render::packTagIdentity(render::tagKindOverlay, 0, 0), 0}};
 
   const std::span<const std::byte> bytes{
       reinterpret_cast<const std::byte *>(&row), sizeof(row)};
