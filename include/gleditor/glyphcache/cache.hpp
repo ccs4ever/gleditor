@@ -152,13 +152,19 @@ public:
   GlyphCache(GlyphCache &oth)           = delete;
   void operator=(const GlyphCache &oth) = delete;
 
+  /// Longest cluster the cache will key on. Long enough for emoji sequences
+  /// joined by zero-width joiners; a bound only so that a pathological run
+  /// cannot become a cache key.
+  static constexpr std::size_t maxClusterBytes = 64;
+
   /**
-   * @brief Retrieve or create a glyph entry for the given character and font.
-   * @param chr UTF-8 sequence representing a single codepoint or small cluster.
-   *            At most four bytes, the maximum length of one UTF-8 codepoint.
+   * @brief Retrieve or create a glyph entry for one shaped cluster.
+   * @param chr UTF-8 text of a whole cluster -- a ligature, or a base
+   *            character with its combining marks -- rasterised as a unit so
+   *            that what is drawn matches what Pango shaped.
    * @param font Loaded Pango font to use for rasterization.
    * @return Sizes with UVs and pixel dimensions.
-   * @throws std::invalid_argument if the provided sequence is too long.
+   * @throws std::invalid_argument if the cluster exceeds maxClusterBytes.
    */
   Sizes put(const std::string_view &chr, const FontPtr &font);
 

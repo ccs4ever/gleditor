@@ -54,6 +54,21 @@ constexpr std::uint32_t initialPoolRows = 1U << 16U;
           packed3DDims & static_cast<uint>(16383)};
 }
 
+/// Margin in layout pixels between the page edge and its text.
+constexpr float pageMargin = 24.0F;
+
+/// Convert Pango units to pixels.
+double toPixels(const int pangoUnits) {
+  return static_cast<double>(pangoUnits) / PANGO_SCALE;
+}
+
+/// Number of characters in a UTF-8 range, counting lead bytes.
+std::size_t utf8Length(const std::string_view text) {
+  return static_cast<std::size_t>(std::ranges::count_if(text, [](const char chr) {
+    return 0x80 != (static_cast<unsigned char>(chr) & 0xC0);
+  }));
+}
+
 /// Byte at @p pos widened without sign extension, for comparing against byte
 /// order marks.
 unsigned int byteAt(const std::string &str, const std::size_t pos) {
@@ -117,95 +132,127 @@ render::VertexLayout Doc::vertexLayout() {
 // refer to the members without ambiguity: the members are move-constructed from
 // the parameters, which leaves the parameters empty.
 Page::Page(std::shared_ptr<Doc> aDoc, RenderState &state, glm::mat4 &model,
-           Glib::RefPtr<Pango::Layout> aLayout)
-    : Drawable(model), doc(std::move(aDoc)), layout(std::move(aLayout)) {
+           Glib::RefPtr<Pango::Layout> aLayout, const std::uint32_t aTextOffset)
+    : Drawable(model), doc(std::move(aDoc)), layout(std::move(aLayout)),
+      textOffset(aTextOffset) {
   const auto &layout = this->layout;
-  const auto &line   = layout->get_const_line(layout->get_line_count() - 1);
-  const int len      = line->get_length();
-  const int charCnt  = line->get_start_index() + (0 == len ? 1 : len);
 
-  auto color   = Doc::VBORow::color;
-  auto layerWH = Doc::VBORow::layerWidthHeight;
-  const auto xMargin = 2;
-  const auto yMargin = 2;
-  const auto layW =
-      (static_cast<float>(layout->get_logical_extents().get_width()) /
-       PANGO_SCALE) +
-      (static_cast<float>(xMargin) * 2);
-  const auto layH =
-      (static_cast<float>(layout->get_logical_extents().get_height()) /
-       PANGO_SCALE) +
-      (static_cast<float>(yMargin) * 2);
+  const auto color   = Doc::VBORow::color;
+  const auto layerWH = Doc::VBORow::layerWidthHeight;
+
+  // Everything below is in layout pixels, the unit Pango reports positions and
+  // sizes in. The page's model matrix scales them to world units, so a glyph's
+  // quad and the advance that places it shrink together -- they did not before,
+  // and the mismatch drew every glyph on top of its neighbours.
+  int textWidthPx  = 0;
+  int textHeightPx = 0;
+  layout->get_pixel_size(textWidthPx, textHeightPx);
+  const auto pageWidth  = static_cast<float>(textWidthPx) + (2 * pageMargin);
+  const auto pageHeight = static_cast<float>(textHeightPx) + (2 * pageMargin);
+
+  // The page is centred on its own origin, so that the model matrix placing it
+  // in the scene positions its middle rather than its top left corner.
+  const auto originX = -pageWidth / 2.0F;
+  const auto originY = pageHeight / 2.0F;
 
   // Row 0 is the page background; the glyphs follow it. Every row is one
   // instance of the glyph quad.
   std::vector<Doc::VBORow> vertexData;
-  vertexData.reserve(static_cast<std::size_t>(charCnt) + 1);
   vertexData.push_back(Doc::VBORow{
-      {layW / 32.0F, -layH / 48.0F, 0},
-      color(0),
+      {0.0F, 0.0F, 0.0F},
+      color(255),
       color(255),
       {0, 0},
-      {1, 1},
-      layerWH(0, std::min(16383U, static_cast<uint>(layW)),
-              std::min(16383U, static_cast<uint>(layH))),
+      {0, 0},
+      layerWH(0, std::min(16383U, static_cast<unsigned int>(pageWidth)),
+              std::min(16383U, static_cast<unsigned int>(pageHeight))),
       {2, 1}});
-
-  auto iter = layout->get_iter();
-
-  int lastIdx = 0;
-  int idx     = 0;
-  auto xpen   = static_cast<float>(xMargin);
-  auto ypenF  = [&iter] -> double {
-    return ((static_cast<float>(iter.get_baseline()) -
-             (iter.get_line_logical_extents().get_ascent() / 2.0)) /
-            PANGO_SCALE) +
-           static_cast<float>(yMargin * 2);
-  };
-  auto ypen = ypenF();
-  Pango::Rectangle rInk;
-  Pango::Rectangle rLog;
 
   const auto text = layout->get_text().raw();
   const auto font =
       layout->get_context()->load_font(layout->get_font_description());
 
-  iter.next_cluster();
-  while (lastIdx != (idx = iter.get_index())) {
-    iter.get_cluster_extents(rInk, rLog);
-    const bool hasNewLine = text.at(idx - 1) == '\n';
-    // Render the leading codepoint of the cluster. Slicing at a fixed byte
-    // count would cut a 4-byte sequence in half and hand Pango invalid UTF-8,
-    // so the cut is made on a sequence boundary instead.
-    const int clusterEnd = hasNewLine ? idx - 1 : idx;
-    const int clusterLen =
-        std::min(clusterEnd - lastIdx, utf8SequenceLength(text[lastIdx]));
-    const std::string_view tmp(text.data() + lastIdx,
-                               static_cast<std::size_t>(std::max(0, clusterLen)));
+  // Walk the clusters. A cluster is the smallest run Pango will not break
+  // apart, so it is what one quad can represent: an "ffi" ligature or a letter
+  // with its combining marks is one cluster covering several characters.
+  auto iter = layout->get_iter();
+  while (true) {
+    Pango::Rectangle clusterInk;
+    Pango::Rectangle clusterLogical;
+    iter.get_cluster_extents(clusterInk, clusterLogical);
 
-    const auto glyph = state.glyphCache.put(tmp, font);
+    const auto start = static_cast<std::size_t>(std::max(0, iter.get_index()));
+    const bool more  = iter.next_cluster();
+    const auto end =
+        more ? static_cast<std::size_t>(std::max(0, iter.get_index()))
+             : text.size();
+
+    if (end <= start || start >= text.size()) {
+      if (!more) {
+        break;
+      }
+      continue;
+    }
+
+    // A trailing newline is part of the cluster's byte range but has nothing
+    // to draw; it still has to be counted so offsets stay in step with the
+    // text.
+    std::size_t drawEnd = end;
+    while (drawEnd > start && ('\n' == text[drawEnd - 1] ||
+                               '\r' == text[drawEnd - 1])) {
+      drawEnd--;
+    }
+
+    clusters.push_back(
+        ClusterBox{static_cast<std::uint32_t>(start),
+                   static_cast<std::uint32_t>(end - start),
+                   static_cast<std::uint32_t>(utf8Length(
+                       std::string_view(text).substr(start, end - start)))});
+
+    if (drawEnd == start) {
+      if (!more) {
+        break;
+      }
+      continue;
+    }
+
+    // The whole cluster is rasterised, not just its first codepoint. Taking
+    // the leading sequence dropped the rest of every ligature and every
+    // combining mark from the page.
+    const std::string_view chr(text.data() + start, drawEnd - start);
+    const auto glyph    = state.glyphCache.put(chr, font);
     const auto &coords  = glyph.texCoords;
     const auto &extents = glyph.dims;
 
-    xpen += static_cast<float>(static_cast<int>(extents.width)) / 35.0F;
-    vertexData.push_back(Doc::VBORow{
-        {xpen, static_cast<float>(-ypen) / 30.0F, 0.1F},
-        color(0),
-        color(255),
-        {coords.topLeft.x, coords.topLeft.y},
-        {coords.box.width, coords.box.height},
-        layerWH(static_cast<unsigned char>(glyph.layer),
-                static_cast<uint>(extents.width),
-                static_cast<uint>(extents.height)),
-        {3, static_cast<unsigned int>(idx)}});
-    xpen += static_cast<float>(static_cast<int>(extents.width)) / 35.0F;
+    const auto glyphWidth  = static_cast<float>(static_cast<int>(extents.width));
+    const auto glyphHeight = static_cast<float>(static_cast<int>(extents.height));
 
-    if (hasNewLine) {
-      xpen = static_cast<float>(xMargin);
-      ypen = ypenF() + (static_cast<float>(layout->get_spacing()) / PANGO_SCALE);
+    if (0.0F < glyphWidth && 0.0F < glyphHeight) {
+      // Pango measures from the top left of the text block downwards; the page
+      // runs upwards from its own origin, hence the negated Y.
+      const auto left =
+          pageMargin + static_cast<float>(toPixels(clusterLogical.get_x()));
+      const auto top =
+          pageMargin + static_cast<float>(toPixels(clusterLogical.get_y()));
+
+      vertexData.push_back(Doc::VBORow{
+          {originX + left + (glyphWidth / 2.0F),
+           originY - (top + (glyphHeight / 2.0F)), 0.1F},
+          color(0),
+          color(255),
+          {coords.topLeft.x, coords.topLeft.y},
+          {coords.box.width, coords.box.height},
+          layerWH(static_cast<unsigned char>(glyph.layer),
+                  static_cast<unsigned int>(glyphWidth),
+                  static_cast<unsigned int>(glyphHeight)),
+          // The cluster index into this page's cluster table, which is what
+          // turns a picked fragment back into a text position.
+          {3, static_cast<unsigned int>(clusters.size() - 1)}});
     }
-    lastIdx = idx;
-    iter.next_cluster();
+
+    if (!more) {
+      break;
+    }
   }
 
   instanceCount = static_cast<std::uint32_t>(vertexData.size());
@@ -313,19 +360,23 @@ void Doc::makePages(RenderState &state) {
     pango_layout_set_text(lay->gobj(), txt + tSize,
                           static_cast<int>(text.bytes() - tSize));
     const auto &line = lay->get_const_line(lay->get_line_count() - 1);
-    newPage(state, lay);
+    newPage(state, lay, static_cast<std::uint32_t>(tSize));
     const int len = line->get_length();
     tSize += line->get_start_index() + (0 == len ? 1 : len);
   }
 }
 
-void Doc::newPage(RenderState &state, Glib::RefPtr<Pango::Layout> &layout) {
-  renderer->run([this, &state, layout] {
+void Doc::newPage(RenderState &state, Glib::RefPtr<Pango::Layout> &layout,
+                  const std::uint32_t textOffset) {
+  renderer->run([this, &state, layout, textOffset] {
     const auto numPages = this->pages.size();
-    glm::mat4 trans     = glm::translate(
+    // Pages are laid out in pixels and scaled here, so the stacking distance is
+    // in world units while everything inside the page is not.
+    glm::mat4 trans = glm::translate(
         glm::mat4(1.0),
         glm::vec3(0.0F, -100 * static_cast<float>(numPages), 0.0F));
-    pages.emplace_back(this->getPtr(), state, trans, layout);
+    trans = glm::scale(trans, glm::vec3(pixelsToWorld, pixelsToWorld, 1.0F));
+    pages.emplace_back(this->getPtr(), state, trans, layout, textOffset);
   });
 }
 // vi: set sw=2 sts=2 ts=2 et:

@@ -206,12 +206,16 @@ GlyphCache::Sizes GlyphCache::addToCache(const std::string &chr,
 
 GlyphCache::Sizes GlyphCache::put(const std::string_view &chr,
                                   const FontPtr &font) {
-  // A single UTF-8 codepoint occupies at most four bytes; rejecting at three
-  // turned every astral-plane character (emoji, CJK extensions, ...) into an
-  // exception.
-  if (chr.size() > 4) {
+  // A whole shaped cluster is cached, not a single codepoint: a ligature or a
+  // base letter with its combining marks is one quad covering several
+  // characters, and rasterising only the first of them dropped the rest from
+  // the page. The bound is generous enough for emoji sequences joined by
+  // zero-width joiners, and exists only so that a pathological run cannot
+  // become a cache key.
+  if (chr.size() > maxClusterBytes) {
     throw std::invalid_argument(
-        std::format("GlyphCache: bad character: {}", chr));
+        std::format("GlyphCache: cluster of {} bytes exceeds the {}-byte limit",
+                    chr.size(), maxClusterBytes));
   }
   if (const auto &chrToFontMap = glyphs.find(chr);
       chrToFontMap != glyphs.cend()) {
