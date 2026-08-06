@@ -1,24 +1,23 @@
-#include <GL/glew.h>                   // for glDrawArrays, GL_ARRAY_BUFFER
-#include <algorithm>                   // for min
+#include <algorithm>                   // for min, max
 #include <cmath>                       // for ceil
+#include <cstddef>                     // for byte
 #include <format>                      // for format
 #include <gleditor/doc.hpp>            // IWYU pragma: associated
-#include <gleditor/gl/state.hpp>       // for GLState
+#include <gleditor/render/device.hpp>  // for RenderDevice
+#include <gleditor/render_state.hpp>   // for RenderState
 #include <gleditor/renderer.hpp>       // for Renderer, RendererRef
-#include <gleditor/vao_supports.hpp>   // for VAOSupports
 #include <glm/detail/qualifier.hpp>    // for qualifier
 #include <glm/ext/matrix_float4x4.hpp> // for mat4
 #include <glm/ext/vector_float3.hpp>   // for vec3
 #include <glm/gtc/type_ptr.hpp>
 #include <iostream>               // for basic_ostream, operator<<
-#include <iterator>               // for distance
 #include <memory>                 // for __shared_ptr_access, shared...
 #include <pangomm/cairofontmap.h> // for CairoFontMap
+#include <span>                   // for span
 #include <stdexcept>              // for logic_error
 #include <string>                 // for char_traits, basic_string
 #include <string_view>            // for string_view
 #include <sys/types.h>            // for uint
-#include <unordered_map>          // for unordered_map
 #include <utility>                // for move
 #include <vector>                 // for vector
 
@@ -40,10 +39,16 @@
 #include <gleditor/glyphcache/types.hpp> // for TextureCoords, PointF, Rect
 #include <glm/gtx/string_cast.hpp>
 
+namespace {
+
+/// Rows the document's vertex buffer starts out with. It grows on demand, so
+/// this only needs to cover a first page or two without a reallocation.
+constexpr std::uint32_t initialPoolRows = 1U << 16U;
+
 /// Unpack the layer/width/height triple written by
 /// Doc::VBORow::layerWidthHeight. The field widths must stay in step with that
-/// function and with lwh() in assets/glsl/main.geom.glsl.
-glm::vec3 lwh(const uint packed3DDims) {
+/// function and with unpackLayerWH() in assets/shaders/glyph.vert.glsl.
+[[maybe_unused]] glm::vec3 lwh(const uint packed3DDims) {
   return {packed3DDims >> static_cast<uint>(28),
           packed3DDims >> static_cast<uint>(14) & static_cast<uint>(16383),
           packed3DDims & static_cast<uint>(16383)};
@@ -74,326 +79,167 @@ int utf8SequenceLength(const char lead) {
   return 1;
 }
 
+/// View a row vector as the raw bytes the buffer pool wants.
+std::span<const std::byte> asBytes(const std::vector<Doc::VBORow> &rows) {
+  return {reinterpret_cast<const std::byte *>(rows.data()),
+          rows.size() * sizeof(Doc::VBORow)};
+}
+
+/// Copy a matrix into the flat array the device uniform structs carry.
+std::array<float, 16> toArray(const glm::mat4 &mat) {
+  std::array<float, 16> out{};
+  const auto *src = glm::value_ptr(mat);
+  std::copy_n(src, out.size(), out.begin());
+  return out;
+}
+
+} // namespace
+
+render::VertexLayout Doc::vertexLayout() {
+  using render::AttributeType;
+  static_assert(sizeof(Doc::VBORow) == 48);
+
+  render::VertexLayout layout;
+  layout.stride = sizeof(VBORow);
+  layout.attributes = {
+      {"position", 0, AttributeType::Float, 3, offsetof(VBORow, pos)},
+      {"fgcolor", 1, AttributeType::UnsignedInt, 1, offsetof(VBORow, fg)},
+      {"bgcolor", 2, AttributeType::UnsignedInt, 1, offsetof(VBORow, bg)},
+      {"texcoord", 3, AttributeType::Float, 2, offsetof(VBORow, texcoord)},
+      {"texBox", 4, AttributeType::Float, 2, offsetof(VBORow, texBox)},
+      {"layerWH", 5, AttributeType::UnsignedInt, 1, offsetof(VBORow, layer)},
+      {"tag", 6, AttributeType::UnsignedInt, 2, offsetof(VBORow, tag)},
+  };
+  return layout;
+}
+
 // The constructor parameters are named with a leading `a` so that the body can
 // refer to the members without ambiguity: the members are move-constructed from
 // the parameters, which leaves the parameters empty.
-Page::Page(std::shared_ptr<Doc> aDoc, GLState &state, glm::mat4 &model,
+Page::Page(std::shared_ptr<Doc> aDoc, RenderState &state, glm::mat4 &model,
            Glib::RefPtr<Pango::Layout> aLayout)
     : Drawable(model), doc(std::move(aDoc)), layout(std::move(aLayout)) {
-  static_assert(sizeof(Doc::VBORow) == 48);
   const auto &layout = this->layout;
-  std::cout << "NEW PAGE: " << &this->doc << " " << glm::to_string(model) << "\n";
-  const auto &line  = layout->get_const_line(layout->get_line_count() - 1);
-  int len           = line->get_length();
-  const int charCnt = line->get_start_index() + (0 == len ? 1 : len);
-  // interleaved data --
-  // https://www.opengl.org/wiki/Vertex_Specification#Interleaved_arrays pos
-  // (3-vector), fg color (3-vector), bg color (3-vector),
-  //   texture coordinates (2-vector: st) s == x, t == y, bottom left == (0,0)
-  //   top right == (1,1)
-  // the vertices should be layed out so that each triangle is created in a
-  // counter-clockwise order this allows face culling to work. OpenGL will keep
-  // a triangle that is "facing" you. It determines this by seeing if its
-  // vertices are being drawn clockwise or counter-clockwise. By default,
-  // counter-clockwise indicates "its facing you" while clockwise indicates that
-  // the back face is pointing at you. Face culling is enabled with
-  // glEnable(GL_CULL_FACE)
-  /*
-  std::array<GLfloat, static_cast<std::size_t>(12 * 4)> vertexData = {
-      // left-bottom,  white, black, tex: left-top, layer0
-      0, -2.0, 1.0, 1.0, 1.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0,
-      // right-bottom, white, black, tex: right-top, layer0
-      2.0, -2.0, 1.0, 1.0, 1.0, 1.0, 0.0, 0.0, 0.0, 1.0, 1.0, 0,
-      // left-top, white, black, tex: left-bottom, layer0
-      0, 0, 0, 1.0, 1.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0,
-      // right-top, white, black, tex: right-bottom, layer0
-      2.0, 0, 1.0, 1.0, 1.0, 1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0};
-  std::array<GLuint, 6> indexData = {
-      0, 1, 2, // (lb, rb, lt) ccw
-      3, 2, 1, // (rt, lt, rb) ccw
-  };
-  */
-  auto color = Doc::VBORow::color;
-  // auto color3  = Doc::VBORow::color3;
-  auto layerWH = Doc::VBORow::layerWidthHeight;
-  auto xMargin = 2;
-  auto yMargin = 2;
-  auto layW    = static_cast<float>(layout->get_logical_extents().get_width()) /
-                  PANGO_SCALE +
-              static_cast<float>(xMargin) * 2;
-  auto layH = static_cast<float>(layout->get_logical_extents().get_height()) /
-                  PANGO_SCALE +
-              static_cast<float>(yMargin) * 2;
-  std::vector vertexData = {
-      // left-bottom,  white, black, tex: left-top, layer0
-      // Doc::VBORow{{0.0, -2.0, 1.0}, color(255), color(0), {0.0, 1.0}, 0},
-      // right-bottom, white, black, tex: right-top, layer0
-      // Doc::VBORow{{2.0, -2.0, 1.0}, color(255), color(0), {1.0, 1.0}, 0},
-      // left-top, white, black, tex: left-bottom, layer0
-      Doc::VBORow{{layW / 32.0F, -layH / 48.0F, 0},
-                  color(0),
-                  color(255),
-                  {0, 0},
-                  {1, 1},
-                  layerWH(0, std::min(16383U, static_cast<uint>(layW)),
-                          std::min(16383U, static_cast<uint>(layH))),
-                  {2, 1}},
-  };
-  // vertexData is used as a ring buffer of exactly vertMax rows: the loop below
-  // writes through an iterator and flushes to the VBO whenever it wraps. The
-  // rows past the page background must therefore actually exist -- reserve()
-  // only grows the capacity, so writing through begin() + 1 would run past
-  // size(). Two rows is the minimum: one background row plus one glyph row.
-  const auto vertMax = std::max(2, std::min(charCnt, 100000));
-  vertexData.resize(vertMax);
-  auto logAttrs = layout->get_log_attrs();
-  auto iter     = layout->get_iter();
-  /*std::cout << "char count: " << charCnt << " attrs size: " << logAttrs.size()
-            << "\n";*/
-  // auto textIter = text.begin();
-  /*for (const auto &attr : logAttrs) {
-    if (textIter == text.end()) break;
-    std::cout << std::format(
-        "Glyph: {} attr.backspace_deletes_character {}, "
-        "attr.break_inserts_hyphen "
-        "{}, attr.break_removes_preceding {}, attr.is_char_break {}, "
-        "attr.is_line_break {}, attr.is_mandatory_break {}, "
-        "attr.is_cursor_position {}, attr.is_expandable_space {}, "
-        "attr.is_sentence_boundary {}, attr.is_sentence_end {}, "
-        "attr.is_sentence_start {}, attr.is_word_boundary {}, attr.is_word_end "
-        "{}, attr.is_word_start {}, attr.is_white {}, attr.reserved {}\n",
-        (char)*(textIter == text.begin() ? textIter : textIter++),
-        attr.backspace_deletes_character, attr.break_inserts_hyphen,
-        attr.break_removes_preceding, attr.is_char_break, attr.is_line_break,
-        attr.is_mandatory_break, attr.is_cursor_position,
-        attr.is_expandable_space, attr.is_sentence_boundary,
-        attr.is_sentence_end, attr.is_sentence_start, attr.is_word_boundary,
-        attr.is_word_end, attr.is_word_start, attr.is_white, attr.reserved);
-    if (textIter == text.begin()) textIter++;
-  }*/
-  /*for (const auto &line : layout->get_const_lines()) {
-    const auto startIdx = line->get_start_index();
-    const auto endIdx   = startIdx + line->get_length();
-    const auto runs     = line->get_x_ranges(startIdx, endIdx);
-    for (const auto &run : runs) {
-      int runStartIdx;
-      int runStartTrailing;
-      int runEndIdx;
-      int runEndTrailing;
-      bool inOrOutStart =
-          line->x_to_index(run.first, runStartIdx, runStartTrailing);
-      bool inOrOutEnd = line->x_to_index(run.second, runEndIdx, runEndTrailing);
-      std::cout << " st: " << runStartIdx << " " << runStartTrailing
-                << " en: " << runEndIdx << " " << runEndTrailing << "\n";
-      std::cout << " NEW run: "
-                << text.substr(runStartIdx, runEndIdx - runStartIdx) << "\n";
-      int idx = runStartIdx;
-      int idxTr = runStartTrailing;
+  const auto &line   = layout->get_const_line(layout->get_line_count() - 1);
+  const int len      = line->get_length();
+  const int charCnt  = line->get_start_index() + (0 == len ? 1 : len);
 
-    }
-  }*/
+  auto color   = Doc::VBORow::color;
+  auto layerWH = Doc::VBORow::layerWidthHeight;
+  const auto xMargin = 2;
+  const auto yMargin = 2;
+  const auto layW =
+      (static_cast<float>(layout->get_logical_extents().get_width()) /
+       PANGO_SCALE) +
+      (static_cast<float>(xMargin) * 2);
+  const auto layH =
+      (static_cast<float>(layout->get_logical_extents().get_height()) /
+       PANGO_SCALE) +
+      (static_cast<float>(yMargin) * 2);
+
+  // Row 0 is the page background; the glyphs follow it. Every row is one
+  // instance of the glyph quad.
+  std::vector<Doc::VBORow> vertexData;
+  vertexData.reserve(static_cast<std::size_t>(charCnt) + 1);
+  vertexData.push_back(Doc::VBORow{
+      {layW / 32.0F, -layH / 48.0F, 0},
+      color(0),
+      color(255),
+      {0, 0},
+      {1, 1},
+      layerWH(0, std::min(16383U, static_cast<uint>(layW)),
+              std::min(16383U, static_cast<uint>(layH))),
+      {2, 1}});
+
+  auto iter = layout->get_iter();
+
   int lastIdx = 0;
   int idx     = 0;
-  int vboPos  = 0;
   auto xpen   = static_cast<float>(xMargin);
   auto ypenF  = [&iter, yMargin] -> double {
-    return (static_cast<float>(iter.get_baseline()) -
-            iter.get_line_logical_extents().get_ascent() / 2.0) /
-               PANGO_SCALE +
+    return ((static_cast<float>(iter.get_baseline()) -
+             (iter.get_line_logical_extents().get_ascent() / 2.0)) /
+            PANGO_SCALE) +
            static_cast<float>(yMargin * 2);
   };
   auto ypen = ypenF();
   Pango::Rectangle rInk;
   Pango::Rectangle rLog;
-  auto vertIter     = vertexData.begin() + 1;
-  pageBackingHandle = this->doc->reservePoints(charCnt + charCnt / 4);
-  auto text         = layout->get_text().raw();
-  auto font = layout->get_context()->load_font(this->layout->get_font_description());
+
+  const auto text = layout->get_text().raw();
+  const auto font =
+      layout->get_context()->load_font(layout->get_font_description());
+
   iter.next_cluster();
   while (lastIdx != (idx = iter.get_index())) {
     iter.get_cluster_extents(rInk, rLog);
-    /*std::cout << "xoff: " << iter.get_line_logical_extents().get_x()
-              << " yoff: " << iter.get_line_logical_extents().get_y()
-              << " base: " << iter.get_baseline() << " ypen: " << ypen
-              << " ypen calc: " << ypenF() << " log height: "
-              << float(iter.get_line_logical_extents().get_height()) /
-                     PANGO_SCALE
-              << "\n";
-    std::cout << size << " " << idx
-              << (unsigned char)text[idx]
-              << (text[idx] == '\n') << "\n";*/
-    bool hasNewLine = text.at(idx - 1) == '\n';
+    const bool hasNewLine = text.at(idx - 1) == '\n';
     // Render the leading codepoint of the cluster. Slicing at a fixed byte
     // count would cut a 4-byte sequence in half and hand Pango invalid UTF-8,
     // so the cut is made on a sequence boundary instead.
     const int clusterEnd = hasNewLine ? idx - 1 : idx;
     const int clusterLen =
         std::min(clusterEnd - lastIdx, utf8SequenceLength(text[lastIdx]));
-    std::string_view tmp(text.data() + lastIdx,
-                         static_cast<std::size_t>(std::max(0, clusterLen)));
-    if (idx - lastIdx > 3) {
-      /*std::string_view tmp2(
-          text.cbegin() + lastIdx,
-          text.cbegin() + (hasNewLine ? (idx - 1) : idx));
-        std::cout << std::format("lidx: {} idx: {} sz: {} clust: {}\n", lastIdx,
-                                 idx, idx - lastIdx, tmp2);*/
-    }
-    /*std::cout << "has nl: " << hasNewLine << " cluster: [" << tmp << "] "
-              << " end: [" << text.at(idx-1) << "]\n";*/
-    /*std::cout << "iter index: " << idx - len << " char: " << tmp << " "
-              << " cluster width: "
-              << iter.get_cluster_ink_extents().get_width() / PANGO_SCALE
-              << "\n";*/
-    const auto [coords, extents] = state.glyphCache.put(tmp, font);
-    /*std::cerr << std::format("coords: pt: {}/{} box: {}/{}\n",
-                             coords.topLeft.x, coords.topLeft.y,
-                             coords.box.width, coords.box.height);
-    std::cerr << std::format("extents: {}/{} {}\n", int(extents.width),
-                             int(extents.height), xpen);*/
-    /*auto vec = lwh(layerWH(0, int(extents.width), int(extents.height)));
-    vec      = (doc->model * model * glm::vec4(vec, 0));*/
-    /*std::cerr << std::format("vec: {} {}/{} {}\n", vec.x, vec.y, vec.z,
-                             -ypen / 30.0F);*/
+    const std::string_view tmp(text.data() + lastIdx,
+                               static_cast<std::size_t>(std::max(0, clusterLen)));
+
+    const auto glyph = state.glyphCache.put(tmp, font);
+    const auto &coords  = glyph.texCoords;
+    const auto &extents = glyph.dims;
+
     xpen += static_cast<float>(static_cast<int>(extents.width)) / 35.0F;
-    // std::cout << "xpen sent: " << xpen << "\n";
-    vboPos++;
-    *vertIter = {{xpen, static_cast<float>(-ypen) / 30.0F, 0.1F},
-                 color(0),
-                 color(255),
-                 {coords.topLeft.x, coords.topLeft.y},
-                 {coords.box.width, coords.box.height},
-                 layerWH(0, static_cast<uint>(extents.width),
-                         static_cast<uint>(extents.height)),
-                 {3, static_cast<unsigned int>(idx)}};
-    ++vertIter;
+    vertexData.push_back(Doc::VBORow{
+        {xpen, static_cast<float>(-ypen) / 30.0F, 0.1F},
+        color(0),
+        color(255),
+        {coords.topLeft.x, coords.topLeft.y},
+        {coords.box.width, coords.box.height},
+        layerWH(static_cast<unsigned char>(glyph.layer),
+                static_cast<uint>(extents.width),
+                static_cast<uint>(extents.height)),
+        {3, static_cast<unsigned int>(idx)}});
     xpen += static_cast<float>(static_cast<int>(extents.width)) / 35.0F;
-    // std::cout << "xpen after: " << xpen << "\n";
+
     if (hasNewLine) {
-      // std::cout << "GOT newline: [" << tmp << "]\n";
       xpen = static_cast<float>(xMargin);
-      ypen = ypenF() + static_cast<float>(layout->get_spacing()) / PANGO_SCALE;
-    }
-    // std::cout << "distance: " << std::distance(vertexData.begin(), vertIter)
-    //           << "\n";
-    if (std::distance(vertexData.begin(), vertIter) == vertMax) {
-      /*std::cout << "OUT calling glBufferSubData: " << vertMax
-                << " dist: " << std::distance(vertexData.begin(), vertIter)
-                << " pos: " << vboPos << "\n";*/
-      vertIter = vertexData.begin();
-      glBufferSubData(
-          GL_ARRAY_BUFFER,
-          static_cast<GLintptr>(pageBackingHandle.vbo.offset +
-                                (vboPos - (vertMax - 1)) * sizeof(Doc::VBORow)),
-          static_cast<GLsizeiptr>(vertMax * sizeof(Doc::VBORow)),
-          vertexData.data());
+      ypen = ypenF() + (static_cast<float>(layout->get_spacing()) / PANGO_SCALE);
     }
     lastIdx = idx;
     iter.next_cluster();
   }
-  if (vertexData.cbegin() != vertIter) {
-    const auto dist = std::distance(vertexData.begin(), vertIter);
-    /*std::cout << "remain OUT calling glBufferSubData: " << vertMax
-              << " dist: " << dist << " pos: " << vboPos << "\n";*/
-    // vertIter = vertexData.begin();
-    glBufferSubData(
-        GL_ARRAY_BUFFER,
-        static_cast<GLintptr>(pageBackingHandle.vbo.offset +
-                              (vboPos - (dist - 1)) * sizeof(Doc::VBORow)),
-        static_cast<GLsizeiptr>(dist * sizeof(Doc::VBORow)), vertexData.data());
-  }
 
-#if 0
-  auto items = ctx->itemize(text, attrs);
-  for (const auto &item : items) {
-    Glib::ustring seg{item.get_segment(text)};
-    auto glyphStr = item.shape(seg);
-    for (auto i = 0UL; i < glyphStr.get_glyphs().size(); i++) {
-      std::cerr << std::format("log cluster {}: {}\n", i, glyphStr.gobj()->log_clusters[i]);
-    }
-    auto glyphs   = glyphStr.get_glyphs();
-    std::cerr << "seg: " << Glib::convert_with_fallback(seg.raw(), loc, "UTF-8") << " text: " << Glib::convert_with_fallback(text.raw(), loc, "UTF-8") << " len: " << seg.length() << " " << text.length() << " " << glyphStr.get_width() << " " << glyphs.size() << "\n";
-    for (const auto &glyphInfo : glyphs) {
-      std::cerr << std::format("got glyph: {} is_cluster_start: {}\n",
-                               glyphInfo.get_glyph(),
-                               glyphInfo.get_attr().is_cluster_start);
-    }
-  }
-#endif
-#if 0
-  glGenTextures(1, &tex);
-  std::array<unsigned char, 256L * 256> arr;
-  std::srand(std::time(nullptr));
-  std::ranges::generate(arr, []() { return std::rand() % 255; });
-  glBindTexture(GL_TEXTURE_2D_ARRAY, tex);
-  glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
-  glPixelStorei(GL_PACK_ALIGNMENT, 1);
-  glTexParameteri(GL_TEXTURE_2D_ARRAY, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
-  glTexParameteri(GL_TEXTURE_2D_ARRAY, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
-  glTexParameteri(GL_TEXTURE_2D_ARRAY, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
-  glTexParameteri(GL_TEXTURE_2D_ARRAY, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-  glTexImage3D(GL_TEXTURE_2D_ARRAY, 0, GL_R8, 256, 256, 1, 0, GL_RED,
-               GL_UNSIGNED_BYTE, arr.data());
-  glBindTexture(GL_TEXTURE_2D_ARRAY, 0);
-#endif
-  /*std::cerr << "page backing handle: vbo: " << pageBackingHandle.vbo.offset
-            << " " << pageBackingHandle.vbo.size
-            << " ibo: " << pageBackingHandle.ibo.offset << " "
-            << pageBackingHandle.ibo.size << "\n"
-            << std::flush;*/
-  // glBufferSubData(GL_ARRAY_BUFFER, pageBackingHandle.vbo.offset,
-  //                 pageBackingHandle.vbo.size, vertexData.data());
-  //  glBufferSubData(GL_ELEMENT_ARRAY_BUFFER, pageBackingHandle.ibo.offset,
-  //                  pageBackingHandle.ibo.size, indexData.data());
+  instanceCount = static_cast<std::uint32_t>(vertexData.size());
+  pageBacking   = this->doc->pool->reserve(instanceCount);
+  this->doc->pool->write(pageBacking, 0, asBytes(vertexData));
 }
 
 // Always called from the render thread
-void Page::draw(const GLState &state, const glm::mat4 &docModel) const {
-  // model = glm::rotate(model, glm::radians(1.0F), glm::vec3(0, 0, 1));
-  const auto mat = docModel * model;
-  glUniformMatrix4fv(state.programs.at("main")["model"], 1, GL_FALSE,
-                     glm::value_ptr(mat));
-  glUniform1f(state.programs.at("main")["cubeDepth"], /*2.0F*/ 0);
-  /*std::cout << "doc: " << &doc << " docModel: " << glm::to_string(docModel)
-            << "\npageModel: " << glm::to_string(model)
-            << "\nmult: " << glm::to_string(docModel * model) << "\n";*/
-  // make the compiler happy, reinterpret_cast<void*> of long would introduce
-  // performance penalties apparently
-  state.glyphCache.bindTexture(0);
-  glDrawArrays(
-      GL_POINTS,
-      static_cast<GLint>(pageBackingHandle.vbo.offset / sizeof(Doc::VBORow)),
-      1);
-  glUniform1f(state.programs.at("main")["cubeDepth"], 0);
-  glUniformMatrix4fv(
-      state.programs.at("main")["model"], 1, GL_FALSE,
-      glm::value_ptr(mat
-                     // glm::translate(model, glm::vec3(-0.1F, 0.1F, 0.1F))
-                     ));
-  glDrawArrays(GL_POINTS,
-               static_cast<GLint>(
-                   pageBackingHandle.vbo.offset / sizeof(Doc::VBORow) + 1),
-               static_cast<GLsizei>(
-                   pageBackingHandle.vbo.size / sizeof(Doc::VBORow) - 1));
-  GlyphCache::clearTexture();
-  // TODO: add glyph boxes
-  for ([[maybe_unused]] const auto &handle : glyphs) {
+void Page::draw(RenderState &state, const glm::mat4 &docModel) const {
+  if (0 == instanceCount) {
+    return;
   }
+  const render::DrawUniforms uniforms{toArray(docModel * model)};
+  state.device->drawGlyphs(uniforms, doc->pool->buffer(),
+                           doc->pool->byteOffset(pageBacking), instanceCount);
 }
 
 // Always called from the render thread
-void Doc::draw(const GLState &state) const {
-  AutoVAO binder(this);
-
-  AutoProgram progBinder(this, state, "main");
-
-  for (auto &page : pages) {
+void Doc::draw(RenderState &state) const {
+  for (const auto &page : pages) {
     page.draw(state, model);
   }
 }
 
-Doc::Doc(const RendererRef &renderer, const glm::mat4 &model,
-         const std::string &fileName, [[maybe_unused]] const Private _priv)
-    : Doc(renderer, model, _priv) {
+Doc::Doc(const RendererRef &renderer, render::RenderDevice *device,
+         const glm::mat4 &model, [[maybe_unused]] const Private _priv)
+    : Drawable(model), renderer(renderer),
+      pool(std::make_unique<BufferPool>(device, sizeof(VBORow),
+                                        initialPoolRows)) {}
+
+Doc::Doc(const RendererRef &renderer, render::RenderDevice *device,
+         const glm::mat4 &model, const std::string &fileName,
+         [[maybe_unused]] const Private _priv)
+    : Doc(renderer, device, model, _priv) {
   docFile = fileName;
   std::cout << "NEW DOC: " << this << " " << fileName << " "
             << glm::to_string(model) << "\n";
@@ -430,7 +276,7 @@ Doc::Doc(const RendererRef &renderer, const glm::mat4 &model,
   } else {
     text = tmpText;
   }
-  auto iter = text.begin();
+  auto iter        = text.begin();
   const bool valid = text.validate(iter);
   std::cout << "validate: " << valid << "\n";
   if (!valid) {
@@ -442,14 +288,13 @@ Doc::Doc(const RendererRef &renderer, const glm::mat4 &model,
   }
 }
 
-void Doc::makePages(GLState &glState) {
+void Doc::makePages(RenderState &state) {
   std::cout << "MAKING PAGES: " << this << " " << glm::to_string(model) << "\n";
   const auto fontDesc =
       Pango::FontDescription(renderer->defaultFontName().data());
   const auto fonts = Pango::CairoFontMap::get_default();
   const auto ctx   = fonts->create_context();
   ctx->set_font_description(fontDesc);
-  // auto font = ctx->load_font(fontDesc);
   Pango::AttrList attrs;
   auto fontAttr = Pango::Attribute::create_attr_font_desc(fontDesc);
   attrs.change(fontAttr);
@@ -458,8 +303,6 @@ void Doc::makePages(GLState &glState) {
   auto tSize      = 0UL;
   const char *txt = text.raw().c_str();
   while (tSize < text.bytes()) {
-    // std::cout << "BEGIN layout creation: " << tSize << " " << text.bytes()
-    //           << "\n";
     auto lay = Pango::Layout::create(ctx);
     lay->set_font_description(fontDesc);
     lay->set_single_paragraph_mode(false);
@@ -469,82 +312,19 @@ void Doc::makePages(GLState &glState) {
     pango_layout_set_text(lay->gobj(), txt + tSize,
                           static_cast<int>(text.bytes() - tSize));
     const auto &line = lay->get_const_line(lay->get_line_count() - 1);
-    /*std::cout << "START: " << tSize << " " << line->get_start_index() << " "
-              << line->get_length() << "\n"
-              << std::flush;*/
-    newPage(glState, lay);
+    newPage(state, lay);
     const int len = line->get_length();
     tSize += line->get_start_index() + (0 == len ? 1 : len);
-    // std::cout << "END layout creation: " << tSize << " " << text.bytes()
-    //           << "\n";
   }
-#if 0
-    for (const auto &line : lay->get_const_lines()) {
-      /*std::cout << "line: " << line->get_start_index() << " "
-                << line->get_length() << " str: ("
-                << std::string(txt + tSize + line->get_start_index(), txt + tSize + line->get_start_index() + line->get_length())
-                << ") ";*/
-      auto xs =
-          line->get_x_ranges(line->get_start_index(),
-                             line->get_start_index() + line->get_length());
-      /*std::ranges::transform(
-          xs, std::ostream_iterator<std::string>(std::cout, ", "),
-          [&lay, &line](const auto &t) {
-            int idx, trail, idx2, trail2;
-            bool xin  = line->x_to_index(t.first, idx, trail);
-            bool xin2 = line->x_to_index(t.second - 1, idx2, trail2);
-            return std::format("{}*{}*{}/{}*{}*{}%{:.02f}@{:.02f}", idx, trail,
-                               xin, idx2, trail2, xin2,
-                               float(t.first) / PANGO_SCALE,
-                               float(t.second) / PANGO_SCALE);
-          });
-      std::cout << "\n";*/
-      int len = line->get_length();
-      offset = line->get_start_index() + (0 == len ? 1 : len);
-    }
-    /*std::cout << "END layout creation: " << offset << " " << text.bytes()
-              << "\n";*/
-    //txt += offset;
-    tSize += offset;
-  }
-  /*while (offset != size) {
-    pango_find_paragraph_boundary(text.c_str() + offset, -1, &paraEnd,
-                                  &paraNextStart);
-    auto str = Glib::ustring(text.cbegin() + offset,
-                                text.cbegin() + offset + paraEnd);
-    std::cout << "para: " << str << "\n";
-    lay->set_text(text);
-    offset += paraNextStart;
-  }*/
-  std::exit(1);
-#endif
-  /*std::cerr << "text: " << Glib::convert_with_fallback(text.raw(), loc,
-     "UTF-8")
-            << " pango attrs: "
-            << Glib::convert_with_fallback(attrs.to_string().raw(), loc,
-                                           "UTF-8")
-            << " valid?: " << bool(attrs) << "\n";*/
 }
 
-Doc::Doc(const RendererRef &renderer, const glm::mat4 &model,
-         [[maybe_unused]] Private _priv)
-    : Drawable(model),
-      VAOSupports(renderer,
-                  VAOBuffers(VAOBuffers::Vbo(sizeof(VBORow), 10000000),
-                             VAOBuffers::Ibo(sizeof(unsigned int), 1))) {}
-
-void Doc::newPage(GLState &state, Glib::RefPtr<Pango::Layout> &layout) {
+void Doc::newPage(RenderState &state, Glib::RefPtr<Pango::Layout> &layout) {
   renderer->run([this, &state, layout] {
-    AutoVAO binder(this);
-
-    AutoProgram progBinder(this, state, "main");
-
     const auto numPages = this->pages.size();
     glm::mat4 trans     = glm::translate(
         glm::mat4(1.0),
         glm::vec3(0.0F, -100 * static_cast<float>(numPages), 0.0F));
-    // trans = glm::rotate(trans, glm::radians(20.0F*numPages), glm::vec3(0.5,
-    // 1, 0)); trans = glm::scale(trans, glm::vec3(1+numPages, 1+numPages, 1));
     pages.emplace_back(this->getPtr(), state, trans, layout);
   });
 }
+// vi: set sw=2 sts=2 ts=2 et:

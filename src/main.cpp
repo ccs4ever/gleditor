@@ -22,15 +22,11 @@
 #include <SDL3/SDL_main.h>
 #include <SDL3/SDL_scancode.h>   // for SDL_SCANCODE_C, SDL_SCANCODE_D
 #include <SDL3/SDL_video.h>      // for SDL_WINDOWPOS_UNDEFINED
-#include <argparse/argparse.hpp> // for ArgumentParser, Argument
-#include <gleditor/state.hpp>    // for AppState, AppStateRef
-#include <glibmm/init.h>         // for init
-#ifdef GLEDITOR_ENABLE_VULKAN
-#include <SDL3/SDL.h>
-#include <SDL3/SDL_vulkan.h>
-#include <gleditor/vulkan/renderer_vk.hpp>
-#include <vulkan/vulkan.h>
-#endif
+#include <argparse/argparse.hpp>      // for ArgumentParser, Argument
+#include <gleditor/render/device.hpp> // for backendWindowFlags, Backend
+#include <gleditor/render/types.hpp>  // for Backend
+#include <gleditor/state.hpp>         // for AppState, AppStateRef
+#include <glibmm/init.h>              // for init
 
 void handleMouseMove(const SDL_Event &evt, const AppStateRef &state) {
   state->mouseX = static_cast<int>(evt.motion.x);
@@ -115,8 +111,12 @@ void handleKeyPress(const SDL_Event &evt, const AppStateRef &state,
   std::cout << "camera pos after: " << glm::to_string(state->view.pos) << "\n";
 }
 
-RendererRef handleArgs(const AppStateRef &state, const int argc,
-                       const char *const *const argv) {
+/**
+ * @brief Parse the command line and build the renderer it asks for.
+ * @param[out] backend Receives the selected graphics backend.
+ */
+RendererRef handleArgs(const AppStateRef &state, render::Backend &backend,
+                       const int argc, const char *const *const argv) {
 
 #ifndef GLEDITOR_VERSION
 #error GLEDITOR_VERSION must be defined
@@ -129,28 +129,35 @@ RendererRef handleArgs(const AppStateRef &state, const int argc,
   parser.add_argument("--profile")
       .help("perform initial setup, then quit")
       .flag();
-#ifdef GLEDITOR_ENABLE_VULKAN
-  parser.add_argument("--vulkan").help("use the vulkan renderer").flag();
-#endif
+  parser.add_argument("--screenshot")
+      .default_value(std::string{})
+      .help("write the first rendered frame to this path as a PPM");
+  parser.add_argument("--backend")
+      .default_value(std::string{"opengl"})
+      .help("rendering backend: opengl, opengles or vulkan");
   parser.add_argument("files").help("input files").remaining();
 
   try {
 
     parser.parse_args(argc, argv);
 
-    RendererRef renderer =
-#ifdef GLEDITOR_ENABLE_VULKAN
-        parser["--vulkan"] == true ? RendererVK::create(state) :
-#endif
-                                   Renderer::create(state);
+    backend = render::backendFromName(parser.get<std::string>("--backend"));
+    std::cout << "backend: " << render::backendName(backend) << "\n";
+
+    RendererRef renderer = Renderer::create(state, backend);
 
     state->defaultFontName = parser.get("--font");
-    for (const auto &files = parser.get<std::vector<std::string>>("files");
-         const auto &file : files) {
-      std::cout << "file: " << file << "\n";
-      renderer->push(RenderItemOpenDoc(file));
+    // "files" is a remaining-argument list, which argparse leaves unset rather
+    // than empty when no file is named.
+    if (parser.present<std::vector<std::string>>("files")) {
+      for (const auto &files = parser.get<std::vector<std::string>>("files");
+           const auto &file : files) {
+        std::cout << "file: " << file << "\n";
+        renderer->push(RenderItemOpenDoc(file));
+      }
     }
-    state->profiling = parser["--profile"] == true;
+    state->profiling      = parser["--profile"] == true;
+    state->screenshotPath = parser.get<std::string>("--screenshot");
 
     return renderer;
 
@@ -173,8 +180,9 @@ int main(const int argc, char **argv) {
   const auto state = std::make_shared<AppState>();
 
   RendererRef rend;
+  auto backend = render::Backend::OpenGL;
 
-  if (nullptr == (rend = handleArgs(state, argc, argv))) {
+  if (nullptr == (rend = handleArgs(state, backend, argc, argv))) {
     return 1;
   }
 
@@ -187,10 +195,16 @@ int main(const int argc, char **argv) {
 
     const AutoSDLSurface icon("logo.png");
 
+    // The window has to be created with the flags and, for the GL family, the
+    // context attributes the chosen backend needs; both are decided before the
+    // device itself is constructed on the render thread.
+    render::configureBackendWindowAttributes(backend);
+
     AutoSDLWindow window("GL Editor", SDL_WINDOWPOS_UNDEFINED,
                          SDL_WINDOWPOS_UNDEFINED, state->view.screenWidth,
                          state->view.screenHeight,
-                         SDL_WINDOW_OPENGL | SDL_WINDOW_RESIZABLE |
+                         render::backendWindowFlags(backend) |
+                             SDL_WINDOW_RESIZABLE |
                              SDL_WINDOW_HIGH_PIXEL_DENSITY,
                          icon.surface);
 

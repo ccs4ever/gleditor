@@ -14,6 +14,9 @@ struct AppState {
   /// Shared state between main and renderer threads
   // set before the render thread starts, no need to synchronize
   std::string defaultFontName;
+  /// When set, the first fully drawn frame is written here as a PPM and the
+  /// path is cleared. Used to compare backends pixel for pixel.
+  std::string screenshotPath;
   std::atomic_bool alive{true};
   bool profiling{};
   std::atomic<std::chrono::duration<float>> frameTimeDelta;
