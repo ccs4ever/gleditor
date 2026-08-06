@@ -21,7 +21,6 @@
 #include <glm/ext/matrix_clip_space.hpp>
 #include <glm/ext/matrix_float4x4.hpp>
 #include <glm/ext/matrix_transform.hpp>
-#include <glm/gtc/type_ptr.hpp>
 #include <glm/gtx/string_cast.hpp>
 
 #include <gleditor/doc.hpp>
@@ -37,14 +36,6 @@ namespace {
 /// Directory the portable shader bodies are read from, relative to the working
 /// directory the application is started in.
 constexpr const char *shaderDir = "assets/shaders";
-
-/// Copy a matrix into the flat array the device uniform structs carry.
-std::array<float, 16> toArray(const glm::mat4 &mat) {
-  std::array<float, 16> out{};
-  const auto *src = glm::value_ptr(mat);
-  std::copy_n(src, out.size(), out.begin());
-  return out;
-}
 
 /**
  * @brief Write a captured frame as a binary PPM.
@@ -84,6 +75,9 @@ void Renderer::createPipeline(RenderState &state) const {
   desc.layout   = Doc::vertexLayout();
 
   state.glyphPipeline = device->createPipeline(desc);
+  // The overlay draws the same glyph instances with the same shaders; only the
+  // depth state and the transform it is handed differ.
+  toasts->createPipeline(desc);
 }
 
 void Renderer::newDoc(RenderState &state) {
@@ -130,6 +124,7 @@ bool Renderer::update(RenderState &state, const bool settled) {
   // path that always runs -- on a driver quick enough to finish the read
   // immediately as much as on one that is not.
   collectPickingResults();
+  collectDiagnostics(state);
 
   if (!device->beginFrame()) {
     return this->state->alive;
@@ -161,6 +156,11 @@ bool Renderer::update(RenderState &state, const bool settled) {
   for (const std::shared_ptr<Doc> &doc : state.docs) {
     doc->draw(state, viewProjection);
   }
+
+  // Last, so that the overlay is on top: its pipeline does not depth test, so
+  // submission order is what decides.
+  toasts->expire(ToastOverlay::Clock::now());
+  toasts->draw(state, screenWidth, screenHeight);
 
   // Ask what is under the cursor, or at the pixel --pick named. The read is
   // asynchronous, so this only queues it; the answer is collected below on a
@@ -219,6 +219,19 @@ void Renderer::collectPickingResults() {
   }
 }
 
+void Renderer::collectDiagnostics(RenderState &state) {
+  // The device logged each of these as the driver reported it; showing them is
+  // what this adds. Only messages the user can act on are worth interrupting
+  // the view for -- a driver's performance notes are not, and on some drivers
+  // there is a steady stream of them.
+  for (const auto &[severity, message] : device->takeDiagnostics()) {
+    if (render::DiagnosticSeverity::Info == severity) {
+      continue;
+    }
+    toasts->post(severity, message, state);
+  }
+}
+
 void Renderer::dispatch(RenderState &state, RenderItem &item) {
   switch (item.type) {
   case RenderItem::Type::NewDoc: {
@@ -262,10 +275,17 @@ void Renderer::operator()(AutoSDLWindow &window) {
 void Renderer::renderLoop(AutoSDLWindow &window) {
   device = render::createDevice(backendKind);
   device->initialize(window);
+  device->setStrictDiagnostics(this->state->strictDiagnostics);
 
   RenderState state(device.get());
+  toasts = std::make_unique<ToastOverlay>(device.get(),
+                                          std::string(defaultFontName()));
 
   createPipeline(state);
+
+  for (const auto &[severity, message] : this->state->requestedToasts) {
+    toasts->post(severity, message, state);
+  }
 
   while (this->state->alive) {
 
@@ -311,6 +331,7 @@ void Renderer::renderLoop(AutoSDLWindow &window) {
   // still alive, and after any in-flight frame has finished reading them.
   device->waitIdle();
   state.docs.clear();
+  toasts.reset();
   device->shutdown();
 }
 // vi: set sw=2 sts=2 ts=2 et:

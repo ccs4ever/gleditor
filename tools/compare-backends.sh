@@ -21,10 +21,15 @@ OUT="${OUT:-$(mktemp -d)}"
 GL_TOLERANCE=0
 VK_TOLERANCE_PCT=1
 
+# Driver errors are notifications by default, which is right for an editor and
+# wrong for a comparison: a frame produced while the driver was objecting has
+# proved nothing. --strict-diagnostics puts that back to fatal.
+STRICT="--strict-diagnostics"
+
 backends="opengl opengles"
 # A binary built without Vulkan says so and exits non-zero, which is the only
 # reliable way to ask: --help returns before the backend is ever looked at.
-if "$BIN" --backend vulkan --profile "$SAMPLE" >"$OUT/vkprobe.log" 2>&1; then
+if "$BIN" --backend vulkan --profile $STRICT "$SAMPLE" >"$OUT/vkprobe.log" 2>&1; then
   backends="$backends vulkan"
 elif grep -q 'was not compiled into this binary' "$OUT/vkprobe.log"; then
   echo "vulkan backend not compiled in, skipping"
@@ -38,13 +43,31 @@ fi
 # rest land on glyphs, so agreement covers both tag kinds.
 PICK_PIXELS="10,10 400,300 500,250 600,300 700,350"
 
+# The notification overlay is drawn in window pixels through an orthographic
+# projection rather than the document camera, so it exercises a transform the
+# document frames never take. Comparing it separately is what catches a backend
+# getting the overlay wrong while drawing documents correctly.
+TOAST_ONE="error:GL_INVALID_ENUM in glEnable(0xdead)"
+TOAST_TWO="warning:overlay parity check"
+
+
 for backend in $backends; do
   echo "rendering with $backend"
-  "$BIN" --backend "$backend" --profile \
+  "$BIN" --backend "$backend" --profile $STRICT \
          --screenshot "$OUT/$backend.ppm" "$SAMPLE" >"$OUT/$backend.log" 2>&1 ||
     { echo "FAIL: $backend exited non-zero"; tail -20 "$OUT/$backend.log"; exit 1; }
   [ -s "$OUT/$backend.ppm" ] ||
     { echo "FAIL: $backend produced no screenshot"; exit 1; }
+
+  # The same document again, with notifications showing over it.
+  "$BIN" --backend "$backend" --profile $STRICT \
+      --toast "$TOAST_ONE" --toast "$TOAST_TWO" \
+      --screenshot "$OUT/$backend.toast.ppm" "$SAMPLE" \
+      >"$OUT/$backend.toastlog" 2>&1 ||
+    { echo "FAIL: $backend overlay run exited non-zero"
+      tail -20 "$OUT/$backend.toastlog"; exit 1; }
+  [ -s "$OUT/$backend.toast.ppm" ] ||
+    { echo "FAIL: $backend produced no overlay screenshot"; exit 1; }
 
   # All the pick pixels are answered by one run: --pick is repeatable, and
   # re-rendering a large document once per pixel would dominate the runtime.
@@ -53,7 +76,7 @@ for backend in $backends; do
     pickArgs="$pickArgs --pick $pixel"
   done
   # shellcheck disable=SC2086
-  "$BIN" --backend "$backend" --profile $pickArgs "$SAMPLE" \
+  "$BIN" --backend "$backend" --profile $STRICT $pickArgs "$SAMPLE" \
       >"$OUT/$backend.picklog" 2>&1 ||
     { echo "FAIL: $backend picking run exited non-zero"
       tail -20 "$OUT/$backend.picklog"; exit 1; }
@@ -123,6 +146,36 @@ for backend in backends:
     status = "ok" if fraction <= limit else "FAIL"
     print(f"{status}: {backend} vs opengl: {differing}/{len(ref)} bytes differ "
           f"({fraction*100:.4f}%), max delta {max(diffs)}, limit {limit*100:.2f}%")
+    if fraction > limit:
+        failed = True
+
+# The overlay frames must agree with each other, and must differ from the
+# frames without an overlay -- otherwise every backend agreeing would only mean
+# every backend drew nothing.
+toastRef = load(f"{out}/opengl.toast.ppm")
+overlaid = sum(1 for a, b in zip(ref, toastRef) if a != b)
+if overlaid == 0:
+    print("FAIL: the notification overlay changed no pixels")
+    failed = True
+else:
+    print(f"ok: the notification overlay changed {overlaid} bytes of the frame")
+
+for backend in backends:
+    if backend == "opengl":
+        continue
+    other = load(f"{out}/{backend}.toast.ppm")
+    if len(other) != len(toastRef):
+        print(f"FAIL: {backend} overlay frame is a different size")
+        failed = True
+        continue
+    diffs = [abs(a - b) for a, b in zip(toastRef, other)]
+    differing = sum(1 for d in diffs if d)
+    fraction = differing / len(toastRef)
+    limit = vk_tol if backend == "vulkan" else 0.0
+    status = "ok" if fraction <= limit else "FAIL"
+    print(f"{status}: {backend} vs opengl with overlay: "
+          f"{differing}/{len(toastRef)} bytes differ ({fraction*100:.4f}%), "
+          f"max delta {max(diffs)}, limit {limit*100:.2f}%")
     if fraction > limit:
         failed = True
 

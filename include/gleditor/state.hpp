@@ -10,6 +10,8 @@
 #include <utility>
 #include <vector>
 
+#include <gleditor/render/diagnostics.hpp>
+
 struct RenderItem;
 
 struct AppState {
@@ -28,7 +30,17 @@ struct AppState {
   /// it was asked to. The process exit status follows it, so a renderer that
   /// dies is not reported as a successful run.
   std::atomic_bool renderFailed{false};
+  /// Notifications to show as soon as the first frame can be drawn. Driver
+  /// diagnostics are the reason the overlay exists, and they cannot be provoked
+  /// on demand, so this is how the overlay is exercised and compared between
+  /// backends. Written before the render thread starts and only read after.
+  std::vector<std::pair<render::DiagnosticSeverity, std::string>>
+      requestedToasts;
   bool profiling{};
+  /// When set, a driver error ends the render thread instead of being shown as
+  /// a notification. Automated runs want it: a frame rendered by a driver that
+  /// was reporting errors proves nothing, however plausible it looks.
+  bool strictDiagnostics{};
   std::atomic<std::chrono::duration<float>> frameTimeDelta;
   std::atomic_int mouseX;
   std::atomic_int mouseY;
