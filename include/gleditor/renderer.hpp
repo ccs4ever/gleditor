@@ -6,6 +6,7 @@
 #include <future>
 #include <gleditor/tqueue.hpp>
 #include <memory>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <thread>
@@ -153,6 +154,16 @@ private:
   /// returning.
   std::vector<std::future<void>> pendingDocLoads;
 
+  /// Most recent completed picking result, kept so that interactive callers can
+  /// consult it without polling the device themselves.
+  std::optional<render::PickingResult> lastPick;
+  /// Last tag reported to the log, so that hovering over one object does not
+  /// print a line per frame.
+  render::PickingTag reportedPick{};
+  /// Index of the next AppState::requestedPicks entry to issue.
+  std::size_t nextPick{};
+  /// How many of those queries have come back.
+  std::size_t picksReported{};
   /// Drop loads that have already finished, so the list cannot grow without
   /// bound over the lifetime of the process.
   void reapFinishedDocLoads();
@@ -161,6 +172,8 @@ private:
   [[nodiscard]] bool hasPendingWork() const;
   /// Run one queued command.
   void dispatch(RenderState &state, RenderItem &item);
+  /// Drain picking reads that have completed since the last frame.
+  void collectPickingResults();
 
 protected:
   /**

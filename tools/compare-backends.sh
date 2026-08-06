@@ -34,6 +34,10 @@ else
   exit 1
 fi
 
+# Pixels the picking query is compared at. The first is page background, the
+# rest land on glyphs, so agreement covers both tag kinds.
+PICK_PIXELS="10,10 400,300 500,250 600,300 700,350"
+
 for backend in $backends; do
   echo "rendering with $backend"
   "$BIN" --backend "$backend" --profile \
@@ -41,7 +45,49 @@ for backend in $backends; do
     { echo "FAIL: $backend exited non-zero"; tail -20 "$OUT/$backend.log"; exit 1; }
   [ -s "$OUT/$backend.ppm" ] ||
     { echo "FAIL: $backend produced no screenshot"; exit 1; }
+
+  # All the pick pixels are answered by one run: --pick is repeatable, and
+  # re-rendering a large document once per pixel would dominate the runtime.
+  pickArgs=""
+  for pixel in $PICK_PIXELS; do
+    pickArgs="$pickArgs --pick $pixel"
+  done
+  # shellcheck disable=SC2086
+  "$BIN" --backend "$backend" --profile $pickArgs "$SAMPLE" \
+      >"$OUT/$backend.picklog" 2>&1 ||
+    { echo "FAIL: $backend picking run exited non-zero"
+      tail -20 "$OUT/$backend.picklog"; exit 1; }
+  sed -n 's/^pick //p' "$OUT/$backend.picklog" >"$OUT/$backend.picks"
+
+  expected=$(echo "$PICK_PIXELS" | wc -w)
+  actual=$(wc -l <"$OUT/$backend.picks")
+  [ "$expected" -eq "$actual" ] ||
+    { echo "FAIL: $backend answered $actual of $expected picking queries"; exit 1; }
 done
+
+# Picking reads a different attachment through a different path than the colour
+# capture, so it is checked separately: a backend can render correctly and still
+# report the wrong identity for what it drew.
+echo "comparing picking results"
+for backend in $backends; do
+  [ "$backend" = "opengl" ] && continue
+  if diff -u "$OUT/opengl.picks" "$OUT/$backend.picks" >"$OUT/$backend.pickdiff"; then
+    echo "ok: $backend picking matches opengl"
+  else
+    echo "FAIL: $backend picking differs from opengl"
+    cat "$OUT/$backend.pickdiff"
+    exit 1
+  fi
+done
+
+# A run where every pixel reports nothing would "match" trivially.
+if ! grep -qv 'kind 0 index 0' "$OUT/opengl.picks"; then
+  echo "FAIL: every picking query came back empty"
+  cat "$OUT/opengl.picks"
+  exit 1
+fi
+echo "picking results:"
+sed 's/^/  /' "$OUT/opengl.picks"
 
 OUT="$OUT" GL_TOLERANCE="$GL_TOLERANCE" VK_TOLERANCE_PCT="$VK_TOLERANCE_PCT" \
   BACKENDS="$backends" python3 - <<'PYEOF'

@@ -27,6 +27,11 @@ constexpr GLuint highlightBinding = 0;
 /// Texture unit the glyph atlas is bound to.
 constexpr GLint glyphAtlasUnit = 0;
 
+/// Bytes one picking read occupies: four unsigned integer components. Only two
+/// carry data, but four is the component count OpenGL ES guarantees for reading
+/// an integer colour buffer.
+constexpr GLsizeiptr pickingReadBytes = 4 * sizeof(GLuint);
+
 GLenum bufferTarget(const BufferKind kind) {
   switch (kind) {
   case BufferKind::Vertex:
@@ -35,6 +40,8 @@ GLenum bufferTarget(const BufferKind kind) {
     return GL_ELEMENT_ARRAY_BUFFER;
   case BufferKind::Uniform:
     return GL_UNIFORM_BUFFER;
+  case BufferKind::Readback:
+    return GL_PIXEL_PACK_BUFFER;
   }
   throw std::invalid_argument("DeviceGL: unknown buffer kind");
 }
@@ -94,6 +101,7 @@ void DeviceGL::initialize(AutoSDLWindow &window) {
   int height = 0;
   SDL_GetWindowSizeInPixels(window.window, &width, &height);
   createOffscreenTarget(width > 0 ? width : 1, height > 0 ? height : 1);
+  createPickingSlots();
 
   initialised = true;
 }
@@ -177,6 +185,7 @@ void DeviceGL::shutdown() {
     api.DeleteBuffers(1, &highlightUbo);
     highlightUbo = 0;
   }
+  destroyPickingSlots();
   destroyOffscreenTarget();
 
   if (nullptr != glContext) {
@@ -192,7 +201,11 @@ void DeviceGL::resize(const int width, const int height) {
   if (width == targetWidth && height == targetHeight) {
     return;
   }
+  // Outstanding picking reads refer to the framebuffer being replaced, so they
+  // are abandoned rather than answered against a target that no longer exists.
+  destroyPickingSlots();
   createOffscreenTarget(width, height);
+  createPickingSlots();
 }
 
 BufferHandle DeviceGL::createBuffer(const BufferKind kind,
@@ -530,6 +543,109 @@ void DeviceGL::drawGlyphs(const DrawUniforms &uniforms,
 
   api.DrawArraysInstanced(GL_TRIANGLE_STRIP, 0, 4,
                           static_cast<GLsizei>(instanceCount));
+}
+
+/// Convert a top-down row, as the picking API and window coordinates use, to
+/// the bottom-up row OpenGL addresses framebuffers with.
+int DeviceGL::flipY(const int y) const { return targetHeight - 1 - y; }
+
+void DeviceGL::createPickingSlots() {
+  destroyPickingSlots();
+  for (auto &slot : picking) {
+    api.GenBuffers(1, &slot.pbo);
+    api.BindBuffer(GL_PIXEL_PACK_BUFFER, slot.pbo);
+    // GL_STREAM_READ says the buffer is written by the GPU and read once by the
+    // application, which is exactly this access pattern.
+    api.BufferData(GL_PIXEL_PACK_BUFFER, pickingReadBytes, nullptr,
+                   GL_STREAM_READ);
+  }
+  api.BindBuffer(GL_PIXEL_PACK_BUFFER, 0);
+}
+
+void DeviceGL::destroyPickingSlots() {
+  for (auto &slot : picking) {
+    if (nullptr != slot.fence) {
+      api.DeleteSync(slot.fence);
+    }
+    if (0 != slot.pbo) {
+      api.DeleteBuffers(1, &slot.pbo);
+    }
+    slot = PickingSlot{};
+  }
+  nextPickingSlot = 0;
+}
+
+void DeviceGL::requestPickingTag(const int x, const int y) {
+  if (x < 0 || y < 0 || x >= targetWidth || y >= targetHeight) {
+    return;
+  }
+
+  auto &slot = picking[nextPickingSlot];
+  if (slot.pending) {
+    // Every slot is already waiting on the GPU. Dropping the request keeps the
+    // frame moving; the caller asks again next frame anyway.
+    return;
+  }
+
+  api.BindFramebuffer(GL_READ_FRAMEBUFFER, offscreenFbo);
+  api.ReadBuffer(GL_COLOR_ATTACHMENT1);
+  api.BindBuffer(GL_PIXEL_PACK_BUFFER, slot.pbo);
+  api.PixelStorei(GL_PACK_ALIGNMENT, 4);
+
+  // With a pixel pack buffer bound the last argument is an offset into that
+  // buffer rather than a client pointer, and the call returns without waiting
+  // for the pixels.
+  //
+  // The read is four components even though the attachment has two: OpenGL ES
+  // only guarantees GL_RGBA_INTEGER for an integer colour buffer, and desktop
+  // GL accepts it too, so one format works on both.
+  api.ReadPixels(x, flipY(y), 1, 1, GL_RGBA_INTEGER, GL_UNSIGNED_INT, nullptr);
+
+  api.BindBuffer(GL_PIXEL_PACK_BUFFER, 0);
+
+  slot.fence = api.FenceSync(GL_SYNC_GPU_COMMANDS_COMPLETE, 0);
+  slot.x = x;
+  slot.y = y;
+  slot.pending = true;
+  nextPickingSlot = (nextPickingSlot + 1) % picking.size();
+}
+
+std::optional<PickingResult> DeviceGL::takePickingTag() {
+  // Slots are filled in order, so the oldest outstanding one is the slot after
+  // the one that will be written next.
+  for (std::size_t i = 0; i < picking.size(); i++) {
+    auto &slot = picking[(nextPickingSlot + i) % picking.size()];
+    if (!slot.pending) {
+      continue;
+    }
+    if (nullptr == slot.fence) {
+      slot.pending = false;
+      continue;
+    }
+
+    // A zero timeout makes this a poll: either the read has landed or the
+    // caller tries again next frame.
+    const auto status = api.ClientWaitSync(slot.fence, 0, 0);
+    if (GL_TIMEOUT_EXPIRED == status || GL_WAIT_FAILED == status) {
+      continue;
+    }
+
+    api.DeleteSync(slot.fence);
+    slot.fence = nullptr;
+    slot.pending = false;
+
+    api.BindBuffer(GL_PIXEL_PACK_BUFFER, slot.pbo);
+    const auto *mapped = static_cast<const GLuint *>(api.MapBufferRange(
+        GL_PIXEL_PACK_BUFFER, 0, pickingReadBytes, GL_MAP_READ_BIT));
+    PickingResult result{slot.x, slot.y, {}};
+    if (nullptr != mapped) {
+      result.tag = PickingTag{mapped[0], mapped[1]};
+      api.UnmapBuffer(GL_PIXEL_PACK_BUFFER);
+    }
+    api.BindBuffer(GL_PIXEL_PACK_BUFFER, 0);
+    return result;
+  }
+  return std::nullopt;
 }
 
 FrameImage DeviceGL::captureColorTarget() {

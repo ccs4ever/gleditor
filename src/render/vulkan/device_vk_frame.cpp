@@ -234,6 +234,60 @@ void DeviceVK::drawGlyphs(const DrawUniforms &uniforms,
   vkCmdDraw(frame.commands, 4, instanceCount, 0, 0);
 }
 
+void DeviceVK::requestPickingTag(const int x, const int y) {
+  if (!frameActive) {
+    return;
+  }
+  if (x < 0 || y < 0 || x >= static_cast<int>(swapchainExtent.width) ||
+      y >= static_cast<int>(swapchainExtent.height)) {
+    return;
+  }
+
+  auto &frame = frames[frameIndex];
+  if (frame.pickPending) {
+    // This slot's previous result has not been collected. Dropping the request
+    // keeps the frame moving; the caller asks again next frame.
+    return;
+  }
+
+  // The copy itself cannot be recorded here: the render pass is still open and
+  // the tag image only reaches TRANSFER_SRC layout when the pass ends. Note the
+  // pixel now and emit the copy in endFrame().
+  frame.pickX       = x;
+  frame.pickY       = y;
+  frame.pickPending = true;
+}
+
+std::optional<PickingResult> DeviceVK::takePickingTag() {
+  // Frames are submitted in slot order, so the oldest outstanding pick is in
+  // the slot that will be recorded next.
+  for (std::uint32_t i = 0; i < framesInFlight; i++) {
+    auto &frame = frames[(frameIndex + i) % framesInFlight];
+    if (!frame.pickPending || !frame.pickSubmitted) {
+      continue;
+    }
+
+    // A zero timeout makes this a poll rather than a stall: the copy landed
+    // when the frame that carried it completed, which is what its fence says.
+    if (VK_SUCCESS !=
+        vkWaitForFences(device, 1, &frame.inFlight, VK_TRUE, 0)) {
+      continue;
+    }
+
+    frame.pickPending   = false;
+    frame.pickSubmitted = false;
+
+    const auto bufferIt = buffers.find(frame.pickingBuffer.id);
+    if (buffers.end() == bufferIt || nullptr == bufferIt->second.mapped) {
+      continue;
+    }
+    const auto *values = static_cast<const std::uint32_t *>(bufferIt->second.mapped);
+    return PickingResult{frame.pickX, frame.pickY,
+                         PickingTag{values[0], values[1]}};
+  }
+  return std::nullopt;
+}
+
 void DeviceVK::endFrame() {
   if (!frameActive) {
     return;
@@ -242,6 +296,25 @@ void DeviceVK::endFrame() {
 
   auto &frame = frames[frameIndex];
   vkCmdEndRenderPass(frame.commands);
+
+  if (frame.pickPending && !frame.pickSubmitted) {
+    // The render pass left the tag image in TRANSFER_SRC layout, so the single
+    // pixel can be copied out without an extra barrier. The copy rides along
+    // with the frame and completes when its fence signals.
+    const auto pickIt = buffers.find(frame.pickingBuffer.id);
+    if (buffers.end() != pickIt) {
+      VkBufferImageCopy region{};
+      region.imageSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1};
+      region.imageOffset      = {frame.pickX, frame.pickY, 0};
+      region.imageExtent      = {1, 1, 1};
+      vkCmdCopyImageToBuffer(frame.commands, tagImage,
+                             VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+                             pickIt->second.buffer, 1, &region);
+      frame.pickSubmitted = true;
+    } else {
+      frame.pickPending = false;
+    }
+  }
 
   // Present by blitting the offscreen colour target onto the acquired
   // swapchain image, which also resolves any difference in their formats.

@@ -46,7 +46,33 @@ it does not mean touching the document code.
   bodies through that same generator, so the two forms cannot drift apart.
 - **Clip space differs and the backend absorbs it.** Vulkan's +Y points down;
   `DeviceVK` negates the projection's Y scale so callers hand every backend the
-  same conventional matrix.
+  same conventional matrix. Framebuffer rows likewise: picking coordinates are
+  window coordinates, top-down, and the OpenGL backend flips them internally.
+
+### Picking
+
+The glyph pipeline writes a second colour attachment holding the identity of
+whatever produced each fragment, so asking what is under the cursor is a
+one-pixel read of that attachment.
+
+The read is asynchronous on every backend, and the interface says so:
+`requestPickingTag(x, y)` queues a read and `takePickingTag()` collects one that
+has finished, returning the pixel it came from because by then the cursor has
+usually moved. Results are collected at the top of the next frame, so a request
+is never answered within the frame that made it.
+
+- **OpenGL and OpenGL ES** read into a ring of pixel buffer objects. With a
+  pixel pack buffer bound, `glReadPixels` queues the transfer and returns; a
+  fence says when the bytes have landed, and it is polled with a zero timeout so
+  the loop never blocks on it. Reading straight to client memory would instead
+  stall the pipeline until the GPU caught up.
+- **Vulkan** copies the pixel into a per-frame host-visible buffer just after
+  the render pass, while the attachment is already in transfer-source layout.
+  The frame's own fence says when the copy completed, so picking needs no
+  synchronisation object of its own.
+
+`--pick X,Y` prints the tag at one pixel and exits, which is how the backends
+are compared.
 
 ## Tech stack
 
@@ -148,6 +174,8 @@ Command-line options (from `argparse` in `src/main.cpp`):
 - `--backend <name>`  `opengl` (default), `opengles` or `vulkan`
 - `--profile`         open any provided files and then exit (useful for profiling)
 - `--screenshot <path>` write the first settled frame to `<path>` as a binary PPM
+- `--pick X,Y`        print the picking tag at that pixel once the document has
+  settled, then exit
 - `files...`          one or more input files to open at startup
 
 Help:
@@ -204,11 +232,13 @@ Other actions:
   - `./tools/compare-backends.sh [file]`
 
   Renders the same document through every compiled-in backend and diffs the
-  captured frames. Exiting zero proves very little about a renderer -- a
-  backend that draws nothing still exits zero -- so this comparison is what
-  actually demonstrates a backend works. OpenGL and OpenGL ES are required to
-  match exactly; Vulkan is allowed a small tolerance for edge rounding, since
-  it rasterises through a different pipeline.
+  captured frames, then compares the picking tag each one reports at a set of
+  pixels. Exiting zero proves very little about a renderer -- a backend that
+  draws nothing still exits zero -- so this comparison is what actually
+  demonstrates a backend works. OpenGL and OpenGL ES are required to match
+  exactly; Vulkan is allowed a small tolerance for edge rounding, since it
+  rasterises through a different pipeline. Picking must agree exactly on all
+  three, and at least one queried pixel must report something.
 
   Headless, with software drivers:
 

@@ -124,6 +124,13 @@ bool Renderer::update(RenderState &state, const bool settled) {
 
   const auto start = std::chrono::steady_clock::now();
 
+  // Collect picking reads issued on earlier frames before starting this one.
+  // Doing it here rather than after the draws means a request is never
+  // answered within the frame that made it, so the asynchronous path is the
+  // path that always runs -- on a driver quick enough to finish the read
+  // immediately as much as on one that is not.
+  collectPickingResults();
+
   if (!device->beginFrame()) {
     return this->state->alive;
   }
@@ -152,6 +159,25 @@ bool Renderer::update(RenderState &state, const bool settled) {
     doc->draw(state);
   }
 
+  // Ask what is under the cursor, or at the pixel --pick named. The read is
+  // asynchronous, so this only queues it; the answer is collected below on a
+  // later frame.
+  //
+  // Only settled frames are queried: a frame drawn while pages are still being
+  // built would answer for a document that is not there yet, which for --pick
+  // means reporting an empty tag and exiting.
+  if (settled) {
+    if (nextPick < this->state->requestedPicks.size()) {
+      // One request per frame. The device can only hold a couple of reads at
+      // once, and issuing more than it accepts would silently drop queries.
+      const auto &[pickX, pickY] = this->state->requestedPicks[nextPick];
+      device->requestPickingTag(pickX, pickY);
+      nextPick++;
+    } else if (this->state->requestedPicks.empty()) {
+      device->requestPickingTag(this->state->mouseX, this->state->mouseY);
+    }
+  }
+
   device->endFrame();
 
   // Capture after the frame is complete: the colour target still holds its
@@ -166,6 +192,28 @@ bool Renderer::update(RenderState &state, const bool settled) {
   this->state->frameTimeDelta = end - start;
 
   return this->state->alive;
+}
+
+void Renderer::collectPickingResults() {
+  while (const auto pick = device->takePickingTag()) {
+    lastPick = pick;
+    if (!this->state->requestedPicks.empty()) {
+      std::cout << std::format("pick {},{}: kind {} index {}\n", pick->x,
+                               pick->y, pick->tag.kind, pick->tag.index);
+      picksReported++;
+    } else if (pick->tag != reportedPick) {
+      // Report transitions rather than every frame: the query runs each frame,
+      // but what a reader cares about is the cursor moving onto something new.
+      reportedPick = pick->tag;
+      if (pick->tag.empty()) {
+        std::cout << std::format("no object at {},{}\n", pick->x, pick->y);
+      } else {
+        std::cout << std::format("tagged object at {},{}: kind {} index {}\n",
+                                 pick->x, pick->y, pick->tag.kind,
+                                 pick->tag.index);
+      }
+    }
+  }
 }
 
 void Renderer::dispatch(RenderState &state, RenderItem &item) {
@@ -237,7 +285,10 @@ void Renderer::renderLoop(AutoSDLWindow &window) {
       break;
     }
 
-    if (settled && this->state->profiling) {
+    // A pick takes a frame or two to come back, so profiling waits for every
+    // requested query rather than exiting with one still outstanding.
+    if (settled && this->state->profiling &&
+        picksReported >= this->state->requestedPicks.size()) {
       this->state->alive = false;
       break;
     }

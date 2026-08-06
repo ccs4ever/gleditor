@@ -38,6 +38,8 @@ struct GLApi {
   PFNGLBUFFERDATAPROC BufferData{};
   PFNGLBUFFERSUBDATAPROC BufferSubData{};
   PFNGLCOPYBUFFERSUBDATAPROC CopyBufferSubData{};
+  PFNGLMAPBUFFERRANGEPROC MapBufferRange{};
+  PFNGLUNMAPBUFFERPROC UnmapBuffer{};
 
   // -- vertex arrays
   PFNGLGENVERTEXARRAYSPROC GenVertexArrays{};
@@ -106,6 +108,11 @@ struct GLApi {
   PFNGLGETERRORPROC GetError{};
   PFNGLGETSTRINGPROC GetString{};
   PFNGLDRAWARRAYSINSTANCEDPROC DrawArraysInstanced{};
+
+  // -- fences, used to tell when an asynchronous pixel read has landed
+  PFNGLFENCESYNCPROC FenceSync{};
+  PFNGLCLIENTWAITSYNCPROC ClientWaitSync{};
+  PFNGLDELETESYNCPROC DeleteSync{};
 
   /**
    * @brief Resolve every entry point above against the current context.

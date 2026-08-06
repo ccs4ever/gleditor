@@ -58,6 +58,9 @@ public:
                render::BufferHandle vertices, std::size_t vertexByteOffset,
                std::uint32_t instanceCount),
               (override));
+  MOCK_METHOD(void, requestPickingTag, (int x, int y), (override));
+  MOCK_METHOD(std::optional<render::PickingResult>, takePickingTag, (),
+              (override));
   MOCK_METHOD(render::FrameImage, captureColorTarget, (), (override));
   MOCK_METHOD(void, waitIdle, (), (override));
 };

@@ -7,6 +7,8 @@
 #include <memory>
 #include <mutex>
 #include <string>
+#include <utility>
+#include <vector>
 
 struct RenderItem;
 
@@ -17,6 +19,10 @@ struct AppState {
   /// When set, the first fully drawn frame is written here as a PPM and the
   /// path is cleared. Used to compare backends pixel for pixel.
   std::string screenshotPath;
+  /// Picking queries to run once the document has settled, each printed as it
+  /// comes back. Used to compare what the backends report at given pixels.
+  /// Written before the render thread starts and only read after.
+  std::vector<std::pair<int, int>> requestedPicks;
   std::atomic_bool alive{true};
   bool profiling{};
   std::atomic<std::chrono::duration<float>> frameTimeDelta;
