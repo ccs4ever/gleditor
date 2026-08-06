@@ -17,8 +17,11 @@ SAMPLE="${1:-tests/samples/quick_brown_fox.txt}"
 BIN="${BIN:-build/gleditor}"
 OUT="${OUT:-$(mktemp -d)}"
 
-# Fraction of differing bytes tolerated against the OpenGL reference.
-GL_TOLERANCE=0
+# Percentage of differing bytes tolerated against the OpenGL reference. OpenGL
+# ES runs the same pipeline through the same driver, so it is held to exact
+# equality; Vulkan rasterises through a different one and is allowed a margin
+# tight enough that anything beyond edge rounding still fails.
+GL_TOLERANCE_PCT=0
 VK_TOLERANCE_PCT=1
 
 # Driver errors are notifications by default, which is right for an editor and
@@ -112,13 +115,15 @@ fi
 echo "picking results:"
 sed 's/^/  /' "$OUT/opengl.picks"
 
-OUT="$OUT" GL_TOLERANCE="$GL_TOLERANCE" VK_TOLERANCE_PCT="$VK_TOLERANCE_PCT" \
+OUT="$OUT" GL_TOLERANCE_PCT="$GL_TOLERANCE_PCT" \
+  VK_TOLERANCE_PCT="$VK_TOLERANCE_PCT" \
   BACKENDS="$backends" python3 - <<'PYEOF'
 import os, sys
 
 out = os.environ["OUT"]
 backends = os.environ["BACKENDS"].split()
 vk_tol = float(os.environ["VK_TOLERANCE_PCT"]) / 100.0
+gl_tol = float(os.environ["GL_TOLERANCE_PCT"]) / 100.0
 
 def load(path):
     data = open(path, "rb").read()
@@ -142,7 +147,7 @@ for backend in backends:
     diffs = [abs(a - b) for a, b in zip(ref, other)]
     differing = sum(1 for d in diffs if d)
     fraction = differing / len(ref)
-    limit = vk_tol if backend == "vulkan" else 0.0
+    limit = vk_tol if backend == "vulkan" else gl_tol
     status = "ok" if fraction <= limit else "FAIL"
     print(f"{status}: {backend} vs opengl: {differing}/{len(ref)} bytes differ "
           f"({fraction*100:.4f}%), max delta {max(diffs)}, limit {limit*100:.2f}%")
@@ -171,7 +176,7 @@ for backend in backends:
     diffs = [abs(a - b) for a, b in zip(toastRef, other)]
     differing = sum(1 for d in diffs if d)
     fraction = differing / len(toastRef)
-    limit = vk_tol if backend == "vulkan" else 0.0
+    limit = vk_tol if backend == "vulkan" else gl_tol
     status = "ok" if fraction <= limit else "FAIL"
     print(f"{status}: {backend} vs opengl with overlay: "
           f"{differing}/{len(toastRef)} bytes differ ({fraction*100:.4f}%), "
