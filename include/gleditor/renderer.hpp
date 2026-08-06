@@ -188,6 +188,8 @@ private:
   void dispatch(RenderState &state, RenderItem &item);
   /// Drain picking reads that have completed since the last frame.
   void collectPickingResults(RenderState &state);
+  /// Insert anything typed since the last frame at the caret.
+  void applyTypedText(RenderState &state);
   /// Place the caret from a picking result that answered a click.
   void placeCaretFromPick(RenderState &state, const render::PickingResult &pick);
   /// Turn driver diagnostics recorded since the last frame into notifications.

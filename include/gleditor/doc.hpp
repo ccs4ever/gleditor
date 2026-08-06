@@ -78,6 +78,15 @@ public:
   [[nodiscard]] const std::vector<ClusterBox> &clusterBoxes() const {
     return clusters;
   }
+  [[nodiscard]] const Glib::RefPtr<Pango::Layout> &layoutRef() const {
+    return layout;
+  }
+  [[nodiscard]] const BufferPool::Allocation &allocation() const {
+    return pageBacking;
+  }
+  /// Move this page's text offset without touching its shaping or its rows,
+  /// which an edit earlier in the document leaves byte-identical.
+  void shiftBaseOffset(const std::uint32_t bytes) { textOffset += bytes; }
   /// Bytes of document text this page lays out.
   [[nodiscard]] std::uint32_t textLength() const { return textBytes; }
   /// True when a document-global byte offset falls within this page's text.
@@ -112,6 +121,20 @@ public:
   ~Page() override = default;
 };
 
+/**
+ * @brief How much had to be laid out again after an edit.
+ *
+ * Reported so that the fast paths are observable rather than merely claimed:
+ * a change that quietly stopped taking them would still look correct.
+ */
+enum class ReflowScope : std::uint8_t {
+  Line,     ///< The edit stayed within one line: no line break moved.
+  Page,     ///< Line breaks moved, but the page still ends where it did.
+  Document, ///< The page spilled, so pagination changed after it.
+};
+
+const char *reflowScopeName(ReflowScope scope);
+
 class Doc : public Drawable, public std::enable_shared_from_this<Doc> {
 private:
   std::vector<Page> pages;
@@ -122,6 +145,24 @@ private:
   std::unique_ptr<BufferPool> pool;
   /// Position among the open documents; see setDocIndex().
   std::uint32_t docIndex{};
+  /// Outcome of the most recent reflow, for reporting and for tests.
+  ReflowScope reflowScope{ReflowScope::Document};
+  std::size_t reflowPages{};
+
+  /// Build a page layout for text starting at @p offset, with the page
+  /// geometry makePages() uses. Safe to call off the render thread.
+  [[nodiscard]] Glib::RefPtr<Pango::Layout>
+  layoutFrom(std::uint32_t offset) const;
+  /// Bytes of document text a finished page layout consumes.
+  [[nodiscard]] static std::uint32_t
+  consumedBytes(const Glib::RefPtr<Pango::Layout> &layout);
+  /// Byte offsets at which each line of a layout starts.
+  [[nodiscard]] static std::vector<int>
+  lineStarts(const Glib::RefPtr<Pango::Layout> &layout);
+  /// Rebuild the pages an edit disturbed. Render thread only.
+  void reflowFrom(RenderState &state, std::size_t firstPage, std::uint32_t at,
+                  std::uint32_t inserted, const std::vector<int> &oldStarts,
+                  std::uint32_t oldConsumed);
   // token to keep anything other than Doc::create from using our constructor
   struct Private {
     explicit Private() = default;
@@ -199,6 +240,22 @@ public:
   void draw(RenderState &state, const glm::mat4 &viewProjection) const;
   void newPage(RenderState &state, Glib::RefPtr<Pango::Layout> &layout,
                std::uint32_t textOffset);
+
+  /**
+   * @brief Insert UTF-8 text at a document-global byte offset.
+   *
+   * The text is spliced immediately, so the document is authoritative at once;
+   * the layout that follows is scheduled off the render thread, because
+   * shaping a page is far too slow to do between a keystroke and the next
+   * frame.
+   */
+  void insert(RenderState &state, std::uint32_t offset, const std::string &utf8,
+              Caret *caret);
+
+  /// Scope of the most recent reflow, and how many pages it rebuilt.
+  [[nodiscard]] ReflowScope lastReflowScope() const { return reflowScope; }
+  [[nodiscard]] std::size_t lastReflowPages() const { return reflowPages; }
+  [[nodiscard]] const Glib::ustring &contents() const { return text; }
   /// Position among the renderer's open documents, carried in the picking tag
   /// so a result names which document was clicked.
   void setDocIndex(const std::uint32_t index) { docIndex = index; }
