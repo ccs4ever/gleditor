@@ -4,7 +4,7 @@
  */
 #include <gleditor/render/gl/gl_api.hpp> // IWYU pragma: associated
 
-#include <SDL3/SDL_video.h>
+#include <gleditor/sdl_compat.hpp>
 
 #include <cstring>
 #include <stdexcept>

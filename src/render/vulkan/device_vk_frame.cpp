@@ -4,7 +4,7 @@
  */
 #include <gleditor/render/vulkan/device_vk.hpp> // IWYU pragma: associated
 
-#include <SDL3/SDL_video.h>
+#include <gleditor/sdl_compat.hpp>
 
 #include <algorithm>
 #include <array>

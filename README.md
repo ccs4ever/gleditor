@@ -8,7 +8,7 @@ Still a work in progress.
 
 ## Overview
 
-`gleditor` is an experimental text editor rendered on the GPU. It uses SDL3 for windowing/input and Pango/Cairo for text shaping and rasterization. The goal is to explore fast, flexible text rendering in a 2D/3D scene.
+`gleditor` is an experimental text editor rendered on the GPU. It uses SDL (3 or 2) for windowing/input and Pango/Cairo for text shaping and rasterization. The goal is to explore fast, flexible text rendering in a 2D/3D scene.
 
 - Entry point: `src/main.cpp`
 - Rendering pipeline and glyph cache live under `src/` (see `src/glyphcache/*`, `src/renderer.cpp`).
@@ -123,6 +123,35 @@ is never answered within the frame that made it.
 `--pick X,Y` prints the tag at one pixel and exits, which is how the backends
 are compared.
 
+## SDL2 and SDL3
+
+Either major version works, chosen at build time with `GLEDITOR_SDL=2` or
+`GLEDITOR_SDL=3`. Left unset, the Makefile uses SDL3 when pkg-config finds it
+and SDL2 otherwise -- SDL3 is what the code is written against, SDL2 is what
+most distributions still ship. CI builds and tests both, as parallel jobs.
+
+`include/gleditor/sdl_compat.hpp` is where the difference lives. Everything
+else uses SDL3 spellings, which that header supplies for SDL2; the only other
+place with a version test is the optional `SDL_image` include in
+`src/sdl_wrap.cpp`, whose header path differs and which most builds do not have
+at all. The differences the header covers are of four kinds:
+
+- Renamed symbols, which a macro settles.
+- Calls that returned 0 for success in SDL2 and `true` in SDL3
+  (`SDL_InitSubSystem`, `SDL_GL_MakeCurrent`). These are functions rather than
+  macros: getting the sense backwards turns a failure into a success.
+- Changed signatures: window creation, and both Vulkan entry points -- the
+  latter in `render/vulkan/sdl_vulkan_compat.hpp`, so a build without Vulkan
+  never includes `SDL_vulkan.h`.
+- Window resize, which SDL2 reports as one event type carrying a sub-type and
+  SDL3 reports as several event types. That is a difference in shape rather
+  than in naming, so it is exposed as a predicate, `sdl::windowSizeChanged()`,
+  instead of a constant.
+
+SDL2 builds require 2.0.22 or newer, for `SDL_GetWindowSizeInPixels`. The
+startup banner names the version the binary was built against, since nothing on
+the command line can change it.
+
 ## Tech stack
 
 - Language: C++23
@@ -131,8 +160,8 @@ are compared.
 - Package discovery: pkg-config
 - Libraries (via pkg-config):
   - pangomm-2.48 (Pango) and cairomm
-  - SDL3
-  - SDL3_image (optional; supplies the window icon and nothing else, and is
+  - SDL3 or SDL2 (see below)
+  - SDL_image (optional; supplies the window icon and nothing else, and is
     skipped when pkg-config cannot find it)
   - Vulkan (only with `GLEDITOR_ENABLE_VULKAN=1`)
   - GLM (headers)
@@ -165,6 +194,9 @@ sudo apt-get update && sudo apt-get install \
   libgtest-dev libgmock-dev
 ```
 
+Substitute `libsdl2-dev` for `libsdl3-dev` to build against SDL2; see
+"SDL2 and SDL3" above.
+
 For the Vulkan backend, additionally:
 
 ```
@@ -175,10 +207,12 @@ sudo apt-get install mesa-vulkan-drivers vulkan-validationlayers
 
 Notes:
 - SDL3 is not yet in the Ubuntu archive; the CI workflow pulls it from the
-  `ppa:hrzhu/sdl3-backport` PPA. Building SDL3 from source works equally well.
+  `ppa:hrzhu/sdl3-backport` PPA for its SDL3 job. Building SDL3 from source
+  works equally well, and `libsdl2-dev` from the archive avoids the question
+  entirely -- see "SDL2 and SDL3" above.
 - That PPA has no SDL3_image, which is why the dependency is optional: without
-  it the window simply has no icon. Install `libsdl3-image-dev`, or build
-  SDL3_image from source, to get one.
+  it the window simply has no icon. Install `libsdl3-image-dev` or
+  `libsdl2-image-dev`, or build it from source, to get one.
 - The default `LDFLAGS` include `-rtlib=compiler-rt`, which needs the LLVM
   runtime package (`libclang-rt-dev` on Debian/Ubuntu).
 - spdlog is not used at present (it was removed due to libc++ linking issues).
@@ -195,6 +229,8 @@ Common targets (see `Makefile`):
   - `make`  → builds `build/gleditor`, `build/gleditor_test`, and `build/compile_commands.json`
 - Build with the Vulkan backend:
   - `make GLEDITOR_ENABLE_VULKAN=1`  → also compiles `assets/shaders/vulkan/*.spv`
+- Build against a particular SDL:
+  - `make GLEDITOR_SDL=2` or `make GLEDITOR_SDL=3`
 - Compile the SPIR-V modules only:
   - `make shaders`  (needs `glslangValidator`)
 - Build the app only:
@@ -211,6 +247,8 @@ Compile commands database (for clangd, etc.):
 Optional Make variables:
 - `DEBUG=1` enables debug flags and sanitizer flag sets.
 - `GLEDITOR_ENABLE_VULKAN=1` compiles the Vulkan backend.
+- `GLEDITOR_SDL=2` or `GLEDITOR_SDL=3` picks the SDL major version; unset means
+  SDL3 when pkg-config finds it, SDL2 otherwise.
 - `STATIC=--static` attempts static linking for libs resolved via pkg-config.
 
 Objects are rebuilt when the compile flags change, so toggling either of the
@@ -333,6 +371,7 @@ Other actions:
 
 - `DEBUG=1`  enable debug flags and sanitizer options in builds.
 - `GLEDITOR_ENABLE_VULKAN=1`  compile the Vulkan backend and its SPIR-V.
+- `GLEDITOR_SDL=2` / `GLEDITOR_SDL=3`  build against that SDL major version.
 - `STATIC=--static`  attempt static linking (where supported by your system/libs).
 - `ASAN_OPTIONS`, `TSAN_OPTIONS`, `MSAN_OPTIONS`  fine-tune sanitizer behavior (the `/run` targets set sensible defaults).
 - LandlockMake: if `LANDLOCKMAKE_VERSION` is set, the Makefile enables a sandbox for builds (optional/developer setup).

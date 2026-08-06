@@ -4,8 +4,6 @@
  */
 #include <gleditor/render/gl/device_gl.hpp> // IWYU pragma: associated
 
-#include <SDL3/SDL_error.h>
-#include <SDL3/SDL_video.h>
 
 #include <array>
 #include <cstddef>
@@ -17,6 +15,7 @@
 #include <vector>
 
 #include <gleditor/render/shader_source.hpp>
+#include <gleditor/sdl_compat.hpp>
 #include <gleditor/sdl_wrap.hpp>
 
 namespace render::gl {
@@ -65,7 +64,8 @@ void DeviceGL::initialize(AutoSDLWindow &window) {
     throw std::runtime_error(std::string("SDL GL context creation failed: ") +
                              SDL_GetError());
   }
-  if (!SDL_GL_MakeCurrent(window.window, static_cast<SDL_GLContext>(glContext))) {
+  if (!sdl::glMakeCurrent(window.window,
+                          static_cast<SDL_GLContext>(glContext))) {
     throw std::runtime_error(std::string("SDL_GL_MakeCurrent failed: ") +
                              SDL_GetError());
   }
