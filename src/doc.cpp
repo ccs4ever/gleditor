@@ -132,9 +132,10 @@ render::VertexLayout Doc::vertexLayout() {
 // refer to the members without ambiguity: the members are move-constructed from
 // the parameters, which leaves the parameters empty.
 Page::Page(std::shared_ptr<Doc> aDoc, RenderState &state, glm::mat4 &model,
-           Glib::RefPtr<Pango::Layout> aLayout, const std::uint32_t aTextOffset)
+           Glib::RefPtr<Pango::Layout> aLayout, const std::uint32_t aTextOffset,
+           const std::uint32_t aPageIndex)
     : Drawable(model), doc(std::move(aDoc)), layout(std::move(aLayout)),
-      textOffset(aTextOffset) {
+      textOffset(aTextOffset), pageIndex(aPageIndex) {
   const auto &layout = this->layout;
 
   const auto color   = Doc::VBORow::color;
@@ -166,7 +167,7 @@ Page::Page(std::shared_ptr<Doc> aDoc, RenderState &state, glm::mat4 &model,
       {0, 0},
       layerWH(0, std::min(16383U, static_cast<unsigned int>(pageWidth)),
               std::min(16383U, static_cast<unsigned int>(pageHeight))),
-      {2, 1}});
+      {render::packTagIdentity(2, this->doc->documentIndex(), aPageIndex), 0}});
 
   const auto text = layout->get_text().raw();
   const auto font =
@@ -246,8 +247,10 @@ Page::Page(std::shared_ptr<Doc> aDoc, RenderState &state, glm::mat4 &model,
                   static_cast<unsigned int>(glyphWidth),
                   static_cast<unsigned int>(glyphHeight)),
           // The cluster index into this page's cluster table, which is what
-          // turns a picked fragment back into a text position.
-          {3, static_cast<unsigned int>(clusters.size() - 1)}});
+          // turns a picked fragment back into a text position. The identity
+          // word says which document and page that table belongs to.
+          {render::packTagIdentity(3, this->doc->documentIndex(), aPageIndex),
+           static_cast<unsigned int>(clusters.size() - 1)}});
     }
 
     if (!more) {
@@ -376,7 +379,8 @@ void Doc::newPage(RenderState &state, Glib::RefPtr<Pango::Layout> &layout,
         glm::mat4(1.0),
         glm::vec3(0.0F, -100 * static_cast<float>(numPages), 0.0F));
     trans = glm::scale(trans, glm::vec3(pixelsToWorld, pixelsToWorld, 1.0F));
-    pages.emplace_back(this->getPtr(), state, trans, layout, textOffset);
+    pages.emplace_back(this->getPtr(), state, trans, layout, textOffset,
+                       static_cast<std::uint32_t>(numPages));
   });
 }
 // vi: set sw=2 sts=2 ts=2 et:

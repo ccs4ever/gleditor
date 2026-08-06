@@ -53,3 +53,50 @@ TEST(Picking, noResultYetIsNotAnEmptyTag) {
 }
 
 // vi: set sw=2 sts=2 ts=2 et:
+
+// The identity word packs kind, document and page into one of the four words
+// the attachment carries; the other two hold the cluster index and the
+// fractional position. Round-tripping is what keeps the C++ packer and the
+// C++ unpacker honest about the field widths.
+TEST(Picking, identityPacksAndUnpacksToTheSameFields) {
+  const auto identity = render::packTagIdentity(3, 5, 9);
+  const auto tag      = render::unpackPickingTag(identity, 1234, 0);
+  EXPECT_EQ(tag.kind, 3U);
+  EXPECT_EQ(tag.docIndex, 5U);
+  EXPECT_EQ(tag.pageIndex, 9U);
+  EXPECT_EQ(tag.clusterIndex, 1234U);
+}
+
+TEST(Picking, identityHoldsTheWidestValuesEachFieldClaims) {
+  constexpr std::uint32_t maxKind = (1U << render::tagKindBits) - 1U;
+  constexpr std::uint32_t maxDoc  = (1U << render::tagDocBits) - 1U;
+  constexpr std::uint32_t maxPage = (1U << render::tagPageBits) - 1U;
+
+  const auto tag = render::unpackPickingTag(
+      render::packTagIdentity(maxKind, maxDoc, maxPage), 0xFFFFFFFFU, 0);
+  EXPECT_EQ(tag.kind, maxKind);
+  EXPECT_EQ(tag.docIndex, maxDoc) << "document field overflowed into another";
+  EXPECT_EQ(tag.pageIndex, maxPage);
+  EXPECT_EQ(tag.clusterIndex, 0xFFFFFFFFU);
+}
+
+// The fraction is fixed point in the attachment because it holds unsigned
+// integers; the scale has to agree with the one the fragment stage applies.
+TEST(Picking, fractionSpansTheWholeQuad) {
+  EXPECT_FLOAT_EQ(render::unpackPickingTag(0, 0, 0).fraction, 0.0F);
+  EXPECT_FLOAT_EQ(
+      render::unpackPickingTag(0, 0, render::tagFractionScale).fraction, 1.0F);
+  EXPECT_NEAR(
+      render::unpackPickingTag(0, 0, render::tagFractionScale / 2).fraction,
+      0.5F, 0.001F);
+}
+
+// Hovering within one glyph must not read as moving onto a new object, or the
+// reporting would fire on every sub-pixel movement.
+TEST(Picking, adifferentFractionIsStillTheSameObject) {
+  auto left  = render::unpackPickingTag(render::packTagIdentity(3, 0, 0), 7, 0);
+  auto right = render::unpackPickingTag(render::packTagIdentity(3, 0, 0), 7,
+                                        render::tagFractionScale);
+  EXPECT_NE(left, right) << "the fraction differs, so equality should differ";
+  EXPECT_TRUE(left.sameObject(right));
+}

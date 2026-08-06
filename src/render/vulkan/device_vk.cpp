@@ -33,9 +33,9 @@ void check(const VkResult result, const char *what) {
 }
 
 /// Format of the picking target. Two 32-bit unsigned channels, matching the
-/// uvec2 the fragment stage writes and the RG32UI renderbuffer the OpenGL
+/// uvec4 the fragment stage writes and the RGBA32UI renderbuffer the OpenGL
 /// backend uses.
-constexpr VkFormat tagFormat = VK_FORMAT_R32G32_UINT;
+constexpr VkFormat tagFormat = VK_FORMAT_R32G32B32A32_UINT;
 /// Format of the offscreen colour target. Fixed rather than taken from the
 /// swapchain so that a captured frame has the same channel order everywhere.
 constexpr VkFormat colourFormat = VK_FORMAT_R8G8B8A8_UNORM;
@@ -574,10 +574,10 @@ void DeviceVK::createCommandResources() {
           "vkCreateSemaphore");
     check(vkCreateFence(device, &fenceInfo, nullptr, &frames[i].inFlight),
           "vkCreateFence");
-    // Destination for this slot's picking read: two unsigned integers, the
-    // uvec2 the fragment stage writes to the picking attachment.
+    // Destination for this slot's picking read: four unsigned integers, the
+    // uvec4 the fragment stage writes to the picking attachment.
     frames[i].pickingBuffer = createBuffer(BufferKind::Readback,
-                                           2 * sizeof(std::uint32_t));
+                                           4 * sizeof(std::uint32_t));
   }
 }
 

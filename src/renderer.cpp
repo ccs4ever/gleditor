@@ -82,6 +82,7 @@ void Renderer::createPipeline(RenderState &state) const {
 
 void Renderer::newDoc(RenderState &state) {
   const auto docPtr = Doc::create(getPtr(), device.get(), glm::mat4(1.0));
+  docPtr->setDocIndex(static_cast<std::uint32_t>(state.docs.size()));
   state.docs.push_back(docPtr->getPtr());
 }
 
@@ -104,6 +105,7 @@ void Renderer::openDoc(RenderState &state, std::string &fileName) {
   std::cout << "doc pos: " << numDocsOpened << " "
             << glm::to_string(newDocPosition) << "\n";
   auto docPtr = Doc::create(getPtr(), device.get(), newDocPosition, fileName);
+  docPtr->setDocIndex(static_cast<std::uint32_t>(state.docs.size()));
   reapFinishedDocLoads();
   pendingDocLoads.push_back(std::async(
       std::launch::async, [&state, docPtr] { docPtr->makePages(state); }));
@@ -201,19 +203,22 @@ void Renderer::collectPickingResults() {
   while (const auto pick = device->takePickingTag()) {
     lastPick = pick;
     if (!this->state->requestedPicks.empty()) {
-      std::cout << std::format("pick {},{}: kind {} index {}\n", pick->x,
-                               pick->y, pick->tag.kind, pick->tag.index);
+      std::cout << std::format(
+          "pick {},{}: kind {} doc {} page {} cluster {} frac {:.3f}\n", pick->x,
+          pick->y, pick->tag.kind, pick->tag.docIndex, pick->tag.pageIndex,
+          pick->tag.clusterIndex, pick->tag.fraction);
       picksReported++;
-    } else if (pick->tag != reportedPick) {
+    } else if (!pick->tag.sameObject(reportedPick)) {
       // Report transitions rather than every frame: the query runs each frame,
       // but what a reader cares about is the cursor moving onto something new.
       reportedPick = pick->tag;
       if (pick->tag.empty()) {
         std::cout << std::format("no object at {},{}\n", pick->x, pick->y);
       } else {
-        std::cout << std::format("tagged object at {},{}: kind {} index {}\n",
-                                 pick->x, pick->y, pick->tag.kind,
-                                 pick->tag.index);
+        std::cout << std::format(
+            "tagged object at {},{}: kind {} doc {} page {} cluster {}\n",
+            pick->x, pick->y, pick->tag.kind, pick->tag.docIndex,
+            pick->tag.pageIndex, pick->tag.clusterIndex);
       }
     }
   }

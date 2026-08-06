@@ -56,10 +56,13 @@ private:
   std::uint32_t textOffset{};
   /// Every cluster on the page, in text order.
   std::vector<ClusterBox> clusters;
+  /// This page's position in its document, carried in the picking tag.
+  std::uint32_t pageIndex{};
 
 public:
   Page(std::shared_ptr<Doc> aDoc, RenderState &state, glm::mat4 &model,
-       Glib::RefPtr<Pango::Layout> aLayout, std::uint32_t aTextOffset);
+       Glib::RefPtr<Pango::Layout> aLayout, std::uint32_t aTextOffset,
+       std::uint32_t aPageIndex);
   /// @param docTransform projection * view * document model.
   void draw(RenderState &state, const glm::mat4 &docTransform) const;
 
@@ -78,6 +81,8 @@ private:
   RendererRef renderer;
   /// Vertex storage shared by every page of this document.
   std::unique_ptr<BufferPool> pool;
+  /// Position among the open documents; see setDocIndex().
+  std::uint32_t docIndex{};
   // token to keep anything other than Doc::create from using our constructor
   struct Private {
     explicit Private() = default;
@@ -155,6 +160,13 @@ public:
   void draw(RenderState &state, const glm::mat4 &viewProjection) const;
   void newPage(RenderState &state, Glib::RefPtr<Pango::Layout> &layout,
                std::uint32_t textOffset);
+  /// Position among the renderer's open documents, carried in the picking tag
+  /// so a result names which document was clicked.
+  void setDocIndex(const std::uint32_t index) { docIndex = index; }
+  [[nodiscard]] std::uint32_t documentIndex() const { return docIndex; }
+  [[nodiscard]] const Page *page(const std::size_t index) const {
+    return index < pages.size() ? &pages[index] : nullptr;
+  }
   [[nodiscard]] size_t numPages() const { return pages.size(); }
 
   friend class Page;

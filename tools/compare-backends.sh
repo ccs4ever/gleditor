@@ -107,7 +107,7 @@ for backend in $backends; do
 done
 
 # A run where every pixel reports nothing would "match" trivially.
-if ! grep -qv 'kind 0 index 0' "$OUT/opengl.picks"; then
+if ! grep -qv '^[0-9,]*: kind 0 ' "$OUT/opengl.picks"; then
   echo "FAIL: every picking query came back empty"
   cat "$OUT/opengl.picks"
   exit 1
