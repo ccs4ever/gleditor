@@ -49,7 +49,14 @@ override LDFLAGS += $(DEBUG_OPTS) $(findstring $(STATIC),-static) -rtlib=compile
 #CXXFLAGS += -stdlib=libc++ -fexperimental-library 
 #LDFLAGS += -v -stdlib=libc++ -fexperimental-library 
 LIBS := $(shell pkg-config $(STATIC) --libs $(PKGS))
-SHARED_SRCS := $(shell find thirdparty/Choreograph/src/ src/ -name '*.cpp' -a ! -name main.cpp )
+GLSLANG := $(shell which glslangValidator 2>/dev/null)
+# The Vulkan backend only compiles when Vulkan is enabled; everything else is
+# backend-neutral or belongs to the GL family backend.
+VK_SRCS := $(shell find src/render/vulkan -name '*.cpp' 2>/dev/null)
+SHARED_SRCS := $(filter-out $(VK_SRCS),$(shell find thirdparty/Choreograph/src/ src/ -name '*.cpp' -a ! -name main.cpp ))
+ifdef GLEDITOR_ENABLE_VULKAN
+SHARED_SRCS += $(VK_SRCS)
+endif
 SRCS := $(SHARED_SRCS) src/main.cpp
 TEST_SRCS := $(SHARED_SRCS) $(shell find tests/ -name '*.cpp')
 OBJDIR := build/
@@ -82,7 +89,12 @@ endif
 .FEATURES = output-sync
 
 
+SPIRV := assets/shaders/vulkan/glyph.vert.spv assets/shaders/vulkan/glyph.frag.spv
+
 all: gleditor gleditor_test $(OBJDIR)/compile_commands.json
+ifdef GLEDITOR_ENABLE_VULKAN
+all: shaders
+endif
 
 # cannot unveil a nonexistant directory, have to remove the sandbox for
 # just the directory creation
@@ -113,7 +125,33 @@ endif
 .PHONY: $(VERS)
 endif
 
+# Object files do not otherwise depend on the flags they were compiled with, so
+# toggling GLEDITOR_ENABLE_VULKAN or DEBUG left stale objects behind and the
+# resulting binary silently disagreed with the build that was asked for.
+# Recording the flags in a stamp file makes every object depend on them.
+FLAGSTAMP := $(OBJDIR)/.buildflags
+.PHONY: FORCE
+FORCE:
+$(FLAGSTAMP): FORCE | $(OBJDIR)/
+	@sig='$(CXXFLAGS) $(LDFLAGS)'; 	[ "`cat $@ 2>/dev/null`" = "$$sig" ] || printf '%s' "$$sig" > $@
+$(ALL_OBJS): $(FLAGSTAMP)
+
 $(OBJDIR)/src/main.o $(OBJDIR)/src/main.dep: $(OBJDIR)/src/config.h
+
+# The SPIR-V the Vulkan backend loads is produced from the same portable shader
+# bodies the GL backends compile at runtime, and through the same preamble
+# generator, so the two forms cannot drift apart.
+$(OBJDIR)/shader_assemble: tools/shader_assemble.cpp src/render/shader_source.cpp src/render/backend.cpp | $(OBJDIR)/
+	$(CXX) $(CXXFLAGS) -o $@ $^
+
+assets/shaders/vulkan/%.spv: assets/shaders/%.glsl $(OBJDIR)/shader_assemble
+	@[ -n "$(GLSLANG)" ] || { echo "glslangValidator not found; install glslang-tools" >&2; exit 1; }
+	@$(MKDIR) -p assets/shaders/vulkan $(OBJDIR)/shaders
+	$(OBJDIR)/shader_assemble vulkan $(word 2,$(subst ., ,$(notdir $<))) $< $(OBJDIR)/shaders/$(notdir $<)
+	$(GLSLANG) -V --target-env vulkan1.0 -S $(word 2,$(subst ., ,$(notdir $<))) $(OBJDIR)/shaders/$(notdir $<) -o $@
+
+shaders: $(SPIRV)
+.PHONY: shaders
 
 gleditor: $(OBJDIR)/gleditor
 $(OBJDIR)/gleditor: $(OBJS)
@@ -223,7 +261,7 @@ $(OBJDIR)/compile_commands.json: $(JFILES)
 	{ echo '['; cat $^ | $(SED) '$$ s/,[[:space:]]*$$//'; echo ']'; } > $@
 
 
-.PHONY: clean doc run test profile sanitize/address sanitize/address/run sanitize/thread sanitize/thread/run \
+.PHONY: clean doc run test profile shaders sanitize/address sanitize/address/run sanitize/thread sanitize/thread/run \
 	sanitize/memory sanitize/memory/run
 
 ifeq (,$(filter clean,$(MAKECMDGOALS)))

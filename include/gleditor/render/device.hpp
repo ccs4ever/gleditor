@@ -128,9 +128,10 @@ public:
   /**
    * @brief Read the colour target back to host memory.
    *
-   * Call between the last draw of a frame and endFrame(). Beyond being a
-   * screenshot facility, this is what makes the backends comparable: the same
-   * document rendered through each one can be diffed pixel by pixel.
+   * Call after endFrame(); the colour target keeps its contents until the next
+   * frame clears it. Beyond being a screenshot facility, this is what makes the
+   * backends comparable: the same document rendered through each one can be
+   * diffed pixel by pixel.
    */
   virtual FrameImage captureColorTarget() = 0;
 
@@ -153,6 +154,9 @@ std::uint64_t backendWindowFlags(Backend backend);
  * through SDL's GL context management.
  */
 void configureBackendWindowAttributes(Backend backend);
+
+/// True when @p backend was compiled into this binary.
+bool backendCompiledIn(Backend backend);
 
 /// Construct a device for @p backend. Throws std::runtime_error if the backend
 /// was not compiled in.

@@ -1,6 +1,6 @@
 # gleditor
 
-OpenGL-based text editor experiment
+GPU text editor experiment, with OpenGL, OpenGL ES and Vulkan backends
 
 [![C/C++ CI](https://github.com/ccs4ever/gleditor/actions/workflows/c-cpp.yml/badge.svg)](https://github.com/ccs4ever/gleditor/actions/workflows/c-cpp.yml)
 
@@ -8,10 +8,45 @@ Still a work in progress.
 
 ## Overview
 
-`gleditor` is an experimental text editor rendered with OpenGL. It uses SDL3 for windowing/input and Pango/Cairo for text shaping and rasterization. The goal is to explore fast, flexible text rendering in a 2D/3D scene.
+`gleditor` is an experimental text editor rendered on the GPU. It uses SDL3 for windowing/input and Pango/Cairo for text shaping and rasterization. The goal is to explore fast, flexible text rendering in a 2D/3D scene.
 
 - Entry point: `src/main.cpp`
 - Rendering pipeline and glyph cache live under `src/` (see `src/glyphcache/*`, `src/renderer.cpp`).
+
+## Rendering backends
+
+The graphics API is chosen at run time with `--backend`:
+
+| Backend | Requires | Notes |
+| ------- | -------- | ----- |
+| `opengl` (default) | OpenGL 3.3 core | |
+| `opengles` | OpenGL ES 3.0 | |
+| `vulkan` | Vulkan 1.0 | Only when built with `GLEDITOR_ENABLE_VULKAN=1` |
+
+Everything above the backend -- documents, pages, the glyph cache, the buffer
+allocator -- is written against `render::RenderDevice` (`include/gleditor/render/`)
+and names no graphics API. Adding a backend means implementing that interface;
+it does not mean touching the document code.
+
+### How one pipeline serves all three
+
+- **Glyphs are instanced quads.** One instance per glyph, with the four corners
+  derived from the vertex index. Expanding points into quads in a geometry
+  shader would rule out OpenGL ES 3.0, which has no geometry stage.
+- **The draw offset is a buffer binding offset**, not a base-instance draw:
+  OpenGL ES has no `glDrawArraysInstancedBaseInstance`.
+- **The glyph atlas is single-channel coverage**, narrowed from Cairo's ARGB32
+  on the CPU. Uploading BGRA and letting the driver keep one channel is an
+  OpenGL convenience with no Vulkan equivalent.
+- **The shaders have one source.** `assets/shaders/*.glsl` are written in the
+  common subset of GLSL 3.30, GLSL ES 3.00 and Vulkan GLSL; the version
+  directive, precision qualifiers, varying locations and uniform declarations
+  come from a preamble generated per backend in `src/render/shader_source.cpp`.
+  The SPIR-V the Vulkan backend loads is produced at build time from those same
+  bodies through that same generator, so the two forms cannot drift apart.
+- **Clip space differs and the backend absorbs it.** Vulkan's +Y points down;
+  `DeviceVK` negates the projection's Y scale so callers hand every backend the
+  same conventional matrix.
 
 ## Tech stack
 
@@ -22,8 +57,11 @@ Still a work in progress.
 - Libraries (via pkg-config):
   - pangomm-2.48 (Pango) and cairomm
   - SDL3, SDL3_image
-  - OpenGL, GLU, GLEW
+  - Vulkan (only with `GLEDITOR_ENABLE_VULKAN=1`)
   - GLM (headers)
+  - The OpenGL and OpenGL ES entry points are resolved at run time through
+    `SDL_GL_GetProcAddress`, so no GL library is linked. `GL/glcorearb.h` is
+    still needed for its typedefs and enum values.
 - Testing: GoogleTest + GoogleMock
 - Vendored/third-party: `thirdparty/argparse`, `thirdparty/Choreograph`, `thirdparty/cosmopolitan` toolchain support (optional)
 
@@ -45,9 +83,17 @@ On Ubuntu/Debian, for example:
 sudo apt-get update && sudo apt-get install \
   clang libclang-rt-dev make pkg-config doxygen \
   libglm-dev libpangomm-2.48-dev \
-  libsdl3-dev libsdl3-image-dev libglew-dev \
-  libgl1-mesa-dev libglu1-mesa-dev \
+  libsdl3-dev libsdl3-image-dev \
+  libgl-dev libgl1-mesa-dev libglu1-mesa-dev \
   libgtest-dev libgmock-dev
+```
+
+For the Vulkan backend, additionally:
+
+```
+sudo apt-get install libvulkan-dev glslang-tools
+# a driver, plus a software one for headless testing:
+sudo apt-get install mesa-vulkan-drivers vulkan-validationlayers
 ```
 
 Notes:
@@ -58,7 +104,9 @@ Notes:
   runtime package (`libclang-rt-dev` on Debian/Ubuntu).
 - spdlog is not used at present (it was removed due to libc++ linking issues).
 - For coverage (`make profile`), install `llvm-profdata` and `llvm-cov` (e.g., `llvm-14-tools` or similar on Ubuntu).  
-- Depending on your system, you may also need OpenGL dev headers (e.g., `libgl1-mesa-dev` and `libglu1-mesa-dev`).
+- Headless testing works with Mesa's software drivers: `llvmpipe` for OpenGL and
+  OpenGL ES, `lavapipe` for Vulkan. Both come from `mesa-vulkan-drivers` and the
+  usual Mesa packages.
 
 ## Build
 
@@ -66,6 +114,10 @@ Common targets (see `Makefile`):
 
 - Build everything (app, tests, compile commands):
   - `make`  → builds `build/gleditor`, `build/gleditor_test`, and `build/compile_commands.json`
+- Build with the Vulkan backend:
+  - `make GLEDITOR_ENABLE_VULKAN=1`  → also compiles `assets/shaders/vulkan/*.spv`
+- Compile the SPIR-V modules only:
+  - `make shaders`  (needs `glslangValidator`)
 - Build the app only:
   - `make gleditor`  → `build/gleditor`
 - Build tests only:
@@ -79,7 +131,11 @@ Compile commands database (for clangd, etc.):
 
 Optional Make variables:
 - `DEBUG=1` enables debug flags and sanitizer flag sets.
+- `GLEDITOR_ENABLE_VULKAN=1` compiles the Vulkan backend.
 - `STATIC=--static` attempts static linking for libs resolved via pkg-config.
+
+Objects are rebuilt when the compile flags change, so toggling either of the
+first two does not leave a binary that disagrees with what was asked for.
 
 ## Run
 
@@ -88,9 +144,11 @@ Optional Make variables:
   - `./build/gleditor [options] [files...]`
 
 Command-line options (from `argparse` in `src/main.cpp`):
-- `--font <name>`  default: `"Monospace 16"`
-- `--profile`      open any provided files and then exit (useful for profiling)
-- `files...`       one or more input files to open at startup
+- `--font <name>`     default: `"Monospace 16"`
+- `--backend <name>`  `opengl` (default), `opengles` or `vulkan`
+- `--profile`         open any provided files and then exit (useful for profiling)
+- `--screenshot <path>` write the first settled frame to `<path>` as a binary PPM
+- `files...`          one or more input files to open at startup
 
 Help:
 - `./build/gleditor --help`
@@ -142,6 +200,21 @@ Other actions:
 
 - Build and run tests:
   - `make test`  → builds and runs `build/gleditor_test`
+- Compare the backends against each other:
+  - `./tools/compare-backends.sh [file]`
+
+  Renders the same document through every compiled-in backend and diffs the
+  captured frames. Exiting zero proves very little about a renderer -- a
+  backend that draws nothing still exits zero -- so this comparison is what
+  actually demonstrates a backend works. OpenGL and OpenGL ES are required to
+  match exactly; Vulkan is allowed a small tolerance for edge rounding, since
+  it rasterises through a different pipeline.
+
+  Headless, with software drivers:
+
+  ```
+  xvfb-run -s "-screen 0 1024x768x24" ./tools/compare-backends.sh
+  ```
 - Coverage from tests:
   - `make profile`  → generates `gleditor_test.prof` and `coverage.lcov`
     - Requires `llvm-profdata` and `llvm-cov` on PATH.
@@ -154,8 +227,11 @@ Other actions:
 
 ## Project structure
 
-- `src/`        application sources (OpenGL rendering, glyph cache, SDL wrappers, etc.)
+- `src/`        application sources (document model, glyph cache, SDL wrappers, etc.)
+- `src/render/` the device abstraction and its backends (`gl/`, `vulkan/`)
 - `include/`    public headers under `gleditor/`
+- `assets/shaders/` portable GLSL bodies, plus generated SPIR-V under `vulkan/`
+- `tools/`      build-time and verification helpers
 - `tests/`      unit tests (GoogleTest/GoogleMock)
 - `thirdparty/` vendored dependencies (argparse, Choreograph, cosmopolitan, etc.)
 - `assets/`     assets like `logo.png`
@@ -167,6 +243,7 @@ Other actions:
 ## Environment and Make variables
 
 - `DEBUG=1`  enable debug flags and sanitizer options in builds.
+- `GLEDITOR_ENABLE_VULKAN=1`  compile the Vulkan backend and its SPIR-V.
 - `STATIC=--static`  attempt static linking (where supported by your system/libs).
 - `ASAN_OPTIONS`, `TSAN_OPTIONS`, `MSAN_OPTIONS`  fine-tune sanitizer behavior (the `/run` targets set sensible defaults).
 - LandlockMake: if `LANDLOCKMAKE_VERSION` is set, the Makefile enables a sandbox for builds (optional/developer setup).

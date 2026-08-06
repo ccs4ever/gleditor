@@ -184,6 +184,10 @@ protected:
   /// Build the glyph pipeline from the portable shader sources.
   void createPipeline(RenderState &state) const;
 
+  /// The loop proper. Separated from operator() so that everything it does,
+  /// including device creation, is covered by one exception handler.
+  void renderLoop(AutoSDLWindow &window);
+
 public:
   /**
    * @brief Factory method; constructs a Renderer for @p backend.

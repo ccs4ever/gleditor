@@ -152,14 +152,15 @@ bool Renderer::update(RenderState &state, const bool settled) {
     doc->draw(state);
   }
 
-  // Capture before presenting: the colour target still holds this frame's
-  // contents, and every backend can read it back at this point.
+  device->endFrame();
+
+  // Capture after the frame is complete: the colour target still holds its
+  // contents, and reading a finished frame avoids interrupting one that the
+  // device has already begun submitting.
   if (settled && !this->state->screenshotPath.empty()) {
     writeScreenshot(device->captureColorTarget(), this->state->screenshotPath);
     this->state->screenshotPath.clear();
   }
-
-  device->endFrame();
 
   const auto end              = std::chrono::steady_clock::now();
   this->state->frameTimeDelta = end - start;
@@ -193,6 +194,20 @@ void Renderer::operator()(AutoSDLWindow &window) {
 
   this->renderThreadId = std::this_thread::get_id();
 
+  try {
+    renderLoop(window);
+  } catch (const std::exception &err) {
+    // Nothing above this frame can catch: it is the top of the render thread,
+    // and letting the exception escape would call std::terminate instead of
+    // reporting what went wrong. Clearing `alive` also releases the main thread
+    // from its event loop.
+    std::cerr << std::format("render thread ({} backend) failed: {}\n",
+                             render::backendName(backendKind), err.what());
+    this->state->alive = false;
+  }
+}
+
+void Renderer::renderLoop(AutoSDLWindow &window) {
   device = render::createDevice(backendKind);
   device->initialize(window);
 
