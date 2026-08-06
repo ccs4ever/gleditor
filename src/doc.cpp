@@ -34,6 +34,7 @@
 #include "pangomm/layoutiter.h"          // for LayoutIter
 #include "pangomm/layoutline.h"          // for LayoutLine
 #include "pangomm/rectangle.h"           // for Rectangle
+#include <gleditor/caret.hpp>            // for Caret
 #include <gleditor/drawable.hpp>         // for Drawable
 #include <gleditor/glyphcache/cache.hpp> // for GlyphCache
 #include <gleditor/glyphcache/types.hpp> // for TextureCoords, PointF, Rect
@@ -56,6 +57,8 @@ constexpr std::uint32_t initialPoolRows = 1U << 16U;
 
 /// Margin in layout pixels between the page edge and its text.
 constexpr float pageMargin = 24.0F;
+
+
 
 /// Convert Pango units to pixels.
 double toPixels(const int pangoUnits) {
@@ -152,9 +155,10 @@ Page::Page(std::shared_ptr<Doc> aDoc, RenderState &state, glm::mat4 &model,
   const auto pageHeight = static_cast<float>(textHeightPx) + (2 * pageMargin);
 
   // The page is centred on its own origin, so that the model matrix placing it
-  // in the scene positions its middle rather than its top left corner.
-  const auto originX = -pageWidth / 2.0F;
-  const auto originY = pageHeight / 2.0F;
+  // in the scene positions its middle rather than its top left corner. Kept as
+  // members so caret geometry lands in the same space as the glyphs.
+  originX = -pageWidth / 2.0F;
+  originY = pageHeight / 2.0F;
 
   // Row 0 is the page background; the glyphs follow it. Every row is one
   // instance of the glyph quad.
@@ -258,9 +262,72 @@ Page::Page(std::shared_ptr<Doc> aDoc, RenderState &state, glm::mat4 &model,
     }
   }
 
+  textBytes     = static_cast<std::uint32_t>(text.size());
   instanceCount = static_cast<std::uint32_t>(vertexData.size());
   pageBacking   = this->doc->pool->reserve(instanceCount);
   this->doc->pool->write(pageBacking, 0, asBytes(vertexData));
+}
+
+bool Page::contains(const std::uint32_t globalOffset) const {
+  // The end of the last page is a valid caret position, so the upper bound is
+  // inclusive there and exclusive everywhere else -- otherwise the caret could
+  // not be put after the final character.
+  return globalOffset >= textOffset && globalOffset <= textOffset + textBytes;
+}
+
+bool Page::caretGeometry(const std::uint32_t globalOffset, float &posX,
+                         float &posY, float &height) const {
+  if (!contains(globalOffset) || !layout) {
+    return false;
+  }
+  Pango::Rectangle strong;
+  Pango::Rectangle weak;
+  layout->get_cursor_pos(static_cast<int>(globalOffset - textOffset), strong,
+                         weak);
+
+  const auto left   = pageMargin + static_cast<float>(toPixels(strong.get_x()));
+  const auto top    = pageMargin + static_cast<float>(toPixels(strong.get_y()));
+  const auto tall   = static_cast<float>(toPixels(strong.get_height()));
+
+  posX   = originX + left + (Caret::widthPixels / 2.0F);
+  posY   = originY - (top + (tall / 2.0F));
+  height = tall;
+  return true;
+}
+
+std::optional<std::uint32_t>
+Page::offsetForCluster(const std::uint32_t clusterIndex,
+                       const float fraction) const {
+  if (clusterIndex >= clusters.size()) {
+    return std::nullopt;
+  }
+  const auto &cluster = clusters[clusterIndex];
+
+  // How many character boundaries into the cluster the click fell. Rounding
+  // rather than truncating puts the caret on the nearer side, so clicking the
+  // left half of a character lands before it and the right half after it.
+  const auto steps = std::min<std::uint32_t>(
+      cluster.charCount,
+      static_cast<std::uint32_t>(
+          std::lround(static_cast<double>(std::clamp(fraction, 0.0F, 1.0F)) *
+                      cluster.charCount)));
+
+  // Walk that many characters into the cluster. The byte length of a
+  // character varies, so the boundary cannot be computed arithmetically.
+  auto offset = static_cast<std::size_t>(cluster.byteStart);
+  const auto end =
+      static_cast<std::size_t>(cluster.byteStart + cluster.byteLength);
+  const auto text = layout->get_text().raw();
+  for (std::uint32_t taken = 0; taken < steps && offset < end;) {
+    offset++;
+    while (offset < end &&
+           0x80 == (static_cast<unsigned char>(text[offset]) & 0xC0)) {
+      offset++;
+    }
+    taken++;
+  }
+
+  return textOffset + static_cast<std::uint32_t>(offset);
 }
 
 // Always called from the render thread
@@ -278,6 +345,38 @@ void Doc::draw(RenderState &state, const glm::mat4 &viewProjection) const {
   const auto docTransform = viewProjection * model;
   for (const auto &page : pages) {
     page.draw(state, docTransform);
+  }
+}
+
+std::optional<std::uint32_t>
+Doc::offsetForPick(const render::PickingTag &tag) const {
+  const auto *target = page(tag.pageIndex);
+  if (nullptr == target) {
+    return std::nullopt;
+  }
+  // Kind 3 is a glyph; anything else drawn by a page is its background, which
+  // has no character beneath it.
+  if (3 != tag.kind) {
+    return target->baseOffset();
+  }
+  return target->offsetForCluster(tag.clusterIndex, tag.fraction);
+}
+
+void Doc::drawCaret(RenderState &state, const glm::mat4 &viewProjection,
+                    Caret &caret) const {
+  if (!caret.active() || caret.documentIndex() != docIndex) {
+    return;
+  }
+  for (const auto &pageOn : pages) {
+    float posX   = 0.0F;
+    float posY   = 0.0F;
+    float height = 0.0F;
+    if (!pageOn.caretGeometry(caret.byteOffset(), posX, posY, height)) {
+      continue;
+    }
+    caret.setGeometry(posX, posY, height);
+    caret.draw(state, viewProjection * model * pageOn.getModel());
+    return;
   }
 }
 

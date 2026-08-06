@@ -50,6 +50,8 @@ PICK_PIXELS="200,240 300,265 420,265 250,305 400,345"
 # projection rather than the document camera, so it exercises a transform the
 # document frames never take. Comparing it separately is what catches a backend
 # getting the overlay wrong while drawing documents correctly.
+# Pixel the overlay run clicks, to place the caret inside a word.
+CARET_CLICK="300,265"
 TOAST_ONE="error:GL_INVALID_ENUM in glEnable(0xdead)"
 TOAST_TWO="warning:overlay parity check"
 
@@ -62,9 +64,11 @@ for backend in $backends; do
   [ -s "$OUT/$backend.ppm" ] ||
     { echo "FAIL: $backend produced no screenshot"; exit 1; }
 
-  # The same document again, with notifications showing over it.
+  # The same document again, with notifications showing over it and the caret
+  # placed by a click. Both are drawn through pipelines that do not depth test
+  # and in coordinate spaces the plain document frame never exercises.
   "$BIN" --backend "$backend" --profile $STRICT \
-      --toast "$TOAST_ONE" --toast "$TOAST_TWO" \
+      --toast "$TOAST_ONE" --toast "$TOAST_TWO" --click "$CARET_CLICK" \
       --screenshot "$OUT/$backend.toast.ppm" "$SAMPLE" \
       >"$OUT/$backend.toastlog" 2>&1 ||
     { echo "FAIL: $backend overlay run exited non-zero"

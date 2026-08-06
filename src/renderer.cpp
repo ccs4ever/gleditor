@@ -78,6 +78,7 @@ void Renderer::createPipeline(RenderState &state) const {
   // The overlay draws the same glyph instances with the same shaders; only the
   // depth state and the transform it is handed differ.
   toasts->createPipeline(desc);
+  caret->createPipeline(desc);
 }
 
 void Renderer::newDoc(RenderState &state) {
@@ -125,7 +126,7 @@ bool Renderer::update(RenderState &state, const bool settled) {
   // answered within the frame that made it, so the asynchronous path is the
   // path that always runs -- on a driver quick enough to finish the read
   // immediately as much as on one that is not.
-  collectPickingResults();
+  collectPickingResults(state);
   collectDiagnostics(state);
 
   if (!device->beginFrame()) {
@@ -158,6 +159,9 @@ bool Renderer::update(RenderState &state, const bool settled) {
   for (const std::shared_ptr<Doc> &doc : state.docs) {
     doc->draw(state, viewProjection);
   }
+  for (const std::shared_ptr<Doc> &doc : state.docs) {
+    doc->drawCaret(state, viewProjection, *caret);
+  }
 
   // Last, so that the overlay is on top: its pipeline does not depth test, so
   // submission order is what decides.
@@ -178,6 +182,21 @@ bool Renderer::update(RenderState &state, const bool settled) {
       const auto &[pickX, pickY] = this->state->requestedPicks[nextPick];
       device->requestPickingTag(pickX, pickY);
       nextPick++;
+    } else if (nextClick < this->state->requestedClicks.size() &&
+               !awaitingClick) {
+      // One at a time: a click is only answered when its own read comes back,
+      // so issuing the next before then would lose the first.
+      const auto &[clickX, clickY] = this->state->requestedClicks[nextClick];
+      awaitingClick                = std::pair{clickX, clickY};
+      device->requestPickingTag(clickX, clickY);
+      nextClick++;
+    } else if (this->state->clickPending.exchange(false)) {
+      // A click takes priority over the hover query: only one read is issued
+      // per frame, and the click is the one somebody is waiting on.
+      const auto clickX = this->state->clickX.load();
+      const auto clickY = this->state->clickY.load();
+      awaitingClick     = std::pair{clickX, clickY};
+      device->requestPickingTag(clickX, clickY);
     } else if (this->state->requestedPicks.empty()) {
       device->requestPickingTag(this->state->mouseX, this->state->mouseY);
     }
@@ -188,7 +207,11 @@ bool Renderer::update(RenderState &state, const bool settled) {
   // Capture after the frame is complete: the colour target still holds its
   // contents, and reading a finished frame avoids interrupting one that the
   // device has already begun submitting.
-  if (settled && !this->state->screenshotPath.empty()) {
+  // Wait for any requested clicks to have been answered: picking is
+  // asynchronous, so a frame captured the moment the document settles is one
+  // or two frames before the caret those clicks place exists.
+  if (settled && clicksReported >= this->state->requestedClicks.size() &&
+      !this->state->screenshotPath.empty()) {
     writeScreenshot(device->captureColorTarget(), this->state->screenshotPath);
     this->state->screenshotPath.clear();
   }
@@ -199,9 +222,33 @@ bool Renderer::update(RenderState &state, const bool settled) {
   return this->state->alive;
 }
 
-void Renderer::collectPickingResults() {
+void Renderer::placeCaretFromPick(RenderState &state,
+                                  const render::PickingResult &pick) {
+  if (pick.tag.empty()) {
+    // Clicking away from any document puts the editor back to navigating.
+    caret->clear();
+    return;
+  }
+  if (pick.tag.docIndex >= state.docs.size()) {
+    return;
+  }
+  const auto &doc = state.docs[pick.tag.docIndex];
+  if (const auto offset = doc->offsetForPick(pick.tag)) {
+    caret->placeAt(pick.tag.docIndex, *offset);
+    std::cout << std::format("caret: doc {} offset {}\n", pick.tag.docIndex,
+                             *offset);
+  }
+}
+
+void Renderer::collectPickingResults(RenderState &state) {
   while (const auto pick = device->takePickingTag()) {
     lastPick = pick;
+    if (awaitingClick && awaitingClick->first == pick->x &&
+        awaitingClick->second == pick->y) {
+      awaitingClick.reset();
+      placeCaretFromPick(state, *pick);
+      clicksReported++;
+    }
     if (!this->state->requestedPicks.empty()) {
       std::cout << std::format(
           "pick {},{}: kind {} doc {} page {} cluster {} frac {:.3f}\n", pick->x,
@@ -285,6 +332,7 @@ void Renderer::renderLoop(AutoSDLWindow &window) {
   RenderState state(device.get());
   toasts = std::make_unique<ToastOverlay>(device.get(),
                                           std::string(defaultFontName()));
+  caret  = std::make_unique<Caret>(device.get());
 
   createPipeline(state);
 
@@ -317,7 +365,8 @@ void Renderer::renderLoop(AutoSDLWindow &window) {
     // A pick takes a frame or two to come back, so profiling waits for every
     // requested query rather than exiting with one still outstanding.
     if (settled && this->state->profiling &&
-        picksReported >= this->state->requestedPicks.size()) {
+        picksReported >= this->state->requestedPicks.size() &&
+        clicksReported >= this->state->requestedClicks.size()) {
       this->state->alive = false;
       break;
     }
@@ -336,6 +385,7 @@ void Renderer::renderLoop(AutoSDLWindow &window) {
   // still alive, and after any in-flight frame has finished reading them.
   device->waitIdle();
   state.docs.clear();
+  caret.reset();
   toasts.reset();
   device->shutdown();
 }

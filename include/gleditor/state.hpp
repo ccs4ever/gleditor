@@ -44,6 +44,21 @@ struct AppState {
   std::atomic<std::chrono::duration<float>> frameTimeDelta;
   std::atomic_int mouseX;
   std::atomic_int mouseY;
+  /// Pixel of a click the render thread has not yet answered. Held as one
+  /// pending position rather than a queue: a second click before the first is
+  /// resolved supersedes it, which is what a user clicking twice means.
+  std::atomic_int clickX{-1};
+  std::atomic_int clickY{-1};
+  std::atomic_bool clickPending{false};
+  /// Clicks to perform once the document has settled, each reported as its
+  /// picking result comes back. Driven by --click so that caret placement can
+  /// be compared between backends the way picking already is.
+  std::vector<std::pair<int, int>> requestedClicks;
+  /// Text typed since the render thread last drained it, in UTF-8. Guarded by
+  /// its own mutex: SDL delivers it on the event thread and the edit is
+  /// applied on the render thread.
+  std::mutex typedMutex;
+  std::string typedText;
   struct ViewPerspective : public std::mutex {
     int screenWidth  = 800;
     int screenHeight = 600;

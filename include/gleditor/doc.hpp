@@ -11,12 +11,14 @@
 #include <glibmm/ustring.h>
 #include <glm/ext/matrix_float4x4.hpp>
 #include <memory>
+#include <optional>
 #include <pangomm/layout.h>
 #include <string>
 #include <vector>
 
 #include <gleditor/render/types.hpp>
 
+class Caret;
 class Doc;
 struct RenderState;
 
@@ -58,6 +60,12 @@ private:
   std::vector<ClusterBox> clusters;
   /// This page's position in its document, carried in the picking tag.
   std::uint32_t pageIndex{};
+  /// Bytes of document text this page lays out.
+  std::uint32_t textBytes{};
+  /// Offset applied to layout coordinates so the page is centred on its own
+  /// origin; kept so caret geometry lands in the same space as the glyphs.
+  float originX{};
+  float originY{};
 
 public:
   Page(std::shared_ptr<Doc> aDoc, RenderState &state, glm::mat4 &model,
@@ -70,6 +78,37 @@ public:
   [[nodiscard]] const std::vector<ClusterBox> &clusterBoxes() const {
     return clusters;
   }
+  /// Bytes of document text this page lays out.
+  [[nodiscard]] std::uint32_t textLength() const { return textBytes; }
+  /// True when a document-global byte offset falls within this page's text.
+  [[nodiscard]] bool contains(std::uint32_t globalOffset) const;
+
+  /**
+   * @brief Where a caret sits for a document-global byte offset.
+   *
+   * Answered by Pango rather than derived from the cluster table: it is the
+   * same call an editor would make to place a cursor, and it already knows
+   * about right-to-left runs and about offsets that fall inside a cluster.
+   *
+   * @param[out] posX,posY Centre of the caret in this page's pixel space.
+   * @param[out] height Caret height in the same space.
+   * @return false when the offset is not on this page.
+   */
+  [[nodiscard]] bool caretGeometry(std::uint32_t globalOffset, float &posX,
+                                   float &posY, float &height) const;
+
+  /**
+   * @brief Resolve a picked cluster and fractional position to a byte offset.
+   *
+   * A cluster covering several characters -- a ligature -- is subdivided
+   * evenly by the fraction, which is how Pango itself turns an x coordinate
+   * into an index, so a click lands on the boundary a user would expect.
+   *
+   * @return The document-global byte offset, or nullopt for an unknown
+   *         cluster.
+   */
+  [[nodiscard]] std::optional<std::uint32_t>
+  offsetForCluster(std::uint32_t clusterIndex, float fraction) const;
   ~Page() override = default;
 };
 
@@ -167,6 +206,21 @@ public:
   [[nodiscard]] const Page *page(const std::size_t index) const {
     return index < pages.size() ? &pages[index] : nullptr;
   }
+
+  /**
+   * @brief Turn a picking result into a byte offset in this document's text.
+   *
+   * A glyph resolves through its cluster and the fractional position across
+   * the quad. A page background has no character under it, so it resolves to
+   * the start of that page -- the click was beside the text rather than on it.
+   */
+  [[nodiscard]] std::optional<std::uint32_t>
+  offsetForPick(const render::PickingTag &tag) const;
+
+  /// Draw @p caret on whichever page holds its offset, if it belongs to this
+  /// document.
+  void drawCaret(RenderState &state, const glm::mat4 &viewProjection,
+                 Caret &caret) const;
   [[nodiscard]] size_t numPages() const { return pages.size(); }
 
   friend class Page;
