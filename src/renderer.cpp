@@ -128,6 +128,7 @@ bool Renderer::update(RenderState &state, const bool settled) {
   // immediately as much as on one that is not.
   collectPickingResults(state);
   collectDiagnostics(state);
+  applyTypedText(state);
 
   if (!device->beginFrame()) {
     return this->state->alive;
@@ -269,6 +270,25 @@ void Renderer::collectPickingResults(RenderState &state) {
       }
     }
   }
+}
+
+void Renderer::applyTypedText(RenderState &state) {
+  if (!caret->active()) {
+    return;
+  }
+  std::string typed;
+  {
+    const std::lock_guard locker(this->state->typedMutex);
+    if (this->state->typedText.empty()) {
+      return;
+    }
+    typed.swap(this->state->typedText);
+  }
+  if (caret->documentIndex() >= state.docs.size()) {
+    return;
+  }
+  state.docs[caret->documentIndex()]->insert(state, caret->byteOffset(), typed,
+                                             caret.get());
 }
 
 void Renderer::collectDiagnostics(RenderState &state) {

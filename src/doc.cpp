@@ -177,6 +177,17 @@ Page::Page(std::shared_ptr<Doc> aDoc, RenderState &state, glm::mat4 &model,
   const auto font =
       layout->get_context()->load_font(layout->get_font_description());
 
+  // A page layout is handed the whole rest of the document and limited by
+  // height, so its text runs far past what the page shows. Everything below is
+  // bounded by what the page actually consumes -- without which the final
+  // cluster's end ran to the end of the document, producing a "cluster" of
+  // tens of kilobytes.
+  const auto &lastLine = layout->get_const_line(layout->get_line_count() - 1);
+  const auto lastLen   = lastLine->get_length();
+  const auto limit     = std::min<std::size_t>(
+      text.size(), static_cast<std::size_t>(lastLine->get_start_index() +
+                                                (0 == lastLen ? 1 : lastLen)));
+
   // Walk the clusters. A cluster is the smallest run Pango will not break
   // apart, so it is what one quad can represent: an "ffi" ligature or a letter
   // with its combining marks is one cluster covering several characters.
@@ -188,11 +199,14 @@ Page::Page(std::shared_ptr<Doc> aDoc, RenderState &state, glm::mat4 &model,
 
     const auto start = static_cast<std::size_t>(std::max(0, iter.get_index()));
     const bool more  = iter.next_cluster();
-    const auto end =
-        more ? static_cast<std::size_t>(std::max(0, iter.get_index()))
-             : text.size();
+    const auto end   = std::min(
+        limit, more ? static_cast<std::size_t>(std::max(0, iter.get_index()))
+                      : limit);
 
-    if (end <= start || start >= text.size()) {
+    if (start >= limit) {
+      break;
+    }
+    if (end <= start) {
       if (!more) {
         break;
       }
@@ -223,7 +237,15 @@ Page::Page(std::shared_ptr<Doc> aDoc, RenderState &state, glm::mat4 &model,
 
     // The whole cluster is rasterised, not just its first codepoint. Taking
     // the leading sequence dropped the rest of every ligature and every
-    // combining mark from the page.
+    // combining mark from the page. A cluster too long for the cache to key on
+    // is skipped rather than allowed to stop the editor: it is pathological
+    // input, not a reason to fail to open a file.
+    if (drawEnd - start > GlyphCache::maxClusterBytes) {
+      if (!more) {
+        break;
+      }
+      continue;
+    }
     const std::string_view chr(text.data() + start, drawEnd - start);
     const auto glyph    = state.glyphCache.put(chr, font);
     const auto &coords  = glyph.texCoords;
@@ -262,7 +284,7 @@ Page::Page(std::shared_ptr<Doc> aDoc, RenderState &state, glm::mat4 &model,
     }
   }
 
-  textBytes     = static_cast<std::uint32_t>(text.size());
+  textBytes     = static_cast<std::uint32_t>(limit);
   instanceCount = static_cast<std::uint32_t>(vertexData.size());
   pageBacking   = this->doc->pool->reserve(instanceCount);
   this->doc->pool->write(pageBacking, 0, asBytes(vertexData));
@@ -378,6 +400,215 @@ void Doc::drawCaret(RenderState &state, const glm::mat4 &viewProjection,
     caret.draw(state, viewProjection * model * pageOn.getModel());
     return;
   }
+}
+
+
+const char *reflowScopeName(const ReflowScope scope) {
+  switch (scope) {
+  case ReflowScope::Line:
+    return "line";
+  case ReflowScope::Page:
+    return "page";
+  case ReflowScope::Document:
+    return "document";
+  }
+  return "unknown";
+}
+
+Glib::RefPtr<Pango::Layout> Doc::layoutFrom(const std::uint32_t offset) const {
+  const auto fontDesc =
+      Pango::FontDescription(renderer->defaultFontName().data());
+  const auto fonts = Pango::CairoFontMap::get_default();
+  const auto ctx   = fonts->create_context();
+  ctx->set_font_description(fontDesc);
+
+  auto lay = Pango::Layout::create(ctx);
+  lay->set_font_description(fontDesc);
+  lay->set_single_paragraph_mode(false);
+  lay->set_height(std::ceil(139.70 * 11 * PANGO_SCALE));
+  lay->set_width(std::ceil(139.70 * 8.5 * PANGO_SCALE));
+  lay->set_ellipsize(Pango::EllipsizeMode::END);
+
+  const char *txt = text.raw().c_str();
+  const auto size = text.bytes();
+  if (offset >= size) {
+    lay->set_text("");
+    return lay;
+  }
+  pango_layout_set_text(lay->gobj(), txt + offset,
+                        static_cast<int>(size - offset));
+  return lay;
+}
+
+std::uint32_t Doc::consumedBytes(const Glib::RefPtr<Pango::Layout> &layout) {
+  const auto &line = layout->get_const_line(layout->get_line_count() - 1);
+  const int len    = line->get_length();
+  return static_cast<std::uint32_t>(line->get_start_index() +
+                                    (0 == len ? 1 : len));
+}
+
+namespace {
+
+/**
+ * @brief Whether an insertion left every line break where it was.
+ *
+ * Line starts before the insertion are untouched; those at or after it shift
+ * by exactly the bytes inserted. Comparing the two lists directly would always
+ * differ, since the tail moves -- what matters is whether it moved by the
+ * insertion and nothing more.
+ */
+bool sameLineBreaks(const std::vector<int> &before,
+                    const std::vector<int> &after, const int at,
+                    const int inserted) {
+  if (before.size() != after.size()) {
+    return false;
+  }
+  for (std::size_t i = 0; i < before.size(); i++) {
+    const int expected = before[i] <= at ? before[i] : before[i] + inserted;
+    if (after[i] != expected) {
+      return false;
+    }
+  }
+  return true;
+}
+
+} // namespace
+
+std::vector<int> Doc::lineStarts(const Glib::RefPtr<Pango::Layout> &layout) {
+  std::vector<int> starts;
+  const int count = layout->get_line_count();
+  starts.reserve(static_cast<std::size_t>(count));
+  for (int i = 0; i < count; i++) {
+    starts.push_back(layout->get_const_line(i)->get_start_index());
+  }
+  return starts;
+}
+
+void Doc::insert(RenderState &state, const std::uint32_t offset,
+                 const std::string &utf8, Caret *caret) {
+  if (utf8.empty()) {
+    return;
+  }
+  const auto inserted = static_cast<std::uint32_t>(utf8.size());
+  const auto at       = std::min<std::uint32_t>(offset, text.bytes());
+
+  // Splice first: the document is the source of truth and must be correct
+  // before anything asynchronous looks at it.
+  auto raw = text.raw();
+  raw.insert(at, utf8);
+  text = raw;
+
+  if (nullptr != caret) {
+    caret->shiftForInsertion(at, inserted);
+  }
+
+  // Which page holds the edit. Everything before it is untouched by
+  // construction: text ahead of an insertion cannot reflow.
+  std::size_t firstPage = 0;
+  for (std::size_t i = 0; i < pages.size(); i++) {
+    if (at >= pages[i].baseOffset()) {
+      firstPage = i;
+    }
+  }
+  if (pages.empty()) {
+    return;
+  }
+
+  // Line breaks of the edited page before the edit, to tell a line-local
+  // insertion from one that pushed a word onto the next line.
+  const auto oldStarts   = lineStarts(pages[firstPage].layoutRef());
+  const auto oldConsumed = pages[firstPage].textLength();
+
+  auto self = getPtr();
+  renderer->run([self, &state, firstPage, at, inserted, oldStarts,
+                 oldConsumed] {
+    self->reflowFrom(state, firstPage, at, inserted, oldStarts, oldConsumed);
+  });
+}
+
+void Doc::reflowFrom(RenderState &state, const std::size_t firstPage,
+                     const std::uint32_t at, const std::uint32_t inserted,
+                     const std::vector<int> &oldStarts,
+                     const std::uint32_t oldConsumed) {
+  // Lay the edited page out again and see how far the damage reaches.
+  //
+  // Pagination re-syncs as soon as a page ends where it used to, shifted by
+  // what was inserted. From there on every later page holds byte-identical
+  // text: its shaping, its glyphs and its vertex rows are all unchanged, and
+  // only the offset it reports moves. That is what keeps a keystroke from
+  // costing a relayout of the whole document.
+  std::vector<std::pair<std::uint32_t, Glib::RefPtr<Pango::Layout>>> rebuilt;
+  auto offset      = pages[firstPage].baseOffset();
+  auto pageCursor  = firstPage;
+  auto scope       = ReflowScope::Document;
+
+  while (offset < text.bytes()) {
+    auto lay = layoutFrom(offset);
+    const auto consumed = consumedBytes(lay);
+    rebuilt.emplace_back(offset, lay);
+
+    if (pageCursor == firstPage) {
+      // The edited page absorbed the insertion when it still ends where it
+      // did, plus the bytes that were added.
+      if (consumed == oldConsumed + inserted) {
+        const auto relativeAt =
+            static_cast<int>(at - pages[firstPage].baseOffset());
+        scope = sameLineBreaks(oldStarts, lineStarts(lay), relativeAt,
+                               static_cast<int>(inserted))
+                    ? ReflowScope::Line
+                    : ReflowScope::Page;
+      }
+    }
+
+    offset += consumed;
+    pageCursor++;
+
+    if (ReflowScope::Document != scope) {
+      break; // pagination re-synced: later pages are untouched.
+    }
+    if (pageCursor >= pages.size()) {
+      break; // ran past the pages that existed; the tail is being rebuilt.
+    }
+    if (offset == pages[pageCursor].baseOffset() + inserted) {
+      break; // re-synced further down.
+    }
+  }
+
+  // Drop the pages being replaced, returning their rows to the pool.
+  const auto lastRebuilt = firstPage + rebuilt.size();
+  for (std::size_t i = firstPage; i < std::min(lastRebuilt, pages.size()); i++) {
+    pool->release(pages[i].allocation());
+  }
+  const auto tailFrom = std::min(lastRebuilt, pages.size());
+  std::vector<Page> tail;
+  tail.reserve(pages.size() - tailFrom);
+  for (std::size_t i = tailFrom; i < pages.size(); i++) {
+    tail.push_back(std::move(pages[i]));
+  }
+  pages.erase(pages.begin() + static_cast<std::ptrdiff_t>(firstPage),
+              pages.end());
+
+  for (std::size_t i = 0; i < rebuilt.size(); i++) {
+    auto &[base, lay] = rebuilt[i];
+    const auto index  = firstPage + i;
+    glm::mat4 trans   = glm::translate(
+        glm::mat4(1.0), glm::vec3(0.0F, -100 * static_cast<float>(index), 0.0F));
+    trans = glm::scale(trans, glm::vec3(pixelsToWorld, pixelsToWorld, 1.0F));
+    pages.emplace_back(getPtr(), state, trans, lay, base,
+                       static_cast<std::uint32_t>(index));
+  }
+  // Untouched pages keep their shaping and their vertex rows; only the offset
+  // they report moves.
+  for (auto &page : tail) {
+    page.shiftBaseOffset(inserted);
+    pages.push_back(std::move(page));
+  }
+
+  reflowScope = scope;
+  reflowPages = rebuilt.size();
+  std::cout << std::format("reflow: scope {} pages rebuilt {} of {}\n",
+                           reflowScopeName(scope), rebuilt.size(),
+                           pages.size());
 }
 
 Doc::Doc(const RendererRef &renderer, render::RenderDevice *device,
