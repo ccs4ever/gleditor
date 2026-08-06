@@ -46,11 +46,23 @@ VKAPI_ATTR VkBool32 VKAPI_CALL
 debugCallback(const VkDebugUtilsMessageSeverityFlagBitsEXT severity,
               VkDebugUtilsMessageTypeFlagsEXT /*types*/,
               const VkDebugUtilsMessengerCallbackDataEXT *data,
-              void * /*user*/) {
-  if (0 != (severity & (VK_DEBUG_UTILS_MESSAGE_SEVERITY_WARNING_BIT_EXT |
-                        VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT))) {
-    std::cerr << "vulkan: " << data->pMessage << "\n";
+              void *user) {
+  auto *sink = static_cast<DiagnosticSink *>(user);
+  if (nullptr == sink || nullptr == data || nullptr == data->pMessage) {
+    return VK_FALSE;
   }
+
+  // A validation error means this program used the API wrongly. Recording it
+  // rather than only printing is what lets the frame boundary fail on it: a
+  // printed error that nothing acts on is a message the build stays green
+  // through.
+  if (0 != (severity & VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT)) {
+    sink->record(DiagnosticSeverity::Error, data->pMessage);
+  } else if (0 != (severity & VK_DEBUG_UTILS_MESSAGE_SEVERITY_WARNING_BIT_EXT)) {
+    sink->record(DiagnosticSeverity::Warning, data->pMessage);
+  }
+  // VK_FALSE means "do not abort the call that produced this", which is the
+  // only value an application is permitted to return here.
   return VK_FALSE;
 }
 
@@ -127,6 +139,7 @@ void DeviceVK::createInstance() {
                          VK_DEBUG_UTILS_MESSAGE_TYPE_VALIDATION_BIT_EXT |
                          VK_DEBUG_UTILS_MESSAGE_TYPE_PERFORMANCE_BIT_EXT;
       info.pfnUserCallback = debugCallback;
+      info.pUserData       = &diagnostics;
       create(instance, &info, nullptr, &debugMessenger);
     }
   }

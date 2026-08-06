@@ -107,6 +107,7 @@ struct GLApi {
   PFNGLGETINTEGERVPROC GetIntegerv{};
   PFNGLGETERRORPROC GetError{};
   PFNGLGETSTRINGPROC GetString{};
+  PFNGLGETSTRINGIPROC GetStringi{};
   PFNGLDRAWARRAYSINSTANCEDPROC DrawArraysInstanced{};
 
   // -- fences, used to tell when an asynchronous pixel read has landed
@@ -114,11 +115,26 @@ struct GLApi {
   PFNGLCLIENTWAITSYNCPROC ClientWaitSync{};
   PFNGLDELETESYNCPROC DeleteSync{};
 
+  // -- debug output. KHR_debug is core only in OpenGL 4.3 and OpenGL ES 3.2,
+  // above what this backend requires, so these stay null when the context does
+  // not offer them and the caller checks before use.
+  PFNGLDEBUGMESSAGECALLBACKPROC DebugMessageCallback{};
+  PFNGLDEBUGMESSAGECONTROLPROC DebugMessageControl{};
+
   /**
-   * @brief Resolve every entry point above against the current context.
+   * @brief Resolve every mandatory entry point against the current context.
    * @throws std::runtime_error naming the first entry point that is missing.
    */
   void load();
+
+  /// True when the context advertises @p name in its extension list.
+  [[nodiscard]] bool hasExtension(const char *name) const;
+
+  /**
+   * @brief Resolve the optional debug output entry points.
+   * @return true if debug output can be used on this context.
+   */
+  bool loadDebugOutput();
 };
 
 } // namespace render::gl

@@ -27,6 +27,7 @@
 #include <vulkan/vulkan.h>
 
 #include <gleditor/render/device.hpp>
+#include <gleditor/render/diagnostics.hpp>
 
 namespace render::vulkan {
 
@@ -214,6 +215,10 @@ private:
   PipelineHandle boundPipeline{};
 
   TextureLimits limits{};
+  /// Diagnostics the validation layers reported since the last frame boundary.
+  /// The messenger may be called from any thread the driver uses, which the
+  /// sink accounts for.
+  DiagnosticSink diagnostics;
   std::unordered_map<std::uint32_t, BufferRecord> buffers;
   std::unordered_map<std::uint32_t, TextureRecord> textures;
   std::unordered_map<std::uint32_t, PipelineRecord> pipelines;

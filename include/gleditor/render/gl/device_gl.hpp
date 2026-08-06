@@ -18,6 +18,7 @@
 #include <vector>
 
 #include <gleditor/render/device.hpp>
+#include <gleditor/render/diagnostics.hpp>
 #include <gleditor/render/gl/gl_api.hpp>
 
 namespace render::gl {
@@ -121,6 +122,17 @@ private:
 
   void createPickingSlots();
   void destroyPickingSlots();
+
+  /// Turn on debug output if the context offers it. Optional: KHR_debug is not
+  /// core until OpenGL 4.3 or OpenGL ES 3.2, both above what this backend asks
+  /// for, so a context without it simply reports nothing.
+  void setupDebugOutput();
+  /// Entry point the driver calls. Records into `diagnostics` and returns; see
+  /// diagnostics.hpp for why it must not throw.
+  static void APIENTRY debugCallback(GLenum source, GLenum type, GLuint id,
+                                       GLenum severity, GLsizei length,
+                                       const GLchar *message,
+                                       const void *user);
   /// Convert a top-down row to the bottom-up row OpenGL uses.
   [[nodiscard]] int flipY(int y) const;
 
@@ -130,6 +142,8 @@ private:
   AutoSDLWindow *targetWindow{};
 
   TextureLimits limits{};
+  /// Diagnostics reported by the driver since the last frame boundary.
+  DiagnosticSink diagnostics;
 
   std::unordered_map<std::uint32_t, BufferRecord> buffers;
   std::unordered_map<std::uint32_t, TextureRecord> textures;

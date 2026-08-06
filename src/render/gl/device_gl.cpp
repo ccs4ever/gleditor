@@ -13,6 +13,7 @@
 #include <iostream>
 #include <stdexcept>
 #include <string>
+#include <string_view>
 #include <vector>
 
 #include <gleditor/render/shader_source.hpp>
@@ -70,6 +71,7 @@ void DeviceGL::initialize(AutoSDLWindow &window) {
   }
 
   api.load();
+  setupDebugOutput();
 
   std::cout << std::format(
       "render: {} device, version {}\n", backendName(backendKind),
@@ -104,6 +106,52 @@ void DeviceGL::initialize(AutoSDLWindow &window) {
   createPickingSlots();
 
   initialised = true;
+}
+
+void APIENTRY DeviceGL::debugCallback(const GLenum /*source*/,
+                                        const GLenum type, const GLuint /*id*/,
+                                        const GLenum severity,
+                                        const GLsizei length,
+                                        const GLchar *message,
+                                        const void *user) {
+  auto *sink = static_cast<DiagnosticSink *>(const_cast<void *>(user));
+  if (nullptr == sink || nullptr == message) {
+    return;
+  }
+
+  // An API error or undefined behaviour is a bug in this program; anything
+  // else is advisory. Only the former stops the frame.
+  auto level = DiagnosticSeverity::Info;
+  if (GL_DEBUG_TYPE_ERROR == type || GL_DEBUG_TYPE_UNDEFINED_BEHAVIOR == type) {
+    level = DiagnosticSeverity::Error;
+  } else if (GL_DEBUG_SEVERITY_HIGH == severity ||
+             GL_DEBUG_SEVERITY_MEDIUM == severity) {
+    level = DiagnosticSeverity::Warning;
+  }
+
+  // length is negative when the driver passes a null-terminated string.
+  const std::string_view text =
+      length < 0 ? std::string_view{message}
+                 : std::string_view{message, static_cast<std::size_t>(length)};
+  sink->record(level, text);
+}
+
+void DeviceGL::setupDebugOutput() {
+  if (!api.loadDebugOutput()) {
+    std::cerr << "render: GL_KHR_debug unavailable; driver diagnostics off\n";
+    return;
+  }
+
+  api.Enable(GL_DEBUG_OUTPUT);
+  // Synchronous delivery costs performance but calls the callback on the thread
+  // and at the point of the offending command, so a recorded error belongs to
+  // the call that caused it rather than to some later frame.
+  api.Enable(GL_DEBUG_OUTPUT_SYNCHRONOUS);
+  // Notifications are mostly buffer-allocation chatter; leave them off so the
+  // sink's dedupe budget goes on things worth reading.
+  api.DebugMessageControl(GL_DONT_CARE, GL_DONT_CARE,
+                          GL_DEBUG_SEVERITY_NOTIFICATION, 0, nullptr, GL_FALSE);
+  api.DebugMessageCallback(debugCallback, &diagnostics);
 }
 
 void DeviceGL::createOffscreenTarget(const int width, const int height) {
@@ -440,6 +488,11 @@ bool DeviceGL::beginFrame() {
 }
 
 void DeviceGL::endFrame() {
+  // Debug output is synchronous, so anything the driver objected to during this
+  // frame has already been recorded. Raise it here, from our own stack, rather
+  // than from inside the driver callback where unwinding is undefined.
+  diagnostics.raiseIfError("opengl driver reported an error");
+
   api.BindFramebuffer(GL_READ_FRAMEBUFFER, offscreenFbo);
   api.BindFramebuffer(GL_DRAW_FRAMEBUFFER, 0);
   api.ReadBuffer(GL_COLOR_ATTACHMENT0);

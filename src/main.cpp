@@ -287,7 +287,9 @@ int main(const int argc, char **argv) {
     return 1;
   }
 
-  return 0;
+  // The render thread reports its own failures and cannot return a status
+  // through std::jthread, so the flag it sets decides the exit code.
+  return state->renderFailed ? 1 : 0;
 }
 
 // vi: set sw=2 sts=2 ts=2 et:
