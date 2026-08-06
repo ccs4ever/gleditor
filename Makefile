@@ -20,19 +20,40 @@ CKSUM = cksum
 #MKDIR = thirdparty/cosmos/bin/mkdir
 MKDIR = mkdir
 # removed spdlog
+# SDL major version. SDL3 is what the code is written against and what is used
+# when it is installed; SDL2 is still what most distributions ship, so it is
+# the fallback rather than an error. Set GLEDITOR_SDL=2 or 3 to choose
+# explicitly -- which is what the CI matrix does, since "whatever is installed"
+# is not a configuration anyone can reproduce.
+ifndef GLEDITOR_SDL
+GLEDITOR_SDL := $(shell pkg-config --exists sdl3 && echo 3 || echo 2)
+endif
+ifeq ($(GLEDITOR_SDL),3)
+SDL_PKG := sdl3
+SDL_IMAGE_PKG := sdl3-image
+else ifeq ($(GLEDITOR_SDL),2)
+SDL_PKG := sdl2
+SDL_IMAGE_PKG := SDL2_image
+else
+$(error GLEDITOR_SDL must be 2 or 3, got "$(GLEDITOR_SDL)")
+endif
+ifneq ($(shell pkg-config --exists $(SDL_PKG) && echo 1),1)
+$(error $(SDL_PKG) not found by pkg-config; install it or set GLEDITOR_SDL to the other major version)
+endif
+
 # The GL/GLES entry points are resolved at runtime through SDL rather than
 # linked, so no GL library is needed here; `gl` is still listed because the
 # backend includes GL/glcorearb.h for its typedefs and enum values.
-PKGS := pangomm-2.48 sdl3 gl
+PKGS := pangomm-2.48 $(SDL_PKG) gl
 ifdef GLEDITOR_ENABLE_VULKAN
 PKGS += vulkan
 endif
-# SDL3_image supplies the window icon and nothing else, and is not packaged
-# everywhere SDL3 itself is. Use it when it is present and carry on without it
+# SDL_image supplies the window icon and nothing else, and is not packaged
+# everywhere SDL itself is. Use it when it is present and carry on without it
 # when it is not.
-HAVE_SDL_IMAGE := $(shell pkg-config --exists sdl3-image && echo 1)
+HAVE_SDL_IMAGE := $(shell pkg-config --exists $(SDL_IMAGE_PKG) && echo 1)
 ifeq ($(HAVE_SDL_IMAGE),1)
-PKGS += sdl3-image
+PKGS += $(SDL_IMAGE_PKG)
 endif
 TEST_PKGS := gmock_main
 VERS := $(shell git describe --tags --always --match "v[0-9]*.[0-9]*.[0-9]*" HEAD | tr -d v)
@@ -48,6 +69,7 @@ else
 DEBUG_OPTS := -O3 -g
 endif
 override CXXFLAGS += $(DEBUG_OPTS) -std=c++2c -Ibuild/src -Iinclude -Ithirdparty/Choreograph/src -Ithirdparty/argparse/include -Wall -Wextra $(shell pkg-config $(STATIC) --cflags $(PKGS))
+override CXXFLAGS += -DGLEDITOR_SDL_MAJOR=$(GLEDITOR_SDL)
 ifdef GLEDITOR_ENABLE_VULKAN
 override CXXFLAGS += -DGLEDITOR_ENABLE_VULKAN=1
 endif

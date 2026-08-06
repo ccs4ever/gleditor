@@ -19,14 +19,9 @@
 #include <thread>         // for jthread
 #include <utility>        // for pair
 
-#include "config.h"           // for GLEDITOR_VERSION, TOSTRING
-#include <SDL3/SDL.h>         // for SDL_INIT_VIDEO
-#include <SDL3/SDL_events.h>  // for SDL_Event, SDL_PollEvent
-#include <SDL3/SDL_keycode.h> // for KMOD_SHIFT
-#include <SDL3/SDL_main.h>
-#include <SDL3/SDL_scancode.h>   // for SDL_SCANCODE_C, SDL_SCANCODE_D
-#include <SDL3/SDL_video.h>      // for SDL_WINDOWPOS_UNDEFINED
+#include "config.h"                   // for GLEDITOR_VERSION, TOSTRING
 #include <argparse/argparse.hpp>      // for ArgumentParser, Argument
+#include <gleditor/sdl_compat.hpp>    // for SDL, whichever major version
 #include <gleditor/render/device.hpp> // for backendWindowFlags, Backend
 #include <gleditor/render/types.hpp>  // for Backend
 #include <gleditor/state.hpp>         // for AppState, AppStateRef
@@ -50,7 +45,7 @@ void handleKeyPress(const SDL_Event &evt, const AppStateRef &state,
   }*/
   std::cout << "camera pos before: " << glm::to_string(state->view.pos)
             << " speed: " << speed << "\n";
-  switch (evt.key.scancode) {
+  switch (sdl::keyScancode(evt)) {
   case SDL_SCANCODE_Q: {
     state->alive = false;
     break;
@@ -70,7 +65,7 @@ void handleKeyPress(const SDL_Event &evt, const AppStateRef &state,
     break;
   }
   case SDL_SCANCODE_D: {
-    if (0 != (evt.key.mod & SDL_KMOD_SHIFT)) {
+    if (0 != (sdl::keyModifiers(evt) & SDL_KMOD_SHIFT)) {
       state->view.pos += speed * state->view.front;
     } else {
       state->view.pos -= speed * state->view.front;
@@ -97,7 +92,7 @@ void handleKeyPress(const SDL_Event &evt, const AppStateRef &state,
   }
   case SDL_SCANCODE_G: {
     auto fov = state->view.fov;
-    if (0 != (evt.key.mod & SDL_KMOD_SHIFT)) {
+    if (0 != (sdl::keyModifiers(evt) & SDL_KMOD_SHIFT)) {
       fov -= 1;
       if (fov < 1) {
         fov = 1;
@@ -186,7 +181,10 @@ RendererRef handleArgs(const AppStateRef &state, render::Backend &backend,
           " backend was not compiled into this binary. Rebuild with "
           "GLEDITOR_ENABLE_VULKAN=1 to enable Vulkan.");
     }
-    std::cout << "backend: " << render::backendName(backend) << "\n";
+    // Which SDL this binary was built against is not something the command
+    // line can change, and a bug report is much easier to read with it stated.
+    std::cout << "backend: " << render::backendName(backend) << ", SDL"
+              << sdl::majorVersion << "\n";
 
     RendererRef renderer = Renderer::create(state, backend);
 
@@ -263,8 +261,7 @@ int main(const int argc, char **argv) {
     // device itself is constructed on the render thread.
     render::configureBackendWindowAttributes(backend);
 
-    AutoSDLWindow window("GL Editor", SDL_WINDOWPOS_UNDEFINED,
-                         SDL_WINDOWPOS_UNDEFINED, state->view.screenWidth,
+    AutoSDLWindow window("GL Editor", state->view.screenWidth,
                          state->view.screenHeight,
                          render::backendWindowFlags(backend) |
                              SDL_WINDOW_RESIZABLE |
@@ -297,11 +294,15 @@ int main(const int argc, char **argv) {
           handleMouseMove(evt, state);
           break;
         }
-        case SDL_EVENT_WINDOW_RESIZED:
-        case SDL_EVENT_WINDOW_PIXEL_SIZE_CHANGED:
-        case SDL_EVENT_WINDOW_MAXIMIZED: {
-          const auto width  = evt.window.data1;
-          const auto height = evt.window.data2;
+        default: {
+          // SDL2 reports every window change as one event type with a
+          // sub-type, SDL3 as distinct types, so this is asked rather than
+          // matched on.
+          int width  = 0;
+          int height = 0;
+          if (!sdl::windowSizeChanged(evt, width, height)) {
+            break;
+          }
           std::cout << "window size changed(w/h): " << width << "/" << height
                     << "\n";
           {
@@ -314,8 +315,6 @@ int main(const int argc, char **argv) {
           rend->push(RenderItemResize(width, height));
           break;
         }
-        default:
-          break;
         }
       } while (state->alive && SDL_PollEvent(&evt));
     }

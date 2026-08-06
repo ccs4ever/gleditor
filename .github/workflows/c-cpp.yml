@@ -11,26 +11,42 @@ jobs:
 
     runs-on: ubuntu-latest
 
+    # SDL3 is what the code is written against; SDL2 is what most distributions
+    # still ship. Both are built and tested, as parallel jobs, so a change that
+    # only compiles against one of them fails here rather than on someone's
+    # machine. fail-fast is off because which of the two broke is the useful
+    # part of the answer.
+    strategy:
+      fail-fast: false
+      matrix:
+        sdl: [2, 3]
+
+    name: build (SDL${{ matrix.sdl }})
+
     steps:
     - uses: actions/checkout@v5
       with:
         submodules: recursive
+    # SDL3 is not in the Ubuntu archive yet; SDL2 is, so only one job needs the
+    # PPA.
     - name: sdl3 ppa add
+      if: matrix.sdl == 3
       run: sudo add-apt-repository ppa:hrzhu/sdl3-backport
     - name: update apt
       run: sudo apt-get update
-    # PKGS in the Makefile is: pangomm-2.48 sdl3 gl (+ vulkan when
-    # GLEDITOR_ENABLE_VULKAN is set). SDL3_image is optional and is not in the
-    # SDL3 backport PPA, so it is left out; the window icon is skipped without
-    # it. The GL and GLES entry points are resolved
-    # at runtime through SDL, so no GL library is linked; libgl-dev is still
-    # needed for GL/glcorearb.h. mesa-vulkan-drivers provides lavapipe, a
-    # software Vulkan device, and the validation layers catch API misuse that
-    # would otherwise only show up as a blank window.
+    # PKGS in the Makefile is: pangomm-2.48 <sdl2|sdl3> gl (+ vulkan when
+    # GLEDITOR_ENABLE_VULKAN is set). SDL_image is optional and SDL3_image is
+    # in neither the archive nor the SDL3 backport PPA, so it is left out of
+    # both jobs to keep them comparable; the window icon is skipped without it.
+    # The GL and GLES entry points are resolved at runtime through SDL, so no
+    # GL library is linked; libgl-dev is still needed for GL/glcorearb.h.
+    # mesa-vulkan-drivers provides lavapipe, a software Vulkan device, and the
+    # validation layers catch API misuse that would otherwise only show up as a
+    # blank window.
     - name: packages
       run: >-
         sudo apt-get install -y
-        libsdl3-dev
+        ${{ matrix.sdl == 3 && 'libsdl3-dev' || 'libsdl2-dev' }}
         libglm-dev libpangomm-2.48-dev
         libgl-dev libgl1-mesa-dev libglu1-mesa-dev
         libvulkan-dev glslang-tools
@@ -38,10 +54,13 @@ jobs:
         libgmock-dev libgtest-dev
         xvfb
         clang libclang-rt-dev make
+    # GLEDITOR_SDL is set explicitly rather than left to the Makefile's probe:
+    # "whichever is installed" would silently make both jobs build the same
+    # thing if a runner image ever gained the other one.
     - name: make
-      run: make GLEDITOR_ENABLE_VULKAN=1
+      run: make GLEDITOR_SDL=${{ matrix.sdl }} GLEDITOR_ENABLE_VULKAN=1
     - name: make test
-      run: make GLEDITOR_ENABLE_VULKAN=1 test
+      run: make GLEDITOR_SDL=${{ matrix.sdl }} GLEDITOR_ENABLE_VULKAN=1 test
     # Render the sample document through each backend and require that they
     # agree. A backend that silently stops drawing still exits zero, so the
     # comparison -- not the exit code -- is what actually proves it works.

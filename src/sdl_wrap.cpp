@@ -3,19 +3,20 @@
 #include <stdexcept>
 #include <string>
 
-#include <SDL3/SDL.h>
-#include <SDL3/SDL_error.h>
-#include <SDL3/SDL_surface.h>
-#include <SDL3/SDL_video.h>
+#include <gleditor/sdl_compat.hpp>
 
 #ifdef GLEDITOR_HAVE_SDL_IMAGE
+#if GLEDITOR_SDL_MAJOR == 3
 #include <SDL3_image/SDL_image.h>
+#else
+#include <SDL2/SDL_image.h>
+#endif
 #endif
 
 #include <iostream>
 
 AutoSDL::AutoSDL(const std::uint32_t flags) : flags(flags) {
-  if (!SDL_InitSubSystem(flags)) {
+  if (!sdl::initSubSystem(flags)) {
     throw std::runtime_error(std::string("SDL init failed: ") + SDL_GetError());
   }
 }
@@ -26,15 +27,14 @@ AutoSDL::~AutoSDL() {
 }
 
 
-// NOLINTNEXTLINE(readability-identifier-length)
-AutoSDLWindow::AutoSDLWindow(const char *title, const int /*x*/, const int /*y*/, const int width,
-                             const int height, const std::uint32_t flags,
+AutoSDLWindow::AutoSDLWindow(const char *title, const int width,
+                             const int height, const std::uint64_t flags,
                              SDL_Surface *icon) {
   // The context version and profile belong to the chosen backend, which sets
   // them through render::configureBackendWindowAttributes() before getting
   // here. Forcing a desktop core profile in this constructor would silently
   // defeat a request for OpenGL ES.
-  window = SDL_CreateWindow(title, width, height, flags);
+  window = sdl::createWindow(title, width, height, flags);
 
   if (nullptr == window) {
     throw std::runtime_error(std::string("SDL create window failed: ") +
@@ -70,7 +70,7 @@ AutoSDLGL::~AutoSDLGL() {
 
 AutoSDLSurface::AutoSDLSurface(const char *fileName) {
   // The window icon is decoration. Failing to load it must not stop the editor
-  // from starting -- which it used to, both when SDL3_image was unavailable and
+  // from starting -- which it used to, both when SDL_image was unavailable and
   // whenever the program was run from a directory that does not hold the file.
 #ifdef GLEDITOR_HAVE_SDL_IMAGE
   surface = IMG_Load(fileName);

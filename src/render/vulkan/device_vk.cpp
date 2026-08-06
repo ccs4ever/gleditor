@@ -4,9 +4,7 @@
  */
 #include <gleditor/render/vulkan/device_vk.hpp> // IWYU pragma: associated
 
-#include <SDL3/SDL_error.h>
-#include <SDL3/SDL_video.h>
-#include <SDL3/SDL_vulkan.h>
+#include <gleditor/render/vulkan/sdl_vulkan_compat.hpp>
 
 #include <algorithm>
 #include <array>
@@ -88,14 +86,19 @@ DeviceVK::~DeviceVK() { DeviceVK::shutdown(); }
 // -- setup --------------------------------------------------------------------
 
 void DeviceVK::createInstance() {
-  std::uint32_t sdlExtCount = 0;
-  const char *const *sdlExts = SDL_Vulkan_GetInstanceExtensions(&sdlExtCount);
-  if (nullptr == sdlExts) {
+  // Owned copies: SDL2 fills a caller-supplied array, so the names have to
+  // outlive the call that produced them either way.
+  const auto sdlExtNames = sdl::vulkanInstanceExtensions(targetWindow->window);
+  if (sdlExtNames.empty()) {
     throw std::runtime_error(
         std::format("SDL_Vulkan_GetInstanceExtensions failed: {}",
                     SDL_GetError()));
   }
-  std::vector<const char *> extensions(sdlExts, sdlExts + sdlExtCount);
+  std::vector<const char *> extensions;
+  extensions.reserve(sdlExtNames.size());
+  for (const auto &name : sdlExtNames) {
+    extensions.push_back(name.c_str());
+  }
 
   const bool wantValidation = validationLayerAvailable();
   if (wantValidation) {
@@ -146,7 +149,7 @@ void DeviceVK::createInstance() {
 }
 
 void DeviceVK::createSurface(AutoSDLWindow &window) {
-  if (!SDL_Vulkan_CreateSurface(window.window, instance, nullptr, &surface)) {
+  if (!sdl::vulkanCreateSurface(window.window, instance, surface)) {
     throw std::runtime_error(
         std::format("SDL_Vulkan_CreateSurface failed: {}", SDL_GetError()));
   }
