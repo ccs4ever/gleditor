@@ -1,11 +1,31 @@
-# To get started with Dependabot version updates, you'll need to specify which
-# package ecosystems to update and where the package manifests are located.
-# Please see the documentation for all configuration options:
+# Dependabot version updates.
+#
 # https://docs.github.com/code-security/dependabot/dependabot-version-updates/configuration-options-for-the-dependabot.yml-file
+#
+# Two ecosystems apply here. The C++ dependencies proper -- pangomm, SDL, GLM,
+# Vulkan -- come from the system package manager through pkg-config, which
+# Dependabot has no way to track. conanfile.txt is an optional convenience for
+# obtaining them, and Conan is not among the ecosystems Dependabot supports, so
+# neither is listed below.
 
 version: 2
 updates:
-  - package-ecosystem: "" # See documentation for possible values
-    directory: "/" # Location of package manifests
+  # The workflow pins actions/checkout and actions/cache by major version.
+  # Grouped so that a week in which both move is one pull request rather than
+  # two.
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    groups:
+      actions:
+        patterns:
+          - "*"
+
+  # thirdparty/argparse and thirdparty/Choreograph are vendored as submodules,
+  # which pin an exact commit. Nothing else in the build will ever mention that
+  # upstream has moved on.
+  - package-ecosystem: "gitsubmodule"
+    directory: "/"
     schedule:
       interval: "weekly"
