@@ -571,8 +571,6 @@ void DeviceVK::createCommandResources() {
           "vkCreateSemaphore");
     check(vkCreateFence(device, &fenceInfo, nullptr, &frames[i].inFlight),
           "vkCreateFence");
-    frames[i].cameraBuffer =
-        createBuffer(BufferKind::Uniform, sizeof(FrameUniforms));
     // Destination for this slot's picking read: two unsigned integers, the
     // uvec2 the fragment stage writes to the picking attachment.
     frames[i].pickingBuffer = createBuffer(BufferKind::Readback,
@@ -581,16 +579,17 @@ void DeviceVK::createCommandResources() {
 }
 
 void DeviceVK::createDescriptorPool() {
-  // Two uniform buffers and one sampled image per set, one set per frame.
+  // One uniform buffer and one sampled image per set, and one set per frame in
+  // flight for each pipeline: a set updated for the frame being recorded must
+  // not disturb the frame the GPU is still reading, nor the other pipeline's.
+  constexpr std::uint32_t sets = maxPipelines * framesInFlight;
   const std::array<VkDescriptorPoolSize, 2> sizes = {
-      VkDescriptorPoolSize{VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
-                           2 * framesInFlight},
-      VkDescriptorPoolSize{VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-                           framesInFlight}};
+      VkDescriptorPoolSize{VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, sets},
+      VkDescriptorPoolSize{VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, sets}};
 
   VkDescriptorPoolCreateInfo info{};
   info.sType         = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
-  info.maxSets       = framesInFlight;
+  info.maxSets       = sets;
   info.poolSizeCount = sizes.size();
   info.pPoolSizes    = sizes.data();
   check(vkCreateDescriptorPool(device, &info, nullptr, &descriptorPool),

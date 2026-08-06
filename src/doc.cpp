@@ -214,19 +214,20 @@ Page::Page(std::shared_ptr<Doc> aDoc, RenderState &state, glm::mat4 &model,
 }
 
 // Always called from the render thread
-void Page::draw(RenderState &state, const glm::mat4 &docModel) const {
+void Page::draw(RenderState &state, const glm::mat4 &docTransform) const {
   if (0 == instanceCount) {
     return;
   }
-  const render::DrawUniforms uniforms{toArray(docModel * model)};
+  const render::DrawUniforms uniforms{toArray(docTransform * model)};
   state.device->drawGlyphs(uniforms, doc->pool->buffer(),
                            doc->pool->byteOffset(pageBacking), instanceCount);
 }
 
 // Always called from the render thread
-void Doc::draw(RenderState &state) const {
+void Doc::draw(RenderState &state, const glm::mat4 &viewProjection) const {
+  const auto docTransform = viewProjection * model;
   for (const auto &page : pages) {
-    page.draw(state, model);
+    page.draw(state, docTransform);
   }
 }
 

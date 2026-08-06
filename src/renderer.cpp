@@ -135,11 +135,14 @@ bool Renderer::update(RenderState &state, const bool settled) {
     return this->state->alive;
   }
 
-  device->bindPipeline(state.glyphPipeline);
-
+  glm::mat4 viewProjection(1.0F);
+  int screenWidth  = 0;
+  int screenHeight = 0;
   {
     std::lock_guard locker(this->state->view);
     const auto &view = this->state->view;
+    screenWidth      = view.screenWidth;
+    screenHeight     = view.screenHeight;
 
     const glm::mat4 projection = glm::perspective(
         glm::radians(view.fov),
@@ -149,14 +152,14 @@ bool Renderer::update(RenderState &state, const bool settled) {
     const glm::mat4 camera =
         glm::lookAt(view.pos, view.pos + view.front, view.upward);
 
-    device->setFrameUniforms(
-        render::FrameUniforms{toArray(projection), toArray(camera)});
+    viewProjection = projection * camera;
   }
 
+  device->bindPipeline(state.glyphPipeline);
   device->bindGlyphTexture(state.glyphCache.textureHandle());
 
   for (const std::shared_ptr<Doc> &doc : state.docs) {
-    doc->draw(state);
+    doc->draw(state, viewProjection);
   }
 
   // Ask what is under the cursor, or at the pixel --pick named. The read is

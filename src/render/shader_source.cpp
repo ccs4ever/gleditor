@@ -27,21 +27,16 @@ std::string uniformBlock(const Backend backend, const ShaderStage stage) {
   std::string out;
   if (ShaderStage::Vertex == stage) {
     if (vulkan) {
-      // The camera changes once per frame and the model matrix once per draw,
-      // so the model matrix goes in a push constant to avoid a descriptor
-      // update -- and a buffer -- for every glyph run.
-      out += "layout(set = 0, binding = 0, std140) uniform Camera {\n"
-             "    mat4 uProjection;\n"
-             "    mat4 uView;\n"
-             "};\n"
-             "layout(push_constant) uniform Push {\n"
-             "    mat4 uModel;\n"
+      // The whole transform changes per draw, so it goes in a push constant:
+      // a descriptor-backed block would have to be either rewritten between
+      // draws -- which a recorded command buffer cannot do -- or duplicated per
+      // draw with a dynamic offset.
+      out += "layout(push_constant) uniform Push {\n"
+             "    mat4 uMVP;\n"
              "} uPush;\n"
-             "#define uModel uPush.uModel\n";
+             "#define uMVP uPush.uMVP\n";
     } else {
-      out += "uniform mat4 uProjection;\n"
-             "uniform mat4 uView;\n"
-             "uniform mat4 uModel;\n";
+      out += "uniform mat4 uMVP;\n";
     }
 
     out += "struct HighlightRange {\n"
@@ -50,13 +45,13 @@ std::string uniformBlock(const Backend backend, const ShaderStage stage) {
            "    uint colour;\n"
            "    uint reserved;\n"
            "};\n";
-    out += vulkan ? "layout(set = 0, binding = 1, std140) uniform Highlights {\n"
+    out += vulkan ? "layout(set = 0, binding = 0, std140) uniform Highlights {\n"
                   : "layout(std140) uniform Highlights {\n";
     out += std::format("    HighlightRange uRanges[{}];\n", maxHighlightRanges);
     out += "};\n";
   } else {
     out += vulkan
-               ? "layout(set = 0, binding = 2) uniform sampler2DArray uGlyphAtlas;\n"
+               ? "layout(set = 0, binding = 1) uniform sampler2DArray uGlyphAtlas;\n"
                : "uniform sampler2DArray uGlyphAtlas;\n";
   }
   return out;

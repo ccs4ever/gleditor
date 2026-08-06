@@ -128,21 +128,32 @@ struct PipelineDesc {
   /// GLSL directly. Ignored by the GL and GLES backends.
   std::string spirvDir;
   VertexLayout layout;
-};
-
-/**
- * @brief Uniform values that stay constant for a whole frame.
- */
-struct FrameUniforms {
-  std::array<float, 16> projection{};
-  std::array<float, 16> view{};
+  /**
+   * @brief Whether fragments are depth tested and depth written.
+   *
+   * Off for overlays: a screen-space notification has no meaningful depth to
+   * compare against a perspective document, so it relies on being submitted
+   * last instead. Leaving it on would need the overlay's clip-space Z to be
+   * closer than everything else on both the OpenGL [-1,1] and Vulkan [0,1]
+   * depth conventions, which no single value satisfies.
+   */
+  bool depthTest{true};
 };
 
 /**
  * @brief Uniform values that change per draw call.
+ *
+ * The whole transform is carried here rather than split into camera and model
+ * halves. Splitting it would put the camera in per-frame storage that every
+ * draw of the frame shares -- a descriptor-backed uniform block on Vulkan --
+ * and a draw that wants a different transform, such as a screen-space overlay
+ * drawn over a perspective document, could then not have one. Combining them
+ * costs one matrix multiply on the host per draw and removes a uniform buffer,
+ * a descriptor binding and a device entry point.
  */
 struct DrawUniforms {
-  std::array<float, 16> model{};
+  /// projection * view * model, in the column-major order GLSL expects.
+  std::array<float, 16> mvp{};
 };
 
 /**

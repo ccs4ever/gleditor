@@ -17,7 +17,9 @@
 #include <memory>
 #include <optional>
 #include <span>
+#include <vector>
 
+#include <gleditor/render/diagnostics.hpp>
 #include <gleditor/render/types.hpp>
 
 struct AutoSDLWindow;
@@ -106,9 +108,6 @@ public:
   /// Select the pipeline subsequent draws use.
   virtual void bindPipeline(PipelineHandle pipeline) = 0;
 
-  /// Set the camera uniforms for this frame. Call after beginFrame().
-  virtual void setFrameUniforms(const FrameUniforms &uniforms) = 0;
-
   /// Bind the glyph atlas subsequent draws sample from.
   virtual void bindGlyphTexture(TextureHandle texture) = 0;
 
@@ -163,6 +162,29 @@ public:
    * reading.
    */
   virtual void waitIdle() = 0;
+
+  // -- driver diagnostics ---------------------------------------------------
+
+  /**
+   * @brief Take the driver diagnostics recorded since the last call.
+   *
+   * Every message is logged by the device as it arrives; this is what lets the
+   * application show them as well. Repeats of a message already reported are
+   * dropped, so polling this every frame does not produce a message per frame.
+   */
+  virtual std::vector<Diagnostic> takeDiagnostics() = 0;
+
+  /**
+   * @brief Decide what a driver error does.
+   *
+   * Off (the default), an error is logged and handed to takeDiagnostics() like
+   * any other message, and the frame continues: a driver that objects to
+   * something the editor can survive should not close the editor. On, the
+   * first error ends the next frame with an exception, which is what automated
+   * runs want -- a test that renders through a driver reporting errors has not
+   * proved anything, however plausible its output looks.
+   */
+  virtual void setStrictDiagnostics(bool strict) = 0;
 };
 
 /// SDL window creation flags a given backend requires.

@@ -57,7 +57,6 @@ public:
   bool beginFrame() override;
   void endFrame() override;
   void bindPipeline(PipelineHandle pipeline) override;
-  void setFrameUniforms(const FrameUniforms &uniforms) override;
   void bindGlyphTexture(TextureHandle texture) override;
   void setHighlights(std::span<const HighlightRange> ranges) override;
   void drawGlyphs(const DrawUniforms &uniforms, BufferHandle vertices,
@@ -67,6 +66,13 @@ public:
   std::optional<PickingResult> takePickingTag() override;
   FrameImage captureColorTarget() override;
   void waitIdle() override;
+
+  std::vector<Diagnostic> takeDiagnostics() override {
+    return diagnostics.drain();
+  }
+  void setStrictDiagnostics(bool strict) override {
+    diagnostics.setStrict(strict);
+  }
 
 private:
   /// Picking reads outstanding at once. Two lets a read issued this frame land
@@ -106,10 +112,9 @@ private:
     GLuint program{};
     GLuint vao{};
     VertexLayout layout;
-    GLint projectionLoc{-1};
-    GLint viewLoc{-1};
-    GLint modelLoc{-1};
+    GLint mvpLoc{-1};
     GLint atlasLoc{-1};
+    bool depthTest{true};
   };
 
   /// Compile one stage, throwing with the driver's log on failure.

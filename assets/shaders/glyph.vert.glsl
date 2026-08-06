@@ -68,9 +68,11 @@ void main() {
     float xSign = (0 != (corner & 1)) ? 1.0 : -1.0;
     float ySign = (0 != (corner & 2)) ? 1.0 : -1.0;
 
+    // The corner offset is a direction, not a point: its w is zero, so adding
+    // it to the centre in model space and transforming once is the same as
+    // transforming both and adding, for one matrix multiply instead of two.
     vec4 offset = vec4(xSign * halfWidth, ySign * halfHeight, 0.0, 0.0);
-    vec4 centre = uProjection * uView * uModel * vec4(position, 1.0);
-    gl_Position = centre + uProjection * uView * uModel * offset;
+    gl_Position = uMVP * (vec4(position, 1.0) + offset);
 
     vec3 fg = unpackColor(fgcolor).rgb;
     vec3 bg = unpackColor(bgcolor).rgb;

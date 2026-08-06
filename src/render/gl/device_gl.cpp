@@ -454,11 +454,10 @@ PipelineHandle DeviceGL::createPipeline(const PipelineDesc &desc) {
   api.DeleteShader(vertexShader);
   api.DeleteShader(fragmentShader);
 
-  record.layout = desc.layout;
-  record.projectionLoc = api.GetUniformLocation(record.program, "uProjection");
-  record.viewLoc = api.GetUniformLocation(record.program, "uView");
-  record.modelLoc = api.GetUniformLocation(record.program, "uModel");
-  record.atlasLoc = api.GetUniformLocation(record.program, "uGlyphAtlas");
+  record.layout    = desc.layout;
+  record.depthTest = desc.depthTest;
+  record.mvpLoc    = api.GetUniformLocation(record.program, "uMVP");
+  record.atlasLoc  = api.GetUniformLocation(record.program, "uGlyphAtlas");
 
   if (const GLuint blockIndex =
           api.GetUniformBlockIndex(record.program, "Highlights");
@@ -516,19 +515,10 @@ void DeviceGL::bindPipeline(const PipelineHandle pipeline) {
   if (-1 != it->second.atlasLoc) {
     api.Uniform1i(it->second.atlasLoc, glyphAtlasUnit);
   }
-}
-
-void DeviceGL::setFrameUniforms(const FrameUniforms &uniforms) {
-  const auto it = pipelines.find(boundPipeline.id);
-  if (pipelines.end() == it) {
-    return;
-  }
-  if (-1 != it->second.projectionLoc) {
-    api.UniformMatrix4fv(it->second.projectionLoc, 1, GL_FALSE,
-                         uniforms.projection.data());
-  }
-  if (-1 != it->second.viewLoc) {
-    api.UniformMatrix4fv(it->second.viewLoc, 1, GL_FALSE, uniforms.view.data());
+  if (it->second.depthTest) {
+    api.Enable(GL_DEPTH_TEST);
+  } else {
+    api.Disable(GL_DEPTH_TEST);
   }
 }
 
@@ -565,8 +555,8 @@ void DeviceGL::drawGlyphs(const DrawUniforms &uniforms,
   }
   const auto &record = pipelineIt->second;
 
-  if (-1 != record.modelLoc) {
-    api.UniformMatrix4fv(record.modelLoc, 1, GL_FALSE, uniforms.model.data());
+  if (-1 != record.mvpLoc) {
+    api.UniformMatrix4fv(record.mvpLoc, 1, GL_FALSE, uniforms.mvp.data());
   }
 
   // The draw starts partway into the vertex buffer. Baking that offset into
