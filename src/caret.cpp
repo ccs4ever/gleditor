@@ -50,6 +50,19 @@ void Caret::placeAt(const std::uint32_t aDocIndex,
   docIndex    = aDocIndex;
   byteOffset_ = aByteOffset;
   visible     = true;
+  anchored    = false;
+}
+
+void Caret::anchorSelection() {
+  anchor   = byteOffset_;
+  anchored = true;
+}
+
+void Caret::extendTo(const std::uint32_t aByteOffset) {
+  if (!anchored) {
+    anchorSelection();
+  }
+  byteOffset_ = aByteOffset;
 }
 
 void Caret::shiftForInsertion(const std::uint32_t at,
@@ -58,6 +71,11 @@ void Caret::shiftForInsertion(const std::uint32_t at,
   // which is where the next character belongs.
   if (at <= byteOffset_) {
     byteOffset_ += bytes;
+  }
+  // The anchor is a position in the same text and moves by the same rule, or
+  // the selection would silently grow to cover what was typed before it.
+  if (anchored && at <= anchor) {
+    anchor += bytes;
   }
 }
 

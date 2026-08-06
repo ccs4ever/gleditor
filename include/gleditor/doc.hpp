@@ -118,6 +118,21 @@ public:
    */
   [[nodiscard]] std::optional<std::uint32_t>
   offsetForCluster(std::uint32_t clusterIndex, float fraction) const;
+
+  /**
+   * @brief The highlight span covering a byte range on this page.
+   *
+   * The edges are quantised to character boundaries within the clusters they
+   * fall in: a selection ending between the "f" and the "i" of an "fi"
+   * ligature yields a fraction of one half of that one quad, not a whole
+   * cluster and not nothing. Single-character clusters come out as 0 or 1,
+   * which is the same rule with nothing to divide.
+   *
+   * @return nullopt when the range does not reach this page.
+   */
+  [[nodiscard]] std::optional<render::HighlightRange>
+  highlightFor(std::uint32_t selStart, std::uint32_t selEnd,
+               std::uint32_t colour) const;
   ~Page() override = default;
 };
 
@@ -278,6 +293,12 @@ public:
   /// document.
   void drawCaret(RenderState &state, const glm::mat4 &viewProjection,
                  Caret &caret) const;
+
+  /// Append the highlight spans covering a byte range, one per page it
+  /// touches.
+  void highlightsFor(std::uint32_t selStart, std::uint32_t selEnd,
+                     std::uint32_t colour,
+                     std::vector<render::HighlightRange> &out) const;
   [[nodiscard]] size_t numPages() const { return pages.size(); }
 
   friend class Page;

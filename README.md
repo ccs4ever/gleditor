@@ -167,6 +167,37 @@ instead would mean masking writes to the second colour attachment alone, which
 OpenGL ES 3.0 cannot do -- per-attachment colour masks arrive in ES 3.2 -- so
 clicking the caret leaves it where it is.
 
+### Selection
+
+Pressing and dragging selects; the caret is one end of the span and the anchor
+is where the drag began, so dragging backwards over the anchor needs no special
+case. Clicking on empty space -- a pixel where nothing was drawn -- clears the
+caret and the selection together and returns the editor to navigating.
+
+**Highlighting respects character boundaries inside a quad.** A selection
+ending between the "f" and the "i" of an "fi" ligature has to cover part of one
+quad: the two characters share it and have no geometry to tell them apart.
+Highlighting whole clusters would show a selection the user did not make. So
+the decision is made per fragment rather than per instance -- a vertex only
+knows its corner -- using the same across-quad fraction that resolves a click.
+A span names clusters plus a fraction at each end, and the fractions are
+quantised on the host to `k / charCount`, so an edge always lands on a
+character boundary. Single-character quads are the same rule with nothing to
+divide.
+
+Selecting inside the three-character `ffi` ligature of
+`tests/samples/ligatures.txt`, whose quad is 29 pixels wide on screen:
+
+| selection | highlighted |
+| --- | --- |
+| first `f` | 10 px |
+| `ff` | 19 px |
+| whole `ffi` | 29 px |
+| middle `f` only | 9 px, offset 10 px in |
+
+`--select START,END` applies a span as a drag would, after any `--click` has
+been answered -- a click replaces a selection rather than extending one.
+
 `--click X,Y` and `--type TEXT` drive both without a mouse or a keyboard, which
 is how caret placement is compared between backends. Every click reports the
 pixel it answered, since picking is asynchronous and a reply that named only

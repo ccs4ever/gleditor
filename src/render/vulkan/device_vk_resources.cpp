@@ -424,12 +424,14 @@ DeviceVK::createShaderModule(const std::vector<std::uint32_t> &code) const {
 PipelineHandle DeviceVK::createPipeline(const PipelineDesc &desc) {
   PipelineRecord record{};
 
-  // Descriptor layout: highlights, glyph atlas. The transform is a push
-  // constant instead, so a per-draw change costs no descriptor traffic and a
-  // recorded frame can hold a different one for every draw.
+  // Descriptor layout: highlights, glyph atlas. Both are read by the fragment
+  // stage -- selection depends on where inside a quad a fragment sits, which
+  // only exists per fragment. The transform is a push constant instead, so a
+  // per-draw change costs no descriptor traffic and a recorded frame can hold a
+  // different one for every draw.
   const std::array<VkDescriptorSetLayoutBinding, 2> bindings = {
       VkDescriptorSetLayoutBinding{0, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 1,
-                                   VK_SHADER_STAGE_VERTEX_BIT, nullptr},
+                                   VK_SHADER_STAGE_FRAGMENT_BIT, nullptr},
       VkDescriptorSetLayoutBinding{1, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
                                    1, VK_SHADER_STAGE_FRAGMENT_BIT, nullptr}};
 

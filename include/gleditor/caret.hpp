@@ -69,10 +69,41 @@ public:
   Caret(Caret &&)                 = delete;
   Caret &operator=(Caret &&)      = delete;
 
-  /// Place the caret at a byte offset in a document, making it visible.
+  /// Place the caret at a byte offset in a document, making it visible. This
+  /// drops any selection: a plain click replaces one rather than extending it.
   void placeAt(std::uint32_t aDocIndex, std::uint32_t aByteOffset);
-  /// Hide the caret; the editor goes back to navigating rather than typing.
-  void clear() { visible = false; }
+
+  /**
+   * @brief Start a selection at the caret's position.
+   *
+   * The anchor is where a drag began and the caret is where it has reached, so
+   * dragging backwards over the anchor selects in the other direction without
+   * any special case.
+   */
+  void anchorSelection();
+
+  /// Move the caret, keeping the anchor, which extends the selection.
+  void extendTo(std::uint32_t aByteOffset);
+
+  /// Forget the selection but keep the caret where it is.
+  void clearSelection() { anchored = false; }
+
+  [[nodiscard]] bool hasSelection() const {
+    return anchored && anchor != byteOffset_;
+  }
+  /// Selected range as [start, end), ordered however the drag went.
+  [[nodiscard]] std::uint32_t selectionStart() const {
+    return anchor < byteOffset_ ? anchor : byteOffset_;
+  }
+  [[nodiscard]] std::uint32_t selectionEnd() const {
+    return anchor < byteOffset_ ? byteOffset_ : anchor;
+  }
+  /// Hide the caret and drop any selection; the editor goes back to navigating
+  /// rather than typing. This is what clicking on empty space does.
+  void clear() {
+    visible  = false;
+    anchored = false;
+  }
 
   [[nodiscard]] bool active() const { return visible; }
   [[nodiscard]] std::uint32_t documentIndex() const { return docIndex; }
@@ -108,6 +139,9 @@ private:
   bool hasGeometry{};
   std::uint32_t docIndex{};
   std::uint32_t byteOffset_{};
+  /// Where a selection began. The caret itself is the other end.
+  std::uint32_t anchor{};
+  bool anchored{};
 };
 
 #endif // GLEDITOR_CARET_H

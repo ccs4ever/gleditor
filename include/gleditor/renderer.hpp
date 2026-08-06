@@ -159,6 +159,14 @@ private:
   /// Pixel of a click whose picking result has not come back yet. Picking is
   /// asynchronous, so the click cannot be answered in the frame that saw it.
   std::optional<std::pair<int, int>> awaitingClick;
+  /// Whether that pending answer extends the selection rather than replacing
+  /// the caret.
+  bool awaitingDrag{};
+  /// Scratch for the highlight table, kept so a drag does not reallocate it
+  /// every frame.
+  std::vector<render::HighlightRange> highlights;
+  /// Background the selection paints behind glyphs.
+  static constexpr std::uint32_t selectionColour = 0x99C4FFFFU;
   /// In-flight background document loads. These capture the render thread's
   /// RenderState by reference, so the render loop waits on them before
   /// returning.
@@ -178,6 +186,7 @@ private:
   /// have been answered.
   std::size_t nextClick{};
   std::size_t clicksReported{};
+  bool selectionApplied{};
   /// Drop loads that have already finished, so the list cannot grow without
   /// bound over the lifetime of the process.
   void reapFinishedDocLoads();
@@ -188,6 +197,10 @@ private:
   void dispatch(RenderState &state, RenderItem &item);
   /// Drain picking reads that have completed since the last frame.
   void collectPickingResults(RenderState &state);
+  /// Apply --select, once any requested clicks have been answered.
+  void applySelectionRequest(bool settled);
+  /// Rebuild and upload the highlight spans covering the selection.
+  void updateHighlights(RenderState &state);
   /// Insert anything typed since the last frame at the caret.
   void applyTypedText(RenderState &state);
   /// Place the caret from a picking result that answered a click.

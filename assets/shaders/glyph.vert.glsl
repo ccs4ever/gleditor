@@ -83,20 +83,11 @@ void main() {
     vec3 fg = unpackColor(fgcolor).rgb;
     vec3 bg = unpackColor(bgcolor).rgb;
 
-    // Highlight lookup. Ranges are in cluster indices, which is what tag.y
-    // holds for a glyph row; the loop is bounded by the block size so it
-    // cannot read past the end of the array. tag.x packs kind, document and
-    // page, so the kind is its top field rather than the whole word.
-    if (3u == (tag.x >> 28)) { // tagKindGlyph
-        for (int i = 0; i < GLEDITOR_MAX_HIGHLIGHTS; i++) {
-            if (0u == (uRanges[i].start | uRanges[i].end | uRanges[i].colour)) {
-                break;
-            }
-            if (tag.y >= uRanges[i].start && tag.y <= uRanges[i].end) {
-                bg = unpackColor(uRanges[i].colour).rgb;
-            }
-        }
-    }
+    // Selection is decided in the fragment stage, not here: whether a
+    // fragment is selected depends on where inside its quad it sits, and a
+    // vertex only knows its corner. Deciding per instance could only ever
+    // select whole clusters, and one cluster can be a ligature covering
+    // several characters.
 
     vFgColor = fg;
     vBgColor = bg;

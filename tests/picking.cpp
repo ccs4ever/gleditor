@@ -139,3 +139,21 @@ TEST(Picking, theStepNeverEscapesTheCluster) {
   EXPECT_EQ(render::clusterCharStep(3, -1.0F), 0U);
   EXPECT_EQ(render::clusterCharStep(0, 0.5F), 0U) << "an empty cluster";
 }
+
+// A selection ending inside a ligature has to cover part of that one quad. The
+// fraction is what carries it, so the range's edges are what get checked here;
+// the shader's use of them is covered by the backend comparison.
+TEST(Picking, aHighlightRangeDefaultsToCoveringWholeClusters) {
+  const render::HighlightRange range;
+  EXPECT_EQ(range.identity, 0U) << "zero identity terminates the shader's scan";
+  EXPECT_FLOAT_EQ(range.startFraction, 0.0F);
+  EXPECT_FLOAT_EQ(range.endFraction, 1.0F);
+}
+
+// The table is read per fragment and each element is eight words, so its size
+// has to stay well inside the 16 KB uniform block OpenGL ES 3.0 guarantees.
+TEST(Picking, theHighlightTableFitsTheSmallestGuaranteedUniformBlock) {
+  constexpr auto bytes = sizeof(render::HighlightRange) * render::maxHighlightRanges;
+  EXPECT_EQ(sizeof(render::HighlightRange), 32U) << "std140 stride must be a multiple of 16";
+  EXPECT_LE(bytes, 16U * 1024U);
+}

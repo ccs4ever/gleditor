@@ -39,17 +39,26 @@ std::string uniformBlock(const Backend backend, const ShaderStage stage) {
       out += "uniform mat4 uMVP;\n";
     }
 
+  } else {
+    // The highlight table is read by the fragment stage, not the vertex one:
+    // deciding whether a fragment is selected needs where inside its quad the
+    // fragment sits, which only exists per fragment. A vertex-stage decision
+    // could only ever select whole clusters, and a cluster can be a ligature
+    // covering several characters.
     out += "struct HighlightRange {\n"
-           "    uint start;\n"
-           "    uint end;\n"
+           "    uint identity;\n"
+           "    uint firstCluster;\n"
+           "    uint lastCluster;\n"
            "    uint colour;\n"
-           "    uint reserved;\n"
+           "    float startFraction;\n"
+           "    float endFraction;\n"
+           "    uint reserved0;\n"
+           "    uint reserved1;\n"
            "};\n";
     out += vulkan ? "layout(set = 0, binding = 0, std140) uniform Highlights {\n"
                   : "layout(std140) uniform Highlights {\n";
     out += std::format("    HighlightRange uRanges[{}];\n", maxHighlightRanges);
     out += "};\n";
-  } else {
     out += vulkan
                ? "layout(set = 0, binding = 1) uniform sampler2DArray uGlyphAtlas;\n"
                : "uniform sampler2DArray uGlyphAtlas;\n";

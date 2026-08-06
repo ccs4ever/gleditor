@@ -164,6 +164,9 @@ RendererRef handleArgs(const AppStateRef &state, render::Backend &backend,
       .append()
       .help("click at X,Y once the document has settled, moving the caret "
             "there, and print where it landed; may be given more than once");
+  parser.add_argument("--select")
+      .help("select the document byte range START,END once the document has "
+            "settled, as a drag would");
   parser.add_argument("--type")
       .default_value(std::string{})
       .help("text to insert at the caret once it has been placed");
@@ -227,6 +230,16 @@ RendererRef handleArgs(const AppStateRef &state, render::Backend &backend,
       }
     }
     state->typedText = parser.get<std::string>("--type");
+
+    if (const auto span = parser.present<std::string>("--select")) {
+      const auto comma = span->find(',');
+      if (std::string::npos == comma) {
+        throw std::runtime_error("--select expects START,END, got: " + *span);
+      }
+      state->requestedSelection = {
+          static_cast<std::uint32_t>(std::stoul(span->substr(0, comma))),
+          static_cast<std::uint32_t>(std::stoul(span->substr(comma + 1)))};
+    }
 
     if (parser.present<std::vector<std::string>>("--pick")) {
       for (const auto &pick :
@@ -317,6 +330,13 @@ int main(const int argc, char **argv) {
         }
         case SDL_EVENT_MOUSE_MOTION: {
           handleMouseMove(evt, state);
+          // Motion with the left button held is a drag, which extends the
+          // selection rather than moving the caret on its own.
+          if (0 != (evt.motion.state & SDL_BUTTON_LMASK)) {
+            state->dragX       = static_cast<int>(evt.motion.x);
+            state->dragY       = static_cast<int>(evt.motion.y);
+            state->dragPending = true;
+          }
           break;
         }
         case SDL_EVENT_MOUSE_BUTTON_DOWN: {

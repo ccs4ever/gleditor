@@ -84,10 +84,16 @@ TEST(ShaderSource, vertexIndexBuiltinDiffersOnVulkan) {
 TEST(ShaderSource, vulkanDeclaresUniformsThroughDescriptors) {
   const auto vert = vertexPreamble(Backend::Vulkan);
   EXPECT_THAT(vert, HasSubstr("layout(push_constant) uniform Push"));
-  EXPECT_THAT(vert,
+  const auto frag = fragmentPreamble(Backend::Vulkan);
+  // The highlight table is read per fragment -- selection depends on where
+  // inside a quad a fragment sits -- so it is declared in that stage, not the
+  // vertex one.
+  EXPECT_THAT(frag,
               HasSubstr("layout(set = 0, binding = 0, std140) uniform Highlights"));
-  EXPECT_THAT(fragmentPreamble(Backend::Vulkan),
+  EXPECT_THAT(frag,
               HasSubstr("layout(set = 0, binding = 1) uniform sampler2DArray"));
+  EXPECT_THAT(vert, testing::Not(HasSubstr("Highlights")))
+      << "a vertex-stage decision could only select whole clusters";
 }
 
 TEST(ShaderSource, glFamilyDeclaresPlainUniforms) {
@@ -123,7 +129,7 @@ TEST(ShaderSource, highlightArrayMatchesTheHostSideBound) {
       "uRanges[" + std::to_string(render::maxHighlightRanges) + "]";
   for (const auto backend :
        {Backend::OpenGL, Backend::OpenGLES, Backend::Vulkan}) {
-    EXPECT_THAT(vertexPreamble(backend), HasSubstr(expected))
+    EXPECT_THAT(fragmentPreamble(backend), HasSubstr(expected))
         << render::backendName(backend);
     EXPECT_THAT(vertexPreamble(backend),
                 HasSubstr("#define GLEDITOR_MAX_HIGHLIGHTS " +

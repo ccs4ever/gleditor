@@ -370,6 +370,78 @@ void Doc::draw(RenderState &state, const glm::mat4 &viewProjection) const {
   }
 }
 
+std::optional<render::HighlightRange>
+Page::highlightFor(const std::uint32_t selStart, const std::uint32_t selEnd,
+                   const std::uint32_t colour) const {
+  if (selEnd <= selStart || clusters.empty()) {
+    return std::nullopt;
+  }
+  // Clip the span to this page, in page-local bytes.
+  const auto pageStart = textOffset;
+  const auto pageEnd   = textOffset + textBytes;
+  if (selEnd <= pageStart || selStart >= pageEnd) {
+    return std::nullopt;
+  }
+  const auto localStart = std::max(selStart, pageStart) - textOffset;
+  const auto localEnd   = std::min(selEnd, pageEnd) - textOffset;
+
+  const auto text = layout->get_text().raw();
+
+  std::optional<std::size_t> first;
+  std::size_t last = 0;
+  for (std::size_t i = 0; i < clusters.size(); i++) {
+    const auto &box = clusters[i];
+    const auto begin = box.byteStart;
+    const auto end   = box.byteStart + box.byteLength;
+    // Half-open overlap: a cluster is covered when any of its bytes are.
+    if (end <= localStart || begin >= localEnd) {
+      continue;
+    }
+    if (!first) {
+      first = i;
+    }
+    last = i;
+  }
+  if (!first) {
+    return std::nullopt;
+  }
+
+  // Where inside the edge clusters the span begins and ends, counted in
+  // characters so the edge cannot land mid-glyph of a ligature.
+  const auto fractionInto = [&text](const ClusterBox &box,
+                                    const std::uint32_t offset) -> float {
+    if (0 == box.charCount) {
+      return 0.0F;
+    }
+    const auto clamped = std::clamp(offset, box.byteStart,
+                                    box.byteStart + box.byteLength);
+    const auto chars   = utf8Length(std::string_view(text).substr(
+        box.byteStart, clamped - box.byteStart));
+    return static_cast<float>(chars) / static_cast<float>(box.charCount);
+  };
+
+  render::HighlightRange range;
+  range.identity =
+      render::packTagIdentity(render::tagKindGlyph, doc->documentIndex(),
+                              pageIndex);
+  range.firstCluster  = static_cast<std::uint32_t>(*first);
+  range.lastCluster   = static_cast<std::uint32_t>(last);
+  range.colour        = colour;
+  range.startFraction = fractionInto(clusters[*first], localStart);
+  range.endFraction   = fractionInto(clusters[last], localEnd);
+  return range;
+}
+
+void Doc::highlightsFor(const std::uint32_t selStart, const std::uint32_t selEnd,
+                        const std::uint32_t colour,
+                        std::vector<render::HighlightRange> &out) const {
+  for (const auto &page : pages) {
+    if (auto range = page.highlightFor(selStart, selEnd, colour)) {
+      out.push_back(*range);
+    }
+  }
+}
+
 std::optional<std::uint32_t>
 Doc::offsetForPick(const render::PickingTag &tag) const {
   const auto *target = page(tag.pageIndex);

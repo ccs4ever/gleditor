@@ -532,12 +532,23 @@ void DeviceGL::bindGlyphTexture(const TextureHandle texture) {
 }
 
 void DeviceGL::setHighlights(const std::span<const HighlightRange> ranges) {
-  const auto count =
-      std::min<std::size_t>(ranges.size(), maxHighlightRanges);
+  const auto count = std::min<std::size_t>(ranges.size(), maxHighlightRanges);
   api.BindBuffer(GL_UNIFORM_BUFFER, highlightUbo);
-  api.BufferSubData(GL_UNIFORM_BUFFER, 0,
-                    static_cast<GLsizeiptr>(count * sizeof(HighlightRange)),
-                    ranges.data());
+  if (0 != count) {
+    api.BufferSubData(GL_UNIFORM_BUFFER, 0,
+                      static_cast<GLsizeiptr>(count * sizeof(HighlightRange)),
+                      ranges.data());
+  }
+  // The shader stops at the first zeroed entry, so one has to be written after
+  // the last real range. Without it a shorter list than last frame's leaves the
+  // tail of the old one in place -- clearing a selection left it on screen.
+  if (count < static_cast<std::size_t>(maxHighlightRanges)) {
+    const HighlightRange terminator{};
+    api.BufferSubData(GL_UNIFORM_BUFFER,
+                      static_cast<GLintptr>(count * sizeof(HighlightRange)),
+                      static_cast<GLsizeiptr>(sizeof(HighlightRange)),
+                      &terminator);
+  }
   api.BindBuffer(GL_UNIFORM_BUFFER, 0);
 }
 
