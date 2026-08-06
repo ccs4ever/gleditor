@@ -35,6 +35,8 @@ VkBufferUsageFlags bufferUsage(const BufferKind kind) {
            VK_BUFFER_USAGE_TRANSFER_DST_BIT;
   case BufferKind::Uniform:
     return VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT;
+  case BufferKind::Readback:
+    return VK_BUFFER_USAGE_TRANSFER_DST_BIT;
   }
   throw std::invalid_argument("DeviceVK: unknown buffer kind");
 }

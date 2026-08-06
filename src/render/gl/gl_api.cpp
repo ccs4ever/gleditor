@@ -41,6 +41,8 @@ void GLApi::load() {
   GLEDITOR_RESOLVE(BufferData);
   GLEDITOR_RESOLVE(BufferSubData);
   GLEDITOR_RESOLVE(CopyBufferSubData);
+  GLEDITOR_RESOLVE(MapBufferRange);
+  GLEDITOR_RESOLVE(UnmapBuffer);
 
   GLEDITOR_RESOLVE(GenVertexArrays);
   GLEDITOR_RESOLVE(DeleteVertexArrays);
@@ -104,6 +106,10 @@ void GLApi::load() {
   GLEDITOR_RESOLVE(GetError);
   GLEDITOR_RESOLVE(GetString);
   GLEDITOR_RESOLVE(DrawArraysInstanced);
+
+  GLEDITOR_RESOLVE(FenceSync);
+  GLEDITOR_RESOLVE(ClientWaitSync);
+  GLEDITOR_RESOLVE(DeleteSync);
 
 #undef GLEDITOR_RESOLVE
 }

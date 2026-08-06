@@ -10,7 +10,9 @@
 #ifndef GLEDITOR_RENDER_GL_DEVICE_H
 #define GLEDITOR_RENDER_GL_DEVICE_H
 
+#include <array>
 #include <cstdint>
+#include <optional>
 #include <string>
 #include <unordered_map>
 #include <vector>
@@ -60,10 +62,32 @@ public:
   void drawGlyphs(const DrawUniforms &uniforms, BufferHandle vertices,
                   std::size_t vertexByteOffset,
                   std::uint32_t instanceCount) override;
+  void requestPickingTag(int x, int y) override;
+  std::optional<PickingResult> takePickingTag() override;
   FrameImage captureColorTarget() override;
   void waitIdle() override;
 
 private:
+  /// Picking reads outstanding at once. Two lets a read issued this frame land
+  /// while the next frame is already being drawn, which is the whole point of
+  /// reading through a pixel buffer object.
+  static constexpr std::size_t pickingSlots = 2;
+
+  /**
+   * @brief One asynchronous picking read in flight.
+   *
+   * glReadPixels into a bound pixel pack buffer returns immediately and the
+   * transfer completes on the GPU's own schedule; the fence is what says when
+   * the buffer's contents are actually there. Reading without one would either
+   * stall the pipeline or hand back the previous frame's bytes.
+   */
+  struct PickingSlot {
+    GLuint pbo{};
+    GLsync fence{};
+    int x{};
+    int y{};
+    bool pending{};
+  };
   /// A buffer object plus the metadata growBuffer() needs to copy it forward.
   struct BufferRecord {
     GLuint name{};
@@ -95,6 +119,11 @@ private:
   void createOffscreenTarget(int width, int height);
   void destroyOffscreenTarget();
 
+  void createPickingSlots();
+  void destroyPickingSlots();
+  /// Convert a top-down row to the bottom-up row OpenGL uses.
+  [[nodiscard]] int flipY(int y) const;
+
   Backend backendKind;
   GLApi api;
   void *glContext{};
@@ -108,6 +137,11 @@ private:
   std::uint32_t nextHandleId{1};
 
   PipelineHandle boundPipeline{};
+
+  std::array<PickingSlot, pickingSlots> picking{};
+  /// Next slot a request will use; slots are consumed in order so results come
+  /// back oldest first.
+  std::size_t nextPickingSlot{};
 
   GLuint highlightUbo{};
   GLuint offscreenFbo{};

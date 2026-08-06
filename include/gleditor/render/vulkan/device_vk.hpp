@@ -17,7 +17,9 @@
 #ifndef GLEDITOR_RENDER_VULKAN_DEVICE_H
 #define GLEDITOR_RENDER_VULKAN_DEVICE_H
 
+#include <array>
 #include <cstdint>
+#include <optional>
 #include <string>
 #include <unordered_map>
 #include <vector>
@@ -68,6 +70,8 @@ public:
   void drawGlyphs(const DrawUniforms &uniforms, BufferHandle vertices,
                   std::size_t vertexByteOffset,
                   std::uint32_t instanceCount) override;
+  void requestPickingTag(int x, int y) override;
+  std::optional<PickingResult> takePickingTag() override;
   FrameImage captureColorTarget() override;
   void waitIdle() override;
 
@@ -110,6 +114,19 @@ private:
     /// Camera uniforms for this frame; per-frame so a submitted frame keeps the
     /// values it was recorded with.
     BufferHandle cameraBuffer{};
+    /// Destination of this frame's picking read, if one was requested. The
+    /// frame's own fence already says when the copy has completed, so no extra
+    /// synchronisation object is needed.
+    BufferHandle pickingBuffer{};
+    /// Pixel this frame's picking read was aimed at.
+    int pickX{};
+    int pickY{};
+    /// A picking copy was recorded into this frame and its result has not been
+    /// collected yet.
+    bool pickPending{};
+    /// The frame carrying this pick has been submitted, so waiting on its fence
+    /// is enough to read the result.
+    bool pickSubmitted{};
   };
 
   // -- setup steps

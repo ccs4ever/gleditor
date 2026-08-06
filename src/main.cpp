@@ -30,8 +30,11 @@
 #include <glibmm/init.h>              // for init
 
 void handleMouseMove(const SDL_Event &evt, const AppStateRef &state) {
+  // Kept in window coordinates, top-down, which is what
+  // RenderDevice::requestPickingTag takes. OpenGL's bottom-up framebuffer
+  // convention is the GL backend's business, not the application's.
   state->mouseX = static_cast<int>(evt.motion.x);
-  state->mouseY = state->view.screenHeight - static_cast<int>(evt.motion.y);
+  state->mouseY = static_cast<int>(evt.motion.y);
 }
 
 void handleKeyPress(const SDL_Event &evt, const AppStateRef &state,
@@ -130,6 +133,10 @@ RendererRef handleArgs(const AppStateRef &state, render::Backend &backend,
   parser.add_argument("--profile")
       .help("perform initial setup, then quit")
       .flag();
+  parser.add_argument("--pick")
+      .append()
+      .help("read the picking tag at X,Y once the document has settled and "
+            "print it; may be given more than once");
   parser.add_argument("--screenshot")
       .default_value(std::string{})
       .help("write the first rendered frame to this path as a PPM");
@@ -165,6 +172,18 @@ RendererRef handleArgs(const AppStateRef &state, render::Backend &backend,
     }
     state->profiling      = parser["--profile"] == true;
     state->screenshotPath = parser.get<std::string>("--screenshot");
+
+    if (parser.present<std::vector<std::string>>("--pick")) {
+      for (const auto &pick :
+           parser.get<std::vector<std::string>>("--pick")) {
+        const auto comma = pick.find(',');
+        if (std::string::npos == comma) {
+          throw std::runtime_error("--pick expects X,Y, got: " + pick);
+        }
+        state->requestedPicks.emplace_back(std::stoi(pick.substr(0, comma)),
+                                           std::stoi(pick.substr(comma + 1)));
+      }
+    }
 
     return renderer;
 

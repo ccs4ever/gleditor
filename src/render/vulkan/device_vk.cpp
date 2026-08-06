@@ -560,6 +560,10 @@ void DeviceVK::createCommandResources() {
           "vkCreateFence");
     frames[i].cameraBuffer =
         createBuffer(BufferKind::Uniform, sizeof(FrameUniforms));
+    // Destination for this slot's picking read: two unsigned integers, the
+    // uvec2 the fragment stage writes to the picking attachment.
+    frames[i].pickingBuffer = createBuffer(BufferKind::Readback,
+                                           2 * sizeof(std::uint32_t));
   }
 }
 

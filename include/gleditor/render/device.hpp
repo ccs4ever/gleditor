@@ -15,6 +15,7 @@
 
 #include <cstddef>
 #include <memory>
+#include <optional>
 #include <span>
 
 #include <gleditor/render/types.hpp>
@@ -124,6 +125,26 @@ public:
   virtual void drawGlyphs(const DrawUniforms &uniforms, BufferHandle vertices,
                           std::size_t vertexByteOffset,
                           std::uint32_t instanceCount) = 0;
+
+  /**
+   * @brief Queue a read of the picking target at one pixel.
+   *
+   * Call inside a frame, after the draws whose result should be sampled.
+   * Coordinates are in pixels from the top left of the drawable, the same
+   * convention as window and mouse coordinates.
+   *
+   * The read is asynchronous: it does not stall the pipeline and the answer is
+   * not available on return. Poll takePickingTag() on later frames. Requests
+   * beyond the number the device can have outstanding are dropped rather than
+   * queued, since a stale pick is worth less than a live frame.
+   */
+  virtual void requestPickingTag(int x, int y) = 0;
+
+  /**
+   * @brief Collect a picking result whose readback has completed.
+   * @return The oldest finished result, or nullopt if none is ready yet.
+   */
+  virtual std::optional<PickingResult> takePickingTag() = 0;
 
   /**
    * @brief Read the colour target back to host memory.

@@ -60,9 +60,10 @@ using PipelineHandle = Handle<PipelineTag>;
  *        Vulkan, its usage flags and memory properties.
  */
 enum class BufferKind : std::uint8_t {
-  Vertex,  ///< Per-instance glyph attributes.
-  Index,   ///< Element indices.
-  Uniform, ///< Shader-visible uniform block storage.
+  Vertex,   ///< Per-instance glyph attributes.
+  Index,    ///< Element indices.
+  Uniform,  ///< Shader-visible uniform block storage.
+  Readback, ///< Transfer destination the host reads, such as a picking result.
 };
 
 /**
@@ -155,6 +156,36 @@ struct FrameImage {
   int width{};
   int height{};
   std::vector<std::uint8_t> rgba;
+};
+
+/**
+ * @brief Identity of whatever was drawn at a queried pixel.
+ *
+ * The glyph pipeline writes this to its second colour attachment, so every
+ * fragment carries the identity of the thing that produced it. Values come from
+ * Doc::VBORow::tag: kind 2 is a page background and kind 3 a glyph, whose index
+ * is the byte offset of the glyph's cluster within the page text.
+ */
+struct PickingTag {
+  std::uint32_t kind{};
+  std::uint32_t index{};
+
+  /// True when nothing was drawn at the queried pixel.
+  [[nodiscard]] bool empty() const { return 0 == kind && 0 == index; }
+  bool operator==(const PickingTag &oth) const = default;
+};
+
+/**
+ * @brief A completed picking query.
+ *
+ * Readback is asynchronous, so a result names the pixel it came from: by the
+ * time it arrives the cursor has usually moved on, and a caller that assumed
+ * otherwise would attribute the tag to the wrong position.
+ */
+struct PickingResult {
+  int x{};
+  int y{};
+  PickingTag tag;
 };
 
 /**
