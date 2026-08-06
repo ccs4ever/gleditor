@@ -6,6 +6,7 @@
 
 #include <SDL3/SDL_video.h>
 
+#include <cstring>
 #include <stdexcept>
 #include <string>
 
@@ -19,6 +20,13 @@ namespace {
  * A missing entry point means the context is older or less capable than the
  * backend requires, and finding that out here beats a null call later.
  */
+/// Resolve an entry point that may legitimately be absent.
+template <typename Fn> bool resolveOptional(Fn &slot, const char *name) {
+  auto *addr = SDL_GL_GetProcAddress(name);
+  slot       = reinterpret_cast<Fn>(addr);
+  return nullptr != addr;
+}
+
 template <typename Fn> void resolve(Fn &slot, const char *name) {
   // SDL returns a generic function pointer; the cast to the specific
   // signature is the documented way to consume it.
@@ -105,6 +113,7 @@ void GLApi::load() {
   GLEDITOR_RESOLVE(GetIntegerv);
   GLEDITOR_RESOLVE(GetError);
   GLEDITOR_RESOLVE(GetString);
+  GLEDITOR_RESOLVE(GetStringi);
   GLEDITOR_RESOLVE(DrawArraysInstanced);
 
   GLEDITOR_RESOLVE(FenceSync);
@@ -112,6 +121,39 @@ void GLApi::load() {
   GLEDITOR_RESOLVE(DeleteSync);
 
 #undef GLEDITOR_RESOLVE
+}
+
+bool GLApi::hasExtension(const char *name) const {
+  if (nullptr == GetStringi || nullptr == GetIntegerv) {
+    return false;
+  }
+  // A core profile returns nothing for glGetString(GL_EXTENSIONS); the indexed
+  // query is the only way to read the list.
+  GLint count = 0;
+  GetIntegerv(GL_NUM_EXTENSIONS, &count);
+  for (GLint i = 0; i < count; i++) {
+    const auto *entry = GetStringi(GL_EXTENSIONS, static_cast<GLuint>(i));
+    if (nullptr != entry &&
+        0 == std::strcmp(reinterpret_cast<const char *>(entry), name)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+bool GLApi::loadDebugOutput() {
+  if (!hasExtension("GL_KHR_debug")) {
+    return false;
+  }
+  // OpenGL ES exposes the extension under its suffixed names; desktop OpenGL
+  // promoted them to core spellings. Either may be the one this context has.
+  const bool haveCallback =
+      resolveOptional(DebugMessageCallback, "glDebugMessageCallback") ||
+      resolveOptional(DebugMessageCallback, "glDebugMessageCallbackKHR");
+  const bool haveControl =
+      resolveOptional(DebugMessageControl, "glDebugMessageControl") ||
+      resolveOptional(DebugMessageControl, "glDebugMessageControlKHR");
+  return haveCallback && haveControl;
 }
 
 } // namespace render::gl

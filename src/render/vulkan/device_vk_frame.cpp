@@ -294,6 +294,11 @@ void DeviceVK::endFrame() {
   }
   frameActive = false;
 
+  // Raise anything validation objected to while this frame was recorded, from
+  // here rather than from inside the messenger, where unwinding through the
+  // driver's stack would be undefined.
+  diagnostics.raiseIfError("vulkan validation reported an error");
+
   auto &frame = frames[frameIndex];
   vkCmdEndRenderPass(frame.commands);
 

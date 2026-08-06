@@ -49,6 +49,29 @@ it does not mean touching the document code.
   same conventional matrix. Framebuffer rows likewise: picking coordinates are
   window coordinates, top-down, and the OpenGL backend flips them internally.
 
+### Driver diagnostics
+
+Both APIs report problems through a C function pointer the driver calls on its
+own stack. An exception must not leave such a callback: unwinding through a
+frame with no C++ exception tables is undefined, and it happens midway through a
+driver call. The callbacks therefore only record, into a shared
+`render::DiagnosticSink`; the device raises what was recorded from `endFrame()`,
+its own code, where throwing is defined and the render loop's handler can report
+it.
+
+- **OpenGL and OpenGL ES** use `KHR_debug`, which is core only in OpenGL 4.3 and
+  OpenGL ES 3.2 -- above what these backends require -- so the entry points are
+  resolved optionally and a context without them simply reports nothing.
+  Delivery is synchronous, so a recorded error belongs to the call that caused
+  it rather than to some later frame.
+- **Vulkan** records through its debug messenger when the validation layers are
+  installed.
+
+API errors and undefined behaviour end the frame; warnings and notices are
+logged once each, deduplicated so a driver complaining every draw call does not
+bury the log. A render thread that stops this way sets the process exit status,
+so a renderer that dies is not reported as a successful run.
+
 ### Picking
 
 The glyph pipeline writes a second colour attachment holding the identity of

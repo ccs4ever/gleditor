@@ -251,7 +251,8 @@ void Renderer::operator()(AutoSDLWindow &window) {
     // from its event loop.
     std::cerr << std::format("render thread ({} backend) failed: {}\n",
                              render::backendName(backendKind), err.what());
-    this->state->alive = false;
+    this->state->renderFailed = true;
+    this->state->alive        = false;
   }
 }
 

@@ -24,6 +24,10 @@ struct AppState {
   /// Written before the render thread starts and only read after.
   std::vector<std::pair<int, int>> requestedPicks;
   std::atomic_bool alive{true};
+  /// Set when the render thread stops because of an error rather than because
+  /// it was asked to. The process exit status follows it, so a renderer that
+  /// dies is not reported as a successful run.
+  std::atomic_bool renderFailed{false};
   bool profiling{};
   std::atomic<std::chrono::duration<float>> frameTimeDelta;
   std::atomic_int mouseX;
