@@ -178,13 +178,72 @@ struct FrameImage {
  * is the byte offset of the glyph's cluster within the page text.
  */
 struct PickingTag {
+  /// 0 when nothing was drawn, 2 for a page background, 3 for a glyph.
   std::uint32_t kind{};
-  std::uint32_t index{};
+  /// Which open document the fragment belongs to.
+  std::uint32_t docIndex{};
+  /// Which page of that document.
+  std::uint32_t pageIndex{};
+  /// Index into the page's cluster table. One quad is one cluster, which may
+  /// cover several characters, so this names the cluster and not a character.
+  std::uint32_t clusterIndex{};
+  /**
+   * @brief Where across the picked quad the fragment sat, 0 at its left edge
+   *        and 1 at its right.
+   *
+   * This is what makes a click inside a ligature resolvable. A quad may stand
+   * for "ffi" or for a letter carrying combining marks, and the character
+   * boundaries inside it have no fragment of their own to pick; the fraction
+   * says how far along the caller landed, and the cluster's character count
+   * says how many boundaries to divide that among.
+   */
+  float fraction{};
 
   /// True when nothing was drawn at the queried pixel.
-  [[nodiscard]] bool empty() const { return 0 == kind && 0 == index; }
+  [[nodiscard]] bool empty() const { return 0 == kind; }
+  /// Position only: two results at the same place with different fractions are
+  /// the same object, which is what "has the cursor moved onto something new"
+  /// asks.
+  [[nodiscard]] bool sameObject(const PickingTag &oth) const {
+    return kind == oth.kind && docIndex == oth.docIndex &&
+           pageIndex == oth.pageIndex && clusterIndex == oth.clusterIndex;
+  }
   bool operator==(const PickingTag &oth) const = default;
 };
+
+/// Bit widths of the identity word a glyph instance carries. Packed rather
+/// than given a word each because the attachment is four words wide and the
+/// cluster index and the fraction need one each.
+inline constexpr std::uint32_t tagKindBits = 4;
+inline constexpr std::uint32_t tagDocBits  = 14;
+inline constexpr std::uint32_t tagPageBits = 14;
+
+/// Pack the identity word written to Doc::VBORow::tag[0].
+inline constexpr std::uint32_t packTagIdentity(const std::uint32_t kind,
+                                               const std::uint32_t docIndex,
+                                               const std::uint32_t pageIndex) {
+  return ((kind & ((1U << tagKindBits) - 1U)) << (tagDocBits + tagPageBits)) |
+         ((docIndex & ((1U << tagDocBits) - 1U)) << tagPageBits) |
+         (pageIndex & ((1U << tagPageBits) - 1U));
+}
+
+/// Scale the fragment stage encodes the quad fraction with. Fixed point rather
+/// than a float because the attachment holds unsigned integers.
+inline constexpr std::uint32_t tagFractionScale = 65535;
+
+/// Decode the four words read back from the picking attachment.
+inline PickingTag unpackPickingTag(const std::uint32_t identity,
+                                   const std::uint32_t clusterIndex,
+                                   const std::uint32_t fraction) {
+  PickingTag tag;
+  tag.kind      = identity >> (tagDocBits + tagPageBits);
+  tag.docIndex  = (identity >> tagPageBits) & ((1U << tagDocBits) - 1U);
+  tag.pageIndex = identity & ((1U << tagPageBits) - 1U);
+  tag.clusterIndex = clusterIndex;
+  tag.fraction     = static_cast<float>(fraction) /
+                 static_cast<float>(tagFractionScale);
+  return tag;
+}
 
 /**
  * @brief A completed picking query.

@@ -267,7 +267,7 @@ std::optional<PickingResult> DeviceVK::takePickingTag() {
     }
     const auto *values = static_cast<const std::uint32_t *>(bufferIt->second.mapped);
     return PickingResult{frame.pickX, frame.pickY,
-                         PickingTag{values[0], values[1]}};
+                         unpackPickingTag(values[0], values[1], values[2])};
   }
   return std::nullopt;
 }

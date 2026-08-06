@@ -30,6 +30,11 @@ GLEDITOR_OUT(1) vec3 vBgColor;
 GLEDITOR_OUT(2) vec2 vTexCoord;
 GLEDITOR_OUT(3) float vLayer;
 GLEDITOR_OUT_FLAT(4) uvec2 vTag;
+// Where across the quad this vertex sits, 0 at the left edge and 1 at the
+// right. Interpolated, unlike the tag, because the whole point is to know
+// where inside the quad a fragment landed: one quad can be a whole ligature,
+// and the character boundaries within it have no geometry of their own.
+GLEDITOR_OUT(5) float vQuadU;
 
 vec4 unpackColor(uint bits) {
     return vec4(float((bits >> 24) & 255u),
@@ -60,6 +65,7 @@ void main() {
         vTexCoord = vec2(0.0);
         vLayer = 0.0;
         vTag = uvec2(0u);
+        vQuadU = 0.0;
         return;
     }
 
@@ -77,10 +83,11 @@ void main() {
     vec3 fg = unpackColor(fgcolor).rgb;
     vec3 bg = unpackColor(bgcolor).rgb;
 
-    // Highlight lookup. Only glyph rows (tag.x == 3) carry a text offset in
-    // tag.y; the loop is bounded by the block size so it cannot read past the
-    // end of the array.
-    if (3u == tag.x) {
+    // Highlight lookup. Ranges are in cluster indices, which is what tag.y
+    // holds for a glyph row; the loop is bounded by the block size so it
+    // cannot read past the end of the array. tag.x packs kind, document and
+    // page, so the kind is its top field rather than the whole word.
+    if (3u == (tag.x >> 28)) {
         for (int i = 0; i < GLEDITOR_MAX_HIGHLIGHTS; i++) {
             if (0u == (uRanges[i].start | uRanges[i].end | uRanges[i].colour)) {
                 break;
@@ -99,5 +106,6 @@ void main() {
                                 (0 != (corner & 2)) ? texBox.y : 0.0);
     vLayer = lwh.x;
     vTag = tag;
+    vQuadU = (0 != (corner & 1)) ? 1.0 : 0.0;
 }
 // vi: set sw=4 sts=4 ts=4 et:

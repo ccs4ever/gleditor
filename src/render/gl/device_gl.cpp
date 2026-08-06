@@ -170,7 +170,7 @@ void DeviceGL::createOffscreenTarget(const int width, const int height) {
   api.BindRenderbuffer(GL_RENDERBUFFER, colourRbo);
   api.RenderbufferStorage(GL_RENDERBUFFER, GL_RGBA8, width, height);
   api.BindRenderbuffer(GL_RENDERBUFFER, pickingRbo);
-  api.RenderbufferStorage(GL_RENDERBUFFER, GL_RG32UI, width, height);
+  api.RenderbufferStorage(GL_RENDERBUFFER, GL_RGBA32UI, width, height);
   api.BindRenderbuffer(GL_RENDERBUFFER, depthRbo);
   // A sized format is required here: unsized GL_DEPTH_COMPONENT is not a valid
   // renderbuffer format on OpenGL ES.
@@ -682,7 +682,7 @@ std::optional<PickingResult> DeviceGL::takePickingTag() {
         GL_PIXEL_PACK_BUFFER, 0, pickingReadBytes, GL_MAP_READ_BIT));
     PickingResult result{slot.x, slot.y, {}};
     if (nullptr != mapped) {
-      result.tag = PickingTag{mapped[0], mapped[1]};
+      result.tag = unpackPickingTag(mapped[0], mapped[1], mapped[2]);
       api.UnmapBuffer(GL_PIXEL_PACK_BUFFER);
     }
     api.BindBuffer(GL_PIXEL_PACK_BUFFER, 0);
