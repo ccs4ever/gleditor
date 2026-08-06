@@ -50,3 +50,6 @@ gleditor_test
 .idea
 build
 docs
+
+# SPIR-V compiled from assets/shaders by `make shaders`
+assets/shaders/vulkan/*.spv

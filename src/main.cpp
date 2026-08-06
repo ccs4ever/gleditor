@@ -10,6 +10,7 @@
 #include <iostream>       // for basic_ostream, char_traits
 #include <locale>         // for locale
 #include <memory>         // for __shared_ptr_access, shared...
+#include <stdexcept>      // for runtime_error
 #include <mutex>          // for lock_guard
 #include <pangomm/init.h> // for init
 #include <string>         // for operator<<, basic_string
@@ -142,6 +143,12 @@ RendererRef handleArgs(const AppStateRef &state, render::Backend &backend,
     parser.parse_args(argc, argv);
 
     backend = render::backendFromName(parser.get<std::string>("--backend"));
+    if (!render::backendCompiledIn(backend)) {
+      throw std::runtime_error(
+          "The " + render::backendName(backend) +
+          " backend was not compiled into this binary. Rebuild with "
+          "GLEDITOR_ENABLE_VULKAN=1 to enable Vulkan.");
+    }
     std::cout << "backend: " << render::backendName(backend) << "\n";
 
     RendererRef renderer = Renderer::create(state, backend);

@@ -6,7 +6,6 @@
 
 #include <SDL3/SDL_video.h>
 
-#include <format>
 #include <memory>
 #include <stdexcept>
 #include <string>
@@ -17,34 +16,6 @@
 #endif
 
 namespace render {
-
-Backend backendFromName(const std::string &name) {
-  if ("opengl" == name || "gl" == name) {
-    return Backend::OpenGL;
-  }
-  if ("opengles" == name || "gles" == name || "es" == name) {
-    return Backend::OpenGLES;
-  }
-  if ("vulkan" == name || "vk" == name) {
-    return Backend::Vulkan;
-  }
-  throw std::invalid_argument(
-      std::format("Unknown render backend: {}. Expected one of "
-                  "opengl, opengles, vulkan.",
-                  name));
-}
-
-std::string backendName(const Backend backend) {
-  switch (backend) {
-  case Backend::OpenGL:
-    return "opengl";
-  case Backend::OpenGLES:
-    return "opengles";
-  case Backend::Vulkan:
-    return "vulkan";
-  }
-  return "unknown";
-}
 
 std::uint64_t backendWindowFlags(const Backend backend) {
   switch (backend) {
@@ -80,6 +51,21 @@ void configureBackendWindowAttributes(const Backend backend) {
     SDL_GL_SetAttribute(SDL_GL_DEPTH_SIZE, 24);
     SDL_GL_SetAttribute(SDL_GL_DOUBLEBUFFER, 1);
   }
+}
+
+bool backendCompiledIn(const Backend backend) {
+  switch (backend) {
+  case Backend::OpenGL:
+  case Backend::OpenGLES:
+    return true;
+  case Backend::Vulkan:
+#ifdef GLEDITOR_ENABLE_VULKAN
+    return true;
+#else
+    return false;
+#endif
+  }
+  return false;
 }
 
 std::unique_ptr<RenderDevice> createDevice(const Backend backend) {

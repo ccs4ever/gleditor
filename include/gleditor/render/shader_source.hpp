@@ -6,7 +6,7 @@
  * GLSL 3.30, GLSL ES 3.00 and Vulkan GLSL. Everything that genuinely differs
  * between those dialects -- the version directive, precision qualifiers,
  * whether varyings carry explicit locations, and how the uniforms are declared
- * -- is expressed through GLEDITOR_* macros that this module defines
+ * -- is expressed through GLEDITOR_ prefixed macros that this module defines
  * per backend and stage.
  */
 #ifndef GLEDITOR_RENDER_SHADER_SOURCE_H
@@ -24,7 +24,7 @@ enum class ShaderStage : std::uint8_t { Vertex, Fragment };
 
 /**
  * @brief Prepend the backend/stage preamble to a portable shader body.
- * @param body Contents of one of the assets/shaders/*.glsl files.
+ * @param body Contents of a portable shader body under assets/shaders.
  */
 std::string assembleShaderSource(Backend backend, ShaderStage stage,
                                  std::string_view body);

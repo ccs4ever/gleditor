@@ -19,17 +19,32 @@ jobs:
       run: sudo add-apt-repository ppa:hrzhu/sdl3-backport
     - name: update apt
       run: sudo apt-get update
-    # PKGS in the Makefile is: pangomm-2.48 sdl3 sdl3-image gl glu glew.
-    # SDL2 and spdlog are no longer used; sdl3-image is, and was missing.
+    # PKGS in the Makefile is: pangomm-2.48 sdl3 sdl3-image gl (+ vulkan when
+    # GLEDITOR_ENABLE_VULKAN is set). The GL and GLES entry points are resolved
+    # at runtime through SDL, so no GL library is linked; libgl-dev is still
+    # needed for GL/glcorearb.h. mesa-vulkan-drivers provides lavapipe, a
+    # software Vulkan device, and the validation layers catch API misuse that
+    # would otherwise only show up as a blank window.
     - name: packages
       run: >-
         sudo apt-get install -y
         libsdl3-dev libsdl3-image-dev
         libglm-dev libpangomm-2.48-dev
-        libglew-dev libgl1-mesa-dev libglu1-mesa-dev
+        libgl-dev libgl1-mesa-dev libglu1-mesa-dev
+        libvulkan-dev glslang-tools
+        mesa-vulkan-drivers vulkan-validationlayers
         libgmock-dev libgtest-dev
+        xvfb
         clang libclang-rt-dev make
     - name: make
-      run: make
+      run: make GLEDITOR_ENABLE_VULKAN=1
     - name: make test
-      run: make test
+      run: make GLEDITOR_ENABLE_VULKAN=1 test
+    # Render the sample document through each backend and require that they
+    # agree. A backend that silently stops drawing still exits zero, so the
+    # comparison -- not the exit code -- is what actually proves it works.
+    - name: backend parity
+      run: xvfb-run -s "-screen 0 1024x768x24" ./tools/compare-backends.sh
+      env:
+        LIBGL_ALWAYS_SOFTWARE: "1"
+        GALLIUM_DRIVER: llvmpipe

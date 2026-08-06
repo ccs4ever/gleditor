@@ -156,7 +156,7 @@ Page::Page(std::shared_ptr<Doc> aDoc, RenderState &state, glm::mat4 &model,
   int lastIdx = 0;
   int idx     = 0;
   auto xpen   = static_cast<float>(xMargin);
-  auto ypenF  = [&iter, yMargin] -> double {
+  auto ypenF  = [&iter] -> double {
     return ((static_cast<float>(iter.get_baseline()) -
              (iter.get_line_logical_extents().get_ascent() / 2.0)) /
             PANGO_SCALE) +
