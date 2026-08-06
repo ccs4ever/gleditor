@@ -148,6 +148,7 @@ public:
   /**
    * @brief Retrieve or create a glyph entry for the given character and font.
    * @param chr UTF-8 sequence representing a single codepoint or small cluster.
+   *            At most four bytes, the maximum length of one UTF-8 codepoint.
    * @param font Loaded Pango font to use for rasterization.
    * @return Sizes with UVs and pixel dimensions.
    * @throws std::invalid_argument if the provided sequence is too long.

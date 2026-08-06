@@ -196,12 +196,21 @@ int main(const int argc, char **argv) {
 
     std::jthread renderer(std::ref(*rend), std::ref(window));
 
+    // Milliseconds to block in SDL_WaitEventTimeout. Waiting rather than
+    // spinning on SDL_PollEvent keeps this thread off the CPU while idle; the
+    // timeout still lets the loop notice `alive` being cleared by the renderer.
+    constexpr int eventWaitMs = 100;
+
     while (state->alive) {
       SDL_Event evt;
-      while (state->alive && SDL_PollEvent(&evt)) {
+      if (!SDL_WaitEventTimeout(&evt, eventWaitMs)) {
+        continue;
+      }
+      do {
         switch (evt.type) {
         case SDL_EVENT_QUIT: {
           state->alive = false;
+          break;
         }
         case SDL_EVENT_KEY_DOWN: {
           handleKeyPress(evt, state, rend);
@@ -218,15 +227,20 @@ int main(const int argc, char **argv) {
           const auto height = evt.window.data2;
           std::cout << "window size changed(w/h): " << width << "/" << height
                     << "\n";
-          state->view.screenWidth  = width;
-          state->view.screenHeight = height;
+          {
+            // the render thread reads these under the same lock while building
+            // its projection matrix
+            std::lock_guard locker(state->view);
+            state->view.screenWidth  = width;
+            state->view.screenHeight = height;
+          }
           rend->push(RenderItemResize(width, height));
           break;
         }
         default:
           break;
         }
-      }
+      } while (state->alive && SDL_PollEvent(&evt));
     }
   } catch (const std::exception &e) {
     std::cerr << "Error: " << e.what() << "\n";

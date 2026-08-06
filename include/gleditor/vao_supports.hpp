@@ -87,6 +87,10 @@ private:
   void reallocate(long vertexRes, long indexRes);
   void allocateBuffers();
   void deallocateBuffers();
+  /// Delete the given GL objects. Static so that the destructor can hand the
+  /// names to the render thread without capturing a soon-to-be-dead `this`.
+  static void releaseBuffers(unsigned int vao, unsigned int vbo,
+                             unsigned int ibo, unsigned int ubo);
   void defragmentFreeLists();
 };
 

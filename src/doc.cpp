@@ -40,18 +40,50 @@
 #include <gleditor/glyphcache/types.hpp> // for TextureCoords, PointF, Rect
 #include <glm/gtx/string_cast.hpp>
 
+/// Unpack the layer/width/height triple written by
+/// Doc::VBORow::layerWidthHeight. The field widths must stay in step with that
+/// function and with lwh() in assets/glsl/main.geom.glsl.
 glm::vec3 lwh(const uint packed3DDims) {
-  return {packed3DDims >> static_cast<uint>(24),
-          packed3DDims >> static_cast<uint>(12) & static_cast<uint>(4095),
-          packed3DDims & static_cast<uint>(4095)};
+  return {packed3DDims >> static_cast<uint>(28),
+          packed3DDims >> static_cast<uint>(14) & static_cast<uint>(16383),
+          packed3DDims & static_cast<uint>(16383)};
 }
 
-Page::Page(std::shared_ptr<Doc> doc, GLState &state, glm::mat4 &model,
-           Glib::RefPtr<Pango::Layout> layout)
-    : Drawable(model), doc(std::move(doc)), layout(std::move(layout)) {
+/// Byte at @p pos widened without sign extension, for comparing against byte
+/// order marks.
+unsigned int byteAt(const std::string &str, const std::size_t pos) {
+  return static_cast<unsigned char>(str[pos]);
+}
+
+/// Length in bytes of the UTF-8 sequence introduced by @p lead. Continuation
+/// and invalid bytes report 1 so that callers always make forward progress.
+int utf8SequenceLength(const char lead) {
+  const auto byte = static_cast<unsigned char>(lead);
+  if (byte < 0x80U) {
+    return 1;
+  }
+  if ((byte & 0xE0U) == 0xC0U) {
+    return 2;
+  }
+  if ((byte & 0xF0U) == 0xE0U) {
+    return 3;
+  }
+  if ((byte & 0xF8U) == 0xF0U) {
+    return 4;
+  }
+  return 1;
+}
+
+// The constructor parameters are named with a leading `a` so that the body can
+// refer to the members without ambiguity: the members are move-constructed from
+// the parameters, which leaves the parameters empty.
+Page::Page(std::shared_ptr<Doc> aDoc, GLState &state, glm::mat4 &model,
+           Glib::RefPtr<Pango::Layout> aLayout)
+    : Drawable(model), doc(std::move(aDoc)), layout(std::move(aLayout)) {
   static_assert(sizeof(Doc::VBORow) == 48);
+  const auto &layout = this->layout;
   std::cout << "NEW PAGE: " << &this->doc << " " << glm::to_string(model) << "\n";
-  const auto &line  = this->layout->get_const_line(this->layout->get_line_count() - 1);
+  const auto &line  = layout->get_const_line(layout->get_line_count() - 1);
   int len           = line->get_length();
   const int charCnt = line->get_start_index() + (0 == len ? 1 : len);
   // interleaved data --
@@ -107,8 +139,13 @@ Page::Page(std::shared_ptr<Doc> doc, GLState &state, glm::mat4 &model,
                           std::min(16383U, static_cast<uint>(layH))),
                   {2, 1}},
   };
-  auto vertMax = std::min(charCnt, 100000);
-  vertexData.reserve(vertMax);
+  // vertexData is used as a ring buffer of exactly vertMax rows: the loop below
+  // writes through an iterator and flushes to the VBO whenever it wraps. The
+  // rows past the page background must therefore actually exist -- reserve()
+  // only grows the capacity, so writing through begin() + 1 would run past
+  // size(). Two rows is the minimum: one background row plus one glyph row.
+  const auto vertMax = std::max(2, std::min(charCnt, 100000));
+  vertexData.resize(vertMax);
   auto logAttrs = layout->get_log_attrs();
   auto iter     = layout->get_iter();
   /*std::cout << "char count: " << charCnt << " attrs size: " << logAttrs.size()
@@ -186,10 +223,14 @@ Page::Page(std::shared_ptr<Doc> doc, GLState &state, glm::mat4 &model,
               << (unsigned char)text[idx]
               << (text[idx] == '\n') << "\n";*/
     bool hasNewLine = text.at(idx - 1) == '\n';
-    std::string_view tmp(text.cbegin() + lastIdx,
-                         text.cbegin() + (idx - lastIdx > 3 ? lastIdx + 3
-                                          : hasNewLine      ? idx - 1
-                                                            : idx));
+    // Render the leading codepoint of the cluster. Slicing at a fixed byte
+    // count would cut a 4-byte sequence in half and hand Pango invalid UTF-8,
+    // so the cut is made on a sequence boundary instead.
+    const int clusterEnd = hasNewLine ? idx - 1 : idx;
+    const int clusterLen =
+        std::min(clusterEnd - lastIdx, utf8SequenceLength(text[lastIdx]));
+    std::string_view tmp(text.data() + lastIdx,
+                         static_cast<std::size_t>(std::max(0, clusterLen)));
     if (idx - lastIdx > 3) {
       /*std::string_view tmp2(
           text.cbegin() + lastIdx,
@@ -357,42 +398,48 @@ Doc::Doc(const RendererRef &renderer, const glm::mat4 &model,
   std::cout << "NEW DOC: " << this << " " << fileName << " "
             << glm::to_string(model) << "\n";
   std::string tmpText = Glib::file_get_contents(docFile);
-  std::cout << std::format("bom: {:x} {:x} {:x}\n", tmpText[0], tmpText[1],
-                           tmpText[2]);
+  // Read no further than the file actually goes: a file shorter than three
+  // bytes has no third byte to inspect.
+  for (std::size_t i = 0; i < std::min<std::size_t>(3, tmpText.size()); i++) {
+    std::cout << std::format("bom[{}]: {:02x}\n", i,
+                             static_cast<unsigned char>(tmpText[i]));
+  }
   if (tmpText.size() >= 3 && static_cast<unsigned char>(tmpText[0]) == 0xEF &&
       static_cast<unsigned char>(tmpText[1]) == 0xBB &&
       static_cast<unsigned char>(tmpText[2]) == 0xBF) {
     std::cout << "found utf8 bom: " << tmpText.size() << " "
               << tmpText.capacity() << "\n";
     text = Glib::ustring(tmpText.data() + 3, tmpText.data() + tmpText.size());
-    auto iter = text.begin();
-    std::cout << "validate: " << text.validate(iter) << " "
-              << (text == text.make_valid() ? "" : text.make_valid()) << "\n";
-    std::cout << "first bad: " << *iter << "\n";
+    // `char` is signed on most targets, so the BOM bytes have to be widened
+    // through `unsigned char`; comparing the raw char against 0xEF/0xFF is
+    // never true and silently disables the detection below.
   } else if (tmpText.size() >= 4 &&
-             ((/*utf32BE*/ static_cast<int>(tmpText[0]) == 0x0 &&
-               static_cast<int>(tmpText[1]) == 0x0 &&
-               static_cast<int>(tmpText[2]) == 0xFE &&
-               static_cast<int>(tmpText[3]) == 0xFF) ||
-              (/*utf32LE*/ static_cast<int>(tmpText[0]) == 0xFF &&
-               static_cast<int>(tmpText[1]) == 0xFE &&
-               static_cast<int>(tmpText[2]) == 0x0 &&
-               static_cast<int>(tmpText[3]) == 0x0))) {
+             ((/*utf32BE*/ byteAt(tmpText, 0) == 0x00 &&
+               byteAt(tmpText, 1) == 0x00 && byteAt(tmpText, 2) == 0xFE &&
+               byteAt(tmpText, 3) == 0xFF) ||
+              (/*utf32LE*/ byteAt(tmpText, 0) == 0xFF &&
+               byteAt(tmpText, 1) == 0xFE && byteAt(tmpText, 2) == 0x00 &&
+               byteAt(tmpText, 3) == 0x00))) {
     throw std::logic_error("utf32 not supported yet");
   } else if (tmpText.size() >= 2 &&
-             ((/*utf16BE*/ static_cast<int>(tmpText[0]) == 0xFE &&
-               static_cast<int>(tmpText[1]) == 0xFF) ||
-              (/*utf16LE*/ static_cast<int>(tmpText[0]) == 0xFF &&
-               static_cast<int>(tmpText[1]) == 0xFE))) {
+             ((/*utf16BE*/ byteAt(tmpText, 0) == 0xFE &&
+               byteAt(tmpText, 1) == 0xFF) ||
+              (/*utf16LE*/ byteAt(tmpText, 0) == 0xFF &&
+               byteAt(tmpText, 1) == 0xFE))) {
     throw std::logic_error("utf16 not supported yet");
   } else {
     text = tmpText;
   }
   auto iter = text.begin();
-  std::cout << "validate: " << text.validate(iter) << " "
-            << (text == text.make_valid()) << "\n";
-  std::cout << "first bad: " << *iter << "\n";
-  std::cout << "bom: " << text[0] << " " << text[1] << " " << text[2] << "\n";
+  const bool valid = text.validate(iter);
+  std::cout << "validate: " << valid << "\n";
+  if (!valid) {
+    // Only a failed validate() leaves `iter` on a real character; on success it
+    // is the end iterator and must not be dereferenced.
+    std::cout << "first bad offset: " << std::distance(text.begin(), iter)
+              << "\n";
+    text = text.make_valid();
+  }
 }
 
 void Doc::makePages(GLState &glState) {

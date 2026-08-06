@@ -84,18 +84,26 @@ void GlyphCache::initTextureArray() {
 }
 
 auto GlyphCache::getBestPalette(const Rect &charBox) {
-  for (auto it = palettes.begin(); it != palettes.end(); ++it) {
-    if (it->canFit(charBox)) {
-      return it + 0;
-    }
+  const auto fits = [&charBox](GlyphPalette &pal) { return pal.canFit(charBox); };
+
+  if (const auto it = std::ranges::find_if(palettes, fits);
+      it != palettes.end()) {
+    return it;
   }
   if (palettes.size() >= static_cast<unsigned long>(maxLayers)) {
     throw std::overflow_error("Out of Palettes!!!");
   }
   // std::cout << "creating palette\n";
   palettes.emplace_back(Rect{Length{size}, Length{size}}, gl);
+  // The sort moves the new palette somewhere unpredictable -- palettes with
+  // equal fill compare equivalent and std::sort is not stable -- so look it up
+  // again rather than assuming it is still the last element.
   std::ranges::sort(palettes);
-  return std::prev(palettes.end());
+  const auto placed = std::ranges::find_if(palettes, fits);
+  if (placed == palettes.end()) {
+    throw std::overflow_error("Glyph too large for an empty palette");
+  }
+  return placed;
 }
 
 inline Glib::RefPtr<Pango::Layout>
@@ -170,7 +178,10 @@ GlyphCache::Sizes GlyphCache::addToCache(const std::string &chr,
 
 GlyphCache::Sizes GlyphCache::put(const std::string_view &chr,
                                   const FontPtr &font) {
-  if (chr.size() > 3) {
+  // A single UTF-8 codepoint occupies at most four bytes; rejecting at three
+  // turned every astral-plane character (emoji, CJK extensions, ...) into an
+  // exception.
+  if (chr.size() > 4) {
     throw std::invalid_argument(
         std::format("GlyphCache: bad character: {}", chr));
   }

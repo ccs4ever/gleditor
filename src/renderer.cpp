@@ -19,9 +19,9 @@
 #include <iomanip>       // for operator<<, quoted
 #include <iostream>      // for cerr, cout
 #include <map>           // for map
+#include <gleditor/shader_introspect.hpp> // for ShaderDecl, parseShaderDecls
 #include <memory>        // for allocator, shared_ptr
 #include <mutex>         // for lock_guard
-#include <regex>         // for regex_iterator, sregex_...
 #include <stdexcept>     // for runtime_error, logic_error
 #include <string>        // for basic_string, char_traits
 #include <thread>        // for get_id
@@ -148,15 +148,27 @@ void Renderer::newDoc(GLState &glState) {
   std::cerr << "doc use count: " << doc.use_count() << "\n";
 }
 
+void Renderer::reapFinishedDocLoads() {
+  const auto done = std::ranges::remove_if(pendingDocLoads, [](auto &fut) {
+    return !fut.valid() ||
+           std::future_status::ready == fut.wait_for(std::chrono::seconds{0});
+  });
+  pendingDocLoads.erase(done.begin(), done.end());
+}
+
+bool Renderer::hasPendingWork() const {
+  return !renderQueue.empty() || !pendingDocLoads.empty();
+}
+
 void Renderer::openDoc(GLState &glState, std::string &fileName) {
-  static std::vector<std::future<void>> futs;
   const auto numDocsOpened = static_cast<double>(glState.docs.size());
   const auto newDocPosition =
       glm::translate(glm::mat4(1.0), glm::vec3(50.0 * numDocsOpened, 0.0, 0.0));
   std::cout << "doc pos: " << numDocsOpened << " "
             << glm::to_string(newDocPosition) << "\n";
   auto docPtr = Doc::create(getPtr(), newDocPosition, fileName);
-  futs.push_back(std::async(
+  reapFinishedDocLoads();
+  pendingDocLoads.push_back(std::async(
       std::launch::async, [&glState, docPtr] { docPtr->makePages(glState); }));
   glState.docs.push_back(docPtr->getPtr());
 }
@@ -176,10 +188,6 @@ inline GLenum getShaderType(const std::string &stage) {
 }
 
 void setupShaders(GLState &glState) {
-
-  static std::regex uniformsReg(
-      R"(^\s*(uniform|in)\s+([a-zA-Z]+)(\d+)?\S*?\s+(\w+)\s*;)",
-      std::regex_constants::multiline);
 
   const std::filesystem::path glslDir{"assets/glsl"};
 
@@ -220,9 +228,16 @@ void setupShaders(GLState &glState) {
       std::cerr << "created shader: " << shader << "\n";
       // slurp the entire file into string
       std::string glslSource;
-      const auto shaderFileLength = static_cast<int>(stream.tellg());
+      const auto shaderFileLength = static_cast<long>(stream.tellg());
+      if (shaderFileLength < 0) {
+        throw std::runtime_error("Failed to size shader file: " +
+                                 entry.path().string());
+      }
       std::cerr << "reading shader file size: " << shaderFileLength << "\n";
-      glslSource.resize(shaderFileLength + 1);
+      // no room for a trailing NUL: c_str() supplies the terminator that
+      // glShaderSource needs, and a NUL inside the string would be scanned
+      // as if it were source text
+      glslSource.resize(static_cast<std::size_t>(shaderFileLength));
       stream.seekg(0);
       stream.read(glslSource.data(), shaderFileLength);
       std::cerr << "read shader file size: " << shaderFileLength << "\n";
@@ -245,23 +260,12 @@ void setupShaders(GLState &glState) {
         throw std::runtime_error(std::format("Failed to compile shader: {}/{}",
                                              progName, shaderStage));
       }
-      std::sregex_iterator reStart(glslSource.begin(), glslSource.end(),
-                                   uniformsReg);
-      std::sregex_iterator reEnd;
-      for (auto it = reStart; it != reEnd; ++it) {
-        const auto type = it->str(1); // in or uniform
-        if ("vert" != shaderStage && "in" == type) {
-          continue;
-        }
-        auto varType        = it->str(2);
-        auto sizeFromVarNum = std::stoi(it->str(3));
-        sizeFromVarNum      = 0 != sizeFromVarNum ? sizeFromVarNum : 1;
-        const auto size     = type == "in" ? sizeFromVarNum : 0;
-        const auto name     = it->str(4);
-        std::cerr << "found " << type << ": (" << (varType + it->str(3)) << "/"
-                  << size << ")/" << std::quoted(name) << "\n"
+      for (const auto &[kind, varType, name, size] :
+           parseShaderDecls(glslSource, "vert" == shaderStage)) {
+        std::cerr << "found " << kind << ": (" << varType << "/" << size
+                  << ")/" << std::quoted(name) << "\n"
                   << std::flush;
-        prog.locs.emplace(name, GLState::Loc{0, type, varType, size});
+        prog.locs.emplace(name, GLState::Loc{0, kind, varType, size});
       }
       const auto pid = glState[progName];
       glAttachShader(pid, shader);
@@ -427,12 +431,16 @@ void Renderer::initGL() {
   }
 
   glEnable(GL_DEBUG_OUTPUT);
+  // GL_KHR_debug and friends are unconditionally #defined by glew.h; they say
+  // the *headers* know the extension, not that the *driver* implements it.
+  // GLEW_* are the runtime flags glewInit() fills in, and calling an entry
+  // point the driver does not export dereferences a null function pointer.
   if (GL_TRUE == glIsEnabled(GL_DEBUG_OUTPUT)) {
-    if constexpr (GL_KHR_debug) {
+    if (GLEW_KHR_debug) {
       glDebugMessageCallback(debugCb, nullptr);
-    } else if constexpr (GL_ARB_debug_output) {
+    } else if (GLEW_ARB_debug_output) {
       glDebugMessageCallbackARB(debugCb, nullptr);
-    } else if constexpr (GL_AMD_debug_output) {
+    } else if (GLEW_AMD_debug_output) {
       glDebugMessageCallbackAMD(debugCbAMD, nullptr);
     }
   } else {
@@ -548,10 +556,28 @@ bool Renderer::update(const GLState &glState,
   const auto end        = std::chrono::steady_clock::now();
   state->frameTimeDelta = end - start;
 
-  if (state->profiling) {
-    state->alive = false;
-  }
   return state->alive;
+}
+
+void Renderer::dispatch(GLState &glState, RenderItem &item) {
+  switch (item.type) {
+  case RenderItem::Type::NewDoc: {
+    newDoc(glState);
+    break;
+  }
+  case RenderItem::Type::Resize: {
+    resize();
+    break;
+  }
+  case RenderItem::Type::OpenDoc: {
+    openDoc(glState, dynamic_cast<RenderItemOpenDoc &>(item).docFile);
+    break;
+  }
+  case RenderItem::Type::Run: {
+    dynamic_cast<const RenderItemRun &>(item)();
+    break;
+  }
+  }
 }
 
 void Renderer::operator()(AutoSDLWindow &window) {
@@ -571,37 +597,35 @@ void Renderer::operator()(AutoSDLWindow &window) {
 
   while (state->alive) {
 
+    // Drain queued commands before drawing, so that work requested before this
+    // thread started -- files named on the command line, for instance -- is
+    // carried out rather than discarded on the first frame.
+    while (auto item = renderQueue.pop()) {
+      dispatch(glState, *item);
+    }
+
     // still want to update once even if we don't have anything in the render
     // queue
     if (!update(glState, window)) {
       break;
     }
-    while (auto item = renderQueue.pop()) {
-      switch (item->type) {
-      case RenderItem::Type::NewDoc: {
-        newDoc(glState);
-        break;
-      }
-      case RenderItem::Type::Resize: {
-        resize();
-        break;
-      }
-      case RenderItem::Type::OpenDoc: {
-        auto *docItem = dynamic_cast<RenderItemOpenDoc *>(item.get());
-        openDoc(glState, docItem->docFile);
-        break;
-      }
-      case RenderItem::Type::Run: {
-        const auto *runItem = dynamic_cast<RenderItemRun *>(item.get());
-        (*runItem)();
-        break;
-      }
-      default:
-        break;
-      }
-      if (!update(glState, window)) {
-        break;
-      }
+
+    reapFinishedDocLoads();
+
+    // --profile opens the requested files and then exits, so it may only quit
+    // once that queued work has actually run.
+    if (state->profiling && !hasPendingWork()) {
+      state->alive = false;
+      break;
     }
   }
+
+  // The background loaders capture glState, which lives on this stack frame,
+  // so none of them may outlive this function.
+  for (auto &fut : pendingDocLoads) {
+    if (fut.valid()) {
+      fut.wait();
+    }
+  }
+  pendingDocLoads.clear();
 }

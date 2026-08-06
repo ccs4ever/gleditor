@@ -4,12 +4,14 @@
 #include <array>
 #include <concepts>
 #include <functional>
+#include <future>
 #include <gleditor/tqueue.hpp>
 #include <memory>
 #include <string>
 #include <string_view>
 #include <thread>
 #include <utility>
+#include <vector>
 
 #include <gleditor/gl/gl.hpp>
 #include <gleditor/gl/state.hpp>
@@ -44,7 +46,7 @@ struct RenderItemResize : RenderItem {
 
 struct RenderItemOpenDoc : RenderItem {
   std::string docFile;
-  explicit RenderItemOpenDoc(const std::string &fileName)
+  explicit RenderItemOpenDoc(std::string fileName)
       : RenderItem(Type::OpenDoc), docFile(std::move(fileName)) {}
   ~RenderItemOpenDoc() override = default;
 };
@@ -52,7 +54,7 @@ struct RenderItemOpenDoc : RenderItem {
 struct RenderItemRun : RenderItem {
   std::function<void()> fun;
   explicit RenderItemRun(std::invocable auto fun)
-      : RenderItem(Type::Run), fun(fun) {}
+      : RenderItem(Type::Run), fun(std::move(fun)) {}
   ~RenderItemRun() override = default;
   void operator()() const { fun(); }
 };
@@ -113,7 +115,7 @@ public:
   template <typename Item>
     requires std::derived_from<Item, RenderItem>
   void push(const Item &item) {
-    renderQueue.push(std::move(item));
+    renderQueue.push(item);
   }
 
   /**
@@ -138,6 +140,18 @@ class Renderer : public AbstractRenderer,
                  public std::enable_shared_from_this<Renderer> {
 private:
   unsigned int pickingFBO{}, pickingRBO{}, colorRBO{}, depthRBO{};
+  /// In-flight background document loads. These capture the render thread's
+  /// GLState by reference, so the render loop waits on them before returning.
+  std::vector<std::future<void>> pendingDocLoads;
+
+  /// Drop loads that have already finished, so the list cannot grow without
+  /// bound over the lifetime of the process.
+  void reapFinishedDocLoads();
+  /// True while the render queue is non-empty or a document load is still
+  /// running.
+  [[nodiscard]] bool hasPendingWork() const;
+  /// Run one queued command.
+  void dispatch(GLState &glState, RenderItem &item);
 
 protected:
   /**

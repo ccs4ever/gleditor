@@ -41,7 +41,21 @@ VAOSupports::VAOSupports(RendererRef renderer, VAOBuffers bufferInfos)
   this->renderer->run([this] { allocateBuffers(); });
 }
 VAOSupports::~VAOSupports() {
-  renderer->run([this] { deallocateBuffers(); });
+  // When this runs off the render thread the callback is queued, so it must not
+  // capture `this` -- by the time the render thread picks it up the object is
+  // gone. The GL names are all it actually needs.
+  renderer->run([vao = this->vao, vbo = this->vbo, ibo = this->ibo,
+                 ubo = this->ubo] { releaseBuffers(vao, vbo, ibo, ubo); });
+}
+
+void VAOSupports::releaseBuffers(const unsigned int vao, const unsigned int vbo,
+                                 const unsigned int ibo,
+                                 const unsigned int ubo) {
+  clearBuffers(GL_ARRAY_BUFFER, GL_ELEMENT_ARRAY_BUFFER, GL_UNIFORM_BUFFER);
+
+  const std::array bufs = {vbo, ibo, ubo};
+  glDeleteBuffers(static_cast<GLsizei>(bufs.size()), bufs.data());
+  glDeleteVertexArrays(1, &vao);
 }
 void VAOSupports::allocateBuffers() {
 
@@ -69,7 +83,8 @@ void VAOSupports::allocateBuffers() {
   std::cout << STR(GL_MAX_FRAGMENT_UNIFORM_BLOCKS) ": " << ret << "\n";
   glGetIntegerv(GL_MAX_GEOMETRY_UNIFORM_BLOCKS, &ret);
   std::cout << STR(GL_MAX_GEOMETRY_UNIFORM_BLOCKS) ": " << ret << "\n";
-  glGenBuffers(1, &ubo);
+  // ubo already has a name from the genBuffers() above; generating a second one
+  // here would overwrite it and leak the first.
   glBindBuffer(GL_UNIFORM_BUFFER, ubo);
   glBufferData(GL_UNIFORM_BUFFER, sizeof(Highlight) * 2048, nullptr,
                GL_STATIC_DRAW);
@@ -88,14 +103,9 @@ void VAOSupports::allocateBuffers() {
 }
 
 void VAOSupports::deallocateBuffers() {
+  releaseBuffers(vao, vbo, ibo, ubo);
 
-  clearBuffers();
-
-  delBuffers(vbo, ibo, ubo);
-
-  glDeleteVertexArrays(1, &vao);
-
-  vao = vbo = ibo = 0;
+  vao = vbo = ibo = ubo = 0;
 }
 
 // TODO: implement
@@ -108,6 +118,8 @@ void VAOSupports::reallocate(long /*vertexRes*/, long /*indexRes*/) {
 
   const unsigned int origVbo = vbo;
   const unsigned int origIbo = ibo;
+  const unsigned int origUbo = ubo;
+  const unsigned int origVao = vao;
 
   const long origVboMaxVertices = bufferInfos.vbo.maxVertices;
   const long origIboMaxIndices  = bufferInfos.ibo.maxIndices;
@@ -119,6 +131,9 @@ void VAOSupports::reallocate(long /*vertexRes*/, long /*indexRes*/) {
   bufferInfos.ibo.maxIndices *= 2;
 
   renderer->run([=, this] {
+    // allocateBuffers() hands vao/vbo/ibo/ubo fresh names, so the old ones have
+    // to be released here or they leak on every growth step. The old vbo/ibo
+    // stay alive until their contents have been copied across.
     allocateBuffers();
 
     AutoVAO binder(this);
@@ -133,21 +148,33 @@ void VAOSupports::reallocate(long /*vertexRes*/, long /*indexRes*/) {
     glCopyBufferSubData(GL_COPY_WRITE_BUFFER, GL_ELEMENT_ARRAY_BUFFER, 0, 0,
                         origIboEnd);
     clearBuffers(GL_COPY_READ_BUFFER, GL_COPY_WRITE_BUFFER);
-    const std::array origBufs = {origVbo, origIbo};
-    glDeleteBuffers(2, origBufs.data());
+    const std::array origBufs = {origVbo, origIbo, origUbo};
+    glDeleteBuffers(static_cast<GLsizei>(origBufs.size()), origBufs.data());
+    glDeleteVertexArrays(1, &origVao);
   });
 
+  // Free list entries are (row offset, row count) -- reserve() multiplies the
+  // offset by the stride to reach bytes. Recording a byte offset here handed
+  // out allocations far past the end of the buffer, and the +1 skipped the
+  // first row of the newly added space.
   bufferInfos.vbo.free.emplace_back(
-      origVboEnd + 1, bufferInfos.vbo.maxVertices - origVboMaxVertices);
-  bufferInfos.ibo.free.emplace_back(origIboEnd + 1, bufferInfos.ibo.maxIndices -
-                                                        origIboMaxIndices);
+      static_cast<std::uint32_t>(origVboMaxVertices),
+      static_cast<std::uint32_t>(bufferInfos.vbo.maxVertices -
+                                 origVboMaxVertices));
+  bufferInfos.ibo.free.emplace_back(
+      static_cast<std::uint32_t>(origIboMaxIndices),
+      static_cast<std::uint32_t>(bufferInfos.ibo.maxIndices -
+                                 origIboMaxIndices));
 
   defragmentFreeLists();
 }
 
+/// Fallback ordering for attributes the linker elided, which report location
+/// -1. The order must match the field order of Doc::VBORow, since the vertex
+/// attribute offsets are accumulated by walking this sequence.
 unsigned int fixupAttr(const auto &pair) {
-  static constexpr std::array<std::string, 6> arr = {
-      "position", "fgcolor", "bgcolor", "texcoord", "texBox", "layer"};
+  static constexpr std::array<std::string, 7> arr = {
+      "position", "fgcolor", "bgcolor", "texcoord", "texBox", "layer", "tag"};
   return std::distance(arr.begin(), std::ranges::find(arr, pair.first));
 }
 
@@ -266,6 +293,13 @@ VAOSupports::Handle VAOSupports::reserve(const unsigned int type,
     vboIt = findFreeOffset(bufferInfos.vbo.free, numPoints);
     iboIt = GL_QUADS != type ? bufferInfos.ibo.free.end()
                              : findFreeOffset(bufferInfos.ibo.free, 6 * res);
+    // Growing the buffers is not guaranteed to produce a run long enough for a
+    // single oversized request; fail loudly rather than dereference end().
+    if (bufferInfos.vbo.free.cend() == vboIt ||
+        (GL_QUADS == type && bufferInfos.ibo.free.cend() == iboIt)) {
+      throw std::runtime_error(std::format(
+          "VAOSupports::reserve: no contiguous space for {} points", numPoints));
+    }
   }
 
   Handle ret{};
