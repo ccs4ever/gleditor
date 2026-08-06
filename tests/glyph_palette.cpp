@@ -35,8 +35,35 @@ protected:
 // just to make coverage happy
 TEST_F(GlyphPaletteTest, moveSelfAssignment) {
   GlyphPalette alice(dims, gl);
+  // deliberately exercising the self-assignment guard
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wself-move"
   alice = std::move(alice); // NOLINT
+#pragma clang diagnostic pop
   EXPECT_EQ(alice, alice);
+}
+
+// Move assignment must carry the GL wrapper across, otherwise the moved-to
+// palette keeps uploading through whichever GL it happened to be built with.
+TEST_F(GlyphPaletteTest, moveAssignmentKeepsGlOfSource) {
+  auto otherMock = std::make_shared<testing::NiceMock<GLMock>>();
+  EXPECT_CALL(*otherMock, texSubImage3D).Times(1);
+  EXPECT_CALL(*glMock, texSubImage3D).Times(0);
+
+  GlyphPalette source(dims, std::static_pointer_cast<GL>(otherMock));
+  GlyphPalette dest(dims, gl);
+  dest = std::move(source);
+  dest.put(Rect{Length{10}, Length{10}}, nullptr);
+}
+
+TEST_F(GlyphPaletteTest, moveConstructionKeepsGlOfSource) {
+  auto otherMock = std::make_shared<testing::NiceMock<GLMock>>();
+  EXPECT_CALL(*otherMock, texSubImage3D).Times(1);
+  EXPECT_CALL(*glMock, texSubImage3D).Times(0);
+
+  GlyphPalette source(dims, std::static_pointer_cast<GL>(otherMock));
+  GlyphPalette dest(std::move(source));
+  dest.put(Rect{Length{10}, Length{10}}, nullptr);
 }
 
 TEST_F(GlyphPaletteTest, equality) {

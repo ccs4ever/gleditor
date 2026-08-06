@@ -73,7 +73,9 @@ void main() {
     vec4 hi;
     uint pos = v[0].tag.y;
     if (v[0].tag.x == uint(3)) {
-        while (uint(ranges[i].start | ranges[i].end | ranges[i].data) != uint(0) && i < rangesSize) {
+        // the bounds check has to come first: && short-circuits left to right,
+        // so testing it last indexes ranges[rangesSize] before rejecting it
+        while (i < rangesSize && uint(ranges[i].start | ranges[i].end | ranges[i].data) != uint(0)) {
             if (pos >= ranges[i].start && pos <= ranges[i].end) {
                 hi = c(ranges[i].data);
                 /*if (1 == hi.a) { // reverse video highlight

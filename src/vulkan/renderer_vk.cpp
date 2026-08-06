@@ -103,7 +103,8 @@ bool RendererVK::tick() {
   return state->alive;
 }
 
-void RendererVK::operator()(AutoSDLWindow &window) {
+// `window` is only consulted in the GLEDITOR_ENABLE_VULKAN build
+void RendererVK::operator()([[maybe_unused]] AutoSDLWindow &window) {
   // Record render thread id so AbstractRenderer::run() can dispatch correctly
   this->renderThreadId = std::this_thread::get_id();
 

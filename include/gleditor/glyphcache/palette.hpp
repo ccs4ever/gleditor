@@ -63,6 +63,7 @@ public:
 
     layer       = oth.layer;
     paletteDims = oth.paletteDims;
+    gl          = oth.gl;
     usedHeight  = oth.usedHeight;
     lanes       = std::move(oth.lanes);
 

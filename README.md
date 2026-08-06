@@ -8,7 +8,7 @@ Still a work in progress.
 
 ## Overview
 
-`gleditor` is an experimental text editor rendered with OpenGL. It uses SDL2 for windowing/input and Pango/Cairo for text shaping and rasterization. The goal is to explore fast, flexible text rendering in a 2D/3D scene.
+`gleditor` is an experimental text editor rendered with OpenGL. It uses SDL3 for windowing/input and Pango/Cairo for text shaping and rasterization. The goal is to explore fast, flexible text rendering in a 2D/3D scene.
 
 - Entry point: `src/main.cpp`
 - Rendering pipeline and glyph cache live under `src/` (see `src/glyphcache/*`, `src/renderer.cpp`).
@@ -21,7 +21,7 @@ Still a work in progress.
 - Package discovery: pkg-config
 - Libraries (via pkg-config):
   - pangomm-2.48 (Pango) and cairomm
-  - SDL2, SDL2_image
+  - SDL3, SDL3_image
   - OpenGL, GLU, GLEW
   - GLM (headers)
 - Testing: GoogleTest + GoogleMock
@@ -29,17 +29,33 @@ Still a work in progress.
 
 ## Requirements
 
-You’ll need a C++23 toolchain, `make`, and the libraries above. On Ubuntu/Debian, for example:
+You’ll need a C++23 toolchain, `make`, and the libraries above.
+
+The vendored dependencies are git submodules, so clone with them:
+
+```
+git clone --recurse-submodules https://github.com/ccs4ever/gleditor
+# or, in an existing clone:
+git submodule update --init --recursive
+```
+
+On Ubuntu/Debian, for example:
 
 ```
 sudo apt-get update && sudo apt-get install \
-  clang make pkg-config doxygen \
+  clang libclang-rt-dev make pkg-config doxygen \
   libglm-dev libpangomm-2.48-dev \
-  libsdl2-dev libsdl2-image-dev libglew-dev \
+  libsdl3-dev libsdl3-image-dev libglew-dev \
+  libgl1-mesa-dev libglu1-mesa-dev \
   libgtest-dev libgmock-dev
 ```
 
 Notes:
+- SDL3 is not yet in the Ubuntu archive; the CI workflow pulls it from the
+  `ppa:hrzhu/sdl3-backport` PPA. Building SDL3 and SDL3_image from source works
+  equally well.
+- The default `LDFLAGS` include `-rtlib=compiler-rt`, which needs the LLVM
+  runtime package (`libclang-rt-dev` on Debian/Ubuntu).
 - spdlog is not used at present (it was removed due to libc++ linking issues).
 - For coverage (`make profile`), install `llvm-profdata` and `llvm-cov` (e.g., `llvm-14-tools` or similar on Ubuntu).  
 - Depending on your system, you may also need OpenGL dev headers (e.g., `libgl1-mesa-dev` and `libglu1-mesa-dev`).
@@ -95,6 +111,12 @@ Sanitizers are wired via Make targets. Set `DEBUG=1` to activate sanitizer flags
   - Or: `make DEBUG=1 sanitize/memory/run`
 
 Note: the `/run` targets set recommended `ASAN_OPTIONS`, `TSAN_OPTIONS`, or `MSAN_OPTIONS` and then execute the binary.
+
+Known sanitizer noise: the sanitizer flag sets include `-fsanitize=integer`,
+whose `implicit-integer-sign-change` check fires inside libstdc++'s `<format>`
+whenever a negative integer is formatted (`format:3510` and `format:1016` in
+GCC 13). Those reports come from the standard library's own modular arithmetic,
+not from `gleditor`.
 
 ## Usage: Movement and Commands
 
@@ -158,6 +180,6 @@ TODO: Confirm whether the intent is GPL-3.0-only or GPL-3.0-or-later.
 
 - Cross-platform support (Windows/macOS) has not been documented or tested yet.
 - Packaging/distribution not defined.
-- The `profile/main` Makefile target may require CLI flag updates (it uses `--file`, but the app currently expects positional `files`).
-- If your system needs explicit OpenGL dev headers, install `libgl1-mesa-dev` and `libglu1-mesa-dev`.
+- The app resolves `assets/glsl` and `logo.png` relative to the working
+  directory, so it must be started from the repository root (`make run` does).
 

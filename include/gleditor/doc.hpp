@@ -22,12 +22,11 @@ private:
   std::shared_ptr<Doc> doc;
   VAOSupports::Handle pageBackingHandle{};
   std::vector<VAOSupports::Handle> glyphs;
-  unsigned int tex{};
   Glib::RefPtr<Pango::Layout> layout;
 
 public:
-  Page(std::shared_ptr<Doc> doc, GLState &state, glm::mat4 &model,
-       Glib::RefPtr<Pango::Layout> layout);
+  Page(std::shared_ptr<Doc> aDoc, GLState &state, glm::mat4 &model,
+       Glib::RefPtr<Pango::Layout> aLayout);
   void draw(const GLState &state, const glm::mat4 &docModel) const;
   ~Page() override = default;
 };
@@ -38,7 +37,6 @@ class Doc : public Drawable,
             public VAOSupports,
             public std::enable_shared_from_this<Doc> {
 private:
-  int maxQuads = 10000;
   std::vector<Page> pages;
   std::string docFile;
   Glib::ustring text;

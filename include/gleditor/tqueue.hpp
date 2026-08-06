@@ -19,6 +19,10 @@ public:
     std::lock_guard lock(mutex);
     return queue.size();
   }
+  [[nodiscard]] bool empty() const {
+    std::lock_guard lock(mutex);
+    return queue.empty();
+  }
   value pop() {
     std::lock_guard lock(mutex);
     if (isEmpty()) {

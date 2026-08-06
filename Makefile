@@ -173,7 +173,7 @@ profile/main: gleditor
 	raw=gleditor.profraw; data=gleditor.profdata; \
 	trap "$(RM) -f $${raw} $${data}" EXIT HUP KILL TERM; \
 	seq 1 1 | while read f; do \
-		echo "*\c"; LLVM_PROFILE_FILE=$${raw} $(OBJDIR)/gleditor --font "Serif 16" --profile --file kjv.txt 2>&1 >/dev/null; \
+		echo "*\c"; LLVM_PROFILE_FILE=$${raw} $(OBJDIR)/gleditor --font "Serif 16" --profile tests/samples/kjv.txt 2>&1 >/dev/null; \
 	done; echo; \
 	llvm-profdata merge -sparse $${raw} -o $${data}; \
 	export DEBUGINFOD_URLS=https://debuginfod.ubuntu.com; \
@@ -199,17 +199,25 @@ clean:
 $(OBJDIR)/%.o: %.cpp
 	$(COMPILE.cpp) $(OUTPUT_OPTION) $<
 
+# The rewritten target must carry the $(OBJDIR)/ prefix that $(OBJS) uses.
+# Emitting a bare "tests/foo.o" attaches every header dependency to a target
+# make never builds, so header edits silently produce a stale binary.
+# -MP adds phony targets for the headers so that deleting one does not wedge
+# the build with "No rule to make target".
 $(OBJDIR)/%.dep: %.cpp
 	set -e; $(RM) -f $@; \
-	$(CXX) -MM $(CXXFLAGS) $< > $@.$$$$; \
-	$(SED) 's,\($(*F)\)\.o[ :]*,$*.o $*.j : ,g' < $@.$$$$ > $@; \
+	$(CXX) -MM -MP $(CXXFLAGS) $< > $@.$$$$; \
+	$(SED) 's,^\($(*F)\)\.o[ :]*,$(OBJDIR)/$*.o $(OBJDIR)/$*.j : ,' < $@.$$$$ > $@; \
 	$(RM) -f $@.$$$$
 
 $(OBJDIR)/%.j: %.cpp
 	$(CXX) -MJ $@ $(CXXFLAGS) -E $< > /dev/null
 		
+# clang -MJ emits one trailing-comma-terminated object per file, so the comma on
+# the final entry has to go: JSON has no trailing commas and clangd rejects the
+# whole database when one is present.
 $(OBJDIR)/compile_commands.json: $(JFILES)
-	{ echo '['; cat $^; echo ']'; } > $@
+	{ echo '['; cat $^ | $(SED) '$$ s/,[[:space:]]*$$//'; echo ']'; } > $@
 
 
 .PHONY: clean doc run test profile sanitize/address sanitize/address/run sanitize/thread sanitize/thread/run \
