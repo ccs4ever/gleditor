@@ -163,9 +163,9 @@ void ToastOverlay::post(const render::DiagnosticSeverity severity,
       {0, 0},
       Doc::VBORow::layerWidthHeight(0, static_cast<unsigned int>(panelWidth),
                                     static_cast<unsigned int>(panelHeight)),
-      // Tag 0 is "nothing here", so picking under a toast reports no object
-      // rather than a bogus one.
-      {0, 0}});
+      // An identity of its own rather than zero: a notification tagged zero
+      // would read as empty space, so clicking one would clear the caret.
+      {render::packTagIdentity(render::tagKindOverlay, 0, 0), 0}});
 
   const auto raw = layout->get_text().raw();
 
@@ -230,7 +230,7 @@ void ToastOverlay::post(const render::DiagnosticSeverity severity,
         Doc::VBORow::layerWidthHeight(static_cast<unsigned char>(glyph.layer),
                                       static_cast<unsigned int>(width),
                                       static_cast<unsigned int>(height)),
-        {0, 0}});
+        {render::packTagIdentity(render::tagKindOverlay, 0, 0), 0}});
   }
 
   while (toasts.size() >= maxVisible) {

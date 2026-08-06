@@ -171,7 +171,9 @@ Page::Page(std::shared_ptr<Doc> aDoc, RenderState &state, glm::mat4 &model,
       {0, 0},
       layerWH(0, std::min(16383U, static_cast<unsigned int>(pageWidth)),
               std::min(16383U, static_cast<unsigned int>(pageHeight))),
-      {render::packTagIdentity(2, this->doc->documentIndex(), aPageIndex), 0}});
+      {render::packTagIdentity(render::tagKindPage, this->doc->documentIndex(),
+                               aPageIndex),
+       0}});
 
   const auto text = layout->get_text().raw();
   const auto font =
@@ -222,6 +224,10 @@ Page::Page(std::shared_ptr<Doc> aDoc, RenderState &state, glm::mat4 &model,
       drawEnd--;
     }
 
+    std::cerr << "DEBUGCLUSTER idx=" << clusters.size() << " start=" << start
+              << " end=" << end << " chars="
+              << utf8Length(std::string_view(text).substr(start, end - start))
+              << " text=[" << text.substr(start, end - start) << "]\n";
     clusters.push_back(
         ClusterBox{static_cast<std::uint32_t>(start),
                    static_cast<std::uint32_t>(end - start),
@@ -275,7 +281,8 @@ Page::Page(std::shared_ptr<Doc> aDoc, RenderState &state, glm::mat4 &model,
           // The cluster index into this page's cluster table, which is what
           // turns a picked fragment back into a text position. The identity
           // word says which document and page that table belongs to.
-          {render::packTagIdentity(3, this->doc->documentIndex(), aPageIndex),
+          {render::packTagIdentity(render::tagKindGlyph,
+                                   this->doc->documentIndex(), aPageIndex),
            static_cast<unsigned int>(clusters.size() - 1)}});
     }
 
@@ -325,14 +332,7 @@ Page::offsetForCluster(const std::uint32_t clusterIndex,
   }
   const auto &cluster = clusters[clusterIndex];
 
-  // How many character boundaries into the cluster the click fell. Rounding
-  // rather than truncating puts the caret on the nearer side, so clicking the
-  // left half of a character lands before it and the right half after it.
-  const auto steps = std::min<std::uint32_t>(
-      cluster.charCount,
-      static_cast<std::uint32_t>(
-          std::lround(static_cast<double>(std::clamp(fraction, 0.0F, 1.0F)) *
-                      cluster.charCount)));
+  const auto steps = render::clusterCharStep(cluster.charCount, fraction);
 
   // Walk that many characters into the cluster. The byte length of a
   // character varies, so the boundary cannot be computed arithmetically.
@@ -376,9 +376,9 @@ Doc::offsetForPick(const render::PickingTag &tag) const {
   if (nullptr == target) {
     return std::nullopt;
   }
-  // Kind 3 is a glyph; anything else drawn by a page is its background, which
-  // has no character beneath it.
-  if (3 != tag.kind) {
+  // A glyph resolves through its cluster; anything else a page draws is its
+  // background, which has no character beneath it.
+  if (render::tagKindGlyph != tag.kind) {
     return target->baseOffset();
   }
   return target->offsetForCluster(tag.clusterIndex, tag.fraction);

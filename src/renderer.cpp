@@ -225,20 +225,40 @@ bool Renderer::update(RenderState &state, const bool settled) {
 
 void Renderer::placeCaretFromPick(RenderState &state,
                                   const render::PickingResult &pick) {
+  // Every outcome is reported, including the ones that place no caret. The
+  // read is asynchronous, so a line that named only the offset could not be
+  // lined up with the click that caused it -- and a silent outcome would drop
+  // out of a sequence of clicks entirely, which is exactly the misreading this
+  // is here to prevent.
   if (pick.tag.empty()) {
     // Clicking away from any document puts the editor back to navigating.
     caret->clear();
+    std::cout << std::format("caret {},{}: none\n", pick.x, pick.y);
+    return;
+  }
+  if (render::tagKindOverlay == pick.tag.kind) {
+    // The caret and the notifications are drawn over the text and write the
+    // picking attachment too, so a click can land on one. Leaving the caret
+    // alone is the sensible reading of clicking the caret; clearing it would
+    // mean the caret could not be clicked on at all.
+    std::cout << std::format("caret {},{}: overlay, unchanged\n", pick.x,
+                             pick.y);
     return;
   }
   if (pick.tag.docIndex >= state.docs.size()) {
+    std::cout << std::format("caret {},{}: no such document {}\n", pick.x,
+                             pick.y, pick.tag.docIndex);
     return;
   }
   const auto &doc = state.docs[pick.tag.docIndex];
-  if (const auto offset = doc->offsetForPick(pick.tag)) {
-    caret->placeAt(pick.tag.docIndex, *offset);
-    std::cout << std::format("caret: doc {} offset {}\n", pick.tag.docIndex,
-                             *offset);
+  const auto offset = doc->offsetForPick(pick.tag);
+  if (!offset) {
+    std::cout << std::format("caret {},{}: unresolved\n", pick.x, pick.y);
+    return;
   }
+  caret->placeAt(pick.tag.docIndex, *offset);
+  std::cout << std::format("caret {},{}: doc {} offset {}\n", pick.x, pick.y,
+                           pick.tag.docIndex, *offset);
 }
 
 void Renderer::collectPickingResults(RenderState &state) {

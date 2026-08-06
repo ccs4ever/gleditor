@@ -129,6 +129,11 @@ Clicking on text places the caret. The caret is a byte offset into the
 document, not a page and a coordinate: pages are a presentation that reflows,
 and an offset survives that.
 
+`tests/samples/ligatures.txt` holds `ffi ffl fi fl ff`. Rendered in a font with
+those ligatures -- FreeSerif has all five; DejaVu Serif lacks `ffi`; Liberation
+Serif has none -- each is drawn as a single joined glyph, and clicking across
+one steps the caret through the characters inside it.
+
 **One quad is one cluster, and a cluster is not a character.** Pango shapes
 "ffi" into a single ligature, and a letter with its combining marks into a
 single cluster; each is drawn as one quad covering several characters. The
@@ -154,8 +159,18 @@ the work to one page; the distinction is diagnostic, since Pango cannot lay out
 one line of a page again in isolation. A genuinely line-local relayout would
 want a layout object per line.
 
+The caret and the notifications write the picking attachment like everything
+else, and are drawn last, so they cover the tag of whatever is beneath them.
+They carry an identity of their own rather than zero: tagged zero a click on
+the caret read as empty space and cleared it. Being transparent to picking
+instead would mean masking writes to the second colour attachment alone, which
+OpenGL ES 3.0 cannot do -- per-attachment colour masks arrive in ES 3.2 -- so
+clicking the caret leaves it where it is.
+
 `--click X,Y` and `--type TEXT` drive both without a mouse or a keyboard, which
-is how caret placement is compared between backends.
+is how caret placement is compared between backends. Every click reports the
+pixel it answered, since picking is asynchronous and a reply that named only
+the offset could not be lined up with the click that caused it.
 
 ## SDL2 and SDL3
 
