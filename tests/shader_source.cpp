@@ -79,25 +79,40 @@ TEST(ShaderSource, vertexIndexBuiltinDiffersOnVulkan) {
               HasSubstr("GLEDITOR_VERTEX_INDEX gl_VertexID"));
 }
 
-// Vulkan has no default uniform block, so the matrices and the sampler have to
-// be declared through descriptors and push constants instead.
+// Vulkan has no default uniform block, so the transform and the sampler have to
+// be declared through a push constant and descriptors instead.
 TEST(ShaderSource, vulkanDeclaresUniformsThroughDescriptors) {
   const auto vert = vertexPreamble(Backend::Vulkan);
-  EXPECT_THAT(vert, HasSubstr("layout(set = 0, binding = 0, std140) uniform Camera"));
   EXPECT_THAT(vert, HasSubstr("layout(push_constant) uniform Push"));
+  EXPECT_THAT(vert,
+              HasSubstr("layout(set = 0, binding = 0, std140) uniform Highlights"));
   EXPECT_THAT(fragmentPreamble(Backend::Vulkan),
-              HasSubstr("layout(set = 0, binding = 2) uniform sampler2DArray"));
+              HasSubstr("layout(set = 0, binding = 1) uniform sampler2DArray"));
 }
 
 TEST(ShaderSource, glFamilyDeclaresPlainUniforms) {
   for (const auto backend : {Backend::OpenGL, Backend::OpenGLES}) {
-    EXPECT_THAT(vertexPreamble(backend), HasSubstr("uniform mat4 uProjection;"))
-        << render::backendName(backend);
-    EXPECT_THAT(vertexPreamble(backend), HasSubstr("uniform mat4 uModel;"))
+    EXPECT_THAT(vertexPreamble(backend), HasSubstr("uniform mat4 uMVP;"))
         << render::backendName(backend);
     EXPECT_THAT(fragmentPreamble(backend),
                 HasSubstr("uniform sampler2DArray uGlyphAtlas;"))
         << render::backendName(backend);
+  }
+}
+
+// The transform is one matrix per draw rather than a per-frame camera plus a
+// per-draw model, which is what lets a screen-space overlay be drawn in the
+// same frame as a perspective document. A camera block reappearing here would
+// mean per-frame storage had come back with it.
+TEST(ShaderSource, noBackendDeclaresASeparateCameraBlock) {
+  for (const auto backend :
+       {Backend::OpenGL, Backend::OpenGLES, Backend::Vulkan}) {
+    const auto vert = vertexPreamble(backend);
+    EXPECT_THAT(vert, testing::Not(HasSubstr("uProjection")))
+        << render::backendName(backend);
+    EXPECT_THAT(vert, testing::Not(HasSubstr("uView")))
+        << render::backendName(backend);
+    EXPECT_THAT(vert, HasSubstr("uMVP")) << render::backendName(backend);
   }
 }
 

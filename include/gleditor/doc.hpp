@@ -36,7 +36,8 @@ private:
 public:
   Page(std::shared_ptr<Doc> aDoc, RenderState &state, glm::mat4 &model,
        Glib::RefPtr<Pango::Layout> aLayout);
-  void draw(RenderState &state, const glm::mat4 &docModel) const;
+  /// @param docTransform projection * view * document model.
+  void draw(RenderState &state, const glm::mat4 &docTransform) const;
   ~Page() override = default;
 };
 
@@ -109,7 +110,9 @@ public:
       const glm::mat4 &model, const std::string &fileName, Private);
   ~Doc() override = default;
   void makePages(RenderState &state);
-  void draw(RenderState &state) const;
+  /// @param viewProjection projection * view; the document's own model matrix
+  ///        is applied on top of it here.
+  void draw(RenderState &state, const glm::mat4 &viewProjection) const;
   void newPage(RenderState &state, Glib::RefPtr<Pango::Layout> &layout);
   [[nodiscard]] size_t numPages() const { return pages.size(); }
 

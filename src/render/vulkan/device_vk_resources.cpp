@@ -424,14 +424,13 @@ DeviceVK::createShaderModule(const std::vector<std::uint32_t> &code) const {
 PipelineHandle DeviceVK::createPipeline(const PipelineDesc &desc) {
   PipelineRecord record{};
 
-  // Descriptor layout: camera, highlights, glyph atlas. The model matrix is a
-  // push constant instead, so a per-draw change costs no descriptor traffic.
-  const std::array<VkDescriptorSetLayoutBinding, 3> bindings = {
+  // Descriptor layout: highlights, glyph atlas. The transform is a push
+  // constant instead, so a per-draw change costs no descriptor traffic and a
+  // recorded frame can hold a different one for every draw.
+  const std::array<VkDescriptorSetLayoutBinding, 2> bindings = {
       VkDescriptorSetLayoutBinding{0, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 1,
                                    VK_SHADER_STAGE_VERTEX_BIT, nullptr},
-      VkDescriptorSetLayoutBinding{1, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 1,
-                                   VK_SHADER_STAGE_VERTEX_BIT, nullptr},
-      VkDescriptorSetLayoutBinding{2, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+      VkDescriptorSetLayoutBinding{1, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
                                    1, VK_SHADER_STAGE_FRAGMENT_BIT, nullptr}};
 
   VkDescriptorSetLayoutCreateInfo setLayoutInfo{};
@@ -519,8 +518,8 @@ PipelineHandle DeviceVK::createPipeline(const PipelineDesc &desc) {
 
   VkPipelineDepthStencilStateCreateInfo depthStencil{};
   depthStencil.sType = VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO;
-  depthStencil.depthTestEnable  = VK_TRUE;
-  depthStencil.depthWriteEnable = VK_TRUE;
+  depthStencil.depthTestEnable  = desc.depthTest ? VK_TRUE : VK_FALSE;
+  depthStencil.depthWriteEnable = desc.depthTest ? VK_TRUE : VK_FALSE;
   depthStencil.depthCompareOp   = VK_COMPARE_OP_LESS;
 
   // One blend state per colour attachment; the picking target takes the same

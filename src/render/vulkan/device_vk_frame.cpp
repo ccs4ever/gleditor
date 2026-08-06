@@ -126,27 +126,6 @@ void DeviceVK::bindPipeline(const PipelineHandle pipeline) {
   }
 }
 
-void DeviceVK::setFrameUniforms(const FrameUniforms &uniforms) {
-  auto &frame = frames[frameIndex];
-  const auto bufferIt = buffers.find(frame.cameraBuffer.id);
-  if (buffers.end() == bufferIt) {
-    return;
-  }
-
-  // Vulkan's clip space has +Y pointing down, OpenGL's points up. Callers hand
-  // over one conventional projection matrix, so the backend that differs is the
-  // one that adapts: negating the Y scale of the projection puts the image the
-  // same way up as the other backends, which is what makes their output
-  // directly comparable. Element 5 is [1][1] in the column-major layout.
-  // Winding is unaffected in practice because the glyph pipeline does not cull.
-  FrameUniforms flipped = uniforms;
-  flipped.projection[5] = -flipped.projection[5];
-
-  // The camera buffer belongs to this frame slot alone, so writing it needs no
-  // synchronisation beyond the fence already waited on in beginFrame().
-  std::memcpy(bufferIt->second.mapped, &flipped, sizeof(flipped));
-}
-
 void DeviceVK::bindGlyphTexture(const TextureHandle texture) {
   boundTexture = texture;
 
@@ -156,37 +135,30 @@ void DeviceVK::bindGlyphTexture(const TextureHandle texture) {
     return;
   }
 
-  auto &frame = frames[frameIndex];
-  const auto cameraIt    = buffers.find(frame.cameraBuffer.id);
   const auto highlightIt = buffers.find(highlightBuffer.id);
-  if (buffers.end() == cameraIt || buffers.end() == highlightIt) {
+  if (buffers.end() == highlightIt) {
     return;
   }
 
-  const VkDescriptorBufferInfo cameraInfo{cameraIt->second.buffer, 0,
-                                          sizeof(FrameUniforms)};
   const VkDescriptorBufferInfo highlightInfo{highlightIt->second.buffer, 0,
                                              highlightIt->second.bytes};
   const VkDescriptorImageInfo imageInfo{glyphSampler, textureIt->second.view,
                                         VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL};
 
   const auto set = pipelineIt->second.sets[frameIndex];
-  std::array<VkWriteDescriptorSet, 3> writes{};
+  std::array<VkWriteDescriptorSet, 2> writes{};
   writes[0].sType           = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
   writes[0].dstSet          = set;
   writes[0].dstBinding      = 0;
   writes[0].descriptorCount = 1;
   writes[0].descriptorType  = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
-  writes[0].pBufferInfo     = &cameraInfo;
-  writes[1]                 = writes[0];
+  writes[0].pBufferInfo     = &highlightInfo;
+  writes[1].sType           = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+  writes[1].dstSet          = set;
   writes[1].dstBinding      = 1;
-  writes[1].pBufferInfo     = &highlightInfo;
-  writes[2].sType           = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-  writes[2].dstSet          = set;
-  writes[2].dstBinding      = 2;
-  writes[2].descriptorCount = 1;
-  writes[2].descriptorType  = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-  writes[2].pImageInfo      = &imageInfo;
+  writes[1].descriptorCount = 1;
+  writes[1].descriptorType  = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+  writes[1].pImageInfo      = &imageInfo;
 
   vkUpdateDescriptorSets(device, writes.size(), writes.data(), 0, nullptr);
 
@@ -222,9 +194,21 @@ void DeviceVK::drawGlyphs(const DrawUniforms &uniforms,
 
   auto &frame = frames[frameIndex];
 
+  // Vulkan's clip space has +Y pointing down, OpenGL's points up. Callers hand
+  // over one conventional transform, so the backend that differs is the one
+  // that adapts: negating the row of the transform that produces clip-space Y
+  // -- premultiplying by diag(1, -1, 1, 1) -- puts the image the same way up as
+  // the other backends, which is what makes their output directly comparable.
+  // In the column-major layout that row is elements 1, 5, 9 and 13. Winding is
+  // unaffected in practice because the glyph pipeline does not cull.
+  DrawUniforms flipped = uniforms;
+  for (std::size_t i = 1; i < flipped.mvp.size(); i += 4) {
+    flipped.mvp[i] = -flipped.mvp[i];
+  }
+
   vkCmdPushConstants(frame.commands, pipelineIt->second.layout,
                      VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(DrawUniforms),
-                     &uniforms);
+                     &flipped);
 
   // Binding the vertex buffer at an offset is how the draw is aimed at one
   // page's rows, matching what the GL backend does with attribute pointers.

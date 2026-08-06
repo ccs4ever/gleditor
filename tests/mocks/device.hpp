@@ -47,8 +47,6 @@ public:
   MOCK_METHOD(void, endFrame, (), (override));
   MOCK_METHOD(void, bindPipeline, (render::PipelineHandle pipeline),
               (override));
-  MOCK_METHOD(void, setFrameUniforms, (const render::FrameUniforms &uniforms),
-              (override));
   MOCK_METHOD(void, bindGlyphTexture, (render::TextureHandle texture),
               (override));
   MOCK_METHOD(void, setHighlights,
@@ -63,6 +61,8 @@ public:
               (override));
   MOCK_METHOD(render::FrameImage, captureColorTarget, (), (override));
   MOCK_METHOD(void, waitIdle, (), (override));
+  MOCK_METHOD(std::vector<render::Diagnostic>, takeDiagnostics, (), (override));
+  MOCK_METHOD(void, setStrictDiagnostics, (bool strict), (override));
 };
 
 #endif /* MOCK_GLEDITOR_RENDER_DEVICE_H */

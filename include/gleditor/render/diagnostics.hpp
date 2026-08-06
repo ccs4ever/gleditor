@@ -22,6 +22,7 @@
 #include <string>
 #include <string_view>
 #include <unordered_set>
+#include <vector>
 
 namespace render {
 
@@ -30,7 +31,16 @@ enum class DiagnosticSeverity : std::uint8_t {
   Info,    ///< Notification or performance note; logged once, never fatal.
   Warning, ///< Suspicious but not incorrect; logged once, never fatal.
   Error,   ///< An API error or undefined behaviour; raised at the next frame
-           ///< boundary.
+           ///< boundary when strict mode is on.
+};
+
+/// Name of a severity, for logs and for anything that displays one.
+const char *severityName(DiagnosticSeverity severity);
+
+/// One message as the driver reported it.
+struct Diagnostic {
+  DiagnosticSeverity severity{};
+  std::string message;
 };
 
 /**
@@ -52,13 +62,38 @@ public:
    */
   void record(DiagnosticSeverity severity, std::string_view message) noexcept;
 
-  /// True once an Error has been recorded and not yet raised.
+  /// True once an Error has been recorded and not yet consumed.
   [[nodiscard]] bool hasError() const;
 
   /**
-   * @brief Throw the first recorded error, if any, and clear it.
+   * @brief Take the messages recorded since the last call.
+   *
+   * This is what lets the application show diagnostics rather than only log
+   * them. Because record() deduplicates, polling every frame does not return
+   * the same message again and again.
+   */
+  [[nodiscard]] std::vector<Diagnostic> drain();
+
+  /**
+   * @brief Decide whether a recorded error is fatal.
+   *
+   * Off by default: a driver complaint the editor can survive should be
+   * reported to the user, not used to close the editor. Automated runs turn it
+   * on, because a render that provoked driver errors has proved nothing however
+   * plausible its output looks.
+   */
+  void setStrict(bool value);
+  [[nodiscard]] bool strict() const;
+
+  /**
+   * @brief Consume the first recorded error, throwing it in strict mode.
+   *
+   * Always clears the pending error, so one bad call cannot keep failing every
+   * later frame. Outside strict mode the error has already been logged and
+   * queued for drain(), so consuming it here loses nothing.
+   *
    * @param context Prefixed to the message, naming the backend that saw it.
-   * @throws std::runtime_error
+   * @throws std::runtime_error when strict mode is on and an error is pending.
    */
   void raiseIfError(std::string_view context);
 
@@ -73,11 +108,17 @@ private:
   /// would otherwise grow this without bound; past the cap, deduplication stops
   /// but recording still works.
   static constexpr std::size_t maxRemembered = 256;
+  /// Cap on messages waiting to be drained. Nothing guarantees anyone is
+  /// draining -- a headless run never displays anything -- so the queue needs a
+  /// bound of its own rather than relying on deduplication for one.
+  static constexpr std::size_t maxUndrained = 32;
 
   mutable std::mutex mutex;
   std::unordered_set<std::string> seen;
+  std::vector<Diagnostic> undrained;
   std::string firstError;
   bool errorPending{};
+  bool strictMode{};
 };
 
 } // namespace render

@@ -30,6 +30,7 @@ TEST(Diagnostics, nonErrorSeveritiesAreNotFatal) {
 
 TEST(Diagnostics, anErrorIsRaisedWithItsContextAndText) {
   DiagnosticSink sink;
+  sink.setStrict(true);
   sink.record(DiagnosticSeverity::Error, "GL_INVALID_ENUM in glEnable");
 
   ASSERT_TRUE(sink.hasError());
@@ -47,6 +48,7 @@ TEST(Diagnostics, anErrorIsRaisedWithItsContextAndText) {
 // subsequent frame.
 TEST(Diagnostics, raisingClearsTheError) {
   DiagnosticSink sink;
+  sink.setStrict(true);
   sink.record(DiagnosticSeverity::Error, "boom");
   EXPECT_THROW(sink.raiseIfError("test"), std::runtime_error);
   EXPECT_FALSE(sink.hasError());
@@ -56,6 +58,7 @@ TEST(Diagnostics, raisingClearsTheError) {
 // The first error is the one that explains the others, so it is the one kept.
 TEST(Diagnostics, theFirstErrorIsTheOneReported) {
   DiagnosticSink sink;
+  sink.setStrict(true);
   sink.record(DiagnosticSeverity::Error, "first failure");
   sink.record(DiagnosticSeverity::Error, "second failure");
   EXPECT_THAT([&sink] { sink.raiseIfError("test"); },
@@ -93,6 +96,7 @@ TEST(Diagnostics, rememberedMessagesAreBounded) {
 // a noisy driver could hide a real fault.
 TEST(Diagnostics, errorsAreStillCaughtAfterTheDedupeCapIsReached) {
   DiagnosticSink sink;
+  sink.setStrict(true);
   for (int i = 0; i < 2000; i++) {
     sink.record(DiagnosticSeverity::Warning, "noise " + std::to_string(i));
   }
@@ -103,12 +107,68 @@ TEST(Diagnostics, errorsAreStillCaughtAfterTheDedupeCapIsReached) {
                   HasSubstr("the real problem")));
 }
 
+// The editor has to survive a driver complaint to be able to show it, so
+// outside strict mode an error consumes without throwing.
+TEST(Diagnostics, outsideStrictModeAnErrorIsNotFatal) {
+  DiagnosticSink sink;
+  ASSERT_FALSE(sink.strict());
+  sink.record(DiagnosticSeverity::Error, "GL_INVALID_ENUM in glEnable");
+  EXPECT_TRUE(sink.hasError());
+  EXPECT_NO_THROW(sink.raiseIfError("test"));
+  // Consumed all the same: a driver that complains once must not make every
+  // later frame look like a fresh failure.
+  EXPECT_FALSE(sink.hasError());
+}
+
+// Losing the message would defeat the point: it is what gets displayed.
+TEST(Diagnostics, aNonFatalErrorIsStillDrainable) {
+  DiagnosticSink sink;
+  sink.record(DiagnosticSeverity::Error, "GL_INVALID_ENUM in glEnable");
+  sink.raiseIfError("test");
+
+  const auto drained = sink.drain();
+  ASSERT_EQ(drained.size(), 1U);
+  EXPECT_EQ(drained[0].severity, DiagnosticSeverity::Error);
+  EXPECT_EQ(drained[0].message, "GL_INVALID_ENUM in glEnable");
+}
+
+TEST(Diagnostics, drainReturnsWhatWasRecordedAndThenNothing) {
+  DiagnosticSink sink;
+  sink.record(DiagnosticSeverity::Warning, "first");
+  sink.record(DiagnosticSeverity::Info, "second");
+
+  const auto drained = sink.drain();
+  ASSERT_EQ(drained.size(), 2U);
+  EXPECT_EQ(drained[0].message, "first");
+  EXPECT_EQ(drained[1].message, "second");
+  EXPECT_TRUE(sink.drain().empty());
+}
+
+// A message already displayed must not be displayed again on the next frame.
+TEST(Diagnostics, drainDoesNotRepeatADeduplicatedMessage) {
+  DiagnosticSink sink;
+  sink.record(DiagnosticSeverity::Warning, "same complaint");
+  EXPECT_EQ(sink.drain().size(), 1U);
+  sink.record(DiagnosticSeverity::Warning, "same complaint");
+  EXPECT_TRUE(sink.drain().empty());
+}
+
+// Nothing guarantees anyone drains: a headless run displays nothing at all.
+TEST(Diagnostics, undrainedMessagesAreBounded) {
+  DiagnosticSink sink;
+  for (int i = 0; i < 2000; i++) {
+    sink.record(DiagnosticSeverity::Warning, "message " + std::to_string(i));
+  }
+  EXPECT_LE(sink.drain().size(), 32U);
+}
+
 TEST(Diagnostics, clearForgetsEverything) {
   DiagnosticSink sink;
   sink.record(DiagnosticSeverity::Error, "boom");
   sink.clear();
   EXPECT_FALSE(sink.hasError());
   EXPECT_EQ(sink.distinctCount(), 0U);
+  EXPECT_TRUE(sink.drain().empty());
 }
 
 // Vulkan may call its messenger from any thread the driver uses, so recording

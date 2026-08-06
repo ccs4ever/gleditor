@@ -65,7 +65,6 @@ public:
   bool beginFrame() override;
   void endFrame() override;
   void bindPipeline(PipelineHandle pipeline) override;
-  void setFrameUniforms(const FrameUniforms &uniforms) override;
   void bindGlyphTexture(TextureHandle texture) override;
   void setHighlights(std::span<const HighlightRange> ranges) override;
   void drawGlyphs(const DrawUniforms &uniforms, BufferHandle vertices,
@@ -76,10 +75,22 @@ public:
   FrameImage captureColorTarget() override;
   void waitIdle() override;
 
+  std::vector<Diagnostic> takeDiagnostics() override {
+    return diagnostics.drain();
+  }
+  void setStrictDiagnostics(bool strict) override {
+    diagnostics.setStrict(strict);
+  }
+
 private:
   /// Frames recorded ahead of the GPU. Two is enough to overlap CPU and GPU
   /// work without letting latency grow.
   static constexpr std::uint32_t framesInFlight = 2;
+
+  /// Pipelines the descriptor pool is sized for: the document pipeline and the
+  /// overlay one, with room to spare. Vulkan pools are fixed at creation, so
+  /// this is a ceiling rather than a hint.
+  static constexpr std::uint32_t maxPipelines = 4;
 
   struct BufferRecord {
     VkBuffer buffer{VK_NULL_HANDLE};
@@ -112,9 +123,6 @@ private:
     VkSemaphore imageAvailable{VK_NULL_HANDLE};
     VkSemaphore renderFinished{VK_NULL_HANDLE};
     VkFence inFlight{VK_NULL_HANDLE};
-    /// Camera uniforms for this frame; per-frame so a submitted frame keeps the
-    /// values it was recorded with.
-    BufferHandle cameraBuffer{};
     /// Destination of this frame's picking read, if one was requested. The
     /// frame's own fence already says when the copy has completed, so no extra
     /// synchronisation object is needed.

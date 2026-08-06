@@ -9,10 +9,10 @@
 #include <mutex>
 #include <stdexcept>
 #include <string>
+#include <utility>
+#include <vector>
 
 namespace render {
-
-namespace {
 
 const char *severityName(const DiagnosticSeverity severity) {
   switch (severity) {
@@ -25,8 +25,6 @@ const char *severityName(const DiagnosticSeverity severity) {
   }
   return "unknown";
 }
-
-} // namespace
 
 void DiagnosticSink::record(const DiagnosticSeverity severity,
                             const std::string_view message) noexcept {
@@ -50,12 +48,34 @@ void DiagnosticSink::record(const DiagnosticSeverity severity,
         firstError   = text;
         errorPending = true;
       }
+
+      // Dropping the newest keeps the oldest, which is the one that explains
+      // the rest; a driver that has already queued a screenful is not made
+      // clearer by the thirty-third message.
+      if (undrained.size() < maxUndrained) {
+        undrained.push_back(Diagnostic{severity, text});
+      }
     }
 
     std::cerr << std::format("driver {}: {}\n", severityName(severity), text);
   } catch (...) { // NOLINT(bugprone-empty-catch)
     // Deliberately swallowed: see above.
   }
+}
+
+std::vector<Diagnostic> DiagnosticSink::drain() {
+  const std::lock_guard lock(mutex);
+  return std::exchange(undrained, {});
+}
+
+void DiagnosticSink::setStrict(const bool value) {
+  const std::lock_guard lock(mutex);
+  strictMode = value;
+}
+
+bool DiagnosticSink::strict() const {
+  const std::lock_guard lock(mutex);
+  return strictMode;
 }
 
 bool DiagnosticSink::hasError() const {
@@ -73,6 +93,10 @@ void DiagnosticSink::raiseIfError(const std::string_view context) {
     message      = firstError;
     errorPending = false;
     firstError.clear();
+    if (!strictMode) {
+      // Already logged, and already queued for whoever displays diagnostics.
+      return;
+    }
   }
   // Thrown from the caller's own frame rather than the driver's, so unwinding
   // is defined and the render loop's handler can report it.
@@ -82,6 +106,7 @@ void DiagnosticSink::raiseIfError(const std::string_view context) {
 void DiagnosticSink::clear() {
   const std::lock_guard lock(mutex);
   seen.clear();
+  undrained.clear();
   firstError.clear();
   errorPending = false;
 }
