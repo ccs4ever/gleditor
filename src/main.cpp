@@ -150,6 +150,10 @@ RendererRef handleArgs(const AppStateRef &state, render::Backend &backend,
   parser.add_argument("--profile")
       .help("perform initial setup, then quit")
       .flag();
+  parser.add_argument("--benchmark")
+      .default_value(std::string{"0"})
+      .help("draw N frames once the document has settled, report how long "
+            "they took, and quit");
   parser.add_argument("--pick")
       .append()
       .help("read the picking tag at X,Y once the document has settled and "
@@ -209,6 +213,8 @@ RendererRef handleArgs(const AppStateRef &state, render::Backend &backend,
       }
     }
     state->profiling         = parser["--profile"] == true;
+    state->benchmarkFrames =
+        std::stoul(parser.get<std::string>("--benchmark"));
     state->screenshotPath    = parser.get<std::string>("--screenshot");
     state->strictDiagnostics = parser["--strict-diagnostics"] == true;
 

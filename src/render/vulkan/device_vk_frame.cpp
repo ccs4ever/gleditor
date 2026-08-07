@@ -8,6 +8,7 @@
 
 #include <algorithm>
 #include <array>
+#include <chrono>
 #include <cstring>
 #include <format>
 #include <stdexcept>
@@ -79,6 +80,16 @@ bool DeviceVK::beginFrame() {
   check(vkResetFences(device, 1, &frame.inFlight), "vkResetFences");
   check(vkResetCommandBuffer(frame.commands, 0), "vkResetCommandBuffer");
 
+  // The fence above says the GPU has finished with everything this slot
+  // recorded last time round, so its command storage can be recycled whole.
+  // Resetting the pool rather than the buffers is what makes reuse free.
+  for (auto &slot : frame.slots) {
+    check(vkResetCommandPool(device, slot.pool, 0), "vkResetCommandPool");
+    slot.used = 0;
+  }
+  frame.secondaries.clear();
+  frame.openSecondary = VK_NULL_HANDLE;
+
   VkCommandBufferBeginInfo begin{};
   begin.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
   begin.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
@@ -98,8 +109,51 @@ bool DeviceVK::beginFrame() {
   passInfo.renderArea      = {{0, 0}, swapchainExtent};
   passInfo.clearValueCount = clears.size();
   passInfo.pClearValues    = clears.data();
-  vkCmdBeginRenderPass(frame.commands, &passInfo, VK_SUBPASS_CONTENTS_INLINE);
+  // Every draw of the pass goes into a secondary command buffer, whether or
+  // not this frame turns out to be split across threads. Vulkan 1.0 does not
+  // let a subpass mix inline commands with executed ones, so the choice is made
+  // once here rather than per draw -- and recording the sequential case the
+  // same way means the two paths cannot drift apart.
+  vkCmdBeginRenderPass(frame.commands, &passInfo,
+                       VK_SUBPASS_CONTENTS_SECONDARY_COMMAND_BUFFERS);
 
+  frameActive = true;
+  return true;
+}
+
+VkCommandBuffer DeviceVK::beginSecondary(RecordSlot &slot) {
+  if (slot.used == slot.buffers.size()) {
+    // Grown once and then reused for the life of the device: a frame that
+    // needed n buffers will need about n again.
+    VkCommandBufferAllocateInfo allocInfo{};
+    allocInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
+    allocInfo.commandPool        = slot.pool;
+    allocInfo.level              = VK_COMMAND_BUFFER_LEVEL_SECONDARY;
+    allocInfo.commandBufferCount = 1;
+    VkCommandBuffer allocated = VK_NULL_HANDLE;
+    check(vkAllocateCommandBuffers(device, &allocInfo, &allocated),
+          "vkAllocateCommandBuffers (secondary)");
+    slot.buffers.push_back(allocated);
+  }
+  const auto commands = slot.buffers[slot.used++];
+
+  VkCommandBufferInheritanceInfo inherit{};
+  inherit.sType       = VK_STRUCTURE_TYPE_COMMAND_BUFFER_INHERITANCE_INFO;
+  inherit.renderPass  = renderPass;
+  inherit.subpass     = 0;
+  inherit.framebuffer = framebuffer;
+
+  VkCommandBufferBeginInfo begin{};
+  begin.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+  begin.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT |
+                VK_COMMAND_BUFFER_USAGE_RENDER_PASS_CONTINUE_BIT;
+  begin.pInheritanceInfo = &inherit;
+  check(vkBeginCommandBuffer(commands, &begin),
+        "vkBeginCommandBuffer (secondary)");
+
+  // A secondary buffer inherits the render pass and framebuffer and nothing
+  // else: no viewport, no bound pipeline, no descriptor sets. Each one
+  // therefore re-establishes the state its draws need.
   const VkViewport viewport{0.0F,
                             0.0F,
                             static_cast<float>(swapchainExtent.width),
@@ -107,11 +161,40 @@ bool DeviceVK::beginFrame() {
                             0.0F,
                             1.0F};
   const VkRect2D scissor{{0, 0}, swapchainExtent};
-  vkCmdSetViewport(frame.commands, 0, 1, &viewport);
-  vkCmdSetScissor(frame.commands, 0, 1, &scissor);
+  vkCmdSetViewport(commands, 0, 1, &viewport);
+  vkCmdSetScissor(commands, 0, 1, &scissor);
 
-  frameActive = true;
-  return true;
+  const auto pipelineIt = pipelines.find(boundPipeline.id);
+  if (pipelines.end() != pipelineIt) {
+    vkCmdBindPipeline(commands, VK_PIPELINE_BIND_POINT_GRAPHICS,
+                      pipelineIt->second.pipeline);
+    const auto set = pipelineIt->second.sets[frameIndex];
+    vkCmdBindDescriptorSets(commands, VK_PIPELINE_BIND_POINT_GRAPHICS,
+                            pipelineIt->second.layout, 0, 1, &set, 0, nullptr);
+  }
+  return commands;
+}
+
+VkCommandBuffer DeviceVK::sequentialSecondary() {
+  auto &frame = frames[frameIndex];
+  if (VK_NULL_HANDLE == frame.openSecondary) {
+    // Slot 0 doubles as the sequential slot. Safe because a split ends the
+    // buffer open here before it starts and joins before it returns, so the
+    // two uses of the slot never overlap in time.
+    frame.openSecondary = beginSecondary(frame.slots[0]);
+    frame.secondaries.push_back(frame.openSecondary);
+  }
+  return frame.openSecondary;
+}
+
+void DeviceVK::closeSequentialSecondary() {
+  auto &frame = frames[frameIndex];
+  if (VK_NULL_HANDLE == frame.openSecondary) {
+    return;
+  }
+  check(vkEndCommandBuffer(frame.openSecondary),
+        "vkEndCommandBuffer (secondary)");
+  frame.openSecondary = VK_NULL_HANDLE;
 }
 
 void DeviceVK::bindPipeline(const PipelineHandle pipeline) {
@@ -120,9 +203,11 @@ void DeviceVK::bindPipeline(const PipelineHandle pipeline) {
     throw std::invalid_argument("DeviceVK::bindPipeline: unknown pipeline");
   }
   boundPipeline = pipeline;
+  // Nothing is recorded here. A secondary command buffer cannot be reopened
+  // once ended, so bound state is remembered and written into the next buffer
+  // that is begun; ending the open one is what makes the change take effect.
   if (frameActive) {
-    vkCmdBindPipeline(frames[frameIndex].commands,
-                      VK_PIPELINE_BIND_POINT_GRAPHICS, it->second.pipeline);
+    closeSequentialSecondary();
   }
 }
 
@@ -162,10 +247,12 @@ void DeviceVK::bindGlyphTexture(const TextureHandle texture) {
 
   vkUpdateDescriptorSets(device, writes.size(), writes.data(), 0, nullptr);
 
+  // As with bindPipeline: remembered, not recorded. The descriptor set is
+  // bound by whichever secondary buffers are begun after this point, including
+  // the ones the recording threads begin -- they only bind it, so the update
+  // above having already happened on this thread is what keeps that safe.
   if (frameActive) {
-    vkCmdBindDescriptorSets(frames[frameIndex].commands,
-                            VK_PIPELINE_BIND_POINT_GRAPHICS,
-                            pipelineIt->second.layout, 0, 1, &set, 0, nullptr);
+    closeSequentialSecondary();
   }
 }
 
@@ -190,20 +277,14 @@ void DeviceVK::setHighlights(const std::span<const HighlightRange> ranges) {
   }
 }
 
-void DeviceVK::drawGlyphs(const DrawUniforms &uniforms,
-                          const BufferHandle vertices,
-                          const std::size_t vertexByteOffset,
-                          const std::uint32_t instanceCount) {
-  if (!frameActive || 0 == instanceCount) {
-    return;
-  }
+void DeviceVK::recordBatch(const VkCommandBuffer commands,
+                           const GlyphBatch &batch) const {
   const auto pipelineIt = pipelines.find(boundPipeline.id);
-  const auto bufferIt   = buffers.find(vertices.id);
+  const auto bufferIt   = buffers.find(batch.vertices.id);
   if (pipelines.end() == pipelineIt || buffers.end() == bufferIt) {
-    throw std::invalid_argument("DeviceVK::drawGlyphs: unknown pipeline or buffer");
+    throw std::invalid_argument(
+        "DeviceVK::recordBatch: unknown pipeline or buffer");
   }
-
-  auto &frame = frames[frameIndex];
 
   // Vulkan's clip space has +Y pointing down, OpenGL's points up. Callers hand
   // over one conventional transform, so the backend that differs is the one
@@ -212,21 +293,147 @@ void DeviceVK::drawGlyphs(const DrawUniforms &uniforms,
   // the other backends, which is what makes their output directly comparable.
   // In the column-major layout that row is elements 1, 5, 9 and 13. Winding is
   // unaffected in practice because the glyph pipeline does not cull.
-  DrawUniforms flipped = uniforms;
+  DrawUniforms flipped = batch.uniforms;
   for (std::size_t i = 1; i < flipped.mvp.size(); i += 4) {
     flipped.mvp[i] = -flipped.mvp[i];
   }
 
-  vkCmdPushConstants(frame.commands, pipelineIt->second.layout,
+  vkCmdPushConstants(commands, pipelineIt->second.layout,
                      VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(DrawUniforms),
                      &flipped);
 
   // Binding the vertex buffer at an offset is how the draw is aimed at one
   // page's rows, matching what the GL backend does with attribute pointers.
-  const VkDeviceSize offset = vertexByteOffset;
-  vkCmdBindVertexBuffers(frame.commands, 0, 1, &bufferIt->second.buffer,
-                         &offset);
-  vkCmdDraw(frame.commands, 4, instanceCount, 0, 0);
+  const VkDeviceSize offset = batch.vertexByteOffset;
+  vkCmdBindVertexBuffers(commands, 0, 1, &bufferIt->second.buffer, &offset);
+  vkCmdDraw(commands, 4, batch.instanceCount, 0, 0);
+}
+
+void DeviceVK::drawGlyphs(const DrawUniforms &uniforms,
+                          const BufferHandle vertices,
+                          const std::size_t vertexByteOffset,
+                          const std::uint32_t instanceCount) {
+  if (!frameActive || 0 == instanceCount) {
+    return;
+  }
+  recordBatch(sequentialSecondary(),
+              GlyphBatch{uniforms, vertices, vertexByteOffset, instanceCount});
+}
+
+void DeviceVK::recordSequentially(const std::span<const GlyphBatch> batches) {
+  // Keeps the run in the buffer already open, which also saves beginning a
+  // fresh secondary.
+  const auto commands = sequentialSecondary();
+  for (const auto &batch : batches) {
+    recordBatch(commands, batch);
+  }
+}
+
+void DeviceVK::recordInParallel(const std::span<const GlyphBatch> batches,
+                                const std::size_t chunks) {
+  auto &frame = frames[frameIndex];
+  // A split starts a new buffer per thread, so whatever is open ends here. Its
+  // place in the execution order was fixed when it was opened.
+  closeSequentialSecondary();
+
+  // Reserve the run's places in the execution order before any of it is
+  // recorded. Which thread finishes first decides nothing: chunk k executes
+  // k-th because it was written to the k-th slot.
+  const auto base = frame.secondaries.size();
+  frame.secondaries.resize(base + chunks);
+
+  const auto perChunk = (batches.size() + chunks - 1) / chunks;
+  recorders.run(static_cast<std::uint32_t>(chunks), [&](const std::uint32_t k) {
+    const auto first = std::min<std::size_t>(k * perChunk, batches.size());
+    const auto last  = std::min<std::size_t>(first + perChunk, batches.size());
+    // Slot k belongs to this call for its duration and to no other thread, so
+    // allocating and recording from it needs no lock. Everything the recording
+    // reads -- the pipeline and buffer tables, the bound state -- is written
+    // only between frames.
+    const auto commands = beginSecondary(frame.slots[k]);
+    for (auto i = first; i < last; i++) {
+      recordBatch(commands, batches[i]);
+    }
+    check(vkEndCommandBuffer(commands), "vkEndCommandBuffer (secondary)");
+    frame.secondaries[base + k] = commands;
+  });
+}
+
+void DeviceVK::drawGlyphBatches(const std::span<const GlyphBatch> batches) {
+  if (!frameActive || batches.empty()) {
+    return;
+  }
+
+  const auto chunks =
+      std::min<std::size_t>(recorders.parallelism(), batches.size());
+  if (chunks < 2 || batches.size() < parallelRecordingThreshold) {
+    recordSequentially(batches);
+    return;
+  }
+
+  if (recordingThreadsForced) {
+    // The operator named a thread count, so use it rather than deciding.
+    recordInParallel(batches, chunks);
+    if (!reportedRecordingChoice) {
+      reportedRecordingChoice = true;
+      diagnostics.record(
+          DiagnosticSeverity::Info,
+          std::format("recording {} draws on {} thread(s): asked for by "
+                      "GLEDITOR_RECORD_THREADS, so not timed against "
+                      "recording in one piece",
+                      batches.size(), recorders.parallelism()));
+    }
+    return;
+  }
+
+  // Re-time the two strategies now and then. What decides between them is
+  // whether this machine has a core free for a worker to wake onto, and that
+  // is a property of the load rather than of the code.
+  if (recordingProbeFrame >= recordingProbeInterval) {
+    sequentialCost.reset();
+    parallelCost.reset();
+    recordingProbeFrame = 0;
+  }
+
+  // While measuring, alternate so that both strategies see the same mixture of
+  // frames; afterwards, commit to the cheaper one and stop timing. Timing only
+  // during the comparison is what keeps the choice from drifting with the
+  // noise of whichever strategy happens to be in use.
+  const bool probing = recordingProbeFrame < recordingProbeFrames;
+  const bool split   = probing ? (0 == recordingProbeFrame % 2)
+                               : parallelCost.median() <
+                                     sequentialCost.median() *
+                                         parallelRecordingMargin;
+  recordingProbeFrame++;
+
+  const auto started = std::chrono::steady_clock::now();
+  if (split) {
+    recordInParallel(batches, chunks);
+  } else {
+    recordSequentially(batches);
+  }
+
+  if (probing) {
+    const auto elapsed = std::chrono::duration<double, std::nano>(
+                             std::chrono::steady_clock::now() - started)
+                             .count() /
+                         static_cast<double>(batches.size());
+    (split ? parallelCost : sequentialCost).add(elapsed);
+    return;
+  }
+
+  // Said once per decision. Which strategy wins is the only thing this device
+  // does differently from the others, and a silent choice is one nobody can
+  // check.
+  if (reportedRecordingChoice != std::optional{split}) {
+    reportedRecordingChoice = split;
+    diagnostics.record(
+        DiagnosticSeverity::Info,
+        std::format("recording {} draws on {} thread(s): {:.0f} ns/draw split "
+                    "against {:.0f} ns/draw in one piece",
+                    batches.size(), split ? recorders.parallelism() : 1U,
+                    parallelCost.median(), sequentialCost.median()));
+  }
 }
 
 void DeviceVK::requestPickingTag(const int x, const int y) {
@@ -295,6 +502,16 @@ void DeviceVK::endFrame() {
   diagnostics.raiseIfError("vulkan validation reported an error");
 
   auto &frame = frames[frameIndex];
+
+  // Everything the frame drew went into secondary buffers; this is where the
+  // pass actually runs them, in the order the draws were issued.
+  closeSequentialSecondary();
+  if (!frame.secondaries.empty()) {
+    vkCmdExecuteCommands(frame.commands,
+                         static_cast<std::uint32_t>(frame.secondaries.size()),
+                         frame.secondaries.data());
+  }
+
   vkCmdEndRenderPass(frame.commands);
 
   if (frame.pickPending && !frame.pickSubmitted) {

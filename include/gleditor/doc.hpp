@@ -71,8 +71,16 @@ public:
   Page(std::shared_ptr<Doc> aDoc, RenderState &state, glm::mat4 &model,
        Glib::RefPtr<Pango::Layout> aLayout, std::uint32_t aTextOffset,
        std::uint32_t aPageIndex);
-  /// @param docTransform projection * view * document model.
-  void draw(RenderState &state, const glm::mat4 &docTransform) const;
+  /**
+   * @brief Append this page's draw to @p batches.
+   * @param docTransform projection * view * document model.
+   *
+   * Collected rather than issued so that the whole frame's page draws reach the
+   * device in one call, which is what a backend needs in order to record them
+   * on more than one thread.
+   */
+  void collect(std::vector<render::GlyphBatch> &batches,
+               const glm::mat4 &docTransform) const;
 
   [[nodiscard]] std::uint32_t baseOffset() const { return textOffset; }
   [[nodiscard]] const std::vector<ClusterBox> &clusterBoxes() const {
@@ -250,9 +258,11 @@ public:
       const glm::mat4 &model, const std::string &fileName, Private);
   ~Doc() override = default;
   void makePages(RenderState &state);
+  /// Append every page's draw to @p batches.
   /// @param viewProjection projection * view; the document's own model matrix
   ///        is applied on top of it here.
-  void draw(RenderState &state, const glm::mat4 &viewProjection) const;
+  void collect(std::vector<render::GlyphBatch> &batches,
+               const glm::mat4 &viewProjection) const;
   void newPage(RenderState &state, Glib::RefPtr<Pango::Layout> &layout,
                std::uint32_t textOffset);
 

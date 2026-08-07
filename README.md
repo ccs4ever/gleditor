@@ -56,6 +56,77 @@ it does not mean touching the document code.
   the notification overlay could then not use a different projection from the
   documents behind it.
 
+### Threads: what Vulkan can do that the GL family cannot
+
+`RenderDevice::capabilities()` reports a `DeviceCapabilities`, and the field
+that actually differs between backends is `parallelCommandRecording`. Vulkan
+sets it; OpenGL and OpenGL ES do not, and not because their drivers are slower.
+A GL context is current on one thread at a time and every call that records work
+goes through it, so a second thread cannot build part of a frame -- making the
+context current elsewhere would first have to release it here, which serialises
+rather than overlaps. Vulkan separates recording from submission: each thread
+records into its own command buffer out of its own command pool, and one thread
+submits the result.
+
+Callers do not branch on the flag. `drawGlyphBatches()` takes the frame's page
+draws as one list on every backend; a device that cannot split it records it in
+order, and the default implementation on `RenderDevice` is exactly that loop.
+The flag is there for deciding whether producing the list is worth the trouble,
+and for reporting what a build can do.
+
+**Where it is used.** The frame's document draws, which is the only part of the
+frame whose size grows with the document: one draw per page, so 1152 of them for
+the 4.6 MB sample. `Doc::collect()` appends them to one list across every open
+document -- a per-document list would cap the work available to split at one
+document's page count -- and `DeviceVK::drawGlyphBatches()` cuts that list into
+one chunk per thread. Each chunk is recorded into its own secondary command
+buffer and the primary executes them in chunk order, so which thread finished
+first changes nothing about what is drawn. Vulkan 1.0 cannot mix inline commands
+with executed ones in a subpass, so the sequential path records into a secondary
+buffer too, and the two paths cannot drift apart.
+
+**Whether it is used is measured, not assumed.** Splitting costs waking the
+workers; recording a draw costs a few hundred nanoseconds. Which wins depends on
+whether the machine has a core free for a worker to wake onto, which is a
+property of the load and not of the code -- so `DeviceVK` times both strategies
+over a few frames, keeps the cheaper one, and re-checks periodically. It says
+which it chose through the diagnostic sink. `GLEDITOR_RECORD_THREADS` takes the
+decision away from it, which is what lets both paths be compared: recording the
+4.6 MB sample's 1152 draws on four threads and on one produces byte-identical
+frames, and `tools/compare-backends.sh` checks that.
+
+**What the measurements said.** `--benchmark N` draws N settled frames and
+reports the median, with collecting the draws timed apart from recording them --
+only the second can be split, and a figure covering both would hide it. On the
+4.6 MB sample (1152 page draws), headless on four cores:
+
+```
+$ xvfb-run -a build/gleditor --backend vulkan --benchmark 40 tests/samples/kjv.txt
+driver info: recording 1152 draws on 1 thread(s): 495 ns/draw split against 247 ns/draw in one piece
+benchmark: 40 frames, 1152 page draws, median frame 731.315 ms, median collect 0.044 ms, median record 0.285 ms, ...
+```
+
+| | median frame | collect | record |
+| --- | --- | --- | --- |
+| Vulkan (lavapipe) | 731 ms | 0.044 ms | 0.285 ms |
+| OpenGL (llvmpipe) | 738 ms | 0.044 ms | 729 ms |
+
+Three things worth reading off that. Recording a frame costs about 0.3 ms, or
+247 ns per draw -- material against a 16.7 ms budget, invisible against this
+frame. The device measured the split at 495 ns per draw and declined it, and did
+so on every repeat: this machine runs a software rasteriser that keeps all four
+cores busy drawing the previous frame, so a worker waits for a core longer than
+recording in one piece takes. `GLEDITOR_RECORD_THREADS=1` reproduces the
+sequential side on its own. And the OpenGL `record` figure is not a recording
+cost at all -- the GL driver blocks inside the draw calls, which is exactly what
+separating the two columns exposes.
+
+The frame time is dominated by none of them: it is 4.6 million quads being
+rasterised, every page of the document, every frame, whether or not the page is
+on screen. Culling pages outside the view would cut both columns by about two
+orders of magnitude, and is the optimisation this measurement most clearly
+points at -- see TODO.
+
 ### Driver diagnostics
 
 Both APIs report problems through a C function pointer the driver calls on its
@@ -354,6 +425,10 @@ Command-line options (from `argparse` in `src/main.cpp`):
 - `--click X,Y`       click there once the document has settled, moving the
   caret, and print where it landed; may be given more than once
 - `--type TEXT`       insert TEXT at the caret once it has been placed
+- `--select START,END`  select that document byte range once the document has
+  settled, as a drag would
+- `--benchmark N`     draw N frames once the document has settled, report how
+  long they took, and exit
 - `--strict-diagnostics`  treat a driver error as fatal instead of showing it
   as a notification
 - `files...`          one or more input files to open at startup
@@ -420,6 +495,13 @@ Other actions:
   rasterises through a different pipeline. Picking must agree exactly on all
   three, and at least one queried pixel must report something.
 
+  It then renders the same document through Vulkan twice more, recording the
+  frame on four threads and on one, and requires the two to be byte-identical.
+  Chunks are recorded out of order and executed in order, so an ordering
+  mistake shows up here and in no other check. A document with too few page
+  draws to split says so instead of reporting a pass -- pass a larger sample,
+  such as `tests/samples/kjv.txt`, to exercise it.
+
   Headless, with software drivers:
 
   ```
@@ -455,6 +537,12 @@ Other actions:
 - `DEBUG=1`  enable debug flags and sanitizer options in builds.
 - `GLEDITOR_ENABLE_VULKAN=1`  compile the Vulkan backend and its SPIR-V.
 - `GLEDITOR_SDL=2` / `GLEDITOR_SDL=3`  build against that SDL major version.
+- `GLEDITOR_RECORD_THREADS=N`  threads the Vulkan backend records a frame with,
+  and an instruction rather than a ceiling: setting it takes the choice away
+  from the device, so `1` records in one piece and anything more always splits.
+  That is what lets the same binary be run both ways, which is how the two
+  paths get timed and compared at all. Ignored by the other backends, which
+  cannot split.
 - `STATIC=--static`  attempt static linking (where supported by your system/libs).
 - `ASAN_OPTIONS`, `TSAN_OPTIONS`, `MSAN_OPTIONS`  fine-tune sanitizer behavior (the `/run` targets set sensible defaults).
 - LandlockMake: if `LANDLOCKMAKE_VERSION` is set, the Makefile enables a sandbox for builds (optional/developer setup).

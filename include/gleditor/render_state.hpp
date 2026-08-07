@@ -37,6 +37,16 @@ struct RenderState {
   GlyphCache glyphCache;                 ///< Shared glyph atlas.
   render::PipelineHandle glyphPipeline{}; ///< Pipeline all documents draw with.
   std::vector<std::shared_ptr<Doc>> docs; ///< Open documents.
+  /**
+   * @brief Scratch the frame's page draws are collected into.
+   *
+   * Handing the device the whole run at once is what lets a backend record it
+   * on more than one thread. Kept here rather than built per document so that
+   * every page of every document lands in one list -- a per-document list would
+   * cap the work available to split at one document's page count -- and reused
+   * between frames so that collecting it costs no allocation.
+   */
+  std::vector<render::GlyphBatch> pageBatches;
 };
 
 #endif // GLEDITOR_RENDER_STATE_H

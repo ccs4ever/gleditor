@@ -157,6 +157,56 @@ struct DrawUniforms {
 };
 
 /**
+ * @brief One glyph draw, described rather than issued.
+ *
+ * A batch carries exactly what drawGlyphs() takes. Handing a device a run of
+ * them instead of calling it once per draw is what gives the device the chance
+ * to record them out of order -- on more than one thread, if it can -- while
+ * still executing them in the order they were given.
+ */
+struct GlyphBatch {
+  DrawUniforms uniforms;
+  BufferHandle vertices;
+  std::size_t vertexByteOffset{};
+  std::uint32_t instanceCount{};
+};
+
+/**
+ * @brief What a backend can do beyond the interface every backend implements.
+ *
+ * Queried rather than inferred from backend(): a caller that switched on the
+ * API name would have to be edited every time a backend is added, and would
+ * still be guessing about the driver underneath.
+ */
+struct DeviceCapabilities {
+  /**
+   * @brief One frame's commands may be recorded by several threads at once.
+   *
+   * True only on Vulkan, and not because the others are slower at it: an
+   * OpenGL or OpenGL ES context is current on one thread at a time, so every
+   * call that records work has to come from that thread. There is no supported
+   * way for a second thread to build part of a frame in parallel. Vulkan
+   * separates recording from submission -- each thread records into its own
+   * command buffer out of its own command pool, and one thread submits the
+   * result -- so the work genuinely runs concurrently.
+   *
+   * Callers do not have to test this. drawGlyphBatches() takes the same list
+   * on every backend and a device that cannot split it simply records it in
+   * order; the flag is here for callers deciding whether producing that list
+   * is worth the trouble, and for reporting what a build is capable of.
+   */
+  bool parallelCommandRecording{false};
+  /**
+   * @brief How many threads the device will actually split recording across.
+   *
+   * One when parallelCommandRecording is false. Bounded by the hardware and by
+   * the per-thread command pools the device allocated up front, so it is a
+   * fact about this device rather than a suggestion.
+   */
+  std::uint32_t recordingThreads{1};
+};
+
+/**
  * @brief A colour target read back to host memory.
  *
  * Rows run top to bottom and pixels are tightly packed RGBA8, so the contents

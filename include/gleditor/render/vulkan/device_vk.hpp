@@ -17,10 +17,13 @@
 #ifndef GLEDITOR_RENDER_VULKAN_DEVICE_H
 #define GLEDITOR_RENDER_VULKAN_DEVICE_H
 
+#include <algorithm>
 #include <array>
 #include <cstdint>
+#include <limits>
 #include <optional>
 #include <string>
+#include <utility>
 #include <unordered_map>
 #include <vector>
 
@@ -28,6 +31,7 @@
 
 #include <gleditor/render/device.hpp>
 #include <gleditor/render/diagnostics.hpp>
+#include <gleditor/render/worker_pool.hpp>
 
 namespace render::vulkan {
 
@@ -41,6 +45,23 @@ public:
   ~DeviceVK() override;
 
   [[nodiscard]] Backend backend() const override { return Backend::Vulkan; }
+
+  /**
+   * @brief Vulkan can record one frame from several threads.
+   *
+   * Recording and submission are separate operations here, and a command pool
+   * belongs to whichever thread is using it, so each worker builds its own
+   * secondary command buffer with no lock between them; one thread then submits
+   * the lot. That is what the GL family cannot do, whatever the driver.
+   *
+   * The thread count is fixed at initialisation because the per-thread command
+   * pools are, so this reports what the device will really use rather than what
+   * the machine might allow.
+   */
+  [[nodiscard]] DeviceCapabilities capabilities() const override {
+    return DeviceCapabilities{recorders.parallelism() > 1,
+                              recorders.parallelism()};
+  }
 
   void initialize(AutoSDLWindow &window) override;
   void shutdown() override;
@@ -70,6 +91,7 @@ public:
   void drawGlyphs(const DrawUniforms &uniforms, BufferHandle vertices,
                   std::size_t vertexByteOffset,
                   std::uint32_t instanceCount) override;
+  void drawGlyphBatches(std::span<const GlyphBatch> batches) override;
   void requestPickingTag(int x, int y) override;
   std::optional<PickingResult> takePickingTag() override;
   FrameImage captureColorTarget() override;
@@ -83,6 +105,10 @@ public:
   }
 
 private:
+  /// Thread count and whether it was demanded, as one value so that the
+  /// environment is consulted once. See the delegating constructor.
+  explicit DeviceVK(std::pair<std::uint32_t, bool> recording);
+
   /// Frames recorded ahead of the GPU. Two is enough to overlap CPU and GPU
   /// work without letting latency grow.
   static constexpr std::uint32_t framesInFlight = 2;
@@ -117,6 +143,89 @@ private:
     std::array<VkDescriptorSet, framesInFlight> sets{};
   };
 
+  /**
+   * @brief Smallest run of draws that is even considered for a split.
+   *
+   * A split costs waking the workers and one begin/end pair of a secondary
+   * command buffer each, against a few hundred nanoseconds saved per draw.
+   * Below this the overhead cannot be repaid however cheap the wake-up is, so
+   * the run is recorded in one piece without measuring anything.
+   */
+  static constexpr std::size_t parallelRecordingThreshold = 128;
+
+  /**
+   * @brief Frames spent comparing the two recording strategies, and frames
+   *        between one comparison and the next.
+   *
+   * Whether splitting pays is not a property of the code: it depends on
+   * whether this machine has a core free for a worker to wake onto. Measured
+   * against a software rasteriser, which keeps every core busy drawing the
+   * previous frame, the split loses -- the workers wait for a core longer than
+   * recording in one piece would have taken. With a GPU doing the drawing,
+   * those cores are idle and the same split wins. Neither answer can be
+   * compiled in, so the device times both and keeps the cheaper.
+   *
+   * The comparison runs over several frames of each rather than one, and
+   * compares medians: a single frame's recording is a few hundred microseconds
+   * and one slow frame can be twice the median, which is enough to pick the
+   * wrong winner outright.
+   */
+  static constexpr std::uint32_t recordingProbeFrames   = 16;
+  static constexpr std::uint32_t recordingProbeInterval = 600;
+
+  /**
+   * @brief How much cheaper the split has to be before it is used.
+   *
+   * The two strategies can be within the noise of each other, and then the
+   * comparison decides by coin toss and changes its mind at the next probe.
+   * Requiring a clear margin settles that in favour of recording in one piece,
+   * which is the simpler thing to have going on inside a frame.
+   */
+  static constexpr double parallelRecordingMargin = 0.9;
+
+  /// What one recording strategy cost over the frames it was measured on.
+  struct RecordingCost {
+    /// Per-draw cost of each measured frame. Sized for the half of the probe
+    /// frames that go to one strategy.
+    std::array<double, recordingProbeFrames / 2> samples{};
+    std::size_t count{};
+
+    void add(const double sample) {
+      if (count < samples.size()) {
+        samples[count++] = sample;
+      }
+    }
+    void reset() { count = 0; }
+    /// Median cost per draw, or infinity when nothing has been measured, so
+    /// that an unmeasured strategy never wins a comparison by default.
+    [[nodiscard]] double median() const {
+      if (0 == count) {
+        return std::numeric_limits<double>::infinity();
+      }
+      auto sorted = samples;
+      const auto middle = sorted.begin() + static_cast<std::ptrdiff_t>(count / 2);
+      std::nth_element(sorted.begin(), middle,
+                       sorted.begin() + static_cast<std::ptrdiff_t>(count));
+      return *middle;
+    }
+  };
+
+  /**
+   * @brief One thread's command storage for one frame in flight.
+   *
+   * A Vulkan command pool may only be used by one thread at a time, so
+   * recording on N threads means N pools. They are per frame as well as per
+   * thread because a pool cannot be reset while the GPU is still executing
+   * buffers allocated from it.
+   */
+  struct RecordSlot {
+    VkCommandPool pool{VK_NULL_HANDLE};
+    /// Secondary buffers allocated from this pool, reused frame to frame.
+    std::vector<VkCommandBuffer> buffers;
+    /// How many of them this frame has handed out.
+    std::size_t used{};
+  };
+
   /// Per-frame command recording and synchronisation objects.
   struct FrameContext {
     VkCommandBuffer commands{VK_NULL_HANDLE};
@@ -136,6 +245,14 @@ private:
     /// The frame carrying this pick has been submitted, so waiting on its fence
     /// is enough to read the result.
     bool pickSubmitted{};
+    /// Command storage, one entry per thread that may record this frame.
+    std::vector<RecordSlot> slots;
+    /// Secondary buffers the primary will execute, in the order the caller
+    /// issued the draws. Recording order is not this order once threads are
+    /// involved, which is exactly why the list is kept separately.
+    std::vector<VkCommandBuffer> secondaries;
+    /// The buffer draws issued one at a time are currently appending to.
+    VkCommandBuffer openSecondary{VK_NULL_HANDLE};
   };
 
   // -- setup steps
@@ -171,6 +288,22 @@ private:
   void ensureIdleForMutation();
   /// Recreate the swapchain and everything sized to it.
   void recreateSwapchain(int width, int height);
+  /**
+   * @brief Begin a secondary command buffer from @p slot, ready to draw into.
+   *
+   * A secondary buffer inherits the render pass and framebuffer and nothing
+   * else, so the viewport, the pipeline and the descriptor set are recorded
+   * into every one of them. That per-buffer cost is what sets the threshold
+   * below which splitting a run is not worth it.
+   */
+  VkCommandBuffer beginSecondary(RecordSlot &slot);
+  /// The buffer sequential draws append to, opening one if none is open.
+  VkCommandBuffer sequentialSecondary();
+  /// End the sequentially recorded buffer, if one is open. Anything that
+  /// changes bound state calls this, since a secondary cannot be re-entered.
+  void closeSequentialSecondary();
+  /// Record one batch into an already-begun secondary buffer.
+  void recordBatch(VkCommandBuffer commands, const GlyphBatch &batch) const;
   static std::vector<std::uint32_t> readSpirv(const std::string &path);
   VkShaderModule createShaderModule(const std::vector<std::uint32_t> &code) const;
 
@@ -221,6 +354,43 @@ private:
   BufferHandle highlightBuffer{};
   TextureHandle boundTexture{};
   PipelineHandle boundPipeline{};
+
+  /**
+   * @brief Threads a frame's recording is spread across.
+   *
+   * Sized from the hardware at construction and capped: past a handful of
+   * threads the per-buffer setup a split adds grows faster than the recording
+   * it saves, and the pools have to be allocated for every one of them whether
+   * a frame turns out to need them or not.
+   */
+  static constexpr std::uint32_t maxRecordingThreads = 4;
+  WorkerPool recorders;
+  /**
+   * @brief GLEDITOR_RECORD_THREADS named a count, so take it as an instruction
+   *        rather than a ceiling.
+   *
+   * With it set the device stops choosing and always splits a run large enough
+   * to be worth splitting. That is what makes both paths reachable on demand:
+   * left to itself the device picks one and the other is never exercised, so
+   * the comparison that proves they draw the same frame could not be run.
+   */
+  bool recordingThreadsForced{};
+
+  /// What each strategy cost in the current measurement, counted per draw so
+  /// that a document changing size mid-comparison does not decide it.
+  RecordingCost sequentialCost;
+  RecordingCost parallelCost;
+  /// Frames since the current comparison began. Below recordingProbeFrames the
+  /// device is still measuring; at recordingProbeInterval it starts again.
+  std::uint32_t recordingProbeFrame{};
+  /// The choice last reported through the diagnostic sink, so that settling on
+  /// one strategy says so once rather than every frame.
+  std::optional<bool> reportedRecordingChoice;
+  /// Record the whole run on one thread, as it would be without a split.
+  void recordSequentially(std::span<const GlyphBatch> batches);
+  /// Record the run across the worker pool.
+  void recordInParallel(std::span<const GlyphBatch> batches,
+                        std::size_t chunks);
 
   TextureLimits limits{};
   /// Diagnostics the validation layers reported since the last frame boundary.

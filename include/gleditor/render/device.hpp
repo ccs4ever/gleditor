@@ -8,7 +8,10 @@
  * buffers and textures, describes a pipeline once, and then submits frames.
  *
  * Threading: a device is created and used entirely on the render thread. The
- * only exception is textureLimits(), which is fixed after initialisation.
+ * only exceptions are textureLimits() and capabilities(), which are fixed after
+ * initialisation. A device may use threads of its own internally -- see
+ * DeviceCapabilities::parallelCommandRecording -- but that is invisible to
+ * callers, who still make every call from the render thread.
  */
 #ifndef GLEDITOR_RENDER_DEVICE_H
 #define GLEDITOR_RENDER_DEVICE_H
@@ -42,6 +45,16 @@ public:
 
   /// Which API this device drives.
   [[nodiscard]] virtual Backend backend() const = 0;
+
+  /**
+   * @brief What this device can do beyond the common interface.
+   *
+   * Valid after initialize(): the answer depends on what the driver and the
+   * hardware turned out to support, not only on which API was asked for.
+   */
+  [[nodiscard]] virtual DeviceCapabilities capabilities() const {
+    return DeviceCapabilities{};
+  }
 
   /**
    * @brief Bring the device up against an already-created window.
@@ -124,6 +137,27 @@ public:
   virtual void drawGlyphs(const DrawUniforms &uniforms, BufferHandle vertices,
                           std::size_t vertexByteOffset,
                           std::uint32_t instanceCount) = 0;
+
+  /**
+   * @brief Draw a run of glyph batches with the currently bound pipeline and
+   *        texture.
+   *
+   * Equivalent to calling drawGlyphs() once per batch, and that is exactly what
+   * the default does. The difference is that the device is handed the whole run
+   * at once, so a device whose capabilities() report parallelCommandRecording
+   * may record it on several threads. The batches are executed in the order
+   * given whether or not they were recorded in that order, so overlapping
+   * geometry looks the same either way.
+   *
+   * Every batch in one call must be drawable with the state bound when the call
+   * is made; a device may not re-read that state part way through.
+   */
+  virtual void drawGlyphBatches(const std::span<const GlyphBatch> batches) {
+    for (const auto &batch : batches) {
+      drawGlyphs(batch.uniforms, batch.vertices, batch.vertexByteOffset,
+                 batch.instanceCount);
+    }
+  }
 
   /**
    * @brief Queue a read of the picking target at one pixel.
