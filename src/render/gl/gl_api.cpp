@@ -86,6 +86,7 @@ void GLApi::load() {
   GLEDITOR_RESOLVE(DeleteProgram);
   GLEDITOR_RESOLVE(GetUniformLocation);
   GLEDITOR_RESOLVE(Uniform1i);
+  GLEDITOR_RESOLVE(Uniform1f);
   GLEDITOR_RESOLVE(UniformMatrix4fv);
   GLEDITOR_RESOLVE(GetUniformBlockIndex);
   GLEDITOR_RESOLVE(UniformBlockBinding);
@@ -107,6 +108,7 @@ void GLApi::load() {
 
   GLEDITOR_RESOLVE(Enable);
   GLEDITOR_RESOLVE(Disable);
+  GLEDITOR_RESOLVE(BlendFunc);
   GLEDITOR_RESOLVE(Viewport);
   GLEDITOR_RESOLVE(Clear);
   GLEDITOR_RESOLVE(ClearColor);

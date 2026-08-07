@@ -55,6 +55,12 @@ void handleKeyPress(const SDL_Event &evt, const AppStateRef &state,
     renderer->push(RenderItemNewDoc());
     break;
   }
+  case SDL_SCANCODE_W: {
+    // Closes the most recently opened document; the render thread is the one
+    // that knows which that is.
+    renderer->push(RenderItemCloseDoc());
+    break;
+  }
   case SDL_SCANCODE_R: {
     state->view.resetPos();
     break;

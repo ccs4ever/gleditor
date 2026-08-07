@@ -4,6 +4,9 @@
  */
 #include <gleditor/toast.hpp> // IWYU pragma: associated
 
+#include <choreograph/Choreograph.h> // for easeInOutQuad
+#include <gleditor/animation.hpp>     // for toastFade
+
 #include <algorithm>
 #include <cmath>
 #include <cstddef>
@@ -242,9 +245,46 @@ void ToastOverlay::post(const render::DiagnosticSeverity severity,
   toast.backing       = pool->reserve(toast.instanceCount);
   toast.width         = panelWidth;
   toast.height        = panelHeight;
-  toast.expiresAt     = Clock::now() + lifetime;
+  toast.postedAt      = Clock::now();
+  toast.expiresAt     = toast.postedAt + lifetime;
   pool->write(toast.backing, 0, asBytes(rows));
   toasts.push_back(toast);
+}
+
+float ToastOverlay::fadeFactor(const Clock::time_point postedAt,
+                               const Clock::time_point expiresAt,
+                               const Clock::time_point now) {
+  const auto seconds = [](const Clock::duration dur) {
+    return std::chrono::duration<double>(dur).count();
+  };
+  // A toast dropped early to make room for a newer one can be asked about
+  // after its expiry, and one can be posted with a lifetime shorter than two
+  // fades; neither should produce an alpha outside [0, 1].
+  if (now <= postedAt) {
+    return 0.0F;
+  }
+  if (now >= expiresAt) {
+    return 0.0F;
+  }
+  const double fade =
+      std::min(gleditor::anim::toastFade, seconds(expiresAt - postedAt) / 2.0);
+  if (fade <= 0.0) {
+    return 1.0F;
+  }
+  const double in  = seconds(now - postedAt) / fade;
+  const double out = seconds(expiresAt - now) / fade;
+  const auto ramp  = static_cast<float>(std::min({in, out, 1.0}));
+  return ch::easeInOutQuad(ramp);
+}
+
+bool ToastOverlay::fadingIn(const Clock::time_point now) const {
+  return std::ranges::any_of(toasts, [now](const Toast &toast) {
+    return now > toast.postedAt &&
+           now < toast.postedAt +
+                     std::chrono::duration_cast<Clock::duration>(
+                         std::chrono::duration<double>(
+                             gleditor::anim::toastFade));
+  });
 }
 
 void ToastOverlay::expire(const Clock::time_point now) {
@@ -270,11 +310,14 @@ void ToastOverlay::draw(RenderState &state, const int screenWidth,
   state.device->bindGlyphTexture(state.glyphCache.textureHandle());
 
   // Newest nearest the corner, older ones stacked above it.
-  float penY = marginY;
+  const auto now = Clock::now();
+  float penY     = marginY;
   for (const auto &toast : std::ranges::reverse_view(toasts)) {
     const glm::mat4 model =
         glm::translate(glm::mat4(1.0F), glm::vec3(marginX, penY, 0.0F));
-    const render::DrawUniforms uniforms{toArray(projection * model)};
+    const render::DrawUniforms uniforms{
+        toArray(projection * model),
+        fadeFactor(toast.postedAt, toast.expiresAt, now)};
     state.device->drawGlyphs(uniforms, pool->buffer(),
                              pool->byteOffset(toast.backing),
                              toast.instanceCount);

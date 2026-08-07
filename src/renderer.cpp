@@ -39,6 +39,16 @@ namespace {
 /// any working directory.
 std::string shaderDir() { return gleditor::assetPath("shaders"); }
 
+/// World units between the resting places of adjacent documents.
+constexpr float docSpacing = 50.0F;
+
+/// Where the document at @p index belongs when nothing is animating. The one
+/// place the row is described, so opening, closing and moving cannot disagree
+/// about it.
+glm::vec3 docSlot(const std::size_t index) {
+  return {docSpacing * static_cast<float>(index), 0.0F, 0.0F};
+}
+
 /**
  * @brief Write a captured frame as a binary PPM.
  *
@@ -97,17 +107,62 @@ void Renderer::reapFinishedDocLoads() {
 }
 
 bool Renderer::hasPendingWork() const {
-  return !renderQueue.empty() || !pendingDocLoads.empty();
+  // An animation counts as pending work, which is what keeps a screenshot
+  // honest: the frame a capture wants is the finished one, and a document
+  // halfway through fading in is not it.
+  return !renderQueue.empty() || !pendingDocLoads.empty() ||
+         !timeline.empty() ||
+         (nullptr != toasts && toasts->fadingIn(ToastOverlay::Clock::now()));
+}
+
+double Renderer::stepAnimations() {
+  const auto now = std::chrono::steady_clock::now();
+  // The first frame steps by nothing rather than by however long start-up
+  // took, which would otherwise finish every animation before it was seen.
+  const double elapsed =
+      lastAnimationStep
+          ? std::chrono::duration<double>(now - *lastAnimationStep).count()
+          : 0.0;
+  lastAnimationStep = now;
+  timeline.step(elapsed);
+  return elapsed;
+}
+
+void Renderer::closeDoc(RenderState &state, const std::uint32_t index) {
+  if (state.docs.empty()) {
+    return;
+  }
+  const auto which = RenderItemCloseDoc::mostRecent == index
+                         ? state.docs.size() - 1
+                         : static_cast<std::size_t>(index);
+  if (which >= state.docs.size()) {
+    return;
+  }
+
+  // Off the open list first, so that a pick or a keystroke arriving during the
+  // fade cannot land on a document that is on its way out.
+  auto departing = state.docs[which];
+  state.docs.erase(state.docs.begin() + static_cast<std::ptrdiff_t>(which));
+  departing->animateDeparture(timeline);
+  fadingDocs.push_back(std::move(departing));
+
+  // The survivors close the gap. Renumbering matters as much as the movement:
+  // a document's index is what its picking tags resolve through, so leaving it
+  // stale would make clicks land on the wrong document.
+  for (std::size_t i = 0; i < state.docs.size(); i++) {
+    state.docs[i]->setDocIndex(static_cast<std::uint32_t>(i));
+    state.docs[i]->animateMoveTo(timeline, docSlot(i));
+  }
 }
 
 void Renderer::openDoc(RenderState &state, std::string &fileName) {
-  const auto numDocsOpened = static_cast<double>(state.docs.size());
   const auto newDocPosition =
-      glm::translate(glm::mat4(1.0), glm::vec3(50.0 * numDocsOpened, 0.0, 0.0));
-  std::cout << "doc pos: " << numDocsOpened << " "
+      glm::translate(glm::mat4(1.0), docSlot(state.docs.size()));
+  std::cout << "doc pos: " << state.docs.size() << " "
             << glm::to_string(newDocPosition) << "\n";
   auto docPtr = Doc::create(getPtr(), device.get(), newDocPosition, fileName);
   docPtr->setDocIndex(static_cast<std::uint32_t>(state.docs.size()));
+  docPtr->animateArrival(timeline);
   reapFinishedDocLoads();
   pendingDocLoads.push_back(std::async(
       std::launch::async, [&state, docPtr] { docPtr->makePages(state); }));
@@ -121,6 +176,10 @@ bool Renderer::update(RenderState &state, const bool settled) {
   }
 
   const auto start = std::chrono::steady_clock::now();
+
+  // Advance every animation before anything reads a position or an opacity, so
+  // that one frame draws one instant rather than a mixture of two.
+  stepAnimations();
 
   // Collect picking reads issued on earlier frames before starting this one.
   // Doing it here rather than after the draws means a request is never
@@ -178,6 +237,14 @@ bool Renderer::update(RenderState &state, const bool settled) {
   for (const std::shared_ptr<Doc> &doc : state.docs) {
     doc->collect(state.pageBatches, viewProjection, budget, lastDraw);
   }
+  // Closed documents still draw while they fade. They are gone from the open
+  // list, so this is the only thing that still refers to them, and dropping
+  // one the moment it is invisible is what ends that.
+  for (const std::shared_ptr<Doc> &doc : fadingDocs) {
+    doc->collect(state.pageBatches, viewProjection, budget, lastDraw);
+  }
+  std::erase_if(fadingDocs,
+                [](const std::shared_ptr<Doc> &doc) { return doc->hasFadedOut(); });
   // Timed apart from the collection above: only the recording can be split
   // across threads, so an improvement there would be invisible in a figure
   // that also counted a matrix multiply per page.
@@ -440,6 +507,10 @@ void Renderer::dispatch(RenderState &state, RenderItem &item) {
     newDoc(state);
     break;
   }
+  case RenderItem::Type::CloseDoc: {
+    closeDoc(state, dynamic_cast<RenderItemCloseDoc &>(item).docIndex);
+    break;
+  }
   case RenderItem::Type::Resize: {
     const auto &resize = dynamic_cast<RenderItemResize &>(item);
     device->resize(resize.width, resize.height);
@@ -545,6 +616,10 @@ void Renderer::renderLoop(AutoSDLWindow &window) {
   // Documents own device buffers; they must be released while the device is
   // still alive, and after any in-flight frame has finished reading them.
   device->waitIdle();
+  // Motions point at outputs inside the documents, so they have to go before
+  // the documents do.
+  timeline.clear();
+  fadingDocs.clear();
   state.docs.clear();
   caret.reset();
   toasts.reset();

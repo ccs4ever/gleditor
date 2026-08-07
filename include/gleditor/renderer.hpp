@@ -2,6 +2,7 @@
 #define GLEDITOR_RENDERER_H
 
 #include <chrono>
+#include <choreograph/Choreograph.h>
 #include <concepts>
 #include <functional>
 #include <future>
@@ -26,12 +27,14 @@
 #include <gleditor/state.hpp>
 #include <gleditor/toast.hpp>
 
+class Doc;
 struct AutoSDLWindow;
 struct RenderState;
 
 struct RenderItem {
   enum class Type : std::uint8_t {
     NewDoc,
+    CloseDoc,
     Resize,
     OpenDoc,
     Run,
@@ -44,6 +47,21 @@ struct RenderItem {
 struct RenderItemNewDoc : RenderItem {
   RenderItemNewDoc() : RenderItem(Type::NewDoc) {}
   ~RenderItemNewDoc() override = default;
+};
+
+/**
+ * @brief Close a document, fading it out first.
+ *
+ * The index is the document's position among the open ones. The default names
+ * the most recently opened, which is what a keystroke with no other way to say
+ * which document it meant should do.
+ */
+struct RenderItemCloseDoc : RenderItem {
+  static constexpr std::uint32_t mostRecent = ~0U;
+  std::uint32_t docIndex;
+  explicit RenderItemCloseDoc(const std::uint32_t index = mostRecent)
+      : RenderItem(Type::CloseDoc), docIndex(index) {}
+  ~RenderItemCloseDoc() override = default;
 };
 
 struct RenderItemResize : RenderItem {
@@ -174,6 +192,29 @@ private:
   /// returning.
   std::vector<std::future<void>> pendingDocLoads;
 
+  /**
+   * @brief Every animation in flight, stepped once per frame.
+   *
+   * Choreograph does no locking, so this is touched from the render thread
+   * only -- which is also the thread that opens documents and posts toasts,
+   * the two things that start a motion.
+   */
+  ch::Timeline timeline;
+  /// When the previous frame stepped the timeline, so the step is in real time
+  /// rather than in frames: the same fade has to last as long on a software
+  /// rasteriser as on a GPU.
+  std::optional<std::chrono::steady_clock::time_point> lastAnimationStep;
+  /// Advance every animation to now. Returns the seconds that passed.
+  double stepAnimations();
+  /**
+   * @brief Documents that have been closed but are still fading out.
+   *
+   * Held apart from the open list so that an index into that list, which the
+   * picking tags carry, keeps meaning the same document. They are drawn and
+   * nothing else.
+   */
+  std::vector<std::shared_ptr<Doc>> fadingDocs;
+
   /// Most recent completed picking result, kept so that interactive callers can
   /// consult it without polling the device themselves.
   std::optional<render::PickingResult> lastPick;
@@ -237,6 +278,15 @@ protected:
    * Create a new empty document and initialize any default resources.
    */
   void newDoc(RenderState &state);
+
+  /**
+   * @brief Start closing the document at @p index.
+   *
+   * It leaves the open list at once, so nothing can pick it or type into it,
+   * but is kept alive and drawn until its fade finishes. The documents after
+   * it are renumbered and eased into the places that opened up.
+   */
+  void closeDoc(RenderState &state, std::uint32_t index);
 
   /**
    * Draw one frame.

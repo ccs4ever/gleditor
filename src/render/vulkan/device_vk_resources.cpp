@@ -632,8 +632,10 @@ PipelineHandle DeviceVK::createPipeline(const PipelineDesc &desc) {
   depthStencil.depthWriteEnable = desc.depthTest ? VK_TRUE : VK_FALSE;
   depthStencil.depthCompareOp   = VK_COMPARE_OP_LESS;
 
-  // One blend state per colour attachment; the picking target takes the same
-  // straight write the colour target does.
+  // One blend state per colour attachment. The colour target blends on alpha,
+  // which is what lets a draw fade; the picking target must not, and not only
+  // because a blended tag would be meaningless -- it is an integer format, and
+  // Vulkan requires blendEnable be false for those.
   std::array<VkPipelineColorBlendAttachmentState, 2> blendAttachments{};
   for (auto &attachment : blendAttachments) {
     attachment.blendEnable = VK_FALSE;
@@ -641,6 +643,14 @@ PipelineHandle DeviceVK::createPipeline(const PipelineDesc &desc) {
         VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT |
         VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT;
   }
+  auto &colourBlend               = blendAttachments[0];
+  colourBlend.blendEnable         = VK_TRUE;
+  colourBlend.srcColorBlendFactor = VK_BLEND_FACTOR_SRC_ALPHA;
+  colourBlend.dstColorBlendFactor = VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA;
+  colourBlend.colorBlendOp        = VK_BLEND_OP_ADD;
+  colourBlend.srcAlphaBlendFactor = VK_BLEND_FACTOR_ONE;
+  colourBlend.dstAlphaBlendFactor = VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA;
+  colourBlend.alphaBlendOp        = VK_BLEND_OP_ADD;
 
   VkPipelineColorBlendStateCreateInfo blend{};
   blend.sType = VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO;
