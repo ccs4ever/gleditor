@@ -73,9 +73,10 @@ public:
                     std::span<const std::byte> data) override;
   BufferHandle growBuffer(BufferHandle buffer, std::size_t bytes) override;
 
-  TextureHandle createTextureArray(int size, int layers,
-                                   TextureFormat format) override;
+  TextureHandle createTextureArray(int size, int layers, TextureFormat format,
+                                   int levels) override;
   void destroyTexture(TextureHandle texture) override;
+  void generateMipmaps(TextureHandle texture) override;
   void updateTextureLayer(TextureHandle texture, int layer, int xOffset,
                           int yOffset, int width, int height,
                           std::span<const std::byte> data) override;
@@ -132,6 +133,8 @@ private:
     VkImageView view{VK_NULL_HANDLE};
     int size{};
     int layers{};
+    /// Mip levels allocated. One means the chain is never generated.
+    int levels{1};
   };
 
   struct PipelineRecord {

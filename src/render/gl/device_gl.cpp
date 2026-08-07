@@ -332,7 +332,8 @@ BufferHandle DeviceGL::growBuffer(const BufferHandle buffer,
 }
 
 TextureHandle DeviceGL::createTextureArray(const int size, const int layers,
-                                           const TextureFormat format) {
+                                           const TextureFormat format,
+                                           const int levels) {
   if (TextureFormat::R8 != format) {
     throw std::invalid_argument("DeviceGL: unsupported texture format");
   }
@@ -340,20 +341,50 @@ TextureHandle DeviceGL::createTextureArray(const int size, const int layers,
   TextureRecord record{};
   record.size = size;
   record.layers = layers;
+  record.levels = std::max(1, levels);
   api.GenTextures(1, &record.name);
   api.ActiveTexture(GL_TEXTURE0);
   api.BindTexture(GL_TEXTURE_2D_ARRAY, record.name);
-  api.TexParameteri(GL_TEXTURE_2D_ARRAY, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+  // Trilinear when the glyph is smaller on screen than in the atlas, which is
+  // the case this exists for, and plain linear when it is larger: there is no
+  // level above zero to blend towards.
+  api.TexParameteri(GL_TEXTURE_2D_ARRAY, GL_TEXTURE_MIN_FILTER,
+                    1 < record.levels ? GL_LINEAR_MIPMAP_LINEAR : GL_LINEAR);
   api.TexParameteri(GL_TEXTURE_2D_ARRAY, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
   api.TexParameteri(GL_TEXTURE_2D_ARRAY, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
   api.TexParameteri(GL_TEXTURE_2D_ARRAY, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-  api.TexImage3D(GL_TEXTURE_2D_ARRAY, 0, GL_R8, size, size, layers, 0, GL_RED,
-                 GL_UNSIGNED_BYTE, nullptr);
+  // The chain stops where the atlas runs out of gutter between glyphs, not
+  // where the texture runs out of pixels, so the cap is the caller's.
+  api.TexParameteri(GL_TEXTURE_2D_ARRAY, GL_TEXTURE_BASE_LEVEL, 0);
+  api.TexParameteri(GL_TEXTURE_2D_ARRAY, GL_TEXTURE_MAX_LEVEL,
+                    record.levels - 1);
+  // Every level is allocated up front and zeroed. Undefined contents would be
+  // sampled the moment a glyph is minified, before anything has generated the
+  // chain, and would be whatever the driver left in memory.
+  for (int level = 0; level < record.levels; level++) {
+    const auto extent = std::max(1, size >> level);
+    const std::vector<std::uint8_t> zeros(
+        static_cast<std::size_t>(extent) * extent * layers, 0);
+    api.TexImage3D(GL_TEXTURE_2D_ARRAY, level, GL_R8, extent, extent, layers, 0,
+                   GL_RED, GL_UNSIGNED_BYTE, zeros.data());
+  }
   api.BindTexture(GL_TEXTURE_2D_ARRAY, 0);
+  diagnostics.raiseIfError("creating the glyph atlas");
 
   const TextureHandle handle{nextHandleId++};
   textures.emplace(handle.id, record);
   return handle;
+}
+
+void DeviceGL::generateMipmaps(const TextureHandle texture) {
+  const auto it = textures.find(texture.id);
+  if (textures.end() == it || 1 >= it->second.levels) {
+    return;
+  }
+  api.ActiveTexture(GL_TEXTURE0);
+  api.BindTexture(GL_TEXTURE_2D_ARRAY, it->second.name);
+  api.GenerateMipmap(GL_TEXTURE_2D_ARRAY);
+  api.BindTexture(GL_TEXTURE_2D_ARRAY, 0);
 }
 
 void DeviceGL::destroyTexture(const TextureHandle texture) {

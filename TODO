@@ -1,10 +1,8 @@
-* Mipmap the glyph atlas. The detailed path point-samples it, so a page drawn
-  much smaller than its glyphs shimmers and reads darker than the text really
-  is -- measurably so: swept across fields of view, the same page rendered
-  detailed and coarse differ by 8 levels of brightness at 0.03 screen pixels
-  per layout pixel and by 0.4 at 0.24. The coarse path sidesteps this rather
-  than fixing it, and only for text: page backgrounds and the caret still
-  alias.
+* The coarse path is the only thing that filters when a page is very small.
+  Below one eighth scale the atlas runs out of mip levels -- the gutter around
+  each glyph is what bounds the chain -- so the detailed path starts aliasing
+  again if --coarse-below is lowered past the default. Page backgrounds and the
+  caret are untextured quads and alias at every size.
 * Replace logo.png with something cooler
 * port over the gleditor code, enable glyph by glyph creation
 * document everything

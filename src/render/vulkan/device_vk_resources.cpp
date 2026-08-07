@@ -236,7 +236,8 @@ void DeviceVK::endOneShot(const VkCommandBuffer commands) const {
 // -- textures -----------------------------------------------------------------
 
 TextureHandle DeviceVK::createTextureArray(const int size, const int layers,
-                                           const TextureFormat format) {
+                                           const TextureFormat format,
+                                           const int levels) {
   if (TextureFormat::R8 != format) {
     throw std::invalid_argument("DeviceVK: unsupported texture format");
   }
@@ -244,6 +245,7 @@ TextureHandle DeviceVK::createTextureArray(const int size, const int layers,
   TextureRecord record{};
   record.size   = size;
   record.layers = layers;
+  record.levels = std::max(1, levels);
 
   VkImageCreateInfo info{};
   info.sType         = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
@@ -251,11 +253,14 @@ TextureHandle DeviceVK::createTextureArray(const int size, const int layers,
   info.format        = VK_FORMAT_R8_UNORM;
   info.extent        = {static_cast<std::uint32_t>(size),
                         static_cast<std::uint32_t>(size), 1};
-  info.mipLevels     = 1;
+  info.mipLevels     = static_cast<std::uint32_t>(record.levels);
   info.arrayLayers   = static_cast<std::uint32_t>(layers);
   info.samples       = VK_SAMPLE_COUNT_1_BIT;
   info.tiling        = VK_IMAGE_TILING_OPTIMAL;
-  info.usage         = VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT;
+  // TRANSFER_SRC as well as DST: the mip chain is built by blitting each level
+  // from the one above it, so every level is read as well as written.
+  info.usage = VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT |
+               VK_IMAGE_USAGE_SAMPLED_BIT;
   info.sharingMode   = VK_SHARING_MODE_EXCLUSIVE;
   info.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
   check(vkCreateImage(device, &info, nullptr, &record.image),
@@ -278,7 +283,8 @@ TextureHandle DeviceVK::createTextureArray(const int size, const int layers,
   viewInfo.image            = record.image;
   viewInfo.viewType         = VK_IMAGE_VIEW_TYPE_2D_ARRAY;
   viewInfo.format           = VK_FORMAT_R8_UNORM;
-  viewInfo.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0,
+  viewInfo.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0,
+                               static_cast<std::uint32_t>(record.levels), 0,
                                static_cast<std::uint32_t>(layers)};
   check(vkCreateImageView(device, &viewInfo, nullptr, &record.view),
         "vkCreateImageView (atlas)");
@@ -293,7 +299,8 @@ TextureHandle DeviceVK::createTextureArray(const int size, const int layers,
   barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
   barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
   barrier.image            = record.image;
-  barrier.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0,
+  barrier.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0,
+                              static_cast<std::uint32_t>(record.levels), 0,
                               static_cast<std::uint32_t>(layers)};
   barrier.srcAccessMask    = 0;
   barrier.dstAccessMask    = VK_ACCESS_SHADER_READ_BIT;
@@ -305,6 +312,107 @@ TextureHandle DeviceVK::createTextureArray(const int size, const int layers,
   const TextureHandle handle{nextHandleId++};
   textures.emplace(handle.id, record);
   return handle;
+}
+
+void DeviceVK::generateMipmaps(const TextureHandle texture) {
+  const auto it = textures.find(texture.id);
+  if (textures.end() == it || 1 >= it->second.levels) {
+    return;
+  }
+  const auto &record = it->second;
+  const auto layers  = static_cast<std::uint32_t>(record.layers);
+
+  // Vulkan has no glGenerateMipmap: each level is blitted from the one above
+  // it, and every step needs the source moved to TRANSFER_SRC and the
+  // destination to TRANSFER_DST first. Linear filtering during the blit is
+  // what does the averaging, so the format has to advertise it.
+  VkFormatProperties props{};
+  vkGetPhysicalDeviceFormatProperties(physicalDevice, VK_FORMAT_R8_UNORM,
+                                      &props);
+  if (0 == (props.optimalTilingFeatures &
+            VK_FORMAT_FEATURE_SAMPLED_IMAGE_FILTER_LINEAR_BIT)) {
+    // Without it the blit would fall back to nearest, which is not a mip chain
+    // so much as a subsample of one. Leaving the levels as they are and saying
+    // so beats quietly producing a worse image than no mipmaps at all.
+    diagnostics.record(DiagnosticSeverity::Warning,
+                       "the driver cannot filter R8 while blitting, so the "
+                       "glyph atlas keeps a single mip level");
+    return;
+  }
+
+  ensureIdleForMutation();
+  const auto commands = beginOneShot();
+
+  VkImageMemoryBarrier barrier{};
+  barrier.sType               = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+  barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+  barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+  barrier.image               = record.image;
+
+  const auto transition = [&](const std::uint32_t level,
+                              const VkImageLayout from, const VkImageLayout to,
+                              const VkAccessFlags srcAccess,
+                              const VkAccessFlags dstAccess,
+                              const VkPipelineStageFlags srcStage,
+                              const VkPipelineStageFlags dstStage) {
+    barrier.oldLayout        = from;
+    barrier.newLayout        = to;
+    barrier.srcAccessMask    = srcAccess;
+    barrier.dstAccessMask    = dstAccess;
+    barrier.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, level, 1, 0, layers};
+    vkCmdPipelineBarrier(commands, srcStage, dstStage, 0, 0, nullptr, 0,
+                         nullptr, 1, &barrier);
+  };
+
+  // Level zero holds the uploaded glyphs and is being sampled; the rest hold
+  // whatever the last generation left and are about to be overwritten.
+  transition(0, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+             VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, VK_ACCESS_SHADER_READ_BIT,
+             VK_ACCESS_TRANSFER_READ_BIT, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
+             VK_PIPELINE_STAGE_TRANSFER_BIT);
+
+  auto extent = record.size;
+  for (std::uint32_t level = 1; level < static_cast<std::uint32_t>(record.levels);
+       level++) {
+    const auto next = std::max(1, extent / 2);
+
+    transition(level, VK_IMAGE_LAYOUT_UNDEFINED,
+               VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 0,
+               VK_ACCESS_TRANSFER_WRITE_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT,
+               VK_PIPELINE_STAGE_TRANSFER_BIT);
+
+    VkImageBlit blit{};
+    blit.srcSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, level - 1, 0, layers};
+    blit.srcOffsets[1]  = {extent, extent, 1};
+    blit.dstSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, level, 0, layers};
+    blit.dstOffsets[1]  = {next, next, 1};
+    vkCmdBlitImage(commands, record.image,
+                   VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, record.image,
+                   VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &blit,
+                   VK_FILTER_LINEAR);
+
+    // This level becomes the next one's source, so it has to be readable
+    // before the following blit rather than after the loop.
+    transition(level, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+               VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+               VK_ACCESS_TRANSFER_WRITE_BIT, VK_ACCESS_TRANSFER_READ_BIT,
+               VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT);
+    extent = next;
+  }
+
+  // Every level is now TRANSFER_SRC; hand the lot back to the shader.
+  barrier.oldLayout        = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
+  barrier.newLayout        = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+  barrier.srcAccessMask    = VK_ACCESS_TRANSFER_READ_BIT;
+  barrier.dstAccessMask    = VK_ACCESS_SHADER_READ_BIT;
+  barrier.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0,
+                              static_cast<std::uint32_t>(record.levels), 0,
+                              layers};
+  vkCmdPipelineBarrier(commands, VK_PIPELINE_STAGE_TRANSFER_BIT,
+                       VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT, 0, 0, nullptr, 0,
+                       nullptr, 1, &barrier);
+
+  endOneShot(commands);
 }
 
 void DeviceVK::destroyTexture(const TextureHandle texture) {

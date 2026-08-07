@@ -50,6 +50,43 @@ int clampTextureSize(const int size) { return std::min(2048, size); }
 int clampTextureLayers(const int layers) { return std::min(10, layers); }
 
 /**
+ * @brief Mip levels the atlas carries, and the gutter that makes them safe.
+ *
+ * A mip texel at level L is the average of a 2^L block of level zero, aligned
+ * to level zero's grid, so the texels covering a glyph reach up to 2^L - 1
+ * texels outside it. Packed edge to edge, as glyphs were, that means level one
+ * already averages a glyph with whatever was placed beside it. Each glyph
+ * therefore sits inside a zeroed border wide enough for the deepest level.
+ *
+ * Four levels reach one eighth scale, which is a little past the point where
+ * the coarse path takes the page over entirely (0.15 screen pixels per layout
+ * pixel, see AppState::coarseBelow), so between them the two cover every size
+ * a page is drawn at. Going deeper would quadruple the gutter for sizes
+ * nothing ever samples.
+ */
+constexpr int atlasMipLevels = 4;
+constexpr int glyphPadding   = 1 << (atlasMipLevels - 1);
+
+/// Copy a tightly packed coverage rectangle into the middle of a zeroed one
+/// that is `glyphPadding` wider on every side.
+std::vector<std::byte> withPadding(const std::span<const std::byte> coverage,
+                                   const int width, const int height) {
+  const auto paddedWidth  = width + (2 * glyphPadding);
+  const auto paddedHeight = height + (2 * glyphPadding);
+  std::vector<std::byte> padded(static_cast<std::size_t>(paddedWidth) *
+                                    static_cast<std::size_t>(paddedHeight),
+                                std::byte{0});
+  for (int row = 0; row < height; row++) {
+    const auto *src = coverage.data() + static_cast<std::size_t>(row) * width;
+    auto *dst = padded.data() +
+                (static_cast<std::size_t>(row + glyphPadding) * paddedWidth) +
+                glyphPadding;
+    std::copy_n(src, width, dst);
+  }
+  return padded;
+}
+
+/**
  * @brief Convert a Cairo ARGB32 surface to tightly packed single-channel
  *        coverage.
  *
@@ -90,7 +127,16 @@ GlyphCache::GlyphCache(render::RenderDevice *aDevice) : device(aDevice) {
       size, size, limits.maxSize, maxLayers, limits.maxLayers);
 
   texture = device->createTextureArray(size, maxLayers,
-                                       render::TextureFormat::R8);
+                                       render::TextureFormat::R8,
+                                       atlasMipLevels);
+}
+
+void GlyphCache::flush() {
+  if (!atlasDirty || nullptr == device || !texture.valid()) {
+    return;
+  }
+  atlasDirty = false;
+  device->generateMipmaps(texture);
 }
 
 GlyphCache::~GlyphCache() {
@@ -194,12 +240,27 @@ GlyphCache::Sizes GlyphCache::addToCache(const std::string &chr,
 
   const auto coverage = toCoverage(data, width, height, stride);
 
-  const auto palette = getBestPalette(extents);
-  const auto placed  = palette->put(extents, coverage);
+  // The glyph goes into the atlas inside a zeroed border, so that the mip
+  // chain averages it with empty space rather than with its neighbour. The
+  // palette packs the padded box and knows nothing about the padding; the
+  // texture coordinates handed back to the shader are narrowed to the glyph
+  // itself below, so nothing downstream sees the border either.
+  const auto padded =
+      Rect{Length{width + (2 * glyphPadding)}, Length{height + (2 * glyphPadding)}};
+  const auto palette = getBestPalette(padded);
+  const auto placed  = palette->put(padded, withPadding(coverage, width, height));
   if (!placed.has_value()) {
     throw std::overflow_error(
         std::format("GlyphCache: failed to place glyph: {}", chr));
   }
+
+  // Narrow the placed rectangle from the padded box to the glyph inside it.
+  const auto texel = 1.0F / static_cast<float>(size);
+  const auto inner = TextureCoords{
+      PointF{placed->topLeft.x + (glyphPadding * texel),
+             placed->topLeft.y + (glyphPadding * texel)},
+      RectF{placed->box.width - (2 * glyphPadding * texel),
+            placed->box.height - (2 * glyphPadding * texel)}};
   // Mean coverage over the box, taken from the bitmap that was just
   // rasterised. One pass over data already in cache, once per distinct cluster.
   const auto inked =
@@ -209,8 +270,10 @@ GlyphCache::Sizes GlyphCache::addToCache(const std::string &chr,
                       }) /
       (255.0 * static_cast<double>(coverage.size()));
 
-  const auto sizes = Sizes{placed.value(), extents, palette->layerIndex(),
-                           static_cast<float>(inked)};
+  const auto sizes =
+      Sizes{inner, extents, palette->layerIndex(), static_cast<float>(inked)};
+  // Level zero moved, so the chain below it is stale until it is rebuilt.
+  atlasDirty = true;
   glyphs[chr][FontMapKeyAdapter(font)] = sizes;
   return sizes;
 }

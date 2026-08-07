@@ -214,6 +214,41 @@ Widening the view until several pages are on screen at once is what exercises
 the coarse path; at `--fov 60` the same document culls to 7 pages, and those 7
 cost 18.0 ms drawn as glyphs against 4.6 ms drawn as bars.
 
+**The atlas is mipmapped, which is what stops minified text crawling.** A page
+drawn smaller than its glyphs samples the atlas at less than one texel per
+pixel, and without a mip chain each pixel takes whichever texel it happens to
+land on. Nudge the camera and those samples jump between stroke and paper, which
+is the shimmer you see when panning. Measured by zooming 0.33% -- a change a
+filtered render should barely notice -- and asking how much of the page moved:
+
+| | pixels changed | mean change | changed by >32 levels |
+| --- | --- | --- | --- |
+| before | 6.5% | 5.41 | 4.3% |
+| after | 10.9% | 0.78 | 0.1% |
+
+More pixels move and each moves less, which is exactly the shape of the fix: a
+sub-pixel zoom should nudge everything slightly rather than flip a few pixels
+between black and white. The violent changes -- the ones that read as crawling
+-- fall by a factor of forty.
+
+Mipmapping an atlas is not free of consequences, because a mip texel at level L
+averages a 2^L block of level zero aligned to level zero's grid, and so reaches
+up to 2^L-1 texels outside whatever it covers. Glyphs were packed edge to edge,
+so level one alone would have averaged each glyph with its neighbour. Each glyph
+now sits inside a zeroed border sized for the deepest level the atlas carries,
+and the texture coordinates handed to the shader are narrowed back to the glyph,
+so nothing downstream knows the border is there. Four levels reach one eighth
+scale, a little past where the coarse path takes over entirely, so between them
+the two cover every size a page is drawn at.
+
+OpenGL has `glGenerateMipmap`; Vulkan has nothing equivalent and `DeviceVK`
+blits each level from the one above with the layout transitions to go with it.
+Either way it is `RenderDevice::generateMipmaps()`, called once a frame when a
+glyph has been added rather than once per glyph -- loading a document adds
+thousands of clusters between two frames, and the chain only has to be right by
+the time something samples it. The two backends produce identical frames, which
+is the useful check on a hand-written blit chain.
+
 **Occlusion queries would add nothing here, and were not used.** They answer
 "is this hidden behind something already drawn", and after frustum culling there
 is nothing left to hide behind anything: the 7 surviving pages are stacked with
@@ -222,11 +257,20 @@ query would also cost a round trip -- the answer arrives a frame or two later,
 the same latency the picking readback has -- for pages that are already down to
 a handful. Frustum culling is what the geometry here rewards.
 
-Both are checked rather than asserted, by `tools/compare-backends.sh`. Culling
-is checked by rendering the same document with `--no-cull` and requiring the two
-frames to be identical to the byte, on every backend. The coarse path is checked
-by comparing the average brightness of the pages between the two paths, which is
-what would give the switch away as the camera crosses it.
+All three are checked rather than asserted, by `tools/compare-backends.sh`.
+Culling is checked by rendering the same document with `--no-cull` and requiring
+the two frames to be identical to the byte, on every backend. The coarse path is
+checked by comparing the average brightness of the pages between the two paths,
+which is what would give the switch away as the camera crosses it. The filtering
+is checked by the 0.33% zoom above, with limits an order of magnitude under what
+the unfiltered atlas measured.
+
+One of those checks corroborated another, which is the sort of thing worth
+noticing: mipmapping brought the coarse path's brightness *closer* to the
+detailed path's, from 1.85 levels apart to 0.81. The two were derived
+independently -- one from the glyph coverage the cache measured, the other from
+whatever the rasteriser produced -- so them converging says both are now
+right rather than agreeably wrong.
 
 ### Driver diagnostics
 
