@@ -1,0 +1,40 @@
+# Maintainer: ccs4ever <ccs4ever@gmail.com>
+pkgname=gleditor
+pkgver=0.1.0
+pkgrel=1
+pkgdesc="GPU-rendered text editor with OpenGL, OpenGL ES and Vulkan backends"
+arch=('x86_64' 'aarch64')
+url="https://github.com/ccs4ever/gleditor"
+license=('GPL-3.0-or-later')
+depends=('pangomm' 'cairomm' 'glibmm-2.68' 'sdl3' 'sdl3_image' 'libglvnd'
+         'hicolor-icon-theme')
+# The Vulkan backend loads a loader at run time; the other two backends work
+# without one, so this is optional rather than a hard dependency.
+optdepends=('vulkan-icd-loader: Vulkan backend'
+            'ttf-dejavu: default font')
+makedepends=('gcc' 'make' 'pkgconf' 'glm' 'glslang' 'vulkan-headers')
+source=("$pkgname-$pkgver.tar.gz")
+sha256sums=('SKIP')
+
+build() {
+  cd "$pkgname-$pkgver"
+  # GLEDITOR_VERSION is passed because the tarball carries no git history, and
+  # SDL3 is stated rather than probed so the package cannot silently change
+  # which SDL it links depending on what happened to be installed.
+  make \
+    GLEDITOR_SDL=3 \
+    GLEDITOR_ENABLE_VULKAN=1 \
+    GLEDITOR_VERSION="$pkgver" \
+    gleditor shaders
+}
+
+package() {
+  cd "$pkgname-$pkgver"
+  make install \
+    DESTDIR="$pkgdir" \
+    prefix=/usr \
+    GLEDITOR_SDL=3 \
+    GLEDITOR_ENABLE_VULKAN=1 \
+    GLEDITOR_VERSION="$pkgver"
+  install -Dm644 LICENSE "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
+}

@@ -241,8 +241,12 @@ shaders: $(SPIRV)
 .PHONY: shaders
 
 gleditor: $(OBJDIR)/gleditor
+# Libraries after the objects that need them. GNU ld resolves left to right, so
+# the other order only ever worked because clang's linker is forgiving about
+# it; gcc with link-time optimisation, which is what Debian builds with,
+# reported every pangomm and glibmm symbol as undefined.
 $(OBJDIR)/gleditor: $(OBJS)
-	$(CXX) $(LIBS) $(LDFLAGS) -o $@ $^
+	$(CXX) $(LDFLAGS) -o $@ $^ $(LIBS)
 .PHONY: gleditor
 
 sanitize/address: CXXFLAGS += $(SANITIZE_ADDR_OPTS)
@@ -272,7 +276,7 @@ sanitize/memory/run: sanitize/memory
 .PHONY: gleditor_test
 gleditor_test: $(OBJDIR)/gleditor_test
 $(OBJDIR)/gleditor_test: $(TEST_OBJS)
-	$(CXX) $(LIBS) $(LDFLAGS) $(shell pkg-config $(STATIC) --libs $(TEST_PKGS)) -o $@ $^
+	$(CXX) $(LDFLAGS) -o $@ $^ $(LIBS) $(shell pkg-config $(STATIC) --libs $(TEST_PKGS))
 
 test: $(OBJDIR)/gleditor_test
 	$(OBJDIR)/gleditor_test

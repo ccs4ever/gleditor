@@ -1,0 +1,45 @@
+#!/usr/bin/make -f
+
+# The build is a plain Makefile, so dh's autoconf and cmake guesses are turned
+# off and the three steps are spelled out below.
+export DEB_BUILD_MAINT_OPTIONS = hardening=+all
+
+# Stated rather than left to the Makefile, whose own default is clang++ when
+# nothing else asks. clang is not in build-essential, so a buildd would either
+# not have it or would use it without it appearing in Build-Depends; either way
+# the package would not be built with the compiler it claims. The Makefile
+# picks the -std flag the compiler accepts, which is what makes gcc work here.
+export CXX = g++
+
+# SDL2 rather than SDL3: SDL3 is not in the Debian archive, and "whichever is
+# installed" is not something a package can depend on. The Makefile would pick
+# SDL3 when it finds it, so this is stated rather than left to the probe.
+export GLEDITOR_SDL = 2
+export GLEDITOR_ENABLE_VULKAN = 1
+
+# Debian builds from an unpacked tarball with no git history, so the version
+# has to be handed in. dpkg-parsechangelog is the authority on what it is.
+DEB_VERSION_UPSTREAM := $(shell dpkg-parsechangelog -SVersion | sed 's/-[^-]*$$//')
+
+%:
+	dh $@
+
+# dh_auto_build rather than a bare $(MAKE): it is what turns the parallel=N in
+# DEB_BUILD_OPTIONS into a -j flag. Calling make directly silently built the
+# whole package on one core.
+override_dh_auto_build:
+	dh_auto_build -- GLEDITOR_VERSION=$(DEB_VERSION_UPSTREAM) gleditor shaders
+
+# The test binary links gmock, which is a build dependency Debian would rather
+# not carry for a package that has no autopkgtest. The suite is run in CI on
+# every push instead.
+override_dh_auto_test:
+
+override_dh_auto_install:
+	$(MAKE) install DESTDIR=$(CURDIR)/debian/gleditor prefix=/usr \
+		GLEDITOR_VERSION=$(DEB_VERSION_UPSTREAM)
+
+# Nothing here is a library, and the binary is not built with a soname; the
+# default clean also removes build/, which the Makefile owns.
+override_dh_auto_clean:
+	$(MAKE) clean

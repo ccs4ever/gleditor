@@ -1,0 +1,38 @@
+Source: gleditor
+Section: editors
+Priority: optional
+Maintainer: ccs4ever <ccs4ever@gmail.com>
+Build-Depends: debhelper-compat (= 13),
+               pkg-config,
+               libpangomm-2.48-dev,
+               libcairomm-1.16-dev,
+               libglibmm-2.68-dev,
+               libsdl2-dev (>= 2.0.22),
+               libsdl2-image-dev,
+               libgl-dev,
+               libglm-dev,
+               libvulkan-dev,
+               glslang-tools,
+               g++ (>= 13)
+Standards-Version: 4.7.0
+Homepage: https://github.com/ccs4ever/gleditor
+Rules-Requires-Root: no
+
+Package: gleditor
+Architecture: any
+Depends: ${shlibs:Depends}, ${misc:Depends}
+Recommends: fonts-dejavu-core
+Description: GPU-rendered text editor with three graphics backends
+ GL Editor draws text on the GPU. Documents are laid out as pages in a 3D
+ scene, shaped and rasterised with Pango and Cairo, and drawn as instanced
+ quads sampled from a glyph atlas.
+ .
+ One rendering pipeline serves three graphics APIs. Everything above the
+ backend is written against a single device interface and names no graphics
+ API, so the same frame can be produced through OpenGL 3.3, OpenGL ES 3.0 or
+ Vulkan 1.0, chosen at run time with --backend.
+ .
+ The renderer draws only what is on screen: pages outside the view are culled,
+ and pages too far away for their glyphs to be legible are drawn as one solid
+ bar per line. The glyph atlas is mipmapped so minified text does not crawl,
+ and grows on demand rather than being sized for the worst case.
