@@ -152,6 +152,16 @@ wrong one -- 0.25 ms out of a 2.5 s frame here. Where it would cost more, it has
 been right every time. `GLEDITOR_RECORD_THREADS` settles it by hand when that is
 not good enough.
 
+There is one other thread boundary worth naming, because it is easy to cross by
+accident. Documents are paginated on a loader thread, but each finished layout
+is handed to the render thread through the render queue, and the `RefPtr` means
+both threads then hold the same `Pango::Layout`. A layout computes its lines
+lazily, so *asking it a question mutates it* -- `get_line_count()` shapes the
+text. Anything the loader thread wants to know about a layout has to be asked
+before the layout is handed over, not after. Doing it in the other order crashed
+about one run in five, always somewhere inside Pango or glib's allocator, and
+also corrupted the shaping badly enough to produce clusters 237 texels wide.
+
 The frame time is dominated by none of them: it is 4.6 million quads being
 rasterised, every page of the document, every frame, whether or not the page is
 on screen. Culling pages outside the view would cut both columns by about two
@@ -248,6 +258,62 @@ glyph has been added rather than once per glyph -- loading a document adds
 thousands of clusters between two frames, and the chain only has to be right by
 the time something samples it. The two backends produce identical frames, which
 is the useful check on a hand-written blit chain.
+
+**The atlas is allocated small and grown on demand.** It used to be sized for
+the worst case at startup, which is a poor trade in both directions: too large
+for the hundred or so distinct clusters a document of plain English actually
+uses, and still a hard ceiling for one that uses more. Now it opens at 512x512
+in a single layer and grows when a glyph will not fit.
+
+It grows sideways first, up to whatever `RenderDevice::textureLimits()` reports,
+and only then adds layers. A layer twice as wide holds four times as much where
+a second layer holds twice as much, and layers are the scarcer resource anyway:
+the vertex packing names one in six bits, so 64 is the ceiling regardless of the
+2048 lavapipe offers. Growing means a new texture object either way -- an array
+texture cannot gain layers and a 2D texture cannot gain pixels -- so every glyph
+already packed is written into the new one, at the texel it was already on.
+
+That last part is why glyph coordinates are texels rather than a fraction of the
+texture, with the shader dividing by `textureSize()` when it samples. A fraction
+would move every glyph named by a page's vertex buffer the moment the atlas
+doubled, and those buffers are already on the device. Texels do not move,
+because growth only ever adds room above and to the right of what is packed.
+
+Provoking it takes deliberate effort: after the fix below, the whole King James
+Bible packs into one 512x512 layer and never grows at all. `tests/glyph_cache.cpp`
+uses a mock device reporting whatever limits a test asks for, and checks the
+order (size before layers), that no allocation exceeds what the device allowed,
+that a glyph's coordinates survive a growth unchanged, and that a glyph too
+large for any layer is refused rather than chased with reallocations that cannot
+help. End to end, `GLEDITOR_ATLAS_SIZE=64` makes ordinary text overflow the
+atlas twice over, and `tools/compare-backends.sh` renders that against the
+ungrown frame on every backend.
+
+That last comparison is not a byte comparison, and the reason is worth stating
+because it looks like a tolerance chosen for convenience. A smaller atlas packs
+glyphs at different texels, and a mip texel averages a block aligned to level
+zero's grid rather than to the glyph, so the same glyph at an odd offset
+genuinely has a different mip chain from one at an even offset. An atlas opened
+at 256, which never grows at all, differs from one opened at 512 by as much as
+one opened at 64, which grows twice -- so the difference is packing, not growth.
+What a failed re-upload looks like is glyphs missing outright, and the limits
+were set by breaking it on purpose:
+
+| | mean change | >32 levels | >64 | >100 |
+| --- | --- | --- | --- | --- |
+| working | 0.64 | 0.38% | 0.02% | 0.000% |
+| re-upload dropped | 2.24 | 1.92% | 1.19% | 0.739% |
+
+The phase shift nudges pixels; a missing glyph flips them from ink to paper. The
+limit that carries the check is the one a working atlas does not reach at all.
+
+Fitting a Bible into one small layer was not the plan; it fell out of a bug the
+work uncovered. A page bounds its layout by height and Pango implements that by
+ellipsizing, so the last line is cut short while still reporting its full logical
+length. Taking that length made each page claim bytes it never drew, and the
+cluster walk then handed the cache single bitmaps up to 848 texels wide -- one
+per page, hundreds of them. Measuring what the layout actually consumed removed
+them, and with them a factor of 64 in atlas area.
 
 **Occlusion queries would add nothing here, and were not used.** They answer
 "is this hidden behind something already drawn", and after frustum culling there
@@ -694,6 +760,10 @@ Other actions:
   That is what lets the same binary be run both ways, which is how the two
   paths get timed and compared at all. Ignored by the other backends, which
   cannot split.
+- `GLEDITOR_ATLAS_SIZE=N`  side length the glyph atlas opens at, before it grows
+  to fit. Exists because nothing else provokes growth -- a whole Bible packs
+  into the default 512 -- so a small value is how the grown atlas gets rendered
+  and compared against the ungrown one. `tools/compare-backends.sh` sets it.
 - `STATIC=--static`  attempt static linking (where supported by your system/libs).
 - `ASAN_OPTIONS`, `TSAN_OPTIONS`, `MSAN_OPTIONS`  fine-tune sanitizer behavior (the `/run` targets set sensible defaults).
 - LandlockMake: if `LANDLOCKMAKE_VERSION` is set, the Makefile enables a sandbox for builds (optional/developer setup).

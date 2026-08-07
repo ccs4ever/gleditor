@@ -235,13 +235,25 @@ public:
     static unsigned int color(unsigned char rgb) {
       return color3(rgb, rgb, rgb);
     }
+    /**
+     * @brief Pack the atlas layer and the quad's size into one word.
+     *
+     * Six bits of layer, thirteen each of width and height. The layer field is
+     * what bounds how far the glyph atlas can grow in layers -- the hardware
+     * allows far more -- and thirteen bits leaves the largest quad drawn, a
+     * page background of around fifteen hundred layout pixels, five times the
+     * room it needs. Must stay in step with unpackLayerWH() in
+     * assets/shaders/glyph.vert.glsl and lwh() in doc.cpp.
+     */
+    static constexpr unsigned int maxAtlasLayers = 64;
+    static constexpr unsigned int maxQuadExtent  = 8191;
     static constexpr unsigned int layerWidthHeight(const unsigned char layer,
                                                    const unsigned int width,
                                                    const unsigned int height) {
-      assert(layer <= 10);
-      assert(width < 16384);
-      assert(height < 16384);
-      return layer << 28 | width << 14 | height;
+      assert(layer < maxAtlasLayers);
+      assert(width <= maxQuadExtent);
+      assert(height <= maxQuadExtent);
+      return layer << 26 | width << 13 | height;
     }
   };
 

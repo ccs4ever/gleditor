@@ -51,9 +51,9 @@ constexpr std::uint32_t initialPoolRows = 1U << 16U;
 /// Doc::VBORow::layerWidthHeight. The field widths must stay in step with that
 /// function and with unpackLayerWH() in assets/shaders/glyph.vert.glsl.
 [[maybe_unused]] glm::vec3 lwh(const uint packed3DDims) {
-  return {packed3DDims >> static_cast<uint>(28),
-          packed3DDims >> static_cast<uint>(14) & static_cast<uint>(16383),
-          packed3DDims & static_cast<uint>(16383)};
+  return {packed3DDims >> static_cast<uint>(26),
+          packed3DDims >> static_cast<uint>(13) & static_cast<uint>(8191),
+          packed3DDims & static_cast<uint>(8191)};
 }
 
 /// Margin in layout pixels between the page edge and its text.
@@ -86,6 +86,18 @@ double toPixels(const int pangoUnits) {
   return static_cast<double>(pangoUnits) / PANGO_SCALE;
 }
 
+/// Byte offset of the character after the one starting at @p pos. Always
+/// advances, so a caller stepping through text cannot get stuck on a malformed
+/// byte.
+std::size_t nextCharacter(const std::string &text, std::size_t pos) {
+  pos = std::min(pos + 1, text.size());
+  while (pos < text.size() &&
+         0x80 == (static_cast<unsigned char>(text[pos]) & 0xC0)) {
+    pos++;
+  }
+  return pos;
+}
+
 /// Number of characters in a UTF-8 range, counting lead bytes.
 std::size_t utf8Length(const std::string_view text) {
   return static_cast<std::size_t>(std::ranges::count_if(text, [](const char chr) {
@@ -114,6 +126,13 @@ std::array<float, 16> toArray(const glm::mat4 &mat) {
 }
 
 } // namespace
+
+// Neither header can see the other, so the two ends of the layer limit are
+// tied together here: the atlas refuses to grow past what the packing can name.
+static_assert(GlyphCache::maxEncodableLayers ==
+                  static_cast<int>(Doc::VBORow::maxAtlasLayers),
+              "the glyph cache's layer ceiling and the vertex packing's layer "
+              "field have drifted apart");
 
 render::VertexLayout Doc::vertexLayout() {
   using render::AttributeType;
@@ -185,8 +204,8 @@ Page::Page(std::shared_ptr<Doc> aDoc, RenderState &state, glm::mat4 &model,
         color(255),
         {0, 0},
         {0, 0},
-        layerWH(0, std::min(16383U, static_cast<unsigned int>(pageWidth)),
-                std::min(16383U, static_cast<unsigned int>(pageHeight))),
+        layerWH(0, std::min(Doc::VBORow::maxQuadExtent, static_cast<unsigned int>(pageWidth)),
+                std::min(Doc::VBORow::maxQuadExtent, static_cast<unsigned int>(pageHeight))),
         pageTag});
   };
   pushBackground();
@@ -200,11 +219,8 @@ Page::Page(std::shared_ptr<Doc> aDoc, RenderState &state, glm::mat4 &model,
   // bounded by what the page actually consumes -- without which the final
   // cluster's end ran to the end of the document, producing a "cluster" of
   // tens of kilobytes.
-  const auto &lastLine = layout->get_const_line(layout->get_line_count() - 1);
-  const auto lastLen   = lastLine->get_length();
-  const auto limit     = std::min<std::size_t>(
-      text.size(), static_cast<std::size_t>(lastLine->get_start_index() +
-                                                (0 == lastLen ? 1 : lastLen)));
+  const auto limit =
+      std::min<std::size_t>(text.size(), Doc::consumedBytes(layout));
 
   // Glyph box area per line, accumulated as the clusters are placed. This is
   // what tells the coarse path how full each line is, so that its bar is as
@@ -235,9 +251,17 @@ Page::Page(std::shared_ptr<Doc> aDoc, RenderState &state, glm::mat4 &model,
 
     const auto start = static_cast<std::size_t>(std::max(0, iter.get_index()));
     const bool more  = iter.next_cluster();
-    const auto end   = std::min(
+    // Where the next cluster begins is where this one ends. When there is no
+    // next cluster the answer is one character, not "the rest of the page":
+    // Pango stops producing clusters partway through the final line, and
+    // taking the page's end instead handed the cache a bitmap of the whole
+    // remaining run -- a "glyph" 848 texels wide, and hundreds of them across
+    // a document. Everything past the last cluster was never shaped, so it
+    // belongs to the next page rather than to this one; textBytes below is set
+    // from what was actually consumed.
+    const auto end = std::min(
         limit, more ? static_cast<std::size_t>(std::max(0, iter.get_index()))
-                      : limit);
+                    : nextCharacter(text, start));
 
     if (start >= limit) {
       break;
@@ -381,8 +405,8 @@ Page::Page(std::shared_ptr<Doc> aDoc, RenderState &state, glm::mat4 &model,
           color(shade),
           {0, 0},
           {0, 0},
-          layerWH(0, std::min(16383U, static_cast<unsigned int>(barWidth)),
-                  std::min(16383U, static_cast<unsigned int>(barHeight))),
+          layerWH(0, std::min(Doc::VBORow::maxQuadExtent, static_cast<unsigned int>(barWidth)),
+                  std::min(Doc::VBORow::maxQuadExtent, static_cast<unsigned int>(barHeight))),
           pageTag});
     } while (lineIter.next_line());
   }
@@ -646,11 +670,39 @@ Glib::RefPtr<Pango::Layout> Doc::layoutFrom(const std::uint32_t offset) const {
 }
 
 std::uint32_t Doc::consumedBytes(const Glib::RefPtr<Pango::Layout> &layout) {
-  const auto &line = layout->get_const_line(layout->get_line_count() - 1);
-  const int len    = line->get_length();
-  return static_cast<std::uint32_t>(line->get_start_index() +
-                                    (0 == len ? 1 : len));
+  // How much of the text this page actually shows.
+  //
+  // A page bounds its layout by height, and Pango implements that by
+  // ellipsizing: the final line is cut short and replaced by an ellipsis, while
+  // still reporting its full logical length. Taking that length made the page
+  // claim bytes it never drew -- the following page then started past them, and
+  // the cluster walk handed the glyph cache one bitmap covering the whole
+  // remaining run, hundreds of texels wide and one per page.
+  //
+  // So an ellipsized last line belongs to the next page, not this one. Asking
+  // whether the layout ellipsized costs nothing; counting the clusters that
+  // survived would mean shaping the text here, on the loader thread, while the
+  // render thread is shaping through the same global font map -- which
+  // corrupts the heap inside fontconfig often enough to be caught in a handful
+  // of runs.
+  const auto lines = layout->get_line_count();
+  if (0 >= lines) {
+    return 0;
+  }
+  const auto &last = layout->get_const_line(lines - 1);
+  const int len    = last->get_length();
+  const auto whole = static_cast<std::uint32_t>(last->get_start_index() +
+                                                (0 == len ? 1 : len));
+  if (!layout->is_ellipsized()) {
+    return whole;
+  }
+  // Everything before the cut line. A single line that ellipsizes has nothing
+  // before it, and a page that consumed nothing would never advance, so the
+  // whole line is taken in that case and the overrun tolerated.
+  const auto upToCut = static_cast<std::uint32_t>(last->get_start_index());
+  return 0 == upToCut ? whole : upToCut;
 }
+
 
 namespace {
 
@@ -897,10 +949,16 @@ void Doc::makePages(RenderState &state) {
     lay->set_ellipsize(Pango::EllipsizeMode::END);
     pango_layout_set_text(lay->gobj(), txt + tSize,
                           static_cast<int>(text.bytes() - tSize));
-    const auto &line = lay->get_const_line(lay->get_line_count() - 1);
+    // Measured before the layout is handed over, never after. newPage() queues
+    // the page onto the render thread and the layout goes with it, so from
+    // that call on it belongs to two threads at once -- and a Pango layout
+    // computes its lines lazily, so merely asking it a question mutates it.
+    // Reading it here means this thread does that work while it is still the
+    // only owner. The same measure the page itself will record, so that page
+    // N+1 starts exactly where page N stopped drawing.
+    const auto consumed = consumedBytes(lay);
     newPage(state, lay, static_cast<std::uint32_t>(tSize));
-    const int len = line->get_length();
-    tSize += line->get_start_index() + (0 == len ? 1 : len);
+    tSize += consumed;
   }
 }
 

@@ -49,26 +49,36 @@ GlyphPalette::put(const Rect &charBox, const std::span<const std::byte> data) {
   }
   auto [x, y] = lane->put(charBox.width);
 
-  // Lanes grow downwards from the top of the palette while texture rows are
-  // addressed from the bottom, so the lane offset is mirrored before upload.
-  const auto yOffset = std::to_underlying(paletteDims.height) -
-                       std::to_underlying(y) -
-                       std::to_underlying(charBox.height);
-
   if (nullptr != device && !data.empty()) {
-    device->updateTextureLayer(texture, layer, std::to_underlying(x), yOffset,
+    device->updateTextureLayer(texture, layer, std::to_underlying(x),
+                               std::to_underlying(y),
                                std::to_underlying(charBox.width),
                                std::to_underlying(charBox.height), data);
   }
 
   std::ranges::sort(lanes);
 
-  const auto wid = static_cast<float>(paletteDims.width);
-  const auto hgt = static_cast<float>(paletteDims.height);
+  // Texels, not a fraction of the texture. The atlas grows as glyphs arrive,
+  // and a fraction would mean every glyph already written into a document's
+  // vertex buffer pointed somewhere else the moment it did. Texels stay put --
+  // growth only ever adds room above and to the right -- so the shader divides
+  // by the texture's size at sampling time instead.
   return make_optional(TextureCoords{
-      PointF{static_cast<float>(x) / wid, static_cast<float>(yOffset) / hgt},
-      RectF{static_cast<float>(charBox.width) / wid,
-            static_cast<float>(charBox.height) / hgt}});
+      PointF{static_cast<float>(std::to_underlying(x)),
+             static_cast<float>(std::to_underlying(y))},
+      RectF{static_cast<float>(std::to_underlying(charBox.width)),
+            static_cast<float>(std::to_underlying(charBox.height))}});
+}
+
+void GlyphPalette::grow(const Rect &newDims, const render::TextureHandle aTexture) {
+  // Lanes stack upwards from y = 0 and fill rightwards from x = 0, so a bigger
+  // layer is purely additional room: nothing already placed moves, which is
+  // what lets the glyphs be re-uploaded where they already were.
+  paletteDims = newDims;
+  texture     = aTexture;
+  for (auto &lane : lanes) {
+    lane.widen(newDims.width);
+  }
 }
 
 [[nodiscard]] std::partial_ordering operator<=>(const GlyphPalette &left,

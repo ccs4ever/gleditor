@@ -53,8 +53,13 @@ vec3 selectedBackground(vec3 base) {
 }
 
 void main() {
+    // vTexCoord arrives in texels; the atlas is resized as glyphs are added, so
+    // the divisor is read from the texture rather than baked into the vertex
+    // data. textureSize reports level zero, which is the level the coordinates
+    // were placed in.
+    vec2 atlas = vec2(textureSize(uGlyphAtlas, 0).xy);
     float coverage =
-        texture(uGlyphAtlas, vec3(vTexCoord, floor(vLayer + 0.5))).r;
+        texture(uGlyphAtlas, vec3(vTexCoord / atlas, floor(vLayer + 0.5))).r;
     outColor = vec4(mix(selectedBackground(vBgColor), vFgColor, coverage), 1.0);
     // Fixed point: the attachment holds unsigned integers. The scale must
     // match render::tagFractionScale.

@@ -106,11 +106,20 @@ public:
    * @param charBox Dimensions of the rectangle to insert.
    * @param data Tightly packed single-channel coverage, `width * height` bytes.
    *             May be empty for a zero-area box.
-   * @return Normalized texture coordinates of the inserted rectangle, or
-   *         nullopt if no space remains.
+   * @return Texture coordinates of the inserted rectangle, in texels, or
+   *         nullopt if no space remains. Texels rather than a fraction of the
+   *         texture because the atlas grows: see the note in put().
    */
   std::optional<TextureCoords> put(const Rect &charBox,
                                    std::span<const std::byte> data);
+
+  /**
+   * @brief Re-point this palette at a larger layer of a new array texture.
+   *
+   * Everything already packed keeps its texel position, so the caller can
+   * re-upload each glyph exactly where it was.
+   */
+  void grow(const Rect &newDims, render::TextureHandle aTexture);
 
   /// Index of the array texture layer this palette owns.
   [[nodiscard]] int layerIndex() const { return layer; }

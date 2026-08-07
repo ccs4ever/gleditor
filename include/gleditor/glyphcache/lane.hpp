@@ -58,6 +58,19 @@ public:
     return availWidth() >= charBox.width && maxCharHeight >= charBox.height;
   }
   /**
+   * @brief Extend the lane to a wider palette.
+   *
+   * Glyphs fill from x = 0, so a wider layer only ever adds free space at the
+   * right-hand end; nothing already in the lane moves. Narrowing is not
+   * supported and would strand whatever sat beyond the new edge.
+   */
+  void widen(const Length newWidth) {
+    if (std::to_underlying(newWidth) > std::to_underlying(paletteWidth)) {
+      paletteWidth = newWidth;
+    }
+  }
+
+  /**
    * @brief Remaining horizontal capacity of the lane.
    */
   [[nodiscard]] Length availWidth() const {
