@@ -292,7 +292,21 @@ void DeviceVK::createLogicalDevice() {
   static constexpr std::array deviceExtensions = {
       VK_KHR_SWAPCHAIN_EXTENSION_NAME};
 
+  // Without independentBlend every colour attachment of a pipeline must carry
+  // identical blend state. This pipeline cannot: the colour target blends on
+  // alpha so a draw can fade, and the picking target is an integer format,
+  // for which the spec requires blending be off. Asking for the feature is
+  // what makes those two states legal in one pipeline.
+  VkPhysicalDeviceFeatures available{};
+  vkGetPhysicalDeviceFeatures(physicalDevice, &available);
+  if (VK_FALSE == available.independentBlend) {
+    throw std::runtime_error(
+        "vulkan: the device does not support independentBlend, which the "
+        "glyph pipeline needs in order to blend colour without blending the "
+        "picking attachment");
+  }
   VkPhysicalDeviceFeatures features{};
+  features.independentBlend = VK_TRUE;
 
   VkDeviceCreateInfo info{};
   info.sType                   = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;

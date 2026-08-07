@@ -3,6 +3,7 @@
 
 #include <array>
 #include <cassert>
+#include <choreograph/Choreograph.h>
 #include <cstdint>
 #include <gleditor/buffer_pool.hpp>
 #include <gleditor/drawable.hpp>
@@ -98,8 +99,8 @@ public:
    * drawn as one solid bar per line instead.
    */
   void collect(std::vector<render::GlyphBatch> &batches,
-               const glm::mat4 &docTransform, const DrawBudget &budget,
-               DrawStats &stats) const;
+               const glm::mat4 &docTransform, float opacity,
+               const DrawBudget &budget, DrawStats &stats) const;
 
   [[nodiscard]] std::uint32_t baseOffset() const { return textOffset; }
   [[nodiscard]] const std::vector<ClusterBox> &clusterBoxes() const {
@@ -190,6 +191,20 @@ private:
   /// Outcome of the most recent reflow, for reporting and for tests.
   ReflowScope reflowScope{ReflowScope::Document};
   std::size_t reflowPages{};
+  /**
+   * @brief Where the document actually is, as opposed to where it belongs.
+   *
+   * Animated, so during an arrival it lags the resting place the constructor
+   * was given. Everything that needs the document's transform reads
+   * modelMatrix(), which is built from this rather than from the base class's
+   * matrix -- that one records the destination and does not move.
+   */
+  ch::Output<glm::vec3> position;
+  /// Alpha the whole document is drawn at. Zero until it has arrived.
+  ch::Output<float> opacity{1.0F};
+  /// Whether a departure has been started, so the owner knows this document is
+  /// on its way out rather than merely transparent for a moment.
+  bool closing{};
 
   /// Build a page layout for text starting at @p offset, with the page
   /// geometry makePages() uses. Safe to call off the render thread.
@@ -342,6 +357,47 @@ public:
                      std::uint32_t colour,
                      std::vector<render::HighlightRange> &out) const;
   [[nodiscard]] size_t numPages() const { return pages.size(); }
+
+  /**
+   * @brief Ease this document into place and fade it in.
+   *
+   * Called when the document is opened, on the render thread: @p timeline is
+   * stepped by the render loop and Choreograph does not lock. The document
+   * starts in front of where it belongs and becomes opaque as it settles back,
+   * so opening one reads as an arrival rather than a document appearing
+   * already in position.
+   */
+  void animateArrival(ch::Timeline &timeline);
+
+  /**
+   * @brief Fade this document out and drift it towards the viewer.
+   *
+   * The reverse of the arrival, and deliberately not an immediate removal: the
+   * caller keeps the document alive until hasFadedOut() is true, so the fade
+   * is something the user sees rather than a frame in which a document was
+   * there and then was not.
+   */
+  void animateDeparture(ch::Timeline &timeline);
+
+  /**
+   * @brief Ease this document to a new resting place.
+   *
+   * Used when a document closes and the ones after it move up. Retargets the
+   * animation from wherever the document currently is, so a move that
+   * interrupts another move does not jump.
+   */
+  void animateMoveTo(ch::Timeline &timeline, const glm::vec3 &target);
+
+  /// True once a departure has been started.
+  [[nodiscard]] bool isClosing() const { return closing; }
+  /// True when a departing document has finished fading and can be dropped.
+  [[nodiscard]] bool hasFadedOut() const { return closing && opacity() <= 0.0F; }
+
+  /// Transform placing this document in the world, including any arrival still
+  /// in progress. Prefer this to getModel(), which is the resting place.
+  [[nodiscard]] glm::mat4 modelMatrix() const;
+  /// Alpha this document currently draws at.
+  [[nodiscard]] float currentOpacity() const { return opacity(); }
 
   friend class Page;
 };

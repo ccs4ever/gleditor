@@ -487,8 +487,9 @@ PipelineHandle DeviceGL::createPipeline(const PipelineDesc &desc) {
 
   record.layout    = desc.layout;
   record.depthTest = desc.depthTest;
-  record.mvpLoc    = api.GetUniformLocation(record.program, "uMVP");
-  record.atlasLoc  = api.GetUniformLocation(record.program, "uGlyphAtlas");
+  record.mvpLoc     = api.GetUniformLocation(record.program, "uMVP");
+  record.opacityLoc = api.GetUniformLocation(record.program, "uOpacity");
+  record.atlasLoc   = api.GetUniformLocation(record.program, "uGlyphAtlas");
 
   if (const GLuint blockIndex =
           api.GetUniformBlockIndex(record.program, "Highlights");
@@ -551,6 +552,12 @@ void DeviceGL::bindPipeline(const PipelineHandle pipeline) {
   } else {
     api.Disable(GL_DEPTH_TEST);
   }
+  // Left on for every pipeline, because a draw that is not fading passes
+  // opacity one and blends to exactly what it would have written unblended.
+  // The picking attachment is an integer target, and the spec says blending is
+  // not applied to those, so this cannot disturb a tag.
+  api.Enable(GL_BLEND);
+  api.BlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
 }
 
 void DeviceGL::bindGlyphTexture(const TextureHandle texture) {
@@ -599,6 +606,9 @@ void DeviceGL::drawGlyphs(const DrawUniforms &uniforms,
 
   if (-1 != record.mvpLoc) {
     api.UniformMatrix4fv(record.mvpLoc, 1, GL_FALSE, uniforms.mvp.data());
+  }
+  if (-1 != record.opacityLoc) {
+    api.Uniform1f(record.opacityLoc, uniforms.opacity);
   }
 
   // The draw starts partway into the vertex buffer. Baking that offset into

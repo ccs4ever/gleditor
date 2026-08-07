@@ -35,6 +35,11 @@ GLEDITOR_OUT_FLAT(4) uvec2 vTag;
 // where inside the quad a fragment landed: one quad can be a whole ligature,
 // and the character boundaries within it have no geometry of their own.
 GLEDITOR_OUT(5) float vQuadU;
+// Alpha for the whole draw. Carried through the vertex stage rather than read
+// straight from a fragment uniform so that the per-draw block stays visible to
+// one stage only, which on Vulkan is what keeps it a vertex-stage push
+// constant rather than a range shared with the fragment stage.
+GLEDITOR_OUT(6) float vOpacity;
 
 vec4 unpackColor(uint bits) {
     return vec4(float((bits >> 24) & 255u),
@@ -104,5 +109,6 @@ void main() {
     vLayer = lwh.x;
     vTag = tag;
     vQuadU = (0 != (corner & 1)) ? 1.0 : 0.0;
+    vOpacity = uOpacity;
 }
 // vi: set sw=4 sts=4 ts=4 et:

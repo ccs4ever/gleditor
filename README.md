@@ -758,9 +758,32 @@ Other actions:
 | Key | Action |
 | --- | ------ |
 | n   | Create a new page |
+| w   | Close the most recently opened document |
 | r   | Reset view back to start |
 | q   | Quit the application |
 | g   | Increment fov by 1 (max 360); use Shift+g to decrement (min 1) |
+
+### Animation
+
+Documents do not appear and disappear between one frame and the next.
+Choreograph drives a single timeline, stepped once per frame in real time so a
+fade lasts as long on a software rasteriser as on a GPU. Opening a document
+eases it back into its place in the row while it becomes opaque; closing one
+reverses that, and the documents after it slide up into the space. Retargeting
+an animation that is already running continues from wherever it had got to,
+which is what stops a second close from making the survivors jump.
+
+The alpha is one number per draw rather than one per glyph, so fading a
+document does not mean rewriting its vertex buffer every frame. It reaches the
+shader as a push constant on Vulkan and a plain uniform on OpenGL and OpenGL
+ES, and only the colour attachment blends -- the picking attachment is an
+integer target, which is both meaningless to blend and forbidden to.
+
+An animation counts as unfinished work, so `--screenshot` and `--profile` still
+wait for the settled frame: a capture shows the finished document, never the
+middle of a fade. Notifications are the exception. They fade at both ends too,
+but from their own clock rather than from the timeline, because a toast lives
+for eight seconds and no capture should wait that long.
 
 ## Tests
 

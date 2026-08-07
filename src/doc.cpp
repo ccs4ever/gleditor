@@ -4,6 +4,7 @@
 #include <cstddef>                     // for byte
 #include <cstdint>                     // for uint32_t
 #include <format>                      // for format
+#include <gleditor/animation.hpp>      // for docArrival, docArrivalDepth
 #include <gleditor/doc.hpp>            // IWYU pragma: associated
 #include <gleditor/render/device.hpp>  // for RenderDevice
 #include <gleditor/render_state.hpp>   // for RenderState
@@ -480,8 +481,8 @@ Page::offsetForCluster(const std::uint32_t clusterIndex,
 
 // Always called from the render thread
 void Page::collect(std::vector<render::GlyphBatch> &batches,
-                   const glm::mat4 &docTransform, const DrawBudget &budget,
-                   DrawStats &stats) const {
+                   const glm::mat4 &docTransform, const float opacity,
+                   const DrawBudget &budget, DrawStats &stats) const {
   if (0 == detailInstances) {
     return;
   }
@@ -511,7 +512,7 @@ void Page::collect(std::vector<render::GlyphBatch> &batches,
   const auto first = coarse ? detailInstances : 0U;
   const auto count = coarse ? coarseInstances : detailInstances;
   batches.push_back(render::GlyphBatch{
-      render::DrawUniforms{toArray(mvp)}, doc->pool->buffer(),
+      render::DrawUniforms{toArray(mvp), opacity}, doc->pool->buffer(),
       doc->pool->byteOffset(pageBacking) + (first * sizeof(Doc::VBORow)),
       count});
 }
@@ -520,10 +521,59 @@ void Page::collect(std::vector<render::GlyphBatch> &batches,
 void Doc::collect(std::vector<render::GlyphBatch> &batches,
                   const glm::mat4 &viewProjection, const DrawBudget &budget,
                   DrawStats &stats) const {
-  const auto docTransform = viewProjection * model;
-  for (const auto &page : pages) {
-    page.collect(batches, docTransform, budget, stats);
+  // Fully faded out contributes nothing, so it is skipped before any page is
+  // transformed rather than submitted and blended away to nothing.
+  if (opacity() <= 0.0F) {
+    return;
   }
+  const auto docTransform = viewProjection * modelMatrix();
+  for (const auto &page : pages) {
+    page.collect(batches, docTransform, opacity(), budget, stats);
+  }
+}
+
+glm::mat4 Doc::modelMatrix() const {
+  return glm::translate(glm::mat4(1.0F), position());
+}
+
+void Doc::animateArrival(ch::Timeline &timeline) {
+  // The resting place is the translation the constructor was handed; the base
+  // class keeps that matrix untouched, so it stays available as the target no
+  // matter where the animation has got to.
+  const glm::vec3 target(model[3]);
+  position = target + glm::vec3(0.0F, 0.0F, gleditor::anim::docArrivalDepth);
+  opacity  = 0.0F;
+
+  // Eased out rather than linear: the document decelerates into place, which
+  // is what makes it read as arriving somewhere rather than being dragged.
+  timeline.apply(&position)
+      .then<ch::RampTo>(target, gleditor::anim::docArrival, ch::EaseOutCubic());
+  timeline.apply(&opacity).then<ch::RampTo>(1.0F, gleditor::anim::docArrival,
+                                            ch::EaseOutQuad());
+}
+
+void Doc::animateDeparture(ch::Timeline &timeline) {
+  closing = true;
+  const glm::vec3 away =
+      position() + glm::vec3(0.0F, 0.0F, gleditor::anim::docArrivalDepth);
+  // Eased in rather than out, so the document lingers a moment and then leaves
+  // quickly: the opposite shape to the arrival, which is what tells the two
+  // apart at a glance.
+  timeline.apply(&position)
+      .then<ch::RampTo>(away, gleditor::anim::docArrival, ch::EaseInQuad());
+  timeline.apply(&opacity).then<ch::RampTo>(0.0F, gleditor::anim::docArrival,
+                                            ch::EaseInQuad());
+}
+
+void Doc::animateMoveTo(ch::Timeline &timeline, const glm::vec3 &target) {
+  // The resting place is recorded as well as animated towards: a later
+  // arrival or departure reads it back out of the base matrix.
+  model = glm::translate(glm::mat4(1.0F), target);
+  // apply() replaces whatever motion was on this output, so a move that
+  // interrupts another one continues from where that one had got to rather
+  // than restarting from the old target.
+  timeline.apply(&position)
+      .then<ch::RampTo>(target, gleditor::anim::docArrival, ch::EaseInOutQuad());
 }
 
 std::optional<render::HighlightRange>
@@ -625,7 +675,7 @@ void Doc::drawCaret(RenderState &state, const glm::mat4 &viewProjection,
       continue;
     }
     caret.setGeometry(posX, posY, height);
-    caret.draw(state, viewProjection * model * pageOn.getModel());
+    caret.draw(state, viewProjection * modelMatrix() * pageOn.getModel());
     return;
   }
 }

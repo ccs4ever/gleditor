@@ -101,8 +101,40 @@ private:
     /// Size of the panel in pixels, needed to stack the next one above it.
     float width{};
     float height{};
+    Clock::time_point postedAt;
     Clock::time_point expiresAt;
   };
+
+public:
+  /**
+   * @brief Alpha a toast posted at @p postedAt and expiring at @p expiresAt
+   *        draws at @p now.
+   *
+   * Derived from the clock rather than driven by the shared timeline, because
+   * a toast's whole life is already a function of the clock -- it is posted,
+   * it sits there, it expires -- and putting it on the timeline would make the
+   * render loop consider a notification unfinished business for eight seconds,
+   * which is the one thing a screenshot must not wait for.
+   *
+   * Eased at both ends, so the ramp starts and stops smoothly instead of
+   * switching linear motion on and off.
+   */
+  [[nodiscard]] static float fadeFactor(Clock::time_point postedAt,
+                                        Clock::time_point expiresAt,
+                                        Clock::time_point now);
+
+  /**
+   * @brief Whether any notification is still fading in.
+   *
+   * The render loop counts this as unfinished work, which is what stops a
+   * capture landing on a half-faded panel and makes two backends rendering the
+   * same scene comparable. Only the fade in: it is bounded by a fraction of a
+   * second, where waiting for a fade out would mean waiting out the whole
+   * lifetime.
+   */
+  [[nodiscard]] bool fadingIn(Clock::time_point now) const;
+
+private:
 
   /// Pixels between the panel edge and the text, and between stacked panels.
   static constexpr float padding = 8.0F;

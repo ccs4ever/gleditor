@@ -154,6 +154,17 @@ struct PipelineDesc {
 struct DrawUniforms {
   /// projection * view * model, in the column-major order GLSL expects.
   std::array<float, 16> mvp{};
+  /**
+   * @brief Alpha the whole draw is multiplied by, for fading a document in or
+   *        a notification out.
+   *
+   * Per draw rather than per instance: a fade applies to everything the draw
+   * covers, so putting it in the vertex data would repeat one number across
+   * every glyph of a document and mean rewriting that buffer every frame of
+   * the animation. One is fully opaque, which is what a caller that never
+   * mentions it gets.
+   */
+  float opacity{1.0F};
 };
 
 /**

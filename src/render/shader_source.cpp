@@ -31,12 +31,16 @@ std::string uniformBlock(const Backend backend, const ShaderStage stage) {
       // a descriptor-backed block would have to be either rewritten between
       // draws -- which a recorded command buffer cannot do -- or duplicated per
       // draw with a dynamic offset.
+      // Field order must match render::DrawUniforms, which is pushed whole.
       out += "layout(push_constant) uniform Push {\n"
              "    mat4 uMVP;\n"
+             "    float uOpacity;\n"
              "} uPush;\n"
-             "#define uMVP uPush.uMVP\n";
+             "#define uMVP uPush.uMVP\n"
+             "#define uOpacity uPush.uOpacity\n";
     } else {
       out += "uniform mat4 uMVP;\n";
+      out += "uniform float uOpacity;\n";
     }
 
   } else {

@@ -11,6 +11,7 @@ GLEDITOR_IN(2) vec2 vTexCoord;
 GLEDITOR_IN(3) float vLayer;
 GLEDITOR_IN_FLAT(4) uvec2 vTag;
 GLEDITOR_IN(5) float vQuadU;
+GLEDITOR_IN(6) float vOpacity;
 
 GLEDITOR_FRAG_OUT(0) vec4 outColor;
 // identity word, cluster index, fractional position across the quad, unused.
@@ -60,7 +61,8 @@ void main() {
     vec2 atlas = vec2(textureSize(uGlyphAtlas, 0).xy);
     float coverage =
         texture(uGlyphAtlas, vec3(vTexCoord / atlas, floor(vLayer + 0.5))).r;
-    outColor = vec4(mix(selectedBackground(vBgColor), vFgColor, coverage), 1.0);
+    outColor =
+        vec4(mix(selectedBackground(vBgColor), vFgColor, coverage), vOpacity);
     // Fixed point: the attachment holds unsigned integers. The scale must
     // match render::tagFractionScale.
     outTag = uvec4(vTag, uint(clamp(vQuadU, 0.0, 1.0) * 65535.0), 0u);
