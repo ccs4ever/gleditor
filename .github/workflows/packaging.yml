@@ -1,0 +1,299 @@
+name: Packaging
+
+# Every job here does the same two things: build a package, then install it and
+# run the installed binary from a directory that has nothing to do with the
+# source tree. The second half is the part that matters. A package that builds
+# proves the compiler was happy; a package that renders a frame from /tmp
+# proves it can find its shaders and its icon, which is the failure this
+# packaging was blocked on for its whole existence.
+on:
+  push:
+    branches: [ "main" ]
+    tags: [ "v*" ]
+  pull_request:
+    branches: [ "main" ]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  # ---------------------------------------------------------------- Debian ---
+  # SDL2, because SDL3 is not in the Debian archive and a package cannot depend
+  # on "whichever the build happened to find".
+  debian:
+    name: deb (Ubuntu, SDL2)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          submodules: recursive
+          fetch-depth: 0
+
+      - name: install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential debhelper devscripts pkg-config \
+            libpangomm-2.48-dev libcairomm-1.16-dev libglibmm-2.68-dev \
+            libsdl2-dev libsdl2-image-dev libgl-dev libglm-dev \
+            libvulkan-dev glslang-tools
+
+      # dpkg-buildpackage wants debian/ at the root of the tree it is building.
+      # It lives under packaging/ in the repository so that four packaging
+      # formats can sit beside each other without one of them claiming the top
+      # level.
+      - name: stage the debian directory
+        run: cp -r packaging/debian debian
+
+      - name: build the package
+        run: dpkg-buildpackage -us -uc -b
+
+      - name: install it
+        run: sudo apt-get install -y ../gleditor_*.deb
+
+      - name: check what landed
+        run: |
+          dpkg -L gleditor
+          test -x /usr/bin/gleditor
+          test -f /usr/share/gleditor/shaders/glyph.vert.glsl
+          test -f /usr/share/gleditor/shaders/vulkan/glyph.vert.spv
+          test -f /usr/share/applications/gleditor.desktop
+          test -f /usr/share/man/man1/gleditor.1
+
+      - name: run the installed binary
+        run: |
+          sudo apt-get install -y --no-install-recommends \
+            xvfb libgl1-mesa-dri mesa-vulkan-drivers fonts-dejavu-core
+          xvfb-run -a packaging/smoke-test.sh /usr/bin/gleditor opengl vulkan
+        env:
+          LIBGL_ALWAYS_SOFTWARE: "1"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: gleditor-deb
+          path: ../gleditor_*.deb
+
+  # ---------------------------------------------------------------- Fedora ---
+  fedora:
+    name: rpm (Fedora, SDL3)
+    runs-on: ubuntu-latest
+    container: fedora:latest
+    steps:
+      - name: install build dependencies
+        run: |
+          dnf install -y --setopt=install_weak_deps=False \
+            rpm-build rpmdevtools make gcc-c++ pkgconf-pkg-config git tar \
+            pangomm2.48-devel cairomm1.16-devel glibmm2.68-devel \
+            sdl3-devel sdl3_image-devel mesa-libGL-devel glm-devel \
+            vulkan-loader-devel glslang desktop-file-utils libappstream-glib \
+            python3
+
+      - uses: actions/checkout@v5
+        with:
+          submodules: recursive
+          fetch-depth: 0
+
+      # git refuses to describe a tree it thinks belongs to another user, which
+      # is what checkout inside a container looks like to it.
+      - name: trust the checkout
+        run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
+
+      - name: build the tarball and the rpm
+        run: |
+          rpmdev-setuptree
+          make dist GLEDITOR_VERSION=0.1.0
+          cp build/dist/gleditor-0.1.0.tar.gz ~/rpmbuild/SOURCES/
+          rpmbuild -ba packaging/fedora/gleditor.spec
+
+      - name: install it
+        run: dnf install -y ~/rpmbuild/RPMS/*/gleditor-*.rpm
+
+      - name: check what landed
+        run: |
+          rpm -ql gleditor
+          test -x /usr/bin/gleditor
+          test -f /usr/share/gleditor/shaders/glyph.vert.glsl
+          test -f /usr/share/gleditor/shaders/vulkan/glyph.vert.spv
+
+      - name: run the installed binary
+        run: |
+          dnf install -y --setopt=install_weak_deps=False \
+            xorg-x11-server-Xvfb mesa-dri-drivers mesa-vulkan-drivers \
+            dejavu-sans-fonts
+          xvfb-run -a packaging/smoke-test.sh /usr/bin/gleditor opengl vulkan
+        env:
+          LIBGL_ALWAYS_SOFTWARE: "1"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: gleditor-rpm
+          path: ~/rpmbuild/RPMS/*/gleditor-*.rpm
+
+  # ------------------------------------------------------------------ Arch ---
+  arch:
+    name: pkg.tar.zst (Arch, SDL3)
+    runs-on: ubuntu-latest
+    container: archlinux:base-devel
+    steps:
+      - name: install build dependencies
+        run: |
+          pacman -Syu --noconfirm --needed \
+            git pkgconf make gcc pangomm cairomm glibmm-2.68 \
+            sdl3 sdl3_image libglvnd glm vulkan-headers vulkan-icd-loader \
+            glslang python
+
+      - uses: actions/checkout@v5
+        with:
+          submodules: recursive
+          fetch-depth: 0
+
+      - name: trust the checkout
+        run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
+
+      # makepkg refuses to run as root, and the container has no other user.
+      - name: create a build user
+        run: |
+          useradd -m builder
+          echo 'builder ALL=(ALL) NOPASSWD: ALL' >> /etc/sudoers
+
+      - name: build the package
+        run: |
+          make dist GLEDITOR_VERSION=0.1.0
+          install -d /home/builder/pkg
+          cp packaging/arch/PKGBUILD /home/builder/pkg/
+          cp build/dist/gleditor-0.1.0.tar.gz /home/builder/pkg/
+          chown -R builder:builder /home/builder/pkg
+          su builder -c 'cd /home/builder/pkg && makepkg --noconfirm --nodeps'
+
+      - name: install it
+        run: pacman -U --noconfirm /home/builder/pkg/gleditor-*.pkg.tar.zst
+
+      - name: check what landed
+        run: |
+          pacman -Ql gleditor
+          test -x /usr/bin/gleditor
+          test -f /usr/share/gleditor/shaders/glyph.vert.glsl
+          test -f /usr/share/gleditor/shaders/vulkan/glyph.vert.spv
+
+      - name: run the installed binary
+        run: |
+          pacman -S --noconfirm --needed xorg-server-xvfb mesa vulkan-swrast \
+            ttf-dejavu
+          xvfb-run -a packaging/smoke-test.sh /usr/bin/gleditor opengl vulkan
+        env:
+          LIBGL_ALWAYS_SOFTWARE: "1"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: gleditor-arch
+          path: /home/builder/pkg/gleditor-*.pkg.tar.zst
+
+  # ------------------------------------------------------------------- Nix ---
+  nix:
+    name: nix flake
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          submodules: recursive
+
+      - uses: cachix/install-nix-action@v31
+        with:
+          extra_nix_config: |
+            experimental-features = nix-command flakes
+
+      - name: check the flake
+        run: nix flake check --no-build
+
+      - name: build
+        run: nix build .#gleditor --print-build-logs
+
+      # The store path is the installed layout -- result/bin/gleditor beside
+      # result/share/gleditor -- so this exercises the same executable-relative
+      # search a distribution package does, without a prefix anywhere in it.
+      - name: run what was built
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            xvfb libgl1-mesa-dri mesa-vulkan-drivers fonts-dejavu-core
+          xvfb-run -a packaging/smoke-test.sh "$(readlink -f result)/bin/gleditor" opengl
+        env:
+          LIBGL_ALWAYS_SOFTWARE: "1"
+
+  # --------------------------------------------------------------- Windows ---
+  # MSYS2 rather than MSVC: the dependencies are the GTK stack -- pangomm,
+  # cairomm, glibmm -- which MSYS2 packages and vcpkg largely does not.
+  windows:
+    name: zip (Windows, MSYS2 UCRT64)
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: msys2 {0}
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          submodules: recursive
+
+      - uses: msys2/setup-msys2@v2
+        with:
+          msystem: UCRT64
+          update: true
+          install: >-
+            git zip
+            mingw-w64-ucrt-x86_64-gcc
+            mingw-w64-ucrt-x86_64-pkgconf
+            mingw-w64-ucrt-x86_64-make
+            mingw-w64-ucrt-x86_64-pangomm
+            mingw-w64-ucrt-x86_64-cairomm
+            mingw-w64-ucrt-x86_64-glibmm2.68
+            mingw-w64-ucrt-x86_64-SDL3
+            mingw-w64-ucrt-x86_64-SDL3_image
+            mingw-w64-ucrt-x86_64-glm
+            mingw-w64-ucrt-x86_64-glslang
+            mingw-w64-ucrt-x86_64-vulkan-headers
+            mingw-w64-ucrt-x86_64-vulkan-loader
+            mingw-w64-ucrt-x86_64-mesa
+
+      - name: build and bundle
+        run: ./packaging/windows/build-msys2.sh
+        env:
+          GLEDITOR_VERSION: 0.1.0
+
+      - name: check the bundle
+        run: |
+          test -f build/windows/gleditor/gleditor.exe
+          test -f build/windows/gleditor/assets/shaders/glyph.vert.glsl
+          test -f build/windows/gleditor/assets/shaders/vulkan/glyph.vert.spv
+          test -f build/windows/gleditor/assets/logo.png
+          ls build/windows/*.zip
+
+      # Run it from outside MSYS2, with only the bundled DLLs on the path. If
+      # the bundle is missing a library the process fails to start at all, and
+      # --version is enough to catch that: it returns before SDL is touched.
+      # This is the check that the zip is self-contained.
+      - name: run the bundled exe standalone
+        shell: cmd
+        run: |
+          set PATH=C:\Windows\system32;C:\Windows
+          cd build\windows\gleditor
+          gleditor.exe --version || exit /b 1
+          gleditor.exe --help > nul || exit /b 1
+
+      # Best-effort rendering. The runner has no GPU and Windows' fallback
+      # OpenGL is 1.1, far below the 3.3 this needs, so the software rasteriser
+      # MSYS2 ships is dropped in beside the executable. Reported rather than
+      # required: the check above is the one that guards the package.
+      - name: try to draw a frame
+        continue-on-error: true
+        run: |
+          cp "$MINGW_PREFIX/bin/opengl32.dll" build/windows/gleditor/ || true
+          cd build/windows/gleditor
+          ./gleditor.exe --backend opengl --profile --screenshot frame.ppm \
+            ../../../tests/samples/quick_brown_fox.txt
+          ls -la frame.ppm
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: gleditor-windows
+          path: build/windows/*.zip

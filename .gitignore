@@ -53,3 +53,8 @@ docs
 
 # SPIR-V compiled from assets/shaders by `make shaders`
 assets/shaders/vulkan/*.spv
+
+# Staged by the Debian build; the real copy is packaging/debian.
+/debian/
+/result
+/VERSION.tmp

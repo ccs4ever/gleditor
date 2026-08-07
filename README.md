@@ -616,6 +616,66 @@ Optional Make variables:
 Objects are rebuilt when the compile flags change, so toggling either of the
 first two does not leave a binary that disagrees with what was asked for.
 
+`clang++` is the default compiler, but only when nothing else asked for one:
+`CXX=g++ make` and `make CXX=g++` are both honoured. The `-std` flag is chosen
+by asking the compiler what it takes, because `-std=c++2c` is clang's and
+gcc 14's spelling and gcc 13 rejects it.
+
+## Installing and packaging
+
+```
+make install DESTDIR=/tmp/stage prefix=/usr
+```
+
+which lays out the binary, the shaders and SPIR-V, the icon, a desktop entry,
+AppStream metainfo and a man page. `make dist` produces the release tarball the
+distribution packages build from, with both submodules unpacked into it --
+they are vendored dependencies, and `git archive` alone produces a tree that
+will not compile.
+
+**The data files are found rather than assumed.** `gleditor::assetDir()` takes
+the first of these that exists: `$GLEDITOR_ASSET_DIR`; the executable's own
+directory, then the `share/gleditor` beside it; a compiled-in
+`GLEDITOR_DATADIR`; and finally `./assets`. The executable's path comes from
+SDL rather than `/proc/self/exe`, which is what makes the same search work on
+Windows. `GLEDITOR_DATADIR` is compiled in by `make install` and by nothing
+else, so a build tree cannot quietly read the assets of an older installed
+copy, and `./assets` last is what keeps `make run` working from the source
+tree.
+
+Definitions live under `packaging/`, one directory per format, all of them
+building the same tarball with the same `install` target:
+
+| Target | Definition | SDL | Compiler |
+| --- | --- | --- | --- |
+| Debian / Ubuntu | `packaging/debian/` | 2 | g++ |
+| Fedora | `packaging/fedora/gleditor.spec` | 3 | g++ |
+| Arch | `packaging/arch/PKGBUILD` | 3 | gcc |
+| Nix | `flake.nix`, `packaging/nix/gleditor.nix` | 3 | stdenv |
+| Windows | `packaging/windows/build-msys2.sh` | 3 | MSYS2 UCRT64 |
+
+The Vulkan backend is enabled in all of them, so `glslang` is a build
+dependency everywhere and the Vulkan loader is a weak runtime one -- it is one
+backend of three, and the other two work without it.
+
+Debian gets SDL2 because SDL3 is not in the archive and a package cannot depend
+on whichever version the build happened to find; everything else gets SDL3,
+stated rather than probed for the same reason.
+
+Windows is an MSYS2/MinGW build producing a zip rather than an MSVC installer.
+The dependencies are the GTK stack -- pangomm, cairomm, glibmm -- which MSYS2
+packages and vcpkg largely does not. The zip carries every non-system DLL,
+found by walking `ldd` until it settles, and puts the assets *beside* the
+executable, which is the first place the search looks; unzip it anywhere and it
+finds its own data.
+
+`.github/workflows/packaging.yml` builds each of them, and then installs the
+result and runs it from a directory with no relation to the source tree.
+That second half is the point: until the data files were found at run time,
+every one of these packages would have built, installed, and then failed to
+start, with nothing in a build log to say so. `packaging/smoke-test.sh` is
+what each job runs, and it is runnable by hand against any installed copy.
+
 ## Run
 
 - After building, run either:
