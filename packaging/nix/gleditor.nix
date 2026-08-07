@@ -3,9 +3,12 @@
   stdenv,
   pkg-config,
   makeWrapper,
-  pangomm,
-  cairomm,
-  glibmm,
+  # The ABI-suffixed attributes. The unsuffixed pangomm, cairomm and glibmm in
+  # nixpkgs are the older parallel versions, and do not provide the .pc files
+  # this build asks for.
+  pangomm_2_48,
+  cairomm_1_16,
+  glibmm_2_68,
   sdl3,
   sdl3-image,
   libGL,
@@ -44,9 +47,9 @@ stdenv.mkDerivation {
   ];
 
   buildInputs = [
-    pangomm
-    cairomm
-    glibmm
+    pangomm_2_48
+    cairomm_1_16
+    glibmm_2_68
     sdl3
     sdl3-image
     libGL
