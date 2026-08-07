@@ -281,6 +281,58 @@ print(f"{status}: coarse page brightness {meanCoarse:.1f} against detailed "
 sys.exit(0 if delta <= limit else 1)
 PYEOF
 
+# Minified text must not crawl. A tiny zoom moves every sample point a fraction
+# of a texel, which a filtered render answers with a slight change everywhere
+# and an unfiltered one answers by flipping pixels between stroke and paper --
+# the shimmer you see when panning. Measured as how many page pixels change
+# violently rather than how many change at all: good filtering makes *more*
+# pixels move, each by very little.
+#
+# Without mipmaps this ran at 4.3% of page pixels changing by more than 32
+# levels, with a mean change of 5.41; the limits below are set an order of
+# magnitude under that, which no amount of rounding will drift into.
+echo "checking that minified text does not crawl"
+for backend in $backends; do
+  for zoom in 15 15.05; do
+    "$BIN" --backend "$backend" --profile $STRICT --fov "$zoom" \
+        --coarse-below 0 --screenshot "$OUT/$backend.zoom$zoom.ppm" "$SAMPLE" \
+        >"$OUT/$backend.zoom$zoom.log" 2>&1 ||
+      { echo "FAIL: $backend zoom run exited non-zero"
+        tail -20 "$OUT/$backend.zoom$zoom.log"; exit 1; }
+  done
+done
+
+OUT="$OUT" BACKENDS="$backends" python3 - <<'PYEOF'
+import os, sys
+
+out = os.environ["OUT"]
+backends = os.environ["BACKENDS"].split()
+
+def load(path):
+    data = open(path, "rb").read()
+    return data[data.index(b"255\n") + 4:]
+
+meanLimit  = 2.0
+violentPct = 1.0
+failed = False
+for backend in backends:
+    before = load(f"{out}/{backend}.zoom15.ppm")
+    after  = load(f"{out}/{backend}.zoom15.05.ppm")
+    paper  = [(a, b) for a, b in zip(before, after) if a or b]
+    if not paper:
+        sys.exit(f"FAIL: {backend} drew nothing to compare")
+    mean    = sum(abs(a - b) for a, b in paper) / len(paper)
+    violent = 100.0 * sum(1 for a, b in paper if abs(a - b) > 32) / len(paper)
+    ok = mean <= meanLimit and violent <= violentPct
+    print(f"{'ok' if ok else 'FAIL'}: {backend} under a 0.33% zoom, mean change "
+          f"{mean:.2f} (limit {meanLimit}), {violent:.1f}% of page pixels "
+          f"changed by >32 levels (limit {violentPct}%)")
+    if not ok:
+        failed = True
+
+sys.exit(1 if failed else 0)
+PYEOF
+
 if echo "$backends" | grep -q vulkan; then
   echo "comparing threaded against single-threaded recording"
   for threads in 4 1; do

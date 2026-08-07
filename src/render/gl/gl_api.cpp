@@ -67,6 +67,7 @@ void GLApi::load() {
   GLEDITOR_RESOLVE(TexParameteri);
   GLEDITOR_RESOLVE(TexImage3D);
   GLEDITOR_RESOLVE(TexSubImage3D);
+  GLEDITOR_RESOLVE(GenerateMipmap);
   GLEDITOR_RESOLVE(PixelStorei);
 
   GLEDITOR_RESOLVE(CreateShader);

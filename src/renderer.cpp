@@ -157,6 +157,10 @@ bool Renderer::update(RenderState &state, const bool settled) {
 
   updateHighlights(state);
 
+  // Any glyphs rasterised since the last frame have only reached level zero of
+  // the atlas; rebuild the rest of the chain before anything samples it.
+  state.glyphCache.flush();
+
   device->bindPipeline(state.glyphPipeline);
   device->bindGlyphTexture(state.glyphCache.textureHandle());
 

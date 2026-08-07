@@ -59,6 +59,7 @@ struct GLApi {
   PFNGLTEXIMAGE3DPROC TexImage3D{};
   PFNGLTEXSUBIMAGE3DPROC TexSubImage3D{};
   PFNGLPIXELSTOREIPROC PixelStorei{};
+  PFNGLGENERATEMIPMAPPROC GenerateMipmap{};
 
   // -- programs
   PFNGLCREATESHADERPROC CreateShader{};

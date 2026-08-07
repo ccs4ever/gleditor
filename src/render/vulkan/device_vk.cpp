@@ -663,6 +663,13 @@ void DeviceVK::createDescriptorPool() {
   samplerInfo.addressModeV = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
   samplerInfo.addressModeW = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
   samplerInfo.borderColor  = VK_BORDER_COLOR_FLOAT_TRANSPARENT_BLACK;
+  // Blend between mip levels rather than snapping to one, and let the sampler
+  // reach every level the atlas might have. A sampler left at the default
+  // maxLod of zero would sample level zero however small the glyph became,
+  // which is the aliasing this is here to remove.
+  samplerInfo.mipmapMode = VK_SAMPLER_MIPMAP_MODE_LINEAR;
+  samplerInfo.minLod     = 0.0F;
+  samplerInfo.maxLod     = VK_LOD_CLAMP_NONE;
   check(vkCreateSampler(device, &samplerInfo, nullptr, &glyphSampler),
         "vkCreateSampler");
 }

@@ -180,6 +180,17 @@ public:
   /// Handle of the array texture holding every cached glyph.
   [[nodiscard]] render::TextureHandle textureHandle() const { return texture; }
 
+  /**
+   * @brief Rebuild the atlas mip chain if any glyph has been added since the
+   *        last call.
+   *
+   * Called once per frame rather than once per glyph: loading a document adds
+   * thousands of clusters between two frames, and the chain only has to be
+   * right by the time something samples it. Cheap when nothing changed, which
+   * is every frame after the document has settled.
+   */
+  void flush();
+
 private:
   std::vector<GlyphPalette> palettes; ///< Palette layers used for packing.
   std::unordered_map<std::string, std::unordered_map<FontMapKeyAdapter, Sizes>,
@@ -188,6 +199,8 @@ private:
   render::RenderDevice *device;   ///< Device the atlas lives on.
   render::TextureHandle texture{}; ///< Array texture holding the glyph atlas.
   int size{}, maxLayers{};        ///< Texture side length and max array layers.
+  /// A glyph has been written to level zero since the mip chain was last built.
+  bool atlasDirty{};
 
   /**
    * @brief Find or create a palette capable of fitting the given rectangle.

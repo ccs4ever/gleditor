@@ -30,7 +30,10 @@ public:
               (render::BufferHandle buffer, std::size_t bytes), (override));
 
   MOCK_METHOD(render::TextureHandle, createTextureArray,
-              (int size, int layers, render::TextureFormat format), (override));
+              (int size, int layers, render::TextureFormat format, int levels),
+              (override));
+  MOCK_METHOD(void, generateMipmaps, (render::TextureHandle texture),
+              (override));
   MOCK_METHOD(void, destroyTexture, (render::TextureHandle texture),
               (override));
   MOCK_METHOD(void, updateTextureLayer,

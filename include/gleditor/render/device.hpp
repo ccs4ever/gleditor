@@ -86,10 +86,26 @@ public:
    */
   virtual BufferHandle growBuffer(BufferHandle buffer, std::size_t bytes) = 0;
 
-  /// Create a 2D array texture of @p size x @p size with @p layers layers.
+  /**
+   * @brief Create a 2D array texture of @p size x @p size with @p layers
+   *        layers.
+   * @param levels Mip levels to allocate, 1 for none. Levels beyond the first
+   *        hold nothing until generateMipmaps() is called.
+   */
   virtual TextureHandle createTextureArray(int size, int layers,
-                                           TextureFormat format) = 0;
-  virtual void destroyTexture(TextureHandle texture)             = 0;
+                                           TextureFormat format,
+                                           int levels = 1) = 0;
+  virtual void destroyTexture(TextureHandle texture)       = 0;
+
+  /**
+   * @brief Rebuild @p texture's mip levels from what is in level zero.
+   *
+   * A no-op on a texture allocated with a single level. Callers upload however
+   * many glyphs they like and then call this once, rather than once per upload:
+   * the whole chain is rebuilt each time regardless of how much of level zero
+   * moved.
+   */
+  virtual void generateMipmaps(TextureHandle texture) = 0;
 
   /**
    * @brief Upload a tightly packed sub-rectangle into one array layer.
