@@ -34,6 +34,19 @@ public:
 
   [[nodiscard]] Backend backend() const override { return backendKind; }
 
+  /**
+   * @brief No parallel recording.
+   *
+   * A GL context is current on exactly one thread, and every entry point that
+   * records work goes through it. Making a second thread current would first
+   * have to release it from this one, which serialises rather than overlaps.
+   * Shared contexts share objects, not a command stream, so they do not help
+   * either.
+   */
+  [[nodiscard]] DeviceCapabilities capabilities() const override {
+    return DeviceCapabilities{};
+  }
+
   void initialize(AutoSDLWindow &window) override;
   void shutdown() override;
   void resize(int width, int height) override;

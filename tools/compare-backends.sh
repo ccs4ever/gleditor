@@ -196,3 +196,39 @@ sys.exit(1 if failed else 0)
 PYEOF
 
 echo "all backends agree"
+
+# Vulkan is the only backend that can record one frame from several threads, so
+# it is the only one where the same frame has two ways of being produced. They
+# have to produce the same image: chunks are recorded out of order and executed
+# in order, and an ordering mistake would show up here and nowhere else.
+#
+# The device normally decides for itself whether splitting is worth it, and on
+# a machine where it is not, the threaded path would never run. Naming a thread
+# count takes the decision away from it, which is what makes both paths
+# reachable on demand.
+if echo "$backends" | grep -q vulkan; then
+  echo "comparing threaded against single-threaded recording"
+  for threads in 4 1; do
+    GLEDITOR_RECORD_THREADS="$threads" "$BIN" --backend vulkan --profile \
+        $STRICT --screenshot "$OUT/vk.threads$threads.ppm" "$SAMPLE" \
+        >"$OUT/vk.threads$threads.log" 2>&1 ||
+      { echo "FAIL: vulkan run with $threads recording thread(s) exited non-zero"
+        tail -20 "$OUT/vk.threads$threads.log"; exit 1; }
+  done
+
+  if ! cmp -s "$OUT/vk.threads4.ppm" "$OUT/vk.threads1.ppm"; then
+    echo "FAIL: recording on four threads drew a different frame than one"
+    exit 1
+  fi
+
+  # A document small enough to be recorded in one piece whatever was asked for
+  # compares two identical code paths, which proves nothing. Say so rather than
+  # reporting a pass: the split is only reached above the device's own
+  # threshold, and the device announces when it takes it.
+  if grep -q 'recording .* draws on [2-9]' "$OUT/vk.threads4.log"; then
+    echo "ok: threaded recording matches single-threaded exactly"
+  else
+    echo "ok: frames match, but $SAMPLE has too few page draws to split;"
+    echo "    pass a larger sample to exercise threaded recording"
+  fi
+fi

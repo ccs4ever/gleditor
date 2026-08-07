@@ -1,6 +1,7 @@
 #ifndef GLEDITOR_RENDERER_H
 #define GLEDITOR_RENDERER_H
 
+#include <chrono>
 #include <concepts>
 #include <functional>
 #include <future>
@@ -187,6 +188,18 @@ private:
   std::size_t nextClick{};
   std::size_t clicksReported{};
   bool selectionApplied{};
+  /// Wall time of each settled frame, of collecting its page draws, and of
+  /// handing them to the device. Gathered only when --benchmark asked for it.
+  std::vector<std::chrono::nanoseconds> benchFrame;
+  std::vector<std::chrono::nanoseconds> benchCollect;
+  std::vector<std::chrono::nanoseconds> benchRecord;
+  /// Page draws the last measured frame submitted, reported alongside the
+  /// timings: a recording cost means nothing without the number of draws.
+  std::size_t benchBatches{};
+  /// Print the gathered timings. Reports the median rather than the mean: a
+  /// software rasteriser under a virtual display produces occasional
+  /// hundred-millisecond frames that no amount of averaging removes.
+  void reportBenchmark() const;
   /// Drop loads that have already finished, so the list cannot grow without
   /// bound over the lifetime of the process.
   void reapFinishedDocLoads();

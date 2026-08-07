@@ -15,6 +15,7 @@
 #include <set>
 #include <stdexcept>
 #include <string>
+#include <thread>
 #include <vector>
 
 #include <gleditor/sdl_wrap.hpp>
@@ -79,7 +80,47 @@ bool validationLayerAvailable() {
 
 } // namespace
 
-DeviceVK::DeviceVK() = default;
+namespace {
+
+/**
+ * @brief How many threads to record with, and whether that was asked for.
+ *
+ * GLEDITOR_RECORD_THREADS overrides the default; 1 turns splitting off
+ * entirely, and anything more forces it on. Recording threads compete for
+ * cores with whatever else is running -- including, on a software rasteriser,
+ * the driver drawing the previous frame -- so whether a split pays depends on
+ * the machine and not only on the number of draws. Left to itself the device
+ * measures and picks; the override is what lets the same binary be run both
+ * ways, which is how the two paths get compared at all.
+ */
+std::pair<std::uint32_t, bool> recordingThreadCount(const std::uint32_t limit) {
+  // hardware_concurrency reports 0 when it cannot tell, which would otherwise
+  // ask for a pool of zero; treat that as "no idea, do not split".
+  const auto automatic =
+      std::min(limit, std::max(1U, std::thread::hardware_concurrency()));
+  const auto *requested = std::getenv("GLEDITOR_RECORD_THREADS");
+  if (nullptr == requested) {
+    return {automatic, false};
+  }
+  try {
+    return {std::max(1U, static_cast<std::uint32_t>(
+                             std::stoul(std::string(requested)))),
+            true};
+  } catch (const std::exception &) {
+    std::cerr << "GLEDITOR_RECORD_THREADS is not a number, ignoring: "
+              << requested << "\n";
+  }
+  return {automatic, false};
+}
+
+} // namespace
+
+// Delegated so that the environment is read once: reading it in each member's
+// initialiser would warn twice about the same bad value.
+DeviceVK::DeviceVK() : DeviceVK(recordingThreadCount(maxRecordingThreads)) {}
+
+DeviceVK::DeviceVK(const std::pair<std::uint32_t, bool> recording)
+    : recorders(recording.first), recordingThreadsForced(recording.second) {}
 
 DeviceVK::~DeviceVK() { DeviceVK::shutdown(); }
 
@@ -578,6 +619,22 @@ void DeviceVK::createCommandResources() {
     // uvec4 the fragment stage writes to the picking attachment.
     frames[i].pickingBuffer = createBuffer(BufferKind::Readback,
                                            4 * sizeof(std::uint32_t));
+
+    // One command pool per recording thread per frame. A pool may only be
+    // touched by one thread at a time, so sharing one between the workers
+    // would need a lock and give back exactly what the split was for.
+    // RESET_COMMAND_BUFFER_BIT is deliberately absent: the whole pool is reset
+    // at the start of the frame, which is cheaper than resetting each buffer
+    // and is all the reuse pattern here needs.
+    frames[i].slots.resize(recorders.parallelism());
+    VkCommandPoolCreateInfo slotPool{};
+    slotPool.sType            = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
+    slotPool.flags            = VK_COMMAND_POOL_CREATE_TRANSIENT_BIT;
+    slotPool.queueFamilyIndex = graphicsFamily;
+    for (auto &slot : frames[i].slots) {
+      check(vkCreateCommandPool(device, &slotPool, nullptr, &slot.pool),
+            "vkCreateCommandPool (recording slot)");
+    }
   }
 }
 
@@ -678,6 +735,13 @@ void DeviceVK::shutdown() {
     }
     if (VK_NULL_HANDLE != frame.inFlight) {
       vkDestroyFence(device, frame.inFlight, nullptr);
+    }
+    // Destroying a pool frees every buffer allocated from it, so the recorded
+    // secondaries need no separate release.
+    for (auto &slot : frame.slots) {
+      if (VK_NULL_HANDLE != slot.pool) {
+        vkDestroyCommandPool(device, slot.pool, nullptr);
+      }
     }
     frame = FrameContext{};
   }

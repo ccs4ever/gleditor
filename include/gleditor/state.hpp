@@ -38,6 +38,11 @@ struct AppState {
   std::vector<std::pair<render::DiagnosticSeverity, std::string>>
       requestedToasts;
   bool profiling{};
+  /// Frames to draw, and time, once the document has settled, before quitting.
+  /// Zero disables the measurement. Only settled frames are counted: a frame
+  /// drawn while pages are still being built is measuring the loader, not the
+  /// renderer.
+  std::size_t benchmarkFrames{};
   /// When set, a driver error ends the render thread instead of being shown as
   /// a notification. Automated runs want it: a frame rendered by a driver that
   /// was reporting errors proves nothing, however plausible it looks.

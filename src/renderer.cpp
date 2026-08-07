@@ -160,9 +160,21 @@ bool Renderer::update(RenderState &state, const bool settled) {
   device->bindPipeline(state.glyphPipeline);
   device->bindGlyphTexture(state.glyphCache.textureHandle());
 
+  // Every page of every open document in one list, then one call. Collecting
+  // first is what gives a device the chance to record the run on more than one
+  // thread; a device that cannot simply walks it in order.
+  const auto collectStart = std::chrono::steady_clock::now();
+  state.pageBatches.clear();
   for (const std::shared_ptr<Doc> &doc : state.docs) {
-    doc->draw(state, viewProjection);
+    doc->collect(state.pageBatches, viewProjection);
   }
+  // Timed apart from the collection above: only the recording can be split
+  // across threads, so an improvement there would be invisible in a figure
+  // that also counted a matrix multiply per page.
+  const auto recordStart = std::chrono::steady_clock::now();
+  device->drawGlyphBatches(state.pageBatches);
+  const auto recordEnd = std::chrono::steady_clock::now();
+
   for (const std::shared_ptr<Doc> &doc : state.docs) {
     doc->drawCaret(state, viewProjection, *caret);
   }
@@ -232,7 +244,38 @@ bool Renderer::update(RenderState &state, const bool settled) {
   const auto end              = std::chrono::steady_clock::now();
   this->state->frameTimeDelta = end - start;
 
+  // Only settled frames are measured, and only once every requested click has
+  // been answered, so the sample covers the frame the editor actually steadies
+  // into rather than one still waiting on a readback.
+  if (settled && 0 != this->state->benchmarkFrames &&
+      clicksReported >= this->state->requestedClicks.size()) {
+    benchFrame.push_back(end - start);
+    benchCollect.push_back(recordStart - collectStart);
+    benchRecord.push_back(recordEnd - recordStart);
+    benchBatches = state.pageBatches.size();
+  }
+
   return this->state->alive;
+}
+
+void Renderer::reportBenchmark() const {
+  if (benchFrame.empty()) {
+    std::cout << "benchmark: no settled frames were measured\n";
+    return;
+  }
+  const auto median = [](std::vector<std::chrono::nanoseconds> samples) {
+    std::ranges::nth_element(samples, samples.begin() + (samples.size() / 2));
+    return std::chrono::duration<double, std::milli>(samples[samples.size() / 2])
+        .count();
+  };
+  const auto caps = device->capabilities();
+  std::cout << std::format(
+      "benchmark: {} frames, {} page draws, median frame {:.3f} ms, median "
+      "collect {:.3f} ms, median record {:.3f} ms, parallel recording "
+      "available: {} ({} thread(s))\n",
+      benchFrame.size(), benchBatches, median(benchFrame), median(benchCollect),
+      median(benchRecord), caps.parallelCommandRecording ? "yes" : "no",
+      caps.recordingThreads);
 }
 
 void Renderer::placeCaretFromPick(RenderState &state,
@@ -454,6 +497,17 @@ void Renderer::renderLoop(AutoSDLWindow &window) {
     // queue
     if (!update(state, settled)) {
       break;
+    }
+
+    // A measured run outlives --profile: the point is the steady state, which
+    // the first settled frame is not part of.
+    if (0 != this->state->benchmarkFrames) {
+      if (benchFrame.size() >= this->state->benchmarkFrames) {
+        reportBenchmark();
+        this->state->alive = false;
+        break;
+      }
+      continue;
     }
 
     // A pick takes a frame or two to come back, so profiling waits for every

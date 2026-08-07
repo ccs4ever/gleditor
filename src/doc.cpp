@@ -78,25 +78,6 @@ unsigned int byteAt(const std::string &str, const std::size_t pos) {
   return static_cast<unsigned char>(str[pos]);
 }
 
-/// Length in bytes of the UTF-8 sequence introduced by @p lead. Continuation
-/// and invalid bytes report 1 so that callers always make forward progress.
-int utf8SequenceLength(const char lead) {
-  const auto byte = static_cast<unsigned char>(lead);
-  if (byte < 0x80U) {
-    return 1;
-  }
-  if ((byte & 0xE0U) == 0xC0U) {
-    return 2;
-  }
-  if ((byte & 0xF0U) == 0xE0U) {
-    return 3;
-  }
-  if ((byte & 0xF8U) == 0xF0U) {
-    return 4;
-  }
-  return 1;
-}
-
 /// View a row vector as the raw bytes the buffer pool wants.
 std::span<const std::byte> asBytes(const std::vector<Doc::VBORow> &rows) {
   return {reinterpret_cast<const std::byte *>(rows.data()),
@@ -224,10 +205,6 @@ Page::Page(std::shared_ptr<Doc> aDoc, RenderState &state, glm::mat4 &model,
       drawEnd--;
     }
 
-    std::cerr << "DEBUGCLUSTER idx=" << clusters.size() << " start=" << start
-              << " end=" << end << " chars="
-              << utf8Length(std::string_view(text).substr(start, end - start))
-              << " text=[" << text.substr(start, end - start) << "]\n";
     clusters.push_back(
         ClusterBox{static_cast<std::uint32_t>(start),
                    static_cast<std::uint32_t>(end - start),
@@ -353,20 +330,22 @@ Page::offsetForCluster(const std::uint32_t clusterIndex,
 }
 
 // Always called from the render thread
-void Page::draw(RenderState &state, const glm::mat4 &docTransform) const {
+void Page::collect(std::vector<render::GlyphBatch> &batches,
+                   const glm::mat4 &docTransform) const {
   if (0 == instanceCount) {
     return;
   }
-  const render::DrawUniforms uniforms{toArray(docTransform * model)};
-  state.device->drawGlyphs(uniforms, doc->pool->buffer(),
-                           doc->pool->byteOffset(pageBacking), instanceCount);
+  batches.push_back(render::GlyphBatch{
+      render::DrawUniforms{toArray(docTransform * model)}, doc->pool->buffer(),
+      doc->pool->byteOffset(pageBacking), instanceCount});
 }
 
 // Always called from the render thread
-void Doc::draw(RenderState &state, const glm::mat4 &viewProjection) const {
+void Doc::collect(std::vector<render::GlyphBatch> &batches,
+                  const glm::mat4 &viewProjection) const {
   const auto docTransform = viewProjection * model;
   for (const auto &page : pages) {
-    page.draw(state, docTransform);
+    page.collect(batches, docTransform);
   }
 }
 
