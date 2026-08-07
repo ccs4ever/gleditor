@@ -16,7 +16,7 @@ STATIC =
 # $(origin) rather than ?=, because make defines CXX itself: ?= would see it
 # already set and never fire.
 ifeq ($(origin CXX),default)
-CXX := $(shell which clang++ 2>/dev/null || which c++)
+CXX := $(shell command -v clang++ 2>/dev/null || command -v c++)
 endif
 #CXX = thirdparty/cosmocc-4.0.2/bin/cosmoc++ -mclang
 #CXX = thirdparty/cosmocc/bin/x86_64-linux-cosmo-gcc
@@ -165,8 +165,13 @@ endif
 #LDFLAGS += -v -stdlib=libc++ -fexperimental-library 
 LIBS := $(shell pkg-config $(STATIC) --libs $(PKGS))
 # glslangValidator is the traditional name and glslang the current one; which
-# of the two a distribution installs varies, and Fedora ships only the latter.
-GLSLANG := $(shell which glslangValidator 2>/dev/null || which glslang 2>/dev/null)
+# of the two a distribution installs varies, so both are tried.
+#
+# command -v rather than which: `which` is a separate package that neither the
+# Nix build sandbox nor a minimal Fedora container has, and its absence looked
+# exactly like the compiler being absent -- an empty result either way. It is a
+# shell builtin, so it is always there.
+GLSLANG := $(shell command -v glslangValidator 2>/dev/null || command -v glslang 2>/dev/null)
 # The Vulkan backend only compiles when Vulkan is enabled; everything else is
 # backend-neutral or belongs to the GL family backend.
 VK_SRCS := $(shell find src/render/vulkan -name '*.cpp' 2>/dev/null)
