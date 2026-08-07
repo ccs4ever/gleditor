@@ -2,6 +2,7 @@
 #include <cmath>                       // for ceil, lround
 #include <limits>
 #include <cstddef>                     // for byte
+#include <cstdint>                     // for uint32_t
 #include <format>                      // for format
 #include <gleditor/doc.hpp>            // IWYU pragma: associated
 #include <gleditor/render/device.hpp>  // for RenderDevice
@@ -18,7 +19,6 @@
 #include <stdexcept>              // for logic_error
 #include <string>                 // for char_traits, basic_string
 #include <string_view>            // for string_view
-#include <sys/types.h>            // for uint
 #include <utility>                // for move
 #include <vector>                 // for vector
 
@@ -50,10 +50,9 @@ constexpr std::uint32_t initialPoolRows = 1U << 16U;
 /// Unpack the layer/width/height triple written by
 /// Doc::VBORow::layerWidthHeight. The field widths must stay in step with that
 /// function and with unpackLayerWH() in assets/shaders/glyph.vert.glsl.
-[[maybe_unused]] glm::vec3 lwh(const uint packed3DDims) {
-  return {packed3DDims >> static_cast<uint>(26),
-          packed3DDims >> static_cast<uint>(13) & static_cast<uint>(8191),
-          packed3DDims & static_cast<uint>(8191)};
+[[maybe_unused]] glm::vec3 lwh(const std::uint32_t packed3DDims) {
+  return {packed3DDims >> 26U, packed3DDims >> 13U & 8191U,
+          packed3DDims & 8191U};
 }
 
 /// Margin in layout pixels between the page edge and its text.
