@@ -222,14 +222,19 @@ jobs:
       # The store path is the installed layout -- result/bin/gleditor beside
       # result/share/gleditor -- so this exercises the same executable-relative
       # search a distribution package does, without a prefix anywhere in it.
+      #
+      # No backend is named, so the frame is not drawn: a store binary links
+      # nixpkgs' libglvnd, which cannot load the Mesa drivers a non-NixOS
+      # runner has, and no amount of LIBGL_ALWAYS_SOFTWARE changes that. What
+      # is checked is that it starts, that its libraries resolve, and that it
+      # finds its shaders -- which is the part packaging gets wrong. The frame
+      # itself is drawn on the three distributions that can.
       - name: run what was built
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
-            xvfb libgl1-mesa-dri mesa-vulkan-drivers fonts-dejavu-core
-          xvfb-run -a packaging/smoke-test.sh "$(readlink -f result)/bin/gleditor" opengl
-        env:
-          LIBGL_ALWAYS_SOFTWARE: "1"
+            xvfb fonts-dejavu-core
+          xvfb-run -a packaging/smoke-test.sh "$(readlink -f result)/bin/gleditor"
 
   # --------------------------------------------------------------- Windows ---
   # MSYS2 rather than MSVC: the dependencies are the GTK stack -- pangomm,

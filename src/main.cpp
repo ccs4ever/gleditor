@@ -195,6 +195,10 @@ RendererRef handleArgs(const AppStateRef &state, render::Backend &backend,
       .help("treat a driver error as fatal instead of showing it as a "
             "notification")
       .flag();
+  parser.add_argument("--print-asset-dir")
+      .help("report the directory the shaders and icon were found in, then "
+            "quit; the one check a package can make without a GPU")
+      .flag();
   parser.add_argument("files").help("input files").remaining();
 
   try {
@@ -210,8 +214,12 @@ RendererRef handleArgs(const AppStateRef &state, render::Backend &backend,
     }
     // Which SDL this binary was built against is not something the command
     // line can change, and a bug report is much easier to read with it stated.
-    std::cout << "backend: " << render::backendName(backend) << ", SDL"
-              << sdl::majorVersion << "\n";
+    // Suppressed for --print-asset-dir, whose whole output is one path a
+    // script reads: a query prints its answer and nothing else.
+    if (parser["--print-asset-dir"] == false) {
+      std::cout << "backend: " << render::backendName(backend) << ", SDL"
+                << sdl::majorVersion << "\n";
+    }
 
     RendererRef renderer = Renderer::create(state, backend);
 
@@ -226,6 +234,7 @@ RendererRef handleArgs(const AppStateRef &state, render::Backend &backend,
       }
     }
     state->profiling         = parser["--profile"] == true;
+    state->printAssetDir     = parser["--print-asset-dir"] == true;
     state->benchmarkFrames =
         std::stoul(parser.get<std::string>("--benchmark"));
     state->cullPages   = parser["--no-cull"] == false;
@@ -311,6 +320,16 @@ int main(const int argc, char **argv) {
     Pango::init();
 
     AutoSDL sdlScoped(SDL_INIT_VIDEO);
+
+    // Answered here rather than before SDL starts, because the search asks SDL
+    // where the executable is and SDL only knows once it has been initialised.
+    // Before any window is created, though: a package installed on a machine
+    // with no usable GL driver can still be asked whether it found its files,
+    // and that is the question packaging gets wrong.
+    if (state->printAssetDir) {
+      std::cout << gleditor::assetDir() << "\n";
+      return 0;
+    }
 
     // Found next to the installed data files rather than in the working
     // directory, so that a packaged copy still has its icon.

@@ -17,7 +17,11 @@ set -eu
 
 BIN=${1:?usage: smoke-test.sh <path to gleditor> [backend...]}
 shift
-BACKENDS=${*:-opengl}
+# Named backends are rendered with. Naming none checks everything that does not
+# need a GPU and stops there, which is what the Nix job does: a binary from the
+# store uses nixpkgs' libglvnd and cannot load a non-NixOS runner's Mesa
+# drivers, and that is a fact about the runner rather than about the package.
+BACKENDS=$*
 
 command -v "$BIN" >/dev/null 2>&1 || [ -x "$BIN" ] || {
   echo "FAIL: $BIN is not executable"
@@ -32,6 +36,28 @@ echo "==> $BIN --version"
 "$BIN" --version
 echo "==> $BIN --help (loader check)"
 "$BIN" --help >/dev/null
+
+# Where the program decided its data files are. This is the question packaging
+# gets wrong, and unlike rendering it can be asked on a machine with no usable
+# GL driver at all -- so it is checked everywhere, including where the frame
+# below is not drawn.
+echo "==> $BIN --print-asset-dir"
+assets=$("$BIN" --print-asset-dir)
+echo "    resolved to: $assets"
+for shader in glyph.vert.glsl glyph.frag.glsl; do
+  if [ ! -f "$assets/shaders/$shader" ]; then
+    echo "FAIL: $assets/shaders/$shader is not there; the search found the"
+    echo "      wrong directory, which is what an installed copy failing to"
+    echo "      start looks like"
+    exit 1
+  fi
+done
+echo "ok: the shaders are where the program looked for them"
+
+if [ -z "$BACKENDS" ]; then
+  echo "no backends named; skipping the render"
+  exit 0
+fi
 
 work=$(mktemp -d)
 trap 'rm -rf "$work"' EXIT

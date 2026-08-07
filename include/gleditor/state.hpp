@@ -38,6 +38,10 @@ struct AppState {
   std::vector<std::pair<render::DiagnosticSeverity, std::string>>
       requestedToasts;
   bool profiling{};
+  /// Report where the data files were found and quit, without opening a
+  /// window. The one thing a package can be asked on a machine whose GL driver
+  /// cannot give it a context -- and the thing packaging most often gets wrong.
+  bool printAssetDir{};
   /**
    * @brief Screen pixels per layout pixel below which a page is drawn as one
    *        solid bar per line rather than one quad per glyph.

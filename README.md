@@ -669,6 +669,12 @@ found by walking `ldd` until it settles, and puts the assets *beside* the
 executable, which is the first place the search looks; unzip it anywhere and it
 finds its own data.
 
+`gleditor --print-asset-dir` reports where that search landed and exits before
+opening a window, which is how the answer can be checked on a machine whose
+driver cannot give the program a context -- the Nix job does exactly that,
+since a store binary links nixpkgs' libglvnd and cannot load a non-NixOS
+runner's Mesa drivers.
+
 `.github/workflows/packaging.yml` builds each of them, and then installs the
 result and runs it from a directory with no relation to the source tree.
 That second half is the point: until the data files were found at run time,
