@@ -121,6 +121,37 @@ sequential side on its own. And the OpenGL `record` figure is not a recording
 cost at all -- the GL driver blocks inside the draw calls, which is exactly what
 separating the two columns exposes.
 
+**Where the split does start to pay.** Several documents can be open at once,
+and the draws add up: `gleditor a.txt b.txt c.txt` puts every page of all three
+in the one list. Running the 4.6 MB sample two and three times over, still under
+lavapipe on four cores:
+
+| documents | page draws | median frame | collect | record |
+| --- | --- | --- | --- | --- |
+| 1 | 1152 | 731 ms | 0.044 ms | 0.285 ms |
+| 2 | 2304 | 1649 ms | 0.077 ms | 0.695 ms |
+| 3 | 3456 | 2474 ms | 0.115 ms | 1.279 ms |
+
+The gap between the two strategies closes as the fixed cost of a split is spread
+over more draws: the device measured them 2.0x apart at 1152 draws, 1.36x at
+2304, and at 3456 the split finally won. Forced both ways with
+`GLEDITOR_RECORD_THREADS`, 3456 draws record in 1.279 ms on one thread and
+1.045 ms on four -- 18% off the largest CPU cost in the frame. So the crossover
+on this machine is somewhere between two and three copies of the sample; on a
+machine whose cores are not all busy rasterising, it would be far lower.
+
+The chooser finds that when the two are far apart and is only mostly right when
+they are close. At 1152 draws it declined on every run. At 3456, where the true
+difference is 18%, it took the split in two runs of three (recording in 0.95 and
+1.03 ms) and declined in the third (1.30 ms): the split's measured cost moved
+between 277 and 400 ns per draw from one run to the next while the sequential
+figure held between 371 and 394, so the spread in what it is measuring is about
+as wide as the difference it is trying to resolve. This only happens where the
+two strategies are close, which is also what bounds the cost of picking the
+wrong one -- 0.25 ms out of a 2.5 s frame here. Where it would cost more, it has
+been right every time. `GLEDITOR_RECORD_THREADS` settles it by hand when that is
+not good enough.
+
 The frame time is dominated by none of them: it is 4.6 million quads being
 rasterised, every page of the document, every frame, whether or not the page is
 on screen. Culling pages outside the view would cut both columns by about two

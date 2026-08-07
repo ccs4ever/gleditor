@@ -165,12 +165,29 @@ private:
    * those cores are idle and the same split wins. Neither answer can be
    * compiled in, so the device times both and keeps the cheaper.
    *
-   * The comparison runs over several frames of each rather than one, and
-   * compares medians: a single frame's recording is a few hundred microseconds
-   * and one slow frame can be twice the median, which is enough to pick the
-   * wrong winner outright.
+   * Each strategy is measured over a run of consecutive frames, not by
+   * alternating between them, and the first few frames of each run are
+   * discarded. Both details are load-bearing. What a split costs depends on
+   * how long a worker waits for a core, which varies far more frame to frame
+   * than recording in one piece does; and alternating quietly penalises the
+   * split, because its workers then park between every measured frame instead
+   * of being woken by each one as they are in steady state. Measured by
+   * alternating, the split read 7% cheaper than recording in one piece where
+   * running it for real was 18% cheaper -- little enough to lose to the margin
+   * below.
+   *
+   * This narrows the error rather than removing it. Where the two strategies
+   * are close, the split's own run-to-run spread is wider than the difference
+   * being measured and the comparison can still go either way; where they are
+   * far apart, which is where the choice is worth anything, it has been
+   * consistent. GLEDITOR_RECORD_THREADS settles it by hand when that is not
+   * good enough.
    */
-  static constexpr std::uint32_t recordingProbeFrames   = 16;
+  static constexpr std::uint32_t recordingProbeWarmup   = 3;
+  static constexpr std::uint32_t recordingProbeSamples  = 8;
+  static constexpr std::uint32_t recordingProbeBlock =
+      recordingProbeWarmup + recordingProbeSamples;
+  static constexpr std::uint32_t recordingProbeFrames = 2 * recordingProbeBlock;
   static constexpr std::uint32_t recordingProbeInterval = 600;
 
   /**
@@ -185,9 +202,8 @@ private:
 
   /// What one recording strategy cost over the frames it was measured on.
   struct RecordingCost {
-    /// Per-draw cost of each measured frame. Sized for the half of the probe
-    /// frames that go to one strategy.
-    std::array<double, recordingProbeFrames / 2> samples{};
+    /// Per-draw cost of each measured frame of this strategy's run.
+    std::array<double, recordingProbeSamples> samples{};
     std::size_t count{};
 
     void add(const double sample) {
