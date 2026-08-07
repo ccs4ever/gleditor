@@ -59,7 +59,7 @@ jobs:
           test -f /usr/share/gleditor/shaders/glyph.vert.glsl
           test -f /usr/share/gleditor/shaders/vulkan/glyph.vert.spv
           test -f /usr/share/applications/gleditor.desktop
-          test -f /usr/share/man/man1/gleditor.1
+          test -f /usr/share/man/man1/gleditor.1.gz
 
       - name: run the installed binary
         run: |
@@ -83,9 +83,9 @@ jobs:
       - name: install build dependencies
         run: |
           dnf install -y --setopt=install_weak_deps=False \
-            rpm-build rpmdevtools make gcc-c++ pkgconf-pkg-config git tar \
+            rpm-build rpmdevtools make gcc-c++ pkgconf-pkg-config git \
             pangomm2.48-devel cairomm1.16-devel glibmm2.68-devel \
-            sdl3-devel sdl3_image-devel mesa-libGL-devel glm-devel \
+            SDL3-devel SDL3_image-devel mesa-libGL-devel glm-devel \
             vulkan-loader-devel glslang desktop-file-utils libappstream-glib \
             python3
 
@@ -139,7 +139,7 @@ jobs:
       - name: install build dependencies
         run: |
           pacman -Syu --noconfirm --needed \
-            git pkgconf make gcc pangomm cairomm glibmm-2.68 \
+            git pkgconf make gcc pangomm-2.48 cairomm-1.16 glibmm-2.68 \
             sdl3 sdl3_image libglvnd glm vulkan-headers vulkan-icd-loader \
             glslang python
 
@@ -235,6 +235,11 @@ jobs:
         with:
           submodules: recursive
 
+      # Only the packages whose names are not in doubt. The C++ bindings and
+      # SDL3 are resolved in the next step instead: MSYS2 ships several
+      # parallel binding ABIs and has renamed the SDL packages, and a wrong
+      # guess in this list fails the job before anything can report what the
+      # right name would have been.
       - uses: msys2/setup-msys2@v2
         with:
           msystem: UCRT64
@@ -244,16 +249,43 @@ jobs:
             mingw-w64-ucrt-x86_64-gcc
             mingw-w64-ucrt-x86_64-pkgconf
             mingw-w64-ucrt-x86_64-make
-            mingw-w64-ucrt-x86_64-pangomm
-            mingw-w64-ucrt-x86_64-cairomm
-            mingw-w64-ucrt-x86_64-glibmm2.68
-            mingw-w64-ucrt-x86_64-SDL3
-            mingw-w64-ucrt-x86_64-SDL3_image
             mingw-w64-ucrt-x86_64-glm
             mingw-w64-ucrt-x86_64-glslang
             mingw-w64-ucrt-x86_64-vulkan-headers
             mingw-w64-ucrt-x86_64-vulkan-loader
             mingw-w64-ucrt-x86_64-mesa
+
+      # Each library is asked for by the ABI the build actually needs, trying
+      # the candidate spellings in order and taking the first that exists. When
+      # none do, the matching packages are printed, so one run says what the
+      # name should be rather than only that the guess was wrong.
+      - name: resolve and install the C++ bindings and SDL3
+        run: |
+          set -eu
+          prefix=mingw-w64-ucrt-x86_64
+          resolve() {
+            search=$1; shift
+            for candidate in "$@"; do
+              if pacman -Si "$prefix-$candidate" >/dev/null 2>&1; then
+                echo "$prefix-$candidate"
+                return 0
+              fi
+            done
+            echo "no package found for $search; candidates in the repository:" >&2
+            pacman -Ssq "$search" >&2 || true
+            return 1
+          }
+          pkgs=""
+          pkgs="$pkgs $(resolve pangomm pangomm-2.48 pangomm2.48 pangomm)"
+          pkgs="$pkgs $(resolve cairomm cairomm-1.16 cairomm1.16 cairomm)"
+          pkgs="$pkgs $(resolve glibmm glibmm-2.68 glibmm2.68 glibmm)"
+          pkgs="$pkgs $(resolve sdl3 sdl3 SDL3)"
+          pkgs="$pkgs $(resolve sdl3.image sdl3-image sdl3_image SDL3_image)"
+          echo "installing:$pkgs"
+          # shellcheck disable=SC2086
+          pacman -S --noconfirm --needed $pkgs
+          echo "--- what pkg-config sees ---"
+          pkg-config --modversion pangomm-2.48 cairomm-1.16 glibmm-2.68 sdl3
 
       - name: build and bundle
         run: ./packaging/windows/build-msys2.sh

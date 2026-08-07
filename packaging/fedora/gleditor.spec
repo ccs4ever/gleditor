@@ -13,8 +13,8 @@ BuildRequires:  pkgconfig
 BuildRequires:  pkgconfig(pangomm-2.48)
 BuildRequires:  pkgconfig(cairomm-1.16)
 BuildRequires:  pkgconfig(glibmm-2.68)
-BuildRequires:  pkgconfig(sdl3)
-BuildRequires:  pkgconfig(sdl3-image)
+BuildRequires:  SDL3-devel
+BuildRequires:  SDL3_image-devel
 BuildRequires:  pkgconfig(gl)
 BuildRequires:  pkgconfig(vulkan)
 BuildRequires:  glm-devel

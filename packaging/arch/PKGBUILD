@@ -6,7 +6,7 @@ pkgdesc="GPU-rendered text editor with OpenGL, OpenGL ES and Vulkan backends"
 arch=('x86_64' 'aarch64')
 url="https://github.com/ccs4ever/gleditor"
 license=('GPL-3.0-or-later')
-depends=('pangomm' 'cairomm' 'glibmm-2.68' 'sdl3' 'sdl3_image' 'libglvnd'
+depends=('pangomm-2.48' 'cairomm-1.16' 'glibmm-2.68' 'sdl3' 'sdl3_image' 'libglvnd'
          'hicolor-icon-theme')
 # The Vulkan backend loads a loader at run time; the other two backends work
 # without one, so this is optional rather than a hard dependency.

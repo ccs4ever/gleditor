@@ -32,14 +32,14 @@
         };
 
         # The build dependencies, plus what the tests and the backend
-        # comparison need: gmock for the suite, and the software rasterisers
-        # that make a headless run possible.
+        # comparison need. gtest carries gmock in nixpkgs -- there is no
+        # separate attribute for it -- and mesa is what makes a headless run
+        # possible.
         devShells.default = pkgs.mkShell {
           inputsFrom = [ self.packages.${system}.gleditor ];
           packages = with pkgs; [
             clang-tools
             gtest
-            gmock
             doxygen
             xvfb-run
             mesa
