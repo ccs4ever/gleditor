@@ -268,6 +268,7 @@ jobs:
             mingw-w64-ucrt-x86_64-vulkan-headers
             mingw-w64-ucrt-x86_64-vulkan-loader
             mingw-w64-ucrt-x86_64-mesa
+            mingw-w64-ucrt-x86_64-gdb
 
       # Each library is asked for by the ABI the build actually needs, trying
       # the candidate spellings in order and taking the first that exists. When
@@ -349,9 +350,23 @@ jobs:
         run: |
           cp "$MINGW_PREFIX/bin/opengl32.dll" build/windows/gleditor/ || true
           cd build/windows/gleditor
-          ./gleditor.exe --backend opengl --profile --screenshot frame.ppm \
-            ../../../tests/samples/quick_brown_fox.txt
-          ls -la frame.ppm
+          # Under gdb, and with the exit status reported rather than swallowed.
+          # A bare run here says only that the process stopped: stdout is block
+          # buffered when it is not a terminal, so the last line printed is not
+          # where it died, and Windows reports a status that names no cause.
+          gdb -batch -return-child-result \
+              -ex 'set pagination off' \
+              -ex 'set confirm off' \
+              -ex run \
+              -ex 'echo \n--- backtrace of the failing thread ---\n' \
+              -ex bt \
+              -ex 'echo \n--- every thread ---\n' \
+              -ex 'thread apply all bt' \
+              --args ./gleditor.exe --backend opengl --profile \
+              --strict-diagnostics --screenshot frame.ppm \
+              ../../../tests/samples/quick_brown_fox.txt \
+            && echo "gdb reported success" || echo "exit status: $?"
+          ls -la frame.ppm || echo "no frame was written"
 
       - uses: actions/upload-artifact@v4
         with:
