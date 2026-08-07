@@ -299,8 +299,18 @@ RendererRef handleArgs(const AppStateRef &state, render::Backend &backend,
 int main(const int argc, char **argv) {
 
   // "" signals that LC_ALL should be set from the environment
-  std::setlocale(LC_ALL, "");           // for C and C++ where synced with stdio
-  std::locale::global(std::locale("")); // for C++
+  std::setlocale(LC_ALL, ""); // for C and C++ where synced with stdio
+  try {
+    std::locale::global(std::locale("")); // for C++
+  } catch (const std::runtime_error &) {
+    // MinGW's libstdc++ has no named locales, so this throws whenever the
+    // environment names one. Under cmd.exe nothing does and the program
+    // started; under a shell that exports LANG it died before parsing an
+    // argument, with a message about facets that named neither the program
+    // nor the cause. The user's locale where it can be had and the classic
+    // one where it cannot is a better answer than no program at all.
+    std::locale::global(std::locale::classic());
+  }
   std::cerr.imbue(std::locale());
   std::cin.imbue(std::locale());
   std::cout.imbue(std::locale());

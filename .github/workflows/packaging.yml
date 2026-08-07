@@ -326,6 +326,20 @@ jobs:
           gleditor.exe --version || exit /b 1
           gleditor.exe --help > nul || exit /b 1
 
+      # And again from a shell, which is a different question: cmd.exe exports
+      # no LANG and MSYS2 does, and the C++ locale a named one asks for is one
+      # MinGW cannot build. That difference hid a startup crash behind a green
+      # check -- everything above passed while the program could not start for
+      # anyone who ran it from a shell. Asking it where its assets are is the
+      # cheapest way to get past argument parsing without needing a GPU.
+      - name: run the bundled exe from a shell, where LANG is set
+        run: |
+          set -eu
+          echo "LANG=${LANG-unset} LC_ALL=${LC_ALL-unset}"
+          cd build/windows/gleditor
+          ./gleditor.exe --version
+          ./gleditor.exe --print-asset-dir
+
       # Best-effort rendering. The runner has no GPU and Windows' fallback
       # OpenGL is 1.1, far below the 3.3 this needs, so the software rasteriser
       # MSYS2 ships is dropped in beside the executable. Reported rather than
