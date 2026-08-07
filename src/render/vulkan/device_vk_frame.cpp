@@ -395,15 +395,20 @@ void DeviceVK::drawGlyphBatches(const std::span<const GlyphBatch> batches) {
     recordingProbeFrame = 0;
   }
 
-  // While measuring, alternate so that both strategies see the same mixture of
-  // frames; afterwards, commit to the cheaper one and stop timing. Timing only
-  // during the comparison is what keeps the choice from drifting with the
-  // noise of whichever strategy happens to be in use.
+  // While measuring, run each strategy for a block of consecutive frames --
+  // the split first -- and afterwards commit to the cheaper one and stop
+  // timing. Timing only during the comparison is what keeps the choice from
+  // drifting with the noise of whichever strategy happens to be in use.
   const bool probing = recordingProbeFrame < recordingProbeFrames;
-  const bool split   = probing ? (0 == recordingProbeFrame % 2)
+  const bool split   = probing ? (recordingProbeFrame < recordingProbeBlock)
                                : parallelCost.median() <
                                      sequentialCost.median() *
                                          parallelRecordingMargin;
+  // The opening frames of each block are thrown away: the first split frame
+  // after a run of sequential ones wakes workers that have been parked, which
+  // is a cost the steady state does not pay.
+  const bool measured =
+      probing && (recordingProbeFrame % recordingProbeBlock) >= recordingProbeWarmup;
   recordingProbeFrame++;
 
   const auto started = std::chrono::steady_clock::now();
@@ -413,12 +418,14 @@ void DeviceVK::drawGlyphBatches(const std::span<const GlyphBatch> batches) {
     recordSequentially(batches);
   }
 
-  if (probing) {
+  if (measured) {
     const auto elapsed = std::chrono::duration<double, std::nano>(
                              std::chrono::steady_clock::now() - started)
                              .count() /
                          static_cast<double>(batches.size());
     (split ? parallelCost : sequentialCost).add(elapsed);
+  }
+  if (probing) {
     return;
   }
 
