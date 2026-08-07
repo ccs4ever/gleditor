@@ -69,10 +69,16 @@ jobs:
         env:
           LIBGL_ALWAYS_SOFTWARE: "1"
 
+      # dpkg-buildpackage writes its output beside the source tree, and
+      # upload-artifact rejects any path containing '..', so the package is
+      # moved inside the workspace first.
+      - name: collect the package
+        run: mkdir -p dist && mv ../gleditor_*.deb dist/
+
       - uses: actions/upload-artifact@v4
         with:
           name: gleditor-deb
-          path: ../gleditor_*.deb
+          path: dist/*.deb
 
   # ---------------------------------------------------------------- Fedora ---
   fedora:
@@ -206,8 +212,12 @@ jobs:
       - name: check the flake
         run: nix flake check --no-build
 
+      # ?submodules=1 because a flake copies only what git tracks, and the
+      # parent repository tracks the two vendored dependencies as gitlinks
+      # rather than as files. Without it the source reaches the sandbox with
+      # thirdparty/ empty, and the build fails on argparse's header.
       - name: build
-        run: nix build .#gleditor --print-build-logs
+        run: nix build '.?submodules=1#gleditor' --print-build-logs
 
       # The store path is the installed layout -- result/bin/gleditor beside
       # result/share/gleditor -- so this exercises the same executable-relative
