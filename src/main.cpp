@@ -14,7 +14,7 @@
 #include <memory>         // for __shared_ptr_access, shared...
 #include <stdexcept>      // for runtime_error
 #include <mutex>          // for lock_guard
-#include <pangomm/init.h> // for init
+#include <pangomm/wrap_init.h> // for wrap_init
 #include <string>         // for operator<<, basic_string
 #include <string_view>    // for string_view
 #include <thread>         // for jthread
@@ -317,7 +317,12 @@ int main(const int argc, char **argv) {
   try {
 
     Glib::init();
-    Pango::init();
+    // What Pango::init() does, spelled out, because on MinGW it is not there
+    // to call: the DLL exports what the headers mark for export, and pangomm's
+    // init.cc is the one file that defines a function without including its
+    // own header, so the marking never reaches the definition. wrap_init is
+    // generated with its header included and is exported everywhere.
+    Pango::wrap_init();
 
     AutoSDL sdlScoped(SDL_INIT_VIDEO);
 
