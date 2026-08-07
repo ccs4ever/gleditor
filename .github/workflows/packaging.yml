@@ -350,15 +350,24 @@ jobs:
         run: |
           cp "$MINGW_PREFIX/bin/opengl32.dll" build/windows/gleditor/ || true
           cd build/windows/gleditor
-          # Under gdb, and with the exit status reported rather than swallowed.
-          # A bare run here says only that the process stopped: stdout is block
-          # buffered when it is not a terminal, so the last line printed is not
-          # where it died, and Windows reports a status that names no cause.
+          # The last round established that the process exits rather than
+          # faults: gdb reported "exited with code 020001600127" -- octal, so
+          # 0x80070057, which is HRESULT_FROM_WIN32(ERROR_INVALID_PARAMETER)
+          # truncated to 87 by the shell -- and "No stack", because there is
+          # nothing to unwind after a clean exit.
+          #
+          # So the question is who called exit, which a breakpoint on the exit
+          # paths answers and a backtrace after the fact cannot.
           gdb -batch -return-child-result \
               -ex 'set pagination off' \
               -ex 'set confirm off' \
+              -ex 'set breakpoint pending on' \
+              -ex 'break ExitProcess' \
+              -ex 'break exit' \
+              -ex 'break _exit' \
+              -ex 'break abort' \
               -ex run \
-              -ex 'echo \n--- backtrace of the failing thread ---\n' \
+              -ex 'echo \n--- who is stopping the process ---\n' \
               -ex bt \
               -ex 'echo \n--- every thread ---\n' \
               -ex 'thread apply all bt' \
