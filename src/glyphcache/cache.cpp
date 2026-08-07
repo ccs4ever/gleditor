@@ -11,6 +11,7 @@
 #include <cairomm/context.h>               // for Context
 #include <cairomm/surface.h>               // for ImageSurface, Surface
 #include <cstddef>                         // for byte
+#include <cstdlib>                         // for getenv
 #include <format>
 #include <numeric>                          // for format
 #include <gleditor/glyphcache/palette.hpp> // for GlyphPalette, operator<=>
@@ -26,7 +27,7 @@
 #include <string_view>                     // for operator==, string_view
 #include <tuple>                           // for make_tuple, tuple
 #include <unordered_map>                   // for unordered_map, operator==
-#include <utility>                         // for pair
+#include <utility>                        // for to_underlying, move
 #include <vector>                          // for vector
 
 #include "cairomm/enums.h"       // for ANTIALIAS_SUBPIXEL, Antia...
@@ -42,12 +43,40 @@ enum class Length : int;
 
 namespace {
 
-/// Upper bound on the atlas side length. Larger atlases waste memory for the
-/// handful of layers the cache actually fills.
-int clampTextureSize(const int size) { return std::min(2048, size); }
-/// Upper bound on atlas layers, which also bounds the 4-bit layer field packed
-/// into Doc::VBORow::layerWidthHeight.
-int clampTextureLayers(const int layers) { return std::min(10, layers); }
+/**
+ * @brief Side length the atlas starts at, and the layer count it starts with.
+ *
+ * Small on purpose. The atlas grows when a glyph will not fit, so the opening
+ * size only has to hold the first few dozen clusters; sizing it for the worst
+ * case instead meant reserving tens of megabytes for the hundred or so
+ * distinct clusters a document of plain English actually uses. Growing is also
+ * then exercised by every run rather than by nothing.
+ */
+constexpr int initialAtlasSize   = 512;
+constexpr int initialAtlasLayers = 1;
+
+/**
+ * @brief The opening size, with GLEDITOR_ATLAS_SIZE allowed to override it.
+ *
+ * Growth is the sort of thing that is either exercised or merely believed in,
+ * and no real document exercises it: the whole King James Bible packs into one
+ * 512x512 layer. Starting small enough that ordinary text overflows is how the
+ * grown atlas can be rendered and compared against the ungrown one -- see the
+ * atlas-growth check in tools/compare-backends.sh.
+ */
+int openingAtlasSize() {
+  const auto *requested = std::getenv("GLEDITOR_ATLAS_SIZE");
+  if (nullptr == requested) {
+    return initialAtlasSize;
+  }
+  try {
+    return std::max(1, std::stoi(std::string(requested)));
+  } catch (const std::exception &) {
+    std::cerr << "GLEDITOR_ATLAS_SIZE is not a number, ignoring: " << requested
+              << "\n";
+  }
+  return initialAtlasSize;
+}
 
 /**
  * @brief Mip levels the atlas carries, and the gutter that makes them safe.
@@ -120,13 +149,20 @@ std::vector<std::byte> toCoverage(const std::span<const unsigned char> surface,
 
 GlyphCache::GlyphCache(render::RenderDevice *aDevice) : device(aDevice) {
   const auto limits = device->textureLimits();
-  size              = clampTextureSize(limits.maxSize);
-  maxLayers         = clampTextureLayers(limits.maxLayers);
+  // The hardware's ceiling is the ceiling. A device that reports less than the
+  // opening size gets a smaller opening size, not an allocation it cannot
+  // make; the one thing not allowed is zero, which no device means literally.
+  maxSize    = std::max(1, limits.maxSize);
+  maxLayers  = std::min(maxEncodableLayers, std::max(1, limits.maxLayers));
+  size       = std::min(openingAtlasSize(), maxSize);
+  layerCount = std::min(initialAtlasLayers, maxLayers);
   std::cerr << std::format(
-      "glyph cache: atlas {}x{} (device max {}), {} layers (device max {})\n",
-      size, size, limits.maxSize, maxLayers, limits.maxLayers);
+      "glyph cache: atlas {}x{} x{} layers, growing to at most {}x{} x{} "
+      "(device allows {}x{} x{}, the vertex encoding {} layers)\n",
+      size, size, layerCount, maxSize, maxSize, maxLayers, limits.maxSize,
+      limits.maxSize, limits.maxLayers, maxEncodableLayers);
 
-  texture = device->createTextureArray(size, maxLayers,
+  texture = device->createTextureArray(size, layerCount,
                                        render::TextureFormat::R8,
                                        atlasMipLevels);
 }
@@ -152,22 +188,94 @@ auto GlyphCache::getBestPalette(const Rect &charBox) {
       it != palettes.end()) {
     return it;
   }
-  if (palettes.size() >= static_cast<unsigned long>(maxLayers)) {
-    throw std::overflow_error("Out of Palettes!!!");
+  if (palettes.size() < static_cast<unsigned long>(layerCount)) {
+    // Layers are handed out in creation order; the palette keeps its own index
+    // so that sorting the vector cannot detach a palette from its layer.
+    palettes.emplace_back(Rect{Length{size}, Length{size}}, device, texture,
+                          static_cast<int>(palettes.size()));
+    // The sort moves the new palette somewhere unpredictable -- palettes with
+    // equal fill compare equivalent and std::sort is not stable -- so look it
+    // up again rather than assuming it is still the last element.
+    std::ranges::sort(palettes);
+    const auto placed = std::ranges::find_if(palettes, fits);
+    if (placed != palettes.end()) {
+      return placed;
+    }
   }
-  // Layers are handed out in creation order; the palette keeps its own index
-  // so that sorting the vector cannot detach a palette from its layer.
-  palettes.emplace_back(Rect{Length{size}, Length{size}}, device, texture,
-                        static_cast<int>(palettes.size()));
-  // The sort moves the new palette somewhere unpredictable -- palettes with
-  // equal fill compare equivalent and std::sort is not stable -- so look it up
-  // again rather than assuming it is still the last element.
-  std::ranges::sort(palettes);
-  const auto placed = std::ranges::find_if(palettes, fits);
-  if (placed == palettes.end()) {
-    throw std::overflow_error("Glyph too large for an empty palette");
+  return palettes.end();
+}
+
+void GlyphCache::reallocate(const int newSize, const int newLayers) {
+  {
+    std::size_t inked   = 0;
+    std::size_t widest  = 0;
+    std::size_t tallest = 0;
+    for (const auto &placed : placements) {
+      inked += static_cast<std::size_t>(placed.width) *
+               static_cast<std::size_t>(placed.height);
+      widest  = std::max<std::size_t>(widest, placed.width);
+      tallest = std::max<std::size_t>(tallest, placed.height);
+    }
+    std::cerr << std::format(
+        "glyph cache: atlas {}x{} x{} -> {}x{} x{} ({} glyphs, {} texels "
+        "placed, largest {}x{}, {} palettes)\n",
+        size, size, layerCount, newSize, newSize, newLayers, placements.size(),
+        inked, widest, tallest, palettes.size());
   }
-  return placed;
+
+  // Nothing in flight may still be sampling the old texture. The device is
+  // asked to settle before the handle it is reading from is destroyed.
+  device->waitIdle();
+  const auto old = texture;
+  texture        = device->createTextureArray(
+      newSize, newLayers, render::TextureFormat::R8, atlasMipLevels);
+  size       = newSize;
+  layerCount = newLayers;
+  device->destroyTexture(old);
+
+  // Existing palettes keep their layer and everything in it: lanes stack up
+  // from y = 0 and fill right from x = 0, so a larger layer is room added
+  // beyond what is used, never a shuffle of what is there.
+  for (auto &palette : palettes) {
+    palette.grow(Rect{Length{size}, Length{size}}, texture);
+  }
+  for (const auto &placed : placements) {
+    device->updateTextureLayer(texture, placed.layer, placed.x, placed.y,
+                               placed.width, placed.height, placed.coverage);
+  }
+  atlasDirty = true;
+}
+
+void GlyphCache::makeRoomFor(const Rect &padded) {
+  const auto needed = std::max(std::to_underlying(padded.width),
+                               std::to_underlying(padded.height));
+  while (true) {
+    // A glyph wider or taller than a whole layer can only be housed by a
+    // larger layer, however many layers there are.
+    if (needed <= size && palettes.end() != getBestPalette(padded)) {
+      return;
+    }
+    // Size first: a layer twice as wide holds four times as much, where a
+    // second layer only doubles it, and layers are the scarcer resource --
+    // the vertex encoding allows a few dozen and the hardware allows a
+    // texture thousands of pixels across.
+    if (size < maxSize) {
+      reallocate(std::min(maxSize, size * 2), layerCount);
+      continue;
+    }
+    // Only when the glyph would fit a layer. A glyph too big for one is too
+    // big for a hundred, and reallocating anyway would copy the whole atlas
+    // into a larger one to no purpose before failing regardless.
+    if (needed <= size && layerCount < maxLayers) {
+      reallocate(size, std::min(maxLayers, layerCount * 2));
+      continue;
+    }
+    throw std::overflow_error(std::format(
+        "GlyphCache: the atlas is full at {}x{} across {} layers, and a "
+        "{}x{} glyph will not fit",
+        size, size, layerCount, std::to_underlying(padded.width),
+        std::to_underlying(padded.height)));
+  }
 }
 
 inline Glib::RefPtr<Pango::Layout>
@@ -247,20 +355,34 @@ GlyphCache::Sizes GlyphCache::addToCache(const std::string &chr,
   // itself below, so nothing downstream sees the border either.
   const auto padded =
       Rect{Length{width + (2 * glyphPadding)}, Length{height + (2 * glyphPadding)}};
+  makeRoomFor(padded);
   const auto palette = getBestPalette(padded);
-  const auto placed  = palette->put(padded, withPadding(coverage, width, height));
+  if (palettes.end() == palette) {
+    throw std::overflow_error(
+        std::format("GlyphCache: no palette has room for glyph: {}", chr));
+  }
+  auto paddedCoverage = withPadding(coverage, width, height);
+  const auto placed   = palette->put(padded, paddedCoverage);
   if (!placed.has_value()) {
     throw std::overflow_error(
         std::format("GlyphCache: failed to place glyph: {}", chr));
   }
+  // Remembered so that growing the atlas can put it back exactly here.
+  placements.push_back(Placement{palette->layerIndex(),
+                                 static_cast<int>(placed->topLeft.x),
+                                 static_cast<int>(placed->topLeft.y),
+                                 std::to_underlying(padded.width),
+                                 std::to_underlying(padded.height),
+                                 std::move(paddedCoverage)});
 
   // Narrow the placed rectangle from the padded box to the glyph inside it.
-  const auto texel = 1.0F / static_cast<float>(size);
+  // Texels, so that growing the atlas leaves this glyph where it is; the
+  // shader divides by the texture's own size when it samples.
   const auto inner = TextureCoords{
-      PointF{placed->topLeft.x + (glyphPadding * texel),
-             placed->topLeft.y + (glyphPadding * texel)},
-      RectF{placed->box.width - (2 * glyphPadding * texel),
-            placed->box.height - (2 * glyphPadding * texel)}};
+      PointF{placed->topLeft.x + glyphPadding,
+             placed->topLeft.y + glyphPadding},
+      RectF{placed->box.width - (2 * glyphPadding),
+            placed->box.height - (2 * glyphPadding)}};
   // Mean coverage over the box, taken from the bitmap that was just
   // rasterised. One pass over data already in cache, once per distinct cluster.
   const auto inked =

@@ -224,6 +224,83 @@ for backend in $backends; do
   fi
 done
 
+# The atlas grows when a glyph will not fit, which means a new texture object --
+# an array texture cannot gain layers and a 2D texture cannot gain pixels -- so
+# every glyph already packed has to be written into it again, at the texel it
+# was already on. The coordinates naming those texels are already in a page's
+# vertex buffer, on the device, and cannot be revised.
+#
+# No document provokes it: the whole King James Bible packs into one 512x512
+# layer. GLEDITOR_ATLAS_SIZE starts the atlas small enough that ordinary text
+# overflows it twice over.
+#
+# Not a byte comparison, and not because the tolerance is convenient. A smaller
+# atlas packs glyphs at different texels, and a mip texel averages a block
+# aligned to level zero's grid rather than to the glyph, so the same glyph at an
+# odd offset genuinely has a different mip chain from the same glyph at an even
+# one. That shows up as a sub-level nudge over the page -- an atlas opened at
+# 256, which never grows at all, differs from one opened at 512 by the same
+# amount as one opened at 64, which grows twice.
+#
+# What a failed re-upload looks like instead is glyphs missing outright, and the
+# two are easy to tell apart. The limits were set by breaking it on purpose --
+# dropping the re-upload from reallocate() -- and measuring both:
+#
+#           | mean change | >32 levels | >64 | >100
+#   working |        0.64 |      0.38% | 0.02% | 0.000%
+#   broken  |        2.24 |      1.92% | 1.19% | 0.739%
+#
+# The phase shift nudges pixels; a missing glyph flips them from ink to paper.
+# So the limit that carries the check is the >100 one, which a working atlas
+# does not reach at all.
+echo "comparing a grown atlas against one that never grew"
+for backend in $backends; do
+  GLEDITOR_ATLAS_SIZE=64 "$BIN" --backend "$backend" --profile $STRICT \
+      --screenshot "$OUT/$backend.grown.ppm" "$SAMPLE" \
+      >"$OUT/$backend.grown.log" 2>&1 ||
+    { echo "FAIL: $backend run with a small atlas exited non-zero"
+      tail -20 "$OUT/$backend.grown.log"; exit 1; }
+  growths=$(grep -c -- '->' "$OUT/$backend.grown.log" || true)
+  if [ "$growths" -lt 1 ]; then
+    echo "FAIL: $backend atlas never grew, so nothing was compared"
+    exit 1
+  fi
+  echo "  $backend grew the atlas $growths times"
+done
+
+OUT="$OUT" BACKENDS="$backends" python3 - <<'PYEOF'
+import os, sys
+
+out      = os.environ["OUT"]
+backends = os.environ["BACKENDS"].split()
+
+def load(path):
+    data = open(path, "rb").read()
+    return data[data.index(b"255\n") + 4:]
+
+meanLimit = 1.2
+lostLevel = 100
+lostPct   = 0.05
+failed = False
+for backend in backends:
+    grew = load(f"{out}/{backend}.grown.ppm")
+    kept = load(f"{out}/{backend}.ppm")
+    paper = [(a, b) for a, b in zip(kept, grew) if a or b]
+    if not paper:
+        sys.exit(f"FAIL: {backend} drew nothing to compare")
+    mean = sum(abs(a - b) for a, b in paper) / len(paper)
+    lost = 100.0 * sum(1 for a, b in paper
+                       if abs(a - b) > lostLevel) / len(paper)
+    ok = mean <= meanLimit and lost <= lostPct
+    print(f"{'ok' if ok else 'FAIL'}: {backend} across atlas growths, mean "
+          f"change {mean:.2f} (limit {meanLimit}), {lost:.3f}% of page pixels "
+          f"changed by >{lostLevel} levels (limit {lostPct}%)")
+    if not ok:
+        failed = True
+
+sys.exit(1 if failed else 0)
+PYEOF
+
 # The coarse path replaces a page's glyphs with one solid bar per line, so the
 # frames are meant to differ -- what must not differ is how bright the page is,
 # since a bar too dark or too light makes the switch visible as the camera

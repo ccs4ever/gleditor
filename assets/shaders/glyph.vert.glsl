@@ -20,8 +20,8 @@
 GLEDITOR_IN(0) vec3 position;   // centre of the glyph in model space
 GLEDITOR_IN(1) uint fgcolor;    // packed RGBA8
 GLEDITOR_IN(2) uint bgcolor;    // packed RGBA8
-GLEDITOR_IN(3) vec2 texcoord;   // atlas origin of the glyph, normalised
-GLEDITOR_IN(4) vec2 texBox;     // atlas extent of the glyph, normalised
+GLEDITOR_IN(3) vec2 texcoord;   // atlas origin of the glyph, in texels
+GLEDITOR_IN(4) vec2 texBox;     // atlas extent of the glyph, in texels
 GLEDITOR_IN(5) uint layerWH;    // layer:4 width:14 height:14
 GLEDITOR_IN(6) uvec2 tag;       // picking identity
 
@@ -44,11 +44,14 @@ vec4 unpackColor(uint bits) {
 }
 
 // Field widths must stay in step with Doc::VBORow::layerWidthHeight and with
-// lwh() in doc.cpp.
+// lwh() in doc.cpp. Six bits of layer rather than four: the atlas adds layers
+// when it runs out of room, and this encoding is what bounds how many it can
+// have. Thirteen bits each leaves the largest quad drawn -- a page background,
+// around fifteen hundred layout pixels tall -- five times the room it needs.
 vec3 unpackLayerWH(uint bits) {
-    return vec3(float(bits >> 28),
-                float((bits >> 14) & 16383u),
-                float(bits & 16383u));
+    return vec3(float(bits >> 26),
+                float((bits >> 13) & 8191u),
+                float(bits & 8191u));
 }
 
 void main() {
@@ -92,7 +95,10 @@ void main() {
     vFgColor = fg;
     vBgColor = bg;
     // The atlas origin is the bottom-left of the glyph, so the texture
-    // coordinate follows the same corner selection as the position.
+    // coordinate follows the same corner selection as the position. Carried in
+    // texels and divided by the atlas size in the fragment stage, which is
+    // where the sampler is declared; the atlas grows as glyphs arrive, and a
+    // fraction baked in here would point somewhere else the moment it did.
     vTexCoord = texcoord + vec2((0 != (corner & 1)) ? texBox.x : 0.0,
                                 (0 != (corner & 2)) ? texBox.y : 0.0);
     vLayer = lwh.x;

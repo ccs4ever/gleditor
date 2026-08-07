@@ -126,18 +126,32 @@ template <> struct std::hash<FontMapKeyAdapter> {
  *
  * GlyphCache uses Pango/Cairo to rasterize text for a given Pango::Font,
  * converts the result to single-channel coverage, and packs it into a layered
- * texture via GlyphPalette. The put() API returns normalized texture
- * coordinates and pixel dimensions for rendering.
+ * texture via GlyphPalette. The put() API returns texture coordinates, in
+ * texels, and pixel dimensions for rendering.
+ *
+ * The atlas is allocated small and grown on demand: a layer is doubled until
+ * the hardware will not take a larger one, and only then are layers added,
+ * because doubling a layer buys four times the room where a second layer buys
+ * two. Nothing already packed moves when it grows, which is what lets the
+ * coordinates already written into a page's vertex buffer stay correct.
  */
 class GlyphCache : public Loggable {
 public:
   /**
    * @brief Return values for a cached glyph.
-   * texCoords are normalized UVs within the device texture array; dims are the
-   * pixel rectangle sizes used for placement and rendering calculations.
+   * texCoords locate the glyph in its layer, in texels; dims are the pixel
+   * rectangle sizes used for placement and rendering calculations.
    */
   struct Sizes {
-    TextureCoords texCoords; ///< Normalized UVs within the texture layer.
+    /**
+     * @brief Where the glyph sits in its layer, in texels.
+     *
+     * Texels rather than a fraction of the texture because the atlas grows:
+     * a fraction would move every glyph already named by a page's vertex
+     * buffer the moment it did. The shader divides by the texture's own size
+     * when it samples.
+     */
+    TextureCoords texCoords;
     Rect dims;               ///< Pixel dimensions of the rasterized glyph.
     int layer{};             ///< Array texture layer holding the glyph.
     /**
@@ -155,6 +169,16 @@ public:
    * @param aDevice Device used to size and upload the atlas. Not owned; must
    *        outlive the cache.
    */
+  /**
+   * @brief Layers the atlas may grow to, whatever the hardware allows.
+   *
+   * The layer index reaches the shader in six bits of
+   * Doc::VBORow::layerWidthHeight, so the encoding is the binding limit and not
+   * the driver -- lavapipe reports two thousand layers. doc.cpp asserts that
+   * this and the packing agree, since neither header can see the other.
+   */
+  static constexpr int maxEncodableLayers = 64;
+
   explicit GlyphCache(render::RenderDevice *aDevice);
   ~GlyphCache() override;
 
@@ -172,13 +196,22 @@ public:
    *            character with its combining marks -- rasterised as a unit so
    *            that what is drawn matches what Pango shaped.
    * @param font Loaded Pango font to use for rasterization.
-   * @return Sizes with UVs and pixel dimensions.
+   * @return Sizes with texel coordinates and pixel dimensions.
    * @throws std::invalid_argument if the cluster exceeds maxClusterBytes.
    */
   Sizes put(const std::string_view &chr, const FontPtr &font);
 
   /// Handle of the array texture holding every cached glyph.
   [[nodiscard]] render::TextureHandle textureHandle() const { return texture; }
+
+  /// Side length of each atlas layer as it stands. Grows as glyphs arrive.
+  [[nodiscard]] int atlasSize() const { return size; }
+  /// Array layers allocated as it stands. Grows once the side length cannot.
+  [[nodiscard]] int atlasLayers() const { return layerCount; }
+  /// Ceilings growth stops at: the hardware's, narrowed by what a vertex can
+  /// name.
+  [[nodiscard]] int atlasMaxSize() const { return maxSize; }
+  [[nodiscard]] int atlasMaxLayers() const { return maxLayers; }
 
   /**
    * @brief Rebuild the atlas mip chain if any glyph has been added since the
@@ -193,12 +226,47 @@ public:
 
 private:
   std::vector<GlyphPalette> palettes; ///< Palette layers used for packing.
+
+  /**
+   * @brief One glyph as it sits in the atlas, kept so a larger atlas can be
+   *        refilled exactly as the old one was.
+   *
+   * Growing means a new texture object: array textures cannot gain layers and
+   * 2D textures cannot gain pixels. Every glyph therefore has to be written
+   * again, and it has to land on the same texel it was on, because the texture
+   * coordinates naming it are already sitting in the vertex buffer of every
+   * page that drew it.
+   *
+   * The coverage is the padded bitmap, the same bytes that were uploaded. That
+   * is the memory price of being able to grow: bounded by the atlas itself,
+   * since a glyph is only kept here once it has been packed into one.
+   */
+  struct Placement {
+    int layer{};
+    int x{};
+    int y{};
+    int width{};
+    int height{};
+    std::vector<std::byte> coverage;
+  };
+  std::vector<Placement> placements;
+
+  /// Reallocate the atlas at @p newSize / @p newLayers and put every glyph back
+  /// where it was.
+  void reallocate(int newSize, int newLayers);
+  /// Make room for a padded glyph box, growing the atlas if that is what it
+  /// takes. Throws when neither the size nor the layer count can grow further.
+  void makeRoomFor(const Rect &padded);
   std::unordered_map<std::string, std::unordered_map<FontMapKeyAdapter, Sizes>,
                      transparent_string_hash, std::equal_to<>>
       glyphs; ///< Map: character string -> (font -> cached sizes).
   render::RenderDevice *device;   ///< Device the atlas lives on.
   render::TextureHandle texture{}; ///< Array texture holding the glyph atlas.
-  int size{}, maxLayers{};        ///< Texture side length and max array layers.
+  int size{};      ///< Current side length of each atlas layer.
+  int layerCount{}; ///< Array layers currently allocated.
+  /// Ceilings growth stops at: what the hardware reports, narrowed by what the
+  /// vertex encoding can address.
+  int maxSize{}, maxLayers{};
   /// A glyph has been written to level zero since the mip chain was last built.
   bool atlasDirty{};
 
