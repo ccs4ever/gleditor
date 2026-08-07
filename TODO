@@ -1,9 +1,10 @@
-* Cull pages outside the view before drawing them. Every page of a document is
-  drawn every frame: --benchmark on the 4.6 MB sample submits 1152 page draws
-  and 4.6 million quads for a window showing two or three pages, and the frame
-  time is almost entirely those quads being rasterised. This is the largest
-  optimisation the benchmark points at, and it would shrink the recording cost
-  by the same factor as a side effect.
+* Mipmap the glyph atlas. The detailed path point-samples it, so a page drawn
+  much smaller than its glyphs shimmers and reads darker than the text really
+  is -- measurably so: swept across fields of view, the same page rendered
+  detailed and coarse differ by 8 levels of brightness at 0.03 screen pixels
+  per layout pixel and by 0.4 at 0.24. The coarse path sidesteps this rather
+  than fixing it, and only for text: page backgrounds and the caret still
+  alias.
 * Replace logo.png with something cooler
 * port over the gleditor code, enable glyph by glyph creation
 * document everything

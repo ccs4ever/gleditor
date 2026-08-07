@@ -140,6 +140,15 @@ public:
     TextureCoords texCoords; ///< Normalized UVs within the texture layer.
     Rect dims;               ///< Pixel dimensions of the rasterized glyph.
     int layer{};             ///< Array texture layer holding the glyph.
+    /**
+     * @brief Mean coverage over the glyph's box, 0 for blank and 1 for solid.
+     *
+     * How much of its own box the glyph actually inks. Free to compute -- the
+     * coverage bitmap is already in hand when the glyph is rasterised -- and it
+     * is what lets a line of text be replaced by a bar of the right darkness
+     * without anything being assumed about the typeface.
+     */
+    float ink{};
   };
   /**
    * @brief Construct the glyph cache and allocate its device array texture.

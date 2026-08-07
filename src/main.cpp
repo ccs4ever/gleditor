@@ -150,6 +150,18 @@ RendererRef handleArgs(const AppStateRef &state, render::Backend &backend,
   parser.add_argument("--profile")
       .help("perform initial setup, then quit")
       .flag();
+  parser.add_argument("--fov")
+      .default_value(std::string{"5"})
+      .help("initial vertical field of view in degrees; widening it is how a "
+            "headless run sees many pages at once, and small ones");
+  parser.add_argument("--no-cull")
+      .help("draw every page of every document, including those entirely "
+            "outside the view")
+      .flag();
+  parser.add_argument("--coarse-below")
+      .default_value(std::string{"0.15"})
+      .help("draw a page as one solid bar per line once one layout pixel of it "
+            "covers fewer than this many screen pixels; 0 always draws glyphs");
   parser.add_argument("--benchmark")
       .default_value(std::string{"0"})
       .help("draw N frames once the document has settled, report how long "
@@ -215,6 +227,12 @@ RendererRef handleArgs(const AppStateRef &state, render::Backend &backend,
     state->profiling         = parser["--profile"] == true;
     state->benchmarkFrames =
         std::stoul(parser.get<std::string>("--benchmark"));
+    state->cullPages   = parser["--no-cull"] == false;
+    {
+      const std::lock_guard locker(state->view);
+      state->view.fov = std::stof(parser.get<std::string>("--fov"));
+    }
+    state->coarseBelow = std::stof(parser.get<std::string>("--coarse-below"));
     state->screenshotPath    = parser.get<std::string>("--screenshot");
     state->strictDiagnostics = parser["--strict-diagnostics"] == true;
 
