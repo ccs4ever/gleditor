@@ -54,9 +54,14 @@ $(error $(SDL_PKG) not found by pkg-config; install it or set GLEDITOR_SDL to th
 endif
 
 # The GL/GLES entry points are resolved at runtime through SDL rather than
-# linked, so no GL library is needed here; `gl` is still listed because the
-# backend includes GL/glcorearb.h for its typedefs and enum values.
-PKGS := pangomm-2.48 $(SDL_PKG) gl
+# linked, so no GL library is needed here; `gl` is only wanted for the include
+# path to GL/glcorearb.h, which the backend reads for its typedefs and enum
+# values. MinGW has no gl.pc at all and puts those headers where the compiler
+# already looks, so this is used when pkg-config knows it and skipped when not.
+PKGS := pangomm-2.48 $(SDL_PKG)
+ifeq ($(shell pkg-config --exists gl && echo 1),1)
+PKGS += gl
+endif
 ifdef GLEDITOR_ENABLE_VULKAN
 PKGS += vulkan
 endif
@@ -159,7 +164,9 @@ endif
 #CXXFLAGS += -stdlib=libc++ -fexperimental-library 
 #LDFLAGS += -v -stdlib=libc++ -fexperimental-library 
 LIBS := $(shell pkg-config $(STATIC) --libs $(PKGS))
-GLSLANG := $(shell which glslangValidator 2>/dev/null)
+# glslangValidator is the traditional name and glslang the current one; which
+# of the two a distribution installs varies, and Fedora ships only the latter.
+GLSLANG := $(shell which glslangValidator 2>/dev/null || which glslang 2>/dev/null)
 # The Vulkan backend only compiles when Vulkan is enabled; everything else is
 # backend-neutral or belongs to the GL family backend.
 VK_SRCS := $(shell find src/render/vulkan -name '*.cpp' 2>/dev/null)
@@ -255,7 +262,7 @@ $(OBJDIR)/shader_assemble: tools/shader_assemble.cpp src/render/shader_source.cp
 	$(CXX) $(CXXFLAGS) -o $@ $^
 
 assets/shaders/vulkan/%.spv: assets/shaders/%.glsl $(OBJDIR)/shader_assemble
-	@[ -n "$(GLSLANG)" ] || { echo "glslangValidator not found; install glslang-tools" >&2; exit 1; }
+	@[ -n "$(GLSLANG)" ] || { echo "neither glslangValidator nor glslang found on PATH; install glslang-tools (Debian) or glslang (Fedora, Arch)" >&2; exit 1; }
 	@$(MKDIR) -p assets/shaders/vulkan $(OBJDIR)/shaders
 	$(OBJDIR)/shader_assemble vulkan $(word 2,$(subst ., ,$(notdir $<))) $< $(OBJDIR)/shaders/$(notdir $<)
 	$(GLSLANG) -V --target-env vulkan1.0 -S $(word 2,$(subst ., ,$(notdir $<))) $(OBJDIR)/shaders/$(notdir $<) -o $@
