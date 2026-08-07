@@ -206,6 +206,81 @@ echo "all backends agree"
 # a machine where it is not, the threaded path would never run. Naming a thread
 # count takes the decision away from it, which is what makes both paths
 # reachable on demand.
+# Culling decides not to draw things. The only way to be sure it decided
+# correctly is to draw them anyway and compare: the two frames must be identical
+# to the byte, on every backend, because everything skipped was outside the view.
+echo "comparing culled frames against unculled ones"
+for backend in $backends; do
+  "$BIN" --backend "$backend" --profile $STRICT --no-cull \
+      --screenshot "$OUT/$backend.nocull.ppm" "$SAMPLE" \
+      >"$OUT/$backend.nocull.log" 2>&1 ||
+    { echo "FAIL: $backend unculled run exited non-zero"
+      tail -20 "$OUT/$backend.nocull.log"; exit 1; }
+  if cmp -s "$OUT/$backend.ppm" "$OUT/$backend.nocull.ppm"; then
+    echo "ok: $backend culling changed no pixels"
+  else
+    echo "FAIL: $backend culling changed the frame"
+    exit 1
+  fi
+done
+
+# The coarse path replaces a page's glyphs with one solid bar per line, so the
+# frames are meant to differ -- what must not differ is how bright the page is,
+# since a bar too dark or too light makes the switch visible as the camera
+# crosses it. Compared over the pixels the pages cover: most of a zoomed-out
+# frame is empty space, which would dilute the difference into invisibility.
+#
+# Measured just either side of the switch, at a field of view that puts a layout
+# pixel a little under the threshold, rather than as far out as the coarse path
+# ever runs. Further out the comparison stops meaning anything: the detailed
+# path has no mipmaps, so under heavy minification it point-samples the atlas
+# and its brightness becomes an artefact of where the samples land. Swept across
+# fields of view on the short sample, the difference between the two paths ran
+# +8.4 levels at 0.03 screen pixels per layout pixel, +1.0 at 0.06, +1.9 at 0.13
+# and -0.4 at 0.24 -- converging as the detailed path becomes trustworthy, which
+# is what says the coarse path is the one telling the truth out there.
+COARSE_FOV=15
+echo "comparing the coarse text path against the detailed one"
+for detail in 0 999; do
+  "$BIN" --backend opengl --profile $STRICT --fov "$COARSE_FOV" \
+      --coarse-below "$detail" --screenshot "$OUT/coarse$detail.ppm" "$SAMPLE" \
+      >"$OUT/coarse$detail.log" 2>&1 ||
+    { echo "FAIL: coarse-below $detail run exited non-zero"
+      tail -20 "$OUT/coarse$detail.log"; exit 1; }
+done
+
+OUT="$OUT" python3 - <<'PYEOF'
+import os, sys
+
+out = os.environ["OUT"]
+
+def load(path):
+    data = open(path, "rb").read()
+    return data[data.index(b"255\n") + 4:]
+
+fine   = load(f"{out}/coarse0.ppm")
+coarse = load(f"{out}/coarse999.ppm")
+if len(fine) != len(coarse):
+    sys.exit("FAIL: the two coarse-path frames are different sizes")
+
+# The scene clears to black, so the pages are exactly the non-black pixels.
+paper = [(a, b) for a, b in zip(fine, coarse) if a or b]
+if not paper:
+    sys.exit("FAIL: neither frame drew anything")
+
+meanFine   = sum(a for a, _ in paper) / len(paper)
+meanCoarse = sum(b for _, b in paper) / len(paper)
+delta = abs(meanCoarse - meanFine)
+# Two and a half levels out of 255. Tight enough to catch a bar shade that
+# drifted with a font change, loose enough to absorb what is left of the
+# detailed path's aliasing at the switch point.
+limit = 2.5
+status = "ok" if delta <= limit else "FAIL"
+print(f"{status}: coarse page brightness {meanCoarse:.1f} against detailed "
+      f"{meanFine:.1f}, delta {delta:.2f} (limit {limit})")
+sys.exit(0 if delta <= limit else 1)
+PYEOF
+
 if echo "$backends" | grep -q vulkan; then
   echo "comparing threaded against single-threaded recording"
   for threads in 4 1; do

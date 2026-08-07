@@ -1,5 +1,6 @@
 #include <algorithm>                   // for min, max
-#include <cmath>                       // for ceil
+#include <cmath>                       // for ceil, lround
+#include <limits>
 #include <cstddef>                     // for byte
 #include <format>                      // for format
 #include <gleditor/doc.hpp>            // IWYU pragma: associated
@@ -58,7 +59,27 @@ constexpr std::uint32_t initialPoolRows = 1U << 16U;
 /// Margin in layout pixels between the page edge and its text.
 constexpr float pageMargin = 24.0F;
 
+/// How far in front of the page background its glyphs and bars sit, in the
+/// same layout-pixel space. Small enough to be a depth tie-break rather than a
+/// visible offset, and part of the box the frustum test uses.
+constexpr float glyphDepth = 0.1F;
 
+/**
+ * @brief Shade a line's bar takes, given how much of its ink box the glyphs
+ *        cover.
+ *
+ * White paper darkened in proportion to the ink it would have carried. Nothing
+ * here is tuned: the coverage comes from the glyph boxes the detailed path
+ * places and from the mean coverage the glyph cache measured when it rasterised
+ * each cluster, so a change of font or size carries through on its own. Two
+ * earlier attempts did have a constant in them -- a flat shade, then a flat
+ * assumption about how much of its box a glyph inks -- and each was tuned right
+ * on one sample and ten to forty levels out on the other.
+ */
+unsigned char greekedShade(const float coverage) {
+  const auto inked = coverage < 0.0F ? 0.0F : std::min(1.0F, coverage);
+  return static_cast<unsigned char>(std::lround(255.0F * (1.0F - inked)));
+}
 
 /// Convert Pango units to pixels.
 double toPixels(const int pangoUnits) {
@@ -132,8 +153,8 @@ Page::Page(std::shared_ptr<Doc> aDoc, RenderState &state, glm::mat4 &model,
   int textWidthPx  = 0;
   int textHeightPx = 0;
   layout->get_pixel_size(textWidthPx, textHeightPx);
-  const auto pageWidth  = static_cast<float>(textWidthPx) + (2 * pageMargin);
-  const auto pageHeight = static_cast<float>(textHeightPx) + (2 * pageMargin);
+  pageWidth  = static_cast<float>(textWidthPx) + (2 * pageMargin);
+  pageHeight = static_cast<float>(textHeightPx) + (2 * pageMargin);
 
   // The page is centred on its own origin, so that the model matrix placing it
   // in the scene positions its middle rather than its top left corner. Kept as
@@ -141,20 +162,34 @@ Page::Page(std::shared_ptr<Doc> aDoc, RenderState &state, glm::mat4 &model,
   originX = -pageWidth / 2.0F;
   originY = pageHeight / 2.0F;
 
-  // Row 0 is the page background; the glyphs follow it. Every row is one
-  // instance of the glyph quad.
+  // The page's own tag, shared by its background and by the solid bars that
+  // stand in for its text at a distance: at that size there is no character
+  // under the cursor to name, so a click resolves to the start of the page,
+  // which is what a page-kind tag already means.
+  const std::array<unsigned int, 2> pageTag = {
+      render::packTagIdentity(render::tagKindPage, this->doc->documentIndex(),
+                              aPageIndex),
+      0};
+
+  // The allocation holds two draws back to back: the full-detail one -- page
+  // background followed by a glyph per cluster -- and then the coarse one,
+  // which repeats the background and follows it with a solid bar per line.
+  // Repeating the background costs one row and is what lets either draw be
+  // aimed at with a byte offset and a count, with no second allocation and no
+  // stitching of two ranges.
   std::vector<Doc::VBORow> vertexData;
-  vertexData.push_back(Doc::VBORow{
-      {0.0F, 0.0F, 0.0F},
-      color(255),
-      color(255),
-      {0, 0},
-      {0, 0},
-      layerWH(0, std::min(16383U, static_cast<unsigned int>(pageWidth)),
-              std::min(16383U, static_cast<unsigned int>(pageHeight))),
-      {render::packTagIdentity(render::tagKindPage, this->doc->documentIndex(),
-                               aPageIndex),
-       0}});
+  const auto pushBackground = [&] {
+    vertexData.push_back(Doc::VBORow{
+        {0.0F, 0.0F, 0.0F},
+        color(255),
+        color(255),
+        {0, 0},
+        {0, 0},
+        layerWH(0, std::min(16383U, static_cast<unsigned int>(pageWidth)),
+                std::min(16383U, static_cast<unsigned int>(pageHeight))),
+        pageTag});
+  };
+  pushBackground();
 
   const auto text = layout->get_text().raw();
   const auto font =
@@ -170,6 +205,24 @@ Page::Page(std::shared_ptr<Doc> aDoc, RenderState &state, glm::mat4 &model,
   const auto limit     = std::min<std::size_t>(
       text.size(), static_cast<std::size_t>(lastLine->get_start_index() +
                                                 (0 == lastLen ? 1 : lastLen)));
+
+  // Glyph box area per line, accumulated as the clusters are placed. This is
+  // what tells the coarse path how full each line is, so that its bar is as
+  // dark as the glyphs it stands in for without anything having to be assumed
+  // about the text.
+  std::vector<float> lineInk(
+      static_cast<std::size_t>(std::max(0, layout->get_line_count())), 0.0F);
+  std::size_t lineOfCluster = 0;
+  // Byte at which the next line begins, so the running cluster offset can be
+  // attributed to a line without searching. Clusters arrive in text order.
+  const auto lineStartAt = [&layout](const std::size_t index) {
+    const auto &line = layout->get_const_line(static_cast<int>(index));
+    return line ? static_cast<std::size_t>(line->get_start_index())
+                : std::numeric_limits<std::size_t>::max();
+  };
+  auto nextLineStart = lineInk.size() > 1
+                           ? lineStartAt(1)
+                           : std::numeric_limits<std::size_t>::max();
 
   // Walk the clusters. A cluster is the smallest run Pango will not break
   // apart, so it is what one quad can represent: an "ffi" ligature or a letter
@@ -237,7 +290,17 @@ Page::Page(std::shared_ptr<Doc> aDoc, RenderState &state, glm::mat4 &model,
     const auto glyphWidth  = static_cast<float>(static_cast<int>(extents.width));
     const auto glyphHeight = static_cast<float>(static_cast<int>(extents.height));
 
+    while (start >= nextLineStart && lineOfCluster + 1 < lineInk.size()) {
+      lineOfCluster++;
+      nextLineStart = lineOfCluster + 1 < lineInk.size()
+                          ? lineStartAt(lineOfCluster + 1)
+                          : std::numeric_limits<std::size_t>::max();
+    }
+
     if (0.0F < glyphWidth && 0.0F < glyphHeight) {
+      if (lineOfCluster < lineInk.size()) {
+        lineInk[lineOfCluster] += glyphWidth * glyphHeight * glyph.ink;
+      }
       // Pango measures from the top left of the text block downwards; the page
       // runs upwards from its own origin, hence the negated Y.
       const auto left =
@@ -268,9 +331,72 @@ Page::Page(std::shared_ptr<Doc> aDoc, RenderState &state, glm::mat4 &model,
     }
   }
 
-  textBytes     = static_cast<std::uint32_t>(limit);
-  instanceCount = static_cast<std::uint32_t>(vertexData.size());
-  pageBacking   = this->doc->pool->reserve(instanceCount);
+  textBytes      = static_cast<std::uint32_t>(limit);
+  detailInstances = static_cast<std::uint32_t>(vertexData.size());
+
+  // The coarse draw. One quad per line, covering the line's ink box -- the box
+  // the glyphs actually mark, not the logical box, which runs to the wrapping
+  // width whether or not there is text out there. At the size this is used at
+  // a line is a few pixels tall and its glyphs are indistinguishable anyway,
+  // so what matters is that the bar sits where the text sits and is about as
+  // dark.
+  pushBackground();
+  {
+    auto lineIter = layout->get_iter();
+    std::size_t lineIndex = 0;
+    do {
+      const auto &line = layout->get_const_line(static_cast<int>(lineIndex));
+      // Lines past what this page consumes belong to the next page; the layout
+      // is handed the rest of the document and bounded by height, so it has
+      // them and the page must not draw them.
+      if (!line || static_cast<std::size_t>(line->get_start_index()) >= limit) {
+        break;
+      }
+      const auto inkArea =
+          lineIndex < lineInk.size() ? lineInk[lineIndex] : 0.0F;
+      lineIndex++;
+
+      Pango::Rectangle ink;
+      Pango::Rectangle logical;
+      lineIter.get_line_extents(ink, logical);
+
+      const auto barWidth  = static_cast<float>(toPixels(ink.get_width()));
+      const auto barHeight = static_cast<float>(toPixels(ink.get_height()));
+      // A blank line has no ink and needs no bar.
+      if (0.0F >= barWidth || 0.0F >= barHeight) {
+        continue;
+      }
+      const auto left = pageMargin + static_cast<float>(toPixels(ink.get_x()));
+      const auto top  = pageMargin + static_cast<float>(toPixels(ink.get_y()));
+
+      // Foreground and background the same colour, so the atlas sample the
+      // fragment stage takes cannot change the result: the quad is solid
+      // whatever texture coordinate it carries. That is what lets the coarse
+      // path share the glyph pipeline instead of needing one of its own.
+      const auto shade = greekedShade(inkArea / (barWidth * barHeight));
+      vertexData.push_back(Doc::VBORow{
+          {originX + left + (barWidth / 2.0F),
+           originY - (top + (barHeight / 2.0F)), 0.1F},
+          color(shade),
+          color(shade),
+          {0, 0},
+          {0, 0},
+          layerWH(0, std::min(16383U, static_cast<unsigned int>(barWidth)),
+                  std::min(16383U, static_cast<unsigned int>(barHeight))),
+          pageTag});
+    } while (lineIter.next_line());
+  }
+  coarseInstances =
+      static_cast<std::uint32_t>(vertexData.size()) - detailInstances;
+  // A page with no lines to bar would draw its background alone, which is not
+  // what the page looks like; fall back to the detailed draw instead.
+  if (1 >= coarseInstances) {
+    vertexData.resize(detailInstances);
+    coarseInstances = 0;
+  }
+
+  pageBacking = this->doc->pool->reserve(
+      static_cast<std::uint32_t>(vertexData.size()));
   this->doc->pool->write(pageBacking, 0, asBytes(vertexData));
 }
 
@@ -331,21 +457,49 @@ Page::offsetForCluster(const std::uint32_t clusterIndex,
 
 // Always called from the render thread
 void Page::collect(std::vector<render::GlyphBatch> &batches,
-                   const glm::mat4 &docTransform) const {
-  if (0 == instanceCount) {
+                   const glm::mat4 &docTransform, const DrawBudget &budget,
+                   DrawStats &stats) const {
+  if (0 == detailInstances) {
     return;
   }
+  stats.pages++;
+
+  const auto mvp = docTransform * model;
+  // The page is flat: a rectangle in x and y, with the glyphs sitting just in
+  // front of the background in z.
+  if (budget.cull &&
+      outsideFrustum(mvp, pageWidth / 2.0F, pageHeight / 2.0F, glyphDepth)) {
+    stats.culled++;
+    return;
+  }
+
+  const bool coarse = 0 != coarseInstances &&
+                      screenScaleAt(mvp, budget.screenWidth) <
+                          budget.coarseBelow;
+  if (coarse) {
+    stats.coarse++;
+  } else {
+    stats.detailed++;
+  }
+
+  // Both draws live in the one allocation, the coarse one straight after the
+  // detailed one, so choosing between them is a matter of where the draw
+  // starts and how many instances it covers.
+  const auto first = coarse ? detailInstances : 0U;
+  const auto count = coarse ? coarseInstances : detailInstances;
   batches.push_back(render::GlyphBatch{
-      render::DrawUniforms{toArray(docTransform * model)}, doc->pool->buffer(),
-      doc->pool->byteOffset(pageBacking), instanceCount});
+      render::DrawUniforms{toArray(mvp)}, doc->pool->buffer(),
+      doc->pool->byteOffset(pageBacking) + (first * sizeof(Doc::VBORow)),
+      count});
 }
 
 // Always called from the render thread
 void Doc::collect(std::vector<render::GlyphBatch> &batches,
-                  const glm::mat4 &viewProjection) const {
+                  const glm::mat4 &viewProjection, const DrawBudget &budget,
+                  DrawStats &stats) const {
   const auto docTransform = viewProjection * model;
   for (const auto &page : pages) {
-    page.collect(batches, docTransform);
+    page.collect(batches, docTransform, budget, stats);
   }
 }
 

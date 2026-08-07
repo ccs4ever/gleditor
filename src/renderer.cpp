@@ -165,8 +165,13 @@ bool Renderer::update(RenderState &state, const bool settled) {
   // thread; a device that cannot simply walks it in order.
   const auto collectStart = std::chrono::steady_clock::now();
   state.pageBatches.clear();
+  DrawBudget budget;
+  budget.screenWidth = static_cast<float>(screenWidth);
+  budget.coarseBelow = this->state->coarseBelow;
+  budget.cull        = this->state->cullPages;
+  lastDraw           = DrawStats{};
   for (const std::shared_ptr<Doc> &doc : state.docs) {
-    doc->collect(state.pageBatches, viewProjection);
+    doc->collect(state.pageBatches, viewProjection, budget, lastDraw);
   }
   // Timed apart from the collection above: only the recording can be split
   // across threads, so an improvement there would be invisible in a figure
@@ -276,6 +281,9 @@ void Renderer::reportBenchmark() const {
       benchFrame.size(), benchBatches, median(benchFrame), median(benchCollect),
       median(benchRecord), caps.parallelCommandRecording ? "yes" : "no",
       caps.recordingThreads);
+  std::cout << std::format(
+      "pages: {} considered, {} culled, {} coarse, {} detailed\n",
+      lastDraw.pages, lastDraw.culled, lastDraw.coarse, lastDraw.detailed);
 }
 
 void Renderer::placeCaretFromPick(RenderState &state,

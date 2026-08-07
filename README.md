@@ -158,6 +158,76 @@ on screen. Culling pages outside the view would cut both columns by about two
 orders of magnitude, and is the optimisation this measurement most clearly
 points at -- see TODO.
 
+### Drawing less: culling, and text too small to read
+
+Two decisions are made per page before anything is submitted, both in
+`Page::collect()`, because both need to know what the page is rather than what
+the draw is.
+
+**A page outside the view is not drawn.** Its box is transformed by the page's
+own MVP and rejected when all eight corners fall outside the same clip plane.
+The comparisons are made in clip space, before the perspective divide, so a page
+behind the camera needs no special case -- dividing by a negative `w` is exactly
+what would flip a sign and cull something visible. The test is conservative: a
+page straddling the edge of the screen is kept, costing a draw rather than a
+frame with a page missing from it. Only the four side planes are tested; the
+depth range is the one thing the backends disagree on (OpenGL clips to `[-w, w]`,
+Vulkan to `[0, w]`) and a document is spread sideways and downwards rather than
+in depth.
+
+**A page too small on screen is drawn as one solid bar per line.** The decision
+is made from how big the page lands, not from how far away it is: distance says
+nothing without the field of view and the size of the drawable, so
+`screenScaleAt()` reads the projected size of one layout pixel straight off the
+transform. Below `--coarse-below` screen pixels per layout pixel -- 0.15 by
+default, about three pixels of glyph -- the page draws its coarse rows instead.
+
+Those rows live in the same allocation, straight after the detailed ones, so
+choosing between them is a byte offset and a count and there is no second buffer
+to keep in step. They also share the glyph pipeline: a bar is a quad whose
+foreground and background are the same colour, which makes the atlas sample the
+fragment stage takes irrelevant.
+
+How dark a bar should be is the only interesting part, and it is derived rather
+than tuned. Two earlier attempts had a constant in them -- first a flat shade,
+then a flat assumption about how much of its box a glyph inks -- and each was
+right on one sample and 10 to 40 levels of brightness out on the other, because
+their lines are not equally full. What the code does now is take the glyph boxes
+the detailed path already places and the mean coverage the glyph cache measured
+when it rasterised each cluster, and darken white paper in proportion. Nothing
+is assumed about the typeface, and a font change carries through on its own.
+
+**What it costs and what it saves.** On the 4.6 MB sample under lavapipe:
+
+| | page draws | median frame |
+| --- | --- | --- |
+| one document, every page | 1152 | 962 ms |
+| one document, culled | 1 | 14 ms |
+| three documents, every page | 3456 | 2657 ms |
+| three documents, culled | 2 | 15 ms |
+
+The last row is the one that matters: with culling, what a frame costs stops
+tracking how much is open and starts tracking how much is on screen, which is
+the only quantity bounded by the window.
+
+Widening the view until several pages are on screen at once is what exercises
+the coarse path; at `--fov 60` the same document culls to 7 pages, and those 7
+cost 18.0 ms drawn as glyphs against 4.6 ms drawn as bars.
+
+**Occlusion queries would add nothing here, and were not used.** They answer
+"is this hidden behind something already drawn", and after frustum culling there
+is nothing left to hide behind anything: the 7 surviving pages are stacked with
+gaps and overlap neither each other nor the pages of a document alongside. A
+query would also cost a round trip -- the answer arrives a frame or two later,
+the same latency the picking readback has -- for pages that are already down to
+a handful. Frustum culling is what the geometry here rewards.
+
+Both are checked rather than asserted, by `tools/compare-backends.sh`. Culling
+is checked by rendering the same document with `--no-cull` and requiring the two
+frames to be identical to the byte, on every backend. The coarse path is checked
+by comparing the average brightness of the pages between the two paths, which is
+what would give the switch away as the camera crosses it.
+
 ### Driver diagnostics
 
 Both APIs report problems through a C function pointer the driver calls on its
@@ -458,6 +528,12 @@ Command-line options (from `argparse` in `src/main.cpp`):
 - `--type TEXT`       insert TEXT at the caret once it has been placed
 - `--select START,END`  select that document byte range once the document has
   settled, as a drag would
+- `--fov DEGREES`     initial vertical field of view; widening it is how a
+  headless run sees many pages at once, and small ones
+- `--no-cull`         draw every page of every document, including the ones
+  entirely outside the view. The frame must come out identical
+- `--coarse-below N`  draw a page as one solid bar per line once one layout
+  pixel of it covers fewer than N screen pixels; `0` always draws glyphs
 - `--benchmark N`     draw N frames once the document has settled, report how
   long they took, and exit
 - `--strict-diagnostics`  treat a driver error as fatal instead of showing it

@@ -38,6 +38,21 @@ struct AppState {
   std::vector<std::pair<render::DiagnosticSeverity, std::string>>
       requestedToasts;
   bool profiling{};
+  /**
+   * @brief Screen pixels per layout pixel below which a page is drawn as one
+   *        solid bar per line rather than one quad per glyph.
+   *
+   * A glyph of this font stands around twenty layout pixels tall, so this is
+   * about three screen pixels of glyph -- well past the point where the shapes
+   * carry any information and comfortably below the default view, which gives a
+   * glyph roughly eight. Zero draws every visible page in full detail, which is
+   * what makes the two paths comparable.
+   */
+  float coarseBelow{0.15F};
+  /// Whether pages outside the view are skipped. Off draws every page of every
+  /// document, which is how the culled frame is checked against the unculled
+  /// one.
+  bool cullPages{true};
   /// Frames to draw, and time, once the document has settled, before quitting.
   /// Zero disables the measurement. Only settled frames are counted: a frame
   /// drawn while pages are still being built is measuring the loader, not the

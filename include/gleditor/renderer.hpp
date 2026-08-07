@@ -20,6 +20,7 @@
 // in every translation unit that builds a renderer. The header names no
 // graphics API, so this costs nothing in coupling.
 #include <gleditor/caret.hpp>
+#include <gleditor/draw_budget.hpp>
 #include <gleditor/render/device.hpp>
 #include <gleditor/render/types.hpp>
 #include <gleditor/state.hpp>
@@ -196,6 +197,10 @@ private:
   /// Page draws the last measured frame submitted, reported alongside the
   /// timings: a recording cost means nothing without the number of draws.
   std::size_t benchBatches{};
+  /// What the last frame's collection decided: how many pages it considered,
+  /// skipped as off screen, and drew coarsely. Reported by --benchmark, since
+  /// culling that is not counted is culling nobody can check.
+  DrawStats lastDraw{};
   /// Print the gathered timings. Reports the median rather than the mean: a
   /// software rasteriser under a virtual display produces occasional
   /// hundred-millisecond frames that no amount of averaging removes.

@@ -11,7 +11,8 @@
 #include <cairomm/context.h>               // for Context
 #include <cairomm/surface.h>               // for ImageSurface, Surface
 #include <cstddef>                         // for byte
-#include <format>                          // for format
+#include <format>
+#include <numeric>                          // for format
 #include <gleditor/glyphcache/palette.hpp> // for GlyphPalette, operator<=>
 #include <gleditor/glyphcache/types.hpp>   // for TextureCoords, Rect
 #include <gleditor/render/device.hpp>      // for RenderDevice
@@ -164,7 +165,7 @@ GlyphCache::Sizes GlyphCache::addToCache(const std::string &chr,
   // A zero-area cluster -- an isolated newline, for instance -- has nothing to
   // rasterize, but still needs an entry so the caller can advance the pen.
   if (0 == width || 0 == height) {
-    const auto empty = Sizes{TextureCoords{}, extents, 0};
+    const auto empty = Sizes{TextureCoords{}, extents, 0, 0.0F};
     glyphs[chr][FontMapKeyAdapter(font)] = empty;
     return empty;
   }
@@ -199,7 +200,17 @@ GlyphCache::Sizes GlyphCache::addToCache(const std::string &chr,
     throw std::overflow_error(
         std::format("GlyphCache: failed to place glyph: {}", chr));
   }
-  const auto sizes = Sizes{placed.value(), extents, palette->layerIndex()};
+  // Mean coverage over the box, taken from the bitmap that was just
+  // rasterised. One pass over data already in cache, once per distinct cluster.
+  const auto inked =
+      std::accumulate(coverage.begin(), coverage.end(), 0.0,
+                      [](const double sum, const std::byte value) {
+                        return sum + static_cast<double>(std::to_integer<int>(value));
+                      }) /
+      (255.0 * static_cast<double>(coverage.size()));
+
+  const auto sizes = Sizes{placed.value(), extents, palette->layerIndex(),
+                           static_cast<float>(inked)};
   glyphs[chr][FontMapKeyAdapter(font)] = sizes;
   return sizes;
 }

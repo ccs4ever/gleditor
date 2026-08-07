@@ -16,6 +16,7 @@
 #include <string>
 #include <vector>
 
+#include <gleditor/draw_budget.hpp>
 #include <gleditor/render/types.hpp>
 
 class Caret;
@@ -49,9 +50,22 @@ class Page : public Drawable {
 private:
   std::shared_ptr<Doc> doc;
   BufferPool::Allocation pageBacking{};
-  /// Glyph rows actually written, which is what gets drawn. One instance is
-  /// emitted per row.
-  std::uint32_t instanceCount{};
+  /**
+   * @brief Rows of the full-detail draw: the page background then one per
+   *        glyph.
+   *
+   * The allocation holds the coarse draw's rows straight after these, so both
+   * draws are a contiguous run and either can be aimed at with nothing but a
+   * byte offset and a count.
+   */
+  std::uint32_t detailInstances{};
+  /// Rows of the coarse draw: the page background again, then one solid bar
+  /// per line of text. Zero when the page has no lines worth drawing.
+  std::uint32_t coarseInstances{};
+  /// Page size in layout pixels, which is the space the vertex positions are
+  /// in. Kept for the frustum test.
+  float pageWidth{};
+  float pageHeight{};
   Glib::RefPtr<Pango::Layout> layout;
   /// Byte offset of this page's text within the whole document, so a picking
   /// result can name a position in the document rather than in the page.
@@ -72,15 +86,20 @@ public:
        Glib::RefPtr<Pango::Layout> aLayout, std::uint32_t aTextOffset,
        std::uint32_t aPageIndex);
   /**
-   * @brief Append this page's draw to @p batches.
+   * @brief Append this page's draw to @p batches, or decide it needs none.
    * @param docTransform projection * view * document model.
    *
    * Collected rather than issued so that the whole frame's page draws reach the
    * device in one call, which is what a backend needs in order to record them
-   * on more than one thread.
+   * on more than one thread. Two decisions are made here rather than by the
+   * device, because both need to know what the page is rather than what the
+   * draw is: a page entirely outside the view contributes nothing and is
+   * skipped, and a page too small on screen for its glyphs to be legible is
+   * drawn as one solid bar per line instead.
    */
   void collect(std::vector<render::GlyphBatch> &batches,
-               const glm::mat4 &docTransform) const;
+               const glm::mat4 &docTransform, const DrawBudget &budget,
+               DrawStats &stats) const;
 
   [[nodiscard]] std::uint32_t baseOffset() const { return textOffset; }
   [[nodiscard]] const std::vector<ClusterBox> &clusterBoxes() const {
@@ -258,11 +277,12 @@ public:
       const glm::mat4 &model, const std::string &fileName, Private);
   ~Doc() override = default;
   void makePages(RenderState &state);
-  /// Append every page's draw to @p batches.
+  /// Append every visible page's draw to @p batches.
   /// @param viewProjection projection * view; the document's own model matrix
   ///        is applied on top of it here.
   void collect(std::vector<render::GlyphBatch> &batches,
-               const glm::mat4 &viewProjection) const;
+               const glm::mat4 &viewProjection, const DrawBudget &budget,
+               DrawStats &stats) const;
   void newPage(RenderState &state, Glib::RefPtr<Pango::Layout> &layout,
                std::uint32_t textOffset);
 
