@@ -31,6 +31,7 @@
 #endif
 
 #include <cstdint>
+#include <string>
 
 #if GLEDITOR_SDL_MAJOR == 3
 
@@ -164,6 +165,37 @@ inline void stopTextInput([[maybe_unused]] SDL_Window *window) {
   SDL_StopTextInput(window);
 #else
   SDL_StopTextInput();
+#endif
+}
+
+/**
+ * @brief Directory the executable was loaded from, with a trailing separator,
+ *        or nullptr when SDL cannot tell.
+ *
+ * SDL3 owns the string and hands back a pointer good for the life of the
+ * process; SDL2 returns one the caller must SDL_free. Rather than push that
+ * difference onto callers, the SDL2 side copies it into a static once and
+ * frees the original -- there is exactly one executable path per process, so a
+ * cache costs one small allocation and removes the ownership question from
+ * every call site.
+ *
+ * Returns nullptr before SDL_Init, which is not an error: the caller is
+ * expected to have another way of finding its files.
+ */
+inline const char *basePath() {
+#if GLEDITOR_SDL_MAJOR == 3
+  return SDL_GetBasePath();
+#else
+  static const std::string cached = [] {
+    char *path = SDL_GetBasePath();
+    if (nullptr == path) {
+      return std::string{};
+    }
+    std::string owned(path);
+    SDL_free(path);
+    return owned;
+  }();
+  return cached.empty() ? nullptr : cached.c_str();
 #endif
 }
 

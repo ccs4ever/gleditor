@@ -3,6 +3,7 @@
 #include <clocale>                  // for setlocale, LC_ALL
 #include <exception>                // for exception
 #include <functional>               // for reference_wrapper, ref
+#include <gleditor/paths.hpp>       // for assetPath
 #include <gleditor/renderer.hpp>    // for RenderItemNewDoc, Renderer
 #include <gleditor/sdl_wrap.hpp>    // for AutoSDLSurface, AutoSDL
 #include <glm/detail/type_vec3.hpp> // for vec
@@ -311,7 +312,9 @@ int main(const int argc, char **argv) {
 
     AutoSDL sdlScoped(SDL_INIT_VIDEO);
 
-    const AutoSDLSurface icon("logo.png");
+    // Found next to the installed data files rather than in the working
+    // directory, so that a packaged copy still has its icon.
+    const AutoSDLSurface icon(gleditor::assetPath("logo.png").c_str());
 
     // The window has to be created with the flags and, for the GL family, the
     // context attributes the chosen backend needs; both are decided before the

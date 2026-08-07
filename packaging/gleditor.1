@@ -1,0 +1,108 @@
+.TH GLEDITOR 1 "2026" "gleditor" "User Commands"
+.SH NAME
+gleditor \- GPU-rendered text editor with OpenGL, OpenGL ES and Vulkan backends
+.SH SYNOPSIS
+.B gleditor
+.RI [ options ]
+.RI [ file .\|.\|.]
+.SH DESCRIPTION
+.B gleditor
+draws text on the GPU. Documents are laid out as pages in a 3D scene, shaped
+and rasterised with Pango and Cairo, and drawn as instanced quads sampled from
+a glyph atlas.
+.PP
+One rendering pipeline serves three graphics APIs, selected at run time with
+.BR \-\-backend .
+Everything above the backend is written against a single device interface and
+names no graphics API.
+.SH OPTIONS
+.TP
+.BI \-\-backend " NAME"
+Rendering backend:
+.BR opengl " (default), " opengles " or " vulkan .
+The Vulkan backend is only present when the binary was built with it.
+.TP
+.BI \-\-font " DESCRIPTION"
+Default font, as a Pango font description, for example
+.BR """Serif 16""" .
+.TP
+.BI \-\-fov " DEGREES"
+Initial vertical field of view. Widening it is how several pages are brought
+on screen at once.
+.TP
+.B \-\-no\-cull
+Draw every page of every document, including those entirely outside the view.
+Only useful for checking that culling changes nothing it should not.
+.TP
+.BI \-\-coarse\-below " SCALE"
+Draw a page as one solid bar per line once one layout pixel of it covers fewer
+than
+.I SCALE
+screen pixels. Zero draws every visible page in full detail.
+.TP
+.BI \-\-benchmark " N"
+Draw
+.I N
+frames once the document has settled, then report frame, collect and record
+times and exit.
+.TP
+.BI \-\-screenshot " PATH"
+Write the first fully drawn frame to
+.I PATH
+as a binary PPM.
+.TP
+.BI \-\-pick " X,Y"
+Report the picking tag at a pixel once the document has settled. Repeatable.
+.TP
+.BI \-\-click " X,Y"
+Click at a pixel once the document has settled, placing the caret. Repeatable.
+.TP
+.BI \-\-select " START,END"
+Select the document byte range once the document has settled.
+.TP
+.BI \-\-type " TEXT"
+Insert text at the caret once it has been placed.
+.TP
+.BI \-\-toast " SEVERITY:MESSAGE"
+Show a notification once the first frame is drawn. Repeatable.
+.TP
+.B \-\-strict\-diagnostics
+Treat a driver error as fatal instead of showing it as a notification, and set
+the exit status accordingly. Automated runs want this: a frame rendered by a
+driver that was reporting errors proves nothing.
+.TP
+.B \-\-profile
+Perform initial setup, then quit.
+.SH ENVIRONMENT
+.TP
+.B GLEDITOR_ASSET_DIR
+Directory holding the shaders and the window icon. Set this only when they are
+somewhere the usual search will not find them; it is taken as given rather than
+checked, so a wrong value reports itself as a missing shader.
+.TP
+.B GLEDITOR_ATLAS_SIZE
+Side length the glyph atlas opens at before it grows to fit. Exists so that
+atlas growth can be exercised, since no ordinary document provokes it.
+.TP
+.B GLEDITOR_RECORD_THREADS
+Threads the Vulkan backend records a frame with. An instruction rather than a
+ceiling: setting it takes the choice away from the device, so
+.B 1
+records in one piece and anything more always splits. Ignored by the other
+backends, which cannot split.
+.SH FILES
+.TP
+.I @DATADIR@/shaders
+Portable shader bodies, and the SPIR-V built from them.
+.TP
+.I @DATADIR@/logo.png
+Window icon.
+.SH EXIT STATUS
+Zero on success. Non-zero when the render thread stopped because of an error
+rather than because it was asked to, which includes a driver diagnostic under
+.BR \-\-strict\-diagnostics .
+.SH SEE ALSO
+The project README, which documents the rendering pipeline and the
+measurements behind it, at
+.UR https://github.com/ccs4ever/gleditor
+.UE .

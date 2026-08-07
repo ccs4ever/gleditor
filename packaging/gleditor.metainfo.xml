@@ -1,0 +1,51 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<component type="desktop-application">
+  <id>io.github.ccs4ever.gleditor</id>
+  <metadata_license>CC0-1.0</metadata_license>
+  <project_license>GPL-3.0-or-later</project_license>
+
+  <name>GL Editor</name>
+  <summary>GPU-rendered text editor with three graphics backends</summary>
+
+  <description>
+    <p>
+      GL Editor is an experimental text editor that draws its text on the GPU.
+      Documents are laid out as pages in a 3D scene, shaped and rasterised with
+      Pango and Cairo, and drawn as instanced quads sampled from a glyph atlas.
+    </p>
+    <p>
+      One rendering pipeline serves three graphics APIs. Everything above the
+      backend is written against a single device interface and names no
+      graphics API, so the same frame can be produced through OpenGL 3.3,
+      OpenGL ES 3.0 or Vulkan 1.0, chosen at run time.
+    </p>
+    <p>
+      The renderer draws only what is on screen: pages outside the view are
+      culled, and pages too far away for their glyphs to be legible are drawn
+      as one solid bar per line, at the darkness the text itself would have.
+      The glyph atlas is mipmapped so minified text does not crawl when the
+      camera moves, and grows on demand rather than being sized for the worst
+      case.
+    </p>
+  </description>
+
+  <launchable type="desktop-id">gleditor.desktop</launchable>
+
+  <url type="homepage">https://github.com/ccs4ever/gleditor</url>
+  <url type="bugtracker">https://github.com/ccs4ever/gleditor/issues</url>
+
+  <provides>
+    <binary>gleditor</binary>
+  </provides>
+
+  <categories>
+    <category>Utility</category>
+    <category>TextEditor</category>
+  </categories>
+
+  <content_rating type="oars-1.1"/>
+
+  <developer id="io.github.ccs4ever">
+    <name>ccs4ever</name>
+  </developer>
+</component>

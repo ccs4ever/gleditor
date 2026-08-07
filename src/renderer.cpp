@@ -27,15 +27,17 @@
 #include <gleditor/render/device.hpp>
 #include <gleditor/render/shader_source.hpp>
 #include <gleditor/render_state.hpp>
+#include <gleditor/paths.hpp>
 #include <gleditor/sdl_wrap.hpp>
 #include <gleditor/state.hpp>
 #include <gleditor/tqueue.hpp>
 
 namespace {
 
-/// Directory the portable shader bodies are read from, relative to the working
-/// directory the application is started in.
-constexpr const char *shaderDir = "assets/shaders";
+/// Directory the portable shader bodies are read from. Found rather than
+/// assumed -- see gleditor::assetDir() -- so that an installed copy works from
+/// any working directory.
+std::string shaderDir() { return gleditor::assetPath("shaders"); }
 
 /**
  * @brief Write a captured frame as a binary PPM.
@@ -67,11 +69,10 @@ Renderer::~Renderer() = default;
 void Renderer::createPipeline(RenderState &state) const {
   render::PipelineDesc desc;
   desc.name = "glyph";
-  desc.vertexSource =
-      render::readShaderBody(std::string(shaderDir) + "/glyph.vert.glsl");
-  desc.fragmentSource =
-      render::readShaderBody(std::string(shaderDir) + "/glyph.frag.glsl");
-  desc.spirvDir = std::string(shaderDir) + "/vulkan";
+  const auto shaders  = shaderDir();
+  desc.vertexSource   = render::readShaderBody(shaders + "/glyph.vert.glsl");
+  desc.fragmentSource = render::readShaderBody(shaders + "/glyph.frag.glsl");
+  desc.spirvDir       = shaders + "/vulkan";
   desc.layout   = Doc::vertexLayout();
 
   state.glyphPipeline = device->createPipeline(desc);
