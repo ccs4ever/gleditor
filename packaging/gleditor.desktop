@@ -1,0 +1,13 @@
+[Desktop Entry]
+Type=Application
+Version=1.0
+Name=GL Editor
+GenericName=Text Editor
+Comment=GPU-rendered text editor with OpenGL, OpenGL ES and Vulkan backends
+Exec=gleditor %F
+Icon=gleditor
+Terminal=false
+Categories=Utility;TextEditor;Development;
+MimeType=text/plain;
+Keywords=text;editor;gpu;opengl;vulkan;
+StartupNotify=true

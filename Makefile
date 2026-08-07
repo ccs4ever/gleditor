@@ -1,11 +1,23 @@
 
 #SHELL = thirdparty/cosmocc/bin/cocmd
-SHELL = dash
+# /bin/sh rather than dash: the recipes here are plain POSIX shell, and dash is
+# not installed on Fedora or Arch, where the distribution packages build.
+SHELL = /bin/sh
 
 #STATIC = --static
 STATIC =
 
-CXX = $(shell which clang++)
+# clang++ is the default, but only when nothing else asked for a compiler. A
+# distribution package is built with the compiler that distribution chose --
+# gcc, almost always -- and the plain `=` that used to be here silently ignored
+# a CXX in the environment, which looks like the build honouring the request
+# right up until the binary turns out to have been built with something else.
+#
+# $(origin) rather than ?=, because make defines CXX itself: ?= would see it
+# already set and never fire.
+ifeq ($(origin CXX),default)
+CXX := $(shell which clang++ 2>/dev/null || which c++)
+endif
 #CXX = thirdparty/cosmocc-4.0.2/bin/cosmoc++ -mclang
 #CXX = thirdparty/cosmocc/bin/x86_64-linux-cosmo-gcc
 # cocmd gives us a builtin in-process sed hook
@@ -56,7 +68,44 @@ ifeq ($(HAVE_SDL_IMAGE),1)
 PKGS += $(SDL_IMAGE_PKG)
 endif
 TEST_PKGS := gmock_main
-VERS := $(shell git describe --tags --always --match "v[0-9]*.[0-9]*.[0-9]*" HEAD | tr -d v)
+
+# The version, which a release tarball has to know without a git history: every
+# distribution builds from an unpacked tarball, where `git describe` prints
+# nothing at all. VERSION in the tree is the fallback, and setting GLEDITOR_VERSION
+# overrides both, which is what a packager does when the package version and
+# the tag disagree.
+FALLBACK_VERS := $(shell cat VERSION 2>/dev/null || echo 0.0.0)
+ifndef GLEDITOR_VERSION
+# No --always: a bare commit hash is not a version, and every packaging format
+# wants to compare two of them. Without a matching tag this comes back empty
+# and VERSION answers instead. The dashes git puts between the tag, the commit
+# count and the hash become dots, because a dash separates upstream from
+# revision in a Debian version and means nothing good in an RPM one.
+GLEDITOR_VERSION := $(shell git describe --tags --match "v[0-9]*.[0-9]*.[0-9]*" HEAD 2>/dev/null | tr -d v | tr - .)
+ifeq ($(GLEDITOR_VERSION),)
+GLEDITOR_VERSION := $(FALLBACK_VERS)
+endif
+endif
+VERS := $(GLEDITOR_VERSION)
+
+# Which compiler this is, and what it will accept. -std=c++2c is clang's and
+# gcc 14's spelling; gcc 13 wants c++2b and rejects the newer name outright, so
+# asking beats assuming. -rtlib=compiler-rt is clang-only and gcc fails the
+# link on it.
+CXX_IS_CLANG := $(shell $(CXX) --version 2>/dev/null | grep -qi clang && echo 1)
+STD_FLAG := $(shell $(CXX) -std=c++2c -x c++ -E - </dev/null >/dev/null 2>&1 \
+	&& echo -std=c++2c || echo -std=c++2b)
+
+# Where an installed copy lives. Only the install target compiles DATADIR in:
+# a plain `make` must not let a build tree quietly read the assets of an older
+# installed copy, so the search falls through to ./assets instead.
+prefix ?= /usr/local
+exec_prefix ?= $(prefix)
+bindir ?= $(exec_prefix)/bin
+datarootdir ?= $(prefix)/share
+datadir ?= $(datarootdir)
+mandir ?= $(datarootdir)/man
+appdir := $(datadir)/gleditor
 ifdef DEBUG
 SANITIZE_ADDR_OPTS := -fsanitize=address,undefined,integer -fno-omit-frame-pointer -fsanitize-address-use-after-return=runtime \
 	         -fsanitize-address-use-after-scope 
@@ -68,7 +117,10 @@ PROFILE_OPTS := -fprofile-instr-generate -fcoverage-mapping -fcoverage-mcdc
 else
 DEBUG_OPTS := -O3 -g
 endif
-override CXXFLAGS += $(DEBUG_OPTS) -std=c++2c -Ibuild/src -Iinclude -Ithirdparty/Choreograph/src -Ithirdparty/argparse/include -Wall -Wextra $(shell pkg-config $(STATIC) --cflags $(PKGS))
+override CXXFLAGS += $(DEBUG_OPTS) $(STD_FLAG) -Ibuild/src -Iinclude -Ithirdparty/Choreograph/src -Ithirdparty/argparse/include -Wall -Wextra $(shell pkg-config $(STATIC) --cflags $(PKGS))
+ifdef GLEDITOR_DATADIR
+override CXXFLAGS += -DGLEDITOR_DATADIR='"$(GLEDITOR_DATADIR)"'
+endif
 override CXXFLAGS += -DGLEDITOR_SDL_MAJOR=$(GLEDITOR_SDL)
 ifdef GLEDITOR_ENABLE_VULKAN
 override CXXFLAGS += -DGLEDITOR_ENABLE_VULKAN=1
@@ -76,7 +128,10 @@ endif
 ifeq ($(HAVE_SDL_IMAGE),1)
 override CXXFLAGS += -DGLEDITOR_HAVE_SDL_IMAGE=1
 endif
-override LDFLAGS += $(DEBUG_OPTS) $(findstring $(STATIC),-static) -rtlib=compiler-rt 
+override LDFLAGS += $(DEBUG_OPTS) $(findstring $(STATIC),-static)
+ifeq ($(CXX_IS_CLANG),1)
+override LDFLAGS += -rtlib=compiler-rt
+endif
 # XXX: work on this in a separate branch, get tests working again for now
 #CXXFLAGS += -stdlib=libc++ -fexperimental-library 
 #LDFLAGS += -v -stdlib=libc++ -fexperimental-library 
@@ -269,6 +324,67 @@ clean: private .UNVEIL += w:gleditor w:gleditor_test
 clean:
 	@$(RM) -rf gleditor gleditor_test build
 
+# -- installation -------------------------------------------------------------
+
+INSTALL ?= install
+# DESTDIR is how every packaging tool stages an install into a directory that
+# is not the final one. It prefixes the paths and nothing else: what the
+# program is told about itself still names the eventual location.
+INSTALL_DATADIR := $(DESTDIR)$(appdir)
+
+# GLEDITOR_DATADIR is compiled in here and nowhere else, so the binary that
+# gets installed knows where its data went even if it is later moved somewhere
+# the executable-relative search cannot follow.
+install: GLEDITOR_DATADIR := $(appdir)
+install: $(OBJDIR)/gleditor
+ifdef GLEDITOR_ENABLE_VULKAN
+install: shaders
+endif
+install:
+	$(INSTALL) -d $(DESTDIR)$(bindir)
+	$(INSTALL) -m 755 $(OBJDIR)/gleditor $(DESTDIR)$(bindir)/gleditor
+	$(INSTALL) -d $(INSTALL_DATADIR)/shaders
+	$(INSTALL) -m 644 assets/shaders/*.glsl $(INSTALL_DATADIR)/shaders
+ifdef GLEDITOR_ENABLE_VULKAN
+	$(INSTALL) -d $(INSTALL_DATADIR)/shaders/vulkan
+	$(INSTALL) -m 644 $(SPIRV) $(INSTALL_DATADIR)/shaders/vulkan
+endif
+	$(INSTALL) -m 644 logo.png $(INSTALL_DATADIR)/logo.png
+	$(INSTALL) -d $(DESTDIR)$(datadir)/applications
+	$(INSTALL) -m 644 packaging/gleditor.desktop $(DESTDIR)$(datadir)/applications/
+	$(INSTALL) -d $(DESTDIR)$(datadir)/metainfo
+	$(INSTALL) -m 644 packaging/gleditor.metainfo.xml $(DESTDIR)$(datadir)/metainfo/
+	$(INSTALL) -d $(DESTDIR)$(datadir)/icons/hicolor/256x256/apps
+	$(INSTALL) -m 644 logo.png $(DESTDIR)$(datadir)/icons/hicolor/256x256/apps/gleditor.png
+	$(INSTALL) -d $(DESTDIR)$(mandir)/man1
+	$(SED) 's,@DATADIR@,$(appdir),g' packaging/gleditor.1 > $(OBJDIR)/gleditor.1
+	$(INSTALL) -m 644 $(OBJDIR)/gleditor.1 $(DESTDIR)$(mandir)/man1/gleditor.1
+
+uninstall:
+	$(RM) -f $(DESTDIR)$(bindir)/gleditor
+	$(RM) -rf $(INSTALL_DATADIR)
+	$(RM) -f $(DESTDIR)$(datadir)/applications/gleditor.desktop
+	$(RM) -f $(DESTDIR)$(datadir)/metainfo/gleditor.metainfo.xml
+	$(RM) -f $(DESTDIR)$(datadir)/icons/hicolor/256x256/apps/gleditor.png
+	$(RM) -f $(DESTDIR)$(mandir)/man1/gleditor.1
+
+# A release tarball, which is what the distribution packages build from. The
+# submodules are vendored dependencies rather than optional extras, so the
+# archive has to carry them: `git archive` alone produces a tree that cannot be
+# compiled. VERSION is written into the tarball because the unpacked copy has
+# no git history to ask.
+DIST_NAME := gleditor-$(VERS)
+dist:
+	@$(RM) -rf $(OBJDIR)/dist/$(DIST_NAME)
+	@$(MKDIR) -p $(OBJDIR)/dist/$(DIST_NAME)
+	git archive HEAD | tar -x -C $(OBJDIR)/dist/$(DIST_NAME)
+	git submodule foreach --quiet \
+	  'mkdir -p "$(CURDIR)/$(OBJDIR)/dist/$(DIST_NAME)/$$sm_path" && \
+	   git archive HEAD | tar -x -C "$(CURDIR)/$(OBJDIR)/dist/$(DIST_NAME)/$$sm_path"'
+	echo $(VERS) > $(OBJDIR)/dist/$(DIST_NAME)/VERSION
+	tar -czf $(OBJDIR)/dist/$(DIST_NAME).tar.gz -C $(OBJDIR)/dist $(DIST_NAME)
+	@echo "wrote $(OBJDIR)/dist/$(DIST_NAME).tar.gz"
+
 $(OBJDIR)/%.o: %.cpp
 	$(COMPILE.cpp) $(OUTPUT_OPTION) $<
 
@@ -293,7 +409,8 @@ $(OBJDIR)/compile_commands.json: $(JFILES)
 	{ echo '['; cat $^ | $(SED) '$$ s/,[[:space:]]*$$//'; echo ']'; } > $@
 
 
-.PHONY: clean doc run test profile shaders sanitize/address sanitize/address/run sanitize/thread sanitize/thread/run \
+.PHONY: clean doc run test profile shaders install uninstall dist \
+	sanitize/address sanitize/address/run sanitize/thread sanitize/thread/run \
 	sanitize/memory sanitize/memory/run
 
 ifeq (,$(filter clean,$(MAKECMDGOALS)))
