@@ -52,13 +52,6 @@ endif
 ifneq ($(shell pkg-config --exists $(SDL_PKG) && echo 1),1)
 $(error $(SDL_PKG) not found by pkg-config; install it or set GLEDITOR_SDL to the other major version)
 endif
-# Checked for the same reason: without it the build carries on with empty
-# include flags and fails much later on a header, naming the header rather than
-# the package. Distributions ship several parallel pangomm ABIs under different
-# package names, so getting the wrong one is an ordinary packaging mistake.
-ifneq ($(shell pkg-config --exists pangomm-2.48 && echo 1),1)
-$(error pangomm-2.48 not found by pkg-config; on Arch it is pangomm-2.48, on Fedora pangomm2.48-devel, on Debian libpangomm-2.48-dev)
-endif
 
 # The GL/GLES entry points are resolved at runtime through SDL rather than
 # linked, so no GL library is needed here; `gl` is still listed because the
@@ -73,6 +66,23 @@ endif
 HAVE_SDL_IMAGE := $(shell pkg-config --exists $(SDL_IMAGE_PKG) && echo 1)
 ifeq ($(HAVE_SDL_IMAGE),1)
 PKGS += $(SDL_IMAGE_PKG)
+endif
+
+# Every package, named individually, before anything asks for their flags.
+# pkg-config is all-or-nothing: given a set where one member is missing it
+# prints a complaint about that one and then returns *nothing at all* for the
+# rest, so the build carries on with no include paths and fails on whichever
+# header happens to come first. That names a header rather than a package, and
+# the header is never the one belonging to what is actually missing. Several of
+# these ship under names that differ per distribution -- pangomm has parallel
+# ABIs, and vulkan.pc comes from the loader rather than the headers -- so
+# getting one wrong is an ordinary packaging mistake to make.
+MISSING_PKGS := $(strip $(foreach p,$(PKGS),\
+  $(if $(shell pkg-config --exists $(p) && echo 1),,$(p))))
+ifneq ($(MISSING_PKGS),)
+$(error pkg-config cannot find: $(MISSING_PKGS). Install the development \
+packages providing them, or unset GLEDITOR_ENABLE_VULKAN to build without \
+the Vulkan backend)
 endif
 TEST_PKGS := gmock_main
 
