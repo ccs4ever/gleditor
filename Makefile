@@ -129,6 +129,12 @@ ifdef GLEDITOR_DATADIR
 override CXXFLAGS += -DGLEDITOR_DATADIR='"$(GLEDITOR_DATADIR)"'
 endif
 override CXXFLAGS += -DGLEDITOR_SDL_MAJOR=$(GLEDITOR_SDL)
+# glm/gtx/string_cast.hpp, which is where glm::to_string lives and which three
+# files use for their startup diagnostics. GLM 1.0 refuses to compile any gtx
+# header without this defined; 0.9, which is what Ubuntu still ships, does not
+# ask. Defining it unconditionally satisfies both, and the distributions
+# tracking GLM 1.0 -- Arch, Fedora, nixpkgs -- would otherwise all fail here.
+override CXXFLAGS += -DGLM_ENABLE_EXPERIMENTAL
 ifdef GLEDITOR_ENABLE_VULKAN
 override CXXFLAGS += -DGLEDITOR_ENABLE_VULKAN=1
 endif
