@@ -19,6 +19,26 @@
 #ifndef GLEDITOR_RENDER_GL_API_H
 #define GLEDITOR_RENDER_GL_API_H
 
+// On Windows, GL/glcorearb.h includes windows.h for its calling conventions,
+// and windows.h brings in a great deal besides. Two pieces of that actively
+// break C++ that has nothing to do with it: winspool.h defines
+// DeviceCapabilities as a macro aliasing DeviceCapabilitiesA, which renamed
+// this project's own render::DeviceCapabilities out from under every use of
+// it, and windows.h defines min and max as macros, which breaks std::min and
+// std::max. Both are asked not to appear. The defines are guarded so that a
+// translation unit that already set them is left alone.
+#ifdef _WIN32
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#ifndef NOGDI
+#define NOGDI
+#endif
+#endif
+
 #include <GL/glcorearb.h>
 
 namespace render::gl {
