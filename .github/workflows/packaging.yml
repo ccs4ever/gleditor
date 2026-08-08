@@ -268,6 +268,7 @@ jobs:
             mingw-w64-ucrt-x86_64-vulkan-headers
             mingw-w64-ucrt-x86_64-vulkan-loader
             mingw-w64-ucrt-x86_64-mesa
+            mingw-w64-ucrt-x86_64-gdb
 
       # Each library is asked for by the ABI the build actually needs, trying
       # the candidate spellings in order and taking the first that exists. When
@@ -353,12 +354,42 @@ jobs:
         run: |
           cp "$MINGW_PREFIX/bin/opengl32.dll" build/windows/gleditor/ || true
           cd build/windows/gleditor
-          set -eu
-          # Bounded, because a render that never finishes is a failure and
-          # should be reported as one rather than sit until the job is killed.
-          timeout 300 ./gleditor.exe --backend opengl --profile \
-            --strict-diagnostics --no-present --screenshot frame.ppm \
-            ../../../tests/samples/quick_brown_fox.txt
+          set -u
+          # Bounded by hand rather than with timeout(1). MSYS2's timeout sends
+          # POSIX signals, and those do not reliably reach a native Windows
+          # process -- which is how the previous attempt at a bound sat there
+          # for a quarter of an hour instead of failing. taskkill speaks to the
+          # process Windows actually knows about.
+          #
+          # And if it does hang, ask it what it is waiting on before killing
+          # it. A hang that is only ever killed tells you nothing twice.
+          ./gleditor.exe --backend opengl --profile --strict-diagnostics \
+            --no-present --screenshot frame.ppm \
+            ../../../tests/samples/quick_brown_fox.txt > draw.log 2>&1 &
+          pid=$!
+          winpid=$(cat "/proc/$pid/winpid" 2>/dev/null || echo "$pid")
+          echo "msys pid $pid, windows pid $winpid"
+
+          for _ in $(seq 1 90); do
+            kill -0 "$pid" 2>/dev/null || break
+            sleep 1
+          done
+
+          if kill -0 "$pid" 2>/dev/null; then
+            echo "=== still running after 90s; every thread, then killed ==="
+            gdb -batch -p "$winpid" \
+                -ex 'set pagination off' \
+                -ex 'thread apply all bt' || echo "gdb could not attach"
+            taskkill //F //PID "$winpid" >/dev/null 2>&1 || kill -9 "$pid" || true
+            echo "--- what it had printed ---"
+            cat draw.log || true
+            exit 1
+          fi
+
+          wait "$pid" && rc=0 || rc=$?
+          echo "exit status: $rc"
+          cat draw.log
+          [ "$rc" -eq 0 ]
           ls -la frame.ppm
 
       # A missing shader exits zero and draws a flat rectangle, so the frame
