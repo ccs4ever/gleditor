@@ -69,6 +69,13 @@ struct OpenView {
   /// The version rebuilt, kept so that decorating does not replay the whole
   /// history once per frame per document.
   Version pieces;
+  /// The spans this document was last decorated with, and what was true when
+  /// they were worked out. Finding them compares every piece of this version
+  /// against every piece of each other one, which is quadratic in the number
+  /// of edits a document has had -- affordable when something changes, and not
+  /// affordable sixty times a second.
+  std::vector<gleditor::SpanStyle> decorations;
+  std::uint64_t decoratedAt{};
 };
 
 /**
@@ -128,15 +135,23 @@ public:
 private:
   /// Rebuild the cached version for @p docIndex after an edit moved it.
   void refresh(std::uint32_t docIndex, const MicroversionId &version);
+  /// Note that something a decoration depends on has changed.
+  void invalidate() { epoch++; }
 
   Store docStore;
+  /// Bumped whenever a view or a link changes, which is what a cached set of
+  /// decorations is checked against.
+  std::uint64_t epoch{1};
   std::string storePath;
   std::vector<OpenView> open;
 
 public:
   /// Forget every open view. Used when the program replaces what is on screen
   /// wholesale, which is how travelling to another state is done.
-  void clearViews() { open.clear(); }
+  void clearViews() {
+    open.clear();
+    invalidate();
+  }
 };
 
 /**

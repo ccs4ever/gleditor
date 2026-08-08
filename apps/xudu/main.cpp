@@ -166,7 +166,7 @@ public:
 
   /// Stop pointing at the selection. The content stays in the spool.
   void deleteSelection() {
-    withCaret([this](RenderState &state, const Where &where, Caret *caret) {
+    withCaret([](RenderState &state, const Where &where, Caret *caret) {
       if (!where.hasRange) {
         return;
       }

@@ -8,6 +8,7 @@
 #include <gleditor/doc.hpp>            // IWYU pragma: associated
 #include <gleditor/document_observer.hpp> // for DocumentObserver
 #include <gleditor/text_source.hpp>    // for TextSource
+#include <gleditor/utf8.hpp>           // for alignToCharacterStart
 #include <gleditor/render/device.hpp>  // for RenderDevice
 #include <gleditor/render_state.hpp>   // for RenderState
 #include <gleditor/renderer.hpp>       // for Renderer, RendererRef
@@ -851,21 +852,6 @@ void Doc::insert(RenderState &state, const std::uint32_t offset,
   scheduleReflow(state, at, static_cast<std::int32_t>(inserted));
 }
 
-namespace {
-
-/// Move @p offset back to the start of the UTF-8 sequence it lands in.
-/// Continuation bytes are 10xxxxxx; every other byte begins a character.
-std::uint32_t alignToCharacterStart(const std::string &raw,
-                                    std::uint32_t offset) {
-  while (offset > 0 && offset < raw.size() &&
-         0x80 == (static_cast<unsigned char>(raw[offset]) & 0xC0)) {
-    offset--;
-  }
-  return offset;
-}
-
-} // namespace
-
 std::string Doc::erase(RenderState &state, const std::uint32_t offset,
                        const std::uint32_t bytes, Caret *caret) {
   auto raw = text.raw();
@@ -873,20 +859,20 @@ std::string Doc::erase(RenderState &state, const std::uint32_t offset,
     return {};
   }
 
-  // Snap outwards, so a caller working in bytes cannot cut a character in
-  // half: the start moves back to a character boundary and the end forwards to
-  // the next one. Doing it in the other direction would let a range that names
-  // one whole character remove nothing.
-  const auto start = alignToCharacterStart(raw, offset);
-  const auto end   = alignToCharacterStart(
+  // Snap outwards, so a caller working in bytes cannot leave half a character
+  // behind: the start moves back to a boundary and the end forward to the next
+  // one. Both directions matter. Snapping the end backwards as well would
+  // collapse a range naming part of one character to nothing, and would make
+  // "delete one byte of a two-byte character" mean something other than
+  // deleting that character.
+  const auto start = gleditor::alignToCharacterStart(raw, offset);
+  const auto end   = gleditor::alignToCharacterEnd(
       raw, std::min<std::uint32_t>(offset + bytes,
                                      static_cast<std::uint32_t>(raw.size())));
-  const auto removedEnd =
-      end <= start ? static_cast<std::uint32_t>(raw.size()) : end;
-  const auto removed = raw.substr(start, removedEnd - start);
-  if (removed.empty()) {
+  if (end <= start) {
     return {};
   }
+  const auto removed = raw.substr(start, end - start);
 
   raw.erase(start, removed.size());
   text = raw;

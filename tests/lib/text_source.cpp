@@ -50,14 +50,14 @@ TEST(ByteOrderMarkTest, utf16IsRefusedRatherThanMisread) {
   // Silently treating these bytes as UTF-8 produces a document of replacement
   // characters, which reads as a corrupt file rather than an encoding this
   // does not handle.
-  EXPECT_THROW(stripByteOrderMark(bytes({0xFE, 0xFF, 0x00, 'h'})),
+  EXPECT_THROW((void)stripByteOrderMark(bytes({0xFE, 0xFF, 0x00, 'h'})),
                std::logic_error);
-  EXPECT_THROW(stripByteOrderMark(bytes({0xFF, 0xFE, 'h', 0x00})),
+  EXPECT_THROW((void)stripByteOrderMark(bytes({0xFF, 0xFE, 'h', 0x00})),
                std::logic_error);
 }
 
 TEST(ByteOrderMarkTest, utf32IsRefused) {
-  EXPECT_THROW(stripByteOrderMark(bytes({0x00, 0x00, 0xFE, 0xFF})),
+  EXPECT_THROW((void)stripByteOrderMark(bytes({0x00, 0x00, 0xFE, 0xFF})),
                std::logic_error);
 }
 
@@ -66,7 +66,7 @@ TEST(ByteOrderMarkTest, aLittleEndianUtf32MarkIsNotReportedAsUtf16) {
   // two are tested in is what decides whether this is diagnosed correctly.
   // Both throw, so the distinction is only visible in the message.
   try {
-    stripByteOrderMark(bytes({0xFF, 0xFE, 0x00, 0x00}));
+    (void)stripByteOrderMark(bytes({0xFF, 0xFE, 0x00, 0x00}));
     FAIL() << "expected a refusal";
   } catch (const std::logic_error &err) {
     EXPECT_THAT(std::string{err.what()}, testing::HasSubstr("utf32"));

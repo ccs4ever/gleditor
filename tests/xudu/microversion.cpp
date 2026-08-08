@@ -41,15 +41,15 @@ TEST(MicroversionTest, namesSurviveBeingWrittenAndReadBack) {
 TEST(MicroversionTest, malformedNamesAreRefused) {
   // A leading letter, two letters running, a zero segment, and a trailing
   // letter with no number: none of these could have been produced.
-  EXPECT_THROW(MicroversionId::parse("a1"), std::invalid_argument);
-  EXPECT_THROW(MicroversionId::parse("2ab1"), std::invalid_argument);
-  EXPECT_THROW(MicroversionId::parse("2a0"), std::invalid_argument);
-  EXPECT_THROW(MicroversionId::parse("2a"), std::invalid_argument);
-  EXPECT_THROW(MicroversionId::parse("2-4"), std::invalid_argument);
+  EXPECT_THROW((void)MicroversionId::parse("a1"), std::invalid_argument);
+  EXPECT_THROW((void)MicroversionId::parse("2ab1"), std::invalid_argument);
+  EXPECT_THROW((void)MicroversionId::parse("2a0"), std::invalid_argument);
+  EXPECT_THROW((void)MicroversionId::parse("2a"), std::invalid_argument);
+  EXPECT_THROW((void)MicroversionId::parse("2-4"), std::invalid_argument);
 }
 
 TEST(MicroversionTest, anImpossiblyLargeNumberIsRefused) {
-  EXPECT_THROW(MicroversionId::parse("99999999999999999999"),
+  EXPECT_THROW((void)MicroversionId::parse("99999999999999999999"),
                std::invalid_argument);
 }
 
