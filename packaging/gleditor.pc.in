@@ -1,0 +1,10 @@
+prefix=@PREFIX@
+libdir=@LIBDIR@
+includedir=@INCLUDEDIR@
+
+Name: gleditor
+Description: GPU-rendered text and document library: render devices, glyph cache and a paginated document model
+Version: @VERSION@
+Requires: pangomm-2.48
+Libs: -L${libdir} -lgleditor
+Cflags: -I${includedir}

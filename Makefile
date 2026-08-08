@@ -124,6 +124,8 @@ STD_FLAG := $(shell $(CXX) -std=c++2c -x c++ -E - </dev/null >/dev/null 2>&1 \
 prefix ?= /usr/local
 exec_prefix ?= $(prefix)
 bindir ?= $(exec_prefix)/bin
+libdir ?= $(exec_prefix)/lib
+includedir ?= $(prefix)/include
 datarootdir ?= $(prefix)/share
 datadir ?= $(datarootdir)
 mandir ?= $(datarootdir)/man
@@ -139,7 +141,11 @@ PROFILE_OPTS := -fprofile-instr-generate -fcoverage-mapping -fcoverage-mcdc
 else
 DEBUG_OPTS := -O3 -g
 endif
-override CXXFLAGS += $(DEBUG_OPTS) $(STD_FLAG) -Ibuild/src -Iinclude -Ithirdparty/Choreograph/src -Ithirdparty/argparse/include -Wall -Wextra $(shell pkg-config $(STATIC) --cflags $(PKGS))
+# -fPIC everywhere rather than only for the library's objects. A shared library
+# requires it; a program does not, but compiling the two trees differently
+# would mean two object directories and two sets of rules for one flag whose
+# cost here is not measurable.
+override CXXFLAGS += $(DEBUG_OPTS) $(STD_FLAG) -fPIC -Ibuild/src -Iinclude -Iapps -Ithirdparty/Choreograph/src -Ithirdparty/argparse/include -Wall -Wextra $(shell pkg-config $(STATIC) --cflags $(PKGS))
 ifdef GLEDITOR_DATADIR
 override CXXFLAGS += -DGLEDITOR_DATADIR='"$(GLEDITOR_DATADIR)"'
 endif
@@ -174,22 +180,55 @@ LIBS := $(shell pkg-config $(STATIC) --libs $(PKGS))
 GLSLANG := $(shell command -v glslangValidator 2>/dev/null || command -v glslang 2>/dev/null)
 # The Vulkan backend only compiles when Vulkan is enabled; everything else is
 # backend-neutral or belongs to the GL family backend.
+# -- what is a library and what is a program ----------------------------------
+#
+# Everything under src/ is the shared library: the render devices, the glyph
+# cache, the buffer allocator, the document model and the render loop. None of
+# it names a document format or an application, which is what lets more than
+# one program be built on it.
+#
+# The programs live under apps/. `gleditor` is the plain editor -- a command
+# line, a key map and an event loop over the library. `xudu` is a second one
+# that keeps a versioned hypertext and renders it with the same library. The
+# library must not need either of them in order to build, and neither program
+# may need the other; that is the whole of what the boundary is for.
 VK_SRCS := $(shell find src/render/vulkan -name '*.cpp' 2>/dev/null)
-SHARED_SRCS := $(filter-out $(VK_SRCS),$(shell find thirdparty/Choreograph/src/ src/ -name '*.cpp' -a ! -name main.cpp ))
+LIB_SRCS := $(filter-out $(VK_SRCS),$(shell find thirdparty/Choreograph/src/ src/ -name '*.cpp'))
 ifdef GLEDITOR_ENABLE_VULKAN
-SHARED_SRCS += $(VK_SRCS)
+LIB_SRCS += $(VK_SRCS)
 endif
-SRCS := $(SHARED_SRCS) src/main.cpp
-TEST_SRCS := $(SHARED_SRCS) $(shell find tests/ -name '*.cpp')
+GLEDITOR_SRCS  := $(shell find apps/gleditor -name '*.cpp' 2>/dev/null)
+# The xanalogical engine is separated from the program that displays it so that
+# it can be tested without a graphics device: every rule about versions, spans
+# and links is decidable from the store alone.
+XUDU_CORE_SRCS := $(shell find apps/xudu/core -name '*.cpp' 2>/dev/null)
+XUDU_SRCS      := $(filter-out $(XUDU_CORE_SRCS),$(shell find apps/xudu -name '*.cpp' 2>/dev/null))
+LIB_TEST_SRCS  := $(shell find tests/lib -name '*.cpp' 2>/dev/null)
+XUDU_TEST_SRCS := $(shell find tests/xudu -name '*.cpp' 2>/dev/null)
+
 OBJDIR := build/
-OBJS := $(addprefix $(OBJDIR)/,$(patsubst %.cpp,%.o,$(SRCS)))
-TEST_OBJS := $(addprefix $(OBJDIR)/,$(patsubst %.cpp,%.o,$(TEST_SRCS)))
-OBJ_DIRS := $(sort $(dir $(OBJS)))
-TEST_OBJ_DIRS := $(sort $(dir $(TEST_OBJS)))
-ALL_OBJS := $(sort $(OBJS) $(TEST_OBJS))
-ALL_OBJ_DIRS := $(sort $(OBJDIR)/ $(OBJDIR)/tmp/ $(OBJ_DIRS) $(TEST_OBJ_DIRS))
-DEPS := $(sort $(patsubst %.o,%.dep,$(TEST_OBJS) $(OBJS)))
-JFILES := $(sort $(patsubst %.o,%.j,$(TEST_OBJS) $(OBJS)))
+obj = $(addprefix $(OBJDIR)/,$(patsubst %.cpp,%.o,$(1)))
+LIB_OBJS        := $(call obj,$(LIB_SRCS))
+GLEDITOR_OBJS   := $(call obj,$(GLEDITOR_SRCS))
+XUDU_CORE_OBJS  := $(call obj,$(XUDU_CORE_SRCS))
+XUDU_OBJS       := $(call obj,$(XUDU_SRCS))
+LIB_TEST_OBJS   := $(call obj,$(LIB_TEST_SRCS))
+XUDU_TEST_OBJS  := $(call obj,$(XUDU_TEST_SRCS))
+
+# The library's real name carries the ABI version, the linker name does not:
+# `-lgleditor` finds the second, which is a symlink to the first, and a program
+# records the first in its DT_NEEDED. That is what lets an incompatible library
+# be installed beside this one rather than over it.
+LIBNAME  := libgleditor.so
+SOVERSION := 0
+LIBSO    := $(OBJDIR)/$(LIBNAME).$(SOVERSION)
+LIBLINK  := $(OBJDIR)/$(LIBNAME)
+
+ALL_OBJS := $(sort $(LIB_OBJS) $(GLEDITOR_OBJS) $(XUDU_CORE_OBJS) $(XUDU_OBJS) \
+	$(LIB_TEST_OBJS) $(XUDU_TEST_OBJS))
+ALL_OBJ_DIRS := $(sort $(OBJDIR)/ $(OBJDIR)/tmp/ $(dir $(ALL_OBJS)))
+DEPS := $(sort $(patsubst %.o,%.dep,$(ALL_OBJS)))
+JFILES := $(sort $(patsubst %.o,%.j,$(ALL_OBJS)))
 
 ifneq ($(LANDLOCKMAKE_VERSION),)
 .STRICT = 1
@@ -198,7 +237,7 @@ ifneq ($(LANDLOCKMAKE_VERSION),)
 	rwcx:$(OBJDIR)/src/ \
 	rwcx:$(OBJDIR)/tmp/ \
 	rx:thirdparty/ \
-	include/ src/ tests/ \
+	include/ src/ apps/ tests/ \
 	rw:/dev/null \
 	rx:/usr/bin/ \
 	rx:/usr/include/ \
@@ -213,7 +252,7 @@ endif
 
 SPIRV := assets/shaders/vulkan/glyph.vert.spv assets/shaders/vulkan/glyph.frag.spv
 
-all: gleditor gleditor_test $(OBJDIR)/compile_commands.json
+all: lib gleditor xudu gleditor_test xudu_test $(OBJDIR)/compile_commands.json
 ifdef GLEDITOR_ENABLE_VULKAN
 all: shaders
 endif
@@ -224,10 +263,9 @@ $(ALL_OBJ_DIRS): private .UNSANDBOXED = 1
 $(ALL_OBJ_DIRS):
 	[ -d "$@" ] || $(MKDIR) -p "$@"
 
-$(TEST_OBJS): | $(OBJDIR)/ $(OBJDIR)/tmp/ $(TEST_OBJ_DIRS)
-$(OBJS): | $(OBJDIR)/ $(OBJDIR)/tmp/ $(OBJ_DIRS)
-$(DEPS) $(JFILES) $(OBJDIR)/src/config.h: | $(OBJDIR)/ $(OBJDIR)/tmp/ $(OBJ_DIRS) $(TEST_OBJ_DIRS)
-$(TEST_OBJS): CXXFLAGS += $(shell pkg-config $(STATIC) --cflags $(TEST_PKGS))
+$(ALL_OBJS): | $(ALL_OBJ_DIRS)
+$(DEPS) $(JFILES) $(OBJDIR)/src/config.h: | $(ALL_OBJ_DIRS)
+$(LIB_TEST_OBJS) $(XUDU_TEST_OBJS): CXXFLAGS += $(shell pkg-config $(STATIC) --cflags $(TEST_PKGS))
 
 ifeq (,$(filter clean,$(MAKECMDGOALS)))
 MKCFG = $(SED) 's/\@\@VERS\@\@/$(VERS)/'
@@ -258,7 +296,8 @@ $(FLAGSTAMP): FORCE | $(OBJDIR)/
 	@sig='$(CXXFLAGS) $(LDFLAGS)'; 	[ "`cat $@ 2>/dev/null`" = "$$sig" ] || printf '%s' "$$sig" > $@
 $(ALL_OBJS): $(FLAGSTAMP)
 
-$(OBJDIR)/src/main.o $(OBJDIR)/src/main.dep: $(OBJDIR)/src/config.h
+$(OBJDIR)/apps/gleditor/main.o $(OBJDIR)/apps/gleditor/main.dep: $(OBJDIR)/src/config.h
+$(OBJDIR)/apps/xudu/main.o $(OBJDIR)/apps/xudu/main.dep: $(OBJDIR)/src/config.h
 
 # The SPIR-V the Vulkan backend loads is produced from the same portable shader
 # bodies the GL backends compile at runtime, and through the same preamble
@@ -275,14 +314,39 @@ assets/shaders/vulkan/%.spv: assets/shaders/%.glsl $(OBJDIR)/shader_assemble
 shaders: $(SPIRV)
 .PHONY: shaders
 
-gleditor: $(OBJDIR)/gleditor
+# -- the library --------------------------------------------------------------
+
+lib: $(LIBLINK)
+.PHONY: lib
+
 # Libraries after the objects that need them. GNU ld resolves left to right, so
 # the other order only ever worked because clang's linker is forgiving about
 # it; gcc with link-time optimisation, which is what Debian builds with,
 # reported every pangomm and glibmm symbol as undefined.
-$(OBJDIR)/gleditor: $(OBJS)
-	$(CXX) $(LDFLAGS) -o $@ $^ $(LIBS)
+$(LIBSO): $(LIB_OBJS)
+	$(CXX) $(LDFLAGS) -shared -Wl,-soname,$(LIBNAME).$(SOVERSION) -o $@ $^ $(LIBS)
+
+$(LIBLINK): $(LIBSO)
+	ln -sf $(notdir $(LIBSO)) $@
+
+# Programs find the library beside themselves in a build tree and in $(libdir)
+# once installed. Both are recorded, so a binary run out of build/ needs no
+# LD_LIBRARY_PATH and an installed one needs no ldconfig entry. $$ORIGIN
+# reaches the shell as a literal, which is what makes it a run-time lookup
+# rather than a path baked in at link time.
+APP_LDFLAGS = -L$(OBJDIR) -lgleditor -Wl,-rpath,'$$ORIGIN' -Wl,-rpath,$(libdir)
+
+# -- the programs -------------------------------------------------------------
+
+gleditor: $(OBJDIR)/gleditor
+$(OBJDIR)/gleditor: $(GLEDITOR_OBJS) $(LIBLINK)
+	$(CXX) $(LDFLAGS) -o $@ $(GLEDITOR_OBJS) $(APP_LDFLAGS) $(LIBS)
 .PHONY: gleditor
+
+xudu: $(OBJDIR)/xudu
+$(OBJDIR)/xudu: $(XUDU_OBJS) $(XUDU_CORE_OBJS) $(LIBLINK)
+	$(CXX) $(LDFLAGS) -o $@ $(XUDU_OBJS) $(XUDU_CORE_OBJS) $(APP_LDFLAGS) $(LIBS)
+.PHONY: xudu
 
 sanitize/address: CXXFLAGS += $(SANITIZE_ADDR_OPTS)
 sanitize/address: LDFLAGS += $(SANITIZE_ADDR_OPTS)
@@ -308,13 +372,27 @@ sanitize/memory/run: sanitize/memory
 	MSAN_OPTIONS=check_initialization_order=1:detect_leaks=1:strict_string_checks=1 $(OBJDIR)/gleditor
 
 
-.PHONY: gleditor_test
-gleditor_test: $(OBJDIR)/gleditor_test
-$(OBJDIR)/gleditor_test: $(TEST_OBJS)
-	$(CXX) $(LDFLAGS) -o $@ $^ $(LIBS) $(shell pkg-config $(STATIC) --libs $(TEST_PKGS))
+.PHONY: gleditor_test xudu_test
+TEST_LIBS = $(shell pkg-config $(STATIC) --libs $(TEST_PKGS))
 
-test: $(OBJDIR)/gleditor_test
+# The library's own tests, linked against the library the programs link
+# against: testing a separately compiled copy of the sources would not notice a
+# symbol that failed to be exported.
+gleditor_test: $(OBJDIR)/gleditor_test
+$(OBJDIR)/gleditor_test: $(LIB_TEST_OBJS) $(LIBLINK)
+	$(CXX) $(LDFLAGS) -o $@ $(LIB_TEST_OBJS) $(APP_LDFLAGS) $(LIBS) $(TEST_LIBS)
+
+# The xanalogical engine's tests need no graphics device, so they link the
+# engine and not the library. That is the boundary being checked rather than
+# merely asserted: if a rule about versions or links ever needed a renderer,
+# this would stop linking.
+xudu_test: $(OBJDIR)/xudu_test
+$(OBJDIR)/xudu_test: $(XUDU_TEST_OBJS) $(XUDU_CORE_OBJS)
+	$(CXX) $(LDFLAGS) -o $@ $^ $(TEST_LIBS)
+
+test: $(OBJDIR)/gleditor_test $(OBJDIR)/xudu_test
 	$(OBJDIR)/gleditor_test
+	$(OBJDIR)/xudu_test
 
 # produces gleditor_test.prof (a human-readable code coverage report) and
 # coverage.lcov (a coverage report in lcov format) suitable for feeding into other tools like NeoVim
@@ -359,9 +437,9 @@ run: $(OBJDIR)/gleditor
 doc:
 	doxygen
 
-clean: private .UNVEIL += w:gleditor w:gleditor_test
+clean: private .UNVEIL += w:gleditor w:gleditor_test w:xudu w:xudu_test
 clean:
-	@$(RM) -rf gleditor gleditor_test build
+	@$(RM) -rf gleditor gleditor_test xudu xudu_test build
 
 # -- installation -------------------------------------------------------------
 
@@ -375,13 +453,29 @@ INSTALL_DATADIR := $(DESTDIR)$(appdir)
 # gets installed knows where its data went even if it is later moved somewhere
 # the executable-relative search cannot follow.
 install: GLEDITOR_DATADIR := $(appdir)
-install: $(OBJDIR)/gleditor
+install: $(OBJDIR)/gleditor $(OBJDIR)/xudu
 ifdef GLEDITOR_ENABLE_VULKAN
 install: shaders
 endif
 install:
 	$(INSTALL) -d $(DESTDIR)$(bindir)
 	$(INSTALL) -m 755 $(OBJDIR)/gleditor $(DESTDIR)$(bindir)/gleditor
+	$(INSTALL) -m 755 $(OBJDIR)/xudu $(DESTDIR)$(bindir)/xudu
+	# The real name is what a program records; the linker name is what a later
+	# build resolves -lgleditor against, so both have to be installed.
+	$(INSTALL) -d $(DESTDIR)$(libdir)
+	$(INSTALL) -m 755 $(LIBSO) $(DESTDIR)$(libdir)/$(LIBNAME).$(SOVERSION)
+	ln -sf $(LIBNAME).$(SOVERSION) $(DESTDIR)$(libdir)/$(LIBNAME)
+	# Public headers, so something outside this tree can be built on the
+	# library. Copied wholesale: the split between what a program may include
+	# and what it may not is the directory itself.
+	$(INSTALL) -d $(DESTDIR)$(includedir)
+	cp -R include/gleditor $(DESTDIR)$(includedir)/
+	$(INSTALL) -d $(DESTDIR)$(libdir)/pkgconfig
+	$(SED) -e 's,@PREFIX@,$(prefix),g' -e 's,@LIBDIR@,$(libdir),g' \
+	       -e 's,@INCLUDEDIR@,$(includedir),g' -e 's,@VERSION@,$(VERS),g' \
+	       packaging/gleditor.pc.in > $(OBJDIR)/gleditor.pc
+	$(INSTALL) -m 644 $(OBJDIR)/gleditor.pc $(DESTDIR)$(libdir)/pkgconfig/gleditor.pc
 	$(INSTALL) -d $(INSTALL_DATADIR)/shaders
 	$(INSTALL) -m 644 assets/shaders/*.glsl $(INSTALL_DATADIR)/shaders
 ifdef GLEDITOR_ENABLE_VULKAN
@@ -401,6 +495,11 @@ endif
 
 uninstall:
 	$(RM) -f $(DESTDIR)$(bindir)/gleditor
+	$(RM) -f $(DESTDIR)$(bindir)/xudu
+	$(RM) -f $(DESTDIR)$(libdir)/$(LIBNAME).$(SOVERSION)
+	$(RM) -f $(DESTDIR)$(libdir)/$(LIBNAME)
+	$(RM) -f $(DESTDIR)$(libdir)/pkgconfig/gleditor.pc
+	$(RM) -rf $(DESTDIR)$(includedir)/gleditor
 	$(RM) -rf $(INSTALL_DATADIR)
 	$(RM) -f $(DESTDIR)$(datadir)/applications/gleditor.desktop
 	$(RM) -f $(DESTDIR)$(datadir)/metainfo/gleditor.metainfo.xml
@@ -448,7 +547,7 @@ $(OBJDIR)/compile_commands.json: $(JFILES)
 	{ echo '['; cat $^ | $(SED) '$$ s/,[[:space:]]*$$//'; echo ']'; } > $@
 
 
-.PHONY: clean doc run test profile shaders install uninstall dist \
+.PHONY: clean doc run test profile shaders install uninstall dist lib \
 	sanitize/address sanitize/address/run sanitize/thread sanitize/thread/run \
 	sanitize/memory sanitize/memory/run
 
