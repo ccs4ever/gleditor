@@ -2,7 +2,7 @@
 pkgname=gleditor
 pkgver=0.1.0
 pkgrel=1
-pkgdesc="GPU-rendered text editor with OpenGL, OpenGL ES and Vulkan backends"
+pkgdesc="GPU-rendered document library, a text editor and a xanadoc editor, with OpenGL, OpenGL ES and Vulkan backends"
 arch=('x86_64' 'aarch64')
 url="https://github.com/ccs4ever/gleditor"
 license=('GPL-3.0-or-later')
@@ -25,7 +25,7 @@ build() {
     GLEDITOR_SDL=3 \
     GLEDITOR_ENABLE_VULKAN=1 \
     GLEDITOR_VERSION="$pkgver" \
-    gleditor shaders
+    lib gleditor xudu shaders
 }
 
 package() {
@@ -33,6 +33,8 @@ package() {
   make install \
     DESTDIR="$pkgdir" \
     prefix=/usr \
+    libdir=/usr/lib \
+    includedir=/usr/include \
     GLEDITOR_SDL=3 \
     GLEDITOR_ENABLE_VULKAN=1 \
     GLEDITOR_VERSION="$pkgver"

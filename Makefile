@@ -215,14 +215,42 @@ XUDU_OBJS       := $(call obj,$(XUDU_SRCS))
 LIB_TEST_OBJS   := $(call obj,$(LIB_TEST_SRCS))
 XUDU_TEST_OBJS  := $(call obj,$(XUDU_TEST_SRCS))
 
-# The library's real name carries the ABI version, the linker name does not:
+# What a shared library is called, and how a program finds it, differ enough
+# between the two targets that both are spelled out rather than guessed at.
+#
+# On ELF the real name carries the ABI version and the linker name does not:
 # `-lgleditor` finds the second, which is a symlink to the first, and a program
 # records the first in its DT_NEEDED. That is what lets an incompatible library
 # be installed beside this one rather than over it.
-LIBNAME  := libgleditor.so
+#
+# Windows has no soname and no symlink. The DLL is what is loaded, an import
+# library produced by the same link is what a program links against, and the
+# loader searches the executable's own directory -- so there is nothing for a
+# run path to do.
 SOVERSION := 0
-LIBSO    := $(OBJDIR)/$(LIBNAME).$(SOVERSION)
-LIBLINK  := $(OBJDIR)/$(LIBNAME)
+UNAME_S := $(shell uname -s 2>/dev/null || echo unknown)
+ifneq (,$(filter MINGW% MSYS% CYGWIN%,$(UNAME_S)))
+WINDOWS := 1
+endif
+
+ifdef WINDOWS
+LIBNAME     := libgleditor.dll
+LIBREAL     := $(OBJDIR)/$(LIBNAME)
+LIBLINK     := $(OBJDIR)/libgleditor.dll.a
+LIB_LINKARG := -Wl,--out-implib,$(LIBLINK)
+RPATH_FLAGS :=
+else
+LIBNAME     := libgleditor.so
+LIBREAL     := $(OBJDIR)/$(LIBNAME).$(SOVERSION)
+LIBLINK     := $(OBJDIR)/$(LIBNAME)
+LIB_LINKARG := -Wl,-soname,$(LIBNAME).$(SOVERSION)
+# Programs find the library beside themselves in a build tree and in $(libdir)
+# once installed. Both are recorded, so a binary run out of build/ needs no
+# LD_LIBRARY_PATH and an installed one needs no ldconfig entry. $$ORIGIN
+# reaches the shell as a literal, which is what makes it a run-time lookup
+# rather than a path baked in at link time.
+RPATH_FLAGS := -Wl,-rpath,'$$ORIGIN' -Wl,-rpath,$(libdir)
+endif
 
 ALL_OBJS := $(sort $(LIB_OBJS) $(GLEDITOR_OBJS) $(XUDU_CORE_OBJS) $(XUDU_OBJS) \
 	$(LIB_TEST_OBJS) $(XUDU_TEST_OBJS))
@@ -323,18 +351,20 @@ lib: $(LIBLINK)
 # the other order only ever worked because clang's linker is forgiving about
 # it; gcc with link-time optimisation, which is what Debian builds with,
 # reported every pangomm and glibmm symbol as undefined.
-$(LIBSO): $(LIB_OBJS)
-	$(CXX) $(LDFLAGS) -shared -Wl,-soname,$(LIBNAME).$(SOVERSION) -o $@ $^ $(LIBS)
+$(LIBREAL): $(LIB_OBJS)
+	$(CXX) $(LDFLAGS) -shared $(LIB_LINKARG) -o $@ $^ $(LIBS)
 
-$(LIBLINK): $(LIBSO)
-	ln -sf $(notdir $(LIBSO)) $@
+ifdef WINDOWS
+# The import library falls out of the link above, so asking for it is asking
+# for the DLL and there is nothing further to do.
+$(LIBLINK): $(LIBREAL)
+	@:
+else
+$(LIBLINK): $(LIBREAL)
+	ln -sf $(notdir $(LIBREAL)) $@
+endif
 
-# Programs find the library beside themselves in a build tree and in $(libdir)
-# once installed. Both are recorded, so a binary run out of build/ needs no
-# LD_LIBRARY_PATH and an installed one needs no ldconfig entry. $$ORIGIN
-# reaches the shell as a literal, which is what makes it a run-time lookup
-# rather than a path baked in at link time.
-APP_LDFLAGS = -L$(OBJDIR) -lgleditor -Wl,-rpath,'$$ORIGIN' -Wl,-rpath,$(libdir)
+APP_LDFLAGS = -L$(OBJDIR) -lgleditor $(RPATH_FLAGS)
 
 # -- the programs -------------------------------------------------------------
 
@@ -464,7 +494,7 @@ install:
 	# The real name is what a program records; the linker name is what a later
 	# build resolves -lgleditor against, so both have to be installed.
 	$(INSTALL) -d $(DESTDIR)$(libdir)
-	$(INSTALL) -m 755 $(LIBSO) $(DESTDIR)$(libdir)/$(LIBNAME).$(SOVERSION)
+	$(INSTALL) -m 755 $(LIBREAL) $(DESTDIR)$(libdir)/$(notdir $(LIBREAL))
 	ln -sf $(LIBNAME).$(SOVERSION) $(DESTDIR)$(libdir)/$(LIBNAME)
 	# Public headers, so something outside this tree can be built on the
 	# library. Copied wholesale: the split between what a program may include
@@ -492,6 +522,8 @@ endif
 	$(INSTALL) -d $(DESTDIR)$(mandir)/man1
 	$(SED) 's,@DATADIR@,$(appdir),g' packaging/gleditor.1 > $(OBJDIR)/gleditor.1
 	$(INSTALL) -m 644 $(OBJDIR)/gleditor.1 $(DESTDIR)$(mandir)/man1/gleditor.1
+	$(SED) 's,@DATADIR@,$(appdir),g' packaging/xudu.1 > $(OBJDIR)/xudu.1
+	$(INSTALL) -m 644 $(OBJDIR)/xudu.1 $(DESTDIR)$(mandir)/man1/xudu.1
 
 uninstall:
 	$(RM) -f $(DESTDIR)$(bindir)/gleditor
@@ -505,6 +537,7 @@ uninstall:
 	$(RM) -f $(DESTDIR)$(datadir)/metainfo/gleditor.metainfo.xml
 	$(RM) -f $(DESTDIR)$(datadir)/icons/hicolor/256x256/apps/gleditor.png
 	$(RM) -f $(DESTDIR)$(mandir)/man1/gleditor.1
+	$(RM) -f $(DESTDIR)$(mandir)/man1/xudu.1
 
 # A release tarball, which is what the distribution packages build from. The
 # submodules are vendored dependencies rather than optional extras, so the

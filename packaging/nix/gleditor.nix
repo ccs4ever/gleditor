@@ -71,7 +71,9 @@ stdenv.mkDerivation {
   ];
 
   buildFlags = [
+    "lib"
     "gleditor"
+    "xudu"
     "shaders"
   ];
 
@@ -82,17 +84,19 @@ stdenv.mkDerivation {
   # libGL comes from the driver on a NixOS system, hence only the Vulkan
   # loader being pinned here.
   postInstall = ''
-    wrapProgram $out/bin/gleditor \
-      --prefix LD_LIBRARY_PATH : ${
-        lib.makeLibraryPath [
-          vulkan-loader
-          libGL
-        ]
-      }
+    for program in gleditor xudu; do
+      wrapProgram $out/bin/$program \
+        --prefix LD_LIBRARY_PATH : ${
+          lib.makeLibraryPath [
+            vulkan-loader
+            libGL
+          ]
+        }
+    done
   '';
 
   meta = {
-    description = "GPU-rendered text editor with OpenGL, OpenGL ES and Vulkan backends";
+    description = "GPU-rendered document library with a text editor and a xanadoc editor";
     longDescription = ''
       GL Editor draws text on the GPU. Documents are laid out as pages in a 3D
       scene, shaped and rasterised with Pango and Cairo, and drawn as instanced

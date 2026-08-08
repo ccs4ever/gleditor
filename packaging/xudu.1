@@ -1,0 +1,120 @@
+.TH XUDU 1 "August 2026" "xudu" "User Commands"
+.SH NAME
+xudu \- a xanadoc editor, after Ted Nelson's OSMIC
+.SH SYNOPSIS
+.B xudu
+[\fIOPTION\fR]... [\fISTORE\fR]
+.SH DESCRIPTION
+.B xudu
+edits a
+.IR xanadoc :
+a document kept as two append-and-read-only spools rather than as a file. Text
+that is typed goes into the primedia spool at an address it keeps forever, and
+each edit is recorded in the operations spool under the state it produced.
+.PP
+No version is stored. A state's name spells out the operations that rebuild it,
+in Nelson's numbering where change 2a4 creates state 2a4, so 2a4 is reached by
+replaying 1, 2, 2a1, 2a2, 2a3 and 2a4.
+.PP
+Going back to an earlier state and editing it starts a branch rather than
+destroying what already followed, and deleting stops pointing at content
+without removing it from the spool, so every state the document has ever been
+in stays reachable.
+.PP
+Quoting a passage from one document into another inserts a pointer to the
+address the original already uses, so there is one copy and two documents
+showing it. Whether two documents share content is therefore a question about
+addresses: it survives editing around the quotation, and two documents that
+merely read the same are correctly not treated as sharing anything.
+.PP
+.I STORE
+is the directory the spools live in. It is created if it is not there, and
+defaults to
+.IR xanadoc .
+.SH OPTIONS
+.TP
+.BR \-\-import " \fIFILE\fR"
+Read
+.I FILE
+into an empty store as its first operation. Refused on a store that already has
+operations, since importing into one would be an ordinary edit and should be
+made as one.
+.TP
+.BR \-\-version\-id " \fIID\fR"
+Open this microversion, for example
+.BR 2a4 .
+The default is the most recent state in the store.
+.TP
+.BR \-\-alongside " \fIID\fR"
+Also open this microversion as a second document, for reading two states
+against each other. Passages they share are shaded in both.
+.TP
+.B \-\-map
+Start with the hypertime map shown.
+.TP
+.BR \-\-backend " \fINAME\fR"
+Rendering backend:
+.BR opengl " (the default), " opengles " or " vulkan .
+The Vulkan backend is present only when the binary was built with it.
+.TP
+.BR \-\-font " \fIDESCRIPTION\fR"
+Font, as a Pango font description, for example "Serif 16".
+.TP
+.BR \-\-fov " \fIDEGREES\fR"
+Initial vertical field of view. Widening it brings more of the documents on
+screen at once.
+.TP
+.B \-\-print\-asset\-dir
+Report the directory the shaders and the icon were found in, then quit.
+.TP
+.B \-\-help\-all
+Show every option, including those for driving a run without a person at the
+keyboard, and describe them at length.
+.SH KEYS
+Commands take control, because a bare letter is text: the point of this program
+is that typing is an edit, so it has to reach the document.
+.TP
+.BR ctrl\-b ", " ctrl\-n
+Go back or forward in hypertime. Nothing is lost either way.
+.TP
+.B ctrl\-t
+Quote the selection into a second document.
+.TP
+.B ctrl\-l
+Attach a link to the selected content. A link names content rather than a
+position, so it appears on every document quoting it.
+.TP
+.B ctrl\-m
+Show or hide the hypertime map.
+.TP
+.B ctrl\-p
+Print every state to the terminal.
+.TP
+.BR ctrl\-s ", " ctrl\-q
+Write the spools out; save and quit.
+.TP
+.B backspace
+Stop pointing at the selection.
+.SH FILES
+.TP
+.I STORE/primedia.spool
+Every byte ever typed, at the address it was given.
+.TP
+.I STORE/ops.spool
+One line per operation, in replay order.
+.TP
+.I STORE/links.spool
+Links, as their two lists of primedia spans, a type and an owner.
+.TP
+.I @DATADIR@/shaders
+Shader sources loaded at run time.
+.SH ENVIRONMENT
+.TP
+.B GLEDITOR_ASSET_DIR
+Directory to read the shaders and icon from, overriding the search.
+.SH SEE ALSO
+.BR gleditor (1)
+.PP
+OSMIC: <https://xanadu.com.au/ted/OSMIC/>
+.SH AUTHOR
+Written by the gleditor authors.

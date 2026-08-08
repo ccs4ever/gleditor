@@ -1,6 +1,7 @@
 # gleditor
 
-GPU text editor experiment, with OpenGL, OpenGL ES and Vulkan backends
+A GPU-rendered document library, with OpenGL, OpenGL ES and Vulkan backends, and
+two programs built on it.
 
 [![C/C++ CI](https://github.com/ccs4ever/gleditor/actions/workflows/c-cpp.yml/badge.svg)](https://github.com/ccs4ever/gleditor/actions/workflows/c-cpp.yml)
 
@@ -8,10 +9,25 @@ Still a work in progress.
 
 ## Overview
 
-`gleditor` is an experimental text editor rendered on the GPU. It uses SDL (3 or 2) for windowing/input and Pango/Cairo for text shaping and rasterization. The goal is to explore fast, flexible text rendering in a 2D/3D scene.
+This tree builds three things.
 
-- Entry point: `src/main.cpp`
-- Rendering pipeline and glyph cache live under `src/` (see `src/glyphcache/*`, `src/renderer.cpp`).
+**`libgleditor`** is the library: SDL for windowing and input, Pango and Cairo
+for shaping and rasterisation, a device abstraction with three backends, a glyph
+atlas, a buffer allocator, a paginated document model and a render loop. It
+names no document format and no application. Everything under `src/` is part of
+it.
+
+**`gleditor`** is the plain editor -- open files, look at them, type into them.
+It is `apps/gleditor/main.cpp`, and it is 119 lines: a command line, a key map,
+and the library doing the rest.
+
+**`xudu`** is a second program that keeps a versioned hypertext instead of a
+file, after Ted Nelson's OSMIC and Project Xanadu. It is `apps/xudu/`. It shares
+the library with the editor and shares no code with it.
+
+The split is the point. See [Building on the library](#building-on-the-library)
+for what a program gets to hook into, and [xudu](#xudu-a-xanadoc-editor) for
+what one program did with it.
 
 ## Rendering backends
 
@@ -485,6 +501,195 @@ is how caret placement is compared between backends. Every click reports the
 pixel it answered, since picking is asynchronous and a reply that named only
 the offset could not be lined up with the click that caused it.
 
+## Building on the library
+
+Everything the plain editor does, it does through the same surface any other
+program gets. There are six hooks, and each exists because something concrete
+could not be written without it. None of them names a document format, a file,
+or an application.
+
+### Where text comes from -- `gleditor/text_source.hpp`
+
+A document's constructor used to open a file, strip its byte order mark and
+validate it. Only the validation is about documents; the rest is one answer to
+"what text?". `TextSource` asks the question. `FileTextSource` is the old
+answer and `MemoryTextSource` is the other obvious one; a program whose text is
+computed rather than stored supplies its own.
+
+```cpp
+class TextSource {
+  virtual std::string text() const = 0;   // UTF-8; need not be valid
+  virtual std::string name() const = 0;
+};
+```
+
+### What changed -- `gleditor/document_observer.hpp`
+
+A document applied an edit and remembered only the result, so nothing could
+journal, replay, undo or account for one afterwards. `DocumentObserver` is told
+about insertions and removals, and carries the removed text so a recipient can
+reverse an edit without having kept its own copy of the document.
+
+Adding it meant giving `Doc` an `erase()` at all -- it could only insert -- and
+making the reflow take a signed delta. That is in 64-bit arithmetic, because
+the test that decides where pagination re-syncs compares unsigned offsets and
+would otherwise wrap rather than go below zero.
+
+### Colouring a range -- `gleditor/span_decorator.hpp`
+
+The renderer could already paint a background behind a byte range, quantise its
+edges to character boundaries inside a ligature, split it across pages and pack
+it for the fragment stage. All of that was reachable only by making a
+selection. A `SpanDecorator` returns byte ranges and colours, and the library
+does not ask what they mean -- search hits, a diff, unsaved regions, whichever
+parts of a document came from somewhere else.
+
+The selection is built into the table first, and both reasons are properties of
+what consumes it: the fragment stage returns on the first span covering it, so
+an earlier entry wins an overlap, and the device keeps the first
+`render::maxHighlightRanges` and drops the rest, so an earlier entry survives a
+full table.
+
+### Drawing -- `gleditor/frame_contributor.hpp` and `gleditor/canvas.hpp`
+
+A `FrameContributor` is called once a frame with the camera and the render
+state, after the documents and before the notifications. `deviceReady()` hands
+it the device and the document pipeline description the first time both exist,
+which is on the render thread and therefore after the program registered
+itself.
+
+`Canvas` is what it draws with: rectangles, lines and text through the glyph
+pipeline, in pixels, with the transform supplied at draw time so the same
+canvas can be a screen overlay or an object standing in the world. It is built
+on the observation that made the notification panel possible -- a quad whose
+foreground and background are the same colour ignores the atlas entirely, so a
+solid rectangle needs no second pipeline, no blend state and no reserved blank
+texel.
+
+### Being a program at all -- `gleditor/app.hpp`
+
+`Application` owns SDL, the window, the render thread and the event loop.
+`CommandTable` maps a key and its modifiers to something to run, and can print
+itself. `addCommonArguments()` registers the options every program here accepts
+-- the backend, the font, and the whole set for driving a run without a person.
+A program supplies its own options and its own keys and gets the rest.
+
+### Reaching the render thread -- `runWithState()` and `editCaret()`
+
+Editing a document takes a `RenderState`, which is created inside the render
+loop and exists nowhere else, so a key bound to "delete the selection" had no
+way to reach it. `AbstractRenderer::runWithState()` is that way, and
+`editCaret()` is how a command asks what is selected.
+
+## xudu: a xanadoc editor
+
+[OSMIC](https://xanadu.com.au/ted/OSMIC/) is Ted Nelson's 1996 proposal, a
+byproduct of Project Xanadu. Its argument is that the undo everyone ships is
+destructive: go back five states, type one character, and the five you came
+through are gone forever. Nelson's objection is that "the problems of versioning
+and backtrack are not simple and need to be appreciated -- and solved -- in
+their full complexity, rather than simplified for programmer convenience."
+
+`xudu` implements it. The engine is `apps/xudu/core/` and needs no graphics
+device, which is why it has its own test binary that does not link the library.
+
+### The two spools
+
+"In OSMIC, data is logically saved in the server as two cumulative spools --
+that is, Append-and-Read-Only files."
+
+Text that is typed goes into the **primedia spool** at an address it keeps
+forever. Each edit goes into the **operations spool**, filed under the state it
+produced. Nothing is ever removed from either.
+
+### Nothing stores a version
+
+"The server does not store versions. Nothing stores versions. Versions
+themselves are not saved, but regenerated as needed from these two files."
+
+A state's name is enough to rebuild it. In Nelson's numbering, "change 2 creates
+state 2. A branch is given a letter, after which new integers begin with 1
+again; thus change 2a4 creates state 2a4" -- so `2a4` is reached by replaying
+`1`, `2`, `2a1`, `2a2`, `2a3`, `2a4` and nothing else. `MicroversionId::path()`
+is that, and it is why there is no cache of documents to keep in step.
+
+### Time branches
+
+Editing a state that already has a successor does not overwrite it; it starts a
+branch. That is one `if` in `Store::apply()`, and it is the whole of what OSMIC
+is arguing for.
+
+```
+$ xudu --import notes.txt xanadoc     # imported as state 1
+   ... type something ...             # state 2
+$ xudu --version-id 1 xanadoc         # go back to 1
+   ... type something else ...        # state 1a1; state 2 is untouched
+$ xudu --map xanadoc                  # see all three
+```
+
+### Deleting keeps the content
+
+Deletion is what OSMIC calls "rearrange to limbo": the version stops pointing at
+the content, and the content stays in the spool. Every earlier state still
+resolves, so going back to one still shows what it showed.
+
+### Quoting costs a pointer
+
+A version is "a list of pieces", each naming a run of primedia -- the same shape
+as the edit decision list a film edit produces. Transcluding a passage inserts a
+piece aimed at the address the original already uses, so there is one copy and
+two documents showing it: Nelson's "conceptually there is only one copy of
+anything".
+
+Two consequences the implementation gets for free. Whether two documents show
+the same content is a question about addresses, so it survives editing around
+the quotation, where a text comparison would not -- and two documents that
+merely happen to read the same are correctly *not* reported as sharing anything.
+And a link's ends are primedia addresses rather than positions in a document, so
+a link shows up on everything quoting that content, which is Nelson's criterion
+that a "link to any portion is present on all manifestations".
+
+Opening two branches side by side shades everything they have in common and
+leaves only the words that differ plain:
+
+```
+$ xudu --version-id 2 --alongside 1a1 xanadoc
+```
+
+![Two branches of one document side by side, everything they share shaded, with
+the hypertime map showing state 1 forking into 1a1 and
+2](assets/xudu-intercomparison.png)
+
+Both documents were state `1` until one was edited into state `2` and the other,
+from `1` again, into `1a1`. The shading is not a text diff: it is the passages
+whose primedia addresses the two versions have in common, which is why only
+" EDITED" and " BRANCHED" -- the bytes that were typed separately -- come out
+plain.
+
+### Commands
+
+Control is used throughout, because a bare letter is text: the whole point of
+this program is that typing is an edit, so it has to reach the document.
+
+| Key | Does |
+| --- | --- |
+| `ctrl-b` / `ctrl-n` | go back or forward in hypertime, losing nothing |
+| `ctrl-t` | quote the selection into a second document |
+| `ctrl-l` | attach a link to the selected content |
+| `ctrl-m` | show or hide the hypertime map |
+| `ctrl-p` | print every state to the terminal |
+| `ctrl-s` / `ctrl-q` | write the spools out; save and quit |
+| `backspace` | stop pointing at the selection |
+
+### What the library did not learn
+
+Nothing in `src/` or `include/` mentions a version, a transclusion, a link or a
+spool. Xudu reaches the library as a `TextSource` that rebuilds a version on
+demand, a `DocumentObserver` that turns each keystroke into a hyperop, a
+`SpanDecorator` that shades shared passages, and a `FrameContributor` that draws
+the map. Deep intercomparison -- the shading in the picture above -- took no
+code in the library at all.
+
 ## SDL2 and SDL3
 
 Either major version works, chosen at build time with `GLEDITOR_SDL=2` or
@@ -587,8 +792,12 @@ Notes:
 
 Common targets (see `Makefile`):
 
-- Build everything (app, tests, compile commands):
-  - `make`  → builds `build/gleditor`, `build/gleditor_test`, and `build/compile_commands.json`
+- Build everything (library, both programs, tests, compile commands):
+  - `make`  → builds `build/libgleditor.so.0`, `build/gleditor`, `build/xudu`, `build/gleditor_test`, `build/xudu_test` and `build/compile_commands.json`
+- Build the library only:
+  - `make lib`  → `build/libgleditor.so.0`, plus the `build/libgleditor.so` linker name
+- Build the xanadoc editor only:
+  - `make xudu`  → `build/xudu`
 - Build with the Vulkan backend:
   - `make GLEDITOR_ENABLE_VULKAN=1`  → also compiles `assets/shaders/vulkan/*.spv`
 - Build against a particular SDL:
@@ -686,9 +895,16 @@ what each job runs, and it is runnable by hand against any installed copy.
 
 - After building, run either:
   - `make run`  (runs `build/gleditor`), or
-  - `./build/gleditor [options] [files...]`
+  - `./build/gleditor [options] [files...]`, or
+  - `./build/xudu [options] [store]` -- see [xudu](#xudu-a-xanadoc-editor)
 
-Command-line options (from `argparse` in `src/main.cpp`):
+Both programs take the options below; `xudu` adds a few of its own, which
+`xudu --help` lists. Neither needs `LD_LIBRARY_PATH` to find the library it
+was built against: the run path records the binary's own directory and the
+install prefix.
+
+Command-line options (registered by `gleditor::addCommonArguments()` in
+`src/app.cpp`):
 - `--font <name>`     default: `"Monospace 16"`
 - `--backend <name>`  `opengl` (default), `opengles` or `vulkan`
 - `--profile`         open any provided files and then exit (useful for profiling)
@@ -802,7 +1018,16 @@ for eight seconds and no capture should wait that long.
 ## Tests
 
 - Build and run tests:
-  - `make test`  → builds and runs `build/gleditor_test`
+  - `make test`  → builds and runs `build/gleditor_test` and `build/xudu_test`
+
+  There are two binaries because there are two things to test. `gleditor_test`
+  covers the library and links the shared library the programs link, so a
+  symbol that failed to be exported fails the test build rather than going
+  unnoticed until something outside this tree tried to link it. `xudu_test`
+  covers the xanalogical engine and links no graphics library at all, which is
+  the boundary being checked rather than merely asserted: if a rule about
+  versions, spans or links ever needed a renderer, that binary would stop
+  linking.
 - Compare the backends against each other:
   - `./tools/compare-backends.sh [file]`
 
@@ -839,12 +1064,15 @@ for eight seconds and no capture should wait that long.
 
 ## Project structure
 
-- `src/`        application sources (document model, glyph cache, SDL wrappers, etc.)
+- `src/`        the library: document model, glyph cache, SDL wrappers, render loop
 - `src/render/` the device abstraction and its backends (`gl/`, `vulkan/`)
-- `include/`    public headers under `gleditor/`
+- `include/`    the library's public headers, under `gleditor/`
+- `apps/gleditor/` the plain editor
+- `apps/xudu/`  the xanadoc editor; `apps/xudu/core/` is its engine, which needs no graphics device
 - `assets/shaders/` portable GLSL bodies, plus generated SPIR-V under `vulkan/`
 - `tools/`      build-time and verification helpers
-- `tests/`      unit tests (GoogleTest/GoogleMock)
+- `tests/lib/`  the library's unit tests (GoogleTest/GoogleMock)
+- `tests/xudu/` the xanalogical engine's unit tests
 - `thirdparty/` vendored dependencies (argparse, Choreograph, cosmopolitan, etc.)
 - `assets/`     assets like `logo.png`
 - `docs/`       Doxygen output directory

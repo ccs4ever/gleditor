@@ -28,18 +28,22 @@ DEB_VERSION_UPSTREAM := $(shell dpkg-parsechangelog -SVersion | sed 's/-[^-]*$$/
 # DEB_BUILD_OPTIONS into a -j flag. Calling make directly silently built the
 # whole package on one core.
 override_dh_auto_build:
-	dh_auto_build -- GLEDITOR_VERSION=$(DEB_VERSION_UPSTREAM) gleditor shaders
+	dh_auto_build -- GLEDITOR_VERSION=$(DEB_VERSION_UPSTREAM) lib gleditor xudu shaders
 
 # The test binary links gmock, which is a build dependency Debian would rather
 # not carry for a package that has no autopkgtest. The suite is run in CI on
 # every push instead.
 override_dh_auto_test:
 
+# The library goes in the multiarch directory, which is where a Debian package
+# puts one and where the linker looks without being told.
+DEB_HOST_MULTIARCH := $(shell dpkg-architecture -qDEB_HOST_MULTIARCH)
+
 override_dh_auto_install:
 	$(MAKE) install DESTDIR=$(CURDIR)/debian/gleditor prefix=/usr \
+		libdir=/usr/lib/$(DEB_HOST_MULTIARCH) \
 		GLEDITOR_VERSION=$(DEB_VERSION_UPSTREAM)
 
-# Nothing here is a library, and the binary is not built with a soname; the
-# default clean also removes build/, which the Makefile owns.
+# The default clean also removes build/, which the Makefile owns.
 override_dh_auto_clean:
 	$(MAKE) clean

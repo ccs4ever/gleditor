@@ -66,6 +66,7 @@ jobs:
           sudo apt-get install -y --no-install-recommends \
             xvfb libgl1-mesa-dri mesa-vulkan-drivers fonts-dejavu-core
           xvfb-run -a packaging/smoke-test.sh /usr/bin/gleditor opengl vulkan
+          xvfb-run -a packaging/smoke-test.sh /usr/bin/xudu opengl vulkan
         env:
           LIBGL_ALWAYS_SOFTWARE: "1"
 
@@ -128,6 +129,7 @@ jobs:
             xorg-x11-server-Xvfb mesa-dri-drivers mesa-vulkan-drivers \
             dejavu-sans-fonts
           xvfb-run -a packaging/smoke-test.sh /usr/bin/gleditor opengl vulkan
+          xvfb-run -a packaging/smoke-test.sh /usr/bin/xudu opengl vulkan
         env:
           LIBGL_ALWAYS_SOFTWARE: "1"
 
@@ -187,6 +189,7 @@ jobs:
           pacman -S --noconfirm --needed xorg-server-xvfb mesa vulkan-swrast \
             ttf-dejavu
           xvfb-run -a packaging/smoke-test.sh /usr/bin/gleditor opengl vulkan
+          xvfb-run -a packaging/smoke-test.sh /usr/bin/xudu opengl vulkan
         env:
           LIBGL_ALWAYS_SOFTWARE: "1"
 
@@ -235,6 +238,7 @@ jobs:
           sudo apt-get install -y --no-install-recommends \
             xvfb fonts-dejavu-core
           xvfb-run -a packaging/smoke-test.sh "$(readlink -f result)/bin/gleditor"
+          xvfb-run -a packaging/smoke-test.sh "$(readlink -f result)/bin/xudu"
 
   # --------------------------------------------------------------- Windows ---
   # MSYS2 rather than MSVC: the dependencies are the GTK stack -- pangomm,
