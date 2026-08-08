@@ -74,6 +74,15 @@ driver that was reporting errors proves nothing.
 .B \-\-profile
 Perform initial setup, then quit.
 .TP
+.B \-\-no\-present
+Draw frames without showing them. For capturing a frame on a machine that can
+give a rendering context but cannot put one on a screen, such as a headless
+Windows runner, where the frame is drawn correctly and the software driver then
+fails inside the call that puts it on screen. The capture is unaffected:
+drawing goes to an offscreen target either way. Accepted by the OpenGL and
+OpenGL ES backends; the Vulkan backend refuses it, because every frame acquires
+a swapchain image and presenting is what returns it.
+.TP
 .B \-\-print\-asset\-dir
 Report the directory the shaders and icon were found in, then quit without
 opening a window. Answers the one question a package can be asked on a machine

@@ -201,6 +201,11 @@ RendererRef handleArgs(const AppStateRef &state, render::Backend &backend,
       .help("treat a driver error as fatal instead of showing it as a "
             "notification")
       .flag();
+  parser.add_argument("--no-present")
+      .help("draw frames without showing them; for capturing a frame on a "
+            "machine that can give a context but cannot put one on screen. "
+            "OpenGL and OpenGL ES only")
+      .flag();
   parser.add_argument("--print-asset-dir")
       .help("report the directory the shaders and icon were found in, then "
             "quit; the one check a package can make without a GPU")
@@ -251,6 +256,7 @@ RendererRef handleArgs(const AppStateRef &state, render::Backend &backend,
     state->coarseBelow = std::stof(parser.get<std::string>("--coarse-below"));
     state->screenshotPath    = parser.get<std::string>("--screenshot");
     state->strictDiagnostics = parser["--strict-diagnostics"] == true;
+    state->noPresent         = parser["--no-present"] == true;
 
     if (parser.present<std::vector<std::string>>("--toast")) {
       for (const auto &toast : parser.get<std::vector<std::string>>("--toast")) {

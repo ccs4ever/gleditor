@@ -235,6 +235,24 @@ public:
    * proved anything, however plausible its output looks.
    */
   virtual void setStrictDiagnostics(bool strict) = 0;
+
+  /**
+   * @brief Render frames without showing them.
+   *
+   * For capturing a frame on a machine that can give a context but cannot put
+   * one on a screen. A headless Windows runner is the case that forced this:
+   * the frame is drawn correctly and the software driver then dies inside
+   * SwapBuffers, so everything a capture needs has already happened by the
+   * time the one call that cannot work is made.
+   *
+   * The captured colour target is unaffected -- drawing goes to an offscreen
+   * target either way, and presenting only copies it to the window.
+   *
+   * A device that cannot honour this must say so rather than ignore it: a
+   * caller that asked not to present and was presented to anyway is back where
+   * it started, with no way to tell.
+   */
+  virtual void setPresentEnabled(bool enabled) = 0;
 };
 
 /// SDL window creation flags a given backend requires.

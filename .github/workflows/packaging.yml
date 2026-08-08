@@ -260,7 +260,7 @@ jobs:
           msystem: UCRT64
           update: true
           install: >-
-            git zip make
+            git zip make gawk
             mingw-w64-ucrt-x86_64-gcc
             mingw-w64-ucrt-x86_64-pkgconf
             mingw-w64-ucrt-x86_64-glm
@@ -268,7 +268,6 @@ jobs:
             mingw-w64-ucrt-x86_64-vulkan-headers
             mingw-w64-ucrt-x86_64-vulkan-loader
             mingw-w64-ucrt-x86_64-mesa
-            mingw-w64-ucrt-x86_64-gdb
 
       # Each library is asked for by the ABI the build actually needs, trying
       # the candidate spellings in order and taking the first that exists. When
@@ -341,41 +340,45 @@ jobs:
           ./gleditor.exe --version
           ./gleditor.exe --print-asset-dir
 
-      # Best-effort rendering. The runner has no GPU and Windows' fallback
-      # OpenGL is 1.1, far below the 3.3 this needs, so the software rasteriser
-      # MSYS2 ships is dropped in beside the executable. Reported rather than
-      # required: the check above is the one that guards the package.
-      - name: try to draw a frame
-        continue-on-error: true
+      # Required, not best effort. Windows' fallback OpenGL is 1.1, far below
+      # the 3.3 this needs, so the software rasteriser MSYS2 ships is dropped in
+      # beside the executable -- and --no-present is what makes it work on a
+      # runner with no screen to present to. The frame is captured from the
+      # offscreen target, which is complete before any present would happen.
+      #
+      # This step was continue-on-error for as long as it took to find that
+      # out, and that is exactly why the Windows package went so long without
+      # ever having drawn anything: a check that cannot fail reports nothing.
+      - name: draw a frame
         run: |
           cp "$MINGW_PREFIX/bin/opengl32.dll" build/windows/gleditor/ || true
           cd build/windows/gleditor
-          # The last round established that the process exits rather than
-          # faults: gdb reported "exited with code 020001600127" -- octal, so
-          # 0x80070057, which is HRESULT_FROM_WIN32(ERROR_INVALID_PARAMETER)
-          # truncated to 87 by the shell -- and "No stack", because there is
-          # nothing to unwind after a clean exit.
-          #
-          # So the question is who called exit, which a breakpoint on the exit
-          # paths answers and a backtrace after the fact cannot.
-          gdb -batch -return-child-result \
-              -ex 'set pagination off' \
-              -ex 'set confirm off' \
-              -ex 'set breakpoint pending on' \
-              -ex 'break ExitProcess' \
-              -ex 'break exit' \
-              -ex 'break _exit' \
-              -ex 'break abort' \
-              -ex run \
-              -ex 'echo \n--- who is stopping the process ---\n' \
-              -ex bt \
-              -ex 'echo \n--- every thread ---\n' \
-              -ex 'thread apply all bt' \
-              --args ./gleditor.exe --backend opengl --profile \
-              --strict-diagnostics --screenshot frame.ppm \
-              ../../../tests/samples/quick_brown_fox.txt \
-            && echo "gdb reported success" || echo "exit status: $?"
-          ls -la frame.ppm || echo "no frame was written"
+          set -eu
+          ./gleditor.exe --backend opengl --profile --strict-diagnostics \
+            --no-present --screenshot frame.ppm \
+            ../../../tests/samples/quick_brown_fox.txt
+          ls -la frame.ppm
+
+      # A missing shader exits zero and draws a flat rectangle, so the frame
+      # having been written is not the same as the document having been drawn.
+      # Counting the distinct colours is what separates the two, and is the
+      # same check the Linux packages make through smoke-test.sh.
+      - name: check the frame is a document and not a blank rectangle
+        run: |
+          set -eu
+          cd build/windows/gleditor
+          # The PPM this writes is three header lines -- P6, the dimensions,
+          # then the maximum value -- followed by raw RGB. Skip exactly those,
+          # then read three bytes per line so one line is one pixel.
+          header=$(head -c 64 frame.ppm |
+                   awk 'NR<=3 { n += length($0) + 1 } NR==3 { print n; exit }')
+          colours=$(tail -c "+$((header + 1))" frame.ppm |
+                    od -An -v -tu1 -w3 | sort -u | wc -l)
+          echo "the frame has $colours distinct colours"
+          if [ "$colours" -lt 20 ]; then
+            echo "FAIL: $colours colours is a blank frame, not a document"
+            exit 1
+          fi
 
       - uses: actions/upload-artifact@v4
         with:

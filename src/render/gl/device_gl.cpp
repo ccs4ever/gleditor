@@ -531,7 +531,10 @@ void DeviceGL::endFrame() {
                       targetHeight, GL_COLOR_BUFFER_BIT, GL_NEAREST);
   api.BindFramebuffer(GL_FRAMEBUFFER, 0);
 
-  if (nullptr != targetWindow) {
+  // The blit above is what fills the window's back buffer; the swap is only
+  // what puts it in front of anybody. A capture reads the offscreen target, so
+  // skipping the swap costs a caller that asked for it nothing.
+  if (present && nullptr != targetWindow) {
     SDL_GL_SwapWindow(targetWindow->window);
   }
 }

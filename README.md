@@ -714,6 +714,12 @@ Command-line options (from `argparse` in `src/main.cpp`):
   long they took, and exit
 - `--strict-diagnostics`  treat a driver error as fatal instead of showing it
   as a notification
+- `--no-present`      draw frames without showing them, for capturing one on a
+  machine that can give a context but cannot put it on a screen. The capture is
+  unaffected -- drawing goes to an offscreen target either way, and presenting
+  only copies it to the window. OpenGL and OpenGL ES accept it; Vulkan refuses,
+  because every frame acquires a swapchain image and presenting is what hands
+  it back, so skipping it would block rather than capture
 - `files...`          one or more input files to open at startup
 
 Help:

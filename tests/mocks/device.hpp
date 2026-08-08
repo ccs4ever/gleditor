@@ -66,6 +66,7 @@ public:
   MOCK_METHOD(void, waitIdle, (), (override));
   MOCK_METHOD(std::vector<render::Diagnostic>, takeDiagnostics, (), (override));
   MOCK_METHOD(void, setStrictDiagnostics, (bool strict), (override));
+  MOCK_METHOD(void, setPresentEnabled, (bool enabled), (override));
 };
 
 #endif /* MOCK_GLEDITOR_RENDER_DEVICE_H */

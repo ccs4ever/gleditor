@@ -104,6 +104,15 @@ public:
   void setStrictDiagnostics(bool strict) override {
     diagnostics.setStrict(strict);
   }
+  /**
+   * @brief Refused rather than ignored.
+   *
+   * Every frame acquires a swapchain image and presenting is what hands it
+   * back. Skipping the present would work for the first frame or two and then
+   * block forever in acquire, which is a worse answer than saying no: the
+   * caller wanted a capture and would get a hang.
+   */
+  void setPresentEnabled(bool enabled) override;
 
 private:
   /// Thread count and whether it was demanded, as one value so that the
