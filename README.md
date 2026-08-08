@@ -800,7 +800,7 @@ $ sudo make test/swarm
 ==> starting the seeder in xudu-seed
   listening on 10.77.0.1:34941
 ==> running the swarm tests in xudu-leech
-[  PASSED  ] 7 tests.
+[  PASSED  ] 11 tests.
 ```
 
 So the two have separate addresses, separate routing, and separate loopbacks:
@@ -820,6 +820,19 @@ Counting connected peers does not work for that -- a peer with nothing left to
 give disconnects, so by the time a completed read can be asked about, the
 connection it used is gone.
 
+Four more cover BEP 46 over the same wire, with the seeder publishing a name it
+mints at startup: the name resolving to the right info hash, content fetched
+from nothing but a name, an unpublished name giving up rather than hanging, and
+the salt being part of the name rather than decoration.
+
+The seeder sets `allowManyConnectionsPerAddress`, which is worth explaining
+because libtorrent recommends against it. These tests are several sessions in
+one namespace, so they share an address while being separate peers in every
+other sense; the default has the seeder refuse the newcomer for as long as the
+previous connection is still being torn down, and the newcomer then waits for
+content nobody will send. That was a real intermittent failure -- about one run
+in five, always the test following the heaviest one.
+
 It needs root, because creating a network namespace does, which is why it is
 not part of `make test`. It runs as its own CI job.
 
@@ -829,6 +842,62 @@ server. It fits the `ContentSource` seam with no new code and is still the wrong
 choice, because a filesystem read of unavailable content blocks where this has
 to fail quickly. The permascroll question has a better answer that BitTorrent
 does support. See [design/btfs-and-permascrolls.md](design/btfs-and-permascrolls.md).
+
+### Names that outlive what they point at
+
+An info hash names bytes, which is its strength and also its one limit: it
+cannot name something still being written. Appending to a torrent produces a
+different torrent, because the hash fixes the file list, the piece length and
+every piece hash. A permascroll is exactly the thing that keeps growing, so its
+address cannot be the address of its content.
+
+BEP 46 supplies the missing indirection, and it is already deployed. A
+publisher holds an ed25519 key pair; the public key is the permanent name, and
+the DHT holds a signed, sequence-numbered pointer under it saying which info
+hash is current. The key never changes and what it points at does. It is
+written `magnet:?xs=urn:btpk:KEY` -- `xs`, "exact source", rather than `xt`.
+
+```
+$ xudu --swarm --dht-node 10.77.0.1:33493 --peer 10.77.0.1:33493 \
+       --torrent 'magnet:?xs=urn:btpk:f12c8faa...' --quote 0,4,9 doc
+xudu: swarm listening on port 35815
+xudu: joining the DHT through 10.77.0.1:33493
+xudu: magnet:?xs=urn:btpk:f12c8faa... is dc308895... (awaiting metadata)
+xudu: 1 quotes dc308895... file 0 [4,13)
+```
+
+That reader was never told `dc308895...`. It was given a public key, asked the
+DHT what the key currently means, and got an info hash back -- then fetched and
+verified the content as usual, ending with a document whose `primedia.spool` is
+zero bytes.
+
+The reason a stranger's answer can be believed is that it is signed. A DHT node
+is somebody asked to hold a value, and a stranger holding your address is
+normally where rot and substitution come from. Here the answer carries a
+signature over the sequence number and the payload, so the only party that can
+move a name is the one holding the private key -- and resolving is untrusted in
+exactly the way fetching a piece is untrusted. An unsigned, wrongly signed, or
+non-BEP 46 answer is treated as no answer, never as a partial one.
+
+The signing buffer is assembled here rather than taken from a library, and it
+is checked against BEP 44's published vectors: given that specification's key
+pair, this code reproduces its published signatures byte for byte. That check
+matters more than most, because a buffer assembled slightly wrongly still signs
+and still verifies against itself -- producing a name that resolves for its
+author and for nobody else alive.
+
+`--dht-node HOST:PORT` introduces a node, since no public router is contacted
+unless named. `--private-dht` drops the public rule limiting the routing table
+to one node per /8, which on a single private network would otherwise leave a
+DHT of one.
+
+This is the first step of the permascroll design in
+[design/btfs-and-permascrolls.md](design/btfs-and-permascrolls.md), and it went
+where it was meant to: a name resolves to an info hash and nothing below that
+changed. The next step is not the append protocol but the smaller thing it
+rests on -- moving a span's address off the torrent that happens to carry it
+and into scroll coordinates, so that sealing a segment cannot disturb a
+reference already handed out.
 
 **What is implemented and what is not.** The addressing, the verification and
 the fetching are all real. What is not here is any notion of who may read what:

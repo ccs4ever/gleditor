@@ -26,13 +26,14 @@ Session::Session(std::string aStorePath) : storePath(std::move(aStorePath)) {
   docStore.setContentSource(&contentSource);
 }
 
-void Session::useSwarm() {
+void Session::useSwarm(const bool privateNetwork) {
   if (!swarmSupported()) {
     throw std::runtime_error(
         "this build has no swarm support: it was compiled without libtorrent");
   }
   SwarmContentSource::Options options;
-  options.listenInterfaces = "0.0.0.0:0";
+  options.listenInterfaces              = "0.0.0.0:0";
+  options.restrictDhtToDistinctNetworks = !privateNetwork;
   swarmSource = std::make_unique<SwarmContentSource>(std::move(options));
   docStore.setContentSource(swarmSource.get());
 }
@@ -53,6 +54,43 @@ void Session::connectPeer(const InfoHash &hash, const std::string &host,
   if (nullptr != swarmSource) {
     swarmSource->connectPeer(hash, host, port);
   }
+}
+
+bool Session::awaitMetadata(const InfoHash &hash,
+                            const std::chrono::milliseconds timeout) {
+  if (nullptr != content().metainfo(hash)) {
+    return true;
+  }
+  return nullptr != swarmSource && swarmSource->waitForMetadata(hash, timeout);
+}
+
+void Session::addDhtNode(const std::string &host, const std::uint16_t port) {
+  if (nullptr != swarmSource) {
+    swarmSource->addDhtNode(host, port);
+  }
+}
+
+InfoHash Session::addName(const std::string &uri) {
+  const auto link = MutableLink::parse(uri);
+  if (nullptr == swarmSource) {
+    throw std::runtime_error(
+        "name " + link.key.hex() +
+        " can only be resolved through the DHT, which needs --swarm. A name "
+        "is not content: it says who is publishing, and the DHT says what "
+        "they are currently pointing at.");
+  }
+  const auto pointer =
+      swarmSource->resolveMutable(link, std::chrono::seconds{60});
+  if (!pointer.has_value()) {
+    throw std::runtime_error(
+        "name " + link.key.hex() +
+        " has no answer in the DHT. Either nothing has been published under "
+        "it, or this machine is not in a DHT that has heard of it -- name a "
+        "node with --dht-node.");
+  }
+  // From here it is an ordinary content reference, which is the point: what a
+  // name adds is one indirection, and everything below it is unchanged.
+  return addMagnet("magnet:?xt=urn:btih:" + pointer->hash.hex());
 }
 
 InfoHash Session::addTorrent(const std::string &torrentPath,

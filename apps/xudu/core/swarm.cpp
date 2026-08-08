@@ -15,7 +15,10 @@
 #include <vector>
 
 #include <libtorrent/alert_types.hpp>
+#include <libtorrent/bencode.hpp>
 #include <libtorrent/create_torrent.hpp>
+#include <libtorrent/kademlia/ed25519.hpp>
+#include <libtorrent/kademlia/types.hpp>
 #include <libtorrent/magnet_uri.hpp>
 #include <libtorrent/session.hpp>
 #include <libtorrent/settings_pack.hpp>
@@ -36,9 +39,66 @@ InfoHash fromLt(const lt::sha1_hash &hash) {
   return out;
 }
 
+/// libtorrent keeps its keys as arrays of char; these carry no meaning beyond
+/// the reinterpretation, and exist so the conversion is written once.
+lt::dht::public_key toLt(const PublicKey &key) {
+  lt::dht::public_key out;
+  std::copy(key.bytes.begin(), key.bytes.end(), out.bytes.begin());
+  return out;
+}
+
+lt::dht::secret_key toLt(const SecretKey &key) {
+  lt::dht::secret_key out;
+  std::copy(key.bytes.begin(), key.bytes.end(), out.bytes.begin());
+  return out;
+}
+
+lt::dht::signature toLt(const Signature &signature) {
+  lt::dht::signature out;
+  std::copy(signature.bytes.begin(), signature.bytes.end(), out.bytes.begin());
+  return out;
+}
+
+lt::span<const char> spanOf(const std::string_view text) {
+  return {text.data(), static_cast<std::ptrdiff_t>(text.size())};
+}
+
+/// Bencode an entry the way libtorrent will when it sends it, which is the
+/// encoding the signature has to cover.
+std::string encodedValueOf(const lt::entry &value) {
+  std::string out;
+  lt::bencode(std::back_inserter(out), value);
+  return out;
+}
+
 } // namespace
 
 bool swarmSupported() { return true; }
+
+MutableKeys createMutableKeys() {
+  const auto [publicKey, secretKey] =
+      lt::dht::ed25519_create_keypair(lt::dht::ed25519_create_seed());
+  MutableKeys keys;
+  std::copy(publicKey.bytes.begin(), publicKey.bytes.end(),
+            keys.publicKey.bytes.begin());
+  std::copy(secretKey.bytes.begin(), secretKey.bytes.end(),
+            keys.secretKey.bytes.begin());
+  return keys;
+}
+
+Signature signMutableItem(const std::string_view buffer,
+                          const MutableKeys &keys) {
+  const auto signed_ = lt::dht::ed25519_sign(
+      spanOf(buffer), toLt(keys.publicKey), toLt(keys.secretKey));
+  Signature out;
+  std::copy(signed_.bytes.begin(), signed_.bytes.end(), out.bytes.begin());
+  return out;
+}
+
+bool verifyMutableItem(const std::string_view buffer,
+                       const Signature &signature, const PublicKey &key) {
+  return lt::dht::ed25519_verify(toLt(signature), spanOf(buffer), toLt(key));
+}
 
 /// One swarm this source takes part in.
 struct Swarm {
@@ -76,12 +136,25 @@ struct Swarm {
   std::set<int> pendingPieces;
 };
 
+/// A name that has been asked about and not yet answered.
+struct PendingName {
+  MutableLink link;
+  /// The best answer so far, which is the one with the highest sequence
+  /// number. Only ever set from an answer whose signature checked out.
+  std::optional<MutablePointer> best;
+};
+
 struct SwarmContentSource::Impl {
   SwarmContentSource::Options options;
   lt::session session;
   /// Mutable because reading is logically const -- it answers a question about
   /// content -- while unavoidably driving a session and filling a cache.
   mutable std::map<InfoHash, Swarm> swarms;
+  /// Names being resolved right now, by where in the DHT their pointer lives.
+  std::map<DhtTarget, PendingName> names;
+  /// When the outstanding names were last asked about, so that re-asking is
+  /// periodic rather than as fast as the session can be pumped.
+  std::chrono::steady_clock::time_point lastNameQuery{};
 
   explicit Impl(SwarmContentSource::Options aOptions)
       : options(std::move(aOptions)), session(settings(options)) {}
@@ -96,11 +169,20 @@ struct SwarmContentSource::Impl {
     // peer without being asked.
     pack.set_bool(lt::settings_pack::enable_upnp, false);
     pack.set_bool(lt::settings_pack::enable_natpmp, false);
+    // No public bootstrap routers. A DHT node is reached by being named, the
+    // same way a peer is, so that a closed network stays closed.
+    pack.set_str(lt::settings_pack::dht_bootstrap_nodes, "");
+    pack.set_bool(lt::settings_pack::dht_restrict_routing_ips,
+                  options.restrictDhtToDistinctNetworks);
+    pack.set_bool(lt::settings_pack::dht_restrict_search_ips,
+                  options.restrictDhtToDistinctNetworks);
+    pack.set_bool(lt::settings_pack::allow_multiple_connections_per_ip,
+                  options.allowManyConnectionsPerAddress);
     // Only the alerts that are acted on. The default set is chatty enough that
     // pumping it would be most of the cost of a read.
     pack.set_int(lt::settings_pack::alert_mask,
                  lt::alert_category::status | lt::alert_category::storage |
-                     lt::alert_category::error);
+                     lt::alert_category::error | lt::alert_category::dht);
     pack.set_str(lt::settings_pack::user_agent, "xudu/0.1");
     return pack;
   }
@@ -163,10 +245,83 @@ struct SwarmContentSource::Impl {
     }
   }
 
+  /**
+   * @brief Ask again about any name that has not been answered.
+   *
+   * Re-asked rather than asked once, for a reason particular to a small DHT: a
+   * node only learns of another when it hears from it, so the first get is
+   * often what introduces the two, and the answer can only come to the second.
+   * On a large DHT the repetition is harmless -- the routing table is already
+   * populated and the first query finds the value.
+   */
+  void askAgainForNames() {
+    if (names.empty()) {
+      return;
+    }
+    const auto now = std::chrono::steady_clock::now();
+    if (now - lastNameQuery < std::chrono::milliseconds{500}) {
+      return;
+    }
+    lastNameQuery = now;
+    for (const auto &[target, pending] : names) {
+      if (pending.best.has_value()) {
+        continue;
+      }
+      session.dht_get_item(toLt(pending.link.key).bytes, pending.link.salt);
+    }
+  }
+
+  /**
+   * @brief Take an answer about a name, if it can be believed.
+   *
+   * Everything here is a reason to drop the answer rather than to complain
+   * about it. A name may legitimately hold nothing, or hold something that is
+   * not a pointer to a torrent, and a wrongly signed answer is what an
+   * attacker's answer looks like -- none of which is an error on this side.
+   */
+  void recordMutableItem(const lt::dht_mutable_item_alert &alert) {
+    MutableLink answered;
+    std::copy(alert.key.begin(), alert.key.end(),
+              answered.key.bytes.begin());
+    answered.salt = alert.salt;
+
+    const auto found = names.find(answered.target());
+    if (found == names.end()) {
+      return;
+    }
+    if (lt::entry::dictionary_t != alert.item.type()) {
+      // A get that found nothing still answers, with an uninitialised value.
+      return;
+    }
+
+    // Verified against this program's own reading of what BEP 44 signs, over
+    // libtorrent's encoding of the value -- which is the encoding it sends and
+    // therefore the one the publisher signed.
+    const auto encoded = encodedValueOf(alert.item);
+    Signature signature;
+    std::copy(alert.signature.begin(), alert.signature.end(),
+              signature.bytes.begin());
+    if (!verifyMutableItem(
+            mutableSigningBuffer(alert.salt, alert.seq, encoded), signature,
+            answered.key)) {
+      return;
+    }
+
+    const auto hash = decodeMutablePointer(encoded);
+    if (!hash.has_value()) {
+      return;
+    }
+    if (!found->second.best.has_value() ||
+        alert.seq > found->second.best->sequence) {
+      found->second.best = MutablePointer{*hash, alert.seq};
+    }
+  }
+
   /// Drain the session's alerts, updating whatever they are about.
   void pump() {
     tryConnectPeers();
     requestPendingPieces();
+    askAgainForNames();
     std::vector<lt::alert *> alerts;
     session.pop_alerts(&alerts);
     for (const auto *alert : alerts) {
@@ -185,6 +340,10 @@ struct SwarmContentSource::Impl {
                      lt::alert_cast<lt::metadata_received_alert>(alert);
                  nullptr != meta) {
         adoptMetadata(meta->handle);
+      } else if (const auto *item =
+                     lt::alert_cast<lt::dht_mutable_item_alert>(alert);
+                 nullptr != item) {
+        recordMutableItem(*item);
       }
     }
   }
@@ -322,6 +481,62 @@ bool SwarmContentSource::waitForMetadata(const InfoHash &hash,
       timeout);
 }
 
+void SwarmContentSource::addDhtNode(const std::string &host,
+                                    const std::uint16_t port) {
+  impl->session.add_dht_node({host, port});
+}
+
+std::optional<MutablePointer>
+SwarmContentSource::resolveMutable(const MutableLink &link,
+                                   const std::chrono::milliseconds timeout) {
+  const auto target = link.target();
+  impl->names.insert_or_assign(target, PendingName{link, std::nullopt});
+  // Asked immediately as well as on every pump, so a name that the DHT can
+  // already answer costs one round trip rather than one polling interval.
+  impl->lastNameQuery = {};
+
+  const auto answered = [this, &target] {
+    const auto found = impl->names.find(target);
+    return found != impl->names.end() && found->second.best.has_value();
+  };
+  static_cast<void>(impl->waitUntil(answered, timeout));
+
+  std::optional<MutablePointer> result;
+  if (const auto found = impl->names.find(target); found != impl->names.end()) {
+    result = found->second.best;
+    // Stop asking. A caller wanting a fresher answer asks again, which is what
+    // the specification says freshness means for a mutable item.
+    impl->names.erase(found);
+  }
+  return result;
+}
+
+void SwarmContentSource::publishMutable(const MutableKeys &keys,
+                                        const std::string &salt,
+                                        const InfoHash &hash,
+                                        const std::int64_t sequence) {
+  const auto payload = encodeMutablePointer(hash);
+  // Everything the callback touches is copied into it: libtorrent runs it on
+  // its own thread, at a time of its choosing, and a reference to a caller's
+  // argument would be a reference to something long gone.
+  impl->session.dht_put_item(
+      toLt(keys.publicKey).bytes,
+      [keys, payload, sequence](lt::entry &value, std::array<char, 64> &signature,
+                                std::int64_t &seq, const std::string &itemSalt) {
+        value = lt::bdecode(payload.begin(), payload.end());
+        seq   = sequence;
+        // Signed over libtorrent's encoding of the value rather than over the
+        // payload as written, because that encoding is what goes on the wire
+        // and a signature over anything else is a signature over nothing.
+        const auto signed_ = signMutableItem(
+            mutableSigningBuffer(itemSalt, seq, encodedValueOf(value)), keys);
+        std::copy(signed_.bytes.begin(), signed_.bytes.end(),
+                  signature.begin());
+      },
+      salt);
+  impl->pump();
+}
+
 std::uint16_t SwarmContentSource::listenPort() const {
   return static_cast<std::uint16_t>(impl->session.listen_port());
 }
@@ -427,14 +642,28 @@ namespace xudu {
 
 bool swarmSupported() { return false; }
 
+namespace {
+
+/// The one complaint every entry point here makes, so it reads the same
+/// however the build without libtorrent is reached.
+[[noreturn]] void noSwarm() {
+  throw std::runtime_error(
+      "this build has no swarm support: it was compiled without libtorrent");
+}
+
+} // namespace
+
+MutableKeys createMutableKeys() { noSwarm(); }
+Signature signMutableItem(std::string_view, const MutableKeys &) { noSwarm(); }
+bool verifyMutableItem(std::string_view, const Signature &, const PublicKey &) {
+  noSwarm();
+}
+
 struct SwarmContentSource::Impl {};
 
 SwarmContentSource::SwarmContentSource() : SwarmContentSource(Options{}) {}
 
-SwarmContentSource::SwarmContentSource(Options /*options*/) {
-  throw std::runtime_error(
-      "this build has no swarm support: it was compiled without libtorrent");
-}
+SwarmContentSource::SwarmContentSource(Options /*options*/) { noSwarm(); }
 SwarmContentSource::~SwarmContentSource() = default;
 
 InfoHash SwarmContentSource::addTorrent(std::string_view, const std::string &,
@@ -450,6 +679,15 @@ bool SwarmContentSource::waitForMetadata(const InfoHash &,
                                          std::chrono::milliseconds) {
   return false;
 }
+void SwarmContentSource::addDhtNode(const std::string &, std::uint16_t) {}
+std::optional<MutablePointer>
+SwarmContentSource::resolveMutable(const MutableLink &,
+                                   std::chrono::milliseconds) {
+  return std::nullopt;
+}
+void SwarmContentSource::publishMutable(const MutableKeys &,
+                                        const std::string &, const InfoHash &,
+                                        std::int64_t) {}
 std::uint16_t SwarmContentSource::listenPort() const { return 0; }
 int SwarmContentSource::peerCount(const InfoHash &) const { return 0; }
 std::int64_t SwarmContentSource::bytesFromPeers(const InfoHash &) const {

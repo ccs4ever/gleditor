@@ -54,6 +54,29 @@ it carries only the name: the piece hashes it must be verified against are in
 the torrent's info dictionary, which a client normally fetches from the swarm.
 A magnet whose metadata is not available is refused rather than recorded as a
 reference that could never resolve.
+.IP
+A BEP 46 name is accepted here as well, written
+.BR magnet:?xs=urn:btpk: \fIKEY\fR .
+It is not a hash of anything: it is an ed25519 public key, and what it points
+at is a signed entry in the DHT that its holder can move. That is what a
+reference to something still being written has to be, since an info hash fixes
+the content it names and appending would produce a different one.
+.IP
+The answer is believed only if it carries a signature made by the key in the
+name, so the node that supplied it is not trusted, and neither is the DHT. It
+resolves to an info hash, and from there nothing is different.
+.TP
+.BR \-\-dht\-node " \fIHOST\fR:\fIPORT\fR"
+Introduce a DHT node. Repeatable. A DHT is joined by knowing somebody already
+in it, and no public router is contacted unless it is named here, so resolving
+a
+.B btpk
+name needs at least one.
+.TP
+.B \-\-private\-dht
+Do not apply the public-DHT rule that limits the routing table to one node per
+/8. On one private network every node is in the same /8, and the rule leaves a
+DHT of one.
 .TP
 .B \-\-swarm
 Fetch quoted content from BitTorrent peers rather than only from this disk.

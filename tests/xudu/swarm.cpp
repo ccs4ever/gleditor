@@ -22,6 +22,7 @@
 #include <string>
 #include <thread>
 
+#include <xudu/core/mutable_link.hpp>
 #include <xudu/core/origin.hpp>
 #include <xudu/core/resolver.hpp>
 #include <xudu/core/store.hpp>
@@ -268,6 +269,106 @@ TEST_F(SwarmTest, theContentReallyCameOverTheNetwork) {
   // And it landed on this machine, in a directory that had nothing in it.
   // Nothing but the network could have put it there.
   EXPECT_FALSE(std::filesystem::is_empty(downloads));
+}
+
+/**
+ * @brief Resolving a name that outlives the content it points at.
+ *
+ * The seeder publishes a BEP 46 mutable item under a key it mints at startup,
+ * and the harness passes on the public key. So what these have to work from is
+ * a name and a wire -- not an info hash, which is the thing a permascroll
+ * cannot hand out because it does not know yet what it will contain.
+ */
+class MutableNameTest : public SwarmTest {
+protected:
+  xudu::MutableLink link;
+
+  void SetUp() override {
+    SwarmTest::SetUp();
+    if (IsSkipped()) {
+      return;
+    }
+    const std::string key = env("XUDU_PEER_PUBKEY");
+    if (key.empty()) {
+      GTEST_SKIP() << "the peer is not publishing a name";
+    }
+    link = xudu::MutableLink::parse("magnet:?xs=urn:btpk:" + key);
+  }
+
+  /// The same closed swarm, with the one network a mutable item lives on.
+  [[nodiscard]] SwarmContentSource::Options dhtOptions() const {
+    auto opts                          = options();
+    opts.enableDht                     = true;
+    opts.restrictDhtToDistinctNetworks = false;
+    return opts;
+  }
+};
+
+TEST_F(MutableNameTest, aNameResolvesToWhatItPointsAt) {
+  SwarmContentSource swarm(dhtOptions());
+  swarm.addDhtNode(peer.host, peer.port);
+
+  const auto pointer = swarm.resolveMutable(link, 60s);
+  ASSERT_TRUE(pointer.has_value()) << "the name did not resolve";
+
+  const auto expected = xudu::Metainfo::parse(readWholeFile(peer.torrentPath));
+  EXPECT_EQ(pointer->hash, expected.hash());
+  EXPECT_GT(pointer->sequence, 0);
+}
+
+TEST_F(MutableNameTest, contentIsFetchedFromNothingButAName) {
+  // The whole point, end to end. This process is given a public key and the
+  // address of a machine; it is never told an info hash. It asks the DHT what
+  // the name means now, checks the answer's signature against the name itself,
+  // and fetches and verifies the content that answer pointed at.
+  SwarmContentSource swarm(dhtOptions());
+  swarm.addDhtNode(peer.host, peer.port);
+
+  const auto pointer = swarm.resolveMutable(link, 60s);
+  ASSERT_TRUE(pointer.has_value()) << "the name did not resolve";
+
+  // A magnet built from the resolved hash, so nothing but the DHT's answer
+  // decides which content is fetched.
+  const auto hash = swarm.addMagnet(
+      "magnet:?xt=urn:btih:" + pointer->hash.hex(), downloads.string());
+  ASSERT_EQ(hash, pointer->hash);
+  swarm.connectPeer(hash, peer.host, peer.port);
+  ASSERT_TRUE(swarm.waitForMetadata(hash, 30s)) << "no metadata arrived";
+
+  const auto *meta = swarm.metainfo(hash);
+  ASSERT_NE(meta, nullptr);
+  const auto &file = meta->files().front();
+  const Origin origin{hash, 0, file.path, file.offset, file.length};
+
+  const Resolver resolver(&swarm);
+  EXPECT_EQ(resolver.read(origin, PrimediaSpan{1, 0, file.length}), peer.text);
+}
+
+TEST_F(MutableNameTest, aNameNobodyHasPublishedResolvesToNothing) {
+  // It has to give up rather than hang, for the same reason an unseeded
+  // quotation does: a document is being rendered on the other side of this.
+  SwarmContentSource swarm(dhtOptions());
+  swarm.addDhtNode(peer.host, peer.port);
+
+  xudu::MutableLink unknown;
+  unknown.key = xudu::createMutableKeys().publicKey;
+
+  const auto started = std::chrono::steady_clock::now();
+  EXPECT_FALSE(swarm.resolveMutable(unknown, 3s).has_value());
+  EXPECT_LT(std::chrono::steady_clock::now() - started, 20s)
+      << "the lookup did not give up";
+}
+
+TEST_F(MutableNameTest, theSaltIsPartOfTheName) {
+  // The same key with a different salt is a different name, and this one holds
+  // nothing. Without that, one key could carry one scroll.
+  SwarmContentSource swarm(dhtOptions());
+  swarm.addDhtNode(peer.host, peer.port);
+
+  auto salted = link;
+  salted.salt = "some-other-scroll";
+  ASSERT_NE(salted.target(), link.target());
+  EXPECT_FALSE(swarm.resolveMutable(salted, 3s).has_value());
 }
 
 } // namespace

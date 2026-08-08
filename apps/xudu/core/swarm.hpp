@@ -27,6 +27,9 @@
 #include <string_view>
 #include <vector>
 
+#include <optional>
+
+#include "mutable_link.hpp"
 #include "resolver.hpp"
 #include "torrent.hpp"
 
@@ -34,6 +37,54 @@ namespace xudu {
 
 /// Whether this build can join a swarm at all.
 [[nodiscard]] bool swarmSupported();
+
+/// What a mutable name points at, and how recently the publisher said so.
+struct MutablePointer {
+  InfoHash hash;
+  /**
+   * @brief The sequence number the pointer was published under.
+   *
+   * The only ordering there is. Two answers to the same name are not two
+   * opinions to be reconciled -- the higher sequence number is the later one,
+   * and that is the whole of what "current" means here.
+   */
+  std::int64_t sequence{};
+};
+
+/// A publisher's identity: the name, and the right to move it.
+struct MutableKeys {
+  PublicKey publicKey;
+  SecretKey secretKey;
+};
+
+/**
+ * @brief Mint a new identity.
+ *
+ * Every call produces a name nobody has used before, without asking anyone,
+ * which is the property that makes a public key a usable permanent name in the
+ * first place: there is no registry to be turned off.
+ *
+ * @throws std::runtime_error when the build has no libtorrent.
+ */
+[[nodiscard]] MutableKeys createMutableKeys();
+
+/// Sign @p buffer, which must be what mutableSigningBuffer() produced.
+/// @throws std::runtime_error when the build has no libtorrent.
+[[nodiscard]] Signature signMutableItem(std::string_view buffer,
+                                        const MutableKeys &keys);
+
+/**
+ * @brief Whether @p signature over @p buffer really is @p key's.
+ *
+ * This is the whole basis on which an answer from a stranger can be believed,
+ * so it is worth being clear about what it does not depend on: not on which
+ * node answered, not on how many agreed, and not on the DHT being honest.
+ *
+ * @throws std::runtime_error when the build has no libtorrent.
+ */
+[[nodiscard]] bool verifyMutableItem(std::string_view buffer,
+                                     const Signature &signature,
+                                     const PublicKey &key);
 
 /**
  * @class SwarmContentSource
@@ -64,6 +115,30 @@ public:
     bool enableDht{true};
     bool enableLocalDiscovery{true};
     bool enableTrackers{true};
+    /**
+     * @brief Whether to keep the DHT routing table to one node per /8.
+     *
+     * On the open internet this is a defence worth having: it costs an
+     * attacker a spread of addresses to fill a routing table. On a private
+     * network it is fatal rather than cautious, because every node there is in
+     * the same /8 and the rule leaves a DHT of one -- which is the shape a
+     * permascroll server on a LAN has, and the shape the tests have.
+     */
+    bool restrictDhtToDistinctNetworks{true};
+    /**
+     * @brief Whether to accept a second connection from an address already
+     *        connected.
+     *
+     * Off by default, as libtorrent has it, where refusing is a defence
+     * against one host opening many connections. It is wrong for the case
+     * where several peers genuinely share an address: a seeder will refuse the
+     * newcomer for as long as the previous connection is still being torn
+     * down, and the newcomer waits for content that will never be sent.
+     *
+     * That is the shape of a test harness running several sessions on one
+     * address, and of anything behind a single outward address.
+     */
+    bool allowManyConnectionsPerAddress{false};
     /// How long a read waits before giving up on the pieces it needs.
     std::chrono::milliseconds readTimeout{std::chrono::seconds{30}};
     /// How long to wait for a magnet's metadata.
@@ -118,6 +193,53 @@ public:
   /// passes. Already true for anything added from a .torrent file.
   [[nodiscard]] bool waitForMetadata(const InfoHash &hash,
                                      std::chrono::milliseconds timeout);
+
+  /**
+   * @brief Tell the DHT about a node directly.
+   *
+   * The equivalent of connectPeer() for the other network. A public DHT is
+   * bootstrapped from well-known routers; a closed one has none, so somebody
+   * has to be named. Also what a permascroll server would be pointed at.
+   */
+  void addDhtNode(const std::string &host, std::uint16_t port);
+
+  /**
+   * @brief Ask the DHT what a mutable name currently points at.
+   *
+   * The get is re-issued until an answer arrives or the timeout passes, rather
+   * than asked once: a two-node DHT does not know its neighbours until they
+   * have spoken, and the first query is often what introduces them.
+   *
+   * Only an answer whose signature checks out against the link's own public
+   * key is returned. An unsigned, wrongly signed, or non-BEP 46 value is
+   * treated as no answer at all -- not as a partial one -- for the same reason
+   * a piece that fails its hash is: downstream cannot tell a checked answer
+   * from an unchecked one, so the check has to be the gate.
+   *
+   * A single call is a snapshot, and the specification is explicit that
+   * freshness comes from asking again: consumers "periodically poll such ID by
+   * issuing get requests to see whether the v property of the response has
+   * updated". So this reports what the DHT will say now, not what the
+   * publisher has most recently signed.
+   *
+   * @return The pointer, or nothing when the name has no answer here.
+   */
+  [[nodiscard]] std::optional<MutablePointer>
+  resolveMutable(const MutableLink &link, std::chrono::milliseconds timeout);
+
+  /**
+   * @brief Point a name at an info hash.
+   *
+   * The publisher's half. It exists here mostly because a resolver that has
+   * never been tested against a real publisher is a resolver nobody should
+   * believe -- and because sealing a permascroll segment ends exactly here.
+   *
+   * @param sequence Must exceed what was published before, or the DHT keeps
+   *        what it has. That is the rule that makes an old answer losable
+   *        rather than authoritative.
+   */
+  void publishMutable(const MutableKeys &keys, const std::string &salt,
+                      const InfoHash &hash, std::int64_t sequence);
 
   /// The port actually listened on, once the session is up.
   [[nodiscard]] std::uint16_t listenPort() const;

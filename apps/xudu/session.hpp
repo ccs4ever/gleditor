@@ -14,6 +14,7 @@
 #ifndef XUDU_SESSION_H
 #define XUDU_SESSION_H
 
+#include <chrono>
 #include <cstdint>
 #include <memory>
 #include <string>
@@ -114,7 +115,10 @@ public:
    *
    * @throws std::runtime_error if this build has no libtorrent.
    */
-  void useSwarm();
+  /// @param privateNetwork True when every node is on one private network, so
+  ///        the public-DHT rule limiting the routing table to one node per /8
+  ///        would leave a DHT of one.
+  void useSwarm(bool privateNetwork = false);
   [[nodiscard]] bool swarmEnabled() const { return nullptr != swarmSource; }
   /// The port the swarm listens on, or zero when there is no swarm.
   [[nodiscard]] std::uint16_t swarmPort() const;
@@ -146,6 +150,42 @@ public:
    *         a reference that would silently read as empty forever.
    */
   InfoHash addMagnet(const std::string &uri);
+
+  /**
+   * @brief Wait until @p hash can be described.
+   *
+   * A magnet, and therefore a name, joins a swarm knowing only which content
+   * is meant; the piece hashes come from a peer afterwards. So there is a
+   * window where a reference is held and nothing about it can be checked, and
+   * anything needing to verify has to wait the window out.
+   *
+   * @return True when the metadata is there, including when it always was.
+   */
+  [[nodiscard]] bool awaitMetadata(const InfoHash &hash,
+                                   std::chrono::milliseconds timeout);
+
+  /**
+   * @brief Tell the DHT about a node, as HOST and PORT.
+   *
+   * A DHT is joined by knowing somebody already in it. Does nothing without a
+   * swarm.
+   */
+  void addDhtNode(const std::string &host, std::uint16_t port);
+
+  /**
+   * @brief Make available whatever a BEP 46 name currently points at.
+   *
+   * The name is an ed25519 public key rather than a hash, so it can be handed
+   * out before the content it will point at exists -- which is what a
+   * reference to something still being written has to be. Asking what it means
+   * is a DHT lookup, and the answer is believed only if it carries the
+   * publisher's signature.
+   *
+   * @return The info hash the name resolved to.
+   * @throws std::runtime_error without a swarm, or when the name has no
+   *         answer. Saying so beats recording a reference to nothing.
+   */
+  InfoHash addName(const std::string &uri);
 
   /// Where content is fetched from: a swarm when one was asked for, otherwise
   /// whatever is already on this disk.

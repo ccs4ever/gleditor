@@ -15,6 +15,7 @@
  * colour ranges somebody else cares about, and to let a program draw. Xanadu
  * is assembled out of those here.
  */
+#include <chrono>
 #include <exception>
 #include <iostream>
 #include <memory>
@@ -38,6 +39,7 @@
 
 #include "core/microversion.hpp"
 #include "core/ops.hpp"
+#include "core/mutable_link.hpp"
 #include "core/torrent.hpp"
 #include "session.hpp"
 
@@ -299,14 +301,27 @@ int main(const int argc, char **argv) {
             "recent state in the store")
       .default_value(std::string{});
   parser.add_argument("--torrent")
-      .help("a .torrent file, or a magnet link naming one already given; "
-            "repeatable. The info hash is a content-derived name, so a "
-            "quotation into it means the same thing to anyone who has the "
-            "reference and keeps meaning it after this machine is gone. A "
-            "magnet carries only that name -- the piece hashes it must be "
-            "verified against are in the torrent's info dictionary, which a "
-            "client normally fetches from the swarm")
+      .help("a .torrent file, a magnet link naming one already given, or a "
+            "BEP 46 name (magnet:?xs=urn:btpk:KEY); repeatable. The info hash "
+            "is a content-derived name, so a quotation into it means the same "
+            "thing to anyone who has the reference and keeps meaning it after "
+            "this machine is gone. A magnet carries only that name -- the "
+            "piece hashes it must be verified against are in the torrent's "
+            "info dictionary, which a client normally fetches from the swarm. "
+            "A btpk name carries less still: it is a public key, and what it "
+            "points at is looked up in the DHT and believed only if the "
+            "answer is signed by that key")
       .append();
+  parser.add_argument("--dht-node")
+      .help("introduce a DHT node as HOST:PORT; repeatable. A DHT is joined by "
+            "knowing somebody already in it, and no public routers are "
+            "contacted unless named here. Needed to resolve a btpk name")
+      .append();
+  parser.add_argument("--private-dht")
+      .help("this DHT is one private network, so do not apply the public rule "
+            "that keeps the routing table to one node per /8 -- on a LAN every "
+            "node is in the same /8 and the rule leaves a DHT of one")
+      .flag();
   parser.add_argument("--swarm")
       .help("fetch quoted content from BitTorrent peers rather than only from "
             "this disk. Without it a reference resolves only when this machine "
@@ -378,9 +393,23 @@ int main(const int argc, char **argv) {
     }
 
     if (parser["--swarm"] == true) {
-      session->useSwarm();
+      session->useSwarm(parser["--private-dht"] == true);
       quiet || std::cout << "xudu: swarm listening on port "
                          << session->swarmPort() << "\n";
+    }
+
+    // Before any torrent, since resolving a name needs a DHT to ask.
+    if (parser.present<std::vector<std::string>>("--dht-node")) {
+      for (const auto &spec : parser.get<std::vector<std::string>>("--dht-node")) {
+        const auto colon = spec.rfind(':');
+        if (std::string::npos == colon) {
+          throw std::runtime_error("--dht-node expects HOST:PORT, got: " + spec);
+        }
+        session->addDhtNode(
+            spec.substr(0, colon),
+            static_cast<std::uint16_t>(std::stoul(spec.substr(colon + 1))));
+        quiet || std::cout << "xudu: joining the DHT through " << spec << "\n";
+      }
     }
 
     // Torrents first, so a --quote has something to name.
@@ -388,14 +417,28 @@ int main(const int argc, char **argv) {
     if (parser.present<std::vector<std::string>>("--torrent")) {
       const auto root = parser.get<std::string>("--torrent-data");
       for (const auto &file : parser.get<std::vector<std::string>>("--torrent")) {
-        const auto hash = xudu::MagnetLink::looksLikeMagnet(file)
+        // A name is tried first: both spellings begin "magnet:?", and the one
+        // that has to be looked up is the one carrying xs=urn:btpk.
+        const auto hash = xudu::MutableLink::looksLikeMutableLink(file)
+                              ? session->addName(file)
+                          : xudu::MagnetLink::looksLikeMagnet(file)
                               ? session->addMagnet(file)
                               : session->addTorrent(file, root);
         available.push_back(hash);
-        const auto *const meta = session->content().metainfo(hash);
-        quiet || std::cout << "xudu: " << file << " is " << meta->magnet()
-                           << " (" << meta->files().size() << " file(s), "
-                           << meta->totalLength() << " bytes)\n";
+        // A magnet, and so a name, joins a swarm knowing only which content is
+        // meant: the file list and the piece hashes come from a peer
+        // afterwards. Until they do there is nothing to describe, which is a
+        // stage to report rather than a failure -- the wait happens where the
+        // metadata is first needed, by which time a --peer has been given.
+        if (const auto *const meta = session->content().metainfo(hash);
+            nullptr != meta) {
+          quiet || std::cout << "xudu: " << file << " is " << meta->magnet()
+                             << " (" << meta->files().size() << " file(s), "
+                             << meta->totalLength() << " bytes)\n";
+        } else {
+          quiet || std::cout << "xudu: " << file << " is "
+                             << hash.hex() << " (awaiting metadata)\n";
+        }
       }
     }
 
@@ -419,6 +462,16 @@ int main(const int argc, char **argv) {
     if (parser.present<std::vector<std::string>>("--quote")) {
       if (available.empty()) {
         throw std::runtime_error("--quote needs a --torrent to quote from");
+      }
+      // Nothing can be quoted out of content that cannot be described, since
+      // the piece hashes are what a quotation is checked against. This is the
+      // first point where that is true, and peers have been introduced by now.
+      if (!session->awaitMetadata(available.back(), std::chrono::seconds{60})) {
+        throw std::runtime_error(
+            "--quote: no metadata arrived for " + available.back().hex() +
+            ". A magnet or a name carries only which content is meant; the "
+            "piece hashes come from a peer, so one has to be reachable -- try "
+            "--peer HOST:PORT.");
       }
       for (const auto &spec : parser.get<std::vector<std::string>>("--quote")) {
         const auto first  = spec.find(',');
