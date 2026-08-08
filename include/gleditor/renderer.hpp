@@ -41,6 +41,7 @@ struct RenderItem {
     Resize,
     OpenDoc,
     Run,
+    RunState,
   };
   Type type;
 
@@ -100,6 +101,22 @@ struct RenderItemRun : RenderItem {
   void operator()() const { fun(); }
 };
 
+/**
+ * @brief Work that needs the render thread's own state.
+ *
+ * Editing a document takes a RenderState, because an edit schedules a reflow
+ * against the glyph cache and the buffer pool. That state is created inside
+ * the render loop and exists nowhere else, so a program with a key bound to
+ * "delete the selection" had no way to reach it. This is that way.
+ */
+struct RenderItemRunState : RenderItem {
+  std::function<void(RenderState &)> fun;
+  explicit RenderItemRunState(std::invocable<RenderState &> auto fun)
+      : RenderItem(Type::RunState), fun(std::move(fun)) {}
+  ~RenderItemRunState() override = default;
+  void operator()(RenderState &state) const { fun(state); }
+};
+
 // Abstract interface for the renderer used by external components
 class AbstractRenderer {
 protected:
@@ -153,6 +170,17 @@ public:
     }
   }
 
+  /**
+   * @brief Schedule work that needs the render thread's RenderState.
+   *
+   * Always enqueued, even when called from the render thread: the state
+   * belongs to the render loop's own stack frame, so there is no way to hand
+   * it over other than by going round the queue.
+   */
+  void runWithState(std::invocable<RenderState &> auto fun) {
+    renderQueue.push(RenderItemRunState(std::move(fun)));
+  }
+
   template <typename Item>
     requires std::derived_from<Item, RenderItem>
   void push(const Item &item) {
@@ -174,6 +202,16 @@ public:
    * frame: register before the render thread starts, or from inside run().
    * Registering the same one twice registers it once.
    */
+  /**
+   * @brief The editing caret, or nullptr before the render thread has built
+   *        one.
+   *
+   * A program with a command that acts on the selection -- delete it, quote
+   * it, link it -- has to be able to ask what is selected. Only safe to touch
+   * on the render thread, so reach it from inside run() or runWithState().
+   */
+  [[nodiscard]] virtual Caret *editCaret() { return nullptr; }
+
   void addSpanDecorator(gleditor::SpanDecorator *decorator);
   void removeSpanDecorator(gleditor::SpanDecorator *decorator);
   void addFrameContributor(gleditor::FrameContributor *contributor);
@@ -350,6 +388,8 @@ public:
    * @brief Convenience to get a shared_ptr to this instance.
    */
   std::shared_ptr<Renderer> getPtr() { return shared_from_this(); }
+
+  [[nodiscard]] Caret *editCaret() override { return caret.get(); }
 
   Renderer(const AppStateRef &state, render::Backend backend,
            [[maybe_unused]] Private _priv)

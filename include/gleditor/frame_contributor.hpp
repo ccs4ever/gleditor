@@ -9,16 +9,21 @@
  *
  * A contributor is that way in. It is called once a frame with the frame's
  * camera and the render state, and draws whatever it likes, usually through a
- * Canvas it owns. The library supplies the position of things it knows about
- * -- see Doc::spanQuads() for where a range of text landed in the world -- and
- * has no opinion about what is drawn against them.
+ * Canvas it owns. What it draws is its own business: the library hands over
+ * the transform and the device and has no opinion about what appears.
  */
 #ifndef GLEDITOR_FRAME_CONTRIBUTOR_H
 #define GLEDITOR_FRAME_CONTRIBUTOR_H
 
 #include <glm/ext/matrix_float4x4.hpp>
 
+#include <gleditor/render/types.hpp>
+
 struct RenderState;
+
+namespace render {
+class RenderDevice;
+}
 
 namespace gleditor {
 
@@ -50,6 +55,20 @@ public:
   FrameContributor &operator=(const FrameContributor &) = delete;
   FrameContributor(FrameContributor &&)                 = delete;
   FrameContributor &operator=(FrameContributor &&)      = delete;
+
+  /**
+   * @brief Called once, before the first frame, when the device exists.
+   *
+   * A contributor that draws anything needs a pipeline, and a pipeline needs
+   * both a device and the description the documents are drawn with -- neither
+   * of which exists when a program registers itself, because the device is
+   * created on the render thread. This is where a Canvas gets built.
+   *
+   * Only contributors registered before the render thread starts are called.
+   */
+  virtual void deviceReady([[maybe_unused]] render::RenderDevice &device,
+                           [[maybe_unused]] const render::PipelineDesc
+                               &documentPipeline) {}
 
   virtual void drawFrame(FrameContext &ctx) = 0;
 

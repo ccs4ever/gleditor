@@ -90,6 +90,11 @@ void Renderer::createPipeline(RenderState &state) const {
   // depth state and the transform it is handed differ.
   toasts->createPipeline(desc);
   caret->createPipeline(desc);
+  // Whatever the program draws for itself needs the same two things, and this
+  // is the first moment either exists.
+  for (auto *const contributor : frameContributors) {
+    contributor->deviceReady(*device, desc);
+  }
 }
 
 void Renderer::newDoc(RenderState &state) {
@@ -586,6 +591,10 @@ void Renderer::dispatch(RenderState &state, RenderItem &item) {
   }
   case RenderItem::Type::Run: {
     dynamic_cast<const RenderItemRun &>(item)();
+    break;
+  }
+  case RenderItem::Type::RunState: {
+    dynamic_cast<const RenderItemRunState &>(item)(state);
     break;
   }
   }
