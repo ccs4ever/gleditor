@@ -899,9 +899,13 @@ what each job runs, and it is runnable by hand against any installed copy.
   - `./build/xudu [options] [store]` -- see [xudu](#xudu-a-xanadoc-editor)
 
 Both programs take the options below; `xudu` adds a few of its own, which
-`xudu --help` lists. Neither needs `LD_LIBRARY_PATH` to find the library it
-was built against: the run path records the binary's own directory and the
-install prefix.
+`xudu --help` lists. Neither needs `LD_LIBRARY_PATH` to find the library out of
+the build tree: the run path records the binary's own directory, and the
+library is built beside it. An installed copy relies on the dynamic linker,
+which finds a library under `/usr` or `/usr/local` on its own; the install
+directory is added to the run path only when it is somewhere the linker would
+not look, since a runpath into a standard directory is at best noise and
+Fedora's packaging checks reject one outright.
 
 Command-line options (registered by `gleditor::addCommonArguments()` in
 `src/app.cpp`):

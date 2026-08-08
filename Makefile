@@ -244,12 +244,20 @@ LIBNAME     := libgleditor.so
 LIBREAL     := $(OBJDIR)/$(LIBNAME).$(SOVERSION)
 LIBLINK     := $(OBJDIR)/$(LIBNAME)
 LIB_LINKARG := -Wl,-soname,$(LIBNAME).$(SOVERSION)
-# Programs find the library beside themselves in a build tree and in $(libdir)
-# once installed. Both are recorded, so a binary run out of build/ needs no
-# LD_LIBRARY_PATH and an installed one needs no ldconfig entry. $$ORIGIN
-# reaches the shell as a literal, which is what makes it a run-time lookup
-# rather than a path baked in at link time.
-RPATH_FLAGS := -Wl,-rpath,'$$ORIGIN' -Wl,-rpath,$(libdir)
+# A program finds the library beside itself, which is what lets one run out of
+# build/ with no LD_LIBRARY_PATH. $$ORIGIN reaches the shell as a literal, so
+# it stays a run-time lookup rather than a path resolved at link time.
+RPATH_FLAGS := -Wl,-rpath,'$$ORIGIN'
+# The install directory is recorded as well, but only when the dynamic linker
+# would not find it anyway. Under a custom prefix that is the difference
+# between a program that starts and one that does not; under /usr it is at best
+# noise, and Fedora's check-rpaths fails the package build outright on a
+# runpath naming /usr/local/lib. Anything under /usr, and /lib and /lib64
+# themselves, count as somewhere the linker already looks -- which covers
+# Debian's multiarch directory without naming it.
+ifeq (,$(filter /usr/% /lib /lib64,$(libdir)))
+RPATH_FLAGS += -Wl,-rpath,$(libdir)
+endif
 endif
 
 ALL_OBJS := $(sort $(LIB_OBJS) $(GLEDITOR_OBJS) $(XUDU_CORE_OBJS) $(XUDU_OBJS) \
