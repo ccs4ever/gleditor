@@ -2,7 +2,11 @@
 
 #include <algorithm>
 #include <cstdint>
+#include <filesystem>
+#include <fstream>
 #include <iostream>
+#include <iterator>
+#include <stdexcept>
 #include <map>
 #include <memory>
 #include <string>
@@ -19,6 +23,64 @@ namespace xudu {
 
 Session::Session(std::string aStorePath) : storePath(std::move(aStorePath)) {
   docStore.load(storePath);
+  docStore.setContentSource(&contentSource);
+}
+
+InfoHash Session::addTorrent(const std::string &torrentPath,
+                             const std::string &dataRoot) {
+  std::ifstream in(torrentPath, std::ios::binary);
+  if (!in) {
+    throw std::runtime_error("cannot read torrent: " + torrentPath);
+  }
+  const std::string contents{std::istreambuf_iterator<char>(in),
+                             std::istreambuf_iterator<char>()};
+  // A downloader leaves a torrent's data beside the torrent file more often
+  // than not, so that is the default rather than something to be told.
+  const auto root = dataRoot.empty()
+                        ? std::filesystem::path(torrentPath).parent_path().string()
+                        : dataRoot;
+  return contentSource.add(contents, root.empty() ? "." : root);
+}
+
+InfoHash Session::addMagnet(const std::string &uri) {
+  const auto link = MagnetLink::parse(uri);
+  // The link names the content; it does not carry it, and it does not carry
+  // the piece hashes either. Without those nothing can be verified, and
+  // returning unverified bytes is the one thing this must not do.
+  if (nullptr == contentSource.metainfo(link.hash)) {
+    throw std::runtime_error(
+        "magnet " + link.hash.hex() +
+        " names content whose metadata is not available here. A magnet link "
+        "carries only the name; the piece hashes it needs to be verified "
+        "against live in the torrent's info dictionary, which a client "
+        "normally fetches from the swarm. Give the matching .torrent with "
+        "--torrent.");
+  }
+  return link.hash;
+}
+
+MicroversionId Session::quoteTorrent(const MicroversionId &parent,
+                                     const std::uint32_t at,
+                                     const InfoHash &hash,
+                                     const std::uint32_t fileIndex,
+                                     const std::uint64_t offset,
+                                     const std::uint64_t length) {
+  const auto *const meta = contentSource.metainfo(hash);
+  if (nullptr == meta) {
+    throw std::runtime_error("no torrent " + hash.hex() +
+                             " has been made available");
+  }
+  if (fileIndex >= meta->files().size()) {
+    throw std::runtime_error("torrent " + hash.hex() + " has no file " +
+                             std::to_string(fileIndex));
+  }
+  const auto &file = meta->files()[fileIndex];
+  const Origin origin{hash, fileIndex, file.path, file.offset, file.length};
+  // A length of zero means the rest of the file, which is what "quote this
+  // document" ought to be spelled as.
+  const auto count = 0 == length ? file.length - std::min(offset, file.length)
+                                 : length;
+  return docStore.transcludeExternal(parent, at, origin, offset, count);
 }
 
 MicroversionId Session::versionOf(const std::uint32_t docIndex) const {

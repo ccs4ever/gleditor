@@ -1,84 +1,136 @@
 /**
  * @file spool.hpp
- * @brief The primedia spool: content, appended and never changed.
+ * @brief Addresses for content, and the local spool that is one home for it.
  *
  * "In OSMIC, data is logically saved in the server as two cumulative spools --
- * that is, Append-and-Read-Only files." This is the first of them. Text that
- * an insertion introduced is appended here and stays at that address forever;
- * the second spool records the operations, and lives in store.hpp.
+ * that is, Append-and-Read-Only files." This is the first of them: text that
+ * an insertion introduced is appended here and stays at that address forever.
+ * The second spool records the operations, and lives in store.hpp.
  *
  * Nothing is ever removed. Deleting text in a document removes a pointer to
  * it, not the text -- which is what makes every past state of every document
  * still reachable, and is the difference between this and a file.
  *
- * The address of a run of bytes is what gives Xanadu's transclusion its
- * meaning: "conceptually there is only one copy of anything". Two documents
- * quoting the same passage do not hold two copies of it, they hold two
- * pointers to one address, and that they are the same content is then a fact
- * about the addresses rather than a string comparison that might be a
- * coincidence.
+ * An address is what gives transclusion its meaning: "conceptually there is
+ * only one copy of anything". Two documents quoting the same passage hold two
+ * pointers to one address rather than two copies, and that they are the same
+ * content is then a fact about the addresses rather than a string comparison
+ * that might be a coincidence.
  *
- * Nelson intends the same code to serve other media: "later primedia spools
- * can receive audio samples, video frames, fax scanlines, and other countable
- * data." The unit here is the byte because the only medium so far is text; the
- * spool does not interpret what it holds, so what a unit counts is the one
- * thing that would have to change.
+ * Which is why an address has to say *which* content, and not only where in
+ * it. An offset into one machine's spool means nothing to anyone else and
+ * nothing to you either once that machine is gone. So a span carries an
+ * origin: the local spool, or -- see torrent.hpp -- a file inside a torrent,
+ * whose name is derived from its content and resolves anywhere.
  */
 #ifndef XUDU_SPOOL_H
 #define XUDU_SPOOL_H
 
+#include <algorithm>
 #include <cstdint>
-#include <optional>
 #include <string>
 #include <string_view>
 
 namespace xudu {
 
 /**
+ * @brief Which body of content an address points into.
+ *
+ * Zero is the local primedia spool, which is where anything typed here goes.
+ * Anything else names an entry in the store's table of external origins; see
+ * Origin in origin.hpp. An id is local to one store, and the table is what
+ * turns it back into something globally meaningful.
+ */
+using OriginId = std::uint32_t;
+inline constexpr OriginId localOrigin = 0;
+
+/**
  * @brief A run of content at a permanent address.
  *
- * Xanadu's addresses are global; these are local to one spool, which is as far
- * as a single-machine store can honestly go. A network address would be this
- * plus the identity of the spool.
+ * For the local spool, @p start is an offset into it. For a torrent-backed
+ * origin it is an offset into that one file, not into the torrent's
+ * concatenated stream -- a reference reads as "these bytes of this file",
+ * which is what a person means, and the resolver does the arithmetic.
  */
 struct PrimediaSpan {
+  OriginId origin{localOrigin};
   std::uint64_t start{};
   std::uint64_t length{};
 
   [[nodiscard]] std::uint64_t end() const { return start + length; }
   [[nodiscard]] bool empty() const { return 0 == length; }
-  [[nodiscard]] bool contains(const std::uint64_t address) const {
-    return address >= start && address < end();
+  [[nodiscard]] bool isLocal() const { return localOrigin == origin; }
+  [[nodiscard]] bool contains(const OriginId which,
+                              const std::uint64_t address) const {
+    return which == origin && address >= start && address < end();
   }
 
   /**
    * @brief The part of this span that @p other also covers.
    *
-   * Empty when they do not meet. This is the whole of how transclusion is
-   * detected: two documents show the same content exactly where their spans
-   * overlap, and nothing has to compare a single character to find out.
+   * Empty when they do not meet, and empty whenever they are addresses into
+   * different content -- byte 100 of one torrent has nothing to do with byte
+   * 100 of another, and treating overlapping numbers as overlapping content
+   * would report transclusions nobody made.
+   *
+   * This is the whole of how transclusion is detected: two documents show the
+   * same content exactly where their spans overlap, and nothing has to compare
+   * a single character to find out.
    */
   [[nodiscard]] PrimediaSpan intersect(const PrimediaSpan &other) const {
+    if (origin != other.origin) {
+      return {origin, start, 0};
+    }
     const auto from = std::max(start, other.start);
     const auto to   = std::min(end(), other.end());
-    return to > from ? PrimediaSpan{from, to - from} : PrimediaSpan{from, 0};
+    return to > from ? PrimediaSpan{origin, from, to - from}
+                     : PrimediaSpan{origin, from, 0};
   }
 
   /// A sub-range of this span, given an offset into it and a length.
   [[nodiscard]] PrimediaSpan slice(const std::uint64_t offset,
                                    const std::uint64_t count) const {
     const auto from = std::min(offset, length);
-    return {start + from, std::min(count, length - from)};
+    return {origin, start + from, std::min(count, length - from)};
   }
 
   bool operator==(const PrimediaSpan &) const = default;
 };
 
 /**
- * @class PrimediaSpool
- * @brief Append-and-read-only storage for content.
+ * @brief Something that can turn an address back into bytes.
+ *
+ * Version::materialize() takes one of these rather than a spool, because a
+ * version's pieces may point at content this machine never typed. The store
+ * is the implementation that knows about every origin; the spool below is the
+ * one that knows about the local one only.
  */
-class PrimediaSpool {
+class SpanReader {
+public:
+  SpanReader()          = default;
+  virtual ~SpanReader() = default;
+
+  SpanReader(const SpanReader &)            = delete;
+  SpanReader &operator=(const SpanReader &) = delete;
+  SpanReader(SpanReader &&)                 = delete;
+  SpanReader &operator=(SpanReader &&)      = delete;
+
+  /**
+   * @brief The content at @p span.
+   *
+   * An implementation that cannot reach the content returns fewer bytes than
+   * asked for, or none. It must not return the wrong bytes: a caller has no
+   * way to tell a substitution from the real thing, which is exactly the
+   * failure content addressing exists to prevent.
+   */
+  [[nodiscard]] virtual std::string read(const PrimediaSpan &span) const = 0;
+};
+
+/**
+ * @class PrimediaSpool
+ * @brief Append-and-read-only storage for content typed here.
+ */
+class PrimediaSpool : public SpanReader {
 public:
   /**
    * @brief Add content, and say where it landed.
@@ -90,8 +142,13 @@ public:
    */
   PrimediaSpan append(std::string_view bytes);
 
-  /// The content at @p span, clamped to what has actually been written.
-  [[nodiscard]] std::string read(const PrimediaSpan &span) const;
+  /**
+   * @brief The content at @p span, clamped to what has been written.
+   * @throws std::runtime_error for a span into anything but the local spool.
+   *         The spool has no way to reach other content and must not answer
+   *         with the wrong bytes.
+   */
+  [[nodiscard]] std::string read(const PrimediaSpan &span) const override;
 
   [[nodiscard]] std::uint64_t size() const {
     return static_cast<std::uint64_t>(contents.size());

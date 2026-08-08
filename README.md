@@ -602,6 +602,11 @@ Text that is typed goes into the **primedia spool** at an address it keeps
 forever. Each edit goes into the **operations spool**, filed under the state it
 produced. Nothing is ever removed from either.
 
+An address says *which* content as well as where in it. The local spool is one
+origin; a file inside a torrent is another, and two addresses into different
+content never overlap however close their numbers are. See
+[stable references](#stable-references-quoting-a-torrent).
+
 ### Nothing stores a version
 
 "The server does not store versions. Nothing stores versions. Versions
@@ -666,6 +671,100 @@ whose primedia addresses the two versions have in common, which is why only
 " EDITED" and " BRANCHED" -- the bytes that were typed separately -- come out
 plain.
 
+### Stable references: quoting a torrent
+
+A local address is not a Xanadu address. `primedia.spool` offset 218 means
+nothing on another machine and nothing on this one either once the machine is
+gone, and a reference that stops resolving is exactly the rot Xanadu was meant
+to avoid.
+
+A torrent's info hash is the kind of name Xanadu asks for, and it already
+exists. It is the SHA-1 of the bencoded `info` dictionary, so it is derived
+from the content: nobody assigns it and nobody can reassign it, the same
+content always produces it, and resolving it does not need one particular
+server to still be answering. Every piece carries its own hash, so what arrives
+can be checked against what was named.
+
+That last property is the one that matters most here. Transclusion claims there
+is only one copy of anything; without verification a reader has no way to tell
+that copy from a substitution, and the claim is a hope rather than a fact.
+
+```
+$ xudu --torrent fox.torrent --quote 0,4,5 xanadoc
+xudu: fox.torrent is magnet:?xt=urn:btih:41270f22...&dn=fox.txt (1 file(s), 218 bytes)
+xudu: 1 quotes 41270f22... file 0 [4,9)
+
+$ cat xanadoc/origins.spool
+41270f227583fd10ef9c3e3d9aa71fea4117c24e 0 0 218 fox.txt
+$ wc -c < xanadoc/primedia.spool
+0
+```
+
+The local spool is empty. The document holds no content of its own at all --
+only a reference into content addressed by its own hash, which anyone with the
+reference can resolve and verify.
+
+Alter one byte of the referenced file and the quotation stops resolving:
+
+```
+$ xudu --profile --screenshot before.ppm --torrent fox.torrent xanadoc   # 907 pixels of text
+$ printf 'X' | dd of=fox.txt bs=1 seek=5 conv=notrunc 2>/dev/null
+$ xudu --profile --screenshot after.ppm  --torrent fox.torrent xanadoc   # 0
+```
+
+Nothing is shown rather than something plausible, and nothing partial is shown
+either: a piece hash covers a whole piece, so whole pieces are fetched and
+checked, and if any of them fails the whole read returns empty. A partial
+answer would be a substitution with extra steps, since nothing downstream can
+tell verified bytes from unverified ones.
+
+A document whose references cannot be reached still opens -- the quotation is
+blank and everything else is intact -- because being unable to resolve a
+reference right now is not the same as the document being corrupt.
+
+### Magnet links
+
+A magnet link is how one of these references is written down and passed around,
+and `xudu` reads them as well as emitting them:
+
+```
+$ xudu --torrent fox.torrent --torrent 'magnet:?xt=urn:btih:41270f22...' xanadoc
+```
+
+Both spellings of the hash are accepted -- forty hex digits and the
+thirty-two character base-32 form older links use -- along with `dn`, `tr`, and
+BEP 53's `so` for naming particular files. A link carrying only a v2 `btmh`
+hash is refused rather than half-understood: that names content by a SHA-256
+merkle root, and accepting it would mean claiming to identify content not one
+byte of which could be verified. A hybrid link carrying both is fine, and the
+v1 hash is the one used.
+
+What a magnet **cannot** do on its own is resolve. It carries the name and
+nothing else that matters: the piece hashes and the file list live in the info
+dictionary, which the link only refers to. A real client obtains that from the
+swarm (BEP 9) and then checks that what it was given hashes back to the name it
+started from. Since fetching from a swarm is the part behind `ContentSource`
+that is not implemented, a magnet resolves here exactly when its metadata has
+arrived some other way -- a `.torrent` given alongside it. A magnet with no
+metadata is refused with an error saying so, rather than being recorded as a
+reference that would silently read as empty forever.
+
+**What is implemented and what is not.** The addressing and the verification
+are complete and are what `apps/xudu/core/` is mostly made of: bencode, the
+info hash, the file-to-piece mapping, and reading a byte range with every piece
+it touches checked. Obtaining the bytes is behind `ContentSource`, and the
+implementation shipped reads a directory that already holds the torrent's data
+-- which is what a machine that has finished downloading has. Joining a swarm
+is a third implementation of two methods; nothing above it would change,
+because the resolver verifies whatever it is handed regardless of where that
+came from. That same implementation is what would make a bare magnet link
+resolve, since fetching metadata from peers and fetching content from peers are
+the same connection.
+
+`--quote` names a range on the command line because picking a byte range of a
+remote document is a user-interface problem this has not solved yet, not
+because the model needs one.
+
 ### Commands
 
 Control is used throughout, because a bare letter is text: the whole point of
@@ -675,6 +774,7 @@ this program is that typing is an edit, so it has to reach the document.
 | --- | --- |
 | `ctrl-b` / `ctrl-n` | go back or forward in hypertime, losing nothing |
 | `ctrl-t` | quote the selection into a second document |
+| `--torrent`, `--quote` | quote a range of a torrent-backed file; see above |
 | `ctrl-l` | attach a link to the selected content |
 | `ctrl-m` | show or hide the hypertime map |
 | `ctrl-p` | print every state to the terminal |

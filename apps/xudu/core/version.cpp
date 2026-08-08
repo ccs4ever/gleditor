@@ -128,11 +128,11 @@ void Version::rearrange(const std::uint32_t at, const std::uint32_t length,
   insertSpans(target, taken);
 }
 
-std::string Version::materialize(const PrimediaSpool &spool) const {
+std::string Version::materialize(const SpanReader &reader) const {
   std::string out;
   out.reserve(length());
   for (const auto &run : runs) {
-    out += spool.read(run);
+    out += reader.read(run);
   }
   return out;
 }
