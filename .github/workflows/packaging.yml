@@ -25,7 +25,7 @@ jobs:
     name: deb (Ubuntu, SDL2)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
         with:
           submodules: recursive
           fetch-depth: 0
@@ -76,7 +76,7 @@ jobs:
       - name: collect the package
         run: mkdir -p dist && mv ../gleditor_*.deb dist/
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: gleditor-deb
           path: dist/*.deb
@@ -96,7 +96,7 @@ jobs:
             vulkan-loader-devel glslang desktop-file-utils libappstream-glib \
             python3
 
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
         with:
           submodules: recursive
           fetch-depth: 0
@@ -133,7 +133,7 @@ jobs:
         env:
           LIBGL_ALWAYS_SOFTWARE: "1"
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: gleditor-rpm
           path: ~/rpmbuild/RPMS/*/gleditor-*.rpm
@@ -151,7 +151,7 @@ jobs:
             sdl3 sdl3_image libglvnd glm vulkan-headers vulkan-icd-loader \
             glslang python
 
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
         with:
           submodules: recursive
           fetch-depth: 0
@@ -193,7 +193,7 @@ jobs:
         env:
           LIBGL_ALWAYS_SOFTWARE: "1"
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: gleditor-arch
           path: /home/builder/pkg/gleditor-*.pkg.tar.zst
@@ -203,7 +203,7 @@ jobs:
     name: nix flake
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
         with:
           submodules: recursive
 
@@ -250,7 +250,7 @@ jobs:
       run:
         shell: msys2 {0}
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
         with:
           submodules: recursive
 
@@ -426,7 +426,7 @@ jobs:
             exit 1
           fi
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: gleditor-windows
           path: build/windows/*.zip

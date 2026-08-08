@@ -24,7 +24,7 @@ jobs:
     name: build (SDL${{ matrix.sdl }})
 
     steps:
-    - uses: actions/checkout@v5
+    - uses: actions/checkout@v7
       with:
         submodules: recursive
     # SDL3 is not in the Ubuntu archive yet; SDL2 is, so only one job needs the
@@ -48,7 +48,7 @@ jobs:
     # cache. A stale entry is not a correctness problem either way -- apt
     # verifies what it finds and downloads whatever is missing or superseded.
     - name: package cache
-      uses: actions/cache@v4
+      uses: actions/cache@v6
       with:
         path: ~/apt-archives
         key: apt-sdl${{ matrix.sdl }}-${{ hashFiles('.github/workflows/c-cpp.yml') }}
@@ -112,7 +112,7 @@ jobs:
   swarm:
     runs-on: ubuntu-latest
     steps:
-    - uses: actions/checkout@v4
+    - uses: actions/checkout@v7
       with:
         submodules: recursive
     - name: install dependencies
