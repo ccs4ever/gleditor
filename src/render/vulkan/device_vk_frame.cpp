@@ -497,6 +497,16 @@ std::optional<PickingResult> DeviceVK::takePickingTag() {
   return std::nullopt;
 }
 
+void DeviceVK::setPresentEnabled(const bool enabled) {
+  if (!enabled) {
+    throw std::runtime_error(
+        "the vulkan backend cannot render without presenting: every frame "
+        "acquires a swapchain image and the present is what returns it, so "
+        "this would block rather than capture. Use --backend opengl for a "
+        "capture on a machine that cannot present.");
+  }
+}
+
 void DeviceVK::endFrame() {
   if (!frameActive) {
     return;

@@ -549,6 +549,9 @@ void Renderer::renderLoop(AutoSDLWindow &window) {
   device = render::createDevice(backendKind);
   device->initialize(window);
   device->setStrictDiagnostics(this->state->strictDiagnostics);
+  if (this->state->noPresent) {
+    device->setPresentEnabled(false);
+  }
 
   RenderState state(device.get());
   toasts = std::make_unique<ToastOverlay>(device.get(),

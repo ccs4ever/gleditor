@@ -87,8 +87,12 @@ public:
   void setStrictDiagnostics(bool strict) override {
     diagnostics.setStrict(strict);
   }
+  void setPresentEnabled(const bool enabled) override { present = enabled; }
 
 private:
+  /// Whether endFrame() swaps the window. See RenderDevice::setPresentEnabled.
+  bool present{true};
+
   /// Picking reads outstanding at once. Two lets a read issued this frame land
   /// while the next frame is already being drawn, which is the whole point of
   /// reading through a pixel buffer object.

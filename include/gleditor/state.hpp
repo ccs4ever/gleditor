@@ -66,6 +66,8 @@ struct AppState {
   /// a notification. Automated runs want it: a frame rendered by a driver that
   /// was reporting errors proves nothing, however plausible it looks.
   bool strictDiagnostics{};
+  /// Draw frames but do not show them. See RenderDevice::setPresentEnabled.
+  bool noPresent{};
   std::atomic<std::chrono::duration<float>> frameTimeDelta;
   std::atomic_int mouseX;
   std::atomic_int mouseY;
