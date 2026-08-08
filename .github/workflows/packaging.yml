@@ -363,6 +363,15 @@ jobs:
           #
           # And if it does hang, ask it what it is waiting on before killing
           # it. A hang that is only ever killed tells you nothing twice.
+          # The thread dump from the previous round showed a thread wholly
+          # inside libgallium_wgl entered from BaseThreadInitThunk -- a Mesa
+          # rasteriser worker, not our render thread, and not blocked on
+          # anything. Nothing was deadlocked; Mesa was grinding. The likely
+          # reason is which Gallium driver it picked: softpipe is the
+          # reference rasteriser and is orders of magnitude slower than
+          # llvmpipe, and nothing had told it which to use.
+          export GALLIUM_DRIVER=llvmpipe
+          export LIBGL_ALWAYS_SOFTWARE=1
           ./gleditor.exe --backend opengl --profile --strict-diagnostics \
             --no-present --screenshot frame.ppm \
             ../../../tests/samples/quick_brown_fox.txt > draw.log 2>&1 &
@@ -370,13 +379,13 @@ jobs:
           winpid=$(cat "/proc/$pid/winpid" 2>/dev/null || echo "$pid")
           echo "msys pid $pid, windows pid $winpid"
 
-          for _ in $(seq 1 90); do
+          for _ in $(seq 1 180); do
             kill -0 "$pid" 2>/dev/null || break
             sleep 1
           done
 
           if kill -0 "$pid" 2>/dev/null; then
-            echo "=== still running after 90s; every thread, then killed ==="
+            echo "=== still running after 180s; every thread, then killed ==="
             gdb -batch -p "$winpid" \
                 -ex 'set pagination off' \
                 -ex 'thread apply all bt' || echo "gdb could not attach"
