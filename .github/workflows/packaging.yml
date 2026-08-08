@@ -354,8 +354,10 @@ jobs:
           cp "$MINGW_PREFIX/bin/opengl32.dll" build/windows/gleditor/ || true
           cd build/windows/gleditor
           set -eu
-          ./gleditor.exe --backend opengl --profile --strict-diagnostics \
-            --no-present --screenshot frame.ppm \
+          # Bounded, because a render that never finishes is a failure and
+          # should be reported as one rather than sit until the job is killed.
+          timeout 300 ./gleditor.exe --backend opengl --profile \
+            --strict-diagnostics --no-present --screenshot frame.ppm \
             ../../../tests/samples/quick_brown_fox.txt
           ls -la frame.ppm
 

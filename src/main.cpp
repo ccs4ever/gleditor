@@ -140,6 +140,164 @@ parseToast(const std::string &argument) {
 }
 
 /**
+ * @brief How much of the command line a help listing should admit to.
+ *
+ * Most of what this program accepts exists to drive it without a person:
+ * capture a frame, click at a pixel, report a timing. Listing all of that
+ * ahead of the handful of switches somebody editing a document would use
+ * buries the second in the first, so `--help` shows the everyday ones and
+ * `--help-all` shows everything, at length and grouped.
+ */
+enum class HelpDepth { Everyday, Everything };
+
+/// Whether --help-all appears on the command line. Answered by looking rather
+/// than by parsing, because which parser to build is the question it settles.
+bool wantsEveryOption(const int argc, const char *const *const argv) {
+  for (int i = 1; i < argc; i++) {
+    if (nullptr != argv[i] && std::string_view{"--help-all"} == argv[i]) {
+      return true;
+    }
+  }
+  return false;
+}
+
+/**
+ * @brief Register every argument the program accepts.
+ *
+ * One definition serves both listings: the switches are always accepted, and
+ * @p depth decides only how they describe themselves and whether the
+ * automation ones appear at all. Two separate lists would drift, and the one
+ * that drifted would be the help.
+ */
+void addArguments(argparse::ArgumentParser &parser, const HelpDepth depth) {
+  const bool full = HelpDepth::Everything == depth;
+
+  // Set the help text at the asked-for length. Everyday switches are listed
+  // either way.
+  const auto everyday = [full](argparse::Argument &arg,
+                               const std::string_view brief,
+                               const std::string_view detail)
+      -> argparse::Argument & { return arg.help(std::string(full ? detail : brief)); };
+
+  parser.add_argument("--help-all")
+      .help("show every option, including the ones for driving this without a "
+            "person, and describe them at length")
+      .flag();
+
+  everyday(parser.add_argument("--font").default_value("Monospace 16"),
+           "default font to use for display",
+           "Default font, as a Pango font description, for example "
+           "\"Serif 16\". Anything Pango can resolve on this machine.");
+  everyday(parser.add_argument("--fov").default_value(std::string{"5"}),
+           "initial vertical field of view in degrees",
+           "Initial vertical field of view in degrees. Widening it is how "
+           "several pages are brought on screen at once, and how a headless "
+           "run sees many small ones.");
+  everyday(parser.add_argument("--backend").default_value(std::string{"opengl"}),
+           "rendering backend: opengl, opengles or vulkan",
+           "Rendering backend: opengl (the default), opengles or vulkan. The "
+           "Vulkan backend is only present when the binary was built with it; "
+           "naming one that is not compiled in reports which are.");
+  everyday(parser.add_argument("--coarse-below")
+               .default_value(std::string{"0.15"}),
+           "draw distant pages as one bar per line below this scale",
+           "Draw a page as one solid bar per line once one layout pixel of it "
+           "covers fewer than this many screen pixels. Zero draws every "
+           "visible page in full detail, which is far slower on a document "
+           "held at a distance.");
+
+  // Everything below drives the editor without a person at the keyboard.
+  // Grouped only in the detailed listing: argparse prints a group's heading
+  // whether or not anything in it is visible, so creating the group in the
+  // everyday parser would leave an empty section behind.
+  if (full) {
+    parser.add_group("Options for automation and diagnosis");
+  }
+
+  // Registered, then hidden from the everyday listing. Hiding rather than
+  // omitting is deliberate: a script that passes one of these to a build whose
+  // help does not mention it still works.
+  const auto automation = [full](argparse::Argument &arg,
+                                 const std::string_view brief,
+                                 const std::string_view detail)
+      -> argparse::Argument & {
+    arg.help(std::string(full ? detail : brief));
+    if (!full) {
+      arg.hidden();
+    }
+    return arg;
+  };
+
+  automation(parser.add_argument("--profile").flag(),
+             "perform initial setup, then quit",
+             "Perform initial setup, then quit once the document has settled. "
+             "Pairs with --screenshot to capture a finished frame and stop.");
+  automation(parser.add_argument("--no-cull").flag(),
+             "draw every page, including those outside the view",
+             "Draw every page of every document, including those entirely "
+             "outside the view. Only useful for checking that culling changes "
+             "nothing it should not: the frame must come out identical.");
+  automation(parser.add_argument("--benchmark").default_value(std::string{"0"}),
+             "draw N settled frames, report the timings and quit",
+             "Draw N frames once the document has settled, then report frame, "
+             "collect and record times and exit. The median is reported "
+             "rather than the mean, because a software rasteriser produces "
+             "occasional hundred-millisecond frames no average removes.");
+  automation(parser.add_argument("--screenshot").default_value(std::string{}),
+             "write the first settled frame to this path as a PPM",
+             "Write the first fully drawn frame to this path as a binary PPM. "
+             "The frame is the settled one -- every queued command carried "
+             "out, every document loaded, and every animation finished -- so a "
+             "capture shows the finished result rather than the middle of a "
+             "fade.");
+  automation(parser.add_argument("--no-present").flag(),
+             "draw frames without showing them",
+             "Draw frames without showing them, for capturing a frame on a "
+             "machine that can give a rendering context but cannot put one on "
+             "a screen. The capture is unaffected: drawing goes to an "
+             "offscreen target either way. Accepted by the OpenGL and OpenGL "
+             "ES backends; Vulkan refuses it, because every frame acquires a "
+             "swapchain image and presenting is what hands it back.");
+  automation(parser.add_argument("--pick").append(),
+             "report the picking tag at X,Y; repeatable",
+             "Report the picking tag at pixel X,Y once the document has "
+             "settled. Repeatable. The read is asynchronous, so a run waits "
+             "for every query to come back before it exits.");
+  automation(parser.add_argument("--click").append(),
+             "click at X,Y once settled, placing the caret; repeatable",
+             "Click at pixel X,Y once the document has settled, placing the "
+             "caret there, and print where it landed. Repeatable.");
+  automation(parser.add_argument("--select"),
+             "select the document byte range START,END",
+             "Select the document byte range START,END once the document has "
+             "settled, as a click and drag would.");
+  automation(parser.add_argument("--type").default_value(std::string{}),
+             "insert text at the caret once it has been placed",
+             "Insert this text at the caret once it has been placed. The "
+             "document is spliced immediately and the layout that follows is "
+             "scheduled off the render thread.");
+  automation(parser.add_argument("--toast").append(),
+             "show a notification, as [info:|warning:|error:]TEXT; repeatable",
+             "Show a notification once the first frame is drawn, written as "
+             "[info:|warning:|error:]TEXT. An unprefixed message is a "
+             "warning. Repeatable.");
+  automation(parser.add_argument("--strict-diagnostics").flag(),
+             "treat a driver error as fatal",
+             "Treat a driver error as fatal instead of showing it as a "
+             "notification, and set the exit status accordingly. Automated "
+             "runs want this: a frame rendered by a driver that was reporting "
+             "errors proves nothing, however plausible it looks.");
+  automation(parser.add_argument("--print-asset-dir").flag(),
+             "report where the shaders and icon were found, then quit",
+             "Report the directory the shaders and the icon were found in, "
+             "then quit without opening a window. Answers the one question a "
+             "package can be asked on a machine whose driver cannot give it a "
+             "context.");
+
+  parser.add_argument("files").help("input files").remaining();
+}
+
+/**
  * @brief Parse the command line and build the renderer it asks for.
  * @param[out] backend Receives the selected graphics backend.
  */
@@ -151,66 +309,19 @@ RendererRef handleArgs(const AppStateRef &state, render::Backend &backend,
 #endif
 
   argparse::ArgumentParser parser("gleditor", TOSTRING(GLEDITOR_VERSION));
-  parser.add_argument("--font")
-      .default_value("Monospace 16")
-      .help("default font to use for display");
-  parser.add_argument("--profile")
-      .help("perform initial setup, then quit")
-      .flag();
-  parser.add_argument("--fov")
-      .default_value(std::string{"5"})
-      .help("initial vertical field of view in degrees; widening it is how a "
-            "headless run sees many pages at once, and small ones");
-  parser.add_argument("--no-cull")
-      .help("draw every page of every document, including those entirely "
-            "outside the view")
-      .flag();
-  parser.add_argument("--coarse-below")
-      .default_value(std::string{"0.15"})
-      .help("draw a page as one solid bar per line once one layout pixel of it "
-            "covers fewer than this many screen pixels; 0 always draws glyphs");
-  parser.add_argument("--benchmark")
-      .default_value(std::string{"0"})
-      .help("draw N frames once the document has settled, report how long "
-            "they took, and quit");
-  parser.add_argument("--pick")
-      .append()
-      .help("read the picking tag at X,Y once the document has settled and "
-            "print it; may be given more than once");
-  parser.add_argument("--screenshot")
-      .default_value(std::string{})
-      .help("write the first rendered frame to this path as a PPM");
-  parser.add_argument("--backend")
-      .default_value(std::string{"opengl"})
-      .help("rendering backend: opengl, opengles or vulkan");
-  parser.add_argument("--click")
-      .append()
-      .help("click at X,Y once the document has settled, moving the caret "
-            "there, and print where it landed; may be given more than once");
-  parser.add_argument("--select")
-      .help("select the document byte range START,END once the document has "
-            "settled, as a drag would");
-  parser.add_argument("--type")
-      .default_value(std::string{})
-      .help("text to insert at the caret once it has been placed");
-  parser.add_argument("--toast")
-      .append()
-      .help("show a notification once the first frame is drawn, as "
-            "[info:|warning:|error:]TEXT; may be given more than once");
-  parser.add_argument("--strict-diagnostics")
-      .help("treat a driver error as fatal instead of showing it as a "
-            "notification")
-      .flag();
-  parser.add_argument("--no-present")
-      .help("draw frames without showing them; for capturing a frame on a "
-            "machine that can give a context but cannot put one on screen. "
-            "OpenGL and OpenGL ES only")
-      .flag();
-  parser.add_argument("--print-asset-dir")
-      .help("report the directory the shaders and icon were found in, then "
-            "quit; the one check a package can make without a GPU")
-      .flag();
-  parser.add_argument("files").help("input files").remaining();
+  addArguments(parser, wantsEveryOption(argc, argv) ? HelpDepth::Everything
+                                                    : HelpDepth::Everyday);
+
+  // --help-all is answered before parse_args, because the parser this was
+  // built from is the detailed one only when it was asked for: argparse prints
+  // what it was given, and a hidden argument stays hidden however it is asked
+  // about.
+  if (wantsEveryOption(argc, argv)) {
+    std::cout << parser << "\n";
+    // Exits rather than returns, which is what argparse's own --help does: a
+    // request for help is the whole of what that run was for.
+    std::exit(0);
+  }
 
   try {
 
