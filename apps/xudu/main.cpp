@@ -91,7 +91,10 @@ public:
       // to report its edits here: that is what turns typing into operations.
       state.docs.back()->addObserver(&session);
       session.viewOpened(version);
-      map.setCurrent(version);
+      // The map marks where the reader is, which is the first document --
+      // the one the commands act on. A second opened beside it is context,
+      // and marking that instead would point at the wrong state.
+      map.setCurrent(session.views().front().version);
     });
   }
 
@@ -316,12 +319,14 @@ int main(const int argc, char **argv) {
   render::Backend backend = render::Backend::OpenGL;
   RendererRef renderer;
   std::unique_ptr<Session> session;
+  bool quiet = false;
   MicroversionId opening;
   std::string alongside;
   try {
     parser.parse_args(argc, argv);
     backend  = gleditor::applyCommonArguments(parser, state);
     renderer = Renderer::create(state, backend);
+    quiet    = parser["--print-asset-dir"] == true;
 
     session = std::make_unique<Session>(parser.get<std::string>("store"));
 
@@ -339,8 +344,8 @@ int main(const int argc, char **argv) {
       const auto imported =
           session->store().insert(MicroversionId{}, 0, source.text());
       session->save();
-      std::cout << "xudu: imported " << file << " as " << imported.str()
-                << "\n";
+      quiet || std::cout << "xudu: imported " << file << " as "
+                         << imported.str() << "\n";
     }
 
     const auto asked = parser.get<std::string>("--version-id");
@@ -348,9 +353,10 @@ int main(const int argc, char **argv) {
                             : MicroversionId::parse(asked);
     alongside = parser.get<std::string>("--alongside");
 
-    std::cout << "xudu " << TOSTRING(GLEDITOR_VERSION) << ": "
-              << session->store().opCount() << " operations in "
-              << session->path() << ", opening " << opening.str() << "\n";
+    quiet || std::cout << "xudu " << TOSTRING(GLEDITOR_VERSION) << ": "
+                       << session->store().opCount() << " operations in "
+                       << session->path() << ", opening " << opening.str()
+                       << "\n";
   } catch (const std::exception &err) {
     std::cerr << err.what() << "\n" << parser;
     return 1;
@@ -377,7 +383,9 @@ int main(const int argc, char **argv) {
 
     gleditor::Application app(state, renderer, backend, "Xudu");
     bindCommands(app, state, views, map, *session);
-    std::cout << "commands:\n" << app.commands().helpText();
+    // A query prints its answer and nothing else: --print-asset-dir is read by
+    // scripts, and a command listing in front of the path is not a path.
+    quiet || std::cout << "commands:\n" << app.commands().helpText();
 
     const auto status = app.run();
     session->save();

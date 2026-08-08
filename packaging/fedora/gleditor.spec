@@ -43,6 +43,15 @@ and pages too far away for their glyphs to be legible are drawn as one solid
 bar per line. The glyph atlas is mipmapped so minified text does not crawl,
 and grows on demand rather than being sized for the worst case.
 
+%package devel
+Summary:        Headers for building on the gleditor library
+Requires:       %{name}%{?_isa} = %{version}-%{release}
+
+%description devel
+The headers, the linker name and the pkg-config file needed to build a program
+against libgleditor. The library draws documents on the GPU and names no
+document format; xudu, shipped in the main package, is one program built on it.
+
 %prep
 %autosetup
 
@@ -55,12 +64,14 @@ and grows on demand rather than being sized for the worst case.
     GLEDITOR_SDL=3 \
     GLEDITOR_ENABLE_VULKAN=1 \
     GLEDITOR_VERSION=%{version} \
-    gleditor shaders
+    lib gleditor xudu shaders
 
 %install
 %make_install \
     prefix=%{_prefix} \
     bindir=%{_bindir} \
+    libdir=%{_libdir} \
+    includedir=%{_includedir} \
     datadir=%{_datadir} \
     mandir=%{_mandir} \
     GLEDITOR_SDL=3 \
@@ -76,11 +87,19 @@ appstream-util validate-relax --nonet \
 %license LICENSE
 %doc README.md
 %{_bindir}/gleditor
+%{_bindir}/xudu
+%{_libdir}/libgleditor.so.0
 %{_datadir}/gleditor/
 %{_datadir}/applications/gleditor.desktop
 %{_datadir}/metainfo/gleditor.metainfo.xml
 %{_datadir}/icons/hicolor/256x256/apps/gleditor.png
 %{_mandir}/man1/gleditor.1*
+%{_mandir}/man1/xudu.1*
+
+%files devel
+%{_includedir}/gleditor/
+%{_libdir}/libgleditor.so
+%{_libdir}/pkgconfig/gleditor.pc
 
 %changelog
 * Fri Aug 07 2026 ccs4ever <ccs4ever@gmail.com> - 0.1.0-1
