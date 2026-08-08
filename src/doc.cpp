@@ -6,6 +6,8 @@
 #include <format>                      // for format
 #include <gleditor/animation.hpp>      // for docArrival, docArrivalDepth
 #include <gleditor/doc.hpp>            // IWYU pragma: associated
+#include <gleditor/document_observer.hpp> // for DocumentObserver
+#include <gleditor/text_source.hpp>    // for TextSource
 #include <gleditor/render/device.hpp>  // for RenderDevice
 #include <gleditor/render_state.hpp>   // for RenderState
 #include <gleditor/renderer.hpp>       // for Renderer, RendererRef
@@ -103,12 +105,6 @@ std::size_t utf8Length(const std::string_view text) {
   return static_cast<std::size_t>(std::ranges::count_if(text, [](const char chr) {
     return 0x80 != (static_cast<unsigned char>(chr) & 0xC0);
   }));
-}
-
-/// Byte at @p pos widened without sign extension, for comparing against byte
-/// order marks.
-unsigned int byteAt(const std::string &str, const std::size_t pos) {
-  return static_cast<unsigned char>(str[pos]);
 }
 
 /// View a row vector as the raw bytes the buffer pool wants.
@@ -765,12 +761,12 @@ namespace {
  */
 bool sameLineBreaks(const std::vector<int> &before,
                     const std::vector<int> &after, const int at,
-                    const int inserted) {
+                    const int delta) {
   if (before.size() != after.size()) {
     return false;
   }
   for (std::size_t i = 0; i < before.size(); i++) {
-    const int expected = before[i] <= at ? before[i] : before[i] + inserted;
+    const int expected = before[i] <= at ? before[i] : before[i] + delta;
     if (after[i] != expected) {
       return false;
     }
@@ -788,6 +784,46 @@ std::vector<int> Doc::lineStarts(const Glib::RefPtr<Pango::Layout> &layout) {
     starts.push_back(layout->get_const_line(i)->get_start_index());
   }
   return starts;
+}
+
+void Doc::addObserver(gleditor::DocumentObserver *const observer) {
+  if (nullptr == observer) {
+    return;
+  }
+  if (std::find(observers.begin(), observers.end(), observer) ==
+      observers.end()) {
+    observers.push_back(observer);
+  }
+}
+
+void Doc::removeObserver(gleditor::DocumentObserver *const observer) {
+  observers.erase(std::remove(observers.begin(), observers.end(), observer),
+                  observers.end());
+}
+
+void Doc::scheduleReflow(RenderState &state, const std::uint32_t at,
+                         const std::int32_t delta) {
+  // Which page holds the edit. Everything before it is untouched by
+  // construction: text ahead of an edit cannot reflow.
+  std::size_t firstPage = 0;
+  for (std::size_t i = 0; i < pages.size(); i++) {
+    if (at >= pages[i].baseOffset()) {
+      firstPage = i;
+    }
+  }
+  if (pages.empty()) {
+    return;
+  }
+
+  // Line breaks of the edited page before the edit, to tell a line-local
+  // change from one that moved a word onto another line.
+  const auto oldStarts   = lineStarts(pages[firstPage].layoutRef());
+  const auto oldConsumed = pages[firstPage].textLength();
+
+  auto self = getPtr();
+  renderer->run([self, &state, firstPage, at, delta, oldStarts, oldConsumed] {
+    self->reflowFrom(state, firstPage, at, delta, oldStarts, oldConsumed);
+  });
 }
 
 void Doc::insert(RenderState &state, const std::uint32_t offset,
@@ -808,41 +844,83 @@ void Doc::insert(RenderState &state, const std::uint32_t offset,
     caret->shiftForInsertion(at, inserted);
   }
 
-  // Which page holds the edit. Everything before it is untouched by
-  // construction: text ahead of an insertion cannot reflow.
-  std::size_t firstPage = 0;
-  for (std::size_t i = 0; i < pages.size(); i++) {
-    if (at >= pages[i].baseOffset()) {
-      firstPage = i;
-    }
-  }
-  if (pages.empty()) {
-    return;
+  for (auto *const observer : observers) {
+    observer->textInserted(*this, at, utf8);
   }
 
-  // Line breaks of the edited page before the edit, to tell a line-local
-  // insertion from one that pushed a word onto the next line.
-  const auto oldStarts   = lineStarts(pages[firstPage].layoutRef());
-  const auto oldConsumed = pages[firstPage].textLength();
+  scheduleReflow(state, at, static_cast<std::int32_t>(inserted));
+}
 
-  auto self = getPtr();
-  renderer->run([self, &state, firstPage, at, inserted, oldStarts,
-                 oldConsumed] {
-    self->reflowFrom(state, firstPage, at, inserted, oldStarts, oldConsumed);
-  });
+namespace {
+
+/// Move @p offset back to the start of the UTF-8 sequence it lands in.
+/// Continuation bytes are 10xxxxxx; every other byte begins a character.
+std::uint32_t alignToCharacterStart(const std::string &raw,
+                                    std::uint32_t offset) {
+  while (offset > 0 && offset < raw.size() &&
+         0x80 == (static_cast<unsigned char>(raw[offset]) & 0xC0)) {
+    offset--;
+  }
+  return offset;
+}
+
+} // namespace
+
+std::string Doc::erase(RenderState &state, const std::uint32_t offset,
+                       const std::uint32_t bytes, Caret *caret) {
+  auto raw = text.raw();
+  if (0 == bytes || raw.empty() || offset >= raw.size()) {
+    return {};
+  }
+
+  // Snap outwards, so a caller working in bytes cannot cut a character in
+  // half: the start moves back to a character boundary and the end forwards to
+  // the next one. Doing it in the other direction would let a range that names
+  // one whole character remove nothing.
+  const auto start = alignToCharacterStart(raw, offset);
+  const auto end   = alignToCharacterStart(
+      raw, std::min<std::uint32_t>(offset + bytes,
+                                     static_cast<std::uint32_t>(raw.size())));
+  const auto removedEnd =
+      end <= start ? static_cast<std::uint32_t>(raw.size()) : end;
+  const auto removed = raw.substr(start, removedEnd - start);
+  if (removed.empty()) {
+    return {};
+  }
+
+  raw.erase(start, removed.size());
+  text = raw;
+
+  const auto delta = -static_cast<std::int32_t>(removed.size());
+  if (nullptr != caret) {
+    caret->shiftForErasure(start, static_cast<std::uint32_t>(removed.size()));
+  }
+
+  for (auto *const observer : observers) {
+    observer->textErased(*this, start, removed);
+  }
+
+  scheduleReflow(state, start, delta);
+  return removed;
 }
 
 void Doc::reflowFrom(RenderState &state, const std::size_t firstPage,
-                     const std::uint32_t at, const std::uint32_t inserted,
+                     const std::uint32_t at, const std::int32_t delta,
                      const std::vector<int> &oldStarts,
                      const std::uint32_t oldConsumed) {
   // Lay the edited page out again and see how far the damage reaches.
   //
   // Pagination re-syncs as soon as a page ends where it used to, shifted by
-  // what was inserted. From there on every later page holds byte-identical
+  // what the edit changed. From there on every later page holds byte-identical
   // text: its shaping, its glyphs and its vertex rows are all unchanged, and
   // only the offset it reports moves. That is what keeps a keystroke from
   // costing a relayout of the whole document.
+  //
+  // The comparisons are made in 64-bit signed arithmetic because a removal
+  // makes the shift negative, and every offset in sight is unsigned: the
+  // re-sync test would otherwise be an unsigned subtraction that wraps rather
+  // than going below zero, and would match at a wildly wrong page.
+  const auto shift = static_cast<std::int64_t>(delta);
   std::vector<std::pair<std::uint32_t, Glib::RefPtr<Pango::Layout>>> rebuilt;
   auto offset      = pages[firstPage].baseOffset();
   auto pageCursor  = firstPage;
@@ -854,13 +932,14 @@ void Doc::reflowFrom(RenderState &state, const std::size_t firstPage,
     rebuilt.emplace_back(offset, lay);
 
     if (pageCursor == firstPage) {
-      // The edited page absorbed the insertion when it still ends where it
-      // did, plus the bytes that were added.
-      if (consumed == oldConsumed + inserted) {
+      // The edited page absorbed the change when it still ends where it did,
+      // shifted by what the edit added or took away.
+      if (static_cast<std::int64_t>(consumed) ==
+          static_cast<std::int64_t>(oldConsumed) + shift) {
         const auto relativeAt =
             static_cast<int>(at - pages[firstPage].baseOffset());
         scope = sameLineBreaks(oldStarts, lineStarts(lay), relativeAt,
-                               static_cast<int>(inserted))
+                               static_cast<int>(delta))
                     ? ReflowScope::Line
                     : ReflowScope::Page;
       }
@@ -875,7 +954,8 @@ void Doc::reflowFrom(RenderState &state, const std::size_t firstPage,
     if (pageCursor >= pages.size()) {
       break; // ran past the pages that existed; the tail is being rebuilt.
     }
-    if (offset == pages[pageCursor].baseOffset() + inserted) {
+    if (static_cast<std::int64_t>(offset) ==
+        static_cast<std::int64_t>(pages[pageCursor].baseOffset()) + shift) {
       break; // re-synced further down.
     }
   }
@@ -906,7 +986,7 @@ void Doc::reflowFrom(RenderState &state, const std::size_t firstPage,
   // Untouched pages keep their shaping and their vertex rows; only the offset
   // they report moves.
   for (auto &page : tail) {
-    page.shiftBaseOffset(inserted);
+    page.shiftBaseOffset(delta);
     pages.push_back(std::move(page));
   }
 
@@ -924,53 +1004,25 @@ Doc::Doc(const RendererRef &renderer, render::RenderDevice *device,
                                         initialPoolRows)) {}
 
 Doc::Doc(const RendererRef &renderer, render::RenderDevice *device,
-         const glm::mat4 &model, const std::string &fileName,
+         const glm::mat4 &model, const gleditor::TextSource &source,
          [[maybe_unused]] const Private _priv)
     : Doc(renderer, device, model, _priv) {
-  docFile = fileName;
-  std::cout << "NEW DOC: " << this << " " << fileName << " "
+  docName = source.name();
+  std::cout << "NEW DOC: " << this << " " << docName << " "
             << glm::to_string(model) << "\n";
-  std::string tmpText = Glib::file_get_contents(docFile);
-  // Read no further than the file actually goes: a file shorter than three
-  // bytes has no third byte to inspect.
-  for (std::size_t i = 0; i < std::min<std::size_t>(3, tmpText.size()); i++) {
-    std::cout << std::format("bom[{}]: {:02x}\n", i,
-                             static_cast<unsigned char>(tmpText[i]));
-  }
-  if (tmpText.size() >= 3 && static_cast<unsigned char>(tmpText[0]) == 0xEF &&
-      static_cast<unsigned char>(tmpText[1]) == 0xBB &&
-      static_cast<unsigned char>(tmpText[2]) == 0xBF) {
-    std::cout << "found utf8 bom: " << tmpText.size() << " "
-              << tmpText.capacity() << "\n";
-    text = Glib::ustring(tmpText.data() + 3, tmpText.data() + tmpText.size());
-    // `char` is signed on most targets, so the BOM bytes have to be widened
-    // through `unsigned char`; comparing the raw char against 0xEF/0xFF is
-    // never true and silently disables the detection below.
-  } else if (tmpText.size() >= 4 &&
-             ((/*utf32BE*/ byteAt(tmpText, 0) == 0x00 &&
-               byteAt(tmpText, 1) == 0x00 && byteAt(tmpText, 2) == 0xFE &&
-               byteAt(tmpText, 3) == 0xFF) ||
-              (/*utf32LE*/ byteAt(tmpText, 0) == 0xFF &&
-               byteAt(tmpText, 1) == 0xFE && byteAt(tmpText, 2) == 0x00 &&
-               byteAt(tmpText, 3) == 0x00))) {
-    throw std::logic_error("utf32 not supported yet");
-  } else if (tmpText.size() >= 2 &&
-             ((/*utf16BE*/ byteAt(tmpText, 0) == 0xFE &&
-               byteAt(tmpText, 1) == 0xFF) ||
-              (/*utf16LE*/ byteAt(tmpText, 0) == 0xFF &&
-               byteAt(tmpText, 1) == 0xFE))) {
-    throw std::logic_error("utf16 not supported yet");
-  } else {
-    text = tmpText;
-  }
-  auto iter        = text.begin();
-  const bool valid = text.validate(iter);
-  std::cout << "validate: " << valid << "\n";
-  if (!valid) {
+  text = source.text();
+
+  // Validated here rather than by the source, because every source needs it
+  // and none of them can promise otherwise: the bytes come from a file
+  // somebody else wrote, or from a program that assembled them out of pieces.
+  // A document holding invalid UTF-8 crashes Pango somewhere inside shaping,
+  // a long way from whatever produced it.
+  auto iter = text.begin();
+  if (!text.validate(iter)) {
     // Only a failed validate() leaves `iter` on a real character; on success it
     // is the end iterator and must not be dereferenced.
-    std::cout << "first bad offset: " << std::distance(text.begin(), iter)
-              << "\n";
+    std::cout << "invalid utf-8 in " << docName << ", first bad offset: "
+              << std::distance(text.begin(), iter) << "\n";
     text = text.make_valid();
   }
 }

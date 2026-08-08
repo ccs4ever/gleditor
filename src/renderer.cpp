@@ -112,7 +112,11 @@ bool Renderer::hasPendingWork() const {
   // halfway through fading in is not it.
   return !renderQueue.empty() || !pendingDocLoads.empty() ||
          !timeline.empty() ||
-         (nullptr != toasts && toasts->fadingIn(ToastOverlay::Clock::now()));
+         (nullptr != toasts && toasts->fadingIn(ToastOverlay::Clock::now())) ||
+         std::ranges::any_of(frameContributors,
+                             [](const gleditor::FrameContributor *const one) {
+                               return one->busy();
+                             });
 }
 
 double Renderer::stepAnimations() {
@@ -155,12 +159,12 @@ void Renderer::closeDoc(RenderState &state, const std::uint32_t index) {
   }
 }
 
-void Renderer::openDoc(RenderState &state, std::string &fileName) {
+void Renderer::openDoc(RenderState &state, const gleditor::TextSource &source) {
   const auto newDocPosition =
       glm::translate(glm::mat4(1.0), docSlot(state.docs.size()));
   std::cout << "doc pos: " << state.docs.size() << " "
             << glm::to_string(newDocPosition) << "\n";
-  auto docPtr = Doc::create(getPtr(), device.get(), newDocPosition, fileName);
+  auto docPtr = Doc::create(getPtr(), device.get(), newDocPosition, source);
   docPtr->setDocIndex(static_cast<std::uint32_t>(state.docs.size()));
   docPtr->animateArrival(timeline);
   reapFinishedDocLoads();
@@ -254,6 +258,16 @@ bool Renderer::update(RenderState &state, const bool settled) {
 
   for (const std::shared_ptr<Doc> &doc : state.docs) {
     doc->drawCaret(state, viewProjection, *caret);
+  }
+
+  // Whatever the program draws for itself: after the documents, so it can sit
+  // over them, and before the notifications, which must be over everything.
+  if (!frameContributors.empty()) {
+    gleditor::FrameContext ctx{state, viewProjection, screenWidth,
+                               screenHeight};
+    for (auto *const contributor : frameContributors) {
+      contributor->drawFrame(ctx);
+    }
   }
 
   // Last, so that the overlay is on top: its pipeline does not depth test, so
@@ -456,16 +470,65 @@ void Renderer::applySelectionRequest(const bool settled) {
                            caret->selectionEnd());
 }
 
+void AbstractRenderer::addSpanDecorator(gleditor::SpanDecorator *const decorator) {
+  if (nullptr != decorator &&
+      std::ranges::find(spanDecorators, decorator) == spanDecorators.end()) {
+    spanDecorators.push_back(decorator);
+  }
+}
+
+void AbstractRenderer::removeSpanDecorator(
+    gleditor::SpanDecorator *const decorator) {
+  std::erase(spanDecorators, decorator);
+}
+
+void AbstractRenderer::addFrameContributor(
+    gleditor::FrameContributor *const contributor) {
+  if (nullptr != contributor &&
+      std::ranges::find(frameContributors, contributor) ==
+          frameContributors.end()) {
+    frameContributors.push_back(contributor);
+  }
+}
+
+void AbstractRenderer::removeFrameContributor(
+    gleditor::FrameContributor *const contributor) {
+  std::erase(frameContributors, contributor);
+}
+
 void Renderer::updateHighlights(RenderState &state) {
   // Rebuilt every frame rather than cached: a drag moves the selection each
   // frame anyway, and the table is a handful of entries -- one per page the
   // selection touches.
   highlights.clear();
+
+  // The selection goes in first, and both reasons are properties of what
+  // consumes this table. The fragment stage returns on the first span that
+  // covers it, so an earlier entry wins where two overlap; and the device
+  // keeps the first render::maxHighlightRanges and drops the rest, so an
+  // earlier entry survives a table that fills up. A user who cannot see what
+  // they have selected has lost track of something they were doing, where a
+  // decoration that loses to it is only telling them something.
   if (caret->hasSelection() && caret->documentIndex() < state.docs.size()) {
     state.docs[caret->documentIndex()]->highlightsFor(
         caret->selectionStart(), caret->selectionEnd(), selectionColour,
         highlights);
   }
+
+  if (!spanDecorators.empty()) {
+    for (const auto &doc : state.docs) {
+      decoratedSpans.clear();
+      for (auto *const decorator : spanDecorators) {
+        decorator->decorate(*doc, decoratedSpans);
+      }
+      for (const auto &span : decoratedSpans) {
+        if (span.end > span.start) {
+          doc->highlightsFor(span.start, span.end, span.colour, highlights);
+        }
+      }
+    }
+  }
+
   device->setHighlights(highlights);
 }
 
@@ -517,7 +580,8 @@ void Renderer::dispatch(RenderState &state, RenderItem &item) {
     break;
   }
   case RenderItem::Type::OpenDoc: {
-    openDoc(state, dynamic_cast<RenderItemOpenDoc &>(item).docFile);
+    const auto &source = *dynamic_cast<RenderItemOpenDoc &>(item).source;
+    openDoc(state, source);
     break;
   }
   case RenderItem::Type::Run: {
