@@ -86,8 +86,12 @@ ip netns exec "$TEST_NS" sh -c "ip addr add $TEST_IP/24 dev xudu-l; ip link set 
 echo "  seeder $PEER_IP, leecher $TEST_IP"
 
 echo "==> starting the seeder in $PEER_NS"
+# --publish also points a fresh ed25519 key at the torrent as a BEP 46 mutable
+# item, so the leecher can be given a name rather than a hash and made to go
+# and look up what it currently means.
 ip netns exec "$PEER_NS" ./build/xudu-swarm-peer \
-    "$WORK/sample.torrent" "$WORK/seed" "$PEER_IP" > "$WORK/peer.out" 2>"$WORK/peer.err" &
+    "$WORK/sample.torrent" "$WORK/seed" "$PEER_IP" --publish \
+    > "$WORK/peer.out" 2>"$WORK/peer.err" &
 PEER_PID=$!
 
 # Wait for it to say which port it took, rather than guessing how long it needs.
@@ -103,6 +107,11 @@ done
 [ -n "$PEER_PORT" ] || { echo "seeder never reported a port:"; cat "$WORK/peer.err"; exit 1; }
 echo "  listening on $PEER_IP:$PEER_PORT"
 
+# Printed after the port, so by now it is there.
+PEER_PUBKEY=$(sed -n 's/^pubkey //p' "$WORK/peer.out" | head -1)
+[ -n "$PEER_PUBKEY" ] || { echo "seeder never reported a public key:"; cat "$WORK/peer.err"; exit 1; }
+echo "  publishing as $PEER_PUBKEY"
+
 echo "==> running the swarm tests in $TEST_NS"
 set +e
 ip netns exec "$TEST_NS" env \
@@ -110,8 +119,9 @@ ip netns exec "$TEST_NS" env \
     XUDU_PEER_PORT="$PEER_PORT" \
     XUDU_PEER_TORRENT="$WORK/sample.torrent" \
     XUDU_PEER_TEXT="$WORK/seed/sample.txt" \
+    XUDU_PEER_PUBKEY="$PEER_PUBKEY" \
     LD_LIBRARY_PATH="$PWD/build" \
-    ./build/xudu_test --gtest_filter='SwarmTest.*'
+    ./build/xudu_test --gtest_filter='SwarmTest.*:MutableNameTest.*'
 STATUS=$?
 set -e
 

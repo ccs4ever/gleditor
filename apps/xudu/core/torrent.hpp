@@ -35,6 +35,7 @@
 
 #include <array>
 #include <cstdint>
+#include <functional>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -190,6 +191,31 @@ struct MagnetLink {
 
 /// SHA-1 of @p data, which is the hash BitTorrent v1 is built on.
 [[nodiscard]] std::array<std::uint8_t, 20> sha1(std::string_view data);
+
+/// Lowercase hex, which is how every BitTorrent specification writes binary
+/// into a URI.
+[[nodiscard]] std::string toHex(std::string_view bytes);
+
+/// Decode hex.
+/// @throws std::runtime_error on an odd number of digits or a non-digit. Both
+///         are refused rather than salvaged: these spell out keys and hashes,
+///         where a half-understood value would be a different value.
+[[nodiscard]] std::string fromHex(std::string_view text);
+
+/**
+ * @brief Walk the parameters of a magnet URI.
+ *
+ * Hands @p visit each key with its percent-decoded value, in the order they
+ * appear -- which matters, because a magnet may repeat a key and the
+ * repetitions are not interchangeable.
+ *
+ * Shared because a magnet link and a BEP 46 mutable link are the same syntax
+ * carrying different parameters, and two readings of that syntax would be two
+ * things to keep in agreement.
+ */
+void forEachMagnetParameter(
+    std::string_view uri,
+    const std::function<void(std::string_view key, std::string value)> &visit);
 
 } // namespace xudu
 

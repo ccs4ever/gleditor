@@ -131,21 +131,69 @@ table of them. A permascroll segment is just another origin, so a document
 quoting a sealed segment needs **no change at all** -- `SwarmContentSource`
 fetches and `Resolver` verifies it today.
 
-Three things are genuinely missing.
+Three things were missing when this was written. One of them no longer is.
+
+**BEP 46 is now implemented**, both halves: `MutableLink` reads and writes the
+`urn:btpk` form and works out where in the DHT the pointer lives,
+`SwarmContentSource::resolveMutable` asks and checks the answer's signature
+against the name itself, and `publishMutable` puts one. A name resolves to an
+info hash, and everything below that is unchanged -- which was the point of
+putting the indirection here rather than deeper.
 
 **A span cannot cross a seal.** `Version::occurrencesOf` merges adjacent extents
 only when their addresses are consecutive within one origin, which is right for
 one torrent and wrong across segments. A quotation spanning a seal boundary
-would show as two shaded runs where a reader sees one passage. The fix is for
-the merge to know that segment *n* ends where segment *n+1* begins.
+would show as two shaded runs where a reader sees one passage.
 
-**No BEP 46.** Neither publishing a pointer nor resolving one. Resolving is the
-smaller half and the more useful: it is what turns a permanent name into a
-current info hash.
+The fix first written here -- teach the merge that segment *n* ends where
+*n+1* begins -- is the wrong one, and the section below says why.
 
 **No append protocol.** The server side -- accept content, append to the tail,
 seal periodically, seed the result, republish the pointer -- does not exist.
 This is the actual work, and it is the part BitTorrent contributes nothing to.
+
+### Addresses have to be in scroll coordinates
+
+A permascroll is read constantly and appended to in small pieces at typing
+speed. Neither a torrent nor a DHT item can be anywhere near that write path: a
+BEP 44 value is capped under a kilobyte, is rate limited, expires in hours, and
+is ordered only by a sequence number, and sealing per keystroke would mint a
+swarm per keystroke. So the address of a byte cannot be the address of the
+thing currently distributing it.
+
+Fix the address at write time instead, in the only coordinate system that never
+moves: `(scroll, offset, length)`, where a scroll is one publisher's
+append-only sequence. That costs no round trip, and because a scroll only grows,
+no later append can invalidate an address already handed out. Where those bytes
+can currently be fetched from is then a separate, replaceable question -- an
+index mapping offset ranges to whichever torrent carries them -- and sealing
+republishes an index without touching a single existing reference.
+
+`Origin` today names `(info hash, file index, file offset)`, which binds a
+span's identity to the container it happens to be distributed in. That is the
+change to make, and it dissolves the seal-boundary problem rather than
+special-casing it: in scroll coordinates a quotation spanning a seal is
+contiguous, and the seal is invisible to transclusion.
+
+Distribution then falls into tiers, each with a different number of parties:
+
+| tier | latency | who holds it | what makes it trustworthy |
+| --- | --- | --- | --- |
+| local append | a keystroke | the author | fsync |
+| tail shipping | seconds | a few subscribed replicas | signed by the publisher's key |
+| sealed segment | minutes | anyone, through a swarm | piece hashes |
+| index pointer | tens of minutes | the DHT | BEP 46 signature |
+
+The faster the tier, the fewer the parties and the weaker the guarantee. Reads
+are overwhelmingly of sealed segments, which are immutable and content
+addressed and therefore need no coherence protocol at all; only the short live
+tail needs the fast path. And there is no consensus problem anywhere in it,
+because one scroll has exactly one appender -- documents drawing on several
+authors are an edit decision list over several scrolls.
+
+The key implemented for BEP 46 is the same instrument the tail tier needs: what
+signs the pointer can sign each appended run, so a replica can check a fresh
+append long before anything is sealed.
 
 ### Where it would sit
 
@@ -181,6 +229,12 @@ unreachable content must fail quickly, and a filesystem read cannot.
 The permascroll question is worth pursuing on its own terms. Segments sealed
 into torrents, a growing tail that is not one, and a BEP 46 key as the permanent
 name is a design that suits both BitTorrent's constraints and Nelson's model,
-and most of the addressing for it is already here. The first step, if it is
-taken, is resolving a `urn:btpk` name -- small, self-contained, and immediately
-useful without any of the server side existing yet.
+and most of the addressing for it is already here. The first step named here --
+resolving a `urn:btpk` name -- has since been taken, and it went where it was
+expected to: a name resolves to an info hash and nothing below that changed.
+
+The next step is not the append protocol, which is the largest piece, but the
+smallest one that the rest depends on: moving a span's address off the torrent
+that happens to carry it and into scroll coordinates. Every other tier is
+buildable afterwards and none of them is buildable before, because until an
+address survives sealing there is nothing for a reference to be stable against.

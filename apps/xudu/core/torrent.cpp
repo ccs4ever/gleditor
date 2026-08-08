@@ -60,15 +60,38 @@ std::array<std::uint8_t, 20> sha1(const std::string_view data) {
   return out;
 }
 
-std::string InfoHash::hex() const {
+std::string toHex(const std::string_view bytes) {
   static constexpr std::string_view digits = "0123456789abcdef";
   std::string out;
   out.reserve(bytes.size() * 2);
-  for (const auto byte : bytes) {
+  for (const auto chr : bytes) {
+    const auto byte = static_cast<std::uint8_t>(chr);
     out.push_back(digits[byte >> 4U]);
     out.push_back(digits[byte & 0x0FU]);
   }
   return out;
+}
+
+std::string fromHex(const std::string_view text) {
+  if (0 != text.size() % 2) {
+    throw std::runtime_error("hex: \"" + std::string{text} +
+                             "\" has an odd number of digits");
+  }
+  std::string out;
+  out.reserve(text.size() / 2);
+  for (std::size_t i = 0; i < text.size(); i += 2) {
+    const int high = hexValue(text[i]);
+    const int low  = hexValue(text[i + 1]);
+    if (high < 0 || low < 0) {
+      throw std::runtime_error("hex: \"" + std::string{text} + "\" is not hex");
+    }
+    out.push_back(static_cast<char>((high << 4) | low));
+  }
+  return out;
+}
+
+std::string InfoHash::hex() const {
+  return toHex({reinterpret_cast<const char *>(bytes.data()), bytes.size()});
 }
 
 InfoHash InfoHash::fromHex(const std::string_view text) {
@@ -332,6 +355,27 @@ std::vector<std::uint32_t> parseSelectOnly(const std::string_view text) {
 
 } // namespace
 
+void forEachMagnetParameter(
+    const std::string_view uri,
+    const std::function<void(std::string_view, std::string)> &visit) {
+  if (!uri.starts_with("magnet:?")) {
+    return;
+  }
+  const auto query = uri.substr(std::string_view{"magnet:?"}.size());
+
+  std::size_t at = 0;
+  while (at <= query.size()) {
+    const auto amp   = std::min(query.find('&', at), query.size());
+    const auto field = query.substr(at, amp - at);
+    at               = amp + 1;
+    const auto equals = field.find('=');
+    if (std::string_view::npos == equals) {
+      continue;
+    }
+    visit(field.substr(0, equals), percentDecode(field.substr(equals + 1)));
+  }
+}
+
 bool MagnetLink::looksLikeMagnet(const std::string_view text) {
   return text.starts_with("magnet:?");
 }
@@ -343,41 +387,28 @@ MagnetLink MagnetLink::parse(const std::string_view uri) {
 
   MagnetLink link;
   bool haveHash = false;
-  auto query    = uri.substr(std::string_view{"magnet:?"}.size());
-
-  std::size_t at = 0;
-  while (at <= query.size()) {
-    const auto amp   = std::min(query.find('&', at), query.size());
-    const auto field = query.substr(at, amp - at);
-    at               = amp + 1;
-    const auto equals = field.find('=');
-    if (std::string_view::npos == equals) {
-      continue;
-    }
-    const auto key   = field.substr(0, equals);
-    const auto value = field.substr(equals + 1);
-
+  forEachMagnetParameter(uri, [&link, &haveHash](const std::string_view key,
+                                                 const std::string &value) {
     if ("xt" == key) {
       // Several xt parameters are allowed, and a v2 torrent carries both a
       // btih and a btmh. Take the v1 hash and ignore the rest: this addresses
       // content by SHA-1, and pretending to understand a SHA-256 merkle root
       // would mean being unable to verify anything named by it.
-      const auto decoded = percentDecode(value);
       constexpr std::string_view prefix = "urn:btih:";
-      if (decoded.starts_with(prefix)) {
-        const auto digits = std::string_view{decoded}.substr(prefix.size());
+      if (value.starts_with(prefix)) {
+        const auto digits = std::string_view{value}.substr(prefix.size());
         link.hash = 40 == digits.size() ? InfoHash::fromHex(digits)
                                         : fromBase32(digits);
         haveHash  = true;
       }
     } else if ("dn" == key) {
-      link.displayName = percentDecode(value);
+      link.displayName = value;
     } else if ("tr" == key) {
-      link.trackers.push_back(percentDecode(value));
+      link.trackers.push_back(value);
     } else if ("so" == key) {
-      link.selectedFiles = parseSelectOnly(percentDecode(value));
+      link.selectedFiles = parseSelectOnly(value);
     }
-  }
+  });
 
   if (!haveHash) {
     throw std::runtime_error(
