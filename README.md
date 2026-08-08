@@ -823,6 +823,13 @@ connection it used is gone.
 It needs root, because creating a network namespace does, which is why it is
 not part of `make test`. It runs as its own CI job.
 
+BTFS -- the FUSE filesystem that mounts a torrent as a directory -- was
+investigated as an alternative to this and as a basis for a shared permascroll
+server. It fits the `ContentSource` seam with no new code and is still the wrong
+choice, because a filesystem read of unavailable content blocks where this has
+to fail quickly. The permascroll question has a better answer that BitTorrent
+does support. See [design/btfs-and-permascrolls.md](design/btfs-and-permascrolls.md).
+
 **What is implemented and what is not.** The addressing, the verification and
 the fetching are all real. What is not here is any notion of who may read what:
 Nelson's model has a payment and permission story around "feed and sale... from
@@ -1242,6 +1249,7 @@ for eight seconds and no capture should wait that long.
 - `apps/xudu/`  the xanadoc editor; `apps/xudu/core/` is its engine, which needs no graphics device
 - `assets/shaders/` portable GLSL bodies, plus generated SPIR-V under `vulkan/`
 - `tools/`      build-time and verification helpers
+- `design/`     design notes: investigations and the reasoning behind decisions
 - `tests/lib/`  the library's unit tests (GoogleTest/GoogleMock)
 - `tests/xudu/` the xanalogical engine's unit tests
 - `thirdparty/` vendored dependencies (argparse, Choreograph, cosmopolitan, etc.)

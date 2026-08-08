@@ -42,11 +42,21 @@ std::string readWholeFile(const std::string &path) {
 
 int main(const int argc, char **argv) {
   if (argc < 3) {
-    std::cerr << "usage: xudu-swarm-peer <torrent> <data-dir> [listen-address]\n"
+    std::cerr << "usage: xudu-swarm-peer <torrent> <data-dir> [listen-address] "
+                 "[--discoverable]\n"
                  "\n"
                  "Offers the torrent's content to whoever connects, and prints\n"
-                 "the port it is listening on. Runs until interrupted.\n";
+                 "the port it is listening on. Runs until interrupted.\n"
+                 "\n"
+                 "--discoverable also announces on the local network, for\n"
+                 "clients that cannot be told about a peer directly.\n";
     return 2;
+  }
+  bool discoverable = false;
+  for (int i = 1; i < argc; i++) {
+    if (std::string{"--discoverable"} == argv[i]) {
+      discoverable = true;
+    }
   }
   if (!xudu::swarmSupported()) {
     std::cerr << "built without libtorrent; nothing to seed with\n";
@@ -62,11 +72,17 @@ int main(const int argc, char **argv) {
     // to contain exactly the two peers that were introduced to each other, so
     // that a successful transfer says something about this code rather than
     // about whatever else is on the network.
-    options.enableDht             = false;
-    options.enableLocalDiscovery  = false;
-    options.enableTrackers        = false;
-    options.listenInterfaces =
-        std::string{argc > 3 ? argv[3] : "0.0.0.0"} + ":0";
+    options.enableDht            = false;
+    options.enableTrackers       = false;
+    // Local discovery is off for the same reason, unless asked for: a peer
+    // that announces itself on the network is a peer the test did not
+    // introduce. It is available because some clients -- btfs, for one -- have
+    // no way to be told about a peer and can only find one by discovery.
+    options.enableLocalDiscovery = discoverable;
+    const std::string address =
+        (argc > 3 && std::string{"--discoverable"} != argv[3]) ? argv[3]
+                                                               : "0.0.0.0";
+    options.listenInterfaces = address + ":0";
 
     xudu::SwarmContentSource peer(options);
     const auto torrent = readWholeFile(argv[1]);
