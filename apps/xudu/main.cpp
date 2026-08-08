@@ -38,6 +38,7 @@
 
 #include "core/microversion.hpp"
 #include "core/ops.hpp"
+#include "core/torrent.hpp"
 #include "session.hpp"
 
 namespace {
@@ -297,6 +298,24 @@ int main(const int argc, char **argv) {
       .help("microversion to open, for example 2a4; the default is the most "
             "recent state in the store")
       .default_value(std::string{});
+  parser.add_argument("--torrent")
+      .help("a .torrent file, or a magnet link naming one already given; "
+            "repeatable. The info hash is a content-derived name, so a "
+            "quotation into it means the same thing to anyone who has the "
+            "reference and keeps meaning it after this machine is gone. A "
+            "magnet carries only that name -- the piece hashes it must be "
+            "verified against are in the torrent's info dictionary, which a "
+            "client normally fetches from the swarm")
+      .append();
+  parser.add_argument("--torrent-data")
+      .help("directory the torrent's files are in; the default is the "
+            "directory the .torrent file itself is in")
+      .default_value(std::string{});
+  parser.add_argument("--quote")
+      .help("quote a range of the most recently given --torrent into the "
+            "document, as FILE,OFFSET,LENGTH. A length of 0 means the rest of "
+            "the file. Repeatable")
+      .append();
   parser.add_argument("--map")
       .help("start with the hypertime map shown; ctrl-m toggles it")
       .flag();
@@ -346,6 +365,53 @@ int main(const int argc, char **argv) {
       session->save();
       quiet || std::cout << "xudu: imported " << file << " as "
                          << imported.str() << "\n";
+    }
+
+    // Torrents first, so a --quote has something to name.
+    std::vector<xudu::InfoHash> available;
+    if (parser.present<std::vector<std::string>>("--torrent")) {
+      const auto root = parser.get<std::string>("--torrent-data");
+      for (const auto &file : parser.get<std::vector<std::string>>("--torrent")) {
+        const auto hash = xudu::MagnetLink::looksLikeMagnet(file)
+                              ? session->addMagnet(file)
+                              : session->addTorrent(file, root);
+        available.push_back(hash);
+        const auto *const meta = session->content().metainfo(hash);
+        quiet || std::cout << "xudu: " << file << " is " << meta->magnet()
+                           << " (" << meta->files().size() << " file(s), "
+                           << meta->totalLength() << " bytes)\n";
+      }
+    }
+
+    if (parser.present<std::vector<std::string>>("--quote")) {
+      if (available.empty()) {
+        throw std::runtime_error("--quote needs a --torrent to quote from");
+      }
+      for (const auto &spec : parser.get<std::vector<std::string>>("--quote")) {
+        const auto first  = spec.find(',');
+        const auto second = spec.find(',', first + 1);
+        if (std::string::npos == first || std::string::npos == second) {
+          throw std::runtime_error("--quote expects FILE,OFFSET,LENGTH, got: " +
+                                   spec);
+        }
+        const auto fileIndex = static_cast<std::uint32_t>(
+            std::stoul(spec.substr(0, first)));
+        const auto offset = std::stoull(spec.substr(first + 1, second - first - 1));
+        const auto length = std::stoull(spec.substr(second + 1));
+
+        // Appended to whatever the document is now, which for a fresh store is
+        // the null document -- so a store made entirely of quotations holds no
+        // content of its own at all.
+        const auto at = static_cast<std::uint32_t>(
+            session->store().rebuild(session->store().latest()).length());
+        const auto produced =
+            session->quoteTorrent(session->store().latest(), at,
+                                  available.back(), fileIndex, offset, length);
+        quiet || std::cout << "xudu: " << produced.str() << " quotes "
+                           << available.back().hex() << " file " << fileIndex
+                           << " [" << offset << "," << offset + length << ")\n";
+      }
+      session->save();
     }
 
     const auto asked = parser.get<std::string>("--version-id");

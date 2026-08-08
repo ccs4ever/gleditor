@@ -28,6 +28,8 @@
 
 #include "microversion.hpp"
 #include "ops.hpp"
+#include "origin.hpp"
+#include "resolver.hpp"
 #include "spool.hpp"
 #include "version.hpp"
 
@@ -37,7 +39,7 @@ namespace xudu {
  * @class Store
  * @brief A xanadoc: one primedia spool, one operations spool, and its links.
  */
-class Store {
+class Store : public SpanReader {
 public:
   // -- OSMIC's three server functions ---------------------------------------
 
@@ -80,6 +82,8 @@ public:
   [[nodiscard]] Version rebuild(const MicroversionId &version) const;
 
   /// The text of @p version, which is rebuild() followed by materialize().
+  /// Content quoted from a torrent this machine cannot reach comes out empty,
+  /// so a document is readable even when part of what it points at is not.
   [[nodiscard]] std::string textOf(const MicroversionId &version) const;
 
   // -- making new states ----------------------------------------------------
@@ -158,6 +162,51 @@ public:
   [[nodiscard]] const PrimediaSpool &primedia() const { return spool; }
   [[nodiscard]] std::size_t opCount() const { return ops.size(); }
 
+  // -- content that was not typed here --------------------------------------
+
+  /**
+   * @brief Record an external origin, and give back the id spans name it by.
+   *
+   * Recording the same content twice gives the same id: an origin is
+   * identified by its torrent and file index, so two references to one file
+   * are two references to one thing, which is what makes a transclusion
+   * between them detectable.
+   */
+  OriginId addOrigin(const Origin &origin);
+
+  /// The origin @p id names, or nullptr for the local spool and for anything
+  /// this store has never recorded.
+  [[nodiscard]] const Origin *origin(OriginId id) const;
+  [[nodiscard]] const std::vector<Origin> &origins() const { return externals; }
+
+  /// Where the bytes of external origins are fetched from. Not owned.
+  void setContentSource(const ContentSource *source) {
+    resolver.setSource(source);
+  }
+  [[nodiscard]] const Resolver &contentResolver() const { return resolver; }
+
+  /**
+   * @brief Read a span, wherever its content lives.
+   *
+   * Local spans come from the spool. External ones are fetched and verified
+   * against the torrent's piece hashes; content that cannot be reached, or
+   * that does not hash to what the reference named, reads as nothing rather
+   * than as something plausible.
+   */
+  [[nodiscard]] std::string read(const PrimediaSpan &span) const override;
+
+  /**
+   * @brief Quote a range of an external file into @p parent at @p at.
+   *
+   * The document ends up pointing at content this machine may not hold, whose
+   * address means the same thing to everyone. Nothing is copied and nothing
+   * needs to be downloaded for the reference to be made -- only to be read.
+   */
+  MicroversionId transcludeExternal(const MicroversionId &parent,
+                                    std::uint32_t at, const Origin &from,
+                                    std::uint64_t fileOffset,
+                                    std::uint64_t length);
+
   // -- persistence ----------------------------------------------------------
 
   /**
@@ -181,6 +230,11 @@ private:
   void replay(const Op &op, Version &onto) const;
 
   PrimediaSpool spool;
+  /// External origins, in the order they were first recorded. A span's
+  /// OriginId is one more than the index here, so that zero stays the local
+  /// spool.
+  std::vector<Origin> externals;
+  Resolver resolver;
   /// The operations spool, filed by the state each op produces. Ordered, so
   /// iteration is replay order.
   std::map<MicroversionId, Op> ops;

@@ -1,19 +1,31 @@
 #include "spool.hpp"
 
 #include <algorithm>
+#include <stdexcept>
 #include <string>
 #include <string_view>
 
 namespace xudu {
 
 PrimediaSpan PrimediaSpool::append(const std::string_view bytes) {
-  const PrimediaSpan span{static_cast<std::uint64_t>(contents.size()),
+  const PrimediaSpan span{localOrigin,
+                          static_cast<std::uint64_t>(contents.size()),
                           static_cast<std::uint64_t>(bytes.size())};
   contents.append(bytes);
   return span;
 }
 
 std::string PrimediaSpool::read(const PrimediaSpan &span) const {
+  // A span into a torrent cannot be answered from here, and answering with
+  // whatever happens to sit at that offset locally would be worse than not
+  // answering: a caller cannot tell substituted bytes from the real thing,
+  // which is the failure content addressing exists to prevent. The store is
+  // the reader that knows about every origin.
+  if (!span.isLocal()) {
+    throw std::runtime_error(
+        "primedia spool: asked for a span into origin " +
+        std::to_string(span.origin) + ", which is not the local spool");
+  }
   // Clamped rather than checked, because a span can outlive the run that
   // produced it only by being read from a store written by an older version --
   // and returning what is there beats refusing to open the document.

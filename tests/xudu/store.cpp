@@ -21,6 +21,7 @@ using xudu::LinkType;
 using xudu::MicroversionId;
 using xudu::Op;
 using xudu::OpKind;
+using xudu::localOrigin;
 using xudu::PrimediaSpan;
 using xudu::Store;
 
@@ -228,7 +229,7 @@ TEST(StoreTest, aLinkChangesNoText) {
   Store store;
   const auto one = store.insert(MicroversionId{}, 0, "text");
   Link link;
-  link.left.push_back(PrimediaSpan{0, 4});
+  link.left.push_back(PrimediaSpan{localOrigin, 0, 4});
   const auto two = store.addLink(one, link);
 
   EXPECT_EQ(store.textOf(two), "text");
@@ -277,8 +278,8 @@ TEST_F(StoreRoundTripTest, aStoreSurvivesBeingWrittenAndReadBack) {
     Link link;
     link.type  = LinkType::Quotation;
     link.owner = "someone";
-    link.left.push_back(PrimediaSpan{0, 5});
-    link.right.push_back(PrimediaSpan{5, 6});
+    link.left.push_back(PrimediaSpan{localOrigin, 0, 5});
+    link.right.push_back(PrimediaSpan{localOrigin, 5, 6});
     store.addLink(two, link);
     store.save(dir.string());
   }
@@ -295,8 +296,8 @@ TEST_F(StoreRoundTripTest, aStoreSurvivesBeingWrittenAndReadBack) {
   const auto &link = reloaded.links().begin()->second;
   EXPECT_EQ(link.type, LinkType::Quotation);
   EXPECT_EQ(link.owner, "someone");
-  EXPECT_EQ(link.left.front(), (PrimediaSpan{0, 5}));
-  EXPECT_EQ(link.right.front(), (PrimediaSpan{5, 6}));
+  EXPECT_EQ(link.left.front(), (PrimediaSpan{localOrigin, 0, 5}));
+  EXPECT_EQ(link.right.front(), (PrimediaSpan{localOrigin, 5, 6}));
 }
 
 TEST_F(StoreRoundTripTest, aStoreThatIsNotThereOpensEmpty) {

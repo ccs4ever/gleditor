@@ -26,6 +26,7 @@
 #include <gleditor/text_source.hpp>
 
 #include "core/microversion.hpp"
+#include "core/resolver.hpp"
 #include "core/store.hpp"
 
 class Caret;
@@ -92,6 +93,51 @@ public:
 
   explicit Session(std::string aStorePath);
 
+  /**
+   * @brief Make a torrent's content available to this store.
+   *
+   * @param torrentPath A .torrent file.
+   * @param dataRoot Where its files are. Empty means the directory the torrent
+   *        file itself is in, which is where a downloader usually leaves them.
+   * @return The info hash, which is the name the content is known by
+   *         everywhere.
+   * @throws std::runtime_error if the torrent cannot be read or parsed.
+   */
+  InfoHash addTorrent(const std::string &torrentPath,
+                      const std::string &dataRoot);
+
+  /**
+   * @brief Name content by a magnet link.
+   *
+   * A magnet carries the info hash and nothing else that matters: the piece
+   * hashes and the file list are in the info dictionary, which the link only
+   * names. So this can say which content is meant, and can resolve it only
+   * when the metadata has been obtained some other way -- a .torrent given
+   * alongside, or eventually a swarm.
+   *
+   * @throws std::runtime_error when the link is malformed, or when its
+   *         metadata is not available. Reporting that plainly beats recording
+   *         a reference that would silently read as empty forever.
+   */
+  InfoHash addMagnet(const std::string &uri);
+
+  /// The torrents whose content this session can reach.
+  [[nodiscard]] const DirectoryContentSource &content() const {
+    return contentSource;
+  }
+
+  /**
+   * @brief Quote a range of a torrent-backed file into @p parent.
+   *
+   * The document ends up pointing at content addressed by its own hash rather
+   * than by an offset into this machine's spool, so the reference means the
+   * same thing to anyone who has it and keeps meaning it after this machine is
+   * gone.
+   */
+  MicroversionId quoteTorrent(const MicroversionId &parent, std::uint32_t at,
+                              const InfoHash &hash, std::uint32_t fileIndex,
+                              std::uint64_t offset, std::uint64_t length);
+
   [[nodiscard]] Store &store() { return docStore; }
   [[nodiscard]] const Store &store() const { return docStore; }
 
@@ -141,6 +187,14 @@ private:
   /// Note that something a decoration depends on has changed.
   void invalidate() { epoch++; }
 
+  /// Where the bytes of torrent-backed origins come from.
+  ///
+  /// Declared before the store, and therefore destroyed after it: the store
+  /// keeps a bare pointer to this, and members are torn down in reverse
+  /// declaration order. Nothing dereferences it during destruction today,
+  /// which is exactly why the order should be right now rather than after
+  /// something does.
+  DirectoryContentSource contentSource;
   Store docStore;
   /// Bumped whenever a view or a link changes, which is what a cached set of
   /// decorations is checked against.

@@ -17,6 +17,7 @@ namespace {
 constexpr const char *primediaFile = "primedia.spool";
 constexpr const char *opsFile      = "ops.spool";
 constexpr const char *linksFile    = "links.spool";
+constexpr const char *originsFile  = "origins.spool";
 
 std::string readWholeFile(const std::filesystem::path &path) {
   std::ifstream in(path, std::ios::binary);
@@ -76,6 +77,12 @@ void Store::replay(const Op &op, Version &onto) const {
     break;
   }
   case OpKind::Transclude: {
+    if (!op.span.empty()) {
+      // Named directly by a content address, so there is no source document to
+      // go through: the reference is already global.
+      onto.insert(op.at, op.span);
+      break;
+    }
     // Resolved against the source version as it stands, which is what makes
     // this a virtual copy: the spans it yields are the source's own addresses,
     // so both versions end up pointing at one copy of the content.
@@ -103,7 +110,57 @@ Version Store::rebuild(const MicroversionId &version) const {
 }
 
 std::string Store::textOf(const MicroversionId &version) const {
-  return rebuild(version).materialize(spool);
+  return rebuild(version).materialize(*this);
+}
+
+OriginId Store::addOrigin(const Origin &origin) {
+  // Identified by the content it names, not by how it was written down: two
+  // references to one file must share an id, or a transclusion between them
+  // would be invisible to the address comparison that finds one.
+  for (std::size_t i = 0; i < externals.size(); i++) {
+    if (externals[i].sameContentAs(origin)) {
+      return static_cast<OriginId>(i + 1);
+    }
+  }
+  externals.push_back(origin);
+  return static_cast<OriginId>(externals.size());
+}
+
+const Origin *Store::origin(const OriginId id) const {
+  if (localOrigin == id || id > externals.size()) {
+    return nullptr;
+  }
+  return &externals[id - 1];
+}
+
+std::string Store::read(const PrimediaSpan &span) const {
+  if (span.isLocal()) {
+    return spool.read(span);
+  }
+  const auto *const which = origin(span.origin);
+  if (nullptr == which) {
+    return {};
+  }
+  // Verified inside the resolver. Content that cannot be reached, or that does
+  // not hash to what the reference named, comes back empty -- so a document
+  // quoting a torrent nobody is seeding still opens, with the quotation blank
+  // rather than with something invented in its place.
+  return resolver.read(*which, span);
+}
+
+MicroversionId Store::transcludeExternal(const MicroversionId &parent,
+                                         const std::uint32_t at,
+                                         const Origin &from,
+                                         const std::uint64_t fileOffset,
+                                         const std::uint64_t length) {
+  Op op;
+  op.kind = OpKind::Transclude;
+  op.at   = at;
+  // No source version: the content is named directly by a content address, so
+  // there is no other document to resolve it through. This is the case Xanadu
+  // wants and the local spool cannot express.
+  op.span = PrimediaSpan{addOrigin(from), fileOffset, length};
+  return apply(parent, op);
 }
 
 MicroversionId Store::apply(const MicroversionId &parent, Op op) {
@@ -244,7 +301,18 @@ void Store::save(const std::string &directory) const {
           << op.length << ' ' << op.to << ' ' << op.span.start << ' '
           << op.span.length << ' ' << (op.source.isZero() ? "0" : op.source.str())
           << ' ' << op.sourceAt << ' ' << op.sourceLength << ' ' << op.link
-          << '\n';
+          << ' ' << op.span.origin << '\n';
+    }
+  }
+  {
+    // The origin table: what a span's OriginId means. Without it an id is a
+    // number with no content behind it, so this is as much a part of the store
+    // as the spans that refer to it.
+    std::ofstream out(dir / originsFile, std::ios::trunc);
+    for (const auto &origin : externals) {
+      out << origin.torrent.hex() << ' ' << origin.fileIndex << ' '
+          << origin.fileOffset << ' ' << origin.fileLength << ' '
+          << (origin.path.empty() ? "-" : origin.path) << '\n';
     }
   }
   {
@@ -269,7 +337,34 @@ void Store::load(const std::string &directory) {
   spool.adopt(readWholeFile(dir / primediaFile));
   ops.clear();
   linkTable.clear();
+  externals.clear();
   nextLinkId = 1;
+
+  {
+    std::ifstream in(dir / originsFile);
+    std::string line;
+    while (std::getline(in, line)) {
+      if (line.empty()) {
+        continue;
+      }
+      std::istringstream fields(line);
+      std::string hash;
+      Origin origin;
+      fields >> hash >> origin.fileIndex >> origin.fileOffset >>
+          origin.fileLength >> origin.path;
+      if (!fields) {
+        throw std::runtime_error("malformed origin in " +
+                                 (dir / originsFile).string() + ": " + line);
+      }
+      origin.torrent = InfoHash::fromHex(hash);
+      if ("-" == origin.path) {
+        origin.path.clear();
+      }
+      // Appended rather than interned, because the ids already written into
+      // the operations spool are positions in this list.
+      externals.push_back(origin);
+    }
+  }
 
   {
     std::ifstream in(dir / opsFile);
@@ -285,6 +380,11 @@ void Store::load(const std::string &directory) {
       Op op;
       fields >> id >> kind >> op.at >> op.length >> op.to >> op.span.start >>
           op.span.length >> source >> op.sourceAt >> op.sourceLength >> op.link;
+      // Added after the first stores were written, so its absence means the
+      // local spool -- which is what every span in such a store was.
+      if (!(fields >> op.span.origin)) {
+        op.span.origin = localOrigin;
+      }
       if (!fields) {
         throw std::runtime_error("malformed operation in " +
                                  (dir / opsFile).string() + ": " + line);

@@ -80,8 +80,15 @@ public:
   /// Insert pointers to @p spans, in order, at @p at.
   void insertSpans(std::uint32_t at, const std::vector<PrimediaSpan> &spans);
 
-  /// The text this version stands for.
-  [[nodiscard]] std::string materialize(const PrimediaSpool &spool) const;
+  /**
+   * @brief The text this version stands for.
+   *
+   * Read through @p reader rather than out of a spool, because a version's
+   * pieces may point at content this machine never typed and may not hold. A
+   * piece the reader cannot produce contributes nothing, so a document quoting
+   * something unreachable still has the rest of itself.
+   */
+  [[nodiscard]] std::string materialize(const SpanReader &reader) const;
 
   /// Total length in bytes of that text.
   [[nodiscard]] std::uint32_t length() const;

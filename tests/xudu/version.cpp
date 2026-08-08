@@ -5,6 +5,7 @@
 #include <gmock/gmock.h>
 #include <gtest/gtest.h>
 
+#include <stdexcept>
 #include <string>
 
 #include <xudu/core/spool.hpp>
@@ -13,18 +14,50 @@
 namespace {
 
 using xudu::Extent;
+using xudu::localOrigin;
 using xudu::PrimediaSpan;
 using xudu::PrimediaSpool;
 using xudu::Version;
 
 TEST(PrimediaSpanTest, intersectionIsTheSharedPart) {
-  const PrimediaSpan left{10, 10};  // [10, 20)
-  const PrimediaSpan right{15, 10}; // [15, 25)
-  EXPECT_EQ(left.intersect(right), (PrimediaSpan{15, 5}));
+  const PrimediaSpan left{localOrigin, 10, 10};  // [10, 20)
+  const PrimediaSpan right{localOrigin, 15, 10}; // [15, 25)
+  EXPECT_EQ(left.intersect(right), (PrimediaSpan{localOrigin, 15, 5}));
+}
+
+TEST(PrimediaSpanTest, addressesIntoDifferentContentNeverOverlap) {
+  // The property that makes an address global rather than local. Byte 100 of
+  // one torrent has nothing to do with byte 100 of another, and treating the
+  // numbers as comparable would report transclusions nobody made -- between
+  // two documents that merely quote unrelated things at similar offsets.
+  const PrimediaSpan mine{localOrigin, 10, 10};
+  const PrimediaSpan theirs{7, 10, 10};
+  EXPECT_TRUE(mine.intersect(theirs).empty());
+  EXPECT_TRUE(theirs.intersect(mine).empty());
+  // Same numbers, same origin: that is a real overlap.
+  EXPECT_FALSE(theirs.intersect(PrimediaSpan{7, 12, 4}).empty());
+}
+
+TEST(PrimediaSpanTest, slicingKeepsTheOrigin) {
+  // A slice of a reference is a reference to the same content. Losing the
+  // origin here would silently turn part of a torrent-backed quotation into an
+  // address in the local spool.
+  const PrimediaSpan external{7, 100, 50};
+  EXPECT_EQ(external.slice(10, 5).origin, 7U);
+  EXPECT_EQ(external.slice(10, 5).start, 110U);
+}
+
+TEST(SpoolTest, aSpanIntoOtherContentIsRefusedRatherThanAnswered) {
+  // The spool has no way to reach a torrent, and answering with whatever sits
+  // at that offset locally would be a substitution the caller could not
+  // detect -- the exact failure content addressing exists to prevent.
+  PrimediaSpool spool;
+  spool.append("local text");
+  EXPECT_THROW((void)spool.read(PrimediaSpan{7, 0, 5}), std::runtime_error);
 }
 
 TEST(PrimediaSpanTest, spansThatDoNotMeetShareNothing) {
-  EXPECT_TRUE((PrimediaSpan{0, 5}).intersect(PrimediaSpan{5, 5}).empty());
+  EXPECT_TRUE((PrimediaSpan{localOrigin, 0, 5}).intersect(PrimediaSpan{localOrigin, 5, 5}).empty());
 }
 
 TEST(SpoolTest, appendingReportsWhereItLanded) {
@@ -32,8 +65,8 @@ TEST(SpoolTest, appendingReportsWhereItLanded) {
   const auto first  = spool.append("hello");
   const auto second = spool.append(" world");
 
-  EXPECT_EQ(first, (PrimediaSpan{0, 5}));
-  EXPECT_EQ(second, (PrimediaSpan{5, 6}));
+  EXPECT_EQ(first, (PrimediaSpan{localOrigin, 0, 5}));
+  EXPECT_EQ(second, (PrimediaSpan{localOrigin, 5, 6}));
   EXPECT_EQ(spool.read(first), "hello");
   EXPECT_EQ(spool.read(second), " world");
 }
@@ -48,8 +81,8 @@ TEST(SpoolTest, theSameTextTwiceGetsTwoAddresses) {
 TEST(SpoolTest, aSpanPastTheEndReadsWhatIsThere) {
   PrimediaSpool spool;
   spool.append("abc");
-  EXPECT_EQ(spool.read(PrimediaSpan{1, 100}), "bc");
-  EXPECT_EQ(spool.read(PrimediaSpan{100, 5}), "");
+  EXPECT_EQ(spool.read(PrimediaSpan{localOrigin, 1, 100}), "bc");
+  EXPECT_EQ(spool.read(PrimediaSpan{localOrigin, 100, 5}), "");
 }
 
 /// A version over one spool, which most of these need.
@@ -148,7 +181,7 @@ TEST_F(VersionTest, spansForNamesTheAddressesARangePointsAt) {
   type(0, "hello");
   const auto spans = version.spansFor(1, 3);
   ASSERT_EQ(spans.size(), 1U);
-  EXPECT_EQ(spans.front(), (PrimediaSpan{1, 3}));
+  EXPECT_EQ(spans.front(), (PrimediaSpan{localOrigin, 1, 3}));
   EXPECT_EQ(spool.read(spans.front()), "ell");
 }
 

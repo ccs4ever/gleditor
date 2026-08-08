@@ -40,6 +40,38 @@ into an empty store as its first operation. Refused on a store that already has
 operations, since importing into one would be an ordinary edit and should be
 made as one.
 .TP
+.BR \-\-torrent " \fIFILE\fR|\fIMAGNET\fR"
+Make a torrent's content available for quoting. Repeatable.
+.IP
+A torrent's info hash is derived from its content, so it names that content
+everywhere and permanently, and every piece carries a hash so what arrives can
+be checked against what was named. A quotation into a torrent therefore means
+the same thing to anyone who has the reference, and keeps meaning it after this
+machine is gone.
+.IP
+A magnet link is accepted here too, in either the hex or base-32 spelling, but
+it carries only the name: the piece hashes it must be verified against are in
+the torrent's info dictionary, which a client normally fetches from the swarm.
+A magnet whose metadata is not available is refused rather than recorded as a
+reference that could never resolve.
+.TP
+.BR \-\-torrent\-data " \fIDIR\fR"
+Directory the torrent's files are in. The default is the directory the
+.I .torrent
+file itself is in, which is where a downloader usually leaves them.
+.TP
+.BR \-\-quote " \fIFILE\fR,\fIOFFSET\fR,\fILENGTH\fR"
+Quote that range of the most recently given
+.B \-\-torrent
+into the document. A length of 0 means the rest of the file. Repeatable.
+.IP
+Nothing is copied: the document ends up holding a pointer to content addressed
+by its own hash, so a store made entirely of quotations has an empty primedia
+spool. Content that cannot be reached, or that does not hash to what the
+reference named, reads as nothing rather than as something plausible -- and the
+rest of the document is unaffected, because failing to resolve a reference is
+not the same as the document being corrupt.
+.TP
 .BR \-\-version\-id " \fIID\fR"
 Open this microversion, for example
 .BR 2a4 .
@@ -105,6 +137,11 @@ One line per operation, in replay order.
 .TP
 .I STORE/links.spool
 Links, as their two lists of primedia spans, a type and an owner.
+.TP
+.I STORE/origins.spool
+The content this store points at but did not produce: a torrent info hash, a
+file index, and where that file sits in the torrent. Without it a span's origin
+is a number with no content behind it.
 .TP
 .I @DATADIR@/shaders
 Shader sources loaded at run time.

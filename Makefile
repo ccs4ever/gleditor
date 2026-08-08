@@ -90,6 +90,12 @@ packages providing them, or unset GLEDITOR_ENABLE_VULKAN to build without \
 the Vulkan backend)
 endif
 TEST_PKGS := gmock_main
+# What the xanalogical engine is allowed to link. glibmm supplies SHA-1, which
+# is what a torrent's info hash is, and glibmm is already a hard dependency of
+# the library. The point of keeping this list short is that the engine must not
+# need a graphics device -- not that it must need nothing at all -- so a
+# utility library is fine here and pangomm, cairo and SDL are not.
+XUDU_PKGS := glibmm-2.68
 
 # The version, which a release tarball has to know without a git history: every
 # distribution builds from an unpacked tarball, where `git describe` prints
@@ -170,6 +176,7 @@ endif
 #CXXFLAGS += -stdlib=libc++ -fexperimental-library 
 #LDFLAGS += -v -stdlib=libc++ -fexperimental-library 
 LIBS := $(shell pkg-config $(STATIC) --libs $(PKGS))
+XUDU_LIBS := $(shell pkg-config $(STATIC) --libs $(XUDU_PKGS))
 # glslangValidator is the traditional name and glslang the current one; which
 # of the two a distribution installs varies, so both are tried.
 #
@@ -420,13 +427,13 @@ gleditor_test: $(OBJDIR)/gleditor_test
 $(OBJDIR)/gleditor_test: $(LIB_TEST_OBJS) $(LIBLINK)
 	$(CXX) $(LDFLAGS) -o $@ $(LIB_TEST_OBJS) $(APP_LDFLAGS) $(LIBS) $(TEST_LIBS)
 
-# The xanalogical engine's tests need no graphics device, so they link the
-# engine and not the library. That is the boundary being checked rather than
-# merely asserted: if a rule about versions or links ever needed a renderer,
-# this would stop linking.
+# The xanalogical engine's tests link the engine and not the library, so they
+# run without a graphics device. That is the boundary being checked rather than
+# merely asserted: if a rule about versions, links or content addresses ever
+# needed a renderer, this would stop linking.
 xudu_test: $(OBJDIR)/xudu_test
 $(OBJDIR)/xudu_test: $(XUDU_TEST_OBJS) $(XUDU_CORE_OBJS)
-	$(CXX) $(LDFLAGS) -o $@ $^ $(TEST_LIBS)
+	$(CXX) $(LDFLAGS) -o $@ $^ $(XUDU_LIBS) $(TEST_LIBS)
 
 test: $(OBJDIR)/gleditor_test $(OBJDIR)/xudu_test
 	$(OBJDIR)/gleditor_test
