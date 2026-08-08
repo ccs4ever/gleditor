@@ -28,8 +28,8 @@
 
 #include "microversion.hpp"
 #include "ops.hpp"
-#include "origin.hpp"
 #include "resolver.hpp"
+#include "scroll.hpp"
 #include "spool.hpp"
 #include "version.hpp"
 
@@ -165,21 +165,35 @@ public:
   // -- content that was not typed here --------------------------------------
 
   /**
-   * @brief Record an external origin, and give back the id spans name it by.
+   * @brief Record a scroll, and give back the id spans name it by.
    *
-   * Recording the same content twice gives the same id: an origin is
-   * identified by its torrent and file index, so two references to one file
-   * are two references to one thing, which is what makes a transclusion
-   * between them detectable.
+   * Recording the same scroll twice gives the same id: a scroll is identified
+   * by its publisher's name, or failing that by the file it was found in, so
+   * two references to one scroll are two references to one thing -- which is
+   * what makes a transclusion between them detectable.
+   *
+   * Segments of a scroll already known are merged into it rather than starting
+   * a second entry, so learning about a further seal does not fork the
+   * identity of everything referring to it.
    */
-  OriginId addOrigin(const Origin &origin);
+  ScrollId addScroll(const Scroll &scroll);
 
-  /// The origin @p id names, or nullptr for the local spool and for anything
+  /**
+   * @brief Say that a stretch of a scroll is carried by a torrent.
+   *
+   * This is what sealing does, and the reason the addressing was arranged this
+   * way: it changes where bytes are fetched from and leaves every address that
+   * refers to them untouched. A segment covering a stretch that already has
+   * one replaces it.
+   */
+  void addSegment(ScrollId id, const ScrollSegment &segment);
+
+  /// The scroll @p id names, or nullptr for the local spool and for anything
   /// this store has never recorded.
-  [[nodiscard]] const Origin *origin(OriginId id) const;
-  [[nodiscard]] const std::vector<Origin> &origins() const { return externals; }
+  [[nodiscard]] const Scroll *scroll(ScrollId id) const;
+  [[nodiscard]] const std::vector<Scroll> &scrolls() const { return externals; }
 
-  /// Where the bytes of external origins are fetched from. Not owned.
+  /// Where the bytes of external scrolls are fetched from. Not owned.
   void setContentSource(const ContentSource *source) {
     resolver.setSource(source);
   }
@@ -196,15 +210,18 @@ public:
   [[nodiscard]] std::string read(const PrimediaSpan &span) const override;
 
   /**
-   * @brief Quote a range of an external file into @p parent at @p at.
+   * @brief Quote a range of somebody else's scroll into @p parent at @p at.
    *
    * The document ends up pointing at content this machine may not hold, whose
    * address means the same thing to everyone. Nothing is copied and nothing
    * needs to be downloaded for the reference to be made -- only to be read.
+   *
+   * @param scrollOffset An offset in @p from's own coordinates, which for a
+   *        scroll that is one torrent file is an offset into that file.
    */
   MicroversionId transcludeExternal(const MicroversionId &parent,
-                                    std::uint32_t at, const Origin &from,
-                                    std::uint64_t fileOffset,
+                                    std::uint32_t at, const Scroll &from,
+                                    std::uint64_t scrollOffset,
                                     std::uint64_t length);
 
   // -- persistence ----------------------------------------------------------
@@ -230,10 +247,10 @@ private:
   void replay(const Op &op, Version &onto) const;
 
   PrimediaSpool spool;
-  /// External origins, in the order they were first recorded. A span's
-  /// OriginId is one more than the index here, so that zero stays the local
-  /// spool.
-  std::vector<Origin> externals;
+  /// Scrolls other than the local spool, in the order they were first
+  /// recorded. A span's ScrollId is one more than the index here, so that zero
+  /// stays the local spool.
+  std::vector<Scroll> externals;
   Resolver resolver;
   /// The operations spool, filed by the state each op produces. Ordered, so
   /// iteration is replay order.

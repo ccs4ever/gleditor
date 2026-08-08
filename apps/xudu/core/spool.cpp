@@ -8,7 +8,7 @@
 namespace xudu {
 
 PrimediaSpan PrimediaSpool::append(const std::string_view bytes) {
-  const PrimediaSpan span{localOrigin,
+  const PrimediaSpan span{localScroll,
                           static_cast<std::uint64_t>(contents.size()),
                           static_cast<std::uint64_t>(bytes.size())};
   contents.append(bytes);
@@ -20,11 +20,11 @@ std::string PrimediaSpool::read(const PrimediaSpan &span) const {
   // whatever happens to sit at that offset locally would be worse than not
   // answering: a caller cannot tell substituted bytes from the real thing,
   // which is the failure content addressing exists to prevent. The store is
-  // the reader that knows about every origin.
+  // the reader that knows about every scroll.
   if (!span.isLocal()) {
     throw std::runtime_error(
-        "primedia spool: asked for a span into origin " +
-        std::to_string(span.origin) + ", which is not the local spool");
+        "primedia spool: asked for a span into scroll " +
+        std::to_string(span.scroll) + ", which is not the local spool");
   }
   // Clamped rather than checked, because a span can outlive the run that
   // produced it only by being read from a store written by an older version --

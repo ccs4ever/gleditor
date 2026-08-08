@@ -178,10 +178,22 @@ One line per operation, in replay order.
 .I STORE/links.spool
 Links, as their two lists of primedia spans, a type and an owner.
 .TP
-.I STORE/origins.spool
-The content this store points at but did not produce: a torrent info hash, a
-file index, and where that file sits in the torrent. Without it a span's origin
-is a number with no content behind it.
+.I STORE/scrolls.spool
+The scrolls this store points at but did not produce. A
+.B scroll
+line names one \-\- a publisher's key, or a dash when it has none \-\- and the
+.B segment
+lines after it say which torrent carries which stretch of it. Without this a
+span's scroll is a number with no content behind it.
+.IP
+The two kinds of line have two lifetimes, which is why they are separate. A
+scroll's name never changes. Which torrent carries a stretch changes every time
+something is sealed, and changing it moves no address: that is what addressing
+content by scroll rather than by container buys.
+.IP
+A store written before scrolls existed has an
+.I origins.spool
+instead, and is read and then rewritten in this form.
 .TP
 .I @DATADIR@/shaders
 Shader sources loaded at run time.

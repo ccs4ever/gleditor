@@ -153,12 +153,18 @@ MicroversionId Session::quoteTorrent(const MicroversionId &parent,
                              std::to_string(fileIndex));
   }
   const auto &file = meta->files()[fileIndex];
-  const Origin origin{hash, fileIndex, file.path, file.offset, file.length};
+  // A scroll of one segment: this content is a fixed torrent file, not a
+  // published sequence somebody is still adding to. Its offsets are the file's
+  // offsets, so the quotation means what it always meant -- and if the same
+  // bytes are later republished under a name, that is a different scroll and
+  // honestly so, because nothing binds the two packagings together.
+  const auto scroll = Scroll::ofTorrentFile(hash, fileIndex, file.path,
+                                            file.offset, file.length);
   // A length of zero means the rest of the file, which is what "quote this
   // document" ought to be spelled as.
   const auto count = 0 == length ? file.length - std::min(offset, file.length)
                                  : length;
-  return docStore.transcludeExternal(parent, at, origin, offset, count);
+  return docStore.transcludeExternal(parent, at, scroll, offset, count);
 }
 
 MicroversionId Session::versionOf(const std::uint32_t docIndex) const {
