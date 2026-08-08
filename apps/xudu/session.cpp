@@ -26,6 +26,35 @@ Session::Session(std::string aStorePath) : storePath(std::move(aStorePath)) {
   docStore.setContentSource(&contentSource);
 }
 
+void Session::useSwarm() {
+  if (!swarmSupported()) {
+    throw std::runtime_error(
+        "this build has no swarm support: it was compiled without libtorrent");
+  }
+  SwarmContentSource::Options options;
+  options.listenInterfaces = "0.0.0.0:0";
+  swarmSource = std::make_unique<SwarmContentSource>(std::move(options));
+  docStore.setContentSource(swarmSource.get());
+}
+
+std::uint16_t Session::swarmPort() const {
+  return nullptr == swarmSource ? 0 : swarmSource->listenPort();
+}
+
+const ContentSource &Session::content() const {
+  if (nullptr != swarmSource) {
+    return *swarmSource;
+  }
+  return contentSource;
+}
+
+void Session::connectPeer(const InfoHash &hash, const std::string &host,
+                          const std::uint16_t port) {
+  if (nullptr != swarmSource) {
+    swarmSource->connectPeer(hash, host, port);
+  }
+}
+
 InfoHash Session::addTorrent(const std::string &torrentPath,
                              const std::string &dataRoot) {
   std::ifstream in(torrentPath, std::ios::binary);
@@ -39,6 +68,12 @@ InfoHash Session::addTorrent(const std::string &torrentPath,
   const auto root = dataRoot.empty()
                         ? std::filesystem::path(torrentPath).parent_path().string()
                         : dataRoot;
+  if (nullptr != swarmSource) {
+    // Not seeding: this machine is asking for the content, not offering it.
+    // Anything it does end up holding it will serve, which is what makes a
+    // reader of a quotation also a source of it.
+    return swarmSource->addTorrent(contents, root.empty() ? "." : root, false);
+  }
   return contentSource.add(contents, root.empty() ? "." : root);
 }
 
@@ -47,6 +82,11 @@ InfoHash Session::addMagnet(const std::string &uri) {
   // The link names the content; it does not carry it, and it does not carry
   // the piece hashes either. Without those nothing can be verified, and
   // returning unverified bytes is the one thing this must not do.
+  if (nullptr != swarmSource) {
+    // A swarm can do what a magnet needs: join, and ask a peer for the info
+    // dictionary. This is the case a magnet was designed for.
+    return swarmSource->addMagnet(uri, storePath + "-content");
+  }
   if (nullptr == contentSource.metainfo(link.hash)) {
     throw std::runtime_error(
         "magnet " + link.hash.hex() +
@@ -65,7 +105,7 @@ MicroversionId Session::quoteTorrent(const MicroversionId &parent,
                                      const std::uint32_t fileIndex,
                                      const std::uint64_t offset,
                                      const std::uint64_t length) {
-  const auto *const meta = contentSource.metainfo(hash);
+  const auto *const meta = content().metainfo(hash);
   if (nullptr == meta) {
     throw std::runtime_error("no torrent " + hash.hex() +
                              " has been made available");

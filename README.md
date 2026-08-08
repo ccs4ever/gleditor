@@ -749,17 +749,84 @@ arrived some other way -- a `.torrent` given alongside it. A magnet with no
 metadata is refused with an error saying so, rather than being recorded as a
 reference that would silently read as empty forever.
 
-**What is implemented and what is not.** The addressing and the verification
-are complete and are what `apps/xudu/core/` is mostly made of: bencode, the
-info hash, the file-to-piece mapping, and reading a byte range with every piece
-it touches checked. Obtaining the bytes is behind `ContentSource`, and the
-implementation shipped reads a directory that already holds the torrent's data
--- which is what a machine that has finished downloading has. Joining a swarm
-is a third implementation of two methods; nothing above it would change,
-because the resolver verifies whatever it is handed regardless of where that
-came from. That same implementation is what would make a bare magnet link
-resolve, since fetching metadata from peers and fetching content from peers are
-the same connection.
+### Fetching from the swarm
+
+`--swarm` fetches quoted content from BitTorrent peers instead of only from
+this disk. Without it a reference resolves only when this machine already holds
+the bytes -- which quietly reintroduces the dependency on one particular
+machine that addressing content by its hash exists to remove.
+
+```
+$ xudu --swarm --torrent fox.torrent --quote 0,4,9 xanadoc
+xudu: swarm listening on port 42343
+xudu: fox.torrent is magnet:?xt=urn:btih:dc308895...&dn=sample.txt (1 file(s), 218 bytes)
+xudu: 1 quotes dc308895... file 0 [4,13)
+```
+
+Only the pieces a quotation needs are requested, not the whole file: a
+quotation is usually a sentence out of something long, and fetching the rest
+would make a reference cost what a copy costs. Whole *pieces* though, because a
+piece hash covers a piece and says nothing about a fragment of one.
+
+With a swarm, a bare magnet link resolves as well -- that is the case it was
+designed for. The metadata it lacks is fetched from a peer (BEP 9), and
+libtorrent accepts an info dictionary only if it hashes back to the name the
+link carried.
+
+`--peer HOST:PORT` introduces a peer directly, for when there is no tracker or
+DHT to find one through.
+
+Nothing above the fetching changed to make this work. `Resolver` still gets
+whole pieces and hashes them against the torrent before returning anything, and
+it does not know whether they came off a local disk or from a stranger. That is
+the point of verifying: a peer is not trusted, so it does not have to be.
+
+Built only when libtorrent is installed. Without it the rest still works and
+there is simply no swarm on offer, which `xudu --swarm` says rather than
+pretending otherwise.
+
+#### Testing it
+
+Two peers that share a loopback are not really two peers. `make test/swarm`
+puts each in a network namespace of its own, joined by a veth pair and nothing
+else:
+
+```
+$ sudo make test/swarm
+==> making a torrent of tests/samples/quick_brown_fox.txt
+  218 bytes, 4 pieces, info hash dc308895c32545a2fb09f050d0be66164b234219
+==> two network namespaces, joined by a veth pair
+  seeder 10.77.0.1, leecher 10.77.0.2
+==> starting the seeder in xudu-seed
+  listening on 10.77.0.1:34941
+==> running the swarm tests in xudu-leech
+[  PASSED  ] 7 tests.
+```
+
+So the two have separate addresses, separate routing, and separate loopbacks:
+`127.0.0.1` means something different to each of them and neither can reach the
+other by accident. There is no DHT, no local discovery and no tracker, so the
+swarm contains exactly the two peers that were introduced -- a transfer that
+succeeds is this code talking BitTorrent over a network device and nothing
+else.
+
+The tests cover a byte range arriving, a range spanning a piece boundary, the
+whole file, a magnet getting its metadata from the peer, a document quoting
+content this machine never had, and a read of content nobody is seeding giving
+up rather than hanging. One of them checks that the bytes really came over the
+wire: it starts with an empty download directory and asserts afterwards both
+that libtorrent's received-byte counter moved and that the file materialised.
+Counting connected peers does not work for that -- a peer with nothing left to
+give disconnects, so by the time a completed read can be asked about, the
+connection it used is gone.
+
+It needs root, because creating a network namespace does, which is why it is
+not part of `make test`. It runs as its own CI job.
+
+**What is implemented and what is not.** The addressing, the verification and
+the fetching are all real. What is not here is any notion of who may read what:
+Nelson's model has a payment and permission story around "feed and sale... from
+original", and this has none -- content in a swarm is content anyone can take.
 
 `--quote` names a range on the command line because picking a byte range of a
 remote document is a user-interface problem this has not solved yet, not

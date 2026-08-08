@@ -307,6 +307,16 @@ int main(const int argc, char **argv) {
             "verified against are in the torrent's info dictionary, which a "
             "client normally fetches from the swarm")
       .append();
+  parser.add_argument("--swarm")
+      .help("fetch quoted content from BitTorrent peers rather than only from "
+            "this disk. Without it a reference resolves only when this machine "
+            "already holds the bytes, which is the dependency on one machine "
+            "that addressing content by its hash exists to remove")
+      .flag();
+  parser.add_argument("--peer")
+      .help("introduce a peer as HOST:PORT; repeatable. Needed only when there "
+            "is no tracker or DHT to find one through")
+      .append();
   parser.add_argument("--torrent-data")
       .help("directory the torrent's files are in; the default is the "
             "directory the .torrent file itself is in")
@@ -367,6 +377,12 @@ int main(const int argc, char **argv) {
                          << imported.str() << "\n";
     }
 
+    if (parser["--swarm"] == true) {
+      session->useSwarm();
+      quiet || std::cout << "xudu: swarm listening on port "
+                         << session->swarmPort() << "\n";
+    }
+
     // Torrents first, so a --quote has something to name.
     std::vector<xudu::InfoHash> available;
     if (parser.present<std::vector<std::string>>("--torrent")) {
@@ -380,6 +396,23 @@ int main(const int argc, char **argv) {
         quiet || std::cout << "xudu: " << file << " is " << meta->magnet()
                            << " (" << meta->files().size() << " file(s), "
                            << meta->totalLength() << " bytes)\n";
+      }
+    }
+
+    if (parser.present<std::vector<std::string>>("--peer")) {
+      if (available.empty()) {
+        throw std::runtime_error("--peer needs a --torrent to attach it to");
+      }
+      for (const auto &spec : parser.get<std::vector<std::string>>("--peer")) {
+        const auto colon = spec.rfind(':');
+        if (std::string::npos == colon) {
+          throw std::runtime_error("--peer expects HOST:PORT, got: " + spec);
+        }
+        session->connectPeer(
+            available.back(), spec.substr(0, colon),
+            static_cast<std::uint16_t>(std::stoul(spec.substr(colon + 1))));
+        quiet || std::cout << "xudu: asking " << spec << " for "
+                           << available.back().hex() << "\n";
       }
     }
 

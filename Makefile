@@ -96,6 +96,16 @@ TEST_PKGS := gmock_main
 # need a graphics device -- not that it must need nothing at all -- so a
 # utility library is fine here and pangomm, cairo and SDL are not.
 XUDU_PKGS := glibmm-2.68
+# libtorrent, when it is installed. It is what lets a torrent-backed reference
+# actually be fetched from peers rather than only from a disk here, which is
+# the difference between content addressing that removes the dependency on one
+# machine and content addressing that merely describes it. Optional because
+# everything else works without it, and a build without it has no swarm to
+# offer rather than a broken one.
+HAVE_LIBTORRENT := $(shell pkg-config --exists libtorrent-rasterbar && echo 1)
+ifeq ($(HAVE_LIBTORRENT),1)
+XUDU_PKGS += libtorrent-rasterbar
+endif
 
 # The version, which a release tarball has to know without a git history: every
 # distribution builds from an unpacked tarball, where `git describe` prints
@@ -162,6 +172,9 @@ override CXXFLAGS += -DGLEDITOR_SDL_MAJOR=$(GLEDITOR_SDL)
 # ask. Defining it unconditionally satisfies both, and the distributions
 # tracking GLM 1.0 -- Arch, Fedora, nixpkgs -- would otherwise all fail here.
 override CXXFLAGS += -DGLM_ENABLE_EXPERIMENTAL
+ifeq ($(HAVE_LIBTORRENT),1)
+override CXXFLAGS += -DXUDU_ENABLE_SWARM=1 $(shell pkg-config --cflags libtorrent-rasterbar)
+endif
 ifdef GLEDITOR_ENABLE_VULKAN
 override CXXFLAGS += -DGLEDITOR_ENABLE_VULKAN=1
 endif
@@ -221,6 +234,7 @@ XUDU_CORE_OBJS  := $(call obj,$(XUDU_CORE_SRCS))
 XUDU_OBJS       := $(call obj,$(XUDU_SRCS))
 LIB_TEST_OBJS   := $(call obj,$(LIB_TEST_SRCS))
 XUDU_TEST_OBJS  := $(call obj,$(XUDU_TEST_SRCS))
+SWARM_PEER_OBJS := $(call obj,tools/xudu-swarm-peer.cpp)
 
 # What a shared library is called, and how a program finds it, differ enough
 # between the two targets that both are spelled out rather than guessed at.
@@ -268,7 +282,7 @@ endif
 endif
 
 ALL_OBJS := $(sort $(LIB_OBJS) $(GLEDITOR_OBJS) $(XUDU_CORE_OBJS) $(XUDU_OBJS) \
-	$(LIB_TEST_OBJS) $(XUDU_TEST_OBJS))
+	$(LIB_TEST_OBJS) $(XUDU_TEST_OBJS) $(SWARM_PEER_OBJS))
 ALL_OBJ_DIRS := $(sort $(OBJDIR)/ $(OBJDIR)/tmp/ $(dir $(ALL_OBJS)))
 DEPS := $(sort $(patsubst %.o,%.dep,$(ALL_OBJS)))
 JFILES := $(sort $(patsubst %.o,%.j,$(ALL_OBJS)))
@@ -390,7 +404,7 @@ $(OBJDIR)/gleditor: $(GLEDITOR_OBJS) $(LIBLINK)
 
 xudu: $(OBJDIR)/xudu
 $(OBJDIR)/xudu: $(XUDU_OBJS) $(XUDU_CORE_OBJS) $(LIBLINK)
-	$(CXX) $(LDFLAGS) -o $@ $(XUDU_OBJS) $(XUDU_CORE_OBJS) $(APP_LDFLAGS) $(LIBS)
+	$(CXX) $(LDFLAGS) -o $@ $(XUDU_OBJS) $(XUDU_CORE_OBJS) $(APP_LDFLAGS) $(LIBS) $(XUDU_LIBS)
 .PHONY: xudu
 
 sanitize/address: CXXFLAGS += $(SANITIZE_ADDR_OPTS)
@@ -434,6 +448,21 @@ $(OBJDIR)/gleditor_test: $(LIB_TEST_OBJS) $(LIBLINK)
 xudu_test: $(OBJDIR)/xudu_test
 $(OBJDIR)/xudu_test: $(XUDU_TEST_OBJS) $(XUDU_CORE_OBJS)
 	$(CXX) $(LDFLAGS) -o $@ $^ $(XUDU_LIBS) $(TEST_LIBS)
+
+# The other end of the swarm tests: a peer that offers a torrent's content and
+# waits to be asked. A separate program because the two peers are meant to be
+# separate machines -- tools/swarm-netns-test.sh runs this one in a network
+# namespace of its own.
+.PHONY: xudu-swarm-peer
+xudu-swarm-peer: $(OBJDIR)/xudu-swarm-peer
+$(OBJDIR)/xudu-swarm-peer: $(OBJDIR)/tools/xudu-swarm-peer.o $(XUDU_CORE_OBJS)
+	$(CXX) $(LDFLAGS) -o $@ $^ $(XUDU_LIBS)
+
+# The swarm tests proper, with the two peers on separate network stacks. Needs
+# root, so it is not part of `make test`.
+.PHONY: test/swarm
+test/swarm: $(OBJDIR)/xudu-swarm-peer $(OBJDIR)/xudu_test
+	tools/swarm-netns-test.sh
 
 test: $(OBJDIR)/gleditor_test $(OBJDIR)/xudu_test
 	$(OBJDIR)/gleditor_test
