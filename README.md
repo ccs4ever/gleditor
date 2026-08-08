@@ -722,8 +722,16 @@ Command-line options (from `argparse` in `src/main.cpp`):
   it back, so skipping it would block rather than capture
 - `files...`          one or more input files to open at startup
 
+Most of these exist to drive the editor without a person at the keyboard, so
+`--help` lists only the everyday ones -- `--font`, `--fov`, `--backend` and
+`--coarse-below`. `--help-all` lists everything, at length and in its own
+section. Hiding is only about the listing: every switch is accepted either way,
+so a script written against one build still runs on another whose help does not
+mention what it passes.
+
 Help:
-- `./build/gleditor --help`
+- `./build/gleditor --help`      the everyday switches
+- `./build/gleditor --help-all`  every switch, described in full
 
 ## Running with sanitizers
 

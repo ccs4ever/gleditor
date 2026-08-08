@@ -586,6 +586,16 @@ void Renderer::renderLoop(AutoSDLWindow &window) {
       break;
     }
 
+    // Presenting is what paces this loop: it blocks until the display is ready
+    // for another frame. Without it the loop redraws as fast as a core will
+    // let it, which on a software rasteriser means taking every core there is
+    // -- including the one the background document load needs in order to
+    // finish, and this loop will not settle until it does. Yielding a little
+    // per frame costs a capture nothing and leaves that work somewhere to run.
+    if (this->state->noPresent) {
+      std::this_thread::sleep_for(std::chrono::milliseconds(2));
+    }
+
     // A measured run outlives --profile: the point is the steady state, which
     // the first settled frame is not part of.
     if (0 != this->state->benchmarkFrames) {

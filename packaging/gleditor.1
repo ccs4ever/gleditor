@@ -16,6 +16,17 @@ One rendering pipeline serves three graphics APIs, selected at run time with
 Everything above the backend is written against a single device interface and
 names no graphics API.
 .SH OPTIONS
+Most of what this program accepts exists to drive it without a person at the
+keyboard. Those options are listed by
+.B \-\-help\-all
+rather than by
+.BR \-\-help ,
+which keeps the handful of everyday switches from being buried in them. They
+are accepted either way.
+.TP
+.B \-\-help\-all
+Show every option, including the ones for automation, described at length and
+grouped separately from the everyday ones.
 .TP
 .BI \-\-backend " NAME"
 Rendering backend:
