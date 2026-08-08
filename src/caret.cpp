@@ -79,6 +79,31 @@ void Caret::shiftForInsertion(const std::uint32_t at,
   }
 }
 
+namespace {
+
+/// Where @p offset ends up once [at, at + bytes) is taken out of the text.
+std::uint32_t afterErasure(const std::uint32_t offset, const std::uint32_t at,
+                           const std::uint32_t bytes) {
+  if (offset <= at) {
+    return offset;
+  }
+  return offset >= at + bytes ? offset - bytes : at;
+}
+
+} // namespace
+
+void Caret::shiftForErasure(const std::uint32_t at, const std::uint32_t bytes) {
+  byteOffset_ = afterErasure(byteOffset_, at, bytes);
+  if (anchored) {
+    anchor = afterErasure(anchor, at, bytes);
+    // Both ends landing in the same place is not a selection; leaving it
+    // anchored would report an empty one as live.
+    if (anchor == byteOffset_) {
+      anchored = false;
+    }
+  }
+}
+
 void Caret::setGeometry(const float posX, const float posY,
                         const float height) {
   // Width and height are packed as unsigned integers, so a caret shorter than

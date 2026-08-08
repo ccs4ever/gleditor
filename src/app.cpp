@@ -1,0 +1,504 @@
+/**
+ * @file app.cpp
+ * @brief Implementation of the window, event loop and shared command line.
+ */
+#include <gleditor/app.hpp> // IWYU pragma: associated
+
+#include <algorithm>
+#include <array>
+#include <clocale>
+#include <cstdint>
+#include <functional>
+#include <iostream>
+#include <locale>
+#include <mutex>
+#include <sstream>
+#include <stdexcept>
+#include <string>
+#include <string_view>
+#include <thread>
+#include <utility>
+#include <vector>
+
+#include <argparse/argparse.hpp>
+#include <glibmm/init.h>
+#include <pangomm/wrap_init.h>
+#include <glm/ext/vector_float3.hpp>
+#include <glm/geometric.hpp>
+
+#include <gleditor/paths.hpp>
+#include <gleditor/render/device.hpp>
+#include <gleditor/render/diagnostics.hpp>
+#include <gleditor/sdl_compat.hpp>
+#include <gleditor/sdl_wrap.hpp>
+
+namespace gleditor {
+
+namespace {
+
+/// The library's modifier mask for whatever SDL currently reports held.
+Mod modsFromSdl(const std::uint16_t sdlMods) {
+  auto mods = Mod::None;
+  if (0 != (sdlMods & SDL_KMOD_SHIFT)) {
+    mods = mods | Mod::Shift;
+  }
+  if (0 != (sdlMods & SDL_KMOD_CTRL)) {
+    mods = mods | Mod::Ctrl;
+  }
+  if (0 != (sdlMods & SDL_KMOD_ALT)) {
+    mods = mods | Mod::Alt;
+  }
+  return mods;
+}
+
+/// Split a `--toast` argument into its severity and its text. An unprefixed
+/// argument is a warning, which is what a message worth showing but not worth
+/// stopping for amounts to.
+std::pair<render::DiagnosticSeverity, std::string>
+parseToast(const std::string &argument) {
+  using render::DiagnosticSeverity;
+  static const std::array<std::pair<std::string_view, DiagnosticSeverity>, 3>
+      prefixes = {std::pair{"info:", DiagnosticSeverity::Info},
+                  std::pair{"warning:", DiagnosticSeverity::Warning},
+                  std::pair{"error:", DiagnosticSeverity::Error}};
+
+  for (const auto &[prefix, severity] : prefixes) {
+    if (argument.starts_with(prefix)) {
+      return {severity, argument.substr(prefix.size())};
+    }
+  }
+  return {DiagnosticSeverity::Warning, argument};
+}
+
+/// Parse an "X,Y" pair, naming the option in the complaint when it is not one.
+std::pair<int, int> parsePair(const std::string &value,
+                              const std::string_view option,
+                              const std::string_view shape) {
+  const auto comma = value.find(',');
+  if (std::string::npos == comma) {
+    throw std::runtime_error(std::string{option} + " expects " +
+                             std::string{shape} + ", got: " + value);
+  }
+  return {std::stoi(value.substr(0, comma)),
+          std::stoi(value.substr(comma + 1))};
+}
+
+} // namespace
+
+void CommandTable::bind(const int scancode, const Mod mods, std::string name,
+                        std::string help, std::function<void()> run) {
+  bindings.push_back(Command{scancode, mods, std::move(name), std::move(help),
+                             std::move(run)});
+}
+
+bool CommandTable::dispatch(const int scancode, const Mod mods) const {
+  const auto found = std::ranges::find_if(bindings, [&](const Command &cmd) {
+    return cmd.scancode == scancode && cmd.mods == mods;
+  });
+  if (found == bindings.end() || !found->run) {
+    return false;
+  }
+  found->run();
+  return true;
+}
+
+std::string CommandTable::helpText() const {
+  std::ostringstream out;
+  for (const auto &cmd : bindings) {
+    out << "  " << cmd.name;
+    if (!cmd.help.empty()) {
+      out << " -- " << cmd.help;
+    }
+    out << "\n";
+  }
+  return out.str();
+}
+
+void initLocale() {
+  // "" signals that LC_ALL should be set from the environment.
+  std::setlocale(LC_ALL, ""); // for C and C++ where synced with stdio
+  try {
+    std::locale::global(std::locale("")); // for C++
+  } catch (const std::runtime_error &) {
+    // MinGW's libstdc++ has no named locales, so this throws whenever the
+    // environment names one. Under cmd.exe nothing does and the program
+    // started; under a shell that exports LANG it died before parsing an
+    // argument, with a message about facets that named neither the program nor
+    // the cause. The user's locale where it can be had and the classic one
+    // where it cannot is a better answer than no program at all.
+    std::locale::global(std::locale::classic());
+  }
+  std::cerr.imbue(std::locale());
+  std::cin.imbue(std::locale());
+  std::cout.imbue(std::locale());
+}
+
+void addCommonArguments(argparse::ArgumentParser &parser, const bool detailed) {
+  // One definition serves both listings: the switches are always accepted, and
+  // the flag decides only how they describe themselves and whether the
+  // automation ones appear at all. Two separate lists would drift, and the one
+  // that drifted would be the help.
+  const auto everyday = [detailed](argparse::Argument &arg,
+                                   const std::string_view brief,
+                                   const std::string_view detail)
+      -> argparse::Argument & {
+    return arg.help(std::string(detailed ? detail : brief));
+  };
+
+  parser.add_argument("--help-all")
+      .help("show every option, including the ones for driving this without a "
+            "person, and describe them at length")
+      .flag();
+
+  everyday(parser.add_argument("--font").default_value("Monospace 16"),
+           "default font to use for display",
+           "Default font, as a Pango font description, for example "
+           "\"Serif 16\". Anything Pango can resolve on this machine.");
+  everyday(parser.add_argument("--fov").default_value(std::string{"5"}),
+           "initial vertical field of view in degrees",
+           "Initial vertical field of view in degrees. Widening it is how "
+           "several pages are brought on screen at once, and how a headless "
+           "run sees many small ones.");
+  everyday(parser.add_argument("--backend").default_value(std::string{"opengl"}),
+           "rendering backend: opengl, opengles or vulkan",
+           "Rendering backend: opengl (the default), opengles or vulkan. The "
+           "Vulkan backend is only present when the binary was built with it; "
+           "naming one that is not compiled in reports which are.");
+  everyday(parser.add_argument("--coarse-below").default_value(std::string{"0.15"}),
+           "draw distant pages as one bar per line below this scale",
+           "Draw a page as one solid bar per line once one layout pixel of it "
+           "covers fewer than this many screen pixels. Zero draws every "
+           "visible page in full detail, which is far slower on a document "
+           "held at a distance.");
+
+  // Everything below drives the program without a person at the keyboard.
+  // Grouped only in the detailed listing: argparse prints a group's heading
+  // whether or not anything in it is visible, so creating the group in the
+  // everyday parser would leave an empty section behind.
+  if (detailed) {
+    parser.add_group("Options for automation and diagnosis");
+  }
+
+  // Registered, then hidden from the everyday listing. Hiding rather than
+  // omitting is deliberate: a script that passes one of these to a build whose
+  // help does not mention it still works.
+  const auto automation = [detailed](argparse::Argument &arg,
+                                     const std::string_view brief,
+                                     const std::string_view detail)
+      -> argparse::Argument & {
+    arg.help(std::string(detailed ? detail : brief));
+    if (!detailed) {
+      arg.hidden();
+    }
+    return arg;
+  };
+
+  automation(parser.add_argument("--profile").flag(),
+             "perform initial setup, then quit",
+             "Perform initial setup, then quit once the document has settled. "
+             "Pairs with --screenshot to capture a finished frame and stop.");
+  automation(parser.add_argument("--no-cull").flag(),
+             "draw every page, including those outside the view",
+             "Draw every page of every document, including those entirely "
+             "outside the view. Only useful for checking that culling changes "
+             "nothing it should not: the frame must come out identical.");
+  automation(parser.add_argument("--benchmark").default_value(std::string{"0"}),
+             "draw N settled frames, report the timings and quit",
+             "Draw N frames once the document has settled, then report frame, "
+             "collect and record times and exit. The median is reported rather "
+             "than the mean, because a software rasteriser produces occasional "
+             "hundred-millisecond frames no average removes.");
+  automation(parser.add_argument("--screenshot").default_value(std::string{}),
+             "write the first settled frame to this path as a PPM",
+             "Write the first fully drawn frame to this path as a binary PPM. "
+             "The frame is the settled one -- every queued command carried "
+             "out, every document loaded, and every animation finished -- so a "
+             "capture shows the finished result rather than the middle of a "
+             "fade.");
+  automation(parser.add_argument("--no-present").flag(),
+             "draw frames without showing them",
+             "Draw frames without showing them, for capturing a frame on a "
+             "machine that can give a rendering context but cannot put one on "
+             "a screen. The capture is unaffected: drawing goes to an offscreen "
+             "target either way. Accepted by the OpenGL and OpenGL ES backends; "
+             "Vulkan refuses it, because every frame acquires a swapchain image "
+             "and presenting is what hands it back.");
+  automation(parser.add_argument("--pick").append(),
+             "report the picking tag at X,Y; repeatable",
+             "Report the picking tag at pixel X,Y once the document has "
+             "settled. Repeatable. The read is asynchronous, so a run waits for "
+             "every query to come back before it exits.");
+  automation(parser.add_argument("--click").append(),
+             "click at X,Y once settled, placing the caret; repeatable",
+             "Click at pixel X,Y once the document has settled, placing the "
+             "caret there, and print where it landed. Repeatable.");
+  automation(parser.add_argument("--select"),
+             "select the document byte range START,END",
+             "Select the document byte range START,END once the document has "
+             "settled, as a click and drag would.");
+  automation(parser.add_argument("--type").default_value(std::string{}),
+             "insert text at the caret once it has been placed",
+             "Insert this text at the caret once it has been placed. The "
+             "document is spliced immediately and the layout that follows is "
+             "scheduled off the render thread.");
+  automation(parser.add_argument("--toast").append(),
+             "show a notification, as [info:|warning:|error:]TEXT; repeatable",
+             "Show a notification once the first frame is drawn, written as "
+             "[info:|warning:|error:]TEXT. An unprefixed message is a warning. "
+             "Repeatable.");
+  automation(parser.add_argument("--strict-diagnostics").flag(),
+             "treat a driver error as fatal",
+             "Treat a driver error as fatal instead of showing it as a "
+             "notification, and set the exit status accordingly. Automated runs "
+             "want this: a frame rendered by a driver that was reporting errors "
+             "proves nothing, however plausible it looks.");
+  automation(parser.add_argument("--print-asset-dir").flag(),
+             "report where the shaders and icon were found, then quit",
+             "Report the directory the shaders and the icon were found in, then "
+             "quit without opening a window. Answers the one question a package "
+             "can be asked on a machine whose driver cannot give it a context.");
+}
+
+render::Backend applyCommonArguments(argparse::ArgumentParser &parser,
+                                     const AppStateRef &state) {
+  const auto backend = render::backendFromName(parser.get<std::string>("--backend"));
+  if (!render::backendCompiledIn(backend)) {
+    throw std::runtime_error("The " + render::backendName(backend) +
+                             " backend was not compiled into this binary. "
+                             "Rebuild with GLEDITOR_ENABLE_VULKAN=1 to enable "
+                             "Vulkan.");
+  }
+
+  state->defaultFontName   = parser.get("--font");
+  state->profiling         = parser["--profile"] == true;
+  state->printAssetDir     = parser["--print-asset-dir"] == true;
+  state->benchmarkFrames   = std::stoul(parser.get<std::string>("--benchmark"));
+  state->cullPages         = parser["--no-cull"] == false;
+  state->coarseBelow       = std::stof(parser.get<std::string>("--coarse-below"));
+  state->screenshotPath    = parser.get<std::string>("--screenshot");
+  state->strictDiagnostics = parser["--strict-diagnostics"] == true;
+  state->noPresent         = parser["--no-present"] == true;
+  state->typedText         = parser.get<std::string>("--type");
+  {
+    const std::lock_guard locker(state->view);
+    state->view.fov = std::stof(parser.get<std::string>("--fov"));
+  }
+
+  if (parser.present<std::vector<std::string>>("--toast")) {
+    for (const auto &toast : parser.get<std::vector<std::string>>("--toast")) {
+      state->requestedToasts.emplace_back(parseToast(toast));
+    }
+  }
+  if (parser.present<std::vector<std::string>>("--click")) {
+    for (const auto &click : parser.get<std::vector<std::string>>("--click")) {
+      state->requestedClicks.emplace_back(parsePair(click, "--click", "X,Y"));
+    }
+  }
+  if (parser.present<std::vector<std::string>>("--pick")) {
+    for (const auto &pick : parser.get<std::vector<std::string>>("--pick")) {
+      state->requestedPicks.emplace_back(parsePair(pick, "--pick", "X,Y"));
+    }
+  }
+  if (const auto span = parser.present<std::string>("--select")) {
+    const auto [start, end] = parsePair(*span, "--select", "START,END");
+    state->requestedSelection = {static_cast<std::uint32_t>(start),
+                                 static_cast<std::uint32_t>(end)};
+  }
+
+  return backend;
+}
+
+Application::Application(AppStateRef aState, RendererRef aRenderer,
+                         const render::Backend aBackend, std::string aTitle)
+    : state(std::move(aState)), renderer(std::move(aRenderer)),
+      backend(aBackend), title(std::move(aTitle)) {}
+
+Application::~Application() = default;
+
+void Application::bindDefaultViewCommands() {
+  const auto move = [this](const std::function<void(AppState::ViewPerspective &)> &fun) {
+    return [this, fun] {
+      const std::lock_guard locker(state->view);
+      fun(state->view);
+    };
+  };
+  // One world unit per press. The view is a camera in the scene rather than a
+  // scroll offset, so these are all in its own frame: forwards is where it
+  // looks, sideways is the cross product with up.
+  constexpr float step = 1.0F;
+
+  commandTable.bind(SDL_SCANCODE_R, "reset view",
+                    "put the camera back where it started",
+                    move([](AppState::ViewPerspective &view) { view.resetPos(); }));
+  commandTable.bind(SDL_SCANCODE_D, "back",
+                    "move the camera away from the documents",
+                    move([](AppState::ViewPerspective &view) {
+                      view.pos -= step * view.front;
+                    }));
+  commandTable.bind(SDL_SCANCODE_D, Mod::Shift, "forward",
+                    "move the camera towards the documents",
+                    move([](AppState::ViewPerspective &view) {
+                      view.pos += step * view.front;
+                    }));
+  commandTable.bind(SDL_SCANCODE_S, "left", "move the camera left",
+                    move([](AppState::ViewPerspective &view) {
+                      view.pos -= glm::normalize(
+                                      glm::cross(view.front, view.upward)) *
+                                  step;
+                    }));
+  commandTable.bind(SDL_SCANCODE_F, "right", "move the camera right",
+                    move([](AppState::ViewPerspective &view) {
+                      view.pos += glm::normalize(
+                                      glm::cross(view.front, view.upward)) *
+                                  step;
+                    }));
+  commandTable.bind(SDL_SCANCODE_E, "up", "move the camera up",
+                    move([](AppState::ViewPerspective &view) {
+                      view.pos -= glm::normalize(glm::cross(
+                                      view.front, glm::vec3(1.0F, 0.0F, 0.0F))) *
+                                  step;
+                    }));
+  commandTable.bind(SDL_SCANCODE_C, "down", "move the camera down",
+                    move([](AppState::ViewPerspective &view) {
+                      view.pos += glm::normalize(glm::cross(
+                                      view.front, glm::vec3(1.0F, 0.0F, 0.0F))) *
+                                  step;
+                    }));
+  commandTable.bind(SDL_SCANCODE_G, "widen", "widen the field of view",
+                    move([](AppState::ViewPerspective &view) {
+                      view.fov = std::min(360.0F, view.fov + 1.0F);
+                    }));
+  commandTable.bind(SDL_SCANCODE_G, Mod::Shift, "narrow",
+                    "narrow the field of view",
+                    move([](AppState::ViewPerspective &view) {
+                      view.fov = std::max(1.0F, view.fov - 1.0F);
+                    }));
+}
+
+int Application::run() {
+  Glib::init();
+  // What Pango::init() does, spelled out, because on MinGW it is not there to
+  // call: the DLL exports what the headers mark for export, and pangomm's
+  // init.cc is the one file that defines a function without including its own
+  // header, so the marking never reaches the definition. wrap_init is generated
+  // with its header included and is exported everywhere.
+  Pango::wrap_init();
+
+  AutoSDL sdlScoped(SDL_INIT_VIDEO);
+
+  // Answered here rather than before SDL starts, because the search asks SDL
+  // where the executable is and SDL only knows once it has been initialised.
+  // Before any window is created, though: a package installed on a machine with
+  // no usable GL driver can still be asked whether it found its files, and that
+  // is the question packaging gets wrong.
+  if (state->printAssetDir) {
+    std::cout << assetDir() << "\n";
+    return 0;
+  }
+
+  // Found next to the installed data files rather than in the working
+  // directory, so that a packaged copy still has its icon.
+  const AutoSDLSurface icon(assetPath("logo.png").c_str());
+
+  // The window has to be created with the flags and, for the GL family, the
+  // context attributes the chosen backend needs; both are decided before the
+  // device itself is constructed on the render thread.
+  render::configureBackendWindowAttributes(backend);
+
+  AutoSDLWindow window(title.c_str(), state->view.screenWidth,
+                       state->view.screenHeight,
+                       render::backendWindowFlags(backend) |
+                           SDL_WINDOW_RESIZABLE | SDL_WINDOW_HIGH_PIXEL_DENSITY,
+                       icon.surface);
+
+  if (textInput) {
+    // Composed text rather than raw key events: this is what gives dead keys,
+    // input methods and anything else the platform composes before it becomes a
+    // character.
+    sdl::startTextInput(window.window);
+  }
+
+  std::jthread renderThread(std::ref(*renderer), std::ref(window));
+
+  // Milliseconds to block in SDL_WaitEventTimeout. Waiting rather than spinning
+  // on SDL_PollEvent keeps this thread off the CPU while idle; the timeout still
+  // lets the loop notice `alive` being cleared by the renderer.
+  constexpr int eventWaitMs = 100;
+
+  while (state->alive) {
+    SDL_Event evt;
+    if (!SDL_WaitEventTimeout(&evt, eventWaitMs)) {
+      continue;
+    }
+    do {
+      switch (evt.type) {
+      case SDL_EVENT_QUIT: {
+        state->alive = false;
+        break;
+      }
+      case SDL_EVENT_KEY_DOWN: {
+        commandTable.dispatch(static_cast<int>(sdl::keyScancode(evt)),
+                              modsFromSdl(sdl::keyModifiers(evt)));
+        break;
+      }
+      case SDL_EVENT_MOUSE_MOTION: {
+        // Kept in window coordinates, top-down, which is what
+        // RenderDevice::requestPickingTag takes. OpenGL's bottom-up framebuffer
+        // convention is the GL backend's business, not the application's.
+        state->mouseX = static_cast<int>(evt.motion.x);
+        state->mouseY = static_cast<int>(evt.motion.y);
+        // Motion with the left button held is a drag, which extends the
+        // selection rather than moving the caret on its own.
+        if (0 != (evt.motion.state & SDL_BUTTON_LMASK)) {
+          state->dragX       = static_cast<int>(evt.motion.x);
+          state->dragY       = static_cast<int>(evt.motion.y);
+          state->dragPending = true;
+        }
+        break;
+      }
+      case SDL_EVENT_MOUSE_BUTTON_DOWN: {
+        // The render thread answers this: where a click lands in the text is a
+        // question only the picking attachment can answer, and that read is
+        // asynchronous.
+        state->clickX       = static_cast<int>(evt.button.x);
+        state->clickY       = static_cast<int>(evt.button.y);
+        state->clickPending = true;
+        break;
+      }
+      case SDL_EVENT_TEXT_INPUT: {
+        if (textInput) {
+          const std::lock_guard locker(state->typedMutex);
+          state->typedText += evt.text.text;
+        }
+        break;
+      }
+      default: {
+        // SDL2 reports every window change as one event type with a sub-type,
+        // SDL3 as distinct types, so this is asked rather than matched on.
+        int width  = 0;
+        int height = 0;
+        if (!sdl::windowSizeChanged(evt, width, height)) {
+          break;
+        }
+        {
+          // The render thread reads these under the same lock while building
+          // its projection matrix.
+          const std::lock_guard locker(state->view);
+          state->view.screenWidth  = width;
+          state->view.screenHeight = height;
+        }
+        renderer->push(RenderItemResize(width, height));
+        break;
+      }
+      }
+    } while (state->alive && SDL_PollEvent(&evt));
+  }
+
+  // The render thread reports its own failures and cannot return a status
+  // through std::jthread, so the flag it sets decides the exit code.
+  return state->renderFailed ? 1 : 0;
+}
+
+} // namespace gleditor
+
+// vi: set sw=2 sts=2 ts=2 et:

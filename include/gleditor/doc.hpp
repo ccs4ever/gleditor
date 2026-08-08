@@ -28,6 +28,11 @@ namespace render {
 class RenderDevice;
 }
 
+namespace gleditor {
+class DocumentObserver;
+class TextSource;
+} // namespace gleditor
+
 /**
  * @brief One shaped cluster of the page's text.
  *
@@ -113,8 +118,12 @@ public:
     return pageBacking;
   }
   /// Move this page's text offset without touching its shaping or its rows,
-  /// which an edit earlier in the document leaves byte-identical.
-  void shiftBaseOffset(const std::uint32_t bytes) { textOffset += bytes; }
+  /// which an edit earlier in the document leaves byte-identical. Negative for
+  /// an edit that removed text.
+  void shiftBaseOffset(const std::int32_t bytes) {
+    textOffset = static_cast<std::uint32_t>(static_cast<std::int64_t>(textOffset) +
+                                            bytes);
+  }
   /// Bytes of document text this page lays out.
   [[nodiscard]] std::uint32_t textLength() const { return textBytes; }
   /// True when a document-global byte offset falls within this page's text.
@@ -181,8 +190,12 @@ const char *reflowScopeName(ReflowScope scope);
 class Doc : public Drawable, public std::enable_shared_from_this<Doc> {
 private:
   std::vector<Page> pages;
-  std::string docFile;
+  /// What this document is called: a path for one opened from disk, whatever
+  /// the source said otherwise.
+  std::string docName;
   Glib::ustring text;
+  /// Told about every edit. Bare pointers, not owned; see DocumentObserver.
+  std::vector<gleditor::DocumentObserver *> observers;
   RendererRef renderer;
   /// Vertex storage shared by every page of this document.
   std::unique_ptr<BufferPool> pool;
@@ -216,10 +229,18 @@ private:
   /// Byte offsets at which each line of a layout starts.
   [[nodiscard]] static std::vector<int>
   lineStarts(const Glib::RefPtr<Pango::Layout> &layout);
-  /// Rebuild the pages an edit disturbed. Render thread only.
+  /**
+   * @brief Rebuild the pages an edit disturbed. Render thread only.
+   * @param delta Bytes the document grew by, negative for a removal. Every
+   *        offset after the edit moves by exactly this, which is what lets the
+   *        pages past the damage keep their shaping and only renumber.
+   */
   void reflowFrom(RenderState &state, std::size_t firstPage, std::uint32_t at,
-                  std::uint32_t inserted, const std::vector<int> &oldStarts,
+                  std::int32_t delta, const std::vector<int> &oldStarts,
                   std::uint32_t oldConsumed);
+  /// Shared tail of insert() and erase(): find the damaged page, record what
+  /// its lines looked like, and schedule the reflow.
+  void scheduleReflow(RenderState &state, std::uint32_t at, std::int32_t delta);
   // token to keep anything other than Doc::create from using our constructor
   struct Private {
     explicit Private() = default;
@@ -286,22 +307,32 @@ public:
    */
   static constexpr float pixelsToWorld = 1.0F / 18.0F;
 
+  /// An empty document.
   static std::shared_ptr<Doc> create(const RendererRef &renderer,
                                      render::RenderDevice *device,
                                      const glm::mat4 &model) {
     return std::make_shared<Doc>(renderer, device, model, Private());
   }
+  /**
+   * @brief A document holding whatever @p source supplies.
+   *
+   * The source is consulted once, here, on whichever thread is building the
+   * document -- a background loader thread for anything opened from a command
+   * line. It is not kept afterwards: a document is its text once it exists,
+   * and re-reading a source that has since changed would not be a reload but a
+   * silent one.
+   */
   static std::shared_ptr<Doc> create(const RendererRef &renderer,
                                      render::RenderDevice *device,
                                      const glm::mat4 &model,
-                                     std::string &fileName) {
-    return std::make_shared<Doc>(renderer, device, model, fileName, Private());
+                                     const gleditor::TextSource &source) {
+    return std::make_shared<Doc>(renderer, device, model, source, Private());
   }
   std::shared_ptr<Doc> getPtr() { return shared_from_this(); }
   Doc(const RendererRef &renderer, render::RenderDevice *device,
       const glm::mat4 &model, Private);
   Doc(const RendererRef &renderer, render::RenderDevice *device,
-      const glm::mat4 &model, const std::string &fileName, Private);
+      const glm::mat4 &model, const gleditor::TextSource &source, Private);
   ~Doc() override = default;
   void makePages(RenderState &state);
   /// Append every visible page's draw to @p batches.
@@ -323,6 +354,31 @@ public:
    */
   void insert(RenderState &state, std::uint32_t offset, const std::string &utf8,
               Caret *caret);
+
+  /**
+   * @brief Remove @p bytes of text from a document-global byte offset.
+   *
+   * The range is clamped to the document and snapped outwards to character
+   * boundaries, so a caller working in bytes cannot leave a partial UTF-8
+   * sequence behind. Like insert(), the text is spliced at once and the pages
+   * are laid out again afterwards.
+   *
+   * @return What was actually removed, which is empty when the range was.
+   */
+  std::string erase(RenderState &state, std::uint32_t offset,
+                    std::uint32_t bytes, Caret *caret);
+
+  /**
+   * @brief Start or stop being told about this document's edits.
+   *
+   * The observer is not owned and must outlive the document or remove itself
+   * first. Adding one twice adds it once.
+   */
+  void addObserver(gleditor::DocumentObserver *observer);
+  void removeObserver(gleditor::DocumentObserver *observer);
+
+  /// What this document is called. A path, for one opened from a file.
+  [[nodiscard]] const std::string &name() const { return docName; }
 
   /// Scope of the most recent reflow, and how many pages it rebuilt.
   [[nodiscard]] ReflowScope lastReflowScope() const { return reflowScope; }

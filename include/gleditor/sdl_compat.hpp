@@ -56,6 +56,8 @@
 #define SDL_EVENT_MOUSE_BUTTON_DOWN SDL_MOUSEBUTTONDOWN
 #define SDL_EVENT_TEXT_INPUT        SDL_TEXTINPUT
 #define SDL_KMOD_SHIFT         KMOD_SHIFT
+#define SDL_KMOD_CTRL          KMOD_CTRL
+#define SDL_KMOD_ALT           KMOD_ALT
 // SDL3 renamed this to say what it does; SDL2's spelling says what you are
 // allowed to do.
 #define SDL_WINDOW_HIGH_PIXEL_DENSITY SDL_WINDOW_ALLOW_HIGHDPI

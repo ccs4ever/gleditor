@@ -119,6 +119,16 @@ public:
   void shiftForInsertion(std::uint32_t at, std::uint32_t bytes);
 
   /**
+   * @brief Shift the caret to follow a removal made elsewhere in the text.
+   *
+   * The mirror of shiftForInsertion(). A position after the removed range
+   * moves back by its length; one inside it lands on the join, which is where
+   * the text it pointed at used to begin. A selection that the removal
+   * collapsed to nothing is dropped, since a zero-width selection is not one.
+   */
+  void shiftForErasure(std::uint32_t at, std::uint32_t bytes);
+
+  /**
    * @brief Write the caret quad for a rectangle in a page's pixel space.
    *
    * Separate from draw() because the geometry only changes when the caret

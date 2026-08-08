@@ -22,9 +22,12 @@
 // graphics API, so this costs nothing in coupling.
 #include <gleditor/caret.hpp>
 #include <gleditor/draw_budget.hpp>
+#include <gleditor/frame_contributor.hpp>
 #include <gleditor/render/device.hpp>
 #include <gleditor/render/types.hpp>
+#include <gleditor/span_decorator.hpp>
 #include <gleditor/state.hpp>
+#include <gleditor/text_source.hpp>
 #include <gleditor/toast.hpp>
 
 class Doc;
@@ -71,10 +74,21 @@ struct RenderItemResize : RenderItem {
   ~RenderItemResize() override = default;
 };
 
+/**
+ * @brief Open a document over whatever text @p source supplies.
+ *
+ * The source is shared rather than copied because the queue is what carries it
+ * across to the render thread, and it is consulted from a loader thread after
+ * that: the caller cannot know when it has been finished with.
+ */
 struct RenderItemOpenDoc : RenderItem {
-  std::string docFile;
-  explicit RenderItemOpenDoc(std::string fileName)
-      : RenderItem(Type::OpenDoc), docFile(std::move(fileName)) {}
+  std::shared_ptr<gleditor::TextSource> source;
+  explicit RenderItemOpenDoc(std::shared_ptr<gleditor::TextSource> aSource)
+      : RenderItem(Type::OpenDoc), source(std::move(aSource)) {}
+  /// Convenience for the common case: a document that is a file on disk.
+  explicit RenderItemOpenDoc(const std::string &fileName)
+      : RenderItem(Type::OpenDoc),
+        source(std::make_shared<gleditor::FileTextSource>(fileName)) {}
   ~RenderItemOpenDoc() override = default;
 };
 
@@ -151,6 +165,23 @@ public:
   [[nodiscard]] std::string_view defaultFontName() const {
     return state->defaultFontName;
   }
+
+  /**
+   * @brief Register something that colours ranges of a document, or draws into
+   *        the frame.
+   *
+   * Neither is owned, and both are consulted from the render thread every
+   * frame: register before the render thread starts, or from inside run().
+   * Registering the same one twice registers it once.
+   */
+  void addSpanDecorator(gleditor::SpanDecorator *decorator);
+  void removeSpanDecorator(gleditor::SpanDecorator *decorator);
+  void addFrameContributor(gleditor::FrameContributor *contributor);
+  void removeFrameContributor(gleditor::FrameContributor *contributor);
+
+protected:
+  std::vector<gleditor::SpanDecorator *> spanDecorators;
+  std::vector<gleditor::FrameContributor *> frameContributors;
 };
 
 using RendererRef = std::shared_ptr<AbstractRenderer>;
@@ -185,6 +216,8 @@ private:
   /// Scratch for the highlight table, kept so a drag does not reallocate it
   /// every frame.
   std::vector<render::HighlightRange> highlights;
+  /// Scratch the registered decorators are asked to fill, likewise reused.
+  std::vector<gleditor::SpanStyle> decoratedSpans;
   /// Background the selection paints behind glyphs.
   static constexpr std::uint32_t selectionColour = 0x99C4FFFFU;
   /// In-flight background document loads. These capture the render thread's
@@ -270,9 +303,9 @@ private:
 
 protected:
   /**
-   * Open an existing document file and prepare it for rendering.
+   * Open a document over @p source and prepare it for rendering.
    */
-  void openDoc(RenderState &state, std::string &fileName);
+  void openDoc(RenderState &state, const gleditor::TextSource &source);
 
   /**
    * Create a new empty document and initialize any default resources.
