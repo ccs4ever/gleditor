@@ -61,6 +61,7 @@ document format; xudu, shipped in the main package, is one program built on it.
 # passed because the tarball has no git history to describe.
 %set_build_flags
 %make_build \
+    libdir=%{_libdir} \
     GLEDITOR_SDL=3 \
     GLEDITOR_ENABLE_VULKAN=1 \
     GLEDITOR_VERSION=%{version} \
