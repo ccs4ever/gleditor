@@ -103,12 +103,15 @@ public:
   [[nodiscard]] const std::vector<OpenView> &views() const { return open; }
   [[nodiscard]] MicroversionId versionOf(std::uint32_t docIndex) const;
 
-  /// Note that a document showing @p version has been opened, or that one has
-  /// gone. Called from the render thread as documents come and go.
+  /// Note that a document showing @p version has been opened. Called from the
+  /// render thread as documents come and go.
+  ///
+  /// There is no matching "one closed": travelling to another state replaces
+  /// everything on screen rather than editing what is there, so clearViews()
+  /// is the only way a view goes away. A version an open document is showing
+  /// changes only by being edited, which comes back through textInserted() and
+  /// textErased().
   void viewOpened(const MicroversionId &version);
-  void viewClosed(std::uint32_t docIndex);
-  /// Point an already-open document at a different version.
-  void viewMovedTo(std::uint32_t docIndex, const MicroversionId &version);
 
   /// A source for @p version, ready to hand to the render queue.
   [[nodiscard]] std::shared_ptr<VersionTextSource>

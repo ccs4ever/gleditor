@@ -30,18 +30,6 @@ void Session::viewOpened(const MicroversionId &version) {
   invalidate();
 }
 
-void Session::viewClosed(const std::uint32_t docIndex) {
-  if (docIndex < open.size()) {
-    open.erase(open.begin() + static_cast<std::ptrdiff_t>(docIndex));
-    invalidate();
-  }
-}
-
-void Session::viewMovedTo(const std::uint32_t docIndex,
-                          const MicroversionId &version) {
-  refresh(docIndex, version);
-}
-
 void Session::refresh(const std::uint32_t docIndex,
                       const MicroversionId &version) {
   if (docIndex >= open.size()) {
