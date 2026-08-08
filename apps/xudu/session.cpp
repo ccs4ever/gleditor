@@ -26,12 +26,14 @@ MicroversionId Session::versionOf(const std::uint32_t docIndex) const {
 }
 
 void Session::viewOpened(const MicroversionId &version) {
-  open.push_back(OpenView{version, docStore.rebuild(version)});
+  open.push_back(OpenView{version, docStore.rebuild(version), {}, 0});
+  invalidate();
 }
 
 void Session::viewClosed(const std::uint32_t docIndex) {
   if (docIndex < open.size()) {
     open.erase(open.begin() + static_cast<std::ptrdiff_t>(docIndex));
+    invalidate();
   }
 }
 
@@ -47,6 +49,9 @@ void Session::refresh(const std::uint32_t docIndex,
   }
   open[docIndex].version = version;
   open[docIndex].pieces  = docStore.rebuild(version);
+  // Every document's decorations depend on every other's contents, so one
+  // moving invalidates all of them rather than just its own.
+  invalidate();
 }
 
 std::shared_ptr<VersionTextSource>
@@ -90,7 +95,15 @@ void Session::decorate(const Doc &doc,
   if (which >= open.size()) {
     return;
   }
-  const auto &mine = open[which].pieces;
+  auto &view = open[which];
+  if (view.decoratedAt == epoch) {
+    out.insert(out.end(), view.decorations.begin(), view.decorations.end());
+    return;
+  }
+  view.decorations.clear();
+  view.decoratedAt = epoch;
+  auto &found      = view.decorations;
+  const auto &mine = view.pieces;
 
   // Passages this document shares with another open one. Found by comparing
   // primedia addresses, which is why two documents that merely read the same
@@ -101,8 +114,8 @@ void Session::decorate(const Doc &doc,
     }
     for (const auto &piece : open[other].pieces.pieces()) {
       for (const auto &extent : mine.occurrencesOf(piece)) {
-        out.push_back(gleditor::SpanStyle{extent.start, extent.end,
-                                          Session::transclusionColour});
+        found.push_back(gleditor::SpanStyle{extent.start, extent.end,
+                                            Session::transclusionColour});
       }
     }
   }
@@ -114,12 +127,14 @@ void Session::decorate(const Doc &doc,
     for (const auto *const ends : {&link.left, &link.right}) {
       for (const auto &span : *ends) {
         for (const auto &extent : mine.occurrencesOf(span)) {
-          out.push_back(
+          found.push_back(
               gleditor::SpanStyle{extent.start, extent.end, Session::linkColour});
         }
       }
     }
   }
+
+  out.insert(out.end(), found.begin(), found.end());
 }
 
 // -- the hypertime map --------------------------------------------------------
