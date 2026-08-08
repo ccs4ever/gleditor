@@ -252,7 +252,7 @@ private:
   /// Note that something a decoration depends on has changed.
   void invalidate() { epoch++; }
 
-  /// Where the bytes of torrent-backed origins come from.
+  /// Where the bytes of torrent-backed scrolls come from.
   ///
   /// Declared before the store, and therefore destroyed after it: the store
   /// keeps a bare pointer to this, and members are torn down in reverse

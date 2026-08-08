@@ -78,28 +78,27 @@ std::string DirectoryContentSource::readStream(const InfoHash &hash,
   return out;
 }
 
-bool Resolver::available(const Origin &origin) const {
-  return nullptr != source && nullptr != source->metainfo(origin.torrent);
+bool Resolver::available(const Scroll &scroll) const {
+  if (nullptr == source || scroll.segments.empty()) {
+    return false;
+  }
+  return std::ranges::all_of(scroll.segments,
+                             [this](const ScrollSegment &segment) {
+                               return nullptr !=
+                                      source->metainfo(segment.torrent);
+                             });
 }
 
-std::string Resolver::read(const Origin &origin,
-                           const PrimediaSpan &span) const {
-  if (nullptr == source || span.empty()) {
-    return {};
-  }
-  const auto *const meta = source->metainfo(origin.torrent);
+std::string Resolver::readSegment(const ScrollSegment &segment,
+                                  const std::uint64_t from,
+                                  const std::uint64_t count) const {
+  const auto *const meta = source->metainfo(segment.torrent);
   if (nullptr == meta) {
     return {};
   }
-
-  // A span is an offset within the file; the piece hashes are over the
-  // concatenated stream. This is where the two meet.
-  const auto within = std::min(span.start, origin.fileLength);
-  const auto count  = std::min(span.length, origin.fileLength - within);
-  if (0 == count) {
-    return {};
-  }
-  const auto streamAt = origin.fileOffset + within;
+  // Scroll coordinates in, stream coordinates out. The segment is the whole of
+  // what relates them, and it is the only thing here that a re-seal changes.
+  const auto streamAt = segment.streamOffset + (from - segment.at);
 
   const auto [firstPiece, endPiece] = meta->piecesForRange(streamAt, count);
   if (endPiece <= firstPiece) {
@@ -116,7 +115,7 @@ std::string Resolver::read(const Origin &origin,
 
   for (auto piece = firstPiece; piece < endPiece; piece++) {
     const auto at    = static_cast<std::uint64_t>(piece) * meta->pieceLength();
-    const auto bytes = source->readStream(origin.torrent, at,
+    const auto bytes = source->readStream(segment.torrent, at,
                                           meta->lengthOfPiece(piece));
     if (!meta->verifyPiece(piece, bytes)) {
       // Nothing is returned rather than the pieces that did check out.
@@ -133,6 +132,33 @@ std::string Resolver::read(const Origin &origin,
     return {};
   }
   return verified.substr(into, static_cast<std::size_t>(count));
+}
+
+std::string Resolver::read(const Scroll &scroll,
+                           const PrimediaSpan &span) const {
+  if (nullptr == source || span.empty()) {
+    return {};
+  }
+
+  std::string out;
+  auto at = span.start;
+  while (at < span.end()) {
+    const auto *const segment = scroll.segmentAt(at);
+    if (nullptr == segment) {
+      // A stretch nobody has sealed, or a scroll this store knows only part
+      // of. Half a quotation is not a shorter quotation, it is a different
+      // one, so this reports nothing at all.
+      return {};
+    }
+    const auto count = std::min(span.end(), segment->end()) - at;
+    auto bytes       = readSegment(*segment, at, count);
+    if (bytes.size() != count) {
+      return {};
+    }
+    out += bytes;
+    at += count;
+  }
+  return out;
 }
 
 } // namespace xudu

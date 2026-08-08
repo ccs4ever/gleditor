@@ -603,9 +603,12 @@ forever. Each edit goes into the **operations spool**, filed under the state it
 produced. Nothing is ever removed from either.
 
 An address says *which* content as well as where in it. The local spool is one
-origin; a file inside a torrent is another, and two addresses into different
-content never overlap however close their numbers are. See
-[stable references](#stable-references-quoting-a-torrent).
+**scroll**; somebody else's append-only sequence is another, and two addresses
+into different scrolls never overlap however close their numbers are. A scroll
+only grows, so an offset into it is settled when the bytes are written and no
+later event moves it -- in particular not a change in which torrent carries
+that stretch. See [stable references](#stable-references-quoting-a-torrent) and
+[scrolls](#scrolls-addresses-that-survive-being-repackaged).
 
 ### Nothing stores a version
 
@@ -694,8 +697,9 @@ $ xudu --torrent fox.torrent --quote 0,4,5 xanadoc
 xudu: fox.torrent is magnet:?xt=urn:btih:41270f22...&dn=fox.txt (1 file(s), 218 bytes)
 xudu: 1 quotes 41270f22... file 0 [4,9)
 
-$ cat xanadoc/origins.spool
-41270f227583fd10ef9c3e3d9aa71fea4117c24e 0 0 218 fox.txt
+$ cat xanadoc/scrolls.spool
+scroll 1 - -
+segment 1 0 218 41270f227583fd10ef9c3e3d9aa71fea4117c24e 0 0 fox.txt
 $ wc -c < xanadoc/primedia.spool
 0
 ```
@@ -842,6 +846,62 @@ server. It fits the `ContentSource` seam with no new code and is still the wrong
 choice, because a filesystem read of unavailable content blocks where this has
 to fail quickly. The permascroll question has a better answer that BitTorrent
 does support. See [design/btfs-and-permascrolls.md](design/btfs-and-permascrolls.md).
+
+### Scrolls: addresses that survive being repackaged
+
+Addressing a span by torrent works for content that is finished, and is wrong
+for content still being written -- for a reason that only shows up later. An
+info hash fixes the file list, the piece length and every piece hash, so
+appending produces a *different* torrent. Anything that grows is therefore
+carried by a succession of torrents, each sealed when it stopped growing. If a
+span names the torrent, sealing changes what an address means, and it does so
+silently: the old reference still resolves, to content that is no longer the
+same passage.
+
+So a span names a **scroll** and an offset within it. A scroll is one
+publisher's append-only sequence, which only ever grows, so an offset is settled
+the moment the bytes are written. Which torrent carries a given stretch is a
+separate, replaceable fact, kept as a list of segments:
+
+```
+$ cat xanadoc/scrolls.spool
+scroll 1 4b617dae...9d76 -
+segment 1 0 4096 dc308895c32545a2fb09f050d0be66164b234219 0 0 part-0
+segment 1 4096 1731 8f2a11bd7c04e6539ab8102ff6cd41e0b7a5d382 0 0 part-1
+```
+
+Two things follow, and they are the point:
+
+- **Sealing moves no address.** A test quotes a passage, repackages the content
+  into a torrent with a different piece length and therefore a different info
+  hash, and the quotation still reads back the same bytes.
+- **A quotation crossing a seal is one span.** It is fetched from both torrents,
+  verified against both sets of piece hashes, and joined -- and nothing above
+  the resolver can tell where one segment ended. It shades as one passage
+  because it *is* one span.
+
+That second point replaces a worse fix. The BTFS note originally proposed
+teaching the extent merge that segment *n* ends where *n+1* begins; that treats
+a symptom, and would leave every other piece of address arithmetic to be taught
+the same lesson separately.
+
+A scroll with a publisher's key is identified by that key, so learning it has
+been re-sealed folds the new segment into the scroll already known rather than
+creating a second one -- otherwise every existing reference would quietly stop
+being recognised as the same content, which is transclusion coming apart. A
+scroll with no key is content that exists only as a fixed torrent file, and is
+identified by that file. Two packagings of the same bytes with no publisher are
+*not* the same scroll, which is honest: nothing binds them together.
+
+One behaviour changed. A range running past the end of a scroll used to be
+clamped to what existed; it now reads as nothing. Nothing downstream can tell a
+clamped answer from a complete one, and it matters more once a scroll grows: a
+quotation reaching past the last sealed segment quotes content nobody has
+published yet, and showing the part that exists would misrepresent it.
+
+Stores written before scrolls are read from `origins.spool` and rewritten in the
+new shape. A one-segment scroll's offsets are its file's offsets, so every span
+already on disk keeps meaning what it meant.
 
 ### Names that outlive what they point at
 

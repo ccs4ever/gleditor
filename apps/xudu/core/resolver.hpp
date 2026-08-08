@@ -30,7 +30,7 @@
 #include <string>
 #include <vector>
 
-#include "origin.hpp"
+#include "scroll.hpp"
 #include "spool.hpp"
 #include "torrent.hpp"
 
@@ -118,25 +118,38 @@ public:
   [[nodiscard]] const ContentSource *contentSource() const { return source; }
 
   /**
-   * @brief Read @p span of @p origin.
+   * @brief Read @p span of @p scroll.
    *
-   * Every piece the range touches is fetched whole and hashed against the
+   * This is the one place scroll coordinates are turned into torrent
+   * coordinates, and the only place that knows a scroll has segments at all. A
+   * range crossing a seal is fetched from both torrents and joined, so nothing
+   * above here can tell where one segment ended.
+   *
+   * Every piece the range touches is fetched whole and hashed against its
    * torrent before any of it is returned, because a piece hash covers a piece
-   * and says nothing about a fragment of one. If any piece fails, or the
-   * content is not available, nothing is returned: a partial or unverified
-   * answer would be indistinguishable from the real thing to everything
-   * downstream.
+   * and says nothing about a fragment of one. If any piece fails, or any part
+   * of the range is not carried by a segment at all, nothing is returned: a
+   * partial or unverified answer would be indistinguishable from the real
+   * thing to everything downstream. A quotation that spans a seal therefore
+   * needs both segments -- half of it is not an answer.
    *
    * @return The bytes, or nothing when they could not be obtained and
    *         verified.
    */
-  [[nodiscard]] std::string read(const Origin &origin,
+  [[nodiscard]] std::string read(const Scroll &scroll,
                                  const PrimediaSpan &span) const;
 
-  /// Whether @p origin's content can be reached and verified at all.
-  [[nodiscard]] bool available(const Origin &origin) const;
+  /// Whether every segment of @p scroll names a torrent this source knows, so
+  /// that the whole of it could be read and verified.
+  [[nodiscard]] bool available(const Scroll &scroll) const;
 
 private:
+  /// One segment's worth: [@p from, @p from + @p count) in scroll
+  /// coordinates, which this turns into stream coordinates and verifies.
+  [[nodiscard]] std::string readSegment(const ScrollSegment &segment,
+                                        std::uint64_t from,
+                                        std::uint64_t count) const;
+
   const ContentSource *source{};
 };
 

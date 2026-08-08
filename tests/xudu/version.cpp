@@ -14,15 +14,15 @@
 namespace {
 
 using xudu::Extent;
-using xudu::localOrigin;
+using xudu::localScroll;
 using xudu::PrimediaSpan;
 using xudu::PrimediaSpool;
 using xudu::Version;
 
 TEST(PrimediaSpanTest, intersectionIsTheSharedPart) {
-  const PrimediaSpan left{localOrigin, 10, 10};  // [10, 20)
-  const PrimediaSpan right{localOrigin, 15, 10}; // [15, 25)
-  EXPECT_EQ(left.intersect(right), (PrimediaSpan{localOrigin, 15, 5}));
+  const PrimediaSpan left{localScroll, 10, 10};  // [10, 20)
+  const PrimediaSpan right{localScroll, 15, 10}; // [15, 25)
+  EXPECT_EQ(left.intersect(right), (PrimediaSpan{localScroll, 15, 5}));
 }
 
 TEST(PrimediaSpanTest, addressesIntoDifferentContentNeverOverlap) {
@@ -30,20 +30,20 @@ TEST(PrimediaSpanTest, addressesIntoDifferentContentNeverOverlap) {
   // one torrent has nothing to do with byte 100 of another, and treating the
   // numbers as comparable would report transclusions nobody made -- between
   // two documents that merely quote unrelated things at similar offsets.
-  const PrimediaSpan mine{localOrigin, 10, 10};
+  const PrimediaSpan mine{localScroll, 10, 10};
   const PrimediaSpan theirs{7, 10, 10};
   EXPECT_TRUE(mine.intersect(theirs).empty());
   EXPECT_TRUE(theirs.intersect(mine).empty());
-  // Same numbers, same origin: that is a real overlap.
+  // Same numbers, same scroll: that is a real overlap.
   EXPECT_FALSE(theirs.intersect(PrimediaSpan{7, 12, 4}).empty());
 }
 
-TEST(PrimediaSpanTest, slicingKeepsTheOrigin) {
+TEST(PrimediaSpanTest, slicingKeepsTheScroll) {
   // A slice of a reference is a reference to the same content. Losing the
-  // origin here would silently turn part of a torrent-backed quotation into an
-  // address in the local spool.
+  // scroll here would silently turn part of a quotation of somebody else's
+  // scroll into an address in the local spool.
   const PrimediaSpan external{7, 100, 50};
-  EXPECT_EQ(external.slice(10, 5).origin, 7U);
+  EXPECT_EQ(external.slice(10, 5).scroll, 7U);
   EXPECT_EQ(external.slice(10, 5).start, 110U);
 }
 
@@ -57,7 +57,7 @@ TEST(SpoolTest, aSpanIntoOtherContentIsRefusedRatherThanAnswered) {
 }
 
 TEST(PrimediaSpanTest, spansThatDoNotMeetShareNothing) {
-  EXPECT_TRUE((PrimediaSpan{localOrigin, 0, 5}).intersect(PrimediaSpan{localOrigin, 5, 5}).empty());
+  EXPECT_TRUE((PrimediaSpan{localScroll, 0, 5}).intersect(PrimediaSpan{localScroll, 5, 5}).empty());
 }
 
 TEST(SpoolTest, appendingReportsWhereItLanded) {
@@ -65,8 +65,8 @@ TEST(SpoolTest, appendingReportsWhereItLanded) {
   const auto first  = spool.append("hello");
   const auto second = spool.append(" world");
 
-  EXPECT_EQ(first, (PrimediaSpan{localOrigin, 0, 5}));
-  EXPECT_EQ(second, (PrimediaSpan{localOrigin, 5, 6}));
+  EXPECT_EQ(first, (PrimediaSpan{localScroll, 0, 5}));
+  EXPECT_EQ(second, (PrimediaSpan{localScroll, 5, 6}));
   EXPECT_EQ(spool.read(first), "hello");
   EXPECT_EQ(spool.read(second), " world");
 }
@@ -81,8 +81,8 @@ TEST(SpoolTest, theSameTextTwiceGetsTwoAddresses) {
 TEST(SpoolTest, aSpanPastTheEndReadsWhatIsThere) {
   PrimediaSpool spool;
   spool.append("abc");
-  EXPECT_EQ(spool.read(PrimediaSpan{localOrigin, 1, 100}), "bc");
-  EXPECT_EQ(spool.read(PrimediaSpan{localOrigin, 100, 5}), "");
+  EXPECT_EQ(spool.read(PrimediaSpan{localScroll, 1, 100}), "bc");
+  EXPECT_EQ(spool.read(PrimediaSpan{localScroll, 100, 5}), "");
 }
 
 /// A version over one spool, which most of these need.
@@ -181,7 +181,7 @@ TEST_F(VersionTest, spansForNamesTheAddressesARangePointsAt) {
   type(0, "hello");
   const auto spans = version.spansFor(1, 3);
   ASSERT_EQ(spans.size(), 1U);
-  EXPECT_EQ(spans.front(), (PrimediaSpan{localOrigin, 1, 3}));
+  EXPECT_EQ(spans.front(), (PrimediaSpan{localScroll, 1, 3}));
   EXPECT_EQ(spool.read(spans.front()), "ell");
 }
 

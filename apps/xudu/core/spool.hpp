@@ -19,9 +19,9 @@
  *
  * Which is why an address has to say *which* content, and not only where in
  * it. An offset into one machine's spool means nothing to anyone else and
- * nothing to you either once that machine is gone. So a span carries an
- * origin: the local spool, or -- see torrent.hpp -- a file inside a torrent,
- * whose name is derived from its content and resolves anywhere.
+ * nothing to you either once that machine is gone. So a span carries a scroll:
+ * the local spool, or -- see scroll.hpp -- somebody's append-only sequence,
+ * whose name resolves anywhere and whose offsets never move.
  */
 #ifndef XUDU_SPOOL_H
 #define XUDU_SPOOL_H
@@ -37,32 +37,33 @@ namespace xudu {
  * @brief Which body of content an address points into.
  *
  * Zero is the local primedia spool, which is where anything typed here goes.
- * Anything else names an entry in the store's table of external origins; see
- * Origin in origin.hpp. An id is local to one store, and the table is what
- * turns it back into something globally meaningful.
+ * Anything else names an entry in the store's table of scrolls; see Scroll in
+ * scroll.hpp. An id is local to one store, and the table is what turns it back
+ * into something globally meaningful.
  */
-using OriginId = std::uint32_t;
-inline constexpr OriginId localOrigin = 0;
+using ScrollId = std::uint32_t;
+inline constexpr ScrollId localScroll = 0;
 
 /**
  * @brief A run of content at a permanent address.
  *
- * For the local spool, @p start is an offset into it. For a torrent-backed
- * origin it is an offset into that one file, not into the torrent's
- * concatenated stream -- a reference reads as "these bytes of this file",
- * which is what a person means, and the resolver does the arithmetic.
+ * @p start is an offset into the scroll, and a scroll only ever grows, so the
+ * address of a byte is settled the moment it is written and nothing that
+ * happens afterwards can move it. In particular it does not depend on which
+ * torrent is currently carrying that stretch, which is a fact that changes
+ * every time a segment is sealed.
  */
 struct PrimediaSpan {
-  OriginId origin{localOrigin};
+  ScrollId scroll{localScroll};
   std::uint64_t start{};
   std::uint64_t length{};
 
   [[nodiscard]] std::uint64_t end() const { return start + length; }
   [[nodiscard]] bool empty() const { return 0 == length; }
-  [[nodiscard]] bool isLocal() const { return localOrigin == origin; }
-  [[nodiscard]] bool contains(const OriginId which,
+  [[nodiscard]] bool isLocal() const { return localScroll == scroll; }
+  [[nodiscard]] bool contains(const ScrollId which,
                               const std::uint64_t address) const {
-    return which == origin && address >= start && address < end();
+    return which == scroll && address >= start && address < end();
   }
 
   /**
@@ -78,20 +79,20 @@ struct PrimediaSpan {
    * a single character to find out.
    */
   [[nodiscard]] PrimediaSpan intersect(const PrimediaSpan &other) const {
-    if (origin != other.origin) {
-      return {origin, start, 0};
+    if (scroll != other.scroll) {
+      return {scroll, start, 0};
     }
     const auto from = std::max(start, other.start);
     const auto to   = std::min(end(), other.end());
-    return to > from ? PrimediaSpan{origin, from, to - from}
-                     : PrimediaSpan{origin, from, 0};
+    return to > from ? PrimediaSpan{scroll, from, to - from}
+                     : PrimediaSpan{scroll, from, 0};
   }
 
   /// A sub-range of this span, given an offset into it and a length.
   [[nodiscard]] PrimediaSpan slice(const std::uint64_t offset,
                                    const std::uint64_t count) const {
     const auto from = std::min(offset, length);
-    return {origin, start + from, std::min(count, length - from)};
+    return {scroll, start + from, std::min(count, length - from)};
   }
 
   bool operator==(const PrimediaSpan &) const = default;
@@ -102,7 +103,7 @@ struct PrimediaSpan {
  *
  * Version::materialize() takes one of these rather than a spool, because a
  * version's pieces may point at content this machine never typed. The store
- * is the implementation that knows about every origin; the spool below is the
+ * is the implementation that knows about every scroll; the spool below is the
  * one that knows about the local one only.
  */
 class SpanReader {

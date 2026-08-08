@@ -23,8 +23,8 @@
 #include <thread>
 
 #include <xudu/core/mutable_link.hpp>
-#include <xudu/core/origin.hpp>
 #include <xudu/core/resolver.hpp>
+#include <xudu/core/scroll.hpp>
 #include <xudu/core/store.hpp>
 #include <xudu/core/swarm.hpp>
 #include <xudu/core/torrent.hpp>
@@ -35,8 +35,8 @@ using namespace std::chrono_literals;
 
 using xudu::InfoHash;
 using xudu::MicroversionId;
-using xudu::Origin;
 using xudu::PrimediaSpan;
+using xudu::Scroll;
 using xudu::Resolver;
 using xudu::Store;
 using xudu::SwarmContentSource;
@@ -119,10 +119,11 @@ TEST_F(SwarmTest, contentArrivesFromTheOtherMachine) {
   // A range in the middle, so this is not accidentally reading a file that
   // happened to already exist.
   const auto &file = meta->files().front();
-  const Origin origin{hash, 0, file.path, file.offset, file.length};
+  const auto scroll = Scroll::ofTorrentFile(hash, 0, file.path, file.offset,
+                                            file.length);
 
   const Resolver resolver(&swarm);
-  const auto got = resolver.read(origin, PrimediaSpan{1, 4, 5});
+  const auto got = resolver.read(scroll, PrimediaSpan{1, 4, 5});
   EXPECT_EQ(got, peer.text.substr(4, 5));
 }
 
@@ -136,13 +137,14 @@ TEST_F(SwarmTest, aRangeSpanningPiecesArrives) {
   ASSERT_GT(meta->pieceCount(), 1U) << "the sample needs several pieces";
 
   const auto &file = meta->files().front();
-  const Origin origin{hash, 0, file.path, file.offset, file.length};
+  const auto scroll = Scroll::ofTorrentFile(hash, 0, file.path, file.offset,
+                                            file.length);
   const Resolver resolver(&swarm);
 
   // Straddling the first piece boundary, so two pieces have to be fetched and
   // both verified before anything is returned.
   const auto at     = meta->pieceLength() - 3;
-  const auto got    = resolver.read(origin, PrimediaSpan{1, at, 8});
+  const auto got    = resolver.read(scroll, PrimediaSpan{1, at, 8});
   EXPECT_EQ(got, peer.text.substr(static_cast<std::size_t>(at), 8));
 }
 
@@ -155,9 +157,10 @@ TEST_F(SwarmTest, theWholeFileArrives) {
   ASSERT_NE(meta, nullptr);
 
   const auto &file = meta->files().front();
-  const Origin origin{hash, 0, file.path, file.offset, file.length};
+  const auto scroll = Scroll::ofTorrentFile(hash, 0, file.path, file.offset,
+                                            file.length);
   const Resolver resolver(&swarm);
-  EXPECT_EQ(resolver.read(origin, PrimediaSpan{1, 0, file.length}), peer.text);
+  EXPECT_EQ(resolver.read(scroll, PrimediaSpan{1, 0, file.length}), peer.text);
 }
 
 TEST_F(SwarmTest, aMagnetGetsItsMetadataFromAPeer) {
@@ -199,10 +202,11 @@ TEST_F(SwarmTest, aDocumentQuotesContentThisMachineNeverHad) {
   Store store;
   store.setContentSource(&swarm);
   const auto &file = meta->files().front();
-  const Origin origin{hash, 0, file.path, file.offset, file.length};
+  const auto scroll = Scroll::ofTorrentFile(hash, 0, file.path, file.offset,
+                                            file.length);
 
   const auto quoted =
-      store.transcludeExternal(MicroversionId{}, 0, origin, 4, 5);
+      store.transcludeExternal(MicroversionId{}, 0, scroll, 4, 5);
 
   EXPECT_EQ(store.textOf(quoted), peer.text.substr(4, 5));
   // Not one byte of it was typed here.
@@ -222,11 +226,12 @@ TEST_F(SwarmTest, contentNobodyIsSeedingReadsAsNothing) {
   const auto *meta = swarm.metainfo(hash);
   ASSERT_NE(meta, nullptr);
   const auto &file = meta->files().front();
-  const Origin origin{hash, 0, file.path, file.offset, file.length};
+  const auto scroll = Scroll::ofTorrentFile(hash, 0, file.path, file.offset,
+                                            file.length);
 
   const Resolver resolver(&swarm);
   const auto started = std::chrono::steady_clock::now();
-  EXPECT_EQ(resolver.read(origin, PrimediaSpan{1, 0, 5}), "");
+  EXPECT_EQ(resolver.read(scroll, PrimediaSpan{1, 0, 5}), "");
   EXPECT_LT(std::chrono::steady_clock::now() - started, 20s)
       << "the read did not give up";
 }
@@ -251,10 +256,11 @@ TEST_F(SwarmTest, theContentReallyCameOverTheNetwork) {
   const auto *meta = swarm.metainfo(hash);
   ASSERT_NE(meta, nullptr);
   const auto &file = meta->files().front();
-  const Origin origin{hash, 0, file.path, file.offset, file.length};
+  const auto scroll = Scroll::ofTorrentFile(hash, 0, file.path, file.offset,
+                                            file.length);
 
   const Resolver resolver(&swarm);
-  ASSERT_EQ(resolver.read(origin, PrimediaSpan{1, 0, file.length}), peer.text);
+  ASSERT_EQ(resolver.read(scroll, PrimediaSpan{1, 0, file.length}), peer.text);
 
   const auto deadline = std::chrono::steady_clock::now() + 10s;
   while (swarm.bytesFromPeers(hash) <= 0 &&
@@ -338,10 +344,11 @@ TEST_F(MutableNameTest, contentIsFetchedFromNothingButAName) {
   const auto *meta = swarm.metainfo(hash);
   ASSERT_NE(meta, nullptr);
   const auto &file = meta->files().front();
-  const Origin origin{hash, 0, file.path, file.offset, file.length};
+  const auto scroll = Scroll::ofTorrentFile(hash, 0, file.path, file.offset,
+                                            file.length);
 
   const Resolver resolver(&swarm);
-  EXPECT_EQ(resolver.read(origin, PrimediaSpan{1, 0, file.length}), peer.text);
+  EXPECT_EQ(resolver.read(scroll, PrimediaSpan{1, 0, file.length}), peer.text);
 }
 
 TEST_F(MutableNameTest, aNameNobodyHasPublishedResolvesToNothing) {
