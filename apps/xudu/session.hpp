@@ -28,6 +28,7 @@
 #include "core/microversion.hpp"
 #include "core/resolver.hpp"
 #include "core/store.hpp"
+#include "core/swarm.hpp"
 
 class Caret;
 class Doc;
@@ -103,6 +104,31 @@ public:
    *         everywhere.
    * @throws std::runtime_error if the torrent cannot be read or parsed.
    */
+  /**
+   * @brief Fetch quoted content from peers rather than from a disk here.
+   *
+   * Must be called before any torrent is added, since it decides where content
+   * comes from. Without it a reference resolves only if this machine already
+   * holds the bytes -- which quietly reintroduces the dependency on one
+   * machine that addressing content by its hash was meant to remove.
+   *
+   * @throws std::runtime_error if this build has no libtorrent.
+   */
+  void useSwarm();
+  [[nodiscard]] bool swarmEnabled() const { return nullptr != swarmSource; }
+  /// The port the swarm listens on, or zero when there is no swarm.
+  [[nodiscard]] std::uint16_t swarmPort() const;
+
+  /**
+   * @brief Introduce a peer that is known to hold some of this content.
+   *
+   * Ordinarily peers are found through a tracker or the DHT. Naming one is
+   * useful when they are not, and is what makes a swarm of two known machines
+   * possible. Does nothing without a swarm.
+   */
+  void connectPeer(const InfoHash &hash, const std::string &host,
+                   std::uint16_t port);
+
   InfoHash addTorrent(const std::string &torrentPath,
                       const std::string &dataRoot);
 
@@ -121,10 +147,9 @@ public:
    */
   InfoHash addMagnet(const std::string &uri);
 
-  /// The torrents whose content this session can reach.
-  [[nodiscard]] const DirectoryContentSource &content() const {
-    return contentSource;
-  }
+  /// Where content is fetched from: a swarm when one was asked for, otherwise
+  /// whatever is already on this disk.
+  [[nodiscard]] const ContentSource &content() const;
 
   /**
    * @brief Quote a range of a torrent-backed file into @p parent.
@@ -195,6 +220,9 @@ private:
   /// which is exactly why the order should be right now rather than after
   /// something does.
   DirectoryContentSource contentSource;
+  /// Null unless useSwarm() was called. Declared before the store for the same
+  /// reason as the directory source: the store points at whichever is active.
+  std::unique_ptr<SwarmContentSource> swarmSource;
   Store docStore;
   /// Bumped whenever a view or a link changes, which is what a cached set of
   /// decorations is checked against.

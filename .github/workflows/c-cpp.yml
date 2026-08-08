@@ -104,3 +104,32 @@ jobs:
       env:
         LIBGL_ALWAYS_SOFTWARE: "1"
         GALLIUM_DRIVER: llvmpipe
+
+  # The network path, with the two peers on separate network stacks. Its own
+  # job because it needs root and packages the build jobs do not, and because a
+  # flake in a network test should not be able to obscure whether the code
+  # compiles.
+  swarm:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+      with:
+        submodules: recursive
+    - name: install dependencies
+      run: |
+        sudo apt-get update -q
+        sudo apt-get install -y -q --no-install-recommends \
+          libpangomm-2.48-dev libsdl2-dev libsdl2-image-dev libglm-dev \
+          libgl-dev libgmock-dev pkg-config \
+          libtorrent-rasterbar-dev iproute2
+    - name: build
+      run: make GLEDITOR_SDL=2 xudu_test xudu-swarm-peer
+    # Fails rather than skips if libtorrent went missing: this job exists to
+    # exercise the swarm, so a silent skip would be the failure it is meant to
+    # catch.
+    - name: check the swarm was compiled in
+      run: |
+        ./build/xudu_test --gtest_filter=SwarmTest.* --gtest_list_tests > /dev/null
+        pkg-config --exists libtorrent-rasterbar
+    - name: swarm tests across network namespaces
+      run: sudo tools/swarm-netns-test.sh

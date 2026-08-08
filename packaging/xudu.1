@@ -55,6 +55,23 @@ the torrent's info dictionary, which a client normally fetches from the swarm.
 A magnet whose metadata is not available is refused rather than recorded as a
 reference that could never resolve.
 .TP
+.B \-\-swarm
+Fetch quoted content from BitTorrent peers rather than only from this disk.
+.IP
+Without it a reference resolves only when this machine already holds the bytes,
+which is the dependency on one machine that addressing content by its hash
+exists to remove. Only the pieces a quotation needs are requested, and only
+whole pieces, since a piece hash covers a piece and says nothing about a
+fragment of one. With a swarm a bare magnet link resolves too: the metadata it
+lacks is fetched from a peer and accepted only if it hashes back to the name
+the link carried.
+.IP
+Available only when the program was built with libtorrent.
+.TP
+.BR \-\-peer " \fIHOST\fR:\fIPORT\fR"
+Introduce a peer known to hold some of the content. Repeatable. Needed only
+when there is no tracker or DHT to find one through.
+.TP
 .BR \-\-torrent\-data " \fIDIR\fR"
 Directory the torrent's files are in. The default is the directory the
 .I .torrent
