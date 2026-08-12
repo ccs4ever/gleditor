@@ -115,14 +115,36 @@ public:
   [[nodiscard]] std::vector<Extent> occurrencesOf(const PrimediaSpan &span) const;
 
 private:
-  /// Split whatever piece covers @p offset so that a boundary falls there, and
-  /// return the index of the piece that then begins at it.
+  /**
+   * @brief Split whatever piece covers @p offset so that a boundary falls
+   *        there, and return the index of the piece that then begins at it.
+   *
+   * Never leaves an empty piece behind: an offset landing on a boundary splits
+   * nothing, and one landing inside a piece cuts it into two non-empty halves.
+   * That, with empty spans refused on the way in, is why no method here has to
+   * go looking for empties afterwards.
+   */
   std::size_t splitAt(std::uint32_t offset);
 
-  /// Drop pieces that ended up empty, which splitting at an edge can produce.
-  void compact();
+  /// Join the piece at @p index with the one after it when they name
+  /// consecutive addresses in the same scroll.
+  void joinFollowing(std::size_t index);
 
   std::vector<PrimediaSpan> runs;
+
+  /**
+   * @brief Total length of @p runs, maintained rather than counted.
+   *
+   * Every mutation here asked length() for the end of the document, and
+   * length() added up every piece to answer. That made one insertion cost a
+   * pass over the whole version, and replaying a history cost a pass per
+   * operation -- so rebuilding a document was quadratic in the number of edits
+   * it had ever had, and rebuilding is what happens on every keystroke.
+   *
+   * Kept in step by the four methods that change runs. Nothing else can: runs
+   * is private and pieces() hands out a const reference.
+   */
+  std::uint32_t total{};
 };
 
 } // namespace xudu
