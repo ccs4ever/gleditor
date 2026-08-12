@@ -72,9 +72,29 @@ using FontPtr = Glib::RefPtr<Pango::Font>;
 class FontMapKeyAdapter {
 private:
   FontPtr font_;
+  /**
+   * @brief The casefolded description, worked out once here.
+   *
+   * Describing a font, printing the description and casefolding the result are
+   * three allocations, and this used to do all three on every comparison --
+   * twice, once for each side -- and again for every hash. A hash lookup does
+   * that once to find the bucket and once more per key already in it, so the
+   * cost fell on the cache's hottest path: a glyph is looked up per cluster
+   * per page.
+   *
+   * Held as bytes rather than as a ustring because what is wanted of it is
+   * equality, and casefolding is what makes byte equality the right question.
+   */
+  std::string key_;
+  /// Worked out with the key, so that a probe that will fail usually fails on
+  /// a size_t comparison rather than on a string one.
+  std::size_t hash_;
 
 public:
-  explicit FontMapKeyAdapter(FontPtr font) : font_(std::move(font)) {}
+  explicit FontMapKeyAdapter(FontPtr font)
+      : font_(std::move(font)),
+        key_(font_->describe_with_absolute_size().to_string().casefold().raw()),
+        hash_(std::hash<std::string>{}(key_)) {}
   FontMapKeyAdapter(const FontMapKeyAdapter &oth)            = default;
   FontMapKeyAdapter &operator=(const FontMapKeyAdapter &oth) = default;
   FontMapKeyAdapter(FontMapKeyAdapter &&oth)                 = default;
@@ -85,28 +105,28 @@ public:
    */
   [[nodiscard]] const FontPtr &font() const { return font_; }
 
+  /// The casefolded description this compares and hashes by.
+  [[nodiscard]] const std::string &key() const { return key_; }
+  [[nodiscard]] std::size_t hash() const { return hash_; }
+
   /**
    * @brief Equality based on casefolded absolute-size font description.
    */
   bool operator==(const FontMapKeyAdapter &oth) const {
-    return (*this <=> oth) == std::partial_ordering::equivalent;
+    return hash_ == oth.hash_ && key_ == oth.key_;
   }
 
   /**
    * @brief Three-way comparison using the casefolded font description.
+   *
+   * Byte order over the casefolded description, where this used to use
+   * g_utf8_collate. Nothing orders these -- they are keys of an unordered_map
+   * and only equality is ever asked for -- and collation answers a question
+   * about how a person would sort names, at a price this path cannot pay.
+   * Casefolded equality is unchanged, which is the part anything relies on.
    */
   std::partial_ordering operator<=>(const FontMapKeyAdapter &oth) const {
-    const auto myStr = font_->describe_with_absolute_size().to_string().casefold();
-    const auto othStr =
-        oth.font_->describe_with_absolute_size().to_string().casefold();
-    const auto cmp = myStr.compare(othStr);
-    if (0 == cmp) {
-      return std::partial_ordering::equivalent;
-    }
-    if (0 > cmp) {
-      return std::partial_ordering::less;
-    }
-    return std::partial_ordering::greater;
+    return key_ <=> oth.key_;
   }
 };
 
@@ -115,8 +135,7 @@ public:
  */
 template <> struct std::hash<FontMapKeyAdapter> {
   std::size_t operator()(const FontMapKeyAdapter &adapter) const noexcept {
-    return std::hash<std::string>{}(
-        adapter.font()->describe_with_absolute_size().to_string().casefold());
+    return adapter.hash();
   }
 };
 
@@ -257,6 +276,26 @@ private:
   /// Make room for a padded glyph box, growing the atlas if that is what it
   /// takes. Throws when neither the size nor the layer count can grow further.
   void makeRoomFor(const Rect &padded);
+  /**
+   * @brief The key for @p font, worked out once per font rather than per
+   *        lookup.
+   *
+   * Building a key describes the font and prints the description, and printing
+   * it formats the size as a float -- which is glibc's floating point printf,
+   * and it showed up in a profile as several percent of a whole document load.
+   * A cluster is looked up per glyph per page and every one of those was
+   * building the same key from the same font.
+   *
+   * Keyed on the font's address, though what a key *means* is still its
+   * description: two font objects describing the same font produce equal keys
+   * here as they always did, so nothing about cache hits changes. This only
+   * avoids working the description out again for a font already seen.
+   */
+  const FontMapKeyAdapter &keyFor(const FontPtr &font);
+
+  /// Keys by font address. Holds a reference to each font through the adapter,
+  /// so an address used as a key cannot be reused by a different font.
+  std::unordered_map<const Pango::Font *, FontMapKeyAdapter> fontKeys;
   std::unordered_map<std::string, std::unordered_map<FontMapKeyAdapter, Sizes>,
                      transparent_string_hash, std::equal_to<>>
       glyphs; ///< Map: character string -> (font -> cached sizes).
