@@ -8,15 +8,16 @@
 
 namespace xudu {
 
-std::uint32_t Version::length() const {
-  std::uint64_t total = 0;
-  for (const auto &run : runs) {
-    total += run.length;
-  }
-  return static_cast<std::uint32_t>(total);
-}
+std::uint32_t Version::length() const { return total; }
 
 std::size_t Version::splitAt(const std::uint32_t offset) {
+  // Appending is the common case -- it is what typing at the end of a document
+  // is -- and it used to walk every piece to discover that there was nothing
+  // to split. The end of the list is where it belongs, and that is known
+  // without looking.
+  if (offset >= total) {
+    return runs.size();
+  }
   std::uint64_t seen = 0;
   for (std::size_t i = 0; i < runs.size(); i++) {
     if (seen == offset) {
@@ -38,30 +39,91 @@ std::size_t Version::splitAt(const std::uint32_t offset) {
   return runs.size();
 }
 
-void Version::compact() {
-  std::erase_if(runs, [](const PrimediaSpan &run) { return run.empty(); });
+namespace {
+
+/// Whether @p second carries straight on from @p first: the same scroll, and
+/// beginning exactly where the other ends.
+///
+/// Two such pieces stand for precisely what one piece across both would, so
+/// keeping them apart records the history of how the text was typed rather
+/// than anything about the document. Nothing above here can tell the
+/// difference: every question asked of a version -- what it says, which
+/// addresses it holds, where a quotation of it appears -- is answered from
+/// addresses, and the addresses are the same either way.
+[[nodiscard]] bool joins(const PrimediaSpan &first, const PrimediaSpan &second) {
+  return first.scroll == second.scroll && first.end() == second.start;
 }
+
+} // namespace
 
 void Version::insert(const std::uint32_t at, const PrimediaSpan &span) {
   if (span.empty()) {
     return;
   }
   const auto where = splitAt(std::min(at, length()));
+  total += static_cast<std::uint32_t>(span.length);
+
+  // Typing carries on from what was typed a moment ago, so the new span
+  // usually continues the piece before it. Lengthening that piece rather than
+  // adding another is what keeps a document that has been typed into for an
+  // hour down to a handful of pieces instead of one per keystroke -- and the
+  // number of pieces is the multiplier on every other cost here.
+  if (where > 0 && joins(runs[where - 1], span)) {
+    runs[where - 1].length += span.length;
+    joinFollowing(where - 1);
+    return;
+  }
+
   runs.insert(runs.begin() + static_cast<std::ptrdiff_t>(where), span);
-  compact();
+  joinFollowing(where);
+  // No search for empty pieces: the span was checked above, and splitAt()
+  // either lands on a boundary and splits nothing or cuts strictly inside a
+  // piece, leaving two non-empty halves.
+}
+
+void Version::joinFollowing(const std::size_t index) {
+  if (index + 1 < runs.size() && joins(runs[index], runs[index + 1])) {
+    runs[index].length += runs[index + 1].length;
+    runs.erase(runs.begin() + static_cast<std::ptrdiff_t>(index) + 1);
+  }
 }
 
 void Version::insertSpans(const std::uint32_t at,
                           const std::vector<PrimediaSpan> &spans) {
-  auto where = splitAt(std::min(at, length()));
+  // Gathered and inserted once. Inserting them one at a time shifted the tail
+  // of the vector per span, which for a quotation of many pieces is the same
+  // work repeated for no reason.
+  std::vector<PrimediaSpan> wanted;
+  wanted.reserve(spans.size());
+  std::uint64_t added = 0;
   for (const auto &span : spans) {
     if (span.empty()) {
       continue;
     }
-    runs.insert(runs.begin() + static_cast<std::ptrdiff_t>(where), span);
-    where++;
+    added += span.length;
+    // Joined on the way in as well, since a quotation of a run of consecutive
+    // pieces is a quotation of one stretch.
+    if (!wanted.empty() && joins(wanted.back(), span)) {
+      wanted.back().length += span.length;
+      continue;
+    }
+    wanted.push_back(span);
   }
-  compact();
+  if (wanted.empty()) {
+    return;
+  }
+
+  const auto where = splitAt(std::min(at, length()));
+  runs.insert(runs.begin() + static_cast<std::ptrdiff_t>(where), wanted.begin(),
+              wanted.end());
+  total += static_cast<std::uint32_t>(added);
+  // And at both seams, where the batch meets what was already there.
+  joinFollowing(where + wanted.size() - 1);
+  if (where > 0) {
+    joinFollowing(where - 1);
+  }
+  // Empty spans were dropped on the way in, and splitting leaves none, so
+  // there is nothing here to compact either.
 }
 
 std::vector<PrimediaSpan> Version::spansFor(const std::uint32_t at,
@@ -105,7 +167,11 @@ std::vector<PrimediaSpan> Version::remove(const std::uint32_t at,
   const auto last  = splitAt(at + count);
   runs.erase(runs.begin() + static_cast<std::ptrdiff_t>(first),
              runs.begin() + static_cast<std::ptrdiff_t>(last));
-  compact();
+  total -= count;
+  // What was on either side of the removal may now be consecutive.
+  if (first > 0) {
+    joinFollowing(first - 1);
+  }
   return taken;
 }
 
