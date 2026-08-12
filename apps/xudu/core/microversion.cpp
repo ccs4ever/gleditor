@@ -22,17 +22,23 @@ MicroversionId MicroversionId::parse(const std::string_view text) {
   char branch     = noBranch;
 
   while (pos < text.size()) {
-    if (!parsed.empty()) {
-      // Every segment after the first is introduced by its branch letter.
-      const auto letter = text[pos];
-      if (0 == std::isalpha(static_cast<unsigned char>(letter))) {
-        throw std::invalid_argument("microversion \"" + std::string{text} +
-                                    "\": expected a branch letter at offset " +
-                                    std::to_string(pos));
-      }
+    // A branch is introduced by its letter. Every segment after the first must
+    // have one -- there is no way to reach a second segment except by
+    // branching -- and the first segment may, because the null document can be
+    // branched from like any other state: quoting a passage into a second
+    // document does exactly that, and the state it produces is a1.
+    //
+    // Reading one back was the omission. str() has always written a1, so a
+    // store holding a quotation into a second document could be written and
+    // not read: "expected a number at offset 0".
+    if (0 != std::isalpha(static_cast<unsigned char>(text[pos]))) {
       branch = static_cast<char>(
-          std::tolower(static_cast<unsigned char>(letter)));
+          std::tolower(static_cast<unsigned char>(text[pos])));
       pos++;
+    } else if (!parsed.empty()) {
+      throw std::invalid_argument("microversion \"" + std::string{text} +
+                                  "\": expected a branch letter at offset " +
+                                  std::to_string(pos));
     }
 
     const auto digitsFrom = pos;

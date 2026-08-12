@@ -38,10 +38,32 @@ TEST(MicroversionTest, namesSurviveBeingWrittenAndReadBack) {
   }
 }
 
+TEST(MicroversionTest, aBranchOffTheNullDocumentReadsBack) {
+  // The null document branches like any other state, and quoting a passage
+  // into a second document is how that happens: the new document starts from
+  // nothing and its first state is a1.
+  //
+  // str() always wrote these; parse() refused them, so a store holding a
+  // quotation into a second document could be written and never read.
+  for (const auto *name : {"a1", "a2", "b1", "a1b3"}) {
+    EXPECT_EQ(MicroversionId::parse(name).str(), name);
+  }
+
+  // Not merely parseable -- the same name the store would produce.
+  EXPECT_EQ(MicroversionId{}.branch('a').str(), "a1");
+  EXPECT_EQ(MicroversionId::parse("a1"), MicroversionId{}.branch('a'));
+  // And it still comes back to the root, which is what makes it a branch of
+  // the null document rather than a state of its own.
+  EXPECT_TRUE(MicroversionId::parse("a1").parent().isZero());
+}
+
 TEST(MicroversionTest, malformedNamesAreRefused) {
-  // A leading letter, two letters running, a zero segment, and a trailing
-  // letter with no number: none of these could have been produced.
-  EXPECT_THROW((void)MicroversionId::parse("a1"), std::invalid_argument);
+  // Two letters running, a zero segment, and a trailing letter with no
+  // number: none of these could have been produced.
+  //
+  // A leading letter used to be in this list. It did not belong: str()
+  // produces one for any branch off the null document, so refusing it made a
+  // name the program writes a name the program cannot read.
   EXPECT_THROW((void)MicroversionId::parse("2ab1"), std::invalid_argument);
   EXPECT_THROW((void)MicroversionId::parse("2a0"), std::invalid_argument);
   EXPECT_THROW((void)MicroversionId::parse("2a"), std::invalid_argument);
