@@ -458,6 +458,16 @@ xudu-swarm-peer: $(OBJDIR)/xudu-swarm-peer
 $(OBJDIR)/xudu-swarm-peer: $(OBJDIR)/tools/xudu-swarm-peer.o $(XUDU_CORE_OBJS)
 	$(CXX) $(LDFLAGS) -o $@ $^ $(XUDU_LIBS)
 
+# What the loader pays to lay a page out, against the two ways of asking Pango
+# for it. Not part of `all`, because it measures rather than builds anything the
+# programs use -- but a target, so that it goes on compiling: a measurement tool
+# that no longer builds is worse than none, since it is reached for precisely
+# when somebody is already unsure what is slow.
+.PHONY: layout-latency-probe
+layout-latency-probe: $(OBJDIR)/layout-latency-probe
+$(OBJDIR)/layout-latency-probe: $(OBJDIR)/tools/layout-latency-probe.o
+	$(CXX) $(LDFLAGS) -o $@ $^ $(LIBS)
+
 # The swarm tests proper, with the two peers on separate network stacks. Needs
 # root, so it is not part of `make test`.
 .PHONY: test/swarm
