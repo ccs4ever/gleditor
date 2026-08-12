@@ -296,15 +296,18 @@ void DeviceGL::updateBuffer(const BufferHandle buffer, const std::size_t offset,
   api.BindBuffer(it->second.target, 0);
 }
 
-BufferHandle DeviceGL::growBuffer(const BufferHandle buffer,
-                                  const std::size_t bytes) {
+BufferHandle DeviceGL::resizeBuffer(const BufferHandle buffer,
+                                    const std::size_t bytes) {
   const auto it = buffers.find(buffer.id);
   if (buffers.end() == it) {
-    throw std::invalid_argument("DeviceGL::growBuffer: unknown buffer");
+    throw std::invalid_argument("DeviceGL::resizeBuffer: unknown buffer");
   }
   const BufferRecord old = it->second;
-  if (bytes <= old.bytes) {
+  if (bytes == old.bytes) {
     return buffer;
+  }
+  if (0 == bytes) {
+    throw std::invalid_argument("DeviceGL::resizeBuffer: zero bytes");
   }
 
   BufferRecord grown{};
@@ -320,8 +323,11 @@ BufferHandle DeviceGL::growBuffer(const BufferHandle buffer,
   // same kind possible without disturbing the array binding.
   api.BindBuffer(GL_COPY_READ_BUFFER, old.name);
   api.BindBuffer(GL_COPY_WRITE_BUFFER, grown.name);
+  // Whichever is smaller: growing carries everything forward, shrinking
+  // carries forward what still fits and drops the rest, which the caller has
+  // said nothing is using.
   api.CopyBufferSubData(GL_COPY_READ_BUFFER, GL_COPY_WRITE_BUFFER, 0, 0,
-                        static_cast<GLsizeiptr>(old.bytes));
+                        static_cast<GLsizeiptr>(std::min(old.bytes, bytes)));
   api.BindBuffer(GL_COPY_READ_BUFFER, 0);
   api.BindBuffer(GL_COPY_WRITE_BUFFER, 0);
   api.BindBuffer(grown.target, 0);

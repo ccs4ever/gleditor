@@ -26,7 +26,7 @@ public:
               (render::BufferHandle buffer, std::size_t offset,
                std::span<const std::byte> data),
               (override));
-  MOCK_METHOD(render::BufferHandle, growBuffer,
+  MOCK_METHOD(render::BufferHandle, resizeBuffer,
               (render::BufferHandle buffer, std::size_t bytes), (override));
 
   MOCK_METHOD(render::TextureHandle, createTextureArray,

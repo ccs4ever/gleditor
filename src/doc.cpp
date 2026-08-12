@@ -47,9 +47,34 @@
 
 namespace {
 
-/// Rows the document's vertex buffer starts out with. It grows on demand, so
-/// this only needs to cover a first page or two without a reallocation.
-constexpr std::uint32_t initialPoolRows = 1U << 16U;
+/**
+ * @brief Rows the document's vertex buffer starts out with.
+ *
+ * A page's worth. A document that is about to load text says how much it needs
+ * before it lays anything out, so this only has to cover an empty document
+ * being typed into.
+ */
+constexpr std::uint32_t initialPoolRows = 4096;
+
+/**
+ * @brief Rows a document of @p characters will want, near enough to allocate.
+ *
+ * One quad per cluster, and a cluster is a character except where several
+ * combine into one -- so the character count is an over-estimate of the glyphs
+ * and the pages add a background and a bar per line on top. A twentieth covers
+ * the bars comfortably for prose, and being a little over is the point: the
+ * buffer is allocated once at this size instead of being grown through every
+ * size on the way there, and whatever is left over is given back by a trim
+ * when the document has finished loading.
+ *
+ * Characters rather than bytes, so that text outside ASCII is not over-counted
+ * threefold.
+ */
+std::uint32_t rowsFor(const std::size_t characters) {
+  const auto estimate = characters + (characters / 20) + initialPoolRows;
+  return static_cast<std::uint32_t>(
+      std::min<std::size_t>(estimate, std::numeric_limits<std::uint32_t>::max()));
+}
 
 /// Margin in layout pixels between the page edge and its text.
 constexpr float pageMargin = 24.0F;
@@ -1032,6 +1057,13 @@ Doc::Doc(const RendererRef &renderer, render::RenderDevice *device,
               << std::distance(text.begin(), iter) << "\n";
     text = text.make_valid();
   }
+
+  // The whole buffer in one allocation, before a page of it is laid out. Doing
+  // it by growth instead cost more than the buffer itself: each intermediate
+  // size is an allocation the driver keeps rather than returns, so arriving at
+  // twenty-five megabytes through seven of them was worse for peak memory than
+  // arriving at forty-eight through four.
+  pool->reserveCapacity(rowsFor(text.length()));
 }
 
 namespace {
@@ -1099,6 +1131,13 @@ void Doc::makePages(RenderState &state) {
     newPage(state, lay, static_cast<std::uint32_t>(tSize));
     tSize += consumed;
   }
+
+  // The document is as long as it is going to get without an edit, so the room
+  // growth reserved beyond it can go back. Queued rather than done here: the
+  // pool belongs to the render thread, which is still building the last pages
+  // this loop handed it, and it is those pages that say how much is in use.
+  auto self = getPtr();
+  renderer->run([self] { self->pool->trim(); });
 }
 
 void Doc::newPage(RenderState &state, Glib::RefPtr<Pango::Layout> &layout,

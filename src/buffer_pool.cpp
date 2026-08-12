@@ -34,21 +34,44 @@ BufferPool::~BufferPool() {
   }
 }
 
+std::uint32_t BufferPool::trailingFreeRows() const {
+  if (free.empty()) {
+    return 0;
+  }
+  const auto &last = free.back();
+  return last.first + last.second == totalRows ? last.second : 0;
+}
+
 void BufferPool::grow(const std::uint32_t neededRows) {
   const std::uint32_t previousRows = totalRows;
 
-  // Double until the tail run is long enough, so repeated growth stays
-  // amortised rather than reallocating once per page.
-  std::uint32_t target = std::max<std::uint32_t>(totalRows, 1);
-  while (target - previousRows < neededRows) {
-    if (target > (std::numeric_limits<std::uint32_t>::max() / 2)) {
-      throw std::runtime_error("BufferPool: buffer size overflow");
-    }
-    target *= 2;
+  // Rows already free at the end are part of the run this request will be cut
+  // from, since growth extends that run rather than starting a new one. Only
+  // the shortfall has to be found, which is what stops a pool from growing
+  // because it was a hundred rows short of a request.
+  const auto trailing  = trailingFreeRows();
+  const auto shortfall = neededRows > trailing ? neededRows - trailing : 0;
+
+  constexpr auto ceiling = std::numeric_limits<std::uint32_t>::max();
+  if (shortfall > ceiling - previousRows) {
+    throw std::runtime_error("BufferPool: buffer size overflow");
+  }
+  std::uint32_t target = previousRows + shortfall;
+
+  // Geometric on top of that, so a document reserving once per page does not
+  // copy the whole buffer once per page. See growthSixteenths for why the step
+  // is half again rather than a doubling.
+  const auto geometric =
+      static_cast<std::uint64_t>(std::max<std::uint32_t>(previousRows, 1)) *
+      growthSixteenths / 16;
+  target = static_cast<std::uint32_t>(std::max<std::uint64_t>(
+      target, std::min<std::uint64_t>(geometric, ceiling)));
+  if (target <= previousRows) {
+    throw std::runtime_error("BufferPool: buffer size overflow");
   }
 
-  handle = device->growBuffer(handle, static_cast<std::size_t>(target) *
-                                          rowStrideBytes);
+  handle = device->resizeBuffer(handle, static_cast<std::size_t>(target) *
+                                            rowStrideBytes);
   totalRows = target;
 
   // The newly added space is one contiguous run at the end. Merge it with a
@@ -109,6 +132,56 @@ void BufferPool::release(const Allocation &allocation) {
       prev->second += inserted->second;
       free.erase(inserted);
     }
+  }
+}
+
+void BufferPool::reserveCapacity(const std::uint32_t rows) {
+  if (rows <= totalRows) {
+    return;
+  }
+  const auto previousRows = totalRows;
+  handle = device->resizeBuffer(handle, static_cast<std::size_t>(rows) *
+                                            rowStrideBytes);
+  totalRows = rows;
+
+  const auto added = rows - previousRows;
+  if (!free.empty() && free.back().first + free.back().second == previousRows) {
+    free.back().second += added;
+  } else {
+    free.emplace_back(previousRows, added);
+  }
+}
+
+void BufferPool::trim() {
+  const auto trailing = trailingFreeRows();
+  if (0 == trailing) {
+    return;
+  }
+  const auto used = totalRows - trailing;
+
+  const std::uint64_t wanted = std::max<std::uint64_t>(
+      static_cast<std::uint64_t>(used) + (used / 16 * trimHeadroom),
+      trimFloorRows);
+  if (wanted >= totalRows) {
+    return;
+  }
+  // A copy of the whole buffer to save a sliver of it is not worth doing, so
+  // the rows go back only when there are enough of them to matter.
+  if (totalRows - wanted < totalRows / 8) {
+    return;
+  }
+
+  const auto target = static_cast<std::uint32_t>(wanted);
+  handle = device->resizeBuffer(handle, static_cast<std::size_t>(target) *
+                                            rowStrideBytes);
+  totalRows = target;
+
+  // The trailing run is what shrank. It disappears entirely when the trim kept
+  // exactly what was in use.
+  if (target <= free.back().first) {
+    free.pop_back();
+  } else {
+    free.back().second = target - free.back().first;
   }
 }
 
