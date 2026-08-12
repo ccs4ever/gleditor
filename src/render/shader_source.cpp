@@ -35,12 +35,15 @@ std::string uniformBlock(const Backend backend, const ShaderStage stage) {
       out += "layout(push_constant) uniform Push {\n"
              "    mat4 uMVP;\n"
              "    float uOpacity;\n"
+             "    uint uIdentity;\n"
              "} uPush;\n"
              "#define uMVP uPush.uMVP\n"
-             "#define uOpacity uPush.uOpacity\n";
+             "#define uOpacity uPush.uOpacity\n"
+             "#define uIdentity uPush.uIdentity\n";
     } else {
       out += "uniform mat4 uMVP;\n";
       out += "uniform float uOpacity;\n";
+      out += "uniform uint uIdentity;\n";
     }
 
   } else {
@@ -134,6 +137,10 @@ std::string assembleShaderSource(const Backend backend, const ShaderStage stage,
                                  const std::string_view body) {
   std::string out = versionAndPrecision(backend, stage);
   out += std::format("#define GLEDITOR_MAX_HIGHLIGHTS {}\n", maxHighlightRanges);
+  // Where a quad's two kind bits sit once they are shifted into the identity
+  // the draw supplies. Taken from the packing rather than written out twice.
+  out += std::format("#define GLEDITOR_TAG_KIND_SHIFT {}\n",
+                     tagDocBits + tagPageBits);
   out += interfaceMacros(backend, stage);
   out += uniformBlock(backend, stage);
   // Reset the line counter so compiler diagnostics point at lines of the

@@ -51,21 +51,14 @@ namespace {
 /// this only needs to cover a first page or two without a reallocation.
 constexpr std::uint32_t initialPoolRows = 1U << 16U;
 
-/// Unpack the layer/width/height triple written by
-/// Doc::VBORow::layerWidthHeight. The field widths must stay in step with that
-/// function and with unpackLayerWH() in assets/shaders/glyph.vert.glsl.
-[[maybe_unused]] glm::vec3 lwh(const std::uint32_t packed3DDims) {
-  return {packed3DDims >> 26U, packed3DDims >> 13U & 8191U,
-          packed3DDims & 8191U};
-}
-
 /// Margin in layout pixels between the page edge and its text.
 constexpr float pageMargin = 24.0F;
 
 /// How far in front of the page background its glyphs and bars sit, in the
 /// same layout-pixel space. Small enough to be a depth tie-break rather than a
-/// visible offset, and part of the box the frustum test uses.
-constexpr float glyphDepth = 0.1F;
+/// visible offset, and part of the box the frustum test uses. A quad carries
+/// which step it is on, not the distance itself.
+constexpr float glyphDepth = Doc::VBORow::depthStep;
 
 /**
  * @brief Shade a line's bar takes, given how much of its ink box the glyphs
@@ -131,20 +124,27 @@ static_assert(GlyphCache::maxEncodableLayers ==
               "the glyph cache's layer ceiling and the vertex packing's layer "
               "field have drifted apart");
 
+// A quad carries its kind in two bits and takes the rest of its picking
+// identity from the draw, so a fifth kind would need a bit that is not there.
+static_assert(render::tagKindGlyph < 4 && render::tagKindPage < 4 &&
+                  render::tagKindOverlay < 4,
+              "a tag kind no longer fits the two bits a quad carries");
+
 render::VertexLayout Doc::vertexLayout() {
   using render::AttributeType;
-  static_assert(sizeof(Doc::VBORow) == 48);
+  static_assert(sizeof(Doc::VBORow) == 24,
+                "the instance record is the renderer's dominant memory cost; "
+                "growing it costs a megabyte per twenty thousand characters");
 
   render::VertexLayout layout;
   layout.stride = sizeof(VBORow);
   layout.attributes = {
-      {"position", 0, AttributeType::Float, 3, offsetof(VBORow, pos)},
-      {"fgcolor", 1, AttributeType::UnsignedInt, 1, offsetof(VBORow, fg)},
-      {"bgcolor", 2, AttributeType::UnsignedInt, 1, offsetof(VBORow, bg)},
-      {"texcoord", 3, AttributeType::Float, 2, offsetof(VBORow, texcoord)},
-      {"texBox", 4, AttributeType::Float, 2, offsetof(VBORow, texBox)},
-      {"layerWH", 5, AttributeType::UnsignedInt, 1, offsetof(VBORow, layer)},
-      {"tag", 6, AttributeType::UnsignedInt, 2, offsetof(VBORow, tag)},
+      {"position", 0, AttributeType::Float, 2, offsetof(VBORow, pos)},
+      {"foreground", 1, AttributeType::UnsignedInt, 1,
+       offsetof(VBORow, foreground)},
+      {"atlas", 2, AttributeType::UnsignedInt, 1, offsetof(VBORow, atlas)},
+      {"quad", 3, AttributeType::UnsignedInt, 1, offsetof(VBORow, quad)},
+      {"paper", 4, AttributeType::UnsignedInt, 1, offsetof(VBORow, paper)},
   };
   return layout;
 }
@@ -159,8 +159,8 @@ Page::Page(std::shared_ptr<Doc> aDoc, RenderState &state, glm::mat4 &model,
       textOffset(aTextOffset), pageIndex(aPageIndex) {
   const auto &layout = this->layout;
 
-  const auto color   = Doc::VBORow::color;
-  const auto layerWH = Doc::VBORow::layerWidthHeight;
+  const auto color = Doc::VBORow::color;
+  const auto box   = Doc::VBORow::box;
 
   // Everything below is in layout pixels, the unit Pango reports positions and
   // sizes in. The page's model matrix scales them to world units, so a glyph's
@@ -178,14 +178,11 @@ Page::Page(std::shared_ptr<Doc> aDoc, RenderState &state, glm::mat4 &model,
   originX = -pageWidth / 2.0F;
   originY = pageHeight / 2.0F;
 
-  // The page's own tag, shared by its background and by the solid bars that
-  // stand in for its text at a distance: at that size there is no character
-  // under the cursor to name, so a click resolves to the start of the page,
-  // which is what a page-kind tag already means.
-  const std::array<unsigned int, 2> pageTag = {
-      render::packTagIdentity(render::tagKindPage, this->doc->documentIndex(),
-                              aPageIndex),
-      0};
+  // Which document and page these quads belong to is the same for every one of
+  // them, so it is not written into any of them: the draw carries it, and a
+  // quad carries only the kind, which does vary -- the background and the bars
+  // are the page itself, where a glyph is a character within it.
+  identity = render::packTagIdentity(0, this->doc->documentIndex(), aPageIndex);
 
   // The allocation holds two draws back to back: the full-detail one -- page
   // background followed by a glyph per cluster -- and then the coarse one,
@@ -196,14 +193,18 @@ Page::Page(std::shared_ptr<Doc> aDoc, RenderState &state, glm::mat4 &model,
   std::vector<Doc::VBORow> vertexData;
   const auto pushBackground = [&] {
     vertexData.push_back(Doc::VBORow{
-        {0.0F, 0.0F, 0.0F},
-        color(255),
-        color(255),
-        {0, 0},
-        {0, 0},
-        layerWH(0, std::min(Doc::VBORow::maxQuadExtent, static_cast<unsigned int>(pageWidth)),
-                std::min(Doc::VBORow::maxQuadExtent, static_cast<unsigned int>(pageHeight))),
-        pageTag});
+        {0.0F, 0.0F},
+        Doc::VBORow::fill(color(255), Doc::VBORow::onPaper),
+        0,
+        box(0,
+            std::min(Doc::VBORow::maxQuadExtent,
+                     static_cast<unsigned int>(pageWidth)),
+            std::min(Doc::VBORow::maxQuadExtent,
+                     static_cast<unsigned int>(pageHeight)),
+            render::tagKindPage),
+        // A click on bare paper resolves to the start of the page, which is
+        // what a page-kind tag with no cluster already means.
+        Doc::VBORow::paperAt(color(255), 0)});
   };
   pushBackground();
 
@@ -216,8 +217,18 @@ Page::Page(std::shared_ptr<Doc> aDoc, RenderState &state, glm::mat4 &model,
   // bounded by what the page actually consumes -- without which the final
   // cluster's end ran to the end of the document, producing a "cluster" of
   // tens of kilobytes.
-  const auto limit =
-      std::min<std::size_t>(text.size(), Doc::consumedBytes(layout));
+  // Not const: a page that would hold more clusters than one can name gives
+  // the rest back to the next page, which is what keeps every cluster on this
+  // one pickable.
+  auto limit = std::min<std::size_t>(text.size(), Doc::consumedBytes(layout));
+
+  // Sizes are clamped rather than asserted. They come from whatever font the
+  // caller asked for, and a glyph too large to describe is a visual mistake
+  // where a failed assertion is a crash.
+  const auto extent = [](const float value) {
+    return static_cast<unsigned int>(
+        std::clamp(value, 0.0F, static_cast<float>(Doc::VBORow::maxQuadExtent)));
+  };
 
   // Glyph box area per line, accumulated as the clusters are placed. This is
   // what tells the coarse path how full each line is, so that its bar is as
@@ -279,6 +290,15 @@ Page::Page(std::shared_ptr<Doc> aDoc, RenderState &state, glm::mat4 &model,
       drawEnd--;
     }
 
+    // A quad names its cluster in sixteen bits, so a page holds that many and
+    // no more. Reached only at font sizes small enough that a page carries
+    // fourteen times what a real one does; the page simply ends here and the
+    // next one starts where it left off.
+    if (clusters.size() >= Doc::VBORow::maxClustersPerPage) {
+      limit = start;
+      break;
+    }
+
     clusters.push_back(
         ClusterBox{static_cast<std::uint32_t>(start),
                    static_cast<std::uint32_t>(end - start),
@@ -331,20 +351,21 @@ Page::Page(std::shared_ptr<Doc> aDoc, RenderState &state, glm::mat4 &model,
 
       vertexData.push_back(Doc::VBORow{
           {originX + left + (glyphWidth / 2.0F),
-           originY - (top + (glyphHeight / 2.0F)), 0.1F},
-          color(0),
-          color(255),
-          {coords.topLeft.x, coords.topLeft.y},
-          {coords.box.width, coords.box.height},
-          layerWH(static_cast<unsigned char>(glyph.layer),
-                  static_cast<unsigned int>(glyphWidth),
-                  static_cast<unsigned int>(glyphHeight)),
+           originY - (top + (glyphHeight / 2.0F))},
+          Doc::VBORow::ink(color(0), Doc::VBORow::onText, false),
+          // Where the glyph sits in the atlas. How large it is there is not
+          // written down: the atlas holds it at its own size, so the box below
+          // is the same rectangle in texels as it is in layout pixels.
+          Doc::VBORow::atlasAt(
+              static_cast<unsigned int>(coords.topLeft.x),
+              static_cast<unsigned int>(coords.topLeft.y)),
+          box(static_cast<unsigned char>(glyph.layer), extent(glyphWidth),
+              extent(glyphHeight), render::tagKindGlyph),
           // The cluster index into this page's cluster table, which is what
-          // turns a picked fragment back into a text position. The identity
-          // word says which document and page that table belongs to.
-          {render::packTagIdentity(render::tagKindGlyph,
-                                   this->doc->documentIndex(), aPageIndex),
-           static_cast<unsigned int>(clusters.size() - 1)}});
+          // turns a picked fragment back into a text position; the draw says
+          // which document and page that table belongs to.
+          Doc::VBORow::paperAt(
+              color(255), static_cast<unsigned int>(clusters.size() - 1))});
     }
 
     if (!more) {
@@ -390,21 +411,18 @@ Page::Page(std::shared_ptr<Doc> aDoc, RenderState &state, glm::mat4 &model,
       const auto left = pageMargin + static_cast<float>(toPixels(ink.get_x()));
       const auto top  = pageMargin + static_cast<float>(toPixels(ink.get_y()));
 
-      // Foreground and background the same colour, so the atlas sample the
-      // fragment stage takes cannot change the result: the quad is solid
-      // whatever texture coordinate it carries. That is what lets the coarse
-      // path share the glyph pipeline instead of needing one of its own.
+      // Solid, so the fragment stage fills it with this colour and never
+      // samples the atlas. That is what lets the coarse path share the glyph
+      // pipeline instead of needing one of its own, and it keeps all eight
+      // bits of the shade: a bar is drawn as ink, not as paper.
       const auto shade = greekedShade(inkArea / (barWidth * barHeight));
       vertexData.push_back(Doc::VBORow{
           {originX + left + (barWidth / 2.0F),
-           originY - (top + (barHeight / 2.0F)), 0.1F},
-          color(shade),
-          color(shade),
-          {0, 0},
-          {0, 0},
-          layerWH(0, std::min(Doc::VBORow::maxQuadExtent, static_cast<unsigned int>(barWidth)),
-                  std::min(Doc::VBORow::maxQuadExtent, static_cast<unsigned int>(barHeight))),
-          pageTag});
+           originY - (top + (barHeight / 2.0F))},
+          Doc::VBORow::fill(color(shade), Doc::VBORow::onText),
+          0,
+          box(0, extent(barWidth), extent(barHeight), render::tagKindPage),
+          Doc::VBORow::paperAt(color(shade), 0)});
     } while (lineIter.next_line());
   }
   coarseInstances =
@@ -509,7 +527,8 @@ void Page::collect(std::vector<render::GlyphBatch> &batches,
   const auto first = coarse ? detailInstances : 0U;
   const auto count = coarse ? coarseInstances : detailInstances;
   batches.push_back(render::GlyphBatch{
-      render::DrawUniforms{toArray(mvp), opacity}, doc->pool->buffer(),
+      render::DrawUniforms{toArray(mvp), opacity, identity},
+      doc->pool->buffer(),
       doc->pool->byteOffset(pageBacking) + (first * sizeof(Doc::VBORow)),
       count});
 }

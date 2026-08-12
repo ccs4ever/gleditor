@@ -80,6 +80,10 @@ private:
   std::vector<ClusterBox> clusters;
   /// This page's position in its document, carried in the picking tag.
   std::uint32_t pageIndex{};
+  /// The picking identity every quad of this page shares -- its document and
+  /// page, with no kind, since that is the part each quad supplies. Passed to
+  /// the draw rather than written into a million instances.
+  std::uint32_t identity{};
   /// Bytes of document text this page lays out.
   std::uint32_t textBytes{};
   /// Offset applied to layout coordinates so the page is centred on its own
@@ -289,48 +293,166 @@ private:
 
 public:
   /**
-   * @brief One glyph instance.
+   * @brief One quad, which is one glyph or one solid rectangle.
+   *
+   * Twenty-four bytes, and every one of them is packed: a megabyte of text is
+   * a little over a million of these, so the record's size is the largest
+   * single cost the renderer has. Four bytes per instance is fifty megabytes
+   * across a document, which is why fields that could be derived are derived
+   * and fields that need a byte are given bits.
+   *
+   * What is *not* here is as important as what is. There is no per-vertex data
+   * at all -- the quad's four corners come from the vertex index -- and no
+   * texture extent, because a glyph's box in the atlas is the same rectangle
+   * as its box on the page and is read out of @ref quad. Nor is there a
+   * picking identity: the document and page a quad belongs to are the same for
+   * every instance of a draw, so they arrive in render::DrawUniforms and only
+   * the kind, which does vary within a page's draw, is carried here.
    *
    * Field order and offsets must stay in step with Doc::vertexLayout() and
    * with the attribute locations in assets/shaders/glyph.vert.glsl.
    */
   struct VBORow {
-    std::array<float, 3> pos;
-    unsigned int fg;
-    unsigned int bg;
-    std::array<float, 2> texcoord;
-    std::array<float, 2> texBox;
-    unsigned int layer;
-    std::array<unsigned int, 2> tag;
+    /// Centre of the quad. Two components: depth is one of a few fixed steps
+    /// and rides in @ref foreground rather than spending a float.
+    std::array<float, 2> pos;
+    /// Ink colour, r:8 g:8 b:8, and flags:8. See @ref ink.
+    unsigned int foreground;
+    /// Atlas origin of the glyph in texels, x:16 y:16. See @ref atlasAt.
+    unsigned int atlas;
+    /// width:12 height:12 layer:6 kind:2. See @ref box.
+    unsigned int quad;
+    /// Paper colour as RGB565:16, then cluster:16. See @ref paperAt.
+    unsigned int paper;
 
-    static unsigned int color3(const unsigned char red,
-                               const unsigned char green,
-                               const unsigned char blue) {
-      return static_cast<unsigned int>(red << 24) | green << 16 | blue << 8 |
-             255;
+    /**
+     * @brief Quad size the packing can name, in layout pixels.
+     *
+     * Twelve bits each. The largest quad drawn is a page background of around
+     * sixteen hundred layout pixels, so this leaves it more than twice the
+     * room it needs, and the two bits saved against the old thirteen are what
+     * the kind field is written in.
+     */
+    static constexpr unsigned int maxQuadExtent = 4095;
+    /// Atlas layers the packing can name; the hardware allows far more.
+    static constexpr unsigned int maxAtlasLayers = 64;
+    /**
+     * @brief Clusters one page may hold, which the cluster field bounds.
+     *
+     * Sixteen bits. A page of the default font holds around forty-five
+     * hundred, so this is fourteen times a real page; a page that would run
+     * past it stops early and the next one carries on, which costs a short
+     * page at absurd font sizes rather than a mis-resolved click.
+     */
+    static constexpr unsigned int maxClustersPerPage = 65535;
+
+    /**
+     * @brief Depth of a quad, as a step rather than a coordinate.
+     *
+     * Only a few depths are ever used -- paper, the text on it, and the caret
+     * over that -- and they exist to break ties in the depth test rather than
+     * to be seen, so two bits say which one. Must match the same constant in
+     * assets/shaders/glyph.vert.glsl.
+     */
+    static constexpr float depthStep    = 0.1F;
+    static constexpr unsigned int onPaper = 0; ///< The page itself.
+    static constexpr unsigned int onText  = 1; ///< Glyphs and bars.
+    static constexpr unsigned int onTop   = 2; ///< The caret.
+    static constexpr unsigned int maxDepthStep = 3;
+
+    /// Flag bits of @ref foreground's low byte.
+    static constexpr unsigned int depthMask = 0x3;
+    /// A quad with no glyph on it: filled with @ref foreground and never
+    /// sampled from the atlas, which is both what a background is and one
+    /// texture fetch per fragment cheaper than pretending otherwise.
+    static constexpr unsigned int solidFlag = 0x4;
+
+    /**
+     * @brief Pack an ink colour and its flags.
+     *
+     * The alpha the colour word used to carry was never read -- a draw's
+     * opacity is a uniform, because it applies to everything the draw covers
+     * -- so the byte it occupied holds the flags instead.
+     */
+    static constexpr unsigned int ink(const unsigned int rgb,
+                                      const unsigned int depth,
+                                      const bool solid) {
+      assert(depth <= maxDepthStep);
+      return (rgb & 0xFFFFFF00U) | (depth & depthMask) |
+             (solid ? solidFlag : 0U);
     }
-    static unsigned int color(unsigned char rgb) {
+    /// A solid quad of @p rgb, sitting at @p depth.
+    static constexpr unsigned int fill(const unsigned int rgb,
+                                       const unsigned int depth) {
+      return ink(rgb, depth, true);
+    }
+
+    static constexpr unsigned int color3(const unsigned char red,
+                                         const unsigned char green,
+                                         const unsigned char blue) {
+      return static_cast<unsigned int>(red) << 24 |
+             static_cast<unsigned int>(green) << 16 |
+             static_cast<unsigned int>(blue) << 8;
+    }
+    static constexpr unsigned int color(const unsigned char rgb) {
       return color3(rgb, rgb, rgb);
     }
+
     /**
-     * @brief Pack the atlas layer and the quad's size into one word.
+     * @brief Narrow a colour to the sixteen bits the paper field holds.
      *
-     * Six bits of layer, thirteen each of width and height. The layer field is
-     * what bounds how far the glyph atlas can grow in layers -- the hardware
-     * allows far more -- and thirteen bits leaves the largest quad drawn, a
-     * page background of around fifteen hundred layout pixels, five times the
-     * room it needs. Must stay in step with unpackLayerWH() in
-     * assets/shaders/glyph.vert.glsl and lwh() in doc.cpp.
+     * Five bits of red, six of green, five of blue. Paper is a flat fill
+     * behind text -- white for a page, a panel colour for a notification --
+     * and a flat fill has no gradient to band, so the two units of error this
+     * can introduce have nowhere to show. Ink keeps all eight bits, which is
+     * what matters: the bars that stand in for lines at a distance are shaded
+     * by how much ink each line carries, and they are drawn as ink.
      */
-    static constexpr unsigned int maxAtlasLayers = 64;
-    static constexpr unsigned int maxQuadExtent  = 8191;
-    static constexpr unsigned int layerWidthHeight(const unsigned char layer,
-                                                   const unsigned int width,
-                                                   const unsigned int height) {
+    static constexpr unsigned int rgb565(const unsigned int rgb) {
+      // Rounded to the nearest representable value rather than truncated,
+      // which halves the error and, more to the point, keeps white white: a
+      // page whose paper came back a shade under would be a grey page.
+      const auto narrow = [](const unsigned int channel,
+                             const unsigned int most) {
+        return ((channel * most) + 127) / 255;
+      };
+      return narrow((rgb >> 24) & 0xFFU, 31) << 11 |
+             narrow((rgb >> 16) & 0xFFU, 63) << 5 |
+             narrow((rgb >> 8) & 0xFFU, 31);
+    }
+
+    /// Pack the paper colour and the cluster this quad stands for.
+    static constexpr unsigned int paperAt(const unsigned int rgb,
+                                          const unsigned int cluster) {
+      assert(cluster <= maxClustersPerPage);
+      return rgb565(rgb) << 16 | (cluster & 0xFFFFU);
+    }
+
+    /// Pack a glyph's origin in the atlas, in texels.
+    static constexpr unsigned int atlasAt(const unsigned int texelX,
+                                          const unsigned int texelY) {
+      assert(texelX <= 0xFFFFU);
+      assert(texelY <= 0xFFFFU);
+      return (texelX & 0xFFFFU) << 16 | (texelY & 0xFFFFU);
+    }
+
+    /**
+     * @brief Pack the quad's size, its atlas layer and its picking kind.
+     *
+     * The layer field is what bounds how far the glyph atlas may grow in
+     * layers. Must stay in step with unpackQuad() in
+     * assets/shaders/glyph.vert.glsl.
+     */
+    static constexpr unsigned int box(const unsigned char layer,
+                                      const unsigned int width,
+                                      const unsigned int height,
+                                      const unsigned int kind) {
       assert(layer < maxAtlasLayers);
       assert(width <= maxQuadExtent);
       assert(height <= maxQuadExtent);
-      return layer << 26 | width << 13 | height;
+      assert(kind < 4);
+      return width << 20 | height << 8 | static_cast<unsigned int>(layer) << 2 |
+             kind;
     }
   };
 
