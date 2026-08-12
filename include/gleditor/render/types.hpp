@@ -165,6 +165,20 @@ struct DrawUniforms {
    * mentions it gets.
    */
   float opacity{1.0F};
+  /**
+   * @brief Picking identity every quad of this draw shares, with no kind.
+   *
+   * A quad's identity is which document and page it belongs to, then what kind
+   * of thing it is. The first two are the same for everything one draw covers,
+   * so they are said once here; only the kind, which differs between a page's
+   * paper and the glyphs on it, is carried per instance. Written into the
+   * vertex data instead, they cost four bytes of every instance in the
+   * editor -- fifty megabytes across a megabyte of text.
+   *
+   * Built by packTagIdentity() with a kind of zero; the vertex stage shifts
+   * the quad's own kind into the top bits.
+   */
+  std::uint32_t identity{};
 };
 
 /**

@@ -113,12 +113,10 @@ void Caret::setGeometry(const float posX, const float posY,
 
   const auto colour = Doc::VBORow::color3(32, 96, 220);
   const Doc::VBORow row{
-      {posX, posY, 0.2F},
-      colour,
-      colour,
-      {0, 0},
-      {0, 0},
-      Doc::VBORow::layerWidthHeight(0, pixelWidth, pixelHeight),
+      {posX, posY},
+      // In front of the text, which is itself in front of the paper.
+      Doc::VBORow::fill(colour, Doc::VBORow::onTop),
+      0,
       // The caret writes the picking attachment like every other quad, and it
       // is drawn last, so it covers the tag of the glyph beneath it. Tagged
       // zero that reads as empty space, and clicking the caret reported
@@ -126,9 +124,10 @@ void Caret::setGeometry(const float posX, const float posY,
       //
       // Being transparent to picking instead would mean masking writes to the
       // second colour attachment alone, which OpenGL ES 3.0 cannot do --
-      // per-attachment colour masks arrive in ES 3.2. So the caret carries an
-      // identity of its own and the click handler leaves it where it is.
-      {render::packTagIdentity(render::tagKindOverlay, 0, 0), 0}};
+      // per-attachment colour masks arrive in ES 3.2. So the caret carries a
+      // kind of its own and the click handler leaves it where it is.
+      Doc::VBORow::box(0, pixelWidth, pixelHeight, render::tagKindOverlay),
+      Doc::VBORow::paperAt(colour, 0)};
 
   const std::span<const std::byte> bytes{
       reinterpret_cast<const std::byte *>(&row), sizeof(row)};

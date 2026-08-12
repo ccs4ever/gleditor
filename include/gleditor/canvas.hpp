@@ -96,17 +96,29 @@ public:
    *
    * This is what a picking query reports for the pixels these primitives
    * cover, so it is how a program finds out that one of its own drawings was
-   * clicked. Build it with render::packTagIdentity; kind
+   * clicked. @p kind is one of render::tagKindOverlay and friends;
    * render::tagKindOverlay is what anything that is not a document page or a
    * glyph should use. @p index lands in the cluster field, so a caller can
    * tell one primitive from another.
    *
-   * Zero is not usable as an identity: the picking attachment reports zero for
-   * pixels nothing was drawn at, so a primitive tagged zero would come back as
-   * empty space. Primitives added before any call to this get the plain
-   * overlay identity.
+   * Kind zero is not usable: the picking attachment reports zero for pixels
+   * nothing was drawn at, so a primitive of kind zero would come back as empty
+   * space. Primitives added before any call to this are overlays.
+   *
+   * The document and page a canvas belongs to are not settable per primitive.
+   * They are the same for everything one draw covers, so they are said once,
+   * in @ref setIdentity, and cost the instances nothing.
    */
-  void setTag(std::uint32_t identity, std::uint32_t index = 0);
+  void setTag(std::uint32_t kind, std::uint32_t index = 0);
+
+  /**
+   * @brief The document and page every primitive of this canvas belongs to.
+   *
+   * Both default to zero, which is what a canvas drawing something that is not
+   * part of a document wants. Passed to the draw, not written into the
+   * primitives.
+   */
+  void setIdentity(std::uint32_t docIndex, std::uint32_t pageIndex);
 
   /// A solid rectangle, given its bottom left corner and its size.
   void addRect(float left, float bottom, float width, float height,
@@ -163,8 +175,7 @@ private:
   /// pipeline the canvas borrows is described by Doc::vertexLayout().
   void pushQuad(float centreX, float centreY, float width, float height,
                 std::uint32_t foreground, std::uint32_t background,
-                std::uint32_t layer, float texX, float texY, float texW,
-                float texH);
+                std::uint32_t layer, float texX, float texY, bool solid);
 
   render::RenderDevice *device;
   std::string fontName;
@@ -173,8 +184,11 @@ private:
   BufferPool::Allocation backing{};
   std::uint32_t committedInstances{};
   int textWidthLimit{};
-  std::uint32_t tagIdentity;
+  std::uint32_t tagKind;
   std::uint32_t tagIndex{};
+  /// Document and page, with no kind: the base every primitive's identity is
+  /// built on, handed to the draw rather than to each instance.
+  std::uint32_t identity{};
   /// Geometry built since clear(), as raw bytes: the row type belongs to the
   /// document model and is not worth dragging into this header.
   std::vector<std::byte> rows;

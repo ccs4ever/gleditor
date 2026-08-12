@@ -154,21 +154,19 @@ void ToastOverlay::post(const render::DiagnosticSeverity severity,
   // Row 0 is the panel; the glyphs follow it, drawn over it because the
   // overlay pipeline does not depth test.
   //
-  // Foreground and background are the same colour, which makes the fragment
-  // stage's blend between them independent of the atlas coverage it samples.
-  // That is what gives a solid panel without a second pipeline, a blend state
-  // or a reserved blank texel.
+  // The panel is a solid quad, so the fragment stage fills it with its colour
+  // and never samples the atlas. That is what gives a solid panel without a
+  // second pipeline, a blend state or a reserved blank texel.
   rows.push_back(Doc::VBORow{
-      {panelWidth / 2.0F, panelHeight / 2.0F, 0.0F},
-      panel,
-      panel,
-      {0, 0},
-      {0, 0},
-      Doc::VBORow::layerWidthHeight(0, static_cast<unsigned int>(panelWidth),
-                                    static_cast<unsigned int>(panelHeight)),
-      // An identity of its own rather than zero: a notification tagged zero
-      // would read as empty space, so clicking one would clear the caret.
-      {render::packTagIdentity(render::tagKindOverlay, 0, 0), 0}});
+      {panelWidth / 2.0F, panelHeight / 2.0F},
+      Doc::VBORow::fill(panel, Doc::VBORow::onPaper),
+      0,
+      // A kind of its own rather than none: a notification tagged zero would
+      // read as empty space, so clicking one would clear the caret.
+      Doc::VBORow::box(0, static_cast<unsigned int>(panelWidth),
+                       static_cast<unsigned int>(panelHeight),
+                       render::tagKindOverlay),
+      Doc::VBORow::paperAt(panel, 0)});
 
   const auto raw = layout->get_text().raw();
 
@@ -225,15 +223,16 @@ void ToastOverlay::post(const render::DiagnosticSeverity severity,
                      static_cast<float>(toPixels(cluster.logical.get_y()));
 
     rows.push_back(Doc::VBORow{
-        {left + (width / 2.0F), top - (height / 2.0F), 0.0F},
-        text,
-        panel,
-        {glyph.texCoords.topLeft.x, glyph.texCoords.topLeft.y},
-        {glyph.texCoords.box.width, glyph.texCoords.box.height},
-        Doc::VBORow::layerWidthHeight(static_cast<unsigned char>(glyph.layer),
-                                      static_cast<unsigned int>(width),
-                                      static_cast<unsigned int>(height)),
-        {render::packTagIdentity(render::tagKindOverlay, 0, 0), 0}});
+        {left + (width / 2.0F), top - (height / 2.0F)},
+        Doc::VBORow::ink(text, Doc::VBORow::onPaper, false),
+        Doc::VBORow::atlasAt(
+            static_cast<unsigned int>(glyph.texCoords.topLeft.x),
+            static_cast<unsigned int>(glyph.texCoords.topLeft.y)),
+        Doc::VBORow::box(static_cast<unsigned char>(glyph.layer),
+                         static_cast<unsigned int>(width),
+                         static_cast<unsigned int>(height),
+                         render::tagKindOverlay),
+        Doc::VBORow::paperAt(panel, 0)});
   }
 
   while (toasts.size() >= maxVisible) {

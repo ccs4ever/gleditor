@@ -333,7 +333,7 @@ void HypertimeMap::drawFrame(gleditor::FrameContext &ctx) {
                     (2 * padding) + nodeHeight;
     }
 
-    canvas->setTag(render::packTagIdentity(render::tagKindOverlay, 0, 0));
+    canvas->setTag(render::tagKindOverlay);
     const auto heading = "hypertime: " + std::to_string(versions.size()) +
                          " states, none lost";
     const auto headingWidth = canvas->measureText(heading).width;
@@ -377,7 +377,7 @@ void HypertimeMap::drawFrame(gleditor::FrameContext &ctx) {
                              : Doc::VBORow::color3(44, 48, 60);
       // Each node carries its own picking identity, so a click on the map can
       // be resolved to the state it landed on.
-      canvas->setTag(render::packTagIdentity(render::tagKindOverlay, 0, 0),
+      canvas->setTag(render::tagKindOverlay,
                     static_cast<std::uint32_t>(placed.size()));
       canvas->addRect(left, bottom, nodeWidth, nodeHeight, box);
       canvas->addText(ctx.state, left + 6.0F, bottom + nodeHeight - 5.0F,

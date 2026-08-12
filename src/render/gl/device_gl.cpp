@@ -488,8 +488,9 @@ PipelineHandle DeviceGL::createPipeline(const PipelineDesc &desc) {
   record.layout    = desc.layout;
   record.depthTest = desc.depthTest;
   record.mvpLoc     = api.GetUniformLocation(record.program, "uMVP");
-  record.opacityLoc = api.GetUniformLocation(record.program, "uOpacity");
-  record.atlasLoc   = api.GetUniformLocation(record.program, "uGlyphAtlas");
+  record.opacityLoc  = api.GetUniformLocation(record.program, "uOpacity");
+  record.identityLoc = api.GetUniformLocation(record.program, "uIdentity");
+  record.atlasLoc    = api.GetUniformLocation(record.program, "uGlyphAtlas");
 
   if (const GLuint blockIndex =
           api.GetUniformBlockIndex(record.program, "Highlights");
@@ -612,6 +613,9 @@ void DeviceGL::drawGlyphs(const DrawUniforms &uniforms,
   }
   if (-1 != record.opacityLoc) {
     api.Uniform1f(record.opacityLoc, uniforms.opacity);
+  }
+  if (-1 != record.identityLoc) {
+    api.Uniform1ui(record.identityLoc, uniforms.identity);
   }
 
   // The draw starts partway into the vertex buffer. Baking that offset into

@@ -134,6 +134,7 @@ private:
     VertexLayout layout;
     GLint mvpLoc{-1};
     GLint opacityLoc{-1};
+    GLint identityLoc{-1};
     GLint atlasLoc{-1};
     bool depthTest{true};
   };

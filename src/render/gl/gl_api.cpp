@@ -87,6 +87,7 @@ void GLApi::load() {
   GLEDITOR_RESOLVE(GetUniformLocation);
   GLEDITOR_RESOLVE(Uniform1i);
   GLEDITOR_RESOLVE(Uniform1f);
+  GLEDITOR_RESOLVE(Uniform1ui);
   GLEDITOR_RESOLVE(UniformMatrix4fv);
   GLEDITOR_RESOLVE(GetUniformBlockIndex);
   GLEDITOR_RESOLVE(UniformBlockBinding);

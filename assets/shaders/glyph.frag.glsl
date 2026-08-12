@@ -12,6 +12,7 @@ GLEDITOR_IN(3) float vLayer;
 GLEDITOR_IN_FLAT(4) uvec2 vTag;
 GLEDITOR_IN(5) float vQuadU;
 GLEDITOR_IN(6) float vOpacity;
+GLEDITOR_IN_FLAT(7) uint vSolid;
 
 GLEDITOR_FRAG_OUT(0) vec4 outColor;
 // identity word, cluster index, fractional position across the quad, unused.
@@ -54,15 +55,23 @@ vec3 selectedBackground(vec3 base) {
 }
 
 void main() {
-    // vTexCoord arrives in texels; the atlas is resized as glyphs are added, so
-    // the divisor is read from the texture rather than baked into the vertex
-    // data. textureSize reports level zero, which is the level the coordinates
-    // were placed in.
-    vec2 atlas = vec2(textureSize(uGlyphAtlas, 0).xy);
-    float coverage =
-        texture(uGlyphAtlas, vec3(vTexCoord / atlas, floor(vLayer + 0.5))).r;
-    outColor =
-        vec4(mix(selectedBackground(vBgColor), vFgColor, coverage), vOpacity);
+    // A solid quad -- a page, a bar standing in for a line of text, a panel,
+    // the caret -- has no glyph on it, so it is its own colour and the atlas is
+    // never touched. Page backgrounds cover more fragments than all the text
+    // they sit behind, and this is the fetch each of them no longer does.
+    if (0u != vSolid) {
+        outColor = vec4(vFgColor, vOpacity);
+    } else {
+        // vTexCoord arrives in texels; the atlas is resized as glyphs are
+        // added, so the divisor is read from the texture rather than baked into
+        // the vertex data. textureSize reports level zero, which is the level
+        // the coordinates were placed in.
+        vec2 atlas = vec2(textureSize(uGlyphAtlas, 0).xy);
+        float coverage =
+            texture(uGlyphAtlas, vec3(vTexCoord / atlas, floor(vLayer + 0.5))).r;
+        outColor =
+            vec4(mix(selectedBackground(vBgColor), vFgColor, coverage), vOpacity);
+    }
     // Fixed point: the attachment holds unsigned integers. The scale must
     // match render::tagFractionScale.
     outTag = uvec4(vTag, uint(clamp(vQuadU, 0.0, 1.0) * 65535.0), 0u);

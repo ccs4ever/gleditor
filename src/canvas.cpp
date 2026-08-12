@@ -94,7 +94,7 @@ Canvas::Canvas(render::RenderDevice *const aDevice, std::string aFontName,
     : device(aDevice), fontName(std::move(aFontName)),
       pool(std::make_unique<BufferPool>(aDevice, sizeof(Doc::VBORow),
                                         initialRows)),
-      tagIdentity(render::packTagIdentity(render::tagKindOverlay, 0, 0)) {}
+      tagKind(render::tagKindOverlay) {}
 
 Canvas::~Canvas() = default;
 
@@ -111,9 +111,14 @@ void Canvas::clear() {
   pendingInstances = 0;
 }
 
-void Canvas::setTag(const std::uint32_t identity, const std::uint32_t index) {
-  tagIdentity = identity;
-  tagIndex    = index;
+void Canvas::setTag(const std::uint32_t kind, const std::uint32_t index) {
+  tagKind  = kind;
+  tagIndex = index;
+}
+
+void Canvas::setIdentity(const std::uint32_t docIndex,
+                         const std::uint32_t pageIndex) {
+  identity = render::packTagIdentity(0, docIndex, pageIndex);
 }
 
 void Canvas::pushQuad(const float centreX, const float centreY,
@@ -121,8 +126,8 @@ void Canvas::pushQuad(const float centreX, const float centreY,
                       const std::uint32_t foreground,
                       const std::uint32_t background,
                       const std::uint32_t layer, const float texX,
-                      const float texY, const float texW, const float texH) {
-  // The width and height fields the vertex stage unpacks are 13 bits each, so
+                      const float texY, const bool solid) {
+  // The width and height fields the vertex stage unpacks are 12 bits each, so
   // a quad larger than this cannot be described. Clamping rather than asserting
   // because the sizes come from whatever a caller is drawing, and a panel too
   // big is a visual mistake where a failed assertion is a crash.
@@ -132,14 +137,13 @@ void Canvas::pushQuad(const float centreX, const float centreY,
   };
 
   const Doc::VBORow row{
-      {centreX, centreY, 0.0F},
-      foreground,
-      background,
-      {texX, texY},
-      {texW, texH},
-      Doc::VBORow::layerWidthHeight(static_cast<unsigned char>(layer),
-                                    clamp(width), clamp(height)),
-      {tagIdentity, tagIndex}};
+      {centreX, centreY},
+      Doc::VBORow::ink(foreground, Doc::VBORow::onPaper, solid),
+      Doc::VBORow::atlasAt(static_cast<unsigned int>(texX),
+                           static_cast<unsigned int>(texY)),
+      Doc::VBORow::box(static_cast<unsigned char>(layer), clamp(width),
+                       clamp(height), tagKind),
+      Doc::VBORow::paperAt(background, tagIndex)};
 
   const auto *const bytes = reinterpret_cast<const std::byte *>(&row);
   rows.insert(rows.end(), bytes, bytes + sizeof(row));
@@ -151,10 +155,10 @@ void Canvas::addRect(const float left, const float bottom, const float width,
   if (width <= 0.0F || height <= 0.0F) {
     return;
   }
-  // Foreground and background alike, which is what makes the fragment stage's
-  // blend between them independent of whatever the atlas sample returns.
+  // Solid, so the fragment stage fills it with this colour and never samples
+  // the atlas.
   pushQuad(left + (width / 2.0F), bottom + (height / 2.0F), width, height,
-           colour, colour, 0, 0.0F, 0.0F, 0.0F, 0.0F);
+           colour, colour, 0, 0.0F, 0.0F, true);
 }
 
 void Canvas::addLine(const float fromX, const float fromY, const float toX,
@@ -256,8 +260,7 @@ TextMetrics Canvas::addText(RenderState &state, const float left,
 
     pushQuad(glyphLeft + (width / 2.0F), glyphTop - (height / 2.0F), width,
              height, colour, background, static_cast<std::uint32_t>(glyph.layer),
-             glyph.texCoords.topLeft.x, glyph.texCoords.topLeft.y,
-             glyph.texCoords.box.width, glyph.texCoords.box.height);
+             glyph.texCoords.topLeft.x, glyph.texCoords.topLeft.y, false);
   }
 
   return {static_cast<float>(textWidth), static_cast<float>(textHeight)};
@@ -283,7 +286,7 @@ void Canvas::draw(RenderState &state, const glm::mat4 &transform,
   }
   state.device->bindPipeline(pipeline);
   state.device->bindGlyphTexture(state.glyphCache.textureHandle());
-  const render::DrawUniforms uniforms{toArray(transform), opacity};
+  const render::DrawUniforms uniforms{toArray(transform), opacity, identity};
   state.device->drawGlyphs(uniforms, pool->buffer(), pool->byteOffset(backing),
                            committedInstances);
 }
