@@ -462,6 +462,12 @@ Page::Page(std::shared_ptr<Doc> aDoc, RenderState &state, glm::mat4 &model,
   pageBacking = this->doc->pool->reserve(
       static_cast<std::uint32_t>(vertexData.size()));
   this->doc->pool->write(pageBacking, 0, asBytes(vertexData));
+
+  // The shaping has done what it was for: the quads are in the buffer and the
+  // cluster table records where each one came from. Keeping it is what made a
+  // megabyte of text cost ninety megabytes of Pango, and a document that is
+  // read rather than edited never asks for it again. See Page::layout.
+  dropLayout();
 }
 
 bool Page::contains(const std::uint32_t globalOffset) const {
@@ -471,14 +477,61 @@ bool Page::contains(const std::uint32_t globalOffset) const {
   return globalOffset >= textOffset && globalOffset <= textOffset + textBytes;
 }
 
+void Doc::keepLayoutOf(const std::uint32_t pageIndex) const {
+  // Already the most recent, so there is nothing to record and nothing to
+  // drop; a caret sitting still asks its page for a layout every frame.
+  if (!liveLayouts.empty() && liveLayouts.back() == pageIndex) {
+    return;
+  }
+  std::erase(liveLayouts, pageIndex);
+  liveLayouts.push_back(pageIndex);
+
+  while (liveLayouts.size() > maxLiveLayouts) {
+    const auto oldest = liveLayouts.front();
+    liveLayouts.pop_front();
+    // Pages are renumbered by a reflow, so an index recorded before one may
+    // now name a different page or none at all. Dropping the wrong page's
+    // layout costs it a reshaping and nothing else, and dropping none is only
+    // a page kept a little longer.
+    if (oldest < pages.size()) {
+      pages[oldest].dropLayout();
+    }
+  }
+}
+
+std::string_view Page::pageText() const {
+  const std::string_view whole{doc->contents().raw()};
+  if (textOffset >= whole.size()) {
+    return {};
+  }
+  return whole.substr(textOffset, textBytes);
+}
+
+Glib::RefPtr<Pango::Layout> Page::ensureLayout() const {
+  if (!layout) {
+    // The same call, on the same bytes, that produced this page in the first
+    // place, so what comes back is what was drawn.
+    layout = doc->layoutFrom(textOffset);
+    doc->keepLayoutOf(pageIndex);
+  }
+  return layout;
+}
+
 bool Page::caretGeometry(const std::uint32_t globalOffset, float &posX,
                          float &posY, float &height) const {
-  if (!contains(globalOffset) || !layout) {
+  // Whether the caret is on this page is answered before the page is shaped
+  // again, or drawing a caret would shape every page of the document to find
+  // the one page it is on.
+  if (!contains(globalOffset)) {
+    return false;
+  }
+  const auto shaped = ensureLayout();
+  if (!shaped) {
     return false;
   }
   Pango::Rectangle strong;
   Pango::Rectangle weak;
-  layout->get_cursor_pos(static_cast<int>(globalOffset - textOffset), strong,
+  shaped->get_cursor_pos(static_cast<int>(globalOffset - textOffset), strong,
                          weak);
 
   const auto left   = pageMargin + static_cast<float>(toPixels(strong.get_x()));
@@ -506,7 +559,7 @@ Page::offsetForCluster(const std::uint32_t clusterIndex,
   auto offset = static_cast<std::size_t>(cluster.byteStart);
   const auto end =
       static_cast<std::size_t>(cluster.byteStart + cluster.byteLength);
-  const auto text = layout->get_text().raw();
+  const auto text = pageText();
   for (std::uint32_t taken = 0; taken < steps && offset < end;) {
     offset++;
     while (offset < end &&
@@ -632,7 +685,7 @@ Page::highlightFor(const std::uint32_t selStart, const std::uint32_t selEnd,
   const auto localStart = std::max(selStart, pageStart) - textOffset;
   const auto localEnd   = std::min(selEnd, pageEnd) - textOffset;
 
-  const auto text = layout->get_text().raw();
+  const auto text = pageText();
 
   std::optional<std::size_t> first;
   std::size_t last = 0;
@@ -864,7 +917,7 @@ void Doc::scheduleReflow(RenderState &state, const std::uint32_t at,
 
   // Line breaks of the edited page before the edit, to tell a line-local
   // change from one that moved a word onto another line.
-  const auto oldStarts   = lineStarts(pages[firstPage].layoutRef());
+  const auto oldStarts   = lineStarts(pages[firstPage].ensureLayout());
   const auto oldConsumed = pages[firstPage].textLength();
 
   auto self = getPtr();
@@ -1100,26 +1153,14 @@ void Doc::fillPage(const Glib::RefPtr<Pango::Layout> &layout, const char *from,
 
 void Doc::makePages(RenderState &state) {
   std::cout << "MAKING PAGES: " << this << " " << glm::to_string(model) << "\n";
-  const auto fontDesc =
-      Pango::FontDescription(renderer->defaultFontName().data());
-  const auto fonts = Pango::CairoFontMap::get_default();
-  const auto ctx   = fonts->create_context();
-  ctx->set_font_description(fontDesc);
-  Pango::AttrList attrs;
-  auto fontAttr = Pango::Attribute::create_attr_font_desc(fontDesc);
-  attrs.change(fontAttr);
-  std::string loc;
-  Glib::get_charset(loc);
-  auto tSize      = 0UL;
-  const char *txt = text.raw().c_str();
+  auto tSize = 0UL;
   while (tSize < text.bytes()) {
-    auto lay = Pango::Layout::create(ctx);
-    lay->set_font_description(fontDesc);
-    lay->set_single_paragraph_mode(false);
-    lay->set_height(std::ceil(139.70 * 11 * PANGO_SCALE));
-    lay->set_width(std::ceil(139.70 * 8.5 * PANGO_SCALE));
-    lay->set_ellipsize(Pango::EllipsizeMode::END);
-    Doc::fillPage(lay, txt + tSize, text.bytes() - tSize);
+    // The same call a page uses to shape itself again once it has let its
+    // layout go, so what a caret is placed against is what was drawn. These
+    // were two copies of the same page setup until a page's layout became
+    // something it could be without; two copies that had to agree exactly and
+    // nothing to say so.
+    auto lay = layoutFrom(static_cast<std::uint32_t>(tSize));
     // Measured before the layout is handed over, never after. newPage() queues
     // the page onto the render thread and the layout goes with it, so from
     // that call on it belongs to two threads at once -- and a Pango layout

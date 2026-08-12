@@ -22,6 +22,7 @@
 #include <pangomm/fontdescription.h>
 #include <pangomm/init.h>
 #include <pangomm/layout.h>
+#include <pangomm/layoutline.h>
 
 #include <gleditor/doc.hpp>
 
@@ -143,6 +144,45 @@ TEST_F(PageFillTest, whatThePageHoldsDoesNotDependOnTheSlice) {
                         static_cast<int>(text.size()));
 
   EXPECT_EQ(Doc::consumedBytes(bounded), Doc::consumedBytes(whole));
+}
+
+// The property a page's deferred layout rests on. A page gives up its shaping
+// once its quads exist and shapes the same bytes again when a caret arrives,
+// so the second shaping must be the first one: a cursor placed against a
+// layout that broke its lines differently would be drawn somewhere the glyphs
+// are not.
+TEST_F(PageFillTest, shapingTheSameBytesTwiceGivesTheSameAnswers) {
+  const auto text = unbrokenText(64 * 1024);
+
+  const auto first = pageLayout();
+  Doc::fillPage(first, text.data(), text.size());
+  const auto second = pageLayout();
+  Doc::fillPage(second, text.data(), text.size());
+
+  ASSERT_EQ(Doc::consumedBytes(first), Doc::consumedBytes(second));
+  ASSERT_EQ(first->get_line_count(), second->get_line_count());
+  for (int line = 0; line < first->get_line_count(); line++) {
+    EXPECT_EQ(first->get_const_line(line)->get_start_index(),
+              second->get_const_line(line)->get_start_index())
+        << "line " << line << " starts elsewhere the second time";
+  }
+
+  // And where a caret would go, which is the question the reshaping exists to
+  // answer. Every hundredth byte rather than every one, so the test stays
+  // quick while still covering the whole page.
+  const auto consumed = static_cast<int>(Doc::consumedBytes(first));
+  for (int at = 0; at < consumed; at += 97) {
+    Pango::Rectangle strongFirst;
+    Pango::Rectangle weakFirst;
+    Pango::Rectangle strongSecond;
+    Pango::Rectangle weakSecond;
+    first->get_cursor_pos(at, strongFirst, weakFirst);
+    second->get_cursor_pos(at, strongSecond, weakSecond);
+    ASSERT_EQ(strongFirst.get_x(), strongSecond.get_x()) << "at byte " << at;
+    ASSERT_EQ(strongFirst.get_y(), strongSecond.get_y()) << "at byte " << at;
+    ASSERT_EQ(strongFirst.get_height(), strongSecond.get_height())
+        << "at byte " << at;
+  }
 }
 
 } // namespace
