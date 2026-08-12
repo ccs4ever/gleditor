@@ -1013,6 +1013,58 @@ Doc::Doc(const RendererRef &renderer, render::RenderDevice *device,
   }
 }
 
+namespace {
+
+/**
+ * @brief Where a page starts guessing at how much text it can hold.
+ *
+ * A page of the default geometry and font holds about four and a half thousand
+ * bytes, so one slice of this size fills it with room to spare and the guess
+ * is right first time. A font small enough to fit more gets a second attempt;
+ * see fillPage().
+ */
+constexpr std::size_t firstPageGuess = 8 * 1024;
+
+/**
+ * @brief Give a layout the least text that still fills the page.
+ *
+ * A page cannot show more than its height allows, so the text past that point
+ * changes nothing about what the page holds -- but Pango does not know it is
+ * unwanted, and breaking lines through it is what asking for the line count
+ * pays for. Handed a whole document, that made the loader quadratic: every
+ * page broke lines through everything after it.
+ *
+ * The amount a page holds depends on the font and the geometry, so it cannot
+ * be a constant. Instead the slice starts small and grows until the layout
+ * ellipsizes, which is Pango saying it ran out of room -- at which point more
+ * text provably could not change what the page shows. A slice that reaches the
+ * end of the document is likewise complete. So this ends up handing over
+ * exactly what the unbounded version would have shown, having laid out a page's
+ * worth rather than a document's worth to find it.
+ *
+ * Each slice ends on a character boundary, since cutting through one would
+ * hand Pango invalid UTF-8 that was never in the document.
+ */
+void fillPage(const Glib::RefPtr<Pango::Layout> &layout, const char *from,
+              const std::size_t remaining) {
+  for (auto budget = firstPageGuess;; budget *= 4) {
+    if (remaining <= budget) {
+      pango_layout_set_text(layout->gobj(), from, static_cast<int>(remaining));
+      return;
+    }
+    const auto offered = gleditor::alignToCharacterEnd(
+        std::string_view{from, remaining}, static_cast<std::uint32_t>(budget));
+    pango_layout_set_text(layout->gobj(), from, static_cast<int>(offered));
+    if (layout->is_ellipsized()) {
+      // Out of room, so the rest of the document could not have been shown on
+      // this page however much of it Pango had been given.
+      return;
+    }
+  }
+}
+
+} // namespace
+
 void Doc::makePages(RenderState &state) {
   std::cout << "MAKING PAGES: " << this << " " << glm::to_string(model) << "\n";
   const auto fontDesc =
@@ -1034,8 +1086,7 @@ void Doc::makePages(RenderState &state) {
     lay->set_height(std::ceil(139.70 * 11 * PANGO_SCALE));
     lay->set_width(std::ceil(139.70 * 8.5 * PANGO_SCALE));
     lay->set_ellipsize(Pango::EllipsizeMode::END);
-    pango_layout_set_text(lay->gobj(), txt + tSize,
-                          static_cast<int>(text.bytes() - tSize));
+    fillPage(lay, txt + tSize, text.bytes() - tSize);
     // Measured before the layout is handed over, never after. newPage() queues
     // the page onto the render thread and the layout goes with it, so from
     // that call on it belongs to two threads at once -- and a Pango layout
