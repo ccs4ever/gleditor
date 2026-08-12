@@ -25,7 +25,7 @@ protected:
     device = std::make_unique<NiceMock<MockRenderDevice>>();
     ON_CALL(*device, createBuffer)
         .WillByDefault(Return(render::BufferHandle{1}));
-    ON_CALL(*device, growBuffer)
+    ON_CALL(*device, resizeBuffer)
         .WillByDefault(Return(render::BufferHandle{1}));
   }
 };
@@ -50,7 +50,7 @@ TEST_F(BufferPoolTest, reserveOfZeroRowsIsEmpty) {
 // The buffer starts small and is meant to grow, so a request larger than the
 // current capacity must succeed rather than fail.
 TEST_F(BufferPoolTest, reserveBeyondCapacityGrowsTheBuffer) {
-  EXPECT_CALL(*device, growBuffer(_, _))
+  EXPECT_CALL(*device, resizeBuffer(_, _))
       .WillOnce(Return(render::BufferHandle{1}));
 
   BufferPool pool(device.get(), kStride, 4);
@@ -107,6 +107,101 @@ TEST_F(BufferPoolTest, writeTargetsTheAllocationsOffset) {
       .Times(1);
   const std::vector<std::byte> row(kStride);
   pool.write(alloc, 1, row);
+}
+
+// Growth has to overshoot, but a pool that doubles has room for a second
+// document by the time it holds the first. What bounds the waste is the size
+// of the step, and this is the test that says what that step is: filling a
+// pool leaves the capacity within half again of what is in it, where doubling
+// left it within twice.
+TEST_F(BufferPoolTest, growthOvershootsByHalfRatherThanByDouble) {
+  BufferPool pool(device.get(), kStride, 64);
+  // Fill it a page at a time, as a document loading does.
+  for (int page = 0; page < 200; page++) {
+    pool.reserve(37);
+  }
+  const auto used = 200U * 37U;
+  EXPECT_GE(pool.capacityRows(), used);
+  EXPECT_LT(pool.capacityRows(), used * 3 / 2)
+      << "capacity " << pool.capacityRows() << " for " << used << " rows in use";
+}
+
+// The pool used to grow because a request was a few rows short of the free run
+// at the end, ignoring that growth extends that very run.
+TEST_F(BufferPoolTest, growthCountsTheFreeRunItIsExtending) {
+  BufferPool pool(device.get(), kStride, 100);
+  pool.reserve(99); // one row left at the end
+  pool.reserve(2);  // needs one more row than the pool has
+
+  // Growing by the shortfall alone would have been one row; the geometric step
+  // is what it actually grows by, and it must not be more than that.
+  EXPECT_LE(pool.capacityRows(), 150U);
+}
+
+TEST_F(BufferPoolTest, trimGivesBackTheRoomGrowthReserved) {
+  BufferPool pool(device.get(), kStride, 64);
+  for (int page = 0; page < 400; page++) {
+    pool.reserve(37);
+  }
+  const auto before = pool.capacityRows();
+  const auto used   = pool.rowsInUse();
+  ASSERT_GT(before, used);
+
+  EXPECT_CALL(*device, resizeBuffer(_, _))
+      .WillOnce(Return(render::BufferHandle{1}));
+  pool.trim();
+
+  EXPECT_GE(pool.capacityRows(), used) << "a trim must not drop live rows";
+  EXPECT_LT(pool.capacityRows(), before);
+  // Some room is kept, so the first edit after a load does not reallocate.
+  EXPECT_GT(pool.capacityRows(), used);
+}
+
+// A trimmed pool is an ordinary pool: the rows it kept are still where they
+// were, and it grows again when the next edit needs more than it has.
+TEST_F(BufferPoolTest, allocationsSurviveATrimAndItCanGrowAgain) {
+  BufferPool pool(device.get(), kStride, 64);
+  const auto first = pool.reserve(37);
+  for (int page = 0; page < 399; page++) {
+    pool.reserve(37);
+  }
+  const auto used = pool.rowsInUse();
+  pool.trim();
+
+  EXPECT_EQ(pool.byteOffset(first), 0U);
+  EXPECT_GE(pool.capacityRows(), used);
+
+  // More than the headroom the trim left, so it has to grow.
+  const auto after = pool.reserve(used);
+  EXPECT_EQ(after.rowCount, used);
+  EXPECT_GE(pool.capacityRows(), used * 2);
+}
+
+TEST_F(BufferPoolTest, trimDoesNothingWhenThereIsLittleToGiveBack) {
+  BufferPool pool(device.get(), kStride, 1000);
+  pool.reserve(990);
+
+  // No resize at all: copying a whole buffer to recover ten rows is a worse
+  // deal than keeping them.
+  EXPECT_CALL(*device, resizeBuffer(_, _)).Times(0);
+  pool.trim();
+  EXPECT_EQ(pool.capacityRows(), 1000U);
+}
+
+// Only the run at the end can go back. Rows freed in the middle belong to
+// allocations that have been handed out on either side, and moving those would
+// mean telling every page that holds one.
+TEST_F(BufferPoolTest, trimLeavesHolesInTheMiddleAlone) {
+  BufferPool pool(device.get(), kStride, 1000);
+  const auto hole = pool.reserve(400);
+  pool.reserve(400);
+  pool.release(hole);
+
+  EXPECT_CALL(*device, resizeBuffer(_, _)).Times(0);
+  pool.trim();
+  EXPECT_EQ(pool.capacityRows(), 1000U);
+  // And the hole is still usable.
+  EXPECT_EQ(pool.reserve(400).rowOffset, 0U);
 }
 
 TEST_F(BufferPoolTest, rejectsZeroStride) {

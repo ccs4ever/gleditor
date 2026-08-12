@@ -178,14 +178,17 @@ void DeviceVK::updateBuffer(const BufferHandle buffer, const std::size_t offset,
               data.size());
 }
 
-BufferHandle DeviceVK::growBuffer(const BufferHandle buffer,
-                                  const std::size_t bytes) {
+BufferHandle DeviceVK::resizeBuffer(const BufferHandle buffer,
+                                    const std::size_t bytes) {
   const auto it = buffers.find(buffer.id);
   if (buffers.end() == it) {
-    throw std::invalid_argument("DeviceVK::growBuffer: unknown buffer");
+    throw std::invalid_argument("DeviceVK::resizeBuffer: unknown buffer");
   }
-  if (bytes <= it->second.bytes) {
+  if (bytes == it->second.bytes) {
     return buffer;
+  }
+  if (0 == bytes) {
+    throw std::invalid_argument("DeviceVK::resizeBuffer: zero bytes");
   }
   ensureIdleForMutation();
 
@@ -193,8 +196,10 @@ BufferHandle DeviceVK::growBuffer(const BufferHandle buffer,
                               VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT |
                                   VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
   // Both buffers are mapped, so carrying the contents forward is a plain copy
-  // rather than a queue operation.
-  std::memcpy(grown.mapped, it->second.mapped, it->second.bytes);
+  // rather than a queue operation. Whichever is smaller: shrinking drops what
+  // no longer fits, which the caller has said nothing is using.
+  std::memcpy(grown.mapped, it->second.mapped,
+              std::min(bytes, it->second.bytes));
   destroyBufferRecord(it->second);
   it->second = grown;
   return buffer;

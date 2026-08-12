@@ -81,10 +81,17 @@ public:
                             std::span<const std::byte> data) = 0;
 
   /**
-   * @brief Grow @p buffer to @p bytes, preserving its existing contents.
-   * @return A handle to the larger buffer; the old handle is consumed.
+   * @brief Resize @p buffer to @p bytes, preserving as much of its contents as
+   *        still fits.
+   *
+   * Shrinking is as useful as growing: a document that has finished loading
+   * knows exactly how many rows it uses, and the room reserved on the way there
+   * is room nothing will ever write to. Bytes past the new size are gone, so a
+   * caller must know they are unused.
+   *
+   * @return A handle to the resized buffer; the old handle is consumed.
    */
-  virtual BufferHandle growBuffer(BufferHandle buffer, std::size_t bytes) = 0;
+  virtual BufferHandle resizeBuffer(BufferHandle buffer, std::size_t bytes) = 0;
 
   /**
    * @brief Create a 2D array texture of @p size x @p size with @p layers

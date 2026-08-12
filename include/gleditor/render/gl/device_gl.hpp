@@ -55,7 +55,7 @@ public:
   void destroyBuffer(BufferHandle buffer) override;
   void updateBuffer(BufferHandle buffer, std::size_t offset,
                     std::span<const std::byte> data) override;
-  BufferHandle growBuffer(BufferHandle buffer, std::size_t bytes) override;
+  BufferHandle resizeBuffer(BufferHandle buffer, std::size_t bytes) override;
 
   TextureHandle createTextureArray(int size, int layers, TextureFormat format,
                                    int levels) override;
@@ -113,7 +113,7 @@ private:
     int y{};
     bool pending{};
   };
-  /// A buffer object plus the metadata growBuffer() needs to copy it forward.
+  /// A buffer object plus the metadata resizeBuffer() needs to copy it forward.
   struct BufferRecord {
     GLuint name{};
     GLenum target{};
