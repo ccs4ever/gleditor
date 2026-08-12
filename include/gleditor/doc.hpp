@@ -11,10 +11,12 @@
 #include <glibmm/refptr.h>
 #include <glibmm/ustring.h>
 #include <glm/ext/matrix_float4x4.hpp>
+#include <deque>
 #include <memory>
 #include <optional>
 #include <pangomm/layout.h>
 #include <string>
+#include <string_view>
 #include <vector>
 
 #include <gleditor/draw_budget.hpp>
@@ -72,7 +74,21 @@ private:
   /// in. Kept for the frustum test.
   float pageWidth{};
   float pageHeight{};
-  Glib::RefPtr<Pango::Layout> layout;
+  /**
+   * @brief This page's shaping, kept only while something needs it.
+   *
+   * A layout is what Pango shaped the page's text into, and it is large: on a
+   * megabyte of text the layouts of every page came to ninety megabytes,
+   * more than the vertex buffer they produced. Once a page's quads are in that
+   * buffer the layout has done its job, and a reader who never puts a cursor
+   * in the document never needs it again.
+   *
+   * So it is released when the page is built and shaped again on demand -- by
+   * the same call on the same text, so it comes back identical. Only placing a
+   * caret and reflowing an edit need one, and both are things a person does to
+   * one page at a time.
+   */
+  mutable Glib::RefPtr<Pango::Layout> layout;
   /// Byte offset of this page's text within the whole document, so a picking
   /// result can name a position in the document rather than in the page.
   std::uint32_t textOffset{};
@@ -115,9 +131,15 @@ public:
   [[nodiscard]] const std::vector<ClusterBox> &clusterBoxes() const {
     return clusters;
   }
-  [[nodiscard]] const Glib::RefPtr<Pango::Layout> &layoutRef() const {
-    return layout;
-  }
+  /**
+   * @brief This page's shaping, produced again if it is not being kept.
+   *
+   * Returned by value rather than by reference: the document keeps only a few
+   * of these at a time, and asking for one may be what pushes another out.
+   */
+  [[nodiscard]] Glib::RefPtr<Pango::Layout> ensureLayout() const;
+  /// Let go of the shaping. Whatever needs it next asks for it again.
+  void dropLayout() const { layout.reset(); }
   [[nodiscard]] const BufferPool::Allocation &allocation() const {
     return pageBacking;
   }
@@ -146,6 +168,11 @@ public:
    */
   [[nodiscard]] bool caretGeometry(std::uint32_t globalOffset, float &posX,
                                    float &posY, float &height) const;
+
+  /// This page's own text, as a view into the document's. The offsets the
+  /// cluster table carries are relative to its start, and asking the document
+  /// rather than the layout is what lets the layout be let go of.
+  [[nodiscard]] std::string_view pageText() const;
 
   /**
    * @brief Resolve a picked cluster and fractional position to a byte offset.
@@ -194,6 +221,19 @@ const char *reflowScopeName(ReflowScope scope);
 class Doc : public Drawable, public std::enable_shared_from_this<Doc> {
 private:
   std::vector<Page> pages;
+  /**
+   * @brief Pages whose shaping is currently being kept, oldest first.
+   *
+   * A page gives up its layout as soon as its quads exist, and shapes again
+   * when a caret or an edit needs it. Without a bound the pages a person
+   * visits would accumulate layouts until the document held them all again,
+   * which is the cost this exists to avoid; with one, a long session keeps as
+   * many as a person can be working on at once.
+   */
+  mutable std::deque<std::uint32_t> liveLayouts;
+  /// Kept because a reflow shapes the edited page and the pages after it, and
+  /// a caret sits in one page while an edit rebuilds another.
+  static constexpr std::size_t maxLiveLayouts = 4;
   /// What this document is called: a path for one opened from disk, whatever
   /// the source said otherwise.
   std::string docName;
@@ -227,6 +267,10 @@ private:
   /// geometry makePages() uses. Safe to call off the render thread.
   [[nodiscard]] Glib::RefPtr<Pango::Layout>
   layoutFrom(std::uint32_t offset) const;
+
+  /// Record that page @p pageIndex has shaped itself again, and let go of the
+  /// least recently shaped page once more than a few are being kept.
+  void keepLayoutOf(std::uint32_t pageIndex) const;
 public:
   /**
    * @brief Bytes of document text a finished page layout consumes.
