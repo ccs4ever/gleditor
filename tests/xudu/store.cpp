@@ -320,6 +320,37 @@ TEST_F(StoreRoundTripTest, editingContinuesAfterAReload) {
   EXPECT_EQ(store.textOf(next), "one two");
 }
 
+TEST_F(StoreRoundTripTest, aQuotationIntoASecondDocumentSurvivesSaving) {
+  // What ctrl-t does: quote the selection into a second document. That second
+  // document starts from the null document, so the state it produces is a
+  // branch off the root -- a1 -- and writing a store containing one used to
+  // produce an ops spool that could not be read back:
+  //
+  //   microversion "a1": expected a number at offset 0
+  //
+  // The quotation is the point of the program, so this is the whole store
+  // becoming unreadable, not a corner of it.
+  std::filesystem::create_directories(dir);
+
+  MicroversionId quoted;
+  {
+    Store store;
+    const auto one = store.insert(MicroversionId{}, 0, "Hello there");
+    quoted = store.transclude(MicroversionId{}, 0, one, 0, 5);
+    ASSERT_EQ(quoted.str(), "a1");
+    ASSERT_EQ(store.textOf(quoted), "Hello");
+    store.save(dir.string());
+  }
+
+  Store reloaded;
+  reloaded.load(dir.string());
+  EXPECT_EQ(reloaded.opCount(), 2U);
+  // The quotation still points at the same content, which is what a virtual
+  // copy has to mean after a round trip.
+  EXPECT_EQ(reloaded.textOf(quoted), "Hello");
+  EXPECT_EQ(reloaded.textOf(MicroversionId::parse("1")), "Hello there");
+}
+
 } // namespace
 
 // vi: set sw=2 sts=2 ts=2 et:
