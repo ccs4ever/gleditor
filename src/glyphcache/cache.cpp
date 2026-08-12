@@ -320,7 +320,7 @@ GlyphCache::Sizes GlyphCache::addToCache(const std::string &chr,
   // rasterize, but still needs an entry so the caller can advance the pen.
   if (0 == width || 0 == height) {
     const auto empty = Sizes{TextureCoords{}, extents, 0, 0.0F};
-    glyphs[chr][FontMapKeyAdapter(font)] = empty;
+    glyphs[chr][keyFor(font)] = empty;
     return empty;
   }
 
@@ -396,8 +396,16 @@ GlyphCache::Sizes GlyphCache::addToCache(const std::string &chr,
       Sizes{inner, extents, palette->layerIndex(), static_cast<float>(inked)};
   // Level zero moved, so the chain below it is stale until it is rebuilt.
   atlasDirty = true;
-  glyphs[chr][FontMapKeyAdapter(font)] = sizes;
+  glyphs[chr][keyFor(font)] = sizes;
   return sizes;
+}
+
+const FontMapKeyAdapter &GlyphCache::keyFor(const FontPtr &font) {
+  const auto found = fontKeys.find(font.get());
+  if (found != fontKeys.end()) {
+    return found->second;
+  }
+  return fontKeys.emplace(font.get(), FontMapKeyAdapter(font)).first->second;
 }
 
 GlyphCache::Sizes GlyphCache::put(const std::string_view &chr,
@@ -416,7 +424,7 @@ GlyphCache::Sizes GlyphCache::put(const std::string_view &chr,
   if (const auto &chrToFontMap = glyphs.find(chr);
       chrToFontMap != glyphs.cend()) {
     if (const auto &fontMapToGlyphSizes =
-            chrToFontMap->second.find(FontMapKeyAdapter(font));
+            chrToFontMap->second.find(keyFor(font));
         fontMapToGlyphSizes != chrToFontMap->second.cend()) {
       return fontMapToGlyphSizes->second;
     }
