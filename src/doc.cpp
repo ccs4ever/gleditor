@@ -710,8 +710,10 @@ Glib::RefPtr<Pango::Layout> Doc::layoutFrom(const std::uint32_t offset) const {
     lay->set_text("");
     return lay;
   }
-  pango_layout_set_text(lay->gobj(), txt + offset,
-                        static_cast<int>(size - offset));
+  // The same slice makePages() uses. This path is the one an edit reflows
+  // through, so leaving it handing Pango the whole document would have left
+  // the fault in place for every keystroke in a long one.
+  fillPage(lay, txt + offset, size - offset);
   return lay;
 }
 
@@ -1025,28 +1027,10 @@ namespace {
  */
 constexpr std::size_t firstPageGuess = 8 * 1024;
 
-/**
- * @brief Give a layout the least text that still fills the page.
- *
- * A page cannot show more than its height allows, so the text past that point
- * changes nothing about what the page holds -- but Pango does not know it is
- * unwanted, and breaking lines through it is what asking for the line count
- * pays for. Handed a whole document, that made the loader quadratic: every
- * page broke lines through everything after it.
- *
- * The amount a page holds depends on the font and the geometry, so it cannot
- * be a constant. Instead the slice starts small and grows until the layout
- * ellipsizes, which is Pango saying it ran out of room -- at which point more
- * text provably could not change what the page shows. A slice that reaches the
- * end of the document is likewise complete. So this ends up handing over
- * exactly what the unbounded version would have shown, having laid out a page's
- * worth rather than a document's worth to find it.
- *
- * Each slice ends on a character boundary, since cutting through one would
- * hand Pango invalid UTF-8 that was never in the document.
- */
-void fillPage(const Glib::RefPtr<Pango::Layout> &layout, const char *from,
-              const std::size_t remaining) {
+} // namespace
+
+void Doc::fillPage(const Glib::RefPtr<Pango::Layout> &layout, const char *from,
+                   const std::size_t remaining) {
   for (auto budget = firstPageGuess;; budget *= 4) {
     if (remaining <= budget) {
       pango_layout_set_text(layout->gobj(), from, static_cast<int>(remaining));
@@ -1062,8 +1046,6 @@ void fillPage(const Glib::RefPtr<Pango::Layout> &layout, const char *from,
     }
   }
 }
-
-} // namespace
 
 void Doc::makePages(RenderState &state) {
   std::cout << "MAKING PAGES: " << this << " " << glm::to_string(model) << "\n";
@@ -1086,7 +1068,7 @@ void Doc::makePages(RenderState &state) {
     lay->set_height(std::ceil(139.70 * 11 * PANGO_SCALE));
     lay->set_width(std::ceil(139.70 * 8.5 * PANGO_SCALE));
     lay->set_ellipsize(Pango::EllipsizeMode::END);
-    fillPage(lay, txt + tSize, text.bytes() - tSize);
+    Doc::fillPage(lay, txt + tSize, text.bytes() - tSize);
     // Measured before the layout is handed over, never after. newPage() queues
     // the page onto the render thread and the layout goes with it, so from
     // that call on it belongs to two threads at once -- and a Pango layout

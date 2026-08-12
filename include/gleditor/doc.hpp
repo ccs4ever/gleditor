@@ -223,9 +223,50 @@ private:
   /// geometry makePages() uses. Safe to call off the render thread.
   [[nodiscard]] Glib::RefPtr<Pango::Layout>
   layoutFrom(std::uint32_t offset) const;
-  /// Bytes of document text a finished page layout consumes.
+public:
+  /**
+   * @brief Bytes of document text a finished page layout consumes.
+   *
+   * Public alongside fillPage() below, and for the same reason: between them
+   * these two decide where one page ends and the next begins, they are pure
+   * functions of a layout, and the property that matters -- that bounding the
+   * text a layout is given does not move that boundary -- can only be checked
+   * by asking both.
+   */
   [[nodiscard]] static std::uint32_t
   consumedBytes(const Glib::RefPtr<Pango::Layout> &layout);
+
+  /**
+   * @brief Give @p layout the least text that still fills the page.
+   *
+   * A page cannot show more than its height allows, so text past that point
+   * changes nothing about what the page holds -- but Pango does not know it is
+   * unwanted, and breaking lines through it is what asking a layout anything
+   * pays for. Handed a whole document, that made building pages cost time
+   * proportional to the document once per page.
+   *
+   * How much a page holds depends on the font and the geometry, so it cannot
+   * be a constant. The slice starts small and grows until the layout
+   * ellipsizes, which is Pango saying it ran out of room -- at which point
+   * more text provably cannot change what the page shows. A slice that reaches
+   * the end of the text is likewise complete. So the page ends up holding
+   * exactly what it would have held given everything.
+   *
+   * Each slice ends on a character boundary, since cutting through one would
+   * hand Pango invalid UTF-8 that was never in the document.
+   *
+   * Public because it is worth testing directly: handed a document with no
+   * line breaks in it, Pango stops wrapping past a certain length and lays the
+   * whole thing out as one enormously wide line, which this avoids.
+   *
+   * @param from Start of the remaining text, which need not be NUL-terminated
+   *        at the point the page ends.
+   * @param remaining Bytes available from @p from.
+   */
+  static void fillPage(const Glib::RefPtr<Pango::Layout> &layout,
+                       const char *from, std::size_t remaining);
+
+private:
   /// Byte offsets at which each line of a layout starts.
   [[nodiscard]] static std::vector<int>
   lineStarts(const Glib::RefPtr<Pango::Layout> &layout);
