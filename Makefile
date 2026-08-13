@@ -18,6 +18,27 @@ STATIC =
 ifeq ($(origin CXX),default)
 CXX := $(shell command -v clang++ 2>/dev/null || command -v c++)
 endif
+
+# The compiler as it is to be recorded, before ccache is put in front of it:
+# compile_commands.json is read by clangd, which wants the compiler and not the
+# thing that caches it.
+REAL_CXX := $(CXX)
+
+# ccache, when it is installed. It is worth having here for one reason in
+# particular: GLEDITOR_ENABLE_VULKAN changes the flags every object is built
+# with, so turning it on or off rebuilds all of them -- a hundred seconds of
+# recompiling to arrive back at objects that were compiled ten minutes ago.
+# With ccache the second flip is a second and a half. Set GLEDITOR_NO_CCACHE=1
+# to build without it, and an explicit CXX is left alone: somebody who named a
+# compiler meant that command and not a wrapper around it.
+ifeq ($(origin CXX),file)
+ifndef GLEDITOR_NO_CCACHE
+CCACHE := $(shell command -v ccache 2>/dev/null)
+ifneq ($(CCACHE),)
+CXX := $(CCACHE) $(CXX)
+endif
+endif
+endif
 #CXX = thirdparty/cosmocc-4.0.2/bin/cosmoc++ -mclang
 #CXX = thirdparty/cosmocc/bin/x86_64-linux-cosmo-gcc
 # cocmd gives us a builtin in-process sed hook
@@ -644,7 +665,7 @@ $(OBJDIR)/%.dep: %.cpp
 	$(RM) -f $@.$$$$
 
 $(OBJDIR)/%.j: %.cpp
-	$(CXX) -MJ $@ $(CXXFLAGS) -E $< > /dev/null
+	$(REAL_CXX) -MJ $@ $(CXXFLAGS) -E $< > /dev/null
 		
 # clang -MJ emits one trailing-comma-terminated object per file, so the comma on
 # the final entry has to go: JSON has no trailing commas and clangd rejects the
