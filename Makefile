@@ -376,6 +376,24 @@ LIBREAL     := $(OBJDIR)/$(LIBNAME)
 LIBLINK     := $(OBJDIR)/libgleditor.dll.a
 LIB_LINKARG := -Wl,--out-implib,$(LIBLINK)
 RPATH_FLAGS :=
+else ifeq ($(UNAME_S),Darwin)
+# Mach-O has no soname; -install_name plays the same role, read by the
+# dynamic linker at load time rather than encoded in the file name. The
+# ABI version still goes in the file name, just before the extension instead
+# of after it -- libgleditor.0.dylib rather than libgleditor.so.0 -- which is
+# the convention every other dylib on the system follows. clang's driver
+# treats -shared as -dynamiclib on Darwin, so the link recipe itself needs no
+# platform test; only the flags gathered here do.
+LIBNAME     := libgleditor.dylib
+LIBREAL     := $(OBJDIR)/libgleditor.$(SOVERSION).dylib
+LIBLINK     := $(OBJDIR)/$(LIBNAME)
+LIB_LINKARG := -install_name $(libdir)/libgleditor.$(SOVERSION).dylib
+# @loader_path is dyld's name for the same thing $ORIGIN is on ELF: the
+# directory holding whatever is doing the loading, resolved at run time.
+RPATH_FLAGS := -Wl,-rpath,@loader_path
+ifeq (,$(filter /usr/% /lib /lib64,$(libdir)))
+RPATH_FLAGS += -Wl,-rpath,$(libdir)
+endif
 else
 LIBNAME     := libgleditor.so
 LIBREAL     := $(OBJDIR)/$(LIBNAME).$(SOVERSION)
@@ -685,7 +703,7 @@ install:
 	# build resolves -lgleditor against, so both have to be installed.
 	$(INSTALL) -d $(DESTDIR)$(libdir)
 	$(INSTALL) -m 755 $(LIBREAL) $(DESTDIR)$(libdir)/$(notdir $(LIBREAL))
-	ln -sf $(LIBNAME).$(SOVERSION) $(DESTDIR)$(libdir)/$(LIBNAME)
+	ln -sf $(notdir $(LIBREAL)) $(DESTDIR)$(libdir)/$(LIBNAME)
 	# Public headers, so something outside this tree can be built on the
 	# library. Copied wholesale: the split between what a program may include
 	# and what it may not is the directory itself.
@@ -718,7 +736,7 @@ endif
 uninstall:
 	$(RM) -f $(DESTDIR)$(bindir)/gleditor
 	$(RM) -f $(DESTDIR)$(bindir)/xudu
-	$(RM) -f $(DESTDIR)$(libdir)/$(LIBNAME).$(SOVERSION)
+	$(RM) -f $(DESTDIR)$(libdir)/$(notdir $(LIBREAL))
 	$(RM) -f $(DESTDIR)$(libdir)/$(LIBNAME)
 	$(RM) -f $(DESTDIR)$(libdir)/pkgconfig/gleditor.pc
 	$(RM) -rf $(DESTDIR)$(includedir)/gleditor
