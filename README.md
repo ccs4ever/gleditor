@@ -1338,6 +1338,19 @@ middle of a fade. Notifications are the exception. They fade at both ends too,
 but from their own clock rather than from the timeline, because a toast lives
 for eight seconds and no capture should wait that long.
 
+## Build speed
+
+`ccache` is used when it is installed, unless `GLEDITOR_NO_CCACHE=1` or an
+explicit `CXX` says otherwise. It matters most for one thing: turning
+`GLEDITOR_ENABLE_VULKAN` on or off changes the flags every object is compiled
+with, so a flip rebuilds all seventy of them. On four cores that is around a
+hundred seconds each way; with ccache the second flip is a second and a half,
+because the objects for the configuration being returned to are still there.
+
+A real code change still costs what it costs -- around nine seconds for a
+change to `doc.cpp` and the relinking that follows. What ccache removes is
+recompiling the sixty-nine files that did not change.
+
 ## Tests
 
 - Build and run tests:
