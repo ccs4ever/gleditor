@@ -94,6 +94,16 @@ public:
   virtual BufferHandle resizeBuffer(BufferHandle buffer, std::size_t bytes) = 0;
 
   /**
+   * @brief Copy @p bytes within one buffer, from @p srcOffset to @p dstOffset.
+   *
+   * Device-side: the contents are already on the device and the host does not
+   * have them, so moving a run of rows cannot go through a staging copy. The
+   * ranges must not overlap.
+   */
+  virtual void copyBufferRange(BufferHandle buffer, std::size_t srcOffset,
+                               std::size_t dstOffset, std::size_t bytes) = 0;
+
+  /**
    * @brief Create a 2D array texture of @p size x @p size with @p layers
    *        layers.
    * @param levels Mip levels to allocate, 1 for none. Levels beyond the first

@@ -28,6 +28,10 @@ public:
               (override));
   MOCK_METHOD(render::BufferHandle, resizeBuffer,
               (render::BufferHandle buffer, std::size_t bytes), (override));
+  MOCK_METHOD(void, copyBufferRange,
+              (render::BufferHandle buffer, std::size_t srcOffset,
+               std::size_t dstOffset, std::size_t bytes),
+              (override));
 
   MOCK_METHOD(render::TextureHandle, createTextureArray,
               (int size, int layers, render::TextureFormat format, int levels),

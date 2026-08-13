@@ -115,11 +115,7 @@ void BufferPool::grow(const std::uint32_t neededRows) {
   }
 }
 
-BufferPool::Allocation BufferPool::reserve(const std::uint32_t rows) {
-  if (0 == rows) {
-    return {};
-  }
-
+std::uint32_t BufferPool::takeRun(const std::uint32_t rows) {
   auto fits = [rows](const auto &run) { return run.second >= rows; };
   auto it   = std::ranges::find_if(free, fits);
   if (free.end() == it) {
@@ -131,33 +127,107 @@ BufferPool::Allocation BufferPool::reserve(const std::uint32_t rows) {
     }
   }
 
-  const Allocation allocation{it->first, rows};
+  const auto first = it->first;
   it->first += rows;
   it->second -= rows;
   if (0 == it->second) {
     free.erase(it);
   }
-  // An allocation starts with nothing erased from it. release() clears this
-  // already; doing it here too means a record can never outlive the rows it
-  // describes, whatever else goes wrong.
-  erased.erase(allocation.rowOffset);
+  return first;
+}
+
+BufferPool::Allocation BufferPool::reserve(const std::uint32_t rows) {
+  if (0 == rows) {
+    return {};
+  }
+
+  // Room around the rows as well as for them, so that the first row gained
+  // does not cost a move. See slackFor.
+  const auto room = rows + slackFor(rows);
+  const Allocation allocation{nextAllocationId++};
+  placements.emplace(allocation.id, Placement{takeRun(room), rows, room, {}});
   return allocation;
+}
+
+const BufferPool::Placement &
+BufferPool::placementOf(const Allocation &allocation, const char *what) const {
+  const auto found = placements.find(allocation.id);
+  if (placements.end() == found) {
+    throw std::invalid_argument(
+        std::format("BufferPool::{}: allocation {} is not live", what,
+                    allocation.id));
+  }
+  return found->second;
+}
+
+BufferPool::Placement &BufferPool::placementOf(const Allocation &allocation,
+                                               const char *what) {
+  return const_cast<Placement &>(
+      static_cast<const BufferPool *>(this)->placementOf(allocation, what));
+}
+
+std::size_t BufferPool::byteOffset(const Allocation &allocation) const {
+  return static_cast<std::size_t>(placementOf(allocation, "byteOffset").rowOffset) *
+         rowStrideBytes;
+}
+
+std::uint32_t BufferPool::rowCount(const Allocation &allocation) const {
+  return placementOf(allocation, "rowCount").rowCount;
+}
+
+std::uint32_t BufferPool::roomFor(const Allocation &allocation) const {
+  return placementOf(allocation, "roomFor").roomRows;
+}
+
+void BufferPool::resize(const Allocation &allocation, const std::uint32_t rows) {
+  auto &placement = placementOf(allocation, "resize");
+  if (rows <= placement.roomRows) {
+    // It fits where it is. Shrinking widens the slack rather than giving rows
+    // back: they are in the middle of the buffer, where the only thing that
+    // could use them is this allocation growing again.
+    placement.rowCount = rows;
+    return;
+  }
+
+  // It has outgrown its room, so it goes somewhere it fits. Taking the new run
+  // first means the old one is still live while its contents are read, and
+  // that the pool grows -- moving nothing, since growth only adds to the end
+  // -- before anything is committed.
+  const auto room   = rows + slackFor(rows);
+  const auto moved  = takeRun(room);
+  const auto oldRun = placement.rowOffset;
+  const auto oldRoom = placement.roomRows;
+
+  if (0 != placement.rowCount) {
+    device->copyBufferRange(
+        handle, static_cast<std::size_t>(oldRun) * rowStrideBytes,
+        static_cast<std::size_t>(moved) * rowStrideBytes,
+        static_cast<std::size_t>(placement.rowCount) * rowStrideBytes);
+  }
+
+  placement.rowOffset = moved;
+  placement.rowCount  = rows;
+  placement.roomRows  = room;
+  movesMade++;
+
+  // Only now, so that a run being vacated cannot be handed to this very move.
+  insertRun(free, oldRun, oldRoom);
 }
 
 void BufferPool::release(const Allocation &allocation) {
   if (allocation.empty()) {
     return;
   }
+  const auto found = placements.find(allocation.id);
+  if (placements.end() == found) {
+    return; // released twice, or never reserved
+  }
 
-  // Rows erased from inside it go with it: they are part of the run being
-  // handed back, and leaving the record behind would offer them to whatever
-  // allocation lands here next.
-  erased.erase(allocation.rowOffset);
-
-  // The list is kept ordered by offset so neighbouring runs can be coalesced;
-  // without that, repeated reserve/release cycles would fragment the buffer
-  // into unusable slivers.
-  insertRun(free, allocation.rowOffset, allocation.rowCount);
+  // The whole reserved run goes back, slack and erased rows alike: the record
+  // of what was erased describes rows this allocation no longer owns, and
+  // leaving it behind would offer them to whatever lands here next.
+  insertRun(free, found->second.rowOffset, found->second.roomRows);
+  placements.erase(found);
 }
 
 void BufferPool::reserveCapacity(const std::uint32_t rows) {
@@ -204,18 +274,20 @@ void BufferPool::eraseRows(const Allocation &allocation,
   if (0 == count) {
     return;
   }
-  if (firstRow > allocation.rowCount ||
-      count > allocation.rowCount - firstRow) {
+  auto &placement = placementOf(allocation, "eraseRows");
+  if (firstRow > placement.rowCount || count > placement.rowCount - firstRow) {
     throw std::out_of_range(
         std::format("BufferPool::eraseRows: erasing {} rows at {} runs past an "
                     "allocation of {} rows",
-                    count, firstRow, allocation.rowCount));
+                    count, firstRow, placement.rowCount));
   }
 
   // Zeroed on the device before being recorded, so that a row is never both
   // listed as reusable and still drawing something.
-  zeroRows(allocation.rowOffset + firstRow, count);
-  insertRun(erased[allocation.rowOffset], firstRow, count);
+  zeroRows(placement.rowOffset + firstRow, count);
+  // Recorded relative to the allocation rather than to the buffer, so that the
+  // record still describes the same rows after the allocation has moved.
+  insertRun(placement.erased, firstRow, count);
 }
 
 std::optional<std::uint32_t>
@@ -223,14 +295,12 @@ BufferPool::reuseRows(const Allocation &allocation, const std::uint32_t count) {
   if (0 == count) {
     return std::nullopt;
   }
-  const auto holes = erased.find(allocation.rowOffset);
-  if (erased.end() == holes) {
-    return std::nullopt;
-  }
+  auto &placement = placementOf(allocation, "reuseRows");
 
   auto run = std::ranges::find_if(
-      holes->second, [count](const auto &hole) { return hole.second >= count; });
-  if (holes->second.end() == run) {
+      placement.erased,
+      [count](const auto &hole) { return hole.second >= count; });
+  if (placement.erased.end() == run) {
     return std::nullopt;
   }
 
@@ -238,21 +308,15 @@ BufferPool::reuseRows(const Allocation &allocation, const std::uint32_t count) {
   run->first += count;
   run->second -= count;
   if (0 == run->second) {
-    holes->second.erase(run);
-  }
-  if (holes->second.empty()) {
-    erased.erase(holes);
+    placement.erased.erase(run);
   }
   return firstRow;
 }
 
 std::uint32_t BufferPool::erasedRows(const Allocation &allocation) const {
-  const auto holes = erased.find(allocation.rowOffset);
-  if (erased.end() == holes) {
-    return 0;
-  }
+  const auto &placement = placementOf(allocation, "erasedRows");
   std::uint32_t rows = 0;
-  for (const auto &hole : holes->second) {
+  for (const auto &hole : placement.erased) {
     rows += hole.second;
   }
   return rows;
@@ -300,16 +364,18 @@ void BufferPool::write(const Allocation &allocation,
   if (0 != data.size() % rowStrideBytes) {
     throw std::invalid_argument("BufferPool::write: data is not row-aligned");
   }
+  const auto &placement = placementOf(allocation, "write");
   const auto rows = static_cast<std::uint32_t>(data.size() / rowStrideBytes);
-  if (firstRow + rows > allocation.rowCount) {
+  if (firstRow + rows > placement.rowCount) {
     throw std::out_of_range(
         std::format("BufferPool::write: writing {} rows at {} overruns an "
                     "allocation of {} rows",
-                    rows, firstRow, allocation.rowCount));
+                    rows, firstRow, placement.rowCount));
   }
 
   const auto offset =
-      static_cast<std::size_t>(allocation.rowOffset + firstRow) * rowStrideBytes;
+      static_cast<std::size_t>(placement.rowOffset + firstRow) * rowStrideBytes;
   device->updateBuffer(handle, offset, data);
 }
+
 // vi: set sw=2 sts=2 ts=2 et:

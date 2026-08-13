@@ -12,6 +12,7 @@
 #ifndef GLEDITOR_BUFFER_POOL_H
 #define GLEDITOR_BUFFER_POOL_H
 
+#include <algorithm>
 #include <cstddef>
 #include <cstdint>
 #include <list>
@@ -33,13 +34,22 @@ class RenderDevice;
 class BufferPool {
 public:
   /**
-   * @brief A reserved run of rows.
+   * @brief A reserved run of rows: a name for it, not a place.
+   *
+   * Where the rows are is the pool's business and may change. An allocation
+   * that outgrows the room reserved around it is moved somewhere it fits, and
+   * the holder is not told, because there is nothing it could do about it:
+   * everything it can ask -- where its rows begin, how many there are, where
+   * to write -- it asks the pool, which knows where they are now.
+   *
+   * Holding one of these across a move is therefore safe. Holding a byte
+   * offset across one is not, so ask for that at the point of use.
    */
   struct Allocation {
-    std::uint32_t rowOffset{}; ///< First row of the run.
-    std::uint32_t rowCount{};  ///< Length of the run in rows.
+    std::uint32_t id{};
 
-    [[nodiscard]] bool empty() const { return 0 == rowCount; }
+    [[nodiscard]] bool empty() const { return 0 == id; }
+    bool operator==(const Allocation &) const = default;
   };
 
   /**
@@ -58,10 +68,33 @@ public:
 
   /**
    * @brief Reserve @p rows contiguous rows, growing the buffer if needed.
+   *
+   * Room is left around them -- see @ref slackFor -- so that the run can grow
+   * a little without going anywhere. @ref rowCount reports what was asked for;
+   * the slack is not part of it and is never drawn, since a draw covers the
+   * rows the holder says it has.
+   *
    * @throws std::runtime_error if the request cannot be satisfied even after
    *         growing.
    */
   Allocation reserve(std::uint32_t rows);
+
+  /**
+   * @brief Make an allocation @p rows long, wherever that has to be.
+   *
+   * Within the room already reserved this is bookkeeping and nothing moves.
+   * Past it, the pool finds somewhere the run fits, copies the rows there,
+   * and gives the old place back to the free list -- all under the same
+   * handle, so a holder that kept one goes on using it.
+   *
+   * Shrinking keeps the place and widens the slack, since the rows that would
+   * be given back are in the middle of the buffer where nothing else can use
+   * them. @ref eraseRows is how a holder says rows are no longer drawn.
+   *
+   * @throws std::runtime_error if the pool cannot find room even after
+   *         growing.
+   */
+  void resize(const Allocation &allocation, std::uint32_t rows);
 
   /// Return an allocation to the free list, along with any rows erased from
   /// inside it.
@@ -151,10 +184,25 @@ public:
   void write(const Allocation &allocation, std::uint32_t firstRow,
              std::span<const std::byte> data);
 
-  /// Byte offset of an allocation within the buffer.
-  [[nodiscard]] std::size_t byteOffset(const Allocation &allocation) const {
-    return static_cast<std::size_t>(allocation.rowOffset) * rowStrideBytes;
-  }
+  /**
+   * @brief Byte offset of an allocation within the buffer, as it is now.
+   *
+   * Read it when it is needed rather than keeping it: a resize elsewhere in
+   * the pool cannot move this allocation, but a resize of this one can.
+   */
+  [[nodiscard]] std::size_t byteOffset(const Allocation &allocation) const;
+
+  /// Rows the holder asked for, which is what a draw over this allocation
+  /// covers.
+  [[nodiscard]] std::uint32_t rowCount(const Allocation &allocation) const;
+
+  /// Rows actually reserved: @ref rowCount plus the room left for it to grow
+  /// into.
+  [[nodiscard]] std::uint32_t roomFor(const Allocation &allocation) const;
+
+  /// How many times the pool has had to move an allocation. A number that
+  /// keeps climbing means the slack is too tight for how this pool is used.
+  [[nodiscard]] std::uint64_t moves() const { return movesMade; }
 
   [[nodiscard]] render::BufferHandle buffer() const { return handle; }
   [[nodiscard]] std::uint32_t rowStride() const { return rowStrideBytes; }
@@ -189,7 +237,51 @@ public:
   /// Rows below which a trim is not worth a copy of the whole buffer.
   static constexpr std::uint32_t trimFloorRows = 4096;
 
+  /**
+   * @brief Room left around a run of @p rows for it to grow into.
+   *
+   * An allocation with no slack has to move the first time it gains a row,
+   * and moving means copying the whole run and leaving a hole behind. A
+   * sixteenth of a page is a few hundred quads, which is a few hundred
+   * characters typed into it before it has to go anywhere; the floor covers
+   * the small allocations, where a sixteenth is nothing but the cost of moving
+   * is the same call.
+   */
+  static constexpr std::uint32_t slackFloorRows = 8;
+  [[nodiscard]] static constexpr std::uint32_t slackFor(std::uint32_t rows) {
+    return std::max(rows / 16, slackFloorRows);
+  }
+
 private:
+  /// Free runs as (first row, row count), kept sorted by offset so that
+  /// adjacent runs can be merged on release.
+  using FreeList = std::list<std::pair<std::uint32_t, std::uint32_t>>;
+
+  /**
+   * @brief Where an allocation's rows are, and how much room they have.
+   *
+   * The pool holds these rather than handing them out, which is what lets an
+   * allocation be moved without anyone being told.
+   */
+  struct Placement {
+    std::uint32_t rowOffset{}; ///< First row of the reserved run.
+    std::uint32_t rowCount{};  ///< Rows the holder asked for.
+    std::uint32_t roomRows{};  ///< Rows reserved, including the slack.
+    /// Rows erased from inside [0, rowCount), relative to the allocation, so
+    /// they travel with it when it moves.
+    FreeList erased;
+  };
+
+  /// The placement of a live allocation, or a throw naming the caller.
+  [[nodiscard]] const Placement &placementOf(const Allocation &allocation,
+                                             const char *what) const;
+  [[nodiscard]] Placement &placementOf(const Allocation &allocation,
+                                       const char *what);
+
+  /// Take a run of @p rows from the free list, growing the buffer if no run is
+  /// long enough.
+  [[nodiscard]] std::uint32_t takeRun(std::uint32_t rows);
+
   /// Free rows at the end of the buffer, which are the only ones a trim can
   /// give back.
   [[nodiscard]] std::uint32_t trailingFreeRows() const;
@@ -197,10 +289,6 @@ private:
   /// Zero @p count rows of the buffer from @p rowOffset, in chunks, so that
   /// erasing a large run does not need a staging buffer the size of the run.
   void zeroRows(std::uint32_t rowOffset, std::uint32_t count);
-
-  /// Free runs as (first row, row count), kept sorted by offset so that
-  /// adjacent runs can be merged on release.
-  using FreeList = std::list<std::pair<std::uint32_t, std::uint32_t>>;
 
   /// Double the buffer until it holds at least @p neededRows more contiguous
   /// rows at the end.
@@ -212,16 +300,11 @@ private:
   std::uint32_t totalRows;
   FreeList free;
 
-  /**
-   * @brief Rows erased from inside live allocations, by the row the allocation
-   *        starts at.
-   *
-   * Separate from @ref free, which holds rows no allocation covers. These are
-   * still inside one, still drawn, and reusable only by the allocation they
-   * came from. Kept sorted and merged like the free list, so that erasing
-   * either side of a hole leaves one hole rather than three.
-   */
-  std::unordered_map<std::uint32_t, FreeList> erased;
+  /// Live allocations by handle. An id is never reused, so a handle to a
+  /// released allocation is not silently a handle to somebody else's.
+  std::unordered_map<std::uint32_t, Placement> placements;
+  std::uint32_t nextAllocationId{1};
+  std::uint64_t movesMade{};
 };
 
 #endif // GLEDITOR_BUFFER_POOL_H

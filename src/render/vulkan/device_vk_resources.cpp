@@ -178,6 +178,29 @@ void DeviceVK::updateBuffer(const BufferHandle buffer, const std::size_t offset,
               data.size());
 }
 
+void DeviceVK::copyBufferRange(const BufferHandle buffer,
+                               const std::size_t srcOffset,
+                               const std::size_t dstOffset,
+                               const std::size_t bytes) {
+  const auto it = buffers.find(buffer.id);
+  if (buffers.end() == it) {
+    throw std::invalid_argument("DeviceVK::copyBufferRange: unknown buffer");
+  }
+  if (0 == bytes) {
+    return;
+  }
+  if (srcOffset + bytes > it->second.bytes ||
+      dstOffset + bytes > it->second.bytes) {
+    throw std::out_of_range("DeviceVK::copyBufferRange: past the end");
+  }
+  // The buffer is host visible and permanently mapped, so this is a memory
+  // move rather than a queue operation -- but it is a move the GPU may be
+  // reading through, so the device is idled first as every other mutation is.
+  ensureIdleForMutation();
+  auto *const base = static_cast<std::byte *>(it->second.mapped);
+  std::memmove(base + dstOffset, base + srcOffset, bytes);
+}
+
 BufferHandle DeviceVK::resizeBuffer(const BufferHandle buffer,
                                     const std::size_t bytes) {
   const auto it = buffers.find(buffer.id);
