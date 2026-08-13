@@ -222,7 +222,7 @@ BufferHandle DeviceVK::resizeBuffer(const BufferHandle buffer,
   // rather than a queue operation. Whichever is smaller: shrinking drops what
   // no longer fits, which the caller has said nothing is using.
   std::memcpy(grown.mapped, it->second.mapped,
-              std::min(bytes, it->second.bytes));
+              std::min(static_cast<VkDeviceSize>(bytes), it->second.bytes));
   destroyBufferRecord(it->second);
   it->second = grown;
   return buffer;
