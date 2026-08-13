@@ -48,6 +48,7 @@ class Gleditor < Formula
     # A head-only formula has no real version to report; matched to the
     # placeholder every other packaging target in this tree uses instead.
     system "gmake", "install",
+           "-j#{ENV.make_jobs}",
            "prefix=#{prefix}",
            "GLEDITOR_SDL=3",
            "GLEDITOR_VERSION=0.1.0"
