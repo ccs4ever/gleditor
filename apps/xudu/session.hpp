@@ -17,6 +17,7 @@
 #include <chrono>
 #include <cstdint>
 #include <memory>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -213,6 +214,35 @@ public:
   /// The version each open document shows, in the library's document order.
   [[nodiscard]] const std::vector<OpenView> &views() const { return open; }
   [[nodiscard]] MicroversionId versionOf(std::uint32_t docIndex) const;
+
+  /**
+   * @brief What has changed that anything derived from the views depends on.
+   *
+   * Bumped when a view is opened, edited or cleared. Anything that computes
+   * something across the open documents -- which passages they share, where
+   * the links between them run -- compares against this rather than doing the
+   * work again per frame.
+   */
+  [[nodiscard]] std::uint64_t generation() const { return epoch; }
+
+  /**
+   * @brief A recorded state that shows any of @p ends, most recent first.
+   *
+   * What "follow this link" needs when the other end of it is not on screen:
+   * a link names content, not a document, so the document to open is one that
+   * happens to be showing that content. There may be several -- content is
+   * quoted -- and the most recent is the one most likely to be meant.
+   *
+   * Expensive: every state is rebuilt until one matches, and rebuilding is
+   * linear in the operations behind it. Meant to be asked once when a link
+   * first needs following, not per frame.
+   *
+   * @param except States to pass over, which is how the documents already open
+   *        are excluded.
+   */
+  [[nodiscard]] std::optional<MicroversionId>
+  versionShowing(const std::vector<PrimediaSpan> &ends,
+                 const std::vector<MicroversionId> &except) const;
 
   /// Note that a document showing @p version has been opened. Called from the
   /// render thread as documents come and go.
