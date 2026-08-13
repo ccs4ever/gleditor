@@ -65,9 +65,6 @@ protected:
   std::filesystem::path downloads;
 
   void SetUp() override {
-    if (!xudu::swarmSupported()) {
-      GTEST_SKIP() << "built without libtorrent";
-    }
     const std::string host = env("XUDU_PEER_HOST");
     const std::string port = env("XUDU_PEER_PORT");
     if (host.empty() || port.empty()) {

@@ -36,10 +36,6 @@ using xudu::Publication;
 using xudu::Scroll;
 using xudu::ScrollSegment;
 
-/// Signing is ed25519, which this build only has when it was built with
-/// libtorrent. Without it there is no publishing to test.
-bool canSign() { return xudu::swarmSupported(); }
-
 /// A scroll standing for somebody's published permascroll, named by a key so
 /// that it is the same scroll on every machine.
 Scroll namedScroll(const xudu::PublicKey &key, std::string salt,
@@ -65,9 +61,6 @@ MicroversionId quoting(xudu::Store &store, const Scroll &scroll,
 }
 
 TEST(PublicationTest, aDocumentIsPublishedAsPointersAndReadsBackTheSame) {
-  if (!canSign()) {
-    GTEST_SKIP() << "built without ed25519";
-  }
   const auto keys   = xudu::createMutableKeys();
   const auto scroll = namedScroll(keys.publicKey, "permascroll", 1000);
   xudu::Store store;
@@ -96,9 +89,6 @@ TEST(PublicationTest, aDocumentIsPublishedAsPointersAndReadsBackTheSame) {
 }
 
 TEST(PublicationTest, aManifestThatWasAlteredDoesNotRead) {
-  if (!canSign()) {
-    GTEST_SKIP() << "built without ed25519";
-  }
   const auto keys   = xudu::createMutableKeys();
   const auto scroll = namedScroll(keys.publicKey, "permascroll", 1000);
   xudu::Store store;
@@ -129,9 +119,6 @@ TEST(PublicationTest, aManifestThatWasAlteredDoesNotRead) {
 }
 
 TEST(PublicationTest, refusesToPublishContentThisMachineHasNotPublished) {
-  if (!canSign()) {
-    GTEST_SKIP() << "built without ed25519";
-  }
   // Typed here and never sealed: the pieces point at the local spool, which
   // has no address anyone else could resolve. Publishing that would produce a
   // document that arrives and cannot be read.
@@ -147,9 +134,6 @@ TEST(PublicationTest, refusesToPublishContentThisMachineHasNotPublished) {
 // spool the name it was missing; the offsets it already had become global
 // addresses, so nothing written before the seal has to be rewritten.
 TEST(PublicationTest, whatWasWrittenHereCanBeSealedAndThenPublished) {
-  if (!canSign()) {
-    GTEST_SKIP() << "built without ed25519";
-  }
   xudu::Store store;
   const auto version = store.insert(MicroversionId{}, 0, "Written here first.");
   const auto keys    = xudu::createMutableKeys();
@@ -181,9 +165,6 @@ TEST(PublicationTest, whatWasWrittenHereCanBeSealedAndThenPublished) {
 }
 
 TEST(PublicationTest, twoDocumentsQuotingOnePassageAreFoundToShareIt) {
-  if (!canSign()) {
-    GTEST_SKIP() << "built without ed25519";
-  }
   // Two publishers who have never met, quoting one published permascroll.
   const auto author  = xudu::createMutableKeys();
   const auto scroll  = namedScroll(author.publicKey, "permascroll", 1000);
@@ -224,9 +205,6 @@ TEST(PublicationTest, twoDocumentsQuotingOnePassageAreFoundToShareIt) {
 }
 
 TEST(PublicationTest, aLinkMadeHereReachesAPassageThere) {
-  if (!canSign()) {
-    GTEST_SKIP() << "built without ed25519";
-  }
   const auto author = xudu::createMutableKeys();
   const auto critic = xudu::createMutableKeys();
   const auto scroll = namedScroll(author.publicKey, "permascroll", 1000);
@@ -267,9 +245,6 @@ TEST(PublicationTest, aLinkMadeHereReachesAPassageThere) {
 }
 
 TEST(PublicationTest, aNameMovesForwardAndNotBack) {
-  if (!canSign()) {
-    GTEST_SKIP() << "built without ed25519";
-  }
   const auto keys   = xudu::createMutableKeys();
   const auto scroll = namedScroll(keys.publicKey, "permascroll", 1000);
   xudu::Store store;
@@ -289,9 +264,6 @@ TEST(PublicationTest, aNameMovesForwardAndNotBack) {
 }
 
 TEST(PublicationTest, twoNamesUnderOneKeyAreTwoDocuments) {
-  if (!canSign()) {
-    GTEST_SKIP() << "built without ed25519";
-  }
   const auto keys   = xudu::createMutableKeys();
   const auto scroll = namedScroll(keys.publicKey, "permascroll", 1000);
   xudu::Store store;
@@ -310,9 +282,6 @@ TEST(PublicationTest, twoNamesUnderOneKeyAreTwoDocuments) {
 }
 
 TEST(PublicationTest, theSameDocumentEncodesToTheSameBytes) {
-  if (!canSign()) {
-    GTEST_SKIP() << "built without ed25519";
-  }
   // Which is what makes a signature checkable rather than a coincidence: two
   // machines holding the same manifest must produce the same bytes to sign.
   const auto keys   = xudu::createMutableKeys();

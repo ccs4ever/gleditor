@@ -220,8 +220,7 @@ struct SealedScroll {
  *
  * @param sequence Which publication of this name. Must rise, or readers who
  *        already have an earlier one will keep it.
- * @throws std::runtime_error if the version points at unpublished content, or
- *         if this build has no signing (see swarmSupported()).
+ * @throws std::runtime_error if the version points at unpublished content.
  */
 [[nodiscard]] Publication publish(const Store &store,
                                   const MicroversionId &version,

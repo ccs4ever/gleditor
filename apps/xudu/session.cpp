@@ -28,10 +28,6 @@ Session::Session(std::string aStorePath) : storePath(std::move(aStorePath)) {
 }
 
 void Session::useSwarm(const bool privateNetwork) {
-  if (!swarmSupported()) {
-    throw std::runtime_error(
-        "this build has no swarm support: it was compiled without libtorrent");
-  }
   SwarmContentSource::Options options;
   options.listenInterfaces              = "0.0.0.0:0";
   options.restrictDhtToDistinctNetworks = !privateNetwork;
@@ -176,12 +172,6 @@ const MutableKeys &Session::identity() {
   if (keys.has_value()) {
     return *keys;
   }
-  if (!swarmSupported()) {
-    throw std::runtime_error(
-        "publishing needs ed25519, which this build has none of; rebuild with "
-        "libtorrent-rasterbar installed");
-  }
-
   const auto path = std::filesystem::path(storePath) / "identity";
   if (std::ifstream in(path); in) {
     std::string publicHex;

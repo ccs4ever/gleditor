@@ -35,9 +35,6 @@
 
 namespace xudu {
 
-/// Whether this build can join a swarm at all.
-[[nodiscard]] bool swarmSupported();
-
 /// What a mutable name points at, and how recently the publisher said so.
 struct MutablePointer {
   InfoHash hash;

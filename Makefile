@@ -116,16 +116,17 @@ TEST_PKGS := gmock_main
 # the library. The point of keeping this list short is that the engine must not
 # need a graphics device -- not that it must need nothing at all -- so a
 # utility library is fine here and pangomm, cairo and SDL are not.
-XUDU_PKGS := glibmm-2.68
-# libtorrent, when it is installed. It is what lets a torrent-backed reference
-# actually be fetched from peers rather than only from a disk here, which is
-# the difference between content addressing that removes the dependency on one
-# machine and content addressing that merely describes it. Optional because
-# everything else works without it, and a build without it has no swarm to
-# offer rather than a broken one.
-HAVE_LIBTORRENT := $(shell pkg-config --exists libtorrent-rasterbar && echo 1)
-ifeq ($(HAVE_LIBTORRENT),1)
-XUDU_PKGS += libtorrent-rasterbar
+# libtorrent is required, not optional. It is what lets a reference be fetched
+# from peers rather than only from a disk here, and what signs and resolves the
+# names a publisher is known by -- so a build without it produces a program
+# whose documents cannot leave the machine that wrote them, which is the one
+# thing this program is for. Better to fail at configure time than to ship a
+# xanadoc editor that quietly cannot publish.
+XUDU_PKGS := glibmm-2.68 libtorrent-rasterbar
+ifneq ($(shell pkg-config --exists libtorrent-rasterbar && echo 1),1)
+$(error libtorrent-rasterbar was not found by pkg-config. It is required: \
+install libtorrent-rasterbar-dev (Debian, Ubuntu), libtorrent-rasterbar-devel \
+(Fedora), or libtorrent-rasterbar (Arch, Homebrew).)
 endif
 
 # The version, which a release tarball has to know without a git history: every
@@ -193,9 +194,7 @@ override CXXFLAGS += -DGLEDITOR_SDL_MAJOR=$(GLEDITOR_SDL)
 # ask. Defining it unconditionally satisfies both, and the distributions
 # tracking GLM 1.0 -- Arch, Fedora, nixpkgs -- would otherwise all fail here.
 override CXXFLAGS += -DGLM_ENABLE_EXPERIMENTAL
-ifeq ($(HAVE_LIBTORRENT),1)
-override CXXFLAGS += -DXUDU_ENABLE_SWARM=1 $(shell pkg-config --cflags libtorrent-rasterbar)
-endif
+override CXXFLAGS += $(shell pkg-config --cflags libtorrent-rasterbar)
 ifdef GLEDITOR_ENABLE_VULKAN
 override CXXFLAGS += -DGLEDITOR_ENABLE_VULKAN=1
 endif

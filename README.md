@@ -797,9 +797,10 @@ whole pieces and hashes them against the torrent before returning anything, and
 it does not know whether they came off a local disk or from a stranger. That is
 the point of verifying: a peer is not trusted, so it does not have to be.
 
-Built only when libtorrent is installed. Without it the rest still works and
-there is simply no swarm on offer, which `xudu --swarm` says rather than
-pretending otherwise.
+libtorrent is required to build xudu. It is not only the swarm: the ed25519 a
+publisher's name is signed with comes from it too, so a build without it would
+be a xanadoc editor whose documents cannot leave the machine that wrote them.
+The build says so at configure time rather than producing one.
 
 #### Testing it
 

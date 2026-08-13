@@ -79,6 +79,7 @@ jobs:
           libvulkan-dev glslang-tools \
           mesa-vulkan-drivers vulkan-validationlayers \
           libgmock-dev libgtest-dev \
+          libtorrent-rasterbar-dev gnupg \
           xvfb \
           clang libclang-rt-dev make
 

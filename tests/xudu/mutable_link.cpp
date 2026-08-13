@@ -200,9 +200,6 @@ TEST(MutablePointerTest, anythingElseUnderTheNameIsNotAnAnswer) {
 class MutableCryptoTest : public testing::Test {
 protected:
   void SetUp() override {
-    if (!xudu::swarmSupported()) {
-      GTEST_SKIP() << "built without libtorrent";
-    }
     keys.publicKey = PublicKey::fromHex(bep44Key);
     const auto secret = xudu::fromHex(bep44Secret);
     std::copy(secret.begin(), secret.end(), keys.secretKey.bytes.begin());
