@@ -56,6 +56,23 @@ cp assets/shaders/vulkan/*.spv "$stage/assets/shaders/vulkan/"
 cp logo.png "$stage/assets/logo.png"
 cp LICENSE README.md "$stage/"
 
+# AccessKit, when this was built with it. Copied by name rather than left to
+# the collector below: the collector takes what is under $MINGW_PREFIX, and
+# this came from wherever ACCESSKIT_DIR pointed. Windows has no run path -- the
+# loader looks beside the executable -- so the DLL has to be in the bundle or
+# nothing starts.
+if [ -n "${ACCESSKIT_DIR:-}" ]; then
+  akarch=$(uname -m | sed 's/^amd64$/x86_64/;s/^aarch64$/arm64/;s/^i.86$/x86/')
+  akdll="$ACCESSKIT_DIR/lib/windows/$akarch/mingw/shared/accesskit.dll"
+  if [ -f "$akdll" ]; then
+    cp "$akdll" "$stage/"
+    echo "==> bundled accesskit.dll"
+  else
+    echo "ACCESSKIT_DIR is set but $akdll is not there" >&2
+    exit 1
+  fi
+fi
+
 # Every DLL the executable needs that is not part of Windows itself. ldd under
 # MSYS2 reports both; the ones under $MINGW_PREFIX are ours to ship and the
 # ones in /c/WINDOWS are already on the target machine. Repeated until it

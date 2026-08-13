@@ -306,10 +306,33 @@ jobs:
           echo "--- what pkg-config sees ---"
           pkg-config --modversion pangomm-2.48 cairomm-1.16 glibmm-2.68 sdl3
 
+      # AccessKit is what reports the user interface to screen readers -- UI
+      # Automation on Windows. Its C bindings are published as one archive
+      # holding a prebuilt library per platform, so there is nothing to build
+      # here: unpack it and point ACCESSKIT_DIR at it, which is exactly what
+      # the README tells anybody else to do.
+      #
+      # Pinned rather than tracking the latest release: a build that changes
+      # what it links because somebody else tagged something is not a build
+      # anybody can reproduce.
+      - name: fetch accesskit-c
+        run: |
+          set -eu
+          version=0.22.3
+          curl -sSfL -o accesskit-c.zip \
+            "https://github.com/AccessKit/accesskit-c/releases/download/$version/accesskit-c-$version.zip"
+          unzip -q accesskit-c.zip -d "$RUNNER_TEMP"
+          echo "ACCESSKIT_DIR=$RUNNER_TEMP/accesskit-c-$version" >> "$GITHUB_ENV"
+          ls "$RUNNER_TEMP/accesskit-c-$version/lib/windows/x86_64/mingw/shared"
+
       - name: build and bundle
         run: ./packaging/windows/build-msys2.sh
         env:
           GLEDITOR_VERSION: 0.1.0
+          # Required here, unlike a plain build: the whole point of this job is
+          # to test the Windows accessibility path, and a job that quietly
+          # built without it would report a green check for nothing.
+          GLEDITOR_ENABLE_A11Y: 1
 
       - name: check the bundle
         run: |
@@ -317,6 +340,7 @@ jobs:
           test -f build/windows/gleditor/assets/shaders/glyph.vert.glsl
           test -f build/windows/gleditor/assets/shaders/vulkan/glyph.vert.spv
           test -f build/windows/gleditor/assets/logo.png
+          test -f build/windows/gleditor/accesskit.dll
           ls build/windows/*.zip
 
       # Run it from outside MSYS2, with only the bundled DLLs on the path. If
@@ -404,6 +428,57 @@ jobs:
           cat draw.log
           [ "$rc" -eq 0 ]
           ls -la frame.ppm
+
+      # The Windows accessibility path, which is the one this repository cannot
+      # exercise anywhere else. Three things are being checked and they are
+      # different things:
+      #
+      #  - the adapter opened at all. That is the line the program prints, and
+      #    it means accesskit_windows_subclassing_adapter_new() was handed the
+      #    real HWND out of SDL and did not refuse it. It refuses -- by
+      #    panicking, which would take the process with it -- if the window has
+      #    already been shown, which is why the window is created hidden on
+      #    Windows and shown immediately afterwards. A green check here is what
+      #    says that ordering held.
+      #  - the tree was built and is the tree of a document, not an empty
+      #    window.
+      #  - none of it crashed. AccessKit's Windows adapter subclasses the
+      #    window procedure, so it is running inside every message this window
+      #    handles from the moment it is installed.
+      #
+      # What is not checked is a client reading the tree back: that needs a UI
+      # Automation client, which needs a desktop session this runner does not
+      # have. The AT-SPI side of the same tree is read back over a real bus;
+      # see the accessibility section of the README.
+      - name: report the accessibility tree to Windows
+        run: |
+          set -eu
+          cd build/windows/gleditor
+          export GALLIUM_DRIVER=llvmpipe
+          export LIBGL_ALWAYS_SOFTWARE=1
+          ./xudu.exe --backend opengl --profile --no-present --dump-a11y \
+            --import ../../../tests/samples/quick_brown_fox.txt \
+            store > a11y.log 2>&1 &
+          pid=$!
+          winpid=$(cat "/proc/$pid/winpid" 2>/dev/null || echo "$pid")
+          for _ in $(seq 1 180); do
+            kill -0 "$pid" 2>/dev/null || break
+            sleep 1
+          done
+          if kill -0 "$pid" 2>/dev/null; then
+            echo "=== still running after 180s; killed ==="
+            taskkill //F //PID "$winpid" >/dev/null 2>&1 || kill -9 "$pid" || true
+            cat a11y.log || true
+            exit 1
+          fi
+          wait "$pid" && rc=0 || rc=$?
+          echo "exit status: $rc"
+          cat a11y.log
+          [ "$rc" -eq 0 ]
+          grep -q 'accessibility: reporting to the platform' a11y.log
+          grep -q '^window "Xudu"' a11y.log
+          grep -q 'multiline text input' a11y.log
+          grep -q 'text run' a11y.log
 
       # A missing shader exits zero and draws a flat rectangle, so the frame
       # having been written is not the same as the document having been drawn.

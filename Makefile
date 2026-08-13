@@ -129,6 +129,13 @@ install libtorrent-rasterbar-dev (Debian, Ubuntu), libtorrent-rasterbar-devel \
 (Fedora), or libtorrent-rasterbar (Arch, Homebrew).)
 endif
 
+# Which platform this is. Up here because the accessibility block below needs
+# it, and it is wanted again further down for what a shared library is called.
+UNAME_S := $(shell uname -s 2>/dev/null || echo unknown)
+ifneq (,$(filter MINGW% MSYS% CYGWIN%,$(UNAME_S)))
+WINDOWS := 1
+endif
+
 # -- accessibility -------------------------------------------------------------
 #
 # AccessKit is what reports the user interface to the platform's assistive
@@ -158,16 +165,32 @@ ifneq ($(GLEDITOR_ENABLE_A11Y),0)
 
 ifdef ACCESSKIT_DIR
 # The layout an accesskit-c release unpacks to, and the one its own build
-# installs into. The shared library rather than the static one: this goes into
-# a shared library of ours, and every distribution would rather have one copy
-# of it on the system than one inside each thing that uses it.
-A11Y_ARCH := $(shell uname -m 2>/dev/null | $(SED) 's/^amd64$$/x86_64/;s/^arm64$$/aarch64/')
-A11Y_OS   := $(shell uname -s 2>/dev/null | tr 'A-Z' 'a-z')
-A11Y_LIBDIR := $(ACCESSKIT_DIR)/lib/$(A11Y_OS)/$(A11Y_ARCH)/shared
+# installs into: lib/<os>/<arch>[/<toolchain>]/{static,shared}, where the
+# toolchain level exists on Windows alone because a MinGW import library and an
+# MSVC one are not interchangeable. Kept in step with accesskit.cmake, which is
+# the authority on it.
+#
+# The shared library rather than the static one: this goes into a shared
+# library of ours, and every distribution would rather have one copy of it on
+# the system than one inside each thing that links it.
+A11Y_ARCH := $(shell uname -m 2>/dev/null | $(SED) 's/^amd64$$/x86_64/;s/^aarch64$$/arm64/;s/^i.86$$/x86/')
+ifdef WINDOWS
+A11Y_LIBDIR := $(ACCESSKIT_DIR)/lib/windows/$(A11Y_ARCH)/mingw/shared
+else ifeq ($(UNAME_S),Darwin)
+A11Y_LIBDIR := $(ACCESSKIT_DIR)/lib/macos/$(A11Y_ARCH)/shared
+else
+A11Y_LIBDIR := $(ACCESSKIT_DIR)/lib/linux/$(A11Y_ARCH)/shared
+endif
 ifneq ($(wildcard $(ACCESSKIT_DIR)/include/accesskit.h),)
 GLEDITOR_HAVE_A11Y := 1
 A11Y_CFLAGS := -I$(ACCESSKIT_DIR)/include
-A11Y_LIBS   := -L$(A11Y_LIBDIR) -laccesskit -Wl,-rpath,$(A11Y_LIBDIR)
+A11Y_LIBS   := -L$(A11Y_LIBDIR) -laccesskit
+ifndef WINDOWS
+# Recorded so a build tree runs without the library being installed. Windows
+# has no run path: the loader looks beside the executable, which is what the
+# packaging script arranges.
+A11Y_LIBS   += -Wl,-rpath,$(A11Y_LIBDIR)
+endif
 endif
 else ifeq ($(shell pkg-config --exists accesskit && echo 1),1)
 GLEDITOR_HAVE_A11Y := 1
@@ -338,10 +361,6 @@ SWARM_PEER_OBJS := $(call obj,tools/xudu-swarm-peer.cpp)
 # loader searches the executable's own directory -- so there is nothing for a
 # run path to do.
 SOVERSION := 0
-UNAME_S := $(shell uname -s 2>/dev/null || echo unknown)
-ifneq (,$(filter MINGW% MSYS% CYGWIN%,$(UNAME_S)))
-WINDOWS := 1
-endif
 
 ifdef WINDOWS
 LIBNAME     := libgleditor.dll
