@@ -78,6 +78,40 @@ bool validationLayerAvailable() {
   });
 }
 
+/// True when the named instance extension is present. Used for
+/// VK_KHR_portability_enumeration, which only a loader carrying a
+/// portability driver -- MoltenVK on macOS -- advertises; every other
+/// platform's loader simply does not have it, and this is what lets the same
+/// call sequence run on both without an `#ifdef` on the platform.
+bool instanceExtensionAvailable(const char *name) {
+  std::uint32_t count = 0;
+  vkEnumerateInstanceExtensionProperties(nullptr, &count, nullptr);
+  std::vector<VkExtensionProperties> extensions(count);
+  vkEnumerateInstanceExtensionProperties(nullptr, &count, extensions.data());
+  return std::ranges::any_of(
+      extensions, [name](const VkExtensionProperties &extension) {
+        return 0 == std::strcmp(extension.extensionName, name);
+      });
+}
+
+/// True when the named device extension is present on `physicalDevice`. Used
+/// for VK_KHR_portability_subset, which the Vulkan spec requires be enabled
+/// whenever a device reports it -- MoltenVK always does, no conformant driver
+/// ever does -- so this is what decides per device rather than per platform.
+bool deviceExtensionAvailable(const VkPhysicalDevice physicalDevice,
+                              const char *name) {
+  std::uint32_t count = 0;
+  vkEnumerateDeviceExtensionProperties(physicalDevice, nullptr, &count,
+                                       nullptr);
+  std::vector<VkExtensionProperties> extensions(count);
+  vkEnumerateDeviceExtensionProperties(physicalDevice, nullptr, &count,
+                                       extensions.data());
+  return std::ranges::any_of(
+      extensions, [name](const VkExtensionProperties &extension) {
+        return 0 == std::strcmp(extension.extensionName, name);
+      });
+}
+
 } // namespace
 
 namespace {
@@ -146,6 +180,18 @@ void DeviceVK::createInstance() {
     extensions.push_back(VK_EXT_DEBUG_UTILS_EXTENSION_NAME);
   }
 
+  // Since loader version 1.3.216, a loader that carries a portability driver
+  // -- MoltenVK, wrapping Metal, is the one this project cares about --
+  // excludes that driver from vkEnumeratePhysicalDevices unless the instance
+  // both enables this extension and sets the matching create flag below. No
+  // other loader advertises the extension, so this is a no-op everywhere
+  // except macOS rather than a platform check.
+  const bool wantPortability =
+      instanceExtensionAvailable(VK_KHR_PORTABILITY_ENUMERATION_EXTENSION_NAME);
+  if (wantPortability) {
+    extensions.push_back(VK_KHR_PORTABILITY_ENUMERATION_EXTENSION_NAME);
+  }
+
   VkApplicationInfo appInfo{};
   appInfo.sType              = VK_STRUCTURE_TYPE_APPLICATION_INFO;
   appInfo.pApplicationName   = "gleditor";
@@ -161,6 +207,9 @@ void DeviceVK::createInstance() {
   createInfo.pApplicationInfo        = &appInfo;
   createInfo.enabledExtensionCount   = static_cast<std::uint32_t>(extensions.size());
   createInfo.ppEnabledExtensionNames = extensions.data();
+  if (wantPortability) {
+    createInfo.flags |= VK_INSTANCE_CREATE_ENUMERATE_PORTABILITY_BIT_KHR;
+  }
   if (wantValidation) {
     createInfo.enabledLayerCount   = validationLayers.size();
     createInfo.ppEnabledLayerNames = validationLayers.data();
@@ -289,8 +338,16 @@ void DeviceVK::createLogicalDevice() {
     queueInfos.push_back(info);
   }
 
-  static constexpr std::array deviceExtensions = {
+  std::vector<const char *> deviceExtensions = {
       VK_KHR_SWAPCHAIN_EXTENSION_NAME};
+  // The spec requires this be enabled whenever the device reports it; every
+  // MoltenVK device does and no conformant driver ever does, so this is a
+  // per-device check rather than a platform one, the same as the instance
+  // extension above.
+  if (deviceExtensionAvailable(physicalDevice,
+                               VK_KHR_PORTABILITY_SUBSET_EXTENSION_NAME)) {
+    deviceExtensions.push_back(VK_KHR_PORTABILITY_SUBSET_EXTENSION_NAME);
+  }
 
   // Without independentBlend every colour attachment of a pipeline must carry
   // identical blend state. This pipeline cannot: the colour target blends on

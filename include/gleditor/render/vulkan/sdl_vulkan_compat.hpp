@@ -12,6 +12,10 @@
 
 #include <gleditor/sdl_compat.hpp>
 
+// See device_vk.hpp for why this is defined before the Vulkan header.
+#ifndef VK_ENABLE_BETA_EXTENSIONS
+#define VK_ENABLE_BETA_EXTENSIONS
+#endif
 #include <vulkan/vulkan.h>
 
 #include <string>

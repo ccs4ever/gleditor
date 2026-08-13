@@ -532,10 +532,11 @@ jobs:
   # tests the commit under test the way `nix build` does against this same
   # checkout rather than a fetched tarball.
   #
-  # No Vulkan here; see the packaging table in the README for why. Nothing
-  # distributable comes out of this job either -- a real bottle is a
-  # release-time concern -- so unlike the other five there is no artifact to
-  # upload.
+  # Both Vulkan and AccessKit are built here (see packaging/macos/gleditor.rb
+  # for the MoltenVK dependencies and portability handling the former relies
+  # on, and the accesskit-c fetch below for the latter). Nothing distributable
+  # comes out of this job either -- a real bottle is a release-time concern --
+  # so unlike the other five there is no artifact to upload.
   macos:
     name: brew (macOS, SDL3)
     runs-on: macos-latest
@@ -562,10 +563,13 @@ jobs:
       # on the compiler's default search path (whatever the local libgtest-dev
       # / gtest-devel / gtest package installed there); Homebrew has no such
       # ambient location, so it is named outright.
+      # vulkan-loader, molten-vk and glslang mirror packaging/macos/gleditor.rb's
+      # own dependencies -- see the comment there for what each is for.
       - name: install build dependencies
         run: |
           brew install make pangomm cairomm glibmm sdl3 sdl3_image glm \
-            libtorrent-rasterbar boost openssl@3 pkgconf googletest
+            libtorrent-rasterbar boost openssl@3 pkgconf googletest \
+            vulkan-loader molten-vk glslang
 
       # AccessKit is what reports the user interface to screen readers --
       # NSAccessibility here. Its C bindings are published as one archive
@@ -615,7 +619,8 @@ jobs:
           # Windows job states for the same setting.
           gmake -j"$(sysctl -n hw.ncpu)" lib gleditor xudu \
             GLEDITOR_SDL=3 GLEDITOR_VERSION=0.1.0 \
-            GLEDITOR_ENABLE_A11Y=1 ACCESSKIT_DIR="$ACCESSKIT_DIR"
+            GLEDITOR_ENABLE_A11Y=1 ACCESSKIT_DIR="$ACCESSKIT_DIR" \
+            GLEDITOR_ENABLE_VULKAN=1
 
       - name: install it
         run: |
@@ -625,13 +630,15 @@ jobs:
             GLEDITOR_SDL=3 \
             GLEDITOR_VERSION=0.1.0 \
             GLEDITOR_ENABLE_A11Y=1 \
-            ACCESSKIT_DIR="$ACCESSKIT_DIR"
+            ACCESSKIT_DIR="$ACCESSKIT_DIR" \
+            GLEDITOR_ENABLE_VULKAN=1
 
       - name: check what landed
         run: |
           test -x stage/usr/local/bin/gleditor
           test -x stage/usr/local/bin/xudu
           test -f stage/usr/local/share/gleditor/shaders/glyph.vert.glsl
+          test -f stage/usr/local/share/gleditor/shaders/vulkan/glyph.vert.spv
           # Said out loud rather than only implied by a successful build:
           # GLEDITOR_ENABLE_A11Y=1 above made AccessKit's absence a build
           # failure, but a stale object left over from an earlier step
@@ -642,12 +649,12 @@ jobs:
 
       # No backend named, for the same reason the Nix job names none: whether
       # a GitHub-hosted macOS runner's WindowServer can hand SDL a real OpenGL
-      # context has not been established from anywhere this project's CI has
-      # run before, and a check that might hang or fail for reasons that have
-      # nothing to do with the package is worse than one that proves the
-      # binary starts, resolves every dynamic library and finds its shaders --
-      # which is the same failure mode every other job in this file exists to
-      # catch.
+      # or Vulkan/MoltenVK context has not been established from anywhere this
+      # project's CI has run before, and a check that might hang or fail for
+      # reasons that have nothing to do with the package is worse than one
+      # that proves the binary starts, resolves every dynamic library and
+      # finds its shaders -- which is the same failure mode every other job in
+      # this file exists to catch.
       # DESTDIR only redirects where install(1) copies files; the rpath
       # recorded in the binary is still built from `prefix`, which names the
       # library's eventual home at /usr/local/lib -- correct for a real `brew

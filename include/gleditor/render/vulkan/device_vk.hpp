@@ -27,6 +27,14 @@
 #include <unordered_map>
 #include <vector>
 
+// VK_KHR_portability_subset is still marked provisional by Khronos, so its
+// extension name and structs are hidden behind this macro. MoltenVK on macOS
+// is the implementation that needs it; defining the macro unconditionally
+// only exposes the declarations; nothing here uses them unless the device
+// actually reports the extension at run time (see DeviceVK::createLogicalDevice).
+#ifndef VK_ENABLE_BETA_EXTENSIONS
+#define VK_ENABLE_BETA_EXTENSIONS
+#endif
 #include <vulkan/vulkan.h>
 
 #include <gleditor/render/device.hpp>
