@@ -51,9 +51,9 @@ std::string pieceHashesOf(const std::string_view stream,
                           const std::uint64_t pieceLength) {
   std::string pieces;
   for (std::uint64_t at = 0; at < stream.size(); at += pieceLength) {
-    const auto span = stream.substr(
-        at, static_cast<std::size_t>(
-                std::min<std::uint64_t>(pieceLength, stream.size() - at)));
+    const auto span =
+        stream.substr(at, static_cast<std::size_t>(std::min<std::uint64_t>(
+                              pieceLength, stream.size() - at)));
     const auto hash = sha1(span);
     pieces.append(reinterpret_cast<const char *>(hash.data()), hash.size());
   }
@@ -79,7 +79,8 @@ MadeTorrent makeTorrent(const std::string_view data, std::string name,
   }
 
   return fromInfo(bencode::Value::dict({
-      {"length", bencode::Value::integer(static_cast<std::int64_t>(data.size()))},
+      {"length",
+       bencode::Value::integer(static_cast<std::int64_t>(data.size()))},
       {"name", bencode::Value::string(std::move(name))},
       {"piece length",
        bencode::Value::integer(static_cast<std::int64_t>(pieceLength))},
@@ -104,7 +105,8 @@ MadeTorrent makeTorrent(const std::span<const TorrentContent> files,
         file.path.find_first_of("/\\") != std::string::npos) {
       throw std::invalid_argument(
           "makeTorrent: file names must be plain names within the torrent's "
-          "directory, got: " + file.path);
+          "directory, got: " +
+          file.path);
     }
     entries.push_back(bencode::Value::dict({
         {"length",
@@ -195,9 +197,8 @@ InfoHash InfoHash::fromHex(const std::string_view text) {
 }
 
 bool InfoHash::isZero() const {
-  return std::ranges::all_of(bytes, [](const std::uint8_t byte) {
-    return 0 == byte;
-  });
+  return std::ranges::all_of(bytes,
+                             [](const std::uint8_t byte) { return 0 == byte; });
 }
 
 Metainfo Metainfo::parse(const std::string_view torrentFile) {
@@ -247,8 +248,8 @@ Metainfo Metainfo::parse(const std::string_view torrentFile) {
     if (length < 0) {
       throw std::runtime_error("torrent: \"length\" is negative");
     }
-    meta.entries.push_back(TorrentFile{
-        meta.torrentName, static_cast<std::uint64_t>(length), 0});
+    meta.entries.push_back(
+        TorrentFile{meta.torrentName, static_cast<std::uint64_t>(length), 0});
     offset = static_cast<std::uint64_t>(length);
   } else {
     for (const auto &entry : require(info, "files", "info").asList()) {
@@ -272,7 +273,8 @@ Metainfo Metainfo::parse(const std::string_view torrentFile) {
   // The piece count has to account for the content, or a reference near the
   // end would name a piece that does not exist and could never be verified.
   const auto expected =
-      0 == offset ? 0 : ((offset + meta.bytesPerPiece - 1) / meta.bytesPerPiece);
+      0 == offset ? 0
+                  : ((offset + meta.bytesPerPiece - 1) / meta.bytesPerPiece);
   if (expected != meta.pieceHashes.size()) {
     throw std::runtime_error(
         "torrent: " + std::to_string(meta.pieceHashes.size()) +
@@ -318,7 +320,7 @@ Metainfo::piecesForRange(const std::uint64_t offset,
   if (0 == length) {
     return {0, 0};
   }
-  const auto last  = std::min(offset + length, totalLength());
+  const auto last = std::min(offset + length, totalLength());
   if (last <= offset) {
     return {0, 0};
   }
@@ -417,10 +419,10 @@ std::vector<std::uint32_t> parseSelectOnly(const std::string_view text) {
           selected.push_back(
               static_cast<std::uint32_t>(std::stoul(std::string{item})));
         } else {
-          const auto first =
-              static_cast<std::uint32_t>(std::stoul(std::string{item.substr(0, dash)}));
-          const auto last =
-              static_cast<std::uint32_t>(std::stoul(std::string{item.substr(dash + 1)}));
+          const auto first = static_cast<std::uint32_t>(
+              std::stoul(std::string{item.substr(0, dash)}));
+          const auto last = static_cast<std::uint32_t>(
+              std::stoul(std::string{item.substr(dash + 1)}));
           for (auto index = first; index <= last; index++) {
             selected.push_back(index);
           }
@@ -447,9 +449,9 @@ void forEachMagnetParameter(
 
   std::size_t at = 0;
   while (at <= query.size()) {
-    const auto amp   = std::min(query.find('&', at), query.size());
-    const auto field = query.substr(at, amp - at);
-    at               = amp + 1;
+    const auto amp    = std::min(query.find('&', at), query.size());
+    const auto field  = query.substr(at, amp - at);
+    at                = amp + 1;
     const auto equals = field.find('=');
     if (std::string_view::npos == equals) {
       continue;
@@ -479,9 +481,9 @@ MagnetLink MagnetLink::parse(const std::string_view uri) {
       constexpr std::string_view prefix = "urn:btih:";
       if (value.starts_with(prefix)) {
         const auto digits = std::string_view{value}.substr(prefix.size());
-        link.hash = 40 == digits.size() ? InfoHash::fromHex(digits)
-                                        : fromBase32(digits);
-        haveHash  = true;
+        link.hash         = 40 == digits.size() ? InfoHash::fromHex(digits)
+                                                : fromBase32(digits);
+        haveHash          = true;
       }
     } else if ("dn" == key) {
       link.displayName = value;

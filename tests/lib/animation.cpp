@@ -115,8 +115,8 @@ TEST(ToastFade, RampsMonotonicallyAtBothEnds) {
   float previous    = 0.0F;
   for (int i = 1; i <= 10; i++) {
     const float now = at(fade * i / 10.0);
-    EXPECT_GE(now, previous) << "the fade in never goes backwards, at step "
-                             << i;
+    EXPECT_GE(now, previous)
+        << "the fade in never goes backwards, at step " << i;
     previous = now;
   }
   EXPECT_FLOAT_EQ(1.0F, at(fade));
@@ -137,16 +137,17 @@ TEST(ToastFade, StaysInRangeForALifetimeShorterThanTwoFades) {
   // alpha a blend can use.
   const auto posted = Clock::now();
   const auto brief =
-      posted + std::chrono::duration_cast<Clock::duration>(
-                   std::chrono::duration<double>(gleditor::anim::toastFade / 4));
+      posted +
+      std::chrono::duration_cast<Clock::duration>(
+          std::chrono::duration<double>(gleditor::anim::toastFade / 4));
   for (int i = 0; i <= 8; i++) {
-    const auto when = posted + ((brief - posted) * i / 8);
+    const auto when   = posted + ((brief - posted) * i / 8);
     const float alpha = ToastOverlay::fadeFactor(posted, brief, when);
     EXPECT_GE(alpha, 0.0F);
     EXPECT_LE(alpha, 1.0F);
   }
-  EXPECT_FLOAT_EQ(0.0F, ToastOverlay::fadeFactor(posted, brief,
-                                                 brief + std::chrono::seconds(1)))
+  EXPECT_FLOAT_EQ(0.0F, ToastOverlay::fadeFactor(
+                            posted, brief, brief + std::chrono::seconds(1)))
       << "past its expiry a toast contributes nothing";
 }
 // vi: set sw=2 sts=2 ts=2 et:

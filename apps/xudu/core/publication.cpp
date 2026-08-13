@@ -71,7 +71,8 @@ bencode::Value encodeSpans(const std::vector<GlobalSpan> &spans) {
   return bencode::Value::list(std::move(out));
 }
 
-std::optional<std::vector<GlobalSpan>> decodeSpans(const bencode::Value &value) {
+std::optional<std::vector<GlobalSpan>>
+decodeSpans(const bencode::Value &value) {
   if (!value.isList()) {
     return std::nullopt;
   }
@@ -94,8 +95,8 @@ bencode::Value encodeSegment(const ScrollSegment &segment) {
       {"len",
        bencode::Value::integer(static_cast<std::int64_t>(segment.length))},
       {"path", bencode::Value::string(segment.path)},
-      {"stream",
-       bencode::Value::integer(static_cast<std::int64_t>(segment.streamOffset))},
+      {"stream", bencode::Value::integer(
+                     static_cast<std::int64_t>(segment.streamOffset))},
       {"torrent",
        bencode::Value::string(std::string{
            reinterpret_cast<const char *>(segment.torrent.bytes.data()),
@@ -216,7 +217,8 @@ bencode::Dict manifestOf(const Publication &pub, const bool withSignature) {
       {keySalt, bencode::Value::string(pub.salt)},
       {keyScrolls, bencode::Value::dict(std::move(scrolls))},
       {keySequence, bencode::Value::integer(pub.sequence)},
-      {keyTime, bencode::Value::integer(static_cast<std::int64_t>(pub.published))},
+      {keyTime,
+       bencode::Value::integer(static_cast<std::int64_t>(pub.published))},
       {keyTitle, bencode::Value::string(pub.title)},
       {keyVersion, bencode::Value::string(pub.version.str())},
   };
@@ -468,8 +470,9 @@ std::optional<GlobalSpan> globalise(const Store &store,
   return GlobalSpan{std::move(key), span.start, span.length};
 }
 
-std::optional<PrimediaSpan> localise(Store &store, const GlobalSpan &span,
-                                     const std::map<std::string, Scroll> &scrolls) {
+std::optional<PrimediaSpan>
+localise(Store &store, const GlobalSpan &span,
+         const std::map<std::string, Scroll> &scrolls) {
   // Already known here, under whatever id this store handed out. Found by the
   // name rather than by asking for the scroll again, so that a store which has
   // learned of a re-seal keeps the identity it already had.
@@ -552,7 +555,8 @@ Adopted adopt(Store &store, const Publication &pub) {
     // through a second publication that carries it, or through this one being
     // read twice -- and it is one link either way.
     const auto same = [&link](const auto &entry) {
-      return entry.second.type == link.type && entry.second.owner == link.owner &&
+      return entry.second.type == link.type &&
+             entry.second.owner == link.owner &&
              entry.second.left == link.left && entry.second.right == link.right;
     };
     if (std::ranges::any_of(store.links(), same)) {
@@ -579,7 +583,7 @@ Publication publish(const Store &store, const MicroversionId &version,
   pub.sequence  = sequence;
   pub.published = published;
 
-  const auto document = store.rebuild(version);
+  const auto document  = store.rebuild(version);
   const auto scrollFor = [&store, localSealedAs](const PrimediaSpan &span) {
     return span.isLocal() ? localSealedAs : store.scroll(span.scroll);
   };
@@ -607,9 +611,9 @@ Publication publish(const Store &store, const MicroversionId &version,
   for (const auto &piece : document.pieces()) {
     for (const auto *link : store.linksTouching(piece)) {
       GlobalLink out;
-      out.type  = link->type;
-      out.owner = link->owner;
-      bool addressable = true;
+      out.type               = link->type;
+      out.owner              = link->owner;
+      bool addressable       = true;
       const auto sayGlobally = [&](const std::vector<PrimediaSpan> &side,
                                    std::vector<GlobalSpan> &into) {
         for (const auto &span : side) {
@@ -679,7 +683,8 @@ std::vector<Library::Sighting> Library::showing(const GlobalSpan &span) const {
     for (const auto &piece : pub.pieces) {
       const auto shared = piece.intersect(span);
       if (!shared.empty()) {
-        const auto into = static_cast<std::uint32_t>(shared.start - piece.start);
+        const auto into =
+            static_cast<std::uint32_t>(shared.start - piece.start);
         out.push_back(Sighting{
             &pub, at + into,
             at + into + static_cast<std::uint32_t>(shared.length), shared});

@@ -4,9 +4,9 @@
 #include <algorithm>
 #include <atomic>
 #include <chrono>
+#include <functional>
 #include <glm/ext/vector_float3.hpp>
 #include <memory>
-#include <functional>
 #include <mutex>
 #include <optional>
 #include <string>
@@ -53,8 +53,8 @@ struct AppState {
     int y{};
     std::uint32_t from{}; ///< Select: document-global byte offsets.
     std::uint32_t to{};
-    std::string text; ///< Type: the UTF-8 to insert. Command: which command.
-    gleditor::Key key{};      ///< Press: which key.
+    std::string text;    ///< Type: the UTF-8 to insert. Command: which command.
+    gleditor::Key key{}; ///< Press: which key.
     gleditor::KeyMods mods{}; ///< Press: held with it.
   };
   /// The script, in command line order. Written before the render thread

@@ -37,10 +37,10 @@ stage=$outdir/gleditor
 echo "==> building gleditor $version for $MSYSTEM"
 make clean >/dev/null 2>&1 || true
 make -j"$(nproc)" \
-    GLEDITOR_SDL=3 \
-    GLEDITOR_ENABLE_VULKAN=1 \
-    GLEDITOR_VERSION="$version" \
-    lib gleditor xudu shaders
+  GLEDITOR_SDL=3 \
+  GLEDITOR_ENABLE_VULKAN=1 \
+  GLEDITOR_VERSION="$version" \
+  lib gleditor xudu shaders
 
 echo "==> staging into $stage"
 rm -rf "$stage"
@@ -110,5 +110,5 @@ fi
 echo "==> zipping"
 zipfile="$outdir/gleditor-$version-windows-${MSYSTEM,,}.zip"
 rm -f "$zipfile"
-( cd "$outdir" && zip -qr "$(basename "$zipfile")" gleditor )
+(cd "$outdir" && zip -qr "$(basename "$zipfile")" gleditor)
 echo "wrote $zipfile"

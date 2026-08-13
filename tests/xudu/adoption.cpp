@@ -68,7 +68,7 @@ struct Elsewhere {
   Scroll scroll;
   Publication pub;
 };
-Elsewhere published(const std::uint64_t from = 100,
+Elsewhere published(const std::uint64_t from   = 100,
                     const std::uint64_t length = 200) {
   Elsewhere out;
   out.keys   = xudu::createMutableKeys();
@@ -103,7 +103,8 @@ std::vector<const Version *> viewing(const std::vector<Version> &versions) {
 
 // Reading one in: the pieces become a version here, pointing at the same
 // content the publisher's own document points at rather than at a copy of it.
-TEST(AdoptionTest, aPublishedDocumentBecomesAVersionOnAMachineThatNeverWroteIt) {
+TEST(AdoptionTest,
+     aPublishedDocumentBecomesAVersionOnAMachineThatNeverWroteIt) {
   const auto theirs = published();
 
   Store mine;
@@ -202,7 +203,7 @@ TEST(AdoptionTest, aLinkBetweenTwoPublishedDocumentsCrossesToAThirdMachine) {
 
   Store mine;
   const auto reading = xudu::adopt(mine, theirs.pub).version;
-  auto notes         = mine.insert(MicroversionId{}, 0, "This passage is the crux.");
+  auto notes = mine.insert(MicroversionId{}, 0, "This passage is the crux.");
   Link link;
   link.type  = LinkType::Comment;
   link.owner = "me";
@@ -215,13 +216,14 @@ TEST(AdoptionTest, aLinkBetweenTwoPublishedDocumentsCrossesToAThirdMachine) {
   // see provenance.cpp for what that record is and why it comes first.
   const auto sealed =
       xudu::sealLocalSpool(mine, myKeys, "notes", "", signedBy("me"));
-  const auto myPub  = xudu::publish(mine, notes, myKeys, "notes", "My Notes", 1,
-                                    1700000200, &sealed.scroll);
+  const auto myPub = xudu::publish(mine, notes, myKeys, "notes", "My Notes", 1,
+                                   1700000200, &sealed.scroll);
 
   // Both ends said globally, and the far one is their scroll rather than
   // anything of mine -- the link points where it always pointed.
   ASSERT_EQ(myPub.links.size(), 1U);
-  const auto theirKey = xudu::scrollKeyFor(theirs.keys.publicKey, "permascroll");
+  const auto theirKey =
+      xudu::scrollKeyFor(theirs.keys.publicKey, "permascroll");
   ASSERT_EQ(myPub.links[0].right.size(), 1U);
   EXPECT_EQ(myPub.links[0].right[0].scroll, theirKey);
   EXPECT_EQ(myPub.links[0].right[0].start, 120U)
@@ -263,7 +265,7 @@ TEST(AdoptionTest, readingTheSamePublicationTwiceDoesNotDoubleItsLinks) {
   link.owner = "them";
   link.left.push_back(xudu::PrimediaSpan{scrollId, 0, 40});
   link.right.push_back(xudu::PrimediaSpan{scrollId, 200, 40});
-  version = theirs.addLink(version, link);
+  version        = theirs.addLink(version, link);
   const auto pub = xudu::publish(theirs, version, keys, "essay", "Their Essay",
                                  1, 1700000000);
   ASSERT_EQ(pub.links.size(), 1U);
@@ -309,8 +311,8 @@ TEST(AdoptionTest, aPublicationThatDoesNotSayWhereItsContentIsIsRefused) {
 
   pub.scrolls.clear();
   // Signed again over what it now says, so this is not the forgery case.
-  pub.signature = xudu::signMutableItem(xudu::publicationSigningBuffer(pub),
-                                        keys);
+  pub.signature =
+      xudu::signMutableItem(xudu::publicationSigningBuffer(pub), keys);
   ASSERT_TRUE(xudu::verifyPublication(pub));
 
   Store mine;

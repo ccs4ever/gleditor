@@ -55,7 +55,8 @@ public:
 
   /// The torrent's metadata, or nullptr when this source has never heard of
   /// it. Without it nothing can be verified, so nothing is returned.
-  [[nodiscard]] virtual const Metainfo *metainfo(const InfoHash &hash) const = 0;
+  [[nodiscard]] virtual const Metainfo *
+  metainfo(const InfoHash &hash) const = 0;
 
   /**
    * @brief Read [@p offset, @p offset + @p length) of the concatenated stream.

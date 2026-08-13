@@ -27,9 +27,9 @@ std::size_t Version::splitAt(const std::uint32_t offset) {
     if (offset < after) {
       // The offset falls inside this piece: cut it in two so that a boundary
       // exists where the caller wants to work.
-      const auto into  = static_cast<std::uint64_t>(offset) - seen;
-      const auto tail  = runs[i].slice(into, runs[i].length - into);
-      runs[i]          = runs[i].slice(0, into);
+      const auto into = static_cast<std::uint64_t>(offset) - seen;
+      const auto tail = runs[i].slice(into, runs[i].length - into);
+      runs[i]         = runs[i].slice(0, into);
       runs.insert(runs.begin() + static_cast<std::ptrdiff_t>(i) + 1, tail);
       return i + 1;
     }
@@ -50,7 +50,8 @@ namespace {
 /// difference: every question asked of a version -- what it says, which
 /// addresses it holds, where a quotation of it appears -- is answered from
 /// addresses, and the addresses are the same either way.
-[[nodiscard]] bool joins(const PrimediaSpan &first, const PrimediaSpan &second) {
+[[nodiscard]] bool joins(const PrimediaSpan &first,
+                         const PrimediaSpan &second) {
   return first.scroll == second.scroll && first.end() == second.start;
 }
 
@@ -203,7 +204,8 @@ std::string Version::materialize(const SpanReader &reader) const {
   return out;
 }
 
-std::optional<std::uint64_t> Version::addressAt(const std::uint32_t offset) const {
+std::optional<std::uint64_t>
+Version::addressAt(const std::uint32_t offset) const {
   std::uint64_t seen = 0;
   for (const auto &run : runs) {
     const auto after = seen + run.length;
@@ -227,8 +229,9 @@ std::vector<Extent> Version::occurrencesOf(const PrimediaSpan &span) const {
       // Where the shared part sits within this piece, carried back out into
       // the version's own coordinates.
       const auto into = static_cast<std::uint32_t>(shared.start - run.start);
-      found.push_back(Extent{seen + into,
-                             seen + into + static_cast<std::uint32_t>(shared.length)});
+      found.push_back(
+          Extent{seen + into,
+                 seen + into + static_cast<std::uint32_t>(shared.length)});
     }
     seen += static_cast<std::uint32_t>(run.length);
   }

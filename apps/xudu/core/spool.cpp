@@ -22,17 +22,17 @@ std::string PrimediaSpool::read(const PrimediaSpan &span) const {
   // which is the failure content addressing exists to prevent. The store is
   // the reader that knows about every scroll.
   if (!span.isLocal()) {
-    throw std::runtime_error(
-        "primedia spool: asked for a span into scroll " +
-        std::to_string(span.scroll) + ", which is not the local spool");
+    throw std::runtime_error("primedia spool: asked for a span into scroll " +
+                             std::to_string(span.scroll) +
+                             ", which is not the local spool");
   }
   // Clamped rather than checked, because a span can outlive the run that
   // produced it only by being read from a store written by an older version --
   // and returning what is there beats refusing to open the document.
-  const auto from =
-      std::min<std::size_t>(static_cast<std::size_t>(span.start), contents.size());
-  const auto to = std::min<std::size_t>(static_cast<std::size_t>(span.end()),
-                                        contents.size());
+  const auto from = std::min<std::size_t>(static_cast<std::size_t>(span.start),
+                                          contents.size());
+  const auto to   = std::min<std::size_t>(static_cast<std::size_t>(span.end()),
+                                          contents.size());
   return contents.substr(from, to - from);
 }
 

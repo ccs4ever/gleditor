@@ -24,7 +24,7 @@ int main(const int argc, const char *const *const argv) {
   }
 
   try {
-    const auto backend = render::backendFromName(argv[1]);
+    const auto backend          = render::backendFromName(argv[1]);
     const std::string stageName = argv[2];
     if ("vert" != stageName && "frag" != stageName) {
       std::cerr << "stage must be vert or frag\n";

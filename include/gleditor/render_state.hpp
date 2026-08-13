@@ -33,8 +33,8 @@ struct RenderState {
   explicit RenderState(render::RenderDevice *aDevice)
       : device(aDevice), glyphCache(aDevice) {}
 
-  render::RenderDevice *device;          ///< Active graphics device.
-  GlyphCache glyphCache;                 ///< Shared glyph atlas.
+  render::RenderDevice *device;           ///< Active graphics device.
+  GlyphCache glyphCache;                  ///< Shared glyph atlas.
   render::PipelineHandle glyphPipeline{}; ///< Pipeline all documents draw with.
   std::vector<std::shared_ptr<Doc>> docs; ///< Open documents.
   /**

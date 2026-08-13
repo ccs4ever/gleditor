@@ -124,16 +124,15 @@ void Canvas::setIdentity(const std::uint32_t docIndex,
 void Canvas::pushQuad(const float centreX, const float centreY,
                       const float width, const float height,
                       const std::uint32_t foreground,
-                      const std::uint32_t background,
-                      const std::uint32_t layer, const float texX,
-                      const float texY, const bool solid) {
+                      const std::uint32_t background, const std::uint32_t layer,
+                      const float texX, const float texY, const bool solid) {
   // The width and height fields the vertex stage unpacks are 12 bits each, so
   // a quad larger than this cannot be described. Clamping rather than asserting
   // because the sizes come from whatever a caller is drawing, and a panel too
   // big is a visual mistake where a failed assertion is a crash.
   const auto clamp = [](const float value) {
-    return static_cast<unsigned int>(
-        std::clamp(value, 0.0F, static_cast<float>(Doc::VBORow::maxQuadExtent)));
+    return static_cast<unsigned int>(std::clamp(
+        value, 0.0F, static_cast<float>(Doc::VBORow::maxQuadExtent)));
   };
 
   const Doc::VBORow row{
@@ -164,8 +163,8 @@ void Canvas::addRect(const float left, const float bottom, const float width,
 void Canvas::addLine(const float fromX, const float fromY, const float toX,
                      const float toY, const float thickness,
                      const std::uint32_t colour) {
-  const auto minX = std::min(fromX, toX);
-  const auto minY = std::min(fromY, toY);
+  const auto minX  = std::min(fromX, toX);
+  const auto minY  = std::min(fromY, toY);
   const auto spanX = std::abs(toX - fromX);
   const auto spanY = std::abs(toY - fromY);
   // A segment with no extent in one axis is exactly a thin rectangle; one with
@@ -178,8 +177,8 @@ void Canvas::addLine(const float fromX, const float fromY, const float toX,
 TextMetrics Canvas::measureText(const std::string_view utf8) const {
   Glib::RefPtr<Pango::Context> ctx;
   const auto layout = makeLayout(fontName, utf8, textWidthLimit, ctx);
-  int width  = 0;
-  int height = 0;
+  int width         = 0;
+  int height        = 0;
   layout->get_pixel_size(width, height);
   return {static_cast<float>(width), static_cast<float>(height)};
 }
@@ -231,9 +230,8 @@ TextMetrics Canvas::addText(RenderState &state, const float left,
 
   for (std::size_t i = 0; i < clusters.size(); i++) {
     const auto &cluster = clusters[i];
-    const int end       = i + 1 < clusters.size()
-                              ? clusters[i + 1].start
-                              : static_cast<int>(raw.size());
+    const int end       = i + 1 < clusters.size() ? clusters[i + 1].start
+                                                  : static_cast<int>(raw.size());
     if (end <= cluster.start || cluster.start >= static_cast<int>(raw.size())) {
       continue;
     }
@@ -263,8 +261,9 @@ TextMetrics Canvas::addText(RenderState &state, const float left,
         top - static_cast<float>(toPixels(cluster.logical.get_y()));
 
     pushQuad(glyphLeft + (width / 2.0F), glyphTop - (height / 2.0F), width,
-             height, colour, background, static_cast<std::uint32_t>(glyph.layer),
-             glyph.texCoords.topLeft.x, glyph.texCoords.topLeft.y, false);
+             height, colour, background,
+             static_cast<std::uint32_t>(glyph.layer), glyph.texCoords.topLeft.x,
+             glyph.texCoords.topLeft.y, false);
   }
 
   return {static_cast<float>(textWidth), static_cast<float>(textHeight)};

@@ -58,27 +58,39 @@ SELECT_SPAN="20,34"
 TOAST_ONE="error:GL_INVALID_ENUM in glEnable(0xdead)"
 TOAST_TWO="warning:overlay parity check"
 
-
 for backend in $backends; do
   echo "rendering with $backend"
   "$BIN" --backend "$backend" --profile $STRICT \
-         --screenshot "$OUT/$backend.ppm" "$SAMPLE" >"$OUT/$backend.log" 2>&1 ||
-    { echo "FAIL: $backend exited non-zero"; tail -20 "$OUT/$backend.log"; exit 1; }
+    --screenshot "$OUT/$backend.ppm" "$SAMPLE" >"$OUT/$backend.log" 2>&1 ||
+    {
+      echo "FAIL: $backend exited non-zero"
+      tail -20 "$OUT/$backend.log"
+      exit 1
+    }
   [ -s "$OUT/$backend.ppm" ] ||
-    { echo "FAIL: $backend produced no screenshot"; exit 1; }
+    {
+      echo "FAIL: $backend produced no screenshot"
+      exit 1
+    }
 
   # The same document again, with notifications showing over it and the caret
   # placed by a click. Both are drawn through pipelines that do not depth test
   # and in coordinate spaces the plain document frame never exercises.
   "$BIN" --backend "$backend" --profile $STRICT \
-      --toast "$TOAST_ONE" --toast "$TOAST_TWO" --click "$CARET_CLICK" \
-      --select "$SELECT_SPAN" \
-      --screenshot "$OUT/$backend.toast.ppm" "$SAMPLE" \
-      >"$OUT/$backend.toastlog" 2>&1 ||
-    { echo "FAIL: $backend overlay run exited non-zero"
-      tail -20 "$OUT/$backend.toastlog"; exit 1; }
+    --toast "$TOAST_ONE" --toast "$TOAST_TWO" --click "$CARET_CLICK" \
+    --select "$SELECT_SPAN" \
+    --screenshot "$OUT/$backend.toast.ppm" "$SAMPLE" \
+    >"$OUT/$backend.toastlog" 2>&1 ||
+    {
+      echo "FAIL: $backend overlay run exited non-zero"
+      tail -20 "$OUT/$backend.toastlog"
+      exit 1
+    }
   [ -s "$OUT/$backend.toast.ppm" ] ||
-    { echo "FAIL: $backend produced no overlay screenshot"; exit 1; }
+    {
+      echo "FAIL: $backend produced no overlay screenshot"
+      exit 1
+    }
 
   # All the pick pixels are answered by one run: --pick is repeatable, and
   # re-rendering a large document once per pixel would dominate the runtime.
@@ -88,15 +100,21 @@ for backend in $backends; do
   done
   # shellcheck disable=SC2086
   "$BIN" --backend "$backend" --profile $STRICT $pickArgs "$SAMPLE" \
-      >"$OUT/$backend.picklog" 2>&1 ||
-    { echo "FAIL: $backend picking run exited non-zero"
-      tail -20 "$OUT/$backend.picklog"; exit 1; }
+    >"$OUT/$backend.picklog" 2>&1 ||
+    {
+      echo "FAIL: $backend picking run exited non-zero"
+      tail -20 "$OUT/$backend.picklog"
+      exit 1
+    }
   sed -n 's/^pick //p' "$OUT/$backend.picklog" >"$OUT/$backend.picks"
 
   expected=$(echo "$PICK_PIXELS" | wc -w)
   actual=$(wc -l <"$OUT/$backend.picks")
   [ "$expected" -eq "$actual" ] ||
-    { echo "FAIL: $backend answered $actual of $expected picking queries"; exit 1; }
+    {
+      echo "FAIL: $backend answered $actual of $expected picking queries"
+      exit 1
+    }
 done
 
 # Picking reads a different attachment through a different path than the colour
@@ -212,10 +230,13 @@ echo "all backends agree"
 echo "comparing culled frames against unculled ones"
 for backend in $backends; do
   "$BIN" --backend "$backend" --profile $STRICT --no-cull \
-      --screenshot "$OUT/$backend.nocull.ppm" "$SAMPLE" \
-      >"$OUT/$backend.nocull.log" 2>&1 ||
-    { echo "FAIL: $backend unculled run exited non-zero"
-      tail -20 "$OUT/$backend.nocull.log"; exit 1; }
+    --screenshot "$OUT/$backend.nocull.ppm" "$SAMPLE" \
+    >"$OUT/$backend.nocull.log" 2>&1 ||
+    {
+      echo "FAIL: $backend unculled run exited non-zero"
+      tail -20 "$OUT/$backend.nocull.log"
+      exit 1
+    }
   if cmp -s "$OUT/$backend.ppm" "$OUT/$backend.nocull.ppm"; then
     echo "ok: $backend culling changed no pixels"
   else
@@ -256,10 +277,13 @@ done
 echo "comparing a grown atlas against one that never grew"
 for backend in $backends; do
   GLEDITOR_ATLAS_SIZE=64 "$BIN" --backend "$backend" --profile $STRICT \
-      --screenshot "$OUT/$backend.grown.ppm" "$SAMPLE" \
-      >"$OUT/$backend.grown.log" 2>&1 ||
-    { echo "FAIL: $backend run with a small atlas exited non-zero"
-      tail -20 "$OUT/$backend.grown.log"; exit 1; }
+    --screenshot "$OUT/$backend.grown.ppm" "$SAMPLE" \
+    >"$OUT/$backend.grown.log" 2>&1 ||
+    {
+      echo "FAIL: $backend run with a small atlas exited non-zero"
+      tail -20 "$OUT/$backend.grown.log"
+      exit 1
+    }
   growths=$(grep -c -- '->' "$OUT/$backend.grown.log" || true)
   if [ "$growths" -lt 1 ]; then
     echo "FAIL: $backend atlas never grew, so nothing was compared"
@@ -320,10 +344,13 @@ COARSE_FOV=15
 echo "comparing the coarse text path against the detailed one"
 for detail in 0 999; do
   "$BIN" --backend opengl --profile $STRICT --fov "$COARSE_FOV" \
-      --coarse-below "$detail" --screenshot "$OUT/coarse$detail.ppm" "$SAMPLE" \
-      >"$OUT/coarse$detail.log" 2>&1 ||
-    { echo "FAIL: coarse-below $detail run exited non-zero"
-      tail -20 "$OUT/coarse$detail.log"; exit 1; }
+    --coarse-below "$detail" --screenshot "$OUT/coarse$detail.ppm" "$SAMPLE" \
+    >"$OUT/coarse$detail.log" 2>&1 ||
+    {
+      echo "FAIL: coarse-below $detail run exited non-zero"
+      tail -20 "$OUT/coarse$detail.log"
+      exit 1
+    }
 done
 
 OUT="$OUT" python3 - <<'PYEOF'
@@ -372,10 +399,13 @@ echo "checking that minified text does not crawl"
 for backend in $backends; do
   for zoom in 15 15.05; do
     "$BIN" --backend "$backend" --profile $STRICT --fov "$zoom" \
-        --coarse-below 0 --screenshot "$OUT/$backend.zoom$zoom.ppm" "$SAMPLE" \
-        >"$OUT/$backend.zoom$zoom.log" 2>&1 ||
-      { echo "FAIL: $backend zoom run exited non-zero"
-        tail -20 "$OUT/$backend.zoom$zoom.log"; exit 1; }
+      --coarse-below 0 --screenshot "$OUT/$backend.zoom$zoom.ppm" "$SAMPLE" \
+      >"$OUT/$backend.zoom$zoom.log" 2>&1 ||
+      {
+        echo "FAIL: $backend zoom run exited non-zero"
+        tail -20 "$OUT/$backend.zoom$zoom.log"
+        exit 1
+      }
   done
 done
 
@@ -414,10 +444,13 @@ if echo "$backends" | grep -q vulkan; then
   echo "comparing threaded against single-threaded recording"
   for threads in 4 1; do
     GLEDITOR_RECORD_THREADS="$threads" "$BIN" --backend vulkan --profile \
-        $STRICT --screenshot "$OUT/vk.threads$threads.ppm" "$SAMPLE" \
-        >"$OUT/vk.threads$threads.log" 2>&1 ||
-      { echo "FAIL: vulkan run with $threads recording thread(s) exited non-zero"
-        tail -20 "$OUT/vk.threads$threads.log"; exit 1; }
+      $STRICT --screenshot "$OUT/vk.threads$threads.ppm" "$SAMPLE" \
+      >"$OUT/vk.threads$threads.log" 2>&1 ||
+      {
+        echo "FAIL: vulkan run with $threads recording thread(s) exited non-zero"
+        tail -20 "$OUT/vk.threads$threads.log"
+        exit 1
+      }
   done
 
   if ! cmp -s "$OUT/vk.threads4.ppm" "$OUT/vk.threads1.ppm"; then

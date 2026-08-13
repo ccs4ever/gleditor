@@ -21,26 +21,26 @@ namespace {
 
 /// Pixel geometry of the panel. One place, so nothing drifts out of line with
 /// anything else.
-constexpr float panelWidth   = 620.0F;
-constexpr float padding      = 18.0F;
-constexpr float rowHeight    = 30.0F;
-constexpr float labelWidth   = 150.0F;
-constexpr float boxHeight    = 24.0F;
-constexpr float lineGap      = 8.0F;
-constexpr float caretWidth   = 2.0F;
+constexpr float panelWidth = 620.0F;
+constexpr float padding    = 18.0F;
+constexpr float rowHeight  = 30.0F;
+constexpr float labelWidth = 150.0F;
+constexpr float boxHeight  = 24.0F;
+constexpr float lineGap    = 8.0F;
+constexpr float caretWidth = 2.0F;
 
 /// Colours. A panel over the documents has to be plainly in front of them
 /// rather than blended into them, so it is opaque and dark and the sheet
 /// behind it dims everything else.
-constexpr auto dimming    = 0x00000090U;
-constexpr auto panelInk   = 0xE8EAF0FFU;
-constexpr auto panelBack  = 0x22252EFFU;
-constexpr auto boxBack    = 0x171A21FFU;
-constexpr auto boxFocused = 0x2C3446FFU;
-constexpr auto hintInk    = 0x7C8494FFU;
-constexpr auto titleInk   = 0xFFFFFFFFU;
+constexpr auto dimming     = 0x00000090U;
+constexpr auto panelInk    = 0xE8EAF0FFU;
+constexpr auto panelBack   = 0x22252EFFU;
+constexpr auto boxBack     = 0x171A21FFU;
+constexpr auto boxFocused  = 0x2C3446FFU;
+constexpr auto hintInk     = 0x7C8494FFU;
+constexpr auto titleInk    = 0xFFFFFFFFU;
 constexpr auto requiredInk = 0xFFC46BFFU;
-constexpr auto troubleInk = 0xFF9A8CFFU;
+constexpr auto troubleInk  = 0xFF9A8CFFU;
 
 /// A colour as the canvas wants it, given RGBA8.
 std::uint32_t ink(const std::uint32_t rgba) { return rgba; }
@@ -49,9 +49,10 @@ std::uint32_t ink(const std::uint32_t rgba) { return rgba; }
 /// asterisk for. Bytes would show three for every accented letter, which says
 /// something about the passphrase that is nobody's business.
 std::size_t charactersIn(const std::string_view text) {
-  return static_cast<std::size_t>(std::ranges::count_if(text, [](const char chr) {
-    return 0x80 != (static_cast<unsigned char>(chr) & 0xC0);
-  }));
+  return static_cast<std::size_t>(
+      std::ranges::count_if(text, [](const char chr) {
+        return 0x80 != (static_cast<unsigned char>(chr) & 0xC0);
+      }));
 }
 
 } // namespace
@@ -406,15 +407,14 @@ void Form::moveCaret(const int by) {
   const auto &value = fields[focus].value;
   if (by < 0) {
     caret = caret == 0 ? 0
-                       : alignToCharacterStart(value,
-                                               static_cast<std::uint32_t>(
-                                                   caret - 1));
+                       : alignToCharacterStart(
+                             value, static_cast<std::uint32_t>(caret - 1));
     return;
   }
-  caret = caret >= value.size()
-              ? value.size()
-              : alignToCharacterEnd(value,
-                                    static_cast<std::uint32_t>(caret + 1));
+  caret =
+      caret >= value.size()
+          ? value.size()
+          : alignToCharacterEnd(value, static_cast<std::uint32_t>(caret + 1));
 }
 
 bool Form::keyPressed(const Key key, const KeyMods mods) {
@@ -503,9 +503,9 @@ bool Form::keyPressed(const Key key, const KeyMods mods) {
         // Through the options without opening the list, for somebody who knows
         // what is in it.
         const auto count = here.options.size();
-        here.chosen = Key::Left == key ? (0 == here.chosen ? count - 1
-                                                           : here.chosen - 1)
-                                       : (here.chosen + 1) % count;
+        here.chosen      = Key::Left == key
+                               ? (0 == here.chosen ? count - 1 : here.chosen - 1)
+                               : (here.chosen + 1) % count;
         return true;
       }
       if (Kind::Toggle == here.kind) {
@@ -529,8 +529,8 @@ bool Form::keyPressed(const Key key, const KeyMods mods) {
       }
       // A whole character, not a byte: half of a UTF-8 sequence is not a
       // shorter string, it is a broken one.
-      const auto from =
-          alignToCharacterStart(value.value, static_cast<std::uint32_t>(caret - 1));
+      const auto from = alignToCharacterStart(
+          value.value, static_cast<std::uint32_t>(caret - 1));
       value.value.erase(from, caret - from);
       caret = from;
       trouble.clear();
@@ -598,12 +598,12 @@ void Form::drawFrame(FrameContext &ctx) {
   std::string heading;
   std::string subheading;
   std::vector<Field> shown;
-  std::size_t where     = 0;
-  std::size_t at        = 0;
-  std::uint64_t seen    = 0;
-  bool listDown         = false;
-  std::size_t lit       = 0;
-  bool reveal           = false;
+  std::size_t where  = 0;
+  std::size_t at     = 0;
+  std::uint64_t seen = 0;
+  bool listDown      = false;
+  std::size_t lit    = 0;
+  bool reveal        = false;
   {
     const std::lock_guard locker(guard);
     if (!open_) {
@@ -642,10 +642,9 @@ void Form::drawFrame(FrameContext &ctx) {
     // An open drop-down grows the panel rather than covering the rows under
     // it: a list that obscures the fields it is part of is a list somebody has
     // to close before they can see what they were filling in.
-    const auto listRows =
-        listDown && where < shown.size()
-            ? static_cast<float>(shown[where].options.size())
-            : 0.0F;
+    const auto listRows    = listDown && where < shown.size()
+                                 ? static_cast<float>(shown[where].options.size())
+                                 : 0.0F;
     const auto panelHeight = (2 * padding) + (rowHeight * 2) +
                              ((rows + listRows) * rowHeight) + rowHeight;
     const auto left   = std::max(0.0F, (width - panelWidth) / 2.0F);
@@ -688,11 +687,11 @@ void Form::drawFrame(FrameContext &ctx) {
       auto shownValue = held.empty() ? one.hint : held;
       auto valueInk   = held.empty() ? hintInk : panelInk;
       if (Kind::Choice == one.kind) {
-        shownValue = one.options.empty()
-                         ? one.hint
-                         : one.options[std::min(one.chosen,
-                                                one.options.size() - 1)];
-        valueInk   = one.options.empty() ? hintInk : panelInk;
+        shownValue =
+            one.options.empty()
+                ? one.hint
+                : one.options[std::min(one.chosen, one.options.size() - 1)];
+        valueInk = one.options.empty() ? hintInk : panelInk;
         // The mark every drop-down has, so it reads as one thing to open
         // rather than as text somebody forgot to make editable.
         shownValue += listDown && focused ? "   \u25B4" : "   \u25BE";
@@ -727,11 +726,12 @@ void Form::drawFrame(FrameContext &ctx) {
         // would be in the wrong place in anything but a monospaced font. What
         // is measured is what is shown, so the caret in a masked field sits
         // among the asterisks.
-        const auto upTo = Kind::Secret == one.kind && !reveal
-                              ? std::string(charactersIn(one.value.substr(
-                                                0, std::min(at, one.value.size()))),
-                                            '*')
-                              : one.value.substr(0, std::min(at, one.value.size()));
+        const auto upTo =
+            Kind::Secret == one.kind && !reveal
+                ? std::string(charactersIn(one.value.substr(
+                                  0, std::min(at, one.value.size()))),
+                              '*')
+                : one.value.substr(0, std::min(at, one.value.size()));
         const auto before = canvas->measureText(upTo);
         canvas->addRect(textLeft + before.width, top - boxHeight + lineGap,
                         caretWidth, boxHeight, ink(panelInk));

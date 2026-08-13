@@ -129,7 +129,8 @@ TEST_F(BufferPoolTest, growthOvershootsByHalfRatherThanByDouble) {
   const auto used = pool.rowsInUse();
   EXPECT_GE(pool.capacityRows(), used);
   EXPECT_LT(pool.capacityRows(), used * 3 / 2)
-      << "capacity " << pool.capacityRows() << " for " << used << " rows in use";
+      << "capacity " << pool.capacityRows() << " for " << used
+      << " rows in use";
 }
 
 // The pool used to grow because a request was a few rows short of the free run
@@ -242,8 +243,9 @@ TEST_F(BufferPoolTest, erasureIsRelativeToTheAllocation) {
 
   // Row 2 of the second allocation, wherever the pool put it -- not row 2 of
   // the buffer, and not row 2 of the first allocation.
-  EXPECT_CALL(*device, updateBuffer(render::BufferHandle{1},
-                                    pool.byteOffset(second) + (2U * kStride), _))
+  EXPECT_CALL(*device,
+              updateBuffer(render::BufferHandle{1},
+                           pool.byteOffset(second) + (2U * kStride), _))
       .Times(1);
   pool.eraseRows(second, 2, 4);
 }
@@ -284,7 +286,7 @@ TEST_F(BufferPoolTest, adjacentErasuresMergeIntoOneRun) {
   const auto alloc = pool.reserve(20);
 
   pool.eraseRows(alloc, 8, 2);
-  pool.eraseRows(alloc, 4, 4); // ends where the first begins
+  pool.eraseRows(alloc, 4, 4);  // ends where the first begins
   pool.eraseRows(alloc, 10, 2); // begins where the first ends
   EXPECT_EQ(pool.erasedRows(alloc), 8U);
 
@@ -354,7 +356,8 @@ TEST_F(BufferPoolTest, growingWithinTheRoomMovesNothing) {
   EXPECT_CALL(*device, copyBufferRange(_, _, _, _)).Times(0);
   pool.resize(alloc, pool.roomFor(alloc));
 
-  EXPECT_EQ(pool.byteOffset(alloc), where) << "it moved when it did not have to";
+  EXPECT_EQ(pool.byteOffset(alloc), where)
+      << "it moved when it did not have to";
   EXPECT_EQ(pool.rowCount(alloc), pool.roomFor(alloc));
   EXPECT_EQ(pool.moves(), 0U);
 }
@@ -391,7 +394,7 @@ TEST_F(BufferPoolTest, outgrowingTheRoomMovesTheRowsAndTheHandleStillWorks) {
 
 TEST_F(BufferPoolTest, theRoomAMovedAllocationLeavesIsReusable) {
   BufferPool pool(device.get(), kStride, 1000);
-  const auto alloc = pool.reserve(100);
+  const auto alloc   = pool.reserve(100);
   const auto vacated = pool.byteOffset(alloc);
   const auto room    = pool.roomFor(alloc);
   pool.resize(alloc, 400);
@@ -406,7 +409,7 @@ TEST_F(BufferPoolTest, theRoomAMovedAllocationLeavesIsReusable) {
 // which would be a copy onto itself.
 TEST_F(BufferPoolTest, aMoveDoesNotLandOnTopOfWhatItIsLeaving) {
   BufferPool pool(device.get(), kStride, 128);
-  const auto only = pool.reserve(100);
+  const auto only  = pool.reserve(100);
   const auto wasAt = pool.byteOffset(only);
 
   ON_CALL(*device, copyBufferRange)
@@ -459,7 +462,8 @@ TEST_F(BufferPoolTest, aReleasedAllocationIsNoLongerAddressable) {
 
   // Handles are never reissued, so using one after releasing it is caught
   // rather than quietly addressing somebody else's rows.
-  EXPECT_THROW(static_cast<void>(pool.byteOffset(alloc)), std::invalid_argument);
+  EXPECT_THROW(static_cast<void>(pool.byteOffset(alloc)),
+               std::invalid_argument);
   EXPECT_THROW(pool.resize(alloc, 20), std::invalid_argument);
   EXPECT_NE(pool.reserve(10), alloc);
   // Releasing twice is not an error, though: it is what a holder does when it

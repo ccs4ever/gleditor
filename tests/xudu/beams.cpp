@@ -20,22 +20,23 @@
 
 namespace {
 
-using xudu::Link;
 using xudu::HalfLink;
+using xudu::Link;
 using xudu::LinkedPair;
 using xudu::LinkType;
 using xudu::MicroversionId;
 using xudu::Store;
 using xudu::Version;
 
-constexpr const char *sentence = "alpha beta gamma delta";
-constexpr std::uint32_t alphaAt = 0;
+constexpr const char *sentence   = "alpha beta gamma delta";
+constexpr std::uint32_t alphaAt  = 0;
 constexpr std::uint32_t alphaLen = 5;
-constexpr std::uint32_t gammaAt = 11;
+constexpr std::uint32_t gammaAt  = 11;
 constexpr std::uint32_t gammaLen = 5;
 
 /// A document with a link from "alpha" to "gamma", and the state it produced.
-MicroversionId linkedSentence(Store &store, const LinkType type = LinkType::Comment) {
+MicroversionId linkedSentence(Store &store,
+                              const LinkType type = LinkType::Comment) {
   const auto typed = store.insert(MicroversionId{}, 0, sentence);
   const auto text  = store.rebuild(typed);
   Link link;
@@ -156,7 +157,8 @@ TEST(LinkLayout, anEndQuotedTwiceIntoOneDocumentIsStillOneBeam) {
   const auto linked = linkedSentence(store);
   const auto once =
       store.transclude(MicroversionId{}, 0, linked, gammaAt, gammaLen);
-  const auto twice = store.transclude(once, gammaLen, linked, gammaAt, gammaLen);
+  const auto twice =
+      store.transclude(once, gammaLen, linked, gammaAt, gammaLen);
 
   const std::vector<Version> versions{store.rebuild(linked),
                                       store.rebuild(twice)};

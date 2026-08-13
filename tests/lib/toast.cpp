@@ -36,8 +36,8 @@ protected:
     // into a zero-sized one.
     ON_CALL(*device, textureLimits())
         .WillByDefault(Return(render::TextureLimits{2048, 10}));
-    ON_CALL(*device, createTextureArray(testing::_, testing::_, testing::_,
-                                        testing::_))
+    ON_CALL(*device,
+            createTextureArray(testing::_, testing::_, testing::_, testing::_))
         .WillByDefault(Return(render::TextureHandle{1}));
     ON_CALL(*device, createBuffer(testing::_, testing::_))
         .WillByDefault(Return(render::BufferHandle{1}));

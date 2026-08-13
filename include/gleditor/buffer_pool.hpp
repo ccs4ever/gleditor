@@ -53,7 +53,8 @@ public:
   };
 
   /**
-   * @param aDevice Device the buffer lives on. Not owned; must outlive the pool.
+   * @param aDevice Device the buffer lives on. Not owned; must outlive the
+   * pool.
    * @param aRowStride Size of one row in bytes.
    * @param initialRows Rows to allocate up front.
    */

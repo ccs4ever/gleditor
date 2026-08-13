@@ -41,7 +41,7 @@ namespace xudu {
  * scroll.hpp. An id is local to one store, and the table is what turns it back
  * into something globally meaningful.
  */
-using ScrollId = std::uint32_t;
+using ScrollId                        = std::uint32_t;
 inline constexpr ScrollId localScroll = 0;
 
 /**

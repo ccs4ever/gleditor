@@ -53,7 +53,8 @@ TEST(WorkerPool, aPoolOfOneRunsOnTheCallingThread) {
   EXPECT_EQ(1U, pool.parallelism());
 
   std::set<std::thread::id> seen;
-  pool.run(16, [&seen](std::uint32_t) { seen.insert(std::this_thread::get_id()); });
+  pool.run(16,
+           [&seen](std::uint32_t) { seen.insert(std::this_thread::get_id()); });
   ASSERT_EQ(1U, seen.size());
   EXPECT_EQ(std::this_thread::get_id(), *seen.begin());
 }
@@ -129,9 +130,10 @@ TEST(WorkerPool, everyShareFinishesBeforeAThrowPropagates) {
 // A pool is reused for every frame, so a batch that threw must leave it usable.
 TEST(WorkerPool, survivesAFailedBatch) {
   render::WorkerPool pool(4);
-  EXPECT_THROW(pool.run(8, [](std::uint32_t) {
-                 throw std::runtime_error("recording failed");
-               }),
+  EXPECT_THROW(pool.run(8,
+                        [](std::uint32_t) {
+                          throw std::runtime_error("recording failed");
+                        }),
                std::runtime_error);
 
   std::vector<std::atomic_int> runs(8);
@@ -148,9 +150,8 @@ TEST(WorkerPool, handlesManyBatchesInARow) {
   render::WorkerPool pool(4);
   std::atomic_int total{0};
   for (int batch = 0; batch < 500; batch++) {
-    pool.run(9, [&total](const std::uint32_t i) {
-      total += static_cast<int>(i);
-    });
+    pool.run(9,
+             [&total](const std::uint32_t i) { total += static_cast<int>(i); });
   }
   // 0 + 1 + ... + 8 is 36, five hundred times over.
   EXPECT_EQ(36 * 500, total.load());

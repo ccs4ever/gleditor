@@ -54,7 +54,8 @@ struct char_pointer_hash {
   }
 };
 
-/// Transparent string hasher enabling heterogeneous lookup on std::string, std::string_view, and const char*.
+/// Transparent string hasher enabling heterogeneous lookup on std::string,
+/// std::string_view, and const char*.
 using transparent_string_hash =
     overload<std::hash<std::string>, std::hash<std::string_view>,
              char_pointer_hash>;
@@ -64,7 +65,8 @@ using FontPtr = Glib::RefPtr<Pango::Font>;
 
 /**
  * @class FontMapKeyAdapter
- * @brief Compares Pango::Font objects by their fully described absolute size strings.
+ * @brief Compares Pango::Font objects by their fully described absolute size
+ * strings.
  *
  * Provides a strict-weak-ordering and hash based on the casefolded string
  * from Pango's describe_with_absolute_size(). Useful as a key in maps.
@@ -131,7 +133,8 @@ public:
 };
 
 /**
- * @brief std::hash specialization for FontMapKeyAdapter based on font description.
+ * @brief std::hash specialization for FontMapKeyAdapter based on font
+ * description.
  */
 template <> struct std::hash<FontMapKeyAdapter> {
   std::size_t operator()(const FontMapKeyAdapter &adapter) const noexcept {
@@ -171,8 +174,8 @@ public:
      * when it samples.
      */
     TextureCoords texCoords;
-    Rect dims;               ///< Pixel dimensions of the rasterized glyph.
-    int layer{};             ///< Array texture layer holding the glyph.
+    Rect dims;   ///< Pixel dimensions of the rasterized glyph.
+    int layer{}; ///< Array texture layer holding the glyph.
     /**
      * @brief Mean coverage over the glyph's box, 0 for blank and 1 for solid.
      *
@@ -299,10 +302,10 @@ private:
   std::unordered_map<std::string, std::unordered_map<FontMapKeyAdapter, Sizes>,
                      transparent_string_hash, std::equal_to<>>
       glyphs; ///< Map: character string -> (font -> cached sizes).
-  render::RenderDevice *device;   ///< Device the atlas lives on.
+  render::RenderDevice *device;    ///< Device the atlas lives on.
   render::TextureHandle texture{}; ///< Array texture holding the glyph atlas.
-  int size{};      ///< Current side length of each atlas layer.
-  int layerCount{}; ///< Array layers currently allocated.
+  int size{};                      ///< Current side length of each atlas layer.
+  int layerCount{};                ///< Array layers currently allocated.
   /// Ceilings growth stops at: what the hardware reports, narrowed by what the
   /// vertex encoding can address.
   int maxSize{}, maxLayers{};

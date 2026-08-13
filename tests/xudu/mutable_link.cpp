@@ -92,15 +92,15 @@ TEST(MutableLinkTest, aMutableLinkIsToldApartFromAnOrdinaryMagnet) {
   // Both are magnets and both begin the same way; the difference is xs against
   // xt, so the parameters have to be looked at rather than the scheme.
   EXPECT_TRUE(MutableLink::looksLikeMutableLink(linkFor(bep46Key).uri()));
-  EXPECT_FALSE(MutableLink::looksLikeMutableLink(
-      "magnet:?xt=urn:btih:" + std::string(40, 'a')));
+  EXPECT_FALSE(MutableLink::looksLikeMutableLink("magnet:?xt=urn:btih:" +
+                                                 std::string(40, 'a')));
   EXPECT_FALSE(MutableLink::looksLikeMutableLink("sample.torrent"));
 }
 
 TEST(MutableLinkTest, aLinkNamingNoKeyIsRefused) {
-  EXPECT_THROW((void)MutableLink::parse("magnet:?xt=urn:btih:" +
-                                        std::string(40, 'a')),
-               std::runtime_error);
+  EXPECT_THROW(
+      (void)MutableLink::parse("magnet:?xt=urn:btih:" + std::string(40, 'a')),
+      std::runtime_error);
   EXPECT_THROW((void)MutableLink::parse("sample.torrent"), std::runtime_error);
   // Half a key is not a key.
   EXPECT_THROW((void)linkFor("8543d3e6"), std::runtime_error);
@@ -124,9 +124,8 @@ TEST(MutableLinkTest, anInfoHashInTheLinkIsAHintAndNotTheName) {
   // a starting point for a client that cannot reach the DHT, and it is
   // expected to go stale -- which is the entire point of a mutable name.
   const auto hash = std::string(40, 'a');
-  const auto link = MutableLink::parse("magnet:?xs=urn:btpk:" +
-                                       std::string{bep46Key} +
-                                       "&xt=urn:btih:" + hash);
+  const auto link = MutableLink::parse(
+      "magnet:?xs=urn:btpk:" + std::string{bep46Key} + "&xt=urn:btih:" + hash);
   ASSERT_TRUE(link.currentWhenWritten.has_value());
   EXPECT_EQ(link.currentWhenWritten->hex(), hash);
   // The hint moves nothing: the pointer still lives where the key says.
@@ -163,7 +162,7 @@ TEST(MutableSigningTest, theSequenceNumberIsPartOfWhatIsSigned) {
 // -- what a name points at --------------------------------------------------
 
 TEST(MutablePointerTest, itIsADictionaryOfOneEntry) {
-  const auto hash = InfoHash::fromHex(std::string(40, 'a'));
+  const auto hash    = InfoHash::fromHex(std::string(40, 'a'));
   const auto encoded = xudu::encodeMutablePointer(hash);
   EXPECT_EQ(encoded.substr(0, 8), "d2:ih20:");
   EXPECT_EQ(encoded.size(), 8U + 20U + 1U);
@@ -186,9 +185,9 @@ TEST(MutablePointerTest, anythingElseUnderTheNameIsNotAnAnswer) {
   EXPECT_FALSE(xudu::decodeMutablePointer("de").has_value());
   EXPECT_FALSE(xudu::decodeMutablePointer("d2:ihi7ee").has_value());
   // Nineteen bytes is not an info hash, and padding it out would invent one.
-  EXPECT_FALSE(xudu::decodeMutablePointer("d2:ih19:" + std::string(19, 'a') +
-                                          "e")
-                   .has_value());
+  EXPECT_FALSE(
+      xudu::decodeMutablePointer("d2:ih19:" + std::string(19, 'a') + "e")
+          .has_value());
 }
 
 // -- the signature itself ---------------------------------------------------
@@ -200,7 +199,7 @@ TEST(MutablePointerTest, anythingElseUnderTheNameIsNotAnAnswer) {
 class MutableCryptoTest : public testing::Test {
 protected:
   void SetUp() override {
-    keys.publicKey = PublicKey::fromHex(bep44Key);
+    keys.publicKey    = PublicKey::fromHex(bep44Key);
     const auto secret = xudu::fromHex(bep44Secret);
     std::copy(secret.begin(), secret.end(), keys.secretKey.bytes.begin());
   }
@@ -209,10 +208,10 @@ protected:
 };
 
 TEST_F(MutableCryptoTest, signingReproducesThePublishedSignature) {
-  EXPECT_EQ(xudu::signMutableItem(xudu::mutableSigningBuffer("", 1, bep44Value),
-                                  keys)
-                .hex(),
-            bep44Signature);
+  EXPECT_EQ(
+      xudu::signMutableItem(xudu::mutableSigningBuffer("", 1, bep44Value), keys)
+          .hex(),
+      bep44Signature);
   EXPECT_EQ(xudu::signMutableItem(
                 xudu::mutableSigningBuffer("foobar", 1, bep44Value), keys)
                 .hex(),
@@ -233,13 +232,13 @@ TEST_F(MutableCryptoTest, aTamperedAnswerDoesNotVerify) {
       xudu::mutableSigningBuffer("", 1, "12:Goodbye All!"), signature,
       keys.publicKey));
   // The same content, claimed to be newer than it is.
-  EXPECT_FALSE(xudu::verifyMutableItem(
-      xudu::mutableSigningBuffer("", 2, bep44Value), signature,
-      keys.publicKey));
+  EXPECT_FALSE(
+      xudu::verifyMutableItem(xudu::mutableSigningBuffer("", 2, bep44Value),
+                              signature, keys.publicKey));
   // The right answer, attributed to a name that did not give it.
-  EXPECT_FALSE(xudu::verifyMutableItem(
-      xudu::mutableSigningBuffer("", 1, bep44Value), signature,
-      PublicKey::fromHex(bep46Key)));
+  EXPECT_FALSE(
+      xudu::verifyMutableItem(xudu::mutableSigningBuffer("", 1, bep44Value),
+                              signature, PublicKey::fromHex(bep46Key)));
   // The salted answer offered as the unsalted one, which is a different name.
   EXPECT_FALSE(xudu::verifyMutableItem(
       xudu::mutableSigningBuffer("", 1, bep44Value),

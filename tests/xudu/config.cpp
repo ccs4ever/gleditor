@@ -139,8 +139,7 @@ TEST(ConfigTest, theFileIsWhereXdgSaysItIs) {
 TEST(ConfigTest, itIsWrittenReadableOnlyByItsOwner) {
   const Environment environment;
   const auto path = std::filesystem::temp_directory_path() /
-                    ("xudu-config-" + std::to_string(getpid())) /
-                    "config.yaml";
+                    ("xudu-config-" + std::to_string(getpid())) / "config.yaml";
   std::filesystem::remove_all(path.parent_path());
 
   Config config;
@@ -235,11 +234,10 @@ TEST(ConfigTest, theKeyringSaysWhatItCanSignWith) {
     EXPECT_TRUE(key.describe().contains(
         key.fingerprint.substr(key.fingerprint.size() - 8)));
   }
-  EXPECT_EQ(std::ranges::count_if(keys,
-                                  [](const xudu::SigningKey &key) {
-                                    return key.preferred;
-                                  }),
-            1)
+  EXPECT_EQ(
+      std::ranges::count_if(
+          keys, [](const xudu::SigningKey &key) { return key.preferred; }),
+      1)
       << "exactly one key is the one gpg would use";
 
   static_cast<void>(std::system(("gpgconf --homedir " + dir.string() +

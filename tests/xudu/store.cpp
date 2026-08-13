@@ -18,10 +18,10 @@ namespace {
 
 using xudu::Link;
 using xudu::LinkType;
+using xudu::localScroll;
 using xudu::MicroversionId;
 using xudu::Op;
 using xudu::OpKind;
-using xudu::localScroll;
 using xudu::PrimediaSpan;
 using xudu::Store;
 
@@ -47,7 +47,8 @@ TEST(StoreTest, editsContinueTheChain) {
   const auto two   = store.insert(one, 0, "hello ");
   const auto three = store.insert(two, 11, "!");
 
-  EXPECT_EQ(names({one, two, three}), (std::vector<std::string>{"1", "2", "3"}));
+  EXPECT_EQ(names({one, two, three}),
+            (std::vector<std::string>{"1", "2", "3"}));
   EXPECT_EQ(store.textOf(three), "hello world!");
 }
 
@@ -254,11 +255,11 @@ struct StoreRoundTripTest : testing::Test {
   std::filesystem::path dir;
 
   void SetUp() override {
-    dir = std::filesystem::temp_directory_path() /
-          ("xudu-test-" + std::to_string(::testing::UnitTest::GetInstance()
-                                             ->random_seed()) +
-           "-" +
-           ::testing::UnitTest::GetInstance()->current_test_info()->name());
+    dir =
+        std::filesystem::temp_directory_path() /
+        ("xudu-test-" +
+         std::to_string(::testing::UnitTest::GetInstance()->random_seed()) +
+         "-" + ::testing::UnitTest::GetInstance()->current_test_info()->name());
     std::filesystem::remove_all(dir);
   }
   void TearDown() override { std::filesystem::remove_all(dir); }
@@ -336,7 +337,7 @@ TEST_F(StoreRoundTripTest, aQuotationIntoASecondDocumentSurvivesSaving) {
   {
     Store store;
     const auto one = store.insert(MicroversionId{}, 0, "Hello there");
-    quoted = store.transclude(MicroversionId{}, 0, one, 0, 5);
+    quoted         = store.transclude(MicroversionId{}, 0, one, 0, 5);
     ASSERT_EQ(quoted.str(), "a1");
     ASSERT_EQ(store.textOf(quoted), "Hello");
     store.save(dir.string());

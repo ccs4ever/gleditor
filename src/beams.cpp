@@ -72,11 +72,8 @@ void Beams::clear() { rows.clear(); }
 
 void Beams::add(const glm::vec3 &from, const glm::vec3 &to, const float width,
                 const std::uint32_t colour, const std::uint32_t tag) {
-  rows.push_back(Row{{from.x, from.y, from.z},
-                     width,
-                     {to.x, to.y, to.z},
-                     colour,
-                     tag});
+  rows.push_back(
+      Row{{from.x, from.y, from.z}, width, {to.x, to.y, to.z}, colour, tag});
 }
 
 void Beams::commit() {

@@ -1,0 +1,18 @@
+extends: default
+
+rules:
+  # GitHub Actions workflows conventionally have no "---" document marker.
+  document-start: disable
+  # "on:" is a mapping key in every workflow file, and YAML 1.1 coerces the
+  # bare word to a boolean; checking keys for that produces one guaranteed
+  # false positive per workflow rather than catching anything.
+  truthy:
+    check-keys: false
+  # Workflow run: blocks quote real shell commands, which routinely run
+  # past 80 columns; keeps a limit without fighting the content it wraps.
+  line-length:
+    max: 100
+  # actions/checkout-style "- uses:" lists sit at the same indent as their
+  # parent key throughout these files rather than being indented further.
+  indentation:
+    indent-sequences: consistent

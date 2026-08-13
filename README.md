@@ -1239,12 +1239,14 @@ which for a document means the render thread.
 
 ### How it is put together
 
-    include/gleditor/a11y/tree.hpp        the vocabulary: nodes, roles, actions
-    include/gleditor/a11y/publisher.hpp   collecting what everything has to say
-    include/gleditor/a11y/platform.hpp    where it goes
-    include/gleditor/a11y/documents.hpp   the documents, the runs and the caret
-    src/a11y/platform_accesskit.cpp       AccessKit
-    src/a11y/platform_none.cpp            no AccessKit
+```
+include/gleditor/a11y/tree.hpp        the vocabulary: nodes, roles, actions
+include/gleditor/a11y/publisher.hpp   collecting what everything has to say
+include/gleditor/a11y/platform.hpp    where it goes
+include/gleditor/a11y/documents.hpp   the documents, the runs and the caret
+src/a11y/platform_accesskit.cpp       AccessKit
+src/a11y/platform_none.cpp            no AccessKit
+```
 
 The vocabulary is its own rather than AccessKit's, for three reasons and the
 third is the one that matters. It is plain data, so building a tree is testable
@@ -1324,7 +1326,9 @@ likely to have arranged one:
 for it and settles for none, because not everybody has it installed and a build
 that stopped would be a worse answer than an editor that draws.
 
-    make ACCESSKIT_DIR=/opt/accesskit-c
+```
+make ACCESSKIT_DIR=/opt/accesskit-c
+```
 
 AccessKit is written in Rust, so building accesskit-c from source needs a Rust
 toolchain -- but this project does not: it links a library, the same as it
@@ -1336,16 +1340,20 @@ links libtorrent. There is no cargo in this build and no Rust in this tree.
 per line. It is the one way to check the description without an accessibility
 bus and somebody listening to it, and it is what the tests read.
 
-    ./build/xudu store --import essay.txt --click 400,300 --dump-a11y --profile
+```
+./build/xudu store --import essay.txt --click 400,300 --dump-a11y --profile
+```
 
-    window "Xudu"
-      multiline text input "1" [caret 14]
-        text run = "hello world\n"
-        text run = "this is a second line\n"
-        text run = "and a third with words in it\n"
-      list "hypertime: every state of this document"
-        list item "1" = "current"
-    focus: 1
+```
+window "Xudu"
+  multiline text input "1" [caret 14]
+    text run = "hello world\n"
+    text run = "this is a second line\n"
+    text run = "and a third with words in it\n"
+  list "hypertime: every state of this document"
+    list item "1" = "current"
+focus: 1
+```
 
 The description has also been read back off a real accessibility bus -- an
 `at-spi-bus-launcher`, a registry and `org.a11y.Status.IsEnabled` set, with the
@@ -1444,7 +1452,8 @@ What SDL does have, this program uses:
   - accesskit-c (optional; what reports the user interface to screen readers.
     See "Accessibility" above)
 - Testing: GoogleTest + GoogleMock
-- Vendored/third-party: `thirdparty/argparse`, `thirdparty/Choreograph`, `thirdparty/cosmopolitan` toolchain support (optional)
+- Vendored/third-party: `thirdparty/argparse`, `thirdparty/Choreograph`,
+  `thirdparty/cosmopolitan` toolchain support (optional)
 
 ## Requirements
 
@@ -1488,6 +1497,7 @@ sudo apt-get install mesa-vulkan-drivers vulkan-validationlayers
 ```
 
 Notes:
+
 - SDL3 is not yet in the Ubuntu archive; the CI workflow pulls it from the
   `ppa:hrzhu/sdl3-backport` PPA for its SDL3 job. Building SDL3 from source
   works equally well, and `libsdl2-dev` from the archive avoids the question
@@ -1498,7 +1508,8 @@ Notes:
 - The default `LDFLAGS` include `-rtlib=compiler-rt`, which needs the LLVM
   runtime package (`libclang-rt-dev` on Debian/Ubuntu).
 - spdlog is not used at present (it was removed due to libc++ linking issues).
-- For coverage (`make profile`), install `llvm-profdata` and `llvm-cov` (e.g., `llvm-14-tools` or similar on Ubuntu).  
+- For coverage (`make profile`), install `llvm-profdata` and `llvm-cov`
+  (e.g., `llvm-14-tools` or similar on Ubuntu).
 - Headless testing works with Mesa's software drivers: `llvmpipe` for OpenGL and
   OpenGL ES, `lavapipe` for Vulkan. Both come from `mesa-vulkan-drivers` and the
   usual Mesa packages.
@@ -1508,7 +1519,8 @@ Notes:
 Common targets (see `Makefile`):
 
 - Build everything (library, both programs, tests, compile commands):
-  - `make`  → builds `build/libgleditor.so.0`, `build/gleditor`, `build/xudu`, `build/gleditor_test`, `build/xudu_test` and `build/compile_commands.json`
+  - `make`  → builds `build/libgleditor.so.0`, `build/gleditor`, `build/xudu`,
+    `build/gleditor_test`, `build/xudu_test` and `build/compile_commands.json`
 - Build the library only:
   - `make lib`  → `build/libgleditor.so.0`, plus the `build/libgleditor.so` linker name
 - Build the xanadoc editor only:
@@ -1527,10 +1539,12 @@ Common targets (see `Makefile`):
   - `make clean`  → removes `build/` artifacts
 
 Compile commands database (for clangd, etc.):
+
 - Generated automatically by `make` at `build/compile_commands.json`.
 - You can also run: `make build/compile_commands.json`.
 
 Optional Make variables:
+
 - `DEBUG=1` enables debug flags and sanitizer flag sets.
 - `GLEDITOR_ENABLE_VULKAN=1` compiles the Vulkan backend.
 - `GLEDITOR_SDL=2` or `GLEDITOR_SDL=3` picks the SDL major version; unset means
@@ -1653,6 +1667,7 @@ Fedora's packaging checks reject one outright.
 
 Command-line options (registered by `gleditor::addCommonArguments()` in
 `src/app.cpp`):
+
 - `--font <name>`     default: `"Monospace 16"`
 - `--backend <name>`  `opengl` (default), `opengles` or `vulkan`
 - `--profile`         open any provided files and then exit (useful for profiling)
@@ -1698,6 +1713,7 @@ so a script written against one build still runs on another whose help does not
 mention what it passes.
 
 Help:
+
 - `./build/gleditor --help`      the everyday switches
 - `./build/gleditor --help-all`  every switch, described in full
 
@@ -1716,7 +1732,8 @@ Sanitizers are wired via Make targets. Set `DEBUG=1` to activate sanitizer flags
   - `make clean && make DEBUG=1 sanitize/memory`
   - Or: `make DEBUG=1 sanitize/memory/run`
 
-Note: the `/run` targets set recommended `ASAN_OPTIONS`, `TSAN_OPTIONS`, or `MSAN_OPTIONS` and then execute the binary.
+Note: the `/run` targets set recommended `ASAN_OPTIONS`, `TSAN_OPTIONS`, or
+`MSAN_OPTIONS` and then execute the binary.
 
 Known sanitizer noise: the sanitizer flag sets include `-fsanitize=integer`,
 whose `implicit-integer-sign-change` check fires inside libstdc++'s `<format>`
@@ -1823,6 +1840,7 @@ recompiling the sixty-nine files that did not change.
   ```
   xvfb-run -s "-screen 0 1024x768x24" ./tools/compare-backends.sh
   ```
+
 - Coverage from tests:
   - `make profile`  → generates `gleditor_test.prof` and `coverage.lcov`
     - Requires `llvm-profdata` and `llvm-cov` on PATH.
@@ -1869,8 +1887,10 @@ recompiling the sixty-nine files that did not change.
   into the default 512 -- so a small value is how the grown atlas gets rendered
   and compared against the ungrown one. `tools/compare-backends.sh` sets it.
 - `STATIC=--static`  attempt static linking (where supported by your system/libs).
-- `ASAN_OPTIONS`, `TSAN_OPTIONS`, `MSAN_OPTIONS`  fine-tune sanitizer behavior (the `/run` targets set sensible defaults).
-- LandlockMake: if `LANDLOCKMAKE_VERSION` is set, the Makefile enables a sandbox for builds (optional/developer setup).
+- `ASAN_OPTIONS`, `TSAN_OPTIONS`, `MSAN_OPTIONS`  fine-tune sanitizer behavior
+  (the `/run` targets set sensible defaults).
+- LandlockMake: if `LANDLOCKMAKE_VERSION` is set, the Makefile enables a
+  sandbox for builds (optional/developer setup).
 
 ## License
 
@@ -1884,4 +1904,3 @@ TODO: Confirm whether the intent is GPL-3.0-only or GPL-3.0-or-later.
   the packaging table above.
 - The app resolves `assets/glsl` and `logo.png` relative to the working
   directory, so it must be started from the repository root (`make run` does).
-

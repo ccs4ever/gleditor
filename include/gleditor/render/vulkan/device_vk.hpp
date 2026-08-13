@@ -23,15 +23,16 @@
 #include <limits>
 #include <optional>
 #include <string>
-#include <utility>
 #include <unordered_map>
+#include <utility>
 #include <vector>
 
 // VK_KHR_portability_subset is still marked provisional by Khronos, so its
 // extension name and structs are hidden behind this macro. MoltenVK on macOS
 // is the implementation that needs it; defining the macro unconditionally
 // only exposes the declarations; nothing here uses them unless the device
-// actually reports the extension at run time (see DeviceVK::createLogicalDevice).
+// actually reports the extension at run time (see
+// DeviceVK::createLogicalDevice).
 #ifndef VK_ENABLE_BETA_EXTENSIONS
 #define VK_ENABLE_BETA_EXTENSIONS
 #endif
@@ -213,8 +214,8 @@ private:
    * consistent. GLEDITOR_RECORD_THREADS settles it by hand when that is not
    * good enough.
    */
-  static constexpr std::uint32_t recordingProbeWarmup   = 3;
-  static constexpr std::uint32_t recordingProbeSamples  = 8;
+  static constexpr std::uint32_t recordingProbeWarmup  = 3;
+  static constexpr std::uint32_t recordingProbeSamples = 8;
   static constexpr std::uint32_t recordingProbeBlock =
       recordingProbeWarmup + recordingProbeSamples;
   static constexpr std::uint32_t recordingProbeFrames = 2 * recordingProbeBlock;
@@ -249,7 +250,8 @@ private:
         return std::numeric_limits<double>::infinity();
       }
       auto sorted = samples;
-      const auto middle = sorted.begin() + static_cast<std::ptrdiff_t>(count / 2);
+      const auto middle =
+          sorted.begin() + static_cast<std::ptrdiff_t>(count / 2);
       std::nth_element(sorted.begin(), middle,
                        sorted.begin() + static_cast<std::ptrdiff_t>(count));
       return *middle;
@@ -351,7 +353,8 @@ private:
   /// Record one batch into an already-begun secondary buffer.
   void recordBatch(VkCommandBuffer commands, const GlyphBatch &batch) const;
   static std::vector<std::uint32_t> readSpirv(const std::string &path);
-  VkShaderModule createShaderModule(const std::vector<std::uint32_t> &code) const;
+  VkShaderModule
+  createShaderModule(const std::vector<std::uint32_t> &code) const;
 
   AutoSDLWindow *targetWindow{};
 

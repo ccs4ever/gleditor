@@ -19,17 +19,16 @@ namespace {
 
 void check(const VkResult result, const char *what) {
   if (VK_SUCCESS != result) {
-    throw std::runtime_error(
-        std::format("Vulkan: {} failed with VkResult {}", what,
-                    static_cast<int>(result)));
+    throw std::runtime_error(std::format("Vulkan: {} failed with VkResult {}",
+                                         what, static_cast<int>(result)));
   }
 }
 
 VkBufferUsageFlags bufferUsage(const BufferKind kind) {
   switch (kind) {
   case BufferKind::Vertex:
-    return VK_BUFFER_USAGE_VERTEX_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_SRC_BIT |
-           VK_BUFFER_USAGE_TRANSFER_DST_BIT;
+    return VK_BUFFER_USAGE_VERTEX_BUFFER_BIT |
+           VK_BUFFER_USAGE_TRANSFER_SRC_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT;
   case BufferKind::Index:
     return VK_BUFFER_USAGE_INDEX_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_SRC_BIT |
            VK_BUFFER_USAGE_TRANSFER_DST_BIT;
@@ -69,26 +68,30 @@ VkFormat attributeFormat(const AttributeType type, const int components) {
       break;
     }
   }
-  throw std::invalid_argument("DeviceVK: unsupported attribute component count");
+  throw std::invalid_argument(
+      "DeviceVK: unsupported attribute component count");
 }
 
 } // namespace
 
 // -- memory and buffers -------------------------------------------------------
 
-std::uint32_t DeviceVK::findMemoryType(const std::uint32_t typeBits,
-                                       const VkMemoryPropertyFlags props) const {
+std::uint32_t
+DeviceVK::findMemoryType(const std::uint32_t typeBits,
+                         const VkMemoryPropertyFlags props) const {
   for (std::uint32_t i = 0; i < memoryProperties.memoryTypeCount; i++) {
     if (0 != (typeBits & (1U << i)) &&
         props == (memoryProperties.memoryTypes[i].propertyFlags & props)) {
       return i;
     }
   }
-  throw std::runtime_error("Vulkan: no memory type with the required properties");
+  throw std::runtime_error(
+      "Vulkan: no memory type with the required properties");
 }
 
 DeviceVK::BufferRecord
-DeviceVK::allocateBuffer(const VkDeviceSize bytes, const VkBufferUsageFlags usage,
+DeviceVK::allocateBuffer(const VkDeviceSize bytes,
+                         const VkBufferUsageFlags usage,
                          const VkMemoryPropertyFlags props) const {
   BufferRecord record{};
   record.bytes = bytes;
@@ -115,9 +118,9 @@ DeviceVK::allocateBuffer(const VkDeviceSize bytes, const VkBufferUsageFlags usag
         "vkBindBufferMemory");
 
   if (0 != (props & VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT)) {
-    check(vkMapMemory(device, record.memory, 0, VK_WHOLE_SIZE, 0,
-                      &record.mapped),
-          "vkMapMemory");
+    check(
+        vkMapMemory(device, record.memory, 0, VK_WHOLE_SIZE, 0, &record.mapped),
+        "vkMapMemory");
   }
   return record;
 }
@@ -142,9 +145,10 @@ BufferHandle DeviceVK::createBuffer(const BufferKind kind,
   // Host-visible coherent memory keeps updates to a memcpy. The data here is
   // rewritten as documents load rather than being static, so the staging copy a
   // device-local buffer would need buys nothing.
-  auto record = allocateBuffer(
-      std::max<VkDeviceSize>(bytes, 1), bufferUsage(kind),
-      VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
+  auto record =
+      allocateBuffer(std::max<VkDeviceSize>(bytes, 1), bufferUsage(kind),
+                     VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT |
+                         VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
 
   const BufferHandle handle{nextHandleId++};
   buffers.emplace(handle.id, record);
@@ -276,19 +280,19 @@ TextureHandle DeviceVK::createTextureArray(const int size, const int layers,
   record.levels = std::max(1, levels);
 
   VkImageCreateInfo info{};
-  info.sType         = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
-  info.imageType     = VK_IMAGE_TYPE_2D;
-  info.format        = VK_FORMAT_R8_UNORM;
-  info.extent        = {static_cast<std::uint32_t>(size),
-                        static_cast<std::uint32_t>(size), 1};
-  info.mipLevels     = static_cast<std::uint32_t>(record.levels);
-  info.arrayLayers   = static_cast<std::uint32_t>(layers);
-  info.samples       = VK_SAMPLE_COUNT_1_BIT;
-  info.tiling        = VK_IMAGE_TILING_OPTIMAL;
+  info.sType       = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
+  info.imageType   = VK_IMAGE_TYPE_2D;
+  info.format      = VK_FORMAT_R8_UNORM;
+  info.extent      = {static_cast<std::uint32_t>(size),
+                      static_cast<std::uint32_t>(size), 1};
+  info.mipLevels   = static_cast<std::uint32_t>(record.levels);
+  info.arrayLayers = static_cast<std::uint32_t>(layers);
+  info.samples     = VK_SAMPLE_COUNT_1_BIT;
+  info.tiling      = VK_IMAGE_TILING_OPTIMAL;
   // TRANSFER_SRC as well as DST: the mip chain is built by blitting each level
   // from the one above it, so every level is read as well as written.
-  info.usage = VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT |
-               VK_IMAGE_USAGE_SAMPLED_BIT;
+  info.usage = VK_IMAGE_USAGE_TRANSFER_DST_BIT |
+               VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_SAMPLED_BIT;
   info.sharingMode   = VK_SHARING_MODE_EXCLUSIVE;
   info.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
   check(vkCreateImage(device, &info, nullptr, &record.image),
@@ -297,8 +301,8 @@ TextureHandle DeviceVK::createTextureArray(const int size, const int layers,
   VkMemoryRequirements reqs{};
   vkGetImageMemoryRequirements(device, record.image, &reqs);
   VkMemoryAllocateInfo alloc{};
-  alloc.sType           = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
-  alloc.allocationSize  = reqs.size;
+  alloc.sType          = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
+  alloc.allocationSize = reqs.size;
   alloc.memoryTypeIndex =
       findMemoryType(reqs.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
   check(vkAllocateMemory(device, &alloc, nullptr, &record.memory),
@@ -321,17 +325,17 @@ TextureHandle DeviceVK::createTextureArray(const int size, const int layers,
   // uploads transition individual layers in and out of it as needed.
   const auto commands = beginOneShot();
   VkImageMemoryBarrier barrier{};
-  barrier.sType            = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
-  barrier.oldLayout        = VK_IMAGE_LAYOUT_UNDEFINED;
-  barrier.newLayout        = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+  barrier.sType               = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+  barrier.oldLayout           = VK_IMAGE_LAYOUT_UNDEFINED;
+  barrier.newLayout           = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
   barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
   barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-  barrier.image            = record.image;
-  barrier.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0,
-                              static_cast<std::uint32_t>(record.levels), 0,
-                              static_cast<std::uint32_t>(layers)};
-  barrier.srcAccessMask    = 0;
-  barrier.dstAccessMask    = VK_ACCESS_SHADER_READ_BIT;
+  barrier.image               = record.image;
+  barrier.subresourceRange    = {VK_IMAGE_ASPECT_COLOR_BIT, 0,
+                                 static_cast<std::uint32_t>(record.levels), 0,
+                                 static_cast<std::uint32_t>(layers)};
+  barrier.srcAccessMask       = 0;
+  barrier.dstAccessMask       = VK_ACCESS_SHADER_READ_BIT;
   vkCmdPipelineBarrier(commands, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
                        VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT, 0, 0, nullptr, 0,
                        nullptr, 1, &barrier);
@@ -400,8 +404,8 @@ void DeviceVK::generateMipmaps(const TextureHandle texture) {
              VK_PIPELINE_STAGE_TRANSFER_BIT);
 
   auto extent = record.size;
-  for (std::uint32_t level = 1; level < static_cast<std::uint32_t>(record.levels);
-       level++) {
+  for (std::uint32_t level = 1;
+       level < static_cast<std::uint32_t>(record.levels); level++) {
     const auto next = std::max(1, extent / 2);
 
     transition(level, VK_IMAGE_LAYOUT_UNDEFINED,
@@ -414,9 +418,8 @@ void DeviceVK::generateMipmaps(const TextureHandle texture) {
     blit.srcOffsets[1]  = {extent, extent, 1};
     blit.dstSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, level, 0, layers};
     blit.dstOffsets[1]  = {next, next, 1};
-    vkCmdBlitImage(commands, record.image,
-                   VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, record.image,
-                   VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &blit,
+    vkCmdBlitImage(commands, record.image, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+                   record.image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &blit,
                    VK_FILTER_LINEAR);
 
     // This level becomes the next one's source, so it has to be readable
@@ -464,7 +467,8 @@ void DeviceVK::updateTextureLayer(const TextureHandle texture, const int layer,
   }
   const auto it = textures.find(texture.id);
   if (textures.end() == it) {
-    throw std::invalid_argument("DeviceVK::updateTextureLayer: unknown texture");
+    throw std::invalid_argument(
+        "DeviceVK::updateTextureLayer: unknown texture");
   }
   const auto expected =
       static_cast<std::size_t>(width) * static_cast<std::size_t>(height);
@@ -495,8 +499,8 @@ void DeviceVK::updateTextureLayer(const TextureHandle texture, const int layer,
   barrier.srcAccessMask = VK_ACCESS_SHADER_READ_BIT;
   barrier.dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
   vkCmdPipelineBarrier(commands, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
-                       VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, nullptr, 0, nullptr,
-                       1, &barrier);
+                       VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, nullptr, 0,
+                       nullptr, 1, &barrier);
 
   VkBufferImageCopy region{};
   region.bufferOffset      = 0;
@@ -596,9 +600,9 @@ PipelineHandle DeviceVK::createPipeline(const PipelineDesc &desc) {
   pushRange.size       = sizeof(DrawUniforms);
 
   VkPipelineLayoutCreateInfo layoutInfo{};
-  layoutInfo.sType                  = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
-  layoutInfo.setLayoutCount         = 1;
-  layoutInfo.pSetLayouts            = &record.setLayout;
+  layoutInfo.sType          = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
+  layoutInfo.setLayoutCount = 1;
+  layoutInfo.pSetLayouts    = &record.setLayout;
   layoutInfo.pushConstantRangeCount = 1;
   layoutInfo.pPushConstantRanges    = &pushRange;
   check(vkCreatePipelineLayout(device, &layoutInfo, nullptr, &record.layout),
@@ -666,7 +670,8 @@ PipelineHandle DeviceVK::createPipeline(const PipelineDesc &desc) {
   multisample.rasterizationSamples = VK_SAMPLE_COUNT_1_BIT;
 
   VkPipelineDepthStencilStateCreateInfo depthStencil{};
-  depthStencil.sType = VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO;
+  depthStencil.sType =
+      VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO;
   depthStencil.depthTestEnable  = desc.depthTest ? VK_TRUE : VK_FALSE;
   depthStencil.depthWriteEnable = desc.depthTest ? VK_TRUE : VK_FALSE;
   // Equal depths pass, and the later draw wins -- see the matching note in the
@@ -674,7 +679,7 @@ PipelineHandle DeviceVK::createPipeline(const PipelineDesc &desc) {
   // which is finer than a depth step is at the distance documents are read
   // from, so under a strict less-than they were discarded and the page came out
   // blank.
-  depthStencil.depthCompareOp   = VK_COMPARE_OP_LESS_OR_EQUAL;
+  depthStencil.depthCompareOp = VK_COMPARE_OP_LESS_OR_EQUAL;
 
   // One blend state per colour attachment. The colour target blends on alpha,
   // which is what lets a draw fade; the picking target must not, and not only
@@ -726,8 +731,8 @@ PipelineHandle DeviceVK::createPipeline(const PipelineDesc &desc) {
   info.renderPass          = renderPass;
   info.subpass             = 0;
 
-  const auto result = vkCreateGraphicsPipelines(device, VK_NULL_HANDLE, 1, &info,
-                                                nullptr, &record.pipeline);
+  const auto result = vkCreateGraphicsPipelines(
+      device, VK_NULL_HANDLE, 1, &info, nullptr, &record.pipeline);
   vkDestroyShaderModule(device, vertModule, nullptr);
   vkDestroyShaderModule(device, fragModule, nullptr);
   check(result, "vkCreateGraphicsPipelines");

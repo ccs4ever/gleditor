@@ -4,7 +4,6 @@
  */
 #include <gleditor/render/gl/device_gl.hpp> // IWYU pragma: associated
 
-
 #include <array>
 #include <cstddef>
 #include <format>
@@ -77,7 +76,7 @@ void DeviceGL::initialize(AutoSDLWindow &window) {
       "render: {} device, version {}\n", backendName(backendKind),
       reinterpret_cast<const char *>(api.GetString(GL_VERSION)));
 
-  GLint maxSize = 0;
+  GLint maxSize   = 0;
   GLint maxLayers = 0;
   api.GetIntegerv(GL_MAX_TEXTURE_SIZE, &maxSize);
   api.GetIntegerv(GL_MAX_ARRAY_TEXTURE_LAYERS, &maxLayers);
@@ -85,10 +84,10 @@ void DeviceGL::initialize(AutoSDLWindow &window) {
 
   api.GenBuffers(1, &highlightUbo);
   api.BindBuffer(GL_UNIFORM_BUFFER, highlightUbo);
-  api.BufferData(GL_UNIFORM_BUFFER,
-                 static_cast<GLsizeiptr>(sizeof(HighlightRange) *
-                                         maxHighlightRanges),
-                 nullptr, GL_DYNAMIC_DRAW);
+  api.BufferData(
+      GL_UNIFORM_BUFFER,
+      static_cast<GLsizeiptr>(sizeof(HighlightRange) * maxHighlightRanges),
+      nullptr, GL_DYNAMIC_DRAW);
   api.BindBufferBase(GL_UNIFORM_BUFFER, highlightBinding, highlightUbo);
   api.BindBuffer(GL_UNIFORM_BUFFER, 0);
 
@@ -110,7 +109,7 @@ void DeviceGL::initialize(AutoSDLWindow &window) {
   api.FrontFace(GL_CCW);
   api.ClearColor(0, 0, 0, 1);
 
-  int width = 0;
+  int width  = 0;
   int height = 0;
   SDL_GetWindowSizeInPixels(window.window, &width, &height);
   createOffscreenTarget(width > 0 ? width : 1, height > 0 ? height : 1);
@@ -120,11 +119,10 @@ void DeviceGL::initialize(AutoSDLWindow &window) {
 }
 
 void APIENTRY DeviceGL::debugCallback(const GLenum /*source*/,
-                                        const GLenum type, const GLuint /*id*/,
-                                        const GLenum severity,
-                                        const GLsizei length,
-                                        const GLchar *message,
-                                        const void *user) {
+                                      const GLenum type, const GLuint /*id*/,
+                                      const GLenum severity,
+                                      const GLsizei length,
+                                      const GLchar *message, const void *user) {
   auto *sink = static_cast<DiagnosticSink *>(const_cast<void *>(user));
   if (nullptr == sink || nullptr == message) {
     return;
@@ -168,7 +166,7 @@ void DeviceGL::setupDebugOutput() {
 void DeviceGL::createOffscreenTarget(const int width, const int height) {
   destroyOffscreenTarget();
 
-  targetWidth = width;
+  targetWidth  = width;
   targetHeight = height;
 
   api.GenFramebuffers(1, &offscreenFbo);
@@ -271,7 +269,7 @@ BufferHandle DeviceGL::createBuffer(const BufferKind kind,
                                     const std::size_t bytes) {
   BufferRecord record{};
   record.target = bufferTarget(kind);
-  record.bytes = bytes;
+  record.bytes  = bytes;
   api.GenBuffers(1, &record.name);
   api.BindBuffer(record.target, record.name);
   api.BufferData(record.target, static_cast<GLsizeiptr>(bytes), nullptr,
@@ -355,7 +353,7 @@ BufferHandle DeviceGL::resizeBuffer(const BufferHandle buffer,
 
   BufferRecord grown{};
   grown.target = old.target;
-  grown.bytes = bytes;
+  grown.bytes  = bytes;
   api.GenBuffers(1, &grown.name);
   api.BindBuffer(grown.target, grown.name);
   api.BufferData(grown.target, static_cast<GLsizeiptr>(bytes), nullptr,
@@ -388,7 +386,7 @@ TextureHandle DeviceGL::createTextureArray(const int size, const int layers,
   }
 
   TextureRecord record{};
-  record.size = size;
+  record.size   = size;
   record.layers = layers;
   record.levels = std::max(1, levels);
   api.GenTextures(1, &record.name);
@@ -454,10 +452,11 @@ void DeviceGL::updateTextureLayer(const TextureHandle texture, const int layer,
   }
   const auto it = textures.find(texture.id);
   if (textures.end() == it) {
-    throw std::invalid_argument("DeviceGL::updateTextureLayer: unknown texture");
+    throw std::invalid_argument(
+        "DeviceGL::updateTextureLayer: unknown texture");
   }
-  const auto expected = static_cast<std::size_t>(width) *
-                        static_cast<std::size_t>(height);
+  const auto expected =
+      static_cast<std::size_t>(width) * static_cast<std::size_t>(height);
   if (data.size() < expected) {
     throw std::invalid_argument(
         "DeviceGL::updateTextureLayer: data shorter than the given rectangle");
@@ -489,11 +488,12 @@ GLuint DeviceGL::compileStage(const GLenum stage, const std::string &source,
   if (GL_TRUE != compiled) {
     GLint logLength = 0;
     api.GetShaderiv(shader, GL_INFO_LOG_LENGTH, &logLength);
-    std::string log(static_cast<std::size_t>(logLength > 0 ? logLength : 1), '\0');
+    std::string log(static_cast<std::size_t>(logLength > 0 ? logLength : 1),
+                    '\0');
     api.GetShaderInfoLog(shader, logLength, nullptr, log.data());
     api.DeleteShader(shader);
-    throw std::runtime_error(
-        std::format("Failed to compile {}:\n{}\nSource:\n{}", name, log, source));
+    throw std::runtime_error(std::format(
+        "Failed to compile {}:\n{}\nSource:\n{}", name, log, source));
   }
   return shader;
 }
@@ -506,8 +506,8 @@ PipelineHandle DeviceGL::createPipeline(const PipelineDesc &desc) {
 
   const GLuint vertexShader =
       compileStage(GL_VERTEX_SHADER, vertexSource, desc.name + " vertex stage");
-  const GLuint fragmentShader = compileStage(
-      GL_FRAGMENT_SHADER, fragmentSource, desc.name + " fragment stage");
+  const GLuint fragmentShader = compileStage(GL_FRAGMENT_SHADER, fragmentSource,
+                                             desc.name + " fragment stage");
 
   PipelineRecord record{};
   record.program = api.CreateProgram();
@@ -520,7 +520,8 @@ PipelineHandle DeviceGL::createPipeline(const PipelineDesc &desc) {
   if (GL_TRUE != linked) {
     GLint logLength = 0;
     api.GetProgramiv(record.program, GL_INFO_LOG_LENGTH, &logLength);
-    std::string log(static_cast<std::size_t>(logLength > 0 ? logLength : 1), '\0');
+    std::string log(static_cast<std::size_t>(logLength > 0 ? logLength : 1),
+                    '\0');
     api.GetProgramInfoLog(record.program, logLength, nullptr, log.data());
     api.DeleteProgram(record.program);
     api.DeleteShader(vertexShader);
@@ -534,9 +535,9 @@ PipelineHandle DeviceGL::createPipeline(const PipelineDesc &desc) {
   api.DeleteShader(vertexShader);
   api.DeleteShader(fragmentShader);
 
-  record.layout    = desc.layout;
-  record.depthTest = desc.depthTest;
-  record.mvpLoc     = api.GetUniformLocation(record.program, "uMVP");
+  record.layout      = desc.layout;
+  record.depthTest   = desc.depthTest;
+  record.mvpLoc      = api.GetUniformLocation(record.program, "uMVP");
   record.opacityLoc  = api.GetUniformLocation(record.program, "uOpacity");
   record.identityLoc = api.GetUniformLocation(record.program, "uIdentity");
   record.atlasLoc    = api.GetUniformLocation(record.program, "uGlyphAtlas");
@@ -651,9 +652,10 @@ void DeviceGL::drawGlyphs(const DrawUniforms &uniforms,
     return;
   }
   const auto pipelineIt = pipelines.find(boundPipeline.id);
-  const auto bufferIt = buffers.find(vertices.id);
+  const auto bufferIt   = buffers.find(vertices.id);
   if (pipelines.end() == pipelineIt || buffers.end() == bufferIt) {
-    throw std::invalid_argument("DeviceGL::drawGlyphs: unknown pipeline or buffer");
+    throw std::invalid_argument(
+        "DeviceGL::drawGlyphs: unknown pipeline or buffer");
   }
   const auto &record = pipelineIt->second;
 
@@ -675,17 +677,17 @@ void DeviceGL::drawGlyphs(const DrawUniforms &uniforms,
     const auto offset = vertexByteOffset + attribute.offset;
     api.EnableVertexAttribArray(attribute.location);
     if (AttributeType::UnsignedInt == attribute.type) {
-      api.VertexAttribIPointer(
-          attribute.location, attribute.components, GL_UNSIGNED_INT,
-          static_cast<GLsizei>(record.layout.stride),
-          // NOLINTNEXTLINE(performance-no-int-to-ptr)
-          reinterpret_cast<const void *>(offset));
+      api.VertexAttribIPointer(attribute.location, attribute.components,
+                               GL_UNSIGNED_INT,
+                               static_cast<GLsizei>(record.layout.stride),
+                               // NOLINTNEXTLINE(performance-no-int-to-ptr)
+                               reinterpret_cast<const void *>(offset));
     } else {
-      api.VertexAttribPointer(
-          attribute.location, attribute.components, GL_FLOAT, GL_FALSE,
-          static_cast<GLsizei>(record.layout.stride),
-          // NOLINTNEXTLINE(performance-no-int-to-ptr)
-          reinterpret_cast<const void *>(offset));
+      api.VertexAttribPointer(attribute.location, attribute.components,
+                              GL_FLOAT, GL_FALSE,
+                              static_cast<GLsizei>(record.layout.stride),
+                              // NOLINTNEXTLINE(performance-no-int-to-ptr)
+                              reinterpret_cast<const void *>(offset));
     }
     // Every attribute is per-instance: the quad's own four vertices carry no
     // data and are synthesised from the vertex index in the shader.
@@ -754,10 +756,10 @@ void DeviceGL::requestPickingTag(const int x, const int y) {
 
   api.BindBuffer(GL_PIXEL_PACK_BUFFER, 0);
 
-  slot.fence = api.FenceSync(GL_SYNC_GPU_COMMANDS_COMPLETE, 0);
-  slot.x = x;
-  slot.y = y;
-  slot.pending = true;
+  slot.fence      = api.FenceSync(GL_SYNC_GPU_COMMANDS_COMPLETE, 0);
+  slot.x          = x;
+  slot.y          = y;
+  slot.pending    = true;
   nextPickingSlot = (nextPickingSlot + 1) % picking.size();
 }
 
@@ -782,7 +784,7 @@ std::optional<PickingResult> DeviceGL::takePickingTag() {
     }
 
     api.DeleteSync(slot.fence);
-    slot.fence = nullptr;
+    slot.fence   = nullptr;
     slot.pending = false;
 
     api.BindBuffer(GL_PIXEL_PACK_BUFFER, slot.pbo);

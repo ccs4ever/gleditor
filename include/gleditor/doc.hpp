@@ -5,6 +5,7 @@
 #include <cassert>
 #include <choreograph/Choreograph.h>
 #include <cstdint>
+#include <deque>
 #include <gleditor/buffer_pool.hpp>
 #include <gleditor/drawable.hpp>
 #include <gleditor/renderer.hpp>
@@ -12,7 +13,6 @@
 #include <glibmm/ustring.h>
 #include <glm/ext/matrix_float4x4.hpp>
 #include <glm/ext/vector_float3.hpp>
-#include <deque>
 #include <memory>
 #include <optional>
 #include <pangomm/layout.h>
@@ -119,8 +119,7 @@ public:
    */
   Page(std::shared_ptr<Doc> aDoc, RenderState &state, glm::mat4 &model,
        Glib::RefPtr<Pango::Layout> aLayout, std::uint32_t aTextOffset,
-       std::uint32_t aPageIndex,
-       const BufferPool::Allocation &inherited = {});
+       std::uint32_t aPageIndex, const BufferPool::Allocation &inherited = {});
   /**
    * @brief Append this page's draw to @p batches, or decide it needs none.
    * @param docTransform projection * view * document model.
@@ -157,8 +156,8 @@ public:
   /// which an edit earlier in the document leaves byte-identical. Negative for
   /// an edit that removed text.
   void shiftBaseOffset(const std::int32_t bytes) {
-    textOffset = static_cast<std::uint32_t>(static_cast<std::int64_t>(textOffset) +
-                                            bytes);
+    textOffset = static_cast<std::uint32_t>(
+        static_cast<std::int64_t>(textOffset) + bytes);
   }
   /// Bytes of document text this page lays out.
   [[nodiscard]] std::uint32_t textLength() const { return textBytes; }
@@ -293,6 +292,7 @@ private:
   /// Record that page @p pageIndex has shaped itself again, and let go of the
   /// least recently shaped page once more than a few are being kept.
   void keepLayoutOf(std::uint32_t pageIndex) const;
+
 public:
   /**
    * @brief Bytes of document text a finished page layout consumes.
@@ -424,10 +424,10 @@ public:
      * to be seen, so two bits say which one. Must match the same constant in
      * assets/shaders/glyph.vert.glsl.
      */
-    static constexpr float depthStep    = 0.1F;
-    static constexpr unsigned int onPaper = 0; ///< The page itself.
-    static constexpr unsigned int onText  = 1; ///< Glyphs and bars.
-    static constexpr unsigned int onTop   = 2; ///< The caret.
+    static constexpr float depthStep           = 0.1F;
+    static constexpr unsigned int onPaper      = 0; ///< The page itself.
+    static constexpr unsigned int onText       = 1; ///< Glyphs and bars.
+    static constexpr unsigned int onTop        = 2; ///< The caret.
     static constexpr unsigned int maxDepthStep = 3;
 
     /// Flag bits of @ref foreground's low byte.
@@ -444,9 +444,8 @@ public:
      * opacity is a uniform, because it applies to everything the draw covers
      * -- so the byte it occupied holds the flags instead.
      */
-    static constexpr unsigned int ink(const unsigned int rgb,
-                                      const unsigned int depth,
-                                      const bool solid) {
+    static constexpr unsigned int
+    ink(const unsigned int rgb, const unsigned int depth, const bool solid) {
       assert(depth <= maxDepthStep);
       return (rgb & 0xFFFFFF00U) | (depth & depthMask) |
              (solid ? solidFlag : 0U);
@@ -657,7 +656,8 @@ public:
 
   /// Where @p globalOffset sits, or nothing when no page holds it -- which is
   /// the answer while a document is still being built.
-  [[nodiscard]] std::optional<Anchor> anchorFor(std::uint32_t globalOffset) const;
+  [[nodiscard]] std::optional<Anchor>
+  anchorFor(std::uint32_t globalOffset) const;
 
   /**
    * @brief A point in a page's pixel space, in world coordinates.
@@ -665,11 +665,12 @@ public:
    * Includes any movement still in progress, so a point taken from this
    * follows the document rather than its resting place.
    */
-  [[nodiscard]] std::optional<glm::vec3>
-  worldPoint(std::uint32_t pageIndex, float x, float y) const;
+  [[nodiscard]] std::optional<glm::vec3> worldPoint(std::uint32_t pageIndex,
+                                                    float x, float y) const;
 
   /// Where an anchor is now.
-  [[nodiscard]] std::optional<glm::vec3> worldPoint(const Anchor &anchor) const {
+  [[nodiscard]] std::optional<glm::vec3>
+  worldPoint(const Anchor &anchor) const {
     return worldPoint(anchor.pageIndex, anchor.x, anchor.y);
   }
 
@@ -728,7 +729,9 @@ public:
   /// True once a departure has been started.
   [[nodiscard]] bool isClosing() const { return closing; }
   /// True when a departing document has finished fading and can be dropped.
-  [[nodiscard]] bool hasFadedOut() const { return closing && opacity() <= 0.0F; }
+  [[nodiscard]] bool hasFadedOut() const {
+    return closing && opacity() <= 0.0F;
+  }
 
   /// Transform placing this document in the world, including any arrival still
   /// in progress. Prefer this to getModel(), which is the resting place.

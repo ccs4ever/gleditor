@@ -64,8 +64,8 @@ void LinkBeams::rebuildStrands(RenderState &state) {
   strands.clear();
   strands.reserve(placed.size());
   for (const auto &one : placed) {
-    strands.push_back(Strand{one.link, one.type, one.from, one.to, {}, {},
-                             false});
+    strands.push_back(
+        Strand{one.link, one.type, one.from, one.to, {}, {}, false});
   }
   dangling.clear();
   dangling.reserve(unplaced.size());
@@ -76,8 +76,8 @@ void LinkBeams::rebuildStrands(RenderState &state) {
 
 void LinkBeams::resolveAnchors(RenderState &state) {
   for (auto &strand : strands) {
-    const auto anchorIn = [&state](const LinkEnd &end)
-        -> std::optional<Doc::Anchor> {
+    const auto anchorIn =
+        [&state](const LinkEnd &end) -> std::optional<Doc::Anchor> {
       if (end.doc >= state.docs.size()) {
         return std::nullopt;
       }
@@ -292,8 +292,8 @@ void LinkBeams::drawFrame(gleditor::FrameContext &ctx) {
     const auto &from = state.docs[strand.from.doc];
     const auto &to   = state.docs[strand.to.doc];
 
-    const auto rightwards =
-        glm::vec3(to->modelMatrix()[3]).x >= glm::vec3(from->modelMatrix()[3]).x;
+    const auto rightwards = glm::vec3(to->modelMatrix()[3]).x >=
+                            glm::vec3(from->modelMatrix()[3]).x;
     const auto fromAt = edgePoint(*from, *strand.fromAnchor, rightwards);
     const auto toAt   = edgePoint(*to, *strand.toAnchor, !rightwards);
     if (!fromAt || !toAt) {

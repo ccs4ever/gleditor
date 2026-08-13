@@ -86,8 +86,7 @@ public:
   /// Convenience for a binding with no modifiers.
   void bind(int scancode, std::string name, std::string help,
             std::function<void()> run) {
-    bind(scancode, Mod::None, std::move(name), std::move(help),
-         std::move(run));
+    bind(scancode, Mod::None, std::move(name), std::move(help), std::move(run));
   }
 
   /**
@@ -175,8 +174,8 @@ render::Backend applyCommonArguments(argparse::ArgumentParser &parser,
  */
 class Application {
 public:
-  Application(AppStateRef aState, RendererRef aRenderer, render::Backend aBackend,
-              std::string aTitle);
+  Application(AppStateRef aState, RendererRef aRenderer,
+              render::Backend aBackend, std::string aTitle);
   ~Application();
 
   Application(const Application &)            = delete;

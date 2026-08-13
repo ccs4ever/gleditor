@@ -201,8 +201,9 @@ struct ProvenanceCheck {
  * signature is good, and both are reported. Nothing here decides what to do
  * about the answer.
  */
-[[nodiscard]] ProvenanceCheck verifyProvenance(const SignedProvenance &signed_,
-                                               const SigningOptions &where = {});
+[[nodiscard]] ProvenanceCheck
+verifyProvenance(const SignedProvenance &signed_,
+                 const SigningOptions &where = {});
 
 /**
  * @brief Read the fields back out of a record's YAML.
@@ -218,9 +219,9 @@ struct ProvenanceCheck {
 
 /// Names the sealed files carry inside a torrent, so a reader knows what to
 /// look for and a writer cannot spell them differently.
-inline constexpr auto provenanceFileName  = "AUTHORSHIP.yaml";
-inline constexpr auto provenanceSigName   = "AUTHORSHIP.yaml.asc";
-inline constexpr auto sealedContentName   = "primedia";
+inline constexpr auto provenanceFileName = "AUTHORSHIP.yaml";
+inline constexpr auto provenanceSigName  = "AUTHORSHIP.yaml.asc";
+inline constexpr auto sealedContentName  = "primedia";
 
 } // namespace xudu
 

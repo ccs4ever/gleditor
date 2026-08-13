@@ -4,8 +4,8 @@
 
 #include <algorithm>
 #include <chrono>
-#include <iterator>
 #include <cstdint>
+#include <iterator>
 #include <map>
 #include <memory>
 #include <set>
@@ -155,9 +155,11 @@ struct SwarmContentSource::Impl {
   explicit Impl(SwarmContentSource::Options aOptions)
       : options(std::move(aOptions)), session(settings(options)) {}
 
-  static lt::settings_pack settings(const SwarmContentSource::Options &options) {
+  static lt::settings_pack
+  settings(const SwarmContentSource::Options &options) {
     lt::settings_pack pack;
-    pack.set_str(lt::settings_pack::listen_interfaces, options.listenInterfaces);
+    pack.set_str(lt::settings_pack::listen_interfaces,
+                 options.listenInterfaces);
     pack.set_bool(lt::settings_pack::enable_dht, options.enableDht);
     pack.set_bool(lt::settings_pack::enable_lsd, options.enableLocalDiscovery);
     // Trackers are not disabled by a setting; the flag below is applied per
@@ -210,8 +212,8 @@ struct SwarmContentSource::Impl {
         }
         const lt::piece_index_t index{*piece};
         swarm.handle.piece_priority(index, lt::top_priority);
-        swarm.handle.set_piece_deadline(index, 0,
-                                        lt::torrent_handle::alert_when_available);
+        swarm.handle.set_piece_deadline(
+            index, 0, lt::torrent_handle::alert_when_available);
         ++piece;
       }
     }
@@ -277,8 +279,7 @@ struct SwarmContentSource::Impl {
    */
   void recordMutableItem(const lt::dht_mutable_item_alert &alert) {
     MutableLink answered;
-    std::copy(alert.key.begin(), alert.key.end(),
-              answered.key.bytes.begin());
+    std::copy(alert.key.begin(), alert.key.end(), answered.key.bytes.begin());
     answered.salt = alert.salt;
 
     const auto found = names.find(answered.target());
@@ -297,9 +298,8 @@ struct SwarmContentSource::Impl {
     Signature signature;
     std::copy(alert.signature.begin(), alert.signature.end(),
               signature.bytes.begin());
-    if (!verifyMutableItem(
-            mutableSigningBuffer(alert.salt, alert.seq, encoded), signature,
-            answered.key)) {
+    if (!verifyMutableItem(mutableSigningBuffer(alert.salt, alert.seq, encoded),
+                           signature, answered.key)) {
       return;
     }
 
@@ -330,7 +330,8 @@ struct SwarmContentSource::Impl {
         if (const auto found = swarms.find(hash); found != swarms.end()) {
           found->second.pieces.emplace(
               static_cast<int>(got->piece),
-              std::string(got->buffer.get(), static_cast<std::size_t>(got->size)));
+              std::string(got->buffer.get(),
+                          static_cast<std::size_t>(got->size)));
         }
       } else if (const auto *meta =
                      lt::alert_cast<lt::metadata_received_alert>(alert);
@@ -404,7 +405,7 @@ InfoHash SwarmContentSource::addTorrent(const std::string_view torrentFile,
                                         const bool seeding) {
   // Parsed here as well as by libtorrent. The one this program verifies
   // against must be the one this program read.
-  auto meta = std::make_unique<Metainfo>(Metainfo::parse(torrentFile));
+  auto meta       = std::make_unique<Metainfo>(Metainfo::parse(torrentFile));
   const auto hash = meta->hash();
 
   lt::add_torrent_params params;
@@ -467,8 +468,8 @@ void SwarmContentSource::connectPeer(const InfoHash &hash,
   impl->tryConnectPeers();
 }
 
-bool SwarmContentSource::waitForMetadata(const InfoHash &hash,
-                                         const std::chrono::milliseconds timeout) {
+bool SwarmContentSource::waitForMetadata(
+    const InfoHash &hash, const std::chrono::milliseconds timeout) {
   return impl->waitUntil(
       [this, &hash] {
         const auto found = impl->swarms.find(hash);
@@ -517,8 +518,9 @@ void SwarmContentSource::publishMutable(const MutableKeys &keys,
   // argument would be a reference to something long gone.
   impl->session.dht_put_item(
       toLt(keys.publicKey).bytes,
-      [keys, payload, sequence](lt::entry &value, std::array<char, 64> &signature,
-                                std::int64_t &seq, const std::string &itemSalt) {
+      [keys, payload,
+       sequence](lt::entry &value, std::array<char, 64> &signature,
+                 std::int64_t &seq, const std::string &itemSalt) {
         // The two-iterator overload this used to call is gone as of
         // libtorrent 2.1: only the span-based form remains across every
         // version this project builds against (1.2 through 2.1), so that is
@@ -619,7 +621,8 @@ std::string SwarmContentSource::readStream(const InfoHash &hash,
   // Stitch the pieces together and cut out the range asked for. The bytes are
   // not trusted here and are not checked here either: Resolver hashes each
   // piece against the torrent, which is the one place that decision belongs.
-  const auto readFrom = static_cast<std::uint64_t>(firstPiece) * meta.pieceLength();
+  const auto readFrom =
+      static_cast<std::uint64_t>(firstPiece) * meta.pieceLength();
   std::string joined;
   for (auto piece = firstPiece; piece < endPiece; piece++) {
     const auto held = swarm.pieces.find(static_cast<int>(piece));
@@ -637,6 +640,5 @@ std::string SwarmContentSource::readStream(const InfoHash &hash,
 }
 
 } // namespace xudu
-
 
 // vi: set sw=2 sts=2 ts=2 et:

@@ -95,9 +95,9 @@ TEST(VertexRecord, aQuadSaysItsSizeItsLayerAndItsKind) {
 
   // The extremes of every field at once, which is where a field that has crept
   // into its neighbour shows up.
-  const auto full = unpackQuad(Row::box(Row::maxAtlasLayers - 1,
-                                        Row::maxQuadExtent, Row::maxQuadExtent,
-                                        render::tagKindGlyph));
+  const auto full =
+      unpackQuad(Row::box(Row::maxAtlasLayers - 1, Row::maxQuadExtent,
+                          Row::maxQuadExtent, render::tagKindGlyph));
   EXPECT_EQ(full.width, Row::maxQuadExtent);
   EXPECT_EQ(full.height, Row::maxQuadExtent);
   EXPECT_EQ(full.layer, Row::maxAtlasLayers - 1);
@@ -108,15 +108,15 @@ TEST(VertexRecord, inkKeepsAllEightBitsOfEveryChannel) {
   // Ink is what a glyph and a greeked line are drawn in, and the bars that
   // stand in for lines are shaded by how much ink each line carries. Rounding
   // them would band a page seen from a distance, so this field is exact.
-  const auto ink = unpackInk(Row::ink(Row::color3(17, 200, 3), Row::onText,
-                                      false));
+  const auto ink =
+      unpackInk(Row::ink(Row::color3(17, 200, 3), Row::onText, false));
   EXPECT_EQ(ink.red, 17U);
   EXPECT_EQ(ink.green, 200U);
   EXPECT_EQ(ink.blue, 3U);
 
   for (unsigned int shade = 0; shade < 256; shade++) {
-    const auto grey = unpackInk(Row::fill(Row::color(
-        static_cast<unsigned char>(shade)), Row::onPaper));
+    const auto grey = unpackInk(
+        Row::fill(Row::color(static_cast<unsigned char>(shade)), Row::onPaper));
     EXPECT_EQ(grey.red, shade);
     EXPECT_EQ(grey.green, shade);
     EXPECT_EQ(grey.blue, shade);
@@ -155,10 +155,14 @@ TEST(VertexRecord, paperRoundsAndWhiteStaysWhite) {
   // is quantisation and not a field written over its neighbour.
   for (unsigned int value = 0; value < 256; value++) {
     const auto shade = static_cast<unsigned char>(value);
-    const auto back  = unpackPaper(Row::paperAt(Row::color3(shade, shade, shade), 0) >> 16);
-    EXPECT_LE(std::abs(static_cast<int>(back.red) - static_cast<int>(value)), 5);
-    EXPECT_LE(std::abs(static_cast<int>(back.green) - static_cast<int>(value)), 2);
-    EXPECT_LE(std::abs(static_cast<int>(back.blue) - static_cast<int>(value)), 5);
+    const auto back =
+        unpackPaper(Row::paperAt(Row::color3(shade, shade, shade), 0) >> 16);
+    EXPECT_LE(std::abs(static_cast<int>(back.red) - static_cast<int>(value)),
+              5);
+    EXPECT_LE(std::abs(static_cast<int>(back.green) - static_cast<int>(value)),
+              2);
+    EXPECT_LE(std::abs(static_cast<int>(back.blue) - static_cast<int>(value)),
+              5);
   }
 }
 
@@ -212,8 +216,8 @@ TEST(VertexRecord, aZeroedRowIsAQuadWithNothingInIt) {
 TEST(VertexRecord, theDrawsIdentityAndTheQuadsKindRebuildTheWholeTag) {
   constexpr std::uint32_t kindShift = render::tagDocBits + render::tagPageBits;
 
-  for (const auto kind : {render::tagKindOverlay, render::tagKindPage,
-                          render::tagKindGlyph}) {
+  for (const auto kind :
+       {render::tagKindOverlay, render::tagKindPage, render::tagKindGlyph}) {
     for (const std::uint32_t doc : {0U, 1U, 4095U}) {
       for (const std::uint32_t page : {0U, 7U, 16383U}) {
         // What Page and Canvas hand the draw, with no kind in it.

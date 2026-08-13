@@ -62,7 +62,7 @@ void bindCommands(gleditor::Application &app, const AppStateRef &state,
 int main(const int argc, char **argv) {
   gleditor::initLocale();
 
-  const auto state = std::make_shared<AppState>();
+  const auto state    = std::make_shared<AppState>();
   const bool detailed = wantsEveryOption(argc, argv);
 
   argparse::ArgumentParser parser("gleditor", TOSTRING(GLEDITOR_VERSION));

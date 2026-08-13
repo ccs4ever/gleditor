@@ -97,12 +97,12 @@ enum class AttributeType : std::uint8_t {
  * @brief One vertex attribute within the per-instance vertex layout.
  */
 struct VertexAttribute {
-  std::string name;    ///< Name used to look the attribute up when the backend
-                       ///< binds by name rather than by location.
+  std::string name; ///< Name used to look the attribute up when the backend
+                    ///< binds by name rather than by location.
   std::uint32_t location{}; ///< Shader location.
   AttributeType type{AttributeType::Float};
-  int components{};         ///< 1..4.
-  std::uint32_t offset{};   ///< Byte offset within the vertex structure.
+  int components{};       ///< 1..4.
+  std::uint32_t offset{}; ///< Byte offset within the vertex structure.
 };
 
 /**
@@ -311,7 +311,7 @@ inline constexpr std::uint32_t tagKindGlyph   = 3;
  * a record of its own, and shifts this into the identity itself. The identity
  * word has four bits of kind, which is what bounds this.
  */
-inline constexpr std::uint32_t tagKindBeam    = 4;
+inline constexpr std::uint32_t tagKindBeam = 4;
 
 /// Bit widths of the identity word a glyph instance carries. Packed rather
 /// than given a word each because the attachment is four words wide and the
@@ -351,9 +351,10 @@ inline std::uint32_t clusterCharStep(const std::uint32_t charCount,
   if (0 == charCount) {
     return 0;
   }
-  const auto clamped = fraction < 0.0F ? 0.0F : (fraction > 1.0F ? 1.0F : fraction);
-  const auto scaled  = static_cast<double>(clamped) * charCount;
-  const auto steps   = static_cast<std::uint32_t>(scaled + 0.5);
+  const auto clamped =
+      fraction < 0.0F ? 0.0F : (fraction > 1.0F ? 1.0F : fraction);
+  const auto scaled = static_cast<double>(clamped) * charCount;
+  const auto steps  = static_cast<std::uint32_t>(scaled + 0.5);
   return steps > charCount ? charCount : steps;
 }
 
@@ -362,12 +363,12 @@ inline PickingTag unpackPickingTag(const std::uint32_t identity,
                                    const std::uint32_t clusterIndex,
                                    const std::uint32_t fraction) {
   PickingTag tag;
-  tag.kind      = identity >> (tagDocBits + tagPageBits);
-  tag.docIndex  = (identity >> tagPageBits) & ((1U << tagDocBits) - 1U);
-  tag.pageIndex = identity & ((1U << tagPageBits) - 1U);
+  tag.kind         = identity >> (tagDocBits + tagPageBits);
+  tag.docIndex     = (identity >> tagPageBits) & ((1U << tagDocBits) - 1U);
+  tag.pageIndex    = identity & ((1U << tagPageBits) - 1U);
   tag.clusterIndex = clusterIndex;
-  tag.fraction     = static_cast<float>(fraction) /
-                 static_cast<float>(tagFractionScale);
+  tag.fraction =
+      static_cast<float>(fraction) / static_cast<float>(tagFractionScale);
   return tag;
 }
 

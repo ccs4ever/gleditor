@@ -27,9 +27,8 @@ namespace {
 /// Throw with the failing call named, so a VkResult never escapes silently.
 void check(const VkResult result, const char *what) {
   if (VK_SUCCESS != result) {
-    throw std::runtime_error(
-        std::format("Vulkan: {} failed with VkResult {}", what,
-                    static_cast<int>(result)));
+    throw std::runtime_error(std::format("Vulkan: {} failed with VkResult {}",
+                                         what, static_cast<int>(result)));
   }
 }
 
@@ -44,8 +43,7 @@ constexpr VkFormat colourFormat = VK_FORMAT_R8G8B8A8_UNORM;
 VKAPI_ATTR VkBool32 VKAPI_CALL
 debugCallback(const VkDebugUtilsMessageSeverityFlagBitsEXT severity,
               VkDebugUtilsMessageTypeFlagsEXT /*types*/,
-              const VkDebugUtilsMessengerCallbackDataEXT *data,
-              void *user) {
+              const VkDebugUtilsMessengerCallbackDataEXT *data, void *user) {
   auto *sink = static_cast<DiagnosticSink *>(user);
   if (nullptr == sink || nullptr == data || nullptr == data->pMessage) {
     return VK_FALSE;
@@ -57,7 +55,8 @@ debugCallback(const VkDebugUtilsMessageSeverityFlagBitsEXT severity,
   // through.
   if (0 != (severity & VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT)) {
     sink->record(DiagnosticSeverity::Error, data->pMessage);
-  } else if (0 != (severity & VK_DEBUG_UTILS_MESSAGE_SEVERITY_WARNING_BIT_EXT)) {
+  } else if (0 !=
+             (severity & VK_DEBUG_UTILS_MESSAGE_SEVERITY_WARNING_BIT_EXT)) {
     sink->record(DiagnosticSeverity::Warning, data->pMessage);
   }
   // VK_FALSE means "do not abort the call that produced this", which is the
@@ -165,9 +164,8 @@ void DeviceVK::createInstance() {
   // outlive the call that produced them either way.
   const auto sdlExtNames = sdl::vulkanInstanceExtensions(targetWindow->window);
   if (sdlExtNames.empty()) {
-    throw std::runtime_error(
-        std::format("SDL_Vulkan_GetInstanceExtensions failed: {}",
-                    SDL_GetError()));
+    throw std::runtime_error(std::format(
+        "SDL_Vulkan_GetInstanceExtensions failed: {}", SDL_GetError()));
   }
   std::vector<const char *> extensions;
   extensions.reserve(sdlExtNames.size());
@@ -203,9 +201,10 @@ void DeviceVK::createInstance() {
       "VK_LAYER_KHRONOS_validation"};
 
   VkInstanceCreateInfo createInfo{};
-  createInfo.sType                   = VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO;
-  createInfo.pApplicationInfo        = &appInfo;
-  createInfo.enabledExtensionCount   = static_cast<std::uint32_t>(extensions.size());
+  createInfo.sType            = VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO;
+  createInfo.pApplicationInfo = &appInfo;
+  createInfo.enabledExtensionCount =
+      static_cast<std::uint32_t>(extensions.size());
   createInfo.ppEnabledExtensionNames = extensions.data();
   if (wantPortability) {
     createInfo.flags |= VK_INSTANCE_CREATE_ENUMERATE_PORTABILITY_BIT_KHR;
@@ -225,9 +224,8 @@ void DeviceVK::createInstance() {
     if (nullptr != create) {
       VkDebugUtilsMessengerCreateInfoEXT info{};
       info.sType = VK_STRUCTURE_TYPE_DEBUG_UTILS_MESSENGER_CREATE_INFO_EXT;
-      info.messageSeverity =
-          VK_DEBUG_UTILS_MESSAGE_SEVERITY_WARNING_BIT_EXT |
-          VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT;
+      info.messageSeverity = VK_DEBUG_UTILS_MESSAGE_SEVERITY_WARNING_BIT_EXT |
+                             VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT;
       info.messageType = VK_DEBUG_UTILS_MESSAGE_TYPE_GENERAL_BIT_EXT |
                          VK_DEBUG_UTILS_MESSAGE_TYPE_VALIDATION_BIT_EXT |
                          VK_DEBUG_UTILS_MESSAGE_TYPE_PERFORMANCE_BIT_EXT;
@@ -261,8 +259,8 @@ void DeviceVK::pickPhysicalDevice() {
     vkGetPhysicalDeviceQueueFamilyProperties(candidate, &familyCount,
                                              families.data());
 
-    bool haveGraphics = false;
-    bool havePresent  = false;
+    bool haveGraphics      = false;
+    bool havePresent       = false;
     std::uint32_t graphics = 0;
     std::uint32_t present  = 0;
     for (std::uint32_t i = 0; i < familyCount; i++) {
@@ -298,19 +296,17 @@ void DeviceVK::pickPhysicalDevice() {
   VkPhysicalDeviceProperties props{};
   vkGetPhysicalDeviceProperties(physicalDevice, &props);
   std::cout << std::format("render: vulkan device, {} (API {}.{}.{})\n",
-                           props.deviceName,
-                           VK_VERSION_MAJOR(props.apiVersion),
+                           props.deviceName, VK_VERSION_MAJOR(props.apiVersion),
                            VK_VERSION_MINOR(props.apiVersion),
                            VK_VERSION_PATCH(props.apiVersion));
 
-  limits = TextureLimits{
-      static_cast<int>(props.limits.maxImageDimension2D),
-      static_cast<int>(props.limits.maxImageArrayLayers)};
+  limits = TextureLimits{static_cast<int>(props.limits.maxImageDimension2D),
+                         static_cast<int>(props.limits.maxImageArrayLayers)};
 
   // Pick the first depth format the device can use as a depth attachment.
-  for (const auto candidate : std::array{VK_FORMAT_D32_SFLOAT,
-                                         VK_FORMAT_D32_SFLOAT_S8_UINT,
-                                         VK_FORMAT_D24_UNORM_S8_UINT}) {
+  for (const auto candidate :
+       std::array{VK_FORMAT_D32_SFLOAT, VK_FORMAT_D32_SFLOAT_S8_UINT,
+                  VK_FORMAT_D24_UNORM_S8_UINT}) {
     VkFormatProperties formatProps{};
     vkGetPhysicalDeviceFormatProperties(physicalDevice, candidate,
                                         &formatProps);
@@ -382,9 +378,9 @@ void DeviceVK::createLogicalDevice() {
 
 void DeviceVK::createSwapchain(const int width, const int height) {
   VkSurfaceCapabilitiesKHR caps{};
-  check(vkGetPhysicalDeviceSurfaceCapabilitiesKHR(physicalDevice, surface,
-                                                  &caps),
-        "vkGetPhysicalDeviceSurfaceCapabilitiesKHR");
+  check(
+      vkGetPhysicalDeviceSurfaceCapabilitiesKHR(physicalDevice, surface, &caps),
+      "vkGetPhysicalDeviceSurfaceCapabilitiesKHR");
 
   std::uint32_t formatCount = 0;
   vkGetPhysicalDeviceSurfaceFormatsKHR(physicalDevice, surface, &formatCount,
@@ -473,9 +469,8 @@ namespace {
 void createImage(const VkDevice device,
                  const VkPhysicalDeviceMemoryProperties &memProps,
                  const VkExtent2D extent, const VkFormat format,
-                 const VkImageUsageFlags usage,
-                 const VkImageAspectFlags aspect, VkImage &image,
-                 VkDeviceMemory &memory, VkImageView &view) {
+                 const VkImageUsageFlags usage, const VkImageAspectFlags aspect,
+                 VkImage &image, VkDeviceMemory &memory, VkImageView &view) {
   VkImageCreateInfo info{};
   info.sType         = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
   info.imageType     = VK_IMAGE_TYPE_2D;
@@ -517,10 +512,10 @@ void createImage(const VkDevice device,
   check(vkBindImageMemory(device, image, memory, 0), "vkBindImageMemory");
 
   VkImageViewCreateInfo viewInfo{};
-  viewInfo.sType    = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
-  viewInfo.image    = image;
-  viewInfo.viewType = VK_IMAGE_VIEW_TYPE_2D;
-  viewInfo.format   = format;
+  viewInfo.sType            = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
+  viewInfo.image            = image;
+  viewInfo.viewType         = VK_IMAGE_VIEW_TYPE_2D;
+  viewInfo.format           = format;
   viewInfo.subresourceRange = {aspect, 0, 1, 0, 1};
   check(vkCreateImageView(device, &viewInfo, nullptr, &view),
         "vkCreateImageView");
@@ -583,9 +578,9 @@ void DeviceVK::createRenderPass() {
   attachments[0].initialLayout  = VK_IMAGE_LAYOUT_UNDEFINED;
   attachments[0].finalLayout    = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
   // picking tag
-  attachments[1]              = attachments[0];
-  attachments[1].format       = tagFormat;
-  attachments[1].finalLayout  = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
+  attachments[1]             = attachments[0];
+  attachments[1].format      = tagFormat;
+  attachments[1].finalLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
   // depth
   attachments[2].format         = depthFormat;
   attachments[2].samples        = VK_SAMPLE_COUNT_1_BIT;
@@ -594,8 +589,7 @@ void DeviceVK::createRenderPass() {
   attachments[2].stencilLoadOp  = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
   attachments[2].stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
   attachments[2].initialLayout  = VK_IMAGE_LAYOUT_UNDEFINED;
-  attachments[2].finalLayout =
-      VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
+  attachments[2].finalLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
 
   const std::array<VkAttachmentReference, 2> colourRefs = {
       VkAttachmentReference{0, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL},
@@ -678,18 +672,18 @@ void DeviceVK::createCommandResources() {
 
   for (std::uint32_t i = 0; i < framesInFlight; i++) {
     frames[i].commands = commandBuffers[i];
-    check(vkCreateSemaphore(device, &semInfo, nullptr,
-                            &frames[i].imageAvailable),
-          "vkCreateSemaphore");
-    check(vkCreateSemaphore(device, &semInfo, nullptr,
-                            &frames[i].renderFinished),
-          "vkCreateSemaphore");
+    check(
+        vkCreateSemaphore(device, &semInfo, nullptr, &frames[i].imageAvailable),
+        "vkCreateSemaphore");
+    check(
+        vkCreateSemaphore(device, &semInfo, nullptr, &frames[i].renderFinished),
+        "vkCreateSemaphore");
     check(vkCreateFence(device, &fenceInfo, nullptr, &frames[i].inFlight),
           "vkCreateFence");
     // Destination for this slot's picking read: four unsigned integers, the
     // uvec4 the fragment stage writes to the picking attachment.
-    frames[i].pickingBuffer = createBuffer(BufferKind::Readback,
-                                           4 * sizeof(std::uint32_t));
+    frames[i].pickingBuffer =
+        createBuffer(BufferKind::Readback, 4 * sizeof(std::uint32_t));
 
     // One command pool per recording thread per frame. A pool may only be
     // touched by one thread at a time, so sharing one between the workers

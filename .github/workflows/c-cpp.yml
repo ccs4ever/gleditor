@@ -2,11 +2,42 @@ name: C/C++ CI
 
 on:
   push:
-    branches: [ "main" ]
+    branches: ["main"]
   pull_request:
-    branches: [ "main" ]
+    branches: ["main"]
 
 jobs:
+  # Formatting and the text-only linters, kept out of the build matrix so a
+  # missing semicolon in a comment does not wait on a full SDL2/SDL3 compile
+  # to be reported, and so this job needs none of that matrix's dependencies
+  # at all -- format, format-check and lint are exempted in the Makefile from
+  # both the pkg-config checks and the dependency-file rebuild that every
+  # other goal triggers, for exactly this reason.
+  format:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v7
+    - name: packages
+      run: |
+        sudo apt-get update -q
+        sudo apt-get install -y -q --no-install-recommends \
+          clang-format shfmt shellcheck yamllint markdownlint
+    - name: make format-check
+      run: make format-check
+    - name: make lint
+      run: make lint
+
+  # flake.nix and packaging/nix/gleditor.nix, checked against the same
+  # formatter the flake itself names as its `formatter` output -- a separate
+  # job because it needs Nix installed and nothing else here does.
+  nix-fmt:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v7
+    - uses: cachix/install-nix-action@v31
+    - name: nixfmt --check
+      run: nix run nixpkgs#nixfmt-rfc-style -- --check flake.nix packaging/nix/gleditor.nix
+
   build:
 
     runs-on: ubuntu-latest

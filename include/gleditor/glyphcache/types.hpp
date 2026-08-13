@@ -1,6 +1,7 @@
 /**
  * @file types.hpp
- * @brief Fundamental geometry and texture coordinate types used by the glyph cache.
+ * @brief Fundamental geometry and texture coordinate types used by the glyph
+ * cache.
  *
  * Provides small POD structs for integer and floating point points/rectangles,
  * character extents and texture coordinates, along with stream helpers and
@@ -12,8 +13,8 @@
 #include <iostream>
 #include <utility>
 
-enum class Length : int;  ///< Integer length unit used for glyph cache packing
-enum class Offset : int;  ///< Integer offset unit used for glyph cache packing
+enum class Length : int; ///< Integer length unit used for glyph cache packing
+enum class Offset : int; ///< Integer offset unit used for glyph cache packing
 
 /**
  * @brief Integer 2D point (uses Offset units).

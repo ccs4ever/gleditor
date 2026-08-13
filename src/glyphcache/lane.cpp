@@ -2,8 +2,8 @@
  * @file lane.cpp
  * @brief Implementation of GlyphLane packing and comparisons.
  */
-#include <gleditor/glyphcache/lane.hpp> // IWYU pragma: associated
 #include <compare>
+#include <gleditor/glyphcache/lane.hpp> // IWYU pragma: associated
 
 [[nodiscard]] std::partial_ordering operator<=>(const GlyphLane &left,
                                                 const GlyphLane &right) {

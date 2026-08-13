@@ -24,10 +24,10 @@
 #include <glm/gtx/string_cast.hpp>
 
 #include <gleditor/doc.hpp>
+#include <gleditor/paths.hpp>
 #include <gleditor/render/device.hpp>
 #include <gleditor/render/shader_source.hpp>
 #include <gleditor/render_state.hpp>
-#include <gleditor/paths.hpp>
 #include <gleditor/sdl_wrap.hpp>
 #include <gleditor/state.hpp>
 #include <gleditor/tqueue.hpp>
@@ -68,12 +68,12 @@ Renderer::~Renderer() = default;
 
 void Renderer::createPipeline(RenderState &state) const {
   render::PipelineDesc desc;
-  desc.name = "glyph";
+  desc.name           = "glyph";
   const auto shaders  = shaderDir();
   desc.vertexSource   = render::readShaderBody(shaders + "/glyph.vert.glsl");
   desc.fragmentSource = render::readShaderBody(shaders + "/glyph.frag.glsl");
   desc.spirvDir       = shaders + "/vulkan";
-  desc.layout   = Doc::vertexLayout();
+  desc.layout         = Doc::vertexLayout();
 
   state.glyphPipeline = device->createPipeline(desc);
   // The overlay draws the same glyph instances with the same shaders; only the
@@ -155,8 +155,8 @@ void Renderer::closeDoc(RenderState &state, const std::uint32_t index) {
 }
 
 void Renderer::openDoc(RenderState &state, const gleditor::TextSource &source) {
-  const auto newDocPosition =
-      glm::translate(glm::mat4(1.0), AbstractRenderer::documentSlot(state.docs.size()));
+  const auto newDocPosition = glm::translate(
+      glm::mat4(1.0), AbstractRenderer::documentSlot(state.docs.size()));
   std::cout << "doc pos: " << state.docs.size() << " "
             << glm::to_string(newDocPosition) << "\n";
   auto docPtr = Doc::create(getPtr(), device.get(), newDocPosition, source);
@@ -202,11 +202,11 @@ bool Renderer::update(RenderState &state, const bool settled) {
     screenWidth      = view.screenWidth;
     screenHeight     = view.screenHeight;
 
-    const glm::mat4 projection = glm::perspective(
-        glm::radians(view.fov),
-        static_cast<float>(view.screenWidth) /
-            static_cast<float>(view.screenHeight),
-        0.1F, 10000.0F);
+    const glm::mat4 projection =
+        glm::perspective(glm::radians(view.fov),
+                         static_cast<float>(view.screenWidth) /
+                             static_cast<float>(view.screenHeight),
+                         0.1F, 10000.0F);
     const glm::mat4 camera =
         glm::lookAt(view.pos, view.pos + view.front, view.upward);
 
@@ -241,8 +241,9 @@ bool Renderer::update(RenderState &state, const bool settled) {
   for (const std::shared_ptr<Doc> &doc : fadingDocs) {
     doc->collect(state.pageBatches, viewProjection, budget, lastDraw);
   }
-  std::erase_if(fadingDocs,
-                [](const std::shared_ptr<Doc> &doc) { return doc->hasFadedOut(); });
+  std::erase_if(fadingDocs, [](const std::shared_ptr<Doc> &doc) {
+    return doc->hasFadedOut();
+  });
   // Timed apart from the collection above: only the recording can be split
   // across threads, so an improvement there would be invisible in a figure
   // that also counted a matrix multiply per page.
@@ -374,7 +375,8 @@ void Renderer::reportBenchmark() const {
   }
   const auto median = [](std::vector<std::chrono::nanoseconds> samples) {
     std::ranges::nth_element(samples, samples.begin() + (samples.size() / 2));
-    return std::chrono::duration<double, std::milli>(samples[samples.size() / 2])
+    return std::chrono::duration<double, std::milli>(
+               samples[samples.size() / 2])
         .count();
   };
   const auto caps = device->capabilities();
@@ -429,7 +431,7 @@ void Renderer::placeCaretFromPick(RenderState &state,
                              pick.y, pick.tag.docIndex);
     return;
   }
-  const auto &doc = state.docs[pick.tag.docIndex];
+  const auto &doc   = state.docs[pick.tag.docIndex];
   const auto offset = doc->offsetForPick(pick.tag);
   if (!offset) {
     std::cout << std::format("caret {},{}: unresolved\n", pick.x, pick.y);
@@ -464,9 +466,9 @@ void Renderer::collectPickingResults(RenderState &state) {
     } else if (awaitingStep && awaitingPick && awaitingPick->first == pick->x &&
                awaitingPick->second == pick->y) {
       std::cout << std::format(
-          "pick {},{}: kind {} doc {} page {} cluster {} frac {:.3f}\n", pick->x,
-          pick->y, pick->tag.kind, pick->tag.docIndex, pick->tag.pageIndex,
-          pick->tag.clusterIndex, pick->tag.fraction);
+          "pick {},{}: kind {} doc {} page {} cluster {} frac {:.3f}\n",
+          pick->x, pick->y, pick->tag.kind, pick->tag.docIndex,
+          pick->tag.pageIndex, pick->tag.clusterIndex, pick->tag.fraction);
       awaitingPick.reset();
       awaitingStep = false;
       nextStep++;
@@ -581,7 +583,8 @@ void Renderer::finishStepWhenSettled() {
   awaitingSettle = true;
 }
 
-void AbstractRenderer::addSpanDecorator(gleditor::SpanDecorator *const decorator) {
+void AbstractRenderer::addSpanDecorator(
+    gleditor::SpanDecorator *const decorator) {
   if (nullptr != decorator &&
       std::ranges::find(spanDecorators, decorator) == spanDecorators.end()) {
     spanDecorators.push_back(decorator);

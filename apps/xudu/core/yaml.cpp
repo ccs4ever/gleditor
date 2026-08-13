@@ -15,8 +15,8 @@ std::string_view trimmed(std::string_view text) {
   while (!text.empty() && (' ' == text.front() || '\t' == text.front())) {
     text.remove_prefix(1);
   }
-  while (!text.empty() && (' ' == text.back() || '\t' == text.back() ||
-                           '\r' == text.back())) {
+  while (!text.empty() &&
+         (' ' == text.back() || '\t' == text.back() || '\r' == text.back())) {
     text.remove_suffix(1);
   }
   return text;

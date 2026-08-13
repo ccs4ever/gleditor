@@ -8,10 +8,10 @@ name: Packaging
 # packaging was blocked on for its whole existence.
 on:
   push:
-    branches: [ "main" ]
-    tags: [ "v*" ]
+    branches: ["main"]
+    tags: ["v*"]
   pull_request:
-    branches: [ "main" ]
+    branches: ["main"]
   workflow_dispatch:
 
 permissions:
@@ -117,6 +117,16 @@ jobs:
       - name: trust the checkout
         run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
 
+      # rpmlint needs rpm's own Python binding, which only a real RPM distro
+      # ships correctly -- this container is the one place in CI it can run
+      # at all. Non-blocking for now: nobody has triaged its output against
+      # this spec yet, so failing the build on it would be gating on warnings
+      # nobody has judged real.
+      - name: rpmlint
+        run: |
+          dnf install -y rpmlint
+          rpmlint packaging/fedora/gleditor.spec || true
+
       - name: build the tarball and the rpm
         run: |
           rpmdev-setuptree
@@ -187,7 +197,8 @@ jobs:
           # /etc/makepkg.conf, so build()'s plain `make` call compiles one
           # file at a time unless something sets it -- makepkg.conf does not
           # override an already-exported MAKEFLAGS, so this is enough.
-          su builder -c 'cd /home/builder/pkg && MAKEFLAGS="-j$(nproc)" makepkg --noconfirm --nodeps'
+          su builder -c 'cd /home/builder/pkg && MAKEFLAGS="-j$(nproc)" \
+            makepkg --noconfirm --nodeps'
 
       - name: install it
         run: pacman -U --noconfirm /home/builder/pkg/gleditor-*.pkg.tar.zst

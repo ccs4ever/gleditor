@@ -24,8 +24,13 @@ TEST_IP=10.77.0.2
 WORK=$(mktemp -d)
 PEER_PID=
 
+# Reached only via the trap below, which shellcheck cannot see -- everything
+# in here is live code, not dead.
+# shellcheck disable=SC2317
 cleanup() {
-  [ -n "$PEER_PID" ] && kill "$PEER_PID" 2>/dev/null || true
+  if [ -n "$PEER_PID" ]; then
+    kill "$PEER_PID" 2>/dev/null || true
+  fi
   ip netns del "$PEER_NS" 2>/dev/null || true
   ip netns del "$TEST_NS" 2>/dev/null || true
   rm -rf "$WORK"
@@ -36,6 +41,9 @@ if [ "$(id -u)" != 0 ]; then
   echo "swarm-netns-test: needs root to create network namespaces" >&2
   exit 77
 fi
+# A one-item list on purpose, so a second required tool is one more word
+# rather than a second copy of this loop.
+# shellcheck disable=SC2043
 for tool in ip; do
   command -v "$tool" >/dev/null 2>&1 || {
     echo "swarm-netns-test: $tool is not installed (iproute2)" >&2
@@ -90,8 +98,8 @@ echo "==> starting the seeder in $PEER_NS"
 # item, so the leecher can be given a name rather than a hash and made to go
 # and look up what it currently means.
 ip netns exec "$PEER_NS" ./build/xudu-swarm-peer \
-    "$WORK/sample.torrent" "$WORK/seed" "$PEER_IP" --publish \
-    > "$WORK/peer.out" 2>"$WORK/peer.err" &
+  "$WORK/sample.torrent" "$WORK/seed" "$PEER_IP" --publish \
+  >"$WORK/peer.out" 2>"$WORK/peer.err" &
 PEER_PID=$!
 
 # Wait for it to say which port it took, rather than guessing how long it needs.
@@ -100,28 +108,40 @@ i=0
 while [ "$i" -lt 100 ]; do
   PEER_PORT=$(sed -n 's/^port //p' "$WORK/peer.out" 2>/dev/null | head -1)
   [ -n "$PEER_PORT" ] && break
-  kill -0 "$PEER_PID" 2>/dev/null || { echo "seeder died:"; cat "$WORK/peer.err"; exit 1; }
+  kill -0 "$PEER_PID" 2>/dev/null || {
+    echo "seeder died:"
+    cat "$WORK/peer.err"
+    exit 1
+  }
   i=$((i + 1))
   sleep 0.1
 done
-[ -n "$PEER_PORT" ] || { echo "seeder never reported a port:"; cat "$WORK/peer.err"; exit 1; }
+[ -n "$PEER_PORT" ] || {
+  echo "seeder never reported a port:"
+  cat "$WORK/peer.err"
+  exit 1
+}
 echo "  listening on $PEER_IP:$PEER_PORT"
 
 # Printed after the port, so by now it is there.
 PEER_PUBKEY=$(sed -n 's/^pubkey //p' "$WORK/peer.out" | head -1)
-[ -n "$PEER_PUBKEY" ] || { echo "seeder never reported a public key:"; cat "$WORK/peer.err"; exit 1; }
+[ -n "$PEER_PUBKEY" ] || {
+  echo "seeder never reported a public key:"
+  cat "$WORK/peer.err"
+  exit 1
+}
 echo "  publishing as $PEER_PUBKEY"
 
 echo "==> running the swarm tests in $TEST_NS"
 set +e
 ip netns exec "$TEST_NS" env \
-    XUDU_PEER_HOST="$PEER_IP" \
-    XUDU_PEER_PORT="$PEER_PORT" \
-    XUDU_PEER_TORRENT="$WORK/sample.torrent" \
-    XUDU_PEER_TEXT="$WORK/seed/sample.txt" \
-    XUDU_PEER_PUBKEY="$PEER_PUBKEY" \
-    LD_LIBRARY_PATH="$PWD/build" \
-    ./build/xudu_test --gtest_filter='SwarmTest.*:MutableNameTest.*'
+  XUDU_PEER_HOST="$PEER_IP" \
+  XUDU_PEER_PORT="$PEER_PORT" \
+  XUDU_PEER_TORRENT="$WORK/sample.torrent" \
+  XUDU_PEER_TEXT="$WORK/seed/sample.txt" \
+  XUDU_PEER_PUBKEY="$PEER_PUBKEY" \
+  LD_LIBRARY_PATH="$PWD/build" \
+  ./build/xudu_test --gtest_filter='SwarmTest.*:MutableNameTest.*'
 STATUS=$?
 set -e
 

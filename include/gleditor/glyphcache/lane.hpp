@@ -9,11 +9,11 @@
 #ifndef GLYPH_LANE_H
 #define GLYPH_LANE_H
 
-#include <gleditor/glyphcache/types.hpp>  // for operator<<, Rect, Point
-#include <gleditor/log.hpp>               // for Loggable
-#include <compare>                        // for partial_ordering
-#include <stdexcept>                      // for invalid_argument
-#include <utility>                        // for to_underlying
+#include <compare>                       // for partial_ordering
+#include <gleditor/glyphcache/types.hpp> // for operator<<, Rect, Point
+#include <gleditor/log.hpp>              // for Loggable
+#include <stdexcept>                     // for invalid_argument
+#include <utility>                       // for to_underlying
 
 enum class Length : int;
 
@@ -40,9 +40,12 @@ protected:
 
 public:
   /**
-   * @brief Construct a lane at the given palette Y offset with the specified box width/height.
-   * @param paletteYOffset Vertical offset of the lane within the palette texture.
-   * @param box Width of the lane (box.width) and max character height (box.height).
+   * @brief Construct a lane at the given palette Y offset with the specified
+   * box width/height.
+   * @param paletteYOffset Vertical offset of the lane within the palette
+   * texture.
+   * @param box Width of the lane (box.width) and max character height
+   * (box.height).
    */
   GlyphLane(const Offset paletteYOffset, const Rect &box)
       : maxCharHeight(box.height), paletteYOffset(paletteYOffset),
@@ -80,7 +83,8 @@ public:
   /**
    * @brief Insert a glyph of the given width into the lane.
    * @param charWidth Width of the glyph to insert.
-   * @return Top-left location within the palette where the glyph should be placed.
+   * @return Top-left location within the palette where the glyph should be
+   * placed.
    * @throws std::invalid_argument if the glyph width exceeds available width.
    */
   Point put(const Length &charWidth) {
@@ -88,7 +92,8 @@ public:
       throw std::invalid_argument(
           "Character width too large or small to hold in lane");
     }
-    const auto ret = Point{Offset{std::to_underlying(usedWidth)}, paletteYOffset};
+    const auto ret =
+        Point{Offset{std::to_underlying(usedWidth)}, paletteYOffset};
     // std::cout << "put usedWidth: " << usedWidth << "\n";
     usedWidth =
         Length{std::to_underlying(usedWidth) + std::to_underlying(charWidth)};

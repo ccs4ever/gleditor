@@ -313,9 +313,10 @@ void Store::save(const std::string &directory) const {
     for (const auto &[id, op] : ops) {
       out << id.str() << ' ' << opKindName(op.kind) << ' ' << op.at << ' '
           << op.length << ' ' << op.to << ' ' << op.span.start << ' '
-          << op.span.length << ' ' << (op.source.isZero() ? "0" : op.source.str())
-          << ' ' << op.sourceAt << ' ' << op.sourceLength << ' ' << op.link
-          << ' ' << op.span.scroll << '\n';
+          << op.span.length << ' '
+          << (op.source.isZero() ? "0" : op.source.str()) << ' ' << op.sourceAt
+          << ' ' << op.sourceLength << ' ' << op.link << ' ' << op.span.scroll
+          << '\n';
     }
   }
   {
@@ -443,10 +444,9 @@ void Store::load(const std::string &directory) {
         throw std::runtime_error("malformed origin in " +
                                  (dir / originsFile).string() + ": " + line);
       }
-      externals.push_back(Scroll::ofTorrentFile(InfoHash::fromHex(hash),
-                                                fileIndex,
-                                                "-" == path ? "" : path,
-                                                fileOffset, fileLength));
+      externals.push_back(Scroll::ofTorrentFile(
+          InfoHash::fromHex(hash), fileIndex, "-" == path ? "" : path,
+          fileOffset, fileLength));
     }
   }
 

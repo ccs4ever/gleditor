@@ -134,8 +134,9 @@ TEST(VersionModelTest, randomEditsAgreeWithAString) {
     case 0:
     case 1: { // insert, sometimes at the end and sometimes within
       const auto text = "t" + std::to_string(step) + " ";
-      const auto at =
-          0 == length ? 0U : static_cast<std::uint32_t>(random() % (length + 1));
+      const auto at   = 0 == length
+                            ? 0U
+                            : static_cast<std::uint32_t>(random() % (length + 1));
       version.insert(at, spool.put(text));
       model.insert(at, text);
       break;
@@ -176,7 +177,8 @@ TEST(VersionModelTest, randomEditsAgreeWithAString) {
     // consecutive pieces could have been one.
     for (std::size_t i = 0; i < version.pieces().size(); i++) {
       const auto &piece = version.pieces()[i];
-      ASSERT_FALSE(piece.empty()) << "empty piece at " << i << ", step " << step;
+      ASSERT_FALSE(piece.empty())
+          << "empty piece at " << i << ", step " << step;
       if (i + 1 < version.pieces().size()) {
         const auto &next = version.pieces()[i + 1];
         ASSERT_FALSE(piece.scroll == next.scroll && piece.end() == next.start)

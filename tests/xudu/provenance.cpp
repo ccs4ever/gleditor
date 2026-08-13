@@ -235,8 +235,9 @@ TEST(ProvenanceTest, theSealCarriesTheContentAndTheRecordUnderOneHash) {
   record.contentDigest = xudu::sha256Hex(bytes);
   const auto signed_   = xudu::signProvenance(record);
 
-  const auto mine   = xudu::createMutableKeys();
-  const auto sealed = xudu::sealLocalSpool(store, mine, "primedia", "", signed_);
+  const auto mine = xudu::createMutableKeys();
+  const auto sealed =
+      xudu::sealLocalSpool(store, mine, "primedia", "", signed_);
 
   const auto meta = xudu::Metainfo::parse(sealed.torrentFile);
   EXPECT_EQ(meta.hash(), sealed.hash);
@@ -264,8 +265,8 @@ TEST(ProvenanceTest, theSealCarriesTheContentAndTheRecordUnderOneHash) {
   auto other          = record;
   other.author.name   = "Someone Else";
   other.author.email  = "else@example.org";
-  const auto elsewise = xudu::sealLocalSpool(
-      store, mine, "primedia", "", xudu::signProvenance(other));
+  const auto elsewise = xudu::sealLocalSpool(store, mine, "primedia", "",
+                                             xudu::signProvenance(other));
   EXPECT_NE(elsewise.hash, sealed.hash);
 }
 
@@ -274,9 +275,9 @@ TEST(ProvenanceTest, sealingWithoutASignedRecordIsRefused) {
   static_cast<void>(store.insert(MicroversionId{}, 0, "Written here first."));
   const auto mine = xudu::createMutableKeys();
 
-  EXPECT_THROW(static_cast<void>(
-                   xudu::sealLocalSpool(store, mine, "primedia", "", {})),
-               std::runtime_error);
+  EXPECT_THROW(
+      static_cast<void>(xudu::sealLocalSpool(store, mine, "primedia", "", {})),
+      std::runtime_error);
   // Half of one is no better: a record with no signature over it is a claim
   // anybody could have written.
   SignedProvenance halfway;

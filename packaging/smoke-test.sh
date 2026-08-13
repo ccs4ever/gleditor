@@ -64,7 +64,7 @@ work=$(mktemp -d)
 trap 'rm -rf "$work"' EXIT
 cd "$work"
 
-cat > sample.txt <<'SAMPLE'
+cat >sample.txt <<'SAMPLE'
 The quick brown fox jumped over the lazy dog.
 fir floor far.
 SAMPLE
@@ -75,7 +75,7 @@ SAMPLE
 # backend rather than one shared by the loop.
 case $(basename "$BIN") in
   xudu*) doc_args() { echo "--import sample.txt $work/$1.xanadoc"; } ;;
-  *)     doc_args() { echo "sample.txt"; } ;;
+  *) doc_args() { echo "sample.txt"; } ;;
 esac
 
 failed=0
@@ -84,7 +84,7 @@ for backend in $BACKENDS; do
   # Unquoted on purpose: doc_args prints one or more arguments.
   # shellcheck disable=SC2046
   if ! "$BIN" --backend "$backend" --profile --strict-diagnostics \
-       --screenshot "$work/$backend.ppm" $(doc_args "$backend") > "$work/$backend.log" 2>&1; then
+    --screenshot "$work/$backend.ppm" $(doc_args "$backend") >"$work/$backend.log" 2>&1; then
     echo "FAIL: $backend run exited non-zero"
     tail -20 "$work/$backend.log"
     failed=1
@@ -94,13 +94,14 @@ for backend in $BACKENDS; do
   # A frame of one flat colour is what a missing shader or an unfound atlas
   # looks like, and it exits zero. Counting the distinct colours is what tells
   # "drew the document" from "drew the background".
-  colours=$(python3 - "$work/$backend.ppm" <<'PY'
+  colours=$(
+    python3 - "$work/$backend.ppm" <<'PY'
 import sys
 data = open(sys.argv[1], 'rb').read()
 pixels = data[data.index(b'255\n') + 4:]
 print(len({pixels[i:i+3] for i in range(0, len(pixels) - 2, 3)}))
 PY
-)
+  )
   if [ "$colours" -lt 2 ]; then
     echo "FAIL: $backend produced a single flat colour ($colours distinct)"
     tail -20 "$work/$backend.log"
