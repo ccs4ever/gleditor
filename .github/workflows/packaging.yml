@@ -547,10 +547,18 @@ jobs:
       - name: check the formula parses
         run: ruby -c packaging/macos/gleditor.rb
 
+      # googletest is here even though this job never builds or runs a test
+      # binary: `make lib gleditor xudu` still generates a .dep file for every
+      # source the Makefile knows about, tests included, and that generation
+      # runs the compiler over each one without the test-only -I flags that
+      # `make test` itself would add. Elsewhere those headers are just already
+      # on the compiler's default search path (whatever the local libgtest-dev
+      # / gtest-devel / gtest package installed there); Homebrew has no such
+      # ambient location, so it is named outright.
       - name: install build dependencies
         run: |
           brew install make pangomm cairomm glibmm sdl3 sdl3_image glm \
-            libtorrent-rasterbar boost openssl@3 pkgconf
+            libtorrent-rasterbar boost openssl@3 pkgconf googletest
 
       # openssl@3 is keg-only -- Homebrew never links it, to stay out of the
       # way of whatever OpenSSL macOS itself ships -- so its include and
