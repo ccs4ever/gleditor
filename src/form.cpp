@@ -108,6 +108,216 @@ std::string Form::complaint() const {
   return trouble;
 }
 
+namespace {
+
+/// What kind of thing a field is, in the platforms' vocabulary.
+a11y::Role roleOf(const Form::Kind kind) {
+  switch (kind) {
+  case Form::Kind::Text:
+    return a11y::Role::TextInput;
+  case Form::Kind::Secret:
+    // Its own role rather than a text field that happens to be masked: it is
+    // what stops a screen reader reading a passphrase aloud, and what stops
+    // it being kept in whatever history the platform keeps.
+    return a11y::Role::PasswordInput;
+  case Form::Kind::Choice:
+    return a11y::Role::ComboBox;
+  case Form::Kind::Toggle:
+    return a11y::Role::Switch;
+  }
+  return a11y::Role::TextInput;
+}
+
+/// Node numbering within a form. Fixed offsets rather than a running counter,
+/// so that a field keeps its id as the panel grows a complaint or loses one --
+/// an id that moved would make a screen reader announce the whole form again
+/// on every keystroke.
+constexpr std::uint64_t panelId    = 0;
+constexpr std::uint64_t titleId    = 1;
+constexpr std::uint64_t noteId     = 2;
+constexpr std::uint64_t firstField = 16;
+/// Room for a Choice's options under each field.
+constexpr std::uint64_t perField = 64;
+
+constexpr std::uint64_t fieldId(const std::size_t which) {
+  return firstField + (which * perField);
+}
+constexpr std::uint64_t optionId(const std::size_t which,
+                                 const std::size_t option) {
+  return fieldId(which) + 1 + option;
+}
+
+} // namespace
+
+void Form::describe(a11y::Builder &into) {
+  const std::lock_guard locker(guard);
+  if (!open_) {
+    return;
+  }
+
+  {
+    // Modal, which is the whole point of it: an assistive technology that
+    // knows a dialog is modal stops offering the document behind it, which is
+    // the same thing the keyboard grab does for somebody typing.
+    auto &panel = into.add(panelId, a11y::Role::Dialog);
+    panel.label = title;
+    panel.modal = true;
+    panel.children.push_back(into.id(titleId));
+    if (!note.empty() || !trouble.empty()) {
+      panel.children.push_back(into.id(noteId));
+    }
+    for (std::size_t which = 0; which < fields.size(); which++) {
+      panel.children.push_back(into.id(fieldId(which)));
+    }
+    into.contribute(into.id(panelId));
+  }
+
+  {
+    auto &heading = into.add(titleId, a11y::Role::Label);
+    heading.value = title;
+  }
+  if (!note.empty() || !trouble.empty()) {
+    auto &line = into.add(noteId, a11y::Role::Label);
+    // The complaint replaces the note on screen, and does the same here --
+    // said at once rather than at the next pause, because it is the answer to
+    // something the person just tried to do.
+    line.value = trouble.empty() ? note : trouble;
+    line.live  = trouble.empty() ? a11y::Live::Off : a11y::Live::Assertive;
+  }
+
+  const bool reveal = std::ranges::any_of(fields, [](const Field &one) {
+    return Kind::Toggle == one.kind && one.revealsSecrets && one.on;
+  });
+
+  for (std::size_t which = 0; which < fields.size(); which++) {
+    const auto &one = fields[which];
+    auto &node      = into.add(fieldId(which), roleOf(one.kind));
+    // A toggle beside a passphrase has no label of its own on screen -- the
+    // button says what it does -- so it is named by what it does.
+    node.label       = one.label.empty() && Kind::Toggle == one.kind
+                           ? "show the passphrase"
+                           : one.label;
+    node.placeholder = one.hint;
+    node.focusable   = true;
+    node.actions     = a11y::bit(a11y::Action::Focus);
+
+    switch (one.kind) {
+    case Kind::Text:
+      node.value = one.value;
+      break;
+    case Kind::Secret:
+      // Never the passphrase itself, revealed or not. What is on screen is a
+      // person's choice about their own screen; what goes on the accessibility
+      // bus is readable by anything on the session, and a screen reader will
+      // say it out loud.
+      node.value = std::string(charactersIn(one.value), '*');
+      node.description =
+          reveal ? "shown on screen" : "hidden; there is a button to show it";
+      break;
+    case Kind::Choice:
+      node.value =
+          one.options.empty()
+              ? std::string{}
+              : one.options[std::min(one.chosen, one.options.size() - 1)];
+      node.actions |= a11y::bit(a11y::Action::Click);
+      for (std::size_t option = 0; option < one.options.size(); option++) {
+        node.children.push_back(into.id(optionId(which, option)));
+      }
+      break;
+    case Kind::Toggle:
+      node.toggled = one.on;
+      node.actions |= a11y::bit(a11y::Action::Click);
+      break;
+    }
+
+    if (which == focus) {
+      into.takeFocus(into.id(fieldId(which)));
+    }
+
+    if (Kind::Choice == one.kind) {
+      for (std::size_t option = 0; option < one.options.size(); option++) {
+        auto &entry = into.add(optionId(which, option), a11y::Role::ListItem);
+        entry.label = one.options[option];
+        entry.actions =
+            a11y::bit(a11y::Action::Focus) | a11y::bit(a11y::Action::Click);
+        entry.focusable = true;
+      }
+    }
+  }
+}
+
+std::uint64_t Form::accessibilityRevision() const {
+  const std::lock_guard locker(guard);
+  // The same counter the drawing uses, which is bumped by every key the form
+  // takes. Nothing else changes what a form has to say.
+  return open_ ? revision : 0;
+}
+
+bool Form::performAction(const std::uint64_t nodeId, const a11y::Action action,
+                         const std::string_view value) {
+  const auto local = a11y::Ids::localOf(nodeId);
+  if (local < firstField) {
+    return false;
+  }
+  const auto which  = (local - firstField) / perField;
+  const auto within = (local - firstField) % perField;
+
+  const std::lock_guard locker(guard);
+  if (!open_ || which >= fields.size()) {
+    return false;
+  }
+  auto &one = fields[which];
+
+  // An option under a Choice: picking it is what a click on it means.
+  if (0 != within) {
+    const auto option = within - 1;
+    if (a11y::Action::Click != action || option >= one.options.size()) {
+      return false;
+    }
+    focus      = which;
+    one.chosen = option;
+    expanded   = false;
+    trouble.clear();
+    revision++;
+    return true;
+  }
+
+  switch (action) {
+  case a11y::Action::Focus:
+    focus = which;
+    caret = one.value.size();
+    revision++;
+    return true;
+  case a11y::Action::Click:
+    focus = which;
+    if (Kind::Toggle == one.kind) {
+      one.on = !one.on;
+      revision++;
+      return true;
+    }
+    if (Kind::Choice == one.kind && !one.options.empty()) {
+      expanded  = true;
+      highlight = one.chosen;
+      revision++;
+      return true;
+    }
+    return false;
+  case a11y::Action::SetValue:
+    if (Kind::Text != one.kind && Kind::Secret != one.kind) {
+      return false;
+    }
+    one.value = value;
+    focus     = which;
+    caret     = one.value.size();
+    trouble.clear();
+    revision++;
+    return true;
+  case a11y::Action::ScrollIntoView:
+    return false;
+  }
+  return false;
+}
+
 std::optional<InputArea> Form::textArea() const {
   const std::lock_guard locker(guard);
   return typingAt;

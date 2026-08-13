@@ -246,8 +246,50 @@ void ToastOverlay::post(const render::DiagnosticSeverity severity,
   toast.height        = panelHeight;
   toast.postedAt      = Clock::now();
   toast.expiresAt     = toast.postedAt + lifetime;
+  toast.message       = message;
+  toast.severity      = severity;
+  toast.serial        = ++posted;
   pool->write(toast.backing, 0, asBytes(rows));
   toasts.push_back(toast);
+}
+
+void ToastOverlay::describe(gleditor::a11y::Builder &into) {
+  namespace a11y = gleditor::a11y;
+  if (toasts.empty()) {
+    // No node at all rather than an empty one. A log that is there but says
+    // nothing is something for an assistive technology to land on while moving
+    // through the window, and there is nothing in the corner of the screen for
+    // it to be landing on.
+    return;
+  }
+
+  auto &log = into.add(0, a11y::Role::Log);
+  log.label = "notifications";
+  // Announced when there is a pause rather than at once: a notification is by
+  // definition the thing that must not interrupt. An error is the exception --
+  // it is what the strict runs stop for.
+  log.live = a11y::Live::Polite;
+  for (const auto &toast : toasts) {
+    // The serial rather than the position, so that a message keeps its
+    // identity as older ones expire from under it -- and so that the same
+    // words posted twice are two notifications and are announced twice.
+    log.children.push_back(into.id(toast.serial));
+  }
+  into.contribute(into.id(0));
+
+  for (const auto &toast : toasts) {
+    auto &node = into.add(toast.serial, a11y::Role::Label);
+    node.value = toast.message;
+    node.live  = render::DiagnosticSeverity::Error == toast.severity
+                     ? a11y::Live::Assertive
+                     : a11y::Live::Polite;
+  }
+}
+
+std::uint64_t ToastOverlay::accessibilityRevision() const {
+  // What has been said, and what is still saying it: posting bumps the first
+  // and expiring changes the second, and nothing else about a toast moves.
+  return (posted * 1000U) + toasts.size();
 }
 
 float ToastOverlay::fadeFactor(const Clock::time_point postedAt,

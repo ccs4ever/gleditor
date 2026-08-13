@@ -47,6 +47,11 @@
 
 #include <SDL2/SDL.h>
 #include <SDL2/SDL_messagebox.h>
+#if defined(_WIN32)
+// Only for the HWND that AccessKit's Windows adapter needs; SDL3 answers the
+// same question through a window property and needs no extra header.
+#include <SDL2/SDL_syswm.h>
+#endif
 
 #if !SDL_VERSION_ATLEAST(2, 0, 22)
 #error SDL2 2.0.22 or newer is required (SDL_GetWindowSizeInPixels)
@@ -152,6 +157,71 @@ inline bool windowSizeChanged(const SDL_Event &event, int &width, int &height) {
 }
 
 /**
+ * @brief Report whether the window gained or lost the keyboard.
+ *
+ * Shaped like windowSizeChanged() and for the same reason: SDL2 carries the
+ * sub-type inside one event and SDL3 gives each its own type.
+ *
+ * An assistive technology needs this because focus within the window only
+ * means anything while the window itself has focus -- otherwise every
+ * application on the desktop would be claiming to hold the caret at once.
+ */
+inline bool windowFocusChanged(const SDL_Event &event, bool &focused) {
+#if GLEDITOR_SDL_MAJOR == 3
+  switch (event.type) {
+  case SDL_EVENT_WINDOW_FOCUS_GAINED:
+    focused = true;
+    return true;
+  case SDL_EVENT_WINDOW_FOCUS_LOST:
+    focused = false;
+    return true;
+  default:
+    return false;
+  }
+#else
+  if (SDL_WINDOWEVENT != event.type) {
+    return false;
+  }
+  switch (event.window.event) {
+  case SDL_WINDOWEVENT_FOCUS_GAINED:
+    focused = true;
+    return true;
+  case SDL_WINDOWEVENT_FOCUS_LOST:
+    focused = false;
+    return true;
+  default:
+    return false;
+  }
+#endif
+}
+
+/// Whether this event means the window is somewhere else on the desktop than
+/// it was. Moving and resizing both count: what is being tracked is where the
+/// drawing area is, and either changes it.
+inline bool windowMoved(const SDL_Event &event) {
+#if GLEDITOR_SDL_MAJOR == 3
+  return SDL_EVENT_WINDOW_MOVED == event.type ||
+         SDL_EVENT_WINDOW_RESIZED == event.type ||
+         SDL_EVENT_WINDOW_MAXIMIZED == event.type ||
+         SDL_EVENT_WINDOW_RESTORED == event.type;
+#else
+  if (SDL_WINDOWEVENT != event.type) {
+    return false;
+  }
+  switch (event.window.event) {
+  case SDL_WINDOWEVENT_MOVED:
+  case SDL_WINDOWEVENT_RESIZED:
+  case SDL_WINDOWEVENT_SIZE_CHANGED:
+  case SDL_WINDOWEVENT_MAXIMIZED:
+  case SDL_WINDOWEVENT_RESTORED:
+    return true;
+  default:
+    return false;
+  }
+#endif
+}
+
+/**
  * @brief Begin or end delivery of composed text events.
  *
  * SDL3 takes the window the text is destined for, since it tracks input focus
@@ -196,6 +266,79 @@ inline void setTextInputArea([[maybe_unused]] SDL_Window *window,
 #else
   SDL_SetTextInputRect(&area);
 #endif
+}
+
+/**
+ * @brief The platform's own handle for a window, where anything needs one.
+ *
+ * Only Windows does: AccessKit's adapter there subclasses the window procedure
+ * to answer WM_GETOBJECT, so it has to be given the HWND. AT-SPI is a bus
+ * rather than a property of a window, so X11 and Wayland need nothing and get
+ * null.
+ *
+ * SDL2 answers through SDL_SysWMinfo and SDL3 through a window property, which
+ * is why this is here rather than at the one call site.
+ */
+inline void *nativeWindowHandle([[maybe_unused]] SDL_Window *window) {
+#if defined(_WIN32)
+#if GLEDITOR_SDL_MAJOR == 3
+  return SDL_GetPointerProperty(SDL_GetWindowProperties(window),
+                                SDL_PROP_WINDOW_WIN32_HWND_POINTER, nullptr);
+#else
+  SDL_SysWMinfo info;
+  SDL_VERSION(&info.version);
+  if (SDL_TRUE != SDL_GetWindowWMInfo(window, &info)) {
+    return nullptr;
+  }
+  return static_cast<void *>(info.info.win.window);
+#endif
+#else
+  return nullptr;
+#endif
+}
+
+/// Where a window is on the desktop: the whole of it including whatever frame
+/// was drawn around it, and the part this program draws in. Both in physical
+/// pixels from the top left of the primary display.
+struct WindowPlacement {
+  int outerLeft{};
+  int outerTop{};
+  int outerRight{};
+  int outerBottom{};
+  int innerLeft{};
+  int innerTop{};
+  int innerRight{};
+  int innerBottom{};
+
+  bool operator==(const WindowPlacement &) const = default;
+};
+
+/**
+ * @brief Ask the window where it is.
+ *
+ * Under Wayland a client is not told its own position and SDL answers with
+ * zeroes. That is not a failure to work around: it is what a Wayland
+ * accessibility client expects, and it means the bounds reported for
+ * everything inside the window are relative to the window.
+ */
+inline WindowPlacement windowPlacement(SDL_Window *window) {
+  int posX = 0;
+  int posY = 0;
+  SDL_GetWindowPosition(window, &posX, &posY);
+  int width  = 0;
+  int height = 0;
+  SDL_GetWindowSize(window, &width, &height);
+  int top    = 0;
+  int left   = 0;
+  int bottom = 0;
+  int right  = 0;
+  // Fails on a platform with no server-side decorations, leaving the four at
+  // zero, which is the right answer there anyway.
+  static_cast<void>(
+      SDL_GetWindowBordersSize(window, &top, &left, &bottom, &right));
+  return WindowPlacement{
+      posX - left, posY - top, posX + width + right, posY + height + bottom,
+      posX,        posY,       posX + width,         posY + height};
 }
 
 /// What a message box is telling somebody, which decides its icon.

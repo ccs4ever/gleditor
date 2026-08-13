@@ -27,9 +27,12 @@
 #include <cstdint>
 #include <functional>
 #include <memory>
+#include <mutex>
 #include <optional>
+#include <string_view>
 #include <vector>
 
+#include <gleditor/a11y/tree.hpp>
 #include <gleditor/beams.hpp>
 #include <gleditor/doc.hpp>
 #include <gleditor/frame_contributor.hpp>
@@ -52,7 +55,8 @@ namespace xudu {
  * link something you can follow rather than something you can look at.
  */
 class LinkBeams : public gleditor::FrameContributor,
-                  public gleditor::PickObserver {
+                  public gleditor::PickObserver,
+                  public gleditor::a11y::Source {
 public:
   /**
    * @param aOpen How a version not currently on screen is put there. Called on
@@ -70,6 +74,16 @@ public:
   void drawFrame(gleditor::FrameContext &ctx) override;
   [[nodiscard]] bool picked(const render::PickingResult &pick,
                             RenderState &state) override;
+
+  // -- gleditor::a11y::Source ------------------------------------------------
+  //
+  // A beam is a line drawn between two passages. Nothing about a line is
+  // reachable without seeing it, which makes this the part of Xudu that most
+  // needs saying rather than drawing: the links are the hypertext.
+  void describe(gleditor::a11y::Builder &into) override;
+  [[nodiscard]] std::uint64_t accessibilityRevision() const override;
+  bool performAction(std::uint64_t nodeId, gleditor::a11y::Action action,
+                     std::string_view value) override;
 
   void setOpener(Opener aOpener) { opener = std::move(aOpener); }
 
@@ -156,6 +170,15 @@ private:
   std::size_t builtDocs{static_cast<std::size_t>(-1)};
   bool visible{true};
   bool sworph{true};
+
+  /// Which beam an assistive technology asked to follow, if any. Filled on the
+  /// event thread and taken on the render thread, where following one means
+  /// moving the caret and possibly opening a document.
+  mutable std::mutex askedGuard;
+  std::vector<std::uint64_t> askedToFollow;
+  /// Bumped whenever the strands change, so the description is rebuilt then
+  /// and not every frame.
+  std::uint64_t described{1};
 };
 
 } // namespace xudu

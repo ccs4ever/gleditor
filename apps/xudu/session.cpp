@@ -514,6 +514,23 @@ void HypertimeMap::deviceReady(render::RenderDevice &device,
 }
 
 void HypertimeMap::drawFrame(gleditor::FrameContext &ctx) {
+  // Before the visibility test: a state somebody asked to go to should be gone
+  // to whether or not the map they asked through is on screen. An assistive
+  // technology reads the tree, and the tree says where the states are even
+  // when the picture of them is hidden.
+  {
+    std::vector<MicroversionId> asked;
+    {
+      const std::lock_guard locker(askedGuard);
+      asked.swap(askedToVisit);
+    }
+    for (const auto &id : asked) {
+      if (goer) {
+        goer(id);
+      }
+    }
+  }
+
   if (!visible || nullptr == canvas) {
     return;
   }
@@ -623,6 +640,78 @@ void HypertimeMap::drawFrame(gleditor::FrameContext &ctx) {
       glm::ortho(0.0F, static_cast<float>(ctx.screenWidth), 0.0F,
                  static_cast<float>(ctx.screenHeight));
   canvas->draw(ctx.state, projection);
+}
+
+void HypertimeMap::describe(gleditor::a11y::Builder &into) {
+  namespace a11y      = gleditor::a11y;
+  const auto versions = session.store().allVersions();
+  if (versions.empty()) {
+    return;
+  }
+
+  {
+    // Kept so that a request coming back can be resolved without reading the
+    // store from the event thread. The store is this thread's; a version is a
+    // value and travels.
+    const std::lock_guard locker(askedGuard);
+    listed = versions;
+  }
+
+  auto &list = into.add(0, a11y::Role::List);
+  list.label = "hypertime: every state of this document";
+  for (std::size_t which = 0; which < versions.size(); which++) {
+    list.children.push_back(into.id(which + 1));
+  }
+  into.contribute(into.id(0));
+
+  for (std::size_t which = 0; which < versions.size(); which++) {
+    const auto &id = versions[which];
+    auto &node     = into.add(which + 1, a11y::Role::ListItem);
+    node.label     = id.str();
+    // What the drawn map says by marking a box, and by which column the box is
+    // in. Neither survives being unable to see it, so both are said.
+    node.description = (id == current ? "where you are; " : "") +
+                       std::string{"generation "} +
+                       std::to_string(id.path().size());
+    if (const auto *const op = session.store().getOp(id); nullptr != op) {
+      node.description += ", " + std::string{opKindName(op->kind)};
+    }
+    node.focusable = true;
+    node.actions =
+        a11y::bit(a11y::Action::Focus) | a11y::bit(a11y::Action::Click);
+    if (id == current) {
+      node.value = "current";
+    }
+  }
+}
+
+std::uint64_t HypertimeMap::accessibilityRevision() const {
+  // What the map is drawn from. Not its visibility: the states are there to be
+  // moved through whether or not the picture of them is on screen.
+  return session.store().opCount() + current.path().size();
+}
+
+bool HypertimeMap::performAction(const std::uint64_t nodeId,
+                                 const gleditor::a11y::Action action,
+                                 const std::string_view /*value*/) {
+  namespace a11y = gleditor::a11y;
+  if (a11y::Action::Click != action) {
+    return false;
+  }
+  const auto which = gleditor::a11y::Ids::localOf(nodeId);
+  if (0 == which) {
+    return false;
+  }
+  // Against the list the description was built from rather than against the
+  // store: the store is the render thread's, and this is the event thread. A
+  // node id that no longer names anything is a request about a state that has
+  // gone, which is nothing to do rather than an error.
+  const std::lock_guard locker(askedGuard);
+  if (which > listed.size()) {
+    return false;
+  }
+  askedToVisit.push_back(listed[which - 1]);
+  return true;
 }
 
 } // namespace xudu

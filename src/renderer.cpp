@@ -269,6 +269,26 @@ bool Renderer::update(RenderState &state, const bool settled) {
   toasts->expire(ToastOverlay::Clock::now());
   toasts->draw(state, screenWidth, screenHeight);
 
+  // What was just drawn, said. Here rather than anywhere else because this is
+  // the one place that has the documents, the caret and the camera at the same
+  // time, and a rectangle on screen cannot be worked out without all three.
+  //
+  // Costs a comparison per source on a frame where nothing changed, which is
+  // most of them.
+  if (const auto &publisher = this->state->accessibility; publisher) {
+    documents.observe(state, caret.get(), viewProjection, screenWidth,
+                      screenHeight);
+    publisher->rebuild(screenWidth, screenHeight);
+    // Anything an assistive technology asked to be done to a document. It
+    // arrived on the event thread and waited for this one, because moving a
+    // caret is this thread's business.
+    for (const auto &want : documents.takeWanted()) {
+      if (want.document < state.docs.size()) {
+        caret->placeAt(want.document, want.byteOffset);
+      }
+    }
+  }
+
   // Ask what is under the cursor, or at the pixel --pick named. The read is
   // asynchronous, so this only queues it; the answer is collected below on a
   // later frame.
@@ -317,6 +337,15 @@ bool Renderer::update(RenderState &state, const bool settled) {
   // Wait for any requested clicks to have been answered: picking is
   // asynchronous, so a frame captured the moment the document settles is one
   // or two frames before the caret those clicks place exists.
+  if (settled && scriptFinished() && this->state->dumpAccessibility) {
+    // Once, on the first settled frame, and after the rebuild above so that
+    // what is printed is what would be sent rather than the frame before it.
+    this->state->dumpAccessibility = false;
+    if (const auto &publisher = this->state->accessibility; publisher) {
+      std::cout << gleditor::a11y::Publisher::describe(publisher->snapshot());
+    }
+  }
+
   if (settled && scriptFinished() && !this->state->screenshotPath.empty()) {
     writeScreenshot(device->captureColorTarget(), this->state->screenshotPath);
     this->state->screenshotPath.clear();
@@ -719,6 +748,18 @@ void Renderer::renderLoop(AutoSDLWindow &window) {
   toasts = std::make_unique<ToastOverlay>(device.get(),
                                           std::string(defaultFontName()));
   caret  = std::make_unique<Caret>(device.get());
+
+  // What the library itself has to say about what is on screen. Registered
+  // here rather than earlier because the overlay is one of them and it does
+  // not exist until there is a device -- and before the first frame, which is
+  // the first time anything asks.
+  //
+  // The documents come first: an assistive technology walks the tree in order,
+  // and what is being read matters more than the chrome over it.
+  if (const auto &publisher = this->state->accessibility; publisher) {
+    publisher->addSource(&documents, gleditor::a11y::Ids::documents);
+    publisher->addSource(toasts.get(), gleditor::a11y::Ids::notifications);
+  }
 
   createPipeline(state);
 

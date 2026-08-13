@@ -129,6 +129,68 @@ install libtorrent-rasterbar-dev (Debian, Ubuntu), libtorrent-rasterbar-devel \
 (Fedora), or libtorrent-rasterbar (Arch, Homebrew).)
 endif
 
+# -- accessibility -------------------------------------------------------------
+#
+# AccessKit is what reports the user interface to the platform's assistive
+# technologies: UI Automation on Windows, AT-SPI on X11 and Wayland. What is
+# used here is accesskit-c, its C bindings -- one header and one library, the
+# same as any other dependency. There is nothing to build: releases are
+# published as archives holding an `include/` and a `lib/<os>/<arch>/`, and
+# distributions that package it install a pkg-config file.
+#
+# Three ways to find it, in the order somebody is likely to have arranged one:
+#
+#   ACCESSKIT_DIR   an unpacked release, or a source tree that has been built.
+#                   Named to match accesskit-c's own CMake option, so that a
+#                   directory that works there works here.
+#   pkg-config      what the Meson build installs, and what a distribution
+#                   package will provide.
+#   the system      the header where the compiler already looks.
+#
+# Unset asks for accessibility and settles for none: not everybody has it
+# installed, and a build that stopped would be a worse answer than an editor
+# that draws. Set to 1 it is required, and its absence is an error rather than
+# a program that quietly cannot be used with a screen reader. Set to 0 it is
+# not looked for at all, and src/a11y/platform_none.cpp is built instead --
+# which answers the same interface and does nothing, so the tree is still
+# assembled either way and only its destination differs.
+ifneq ($(GLEDITOR_ENABLE_A11Y),0)
+
+ifdef ACCESSKIT_DIR
+# The layout an accesskit-c release unpacks to, and the one its own build
+# installs into. The shared library rather than the static one: this goes into
+# a shared library of ours, and every distribution would rather have one copy
+# of it on the system than one inside each thing that uses it.
+A11Y_ARCH := $(shell uname -m 2>/dev/null | $(SED) 's/^amd64$$/x86_64/;s/^arm64$$/aarch64/')
+A11Y_OS   := $(shell uname -s 2>/dev/null | tr 'A-Z' 'a-z')
+A11Y_LIBDIR := $(ACCESSKIT_DIR)/lib/$(A11Y_OS)/$(A11Y_ARCH)/shared
+ifneq ($(wildcard $(ACCESSKIT_DIR)/include/accesskit.h),)
+GLEDITOR_HAVE_A11Y := 1
+A11Y_CFLAGS := -I$(ACCESSKIT_DIR)/include
+A11Y_LIBS   := -L$(A11Y_LIBDIR) -laccesskit -Wl,-rpath,$(A11Y_LIBDIR)
+endif
+else ifeq ($(shell pkg-config --exists accesskit && echo 1),1)
+GLEDITOR_HAVE_A11Y := 1
+A11Y_CFLAGS := $(shell pkg-config $(STATIC) --cflags accesskit)
+A11Y_LIBS   := $(shell pkg-config $(STATIC) --libs accesskit)
+else ifneq ($(wildcard /usr/include/accesskit.h /usr/local/include/accesskit.h),)
+GLEDITOR_HAVE_A11Y := 1
+A11Y_CFLAGS :=
+A11Y_LIBS   := -laccesskit
+endif
+
+ifndef GLEDITOR_HAVE_A11Y
+ifeq ($(GLEDITOR_ENABLE_A11Y),1)
+$(error GLEDITOR_ENABLE_A11Y=1 was asked for but AccessKit was not found. \
+Install accesskit-c -- https://github.com/AccessKit/accesskit-c -- and either \
+let pkg-config find it or point ACCESSKIT_DIR at the unpacked release. Set \
+GLEDITOR_ENABLE_A11Y=0 to build without reporting anything to assistive \
+technologies.)
+endif
+endif
+
+endif
+
 # The version, which a release tarball has to know without a git history: every
 # distribution builds from an unpacked tarball, where `git describe` prints
 # nothing at all. VERSION in the tree is the fallback, and setting GLEDITOR_VERSION
@@ -194,6 +256,9 @@ override CXXFLAGS += -DGLEDITOR_SDL_MAJOR=$(GLEDITOR_SDL)
 # ask. Defining it unconditionally satisfies both, and the distributions
 # tracking GLM 1.0 -- Arch, Fedora, nixpkgs -- would otherwise all fail here.
 override CXXFLAGS += -DGLM_ENABLE_EXPERIMENTAL
+# Only src/a11y/platform_accesskit.cpp includes the header, but the flags are
+# not per-file here and a stray include path costs nothing.
+override CXXFLAGS += $(A11Y_CFLAGS)
 override CXXFLAGS += $(shell pkg-config --cflags libtorrent-rasterbar)
 ifdef GLEDITOR_ENABLE_VULKAN
 override CXXFLAGS += -DGLEDITOR_ENABLE_VULKAN=1
@@ -237,6 +302,10 @@ LIB_SRCS := $(filter-out $(VK_SRCS),$(shell find thirdparty/Choreograph/src/ src
 ifdef GLEDITOR_ENABLE_VULKAN
 LIB_SRCS += $(VK_SRCS)
 endif
+# Exactly one end of the accessibility seam is built -- the one that talks to
+# AccessKit or the one that does nothing -- since they define the same
+# functions.
+LIB_SRCS := $(filter-out src/a11y/platform_$(if $(GLEDITOR_HAVE_A11Y),none,accesskit).cpp,$(LIB_SRCS))
 GLEDITOR_SRCS  := $(shell find apps/gleditor -name '*.cpp' 2>/dev/null)
 # The xanalogical engine is separated from the program that displays it so that
 # it can be tested without a graphics device: every rule about versions, spans
@@ -402,7 +471,7 @@ lib: $(LIBLINK)
 # it; gcc with link-time optimisation, which is what Debian builds with,
 # reported every pangomm and glibmm symbol as undefined.
 $(LIBREAL): $(LIB_OBJS)
-	$(CXX) $(LDFLAGS) -shared $(LIB_LINKARG) -o $@ $^ $(LIBS)
+	$(CXX) $(LDFLAGS) -shared $(LIB_LINKARG) -o $@ $^ $(LIBS) $(A11Y_LIBS)
 
 ifdef WINDOWS
 # The import library falls out of the link above, so asking for it is asking

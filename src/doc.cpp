@@ -996,6 +996,7 @@ void Doc::insert(RenderState &state, const std::uint32_t offset,
   auto raw = text.raw();
   raw.insert(at, utf8);
   text = raw;
+  edits++;
 
   if (nullptr != caret) {
     caret->shiftForInsertion(at, inserted);
@@ -1034,6 +1035,7 @@ std::string Doc::erase(RenderState &state, const std::uint32_t offset,
 
   raw.erase(start, removed.size());
   text = raw;
+  edits++;
 
   const auto delta = -static_cast<std::int32_t>(removed.size());
   if (nullptr != caret) {

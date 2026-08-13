@@ -967,6 +967,16 @@ int main(const int argc, char **argv) {
     renderer->addSpanDecorator(session.get());
     renderer->addFrameContributor(&map);
     renderer->addFrameContributor(&links);
+    // And the same three to the accessibility tree, in the order somebody
+    // moving through the window should meet them: the links between the
+    // documents, then the map of hypertime, then whatever modal is up.
+    state->accessibility->addSource(&links);
+    state->accessibility->addSource(&map);
+    state->accessibility->addSource(&publishForm);
+    state->accessibility->setToolkit("gleditor", TOSTRING(GLEDITOR_VERSION));
+    // Going to a state is the program's business rather than the map's; this
+    // is the same move ctrl-b and ctrl-n make.
+    map.setGoer([&views](const MicroversionId &id) { views.showOnly(id); });
     // Last of the three, so the modal draws over both of them.
     renderer->addFrameContributor(&publishForm);
     // And it takes the keyboard while it is up, so that typing a title does
