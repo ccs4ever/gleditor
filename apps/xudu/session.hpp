@@ -16,11 +16,15 @@
 
 #include <chrono>
 #include <cstdint>
+#include <functional>
 #include <memory>
+#include <mutex>
 #include <optional>
 #include <string>
+#include <string_view>
 #include <vector>
 
+#include <gleditor/a11y/tree.hpp>
 #include <gleditor/canvas.hpp>
 #include <gleditor/document_observer.hpp>
 #include <gleditor/frame_contributor.hpp>
@@ -435,7 +439,8 @@ public:
  * without a picture: a graph where nothing is ever lost, as against the single
  * line an undo stack offers.
  */
-class HypertimeMap : public gleditor::FrameContributor {
+class HypertimeMap : public gleditor::FrameContributor,
+                     public gleditor::a11y::Source {
 public:
   HypertimeMap(std::string aFontName, const Session &aSession);
 
@@ -453,6 +458,22 @@ public:
   void setCurrent(MicroversionId id) { current = std::move(id); }
 
   void drawFrame(gleditor::FrameContext &ctx) override;
+
+  // -- gleditor::a11y::Source ------------------------------------------------
+  //
+  // The map is a picture of the shape of hypertime: boxes in columns, with the
+  // one the reader is on marked. Said in words it is a list of states, in
+  // order, saying which is which -- which is the only form of it available to
+  // somebody who cannot see the boxes.
+  void describe(gleditor::a11y::Builder &into) override;
+  [[nodiscard]] std::uint64_t accessibilityRevision() const override;
+  bool performAction(std::uint64_t nodeId, gleditor::a11y::Action action,
+                     std::string_view value) override;
+
+  /// How a state the reader asked to go to is reached. Set by the program,
+  /// because moving through hypertime is its business and not the map's.
+  using Goer = std::function<void(const MicroversionId &)>;
+  void setGoer(Goer aGoer) { goer = std::move(aGoer); }
 
 private:
   /// Pixel geometry of the map. A node is a labelled box; a generation is a
@@ -475,6 +496,15 @@ private:
   MicroversionId builtForCurrent;
   bool builtForVisible{};
   int builtForHeight{};
+
+  Goer goer;
+  /// The states as the description last listed them, and any an assistive
+  /// technology has asked to go to. One lock over both: the first is written
+  /// while describing and read when a request arrives, the second the other
+  /// way round.
+  mutable std::mutex askedGuard;
+  std::vector<MicroversionId> listed;
+  std::vector<MicroversionId> askedToVisit;
 };
 
 } // namespace xudu

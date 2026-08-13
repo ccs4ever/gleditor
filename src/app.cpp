@@ -138,6 +138,23 @@ parseToast(const std::string &argument) {
   return {DiagnosticSeverity::Warning, argument};
 }
 
+/**
+ * @brief Window flags accessibility needs at creation time.
+ *
+ * Hidden, on Windows and only there. AccessKit's adapter subclasses the window
+ * procedure to answer WM_GETOBJECT and can only install itself before the
+ * window has ever been shown, so the window is created hidden and shown a few
+ * lines later. Nothing else on any platform is affected by the delay, and no
+ * other platform pays for it.
+ */
+constexpr std::uint64_t accessibilityWindowFlags() {
+#if defined(_WIN32)
+  return SDL_WINDOW_HIDDEN;
+#else
+  return 0;
+#endif
+}
+
 /// Parse an "X,Y" pair, naming the option in the complaint when it is not one.
 std::pair<int, int> parsePair(const std::string &value,
                               const std::string_view option,
@@ -370,6 +387,14 @@ void addCommonArguments(argparse::ArgumentParser &parser, const bool detailed) {
              "collect and record times and exit. The median is reported rather "
              "than the mean, because a software rasteriser produces occasional "
              "hundred-millisecond frames no average removes.");
+  automation(parser.add_argument("--dump-a11y").flag(),
+             "print what a screen reader would be told, then carry on",
+             "Print the accessibility tree once the frame has settled: every "
+             "node this program reports to the platform, indented, with its "
+             "role, its name, its value and where the caret is. What an "
+             "assistive technology is handed, in the one form that can be "
+             "read without running one. Pairs with --profile to print it and "
+             "quit.");
   automation(parser.add_argument("--screenshot").default_value(std::string{}),
              "write the first settled frame to this path as a PPM",
              "Write the first fully drawn frame to this path as a binary PPM. "
@@ -461,6 +486,7 @@ render::Backend applyCommonArguments(argparse::ArgumentParser &parser,
   state->cullPages         = parser["--no-cull"] == false;
   state->coarseBelow       = std::stof(parser.get<std::string>("--coarse-below"));
   state->screenshotPath    = parser.get<std::string>("--screenshot");
+  state->dumpAccessibility = parser["--dump-a11y"] == true;
   state->strictDiagnostics = parser["--strict-diagnostics"] == true;
   state->noPresent         = parser["--no-present"] == true;
   {
@@ -578,11 +604,25 @@ int Application::run() {
   // device itself is constructed on the render thread.
   render::configureBackendWindowAttributes(backend);
 
-  AutoSDLWindow window(title.c_str(), state->view.screenWidth,
-                       state->view.screenHeight,
-                       render::backendWindowFlags(backend) |
-                           SDL_WINDOW_RESIZABLE | SDL_WINDOW_HIGH_PIXEL_DENSITY,
-                       icon.surface);
+  AutoSDLWindow window(
+      title.c_str(), state->view.screenWidth, state->view.screenHeight,
+      render::backendWindowFlags(backend) | SDL_WINDOW_RESIZABLE |
+          SDL_WINDOW_HIGH_PIXEL_DENSITY | accessibilityWindowFlags(),
+      icon.surface);
+
+  // Accessibility, before the window is on screen. That ordering is a
+  // requirement rather than a preference: AccessKit's Windows adapter works by
+  // subclassing the window procedure to answer WM_GETOBJECT, and it can only
+  // do that before the window has ever been shown -- which is why the flags
+  // above ask for a hidden window there. Everywhere else AT-SPI is a bus and
+  // the moment does not matter.
+  if (const auto &publisher = state->accessibility; publisher) {
+    publisher->setWindowTitle(title);
+    static_cast<void>(publisher->start(sdl::nativeWindowHandle(window.window)));
+  }
+#if defined(_WIN32)
+  SDL_ShowWindow(window.window);
+#endif
 
   if (textInput) {
     // Composed text rather than raw key events: this is what gives dead keys,
@@ -608,6 +648,34 @@ int Application::run() {
   // again only when it moves.
   std::optional<gleditor::InputArea> toldAbout;
   bool modalHadKeyboard = false;
+
+  // The same for where the window is. An assistive technology places what it
+  // reads in desktop coordinates, so every node's rectangle is this plus the
+  // one worked out on the render thread -- which means a window that has been
+  // dragged and not reported is a window whose contents are all announced in
+  // the wrong place.
+  std::optional<sdl::WindowPlacement> placementTold;
+  const auto reportPlacement = [this, &window, &placementTold] {
+    const auto &publisher = state->accessibility;
+    if (!publisher) {
+      return;
+    }
+    const auto now = sdl::windowPlacement(window.window);
+    if (placementTold && *placementTold == now) {
+      return;
+    }
+    placementTold = now;
+    publisher->setWindowBounds(
+        gleditor::a11y::Rect{static_cast<double>(now.outerLeft),
+                             static_cast<double>(now.outerTop),
+                             static_cast<double>(now.outerRight),
+                             static_cast<double>(now.outerBottom)},
+        gleditor::a11y::Rect{static_cast<double>(now.innerLeft),
+                             static_cast<double>(now.innerTop),
+                             static_cast<double>(now.innerRight),
+                             static_cast<double>(now.innerBottom)});
+  };
+  reportPlacement();
 
   /**
    * Anything the render thread asked to be said in a native dialog. Here
@@ -645,6 +713,15 @@ int Application::run() {
 
   while (state->alive) {
     sayWhatIsWaiting(true);
+
+    // What the render thread last described, and whatever an assistive
+    // technology asked for in return. Both here because this is the thread
+    // that owns the window, which is what AccessKit's Windows adapter
+    // requires; publishing costs a comparison when nothing has changed.
+    if (const auto &publisher = state->accessibility; publisher) {
+      publisher->publish();
+      static_cast<void>(publisher->pumpActions());
+    }
 
     // Text entry follows whatever has the keyboard. A modal is typed into even
     // in a program that has text input off -- a question nobody can answer is
@@ -741,7 +818,19 @@ int Application::run() {
       }
       default: {
         // SDL2 reports every window change as one event type with a sub-type,
-        // SDL3 as distinct types, so this is asked rather than matched on.
+        // SDL3 as distinct types, so these are asked rather than matched on.
+        if (bool focused = false; sdl::windowFocusChanged(evt, focused)) {
+          // Which window has the keyboard is the desktop's business and only
+          // the platform knows it. Without this an assistive technology would
+          // believe the caret was in this window while somebody typed into
+          // another.
+          if (const auto &publisher = state->accessibility; publisher) {
+            publisher->setWindowFocused(focused);
+          }
+        }
+        if (sdl::windowMoved(evt)) {
+          reportPlacement();
+        }
         int width  = 0;
         int height = 0;
         if (!sdl::windowSizeChanged(evt, width, height)) {

@@ -1182,6 +1182,146 @@ demand, a `DocumentObserver` that turns each keystroke into a hyperop, a
 the map. Deep intercomparison -- the shading in the picture above -- took no
 code in the library at all.
 
+## Accessibility
+
+Everything this program puts in its window is quads: a document, a caret, a
+notification, a form field, a beam between two passages. A quad is a picture of
+a thing rather than the thing, and nothing can read one back. So there is a
+second description, kept beside the drawing and built from the same state, and
+it is handed to the platform's assistive technologies through
+[AccessKit](https://accesskit.dev) -- UI Automation on Windows, AT-SPI on X11
+and Wayland.
+
+### What is described
+
+| On screen | As a node |
+| --- | --- |
+| the window | `Window`, named by its title, sized to the drawing area |
+| each open document | `MultilineTextInput`, holding one `TextRun` per line |
+| the caret and the selection | a text selection on the document node, in characters |
+| the notification overlay | a `Log` whose entries are announced; an error interrupts |
+| the publish dialog | a modal `Dialog` of labelled fields |
+| its drop-down of keys | a `ComboBox` with a `ListItem` per key |
+| its passphrase field | a `PasswordInput`, whose value is asterisks and never the passphrase |
+| its reveal button | a `Switch` |
+| Xudu's links between documents | a `List` of `Link`s, each followable |
+| Xudu's hypertime map | a `List` of states, with the current one marked |
+
+A document is described as text runs rather than as one long value because
+that is the unit an assistive technology navigates in: it asks for the
+character at an offset, the word around one, the line above. Each run carries
+its text, the byte length of every character in it -- which is what makes an
+offset in characters mean something in a UTF-8 string -- and the character
+index each of its words begins at. A run is a line. A line with no break in it
+for two hundred characters is cut anyway, at a space where there is one,
+because word starts are carried a byte apiece and a word beginning past the
+two hundred and fifty-fifth character of a run cannot be described at all.
+
+Actions come back the other way. Clicking a document or one of its lines puts
+the caret there; clicking a beam follows the link; clicking a state in the map
+goes to it; a form field can be focused, a switch flipped, a drop-down entry
+chosen, a text field set. They arrive on AccessKit's own threads, are queued,
+and are carried out by whichever thread owns the thing being acted on --
+which for a document means the render thread.
+
+### How it is put together
+
+    include/gleditor/a11y/tree.hpp        the vocabulary: nodes, roles, actions
+    include/gleditor/a11y/publisher.hpp   collecting what everything has to say
+    include/gleditor/a11y/platform.hpp    where it goes
+    include/gleditor/a11y/documents.hpp   the documents, the runs and the caret
+    src/a11y/platform_accesskit.cpp       AccessKit
+    src/a11y/platform_none.cpp            no AccessKit
+
+The vocabulary is its own rather than AccessKit's, for three reasons and the
+third is the one that matters. It is plain data, so building a tree is testable
+without a device, a window, a D-Bus session or a screen reader. AccessKit's own
+node vocabulary is the intersection of several platforms' ideas of what a user
+interface is, and naming the small part of it a text editor needs is what keeps
+the mapping readable. And a build without AccessKit should not be a build where
+half the UI code is conditional: `platform.hpp` is where the whole of that
+difference lives, the tree is assembled either way, and only its destination
+changes. A description that is only built in some builds is one that is only
+correct in some builds.
+
+The two threads are the same split as everywhere else here. The documents and
+the caret belong to the render thread, so that is where the tree is built --
+once a frame, and only when one of its sources says something has changed.
+AccessKit's Windows adapter must be talked to from the thread that created the
+window, so that is where it is sent. The tree is a value and crosses under a
+lock.
+
+Nothing calls back into the program from AccessKit's threads. The activation
+handler -- which fires whenever an assistive technology starts, possibly an
+hour into the session -- is answered from the last tree, kept for the purpose;
+action requests are queued and polled for by the event loop.
+
+### Windows, X11 and Wayland
+
+X11 and Wayland share one adapter, and that is not a simplification: AT-SPI is
+a D-Bus protocol, so an assistive technology on Linux talks to the
+accessibility bus and never to the display server. The one place the display
+server shows through is where the window is on the desktop, which every node's
+rectangle is offset by. A Wayland client is not told its own position; SDL
+answers with zeroes there, which means bounds are reported relative to the
+window, which is what a Wayland assistive technology expects.
+
+Windows uses the subclassing adapter, which installs itself on the window
+procedure to answer `WM_GETOBJECT` and can only do so before the window has
+ever been shown. That is why the window is created hidden on Windows and shown
+a few lines later, and why `Application::run()` opens accessibility between the
+two.
+
+### Building it
+
+AccessKit is reached through
+[accesskit-c](https://github.com/AccessKit/accesskit-c), its C bindings: one
+header and one library. Releases are published as archives holding an
+`include/` and a `lib/<os>/<arch>/`, and distributions that package it install
+a pkg-config file. The build looks in three places, in the order somebody is
+likely to have arranged one:
+
+- `ACCESSKIT_DIR`, naming an unpacked release or a source tree that has been
+  built. Spelled the same as accesskit-c's own CMake option, so a directory
+  that works there works here.
+- pkg-config, for `accesskit`.
+- the compiler's own include path.
+
+`GLEDITOR_ENABLE_A11Y=1` makes it required and its absence an error;
+`GLEDITOR_ENABLE_A11Y=0` builds `platform_none.cpp` and never looks. Unset asks
+for it and settles for none, because not everybody has it installed and a build
+that stopped would be a worse answer than an editor that draws.
+
+    make ACCESSKIT_DIR=/opt/accesskit-c
+
+AccessKit is written in Rust, so building accesskit-c from source needs a Rust
+toolchain -- but this project does not: it links a library, the same as it
+links libtorrent. There is no cargo in this build and no Rust in this tree.
+
+### Seeing what a screen reader would be told
+
+`--dump-a11y` prints the tree once the frame has settled, indented, one node
+per line. It is the one way to check the description without an accessibility
+bus and somebody listening to it, and it is what the tests read.
+
+    ./build/xudu store --import essay.txt --click 400,300 --dump-a11y --profile
+
+    window "Xudu"
+      multiline text input "1" [caret 14]
+        text run = "hello world\n"
+        text run = "this is a second line\n"
+        text run = "and a third with words in it\n"
+      list "hypertime: every state of this document"
+        list item "1" = "current"
+    focus: 1
+
+The description has also been read back off a real accessibility bus -- an
+`at-spi-bus-launcher`, a registry and `org.a11y.Status.IsEnabled` set, with the
+tree walked from the registry root by D-Bus. The application registers, the
+window and its children are reachable from outside the process, and the
+document's whole text comes back through the AT-SPI `Text` interface. The
+Windows path is written against the same C API and has not been run here.
+
 ## SDL2 and SDL3
 
 Either major version works, chosen at build time with `GLEDITOR_SDL=2` or
@@ -1265,6 +1405,8 @@ What SDL does have, this program uses:
   - The OpenGL and OpenGL ES entry points are resolved at run time through
     `SDL_GL_GetProcAddress`, so no GL library is linked. `GL/glcorearb.h` is
     still needed for its typedefs and enum values.
+  - accesskit-c (optional; what reports the user interface to screen readers.
+    See "Accessibility" above)
 - Testing: GoogleTest + GoogleMock
 - Vendored/third-party: `thirdparty/argparse`, `thirdparty/Choreograph`, `thirdparty/cosmopolitan` toolchain support (optional)
 
@@ -1357,6 +1499,10 @@ Optional Make variables:
 - `GLEDITOR_ENABLE_VULKAN=1` compiles the Vulkan backend.
 - `GLEDITOR_SDL=2` or `GLEDITOR_SDL=3` picks the SDL major version; unset means
   SDL3 when pkg-config finds it, SDL2 otherwise.
+- `GLEDITOR_ENABLE_A11Y=1` requires AccessKit and fails the build without it;
+  `=0` builds without reporting anything to assistive technologies; unset uses
+  it when it can be found. `ACCESSKIT_DIR` names an unpacked accesskit-c
+  release. See "Accessibility" above.
 - `STATIC=--static` attempts static linking for libs resolved via pkg-config.
 
 Objects are rebuilt when the compile flags change, so toggling either of the
@@ -1628,6 +1774,7 @@ recompiling the sixty-nine files that did not change.
 
 ## Project structure
 
+- `src/a11y/`   the accessibility tree, and the one file that talks to AccessKit
 - `src/`        the library: document model, glyph cache, SDL wrappers, render loop
 - `src/render/` the device abstraction and its backends (`gl/`, `vulkan/`)
 - `include/`    the library's public headers, under `gleditor/`

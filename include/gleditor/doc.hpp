@@ -267,6 +267,8 @@ private:
   std::uint32_t docIndex{};
   /// Outcome of the most recent reflow, for reporting and for tests.
   ReflowScope reflowScope{ReflowScope::Document};
+  /// Bumped by every splice of the text. See editGeneration().
+  std::uint64_t edits{};
   std::size_t reflowPages{};
   /**
    * @brief Where the document actually is, as opposed to where it belongs.
@@ -610,6 +612,17 @@ public:
 
   /// What this document is called. A path, for one opened from a file.
   [[nodiscard]] const std::string &name() const { return docName; }
+
+  /**
+   * @brief How many times this document's text has changed.
+   *
+   * Not a version, and it means nothing between two documents: it is a number
+   * that moves when the text does, so that something keeping a derived copy --
+   * the accessibility description, which holds the whole text as a tree of
+   * runs -- can tell whether it is stale without comparing a megabyte of text
+   * against a megabyte of text every frame.
+   */
+  [[nodiscard]] std::uint64_t editGeneration() const { return edits; }
 
   /// Scope of the most recent reflow, and how many pages it rebuilt.
   [[nodiscard]] ReflowScope lastReflowScope() const { return reflowScope; }

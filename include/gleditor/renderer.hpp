@@ -20,6 +20,7 @@
 // renderer holds a unique_ptr to one and create() instantiates the destructor
 // in every translation unit that builds a renderer. The header names no
 // graphics API, so this costs nothing in coupling.
+#include <gleditor/a11y/documents.hpp>
 #include <gleditor/caret.hpp>
 #include <gleditor/draw_budget.hpp>
 #include <gleditor/frame_contributor.hpp>
@@ -268,6 +269,9 @@ private:
   std::unique_ptr<ToastOverlay> toasts;
   /// The editing caret, likewise built and destroyed around the device.
   std::unique_ptr<Caret> caret;
+  /// What the open documents look like to an assistive technology. Built from
+  /// the same state as the frame, once a frame, and only when it has changed.
+  gleditor::a11y::DocumentsSource documents;
   /// Pixel of a click whose picking result has not come back yet. Picking is
   /// asynchronous, so the click cannot be answered in the frame that saw it.
   std::optional<std::pair<int, int>> awaitingClick;

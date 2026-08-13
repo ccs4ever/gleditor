@@ -25,6 +25,7 @@
 
 #include <glm/ext/matrix_float4x4.hpp>
 
+#include <gleditor/a11y/tree.hpp>
 #include <gleditor/buffer_pool.hpp>
 #include <gleditor/render/diagnostics.hpp>
 #include <gleditor/render/types.hpp>
@@ -41,8 +42,15 @@ class RenderDevice;
  *
  * Every method must be called on the render thread: posting rasterises text
  * through the shared glyph cache and writes device memory.
+ *
+ * Also describes itself to the assistive technologies, as a log whose entries
+ * are announced when there is a pause. That is what a notification is for --
+ * something the person should be told and must not be interrupted by -- and it
+ * is the one place in this program where the accessible form of a thing is
+ * plainly better than the drawn one: a message that fades after eight seconds
+ * is gone, and a message that has been spoken has been heard.
  */
-class ToastOverlay {
+class ToastOverlay : public gleditor::a11y::Source {
 public:
   using Clock = std::chrono::steady_clock;
 
@@ -93,6 +101,10 @@ public:
    */
   void draw(RenderState &state, int screenWidth, int screenHeight);
 
+  // -- gleditor::a11y::Source ------------------------------------------------
+  void describe(gleditor::a11y::Builder &into) override;
+  [[nodiscard]] std::uint64_t accessibilityRevision() const override;
+
 private:
   /// One notification: its rows in the shared pool, and when it dies.
   struct Toast {
@@ -103,6 +115,14 @@ private:
     float height{};
     Clock::time_point postedAt;
     Clock::time_point expiresAt;
+    /// What it says, and how much it matters. Kept because the drawn form is
+    /// quads in a buffer and nothing can read those back -- see describe().
+    std::string message;
+    render::DiagnosticSeverity severity{render::DiagnosticSeverity::Info};
+    /// Its number among every toast this overlay has ever shown, so that a
+    /// second notification with the same words as the first is a second
+    /// notification and gets announced again.
+    std::uint64_t serial{};
   };
 
 public:
@@ -153,6 +173,10 @@ private:
   std::unique_ptr<BufferPool> pool;
   render::PipelineHandle pipeline{};
   std::vector<Toast> toasts;
+  /// How many have been posted, ever. Both the serial a toast is given and,
+  /// with the number still on screen, what tells the accessibility tree that
+  /// something has changed.
+  std::uint64_t posted{};
 };
 
 #endif // GLEDITOR_TOAST_H

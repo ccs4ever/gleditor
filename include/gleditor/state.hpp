@@ -13,6 +13,7 @@
 #include <utility>
 #include <vector>
 
+#include <gleditor/a11y/publisher.hpp>
 #include <gleditor/modal_input.hpp>
 #include <gleditor/render/diagnostics.hpp>
 
@@ -80,6 +81,14 @@ struct AppState {
   std::vector<std::pair<render::DiagnosticSeverity, std::string>>
       requestedToasts;
   bool profiling{};
+  /**
+   * @brief Print the accessibility tree once the frame has settled.
+   *
+   * What a screen reader would be handed, as indented text. The one way to
+   * check the description without a screen reader, an accessibility bus and a
+   * person listening to it -- and the way the tests check it.
+   */
+  bool dumpAccessibility{};
   /// Report where the data files were found and quit, without opening a
   /// window. The one thing a package can be asked on a machine whose GL driver
   /// cannot give it a context -- and the thing packaging most often gets wrong.
@@ -138,6 +147,22 @@ struct AppState {
    * and is asked before every key. See gleditor/modal_input.hpp.
    */
   gleditor::ModalInput *modal{};
+
+  /**
+   * @brief What reports this program's user interface to the platform.
+   *
+   * Here rather than in the renderer or the application because both halves
+   * need it: the render thread describes what is on screen, since that is
+   * where the documents and the caret are, and the event thread does the
+   * talking, since that is what owns the window. See a11y/publisher.hpp.
+   *
+   * Made before anything else so that whatever draws can register itself as it
+   * is built; harmless until Application::run() opens the platform's end of
+   * it, and harmless afterwards on a machine where nothing accessible is
+   * running.
+   */
+  std::shared_ptr<gleditor::a11y::Publisher> accessibility =
+      std::make_shared<gleditor::a11y::Publisher>("gleditor", "gleditor", "");
 
   /**
    * @brief Run a bound command by name, for a scripted run.

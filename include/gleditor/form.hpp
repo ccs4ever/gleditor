@@ -28,6 +28,7 @@
 #include <string>
 #include <vector>
 
+#include <gleditor/a11y/tree.hpp>
 #include <gleditor/frame_contributor.hpp>
 #include <gleditor/modal_input.hpp>
 
@@ -45,7 +46,7 @@ class Canvas;
  * event thread -- so everything it holds is behind one mutex, held briefly and
  * never across a call back into the program.
  */
-class Form : public FrameContributor, public ModalInput {
+class Form : public FrameContributor, public ModalInput, public a11y::Source {
 public:
   /// What kind of thing is being asked for.
   enum class Kind : std::uint8_t {
@@ -119,6 +120,12 @@ public:
   void deviceReady(render::RenderDevice &device,
                    const render::PipelineDesc &documentPipeline) override;
   void drawFrame(FrameContext &ctx) override;
+
+  // -- gleditor::a11y::Source -------------------------------------------------
+  void describe(a11y::Builder &into) override;
+  [[nodiscard]] std::uint64_t accessibilityRevision() const override;
+  bool performAction(std::uint64_t nodeId, a11y::Action action,
+                     std::string_view value) override;
 
   // -- gleditor::ModalInput ---------------------------------------------------
   [[nodiscard]] bool grabbing() const override;
