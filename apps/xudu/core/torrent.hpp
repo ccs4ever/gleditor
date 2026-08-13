@@ -37,6 +37,7 @@
 #include <cstdint>
 #include <functional>
 #include <optional>
+#include <span>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -210,6 +211,37 @@ struct MadeTorrent {
   InfoHash hash;
 };
 [[nodiscard]] MadeTorrent makeTorrent(std::string_view data, std::string name,
+                                      std::uint64_t pieceLength = 256 * 1024);
+
+/// A file to put into a torrent. TorrentFile above is the other direction --
+/// what a parsed torrent says it holds.
+struct TorrentContent {
+  /// Name within the torrent's directory. No separators: a flat directory is
+  /// all this needs, and a path with one in it is how a torrent writes outside
+  /// the directory it was given.
+  std::string path;
+  std::string data;
+};
+
+/**
+ * @brief Build a torrent carrying several files under one directory.
+ *
+ * Pieces run over the concatenation of the files in the order given, which is
+ * what makes a file's offset within the stream fixed the moment the torrent is
+ * made -- and therefore what lets a scroll segment name a stretch of one file
+ * and keep meaning it.
+ *
+ * What this is for: sealing a scroll seals more than the content. The record
+ * of who wrote it goes in the same torrent, so that the info hash covers both
+ * and neither can be substituted for the other afterwards. A reader who has
+ * the bytes has the claim of authorship that came with them.
+ *
+ * @param name The directory name. Display only, as it always is.
+ * @throws std::invalid_argument for a zero piece length, an empty file list,
+ *         or a path containing a separator.
+ */
+[[nodiscard]] MadeTorrent makeTorrent(std::span<const TorrentContent> files,
+                                      std::string name,
                                       std::uint64_t pieceLength = 256 * 1024);
 
 /// SHA-1 of @p data, which is the hash BitTorrent v1 is built on.

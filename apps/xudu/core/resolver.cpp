@@ -35,6 +35,26 @@ InfoHash DirectoryContentSource::add(const std::string_view torrentFile,
                                      std::string dataRoot) {
   auto meta       = Metainfo::parse(torrentFile);
   const auto hash = meta.hash();
+
+  // A multi-file torrent's paths are relative to a directory named after the
+  // torrent, and what somebody has on disk is as often the directory holding
+  // that directory -- which is where a downloader puts it and where sealing
+  // writes it. Both spellings are accepted by looking for the first file:
+  // guessing wrong here produces a document that reads as empty, which is a
+  // long way from the mistake that caused it.
+  if (!meta.files().empty()) {
+    const std::filesystem::path root(dataRoot);
+    const auto &first = meta.files().front().path;
+    // is_regular_file rather than exists: a torrent whose name matches its
+    // first file's name -- which sealing produces, since the scroll and the
+    // content it carries are both called after the salt -- otherwise finds the
+    // directory and tries to read the file out of it.
+    if (!std::filesystem::is_regular_file(root / first) &&
+        std::filesystem::is_regular_file(root / meta.name() / first)) {
+      dataRoot = (root / meta.name()).string();
+    }
+  }
+
   held.insert_or_assign(hash, Held{std::move(meta), std::move(dataRoot)});
   return hash;
 }

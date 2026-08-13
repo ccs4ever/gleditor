@@ -11,6 +11,7 @@
 #include <gmock/gmock.h>
 #include <gtest/gtest.h>
 
+#include <array>
 #include <cstdint>
 #include <filesystem>
 #include <fstream>
@@ -21,6 +22,7 @@
 #include <xudu/core/resolver.hpp>
 #include <xudu/core/scroll.hpp>
 #include <xudu/core/store.hpp>
+#include <xudu/core/torrent.hpp>
 
 #include "torrent_data.hpp"
 
@@ -480,6 +482,53 @@ TEST_F(SealedScrollTest, aNamedScrollIsItselfWhicheverTorrentCarriesIt) {
   // An unnamed scroll of the same bytes is a different scroll, and honestly
   // so: nothing binds two packagings together without a publisher to say so.
   EXPECT_NE(store.addScroll(scrollFor(xudu_test::multiFileHash, 0)), id);
+}
+
+// Where a multi-file torrent's files are is ambiguous in practice: its paths
+// are relative to a directory named after the torrent, and what somebody has
+// is as often the directory holding that one -- which is where a downloader
+// leaves it and where sealing writes it. Guessing wrong produces a document
+// that reads as empty, a long way from the mistake that caused it, so both
+// spellings are accepted.
+TEST_F(TorrentDataTest, aMultiFileTorrentIsFoundFromEitherDirectory) {
+  const auto hash = InfoHash::fromHex(xudu_test::multiFileHash);
+  const auto want = xudu_test::multiFileFirst;
+
+  // The directory the torrent's name refers to, which is what SetUp gave.
+  EXPECT_EQ(source.readStream(hash, 0, want.size()), want);
+
+  // And the directory above it. The layout on disk is unchanged; only what
+  // the caller said about it differs.
+  DirectoryContentSource above;
+  above.add(xudu_test::multiFileTorrent, dir.string());
+  EXPECT_EQ(above.readStream(hash, 0, want.size()), want);
+}
+
+// The case that is easy to get wrong twice over: a torrent whose name is also
+// its first file's name, which is what sealing a scroll produces, since the
+// scroll and the content it carries are both called after the salt. Testing
+// for the file's existence rather than its being a file finds the directory
+// and then fails to read anything out of it.
+TEST_F(TorrentDataTest, aTorrentNamedAfterItsOwnFirstFileStillResolves) {
+  const std::string content = "the content that was sealed";
+  const std::string record  = "author: \"somebody\"\n";
+  const std::array<xudu::TorrentContent, 2> files{
+      xudu::TorrentContent{"spool", content},
+      xudu::TorrentContent{"AUTHORSHIP.yaml", record},
+  };
+  const auto made = xudu::makeTorrent(files, "spool");
+
+  const auto laid = dir / "sealed";
+  std::filesystem::create_directories(laid / "spool");
+  write(laid / "spool" / "spool", content);
+  write(laid / "spool" / "AUTHORSHIP.yaml", record);
+
+  DirectoryContentSource sealed;
+  // The directory above, where "spool" is a directory rather than the file.
+  sealed.add(made.file, laid.string());
+  EXPECT_EQ(sealed.readStream(made.hash, 0, content.size()), content);
+  EXPECT_EQ(sealed.readStream(made.hash, content.size(), record.size()),
+            record);
 }
 
 } // namespace

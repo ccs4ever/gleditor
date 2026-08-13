@@ -80,6 +80,16 @@ Elsewhere published(const std::uint64_t from = 100,
   return out;
 }
 
+/// A stand-in for the OpenPGP-signed authorship record. What sealing insists
+/// on is that there be one; whether gpg made it is provenance.cpp's business,
+/// and needing a keyring would make every test here need one.
+xudu::SignedProvenance signedBy(const std::string &name) {
+  xudu::Provenance record;
+  record.author.name  = name;
+  record.author.email = name + "@example.org";
+  return {record.toYaml(), "-----BEGIN PGP SIGNATURE-----\n(for the test)\n"};
+}
+
 std::vector<const Version *> viewing(const std::vector<Version> &versions) {
   std::vector<const Version *> out;
   out.reserve(versions.size());
@@ -201,7 +211,10 @@ TEST(AdoptionTest, aLinkBetweenTwoPublishedDocumentsCrossesToAThirdMachine) {
   notes      = mine.addLink(notes, link);
 
   const auto myKeys = xudu::createMutableKeys();
-  const auto sealed = xudu::sealLocalSpool(mine, myKeys, "notes", "");
+  // Sealing needs a signed record of who is doing it, so the test says who --
+  // see provenance.cpp for what that record is and why it comes first.
+  const auto sealed =
+      xudu::sealLocalSpool(mine, myKeys, "notes", "", signedBy("me"));
   const auto myPub  = xudu::publish(mine, notes, myKeys, "notes", "My Notes", 1,
                                     1700000200, &sealed.scroll);
 

@@ -43,38 +43,86 @@ const bencode::Value &require(const bencode::Value &dict,
 
 } // namespace
 
+namespace {
+
+/// One SHA-1 per piece over @p stream, which is the concatenation of whatever
+/// files the torrent holds.
+std::string pieceHashesOf(const std::string_view stream,
+                          const std::uint64_t pieceLength) {
+  std::string pieces;
+  for (std::uint64_t at = 0; at < stream.size(); at += pieceLength) {
+    const auto span = stream.substr(
+        at, static_cast<std::size_t>(
+                std::min<std::uint64_t>(pieceLength, stream.size() - at)));
+    const auto hash = sha1(span);
+    pieces.append(reinterpret_cast<const char *>(hash.data()), hash.size());
+  }
+  return pieces;
+}
+
+/// Wrap an info dictionary as a .torrent, and take the name from its encoding.
+MadeTorrent fromInfo(const bencode::Value &info) {
+  // The hash is over the info dictionary's encoding, which is what the spec
+  // asks for and what every other client will compute.
+  MadeTorrent made;
+  made.hash.bytes = sha1(info.encode());
+  made.file       = bencode::Value::dict({{"info", info}}).encode();
+  return made;
+}
+
+} // namespace
+
 MadeTorrent makeTorrent(const std::string_view data, std::string name,
                         const std::uint64_t pieceLength) {
   if (0 == pieceLength) {
     throw std::invalid_argument("makeTorrent: zero piece length");
   }
 
-  // One SHA-1 per piece, over the stream, which for one file is the file.
-  std::string pieces;
-  for (std::uint64_t at = 0; at < data.size(); at += pieceLength) {
-    const auto span = data.substr(
-        at, static_cast<std::size_t>(
-                std::min<std::uint64_t>(pieceLength, data.size() - at)));
-    const auto hash = sha1(span);
-    pieces.append(reinterpret_cast<const char *>(hash.data()), hash.size());
-  }
-
-  const auto info = bencode::Value::dict({
+  return fromInfo(bencode::Value::dict({
       {"length", bencode::Value::integer(static_cast<std::int64_t>(data.size()))},
       {"name", bencode::Value::string(std::move(name))},
       {"piece length",
        bencode::Value::integer(static_cast<std::int64_t>(pieceLength))},
-      {"pieces", bencode::Value::string(std::move(pieces))},
-  });
+      {"pieces", bencode::Value::string(pieceHashesOf(data, pieceLength))},
+  }));
+}
 
-  // The hash is over the info dictionary's encoding, which is what the spec
-  // asks for and what every other client will compute.
-  const auto encodedInfo = info.encode();
-  MadeTorrent made;
-  made.hash.bytes = sha1(encodedInfo);
-  made.file =
-      bencode::Value::dict({{"info", info}}).encode();
-  return made;
+MadeTorrent makeTorrent(const std::span<const TorrentContent> files,
+                        std::string name, const std::uint64_t pieceLength) {
+  if (0 == pieceLength) {
+    throw std::invalid_argument("makeTorrent: zero piece length");
+  }
+  if (files.empty()) {
+    throw std::invalid_argument("makeTorrent: no files");
+  }
+
+  bencode::List entries;
+  entries.reserve(files.size());
+  std::string stream;
+  for (const auto &file : files) {
+    if (file.path.empty() ||
+        file.path.find_first_of("/\\") != std::string::npos) {
+      throw std::invalid_argument(
+          "makeTorrent: file names must be plain names within the torrent's "
+          "directory, got: " + file.path);
+    }
+    entries.push_back(bencode::Value::dict({
+        {"length",
+         bencode::Value::integer(static_cast<std::int64_t>(file.data.size()))},
+        {"path", bencode::Value::list({bencode::Value::string(file.path)})},
+    }));
+    // Pieces run over the concatenation in the order given, so this is also
+    // what fixes each file's offset within the stream.
+    stream += file.data;
+  }
+
+  return fromInfo(bencode::Value::dict({
+      {"files", bencode::Value::list(std::move(entries))},
+      {"name", bencode::Value::string(std::move(name))},
+      {"piece length",
+       bencode::Value::integer(static_cast<std::int64_t>(pieceLength))},
+      {"pieces", bencode::Value::string(pieceHashesOf(stream, pieceLength))},
+  }));
 }
 
 std::array<std::uint8_t, 20> sha1(const std::string_view data) {

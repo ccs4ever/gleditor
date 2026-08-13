@@ -143,13 +143,25 @@ TEST(PublicationTest, whatWasWrittenHereCanBeSealedAndThenPublished) {
                                                "An Essay", 1, 1700000000)),
                std::runtime_error);
 
-  const auto sealed = xudu::sealLocalSpool(store, keys, "permascroll", "");
+  // Sealing insists on a signed record of who is doing it; whether gpg made
+  // that signature is provenance.cpp's business.
+  xudu::Provenance who;
+  who.author.name  = "Ada Lovelace";
+  who.author.email = "ada@example.org";
+  const auto sealed = xudu::sealLocalSpool(
+      store, keys, "permascroll", "",
+      {who.toYaml(), "-----BEGIN PGP SIGNATURE-----\n(for the test)\n"});
   EXPECT_EQ(sealed.scroll.length(), store.primedia().bytes().size());
   EXPECT_TRUE(sealed.scroll.isNamed());
   // A real torrent: it parses, and its info hash is the one sealing reported.
   const auto meta = xudu::Metainfo::parse(sealed.torrentFile);
   EXPECT_EQ(meta.hash(), sealed.hash);
-  EXPECT_EQ(meta.totalLength(), store.primedia().bytes().size());
+  // The content is the first file and the whole of the scroll; the authorship
+  // record and its signature ride along, which is why the torrent holds more
+  // than the spool does.
+  ASSERT_FALSE(meta.files().empty());
+  EXPECT_EQ(meta.files()[0].length, store.primedia().bytes().size());
+  EXPECT_GT(meta.totalLength(), store.primedia().bytes().size());
 
   const auto pub = xudu::publish(store, version, keys, "essay", "An Essay", 1,
                                  1700000000, &sealed.scroll);
