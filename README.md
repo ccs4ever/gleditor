@@ -1085,6 +1085,19 @@ signature is the key management and the web of trust around it, none of which
 this program has any business duplicating -- and a reader will reach for gpg to
 check it, so gpg is what should produce it.
 
+gpg is run with an argument vector rather than a command line, on every
+platform: an author's name and a passphrase are somebody else's text, and
+handing text to a shell is how text becomes commands. What that means differs
+by platform. POSIX has one call that both builds the argument list and takes
+it -- `posix_spawn` -- so there is nothing to assemble. Windows has no such
+call; `CreateProcess` takes a single string, so the argument vector is joined
+into one by hand, quoted the way `CommandLineToArgvW` will read it back apart
+again (`apps/xudu/core/windows_quoting.cpp`, checked by
+`tests/xudu/windows_quoting.cpp` on every platform this project tests on, since
+the algorithm itself needs no Windows API to run). Either way, the passphrase
+goes down a pipe to gpg's stdin rather than onto the command line, which is
+readable by every other process on the machine.
+
 #### Who you are, kept where your other settings are
 
 Identity belongs to a person, not to a document. Being asked to state it again

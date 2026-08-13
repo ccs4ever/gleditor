@@ -4,8 +4,10 @@
  */
 #include "provenance.hpp" // IWYU pragma: associated
 
+#include "windows_quoting.hpp"
 #include "yaml.hpp"
 
+#include <algorithm>
 #include <array>
 #include <cerrno>
 #include <cstdlib>
@@ -13,21 +15,34 @@
 #include <filesystem>
 #include <format>
 #include <fstream>
+#include <optional>
 #include <sstream>
 #include <stdexcept>
-#include <optional>
 #include <string_view>
 #include <system_error>
 #include <utility>
 #include <vector>
 
+#if defined(_WIN32)
+// NOMINMAX: windows.h's own min/max macros would otherwise shadow
+// std::max below, and silently pick the wrong one. MinGW predefines this
+// already; MSVC, if this is ever built with it, does not.
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+// clang-format off
+#include <windows.h>
+// clang-format on
+#include <process.h> // _getpid
+#else
 #include <spawn.h>
 #include <sys/wait.h>
 #include <unistd.h>
 
-#include <glibmm/checksum.h>
-
 extern char **environ;
+#endif
+
+#include <glibmm/checksum.h>
 
 namespace xudu {
 
@@ -50,6 +65,167 @@ struct Ran {
     return said;
   }
 };
+
+#if defined(_WIN32)
+
+/**
+ * @brief An argv element, converted to UTF-16 and quoted as one token of a
+ *        Windows command line.
+ *
+ * CreateProcess takes a single string rather than an array, so an argument
+ * vector has to be joined into one -- and that join is the whole of what
+ * would otherwise be a shell's job, done without a shell. The conversion is
+ * the only part of this that touches the Windows API; the quoting itself is
+ * pure string handling and lives in windows_quoting.cpp, where it can be
+ * checked without a Windows machine to run it on.
+ */
+std::wstring quoteForWindows(const std::string &argUtf8) {
+  const auto wideLength = MultiByteToWideChar(
+      CP_UTF8, 0, argUtf8.data(), static_cast<int>(argUtf8.size()), nullptr, 0);
+  std::wstring arg(static_cast<std::size_t>(std::max(wideLength, 0)), L'\0');
+  if (wideLength > 0) {
+    MultiByteToWideChar(CP_UTF8, 0, argUtf8.data(),
+                        static_cast<int>(argUtf8.size()), arg.data(),
+                        wideLength);
+  }
+  return quoteWindowsArgument(arg);
+}
+
+/// A pipe with both ends closed on destruction unless taken. RAII over a pair
+/// of handles is what keeps every early return above from leaking one.
+struct Pipe {
+  HANDLE readEnd{INVALID_HANDLE_VALUE};
+  HANDLE writeEnd{INVALID_HANDLE_VALUE};
+
+  Pipe() {
+    SECURITY_ATTRIBUTES inheritable{sizeof(SECURITY_ATTRIBUTES), nullptr, TRUE};
+    static_cast<void>(CreatePipe(&readEnd, &writeEnd, &inheritable, 0));
+  }
+  ~Pipe() { close(); }
+  Pipe(const Pipe &)            = delete;
+  Pipe &operator=(const Pipe &) = delete;
+  Pipe(Pipe &&)                 = delete;
+  Pipe &operator=(Pipe &&)      = delete;
+
+  [[nodiscard]] bool ok() const {
+    return INVALID_HANDLE_VALUE != readEnd && INVALID_HANDLE_VALUE != writeEnd;
+  }
+  void closeRead() {
+    if (INVALID_HANDLE_VALUE != readEnd) {
+      CloseHandle(readEnd);
+      readEnd = INVALID_HANDLE_VALUE;
+    }
+  }
+  void closeWrite() {
+    if (INVALID_HANDLE_VALUE != writeEnd) {
+      CloseHandle(writeEnd);
+      writeEnd = INVALID_HANDLE_VALUE;
+    }
+  }
+  void close() {
+    closeRead();
+    closeWrite();
+  }
+};
+
+/**
+ * @brief Run a program and collect what it said.
+ *
+ * An argument vector rather than a command line: an author's name is somebody
+ * else's text, and handing text to a shell is how text becomes commands.
+ * Nothing here goes near cmd.exe -- CreateProcess is given the one string a
+ * command line has to be, but it is built by quoteForWindows() rather than by
+ * concatenation, which is what keeps an argument from being read as two.
+ */
+Ran run(const std::vector<std::string> &argv,
+        const std::string_view feed = {}) {
+  Pipe outPipe;
+  Pipe errPipe;
+  Pipe inPipe;
+  if (!outPipe.ok() || !errPipe.ok() || !inPipe.ok()) {
+    return {};
+  }
+  // The end each side keeps must not be inherited, or a pipe meant to signal
+  // end-of-file by closing never does: the child's copy of the parent's own
+  // end keeps it open.
+  static_cast<void>(
+      SetHandleInformation(outPipe.readEnd, HANDLE_FLAG_INHERIT, 0));
+  static_cast<void>(
+      SetHandleInformation(errPipe.readEnd, HANDLE_FLAG_INHERIT, 0));
+  static_cast<void>(
+      SetHandleInformation(inPipe.writeEnd, HANDLE_FLAG_INHERIT, 0));
+
+  std::wstring commandLine;
+  for (const auto &arg : argv) {
+    if (!commandLine.empty()) {
+      commandLine.push_back(L' ');
+    }
+    commandLine += quoteForWindows(arg);
+  }
+
+  STARTUPINFOW startup{};
+  startup.cb         = sizeof(startup);
+  startup.dwFlags    = STARTF_USESTDHANDLES;
+  startup.hStdInput  = inPipe.readEnd;
+  startup.hStdOutput = outPipe.writeEnd;
+  startup.hStdError  = errPipe.writeEnd;
+
+  PROCESS_INFORMATION process{};
+  // CreateProcess may write into the buffer it is given, so the command line
+  // cannot be a literal or a const pointer into commandLine.
+  const auto spawned =
+      CreateProcessW(nullptr, commandLine.data(), nullptr, nullptr, TRUE, 0,
+                     nullptr, nullptr, &startup, &process);
+  outPipe.closeWrite();
+  errPipe.closeWrite();
+  inPipe.closeRead();
+  if (0 == spawned) {
+    return {};
+  }
+  CloseHandle(process.hThread);
+
+  // What goes down the pipe is a passphrase and nothing longer, so one write
+  // cannot block: it is far below what a pipe holds without a reader.
+  if (!feed.empty()) {
+    DWORD written = 0;
+    static_cast<void>(WriteFile(inPipe.writeEnd, feed.data(),
+                                static_cast<DWORD>(feed.size()), &written,
+                                nullptr));
+  }
+  // Closed either way, so a program waiting on end of input is not left
+  // waiting for a passphrase that is not coming.
+  inPipe.closeWrite();
+
+  // Both pipes are drained before waiting, or a program that fills one while
+  // this waits on the other deadlocks.
+  const auto drain = [](HANDLE &handle, std::string &into) {
+    std::array<char, 4096> buffer{};
+    while (true) {
+      DWORD got = 0;
+      if (0 == ReadFile(handle, buffer.data(),
+                        static_cast<DWORD>(buffer.size()), &got, nullptr) ||
+          0 == got) {
+        break;
+      }
+      into.append(buffer.data(), static_cast<std::size_t>(got));
+    }
+    CloseHandle(handle);
+    handle = INVALID_HANDLE_VALUE;
+  };
+  Ran ran;
+  ran.started = true;
+  drain(outPipe.readEnd, ran.out);
+  drain(errPipe.readEnd, ran.err);
+
+  WaitForSingleObject(process.hProcess, INFINITE);
+  DWORD exitCode = 0;
+  GetExitCodeProcess(process.hProcess, &exitCode);
+  CloseHandle(process.hProcess);
+  ran.status = static_cast<int>(exitCode);
+  return ran;
+}
+
+#else
 
 /**
  * @brief Run a program and collect what it said.
@@ -135,14 +311,20 @@ Ran run(const std::vector<std::string> &argv,
   return ran;
 }
 
+#endif // defined(_WIN32)
+
 /// A file that deletes itself, since gpg wants paths and this wants none of
 /// them left behind.
 class Scratch {
 public:
   Scratch(const std::string &suffix, const std::string_view contents) {
     static int counter = 0;
-    path = std::filesystem::temp_directory_path() /
+    path               = std::filesystem::temp_directory_path() /
+#if defined(_WIN32)
+           std::format("xudu-{}-{}{}", _getpid(), counter++, suffix);
+#else
            std::format("xudu-{}-{}{}", getpid(), counter++, suffix);
+#endif
     std::ofstream out(path, std::ios::binary | std::ios::trunc);
     out.write(contents.data(), static_cast<std::streamsize>(contents.size()));
   }
@@ -284,8 +466,7 @@ std::string SigningKey::describe() const {
 std::vector<SigningKey> signingKeys(const SigningOptions &where) {
   std::vector<std::string> argv{"gpg"};
   addHome(argv, where.gpgHome);
-  argv.insert(argv.end(),
-              {"--batch", "--with-colons", "--list-secret-keys"});
+  argv.insert(argv.end(), {"--batch", "--with-colons", "--list-secret-keys"});
   const auto ran = run(argv);
   if (!ran.ok()) {
     return {};
@@ -324,8 +505,7 @@ std::vector<SigningKey> signingKeys(const SigningOptions &where) {
   auto preferred   = keys.end();
   if (!named.empty()) {
     preferred = std::ranges::find_if(keys, [&named](const SigningKey &key) {
-      return key.fingerprint.ends_with(named) ||
-             key.identity.contains(named);
+      return key.fingerprint.ends_with(named) || key.identity.contains(named);
     });
   }
   if (keys.end() == preferred && !keys.empty()) {
