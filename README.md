@@ -1558,10 +1558,17 @@ building the same tarball with the same `install` target:
 | Arch | `packaging/arch/PKGBUILD` | 3 | gcc |
 | Nix | `flake.nix`, `packaging/nix/gleditor.nix` | 3 | stdenv |
 | Windows | `packaging/windows/build-msys2.sh` | 3 | MSYS2 UCRT64 |
+| macOS | `packaging/macos/gleditor.rb` | 3 | clang |
 
-The Vulkan backend is enabled in all of them, so `glslang` is a build
-dependency everywhere and the Vulkan loader is a weak runtime one -- it is one
-backend of three, and the other two work without it.
+The Vulkan backend is enabled everywhere except macOS, so `glslang` is a build
+dependency on the other five and the Vulkan loader is a weak runtime one --
+it is one backend of three, and the other two work without it. macOS builds
+OpenGL only: MoltenVK would need a software rasteriser for a headless build,
+which has no macOS equivalent as settled as `lavapipe`/`llvmpipe` on the other
+platforms, and it stays out until that is. AccessKit is off there for a
+different reason -- its macOS adapter (NSAccessibility via view subclassing)
+is a third API this project does not speak yet, distinct from both the
+Windows and AT-SPI ones it already does.
 
 Debian gets SDL2 because SDL3 is not in the archive and a package cannot depend
 on whichever version the build happened to find; everything else gets SDL3,
@@ -1831,8 +1838,7 @@ TODO: Confirm whether the intent is GPL-3.0-only or GPL-3.0-or-later.
 
 ## TODOs / Notes
 
-- Cross-platform support (Windows/macOS) has not been documented or tested yet.
-- Packaging/distribution not defined.
+- macOS has no Vulkan or AccessKit support yet; see the packaging table above.
 - The app resolves `assets/glsl` and `logo.png` relative to the working
   directory, so it must be started from the repository root (`make run` does).
 

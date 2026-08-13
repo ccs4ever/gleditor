@@ -515,3 +515,84 @@ jobs:
         with:
           name: gleditor-windows
           path: build/windows/*.zip
+
+  # ------------------------------------------------------------------ macOS ---
+  # packaging/macos/gleditor.rb is a head-only formula -- there is no tagged
+  # release for its head block to fetch, so `brew install` on the checked-in
+  # file would build whatever `main` happens to be rather than the commit
+  # actually under test. Built directly against the same brewed dependencies
+  # and the same `make install` line the formula itself runs instead, which
+  # tests the commit under test the way `nix build` does against this same
+  # checkout rather than a fetched tarball.
+  #
+  # No Vulkan and no AccessKit here; see the packaging table in the README for
+  # why. Nothing distributable comes out of this job either -- a real bottle
+  # is a release-time concern -- so unlike the other five there is no artifact
+  # to upload.
+  macos:
+    name: brew (macOS, SDL3)
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          submodules: recursive
+          fetch-depth: 0
+
+      # Pure lint: rubocop-based style rules only, no source fetched and no
+      # dependency installed, so this catches a malformed formula file even
+      # if everything below it changes.
+      - name: check the formula's style
+        run: brew style --formula packaging/macos/gleditor.rb
+
+      - name: install build dependencies
+        run: |
+          brew install pangomm cairomm glibmm sdl3 sdl3_image glm \
+            libtorrent-rasterbar boost openssl@3 pkgconf
+
+      # openssl@3 is keg-only -- Homebrew never links it, to stay out of the
+      # way of whatever OpenSSL macOS itself ships -- so its include and
+      # library directories are not on the default search path the way every
+      # other dependency's are and have to be named explicitly. `make install`
+      # here is what packaging/macos/gleditor.rb's own install() runs.
+      - name: build
+        run: |
+          set -eu
+          brew_prefix=$(brew --prefix)
+          openssl_prefix=$(brew --prefix openssl@3)
+          export PKG_CONFIG_PATH="$brew_prefix/lib/pkgconfig:$openssl_prefix/lib/pkgconfig"
+          export CPATH="$brew_prefix/include:$openssl_prefix/include"
+          export LIBRARY_PATH="$brew_prefix/lib:$openssl_prefix/lib"
+          make lib gleditor xudu GLEDITOR_SDL=3 GLEDITOR_VERSION=0.1.0
+
+      - name: install it
+        run: |
+          make install \
+            DESTDIR="$PWD/stage" \
+            prefix=/usr/local \
+            GLEDITOR_SDL=3 \
+            GLEDITOR_VERSION=0.1.0
+
+      - name: check what landed
+        run: |
+          test -x stage/usr/local/bin/gleditor
+          test -x stage/usr/local/bin/xudu
+          test -f stage/usr/local/share/gleditor/shaders/glyph.vert.glsl
+
+      # No backend named, for the same reason the Nix job names none: whether
+      # a GitHub-hosted macOS runner's WindowServer can hand SDL a real OpenGL
+      # context has not been established from anywhere this project's CI has
+      # run before, and a check that might hang or fail for reasons that have
+      # nothing to do with the package is worse than one that proves the
+      # binary starts, resolves every dynamic library and finds its shaders --
+      # which is the same failure mode every other job in this file exists to
+      # catch.
+      # DESTDIR only redirects where install(1) copies files; the rpath
+      # recorded in the binary is still built from `prefix`, which names the
+      # library's eventual home at /usr/local/lib -- correct for a real `brew
+      # install`, which puts it exactly there, but not here, where it only
+      # exists under stage/. DYLD_LIBRARY_PATH stands in for that difference.
+      - name: run the installed binary
+        run: |
+          export DYLD_LIBRARY_PATH="$PWD/stage/usr/local/lib"
+          packaging/smoke-test.sh stage/usr/local/bin/gleditor
+          packaging/smoke-test.sh stage/usr/local/bin/xudu
