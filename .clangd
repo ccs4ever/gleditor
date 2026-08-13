@@ -5,7 +5,7 @@ Index:
   StandardLibrary: Yes
 Diagnostics:
   ClangTidy:
-    Add: 
+    Add:
       - modernize*
       - bugprone-*
       - cppcoreguidlines-*

@@ -275,8 +275,8 @@ mandir ?= $(datarootdir)/man
 appdir := $(datadir)/gleditor
 ifdef DEBUG
 SANITIZE_ADDR_OPTS := -fsanitize=address,undefined,integer -fno-omit-frame-pointer -fsanitize-address-use-after-return=runtime \
-	         -fsanitize-address-use-after-scope 
-SANITIZE_THR_OPTS := -fsanitize=thread,undefined,integer -fno-omit-frame-pointer 
+	         -fsanitize-address-use-after-scope
+SANITIZE_THR_OPTS := -fsanitize=thread,undefined,integer -fno-omit-frame-pointer
 SANITIZE_MEM_OPTS := -fsanitize=memory,undefined,integer -fPIE -pie -fno-omit-frame-pointer \
 		     -fsanitize-memory-track-origins
 DEBUG_OPTS := -g -gembed-source -fdebug-macro -O0
@@ -314,8 +314,8 @@ ifeq ($(CXX_IS_CLANG),1)
 override LDFLAGS += -rtlib=compiler-rt
 endif
 # XXX: work on this in a separate branch, get tests working again for now
-#CXXFLAGS += -stdlib=libc++ -fexperimental-library 
-#LDFLAGS += -v -stdlib=libc++ -fexperimental-library 
+#CXXFLAGS += -stdlib=libc++ -fexperimental-library
+#LDFLAGS += -v -stdlib=libc++ -fexperimental-library
 LIBS := $(shell pkg-config $(STATIC) --libs $(PKGS))
 XUDU_LIBS := $(shell pkg-config $(STATIC) --libs $(XUDU_PKGS))
 # glslangValidator is the traditional name and glslang the current one; which
@@ -696,29 +696,41 @@ doc:
 # the two can never name a different set of files by accident.
 CXX_FORMAT_FILES = $(shell git ls-files '*.cpp' '*.hpp' '*.h' '*.glsl' | grep -v '^thirdparty/')
 SH_FORMAT_FILES  = $(shell git ls-files '*.sh' | grep -v '^thirdparty/')
+YAML_FORMAT_FILES = .github/workflows/c-cpp.yml .github/workflows/packaging.yml .github/dependabot.yml
+MD_FORMAT_FILES  = README.md CLAUDE.md design/btfs-and-permascrolls.md
 
+# yamlfmt and mdformat read their settings from .yamlfmt and (via .mdlrc's
+# sibling .mdl_style.rb) the same conventions yamllint and mdl check for, so
+# a file the formatter just wrote is a file the linter already accepts --
+# see the "coalesce" note in CLAUDE.md if that ever stops being true.
 format:
 	echo "$(CXX_FORMAT_FILES)" | xargs clang-format -i --style=file
 	echo "$(SH_FORMAT_FILES)" | xargs shfmt -i 2 -ci -w
+	yamlfmt $(YAML_FORMAT_FILES)
+	mdformat --wrap keep $(MD_FORMAT_FILES)
 .PHONY: format
 
-# What the CI format job runs. clang-format --dry-run --Werror and shfmt -d
-# both exit non-zero on the first unformatted file rather than rewriting it.
+# What the CI format job runs. clang-format --dry-run --Werror, shfmt -d,
+# yamlfmt -lint and mdformat --check all exit non-zero on the first
+# unformatted file rather than rewriting it.
 format-check:
 	echo "$(CXX_FORMAT_FILES)" | xargs clang-format --style=file --dry-run --Werror
 	echo "$(SH_FORMAT_FILES)" | xargs shfmt -i 2 -ci -d
+	yamlfmt -lint $(YAML_FORMAT_FILES)
+	mdformat --check --wrap keep $(MD_FORMAT_FILES)
 .PHONY: format-check
 
 # The languages formatting does not reach: shellcheck for correctness bugs
 # in the shell scripts, yamllint for the workflow YAML (.yamllint holds the
-# project's exceptions to its defaults), mdl for the prose docs (.mdlrc /
-# .mdl_style.rb holds the same). Nix and the packaging manifests (PKGBUILD,
-# the RPM spec, the Homebrew formula) are covered where a linter for them is
-# actually reliable outside their native distribution -- see CLAUDE.md.
+# project's exceptions to its defaults, shared with .yamlfmt), mdl for the
+# prose docs (.mdlrc / .mdl_style.rb holds the same, shared with mdformat's
+# --wrap keep). Nix and the packaging manifests (PKGBUILD, the RPM spec, the
+# Homebrew formula) are covered where a linter for them is actually reliable
+# outside their native distribution -- see CLAUDE.md.
 lint:
 	echo "$(SH_FORMAT_FILES)" "packaging/arch/PKGBUILD" | xargs shellcheck
-	yamllint .github/workflows/c-cpp.yml .github/workflows/packaging.yml .github/dependabot.yml
-	mdl README.md CLAUDE.md design/*.md
+	yamllint $(YAML_FORMAT_FILES)
+	mdl $(MD_FORMAT_FILES)
 .PHONY: lint
 
 clean: private .UNVEIL += w:gleditor w:gleditor_test w:xudu w:xudu_test
@@ -826,7 +838,7 @@ $(OBJDIR)/%.dep: %.cpp
 
 $(OBJDIR)/%.j: %.cpp
 	$(REAL_CXX) -MJ $@ $(CXXFLAGS) -E $< > /dev/null
-		
+
 # clang -MJ emits one trailing-comma-terminated object per file, so the comma on
 # the final entry has to go: JSON has no trailing commas and clangd rejects the
 # whole database when one is present.

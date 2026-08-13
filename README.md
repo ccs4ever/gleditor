@@ -33,11 +33,11 @@ what one program did with it.
 
 The graphics API is chosen at run time with `--backend`:
 
-| Backend | Requires | Notes |
-| ------- | -------- | ----- |
-| `opengl` (default) | OpenGL 3.3 core | |
-| `opengles` | OpenGL ES 3.0 | |
-| `vulkan` | Vulkan 1.0 | Only when built with `GLEDITOR_ENABLE_VULKAN=1` |
+| Backend            | Requires        | Notes                                           |
+| ------------------ | --------------- | ----------------------------------------------- |
+| `opengl` (default) | OpenGL 3.3 core |                                                 |
+| `opengles`         | OpenGL ES 3.0   |                                                 |
+| `vulkan`           | Vulkan 1.0      | Only when built with `GLEDITOR_ENABLE_VULKAN=1` |
 
 Everything above the backend -- documents, pages, the glyph cache, the buffer
 allocator -- is written against `render::RenderDevice` (`include/gleditor/render/`)
@@ -122,10 +122,10 @@ driver info: recording 1152 draws on 1 thread(s): 495 ns/draw split against 247 
 benchmark: 40 frames, 1152 page draws, median frame 731.315 ms, median collect 0.044 ms, median record 0.285 ms, ...
 ```
 
-| | median frame | collect | record |
-| --- | --- | --- | --- |
-| Vulkan (lavapipe) | 731 ms | 0.044 ms | 0.285 ms |
-| OpenGL (llvmpipe) | 738 ms | 0.044 ms | 729 ms |
+|                   | median frame | collect  | record   |
+| ----------------- | ------------ | -------- | -------- |
+| Vulkan (lavapipe) | 731 ms       | 0.044 ms | 0.285 ms |
+| OpenGL (llvmpipe) | 738 ms       | 0.044 ms | 729 ms   |
 
 Three things worth reading off that. Recording a frame costs about 0.3 ms, or
 247 ns per draw -- material against a 16.7 ms budget, invisible against this
@@ -142,11 +142,11 @@ and the draws add up: `gleditor a.txt b.txt c.txt` puts every page of all three
 in the one list. Running the 4.6 MB sample two and three times over, still under
 lavapipe on four cores:
 
-| documents | page draws | median frame | collect | record |
-| --- | --- | --- | --- | --- |
-| 1 | 1152 | 731 ms | 0.044 ms | 0.285 ms |
-| 2 | 2304 | 1649 ms | 0.077 ms | 0.695 ms |
-| 3 | 3456 | 2474 ms | 0.115 ms | 1.279 ms |
+| documents | page draws | median frame | collect  | record   |
+| --------- | ---------- | ------------ | -------- | -------- |
+| 1         | 1152       | 731 ms       | 0.044 ms | 0.285 ms |
+| 2         | 2304       | 1649 ms      | 0.077 ms | 0.695 ms |
+| 3         | 3456       | 2474 ms      | 0.115 ms | 1.279 ms |
 
 The gap between the two strategies closes as the fixed cost of a split is spread
 over more draws: the device measured them 2.0x apart at 1152 draws, 1.36x at
@@ -225,12 +225,12 @@ is assumed about the typeface, and a font change carries through on its own.
 
 **What it costs and what it saves.** On the 4.6 MB sample under lavapipe:
 
-| | page draws | median frame |
-| --- | --- | --- |
-| one document, every page | 1152 | 962 ms |
-| one document, culled | 1 | 14 ms |
-| three documents, every page | 3456 | 2657 ms |
-| three documents, culled | 2 | 15 ms |
+|                             | page draws | median frame |
+| --------------------------- | ---------- | ------------ |
+| one document, every page    | 1152       | 962 ms       |
+| one document, culled        | 1          | 14 ms        |
+| three documents, every page | 3456       | 2657 ms      |
+| three documents, culled     | 2          | 15 ms        |
 
 The last row is the one that matters: with culling, what a frame costs stops
 tracking how much is open and starts tracking how much is on screen, which is
@@ -247,10 +247,10 @@ land on. Nudge the camera and those samples jump between stroke and paper, which
 is the shimmer you see when panning. Measured by zooming 0.33% -- a change a
 filtered render should barely notice -- and asking how much of the page moved:
 
-| | pixels changed | mean change | changed by >32 levels |
-| --- | --- | --- | --- |
-| before | 6.5% | 5.41 | 4.3% |
-| after | 10.9% | 0.78 | 0.1% |
+|        | pixels changed | mean change | changed by >32 levels |
+| ------ | -------------- | ----------- | --------------------- |
+| before | 6.5%           | 5.41        | 4.3%                  |
+| after  | 10.9%          | 0.78        | 0.1%                  |
 
 More pixels move and each moves less, which is exactly the shape of the fix: a
 sub-pixel zoom should nudge everything slightly rather than flip a few pixels
@@ -315,10 +315,10 @@ one opened at 64, which grows twice -- so the difference is packing, not growth.
 What a failed re-upload looks like is glyphs missing outright, and the limits
 were set by breaking it on purpose:
 
-| | mean change | >32 levels | >64 | >100 |
-| --- | --- | --- | --- | --- |
-| working | 0.64 | 0.38% | 0.02% | 0.000% |
-| re-upload dropped | 2.24 | 1.92% | 1.19% | 0.739% |
+|                   | mean change | >32 levels | >64   | >100   |
+| ----------------- | ----------- | ---------- | ----- | ------ |
+| working           | 0.64        | 0.38%      | 0.02% | 0.000% |
+| re-upload dropped | 2.24        | 1.92%      | 1.19% | 0.739% |
 
 The phase shift nudges pixels; a missing glyph flips them from ink to paper. The
 limit that carries the check is the one a working atlas does not reach at all.
@@ -486,11 +486,11 @@ divide.
 Selecting inside the three-character `ffi` ligature of
 `tests/samples/ligatures.txt`, whose quad is 29 pixels wide on screen:
 
-| selection | highlighted |
-| --- | --- |
-| first `f` | 10 px |
-| `ff` | 19 px |
-| whole `ffi` | 29 px |
+| selection       | highlighted           |
+| --------------- | --------------------- |
+| first `f`       | 10 px                 |
+| `ff`            | 19 px                 |
+| whole `ffi`     | 29 px                 |
 | middle `f` only | 9 px, offset 10 px in |
 
 `--click X,Y` and `--type TEXT` drive both without a mouse or a keyboard, which
@@ -1172,19 +1172,19 @@ the platform's and the form itself is not.
 Control is used throughout, because a bare letter is text: the whole point of
 this program is that typing is an edit, so it has to reach the document.
 
-| Key | Does |
-| --- | --- |
-| `ctrl-b` / `ctrl-n` | go back or forward in hypertime, losing nothing |
-| `ctrl-t` | quote the selection into a second document |
-| `--torrent`, `--quote` | quote a range of a torrent-backed file; see above |
-| `ctrl-l` | mark one end of a link, then join it to another selection |
-| `ctrl-shift-l` | forget a link that was begun and not finished |
-| `ctrl-k` / `ctrl-shift-k` | show or hide the beams; stop them moving documents |
-| `ctrl-m` | show or hide the hypertime map |
-| `ctrl-p` | print every state to the terminal |
-| `ctrl-s` / `ctrl-shift-s` | write the spools out; ask what to publish, then publish |
-| `ctrl-q` | save and quit |
-| `backspace` | stop pointing at the selection |
+| Key                       | Does                                                      |
+| ------------------------- | --------------------------------------------------------- |
+| `ctrl-b` / `ctrl-n`       | go back or forward in hypertime, losing nothing           |
+| `ctrl-t`                  | quote the selection into a second document                |
+| `--torrent`, `--quote`    | quote a range of a torrent-backed file; see above         |
+| `ctrl-l`                  | mark one end of a link, then join it to another selection |
+| `ctrl-shift-l`            | forget a link that was begun and not finished             |
+| `ctrl-k` / `ctrl-shift-k` | show or hide the beams; stop them moving documents        |
+| `ctrl-m`                  | show or hide the hypertime map                            |
+| `ctrl-p`                  | print every state to the terminal                         |
+| `ctrl-s` / `ctrl-shift-s` | write the spools out; ask what to publish, then publish   |
+| `ctrl-q`                  | save and quit                                             |
+| `backspace`               | stop pointing at the selection                            |
 
 ### What the library did not learn
 
@@ -1207,18 +1207,18 @@ and Wayland, NSAccessibility on macOS.
 
 ### What is described
 
-| On screen | As a node |
-| --- | --- |
-| the window | `Window`, named by its title, sized to the drawing area |
-| each open document | `MultilineTextInput`, holding one `TextRun` per line |
-| the caret and the selection | a text selection on the document node, in characters |
-| the notification overlay | a `Log` whose entries are announced; an error interrupts |
-| the publish dialog | a modal `Dialog` of labelled fields |
-| its drop-down of keys | a `ComboBox` with a `ListItem` per key |
-| its passphrase field | a `PasswordInput`, whose value is asterisks and never the passphrase |
-| its reveal button | a `Switch` |
-| Xudu's links between documents | a `List` of `Link`s, each followable |
-| Xudu's hypertime map | a `List` of states, with the current one marked |
+| On screen                      | As a node                                                            |
+| ------------------------------ | -------------------------------------------------------------------- |
+| the window                     | `Window`, named by its title, sized to the drawing area              |
+| each open document             | `MultilineTextInput`, holding one `TextRun` per line                 |
+| the caret and the selection    | a text selection on the document node, in characters                 |
+| the notification overlay       | a `Log` whose entries are announced; an error interrupts             |
+| the publish dialog             | a modal `Dialog` of labelled fields                                  |
+| its drop-down of keys          | a `ComboBox` with a `ListItem` per key                               |
+| its passphrase field           | a `PasswordInput`, whose value is asterisks and never the passphrase |
+| its reveal button              | a `Switch`                                                           |
+| Xudu's links between documents | a `List` of `Link`s, each followable                                 |
+| Xudu's hypertime map           | a `List` of states, with the current one marked                      |
 
 A document is described as text runs rather than as one long value because
 that is the unit an assistive technology navigates in: it asks for the
@@ -1519,24 +1519,24 @@ Notes:
 Common targets (see `Makefile`):
 
 - Build everything (library, both programs, tests, compile commands):
-  - `make`  → builds `build/libgleditor.so.0`, `build/gleditor`, `build/xudu`,
+  - `make` → builds `build/libgleditor.so.0`, `build/gleditor`, `build/xudu`,
     `build/gleditor_test`, `build/xudu_test` and `build/compile_commands.json`
 - Build the library only:
-  - `make lib`  → `build/libgleditor.so.0`, plus the `build/libgleditor.so` linker name
+  - `make lib` → `build/libgleditor.so.0`, plus the `build/libgleditor.so` linker name
 - Build the xanadoc editor only:
-  - `make xudu`  → `build/xudu`
+  - `make xudu` → `build/xudu`
 - Build with the Vulkan backend:
-  - `make GLEDITOR_ENABLE_VULKAN=1`  → also compiles `assets/shaders/vulkan/*.spv`
+  - `make GLEDITOR_ENABLE_VULKAN=1` → also compiles `assets/shaders/vulkan/*.spv`
 - Build against a particular SDL:
   - `make GLEDITOR_SDL=2` or `make GLEDITOR_SDL=3`
 - Compile the SPIR-V modules only:
-  - `make shaders`  (needs `glslangValidator`)
+  - `make shaders` (needs `glslangValidator`)
 - Build the app only:
-  - `make gleditor`  → `build/gleditor`
+  - `make gleditor` → `build/gleditor`
 - Build tests only:
-  - `make gleditor_test`  → `build/gleditor_test`
+  - `make gleditor_test` → `build/gleditor_test`
 - Clean:
-  - `make clean`  → removes `build/` artifacts
+  - `make clean` → removes `build/` artifacts
 
 Compile commands database (for clangd, etc.):
 
@@ -1588,14 +1588,14 @@ tree.
 Definitions live under `packaging/`, one directory per format, all of them
 building the same tarball with the same `install` target:
 
-| Target | Definition | SDL | Compiler |
-| --- | --- | --- | --- |
-| Debian / Ubuntu | `packaging/debian/` | 2 | g++ |
-| Fedora | `packaging/fedora/gleditor.spec` | 3 | g++ |
-| Arch | `packaging/arch/PKGBUILD` | 3 | gcc |
-| Nix | `flake.nix`, `packaging/nix/gleditor.nix` | 3 | stdenv |
-| Windows | `packaging/windows/build-msys2.sh` | 3 | MSYS2 UCRT64 |
-| macOS | `packaging/macos/gleditor.rb` | 3 | clang |
+| Target          | Definition                                | SDL | Compiler     |
+| --------------- | ----------------------------------------- | --- | ------------ |
+| Debian / Ubuntu | `packaging/debian/`                       | 2   | g++          |
+| Fedora          | `packaging/fedora/gleditor.spec`          | 3   | g++          |
+| Arch            | `packaging/arch/PKGBUILD`                 | 3   | gcc          |
+| Nix             | `flake.nix`, `packaging/nix/gleditor.nix` | 3   | stdenv       |
+| Windows         | `packaging/windows/build-msys2.sh`        | 3   | MSYS2 UCRT64 |
+| macOS           | `packaging/macos/gleditor.rb`             | 3   | clang        |
 
 The Vulkan backend is enabled on all six targets, so `glslang` is a build
 dependency everywhere and the Vulkan loader is a weak runtime one -- it is one
@@ -1652,7 +1652,7 @@ what each job runs, and it is runnable by hand against any installed copy.
 ## Run
 
 - After building, run either:
-  - `make run`  (runs `build/gleditor`), or
+  - `make run` (runs `build/gleditor`), or
   - `./build/gleditor [options] [files...]`, or
   - `./build/xudu [options] [store]` -- see [xudu](#xudu-a-xanadoc-editor)
 
@@ -1668,42 +1668,57 @@ Fedora's packaging checks reject one outright.
 Command-line options (registered by `gleditor::addCommonArguments()` in
 `src/app.cpp`):
 
-- `--font <name>`     default: `"Monospace 16"`
-- `--backend <name>`  `opengl` (default), `opengles` or `vulkan`
-- `--profile`         open any provided files and then exit (useful for profiling)
+- `--font <name>` default: `"Monospace 16"`
+
+- `--backend <name>` `opengl` (default), `opengles` or `vulkan`
+
+- `--profile` open any provided files and then exit (useful for profiling)
+
 - `--screenshot <path>` write the first settled frame to `<path>` as a binary PPM
-- `--pick X,Y`        print the picking tag at that pixel once the document has
+
+- `--pick X,Y` print the picking tag at that pixel once the document has
   settled, then exit
-- `--toast [severity:]text`  show a notification over the document; severity is
+
+- `--toast [severity:]text` show a notification over the document; severity is
   `info`, `warning` (the default) or `error`. Driver diagnostics raise these on
   their own; this is how the overlay is exercised on demand and compared
   between backends
-- `--click X,Y`       click there, moving the caret, and print where it
+
+- `--click X,Y` click there, moving the caret, and print where it
   landed; repeatable
-- `--type TEXT`       insert TEXT at the caret; repeatable
-- `--select START,END`  select that document byte range, as a drag would;
+
+- `--type TEXT` insert TEXT at the caret; repeatable
+
+- `--select START,END` select that document byte range, as a drag would;
   repeatable
 
   These four -- `--pick`, `--click`, `--type` and `--select` -- are carried out
   in the order they appear on the command line, each waiting for the one before
   it to finish.
-- `--fov DEGREES`     initial vertical field of view; widening it is how a
+
+- `--fov DEGREES` initial vertical field of view; widening it is how a
   headless run sees many pages at once, and small ones
-- `--no-cull`         draw every page of every document, including the ones
+
+- `--no-cull` draw every page of every document, including the ones
   entirely outside the view. The frame must come out identical
-- `--coarse-below N`  draw a page as one solid bar per line once one layout
+
+- `--coarse-below N` draw a page as one solid bar per line once one layout
   pixel of it covers fewer than N screen pixels; `0` always draws glyphs
-- `--benchmark N`     draw N frames once the document has settled, report how
+
+- `--benchmark N` draw N frames once the document has settled, report how
   long they took, and exit
-- `--strict-diagnostics`  treat a driver error as fatal instead of showing it
+
+- `--strict-diagnostics` treat a driver error as fatal instead of showing it
   as a notification
-- `--no-present`      draw frames without showing them, for capturing one on a
+
+- `--no-present` draw frames without showing them, for capturing one on a
   machine that can give a context but cannot put it on a screen. The capture is
   unaffected -- drawing goes to an offscreen target either way, and presenting
   only copies it to the window. OpenGL and OpenGL ES accept it; Vulkan refuses,
   because every frame acquires a swapchain image and presenting is what hands
   it back, so skipping it would block rather than capture
-- `files...`          one or more input files to open at startup
+
+- `files...` one or more input files to open at startup
 
 Most of these exist to drive the editor without a person at the keyboard, so
 `--help` lists only the everyday ones -- `--font`, `--fov`, `--backend` and
@@ -1714,8 +1729,8 @@ mention what it passes.
 
 Help:
 
-- `./build/gleditor --help`      the everyday switches
-- `./build/gleditor --help-all`  every switch, described in full
+- `./build/gleditor --help` the everyday switches
+- `./build/gleditor --help-all` every switch, described in full
 
 ## Running with sanitizers
 
@@ -1754,12 +1769,12 @@ Movement keys:
 
 Other actions:
 
-| Key | Action |
-| --- | ------ |
-| n   | Create a new page |
-| w   | Close the most recently opened document |
-| r   | Reset view back to start |
-| q   | Quit the application |
+| Key | Action                                                         |
+| --- | -------------------------------------------------------------- |
+| n   | Create a new page                                              |
+| w   | Close the most recently opened document                        |
+| r   | Reset view back to start                                       |
+| q   | Quit the application                                           |
 | g   | Increment fov by 1 (max 360); use Shift+g to decrement (min 1) |
 
 ### Animation
@@ -1800,10 +1815,11 @@ recompiling the sixty-nine files that did not change.
 ## Tests
 
 - Build and run tests:
-  - `make test`  → builds and runs `build/gleditor_test` and `build/xudu_test`,
+
+  - `make test` → builds and runs `build/gleditor_test` and `build/xudu_test`,
     leaving out the suites that need a peer on another network stack. Those
     skip without one, and a skip in the middle of a run reads as a pass.
-  - `make test/all`  → the same two binaries with nothing left out. This is
+  - `make test/all` → the same two binaries with nothing left out. This is
     what the pull request checks run.
   - `make test TEST_FILTER='*'` overrides the exclusion for a one-off, and
     names a single suite the same way: `make test TEST_FILTER='SwarmTest.*'`.
@@ -1816,7 +1832,9 @@ recompiling the sixty-nine files that did not change.
   the boundary being checked rather than merely asserted: if a rule about
   versions, spans or links ever needed a renderer, that binary would stop
   linking.
+
 - Compare the backends against each other:
+
   - `./tools/compare-backends.sh [file]`
 
   Renders the same document through every compiled-in backend and diffs the
@@ -1842,7 +1860,8 @@ recompiling the sixty-nine files that did not change.
   ```
 
 - Coverage from tests:
-  - `make profile`  → generates `gleditor_test.prof` and `coverage.lcov`
+
+  - `make profile` → generates `gleditor_test.prof` and `coverage.lcov`
     - Requires `llvm-profdata` and `llvm-cov` on PATH.
 
 ## Documentation
@@ -1853,48 +1872,48 @@ recompiling the sixty-nine files that did not change.
 
 ## Project structure
 
-- `src/a11y/`   the accessibility tree, and the one file that talks to AccessKit
-- `src/`        the library: document model, glyph cache, SDL wrappers, render loop
+- `src/a11y/` the accessibility tree, and the one file that talks to AccessKit
+- `src/` the library: document model, glyph cache, SDL wrappers, render loop
 - `src/render/` the device abstraction and its backends (`gl/`, `vulkan/`)
-- `include/`    the library's public headers, under `gleditor/`
+- `include/` the library's public headers, under `gleditor/`
 - `apps/gleditor/` the plain editor
-- `apps/xudu/`  the xanadoc editor; `apps/xudu/core/` is its engine, which needs no graphics device
+- `apps/xudu/` the xanadoc editor; `apps/xudu/core/` is its engine, which needs no graphics device
 - `assets/shaders/` portable GLSL bodies, plus generated SPIR-V under `vulkan/`
-- `tools/`      build-time and verification helpers
-- `design/`     design notes: investigations and the reasoning behind decisions
-- `tests/lib/`  the library's unit tests (GoogleTest/GoogleMock)
+- `tools/` build-time and verification helpers
+- `design/` design notes: investigations and the reasoning behind decisions
+- `tests/lib/` the library's unit tests (GoogleTest/GoogleMock)
 - `tests/xudu/` the xanalogical engine's unit tests
 - `thirdparty/` vendored dependencies (argparse, Choreograph, cosmopolitan, etc.)
-- `assets/`     assets like `logo.png`
-- `docs/`       Doxygen output directory
-- `Makefile`    build orchestration
-- `Doxyfile`    Doxygen configuration
-- `LICENSE`     project license
+- `assets/` assets like `logo.png`
+- `docs/` Doxygen output directory
+- `Makefile` build orchestration
+- `Doxyfile` Doxygen configuration
+- `LICENSE` project license
 
 ## Environment and Make variables
 
-- `DEBUG=1`  enable debug flags and sanitizer options in builds.
-- `GLEDITOR_ENABLE_VULKAN=1`  compile the Vulkan backend and its SPIR-V.
-- `GLEDITOR_SDL=2` / `GLEDITOR_SDL=3`  build against that SDL major version.
-- `GLEDITOR_RECORD_THREADS=N`  threads the Vulkan backend records a frame with,
+- `DEBUG=1` enable debug flags and sanitizer options in builds.
+- `GLEDITOR_ENABLE_VULKAN=1` compile the Vulkan backend and its SPIR-V.
+- `GLEDITOR_SDL=2` / `GLEDITOR_SDL=3` build against that SDL major version.
+- `GLEDITOR_RECORD_THREADS=N` threads the Vulkan backend records a frame with,
   and an instruction rather than a ceiling: setting it takes the choice away
   from the device, so `1` records in one piece and anything more always splits.
   That is what lets the same binary be run both ways, which is how the two
   paths get timed and compared at all. Ignored by the other backends, which
   cannot split.
-- `GLEDITOR_ATLAS_SIZE=N`  side length the glyph atlas opens at, before it grows
+- `GLEDITOR_ATLAS_SIZE=N` side length the glyph atlas opens at, before it grows
   to fit. Exists because nothing else provokes growth -- a whole Bible packs
   into the default 512 -- so a small value is how the grown atlas gets rendered
   and compared against the ungrown one. `tools/compare-backends.sh` sets it.
-- `STATIC=--static`  attempt static linking (where supported by your system/libs).
-- `ASAN_OPTIONS`, `TSAN_OPTIONS`, `MSAN_OPTIONS`  fine-tune sanitizer behavior
+- `STATIC=--static` attempt static linking (where supported by your system/libs).
+- `ASAN_OPTIONS`, `TSAN_OPTIONS`, `MSAN_OPTIONS` fine-tune sanitizer behavior
   (the `/run` targets set sensible defaults).
 - LandlockMake: if `LANDLOCKMAKE_VERSION` is set, the Makefile enables a
   sandbox for builds (optional/developer setup).
 
 ## License
 
-This project is licensed under the GPL-3.0. See `LICENSE` for details.  
+This project is licensed under the GPL-3.0. See `LICENSE` for details.\
 TODO: Confirm whether the intent is GPL-3.0-only or GPL-3.0-or-later.
 
 ## TODOs / Notes

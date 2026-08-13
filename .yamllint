@@ -13,6 +13,9 @@ rules:
   line-length:
     max: 100
   # actions/checkout-style "- uses:" lists sit at the same indent as their
-  # parent key throughout these files rather than being indented further.
+  # parent key throughout these files rather than being indented further --
+  # matching yamlfmt's indentless_arrays: true in .yamlfmt, so the formatter
+  # and this linter agree on one shape instead of taking turns rejecting
+  # each other's output.
   indentation:
-    indent-sequences: consistent
+    indent-sequences: false

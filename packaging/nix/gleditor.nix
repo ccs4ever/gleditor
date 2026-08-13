@@ -40,11 +40,11 @@ stdenv.mkDerivation {
       # source, so leaving build/ in means every local compile changes the
       # derivation and rebuilds the world.
       keep =
-        name: type:
+        name:
         let
           base = baseNameOf name;
         in
-        !(base == "build" || base == ".git" || base == "result" || lib.hasSuffix ".o" base);
+        _type: !(base == "build" || base == ".git" || base == "result" || lib.hasSuffix ".o" base);
     in
     lib.cleanSourceWith {
       filter = keep;

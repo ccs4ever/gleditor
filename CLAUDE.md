@@ -71,8 +71,8 @@ make test TEST_FILTER='SwarmTest.*'   # run/override a specific gtest filter
   device, on purpose — that's the boundary being tested.
 - `make test/swarm` runs the network-namespace swarm tests; needs root, not
   part of `make test`.
-- Before pushing non-trivial changes, prefer `make test/all` over `make
-  test` since that's what CI actually gates on.
+- Before pushing non-trivial changes, prefer `make test/all` over
+  `make test` since that's what CI actually gates on.
 - `./tools/compare-backends.sh` renders a sample through every compiled-in
   backend and diffs the output — the real check that a backend still draws
   correctly, since a backend that draws nothing still exits 0.
@@ -83,6 +83,12 @@ GoogleTest style already in use.
 
 ## Code style
 
+- `.editorconfig` sets each extension's indent style/size, charset, line
+  ending and trailing-whitespace handling for editors that read it, matching
+  the settings the real formatters below enforce (`.clang-format`'s
+  `IndentWidth: 2`, shfmt's `-i 2`, `.yamlfmt`'s `indent: 2`, ...). It's a
+  hint for editors, not a gate — nothing runs `editorconfig-checker` in CI;
+  see the note at the end of the coverage table below for why.
 - Formatting is governed by `.clang-format` (LLVM-based, 2-space access
   modifier offset, aligned consecutive assignments, etc.), and covers `.glsl`
   shader sources as well as C++: GLSL is close enough to C that clang-format
@@ -100,11 +106,11 @@ GoogleTest style already in use.
   to the indent width should update both.
 - `.clangd` enables `modernize-*`, `bugprone-*`, `cppcoreguidelines-*`,
   `performance-*`, `readability-*`, and `portability-*` clang-tidy checks
-  (minus a few disabled ones — see `.clangd`) and builds with `-Wall -Wextra
-  -std=c++2c`. Treat clangd/clang-tidy warnings on lines you touch as worth
-  fixing, not noise. Not yet wired into CI: doing that meaningfully means
-  triaging the existing warning backlog first, which is future work rather
-  than something this pass attempted.
+  (minus a few disabled ones — see `.clangd`) and builds with
+  `-Wall -Wextra -std=c++2c`. Treat clangd/clang-tidy warnings on lines you
+  touch as worth fixing, not noise. Not yet wired into CI: doing that
+  meaningfully means triaging the existing warning backlog first, which is
+  future work rather than something this pass attempted.
 - Match the prevailing comment style in this codebase: comments explain
   *why* a non-obvious choice was made (a constraint, a workaround, a
   tradeoff), not what the code does. Don't add narrating comments.
@@ -113,25 +119,51 @@ GoogleTest style already in use.
 
 ### Formatting and linting coverage, by language
 
-| Language | Formatter | Linter | CI gate |
-| --- | --- | --- | --- |
-| C++ (`.cpp`/`.hpp`/`.h`) | clang-format (`make format`) | clang-tidy (`.clangd`, editor-only) | blocking |
-| GLSL (`.glsl`) | clang-format, same as C++ | `glslangValidator` via `make shaders` (compiles every shader) | blocking (both) |
-| Shell (`.sh`, `PKGBUILD`) | shfmt (`make format`) | shellcheck (`make lint`) | blocking |
-| YAML (workflows, dependabot) | — (no npm/Node in this tree; see below) | yamllint (`make lint`), config in `.yamllint` | blocking |
-| Markdown (README, CLAUDE.md, design/) | — (same reason) | mdl (`make lint`), config in `.mdlrc`/`.mdl_style.rb` | blocking |
-| Nix (`flake.nix`, `packaging/nix/*.nix`) | nixfmt-rfc-style, the flake's own `formatter` output | — | blocking (job `nix-fmt`), separate from `format` because it needs Nix installed |
-| Ruby (`packaging/macos/gleditor.rb`, a Homebrew formula) | `brew style` (needs Homebrew; not run in CI) | `ruby -c` (syntax only) | non-blocking, see `packaging.yml`'s `macos` job |
-| RPM spec (`packaging/fedora/gleditor.spec`) | — | rpmlint (needs `rpm`'s native Python binding, so only runs inside the `fedora:latest` container the `fedora` packaging job already uses) | non-blocking until its output has been triaged |
-| Debian (`debian/rules`, `debian/control`, ...) | — | — | not covered: `debian/rules` is a `dh`-sequenced Makefile, not a shell script shellcheck understands |
+| Language                                                 | Formatter                                            | Linter                                                                                                                                   | CI gate                                                                                             |
+| -------------------------------------------------------- | ---------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------- |
+| C++ (`.cpp`/`.hpp`/`.h`)                                 | clang-format (`make format`)                         | clang-tidy (`.clangd`, editor-only)                                                                                                      | blocking                                                                                            |
+| GLSL (`.glsl`)                                           | clang-format, same as C++                            | `glslangValidator` via `make shaders` (compiles every shader)                                                                            | blocking (both)                                                                                     |
+| Shell (`.sh`, `PKGBUILD`)                                | shfmt (`make format`)                                | shellcheck (`make lint`)                                                                                                                 | blocking                                                                                            |
+| YAML (workflows, dependabot)                             | yamlfmt (`make format`), config in `.yamlfmt`        | yamllint (`make lint`), config in `.yamllint`                                                                                            | blocking                                                                                            |
+| Markdown (README, CLAUDE.md, design/)                    | mdformat `--wrap keep` (`make format`)               | mdl (`make lint`), config in `.mdlrc`/`.mdl_style.rb`                                                                                    | blocking                                                                                            |
+| Nix (`flake.nix`, `packaging/nix/*.nix`)                 | nixfmt-rfc-style, the flake's own `formatter` output | nix-linter                                                                                                                               | blocking (job `nix`), separate from `format` because it needs Nix installed                         |
+| Ruby (`packaging/macos/gleditor.rb`, a Homebrew formula) | `brew style` (needs Homebrew; not run in CI)         | `ruby -c` (syntax only)                                                                                                                  | non-blocking, see `packaging.yml`'s `macos` job                                                     |
+| RPM spec (`packaging/fedora/gleditor.spec`)              | —                                                    | rpmlint (needs `rpm`'s native Python binding, so only runs inside the `fedora:latest` container the `fedora` packaging job already uses) | non-blocking until its output has been triaged                                                      |
+| Debian (`debian/rules`, `debian/control`, ...)           | —                                                    | —                                                                                                                                        | not covered: `debian/rules` is a `dh`-sequenced Makefile, not a shell script shellcheck understands |
 
-No YAML/Markdown formatter is wired in because the well-known ones
-(`prettier`, `markdownlint-cli2 --fix`) are Node-based, and this is otherwise
-a zero-Node tree; `yamllint` (Python) and `mdl` (Ruby) are both apt-installable
-on the CI image and catch the same classes of problem — bad indentation, long
-unwrapped code lines, missing blank lines around lists — without adding a
-Node toolchain. If that tradeoff ever stops being worth it, revisit rather
-than assume it's fixed.
+yamlfmt and mdformat are Go/Python tools rather than apt packages
+(`go install`/`pip install` in the CI `format` job); they were picked over
+the better-known Node ones (`prettier`, `markdownlint-cli2 --fix`) to avoid
+adding a Node toolchain to an otherwise zero-Node tree, the same reasoning
+`.yamllint`/`.mdl_style.rb` already used for the linters.
+
+**Formatter and linter settings are kept in one place per language on
+purpose**, so running the formatter never leaves a file the linter still
+rejects:
+
+- `.yamlfmt`'s `indentless_arrays: true` matches `.yamllint`'s
+  `indent-sequences: false`; both encode the same "`- uses:` sits level with
+  `steps:`" convention. `retain_line_breaks: true` is load-bearing but has a
+  known bug with folded (`>`) block scalars that leaks a placeholder into the
+  string (google/yamlfmt#84) — this repo has none, on purpose; see the
+  comment in `.yamlfmt` before adding one back.
+- mdformat's `--wrap keep` never reflows a paragraph, so it can't fight
+  `.mdl_style.rb`'s `MD013` line-length allowance; the only content it
+  rewrites is table cell padding, which mdl doesn't check at all. The one
+  failure mode is an inline code span (`` `...` ``) split across a hand-wrapped
+  line: mdformat canonicalizes that onto one line regardless of `--wrap`,
+  which can push it over the line-length limit — keep code spans on one
+  physical line rather than wrapping through them.
+- nixfmt-rfc-style and nix-linter check disjoint things (whitespace/layout
+  vs. semantic style like unused arguments), so there is nothing for them to
+  disagree about.
+
+A repo-wide `editorconfig-checker` run (not wired into CI) is noisy on this
+tree for reasons that are the checker's limits, not real problems: it
+doesn't understand clang-format's alignment-based continuation indents,
+treats Markdown table cell padding as "wrong" indentation, and applies
+`max_line_length` to LICENSE/Doxyfile text nobody intends to rewrap. Use it
+to sanity-check `.editorconfig` itself, not as a gate.
 
 ## Project structure
 
