@@ -127,6 +127,16 @@ struct PipelineDesc {
   /// Directory holding precompiled SPIR-V for backends that cannot consume
   /// GLSL directly. Ignored by the GL and GLES backends.
   std::string spirvDir;
+  /**
+   * @brief Base name of the shader files, which is what the SPIR-V is called.
+   *
+   * Separate from @ref name, which is only ever printed: two pipelines can be
+   * built from one pair of shaders and want telling apart in a diagnostic --
+   * the overlay and the document are both the glyph shaders with different
+   * depth state -- while a pipeline with shaders of its own needs the backend
+   * to go and find them.
+   */
+  std::string shaderName{"glyph"};
   VertexLayout layout;
   /**
    * @brief Whether fragments are depth tested and depth written.
@@ -293,6 +303,15 @@ inline constexpr std::uint32_t tagKindNone    = 0;
 inline constexpr std::uint32_t tagKindOverlay = 1;
 inline constexpr std::uint32_t tagKindPage    = 2;
 inline constexpr std::uint32_t tagKindGlyph   = 3;
+/**
+ * @brief A beam drawn between two places in the world.
+ *
+ * Past what a glyph quad can carry -- those have two bits of kind -- and that
+ * is fine, because a beam is not one: it comes from a pipeline of its own with
+ * a record of its own, and shifts this into the identity itself. The identity
+ * word has four bits of kind, which is what bounds this.
+ */
+inline constexpr std::uint32_t tagKindBeam    = 4;
 
 /// Bit widths of the identity word a glyph instance carries. Packed rather
 /// than given a word each because the attachment is four words wide and the
