@@ -6,11 +6,42 @@
 
 #include <algorithm>
 #include <format>
+#include <list>
+#include <optional>
 #include <limits>
 #include <ranges>
 #include <stdexcept>
+#include <utility>
+#include <vector>
 
 #include <gleditor/render/device.hpp>
+
+namespace {
+
+/// Insert [@p first, @p first + @p count) into a list kept sorted by offset,
+/// merging with the runs either side. Shared by the pool's free list and by
+/// the erased rows of an allocation, which are the same bookkeeping over
+/// different spaces: the buffer in one case, an allocation in the other.
+void insertRun(std::list<std::pair<std::uint32_t, std::uint32_t>> &runs,
+               const std::uint32_t first, const std::uint32_t count) {
+  auto next = std::ranges::find_if(
+      runs, [first](const auto &run) { return run.first > first; });
+  auto inserted = runs.insert(next, {first, count});
+
+  if (runs.end() != next && inserted->first + inserted->second == next->first) {
+    inserted->second += next->second;
+    runs.erase(next);
+  }
+  if (runs.begin() != inserted) {
+    auto prev = std::prev(inserted);
+    if (prev->first + prev->second == inserted->first) {
+      prev->second += inserted->second;
+      runs.erase(inserted);
+    }
+  }
+}
+
+} // namespace
 
 BufferPool::BufferPool(render::RenderDevice *aDevice,
                        const std::uint32_t aRowStride,
@@ -106,6 +137,10 @@ BufferPool::Allocation BufferPool::reserve(const std::uint32_t rows) {
   if (0 == it->second) {
     free.erase(it);
   }
+  // An allocation starts with nothing erased from it. release() clears this
+  // already; doing it here too means a record can never outlive the rows it
+  // describes, whatever else goes wrong.
+  erased.erase(allocation.rowOffset);
   return allocation;
 }
 
@@ -114,25 +149,15 @@ void BufferPool::release(const Allocation &allocation) {
     return;
   }
 
-  // Keep the list ordered by offset so neighbouring runs can be coalesced;
+  // Rows erased from inside it go with it: they are part of the run being
+  // handed back, and leaving the record behind would offer them to whatever
+  // allocation lands here next.
+  erased.erase(allocation.rowOffset);
+
+  // The list is kept ordered by offset so neighbouring runs can be coalesced;
   // without that, repeated reserve/release cycles would fragment the buffer
   // into unusable slivers.
-  auto next = std::ranges::find_if(free, [&allocation](const auto &run) {
-    return run.first > allocation.rowOffset;
-  });
-  auto inserted = free.insert(next, {allocation.rowOffset, allocation.rowCount});
-
-  if (free.end() != next && inserted->first + inserted->second == next->first) {
-    inserted->second += next->second;
-    free.erase(next);
-  }
-  if (free.begin() != inserted) {
-    auto prev = std::prev(inserted);
-    if (prev->first + prev->second == inserted->first) {
-      prev->second += inserted->second;
-      free.erase(inserted);
-    }
-  }
+  insertRun(free, allocation.rowOffset, allocation.rowCount);
 }
 
 void BufferPool::reserveCapacity(const std::uint32_t rows) {
@@ -150,6 +175,87 @@ void BufferPool::reserveCapacity(const std::uint32_t rows) {
   } else {
     free.emplace_back(previousRows, added);
   }
+}
+
+
+void BufferPool::zeroRows(const std::uint32_t rowOffset,
+                          const std::uint32_t count) {
+  // A run of any length, written from a block of a bounded one: erasing half a
+  // document should not need a staging buffer half the size of the document.
+  static constexpr std::uint32_t chunkRows = 4096;
+  const std::vector<std::byte> zeros(
+      static_cast<std::size_t>(std::min(count, chunkRows)) * rowStrideBytes,
+      std::byte{});
+
+  for (std::uint32_t done = 0; done < count; done += chunkRows) {
+    const auto rows = std::min(chunkRows, count - done);
+    device->updateBuffer(
+        handle,
+        static_cast<std::size_t>(rowOffset + done) * rowStrideBytes,
+        std::span<const std::byte>(zeros.data(),
+                                   static_cast<std::size_t>(rows) *
+                                       rowStrideBytes));
+  }
+}
+
+void BufferPool::eraseRows(const Allocation &allocation,
+                           const std::uint32_t firstRow,
+                           const std::uint32_t count) {
+  if (0 == count) {
+    return;
+  }
+  if (firstRow > allocation.rowCount ||
+      count > allocation.rowCount - firstRow) {
+    throw std::out_of_range(
+        std::format("BufferPool::eraseRows: erasing {} rows at {} runs past an "
+                    "allocation of {} rows",
+                    count, firstRow, allocation.rowCount));
+  }
+
+  // Zeroed on the device before being recorded, so that a row is never both
+  // listed as reusable and still drawing something.
+  zeroRows(allocation.rowOffset + firstRow, count);
+  insertRun(erased[allocation.rowOffset], firstRow, count);
+}
+
+std::optional<std::uint32_t>
+BufferPool::reuseRows(const Allocation &allocation, const std::uint32_t count) {
+  if (0 == count) {
+    return std::nullopt;
+  }
+  const auto holes = erased.find(allocation.rowOffset);
+  if (erased.end() == holes) {
+    return std::nullopt;
+  }
+
+  auto run = std::ranges::find_if(
+      holes->second, [count](const auto &hole) { return hole.second >= count; });
+  if (holes->second.end() == run) {
+    return std::nullopt;
+  }
+
+  const auto firstRow = run->first;
+  run->first += count;
+  run->second -= count;
+  if (0 == run->second) {
+    holes->second.erase(run);
+  }
+  if (holes->second.empty()) {
+    erased.erase(holes);
+  }
+  return firstRow;
+}
+
+std::uint32_t BufferPool::erasedRows(const Allocation &allocation) const {
+  const auto holes = erased.find(allocation.rowOffset);
+  if (erased.end() == holes) {
+    return 0;
+  }
+  std::uint32_t rows = 0;
+  for (const auto &hole : holes->second) {
+    rows += hole.second;
+  }
+  return rows;
 }
 
 void BufferPool::trim() {

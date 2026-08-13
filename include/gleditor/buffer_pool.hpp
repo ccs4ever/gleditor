@@ -15,7 +15,9 @@
 #include <cstddef>
 #include <cstdint>
 #include <list>
+#include <optional>
 #include <span>
+#include <unordered_map>
 #include <utility>
 
 #include <gleditor/render/types.hpp>
@@ -61,8 +63,50 @@ public:
    */
   Allocation reserve(std::uint32_t rows);
 
-  /// Return an allocation to the free list.
+  /// Return an allocation to the free list, along with any rows erased from
+  /// inside it.
   void release(const Allocation &allocation);
+
+  /**
+   * @brief Delete @p count rows from inside @p allocation, anywhere in it.
+   *
+   * The rows are zeroed rather than removed. A row of zeroes describes a quad
+   * of no width and no height, which the vertex stage collapses to a point
+   * outside clip space, so it draws nothing and writes no picking tag -- see
+   * unpackQuad() in assets/shaders/glyph.vert.glsl and the test that pins it.
+   *
+   * That is what keeps a page one draw. The alternative to a degenerate row is
+   * a hole the draw has to step over, which turns a page into two ranges and
+   * then three, each needing its own call; a page that has been edited a few
+   * times would be issuing a draw per surviving run. Here the range is
+   * untouched and the cost of a deleted row is one vertex shader invocation
+   * that exits immediately.
+   *
+   * The rows are recorded as free and can be taken back by @ref reuseRows.
+   * They stay part of this allocation and are not offered to any other: the
+   * allocation is drawn as one range with one transform and one identity, so
+   * another page's quads sitting inside it would be drawn in the wrong place
+   * and answer a click with the wrong page.
+   *
+   * @param firstRow Row index within the allocation, not within the buffer.
+   * @throws std::out_of_range if the run is not inside the allocation.
+   */
+  void eraseRows(const Allocation &allocation, std::uint32_t firstRow,
+                 std::uint32_t count);
+
+  /**
+   * @brief Take back a run of @p count rows erased earlier from @p allocation.
+   *
+   * @return Where the run starts within the allocation, ready to be handed
+   *         straight to @ref write, or nothing when no erased run is long
+   *         enough. A caller that gets nothing has to reserve instead.
+   */
+  [[nodiscard]] std::optional<std::uint32_t>
+  reuseRows(const Allocation &allocation, std::uint32_t count);
+
+  /// Rows currently erased from inside @p allocation: drawn, degenerate, and
+  /// waiting to be written into again.
+  [[nodiscard]] std::uint32_t erasedRows(const Allocation &allocation) const;
 
   /**
    * @brief Make room for @p rows in one step, for a caller that knows how much
@@ -150,6 +194,10 @@ private:
   /// give back.
   [[nodiscard]] std::uint32_t trailingFreeRows() const;
 
+  /// Zero @p count rows of the buffer from @p rowOffset, in chunks, so that
+  /// erasing a large run does not need a staging buffer the size of the run.
+  void zeroRows(std::uint32_t rowOffset, std::uint32_t count);
+
   /// Free runs as (first row, row count), kept sorted by offset so that
   /// adjacent runs can be merged on release.
   using FreeList = std::list<std::pair<std::uint32_t, std::uint32_t>>;
@@ -163,6 +211,17 @@ private:
   std::uint32_t rowStrideBytes;
   std::uint32_t totalRows;
   FreeList free;
+
+  /**
+   * @brief Rows erased from inside live allocations, by the row the allocation
+   *        starts at.
+   *
+   * Separate from @ref free, which holds rows no allocation covers. These are
+   * still inside one, still drawn, and reusable only by the allocation they
+   * came from. Kept sorted and merged like the free list, so that erasing
+   * either side of a hole leaves one hole rather than three.
+   */
+  std::unordered_map<std::uint32_t, FreeList> erased;
 };
 
 #endif // GLEDITOR_BUFFER_POOL_H
