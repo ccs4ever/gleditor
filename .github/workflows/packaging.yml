@@ -538,15 +538,14 @@ jobs:
           submodules: recursive
           fetch-depth: 0
 
-      # Pure lint: rubocop-based style rules only, no source fetched and no
-      # dependency installed, so this catches a malformed formula file even
-      # if everything below it changes.
-      # A bare "packaging/macos/gleditor.rb" is parsed as tap shorthand --
-      # tap "packaging/macos", formula "gleditor.rb" -- rather than as a path,
-      # and fails looking for a tap that was never installed. The leading
-      # ./ is what tells brew this is a file.
-      - name: check the formula's style
-        run: brew style --formula ./packaging/macos/gleditor.rb
+      # brew style and brew audit both refuse a formula that is not inside a
+      # real tap -- "Homebrew requires formulae to be in a tap" -- and this one
+      # is not tapped anywhere, so a syntax check is what is available short of
+      # standing up a throwaway tap for a lint pass. It still catches a
+      # malformed formula file before anything below spends time on brewed
+      # dependencies.
+      - name: check the formula parses
+        run: ruby -c packaging/macos/gleditor.rb
 
       - name: install build dependencies
         run: |
