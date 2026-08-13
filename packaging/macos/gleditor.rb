@@ -8,6 +8,12 @@ class Gleditor < Formula
   # can sit alongside this one the way every other formula's does.
   head "https://github.com/ccs4ever/gleditor.git", branch: "main"
 
+  # macOS ships GNU Make 3.81, the last release before the licence changed to
+  # GPLv3, and this Makefile uses target-specific `private` variables, which
+  # 3.81 cannot even parse -- not a missing feature at run time but a syntax
+  # error before the build starts. Homebrew's own make is installed as gmake
+  # rather than linked over the system one.
+  depends_on "make" => :build
   depends_on "pkgconf" => :build
   depends_on "boost"
   depends_on "cairomm"
@@ -34,7 +40,7 @@ class Gleditor < Formula
     #
     # A head-only formula has no real version to report; matched to the
     # placeholder every other packaging target in this tree uses instead.
-    system "make", "install",
+    system "gmake", "install",
            "prefix=#{prefix}",
            "GLEDITOR_SDL=3",
            "GLEDITOR_VERSION=0.1.0"
