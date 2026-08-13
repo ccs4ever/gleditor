@@ -204,6 +204,129 @@ TEST_F(BufferPoolTest, trimLeavesHolesInTheMiddleAlone) {
   EXPECT_EQ(pool.reserve(400).rowOffset, 0U);
 }
 
+// Rows deleted from the middle of a page. They are zeroed rather than removed
+// so the page stays one draw, and recorded so the page can write into them
+// again.
+TEST_F(BufferPoolTest, erasedRowsAreZeroedOnTheDevice) {
+  BufferPool pool(device.get(), kStride, 100);
+  const auto alloc = pool.reserve(20);
+
+  // Rows 5..8 of an allocation starting at row 0, so byte offset 5 * stride.
+  std::vector<std::byte> written;
+  EXPECT_CALL(*device, updateBuffer(render::BufferHandle{1}, 5U * kStride, _))
+      .WillOnce([&written](render::BufferHandle, std::size_t,
+                           std::span<const std::byte> data) {
+        written.assign(data.begin(), data.end());
+      });
+  pool.eraseRows(alloc, 5, 3);
+
+  ASSERT_EQ(written.size(), 3U * kStride);
+  EXPECT_THAT(written, testing::Each(std::byte{0}))
+      << "an erased row must be all zeroes, which is what makes the quad "
+         "degenerate";
+  EXPECT_EQ(pool.erasedRows(alloc), 3U);
+}
+
+TEST_F(BufferPoolTest, erasureIsRelativeToTheAllocation) {
+  BufferPool pool(device.get(), kStride, 100);
+  pool.reserve(30);
+  const auto second = pool.reserve(20);
+
+  // Row 2 of an allocation starting at row 30 is byte offset 32 * stride.
+  EXPECT_CALL(*device, updateBuffer(render::BufferHandle{1}, 32U * kStride, _))
+      .Times(1);
+  pool.eraseRows(second, 2, 4);
+}
+
+TEST_F(BufferPoolTest, erasingRefusesToRunPastTheAllocation) {
+  BufferPool pool(device.get(), kStride, 100);
+  const auto alloc = pool.reserve(10);
+
+  EXPECT_THROW(pool.eraseRows(alloc, 8, 5), std::out_of_range);
+  EXPECT_THROW(pool.eraseRows(alloc, 11, 1), std::out_of_range);
+  // The neighbouring rows belong to somebody else, and zeroing them would
+  // silently blank part of another page.
+  EXPECT_EQ(pool.erasedRows(alloc), 0U);
+}
+
+TEST_F(BufferPoolTest, erasedRowsAreHandedBackToTheirOwnAllocation) {
+  BufferPool pool(device.get(), kStride, 100);
+  const auto alloc = pool.reserve(20);
+  pool.eraseRows(alloc, 4, 6);
+
+  const auto reused = pool.reuseRows(alloc, 4);
+  ASSERT_TRUE(reused.has_value());
+  EXPECT_EQ(*reused, 4U) << "the run should start where the erased one did";
+  EXPECT_EQ(pool.erasedRows(alloc), 2U) << "the remainder stays available";
+
+  const auto rest = pool.reuseRows(alloc, 2);
+  ASSERT_TRUE(rest.has_value());
+  EXPECT_EQ(*rest, 8U);
+  EXPECT_EQ(pool.erasedRows(alloc), 0U);
+  EXPECT_FALSE(pool.reuseRows(alloc, 1).has_value());
+}
+
+// Erasing either side of a hole must leave one hole, or a page edited a few
+// times would have room it could not use: three runs of two rows cannot take a
+// run of six.
+TEST_F(BufferPoolTest, adjacentErasuresMergeIntoOneRun) {
+  BufferPool pool(device.get(), kStride, 100);
+  const auto alloc = pool.reserve(20);
+
+  pool.eraseRows(alloc, 8, 2);
+  pool.eraseRows(alloc, 4, 4); // ends where the first begins
+  pool.eraseRows(alloc, 10, 2); // begins where the first ends
+  EXPECT_EQ(pool.erasedRows(alloc), 8U);
+
+  const auto reused = pool.reuseRows(alloc, 8);
+  ASSERT_TRUE(reused.has_value()) << "the three erasures did not merge";
+  EXPECT_EQ(*reused, 4U);
+}
+
+// The rows are inside somebody's allocation and are drawn with that page's
+// transform and identity, so they cannot go to anyone else.
+TEST_F(BufferPoolTest, erasedRowsAreNotOfferedToOtherAllocations) {
+  BufferPool pool(device.get(), kStride, 100);
+  const auto first  = pool.reserve(40);
+  const auto second = pool.reserve(40);
+  pool.eraseRows(first, 0, 30);
+
+  EXPECT_FALSE(pool.reuseRows(second, 4).has_value());
+  // Nor by a fresh reservation: what is left of the buffer is what was never
+  // handed out, which is twenty rows and not fifty.
+  EXPECT_EQ(pool.reserve(20).rowCount, 20U);
+  EXPECT_EQ(pool.erasedRows(first), 30U);
+}
+
+TEST_F(BufferPoolTest, releasingAnAllocationTakesItsErasedRowsWithIt) {
+  BufferPool pool(device.get(), kStride, 100);
+  const auto alloc = pool.reserve(20);
+  pool.eraseRows(alloc, 5, 5);
+  pool.release(alloc);
+
+  // The whole run is free again, erasures included.
+  const auto reused = pool.reserve(20);
+  EXPECT_EQ(reused.rowOffset, alloc.rowOffset);
+  EXPECT_EQ(pool.erasedRows(reused), 0U)
+      << "the record outlived the rows it described";
+}
+
+TEST_F(BufferPoolTest, erasingALargeRunDoesNotStageItAllAtOnce) {
+  BufferPool pool(device.get(), kStride, 20000);
+  const auto alloc = pool.reserve(20000);
+
+  // Whatever the chunking, no single write may be the size of the run: that is
+  // the point of doing it in pieces.
+  EXPECT_CALL(*device, updateBuffer(_, _, _))
+      .Times(testing::AtLeast(2))
+      .WillRepeatedly([](render::BufferHandle, std::size_t,
+                         std::span<const std::byte> data) {
+        EXPECT_LT(data.size(), 20000U * kStride);
+      });
+  pool.eraseRows(alloc, 0, 20000);
+  EXPECT_EQ(pool.erasedRows(alloc), 20000U);
+}
+
 TEST_F(BufferPoolTest, rejectsZeroStride) {
   EXPECT_THROW(BufferPool(device.get(), 0, 10), std::invalid_argument);
 }

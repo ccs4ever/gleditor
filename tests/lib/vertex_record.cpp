@@ -14,9 +14,11 @@
  */
 #include <gtest/gtest.h>
 
+#include <array>
 #include <cstddef>
 #include <cstdint>
 #include <cstdlib>
+#include <cstring>
 
 #include <gleditor/doc.hpp>
 #include <gleditor/render/types.hpp>
@@ -178,6 +180,30 @@ TEST(VertexRecord, atlasCoordinatesSurviveALargeAtlas) {
   const auto packed = Row::atlasAt(60000, 3);
   EXPECT_EQ(packed >> 16, 60000U);
   EXPECT_EQ(packed & 65535U, 3U);
+}
+
+// What BufferPool::eraseRows relies on. A row deleted from the middle of a
+// page is zeroed rather than removed, so that the page stays a single range
+// the draw can be aimed at; that is only safe if a row of zeroes draws
+// nothing. The vertex stage tests exactly this -- "0.0 == whlk.x || 0.0 ==
+// whlk.y" -- and collapses the quad to a point outside clip space, so it
+// rasterises no fragment and writes no picking tag.
+TEST(VertexRecord, aZeroedRowIsAQuadWithNothingInIt) {
+  const Row erased{};
+  const auto quad = unpackQuad(erased.quad);
+  EXPECT_EQ(quad.width, 0U);
+  EXPECT_EQ(quad.height, 0U);
+  // And it claims to be nothing rather than claiming to be a glyph, so even a
+  // stage that did draw it could not answer a click with it.
+  EXPECT_EQ(quad.kind, render::tagKindNone);
+
+  // Every byte of it, since that is what the pool writes.
+  const std::array<std::byte, sizeof(Row)> raw{};
+  Row fromZeroes{};
+  std::memcpy(&fromZeroes, raw.data(), raw.size());
+  const auto same = unpackQuad(fromZeroes.quad);
+  EXPECT_EQ(same.width, 0U);
+  EXPECT_EQ(same.height, 0U);
 }
 
 // The reason the identity is split at all: three quarters of it is the same
