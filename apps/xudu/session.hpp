@@ -27,6 +27,7 @@
 #include <gleditor/span_decorator.hpp>
 #include <gleditor/text_source.hpp>
 
+#include "core/config.hpp"
 #include "core/microversion.hpp"
 #include "core/publication.hpp"
 #include "core/resolver.hpp"
@@ -223,20 +224,27 @@ public:
   MicroversionId readPublication(const std::string &path);
 
   /**
-   * @brief Who this machine publishes as, as a person.
+   * @brief Who publishes from this store, and what signs for them.
    *
-   * Read from `author.yaml` beside the spools. Separate from @ref identity,
-   * and the two answer different questions: the key pair says "the same
-   * publisher as last time", which nothing outside this program can interpret,
-   * while this says who that publisher is in a form a reader can check against
-   * an OpenPGP key that was somebody's identity before this program existed.
+   * Three places say, and the nearest wins: the per-user configuration file,
+   * which is who somebody is; `author.yaml` beside the spools, which is who
+   * they are for this store -- a pen name, a work identity; and whatever a
+   * caller passes to publishDocument(), which is who they are for one
+   * publication. Layered rather than merged into one setting because each
+   * answers a different question, and because being asked to state an identity
+   * again per document is how it ends up spelled three ways.
    *
-   * @throws std::runtime_error when nobody has been named, since publishing
-   *         under nobody's name is the thing provenance exists to prevent.
+   * Separate from @ref identity, which is the ed25519 key: that says "the same
+   * publisher as last time" and nothing about who that is.
    */
-  [[nodiscard]] const Author &author();
+  [[nodiscard]] const Config &settings();
 
-  /// Record who this machine publishes as. Kept, so it is said once.
+  /// Who this store publishes as: the configuration, with the store's own
+  /// override applied.
+  [[nodiscard]] Author author();
+
+  /// Record who this store publishes as, overriding the configuration for
+  /// documents kept here.
   void setAuthor(Author who);
 
   /**
@@ -266,9 +274,27 @@ public:
    * @throws std::runtime_error when the version points at content that cannot
    *         be given a global address, or when this build has no ed25519.
    */
+  /**
+   * @brief Everything a publication says about itself, before it is made.
+   *
+   * What the dialog collects and what the command line fills in. Held together
+   * rather than passed as five arguments because it is one decision -- how
+   * this document goes out -- and because a caller that got the order wrong
+   * would publish under the wrong name without any type saying so.
+   */
+  struct PublishRequest {
+    /// Which document under this machine's name. The same salt publishes a
+    /// further state of the same document.
+    std::string salt;
+    std::string title;
+    /// Who to publish as. Empty fields fall back to @ref author.
+    Author author;
+    /// Anything else to record, as `key: value`.
+    std::vector<std::pair<std::string, std::string>> extra;
+  };
+
   std::string publishDocument(const MicroversionId &version,
-                              const std::string &salt,
-                              const std::string &title);
+                              const PublishRequest &request);
 
   /// Where publishing writes manifests, torrents and the sealed spool.
   [[nodiscard]] std::string publishedDir() const;
@@ -382,6 +408,8 @@ private:
   std::optional<MutableKeys> keys;
   /// Who publishes here, read from the store the first time it is wanted.
   std::optional<Author> who;
+  /// The per-user configuration, read once.
+  std::optional<Config> config;
 
 public:
   /// Forget every open view. Used when the program replaces what is on screen

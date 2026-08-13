@@ -237,12 +237,16 @@ TextMetrics Canvas::addText(RenderState &state, const float left,
     if (end <= cluster.start || cluster.start >= static_cast<int>(raw.size())) {
       continue;
     }
-    // The leading codepoint of the cluster, cut on a sequence boundary so
-    // Pango is never handed half of a multi-byte character.
-    const int length =
-        std::min(end - cluster.start, utf8SequenceLength(raw[cluster.start]));
-    const std::string_view chr(raw.data() + cluster.start,
-                               static_cast<std::size_t>(length));
+    // The whole cluster, not its leading codepoint. Taking only the first
+    // sequence dropped the rest of every ligature and every combining mark --
+    // "field" came out as "f eld" -- which is the same mistake the document
+    // path made once and for the same reason. A cluster too long for the cache
+    // to key on is skipped rather than allowed to stop a frame.
+    const auto length = static_cast<std::size_t>(end - cluster.start);
+    if (length > GlyphCache::maxClusterBytes) {
+      continue;
+    }
+    const std::string_view chr(raw.data() + cluster.start, length);
 
     const auto glyph  = state.glyphCache.put(chr, font);
     const auto width  = static_cast<float>(static_cast<int>(glyph.dims.width));

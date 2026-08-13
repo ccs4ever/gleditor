@@ -51,6 +51,74 @@ Mod modsFromSdl(const std::uint16_t sdlMods) {
   return mods;
 }
 
+/// A key by the name a script writes it under, with whatever it is held with.
+std::optional<std::pair<gleditor::Key, gleditor::KeyMods>>
+keyNamed(std::string_view name) {
+  using gleditor::Key;
+  using gleditor::KeyMods;
+  auto mods = KeyMods::None;
+  if (name.starts_with("shift-")) {
+    mods = KeyMods::Shift;
+    name.remove_prefix(6);
+  }
+  static constexpr std::array<std::pair<std::string_view, Key>, 11> named = {{
+      {"escape", Key::Escape},
+      {"enter", Key::Return},
+      {"tab", Key::Tab},
+      {"backspace", Key::Backspace},
+      {"delete", Key::Delete},
+      {"left", Key::Left},
+      {"right", Key::Right},
+      {"up", Key::Up},
+      {"down", Key::Down},
+      {"home", Key::Home},
+      {"end", Key::End},
+  }};
+  for (const auto &[spelling, key] : named) {
+    if (spelling == name) {
+      return std::pair{key, mods};
+    }
+  }
+  return std::nullopt;
+}
+
+/// The modal keys, for whatever SDL reports. Everything else is either text,
+/// which arrives composed as its own event, or nothing a form has a use for.
+std::optional<gleditor::Key> modalKey(const int scancode) {
+  switch (scancode) {
+  case SDL_SCANCODE_ESCAPE:
+    return gleditor::Key::Escape;
+  case SDL_SCANCODE_RETURN:
+  case SDL_SCANCODE_KP_ENTER:
+    return gleditor::Key::Return;
+  case SDL_SCANCODE_TAB:
+    return gleditor::Key::Tab;
+  case SDL_SCANCODE_BACKSPACE:
+    return gleditor::Key::Backspace;
+  case SDL_SCANCODE_DELETE:
+    return gleditor::Key::Delete;
+  case SDL_SCANCODE_LEFT:
+    return gleditor::Key::Left;
+  case SDL_SCANCODE_RIGHT:
+    return gleditor::Key::Right;
+  case SDL_SCANCODE_UP:
+    return gleditor::Key::Up;
+  case SDL_SCANCODE_DOWN:
+    return gleditor::Key::Down;
+  case SDL_SCANCODE_HOME:
+    return gleditor::Key::Home;
+  case SDL_SCANCODE_END:
+    return gleditor::Key::End;
+  default:
+    return std::nullopt;
+  }
+}
+
+/// The same modifier mask, in the spelling a modal is written against.
+gleditor::KeyMods modalMods(const Mod mods) {
+  return static_cast<gleditor::KeyMods>(static_cast<std::uint16_t>(mods));
+}
+
 /// Split a `--toast` argument into its severity and its text. An unprefixed
 /// argument is a warning, which is what a message worth showing but not worth
 /// stopping for amounts to.
@@ -118,6 +186,19 @@ readAutomationScript(const int argc, const char *const *const argv) {
       Step step{Step::Kind::Type};
       step.text = value;
       script.push_back(std::move(step));
+    } else if ("--do" == option) {
+      Step step{Step::Kind::Command};
+      step.text = value;
+      script.push_back(std::move(step));
+    } else if ("--key" == option) {
+      Step step{Step::Kind::Press};
+      if (const auto named = keyNamed(value); named) {
+        step.key  = named->first;
+        step.mods = named->second;
+        script.push_back(std::move(step));
+      } else {
+        std::cerr << "--key: no key called \"" << value << "\"\n";
+      }
     } else if ("--select" == option) {
       const auto [from, to] = parsePair(value, option, "START,END");
       Step step{Step::Kind::Select};
@@ -128,7 +209,7 @@ readAutomationScript(const int argc, const char *const *const argv) {
   };
 
   static constexpr std::array scripted = {"--pick", "--click", "--type",
-                                          "--select"};
+                                          "--select", "--do", "--key"};
   for (int i = 1; i < argc; i++) {
     if (nullptr == argv[i]) {
       continue;
@@ -160,6 +241,16 @@ void CommandTable::bind(const int scancode, const Mod mods, std::string name,
                         std::string help, std::function<void()> run) {
   bindings.push_back(Command{scancode, mods, std::move(name), std::move(help),
                              std::move(run)});
+}
+
+bool CommandTable::run(const std::string_view name) const {
+  const auto found = std::ranges::find_if(
+      bindings, [name](const Command &one) { return one.name == name; });
+  if (bindings.end() == found) {
+    return false;
+  }
+  found->run();
+  return true;
 }
 
 bool CommandTable::dispatch(const int scancode, const Mod mods) const {
@@ -316,7 +407,24 @@ void addCommonArguments(argparse::ArgumentParser &parser, const bool detailed) {
              "that \"--click here --type this --click there --type that\" is "
              "the sequence it reads as. The document is spliced immediately "
              "and the layout that follows is scheduled off the render "
-             "thread.");
+             "thread. Goes to whatever has the keyboard, so while a dialog is "
+             "up this fills in the field it is on rather than the document.");
+  automation(parser.add_argument("--do").append(),
+             "run the command called NAME; repeatable",
+             "Run the bound command called NAME -- the names are the ones "
+             "`--help` lists -- in the order it was written among the other "
+             "automation options. By name rather than by key, because a "
+             "scancode and a modifier mask say which keys somebody would have "
+             "pressed and not what they meant by it. This is also how a run "
+             "with nobody at the keyboard reaches a dialog: open it with "
+             "--do, fill it in with --type and --key.");
+  automation(parser.add_argument("--key").append(),
+             "press escape, enter, tab, up, down and so on; repeatable",
+             "Press a key that is not text, for a dialog that is up: escape, "
+             "enter, tab, backspace, delete, left, right, up, down, home, "
+             "end, and any of them prefixed shift-. Carried out in order with "
+             "the other automation options, and reported as a mistake when "
+             "nothing is up to receive it.");
   automation(parser.add_argument("--toast").append(),
              "show a notification, as [info:|warning:|error:]TEXT; repeatable",
              "Show a notification once the first frame is drawn, written as "
@@ -483,6 +591,12 @@ int Application::run() {
     sdl::startTextInput(window.window);
   }
 
+  // What a scripted --do reaches. Set before the render thread starts, since
+  // that is the thread that carries a script out.
+  state->runCommand = [this](const std::string &name) {
+    return commandTable.run(name);
+  };
+
   std::jthread renderThread(std::ref(*renderer), std::ref(window));
 
   // Milliseconds to block in SDL_WaitEventTimeout. Waiting rather than spinning
@@ -502,8 +616,19 @@ int Application::run() {
         break;
       }
       case SDL_EVENT_KEY_DOWN: {
-        commandTable.dispatch(static_cast<int>(sdl::keyScancode(evt)),
-                              modsFromSdl(sdl::keyModifiers(evt)));
+        const auto scancode = static_cast<int>(sdl::keyScancode(evt));
+        const auto mods     = modsFromSdl(sdl::keyModifiers(evt));
+        // A modal has the keyboard while it is up, and gets first refusal on
+        // every key: a question on screen is not answered by editing the
+        // document behind it. A key it does not use falls through, so that
+        // quitting still works while one is open.
+        if (nullptr != state->modal && state->modal->grabbing()) {
+          const auto key = modalKey(scancode);
+          if (key && state->modal->keyPressed(*key, modalMods(mods))) {
+            break;
+          }
+        }
+        commandTable.dispatch(scancode, mods);
         break;
       }
       case SDL_EVENT_MOUSE_MOTION: {
@@ -514,7 +639,8 @@ int Application::run() {
         state->mouseY = static_cast<int>(evt.motion.y);
         // Motion with the left button held is a drag, which extends the
         // selection rather than moving the caret on its own.
-        if (0 != (evt.motion.state & SDL_BUTTON_LMASK)) {
+        if (0 != (evt.motion.state & SDL_BUTTON_LMASK) &&
+            (nullptr == state->modal || !state->modal->grabbing())) {
           state->dragX       = static_cast<int>(evt.motion.x);
           state->dragY       = static_cast<int>(evt.motion.y);
           state->dragPending = true;
@@ -522,6 +648,11 @@ int Application::run() {
         break;
       }
       case SDL_EVENT_MOUSE_BUTTON_DOWN: {
+        // Held while a modal is up, along with the drag above: the caret is
+        // not what is being moved when there is a question on screen.
+        if (nullptr != state->modal && state->modal->grabbing()) {
+          break;
+        }
         // The render thread answers this: where a click lands in the text is a
         // question only the picking attachment can answer, and that read is
         // asynchronous.
@@ -531,6 +662,10 @@ int Application::run() {
         break;
       }
       case SDL_EVENT_TEXT_INPUT: {
+        if (nullptr != state->modal && state->modal->grabbing()) {
+          state->modal->textTyped(evt.text.text);
+          break;
+        }
         if (textInput) {
           const std::lock_guard locker(state->typedMutex);
           state->typedText += evt.text.text;

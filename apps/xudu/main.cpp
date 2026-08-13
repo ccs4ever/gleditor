@@ -33,6 +33,7 @@
 #include <gleditor/app.hpp>
 #include <gleditor/caret.hpp>
 #include <gleditor/doc.hpp>
+#include <gleditor/form.hpp>
 #include <gleditor/render/types.hpp>
 #include <gleditor/render_state.hpp>
 #include <gleditor/renderer.hpp>
@@ -44,6 +45,7 @@
 #include "core/microversion.hpp"
 #include "core/ops.hpp"
 #include "core/mutable_link.hpp"
+#include "core/config.hpp"
 #include "core/provenance.hpp"
 #include "core/torrent.hpp"
 #include "session.hpp"
@@ -54,6 +56,7 @@ using gleditor::Mod;
 using xudu::HypertimeMap;
 using xudu::LinkBeams;
 using xudu::MicroversionId;
+using xudu::Author;
 using xudu::Session;
 
 /**
@@ -142,8 +145,10 @@ bool wantsEveryOption(const int argc, const char *const *const argv) {
  */
 class Views {
 public:
-  Views(Session &aSession, RendererRef aRenderer, HypertimeMap &aMap)
-      : session(aSession), renderer(std::move(aRenderer)), map(aMap) {}
+  Views(Session &aSession, RendererRef aRenderer, HypertimeMap &aMap,
+        gleditor::Form &aForm)
+      : session(aSession), renderer(std::move(aRenderer)), map(aMap),
+        form(aForm) {}
 
   /// Replace everything on screen with one document showing @p version.
   void showOnly(const MicroversionId &version) {
@@ -327,7 +332,19 @@ public:
     });
   }
 
-  /// Publish the document the caret is in, or the first one open.
+  /**
+   * @brief Ask what this publication should say, then make it.
+   *
+   * Asked rather than assumed, because publishing is the irreversible act in
+   * this program: a document goes out under somebody's name, signed, and
+   * cannot be recalled from whoever has it. Everything the record will say is
+   * on screen and editable first, filled in from the configuration and the
+   * store -- so the common case is still one keystroke and a look.
+   *
+   * The form runs on the event thread and the store is the render thread's,
+   * so what is offered is gathered inside runWithState() and what comes back
+   * is applied inside another.
+   */
   void publishCurrent(const std::string &salt) {
     renderer->runWithState([this, salt](RenderState &) {
       if (session.views().empty()) {
@@ -339,11 +356,63 @@ public:
                                  caret->documentIndex() < session.views().size()
                               ? caret->documentIndex()
                               : 0U;
+      const auto version = session.versionOf(which);
+      const auto who     = session.author();
+      const auto where   = session.publishedDir();
+
+      using Field = gleditor::Form::Field;
+      std::vector<Field> asked{
+          Field{"Name", salt.empty() ? std::string{"document"} : salt,
+                "one word; publishing again under it is a further state of "
+                "this document",
+                true},
+          Field{"Title", {}, "what this document is called", true},
+          Field{"Author", who.name, "who is publishing this", true},
+          Field{"Email", who.email, "how to reach them", true},
+          Field{"Signing key", who.gpgKey,
+                "gpg's default key, unless this says otherwise", false},
+          Field{"Rights", {}, "how others may use this; optional", false},
+          Field{"Note", {}, "anything else worth recording; optional", false},
+      };
+      // The title defaults to the name, since a one-word name is a passable
+      // title and an empty required field would stop somebody who meant to
+      // accept everything.
+      asked[1].value = asked[0].value;
+
+      form.open("Publish " + version.str(),
+                "Signed as an authorship record, then sealed into " + where,
+                std::move(asked),
+                [this, version, which](const std::vector<Field> &answers) {
+                  publishAnswers(version, which, answers);
+                });
+    });
+  }
+
+  /// Carry out what the dialog was told. Called on the event thread by the
+  /// form, so the work goes back through the queue like every other command.
+  void publishAnswers(const MicroversionId &version, const std::uint32_t which,
+                      const std::vector<gleditor::Form::Field> &answers) {
+    Session::PublishRequest request;
+    request.salt         = answers[0].value;
+    request.title        = answers[1].value;
+    request.author.name  = answers[2].value;
+    request.author.email = answers[3].value;
+    request.author.gpgKey = answers[4].value;
+    if (!answers[5].value.empty()) {
+      request.extra.emplace_back("rights", answers[5].value);
+    }
+    if (!answers[6].value.empty()) {
+      request.extra.emplace_back("note", answers[6].value);
+    }
+
+    renderer->runWithState([this, version, which, request](RenderState &) {
       try {
-        const auto path = session.publishDocument(session.versionOf(which),
-                                                  salt, salt);
+        const auto path = session.publishDocument(version, request);
         std::cout << "xudu: published doc " << which << " as " << path << "\n";
       } catch (const std::exception &err) {
+        // On the terminal rather than back in the dialog: what gpg says when
+        // it will not sign is several lines of somebody else's diagnostics,
+        // and a panel is the wrong shape for it.
         std::cout << "xudu: cannot publish: " << err.what() << "\n";
       }
     });
@@ -378,6 +447,7 @@ private:
   Session &session;
   RendererRef renderer;
   HypertimeMap &map;
+  gleditor::Form &form;
   std::optional<Pending> pending;
 };
 
@@ -514,11 +584,12 @@ int main(const int argc, char **argv) {
             "are shaded in both")
       .default_value(std::string{});
   parser.add_argument("--author-name")
-      .help("who publishes from this store, as a person. Kept in the store, so "
-            "it is said once. Publishing writes an authorship record naming "
-            "them and has GnuPG sign it before the content is sealed, so that "
-            "the torrent's info hash covers the content and the claim about "
-            "who wrote it together")
+      .help("who publishes, as a person. Kept in the per-user configuration "
+            "file, so it is said once for every store; --author-here puts it "
+            "in this store instead. Publishing writes an authorship record "
+            "naming them and has GnuPG sign it before the content is sealed, "
+            "so that the torrent's info hash covers the content and the claim "
+            "about who wrote it together")
       .default_value(std::string{});
   parser.add_argument("--author-email")
       .help("the author's email address, recorded alongside the name")
@@ -526,8 +597,17 @@ int main(const int argc, char **argv) {
   parser.add_argument("--gpg-key")
       .help("which OpenPGP key signs the authorship record: a fingerprint, a "
             "long key id, or an email address -- anything gpg accepts. The "
-            "default is gpg's own default signing key")
+            "default is gpg's own default signing key. A key kept outside the "
+            "usual keyring is named by gpg_secret_key or gpg_home in the "
+            "configuration file")
       .default_value(std::string{});
+  parser.add_argument("--author-here")
+      .help("record the author in this store rather than in the per-user "
+            "configuration: a pen name, or an identity used for one project")
+      .flag();
+  parser.add_argument("--show-config")
+      .help("print where the configuration file is and what it says, and stop")
+      .flag();
   parser.add_argument("--check-authorship")
       .help("check the authorship record sealed with somebody's content and "
             "print who signed it. Give the directory the torrent's files are "
@@ -571,6 +651,11 @@ int main(const int argc, char **argv) {
   std::vector<MicroversionId> read;
   try {
     parser.parse_args(argc, argv);
+    if (parser["--show-config"] == true) {
+      std::cout << "# " << xudu::configPath() << "\n"
+                << xudu::loadConfig().toYaml();
+      return 0;
+    }
     // Answered before a window is opened or a store is touched: this asks
     // about a file somebody was sent, and needs neither.
     if (const auto where = parser.get<std::string>("--check-authorship");
@@ -716,16 +801,48 @@ int main(const int argc, char **argv) {
                    key   = parser.get<std::string>("--gpg-key");
         !name.empty() || !email.empty() || !key.empty()) {
       xudu::Author who{name, email, key};
-      if (!who.named()) {
-        throw std::runtime_error(
-            "--author-name and --author-email go together: an authorship "
-            "record with only half of a person in it names nobody");
+      if (!who.named() && parser["--author-here"] != true) {
+        // Half of one is accepted when it is being added to what is already
+        // there -- somebody changing only their key -- and refused when it is
+        // all there is, since a record with half a person in it names nobody.
+        const auto existing = xudu::loadConfig();
+        if (!Author{name.empty() ? existing.author.name : name,
+                    email.empty() ? existing.author.email : email, key}
+                 .named()) {
+          throw std::runtime_error(
+              "--author-name and --author-email go together: an authorship "
+              "record with only half of a person in it names nobody");
+        }
       }
-      session->setAuthor(who);
-      quiet || std::cout << "xudu: publishing from " << session->path()
-                         << " as " << who.name << " <" << who.email << ">"
-                         << (who.gpgKey.empty() ? std::string{}
-                                                : ", signed by " + who.gpgKey)
+      const bool here = parser["--author-here"] == true;
+      auto recorded   = who;
+      if (here) {
+        session->setAuthor(who);
+      } else {
+        // Merged into whatever is already there, so setting only the key does
+        // not blank the name somebody set last week.
+        auto config = xudu::loadConfig();
+        if (!who.name.empty()) {
+          config.author.name = who.name;
+        }
+        if (!who.email.empty()) {
+          config.author.email = who.email;
+        }
+        if (!who.gpgKey.empty()) {
+          config.author.gpgKey = who.gpgKey;
+        }
+        xudu::saveConfig(config);
+        recorded = config.author;
+      }
+      // What it now says, rather than what was passed: somebody setting only
+      // their key wants to see the name it was added to.
+      quiet || std::cout << "xudu: publishing as " << recorded.name << " <"
+                         << recorded.email << ">"
+                         << (recorded.gpgKey.empty()
+                                 ? std::string{}
+                                 : ", signed by " + recorded.gpgKey)
+                         << (here ? " from " + session->path()
+                                  : " (kept in " + xudu::configPath() + ")")
                          << "\n";
     }
 
@@ -750,7 +867,8 @@ int main(const int argc, char **argv) {
       // this machine's name, which says so, and a half-written line with that
       // in the middle of it is not a message anybody can read.
       const auto manifest =
-          session->publishDocument(opening, publishAs, publishAs);
+          session->publishDocument(
+              opening, Session::PublishRequest{publishAs, publishAs});
       quiet || std::cout << "xudu: published " << opening.str() << " as "
                          << manifest << "\n";
     }
@@ -770,7 +888,10 @@ int main(const int argc, char **argv) {
     // 24-point label does not fit in a node box.
     HypertimeMap map("Sans 10", *session);
     map.setVisible(parser["--map"] == true);
-    Views views(*session, renderer, map);
+    // The panel a publication is described in. Chrome rather than document, so
+    // it keeps its own small font whatever the text is being read at.
+    gleditor::Form publishForm("Sans 11");
+    Views views(*session, renderer, map, publishForm);
 
     LinkBeams links(*session, renderer);
     links.setVisible(parser["--no-beams"] != true);
@@ -788,6 +909,11 @@ int main(const int argc, char **argv) {
     renderer->addSpanDecorator(session.get());
     renderer->addFrameContributor(&map);
     renderer->addFrameContributor(&links);
+    // Last of the three, so the modal draws over both of them.
+    renderer->addFrameContributor(&publishForm);
+    // And it takes the keyboard while it is up, so that typing a title does
+    // not type into the document behind it.
+    state->modal = &publishForm;
     // Before the caret gets a click, so that clicking a beam follows it rather
     // than putting the caret behind it.
     renderer->addPickObserver(&links);

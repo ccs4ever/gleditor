@@ -102,6 +102,17 @@ public:
    */
   bool dispatch(int scancode, Mod mods) const;
 
+  /**
+   * @brief Run the command called @p name.
+   *
+   * By name rather than by key, for a run with nobody at the keyboard: a
+   * scripted `--do publish` says what it means where a scancode and a modifier
+   * mask would only say which keys somebody would have pressed.
+   *
+   * @return Whether anything is called that.
+   */
+  bool run(std::string_view name) const;
+
   [[nodiscard]] const std::vector<Command> &all() const { return bindings; }
   /// The bindings as lines of text, for a program that wants to print them.
   [[nodiscard]] std::string helpText() const;

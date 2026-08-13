@@ -998,7 +998,7 @@ warning, it is somebody's claim to have published what they did not.
 ```
 $ xudu store --author-name 'Ada Lovelace' --author-email ada@example.org \
              --import essay.txt --publish essay
-xudu: publishing from store as Ada Lovelace <ada@example.org>
+xudu: publishing as Ada Lovelace <ada@example.org> (kept in ~/.config/xudu/config.yaml)
 xudu: minted this machine's name e8a417cb...
 xudu: published 1 as store/published/essay.xanadoc
 ```
@@ -1085,6 +1085,56 @@ signature is the key management and the web of trust around it, none of which
 this program has any business duplicating -- and a reader will reach for gpg to
 check it, so gpg is what should produce it.
 
+#### Who you are, kept where your other settings are
+
+Identity belongs to a person, not to a document. Being asked to state it again
+per store is how it ends up spelled three ways, or omitted -- and an omitted
+author is an unsigned document. So it lives in the per-user configuration
+directory, in the same small YAML the authorship record is written in:
+
+```yaml
+# ~/.config/xudu/config.yaml  ($XDG_CONFIG_HOME is honoured; $XUDU_CONFIG
+# names a file outright, which is what lets somebody keep two identities)
+author: "Ada Lovelace"
+email: "ada@example.org"
+gpg_key: "ada@example.org"       # which key, when the keyring holds several
+gpg_home: "/media/key/.gnupg"    # optional: a GnuPG home to sign from
+gpg_secret_key: "/media/key/ada.sec.asc"  # optional: an exported secret key
+```
+
+`--author-name`, `--author-email` and `--gpg-key` write it; `--show-config`
+prints where it is and what it says. Values are merged rather than replaced, so
+setting only a key does not blank the name set last week.
+
+A key given as a *file* is the spelling everybody reaches for first and the one
+gpg stopped supporting directly: since 2.1 it signs with keys in a keyring and
+has no way to take a key file for one operation. So a key named that way is
+imported into a keyring of its own, used, and thrown away. A passphrase on it
+needs something to ask for the passphrase, and the complaint gpg makes says so.
+
+Three places can say who publishes, and the nearest wins: this file is who
+somebody is; `author.yaml` in a store, written by `--author-here`, is who they
+are for that store -- a pen name, a work identity; and the publish dialog is
+who they are for one publication.
+
+#### The publish dialog
+
+Publishing is the irreversible act in this program. A document goes out under
+somebody's name, signed, and cannot be recalled from whoever has it -- so
+ctrl-shift-s does not publish, it asks:
+
+Everything the record will say is filled in from the configuration and the
+store and is editable before anything is signed. Required fields are marked and
+an attempt to go ahead without one says which is missing rather than publishing
+something half-filled; tab moves between fields, enter goes ahead, escape
+leaves it. While it is up it has the keyboard: the text being typed into a
+title cannot land in the document behind it, and clicks are held.
+
+`--do publish` opens it from a script, `--type` fills in the field the keyboard
+is on, and `--key tab|enter|escape|...` presses what is not text -- which is how
+the dialog is tested, and how any other command can be driven without a person
+at the keyboard.
+
 ### Commands
 
 Control is used throughout, because a bare letter is text: the whole point of
@@ -1100,7 +1150,7 @@ this program is that typing is an edit, so it has to reach the document.
 | `ctrl-k` / `ctrl-shift-k` | show or hide the beams; stop them moving documents |
 | `ctrl-m` | show or hide the hypertime map |
 | `ctrl-p` | print every state to the terminal |
-| `ctrl-s` / `ctrl-shift-s` | write the spools out; publish this document |
+| `ctrl-s` / `ctrl-shift-s` | write the spools out; ask what to publish, then publish |
 | `ctrl-q` | save and quit |
 | `backspace` | stop pointing at the selection |
 

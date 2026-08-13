@@ -4,6 +4,8 @@
  */
 #include "provenance.hpp" // IWYU pragma: associated
 
+#include "yaml.hpp"
+
 #include <array>
 #include <cerrno>
 #include <cstdlib>
@@ -13,6 +15,7 @@
 #include <fstream>
 #include <sstream>
 #include <stdexcept>
+#include <optional>
 #include <string_view>
 #include <system_error>
 #include <utility>
@@ -147,85 +150,6 @@ private:
   std::filesystem::path path;
 };
 
-/// A YAML double-quoted scalar. Everything is quoted rather than only what has
-/// to be: a name with a colon in it is ordinary, and a rule with no exceptions
-/// is one nobody has to remember.
-std::string asYamlString(const std::string_view text) {
-  std::string out = "\"";
-  for (const char chr : text) {
-    switch (chr) {
-    case '"':
-      out += "\\\"";
-      break;
-    case '\\':
-      out += "\\\\";
-      break;
-    case '\n':
-      out += "\\n";
-      break;
-    case '\r':
-      out += "\\r";
-      break;
-    case '\t':
-      out += "\\t";
-      break;
-    default:
-      out += chr;
-    }
-  }
-  out += '"';
-  return out;
-}
-
-/// The inverse, for the small reader below.
-std::string fromYamlString(std::string_view text) {
-  if (text.size() < 2 || '"' != text.front() || '"' != text.back()) {
-    return std::string{text};
-  }
-  text.remove_prefix(1);
-  text.remove_suffix(1);
-  std::string out;
-  for (std::size_t i = 0; i < text.size(); i++) {
-    if ('\\' != text[i] || i + 1 == text.size()) {
-      out += text[i];
-      continue;
-    }
-    switch (text[++i]) {
-    case 'n':
-      out += '\n';
-      break;
-    case 'r':
-      out += '\r';
-      break;
-    case 't':
-      out += '\t';
-      break;
-    default:
-      out += text[i];
-    }
-  }
-  return out;
-}
-
-void writeField(std::string &out, const std::string_view key,
-                const std::string_view value) {
-  if (value.empty()) {
-    return;
-  }
-  out += std::format("{}: {}\n", key, asYamlString(value));
-}
-
-std::string_view trimmed(std::string_view text) {
-  while (!text.empty() && (' ' == text.front() || '\t' == text.front())) {
-    text.remove_prefix(1);
-  }
-  while (!text.empty() && (' ' == text.back() || '\t' == text.back() ||
-                           '\r' == text.back())) {
-    text.remove_suffix(1);
-  }
-  return text;
-}
-
 } // namespace
 
 std::string Provenance::toYaml() const {
@@ -241,27 +165,22 @@ std::string Provenance::toYaml() const {
       std::string{provenanceSigName} + " " + std::string{provenanceFileName} +
       "\n";
 
-  writeField(out, "author", author.name);
-  writeField(out, "email", author.email);
-  writeField(out, "gpg_key", author.gpgKey);
-  writeField(out, "title", title);
-  writeField(out, "salt", salt);
-  writeField(out, "publisher", publisher);
-  writeField(out, "version", version);
+  yaml::write(out, "author", author.name);
+  yaml::write(out, "email", author.email);
+  yaml::write(out, "gpg_key", author.gpgKey);
+  yaml::write(out, "title", title);
+  yaml::write(out, "salt", salt);
+  yaml::write(out, "publisher", publisher);
+  yaml::write(out, "version", version);
   if (0 != published) {
     out += std::format("published: {}\n", published);
   }
   out += std::format("content_length: {}\n", contentLength);
-  writeField(out, "content_sha256", contentDigest);
+  yaml::write(out, "content_sha256", contentDigest);
   for (const auto &[key, value] : extra) {
-    writeField(out, key, value);
+    yaml::write(out, key, value);
   }
-  if (!quotes.empty()) {
-    out += "quotes:\n";
-    for (const auto &key : quotes) {
-      out += std::format("  - {}\n", asYamlString(key));
-    }
-  }
+  yaml::writeList(out, "quotes", quotes);
   return out;
 }
 
@@ -271,9 +190,67 @@ std::string sha256Hex(const std::string_view data) {
   return checksum.get_string();
 }
 
+namespace {
+
+/// A GnuPG home of its own, thrown away afterwards. Short, because the agent's
+/// socket lives in it and a long path is longer than a unix socket name may be
+/// -- which gpg reports as "no agent running", and is nothing of the kind.
+class Keyring {
+public:
+  explicit Keyring(const std::string &secretKeyFile) {
+    path = std::filesystem::temp_directory_path() /
+           std::format("xudu-key-{}", getpid());
+    std::error_code ignored;
+    std::filesystem::remove_all(path, ignored);
+    std::filesystem::create_directories(path);
+    std::filesystem::permissions(path, std::filesystem::perms::owner_all,
+                                 std::filesystem::perm_options::replace,
+                                 ignored);
+    // No terminal to ask for a passphrase on, so a protected key will be
+    // refused here rather than hanging. gpg says which, and that is the
+    // actionable part.
+    { std::ofstream(path / "gpg-agent.conf") << "allow-loopback-pinentry\n"; }
+    { std::ofstream(path / "gpg.conf") << "pinentry-mode loopback\n"; }
+
+    imported = run({"gpg", "--homedir", path.string(), "--batch", "--yes",
+                    "--import", secretKeyFile});
+  }
+  ~Keyring() {
+    static_cast<void>(run({"gpgconf", "--homedir", path.string(), "--kill",
+                           "gpg-agent"}));
+    std::error_code ignored;
+    std::filesystem::remove_all(path, ignored);
+  }
+
+  Keyring(const Keyring &)            = delete;
+  Keyring &operator=(const Keyring &) = delete;
+  Keyring(Keyring &&)                 = delete;
+  Keyring &operator=(Keyring &&)      = delete;
+
+  [[nodiscard]] bool ok() const { return imported.ok(); }
+  [[nodiscard]] std::string complaint() const { return imported.complaint(); }
+  [[nodiscard]] std::string home() const { return path.string(); }
+
+private:
+  std::filesystem::path path;
+  Ran imported;
+};
+
+/// The `--homedir` gpg should be run with, if any.
+void addHome(std::vector<std::string> &argv, const std::string &home) {
+  if (home.empty()) {
+    return;
+  }
+  argv.emplace_back("--homedir");
+  argv.push_back(home);
+}
+
+} // namespace
+
 bool gpgAvailable() { return run({"gpg", "--version"}).ok(); }
 
-SignedProvenance signProvenance(const Provenance &record) {
+SignedProvenance signProvenance(const Provenance &record,
+                                const SigningOptions &where) {
   if (!record.author.named()) {
     throw std::runtime_error(
         "cannot sign for an author with no name and email. Publishing says who "
@@ -294,7 +271,22 @@ SignedProvenance signProvenance(const Provenance &record) {
   const Scratch document(".yaml", out.yaml);
   const Scratch signature(".yaml.asc", "");
 
+  // A key given as a file is imported into a keyring of its own for this one
+  // signature; a GnuPG home is used as it is. Named separately because they
+  // are different things: one is a key, the other is where keys are kept.
+  std::optional<Keyring> imported;
+  if (!where.secretKeyFile.empty()) {
+    imported.emplace(where.secretKeyFile);
+    if (!imported->ok()) {
+      throw std::runtime_error(std::format(
+          "gpg would not read the signing key at {}: {}", where.secretKeyFile,
+          imported->complaint()));
+    }
+  }
+  const auto home = imported ? imported->home() : where.gpgHome;
+
   std::vector<std::string> argv{"gpg", "--batch", "--yes", "--armor"};
+  addHome(argv, home);
   if (!record.author.gpgKey.empty()) {
     argv.emplace_back("--local-user");
     argv.push_back(record.author.gpgKey);
@@ -319,7 +311,8 @@ SignedProvenance signProvenance(const Provenance &record) {
   return out;
 }
 
-ProvenanceCheck verifyProvenance(const SignedProvenance &signed_) {
+ProvenanceCheck verifyProvenance(const SignedProvenance &signed_,
+                                 const SigningOptions &where) {
   ProvenanceCheck check;
   if (signed_.signature.empty()) {
     check.detail = "there is no signature";
@@ -336,8 +329,11 @@ ProvenanceCheck verifyProvenance(const SignedProvenance &signed_) {
   // --status-fd is the machine-readable channel; the human text on stderr says
   // different things in different locales and versions, and is kept only to be
   // shown when something went wrong.
-  const auto ran = run({"gpg", "--batch", "--status-fd", "1", "--verify",
-                        signature.name(), document.name()});
+  std::vector<std::string> argv{"gpg", "--batch"};
+  addHome(argv, where.gpgHome);
+  argv.insert(argv.end(), {"--status-fd", "1", "--verify", signature.name(),
+                           document.name()});
+  const auto ran = run(argv);
   check.detail   = ran.complaint();
   if (!ran.started) {
     return check;
@@ -358,7 +354,11 @@ ProvenanceCheck verifyProvenance(const SignedProvenance &signed_) {
       std::string keyId;
       fields >> keyId;
       std::getline(fields, check.signer);
-      check.signer = std::string{trimmed(check.signer)};
+      // GOODSIG's identity is the rest of the line, which begins with the
+      // space that separated it from the key id.
+      if (!check.signer.empty() && ' ' == check.signer.front()) {
+        check.signer.erase(0, 1);
+      }
     } else if ("VALIDSIG" == keyword) {
       // The last field of VALIDSIG is the primary key's fingerprint; the first
       // is the fingerprint of the key that actually signed, which for a signing
@@ -379,33 +379,21 @@ ProvenanceCheck verifyProvenance(const SignedProvenance &signed_) {
   return check;
 }
 
-std::optional<Provenance> parseProvenance(const std::string_view yaml) {
+std::optional<Provenance> parseProvenance(const std::string_view text) {
+  const auto entries = yaml::read(text);
+  if (!entries) {
+    return std::nullopt;
+  }
+
   Provenance out;
   bool sawAuthor = false;
-  bool inQuotes  = false;
-
-  std::istringstream lines{std::string{yaml}};
-  std::string raw;
-  while (std::getline(lines, raw)) {
-    const auto line = trimmed(raw);
-    if (line.empty() || line.starts_with("#")) {
-      continue;
-    }
-    if (line.starts_with("- ")) {
-      if (!inQuotes) {
-        return std::nullopt;
+  for (const auto &[key, value, listItem] : *entries) {
+    if (listItem) {
+      if ("quotes" == key) {
+        out.quotes.push_back(value);
       }
-      out.quotes.push_back(fromYamlString(trimmed(line.substr(2))));
       continue;
     }
-    const auto colon = line.find(':');
-    if (std::string_view::npos == colon) {
-      return std::nullopt;
-    }
-    const auto key   = std::string{trimmed(line.substr(0, colon))};
-    const auto value = fromYamlString(trimmed(line.substr(colon + 1)));
-    inQuotes         = "quotes" == key;
-
     if ("author" == key) {
       out.author.name = value;
       sawAuthor       = true;
@@ -428,6 +416,10 @@ std::optional<Provenance> parseProvenance(const std::string_view yaml) {
     } else if ("content_sha256" == key) {
       out.contentDigest = value;
     } else if ("quotes" != key) {
+      // Anything this version does not know about is kept rather than
+      // dropped: a record written by a later one still says what it said, and
+      // a reader that quietly discarded half of it would be showing somebody
+      // a claim that is not the claim that was signed.
       out.extra.emplace_back(key, value);
     }
   }

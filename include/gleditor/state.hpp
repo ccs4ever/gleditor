@@ -6,12 +6,14 @@
 #include <chrono>
 #include <glm/ext/vector_float3.hpp>
 #include <memory>
+#include <functional>
 #include <mutex>
 #include <optional>
 #include <string>
 #include <utility>
 #include <vector>
 
+#include <gleditor/modal_input.hpp>
 #include <gleditor/render/diagnostics.hpp>
 
 struct RenderItem;
@@ -38,17 +40,21 @@ struct AppState {
    */
   struct AutomationStep {
     enum class Kind : std::uint8_t {
-      Pick,   ///< Report what is at a pixel.
-      Click,  ///< Place the caret at a pixel.
-      Type,   ///< Insert text at the caret.
-      Select, ///< Select a byte range of the first document.
+      Pick,    ///< Report what is at a pixel.
+      Click,   ///< Place the caret at a pixel.
+      Type,    ///< Insert text at the caret, or into whatever has the keyboard.
+      Select,  ///< Select a byte range of the first document.
+      Command, ///< Run a bound command by name.
+      Press,   ///< A key a modal takes: tab, enter, escape and friends.
     };
     Kind kind{};
     int x{}; ///< Pick and click: the pixel.
     int y{};
     std::uint32_t from{}; ///< Select: document-global byte offsets.
     std::uint32_t to{};
-    std::string text; ///< Type: the UTF-8 to insert.
+    std::string text; ///< Type: the UTF-8 to insert. Command: which command.
+    gleditor::Key key{};      ///< Press: which key.
+    gleditor::KeyMods mods{}; ///< Press: held with it.
   };
   /// The script, in command line order. Written before the render thread
   /// starts and only read after.
@@ -123,6 +129,24 @@ struct AppState {
   /// applied on the render thread.
   std::mutex typedMutex;
   std::string typedText;
+
+  /**
+   * @brief Whatever currently has the keyboard instead of the document.
+   *
+   * Null almost always. Set before the event loop starts and left alone: what
+   * changes is whether it says it is grabbing, which is the modal's business
+   * and is asked before every key. See gleditor/modal_input.hpp.
+   */
+  gleditor::ModalInput *modal{};
+
+  /**
+   * @brief Run a bound command by name, for a scripted run.
+   *
+   * Set by Application before the render thread starts. The commands live on
+   * the event thread and every one of them queues its work, so calling one
+   * from the render thread is the same as somebody pressing the key.
+   */
+  std::function<bool(const std::string &)> runCommand;
   struct ViewPerspective : public std::mutex {
     int screenWidth  = 800;
     int screenHeight = 600;
