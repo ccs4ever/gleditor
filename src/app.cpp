@@ -604,7 +604,74 @@ int Application::run() {
   // lets the loop notice `alive` being cleared by the renderer.
   constexpr int eventWaitMs = 100;
 
+  // What the platform was last told about where typing lands, so it is told
+  // again only when it moves.
+  std::optional<gleditor::InputArea> toldAbout;
+  bool modalHadKeyboard = false;
+
+  /**
+   * Anything the render thread asked to be said in a native dialog. Here
+   * rather than there: SDL's message box blocks and must be shown from the
+   * thread that created the window.
+   *
+   * @param canShow False once the loop is over. A box put up while the window
+   *        is being torn down is one nobody asked for and one nothing would
+   *        dismiss, so what is left over is written down instead of shown.
+   */
+  const auto sayWhatIsWaiting = [this, &window](const bool canShow) {
+    std::vector<AppState::PendingDialog> waiting;
+    {
+      const std::lock_guard locker(state->dialogMutex);
+      waiting.swap(state->dialogs);
+    }
+    for (const auto &dialog : waiting) {
+      // A script driving the run has nobody at the keyboard to press OK, and
+      // the message box blocks until somebody does -- it would stop the script
+      // rather than report to it. On the error stream it does neither.
+      if (!canShow || !state->script.empty()) {
+        std::cerr << dialog.title << ": " << dialog.message << "\n";
+        continue;
+      }
+      static_cast<void>(sdl::showMessageBox(
+          window.window,
+          render::DiagnosticSeverity::Error == dialog.severity
+              ? sdl::MessageKind::Error
+          : render::DiagnosticSeverity::Warning == dialog.severity
+              ? sdl::MessageKind::Warning
+              : sdl::MessageKind::Info,
+          dialog.title, dialog.message, {"OK"}));
+    }
+  };
+
   while (state->alive) {
+    sayWhatIsWaiting(true);
+
+    // Text entry follows whatever has the keyboard. A modal is typed into even
+    // in a program that has text input off -- a question nobody can answer is
+    // not a question -- and the platform is told where the answer will appear,
+    // which is what puts an input method's candidate window and a phone's
+    // keyboard in the right place.
+    if (const bool grabbing =
+            nullptr != state->modal && state->modal->grabbing();
+        grabbing != modalHadKeyboard) {
+      modalHadKeyboard = grabbing;
+      if (grabbing && !textInput) {
+        sdl::startTextInput(window.window);
+      } else if (!grabbing && !textInput) {
+        sdl::stopTextInput(window.window);
+      }
+      toldAbout.reset();
+    }
+    if (modalHadKeyboard) {
+      if (const auto area = state->modal->textArea(); area != toldAbout) {
+        toldAbout = area;
+        if (area) {
+          sdl::setTextInputArea(window.window, area->x, area->y, area->width,
+                                area->height);
+        }
+      }
+    }
+
     SDL_Event evt;
     if (!SDL_WaitEventTimeout(&evt, eventWaitMs)) {
       continue;
@@ -693,6 +760,10 @@ int Application::run() {
       }
     } while (state->alive && SDL_PollEvent(&evt));
   }
+
+  // Whatever was queued in the frame the program was told to quit in. Losing
+  // it would mean a run that failed to publish and said nothing about it.
+  sayWhatIsWaiting(false);
 
   // The render thread reports its own failures and cannot return a status
   // through std::jthread, so the flag it sets decides the exit code.

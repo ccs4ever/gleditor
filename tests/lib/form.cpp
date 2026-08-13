@@ -10,6 +10,7 @@
  */
 #include <gtest/gtest.h>
 
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -174,6 +175,34 @@ TEST_F(FormTest, closingItFromOutsideDoesNotAnswerEither) {
   form.close();
   EXPECT_FALSE(form.grabbing());
   EXPECT_EQ(accepted, 0);
+}
+
+// Where typing lands is handed to SDL and by SDL to the platform: it is what
+// puts an input method's candidate window beside the field being typed into,
+// and what stops a phone's keyboard covering it. Which means it must be a
+// place that exists. It is worked out while drawing -- that is where the
+// panel's geometry is decided -- so there is nothing to report until a frame
+// has been drawn, and nothing to report once the form is down.
+TEST_F(FormTest, nowhereIsBeingTypedUntilThereIsSomewhereToType) {
+  EXPECT_FALSE(form.textArea().has_value())
+      << "a closed form is not typed into";
+  openIt();
+  EXPECT_FALSE(form.textArea().has_value())
+      << "opened but not yet drawn: nobody knows where the field will be";
+  form.keyPressed(Key::Escape, KeyMods::None);
+  EXPECT_FALSE(form.textArea().has_value());
+}
+
+// The event loop tells the platform where typing lands only when it moves,
+// which is a comparison rather than a flag -- so the comparison has to be one.
+TEST(InputAreaTest, twoOfThemAreTheSameWhenTheyAreInTheSamePlace) {
+  using gleditor::InputArea;
+  const InputArea here{40, 120, 300, 24};
+  EXPECT_EQ(here, (InputArea{40, 120, 300, 24}));
+  EXPECT_NE(here, (InputArea{40, 152, 300, 24})) << "the next field down";
+  // And an area at all differs from none, which is how a button that raises no
+  // keyboard is told apart from a field that does.
+  EXPECT_NE(std::optional<InputArea>{here}, std::optional<InputArea>{});
 }
 
 // -- the kinds beyond plain text ---------------------------------------------

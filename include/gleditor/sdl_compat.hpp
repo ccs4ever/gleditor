@@ -32,18 +32,21 @@
 
 #include <cstdint>
 #include <string>
+#include <vector>
 
 #if GLEDITOR_SDL_MAJOR == 3
 
 #include <SDL3/SDL.h>
 #include <SDL3/SDL_error.h>
 #include <SDL3/SDL_events.h>
+#include <SDL3/SDL_messagebox.h>
 #include <SDL3/SDL_surface.h>
 #include <SDL3/SDL_video.h>
 
 #elif GLEDITOR_SDL_MAJOR == 2
 
 #include <SDL2/SDL.h>
+#include <SDL2/SDL_messagebox.h>
 
 #if !SDL_VERSION_ATLEAST(2, 0, 22)
 #error SDL2 2.0.22 or newer is required (SDL_GetWindowSizeInPixels)
@@ -168,6 +171,92 @@ inline void stopTextInput([[maybe_unused]] SDL_Window *window) {
 #else
   SDL_StopTextInput();
 #endif
+}
+
+/**
+ * @brief Tell the platform where the text being typed will appear.
+ *
+ * What an input method needs in order to put its candidate window somewhere
+ * sensible, and what an on-screen keyboard needs in order to avoid covering
+ * the field being typed into. Ignored by platforms with neither, which is why
+ * it is cheap to call whenever the focus moves.
+ *
+ * Coordinates are window pixels from the top left, which is SDL's convention
+ * and not the bottom-up one the glyph pipeline draws in.
+ */
+inline void setTextInputArea([[maybe_unused]] SDL_Window *window,
+                             const int posX, const int posY, const int width,
+                             const int height) {
+  const SDL_Rect area{posX, posY, width, height};
+#if GLEDITOR_SDL_MAJOR == 3
+  // The third argument is where the caret is within the area, which SDL3 uses
+  // to place a candidate window against the insertion point rather than the
+  // whole field.
+  SDL_SetTextInputArea(window, &area, 0);
+#else
+  SDL_SetTextInputRect(&area);
+#endif
+}
+
+/// What a message box is telling somebody, which decides its icon.
+enum class MessageKind : std::uint8_t { Info, Warning, Error };
+
+/**
+ * @brief Show a native modal message box and wait for an answer.
+ *
+ * This is the whole of SDL's cross-platform dialog support: a title, a
+ * message, and buttons. It has no text fields, no lists and no widgets of any
+ * kind -- which is why anything that has to be filled in is drawn in the
+ * window instead, and why what goes through here is the things that really are
+ * a message and a choice.
+ *
+ * Blocking, and platform-modal: on Windows and macOS it takes over the parent
+ * window until it is answered. Must be called from the thread that created
+ * @p parent.
+ *
+ * @param buttons Labels, left to right. The first is the default that return
+ *        presses; the last is what escape presses.
+ * @return Which button was pressed, or -1 when the platform could not show it
+ *         at all -- a headless run, or a system with no dialog service.
+ */
+inline int showMessageBox(SDL_Window *parent, const MessageKind kind,
+                          const std::string &title, const std::string &message,
+                          const std::vector<std::string> &buttons) {
+  std::vector<SDL_MessageBoxButtonData> laid;
+  laid.reserve(buttons.size());
+  for (std::size_t i = 0; i < buttons.size(); i++) {
+    std::uint32_t flags = 0;
+    if (0 == i) {
+      flags |= SDL_MESSAGEBOX_BUTTON_RETURNKEY_DEFAULT;
+    }
+    if (i + 1 == buttons.size()) {
+      flags |= SDL_MESSAGEBOX_BUTTON_ESCAPEKEY_DEFAULT;
+    }
+    laid.push_back(SDL_MessageBoxButtonData{flags, static_cast<int>(i),
+                                            buttons[i].c_str()});
+  }
+
+  SDL_MessageBoxData data{};
+  data.flags      = MessageKind::Error == kind     ? SDL_MESSAGEBOX_ERROR
+                    : MessageKind::Warning == kind ? SDL_MESSAGEBOX_WARNING
+                                                   : SDL_MESSAGEBOX_INFORMATION;
+  data.window     = parent;
+  data.title      = title.c_str();
+  data.message    = message.c_str();
+  data.numbuttons = static_cast<int>(laid.size());
+  data.buttons    = laid.data();
+
+  int pressed = -1;
+#if GLEDITOR_SDL_MAJOR == 3
+  if (!SDL_ShowMessageBox(&data, &pressed)) {
+    return -1;
+  }
+#else
+  if (0 != SDL_ShowMessageBox(&data, &pressed)) {
+    return -1;
+  }
+#endif
+  return pressed;
 }
 
 /**

@@ -108,6 +108,11 @@ std::string Form::complaint() const {
   return trouble;
 }
 
+std::optional<InputArea> Form::textArea() const {
+  const std::lock_guard locker(guard);
+  return typingAt;
+}
+
 void Form::open(std::string aTitle, std::string aNote,
                 std::vector<Field> aFields, Accepted onAccept) {
   const std::lock_guard locker(guard);
@@ -122,13 +127,21 @@ void Form::open(std::string aTitle, std::string aNote,
   // filled-in value wants to be.
   caret = fields.empty() ? 0 : fields.front().value.size();
   open_ = true;
+  // Where the last form's focused field was is not where this one's is, and
+  // until this one has been drawn nobody knows where that will be. Saying
+  // nothing is right: the platform keeps whatever it was told last, which is
+  // better than being pointed somewhere this form is not.
+  typingAt.reset();
   revision++;
 }
 
 void Form::close() {
   const std::lock_guard locker(guard);
-  open_ = false;
+  open_    = false;
   accepted = nullptr;
+  // Nothing is being typed into any more, so there is nowhere for an input
+  // method to put itself.
+  typingAt.reset();
   revision++;
 }
 
@@ -214,6 +227,7 @@ bool Form::keyPressed(const Key key, const KeyMods mods) {
       }
       open_    = false;
       accepted = nullptr;
+      typingAt.reset();
       return true;
 
     case Key::Return: {
@@ -251,6 +265,7 @@ bool Form::keyPressed(const Key key, const KeyMods mods) {
       open_   = false;
       toCall  = std::exchange(accepted, nullptr);
       answers = fields;
+      typingAt.reset();
       break;
     }
 
@@ -480,6 +495,22 @@ void Form::drawFrame(FrameContext &ctx) {
       canvas->setTextWidthLimit(static_cast<int>(boxWidth - 12.0F));
       canvas->addText(ctx.state, textLeft, top, shownValue, ink(valueInk),
                       ink(focused ? boxFocused : boxBack));
+
+      if (focused) {
+        // Where the platform should put a candidate window or an on-screen
+        // keyboard, in the pixels SDL counts in: from the top of the window
+        // rather than the bottom, which is what the canvas draws in. Only for
+        // fields that take text -- a button raises no keyboard.
+        const std::lock_guard locker(guard);
+        typingAt =
+            Kind::Text == one.kind || Kind::Secret == one.kind
+                ? std::optional<InputArea>{InputArea{
+                      static_cast<int>(boxLeft),
+                      static_cast<int>(static_cast<float>(ctx.screenHeight) -
+                                       (top + lineGap)),
+                      static_cast<int>(boxWidth), static_cast<int>(boxHeight)}}
+                : std::nullopt;
+      }
 
       if (focused && (Kind::Text == one.kind || Kind::Secret == one.kind)) {
         // Measured rather than counted: a caret placed by character count
