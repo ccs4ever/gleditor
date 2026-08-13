@@ -618,7 +618,20 @@ int Application::run() {
   // the moment does not matter.
   if (const auto &publisher = state->accessibility; publisher) {
     publisher->setWindowTitle(title);
-    static_cast<void>(publisher->start(sdl::nativeWindowHandle(window.window)));
+    const bool opened =
+        publisher->start(sdl::nativeWindowHandle(window.window));
+    // Said out loud, because the three outcomes are three different things and
+    // only one of them is a problem. A build without AccessKit cannot report
+    // anything; a build with it that could not open an adapter has a platform
+    // that refused; and one that opened is reporting whether or not anybody is
+    // listening yet. Without this line all three look identical from outside,
+    // which is how the Windows path went untested for as long as it did.
+    std::cout << "accessibility: "
+              << (opened ? "reporting to the platform"
+                  : gleditor::a11y::platformAvailable()
+                      ? "no adapter -- the platform declined"
+                      : "not in this build")
+              << "\n";
   }
 #if defined(_WIN32)
   SDL_ShowWindow(window.window);
