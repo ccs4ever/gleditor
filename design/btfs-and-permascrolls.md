@@ -177,12 +177,12 @@ contiguous, and the seal is invisible to transclusion.
 
 Distribution then falls into tiers, each with a different number of parties:
 
-| tier | latency | who holds it | what makes it trustworthy |
-| --- | --- | --- | --- |
-| local append | a keystroke | the author | fsync |
-| tail shipping | seconds | a few subscribed replicas | signed by the publisher's key |
-| sealed segment | minutes | anyone, through a swarm | piece hashes |
-| index pointer | tens of minutes | the DHT | BEP 46 signature |
+| tier           | latency         | who holds it              | what makes it trustworthy     |
+| -------------- | --------------- | ------------------------- | ----------------------------- |
+| local append   | a keystroke     | the author                | fsync                         |
+| tail shipping  | seconds         | a few subscribed replicas | signed by the publisher's key |
+| sealed segment | minutes         | anyone, through a swarm   | piece hashes                  |
+| index pointer  | tens of minutes | the DHT                   | BEP 46 signature              |
 
 The faster the tier, the fewer the parties and the weaker the guarantee. Reads
 are overwhelmingly of sealed segments, which are immutable and content

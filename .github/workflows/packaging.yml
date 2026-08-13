@@ -25,64 +25,64 @@ jobs:
     name: deb (Ubuntu, SDL2)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
-        with:
-          submodules: recursive
-          fetch-depth: 0
+    - uses: actions/checkout@v7
+      with:
+        submodules: recursive
+        fetch-depth: 0
 
-      - name: install build dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends \
-            build-essential debhelper devscripts pkg-config \
-            libpangomm-2.48-dev libcairomm-1.16-dev libglibmm-2.68-dev \
-            libsdl2-dev libsdl2-image-dev libgl-dev libglm-dev \
-            libvulkan-dev libtorrent-rasterbar-dev glslang-tools
+    - name: install build dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y --no-install-recommends \
+          build-essential debhelper devscripts pkg-config \
+          libpangomm-2.48-dev libcairomm-1.16-dev libglibmm-2.68-dev \
+          libsdl2-dev libsdl2-image-dev libgl-dev libglm-dev \
+          libvulkan-dev libtorrent-rasterbar-dev glslang-tools
 
-      # dpkg-buildpackage wants debian/ at the root of the tree it is building.
-      # It lives under packaging/ in the repository so that four packaging
-      # formats can sit beside each other without one of them claiming the top
-      # level.
-      - name: stage the debian directory
-        run: cp -r packaging/debian debian
+    # dpkg-buildpackage wants debian/ at the root of the tree it is building.
+    # It lives under packaging/ in the repository so that four packaging
+    # formats can sit beside each other without one of them claiming the top
+    # level.
+    - name: stage the debian directory
+      run: cp -r packaging/debian debian
 
-      # debian/rules' dh_auto_build only turns into a parallel make when
-      # something sets DEB_BUILD_OPTIONS' parallel=N -- dpkg-buildpackage does
-      # not assume that on its own.
-      - name: build the package
-        run: DEB_BUILD_OPTIONS="parallel=$(nproc)" dpkg-buildpackage -us -uc -b
+    # debian/rules' dh_auto_build only turns into a parallel make when
+    # something sets DEB_BUILD_OPTIONS' parallel=N -- dpkg-buildpackage does
+    # not assume that on its own.
+    - name: build the package
+      run: DEB_BUILD_OPTIONS="parallel=$(nproc)" dpkg-buildpackage -us -uc -b
 
-      - name: install it
-        run: sudo apt-get install -y ../gleditor_*.deb
+    - name: install it
+      run: sudo apt-get install -y ../gleditor_*.deb
 
-      - name: check what landed
-        run: |
-          dpkg -L gleditor
-          test -x /usr/bin/gleditor
-          test -f /usr/share/gleditor/shaders/glyph.vert.glsl
-          test -f /usr/share/gleditor/shaders/vulkan/glyph.vert.spv
-          test -f /usr/share/applications/gleditor.desktop
-          test -f /usr/share/man/man1/gleditor.1.gz
+    - name: check what landed
+      run: |
+        dpkg -L gleditor
+        test -x /usr/bin/gleditor
+        test -f /usr/share/gleditor/shaders/glyph.vert.glsl
+        test -f /usr/share/gleditor/shaders/vulkan/glyph.vert.spv
+        test -f /usr/share/applications/gleditor.desktop
+        test -f /usr/share/man/man1/gleditor.1.gz
 
-      - name: run the installed binary
-        run: |
-          sudo apt-get install -y --no-install-recommends \
-            xvfb libgl1-mesa-dri mesa-vulkan-drivers fonts-dejavu-core
-          xvfb-run -a packaging/smoke-test.sh /usr/bin/gleditor opengl vulkan
-          xvfb-run -a packaging/smoke-test.sh /usr/bin/xudu opengl vulkan
-        env:
-          LIBGL_ALWAYS_SOFTWARE: "1"
+    - name: run the installed binary
+      run: |
+        sudo apt-get install -y --no-install-recommends \
+          xvfb libgl1-mesa-dri mesa-vulkan-drivers fonts-dejavu-core
+        xvfb-run -a packaging/smoke-test.sh /usr/bin/gleditor opengl vulkan
+        xvfb-run -a packaging/smoke-test.sh /usr/bin/xudu opengl vulkan
+      env:
+        LIBGL_ALWAYS_SOFTWARE: "1"
 
-      # dpkg-buildpackage writes its output beside the source tree, and
-      # upload-artifact rejects any path containing '..', so the package is
-      # moved inside the workspace first.
-      - name: collect the package
-        run: mkdir -p dist && mv ../gleditor_*.deb dist/
+    # dpkg-buildpackage writes its output beside the source tree, and
+    # upload-artifact rejects any path containing '..', so the package is
+    # moved inside the workspace first.
+    - name: collect the package
+      run: mkdir -p dist && mv ../gleditor_*.deb dist/
 
-      - uses: actions/upload-artifact@v7
-        with:
-          name: gleditor-deb
-          path: dist/*.deb
+    - uses: actions/upload-artifact@v7
+      with:
+        name: gleditor-deb
+        path: dist/*.deb
 
   # ---------------------------------------------------------------- Fedora ---
   fedora:
@@ -90,74 +90,74 @@ jobs:
     runs-on: ubuntu-latest
     container: fedora:latest
     steps:
-      - name: install build dependencies
-        run: |
-          dnf install -y --setopt=install_weak_deps=False \
-            rpm-build rpmdevtools make gcc-c++ pkgconf-pkg-config git \
-            pangomm2.48-devel cairomm1.16-devel glibmm2.68-devel \
-            SDL3-devel SDL3_image-devel mesa-libGL-devel glm-devel \
-            vulkan-loader-devel glslang \
-            desktop-file-utils libappstream-glib python3
-          # rb_libtorrent is the Fedora package name; the upstream project and
-          # everything else in this file call it libtorrent-rasterbar, so this
-          # is asked for by what it provides rather than by that name.
-          # --setopt=install_weak_deps=False above means the -devel package's
-          # boost-devel dependency, if it is only a recommendation rather than
-          # a hard one, would otherwise not be pulled in -- and without boost's
-          # headers libtorrent's own headers fail to compile at all.
-          dnf install -y 'pkgconfig(libtorrent-rasterbar)' boost-devel
+    - name: install build dependencies
+      run: |
+        dnf install -y --setopt=install_weak_deps=False \
+          rpm-build rpmdevtools make gcc-c++ pkgconf-pkg-config git \
+          pangomm2.48-devel cairomm1.16-devel glibmm2.68-devel \
+          SDL3-devel SDL3_image-devel mesa-libGL-devel glm-devel \
+          vulkan-loader-devel glslang \
+          desktop-file-utils libappstream-glib python3
+        # rb_libtorrent is the Fedora package name; the upstream project and
+        # everything else in this file call it libtorrent-rasterbar, so this
+        # is asked for by what it provides rather than by that name.
+        # --setopt=install_weak_deps=False above means the -devel package's
+        # boost-devel dependency, if it is only a recommendation rather than
+        # a hard one, would otherwise not be pulled in -- and without boost's
+        # headers libtorrent's own headers fail to compile at all.
+        dnf install -y 'pkgconfig(libtorrent-rasterbar)' boost-devel
 
-      - uses: actions/checkout@v7
-        with:
-          submodules: recursive
-          fetch-depth: 0
+    - uses: actions/checkout@v7
+      with:
+        submodules: recursive
+        fetch-depth: 0
 
-      # git refuses to describe a tree it thinks belongs to another user, which
-      # is what checkout inside a container looks like to it.
-      - name: trust the checkout
-        run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
+    # git refuses to describe a tree it thinks belongs to another user, which
+    # is what checkout inside a container looks like to it.
+    - name: trust the checkout
+      run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
 
-      # rpmlint needs rpm's own Python binding, which only a real RPM distro
-      # ships correctly -- this container is the one place in CI it can run
-      # at all. Non-blocking for now: nobody has triaged its output against
-      # this spec yet, so failing the build on it would be gating on warnings
-      # nobody has judged real.
-      - name: rpmlint
-        run: |
-          dnf install -y rpmlint
-          rpmlint packaging/fedora/gleditor.spec || true
+    # rpmlint needs rpm's own Python binding, which only a real RPM distro
+    # ships correctly -- this container is the one place in CI it can run
+    # at all. Non-blocking for now: nobody has triaged its output against
+    # this spec yet, so failing the build on it would be gating on warnings
+    # nobody has judged real.
+    - name: rpmlint
+      run: |
+        dnf install -y rpmlint
+        rpmlint packaging/fedora/gleditor.spec || true
 
-      - name: build the tarball and the rpm
-        run: |
-          rpmdev-setuptree
-          make dist GLEDITOR_VERSION=0.1.0
-          cp build/dist/gleditor-0.1.0.tar.gz ~/rpmbuild/SOURCES/
-          rpmbuild -ba packaging/fedora/gleditor.spec
+    - name: build the tarball and the rpm
+      run: |
+        rpmdev-setuptree
+        make dist GLEDITOR_VERSION=0.1.0
+        cp build/dist/gleditor-0.1.0.tar.gz ~/rpmbuild/SOURCES/
+        rpmbuild -ba packaging/fedora/gleditor.spec
 
-      - name: install it
-        run: dnf install -y ~/rpmbuild/RPMS/*/gleditor-*.rpm
+    - name: install it
+      run: dnf install -y ~/rpmbuild/RPMS/*/gleditor-*.rpm
 
-      - name: check what landed
-        run: |
-          rpm -ql gleditor
-          test -x /usr/bin/gleditor
-          test -f /usr/share/gleditor/shaders/glyph.vert.glsl
-          test -f /usr/share/gleditor/shaders/vulkan/glyph.vert.spv
+    - name: check what landed
+      run: |
+        rpm -ql gleditor
+        test -x /usr/bin/gleditor
+        test -f /usr/share/gleditor/shaders/glyph.vert.glsl
+        test -f /usr/share/gleditor/shaders/vulkan/glyph.vert.spv
 
-      - name: run the installed binary
-        run: |
-          dnf install -y --setopt=install_weak_deps=False \
-            xorg-x11-server-Xvfb mesa-dri-drivers mesa-vulkan-drivers \
-            dejavu-sans-fonts
-          xvfb-run -a packaging/smoke-test.sh /usr/bin/gleditor opengl vulkan
-          xvfb-run -a packaging/smoke-test.sh /usr/bin/xudu opengl vulkan
-        env:
-          LIBGL_ALWAYS_SOFTWARE: "1"
+    - name: run the installed binary
+      run: |
+        dnf install -y --setopt=install_weak_deps=False \
+          xorg-x11-server-Xvfb mesa-dri-drivers mesa-vulkan-drivers \
+          dejavu-sans-fonts
+        xvfb-run -a packaging/smoke-test.sh /usr/bin/gleditor opengl vulkan
+        xvfb-run -a packaging/smoke-test.sh /usr/bin/xudu opengl vulkan
+      env:
+        LIBGL_ALWAYS_SOFTWARE: "1"
 
-      - uses: actions/upload-artifact@v7
-        with:
-          name: gleditor-rpm
-          path: ~/rpmbuild/RPMS/*/gleditor-*.rpm
+    - uses: actions/upload-artifact@v7
+      with:
+        name: gleditor-rpm
+        path: ~/rpmbuild/RPMS/*/gleditor-*.rpm
 
   # ------------------------------------------------------------------ Arch ---
   arch:
@@ -165,106 +165,106 @@ jobs:
     runs-on: ubuntu-latest
     container: archlinux:base-devel
     steps:
-      - name: install build dependencies
-        run: |
-          pacman -Syu --noconfirm --needed \
-            git pkgconf make gcc pangomm-2.48 cairomm-1.16 glibmm-2.68 \
-            sdl3 sdl3_image libglvnd glm vulkan-headers vulkan-icd-loader \
-            libtorrent-rasterbar boost glslang python
+    - name: install build dependencies
+      run: |
+        pacman -Syu --noconfirm --needed \
+          git pkgconf make gcc pangomm-2.48 cairomm-1.16 glibmm-2.68 \
+          sdl3 sdl3_image libglvnd glm vulkan-headers vulkan-icd-loader \
+          libtorrent-rasterbar boost glslang python
 
-      - uses: actions/checkout@v7
-        with:
-          submodules: recursive
-          fetch-depth: 0
+    - uses: actions/checkout@v7
+      with:
+        submodules: recursive
+        fetch-depth: 0
 
-      - name: trust the checkout
-        run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
+    - name: trust the checkout
+      run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
 
-      # makepkg refuses to run as root, and the container has no other user.
-      - name: create a build user
-        run: |
-          useradd -m builder
-          echo 'builder ALL=(ALL) NOPASSWD: ALL' >> /etc/sudoers
+    # makepkg refuses to run as root, and the container has no other user.
+    - name: create a build user
+      run: |
+        useradd -m builder
+        echo 'builder ALL=(ALL) NOPASSWD: ALL' >> /etc/sudoers
 
-      - name: build the package
-        run: |
-          make dist GLEDITOR_VERSION=0.1.0
-          install -d /home/builder/pkg
-          cp packaging/arch/PKGBUILD /home/builder/pkg/
-          cp build/dist/gleditor-0.1.0.tar.gz /home/builder/pkg/
-          chown -R builder:builder /home/builder/pkg
-          # archlinux:base-devel ships MAKEFLAGS commented out in
-          # /etc/makepkg.conf, so build()'s plain `make` call compiles one
-          # file at a time unless something sets it -- makepkg.conf does not
-          # override an already-exported MAKEFLAGS, so this is enough.
-          su builder -c 'cd /home/builder/pkg && MAKEFLAGS="-j$(nproc)" \
-            makepkg --noconfirm --nodeps'
+    - name: build the package
+      run: |
+        make dist GLEDITOR_VERSION=0.1.0
+        install -d /home/builder/pkg
+        cp packaging/arch/PKGBUILD /home/builder/pkg/
+        cp build/dist/gleditor-0.1.0.tar.gz /home/builder/pkg/
+        chown -R builder:builder /home/builder/pkg
+        # archlinux:base-devel ships MAKEFLAGS commented out in
+        # /etc/makepkg.conf, so build()'s plain `make` call compiles one
+        # file at a time unless something sets it -- makepkg.conf does not
+        # override an already-exported MAKEFLAGS, so this is enough.
+        su builder -c 'cd /home/builder/pkg && MAKEFLAGS="-j$(nproc)" \
+          makepkg --noconfirm --nodeps'
 
-      - name: install it
-        run: pacman -U --noconfirm /home/builder/pkg/gleditor-*.pkg.tar.zst
+    - name: install it
+      run: pacman -U --noconfirm /home/builder/pkg/gleditor-*.pkg.tar.zst
 
-      - name: check what landed
-        run: |
-          pacman -Ql gleditor
-          test -x /usr/bin/gleditor
-          test -f /usr/share/gleditor/shaders/glyph.vert.glsl
-          test -f /usr/share/gleditor/shaders/vulkan/glyph.vert.spv
+    - name: check what landed
+      run: |
+        pacman -Ql gleditor
+        test -x /usr/bin/gleditor
+        test -f /usr/share/gleditor/shaders/glyph.vert.glsl
+        test -f /usr/share/gleditor/shaders/vulkan/glyph.vert.spv
 
-      - name: run the installed binary
-        run: |
-          pacman -S --noconfirm --needed xorg-server-xvfb mesa vulkan-swrast \
-            ttf-dejavu
-          xvfb-run -a packaging/smoke-test.sh /usr/bin/gleditor opengl vulkan
-          xvfb-run -a packaging/smoke-test.sh /usr/bin/xudu opengl vulkan
-        env:
-          LIBGL_ALWAYS_SOFTWARE: "1"
+    - name: run the installed binary
+      run: |
+        pacman -S --noconfirm --needed xorg-server-xvfb mesa vulkan-swrast \
+          ttf-dejavu
+        xvfb-run -a packaging/smoke-test.sh /usr/bin/gleditor opengl vulkan
+        xvfb-run -a packaging/smoke-test.sh /usr/bin/xudu opengl vulkan
+      env:
+        LIBGL_ALWAYS_SOFTWARE: "1"
 
-      - uses: actions/upload-artifact@v7
-        with:
-          name: gleditor-arch
-          path: /home/builder/pkg/gleditor-*.pkg.tar.zst
+    - uses: actions/upload-artifact@v7
+      with:
+        name: gleditor-arch
+        path: /home/builder/pkg/gleditor-*.pkg.tar.zst
 
   # ------------------------------------------------------------------- Nix ---
   nix:
     name: nix flake
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
-        with:
-          submodules: recursive
+    - uses: actions/checkout@v7
+      with:
+        submodules: recursive
 
-      - uses: cachix/install-nix-action@v31
-        with:
-          extra_nix_config: |
-            experimental-features = nix-command flakes
+    - uses: cachix/install-nix-action@v31
+      with:
+        extra_nix_config: |
+          experimental-features = nix-command flakes
 
-      - name: check the flake
-        run: nix flake check --no-build
+    - name: check the flake
+      run: nix flake check --no-build
 
-      # ?submodules=1 because a flake copies only what git tracks, and the
-      # parent repository tracks the two vendored dependencies as gitlinks
-      # rather than as files. Without it the source reaches the sandbox with
-      # thirdparty/ empty, and the build fails on argparse's header.
-      - name: build
-        run: nix build '.?submodules=1#gleditor' --print-build-logs
+    # ?submodules=1 because a flake copies only what git tracks, and the
+    # parent repository tracks the two vendored dependencies as gitlinks
+    # rather than as files. Without it the source reaches the sandbox with
+    # thirdparty/ empty, and the build fails on argparse's header.
+    - name: build
+      run: nix build '.?submodules=1#gleditor' --print-build-logs
 
-      # The store path is the installed layout -- result/bin/gleditor beside
-      # result/share/gleditor -- so this exercises the same executable-relative
-      # search a distribution package does, without a prefix anywhere in it.
-      #
-      # No backend is named, so the frame is not drawn: a store binary links
-      # nixpkgs' libglvnd, which cannot load the Mesa drivers a non-NixOS
-      # runner has, and no amount of LIBGL_ALWAYS_SOFTWARE changes that. What
-      # is checked is that it starts, that its libraries resolve, and that it
-      # finds its shaders -- which is the part packaging gets wrong. The frame
-      # itself is drawn on the three distributions that can.
-      - name: run what was built
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends \
-            xvfb fonts-dejavu-core
-          xvfb-run -a packaging/smoke-test.sh "$(readlink -f result)/bin/gleditor"
-          xvfb-run -a packaging/smoke-test.sh "$(readlink -f result)/bin/xudu"
+    # The store path is the installed layout -- result/bin/gleditor beside
+    # result/share/gleditor -- so this exercises the same executable-relative
+    # search a distribution package does, without a prefix anywhere in it.
+    #
+    # No backend is named, so the frame is not drawn: a store binary links
+    # nixpkgs' libglvnd, which cannot load the Mesa drivers a non-NixOS
+    # runner has, and no amount of LIBGL_ALWAYS_SOFTWARE changes that. What
+    # is checked is that it starts, that its libraries resolve, and that it
+    # finds its shaders -- which is the part packaging gets wrong. The frame
+    # itself is drawn on the three distributions that can.
+    - name: run what was built
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y --no-install-recommends \
+          xvfb fonts-dejavu-core
+        xvfb-run -a packaging/smoke-test.sh "$(readlink -f result)/bin/gleditor"
+        xvfb-run -a packaging/smoke-test.sh "$(readlink -f result)/bin/xudu"
 
   # --------------------------------------------------------------- Windows ---
   # MSYS2 rather than MSVC: the dependencies are the GTK stack -- pangomm,
@@ -276,263 +276,273 @@ jobs:
       run:
         shell: msys2 {0}
     steps:
-      - uses: actions/checkout@v7
-        with:
-          submodules: recursive
+    - uses: actions/checkout@v7
+      with:
+        submodules: recursive
 
-      # Only the packages whose names are not in doubt. The C++ bindings and
-      # SDL3 are resolved in the next step instead: MSYS2 ships several
-      # parallel binding ABIs and has renamed the SDL packages, and a wrong
-      # guess in this list fails the job before anything can report what the
-      # right name would have been.
-      - uses: msys2/setup-msys2@v2
-        with:
-          msystem: UCRT64
-          update: true
-          install: >-
-            git zip unzip make gawk
-            mingw-w64-ucrt-x86_64-gcc
-            mingw-w64-ucrt-x86_64-pkgconf
-            mingw-w64-ucrt-x86_64-glm
-            mingw-w64-ucrt-x86_64-glslang
-            mingw-w64-ucrt-x86_64-vulkan-headers
-            mingw-w64-ucrt-x86_64-vulkan-loader
-            mingw-w64-ucrt-x86_64-mesa
-            mingw-w64-ucrt-x86_64-gdb
+    # Only the packages whose names are not in doubt. The C++ bindings and
+    # SDL3 are resolved in the next step instead: MSYS2 ships several
+    # parallel binding ABIs and has renamed the SDL packages, and a wrong
+    # guess in this list fails the job before anything can report what the
+    # right name would have been.
+    - uses: msys2/setup-msys2@v2
+      with:
+        msystem: UCRT64
+        update: true
+        # A literal block, one package per line, rather than the folded
+        # style this repo otherwise favors for wrapped prose: yamlfmt's
+        # blank-line preservation corrupts folded (">") scalars by leaking
+        # an internal placeholder into the string (google/yamlfmt#84), so
+        # this list uses the block style that formatter passes through
+        # untouched instead.
+        install: |-
+          git
+          zip
+          unzip
+          make
+          gawk
+          mingw-w64-ucrt-x86_64-gcc
+          mingw-w64-ucrt-x86_64-pkgconf
+          mingw-w64-ucrt-x86_64-glm
+          mingw-w64-ucrt-x86_64-glslang
+          mingw-w64-ucrt-x86_64-vulkan-headers
+          mingw-w64-ucrt-x86_64-vulkan-loader
+          mingw-w64-ucrt-x86_64-mesa
+          mingw-w64-ucrt-x86_64-gdb
 
-      # Each library is asked for by the ABI the build actually needs, trying
-      # the candidate spellings in order and taking the first that exists. When
-      # none do, the matching packages are printed, so one run says what the
-      # name should be rather than only that the guess was wrong.
-      - name: resolve and install the C++ bindings and SDL3
-        run: |
-          set -eu
-          prefix=mingw-w64-ucrt-x86_64
-          resolve() {
-            search=$1; shift
-            for candidate in "$@"; do
-              if pacman -Si "$prefix-$candidate" >/dev/null 2>&1; then
-                echo "$prefix-$candidate"
-                return 0
-              fi
-            done
-            echo "no package found for $search; candidates in the repository:" >&2
-            pacman -Ssq "$search" >&2 || true
-            return 1
-          }
-          pkgs=""
-          pkgs="$pkgs $(resolve pangomm pangomm-2.48 pangomm2.48 pangomm)"
-          pkgs="$pkgs $(resolve cairomm cairomm-1.16 cairomm1.16 cairomm)"
-          pkgs="$pkgs $(resolve glibmm glibmm-2.68 glibmm2.68 glibmm)"
-          pkgs="$pkgs $(resolve sdl3 sdl3 SDL3)"
-          pkgs="$pkgs $(resolve sdl3.image sdl3-image sdl3_image SDL3_image)"
-          pkgs="$pkgs $(resolve libtorrent-rasterbar libtorrent-rasterbar rb-libtorrent)"
-          echo "installing:$pkgs"
-          # shellcheck disable=SC2086
-          pacman -S --noconfirm --needed $pkgs
-          echo "--- what pkg-config sees ---"
-          pkg-config --modversion pangomm-2.48 cairomm-1.16 glibmm-2.68 sdl3 \
-            libtorrent-rasterbar
-
-      # AccessKit is what reports the user interface to screen readers -- UI
-      # Automation on Windows. Its C bindings are published as one archive
-      # holding a prebuilt library per platform, so there is nothing to build
-      # here: unpack it and point ACCESSKIT_DIR at it, which is exactly what
-      # the README tells anybody else to do.
-      #
-      # Pinned rather than tracking the latest release: a build that changes
-      # what it links because somebody else tagged something is not a build
-      # anybody can reproduce.
-      - name: fetch accesskit-c
-        run: |
-          set -eu
-          version=0.22.3
-          curl -sSfL -o accesskit-c.zip \
-            "https://github.com/AccessKit/accesskit-c/releases/download/$version/accesskit-c-$version.zip"
-          unzip -q accesskit-c.zip -d "$RUNNER_TEMP"
-          echo "ACCESSKIT_DIR=$RUNNER_TEMP/accesskit-c-$version" >> "$GITHUB_ENV"
-          ls "$RUNNER_TEMP/accesskit-c-$version/lib/windows/x86_64/mingw/shared"
-
-      - name: build and bundle
-        run: ./packaging/windows/build-msys2.sh
-        env:
-          GLEDITOR_VERSION: 0.1.0
-          # Required here, unlike a plain build: the whole point of this job is
-          # to test the Windows accessibility path, and a job that quietly
-          # built without it would report a green check for nothing.
-          GLEDITOR_ENABLE_A11Y: 1
-
-      - name: check the bundle
-        run: |
-          test -f build/windows/gleditor/gleditor.exe
-          test -f build/windows/gleditor/assets/shaders/glyph.vert.glsl
-          test -f build/windows/gleditor/assets/shaders/vulkan/glyph.vert.spv
-          test -f build/windows/gleditor/assets/logo.png
-          test -f build/windows/gleditor/accesskit.dll
-          ls build/windows/*.zip
-
-      # Run it from outside MSYS2, with only the bundled DLLs on the path. If
-      # the bundle is missing a library the process fails to start at all, and
-      # --version is enough to catch that: it returns before SDL is touched.
-      # This is the check that the zip is self-contained.
-      - name: run the bundled exe standalone
-        shell: cmd
-        run: |
-          set PATH=C:\Windows\system32;C:\Windows
-          cd build\windows\gleditor
-          gleditor.exe --version || exit /b 1
-          gleditor.exe --help > nul || exit /b 1
-
-      # And again from a shell, which is a different question: cmd.exe exports
-      # no LANG and MSYS2 does, and the C++ locale a named one asks for is one
-      # MinGW cannot build. That difference hid a startup crash behind a green
-      # check -- everything above passed while the program could not start for
-      # anyone who ran it from a shell. Asking it where its assets are is the
-      # cheapest way to get past argument parsing without needing a GPU.
-      - name: run the bundled exe from a shell, where LANG is set
-        run: |
-          set -eu
-          echo "LANG=${LANG-unset} LC_ALL=${LC_ALL-unset}"
-          cd build/windows/gleditor
-          ./gleditor.exe --version
-          ./gleditor.exe --print-asset-dir
-
-      # Required, not best effort. Windows' fallback OpenGL is 1.1, far below
-      # the 3.3 this needs, so the software rasteriser MSYS2 ships is dropped in
-      # beside the executable -- and --no-present is what makes it work on a
-      # runner with no screen to present to. The frame is captured from the
-      # offscreen target, which is complete before any present would happen.
-      #
-      # This step was continue-on-error for as long as it took to find that
-      # out, and that is exactly why the Windows package went so long without
-      # ever having drawn anything: a check that cannot fail reports nothing.
-      - name: draw a frame
-        run: |
-          cp "$MINGW_PREFIX/bin/opengl32.dll" build/windows/gleditor/ || true
-          cd build/windows/gleditor
-          set -u
-          # Bounded by hand rather than with timeout(1). MSYS2's timeout sends
-          # POSIX signals, and those do not reliably reach a native Windows
-          # process -- which is how the previous attempt at a bound sat there
-          # for a quarter of an hour instead of failing. taskkill speaks to the
-          # process Windows actually knows about.
-          #
-          # And if it does hang, ask it what it is waiting on before killing
-          # it. A hang that is only ever killed tells you nothing twice.
-          # The thread dump from the previous round showed a thread wholly
-          # inside libgallium_wgl entered from BaseThreadInitThunk -- a Mesa
-          # rasteriser worker, not our render thread, and not blocked on
-          # anything. Nothing was deadlocked; Mesa was grinding. The likely
-          # reason is which Gallium driver it picked: softpipe is the
-          # reference rasteriser and is orders of magnitude slower than
-          # llvmpipe, and nothing had told it which to use.
-          export GALLIUM_DRIVER=llvmpipe
-          export LIBGL_ALWAYS_SOFTWARE=1
-          ./gleditor.exe --backend opengl --profile --strict-diagnostics \
-            --no-present --screenshot frame.ppm \
-            ../../../tests/samples/quick_brown_fox.txt > draw.log 2>&1 &
-          pid=$!
-          winpid=$(cat "/proc/$pid/winpid" 2>/dev/null || echo "$pid")
-          echo "msys pid $pid, windows pid $winpid"
-
-          for _ in $(seq 1 180); do
-            kill -0 "$pid" 2>/dev/null || break
-            sleep 1
+    # Each library is asked for by the ABI the build actually needs, trying
+    # the candidate spellings in order and taking the first that exists. When
+    # none do, the matching packages are printed, so one run says what the
+    # name should be rather than only that the guess was wrong.
+    - name: resolve and install the C++ bindings and SDL3
+      run: |
+        set -eu
+        prefix=mingw-w64-ucrt-x86_64
+        resolve() {
+          search=$1; shift
+          for candidate in "$@"; do
+            if pacman -Si "$prefix-$candidate" >/dev/null 2>&1; then
+              echo "$prefix-$candidate"
+              return 0
+            fi
           done
+          echo "no package found for $search; candidates in the repository:" >&2
+          pacman -Ssq "$search" >&2 || true
+          return 1
+        }
+        pkgs=""
+        pkgs="$pkgs $(resolve pangomm pangomm-2.48 pangomm2.48 pangomm)"
+        pkgs="$pkgs $(resolve cairomm cairomm-1.16 cairomm1.16 cairomm)"
+        pkgs="$pkgs $(resolve glibmm glibmm-2.68 glibmm2.68 glibmm)"
+        pkgs="$pkgs $(resolve sdl3 sdl3 SDL3)"
+        pkgs="$pkgs $(resolve sdl3.image sdl3-image sdl3_image SDL3_image)"
+        pkgs="$pkgs $(resolve libtorrent-rasterbar libtorrent-rasterbar rb-libtorrent)"
+        echo "installing:$pkgs"
+        # shellcheck disable=SC2086
+        pacman -S --noconfirm --needed $pkgs
+        echo "--- what pkg-config sees ---"
+        pkg-config --modversion pangomm-2.48 cairomm-1.16 glibmm-2.68 sdl3 \
+          libtorrent-rasterbar
 
-          if kill -0 "$pid" 2>/dev/null; then
-            echo "=== still running after 180s; every thread, then killed ==="
-            gdb -batch -p "$winpid" \
-                -ex 'set pagination off' \
-                -ex 'thread apply all bt' || echo "gdb could not attach"
-            taskkill //F //PID "$winpid" >/dev/null 2>&1 || kill -9 "$pid" || true
-            echo "--- what it had printed ---"
-            cat draw.log || true
-            exit 1
-          fi
+    # AccessKit is what reports the user interface to screen readers -- UI
+    # Automation on Windows. Its C bindings are published as one archive
+    # holding a prebuilt library per platform, so there is nothing to build
+    # here: unpack it and point ACCESSKIT_DIR at it, which is exactly what
+    # the README tells anybody else to do.
+    #
+    # Pinned rather than tracking the latest release: a build that changes
+    # what it links because somebody else tagged something is not a build
+    # anybody can reproduce.
+    - name: fetch accesskit-c
+      run: |
+        set -eu
+        version=0.22.3
+        curl -sSfL -o accesskit-c.zip \
+          "https://github.com/AccessKit/accesskit-c/releases/download/$version/accesskit-c-$version.zip"
+        unzip -q accesskit-c.zip -d "$RUNNER_TEMP"
+        echo "ACCESSKIT_DIR=$RUNNER_TEMP/accesskit-c-$version" >> "$GITHUB_ENV"
+        ls "$RUNNER_TEMP/accesskit-c-$version/lib/windows/x86_64/mingw/shared"
 
-          wait "$pid" && rc=0 || rc=$?
-          echo "exit status: $rc"
-          cat draw.log
-          [ "$rc" -eq 0 ]
-          ls -la frame.ppm
+    - name: build and bundle
+      run: ./packaging/windows/build-msys2.sh
+      env:
+        GLEDITOR_VERSION: 0.1.0
+        # Required here, unlike a plain build: the whole point of this job is
+        # to test the Windows accessibility path, and a job that quietly
+        # built without it would report a green check for nothing.
+        GLEDITOR_ENABLE_A11Y: 1
 
-      # The Windows accessibility path, which is the one this repository cannot
-      # exercise anywhere else. Three things are being checked and they are
-      # different things:
-      #
-      #  - the adapter opened at all. That is the line the program prints, and
-      #    it means accesskit_windows_subclassing_adapter_new() was handed the
-      #    real HWND out of SDL and did not refuse it. It refuses -- by
-      #    panicking, which would take the process with it -- if the window has
-      #    already been shown, which is why the window is created hidden on
-      #    Windows and shown immediately afterwards. A green check here is what
-      #    says that ordering held.
-      #  - the tree was built and is the tree of a document, not an empty
-      #    window.
-      #  - none of it crashed. AccessKit's Windows adapter subclasses the
-      #    window procedure, so it is running inside every message this window
-      #    handles from the moment it is installed.
-      #
-      # What is not checked is a client reading the tree back: that needs a UI
-      # Automation client, which needs a desktop session this runner does not
-      # have. The AT-SPI side of the same tree is read back over a real bus;
-      # see the accessibility section of the README.
-      - name: report the accessibility tree to Windows
-        run: |
-          set -eu
-          cd build/windows/gleditor
-          export GALLIUM_DRIVER=llvmpipe
-          export LIBGL_ALWAYS_SOFTWARE=1
-          ./xudu.exe --backend opengl --profile --no-present --dump-a11y \
-            --import ../../../tests/samples/quick_brown_fox.txt \
-            store > a11y.log 2>&1 &
-          pid=$!
-          winpid=$(cat "/proc/$pid/winpid" 2>/dev/null || echo "$pid")
-          for _ in $(seq 1 180); do
-            kill -0 "$pid" 2>/dev/null || break
-            sleep 1
-          done
-          if kill -0 "$pid" 2>/dev/null; then
-            echo "=== still running after 180s; killed ==="
-            taskkill //F //PID "$winpid" >/dev/null 2>&1 || kill -9 "$pid" || true
-            cat a11y.log || true
-            exit 1
-          fi
-          wait "$pid" && rc=0 || rc=$?
-          echo "exit status: $rc"
-          cat a11y.log
-          [ "$rc" -eq 0 ]
-          grep -q 'accessibility: reporting to the platform' a11y.log
-          grep -q '^window "Xudu"' a11y.log
-          grep -q 'multiline text input' a11y.log
-          grep -q 'text run' a11y.log
+    - name: check the bundle
+      run: |
+        test -f build/windows/gleditor/gleditor.exe
+        test -f build/windows/gleditor/assets/shaders/glyph.vert.glsl
+        test -f build/windows/gleditor/assets/shaders/vulkan/glyph.vert.spv
+        test -f build/windows/gleditor/assets/logo.png
+        test -f build/windows/gleditor/accesskit.dll
+        ls build/windows/*.zip
 
-      # A missing shader exits zero and draws a flat rectangle, so the frame
-      # having been written is not the same as the document having been drawn.
-      # Counting the distinct colours is what separates the two, and is the
-      # same check the Linux packages make through smoke-test.sh.
-      - name: check the frame is a document and not a blank rectangle
-        run: |
-          set -eu
-          cd build/windows/gleditor
-          # The PPM this writes is three header lines -- P6, the dimensions,
-          # then the maximum value -- followed by raw RGB. Skip exactly those,
-          # then read three bytes per line so one line is one pixel.
-          header=$(head -c 64 frame.ppm |
-                   awk 'NR<=3 { n += length($0) + 1 } NR==3 { print n; exit }')
-          colours=$(tail -c "+$((header + 1))" frame.ppm |
-                    od -An -v -tu1 -w3 | sort -u | wc -l)
-          echo "the frame has $colours distinct colours"
-          if [ "$colours" -lt 20 ]; then
-            echo "FAIL: $colours colours is a blank frame, not a document"
-            exit 1
-          fi
+    # Run it from outside MSYS2, with only the bundled DLLs on the path. If
+    # the bundle is missing a library the process fails to start at all, and
+    # --version is enough to catch that: it returns before SDL is touched.
+    # This is the check that the zip is self-contained.
+    - name: run the bundled exe standalone
+      shell: cmd
+      run: |
+        set PATH=C:\Windows\system32;C:\Windows
+        cd build\windows\gleditor
+        gleditor.exe --version || exit /b 1
+        gleditor.exe --help > nul || exit /b 1
 
-      - uses: actions/upload-artifact@v7
-        with:
-          name: gleditor-windows
-          path: build/windows/*.zip
+    # And again from a shell, which is a different question: cmd.exe exports
+    # no LANG and MSYS2 does, and the C++ locale a named one asks for is one
+    # MinGW cannot build. That difference hid a startup crash behind a green
+    # check -- everything above passed while the program could not start for
+    # anyone who ran it from a shell. Asking it where its assets are is the
+    # cheapest way to get past argument parsing without needing a GPU.
+    - name: run the bundled exe from a shell, where LANG is set
+      run: |
+        set -eu
+        echo "LANG=${LANG-unset} LC_ALL=${LC_ALL-unset}"
+        cd build/windows/gleditor
+        ./gleditor.exe --version
+        ./gleditor.exe --print-asset-dir
+
+    # Required, not best effort. Windows' fallback OpenGL is 1.1, far below
+    # the 3.3 this needs, so the software rasteriser MSYS2 ships is dropped in
+    # beside the executable -- and --no-present is what makes it work on a
+    # runner with no screen to present to. The frame is captured from the
+    # offscreen target, which is complete before any present would happen.
+    #
+    # This step was continue-on-error for as long as it took to find that
+    # out, and that is exactly why the Windows package went so long without
+    # ever having drawn anything: a check that cannot fail reports nothing.
+    - name: draw a frame
+      run: |
+        cp "$MINGW_PREFIX/bin/opengl32.dll" build/windows/gleditor/ || true
+        cd build/windows/gleditor
+        set -u
+        # Bounded by hand rather than with timeout(1). MSYS2's timeout sends
+        # POSIX signals, and those do not reliably reach a native Windows
+        # process -- which is how the previous attempt at a bound sat there
+        # for a quarter of an hour instead of failing. taskkill speaks to the
+        # process Windows actually knows about.
+        #
+        # And if it does hang, ask it what it is waiting on before killing
+        # it. A hang that is only ever killed tells you nothing twice.
+        # The thread dump from the previous round showed a thread wholly
+        # inside libgallium_wgl entered from BaseThreadInitThunk -- a Mesa
+        # rasteriser worker, not our render thread, and not blocked on
+        # anything. Nothing was deadlocked; Mesa was grinding. The likely
+        # reason is which Gallium driver it picked: softpipe is the
+        # reference rasteriser and is orders of magnitude slower than
+        # llvmpipe, and nothing had told it which to use.
+        export GALLIUM_DRIVER=llvmpipe
+        export LIBGL_ALWAYS_SOFTWARE=1
+        ./gleditor.exe --backend opengl --profile --strict-diagnostics \
+          --no-present --screenshot frame.ppm \
+          ../../../tests/samples/quick_brown_fox.txt > draw.log 2>&1 &
+        pid=$!
+        winpid=$(cat "/proc/$pid/winpid" 2>/dev/null || echo "$pid")
+        echo "msys pid $pid, windows pid $winpid"
+
+        for _ in $(seq 1 180); do
+          kill -0 "$pid" 2>/dev/null || break
+          sleep 1
+        done
+
+        if kill -0 "$pid" 2>/dev/null; then
+          echo "=== still running after 180s; every thread, then killed ==="
+          gdb -batch -p "$winpid" \
+              -ex 'set pagination off' \
+              -ex 'thread apply all bt' || echo "gdb could not attach"
+          taskkill //F //PID "$winpid" >/dev/null 2>&1 || kill -9 "$pid" || true
+          echo "--- what it had printed ---"
+          cat draw.log || true
+          exit 1
+        fi
+
+        wait "$pid" && rc=0 || rc=$?
+        echo "exit status: $rc"
+        cat draw.log
+        [ "$rc" -eq 0 ]
+        ls -la frame.ppm
+
+    # The Windows accessibility path, which is the one this repository cannot
+    # exercise anywhere else. Three things are being checked and they are
+    # different things:
+    #
+    #  - the adapter opened at all. That is the line the program prints, and
+    #    it means accesskit_windows_subclassing_adapter_new() was handed the
+    #    real HWND out of SDL and did not refuse it. It refuses -- by
+    #    panicking, which would take the process with it -- if the window has
+    #    already been shown, which is why the window is created hidden on
+    #    Windows and shown immediately afterwards. A green check here is what
+    #    says that ordering held.
+    #  - the tree was built and is the tree of a document, not an empty
+    #    window.
+    #  - none of it crashed. AccessKit's Windows adapter subclasses the
+    #    window procedure, so it is running inside every message this window
+    #    handles from the moment it is installed.
+    #
+    # What is not checked is a client reading the tree back: that needs a UI
+    # Automation client, which needs a desktop session this runner does not
+    # have. The AT-SPI side of the same tree is read back over a real bus;
+    # see the accessibility section of the README.
+    - name: report the accessibility tree to Windows
+      run: |
+        set -eu
+        cd build/windows/gleditor
+        export GALLIUM_DRIVER=llvmpipe
+        export LIBGL_ALWAYS_SOFTWARE=1
+        ./xudu.exe --backend opengl --profile --no-present --dump-a11y \
+          --import ../../../tests/samples/quick_brown_fox.txt \
+          store > a11y.log 2>&1 &
+        pid=$!
+        winpid=$(cat "/proc/$pid/winpid" 2>/dev/null || echo "$pid")
+        for _ in $(seq 1 180); do
+          kill -0 "$pid" 2>/dev/null || break
+          sleep 1
+        done
+        if kill -0 "$pid" 2>/dev/null; then
+          echo "=== still running after 180s; killed ==="
+          taskkill //F //PID "$winpid" >/dev/null 2>&1 || kill -9 "$pid" || true
+          cat a11y.log || true
+          exit 1
+        fi
+        wait "$pid" && rc=0 || rc=$?
+        echo "exit status: $rc"
+        cat a11y.log
+        [ "$rc" -eq 0 ]
+        grep -q 'accessibility: reporting to the platform' a11y.log
+        grep -q '^window "Xudu"' a11y.log
+        grep -q 'multiline text input' a11y.log
+        grep -q 'text run' a11y.log
+
+    # A missing shader exits zero and draws a flat rectangle, so the frame
+    # having been written is not the same as the document having been drawn.
+    # Counting the distinct colours is what separates the two, and is the
+    # same check the Linux packages make through smoke-test.sh.
+    - name: check the frame is a document and not a blank rectangle
+      run: |
+        set -eu
+        cd build/windows/gleditor
+        # The PPM this writes is three header lines -- P6, the dimensions,
+        # then the maximum value -- followed by raw RGB. Skip exactly those,
+        # then read three bytes per line so one line is one pixel.
+        header=$(head -c 64 frame.ppm |
+                 awk 'NR<=3 { n += length($0) + 1 } NR==3 { print n; exit }')
+        colours=$(tail -c "+$((header + 1))" frame.ppm |
+                  od -An -v -tu1 -w3 | sort -u | wc -l)
+        echo "the frame has $colours distinct colours"
+        if [ "$colours" -lt 20 ]; then
+          echo "FAIL: $colours colours is a blank frame, not a document"
+          exit 1
+        fi
+
+    - uses: actions/upload-artifact@v7
+      with:
+        name: gleditor-windows
+        path: build/windows/*.zip
 
   # ------------------------------------------------------------------ macOS ---
   # packaging/macos/gleditor.rb is a head-only formula -- there is no tagged
@@ -552,127 +562,127 @@ jobs:
     name: brew (macOS, SDL3)
     runs-on: macos-latest
     steps:
-      - uses: actions/checkout@v7
-        with:
-          submodules: recursive
-          fetch-depth: 0
+    - uses: actions/checkout@v7
+      with:
+        submodules: recursive
+        fetch-depth: 0
 
-      # brew style and brew audit both refuse a formula that is not inside a
-      # real tap -- "Homebrew requires formulae to be in a tap" -- and this one
-      # is not tapped anywhere, so a syntax check is what is available short of
-      # standing up a throwaway tap for a lint pass. It still catches a
-      # malformed formula file before anything below spends time on brewed
-      # dependencies.
-      - name: check the formula parses
-        run: ruby -c packaging/macos/gleditor.rb
+    # brew style and brew audit both refuse a formula that is not inside a
+    # real tap -- "Homebrew requires formulae to be in a tap" -- and this one
+    # is not tapped anywhere, so a syntax check is what is available short of
+    # standing up a throwaway tap for a lint pass. It still catches a
+    # malformed formula file before anything below spends time on brewed
+    # dependencies.
+    - name: check the formula parses
+      run: ruby -c packaging/macos/gleditor.rb
 
-      # googletest is here even though this job never builds or runs a test
-      # binary: `make lib gleditor xudu` still generates a .dep file for every
-      # source the Makefile knows about, tests included, and that generation
-      # runs the compiler over each one without the test-only -I flags that
-      # `make test` itself would add. Elsewhere those headers are just already
-      # on the compiler's default search path (whatever the local libgtest-dev
-      # / gtest-devel / gtest package installed there); Homebrew has no such
-      # ambient location, so it is named outright.
-      # vulkan-loader, molten-vk and glslang mirror packaging/macos/gleditor.rb's
-      # own dependencies -- see the comment there for what each is for.
-      - name: install build dependencies
-        run: |
-          brew install make pangomm cairomm glibmm sdl3 sdl3_image glm \
-            libtorrent-rasterbar boost openssl@3 pkgconf googletest \
-            vulkan-loader molten-vk glslang
+    # googletest is here even though this job never builds or runs a test
+    # binary: `make lib gleditor xudu` still generates a .dep file for every
+    # source the Makefile knows about, tests included, and that generation
+    # runs the compiler over each one without the test-only -I flags that
+    # `make test` itself would add. Elsewhere those headers are just already
+    # on the compiler's default search path (whatever the local libgtest-dev
+    # / gtest-devel / gtest package installed there); Homebrew has no such
+    # ambient location, so it is named outright.
+    # vulkan-loader, molten-vk and glslang mirror packaging/macos/gleditor.rb's
+    # own dependencies -- see the comment there for what each is for.
+    - name: install build dependencies
+      run: |
+        brew install make pangomm cairomm glibmm sdl3 sdl3_image glm \
+          libtorrent-rasterbar boost openssl@3 pkgconf googletest \
+          vulkan-loader molten-vk glslang
 
-      # AccessKit is what reports the user interface to screen readers --
-      # NSAccessibility here. Its C bindings are published as one archive
-      # holding a prebuilt library per platform, so there is nothing to build:
-      # unpack it and point ACCESSKIT_DIR at it, the same as the Windows job
-      # and packaging/macos/gleditor.rb's own resource block.
-      #
-      # Pinned rather than tracking the latest release: a build that changes
-      # what it links because somebody else tagged something is not a build
-      # anybody can reproduce.
-      - name: fetch accesskit-c
-        run: |
-          set -eu
-          version=0.22.3
-          curl -sSfL -o accesskit-c.zip \
-            "https://github.com/AccessKit/accesskit-c/releases/download/$version/accesskit-c-$version.zip"
-          unzip -q accesskit-c.zip -d "$RUNNER_TEMP"
-          echo "ACCESSKIT_DIR=$RUNNER_TEMP/accesskit-c-$version" >> "$GITHUB_ENV"
-          arch=$(uname -m)
-          ls "$RUNNER_TEMP/accesskit-c-$version/lib/macos/$arch/shared"
+    # AccessKit is what reports the user interface to screen readers --
+    # NSAccessibility here. Its C bindings are published as one archive
+    # holding a prebuilt library per platform, so there is nothing to build:
+    # unpack it and point ACCESSKIT_DIR at it, the same as the Windows job
+    # and packaging/macos/gleditor.rb's own resource block.
+    #
+    # Pinned rather than tracking the latest release: a build that changes
+    # what it links because somebody else tagged something is not a build
+    # anybody can reproduce.
+    - name: fetch accesskit-c
+      run: |
+        set -eu
+        version=0.22.3
+        curl -sSfL -o accesskit-c.zip \
+          "https://github.com/AccessKit/accesskit-c/releases/download/$version/accesskit-c-$version.zip"
+        unzip -q accesskit-c.zip -d "$RUNNER_TEMP"
+        echo "ACCESSKIT_DIR=$RUNNER_TEMP/accesskit-c-$version" >> "$GITHUB_ENV"
+        arch=$(uname -m)
+        ls "$RUNNER_TEMP/accesskit-c-$version/lib/macos/$arch/shared"
 
-      # openssl@3 is keg-only -- Homebrew never links it, to stay out of the
-      # way of whatever OpenSSL macOS itself ships -- so its include and
-      # library directories are not on the default search path the way every
-      # other dependency's are and have to be named explicitly. gmake rather
-      # than make: macOS ships GNU Make 3.81, the last release before the
-      # licence changed to GPLv3, and this Makefile's target-specific `private`
-      # variables do not even parse under it -- a syntax error before the
-      # build starts, not a missing feature at run time. Homebrew's own make
-      # installs as gmake precisely so it does not collide with that system
-      # one. This is what packaging/macos/gleditor.rb's own install() runs.
-      - name: build
-        run: |
-          set -eu
-          brew_prefix=$(brew --prefix)
-          openssl_prefix=$(brew --prefix openssl@3)
-          export PKG_CONFIG_PATH="$brew_prefix/lib/pkgconfig:$openssl_prefix/lib/pkgconfig"
-          export CPATH="$brew_prefix/include:$openssl_prefix/include"
-          export LIBRARY_PATH="$brew_prefix/lib:$openssl_prefix/lib"
-          # macOS has no nproc (that is GNU coreutils); sysctl is what asks
-          # the kernel the same question here.
-          #
-          # GLEDITOR_ENABLE_A11Y=1 rather than leaving it unset: the whole
-          # point of fetching accesskit-c above is to test the macOS
-          # accessibility path, and a job that quietly built without it would
-          # report a green check for nothing -- the same reasoning the
-          # Windows job states for the same setting.
-          gmake -j"$(sysctl -n hw.ncpu)" lib gleditor xudu \
-            GLEDITOR_SDL=3 GLEDITOR_VERSION=0.1.0 \
-            GLEDITOR_ENABLE_A11Y=1 ACCESSKIT_DIR="$ACCESSKIT_DIR" \
-            GLEDITOR_ENABLE_VULKAN=1
+    # openssl@3 is keg-only -- Homebrew never links it, to stay out of the
+    # way of whatever OpenSSL macOS itself ships -- so its include and
+    # library directories are not on the default search path the way every
+    # other dependency's are and have to be named explicitly. gmake rather
+    # than make: macOS ships GNU Make 3.81, the last release before the
+    # licence changed to GPLv3, and this Makefile's target-specific `private`
+    # variables do not even parse under it -- a syntax error before the
+    # build starts, not a missing feature at run time. Homebrew's own make
+    # installs as gmake precisely so it does not collide with that system
+    # one. This is what packaging/macos/gleditor.rb's own install() runs.
+    - name: build
+      run: |
+        set -eu
+        brew_prefix=$(brew --prefix)
+        openssl_prefix=$(brew --prefix openssl@3)
+        export PKG_CONFIG_PATH="$brew_prefix/lib/pkgconfig:$openssl_prefix/lib/pkgconfig"
+        export CPATH="$brew_prefix/include:$openssl_prefix/include"
+        export LIBRARY_PATH="$brew_prefix/lib:$openssl_prefix/lib"
+        # macOS has no nproc (that is GNU coreutils); sysctl is what asks
+        # the kernel the same question here.
+        #
+        # GLEDITOR_ENABLE_A11Y=1 rather than leaving it unset: the whole
+        # point of fetching accesskit-c above is to test the macOS
+        # accessibility path, and a job that quietly built without it would
+        # report a green check for nothing -- the same reasoning the
+        # Windows job states for the same setting.
+        gmake -j"$(sysctl -n hw.ncpu)" lib gleditor xudu \
+          GLEDITOR_SDL=3 GLEDITOR_VERSION=0.1.0 \
+          GLEDITOR_ENABLE_A11Y=1 ACCESSKIT_DIR="$ACCESSKIT_DIR" \
+          GLEDITOR_ENABLE_VULKAN=1
 
-      - name: install it
-        run: |
-          gmake install \
-            DESTDIR="$PWD/stage" \
-            prefix=/usr/local \
-            GLEDITOR_SDL=3 \
-            GLEDITOR_VERSION=0.1.0 \
-            GLEDITOR_ENABLE_A11Y=1 \
-            ACCESSKIT_DIR="$ACCESSKIT_DIR" \
-            GLEDITOR_ENABLE_VULKAN=1
+    - name: install it
+      run: |
+        gmake install \
+          DESTDIR="$PWD/stage" \
+          prefix=/usr/local \
+          GLEDITOR_SDL=3 \
+          GLEDITOR_VERSION=0.1.0 \
+          GLEDITOR_ENABLE_A11Y=1 \
+          ACCESSKIT_DIR="$ACCESSKIT_DIR" \
+          GLEDITOR_ENABLE_VULKAN=1
 
-      - name: check what landed
-        run: |
-          test -x stage/usr/local/bin/gleditor
-          test -x stage/usr/local/bin/xudu
-          test -f stage/usr/local/share/gleditor/shaders/glyph.vert.glsl
-          test -f stage/usr/local/share/gleditor/shaders/vulkan/glyph.vert.spv
-          # Said out loud rather than only implied by a successful build:
-          # GLEDITOR_ENABLE_A11Y=1 above made AccessKit's absence a build
-          # failure, but a stale object left over from an earlier step
-          # without it could still link a binary that never mentions
-          # libaccesskit. platform_accesskit.cpp is compiled into the
-          # library, not the executables, so this looks there.
-          otool -L stage/usr/local/lib/libgleditor.0.dylib | grep -q libaccesskit
+    - name: check what landed
+      run: |
+        test -x stage/usr/local/bin/gleditor
+        test -x stage/usr/local/bin/xudu
+        test -f stage/usr/local/share/gleditor/shaders/glyph.vert.glsl
+        test -f stage/usr/local/share/gleditor/shaders/vulkan/glyph.vert.spv
+        # Said out loud rather than only implied by a successful build:
+        # GLEDITOR_ENABLE_A11Y=1 above made AccessKit's absence a build
+        # failure, but a stale object left over from an earlier step
+        # without it could still link a binary that never mentions
+        # libaccesskit. platform_accesskit.cpp is compiled into the
+        # library, not the executables, so this looks there.
+        otool -L stage/usr/local/lib/libgleditor.0.dylib | grep -q libaccesskit
 
-      # No backend named, for the same reason the Nix job names none: whether
-      # a GitHub-hosted macOS runner's WindowServer can hand SDL a real OpenGL
-      # or Vulkan/MoltenVK context has not been established from anywhere this
-      # project's CI has run before, and a check that might hang or fail for
-      # reasons that have nothing to do with the package is worse than one
-      # that proves the binary starts, resolves every dynamic library and
-      # finds its shaders -- which is the same failure mode every other job in
-      # this file exists to catch.
-      # DESTDIR only redirects where install(1) copies files; the rpath
-      # recorded in the binary is still built from `prefix`, which names the
-      # library's eventual home at /usr/local/lib -- correct for a real `brew
-      # install`, which puts it exactly there, but not here, where it only
-      # exists under stage/. DYLD_LIBRARY_PATH stands in for that difference.
-      - name: run the installed binary
-        run: |
-          export DYLD_LIBRARY_PATH="$PWD/stage/usr/local/lib"
-          packaging/smoke-test.sh stage/usr/local/bin/gleditor
-          packaging/smoke-test.sh stage/usr/local/bin/xudu
+    # No backend named, for the same reason the Nix job names none: whether
+    # a GitHub-hosted macOS runner's WindowServer can hand SDL a real OpenGL
+    # or Vulkan/MoltenVK context has not been established from anywhere this
+    # project's CI has run before, and a check that might hang or fail for
+    # reasons that have nothing to do with the package is worse than one
+    # that proves the binary starts, resolves every dynamic library and
+    # finds its shaders -- which is the same failure mode every other job in
+    # this file exists to catch.
+    # DESTDIR only redirects where install(1) copies files; the rpath
+    # recorded in the binary is still built from `prefix`, which names the
+    # library's eventual home at /usr/local/lib -- correct for a real `brew
+    # install`, which puts it exactly there, but not here, where it only
+    # exists under stage/. DYLD_LIBRARY_PATH stands in for that difference.
+    - name: run the installed binary
+      run: |-
+        export DYLD_LIBRARY_PATH="$PWD/stage/usr/local/lib"
+        packaging/smoke-test.sh stage/usr/local/bin/gleditor
+        packaging/smoke-test.sh stage/usr/local/bin/xudu

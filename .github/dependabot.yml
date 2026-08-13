@@ -10,22 +10,22 @@
 
 version: 2
 updates:
-  # The workflow pins actions/checkout and actions/cache by major version.
-  # Grouped so that a week in which both move is one pull request rather than
-  # two.
-  - package-ecosystem: "github-actions"
-    directory: "/"
-    schedule:
-      interval: "weekly"
-    groups:
-      actions:
-        patterns:
-          - "*"
+# The workflow pins actions/checkout and actions/cache by major version.
+# Grouped so that a week in which both move is one pull request rather than
+# two.
+- package-ecosystem: "github-actions"
+  directory: "/"
+  schedule:
+    interval: "weekly"
+  groups:
+    actions:
+      patterns:
+      - "*"
 
-  # thirdparty/argparse and thirdparty/Choreograph are vendored as submodules,
-  # which pin an exact commit. Nothing else in the build will ever mention that
-  # upstream has moved on.
-  - package-ecosystem: "gitsubmodule"
-    directory: "/"
-    schedule:
-      interval: "weekly"
+# thirdparty/argparse and thirdparty/Choreograph are vendored as submodules,
+# which pin an exact commit. Nothing else in the build will ever mention that
+# upstream has moved on.
+- package-ecosystem: "gitsubmodule"
+  directory: "/"
+  schedule:
+    interval: "weekly"

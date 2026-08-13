@@ -1,0 +1,53 @@
+root = true
+
+[*]
+charset = utf-8
+end_of_line = lf
+insert_final_newline = true
+trim_trailing_whitespace = true
+indent_style = space
+indent_size = 2
+
+# C++ and GLSL: .clang-format's IndentWidth: 2, UseTab: Never, ColumnLimit: 80.
+# GLSL is formatted by the same clang-format pass as the C++ (see CLAUDE.md),
+# so it takes the same settings here too.
+[*.{cpp,hpp,h,glsl}]
+indent_size = 2
+max_line_length = 80
+
+# Shell scripts and the Arch PKGBUILD: shfmt -i 2 -ci (make format/lint).
+[*.sh]
+indent_size = 2
+
+[PKGBUILD]
+indent_size = 2
+
+# Workflow and Dependabot YAML: .yamlfmt's indent: 2, .yamllint's line-length
+# max: 100.
+[*.{yml,yaml}]
+indent_size = 2
+max_line_length = 100
+
+# README, CLAUDE.md, design notes: mdformat --wrap keep (make format) and
+# .mdl_style.rb's MD007 indent 2 / MD013 line_length 100. Trailing whitespace
+# is NOT trimmed here: a line ending in two spaces is CommonMark's hard line
+# break, and several places in these docs use it on purpose.
+[*.md]
+indent_size = 2
+max_line_length = 100
+trim_trailing_whitespace = false
+
+# flake.nix, packaging/nix/gleditor.nix: nixfmt-rfc-style's own indent width.
+[*.nix]
+indent_size = 2
+
+# packaging/macos/gleditor.rb, a Homebrew formula.
+[*.rb]
+indent_size = 2
+
+# Recipe lines are a literal tab to Make -- UseTab must stay on for these.
+[Makefile]
+indent_style = tab
+
+[debian/rules]
+indent_style = tab

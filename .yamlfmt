@@ -1,0 +1,21 @@
+formatter:
+  type: basic
+  indent: 2
+  # Matches the workflow files' existing style: "- uses:" sits at the same
+  # indent as the "steps:" key above it rather than one level deeper. This is
+  # also what .yamllint's indent-sequences: consistent already accepts, so
+  # the two tools agree on one shape instead of fighting over it.
+  indentless_arrays: true
+  include_document_start: false
+  line_ending: lf
+  # The underlying YAML library leaks a placeholder `#magic___^_^___line`
+  # into folded (">") block scalars when this is on (google/yamlfmt#84,
+  # #109) -- which would land inside a real `run:` command's string value.
+  # Rather than lose this setting's blank-line preservation everywhere to
+  # work around a bug in one scalar style, the two folded scalars this repo
+  # had are rewritten to styles the bug does not touch (a plain one-line
+  # scalar, and a literal "|" block) -- see the two workflow files. Introduce
+  # a new "> " folded scalar in a future .yml edit only with that in mind.
+  retain_line_breaks: true
+  trim_trailing_whitespace: true
+  eof_newline: true
