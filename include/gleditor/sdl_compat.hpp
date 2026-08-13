@@ -47,9 +47,10 @@
 
 #include <SDL2/SDL.h>
 #include <SDL2/SDL_messagebox.h>
-#if defined(_WIN32)
-// Only for the HWND that AccessKit's Windows adapter needs; SDL3 answers the
-// same question through a window property and needs no extra header.
+#if defined(_WIN32) || defined(__APPLE__)
+// Only for the HWND or NSWindow that AccessKit's Windows and macOS adapters
+// need; SDL3 answers the same question through a window property and needs no
+// extra header.
 #include <SDL2/SDL_syswm.h>
 #endif
 
@@ -271,10 +272,12 @@ inline void setTextInputArea([[maybe_unused]] SDL_Window *window,
 /**
  * @brief The platform's own handle for a window, where anything needs one.
  *
- * Only Windows does: AccessKit's adapter there subclasses the window procedure
- * to answer WM_GETOBJECT, so it has to be given the HWND. AT-SPI is a bus
- * rather than a property of a window, so X11 and Wayland need nothing and get
- * null.
+ * Windows and macOS both do: AccessKit's adapters there work by attaching
+ * themselves to a specific window -- subclassing the window procedure to
+ * answer WM_GETOBJECT on Windows, subclassing the NSWindow's content view to
+ * answer NSAccessibility's queries on macOS -- so each has to be given its own
+ * kind of handle, an HWND or an NSWindow respectively. AT-SPI is a bus rather
+ * than a property of a window, so X11 and Wayland need nothing and get null.
  *
  * SDL2 answers through SDL_SysWMinfo and SDL3 through a window property, which
  * is why this is here rather than at the one call site.
@@ -291,6 +294,18 @@ inline void *nativeWindowHandle([[maybe_unused]] SDL_Window *window) {
     return nullptr;
   }
   return static_cast<void *>(info.info.win.window);
+#endif
+#elif defined(__APPLE__)
+#if GLEDITOR_SDL_MAJOR == 3
+  return SDL_GetPointerProperty(SDL_GetWindowProperties(window),
+                                SDL_PROP_WINDOW_COCOA_WINDOW_POINTER, nullptr);
+#else
+  SDL_SysWMinfo info;
+  SDL_VERSION(&info.version);
+  if (SDL_TRUE != SDL_GetWindowWMInfo(window, &info)) {
+    return nullptr;
+  }
+  return static_cast<void *>(info.info.cocoa.window);
 #endif
 #else
   return nullptr;

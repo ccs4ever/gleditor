@@ -532,10 +532,10 @@ jobs:
   # tests the commit under test the way `nix build` does against this same
   # checkout rather than a fetched tarball.
   #
-  # No Vulkan and no AccessKit here; see the packaging table in the README for
-  # why. Nothing distributable comes out of this job either -- a real bottle
-  # is a release-time concern -- so unlike the other five there is no artifact
-  # to upload.
+  # No Vulkan here; see the packaging table in the README for why. Nothing
+  # distributable comes out of this job either -- a real bottle is a
+  # release-time concern -- so unlike the other five there is no artifact to
+  # upload.
   macos:
     name: brew (macOS, SDL3)
     runs-on: macos-latest
@@ -567,6 +567,26 @@ jobs:
           brew install make pangomm cairomm glibmm sdl3 sdl3_image glm \
             libtorrent-rasterbar boost openssl@3 pkgconf googletest
 
+      # AccessKit is what reports the user interface to screen readers --
+      # NSAccessibility here. Its C bindings are published as one archive
+      # holding a prebuilt library per platform, so there is nothing to build:
+      # unpack it and point ACCESSKIT_DIR at it, the same as the Windows job
+      # and packaging/macos/gleditor.rb's own resource block.
+      #
+      # Pinned rather than tracking the latest release: a build that changes
+      # what it links because somebody else tagged something is not a build
+      # anybody can reproduce.
+      - name: fetch accesskit-c
+        run: |
+          set -eu
+          version=0.22.3
+          curl -sSfL -o accesskit-c.zip \
+            "https://github.com/AccessKit/accesskit-c/releases/download/$version/accesskit-c-$version.zip"
+          unzip -q accesskit-c.zip -d "$RUNNER_TEMP"
+          echo "ACCESSKIT_DIR=$RUNNER_TEMP/accesskit-c-$version" >> "$GITHUB_ENV"
+          arch=$(uname -m)
+          ls "$RUNNER_TEMP/accesskit-c-$version/lib/macos/$arch/shared"
+
       # openssl@3 is keg-only -- Homebrew never links it, to stay out of the
       # way of whatever OpenSSL macOS itself ships -- so its include and
       # library directories are not on the default search path the way every
@@ -587,8 +607,15 @@ jobs:
           export LIBRARY_PATH="$brew_prefix/lib:$openssl_prefix/lib"
           # macOS has no nproc (that is GNU coreutils); sysctl is what asks
           # the kernel the same question here.
+          #
+          # GLEDITOR_ENABLE_A11Y=1 rather than leaving it unset: the whole
+          # point of fetching accesskit-c above is to test the macOS
+          # accessibility path, and a job that quietly built without it would
+          # report a green check for nothing -- the same reasoning the
+          # Windows job states for the same setting.
           gmake -j"$(sysctl -n hw.ncpu)" lib gleditor xudu \
-            GLEDITOR_SDL=3 GLEDITOR_VERSION=0.1.0
+            GLEDITOR_SDL=3 GLEDITOR_VERSION=0.1.0 \
+            GLEDITOR_ENABLE_A11Y=1 ACCESSKIT_DIR="$ACCESSKIT_DIR"
 
       - name: install it
         run: |
@@ -596,13 +623,22 @@ jobs:
             DESTDIR="$PWD/stage" \
             prefix=/usr/local \
             GLEDITOR_SDL=3 \
-            GLEDITOR_VERSION=0.1.0
+            GLEDITOR_VERSION=0.1.0 \
+            GLEDITOR_ENABLE_A11Y=1 \
+            ACCESSKIT_DIR="$ACCESSKIT_DIR"
 
       - name: check what landed
         run: |
           test -x stage/usr/local/bin/gleditor
           test -x stage/usr/local/bin/xudu
           test -f stage/usr/local/share/gleditor/shaders/glyph.vert.glsl
+          # Said out loud rather than only implied by a successful build:
+          # GLEDITOR_ENABLE_A11Y=1 above made AccessKit's absence a build
+          # failure, but a stale object left over from an earlier step
+          # without it could still link a binary that never mentions
+          # libaccesskit. platform_accesskit.cpp is compiled into the
+          # library, not the executables, so this looks there.
+          otool -L stage/usr/local/lib/libgleditor.0.dylib | grep -q libaccesskit
 
       # No backend named, for the same reason the Nix job names none: whether
       # a GitHub-hosted macOS runner's WindowServer can hand SDL a real OpenGL

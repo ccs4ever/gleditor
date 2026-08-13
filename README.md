@@ -1203,7 +1203,7 @@ a thing rather than the thing, and nothing can read one back. So there is a
 second description, kept beside the drawing and built from the same state, and
 it is handed to the platform's assistive technologies through
 [AccessKit](https://accesskit.dev) -- UI Automation on Windows, AT-SPI on X11
-and Wayland.
+and Wayland, NSAccessibility on macOS.
 
 ### What is described
 
@@ -1260,16 +1260,16 @@ correct in some builds.
 The two threads are the same split as everywhere else here. The documents and
 the caret belong to the render thread, so that is where the tree is built --
 once a frame, and only when one of its sources says something has changed.
-AccessKit's Windows adapter must be talked to from the thread that created the
-window, so that is where it is sent. The tree is a value and crosses under a
-lock.
+AccessKit's Windows and macOS adapters must each be talked to from the thread
+that created the window, so that is where it is sent. The tree is a value and
+crosses under a lock.
 
 Nothing calls back into the program from AccessKit's threads. The activation
 handler -- which fires whenever an assistive technology starts, possibly an
 hour into the session -- is answered from the last tree, kept for the purpose;
 action requests are queued and polled for by the event loop.
 
-### Windows, X11 and Wayland
+### Windows, X11, Wayland and macOS
 
 X11 and Wayland share one adapter, and that is not a simplification: AT-SPI is
 a D-Bus protocol, so an assistive technology on Linux talks to the
@@ -1284,6 +1284,25 @@ procedure to answer `WM_GETOBJECT` and can only do so before the window has
 ever been shown. That is why the window is created hidden on Windows and shown
 a few lines later, and why `Application::run()` opens accessibility between the
 two.
+
+macOS speaks a third API, NSAccessibility, which is neither a bus nor a
+message: an assistive technology asks the window's content view directly, so
+AccessKit's macOS adapter subclasses that view -- dynamically, at run time,
+since this program does not own the class SDL created for it. Unlike Windows
+this needs no particular ordering against the window being shown, because
+nothing has to be installed before the first message a window procedure could
+receive; NSAccessibility just asks the view whenever it asks.
+
+One thing macOS does need that neither of the others does: SDL's own `NSWindow`
+subclass answers `accessibilityFocusedUIElement` itself rather than deferring
+to its content view, because SDL puts the keyboard focus on the window and not
+the view. Left alone, whatever AccessKit put the focus on would never be
+reached. `openPlatform()` patches SDL's window class once, before opening the
+adapter, to forward that one query down to the content view --
+`accesskit_macos_add_focus_forwarder_to_window_class_with_length()`, the
+function AccessKit ships for exactly this: "windowing libraries such as SDL
+that place the keyboard focus directly on the window rather than the content
+view."
 
 ### Building it
 
@@ -1333,7 +1352,11 @@ The description has also been read back off a real accessibility bus -- an
 tree walked from the registry root by D-Bus. The application registers, the
 window and its children are reachable from outside the process, and the
 document's whole text comes back through the AT-SPI `Text` interface. The
-Windows path is written against the same C API and has not been run here.
+Windows and macOS paths are written against the same C API and have not been
+run against a real screen reader here -- CI proves each builds, links against
+AccessKit and starts (Windows also runs `--dump-a11y` against a software
+renderer; see the workflow), but neither has been checked against VoiceOver or
+Narrator themselves.
 
 ## SDL2 and SDL3
 
@@ -1565,14 +1588,15 @@ dependency on the other five and the Vulkan loader is a weak runtime one --
 it is one backend of three, and the other two work without it. macOS builds
 OpenGL only: MoltenVK would need a software rasteriser for a headless build,
 which has no macOS equivalent as settled as `lavapipe`/`llvmpipe` on the other
-platforms, and it stays out until that is. AccessKit is off there for a
-different reason -- its macOS adapter (NSAccessibility via view subclassing)
-is a third API this project does not speak yet, distinct from both the
-Windows and AT-SPI ones it already does. macOS also builds against a vendored
-copy of `GL/glcorearb.h` (`thirdparty/opengl-registry/`) rather than a system
-one: it has no `gl.pc`, and Apple's own OpenGL.framework headers were never
-going to grow the Khronos registry layout the other four platforms get from
-their GL loader's dev package or, on Windows, from MinGW itself.
+platforms, and it stays out until that is. AccessKit, by contrast, is wired in
+on macOS the same as on Windows: `packaging/macos/gleditor.rb` fetches
+accesskit-c's macOS build as a resource and builds with
+`GLEDITOR_ENABLE_A11Y=1`, and the macOS CI job proves the link the same way the
+Windows one does. macOS also builds against a vendored copy of
+`GL/glcorearb.h` (`thirdparty/opengl-registry/`) rather than a system one: it
+has no `gl.pc`, and Apple's own OpenGL.framework headers were never going to
+grow the Khronos registry layout the other four platforms get from their GL
+loader's dev package or, on Windows, from MinGW itself.
 
 Debian gets SDL2 because SDL3 is not in the archive and a package cannot depend
 on whichever version the build happened to find; everything else gets SDL3,
@@ -1842,7 +1866,7 @@ TODO: Confirm whether the intent is GPL-3.0-only or GPL-3.0-or-later.
 
 ## TODOs / Notes
 
-- macOS has no Vulkan or AccessKit support yet; see the packaging table above.
+- macOS has no Vulkan support yet; see the packaging table above.
 - The app resolves `assets/glsl` and `logo.png` relative to the working
   directory, so it must be started from the repository root (`make run` does).
 

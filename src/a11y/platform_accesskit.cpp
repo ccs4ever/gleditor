@@ -4,10 +4,11 @@
  *
  * AccessKit is the library that turns a description of a user interface into
  * whatever the platform's assistive technologies speak: UI Automation on
- * Windows, AT-SPI on X11 and Wayland. This is the only file in the project
- * that includes its header, and the only one that knows the platforms apart.
+ * Windows, AT-SPI on X11 and Wayland, NSAccessibility on macOS. This is the
+ * only file in the project that includes its header, and the only one that
+ * knows the platforms apart.
  *
- * Three things are worth knowing before reading it.
+ * Four things are worth knowing before reading it.
  *
  * **One adapter serves X11 and Wayland.** AT-SPI is a D-Bus protocol. An
  * assistive technology on Linux talks to the accessibility bus and never to
@@ -15,12 +16,23 @@
  * one place the display server shows through is where the window is on screen,
  * which a Wayland client is not told; see setWindowBounds().
  *
+ * **macOS is a third, wholly separate API.** NSAccessibility is neither UI
+ * Automation nor a bus: an assistive technology asks the window's content
+ * view directly, so AccessKit's macOS adapter subclasses that view the same
+ * way the Windows one subclasses a window procedure -- dynamically, at run
+ * time, because this program does not own the class SDL created. SDL also
+ * places the keyboard focus on the *window* rather than the content view, so
+ * open() additionally patches the window's class to forward
+ * accessibilityFocusedUIElement down to the view; see
+ * accesskit_macos_add_focus_forwarder_to_window_class_with_length() there.
+ *
  * **AccessKit calls back from its own threads.** The AT-SPI adapter runs an
- * executor on one of its own, and the Windows adapter is called from inside a
- * window procedure. The program on the other side of this file is an event
- * loop with a render thread, and handing it a call from an unknown thread
- * would mean locking everything it owns. So nothing is passed on: the tree is
- * kept here and rebuilt on demand, and actions are queued here and polled for.
+ * executor on one of its own, the Windows adapter is called from inside a
+ * window procedure, and the macOS one from whatever thread NSAccessibility
+ * queries on. The program on the other side of this file is an event loop
+ * with a render thread, and handing it a call from an unknown thread would
+ * mean locking everything it owns. So nothing is passed on: the tree is kept
+ * here and rebuilt on demand, and actions are queued here and polled for.
  *
  * **The whole tree is kept, not the changes.** The platform adapters activate
  * lazily -- nothing is built until an assistive technology asks, which may be
@@ -213,6 +225,8 @@ public:
     }
 #if defined(_WIN32)
     accesskit_windows_subclassing_adapter_free(adapter);
+#elif defined(__APPLE__)
+    accesskit_macos_subclassing_adapter_free(adapter);
 #else
     accesskit_unix_adapter_free(adapter);
 #endif
@@ -237,6 +251,32 @@ public:
     // exactly this reason.
     adapter = accesskit_windows_subclassing_adapter_new(
         static_cast<HWND>(nativeWindow), supplyTree, this, takeAction, this);
+#elif defined(__APPLE__)
+    if (nullptr == nativeWindow) {
+      return false;
+    }
+    // SDL's NSWindow answers accessibilityFocusedUIElement itself, rather
+    // than deferring to its content view the way a plain NSWindow does, so
+    // whichever element AccessKit puts the focus on is never reached. This
+    // patches SDL's window class -- once for the process, and safe to repeat
+    // since it only ever installs the same method -- to forward that one
+    // query down to the content view. The class differs between the two SDL
+    // major versions this project builds against; both are SDL's own name,
+    // not configurable and not looked up, so they are spelled out here.
+#if GLEDITOR_SDL_MAJOR == 3
+    static constexpr char windowClass[] = "SDL3Window";
+#else
+    static constexpr char windowClass[] = "SDLWindow";
+#endif
+    accesskit_macos_add_focus_forwarder_to_window_class_with_length(
+        windowClass, sizeof(windowClass) - 1);
+    // for_window rather than the plain view-taking constructor: it finds the
+    // content view itself, which is what NSAccessibility actually queries.
+    // Unlike the Windows adapter this needs no particular ordering against
+    // the window being shown -- NSAccessibility asks the view directly rather
+    // than through a message the window might have missed.
+    adapter = accesskit_macos_subclassing_adapter_for_window(
+        nativeWindow, supplyTree, this, takeAction, this);
 #else
     // The window handle means nothing here: AT-SPI is a bus, and what it wants
     // is a name on that bus rather than a window to hang off.
@@ -266,6 +306,13 @@ public:
       // This is what actually delivers the events to the assistive technology.
       accesskit_windows_queued_events_raise(events);
     }
+#elif defined(__APPLE__)
+    if (auto *const events =
+            accesskit_macos_subclassing_adapter_update_if_active(
+                adapter, supplyTree, this);
+        nullptr != events) {
+      accesskit_macos_queued_events_raise(events);
+    }
 #else
     accesskit_unix_adapter_update_if_active(adapter, supplyTree, this);
 #endif
@@ -279,6 +326,13 @@ public:
     // The subclassing adapter sees the window messages that say so, so there
     // is nothing to tell it.
     static_cast<void>(focused);
+#elif defined(__APPLE__)
+    if (auto *const events =
+            accesskit_macos_subclassing_adapter_update_view_focus_state(
+                adapter, focused);
+        nullptr != events) {
+      accesskit_macos_queued_events_raise(events);
+    }
 #else
     accesskit_unix_adapter_update_window_focus_state(adapter, focused);
 #endif
@@ -288,8 +342,10 @@ public:
     if (nullptr == adapter) {
       return;
     }
-#if defined(_WIN32)
-    // Windows takes the window's position from the window.
+#if defined(_WIN32) || defined(__APPLE__)
+    // Both take the window's position from the window itself: NSAccessibility
+    // reads a view's frame from AppKit directly, the same way UI Automation
+    // reads it from the HWND.
     static_cast<void>(outer);
     static_cast<void>(inner);
 #else
@@ -384,6 +440,8 @@ private:
 
 #if defined(_WIN32)
   accesskit_windows_subclassing_adapter *adapter{};
+#elif defined(__APPLE__)
+  accesskit_macos_subclassing_adapter *adapter{};
 #else
   accesskit_unix_adapter *adapter{};
 #endif
