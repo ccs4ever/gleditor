@@ -189,6 +189,29 @@ struct MagnetLink {
   [[nodiscard]] static bool looksLikeMagnet(std::string_view text);
 };
 
+/**
+ * @brief Build a single-file torrent carrying @p data.
+ *
+ * The other half of Metainfo, which until now could only read one. Sealing a
+ * scroll means turning bytes this machine holds into bytes anybody can ask a
+ * swarm for, and that begins with a torrent describing them.
+ *
+ * No announce list: this project finds peers through the DHT, and a tracker
+ * URL would be a machine to depend on in a design whose point is not to have
+ * one. A torrent without one is still a torrent -- BEP 5 and BEP 9 are how it
+ * is found and fetched.
+ *
+ * @param name The suggested file name. Display only, as it always is.
+ * @param pieceLength Bytes per piece. A power of two, at least 16 KiB.
+ * @return The .torrent file's bytes, and the info hash naming it.
+ */
+struct MadeTorrent {
+  std::string file;
+  InfoHash hash;
+};
+[[nodiscard]] MadeTorrent makeTorrent(std::string_view data, std::string name,
+                                      std::uint64_t pieceLength = 256 * 1024);
+
 /// SHA-1 of @p data, which is the hash BitTorrent v1 is built on.
 [[nodiscard]] std::array<std::uint8_t, 20> sha1(std::string_view data);
 
