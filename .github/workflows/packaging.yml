@@ -46,8 +46,11 @@ jobs:
       - name: stage the debian directory
         run: cp -r packaging/debian debian
 
+      # debian/rules' dh_auto_build only turns into a parallel make when
+      # something sets DEB_BUILD_OPTIONS' parallel=N -- dpkg-buildpackage does
+      # not assume that on its own.
       - name: build the package
-        run: dpkg-buildpackage -us -uc -b
+        run: DEB_BUILD_OPTIONS="parallel=$(nproc)" dpkg-buildpackage -us -uc -b
 
       - name: install it
         run: sudo apt-get install -y ../gleditor_*.deb
@@ -180,7 +183,11 @@ jobs:
           cp packaging/arch/PKGBUILD /home/builder/pkg/
           cp build/dist/gleditor-0.1.0.tar.gz /home/builder/pkg/
           chown -R builder:builder /home/builder/pkg
-          su builder -c 'cd /home/builder/pkg && makepkg --noconfirm --nodeps'
+          # archlinux:base-devel ships MAKEFLAGS commented out in
+          # /etc/makepkg.conf, so build()'s plain `make` call compiles one
+          # file at a time unless something sets it -- makepkg.conf does not
+          # override an already-exported MAKEFLAGS, so this is enough.
+          su builder -c 'cd /home/builder/pkg && MAKEFLAGS="-j$(nproc)" makepkg --noconfirm --nodeps'
 
       - name: install it
         run: pacman -U --noconfirm /home/builder/pkg/gleditor-*.pkg.tar.zst
@@ -578,7 +585,10 @@ jobs:
           export PKG_CONFIG_PATH="$brew_prefix/lib/pkgconfig:$openssl_prefix/lib/pkgconfig"
           export CPATH="$brew_prefix/include:$openssl_prefix/include"
           export LIBRARY_PATH="$brew_prefix/lib:$openssl_prefix/lib"
-          gmake lib gleditor xudu GLEDITOR_SDL=3 GLEDITOR_VERSION=0.1.0
+          # macOS has no nproc (that is GNU coreutils); sysctl is what asks
+          # the kernel the same question here.
+          gmake -j"$(sysctl -n hw.ncpu)" lib gleditor xudu \
+            GLEDITOR_SDL=3 GLEDITOR_VERSION=0.1.0
 
       - name: install it
         run: |
