@@ -147,9 +147,9 @@ bool wantsEveryOption(const int argc, const char *const *const argv) {
 class Views {
 public:
   Views(Session &aSession, RendererRef aRenderer, HypertimeMap &aMap,
-        gleditor::Form &aForm)
+        gleditor::Form &aForm, AppStateRef aState)
       : session(aSession), renderer(std::move(aRenderer)), map(aMap),
-        form(aForm) {}
+        form(aForm), state(std::move(aState)) {}
 
   /// Replace everything on screen with one document showing @p version.
   void showOnly(const MicroversionId &version) {
@@ -350,6 +350,10 @@ public:
     renderer->runWithState([this, salt](RenderState &) {
       if (session.views().empty()) {
         std::cout << "xudu: nothing open to publish\n";
+        state->showDialog(render::DiagnosticSeverity::Warning,
+                          "Nothing to publish",
+                          "No document is open. Open one, and what is under "
+                          "the caret is what gets published.");
         return;
       }
       auto *const caret = renderer->editCaret();
@@ -381,6 +385,19 @@ public:
         if (wanted) {
           keys.chosen = keys.options.size() - 1;
         }
+      }
+      // Nothing to sign with is the end of it: the record is signed before the
+      // content is sealed, so there is no half-published state to offer. Said
+      // now rather than after nine fields have been filled in.
+      if (keys.options.empty()) {
+        std::cout << "xudu: no signing key in the keyring\n";
+        state->showDialog(
+            render::DiagnosticSeverity::Error, "No signing key",
+            "The keyring has no secret key to sign an authorship record with, "
+            "and a document is signed before it is sealed. Make one with `gpg "
+            "--quick-generate-key`, or point gpg_home in " +
+                xudu::configPath() + " at the keyring that holds yours.");
+        return;
       }
 
       std::vector<Field> asked{
@@ -441,10 +458,17 @@ public:
         const auto path = session.publishDocument(version, request);
         std::cout << "xudu: published doc " << which << " as " << path << "\n";
       } catch (const std::exception &err) {
-        // On the terminal rather than back in the dialog: what gpg says when
-        // it will not sign is several lines of somebody else's diagnostics,
-        // and a panel is the wrong shape for it.
+        // Said in the platform's own dialog rather than drawn in the window.
+        // The form was a question and it has been answered; this is the answer
+        // going wrong, and what gpg says when it will not sign is several lines
+        // of somebody else's diagnostics -- a shape a message box already
+        // handles, wraps and lets somebody select from, on every platform,
+        // without this program growing a scrollable text panel to hold it.
+        //
+        // On the terminal as well, since a scripted run has no window.
         std::cout << "xudu: cannot publish: " << err.what() << "\n";
+        state->showDialog(render::DiagnosticSeverity::Error,
+                          "Could not publish " + version.str(), err.what());
       }
     });
   }
@@ -479,6 +503,9 @@ private:
   RendererRef renderer;
   HypertimeMap &map;
   gleditor::Form &form;
+  /// Held for the one thing it offers that this class cannot do itself: a
+  /// native dialog, put up by the thread that owns the window.
+  AppStateRef state;
   std::optional<Pending> pending;
 };
 
@@ -922,7 +949,7 @@ int main(const int argc, char **argv) {
     // The panel a publication is described in. Chrome rather than document, so
     // it keeps its own small font whatever the text is being read at.
     gleditor::Form publishForm("Sans 11");
-    Views views(*session, renderer, map, publishForm);
+    Views views(*session, renderer, map, publishForm, state);
 
     LinkBeams links(*session, renderer);
     links.setVisible(parser["--no-beams"] != true);

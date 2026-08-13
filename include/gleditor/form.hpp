@@ -24,6 +24,7 @@
 #include <functional>
 #include <memory>
 #include <mutex>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -123,6 +124,7 @@ public:
   [[nodiscard]] bool grabbing() const override;
   bool keyPressed(Key key, KeyMods mods) override;
   void textTyped(const std::string &utf8) override;
+  [[nodiscard]] std::optional<InputArea> textArea() const override;
 
   /**
    * @brief Put the form up.
@@ -189,6 +191,11 @@ private:
   std::size_t highlight{};
   /// Bumped whenever anything visible changes, so drawing knows to rebuild.
   std::uint64_t revision{1};
+
+  /// Where the focused field was drawn, in the pixels SDL counts in. Worked
+  /// out while drawing, because that is where the panel's geometry is decided,
+  /// and read by the event thread to tell the platform where typing lands.
+  std::optional<InputArea> typingAt;
 
   std::unique_ptr<Canvas> canvas;
   std::uint64_t builtFor{};

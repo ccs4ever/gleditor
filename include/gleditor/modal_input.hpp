@@ -20,6 +20,7 @@
 #define GLEDITOR_MODAL_INPUT_H
 
 #include <cstdint>
+#include <optional>
 #include <string>
 
 namespace gleditor {
@@ -59,6 +60,16 @@ enum class KeyMods : std::uint16_t {
                static_cast<std::uint16_t>(which));
 }
 
+/// A rectangle in window pixels, top left origin: SDL's convention.
+struct InputArea {
+  int x{};
+  int y{};
+  int width{};
+  int height{};
+
+  bool operator==(const InputArea &) const = default;
+};
+
 /**
  * @brief Something that takes the keyboard while it is up.
  *
@@ -90,6 +101,23 @@ public:
 
   /// Composed text -- what an input method produced, not a scancode.
   virtual void textTyped(const std::string &utf8) = 0;
+
+  /**
+   * @brief Where on screen the text being typed will appear.
+   *
+   * Handed to SDL, which hands it to the platform: it is what an input method
+   * needs in order to put its candidate window somewhere sensible, and what an
+   * on-screen keyboard needs in order not to cover the field being typed into.
+   * Window pixels from the top left, which is SDL's convention rather than the
+   * bottom-up one the glyph pipeline draws in.
+   *
+   * Nothing when the focus is not on anything that takes text -- a button, a
+   * closed list -- so that a keyboard is not raised for a field nobody can
+   * type into.
+   */
+  [[nodiscard]] virtual std::optional<InputArea> textArea() const {
+    return std::nullopt;
+  }
 };
 
 } // namespace gleditor

@@ -147,6 +147,34 @@ struct AppState {
    * from the render thread is the same as somebody pressing the key.
    */
   std::function<bool(const std::string &)> runCommand;
+
+  /**
+   * @brief Native message boxes waiting to be shown.
+   *
+   * SDL's message box is modal and blocking and must be called from the thread
+   * that created the window, which is the event thread -- and the things worth
+   * saying this way happen on the render thread, where the store and the
+   * documents are. So they are queued here and shown from there.
+   *
+   * For what really is a message and a choice. SDL has no text field, no list
+   * and no widget of any kind, so anything that has to be filled in is drawn
+   * in the window instead; see gleditor::Form.
+   */
+  struct PendingDialog {
+    render::DiagnosticSeverity severity{render::DiagnosticSeverity::Error};
+    std::string title;
+    std::string message;
+  };
+  std::mutex dialogMutex;
+  std::vector<PendingDialog> dialogs;
+
+  /// Ask for one. Safe from any thread; shown within a frame or two.
+  void showDialog(const render::DiagnosticSeverity severity, std::string title,
+                  std::string message) {
+    const std::lock_guard locker(dialogMutex);
+    dialogs.push_back(
+        PendingDialog{severity, std::move(title), std::move(message)});
+  }
   struct ViewPerspective : public std::mutex {
     int screenWidth  = 800;
     int screenHeight = 600;

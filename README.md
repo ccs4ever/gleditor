@@ -1149,6 +1149,11 @@ is on, and `--key tab|enter|escape|...` presses what is not text -- which is how
 the dialog is tested, and how any other command can be driven without a person
 at the keyboard.
 
+When publishing goes wrong -- an unknown key, a refused passphrase, a keyring
+with nothing in it that can sign -- what comes back is a native message box,
+put up by SDL. See "What SDL provides for dialogs" below for why that half is
+the platform's and the form itself is not.
+
 ### Commands
 
 Control is used throughout, because a bare letter is text: the whole point of
@@ -1205,6 +1210,44 @@ at all. The differences the header covers are of four kinds:
 SDL2 builds require 2.0.22 or newer, for `SDL_GetWindowSizeInPixels`. The
 startup banner names the version the binary was built against, since nothing on
 the command line can change it.
+
+### What SDL provides for dialogs
+
+Worth stating plainly, because it decides what is drawn here and what is not.
+SDL is a windowing, input and audio library, not a widget toolkit. For asking a
+person something it offers exactly two things:
+
+- **Message boxes.** `SDL_ShowMessageBox` and `SDL_ShowSimpleMessageBox`: a
+  title, a body, and up to a handful of buttons, drawn by the platform. In both
+  majors, on every platform SDL supports.
+- **File dialogs**, in SDL3 only (`SDL_ShowOpenFileDialog` and its siblings).
+  Nothing in this program opens a file that way yet.
+
+There is no text field, no list, no drop-down, no password entry and no widget
+of any kind -- `SDL_ShowInputBox` does not exist in either major. So the
+publish dialog cannot be an SDL dialog: it asks nine questions, one of them a
+drop-down of keys and one a masked passphrase, and none of those have a
+platform control behind them. It is `gleditor::Form`, drawn with the same
+`Canvas` as the hypertime map and the notification overlay, in the window.
+
+What SDL does have, this program uses:
+
+- **`sdl::showMessageBox()`** wraps both majors' message box, and everything
+  that has one thing to say and nothing to fill in goes through it. It blocks,
+  and it must be called from the thread that created the window -- while the
+  things worth saying happen on the render thread, where the store and the
+  documents are. So `AppState::showDialog()` queues one from any thread and the
+  event loop shows it, which is the same shape as every other cross-thread hand-
+  off here.
+- **`SDL_StartTextInput`**, so a modal can be typed into even in a program that
+  has text input off. A question nobody can answer is not a question.
+- **`sdl::setTextInputArea()`** -- `SDL_SetTextInputArea` in SDL3,
+  `SDL_SetTextInputRect` in SDL2 -- so the platform knows where the answer will
+  appear. That is what puts an input method's candidate window beside the field
+  being typed into rather than over it, and what stops a phone's on-screen
+  keyboard covering it. `ModalInput::textArea()` is the seam; `Form` works the
+  rectangle out while drawing, since that is where the panel's geometry is
+  decided, and the event loop tells SDL only when it moves.
 
 ## Tech stack
 
