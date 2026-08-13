@@ -519,7 +519,13 @@ void SwarmContentSource::publishMutable(const MutableKeys &keys,
       toLt(keys.publicKey).bytes,
       [keys, payload, sequence](lt::entry &value, std::array<char, 64> &signature,
                                 std::int64_t &seq, const std::string &itemSalt) {
-        value = lt::bdecode(payload.begin(), payload.end());
+        // The two-iterator overload this used to call is gone as of
+        // libtorrent 2.1: only the span-based form remains across every
+        // version this project builds against (1.2 through 2.1), so that is
+        // the one used here. entry's own assignment operator does the
+        // bdecode_node -> entry conversion.
+        value = lt::bdecode(lt::span<char const>{
+            payload.data(), static_cast<std::ptrdiff_t>(payload.size())});
         seq   = sequence;
         // Signed over libtorrent's encoding of the value rather than over the
         // payload as written, because that encoding is what goes on the wire
