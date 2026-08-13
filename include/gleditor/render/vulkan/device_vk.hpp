@@ -125,10 +125,18 @@ private:
   /// work without letting latency grow.
   static constexpr std::uint32_t framesInFlight = 2;
 
-  /// Pipelines the descriptor pool is sized for: the document pipeline and the
-  /// overlay one, with room to spare. Vulkan pools are fixed at creation, so
-  /// this is a ceiling rather than a hint.
-  static constexpr std::uint32_t maxPipelines = 4;
+  /**
+   * @brief Pipelines the descriptor pool is sized for.
+   *
+   * Vulkan pools are fixed at creation, so this is a ceiling rather than a
+   * hint, and running into it is a driver error rather than a slow path -- so
+   * it has to allow for what a program adds as well as what the library
+   * creates. The library makes three (documents, the overlay, the caret) and a
+   * program makes one per drawing surface of its own: Xudu has a canvas for
+   * the hypertime map and a batch for the beams between documents, which is
+   * five. Eight leaves room for another two without this having to move.
+   */
+  static constexpr std::uint32_t maxPipelines = 8;
 
   struct BufferRecord {
     VkBuffer buffer{VK_NULL_HANDLE};

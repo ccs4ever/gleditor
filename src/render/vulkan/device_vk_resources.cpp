@@ -558,6 +558,17 @@ DeviceVK::createShaderModule(const std::vector<std::uint32_t> &code) const {
 }
 
 PipelineHandle DeviceVK::createPipeline(const PipelineDesc &desc) {
+  // Said plainly here rather than left to the validation layer, which reports
+  // it as an exhausted descriptor pool several calls later and only when the
+  // layers are loaded at all.
+  if (pipelines.size() >= maxPipelines) {
+    throw std::runtime_error(std::format(
+        "DeviceVK::createPipeline: {} is all this device's descriptor pool was "
+        "sized for, and \"{}\" would be one more. Vulkan pools are fixed at "
+        "creation; raise DeviceVK::maxPipelines.",
+        maxPipelines, desc.name));
+  }
+
   PipelineRecord record{};
 
   // Descriptor layout: highlights, glyph atlas. Both are read by the fragment
@@ -658,7 +669,12 @@ PipelineHandle DeviceVK::createPipeline(const PipelineDesc &desc) {
   depthStencil.sType = VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO;
   depthStencil.depthTestEnable  = desc.depthTest ? VK_TRUE : VK_FALSE;
   depthStencil.depthWriteEnable = desc.depthTest ? VK_TRUE : VK_FALSE;
-  depthStencil.depthCompareOp   = VK_COMPARE_OP_LESS;
+  // Equal depths pass, and the later draw wins -- see the matching note in the
+  // GL backend. A page's glyphs sit a tenth of a unit in front of its paper,
+  // which is finer than a depth step is at the distance documents are read
+  // from, so under a strict less-than they were discarded and the page came out
+  // blank.
+  depthStencil.depthCompareOp   = VK_COMPARE_OP_LESS_OR_EQUAL;
 
   // One blend state per colour attachment. The colour target blends on alpha,
   // which is what lets a draw fade; the picking target must not, and not only
