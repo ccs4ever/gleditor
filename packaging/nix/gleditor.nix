@@ -93,6 +93,12 @@ stdenv.mkDerivation {
 
   doCheck = false;
 
+  # Nix's generic builder does not pass -j to make on its own; without this
+  # every translation unit compiles one at a time regardless of how many
+  # cores the build sandbox actually has. This is what makes it pass
+  # -j$NIX_BUILD_CORES instead.
+  enableParallelBuilding = true;
+
   # The GL and Vulkan entry points are resolved at run time through SDL, so
   # they are not in the binary's RPATH and the loaders have to be findable.
   # libGL comes from the driver on a NixOS system, hence only the Vulkan
