@@ -15,6 +15,13 @@ class Gleditor < Formula
   # rather than linked over the system one.
   depends_on "make" => :build
   depends_on "pkgconf" => :build
+  # `gmake install` still generates a .dep file for every source the Makefile
+  # knows about, tests included, and that generation needs gtest/gmock's
+  # headers findable even though this build never runs a test binary. Other
+  # platforms have those on the compiler's default search path already
+  # (whatever their libgtest-dev / gtest-devel / gtest package installed);
+  # Homebrew has no such ambient location.
+  depends_on "googletest" => :build
   depends_on "boost"
   depends_on "cairomm"
   depends_on "glibmm"
