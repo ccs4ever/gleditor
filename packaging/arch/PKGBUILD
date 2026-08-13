@@ -7,7 +7,7 @@ arch=('x86_64' 'aarch64')
 url="https://github.com/ccs4ever/gleditor"
 license=('GPL-3.0-or-later')
 depends=('pangomm-2.48' 'cairomm-1.16' 'glibmm-2.68' 'sdl3' 'sdl3_image' 'libglvnd'
-         'hicolor-icon-theme')
+         'libtorrent-rasterbar' 'hicolor-icon-theme')
 # The Vulkan backend loads a loader at run time; the other two backends work
 # without one, so this is optional rather than a hard dependency.
 optdepends=('vulkan-icd-loader: Vulkan backend'

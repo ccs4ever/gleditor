@@ -16,6 +16,7 @@
   glslang,
   vulkan-headers,
   vulkan-loader,
+  libtorrent-rasterbar,
   version ? "0.1.0",
 }:
 
