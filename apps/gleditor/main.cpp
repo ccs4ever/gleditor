@@ -81,7 +81,7 @@ int main(const int argc, char **argv) {
   RendererRef renderer;
   try {
     parser.parse_args(argc, argv);
-    backend  = gleditor::applyCommonArguments(parser, state);
+    backend  = gleditor::applyCommonArguments(parser, state, argc, argv);
     renderer = Renderer::create(state, backend);
 
     // Which SDL this binary was built against is not something the command line

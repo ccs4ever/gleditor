@@ -368,7 +368,7 @@ int main(const int argc, char **argv) {
   std::string alongside;
   try {
     parser.parse_args(argc, argv);
-    backend  = gleditor::applyCommonArguments(parser, state);
+    backend  = gleditor::applyCommonArguments(parser, state, argc, argv);
     renderer = Renderer::create(state, backend);
     quiet    = parser["--print-asset-dir"] == true;
 

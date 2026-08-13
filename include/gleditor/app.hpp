@@ -129,8 +129,30 @@ void addCommonArguments(argparse::ArgumentParser &parser, bool detailed);
  * @throws std::runtime_error if the backend named is not in this build, or an
  *         option's value cannot be parsed.
  */
+/**
+ * @brief The automation options, in the order they were written.
+ *
+ * Exposed rather than kept private because the order is the whole of what it
+ * produces, and reading a command line by hand -- both "--click 3,4" and
+ * "--click=3,4", stopping at the ones that are not automation -- has enough
+ * edges to be worth testing directly.
+ *
+ * @param argc,argv A command line the parser has already accepted.
+ */
+std::vector<AppState::AutomationStep>
+readAutomationScript(int argc, const char *const *argv);
+
+/**
+ * @brief Apply the parsed common options to @p state.
+ *
+ * @param argc,argv The command line as it was given. Needed for the
+ *        automation options alone, and for one thing about them the parser
+ *        does not keep: the order they were written in, which is the order
+ *        they are carried out in.
+ */
 render::Backend applyCommonArguments(argparse::ArgumentParser &parser,
-                                     const AppStateRef &state);
+                                     const AppStateRef &state, int argc,
+                                     const char *const *argv);
 
 /**
  * @class Application

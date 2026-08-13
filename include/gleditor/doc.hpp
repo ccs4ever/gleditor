@@ -338,7 +338,11 @@ private:
                   std::uint32_t oldConsumed);
   /// Shared tail of insert() and erase(): find the damaged page, record what
   /// its lines looked like, and schedule the reflow.
-  void scheduleReflow(RenderState &state, std::uint32_t at, std::int32_t delta);
+  void scheduleReflow(RenderState &state, std::uint32_t at, std::int32_t delta,
+                      const std::vector<int> &oldStarts);
+  /// The line breaks of the page an edit at @p at lands on, as they are before
+  /// it is made. Must be called before the text is changed.
+  [[nodiscard]] std::vector<int> lineBreaksAround(std::uint32_t at) const;
   // token to keep anything other than Doc::create from using our constructor
   struct Private {
     explicit Private() = default;

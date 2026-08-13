@@ -493,13 +493,25 @@ Selecting inside the three-character `ffi` ligature of
 | whole `ffi` | 29 px |
 | middle `f` only | 9 px, offset 10 px in |
 
-`--select START,END` applies a span as a drag would, after any `--click` has
-been answered -- a click replaces a selection rather than extending one.
-
 `--click X,Y` and `--type TEXT` drive both without a mouse or a keyboard, which
 is how caret placement is compared between backends. Every click reports the
 pixel it answered, since picking is asynchronous and a reply that named only
 the offset could not be lined up with the click that caused it.
+
+The automation options are a script, carried out **in the order they are
+written**, each waiting for the one before it: a click waits for its own
+picking answer, and typing waits for the reflow it causes. So
+
+```
+gleditor --click 200,150 --type "one " --click 400,300 --type "two " \
+         --pick 200,150 --screenshot out.ppm doc.txt
+```
+
+types in two places and then reports what ended up at the first of them --
+rather than clicking twice and inserting everything at the second caret, which
+is what a run that took each option in turn would do. `--select START,END`
+takes its turn among them; a click replaces a selection rather than extending
+one, so where it falls in the sequence decides whether it survives.
 
 ## Building on the library
 
@@ -1222,11 +1234,15 @@ Command-line options (registered by `gleditor::addCommonArguments()` in
   `info`, `warning` (the default) or `error`. Driver diagnostics raise these on
   their own; this is how the overlay is exercised on demand and compared
   between backends
-- `--click X,Y`       click there once the document has settled, moving the
-  caret, and print where it landed; may be given more than once
-- `--type TEXT`       insert TEXT at the caret once it has been placed
-- `--select START,END`  select that document byte range once the document has
-  settled, as a drag would
+- `--click X,Y`       click there, moving the caret, and print where it
+  landed; repeatable
+- `--type TEXT`       insert TEXT at the caret; repeatable
+- `--select START,END`  select that document byte range, as a drag would;
+  repeatable
+
+  These four -- `--pick`, `--click`, `--type` and `--select` -- are carried out
+  in the order they appear on the command line, each waiting for the one before
+  it to finish.
 - `--fov DEGREES`     initial vertical field of view; widening it is how a
   headless run sees many pages at once, and small ones
 - `--no-cull`         draw every page of every document, including the ones
@@ -1325,7 +1341,13 @@ for eight seconds and no capture should wait that long.
 ## Tests
 
 - Build and run tests:
-  - `make test`  → builds and runs `build/gleditor_test` and `build/xudu_test`
+  - `make test`  → builds and runs `build/gleditor_test` and `build/xudu_test`,
+    leaving out the suites that need a peer on another network stack. Those
+    skip without one, and a skip in the middle of a run reads as a pass.
+  - `make test/all`  → the same two binaries with nothing left out. This is
+    what the pull request checks run.
+  - `make test TEST_FILTER='*'` overrides the exclusion for a one-off, and
+    names a single suite the same way: `make test TEST_FILTER='SwarmTest.*'`.
 
   There are two binaries because there are two things to test. `gleditor_test`
   covers the library and links the shared library the programs link, so a
