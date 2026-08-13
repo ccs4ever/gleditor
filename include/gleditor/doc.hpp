@@ -108,9 +108,18 @@ private:
   float originY{};
 
 public:
+  /**
+   * @param inherited Rows a page being replaced was using, for this one to
+   *        take over. A reflow rebuilds a page in place of another of nearly
+   *        the same length, so handing the rows on saves returning them to the
+   *        pool and asking for them straight back -- which, when some earlier
+   *        hole fitted, moved the page across the buffer on every keystroke.
+   *        Empty for a page that has no predecessor.
+   */
   Page(std::shared_ptr<Doc> aDoc, RenderState &state, glm::mat4 &model,
        Glib::RefPtr<Pango::Layout> aLayout, std::uint32_t aTextOffset,
-       std::uint32_t aPageIndex);
+       std::uint32_t aPageIndex,
+       const BufferPool::Allocation &inherited = {});
   /**
    * @brief Append this page's draw to @p batches, or decide it needs none.
    * @param docTransform projection * view * document model.

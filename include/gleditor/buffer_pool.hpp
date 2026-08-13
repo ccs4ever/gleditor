@@ -80,6 +80,18 @@ public:
   Allocation reserve(std::uint32_t rows);
 
   /**
+   * @brief Whether a resize that has to move the rows should bring them along.
+   *
+   * A caller that is about to write every row again -- a page being laid out
+   * after an edit -- would have the pool copy rows to a new home only to
+   * overwrite them there.
+   */
+  enum class Contents : std::uint8_t {
+    Keep,   ///< Carry the rows to the new place.
+    Discard ///< The caller is about to write them all; do not copy.
+  };
+
+  /**
    * @brief Make an allocation @p rows long, wherever that has to be.
    *
    * Within the room already reserved this is bookkeeping and nothing moves.
@@ -94,7 +106,8 @@ public:
    * @throws std::runtime_error if the pool cannot find room even after
    *         growing.
    */
-  void resize(const Allocation &allocation, std::uint32_t rows);
+  void resize(const Allocation &allocation, std::uint32_t rows,
+              Contents contents = Contents::Keep);
 
   /// Return an allocation to the free list, along with any rows erased from
   /// inside it.
