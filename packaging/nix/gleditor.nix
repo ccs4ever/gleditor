@@ -17,6 +17,16 @@
   vulkan-headers,
   vulkan-loader,
   libtorrent-rasterbar,
+  # libtorrent-rasterbar's own public headers reach into boost/predef and
+  # openssl/opensslv.h, but nixpkgs' derivation for it does not propagate
+  # either as a build input of its own -- so a consumer that only links
+  # against it, rather than building it, never sees them and hits "unknown
+  # endian" and "OpenSSL too old" from headers that were never actually
+  # looking at this build's compiler or its real OpenSSL at all. Named
+  # outright so pkg-config and the include search path see the genuine
+  # ones.
+  boost,
+  openssl,
   version ? "0.1.0",
 }:
 
@@ -60,6 +70,8 @@ stdenv.mkDerivation {
     # the .pc file pkg-config returns nothing for the whole package set.
     vulkan-loader
     libtorrent-rasterbar
+    boost
+    openssl
   ];
 
   # The Makefile's compiler default is clang++; stdenv supplies its own, and
