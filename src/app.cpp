@@ -85,6 +85,77 @@ std::pair<int, int> parsePair(const std::string &value,
 
 } // namespace
 
+/**
+ * @brief Read the automation options out of the command line, in order.
+ *
+ * Not from the parser: argparse collects each option's values into its own
+ * list, which is exactly the ordering this needs and does not keep. What a
+ * test wants to say is "click here, type this, click there, type that", and
+ * that is a sequence rather than two clicks and two strings.
+ *
+ * The parser has already accepted these arguments by the time this runs, so
+ * this is reading a command line known to be well formed rather than parsing
+ * one: what is left is to note which option each value belonged to and in what
+ * order. Both spellings are accepted, since argparse accepts both.
+ */
+std::vector<AppState::AutomationStep>
+readAutomationScript(const int argc, const char *const *const argv) {
+  using Step = AppState::AutomationStep;
+  std::vector<Step> script;
+  if (nullptr == argv) {
+    return script;
+  }
+
+  const auto add = [&script](const std::string_view option,
+                             const std::string &value) {
+    if ("--pick" == option || "--click" == option) {
+      const auto [x, y] = parsePair(value, option, "X,Y");
+      Step step{"--pick" == option ? Step::Kind::Pick : Step::Kind::Click};
+      step.x = x;
+      step.y = y;
+      script.push_back(std::move(step));
+    } else if ("--type" == option) {
+      Step step{Step::Kind::Type};
+      step.text = value;
+      script.push_back(std::move(step));
+    } else if ("--select" == option) {
+      const auto [from, to] = parsePair(value, option, "START,END");
+      Step step{Step::Kind::Select};
+      step.from = static_cast<std::uint32_t>(from);
+      step.to   = static_cast<std::uint32_t>(to);
+      script.push_back(std::move(step));
+    }
+  };
+
+  static constexpr std::array scripted = {"--pick", "--click", "--type",
+                                          "--select"};
+  for (int i = 1; i < argc; i++) {
+    if (nullptr == argv[i]) {
+      continue;
+    }
+    const std::string_view arg{argv[i]};
+    for (const auto *const option : scripted) {
+      if (arg == option) {
+        // "--click 3,4": the value is the argument after it.
+        if (i + 1 < argc && nullptr != argv[i + 1]) {
+          add(option, std::string{argv[i + 1]});
+          i++;
+        }
+        break;
+      }
+      const std::string_view joined{option};
+      if (arg.starts_with(joined) && arg.size() > joined.size() &&
+          '=' == arg[joined.size()]) {
+        // "--click=3,4": the value is the rest of this argument.
+        add(option, std::string{arg.substr(joined.size() + 1)});
+        break;
+      }
+    }
+  }
+  return script;
+}
+
+
 void CommandTable::bind(const int scancode, const Mod mods, std::string name,
                         std::string help, std::function<void()> run) {
   bindings.push_back(Command{scancode, mods, std::move(name), std::move(help),
@@ -232,15 +303,20 @@ void addCommonArguments(argparse::ArgumentParser &parser, const bool detailed) {
              "click at X,Y once settled, placing the caret; repeatable",
              "Click at pixel X,Y once the document has settled, placing the "
              "caret there, and print where it landed. Repeatable.");
-  automation(parser.add_argument("--select"),
-             "select the document byte range START,END",
-             "Select the document byte range START,END once the document has "
-             "settled, as a click and drag would.");
-  automation(parser.add_argument("--type").default_value(std::string{}),
-             "insert text at the caret once it has been placed",
-             "Insert this text at the caret once it has been placed. The "
-             "document is spliced immediately and the layout that follows is "
-             "scheduled off the render thread.");
+  automation(parser.add_argument("--select").append(),
+             "select the document byte range START,END; repeatable",
+             "Select the document byte range START,END, as a click and drag "
+             "would. Carried out in the order it was written among the other "
+             "automation options.");
+  automation(parser.add_argument("--type").append().default_value(
+                 std::vector<std::string>{}),
+             "insert text at the caret; repeatable",
+             "Insert this text at the caret. Repeatable, and carried out in "
+             "the order it was written among the other automation options, so "
+             "that \"--click here --type this --click there --type that\" is "
+             "the sequence it reads as. The document is spliced immediately "
+             "and the layout that follows is scheduled off the render "
+             "thread.");
   automation(parser.add_argument("--toast").append(),
              "show a notification, as [info:|warning:|error:]TEXT; repeatable",
              "Show a notification once the first frame is drawn, written as "
@@ -260,7 +336,8 @@ void addCommonArguments(argparse::ArgumentParser &parser, const bool detailed) {
 }
 
 render::Backend applyCommonArguments(argparse::ArgumentParser &parser,
-                                     const AppStateRef &state) {
+                                     const AppStateRef &state, const int argc,
+                                     const char *const *const argv) {
   const auto backend = render::backendFromName(parser.get<std::string>("--backend"));
   if (!render::backendCompiledIn(backend)) {
     throw std::runtime_error("The " + render::backendName(backend) +
@@ -278,7 +355,6 @@ render::Backend applyCommonArguments(argparse::ArgumentParser &parser,
   state->screenshotPath    = parser.get<std::string>("--screenshot");
   state->strictDiagnostics = parser["--strict-diagnostics"] == true;
   state->noPresent         = parser["--no-present"] == true;
-  state->typedText         = parser.get<std::string>("--type");
   {
     const std::lock_guard locker(state->view);
     state->view.fov = std::stof(parser.get<std::string>("--fov"));
@@ -289,21 +365,10 @@ render::Backend applyCommonArguments(argparse::ArgumentParser &parser,
       state->requestedToasts.emplace_back(parseToast(toast));
     }
   }
-  if (parser.present<std::vector<std::string>>("--click")) {
-    for (const auto &click : parser.get<std::vector<std::string>>("--click")) {
-      state->requestedClicks.emplace_back(parsePair(click, "--click", "X,Y"));
-    }
-  }
-  if (parser.present<std::vector<std::string>>("--pick")) {
-    for (const auto &pick : parser.get<std::vector<std::string>>("--pick")) {
-      state->requestedPicks.emplace_back(parsePair(pick, "--pick", "X,Y"));
-    }
-  }
-  if (const auto span = parser.present<std::string>("--select")) {
-    const auto [start, end] = parsePair(*span, "--select", "START,END");
-    state->requestedSelection = {static_cast<std::uint32_t>(start),
-                                 static_cast<std::uint32_t>(end)};
-  }
+  // Every option that acts on the document, in the order it was written. The
+  // parser has already validated them; this is only about their order, which
+  // is the one thing it does not keep.
+  state->script = readAutomationScript(argc, argv);
 
   return backend;
 }

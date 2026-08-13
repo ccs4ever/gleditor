@@ -292,15 +292,19 @@ private:
   /// Last tag reported to the log, so that hovering over one object does not
   /// print a line per frame.
   render::PickingTag reportedPick{};
-  /// Index of the next AppState::requestedPicks entry to issue.
-  std::size_t nextPick{};
-  /// How many of those queries have come back.
-  std::size_t picksReported{};
-  /// Index of the next AppState::requestedClicks entry to issue, and how many
-  /// have been answered.
-  std::size_t nextClick{};
-  std::size_t clicksReported{};
-  bool selectionApplied{};
+  /// Index of the next AppState::script step to carry out.
+  std::size_t nextStep{};
+  /// Whether the step being carried out is waiting for a picking answer. One
+  /// at a time: the device holds only a couple of reads, and a step that
+  /// issued its own before the last was answered would lose one of them.
+  bool awaitingStep{};
+  /// The pixel a scripted --pick is waiting on, told apart from a click by
+  /// what happens with the answer: a pick is reported, a click places the
+  /// caret.
+  std::optional<std::pair<int, int>> awaitingPick;
+  /// Whether the step being carried out is waiting for work it scheduled --
+  /// the reflow an edit causes -- rather than for a picking answer.
+  bool awaitingSettle{};
   /// Wall time of each settled frame, of collecting its page draws, and of
   /// handing them to the device. Gathered only when --benchmark asked for it.
   std::vector<std::chrono::nanoseconds> benchFrame;
@@ -327,8 +331,16 @@ private:
   void dispatch(RenderState &state, RenderItem &item);
   /// Drain picking reads that have completed since the last frame.
   void collectPickingResults(RenderState &state);
-  /// Apply --select, once any requested clicks have been answered.
-  void applySelectionRequest(bool settled);
+  /// Carry out the next automation step once the one before it has finished.
+  void advanceScript(RenderState &state);
+  /// Finish the step just carried out, or wait for the work it scheduled.
+  void finishStepWhenSettled();
+  /// True when every automation step has been carried out and answered, which
+  /// is when a screenshot shows what the script asked for rather than the
+  /// middle of it.
+  [[nodiscard]] bool scriptFinished() const {
+    return nextStep >= state->script.size() && !awaitingStep;
+  }
   /// Rebuild and upload the highlight spans covering the selection.
   void updateHighlights(RenderState &state);
   /// Insert anything typed since the last frame at the caret.

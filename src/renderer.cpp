@@ -197,7 +197,6 @@ bool Renderer::update(RenderState &state, const bool settled) {
   // immediately as much as on one that is not.
   collectPickingResults(state);
   collectDiagnostics(state);
-  applySelectionRequest(settled);
   applyTypedText(state);
 
   if (!device->beginFrame()) {
@@ -288,20 +287,17 @@ bool Renderer::update(RenderState &state, const bool settled) {
   // built would answer for a document that is not there yet, which for --pick
   // means reporting an empty tag and exiting.
   if (settled) {
-    if (nextPick < this->state->requestedPicks.size()) {
-      // One request per frame. The device can only hold a couple of reads at
-      // once, and issuing more than it accepts would silently drop queries.
-      const auto &[pickX, pickY] = this->state->requestedPicks[nextPick];
-      device->requestPickingTag(pickX, pickY);
-      nextPick++;
-    } else if (nextClick < this->state->requestedClicks.size() &&
-               !awaitingClick) {
-      // One at a time: a click is only answered when its own read comes back,
-      // so issuing the next before then would lose the first.
-      const auto &[clickX, clickY] = this->state->requestedClicks[nextClick];
-      awaitingClick                = std::pair{clickX, clickY};
-      device->requestPickingTag(clickX, clickY);
-      nextClick++;
+    if (awaitingSettle) {
+      // The frame this step's work was scheduled on has been and gone, and
+      // this one is settled, so the work is done and the script may go on.
+      awaitingSettle = false;
+      awaitingStep   = false;
+      nextStep++;
+    } else if (!scriptFinished()) {
+      advanceScript(state);
+    } else if (awaitingStep) {
+      // Waiting on a readback: nothing else may issue one, or the answer this
+      // step is waiting for would be lost among the others.
     } else if (this->state->dragPending.exchange(false)) {
       // A drag reuses the click machinery; only what happens with the answer
       // differs, so the pending pixel is remembered as a drag.
@@ -318,7 +314,7 @@ bool Renderer::update(RenderState &state, const bool settled) {
       awaitingClick     = std::pair{clickX, clickY};
       awaitingDrag      = false;
       device->requestPickingTag(clickX, clickY);
-    } else if (this->state->requestedPicks.empty()) {
+    } else if (!this->state->scriptReportsPicks()) {
       device->requestPickingTag(this->state->mouseX, this->state->mouseY);
     }
   }
@@ -331,8 +327,7 @@ bool Renderer::update(RenderState &state, const bool settled) {
   // Wait for any requested clicks to have been answered: picking is
   // asynchronous, so a frame captured the moment the document settles is one
   // or two frames before the caret those clicks place exists.
-  if (settled && clicksReported >= this->state->requestedClicks.size() &&
-      !this->state->screenshotPath.empty()) {
+  if (settled && scriptFinished() && !this->state->screenshotPath.empty()) {
     writeScreenshot(device->captureColorTarget(), this->state->screenshotPath);
     this->state->screenshotPath.clear();
   }
@@ -343,8 +338,7 @@ bool Renderer::update(RenderState &state, const bool settled) {
   // Only settled frames are measured, and only once every requested click has
   // been answered, so the sample covers the frame the editor actually steadies
   // into rather than one still waiting on a readback.
-  if (settled && 0 != this->state->benchmarkFrames &&
-      clicksReported >= this->state->requestedClicks.size()) {
+  if (settled && 0 != this->state->benchmarkFrames && scriptFinished()) {
     benchFrame.push_back(end - start);
     benchCollect.push_back(recordStart - collectStart);
     benchRecord.push_back(recordEnd - recordStart);
@@ -433,15 +427,27 @@ void Renderer::collectPickingResults(RenderState &state) {
         awaitingClick->second == pick->y) {
       awaitingClick.reset();
       placeCaretFromPick(state, *pick);
-      clicksReported++;
-    }
-    if (!this->state->requestedPicks.empty()) {
+      if (awaitingStep) {
+        // The step that asked for this answer is done; the next one may go.
+        awaitingStep = false;
+        nextStep++;
+      }
+    } else if (awaitingStep && awaitingPick && awaitingPick->first == pick->x &&
+               awaitingPick->second == pick->y) {
       std::cout << std::format(
           "pick {},{}: kind {} doc {} page {} cluster {} frac {:.3f}\n", pick->x,
           pick->y, pick->tag.kind, pick->tag.docIndex, pick->tag.pageIndex,
           pick->tag.clusterIndex, pick->tag.fraction);
-      picksReported++;
-    } else if (!pick->tag.sameObject(reportedPick)) {
+      awaitingPick.reset();
+      awaitingStep = false;
+      nextStep++;
+    }
+
+    // Hovering, reported separately from the script and only when the script
+    // named no pixels of its own: a run that asked about particular places
+    // wants those answers and not a line about where the mouse is.
+    if (!this->state->scriptReportsPicks() &&
+        !pick->tag.sameObject(reportedPick)) {
       // Report transitions rather than every frame: the query runs each frame,
       // but what a reader cares about is the cursor moving onto something new.
       reportedPick = pick->tag;
@@ -457,22 +463,70 @@ void Renderer::collectPickingResults(RenderState &state) {
   }
 }
 
-void Renderer::applySelectionRequest(const bool settled) {
-  // Applied only once every requested click has been answered. A click
-  // replaces a selection rather than extending one, so applying this at
-  // startup meant a later --click silently threw it away -- and the frame that
-  // was supposed to show a partly highlighted quad showed none.
-  if (selectionApplied || !settled || !this->state->requestedSelection ||
-      clicksReported < this->state->requestedClicks.size()) {
+/// Carry out the next step of the automation script, if the one before it has
+/// finished. One step per settled frame at most: a step that queues a picking
+/// read is not finished until the answer arrives, and a step that edits is not
+/// finished until the reflow it caused has settled, which is what `settled`
+/// already says.
+void Renderer::advanceScript(RenderState &state) {
+  if (scriptFinished() || awaitingStep) {
     return;
   }
-  const auto &[from, to] = *this->state->requestedSelection;
-  caret->placeAt(0, from);
-  caret->anchorSelection();
-  caret->extendTo(to);
-  selectionApplied = true;
-  std::cout << std::format("select: doc 0 [{},{})\n", caret->selectionStart(),
-                           caret->selectionEnd());
+  const auto &step = this->state->script[nextStep];
+  using Kind       = AppState::AutomationStep::Kind;
+
+  switch (step.kind) {
+  case Kind::Pick:
+    // Answered on a later frame; collectPickingResults() reports it and moves
+    // the script on.
+    awaitingPick = std::pair{step.x, step.y};
+    awaitingStep = true;
+    device->requestPickingTag(step.x, step.y);
+    return;
+  case Kind::Click:
+    awaitingClick = std::pair{step.x, step.y};
+    awaitingDrag  = false;
+    awaitingStep  = true;
+    device->requestPickingTag(step.x, step.y);
+    return;
+  case Kind::Type:
+    if (!caret->active() || caret->documentIndex() >= state.docs.size()) {
+      std::cerr << "--type with no caret to type at; use --click first\n";
+    } else {
+      state.docs[caret->documentIndex()]->insert(state, caret->byteOffset(),
+                                                 step.text, caret.get());
+    }
+    // An edit schedules a reflow, and this frame was judged settled before it
+    // was made. So the step is not finished here: it finishes on the next
+    // frame that really is settled, which is after the pages it changed have
+    // been laid out again. Otherwise a screenshot would show the document
+    // mid-edit and the step after it would act on one.
+    finishStepWhenSettled();
+    return;
+  case Kind::Select:
+    if (state.docs.empty()) {
+      std::cerr << "--select with no document to select in\n";
+    } else {
+      caret->placeAt(0, step.from);
+      caret->anchorSelection();
+      caret->extendTo(step.to);
+      std::cout << std::format("select: doc 0 [{},{})\n",
+                               caret->selectionStart(), caret->selectionEnd());
+    }
+    finishStepWhenSettled();
+    return;
+  }
+  nextStep++;
+}
+
+void Renderer::finishStepWhenSettled() {
+  // Always a frame, never a test of whether work is pending: an edit may
+  // reflow on the spot rather than through the queue, and either way this
+  // frame was drawn before the edit was made. Waiting for the next settled
+  // frame means waiting for one drawn after it -- and if a reflow was queued,
+  // for one drawn after that, since a queued reflow is what unsettles a frame.
+  awaitingStep   = true;
+  awaitingSettle = true;
 }
 
 void AbstractRenderer::addSpanDecorator(gleditor::SpanDecorator *const decorator) {
@@ -682,9 +736,10 @@ void Renderer::renderLoop(AutoSDLWindow &window) {
 
     // A pick takes a frame or two to come back, so profiling waits for every
     // requested query rather than exiting with one still outstanding.
-    if (settled && this->state->profiling &&
-        picksReported >= this->state->requestedPicks.size() &&
-        clicksReported >= this->state->requestedClicks.size()) {
+    // Every step carried out and answered: the script is what this run was
+    // for, so quitting before it finished would report on a document the
+    // command line did not ask for.
+    if (settled && this->state->profiling && scriptFinished()) {
       this->state->alive = false;
       break;
     }

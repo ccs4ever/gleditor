@@ -910,8 +910,32 @@ void Doc::removeObserver(gleditor::DocumentObserver *const observer) {
                   observers.end());
 }
 
+std::vector<int> Doc::lineBreaksAround(const std::uint32_t at) const {
+  // The line breaks of the page the edit lands on, as they are *now*.
+  //
+  // Taken before the text is spliced, and that is the whole point. A page
+  // shapes itself again on demand, so asking it afterwards asks about text
+  // that already contains the edit: the answer came back equal to the line
+  // breaks after the edit, and the comparison that is supposed to tell a
+  // line-local change from one that moved a word onto another line said "it
+  // moved" every time. Whether it did depended on whether the page happened to
+  // still be holding its layout, which is not something the answer should turn
+  // on.
+  if (pages.empty()) {
+    return {};
+  }
+  std::size_t firstPage = 0;
+  for (std::size_t i = 0; i < pages.size(); i++) {
+    if (at >= pages[i].baseOffset()) {
+      firstPage = i;
+    }
+  }
+  return lineStarts(pages[firstPage].ensureLayout());
+}
+
 void Doc::scheduleReflow(RenderState &state, const std::uint32_t at,
-                         const std::int32_t delta) {
+                         const std::int32_t delta,
+                         const std::vector<int> &oldStarts) {
   // Which page holds the edit. Everything before it is untouched by
   // construction: text ahead of an edit cannot reflow.
   std::size_t firstPage = 0;
@@ -924,9 +948,6 @@ void Doc::scheduleReflow(RenderState &state, const std::uint32_t at,
     return;
   }
 
-  // Line breaks of the edited page before the edit, to tell a line-local
-  // change from one that moved a word onto another line.
-  const auto oldStarts   = lineStarts(pages[firstPage].ensureLayout());
   const auto oldConsumed = pages[firstPage].textLength();
 
   auto self = getPtr();
@@ -942,6 +963,8 @@ void Doc::insert(RenderState &state, const std::uint32_t offset,
   }
   const auto inserted = static_cast<std::uint32_t>(utf8.size());
   const auto at       = std::min<std::uint32_t>(offset, text.bytes());
+  // Before the splice: see lineBreaksAround().
+  const auto oldStarts = lineBreaksAround(at);
 
   // Splice first: the document is the source of truth and must be correct
   // before anything asynchronous looks at it.
@@ -957,7 +980,7 @@ void Doc::insert(RenderState &state, const std::uint32_t offset,
     observer->textInserted(*this, at, utf8);
   }
 
-  scheduleReflow(state, at, static_cast<std::int32_t>(inserted));
+  scheduleReflow(state, at, static_cast<std::int32_t>(inserted), oldStarts);
 }
 
 std::string Doc::erase(RenderState &state, const std::uint32_t offset,
@@ -981,6 +1004,8 @@ std::string Doc::erase(RenderState &state, const std::uint32_t offset,
     return {};
   }
   const auto removed = raw.substr(start, end - start);
+  // Before the erasure, for the same reason as in insert().
+  const auto oldStarts = lineBreaksAround(start);
 
   raw.erase(start, removed.size());
   text = raw;
@@ -994,7 +1019,7 @@ std::string Doc::erase(RenderState &state, const std::uint32_t offset,
     observer->textErased(*this, start, removed);
   }
 
-  scheduleReflow(state, start, delta);
+  scheduleReflow(state, start, delta, oldStarts);
   return removed;
 }
 

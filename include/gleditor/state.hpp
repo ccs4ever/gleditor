@@ -1,6 +1,7 @@
 #ifndef GLEDITOR_STATE_H
 #define GLEDITOR_STATE_H
 
+#include <algorithm>
 #include <atomic>
 #include <chrono>
 #include <glm/ext/vector_float3.hpp>
@@ -22,10 +23,45 @@ struct AppState {
   /// When set, the first fully drawn frame is written here as a PPM and the
   /// path is cleared. Used to compare backends pixel for pixel.
   std::string screenshotPath;
-  /// Picking queries to run once the document has settled, each printed as it
-  /// comes back. Used to compare what the backends report at given pixels.
-  /// Written before the render thread starts and only read after.
-  std::vector<std::pair<int, int>> requestedPicks;
+  /**
+   * @brief One thing to do to the document once it has settled.
+   *
+   * The automation options are a script, carried out in the order they were
+   * written on the command line rather than in categories. Order is the whole
+   * point: "click here, type this, click there, type that" is a sequence, and
+   * a run that did every click and then all the typing would be a different
+   * test -- one that inserts everything at the last caret.
+   *
+   * Each step waits for the one before it. A click waits for its own picking
+   * answer, and typing waits for the reflow it causes, so what the next step
+   * sees is what the last one produced.
+   */
+  struct AutomationStep {
+    enum class Kind : std::uint8_t {
+      Pick,   ///< Report what is at a pixel.
+      Click,  ///< Place the caret at a pixel.
+      Type,   ///< Insert text at the caret.
+      Select, ///< Select a byte range of the first document.
+    };
+    Kind kind{};
+    int x{}; ///< Pick and click: the pixel.
+    int y{};
+    std::uint32_t from{}; ///< Select: document-global byte offsets.
+    std::uint32_t to{};
+    std::string text; ///< Type: the UTF-8 to insert.
+  };
+  /// The script, in command line order. Written before the render thread
+  /// starts and only read after.
+  std::vector<AutomationStep> script;
+
+  /// Whether the script asks for any picking report, which is what decides
+  /// whether hovering is reported: a run that named pixels wants those and not
+  /// a line per frame about the mouse.
+  [[nodiscard]] bool scriptReportsPicks() const {
+    return std::ranges::any_of(script, [](const AutomationStep &step) {
+      return AutomationStep::Kind::Pick == step.kind;
+    });
+  }
   std::atomic_bool alive{true};
   /// Set when the render thread stops because of an error rather than because
   /// it was asked to. The process exit status follows it, so a renderer that
@@ -82,14 +118,6 @@ struct AppState {
   std::atomic_int dragX{-1};
   std::atomic_int dragY{-1};
   std::atomic_bool dragPending{false};
-  /// Clicks to perform once the document has settled, each reported as its
-  /// picking result comes back. Driven by --click so that caret placement can
-  /// be compared between backends the way picking already is.
-  std::vector<std::pair<int, int>> requestedClicks;
-  /// Selection to apply once the document has settled, as document-global byte
-  /// offsets. Drives the highlight without a mouse, so that what a drag would
-  /// produce can be compared between backends.
-  std::optional<std::pair<std::uint32_t, std::uint32_t>> requestedSelection;
   /// Text typed since the render thread last drained it, in UTF-8. Guarded by
   /// its own mutex: SDL delivers it on the event thread and the edit is
   /// applied on the render thread.
