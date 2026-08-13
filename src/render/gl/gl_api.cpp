@@ -108,6 +108,7 @@ void GLApi::load() {
   GLEDITOR_RESOLVE(ClearBufferuiv);
 
   GLEDITOR_RESOLVE(Enable);
+  GLEDITOR_RESOLVE(DepthFunc);
   GLEDITOR_RESOLVE(Disable);
   GLEDITOR_RESOLVE(BlendFunc);
   GLEDITOR_RESOLVE(Viewport);

@@ -93,6 +93,17 @@ void DeviceGL::initialize(AutoSDLWindow &window) {
   api.BindBuffer(GL_UNIFORM_BUFFER, 0);
 
   api.Enable(GL_DEPTH_TEST);
+  // Equal depths pass, and the later draw wins. A page puts its glyphs a tenth
+  // of a unit in front of its paper, which is a separation the depth buffer
+  // cannot always resolve: with the near plane at a tenth of a unit and a
+  // document a thousand units away, one step of a 24-bit depth buffer is over
+  // half a unit there. Under GL_LESS the glyphs then landed in the same step as
+  // the paper they sit on and were discarded -- a page that rendered blank
+  // white, with the text still answering picking queries, depending on nothing
+  // more than where the document happened to be. LEQUAL makes the order within
+  // a page the order it was submitted in, which is the order the page was built
+  // in, and leaves the comparison between documents alone.
+  api.DepthFunc(GL_LEQUAL);
   // The glyph quads are emitted as a triangle strip whose winding alternates
   // between the two triangles, so face culling cannot be used here.
   api.Disable(GL_CULL_FACE);

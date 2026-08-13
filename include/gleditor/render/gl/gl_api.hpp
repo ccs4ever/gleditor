@@ -123,6 +123,7 @@ struct GLApi {
   // -- state
   PFNGLENABLEPROC Enable{};
   PFNGLDISABLEPROC Disable{};
+  PFNGLDEPTHFUNCPROC DepthFunc{};
   PFNGLBLENDFUNCPROC BlendFunc{};
   PFNGLVIEWPORTPROC Viewport{};
   PFNGLCLEARPROC Clear{};
