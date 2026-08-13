@@ -181,33 +181,45 @@ std::string authorPath(const std::string &storePath) {
 
 void Session::setAuthor(Author aWho) {
   who = std::move(aWho);
-  Provenance record;
+  Config record;
   record.author = *who;
   std::filesystem::create_directories(storePath);
   std::ofstream out(authorPath(storePath), std::ios::trunc);
   out << record.toYaml();
 }
 
-const Author &Session::author() {
-  if (who.has_value()) {
-    return *who;
+const Config &Session::settings() {
+  if (!config.has_value()) {
+    config = loadConfig();
   }
-  if (std::ifstream in(authorPath(storePath)); in) {
-    const std::string text{std::istreambuf_iterator<char>(in),
-                           std::istreambuf_iterator<char>()};
-    if (const auto record = parseProvenance(text);
-        record && record->author.named()) {
-      who = record->author;
-      return *who;
+  return *config;
+}
+
+Author Session::author() {
+  auto chosen = settings().author;
+  if (!who.has_value()) {
+    if (std::ifstream in(authorPath(storePath)); in) {
+      const std::string text{std::istreambuf_iterator<char>(in),
+                             std::istreambuf_iterator<char>()};
+      if (const auto record = Config::fromYaml(text); record) {
+        who = record->author;
+      }
     }
   }
-  throw std::runtime_error(
-      "nobody has been named as the author of this store. Publishing binds a "
-      "person to what they published, so say who once:\n"
-      "  xudu " +
-      storePath +
-      " --author-name 'Your Name' --author-email you@example.org "
-      "[--gpg-key KEYID]");
+  // Field by field, so a store that overrides only the name keeps the email
+  // and the key from the configuration rather than blanking them.
+  if (who.has_value()) {
+    if (!who->name.empty()) {
+      chosen.name = who->name;
+    }
+    if (!who->email.empty()) {
+      chosen.email = who->email;
+    }
+    if (!who->gpgKey.empty()) {
+      chosen.gpgKey = who->gpgKey;
+    }
+  }
+  return chosen;
 }
 
 const MutableKeys &Session::identity() {
@@ -244,8 +256,7 @@ const MutableKeys &Session::identity() {
 }
 
 std::string Session::publishDocument(const MicroversionId &version,
-                                     const std::string &salt,
-                                     const std::string &title) {
+                                     const PublishRequest &request) {
   const auto &mine = identity();
   const auto into  = publishedDir();
   const auto now   = static_cast<std::uint64_t>(
@@ -258,10 +269,34 @@ std::string Session::publishDocument(const MicroversionId &version,
   // is; this says who, in a form somebody can check with a tool they already
   // have and against a key that was somebody's identity before this program
   // existed.
+  // What the caller chose for this publication, over what the store says, over
+  // what the configuration says -- see settings().
+  auto who = author();
+  if (!request.author.name.empty()) {
+    who.name = request.author.name;
+  }
+  if (!request.author.email.empty()) {
+    who.email = request.author.email;
+  }
+  if (!request.author.gpgKey.empty()) {
+    who.gpgKey = request.author.gpgKey;
+  }
+  if (!who.named()) {
+    throw std::runtime_error(
+        "nobody has been named as the author. Publishing binds a person to "
+        "what they published, so say who once, in " +
+        configPath() +
+        ":\n"
+        "  author: \"Your Name\"\n"
+        "  email: \"you@example.org\"\n"
+        "or for this store alone with --author-name and --author-email.");
+  }
+
   Provenance record;
-  record.author        = author();
-  record.title         = title;
-  record.salt          = salt;
+  record.author        = who;
+  record.title         = request.title;
+  record.salt          = request.salt;
+  record.extra         = request.extra;
   record.publisher     = mine.publicKey.hex();
   record.version       = version.str();
   record.published     = now;
@@ -282,7 +317,7 @@ std::string Session::publishDocument(const MicroversionId &version,
       }
     }
   }
-  const auto provenance = signProvenance(record);
+  const auto provenance = signProvenance(record, settings().signing());
 
   // One scroll for everything typed on this machine, whatever document it
   // ended up in: the spool is one append-only sequence, so sealing it again
@@ -294,12 +329,13 @@ std::string Session::publishDocument(const MicroversionId &version,
 
   // BEP 44 orders two answers to one name by sequence, so it has to rise.
   // The clock is the one number available here that always has.
-  const auto pub = publish(docStore, version, mine, salt, title,
-                           static_cast<std::int64_t>(now), now, &sealed.scroll);
+  const auto pub =
+      publish(docStore, version, mine, request.salt, request.title,
+              static_cast<std::int64_t>(now), now, &sealed.scroll);
 
   std::filesystem::create_directories(into);
   const auto path =
-      (std::filesystem::path(into) / (salt + ".xanadoc")).string();
+      (std::filesystem::path(into) / (request.salt + ".xanadoc")).string();
   std::ofstream out(path, std::ios::binary | std::ios::trunc);
   out << encodePublication(pub);
   return path;

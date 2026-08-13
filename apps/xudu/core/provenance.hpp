@@ -111,6 +111,29 @@ struct SignedProvenance {
   std::string signature;
 };
 
+/**
+ * @brief Where the key to sign with, or check against, is kept.
+ *
+ * Both empty is the ordinary case: gpg uses the keyring it always uses.
+ */
+struct SigningOptions {
+  /// A GnuPG home directory to use instead of the default.
+  std::string gpgHome;
+  /**
+   * @brief An exported secret key to sign with.
+   *
+   * gpg has signed with keys in a keyring rather than with key files since
+   * 2.1, so a key named here is imported into a keyring of its own for the
+   * one operation and that keyring is then thrown away. The alternative was to
+   * refuse the spelling everybody reaches for first.
+   */
+  std::string secretKeyFile;
+
+  [[nodiscard]] bool bare() const {
+    return gpgHome.empty() && secretKeyFile.empty();
+  }
+};
+
 /// Whether gpg can be run at all. Publishing needs it, so this is what a
 /// caller checks before getting as far as a torrent.
 [[nodiscard]] bool gpgAvailable();
@@ -126,7 +149,8 @@ struct SignedProvenance {
  *         is not in the keyring or has no secret half here. The complaint gpg
  *         made is included, since it is nearly always the actionable part.
  */
-[[nodiscard]] SignedProvenance signProvenance(const Provenance &record);
+[[nodiscard]] SignedProvenance signProvenance(const Provenance &record,
+                                              const SigningOptions &where = {});
 
 /// What checking a signature found.
 struct ProvenanceCheck {
@@ -152,7 +176,8 @@ struct ProvenanceCheck {
  * signature is good, and both are reported. Nothing here decides what to do
  * about the answer.
  */
-[[nodiscard]] ProvenanceCheck verifyProvenance(const SignedProvenance &signed_);
+[[nodiscard]] ProvenanceCheck verifyProvenance(const SignedProvenance &signed_,
+                                               const SigningOptions &where = {});
 
 /**
  * @brief Read the fields back out of a record's YAML.

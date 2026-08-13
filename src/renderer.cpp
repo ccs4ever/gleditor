@@ -489,7 +489,30 @@ void Renderer::advanceScript(RenderState &state) {
     awaitingStep  = true;
     device->requestPickingTag(step.x, step.y);
     return;
+  case Kind::Command:
+    // By name, so a script says what it means. The command queues its own
+    // work, as it would if somebody had pressed the key.
+    if (!this->state->runCommand || !this->state->runCommand(step.text)) {
+      std::cerr << std::format("--do: no command called \"{}\"\n", step.text);
+    }
+    finishStepWhenSettled();
+    return;
+  case Kind::Press:
+    if (nullptr == this->state->modal || !this->state->modal->grabbing()) {
+      std::cerr << "--key with nothing to press it in; use --do first\n";
+    } else {
+      static_cast<void>(this->state->modal->keyPressed(step.key, step.mods));
+    }
+    finishStepWhenSettled();
+    return;
   case Kind::Type:
+    // Into whatever has the keyboard. A form is on screen because something
+    // asked a question, and answering it is what typing means while it is up.
+    if (nullptr != this->state->modal && this->state->modal->grabbing()) {
+      this->state->modal->textTyped(step.text);
+      finishStepWhenSettled();
+      return;
+    }
     if (!caret->active() || caret->documentIndex() >= state.docs.size()) {
       std::cerr << "--type with no caret to type at; use --click first\n";
     } else {
