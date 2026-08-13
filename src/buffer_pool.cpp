@@ -179,8 +179,14 @@ std::uint32_t BufferPool::roomFor(const Allocation &allocation) const {
   return placementOf(allocation, "roomFor").roomRows;
 }
 
-void BufferPool::resize(const Allocation &allocation, const std::uint32_t rows) {
+void BufferPool::resize(const Allocation &allocation, const std::uint32_t rows,
+                        const Contents contents) {
   auto &placement = placementOf(allocation, "resize");
+  if (Contents::Discard == contents) {
+    // The rows about to be written are all of them, so what was erased from
+    // the old contents describes nothing.
+    placement.erased.clear();
+  }
   if (rows <= placement.roomRows) {
     // It fits where it is. Shrinking widens the slack rather than giving rows
     // back: they are in the middle of the buffer, where the only thing that
@@ -198,7 +204,7 @@ void BufferPool::resize(const Allocation &allocation, const std::uint32_t rows) 
   const auto oldRun = placement.rowOffset;
   const auto oldRoom = placement.roomRows;
 
-  if (0 != placement.rowCount) {
+  if (0 != placement.rowCount && Contents::Keep == contents) {
     device->copyBufferRange(
         handle, static_cast<std::size_t>(oldRun) * rowStrideBytes,
         static_cast<std::size_t>(moved) * rowStrideBytes,

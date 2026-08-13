@@ -179,9 +179,11 @@ render::VertexLayout Doc::vertexLayout() {
 // the parameters, which leaves the parameters empty.
 Page::Page(std::shared_ptr<Doc> aDoc, RenderState &state, glm::mat4 &model,
            Glib::RefPtr<Pango::Layout> aLayout, const std::uint32_t aTextOffset,
-           const std::uint32_t aPageIndex)
-    : Drawable(model), doc(std::move(aDoc)), layout(std::move(aLayout)),
-      textOffset(aTextOffset), pageIndex(aPageIndex) {
+           const std::uint32_t aPageIndex,
+           const BufferPool::Allocation &inherited)
+    : Drawable(model), doc(std::move(aDoc)), pageBacking(inherited),
+      layout(std::move(aLayout)), textOffset(aTextOffset),
+      pageIndex(aPageIndex) {
   const auto &layout = this->layout;
 
   const auto color = Doc::VBORow::color;
@@ -459,8 +461,15 @@ Page::Page(std::shared_ptr<Doc> aDoc, RenderState &state, glm::mat4 &model,
     coarseInstances = 0;
   }
 
-  pageBacking = this->doc->pool->reserve(
-      static_cast<std::uint32_t>(vertexData.size()));
+  const auto rows = static_cast<std::uint32_t>(vertexData.size());
+  if (pageBacking.empty()) {
+    pageBacking = this->doc->pool->reserve(rows);
+  } else {
+    // Taking over the rows of the page this one replaces. Every one of them is
+    // written below, so the pool is told not to carry the old contents along
+    // if it does have to move them.
+    this->doc->pool->resize(pageBacking, rows, BufferPool::Contents::Discard);
+  }
   this->doc->pool->write(pageBacking, 0, asBytes(vertexData));
 
   // The shaping has done what it was for: the quads are in the buffer and the
@@ -1045,11 +1054,25 @@ void Doc::reflowFrom(RenderState &state, const std::size_t firstPage,
     }
   }
 
-  // Drop the pages being replaced, returning their rows to the pool.
+  // The rows of the pages being replaced. A rebuilt page takes over the rows
+  // of the page it stands in for -- nearly the same length, since it covers
+  // nearly the same text -- rather than handing them back and asking for them
+  // again. Given back, the pool would satisfy the request from the first hole
+  // that fitted, which is how a page came to move across the buffer on every
+  // keystroke.
   const auto lastRebuilt = firstPage + rebuilt.size();
-  for (std::size_t i = firstPage; i < std::min(lastRebuilt, pages.size()); i++) {
-    pool->release(pages[i].allocation());
+  const auto replaced    = std::min(lastRebuilt, pages.size());
+  std::vector<BufferPool::Allocation> inherited;
+  inherited.reserve(replaced - firstPage);
+  for (std::size_t i = firstPage; i < replaced; i++) {
+    inherited.push_back(pages[i].allocation());
   }
+  // Any page that has no successor gives its rows back for good.
+  for (std::size_t i = rebuilt.size(); i < inherited.size(); i++) {
+    pool->release(inherited[i]);
+  }
+  inherited.resize(std::min(inherited.size(), rebuilt.size()));
+
   const auto tailFrom = std::min(lastRebuilt, pages.size());
   std::vector<Page> tail;
   tail.reserve(pages.size() - tailFrom);
@@ -1066,7 +1089,9 @@ void Doc::reflowFrom(RenderState &state, const std::size_t firstPage,
         glm::mat4(1.0), glm::vec3(0.0F, -100 * static_cast<float>(index), 0.0F));
     trans = glm::scale(trans, glm::vec3(pixelsToWorld, pixelsToWorld, 1.0F));
     pages.emplace_back(getPtr(), state, trans, lay, base,
-                       static_cast<std::uint32_t>(index));
+                       static_cast<std::uint32_t>(index),
+                       i < inherited.size() ? inherited[i]
+                                            : BufferPool::Allocation{});
   }
   // Untouched pages keep their shaping and their vertex rows; only the offset
   // they report moves.
