@@ -93,8 +93,16 @@ jobs:
             rpm-build rpmdevtools make gcc-c++ pkgconf-pkg-config git \
             pangomm2.48-devel cairomm1.16-devel glibmm2.68-devel \
             SDL3-devel SDL3_image-devel mesa-libGL-devel glm-devel \
-            vulkan-loader-devel libtorrent-rasterbar-devel glslang \
+            vulkan-loader-devel glslang \
             desktop-file-utils libappstream-glib python3
+          # rb_libtorrent is the Fedora package name; the upstream project and
+          # everything else in this file call it libtorrent-rasterbar, so this
+          # is asked for by what it provides rather than by that name.
+          # --setopt=install_weak_deps=False above means the -devel package's
+          # boost-devel dependency, if it is only a recommendation rather than
+          # a hard one, would otherwise not be pulled in -- and without boost's
+          # headers libtorrent's own headers fail to compile at all.
+          dnf install -y 'pkgconfig(libtorrent-rasterbar)' boost-devel
 
       - uses: actions/checkout@v7
         with:
@@ -149,7 +157,7 @@ jobs:
           pacman -Syu --noconfirm --needed \
             git pkgconf make gcc pangomm-2.48 cairomm-1.16 glibmm-2.68 \
             sdl3 sdl3_image libglvnd glm vulkan-headers vulkan-icd-loader \
-            libtorrent-rasterbar glslang python
+            libtorrent-rasterbar boost glslang python
 
       - uses: actions/checkout@v7
         with:

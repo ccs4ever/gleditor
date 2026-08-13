@@ -59,6 +59,7 @@ stdenv.mkDerivation {
     # The loader, not just the headers: vulkan.pc belongs to it, and without
     # the .pc file pkg-config returns nothing for the whole package set.
     vulkan-loader
+    libtorrent-rasterbar
   ];
 
   # The Makefile's compiler default is clang++; stdenv supplies its own, and
