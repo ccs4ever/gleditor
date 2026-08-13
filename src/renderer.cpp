@@ -267,8 +267,8 @@ bool Renderer::update(RenderState &state, const bool settled) {
   // Whatever the program draws for itself: after the documents, so it can sit
   // over them, and before the notifications, which must be over everything.
   if (!frameContributors.empty()) {
-    gleditor::FrameContext ctx{state, viewProjection, screenWidth,
-                               screenHeight};
+    gleditor::FrameContext ctx{state, viewProjection, screenWidth, screenHeight,
+                               timeline};
     for (auto *const contributor : frameContributors) {
       contributor->drawFrame(ctx);
     }
@@ -378,6 +378,16 @@ void Renderer::placeCaretFromPick(RenderState &state,
   // lined up with the click that caused it -- and a silent outcome would drop
   // out of a sequence of clicks entirely, which is exactly the misreading this
   // is here to prevent.
+  // Whatever the program drew for itself gets first refusal, because a tag it
+  // wrote is a tag only it can read. One that claims the click has dealt with
+  // it, and the caret stays where it was: clicking on a program's own drawing
+  // is not clicking on the text behind it.
+  for (auto *const observer : pickObservers) {
+    if (observer->picked(pick, state)) {
+      return;
+    }
+  }
+
   if (pick.tag.empty()) {
     // Nothing was drawn at that pixel: the click landed outside every
     // document. That puts the editor back to navigating, dropping the caret
@@ -553,6 +563,18 @@ void AbstractRenderer::addFrameContributor(
 void AbstractRenderer::removeFrameContributor(
     gleditor::FrameContributor *const contributor) {
   std::erase(frameContributors, contributor);
+}
+
+void AbstractRenderer::addPickObserver(gleditor::PickObserver *const observer) {
+  if (nullptr != observer &&
+      std::ranges::find(pickObservers, observer) == pickObservers.end()) {
+    pickObservers.push_back(observer);
+  }
+}
+
+void AbstractRenderer::removePickObserver(
+    gleditor::PickObserver *const observer) {
+  std::erase(pickObservers, observer);
 }
 
 void Renderer::updateHighlights(RenderState &state) {

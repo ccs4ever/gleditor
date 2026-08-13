@@ -11,6 +11,7 @@
 #include <glibmm/refptr.h>
 #include <glibmm/ustring.h>
 #include <glm/ext/matrix_float4x4.hpp>
+#include <glm/ext/vector_float3.hpp>
 #include <deque>
 #include <memory>
 #include <optional>
@@ -177,6 +178,16 @@ public:
    */
   [[nodiscard]] bool caretGeometry(std::uint32_t globalOffset, float &posX,
                                    float &posY, float &height) const;
+
+  /// Page size in the pixel space its glyph positions are in, which is what
+  /// the model matrix scales to world units.
+  [[nodiscard]] float widthPixels() const { return pageWidth; }
+  [[nodiscard]] float heightPixels() const { return pageHeight; }
+  /// Left and top edges in that space. Not zero: a page is centred on its own
+  /// origin so that the matrix placing it positions its middle, which is what
+  /// anything drawing alongside a page has to know to find its margin.
+  [[nodiscard]] float leftPixels() const { return originX; }
+  [[nodiscard]] float topPixels() const { return originY; }
 
   /// This page's own text, as a view into the document's. The offsets the
   /// cluster table carries are relative to its start, and asking the document
@@ -610,6 +621,43 @@ public:
   [[nodiscard]] std::uint32_t documentIndex() const { return docIndex; }
   [[nodiscard]] const Page *page(const std::size_t index) const {
     return index < pages.size() ? &pages[index] : nullptr;
+  }
+
+  /**
+   * @brief Where a byte offset is, as a place on a page rather than a point.
+   *
+   * Kept in the page's own pixel space rather than resolved to a point in the
+   * world, because the two change on different occasions: which page a byte is
+   * on and where on that page moves only when the document is edited, while
+   * where the page is moves whenever the document does -- every frame of an
+   * arrival, a departure or a move. Answering the first is expensive, since it
+   * needs the page's shaping; answering the second from it is a matrix
+   * multiply. So a caller works this out when the text changes and calls
+   * @ref worldPoint every frame.
+   */
+  struct Anchor {
+    std::uint32_t pageIndex{};
+    float x{}; ///< In that page's pixel space.
+    float y{};
+    float height{}; ///< Line height there, for something drawn against it.
+  };
+
+  /// Where @p globalOffset sits, or nothing when no page holds it -- which is
+  /// the answer while a document is still being built.
+  [[nodiscard]] std::optional<Anchor> anchorFor(std::uint32_t globalOffset) const;
+
+  /**
+   * @brief A point in a page's pixel space, in world coordinates.
+   *
+   * Includes any movement still in progress, so a point taken from this
+   * follows the document rather than its resting place.
+   */
+  [[nodiscard]] std::optional<glm::vec3>
+  worldPoint(std::uint32_t pageIndex, float x, float y) const;
+
+  /// Where an anchor is now.
+  [[nodiscard]] std::optional<glm::vec3> worldPoint(const Anchor &anchor) const {
+    return worldPoint(anchor.pageIndex, anchor.x, anchor.y);
   }
 
   /**

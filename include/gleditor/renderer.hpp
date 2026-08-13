@@ -23,6 +23,7 @@
 #include <gleditor/caret.hpp>
 #include <gleditor/draw_budget.hpp>
 #include <gleditor/frame_contributor.hpp>
+#include <gleditor/pick_observer.hpp>
 #include <gleditor/render/device.hpp>
 #include <gleditor/render/types.hpp>
 #include <gleditor/span_decorator.hpp>
@@ -216,10 +217,15 @@ public:
   void removeSpanDecorator(gleditor::SpanDecorator *decorator);
   void addFrameContributor(gleditor::FrameContributor *contributor);
   void removeFrameContributor(gleditor::FrameContributor *contributor);
+  /// Something that wants first refusal on clicks, so that a program can be
+  /// told when one lands on what it drew. Offered in registration order.
+  void addPickObserver(gleditor::PickObserver *observer);
+  void removePickObserver(gleditor::PickObserver *observer);
 
 protected:
   std::vector<gleditor::SpanDecorator *> spanDecorators;
   std::vector<gleditor::FrameContributor *> frameContributors;
+  std::vector<gleditor::PickObserver *> pickObservers;
 };
 
 using RendererRef = std::shared_ptr<AbstractRenderer>;

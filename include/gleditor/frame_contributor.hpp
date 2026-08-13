@@ -15,11 +15,14 @@
 #ifndef GLEDITOR_FRAME_CONTRIBUTOR_H
 #define GLEDITOR_FRAME_CONTRIBUTOR_H
 
+#include <choreograph/Choreograph.h>
 #include <glm/ext/matrix_float4x4.hpp>
 
 #include <gleditor/render/types.hpp>
 
 struct RenderState;
+
+namespace ch = choreograph;
 
 namespace render {
 class RenderDevice;
@@ -36,6 +39,17 @@ struct FrameContext {
   const glm::mat4 &viewProjection;
   int screenWidth{};
   int screenHeight{};
+  /**
+   * @brief The frame's animation timeline.
+   *
+   * Here because a contributor that only draws is the smaller half of what one
+   * is for: a program may want to move the documents themselves -- to bring
+   * two that are connected next to each other, say -- and moving them abruptly
+   * is not the same thing at all. Stepped once per frame by the render loop,
+   * before anything reads a position, so anything started here begins on the
+   * next frame rather than partway through this one.
+   */
+  ch::Timeline &timeline;
 };
 
 /**

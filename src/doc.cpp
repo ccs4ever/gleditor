@@ -639,6 +639,31 @@ glm::mat4 Doc::modelMatrix() const {
   return glm::translate(glm::mat4(1.0F), position());
 }
 
+std::optional<Doc::Anchor> Doc::anchorFor(const std::uint32_t globalOffset) const {
+  for (std::size_t i = 0; i < pages.size(); i++) {
+    // Asked page by page rather than by searching, because the same call
+    // decides whether the offset is on the page and where -- and the deciding
+    // half is answered without shaping anything.
+    Anchor anchor{static_cast<std::uint32_t>(i), 0.0F, 0.0F, 0.0F};
+    if (pages[i].caretGeometry(globalOffset, anchor.x, anchor.y,
+                               anchor.height)) {
+      return anchor;
+    }
+  }
+  return std::nullopt;
+}
+
+std::optional<glm::vec3> Doc::worldPoint(const std::uint32_t pageIndex,
+                                         const float posX,
+                                         const float posY) const {
+  if (pageIndex >= pages.size()) {
+    return std::nullopt;
+  }
+  const auto point = modelMatrix() * pages[pageIndex].getModel() *
+                     glm::vec4(posX, posY, 0.0F, 1.0F);
+  return glm::vec3(point);
+}
+
 void Doc::animateArrival(ch::Timeline &timeline) {
   // The resting place is the translation the constructor was handed; the base
   // class keeps that matrix untouched, so it stays available as the target no
