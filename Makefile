@@ -474,7 +474,26 @@ $(OBJDIR)/layout-latency-probe: $(OBJDIR)/tools/layout-latency-probe.o
 test/swarm: $(OBJDIR)/xudu-swarm-peer $(OBJDIR)/xudu_test
 	tools/swarm-netns-test.sh
 
+# Suites kept out of the tests a person runs after every change. Not because
+# they are unimportant -- they cover the network path, which is where the
+# surprises are -- but because they need a peer on another network stack to do
+# anything, and take their time deciding there is not one. Without that peer
+# they skip, which is worse than not running: a skip reads as a pass.
+#
+# The pull request checks run them for real; see the swarm job in
+# .github/workflows/c-cpp.yml, and `make test/swarm` to run them here.
+SLOW_TESTS  := SwarmTest.*:MutableNameTest.*
+# Override to run something else, including everything: make test TEST_FILTER='*'
+TEST_FILTER ?= -$(SLOW_TESTS)
+
 test: $(OBJDIR)/gleditor_test $(OBJDIR)/xudu_test
+	$(OBJDIR)/gleditor_test --gtest_filter='$(TEST_FILTER)'
+	$(OBJDIR)/xudu_test --gtest_filter='$(TEST_FILTER)'
+
+# Everything, slow suites included. What the pull request checks run, and what
+# to run here before pushing.
+.PHONY: test-all
+test-all: $(OBJDIR)/gleditor_test $(OBJDIR)/xudu_test
 	$(OBJDIR)/gleditor_test
 	$(OBJDIR)/xudu_test
 
