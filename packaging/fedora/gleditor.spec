@@ -18,6 +18,7 @@ BuildRequires:  SDL3_image-devel
 BuildRequires:  pkgconfig(gl)
 BuildRequires:  pkgconfig(vulkan)
 BuildRequires:  glm-devel
+BuildRequires:  pkgconfig(libtorrent-rasterbar)
 BuildRequires:  glslang
 BuildRequires:  desktop-file-utils
 BuildRequires:  libappstream-glib

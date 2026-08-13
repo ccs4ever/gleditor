@@ -37,7 +37,7 @@ jobs:
             build-essential debhelper devscripts pkg-config \
             libpangomm-2.48-dev libcairomm-1.16-dev libglibmm-2.68-dev \
             libsdl2-dev libsdl2-image-dev libgl-dev libglm-dev \
-            libvulkan-dev glslang-tools
+            libvulkan-dev libtorrent-rasterbar-dev glslang-tools
 
       # dpkg-buildpackage wants debian/ at the root of the tree it is building.
       # It lives under packaging/ in the repository so that four packaging
@@ -93,8 +93,8 @@ jobs:
             rpm-build rpmdevtools make gcc-c++ pkgconf-pkg-config git \
             pangomm2.48-devel cairomm1.16-devel glibmm2.68-devel \
             SDL3-devel SDL3_image-devel mesa-libGL-devel glm-devel \
-            vulkan-loader-devel glslang desktop-file-utils libappstream-glib \
-            python3
+            vulkan-loader-devel libtorrent-rasterbar-devel glslang \
+            desktop-file-utils libappstream-glib python3
 
       - uses: actions/checkout@v7
         with:
@@ -149,7 +149,7 @@ jobs:
           pacman -Syu --noconfirm --needed \
             git pkgconf make gcc pangomm-2.48 cairomm-1.16 glibmm-2.68 \
             sdl3 sdl3_image libglvnd glm vulkan-headers vulkan-icd-loader \
-            glslang python
+            libtorrent-rasterbar glslang python
 
       - uses: actions/checkout@v7
         with:
@@ -264,7 +264,7 @@ jobs:
           msystem: UCRT64
           update: true
           install: >-
-            git zip make gawk
+            git zip unzip make gawk
             mingw-w64-ucrt-x86_64-gcc
             mingw-w64-ucrt-x86_64-pkgconf
             mingw-w64-ucrt-x86_64-glm
@@ -300,11 +300,13 @@ jobs:
           pkgs="$pkgs $(resolve glibmm glibmm-2.68 glibmm2.68 glibmm)"
           pkgs="$pkgs $(resolve sdl3 sdl3 SDL3)"
           pkgs="$pkgs $(resolve sdl3.image sdl3-image sdl3_image SDL3_image)"
+          pkgs="$pkgs $(resolve libtorrent-rasterbar libtorrent-rasterbar rb-libtorrent)"
           echo "installing:$pkgs"
           # shellcheck disable=SC2086
           pacman -S --noconfirm --needed $pkgs
           echo "--- what pkg-config sees ---"
-          pkg-config --modversion pangomm-2.48 cairomm-1.16 glibmm-2.68 sdl3
+          pkg-config --modversion pangomm-2.48 cairomm-1.16 glibmm-2.68 sdl3 \
+            libtorrent-rasterbar
 
       # AccessKit is what reports the user interface to screen readers -- UI
       # Automation on Windows. Its C bindings are published as one archive
