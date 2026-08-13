@@ -19,6 +19,7 @@
 #include <exception>
 #include <iostream>
 #include <memory>
+#include <optional>
 #include <stdexcept>
 #include <string>
 #include <string_view>
@@ -200,7 +201,15 @@ public:
     });
   }
 
-  /// Attach a link to the selected content.
+  /**
+   * @brief Mark one end of a link, then join it to another selection.
+   *
+   * Two presses rather than one, because a link has two ends and the second is
+   * usually in another document -- which is the case worth being able to make
+   * at all. The far end may be a document read in from somebody else's
+   * publication, and this one need never be published: what a link relates is
+   * content, so only an end that has to travel needs a name that travels.
+   */
   void linkSelection() {
     withCaret([this](RenderState &, const Where &where, Caret *) {
       if (!where.hasRange) {
@@ -208,19 +217,66 @@ public:
         return;
       }
       const auto version = session.versionOf(where.doc);
-      xudu::Link link;
-      link.type  = xudu::LinkType::Comment;
-      link.owner = "you";
       // The ends are primedia addresses rather than positions in this
       // document, which is what makes the link show up on everything that
       // quotes the content and survive editing around it.
-      link.left = session.store().rebuild(version).spansFor(
+      auto spans = session.store().rebuild(version).spansFor(
           where.start, where.end - where.start);
 
-      const auto after = session.store().addLink(version, link);
-      std::cout << "xudu: link over [" << where.start << "," << where.end
-                << ") at " << after.str() << "\n";
-      showOnly(after);
+      if (!pending) {
+        pending = Pending{where.doc, where.start, where.end, std::move(spans)};
+        std::cout << "xudu: link from doc " << where.doc << " [" << where.start
+                  << "," << where.end
+                  << ") -- select the other end and press ctrl-l again\n";
+        return;
+      }
+
+      xudu::Link link;
+      link.type  = xudu::LinkType::Comment;
+      link.owner = "you";
+      link.left  = std::move(pending->spans);
+      link.right = std::move(spans);
+      const auto after = session.addLink(where.doc, link);
+      std::cout << "xudu: link doc " << pending->doc << " [" << pending->start
+                << "," << pending->end << ") -> doc " << where.doc << " ["
+                << where.start << "," << where.end << ") at " << after.str()
+                << "\n";
+      pending.reset();
+    });
+  }
+
+  /// Forget a link that was begun and not finished.
+  void cancelLink() {
+    renderer->runWithState([this](RenderState &) {
+      if (!pending) {
+        std::cout << "xudu: no link waiting for its other end\n";
+        return;
+      }
+      std::cout << "xudu: dropped the link begun at doc " << pending->doc
+                << " [" << pending->start << "," << pending->end << ")\n";
+      pending.reset();
+    });
+  }
+
+  /// Publish the document the caret is in, or the first one open.
+  void publishCurrent(const std::string &salt) {
+    renderer->runWithState([this, salt](RenderState &) {
+      if (session.views().empty()) {
+        std::cout << "xudu: nothing open to publish\n";
+        return;
+      }
+      auto *const caret = renderer->editCaret();
+      const auto which  = nullptr != caret && caret->active() &&
+                                 caret->documentIndex() < session.views().size()
+                              ? caret->documentIndex()
+                              : 0U;
+      try {
+        const auto path = session.publishDocument(session.versionOf(which),
+                                                  salt, salt);
+        std::cout << "xudu: published doc " << which << " as " << path << "\n";
+      } catch (const std::exception &err) {
+        std::cout << "xudu: cannot publish: " << err.what() << "\n";
+      }
     });
   }
 
@@ -242,14 +298,23 @@ public:
   }
 
 private:
+  /// One end of a link that has been marked and not yet joined to another.
+  struct Pending {
+    std::uint32_t doc{};
+    std::uint32_t start{};
+    std::uint32_t end{};
+    std::vector<xudu::PrimediaSpan> spans;
+  };
+
   Session &session;
   RendererRef renderer;
   HypertimeMap &map;
+  std::optional<Pending> pending;
 };
 
 void bindCommands(gleditor::Application &app, const AppStateRef &state,
                   Views &views, HypertimeMap &map, LinkBeams &links,
-                  Session &session) {
+                  Session &session, const std::string &publishAs) {
   app.bindDefaultViewCommands();
 
   // Commands take control, because a bare letter is text: this program's
@@ -276,14 +341,22 @@ void bindCommands(gleditor::Application &app, const AppStateRef &state,
                       "quote the selection into a second document",
                       [&views] { views.transcludeSelection(); });
   app.commands().bind(SDL_SCANCODE_L, Mod::Ctrl, "link",
-                      "attach a link to the selected content",
+                      "mark one end of a link, then join it to another "
+                      "selection -- in this document or any other open one",
                       [&views] { views.linkSelection(); });
+  app.commands().bind(SDL_SCANCODE_L, Mod::Ctrl | Mod::Shift, "cancel link",
+                      "forget a link that was begun and not finished",
+                      [&views] { views.cancelLink(); });
   app.commands().bind(SDL_SCANCODE_K, Mod::Ctrl, "beams",
                       "show or hide the links between documents",
                       [&links] { links.toggle(); });
   app.commands().bind(SDL_SCANCODE_K, Mod::Ctrl | Mod::Shift, "sworph",
                       "let a link coming into view bring its far document over",
                       [&links] { links.setSworph(!links.sworphing()); });
+  app.commands().bind(SDL_SCANCODE_S, Mod::Ctrl | Mod::Shift, "publish",
+                      "publish the document the caret is in, so it can be read "
+                      "off this machine",
+                      [&views, publishAs] { views.publishCurrent(publishAs); });
   app.commands().bind(SDL_SCANCODE_P, Mod::Ctrl, "history",
                       "print every state to the terminal",
                       [&views] { views.printHistory(); });
@@ -371,6 +444,20 @@ int main(const int argc, char **argv) {
             "states or two documents against each other; passages they share "
             "are shaded in both")
       .default_value(std::string{});
+  parser.add_argument("--read")
+      .help("open a published document from a manifest file; repeatable. It is "
+            "taken into this store, so it can then be read, quoted and linked "
+            "to by documents here -- including ones that have never been "
+            "published themselves. Refused if the manifest is not signed by "
+            "whoever it claims to be from")
+      .append();
+  parser.add_argument("--publish")
+      .help("publish the opening document under this name, writing a signed "
+            "manifest and the torrent carrying what was typed here into "
+            "<store>/published. The name is a salt under this machine's key: "
+            "publishing again under the same name is a further state of the "
+            "same document. Ctrl-shift-s does the same while running")
+      .default_value(std::string{});
   parser.add_argument("--import")
       .help("read this file into an empty store as its first operation; a "
             "store that already has operations is left alone, since importing "
@@ -388,6 +475,8 @@ int main(const int argc, char **argv) {
   bool quiet = false;
   MicroversionId opening;
   std::string alongside;
+  std::string publishAs;
+  std::vector<MicroversionId> read;
   try {
     parser.parse_args(argc, argv);
     backend  = gleditor::applyCommonArguments(parser, state, argc, argv);
@@ -522,10 +611,31 @@ int main(const int argc, char **argv) {
       session->save();
     }
 
+    // Before the opening version is chosen, so that reading a document in and
+    // saying nothing else opens the thing that was just read rather than
+    // whatever this store happened to be showing.
+    if (parser.present<std::vector<std::string>>("--read")) {
+      for (const auto &file : parser.get<std::vector<std::string>>("--read")) {
+        read.push_back(session->readPublication(file));
+      }
+      session->save();
+    }
+
     const auto asked = parser.get<std::string>("--version-id");
-    opening = asked.empty() ? session->store().latest()
+    opening = asked.empty() ? (read.empty() ? session->store().latest()
+                                            : read.front())
                             : MicroversionId::parse(asked);
     alongside = parser.get<std::string>("--alongside");
+    publishAs = parser.get<std::string>("--publish");
+    if (!publishAs.empty()) {
+      // Done before anything is printed about it: publishing may have to mint
+      // this machine's name, which says so, and a half-written line with that
+      // in the middle of it is not a message anybody can read.
+      const auto manifest =
+          session->publishDocument(opening, publishAs, publishAs);
+      quiet || std::cout << "xudu: published " << opening.str() << " as "
+                         << manifest << "\n";
+    }
 
     quiet || std::cout << "xudu " << TOSTRING(GLEDITOR_VERSION) << ": "
                        << session->store().opCount() << " operations in "
@@ -568,9 +678,17 @@ int main(const int argc, char **argv) {
     if (!alongside.empty()) {
       views.showAlongside(MicroversionId::parse(alongside));
     }
+    // Anything else read in, so that a link between two published documents is
+    // a link between two documents on screen.
+    for (const auto &also : read) {
+      if (also != opening) {
+        views.showAlongside(also);
+      }
+    }
 
     gleditor::Application app(state, renderer, backend, "Xudu");
-    bindCommands(app, state, views, map, links, *session);
+    bindCommands(app, state, views, map, links, *session,
+                 publishAs.empty() ? std::string{"document"} : publishAs);
     // A query prints its answer and nothing else: --print-asset-dir is read by
     // scripts, and a command listing in front of the path is not a path.
     quiet || std::cout << "commands:\n" << app.commands().helpText();

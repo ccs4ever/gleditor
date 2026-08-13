@@ -78,6 +78,17 @@ struct PublicKey {
  */
 struct SecretKey {
   std::array<std::uint8_t, 64> bytes{};
+
+  /**
+   * @brief The key as hex, for keeping it between runs.
+   *
+   * An identity that only lasts as long as a process is not an identity: the
+   * name a publisher is known by is the one they can still publish under
+   * tomorrow. Whatever holds this is holding the authority to move that name,
+   * so it belongs somewhere only its owner can read.
+   */
+  [[nodiscard]] std::string hex() const;
+  [[nodiscard]] static SecretKey fromHex(std::string_view text);
 };
 
 /// An ed25519 signature over the bytes BEP 44 asks to be signed.

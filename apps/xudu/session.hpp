@@ -28,6 +28,7 @@
 #include <gleditor/text_source.hpp>
 
 #include "core/microversion.hpp"
+#include "core/publication.hpp"
 #include "core/resolver.hpp"
 #include "core/store.hpp"
 #include "core/swarm.hpp"
@@ -204,6 +205,67 @@ public:
                               const InfoHash &hash, std::uint32_t fileIndex,
                               std::uint64_t offset, std::uint64_t length);
 
+  /**
+   * @brief Read a published document and take it into this store.
+   *
+   * After this it is a document like any other here: it can be read, quoted,
+   * and linked to by documents written on this machine that have never been
+   * published themselves. Nothing about it is copied -- its pieces point at
+   * the publisher's scrolls, so this store and theirs are pointing at one copy
+   * of the content, which is what makes a link between them a link about the
+   * same passage.
+   *
+   * @param path A manifest as publishDocument() writes one.
+   * @return The state showing it, ready to be opened.
+   * @throws std::runtime_error when the file cannot be read, is not a
+   *         publication, or is not signed by whoever it claims.
+   */
+  MicroversionId readPublication(const std::string &path);
+
+  /**
+   * @brief This machine's publishing identity, minted on first use.
+   *
+   * An ed25519 key pair kept beside the spools. It is the name this machine's
+   * publications are known by, so it has to be the same one tomorrow -- and
+   * the secret half is the whole of the authority to publish under that name,
+   * so the file is written readable only by its owner.
+   *
+   * @throws std::runtime_error when this build has no ed25519.
+   */
+  [[nodiscard]] const MutableKeys &identity();
+
+  /**
+   * @brief Publish @p version so it can be read off this machine.
+   *
+   * Seals whatever has been typed here into the machine's scroll first, which
+   * is what gives local content a global address; a document made entirely of
+   * quotations needs no sealing but is sealed with everything else anyway,
+   * since the spool is one scroll and sealing it again only covers what is
+   * new.
+   *
+   * @param salt Which document under this machine's name. The same salt
+   *        publishes a further state of the same document.
+   * @return Where the manifest was written.
+   * @throws std::runtime_error when the version points at content that cannot
+   *         be given a global address, or when this build has no ed25519.
+   */
+  std::string publishDocument(const MicroversionId &version,
+                              const std::string &salt,
+                              const std::string &title);
+
+  /// Where publishing writes manifests, torrents and the sealed spool.
+  [[nodiscard]] std::string publishedDir() const;
+
+  /**
+   * @brief Record a link, and move @p docIndex's view to the state that made
+   *        it.
+   *
+   * A link changes no text, so the document on screen is unaffected; what
+   * moves is where in hypertime that view sits, which is what makes making a
+   * link an act that can be gone back past like any other.
+   */
+  MicroversionId addLink(std::uint32_t docIndex, Link link);
+
   [[nodiscard]] Store &store() { return docStore; }
   [[nodiscard]] const Store &store() const { return docStore; }
 
@@ -299,6 +361,8 @@ private:
   std::uint64_t epoch{1};
   std::string storePath;
   std::vector<OpenView> open;
+  /// This machine's key pair, read or minted the first time it is wanted.
+  std::optional<MutableKeys> keys;
 
 public:
   /// Forget every open view. Used when the program replaces what is on screen

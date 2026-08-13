@@ -47,6 +47,12 @@ bool PublicKey::isZero() const {
                              [](const std::uint8_t byte) { return 0 == byte; });
 }
 
+std::string SecretKey::hex() const { return arrayToHex(bytes); }
+
+SecretKey SecretKey::fromHex(const std::string_view text) {
+  return {arrayFromHex<64>(text, "secret key")};
+}
+
 std::string Signature::hex() const { return arrayToHex(bytes); }
 
 Signature Signature::fromHex(const std::string_view text) {
