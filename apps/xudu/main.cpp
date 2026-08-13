@@ -37,6 +37,7 @@
 #include <gleditor/state.hpp>
 #include <gleditor/text_source.hpp>
 
+#include "beams.hpp"
 #include "core/microversion.hpp"
 #include "core/ops.hpp"
 #include "core/mutable_link.hpp"
@@ -47,6 +48,7 @@ namespace {
 
 using gleditor::Mod;
 using xudu::HypertimeMap;
+using xudu::LinkBeams;
 using xudu::MicroversionId;
 using xudu::Session;
 
@@ -246,7 +248,8 @@ private:
 };
 
 void bindCommands(gleditor::Application &app, const AppStateRef &state,
-                  Views &views, HypertimeMap &map, Session &session) {
+                  Views &views, HypertimeMap &map, LinkBeams &links,
+                  Session &session) {
   app.bindDefaultViewCommands();
 
   // Commands take control, because a bare letter is text: this program's
@@ -275,6 +278,12 @@ void bindCommands(gleditor::Application &app, const AppStateRef &state,
   app.commands().bind(SDL_SCANCODE_L, Mod::Ctrl, "link",
                       "attach a link to the selected content",
                       [&views] { views.linkSelection(); });
+  app.commands().bind(SDL_SCANCODE_K, Mod::Ctrl, "beams",
+                      "show or hide the links between documents",
+                      [&links] { links.toggle(); });
+  app.commands().bind(SDL_SCANCODE_K, Mod::Ctrl | Mod::Shift, "sworph",
+                      "let a link coming into view bring its far document over",
+                      [&links] { links.setSworph(!links.sworphing()); });
   app.commands().bind(SDL_SCANCODE_P, Mod::Ctrl, "history",
                       "print every state to the terminal",
                       [&views] { views.printHistory(); });
@@ -343,6 +352,19 @@ int main(const int argc, char **argv) {
       .append();
   parser.add_argument("--map")
       .help("start with the hypertime map shown; ctrl-m toggles it")
+      .flag();
+  parser.add_argument("--no-beams")
+      .help("do not draw the links between open documents as beams; ctrl-k "
+            "toggles them. A link is a visible relation between two passages "
+            "and both ends are meant to be on screen, which is what the beams "
+            "are for")
+      .flag();
+  parser.add_argument("--no-sworph")
+      .help("leave the documents where they are put. By default a link coming "
+            "into view brings the document at its far end alongside the one at "
+            "its near end and lines the two ends up, opening that document if "
+            "nothing on screen shows it; clicking a beam still does so, since "
+            "that was asked for")
       .flag();
   parser.add_argument("--alongside")
       .help("also open this microversion as a second document, for reading two "
@@ -522,11 +544,25 @@ int main(const int argc, char **argv) {
     map.setVisible(parser["--map"] == true);
     Views views(*session, renderer, map);
 
-    // Both registered before the render thread starts, which is the contract:
-    // the decorator is asked every frame, and the map needs the device the
-    // moment there is one.
+    LinkBeams links(*session, renderer);
+    links.setVisible(parser["--no-beams"] != true);
+    links.setSworph(parser["--no-sworph"] != true);
+    // A link's far end is usually in a document nobody has opened, and this is
+    // how one gets opened. Queued rather than done on the spot: it is called
+    // from the render thread, and opening a document is that thread's work.
+    links.setOpener([&views](const MicroversionId &version) {
+      views.showAlongside(version);
+    });
+
+    // All registered before the render thread starts, which is the contract:
+    // the decorator is asked every frame, and the map and the beams need the
+    // device the moment there is one.
     renderer->addSpanDecorator(session.get());
     renderer->addFrameContributor(&map);
+    renderer->addFrameContributor(&links);
+    // Before the caret gets a click, so that clicking a beam follows it rather
+    // than putting the caret behind it.
+    renderer->addPickObserver(&links);
 
     views.showAlongside(opening);
     if (!alongside.empty()) {
@@ -534,7 +570,7 @@ int main(const int argc, char **argv) {
     }
 
     gleditor::Application app(state, renderer, backend, "Xudu");
-    bindCommands(app, state, views, map, *session);
+    bindCommands(app, state, views, map, links, *session);
     // A query prints its answer and nothing else: --print-asset-dir is read by
     // scripts, and a command listing in front of the path is not a path.
     quiet || std::cout << "commands:\n" << app.commands().helpText();

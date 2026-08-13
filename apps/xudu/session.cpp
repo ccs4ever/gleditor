@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <cstdint>
 #include <filesystem>
+#include <ranges>
 #include <fstream>
 #include <iostream>
 #include <iterator>
@@ -169,6 +170,29 @@ MicroversionId Session::quoteTorrent(const MicroversionId &parent,
 
 MicroversionId Session::versionOf(const std::uint32_t docIndex) const {
   return docIndex < open.size() ? open[docIndex].version : MicroversionId{};
+}
+
+std::optional<MicroversionId>
+Session::versionShowing(const std::vector<PrimediaSpan> &ends,
+                        const std::vector<MicroversionId> &except) const {
+  if (ends.empty()) {
+    return std::nullopt;
+  }
+  auto candidates = docStore.allVersions();
+  // Most recent first: content is quoted, so several states may show it, and
+  // the one somebody is likely to mean is the one furthest along.
+  for (const auto &id : std::ranges::reverse_view(candidates)) {
+    if (std::ranges::find(except, id) != except.end()) {
+      continue;
+    }
+    const auto pieces = docStore.rebuild(id);
+    for (const auto &span : ends) {
+      if (!pieces.occurrencesOf(span).empty()) {
+        return id;
+      }
+    }
+  }
+  return std::nullopt;
 }
 
 void Session::viewOpened(const MicroversionId &version) {

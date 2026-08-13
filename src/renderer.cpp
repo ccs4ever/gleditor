@@ -39,16 +39,6 @@ namespace {
 /// any working directory.
 std::string shaderDir() { return gleditor::assetPath("shaders"); }
 
-/// World units between the resting places of adjacent documents.
-constexpr float docSpacing = 50.0F;
-
-/// Where the document at @p index belongs when nothing is animating. The one
-/// place the row is described, so opening, closing and moving cannot disagree
-/// about it.
-glm::vec3 docSlot(const std::size_t index) {
-  return {docSpacing * static_cast<float>(index), 0.0F, 0.0F};
-}
-
 /**
  * @brief Write a captured frame as a binary PPM.
  *
@@ -160,13 +150,13 @@ void Renderer::closeDoc(RenderState &state, const std::uint32_t index) {
   // stale would make clicks land on the wrong document.
   for (std::size_t i = 0; i < state.docs.size(); i++) {
     state.docs[i]->setDocIndex(static_cast<std::uint32_t>(i));
-    state.docs[i]->animateMoveTo(timeline, docSlot(i));
+    state.docs[i]->animateMoveTo(timeline, AbstractRenderer::documentSlot(i));
   }
 }
 
 void Renderer::openDoc(RenderState &state, const gleditor::TextSource &source) {
   const auto newDocPosition =
-      glm::translate(glm::mat4(1.0), docSlot(state.docs.size()));
+      glm::translate(glm::mat4(1.0), AbstractRenderer::documentSlot(state.docs.size()));
   std::cout << "doc pos: " << state.docs.size() << " "
             << glm::to_string(newDocPosition) << "\n";
   auto docPtr = Doc::create(getPtr(), device.get(), newDocPosition, source);

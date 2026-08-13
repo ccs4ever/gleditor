@@ -23,7 +23,7 @@ void main() {
     // And fade along its length, brightest at the end it starts from. Which
     // way a link points is a fact about the link, and this says it without an
     // arrowhead to draw or a direction to explain.
-    float along = mix(1.0, 0.35, vAlong);
+    float along = mix(1.0, 0.55, vAlong);
 
     outColour = vec4(vColour.rgb, vColour.a * edge * along * vOpacity);
     outTag = uvec4(vTag, 0u, 0u);

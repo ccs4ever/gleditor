@@ -213,6 +213,23 @@ public:
    */
   [[nodiscard]] virtual Caret *editCaret() { return nullptr; }
 
+  /**
+   * @brief World units between the resting places of adjacent documents.
+   *
+   * Public because a program that moves a document -- to bring one next to
+   * another it is connected to, say -- has to be able to say "one place over"
+   * in the same units the renderer arranges them in. Guessing a distance would
+   * leave the document somewhere no other document ever sits.
+   */
+  static constexpr float docSpacing = 50.0F;
+
+  /// Where the document at @p index rests when nothing is animating. The one
+  /// place the row is described, so opening, closing, moving and anything a
+  /// program does to a document cannot disagree about it.
+  [[nodiscard]] static glm::vec3 documentSlot(const std::size_t index) {
+    return {docSpacing * static_cast<float>(index), 0.0F, 0.0F};
+  }
+
   void addSpanDecorator(gleditor::SpanDecorator *decorator);
   void removeSpanDecorator(gleditor::SpanDecorator *decorator);
   void addFrameContributor(gleditor::FrameContributor *contributor);
