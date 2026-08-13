@@ -1,19 +1,19 @@
 // #include <fuzztest/fuzztest.h>
-#include <gtest/gtest.h>                    // for TestInfo (ptr only), TEST_F, for AssertionResult, Message
-#include <gleditor/glyphcache/palette.hpp>  // for GlyphPalette
-#include <gleditor/log.hpp>                 // for operator<<, Loggable
-#include <gleditor/glyphcache/types.hpp>    // for Rect
-#include <cstddef>                          // for byte
-#include <memory>                           // for allocator, shared_ptr
-#include <span>                             // for span
-#include <optional>                         // for nullopt
-#include <sstream>                          // for basic_stringstream, char_...
-#include <utility>                          // for to_underlying, move
-#include <vector>                           // for vector
-#include <tuple>                            // for tuple
+#include <cstddef>                         // for byte
+#include <gleditor/glyphcache/palette.hpp> // for GlyphPalette
+#include <gleditor/glyphcache/types.hpp>   // for Rect
+#include <gleditor/log.hpp>                // for operator<<, Loggable
+#include <gtest/gtest.h> // for TestInfo (ptr only), TEST_F, for AssertionResult, Message
+#include <memory>   // for allocator, shared_ptr
+#include <optional> // for nullopt
+#include <span>     // for span
+#include <sstream>  // for basic_stringstream, char_...
+#include <tuple>    // for tuple
+#include <utility>  // for to_underlying, move
+#include <vector>   // for vector
 
-#include "mocks/device.hpp"                 // for MockRenderDevice
-#include <gmock/gmock.h>                    // for NiceMock, EXPECT_CALL
+#include "mocks/device.hpp" // for MockRenderDevice
+#include <gmock/gmock.h>    // for NiceMock, EXPECT_CALL
 
 enum class Length : int;
 
@@ -60,7 +60,7 @@ TEST_F(GlyphPaletteTest, moveAssignmentKeepsDeviceOfSource) {
 
   GlyphPalette source(dims, &otherDevice, texture, 3);
   GlyphPalette dest = makePalette();
-  dest = std::move(source);
+  dest              = std::move(source);
   EXPECT_EQ(dest.layerIndex(), 3);
   dest.put(Rect{Length{10}, Length{10}}, kPixels);
 }
@@ -88,7 +88,7 @@ TEST_F(GlyphPaletteTest, uploadsTargetOwnLayer) {
 
 TEST_F(GlyphPaletteTest, equality) {
   GlyphPalette alice = makePalette();
-  GlyphPalette bob = makePalette();
+  GlyphPalette bob   = makePalette();
   EXPECT_EQ(alice, bob) << "GlyphPalette should equal GlyphPalette";
 }
 
@@ -104,7 +104,7 @@ TEST_F(GlyphPaletteTest, less) {
 TEST_F(GlyphPaletteTest, greater) {
   EXPECT_CALL(*device, updateTextureLayer).Times(1);
   GlyphPalette alice = makePalette();
-  GlyphPalette bob = makePalette();
+  GlyphPalette bob   = makePalette();
   bob.put(Rect{Length{10}, Length{10}}, kPixels);
   EXPECT_GT(alice, bob)
       << "alice should sort last as it has the most available height";
@@ -113,7 +113,7 @@ TEST_F(GlyphPaletteTest, greater) {
 TEST_F(GlyphPaletteTest, ordering) {
   EXPECT_CALL(*device, updateTextureLayer).Times(3);
   GlyphPalette alice = makePalette();
-  GlyphPalette bob = makePalette();
+  GlyphPalette bob   = makePalette();
   bob.put(Rect{Length{10}, Length{10}}, kPixels);
   bob.put(Rect{Length{10}, Length{20}},
           kPixels); // height 20 char to force into a new lane

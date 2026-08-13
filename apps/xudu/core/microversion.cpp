@@ -111,9 +111,8 @@ MicroversionId MicroversionId::next() const {
 
 MicroversionId MicroversionId::branch(const char letter) const {
   auto branched = parts;
-  branched.push_back(
-      Segment{static_cast<char>(std::tolower(static_cast<unsigned char>(letter))),
-              1});
+  branched.push_back(Segment{
+      static_cast<char>(std::tolower(static_cast<unsigned char>(letter))), 1});
   return MicroversionId{std::move(branched)};
 }
 

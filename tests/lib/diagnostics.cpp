@@ -84,9 +84,9 @@ TEST(Diagnostics, theFirstErrorIsTheOneReported) {
   sink.setStrict(true);
   sink.record(DiagnosticSeverity::Error, "first failure");
   sink.record(DiagnosticSeverity::Error, "second failure");
-  EXPECT_THAT([&sink] { sink.raiseIfError("test"); },
-              testing::ThrowsMessage<std::runtime_error>(
-                  HasSubstr("first failure")));
+  EXPECT_THAT(
+      [&sink] { sink.raiseIfError("test"); },
+      testing::ThrowsMessage<std::runtime_error>(HasSubstr("first failure")));
 }
 
 // Drivers repeat the same complaint every draw call; without deduplication the

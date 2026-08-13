@@ -55,8 +55,9 @@ TEST(ShaderSource, onlyGlesDeclaresDefaultPrecision) {
 // Vulkan requires a location on every interface variable; GLSL 3.30 and
 // GLSL ES 3.00 reject them on varyings and match by name instead.
 TEST(ShaderSource, onlyVulkanLocatesVaryings) {
-  EXPECT_THAT(vertexPreamble(Backend::Vulkan),
-              HasSubstr("#define GLEDITOR_OUT(loc) layout(location = loc) out"));
+  EXPECT_THAT(
+      vertexPreamble(Backend::Vulkan),
+      HasSubstr("#define GLEDITOR_OUT(loc) layout(location = loc) out"));
   EXPECT_THAT(vertexPreamble(Backend::OpenGL),
               HasSubstr("#define GLEDITOR_OUT(loc) out\n"));
   EXPECT_THAT(vertexPreamble(Backend::OpenGLES),
@@ -88,8 +89,9 @@ TEST(ShaderSource, vulkanDeclaresUniformsThroughDescriptors) {
   // The highlight table is read per fragment -- selection depends on where
   // inside a quad a fragment sits -- so it is declared in that stage, not the
   // vertex one.
-  EXPECT_THAT(frag,
-              HasSubstr("layout(set = 0, binding = 0, std140) uniform Highlights"));
+  EXPECT_THAT(
+      frag,
+      HasSubstr("layout(set = 0, binding = 0, std140) uniform Highlights"));
   EXPECT_THAT(frag,
               HasSubstr("layout(set = 0, binding = 1) uniform sampler2DArray"));
   EXPECT_THAT(vert, testing::Not(HasSubstr("Highlights")))
@@ -139,9 +141,8 @@ TEST(ShaderSource, highlightArrayMatchesTheHostSideBound) {
 }
 
 TEST(ShaderSource, bodyIsAppendedAfterThePreamble) {
-  const auto out = render::assembleShaderSource(Backend::OpenGL,
-                                                ShaderStage::Vertex,
-                                                "void main() { }\n");
+  const auto out = render::assembleShaderSource(
+      Backend::OpenGL, ShaderStage::Vertex, "void main() { }\n");
   EXPECT_THAT(out, HasSubstr("void main() { }"));
   EXPECT_LT(out.find("#version"), out.find("void main"));
 }

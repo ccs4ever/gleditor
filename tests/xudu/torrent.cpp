@@ -44,7 +44,8 @@ TEST(InfoHashTest, uppercaseHexIsAccepted) {
 
 TEST(InfoHashTest, anythingElseIsRefused) {
   EXPECT_THROW((void)InfoHash::fromHex("abc"), std::runtime_error);
-  EXPECT_THROW((void)InfoHash::fromHex(std::string(40, 'z')), std::runtime_error);
+  EXPECT_THROW((void)InfoHash::fromHex(std::string(40, 'z')),
+               std::runtime_error);
 }
 
 TEST(InfoHashTest, theEmptyHashIsRecognisable) {
@@ -113,21 +114,27 @@ TEST(MetainfoTest, aPieceThatDoesNotExistDoesNotVerify) {
 
 TEST(MetainfoTest, rangesMapOntoPieces) {
   const auto meta = Metainfo::parse(singleFileTorrent);
-  EXPECT_EQ(meta.piecesForRange(0, 10), (std::pair<std::size_t, std::size_t>{0, 1}));
-  EXPECT_EQ(meta.piecesForRange(40, 5), (std::pair<std::size_t, std::size_t>{1, 2}));
+  EXPECT_EQ(meta.piecesForRange(0, 10),
+            (std::pair<std::size_t, std::size_t>{0, 1}));
+  EXPECT_EQ(meta.piecesForRange(40, 5),
+            (std::pair<std::size_t, std::size_t>{1, 2}));
   // Spanning the boundary needs both.
-  EXPECT_EQ(meta.piecesForRange(20, 20), (std::pair<std::size_t, std::size_t>{0, 2}));
+  EXPECT_EQ(meta.piecesForRange(20, 20),
+            (std::pair<std::size_t, std::size_t>{0, 2}));
 }
 
 TEST(MetainfoTest, aRangeEndingOnABoundaryDoesNotClaimTheNextPiece) {
   const auto meta = Metainfo::parse(singleFileTorrent);
-  EXPECT_EQ(meta.piecesForRange(0, 32), (std::pair<std::size_t, std::size_t>{0, 1}));
+  EXPECT_EQ(meta.piecesForRange(0, 32),
+            (std::pair<std::size_t, std::size_t>{0, 1}));
 }
 
 TEST(MetainfoTest, anEmptyRangeNeedsNoPieces) {
   const auto meta = Metainfo::parse(singleFileTorrent);
-  EXPECT_EQ(meta.piecesForRange(10, 0), (std::pair<std::size_t, std::size_t>{0, 0}));
-  EXPECT_EQ(meta.piecesForRange(9999, 10), (std::pair<std::size_t, std::size_t>{0, 0}));
+  EXPECT_EQ(meta.piecesForRange(10, 0),
+            (std::pair<std::size_t, std::size_t>{0, 0}));
+  EXPECT_EQ(meta.piecesForRange(9999, 10),
+            (std::pair<std::size_t, std::size_t>{0, 0}));
 }
 
 TEST(MetainfoTest, aMagnetLinkNamesTheContent) {
@@ -166,7 +173,8 @@ TEST(MagnetTest, theBase32FormIsAccepted) {
 TEST(MagnetTest, theDisplayNameAndTrackersAreRead) {
   const auto link = xudu::MagnetLink::parse(
       std::string("magnet:?xt=urn:btih:") + singleFileHash +
-      "&dn=The%20Fox&tr=http%3A%2F%2Fa.invalid%2Fannounce&tr=udp%3A%2F%2Fb.invalid");
+      "&dn=The%20Fox&tr=http%3A%2F%2Fa.invalid%2Fannounce&tr=udp%3A%2F%2Fb."
+      "invalid");
   EXPECT_EQ(link.displayName, "The Fox");
   EXPECT_THAT(link.trackers, testing::ElementsAre("http://a.invalid/announce",
                                                   "udp://b.invalid"));
@@ -195,15 +203,17 @@ TEST(MagnetTest, aVersionTwoHashAloneIsRefused) {
 
 TEST(MagnetTest, aVersionTwoHashBesideAVersionOneOneIsFine) {
   // A hybrid torrent's link carries both; the v1 hash is the one usable here.
-  const auto link = xudu::MagnetLink::parse(
-      "magnet:?xt=urn:btmh:1220ffff&xt=urn:btih:" + std::string(singleFileHash));
+  const auto link =
+      xudu::MagnetLink::parse("magnet:?xt=urn:btmh:1220ffff&xt=urn:btih:" +
+                              std::string(singleFileHash));
   EXPECT_EQ(link.hash.hex(), singleFileHash);
 }
 
 TEST(MagnetTest, somethingThatIsNotAMagnetIsRefused) {
   EXPECT_FALSE(xudu::MagnetLink::looksLikeMagnet("fox.torrent"));
   EXPECT_TRUE(xudu::MagnetLink::looksLikeMagnet("magnet:?xt=urn:btih:x"));
-  EXPECT_THROW((void)xudu::MagnetLink::parse("fox.torrent"), std::runtime_error);
+  EXPECT_THROW((void)xudu::MagnetLink::parse("fox.torrent"),
+               std::runtime_error);
   EXPECT_THROW((void)xudu::MagnetLink::parse("magnet:?dn=nothing"),
                std::runtime_error);
 }
@@ -261,10 +271,10 @@ TEST(MetainfoTest, somethingThatIsNotATorrentIsRefused) {
 TEST(MetainfoTest, aTruncatedPieceListIsRefused) {
   // 30 bytes is not a whole number of 20-byte hashes, so some piece has no
   // hash and could never be checked.
-  EXPECT_THROW(
-      (void)Metainfo::parse("d4:infod6:lengthi62e4:name1:x12:piece "
-                            "lengthi32e6:pieces30:012345678901234567890123456789ee"),
-      std::runtime_error);
+  EXPECT_THROW((void)Metainfo::parse(
+                   "d4:infod6:lengthi62e4:name1:x12:piece "
+                   "lengthi32e6:pieces30:012345678901234567890123456789ee"),
+               std::runtime_error);
 }
 
 TEST(MetainfoTest, tooFewPieceHashesForTheContentIsRefused) {

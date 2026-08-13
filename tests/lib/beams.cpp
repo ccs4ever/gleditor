@@ -42,17 +42,20 @@ public:
 
   RecordingDevice() {
     ON_CALL(*this, createBuffer)
-        .WillByDefault([this](const render::BufferKind, const std::size_t bytes) {
-          contents.assign(bytes, std::byte{});
-          return render::BufferHandle{1};
-        });
+        .WillByDefault(
+            [this](const render::BufferKind, const std::size_t bytes) {
+              contents.assign(bytes, std::byte{});
+              return render::BufferHandle{1};
+            });
     ON_CALL(*this, resizeBuffer)
-        .WillByDefault([this](const render::BufferHandle, const std::size_t bytes) {
-          contents.resize(bytes, std::byte{});
-          return render::BufferHandle{1};
-        });
+        .WillByDefault(
+            [this](const render::BufferHandle, const std::size_t bytes) {
+              contents.resize(bytes, std::byte{});
+              return render::BufferHandle{1};
+            });
     ON_CALL(*this, updateBuffer)
-        .WillByDefault([this](const render::BufferHandle, const std::size_t offset,
+        .WillByDefault([this](const render::BufferHandle,
+                              const std::size_t offset,
                               const std::span<const std::byte> data) {
           if (offset + data.size() > contents.size()) {
             contents.resize(offset + data.size(), std::byte{});
@@ -212,8 +215,9 @@ TEST_F(BeamsTest, theFourCornersAreARectangleAlongTheRun) {
 // The width is measured across the beam whichever way it runs, which is what
 // says the offset is perpendicular rather than along an axis.
 TEST_F(BeamsTest, theWidthIsAcrossTheBeamAtAnyAngle) {
-  for (const auto &to : {glm::vec3{5.0F, 0.0F, 0.0F}, glm::vec3{0.0F, 5.0F, 0.0F},
-                         glm::vec3{3.0F, 4.0F, 0.0F}, glm::vec3{-2.0F, 7.0F, 0.0F}}) {
+  for (const auto &to :
+       {glm::vec3{5.0F, 0.0F, 0.0F}, glm::vec3{0.0F, 5.0F, 0.0F},
+        glm::vec3{3.0F, 4.0F, 0.0F}, glm::vec3{-2.0F, 7.0F, 0.0F}}) {
     const Beams::Row row{{0.0F, 0.0F, 0.0F}, 1.5F, {to.x, to.y, to.z}, 0, 0};
     const auto left  = cornerOf(row, 0);
     const auto right = cornerOf(row, 1);

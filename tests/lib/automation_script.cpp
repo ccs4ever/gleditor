@@ -79,9 +79,9 @@ TEST(AutomationScript, takesAValueJoinedByAnEqualsSign) {
 }
 
 TEST(AutomationScript, ignoresEverythingThatIsNotAnAutomationOption) {
-  const auto script = scriptOf({"--font", "Serif 12", "file.txt", "--profile",
-                                "--click", "1,2", "--screenshot", "out.ppm",
-                                "--backend", "vulkan"});
+  const auto script =
+      scriptOf({"--font", "Serif 12", "file.txt", "--profile", "--click", "1,2",
+                "--screenshot", "out.ppm", "--backend", "vulkan"});
   ASSERT_EQ(script.size(), 1U);
   EXPECT_EQ(script[0].kind, Kind::Click);
   EXPECT_EQ(script[0].x, 1);

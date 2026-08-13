@@ -89,12 +89,13 @@ double timeFirstPage(const Glib::RefPtr<Pango::Context> &ctx,
 
   // What Doc::consumedBytes would decide this page holds.
   if (linesOut > 0) {
-    const auto &last = lay->get_const_line(linesOut - 1);
-    const int len    = last->get_length();
-    const auto whole =
-        static_cast<std::uint32_t>(last->get_start_index() + (0 == len ? 1 : len));
+    const auto &last   = lay->get_const_line(linesOut - 1);
+    const int len      = last->get_length();
+    const auto whole   = static_cast<std::uint32_t>(last->get_start_index() +
+                                                    (0 == len ? 1 : len));
     const auto upToCut = static_cast<std::uint32_t>(last->get_start_index());
-    consumedOut = !lay->is_ellipsized() ? whole : (0 == upToCut ? whole : upToCut);
+    consumedOut =
+        !lay->is_ellipsized() ? whole : (0 == upToCut ? whole : upToCut);
   }
   return taken;
 }
@@ -128,24 +129,23 @@ int main(const int argc, char **argv) {
     int lines{};
     std::uint32_t consumed{};
     for (int i = 0; i < 3; i++) {
-      static_cast<void>(timeFirstPage(ctx, font, warm.c_str(), warm.size(),
-                                      lines, consumed));
+      static_cast<void>(
+          timeFirstPage(ctx, font, warm.c_str(), warm.size(), lines, consumed));
     }
   }
 
   constexpr int repeats = 5;
   std::cout << "font: " << fontName << ", page " << pageWidthMm << "x"
-            << pageHeightMm << "mm, slice " << sliceBytes << " bytes, median of "
-            << repeats << "\n\n"
+            << pageHeightMm << "mm, slice " << sliceBytes
+            << " bytes, median of " << repeats << "\n\n"
             << std::left << std::setw(11) << "doc bytes" << std::setw(9)
             << "copy" << std::setw(10) << "validate" << std::setw(13)
             << "page1 whole" << std::setw(13) << "page1 slice" << std::setw(8)
             << "lines" << "page holds\n";
 
   for (const std::size_t size :
-       {std::size_t{16} * 1024, std::size_t{64} * 1024,
-        std::size_t{256} * 1024, std::size_t{1024} * 1024,
-        std::size_t{4} * 1024 * 1024}) {
+       {std::size_t{16} * 1024, std::size_t{64} * 1024, std::size_t{256} * 1024,
+        std::size_t{1024} * 1024, std::size_t{4} * 1024 * 1024}) {
     const auto raw = proseOf(size);
 
     // What Doc's constructor does before any layout happens, split in two: the
@@ -191,11 +191,12 @@ int main(const int argc, char **argv) {
               << "\n";
   }
 
-  std::cout << "\ncopy and validate both happen before the first page is\n"
-               "attempted. page1 is set_text plus get_line_count, which is what\n"
-               "consumedBytes() forces. \"page holds\" is the byte count\n"
-               "consumedBytes() would return -- if the slice agrees, bounding\n"
-               "the text handed to a layout changes no output.\n";
+  std::cout
+      << "\ncopy and validate both happen before the first page is\n"
+         "attempted. page1 is set_text plus get_line_count, which is what\n"
+         "consumedBytes() forces. \"page holds\" is the byte count\n"
+         "consumedBytes() would return -- if the slice agrees, bounding\n"
+         "the text handed to a layout changes no output.\n";
   return 0;
 }
 

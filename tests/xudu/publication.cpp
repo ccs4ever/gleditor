@@ -24,8 +24,8 @@
 
 #include <xudu/core/publication.hpp>
 #include <xudu/core/store.hpp>
-#include <xudu/core/torrent.hpp>
 #include <xudu/core/swarm.hpp>
+#include <xudu/core/torrent.hpp>
 
 namespace {
 
@@ -44,10 +44,10 @@ Scroll namedScroll(const xudu::PublicKey &key, std::string salt,
   scroll.publisher = key;
   scroll.salt      = std::move(salt);
   ScrollSegment segment;
-  segment.at       = 0;
-  segment.length   = length;
-  segment.path     = "permascroll";
-  segment.torrent  = xudu::InfoHash{};
+  segment.at      = 0;
+  segment.length  = length;
+  segment.path    = "permascroll";
+  segment.torrent = xudu::InfoHash{};
   scroll.segments.push_back(segment);
   return scroll;
 }
@@ -66,8 +66,8 @@ TEST(PublicationTest, aDocumentIsPublishedAsPointersAndReadsBackTheSame) {
   xudu::Store store;
   const auto version = quoting(store, scroll, 100, 50);
 
-  const auto pub = xudu::publish(store, version, keys, "essay", "An Essay", 1,
-                                 1700000000);
+  const auto pub =
+      xudu::publish(store, version, keys, "essay", "An Essay", 1, 1700000000);
   EXPECT_EQ(pub.title, "An Essay");
   EXPECT_EQ(pub.length(), 50U);
   ASSERT_EQ(pub.pieces.size(), 1U);
@@ -93,15 +93,15 @@ TEST(PublicationTest, aManifestThatWasAlteredDoesNotRead) {
   const auto scroll = namedScroll(keys.publicKey, "permascroll", 1000);
   xudu::Store store;
   const auto version = quoting(store, scroll, 0, 40);
-  const auto pub = xudu::publish(store, version, keys, "essay", "An Essay", 1,
-                                 1700000000);
+  const auto pub =
+      xudu::publish(store, version, keys, "essay", "An Essay", 1, 1700000000);
 
   // The title is the mildest thing anyone would think to change.
   auto altered  = pub;
   altered.title = "Somebody Else's Essay";
   EXPECT_FALSE(xudu::verifyPublication(altered));
-  EXPECT_FALSE(xudu::decodePublication(xudu::encodePublication(altered))
-                   .has_value());
+  EXPECT_FALSE(
+      xudu::decodePublication(xudu::encodePublication(altered)).has_value());
 
   // And the part that would matter: what the document points at.
   auto moved = pub;
@@ -146,8 +146,8 @@ TEST(PublicationTest, whatWasWrittenHereCanBeSealedAndThenPublished) {
   // Sealing insists on a signed record of who is doing it; whether gpg made
   // that signature is provenance.cpp's business.
   xudu::Provenance who;
-  who.author.name  = "Ada Lovelace";
-  who.author.email = "ada@example.org";
+  who.author.name   = "Ada Lovelace";
+  who.author.email  = "ada@example.org";
   const auto sealed = xudu::sealLocalSpool(
       store, keys, "permascroll", "",
       {who.toYaml(), "-----BEGIN PGP SIGNATURE-----\n(for the test)\n"});
@@ -173,14 +173,15 @@ TEST(PublicationTest, whatWasWrittenHereCanBeSealedAndThenPublished) {
   // rewrite anything.
   EXPECT_EQ(pub.pieces[0].start, 0U);
 
-  ASSERT_TRUE(xudu::decodePublication(xudu::encodePublication(pub)).has_value());
+  ASSERT_TRUE(
+      xudu::decodePublication(xudu::encodePublication(pub)).has_value());
 }
 
 TEST(PublicationTest, twoDocumentsQuotingOnePassageAreFoundToShareIt) {
   // Two publishers who have never met, quoting one published permascroll.
-  const auto author  = xudu::createMutableKeys();
-  const auto scroll  = namedScroll(author.publicKey, "permascroll", 1000);
-  const auto quoter  = xudu::createMutableKeys();
+  const auto author = xudu::createMutableKeys();
+  const auto scroll = namedScroll(author.publicKey, "permascroll", 1000);
+  const auto quoter = xudu::createMutableKeys();
 
   xudu::Store originalStore;
   xudu::Store quotingStore;
@@ -243,14 +244,15 @@ TEST(PublicationTest, aLinkMadeHereReachesAPassageThere) {
   ASSERT_TRUE(library.add(published));
 
   // The far end, addressed globally, is what a reader would follow.
-  const auto key = xudu::scrollKeyFor(author.publicKey, "permascroll");
+  const auto key   = xudu::scrollKeyFor(author.publicKey, "permascroll");
   const auto found = library.linksTouching(GlobalSpan{key, 100, 200});
   ASSERT_EQ(found.size(), 1U);
   EXPECT_FALSE(found[0].onLeft) << "the passage is the link's right end";
   EXPECT_EQ(found[0].link->owner, "critic");
   // And it survived the journey: the link came back off a manifest that was
   // encoded, signed and decoded.
-  const auto reread = xudu::decodePublication(xudu::encodePublication(published));
+  const auto reread =
+      xudu::decodePublication(xudu::encodePublication(published));
   ASSERT_TRUE(reread.has_value());
   ASSERT_EQ(reread->links.size(), 1U);
   EXPECT_EQ(reread->links[0].right, published.links[0].right);
@@ -281,10 +283,10 @@ TEST(PublicationTest, twoNamesUnderOneKeyAreTwoDocuments) {
   xudu::Store store;
   const auto version = quoting(store, scroll, 0, 10);
 
-  const auto essay = xudu::publish(store, version, keys, "essay", "An Essay", 1,
-                                   1700000000);
-  const auto notes = xudu::publish(store, version, keys, "notes", "Some Notes",
-                                   1, 1700000000);
+  const auto essay =
+      xudu::publish(store, version, keys, "essay", "An Essay", 1, 1700000000);
+  const auto notes =
+      xudu::publish(store, version, keys, "notes", "Some Notes", 1, 1700000000);
   EXPECT_NE(essay.name(), notes.name());
 
   Library library;
@@ -300,8 +302,8 @@ TEST(PublicationTest, theSameDocumentEncodesToTheSameBytes) {
   const auto scroll = namedScroll(keys.publicKey, "permascroll", 1000);
   xudu::Store store;
   const auto version = quoting(store, scroll, 7, 21);
-  const auto pub     = xudu::publish(store, version, keys, "essay", "An Essay",
-                                     3, 1700000000);
+  const auto pub =
+      xudu::publish(store, version, keys, "essay", "An Essay", 3, 1700000000);
 
   const auto once  = xudu::encodePublication(pub);
   const auto twice = xudu::encodePublication(*xudu::decodePublication(once));

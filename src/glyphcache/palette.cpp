@@ -70,7 +70,8 @@ GlyphPalette::put(const Rect &charBox, const std::span<const std::byte> data) {
             static_cast<float>(std::to_underlying(charBox.height))}});
 }
 
-void GlyphPalette::grow(const Rect &newDims, const render::TextureHandle aTexture) {
+void GlyphPalette::grow(const Rect &newDims,
+                        const render::TextureHandle aTexture) {
   // Lanes stack upwards from y = 0 and fill rightwards from x = 0, so a bigger
   // layer is purely additional room: nothing already placed moves, which is
   // what lets the glyphs be re-uploaded where they already were.

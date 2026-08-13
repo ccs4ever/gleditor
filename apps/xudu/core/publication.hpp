@@ -370,7 +370,8 @@ public:
     /// traversable both ways; which way this crossing goes is the difference.
     bool onLeft{};
   };
-  [[nodiscard]] std::vector<FoundLink> linksTouching(const GlobalSpan &span) const;
+  [[nodiscard]] std::vector<FoundLink>
+  linksTouching(const GlobalSpan &span) const;
 
 private:
   std::map<DhtTarget, Publication> byName;

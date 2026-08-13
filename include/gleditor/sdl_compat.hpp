@@ -59,19 +59,19 @@
 #endif
 
 // -- renamed symbols ---------------------------------------------------------
-#define SDL_EVENT_QUIT         SDL_QUIT
-#define SDL_EVENT_KEY_DOWN     SDL_KEYDOWN
-#define SDL_EVENT_MOUSE_MOTION      SDL_MOUSEMOTION
+#define SDL_EVENT_QUIT SDL_QUIT
+#define SDL_EVENT_KEY_DOWN SDL_KEYDOWN
+#define SDL_EVENT_MOUSE_MOTION SDL_MOUSEMOTION
 #define SDL_EVENT_MOUSE_BUTTON_DOWN SDL_MOUSEBUTTONDOWN
-#define SDL_EVENT_TEXT_INPUT        SDL_TEXTINPUT
-#define SDL_KMOD_SHIFT         KMOD_SHIFT
-#define SDL_KMOD_CTRL          KMOD_CTRL
-#define SDL_KMOD_ALT           KMOD_ALT
+#define SDL_EVENT_TEXT_INPUT SDL_TEXTINPUT
+#define SDL_KMOD_SHIFT KMOD_SHIFT
+#define SDL_KMOD_CTRL KMOD_CTRL
+#define SDL_KMOD_ALT KMOD_ALT
 // SDL3 renamed this to say what it does; SDL2's spelling says what you are
 // allowed to do.
 #define SDL_WINDOW_HIGH_PIXEL_DENSITY SDL_WINDOW_ALLOW_HIGHDPI
-#define SDL_GL_DestroyContext         SDL_GL_DeleteContext
-#define SDL_DestroySurface            SDL_FreeSurface
+#define SDL_GL_DestroyContext SDL_GL_DeleteContext
+#define SDL_DestroySurface SDL_FreeSurface
 
 #else
 #error GLEDITOR_SDL_MAJOR must be 2 or 3

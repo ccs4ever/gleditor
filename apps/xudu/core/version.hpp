@@ -93,13 +93,12 @@ public:
   /// Total length in bytes of that text.
   [[nodiscard]] std::uint32_t length() const;
 
-  [[nodiscard]] const std::vector<PrimediaSpan> &pieces() const {
-    return runs;
-  }
+  [[nodiscard]] const std::vector<PrimediaSpan> &pieces() const { return runs; }
 
   /// The primedia address a byte of this version came from, or nothing when
   /// the offset is past the end.
-  [[nodiscard]] std::optional<std::uint64_t> addressAt(std::uint32_t offset) const;
+  [[nodiscard]] std::optional<std::uint64_t>
+  addressAt(std::uint32_t offset) const;
 
   /// The spans [@p at, @p at + @p length) points at, without removing them.
   [[nodiscard]] std::vector<PrimediaSpan> spansFor(std::uint32_t at,
@@ -112,7 +111,8 @@ public:
    * twice, and a version that merely contains the same words reports nothing,
    * because this compares addresses and not text.
    */
-  [[nodiscard]] std::vector<Extent> occurrencesOf(const PrimediaSpan &span) const;
+  [[nodiscard]] std::vector<Extent>
+  occurrencesOf(const PrimediaSpan &span) const;
 
 private:
   /**

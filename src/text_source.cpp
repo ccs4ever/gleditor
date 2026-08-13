@@ -16,7 +16,8 @@ unsigned char byteAt(const std::string &str, const std::size_t index) {
   return static_cast<unsigned char>(str[index]);
 }
 
-bool startsWith(const std::string &str, const std::initializer_list<unsigned char> mark) {
+bool startsWith(const std::string &str,
+                const std::initializer_list<unsigned char> mark) {
   if (str.size() < mark.size()) {
     return false;
   }

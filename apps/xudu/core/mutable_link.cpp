@@ -85,9 +85,9 @@ MutableLink MutableLink::parse(const std::string_view uri) {
     if ("xs" == key) {
       constexpr std::string_view prefix = "urn:btpk:";
       if (value.starts_with(prefix)) {
-        link.key = PublicKey::fromHex(
-            std::string_view{value}.substr(prefix.size()));
-        haveKey  = true;
+        link.key =
+            PublicKey::fromHex(std::string_view{value}.substr(prefix.size()));
+        haveKey = true;
       }
     } else if ("s" == key) {
       // Hex in the link, bytes everywhere else: it is hashed into the target
@@ -109,8 +109,8 @@ MutableLink MutableLink::parse(const std::string_view uri) {
   });
 
   if (!haveKey) {
-    throw std::runtime_error(
-        "link names no public key (xs=urn:btpk:): " + std::string{uri});
+    throw std::runtime_error("link names no public key (xs=urn:btpk:): " +
+                             std::string{uri});
   }
   return link;
 }
@@ -155,9 +155,10 @@ std::string encodeMutablePointer(const InfoHash &hash) {
   return bencode::Value::dict({{"ih", bencode::Value::string(raw)}}).encode();
 }
 
-std::optional<InfoHash> decodeMutablePointer(const std::string_view encodedValue) {
+std::optional<InfoHash>
+decodeMutablePointer(const std::string_view encodedValue) {
   try {
-    const auto value = bencode::decode(encodedValue);
+    const auto value          = bencode::decode(encodedValue);
     const auto *const pointer = value.find("ih");
     if (nullptr == pointer || !pointer->isString()) {
       return std::nullopt;

@@ -155,7 +155,6 @@ public:
   [[nodiscard]] bool fadingIn(Clock::time_point now) const;
 
 private:
-
   /// Pixels between the panel edge and the text, and between stacked panels.
   static constexpr float padding = 8.0F;
   static constexpr float gap     = 6.0F;

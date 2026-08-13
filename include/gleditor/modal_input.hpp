@@ -56,8 +56,8 @@ enum class KeyMods : std::uint16_t {
 };
 
 [[nodiscard]] inline bool held(const KeyMods mods, const KeyMods which) {
-  return 0 != (static_cast<std::uint16_t>(mods) &
-               static_cast<std::uint16_t>(which));
+  return 0 !=
+         (static_cast<std::uint16_t>(mods) & static_cast<std::uint16_t>(which));
 }
 
 /// A rectangle in window pixels, top left origin: SDL's convention.

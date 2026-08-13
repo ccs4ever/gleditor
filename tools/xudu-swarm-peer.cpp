@@ -42,18 +42,19 @@ std::string readWholeFile(const std::string &path) {
 
 int main(const int argc, char **argv) {
   if (argc < 3) {
-    std::cerr << "usage: xudu-swarm-peer <torrent> <data-dir> [listen-address] "
-                 "[--discoverable] [--publish]\n"
-                 "\n"
-                 "Offers the torrent's content to whoever connects, and prints\n"
-                 "the port it is listening on. Runs until interrupted.\n"
-                 "\n"
-                 "--discoverable also announces on the local network, for\n"
-                 "clients that cannot be told about a peer directly.\n"
-                 "\n"
-                 "--publish mints an ed25519 key pair, points it at the\n"
-                 "torrent as a BEP 46 mutable item, and prints the public key.\n"
-                 "That key is a name that outlives the torrent it points at.\n";
+    std::cerr
+        << "usage: xudu-swarm-peer <torrent> <data-dir> [listen-address] "
+           "[--discoverable] [--publish]\n"
+           "\n"
+           "Offers the torrent's content to whoever connects, and prints\n"
+           "the port it is listening on. Runs until interrupted.\n"
+           "\n"
+           "--discoverable also announces on the local network, for\n"
+           "clients that cannot be told about a peer directly.\n"
+           "\n"
+           "--publish mints an ed25519 key pair, points it at the\n"
+           "torrent as a BEP 46 mutable item, and prints the public key.\n"
+           "That key is a name that outlives the torrent it points at.\n";
     return 2;
   }
   bool discoverable = false;
@@ -79,8 +80,8 @@ int main(const int argc, char **argv) {
     // item is a DHT item and there is nowhere else to put it. It stays a
     // closed DHT: no bootstrap routers are configured, so it contains whoever
     // turns up on this wire and nobody else.
-    options.enableDht            = publish;
-    options.enableTrackers       = false;
+    options.enableDht      = publish;
+    options.enableTrackers = false;
     // Both nodes here are on the same private network and therefore in the
     // same /8, which the public-DHT rule would read as one node pretending to
     // be two.
@@ -138,7 +139,8 @@ int main(const int argc, char **argv) {
         // The sequence number stays at one because this points at one torrent
         // for its whole life. Moving a name is what a higher one is for.
         peer.publishMutable(keys, "", hash, 1);
-        nextPublish = std::chrono::steady_clock::now() + std::chrono::seconds{1};
+        nextPublish =
+            std::chrono::steady_clock::now() + std::chrono::seconds{1};
       }
     }
     return 0;

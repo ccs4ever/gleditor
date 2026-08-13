@@ -478,12 +478,12 @@ public:
 private:
   /// Pixel geometry of the map. A node is a labelled box; a generation is a
   /// column, so time runs left to right and branches stack downwards.
-  static constexpr float nodeWidth   = 74.0F;
-  static constexpr float nodeHeight  = 26.0F;
-  static constexpr float columnGap   = 34.0F;
-  static constexpr float rowGap      = 10.0F;
-  static constexpr float mapMargin   = 16.0F;
-  static constexpr float padding     = 10.0F;
+  static constexpr float nodeWidth  = 74.0F;
+  static constexpr float nodeHeight = 26.0F;
+  static constexpr float columnGap  = 34.0F;
+  static constexpr float rowGap     = 10.0F;
+  static constexpr float mapMargin  = 16.0F;
+  static constexpr float padding    = 10.0F;
 
   std::string fontName;
   std::unique_ptr<gleditor::Canvas> canvas;

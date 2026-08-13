@@ -16,9 +16,9 @@
 // foreshortens with the pages as the view turns, which is what makes it look
 // attached to them rather than painted on the glass.
 
-GLEDITOR_IN(0) vec3 beamFrom;  // one end, in world space
+GLEDITOR_IN(0) vec3 beamFrom; // one end, in world space
 GLEDITOR_IN(1) float beamWidth;
-GLEDITOR_IN(2) vec3 beamTo;    // the other
+GLEDITOR_IN(2) vec3 beamTo;     // the other
 GLEDITOR_IN(3) uint beamColour; // packed RGBA8
 GLEDITOR_IN(4) uint beamTag;    // which beam this is, for picking
 
@@ -36,41 +36,41 @@ GLEDITOR_OUT_FLAT(3) uvec2 vTag;
 GLEDITOR_OUT(4) float vOpacity;
 
 vec4 unpackColour(uint bits) {
-    return vec4(float((bits >> 24) & 255u),
-                float((bits >> 16) & 255u),
-                float((bits >> 8) & 255u),
-                float(bits & 255u)) / 255.0;
+  return vec4(float((bits >> 24) & 255u), float((bits >> 16) & 255u),
+              float((bits >> 8) & 255u), float(bits & 255u)) /
+         255.0;
 }
 
 void main() {
-    int corner = GLEDITOR_VERTEX_INDEX;
-    float along = (0 != (corner & 2)) ? 1.0 : 0.0;
-    float across = (0 != (corner & 1)) ? 1.0 : -1.0;
+  int corner   = GLEDITOR_VERTEX_INDEX;
+  float along  = (0 != (corner & 2)) ? 1.0 : 0.0;
+  float across = (0 != (corner & 1)) ? 1.0 : -1.0;
 
-    vec3 run = beamTo - beamFrom;
-    // Perpendicular to the beam, in the plane of the pages. A beam of no
-    // length has no direction to be perpendicular to; collapse it outside clip
-    // space rather than dividing by zero.
-    vec3 sideways = cross(run, vec3(0.0, 0.0, 1.0));
-    if (dot(sideways, sideways) <= 0.0) {
-        gl_Position = vec4(2.0, 2.0, 2.0, 1.0);
-        vColour = vec4(0.0);
-        vAcross = 0.0;
-        vAlong = 0.0;
-        vTag = uvec2(0u);
-        vOpacity = 0.0;
-        return;
-    }
+  vec3 run = beamTo - beamFrom;
+  // Perpendicular to the beam, in the plane of the pages. A beam of no
+  // length has no direction to be perpendicular to; collapse it outside clip
+  // space rather than dividing by zero.
+  vec3 sideways = cross(run, vec3(0.0, 0.0, 1.0));
+  if (dot(sideways, sideways) <= 0.0) {
+    gl_Position = vec4(2.0, 2.0, 2.0, 1.0);
+    vColour     = vec4(0.0);
+    vAcross     = 0.0;
+    vAlong      = 0.0;
+    vTag        = uvec2(0u);
+    vOpacity    = 0.0;
+    return;
+  }
 
-    vec3 offset = normalize(sideways) * (beamWidth * 0.5) * across;
-    vec3 point = mix(beamFrom, beamTo, along) + offset;
-    gl_Position = uMVP * vec4(point, 1.0);
+  vec3 offset = normalize(sideways) * (beamWidth * 0.5) * across;
+  vec3 point  = mix(beamFrom, beamTo, along) + offset;
+  gl_Position = uMVP * vec4(point, 1.0);
 
-    vColour = unpackColour(beamColour);
-    vAcross = across;
-    vAlong = along;
-    vTag = uvec2(uIdentity | (uint(GLEDITOR_TAG_KIND_BEAM) << GLEDITOR_TAG_KIND_SHIFT),
-                 beamTag);
-    vOpacity = uOpacity;
+  vColour  = unpackColour(beamColour);
+  vAcross  = across;
+  vAlong   = along;
+  vTag     = uvec2(uIdentity |
+                       (uint(GLEDITOR_TAG_KIND_BEAM) << GLEDITOR_TAG_KIND_SHIFT),
+                   beamTag);
+  vOpacity = uOpacity;
 }
-// vi: set sw=4 sts=4 ts=4 et:
+// vi: set sw=2 sts=2 ts=2 et:

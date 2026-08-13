@@ -1,4 +1,9 @@
 # Maintainer: ccs4ever <ccs4ever@gmail.com>
+#
+# makepkg sources this rather than executing it, so it has no shebang of its
+# own; the variables below are makepkg's PKGBUILD API, read by makepkg itself
+# rather than by this file, and pkgdir is one it injects into package().
+# shellcheck shell=bash disable=SC2034,SC2154
 pkgname=gleditor
 pkgver=0.1.0
 pkgrel=1
@@ -21,7 +26,7 @@ source=("$pkgname-$pkgver.tar.gz")
 sha256sums=('SKIP')
 
 build() {
-  cd "$pkgname-$pkgver"
+  cd "$pkgname-$pkgver" || exit
   # GLEDITOR_VERSION is passed because the tarball carries no git history, and
   # SDL3 is stated rather than probed so the package cannot silently change
   # which SDL it links depending on what happened to be installed.
@@ -33,7 +38,7 @@ build() {
 }
 
 package() {
-  cd "$pkgname-$pkgver"
+  cd "$pkgname-$pkgver" || exit
   make install \
     DESTDIR="$pkgdir" \
     prefix=/usr \

@@ -141,7 +141,8 @@ public:
   MicroversionId addLink(const MicroversionId &parent, Link link);
 
   /// Every link with an end covering any of @p span.
-  [[nodiscard]] std::vector<const Link *> linksTouching(const PrimediaSpan &span) const;
+  [[nodiscard]] std::vector<const Link *>
+  linksTouching(const PrimediaSpan &span) const;
   [[nodiscard]] const std::map<std::uint64_t, Link> &links() const {
     return linkTable;
   }
@@ -150,7 +151,8 @@ public:
 
   /// The states reachable in one step from @p id: its continuation, and the
   /// first state of each branch off it.
-  [[nodiscard]] std::vector<MicroversionId> children(const MicroversionId &id) const;
+  [[nodiscard]] std::vector<MicroversionId>
+  children(const MicroversionId &id) const;
 
   /// Every state that has been recorded, in replay order.
   [[nodiscard]] std::vector<MicroversionId> allVersions() const;

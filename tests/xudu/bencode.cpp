@@ -25,7 +25,8 @@ TEST(BencodeTest, strings) {
   EXPECT_EQ(decode("4:spam").asString(), "spam");
   EXPECT_EQ(decode("0:").asString(), "");
   // Byte strings, not text: a length prefix means the bytes may be anything.
-  EXPECT_EQ(decode(std::string("3:a\0b", 5)).asString(), std::string("a\0b", 3));
+  EXPECT_EQ(decode(std::string("3:a\0b", 5)).asString(),
+            std::string("a\0b", 3));
 }
 
 TEST(BencodeTest, lists) {

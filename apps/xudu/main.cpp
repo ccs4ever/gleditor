@@ -42,10 +42,10 @@
 #include <gleditor/text_source.hpp>
 
 #include "beams.hpp"
-#include "core/microversion.hpp"
-#include "core/ops.hpp"
-#include "core/mutable_link.hpp"
 #include "core/config.hpp"
+#include "core/microversion.hpp"
+#include "core/mutable_link.hpp"
+#include "core/ops.hpp"
 #include "core/provenance.hpp"
 #include "core/torrent.hpp"
 #include "session.hpp"
@@ -53,10 +53,10 @@
 namespace {
 
 using gleditor::Mod;
+using xudu::Author;
 using xudu::HypertimeMap;
 using xudu::LinkBeams;
 using xudu::MicroversionId;
-using xudu::Author;
 using xudu::Session;
 using xudu::signingKeys;
 
@@ -73,9 +73,8 @@ using xudu::signingKeys;
 int checkAuthorship(const std::string &where) {
   namespace fs = std::filesystem;
   const fs::path given(where);
-  const auto record = fs::is_directory(given)
-                          ? given / xudu::provenanceFileName
-                          : given;
+  const auto record =
+      fs::is_directory(given) ? given / xudu::provenanceFileName : given;
   const auto sig = fs::path(record.string() + ".asc");
 
   const auto slurp = [](const fs::path &path) {
@@ -101,7 +100,7 @@ int checkAuthorship(const std::string &where) {
   }
   std::cout << "\nxudu: signed by " << check.signer << "\n"
             << "      key " << check.fingerprint << "\n"
-            << "      " 
+            << "      "
             << (check.keyTrusted
                     ? "which is a key this keyring trusts"
                     : "which this keyring has no reason to trust -- the "
@@ -115,7 +114,7 @@ int checkAuthorship(const std::string &where) {
     if (const auto bytes = slurp(content); !bytes.empty()) {
       const auto matches = xudu::sha256Hex(bytes) == said->contentDigest &&
                            bytes.size() == said->contentLength;
-      std::cout << "      " 
+      std::cout << "      "
                 << (matches ? "and it is about the content sealed with it"
                             : "BUT THE CONTENT BESIDE IT IS NOT WHAT IT "
                               "DESCRIBES")
@@ -267,9 +266,8 @@ public:
       // A virtual copy: what goes into the new document is pointers to the
       // addresses this one already uses, so there is one copy of the content
       // and two documents showing it.
-      const auto quoted =
-          session.store().transclude(MicroversionId{}, 0, from, where.start,
-                                     where.end - where.start);
+      const auto quoted = session.store().transclude(
+          MicroversionId{}, 0, from, where.start, where.end - where.start);
       std::cout << "xudu: quoted [" << where.start << "," << where.end
                 << ") of " << from.str() << " into " << quoted.str() << "\n";
       showAlongside(quoted);
@@ -307,10 +305,10 @@ public:
       }
 
       xudu::Link link;
-      link.type  = xudu::LinkType::Comment;
-      link.owner = "you";
-      link.left  = std::move(pending->spans);
-      link.right = std::move(spans);
+      link.type        = xudu::LinkType::Comment;
+      link.owner       = "you";
+      link.left        = std::move(pending->spans);
+      link.right       = std::move(spans);
       const auto after = session.addLink(where.doc, link);
       std::cout << "xudu: link doc " << pending->doc << " [" << pending->start
                 << "," << pending->end << ") -> doc " << where.doc << " ["
@@ -356,11 +354,11 @@ public:
                           "the caret is what gets published.");
         return;
       }
-      auto *const caret = renderer->editCaret();
-      const auto which  = nullptr != caret && caret->active() &&
+      auto *const caret  = renderer->editCaret();
+      const auto which   = nullptr != caret && caret->active() &&
                                  caret->documentIndex() < session.views().size()
-                              ? caret->documentIndex()
-                              : 0U;
+                               ? caret->documentIndex()
+                               : 0U;
       const auto version = session.versionOf(which);
       const auto who     = session.author();
       const auto where   = session.publishedDir();
@@ -371,7 +369,10 @@ public:
       // What the keyring can sign with, offered rather than typed: a
       // fingerprint is not something anybody remembers, and a key that is not
       // there is a failure at the last step of publishing.
-      Field keys{"Signing key", {}, "no signing key in the keyring", false,
+      Field keys{"Signing key",
+                 {},
+                 "no signing key in the keyring",
+                 false,
                  Kind::Choice};
       for (const auto &key : signingKeys(session.settings().signing())) {
         keys.options.push_back(key.describe());
@@ -409,7 +410,10 @@ public:
           Field{"Author", who.name, "who is publishing this", true},
           Field{"Email", who.email, "how to reach them", true},
           std::move(keys),
-          Field{"Passphrase", {}, "only if the agent is not holding it", false,
+          Field{"Passphrase",
+                {},
+                "only if the agent is not holding it",
+                false,
                 Kind::Secret},
           [] {
             Field toggle{"", {}, {}, false, Kind::Toggle};
@@ -521,14 +525,14 @@ void bindCommands(gleditor::Application &app, const AppStateRef &state,
                         session.save();
                         state->alive = false;
                       });
-  app.commands().bind(SDL_SCANCODE_S, Mod::Ctrl, "save",
-                      "write the spools out",
-                      [&session] {
-                        session.save();
-                        std::cout << "xudu: saved to " << session.path() << "\n";
-                      });
+  app.commands().bind(
+      SDL_SCANCODE_S, Mod::Ctrl, "save", "write the spools out", [&session] {
+        session.save();
+        std::cout << "xudu: saved to " << session.path() << "\n";
+      });
   app.commands().bind(SDL_SCANCODE_M, Mod::Ctrl, "map",
-                      "show or hide the hypertime map", [&map] { map.toggle(); });
+                      "show or hide the hypertime map",
+                      [&map] { map.toggle(); });
   app.commands().bind(SDL_SCANCODE_B, Mod::Ctrl, "back",
                       "go to the previous state, losing nothing",
                       [&views] { views.back(); });
@@ -752,10 +756,12 @@ int main(const int argc, char **argv) {
 
     // Before any torrent, since resolving a name needs a DHT to ask.
     if (parser.present<std::vector<std::string>>("--dht-node")) {
-      for (const auto &spec : parser.get<std::vector<std::string>>("--dht-node")) {
+      for (const auto &spec :
+           parser.get<std::vector<std::string>>("--dht-node")) {
         const auto colon = spec.rfind(':');
         if (std::string::npos == colon) {
-          throw std::runtime_error("--dht-node expects HOST:PORT, got: " + spec);
+          throw std::runtime_error("--dht-node expects HOST:PORT, got: " +
+                                   spec);
         }
         session->addDhtNode(
             spec.substr(0, colon),
@@ -768,7 +774,8 @@ int main(const int argc, char **argv) {
     std::vector<xudu::InfoHash> available;
     if (parser.present<std::vector<std::string>>("--torrent")) {
       const auto root = parser.get<std::string>("--torrent-data");
-      for (const auto &file : parser.get<std::vector<std::string>>("--torrent")) {
+      for (const auto &file :
+           parser.get<std::vector<std::string>>("--torrent")) {
         // A name is tried first: both spellings begin "magnet:?", and the one
         // that has to be looked up is the one carrying xs=urn:btpk.
         const auto hash = xudu::MutableLink::looksLikeMutableLink(file)
@@ -788,8 +795,8 @@ int main(const int argc, char **argv) {
                              << " (" << meta->files().size() << " file(s), "
                              << meta->totalLength() << " bytes)\n";
         } else {
-          quiet || std::cout << "xudu: " << file << " is "
-                             << hash.hex() << " (awaiting metadata)\n";
+          quiet || std::cout << "xudu: " << file << " is " << hash.hex()
+                             << " (awaiting metadata)\n";
         }
       }
     }
@@ -832,9 +839,10 @@ int main(const int argc, char **argv) {
           throw std::runtime_error("--quote expects FILE,OFFSET,LENGTH, got: " +
                                    spec);
         }
-        const auto fileIndex = static_cast<std::uint32_t>(
-            std::stoul(spec.substr(0, first)));
-        const auto offset = std::stoull(spec.substr(first + 1, second - first - 1));
+        const auto fileIndex =
+            static_cast<std::uint32_t>(std::stoul(spec.substr(0, first)));
+        const auto offset =
+            std::stoull(spec.substr(first + 1, second - first - 1));
         const auto length = std::stoull(spec.substr(second + 1));
 
         // Appended to whatever the document is now, which for a fresh store is
@@ -854,9 +862,9 @@ int main(const int argc, char **argv) {
 
     // Who publishes here, when it was given. Before anything is published,
     // and kept, so that it is said once rather than every time.
-    if (const auto name  = parser.get<std::string>("--author-name"),
-                   email = parser.get<std::string>("--author-email"),
-                   key   = parser.get<std::string>("--gpg-key");
+    if (const auto name = parser.get<std::string>("--author-name"),
+        email           = parser.get<std::string>("--author-email"),
+        key             = parser.get<std::string>("--gpg-key");
         !name.empty() || !email.empty() || !key.empty()) {
       xudu::Author who{name, email, key};
       if (!who.named() && parser["--author-here"] != true) {
@@ -915,18 +923,17 @@ int main(const int argc, char **argv) {
     }
 
     const auto asked = parser.get<std::string>("--version-id");
-    opening = asked.empty() ? (read.empty() ? session->store().latest()
-                                            : read.front())
-                            : MicroversionId::parse(asked);
-    alongside = parser.get<std::string>("--alongside");
-    publishAs = parser.get<std::string>("--publish");
+    opening          = asked.empty()
+                           ? (read.empty() ? session->store().latest() : read.front())
+                           : MicroversionId::parse(asked);
+    alongside        = parser.get<std::string>("--alongside");
+    publishAs        = parser.get<std::string>("--publish");
     if (!publishAs.empty()) {
       // Done before anything is printed about it: publishing may have to mint
       // this machine's name, which says so, and a half-written line with that
       // in the middle of it is not a message anybody can read.
-      const auto manifest =
-          session->publishDocument(
-              opening, Session::PublishRequest{publishAs, publishAs});
+      const auto manifest = session->publishDocument(
+          opening, Session::PublishRequest{publishAs, publishAs});
       quiet || std::cout << "xudu: published " << opening.str() << " as "
                          << manifest << "\n";
     }

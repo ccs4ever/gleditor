@@ -1,5 +1,5 @@
-#include <gleditor/sdl_wrap.hpp> // IWYU pragma: associated
 #include <cstdint>
+#include <gleditor/sdl_wrap.hpp> // IWYU pragma: associated
 #include <stdexcept>
 #include <string>
 
@@ -25,7 +25,6 @@ AutoSDL::~AutoSDL() {
     SDL_QuitSubSystem(flags);
   }
 }
-
 
 AutoSDLWindow::AutoSDLWindow(const char *title, const int width,
                              const int height, const std::uint64_t flags,

@@ -22,9 +22,9 @@
 
 #include <argparse/argparse.hpp>
 #include <glibmm/init.h>
-#include <pangomm/wrap_init.h>
 #include <glm/ext/vector_float3.hpp>
 #include <glm/geometric.hpp>
+#include <pangomm/wrap_init.h>
 
 #include <gleditor/paths.hpp>
 #include <gleditor/render/device.hpp>
@@ -225,8 +225,8 @@ readAutomationScript(const int argc, const char *const *const argv) {
     }
   };
 
-  static constexpr std::array scripted = {"--pick", "--click", "--type",
-                                          "--select", "--do", "--key"};
+  static constexpr std::array scripted = {"--pick",   "--click", "--type",
+                                          "--select", "--do",    "--key"};
   for (int i = 1; i < argc; i++) {
     if (nullptr == argv[i]) {
       continue;
@@ -252,7 +252,6 @@ readAutomationScript(const int argc, const char *const *const argv) {
   }
   return script;
 }
-
 
 void CommandTable::bind(const int scancode, const Mod mods, std::string name,
                         std::string help, std::function<void()> run) {
@@ -317,10 +316,9 @@ void addCommonArguments(argparse::ArgumentParser &parser, const bool detailed) {
   // the flag decides only how they describe themselves and whether the
   // automation ones appear at all. Two separate lists would drift, and the one
   // that drifted would be the help.
-  const auto everyday = [detailed](argparse::Argument &arg,
-                                   const std::string_view brief,
-                                   const std::string_view detail)
-      -> argparse::Argument & {
+  const auto everyday =
+      [detailed](argparse::Argument &arg, const std::string_view brief,
+                 const std::string_view detail) -> argparse::Argument & {
     return arg.help(std::string(detailed ? detail : brief));
   };
 
@@ -338,17 +336,19 @@ void addCommonArguments(argparse::ArgumentParser &parser, const bool detailed) {
            "Initial vertical field of view in degrees. Widening it is how "
            "several pages are brought on screen at once, and how a headless "
            "run sees many small ones.");
-  everyday(parser.add_argument("--backend").default_value(std::string{"opengl"}),
-           "rendering backend: opengl, opengles or vulkan",
-           "Rendering backend: opengl (the default), opengles or vulkan. The "
-           "Vulkan backend is only present when the binary was built with it; "
-           "naming one that is not compiled in reports which are.");
-  everyday(parser.add_argument("--coarse-below").default_value(std::string{"0.15"}),
-           "draw distant pages as one bar per line below this scale",
-           "Draw a page as one solid bar per line once one layout pixel of it "
-           "covers fewer than this many screen pixels. Zero draws every "
-           "visible page in full detail, which is far slower on a document "
-           "held at a distance.");
+  everyday(
+      parser.add_argument("--backend").default_value(std::string{"opengl"}),
+      "rendering backend: opengl, opengles or vulkan",
+      "Rendering backend: opengl (the default), opengles or vulkan. The "
+      "Vulkan backend is only present when the binary was built with it; "
+      "naming one that is not compiled in reports which are.");
+  everyday(
+      parser.add_argument("--coarse-below").default_value(std::string{"0.15"}),
+      "draw distant pages as one bar per line below this scale",
+      "Draw a page as one solid bar per line once one layout pixel of it "
+      "covers fewer than this many screen pixels. Zero draws every "
+      "visible page in full detail, which is far slower on a document "
+      "held at a distance.");
 
   // Everything below drives the program without a person at the keyboard.
   // Grouped only in the detailed listing: argparse prints a group's heading
@@ -361,10 +361,9 @@ void addCommonArguments(argparse::ArgumentParser &parser, const bool detailed) {
   // Registered, then hidden from the everyday listing. Hiding rather than
   // omitting is deliberate: a script that passes one of these to a build whose
   // help does not mention it still works.
-  const auto automation = [detailed](argparse::Argument &arg,
-                                     const std::string_view brief,
-                                     const std::string_view detail)
-      -> argparse::Argument & {
+  const auto automation =
+      [detailed](argparse::Argument &arg, const std::string_view brief,
+                 const std::string_view detail) -> argparse::Argument & {
     arg.help(std::string(detailed ? detail : brief));
     if (!detailed) {
       arg.hidden();
@@ -402,19 +401,21 @@ void addCommonArguments(argparse::ArgumentParser &parser, const bool detailed) {
              "out, every document loaded, and every animation finished -- so a "
              "capture shows the finished result rather than the middle of a "
              "fade.");
-  automation(parser.add_argument("--no-present").flag(),
-             "draw frames without showing them",
-             "Draw frames without showing them, for capturing a frame on a "
-             "machine that can give a rendering context but cannot put one on "
-             "a screen. The capture is unaffected: drawing goes to an offscreen "
-             "target either way. Accepted by the OpenGL and OpenGL ES backends; "
-             "Vulkan refuses it, because every frame acquires a swapchain image "
-             "and presenting is what hands it back.");
-  automation(parser.add_argument("--pick").append(),
-             "report the picking tag at X,Y; repeatable",
-             "Report the picking tag at pixel X,Y once the document has "
-             "settled. Repeatable. The read is asynchronous, so a run waits for "
-             "every query to come back before it exits.");
+  automation(
+      parser.add_argument("--no-present").flag(),
+      "draw frames without showing them",
+      "Draw frames without showing them, for capturing a frame on a "
+      "machine that can give a rendering context but cannot put one on "
+      "a screen. The capture is unaffected: drawing goes to an offscreen "
+      "target either way. Accepted by the OpenGL and OpenGL ES backends; "
+      "Vulkan refuses it, because every frame acquires a swapchain image "
+      "and presenting is what hands it back.");
+  automation(
+      parser.add_argument("--pick").append(),
+      "report the picking tag at X,Y; repeatable",
+      "Report the picking tag at pixel X,Y once the document has "
+      "settled. Repeatable. The read is asynchronous, so a run waits for "
+      "every query to come back before it exits.");
   automation(parser.add_argument("--click").append(),
              "click at X,Y once settled, placing the caret; repeatable",
              "Click at pixel X,Y once the document has settled, placing the "
@@ -455,23 +456,26 @@ void addCommonArguments(argparse::ArgumentParser &parser, const bool detailed) {
              "Show a notification once the first frame is drawn, written as "
              "[info:|warning:|error:]TEXT. An unprefixed message is a warning. "
              "Repeatable.");
-  automation(parser.add_argument("--strict-diagnostics").flag(),
-             "treat a driver error as fatal",
-             "Treat a driver error as fatal instead of showing it as a "
-             "notification, and set the exit status accordingly. Automated runs "
-             "want this: a frame rendered by a driver that was reporting errors "
-             "proves nothing, however plausible it looks.");
-  automation(parser.add_argument("--print-asset-dir").flag(),
-             "report where the shaders and icon were found, then quit",
-             "Report the directory the shaders and the icon were found in, then "
-             "quit without opening a window. Answers the one question a package "
-             "can be asked on a machine whose driver cannot give it a context.");
+  automation(
+      parser.add_argument("--strict-diagnostics").flag(),
+      "treat a driver error as fatal",
+      "Treat a driver error as fatal instead of showing it as a "
+      "notification, and set the exit status accordingly. Automated runs "
+      "want this: a frame rendered by a driver that was reporting errors "
+      "proves nothing, however plausible it looks.");
+  automation(
+      parser.add_argument("--print-asset-dir").flag(),
+      "report where the shaders and icon were found, then quit",
+      "Report the directory the shaders and the icon were found in, then "
+      "quit without opening a window. Answers the one question a package "
+      "can be asked on a machine whose driver cannot give it a context.");
 }
 
 render::Backend applyCommonArguments(argparse::ArgumentParser &parser,
                                      const AppStateRef &state, const int argc,
                                      const char *const *const argv) {
-  const auto backend = render::backendFromName(parser.get<std::string>("--backend"));
+  const auto backend =
+      render::backendFromName(parser.get<std::string>("--backend"));
   if (!render::backendCompiledIn(backend)) {
     throw std::runtime_error("The " + render::backendName(backend) +
                              " backend was not compiled into this binary. "
@@ -479,13 +483,13 @@ render::Backend applyCommonArguments(argparse::ArgumentParser &parser,
                              "Vulkan.");
   }
 
-  state->defaultFontName   = parser.get("--font");
-  state->profiling         = parser["--profile"] == true;
-  state->printAssetDir     = parser["--print-asset-dir"] == true;
-  state->benchmarkFrames   = std::stoul(parser.get<std::string>("--benchmark"));
-  state->cullPages         = parser["--no-cull"] == false;
-  state->coarseBelow       = std::stof(parser.get<std::string>("--coarse-below"));
-  state->screenshotPath    = parser.get<std::string>("--screenshot");
+  state->defaultFontName = parser.get("--font");
+  state->profiling       = parser["--profile"] == true;
+  state->printAssetDir   = parser["--print-asset-dir"] == true;
+  state->benchmarkFrames = std::stoul(parser.get<std::string>("--benchmark"));
+  state->cullPages       = parser["--no-cull"] == false;
+  state->coarseBelow     = std::stof(parser.get<std::string>("--coarse-below"));
+  state->screenshotPath  = parser.get<std::string>("--screenshot");
   state->dumpAccessibility = parser["--dump-a11y"] == true;
   state->strictDiagnostics = parser["--strict-diagnostics"] == true;
   state->noPresent         = parser["--no-present"] == true;
@@ -515,20 +519,21 @@ Application::Application(AppStateRef aState, RendererRef aRenderer,
 Application::~Application() = default;
 
 void Application::bindDefaultViewCommands() {
-  const auto move = [this](const std::function<void(AppState::ViewPerspective &)> &fun) {
-    return [this, fun] {
-      const std::lock_guard locker(state->view);
-      fun(state->view);
-    };
-  };
+  const auto move =
+      [this](const std::function<void(AppState::ViewPerspective &)> &fun) {
+        return [this, fun] {
+          const std::lock_guard locker(state->view);
+          fun(state->view);
+        };
+      };
   // One world unit per press. The view is a camera in the scene rather than a
   // scroll offset, so these are all in its own frame: forwards is where it
   // looks, sideways is the cross product with up.
   constexpr float step = 1.0F;
 
-  commandTable.bind(SDL_SCANCODE_R, "reset view",
-                    "put the camera back where it started",
-                    move([](AppState::ViewPerspective &view) { view.resetPos(); }));
+  commandTable.bind(
+      SDL_SCANCODE_R, "reset view", "put the camera back where it started",
+      move([](AppState::ViewPerspective &view) { view.resetPos(); }));
   commandTable.bind(SDL_SCANCODE_D, "back",
                     "move the camera away from the documents",
                     move([](AppState::ViewPerspective &view) {
@@ -539,29 +544,29 @@ void Application::bindDefaultViewCommands() {
                     move([](AppState::ViewPerspective &view) {
                       view.pos += step * view.front;
                     }));
-  commandTable.bind(SDL_SCANCODE_S, "left", "move the camera left",
-                    move([](AppState::ViewPerspective &view) {
-                      view.pos -= glm::normalize(
-                                      glm::cross(view.front, view.upward)) *
-                                  step;
-                    }));
-  commandTable.bind(SDL_SCANCODE_F, "right", "move the camera right",
-                    move([](AppState::ViewPerspective &view) {
-                      view.pos += glm::normalize(
-                                      glm::cross(view.front, view.upward)) *
-                                  step;
-                    }));
+  commandTable.bind(
+      SDL_SCANCODE_S, "left", "move the camera left",
+      move([](AppState::ViewPerspective &view) {
+        view.pos -= glm::normalize(glm::cross(view.front, view.upward)) * step;
+      }));
+  commandTable.bind(
+      SDL_SCANCODE_F, "right", "move the camera right",
+      move([](AppState::ViewPerspective &view) {
+        view.pos += glm::normalize(glm::cross(view.front, view.upward)) * step;
+      }));
   commandTable.bind(SDL_SCANCODE_E, "up", "move the camera up",
                     move([](AppState::ViewPerspective &view) {
-                      view.pos -= glm::normalize(glm::cross(
-                                      view.front, glm::vec3(1.0F, 0.0F, 0.0F))) *
-                                  step;
+                      view.pos -=
+                          glm::normalize(glm::cross(
+                              view.front, glm::vec3(1.0F, 0.0F, 0.0F))) *
+                          step;
                     }));
   commandTable.bind(SDL_SCANCODE_C, "down", "move the camera down",
                     move([](AppState::ViewPerspective &view) {
-                      view.pos += glm::normalize(glm::cross(
-                                      view.front, glm::vec3(1.0F, 0.0F, 0.0F))) *
-                                  step;
+                      view.pos +=
+                          glm::normalize(glm::cross(
+                              view.front, glm::vec3(1.0F, 0.0F, 0.0F))) *
+                          step;
                     }));
   commandTable.bind(SDL_SCANCODE_G, "widen", "widen the field of view",
                     move([](AppState::ViewPerspective &view) {
@@ -653,8 +658,8 @@ int Application::run() {
   std::jthread renderThread(std::ref(*renderer), std::ref(window));
 
   // Milliseconds to block in SDL_WaitEventTimeout. Waiting rather than spinning
-  // on SDL_PollEvent keeps this thread off the CPU while idle; the timeout still
-  // lets the loop notice `alive` being cleared by the renderer.
+  // on SDL_PollEvent keeps this thread off the CPU while idle; the timeout
+  // still lets the loop notice `alive` being cleared by the renderer.
   constexpr int eventWaitMs = 100;
 
   // What the platform was last told about where typing lands, so it is told

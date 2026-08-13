@@ -56,86 +56,83 @@ const uint solidFlag = 4u;
 const float depthStep = 0.1;
 
 vec3 unpackInk(uint bits) {
-    return vec3(float((bits >> 24) & 255u),
-                float((bits >> 16) & 255u),
-                float((bits >> 8) & 255u)) / 255.0;
+  return vec3(float((bits >> 24) & 255u), float((bits >> 16) & 255u),
+              float((bits >> 8) & 255u)) /
+         255.0;
 }
 
 // Paper keeps five bits of red, six of green and five of blue: it is a flat
 // fill behind text, so it has no gradient for the rounding to band. Scaled by
 // the largest value of each field so that white stays exactly white.
 vec3 unpackPaper(uint bits) {
-    return vec3(float((bits >> 11) & 31u) / 31.0,
-                float((bits >> 5) & 63u) / 63.0,
-                float(bits & 31u) / 31.0);
+  return vec3(float((bits >> 11) & 31u) / 31.0, float((bits >> 5) & 63u) / 63.0,
+              float(bits & 31u) / 31.0);
 }
 
 // width, height, layer, kind.
 vec4 unpackQuad(uint bits) {
-    return vec4(float(bits >> 20),
-                float((bits >> 8) & 4095u),
-                float((bits >> 2) & 63u),
-                float(bits & 3u));
+  return vec4(float(bits >> 20), float((bits >> 8) & 4095u),
+              float((bits >> 2) & 63u), float(bits & 3u));
 }
 
 void main() {
-    vec4 whlk = unpackQuad(quad);
-    float halfWidth = whlk.x * 0.5;
-    float halfHeight = whlk.y * 0.5;
-    uint flags = foreground & 255u;
+  vec4 whlk        = unpackQuad(quad);
+  float halfWidth  = whlk.x * 0.5;
+  float halfHeight = whlk.y * 0.5;
+  uint flags       = foreground & 255u;
 
-    // A degenerate glyph box would rasterise nothing useful; collapse it to a
-    // point outside clip space so the fragment stage never runs for it.
-    if (0.0 == whlk.x || 0.0 == whlk.y) {
-        gl_Position = vec4(2.0, 2.0, 2.0, 1.0);
-        vFgColor = vec3(0.0);
-        vBgColor = vec3(0.0);
-        vTexCoord = vec2(0.0);
-        vLayer = 0.0;
-        vTag = uvec2(0u);
-        vQuadU = 0.0;
-        vSolid = 1u;
-        return;
-    }
+  // A degenerate glyph box would rasterise nothing useful; collapse it to a
+  // point outside clip space so the fragment stage never runs for it.
+  if (0.0 == whlk.x || 0.0 == whlk.y) {
+    gl_Position = vec4(2.0, 2.0, 2.0, 1.0);
+    vFgColor    = vec3(0.0);
+    vBgColor    = vec3(0.0);
+    vTexCoord   = vec2(0.0);
+    vLayer      = 0.0;
+    vTag        = uvec2(0u);
+    vQuadU      = 0.0;
+    vSolid      = 1u;
+    return;
+  }
 
-    int corner = GLEDITOR_VERTEX_INDEX;
-    // corner & 1 selects right, corner & 2 selects top
-    float xSign = (0 != (corner & 1)) ? 1.0 : -1.0;
-    float ySign = (0 != (corner & 2)) ? 1.0 : -1.0;
+  int corner = GLEDITOR_VERTEX_INDEX;
+  // corner & 1 selects right, corner & 2 selects top
+  float xSign = (0 != (corner & 1)) ? 1.0 : -1.0;
+  float ySign = (0 != (corner & 2)) ? 1.0 : -1.0;
 
-    // The corner offset is a direction, not a point: its w is zero, so adding
-    // it to the centre in model space and transforming once is the same as
-    // transforming both and adding, for one matrix multiply instead of two.
-    vec4 offset = vec4(xSign * halfWidth, ySign * halfHeight, 0.0, 0.0);
-    vec3 centre = vec3(position, float(flags & depthMask) * depthStep);
-    gl_Position = uMVP * (vec4(centre, 1.0) + offset);
+  // The corner offset is a direction, not a point: its w is zero, so adding
+  // it to the centre in model space and transforming once is the same as
+  // transforming both and adding, for one matrix multiply instead of two.
+  vec4 offset = vec4(xSign * halfWidth, ySign * halfHeight, 0.0, 0.0);
+  vec3 centre = vec3(position, float(flags & depthMask) * depthStep);
+  gl_Position = uMVP * (vec4(centre, 1.0) + offset);
 
-    // Selection is decided in the fragment stage, not here: whether a
-    // fragment is selected depends on where inside its quad it sits, and a
-    // vertex only knows its corner. Deciding per instance could only ever
-    // select whole clusters, and one cluster can be a ligature covering
-    // several characters.
+  // Selection is decided in the fragment stage, not here: whether a
+  // fragment is selected depends on where inside its quad it sits, and a
+  // vertex only knows its corner. Deciding per instance could only ever
+  // select whole clusters, and one cluster can be a ligature covering
+  // several characters.
 
-    vFgColor = unpackInk(foreground);
-    vBgColor = unpackPaper(paper >> 16);
-    // The atlas origin is the bottom-left of the glyph, so the texture
-    // coordinate follows the same corner selection as the position. How far it
-    // reaches is not carried at all: the atlas holds a glyph at its own size,
-    // so the box on the page is the box in texels. Texels rather than a
-    // fraction, divided by the atlas size in the fragment stage, because the
-    // atlas grows as glyphs arrive and a fraction baked in here would point
-    // somewhere else the moment it did.
-    vTexCoord = vec2(float(atlas >> 16), float(atlas & 65535u)) +
-                vec2((0 != (corner & 1)) ? whlk.x : 0.0,
-                     (0 != (corner & 2)) ? whlk.y : 0.0);
-    vLayer = whlk.z;
-    // The document and page are the draw's; the kind is the quad's. Assembled
-    // here so the fragment stage sees one identity word, as it did when every
-    // instance carried the whole thing.
-    vTag = uvec2(uIdentity | (uint(whlk.w) << GLEDITOR_TAG_KIND_SHIFT),
-                 paper & 65535u);
-    vQuadU = (0 != (corner & 1)) ? 1.0 : 0.0;
-    vOpacity = uOpacity;
-    vSolid = (0u != (flags & solidFlag)) ? 1u : 0u;
+  vFgColor = unpackInk(foreground);
+  vBgColor = unpackPaper(paper >> 16);
+  // The atlas origin is the bottom-left of the glyph, so the texture
+  // coordinate follows the same corner selection as the position. How far it
+  // reaches is not carried at all: the atlas holds a glyph at its own size,
+  // so the box on the page is the box in texels. Texels rather than a
+  // fraction, divided by the atlas size in the fragment stage, because the
+  // atlas grows as glyphs arrive and a fraction baked in here would point
+  // somewhere else the moment it did.
+  vTexCoord = vec2(float(atlas >> 16), float(atlas & 65535u)) +
+              vec2((0 != (corner & 1)) ? whlk.x : 0.0,
+                   (0 != (corner & 2)) ? whlk.y : 0.0);
+  vLayer = whlk.z;
+  // The document and page are the draw's; the kind is the quad's. Assembled
+  // here so the fragment stage sees one identity word, as it did when every
+  // instance carried the whole thing.
+  vTag     = uvec2(uIdentity | (uint(whlk.w) << GLEDITOR_TAG_KIND_SHIFT),
+                   paper & 65535u);
+  vQuadU   = (0 != (corner & 1)) ? 1.0 : 0.0;
+  vOpacity = uOpacity;
+  vSolid   = (0u != (flags & solidFlag)) ? 1u : 0u;
 }
-// vi: set sw=4 sts=4 ts=4 et:
+// vi: set sw=2 sts=2 ts=2 et:

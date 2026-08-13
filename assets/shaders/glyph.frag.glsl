@@ -19,10 +19,9 @@ GLEDITOR_FRAG_OUT(0) vec4 outColor;
 GLEDITOR_FRAG_OUT(1) uvec4 outTag;
 
 vec4 unpackColor(uint bits) {
-    return vec4(float((bits >> 24) & 255u),
-                float((bits >> 16) & 255u),
-                float((bits >> 8) & 255u),
-                float(bits & 255u)) / 255.0;
+  return vec4(float((bits >> 24) & 255u), float((bits >> 16) & 255u),
+              float((bits >> 8) & 255u), float(bits & 255u)) /
+         255.0;
 }
 
 // Background for this fragment, which is the selection colour when the
@@ -34,46 +33,48 @@ vec4 unpackColor(uint bits) {
 // and the "i" of an "fi" ligature highlights the "f" alone -- the two share a
 // single quad and have no geometry to tell them apart.
 vec3 selectedBackground(vec3 base) {
-    for (int i = 0; i < GLEDITOR_MAX_HIGHLIGHTS; i++) {
-        // Identity zero is not a glyph, so it terminates the list.
-        if (0u == uRanges[i].identity) {
-            break;
-        }
-        if (uRanges[i].identity != vTag.x) {
-            continue;
-        }
-        if (vTag.y < uRanges[i].firstCluster || vTag.y > uRanges[i].lastCluster) {
-            continue;
-        }
-        float lo = (vTag.y == uRanges[i].firstCluster) ? uRanges[i].startFraction : 0.0;
-        float hi = (vTag.y == uRanges[i].lastCluster) ? uRanges[i].endFraction : 1.0;
-        if (vQuadU >= lo && vQuadU < hi) {
-            return unpackColor(uRanges[i].colour).rgb;
-        }
+  for (int i = 0; i < GLEDITOR_MAX_HIGHLIGHTS; i++) {
+    // Identity zero is not a glyph, so it terminates the list.
+    if (0u == uRanges[i].identity) {
+      break;
     }
-    return base;
+    if (uRanges[i].identity != vTag.x) {
+      continue;
+    }
+    if (vTag.y < uRanges[i].firstCluster || vTag.y > uRanges[i].lastCluster) {
+      continue;
+    }
+    float lo =
+        (vTag.y == uRanges[i].firstCluster) ? uRanges[i].startFraction : 0.0;
+    float hi =
+        (vTag.y == uRanges[i].lastCluster) ? uRanges[i].endFraction : 1.0;
+    if (vQuadU >= lo && vQuadU < hi) {
+      return unpackColor(uRanges[i].colour).rgb;
+    }
+  }
+  return base;
 }
 
 void main() {
-    // A solid quad -- a page, a bar standing in for a line of text, a panel,
-    // the caret -- has no glyph on it, so it is its own colour and the atlas is
-    // never touched. Page backgrounds cover more fragments than all the text
-    // they sit behind, and this is the fetch each of them no longer does.
-    if (0u != vSolid) {
-        outColor = vec4(vFgColor, vOpacity);
-    } else {
-        // vTexCoord arrives in texels; the atlas is resized as glyphs are
-        // added, so the divisor is read from the texture rather than baked into
-        // the vertex data. textureSize reports level zero, which is the level
-        // the coordinates were placed in.
-        vec2 atlas = vec2(textureSize(uGlyphAtlas, 0).xy);
-        float coverage =
-            texture(uGlyphAtlas, vec3(vTexCoord / atlas, floor(vLayer + 0.5))).r;
-        outColor =
-            vec4(mix(selectedBackground(vBgColor), vFgColor, coverage), vOpacity);
-    }
-    // Fixed point: the attachment holds unsigned integers. The scale must
-    // match render::tagFractionScale.
-    outTag = uvec4(vTag, uint(clamp(vQuadU, 0.0, 1.0) * 65535.0), 0u);
+  // A solid quad -- a page, a bar standing in for a line of text, a panel,
+  // the caret -- has no glyph on it, so it is its own colour and the atlas is
+  // never touched. Page backgrounds cover more fragments than all the text
+  // they sit behind, and this is the fetch each of them no longer does.
+  if (0u != vSolid) {
+    outColor = vec4(vFgColor, vOpacity);
+  } else {
+    // vTexCoord arrives in texels; the atlas is resized as glyphs are
+    // added, so the divisor is read from the texture rather than baked into
+    // the vertex data. textureSize reports level zero, which is the level
+    // the coordinates were placed in.
+    vec2 atlas = vec2(textureSize(uGlyphAtlas, 0).xy);
+    float coverage =
+        texture(uGlyphAtlas, vec3(vTexCoord / atlas, floor(vLayer + 0.5))).r;
+    outColor =
+        vec4(mix(selectedBackground(vBgColor), vFgColor, coverage), vOpacity);
+  }
+  // Fixed point: the attachment holds unsigned integers. The scale must
+  // match render::tagFractionScale.
+  outTag = uvec4(vTag, uint(clamp(vQuadU, 0.0, 1.0) * 65535.0), 0u);
 }
-// vi: set sw=4 sts=4 ts=4 et:
+// vi: set sw=2 sts=2 ts=2 et:

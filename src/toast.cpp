@@ -5,7 +5,7 @@
 #include <gleditor/toast.hpp> // IWYU pragma: associated
 
 #include <choreograph/Choreograph.h> // for easeInOutQuad
-#include <gleditor/animation.hpp>     // for toastFade
+#include <gleditor/animation.hpp>    // for toastFade
 
 #include <algorithm>
 #include <cmath>
@@ -194,9 +194,8 @@ void ToastOverlay::post(const render::DiagnosticSeverity severity,
   rows.reserve(clusters.size() + 1);
   for (std::size_t i = 0; i < clusters.size(); i++) {
     const auto &cluster = clusters[i];
-    const int end       = i + 1 < clusters.size()
-                              ? clusters[i + 1].start
-                              : static_cast<int>(raw.size());
+    const int end       = i + 1 < clusters.size() ? clusters[i + 1].start
+                                                  : static_cast<int>(raw.size());
     if (end <= cluster.start || cluster.start >= static_cast<int>(raw.size())) {
       continue;
     }
@@ -207,7 +206,7 @@ void ToastOverlay::post(const render::DiagnosticSeverity severity,
     const std::string_view chr(raw.data() + cluster.start,
                                static_cast<std::size_t>(length));
 
-    const auto glyph = state.glyphCache.put(chr, font);
+    const auto glyph  = state.glyphCache.put(chr, font);
     const auto width  = static_cast<float>(static_cast<int>(glyph.dims.width));
     const auto height = static_cast<float>(static_cast<int>(glyph.dims.height));
     if (0.0F == width || 0.0F == height) {
@@ -218,21 +217,22 @@ void ToastOverlay::post(const render::DiagnosticSeverity severity,
     // orthographic projection draw() builds and the bottom-up rows the glyph
     // atlas is packed with. Pango measures down from the top of the text
     // block, hence the subtraction.
-    const auto left = padding + static_cast<float>(toPixels(cluster.logical.get_x()));
-    const auto top  = padding + static_cast<float>(textHeight) -
+    const auto left =
+        padding + static_cast<float>(toPixels(cluster.logical.get_x()));
+    const auto top = padding + static_cast<float>(textHeight) -
                      static_cast<float>(toPixels(cluster.logical.get_y()));
 
-    rows.push_back(Doc::VBORow{
-        {left + (width / 2.0F), top - (height / 2.0F)},
-        Doc::VBORow::ink(text, Doc::VBORow::onPaper, false),
-        Doc::VBORow::atlasAt(
-            static_cast<unsigned int>(glyph.texCoords.topLeft.x),
-            static_cast<unsigned int>(glyph.texCoords.topLeft.y)),
-        Doc::VBORow::box(static_cast<unsigned char>(glyph.layer),
-                         static_cast<unsigned int>(width),
-                         static_cast<unsigned int>(height),
-                         render::tagKindOverlay),
-        Doc::VBORow::paperAt(panel, 0)});
+    rows.push_back(
+        Doc::VBORow{{left + (width / 2.0F), top - (height / 2.0F)},
+                    Doc::VBORow::ink(text, Doc::VBORow::onPaper, false),
+                    Doc::VBORow::atlasAt(
+                        static_cast<unsigned int>(glyph.texCoords.topLeft.x),
+                        static_cast<unsigned int>(glyph.texCoords.topLeft.y)),
+                    Doc::VBORow::box(static_cast<unsigned char>(glyph.layer),
+                                     static_cast<unsigned int>(width),
+                                     static_cast<unsigned int>(height),
+                                     render::tagKindOverlay),
+                    Doc::VBORow::paperAt(panel, 0)});
   }
 
   while (toasts.size() >= maxVisible) {
@@ -321,10 +321,9 @@ float ToastOverlay::fadeFactor(const Clock::time_point postedAt,
 bool ToastOverlay::fadingIn(const Clock::time_point now) const {
   return std::ranges::any_of(toasts, [now](const Toast &toast) {
     return now > toast.postedAt &&
-           now < toast.postedAt +
-                     std::chrono::duration_cast<Clock::duration>(
-                         std::chrono::duration<double>(
-                             gleditor::anim::toastFade));
+           now < toast.postedAt + std::chrono::duration_cast<Clock::duration>(
+                                      std::chrono::duration<double>(
+                                          gleditor::anim::toastFade));
   });
 }
 

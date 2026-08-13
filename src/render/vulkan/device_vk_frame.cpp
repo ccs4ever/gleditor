@@ -22,9 +22,8 @@ namespace {
 
 void check(const VkResult result, const char *what) {
   if (VK_SUCCESS != result) {
-    throw std::runtime_error(
-        std::format("Vulkan: {} failed with VkResult {}", what,
-                    static_cast<int>(result)));
+    throw std::runtime_error(std::format("Vulkan: {} failed with VkResult {}",
+                                         what, static_cast<int>(result)));
   }
 }
 
@@ -126,11 +125,11 @@ VkCommandBuffer DeviceVK::beginSecondary(RecordSlot &slot) {
     // Grown once and then reused for the life of the device: a frame that
     // needed n buffers will need about n again.
     VkCommandBufferAllocateInfo allocInfo{};
-    allocInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
-    allocInfo.commandPool        = slot.pool;
-    allocInfo.level              = VK_COMMAND_BUFFER_LEVEL_SECONDARY;
+    allocInfo.sType       = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
+    allocInfo.commandPool = slot.pool;
+    allocInfo.level       = VK_COMMAND_BUFFER_LEVEL_SECONDARY;
     allocInfo.commandBufferCount = 1;
-    VkCommandBuffer allocated = VK_NULL_HANDLE;
+    VkCommandBuffer allocated    = VK_NULL_HANDLE;
     check(vkAllocateCommandBuffers(device, &allocInfo, &allocated),
           "vkAllocateCommandBuffers (secondary)");
     slot.buffers.push_back(allocated);
@@ -227,8 +226,9 @@ void DeviceVK::bindGlyphTexture(const TextureHandle texture) {
 
   const VkDescriptorBufferInfo highlightInfo{highlightIt->second.buffer, 0,
                                              highlightIt->second.bytes};
-  const VkDescriptorImageInfo imageInfo{glyphSampler, textureIt->second.view,
-                                        VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL};
+  const VkDescriptorImageInfo imageInfo{
+      glyphSampler, textureIt->second.view,
+      VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL};
 
   const auto set = pipelineIt->second.sets[frameIndex];
   std::array<VkWriteDescriptorSet, 2> writes{};
@@ -400,15 +400,16 @@ void DeviceVK::drawGlyphBatches(const std::span<const GlyphBatch> batches) {
   // timing. Timing only during the comparison is what keeps the choice from
   // drifting with the noise of whichever strategy happens to be in use.
   const bool probing = recordingProbeFrame < recordingProbeFrames;
-  const bool split   = probing ? (recordingProbeFrame < recordingProbeBlock)
-                               : parallelCost.median() <
-                                     sequentialCost.median() *
-                                         parallelRecordingMargin;
+  const bool split   = probing
+                           ? (recordingProbeFrame < recordingProbeBlock)
+                           : parallelCost.median() < sequentialCost.median() *
+                                                       parallelRecordingMargin;
   // The opening frames of each block are thrown away: the first split frame
   // after a run of sequential ones wakes workers that have been parked, which
   // is a cost the steady state does not pay.
   const bool measured =
-      probing && (recordingProbeFrame % recordingProbeBlock) >= recordingProbeWarmup;
+      probing &&
+      (recordingProbeFrame % recordingProbeBlock) >= recordingProbeWarmup;
   recordingProbeFrame++;
 
   const auto started = std::chrono::steady_clock::now();
@@ -478,8 +479,7 @@ std::optional<PickingResult> DeviceVK::takePickingTag() {
 
     // A zero timeout makes this a poll rather than a stall: the copy landed
     // when the frame that carried it completed, which is what its fence says.
-    if (VK_SUCCESS !=
-        vkWaitForFences(device, 1, &frame.inFlight, VK_TRUE, 0)) {
+    if (VK_SUCCESS != vkWaitForFences(device, 1, &frame.inFlight, VK_TRUE, 0)) {
       continue;
     }
 
@@ -490,7 +490,8 @@ std::optional<PickingResult> DeviceVK::takePickingTag() {
     if (buffers.end() == bufferIt || nullptr == bufferIt->second.mapped) {
       continue;
     }
-    const auto *values = static_cast<const std::uint32_t *>(bufferIt->second.mapped);
+    const auto *values =
+        static_cast<const std::uint32_t *>(bufferIt->second.mapped);
     return PickingResult{frame.pickX, frame.pickY,
                          unpackPickingTag(values[0], values[1], values[2])};
   }
@@ -553,11 +554,10 @@ void DeviceVK::endFrame() {
   // Present by blitting the offscreen colour target onto the acquired
   // swapchain image, which also resolves any difference in their formats.
   const VkImage swapImage = swapchainImages[acquiredImage];
-  transitionColour(frame.commands, swapImage, VK_IMAGE_LAYOUT_UNDEFINED,
-                   VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 0,
-                   VK_ACCESS_TRANSFER_WRITE_BIT,
-                   VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
-                   VK_PIPELINE_STAGE_TRANSFER_BIT);
+  transitionColour(
+      frame.commands, swapImage, VK_IMAGE_LAYOUT_UNDEFINED,
+      VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 0, VK_ACCESS_TRANSFER_WRITE_BIT,
+      VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT);
 
   VkImageBlit blit{};
   blit.srcSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1};
@@ -570,12 +570,10 @@ void DeviceVK::endFrame() {
                  VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &blit,
                  VK_FILTER_NEAREST);
 
-  transitionColour(frame.commands, swapImage,
-                   VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
-                   VK_IMAGE_LAYOUT_PRESENT_SRC_KHR,
-                   VK_ACCESS_TRANSFER_WRITE_BIT, 0,
-                   VK_PIPELINE_STAGE_TRANSFER_BIT,
-                   VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT);
+  transitionColour(
+      frame.commands, swapImage, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+      VK_IMAGE_LAYOUT_PRESENT_SRC_KHR, VK_ACCESS_TRANSFER_WRITE_BIT, 0,
+      VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT);
 
   check(vkEndCommandBuffer(frame.commands), "vkEndCommandBuffer");
 
@@ -624,8 +622,8 @@ FrameImage DeviceVK::captureColorTarget() {
   image.width  = static_cast<int>(swapchainExtent.width);
   image.height = static_cast<int>(swapchainExtent.height);
 
-  const auto pixels = static_cast<VkDeviceSize>(swapchainExtent.width) *
-                      swapchainExtent.height;
+  const auto pixels =
+      static_cast<VkDeviceSize>(swapchainExtent.width) * swapchainExtent.height;
   const auto bytes = pixels * 4;
   image.rgba.resize(bytes);
 

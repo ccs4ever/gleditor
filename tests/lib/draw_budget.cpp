@@ -19,11 +19,11 @@ namespace {
 
 /// A camera looking down -Z from z = distance, matching the editor's.
 glm::mat4 viewProjection(const float distance, const float fovDegrees = 45.0F) {
-  const auto projection =
-      glm::perspective(glm::radians(fovDegrees), 800.0F / 600.0F, 0.1F, 10000.0F);
-  const auto camera = glm::lookAt(glm::vec3(0.0F, 0.0F, distance),
-                                  glm::vec3(0.0F, 0.0F, 0.0F),
-                                  glm::vec3(0.0F, 1.0F, 0.0F));
+  const auto projection = glm::perspective(glm::radians(fovDegrees),
+                                           800.0F / 600.0F, 0.1F, 10000.0F);
+  const auto camera =
+      glm::lookAt(glm::vec3(0.0F, 0.0F, distance), glm::vec3(0.0F, 0.0F, 0.0F),
+                  glm::vec3(0.0F, 1.0F, 0.0F));
   return projection * camera;
 }
 
@@ -57,7 +57,8 @@ TEST(Frustum, aBoxFarToOneSideIsRejected) {
 // answer -- rejecting it would clip the page at the window edge.
 TEST(Frustum, aBoxStraddlingAnEdgeIsKept) {
   const auto base = viewProjection(200.0F);
-  // Far enough out that the box's centre is off screen but its near edge is not.
+  // Far enough out that the box's centre is off screen but its near edge is
+  // not.
   for (const float offset : {-95.0F, 95.0F}) {
     const auto mvp =
         base * glm::translate(glm::mat4(1.0F), glm::vec3(offset, 0.0F, 0.0F));
@@ -79,10 +80,11 @@ TEST(Frustum, aBoxBehindTheCameraIsNotMistakenForOneInFront) {
 // screen, and the rest have to be rejected. Pages are stacked 100 apart.
 TEST(Frustum, mostPagesOfALongDocumentAreRejected) {
   const auto base = viewProjection(200.0F);
-  int kept = 0;
+  int kept        = 0;
   for (int page = 0; page < 1000; page++) {
-    const auto mvp = base * glm::translate(glm::mat4(1.0F),
-                                           glm::vec3(0.0F, -100.0F * page, 0.0F));
+    const auto mvp =
+        base *
+        glm::translate(glm::mat4(1.0F), glm::vec3(0.0F, -100.0F * page, 0.0F));
     if (!outsideFrustum(mvp, halfW, halfH, depth)) {
       kept++;
     }
@@ -111,8 +113,9 @@ TEST(ScreenScale, aWiderDrawableGivesEachUnitMorePixels) {
 TEST(ScreenScale, somethingOnTheCameraPlaneReadsAsVeryClose) {
   // The box sits exactly where the camera is, so its centre has a clip w of
   // zero and the perspective divide has nothing to say.
-  const auto mvp = viewProjection(200.0F) *
-                   glm::translate(glm::mat4(1.0F), glm::vec3(0.0F, 0.0F, 200.0F));
+  const auto mvp =
+      viewProjection(200.0F) *
+      glm::translate(glm::mat4(1.0F), glm::vec3(0.0F, 0.0F, 200.0F));
   EXPECT_GT(screenScaleAt(mvp, 800.0F), 1e6F);
 }
 

@@ -64,9 +64,10 @@ const Metainfo *DirectoryContentSource::metainfo(const InfoHash &hash) const {
   return found == held.end() ? nullptr : &found->second.meta;
 }
 
-std::string DirectoryContentSource::readStream(const InfoHash &hash,
-                                               const std::uint64_t offset,
-                                               const std::uint64_t length) const {
+std::string
+DirectoryContentSource::readStream(const InfoHash &hash,
+                                   const std::uint64_t offset,
+                                   const std::uint64_t length) const {
   const auto found = held.find(hash);
   if (found == held.end()) {
     return {};
@@ -102,11 +103,10 @@ bool Resolver::available(const Scroll &scroll) const {
   if (nullptr == source || scroll.segments.empty()) {
     return false;
   }
-  return std::ranges::all_of(scroll.segments,
-                             [this](const ScrollSegment &segment) {
-                               return nullptr !=
-                                      source->metainfo(segment.torrent);
-                             });
+  return std::ranges::all_of(
+      scroll.segments, [this](const ScrollSegment &segment) {
+        return nullptr != source->metainfo(segment.torrent);
+      });
 }
 
 std::string Resolver::readSegment(const ScrollSegment &segment,
@@ -128,15 +128,16 @@ std::string Resolver::readSegment(const ScrollSegment &segment,
   // Whole pieces, because a piece hash covers a piece and says nothing about
   // a fragment of one. Reading only the requested bytes would be cheaper and
   // would leave them unverifiable.
-  const auto readFrom = static_cast<std::uint64_t>(firstPiece) * meta->pieceLength();
+  const auto readFrom =
+      static_cast<std::uint64_t>(firstPiece) * meta->pieceLength();
   std::string verified;
-  verified.reserve(static_cast<std::size_t>((endPiece - firstPiece) *
-                                            meta->pieceLength()));
+  verified.reserve(
+      static_cast<std::size_t>((endPiece - firstPiece) * meta->pieceLength()));
 
   for (auto piece = firstPiece; piece < endPiece; piece++) {
-    const auto at    = static_cast<std::uint64_t>(piece) * meta->pieceLength();
-    const auto bytes = source->readStream(segment.torrent, at,
-                                          meta->lengthOfPiece(piece));
+    const auto at = static_cast<std::uint64_t>(piece) * meta->pieceLength();
+    const auto bytes =
+        source->readStream(segment.torrent, at, meta->lengthOfPiece(piece));
     if (!meta->verifyPiece(piece, bytes)) {
       // Nothing is returned rather than the pieces that did check out.
       // Downstream cannot tell verified bytes from unverified ones, so a

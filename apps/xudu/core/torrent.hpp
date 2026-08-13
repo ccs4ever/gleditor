@@ -103,13 +103,17 @@ public:
   [[nodiscard]] std::size_t pieceCount() const { return pieceHashes.size(); }
   /// Total length of the concatenated stream.
   [[nodiscard]] std::uint64_t totalLength() const;
-  [[nodiscard]] const std::vector<TorrentFile> &files() const { return entries; }
+  [[nodiscard]] const std::vector<TorrentFile> &files() const {
+    return entries;
+  }
 
   /// The index of the file named @p path, or nothing.
-  [[nodiscard]] std::optional<std::uint32_t> fileIndex(std::string_view path) const;
+  [[nodiscard]] std::optional<std::uint32_t>
+  fileIndex(std::string_view path) const;
 
   /// The SHA-1 of piece @p index, as recorded in the torrent.
-  [[nodiscard]] const std::array<std::uint8_t, 20> &pieceHash(std::size_t index) const;
+  [[nodiscard]] const std::array<std::uint8_t, 20> &
+  pieceHash(std::size_t index) const;
 
   /// Length of piece @p index. The last one is short unless the content
   /// happens to divide exactly.
@@ -126,7 +130,8 @@ public:
    * @p data must be the whole piece. A short read is not a partial answer, it
    * is a different piece, and reporting it as verified would defeat the point.
    */
-  [[nodiscard]] bool verifyPiece(std::size_t index, std::string_view data) const;
+  [[nodiscard]] bool verifyPiece(std::size_t index,
+                                 std::string_view data) const;
 
   /// A magnet link naming this torrent, for handing the reference to
   /// something that can actually go and find it.

@@ -159,9 +159,8 @@ private:
   /// Entry point the driver calls. Records into `diagnostics` and returns; see
   /// diagnostics.hpp for why it must not throw.
   static void APIENTRY debugCallback(GLenum source, GLenum type, GLuint id,
-                                       GLenum severity, GLsizei length,
-                                       const GLchar *message,
-                                       const void *user);
+                                     GLenum severity, GLsizei length,
+                                     const GLchar *message, const void *user);
   /// Convert a top-down row to the bottom-up row OpenGL uses.
   [[nodiscard]] int flipY(int y) const;
 

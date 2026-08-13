@@ -1,22 +1,22 @@
-#include <algorithm>                   // for min, max
-#include <cmath>                       // for ceil, lround
-#include <limits>
-#include <cstddef>                     // for byte
-#include <cstdint>                     // for uint32_t
-#include <format>                      // for format
-#include <gleditor/animation.hpp>      // for docArrival, docArrivalDepth
-#include <gleditor/doc.hpp>            // IWYU pragma: associated
+#include <algorithm>                      // for min, max
+#include <cmath>                          // for ceil, lround
+#include <cstddef>                        // for byte
+#include <cstdint>                        // for uint32_t
+#include <format>                         // for format
+#include <gleditor/animation.hpp>         // for docArrival, docArrivalDepth
+#include <gleditor/doc.hpp>               // IWYU pragma: associated
 #include <gleditor/document_observer.hpp> // for DocumentObserver
-#include <gleditor/text_source.hpp>    // for TextSource
-#include <gleditor/utf8.hpp>           // for alignToCharacterStart
-#include <gleditor/render/device.hpp>  // for RenderDevice
-#include <gleditor/render_state.hpp>   // for RenderState
-#include <gleditor/renderer.hpp>       // for Renderer, RendererRef
-#include <glm/detail/qualifier.hpp>    // for qualifier
-#include <glm/ext/matrix_float4x4.hpp> // for mat4
-#include <glm/ext/vector_float3.hpp>   // for vec3
+#include <gleditor/render/device.hpp>     // for RenderDevice
+#include <gleditor/render_state.hpp>      // for RenderState
+#include <gleditor/renderer.hpp>          // for Renderer, RendererRef
+#include <gleditor/text_source.hpp>       // for TextSource
+#include <gleditor/utf8.hpp>              // for alignToCharacterStart
+#include <glm/detail/qualifier.hpp>       // for qualifier
+#include <glm/ext/matrix_float4x4.hpp>    // for mat4
+#include <glm/ext/vector_float3.hpp>      // for vec3
 #include <glm/gtc/type_ptr.hpp>
-#include <iostream>               // for basic_ostream, operator<<
+#include <iostream> // for basic_ostream, operator<<
+#include <limits>
 #include <memory>                 // for __shared_ptr_access, shared...
 #include <pangomm/cairofontmap.h> // for CairoFontMap
 #include <span>                   // for span
@@ -72,8 +72,8 @@ constexpr std::uint32_t initialPoolRows = 4096;
  */
 std::uint32_t rowsFor(const std::size_t characters) {
   const auto estimate = characters + (characters / 8) + initialPoolRows;
-  return static_cast<std::uint32_t>(
-      std::min<std::size_t>(estimate, std::numeric_limits<std::uint32_t>::max()));
+  return static_cast<std::uint32_t>(std::min<std::size_t>(
+      estimate, std::numeric_limits<std::uint32_t>::max()));
 }
 
 /// Margin in layout pixels between the page edge and its text.
@@ -121,9 +121,10 @@ std::size_t nextCharacter(const std::string &text, std::size_t pos) {
 
 /// Number of characters in a UTF-8 range, counting lead bytes.
 std::size_t utf8Length(const std::string_view text) {
-  return static_cast<std::size_t>(std::ranges::count_if(text, [](const char chr) {
-    return 0x80 != (static_cast<unsigned char>(chr) & 0xC0);
-  }));
+  return static_cast<std::size_t>(
+      std::ranges::count_if(text, [](const char chr) {
+        return 0x80 != (static_cast<unsigned char>(chr) & 0xC0);
+      }));
 }
 
 /// View a row vector as the raw bytes the buffer pool wants.
@@ -162,7 +163,7 @@ render::VertexLayout Doc::vertexLayout() {
                 "growing it costs a megabyte per twenty thousand characters");
 
   render::VertexLayout layout;
-  layout.stride = sizeof(VBORow);
+  layout.stride     = sizeof(VBORow);
   layout.attributes = {
       {"position", 0, AttributeType::Float, 2, offsetof(VBORow, pos)},
       {"foreground", 1, AttributeType::UnsignedInt, 1,
@@ -253,8 +254,8 @@ Page::Page(std::shared_ptr<Doc> aDoc, RenderState &state, glm::mat4 &model,
   // caller asked for, and a glyph too large to describe is a visual mistake
   // where a failed assertion is a crash.
   const auto extent = [](const float value) {
-    return static_cast<unsigned int>(
-        std::clamp(value, 0.0F, static_cast<float>(Doc::VBORow::maxQuadExtent)));
+    return static_cast<unsigned int>(std::clamp(
+        value, 0.0F, static_cast<float>(Doc::VBORow::maxQuadExtent)));
   };
 
   // Glyph box area per line, accumulated as the clusters are placed. This is
@@ -312,8 +313,8 @@ Page::Page(std::shared_ptr<Doc> aDoc, RenderState &state, glm::mat4 &model,
     // to draw; it still has to be counted so offsets stay in step with the
     // text.
     std::size_t drawEnd = end;
-    while (drawEnd > start && ('\n' == text[drawEnd - 1] ||
-                               '\r' == text[drawEnd - 1])) {
+    while (drawEnd > start &&
+           ('\n' == text[drawEnd - 1] || '\r' == text[drawEnd - 1])) {
       drawEnd--;
     }
 
@@ -355,8 +356,9 @@ Page::Page(std::shared_ptr<Doc> aDoc, RenderState &state, glm::mat4 &model,
     const auto &coords  = glyph.texCoords;
     const auto &extents = glyph.dims;
 
-    const auto glyphWidth  = static_cast<float>(static_cast<int>(extents.width));
-    const auto glyphHeight = static_cast<float>(static_cast<int>(extents.height));
+    const auto glyphWidth = static_cast<float>(static_cast<int>(extents.width));
+    const auto glyphHeight =
+        static_cast<float>(static_cast<int>(extents.height));
 
     while (start >= nextLineStart && lineOfCluster + 1 < lineInk.size()) {
       lineOfCluster++;
@@ -383,9 +385,8 @@ Page::Page(std::shared_ptr<Doc> aDoc, RenderState &state, glm::mat4 &model,
           // Where the glyph sits in the atlas. How large it is there is not
           // written down: the atlas holds it at its own size, so the box below
           // is the same rectangle in texels as it is in layout pixels.
-          Doc::VBORow::atlasAt(
-              static_cast<unsigned int>(coords.topLeft.x),
-              static_cast<unsigned int>(coords.topLeft.y)),
+          Doc::VBORow::atlasAt(static_cast<unsigned int>(coords.topLeft.x),
+                               static_cast<unsigned int>(coords.topLeft.y)),
           box(static_cast<unsigned char>(glyph.layer), extent(glyphWidth),
               extent(glyphHeight), render::tagKindGlyph),
           // The cluster index into this page's cluster table, which is what
@@ -400,7 +401,7 @@ Page::Page(std::shared_ptr<Doc> aDoc, RenderState &state, glm::mat4 &model,
     }
   }
 
-  textBytes      = static_cast<std::uint32_t>(limit);
+  textBytes       = static_cast<std::uint32_t>(limit);
   detailInstances = static_cast<std::uint32_t>(vertexData.size());
 
   // The coarse draw. One quad per line, covering the line's ink box -- the box
@@ -411,7 +412,7 @@ Page::Page(std::shared_ptr<Doc> aDoc, RenderState &state, glm::mat4 &model,
   // dark.
   pushBackground();
   {
-    auto lineIter = layout->get_iter();
+    auto lineIter         = layout->get_iter();
     std::size_t lineIndex = 0;
     do {
       const auto &line = layout->get_const_line(static_cast<int>(lineIndex));
@@ -543,9 +544,9 @@ bool Page::caretGeometry(const std::uint32_t globalOffset, float &posX,
   shaped->get_cursor_pos(static_cast<int>(globalOffset - textOffset), strong,
                          weak);
 
-  const auto left   = pageMargin + static_cast<float>(toPixels(strong.get_x()));
-  const auto top    = pageMargin + static_cast<float>(toPixels(strong.get_y()));
-  const auto tall   = static_cast<float>(toPixels(strong.get_height()));
+  const auto left = pageMargin + static_cast<float>(toPixels(strong.get_x()));
+  const auto top  = pageMargin + static_cast<float>(toPixels(strong.get_y()));
+  const auto tall = static_cast<float>(toPixels(strong.get_height()));
 
   posX   = originX + left + (Caret::widthPixels / 2.0F);
   posY   = originY - (top + (tall / 2.0F));
@@ -599,9 +600,9 @@ void Page::collect(std::vector<render::GlyphBatch> &batches,
     return;
   }
 
-  const bool coarse = 0 != coarseInstances &&
-                      screenScaleAt(mvp, budget.screenWidth) <
-                          budget.coarseBelow;
+  const bool coarse =
+      0 != coarseInstances &&
+      screenScaleAt(mvp, budget.screenWidth) < budget.coarseBelow;
   if (coarse) {
     stats.coarse++;
   } else {
@@ -639,7 +640,8 @@ glm::mat4 Doc::modelMatrix() const {
   return glm::translate(glm::mat4(1.0F), position());
 }
 
-std::optional<Doc::Anchor> Doc::anchorFor(const std::uint32_t globalOffset) const {
+std::optional<Doc::Anchor>
+Doc::anchorFor(const std::uint32_t globalOffset) const {
   for (std::size_t i = 0; i < pages.size(); i++) {
     // Asked page by page rather than by searching, because the same call
     // decides whether the offset is on the page and where -- and the deciding
@@ -674,8 +676,8 @@ void Doc::animateArrival(ch::Timeline &timeline) {
 
   // Eased out rather than linear: the document decelerates into place, which
   // is what makes it read as arriving somewhere rather than being dragged.
-  timeline.apply(&position)
-      .then<ch::RampTo>(target, gleditor::anim::docArrival, ch::EaseOutCubic());
+  timeline.apply(&position).then<ch::RampTo>(target, gleditor::anim::docArrival,
+                                             ch::EaseOutCubic());
   timeline.apply(&opacity).then<ch::RampTo>(1.0F, gleditor::anim::docArrival,
                                             ch::EaseOutQuad());
 }
@@ -687,8 +689,8 @@ void Doc::animateDeparture(ch::Timeline &timeline) {
   // Eased in rather than out, so the document lingers a moment and then leaves
   // quickly: the opposite shape to the arrival, which is what tells the two
   // apart at a glance.
-  timeline.apply(&position)
-      .then<ch::RampTo>(away, gleditor::anim::docArrival, ch::EaseInQuad());
+  timeline.apply(&position).then<ch::RampTo>(away, gleditor::anim::docArrival,
+                                             ch::EaseInQuad());
   timeline.apply(&opacity).then<ch::RampTo>(0.0F, gleditor::anim::docArrival,
                                             ch::EaseInQuad());
 }
@@ -700,8 +702,8 @@ void Doc::animateMoveTo(ch::Timeline &timeline, const glm::vec3 &target) {
   // apply() replaces whatever motion was on this output, so a move that
   // interrupts another one continues from where that one had got to rather
   // than restarting from the old target.
-  timeline.apply(&position)
-      .then<ch::RampTo>(target, gleditor::anim::docArrival, ch::EaseInOutQuad());
+  timeline.apply(&position).then<ch::RampTo>(target, gleditor::anim::docArrival,
+                                             ch::EaseInOutQuad());
 }
 
 std::optional<render::HighlightRange>
@@ -724,7 +726,7 @@ Page::highlightFor(const std::uint32_t selStart, const std::uint32_t selEnd,
   std::optional<std::size_t> first;
   std::size_t last = 0;
   for (std::size_t i = 0; i < clusters.size(); i++) {
-    const auto &box = clusters[i];
+    const auto &box  = clusters[i];
     const auto begin = box.byteStart;
     const auto end   = box.byteStart + box.byteLength;
     // Half-open overlap: a cluster is covered when any of its bytes are.
@@ -747,17 +749,16 @@ Page::highlightFor(const std::uint32_t selStart, const std::uint32_t selEnd,
     if (0 == box.charCount) {
       return 0.0F;
     }
-    const auto clamped = std::clamp(offset, box.byteStart,
-                                    box.byteStart + box.byteLength);
-    const auto chars   = utf8Length(std::string_view(text).substr(
-        box.byteStart, clamped - box.byteStart));
+    const auto clamped =
+        std::clamp(offset, box.byteStart, box.byteStart + box.byteLength);
+    const auto chars = utf8Length(
+        std::string_view(text).substr(box.byteStart, clamped - box.byteStart));
     return static_cast<float>(chars) / static_cast<float>(box.charCount);
   };
 
   render::HighlightRange range;
-  range.identity =
-      render::packTagIdentity(render::tagKindGlyph, doc->documentIndex(),
-                              pageIndex);
+  range.identity      = render::packTagIdentity(render::tagKindGlyph,
+                                                doc->documentIndex(), pageIndex);
   range.firstCluster  = static_cast<std::uint32_t>(*first);
   range.lastCluster   = static_cast<std::uint32_t>(last);
   range.colour        = colour;
@@ -766,8 +767,8 @@ Page::highlightFor(const std::uint32_t selStart, const std::uint32_t selEnd,
   return range;
 }
 
-void Doc::highlightsFor(const std::uint32_t selStart, const std::uint32_t selEnd,
-                        const std::uint32_t colour,
+void Doc::highlightsFor(const std::uint32_t selStart,
+                        const std::uint32_t selEnd, const std::uint32_t colour,
                         std::vector<render::HighlightRange> &out) const {
   for (const auto &page : pages) {
     if (auto range = page.highlightFor(selStart, selEnd, colour)) {
@@ -807,7 +808,6 @@ void Doc::drawCaret(RenderState &state, const glm::mat4 &viewProjection,
     return;
   }
 }
-
 
 const char *reflowScopeName(const ReflowScope scope) {
   switch (scope) {
@@ -881,7 +881,6 @@ std::uint32_t Doc::consumedBytes(const Glib::RefPtr<Pango::Layout> &layout) {
   const auto upToCut = static_cast<std::uint32_t>(last->get_start_index());
   return 0 == upToCut ? whole : upToCut;
 }
-
 
 namespace {
 
@@ -1068,12 +1067,12 @@ void Doc::reflowFrom(RenderState &state, const std::size_t firstPage,
   // than going below zero, and would match at a wildly wrong page.
   const auto shift = static_cast<std::int64_t>(delta);
   std::vector<std::pair<std::uint32_t, Glib::RefPtr<Pango::Layout>>> rebuilt;
-  auto offset      = pages[firstPage].baseOffset();
-  auto pageCursor  = firstPage;
-  auto scope       = ReflowScope::Document;
+  auto offset     = pages[firstPage].baseOffset();
+  auto pageCursor = firstPage;
+  auto scope      = ReflowScope::Document;
 
   while (offset < text.bytes()) {
-    auto lay = layoutFrom(offset);
+    auto lay            = layoutFrom(offset);
     const auto consumed = consumedBytes(lay);
     rebuilt.emplace_back(offset, lay);
 
@@ -1137,13 +1136,13 @@ void Doc::reflowFrom(RenderState &state, const std::size_t firstPage,
   for (std::size_t i = 0; i < rebuilt.size(); i++) {
     auto &[base, lay] = rebuilt[i];
     const auto index  = firstPage + i;
-    glm::mat4 trans   = glm::translate(
-        glm::mat4(1.0), glm::vec3(0.0F, -100 * static_cast<float>(index), 0.0F));
+    glm::mat4 trans =
+        glm::translate(glm::mat4(1.0),
+                       glm::vec3(0.0F, -100 * static_cast<float>(index), 0.0F));
     trans = glm::scale(trans, glm::vec3(pixelsToWorld, pixelsToWorld, 1.0F));
-    pages.emplace_back(getPtr(), state, trans, lay, base,
-                       static_cast<std::uint32_t>(index),
-                       i < inherited.size() ? inherited[i]
-                                            : BufferPool::Allocation{});
+    pages.emplace_back(
+        getPtr(), state, trans, lay, base, static_cast<std::uint32_t>(index),
+        i < inherited.size() ? inherited[i] : BufferPool::Allocation{});
   }
   // Untouched pages keep their shaping and their vertex rows; only the offset
   // they report moves.
@@ -1183,8 +1182,9 @@ Doc::Doc(const RendererRef &renderer, render::RenderDevice *device,
   if (!text.validate(iter)) {
     // Only a failed validate() leaves `iter` on a real character; on success it
     // is the end iterator and must not be dereferenced.
-    std::cout << "invalid utf-8 in " << docName << ", first bad offset: "
-              << std::distance(text.begin(), iter) << "\n";
+    std::cout << "invalid utf-8 in " << docName
+              << ", first bad offset: " << std::distance(text.begin(), iter)
+              << "\n";
     text = text.make_valid();
   }
 

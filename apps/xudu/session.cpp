@@ -3,13 +3,13 @@
 #include <algorithm>
 #include <cstdint>
 #include <filesystem>
-#include <ranges>
 #include <fstream>
 #include <iostream>
 #include <iterator>
-#include <stdexcept>
 #include <map>
 #include <memory>
+#include <ranges>
+#include <stdexcept>
 #include <string>
 #include <utility>
 #include <vector>
@@ -100,9 +100,10 @@ InfoHash Session::addTorrent(const std::string &torrentPath,
                              std::istreambuf_iterator<char>()};
   // A downloader leaves a torrent's data beside the torrent file more often
   // than not, so that is the default rather than something to be told.
-  const auto root = dataRoot.empty()
-                        ? std::filesystem::path(torrentPath).parent_path().string()
-                        : dataRoot;
+  const auto root =
+      dataRoot.empty()
+          ? std::filesystem::path(torrentPath).parent_path().string()
+          : dataRoot;
   if (nullptr != swarmSource) {
     // Not seeding: this machine is asking for the content, not offering it.
     // Anything it does end up holding it will serve, which is what makes a
@@ -134,12 +135,10 @@ InfoHash Session::addMagnet(const std::string &uri) {
   return link.hash;
 }
 
-MicroversionId Session::quoteTorrent(const MicroversionId &parent,
-                                     const std::uint32_t at,
-                                     const InfoHash &hash,
-                                     const std::uint32_t fileIndex,
-                                     const std::uint64_t offset,
-                                     const std::uint64_t length) {
+MicroversionId
+Session::quoteTorrent(const MicroversionId &parent, const std::uint32_t at,
+                      const InfoHash &hash, const std::uint32_t fileIndex,
+                      const std::uint64_t offset, const std::uint64_t length) {
   const auto *const meta = content().metainfo(hash);
   if (nullptr == meta) {
     throw std::runtime_error("no torrent " + hash.hex() +
@@ -159,8 +158,8 @@ MicroversionId Session::quoteTorrent(const MicroversionId &parent,
                                             file.offset, file.length);
   // A length of zero means the rest of the file, which is what "quote this
   // document" ought to be spelled as.
-  const auto count = 0 == length ? file.length - std::min(offset, file.length)
-                                 : length;
+  const auto count =
+      0 == length ? file.length - std::min(offset, file.length) : length;
   return docStore.transcludeExternal(parent, at, scroll, offset, count);
 }
 
@@ -311,8 +310,8 @@ std::string Session::publishDocument(const MicroversionId &version,
     if (const auto *const scroll = docStore.scroll(piece.scroll);
         nullptr != scroll) {
       const auto key = scrollKey(*scroll);
-      if (!key.empty() && std::ranges::find(record.quotes, key) ==
-                              record.quotes.end()) {
+      if (!key.empty() &&
+          std::ranges::find(record.quotes, key) == record.quotes.end()) {
         record.quotes.push_back(key);
       }
     }
@@ -330,9 +329,8 @@ std::string Session::publishDocument(const MicroversionId &version,
 
   // BEP 44 orders two answers to one name by sequence, so it has to rise.
   // The clock is the one number available here that always has.
-  const auto pub =
-      publish(docStore, version, mine, request.salt, request.title,
-              static_cast<std::int64_t>(now), now, &sealed.scroll);
+  const auto pub = publish(docStore, version, mine, request.salt, request.title,
+                           static_cast<std::int64_t>(now), now, &sealed.scroll);
 
   std::filesystem::create_directories(into);
   const auto path =
@@ -368,7 +366,8 @@ MicroversionId Session::addLink(const std::uint32_t docIndex, Link link) {
   if (docIndex >= open.size()) {
     return MicroversionId{};
   }
-  const auto produced = docStore.addLink(open[docIndex].version, std::move(link));
+  const auto produced =
+      docStore.addLink(open[docIndex].version, std::move(link));
   // The text is unchanged -- a link changes none -- so the document on screen
   // stays as it is and only where it sits in hypertime moves.
   refresh(docIndex, produced);
@@ -454,8 +453,7 @@ void Session::textErased(Doc &doc, const std::uint32_t at,
             << " bytes at " << at << "\n";
 }
 
-void Session::decorate(const Doc &doc,
-                       std::vector<gleditor::SpanStyle> &out) {
+void Session::decorate(const Doc &doc, std::vector<gleditor::SpanStyle> &out) {
   const auto which = doc.documentIndex();
   if (which >= open.size()) {
     return;
@@ -492,8 +490,8 @@ void Session::decorate(const Doc &doc,
     for (const auto *const ends : {&link.left, &link.right}) {
       for (const auto &span : *ends) {
         for (const auto &extent : mine.occurrencesOf(span)) {
-          found.push_back(
-              gleditor::SpanStyle{extent.start, extent.end, Session::linkColour});
+          found.push_back(gleditor::SpanStyle{extent.start, extent.end,
+                                              Session::linkColour});
         }
       }
     }
@@ -574,28 +572,28 @@ void HypertimeMap::drawFrame(gleditor::FrameContext &ctx) {
       for (const auto &id : versions) {
         counts[static_cast<std::size_t>(depthOf(id))]++;
       }
-      const auto tallest = counts.empty()
-                               ? 0
-                               : *std::ranges::max_element(counts);
+      const auto tallest =
+          counts.empty() ? 0 : *std::ranges::max_element(counts);
       panelHeight = (static_cast<float>(tallest) * (nodeHeight + rowGap)) +
                     (2 * padding) + nodeHeight;
     }
 
     canvas->setTag(render::tagKindOverlay);
-    const auto heading = "hypertime: " + std::to_string(versions.size()) +
-                         " states, none lost";
+    const auto heading =
+        "hypertime: " + std::to_string(versions.size()) + " states, none lost";
     const auto headingWidth = canvas->measureText(heading).width;
     canvas->addRect(mapMargin, top - panelHeight,
-                   std::max(panelWidth, headingWidth + (2 * padding)),
-                   panelHeight, Doc::VBORow::color3(24, 26, 34));
+                    std::max(panelWidth, headingWidth + (2 * padding)),
+                    panelHeight, Doc::VBORow::color3(24, 26, 34));
     canvas->addText(ctx.state, mapMargin + padding, top - padding, heading,
-                   Doc::VBORow::color(226), Doc::VBORow::color3(24, 26, 34));
+                    Doc::VBORow::color(226), Doc::VBORow::color3(24, 26, 34));
 
     for (const auto &id : versions) {
-      const auto depth  = depthOf(id);
-      auto &row         = rowsUsed[static_cast<std::size_t>(depth)];
-      const auto left   = mapMargin + padding +
-                        (static_cast<float>(depth - 1) * (nodeWidth + columnGap));
+      const auto depth = depthOf(id);
+      auto &row        = rowsUsed[static_cast<std::size_t>(depth)];
+      const auto left =
+          mapMargin + padding +
+          (static_cast<float>(depth - 1) * (nodeWidth + columnGap));
       const auto bottom = top - padding - nodeHeight -
                           (static_cast<float>(row + 1) * (nodeHeight + rowGap));
       row++;
@@ -609,7 +607,7 @@ void HypertimeMap::drawFrame(gleditor::FrameContext &ctx) {
       // how a graph of this shape is usually drawn anyway.
       if (const auto parent = placed.find(id.parent().str());
           parent != placed.end()) {
-        constexpr float edge = 2.0F;
+        constexpr float edge  = 2.0F;
         const auto edgeColour = Doc::VBORow::color3(90, 96, 112);
         const auto fromX      = parent->second.first + nodeWidth;
         const auto fromY      = parent->second.second + (nodeHeight / 2.0F);
@@ -626,10 +624,10 @@ void HypertimeMap::drawFrame(gleditor::FrameContext &ctx) {
       // Each node carries its own picking identity, so a click on the map can
       // be resolved to the state it landed on.
       canvas->setTag(render::tagKindOverlay,
-                    static_cast<std::uint32_t>(placed.size()));
+                     static_cast<std::uint32_t>(placed.size()));
       canvas->addRect(left, bottom, nodeWidth, nodeHeight, box);
       canvas->addText(ctx.state, left + 6.0F, bottom + nodeHeight - 5.0F,
-                     id.str(), Doc::VBORow::color(here ? 255 : 208), box);
+                      id.str(), Doc::VBORow::color(here ? 255 : 208), box);
     }
 
     canvas->commit();

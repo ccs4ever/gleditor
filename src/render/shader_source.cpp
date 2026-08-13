@@ -62,13 +62,14 @@ std::string uniformBlock(const Backend backend, const ShaderStage stage) {
            "    uint reserved0;\n"
            "    uint reserved1;\n"
            "};\n";
-    out += vulkan ? "layout(set = 0, binding = 0, std140) uniform Highlights {\n"
-                  : "layout(std140) uniform Highlights {\n";
+    out += vulkan
+               ? "layout(set = 0, binding = 0, std140) uniform Highlights {\n"
+               : "layout(std140) uniform Highlights {\n";
     out += std::format("    HighlightRange uRanges[{}];\n", maxHighlightRanges);
     out += "};\n";
-    out += vulkan
-               ? "layout(set = 0, binding = 1) uniform sampler2DArray uGlyphAtlas;\n"
-               : "uniform sampler2DArray uGlyphAtlas;\n";
+    out += vulkan ? "layout(set = 0, binding = 1) uniform sampler2DArray "
+                    "uGlyphAtlas;\n"
+                  : "uniform sampler2DArray uGlyphAtlas;\n";
   }
   return out;
 }
@@ -136,7 +137,8 @@ std::string interfaceMacros(const Backend backend, const ShaderStage stage) {
 std::string assembleShaderSource(const Backend backend, const ShaderStage stage,
                                  const std::string_view body) {
   std::string out = versionAndPrecision(backend, stage);
-  out += std::format("#define GLEDITOR_MAX_HIGHLIGHTS {}\n", maxHighlightRanges);
+  out +=
+      std::format("#define GLEDITOR_MAX_HIGHLIGHTS {}\n", maxHighlightRanges);
   // Where a quad's two kind bits sit once they are shifted into the identity
   // the draw supplies. Taken from the packing rather than written out twice.
   out += std::format("#define GLEDITOR_TAG_KIND_SHIFT {}\n",

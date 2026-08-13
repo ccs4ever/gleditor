@@ -6,9 +6,9 @@
 
 #include <algorithm>
 #include <format>
+#include <limits>
 #include <list>
 #include <optional>
-#include <limits>
 #include <ranges>
 #include <stdexcept>
 #include <utility>
@@ -101,8 +101,8 @@ void BufferPool::grow(const std::uint32_t neededRows) {
     throw std::runtime_error("BufferPool: buffer size overflow");
   }
 
-  handle = device->resizeBuffer(handle, static_cast<std::size_t>(target) *
-                                            rowStrideBytes);
+  handle    = device->resizeBuffer(handle, static_cast<std::size_t>(target) *
+                                               rowStrideBytes);
   totalRows = target;
 
   // The newly added space is one contiguous run at the end. Merge it with a
@@ -153,9 +153,8 @@ const BufferPool::Placement &
 BufferPool::placementOf(const Allocation &allocation, const char *what) const {
   const auto found = placements.find(allocation.id);
   if (placements.end() == found) {
-    throw std::invalid_argument(
-        std::format("BufferPool::{}: allocation {} is not live", what,
-                    allocation.id));
+    throw std::invalid_argument(std::format(
+        "BufferPool::{}: allocation {} is not live", what, allocation.id));
   }
   return found->second;
 }
@@ -167,7 +166,8 @@ BufferPool::Placement &BufferPool::placementOf(const Allocation &allocation,
 }
 
 std::size_t BufferPool::byteOffset(const Allocation &allocation) const {
-  return static_cast<std::size_t>(placementOf(allocation, "byteOffset").rowOffset) *
+  return static_cast<std::size_t>(
+             placementOf(allocation, "byteOffset").rowOffset) *
          rowStrideBytes;
 }
 
@@ -199,9 +199,9 @@ void BufferPool::resize(const Allocation &allocation, const std::uint32_t rows,
   // first means the old one is still live while its contents are read, and
   // that the pool grows -- moving nothing, since growth only adds to the end
   // -- before anything is committed.
-  const auto room   = rows + slackFor(rows);
-  const auto moved  = takeRun(room);
-  const auto oldRun = placement.rowOffset;
+  const auto room    = rows + slackFor(rows);
+  const auto moved   = takeRun(room);
+  const auto oldRun  = placement.rowOffset;
   const auto oldRoom = placement.roomRows;
 
   if (0 != placement.rowCount && Contents::Keep == contents) {
@@ -241,8 +241,8 @@ void BufferPool::reserveCapacity(const std::uint32_t rows) {
     return;
   }
   const auto previousRows = totalRows;
-  handle = device->resizeBuffer(handle, static_cast<std::size_t>(rows) *
-                                            rowStrideBytes);
+  handle    = device->resizeBuffer(handle, static_cast<std::size_t>(rows) *
+                                               rowStrideBytes);
   totalRows = rows;
 
   const auto added = rows - previousRows;
@@ -252,7 +252,6 @@ void BufferPool::reserveCapacity(const std::uint32_t rows) {
     free.emplace_back(previousRows, added);
   }
 }
-
 
 void BufferPool::zeroRows(const std::uint32_t rowOffset,
                           const std::uint32_t count) {
@@ -266,11 +265,9 @@ void BufferPool::zeroRows(const std::uint32_t rowOffset,
   for (std::uint32_t done = 0; done < count; done += chunkRows) {
     const auto rows = std::min(chunkRows, count - done);
     device->updateBuffer(
-        handle,
-        static_cast<std::size_t>(rowOffset + done) * rowStrideBytes,
-        std::span<const std::byte>(zeros.data(),
-                                   static_cast<std::size_t>(rows) *
-                                       rowStrideBytes));
+        handle, static_cast<std::size_t>(rowOffset + done) * rowStrideBytes,
+        std::span<const std::byte>(
+            zeros.data(), static_cast<std::size_t>(rows) * rowStrideBytes));
   }
 }
 
@@ -296,16 +293,16 @@ void BufferPool::eraseRows(const Allocation &allocation,
   insertRun(placement.erased, firstRow, count);
 }
 
-std::optional<std::uint32_t>
-BufferPool::reuseRows(const Allocation &allocation, const std::uint32_t count) {
+std::optional<std::uint32_t> BufferPool::reuseRows(const Allocation &allocation,
+                                                   const std::uint32_t count) {
   if (0 == count) {
     return std::nullopt;
   }
   auto &placement = placementOf(allocation, "reuseRows");
 
-  auto run = std::ranges::find_if(
-      placement.erased,
-      [count](const auto &hole) { return hole.second >= count; });
+  auto run = std::ranges::find_if(placement.erased, [count](const auto &hole) {
+    return hole.second >= count;
+  });
   if (placement.erased.end() == run) {
     return std::nullopt;
   }
@@ -321,7 +318,7 @@ BufferPool::reuseRows(const Allocation &allocation, const std::uint32_t count) {
 
 std::uint32_t BufferPool::erasedRows(const Allocation &allocation) const {
   const auto &placement = placementOf(allocation, "erasedRows");
-  std::uint32_t rows = 0;
+  std::uint32_t rows    = 0;
   for (const auto &hole : placement.erased) {
     rows += hole.second;
   }
@@ -348,8 +345,8 @@ void BufferPool::trim() {
   }
 
   const auto target = static_cast<std::uint32_t>(wanted);
-  handle = device->resizeBuffer(handle, static_cast<std::size_t>(target) *
-                                            rowStrideBytes);
+  handle    = device->resizeBuffer(handle, static_cast<std::size_t>(target) *
+                                               rowStrideBytes);
   totalRows = target;
 
   // The trailing run is what shrank. It disappears entirely when the trim kept

@@ -32,9 +32,9 @@ using xudu::DirectoryContentSource;
 using xudu::InfoHash;
 using xudu::Metainfo;
 using xudu::MicroversionId;
-using xudu::Scroll;
 using xudu::PrimediaSpan;
 using xudu::Resolver;
+using xudu::Scroll;
 using xudu::Store;
 
 /// A directory holding the torrents' data, laid out as the torrents describe.
@@ -45,7 +45,8 @@ struct TorrentDataTest : testing::Test {
   void SetUp() override {
     dir = std::filesystem::temp_directory_path() /
           ("xudu-torrent-" +
-           std::string(testing::UnitTest::GetInstance()->current_test_info()->name()));
+           std::string(
+               testing::UnitTest::GetInstance()->current_test_info()->name()));
     std::filesystem::remove_all(dir);
     std::filesystem::create_directories(dir / "pair" / "sub");
 
@@ -58,7 +59,8 @@ struct TorrentDataTest : testing::Test {
   }
   void TearDown() override { std::filesystem::remove_all(dir); }
 
-  static void write(const std::filesystem::path &path, const std::string &text) {
+  static void write(const std::filesystem::path &path,
+                    const std::string &text) {
     std::ofstream out(path, std::ios::binary | std::ios::trunc);
     out << text;
   }
@@ -93,8 +95,9 @@ TEST_F(TorrentDataTest, aRangeSpanningAPieceBoundaryReadsBack) {
 TEST_F(TorrentDataTest, theWholeFileReadsBack) {
   const Resolver resolver(&source);
   const auto fox = scrollFor(xudu_test::singleFileHash, 0);
-  EXPECT_EQ(resolver.read(fox, PrimediaSpan{1, 0, xudu_test::singleFileText.size()}),
-            xudu_test::singleFileText);
+  EXPECT_EQ(
+      resolver.read(fox, PrimediaSpan{1, 0, xudu_test::singleFileText.size()}),
+      xudu_test::singleFileText);
 }
 
 TEST_F(TorrentDataTest, aFileThatDoesNotStartOnAPieceBoundaryReadsBack) {
@@ -197,9 +200,8 @@ TEST_F(TorrentDataTest, aDocumentCanQuoteContentItDoesNotHold) {
   store.setContentSource(&source);
 
   const auto one = store.insert(MicroversionId{}, 0, "Nelson wrote: ");
-  const auto two = store.transcludeExternal(one, 14,
-                                            scrollFor(xudu_test::singleFileHash, 0),
-                                            4, 5);
+  const auto two = store.transcludeExternal(
+      one, 14, scrollFor(xudu_test::singleFileHash, 0), 4, 5);
 
   EXPECT_EQ(store.textOf(two), "Nelson wrote: quick");
   // Nothing was copied: the spool holds only what was typed here.
@@ -213,8 +215,8 @@ TEST_F(TorrentDataTest, twoDocumentsQuotingOneTorrentShareThatContent) {
   store.setContentSource(&source);
   const auto fox = scrollFor(xudu_test::singleFileHash, 0);
 
-  const auto left  = store.transcludeExternal(MicroversionId{}, 0, fox, 4, 5);
-  const auto right = store.insert(MicroversionId{}, 0, "see also: ");
+  const auto left   = store.transcludeExternal(MicroversionId{}, 0, fox, 4, 5);
+  const auto right  = store.insert(MicroversionId{}, 0, "see also: ");
   const auto quoted = store.transcludeExternal(right, 10, fox, 4, 5);
 
   const auto shared = store.rebuild(left).pieces().front();
@@ -257,9 +259,8 @@ TEST_F(TorrentStoreRoundTripTest, aTorrentBackedQuotationSurvivesAReload) {
     Store store;
     store.setContentSource(&source);
     const auto one = store.insert(MicroversionId{}, 0, "Nelson wrote: ");
-    quoted = store.transcludeExternal(one, 14,
-                                      scrollFor(xudu_test::singleFileHash, 0),
-                                      4, 5);
+    quoted         = store.transcludeExternal(
+        one, 14, scrollFor(xudu_test::singleFileHash, 0), 4, 5);
     store.save(storeDir);
   }
 
@@ -302,8 +303,8 @@ TEST_F(TorrentDataTest, aStoreWrittenBeforeScrollsStillReads) {
   const auto again = (dir / "migrated").string();
   std::filesystem::create_directories(again);
   loaded.save(again);
-  EXPECT_TRUE(std::filesystem::exists(std::filesystem::path(again) /
-                                      "scrolls.spool"));
+  EXPECT_TRUE(
+      std::filesystem::exists(std::filesystem::path(again) / "scrolls.spool"));
   Store reloaded;
   reloaded.load(again);
   reloaded.setContentSource(&source);
@@ -325,8 +326,8 @@ TEST_F(TorrentDataTest, aStoreWrittenBeforeScrollsStillReads) {
                                     const std::uint64_t pieceLength) {
   std::string pieces;
   for (std::size_t at = 0; at < text.size(); at += pieceLength) {
-    const auto hash = xudu::sha1(
-        std::string_view{text}.substr(at, static_cast<std::size_t>(pieceLength)));
+    const auto hash = xudu::sha1(std::string_view{text}.substr(
+        at, static_cast<std::size_t>(pieceLength)));
     pieces.append(reinterpret_cast<const char *>(hash.data()), hash.size());
   }
   using xudu::bencode::Value;
@@ -441,9 +442,8 @@ TEST_F(SealedScrollTest, resealingDoesNotDisturbAnAddressAlreadyHandedOut) {
 
   // Sealed again, into a torrent this store has never seen before.
   write(dir / "resealed.txt", xudu_test::singleFileText);
-  const auto resealed =
-      source.add(torrentOf("resealed.txt", xudu_test::singleFileText, 16),
-                 dir.string());
+  const auto resealed = source.add(
+      torrentOf("resealed.txt", xudu_test::singleFileText, 16), dir.string());
   ASSERT_NE(resealed.hex(), std::string{xudu_test::singleFileHash})
       << "the two packagings have to be genuinely different torrents";
 

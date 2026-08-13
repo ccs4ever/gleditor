@@ -80,9 +80,9 @@ public:
    *
    * Only contributors registered before the render thread starts are called.
    */
-  virtual void deviceReady([[maybe_unused]] render::RenderDevice &device,
-                           [[maybe_unused]] const render::PipelineDesc
-                               &documentPipeline) {}
+  virtual void
+  deviceReady([[maybe_unused]] render::RenderDevice &device,
+              [[maybe_unused]] const render::PipelineDesc &documentPipeline) {}
 
   virtual void drawFrame(FrameContext &ctx) = 0;
 

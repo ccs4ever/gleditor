@@ -219,25 +219,25 @@ struct ChoiceFormTest : testing::Test {
   int accepted{};
 
   void openIt() {
-    Form::Field keys{"Signing key", {}, "nothing to sign with", false,
-                     Kind::Choice};
-    keys.options      = {"Ada Lovelace  (8844BE88)", "Grace Hopper  (3E6A9DB7)"};
+    Form::Field keys{
+        "Signing key", {}, "nothing to sign with", false, Kind::Choice};
+    keys.options = {"Ada Lovelace  (8844BE88)", "Grace Hopper  (3E6A9DB7)"};
     keys.optionValues = {std::string(32, 'a') + "8844BE88",
                          std::string(32, 'b') + "3E6A9DB7"};
 
     Form::Field reveal{"", {}, {}, false, Kind::Toggle};
     reveal.revealsSecrets = true;
 
-    form.open("Publish 1", "signed, then sealed",
-              {Form::Field{"Title", "essay", "what it is called", true},
-               std::move(keys),
-               Form::Field{"Passphrase", {}, "only if needed", false,
-                           Kind::Secret},
-               std::move(reveal)},
-              [this](const std::vector<Form::Field> &fields) {
-                answered = fields;
-                accepted++;
-              });
+    form.open(
+        "Publish 1", "signed, then sealed",
+        {Form::Field{"Title", "essay", "what it is called", true},
+         std::move(keys),
+         Form::Field{"Passphrase", {}, "only if needed", false, Kind::Secret},
+         std::move(reveal)},
+        [this](const std::vector<Form::Field> &fields) {
+          answered = fields;
+          accepted++;
+        });
   }
 };
 
@@ -359,8 +359,8 @@ TEST_F(ChoiceFormTest, everythingComesBackTogetherWhenItIsAccepted) {
 // A required drop-down with nothing in it is an empty answer, which is what
 // stops a publication going out signed by nothing at all.
 TEST_F(ChoiceFormTest, anEmptyChoiceAnswersWithNothing) {
-  Form::Field keys{"Signing key", {}, "nothing to sign with", true,
-                   Kind::Choice};
+  Form::Field keys{
+      "Signing key", {}, "nothing to sign with", true, Kind::Choice};
   form.open("Publish", "note", {keys}, [](const std::vector<Form::Field> &) {});
   EXPECT_EQ(form.current()[0].answer(), "");
   form.keyPressed(Key::Return, KeyMods::None);

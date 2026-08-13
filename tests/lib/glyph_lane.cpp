@@ -1,14 +1,14 @@
-#include <gtest/gtest.h>                  // for Test, TestInfo (ptr only)
-#include <gleditor/glyphcache/lane.hpp>   // for GlyphLane
-#include <gleditor/glyphcache/types.hpp>  // for Rect, Point
+#include <gleditor/glyphcache/lane.hpp>  // for GlyphLane
+#include <gleditor/glyphcache/types.hpp> // for Rect, Point
+#include <gtest/gtest.h>                 // for Test, TestInfo (ptr only)
 // #include <spdlog/spdlog-inl.h>
-#include <stdexcept>                      // for invalid_argument
-#include <utility>                        // for to_underlying
-#include <vector>                         // for vector
-#include <tuple>                          // for tuple
+#include <stdexcept> // for invalid_argument
+#include <tuple>     // for tuple
+#include <utility>   // for to_underlying
+#include <vector>    // for vector
 
-#include <gmock/gmock.h>                  // for ElementsAreMatcher, Element...
-#include <gtest/gtest.h>                  // for Message, AssertionResult
+#include <gmock/gmock.h> // for ElementsAreMatcher, Element...
+#include <gtest/gtest.h> // for Message, AssertionResult
 
 enum class Length : int;
 enum class Offset : int;
@@ -119,4 +119,4 @@ TEST(GlyphLane, canFitTooTallAndWide) {
   EXPECT_FALSE(alice.canFit(Rect{Length{1000}, Length{1000}}));
 }
 
-// vi: set sw=4 sts=4 ts=4 et:
+// vi: set sw=2 sts=2 ts=2 et:

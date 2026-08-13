@@ -7,18 +7,18 @@
  */
 #include <gleditor/glyphcache/cache.hpp> // IWYU pragma: associated
 
-#include <algorithm>                       // for min, sort
-#include <cairomm/context.h>               // for Context
-#include <cairomm/surface.h>               // for ImageSurface, Surface
-#include <cstddef>                         // for byte
-#include <cstdlib>                         // for getenv
+#include <algorithm>         // for min, sort
+#include <cairomm/context.h> // for Context
+#include <cairomm/surface.h> // for ImageSurface, Surface
+#include <cstddef>           // for byte
+#include <cstdlib>           // for getenv
 #include <format>
-#include <numeric>                          // for format
 #include <gleditor/glyphcache/palette.hpp> // for GlyphPalette, operator<=>
 #include <gleditor/glyphcache/types.hpp>   // for TextureCoords, Rect
 #include <gleditor/render/device.hpp>      // for RenderDevice
 #include <iostream>                        // for basic_ostream, operator<<
 #include <memory>                          // for shared_ptr
+#include <numeric>                         // for format
 #include <optional>                        // for optional
 #include <ranges>                          // for find_if
 #include <span>                            // for span
@@ -27,7 +27,7 @@
 #include <string_view>                     // for operator==, string_view
 #include <tuple>                           // for make_tuple, tuple
 #include <unordered_map>                   // for unordered_map, operator==
-#include <utility>                        // for to_underlying, move
+#include <utility>                         // for to_underlying, move
 #include <vector>                          // for vector
 
 #include "cairomm/enums.h"       // for ANTIALIAS_SUBPIXEL, Antia...
@@ -107,7 +107,7 @@ std::vector<std::byte> withPadding(const std::span<const std::byte> coverage,
                                 std::byte{0});
   for (int row = 0; row < height; row++) {
     const auto *src = coverage.data() + static_cast<std::size_t>(row) * width;
-    auto *dst = padded.data() +
+    auto *dst       = padded.data() +
                 (static_cast<std::size_t>(row + glyphPadding) * paddedWidth) +
                 glyphPadding;
     std::copy_n(src, width, dst);
@@ -136,8 +136,8 @@ std::vector<std::byte> toCoverage(const std::span<const unsigned char> surface,
   for (int row = 0; row < height; row++) {
     const auto *src = surface.data() + static_cast<std::size_t>(row) *
                                            static_cast<std::size_t>(stride);
-    auto *dst = coverage.data() + static_cast<std::size_t>(row) *
-                                      static_cast<std::size_t>(width);
+    auto *dst = coverage.data() +
+                static_cast<std::size_t>(row) * static_cast<std::size_t>(width);
     for (int col = 0; col < width; col++) {
       dst[col] = static_cast<std::byte>(src[(col * 4) + 3]);
     }
@@ -162,9 +162,8 @@ GlyphCache::GlyphCache(render::RenderDevice *aDevice) : device(aDevice) {
       size, size, layerCount, maxSize, maxSize, maxLayers, limits.maxSize,
       limits.maxSize, limits.maxLayers, maxEncodableLayers);
 
-  texture = device->createTextureArray(size, layerCount,
-                                       render::TextureFormat::R8,
-                                       atlasMipLevels);
+  texture = device->createTextureArray(
+      size, layerCount, render::TextureFormat::R8, atlasMipLevels);
 }
 
 void GlyphCache::flush() {
@@ -182,7 +181,9 @@ GlyphCache::~GlyphCache() {
 }
 
 auto GlyphCache::getBestPalette(const Rect &charBox) {
-  const auto fits = [&charBox](GlyphPalette &pal) { return pal.canFit(charBox); };
+  const auto fits = [&charBox](GlyphPalette &pal) {
+    return pal.canFit(charBox);
+  };
 
   if (const auto it = std::ranges::find_if(palettes, fits);
       it != palettes.end()) {
@@ -319,7 +320,7 @@ GlyphCache::Sizes GlyphCache::addToCache(const std::string &chr,
   // A zero-area cluster -- an isolated newline, for instance -- has nothing to
   // rasterize, but still needs an entry so the caller can advance the pen.
   if (0 == width || 0 == height) {
-    const auto empty = Sizes{TextureCoords{}, extents, 0, 0.0F};
+    const auto empty          = Sizes{TextureCoords{}, extents, 0, 0.0F};
     glyphs[chr][keyFor(font)] = empty;
     return empty;
   }
@@ -353,8 +354,8 @@ GlyphCache::Sizes GlyphCache::addToCache(const std::string &chr,
   // palette packs the padded box and knows nothing about the padding; the
   // texture coordinates handed back to the shader are narrowed to the glyph
   // itself below, so nothing downstream sees the border either.
-  const auto padded =
-      Rect{Length{width + (2 * glyphPadding)}, Length{height + (2 * glyphPadding)}};
+  const auto padded = Rect{Length{width + (2 * glyphPadding)},
+                           Length{height + (2 * glyphPadding)}};
   makeRoomFor(padded);
   const auto palette = getBestPalette(padded);
   if (palettes.end() == palette) {
@@ -368,34 +369,33 @@ GlyphCache::Sizes GlyphCache::addToCache(const std::string &chr,
         std::format("GlyphCache: failed to place glyph: {}", chr));
   }
   // Remembered so that growing the atlas can put it back exactly here.
-  placements.push_back(Placement{palette->layerIndex(),
-                                 static_cast<int>(placed->topLeft.x),
-                                 static_cast<int>(placed->topLeft.y),
-                                 std::to_underlying(padded.width),
-                                 std::to_underlying(padded.height),
-                                 std::move(paddedCoverage)});
+  placements.push_back(Placement{
+      palette->layerIndex(), static_cast<int>(placed->topLeft.x),
+      static_cast<int>(placed->topLeft.y), std::to_underlying(padded.width),
+      std::to_underlying(padded.height), std::move(paddedCoverage)});
 
   // Narrow the placed rectangle from the padded box to the glyph inside it.
   // Texels, so that growing the atlas leaves this glyph where it is; the
   // shader divides by the texture's own size when it samples.
-  const auto inner = TextureCoords{
-      PointF{placed->topLeft.x + glyphPadding,
-             placed->topLeft.y + glyphPadding},
-      RectF{placed->box.width - (2 * glyphPadding),
-            placed->box.height - (2 * glyphPadding)}};
+  const auto inner =
+      TextureCoords{PointF{placed->topLeft.x + glyphPadding,
+                           placed->topLeft.y + glyphPadding},
+                    RectF{placed->box.width - (2 * glyphPadding),
+                          placed->box.height - (2 * glyphPadding)}};
   // Mean coverage over the box, taken from the bitmap that was just
   // rasterised. One pass over data already in cache, once per distinct cluster.
   const auto inked =
       std::accumulate(coverage.begin(), coverage.end(), 0.0,
                       [](const double sum, const std::byte value) {
-                        return sum + static_cast<double>(std::to_integer<int>(value));
+                        return sum +
+                               static_cast<double>(std::to_integer<int>(value));
                       }) /
       (255.0 * static_cast<double>(coverage.size()));
 
   const auto sizes =
       Sizes{inner, extents, palette->layerIndex(), static_cast<float>(inked)};
   // Level zero moved, so the chain below it is stale until it is rebuilt.
-  atlasDirty = true;
+  atlasDirty                = true;
   glyphs[chr][keyFor(font)] = sizes;
   return sizes;
 }

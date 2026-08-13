@@ -49,16 +49,17 @@ protected:
     allocations.clear();
     ON_CALL(*device, textureLimits())
         .WillByDefault(Return(render::TextureLimits{maxSize, maxLayers}));
-    ON_CALL(*device, createTextureArray(testing::_, testing::_, testing::_,
-                                        testing::_))
+    ON_CALL(*device,
+            createTextureArray(testing::_, testing::_, testing::_, testing::_))
         .WillByDefault([this](const int size, const int layers,
                               render::TextureFormat, int) {
           allocations.emplace_back(size, layers);
-          return render::TextureHandle{static_cast<std::uint32_t>(++nextTexture)};
+          return render::TextureHandle{
+              static_cast<std::uint32_t>(++nextTexture)};
         });
-    ON_CALL(*device, updateTextureLayer(testing::_, testing::_, testing::_,
-                                        testing::_, testing::_, testing::_,
-                                        testing::_))
+    ON_CALL(*device,
+            updateTextureLayer(testing::_, testing::_, testing::_, testing::_,
+                               testing::_, testing::_, testing::_))
         .WillByDefault([this](render::TextureHandle, int, int, int, int, int,
                               std::span<const std::byte>) { uploads++; });
     return std::make_unique<GlyphCache>(device.get());
@@ -164,7 +165,7 @@ TEST_F(GlyphCacheTest, growingLeavesEarlierGlyphsWhereTheyWere) {
   const auto cache = makeCache(4096, 8);
   const auto face  = font("Serif 150");
 
-  const auto first = cache->put("A", face);
+  const auto first      = cache->put("A", face);
   const auto sizeBefore = cache->atlasSize();
 
   for (const auto &chr : alphabet(20)) {

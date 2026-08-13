@@ -70,8 +70,15 @@ SDL_IMAGE_PKG := SDL2_image
 else
 $(error GLEDITOR_SDL must be 2 or 3, got "$(GLEDITOR_SDL)")
 endif
+# Skipped when every requested goal is one of the text-only targets below:
+# format, format-check and lint touch no source that needs a compiler, and
+# would otherwise fail this check on a machine that has never installed SDL
+# at all -- which is the point of having them not need to.
+NO_SDL_GOALS := format format-check lint
+ifneq (,$(filter-out $(NO_SDL_GOALS),$(or $(MAKECMDGOALS),all)))
 ifneq ($(shell pkg-config --exists $(SDL_PKG) && echo 1),1)
 $(error $(SDL_PKG) not found by pkg-config; install it or set GLEDITOR_SDL to the other major version)
+endif
 endif
 
 # The GL/GLES entry points are resolved at runtime through SDL rather than
@@ -111,12 +118,14 @@ endif
 # these ship under names that differ per distribution -- pangomm has parallel
 # ABIs, and vulkan.pc comes from the loader rather than the headers -- so
 # getting one wrong is an ordinary packaging mistake to make.
+ifneq (,$(filter-out $(NO_SDL_GOALS),$(or $(MAKECMDGOALS),all)))
 MISSING_PKGS := $(strip $(foreach p,$(PKGS),\
   $(if $(shell pkg-config --exists $(p) && echo 1),,$(p))))
 ifneq ($(MISSING_PKGS),)
 $(error pkg-config cannot find: $(MISSING_PKGS). Install the development \
 packages providing them, or unset GLEDITOR_ENABLE_VULKAN to build without \
 the Vulkan backend)
+endif
 endif
 TEST_PKGS := gmock_main
 # What the xanalogical engine is allowed to link. glibmm supplies SHA-1, which
@@ -131,10 +140,12 @@ TEST_PKGS := gmock_main
 # thing this program is for. Better to fail at configure time than to ship a
 # xanadoc editor that quietly cannot publish.
 XUDU_PKGS := glibmm-2.68 libtorrent-rasterbar
+ifneq (,$(filter-out $(NO_SDL_GOALS),$(or $(MAKECMDGOALS),all)))
 ifneq ($(shell pkg-config --exists libtorrent-rasterbar && echo 1),1)
 $(error libtorrent-rasterbar was not found by pkg-config. It is required: \
 install libtorrent-rasterbar-dev (Debian, Ubuntu), libtorrent-rasterbar-devel \
 (Fedora), or libtorrent-rasterbar (Arch, Homebrew).)
+endif
 endif
 
 # Which platform this is. Up here because the accessibility block below needs
@@ -676,6 +687,40 @@ run: $(OBJDIR)/gleditor
 doc:
 	doxygen
 
+# -- formatting and linting ----------------------------------------------
+
+# clang-format formats C++ under its own extensions and, by asking it to
+# treat a .glsl file the same way, the shader sources too: GLSL is close
+# enough to C that this reformats correctly rather than leaving the shaders
+# an unformatted exception. format and format-check share one file list so
+# the two can never name a different set of files by accident.
+CXX_FORMAT_FILES = $(shell git ls-files '*.cpp' '*.hpp' '*.h' '*.glsl' | grep -v '^thirdparty/')
+SH_FORMAT_FILES  = $(shell git ls-files '*.sh' | grep -v '^thirdparty/')
+
+format:
+	echo "$(CXX_FORMAT_FILES)" | xargs clang-format -i --style=file
+	echo "$(SH_FORMAT_FILES)" | xargs shfmt -i 2 -ci -w
+.PHONY: format
+
+# What the CI format job runs. clang-format --dry-run --Werror and shfmt -d
+# both exit non-zero on the first unformatted file rather than rewriting it.
+format-check:
+	echo "$(CXX_FORMAT_FILES)" | xargs clang-format --style=file --dry-run --Werror
+	echo "$(SH_FORMAT_FILES)" | xargs shfmt -i 2 -ci -d
+.PHONY: format-check
+
+# The languages formatting does not reach: shellcheck for correctness bugs
+# in the shell scripts, yamllint for the workflow YAML (.yamllint holds the
+# project's exceptions to its defaults), mdl for the prose docs (.mdlrc /
+# .mdl_style.rb holds the same). Nix and the packaging manifests (PKGBUILD,
+# the RPM spec, the Homebrew formula) are covered where a linter for them is
+# actually reliable outside their native distribution -- see CLAUDE.md.
+lint:
+	echo "$(SH_FORMAT_FILES)" "packaging/arch/PKGBUILD" | xargs shellcheck
+	yamllint .github/workflows/c-cpp.yml .github/workflows/packaging.yml .github/dependabot.yml
+	mdl README.md CLAUDE.md design/*.md
+.PHONY: lint
+
 clean: private .UNVEIL += w:gleditor w:gleditor_test w:xudu w:xudu_test
 clean:
 	@$(RM) -rf gleditor gleditor_test xudu xudu_test build
@@ -797,7 +842,9 @@ $(OBJDIR)/compile_commands.json: $(JFILES)
 # the compiler over every source. Including them for those goals meant `make
 # dist` needed every header the build needs -- which is how the Arch package,
 # whose only job at that point was to roll a tarball, failed on a missing
-# glibmm header.
-ifeq (,$(filter clean dist,$(MAKECMDGOALS)))
+# glibmm header. format, format-check and lint compile nothing either, and are
+# meant to run on a checkout that has not installed the build dependencies at
+# all.
+ifeq (,$(filter clean dist $(NO_SDL_GOALS),$(MAKECMDGOALS)))
 include $(DEPS)
 endif

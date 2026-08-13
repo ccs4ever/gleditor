@@ -30,9 +30,8 @@ std::array<float, 16> toArray(const glm::mat4 &mat) {
 } // namespace
 
 Caret::Caret(render::RenderDevice *aDevice)
-    : device(aDevice),
-      pool(std::make_unique<BufferPool>(aDevice, sizeof(Doc::VBORow),
-                                        caretRows)) {
+    : device(aDevice), pool(std::make_unique<BufferPool>(
+                           aDevice, sizeof(Doc::VBORow), caretRows)) {
   backing = pool->reserve(caretRows);
 }
 
@@ -108,7 +107,7 @@ void Caret::setGeometry(const float posX, const float posY,
                         const float height) {
   // Width and height are packed as unsigned integers, so a caret shorter than
   // a pixel would vanish rather than round down to a thin line.
-  const auto pixelHeight = std::max(1U, static_cast<unsigned int>(height));
+  const auto pixelHeight    = std::max(1U, static_cast<unsigned int>(height));
   constexpr auto pixelWidth = static_cast<unsigned int>(widthPixels);
 
   const auto colour = Doc::VBORow::color3(32, 96, 220);

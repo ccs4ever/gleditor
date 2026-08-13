@@ -32,7 +32,8 @@ inline std::string fromHex(const std::string_view text) {
   std::string out;
   out.reserve(text.size() / 2);
   for (std::size_t i = 0; i + 1 < text.size(); i += 2) {
-    out.push_back(static_cast<char>((digit(text[i]) << 4) | digit(text[i + 1])));
+    out.push_back(
+        static_cast<char>((digit(text[i]) << 4) | digit(text[i + 1])));
   }
   return out;
 }

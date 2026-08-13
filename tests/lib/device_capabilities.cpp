@@ -3,8 +3,8 @@
  * @brief Tests for what a device says it can do, and for the batched draw path
  *        that capability exists to serve.
  */
-#include <gtest/gtest.h>
 #include <gmock/gmock.h>
+#include <gtest/gtest.h>
 
 #include <gleditor/render/device.hpp>
 #include <gleditor/render/gl/device_gl.hpp>
@@ -37,8 +37,7 @@ TEST(DeviceCapabilities, theGlFamilyCannotRecordInParallel) {
        {render::Backend::OpenGL, render::Backend::OpenGLES}) {
     const render::gl::DeviceGL device(backend);
     const auto caps = device.capabilities();
-    EXPECT_FALSE(caps.parallelCommandRecording)
-        << render::backendName(backend);
+    EXPECT_FALSE(caps.parallelCommandRecording) << render::backendName(backend);
     EXPECT_EQ(1U, caps.recordingThreads) << render::backendName(backend);
   }
 }
@@ -78,9 +77,9 @@ TEST(GlyphBatches, theDefaultIssuesOneDrawPerBatchInOrder) {
   {
     const InSequence ordered;
     for (const auto &batch : batches) {
-      EXPECT_CALL(device, drawGlyphs(testing::_, batch.vertices,
-                                     batch.vertexByteOffset,
-                                     batch.instanceCount));
+      EXPECT_CALL(device,
+                  drawGlyphs(testing::_, batch.vertices, batch.vertexByteOffset,
+                             batch.instanceCount));
     }
   }
 
@@ -89,8 +88,8 @@ TEST(GlyphBatches, theDefaultIssuesOneDrawPerBatchInOrder) {
 
 TEST(GlyphBatches, anEmptyRunDrawsNothing) {
   MockRenderDevice device;
-  EXPECT_CALL(device, drawGlyphs(testing::_, testing::_, testing::_,
-                                 testing::_))
+  EXPECT_CALL(device,
+              drawGlyphs(testing::_, testing::_, testing::_, testing::_))
       .Times(0);
   device.drawGlyphBatches(std::vector<render::GlyphBatch>{});
 }
@@ -99,15 +98,17 @@ TEST(GlyphBatches, anEmptyRunDrawsNothing) {
 // page's position -- a failure that still fills the screen with text.
 TEST(GlyphBatches, eachBatchKeepsItsOwnTransform) {
   MockRenderDevice device;
-  std::array batches = {batchAt(1, 0), batchAt(1, 64)};
+  std::array batches          = {batchAt(1, 0), batchAt(1, 64)};
   batches[0].uniforms.mvp[12] = 11.0F;
   batches[1].uniforms.mvp[12] = 22.0F;
 
   std::vector<float> seen;
-  EXPECT_CALL(device, drawGlyphs(testing::_, testing::_, testing::_, testing::_))
-      .WillRepeatedly([&seen](const render::DrawUniforms &uniforms,
-                              render::BufferHandle, std::size_t,
-                              std::uint32_t) { seen.push_back(uniforms.mvp[12]); });
+  EXPECT_CALL(device,
+              drawGlyphs(testing::_, testing::_, testing::_, testing::_))
+      .WillRepeatedly(
+          [&seen](const render::DrawUniforms &uniforms, render::BufferHandle,
+                  std::size_t,
+                  std::uint32_t) { seen.push_back(uniforms.mvp[12]); });
 
   device.drawGlyphBatches(batches);
   EXPECT_THAT(seen, testing::ElementsAre(11.0F, 22.0F));

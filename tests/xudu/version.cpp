@@ -57,7 +57,9 @@ TEST(SpoolTest, aSpanIntoOtherContentIsRefusedRatherThanAnswered) {
 }
 
 TEST(PrimediaSpanTest, spansThatDoNotMeetShareNothing) {
-  EXPECT_TRUE((PrimediaSpan{localScroll, 0, 5}).intersect(PrimediaSpan{localScroll, 5, 5}).empty());
+  EXPECT_TRUE((PrimediaSpan{localScroll, 0, 5})
+                  .intersect(PrimediaSpan{localScroll, 5, 5})
+                  .empty());
 }
 
 TEST(SpoolTest, appendingReportsWhereItLanded) {
@@ -208,7 +210,8 @@ TEST_F(VersionTest, matchingTextIsNotATransclusion) {
   other.insert(0, spool.append("quick"));
 
   EXPECT_EQ(other.materialize(spool), text());
-  EXPECT_THAT(other.occurrencesOf(version.pieces().front()), testing::IsEmpty());
+  EXPECT_THAT(other.occurrencesOf(version.pieces().front()),
+              testing::IsEmpty());
 }
 
 TEST_F(VersionTest, aPassageQuotedTwiceIsFoundTwice) {
