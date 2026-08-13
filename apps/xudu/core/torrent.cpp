@@ -43,6 +43,40 @@ const bencode::Value &require(const bencode::Value &dict,
 
 } // namespace
 
+MadeTorrent makeTorrent(const std::string_view data, std::string name,
+                        const std::uint64_t pieceLength) {
+  if (0 == pieceLength) {
+    throw std::invalid_argument("makeTorrent: zero piece length");
+  }
+
+  // One SHA-1 per piece, over the stream, which for one file is the file.
+  std::string pieces;
+  for (std::uint64_t at = 0; at < data.size(); at += pieceLength) {
+    const auto span = data.substr(
+        at, static_cast<std::size_t>(
+                std::min<std::uint64_t>(pieceLength, data.size() - at)));
+    const auto hash = sha1(span);
+    pieces.append(reinterpret_cast<const char *>(hash.data()), hash.size());
+  }
+
+  const auto info = bencode::Value::dict({
+      {"length", bencode::Value::integer(static_cast<std::int64_t>(data.size()))},
+      {"name", bencode::Value::string(std::move(name))},
+      {"piece length",
+       bencode::Value::integer(static_cast<std::int64_t>(pieceLength))},
+      {"pieces", bencode::Value::string(std::move(pieces))},
+  });
+
+  // The hash is over the info dictionary's encoding, which is what the spec
+  // asks for and what every other client will compute.
+  const auto encodedInfo = info.encode();
+  MadeTorrent made;
+  made.hash.bytes = sha1(encodedInfo);
+  made.file =
+      bencode::Value::dict({{"info", info}}).encode();
+  return made;
+}
+
 std::array<std::uint8_t, 20> sha1(const std::string_view data) {
   // glib's checksum rather than a hand-rolled SHA-1: glibmm is already a hard
   // dependency of this tree, and a wrong hash here would not be a bug in this
