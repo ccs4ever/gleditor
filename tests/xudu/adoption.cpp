@@ -41,10 +41,6 @@ using xudu::ScrollSegment;
 using xudu::Store;
 using xudu::Version;
 
-/// Signing is ed25519, which this build only has when it was built with
-/// libtorrent. Without it nothing here can be published or verified.
-bool canSign() { return xudu::swarmSupported(); }
-
 /// A published permascroll: named by a key, so it is the same scroll wherever
 /// it is mentioned.
 Scroll namedScroll(const xudu::PublicKey &key, std::string salt,
@@ -98,9 +94,6 @@ std::vector<const Version *> viewing(const std::vector<Version> &versions) {
 // Reading one in: the pieces become a version here, pointing at the same
 // content the publisher's own document points at rather than at a copy of it.
 TEST(AdoptionTest, aPublishedDocumentBecomesAVersionOnAMachineThatNeverWroteIt) {
-  if (!canSign()) {
-    GTEST_SKIP() << "built without ed25519";
-  }
   const auto theirs = published();
 
   Store mine;
@@ -124,9 +117,6 @@ TEST(AdoptionTest, aPublishedDocumentBecomesAVersionOnAMachineThatNeverWroteIt) 
 // somebody else's published document -- and both ends of it are found, which
 // is what draws it.
 TEST(AdoptionTest, anUnpublishedDocumentCanLinkToAPublishedOne) {
-  if (!canSign()) {
-    GTEST_SKIP() << "built without ed25519";
-  }
   const auto theirs = published();
 
   Store mine;
@@ -169,9 +159,6 @@ TEST(AdoptionTest, anUnpublishedDocumentCanLinkToAPublishedOne) {
 // of mine: the end in my unpublished document is nowhere here, and the end in
 // theirs still lands. A link is not all-or-nothing.
 TEST(AdoptionTest, theEndInAPublishedDocumentLandsEvenWhenTheOtherIsNotHere) {
-  if (!canSign()) {
-    GTEST_SKIP() << "built without ed25519";
-  }
   const auto theirs = published();
 
   Store mine;
@@ -201,9 +188,6 @@ TEST(AdoptionTest, theEndInAPublishedDocumentLandsEvenWhenTheOtherIsNotHere) {
 // link publishes with both ends global, and a third machine that has never
 // seen either store reads both documents and finds the link between them.
 TEST(AdoptionTest, aLinkBetweenTwoPublishedDocumentsCrossesToAThirdMachine) {
-  if (!canSign()) {
-    GTEST_SKIP() << "built without ed25519";
-  }
   const auto theirs = published();
 
   Store mine;
@@ -256,9 +240,6 @@ TEST(AdoptionTest, aLinkBetweenTwoPublishedDocumentsCrossesToAThirdMachine) {
 // was read twice -- is one link. Otherwise a document read again would show
 // every relation it has doubled.
 TEST(AdoptionTest, readingTheSamePublicationTwiceDoesNotDoubleItsLinks) {
-  if (!canSign()) {
-    GTEST_SKIP() << "built without ed25519";
-  }
   const auto keys   = xudu::createMutableKeys();
   const auto scroll = namedScroll(keys.publicKey, "permascroll", 1000);
   Store theirs;
@@ -292,9 +273,6 @@ TEST(AdoptionTest, readingTheSamePublicationTwiceDoesNotDoubleItsLinks) {
 // Reading is where a forgery has to be caught: after this the document is
 // indistinguishable from one written here.
 TEST(AdoptionTest, aManifestThatDoesNotVerifyIsNotRead) {
-  if (!canSign()) {
-    GTEST_SKIP() << "built without ed25519";
-  }
   const auto theirs = published();
   auto altered      = theirs.pub;
   altered.title     = "Something Else";
@@ -309,9 +287,6 @@ TEST(AdoptionTest, aManifestThatDoesNotVerifyIsNotRead) {
 // at a scroll it does not say the whereabouts of is a document with a hole in
 // it, and saying so beats showing text with a silent gap.
 TEST(AdoptionTest, aPublicationThatDoesNotSayWhereItsContentIsIsRefused) {
-  if (!canSign()) {
-    GTEST_SKIP() << "built without ed25519";
-  }
   const auto keys   = xudu::createMutableKeys();
   const auto scroll = namedScroll(keys.publicKey, "permascroll", 1000);
   Store theirs;

@@ -65,11 +65,6 @@ int main(const int argc, char **argv) {
       publish = true;
     }
   }
-  if (!xudu::swarmSupported()) {
-    std::cerr << "built without libtorrent; nothing to seed with\n";
-    return 77; // the conventional "skipped" status
-  }
-
   std::signal(SIGINT, stop);
   std::signal(SIGTERM, stop);
 

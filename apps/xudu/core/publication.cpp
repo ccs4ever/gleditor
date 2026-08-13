@@ -309,9 +309,6 @@ std::string encodePublication(const Publication &pub) {
 }
 
 bool verifyPublication(const Publication &pub) {
-  if (!swarmSupported()) {
-    return false;
-  }
   return verifyMutableItem(publicationSigningBuffer(pub), pub.signature,
                            pub.publisher);
 }
@@ -554,12 +551,6 @@ Publication publish(const Store &store, const MicroversionId &version,
                     std::string title, const std::int64_t sequence,
                     const std::uint64_t published,
                     const Scroll *const localSealedAs) {
-  if (!swarmSupported()) {
-    throw std::runtime_error(
-        "publishing needs signing, which this build has no ed25519 for; "
-        "rebuild with libtorrent-rasterbar installed");
-  }
-
   Publication pub;
   pub.publisher = keys.publicKey;
   pub.salt      = std::move(salt);

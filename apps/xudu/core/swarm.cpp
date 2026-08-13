@@ -2,8 +2,6 @@
 
 #include <stdexcept>
 
-#if XUDU_ENABLE_SWARM
-
 #include <algorithm>
 #include <chrono>
 #include <iterator>
@@ -72,8 +70,6 @@ std::string encodedValueOf(const lt::entry &value) {
 }
 
 } // namespace
-
-bool swarmSupported() { return true; }
 
 MutableKeys createMutableKeys() {
   const auto [publicKey, secretKey] =
@@ -636,73 +632,5 @@ std::string SwarmContentSource::readStream(const InfoHash &hash,
 
 } // namespace xudu
 
-#else // XUDU_ENABLE_SWARM
-
-namespace xudu {
-
-bool swarmSupported() { return false; }
-
-namespace {
-
-/// The one complaint every entry point here makes, so it reads the same
-/// however the build without libtorrent is reached.
-[[noreturn]] void noSwarm() {
-  throw std::runtime_error(
-      "this build has no swarm support: it was compiled without libtorrent");
-}
-
-} // namespace
-
-MutableKeys createMutableKeys() { noSwarm(); }
-Signature signMutableItem(std::string_view, const MutableKeys &) { noSwarm(); }
-bool verifyMutableItem(std::string_view, const Signature &, const PublicKey &) {
-  noSwarm();
-}
-
-struct SwarmContentSource::Impl {};
-
-SwarmContentSource::SwarmContentSource() : SwarmContentSource(Options{}) {}
-
-SwarmContentSource::SwarmContentSource(Options /*options*/) { noSwarm(); }
-SwarmContentSource::~SwarmContentSource() = default;
-
-InfoHash SwarmContentSource::addTorrent(std::string_view, const std::string &,
-                                        bool) {
-  return {};
-}
-InfoHash SwarmContentSource::addMagnet(const std::string &, const std::string &) {
-  return {};
-}
-void SwarmContentSource::connectPeer(const InfoHash &, const std::string &,
-                                     std::uint16_t) {}
-bool SwarmContentSource::waitForMetadata(const InfoHash &,
-                                         std::chrono::milliseconds) {
-  return false;
-}
-void SwarmContentSource::addDhtNode(const std::string &, std::uint16_t) {}
-std::optional<MutablePointer>
-SwarmContentSource::resolveMutable(const MutableLink &,
-                                   std::chrono::milliseconds) {
-  return std::nullopt;
-}
-void SwarmContentSource::publishMutable(const MutableKeys &,
-                                        const std::string &, const InfoHash &,
-                                        std::int64_t) {}
-std::uint16_t SwarmContentSource::listenPort() const { return 0; }
-int SwarmContentSource::peerCount(const InfoHash &) const { return 0; }
-std::int64_t SwarmContentSource::bytesFromPeers(const InfoHash &) const {
-  return 0;
-}
-const Metainfo *SwarmContentSource::metainfo(const InfoHash &) const {
-  return nullptr;
-}
-std::string SwarmContentSource::readStream(const InfoHash &, std::uint64_t,
-                                           std::uint64_t) const {
-  return {};
-}
-
-} // namespace xudu
-
-#endif // XUDU_ENABLE_SWARM
 
 // vi: set sw=2 sts=2 ts=2 et:
