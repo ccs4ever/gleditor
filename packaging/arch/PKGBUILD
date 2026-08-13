@@ -12,7 +12,11 @@ depends=('pangomm-2.48' 'cairomm-1.16' 'glibmm-2.68' 'sdl3' 'sdl3_image' 'libglv
 # without one, so this is optional rather than a hard dependency.
 optdepends=('vulkan-icd-loader: Vulkan backend'
             'ttf-dejavu: default font')
-makedepends=('gcc' 'make' 'pkgconf' 'glm' 'glslang' 'vulkan-headers')
+# boost rather than boost-libs: libtorrent-rasterbar's own headers pull in
+# boost/predef at compile time, and on Arch the headers live in the full
+# 'boost' package -- 'boost-libs', which libtorrent-rasterbar depends on,
+# ships only the shared objects.
+makedepends=('gcc' 'make' 'pkgconf' 'glm' 'glslang' 'vulkan-headers' 'boost')
 source=("$pkgname-$pkgver.tar.gz")
 sha256sums=('SKIP')
 

@@ -19,6 +19,10 @@ BuildRequires:  pkgconfig(gl)
 BuildRequires:  pkgconfig(vulkan)
 BuildRequires:  glm-devel
 BuildRequires:  pkgconfig(libtorrent-rasterbar)
+# libtorrent-rasterbar's own headers use boost/predef at compile time, and its
+# -devel package's dependency on it is weak rather than hard -- so it is named
+# outright rather than left to be pulled in.
+BuildRequires:  boost-devel
 BuildRequires:  glslang
 BuildRequires:  desktop-file-utils
 BuildRequires:  libappstream-glib
