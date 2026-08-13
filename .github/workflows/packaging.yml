@@ -541,8 +541,12 @@ jobs:
       # Pure lint: rubocop-based style rules only, no source fetched and no
       # dependency installed, so this catches a malformed formula file even
       # if everything below it changes.
+      # A bare "packaging/macos/gleditor.rb" is parsed as tap shorthand --
+      # tap "packaging/macos", formula "gleditor.rb" -- rather than as a path,
+      # and fails looking for a tap that was never installed. The leading
+      # ./ is what tells brew this is a file.
       - name: check the formula's style
-        run: brew style --formula packaging/macos/gleditor.rb
+        run: brew style --formula ./packaging/macos/gleditor.rb
 
       - name: install build dependencies
         run: |
