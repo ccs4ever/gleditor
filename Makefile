@@ -492,8 +492,8 @@ test: $(OBJDIR)/gleditor_test $(OBJDIR)/xudu_test
 
 # Everything, slow suites included. What the pull request checks run, and what
 # to run here before pushing.
-.PHONY: test-all
-test-all: $(OBJDIR)/gleditor_test $(OBJDIR)/xudu_test
+.PHONY: test/all
+test/all: $(OBJDIR)/gleditor_test $(OBJDIR)/xudu_test
 	$(OBJDIR)/gleditor_test
 	$(OBJDIR)/xudu_test
 
