@@ -431,6 +431,124 @@ SealedScroll sealLocalSpool(const Store &store, const MutableKeys &keys,
   return sealed;
 }
 
+std::string globalKeyOf(const Store &store, const PrimediaSpan &span,
+                        const Scroll *const localSealedAs) {
+  // A piece of the local spool has a global name exactly when the local spool
+  // has been sealed: the offsets are the same bytes, so the sealed scroll's
+  // name is the address it always had, said globally.
+  const auto *const scroll =
+      span.isLocal() ? localSealedAs : store.scroll(span.scroll);
+  return nullptr == scroll ? std::string{} : scrollKey(*scroll);
+}
+
+std::optional<GlobalSpan> globalise(const Store &store,
+                                    const PrimediaSpan &span,
+                                    const Scroll *const localSealedAs) {
+  auto key = globalKeyOf(store, span, localSealedAs);
+  if (key.empty()) {
+    return std::nullopt;
+  }
+  return GlobalSpan{std::move(key), span.start, span.length};
+}
+
+std::optional<PrimediaSpan> localise(Store &store, const GlobalSpan &span,
+                                     const std::map<std::string, Scroll> &scrolls) {
+  // Already known here, under whatever id this store handed out. Found by the
+  // name rather than by asking for the scroll again, so that a store which has
+  // learned of a re-seal keeps the identity it already had.
+  const auto &known = store.scrolls();
+  for (std::size_t i = 0; i < known.size(); i++) {
+    if (scrollKey(known[i]) == span.scroll) {
+      return PrimediaSpan{static_cast<ScrollId>(i + 1), span.start,
+                          span.length};
+    }
+  }
+  const auto found = scrolls.find(span.scroll);
+  if (scrolls.end() == found) {
+    return std::nullopt;
+  }
+  return PrimediaSpan{store.addScroll(found->second), span.start, span.length};
+}
+
+Adopted adopt(Store &store, const Publication &pub) {
+  if (!verifyPublication(pub)) {
+    throw std::runtime_error(
+        "cannot read this publication: its signature is not " +
+        pub.publisher.hex() +
+        "'s. An unsigned or wrongly signed manifest is a claim to have "
+        "published what somebody did not, and reading it anyway is what "
+        "signing exists to prevent.");
+  }
+
+  Adopted taken;
+  const auto before = store.scrolls().size();
+
+  // The pieces, in order, each a quotation of published content -- which is
+  // what reading somebody else's document is. Nothing is copied: the spans
+  // name the publisher's scrolls, so this store now points at the same bytes
+  // the publisher's own document points at, and a comparison of addresses
+  // finds the two showing the same passage.
+  std::uint32_t at = 0;
+  for (const auto &piece : pub.pieces) {
+    const auto found = pub.scrolls.find(piece.scroll);
+    if (pub.scrolls.end() == found) {
+      throw std::runtime_error(std::format(
+          "cannot read this publication: it points at \"{}\" and does not say "
+          "where that is. A document with an address nobody can resolve is a "
+          "document with a hole in it.",
+          piece.scroll));
+    }
+    taken.version = store.transcludeExternal(taken.version, at, found->second,
+                                             piece.start, piece.length);
+    at += static_cast<std::uint32_t>(piece.length);
+  }
+
+  // The links it asserts. They attach to content rather than to this document,
+  // so once they are here they show up on everything this store holds that
+  // quotes the same passages -- including documents written here that the
+  // publisher has never seen.
+  for (const auto &carried : pub.links) {
+    Link link;
+    link.type        = carried.type;
+    link.owner       = carried.owner;
+    bool addressable = true;
+    const auto bring = [&](const std::vector<GlobalSpan> &side,
+                           std::vector<PrimediaSpan> &into) {
+      for (const auto &span : side) {
+        const auto local = localise(store, span, pub.scrolls);
+        if (!local) {
+          // An end this store could not resolve even after taking the
+          // manifest's scrolls in. Half a link is a claim about a passage
+          // that cannot be checked, so the whole of it is left out.
+          addressable = false;
+          return;
+        }
+        into.push_back(*local);
+      }
+    };
+    bring(carried.left, link.left);
+    bring(carried.right, link.right);
+    if (!addressable) {
+      continue;
+    }
+    // A link this store already holds is the same link arriving again --
+    // through a second publication that carries it, or through this one being
+    // read twice -- and it is one link either way.
+    const auto same = [&link](const auto &entry) {
+      return entry.second.type == link.type && entry.second.owner == link.owner &&
+             entry.second.left == link.left && entry.second.right == link.right;
+    };
+    if (std::ranges::any_of(store.links(), same)) {
+      continue;
+    }
+    taken.version = store.addLink(taken.version, std::move(link));
+    taken.links++;
+  }
+
+  taken.scrolls = store.scrolls().size() - before;
+  return taken;
+}
+
 Publication publish(const Store &store, const MicroversionId &version,
                     const MutableKeys &keys, std::string salt,
                     std::string title, const std::int64_t sequence,
@@ -451,26 +569,25 @@ Publication publish(const Store &store, const MicroversionId &version,
   pub.published = published;
 
   const auto document = store.rebuild(version);
+  const auto scrollFor = [&store, localSealedAs](const PrimediaSpan &span) {
+    return span.isLocal() ? localSealedAs : store.scroll(span.scroll);
+  };
+
   for (const auto &piece : document.pieces()) {
-    // A piece of the local spool is publishable exactly when the local spool
-    // has been sealed: the offsets are the same bytes, so the sealed scroll's
-    // name is the address it has always had, said globally.
-    const auto *scroll =
-        piece.isLocal() ? localSealedAs : store.scroll(piece.scroll);
-    if (nullptr == scroll) {
+    const auto global = globalise(store, piece, localSealedAs);
+    if (!global) {
       throw std::runtime_error(std::format(
           "cannot publish: {} bytes at {} are content this machine has not "
           "published; seal it into a scroll first",
           piece.length, piece.start));
     }
-    const auto key = scrollKey(*scroll);
-    if (key.empty()) {
+    if (global->scroll.empty()) {
       throw std::runtime_error(
           "cannot publish: a scroll with no name and no segments has no "
           "address a reader could resolve");
     }
-    pub.pieces.push_back(GlobalSpan{key, piece.start, piece.length});
-    pub.scrolls.insert_or_assign(key, *scroll);
+    pub.scrolls.insert_or_assign(global->scroll, *scrollFor(piece));
+    pub.pieces.push_back(*global);
   }
 
   // The links whose ends this document actually shows. A store may hold links
@@ -482,25 +599,24 @@ Publication publish(const Store &store, const MicroversionId &version,
       out.type  = link->type;
       out.owner = link->owner;
       bool addressable = true;
-      const auto globalise = [&](const std::vector<PrimediaSpan> &side,
-                                 std::vector<GlobalSpan> &into) {
+      const auto sayGlobally = [&](const std::vector<PrimediaSpan> &side,
+                                   std::vector<GlobalSpan> &into) {
         for (const auto &span : side) {
-          const auto *scroll =
-              span.isLocal() ? localSealedAs : store.scroll(span.scroll);
-          if (nullptr == scroll) {
-            // An end nobody else could resolve. The link is dropped rather
-            // than published half-addressed: half a link is a claim about a
-            // passage that cannot be checked.
+          const auto global = globalise(store, span, localSealedAs);
+          if (!global) {
+            // An end nobody else could resolve -- content typed here that has
+            // not been sealed. The link is dropped rather than published
+            // half-addressed: half a link is a claim about a passage that
+            // cannot be checked.
             addressable = false;
             return;
           }
-          into.push_back(
-              GlobalSpan{scrollKey(*scroll), span.start, span.length});
-          pub.scrolls.insert_or_assign(scrollKey(*scroll), *scroll);
+          pub.scrolls.insert_or_assign(global->scroll, *scrollFor(span));
+          into.push_back(*global);
         }
       };
-      globalise(link->left, out.left);
-      globalise(link->right, out.right);
+      sayGlobally(link->left, out.left);
+      sayGlobally(link->right, out.right);
       if (!addressable) {
         continue;
       }

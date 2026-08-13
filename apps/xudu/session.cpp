@@ -168,6 +168,110 @@ MicroversionId Session::quoteTorrent(const MicroversionId &parent,
   return docStore.transcludeExternal(parent, at, scroll, offset, count);
 }
 
+std::string Session::publishedDir() const {
+  return (std::filesystem::path(storePath) / "published").string();
+}
+
+const MutableKeys &Session::identity() {
+  if (keys.has_value()) {
+    return *keys;
+  }
+  if (!swarmSupported()) {
+    throw std::runtime_error(
+        "publishing needs ed25519, which this build has none of; rebuild with "
+        "libtorrent-rasterbar installed");
+  }
+
+  const auto path = std::filesystem::path(storePath) / "identity";
+  if (std::ifstream in(path); in) {
+    std::string publicHex;
+    std::string secretHex;
+    in >> publicHex >> secretHex;
+    if (!publicHex.empty() && !secretHex.empty()) {
+      keys = MutableKeys{PublicKey::fromHex(publicHex),
+                         SecretKey::fromHex(secretHex)};
+      return *keys;
+    }
+  }
+
+  keys = createMutableKeys();
+  std::filesystem::create_directories(storePath);
+  {
+    std::ofstream out(path, std::ios::trunc);
+    out << keys->publicKey.hex() << "\n" << keys->secretKey.hex() << "\n";
+  }
+  // The secret half is the whole of the authority to publish under this name.
+  std::error_code ignored;
+  std::filesystem::permissions(path,
+                               std::filesystem::perms::owner_read |
+                                   std::filesystem::perms::owner_write,
+                               std::filesystem::perm_options::replace, ignored);
+  std::cout << "xudu: minted this machine's name " << keys->publicKey.hex()
+            << "\n";
+  return *keys;
+}
+
+std::string Session::publishDocument(const MicroversionId &version,
+                                     const std::string &salt,
+                                     const std::string &title) {
+  const auto &mine = identity();
+  const auto into  = publishedDir();
+
+  // One scroll for everything typed on this machine, whatever document it
+  // ended up in: the spool is one append-only sequence, so sealing it again
+  // covers what is new and leaves every address already handed out alone.
+  const auto sealed = sealLocalSpool(docStore, mine, "primedia", into);
+
+  // BEP 44 orders two answers to one name by sequence, so it has to rise.
+  // The clock is the one number available here that always has.
+  const auto now = static_cast<std::uint64_t>(
+      std::chrono::duration_cast<std::chrono::seconds>(
+          std::chrono::system_clock::now().time_since_epoch())
+          .count());
+  const auto pub = publish(docStore, version, mine, salt, title,
+                           static_cast<std::int64_t>(now), now, &sealed.scroll);
+
+  std::filesystem::create_directories(into);
+  const auto path =
+      (std::filesystem::path(into) / (salt + ".xanadoc")).string();
+  std::ofstream out(path, std::ios::binary | std::ios::trunc);
+  out << encodePublication(pub);
+  return path;
+}
+
+MicroversionId Session::readPublication(const std::string &path) {
+  std::ifstream in(path, std::ios::binary);
+  if (!in) {
+    throw std::runtime_error("cannot read publication: " + path);
+  }
+  const std::string encoded{std::istreambuf_iterator<char>(in),
+                            std::istreambuf_iterator<char>()};
+  const auto pub = decodePublication(encoded);
+  if (!pub) {
+    throw std::runtime_error(
+        path + " is not a publication, or is not signed by whoever it claims "
+               "to be from. A manifest that does not verify is somebody's "
+               "claim to have published what they did not.");
+  }
+  const auto taken = adopt(docStore, *pub);
+  invalidate();
+  std::cout << "xudu: read " << pub->describe() << " as " << taken.version.str()
+            << " (" << taken.scrolls << " scroll(s), " << taken.links
+            << " link(s) new here)\n";
+  return taken.version;
+}
+
+MicroversionId Session::addLink(const std::uint32_t docIndex, Link link) {
+  if (docIndex >= open.size()) {
+    return MicroversionId{};
+  }
+  const auto produced = docStore.addLink(open[docIndex].version, std::move(link));
+  // The text is unchanged -- a link changes none -- so the document on screen
+  // stays as it is and only where it sits in hypertime moves.
+  refresh(docIndex, produced);
+  return produced;
+}
+
 MicroversionId Session::versionOf(const std::uint32_t docIndex) const {
   return docIndex < open.size() ? open[docIndex].version : MicroversionId{};
 }

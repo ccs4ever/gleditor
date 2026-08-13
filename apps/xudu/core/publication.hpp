@@ -231,6 +231,82 @@ struct SealedScroll {
                                   const Scroll *localSealedAs = nullptr);
 
 /**
+ * @brief The global name of the scroll @p span points into.
+ *
+ * Empty when it has none, which is the case for content typed here and not yet
+ * sealed: it exists at an offset in this machine's spool and nowhere else.
+ *
+ * @param localSealedAs What the local spool has been sealed as, if it has. Its
+ *        offsets are the same bytes, so a local span's address is unchanged --
+ *        only the name it is said under is new.
+ */
+[[nodiscard]] std::string globalKeyOf(const Store &store,
+                                      const PrimediaSpan &span,
+                                      const Scroll *localSealedAs = nullptr);
+
+/// @p span written so another machine can read it, or nothing when its scroll
+/// has no global name.
+[[nodiscard]] std::optional<GlobalSpan>
+globalise(const Store &store, const PrimediaSpan &span,
+          const Scroll *localSealedAs = nullptr);
+
+/**
+ * @brief @p span in @p store's own coordinates.
+ *
+ * The other direction, and the one that lets a document here point into a
+ * document published elsewhere: the scroll is recorded in this store if it is
+ * not already, and the offsets are carried across untouched, because a scroll
+ * offset means the same thing everywhere. That is the whole trick -- an
+ * address does not have to be translated, only the name of what it is an
+ * address into.
+ *
+ * @param scrolls Where the scroll can be looked up when this store has never
+ *        heard of it, which for a publication is its own scroll table.
+ * @return Nothing when the scroll is named by neither, since a span into
+ *         content with no way to reach it would read as text that is silently
+ *         absent.
+ */
+[[nodiscard]] std::optional<PrimediaSpan>
+localise(Store &store, const GlobalSpan &span,
+         const std::map<std::string, Scroll> &scrolls);
+
+/// What taking a publication in produced.
+struct Adopted {
+  /// The state showing the published document, ready to be opened.
+  MicroversionId version;
+  /// Links taken in with it. A link the store already had is not taken twice.
+  std::size_t links{};
+  /// Scrolls this store can now resolve addresses into.
+  std::size_t scrolls{};
+};
+
+/**
+ * @brief Take a published document into @p store so it can be read here.
+ *
+ * The inverse of publish(), and what makes a published document a first-class
+ * thing on a machine that did not write it: its pieces become a version, its
+ * scrolls become addresses this store can resolve, and its links become links
+ * here. From that point a document typed on this machine can quote it and can
+ * be linked to it, by exactly the same operations as if it had been written
+ * here -- the addresses are already global, so nothing is translated and no
+ * agreement between the two machines is needed.
+ *
+ * Nothing about the result is published, and nothing has to be. A link's ends
+ * are addresses; whether the document holding one has been published decides
+ * whether *that* document can travel, not whether the link can be made.
+ *
+ * Adopting the same publication twice adds a second reading of it and no
+ * duplicate links.
+ *
+ * @throws std::runtime_error when the signature does not verify -- an
+ *         unverified manifest is somebody's claim to have published what they
+ *         did not -- or when a piece names a scroll the manifest does not
+ *         carry, which would be a document with a hole in it rather than a
+ *         document.
+ */
+Adopted adopt(Store &store, const Publication &pub);
+
+/**
  * @brief Documents this machine has, however they arrived.
  *
  * A reader accumulates publications: some fetched by name, some handed over,
