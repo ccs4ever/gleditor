@@ -328,7 +328,8 @@ endif
 .FEATURES = output-sync
 
 
-SPIRV := assets/shaders/vulkan/glyph.vert.spv assets/shaders/vulkan/glyph.frag.spv
+SPIRV := assets/shaders/vulkan/glyph.vert.spv assets/shaders/vulkan/glyph.frag.spv \
+	assets/shaders/vulkan/beam.vert.spv assets/shaders/vulkan/beam.frag.spv
 
 all: lib gleditor xudu gleditor_test xudu_test $(OBJDIR)/compile_commands.json
 ifdef GLEDITOR_ENABLE_VULKAN

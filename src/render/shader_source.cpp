@@ -141,6 +141,7 @@ std::string assembleShaderSource(const Backend backend, const ShaderStage stage,
   // the draw supplies. Taken from the packing rather than written out twice.
   out += std::format("#define GLEDITOR_TAG_KIND_SHIFT {}\n",
                      tagDocBits + tagPageBits);
+  out += std::format("#define GLEDITOR_TAG_KIND_BEAM {}\n", tagKindBeam);
   out += interfaceMacros(backend, stage);
   out += uniformBlock(backend, stage);
   // Reset the line counter so compiler diagnostics point at lines of the

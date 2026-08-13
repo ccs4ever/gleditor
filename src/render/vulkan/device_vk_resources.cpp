@@ -593,10 +593,10 @@ PipelineHandle DeviceVK::createPipeline(const PipelineDesc &desc) {
   check(vkCreatePipelineLayout(device, &layoutInfo, nullptr, &record.layout),
         "vkCreatePipelineLayout");
 
-  const auto vertModule =
-      createShaderModule(readSpirv(desc.spirvDir + "/glyph.vert.spv"));
-  const auto fragModule =
-      createShaderModule(readSpirv(desc.spirvDir + "/glyph.frag.spv"));
+  const auto vertModule = createShaderModule(
+      readSpirv(desc.spirvDir + "/" + desc.shaderName + ".vert.spv"));
+  const auto fragModule = createShaderModule(
+      readSpirv(desc.spirvDir + "/" + desc.shaderName + ".frag.spv"));
 
   std::array<VkPipelineShaderStageCreateInfo, 2> stages{};
   stages[0].sType  = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
