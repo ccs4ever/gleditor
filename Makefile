@@ -79,9 +79,17 @@ endif
 # path to GL/glcorearb.h, which the backend reads for its typedefs and enum
 # values. MinGW has no gl.pc at all and puts those headers where the compiler
 # already looks, so this is used when pkg-config knows it and skipped when not.
+# macOS has neither: no gl.pc, and its own OpenGL.framework headers are not the
+# Khronos GL/*.h layout this reads, since Apple never shipped that registry.
+# The one header actually needed -- glcorearb.h, plus the khrplatform.h it
+# includes -- is vendored rather than pulled from a package whose layout on
+# macOS is not this project's to depend on.
+GL_CFLAGS :=
 PKGS := pangomm-2.48 $(SDL_PKG)
 ifeq ($(shell pkg-config --exists gl && echo 1),1)
 PKGS += gl
+else ifeq ($(shell uname -s 2>/dev/null),Darwin)
+GL_CFLAGS := -Ithirdparty/opengl-registry
 endif
 ifdef GLEDITOR_ENABLE_VULKAN
 PKGS += vulkan
@@ -268,7 +276,7 @@ endif
 # requires it; a program does not, but compiling the two trees differently
 # would mean two object directories and two sets of rules for one flag whose
 # cost here is not measurable.
-override CXXFLAGS += $(DEBUG_OPTS) $(STD_FLAG) -fPIC -Ibuild/src -Iinclude -Iapps -Ithirdparty/Choreograph/src -Ithirdparty/argparse/include -Wall -Wextra $(shell pkg-config $(STATIC) --cflags $(PKGS))
+override CXXFLAGS += $(DEBUG_OPTS) $(STD_FLAG) -fPIC -Ibuild/src -Iinclude -Iapps -Ithirdparty/Choreograph/src -Ithirdparty/argparse/include -Wall -Wextra $(shell pkg-config $(STATIC) --cflags $(PKGS)) $(GL_CFLAGS)
 ifdef GLEDITOR_DATADIR
 override CXXFLAGS += -DGLEDITOR_DATADIR='"$(GLEDITOR_DATADIR)"'
 endif

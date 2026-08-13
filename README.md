@@ -1568,7 +1568,11 @@ which has no macOS equivalent as settled as `lavapipe`/`llvmpipe` on the other
 platforms, and it stays out until that is. AccessKit is off there for a
 different reason -- its macOS adapter (NSAccessibility via view subclassing)
 is a third API this project does not speak yet, distinct from both the
-Windows and AT-SPI ones it already does.
+Windows and AT-SPI ones it already does. macOS also builds against a vendored
+copy of `GL/glcorearb.h` (`thirdparty/opengl-registry/`) rather than a system
+one: it has no `gl.pc`, and Apple's own OpenGL.framework headers were never
+going to grow the Khronos registry layout the other four platforms get from
+their GL loader's dev package or, on Windows, from MinGW itself.
 
 Debian gets SDL2 because SDL3 is not in the archive and a package cannot depend
 on whichever version the build happened to find; everything else gets SDL3,
