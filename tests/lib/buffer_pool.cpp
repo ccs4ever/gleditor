@@ -36,10 +36,13 @@ TEST_F(BufferPoolTest, reserveHandsOutDistinctRuns) {
   BufferPool pool(device.get(), kStride, 100);
   const auto first  = pool.reserve(10);
   const auto second = pool.reserve(10);
-  EXPECT_EQ(first.rowOffset, 0U);
-  EXPECT_EQ(first.rowCount, 10U);
-  EXPECT_EQ(second.rowOffset, 10U);
-  EXPECT_EQ(pool.byteOffset(second), 10U * kStride);
+  EXPECT_EQ(pool.byteOffset(first), 0U);
+  EXPECT_EQ(pool.rowCount(first), 10U);
+  EXPECT_EQ(pool.rowCount(second), 10U);
+  // Distinct and non-overlapping: the second begins past the first's rows and
+  // past the room reserved around them.
+  EXPECT_GE(pool.byteOffset(second),
+            pool.byteOffset(first) + (pool.roomFor(first) * kStride));
 }
 
 TEST_F(BufferPoolTest, reserveOfZeroRowsIsEmpty) {
@@ -55,7 +58,7 @@ TEST_F(BufferPoolTest, reserveBeyondCapacityGrowsTheBuffer) {
 
   BufferPool pool(device.get(), kStride, 4);
   const auto alloc = pool.reserve(10);
-  EXPECT_EQ(alloc.rowCount, 10U);
+  EXPECT_EQ(pool.rowCount(alloc), 10U);
   EXPECT_GE(pool.capacityRows(), 10U);
 }
 
@@ -63,10 +66,11 @@ TEST_F(BufferPoolTest, growthKeepsEarlierAllocationsAddressable) {
   BufferPool pool(device.get(), kStride, 4);
   const auto first = pool.reserve(4);
   const auto grown = pool.reserve(64);
-  EXPECT_EQ(first.rowOffset, 0U);
+  EXPECT_EQ(pool.byteOffset(first), 0U);
   // The run added by growth starts where the old buffer ended, so nothing
   // overlaps what was already handed out.
-  EXPECT_GE(grown.rowOffset, first.rowOffset + first.rowCount);
+  EXPECT_GE(pool.byteOffset(grown),
+            pool.byteOffset(first) + (pool.roomFor(first) * kStride));
 }
 
 // Without coalescing, alternating reserve and release would chop the buffer
@@ -79,8 +83,9 @@ TEST_F(BufferPoolTest, releasedRunsAreMergedAndReused) {
   pool.release(second);
 
   const auto merged = pool.reserve(20);
-  EXPECT_EQ(merged.rowOffset, 0U) << "adjacent free runs should have merged";
-  EXPECT_EQ(merged.rowCount, 20U);
+  EXPECT_EQ(pool.byteOffset(merged), 0U)
+      << "adjacent free runs should have merged";
+  EXPECT_EQ(pool.rowCount(merged), 20U);
 }
 
 TEST_F(BufferPoolTest, writeRejectsDataThatIsNotRowAligned) {
@@ -102,8 +107,9 @@ TEST_F(BufferPoolTest, writeTargetsTheAllocationsOffset) {
   pool.reserve(5);
   const auto alloc = pool.reserve(5);
 
-  // Row 1 of an allocation starting at row 5 is byte offset 6 * stride.
-  EXPECT_CALL(*device, updateBuffer(render::BufferHandle{1}, 6U * kStride, _))
+  // Row 1 of the allocation is one row past wherever the pool put it.
+  EXPECT_CALL(*device, updateBuffer(render::BufferHandle{1},
+                                    pool.byteOffset(alloc) + kStride, _))
       .Times(1);
   const std::vector<std::byte> row(kStride);
   pool.write(alloc, 1, row);
@@ -120,7 +126,7 @@ TEST_F(BufferPoolTest, growthOvershootsByHalfRatherThanByDouble) {
   for (int page = 0; page < 200; page++) {
     pool.reserve(37);
   }
-  const auto used = 200U * 37U;
+  const auto used = pool.rowsInUse();
   EXPECT_GE(pool.capacityRows(), used);
   EXPECT_LT(pool.capacityRows(), used * 3 / 2)
       << "capacity " << pool.capacityRows() << " for " << used << " rows in use";
@@ -140,7 +146,9 @@ TEST_F(BufferPoolTest, growthCountsTheFreeRunItIsExtending) {
 
 TEST_F(BufferPoolTest, trimGivesBackTheRoomGrowthReserved) {
   BufferPool pool(device.get(), kStride, 64);
-  for (int page = 0; page < 400; page++) {
+  // As a document does: say how much it will need, then use rather less of it.
+  pool.reserveCapacity(20000);
+  for (int page = 0; page < 300; page++) {
     pool.reserve(37);
   }
   const auto before = pool.capacityRows();
@@ -173,13 +181,13 @@ TEST_F(BufferPoolTest, allocationsSurviveATrimAndItCanGrowAgain) {
 
   // More than the headroom the trim left, so it has to grow.
   const auto after = pool.reserve(used);
-  EXPECT_EQ(after.rowCount, used);
+  EXPECT_EQ(pool.rowCount(after), used);
   EXPECT_GE(pool.capacityRows(), used * 2);
 }
 
 TEST_F(BufferPoolTest, trimDoesNothingWhenThereIsLittleToGiveBack) {
   BufferPool pool(device.get(), kStride, 1000);
-  pool.reserve(990);
+  pool.reserve(900);
 
   // No resize at all: copying a whole buffer to recover ten rows is a worse
   // deal than keeping them.
@@ -201,7 +209,7 @@ TEST_F(BufferPoolTest, trimLeavesHolesInTheMiddleAlone) {
   pool.trim();
   EXPECT_EQ(pool.capacityRows(), 1000U);
   // And the hole is still usable.
-  EXPECT_EQ(pool.reserve(400).rowOffset, 0U);
+  EXPECT_EQ(pool.byteOffset(pool.reserve(400)), 0U);
 }
 
 // Rows deleted from the middle of a page. They are zeroed rather than removed
@@ -232,8 +240,10 @@ TEST_F(BufferPoolTest, erasureIsRelativeToTheAllocation) {
   pool.reserve(30);
   const auto second = pool.reserve(20);
 
-  // Row 2 of an allocation starting at row 30 is byte offset 32 * stride.
-  EXPECT_CALL(*device, updateBuffer(render::BufferHandle{1}, 32U * kStride, _))
+  // Row 2 of the second allocation, wherever the pool put it -- not row 2 of
+  // the buffer, and not row 2 of the first allocation.
+  EXPECT_CALL(*device, updateBuffer(render::BufferHandle{1},
+                                    pool.byteOffset(second) + (2U * kStride), _))
       .Times(1);
   pool.eraseRows(second, 2, 4);
 }
@@ -286,15 +296,12 @@ TEST_F(BufferPoolTest, adjacentErasuresMergeIntoOneRun) {
 // The rows are inside somebody's allocation and are drawn with that page's
 // transform and identity, so they cannot go to anyone else.
 TEST_F(BufferPoolTest, erasedRowsAreNotOfferedToOtherAllocations) {
-  BufferPool pool(device.get(), kStride, 100);
+  BufferPool pool(device.get(), kStride, 200);
   const auto first  = pool.reserve(40);
   const auto second = pool.reserve(40);
   pool.eraseRows(first, 0, 30);
 
   EXPECT_FALSE(pool.reuseRows(second, 4).has_value());
-  // Nor by a fresh reservation: what is left of the buffer is what was never
-  // handed out, which is twenty rows and not fifty.
-  EXPECT_EQ(pool.reserve(20).rowCount, 20U);
   EXPECT_EQ(pool.erasedRows(first), 30U);
 }
 
@@ -306,7 +313,7 @@ TEST_F(BufferPoolTest, releasingAnAllocationTakesItsErasedRowsWithIt) {
 
   // The whole run is free again, erasures included.
   const auto reused = pool.reserve(20);
-  EXPECT_EQ(reused.rowOffset, alloc.rowOffset);
+  EXPECT_EQ(pool.byteOffset(reused), 0U);
   EXPECT_EQ(pool.erasedRows(reused), 0U)
       << "the record outlived the rows it described";
 }
@@ -325,6 +332,139 @@ TEST_F(BufferPoolTest, erasingALargeRunDoesNotStageItAllAtOnce) {
       });
   pool.eraseRows(alloc, 0, 20000);
   EXPECT_EQ(pool.erasedRows(alloc), 20000U);
+}
+
+// Room is left around every allocation so that gaining a row is bookkeeping
+// rather than a move and a copy.
+TEST_F(BufferPoolTest, everyAllocationHasRoomToGrowInto) {
+  BufferPool pool(device.get(), kStride, 1000);
+  const auto alloc = pool.reserve(160);
+  EXPECT_EQ(pool.rowCount(alloc), 160U);
+  EXPECT_GT(pool.roomFor(alloc), pool.rowCount(alloc));
+  // Small allocations get the floor rather than a proportion of nothing.
+  const auto tiny = pool.reserve(1);
+  EXPECT_GE(pool.roomFor(tiny), 1U + BufferPool::slackFloorRows);
+}
+
+TEST_F(BufferPoolTest, growingWithinTheRoomMovesNothing) {
+  BufferPool pool(device.get(), kStride, 1000);
+  const auto alloc = pool.reserve(160);
+  const auto where = pool.byteOffset(alloc);
+
+  EXPECT_CALL(*device, copyBufferRange(_, _, _, _)).Times(0);
+  pool.resize(alloc, pool.roomFor(alloc));
+
+  EXPECT_EQ(pool.byteOffset(alloc), where) << "it moved when it did not have to";
+  EXPECT_EQ(pool.rowCount(alloc), pool.roomFor(alloc));
+  EXPECT_EQ(pool.moves(), 0U);
+}
+
+// The point of the whole arrangement: a page that outgrows its room is moved,
+// and the handle it was given goes on working.
+TEST_F(BufferPoolTest, outgrowingTheRoomMovesTheRowsAndTheHandleStillWorks) {
+  BufferPool pool(device.get(), kStride, 1000);
+  const auto first  = pool.reserve(100);
+  const auto second = pool.reserve(100);
+  const auto wasAt  = pool.byteOffset(second);
+
+  // The rows that exist are carried to the new place; the room reserved
+  // around them is not, since nothing has been written there.
+  EXPECT_CALL(*device, copyBufferRange(render::BufferHandle{1}, wasAt, _,
+                                       100U * kStride))
+      .Times(1);
+  pool.resize(second, 300);
+
+  EXPECT_EQ(pool.rowCount(second), 300U);
+  EXPECT_NE(pool.byteOffset(second), wasAt) << "300 rows cannot have fitted";
+  EXPECT_EQ(pool.moves(), 1U);
+  // The other allocation is where it was: a move moves one allocation.
+  EXPECT_EQ(pool.byteOffset(first), 0U);
+  EXPECT_EQ(pool.rowCount(first), 100U);
+
+  // And the handle still addresses the rows, at their new home.
+  EXPECT_CALL(*device, updateBuffer(render::BufferHandle{1},
+                                    pool.byteOffset(second) + kStride, _))
+      .Times(1);
+  const std::vector<std::byte> row(kStride);
+  pool.write(second, 1, row);
+}
+
+TEST_F(BufferPoolTest, theRoomAMovedAllocationLeavesIsReusable) {
+  BufferPool pool(device.get(), kStride, 1000);
+  const auto alloc = pool.reserve(100);
+  const auto vacated = pool.byteOffset(alloc);
+  const auto room    = pool.roomFor(alloc);
+  pool.resize(alloc, 400);
+
+  // The whole run it used to occupy, slack included, is free again -- and it
+  // is at the front of the buffer, so it is what the next reservation takes.
+  const auto next = pool.reserve(room - BufferPool::slackFor(room));
+  EXPECT_EQ(pool.byteOffset(next), vacated);
+}
+
+// A move must not take its new home out of the run it is about to vacate,
+// which would be a copy onto itself.
+TEST_F(BufferPoolTest, aMoveDoesNotLandOnTopOfWhatItIsLeaving) {
+  BufferPool pool(device.get(), kStride, 128);
+  const auto only = pool.reserve(100);
+  const auto wasAt = pool.byteOffset(only);
+
+  ON_CALL(*device, copyBufferRange)
+      .WillByDefault([](render::BufferHandle, const std::size_t src,
+                        const std::size_t dst, const std::size_t bytes) {
+        EXPECT_TRUE(src + bytes <= dst || dst + bytes <= src)
+            << "the copy overlaps itself";
+      });
+  pool.resize(only, 120);
+  EXPECT_NE(pool.byteOffset(only), wasAt);
+  EXPECT_EQ(pool.rowCount(only), 120U);
+}
+
+TEST_F(BufferPoolTest, erasedRowsTravelWithAMovedAllocation) {
+  BufferPool pool(device.get(), kStride, 1000);
+  const auto alloc = pool.reserve(100);
+  pool.eraseRows(alloc, 10, 20);
+  ASSERT_EQ(pool.erasedRows(alloc), 20U);
+
+  pool.resize(alloc, 400);
+
+  // Recorded against the allocation rather than the buffer, so the record
+  // still describes the same rows of the same page.
+  EXPECT_EQ(pool.erasedRows(alloc), 20U);
+  const auto reused = pool.reuseRows(alloc, 20);
+  ASSERT_TRUE(reused.has_value());
+  EXPECT_EQ(*reused, 10U);
+}
+
+TEST_F(BufferPoolTest, shrinkingKeepsThePlaceAndWidensTheRoom) {
+  BufferPool pool(device.get(), kStride, 1000);
+  const auto alloc = pool.reserve(200);
+  const auto where = pool.byteOffset(alloc);
+  const auto room  = pool.roomFor(alloc);
+
+  EXPECT_CALL(*device, copyBufferRange(_, _, _, _)).Times(0);
+  pool.resize(alloc, 50);
+
+  EXPECT_EQ(pool.rowCount(alloc), 50U);
+  EXPECT_EQ(pool.byteOffset(alloc), where);
+  EXPECT_EQ(pool.roomFor(alloc), room) << "the rows it gave up are its own to "
+                                          "take back, being in the middle of "
+                                          "the buffer";
+}
+
+TEST_F(BufferPoolTest, aReleasedAllocationIsNoLongerAddressable) {
+  BufferPool pool(device.get(), kStride, 1000);
+  const auto alloc = pool.reserve(10);
+  pool.release(alloc);
+
+  // Handles are never reissued, so using one after releasing it is caught
+  // rather than quietly addressing somebody else's rows.
+  EXPECT_THROW(static_cast<void>(pool.byteOffset(alloc)), std::invalid_argument);
+  EXPECT_THROW(pool.resize(alloc, 20), std::invalid_argument);
+  EXPECT_NE(pool.reserve(10), alloc);
+  // Releasing twice is not an error, though: it is what a holder does when it
+  // cannot remember whether it already has.
+  pool.release(alloc);
 }
 
 TEST_F(BufferPoolTest, rejectsZeroStride) {

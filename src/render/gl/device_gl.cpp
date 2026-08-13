@@ -296,6 +296,38 @@ void DeviceGL::updateBuffer(const BufferHandle buffer, const std::size_t offset,
   api.BindBuffer(it->second.target, 0);
 }
 
+void DeviceGL::copyBufferRange(const BufferHandle buffer,
+                               const std::size_t srcOffset,
+                               const std::size_t dstOffset,
+                               const std::size_t bytes) {
+  const auto it = buffers.find(buffer.id);
+  if (buffers.end() == it) {
+    throw std::invalid_argument("DeviceGL::copyBufferRange: unknown buffer");
+  }
+  if (0 == bytes) {
+    return;
+  }
+  if (srcOffset + bytes > it->second.bytes ||
+      dstOffset + bytes > it->second.bytes) {
+    throw std::out_of_range("DeviceGL::copyBufferRange: past the end");
+  }
+  // One buffer bound to both slots is allowed as long as the ranges do not
+  // overlap, which is why the caller must guarantee it: OpenGL raises
+  // INVALID_VALUE rather than doing something sensible.
+  if (srcOffset < dstOffset + bytes && dstOffset < srcOffset + bytes) {
+    throw std::invalid_argument("DeviceGL::copyBufferRange: ranges overlap");
+  }
+
+  api.BindBuffer(GL_COPY_READ_BUFFER, it->second.name);
+  api.BindBuffer(GL_COPY_WRITE_BUFFER, it->second.name);
+  api.CopyBufferSubData(GL_COPY_READ_BUFFER, GL_COPY_WRITE_BUFFER,
+                        static_cast<GLintptr>(srcOffset),
+                        static_cast<GLintptr>(dstOffset),
+                        static_cast<GLsizeiptr>(bytes));
+  api.BindBuffer(GL_COPY_READ_BUFFER, 0);
+  api.BindBuffer(GL_COPY_WRITE_BUFFER, 0);
+}
+
 BufferHandle DeviceGL::resizeBuffer(const BufferHandle buffer,
                                     const std::size_t bytes) {
   const auto it = buffers.find(buffer.id);

@@ -72,6 +72,8 @@ public:
   void updateBuffer(BufferHandle buffer, std::size_t offset,
                     std::span<const std::byte> data) override;
   BufferHandle resizeBuffer(BufferHandle buffer, std::size_t bytes) override;
+  void copyBufferRange(BufferHandle buffer, std::size_t srcOffset,
+                       std::size_t dstOffset, std::size_t bytes) override;
 
   TextureHandle createTextureArray(int size, int layers, TextureFormat format,
                                    int levels) override;

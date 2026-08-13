@@ -61,17 +61,17 @@ constexpr std::uint32_t initialPoolRows = 4096;
  *
  * One quad per cluster, and a cluster is a character except where several
  * combine into one -- so the character count is an over-estimate of the glyphs
- * and the pages add a background and a bar per line on top. A twentieth covers
- * the bars comfortably for prose, and being a little over is the point: the
- * buffer is allocated once at this size instead of being grown through every
- * size on the way there, and whatever is left over is given back by a trim
- * when the document has finished loading.
+ * and the pages add a background and a bar per line on top. An eighth covers
+ * the bars and the room the pool leaves around each page to grow into, and
+ * being a little over is the point: the buffer is allocated once at this size
+ * instead of being grown through every size on the way there, and whatever is
+ * left over is given back by a trim when the document has finished loading.
  *
  * Characters rather than bytes, so that text outside ASCII is not over-counted
  * threefold.
  */
 std::uint32_t rowsFor(const std::size_t characters) {
-  const auto estimate = characters + (characters / 20) + initialPoolRows;
+  const auto estimate = characters + (characters / 8) + initialPoolRows;
   return static_cast<std::uint32_t>(
       std::min<std::size_t>(estimate, std::numeric_limits<std::uint32_t>::max()));
 }
