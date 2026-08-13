@@ -94,8 +94,11 @@ jobs:
     # thing if a runner image ever gained the other one.
     - name: make
       run: make GLEDITOR_SDL=${{ matrix.sdl }} GLEDITOR_ENABLE_VULKAN=1
+    # test-all rather than test: `make test` leaves the network suites out so
+    # that the tests a person runs after every change stay quick, and the pull
+    # request checks are where they are not left out.
     - name: make test
-      run: make GLEDITOR_SDL=${{ matrix.sdl }} GLEDITOR_ENABLE_VULKAN=1 test
+      run: make GLEDITOR_SDL=${{ matrix.sdl }} GLEDITOR_ENABLE_VULKAN=1 test-all
     # Render the sample document through each backend and require that they
     # agree. A backend that silently stops drawing still exits zero, so the
     # comparison -- not the exit code -- is what actually proves it works.
