@@ -112,27 +112,52 @@ struct SignedProvenance {
 };
 
 /**
- * @brief Where the key to sign with, or check against, is kept.
+ * @brief What gpg needs beyond the record: which keyring, and the passphrase.
  *
- * Both empty is the ordinary case: gpg uses the keyring it always uses.
+ * Both empty is the ordinary case: the keyring gpg always uses, and an agent
+ * that already holds whatever the key is protected by.
  */
 struct SigningOptions {
-  /// A GnuPG home directory to use instead of the default.
+  /// A GnuPG home directory to use instead of the default. Which keyring, not
+  /// which key -- the key is named in the record, by Author::gpgKey.
   std::string gpgHome;
   /**
-   * @brief An exported secret key to sign with.
+   * @brief The passphrase protecting the key, when one is needed here.
    *
-   * gpg has signed with keys in a keyring rather than with key files since
-   * 2.1, so a key named here is imported into a keyring of its own for the
-   * one operation and that keyring is then thrown away. The alternative was to
-   * refuse the spelling everybody reaches for first.
+   * Empty is the usual case and the better one: a running gpg-agent has
+   * already been given it, or the key has none. When it is set it goes to gpg
+   * down a pipe rather than on a command line, because a command line is
+   * readable by every process on the machine.
    */
-  std::string secretKeyFile;
-
-  [[nodiscard]] bool bare() const {
-    return gpgHome.empty() && secretKeyFile.empty();
-  }
+  std::string passphrase;
 };
+
+/// One key the keyring can sign with.
+struct SigningKey {
+  /// The full fingerprint, which is what is recorded and what is handed to gpg
+  /// -- a short key id is not a name, it is a prefix, and prefixes collide.
+  std::string fingerprint;
+  /// The primary identity on the key, as gpg prints it: "Name <email>".
+  std::string identity;
+  /// Whether this is the one gpg would use if nobody said: its configured
+  /// default-key, or failing that the first key that can sign.
+  bool preferred{};
+
+  /// What to show somebody choosing between them.
+  [[nodiscard]] std::string describe() const;
+  bool operator==(const SigningKey &) const = default;
+};
+
+/**
+ * @brief Every key in the keyring that can sign, in gpg's own order.
+ *
+ * For offering a choice rather than asking somebody to type a fingerprint.
+ * Empty when gpg is not installed or the keyring holds no secret key, which
+ * are different problems with the same consequence: there is nothing here to
+ * publish with.
+ */
+[[nodiscard]] std::vector<SigningKey>
+signingKeys(const SigningOptions &where = {});
 
 /// Whether gpg can be run at all. Publishing needs it, so this is what a
 /// caller checks before getting as far as a torrent.

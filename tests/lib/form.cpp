@@ -176,4 +176,167 @@ TEST_F(FormTest, closingItFromOutsideDoesNotAnswerEither) {
   EXPECT_EQ(accepted, 0);
 }
 
+// -- the kinds beyond plain text ---------------------------------------------
+
+namespace {
+
+using Kind = Form::Kind;
+
+/// A form with the three kinds in it: a drop-down of keys, a passphrase, and
+/// the button that reveals it.
+struct ChoiceFormTest : testing::Test {
+  Form form{"Sans 11"};
+  std::vector<Form::Field> answered;
+  int accepted{};
+
+  void openIt() {
+    Form::Field keys{"Signing key", {}, "nothing to sign with", false,
+                     Kind::Choice};
+    keys.options      = {"Ada Lovelace  (8844BE88)", "Grace Hopper  (3E6A9DB7)"};
+    keys.optionValues = {std::string(32, 'a') + "8844BE88",
+                         std::string(32, 'b') + "3E6A9DB7"};
+
+    Form::Field reveal{"", {}, {}, false, Kind::Toggle};
+    reveal.revealsSecrets = true;
+
+    form.open("Publish 1", "signed, then sealed",
+              {Form::Field{"Title", "essay", "what it is called", true},
+               std::move(keys),
+               Form::Field{"Passphrase", {}, "only if needed", false,
+                           Kind::Secret},
+               std::move(reveal)},
+              [this](const std::vector<Form::Field> &fields) {
+                answered = fields;
+                accepted++;
+              });
+  }
+};
+
+} // namespace
+
+// A drop-down is worth having because a fingerprint is not something anybody
+// remembers -- so what it hands back is the fingerprint, and what it shows is
+// the name.
+TEST_F(ChoiceFormTest, aChoiceAnswersWithWhatItMeansRatherThanWhatItShows) {
+  openIt();
+  const auto keys = form.current()[1];
+  EXPECT_EQ(keys.answer(), keys.optionValues[0]);
+  EXPECT_TRUE(keys.options[0].contains("Ada"));
+}
+
+TEST_F(ChoiceFormTest, theListOpensMovesAndSettles) {
+  openIt();
+  form.keyPressed(Key::Tab, KeyMods::None);
+  EXPECT_EQ(form.focused(), 1U);
+  EXPECT_FALSE(form.listOpen());
+
+  // Space opens it, as it opens a list anywhere else.
+  form.textTyped(" ");
+  EXPECT_TRUE(form.listOpen());
+
+  // While it is down, up and down move within it rather than between fields.
+  form.keyPressed(Key::Down, KeyMods::None);
+  EXPECT_EQ(form.focused(), 1U) << "still on the same field";
+  form.keyPressed(Key::Return, KeyMods::None);
+  EXPECT_FALSE(form.listOpen());
+  EXPECT_EQ(form.current()[1].chosen, 1U);
+  EXPECT_EQ(accepted, 0) << "enter settled the list, it did not publish";
+}
+
+TEST_F(ChoiceFormTest, escapeClosesTheListBeforeItClosesTheForm) {
+  openIt();
+  form.keyPressed(Key::Tab, KeyMods::None);
+  form.textTyped(" ");
+  form.keyPressed(Key::Down, KeyMods::None);
+
+  form.keyPressed(Key::Escape, KeyMods::None);
+  EXPECT_FALSE(form.listOpen());
+  EXPECT_TRUE(form.grabbing()) << "the form is still up";
+  EXPECT_EQ(form.current()[1].chosen, 0U) << "and nothing was picked";
+
+  // The second escape is the one that abandons it.
+  form.keyPressed(Key::Escape, KeyMods::None);
+  EXPECT_FALSE(form.grabbing());
+  EXPECT_EQ(accepted, 0);
+}
+
+TEST_F(ChoiceFormTest, leftAndRightGoThroughTheOptionsWithoutOpeningIt) {
+  openIt();
+  form.keyPressed(Key::Tab, KeyMods::None);
+  form.keyPressed(Key::Right, KeyMods::None);
+  EXPECT_FALSE(form.listOpen());
+  EXPECT_EQ(form.current()[1].chosen, 1U);
+  form.keyPressed(Key::Right, KeyMods::None);
+  EXPECT_EQ(form.current()[1].chosen, 0U) << "past the last is the first";
+}
+
+// The one field somebody may be typing with a person behind them.
+TEST_F(ChoiceFormTest, aSecretIsHeldButNotShownUntilTheButtonIsPressed) {
+  openIt();
+  form.keyPressed(Key::Tab, KeyMods::None);
+  form.keyPressed(Key::Tab, KeyMods::None);
+  EXPECT_EQ(form.focused(), 2U);
+  form.textTyped("correct horse");
+
+  // Held exactly as typed -- it has to be, since it is what gpg is given.
+  EXPECT_EQ(form.current()[2].value, "correct horse");
+  EXPECT_FALSE(form.secretsShown());
+
+  form.keyPressed(Key::Tab, KeyMods::None);
+  EXPECT_EQ(form.focused(), 3U) << "the button beside it";
+  form.textTyped(" ");
+  EXPECT_TRUE(form.secretsShown());
+  EXPECT_TRUE(form.current()[3].on);
+
+  form.textTyped(" ");
+  EXPECT_FALSE(form.secretsShown()) << "and pressing it again hides it";
+}
+
+TEST_F(ChoiceFormTest, aButtonIsPressedRatherThanTypedInto) {
+  openIt();
+  form.keyPressed(Key::Tab, KeyMods::None);
+  form.keyPressed(Key::Tab, KeyMods::None);
+  form.keyPressed(Key::Tab, KeyMods::None);
+
+  // Text goes nowhere: there is nothing to type into a button.
+  form.textTyped("x");
+  EXPECT_TRUE(form.current()[3].value.empty());
+  EXPECT_FALSE(form.current()[3].on);
+
+  // Enter presses it rather than accepting the form, which is what enter does
+  // to a focused button everywhere else.
+  form.keyPressed(Key::Return, KeyMods::None);
+  EXPECT_TRUE(form.current()[3].on);
+  EXPECT_EQ(accepted, 0);
+}
+
+TEST_F(ChoiceFormTest, everythingComesBackTogetherWhenItIsAccepted) {
+  openIt();
+  form.keyPressed(Key::Tab, KeyMods::None);
+  form.keyPressed(Key::Right, KeyMods::None);
+  form.keyPressed(Key::Tab, KeyMods::None);
+  form.textTyped("correct horse");
+  form.keyPressed(Key::Return, KeyMods::None);
+
+  ASSERT_EQ(accepted, 1);
+  ASSERT_EQ(answered.size(), 4U);
+  EXPECT_EQ(answered[0].answer(), "essay");
+  EXPECT_EQ(answered[1].answer(), answered[1].optionValues[1])
+      << "the fingerprint of the key that was picked";
+  EXPECT_EQ(answered[2].answer(), "correct horse");
+  EXPECT_EQ(answered[3].answer(), "");
+}
+
+// A required drop-down with nothing in it is an empty answer, which is what
+// stops a publication going out signed by nothing at all.
+TEST_F(ChoiceFormTest, anEmptyChoiceAnswersWithNothing) {
+  Form::Field keys{"Signing key", {}, "nothing to sign with", true,
+                   Kind::Choice};
+  form.open("Publish", "note", {keys}, [](const std::vector<Form::Field> &) {});
+  EXPECT_EQ(form.current()[0].answer(), "");
+  form.keyPressed(Key::Return, KeyMods::None);
+  EXPECT_TRUE(form.grabbing());
+  EXPECT_TRUE(form.complaint().contains("Signing key"));
+}
+
 // vi: set sw=2 sts=2 ts=2 et:

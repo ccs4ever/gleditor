@@ -27,7 +27,7 @@ namespace xudu {
  * @brief The settings a person keeps rather than a document does.
  */
 struct Config {
-  /// Name, email, and which key signs. See Author.
+  /// Name, email, and which key in the keyring signs. See Author.
   Author author;
 
   /**
@@ -39,20 +39,6 @@ struct Config {
    */
   std::string gpgHome;
 
-  /**
-   * @brief Path to an exported secret key to sign with.
-   *
-   * The spelling somebody reaches for first, and the one gpg stopped
-   * supporting directly: since 2.1 it signs with keys in a keyring and has no
-   * way to take a key file for one operation. So a key named here is imported
-   * into a keyring of its own, used, and thrown away -- which is what the
-   * caller meant, at the cost of doing it every time.
-   *
-   * A passphrase-protected key cannot be used this way without something to
-   * ask for the passphrase; the complaint gpg makes says so.
-   */
-  std::string gpgSecretKey;
-
   /// Whether there is enough here to sign with.
   [[nodiscard]] bool complete() const { return author.named(); }
 
@@ -61,9 +47,15 @@ struct Config {
   /// empty fields is a different answer and means the file said nothing.
   [[nodiscard]] static std::optional<Config> fromYaml(std::string_view text);
 
-  /// How this record asks to be signed.
-  [[nodiscard]] SigningOptions signing() const {
-    return SigningOptions{gpgHome, gpgSecretKey};
+  /**
+   * @brief How this record asks to be signed.
+   *
+   * @param passphrase What was typed for this one signature, when the key
+   *        needs one and no agent is holding it. Never kept: a passphrase in a
+   *        settings file is a passphrase somebody else can read.
+   */
+  [[nodiscard]] SigningOptions signing(std::string passphrase = {}) const {
+    return SigningOptions{gpgHome, std::move(passphrase)};
   }
 };
 

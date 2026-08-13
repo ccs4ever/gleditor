@@ -35,7 +35,6 @@ std::string Config::toYaml() const {
   yaml::write(out, "email", author.email);
   yaml::write(out, "gpg_key", author.gpgKey);
   yaml::write(out, "gpg_home", gpgHome);
-  yaml::write(out, "gpg_secret_key", gpgSecretKey);
   return out;
 }
 
@@ -57,8 +56,6 @@ std::optional<Config> Config::fromYaml(const std::string_view text) {
       out.author.gpgKey = value;
     } else if ("gpg_home" == key) {
       out.gpgHome = value;
-    } else if ("gpg_secret_key" == key) {
-      out.gpgSecretKey = value;
     }
     // Anything else is somebody's note to themselves, or a setting a later
     // version knows about. Neither is this version's business to complain

@@ -291,6 +291,13 @@ public:
     Author author;
     /// Anything else to record, as `key: value`.
     std::vector<std::pair<std::string, std::string>> extra;
+    /**
+     * @brief The key's passphrase, for this signature only.
+     *
+     * Not kept and not recorded. Empty is the ordinary case: a running
+     * gpg-agent has already been given it, or the key has none.
+     */
+    std::string passphrase;
   };
 
   std::string publishDocument(const MicroversionId &version,
