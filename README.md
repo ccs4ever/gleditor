@@ -1583,20 +1583,33 @@ building the same tarball with the same `install` target:
 | Windows | `packaging/windows/build-msys2.sh` | 3 | MSYS2 UCRT64 |
 | macOS | `packaging/macos/gleditor.rb` | 3 | clang |
 
-The Vulkan backend is enabled everywhere except macOS, so `glslang` is a build
-dependency on the other five and the Vulkan loader is a weak runtime one --
-it is one backend of three, and the other two work without it. macOS builds
-OpenGL only: MoltenVK would need a software rasteriser for a headless build,
-which has no macOS equivalent as settled as `lavapipe`/`llvmpipe` on the other
-platforms, and it stays out until that is. AccessKit, by contrast, is wired in
-on macOS the same as on Windows: `packaging/macos/gleditor.rb` fetches
-accesskit-c's macOS build as a resource and builds with
-`GLEDITOR_ENABLE_A11Y=1`, and the macOS CI job proves the link the same way the
-Windows one does. macOS also builds against a vendored copy of
-`GL/glcorearb.h` (`thirdparty/opengl-registry/`) rather than a system one: it
-has no `gl.pc`, and Apple's own OpenGL.framework headers were never going to
-grow the Khronos registry layout the other four platforms get from their GL
-loader's dev package or, on Windows, from MinGW itself.
+The Vulkan backend is enabled on all six targets, so `glslang` is a build
+dependency everywhere and the Vulkan loader is a weak runtime one -- it is one
+backend of three, and the other two work without it. On macOS the driver
+behind the loader is MoltenVK, a Vulkan implementation on top of Metal rather
+than a native one, and Homebrew's `molten-vk` and `vulkan-loader` formulae are
+what `packaging/macos/gleditor.rb` builds against. A driver reached that way
+is what Vulkan calls a "portability" driver, and its loader excludes one from
+`vkEnumeratePhysicalDevices` unless the instance opts in and, separately,
+requires `VK_KHR_portability_subset` be enabled on the device once the driver
+reports it; `DeviceVK` does both, checked per loader and per device rather
+than per platform, so the same code path runs unchanged on the five platforms
+whose loader never advertises either. What packaging cannot yet do is prove
+this against a live MoltenVK device: `packaging.yml`'s macOS job builds,
+installs and runs `--version` against the result, the same as it has always
+done for OpenGL, because whether a GitHub-hosted runner's WindowServer hands
+SDL a real GPU context at all -- for either backend -- is a standing unknown
+this project's CI has never resolved, unlike the software rasterisers
+(`lavapipe`/`llvmpipe`) the other five platforms' CI jobs render through.
+AccessKit, by contrast, is wired in on macOS the same as on Windows:
+`packaging/macos/gleditor.rb` fetches accesskit-c's macOS build as a resource
+and builds with `GLEDITOR_ENABLE_A11Y=1`, and the macOS CI job proves the link
+the same way the Windows one does -- that reporting does not depend on a live
+GPU context the way rendering does. macOS also builds against a vendored copy
+of `GL/glcorearb.h` (`thirdparty/opengl-registry/`) rather than a system one:
+it has no `gl.pc`, and Apple's own OpenGL.framework headers were never going
+to grow the Khronos registry layout the other four platforms get from their
+GL loader's dev package or, on Windows, from MinGW itself.
 
 Debian gets SDL2 because SDL3 is not in the archive and a package cannot depend
 on whichever version the build happened to find; everything else gets SDL3,
@@ -1866,7 +1879,9 @@ TODO: Confirm whether the intent is GPL-3.0-only or GPL-3.0-or-later.
 
 ## TODOs / Notes
 
-- macOS has no Vulkan support yet; see the packaging table above.
+- macOS's Vulkan backend has not been proven against a live MoltenVK device --
+  CI only checks that the package builds, installs and runs `--version`; see
+  the packaging table above.
 - The app resolves `assets/glsl` and `logo.png` relative to the working
   directory, so it must be started from the repository root (`make run` does).
 
