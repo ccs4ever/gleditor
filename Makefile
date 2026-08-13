@@ -147,9 +147,10 @@ endif
 # -- accessibility -------------------------------------------------------------
 #
 # AccessKit is what reports the user interface to the platform's assistive
-# technologies: UI Automation on Windows, AT-SPI on X11 and Wayland. What is
-# used here is accesskit-c, its C bindings -- one header and one library, the
-# same as any other dependency. There is nothing to build: releases are
+# technologies: UI Automation on Windows, AT-SPI on X11 and Wayland,
+# NSAccessibility on macOS. What is used here is accesskit-c, its C bindings --
+# one header and one library, the same as any other dependency. There is
+# nothing to build: releases are
 # published as archives holding an `include/` and a `lib/<os>/<arch>/`, and
 # distributions that package it install a pkg-config file.
 #

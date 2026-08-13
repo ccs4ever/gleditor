@@ -32,18 +32,42 @@ class Gleditor < Formula
   depends_on "sdl3"
   depends_on "sdl3_image"
 
-  # Neither Vulkan nor AccessKit is wired in here. The Vulkan backend would
-  # need MoltenVK plus a software rasteriser for a headless bottle build, and
-  # nothing in this tree implements AccessKit's macOS adapter yet -- it is a
-  # third, wholly separate API from the Windows and AT-SPI ones already
-  # spoken here (NSAccessibility via view subclassing, not UI Automation or a
-  # D-Bus service). The OpenGL backend and the accessibility reporting this
-  # formula does not attempt are exercised by the Linux and Windows packaging
-  # jobs instead. glslang is left off the build dependencies for the same
-  # reason: it exists only to compile the Vulkan shaders.
+  # AccessKit is what reports the user interface to screen readers --
+  # NSAccessibility here, via view subclassing rather than a system service,
+  # since macOS has neither a bus like AT-SPI to speak to nor a window
+  # procedure to subclass the way Windows does. It has no Homebrew formula of
+  # its own: its C bindings are published as one prebuilt archive per platform
+  # instead, so it is fetched as a resource and pointed at with ACCESSKIT_DIR
+  # below, exactly what the README tells anybody building from source to do.
+  #
+  # Pinned rather than tracking the latest release: a build that changes what
+  # it links because somebody else tagged something is not a build anybody
+  # can reproduce. Kept in step with the version the Windows and macOS CI jobs
+  # fetch.
+  resource "accesskit-c" do
+    url "https://github.com/AccessKit/accesskit-c/releases/download/0.22.3/accesskit-c-0.22.3.zip"
+    sha256 "b652e380fb78efe6721ad892f15b2224f38f661c3fb20436ef4c5b3ce0fe8177"
+  end
+
+  # Vulkan alone is not wired in here: it would need MoltenVK plus a software
+  # rasteriser for a headless bottle build, which has no macOS equivalent as
+  # settled as lavapipe/llvmpipe on the other platforms. The OpenGL backend
+  # this formula does build is not exercised either -- whether a Homebrew
+  # bottle build has a WindowServer to hand SDL a real context is untested --
+  # so that and the Vulkan backend are left to the Linux and Windows packaging
+  # jobs. glslang is left off the build dependencies for the same reason as
+  # Vulkan: it exists only to compile the Vulkan shaders.
   def install
+    resource("accesskit-c").stage buildpath/"accesskit-c"
+
     # SDL3 is what the code is written against and Homebrew ships it, so this
     # does not fall back to SDL2 the way the Debian package does.
+    #
+    # GLEDITOR_ENABLE_A11Y=1 rather than leaving it unset: unset settles for
+    # whatever pkg-config happens to find, which on a machine with no system
+    # AccessKit would silently produce a formula that cannot be used with a
+    # screen reader. The resource above is fetched precisely so that does not
+    # happen.
     #
     # A head-only formula has no real version to report; matched to the
     # placeholder every other packaging target in this tree uses instead.
@@ -51,7 +75,9 @@ class Gleditor < Formula
            "-j#{ENV.make_jobs}",
            "prefix=#{prefix}",
            "GLEDITOR_SDL=3",
-           "GLEDITOR_VERSION=0.1.0"
+           "GLEDITOR_VERSION=0.1.0",
+           "GLEDITOR_ENABLE_A11Y=1",
+           "ACCESSKIT_DIR=#{buildpath}/accesskit-c"
   end
 
   test do
