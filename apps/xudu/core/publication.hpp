@@ -39,6 +39,7 @@
 #include "microversion.hpp"
 #include "mutable_link.hpp"
 #include "ops.hpp"
+#include "provenance.hpp"
 #include "scroll.hpp"
 #include "spool.hpp"
 #include "swarm.hpp"
@@ -194,20 +195,31 @@ decodePublication(std::string_view encoded);
  * segment; the address of everything already sealed is untouched. See
  * scroll.hpp for why the carrier and the address have to be separable.
  *
- * @param into Directory to write `<salt>.torrent` and the data file into, so
- *        that something can seed them. Nothing is written when it is empty.
+ * The torrent carries three files: the content, the authorship record, and the
+ * OpenPGP signature over that record. The record is signed before any of this
+ * happens and is sealed in unchanged, so the info hash covers the content and
+ * the claim about who wrote it together -- neither can be substituted for
+ * another afterwards without the address changing. The content is file zero
+ * and begins at offset zero of the stream, which is what keeps every address
+ * already handed out pointing where it always did.
+ *
+ * @param into Directory to write the torrent and its files into, so that
+ *        something can seed them. Nothing is written when it is empty.
  * @return The scroll the local spool now is, ready to be handed to publish().
  */
 struct SealedScroll {
   Scroll scroll;
-  /// The .torrent describing the bytes, for handing to a seeder.
+  /// The .torrent describing the files, for handing to a seeder.
   std::string torrentFile;
   InfoHash hash;
+  /// The authorship record sealed in with the content, and its signature.
+  SignedProvenance provenance;
 };
 [[nodiscard]] SealedScroll sealLocalSpool(const Store &store,
                                           const MutableKeys &keys,
                                           const std::string &salt,
-                                          const std::string &into);
+                                          const std::string &into,
+                                          const SignedProvenance &provenance);
 
 /**
  * @brief Publish @p version of @p store under @p keys.

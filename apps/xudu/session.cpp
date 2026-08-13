@@ -168,6 +168,48 @@ std::string Session::publishedDir() const {
   return (std::filesystem::path(storePath) / "published").string();
 }
 
+namespace {
+
+/// Where the author record is kept. YAML, and the same shape as the record
+/// that gets signed, so that what somebody set can be read back with the same
+/// reader that reads a published one.
+std::string authorPath(const std::string &storePath) {
+  return (std::filesystem::path(storePath) / "author.yaml").string();
+}
+
+} // namespace
+
+void Session::setAuthor(Author aWho) {
+  who = std::move(aWho);
+  Provenance record;
+  record.author = *who;
+  std::filesystem::create_directories(storePath);
+  std::ofstream out(authorPath(storePath), std::ios::trunc);
+  out << record.toYaml();
+}
+
+const Author &Session::author() {
+  if (who.has_value()) {
+    return *who;
+  }
+  if (std::ifstream in(authorPath(storePath)); in) {
+    const std::string text{std::istreambuf_iterator<char>(in),
+                           std::istreambuf_iterator<char>()};
+    if (const auto record = parseProvenance(text);
+        record && record->author.named()) {
+      who = record->author;
+      return *who;
+    }
+  }
+  throw std::runtime_error(
+      "nobody has been named as the author of this store. Publishing binds a "
+      "person to what they published, so say who once:\n"
+      "  xudu " +
+      storePath +
+      " --author-name 'Your Name' --author-email you@example.org "
+      "[--gpg-key KEYID]");
+}
+
 const MutableKeys &Session::identity() {
   if (keys.has_value()) {
     return *keys;
@@ -206,18 +248,52 @@ std::string Session::publishDocument(const MicroversionId &version,
                                      const std::string &title) {
   const auto &mine = identity();
   const auto into  = publishedDir();
-
-  // One scroll for everything typed on this machine, whatever document it
-  // ended up in: the spool is one append-only sequence, so sealing it again
-  // covers what is new and leaves every address already handed out alone.
-  const auto sealed = sealLocalSpool(docStore, mine, "primedia", into);
-
-  // BEP 44 orders two answers to one name by sequence, so it has to rise.
-  // The clock is the one number available here that always has.
-  const auto now = static_cast<std::uint64_t>(
+  const auto now   = static_cast<std::uint64_t>(
       std::chrono::duration_cast<std::chrono::seconds>(
           std::chrono::system_clock::now().time_since_epoch())
           .count());
+
+  // Authorship first, and signed before anything is sealed. The ed25519 key
+  // below says "the same publisher as last time" and nothing about who that
+  // is; this says who, in a form somebody can check with a tool they already
+  // have and against a key that was somebody's identity before this program
+  // existed.
+  Provenance record;
+  record.author        = author();
+  record.title         = title;
+  record.salt          = salt;
+  record.publisher     = mine.publicKey.hex();
+  record.version       = version.str();
+  record.published     = now;
+  record.contentLength = docStore.primedia().bytes().size();
+  record.contentDigest = sha256Hex(docStore.primedia().bytes());
+  // What this document was built out of, so the record says where the material
+  // came from as well as who assembled it.
+  for (const auto &piece : docStore.rebuild(version).pieces()) {
+    if (piece.isLocal()) {
+      continue;
+    }
+    if (const auto *const scroll = docStore.scroll(piece.scroll);
+        nullptr != scroll) {
+      const auto key = scrollKey(*scroll);
+      if (!key.empty() && std::ranges::find(record.quotes, key) ==
+                              record.quotes.end()) {
+        record.quotes.push_back(key);
+      }
+    }
+  }
+  const auto provenance = signProvenance(record);
+
+  // One scroll for everything typed on this machine, whatever document it
+  // ended up in: the spool is one append-only sequence, so sealing it again
+  // covers what is new and leaves every address already handed out alone. The
+  // signed record goes into the torrent with the content, so the info hash
+  // covers both.
+  const auto sealed =
+      sealLocalSpool(docStore, mine, "primedia", into, provenance);
+
+  // BEP 44 orders two answers to one name by sequence, so it has to rise.
+  // The clock is the one number available here that always has.
   const auto pub = publish(docStore, version, mine, salt, title,
                            static_cast<std::int64_t>(now), now, &sealed.scroll);
 

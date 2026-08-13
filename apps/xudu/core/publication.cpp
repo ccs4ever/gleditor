@@ -391,14 +391,33 @@ std::optional<Publication> decodePublication(const std::string_view encoded) {
 }
 
 SealedScroll sealLocalSpool(const Store &store, const MutableKeys &keys,
-                            const std::string &salt, const std::string &into) {
+                            const std::string &salt, const std::string &into,
+                            const SignedProvenance &provenance) {
+  if (provenance.yaml.empty() || provenance.signature.empty()) {
+    throw std::runtime_error(
+        "cannot seal without a signed authorship record. The record is signed "
+        "before the seal and sealed in with the content, so that the info hash "
+        "covers both; sealing without one would publish content nobody has "
+        "put their name to.");
+  }
+
   const auto &bytes = store.primedia().bytes();
   const auto name   = salt.empty() ? std::string{"primedia"} : salt;
-  auto made         = makeTorrent(bytes, name);
+
+  // The content first, so it begins at offset zero of the piece stream and
+  // every address already handed out still points where it did. The record and
+  // its signature follow it.
+  const std::array<TorrentContent, 3> files{
+      TorrentContent{sealedContentName, bytes},
+      TorrentContent{provenanceFileName, provenance.yaml},
+      TorrentContent{provenanceSigName, provenance.signature},
+  };
+  auto made = makeTorrent(files, name);
 
   SealedScroll sealed;
   sealed.hash        = made.hash;
   sealed.torrentFile = std::move(made.file);
+  sealed.provenance  = provenance;
 
   sealed.scroll.publisher = keys.publicKey;
   sealed.scroll.salt      = salt;
@@ -408,21 +427,22 @@ SealedScroll sealLocalSpool(const Store &store, const MutableKeys &keys,
   segment.torrent      = sealed.hash;
   segment.streamOffset = 0;
   segment.fileIndex    = 0;
-  segment.path         = name;
+  segment.path         = sealedContentName;
   sealed.scroll.segments.push_back(segment);
 
   if (!into.empty()) {
-    const std::filesystem::path dir(into);
+    // A directory named as the torrent names it, holding the files it
+    // describes, so that a seeder handed this finds what it expects.
+    const std::filesystem::path dir = std::filesystem::path(into) / name;
     std::filesystem::create_directories(dir);
     {
-      std::ofstream out(dir / (name + ".torrent"), std::ios::binary);
+      std::ofstream out(std::filesystem::path(into) / (name + ".torrent"),
+                        std::ios::binary);
       out << sealed.torrentFile;
     }
-    {
-      // The data as its own file, named as the torrent names it, so that a
-      // seeder handed the directory finds what the torrent describes.
-      std::ofstream out(dir / name, std::ios::binary);
-      out << bytes;
+    for (const auto &file : files) {
+      std::ofstream out(dir / file.path, std::ios::binary);
+      out << file.data;
     }
   }
   return sealed;

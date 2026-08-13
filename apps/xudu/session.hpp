@@ -223,6 +223,23 @@ public:
   MicroversionId readPublication(const std::string &path);
 
   /**
+   * @brief Who this machine publishes as, as a person.
+   *
+   * Read from `author.yaml` beside the spools. Separate from @ref identity,
+   * and the two answer different questions: the key pair says "the same
+   * publisher as last time", which nothing outside this program can interpret,
+   * while this says who that publisher is in a form a reader can check against
+   * an OpenPGP key that was somebody's identity before this program existed.
+   *
+   * @throws std::runtime_error when nobody has been named, since publishing
+   *         under nobody's name is the thing provenance exists to prevent.
+   */
+  [[nodiscard]] const Author &author();
+
+  /// Record who this machine publishes as. Kept, so it is said once.
+  void setAuthor(Author who);
+
+  /**
    * @brief This machine's publishing identity, minted on first use.
    *
    * An ed25519 key pair kept beside the spools. It is the name this machine's
@@ -363,6 +380,8 @@ private:
   std::vector<OpenView> open;
   /// This machine's key pair, read or minted the first time it is wanted.
   std::optional<MutableKeys> keys;
+  /// Who publishes here, read from the store the first time it is wanted.
+  std::optional<Author> who;
 
 public:
   /// Forget every open view. Used when the program replaces what is on screen

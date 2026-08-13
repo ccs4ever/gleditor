@@ -981,6 +981,110 @@ original", and this has none -- content in a swarm is content anyone can take.
 remote document is a user-interface problem this has not solved yet, not
 because the model needs one.
 
+### Publishing, and reading somebody else's document
+
+Everything above is addressed for one machine. A span names a scroll by a small
+integer that means something only in the store that handed it out, and a
+microversion is called "2a4", which is a name among the versions of one
+document in one store. None of it travels.
+
+Publishing rewrites a document into names that do. Every piece becomes a
+`btpk:KEY:salt` scroll key and an offset, the links whose ends are all
+addressable come along, and the whole manifest is signed by the ed25519 key
+this machine publishes under. A manifest that does not verify does not decode:
+an unsigned or wrongly signed document is not a weaker document to show with a
+warning, it is somebody's claim to have published what they did not.
+
+```
+$ xudu store --author-name 'Ada Lovelace' --author-email ada@example.org \
+             --import essay.txt --publish essay
+xudu: publishing from store as Ada Lovelace <ada@example.org>
+xudu: minted this machine's name e8a417cb...
+xudu: published 1 as store/published/essay.xanadoc
+```
+
+Reading one in is the other direction, and it is what makes a published
+document a thing rather than a file. Its scrolls become addresses this store
+can resolve, its pieces become a version here, and its links become links here.
+Nothing is copied: the pieces point at the publisher's scrolls, so this store
+and theirs point at one copy of the content, which is what makes a link about a
+passage of it a link about the same passage.
+
+```
+$ xudu mine --torrent theirs/published/primedia.torrent \
+            --torrent-data theirs/published \
+            --read theirs/published/essay.xanadoc
+xudu: read "essay" by e8a417cb… seq 1786617153, 205 bytes in 1 pieces as a1
+```
+
+From there a document written here -- never published, with no global name of
+any kind -- can be linked to a passage of theirs with `ctrl-l`. That asymmetry
+is the point: what a link relates is content, and only the end that has to
+travel needs a name that travels. Requiring both ends to be published would
+make linking a privilege of publishers.
+
+### Provenance: who wrote this, in a form somebody can check
+
+The ed25519 key a publication is signed with answers "the same publisher as
+last time" perfectly well and answers "who is this" not at all. It was minted
+by this program, means nothing outside it, and is bound to no person.
+
+So before anything is sealed, publishing writes a YAML record naming the author
+and has GnuPG sign it:
+
+```yaml
+# Authorship of a xanadoc, signed with OpenPGP before the content was
+# sealed into a torrent, and sealed into it alongside the content. The
+# signature is in AUTHORSHIP.yaml.asc; check it with:
+#   gpg --verify AUTHORSHIP.yaml.asc AUTHORSHIP.yaml
+author: "Ada Lovelace"
+email: "ada@example.org"
+title: "essay"
+salt: "essay"
+publisher: "e8a417cbfd100d73ea604c176aafebf78591070eb32f1415cfd953bc358398b2"
+version: "1"
+published: 1786617153
+content_length: 205
+content_sha256: "1ff7117d4101e3b14d5d3e8db1c251ddf4375772691d8917cb8455cb0b124031"
+```
+
+Three decisions, each earning its keep:
+
+*YAML, not the bencode everything else uses.* The audience is a person deciding
+whether to believe it, and `gpg --verify AUTHORSHIP.yaml.asc AUTHORSHIP.yaml`
+is the whole procedure -- no part of it needs this program.
+
+*Signed before the seal, and sealed in.* The torrent carries three files: the
+content, the record, and the signature. The info hash therefore covers the
+content and the claim about who wrote it together, and neither can be swapped
+for the other afterwards without producing a different address. The content is
+file zero at offset zero, so every address already handed out still points
+where it did.
+
+*It says what it covers.* The length and SHA-256 of the sealed content are in
+the record, so a reader holding both can tell the record is about what arrived
+with it.
+
+```
+$ xudu --check-authorship theirs/published/primedia
+...
+xudu: signed by Ada Lovelace <ada@example.org>
+      key 80BCBB97490F21119BCC58FE324FBE808844BE88
+      which is a key this keyring trusts
+      and it is about the content sealed with it
+```
+
+Whether the signature is good and whether the key is anybody you know are
+reported as the two separate questions they are. A valid signature by a key
+your keyring has never heard of is a real signature by somebody you have no
+reason to believe, and reporting the two as one answer is how a signature
+becomes a rubber stamp.
+
+GnuPG is what signs, rather than something here: the whole value of an OpenPGP
+signature is the key management and the web of trust around it, none of which
+this program has any business duplicating -- and a reader will reach for gpg to
+check it, so gpg is what should produce it.
+
 ### Commands
 
 Control is used throughout, because a bare letter is text: the whole point of
@@ -991,10 +1095,13 @@ this program is that typing is an edit, so it has to reach the document.
 | `ctrl-b` / `ctrl-n` | go back or forward in hypertime, losing nothing |
 | `ctrl-t` | quote the selection into a second document |
 | `--torrent`, `--quote` | quote a range of a torrent-backed file; see above |
-| `ctrl-l` | attach a link to the selected content |
+| `ctrl-l` | mark one end of a link, then join it to another selection |
+| `ctrl-shift-l` | forget a link that was begun and not finished |
+| `ctrl-k` / `ctrl-shift-k` | show or hide the beams; stop them moving documents |
 | `ctrl-m` | show or hide the hypertime map |
 | `ctrl-p` | print every state to the terminal |
-| `ctrl-s` / `ctrl-q` | write the spools out; save and quit |
+| `ctrl-s` / `ctrl-shift-s` | write the spools out; publish this document |
+| `ctrl-q` | save and quit |
 | `backspace` | stop pointing at the selection |
 
 ### What the library did not learn
@@ -1074,8 +1181,15 @@ sudo apt-get update && sudo apt-get install \
   libglm-dev libpangomm-2.48-dev \
   libsdl3-dev \
   libgl-dev libgl1-mesa-dev libglu1-mesa-dev \
-  libgtest-dev libgmock-dev
+  libgtest-dev libgmock-dev \
+  libtorrent-rasterbar-dev gnupg
 ```
+
+`libtorrent-rasterbar-dev` is required, not optional: it is where the ed25519
+that signs a publisher's name comes from as well as the swarm, so a build
+without it cannot publish at all. `gnupg` is wanted at run time rather than at
+build time -- publishing signs an authorship record with it, and reading one
+checks the signature with it.
 
 Substitute `libsdl2-dev` for `libsdl3-dev` to build against SDL2; see
 "SDL2 and SDL3" above.

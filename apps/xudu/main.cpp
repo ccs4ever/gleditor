@@ -17,6 +17,8 @@
  */
 #include <chrono>
 #include <exception>
+#include <filesystem>
+#include <fstream>
 #include <iostream>
 #include <memory>
 #include <optional>
@@ -42,6 +44,7 @@
 #include "core/microversion.hpp"
 #include "core/ops.hpp"
 #include "core/mutable_link.hpp"
+#include "core/provenance.hpp"
 #include "core/torrent.hpp"
 #include "session.hpp"
 
@@ -52,6 +55,72 @@ using xudu::HypertimeMap;
 using xudu::LinkBeams;
 using xudu::MicroversionId;
 using xudu::Session;
+
+/**
+ * @brief Report who signed the authorship record at @p where.
+ *
+ * A directory, or the record itself; the signature is the file beside it. The
+ * two questions are kept apart deliberately: gpg accepting a signature says
+ * the record is unaltered since whoever holds that key signed it, and says
+ * nothing at all about whether you have any reason to believe that person is
+ * who the record claims. Reporting the two as one answer is how a signature
+ * becomes a rubber stamp.
+ */
+int checkAuthorship(const std::string &where) {
+  namespace fs = std::filesystem;
+  const fs::path given(where);
+  const auto record = fs::is_directory(given)
+                          ? given / xudu::provenanceFileName
+                          : given;
+  const auto sig = fs::path(record.string() + ".asc");
+
+  const auto slurp = [](const fs::path &path) {
+    std::ifstream in(path, std::ios::binary);
+    return std::string{std::istreambuf_iterator<char>(in),
+                       std::istreambuf_iterator<char>()};
+  };
+  xudu::SignedProvenance sealed{slurp(record), slurp(sig)};
+  if (sealed.yaml.empty()) {
+    std::cerr << "no authorship record at " << record << "\n";
+    return 1;
+  }
+
+  const auto check = xudu::verifyProvenance(sealed);
+  std::cout << sealed.yaml;
+  if (!check.signatureValid) {
+    // Covers both "the signature is bad" and "your keyring has never heard of
+    // this key", which are different problems with the same consequence: you
+    // have no more reason to believe this record than any other text.
+    std::cout << "\nxudu: this record is NOT vouched for -- " << check.detail
+              << "\n";
+    return 1;
+  }
+  std::cout << "\nxudu: signed by " << check.signer << "\n"
+            << "      key " << check.fingerprint << "\n"
+            << "      " 
+            << (check.keyTrusted
+                    ? "which is a key this keyring trusts"
+                    : "which this keyring has no reason to trust -- the "
+                      "signature is real, but that it is this person's key is "
+                      "only their say-so")
+            << "\n";
+
+  // What the record claims to cover, checked against what is actually there.
+  if (const auto said = xudu::parseProvenance(sealed.yaml); said) {
+    const auto content = record.parent_path() / xudu::sealedContentName;
+    if (const auto bytes = slurp(content); !bytes.empty()) {
+      const auto matches = xudu::sha256Hex(bytes) == said->contentDigest &&
+                           bytes.size() == said->contentLength;
+      std::cout << "      " 
+                << (matches ? "and it is about the content sealed with it"
+                            : "BUT THE CONTENT BESIDE IT IS NOT WHAT IT "
+                              "DESCRIBES")
+                << "\n";
+      return matches ? 0 : 1;
+    }
+  }
+  return 0;
+}
 
 bool wantsEveryOption(const int argc, const char *const *const argv) {
   for (int i = 1; i < argc; i++) {
@@ -444,6 +513,29 @@ int main(const int argc, char **argv) {
             "states or two documents against each other; passages they share "
             "are shaded in both")
       .default_value(std::string{});
+  parser.add_argument("--author-name")
+      .help("who publishes from this store, as a person. Kept in the store, so "
+            "it is said once. Publishing writes an authorship record naming "
+            "them and has GnuPG sign it before the content is sealed, so that "
+            "the torrent's info hash covers the content and the claim about "
+            "who wrote it together")
+      .default_value(std::string{});
+  parser.add_argument("--author-email")
+      .help("the author's email address, recorded alongside the name")
+      .default_value(std::string{});
+  parser.add_argument("--gpg-key")
+      .help("which OpenPGP key signs the authorship record: a fingerprint, a "
+            "long key id, or an email address -- anything gpg accepts. The "
+            "default is gpg's own default signing key")
+      .default_value(std::string{});
+  parser.add_argument("--check-authorship")
+      .help("check the authorship record sealed with somebody's content and "
+            "print who signed it. Give the directory the torrent's files are "
+            "in, or the record itself; the signature beside it is what gpg is "
+            "asked about. Says both whether the signature is good and whether "
+            "the key is one you have any reason to trust, because those are "
+            "different questions")
+      .default_value(std::string{});
   parser.add_argument("--read")
       .help("open a published document from a manifest file; repeatable. It is "
             "taken into this store, so it can then be read, quoted and linked "
@@ -479,6 +571,12 @@ int main(const int argc, char **argv) {
   std::vector<MicroversionId> read;
   try {
     parser.parse_args(argc, argv);
+    // Answered before a window is opened or a store is touched: this asks
+    // about a file somebody was sent, and needs neither.
+    if (const auto where = parser.get<std::string>("--check-authorship");
+        !where.empty()) {
+      return checkAuthorship(where);
+    }
     backend  = gleditor::applyCommonArguments(parser, state, argc, argv);
     renderer = Renderer::create(state, backend);
     quiet    = parser["--print-asset-dir"] == true;
@@ -609,6 +707,26 @@ int main(const int argc, char **argv) {
                            << " [" << offset << "," << offset + length << ")\n";
       }
       session->save();
+    }
+
+    // Who publishes here, when it was given. Before anything is published,
+    // and kept, so that it is said once rather than every time.
+    if (const auto name  = parser.get<std::string>("--author-name"),
+                   email = parser.get<std::string>("--author-email"),
+                   key   = parser.get<std::string>("--gpg-key");
+        !name.empty() || !email.empty() || !key.empty()) {
+      xudu::Author who{name, email, key};
+      if (!who.named()) {
+        throw std::runtime_error(
+            "--author-name and --author-email go together: an authorship "
+            "record with only half of a person in it names nobody");
+      }
+      session->setAuthor(who);
+      quiet || std::cout << "xudu: publishing from " << session->path()
+                         << " as " << who.name << " <" << who.email << ">"
+                         << (who.gpgKey.empty() ? std::string{}
+                                                : ", signed by " + who.gpgKey)
+                         << "\n";
     }
 
     // Before the opening version is chosen, so that reading a document in and
