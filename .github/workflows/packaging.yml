@@ -549,14 +549,19 @@ jobs:
 
       - name: install build dependencies
         run: |
-          brew install pangomm cairomm glibmm sdl3 sdl3_image glm \
+          brew install make pangomm cairomm glibmm sdl3 sdl3_image glm \
             libtorrent-rasterbar boost openssl@3 pkgconf
 
       # openssl@3 is keg-only -- Homebrew never links it, to stay out of the
       # way of whatever OpenSSL macOS itself ships -- so its include and
       # library directories are not on the default search path the way every
-      # other dependency's are and have to be named explicitly. `make install`
-      # here is what packaging/macos/gleditor.rb's own install() runs.
+      # other dependency's are and have to be named explicitly. gmake rather
+      # than make: macOS ships GNU Make 3.81, the last release before the
+      # licence changed to GPLv3, and this Makefile's target-specific `private`
+      # variables do not even parse under it -- a syntax error before the
+      # build starts, not a missing feature at run time. Homebrew's own make
+      # installs as gmake precisely so it does not collide with that system
+      # one. This is what packaging/macos/gleditor.rb's own install() runs.
       - name: build
         run: |
           set -eu
@@ -565,11 +570,11 @@ jobs:
           export PKG_CONFIG_PATH="$brew_prefix/lib/pkgconfig:$openssl_prefix/lib/pkgconfig"
           export CPATH="$brew_prefix/include:$openssl_prefix/include"
           export LIBRARY_PATH="$brew_prefix/lib:$openssl_prefix/lib"
-          make lib gleditor xudu GLEDITOR_SDL=3 GLEDITOR_VERSION=0.1.0
+          gmake lib gleditor xudu GLEDITOR_SDL=3 GLEDITOR_VERSION=0.1.0
 
       - name: install it
         run: |
-          make install \
+          gmake install \
             DESTDIR="$PWD/stage" \
             prefix=/usr/local \
             GLEDITOR_SDL=3 \
