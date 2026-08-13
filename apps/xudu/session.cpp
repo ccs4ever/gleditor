@@ -317,7 +317,8 @@ std::string Session::publishDocument(const MicroversionId &version,
       }
     }
   }
-  const auto provenance = signProvenance(record, settings().signing());
+  const auto provenance =
+      signProvenance(record, settings().signing(request.passphrase));
 
   // One scroll for everything typed on this machine, whatever document it
   // ended up in: the spool is one append-only sequence, so sealing it again

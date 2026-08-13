@@ -58,6 +58,7 @@ using xudu::LinkBeams;
 using xudu::MicroversionId;
 using xudu::Author;
 using xudu::Session;
+using xudu::signingKeys;
 
 /**
  * @brief Report who signed the authorship record at @p where.
@@ -361,6 +362,27 @@ public:
       const auto where   = session.publishedDir();
 
       using Field = gleditor::Form::Field;
+      using Kind  = gleditor::Form::Kind;
+
+      // What the keyring can sign with, offered rather than typed: a
+      // fingerprint is not something anybody remembers, and a key that is not
+      // there is a failure at the last step of publishing.
+      Field keys{"Signing key", {}, "no signing key in the keyring", false,
+                 Kind::Choice};
+      for (const auto &key : signingKeys(session.settings().signing())) {
+        keys.options.push_back(key.describe());
+        keys.optionValues.push_back(key.fingerprint);
+        // Whichever the configuration names, or failing that whichever gpg
+        // would reach for on its own, is what the list starts on.
+        const bool wanted = who.gpgKey.empty()
+                                ? key.preferred
+                                : key.fingerprint.ends_with(who.gpgKey) ||
+                                      key.identity.contains(who.gpgKey);
+        if (wanted) {
+          keys.chosen = keys.options.size() - 1;
+        }
+      }
+
       std::vector<Field> asked{
           Field{"Name", salt.empty() ? std::string{"document"} : salt,
                 "one word; publishing again under it is a further state of "
@@ -369,8 +391,14 @@ public:
           Field{"Title", {}, "what this document is called", true},
           Field{"Author", who.name, "who is publishing this", true},
           Field{"Email", who.email, "how to reach them", true},
-          Field{"Signing key", who.gpgKey,
-                "gpg's default key, unless this says otherwise", false},
+          std::move(keys),
+          Field{"Passphrase", {}, "only if the agent is not holding it", false,
+                Kind::Secret},
+          [] {
+            Field toggle{"", {}, {}, false, Kind::Toggle};
+            toggle.revealsSecrets = true;
+            return toggle;
+          }(),
           Field{"Rights", {}, "how others may use this; optional", false},
           Field{"Note", {}, "anything else worth recording; optional", false},
       };
@@ -393,16 +421,19 @@ public:
   void publishAnswers(const MicroversionId &version, const std::uint32_t which,
                       const std::vector<gleditor::Form::Field> &answers) {
     Session::PublishRequest request;
-    request.salt         = answers[0].value;
-    request.title        = answers[1].value;
-    request.author.name  = answers[2].value;
-    request.author.email = answers[3].value;
-    request.author.gpgKey = answers[4].value;
-    if (!answers[5].value.empty()) {
-      request.extra.emplace_back("rights", answers[5].value);
+    request.salt          = answers[0].answer();
+    request.title         = answers[1].answer();
+    request.author.name   = answers[2].answer();
+    request.author.email  = answers[3].answer();
+    request.author.gpgKey = answers[4].answer();
+    // Used for this one signature and not kept anywhere: a passphrase written
+    // down is a passphrase somebody else can read.
+    request.passphrase = answers[5].answer();
+    if (!answers[7].answer().empty()) {
+      request.extra.emplace_back("rights", answers[7].answer());
     }
-    if (!answers[6].value.empty()) {
-      request.extra.emplace_back("note", answers[6].value);
+    if (!answers[8].answer().empty()) {
+      request.extra.emplace_back("note", answers[8].answer());
     }
 
     renderer->runWithState([this, version, which, request](RenderState &) {

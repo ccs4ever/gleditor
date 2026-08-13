@@ -1097,20 +1097,20 @@ directory, in the same small YAML the authorship record is written in:
 # names a file outright, which is what lets somebody keep two identities)
 author: "Ada Lovelace"
 email: "ada@example.org"
-gpg_key: "ada@example.org"       # which key, when the keyring holds several
-gpg_home: "/media/key/.gnupg"    # optional: a GnuPG home to sign from
-gpg_secret_key: "/media/key/ada.sec.asc"  # optional: an exported secret key
+gpg_key: "ada@example.org"       # which key in the keyring, when it holds several
+gpg_home: "/media/key/.gnupg"    # optional: a keyring other than the usual one
 ```
 
 `--author-name`, `--author-email` and `--gpg-key` write it; `--show-config`
 prints where it is and what it says. Values are merged rather than replaced, so
 setting only a key does not blank the name set last week.
 
-A key given as a *file* is the spelling everybody reaches for first and the one
-gpg stopped supporting directly: since 2.1 it signs with keys in a keyring and
-has no way to take a key file for one operation. So a key named that way is
-imported into a keyring of its own, used, and thrown away. A passphrase on it
-needs something to ask for the passphrase, and the complaint gpg makes says so.
+The key is named rather than located: gpg signs with keys in a keyring, so what
+the configuration says is *which* of them -- a fingerprint, a key id, an email
+address, anything gpg accepts -- and `gpg_home` says which keyring when it is
+not the usual one. Saying nothing at all is the ordinary case, and means the
+key gpg would reach for on its own: whatever `default-key` names, or failing
+that the first key that can sign.
 
 Three places can say who publishes, and the nearest wins: this file is who
 somebody is; `author.yaml` in a store, written by `--author-here`, is who they
@@ -1129,6 +1129,20 @@ an attempt to go ahead without one says which is missing rather than publishing
 something half-filled; tab moves between fields, enter goes ahead, escape
 leaves it. While it is up it has the keyboard: the text being typed into a
 title cannot land in the document behind it, and clicks are held.
+
+The signing key is a drop-down of what the keyring actually holds, because a
+fingerprint is not something anybody remembers and a key that turns out not to
+be there is a failure at the last step of publishing. It starts on the key the
+configuration names, or on the one gpg would use if it names none. Space opens
+the list, up and down move through it, enter takes one; left and right step
+through the options without opening it at all.
+
+Underneath it is a passphrase, for the case where the key has one and no agent
+is holding it -- shown as asterisks, with a button beside it that reveals it.
+What is typed there is used for that one signature and kept nowhere: a
+passphrase in a settings file is a passphrase somebody else can read. It
+reaches gpg down a pipe rather than as an argument, because a command line is
+readable by every process on the machine.
 
 `--do publish` opens it from a script, `--type` fills in the field the keyboard
 is on, and `--key tab|enter|escape|...` presses what is not text -- which is how

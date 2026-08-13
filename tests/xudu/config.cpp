@@ -11,6 +11,7 @@
  */
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
@@ -75,13 +76,11 @@ TEST(ConfigTest, everythingSetComesBackOut) {
   config.author.email  = "ada@example.org";
   config.author.gpgKey = "0xDEADBEEF";
   config.gpgHome       = "/home/ada/.gnupg-publishing";
-  config.gpgSecretKey  = "/home/ada/keys/ada.sec.asc";
 
   const auto read = Config::fromYaml(config.toYaml());
   ASSERT_TRUE(read.has_value());
   EXPECT_EQ(read->author, config.author);
   EXPECT_EQ(read->gpgHome, config.gpgHome);
-  EXPECT_EQ(read->gpgSecretKey, config.gpgSecretKey);
   EXPECT_TRUE(read->complete());
 }
 
@@ -147,7 +146,7 @@ TEST(ConfigTest, itIsWrittenReadableOnlyByItsOwner) {
   Config config;
   config.author.name  = "Ada Lovelace";
   config.author.email = "ada@example.org";
-  config.gpgSecretKey = "/home/ada/keys/ada.sec.asc";
+  config.gpgHome      = "/media/key/.gnupg";
   xudu::saveConfig(config, path.string());
 
   // It says who somebody is and where their signing key lives.
@@ -159,7 +158,7 @@ TEST(ConfigTest, itIsWrittenReadableOnlyByItsOwner) {
 
   const auto back = xudu::loadConfig(path.string());
   EXPECT_EQ(back.author, config.author);
-  EXPECT_EQ(back.gpgSecretKey, config.gpgSecretKey);
+  EXPECT_EQ(back.gpgHome, config.gpgHome);
   EXPECT_TRUE(read(path).contains("Ada Lovelace"));
 
   std::filesystem::remove_all(path.parent_path());
@@ -186,63 +185,115 @@ TEST(ConfigTest, aFileThatCannotBeUnderstoodIsAnError) {
   std::filesystem::remove(path);
 }
 
-// The spelling somebody reaches for first, and the one gpg stopped supporting
-// directly: a key named as a file is imported into a keyring of its own for
-// the one signature.
-TEST(ConfigTest, aSecretKeyGivenAsAFileCanSign) {
+// Which key to sign with is chosen from what the keyring holds, so what the
+// keyring holds has to be askable -- and one of them has to be the one gpg
+// would reach for on its own, since that is what somebody who has said nothing
+// expects to be used.
+TEST(ConfigTest, theKeyringSaysWhatItCanSignWith) {
   const Environment environment;
   const auto dir = std::filesystem::temp_directory_path() /
-                   ("xudu-keyfile-" + std::to_string(getpid()));
+                   ("xudu-keyring-" + std::to_string(getpid()));
   std::filesystem::remove_all(dir);
   std::filesystem::create_directories(dir);
   std::filesystem::permissions(dir, std::filesystem::perms::owner_all,
                                std::filesystem::perm_options::replace);
-
-  // A keyring to make the key in, thrown away afterwards. Kept apart from
-  // whatever keyring is on the machine running this.
-  Environment::set("GNUPGHOME", dir.string());
   {
     std::ofstream(dir / "gpg-agent.conf") << "allow-loopback-pinentry\n";
     std::ofstream(dir / "gpg.conf") << "pinentry-mode loopback\n";
   }
-  const bool made =
-      0 == std::system("gpg --batch --passphrase '' --quick-generate-key "
-                       "'Grace Hopper <grace@example.org>' ed25519 sign never "
-                       ">/dev/null 2>&1");
-  const auto keyFile = dir / "grace.sec.asc";
-  const bool exported =
-      made && 0 == std::system(("gpg --batch --pinentry-mode loopback "
-                                "--passphrase '' --armor --export-secret-keys "
-                                "grace@example.org > " +
-                                keyFile.string() + " 2>/dev/null")
-                                   .c_str());
-  if (!exported || std::filesystem::file_size(keyFile) == 0) {
-    static_cast<void>(std::system("gpgconf --kill gpg-agent >/dev/null 2>&1"));
+
+  xudu::SigningOptions where;
+  where.gpgHome = dir.string();
+  EXPECT_TRUE(xudu::signingKeys(where).empty())
+      << "an empty keyring has nothing to offer";
+
+  const auto make = [&dir](const std::string &who) {
+    return 0 == std::system(("gpg --homedir " + dir.string() +
+                             " --batch --passphrase '' --quick-generate-key '" +
+                             who + "' ed25519 sign never >/dev/null 2>&1")
+                                .c_str());
+  };
+  if (!make("Ada Lovelace <ada@example.org>") ||
+      !make("Grace Hopper <grace@example.org>")) {
+    static_cast<void>(std::system(("gpgconf --homedir " + dir.string() +
+                                   " --kill gpg-agent >/dev/null 2>&1")
+                                      .c_str()));
     std::filesystem::remove_all(dir);
-    Environment::clear("GNUPGHOME");
     GTEST_SKIP() << "no gpg keyring could be made here";
   }
 
-  // Now with no keyring at all: the key file is the only way in.
-  const auto elsewhere = dir / "empty-home";
-  std::filesystem::create_directories(elsewhere);
-  Environment::set("GNUPGHOME", elsewhere.string());
+  const auto keys = xudu::signingKeys(where);
+  ASSERT_EQ(keys.size(), 2U);
+  for (const auto &key : keys) {
+    // A fingerprint, not a short id: a short id is a prefix, and prefixes
+    // collide.
+    EXPECT_EQ(key.fingerprint.size(), 40U);
+    EXPECT_TRUE(key.identity.contains("@example.org")) << key.identity;
+    // What somebody picking between them reads: who it is, and enough of the
+    // fingerprint to tell two of the same name apart.
+    EXPECT_TRUE(key.describe().contains(key.identity));
+    EXPECT_TRUE(key.describe().contains(
+        key.fingerprint.substr(key.fingerprint.size() - 8)));
+  }
+  EXPECT_EQ(std::ranges::count_if(keys,
+                                  [](const xudu::SigningKey &key) {
+                                    return key.preferred;
+                                  }),
+            1)
+      << "exactly one key is the one gpg would use";
+
+  static_cast<void>(std::system(("gpgconf --homedir " + dir.string() +
+                                 " --kill gpg-agent >/dev/null 2>&1")
+                                    .c_str()));
+  std::filesystem::remove_all(dir);
+}
+
+// A passphrase goes to gpg down a pipe rather than on a command line, which is
+// readable by every process on the machine. What is checked here is that it
+// works at all: a key with a passphrase cannot be signed with without one.
+TEST(ConfigTest, aKeyWithAPassphraseIsSignedWithWhenGivenOne) {
+  const Environment environment;
+  const auto dir = std::filesystem::temp_directory_path() /
+                   ("xudu-passphrase-" + std::to_string(getpid()));
+  std::filesystem::remove_all(dir);
+  std::filesystem::create_directories(dir);
+  std::filesystem::permissions(dir, std::filesystem::perms::owner_all,
+                               std::filesystem::perm_options::replace);
+  {
+    std::ofstream(dir / "gpg-agent.conf")
+        << "allow-loopback-pinentry\nmax-cache-ttl 0\ndefault-cache-ttl 0\n";
+  }
+  const bool made =
+      0 == std::system(("gpg --homedir " + dir.string() +
+                        " --batch --pinentry-mode loopback --passphrase "
+                        "'correct horse' --quick-generate-key "
+                        "'Locked Key <locked@example.org>' ed25519 sign never "
+                        ">/dev/null 2>&1")
+                           .c_str());
+  if (!made) {
+    std::filesystem::remove_all(dir);
+    GTEST_SKIP() << "no gpg keyring could be made here";
+  }
 
   Config config;
-  config.author.name   = "Grace Hopper";
-  config.author.email  = "grace@example.org";
-  config.gpgSecretKey  = keyFile.string();
+  config.author.name   = "Locked Key";
+  config.author.email  = "locked@example.org";
+  config.author.gpgKey = "locked@example.org";
+  config.gpgHome       = dir.string();
 
   xudu::Provenance record;
   record.author = config.author;
-  record.title  = "Signed from a key file";
+  record.title  = "Signed with a passphrase";
 
-  const auto signed_ = xudu::signProvenance(record, config.signing());
+  const auto signed_ =
+      xudu::signProvenance(record, config.signing("correct horse"));
   EXPECT_TRUE(signed_.signature.starts_with("-----BEGIN PGP SIGNATURE-----"));
+  EXPECT_TRUE(xudu::verifyProvenance(signed_, config.signing()).signatureValid);
 
-  static_cast<void>(std::system("gpgconf --kill gpg-agent >/dev/null 2>&1"));
+  static_cast<void>(std::system(("gpgconf --homedir " + dir.string() +
+                                 " --kill gpg-agent >/dev/null 2>&1")
+                                    .c_str()));
   std::filesystem::remove_all(dir);
-  Environment::clear("GNUPGHOME");
 }
 
 // vi: set sw=2 sts=2 ts=2 et:

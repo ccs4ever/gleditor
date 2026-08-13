@@ -46,6 +46,22 @@ class Canvas;
  */
 class Form : public FrameContributor, public ModalInput {
 public:
+  /// What kind of thing is being asked for.
+  enum class Kind : std::uint8_t {
+    /// Text, typed in.
+    Text,
+    /// Text shown as asterisks unless something reveals it. For a passphrase,
+    /// which is the one thing here that somebody may be typing with a person
+    /// behind them.
+    Secret,
+    /// One of a list. Opened with space, moved through with up and down,
+    /// settled with enter -- which is a drop-down, driven the way a keyboard
+    /// drives one.
+    Choice,
+    /// On or off, drawn as a button and flipped with space.
+    Toggle,
+  };
+
   /// One thing being asked for.
   struct Field {
     std::string label;
@@ -53,8 +69,38 @@ public:
     /// Shown greyed when the value is empty: what this would be if left alone,
     /// or what shape of answer is wanted.
     std::string hint;
-    /// Whether the form will refuse to be accepted while this is empty.
+    /// Whether the form will refuse to be accepted while this is empty. Never
+    /// true of a Toggle, which is always one thing or the other.
     bool required{};
+    Kind kind{Kind::Text};
+
+    /// Choice: what there is to pick from, as somebody reads it.
+    std::vector<std::string> options;
+    /**
+     * @brief Choice: what each option means, when that differs from its label.
+     *
+     * A key is shown as "Ada Lovelace <ada@example.org> (8844BE88)" and meant
+     * as a fingerprint. Same length as @ref options, or empty when the two are
+     * the same.
+     */
+    std::vector<std::string> optionValues;
+    /// Choice: which one is picked.
+    std::size_t chosen{};
+
+    /// Toggle: whether it is on.
+    bool on{};
+    /**
+     * @brief Toggle: whether flipping this shows the Secret fields.
+     *
+     * The button beside a passphrase. Kept as a property of the toggle rather
+     * than wired up by the caller, so that a form with a passphrase in it
+     * cannot be given a reveal button that reveals nothing.
+     */
+    bool revealsSecrets{};
+
+    /// What this field is worth as an answer: the chosen option's value for a
+    /// Choice, "on" or nothing for a Toggle, the text for anything else.
+    [[nodiscard]] std::string answer() const;
   };
 
   /// What to do with the answers. Called on the event thread, with the form
@@ -107,6 +153,13 @@ public:
   /// last attempt to accept.
   [[nodiscard]] std::string complaint() const;
 
+  /// Whether a drop-down is open, which is what makes escape close the list
+  /// rather than the form.
+  [[nodiscard]] bool listOpen() const;
+
+  /// Whether the Secret fields are currently readable.
+  [[nodiscard]] bool secretsShown() const;
+
 private:
   /// Where the caret may be put within the focused field's value: byte
   /// offsets that fall on character boundaries, since a UTF-8 sequence is not
@@ -116,6 +169,8 @@ private:
   [[nodiscard]] Field &field();
   /// Whether every required field has something in it, and which does not.
   [[nodiscard]] bool complete(std::string &missing) const;
+  /// Move the highlight within an open drop-down, or the focus between fields.
+  void step(int by);
 
   mutable std::mutex guard;
   std::string fontName;
@@ -128,6 +183,10 @@ private:
   /// Caret position within the focused field, as a byte offset.
   std::size_t caret{};
   bool open_{};
+  /// Whether the focused Choice has its list down, and which option the
+  /// highlight is on while it is.
+  bool expanded{};
+  std::size_t highlight{};
   /// Bumped whenever anything visible changes, so drawing knows to rebuild.
   std::uint64_t revision{1};
 

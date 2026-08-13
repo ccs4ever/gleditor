@@ -58,10 +58,13 @@ struct Ran {
  * else's text, and handing text to a shell is how text becomes commands.
  * Nothing here goes near /bin/sh.
  */
-Ran run(const std::vector<std::string> &argv) {
+Ran run(const std::vector<std::string> &argv,
+        const std::string_view feed = {}) {
   std::array<int, 2> outPipe{};
   std::array<int, 2> errPipe{};
-  if (0 != pipe(outPipe.data()) || 0 != pipe(errPipe.data())) {
+  std::array<int, 2> inPipe{};
+  if (0 != pipe(outPipe.data()) || 0 != pipe(errPipe.data()) ||
+      0 != pipe(inPipe.data())) {
     return {};
   }
 
@@ -69,10 +72,13 @@ Ran run(const std::vector<std::string> &argv) {
   posix_spawn_file_actions_init(&actions);
   posix_spawn_file_actions_addclose(&actions, outPipe[0]);
   posix_spawn_file_actions_addclose(&actions, errPipe[0]);
+  posix_spawn_file_actions_addclose(&actions, inPipe[1]);
   posix_spawn_file_actions_adddup2(&actions, outPipe[1], STDOUT_FILENO);
   posix_spawn_file_actions_adddup2(&actions, errPipe[1], STDERR_FILENO);
+  posix_spawn_file_actions_adddup2(&actions, inPipe[0], STDIN_FILENO);
   posix_spawn_file_actions_addclose(&actions, outPipe[1]);
   posix_spawn_file_actions_addclose(&actions, errPipe[1]);
+  posix_spawn_file_actions_addclose(&actions, inPipe[0]);
 
   std::vector<char *> raw;
   raw.reserve(argv.size() + 1);
@@ -87,11 +93,22 @@ Ran run(const std::vector<std::string> &argv) {
   posix_spawn_file_actions_destroy(&actions);
   close(outPipe[1]);
   close(errPipe[1]);
+  close(inPipe[0]);
   if (0 != spawned) {
     close(outPipe[0]);
     close(errPipe[0]);
+    close(inPipe[1]);
     return {};
   }
+
+  // What goes down the pipe is a passphrase and nothing longer, so one write
+  // cannot block: it is far below what a pipe holds without a reader.
+  if (!feed.empty()) {
+    static_cast<void>(write(inPipe[1], feed.data(), feed.size()));
+  }
+  // Closed either way, so a program waiting on end of input is not left
+  // waiting for a passphrase that is not coming.
+  close(inPipe[1]);
 
   // Both pipes are drained before waiting, or a program that fills one while
   // this waits on the other deadlocks.
@@ -192,50 +209,6 @@ std::string sha256Hex(const std::string_view data) {
 
 namespace {
 
-/// A GnuPG home of its own, thrown away afterwards. Short, because the agent's
-/// socket lives in it and a long path is longer than a unix socket name may be
-/// -- which gpg reports as "no agent running", and is nothing of the kind.
-class Keyring {
-public:
-  explicit Keyring(const std::string &secretKeyFile) {
-    path = std::filesystem::temp_directory_path() /
-           std::format("xudu-key-{}", getpid());
-    std::error_code ignored;
-    std::filesystem::remove_all(path, ignored);
-    std::filesystem::create_directories(path);
-    std::filesystem::permissions(path, std::filesystem::perms::owner_all,
-                                 std::filesystem::perm_options::replace,
-                                 ignored);
-    // No terminal to ask for a passphrase on, so a protected key will be
-    // refused here rather than hanging. gpg says which, and that is the
-    // actionable part.
-    { std::ofstream(path / "gpg-agent.conf") << "allow-loopback-pinentry\n"; }
-    { std::ofstream(path / "gpg.conf") << "pinentry-mode loopback\n"; }
-
-    imported = run({"gpg", "--homedir", path.string(), "--batch", "--yes",
-                    "--import", secretKeyFile});
-  }
-  ~Keyring() {
-    static_cast<void>(run({"gpgconf", "--homedir", path.string(), "--kill",
-                           "gpg-agent"}));
-    std::error_code ignored;
-    std::filesystem::remove_all(path, ignored);
-  }
-
-  Keyring(const Keyring &)            = delete;
-  Keyring &operator=(const Keyring &) = delete;
-  Keyring(Keyring &&)                 = delete;
-  Keyring &operator=(Keyring &&)      = delete;
-
-  [[nodiscard]] bool ok() const { return imported.ok(); }
-  [[nodiscard]] std::string complaint() const { return imported.complaint(); }
-  [[nodiscard]] std::string home() const { return path.string(); }
-
-private:
-  std::filesystem::path path;
-  Ran imported;
-};
-
 /// The `--homedir` gpg should be run with, if any.
 void addHome(std::vector<std::string> &argv, const std::string &home) {
   if (home.empty()) {
@@ -245,7 +218,124 @@ void addHome(std::vector<std::string> &argv, const std::string &home) {
   argv.push_back(home);
 }
 
+/// The colon-separated fields of one line of gpg's machine-readable output.
+std::vector<std::string> colonFields(const std::string_view line) {
+  std::vector<std::string> out;
+  std::size_t at = 0;
+  while (true) {
+    const auto colon = line.find(':', at);
+    if (std::string_view::npos == colon) {
+      out.emplace_back(line.substr(at));
+      return out;
+    }
+    out.emplace_back(line.substr(at, colon - at));
+    at = colon + 1;
+  }
+}
+
+/// What `default-key` is set to, or nothing. gpgconf rather than reading
+/// gpg.conf: the option may come from any of the places gpg reads, and gpgconf
+/// is what knows which of them won.
+std::string configuredDefaultKey(const std::string &home) {
+  std::vector<std::string> argv{"gpgconf"};
+  addHome(argv, home);
+  argv.insert(argv.end(), {"--list-options", "gpg"});
+  const auto ran = run(argv);
+  if (!ran.ok()) {
+    return {};
+  }
+  std::istringstream lines(ran.out);
+  std::string line;
+  while (std::getline(lines, line)) {
+    if (!line.starts_with("default-key:")) {
+      continue;
+    }
+    // name:flags:level:description:type:alt-type:argname:default:argdef:value
+    const auto fields = colonFields(line);
+    if (fields.size() < 10) {
+      return {};
+    }
+    auto value = fields[9];
+    // gpgconf quotes a string value with a leading quote; there is no closing
+    // one, which is the format rather than an oversight.
+    if (!value.empty() && '"' == value.front()) {
+      value.erase(0, 1);
+    }
+    return value;
+  }
+  return {};
+}
+
 } // namespace
+
+std::string SigningKey::describe() const {
+  if (identity.empty()) {
+    return fingerprint;
+  }
+  // The last eight of the fingerprint: enough for somebody to recognise which
+  // of two keys with the same name this is, without a line of hex nobody
+  // reads.
+  const auto tail = fingerprint.size() > 8
+                        ? fingerprint.substr(fingerprint.size() - 8)
+                        : fingerprint;
+  return identity + "  (" + tail + ")";
+}
+
+std::vector<SigningKey> signingKeys(const SigningOptions &where) {
+  std::vector<std::string> argv{"gpg"};
+  addHome(argv, where.gpgHome);
+  argv.insert(argv.end(),
+              {"--batch", "--with-colons", "--list-secret-keys"});
+  const auto ran = run(argv);
+  if (!ran.ok()) {
+    return {};
+  }
+
+  std::vector<SigningKey> keys;
+  bool canSign = false;
+  std::istringstream lines(ran.out);
+  std::string line;
+  while (std::getline(lines, line)) {
+    const auto fields = colonFields(line);
+    if (fields.empty()) {
+      continue;
+    }
+    if ("sec" == fields[0]) {
+      // Field 12 is what the key is good for; a key that cannot sign is not a
+      // key to offer for signing, whatever else it is useful for.
+      canSign = fields.size() > 11 && fields[11].contains('s');
+      continue;
+    }
+    if ("fpr" == fields[0] && canSign && fields.size() > 9) {
+      keys.push_back(SigningKey{fields[9], {}, false});
+      continue;
+    }
+    if ("uid" == fields[0] && !keys.empty() && keys.back().identity.empty() &&
+        fields.size() > 9) {
+      // The first identity on the key. A key may carry several; the first is
+      // the one gpg shows and the one somebody will recognise.
+      keys.back().identity = fields[9];
+    }
+  }
+
+  // Which one gpg would reach for on its own: what default-key names, or
+  // failing that the first that can sign.
+  const auto named = configuredDefaultKey(where.gpgHome);
+  auto preferred   = keys.end();
+  if (!named.empty()) {
+    preferred = std::ranges::find_if(keys, [&named](const SigningKey &key) {
+      return key.fingerprint.ends_with(named) ||
+             key.identity.contains(named);
+    });
+  }
+  if (keys.end() == preferred && !keys.empty()) {
+    preferred = keys.begin();
+  }
+  if (keys.end() != preferred) {
+    preferred->preferred = true;
+  }
+  return keys;
+}
 
 bool gpgAvailable() { return run({"gpg", "--version"}).ok(); }
 
@@ -271,22 +361,16 @@ SignedProvenance signProvenance(const Provenance &record,
   const Scratch document(".yaml", out.yaml);
   const Scratch signature(".yaml.asc", "");
 
-  // A key given as a file is imported into a keyring of its own for this one
-  // signature; a GnuPG home is used as it is. Named separately because they
-  // are different things: one is a key, the other is where keys are kept.
-  std::optional<Keyring> imported;
-  if (!where.secretKeyFile.empty()) {
-    imported.emplace(where.secretKeyFile);
-    if (!imported->ok()) {
-      throw std::runtime_error(std::format(
-          "gpg would not read the signing key at {}: {}", where.secretKeyFile,
-          imported->complaint()));
-    }
-  }
-  const auto home = imported ? imported->home() : where.gpgHome;
-
   std::vector<std::string> argv{"gpg", "--batch", "--yes", "--armor"};
-  addHome(argv, home);
+  addHome(argv, where.gpgHome);
+  if (!where.passphrase.empty()) {
+    // Down a pipe on file descriptor zero, never as an argument: a command
+    // line is readable by every process on the machine. Loopback, because
+    // there may be no pinentry to ask on -- this is a passphrase somebody has
+    // already typed somewhere else.
+    argv.insert(argv.end(),
+                {"--pinentry-mode", "loopback", "--passphrase-fd", "0"});
+  }
   if (!record.author.gpgKey.empty()) {
     argv.emplace_back("--local-user");
     argv.push_back(record.author.gpgKey);
@@ -296,7 +380,7 @@ SignedProvenance signProvenance(const Provenance &record,
   argv.emplace_back("--detach-sign");
   argv.push_back(document.name());
 
-  const auto ran = run(argv);
+  const auto ran = run(argv, where.passphrase);
   if (!ran.ok()) {
     throw std::runtime_error(std::format(
         "gpg would not sign the authorship record{}: {}",
