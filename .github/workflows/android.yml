@@ -129,10 +129,22 @@ jobs:
           path: ${{ runner.temp }}/ccache
           key: ccache-android-${{ github.run_id }}
           restore-keys: ccache-android-
+      # ccache's default compiler_check is "mtime": it treats a compiler
+      # binary with a different mtime as a different compiler and refuses to
+      # reuse anything compiled with the "old" one. The NDK is unzipped fresh
+      # by the "install the NDK" step above on every run -- same pinned
+      # version and byte-identical clang binary, but a brand new mtime each
+      # time -- which was silently invalidating nearly the whole cache run
+      # over run even after the sloppiness fix below made everything
+      # cacheable (hit rate stayed flat around 15-20% across several
+      # consecutive successful builds instead of climbing toward "only the
+      # files this commit touched"). Hashing the compiler's actual content
+      # instead is slower per compile but stable across a re-extracted NDK.
       - run: |
           echo "CCACHE_DIR=${{ runner.temp }}/ccache" >> "$GITHUB_ENV"
           echo "CCACHE_MAXSIZE=2G" >> "$GITHUB_ENV"
           echo "CCACHE_SLOPPINESS=pch_defines,time_macros" >> "$GITHUB_ENV"
+          echo "CCACHE_COMPILERCHECK=content" >> "$GITHUB_ENV"
 
       # The first ccache-instrumented run (see below) showed exactly why the
       # ~14 minute compile time barely moved with a warm cache: SDL's own
