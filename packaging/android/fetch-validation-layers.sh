@@ -21,8 +21,22 @@ API_URL="https://api.github.com/repos/KhronosGroup/Vulkan-ValidationLayers/relea
 WORK_DIR=$(mktemp -d)
 trap 'rm -rf "$WORK_DIR"' EXIT
 
+# Unauthenticated api.github.com calls share a 60-requests-per-hour budget
+# across every IP on the runner pool, which every workflow run on every repo
+# using GitHub-hosted runners draws from -- easy to exhaust with nothing
+# more unusual than re-running this workflow a few times in a short span,
+# and the failure it produces (a rate-limit JSON body where an asset list
+# was expected) looks nothing like what actually went wrong. GITHUB_TOKEN,
+# which Actions injects into every job for free, raises that to 1000/hour
+# per repository; CI sets it, a local run without it just falls back to the
+# same unauthenticated request this always made.
+AUTH_HEADER=""
+if [ -n "${GITHUB_TOKEN:-}" ]; then
+  AUTH_HEADER="Authorization: Bearer $GITHUB_TOKEN"
+fi
+
 echo "fetch-validation-layers: asking $API_URL for the latest release"
-curl -sSL -H "Accept: application/vnd.github+json" "$API_URL" -o "$WORK_DIR/release.json"
+curl -sSL -H "Accept: application/vnd.github+json" ${AUTH_HEADER:+-H "$AUTH_HEADER"} "$API_URL" -o "$WORK_DIR/release.json"
 
 ASSET_URL=$(jq -r '.assets[] | select(.name | test("android"; "i")) | .browser_download_url' "$WORK_DIR/release.json" | head -n1)
 if [ -z "$ASSET_URL" ] || [ "$ASSET_URL" = "null" ]; then
