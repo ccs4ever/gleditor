@@ -15,6 +15,7 @@
 #include <string>
 #include <system_error>
 
+#include <glib-object.h>
 #include <jni.h>
 #include <SDL3/SDL_filesystem.h>
 #include <SDL3/SDL_iostream.h>
@@ -24,6 +25,26 @@
 namespace gleditor {
 
 namespace {
+
+// dlopen() only runs a library's constructors after every constructor of the
+// shared objects it depends on has already run -- that is what normally
+// guarantees glib's own GType bootstrap finishes before glibmm's or
+// pangomm's constructors touch it. That guarantee does not hold here: glib,
+// glibmm and pangomm are all statically linked into this one libmain.so
+// (see /CMakeLists.txt), so every translation unit's constructors, from all
+// three, are merged into a single .init_array with no ordering between them.
+// glibmm carries a legacy constructor of its own that calls the deprecated
+// g_type_init(), which -- on the glib version vcpkg builds -- asserts
+// rather than initializing anything if the type system was not already
+// bootstrapped by the time it runs, crashing the app before main() is ever
+// reached. Forcing that bootstrap here first, via g_type_ensure() (the
+// public, non-deprecated replacement) at constructor priority 101 -- the
+// highest available to user code, since 0-100 is reserved for the
+// implementation -- is what keeps glibmm's constructor from being the one
+// that loses that race.
+__attribute__((constructor(101))) void primeGTypeSystem() {
+  g_type_ensure(G_TYPE_OBJECT);
+}
 
 // The full set of files the GL/GLES and Vulkan backends open by path, kept in
 // step with assets/shaders/*.glsl and the SPIRV list in the Makefile. Small
