@@ -49,11 +49,18 @@ jobs:
             "cmake;3.22.1"
           echo "ANDROID_NDK_HOME=$ANDROID_HOME/ndk/${{ steps.ndk.outputs.version }}" >> "$GITHUB_ENV"
 
+      # vcpkg's own build tools -- gperf, needed transitively by the pango
+      # stack, is what actually asks for these -- are expected to already be
+      # on the host, the same as pkg-config or a compiler; vcpkg does not
+      # vendor them. Installed once here rather than left for whichever port
+      # first needs them, since vcpkg's own error for a missing one names the
+      # port, not the workflow step that should have prevented it.
+      - name: host build tools vcpkg's ports need
+        run: sudo apt-get update && sudo apt-get install -y autoconf autoconf-archive automake libtool jq unzip
+
       - name: vulkan validation layers
         working-directory: packaging/android
-        run: |
-          sudo apt-get update && sudo apt-get install -y jq unzip
-          ./fetch-validation-layers.sh
+        run: ./fetch-validation-layers.sh
 
       # A shallow clone at the exact commit vcpkg.json's builtin-baseline
       # names, rather than whatever HEAD of the vcpkg repo happens to be on
