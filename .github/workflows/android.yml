@@ -131,9 +131,18 @@ jobs:
           echo "CCACHE_DIR=${{ runner.temp }}/ccache" >> "$GITHUB_ENV"
           echo "CCACHE_MAXSIZE=2G" >> "$GITHUB_ENV"
 
+      # Zeroed immediately before the build and read immediately after, so
+      # this run's own hit/miss counts are visible rather than a cumulative
+      # total masking whether ccache is doing anything on THIS run in
+      # particular -- the restored cache directory carries ccache's own
+      # stats database along with the object files themselves, so without
+      # this a low hit rate here could hide behind a high count left over
+      # from whichever earlier run's stats happened to still be in it.
+      - run: ccache -z
       - name: gradlew assembleDebug
         working-directory: packaging/android
         run: ./gradlew assembleDebug --stacktrace
+      - run: ccache -s -v
 
       - if: always()
         name: save ccache
