@@ -7,6 +7,7 @@
  * on this library takes belong to the library -- see gleditor/app.hpp -- which
  * is what keeps this file to the part that is actually about editing.
  */
+#include <cstdlib>
 #include <exception>
 #include <iostream>
 #include <memory>
@@ -112,6 +113,14 @@ int main(const int argc, char **argv) {
         std::cout << "file: " << file << "\n";
         renderer->push(RenderItemOpenDoc(file));
       }
+    } else if (const char *openFile = std::getenv("GLEDITOR_OPEN_FILE");
+               nullptr != openFile) {
+      // Android has no command line: this is androidBootstrap() (called
+      // above, before argument parsing) reporting whatever file the app was
+      // launched or shared to open, the same way GLEDITOR_BACKEND already
+      // stands in for --backend there.
+      std::cout << "file: " << openFile << "\n";
+      renderer->push(RenderItemOpenDoc(std::string(openFile)));
     }
   } catch (const std::exception &err) {
     std::cerr << err.what() << "\n" << parser;

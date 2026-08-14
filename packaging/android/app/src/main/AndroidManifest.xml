@@ -47,6 +47,29 @@
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
+
+            <!-- "Open with gleditor" from a file manager or browser. No
+                 storage permission accompanies this on purpose: a Uri
+                 delivered through an intent-filter match already comes with
+                 its own temporary read grant (content:// and file:// alike),
+                 which is what src/android_bootstrap.cpp's
+                 openDocumentFromIntent() actually reads through. A
+                 broad-storage permission would ask for more access than
+                 opening a shared or tapped file ever needs, for no benefit. -->
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="content" android:mimeType="text/plain" />
+                <data android:scheme="file" android:mimeType="text/plain" />
+            </intent-filter>
+
+            <!-- "Share" a file to gleditor from another app. -->
+            <intent-filter>
+                <action android:name="android.intent.action.SEND" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:mimeType="text/plain" />
+            </intent-filter>
         </activity>
     </application>
 

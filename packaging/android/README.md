@@ -119,9 +119,16 @@ either with `adb install` or by dragging it onto a running emulator window.
 - **A launcher icon.** The manifest names none; Android shows a generic
   placeholder in its place. `logo.png` at the repository root is the source
   to derive one from.
-- **Opening a file.** There is no file picker wired up, so a fresh install
-  starts on an empty document -- the same thing `gleditor` with no
-  arguments does on desktop. Android's Storage Access Framework is the
-  usual way to add one; it needs a small amount of Java (a
-  `registerForActivityResult` call) that a stock `SDLActivity` does not
-  provide on its own, which is why it is left out rather than done halfway.
+- **An in-app file picker.** A fresh install with nothing shared or opened
+  into it still starts on an empty document -- the same thing `gleditor`
+  with no arguments does on desktop. What *is* wired up is the other
+  direction: `android:intent-filter`s on `SDLActivity` (see
+  `AndroidManifest.xml`) let another app hand gleditor a file, either by
+  "Open with" (`ACTION_VIEW`) or "Share" (`ACTION_SEND`), which
+  `src/android_bootstrap.cpp`'s `openDocumentFromIntent()` reads via JNI and
+  opens the same way a command-line argument would on desktop. An in-app
+  "Open..." *picker* -- browsing for a file from inside gleditor rather than
+  being handed one -- is a different feature (Android's Storage Access
+  Framework, `ACTION_OPEN_DOCUMENT`) and still needs the small amount of Java
+  (a `registerForActivityResult` call) a stock `SDLActivity` does not provide
+  on its own, which is why that half is left out rather than done halfway.
