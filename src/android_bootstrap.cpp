@@ -14,6 +14,7 @@
 #include <ios>
 #include <string>
 #include <system_error>
+#include <vector>
 
 #include <jni.h>
 #include <SDL3/SDL_filesystem.h>
@@ -176,6 +177,189 @@ void applyBackendOverrideFromIntent() {
   env->DeleteLocalRef(value);
 }
 
+/// Copies @p uri's bytes into internal storage and returns the resulting
+/// path, or an empty string on failure. android.content.ContentResolver.
+/// openInputStream() is the only way to read a content:// Uri's bytes --
+/// there is no filesystem path behind one in general, unlike the file://
+/// scheme openDocumentFromIntent() otherwise handles directly. Copying
+/// instead of streaming straight into a TextSource keeps FileTextSource
+/// (src/text_source.cpp) the one place that reads a document off disk, on
+/// every platform.
+std::string copyOpenableUriToInternalStorage(JNIEnv *env, jobject activity,
+                                              jobject uri,
+                                              const std::filesystem::path &internal) {
+  const jclass activityClass = env->GetObjectClass(activity);
+  const jmethodID getContentResolver = env->GetMethodID(
+      activityClass, "getContentResolver", "()Landroid/content/ContentResolver;");
+  const jobject resolver = nullptr != getContentResolver
+                                ? env->CallObjectMethod(activity, getContentResolver)
+                                : nullptr;
+  if (nullptr == resolver) {
+    return {};
+  }
+
+  const jclass resolverClass = env->GetObjectClass(resolver);
+  const jmethodID openInputStream = env->GetMethodID(
+      resolverClass, "openInputStream", "(Landroid/net/Uri;)Ljava/io/InputStream;");
+  if (nullptr == openInputStream) {
+    return {};
+  }
+  const jobject stream = env->CallObjectMethod(resolver, openInputStream, uri);
+  // A Uri that no longer resolves (the app that shared it has since been
+  // uninstalled, a permission grant expired, ...) throws rather than
+  // returning null -- checked and cleared here, since a pending Java
+  // exception makes every further JNI call in this process undefined.
+  if (env->ExceptionCheck()) {
+    env->ExceptionClear();
+    return {};
+  }
+  if (nullptr == stream) {
+    return {};
+  }
+
+  const jclass streamClass = env->GetObjectClass(stream);
+  const jmethodID read  = env->GetMethodID(streamClass, "read", "([B)I");
+  const jmethodID close = env->GetMethodID(streamClass, "close", "()V");
+
+  std::error_code err;
+  const auto destDir = internal / "opened";
+  std::filesystem::create_directories(destDir, err);
+  // A fixed name rather than one derived from the Uri: FileTextSource
+  // (src/text_source.cpp) and the rest of the library treat a document as an
+  // opaque byte stream -- gleditor "names no document format" (README.md) --
+  // so there is nothing here that reads an extension, and a fixed name means
+  // this never has to sanitise whatever a content provider's own display
+  // name happens to contain.
+  const auto destPath = destDir / "opened-document";
+  std::ofstream out(destPath, std::ios::binary | std::ios::trunc);
+
+  constexpr jsize kChunkSize = 1 << 16;
+  const jbyteArray chunk = env->NewByteArray(kChunkSize);
+  std::vector<char> buffer(kChunkSize);
+  for (;;) {
+    const jint got = env->CallIntMethod(stream, read, chunk);
+    if (env->ExceptionCheck()) {
+      env->ExceptionClear();
+      break;
+    }
+    if (got < 0) {
+      break; // end of stream
+    }
+    if (got > 0) {
+      env->GetByteArrayRegion(chunk, 0, got,
+                               reinterpret_cast<jbyte *>(buffer.data()));
+      out.write(buffer.data(), got);
+    }
+  }
+  env->DeleteLocalRef(chunk);
+  env->CallVoidMethod(stream, close);
+  env->DeleteLocalRef(stream);
+
+  return destPath.string();
+}
+
+/// Reads whatever document the app was launched to open -- either
+/// android.intent.action.VIEW's own data Uri (opening a file from a file
+/// manager or browser) or android.intent.action.SEND's EXTRA_STREAM (sharing
+/// a file in from another app) -- and points GLEDITOR_OPEN_FILE at it, which
+/// apps/gleditor/main.cpp falls back to when no file was named on the (empty,
+/// on Android) command line. A file:// Uri already names a real path, so it
+/// is used directly; anything else (content://, almost always) is read
+/// through ContentResolver, since that is the only access a Uri grant from
+/// another app's Intent gives -- there is no filesystem permission that
+/// would let this open one by path instead, and none is asked for.
+void openDocumentFromIntent(const std::filesystem::path &internal) {
+  auto *env     = static_cast<JNIEnv *>(SDL_GetAndroidJNIEnv());
+  auto activity = static_cast<jobject>(SDL_GetAndroidActivity());
+  if (nullptr == env || nullptr == activity) {
+    return;
+  }
+
+  const jclass activityClass = env->GetObjectClass(activity);
+  const jmethodID getIntent  = env->GetMethodID(
+      activityClass, "getIntent", "()Landroid/content/Intent;");
+  const jobject intent =
+      nullptr != getIntent ? env->CallObjectMethod(activity, getIntent)
+                            : nullptr;
+  if (nullptr == intent) {
+    return;
+  }
+  const jclass intentClass = env->GetObjectClass(intent);
+
+  const jmethodID getAction =
+      env->GetMethodID(intentClass, "getAction", "()Ljava/lang/String;");
+  const auto actionValue = nullptr != getAction
+                                ? static_cast<jstring>(env->CallObjectMethod(intent, getAction))
+                                : nullptr;
+  if (nullptr == actionValue) {
+    return;
+  }
+  const char *actionChars = env->GetStringUTFChars(actionValue, nullptr);
+  const std::string action(actionChars);
+  env->ReleaseStringUTFChars(actionValue, actionChars);
+  env->DeleteLocalRef(actionValue);
+
+  jobject uri = nullptr;
+  if ("android.intent.action.VIEW" == action) {
+    const jmethodID getData =
+        env->GetMethodID(intentClass, "getData", "()Landroid/net/Uri;");
+    if (nullptr != getData) {
+      uri = env->CallObjectMethod(intent, getData);
+    }
+  } else if ("android.intent.action.SEND" == action) {
+    // The one-argument overload, deprecated since API 33 in favour of one
+    // that also takes a Class<T> -- kept here since it is still present and
+    // functional on every API level this app runs on, and the two-argument
+    // one is not.
+    const jmethodID getParcelableExtra = env->GetMethodID(
+        intentClass, "getParcelableExtra", "(Ljava/lang/String;)Landroid/os/Parcelable;");
+    if (nullptr != getParcelableExtra) {
+      const jstring key = env->NewStringUTF("android.intent.extra.STREAM");
+      uri = env->CallObjectMethod(intent, getParcelableExtra, key);
+      env->DeleteLocalRef(key);
+    }
+  }
+  if (nullptr == uri) {
+    return;
+  }
+
+  const jclass uriClass = env->GetObjectClass(uri);
+  const jmethodID getScheme =
+      env->GetMethodID(uriClass, "getScheme", "()Ljava/lang/String;");
+  const auto schemeValue =
+      nullptr != getScheme ? static_cast<jstring>(env->CallObjectMethod(uri, getScheme))
+                            : nullptr;
+  std::string scheme;
+  if (nullptr != schemeValue) {
+    const char *schemeChars = env->GetStringUTFChars(schemeValue, nullptr);
+    scheme = schemeChars;
+    env->ReleaseStringUTFChars(schemeValue, schemeChars);
+    env->DeleteLocalRef(schemeValue);
+  }
+
+  std::string path;
+  if ("file" == scheme) {
+    const jmethodID getPath =
+        env->GetMethodID(uriClass, "getPath", "()Ljava/lang/String;");
+    const auto pathValue =
+        nullptr != getPath ? static_cast<jstring>(env->CallObjectMethod(uri, getPath))
+                            : nullptr;
+    if (nullptr != pathValue) {
+      const char *pathChars = env->GetStringUTFChars(pathValue, nullptr);
+      path = pathChars;
+      env->ReleaseStringUTFChars(pathValue, pathChars);
+      env->DeleteLocalRef(pathValue);
+    }
+  } else {
+    path = copyOpenableUriToInternalStorage(env, activity, uri, internal);
+  }
+  env->DeleteLocalRef(uri);
+
+  if (!path.empty()) {
+    setenv("GLEDITOR_OPEN_FILE", path.c_str(), 1);
+  }
+}
+
 } // namespace
 
 void androidBootstrap() {
@@ -183,6 +367,7 @@ void androidBootstrap() {
   if (nullptr != internal && '\0' != internal[0]) {
     extractShaderAssets(internal);
     extractFontConfig(internal);
+    openDocumentFromIntent(internal);
   }
   applyBackendOverrideFromIntent();
 }
