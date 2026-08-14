@@ -80,7 +80,13 @@ android {
 
     externalNativeBuild {
         cmake {
-            path "CMakeLists.txt"
+            // At the repository root, not in this directory -- see the
+            // comment at the top of that file for why: AGP's CMake File API
+            // parser fails on a subdirectory (thirdparty/SDL) that resolves
+            // outside this CMakeLists.txt's own tree, and the repository
+            // root is the nearest ancestor common to both that and this
+            // module.
+            path "../../../CMakeLists.txt"
             version "3.22.1"
         }
     }
