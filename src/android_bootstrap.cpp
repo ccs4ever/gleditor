@@ -16,11 +16,11 @@
 #include <system_error>
 #include <vector>
 
-#include <jni.h>
 #include <SDL3/SDL_filesystem.h>
 #include <SDL3/SDL_iostream.h>
 #include <SDL3/SDL_stdinc.h>
 #include <SDL3/SDL_system.h>
+#include <jni.h>
 
 namespace gleditor {
 
@@ -81,7 +81,7 @@ constexpr std::array<const char *, 8> kShaderAssets = {
 /// GLEDITOR_ASSET_DIR must name somewhere std::ifstream can later open.
 void copyAsset(const std::filesystem::path &destRoot, const char *relative) {
   std::size_t size = 0;
-  void *data = SDL_LoadFile(relative, &size);
+  void *data       = SDL_LoadFile(relative, &size);
   if (nullptr == data) {
     // Left for whatever opens it later to report by name, same as a missing
     // asset on any other platform.
@@ -111,7 +111,7 @@ void extractShaderAssets(const std::filesystem::path &internal) {
 /// directory placeholder filled in, and points FONTCONFIG_FILE at the result.
 void extractFontConfig(const std::filesystem::path &internal) {
   std::size_t size = 0;
-  void *data = SDL_LoadFile("fontconfig/fonts.conf", &size);
+  void *data       = SDL_LoadFile("fontconfig/fonts.conf", &size);
   if (nullptr == data) {
     return;
   }
@@ -141,32 +141,31 @@ void extractFontConfig(const std::filesystem::path &internal) {
 /// JNI calls against the Activity and Intent SDL itself hands back -- is the
 /// only way in that does not mean writing a custom one.
 void applyBackendOverrideFromIntent() {
-  auto *env      = static_cast<JNIEnv *>(SDL_GetAndroidJNIEnv());
-  auto activity  = static_cast<jobject>(SDL_GetAndroidActivity());
+  auto *env     = static_cast<JNIEnv *>(SDL_GetAndroidJNIEnv());
+  auto activity = static_cast<jobject>(SDL_GetAndroidActivity());
   if (nullptr == env || nullptr == activity) {
     return;
   }
 
   const jclass activityClass = env->GetObjectClass(activity);
-  const jmethodID getIntent  = env->GetMethodID(
-      activityClass, "getIntent", "()Landroid/content/Intent;");
-  const jobject intent =
-      nullptr != getIntent ? env->CallObjectMethod(activity, getIntent)
-                            : nullptr;
+  const jmethodID getIntent  = env->GetMethodID(activityClass, "getIntent",
+                                                "()Landroid/content/Intent;");
+  const jobject intent       = nullptr != getIntent
+                                   ? env->CallObjectMethod(activity, getIntent)
+                                   : nullptr;
   if (nullptr == intent) {
     return;
   }
 
-  const jclass intentClass = env->GetObjectClass(intent);
-  const jmethodID getStringExtra =
-      env->GetMethodID(intentClass, "getStringExtra",
-                        "(Ljava/lang/String;)Ljava/lang/String;");
+  const jclass intentClass       = env->GetObjectClass(intent);
+  const jmethodID getStringExtra = env->GetMethodID(
+      intentClass, "getStringExtra", "(Ljava/lang/String;)Ljava/lang/String;");
   if (nullptr == getStringExtra) {
     return;
   }
   const jstring key = env->NewStringUTF("backend");
-  const auto value  = static_cast<jstring>(
-      env->CallObjectMethod(intent, getStringExtra, key));
+  const auto value =
+      static_cast<jstring>(env->CallObjectMethod(intent, getStringExtra, key));
   env->DeleteLocalRef(key);
   if (nullptr == value) {
     return;
@@ -204,22 +203,25 @@ std::string &rememberedOriginalUri() {
 /// instead of streaming straight into a TextSource keeps FileTextSource
 /// (src/text_source.cpp) the one place that reads a document off disk, on
 /// every platform.
-std::string copyOpenableUriToInternalStorage(JNIEnv *env, jobject activity,
-                                              jobject uri,
-                                              const std::filesystem::path &internal) {
+std::string
+copyOpenableUriToInternalStorage(JNIEnv *env, jobject activity, jobject uri,
+                                 const std::filesystem::path &internal) {
   const jclass activityClass = env->GetObjectClass(activity);
-  const jmethodID getContentResolver = env->GetMethodID(
-      activityClass, "getContentResolver", "()Landroid/content/ContentResolver;");
-  const jobject resolver = nullptr != getContentResolver
-                                ? env->CallObjectMethod(activity, getContentResolver)
-                                : nullptr;
+  const jmethodID getContentResolver =
+      env->GetMethodID(activityClass, "getContentResolver",
+                       "()Landroid/content/ContentResolver;");
+  const jobject resolver =
+      nullptr != getContentResolver
+          ? env->CallObjectMethod(activity, getContentResolver)
+          : nullptr;
   if (nullptr == resolver) {
     return {};
   }
 
   const jclass resolverClass = env->GetObjectClass(resolver);
-  const jmethodID openInputStream = env->GetMethodID(
-      resolverClass, "openInputStream", "(Landroid/net/Uri;)Ljava/io/InputStream;");
+  const jmethodID openInputStream =
+      env->GetMethodID(resolverClass, "openInputStream",
+                       "(Landroid/net/Uri;)Ljava/io/InputStream;");
   if (nullptr == openInputStream) {
     return {};
   }
@@ -237,8 +239,8 @@ std::string copyOpenableUriToInternalStorage(JNIEnv *env, jobject activity,
   }
 
   const jclass streamClass = env->GetObjectClass(stream);
-  const jmethodID read  = env->GetMethodID(streamClass, "read", "([B)I");
-  const jmethodID close = env->GetMethodID(streamClass, "close", "()V");
+  const jmethodID read     = env->GetMethodID(streamClass, "read", "([B)I");
+  const jmethodID close    = env->GetMethodID(streamClass, "close", "()V");
 
   std::error_code err;
   const auto destDir = internal / "opened";
@@ -253,7 +255,7 @@ std::string copyOpenableUriToInternalStorage(JNIEnv *env, jobject activity,
   std::ofstream out(destPath, std::ios::binary | std::ios::trunc);
 
   constexpr jsize kChunkSize = 1 << 16;
-  const jbyteArray chunk = env->NewByteArray(kChunkSize);
+  const jbyteArray chunk     = env->NewByteArray(kChunkSize);
   std::vector<char> buffer(kChunkSize);
   for (;;) {
     const jint got = env->CallIntMethod(stream, read, chunk);
@@ -266,7 +268,7 @@ std::string copyOpenableUriToInternalStorage(JNIEnv *env, jobject activity,
     }
     if (got > 0) {
       env->GetByteArrayRegion(chunk, 0, got,
-                               reinterpret_cast<jbyte *>(buffer.data()));
+                              reinterpret_cast<jbyte *>(buffer.data()));
       out.write(buffer.data(), got);
     }
   }
@@ -295,11 +297,11 @@ void openDocumentFromIntent(const std::filesystem::path &internal) {
   }
 
   const jclass activityClass = env->GetObjectClass(activity);
-  const jmethodID getIntent  = env->GetMethodID(
-      activityClass, "getIntent", "()Landroid/content/Intent;");
-  const jobject intent =
-      nullptr != getIntent ? env->CallObjectMethod(activity, getIntent)
-                            : nullptr;
+  const jmethodID getIntent  = env->GetMethodID(activityClass, "getIntent",
+                                                "()Landroid/content/Intent;");
+  const jobject intent       = nullptr != getIntent
+                                   ? env->CallObjectMethod(activity, getIntent)
+                                   : nullptr;
   if (nullptr == intent) {
     return;
   }
@@ -307,9 +309,10 @@ void openDocumentFromIntent(const std::filesystem::path &internal) {
 
   const jmethodID getAction =
       env->GetMethodID(intentClass, "getAction", "()Ljava/lang/String;");
-  const auto actionValue = nullptr != getAction
-                                ? static_cast<jstring>(env->CallObjectMethod(intent, getAction))
-                                : nullptr;
+  const auto actionValue =
+      nullptr != getAction
+          ? static_cast<jstring>(env->CallObjectMethod(intent, getAction))
+          : nullptr;
   if (nullptr == actionValue) {
     return;
   }
@@ -330,8 +333,9 @@ void openDocumentFromIntent(const std::filesystem::path &internal) {
     // that also takes a Class<T> -- kept here since it is still present and
     // functional on every API level this app runs on, and the two-argument
     // one is not.
-    const jmethodID getParcelableExtra = env->GetMethodID(
-        intentClass, "getParcelableExtra", "(Ljava/lang/String;)Landroid/os/Parcelable;");
+    const jmethodID getParcelableExtra =
+        env->GetMethodID(intentClass, "getParcelableExtra",
+                         "(Ljava/lang/String;)Landroid/os/Parcelable;");
     if (nullptr != getParcelableExtra) {
       const jstring key = env->NewStringUTF("android.intent.extra.STREAM");
       uri = env->CallObjectMethod(intent, getParcelableExtra, key);
@@ -346,12 +350,13 @@ void openDocumentFromIntent(const std::filesystem::path &internal) {
   const jmethodID getScheme =
       env->GetMethodID(uriClass, "getScheme", "()Ljava/lang/String;");
   const auto schemeValue =
-      nullptr != getScheme ? static_cast<jstring>(env->CallObjectMethod(uri, getScheme))
-                            : nullptr;
+      nullptr != getScheme
+          ? static_cast<jstring>(env->CallObjectMethod(uri, getScheme))
+          : nullptr;
   std::string scheme;
   if (nullptr != schemeValue) {
     const char *schemeChars = env->GetStringUTFChars(schemeValue, nullptr);
-    scheme = schemeChars;
+    scheme                  = schemeChars;
     env->ReleaseStringUTFChars(schemeValue, schemeChars);
     env->DeleteLocalRef(schemeValue);
   }
@@ -361,11 +366,12 @@ void openDocumentFromIntent(const std::filesystem::path &internal) {
     const jmethodID getPath =
         env->GetMethodID(uriClass, "getPath", "()Ljava/lang/String;");
     const auto pathValue =
-        nullptr != getPath ? static_cast<jstring>(env->CallObjectMethod(uri, getPath))
-                            : nullptr;
+        nullptr != getPath
+            ? static_cast<jstring>(env->CallObjectMethod(uri, getPath))
+            : nullptr;
     if (nullptr != pathValue) {
       const char *pathChars = env->GetStringUTFChars(pathValue, nullptr);
-      path = pathChars;
+      path                  = pathChars;
       env->ReleaseStringUTFChars(pathValue, pathChars);
       env->DeleteLocalRef(pathValue);
     }
@@ -375,8 +381,9 @@ void openDocumentFromIntent(const std::filesystem::path &internal) {
       const jmethodID toString =
           env->GetMethodID(uriClass, "toString", "()Ljava/lang/String;");
       const auto uriStringValue =
-          nullptr != toString ? static_cast<jstring>(env->CallObjectMethod(uri, toString))
-                               : nullptr;
+          nullptr != toString
+              ? static_cast<jstring>(env->CallObjectMethod(uri, toString))
+              : nullptr;
       if (nullptr != uriStringValue) {
         const char *uriChars = env->GetStringUTFChars(uriStringValue, nullptr);
         rememberedInternalPath() = path;
@@ -422,7 +429,7 @@ bool androidSaveDocument(const std::string &documentPath,
   const jmethodID parse =
       nullptr != uriClass
           ? env->GetStaticMethodID(uriClass, "parse",
-                                    "(Ljava/lang/String;)Landroid/net/Uri;")
+                                   "(Ljava/lang/String;)Landroid/net/Uri;")
           : nullptr;
   if (nullptr == parse) {
     return false;
@@ -435,20 +442,22 @@ bool androidSaveDocument(const std::string &documentPath,
   }
 
   const jclass activityClass = env->GetObjectClass(activity);
-  const jmethodID getContentResolver = env->GetMethodID(
-      activityClass, "getContentResolver", "()Landroid/content/ContentResolver;");
-  const jobject resolver = nullptr != getContentResolver
-                                ? env->CallObjectMethod(activity, getContentResolver)
-                                : nullptr;
+  const jmethodID getContentResolver =
+      env->GetMethodID(activityClass, "getContentResolver",
+                       "()Landroid/content/ContentResolver;");
+  const jobject resolver =
+      nullptr != getContentResolver
+          ? env->CallObjectMethod(activity, getContentResolver)
+          : nullptr;
   if (nullptr == resolver) {
     env->DeleteLocalRef(uri);
     return false;
   }
 
-  const jclass resolverClass = env->GetObjectClass(resolver);
-  const jmethodID openOutputStream =
-      env->GetMethodID(resolverClass, "openOutputStream",
-                        "(Landroid/net/Uri;Ljava/lang/String;)Ljava/io/OutputStream;");
+  const jclass resolverClass       = env->GetObjectClass(resolver);
+  const jmethodID openOutputStream = env->GetMethodID(
+      resolverClass, "openOutputStream",
+      "(Landroid/net/Uri;Ljava/lang/String;)Ljava/io/OutputStream;");
   if (nullptr == openOutputStream) {
     env->DeleteLocalRef(uri);
     return false;
@@ -459,7 +468,8 @@ bool androidSaveDocument(const std::string &documentPath,
   // providers that interpret it that way, which is not guaranteed of every
   // one a Uri could have come from.
   const jstring mode = env->NewStringUTF("wt");
-  const jobject stream = env->CallObjectMethod(resolver, openOutputStream, uri, mode);
+  const jobject stream =
+      env->CallObjectMethod(resolver, openOutputStream, uri, mode);
   env->DeleteLocalRef(mode);
   env->DeleteLocalRef(uri);
   // A Uri whose write grant has since been revoked, or whose provider no
@@ -473,10 +483,10 @@ bool androidSaveDocument(const std::string &documentPath,
   }
 
   const jclass streamClass = env->GetObjectClass(stream);
-  const jmethodID write = env->GetMethodID(streamClass, "write", "([BII)V");
-  const jmethodID close = env->GetMethodID(streamClass, "close", "()V");
+  const jmethodID write    = env->GetMethodID(streamClass, "write", "([BII)V");
+  const jmethodID close    = env->GetMethodID(streamClass, "close", "()V");
 
-  const auto size = static_cast<jsize>(content.size());
+  const auto size        = static_cast<jsize>(content.size());
   const jbyteArray bytes = env->NewByteArray(size);
   env->SetByteArrayRegion(bytes, 0, size,
                           reinterpret_cast<const jbyte *>(content.data()));
