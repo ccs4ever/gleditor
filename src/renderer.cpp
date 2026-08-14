@@ -18,11 +18,13 @@
 #include <thread>
 #include <vector>
 
+#include <glibmm/fileutils.h>
 #include <glm/ext/matrix_clip_space.hpp>
 #include <glm/ext/matrix_float4x4.hpp>
 #include <glm/ext/matrix_transform.hpp>
 #include <glm/gtx/string_cast.hpp>
 
+#include <gleditor/android_bootstrap.hpp>
 #include <gleditor/doc.hpp>
 #include <gleditor/paths.hpp>
 #include <gleditor/render/device.hpp>
@@ -152,6 +154,56 @@ void Renderer::closeDoc(RenderState &state, const std::uint32_t index) {
     state.docs[i]->setDocIndex(static_cast<std::uint32_t>(i));
     state.docs[i]->animateMoveTo(timeline, AbstractRenderer::documentSlot(i));
   }
+}
+
+void Renderer::saveDoc(RenderState &state, const std::uint32_t index) {
+  if (state.docs.empty()) {
+    return;
+  }
+  const auto which = RenderItemSaveDoc::mostRecent == index
+                         ? state.docs.size() - 1
+                         : static_cast<std::size_t>(index);
+  if (which >= state.docs.size()) {
+    return;
+  }
+
+  const auto &doc = state.docs[which];
+  const std::string &name = doc->name();
+  // A document made with "new" rather than opened from somewhere has no name
+  // to write to, and there is no "Save As" yet (packaging/android/README.md
+  // notes the Android side of that same gap for opening one) to ask for one.
+  if (name.empty()) {
+    toasts->post(render::DiagnosticSeverity::Error,
+                "nothing to save this document as yet", state);
+    return;
+  }
+  const std::string content = doc->contents().raw();
+
+#ifdef __ANDROID__
+  // Writes through the content:// Uri this document was opened from, when it
+  // was opened that way: name() is that Uri's own internal-storage copy
+  // (src/android_bootstrap.cpp's openDocumentFromIntent()), not a path the
+  // Uri itself would answer to, so writing name() as a plain file here would
+  // silently save over that copy and never reach whatever the user actually
+  // shared or opened in. Falls through to the plain write below for
+  // anything else -- a file:// Uri, which already named a real path, or a
+  // document that was never opened from an intent at all.
+  if (gleditor::androidSaveDocument(name, content)) {
+    toasts->post(render::DiagnosticSeverity::Info,
+                std::format("saved {}", name), state);
+    return;
+  }
+#endif
+
+  try {
+    Glib::file_set_contents(name, content);
+  } catch (const Glib::FileError &err) {
+    toasts->post(render::DiagnosticSeverity::Error,
+                std::format("save failed: {}", err.what()), state);
+    return;
+  }
+  toasts->post(render::DiagnosticSeverity::Info, std::format("saved {}", name),
+              state);
 }
 
 void Renderer::openDoc(RenderState &state, const gleditor::TextSource &source) {
@@ -698,6 +750,10 @@ void Renderer::dispatch(RenderState &state, RenderItem &item) {
   }
   case RenderItem::Type::CloseDoc: {
     closeDoc(state, dynamic_cast<RenderItemCloseDoc &>(item).docIndex);
+    break;
+  }
+  case RenderItem::Type::SaveDoc: {
+    saveDoc(state, dynamic_cast<RenderItemSaveDoc &>(item).docIndex);
     break;
   }
   case RenderItem::Type::Resize: {

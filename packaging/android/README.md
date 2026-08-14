@@ -132,3 +132,8 @@ either with `adb install` or by dragging it onto a running emulator window.
   Framework, `ACTION_OPEN_DOCUMENT`) and still needs the small amount of Java
   (a `registerForActivityResult` call) a stock `SDLActivity` does not provide
   on its own, which is why that half is left out rather than done halfway.
+  Saving (`Ctrl+S`, `src/renderer.cpp`'s `Renderer::saveDoc()`) writes back
+  through the same Uri a document was opened or shared in from --
+  `android_bootstrap.cpp`'s `androidSaveDocument()` -- so the same gap
+  applies there too: a document `gleditor` itself created with "new" has no
+  picker to ask where to save it, on Android or on desktop.

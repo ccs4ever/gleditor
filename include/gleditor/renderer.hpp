@@ -42,6 +42,7 @@ struct RenderItem {
     CloseDoc,
     Resize,
     OpenDoc,
+    SaveDoc,
     Run,
     RunState,
   };
@@ -68,6 +69,23 @@ struct RenderItemCloseDoc : RenderItem {
   explicit RenderItemCloseDoc(const std::uint32_t index = mostRecent)
       : RenderItem(Type::CloseDoc), docIndex(index) {}
   ~RenderItemCloseDoc() override = default;
+};
+
+/**
+ * @brief Write a document's current text back to wherever it was opened from.
+ *
+ * The index is the document's position among the open ones, defaulting to the
+ * most recently opened, the same as RenderItemCloseDoc and for the same
+ * reason. A document that has never been named -- created with "new" rather
+ * than opened from somewhere -- has nowhere to write to yet; see
+ * Renderer::saveDoc for what that does instead of guessing a name.
+ */
+struct RenderItemSaveDoc : RenderItem {
+  static constexpr std::uint32_t mostRecent = ~0U;
+  std::uint32_t docIndex;
+  explicit RenderItemSaveDoc(const std::uint32_t index = mostRecent)
+      : RenderItem(Type::SaveDoc), docIndex(index) {}
+  ~RenderItemSaveDoc() override = default;
 };
 
 struct RenderItemResize : RenderItem {
@@ -398,6 +416,17 @@ protected:
    * it are renumbered and eased into the places that opened up.
    */
   void closeDoc(RenderState &state, std::uint32_t index);
+
+  /**
+   * @brief Write the document at @p index back to wherever it was opened
+   *        from.
+   *
+   * A toast reports the outcome either way, since a save that failed
+   * silently is worse than one that never ran: the document at @p index has
+   * no name yet (created with "new"), the write itself failed (permissions,
+   * a full disk, a revoked Android Uri grant), or it succeeded.
+   */
+  void saveDoc(RenderState &state, std::uint32_t index);
 
   /**
    * Draw one frame.

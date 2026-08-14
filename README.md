@@ -1776,13 +1776,14 @@ Movement keys:
 
 Other actions:
 
-| Key | Action                                                         |
-| --- | -------------------------------------------------------------- |
-| n   | Create a new page                                              |
-| w   | Close the most recently opened document                        |
-| r   | Reset view back to start                                       |
-| q   | Quit the application                                           |
-| g   | Increment fov by 1 (max 360); use Shift+g to decrement (min 1) |
+| Key    | Action                                                         |
+| ------ | -------------------------------------------------------------- |
+| n      | Create a new page                                              |
+| w      | Close the most recently opened document                        |
+| ctrl-s | Save the most recently opened document back to disk            |
+| r      | Reset view back to start                                       |
+| q      | Quit the application                                           |
+| g      | Increment fov by 1 (max 360); use Shift+g to decrement (min 1) |
 
 ### Animation
 
