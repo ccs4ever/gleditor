@@ -256,17 +256,6 @@ to sanity-check `.editorconfig` itself, not as a gate.
   SDL, font packages, or anything else the build needs. A goal that does need a
   compiler must not be added to `NO_SDL_GOALS`.
 
-## Known gaps / TODO
-
-- **Touch and gesture support.** The Android build (`packaging/android/`)
-  currently gets input only through whatever SDL synthesizes from touch
-  events as mouse/keyboard equivalents — there is no tap-to-activate,
-  drag-to-scroll, or pinch-to-zoom handling. That work belongs in
-  `src/app.cpp` alongside the existing SDL event handling. Not started; do
-  not begin it without being asked, since it hasn't been scoped yet (gesture
-  thresholds, how it interacts with the existing mouse/keyboard input model,
-  accessibility implications).
-
 ## License
 
 GPL-3.0 (see `LICENSE`). The README notes the GPL-3.0-only vs.

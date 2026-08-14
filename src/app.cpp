@@ -7,12 +7,14 @@
 #include <algorithm>
 #include <array>
 #include <clocale>
+#include <cmath>
 #include <cstdint>
 #include <cstdlib>
 #include <functional>
 #include <iostream>
 #include <locale>
 #include <mutex>
+#include <optional>
 #include <sstream>
 #include <stdexcept>
 #include <string>
@@ -27,6 +29,7 @@
 #include <gleditor/text/font.hpp>
 #include <glm/ext/vector_float3.hpp>
 #include <glm/geometric.hpp>
+#include <glm/trigonometric.hpp>
 
 #include <gleditor/paths.hpp>
 #include <gleditor/render/device.hpp>
@@ -683,6 +686,11 @@ int Application::run() {
 
   AutoSDL sdlScoped(SDL_INIT_VIDEO);
 
+  // Tap, drag and pinch are given their own meanings below (activate, pan,
+  // zoom); none of those are what SDL's synthesized mouse events out of touch
+  // would produce on their own. See disableTouchMouseSynthesis().
+  sdl::disableTouchMouseSynthesis();
+
   // Answered here rather than before SDL starts, because the search asks SDL
   // where the executable is and SDL only knows once it has been initialised.
   // Before any window is created, though: a package installed on a machine with
@@ -759,6 +767,63 @@ int Application::run() {
   // again only when it moves.
   std::optional<gleditor::InputArea> toldAbout;
   bool modalHadKeyboard = false;
+
+  // Touch gesture tracking. One finger pans the view, two pinch to zoom; both
+  // are worked out from raw SDL_EVENT_FINGER_* events (see
+  // disableTouchMouseSynthesis() above) rather than SDL's synthesized mouse
+  // events, which only ever see the first finger and would collide with the
+  // existing mouse-drag-extends-selection meaning. "A" is whichever finger
+  // started the gesture; "B" is a second finger that joined it. Event-thread
+  // local, like modalHadKeyboard above -- nothing here is read anywhere else.
+  std::optional<SDL_FingerID> fingerAId;
+  std::optional<SDL_FingerID> fingerBId;
+  float fingerAX = 0.0F; // normalized 0..1, last position reported for each
+  float fingerAY = 0.0F;
+  float fingerBX = 0.0F;
+  float fingerBY = 0.0F;
+  // Set once a second finger joins, so a lift afterwards is not read as a
+  // tap: a pinch that ends with one finger lifting a moment before the other
+  // must not also activate whatever was under it. Cleared only when the
+  // gesture fully ends (both fingers up), not by the one-finger-left-over
+  // promotion below, since the whole gesture was still a pinch.
+  bool touchWasMultiFinger = false;
+  // Pixel distance between the two fingers as of the last event, so a pinch
+  // is driven by the *change* in spread rather than its absolute size.
+  std::optional<float> pinchSpreadPixels;
+  // Where the first finger went down, in pixels, so a lift can tell a tap
+  // from a drag that happened to end without triggering the pan threshold.
+  int touchStartX = 0;
+  int touchStartY = 0;
+  // Roughly Android's own touch slop; a finger that has not travelled this
+  // far when it lifts is a tap rather than an abandoned drag.
+  constexpr float tapSlopPixels = 16.0F;
+
+  // World units per screen pixel at the camera's current distance from the
+  // documents, for turning a touch's pixel motion into a view.pos delta that
+  // tracks the finger regardless of zoom level. Perspective-correct: the
+  // frustum is `2 * distance * tan(fov/2)` world units tall at that distance,
+  // spread over screenHeight pixels, and (since pixels are square) the same
+  // figure applies to X once the aspect-ratio scaling in the projection
+  // matrix is undone. Caller holds view's lock; this only reads.
+  const auto worldPerPixel = [](const AppState::ViewPerspective &viewNow) {
+    const float distance =
+        glm::dot(viewNow.pos, -glm::normalize(viewNow.front));
+    const float visibleHeight =
+        2.0F * distance * std::tan(glm::radians(viewNow.fov) * 0.5F);
+    return visibleHeight / static_cast<float>(viewNow.screenHeight);
+  };
+  // Pixel distance between two normalized touch positions. Each axis is
+  // scaled by its own screen dimension before the hypotenuse is taken,
+  // since x and y are normalized to width and height independently.
+  const auto pixelSpread = [](const AppState::ViewPerspective &viewNow,
+                              const float posAx, const float posAy,
+                              const float posBx, const float posBy) {
+    const float dxPixels =
+        (posAx - posBx) * static_cast<float>(viewNow.screenWidth);
+    const float dyPixels =
+        (posAy - posBy) * static_cast<float>(viewNow.screenHeight);
+    return std::sqrt((dxPixels * dxPixels) + (dyPixels * dyPixels));
+  };
 
   // The same for where the window is. An assistive technology places what it
   // reads in desktop coordinates, so every node's rectangle is this plus the
@@ -916,6 +981,91 @@ int Application::run() {
         state->clickPending = true;
         break;
       }
+      case SDL_EVENT_FINGER_DOWN: {
+        if (nullptr != state->modal && state->modal->grabbing()) {
+          break;
+        }
+        const auto id = sdl::fingerId(evt);
+        const std::lock_guard locker(state->view);
+        if (!fingerAId) {
+          fingerAId           = id;
+          fingerAX            = evt.tfinger.x;
+          fingerAY            = evt.tfinger.y;
+          touchWasMultiFinger = false;
+          touchStartX         = static_cast<int>(
+              evt.tfinger.x * static_cast<float>(state->view.screenWidth));
+          touchStartY = static_cast<int>(
+              evt.tfinger.y * static_cast<float>(state->view.screenHeight));
+        } else if (!fingerBId && id != *fingerAId) {
+          // A third finger touching down while two are already tracked is
+          // left alone rather than bumped in: this program only gives a
+          // meaning to one or two fingers, and disturbing an in-progress
+          // pinch because something else touched down would be worse than
+          // ignoring it.
+          fingerBId           = id;
+          fingerBX            = evt.tfinger.x;
+          fingerBY            = evt.tfinger.y;
+          touchWasMultiFinger = true;
+          pinchSpreadPixels =
+              pixelSpread(state->view, fingerAX, fingerAY, fingerBX, fingerBY);
+        }
+        break;
+      }
+      case SDL_EVENT_FINGER_MOTION: {
+        if (nullptr != state->modal && state->modal->grabbing()) {
+          break;
+        }
+        const auto id = sdl::fingerId(evt);
+        if (fingerAId && id == *fingerAId) {
+          fingerAX = evt.tfinger.x;
+          fingerAY = evt.tfinger.y;
+        } else if (fingerBId && id == *fingerBId) {
+          fingerBX = evt.tfinger.x;
+          fingerBY = evt.tfinger.y;
+        } else {
+          // Motion from a finger this program never started tracking (the
+          // ignored third-and-later case above).
+          break;
+        }
+
+        const std::lock_guard locker(state->view);
+        if (fingerAId && fingerBId) {
+          const float spread =
+              pixelSpread(state->view, fingerAX, fingerAY, fingerBX, fingerBY);
+          if (pinchSpreadPixels) {
+            const float worldAmount =
+                (spread - *pinchSpreadPixels) * worldPerPixel(state->view);
+            // Fingers spreading apart moves the camera towards the
+            // documents, the same direction and vector the "forward" key
+            // command uses (bindDefaultViewCommands) -- pinching open is
+            // "zoom in" on every touch platform this matches.
+            state->view.pos += worldAmount * state->view.front;
+          }
+          pinchSpreadPixels = spread;
+        } else if (fingerAId && id == *fingerAId) {
+          // One finger: pan. dx/dy are already relative to this finger's own
+          // last event, normalized -1..1, so no absolute-position
+          // bookkeeping is needed here the way the pinch spread above needs
+          // both fingers' current positions.
+          const float perPixel = worldPerPixel(state->view);
+          const float dxPixels =
+              evt.tfinger.dx * static_cast<float>(state->view.screenWidth);
+          const float dyPixels =
+              evt.tfinger.dy * static_cast<float>(state->view.screenHeight);
+          const auto rightAxis =
+              glm::normalize(glm::cross(state->view.front, state->view.upward));
+          const auto vertAxis = glm::normalize(
+              glm::cross(state->view.front, glm::vec3(1.0F, 0.0F, 0.0F)));
+          // Content follows the finger: dragging right must reveal what was
+          // to the left, which is "pos -= rightAxis" -- the same vector and
+          // sign the keyboard "left" command uses, just driven by the
+          // finger's pixel motion instead of a fixed step per key press.
+          // Same reasoning for vertAxis and up/down.
+          state->view.pos -= rightAxis * (dxPixels * perPixel);
+          state->view.pos -= vertAxis * (dyPixels * perPixel);
+        }
+        break;
+      }
       case SDL_EVENT_TEXT_INPUT: {
         if (nullptr != state->modal && state->modal->grabbing()) {
           state->modal->textTyped(evt.text.text);
@@ -941,6 +1091,48 @@ int Application::run() {
         }
         if (sdl::windowMoved(evt)) {
           reportPlacement();
+        }
+        // SDL3 splits "lifted" from "cancelled by the platform" into two
+        // event types where SDL2 has only one; fingerLifted() is true for
+        // whichever one this build's SDL just delivered.
+        if (sdl::fingerLifted(evt)) {
+          const auto id = sdl::fingerId(evt);
+          if (fingerAId && id == *fingerAId) {
+            if (fingerBId) {
+              // The other finger is still down: it becomes the pan finger
+              // rather than leaving the gesture stuck on a B slot the motion
+              // handler above never reads as a pan by itself.
+              fingerAId = fingerBId;
+              fingerAX  = fingerBX;
+              fingerAY  = fingerBY;
+              fingerBId.reset();
+              pinchSpreadPixels.reset();
+            } else {
+              if (!touchWasMultiFinger &&
+                  (nullptr == state->modal || !state->modal->grabbing())) {
+                const std::lock_guard locker(state->view);
+                const int nowX = static_cast<int>(
+                    evt.tfinger.x *
+                    static_cast<float>(state->view.screenWidth));
+                const int nowY = static_cast<int>(
+                    evt.tfinger.y *
+                    static_cast<float>(state->view.screenHeight));
+                const int travelX = nowX - touchStartX;
+                const int travelY = nowY - touchStartY;
+                if (static_cast<float>((travelX * travelX) +
+                                       (travelY * travelY)) <=
+                    tapSlopPixels * tapSlopPixels) {
+                  state->clickX       = nowX;
+                  state->clickY       = nowY;
+                  state->clickPending = true;
+                }
+              }
+              fingerAId.reset();
+            }
+          } else if (fingerBId && id == *fingerBId) {
+            fingerBId.reset();
+            pinchSpreadPixels.reset();
+          }
         }
         int width  = 0;
         int height = 0;
