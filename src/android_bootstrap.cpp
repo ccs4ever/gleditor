@@ -15,7 +15,6 @@
 #include <string>
 #include <system_error>
 
-#include <glib-object.h>
 #include <jni.h>
 #include <SDL3/SDL_filesystem.h>
 #include <SDL3/SDL_iostream.h>
@@ -28,23 +27,40 @@ namespace {
 
 // dlopen() only runs a library's constructors after every constructor of the
 // shared objects it depends on has already run -- that is what normally
-// guarantees glib's own GType bootstrap finishes before glibmm's or
-// pangomm's constructors touch it. That guarantee does not hold here: glib,
-// glibmm and pangomm are all statically linked into this one libmain.so
-// (see /CMakeLists.txt), so every translation unit's constructors, from all
-// three, are merged into a single .init_array with no ordering between them.
-// glibmm carries a legacy constructor of its own that calls the deprecated
-// g_type_init(), which -- on the glib version vcpkg builds -- asserts
-// rather than initializing anything if the type system was not already
-// bootstrapped by the time it runs, crashing the app before main() is ever
-// reached. Forcing that bootstrap here first, via g_type_ensure() (the
-// public, non-deprecated replacement) at constructor priority 101 -- the
-// highest available to user code, since 0-100 is reserved for the
-// implementation -- is what keeps glibmm's constructor from being the one
-// that loses that race.
-__attribute__((constructor(101))) void primeGTypeSystem() {
-  g_type_ensure(G_TYPE_OBJECT);
-}
+// guarantees glib's own bootstrap constructor (glib_init_ctor, see glib's
+// glib-init.c) finishes before any *mm binding's constructors touch glib.
+// That guarantee does not hold here: glib, glibmm and pangomm are all
+// statically linked into this one libmain.so (see /CMakeLists.txt), so every
+// translation unit's constructors, from all three, are merged into a single
+// .init_array with no ordering between them -- confirmed by symbolizing the
+// crash from a CI build: glibmm's own static `Glib::Class::iface_properties_
+// quark` runs *before* glib_init_ctor and calls g_quark_from_string()
+// directly, which -- unlike glib's own gobject_init(), which explicitly
+// calls glib_init() first for exactly this reason -- does not itself ensure
+// glib has bootstrapped. That leaves GLib's quark table (and its
+// once-only-guard) touched before g_quark_init() has ever run; when
+// glib_init_ctor (or gobject_init_ctor, chained through it) finally does run
+// and calls g_quark_init() for real, its g_assert(quark_seq_id == 0) fails,
+// aborting before main() is ever reached.
+//
+// GLib's own bug tracker (bugzilla.gnome.org #756139, the same ctor-order
+// problem between glib and gobject that gobject_init()'s explicit
+// GLIB_PRIVATE_CALL(glib_init)() was added to fix) settled on exactly this
+// pattern for the general case: "if ctor B depends on ctor A already having
+// run, ctor B should call ctor A" rather than relying on link order. There
+// is no public API for that here -- ordinary GLib calls all assume
+// glib_init() already ran, and g_type_init()/g_type_ensure() are pure
+// checks that do not perform it -- so this reaches for glib_init() itself:
+// exported (used by gobject's own private cross-library call), not declared
+// in any public header, but idempotent by its own construction, so calling
+// it extra early is harmless even after glib_init_ctor/gobject_init_ctor
+// run it again later. Constructor priority 101 -- the lowest number user
+// code may use, since 0-100 is reserved for the implementation -- is what
+// gets this called before glibmm's own (unprioritized, and therefore
+// later-running) constructor.
+extern "C" void glib_init();
+
+__attribute__((constructor(101))) void primeGlibBootstrap() { glib_init(); }
 
 // The full set of files the GL/GLES and Vulkan backends open by path, kept in
 // step with assets/shaders/*.glsl and the SPIRV list in the Makefile. Small
