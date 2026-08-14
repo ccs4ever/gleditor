@@ -141,27 +141,21 @@ jobs:
       # files this commit touched"). Hashing the compiler's actual content
       # instead is slower per compile but stable across a re-extracted NDK.
       # The compiler_check fix above did not move the needle -- CCACHE_LOGFILE
-      # (below) showed the same 122/568 (21.48%) hit rate before and after it,
-      # on a run whose C/C++ source was byte-identical to the one before. The
-      # actual cause, from that log: SDL's precompiled header
-      # (cmake_pch.h.pch) misses every run because one of the headers it pulls
-      # in -- e.g. thirdparty/SDL/include/SDL3/SDL_intrin.h -- has "a new
-      # mtime" (actions/checkout stamps every file with the checkout time, not
-      # the commit time, whether or not its content changed), and ccache can
-      # only validate a precompiled-header *generation* step via direct mode
-      # -- the log's own "Not considering cached precompiled header in
-      # preprocessor mode" -- so there is no content-hash fallback to catch
-      # this the way an ordinary compile has one. The regenerated .pch then
-      # cascades the miss to every one of the ~445 files that consume it,
-      # since their manifests reference the previous run's .pch content. The
-      # include_file_mtime/include_file_ctime sloppiness values are ccache's
-      # own documented fix for headers "automatically updated by CVS, git, or
-      # similar" that "always get a new ctime/mtime even though the content is
-      # unchanged" -- exactly this checkout, every run.
+      # (below) showed the same ~122/568 (21.48%) hit rate before and after
+      # it, on a run whose C/C++ source was byte-identical to the one before.
+      # The actual cause, and the real fix, is in CMakeLists.txt: see its
+      # -fno-pch-timestamp comment. include_file_mtime/include_file_ctime
+      # sloppiness looked right from ccache's own docs (headers "automatically
+      # updated by CVS, git, or similar" getting "a new ctime/mtime even
+      # though the content is unchanged" is exactly this checkout) and was
+      # tried here first, but a second CI run under it showed no improvement
+      # either -- confirmed uninvolved by a local ccache+clang repro before
+      # being reverted: that sloppiness setting has no effect on the specific
+      # mtime check a precompiled header trips (see CMakeLists.txt).
       - run: |
           echo "CCACHE_DIR=${{ runner.temp }}/ccache" >> "$GITHUB_ENV"
           echo "CCACHE_MAXSIZE=2G" >> "$GITHUB_ENV"
-          echo "CCACHE_SLOPPINESS=pch_defines,time_macros,include_file_mtime,include_file_ctime" >> "$GITHUB_ENV"
+          echo "CCACHE_SLOPPINESS=pch_defines,time_macros" >> "$GITHUB_ENV"
           echo "CCACHE_COMPILERCHECK=content" >> "$GITHUB_ENV"
           echo "CCACHE_LOGFILE=${{ runner.temp }}/ccache.log" >> "$GITHUB_ENV"
 

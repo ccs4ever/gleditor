@@ -102,6 +102,24 @@ target_compile_definitions(main PRIVATE
 # find the way desktop does through pkg-config. The cache variables below are
 # SDL's own build options (see thirdparty/SDL/CMakeLists.txt), set before
 # add_subdirectory so they take effect for its build rather than a prior one.
+#
+# -fno-pch-timestamp, before add_subdirectory so it applies to SDL's own
+# target_precompile_headers() build too: Clang embeds the mtime of every
+# header a precompiled header pulls in and refuses to trust the .pch again if
+# any of them has a different one -- ccache honours that unconditionally
+# (core/Manifest.cpp's result_matches(), not gated by CCACHE_SLOPPINESS at
+# all) since a mismatch there would mean Clang itself rejecting the reused
+# .pch, not just ccache being overly cautious. actions/checkout gives every
+# file a fresh mtime on every run regardless of whether its content changed,
+# which made this look identical to a real staleness signal on every single
+# CI run -- confirmed with a minimal ccache+clang repro outside this build:
+# touching an unrelated included header's mtime alone was enough to force a
+# miss on both the PCH's own compile and everything that consumes it, with or
+# without include_file_mtime/include_file_ctime sloppiness, and adding this
+# flag to both sides was what actually produced a hit afterwards. -Xclang is
+# needed because this is a cc1-only flag the driver does not recognise
+# directly.
+add_compile_options(-Xclang -fno-pch-timestamp)
 set(SDL_SHARED ON CACHE BOOL "" FORCE)
 set(SDL_STATIC OFF CACHE BOOL "" FORCE)
 set(SDL_TEST_LIBRARY OFF CACHE BOOL "" FORCE)
