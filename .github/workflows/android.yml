@@ -57,7 +57,7 @@ jobs:
       # first needs them, since vcpkg's own error for a missing one names the
       # port, not the workflow step that should have prevented it.
       - name: host build tools vcpkg's ports need
-        run: sudo apt-get update && sudo apt-get install -y autoconf autoconf-archive automake libtool jq unzip
+        run: sudo apt-get update && sudo apt-get install -y autoconf autoconf-archive automake libtool jq unzip ccache
 
       - name: vulkan validation layers
         working-directory: packaging/android
@@ -103,9 +103,44 @@ jobs:
           distribution: temurin
           java-version: "17"
 
+      # ccache, for this project's own object files and SDL's -- vcpkg's
+      # binary cache above already covers every port it builds, but nothing
+      # was caching the ~140 translation units (most of them SDL's) this
+      # project's own CMake configure compiles directly, so every run paid
+      # the full ~14 minutes for those regardless of whether anything
+      # actually changed. thirdparty/SDL is pinned to a fixed submodule
+      # commit, so once its object files are in the cache once they stay hit
+      # on every run after.
+      #
+      # Keyed on the run id, which never matches on restore, so this always
+      # falls through to restore-keys and pulls the most recent cache under
+      # that prefix regardless of which commit produced it -- ccache keys its
+      # own entries by preprocessed content and flags, so a cache from a
+      # different commit is still almost entirely useful, unlike vcpkg's
+      # cache above where an exact manifest match is what matters. Saved
+      # unconditionally (`if: always()`), the same fix the vcpkg cache
+      # needed: a job that fails after compiling anything should not throw
+      # that work away.
+      - name: restore ccache
+        uses: actions/cache/restore@v6
+        with:
+          path: ${{ runner.temp }}/ccache
+          key: ccache-android-${{ github.run_id }}
+          restore-keys: ccache-android-
+      - run: |
+          echo "CCACHE_DIR=${{ runner.temp }}/ccache" >> "$GITHUB_ENV"
+          echo "CCACHE_MAXSIZE=2G" >> "$GITHUB_ENV"
+
       - name: gradlew assembleDebug
         working-directory: packaging/android
         run: ./gradlew assembleDebug --stacktrace
+
+      - if: always()
+        name: save ccache
+        uses: actions/cache/save@v6
+        with:
+          path: ${{ runner.temp }}/ccache
+          key: ccache-android-${{ github.run_id }}
 
       - if: always()
         name: save vcpkg binary cache

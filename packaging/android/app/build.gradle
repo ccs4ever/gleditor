@@ -11,6 +11,23 @@ plugins {
 // number true for both reasons instead of two that happen to agree today.
 def gleditorMinSdk = 28
 
+// -DCMAKE_C(XX)_COMPILER_LAUNCHER=ccache, only when ccache is actually on
+// PATH: CMake fails the whole configure if a compiler launcher it was told
+// to use cannot be found, so this has to be conditional rather than always
+// passed, for the sake of a local build on a machine that never installed
+// it. The CI workflow always has it (see the "host build tools" step in
+// .github/workflows/android.yml) and a warm cache for it besides.
+static def ccacheArgs() {
+    try {
+        if (["sh", "-c", "command -v ccache"].execute().waitFor() == 0) {
+            return ["-DCMAKE_C_COMPILER_LAUNCHER=ccache", "-DCMAKE_CXX_COMPILER_LAUNCHER=ccache"]
+        }
+    } catch (IOException ignored) {
+        // ccache genuinely isn't there; fall through to an unlaunched build.
+    }
+    return []
+}
+
 android {
     namespace "io.github.ccs4ever.gleditor"
     compileSdk 35
@@ -57,13 +74,13 @@ android {
                 // the real toolchain file directly is what a normal
                 // (non-vcpkg) NDK CMake build gets for free from AGP's own
                 // default CMAKE_TOOLCHAIN_FILE, before it was overridden above.
-                arguments "-DGLEDITOR_ENABLE_VULKAN=1",
-                          "-DANDROID_STL=c++_shared",
-                          "-DCMAKE_TOOLCHAIN_FILE=${System.getenv('VCPKG_ROOT') ?: '/opt/vcpkg'}/scripts/buildsystems/vcpkg.cmake",
-                          "-DVCPKG_CHAINLOAD_TOOLCHAIN_FILE=${System.getenv('ANDROID_NDK_HOME')}/build/cmake/android.toolchain.cmake",
-                          "-DVCPKG_HOST_TRIPLET=x64-linux",
-                          "-DVCPKG_MANIFEST_DIR=${file("${project.rootDir}").absolutePath}",
-                          "-DVCPKG_INSTALLED_DIR=${file("${project.rootDir}/vcpkg_installed").absolutePath}"
+                arguments(*(["-DGLEDITOR_ENABLE_VULKAN=1",
+                             "-DANDROID_STL=c++_shared",
+                             "-DCMAKE_TOOLCHAIN_FILE=${System.getenv('VCPKG_ROOT') ?: '/opt/vcpkg'}/scripts/buildsystems/vcpkg.cmake",
+                             "-DVCPKG_CHAINLOAD_TOOLCHAIN_FILE=${System.getenv('ANDROID_NDK_HOME')}/build/cmake/android.toolchain.cmake",
+                             "-DVCPKG_HOST_TRIPLET=x64-linux",
+                             "-DVCPKG_MANIFEST_DIR=${file("${project.rootDir}").absolutePath}",
+                             "-DVCPKG_INSTALLED_DIR=${file("${project.rootDir}/vcpkg_installed").absolutePath}"] + ccacheArgs()))
                 cppFlags ""
             }
         }
