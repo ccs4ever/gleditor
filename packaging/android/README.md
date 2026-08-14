@@ -85,10 +85,13 @@ if `app/src/debug/jniLibs` is empty; the CI workflow runs it automatically.
 ## Building
 
 This was written and wired up in an environment with no Android SDK/NDK
-installed, so it has not been built here -- `.github/workflows/android.yml`
-is the first real build of it, and is the thing to watch for whether it
-actually compiles. To build locally, with Android Studio (which supplies
-its own SDK/NDK) or a standalone `cmdline-tools` install:
+installed, so the build was never exercised locally -- `.github/workflows/
+android.yml` is what actually proved it out, building both ABIs and running
+the result on a headless emulator (`-gpu swiftshader`) as part of every CI
+run: the APK installs, `SDLActivity.onCreate()` reaches `SDL_main`, and the
+process is still alive 15 seconds after launch. To build locally, with
+Android Studio (which supplies its own SDK/NDK) or a standalone
+`cmdline-tools` install:
 
 ```sh
 export ANDROID_NDK_HOME=/path/to/ndk/27.3.13750724   # app/build.gradle's ndkVersion

@@ -130,7 +130,22 @@ jobs:
       - run: |
           echo "CCACHE_DIR=${{ runner.temp }}/ccache" >> "$GITHUB_ENV"
           echo "CCACHE_MAXSIZE=2G" >> "$GITHUB_ENV"
+          echo "CCACHE_SLOPPINESS=pch_defines,time_macros" >> "$GITHUB_ENV"
 
+      # The first ccache-instrumented run (see below) showed exactly why the
+      # ~14 minute compile time barely moved with a warm cache: SDL's own
+      # CMakeLists.txt calls target_precompile_headers() for SDL_internal.h
+      # across its whole source tree, and ccache refuses to cache *any*
+      # compile that consumes a precompiled header unless told it is safe to
+      # -- 444 of 568 compiler invocations were falling into exactly that
+      # bucket, all uncacheable, while the other 124 (this project's own
+      # sources, which use no PCH) were hitting 97% of the time. The
+      # sloppiness setting above is ccache's own documented fix for this
+      # (https://ccache.dev/manual/latest.html#_precompiled_headers): it
+      # tells ccache to ignore #define and time-macro (__TIME__/__DATE__)
+      # differences that it otherwise can't see through a PCH, which is safe
+      # here since SDL_internal.h uses neither.
+      #
       # Zeroed immediately before the build and read immediately after, so
       # this run's own hit/miss counts are visible rather than a cumulative
       # total masking whether ccache is doing anything on THIS run in
