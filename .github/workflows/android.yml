@@ -114,19 +114,19 @@ jobs:
           key: vcpkg-android-${{ hashFiles('packaging/android/vcpkg.json') }}-f298fb4ef3a7ae09766b6a5beb92ce171a767927
 
       # CMake's own File API reply -- what AGP's "error parsing CMake File
-      # API result" (seen once so far) means it could not make sense of --
-      # plus the raw configure logs, for whichever ABI's configure task
-      # actually ran. Uploaded on any failure since which ABI got furthest is
-      # not known ahead of time; empty when nothing under .cxx exists yet.
+      # API result" means it could not make sense of -- plus the raw
+      # configure logs. The whole tree rather than picking specific files
+      # inside it: the first attempt at this named individual paths under
+      # .cxx and .cmake and uploaded nothing, since actions/upload-artifact
+      # excludes dot-directories unless told not to. include-hidden-files is
+      # that override; taking the whole directory besides is what makes this
+      # robust to not already knowing the exact layout AGP produced.
       - if: failure()
         uses: actions/upload-artifact@v4
         with:
           name: cmake-configure-diagnostics
-          path: |
-            packaging/android/app/.cxx/**/CMakeCache.txt
-            packaging/android/app/.cxx/**/CMakeFiles/CMakeError.log
-            packaging/android/app/.cxx/**/CMakeFiles/CMakeOutput.log
-            packaging/android/app/.cxx/**/.cmake/api/v1/reply/**
+          path: packaging/android/app/.cxx
+          include-hidden-files: true
           if-no-files-found: warn
 
       - uses: actions/upload-artifact@v4
