@@ -23,7 +23,7 @@ chooses between them.
   anywhere; vcpkg's `arm64-android` and `x64-android` triplets build it from
   source, and both default to static linkage, so none of it needs a separate
   packaging step to end up in the APK -- it links straight into `libmain.so`.
-  See `vcpkg.json` for the manifest and `app/CMakeLists.txt` for how the
+  See `vcpkg.json` for the manifest and `/CMakeLists.txt` for how the
   toolchain is chained under the NDK's own.
 - **Two ABIs, two product flavors.** `arm64-v8a` for real devices, `x86_64`
   for the classic Android Studio emulator image (Apple Silicon hosts default
@@ -54,7 +54,7 @@ chooses between them.
 ## Backends
 
 The app starts with `opengles` by default
-(`GLEDITOR_DEFAULT_BACKEND` in `app/CMakeLists.txt`, read by the same
+(`GLEDITOR_DEFAULT_BACKEND` in `/CMakeLists.txt`, read by the same
 `--backend` machinery `src/app.cpp` exposes on desktop) because every
 device this build's `minSdk` reaches supports it, where Vulkan support
 varies by GPU driver. Vulkan is still fully built in

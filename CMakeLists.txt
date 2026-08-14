@@ -1,19 +1,28 @@
 # The Android native build: everything the Makefile's `lib` and `gleditor`
 # targets produce, as one shared library instead of two, since an APK has no
 # equivalent of the desktop's install prefix for a library other programs on
-# the same machine might also want. SDL is built alongside it from source
-# (thirdparty/SDL) rather than found, because Android has no system SDL to
-# find; org.libsdl.app.SDLActivity, unmodified, expects the result to be named
-# libmain.so sitting next to its own libSDL3.so, which is why the target below
-# is named "main" and not "gleditor".
+# the same machine might also want. Nothing else in this repository is built
+# through CMake -- see packaging/android/app/build.gradle, which is what
+# actually invokes this, and packaging/android/README.md for why it lives
+# here.
+#
+# At the repository root and not under packaging/android/app/ (which is where
+# it lived at first): add_subdirectory(thirdparty/SDL) below needs SDL's
+# source to be a real descendant of wherever this file sits, since AGP's
+# CMake File API consumer fails to parse the result -- "There was an error
+# parsing CMake File API result", with no further detail -- when a
+# subdirectory it walks resolves to a path outside this file's own tree.
+# thirdparty/SDL and packaging/android/app have no common ancestor closer
+# than the repository root, so this is as deep as the file can live and still
+# have both.
 cmake_minimum_required(VERSION 3.22.1)
 project(gleditor_android CXX)
 
 if(NOT ANDROID)
-  message(FATAL_ERROR "packaging/android is built through Gradle's externalNativeBuild, which sets ANDROID; it is not meant to be configured directly.")
+  message(FATAL_ERROR "This CMakeLists.txt is built through packaging/android's Gradle project, which sets ANDROID; it is not meant to be configured directly, and nothing else in this repository builds through CMake.")
 endif()
 
-get_filename_component(GLEDITOR_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/../../.." ABSOLUTE)
+set(GLEDITOR_ROOT "${CMAKE_CURRENT_SOURCE_DIR}")
 
 # -- version -------------------------------------------------------------
 #
@@ -101,12 +110,12 @@ add_subdirectory("${GLEDITOR_ROOT}/thirdparty/SDL" "${CMAKE_BINARY_DIR}/SDL3")
 
 # -- pango/cairo/glib, glm --------------------------------------------------
 #
-# All from vcpkg (see ../vcpkg.json), statically linked -- the arm64-android
-# and x64-android triplets set VCPKG_LIBRARY_LINKAGE static, so this is one
-# fewer set of .so files Gradle would otherwise need telling to package. Found
-# through pkg-config, same as the desktop Makefile, since that is the form
-# vcpkg's own meson-built ports install; vcpkg's toolchain file points
-# pkg-config at the triplet's install tree on its own.
+# All from vcpkg (see packaging/android/vcpkg.json), statically linked -- the
+# arm64-android and x64-android triplets set VCPKG_LIBRARY_LINKAGE static, so
+# this is one fewer set of .so files Gradle would otherwise need telling to
+# package. Found through pkg-config, same as the desktop Makefile, since that
+# is the form vcpkg's own meson-built ports install; vcpkg's toolchain file
+# points pkg-config at the triplet's install tree on its own.
 #
 # pkg_check_modules is asked for the plain PANGOMM_* variables rather than an
 # IMPORTED_TARGET: cairomm's .pc file under the debug config computes its
