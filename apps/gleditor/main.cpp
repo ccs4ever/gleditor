@@ -33,6 +33,8 @@
 #include <SDL3/SDL_main.h>
 #endif
 
+using gleditor::Mod;
+
 namespace {
 
 /**
@@ -65,6 +67,15 @@ void bindCommands(gleditor::Application &app, const AppStateRef &state,
                       // Which document that is, is something only the render
                       // thread knows.
                       [renderer] { renderer->push(RenderItemCloseDoc()); });
+  // Ctrl, not a bare key like the bindings above: a bare "s" is also the
+  // letter someone typing into the document is trying to enter, and would
+  // reach it too (SDL_EVENT_TEXT_INPUT fires independently of whatever a
+  // SDL_EVENT_KEY_DOWN on the same keypress dispatched as a command -- see
+  // src/app.cpp's event loop). apps/xudu/main.cpp settled the same question
+  // the same way, for the same reason.
+  app.commands().bind(SDL_SCANCODE_S, Mod::Ctrl, "save",
+                      "write the most recently opened document back to disk",
+                      [renderer] { renderer->push(RenderItemSaveDoc()); });
 }
 
 } // namespace

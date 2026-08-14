@@ -177,6 +177,25 @@ void applyBackendOverrideFromIntent() {
   env->DeleteLocalRef(value);
 }
 
+/// The internal-storage copy openDocumentFromIntent() last made of a
+/// content:// Uri, and the Uri itself (as uri.toString(), reparsed with
+/// Uri.parse() rather than kept as a JNI global reference, which would need
+/// explicit cleanup this process never has an occasion to run). Empty when
+/// nothing has been opened from one yet, or the last thing opened was a
+/// file:// Uri or no Uri at all. One remembered document rather than a map
+/// keyed by path: gleditor opens at most one document from an intent per
+/// process (subsequent "new"/"open" commands make documents with nowhere
+/// external to write back to), so androidSaveDocument() only ever needs to
+/// ask "is this the one".
+std::string &rememberedInternalPath() {
+  static std::string path;
+  return path;
+}
+std::string &rememberedOriginalUri() {
+  static std::string uri;
+  return uri;
+}
+
 /// Copies @p uri's bytes into internal storage and returns the resulting
 /// path, or an empty string on failure. android.content.ContentResolver.
 /// openInputStream() is the only way to read a content:// Uri's bytes --
@@ -352,6 +371,20 @@ void openDocumentFromIntent(const std::filesystem::path &internal) {
     }
   } else {
     path = copyOpenableUriToInternalStorage(env, activity, uri, internal);
+    if (!path.empty()) {
+      const jmethodID toString =
+          env->GetMethodID(uriClass, "toString", "()Ljava/lang/String;");
+      const auto uriStringValue =
+          nullptr != toString ? static_cast<jstring>(env->CallObjectMethod(uri, toString))
+                               : nullptr;
+      if (nullptr != uriStringValue) {
+        const char *uriChars = env->GetStringUTFChars(uriStringValue, nullptr);
+        rememberedInternalPath() = path;
+        rememberedOriginalUri()  = uriChars;
+        env->ReleaseStringUTFChars(uriStringValue, uriChars);
+        env->DeleteLocalRef(uriStringValue);
+      }
+    }
   }
   env->DeleteLocalRef(uri);
 
@@ -370,6 +403,93 @@ void androidBootstrap() {
     openDocumentFromIntent(internal);
   }
   applyBackendOverrideFromIntent();
+}
+
+bool androidSaveDocument(const std::string &documentPath,
+                         const std::string &content) {
+  if (documentPath.empty() || documentPath != rememberedInternalPath() ||
+      rememberedOriginalUri().empty()) {
+    return false;
+  }
+
+  auto *env     = static_cast<JNIEnv *>(SDL_GetAndroidJNIEnv());
+  auto activity = static_cast<jobject>(SDL_GetAndroidActivity());
+  if (nullptr == env || nullptr == activity) {
+    return false;
+  }
+
+  const jclass uriClass = env->FindClass("android/net/Uri");
+  const jmethodID parse =
+      nullptr != uriClass
+          ? env->GetStaticMethodID(uriClass, "parse",
+                                    "(Ljava/lang/String;)Landroid/net/Uri;")
+          : nullptr;
+  if (nullptr == parse) {
+    return false;
+  }
+  const jstring uriString = env->NewStringUTF(rememberedOriginalUri().c_str());
+  const jobject uri = env->CallStaticObjectMethod(uriClass, parse, uriString);
+  env->DeleteLocalRef(uriString);
+  if (nullptr == uri) {
+    return false;
+  }
+
+  const jclass activityClass = env->GetObjectClass(activity);
+  const jmethodID getContentResolver = env->GetMethodID(
+      activityClass, "getContentResolver", "()Landroid/content/ContentResolver;");
+  const jobject resolver = nullptr != getContentResolver
+                                ? env->CallObjectMethod(activity, getContentResolver)
+                                : nullptr;
+  if (nullptr == resolver) {
+    env->DeleteLocalRef(uri);
+    return false;
+  }
+
+  const jclass resolverClass = env->GetObjectClass(resolver);
+  const jmethodID openOutputStream =
+      env->GetMethodID(resolverClass, "openOutputStream",
+                        "(Landroid/net/Uri;Ljava/lang/String;)Ljava/io/OutputStream;");
+  if (nullptr == openOutputStream) {
+    env->DeleteLocalRef(uri);
+    return false;
+  }
+  // "wt": truncate before writing, matching what overwriting a plain file
+  // (Glib::file_set_contents, the non-Android save path) already does. The
+  // plain "w" ContentResolver itself documents also truncates, but only for
+  // providers that interpret it that way, which is not guaranteed of every
+  // one a Uri could have come from.
+  const jstring mode = env->NewStringUTF("wt");
+  const jobject stream = env->CallObjectMethod(resolver, openOutputStream, uri, mode);
+  env->DeleteLocalRef(mode);
+  env->DeleteLocalRef(uri);
+  // A Uri whose write grant has since been revoked, or whose provider no
+  // longer exists, throws here rather than returning null.
+  if (env->ExceptionCheck()) {
+    env->ExceptionClear();
+    return false;
+  }
+  if (nullptr == stream) {
+    return false;
+  }
+
+  const jclass streamClass = env->GetObjectClass(stream);
+  const jmethodID write = env->GetMethodID(streamClass, "write", "([BII)V");
+  const jmethodID close = env->GetMethodID(streamClass, "close", "()V");
+
+  const auto size = static_cast<jsize>(content.size());
+  const jbyteArray bytes = env->NewByteArray(size);
+  env->SetByteArrayRegion(bytes, 0, size,
+                          reinterpret_cast<const jbyte *>(content.data()));
+  env->CallVoidMethod(stream, write, bytes, 0, size);
+  const bool writeFailed = env->ExceptionCheck();
+  if (writeFailed) {
+    env->ExceptionClear();
+  }
+  env->DeleteLocalRef(bytes);
+  env->CallVoidMethod(stream, close);
+  env->DeleteLocalRef(stream);
+
+  return !writeFailed;
 }
 
 } // namespace gleditor
