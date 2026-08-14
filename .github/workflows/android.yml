@@ -61,6 +61,8 @@ jobs:
 
       - name: vulkan validation layers
         working-directory: packaging/android
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
         run: ./fetch-validation-layers.sh
 
       # A shallow clone at the exact commit vcpkg.json's builtin-baseline
