@@ -145,6 +145,7 @@ jobs:
           echo "CCACHE_MAXSIZE=2G" >> "$GITHUB_ENV"
           echo "CCACHE_SLOPPINESS=pch_defines,time_macros" >> "$GITHUB_ENV"
           echo "CCACHE_COMPILERCHECK=content" >> "$GITHUB_ENV"
+          echo "CCACHE_LOGFILE=${{ runner.temp }}/ccache.log" >> "$GITHUB_ENV"
 
       # The first ccache-instrumented run (see below) showed exactly why the
       # ~14 minute compile time barely moved with a warm cache: SDL's own
@@ -160,6 +161,17 @@ jobs:
       # differences that it otherwise can't see through a PCH, which is safe
       # here since SDL_internal.h uses neither.
       #
+      # Aggregate hit/miss counts (ccache -s -v below) can't say *which*
+      # calls miss or why -- they showed the sloppiness fix alone left hits
+      # capped well below 100% even on runs that changed no C/C++ source at
+      # all, which is what motivated the compiler_check=content fix above,
+      # but there was no way to confirm from the aggregate numbers alone
+      # whether that actually closed the gap or whether the still-uncached
+      # calls are the PCH-consuming ones specifically. CCACHE_LOGFILE records
+      # ccache's own per-call reasoning (which lookup was tried, what it
+      # matched or didn't, why a call was a miss) so the next run's numbers
+      # can be explained rather than just observed.
+      #
       # Zeroed immediately before the build and read immediately after, so
       # this run's own hit/miss counts are visible rather than a cumulative
       # total masking whether ccache is doing anything on THIS run in
@@ -172,6 +184,17 @@ jobs:
         working-directory: packaging/android
         run: ./gradlew assembleDebug --stacktrace
       - run: ccache -s -v
+
+      # Uploaded regardless of the numbers above -- it's the per-call detail
+      # behind whatever ccache -s -v just printed, and a build that fails
+      # partway through still leaves calls in it worth reading.
+      - if: always()
+        name: upload ccache log
+        uses: actions/upload-artifact@v4
+        with:
+          name: ccache-log
+          path: ${{ runner.temp }}/ccache.log
+          if-no-files-found: warn
 
       - if: always()
         name: save ccache
