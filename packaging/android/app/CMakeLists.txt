@@ -107,17 +107,39 @@ add_subdirectory("${GLEDITOR_ROOT}/thirdparty/SDL" "${CMAKE_BINARY_DIR}/SDL3")
 # through pkg-config, same as the desktop Makefile, since that is the form
 # vcpkg's own meson-built ports install; vcpkg's toolchain file points
 # pkg-config at the triplet's install tree on its own.
+#
+# pkg_check_modules is asked for the plain PANGOMM_* variables rather than an
+# IMPORTED_TARGET: cairomm's .pc file under the debug config computes its
+# include path relative to itself one directory level off (a vcpkg/Android
+# triplet relocation quirk, not something this project's CMake can fix), and
+# an IMPORTED_TARGET makes CMake validate every INTERFACE_INCLUDE_DIRECTORIES
+# entry exists before it will generate anything -- which turns one wrong path
+# fatal even though the compiler itself would have been perfectly happy to
+# ignore it. The Makefile and every other pkg-config consumer in this project
+# already work this way, from a plain -I/-L/-l flag list.
+#
+# The _STATIC_ variables, not the plain ones: vcpkg's triplets build
+# everything static, and only `pkg-config --static` walks the full transitive
+# dependency graph (down through glib, harfbuzz, freetype, fontconfig...) and
+# adds the system libraries (-pthread and the like) a static link needs and a
+# dynamic one gets for free from its own dependencies' SONAMEs. This is what
+# the Makefile's own STATIC flag selects when a packager sets it.
 find_package(PkgConfig REQUIRED)
-pkg_check_modules(PANGOMM REQUIRED IMPORTED_TARGET pangomm-2.48)
+pkg_check_modules(PANGOMM REQUIRED pangomm-2.48)
 find_package(glm CONFIG REQUIRED)
 
 # libvulkan.so is the NDK's own stub for the platform loader, present from
 # API 24 on; nothing here is vcpkg's to provide.
 find_library(GLEDITOR_VULKAN_LIB vulkan REQUIRED)
 
+target_include_directories(main PRIVATE ${PANGOMM_STATIC_INCLUDE_DIRS})
+target_compile_options(main PRIVATE ${PANGOMM_STATIC_CFLAGS_OTHER})
+target_link_directories(main PRIVATE ${PANGOMM_STATIC_LIBRARY_DIRS})
+
 target_link_libraries(main PRIVATE
   SDL3::SDL3
-  PkgConfig::PANGOMM
+  ${PANGOMM_STATIC_LIBRARIES}
+  ${PANGOMM_STATIC_LDFLAGS_OTHER}
   glm::glm
   ${GLEDITOR_VULKAN_LIB}
 )
