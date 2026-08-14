@@ -167,14 +167,14 @@ void Renderer::saveDoc(RenderState &state, const std::uint32_t index) {
     return;
   }
 
-  const auto &doc = state.docs[which];
+  const auto &doc         = state.docs[which];
   const std::string &name = doc->name();
   // A document made with "new" rather than opened from somewhere has no name
   // to write to, and there is no "Save As" yet (packaging/android/README.md
   // notes the Android side of that same gap for opening one) to ask for one.
   if (name.empty()) {
     toasts->post(render::DiagnosticSeverity::Error,
-                "nothing to save this document as yet", state);
+                 "nothing to save this document as yet", state);
     return;
   }
   const std::string content = doc->contents().raw();
@@ -190,7 +190,7 @@ void Renderer::saveDoc(RenderState &state, const std::uint32_t index) {
   // document that was never opened from an intent at all.
   if (gleditor::androidSaveDocument(name, content)) {
     toasts->post(render::DiagnosticSeverity::Info,
-                std::format("saved {}", name), state);
+                 std::format("saved {}", name), state);
     return;
   }
 #endif
@@ -199,11 +199,11 @@ void Renderer::saveDoc(RenderState &state, const std::uint32_t index) {
     Glib::file_set_contents(name, content);
   } catch (const Glib::FileError &err) {
     toasts->post(render::DiagnosticSeverity::Error,
-                std::format("save failed: {}", err.what()), state);
+                 std::format("save failed: {}", err.what()), state);
     return;
   }
   toasts->post(render::DiagnosticSeverity::Info, std::format("saved {}", name),
-              state);
+               state);
 }
 
 void Renderer::openDoc(RenderState &state, const gleditor::TextSource &source) {

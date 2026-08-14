@@ -62,7 +62,8 @@ namespace {
 class AutoJoinThread {
 public:
   template <typename... Args>
-  explicit AutoJoinThread(Args &&...args) : thread(std::forward<Args>(args)...) {}
+  explicit AutoJoinThread(Args &&...args)
+      : thread(std::forward<Args>(args)...) {}
   ~AutoJoinThread() {
     if (thread.joinable()) {
       thread.join();
@@ -395,12 +396,13 @@ void addCommonArguments(argparse::ArgumentParser &parser, const bool detailed) {
            "Rendering backend: opengl (the default), opengles or vulkan. The "
            "Vulkan backend is only present when the binary was built with it; "
            "naming one that is not compiled in reports which are.");
-  everyday(parser.add_argument("--coarse-below").default_value(std::string{"0.15"}),
-           "draw distant pages as one bar per line below this scale",
-           "Draw a page as one solid bar per line once one layout pixel of it "
-           "covers fewer than this many screen pixels. Zero draws every "
-           "visible page in full detail, which is far slower on a document "
-           "held at a distance.");
+  everyday(
+      parser.add_argument("--coarse-below").default_value(std::string{"0.15"}),
+      "draw distant pages as one bar per line below this scale",
+      "Draw a page as one solid bar per line once one layout pixel of it "
+      "covers fewer than this many screen pixels. Zero draws every "
+      "visible page in full detail, which is far slower on a document "
+      "held at a distance.");
 
   // Everything below drives the program without a person at the keyboard.
   // Grouped only in the detailed listing: argparse prints a group's heading
