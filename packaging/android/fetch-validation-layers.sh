@@ -31,12 +31,27 @@ if [ -z "$ASSET_URL" ] || [ "$ASSET_URL" = "null" ]; then
   exit 1
 fi
 
+ASSET_NAME=${ASSET_URL##*/}
 echo "fetch-validation-layers: downloading $ASSET_URL"
-curl -sSL "$ASSET_URL" -o "$WORK_DIR/android-binaries.zip"
+curl -sSL "$ASSET_URL" -o "$WORK_DIR/$ASSET_NAME"
 
 rm -rf "$JNI_LIBS_DIR"
-mkdir -p "$JNI_LIBS_DIR"
-unzip -q "$WORK_DIR/android-binaries.zip" -d "$WORK_DIR/extracted"
+mkdir -p "$JNI_LIBS_DIR" "$WORK_DIR/extracted"
+# .zip in some releases, .tar.gz in others (1.4.357.0's is
+# android-binaries-1.4.357.0.tar.gz) -- gone by the asset's own name rather
+# than assumed, since which one Khronos publishes has changed before.
+case "$ASSET_NAME" in
+  *.tar.gz | *.tgz)
+    tar -xzf "$WORK_DIR/$ASSET_NAME" -C "$WORK_DIR/extracted"
+    ;;
+  *.zip)
+    unzip -q "$WORK_DIR/$ASSET_NAME" -d "$WORK_DIR/extracted"
+    ;;
+  *)
+    echo "fetch-validation-layers: don't know how to extract $ASSET_NAME" >&2
+    exit 1
+    ;;
+esac
 
 # The archive's internal layout has varied by release (a flat set of <abi>/
 # directories in some, one more directory level in others), so this looks for
