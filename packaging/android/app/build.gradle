@@ -44,20 +44,26 @@ android {
                 // CMAKE_TOOLCHAIN_FILE is repeated by each product flavor below,
                 // and CMake takes the last -D for a given variable: this one
                 // (vcpkg's) is what AGP's own toolchain default is overridden
-                // with. vcpkg's own triplet -- not this project -- decides in turn
-                // to chainload the NDK's toolchain underneath it once it sees
-                // VCPKG_CMAKE_SYSTEM_NAME Android, which is why the NDK toolchain
-                // is never named here directly.
+                // with. VCPKG_CHAINLOAD_TOOLCHAIN_FILE is what then sends vcpkg
+                // on to the NDK's own toolchain underneath it -- left unset,
+                // vcpkg's Android triplet still resolves a working compiler for
+                // every port and for this build's own sources (everything
+                // actually compiles and links), but CMAKE_CXX_COMPILER and
+                // CMAKE_CXX_COMPILER_AR/RANLIB come out of the cache empty or
+                // NOTFOUND rather than the real paths the NDK toolchain would
+                // have set, and that is what AGP's CMake File API consumer
+                // chokes on ("There was an error parsing CMake File API
+                // result", with nothing more specific than that). Chainloading
+                // the real toolchain file directly is what a normal
+                // (non-vcpkg) NDK CMake build gets for free from AGP's own
+                // default CMAKE_TOOLCHAIN_FILE, before it was overridden above.
                 arguments "-DGLEDITOR_ENABLE_VULKAN=1",
                           "-DANDROID_STL=c++_shared",
                           "-DCMAKE_TOOLCHAIN_FILE=${System.getenv('VCPKG_ROOT') ?: '/opt/vcpkg'}/scripts/buildsystems/vcpkg.cmake",
+                          "-DVCPKG_CHAINLOAD_TOOLCHAIN_FILE=${System.getenv('ANDROID_NDK_HOME')}/build/cmake/android.toolchain.cmake",
                           "-DVCPKG_HOST_TRIPLET=x64-linux",
                           "-DVCPKG_MANIFEST_DIR=${file("${project.rootDir}").absolutePath}",
                           "-DVCPKG_INSTALLED_DIR=${file("${project.rootDir}/vcpkg_installed").absolutePath}"
-                // ANDROID_NDK_HOME is read from the environment by vcpkg's own
-                // Android toolchain script (triggered by VCPKG_CMAKE_SYSTEM_NAME
-                // Android in the triplet) -- set by the CI workflow's NDK setup
-                // step, and by whoever installs the same NDK version locally.
                 cppFlags ""
             }
         }
