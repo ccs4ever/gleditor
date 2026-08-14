@@ -80,8 +80,18 @@ jobs:
       # fontconfig, glibmm, pangomm) compiling from source for two triplets is
       # the slow part of this workflow by far, and none of it changes between
       # runs that touch only this project's own sources.
-      - name: vcpkg binary cache
-        uses: actions/cache@v6
+      #
+      # restore/save as two separate steps rather than the combined
+      # actions/cache action, with the save on `if: always()`: the combined
+      # action's own post-job save silently did not run after the first
+      # successful vcpkg build here, so the next run paid the full ~18 minute
+      # rebuild again despite nothing in vcpkg.json having changed. An
+      # explicit save that is not conditioned on the rest of the job
+      # succeeding is what actually guarantees a config-step failure below
+      # (which is what this workflow has been hitting) does not throw away a
+      # vcpkg build that already finished.
+      - name: restore vcpkg binary cache
+        uses: actions/cache/restore@v6
         with:
           path: ${{ runner.temp }}/vcpkg-binary-cache
           key: vcpkg-android-${{ hashFiles('packaging/android/vcpkg.json') }}-f298fb4ef3a7ae09766b6a5beb92ce171a767927
@@ -95,6 +105,29 @@ jobs:
       - name: gradlew assembleDebug
         working-directory: packaging/android
         run: ./gradlew assembleDebug --stacktrace
+
+      - if: always()
+        name: save vcpkg binary cache
+        uses: actions/cache/save@v6
+        with:
+          path: ${{ runner.temp }}/vcpkg-binary-cache
+          key: vcpkg-android-${{ hashFiles('packaging/android/vcpkg.json') }}-f298fb4ef3a7ae09766b6a5beb92ce171a767927
+
+      # CMake's own File API reply -- what AGP's "error parsing CMake File
+      # API result" (seen once so far) means it could not make sense of --
+      # plus the raw configure logs, for whichever ABI's configure task
+      # actually ran. Uploaded on any failure since which ABI got furthest is
+      # not known ahead of time; empty when nothing under .cxx exists yet.
+      - if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: cmake-configure-diagnostics
+          path: |
+            packaging/android/app/.cxx/**/CMakeCache.txt
+            packaging/android/app/.cxx/**/CMakeFiles/CMakeError.log
+            packaging/android/app/.cxx/**/CMakeFiles/CMakeOutput.log
+            packaging/android/app/.cxx/**/.cmake/api/v1/reply/**
+          if-no-files-found: warn
 
       - uses: actions/upload-artifact@v4
         with:
