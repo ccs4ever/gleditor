@@ -94,3 +94,75 @@ jobs:
           name: gleditor-debug-apks
           path: packaging/android/app/build/outputs/apk/**/*.apk
           if-no-files-found: error
+
+  # A real device is what packaging/android/README.md asks a person to test
+  # against, but a headless emulator on the runner is what catches a build
+  # that only looks right -- a manifest AAPT2 accepted, a native library that
+  # links, or an asset path that resolves on the build machine and nowhere
+  # else -- before it ever reaches one. x86_64 rather than arm64-v8a: this
+  # runner has no hardware acceleration for the latter (there is no ARM host
+  # to virtualize on), and TCG-emulated arm64 is slow enough that "boots
+  # within the job timeout" stops being a given. -gpu swiftshader is this
+  # job's equivalent of the desktop workflow's lavapipe/llvmpipe: a software
+  # renderer standing in for a GPU the runner does not have, so both the GLES
+  # and (once vkEnumeratePhysicalDevices is asked) the Vulkan backend get
+  # something to draw through.
+  emulator-smoke-test:
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: gleditor-debug-apks
+          path: apks
+
+      - uses: android-actions/setup-android@v3
+      - run: sdkmanager --install "system-images;android-30;google_apis;x86_64" "emulator"
+
+      # GitHub's own runners have /dev/kvm, but not always the permissions to
+      # use it; the emulator falls back to unaccelerated TCG rather than
+      # failing outright when this does nothing, which is why it is a step of
+      # its own instead of a precondition the job fails without.
+      - name: enable KVM
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+
+      - name: boot a headless emulator
+        run: |
+          set -eu
+          echo "no" | avdmanager create avd -n test -k "system-images;android-30;google_apis;x86_64" --device "pixel_4" -f
+          "$ANDROID_HOME/emulator/emulator" -avd test -no-window -no-audio -no-boot-anim -gpu swiftshader -no-snapshot -accel auto &
+          adb wait-for-device
+          timeout 300 sh -c 'until [ "$(adb shell getprop sys.boot_completed 2>/dev/null | tr -d "\r")" = "1" ]; do sleep 2; done'
+
+      - name: install and launch gleditor
+        run: |
+          set -eu
+          adb install -r apks/x86_64/debug/app-x86_64-debug.apk
+          adb shell am start -n io.github.ccs4ever.gleditor/org.libsdl.app.SDLActivity
+          # SDL's own startup (loading libSDL3.so and libmain.so, then this
+          # project's asset extraction and Pango/fontconfig initialisation in
+          # androidBootstrap()) is what this sleep is giving room to finish
+          # before the process is checked for rather than caught mid-launch.
+          sleep 15
+          adb exec-out screencap -p > gleditor-emulator.png
+          if [ -z "$(adb shell pidof io.github.ccs4ever.gleditor)" ]; then
+            echo "::error::gleditor is not running 15s after launch -- it crashed or never started" >&2
+            exit 1
+          fi
+
+      - if: always()
+        run: adb logcat -d > logcat.txt || true
+
+      - if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: gleditor-emulator-smoke-test
+          path: |
+            gleditor-emulator.png
+            logcat.txt
+          if-no-files-found: warn
