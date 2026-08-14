@@ -14,6 +14,7 @@
 # for.
 set -eu
 
+# shellcheck disable=SC1007
 SCRIPT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 JNI_LIBS_DIR="$SCRIPT_DIR/app/src/debug/jniLibs"
 
