@@ -17,11 +17,20 @@
 #include "config.h" // for GLEDITOR_VERSION, TOSTRING
 #include <argparse/argparse.hpp>
 
+#include <gleditor/android_bootstrap.hpp>
 #include <gleditor/app.hpp>
 #include <gleditor/render/types.hpp>
 #include <gleditor/renderer.hpp>
 #include <gleditor/sdl_compat.hpp>
 #include <gleditor/state.hpp>
+
+// On every other platform this program's own main() is the process entry
+// point. On Android it is not: SDL_main.h renames it and SDL's Java Activity
+// calls the renamed function from JNI once a window surface exists, which is
+// what lets the rest of this file stay unaware it is being started that way.
+#ifdef __ANDROID__
+#include <SDL3/SDL_main.h>
+#endif
 
 namespace {
 
@@ -60,6 +69,9 @@ void bindCommands(gleditor::Application &app, const AppStateRef &state,
 } // namespace
 
 int main(const int argc, char **argv) {
+#ifdef __ANDROID__
+  gleditor::androidBootstrap();
+#endif
   gleditor::initLocale();
 
   const auto state    = std::make_shared<AppState>();

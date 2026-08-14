@@ -1597,6 +1597,13 @@ building the same tarball with the same `install` target:
 | Windows         | `packaging/windows/build-msys2.sh`        | 3   | MSYS2 UCRT64 |
 | macOS           | `packaging/macos/gleditor.rb`             | 3   | clang        |
 
+Android is not in this table: an APK is not a tarball an `install` target can
+produce, and none of pango, cairo, glib or SDL are things a distribution
+installs there for the Makefile to find with pkg-config -- vcpkg cross-builds
+that whole stack from source instead, against the Android NDK. It is `gleditor`
+only for now, not `xudu`, and lives under `packaging/android/` with its own
+[README](packaging/android/README.md) rather than in the table above.
+
 The Vulkan backend is enabled on all six targets, so `glslang` is a build
 dependency everywhere and the Vulkan loader is a weak runtime one -- it is one
 backend of three, and the other two work without it. On macOS the driver
