@@ -64,6 +64,13 @@
 #define SDL_EVENT_MOUSE_MOTION SDL_MOUSEMOTION
 #define SDL_EVENT_MOUSE_BUTTON_DOWN SDL_MOUSEBUTTONDOWN
 #define SDL_EVENT_TEXT_INPUT SDL_TEXTINPUT
+#define SDL_EVENT_FINGER_DOWN SDL_FINGERDOWN
+#define SDL_EVENT_FINGER_MOTION SDL_FINGERMOTION
+// No SDL_EVENT_FINGER_UP macro: SDL2 has no SDL_EVENT_FINGER_CANCELED, and a
+// caller that matched both UP and CANCELED as case labels would collide if
+// this aliased UP to the same value as some other constant. fingerLifted()
+// below is the shape-difference predicate instead, same reasoning as
+// windowSizeChanged() and friends.
 #define SDL_KMOD_SHIFT KMOD_SHIFT
 #define SDL_KMOD_CTRL KMOD_CTRL
 #define SDL_KMOD_ALT KMOD_ALT
@@ -464,6 +471,50 @@ inline std::uint16_t keyModifiers(const SDL_Event &event) {
 #else
   return event.key.keysym.mod;
 #endif
+}
+
+/// Which finger a touch event is about. SDL3 capitalises the "ID" that SDL2
+/// spells "Id"; both name the field's type SDL_FingerID, so only the member
+/// access needs a branch.
+inline SDL_FingerID fingerId(const SDL_Event &event) {
+#if GLEDITOR_SDL_MAJOR == 3
+  return event.tfinger.fingerID;
+#else
+  return event.tfinger.fingerId;
+#endif
+}
+
+/// Whether this event ends a touch contact. SDL3 splits "lifted" from
+/// "interrupted by the platform" (SDL_EVENT_FINGER_CANCELED, e.g. a system
+/// gesture stealing the touch); SDL2 has only SDL_FINGERUP for both. A caller
+/// that only cares whether the finger is gone either way asks this instead of
+/// matching event types, the same shape difference windowSizeChanged() and
+/// windowMoved() paper over.
+inline bool fingerLifted(const SDL_Event &event) {
+#if GLEDITOR_SDL_MAJOR == 3
+  return SDL_EVENT_FINGER_UP == event.type ||
+         SDL_EVENT_FINGER_CANCELED == event.type;
+#else
+  return SDL_FINGERUP == event.type;
+#endif
+}
+
+/**
+ * @brief Stop SDL from faking a mouse click, motion and drag out of the
+ *        first finger that touches the screen.
+ *
+ * On by default on touch platforms, which is why a tap already reaches
+ * SDL_EVENT_MOUSE_BUTTON_DOWN today: SDL synthesizes it. It is also why a
+ * one-finger drag arrives as SDL_EVENT_MOUSE_MOTION with the button held,
+ * indistinguishable from a real mouse drag -- which this program already
+ * gives a meaning to (extending the selection) that a touch drag needs to
+ * mean something else (panning the view). Turning synthesis off is what
+ * makes SDL_EVENT_FINGER_DOWN/MOTION/UP the only source of touch input, so
+ * the two gestures can be told apart instead of colliding on one event
+ * stream. Harmless to call on a build with no touch hardware.
+ */
+inline void disableTouchMouseSynthesis() {
+  SDL_SetHint(SDL_HINT_TOUCH_MOUSE_EVENTS, "0");
 }
 
 } // namespace sdl
