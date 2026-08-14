@@ -45,6 +45,38 @@ namespace gleditor {
 
 namespace {
 
+/**
+ * @brief std::jthread, minus the stop-token machinery this program never
+ *        used.
+ *
+ * The NDK's libc++ does not implement std::jthread: Android's bionic has no
+ * pthread_cancel, which is what its cooperative-cancellation support was
+ * built on elsewhere, and the standard library there simply leaves the type
+ * out rather than offer a version that cannot honour half of what it
+ * promises. The one place this program used std::jthread never called
+ * request_stop or read a stop_token -- it was reached for purely to have the
+ * render thread joined automatically wherever run() stops running, return or
+ * exception alike, which this gives back with a std::thread and a
+ * destructor.
+ */
+class AutoJoinThread {
+public:
+  template <typename... Args>
+  explicit AutoJoinThread(Args &&...args) : thread(std::forward<Args>(args)...) {}
+  ~AutoJoinThread() {
+    if (thread.joinable()) {
+      thread.join();
+    }
+  }
+  AutoJoinThread(const AutoJoinThread &)            = delete;
+  AutoJoinThread &operator=(const AutoJoinThread &) = delete;
+  AutoJoinThread(AutoJoinThread &&)                 = delete;
+  AutoJoinThread &operator=(AutoJoinThread &&)      = delete;
+
+private:
+  std::thread thread;
+};
+
 /// The library's modifier mask for whatever SDL currently reports held.
 Mod modsFromSdl(const std::uint16_t sdlMods) {
   auto mods = Mod::None;
@@ -675,7 +707,7 @@ int Application::run() {
     return commandTable.run(name);
   };
 
-  std::jthread renderThread(std::ref(*renderer), std::ref(window));
+  AutoJoinThread renderThread(std::ref(*renderer), std::ref(window));
 
   // Milliseconds to block in SDL_WaitEventTimeout. Waiting rather than spinning
   // on SDL_PollEvent keeps this thread off the CPU while idle; the timeout
