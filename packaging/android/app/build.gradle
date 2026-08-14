@@ -1,0 +1,173 @@
+plugins {
+    id("com.android.application")
+}
+
+// vcpkg's arm64-android and x64-android triplets both target Android API 28
+// (VCPKG_CMAKE_SYSTEM_VERSION in the triplet file itself), which is also the
+// first API level Android's Vulkan loader will pick up a layer -- the
+// validation layer, in particular -- bundled straight into the APK's own
+// native library directory rather than needing it installed system-wide.
+// Matching minSdk to that rather than to Vulkan's own floor of 24 keeps one
+// number true for both reasons instead of two that happen to agree today.
+def gleditorMinSdk = 28
+
+android {
+    namespace "io.github.ccs4ever.gleditor"
+    compileSdk 35
+    // Pinned rather than left to whatever the runner has installed: the
+    // Khronos validation layer binaries fetched in CI are published against a
+    // specific NDK build, and a toolchain drift between the two is exactly
+    // the kind of failure that only shows up on-device.
+    ndkVersion "27.3.13750724"
+
+    defaultConfig {
+        applicationId "io.github.ccs4ever.gleditor"
+        minSdk gleditorMinSdk
+        targetSdk 35
+        versionCode 1
+        versionName gitDescribeVersion()
+
+        externalNativeBuild {
+            cmake {
+                // GLEDITOR_ENABLE_VULKAN=1 unconditionally: this build exists to
+                // carry both backends, and the default the app actually starts
+                // with is still opengles (src/app.cpp, GLEDITOR_DEFAULT_BACKEND) --
+                // this only decides which backends are compiled in, not which one
+                // runs first.
+                //
+                // c++_shared rather than the NDK's default static libc++: the APK
+                // ends up with two native libraries that both use the C++ runtime
+                // (libmain.so and SDL's own libSDL3.so), and two static copies of
+                // it in one process is undefined behaviour the first time an
+                // exception or a static local crosses that boundary.
+                //
+                // CMAKE_TOOLCHAIN_FILE is repeated by each product flavor below,
+                // and CMake takes the last -D for a given variable: this one
+                // (vcpkg's) is what AGP's own toolchain default is overridden
+                // with. vcpkg's own triplet -- not this project -- decides in turn
+                // to chainload the NDK's toolchain underneath it once it sees
+                // VCPKG_CMAKE_SYSTEM_NAME Android, which is why the NDK toolchain
+                // is never named here directly.
+                arguments "-DGLEDITOR_ENABLE_VULKAN=1",
+                          "-DANDROID_STL=c++_shared",
+                          "-DCMAKE_TOOLCHAIN_FILE=${System.getenv('VCPKG_ROOT') ?: '/opt/vcpkg'}/scripts/buildsystems/vcpkg.cmake",
+                          "-DVCPKG_HOST_TRIPLET=x64-linux",
+                          "-DVCPKG_MANIFEST_DIR=${file("${project.rootDir}").absolutePath}",
+                          "-DVCPKG_INSTALLED_DIR=${file("${project.rootDir}/vcpkg_installed").absolutePath}"
+                // ANDROID_NDK_HOME is read from the environment by vcpkg's own
+                // Android toolchain script (triggered by VCPKG_CMAKE_SYSTEM_NAME
+                // Android in the triplet) -- set by the CI workflow's NDK setup
+                // step, and by whoever installs the same NDK version locally.
+                cppFlags ""
+            }
+        }
+    }
+
+    // Vulkan validation is a debug-build concern (see the Makefile's own
+    // reasoning for enabling it whenever present): the layer binaries only
+    // exist under src/debug/jniLibs, fetched by
+    // packaging/android/fetch-validation-layers.sh, so a release build never
+    // sees them and never becomes debuggable enough to load them.
+    buildTypes {
+        debug {
+            debuggable true
+            jniDebuggable true
+        }
+        release {
+            minifyEnabled false
+        }
+    }
+
+    externalNativeBuild {
+        cmake {
+            path "CMakeLists.txt"
+            version "3.22.1"
+        }
+    }
+
+    // One product flavor per ABI rather than one externalNativeBuild.abiFilters
+    // list for both: each ABI needs a different vcpkg triplet
+    // (VCPKG_TARGET_TRIPLET), and that has to reach CMake as its own
+    // -D argument per invocation. AGP invokes external native builds once per
+    // (flavor, build type) combination, which is what gives each ABI a place
+    // to carry its own triplet name.
+    flavorDimensions "abi"
+    productFlavors {
+        arm64 {
+            dimension "abi"
+            ndk {
+                abiFilters "arm64-v8a"
+            }
+            externalNativeBuild {
+                cmake {
+                    arguments "-DVCPKG_TARGET_TRIPLET=arm64-android"
+                }
+            }
+        }
+        x86_64 {
+            dimension "abi"
+            ndk {
+                abiFilters "x86_64"
+            }
+            externalNativeBuild {
+                cmake {
+                    arguments "-DVCPKG_TARGET_TRIPLET=x64-android"
+                }
+            }
+        }
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+
+    // SDL's own Java sources, used unmodified: this project writes none of its
+    // own. org.libsdl.app.SDLActivity is a small, general-purpose Activity that
+    // loads the native libraries an app subclass (or, as here, its manifest
+    // meta-data) names and forwards lifecycle and input events to them; every
+    // line of actual behaviour is in the C++ this repository owns.
+    sourceSets {
+        main {
+            java.srcDirs = ["${sdlRoot()}/android-project/app/src/main/java"]
+            manifest.srcFile "src/main/AndroidManifest.xml"
+            // The repo's own assets/ (shaders) plus src/main/assets here, which
+            // holds only what is Android-specific and belongs nowhere else in
+            // the tree: fontconfig/fonts.conf, since Android has no fontconfig
+            // of its own for Pango to find fonts through.
+            assets.srcDirs = ["${project.rootDir}/../../assets", "src/main/assets"]
+        }
+        debug {
+            jniLibs.srcDirs = ["src/debug/jniLibs"]
+        }
+    }
+}
+
+// thirdparty/SDL, resolved once for the Java source set above.
+// CMakeLists.txt locates the same tree on its own, relative to itself.
+def sdlRoot() {
+    return file("${project.rootDir}/../../thirdparty/SDL").absolutePath
+}
+
+// GLEDITOR_VERSION as the Makefile computes it: a tag if HEAD carries one,
+// VERSION otherwise. A version name the app cannot report accurately is worse
+// than a plain fallback, so this mirrors that logic rather than inventing a
+// separate one.
+def gitDescribeVersion() {
+    def stdout = new ByteArrayOutputStream()
+    try {
+        exec {
+            commandLine "git", "describe", "--tags", "--match", "v[0-9]*.[0-9]*.[0-9]*", "HEAD"
+            workingDir = "${project.rootDir}/../.."
+            standardOutput = stdout
+            ignoreExitValue = true
+        }
+    } catch (ignored) {
+        return file("${project.rootDir}/../../VERSION").text.trim()
+    }
+    def described = stdout.toString().trim()
+    if (described.isEmpty()) {
+        return file("${project.rootDir}/../../VERSION").text.trim()
+    }
+    return described.replaceFirst("^v", "").replace("-", ".")
+}

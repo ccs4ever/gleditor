@@ -1,0 +1,19 @@
+# Where the SDK lives on whichever machine built this -- never the same path
+# twice, and never something to commit.
+local.properties
+
+# Gradle and CMake build output.
+build/
+.cxx/
+*.iml
+.gradle/
+.idea/
+
+# vcpkg's own build tree and install cache -- large, and rebuilt from
+# vcpkg.json by the CI workflow (or by anyone else) rather than carried here.
+vcpkg_installed/
+
+# Fetched by fetch-validation-layers.sh; only ever a debug-build concern, and
+# not something to keep two copies of (the repo's and whatever a build just
+# downloaded).
+app/src/debug/jniLibs/

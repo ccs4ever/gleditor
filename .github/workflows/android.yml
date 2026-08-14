@@ -1,0 +1,96 @@
+name: Android
+
+# Path-filtered on push, since this build is expensive (vcpkg compiles
+# pango's whole dependency stack from source, for two ABIs) and most pushes
+# touch neither the Android project nor the library code it builds.
+# workflow_dispatch is kept alongside it for re-running against an unchanged
+# tree, which the path filter would otherwise never allow.
+on:
+  push:
+    paths:
+      - "packaging/android/**"
+      - "src/**"
+      - "include/**"
+      - "apps/gleditor/**"
+      - "thirdparty/SDL"
+      - ".github/workflows/android.yml"
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          submodules: recursive
+          # Plain `git describe --tags` -- what both app/build.gradle's
+          # gitDescribeVersion() and CMakeLists.txt's own copy of the same
+          # logic run -- sees no tags at all against actions/checkout's
+          # default shallow clone, and silently falls back to VERSION
+          # instead of failing. Fetching real history is what lets a build
+          # off a tagged commit actually report that tag.
+          fetch-depth: 0
+
+      - name: pin the NDK version app/build.gradle asks for
+        id: ndk
+        run: echo "version=27.3.13750724" >> "$GITHUB_OUTPUT"
+
+      - uses: android-actions/setup-android@v3
+
+      - name: install the NDK, platform and build tools
+        run: |
+          set -eu
+          sdkmanager --install \
+            "ndk;${{ steps.ndk.outputs.version }}" \
+            "platforms;android-35" \
+            "build-tools;35.0.0" \
+            "cmake;3.22.1"
+          echo "ANDROID_NDK_HOME=$ANDROID_HOME/ndk/${{ steps.ndk.outputs.version }}" >> "$GITHUB_ENV"
+
+      - name: vulkan validation layers
+        working-directory: packaging/android
+        run: |
+          sudo apt-get update && sudo apt-get install -y jq unzip
+          ./fetch-validation-layers.sh
+
+      # A shallow clone at the exact commit vcpkg.json's builtin-baseline
+      # names, rather than whatever HEAD of the vcpkg repo happens to be on
+      # the day this runs: the baseline is what actually pins port versions,
+      # and cloning a different commit than it names would just be a second,
+      # looser pin fighting the first.
+      - name: vcpkg
+        run: |
+          set -eu
+          git clone https://github.com/microsoft/vcpkg "$RUNNER_TEMP/vcpkg"
+          git -C "$RUNNER_TEMP/vcpkg" checkout f298fb4ef3a7ae09766b6a5beb92ce171a767927
+          "$RUNNER_TEMP/vcpkg/bootstrap-vcpkg.sh" -disableMetrics
+          echo "VCPKG_ROOT=$RUNNER_TEMP/vcpkg" >> "$GITHUB_ENV"
+
+      # vcpkg's own binary cache, keyed on the manifest and the pinned vcpkg
+      # commit: pango's dependency stack (glib, cairo, harfbuzz, freetype,
+      # fontconfig, glibmm, pangomm) compiling from source for two triplets is
+      # the slow part of this workflow by far, and none of it changes between
+      # runs that touch only this project's own sources.
+      - name: vcpkg binary cache
+        uses: actions/cache@v6
+        with:
+          path: ${{ runner.temp }}/vcpkg-binary-cache
+          key: vcpkg-android-${{ hashFiles('packaging/android/vcpkg.json') }}-f298fb4ef3a7ae09766b6a5beb92ce171a767927
+      - run: echo "VCPKG_BINARY_SOURCES=clear;files,${{ runner.temp }}/vcpkg-binary-cache,readwrite" >> "$GITHUB_ENV"
+
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: gradlew assembleDebug
+        working-directory: packaging/android
+        run: ./gradlew assembleDebug --stacktrace
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: gleditor-debug-apks
+          path: packaging/android/app/build/outputs/apk/**/*.apk
+          if-no-files-found: error

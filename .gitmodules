@@ -4,3 +4,10 @@
 [submodule "thirdparty/Choreograph"]
 	path = thirdparty/Choreograph
 	url = https://github.com/ccs4ever/Choreograph.git
+[submodule "thirdparty/SDL"]
+	path = thirdparty/SDL
+	url = https://github.com/libsdl-org/SDL
+	# Only the Android build compiles this from source; the desktop build finds
+	# SDL through pkg-config, same as before. Pinned to the release-3.4.14 tag
+	# (recorded as this submodule's commit) since Android has no system SDL to
+	# link against instead.

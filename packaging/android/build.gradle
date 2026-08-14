@@ -1,0 +1,5 @@
+// Only declares which Android Gradle Plugin version app/build.gradle is
+// allowed to apply; there is nothing else at the root for a one-module build.
+plugins {
+    id("com.android.application") version "8.7.2" apply false
+}

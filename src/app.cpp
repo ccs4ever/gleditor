@@ -8,6 +8,7 @@
 #include <array>
 #include <clocale>
 #include <cstdint>
+#include <cstdlib>
 #include <functional>
 #include <iostream>
 #include <locale>
@@ -31,6 +32,14 @@
 #include <gleditor/render/diagnostics.hpp>
 #include <gleditor/sdl_compat.hpp>
 #include <gleditor/sdl_wrap.hpp>
+
+// Desktop GL is not a thing Android has: there is no libGL, and asking for it
+// there fails at context creation rather than at the command line. The
+// Android build points this at "opengles" instead; everywhere else the
+// desktop default of plain OpenGL is unchanged.
+#ifndef GLEDITOR_DEFAULT_BACKEND
+#define GLEDITOR_DEFAULT_BACKEND "opengl"
+#endif
 
 namespace gleditor {
 
@@ -166,6 +175,19 @@ std::pair<int, int> parsePair(const std::string &value,
   }
   return {std::stoi(value.substr(0, comma)),
           std::stoi(value.substr(comma + 1))};
+}
+
+/// The backend a run starts with, absent an explicit --backend.
+/// GLEDITOR_BACKEND overrides the compiled-in default without a rebuild --
+/// there is no command line to pass --backend on, on Android, so the Android
+/// bootstrap sets this from a launch-intent extra when it wants the Vulkan
+/// backend exercised.
+std::string defaultBackendName() {
+  if (const char *env = std::getenv("GLEDITOR_BACKEND");
+      nullptr != env && '\0' != *env) {
+    return env;
+  }
+  return GLEDITOR_DEFAULT_BACKEND;
 }
 
 } // namespace
@@ -336,19 +358,17 @@ void addCommonArguments(argparse::ArgumentParser &parser, const bool detailed) {
            "Initial vertical field of view in degrees. Widening it is how "
            "several pages are brought on screen at once, and how a headless "
            "run sees many small ones.");
-  everyday(
-      parser.add_argument("--backend").default_value(std::string{"opengl"}),
-      "rendering backend: opengl, opengles or vulkan",
-      "Rendering backend: opengl (the default), opengles or vulkan. The "
-      "Vulkan backend is only present when the binary was built with it; "
-      "naming one that is not compiled in reports which are.");
-  everyday(
-      parser.add_argument("--coarse-below").default_value(std::string{"0.15"}),
-      "draw distant pages as one bar per line below this scale",
-      "Draw a page as one solid bar per line once one layout pixel of it "
-      "covers fewer than this many screen pixels. Zero draws every "
-      "visible page in full detail, which is far slower on a document "
-      "held at a distance.");
+  everyday(parser.add_argument("--backend").default_value(defaultBackendName()),
+           "rendering backend: opengl, opengles or vulkan",
+           "Rendering backend: opengl (the default), opengles or vulkan. The "
+           "Vulkan backend is only present when the binary was built with it; "
+           "naming one that is not compiled in reports which are.");
+  everyday(parser.add_argument("--coarse-below").default_value(std::string{"0.15"}),
+           "draw distant pages as one bar per line below this scale",
+           "Draw a page as one solid bar per line once one layout pixel of it "
+           "covers fewer than this many screen pixels. Zero draws every "
+           "visible page in full detail, which is far slower on a document "
+           "held at a distance.");
 
   // Everything below drives the program without a person at the keyboard.
   // Grouped only in the detailed listing: argparse prints a group's heading

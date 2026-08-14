@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- NoActionBar: the editor draws its whole window itself, the same as it
+         does on desktop, and a system title bar would just take space away
+         from that. -->
+    <style name="AppTheme" parent="android:Theme.Black.NoTitleBar.Fullscreen" />
+</resources>
