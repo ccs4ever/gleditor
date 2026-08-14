@@ -2,7 +2,7 @@
 <!--
   Modelled on thirdparty/SDL/android-project/app/src/main/AndroidManifest.xml,
   trimmed to what an editor rather than a game needs. The activity is SDL's
-  own org.libsdl.app.SDLActivity, unmodified -- this project supplies no Java
+  own org.libsdl.app.SDLActivity, unmodified: this project supplies no Java
   of its own, only the native libraries (libmain.so, plus libSDL3.so) that its
   default getLibraries() already expects to find.
 -->
