@@ -38,7 +38,7 @@ jobs:
         id: ndk
         run: echo "version=27.3.13750724" >> "$GITHUB_OUTPUT"
 
-      - uses: android-actions/setup-android@v3
+      - uses: android-actions/setup-android@v4
 
       - name: install the NDK, platform and build tools
         run: |
@@ -196,14 +196,14 @@ jobs:
       # that override; taking the whole directory besides is what makes this
       # robust to not already knowing the exact layout AGP produced.
       - if: failure()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: cmake-configure-diagnostics
           path: packaging/android/app/.cxx
           include-hidden-files: true
           if-no-files-found: warn
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: gleditor-debug-apks
           path: packaging/android/app/build/outputs/apk/**/*.apk
@@ -227,12 +227,12 @@ jobs:
     timeout-minutes: 30
 
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           name: gleditor-debug-apks
           path: apks
 
-      - uses: android-actions/setup-android@v3
+      - uses: android-actions/setup-android@v4
       - run: sdkmanager --install "system-images;android-30;google_apis;x86_64" "emulator"
 
       # GitHub's own runners have /dev/kvm, but not always the permissions to
@@ -286,7 +286,7 @@ jobs:
         run: adb logcat -d > logcat.txt || true
 
       - if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: gleditor-emulator-smoke-test
           path: |
