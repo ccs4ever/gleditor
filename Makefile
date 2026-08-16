@@ -139,7 +139,7 @@ TEST_PKGS := gmock_main
 # whose documents cannot leave the machine that wrote them, which is the one
 # thing this program is for. Better to fail at configure time than to ship a
 # xanadoc editor that quietly cannot publish.
-XUDU_PKGS := glibmm-2.68 libtorrent-rasterbar
+XUDU_PKGS := glibmm-2.68 libtorrent-rasterbar lmdb
 ifneq (,$(filter-out $(NO_SDL_GOALS),$(or $(MAKECMDGOALS),all)))
 ifneq ($(shell pkg-config --exists libtorrent-rasterbar && echo 1),1)
 $(error libtorrent-rasterbar was not found by pkg-config. It is required: \
@@ -310,9 +310,9 @@ ifeq ($(HAVE_SDL_IMAGE),1)
 override CXXFLAGS += -DGLEDITOR_HAVE_SDL_IMAGE=1
 endif
 override LDFLAGS += $(DEBUG_OPTS) $(findstring $(STATIC),-static)
-ifeq ($(CXX_IS_CLANG),1)
-override LDFLAGS += -rtlib=compiler-rt
-endif
+#ifeq ($(CXX_IS_CLANG),1)
+#override LDFLAGS += -rtlib=compiler-rt
+#endif
 # XXX: work on this in a separate branch, get tests working again for now
 #CXXFLAGS += -stdlib=libc++ -fexperimental-library
 #LDFLAGS += -v -stdlib=libc++ -fexperimental-library
