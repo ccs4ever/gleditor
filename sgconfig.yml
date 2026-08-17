@@ -1,0 +1,6 @@
+ruleDirs:
+- /data/git/gleditor/rules
+testConfigs:
+- testDir: /data/git/gleditor/rule-tests
+utilDirs:
+- /data/git/gleditor/utils
