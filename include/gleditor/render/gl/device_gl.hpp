@@ -79,7 +79,7 @@ public:
   void drawGlyphs(const DrawUniforms &uniforms, BufferHandle vertices,
                   std::size_t vertexByteOffset,
                   std::uint32_t instanceCount) override;
-  void requestPickingTag(int x, int y) override;
+  void requestPickingTag(int coordX, int coordY) override;
   std::optional<PickingResult> takePickingTag() override;
   FrameImage captureColorTarget() override;
   void waitIdle() override;

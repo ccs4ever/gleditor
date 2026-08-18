@@ -106,7 +106,7 @@ public:
                   std::size_t vertexByteOffset,
                   std::uint32_t instanceCount) override;
   void drawGlyphBatches(std::span<const GlyphBatch> batches) override;
-  void requestPickingTag(int x, int y) override;
+  void requestPickingTag(int coordX, int coordY) override;
   std::optional<PickingResult> takePickingTag() override;
   FrameImage captureColorTarget() override;
   void waitIdle() override;
