@@ -107,7 +107,7 @@ std::vector<std::byte> withPadding(const std::span<const std::byte> coverage,
                                 std::byte{0});
   for (int row = 0; row < height; row++) {
     const auto *src = coverage.data() + static_cast<std::size_t>(row) * width;
-    auto *dst       = padded.data() +
+    auto *dst = padded.data() +
                 (static_cast<std::size_t>(row + glyphPadding) * paddedWidth) +
                 glyphPadding;
     std::copy_n(src, width, dst);
@@ -431,4 +431,3 @@ GlyphCache::Sizes GlyphCache::put(const std::string_view &chr,
   }
   return addToCache(std::string{chr}, font);
 }
-// vi: set sw=2 sts=2 ts=2 et:

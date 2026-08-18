@@ -199,5 +199,3 @@ int main(const int argc, char **argv) {
          "the text handed to a layout changes no output.\n";
   return 0;
 }
-
-// vi: set sw=2 sts=2 ts=2 et:

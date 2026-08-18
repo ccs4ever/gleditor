@@ -122,4 +122,3 @@ inline float screenScaleAt(const glm::mat4 &mvp, const float screenWidth) {
 }
 
 #endif // GLEDITOR_DRAW_BUDGET_H
-// vi: set sw=2 sts=2 ts=2 et:

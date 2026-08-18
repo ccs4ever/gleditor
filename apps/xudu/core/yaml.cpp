@@ -135,5 +135,3 @@ void writeList(std::string &out, const std::string_view key,
 }
 
 } // namespace xudu::yaml
-
-// vi: set sw=2 sts=2 ts=2 et:

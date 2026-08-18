@@ -150,4 +150,3 @@ TEST(ToastFade, StaysInRangeForALifetimeShorterThanTwoFades) {
                             posted, brief, brief + std::chrono::seconds(1)))
       << "past its expiry a toast contributes nothing";
 }
-// vi: set sw=2 sts=2 ts=2 et:

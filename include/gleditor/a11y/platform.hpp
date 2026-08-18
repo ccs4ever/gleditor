@@ -105,4 +105,3 @@ openPlatform(void *nativeWindow, const std::string &name,
 } // namespace gleditor::a11y
 
 #endif // GLEDITOR_A11Y_PLATFORM_H
-// vi: set sw=2 sts=2 ts=2 et:

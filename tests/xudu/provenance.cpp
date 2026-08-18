@@ -286,5 +286,3 @@ TEST(ProvenanceTest, sealingWithoutASignedRecordIsRefused) {
                    xudu::sealLocalSpool(store, mine, "primedia", "", halfway)),
                std::runtime_error);
 }
-
-// vi: set sw=2 sts=2 ts=2 et:

@@ -77,4 +77,3 @@ void main() {
   // match render::tagFractionScale.
   outTag = uvec4(vTag, uint(clamp(vQuadU, 0.0, 1.0) * 65535.0), 0u);
 }
-// vi: set sw=2 sts=2 ts=2 et:

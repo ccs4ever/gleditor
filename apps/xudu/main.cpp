@@ -354,11 +354,11 @@ public:
                           "the caret is what gets published.");
         return;
       }
-      auto *const caret  = renderer->editCaret();
-      const auto which   = nullptr != caret && caret->active() &&
+      auto *const caret = renderer->editCaret();
+      const auto which = nullptr != caret && caret->active() &&
                                  caret->documentIndex() < session.views().size()
-                               ? caret->documentIndex()
-                               : 0U;
+                             ? caret->documentIndex()
+                             : 0U;
       const auto version = session.versionOf(which);
       const auto who     = session.author();
       const auto where   = session.publishedDir();
@@ -923,11 +923,11 @@ int main(const int argc, char **argv) {
     }
 
     const auto asked = parser.get<std::string>("--version-id");
-    opening          = asked.empty()
-                           ? (read.empty() ? session->store().latest() : read.front())
-                           : MicroversionId::parse(asked);
-    alongside        = parser.get<std::string>("--alongside");
-    publishAs        = parser.get<std::string>("--publish");
+    opening   = asked.empty()
+                    ? (read.empty() ? session->store().latest() : read.front())
+                    : MicroversionId::parse(asked);
+    alongside = parser.get<std::string>("--alongside");
+    publishAs = parser.get<std::string>("--publish");
     if (!publishAs.empty()) {
       // Done before anything is printed about it: publishing may have to mint
       // this machine's name, which says so, and a half-written line with that
@@ -1020,5 +1020,3 @@ int main(const int argc, char **argv) {
     return 1;
   }
 }
-
-// vi: set sw=2 sts=2 ts=2 et:

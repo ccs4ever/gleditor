@@ -201,4 +201,3 @@ decodeMutablePointer(std::string_view encodedValue);
 } // namespace xudu
 
 #endif // XUDU_MUTABLE_LINK_H
-// vi: set sw=2 sts=2 ts=2 et:

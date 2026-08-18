@@ -428,4 +428,3 @@ inline constexpr int maxHighlightRanges = 64;
 } // namespace render
 
 #endif // GLEDITOR_RENDER_TYPES_H
-// vi: set sw=2 sts=2 ts=2 et:

@@ -69,4 +69,3 @@ inline constexpr const char *multiFileHash =
 } // namespace xudu_test
 
 #endif // XUDU_TESTS_TORRENT_DATA_H
-// vi: set sw=2 sts=2 ts=2 et:

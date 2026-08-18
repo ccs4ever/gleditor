@@ -198,4 +198,3 @@ private:
 } // namespace render::gl
 
 #endif // GLEDITOR_RENDER_GL_DEVICE_H
-// vi: set sw=2 sts=2 ts=2 et:

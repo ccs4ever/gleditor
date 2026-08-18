@@ -162,4 +162,3 @@ bool GLApi::loadDebugOutput() {
 }
 
 } // namespace render::gl
-// vi: set sw=2 sts=2 ts=2 et:

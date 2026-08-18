@@ -298,5 +298,3 @@ TEST(A11yPublisherTest, withNoPlatformThereIsNothingToDoAndNothingBreaks) {
   EXPECT_EQ(publisher.pumpActions(), 0U);
   EXPECT_FALSE(publisher.snapshot().empty()) << "the description is still made";
 }
-
-// vi: set sw=2 sts=2 ts=2 et:

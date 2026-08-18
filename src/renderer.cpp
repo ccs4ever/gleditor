@@ -901,4 +901,3 @@ void Renderer::renderLoop(AutoSDLWindow &window) {
   toasts.reset();
   device->shutdown();
 }
-// vi: set sw=2 sts=2 ts=2 et:

@@ -100,10 +100,10 @@ GoogleTest style already in use.
   or shell script; `make lint` runs the linters below. Both run without the
   graphics/build dependencies installed — see "Gotchas" below for how that
   works.
-- Every `.cpp`/`.hpp`/`.glsl` file ends with a vim modeline,
-  `// vi: set sw=2 sts=2 ts=2 et:`, matching `.clang-format`'s
-  `IndentWidth: 2`. Carry it over verbatim into new files; a formatter change
-  to the indent width should update both.
+- Indentation and coding style are defined in `.editorconfig` at the root
+  of the project and strictly aligned with `.clang-format` (`IndentWidth: 2`,
+  `UseTab: Never`, `ColumnLimit: 80`). Vim modelines have been removed across
+  the codebase in favor of `.editorconfig`.
 - `.clangd` enables `modernize-*`, `bugprone-*`, `cppcoreguidelines-*`,
   `performance-*`, `readability-*`, and `portability-*` clang-tidy checks
   (minus a few disabled ones — see `.clangd`) and builds with

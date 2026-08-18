@@ -155,4 +155,3 @@ private:
 };
 
 #endif // GLEDITOR_CARET_H
-// vi: set sw=2 sts=2 ts=2 et:

@@ -293,4 +293,3 @@ std::unique_ptr<RenderDevice> createDevice(Backend backend);
 } // namespace render
 
 #endif // GLEDITOR_RENDER_DEVICE_H
-// vi: set sw=2 sts=2 ts=2 et:

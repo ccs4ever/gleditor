@@ -235,5 +235,3 @@ Value decode(const std::string_view input) {
 }
 
 } // namespace xudu::bencode
-
-// vi: set sw=2 sts=2 ts=2 et:

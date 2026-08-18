@@ -505,4 +505,3 @@ bool androidSaveDocument(const std::string &documentPath,
 } // namespace gleditor
 
 #endif // __ANDROID__
-// vi: set sw=2 sts=2 ts=2 et:

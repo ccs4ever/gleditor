@@ -713,5 +713,3 @@ bool HypertimeMap::performAction(const std::uint64_t nodeId,
 }
 
 } // namespace xudu
-
-// vi: set sw=2 sts=2 ts=2 et:

@@ -180,5 +180,3 @@ decodeMutablePointer(const std::string_view encodedValue) {
 }
 
 } // namespace xudu
-
-// vi: set sw=2 sts=2 ts=2 et:

@@ -118,5 +118,3 @@ TEST(GlyphLane, canFitTooTallAndWide) {
   GlyphLane alice(Offset{10}, Rect{Length{100}, Length{100}});
   EXPECT_FALSE(alice.canFit(Rect{Length{1000}, Length{1000}}));
 }
-
-// vi: set sw=2 sts=2 ts=2 et:

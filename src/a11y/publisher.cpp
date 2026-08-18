@@ -269,5 +269,3 @@ std::string Publisher::describe(const Tree &tree) {
 }
 
 } // namespace gleditor::a11y
-
-// vi: set sw=2 sts=2 ts=2 et:

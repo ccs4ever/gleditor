@@ -52,8 +52,6 @@ TEST(Picking, noResultYetIsNotAnEmptyTag) {
   EXPECT_FALSE(device.takePickingTag().has_value());
 }
 
-// vi: set sw=2 sts=2 ts=2 et:
-
 // The identity word packs kind, document and page into one of the four words
 // the attachment carries; the other two hold the cluster index and the
 // fractional position. Round-tripping is what keeps the C++ packer and the

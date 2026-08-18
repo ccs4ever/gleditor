@@ -36,4 +36,3 @@ std::string readShaderBody(const std::string &path);
 } // namespace render
 
 #endif // GLEDITOR_RENDER_SHADER_SOURCE_H
-// vi: set sw=2 sts=2 ts=2 et:

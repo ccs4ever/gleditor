@@ -28,4 +28,3 @@ void main() {
   outColour = vec4(vColour.rgb, vColour.a * edge * along * vOpacity);
   outTag    = uvec4(vTag, 0u, 0u);
 }
-// vi: set sw=2 sts=2 ts=2 et:

@@ -156,5 +156,3 @@ TEST(WorkerPool, handlesManyBatchesInARow) {
   // 0 + 1 + ... + 8 is 36, five hundred times over.
   EXPECT_EQ(36 * 500, total.load());
 }
-
-// vi: set sw=2 sts=2 ts=2 et:

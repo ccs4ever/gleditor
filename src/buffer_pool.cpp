@@ -380,5 +380,3 @@ void BufferPool::write(const Allocation &allocation,
       static_cast<std::size_t>(placement.rowOffset + firstRow) * rowStrideBytes;
   device->updateBuffer(handle, offset, data);
 }
-
-// vi: set sw=2 sts=2 ts=2 et:
