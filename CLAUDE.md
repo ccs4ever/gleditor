@@ -62,18 +62,19 @@ Makefile already probes for what the toolchain supports.
 ## Tests
 
 ```sh
-make test        # builds + runs gleditor_test and xudu_test, skips slow/network suites
-make test/all     # the same, nothing skipped — this is what CI (PR checks) runs
+make -j$(nproc) test        # builds + runs gleditor_test and xudu_test in parallel, skips slow/network suites
+make -j$(nproc) test/all     # the same, nothing skipped — this is what CI (PR checks) runs
 make test TEST_FILTER='SwarmTest.*'   # run/override a specific gtest filter
 ```
 
+- **Parallelism**: Always run `make -j$(nproc) test` or `make -j$(nproc) test/all` to utilize all available cores.
 - `gleditor_test` links the real shared library (catches export-boundary
   bugs); `xudu_test` links only the xanalogical engine, with no graphics
   device, on purpose — that's the boundary being tested.
 - `make test/swarm` runs the network-namespace swarm tests; needs root, not
   part of `make test`.
-- Before pushing non-trivial changes, prefer `make test/all` over
-  `make test` since that's what CI actually gates on.
+- Before pushing non-trivial changes, prefer `make -j$(nproc) test/all` over
+  `make -j$(nproc) test` since that's what CI actually gates on.
 - `./tools/compare-backends.sh` renders a sample through every compiled-in
   backend and diffs the output — the real check that a backend still draws
   correctly, since a backend that draws nothing still exits 0.
@@ -201,6 +202,10 @@ to sanity-check `.editorconfig` itself, not as a gate.
 - **`GlyphCache`** (`src/glyphcache/cache.cpp`):
   - Direct 8-bit grayscale coverage texture rasterization using FreeType (`FT_Load_Glyph`, `FT_Glyph_To_Bitmap`).
   - Clusters are shaped via HarfBuzz and rendered into a dynamic 2D texture array atlas (512x512 growing up to 16384x16384 across 64 layers).
+- **Baseline Alignment & Quad Geometry**:
+  - `Doc` glyph quads are anchored to `line.top` with height set to the font's logical `lineHeight`.
+  - `GlyphCache` cluster textures are sized to `lineHeight` with baseline fixed at $Y = \text{ascent}$.
+  - When modifying text shaping or layout, always run `./tools/compare-backends.sh` and visually inspect screenshots with visual tools (`view_file`) to check for flat baselines, correct cluster height, and sharp glyph rendering.
 
 ## Gotchas worth knowing before editing the Makefile
 
@@ -213,6 +218,9 @@ to sanity-check `.editorconfig` itself, not as a gate.
   `GLEDITOR_SDL` handling.
 - GL/GLES entry points are resolved at runtime via `SDL_GL_GetProcAddress`,
   not linked — don't add `-lGL` or equivalent link flags.
+- `format`, `format-check`, `lint`, and `doc` targets probe tool existence
+  dynamically via `command -v` and gracefully echo missing tool notices rather
+  than failing when optional linters/formatters are not installed locally.
 - `format`, `format-check` and `lint` are the one place `NO_SDL_GOALS` is
   checked: they're exempted from the top-of-Makefile pkg-config checks *and*
   from `include $(DEPS)` (the same exemption `clean`/`dist` already had, for
