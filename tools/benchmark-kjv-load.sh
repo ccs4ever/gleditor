@@ -19,7 +19,7 @@ for backend in opengl vulkan; do
   for count in 1 2 3; do
     echo "  Measuring $count document(s) ($(python3 -c "print(f'{4.4 * $count:.1f}')") MB)..."
     args=()
-    for ((i=0; i<count; i++)); do
+    for ((i = 0; i < count; i++)); do
       args+=("$SAMPLE")
     done
 
@@ -27,7 +27,7 @@ for backend in opengl vulkan; do
     complete_list=()
     pages=0
 
-    for ((r=1; r<=RUNS; r++)); do
+    for ((r = 1; r <= RUNS; r++)); do
       echo -n "    -> Run $r/$RUNS in progress... "
       output=$(SDL_VIDEODRIVER="${SDL_VIDEODRIVER:-offscreen}" "$BIN" --backend "$backend" --profile "${args[@]}" 2>&1)
 
