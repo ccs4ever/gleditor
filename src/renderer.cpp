@@ -827,6 +827,10 @@ void Renderer::renderLoop(AutoSDLWindow &window) {
     toasts->post(severity, message, state);
   }
 
+  const auto loopStart   = std::chrono::steady_clock::now();
+  double timeToFirstPage = 0.0;
+  bool firstPageRecorded = false;
+
   while (this->state->alive) {
 
     // Drain queued commands before drawing, so that work requested before this
@@ -847,6 +851,16 @@ void Renderer::renderLoop(AutoSDLWindow &window) {
     // queue
     if (!update(state, settled)) {
       break;
+    }
+
+    if (!firstPageRecorded && !state.pageBatches.empty()) {
+      timeToFirstPage   = std::chrono::duration<double, std::milli>(
+                              std::chrono::steady_clock::now() - loopStart)
+                              .count();
+      firstPageRecorded = true;
+      std::cout << std::format(
+          "[TIMING] First page rendered: {:.2f} ms (docs in render: {})\n",
+          timeToFirstPage, state.docs.size());
     }
 
     // Presenting is what paces this loop: it blocks until the display is ready
@@ -876,6 +890,17 @@ void Renderer::renderLoop(AutoSDLWindow &window) {
     // for, so quitting before it finished would report on a document the
     // command line did not ask for.
     if (settled && this->state->profiling && scriptFinished()) {
+      const auto completeRender =
+          std::chrono::duration<double, std::milli>(
+              std::chrono::steady_clock::now() - loopStart)
+              .count();
+      std::size_t totalPages = 0;
+      for (const auto &doc : state.docs) {
+        totalPages += doc->numPages();
+      }
+      std::cout << std::format("[TIMING] Complete render settled: {:.2f} ms "
+                               "(docs: {}, total pages: {})\n",
+                               completeRender, state.docs.size(), totalPages);
       this->state->alive = false;
       break;
     }
