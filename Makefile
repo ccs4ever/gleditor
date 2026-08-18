@@ -692,8 +692,13 @@ run: private .UNVEIL += rx:gleditor
 run: $(OBJDIR)/gleditor
 	$(OBJDIR)/gleditor tests/samples/quick_brown_fox.txt
 
+DOXYGEN := $(shell command -v doxygen 2>/dev/null)
 doc:
-	doxygen
+ifdef DOXYGEN
+	$(DOXYGEN)
+else
+	@echo "doxygen not found, skipping documentation build"
+endif
 
 # -- formatting and linting ----------------------------------------------
 
@@ -707,15 +712,39 @@ SH_FORMAT_FILES  = $(shell git ls-files '*.sh' | grep -v '^thirdparty/')
 YAML_FORMAT_FILES = .github/workflows/c-cpp.yml .github/workflows/packaging.yml .github/dependabot.yml
 MD_FORMAT_FILES  = README.md CLAUDE.md design/btfs-and-permascrolls.md
 
+CLANG_FORMAT := $(shell command -v clang-format 2>/dev/null)
+SHFMT        := $(shell command -v shfmt 2>/dev/null)
+YAMLFMT      := $(shell command -v yamlfmt 2>/dev/null)
+MDFORMAT     := $(shell command -v mdformat 2>/dev/null)
+SHELLCHECK   := $(shell command -v shellcheck 2>/dev/null)
+YAMLLINT     := $(shell command -v yamllint 2>/dev/null)
+MDL          := $(shell command -v mdl 2>/dev/null)
+
 # yamlfmt and mdformat read their settings from .yamlfmt and (via .mdlrc's
 # sibling .mdl_style.rb) the same conventions yamllint and mdl check for, so
 # a file the formatter just wrote is a file the linter already accepts --
 # see the "coalesce" note in CLAUDE.md if that ever stops being true.
 format:
-	echo "$(CXX_FORMAT_FILES)" | xargs clang-format -i --style=file
-	echo "$(SH_FORMAT_FILES)" | xargs shfmt -i 2 -ci -w
-	yamlfmt $(YAML_FORMAT_FILES)
-	mdformat --wrap keep $(MD_FORMAT_FILES)
+ifdef CLANG_FORMAT
+	echo "$(CXX_FORMAT_FILES)" | xargs $(CLANG_FORMAT) -i --style=file
+else
+	@echo "clang-format not found, skipping C++ formatting"
+endif
+ifdef SHFMT
+	echo "$(SH_FORMAT_FILES)" | xargs $(SHFMT) -i 2 -ci -w
+else
+	@echo "shfmt not found, skipping shell formatting"
+endif
+ifdef YAMLFMT
+	$(YAMLFMT) $(YAML_FORMAT_FILES)
+else
+	@echo "yamlfmt not found, skipping YAML formatting"
+endif
+ifdef MDFORMAT
+	$(MDFORMAT) --wrap keep $(MD_FORMAT_FILES)
+else
+	@echo "mdformat not found, skipping Markdown formatting"
+endif
 .PHONY: format
 
 # What the CI format job runs. clang-format --dry-run --Werror, shfmt -d,
@@ -724,10 +753,26 @@ format:
 # ensures .editorconfig and .clang-format do not drift out of harmony.
 format-check:
 	./tools/check-config-harmony.sh
-	echo "$(CXX_FORMAT_FILES)" | xargs clang-format --style=file --dry-run --Werror
-	echo "$(SH_FORMAT_FILES)" | xargs shfmt -i 2 -ci -d
-	yamlfmt -lint $(YAML_FORMAT_FILES)
-	mdformat --check --wrap keep $(MD_FORMAT_FILES)
+ifdef CLANG_FORMAT
+	echo "$(CXX_FORMAT_FILES)" | xargs $(CLANG_FORMAT) --style=file --dry-run --Werror
+else
+	@echo "clang-format not found, skipping C++ format check"
+endif
+ifdef SHFMT
+	echo "$(SH_FORMAT_FILES)" | xargs $(SHFMT) -i 2 -ci -d
+else
+	@echo "shfmt not found, skipping shell format check"
+endif
+ifdef YAMLFMT
+	$(YAMLFMT) -lint $(YAML_FORMAT_FILES)
+else
+	@echo "yamlfmt not found, skipping YAML format check"
+endif
+ifdef MDFORMAT
+	$(MDFORMAT) --check --wrap keep $(MD_FORMAT_FILES)
+else
+	@echo "mdformat not found, skipping Markdown format check"
+endif
 .PHONY: format-check
 
 # The languages formatting does not reach: shellcheck for correctness bugs
@@ -737,9 +782,6 @@ format-check:
 # --wrap keep). Nix and the packaging manifests (PKGBUILD, the RPM spec, the
 # Homebrew formula) are covered where a linter for them is actually reliable
 # outside their native distribution -- see CLAUDE.md.
-SHELLCHECK := $(shell command -v shellcheck 2>/dev/null)
-YAMLLINT := $(shell command -v yamllint 2>/dev/null)
-MDL := $(shell command -v mdl 2>/dev/null)
 lint:
 	./tools/check-config-harmony.sh
 ifdef SHELLCHECK
@@ -750,12 +792,12 @@ endif
 ifdef YAMLLINT
 	$(YAMLLINT) $(YAML_FORMAT_FILES)
 else
-	@echo "yamllint not found, skipping yaml lint"
+	@echo "yamllint not found, skipping YAML lint"
 endif
 ifdef MDL
 	$(MDL) $(MD_FORMAT_FILES)
 else
-	@echo "mdl not found, skipping markdown lint"
+	@echo "mdl not found, skipping Markdown lint"
 endif
 .PHONY: lint
 
