@@ -249,7 +249,7 @@ bool Renderer::update(RenderState &state, const bool settled) {
   int screenWidth  = 0;
   int screenHeight = 0;
   {
-    std::lock_guard locker(this->state->view);
+    std::scoped_lock locker(this->state->view);
     const auto &view = this->state->view;
     screenWidth      = view.screenWidth;
     screenHeight     = view.screenHeight;
@@ -717,7 +717,7 @@ void Renderer::applyTypedText(RenderState &state) {
   }
   std::string typed;
   {
-    const std::lock_guard locker(this->state->typedMutex);
+    const std::scoped_lock locker(this->state->typedMutex);
     if (this->state->typedText.empty()) {
       return;
     }

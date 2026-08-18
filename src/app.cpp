@@ -551,7 +551,7 @@ render::Backend applyCommonArguments(argparse::ArgumentParser &parser,
   state->strictDiagnostics = parser["--strict-diagnostics"] == true;
   state->noPresent         = parser["--no-present"] == true;
   {
-    const std::lock_guard locker(state->view);
+    const std::scoped_lock locker(state->view);
     state->view.fov = std::stof(parser.get<std::string>("--fov"));
   }
 
@@ -579,7 +579,7 @@ void Application::bindDefaultViewCommands() {
   const auto move =
       [this](const std::function<void(AppState::ViewPerspective &)> &fun) {
         return [this, fun] {
-          const std::lock_guard locker(state->view);
+          const std::scoped_lock locker(state->view);
           fun(state->view);
         };
       };
@@ -778,7 +778,7 @@ int Application::run() {
   const auto sayWhatIsWaiting = [this, &window](const bool canShow) {
     std::vector<AppState::PendingDialog> waiting;
     {
-      const std::lock_guard locker(state->dialogMutex);
+      const std::scoped_lock locker(state->dialogMutex);
       waiting.swap(state->dialogs);
     }
     for (const auto &dialog : waiting) {
@@ -900,7 +900,7 @@ int Application::run() {
           break;
         }
         if (textInput) {
-          const std::lock_guard locker(state->typedMutex);
+          const std::scoped_lock locker(state->typedMutex);
           state->typedText += evt.text.text;
         }
         break;
@@ -928,7 +928,7 @@ int Application::run() {
         {
           // The render thread reads these under the same lock while building
           // its projection matrix.
-          const std::lock_guard locker(state->view);
+          const std::scoped_lock locker(state->view);
           state->view.screenWidth  = width;
           state->view.screenHeight = height;
         }

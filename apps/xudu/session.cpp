@@ -519,7 +519,7 @@ void HypertimeMap::drawFrame(gleditor::FrameContext &ctx) {
   {
     std::vector<MicroversionId> asked;
     {
-      const std::lock_guard locker(askedGuard);
+      const std::scoped_lock locker(askedGuard);
       asked.swap(askedToVisit);
     }
     for (const auto &id : asked) {
@@ -651,7 +651,7 @@ void HypertimeMap::describe(gleditor::a11y::Builder &into) {
     // Kept so that a request coming back can be resolved without reading the
     // store from the event thread. The store is this thread's; a version is a
     // value and travels.
-    const std::lock_guard locker(askedGuard);
+    const std::scoped_lock locker(askedGuard);
     listed = versions;
   }
 
@@ -704,7 +704,7 @@ bool HypertimeMap::performAction(const std::uint64_t nodeId,
   // store: the store is the render thread's, and this is the event thread. A
   // node id that no longer names anything is a request about a state that has
   // gone, which is nothing to do rather than an error.
-  const std::lock_guard locker(askedGuard);
+  const std::scoped_lock locker(askedGuard);
   if (which > listed.size()) {
     return false;
   }

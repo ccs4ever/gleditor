@@ -16,15 +16,15 @@ private:
 
 public:
   [[nodiscard]] unsigned long size() const {
-    std::lock_guard lock(mutex);
+    std::scoped_lock lock(mutex);
     return queue.size();
   }
   [[nodiscard]] bool empty() const {
-    std::lock_guard lock(mutex);
+    std::scoped_lock lock(mutex);
     return queue.empty();
   }
   value pop() {
-    std::lock_guard lock(mutex);
+    std::scoped_lock lock(mutex);
     if (isEmpty()) {
       return nullptr;
     }
@@ -36,7 +36,7 @@ public:
   template <typename U>
     requires std::derived_from<U, T>
   void push(const U &item) {
-    std::lock_guard lock(mutex);
+    std::scoped_lock lock(mutex);
     queue.push(std::make_unique<U>(item));
   }
 };

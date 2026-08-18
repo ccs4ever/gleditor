@@ -262,7 +262,7 @@ void LinkBeams::drawFrame(gleditor::FrameContext &ctx) {
   {
     std::vector<std::uint64_t> asked;
     {
-      const std::lock_guard locker(askedGuard);
+      const std::scoped_lock locker(askedGuard);
       asked.swap(askedToFollow);
     }
     for (const auto link : asked) {
@@ -390,7 +390,7 @@ bool LinkBeams::performAction(const std::uint64_t nodeId,
   // Under no lock and against nothing: the strand list is the render thread's,
   // so what is recorded is the link's own identity and the lookup happens
   // there. A link that has gone by then is simply not found.
-  const std::lock_guard locker(askedGuard);
+  const std::scoped_lock locker(askedGuard);
   askedToFollow.push_back(link - 1);
   return true;
 }

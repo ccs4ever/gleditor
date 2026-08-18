@@ -1166,7 +1166,7 @@ namespace {
  * is right first time. A font small enough to fit more gets a second attempt;
  * see fillPage().
  */
-constexpr std::size_t firstPageGuess = 8 * 1024;
+constexpr std::size_t firstPageGuess = 8U * 1024U;
 
 } // namespace
 
