@@ -3,15 +3,15 @@ set -e
 
 # 1. Ensure we are in a Git repository
 if [ ! -d .git ]; then
-    echo "Error: Not inside a git repository root." >&2
-    exit 1
+  echo "Error: Not inside a git repository root." >&2
+  exit 1
 fi
 
 # 2. Check for the VERSION file
 VERSION_FILE="VERSION"
 if [ ! -f "$VERSION_FILE" ]; then
-    echo "Error: $VERSION_FILE file not found in the current directory." >&2
-    exit 1
+  echo "Error: $VERSION_FILE file not found in the current directory." >&2
+  exit 1
 fi
 
 # 3. Read current version and parse Major.Minor.Patch
@@ -30,13 +30,13 @@ NEW_VERSION="$MAJOR.$MINOR.$PATCH"
 echo "Bumping to new version: $NEW_VERSION"
 
 # 5. Write out the new version
-echo "$NEW_VERSION" > "$VERSION_FILE"
+echo "$NEW_VERSION" >"$VERSION_FILE"
 
 # 6. Force Makefile flag evaluation to refresh version banners
 # (This clears artifacts that cache old compilation variables)
 if [ -f "Makefile" ]; then
-    echo "Cleaning temporary build artifacts to enforce new flags..."
-    make clean >/dev/null 2>&1 || true
+  echo "Cleaning temporary build artifacts to enforce new flags..."
+  make clean >/dev/null 2>&1 || true
 fi
 
 # 7. Commit changes and mint the release tag
