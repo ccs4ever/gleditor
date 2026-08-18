@@ -21,8 +21,9 @@
 #include <glm/gtc/type_ptr.hpp>
 
 #include <pango/pango-types.h>
-#include <pangomm/cairofontmap.h>
+#include <pango/pangoft2.h>
 #include <pangomm/fontdescription.h>
+#include <pangomm/fontmap.h>
 #include <pangomm/layout.h>
 #include <pangomm/layoutiter.h>
 #include <pangomm/rectangle.h>
@@ -120,7 +121,8 @@ void ToastOverlay::dropOldest() {
 void ToastOverlay::post(const render::DiagnosticSeverity severity,
                         const std::string_view message, RenderState &state) {
   const auto fontDesc = Pango::FontDescription(fontName);
-  const auto ctx      = Pango::CairoFontMap::get_default()->create_context();
+  const auto ctx =
+      Glib::wrap(PANGO_FONT_MAP(pango_ft2_font_map_new()))->create_context();
   ctx->set_font_description(fontDesc);
 
   auto layout = Pango::Layout::create(ctx);

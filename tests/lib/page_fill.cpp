@@ -18,8 +18,9 @@
 #include <cstddef>
 #include <string>
 
-#include <pangomm/cairofontmap.h>
+#include <pango/pangoft2.h>
 #include <pangomm/fontdescription.h>
+#include <pangomm/fontmap.h>
 #include <pangomm/init.h>
 #include <pangomm/layout.h>
 #include <pangomm/layoutline.h>
@@ -37,7 +38,8 @@ struct PageFillTest : testing::Test {
 /// The page geometry Doc::makePages and Doc::layoutFrom use.
 [[nodiscard]] Glib::RefPtr<Pango::Layout> pageLayout() {
   const Pango::FontDescription font("Monospace 16");
-  const auto ctx = Pango::CairoFontMap::get_default()->create_context();
+  const auto ctx =
+      Glib::wrap(PANGO_FONT_MAP(pango_ft2_font_map_new()))->create_context();
   ctx->set_font_description(font);
 
   auto layout = Pango::Layout::create(ctx);

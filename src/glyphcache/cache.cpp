@@ -2,17 +2,16 @@
  * @file cache.cpp
  * @brief Implementation of the glyph cache: rasterization and texture packing.
  *
- * Implements GlyphCache helpers to rasterize text via Pango/Cairo, manage the
- * device array texture, and pack glyphs into palettes and lanes.
+ * Implements GlyphCache helpers to rasterize text via FreeType/PangoFT2, manage
+ * the device array texture, and pack glyphs into palettes and lanes.
  */
 #include <gleditor/glyphcache/cache.hpp> // IWYU pragma: associated
 
-#include <algorithm>         // for min, sort
-#include <cairomm/context.h> // for Context
-#include <cairomm/surface.h> // for ImageSurface, Surface
-#include <cstddef>           // for byte
-#include <cstdlib>           // for getenv
+#include <algorithm> // for min, sort
+#include <cstddef>   // for byte
+#include <cstdlib>   // for getenv
 #include <format>
+#include <ft2build.h>
 #include <gleditor/glyphcache/palette.hpp> // for GlyphPalette, operator<=>
 #include <gleditor/glyphcache/types.hpp>   // for TextureCoords, Rect
 #include <gleditor/render/device.hpp>      // for RenderDevice
@@ -20,22 +19,21 @@
 #include <memory>                          // for shared_ptr
 #include <numeric>                         // for format
 #include <optional>                        // for optional
-#include <ranges>                          // for find_if
-#include <span>                            // for span
-#include <stdexcept>                       // for invalid_argument, overflo...
-#include <string>                          // for char_traits, string, oper...
-#include <string_view>                     // for operator==, string_view
-#include <tuple>                           // for make_tuple, tuple
-#include <unordered_map>                   // for unordered_map, operator==
-#include <utility>                         // for to_underlying, move
-#include <vector>                          // for vector
+#include <pango/pangoft2.h> // for pango_ft2_render_layout_subpixel
+#include <ranges>           // for find_if
+#include <span>             // for span
+#include <stdexcept>        // for invalid_argument, overflo...
+#include <string>           // for char_traits, string, oper...
+#include <string_view>      // for operator==, string_view
+#include <tuple>            // for make_tuple, tuple
+#include <unordered_map>    // for unordered_map, operator==
+#include <utility>          // for to_underlying, move
+#include <vector>           // for vector
+#include FT_FREETYPE_H
 
-#include "cairomm/enums.h"       // for ANTIALIAS_SUBPIXEL, Antia...
-#include "cairomm/fontoptions.h" // for FontOptions
-#include "cairomm/matrix.h"      // for Matrix
-#include "glibmm/refptr.h"       // for RefPtr
-#include "pangomm/font.h"        // for Font
-#include "pangomm/layout.h"      // for Layout
+#include "glibmm/refptr.h"  // for RefPtr
+#include "pangomm/font.h"   // for Font
+#include "pangomm/layout.h" // for Layout
 
 enum class Length : int;
 
@@ -102,21 +100,12 @@ struct PaddedCoverage {
 };
 
 /**
- * @brief Convert a Cairo ARGB32 surface directly to padded single-channel
- *        coverage in a single pass while computing mean ink.
+ * @brief Convert a FreeType 8-bit grayscale bitmap directly to padded
+ *        single-channel coverage in a single pass while computing mean ink.
  *
- * Every backend can upload an R8 rectangle identically, whereas asking the
- * driver to derive one channel from a BGRA upload is an OpenGL-specific
- * convenience that Vulkan has no equivalent for. Doing the narrowing here
- * keeps the device interface honest and the upload path the same everywhere.
- *
- * The glyph is drawn in opaque red on a transparent background, so in Cairo's
- * premultiplied ARGB32 the alpha byte already holds the coverage. On a
- * little-endian host the bytes of each pixel are ordered B, G, R, A.
- *
- * Combining coverage extraction with zero-padding and mean ink calculation
- * avoids an extra intermediate heap allocation and multiple copy/accumulate
- * passes for every rasterized glyph.
+ * FreeType rasterizes directly into 8-bit coverage (FT_PIXEL_MODE_GRAY).
+ * Texture rows are addressed from bottom to top, so we flip rows vertically
+ * during the copy.
  */
 PaddedCoverage
 extractPaddedCoverage(const std::span<const unsigned char> surface,
@@ -128,13 +117,15 @@ extractPaddedCoverage(const std::span<const unsigned char> surface,
                                 std::byte{0});
   std::uint64_t totalInk = 0;
   for (int row = 0; row < height; row++) {
-    const auto *src = surface.data() + static_cast<std::size_t>(row) *
-                                           static_cast<std::size_t>(stride);
-    auto *dst = padded.data() +
-                (static_cast<std::size_t>(row + glyphPadding) * paddedWidth) +
-                glyphPadding;
+    const auto *src   = surface.data() + static_cast<std::size_t>(row) *
+                                             static_cast<std::size_t>(stride);
+    const auto dstRow = height - 1 - row;
+    auto *dst =
+        padded.data() +
+        (static_cast<std::size_t>(dstRow + glyphPadding) * paddedWidth) +
+        glyphPadding;
     for (int col = 0; col < width; col++) {
-      const auto val = static_cast<std::byte>(src[(col * 4) + 3]);
+      const auto val = static_cast<std::byte>(src[col]);
       dst[col]       = val;
       totalInk += std::to_integer<std::uint64_t>(val);
     }
@@ -282,43 +273,26 @@ void GlyphCache::makeRoomFor(const Rect &padded) {
   }
 }
 
-inline Glib::RefPtr<Pango::Layout>
-getLayout(const std::string &chr, const FontPtr &font,
-          const Cairo::Surface::Format format) {
-  const auto tempSurf = Cairo::ImageSurface::create(format, 0, 0);
-  const auto ctx      = Cairo::Context::create(tempSurf);
-  auto layout         = Pango::Layout::create(ctx);
-  const auto desc     = font->describe_with_absolute_size();
+inline Glib::RefPtr<Pango::Layout> getLayout(const std::string &chr,
+                                             const FontPtr &font) {
+  thread_local static auto ftFontMap =
+      Glib::wrap(PANGO_FONT_MAP(pango_ft2_font_map_new()));
+  auto ctx        = ftFontMap->create_context();
+  auto layout     = Pango::Layout::create(ctx);
+  const auto desc = font->describe_with_absolute_size();
   layout->set_font_description(desc);
   layout->set_text(chr);
   return layout;
 }
 
-inline std::tuple<int, int, int>
-getLayoutInfo(const Glib::RefPtr<Pango::Layout> &layout,
-              const Cairo::Surface::Format format) {
-  int width;
-  int height;
-  layout->get_pixel_size(width, height);
-  int stride = Cairo::ImageSurface::format_stride_for_width(format, width);
-  return std::make_tuple(width, height, stride);
-}
-
-inline auto getFontOptions() {
-  Cairo::FontOptions opts;
-  opts.set_antialias(Cairo::Antialias::ANTIALIAS_SUBPIXEL);
-  opts.set_hint_metrics(Cairo::FontOptions::HintMetrics::ON);
-  opts.set_hint_style(Cairo::FontOptions::HintStyle::FULL);
-  return opts;
-}
-
 GlyphCache::Sizes GlyphCache::addToCache(const std::string &chr,
                                          const FontPtr &font) {
-  constexpr auto format = Cairo::Surface::Format::ARGB32;
-  const auto layout     = getLayout(chr, font, format);
+  const auto layout = getLayout(chr, font);
 
-  auto [width, height, stride] = getLayoutInfo(layout, format);
-  const auto extents           = Rect{Length{width}, Length{height}};
+  int width  = 0;
+  int height = 0;
+  layout->get_pixel_size(width, height);
+  const auto extents = Rect{Length{width}, Length{height}};
 
   // A zero-area cluster -- an isolated newline, for instance -- has nothing to
   // rasterize, but still needs an entry so the caller can advance the pen.
@@ -328,27 +302,19 @@ GlyphCache::Sizes GlyphCache::addToCache(const std::string &chr,
     return empty;
   }
 
-  // create layout drawing context
-  std::vector<unsigned char> data(static_cast<long>(height) * stride);
-  const auto layoutSurf =
-      Cairo::ImageSurface::create(data.data(), format, width, height, stride);
-  const auto layCtx = Cairo::Context::create(layoutSurf);
+  // Render text cluster directly into 8-bit FreeType bitmap buffer
+  const int stride = width;
+  std::vector<unsigned char> data(
+      static_cast<std::size_t>(height) * static_cast<std::size_t>(stride), 0);
+  FT_Bitmap bitmap{};
+  bitmap.rows       = static_cast<unsigned int>(height);
+  bitmap.width      = static_cast<unsigned int>(width);
+  bitmap.pitch      = stride;
+  bitmap.buffer     = data.data();
+  bitmap.num_grays  = 256;
+  bitmap.pixel_mode = FT_PIXEL_MODE_GRAY;
 
-  // clear surface
-  layCtx->set_source_rgba(0, 0, 0, 0);
-  layCtx->rectangle(0, 0, width, height);
-  layCtx->fill();
-
-  // Flip the image vertically: texture rows are addressed from the bottom up,
-  // Cairo draws from the top down.
-  const Cairo::Matrix matrix(1.0, 0.0, 0.0, -1.0, 0.0, height);
-  layCtx->transform(matrix);
-  // draw text cluster
-  layCtx->set_source_rgba(1, 0, 0, 1);
-  layCtx->set_font_options(getFontOptions());
-  layout->show_in_cairo_context(layCtx);
-  // Cairo may still be holding drawing operations; flush before reading back.
-  layoutSurf->flush();
+  pango_ft2_render_layout_subpixel(&bitmap, layout->gobj(), 0, 0);
 
   // The glyph goes into the atlas inside a zeroed border, so that the mip
   // chain averages it with empty space rather than with its neighbour. The

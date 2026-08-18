@@ -32,8 +32,8 @@
 #include <glib.h>
 #include <glibmm/convert.h>
 #include <glibmm/ustring.h>
-#include <pango/pangocairo.h>
-#include <pangomm/cairofontmap.h>
+#include <pango/pangoft2.h>
+#include <pangomm/fontmap.h>
 #include <pangomm/init.h>
 #include <pangomm/layout.h>
 
@@ -111,9 +111,8 @@ double median(std::vector<double> runs) {
 int main(const int argc, char **argv) {
   Pango::init();
   const std::string fontName = argc > 1 ? argv[1] : "Monospace 16";
-  const auto font            = Pango::FontDescription(fontName);
-  const auto fonts           = Pango::CairoFontMap::get_default();
-  const auto ctx             = fonts->create_context();
+  const auto fonts = Glib::wrap(PANGO_FONT_MAP(pango_ft2_font_map_new()));
+  const auto ctx   = fonts->create_context();
   ctx->set_font_description(font);
 
   // A slice big enough that a page cannot need more than this. Chosen from the

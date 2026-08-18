@@ -19,13 +19,13 @@
 #include <limits>
 #include <memory> // for __shared_ptr_access, shared...
 #include <mutex>
-#include <pangomm/cairofontmap.h> // for CairoFontMap
-#include <span>                   // for span
-#include <stdexcept>              // for logic_error
-#include <string>                 // for char_traits, basic_string
-#include <string_view>            // for string_view
-#include <utility>                // for move
-#include <vector>                 // for vector
+#include <pango/pangoft2.h> // for pango_ft2_font_map_new
+#include <span>             // for span
+#include <stdexcept>        // for logic_error
+#include <string>           // for char_traits, basic_string
+#include <string_view>      // for string_view
+#include <utility>          // for move
+#include <vector>           // for vector
 
 #include "glibmm/convert.h"          // for get_charset
 #include "glibmm/fileutils.h"        // for file_get_contents
@@ -33,11 +33,11 @@
 #include "glibmm/ustring.h"          // for ustring, operator==, UStrin...
 #include "pango/pango-layout.h"      // for pango_layout_set_text
 #include "pango/pango-types.h"       // for PANGO_SCALE
-#include "pango/pangocairo.h"        // for pango_cairo_font_map_new
 #include "pango/pangofc-fontmap.h"   // for pango_fc_font_map_set_config
 #include "pangomm/attributes.h"      // for AttrFontDesc, Attribute
 #include "pangomm/attrlist.h"        // for AttrList
 #include "pangomm/fontdescription.h" // for FontDescription
+#include "pangomm/fontmap.h"         // for FontMap
 #include "pangomm/layout.h"          // for Layout, EllipsizeMode
 #include "pangomm/layoutiter.h"      // for LayoutIter
 #include "pangomm/layoutline.h"      // for LayoutLine
@@ -339,7 +339,8 @@ Page::Page(std::shared_ptr<Doc> aDoc, RenderState &state, glm::mat4 &model,
   };
   pushBackground();
 
-  thread_local static auto renderFontMap = Pango::CairoFontMap::get_default();
+  thread_local static auto renderFontMap =
+      Glib::wrap(PANGO_FONT_MAP(pango_ft2_font_map_new()));
   thread_local static auto renderFontCtx = renderFontMap->create_context();
   const auto fontDesc =
       Pango::FontDescription(this->doc->renderer->defaultFontName().data());
@@ -774,7 +775,7 @@ Glib::RefPtr<Pango::Layout> Doc::layoutFrom(const std::uint32_t offset) const {
 
     Glib::RefPtr<Pango::FontMap> getFontMap() {
       if (!fontMap) {
-        fontMap = Glib::wrap(PANGO_FONT_MAP(pango_cairo_font_map_new()));
+        fontMap = Glib::wrap(PANGO_FONT_MAP(pango_ft2_font_map_new()));
       }
       return fontMap;
     }

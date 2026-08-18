@@ -26,7 +26,8 @@
 #include <glibmm/init.h>
 #include <glm/ext/vector_float3.hpp>
 #include <glm/geometric.hpp>
-#include <pangomm/cairofontmap.h>
+#include <pango/pangoft2.h>
+#include <pangomm/fontmap.h>
 #include <pangomm/layout.h>
 #include <pangomm/wrap_init.h>
 
@@ -650,7 +651,7 @@ int Application::run() {
   // registration and fontconfig cache initialization complete before background
   // loader threads spawn.
   {
-    const auto fontMap = Pango::CairoFontMap::get_default();
+    const auto fontMap = Glib::wrap(PANGO_FONT_MAP(pango_ft2_font_map_new()));
     const auto ctx     = fontMap->create_context();
     const auto layout  = Pango::Layout::create(ctx);
     layout->set_text("warmup");
