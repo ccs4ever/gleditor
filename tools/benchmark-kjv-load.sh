@@ -13,11 +13,11 @@ fi
 echo "================================================================================"
 echo "          GLEDITOR LOAD TIMING BENCHMARK: KJV.TXT (4.4 MB per document)        "
 echo "================================================================================"
-printf "%-8s | %-6s | %-5s | %-12s | %-12s | %-12s\n" "Backend" "Docs" "Pages" "TTFP (ms)" "Complete (s)" "Throughput"
-echo "--------------------------------------------------------------------------------"
 
 for backend in opengl vulkan; do
+  echo "=== Backend: ${backend^^} ==="
   for count in 1 2 3; do
+    echo "  Measuring $count document(s) ($(python3 -c "print(f'{4.4 * $count:.1f}')") MB)..."
     args=()
     for ((i=0; i<count; i++)); do
       args+=("$SAMPLE")
@@ -28,6 +28,7 @@ for backend in opengl vulkan; do
     pages=0
 
     for ((r=1; r<=RUNS; r++)); do
+      echo -n "    -> Run $r/$RUNS in progress... "
       output=$(SDL_VIDEODRIVER="${SDL_VIDEODRIVER:-offscreen}" "$BIN" --backend "$backend" --profile "${args[@]}" 2>&1)
 
       ttfp=$(echo "$output" | grep -o "First page rendered: [0-9.]*" | head -n1 | awk '{print $4}')
@@ -37,6 +38,9 @@ for backend in opengl vulkan; do
       if [ -n "$ttfp" ] && [ -n "$complete" ]; then
         ttfp_list+=("$ttfp")
         complete_list+=("$complete")
+        echo "TTFP: ${ttfp} ms, Complete: $(python3 -c "print(f'{float($complete)/1000.0:.2f}')") s"
+      else
+        echo "FAILED"
       fi
     done
 
@@ -47,7 +51,7 @@ for backend in opengl vulkan; do
     mb_total=$(python3 -c "print(f'{4.4 * $count:.1f} MB')")
     mb_per_sec=$(python3 -c "import sys; sec=float(sys.argv[1])/1000.0; mb=4.4 * $count; print(f'{mb/sec:.2f} MB/s')" "$complete_avg_ms")
 
-    printf "%-8s | %-6d | %-5d | %-12s | %-12s | %-12s\n" "$backend" "$count" "$pages" "${ttfp_avg} ms" "$complete_avg_s" "$mb_per_sec"
+    echo "  => Average: TTFP ${ttfp_avg} ms | Complete $complete_avg_s | Throughput $mb_per_sec"
+    echo ""
   done
-  echo "--------------------------------------------------------------------------------"
 done
