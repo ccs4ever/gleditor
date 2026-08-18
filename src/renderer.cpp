@@ -254,11 +254,12 @@ bool Renderer::update(RenderState &state, const bool settled) {
     screenWidth      = view.screenWidth;
     screenHeight     = view.screenHeight;
 
+    const auto aspect = (view.screenHeight > 0 && view.screenWidth > 0)
+                            ? static_cast<float>(view.screenWidth) /
+                                  static_cast<float>(view.screenHeight)
+                            : 1.0F;
     const glm::mat4 projection =
-        glm::perspective(glm::radians(view.fov),
-                         static_cast<float>(view.screenWidth) /
-                             static_cast<float>(view.screenHeight),
-                         0.1F, 10000.0F);
+        glm::perspective(glm::radians(view.fov), aspect, 0.1F, 10000.0F);
     const glm::mat4 camera =
         glm::lookAt(view.pos, view.pos + view.front, view.upward);
 

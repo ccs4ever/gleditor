@@ -40,6 +40,8 @@
 
 #include <gleditor/render/device.hpp>
 #include <gleditor/render/diagnostics.hpp>
+#include <gleditor/render/vulkan/sdl_vulkan_compat.hpp>
+#include <gleditor/render/vulkan/stream_buffer_vk.hpp>
 #include <gleditor/render/worker_pool.hpp>
 
 namespace render::vulkan {
@@ -400,7 +402,8 @@ private:
   bool framesSubmitted{};
   bool swapchainOutOfDate{};
 
-  BufferHandle highlightBuffer{};
+  std::array<BufferHandle, framesInFlight> highlightBuffers{};
+  std::unique_ptr<StreamBufferVK> stagingStream;
   TextureHandle boundTexture{};
   PipelineHandle boundPipeline{};
 

@@ -16,6 +16,7 @@ set -eu
 SAMPLE="${1:-tests/samples/quick_brown_fox.txt}"
 BIN="${BIN:-build/gleditor}"
 OUT="${OUT:-$(mktemp -d)}"
+export SDL_VIDEODRIVER="${SDL_VIDEODRIVER:-offscreen}"
 
 # Percentage of differing bytes tolerated against the OpenGL reference. OpenGL
 # ES runs the same pipeline through the same driver, so it is held to exact

@@ -20,6 +20,7 @@
 #include <gleditor/render/device.hpp>
 #include <gleditor/render/diagnostics.hpp>
 #include <gleditor/render/gl/gl_api.hpp>
+#include <gleditor/render/gl/stream_buffer.hpp>
 
 namespace render::gl {
 
@@ -186,6 +187,8 @@ private:
   std::size_t nextPickingSlot{};
 
   GLuint highlightUbo{};
+  std::unique_ptr<StreamBufferGL> pboStream;
+  std::unique_ptr<StreamBufferGL> highlightUboStream;
   GLuint offscreenFbo{};
   GLuint colourRbo{};
   GLuint pickingRbo{};
