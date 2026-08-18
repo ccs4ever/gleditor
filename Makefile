@@ -92,7 +92,7 @@ endif
 # includes -- is vendored rather than pulled from a package whose layout on
 # macOS is not this project's to depend on.
 GL_CFLAGS :=
-PKGS := pangomm-2.48 pangoft2 $(SDL_PKG)
+PKGS := pangomm-2.48 pangoft2 freetype2 harfbuzz fribidi libunibreak fontconfig $(SDL_PKG)
 ifeq ($(shell pkg-config --exists gl && echo 1),1)
 PKGS += gl
 else ifeq ($(shell uname -s 2>/dev/null),Darwin)
