@@ -29,11 +29,11 @@ the resulting gitlink change in the parent repo.
 ## Build
 
 ```sh
-make                              # library, both programs, both test binaries, compile_commands.json
+make                              # library, both programs, both test binaries, compile_commands.json (includes Vulkan if available)
 make lib                          # library only
 make gleditor                     # apps/gleditor only
 make xudu                         # apps/xudu only
-make GLEDITOR_ENABLE_VULKAN=1     # also compiles the Vulkan backend + SPIR-V (needs glslangValidator)
+make GLEDITOR_DISABLE_VULKAN=1    # disables the Vulkan backend and SPIR-V compilation
 make GLEDITOR_SDL=2               # force SDL2 instead of the SDL3/SDL2 auto-probe
 make clean
 make format                       # clang-format + shfmt, in place; no build deps needed
@@ -44,10 +44,11 @@ make lint                         # shellcheck + yamllint + mdl; what CI runs
 Key variables:
 
 - `DEBUG=1` — debug flags + sanitizer flag sets available.
-- `GLEDITOR_ENABLE_VULKAN=1` — compile the Vulkan backend. **This flips the
-  compile flags for every object file**, so toggling it rebuilds the whole
-  tree. `ccache` (used automatically when installed; disable with
-  `GLEDITOR_NO_CCACHE=1`) is what makes flipping it back and forth cheap.
+- `GLEDITOR_DISABLE_VULKAN=1` — disable the Vulkan backend (Vulkan is built by
+  default when available via pkg-config). **This flips the compile flags for
+  every object file**, so toggling it rebuilds the whole tree. `ccache` (used
+  automatically when installed; disable with `GLEDITOR_NO_CCACHE=1`) is what
+  makes flipping it back and forth cheap.
 - `GLEDITOR_SDL=2` / `=3` — pick SDL major version explicitly; unset probes
   via pkg-config (SDL3 if present, else SDL2).
 - `GLEDITOR_ENABLE_A11Y=1` / `=0` — require/disable AccessKit; unset uses it
@@ -186,7 +187,7 @@ to sanity-check `.editorconfig` itself, not as a gate.
 
 ## Gotchas worth knowing before editing the Makefile
 
-- Toggling `GLEDITOR_ENABLE_VULKAN` or `DEBUG` changes flags for *every*
+- Toggling `GLEDITOR_DISABLE_VULKAN` or `DEBUG` changes flags for *every*
   object; the build records a flags signature (`$(OBJDIR)/.buildflags`) so
   stale objects get rebuilt rather than silently linked in — preserve that
   mechanism if you touch flag handling.

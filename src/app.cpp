@@ -536,8 +536,8 @@ render::Backend applyCommonArguments(argparse::ArgumentParser &parser,
   if (!render::backendCompiledIn(backend)) {
     throw std::runtime_error("The " + render::backendName(backend) +
                              " backend was not compiled into this binary. "
-                             "Rebuild with GLEDITOR_ENABLE_VULKAN=1 to enable "
-                             "Vulkan.");
+                             "Rebuild without GLEDITOR_DISABLE_VULKAN=1 to "
+                             "enable Vulkan.");
   }
 
   state->defaultFontName = parser.get("--font");

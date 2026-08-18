@@ -98,6 +98,15 @@ PKGS += gl
 else ifeq ($(shell uname -s 2>/dev/null),Darwin)
 GL_CFLAGS := -Ithirdparty/opengl-registry
 endif
+
+# Vulkan backend is enabled by default if available through pkg-config,
+# unless explicitly disabled with GLEDITOR_DISABLE_VULKAN=1.
+ifndef GLEDITOR_DISABLE_VULKAN
+ifeq ($(shell pkg-config --exists vulkan && echo 1),1)
+GLEDITOR_ENABLE_VULKAN := 1
+endif
+endif
+
 ifdef GLEDITOR_ENABLE_VULKAN
 PKGS += vulkan
 endif
@@ -123,7 +132,7 @@ MISSING_PKGS := $(strip $(foreach p,$(PKGS),\
   $(if $(shell pkg-config --exists $(p) && echo 1),,$(p))))
 ifneq ($(MISSING_PKGS),)
 $(error pkg-config cannot find: $(MISSING_PKGS). Install the development \
-packages providing them, or unset GLEDITOR_ENABLE_VULKAN to build without \
+packages providing them, or set GLEDITOR_DISABLE_VULKAN=1 to build without \
 the Vulkan backend)
 endif
 endif

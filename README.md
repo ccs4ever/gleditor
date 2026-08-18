@@ -35,9 +35,9 @@ The graphics API is chosen at run time with `--backend`:
 
 | Backend            | Requires        | Notes                                           |
 | ------------------ | --------------- | ----------------------------------------------- |
-| `opengl` (default) | OpenGL 3.3 core |                                                 |
-| `opengles`         | OpenGL ES 3.0   |                                                 |
-| `vulkan`           | Vulkan 1.0      | Only when built with `GLEDITOR_ENABLE_VULKAN=1` |
+| `opengl` (default) | OpenGL 3.3 core |                                                          |
+| `opengles`         | OpenGL ES 3.0   |                                                          |
+| `vulkan`           | Vulkan 1.0      | Enabled by default when found; disable with `GLEDITOR_DISABLE_VULKAN=1` |
 
 Everything above the backend -- documents, pages, the glyph cache, the buffer
 allocator -- is written against `render::RenderDevice` (`include/gleditor/render/`)
@@ -1525,8 +1525,8 @@ Common targets (see `Makefile`):
   - `make lib` → `build/libgleditor.so.0`, plus the `build/libgleditor.so` linker name
 - Build the xanadoc editor only:
   - `make xudu` → `build/xudu`
-- Build with the Vulkan backend:
-  - `make GLEDITOR_ENABLE_VULKAN=1` → also compiles `assets/shaders/vulkan/*.spv`
+- Disable the Vulkan backend:
+  - `make GLEDITOR_DISABLE_VULKAN=1` (Vulkan is built by default if available)
 - Build against a particular SDL:
   - `make GLEDITOR_SDL=2` or `make GLEDITOR_SDL=3`
 - Compile the SPIR-V modules only:
@@ -1546,7 +1546,7 @@ Compile commands database (for clangd, etc.):
 Optional Make variables:
 
 - `DEBUG=1` enables debug flags and sanitizer flag sets.
-- `GLEDITOR_ENABLE_VULKAN=1` compiles the Vulkan backend.
+- `GLEDITOR_DISABLE_VULKAN=1` disables the Vulkan backend (built by default when available).
 - `GLEDITOR_SDL=2` or `GLEDITOR_SDL=3` picks the SDL major version; unset means
   SDL3 when pkg-config finds it, SDL2 otherwise.
 - `GLEDITOR_ENABLE_A11Y=1` requires AccessKit and fails the build without it;
@@ -1811,7 +1811,7 @@ for eight seconds and no capture should wait that long.
 
 `ccache` is used when it is installed, unless `GLEDITOR_NO_CCACHE=1` or an
 explicit `CXX` says otherwise. It matters most for one thing: turning
-`GLEDITOR_ENABLE_VULKAN` on or off changes the flags every object is compiled
+`GLEDITOR_DISABLE_VULKAN` on or off changes the flags every object is compiled
 with, so a flip rebuilds all seventy of them. On four cores that is around a
 hundred seconds each way; with ccache the second flip is a second and a half,
 because the objects for the configuration being returned to are still there.
@@ -1901,7 +1901,7 @@ recompiling the sixty-nine files that did not change.
 ## Environment and Make variables
 
 - `DEBUG=1` enable debug flags and sanitizer options in builds.
-- `GLEDITOR_ENABLE_VULKAN=1` compile the Vulkan backend and its SPIR-V.
+- `GLEDITOR_DISABLE_VULKAN=1` disable building the Vulkan backend and its SPIR-V.
 - `GLEDITOR_SDL=2` / `GLEDITOR_SDL=3` build against that SDL major version.
 - `GLEDITOR_RECORD_THREADS=N` threads the Vulkan backend records a frame with,
   and an instruction rather than a ceiling: setting it takes the choice away
