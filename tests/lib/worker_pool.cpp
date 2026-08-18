@@ -72,7 +72,7 @@ TEST(WorkerPool, sharesRunConcurrently) {
 
   pool.run(count, [&](std::uint32_t) {
     {
-      const std::lock_guard locker(guard);
+      const std::scoped_lock locker(guard);
       threads.insert(std::this_thread::get_id());
     }
     started++;
@@ -98,7 +98,7 @@ TEST(WorkerPool, theCallerTakesAShare) {
   std::mutex guard;
   std::set<std::thread::id> threads;
   pool.run(pool.parallelism(), [&](std::uint32_t) {
-    const std::lock_guard locker(guard);
+    const std::scoped_lock locker(guard);
     threads.insert(std::this_thread::get_id());
   });
   EXPECT_TRUE(threads.contains(std::this_thread::get_id()));

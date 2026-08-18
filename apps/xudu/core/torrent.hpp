@@ -216,7 +216,8 @@ struct MadeTorrent {
   InfoHash hash;
 };
 [[nodiscard]] MadeTorrent makeTorrent(std::string_view data, std::string name,
-                                      std::uint64_t pieceLength = 256 * 1024);
+                                      std::uint64_t pieceLength = 256ULL *
+                                                                  1024ULL);
 
 /// A file to put into a torrent. TorrentFile above is the other direction --
 /// what a parsed torrent says it holds.
@@ -245,9 +246,9 @@ struct TorrentContent {
  * @throws std::invalid_argument for a zero piece length, an empty file list,
  *         or a path containing a separator.
  */
-[[nodiscard]] MadeTorrent makeTorrent(std::span<const TorrentContent> files,
-                                      std::string name,
-                                      std::uint64_t pieceLength = 256 * 1024);
+[[nodiscard]] MadeTorrent
+makeTorrent(std::span<const TorrentContent> files, std::string name,
+            std::uint64_t pieceLength = 256ULL * 1024ULL);
 
 /// SHA-1 of @p data, which is the hash BitTorrent v1 is built on.
 [[nodiscard]] std::array<std::uint8_t, 20> sha1(std::string_view data);

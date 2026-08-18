@@ -8,7 +8,7 @@ Diagnostics:
     Add:
       - modernize*
       - bugprone-*
-      - cppcoreguidlines-*
+      - cppcoreguidelines-*
       - performance-*
       - readability-*
       - portability-*
@@ -16,4 +16,5 @@ Diagnostics:
       - modernize-use-trailing-return-type
       - modernize-use-std-print # <print> header is not widely supported yet
       - readability-magic-numbers
+      - cppcoreguidelines-avoid-magic-numbers
     FastCheckFilter: Loose

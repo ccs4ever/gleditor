@@ -16,7 +16,13 @@ protected:
 
 public:
   // Loggable() : logger(spdlog::default_logger()) {}
-  virtual ~Loggable() = default;
+  Loggable()                            = default;
+  virtual ~Loggable()                   = default;
+  Loggable(const Loggable &)            = default;
+  Loggable &operator=(const Loggable &) = default;
+  Loggable(Loggable &&)                 = default;
+  Loggable &operator=(Loggable &&)      = default;
+
   friend std::ostream &operator<<(std::ostream &ost, const Loggable &oth) {
     oth.print(ost);
     return ost;

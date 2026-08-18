@@ -49,7 +49,11 @@ struct RenderItem {
   Type type;
 
   explicit RenderItem(const Type type) : type(type) {}
-  virtual ~RenderItem() = default;
+  virtual ~RenderItem()                     = default;
+  RenderItem(const RenderItem &)            = default;
+  RenderItem &operator=(const RenderItem &) = default;
+  RenderItem(RenderItem &&)                 = default;
+  RenderItem &operator=(RenderItem &&)      = default;
 };
 struct RenderItemNewDoc : RenderItem {
   RenderItemNewDoc() : RenderItem(Type::NewDoc) {}

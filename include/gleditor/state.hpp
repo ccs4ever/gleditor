@@ -196,7 +196,7 @@ struct AppState {
   /// Ask for one. Safe from any thread; shown within a frame or two.
   void showDialog(const render::DiagnosticSeverity severity, std::string title,
                   std::string message) {
-    const std::lock_guard locker(dialogMutex);
+    const std::scoped_lock locker(dialogMutex);
     dialogs.push_back(
         PendingDialog{severity, std::move(title), std::move(message)});
   }

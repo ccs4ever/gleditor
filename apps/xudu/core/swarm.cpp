@@ -41,19 +41,19 @@ InfoHash fromLt(const lt::sha1_hash &hash) {
 /// the reinterpretation, and exist so the conversion is written once.
 lt::dht::public_key toLt(const PublicKey &key) {
   lt::dht::public_key out;
-  std::copy(key.bytes.begin(), key.bytes.end(), out.bytes.begin());
+  std::ranges::copy(key.bytes, out.bytes.begin());
   return out;
 }
 
 lt::dht::secret_key toLt(const SecretKey &key) {
   lt::dht::secret_key out;
-  std::copy(key.bytes.begin(), key.bytes.end(), out.bytes.begin());
+  std::ranges::copy(key.bytes, out.bytes.begin());
   return out;
 }
 
 lt::dht::signature toLt(const Signature &signature) {
   lt::dht::signature out;
-  std::copy(signature.bytes.begin(), signature.bytes.end(), out.bytes.begin());
+  std::ranges::copy(signature.bytes, out.bytes.begin());
   return out;
 }
 

@@ -20,7 +20,7 @@ WorkerPool::WorkerPool(const std::uint32_t threads) {
 
 WorkerPool::~WorkerPool() {
   {
-    const std::lock_guard locker(mutex);
+    const std::scoped_lock locker(mutex);
     stopping = true;
   }
   wake.notify_all();
@@ -36,7 +36,7 @@ void WorkerPool::runOne(const std::function<void(std::uint32_t)> &work,
   try {
     work(index);
   } catch (...) {
-    const std::lock_guard failing(mutex);
+    const std::scoped_lock failing(mutex);
     if (!failure) {
       failure = std::current_exception();
     }
@@ -85,7 +85,7 @@ void WorkerPool::run(const std::uint32_t count,
 
   std::uint32_t mine = 0;
   {
-    const std::lock_guard publishing(mutex);
+    const std::scoped_lock publishing(mutex);
     current     = &work;
     unclaimed   = count;
     outstanding = count;

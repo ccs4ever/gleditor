@@ -261,7 +261,7 @@ bool DocumentsSource::performAction(const std::uint64_t nodeId,
     if (0 != withinIt) {
       asked.run = static_cast<std::size_t>(withinIt - 1);
     }
-    const std::lock_guard locker(wantedGuard);
+    const std::scoped_lock locker(wantedGuard);
     wanted.push_back(asked);
     return true;
   }
@@ -277,7 +277,7 @@ bool DocumentsSource::performAction(const std::uint64_t nodeId,
 std::vector<DocumentsSource::Wanted> DocumentsSource::takeWanted() {
   std::vector<Asked> asked;
   {
-    const std::lock_guard locker(wantedGuard);
+    const std::scoped_lock locker(wantedGuard);
     asked.swap(wanted);
   }
 
