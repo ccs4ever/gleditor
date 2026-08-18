@@ -9,8 +9,6 @@
 #include <gleditor/buffer_pool.hpp>
 #include <gleditor/drawable.hpp>
 #include <gleditor/renderer.hpp>
-#include <glibmm/refptr.h>
-#include <glibmm/ustring.h>
 #include <glm/ext/matrix_float4x4.hpp>
 #include <glm/ext/vector_float3.hpp>
 #include <memory>
@@ -269,7 +267,7 @@ private:
   /// What this document is called: a path for one opened from disk, whatever
   /// the source said otherwise.
   std::string docName;
-  Glib::ustring text;
+  std::string text;
   /// Told about every edit. Bare pointers, not owned; see DocumentObserver.
   std::vector<gleditor::DocumentObserver *> observers;
   RendererRef renderer;
@@ -591,7 +589,7 @@ public:
   /// Scope of the most recent reflow, and how many pages it rebuilt.
   [[nodiscard]] ReflowScope lastReflowScope() const { return reflowScope; }
   [[nodiscard]] std::size_t lastReflowPages() const { return reflowPages; }
-  [[nodiscard]] const Glib::ustring &contents() const { return text; }
+  [[nodiscard]] const std::string &contents() const { return text; }
   /// Position among the renderer's open documents, carried in the picking tag
   /// so a result names which document was clicked.
   void setDocIndex(const std::uint32_t index) { docIndex = index; }

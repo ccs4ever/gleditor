@@ -1,9 +1,13 @@
 {
   "name": "gleditor-android",
   "version-string": "0.0.0",
-  "description": "Android build of libgleditor's dependencies: pangomm pulls in cairo, glib, glibmm, harfbuzz, freetype and fontconfig transitively, the same set the desktop Makefile's pangomm-2.48 pkg-config package pulls in from the system.",
+  "description": "Android build of libgleditor's dependencies: freetype, harfbuzz, fribidi, libunibreak, fontconfig, and glm.",
   "dependencies": [
-    "pangomm",
+    "freetype",
+    "harfbuzz",
+    "fribidi",
+    "libunibreak",
+    "fontconfig",
     "glm"
   ],
   "builtin-baseline": "f298fb4ef3a7ae09766b6a5beb92ce171a767927"

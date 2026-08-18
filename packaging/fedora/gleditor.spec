@@ -10,14 +10,18 @@ Source0:        %{name}-%{version}.tar.gz
 BuildRequires:  gcc-c++ >= 13
 BuildRequires:  make
 BuildRequires:  pkgconfig
-BuildRequires:  pkgconfig(pangomm-2.48)
-BuildRequires:  pkgconfig(cairomm-1.16)
-BuildRequires:  pkgconfig(glibmm-2.68)
+BuildRequires:  pkgconfig(freetype2)
+BuildRequires:  pkgconfig(harfbuzz)
+BuildRequires:  pkgconfig(fribidi)
+BuildRequires:  pkgconfig(libunibreak)
+BuildRequires:  pkgconfig(fontconfig)
 BuildRequires:  SDL3-devel
 BuildRequires:  SDL3_image-devel
 BuildRequires:  pkgconfig(gl)
 BuildRequires:  pkgconfig(vulkan)
 BuildRequires:  glm-devel
+BuildRequires:  openssl-devel
+BuildRequires:  lmdb-devel
 BuildRequires:  pkgconfig(libtorrent-rasterbar)
 # libtorrent-rasterbar's own headers use boost/predef at compile time, and its
 # -devel package's dependency on it is weak rather than hard -- so it is named
@@ -35,7 +39,7 @@ Recommends:     vulkan-loader
 
 %description
 GL Editor draws text on the GPU. Documents are laid out as pages in a 3D
-scene, shaped and rasterised with Pango and Cairo, and drawn as instanced
+scene, shaped with HarfBuzz, rasterised with FreeType, and drawn as instanced
 quads sampled from a glyph atlas.
 
 One rendering pipeline serves three graphics APIs. Everything above the

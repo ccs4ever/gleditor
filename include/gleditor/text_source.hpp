@@ -75,8 +75,8 @@ class FileTextSource : public TextSource {
 public:
   explicit FileTextSource(std::string path) : filePath(std::move(path)) {}
 
-  /// @throws Glib::FileError if the file cannot be read, and std::logic_error
-  ///         for a UTF-16 or UTF-32 byte order mark.
+  /// @throws std::runtime_error if the file cannot be read, and
+  ///         std::logic_error for a UTF-16 or UTF-32 byte order mark.
   [[nodiscard]] std::string text() const override;
   [[nodiscard]] std::string name() const override { return filePath; }
 

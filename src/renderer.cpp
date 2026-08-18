@@ -18,7 +18,6 @@
 #include <thread>
 #include <vector>
 
-#include <glibmm/fileutils.h>
 #include <glm/ext/matrix_clip_space.hpp>
 #include <glm/ext/matrix_float4x4.hpp>
 #include <glm/ext/matrix_transform.hpp>
@@ -177,7 +176,7 @@ void Renderer::saveDoc(RenderState &state, const std::uint32_t index) {
                  "nothing to save this document as yet", state);
     return;
   }
-  const std::string content = doc->contents().raw();
+  const auto &content = doc->contents();
 
 #ifdef __ANDROID__
   // Writes through the content:// Uri this document was opened from, when it
@@ -195,11 +194,16 @@ void Renderer::saveDoc(RenderState &state, const std::uint32_t index) {
   }
 #endif
 
-  try {
-    Glib::file_set_contents(name, content);
-  } catch (const Glib::FileError &err) {
+  std::ofstream file(name, std::ios::binary | std::ios::trunc);
+  if (!file.is_open()) {
     toasts->post(render::DiagnosticSeverity::Error,
-                 std::format("save failed: {}", err.what()), state);
+                 std::format("save failed: could not open {}", name), state);
+    return;
+  }
+  file.write(content.data(), static_cast<std::streamsize>(content.size()));
+  if (!file.good()) {
+    toasts->post(render::DiagnosticSeverity::Error,
+                 std::format("save failed: write error on {}", name), state);
     return;
   }
   toasts->post(render::DiagnosticSeverity::Info, std::format("saved {}", name),
