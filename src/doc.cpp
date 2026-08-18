@@ -17,7 +17,8 @@
 #include <glm/gtc/type_ptr.hpp>
 #include <iostream> // for basic_ostream, operator<<
 #include <limits>
-#include <memory>                 // for __shared_ptr_access, shared...
+#include <memory> // for __shared_ptr_access, shared...
+#include <mutex>
 #include <pangomm/cairofontmap.h> // for CairoFontMap
 #include <span>                   // for span
 #include <stdexcept>              // for logic_error
@@ -822,6 +823,9 @@ const char *reflowScopeName(const ReflowScope scope) {
 }
 
 Glib::RefPtr<Pango::Layout> Doc::layoutFrom(const std::uint32_t offset) const {
+  static std::mutex fontMapMutex;
+  const std::lock_guard lock(fontMapMutex);
+
   const auto fontDesc =
       Pango::FontDescription(renderer->defaultFontName().data());
   const auto fonts = Pango::CairoFontMap::get_default();
