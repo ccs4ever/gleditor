@@ -293,7 +293,7 @@ PageShaping TextLayout::layoutPage(std::string_view text,
       shaping.glyphs.push_back(PageShaping::GlyphEntry{
           .chr          = std::string{clusterStr},
           .clusterLeft  = penX + g.xOffset,
-          .clusterTop   = line.top + (ascent - g.yOffset),
+          .clusterTop   = line.top,
           .clusterIndex = clusterBoxIdx,
           .lineIndex    = lineIdx,
       });

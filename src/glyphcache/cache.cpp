@@ -337,17 +337,24 @@ GlyphCache::Sizes GlyphCache::addToCache(const std::string &chr,
   }
   hb_buffer_destroy(buf);
 
-  int width  = std::max(maxX - minX, penX);
-  int height = maxY - minY;
+  const auto &metrics = font->metrics();
+  const int height    = std::max(1, static_cast<int>(std::ceil(metrics.lineHeight)));
+  const int baselineY = static_cast<int>(std::round(metrics.ascent));
+
+  int width = penX;
+  if (!rendered.empty()) {
+    if (minX < 0) {
+      width = std::max(penX - minX, maxX - minX);
+    } else {
+      width = std::max(penX, maxX);
+    }
+  }
   if (width <= 0) {
     width = penX > 0 ? penX : 0;
   }
-  if (height <= 0) {
-    height = static_cast<int>(std::ceil(font->metrics().lineHeight));
-  }
 
   const auto extents = Rect{Length{width}, Length{height}};
-  if (0 == width || 0 == height || rendered.empty()) {
+  if (0 == width || rendered.empty()) {
     for (auto &r : rendered) {
       FT_Done_Glyph(reinterpret_cast<FT_Glyph>(r.bitmapGlyph));
     }
@@ -360,10 +367,11 @@ GlyphCache::Sizes GlyphCache::addToCache(const std::string &chr,
   std::vector<unsigned char> data(
       static_cast<std::size_t>(height) * static_cast<std::size_t>(stride), 0);
 
+  const int xShift = minX < 0 ? -minX : 0;
   for (auto &r : rendered) {
     auto bg  = r.bitmapGlyph;
-    int dstX = r.x - minX;
-    int dstY = maxY - r.y;
+    int dstX = r.x + xShift;
+    int dstY = baselineY - r.y;
 
     for (unsigned int row = 0; row < bg->bitmap.rows; row++) {
       int curDstY = dstY + static_cast<int>(row);
