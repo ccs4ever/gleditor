@@ -27,19 +27,22 @@
 #include <utility>                // for move
 #include <vector>                 // for vector
 
-#include "glibmm/convert.h"              // for get_charset
-#include "glibmm/fileutils.h"            // for file_get_contents
-#include "glibmm/refptr.h"               // for RefPtr
-#include "glibmm/ustring.h"              // for ustring, operator==, UStrin...
-#include "pango/pango-layout.h"          // for pango_layout_set_text
-#include "pango/pango-types.h"           // for PANGO_SCALE
-#include "pangomm/attributes.h"          // for AttrFontDesc, Attribute
-#include "pangomm/attrlist.h"            // for AttrList
-#include "pangomm/fontdescription.h"     // for FontDescription
-#include "pangomm/layout.h"              // for Layout, EllipsizeMode
-#include "pangomm/layoutiter.h"          // for LayoutIter
-#include "pangomm/layoutline.h"          // for LayoutLine
-#include "pangomm/rectangle.h"           // for Rectangle
+#include "glibmm/convert.h"          // for get_charset
+#include "glibmm/fileutils.h"        // for file_get_contents
+#include "glibmm/refptr.h"           // for RefPtr
+#include "glibmm/ustring.h"          // for ustring, operator==, UStrin...
+#include "pango/pango-layout.h"      // for pango_layout_set_text
+#include "pango/pango-types.h"       // for PANGO_SCALE
+#include "pango/pangocairo.h"        // for pango_cairo_font_map_new
+#include "pango/pangofc-fontmap.h"   // for pango_fc_font_map_set_config
+#include "pangomm/attributes.h"      // for AttrFontDesc, Attribute
+#include "pangomm/attrlist.h"        // for AttrList
+#include "pangomm/fontdescription.h" // for FontDescription
+#include "pangomm/layout.h"          // for Layout, EllipsizeMode
+#include "pangomm/layoutiter.h"      // for LayoutIter
+#include "pangomm/layoutline.h"      // for LayoutLine
+#include "pangomm/rectangle.h"       // for Rectangle
+#include <fontconfig/fontconfig.h>
 #include <gleditor/caret.hpp>            // for Caret
 #include <gleditor/drawable.hpp>         // for Drawable
 #include <gleditor/glyphcache/cache.hpp> // for GlyphCache
@@ -111,7 +114,7 @@ double toPixels(const int pangoUnits) {
 /// Byte offset of the character after the one starting at @p pos. Always
 /// advances, so a caller stepping through text cannot get stuck on a malformed
 /// byte.
-std::size_t nextCharacter(const std::string &text, std::size_t pos) {
+std::size_t nextCharacter(const std::string_view text, std::size_t pos) {
   pos = std::min(pos + 1, text.size());
   while (pos < text.size() &&
          0x80 == (static_cast<unsigned char>(text[pos]) & 0xC0)) {
@@ -176,110 +179,25 @@ render::VertexLayout Doc::vertexLayout() {
   return layout;
 }
 
-// The constructor parameters are named with a leading `a` so that the body can
-// refer to the members without ambiguity: the members are move-constructed from
-// the parameters, which leaves the parameters empty.
-Page::Page(std::shared_ptr<Doc> aDoc, RenderState &state, glm::mat4 &model,
-           Glib::RefPtr<Pango::Layout> aLayout, const std::uint32_t aTextOffset,
-           const std::uint32_t aPageIndex,
-           const BufferPool::Allocation &inherited)
-    : Drawable(model), doc(std::move(aDoc)), pageBacking(inherited),
-      layout(std::move(aLayout)), textOffset(aTextOffset),
-      pageIndex(aPageIndex) {
-  const auto &layout = this->layout;
+PageShaping Doc::extractPageShaping(const Glib::RefPtr<Pango::Layout> &layout,
+                                    const std::string_view text) {
+  PageShaping shaping;
+  layout->get_pixel_size(shaping.textWidthPx, shaping.textHeightPx);
+  shaping.limit =
+      std::min<std::size_t>(text.size(), Doc::consumedBytes(layout));
+  shaping.lineCount =
+      static_cast<std::size_t>(std::max(0, layout->get_line_count()));
 
-  const auto color = Doc::VBORow::color;
-  const auto box   = Doc::VBORow::box;
-
-  // Everything below is in layout pixels, the unit Pango reports positions and
-  // sizes in. The page's model matrix scales them to world units, so a glyph's
-  // quad and the advance that places it shrink together -- they did not before,
-  // and the mismatch drew every glyph on top of its neighbours.
-  int textWidthPx  = 0;
-  int textHeightPx = 0;
-  layout->get_pixel_size(textWidthPx, textHeightPx);
-  pageWidth  = static_cast<float>(textWidthPx) + (2 * pageMargin);
-  pageHeight = static_cast<float>(textHeightPx) + (2 * pageMargin);
-
-  // The page is centred on its own origin, so that the model matrix placing it
-  // in the scene positions its middle rather than its top left corner. Kept as
-  // members so caret geometry lands in the same space as the glyphs.
-  originX = -pageWidth / 2.0F;
-  originY = pageHeight / 2.0F;
-
-  // Which document and page these quads belong to is the same for every one of
-  // them, so it is not written into any of them: the draw carries it, and a
-  // quad carries only the kind, which does vary -- the background and the bars
-  // are the page itself, where a glyph is a character within it.
-  identity = render::packTagIdentity(0, this->doc->documentIndex(), aPageIndex);
-
-  // The allocation holds two draws back to back: the full-detail one -- page
-  // background followed by a glyph per cluster -- and then the coarse one,
-  // which repeats the background and follows it with a solid bar per line.
-  // Repeating the background costs one row and is what lets either draw be
-  // aimed at with a byte offset and a count, with no second allocation and no
-  // stitching of two ranges.
-  std::vector<Doc::VBORow> vertexData;
-  const auto pushBackground = [&] {
-    vertexData.push_back(Doc::VBORow{
-        {0.0F, 0.0F},
-        Doc::VBORow::fill(color(255), Doc::VBORow::onPaper),
-        0,
-        box(0,
-            std::min(Doc::VBORow::maxQuadExtent,
-                     static_cast<unsigned int>(pageWidth)),
-            std::min(Doc::VBORow::maxQuadExtent,
-                     static_cast<unsigned int>(pageHeight)),
-            render::tagKindPage),
-        // A click on bare paper resolves to the start of the page, which is
-        // what a page-kind tag with no cluster already means.
-        Doc::VBORow::paperAt(color(255), 0)});
-  };
-  pushBackground();
-
-  const auto text = layout->get_text().raw();
-  const auto font =
-      layout->get_context()->load_font(layout->get_font_description());
-
-  // A page layout is handed the whole rest of the document and limited by
-  // height, so its text runs far past what the page shows. Everything below is
-  // bounded by what the page actually consumes -- without which the final
-  // cluster's end ran to the end of the document, producing a "cluster" of
-  // tens of kilobytes.
-  // Not const: a page that would hold more clusters than one can name gives
-  // the rest back to the next page, which is what keeps every cluster on this
-  // one pickable.
-  auto limit = std::min<std::size_t>(text.size(), Doc::consumedBytes(layout));
-
-  // Sizes are clamped rather than asserted. They come from whatever font the
-  // caller asked for, and a glyph too large to describe is a visual mistake
-  // where a failed assertion is a crash.
-  const auto extent = [](const float value) {
-    return static_cast<unsigned int>(std::clamp(
-        value, 0.0F, static_cast<float>(Doc::VBORow::maxQuadExtent)));
-  };
-
-  // Glyph box area per line, accumulated as the clusters are placed. This is
-  // what tells the coarse path how full each line is, so that its bar is as
-  // dark as the glyphs it stands in for without anything having to be assumed
-  // about the text.
-  std::vector<float> lineInk(
-      static_cast<std::size_t>(std::max(0, layout->get_line_count())), 0.0F);
   std::size_t lineOfCluster = 0;
-  // Byte at which the next line begins, so the running cluster offset can be
-  // attributed to a line without searching. Clusters arrive in text order.
-  const auto lineStartAt = [&layout](const std::size_t index) {
+  const auto lineStartAt    = [&layout](const std::size_t index) {
     const auto &line = layout->get_const_line(static_cast<int>(index));
     return line ? static_cast<std::size_t>(line->get_start_index())
                 : std::numeric_limits<std::size_t>::max();
   };
-  auto nextLineStart = lineInk.size() > 1
+  auto nextLineStart = shaping.lineCount > 1
                            ? lineStartAt(1)
                            : std::numeric_limits<std::size_t>::max();
 
-  // Walk the clusters. A cluster is the smallest run Pango will not break
-  // apart, so it is what one quad can represent: an "ffi" ligature or a letter
-  // with its combining marks is one cluster covering several characters.
   auto iter = layout->get_iter();
   while (true) {
     Pango::Rectangle clusterInk;
@@ -288,19 +206,12 @@ Page::Page(std::shared_ptr<Doc> aDoc, RenderState &state, glm::mat4 &model,
 
     const auto start = static_cast<std::size_t>(std::max(0, iter.get_index()));
     const bool more  = iter.next_cluster();
-    // Where the next cluster begins is where this one ends. When there is no
-    // next cluster the answer is one character, not "the rest of the page":
-    // Pango stops producing clusters partway through the final line, and
-    // taking the page's end instead handed the cache a bitmap of the whole
-    // remaining run -- a "glyph" 848 texels wide, and hundreds of them across
-    // a document. Everything past the last cluster was never shaped, so it
-    // belongs to the next page rather than to this one; textBytes below is set
-    // from what was actually consumed.
-    const auto end = std::min(
-        limit, more ? static_cast<std::size_t>(std::max(0, iter.get_index()))
-                    : nextCharacter(text, start));
+    const auto end =
+        std::min(shaping.limit,
+                 more ? static_cast<std::size_t>(std::max(0, iter.get_index()))
+                      : nextCharacter(text, start));
 
-    if (start >= limit) {
+    if (start >= shaping.limit) {
       break;
     }
     if (end <= start) {
@@ -310,29 +221,22 @@ Page::Page(std::shared_ptr<Doc> aDoc, RenderState &state, glm::mat4 &model,
       continue;
     }
 
-    // A trailing newline is part of the cluster's byte range but has nothing
-    // to draw; it still has to be counted so offsets stay in step with the
-    // text.
     std::size_t drawEnd = end;
     while (drawEnd > start &&
            ('\n' == text[drawEnd - 1] || '\r' == text[drawEnd - 1])) {
       drawEnd--;
     }
 
-    // A quad names its cluster in sixteen bits, so a page holds that many and
-    // no more. Reached only at font sizes small enough that a page carries
-    // fourteen times what a real one does; the page simply ends here and the
-    // next one starts where it left off.
-    if (clusters.size() >= Doc::VBORow::maxClustersPerPage) {
-      limit = start;
+    if (shaping.clusters.size() >= Doc::VBORow::maxClustersPerPage) {
+      shaping.limit = start;
       break;
     }
 
-    clusters.push_back(
+    shaping.clusters.push_back(
         ClusterBox{static_cast<std::uint32_t>(start),
                    static_cast<std::uint32_t>(end - start),
-                   static_cast<std::uint32_t>(utf8Length(
-                       std::string_view(text).substr(start, end - start)))});
+                   static_cast<std::uint32_t>(
+                       utf8Length(text.substr(start, end - start)))});
 
     if (drawEnd == start) {
       if (!more) {
@@ -341,90 +245,43 @@ Page::Page(std::shared_ptr<Doc> aDoc, RenderState &state, glm::mat4 &model,
       continue;
     }
 
-    // The whole cluster is rasterised, not just its first codepoint. Taking
-    // the leading sequence dropped the rest of every ligature and every
-    // combining mark from the page. A cluster too long for the cache to key on
-    // is skipped rather than allowed to stop the editor: it is pathological
-    // input, not a reason to fail to open a file.
     if (drawEnd - start > GlyphCache::maxClusterBytes) {
       if (!more) {
         break;
       }
       continue;
     }
-    const std::string_view chr(text.data() + start, drawEnd - start);
-    const auto glyph    = state.glyphCache.put(chr, font);
-    const auto &coords  = glyph.texCoords;
-    const auto &extents = glyph.dims;
 
-    const auto glyphWidth = static_cast<float>(static_cast<int>(extents.width));
-    const auto glyphHeight =
-        static_cast<float>(static_cast<int>(extents.height));
-
-    while (start >= nextLineStart && lineOfCluster + 1 < lineInk.size()) {
+    while (start >= nextLineStart && lineOfCluster + 1 < shaping.lineCount) {
       lineOfCluster++;
-      nextLineStart = lineOfCluster + 1 < lineInk.size()
+      nextLineStart = lineOfCluster + 1 < shaping.lineCount
                           ? lineStartAt(lineOfCluster + 1)
                           : std::numeric_limits<std::size_t>::max();
     }
 
-    if (0.0F < glyphWidth && 0.0F < glyphHeight) {
-      if (lineOfCluster < lineInk.size()) {
-        lineInk[lineOfCluster] += glyphWidth * glyphHeight * glyph.ink;
-      }
-      // Pango measures from the top left of the text block downwards; the page
-      // runs upwards from its own origin, hence the negated Y.
-      const auto left =
-          pageMargin + static_cast<float>(toPixels(clusterLogical.get_x()));
-      const auto top =
-          pageMargin + static_cast<float>(toPixels(clusterLogical.get_y()));
-
-      vertexData.push_back(Doc::VBORow{
-          {originX + left + (glyphWidth / 2.0F),
-           originY - (top + (glyphHeight / 2.0F))},
-          Doc::VBORow::ink(color(0), Doc::VBORow::onText, false),
-          // Where the glyph sits in the atlas. How large it is there is not
-          // written down: the atlas holds it at its own size, so the box below
-          // is the same rectangle in texels as it is in layout pixels.
-          Doc::VBORow::atlasAt(static_cast<unsigned int>(coords.topLeft.x),
-                               static_cast<unsigned int>(coords.topLeft.y)),
-          box(static_cast<unsigned char>(glyph.layer), extent(glyphWidth),
-              extent(glyphHeight), render::tagKindGlyph),
-          // The cluster index into this page's cluster table, which is what
-          // turns a picked fragment back into a text position; the draw says
-          // which document and page that table belongs to.
-          Doc::VBORow::paperAt(
-              color(255), static_cast<unsigned int>(clusters.size() - 1))});
-    }
+    shaping.glyphs.push_back(PageShaping::GlyphEntry{
+        .chr          = std::string(text.substr(start, drawEnd - start)),
+        .clusterLeft  = static_cast<float>(toPixels(clusterLogical.get_x())),
+        .clusterTop   = static_cast<float>(toPixels(clusterLogical.get_y())),
+        .clusterIndex = shaping.clusters.size() - 1,
+        .lineIndex    = lineOfCluster,
+    });
 
     if (!more) {
       break;
     }
   }
 
-  textBytes       = static_cast<std::uint32_t>(limit);
-  detailInstances = static_cast<std::uint32_t>(vertexData.size());
-
-  // The coarse draw. One quad per line, covering the line's ink box -- the box
-  // the glyphs actually mark, not the logical box, which runs to the wrapping
-  // width whether or not there is text out there. At the size this is used at
-  // a line is a few pixels tall and its glyphs are indistinguishable anyway,
-  // so what matters is that the bar sits where the text sits and is about as
-  // dark.
-  pushBackground();
   {
     auto lineIter         = layout->get_iter();
     std::size_t lineIndex = 0;
     do {
       const auto &line = layout->get_const_line(static_cast<int>(lineIndex));
-      // Lines past what this page consumes belong to the next page; the layout
-      // is handed the rest of the document and bounded by height, so it has
-      // them and the page must not draw them.
-      if (!line || static_cast<std::size_t>(line->get_start_index()) >= limit) {
+      if (!line ||
+          static_cast<std::size_t>(line->get_start_index()) >= shaping.limit) {
         break;
       }
-      const auto inkArea =
-          lineIndex < lineInk.size() ? lineInk[lineIndex] : 0.0F;
+      const auto curIndex = lineIndex;
       lineIndex++;
 
       Pango::Rectangle ink;
@@ -433,31 +290,121 @@ Page::Page(std::shared_ptr<Doc> aDoc, RenderState &state, glm::mat4 &model,
 
       const auto barWidth  = static_cast<float>(toPixels(ink.get_width()));
       const auto barHeight = static_cast<float>(toPixels(ink.get_height()));
-      // A blank line has no ink and needs no bar.
       if (0.0F >= barWidth || 0.0F >= barHeight) {
         continue;
       }
-      const auto left = pageMargin + static_cast<float>(toPixels(ink.get_x()));
-      const auto top  = pageMargin + static_cast<float>(toPixels(ink.get_y()));
-
-      // Solid, so the fragment stage fills it with this colour and never
-      // samples the atlas. That is what lets the coarse path share the glyph
-      // pipeline instead of needing one of its own, and it keeps all eight
-      // bits of the shade: a bar is drawn as ink, not as paper.
-      const auto shade = greekedShade(inkArea / (barWidth * barHeight));
-      vertexData.push_back(Doc::VBORow{
-          {originX + left + (barWidth / 2.0F),
-           originY - (top + (barHeight / 2.0F))},
-          Doc::VBORow::fill(color(shade), Doc::VBORow::onText),
-          0,
-          box(0, extent(barWidth), extent(barHeight), render::tagKindPage),
-          Doc::VBORow::paperAt(color(shade), 0)});
+      shaping.lines.push_back(PageShaping::LineEntry{
+          .barWidth  = barWidth,
+          .barHeight = barHeight,
+          .left      = static_cast<float>(toPixels(ink.get_x())),
+          .top       = static_cast<float>(toPixels(ink.get_y())),
+          .lineIndex = curIndex,
+      });
     } while (lineIter.next_line());
   }
+
+  return shaping;
+}
+
+Page::Page(std::shared_ptr<Doc> aDoc, RenderState &state, glm::mat4 &model,
+           PageShaping aShaping, const std::uint32_t aTextOffset,
+           const std::uint32_t aPageIndex,
+           const BufferPool::Allocation &inherited)
+    : Drawable(model), doc(std::move(aDoc)), pageBacking(inherited),
+      textOffset(aTextOffset), pageIndex(aPageIndex) {
+  const auto color = Doc::VBORow::color;
+  const auto box   = Doc::VBORow::box;
+
+  pageWidth  = static_cast<float>(aShaping.textWidthPx) + (2 * pageMargin);
+  pageHeight = static_cast<float>(aShaping.textHeightPx) + (2 * pageMargin);
+
+  originX = -pageWidth / 2.0F;
+  originY = pageHeight / 2.0F;
+
+  identity = render::packTagIdentity(0, this->doc->documentIndex(), aPageIndex);
+
+  std::vector<Doc::VBORow> vertexData;
+  const auto pushBackground = [&] {
+    vertexData.push_back(
+        Doc::VBORow{{0.0F, 0.0F},
+                    Doc::VBORow::fill(color(255), Doc::VBORow::onPaper),
+                    0,
+                    box(0,
+                        std::min(Doc::VBORow::maxQuadExtent,
+                                 static_cast<unsigned int>(pageWidth)),
+                        std::min(Doc::VBORow::maxQuadExtent,
+                                 static_cast<unsigned int>(pageHeight)),
+                        render::tagKindPage),
+                    Doc::VBORow::paperAt(color(255), 0)});
+  };
+  pushBackground();
+
+  thread_local static auto renderFontMap = Pango::CairoFontMap::get_default();
+  thread_local static auto renderFontCtx = renderFontMap->create_context();
+  const auto fontDesc =
+      Pango::FontDescription(this->doc->renderer->defaultFontName().data());
+  const auto font = renderFontCtx->load_font(fontDesc);
+
+  const auto extent = [](const float value) {
+    return static_cast<unsigned int>(std::clamp(
+        value, 0.0F, static_cast<float>(Doc::VBORow::maxQuadExtent)));
+  };
+
+  std::vector<float> lineInk(aShaping.lineCount, 0.0F);
+
+  clusters = std::move(aShaping.clusters);
+
+  for (const auto &g : aShaping.glyphs) {
+    const auto glyph    = state.glyphCache.put(g.chr, font);
+    const auto &coords  = glyph.texCoords;
+    const auto &extents = glyph.dims;
+
+    const auto glyphWidth = static_cast<float>(static_cast<int>(extents.width));
+    const auto glyphHeight =
+        static_cast<float>(static_cast<int>(extents.height));
+
+    if (0.0F < glyphWidth && 0.0F < glyphHeight) {
+      if (g.lineIndex < lineInk.size()) {
+        lineInk[g.lineIndex] += glyphWidth * glyphHeight * glyph.ink;
+      }
+      const auto left = pageMargin + g.clusterLeft;
+      const auto top  = pageMargin + g.clusterTop;
+
+      vertexData.push_back(Doc::VBORow{
+          {originX + left + (glyphWidth / 2.0F),
+           originY - (top + (glyphHeight / 2.0F))},
+          Doc::VBORow::ink(color(0), Doc::VBORow::onText, false),
+          Doc::VBORow::atlasAt(static_cast<unsigned int>(coords.topLeft.x),
+                               static_cast<unsigned int>(coords.topLeft.y)),
+          box(static_cast<unsigned char>(glyph.layer), extent(glyphWidth),
+              extent(glyphHeight), render::tagKindGlyph),
+          Doc::VBORow::paperAt(color(255),
+                               static_cast<unsigned int>(g.clusterIndex))});
+    }
+  }
+
+  textBytes       = static_cast<std::uint32_t>(aShaping.limit);
+  detailInstances = static_cast<std::uint32_t>(vertexData.size());
+
+  pushBackground();
+  for (const auto &line : aShaping.lines) {
+    const auto inkArea =
+        line.lineIndex < lineInk.size() ? lineInk[line.lineIndex] : 0.0F;
+    const auto left  = pageMargin + line.left;
+    const auto top   = pageMargin + line.top;
+    const auto shade = greekedShade(inkArea / (line.barWidth * line.barHeight));
+    vertexData.push_back(
+        Doc::VBORow{{originX + left + (line.barWidth / 2.0F),
+                     originY - (top + (line.barHeight / 2.0F))},
+                    Doc::VBORow::fill(color(shade), Doc::VBORow::onText),
+                    0,
+                    box(0, extent(line.barWidth), extent(line.barHeight),
+                        render::tagKindPage),
+                    Doc::VBORow::paperAt(color(shade), 0)});
+  }
+
   coarseInstances =
       static_cast<std::uint32_t>(vertexData.size()) - detailInstances;
-  // A page with no lines to bar would draw its background alone, which is not
-  // what the page looks like; fall back to the detailed draw instead.
   if (1 >= coarseInstances) {
     vertexData.resize(detailInstances);
     coarseInstances = 0;
@@ -467,19 +414,18 @@ Page::Page(std::shared_ptr<Doc> aDoc, RenderState &state, glm::mat4 &model,
   if (pageBacking.empty()) {
     pageBacking = this->doc->pool->reserve(rows);
   } else {
-    // Taking over the rows of the page this one replaces. Every one of them is
-    // written below, so the pool is told not to carry the old contents along
-    // if it does have to move them.
     this->doc->pool->resize(pageBacking, rows, BufferPool::Contents::Discard);
   }
   this->doc->pool->write(pageBacking, 0, asBytes(vertexData));
-
-  // The shaping has done what it was for: the quads are in the buffer and the
-  // cluster table records where each one came from. Keeping it is what made a
-  // megabyte of text cost ninety megabytes of Pango, and a document that is
-  // read rather than edited never asks for it again. See Page::layout.
-  dropLayout();
 }
+
+Page::Page(std::shared_ptr<Doc> aDoc, RenderState &state, glm::mat4 &model,
+           Glib::RefPtr<Pango::Layout> aLayout, const std::uint32_t aTextOffset,
+           const std::uint32_t aPageIndex,
+           const BufferPool::Allocation &inherited)
+    : Page(std::move(aDoc), state, model,
+           Doc::extractPageShaping(aLayout, aLayout->get_text().raw()),
+           aTextOffset, aPageIndex, inherited) {}
 
 bool Page::contains(const std::uint32_t globalOffset) const {
   // The end of the last page is a valid caret position, so the upper bound is
@@ -823,13 +769,20 @@ const char *reflowScopeName(const ReflowScope scope) {
 }
 
 Glib::RefPtr<Pango::Layout> Doc::layoutFrom(const std::uint32_t offset) const {
-  static std::mutex fontMapMutex;
-  const std::lock_guard lock(fontMapMutex);
+  thread_local struct ThreadFontContext {
+    Glib::RefPtr<Pango::FontMap> fontMap;
 
-  const auto fontDesc =
-      Pango::FontDescription(renderer->defaultFontName().data());
-  const auto fonts = Pango::CairoFontMap::get_default();
-  const auto ctx   = fonts->create_context();
+    Glib::RefPtr<Pango::FontMap> getFontMap() {
+      if (!fontMap) {
+        fontMap = Glib::wrap(PANGO_FONT_MAP(pango_cairo_font_map_new()));
+      }
+      return fontMap;
+    }
+  } threadCtx;
+
+  const auto fontName = renderer->defaultFontName();
+  const auto fontDesc = Pango::FontDescription(fontName.data());
+  const auto ctx      = threadCtx.getFontMap()->create_context();
   ctx->set_font_description(fontDesc);
 
   auto lay = Pango::Layout::create(ctx);
@@ -849,6 +802,9 @@ Glib::RefPtr<Pango::Layout> Doc::layoutFrom(const std::uint32_t offset) const {
   // through, so leaving it handing Pango the whole document would have left
   // the fault in place for every keystroke in a long one.
   fillPage(lay, txt + offset, size - offset);
+  int precomputeW = 0;
+  int precomputeH = 0;
+  lay->get_pixel_size(precomputeW, precomputeH);
   return lay;
 }
 
@@ -1235,22 +1191,12 @@ void Doc::fillPage(const Glib::RefPtr<Pango::Layout> &layout, const char *from,
 void Doc::makePages(RenderState &state) {
   std::cout << "MAKING PAGES: " << this << " " << glm::to_string(model) << "\n";
   auto tSize = 0UL;
+  const std::string_view fullText{text.raw()};
   while (tSize < text.bytes()) {
-    // The same call a page uses to shape itself again once it has let its
-    // layout go, so what a caret is placed against is what was drawn. These
-    // were two copies of the same page setup until a page's layout became
-    // something it could be without; two copies that had to agree exactly and
-    // nothing to say so.
-    auto lay = layoutFrom(static_cast<std::uint32_t>(tSize));
-    // Measured before the layout is handed over, never after. newPage() queues
-    // the page onto the render thread and the layout goes with it, so from
-    // that call on it belongs to two threads at once -- and a Pango layout
-    // computes its lines lazily, so merely asking it a question mutates it.
-    // Reading it here means this thread does that work while it is still the
-    // only owner. The same measure the page itself will record, so that page
-    // N+1 starts exactly where page N stopped drawing.
-    const auto consumed = consumedBytes(lay);
-    newPage(state, lay, static_cast<std::uint32_t>(tSize));
+    auto lay            = layoutFrom(static_cast<std::uint32_t>(tSize));
+    auto shaping        = extractPageShaping(lay, fullText.substr(tSize));
+    const auto consumed = static_cast<std::uint32_t>(shaping.limit);
+    newPage(state, std::move(shaping), static_cast<std::uint32_t>(tSize));
     tSize += consumed;
   }
 
@@ -1262,9 +1208,9 @@ void Doc::makePages(RenderState &state) {
   renderer->run([self] { self->pool->trim(); });
 }
 
-void Doc::newPage(RenderState &state, Glib::RefPtr<Pango::Layout> &layout,
+void Doc::newPage(RenderState &state, PageShaping aShaping,
                   const std::uint32_t textOffset) {
-  renderer->run([this, &state, layout, textOffset] {
+  renderer->run([this, &state, shaping = std::move(aShaping), textOffset] {
     const auto numPages = this->pages.size();
     // Pages are laid out in pixels and scaled here, so the stacking distance is
     // in world units while everything inside the page is not.
@@ -1272,7 +1218,13 @@ void Doc::newPage(RenderState &state, Glib::RefPtr<Pango::Layout> &layout,
         glm::mat4(1.0),
         glm::vec3(0.0F, -100 * static_cast<float>(numPages), 0.0F));
     trans = glm::scale(trans, glm::vec3(pixelsToWorld, pixelsToWorld, 1.0F));
-    pages.emplace_back(this->getPtr(), state, trans, layout, textOffset,
-                       static_cast<std::uint32_t>(numPages));
+    pages.emplace_back(this->getPtr(), state, trans, std::move(shaping),
+                       textOffset, static_cast<std::uint32_t>(numPages));
   });
+}
+
+void Doc::newPage(RenderState &state, Glib::RefPtr<Pango::Layout> &layout,
+                  const std::uint32_t textOffset) {
+  auto shaping = extractPageShaping(layout, layout->get_text().raw());
+  newPage(state, std::move(shaping), textOffset);
 }
