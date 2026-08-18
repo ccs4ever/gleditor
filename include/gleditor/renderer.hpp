@@ -57,7 +57,6 @@ struct RenderItem {
 };
 struct RenderItemNewDoc : RenderItem {
   RenderItemNewDoc() : RenderItem(Type::NewDoc) {}
-  ~RenderItemNewDoc() override = default;
 };
 
 /**
@@ -72,7 +71,6 @@ struct RenderItemCloseDoc : RenderItem {
   std::uint32_t docIndex;
   explicit RenderItemCloseDoc(const std::uint32_t index = mostRecent)
       : RenderItem(Type::CloseDoc), docIndex(index) {}
-  ~RenderItemCloseDoc() override = default;
 };
 
 /**
@@ -89,14 +87,12 @@ struct RenderItemSaveDoc : RenderItem {
   std::uint32_t docIndex;
   explicit RenderItemSaveDoc(const std::uint32_t index = mostRecent)
       : RenderItem(Type::SaveDoc), docIndex(index) {}
-  ~RenderItemSaveDoc() override = default;
 };
 
 struct RenderItemResize : RenderItem {
   int width, height;
   RenderItemResize(const int width, const int height)
       : RenderItem(Type::Resize), width(width), height(height) {}
-  ~RenderItemResize() override = default;
 };
 
 /**
@@ -114,14 +110,12 @@ struct RenderItemOpenDoc : RenderItem {
   explicit RenderItemOpenDoc(const std::string &fileName)
       : RenderItem(Type::OpenDoc),
         source(std::make_shared<gleditor::FileTextSource>(fileName)) {}
-  ~RenderItemOpenDoc() override = default;
 };
 
 struct RenderItemRun : RenderItem {
   std::function<void()> fun;
   explicit RenderItemRun(std::invocable auto fun)
       : RenderItem(Type::Run), fun(std::move(fun)) {}
-  ~RenderItemRun() override = default;
   void operator()() const { fun(); }
 };
 
@@ -137,7 +131,6 @@ struct RenderItemRunState : RenderItem {
   std::function<void(RenderState &)> fun;
   explicit RenderItemRunState(std::invocable<RenderState &> auto fun)
       : RenderItem(Type::RunState), fun(std::move(fun)) {}
-  ~RenderItemRunState() override = default;
   void operator()(RenderState &state) const { fun(state); }
 };
 
