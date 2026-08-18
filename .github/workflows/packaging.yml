@@ -35,9 +35,10 @@ jobs:
         sudo apt-get update
         sudo apt-get install -y --no-install-recommends \
           build-essential debhelper devscripts pkg-config \
-          libpangomm-2.48-dev libcairomm-1.16-dev libglibmm-2.68-dev \
+          libfreetype-dev libharfbuzz-dev libfribidi-dev \
+          libunibreak-dev libfontconfig-dev \
           libsdl2-dev libsdl2-image-dev libgl-dev libglm-dev \
-          libvulkan-dev libtorrent-rasterbar-dev glslang-tools
+          libvulkan-dev libtorrent-rasterbar-dev libssl-dev liblmdb-dev glslang-tools
 
     # dpkg-buildpackage wants debian/ at the root of the tree it is building.
     # It lives under packaging/ in the repository so that four packaging
@@ -94,9 +95,10 @@ jobs:
       run: |
         dnf install -y --setopt=install_weak_deps=False \
           rpm-build rpmdevtools make gcc-c++ pkgconf-pkg-config git \
-          pangomm2.48-devel cairomm1.16-devel glibmm2.68-devel \
+          freetype-devel harfbuzz-devel fribidi-devel \
+          libunibreak-devel fontconfig-devel \
           SDL3-devel SDL3_image-devel mesa-libGL-devel glm-devel \
-          vulkan-loader-devel glslang \
+          vulkan-loader-devel glslang openssl-devel lmdb-devel \
           desktop-file-utils libappstream-glib python3
         # rb_libtorrent is the Fedora package name; the upstream project and
         # everything else in this file call it libtorrent-rasterbar, so this
@@ -168,9 +170,9 @@ jobs:
     - name: install build dependencies
       run: |
         pacman -Syu --noconfirm --needed \
-          git pkgconf make gcc pangomm-2.48 cairomm-1.16 glibmm-2.68 \
+          git pkgconf make gcc freetype2 harfbuzz fribidi libunibreak fontconfig \
           sdl3 sdl3_image libglvnd glm vulkan-headers vulkan-icd-loader \
-          libtorrent-rasterbar boost glslang python
+          openssl lmdb libtorrent-rasterbar boost glslang python
 
     - uses: actions/checkout@v7
       with:
@@ -331,17 +333,21 @@ jobs:
           return 1
         }
         pkgs=""
-        pkgs="$pkgs $(resolve pangomm pangomm-2.48 pangomm2.48 pangomm)"
-        pkgs="$pkgs $(resolve cairomm cairomm-1.16 cairomm1.16 cairomm)"
-        pkgs="$pkgs $(resolve glibmm glibmm-2.68 glibmm2.68 glibmm)"
+        pkgs="$pkgs $(resolve freetype freetype freetype2)"
+        pkgs="$pkgs $(resolve harfbuzz harfbuzz)"
+        pkgs="$pkgs $(resolve fribidi fribidi)"
+        pkgs="$pkgs $(resolve libunibreak libunibreak)"
+        pkgs="$pkgs $(resolve fontconfig fontconfig)"
         pkgs="$pkgs $(resolve sdl3 sdl3 SDL3)"
         pkgs="$pkgs $(resolve sdl3.image sdl3-image sdl3_image SDL3_image)"
+        pkgs="$pkgs $(resolve openssl openssl)"
+        pkgs="$pkgs $(resolve lmdb lmdb)"
         pkgs="$pkgs $(resolve libtorrent-rasterbar libtorrent-rasterbar rb-libtorrent)"
         echo "installing:$pkgs"
         # shellcheck disable=SC2086
         pacman -S --noconfirm --needed $pkgs
         echo "--- what pkg-config sees ---"
-        pkg-config --modversion pangomm-2.48 cairomm-1.16 glibmm-2.68 sdl3 \
+        pkg-config --modversion freetype2 harfbuzz fribidi libunibreak fontconfig sdl3 \
           libtorrent-rasterbar
 
     # AccessKit is what reports the user interface to screen readers -- UI
@@ -588,8 +594,8 @@ jobs:
     # own dependencies -- see the comment there for what each is for.
     - name: install build dependencies
       run: |
-        brew install make pangomm cairomm glibmm sdl3 sdl3_image glm \
-          libtorrent-rasterbar boost openssl@3 pkgconf googletest \
+        brew install make freetype harfbuzz fribidi libunibreak fontconfig \
+          sdl3 sdl3_image glm libtorrent-rasterbar lmdb boost openssl@3 pkgconf googletest \
           vulkan-loader molten-vk glslang
 
     # AccessKit is what reports the user interface to screen readers --
