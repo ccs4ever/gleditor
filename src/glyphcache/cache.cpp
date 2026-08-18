@@ -96,28 +96,14 @@ int openingAtlasSize() {
 constexpr int atlasMipLevels = 4;
 constexpr int glyphPadding   = 1 << (atlasMipLevels - 1);
 
-/// Copy a tightly packed coverage rectangle into the middle of a zeroed one
-/// that is `glyphPadding` wider on every side.
-std::vector<std::byte> withPadding(const std::span<const std::byte> coverage,
-                                   const int width, const int height) {
-  const auto paddedWidth  = width + (2 * glyphPadding);
-  const auto paddedHeight = height + (2 * glyphPadding);
-  std::vector<std::byte> padded(static_cast<std::size_t>(paddedWidth) *
-                                    static_cast<std::size_t>(paddedHeight),
-                                std::byte{0});
-  for (int row = 0; row < height; row++) {
-    const auto *src = coverage.data() + static_cast<std::size_t>(row) * width;
-    auto *dst = padded.data() +
-                (static_cast<std::size_t>(row + glyphPadding) * paddedWidth) +
-                glyphPadding;
-    std::copy_n(src, width, dst);
-  }
-  return padded;
-}
+struct PaddedCoverage {
+  std::vector<std::byte> data;
+  float meanInk{};
+};
 
 /**
- * @brief Convert a Cairo ARGB32 surface to tightly packed single-channel
- *        coverage.
+ * @brief Convert a Cairo ARGB32 surface directly to padded single-channel
+ *        coverage in a single pass while computing mean ink.
  *
  * Every backend can upload an R8 rectangle identically, whereas asking the
  * driver to derive one channel from a BGRA upload is an OpenGL-specific
@@ -127,22 +113,39 @@ std::vector<std::byte> withPadding(const std::span<const std::byte> coverage,
  * The glyph is drawn in opaque red on a transparent background, so in Cairo's
  * premultiplied ARGB32 the alpha byte already holds the coverage. On a
  * little-endian host the bytes of each pixel are ordered B, G, R, A.
+ *
+ * Combining coverage extraction with zero-padding and mean ink calculation
+ * avoids an extra intermediate heap allocation and multiple copy/accumulate
+ * passes for every rasterized glyph.
  */
-std::vector<std::byte> toCoverage(const std::span<const unsigned char> surface,
-                                  const int width, const int height,
-                                  const int stride) {
-  std::vector<std::byte> coverage(static_cast<std::size_t>(width) *
-                                  static_cast<std::size_t>(height));
+PaddedCoverage
+extractPaddedCoverage(const std::span<const unsigned char> surface,
+                      const int width, const int height, const int stride) {
+  const auto paddedWidth  = width + (2 * glyphPadding);
+  const auto paddedHeight = height + (2 * glyphPadding);
+  std::vector<std::byte> padded(static_cast<std::size_t>(paddedWidth) *
+                                    static_cast<std::size_t>(paddedHeight),
+                                std::byte{0});
+  std::uint64_t totalInk = 0;
   for (int row = 0; row < height; row++) {
     const auto *src = surface.data() + static_cast<std::size_t>(row) *
                                            static_cast<std::size_t>(stride);
-    auto *dst = coverage.data() +
-                static_cast<std::size_t>(row) * static_cast<std::size_t>(width);
+    auto *dst = padded.data() +
+                (static_cast<std::size_t>(row + glyphPadding) * paddedWidth) +
+                glyphPadding;
     for (int col = 0; col < width; col++) {
-      dst[col] = static_cast<std::byte>(src[(col * 4) + 3]);
+      const auto val = static_cast<std::byte>(src[(col * 4) + 3]);
+      dst[col]       = val;
+      totalInk += std::to_integer<std::uint64_t>(val);
     }
   }
-  return coverage;
+  const auto totalPixels =
+      static_cast<double>(width) * static_cast<double>(height);
+  const auto meanInk = totalPixels > 0.0
+                           ? static_cast<float>(static_cast<double>(totalInk) /
+                                                (255.0 * totalPixels))
+                           : 0.0F;
+  return PaddedCoverage{std::move(padded), meanInk};
 }
 
 } // namespace
@@ -347,8 +350,6 @@ GlyphCache::Sizes GlyphCache::addToCache(const std::string &chr,
   // Cairo may still be holding drawing operations; flush before reading back.
   layoutSurf->flush();
 
-  const auto coverage = toCoverage(data, width, height, stride);
-
   // The glyph goes into the atlas inside a zeroed border, so that the mip
   // chain averages it with empty space rather than with its neighbour. The
   // palette packs the padded box and knows nothing about the padding; the
@@ -362,17 +363,18 @@ GlyphCache::Sizes GlyphCache::addToCache(const std::string &chr,
     throw std::overflow_error(
         std::format("GlyphCache: no palette has room for glyph: {}", chr));
   }
-  auto paddedCoverage = withPadding(coverage, width, height);
-  const auto placed   = palette->put(padded, paddedCoverage);
+  auto paddedCoverage = extractPaddedCoverage(data, width, height, stride);
+  const auto placed   = palette->put(padded, paddedCoverage.data);
   if (!placed.has_value()) {
     throw std::overflow_error(
         std::format("GlyphCache: failed to place glyph: {}", chr));
   }
+  const auto inked = paddedCoverage.meanInk;
   // Remembered so that growing the atlas can put it back exactly here.
   placements.push_back(Placement{
       palette->layerIndex(), static_cast<int>(placed->topLeft.x),
       static_cast<int>(placed->topLeft.y), std::to_underlying(padded.width),
-      std::to_underlying(padded.height), std::move(paddedCoverage)});
+      std::to_underlying(padded.height), std::move(paddedCoverage.data)});
 
   // Narrow the placed rectangle from the padded box to the glyph inside it.
   // Texels, so that growing the atlas leaves this glyph where it is; the
@@ -382,18 +384,8 @@ GlyphCache::Sizes GlyphCache::addToCache(const std::string &chr,
                            placed->topLeft.y + glyphPadding},
                     RectF{placed->box.width - (2 * glyphPadding),
                           placed->box.height - (2 * glyphPadding)}};
-  // Mean coverage over the box, taken from the bitmap that was just
-  // rasterised. One pass over data already in cache, once per distinct cluster.
-  const auto inked =
-      std::accumulate(coverage.begin(), coverage.end(), 0.0,
-                      [](const double sum, const std::byte value) {
-                        return sum +
-                               static_cast<double>(std::to_integer<int>(value));
-                      }) /
-      (255.0 * static_cast<double>(coverage.size()));
 
-  const auto sizes =
-      Sizes{inner, extents, palette->layerIndex(), static_cast<float>(inked)};
+  const auto sizes = Sizes{inner, extents, palette->layerIndex(), inked};
   // Level zero moved, so the chain below it is stale until it is rebuilt.
   atlasDirty                = true;
   glyphs[chr][keyFor(font)] = sizes;

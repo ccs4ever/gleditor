@@ -55,6 +55,36 @@ struct ClusterBox {
   std::uint32_t charCount{};
 };
 
+/**
+ * @brief Extracted layout metrics and shaping data for a single page.
+ *
+ * Extracted on background loader threads so that Pango layouts, contexts, and
+ * fontmaps never cross thread boundaries into the render thread.
+ */
+struct PageShaping {
+  int textWidthPx{};
+  int textHeightPx{};
+  std::size_t limit{};
+  std::vector<ClusterBox> clusters;
+  struct GlyphEntry {
+    std::string chr;
+    float clusterLeft{};
+    float clusterTop{};
+    std::size_t clusterIndex{};
+    std::size_t lineIndex{};
+  };
+  std::vector<GlyphEntry> glyphs;
+  struct LineEntry {
+    float barWidth{};
+    float barHeight{};
+    float left{};
+    float top{};
+    std::size_t lineIndex{};
+  };
+  std::vector<LineEntry> lines;
+  std::size_t lineCount{};
+};
+
 class Page : public Drawable {
 private:
   std::shared_ptr<Doc> doc;
@@ -117,6 +147,9 @@ public:
    *        hole fitted, moved the page across the buffer on every keystroke.
    *        Empty for a page that has no predecessor.
    */
+  Page(std::shared_ptr<Doc> aDoc, RenderState &state, glm::mat4 &model,
+       PageShaping aShaping, std::uint32_t aTextOffset,
+       std::uint32_t aPageIndex, const BufferPool::Allocation &inherited = {});
   Page(std::shared_ptr<Doc> aDoc, RenderState &state, glm::mat4 &model,
        Glib::RefPtr<Pango::Layout> aLayout, std::uint32_t aTextOffset,
        std::uint32_t aPageIndex, const BufferPool::Allocation &inherited = {});
@@ -573,6 +606,11 @@ public:
   void collect(std::vector<render::GlyphBatch> &batches,
                const glm::mat4 &viewProjection, const DrawBudget &budget,
                DrawStats &stats) const;
+  static PageShaping
+  extractPageShaping(const Glib::RefPtr<Pango::Layout> &layout,
+                     std::string_view text);
+  void newPage(RenderState &state, PageShaping aShaping,
+               std::uint32_t textOffset);
   void newPage(RenderState &state, Glib::RefPtr<Pango::Layout> &layout,
                std::uint32_t textOffset);
 
