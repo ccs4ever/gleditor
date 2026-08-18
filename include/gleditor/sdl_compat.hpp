@@ -395,9 +395,15 @@ inline int showMessageBox(SDL_Window *parent, const MessageKind kind,
     if (i + 1 == buttons.size()) {
       flags |= SDL_MESSAGEBOX_BUTTON_ESCAPEKEY_DEFAULT;
     }
-    laid.push_back(SDL_MessageBoxButtonData{.flags    = flags,
-                                            .buttonID = static_cast<int>(i),
-                                            .text     = buttons[i].c_str()});
+    SDL_MessageBoxButtonData btn{};
+    btn.flags = flags;
+#if GLEDITOR_SDL_MAJOR == 3
+    btn.buttonID = static_cast<int>(i);
+#else
+    btn.buttonid = static_cast<int>(i);
+#endif
+    btn.text = buttons[i].c_str();
+    laid.push_back(btn);
   }
 
   SDL_MessageBoxData data{};

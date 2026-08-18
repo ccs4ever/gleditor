@@ -204,7 +204,7 @@ to sanity-check `.editorconfig` itself, not as a gate.
   - Clusters are shaped via HarfBuzz and rendered into a dynamic 2D texture array atlas (512x512 growing up to 16384x16384 across 64 layers).
 - **Baseline Alignment & Quad Geometry**:
   - `Doc` glyph quads are anchored to `line.top` with height set to the font's logical `lineHeight`.
-  - `GlyphCache` cluster textures are sized to `lineHeight` with baseline fixed at $Y = \text{ascent}$.
+  - `GlyphCache` cluster textures are sized to `lineHeight` with baseline fixed at $Y = \\text{ascent}$.
   - When modifying text shaping or layout, always run `./tools/compare-backends.sh` and visually inspect screenshots with visual tools (`view_file`) to check for flat baselines, correct cluster height, and sharp glyph rendering.
 
 ## Gotchas worth knowing before editing the Makefile
