@@ -780,8 +780,9 @@ void DeviceGL::destroyPickingSlots() {
   nextPickingSlot = 0;
 }
 
-void DeviceGL::requestPickingTag(const int x, const int y) {
-  if (x < 0 || y < 0 || x >= targetWidth || y >= targetHeight) {
+void DeviceGL::requestPickingTag(const int coordX, const int coordY) {
+  if (coordX < 0 || coordY < 0 || coordX >= targetWidth ||
+      coordY >= targetHeight) {
     return;
   }
 
@@ -804,13 +805,14 @@ void DeviceGL::requestPickingTag(const int x, const int y) {
   // The read is four components even though the attachment has two: OpenGL ES
   // only guarantees GL_RGBA_INTEGER for an integer colour buffer, and desktop
   // GL accepts it too, so one format works on both.
-  api.ReadPixels(x, flipY(y), 1, 1, GL_RGBA_INTEGER, GL_UNSIGNED_INT, nullptr);
+  api.ReadPixels(coordX, flipY(coordY), 1, 1, GL_RGBA_INTEGER, GL_UNSIGNED_INT,
+                 nullptr);
 
   api.BindBuffer(GL_PIXEL_PACK_BUFFER, 0);
 
   slot.fence      = api.FenceSync(GL_SYNC_GPU_COMMANDS_COMPLETE, 0);
-  slot.x          = x;
-  slot.y          = y;
+  slot.x          = coordX;
+  slot.y          = coordY;
   slot.pending    = true;
   nextPickingSlot = (nextPickingSlot + 1) % picking.size();
 }
