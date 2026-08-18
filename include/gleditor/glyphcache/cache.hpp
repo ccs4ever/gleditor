@@ -73,8 +73,7 @@ private:
 
 public:
   explicit FontMapKeyAdapter(FontPtr font)
-      : font_(std::move(font)),
-        key_(font_ ? font_->key() : ""),
+      : font_(std::move(font)), key_(font_ ? font_->key() : ""),
         hash_(std::hash<std::string>{}(key_)) {}
   FontMapKeyAdapter(const FontMapKeyAdapter &oth)            = default;
   FontMapKeyAdapter &operator=(const FontMapKeyAdapter &oth) = default;

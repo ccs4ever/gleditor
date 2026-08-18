@@ -19,12 +19,12 @@
 #include <limits>
 #include <memory> // for __shared_ptr_access, shared...
 #include <mutex>
-#include <span>             // for span
-#include <stdexcept>        // for logic_error
-#include <string>           // for char_traits, basic_string
-#include <string_view>      // for string_view
-#include <utility>          // for move
-#include <vector>           // for vector
+#include <span>        // for span
+#include <stdexcept>   // for logic_error
+#include <string>      // for char_traits, basic_string
+#include <string_view> // for string_view
+#include <utility>     // for move
+#include <vector>      // for vector
 
 #include "glibmm/convert.h"   // for get_charset
 #include "glibmm/fileutils.h" // for file_get_contents
@@ -269,9 +269,7 @@ bool Page::contains(const std::uint32_t globalOffset) const {
   return globalOffset >= textOffset && globalOffset <= textOffset + textBytes;
 }
 
-void Doc::keepLayoutOf(const std::uint32_t pageIndex) const {
-  (void)pageIndex;
-}
+void Doc::keepLayoutOf(const std::uint32_t pageIndex) const { (void)pageIndex; }
 
 std::string_view Page::pageText() const {
   const std::string_view whole{doc->contents().raw()};
@@ -281,9 +279,7 @@ std::string_view Page::pageText() const {
   return whole.substr(textOffset, textBytes);
 }
 
-PageShaping Page::ensureShaping() const {
-  return doc->layoutFrom(textOffset);
-}
+PageShaping Page::ensureShaping() const { return doc->layoutFrom(textOffset); }
 
 bool Page::caretGeometry(const std::uint32_t globalOffset, float &posX,
                          float &posY, float &height) const {
@@ -869,10 +865,10 @@ void Doc::reflowFrom(RenderState &state, const std::size_t firstPage,
         glm::translate(glm::mat4(1.0),
                        glm::vec3(0.0F, -100 * static_cast<float>(index), 0.0F));
     trans = glm::scale(trans, glm::vec3(pixelsToWorld, pixelsToWorld, 1.0F));
-    pages.emplace_back(
-        getPtr(), state, trans, std::move(shaping), base,
-        static_cast<std::uint32_t>(index),
-        i < inherited.size() ? inherited[i] : BufferPool::Allocation{});
+    pages.emplace_back(getPtr(), state, trans, std::move(shaping), base,
+                       static_cast<std::uint32_t>(index),
+                       i < inherited.size() ? inherited[i]
+                                            : BufferPool::Allocation{});
   }
   // Untouched pages keep their shaping and their vertex rows; only the offset
   // they report moves.

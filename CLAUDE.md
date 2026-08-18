@@ -173,17 +173,34 @@ to sanity-check `.editorconfig` itself, not as a gate.
 ## Project structure
 
 - `src/` — the library: document model, glyph cache, SDL wrappers, render loop
+- `src/text/` — native text layout engine: `FontManager`, `FontFace`, `TextLayout` (HarfBuzz, FreeType, libunibreak, FriBidi)
 - `src/render/` — device abstraction and backends (`gl/`, `vulkan/`)
 - `src/a11y/` — accessibility tree / AccessKit integration
 - `include/gleditor/` — the library's public headers
+- `include/gleditor/text/` — text layout and font management public headers
 - `apps/gleditor/` — the plain editor program
 - `apps/xudu/` — the xanadoc editor; `apps/xudu/core/` is its engine (no graphics dependency)
 - `assets/shaders/` — portable GLSL bodies; `vulkan/` holds generated SPIR-V
 - `tests/lib/`, `tests/xudu/` — unit tests for the library and the engine, respectively
-- `tools/` — build-time and verification helpers (`compare-backends.sh`, `shader_assemble.cpp`, ...)
+- `tools/` — build-time and verification helpers (`compare-backends.sh`, `benchmark-kjv-load.py`, `layout-latency-probe.cpp`, `shader_assemble.cpp`, ...)
 - `packaging/` — distro packaging (arch, debian, fedora, macos, windows, nix)
 - `design/` — design notes and the reasoning behind non-obvious decisions
 - `thirdparty/` — vendored dependencies (git submodules; see above)
+
+## Text Architecture & Shaping Pipeline
+
+- **Zero Cairo / Zero Pango**: The text stack is built directly on **FreeType 2**, **HarfBuzz**, **libunibreak** (UAX #14), **FriBidi**, and **Fontconfig**. Cairo, Pango, PangoFT2, and Pangomm are completely eliminated.
+- **`text::FontManager` & `text::FontFace`** (`src/text/font.cpp`):
+  - Resolves font descriptions (e.g. `"Monospace 16"`, `"Sans Bold 12"`) via Fontconfig (`FcPattern*`) and loads them into thread-safe FreeType `FT_Face` and HarfBuzz `hb_font_t` instances.
+  - Computes typographic metrics (`ascent`, `descent`, `lineHeight`, `spaceWidth`).
+- **`text::TextLayout`** (`src/text/layout.cpp`):
+  - `layoutPage(text, font, options)`: Breaks lines with `libunibreak` (`set_linebreaks_utf8`), shapes runs with HarfBuzz (`hb_shape`), wraps at `maxWidthPx`, and paginates by `maxHeightPx`.
+  - **Height-Budgeted Slicing**: When `maxHeightPx > 0`, input text is sliced to the maximum lines that could fit the height budget. This guarantees $O(1)$ page generation time rather than $O(N^2)$ whole-document shaping across thousands of pages.
+  - `layoutSingleLine(text, font, options)`: Single-line fast path for toasts and canvas measurement.
+  - Outputs `PageShaping` (`limit`, `lineCount`, `clusters`, `glyphs`, `lines`) consumed directly by `Doc` and `Page`.
+- **`GlyphCache`** (`src/glyphcache/cache.cpp`):
+  - Direct 8-bit grayscale coverage texture rasterization using FreeType (`FT_Load_Glyph`, `FT_Glyph_To_Bitmap`).
+  - Clusters are shaped via HarfBuzz and rendered into a dynamic 2D texture array atlas (512x512 growing up to 16384x16384 across 64 layers).
 
 ## Gotchas worth knowing before editing the Makefile
 
@@ -201,7 +218,7 @@ to sanity-check `.editorconfig` itself, not as a gate.
   from `include $(DEPS)` (the same exemption `clean`/`dist` already had, for
   the same reason — see the comment above that `include`), because they
   compile nothing and are meant to run on a checkout that never installed
-  SDL, pangomm, or anything else the build needs. A goal that does need a
+  SDL, font packages, or anything else the build needs. A goal that does need a
   compiler must not be added to `NO_SDL_GOALS`.
 
 ## Known gaps / TODO

@@ -95,8 +95,8 @@ int main(const int argc, char **argv) {
     int lines{};
     std::uint32_t consumed{};
     for (int i = 0; i < 3; i++) {
-      static_cast<void>(timeFirstPage(font, warm.c_str(), warm.size(), lines,
-                                      consumed));
+      static_cast<void>(
+          timeFirstPage(font, warm.c_str(), warm.size(), lines, consumed));
     }
   }
 
@@ -107,9 +107,8 @@ int main(const int argc, char **argv) {
             << "page1 time" << std::setw(8) << "lines" << "page holds\n";
 
   for (const std::size_t size :
-       {std::size_t{16} * 1024, std::size_t{64} * 1024,
-        std::size_t{256} * 1024, std::size_t{1024} * 1024,
-        std::size_t{4} * 1024 * 1024}) {
+       {std::size_t{16} * 1024, std::size_t{64} * 1024, std::size_t{256} * 1024,
+        std::size_t{1024} * 1024, std::size_t{4} * 1024 * 1024}) {
     const auto raw = proseOf(size);
 
     int wholeLines{};
