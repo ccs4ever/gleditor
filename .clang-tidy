@@ -1,0 +1,16 @@
+Checks: >
+  modernize-*,
+  bugprone-*,
+  cppcoreguidelines-*,
+  performance-*,
+  readability-*,
+  portability-*,
+  -modernize-use-trailing-return-type,
+  -modernize-use-std-print,
+  -readability-magic-numbers,
+  -cppcoreguidelines-avoid-magic-numbers,
+  -cppcoreguidelines-pro-bounds-avoid-unchecked-container-access,
+  -cppcoreguidelines-pro-type-union-access,
+  -bugprone-easily-swappable-parameters,
+  -readability-identifier-length
+HeaderFilterRegex: '.*(include/gleditor/|src/|apps/|tests/|tools/).*'
