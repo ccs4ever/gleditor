@@ -1,13 +1,16 @@
 Part 1: LMDB Storage Configuration & Architecture
 
 LMDB (Lightning Memory-Mapped Database) is ideal for Xanadulogical data structures due to its zero-copy read architecture (mmap), MVCC concurrency (lock-free readers never blocking writers), and B+ tree indexing.
+
 1. Architectural Layout & Database Schema
 
-For gleditor, multiple named sub-databases within a single LMDB environment allow separation of concerns while sharing the same memory map and transaction context:
+For gleditor and xudu, storage is cleanly split between raw verified piece payloads and lightweight virtual address lookup stores:
 
-    spans: Stores raw immutable text spans / enfilades indexed by span_id or (doc_id, vposition). Reads map directly to const char* without heap allocations.
+    pieces: Stores raw immutable verified piece payloads indexed by canonical content address (InfoHash, piece_index) with an embedded TextHeader tracking active references (ref_count) and byte length. Reads map directly to const char* without heap allocations.
 
-    zzcells: Stores Zigzag cells and multi-dimensional coordinate pointers (positive/negative links along arbitrary dimension IDs).
+    vspans: Stores virtual Xanadoc primedia scroll lookup records mapping (scroll_id, start, length) to lightweight descriptors VSpanRecord { hash, piece_index, chunk_offset, length }. Sub-spans point into existing piece entries without duplicating text.
+
+    ext_spans: Stores external content references mapping stream coordinates (InfoHash, stream_offset, length) to VSpanRecord descriptors.
 
     meta: Stores document roots, dimensional metadata, and user workspace states.
 
@@ -17,13 +20,13 @@ For gleditor, multiple named sub-databases within a single LMDB environment allo
        +-------------------------------------------------------------+
                |                       |                      |
        +---------------+       +---------------+      +---------------+
-       |  DBI: "spans" |       | DBI: "zzcells"|      |  DBI: "meta"  |
-       +---------------+       +---------------+      +---------------+
-       | Key: SpanID   |       | Key: CellID   |      | Key: DocID    |
-       | Val: Raw text |       | Val: DimLinks |      | Val: RootCell |
-       +---------------+       +---------------+      +---------------+
+       | DBI: "pieces" |       | DBI: "vspans" |      | DBI: "meta"   |
+       +---------------+       |DBI:"ext_spans"|      +---------------+
+       |Key: (Hash,Idx)|       +---------------+      | Key: DocID    |
+       |Val: TextHeader|       |Key: VirtualPos|      | Val: RootCell |
+       |     + RawText |       |Val: VSpanRec  |      +---------------+
+       +---------------+       +---------------+
 
-2. LMDB C++ Wrapper Implementation
 C++
 
 // lmdb_storage.hpp
