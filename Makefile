@@ -740,6 +740,8 @@ format-check:
 # Homebrew formula) are covered where a linter for them is actually reliable
 # outside their native distribution -- see CLAUDE.md.
 SHELLCHECK := $(shell command -v shellcheck 2>/dev/null)
+YAMLLINT := $(shell command -v yamllint 2>/dev/null)
+MDL := $(shell command -v mdl 2>/dev/null)
 lint:
 	./tools/check-config-harmony.sh
 ifdef SHELLCHECK
@@ -747,8 +749,16 @@ ifdef SHELLCHECK
 else
 	@echo "shellcheck not found, skipping shell lint"
 endif
-	yamllint $(YAML_FORMAT_FILES)
-	mdl $(MD_FORMAT_FILES)
+ifdef YAMLLINT
+	$(YAMLLINT) $(YAML_FORMAT_FILES)
+else
+	@echo "yamllint not found, skipping yaml lint"
+endif
+ifdef MDL
+	$(MDL) $(MD_FORMAT_FILES)
+else
+	@echo "mdl not found, skipping markdown lint"
+endif
 .PHONY: lint
 
 clean: private .UNVEIL += w:gleditor w:gleditor_test w:xudu w:xudu_test
