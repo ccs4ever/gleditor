@@ -1436,7 +1436,6 @@ What SDL does have, this program uses:
 - Package discovery: pkg-config
 - Libraries (via pkg-config):
   - FreeType 2 (`freetype2`), HarfBuzz (`harfbuzz`), libunibreak (`libunibreak`), FriBidi (`fribidi`), and Fontconfig (`fontconfig`)
-  - glibmm-2.68
   - SDL3 or SDL2 (see below)
   - SDL_image (optional; supplies the window icon and nothing else, and is
     skipped when pkg-config cannot find it)
@@ -1470,10 +1469,10 @@ sudo apt-get update && sudo apt-get install \
   clang libclang-rt-dev make pkg-config doxygen \
   libglm-dev libfreetype-dev libharfbuzz-dev \
   libfribidi-dev libunibreak-dev libfontconfig-dev \
-  libglibmm-2.68-dev libsdl3-dev \
+  libsdl3-dev \
   libgl-dev libgl1-mesa-dev libglu1-mesa-dev \
   libgtest-dev libgmock-dev \
-  libtorrent-rasterbar-dev gnupg
+  libtorrent-rasterbar-dev libssl-dev liblmdb-dev gnupg
 ```
 
 `libtorrent-rasterbar-dev` is required, not optional: it is where the ed25519
@@ -1634,7 +1633,7 @@ on whichever version the build happened to find; everything else gets SDL3,
 stated rather than probed for the same reason.
 
 Windows is an MSYS2/MinGW build producing a zip rather than an MSVC installer.
-The dependencies are FreeType, HarfBuzz, libunibreak, FriBidi, Fontconfig, and glibmm.
+The dependencies are FreeType, HarfBuzz, libunibreak, FriBidi, Fontconfig, and SDL3.
 The zip carries every non-system DLL, found by walking `ldd` until it settles,
 and puts the assets *beside* the executable, which is the first place the search looks;
 unzip it anywhere and it finds its own data.

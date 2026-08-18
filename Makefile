@@ -92,8 +92,7 @@ endif
 # includes -- is vendored rather than pulled from a package whose layout on
 # macOS is not this project's to depend on.
 GL_CFLAGS :=
-GLIBMM_PKG := $(shell pkg-config --exists glibmm-2.68 && echo glibmm-2.68 || echo glibmm-2.4)
-PKGS := $(GLIBMM_PKG) freetype2 harfbuzz fribidi libunibreak fontconfig $(SDL_PKG)
+PKGS := freetype2 harfbuzz fribidi libunibreak fontconfig $(SDL_PKG)
 ifeq ($(shell pkg-config --exists gl && echo 1),1)
 PKGS += gl
 else ifeq ($(shell uname -s 2>/dev/null),Darwin)
@@ -125,9 +124,9 @@ endif
 # rest, so the build carries on with no include paths and fails on whichever
 # header happens to come first. That names a header rather than a package, and
 # the header is never the one belonging to what is actually missing. Several of
-# these ship under names that differ per distribution -- pangomm has parallel
-# ABIs, and vulkan.pc comes from the loader rather than the headers -- so
-# getting one wrong is an ordinary packaging mistake to make.
+# these ship under names that differ per distribution -- and vulkan.pc comes
+# from the loader rather than the headers -- so getting one wrong is an ordinary
+# packaging mistake to make.
 ifneq (,$(filter-out $(NO_SDL_GOALS),$(or $(MAKECMDGOALS),all)))
 MISSING_PKGS := $(strip $(foreach p,$(PKGS),\
   $(if $(shell pkg-config --exists $(p) && echo 1),,$(p))))
@@ -138,18 +137,17 @@ the Vulkan backend)
 endif
 endif
 TEST_PKGS := gmock_main
-# What the xanalogical engine is allowed to link. glibmm supplies SHA-1, which
-# is what a torrent's info hash is, and glibmm is already a hard dependency of
-# the library. The point of keeping this list short is that the engine must not
-# need a graphics device -- not that it must need nothing at all -- so a
-# utility library is fine here and pangomm, cairo and SDL are not.
+# What the xanalogical engine is allowed to link. The point of keeping this
+# list short is that the engine must not need a graphics device -- not that
+# it must need nothing at all -- so OpenSSL and utility libraries are fine
+# here and graphics and SDL are not.
 # libtorrent is required, not optional. It is what lets a reference be fetched
 # from peers rather than only from a disk here, and what signs and resolves the
 # names a publisher is known by -- so a build without it produces a program
 # whose documents cannot leave the machine that wrote them, which is the one
 # thing this program is for. Better to fail at configure time than to ship a
 # xanadoc editor that quietly cannot publish.
-XUDU_PKGS := glibmm-2.68 libtorrent-rasterbar lmdb
+XUDU_PKGS := libtorrent-rasterbar lmdb
 ifneq (,$(filter-out $(NO_SDL_GOALS),$(or $(MAKECMDGOALS),all)))
 ifneq ($(shell pkg-config --exists libtorrent-rasterbar && echo 1),1)
 $(error libtorrent-rasterbar was not found by pkg-config. It is required: \
@@ -536,7 +534,7 @@ lib: $(LIBLINK)
 # Libraries after the objects that need them. GNU ld resolves left to right, so
 # the other order only ever worked because clang's linker is forgiving about
 # it; gcc with link-time optimisation, which is what Debian builds with,
-# reported every pangomm and glibmm symbol as undefined.
+# reported every library symbol as undefined.
 $(LIBREAL): $(LIB_OBJS)
 	$(CXX) $(LDFLAGS) -shared $(LIB_LINKARG) -o $@ $^ $(LIBS) $(A11Y_LIBS)
 
@@ -882,7 +880,7 @@ $(OBJDIR)/compile_commands.json: $(JFILES)
 # the compiler over every source. Including them for those goals meant `make
 # dist` needed every header the build needs -- which is how the Arch package,
 # whose only job at that point was to roll a tarball, failed on a missing
-# glibmm header. format, format-check and lint compile nothing either, and are
+# dependency header. format, format-check and lint compile nothing either, and are
 # meant to run on a checkout that has not installed the build dependencies at
 # all.
 ifeq (,$(filter clean dist $(NO_SDL_GOALS),$(MAKECMDGOALS)))

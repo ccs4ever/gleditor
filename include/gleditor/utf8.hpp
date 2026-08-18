@@ -41,6 +41,21 @@ namespace gleditor {
 [[nodiscard]] std::uint32_t alignToCharacterEnd(std::string_view text,
                                                 std::uint32_t offset);
 
+/**
+ * @brief Check if @p text is valid UTF-8.
+ *
+ * If invalid, returns false and writes the byte index of the first malformed
+ * sequence to @p badOffsetOut.
+ */
+[[nodiscard]] bool validateUtf8(std::string_view text,
+                                std::size_t &badOffsetOut);
+
+/**
+ * @brief Replace malformed UTF-8 sequences with the Unicode replacement
+ *        character (U+FFFD).
+ */
+[[nodiscard]] std::string makeValidUtf8(std::string_view text);
+
 } // namespace gleditor
 
 #endif // GLEDITOR_UTF8_H

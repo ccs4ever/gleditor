@@ -338,7 +338,8 @@ GlyphCache::Sizes GlyphCache::addToCache(const std::string &chr,
   hb_buffer_destroy(buf);
 
   const auto &metrics = font->metrics();
-  const int height    = std::max(1, static_cast<int>(std::ceil(metrics.lineHeight)));
+  const int height =
+      std::max(1, static_cast<int>(std::ceil(metrics.lineHeight)));
   const int baselineY = static_cast<int>(std::round(metrics.ascent));
 
   int width = penX;

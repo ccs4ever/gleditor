@@ -116,7 +116,7 @@ void DocumentsSource::observe(const RenderState &state,
   std::uint64_t signature        = state.docs.size();
   for (const auto &doc : state.docs) {
     mix(signature, doc->editGeneration());
-    mix(signature, doc->contents().bytes());
+    mix(signature, doc->contents().size());
     if (const auto rect = boundsOf(*doc, viewProjection, width, height); rect) {
       mix(signature, static_cast<std::uint64_t>(static_cast<std::int64_t>(
                          rect->left / boundsQuantum)));
@@ -149,7 +149,7 @@ void DocumentsSource::observe(const RenderState &state,
     Described described;
     described.index  = index;
     described.name   = doc->name();
-    described.text   = doc->contents().raw();
+    described.text   = doc->contents();
     described.breaks = runBreaks(described.text);
     described.bounds = boundsOf(*doc, viewProjection, width, height);
     if (nullptr != caret && caret->active() &&

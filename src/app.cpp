@@ -24,7 +24,6 @@
 #include <argparse/argparse.hpp>
 #include <fontconfig/fontconfig.h>
 #include <gleditor/text/font.hpp>
-#include <glibmm/init.h>
 #include <glm/ext/vector_float3.hpp>
 #include <glm/geometric.hpp>
 
@@ -635,7 +634,6 @@ void Application::bindDefaultViewCommands() {
 }
 
 int Application::run() {
-  Glib::init();
   FcInit();
 
   // Warm up Fontconfig and FontManager on the main thread so that font cache

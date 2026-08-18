@@ -26,10 +26,6 @@
 #include <utility>     // for move
 #include <vector>      // for vector
 
-#include "glibmm/convert.h"   // for get_charset
-#include "glibmm/fileutils.h" // for file_get_contents
-#include "glibmm/refptr.h"    // for RefPtr
-#include "glibmm/ustring.h"   // for ustring, operator==, UStrin...
 #include <fontconfig/fontconfig.h>
 #include <gleditor/caret.hpp>            // for Caret
 #include <gleditor/drawable.hpp>         // for Drawable
@@ -37,6 +33,7 @@
 #include <gleditor/glyphcache/types.hpp> // for TextureCoords, PointF, Rect
 #include <gleditor/text/font.hpp>        // for FontManager
 #include <gleditor/text/layout.hpp>      // for TextLayout
+#include <gleditor/utf8.hpp>             // for validateUtf8, makeValidUtf8
 #include <glm/gtx/string_cast.hpp>
 
 namespace {
@@ -272,7 +269,7 @@ bool Page::contains(const std::uint32_t globalOffset) const {
 void Doc::keepLayoutOf(const std::uint32_t pageIndex) const { (void)pageIndex; }
 
 std::string_view Page::pageText() const {
-  const std::string_view whole{doc->contents().raw()};
+  const std::string_view whole{doc->contents()};
   if (textOffset >= whole.size()) {
     return {};
   }
@@ -589,9 +586,7 @@ const char *reflowScopeName(const ReflowScope scope) {
 }
 
 PageShaping Doc::layoutFrom(const std::uint32_t offset) const {
-  const char *txt = text.raw().c_str();
-  const auto size = text.bytes();
-  if (offset >= size) {
+  if (offset >= text.size()) {
     return PageShaping{};
   }
   auto font = gleditor::text::FontManager::instance().getFont(
@@ -603,7 +598,7 @@ PageShaping Doc::layoutFrom(const std::uint32_t offset) const {
       .ellipsize       = true,
   };
   return gleditor::text::TextLayout::layoutPage(
-      std::string_view{txt + offset, size - offset}, font, opts);
+      std::string_view{text.data() + offset, text.size() - offset}, font, opts);
 }
 
 namespace {
@@ -708,15 +703,14 @@ void Doc::insert(RenderState &state, const std::uint32_t offset,
     return;
   }
   const auto inserted = static_cast<std::uint32_t>(utf8.size());
-  const auto at       = std::min<std::uint32_t>(offset, text.bytes());
+  const auto at =
+      std::min<std::uint32_t>(offset, static_cast<std::uint32_t>(text.size()));
   // Before the splice: see lineBreaksAround().
   const auto oldStarts = lineBreaksAround(at);
 
   // Splice first: the document is the source of truth and must be correct
   // before anything asynchronous looks at it.
-  auto raw = text.raw();
-  raw.insert(at, utf8);
-  text = raw;
+  text.insert(at, utf8);
   edits++;
 
   if (nullptr != caret) {
@@ -732,8 +726,7 @@ void Doc::insert(RenderState &state, const std::uint32_t offset,
 
 std::string Doc::erase(RenderState &state, const std::uint32_t offset,
                        const std::uint32_t bytes, Caret *caret) {
-  auto raw = text.raw();
-  if (0 == bytes || raw.empty() || offset >= raw.size()) {
+  if (0 == bytes || text.empty() || offset >= text.size()) {
     return {};
   }
 
@@ -743,19 +736,18 @@ std::string Doc::erase(RenderState &state, const std::uint32_t offset,
   // collapse a range naming part of one character to nothing, and would make
   // "delete one byte of a two-byte character" mean something other than
   // deleting that character.
-  const auto start = gleditor::alignToCharacterStart(raw, offset);
+  const auto start = gleditor::alignToCharacterStart(text, offset);
   const auto end   = gleditor::alignToCharacterEnd(
-      raw, std::min<std::uint32_t>(offset + bytes,
-                                   static_cast<std::uint32_t>(raw.size())));
+      text, std::min<std::uint32_t>(offset + bytes,
+                                    static_cast<std::uint32_t>(text.size())));
   if (end <= start) {
     return {};
   }
-  const auto removed = raw.substr(start, end - start);
+  const auto removed = text.substr(start, end - start);
   // Before the erasure, for the same reason as in insert().
   const auto oldStarts = lineBreaksAround(start);
 
-  raw.erase(start, removed.size());
-  text = raw;
+  text.erase(start, removed.size());
   edits++;
 
   const auto delta = -static_cast<std::int32_t>(removed.size());
@@ -793,7 +785,7 @@ void Doc::reflowFrom(RenderState &state, const std::size_t firstPage,
   auto pageCursor = firstPage;
   auto scope      = ReflowScope::Document;
 
-  while (offset < text.bytes()) {
+  while (offset < text.size()) {
     auto shaping        = layoutFrom(offset);
     const auto consumed = static_cast<std::uint32_t>(shaping.limit);
     if (consumed == 0) {
@@ -902,16 +894,11 @@ Doc::Doc(const RendererRef &renderer, render::RenderDevice *device,
   // Validated here rather than by the source, because every source needs it
   // and none of them can promise otherwise: the bytes come from a file
   // somebody else wrote, or from a program that assembled them out of pieces.
-  // A document holding invalid UTF-8 crashes Pango somewhere inside shaping,
-  // a long way from whatever produced it.
-  auto iter = text.begin();
-  if (!text.validate(iter)) {
-    // Only a failed validate() leaves `iter` on a real character; on success it
-    // is the end iterator and must not be dereferenced.
+  std::size_t badOffset = 0;
+  if (!gleditor::validateUtf8(text, badOffset)) {
     std::cout << "invalid utf-8 in " << docName
-              << ", first bad offset: " << std::distance(text.begin(), iter)
-              << "\n";
-    text = text.make_valid();
+              << ", first bad offset: " << badOffset << "\n";
+    text = gleditor::makeValidUtf8(text);
   }
 
   // The whole buffer in one allocation, before a page of it is laid out. Doing
@@ -919,13 +906,13 @@ Doc::Doc(const RendererRef &renderer, render::RenderDevice *device,
   // size is an allocation the driver keeps rather than returns, so arriving at
   // twenty-five megabytes through seven of them was worse for peak memory than
   // arriving at forty-eight through four.
-  pool->reserveCapacity(rowsFor(text.length()));
+  pool->reserveCapacity(rowsFor(text.size()));
 }
 
 void Doc::makePages(RenderState &state) {
   std::cout << "MAKING PAGES: " << this << " " << glm::to_string(model) << "\n";
   auto tSize = 0UL;
-  while (tSize < text.bytes()) {
+  while (tSize < text.size()) {
     auto shaping        = layoutFrom(static_cast<std::uint32_t>(tSize));
     const auto consumed = static_cast<std::uint32_t>(shaping.limit);
     if (consumed == 0) {

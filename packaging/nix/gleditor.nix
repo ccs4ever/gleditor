@@ -3,12 +3,11 @@
   stdenv,
   pkg-config,
   makeWrapper,
-  # The ABI-suffixed attributes. The unsuffixed pangomm, cairomm and glibmm in
-  # nixpkgs are the older parallel versions, and do not provide the .pc files
-  # this build asks for.
-  pangomm_2_48,
-  cairomm_1_16,
-  glibmm_2_68,
+  freetype,
+  harfbuzz,
+  fribidi,
+  libunibreak,
+  fontconfig,
   sdl3,
   sdl3-image,
   libGL,
@@ -17,6 +16,7 @@
   vulkan-headers,
   vulkan-loader,
   libtorrent-rasterbar,
+  lmdb,
   # libtorrent-rasterbar's own public headers reach into boost/predef and
   # openssl/opensslv.h, but nixpkgs' derivation for it does not propagate
   # either as a build input of its own -- so a consumer that only links
@@ -58,9 +58,11 @@ stdenv.mkDerivation {
   ];
 
   buildInputs = [
-    pangomm_2_48
-    cairomm_1_16
-    glibmm_2_68
+    freetype
+    harfbuzz
+    fribidi
+    libunibreak
+    fontconfig
     sdl3
     sdl3-image
     libGL
@@ -70,6 +72,7 @@ stdenv.mkDerivation {
     # the .pc file pkg-config returns nothing for the whole package set.
     vulkan-loader
     libtorrent-rasterbar
+    lmdb
     boost
     openssl
   ];

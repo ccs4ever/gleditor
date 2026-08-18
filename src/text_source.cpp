@@ -1,9 +1,10 @@
 #include <cstddef>
+#include <fstream>
+#include <ios>
+#include <sstream>
 #include <stdexcept>
 #include <string>
 #include <utility>
-
-#include <glibmm/fileutils.h>
 
 #include <gleditor/text_source.hpp>
 
@@ -52,7 +53,13 @@ std::string stripByteOrderMark(std::string bytes) {
 }
 
 std::string FileTextSource::text() const {
-  return stripByteOrderMark(Glib::file_get_contents(filePath));
+  std::ifstream file(filePath, std::ios::binary);
+  if (!file.is_open()) {
+    throw std::runtime_error("failed to open file: " + filePath);
+  }
+  std::ostringstream ss;
+  ss << file.rdbuf();
+  return stripByteOrderMark(ss.str());
 }
 
 } // namespace gleditor
