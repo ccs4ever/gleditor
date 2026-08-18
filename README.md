@@ -33,10 +33,10 @@ what one program did with it.
 
 The graphics API is chosen at run time with `--backend`:
 
-| Backend            | Requires        | Notes                                           |
-| ------------------ | --------------- | ----------------------------------------------- |
-| `opengl` (default) | OpenGL 3.3 core |                                                          |
-| `opengles`         | OpenGL ES 3.0   |                                                          |
+| Backend            | Requires        | Notes                                                                   |
+| ------------------ | --------------- | ----------------------------------------------------------------------- |
+| `opengl` (default) | OpenGL 3.3 core |                                                                         |
+| `opengles`         | OpenGL ES 3.0   |                                                                         |
 | `vulkan`           | Vulkan 1.0      | Enabled by default when found; disable with `GLEDITOR_DISABLE_VULKAN=1` |
 
 Everything above the backend -- documents, pages, the glyph cache, the buffer
