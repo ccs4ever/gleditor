@@ -149,4 +149,3 @@ void Caret::draw(RenderState &state, const glm::mat4 &pageTransform) const {
   state.device->drawGlyphs(uniforms, pool->buffer(), pool->byteOffset(backing),
                            caretRows);
 }
-// vi: set sw=2 sts=2 ts=2 et:

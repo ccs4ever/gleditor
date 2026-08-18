@@ -86,4 +86,3 @@ std::unique_ptr<RenderDevice> createDevice(const Backend backend) {
 }
 
 } // namespace render
-// vi: set sw=2 sts=2 ts=2 et:

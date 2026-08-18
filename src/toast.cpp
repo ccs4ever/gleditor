@@ -194,8 +194,8 @@ void ToastOverlay::post(const render::DiagnosticSeverity severity,
   rows.reserve(clusters.size() + 1);
   for (std::size_t i = 0; i < clusters.size(); i++) {
     const auto &cluster = clusters[i];
-    const int end       = i + 1 < clusters.size() ? clusters[i + 1].start
-                                                  : static_cast<int>(raw.size());
+    const int end = i + 1 < clusters.size() ? clusters[i + 1].start
+                                            : static_cast<int>(raw.size());
     if (end <= cluster.start || cluster.start >= static_cast<int>(raw.size())) {
       continue;
     }
@@ -364,4 +364,3 @@ void ToastOverlay::draw(RenderState &state, const int screenWidth,
     penY += toast.height + gap;
   }
 }
-// vi: set sw=2 sts=2 ts=2 et:

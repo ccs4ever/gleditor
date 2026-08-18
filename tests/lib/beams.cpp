@@ -260,5 +260,3 @@ TEST_F(BeamsTest, drawingWithoutAPipelineIsQuiet) {
   beams.commit();
   EXPECT_CALL(*device, drawGlyphs(_, _, _, _)).Times(0);
 }
-
-// vi: set sw=2 sts=2 ts=2 et:

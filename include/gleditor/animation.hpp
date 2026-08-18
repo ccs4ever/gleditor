@@ -40,4 +40,3 @@ inline constexpr double toastFade = 0.25;
 } // namespace gleditor::anim
 
 #endif // GLEDITOR_ANIMATION_H
-// vi: set sw=2 sts=2 ts=2 et:

@@ -214,9 +214,9 @@ void DocumentsSource::describe(Builder &into) {
         node.selection   = TextSelection{
             doc.hasSelection ? pointAt(doc, first,
                                        doc.selectionStart == doc.caretByte
-                                             ? doc.selectionEnd
-                                             : doc.selectionStart)
-                               : focus,
+                                           ? doc.selectionEnd
+                                           : doc.selectionStart)
+                             : focus,
             focus};
         into.takeFocus(into.id(id));
       }
@@ -304,5 +304,3 @@ std::vector<DocumentsSource::Wanted> DocumentsSource::takeWanted() {
 }
 
 } // namespace gleditor::a11y
-
-// vi: set sw=2 sts=2 ts=2 et:

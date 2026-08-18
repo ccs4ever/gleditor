@@ -90,4 +90,3 @@ void GlyphPalette::grow(const Rect &newDims,
                               const GlyphPalette &right) {
   return right.usedHeight == left.usedHeight;
 }
-// vi: set sw=2 sts=2 ts=2 et:

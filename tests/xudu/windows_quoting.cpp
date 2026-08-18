@@ -78,5 +78,3 @@ TEST(WindowsQuotingTest, aPassphraseWithBothIsQuotedCorrectly) {
   EXPECT_EQ(quoteWindowsArgument(LR"(back\slash and "quote")"),
             LR"("back\slash and \"quote\"")");
 }
-
-// vi: set sw=2 sts=2 ts=2 et:

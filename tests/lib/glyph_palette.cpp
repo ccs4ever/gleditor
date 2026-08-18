@@ -249,5 +249,3 @@ TEST_F(GlyphPaletteTest, toString) {
   str << alice;
   EXPECT_NE(str.str(), "");
 }
-
-// vi: set sw=2 sts=2 ts=2 et:

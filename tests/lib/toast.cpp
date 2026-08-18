@@ -125,5 +125,3 @@ TEST_F(ToastOverlayTest, spaceIsReusedAcrossManyMessages) {
   }
   EXPECT_TRUE(overlay->empty());
 }
-
-// vi: set sw=2 sts=2 ts=2 et:

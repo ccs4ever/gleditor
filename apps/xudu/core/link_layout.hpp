@@ -87,4 +87,3 @@ void placeLinks(const std::map<std::uint64_t, Link> &links,
 } // namespace xudu
 
 #endif // XUDU_LINK_LAYOUT_H
-// vi: set sw=2 sts=2 ts=2 et:

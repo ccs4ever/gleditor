@@ -757,11 +757,11 @@ Page::highlightFor(const std::uint32_t selStart, const std::uint32_t selEnd,
   };
 
   render::HighlightRange range;
-  range.identity      = render::packTagIdentity(render::tagKindGlyph,
-                                                doc->documentIndex(), pageIndex);
-  range.firstCluster  = static_cast<std::uint32_t>(*first);
-  range.lastCluster   = static_cast<std::uint32_t>(last);
-  range.colour        = colour;
+  range.identity     = render::packTagIdentity(render::tagKindGlyph,
+                                               doc->documentIndex(), pageIndex);
+  range.firstCluster = static_cast<std::uint32_t>(*first);
+  range.lastCluster  = static_cast<std::uint32_t>(last);
+  range.colour       = colour;
   range.startFraction = fractionInto(clusters[*first], localStart);
   range.endFraction   = fractionInto(clusters[last], localEnd);
   return range;
@@ -1024,7 +1024,7 @@ std::string Doc::erase(RenderState &state, const std::uint32_t offset,
   const auto start = gleditor::alignToCharacterStart(raw, offset);
   const auto end   = gleditor::alignToCharacterEnd(
       raw, std::min<std::uint32_t>(offset + bytes,
-                                     static_cast<std::uint32_t>(raw.size())));
+                                   static_cast<std::uint32_t>(raw.size())));
   if (end <= start) {
     return {};
   }
@@ -1272,4 +1272,3 @@ void Doc::newPage(RenderState &state, Glib::RefPtr<Pango::Layout> &layout,
                        static_cast<std::uint32_t>(numPages));
   });
 }
-// vi: set sw=2 sts=2 ts=2 et:

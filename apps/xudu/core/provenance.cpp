@@ -694,5 +694,3 @@ std::optional<Provenance> parseProvenance(const std::string_view text) {
 }
 
 } // namespace xudu
-
-// vi: set sw=2 sts=2 ts=2 et:

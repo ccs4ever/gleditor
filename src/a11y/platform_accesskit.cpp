@@ -480,5 +480,3 @@ std::unique_ptr<Platform> openPlatform(void *const nativeWindow,
 bool platformAvailable() { return true; }
 
 } // namespace gleditor::a11y
-
-// vi: set sw=2 sts=2 ts=2 et:

@@ -254,5 +254,3 @@ TEST_F(VersionTest, adjacentPiecesOfOneQuotationReadAsOne) {
 }
 
 } // namespace
-
-// vi: set sw=2 sts=2 ts=2 et:

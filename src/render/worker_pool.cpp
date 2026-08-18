@@ -129,4 +129,3 @@ void WorkerPool::run(const std::uint32_t count,
 }
 
 } // namespace render
-// vi: set sw=2 sts=2 ts=2 et:

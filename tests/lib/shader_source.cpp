@@ -151,5 +151,3 @@ TEST(ShaderSource, missingShaderFileReportsThePath) {
   EXPECT_THROW(render::readShaderBody("/nonexistent/glyph.vert.glsl"),
                std::runtime_error);
 }
-
-// vi: set sw=2 sts=2 ts=2 et:

@@ -81,4 +81,3 @@ void saveConfig(const Config &config, const std::string &path = configPath());
 } // namespace xudu
 
 #endif // XUDU_CONFIG_H
-// vi: set sw=2 sts=2 ts=2 et:

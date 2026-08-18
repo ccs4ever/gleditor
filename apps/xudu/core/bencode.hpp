@@ -113,4 +113,3 @@ private:
 } // namespace xudu::bencode
 
 #endif // XUDU_BENCODE_H
-// vi: set sw=2 sts=2 ts=2 et:

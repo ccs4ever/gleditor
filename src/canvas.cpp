@@ -230,8 +230,8 @@ TextMetrics Canvas::addText(RenderState &state, const float left,
 
   for (std::size_t i = 0; i < clusters.size(); i++) {
     const auto &cluster = clusters[i];
-    const int end       = i + 1 < clusters.size() ? clusters[i + 1].start
-                                                  : static_cast<int>(raw.size());
+    const int end = i + 1 < clusters.size() ? clusters[i + 1].start
+                                            : static_cast<int>(raw.size());
     if (end <= cluster.start || cluster.start >= static_cast<int>(raw.size())) {
       continue;
     }
@@ -295,5 +295,3 @@ void Canvas::draw(RenderState &state, const glm::mat4 &transform,
 }
 
 } // namespace gleditor
-
-// vi: set sw=2 sts=2 ts=2 et:

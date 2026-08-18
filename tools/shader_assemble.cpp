@@ -47,4 +47,3 @@ int main(const int argc, const char *const *const argv) {
     return 1;
   }
 }
-// vi: set sw=2 sts=2 ts=2 et:

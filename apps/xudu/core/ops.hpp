@@ -113,4 +113,3 @@ struct Op {
 } // namespace xudu
 
 #endif // XUDU_OPS_H
-// vi: set sw=2 sts=2 ts=2 et:

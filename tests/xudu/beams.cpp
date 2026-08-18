@@ -191,5 +191,3 @@ TEST(LinkLayout, everyLinkTypeHasAColourOfItsOwn) {
     EXPECT_LT(alpha, 0xF0U);
   }
 }
-
-// vi: set sw=2 sts=2 ts=2 et:

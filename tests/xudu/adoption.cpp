@@ -318,5 +318,3 @@ TEST(AdoptionTest, aPublicationThatDoesNotSayWhereItsContentIsIsRefused) {
   Store mine;
   EXPECT_THROW(static_cast<void>(xudu::adopt(mine, pub)), std::runtime_error);
 }
-
-// vi: set sw=2 sts=2 ts=2 et:

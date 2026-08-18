@@ -294,8 +294,8 @@ void LinkBeams::drawFrame(gleditor::FrameContext &ctx) {
 
     const auto rightwards = glm::vec3(to->modelMatrix()[3]).x >=
                             glm::vec3(from->modelMatrix()[3]).x;
-    const auto fromAt = edgePoint(*from, *strand.fromAnchor, rightwards);
-    const auto toAt   = edgePoint(*to, *strand.toAnchor, !rightwards);
+    const auto fromAt     = edgePoint(*from, *strand.fromAnchor, rightwards);
+    const auto toAt       = edgePoint(*to, *strand.toAnchor, !rightwards);
     if (!fromAt || !toAt) {
       continue;
     }
@@ -360,7 +360,7 @@ void LinkBeams::describe(gleditor::a11y::Builder &into) {
                        std::to_string(strand.from.end) + ", and bytes " +
                        std::to_string(strand.to.start) + " to " +
                        std::to_string(strand.to.end);
-    node.focusable = true;
+    node.focusable   = true;
     node.actions =
         a11y::bit(a11y::Action::Focus) | a11y::bit(a11y::Action::Click);
   }
@@ -396,5 +396,3 @@ bool LinkBeams::performAction(const std::uint64_t nodeId,
 }
 
 } // namespace xudu
-
-// vi: set sw=2 sts=2 ts=2 et:

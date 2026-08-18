@@ -469,4 +469,3 @@ inline std::uint16_t keyModifiers(const SDL_Event &event) {
 } // namespace sdl
 
 #endif // GLEDITOR_SDL_COMPAT_H
-// vi: set sw=2 sts=2 ts=2 et:
