@@ -92,7 +92,8 @@ endif
 # includes -- is vendored rather than pulled from a package whose layout on
 # macOS is not this project's to depend on.
 GL_CFLAGS :=
-PKGS := pangomm-2.48 pangoft2 freetype2 harfbuzz fribidi libunibreak fontconfig $(SDL_PKG)
+GLIBMM_PKG := $(shell pkg-config --exists glibmm-2.68 && echo glibmm-2.68 || echo glibmm-2.4)
+PKGS := $(GLIBMM_PKG) freetype2 harfbuzz fribidi libunibreak fontconfig $(SDL_PKG)
 ifeq ($(shell pkg-config --exists gl && echo 1),1)
 PKGS += gl
 else ifeq ($(shell uname -s 2>/dev/null),Darwin)
@@ -621,7 +622,7 @@ $(OBJDIR)/xudu-swarm-peer: $(OBJDIR)/tools/xudu-swarm-peer.o $(XUDU_CORE_OBJS)
 # when somebody is already unsure what is slow.
 .PHONY: layout-latency-probe
 layout-latency-probe: $(OBJDIR)/layout-latency-probe
-$(OBJDIR)/layout-latency-probe: $(OBJDIR)/tools/layout-latency-probe.o
+$(OBJDIR)/layout-latency-probe: $(OBJDIR)/tools/layout-latency-probe.o $(LIBLINK)
 	$(CXX) $(LDFLAGS) -o $@ $^ $(LIBS)
 
 # The swarm tests proper, with the two peers on separate network stacks. Needs

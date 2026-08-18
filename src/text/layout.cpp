@@ -81,6 +81,24 @@ PageShaping TextLayout::layoutPage(std::string_view text,
     return shaping;
   }
 
+  // Bound the input text slice if maxHeightPx is set, to avoid redundant quadratic
+  // full-document shaping on multi-megabyte texts when generating individual pages.
+  if (options.maxHeightPx > 0.0F) {
+    const float lh = std::max(1.0F, font->metrics().lineHeight);
+    const auto maxLinesEst =
+        static_cast<std::size_t>(std::ceil(options.maxHeightPx / lh)) + 8;
+    const std::size_t sliceBudget =
+        std::max<std::size_t>(32768, maxLinesEst * 1024);
+    if (text.size() > sliceBudget) {
+      std::size_t cut = sliceBudget;
+      while (cut < text.size() &&
+             (static_cast<unsigned char>(text[cut]) & 0xC0) == 0x80) {
+        cut++;
+      }
+      text = text.substr(0, cut);
+    }
+  }
+
   static bool lbInited = false;
   if (!lbInited) {
     init_linebreak();
@@ -155,13 +173,21 @@ PageShaping TextLayout::layoutPage(std::string_view text,
       }
 
       const auto startByte = shaped.glyphs[lineStart].clusterByteOffset;
-      const auto endByte   = (breakAt < shaped.glyphs.size())
-                                 ? shaped.glyphs[breakAt].clusterByteOffset
-                                 : text.size();
+      std::size_t endGlyph = breakAt;
+      std::size_t endByte  = (breakAt < shaped.glyphs.size())
+                                ? shaped.glyphs[breakAt].clusterByteOffset
+                                : text.size();
+
+      if (isNewline) {
+        endGlyph = i;
+        endByte  = (i + 1 < shaped.glyphs.size())
+                      ? shaped.glyphs[i + 1].clusterByteOffset
+                      : text.size();
+      }
 
       lines.push_back(LineInfo{
           .startGlyph = lineStart,
-          .endGlyph   = breakAt,
+          .endGlyph   = endGlyph,
           .startByte  = startByte,
           .endByte    = endByte,
           .width      = finalWidth,
@@ -289,6 +315,14 @@ PageShaping TextLayout::layoutSingleLine(std::string_view text,
       .singleParagraph = true,
       .ellipsize       = ellipsize,
   };
+  return layoutPage(text, font, opts);
+}
+
+PageShaping TextLayout::layoutSingleLine(std::string_view text,
+                                         const FontFacePtr &font,
+                                         const LayoutOptions &options) {
+  LayoutOptions opts = options;
+  opts.singleParagraph = true;
   return layoutPage(text, font, opts);
 }
 

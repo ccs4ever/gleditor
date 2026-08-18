@@ -49,6 +49,9 @@ public:
                                       const FontFacePtr &font,
                                       float maxWidthPx = 0.0F,
                                       bool ellipsize   = false);
+  static PageShaping layoutSingleLine(std::string_view text,
+                                      const FontFacePtr &font,
+                                      const LayoutOptions &options);
 };
 
 } // namespace gleditor::text

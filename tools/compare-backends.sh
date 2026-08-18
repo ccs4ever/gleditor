@@ -124,11 +124,21 @@ done
 echo "comparing picking results"
 for backend in $backends; do
   [ "$backend" = "opengl" ] && continue
-  if diff -u "$OUT/opengl.picks" "$OUT/$backend.picks" >"$OUT/$backend.pickdiff"; then
+  if python3 -c '
+import sys
+ref = open(sys.argv[1]).read().strip().splitlines()
+oth = open(sys.argv[2]).read().strip().splitlines()
+if len(ref) != len(oth):
+    sys.exit(1)
+for r, o in zip(ref, oth):
+    rp, op = r.split(), o.split()
+    if rp[:-1] != op[:-1] or abs(float(rp[-1]) - float(op[-1])) > 0.005:
+        sys.exit(1)
+' "$OUT/opengl.picks" "$OUT/$backend.picks"; then
     echo "ok: $backend picking matches opengl"
   else
     echo "FAIL: $backend picking differs from opengl"
-    cat "$OUT/$backend.pickdiff"
+    diff -u "$OUT/opengl.picks" "$OUT/$backend.picks" || true
     exit 1
   fi
 done

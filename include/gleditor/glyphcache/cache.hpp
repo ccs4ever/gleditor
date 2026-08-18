@@ -15,14 +15,12 @@
 #include <cstddef>
 #include <functional>
 #include <memory>
-#include <pangomm/font.h>
 
-#include "glibmm/refptr.h"
-#include "glibmm/ustring.h"
 #include <gleditor/glyphcache/palette.hpp>
 #include <gleditor/glyphcache/types.hpp>
 #include <gleditor/log.hpp>
 #include <gleditor/render/types.hpp>
+#include <gleditor/text/font.hpp>
 #include <string>
 #include <string_view>
 #include <unordered_map>
@@ -60,42 +58,23 @@ using transparent_string_hash =
     overload<std::hash<std::string>, std::hash<std::string_view>,
              char_pointer_hash>;
 
-/// Shared pointer alias to a Pango font instance.
-using FontPtr = Glib::RefPtr<Pango::Font>;
+/// Pointer alias to a font face instance.
+using FontPtr = gleditor::text::FontFacePtr;
 
 /**
  * @class FontMapKeyAdapter
- * @brief Compares Pango::Font objects by their fully described absolute size
- * strings.
- *
- * Provides a strict-weak-ordering and hash based on the casefolded string
- * from Pango's describe_with_absolute_size(). Useful as a key in maps.
+ * @brief Compares FontFace objects by their unique key description strings.
  */
 class FontMapKeyAdapter {
 private:
-  FontPtr font_;
-  /**
-   * @brief The casefolded description, worked out once here.
-   *
-   * Describing a font, printing the description and casefolding the result are
-   * three allocations, and this used to do all three on every comparison --
-   * twice, once for each side -- and again for every hash. A hash lookup does
-   * that once to find the bucket and once more per key already in it, so the
-   * cost fell on the cache's hottest path: a glyph is looked up per cluster
-   * per page.
-   *
-   * Held as bytes rather than as a ustring because what is wanted of it is
-   * equality, and casefolding is what makes byte equality the right question.
-   */
+  FontPtr font_{};
   std::string key_;
-  /// Worked out with the key, so that a probe that will fail usually fails on
-  /// a size_t comparison rather than on a string one.
-  std::size_t hash_;
+  std::size_t hash_{};
 
 public:
   explicit FontMapKeyAdapter(FontPtr font)
       : font_(std::move(font)),
-        key_(font_->describe_with_absolute_size().to_string().casefold().raw()),
+        key_(font_ ? font_->key() : ""),
         hash_(std::hash<std::string>{}(key_)) {}
   FontMapKeyAdapter(const FontMapKeyAdapter &oth)            = default;
   FontMapKeyAdapter &operator=(const FontMapKeyAdapter &oth) = default;
@@ -298,7 +277,8 @@ private:
 
   /// Keys by font address. Holds a reference to each font through the adapter,
   /// so an address used as a key cannot be reused by a different font.
-  std::unordered_map<const Pango::Font *, FontMapKeyAdapter> fontKeys;
+  std::unordered_map<const gleditor::text::FontFace *, FontMapKeyAdapter>
+      fontKeys;
   std::unordered_map<std::string, std::unordered_map<FontMapKeyAdapter, Sizes>,
                      transparent_string_hash, std::equal_to<>>
       glyphs; ///< Map: character string -> (font -> cached sizes).
