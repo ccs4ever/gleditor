@@ -6,7 +6,6 @@
 
 #include <gmock/gmock.h>
 #include <memory>
-#include <pangomm/init.h>
 #include <string>
 
 #include "mocks/device.hpp"
@@ -18,7 +17,7 @@ using testing::Return;
 /**
  * @brief ToastOverlay over a mocked device.
  *
- * Text is laid out and rasterised for real -- Pango and Cairo need no graphics
+ * Text is laid out and rasterised for real -- FreeType and HarfBuzz need no graphics
  * device -- while the buffer and texture uploads go to the mock. What is under
  * test is the bookkeeping the backend comparison cannot reach: how many
  * notifications are kept, and when they go away.
@@ -30,7 +29,6 @@ protected:
   std::unique_ptr<ToastOverlay> overlay;
 
   void SetUp() override {
-    Pango::init();
     device = std::make_unique<NiceMock<MockRenderDevice>>();
     // The glyph cache sizes its atlas from these, and refuses to pack anything
     // into a zero-sized one.

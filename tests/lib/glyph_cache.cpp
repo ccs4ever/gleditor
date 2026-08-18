@@ -5,12 +5,7 @@
 
 #include <gmock/gmock.h>
 #include <memory>
-#include <pango/pangoft2.h>
-#include <pangomm/context.h>
-#include <pangomm/fontdescription.h>
-#include <pangomm/fontmap.h>
-#include <pangomm/init.h>
-#include <pangomm/layout.h>
+#include <gleditor/text/font.hpp>
 #include <stdexcept>
 #include <string>
 #include <vector>
@@ -38,7 +33,7 @@ protected:
   int nextTexture{};
   int uploads{};
 
-  void SetUp() override { Pango::init(); }
+  void SetUp() override {}
 
   /// Build a cache over a device reporting @p maxSize / @p maxLayers.
   std::unique_ptr<GlyphCache> makeCache(const int maxSize,
@@ -68,10 +63,7 @@ protected:
   /// Load a font at @p spec, e.g. "Serif 200". Big sizes are how a handful of
   /// glyphs can fill an atlas that a document's worth of text does not.
   static FontPtr font(const std::string &spec) {
-    const auto fontMap = Glib::wrap(PANGO_FONT_MAP(pango_ft2_font_map_new()));
-    const auto ctx     = fontMap->create_context();
-    const Pango::FontDescription desc(spec);
-    return ctx->load_font(desc);
+    return gleditor::text::FontManager::instance().getFont(spec);
   }
 
   /// Distinct clusters, so that each one is rasterised rather than found in

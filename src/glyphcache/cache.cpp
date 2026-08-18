@@ -16,10 +16,9 @@
 #include <gleditor/glyphcache/types.hpp>   // for TextureCoords, Rect
 #include <gleditor/render/device.hpp>      // for RenderDevice
 #include <iostream>                        // for basic_ostream, operator<<
-#include <memory>                          // for shared_ptr
+#include <hb.h>
 #include <numeric>                         // for format
 #include <optional>                        // for optional
-#include <pango/pangoft2.h> // for pango_ft2_render_layout_subpixel
 #include <ranges>           // for find_if
 #include <span>             // for span
 #include <stdexcept>        // for invalid_argument, overflo...
@@ -30,10 +29,7 @@
 #include <utility>          // for to_underlying, move
 #include <vector>           // for vector
 #include FT_FREETYPE_H
-
-#include "glibmm/refptr.h"  // for RefPtr
-#include "pangomm/font.h"   // for Font
-#include "pangomm/layout.h" // for Layout
+#include FT_GLYPH_H
 
 enum class Length : int;
 
@@ -273,48 +269,123 @@ void GlyphCache::makeRoomFor(const Rect &padded) {
   }
 }
 
-inline Glib::RefPtr<Pango::Layout> getLayout(const std::string &chr,
-                                             const FontPtr &font) {
-  thread_local static auto ftFontMap =
-      Glib::wrap(PANGO_FONT_MAP(pango_ft2_font_map_new()));
-  auto ctx        = ftFontMap->create_context();
-  auto layout     = Pango::Layout::create(ctx);
-  const auto desc = font->describe_with_absolute_size();
-  layout->set_font_description(desc);
-  layout->set_text(chr);
-  return layout;
-}
-
 GlyphCache::Sizes GlyphCache::addToCache(const std::string &chr,
                                          const FontPtr &font) {
-  const auto layout = getLayout(chr, font);
+  if (!font || chr.empty()) {
+    const auto empty =
+        Sizes{TextureCoords{}, Rect{Length{0}, Length{0}}, 0, 0.0F};
+    glyphs[chr][keyFor(font)] = empty;
+    return empty;
+  }
 
-  int width  = 0;
-  int height = 0;
-  layout->get_pixel_size(width, height);
+  hb_buffer_t *buf = hb_buffer_create();
+  hb_buffer_add_utf8(buf, chr.data(), static_cast<int>(chr.size()), 0,
+                     static_cast<int>(chr.size()));
+  hb_buffer_guess_segment_properties(buf);
+  hb_shape(font->hbFont(), buf, nullptr, 0);
+
+  unsigned int glyphCount       = 0;
+  hb_glyph_info_t *info         = hb_buffer_get_glyph_infos(buf, &glyphCount);
+  hb_glyph_position_t *pos      = hb_buffer_get_glyph_positions(buf, &glyphCount);
+
+  if (0 == glyphCount) {
+    hb_buffer_destroy(buf);
+    const auto empty =
+        Sizes{TextureCoords{}, Rect{Length{0}, Length{0}}, 0, 0.0F};
+    glyphs[chr][keyFor(font)] = empty;
+    return empty;
+  }
+
+  FT_Face face = font->face();
+  int penX     = 0;
+  int minX = 0, maxX = 0;
+  int minY = 0, maxY = 0;
+
+  struct RenderedGlyph {
+    FT_BitmapGlyph bitmapGlyph{};
+    int x{};
+    int y{};
+  };
+  std::vector<RenderedGlyph> rendered;
+  rendered.reserve(glyphCount);
+
+  for (unsigned int i = 0; i < glyphCount; i++) {
+    if (FT_Load_Glyph(face, info[i].codepoint, FT_LOAD_DEFAULT) != 0) {
+      continue;
+    }
+    FT_Glyph glyph = nullptr;
+    if (FT_Get_Glyph(face->glyph, &glyph) != 0) {
+      continue;
+    }
+    if (FT_Glyph_To_Bitmap(&glyph, FT_RENDER_MODE_NORMAL, nullptr, 1) != 0) {
+      FT_Done_Glyph(glyph);
+      continue;
+    }
+    auto bg    = reinterpret_cast<FT_BitmapGlyph>(glyph);
+    int gx     = penX + (pos[i].x_offset >> 6) + bg->left;
+    int gy     = (pos[i].y_offset >> 6) + bg->top;
+    int right  = gx + static_cast<int>(bg->bitmap.width);
+    int bottom = gy - static_cast<int>(bg->bitmap.rows);
+
+    minX = rendered.empty() ? gx : std::min(minX, gx);
+    maxX = rendered.empty() ? right : std::max(maxX, right);
+    maxY = rendered.empty() ? gy : std::max(maxY, gy);
+    minY = rendered.empty() ? bottom : std::min(minY, bottom);
+
+    rendered.push_back({bg, gx, gy});
+    penX += (pos[i].x_advance >> 6);
+  }
+  hb_buffer_destroy(buf);
+
+  int width  = std::max(maxX - minX, penX);
+  int height = maxY - minY;
+  if (width <= 0) {
+    width = penX > 0 ? penX : 0;
+  }
+  if (height <= 0) {
+    height = static_cast<int>(std::ceil(font->metrics().lineHeight));
+  }
+
   const auto extents = Rect{Length{width}, Length{height}};
-
-  // A zero-area cluster -- an isolated newline, for instance -- has nothing to
-  // rasterize, but still needs an entry so the caller can advance the pen.
-  if (0 == width || 0 == height) {
+  if (0 == width || 0 == height || rendered.empty()) {
+    for (auto &r : rendered) {
+      FT_Done_Glyph(reinterpret_cast<FT_Glyph>(r.bitmapGlyph));
+    }
     const auto empty          = Sizes{TextureCoords{}, extents, 0, 0.0F};
     glyphs[chr][keyFor(font)] = empty;
     return empty;
   }
 
-  // Render text cluster directly into 8-bit FreeType bitmap buffer
   const int stride = width;
   std::vector<unsigned char> data(
       static_cast<std::size_t>(height) * static_cast<std::size_t>(stride), 0);
-  FT_Bitmap bitmap{};
-  bitmap.rows       = static_cast<unsigned int>(height);
-  bitmap.width      = static_cast<unsigned int>(width);
-  bitmap.pitch      = stride;
-  bitmap.buffer     = data.data();
-  bitmap.num_grays  = 256;
-  bitmap.pixel_mode = FT_PIXEL_MODE_GRAY;
 
-  pango_ft2_render_layout_subpixel(&bitmap, layout->gobj(), 0, 0);
+  for (auto &r : rendered) {
+    auto bg  = r.bitmapGlyph;
+    int dstX = r.x - minX;
+    int dstY = maxY - r.y;
+
+    for (unsigned int row = 0; row < bg->bitmap.rows; row++) {
+      int curDstY = dstY + static_cast<int>(row);
+      if (curDstY < 0 || curDstY >= height) {
+        continue;
+      }
+      const unsigned char *srcRow =
+          bg->bitmap.buffer + (row * bg->bitmap.pitch);
+      unsigned char *dstRow =
+          data.data() + (static_cast<std::size_t>(curDstY) * stride);
+
+      for (unsigned int col = 0; col < bg->bitmap.width; col++) {
+        int curDstX = dstX + static_cast<int>(col);
+        if (curDstX < 0 || curDstX >= width) {
+          continue;
+        }
+        dstRow[curDstX] = static_cast<unsigned char>(
+            std::min(255, dstRow[curDstX] + srcRow[col]));
+      }
+    }
+    FT_Done_Glyph(reinterpret_cast<FT_Glyph>(bg));
+  }
 
   // The glyph goes into the atlas inside a zeroed border, so that the mip
   // chain averages it with empty space rather than with its neighbour. The

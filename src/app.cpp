@@ -26,10 +26,7 @@
 #include <glibmm/init.h>
 #include <glm/ext/vector_float3.hpp>
 #include <glm/geometric.hpp>
-#include <pango/pangoft2.h>
-#include <pangomm/fontmap.h>
-#include <pangomm/layout.h>
-#include <pangomm/wrap_init.h>
+#include <gleditor/text/font.hpp>
 
 #include <gleditor/paths.hpp>
 #include <gleditor/render/device.hpp>
@@ -640,25 +637,10 @@ void Application::bindDefaultViewCommands() {
 int Application::run() {
   Glib::init();
   FcInit();
-  // What Pango::init() does, spelled out, because on MinGW it is not there to
-  // call: the DLL exports what the headers mark for export, and pangomm's
-  // init.cc is the one file that defines a function without including its own
-  // header, so the marking never reaches the definition. wrap_init is generated
-  // with its header included and is exported everywhere.
-  Pango::wrap_init();
 
-  // Warm up Pango and Fontconfig types on the main thread so that GLib type
-  // registration and fontconfig cache initialization complete before background
-  // loader threads spawn.
-  {
-    const auto fontMap = Glib::wrap(PANGO_FONT_MAP(pango_ft2_font_map_new()));
-    const auto ctx     = fontMap->create_context();
-    const auto layout  = Pango::Layout::create(ctx);
-    layout->set_text("warmup");
-    int w = 0;
-    int h = 0;
-    layout->get_pixel_size(w, h);
-  }
+  // Warm up Fontconfig and FontManager on the main thread so that font cache
+  // initialization completes before background loader threads spawn.
+  text::FontManager::instance().getFont("Sans 12");
 
   AutoSDL sdlScoped(SDL_INIT_VIDEO);
 
