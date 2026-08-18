@@ -44,7 +44,8 @@ struct PageFillTest : testing::Test {};
 TEST_F(PageFillTest, aDocumentWithNoLineBreaksStillWraps) {
   const auto inputText = unbrokenText(256 * 1024);
   const auto font      = pageFont();
-  const auto page = text::TextLayout::layoutPage(inputText, font, pageOptions());
+  const auto page =
+      text::TextLayout::layoutPage(inputText, font, pageOptions());
 
   EXPECT_GT(page.lineCount, 1);
   EXPECT_GT(page.lineCount, 20);
@@ -53,7 +54,8 @@ TEST_F(PageFillTest, aDocumentWithNoLineBreaksStillWraps) {
 TEST_F(PageFillTest, thePageFillsUp) {
   const auto inputText = unbrokenText(256 * 1024);
   const auto font      = pageFont();
-  const auto page = text::TextLayout::layoutPage(inputText, font, pageOptions());
+  const auto page =
+      text::TextLayout::layoutPage(inputText, font, pageOptions());
 
   EXPECT_GT(page.limit, 0);
   EXPECT_LT(page.limit, inputText.size());
@@ -62,7 +64,8 @@ TEST_F(PageFillTest, thePageFillsUp) {
 TEST_F(PageFillTest, aShortDocumentIsTakenWhole) {
   const std::string inputText = "The quick brown fox.\n";
   const auto font             = pageFont();
-  const auto page = text::TextLayout::layoutPage(inputText, font, pageOptions());
+  const auto page =
+      text::TextLayout::layoutPage(inputText, font, pageOptions());
 
   EXPECT_EQ(page.limit, inputText.size());
 }
@@ -70,8 +73,10 @@ TEST_F(PageFillTest, aShortDocumentIsTakenWhole) {
 TEST_F(PageFillTest, shapingTheSameBytesTwiceGivesTheSameAnswers) {
   const auto inputText = unbrokenText(64 * 1024);
   const auto font      = pageFont();
-  const auto first  = text::TextLayout::layoutPage(inputText, font, pageOptions());
-  const auto second = text::TextLayout::layoutPage(inputText, font, pageOptions());
+  const auto first =
+      text::TextLayout::layoutPage(inputText, font, pageOptions());
+  const auto second =
+      text::TextLayout::layoutPage(inputText, font, pageOptions());
 
   ASSERT_EQ(first.limit, second.limit);
   ASSERT_EQ(first.lineCount, second.lineCount);
@@ -84,5 +89,3 @@ TEST_F(PageFillTest, shapingTheSameBytesTwiceGivesTheSameAnswers) {
 }
 
 } // namespace
-
-

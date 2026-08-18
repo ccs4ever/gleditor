@@ -23,10 +23,10 @@
 
 #include <argparse/argparse.hpp>
 #include <fontconfig/fontconfig.h>
+#include <gleditor/text/font.hpp>
 #include <glibmm/init.h>
 #include <glm/ext/vector_float3.hpp>
 #include <glm/geometric.hpp>
-#include <gleditor/text/font.hpp>
 
 #include <gleditor/paths.hpp>
 #include <gleditor/render/device.hpp>

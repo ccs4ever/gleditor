@@ -16,15 +16,15 @@
 #include <utility>
 #include <vector>
 
-#include <glm/ext/matrix_clip_space.hpp>
-#include <glm/ext/matrix_transform.hpp>
-#include <glm/gtc/type_ptr.hpp>
 #include <gleditor/doc.hpp>
 #include <gleditor/glyphcache/cache.hpp>
 #include <gleditor/render/device.hpp>
 #include <gleditor/render_state.hpp>
 #include <gleditor/text/font.hpp>
 #include <gleditor/text/layout.hpp>
+#include <glm/ext/matrix_clip_space.hpp>
+#include <glm/ext/matrix_transform.hpp>
+#include <glm/gtc/type_ptr.hpp>
 
 namespace {
 
@@ -116,14 +116,14 @@ void ToastOverlay::post(const render::DiagnosticSeverity severity,
   const auto text  = Doc::VBORow::color(236);
 
   std::vector<Doc::VBORow> rows;
-  rows.push_back(Doc::VBORow{
-      {panelWidth / 2.0F, panelHeight / 2.0F},
-      Doc::VBORow::fill(panel, Doc::VBORow::onPaper),
-      0,
-      Doc::VBORow::box(0, static_cast<unsigned int>(panelWidth),
-                       static_cast<unsigned int>(panelHeight),
-                       render::tagKindOverlay),
-      Doc::VBORow::paperAt(panel, 0)});
+  rows.push_back(
+      Doc::VBORow{{panelWidth / 2.0F, panelHeight / 2.0F},
+                  Doc::VBORow::fill(panel, Doc::VBORow::onPaper),
+                  0,
+                  Doc::VBORow::box(0, static_cast<unsigned int>(panelWidth),
+                                   static_cast<unsigned int>(panelHeight),
+                                   render::tagKindOverlay),
+                  Doc::VBORow::paperAt(panel, 0)});
 
   rows.reserve(shaping.glyphs.size() + 1);
   for (const auto &g : shaping.glyphs) {

@@ -15,19 +15,19 @@
 #include <gleditor/glyphcache/palette.hpp> // for GlyphPalette, operator<=>
 #include <gleditor/glyphcache/types.hpp>   // for TextureCoords, Rect
 #include <gleditor/render/device.hpp>      // for RenderDevice
-#include <iostream>                        // for basic_ostream, operator<<
 #include <hb.h>
-#include <numeric>                         // for format
-#include <optional>                        // for optional
-#include <ranges>           // for find_if
-#include <span>             // for span
-#include <stdexcept>        // for invalid_argument, overflo...
-#include <string>           // for char_traits, string, oper...
-#include <string_view>      // for operator==, string_view
-#include <tuple>            // for make_tuple, tuple
-#include <unordered_map>    // for unordered_map, operator==
-#include <utility>          // for to_underlying, move
-#include <vector>           // for vector
+#include <iostream>      // for basic_ostream, operator<<
+#include <numeric>       // for format
+#include <optional>      // for optional
+#include <ranges>        // for find_if
+#include <span>          // for span
+#include <stdexcept>     // for invalid_argument, overflo...
+#include <string>        // for char_traits, string, oper...
+#include <string_view>   // for operator==, string_view
+#include <tuple>         // for make_tuple, tuple
+#include <unordered_map> // for unordered_map, operator==
+#include <utility>       // for to_underlying, move
+#include <vector>        // for vector
 #include FT_FREETYPE_H
 #include FT_GLYPH_H
 
@@ -284,9 +284,9 @@ GlyphCache::Sizes GlyphCache::addToCache(const std::string &chr,
   hb_buffer_guess_segment_properties(buf);
   hb_shape(font->hbFont(), buf, nullptr, 0);
 
-  unsigned int glyphCount       = 0;
-  hb_glyph_info_t *info         = hb_buffer_get_glyph_infos(buf, &glyphCount);
-  hb_glyph_position_t *pos      = hb_buffer_get_glyph_positions(buf, &glyphCount);
+  unsigned int glyphCount  = 0;
+  hb_glyph_info_t *info    = hb_buffer_get_glyph_infos(buf, &glyphCount);
+  hb_glyph_position_t *pos = hb_buffer_get_glyph_positions(buf, &glyphCount);
 
   if (0 == glyphCount) {
     hb_buffer_destroy(buf);

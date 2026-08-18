@@ -81,8 +81,9 @@ PageShaping TextLayout::layoutPage(std::string_view text,
     return shaping;
   }
 
-  // Bound the input text slice if maxHeightPx is set, to avoid redundant quadratic
-  // full-document shaping on multi-megabyte texts when generating individual pages.
+  // Bound the input text slice if maxHeightPx is set, to avoid redundant
+  // quadratic full-document shaping on multi-megabyte texts when generating
+  // individual pages.
   if (options.maxHeightPx > 0.0F) {
     const float lh = std::max(1.0F, font->metrics().lineHeight);
     const auto maxLinesEst =
@@ -175,14 +176,14 @@ PageShaping TextLayout::layoutPage(std::string_view text,
       const auto startByte = shaped.glyphs[lineStart].clusterByteOffset;
       std::size_t endGlyph = breakAt;
       std::size_t endByte  = (breakAt < shaped.glyphs.size())
-                                ? shaped.glyphs[breakAt].clusterByteOffset
-                                : text.size();
+                                 ? shaped.glyphs[breakAt].clusterByteOffset
+                                 : text.size();
 
       if (isNewline) {
         endGlyph = i;
         endByte  = (i + 1 < shaped.glyphs.size())
-                      ? shaped.glyphs[i + 1].clusterByteOffset
-                      : text.size();
+                       ? shaped.glyphs[i + 1].clusterByteOffset
+                       : text.size();
       }
 
       lines.push_back(LineInfo{
@@ -321,7 +322,7 @@ PageShaping TextLayout::layoutSingleLine(std::string_view text,
 PageShaping TextLayout::layoutSingleLine(std::string_view text,
                                          const FontFacePtr &font,
                                          const LayoutOptions &options) {
-  LayoutOptions opts = options;
+  LayoutOptions opts   = options;
   opts.singleParagraph = true;
   return layoutPage(text, font, opts);
 }

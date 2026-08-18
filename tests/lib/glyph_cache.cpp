@@ -3,9 +3,9 @@
 #include <gleditor/glyphcache/cache.hpp>
 #include <gleditor/render/types.hpp>
 
+#include <gleditor/text/font.hpp>
 #include <gmock/gmock.h>
 #include <memory>
-#include <gleditor/text/font.hpp>
 #include <stdexcept>
 #include <string>
 #include <vector>

@@ -11,11 +11,11 @@ Still a work in progress.
 
 This tree builds three things.
 
-**`libgleditor`** is the library: SDL for windowing and input, Pango and Cairo
-for shaping and rasterisation, a device abstraction with three backends, a glyph
-atlas, a buffer allocator, a paginated document model and a render loop. It
-names no document format and no application. Everything under `src/` is part of
-it.
+**`libgleditor`** is the library: SDL for windowing and input, HarfBuzz and
+FreeType for shaping and rasterisation, libunibreak for Unicode line breaking,
+a device abstraction with three backends, a glyph atlas, a buffer allocator,
+a paginated document model and a render loop. It names no document format and
+no application. Everything under `src/` is part of it.
 
 **`gleditor`** is the plain editor -- open files, look at them, type into them.
 It is `apps/gleditor/main.cpp`, and it is 119 lines: a command line, a key map,
@@ -51,9 +51,9 @@ it does not mean touching the document code.
   shader would rule out OpenGL ES 3.0, which has no geometry stage.
 - **The draw offset is a buffer binding offset**, not a base-instance draw:
   OpenGL ES has no `glDrawArraysInstancedBaseInstance`.
-- **The glyph atlas is single-channel coverage**, narrowed from Cairo's ARGB32
-  on the CPU. Uploading BGRA and letting the driver keep one channel is an
-  OpenGL convenience with no Vulkan equivalent.
+- **The glyph atlas is single-channel coverage**, rasterised directly as 8-bit
+  coverage bitmaps via FreeType on the CPU. Uploading BGRA and letting the
+  driver keep one channel is an OpenGL convenience with no Vulkan equivalent.
 - **The shaders have one source.** `assets/shaders/*.glsl` are written in the
   common subset of GLSL 3.30, GLSL ES 3.00 and Vulkan GLSL; the version
   directive, precision qualifiers, varying locations and uniform declarations
@@ -168,15 +168,12 @@ wrong one -- 0.25 ms out of a 2.5 s frame here. Where it would cost more, it has
 been right every time. `GLEDITOR_RECORD_THREADS` settles it by hand when that is
 not good enough.
 
-There is one other thread boundary worth naming, because it is easy to cross by
-accident. Documents are paginated on a loader thread, but each finished layout
-is handed to the render thread through the render queue, and the `RefPtr` means
-both threads then hold the same `Pango::Layout`. A layout computes its lines
-lazily, so *asking it a question mutates it* -- `get_line_count()` shapes the
-text. Anything the loader thread wants to know about a layout has to be asked
-before the layout is handed over, not after. Doing it in the other order crashed
-about one run in five, always somewhere inside Pango or glib's allocator, and
-also corrupted the shaping badly enough to produce clusters 237 texels wide.
+There is one other thread boundary worth naming: documents are paginated on a
+loader thread using `TextLayout::layoutPage()`, and each finished page is
+handed to the render thread as an immutable `PageShaping` value struct via the
+render queue. Because `PageShaping` holds plain positioned cluster and glyph
+arrays rather than a mutable layout object, ownership passes cleanly between
+threads with zero locking and zero lazy mutation hazards.
 
 The frame time is dominated by none of them: it is 4.6 million quads being
 rasterised, every page of the document, every frame, whether or not the page is
@@ -432,15 +429,14 @@ those ligatures -- FreeSerif has all five; DejaVu Serif lacks `ffi`; Liberation
 Serif has none -- each is drawn as a single joined glyph, and clicking across
 one steps the caret through the characters inside it.
 
-**One quad is one cluster, and a cluster is not a character.** Pango shapes
+**One quad is one cluster, and a cluster is not a character.** HarfBuzz shapes
 "ffi" into a single ligature, and a letter with its combining marks into a
 single cluster; each is drawn as one quad covering several characters. The
 character boundaries inside it have no geometry to click on. So the fragment
 stage writes out how far across its quad each fragment sits, and the cluster's
 character count says how many boundaries to divide that among -- subdividing a
-cluster's width evenly, which is what Pango's own `x_to_index` does. Caret
-geometry comes back from Pango's `get_cursor_pos`, which already knows about
-right-to-left runs.
+cluster's width evenly across its characters. Caret geometry is computed directly
+from `PageShaping` cluster bounds and line geometry, supporting bidirectional runs.
 
 **Reflow stops where pagination re-syncs.** Typing splices the text
 immediately and schedules the layout onto the render thread. A page that still
@@ -453,9 +449,8 @@ the 4.6 MB sample.
 The reflow reports its scope so the fast path is observable rather than merely
 claimed: `line` when no line break moved, `page` when they moved but the page
 still ends where it did, `document` when it did not. Line and page both confine
-the work to one page; the distinction is diagnostic, since Pango cannot lay out
-one line of a page again in isolation. A genuinely line-local relayout would
-want a layout object per line.
+the work to one page; the distinction is diagnostic. A genuinely line-local
+relayout would want a layout object per line.
 
 The caret and the notifications write the picking attachment like everything
 else, and are drawn last, so they cover the tag of whatever is beneath them.
@@ -1440,7 +1435,8 @@ What SDL does have, this program uses:
 - Compiler: clang++ by default (gcc should work)
 - Package discovery: pkg-config
 - Libraries (via pkg-config):
-  - pangomm-2.48 (Pango) and cairomm
+  - FreeType 2 (`freetype2`), HarfBuzz (`harfbuzz`), libunibreak (`libunibreak`), FriBidi (`fribidi`), and Fontconfig (`fontconfig`)
+  - glibmm-2.68
   - SDL3 or SDL2 (see below)
   - SDL_image (optional; supplies the window icon and nothing else, and is
     skipped when pkg-config cannot find it)
@@ -1472,8 +1468,9 @@ On Ubuntu/Debian, for example:
 ```
 sudo apt-get update && sudo apt-get install \
   clang libclang-rt-dev make pkg-config doxygen \
-  libglm-dev libpangomm-2.48-dev \
-  libsdl3-dev \
+  libglm-dev libfreetype-dev libharfbuzz-dev \
+  libfribidi-dev libunibreak-dev libfontconfig-dev \
+  libglibmm-2.68-dev libsdl3-dev \
   libgl-dev libgl1-mesa-dev libglu1-mesa-dev \
   libgtest-dev libgmock-dev \
   libtorrent-rasterbar-dev gnupg
@@ -1598,7 +1595,7 @@ building the same tarball with the same `install` target:
 | macOS           | `packaging/macos/gleditor.rb`             | 3   | clang        |
 
 Android is not in this table: an APK is not a tarball an `install` target can
-produce, and none of pango, cairo, glib or SDL are things a distribution
+produce, and none of freetype, harfbuzz, glib or SDL are things a distribution
 installs there for the Makefile to find with pkg-config -- vcpkg cross-builds
 that whole stack from source instead, against the Android NDK. It is `gleditor`
 only for now, not `xudu`, and lives under `packaging/android/` with its own
@@ -1637,11 +1634,10 @@ on whichever version the build happened to find; everything else gets SDL3,
 stated rather than probed for the same reason.
 
 Windows is an MSYS2/MinGW build producing a zip rather than an MSVC installer.
-The dependencies are the GTK stack -- pangomm, cairomm, glibmm -- which MSYS2
-packages and vcpkg largely does not. The zip carries every non-system DLL,
-found by walking `ldd` until it settles, and puts the assets *beside* the
-executable, which is the first place the search looks; unzip it anywhere and it
-finds its own data.
+The dependencies are FreeType, HarfBuzz, libunibreak, FriBidi, Fontconfig, and glibmm.
+The zip carries every non-system DLL, found by walking `ldd` until it settles,
+and puts the assets *beside* the executable, which is the first place the search looks;
+unzip it anywhere and it finds its own data.
 
 `gleditor --print-asset-dir` reports where that search landed and exits before
 opening a window, which is how the answer can be checked on a machine whose

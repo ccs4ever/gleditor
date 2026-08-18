@@ -13,13 +13,13 @@
 #include <utility>
 #include <vector>
 
-#include <glm/gtc/type_ptr.hpp>
 #include <gleditor/doc.hpp>
 #include <gleditor/glyphcache/cache.hpp>
 #include <gleditor/render/device.hpp>
 #include <gleditor/render_state.hpp>
 #include <gleditor/text/font.hpp>
 #include <gleditor/text/layout.hpp>
+#include <glm/gtc/type_ptr.hpp>
 
 namespace {
 
@@ -123,7 +123,8 @@ void Canvas::addLine(const float fromX, const float fromY, const float toX,
 TextMetrics Canvas::measureText(const std::string_view utf8) const {
   auto font = text::FontManager::instance().getFont(fontName);
   text::LayoutOptions opts{
-      .maxWidthPx      = textWidthLimit > 0 ? static_cast<float>(textWidthLimit) : 0.0F,
+      .maxWidthPx =
+          textWidthLimit > 0 ? static_cast<float>(textWidthLimit) : 0.0F,
       .maxHeightPx     = 0.0F,
       .singleParagraph = true,
       .ellipsize       = textWidthLimit > 0,
@@ -143,7 +144,8 @@ TextMetrics Canvas::addText(RenderState &state, const float left,
   }
 
   text::LayoutOptions opts{
-      .maxWidthPx      = textWidthLimit > 0 ? static_cast<float>(textWidthLimit) : 0.0F,
+      .maxWidthPx =
+          textWidthLimit > 0 ? static_cast<float>(textWidthLimit) : 0.0F,
       .maxHeightPx     = 0.0F,
       .singleParagraph = true,
       .ellipsize       = textWidthLimit > 0,
