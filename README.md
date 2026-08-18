@@ -3,7 +3,7 @@
 A GPU-rendered document library, with OpenGL, OpenGL ES and Vulkan backends, and
 two programs built on it.
 
-[![C/C++ CI](https://github.com/ccs4ever/gleditor/actions/workflows/c-cpp.yml/badge.svg)](https://github.com/ccs4ever/gleditor/actions/workflows/c-cpp.yml)
+[![C/C++ CI](https://github.com/ccs4ever/gleditor/actions/workflows/c-cpp.yml/badge.svg)][ci-badge]
 
 Still a work in progress.
 
@@ -1435,7 +1435,8 @@ What SDL does have, this program uses:
 - Compiler: clang++ by default (gcc should work)
 - Package discovery: pkg-config
 - Libraries (via pkg-config):
-  - FreeType 2 (`freetype2`), HarfBuzz (`harfbuzz`), libunibreak (`libunibreak`), FriBidi (`fribidi`), and Fontconfig (`fontconfig`)
+  - FreeType 2 (`freetype2`), HarfBuzz (`harfbuzz`), libunibreak
+    (`libunibreak`), FriBidi (`fribidi`), and Fontconfig (`fontconfig`)
   - SDL3 or SDL2 (see below)
   - SDL_image (optional; supplies the window icon and nothing else, and is
     skipped when pkg-config cannot find it)
@@ -1926,3 +1927,5 @@ TODO: Confirm whether the intent is GPL-3.0-only or GPL-3.0-or-later.
   the packaging table above.
 - The app resolves `assets/glsl` and `logo.png` relative to the working
   directory, so it must be started from the repository root (`make run` does).
+
+[ci-badge]: https://github.com/ccs4ever/gleditor/actions/workflows/c-cpp.yml

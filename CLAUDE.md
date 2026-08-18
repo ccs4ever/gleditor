@@ -67,7 +67,8 @@ make -j$(nproc) test/all     # the same, nothing skipped — this is what CI (PR
 make test TEST_FILTER='SwarmTest.*'   # run/override a specific gtest filter
 ```
 
-- **Parallelism**: Always run `make -j$(nproc) test` or `make -j$(nproc) test/all` to utilize all available cores.
+- **Parallelism**: Always run `make -j$(nproc) test` or
+  `make -j$(nproc) test/all` to utilize all available cores.
 - `gleditor_test` links the real shared library (catches export-boundary
   bugs); `xudu_test` links only the xanalogical engine, with no graphics
   device, on purpose — that's the boundary being tested.
@@ -174,38 +175,59 @@ to sanity-check `.editorconfig` itself, not as a gate.
 ## Project structure
 
 - `src/` — the library: document model, glyph cache, SDL wrappers, render loop
-- `src/text/` — native text layout engine: `FontManager`, `FontFace`, `TextLayout` (HarfBuzz, FreeType, libunibreak, FriBidi)
+- `src/text/` — native text layout engine: `FontManager`, `FontFace`,
+  `TextLayout` (HarfBuzz, FreeType, libunibreak, FriBidi)
 - `src/render/` — device abstraction and backends (`gl/`, `vulkan/`)
 - `src/a11y/` — accessibility tree / AccessKit integration
 - `include/gleditor/` — the library's public headers
 - `include/gleditor/text/` — text layout and font management public headers
 - `apps/gleditor/` — the plain editor program
-- `apps/xudu/` — the xanadoc editor; `apps/xudu/core/` is its engine (no graphics dependency)
+- `apps/xudu/` — the xanadoc editor; `apps/xudu/core/` is its engine (no graphics
+  dependency)
 - `assets/shaders/` — portable GLSL bodies; `vulkan/` holds generated SPIR-V
-- `tests/lib/`, `tests/xudu/` — unit tests for the library and the engine, respectively
-- `tools/` — build-time and verification helpers (`compare-backends.sh`, `benchmark-kjv-load.py`, `layout-latency-probe.cpp`, `shader_assemble.cpp`, ...)
+- `tests/lib/`, `tests/xudu/` — unit tests for the library and engine
+- `tools/` — build-time and verification helpers (`compare-backends.sh`,
+  `benchmark-kjv-load.py`, `layout-latency-probe.cpp`, `shader_assemble.cpp`)
 - `packaging/` — distro packaging (arch, debian, fedora, macos, windows, nix)
 - `design/` — design notes and the reasoning behind non-obvious decisions
 - `thirdparty/` — vendored dependencies (git submodules; see above)
 
 ## Text Architecture & Shaping Pipeline
 
-- **Zero Cairo / Zero Pango**: The text stack is built directly on **FreeType 2**, **HarfBuzz**, **libunibreak** (UAX #14), **FriBidi**, and **Fontconfig**. Cairo, Pango, PangoFT2, and Pangomm are completely eliminated.
+- **Zero Cairo / Zero Pango**: The text stack is built directly on
+  **FreeType 2**, **HarfBuzz**, **libunibreak** (UAX #14), **FriBidi**, and
+  **Fontconfig**. Cairo, Pango, PangoFT2, and Pangomm are eliminated.
 - **`text::FontManager` & `text::FontFace`** (`src/text/font.cpp`):
-  - Resolves font descriptions (e.g. `"Monospace 16"`, `"Sans Bold 12"`) via Fontconfig (`FcPattern*`) and loads them into thread-safe FreeType `FT_Face` and HarfBuzz `hb_font_t` instances.
+  - Resolves font descriptions (e.g. `"Monospace 16"`, `"Sans Bold 12"`) via
+    Fontconfig (`FcPattern*`) and loads them into thread-safe FreeType `FT_Face`
+    and HarfBuzz `hb_font_t` instances.
   - Computes typographic metrics (`ascent`, `descent`, `lineHeight`, `spaceWidth`).
 - **`text::TextLayout`** (`src/text/layout.cpp`):
-  - `layoutPage(text, font, options)`: Breaks lines with `libunibreak` (`set_linebreaks_utf8`), shapes runs with HarfBuzz (`hb_shape`), wraps at `maxWidthPx`, and paginates by `maxHeightPx`.
-  - **Height-Budgeted Slicing**: When `maxHeightPx > 0`, input text is sliced to the maximum lines that could fit the height budget. This guarantees $O(1)$ page generation time rather than $O(N^2)$ whole-document shaping across thousands of pages.
-  - `layoutSingleLine(text, font, options)`: Single-line fast path for toasts and canvas measurement.
-  - Outputs `PageShaping` (`limit`, `lineCount`, `clusters`, `glyphs`, `lines`) consumed directly by `Doc` and `Page`.
+  - `layoutPage(text, font, options)`: Breaks lines with `libunibreak`
+    (`set_linebreaks_utf8`), shapes runs with HarfBuzz (`hb_shape`), wraps at
+    `maxWidthPx`, and paginates by `maxHeightPx`.
+  - **Height-Budgeted Slicing**: When `maxHeightPx > 0`, input text is sliced
+    to the maximum lines that could fit the height budget. This guarantees
+    $O(1)$ page generation time rather than $O(N^2)$ whole-document shaping
+    across thousands of pages.
+  - `layoutSingleLine(text, font, options)`: Single-line fast path for toasts
+    and canvas measurement.
+  - Outputs `PageShaping` (`limit`, `lineCount`, `clusters`, `glyphs`, `lines`)
+    consumed directly by `Doc` and `Page`.
 - **`GlyphCache`** (`src/glyphcache/cache.cpp`):
-  - Direct 8-bit grayscale coverage texture rasterization using FreeType (`FT_Load_Glyph`, `FT_Glyph_To_Bitmap`).
-  - Clusters are shaped via HarfBuzz and rendered into a dynamic 2D texture array atlas (512x512 growing up to 16384x16384 across 64 layers).
+  - Direct 8-bit grayscale coverage texture rasterization using FreeType
+    (`FT_Load_Glyph`, `FT_Glyph_To_Bitmap`).
+  - Clusters are shaped via HarfBuzz and rendered into a dynamic 2D texture
+    array atlas (512x512 growing up to 16384x16384 across 64 layers).
 - **Baseline Alignment & Quad Geometry**:
-  - `Doc` glyph quads are anchored to `line.top` with height set to the font's logical `lineHeight`.
-  - `GlyphCache` cluster textures are sized to `lineHeight` with baseline fixed at $Y = \\text{ascent}$.
-  - When modifying text shaping or layout, always run `./tools/compare-backends.sh` and visually inspect screenshots with visual tools (`view_file`) to check for flat baselines, correct cluster height, and sharp glyph rendering.
+  - `Doc` glyph quads are anchored to `line.top` with height set to the font's
+    logical `lineHeight`.
+  - `GlyphCache` cluster textures are sized to `lineHeight` with baseline fixed
+    at $Y = \\text{ascent}$.
+  - When modifying text shaping or layout, always run
+    `./tools/compare-backends.sh` and visually inspect screenshots with visual
+    tools (`view_file`) to check for flat baselines, correct cluster height,
+    and sharp glyph rendering.
 
 ## Gotchas worth knowing before editing the Makefile
 

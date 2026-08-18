@@ -147,7 +147,7 @@ TEST_PKGS := gmock_main
 # whose documents cannot leave the machine that wrote them, which is the one
 # thing this program is for. Better to fail at configure time than to ship a
 # xanadoc editor that quietly cannot publish.
-XUDU_PKGS := libtorrent-rasterbar lmdb
+XUDU_PKGS := libtorrent-rasterbar openssl lmdb
 ifneq (,$(filter-out $(NO_SDL_GOALS),$(or $(MAKECMDGOALS),all)))
 ifneq ($(shell pkg-config --exists libtorrent-rasterbar && echo 1),1)
 $(error libtorrent-rasterbar was not found by pkg-config. It is required: \
