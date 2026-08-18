@@ -3,12 +3,12 @@
 #include <gleditor/glyphcache/cache.hpp>
 #include <gleditor/render/types.hpp>
 
-#include <cairomm/context.h>
-#include <cairomm/surface.h>
 #include <gmock/gmock.h>
 #include <memory>
+#include <pango/pangoft2.h>
 #include <pangomm/context.h>
 #include <pangomm/fontdescription.h>
+#include <pangomm/fontmap.h>
 #include <pangomm/init.h>
 #include <pangomm/layout.h>
 #include <stdexcept>
@@ -68,12 +68,10 @@ protected:
   /// Load a font at @p spec, e.g. "Serif 200". Big sizes are how a handful of
   /// glyphs can fill an atlas that a document's worth of text does not.
   static FontPtr font(const std::string &spec) {
-    const auto surface =
-        Cairo::ImageSurface::create(Cairo::Surface::Format::ARGB32, 0, 0);
-    const auto layout = Pango::Layout::create(Cairo::Context::create(surface));
+    const auto fontMap = Glib::wrap(PANGO_FONT_MAP(pango_ft2_font_map_new()));
+    const auto ctx     = fontMap->create_context();
     const Pango::FontDescription desc(spec);
-    layout->set_font_description(desc);
-    return layout->get_context()->load_font(desc);
+    return ctx->load_font(desc);
   }
 
   /// Distinct clusters, so that each one is rasterised rather than found in

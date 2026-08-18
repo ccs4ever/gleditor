@@ -146,7 +146,7 @@ template <> struct std::hash<FontMapKeyAdapter> {
  * @class GlyphCache
  * @brief Caches rendered glyphs into a device array texture and returns UVs.
  *
- * GlyphCache uses Pango/Cairo to rasterize text for a given Pango::Font,
+ * GlyphCache uses FreeType to rasterize text for a given font,
  * converts the result to single-channel coverage, and packs it into a layered
  * texture via GlyphPalette. The put() API returns texture coordinates, in
  * texels, and pixel dimensions for rendering.
