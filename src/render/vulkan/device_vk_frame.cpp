@@ -219,7 +219,7 @@ void DeviceVK::bindGlyphTexture(const TextureHandle texture) {
     return;
   }
 
-  const auto highlightIt = buffers.find(highlightBuffer.id);
+  const auto highlightIt = buffers.find(highlightBuffers[frameIndex].id);
   if (buffers.end() == highlightIt) {
     return;
   }
@@ -257,13 +257,12 @@ void DeviceVK::bindGlyphTexture(const TextureHandle texture) {
 }
 
 void DeviceVK::setHighlights(const std::span<const HighlightRange> ranges) {
-  const auto it = buffers.find(highlightBuffer.id);
+  const auto it = buffers.find(highlightBuffers[frameIndex].id);
   if (buffers.end() == it) {
     return;
   }
   const auto count = std::min<std::size_t>(ranges.size(), maxHighlightRanges);
-  ensureIdleForMutation();
-  auto *dst = static_cast<std::byte *>(it->second.mapped);
+  auto *dst        = static_cast<std::byte *>(it->second.mapped);
   if (0 != count) {
     std::memcpy(dst, ranges.data(), count * sizeof(HighlightRange));
   }

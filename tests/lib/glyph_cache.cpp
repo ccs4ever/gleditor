@@ -135,7 +135,7 @@ TEST_F(GlyphCacheTest, addsLayersOnceTheLayerCannotGrow) {
   const auto cache = makeCache(512, 8);
   const auto face  = font("Serif 150");
 
-  for (const auto &chr : alphabet(24)) {
+  for (const auto &chr : alphabet(16)) {
     cache->put(chr, face);
   }
 

@@ -195,162 +195,71 @@ private:
     MDB_dbi dbi_meta_{ 0 };
 };
 
-1. The Ring Buffer Uploader (src/render/opengl/stream_buffer.hpp)
+Part 2: OpenGL 3.3 & ES 3.0 Ring Buffer Uploader (StreamBufferGL)
 
-This utility provides a lock-free, zero-copy staging area for both Vertex Buffer Objects (instance data) and Pixel Unpack Buffers (PBOs for the glyph atlas). By mapping the buffer unsynchronized, you promise the OpenGL driver that you will not overwrite data the GPU is currently reading, which we manage by tracking chunks with glFenceSync.
+1. The Ring Buffer Uploader (include/gleditor/render/gl/stream_buffer.hpp)
+
+This utility provides a lock-free, zero-copy staging area for high-frequency dynamic GPU resources across both OpenGL 3.3 Core and OpenGL ES 3.0:
+- Pixel Unpack Buffers (GL_PIXEL_UNPACK_BUFFER) for non-blocking asynchronous DMA glyph atlas texture streaming.
+- Dynamic Vertex Streams (GL_ARRAY_BUFFER) for inter-document transclusion beams, live text reflow quad staging, and transient UI elements (carets, toasts).
+- Dynamic Uniform Buffers (GL_UNIFORM_BUFFER) for per-frame highlights and selections via glBindBufferRange.
+
+By mapping the buffer unsynchronized (GL_MAP_UNSYNCHRONIZED_BIT) and flushing explicit ranges (glFlushMappedBufferRange), driver CPU stalls are completely eliminated. In-flight GPU reads are tracked with sync fences (glFenceSync).
+
 C++
 
+// include/gleditor/render/gl/stream_buffer.hpp
 #pragma once
 
-#include <glad/glad.h>
 #include <deque>
+#include <cstddef>
 #include <cstdint>
-#include <cstring>
 #include <stdexcept>
+#include <format>
+#include <utility>
+#include <gleditor/render/gl/gl_api.hpp>
 
-struct SyncPoint {
-    GLsync sync;
-    size_t size;
+namespace render::gl {
+
+struct MappedChunk {
+  void *ptr{nullptr};
+  std::size_t offset{0};
 };
 
-class GLStreamBuffer {
+struct SyncSegment {
+  GLsync sync{nullptr};
+  std::size_t offset{0};
+  std::size_t size{0};
+};
+
+class StreamBufferGL {
 public:
-    GLStreamBuffer(GLenum target, size_t capacity_bytes) 
-        : target_(target), capacity_(capacity_bytes), head_(0) 
-    {
-        glGenBuffers(1, &buffer_id_);
-        glBindBuffer(target_, buffer_id_);
-        
-        // Allocate immutable data store (GL_DYNAMIC_DRAW since it changes frequently)
-        glBufferData(target_, capacity_, nullptr, GL_DYNAMIC_DRAW);
-        glBindBuffer(target_, 0);
-    }
+  StreamBufferGL(const GLApi &glApi, GLenum target, std::size_t capacityBytes);
+  ~StreamBufferGL();
 
-    ~GLStreamBuffer() {
-        wait_all_syncs();
-        glDeleteBuffers(1, &buffer_id_);
-    }
+  MappedChunk allocate(std::size_t size, std::size_t alignment = 64);
+  void flushAndUnmap(std::size_t offset, std::size_t size);
+  void waitAll();
 
-    // Returns a mapped pointer for the CPU to write into, and the GPU offset
-    std::pair<void*, size_t> allocate_chunk(size_t size) {
-        size_t alignment = 64; 
-        head_ = (head_ + alignment - 1) & ~(alignment - 1);
-
-        if (head_ + size > capacity_) {
-            head_ = 0; // Wrap buffer
-        }
-
-        wait_for_space(size);
-
-        glBindBuffer(target_, buffer_id_);
-        // Unsynchronized map: Driver won't stall the CPU even if GPU is reading elsewhere
-        void* ptr = glMapBufferRange(target_, head_, size, 
-            GL_MAP_WRITE_BIT | GL_MAP_UNSYNCHRONIZED_BIT | GL_MAP_FLUSH_EXPLICIT_BIT);
-        
-        if (!ptr) throw std::runtime_error("Failed to map stream buffer chunk");
-
-        size_t offset = head_;
-        head_ += size;
-        return {ptr, offset};
-    }
-
-    void flush_and_unmap(size_t offset, size_t size) {
-        glBindBuffer(target_, buffer_id_);
-        glFlushMappedBufferRange(target_, offset, size);
-        glUnmapBuffer(target_);
-
-        // Insert fence to track when GPU finishes with this chunk
-        syncs_.push_back({glFenceSync(GL_SYNC_GPU_COMMANDS_COMPLETE, 0), size});
-    }
-
-    GLuint get_id() const { return buffer_id_; }
-
-private:
-    void wait_for_space(size_t requested_size) {
-        while (!syncs_.empty() && (capacity_ - (head_ - syncs_.front().size)) < requested_size) {
-            glClientWaitSync(syncs_.front().sync, GL_SYNC_FLUSH_COMMANDS_BIT, GL_TIMEOUT_IGNORED);
-            glDeleteSync(syncs_.front().sync);
-            syncs_.pop_front();
-        }
-    }
-
-    void wait_all_syncs() {
-        for (auto& s : syncs_) {
-            glClientWaitSync(s.sync, GL_SYNC_FLUSH_COMMANDS_BIT, GL_TIMEOUT_IGNORED);
-            glDeleteSync(s.sync);
-        }
-        syncs_.clear();
-    }
-
-    GLenum target_;
-    GLuint buffer_id_;
-    size_t capacity_;
-    size_t head_;
-    std::deque<SyncPoint> syncs_;
+  [[nodiscard]] GLuint id() const;
+  [[nodiscard]] GLenum target() const;
+  [[nodiscard]] std::size_t capacityBytes() const;
 };
 
-2. Integration with the OpenGL Backend (src/render/opengl/render_device_gl.cpp)
+} // namespace render::gl
 
-Integrate GLStreamBuffer into the OpenGL backend implementation of your render::RenderDevice interface. You will need two stream buffers: one for streaming new glyphs into the atlas, and one for streaming layout instances (positions, dimension flags, etc.).
-C++
+2. Integration with the OpenGL Backend (src/render/gl/device_gl.cpp)
 
-#include "stream_buffer.hpp"
-#include "gleditor/render/render_device.hpp"
+In DeviceGL, StreamBufferGL is integrated for:
+- PBO Texture Streaming (16MB GL_PIXEL_UNPACK_BUFFER): Asynchronous glyph uploads in DeviceGL::updateTextureLayer.
+- Dynamic Highlights UBO (2MB GL_UNIFORM_BUFFER): Lock-free range streaming in DeviceGL::setHighlights with api.BindBufferRange.
+- Dynamic Vertex & Beam Streaming (GL_ARRAY_BUFFER): Dynamic per-frame geometry streaming for inter-document beams and text reflow instances without reallocating VBOs.
 
-class RenderDeviceGL : public render::RenderDevice {
-    std::unique_ptr<GLStreamBuffer> pbo_stream_;
-    std::unique_ptr<GLStreamBuffer> instance_stream_;
-    GLuint glyph_atlas_tex_;
+3. The Vulkan Ring Staging Buffer (include/gleditor/render/vulkan/stream_buffer_vk.hpp)
 
-public:
-    void init() override {
-        // 16MB for streaming glyphs, 32MB for layout instances
-        pbo_stream_ = std::make_unique<GLStreamBuffer>(GL_PIXEL_UNPACK_BUFFER, 16 * 1024 * 1024);
-        instance_stream_ = std::make_unique<GLStreamBuffer>(GL_ARRAY_BUFFER, 32 * 1024 * 1024);
-
-        glGenTextures(1, &glyph_atlas_tex_);
-        glBindTexture(GL_TEXTURE_2D, glyph_atlas_tex_);
-        // GL_RED for single-channel coverage
-        glTexImage2D(GL_TEXTURE_2D, 0, GL_R8, 4096, 4096, 0, GL_RED, GL_UNSIGNED_BYTE, nullptr);
-    }
-
-    // Async upload from FreeType/Cairo cache directly to GPU Atlas
-    void upload_glyph(uint32_t x, uint32_t y, uint32_t w, uint32_t h, const void* data) override {
-        size_t size = w * h; // Single channel = 1 byte per pixel
-        auto [ptr, offset] = pbo_stream_->allocate_chunk(size);
-        
-        std::memcpy(ptr, data, size);
-        pbo_stream_->flush_and_unmap(offset, size);
-
-        glBindBuffer(GL_PIXEL_UNPACK_BUFFER, pbo_stream_->get_id());
-        glBindTexture(GL_TEXTURE_2D, glyph_atlas_tex_);
-        
-        // PBO offset used as the data pointer
-        glTexSubImage2D(GL_TEXTURE_2D, 0, x, y, w, h, GL_RED, GL_UNSIGNED_BYTE, (const void*)offset);
-        glBindBuffer(GL_PIXEL_UNPACK_BUFFER, 0);
-    }
-
-    // Bind buffer offset instead of using base-instance rendering
-    void draw_instances(size_t instance_count, const InstanceData* data) override {
-        size_t size = instance_count * sizeof(InstanceData);
-        auto [ptr, offset] = instance_stream_->allocate_chunk(size);
-        
-        std::memcpy(ptr, data, size);
-        instance_stream_->flush_and_unmap(offset, size);
-
-        glBindBuffer(GL_ARRAY_BUFFER, instance_stream_->get_id());
-        
-        // Setup vertex attributes with the stream buffer offset. 
-        // This is crucial for OpenGL ES 3.0 compatibility as it lacks glDrawArraysInstancedBaseInstance.
-        glVertexAttribPointer(1, 4, GL_FLOAT, GL_FALSE, sizeof(InstanceData), (const void*)(offset + offsetof(InstanceData, position)));
-        glVertexAttribDivisor(1, 1); 
-
-        // Draw instanced quads
-        glDrawArraysInstanced(GL_TRIANGLE_STRIP, 0, 4, instance_count);
-    }
-};
-
-3. Unified Shader Architecture (assets/shaders/quad.glsl)
+The Vulkan backend implements StreamBufferVK using a persistent HOST_VISIBLE | HOST_COHERENT VkBuffer:
+- Asynchronous DMA Transfers: updateTextureLayer stages glyph rects in the ring buffer without runtime allocateBuffer/destroyBufferRecord churn or vkDeviceWaitIdle stalls.
+- Zero-Stall Highlights UBO: Double-buffered per-frame highlight UBOs (highlightBuffers[framesInFlight]) updated lock-free per frame without vkDeviceWaitIdle.
 
 Since gleditor relies on a single source of truth for shaders across API backends, you can use preprocessor macros to handle the syntax differences between OpenGL 3.3 Core and OpenGL ES 3.0.
 

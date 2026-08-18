@@ -477,6 +477,53 @@ void DeviceVK::updateTextureLayer(const TextureHandle texture, const int layer,
         "DeviceVK::updateTextureLayer: data shorter than the given rectangle");
   }
 
+  if (stagingStream && expected <= stagingStream->capacityBytes()) {
+    const auto chunk = stagingStream->allocate(expected, 4);
+    std::memcpy(chunk.ptr, data.data(), expected);
+
+    const auto commands = beginOneShot();
+
+    VkImageMemoryBarrier barrier{};
+    barrier.sType               = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+    barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    barrier.image               = it->second.image;
+    barrier.subresourceRange    = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1,
+                                   static_cast<std::uint32_t>(layer), 1};
+
+    barrier.oldLayout     = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+    barrier.newLayout     = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+    barrier.srcAccessMask = VK_ACCESS_SHADER_READ_BIT;
+    barrier.dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+    vkCmdPipelineBarrier(commands, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
+                         VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, nullptr, 0,
+                         nullptr, 1, &barrier);
+
+    VkBufferImageCopy region{};
+    region.bufferOffset      = static_cast<VkDeviceSize>(chunk.offset);
+    region.bufferRowLength   = 0; // tightly packed
+    region.bufferImageHeight = 0;
+    region.imageSubresource  = {VK_IMAGE_ASPECT_COLOR_BIT, 0,
+                                static_cast<std::uint32_t>(layer), 1};
+    region.imageOffset       = {xOffset, yOffset, 0};
+    region.imageExtent       = {static_cast<std::uint32_t>(width),
+                                static_cast<std::uint32_t>(height), 1};
+    vkCmdCopyBufferToImage(commands, stagingStream->vkBuffer(),
+                           it->second.image,
+                           VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &region);
+
+    barrier.oldLayout     = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+    barrier.newLayout     = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+    barrier.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+    barrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
+    vkCmdPipelineBarrier(commands, VK_PIPELINE_STAGE_TRANSFER_BIT,
+                         VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT, 0, 0, nullptr,
+                         0, nullptr, 1, &barrier);
+
+    endOneShot(commands);
+    return;
+  }
+
   ensureIdleForMutation();
 
   auto staging = allocateBuffer(expected, VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
