@@ -712,8 +712,10 @@ format:
 
 # What the CI format job runs. clang-format --dry-run --Werror, shfmt -d,
 # yamlfmt -lint and mdformat --check all exit non-zero on the first
-# unformatted file rather than rewriting it.
+# unformatted file rather than rewriting it. tools/check-config-harmony.sh
+# ensures .editorconfig and .clang-format do not drift out of harmony.
 format-check:
+	./tools/check-config-harmony.sh
 	echo "$(CXX_FORMAT_FILES)" | xargs clang-format --style=file --dry-run --Werror
 	echo "$(SH_FORMAT_FILES)" | xargs shfmt -i 2 -ci -d
 	yamlfmt -lint $(YAML_FORMAT_FILES)
@@ -727,8 +729,14 @@ format-check:
 # --wrap keep). Nix and the packaging manifests (PKGBUILD, the RPM spec, the
 # Homebrew formula) are covered where a linter for them is actually reliable
 # outside their native distribution -- see CLAUDE.md.
+SHELLCHECK := $(shell command -v shellcheck 2>/dev/null)
 lint:
-	echo "$(SH_FORMAT_FILES)" "packaging/arch/PKGBUILD" | xargs shellcheck
+	./tools/check-config-harmony.sh
+ifdef SHELLCHECK
+	echo "$(SH_FORMAT_FILES)" "packaging/arch/PKGBUILD" | xargs $(SHELLCHECK)
+else
+	@echo "shellcheck not found, skipping shell lint"
+endif
 	yamllint $(YAML_FORMAT_FILES)
 	mdl $(MD_FORMAT_FILES)
 .PHONY: lint

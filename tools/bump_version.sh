@@ -2,14 +2,14 @@
 set -e
 
 # 1. Ensure we are in a Git repository
-if [ \! -d .git ]; then
+if [ ! -d .git ]; then
     echo "Error: Not inside a git repository root." >&2
     exit 1
 fi
 
 # 2. Check for the VERSION file
 VERSION_FILE="VERSION"
-if [ \! -f "$VERSION_FILE" ]; then
+if [ ! -f "$VERSION_FILE" ]; then
     echo "Error: $VERSION_FILE file not found in the current directory." >&2
     exit 1
 fi
