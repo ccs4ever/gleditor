@@ -102,15 +102,15 @@ jobs:
         path: ~/apt-archives
         key: apt-sdl${{ matrix.sdl }}-${{ hashFiles('.github/workflows/c-cpp.yml') }}
         restore-keys: apt-sdl${{ matrix.sdl }}-
-    # PKGS in the Makefile is: pangomm-2.48 <sdl2|sdl3> gl (+ vulkan when
-    # GLEDITOR_ENABLE_VULKAN is set). SDL_image is optional and SDL3_image is
-    # in neither the archive nor the SDL3 backport PPA, so it is left out of
-    # both jobs to keep them comparable; the window icon is skipped without it.
-    # The GL and GLES entry points are resolved at runtime through SDL, so no
-    # GL library is linked; libgl-dev is still needed for GL/glcorearb.h.
-    # mesa-vulkan-drivers provides lavapipe, a software Vulkan device, and the
-    # validation layers catch API misuse that would otherwise only show up as a
-    # blank window.
+    # PKGS in the Makefile is: freetype2 harfbuzz fribidi libunibreak fontconfig
+    # <sdl2|sdl3> gl (+ vulkan when GLEDITOR_ENABLE_VULKAN is set). SDL_image is
+    # optional and SDL3_image is in neither the archive nor the SDL3 backport PPA,
+    # so it is left out of both jobs to keep them comparable; the window icon is
+    # skipped without it. The GL and GLES entry points are resolved at runtime
+    # through SDL, so no GL library is linked; libgl-dev is still needed for
+    # GL/glcorearb.h. mesa-vulkan-drivers provides lavapipe, a software Vulkan
+    # device, and the validation layers catch API misuse that would otherwise only
+    # show up as a blank window.
     - name: packages
       run: |
         set -eu
@@ -123,12 +123,13 @@ jobs:
 
         sudo apt-get install -y \
           ${{ matrix.sdl == 3 && 'libsdl3-dev' || 'libsdl2-dev' }} \
-          libglm-dev libpangomm-2.48-dev \
+          libglm-dev libfreetype-dev libharfbuzz-dev \
+          libfribidi-dev libunibreak-dev libfontconfig-dev \
           libgl-dev libgl1-mesa-dev libglu1-mesa-dev \
           libvulkan-dev glslang-tools \
           mesa-vulkan-drivers vulkan-validationlayers \
           libgmock-dev libgtest-dev \
-          libtorrent-rasterbar-dev gnupg \
+          libtorrent-rasterbar-dev libssl-dev liblmdb-dev gnupg \
           xvfb \
           clang libclang-rt-dev make
 
@@ -172,9 +173,11 @@ jobs:
       run: |
         sudo apt-get update -q
         sudo apt-get install -y -q --no-install-recommends \
-          libpangomm-2.48-dev libsdl2-dev libsdl2-image-dev libglm-dev \
+          libglm-dev libfreetype-dev libharfbuzz-dev \
+          libfribidi-dev libunibreak-dev libfontconfig-dev \
+          libsdl2-dev libsdl2-image-dev \
           libgl-dev libgmock-dev pkg-config \
-          libtorrent-rasterbar-dev iproute2
+          libtorrent-rasterbar-dev libssl-dev liblmdb-dev iproute2
     - name: build
       run: make -j$(nproc) GLEDITOR_SDL=2 xudu_test xudu-swarm-peer
     # Fails rather than skips if libtorrent went missing: this job exists to
