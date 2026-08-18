@@ -154,6 +154,10 @@ rejects:
   line: mdformat canonicalizes that onto one line regardless of `--wrap`,
   which can push it over the line-length limit — keep code spans on one
   physical line rather than wrapping through them.
+- `tools/check-config-harmony.sh` validates that `.editorconfig`,
+  `.clang-format`, `.yamlfmt`, `.yamllint`, and `.mdl_style.rb` remain in
+  strict harmony across all languages so configuration rules never drift. It
+  is wired into both `make format-check` and `make lint`.
 - nixfmt-rfc-style and nix-linter check disjoint things (whitespace/layout
   vs. semantic style like unused arguments), so there is nothing for them to
   disagree about.
