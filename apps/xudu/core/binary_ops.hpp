@@ -18,8 +18,30 @@
 
 namespace xudu {
 
-/// 4-byte magic prefix + 1-byte version for compact binary ops spools.
-inline constexpr std::string_view binaryOpsMagic = "\x7fXOP\x01";
+/// 4-byte magic prefix identifying compact binary operations spools.
+inline constexpr std::string_view binaryOpsMagicPrefix = "\x7fXOP";
+
+/// Operations spool format version.
+enum class OpsSpoolVersion : std::uint8_t {
+  StandardOsmicText =
+      0, ///< Standard human-readable OSMIC text format (version 0).
+  CompactBinaryV1 =
+      1, ///< Compact binary encoding with LEB128 and bitpacking (version 1).
+};
+
+/// 4-byte magic prefix + 1-byte version for compact binary ops spools (Version
+/// 1).
+inline constexpr std::string_view binaryOpsMagicV1 = "\x7fXOP\x01";
+
+/// Alias for backwards compatibility.
+inline constexpr std::string_view binaryOpsMagic = binaryOpsMagicV1;
+
+/// Human-readable name for an operations spool version.
+const char *opsSpoolVersionName(OpsSpoolVersion version);
+
+/// Detect the operations spool format version from a stream (Version 0 = text,
+/// Version 1 = binary v1).
+OpsSpoolVersion detectOpsSpoolVersion(std::istream &in);
 
 /// Variable-length unsigned integer (LEB128) encoding.
 void writeVarint(std::ostream &out, std::uint64_t val);
