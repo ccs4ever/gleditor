@@ -481,3 +481,85 @@ if echo "$backends" | grep -q vulkan; then
     echo "    pass a larger sample to exercise threaded recording"
   fi
 fi
+
+# =============================================================================
+# E2E Integration and Binary Orchestration Backend Parity Comparison
+# =============================================================================
+XUDU_TEST_BIN="${XUDU_TEST_BIN:-build/xudu_test}"
+if [ -x "$XUDU_TEST_BIN" ]; then
+  echo "comparing E2E binary orchestration integration scenarios across backends"
+  XUDU_STEPS="step1_source_torrents step2_xanadocs_loaded step3_cross_linking step4_transclusion step5_link_packages_applied step6_full_page_multi_topology step7_three_doc_bypass_routing"
+
+  for backend in $backends; do
+    mkdir -p "$OUT/xudu_$backend"
+    XUDU_BACKEND="$backend" XUDU_SCREENSHOT_DIR="$OUT/xudu_$backend" \
+      "$XUDU_TEST_BIN" --gtest_filter='*E2EBinaryOrchestration*' \
+      >"$OUT/xudu_$backend.log" 2>&1 ||
+      {
+        echo "FAIL: $backend E2E binary orchestration run failed"
+        tail -25 "$OUT/xudu_$backend.log"
+        exit 1
+      }
+    echo "  $backend completed all 7 E2E binary orchestration scenarios"
+  done
+
+  XUDU_GL_TOLERANCE_PCT="${XUDU_GL_TOLERANCE_PCT:-1}"
+  XUDU_VK_TOLERANCE_PCT="${XUDU_VK_TOLERANCE_PCT:-1}"
+
+  OUT="$OUT" BACKENDS="$backends" XUDU_STEPS="$XUDU_STEPS" \
+    XUDU_GL_TOLERANCE_PCT="$XUDU_GL_TOLERANCE_PCT" \
+    XUDU_VK_TOLERANCE_PCT="$XUDU_VK_TOLERANCE_PCT" \
+    python3 - <<'PYEOF'
+import os, sys
+
+out      = os.environ["OUT"]
+backends = os.environ["BACKENDS"].split()
+steps    = os.environ["XUDU_STEPS"].split()
+vk_tol   = float(os.environ["XUDU_VK_TOLERANCE_PCT"]) / 100.0
+gl_tol   = float(os.environ["XUDU_GL_TOLERANCE_PCT"]) / 100.0
+
+def load(path):
+    data = open(path, "rb").read()
+    return data[data.index(b"255\n") + 4:]
+
+failed = False
+for step in steps:
+    ref_path = f"{out}/xudu_opengl/{step}.ppm"
+    if not os.path.exists(ref_path):
+        print(f"FAIL: missing reference screenshot {ref_path}")
+        failed = True
+        continue
+    ref = load(ref_path)
+    if len(set(ref[i:i+3] for i in range(0, len(ref), 3))) < 2:
+        print(f"FAIL: {step} opengl reference frame is a single flat colour")
+        failed = True
+        continue
+
+    for backend in backends:
+        if backend == "opengl":
+            continue
+        oth_path = f"{out}/xudu_{backend}/{step}.ppm"
+        if not os.path.exists(oth_path):
+            print(f"FAIL: missing screenshot {oth_path}")
+            failed = True
+            continue
+        other = load(oth_path)
+        if len(other) != len(ref):
+            print(f"FAIL: {backend} {step} frame is a different size ({len(other)} vs {len(ref)})")
+            failed = True
+            continue
+        diffs = [abs(a - b) for a, b in zip(ref, other)]
+        differing = sum(1 for d in diffs if d)
+        fraction = differing / len(ref)
+        limit = vk_tol if backend == "vulkan" else gl_tol
+        status = "ok" if fraction <= limit else "FAIL"
+        print(f"{status}: {backend} vs opengl for {step}: {differing}/{len(ref)} bytes differ "
+              f"({fraction*100:.4f}%), max delta {max(diffs) if differing else 0}, limit {limit*100:.2f}%")
+        if fraction > limit:
+            failed = True
+
+sys.exit(1 if failed else 0)
+PYEOF
+  echo "all backends agree across all 7 E2E binary orchestration integration scenarios"
+fi
+

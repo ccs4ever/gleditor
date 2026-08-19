@@ -166,14 +166,26 @@ fs::path findXuduBinary() {
   return fs::current_path() / "build" / "xudu";
 }
 
+std::string activeBackend() {
+  const char *env = std::getenv("XUDU_BACKEND");
+  return (env && *env) ? std::string(env) : "opengl";
+}
+
+fs::path getScreenshotDir() {
+  const char *env = std::getenv("XUDU_SCREENSHOT_DIR");
+  if (env && *env) {
+    return fs::path(env);
+  }
+  return fs::current_path() / "build" / "integration_screenshots";
+}
+
 TEST(E2EBinaryOrchestrationTest,
      fullFiveStepOrchestrationWithVisualVerification) {
   const auto xuduBin = findXuduBinary();
   ASSERT_TRUE(fs::exists(xuduBin)) << "xudu binary not found at " << xuduBin;
 
   const auto testRoot = fs::current_path() / "build" / "integration_workspace";
-  const auto screenshotDir =
-      fs::current_path() / "build" / "integration_screenshots";
+  const auto screenshotDir = getScreenshotDir();
 
   fs::remove_all(testRoot);
   fs::create_directories(testRoot);
@@ -251,11 +263,11 @@ TEST(E2EBinaryOrchestrationTest,
     initialStore.save(storeStep1.string());
   }
 
-  std::string cmd1 =
-      xuduBin.string() +
-      " --backend opengl --no-present --profile --fov 7.5 --coarse-below 0" +
-      torrentArgs + " --version-id " + v1.str() + " --alongside " + v2.str() +
-      " --screenshot " + step1Ppm.string() + " " + storeStep1.string();
+  std::string cmd1 = xuduBin.string() + " --backend " + activeBackend() +
+                     " --profile --fov 7.5 --coarse-below 0" + torrentArgs +
+                     " --version-id " + v1.str() + " --alongside " + v2.str() +
+                     " --screenshot " + step1Ppm.string() + " " +
+                     storeStep1.string();
 
   const auto res1 = executeProcess(cmd1);
   EXPECT_EQ(res1.exitCode, 0) << "Step 1 process failed: " << res1.output;
@@ -310,12 +322,11 @@ TEST(E2EBinaryOrchestrationTest,
   const auto step2Ppm    = screenshotDir / "step2_xanadocs_loaded.ppm";
   const auto step2Png    = screenshotDir / "step2_xanadocs_loaded.png";
 
-  std::string cmd2 =
-      xuduBin.string() +
-      " --backend opengl --no-present --profile --fov 7.5 --coarse-below 0" +
-      torrentArgs + " --read " + pubAPath.string() + " --read " +
-      pubBPath.string() + " --screenshot " + step2Ppm.string() + " " +
-      storeReader.string();
+  std::string cmd2 = xuduBin.string() + " --backend " + activeBackend() +
+                     " --profile --fov 7.5 --coarse-below 0" + torrentArgs +
+                     " --read " + pubAPath.string() + " --read " +
+                     pubBPath.string() + " --screenshot " + step2Ppm.string() +
+                     " " + storeReader.string();
 
   const auto res2 = executeProcess(cmd2);
   EXPECT_EQ(res2.exitCode, 0) << "Step 2 process failed: " << res2.output;
@@ -349,12 +360,11 @@ TEST(E2EBinaryOrchestrationTest,
   const auto step3Ppm = screenshotDir / "step3_cross_linking.ppm";
   const auto step3Png = screenshotDir / "step3_cross_linking.png";
 
-  std::string cmd3 =
-      xuduBin.string() +
-      " --backend opengl --no-present --profile --fov 7.5 --coarse-below 0" +
-      torrentArgs + " --version-id " + verLinked.str() + " --alongside " +
-      verB.str() + " --screenshot " + step3Ppm.string() + " " +
-      storeReader.string();
+  std::string cmd3 = xuduBin.string() + " --backend " + activeBackend() +
+                     " --profile --fov 7.5 --coarse-below 0" + torrentArgs +
+                     " --version-id " + verLinked.str() + " --alongside " +
+                     verB.str() + " --screenshot " + step3Ppm.string() + " " +
+                     storeReader.string();
 
   const auto res3 = executeProcess(cmd3);
   EXPECT_EQ(res3.exitCode, 0) << "Step 3 process failed: " << res3.output;
@@ -376,12 +386,11 @@ TEST(E2EBinaryOrchestrationTest,
   const auto step4Ppm = screenshotDir / "step4_transclusion.ppm";
   const auto step4Png = screenshotDir / "step4_transclusion.png";
 
-  std::string cmd4 =
-      xuduBin.string() +
-      " --backend opengl --no-present --profile --fov 7.5 --coarse-below 0" +
-      torrentArgs + " --version-id " + verLinked.str() + " --alongside " +
-      verBTranscluded.str() + " --screenshot " + step4Ppm.string() + " " +
-      storeReader.string();
+  std::string cmd4 = xuduBin.string() + " --backend " + activeBackend() +
+                     " --profile --fov 7.5 --coarse-below 0" + torrentArgs +
+                     " --version-id " + verLinked.str() + " --alongside " +
+                     verBTranscluded.str() + " --screenshot " +
+                     step4Ppm.string() + " " + storeReader.string();
 
   const auto res4 = executeProcess(cmd4);
   EXPECT_EQ(res4.exitCode, 0) << "Step 4 process failed: " << res4.output;
@@ -470,12 +479,12 @@ TEST(E2EBinaryOrchestrationTest,
   const auto step5Ppm = screenshotDir / "step5_link_packages_applied.ppm";
   const auto step5Png = screenshotDir / "step5_link_packages_applied.png";
 
-  std::string cmd5 =
-      xuduBin.string() +
-      " --backend opengl --no-present --profile --fov 15 --coarse-below 0" +
-      torrentArgs + " --read " + pubAPath.string() + " --read " +
-      pubBPath.string() + " --read " + pubCPath.string() + " --screenshot " +
-      step5Ppm.string() + " " + storeReader.string();
+  std::string cmd5 = xuduBin.string() + " --backend " + activeBackend() +
+                     " --profile --fov 15 --coarse-below 0" + torrentArgs +
+                     " --read " + pubAPath.string() + " --read " +
+                     pubBPath.string() + " --read " + pubCPath.string() +
+                     " --screenshot " + step5Ppm.string() + " " +
+                     storeReader.string();
 
   const auto res5 = executeProcess(cmd5);
   EXPECT_EQ(res5.exitCode, 0) << "Step 5 process failed: " << res5.output;
@@ -506,8 +515,7 @@ TEST(E2EBinaryOrchestrationTest,
 
   const auto testRoot =
       fs::current_path() / "build" / "integration_workspace_fullpage";
-  const auto screenshotDir =
-      fs::current_path() / "build" / "integration_screenshots";
+  const auto screenshotDir = getScreenshotDir();
 
   fs::remove_all(testRoot);
   fs::create_directories(testRoot);
@@ -675,12 +683,11 @@ TEST(E2EBinaryOrchestrationTest,
   const auto step6Ppm = screenshotDir / "step6_full_page_multi_topology.ppm";
   const auto step6Png = screenshotDir / "step6_full_page_multi_topology.png";
 
-  std::string cmd =
-      xuduBin.string() +
-      " --backend opengl --no-present --profile --fov 15 --coarse-below 0" +
-      torrentArgs + " --read " + pubAPath.string() + " --read " +
-      pubBPath.string() + " --screenshot " + step6Ppm.string() + " " +
-      storePath.string();
+  std::string cmd = xuduBin.string() + " --backend " + activeBackend() +
+                    " --profile --fov 15 --coarse-below 0" + torrentArgs +
+                    " --read " + pubAPath.string() + " --read " +
+                    pubBPath.string() + " --screenshot " + step6Ppm.string() +
+                    " " + storePath.string();
 
   const auto res = executeProcess(cmd);
   EXPECT_EQ(res.exitCode, 0) << "Step 6 failed: " << res.output;
@@ -694,15 +701,15 @@ TEST(E2EBinaryOrchestrationTest,
             << " colors)\n";
 }
 
-TEST(E2EBinaryOrchestrationTest,
-     threeDocumentNonAdjacentBypassRoutingBinaryOrchestrationWithVisualVerification) {
+TEST(
+    E2EBinaryOrchestrationTest,
+    threeDocumentNonAdjacentBypassRoutingBinaryOrchestrationWithVisualVerification) {
   const auto xuduBin = findXuduBinary();
   ASSERT_TRUE(fs::exists(xuduBin)) << "xudu binary not found at " << xuduBin;
 
   const auto testRoot =
       fs::current_path() / "build" / "integration_workspace_3doc";
-  const auto screenshotDir =
-      fs::current_path() / "build" / "integration_screenshots";
+  const auto screenshotDir = getScreenshotDir();
 
   fs::remove_all(testRoot);
   fs::create_directories(testRoot);
@@ -847,12 +854,12 @@ TEST(E2EBinaryOrchestrationTest,
   const auto step7Ppm = screenshotDir / "step7_three_doc_bypass_routing.ppm";
   const auto step7Png = screenshotDir / "step7_three_doc_bypass_routing.png";
 
-  std::string cmd =
-      xuduBin.string() +
-      " --backend opengl --no-present --profile --fov 18 --coarse-below 0" +
-      torrentArgs + " --read " + pub1Path.string() + " --read " +
-      pub2Path.string() + " --read " + pub3Path.string() + " --screenshot " +
-      step7Ppm.string() + " " + storePath.string();
+  std::string cmd = xuduBin.string() + " --backend " + activeBackend() +
+                    " --profile --fov 18 --coarse-below 0" + torrentArgs +
+                    " --read " + pub1Path.string() + " --read " +
+                    pub2Path.string() + " --read " + pub3Path.string() +
+                    " --screenshot " + step7Ppm.string() + " " +
+                    storePath.string();
 
   const auto res = executeProcess(cmd);
   EXPECT_EQ(res.exitCode, 0) << "Step 7 failed: " << res.output;
