@@ -240,4 +240,32 @@ TEST(BinaryOpsTest, autoDetectionHandlesBothBinaryAndText) {
   }
 }
 
+TEST(BinaryOpsTest, versioningAndDetection) {
+  using xudu::detectOpsSpoolVersion;
+  using xudu::OpsSpoolVersion;
+  using xudu::opsSpoolVersionName;
+
+  EXPECT_STREQ(opsSpoolVersionName(OpsSpoolVersion::StandardOsmicText),
+               "OSMIC text (v0)");
+  EXPECT_STREQ(opsSpoolVersionName(OpsSpoolVersion::CompactBinaryV1),
+               "Compact binary (v1)");
+
+  // Standard OSMIC text is Version 0
+  std::stringstream textStream("1 insert 0 5 0 0 5 0 0 0 0 0\n");
+  EXPECT_EQ(detectOpsSpoolVersion(textStream),
+            OpsSpoolVersion::StandardOsmicText);
+
+  // Binary stream is Version 1
+  std::stringstream binStream("\x7fXOP\x01\x00\x00\x00\x00");
+  EXPECT_EQ(detectOpsSpoolVersion(binStream), OpsSpoolVersion::CompactBinaryV1);
+
+  // Truncated magic header throws
+  std::stringstream truncMagic("\x7fXOP");
+  EXPECT_THROW(detectOpsSpoolVersion(truncMagic), std::runtime_error);
+
+  // Unsupported future binary version throws
+  std::stringstream futureVer("\x7fXOP\x02");
+  EXPECT_THROW(detectOpsSpoolVersion(futureVer), std::runtime_error);
+}
+
 } // namespace

@@ -380,17 +380,48 @@ void readOsmicTextOpsSpool(std::istream &in,
   }
 }
 
+const char *opsSpoolVersionName(const OpsSpoolVersion version) {
+  switch (version) {
+  case OpsSpoolVersion::StandardOsmicText:
+    return "OSMIC text (v0)";
+  case OpsSpoolVersion::CompactBinaryV1:
+    return "Compact binary (v1)";
+  }
+  return "unknown";
+}
+
+OpsSpoolVersion detectOpsSpoolVersion(std::istream &in) {
+  std::string prefix(binaryOpsMagicPrefix.size(), '\0');
+  in.read(prefix.data(),
+          static_cast<std::streamsize>(binaryOpsMagicPrefix.size()));
+  if (in.gcount() ==
+          static_cast<std::streamsize>(binaryOpsMagicPrefix.size()) &&
+      prefix == binaryOpsMagicPrefix) {
+    const int ver = in.get();
+    if (ver == std::char_traits<char>::eof()) {
+      throw std::runtime_error(
+          "truncated binary ops spool header: missing version");
+    }
+    if (ver == static_cast<int>(OpsSpoolVersion::CompactBinaryV1)) {
+      return OpsSpoolVersion::CompactBinaryV1;
+    }
+    throw std::runtime_error("unsupported binary ops spool version: " +
+                             std::to_string(ver));
+  }
+  in.clear();
+  in.seekg(0, std::ios::beg);
+  return OpsSpoolVersion::StandardOsmicText;
+}
+
 void readOpsSpool(std::istream &in, std::map<MicroversionId, Op> &ops) {
-  std::string header;
-  header.resize(binaryOpsMagic.size());
-  in.read(header.data(), static_cast<std::streamsize>(binaryOpsMagic.size()));
-  if (in.gcount() == static_cast<std::streamsize>(binaryOpsMagic.size()) &&
-      header == binaryOpsMagic) {
+  const auto version = detectOpsSpoolVersion(in);
+  switch (version) {
+  case OpsSpoolVersion::CompactBinaryV1:
     readBinaryOpsSpool(in, ops);
-  } else {
-    in.clear();
-    in.seekg(0, std::ios::beg);
+    break;
+  case OpsSpoolVersion::StandardOsmicText:
     readOsmicTextOpsSpool(in, ops);
+    break;
   }
 }
 
