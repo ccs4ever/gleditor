@@ -220,6 +220,10 @@ TEST(E2EBinaryOrchestrationTest, fullFiveStepOrchestrationWithVisualVerification
     out << source3Text;
   }
 
+  const std::string torrentArgs = " --torrent " + s1TorrentPath.string() +
+                                  " --torrent " + s2TorrentPath.string() +
+                                  " --torrent " + s3TorrentPath.string();
+
   // =========================================================================
   // STEP 1: Loading 2 Source Torrents into Xudu Store
   // =========================================================================
@@ -227,12 +231,24 @@ TEST(E2EBinaryOrchestrationTest, fullFiveStepOrchestrationWithVisualVerification
   const auto step1Ppm = screenshotDir / "step1_source_torrents.ppm";
   const auto step1Png = screenshotDir / "step1_source_torrents.png";
 
+  MicroversionId v1;
+  MicroversionId v2;
+  {
+    Store initialStore;
+    const auto s1Hash = InfoHash::fromHex(xudu_test::singleFileHash);
+    const auto s1Scroll = Scroll::ofTorrentFile(s1Hash, 0, "fox.txt", 0, 62);
+    v1 = initialStore.transcludeExternal(MicroversionId{}, 0, s1Scroll, 0, 62);
+
+    const auto s2Hash = InfoHash::fromHex(xudu_test::multiFileHash);
+    const auto s2Scroll = Scroll::ofTorrentFile(s2Hash, 0, "one.txt", 0, 27);
+    v2 = initialStore.transcludeExternal(MicroversionId{}, 0, s2Scroll, 0, 27);
+    initialStore.save(storeStep1.string());
+  }
+
   std::string cmd1 = xuduBin.string() +
-                     " --backend opengl --no-present --profile" +
-                     " --torrent " + s1TorrentPath.string() +
-                     " --quote 0,0,62" +
-                     " --torrent " + s2TorrentPath.string() +
-                     " --quote 0,0,27" +
+                     " --backend opengl --no-present --profile --fov 7.5 --coarse-below 0" +
+                     torrentArgs +
+                     " --version-id " + v1.str() + " --alongside " + v2.str() +
                      " --screenshot " + step1Ppm.string() +
                      " " + storeStep1.string();
 
@@ -284,12 +300,8 @@ TEST(E2EBinaryOrchestrationTest, fullFiveStepOrchestrationWithVisualVerification
   const auto step2Ppm = screenshotDir / "step2_xanadocs_loaded.ppm";
   const auto step2Png = screenshotDir / "step2_xanadocs_loaded.png";
 
-  const std::string torrentArgs = " --torrent " + s1TorrentPath.string() +
-                                  " --torrent " + s2TorrentPath.string() +
-                                  " --torrent " + s3TorrentPath.string();
-
   std::string cmd2 = xuduBin.string() +
-                     " --backend opengl --no-present --profile" +
+                     " --backend opengl --no-present --profile --fov 7.5 --coarse-below 0" +
                      torrentArgs +
                      " --read " + pubAPath.string() +
                      " --read " + pubBPath.string() +
@@ -327,7 +339,7 @@ TEST(E2EBinaryOrchestrationTest, fullFiveStepOrchestrationWithVisualVerification
   const auto step3Png = screenshotDir / "step3_cross_linking.png";
 
   std::string cmd3 = xuduBin.string() +
-                     " --backend opengl --no-present --profile" +
+                     " --backend opengl --no-present --profile --fov 7.5 --coarse-below 0" +
                      torrentArgs +
                      " --version-id " + verLinked.str() +
                      " --alongside " + verB.str() +
@@ -354,7 +366,7 @@ TEST(E2EBinaryOrchestrationTest, fullFiveStepOrchestrationWithVisualVerification
   const auto step4Png = screenshotDir / "step4_transclusion.png";
 
   std::string cmd4 = xuduBin.string() +
-                     " --backend opengl --no-present --profile" +
+                     " --backend opengl --no-present --profile --fov 7.5 --coarse-below 0" +
                      torrentArgs +
                      " --version-id " + verLinked.str() +
                      " --alongside " + verBTranscluded.str() +
@@ -375,6 +387,21 @@ TEST(E2EBinaryOrchestrationTest, fullFiveStepOrchestrationWithVisualVerification
   // =========================================================================
   const auto curatorKeys = createMutableKeys();
 
+  // Author XanaDoc C (Epilogue) quoting Source 3
+  const auto authorC = createMutableKeys();
+  Store storeC;
+  const auto s3Hash = InfoHash::fromHex(source3Hash);
+  const auto s3Scroll = Scroll::ofTorrentFile(s3Hash, 0, "epilogue.txt", 0, 84);
+  const auto vC1 = storeC.transcludeExternal(MicroversionId{}, 0, s3Scroll, 0, 84);
+  auto pubC = publish(storeC, vC1, authorC, "xanadoc_c", "Epilogue on Universal Xanadu Wisdom", 1, 1700000250, nullptr);
+  pubC.signature = signMutableItem(publicationSigningBuffer(pubC), authorC);
+
+  const auto pubCPath = testRoot / "xanadoc_c.manifest";
+  {
+    std::ofstream out(pubCPath, std::ios::binary);
+    out << encodePublication(pubC);
+  }
+
   // LinkPackage 1 (Curated): Commentary links between XanaDoc A and B
   std::vector<GlobalLink> pkg1Links;
   GlobalLink l1;
@@ -392,9 +419,6 @@ TEST(E2EBinaryOrchestrationTest, fullFiveStepOrchestrationWithVisualVerification
                                           1, 1700000200, std::move(pkg1Links), std::move(pkg1Scrolls));
 
   // LinkPackage 2 (External Materializing): References 3rd Source Torrent
-  const auto s3Hash = InfoHash::fromHex(source3Hash);
-  const auto s3Scroll = Scroll::ofTorrentFile(s3Hash, 0, "epilogue.txt", 0, 84);
-
   std::vector<GlobalLink> pkg2Links;
   GlobalLink l2;
   l2.type = LinkType::Quotation;
@@ -419,14 +443,19 @@ TEST(E2EBinaryOrchestrationTest, fullFiveStepOrchestrationWithVisualVerification
   EXPECT_GT(adoptRes2.scrollsAdded, 0U) << "Source 3 scroll failed to materialize";
   activeReaderStore.save(storeReader.string());
 
+  // Also read pubC into activeReaderStore to create its microversion in the store
+  const auto verC = activeReaderStore.transcludeExternal(MicroversionId{}, 0, s3Scroll, 0, 84);
+  activeReaderStore.save(storeReader.string());
+
   const auto step5Ppm = screenshotDir / "step5_link_packages_applied.ppm";
   const auto step5Png = screenshotDir / "step5_link_packages_applied.png";
 
   std::string cmd5 = xuduBin.string() +
-                     " --backend opengl --no-present --profile" +
+                     " --backend opengl --no-present --profile --fov 15 --coarse-below 0" +
                      torrentArgs +
-                     " --version-id " + verLinked.str() +
-                     " --alongside " + verBTranscluded.str() +
+                     " --read " + pubAPath.string() +
+                     " --read " + pubBPath.string() +
+                     " --read " + pubCPath.string() +
                      " --screenshot " + step5Ppm.string() +
                      " " + storeReader.string();
 
