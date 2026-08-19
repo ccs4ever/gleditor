@@ -344,10 +344,10 @@ void Store::save(const std::string &directory) const {
           << (link.owner.empty() ? "-" : link.owner) << ' ' << link.left.size()
           << ' ' << link.right.size();
       for (const auto &span : link.left) {
-        out << ' ' << span.start << ' ' << span.length;
+        out << ' ' << span.scroll << ' ' << span.start << ' ' << span.length;
       }
       for (const auto &span : link.right) {
-        out << ' ' << span.start << ' ' << span.length;
+        out << ' ' << span.scroll << ' ' << span.start << ' ' << span.length;
       }
       out << '\n';
     }
@@ -389,10 +389,10 @@ void Store::saveOsmicText(const std::string &directory) const {
           << (link.owner.empty() ? "-" : link.owner) << ' ' << link.left.size()
           << ' ' << link.right.size();
       for (const auto &span : link.left) {
-        out << ' ' << span.start << ' ' << span.length;
+        out << ' ' << span.scroll << ' ' << span.start << ' ' << span.length;
       }
       for (const auto &span : link.right) {
-        out << ' ' << span.start << ' ' << span.length;
+        out << ' ' << span.scroll << ' ' << span.start << ' ' << span.length;
       }
       out << '\n';
     }
@@ -530,7 +530,7 @@ void Store::load(const std::string &directory) {
                                        std::vector<PrimediaSpan> &into) {
         for (std::size_t i = 0; i < count; i++) {
           PrimediaSpan span;
-          fields >> span.start >> span.length;
+          fields >> span.scroll >> span.start >> span.length;
           into.push_back(span);
         }
       };

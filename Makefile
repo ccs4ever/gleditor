@@ -660,10 +660,14 @@ test: $(OBJDIR)/gleditor_test $(OBJDIR)/xudu_test
 
 # Everything, slow suites included. What the pull request checks run, and what
 # to run here before pushing.
-.PHONY: test/all
+.PHONY: test/all test/integration test/e2e-orchestration
 test/all: $(OBJDIR)/gleditor_test $(OBJDIR)/xudu_test
 	$(OBJDIR)/gleditor_test
 	$(OBJDIR)/xudu_test
+
+test/integration: test/e2e-orchestration
+test/e2e-orchestration: $(OBJDIR)/xudu $(OBJDIR)/xudu_test
+	tools/xudu-e2e-orchestration.sh
 
 # produces gleditor_test.prof (a human-readable code coverage report) and
 # coverage.lcov (a coverage report in lcov format) suitable for feeding into other tools like NeoVim
@@ -681,6 +685,31 @@ profile: gleditor_test
 		-show-line-counts-or-regions -show-branches=count -show-expansions > gleditor_test.prof; \
 	llvm-cov export $(OBJDIR)/gleditor_test --format=lcov --instr-profile=$${data} > coverage.lcov; \
 	$(RM) -f $${raw} $${data};
+
+profile/xudu: CXXFLAGS += $(PROFILE_OPTS)
+profile/xudu: LDFLAGS += $(PROFILE_OPTS)
+profile/xudu: xudu_test
+	set -e; \
+	raw=xudu_test.profraw; data=xudu_test.profdata; \
+	trap "$(RM) -f $${raw} $${data}" EXIT HUP KILL TERM; \
+	LLVM_PROFILE_FILE=$${raw} $(OBJDIR)/xudu_test 2>&1 >/dev/null; \
+	llvm-profdata merge -sparse $${raw} -o $${data}; \
+	llvm-cov show $(OBJDIR)/xudu_test -instr-profile=$${data} \
+		-show-line-counts-or-regions -show-branches=count -show-expansions > xudu_test.prof; \
+	llvm-cov export $(OBJDIR)/xudu_test --format=lcov --instr-profile=$${data} > xudu_coverage.lcov; \
+	$(RM) -f $${raw} $${data};
+
+profile/all: CXXFLAGS += $(PROFILE_OPTS)
+profile/all: LDFLAGS += $(PROFILE_OPTS)
+profile/all: gleditor_test xudu_test
+	set -e; \
+	raw_gl=gleditor_test.profraw; raw_xu=xudu_test.profraw; data=all.profdata; \
+	trap "$(RM) -f $${raw_gl} $${raw_xu} $${data}" EXIT HUP KILL TERM; \
+	LLVM_PROFILE_FILE=$${raw_gl} $(OBJDIR)/gleditor_test 2>&1 >/dev/null; \
+	LLVM_PROFILE_FILE=$${raw_xu} $(OBJDIR)/xudu_test 2>&1 >/dev/null; \
+	llvm-profdata merge -sparse $${raw_gl} $${raw_xu} -o $${data}; \
+	llvm-cov report $(OBJDIR)/xudu_test -instr-profile=$${data}; \
+	$(RM) -f $${raw_gl} $${raw_xu} $${data};
 
 profile/main: CXXFLAGS += $(PROFILE_OPTS)
 profile/main: LDFLAGS += $(PROFILE_OPTS)
