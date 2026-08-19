@@ -38,7 +38,7 @@ for backend in opengl vulkan; do
       if [ -n "$ttfp" ] && [ -n "$complete" ]; then
         ttfp_list+=("$ttfp")
         complete_list+=("$complete")
-        echo "TTFP: ${ttfp} ms, Complete: $(python3 -c "print(f'{float($complete)/1000.0:.2f}')") s"
+        echo "TTFP: ${ttfp} ms, Complete: $(python3 -c "print(f'{float($complete)/1000.0:.2f}')") s (${pages:-unknown} pages)"
       else
         echo "FAILED"
       fi
@@ -51,7 +51,7 @@ for backend in opengl vulkan; do
     mb_total=$(python3 -c "print(f'{4.4 * $count:.1f} MB')")
     mb_per_sec=$(python3 -c "import sys; sec=float(sys.argv[1])/1000.0; mb=4.4 * $count; print(f'{mb/sec:.2f} MB/s')" "$complete_avg_ms")
 
-    echo "  => Average: TTFP ${ttfp_avg} ms | Complete $complete_avg_s | Throughput $mb_per_sec"
+    echo "  => Average ($mb_total): TTFP ${ttfp_avg} ms | Complete $complete_avg_s | Throughput $mb_per_sec"
     echo ""
   done
 done
