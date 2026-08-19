@@ -353,3 +353,31 @@ TEST_F(StoreRoundTripTest, aQuotationIntoASecondDocumentSurvivesSaving) {
 }
 
 } // namespace
+
+TEST_F(StoreRoundTripTest, osmicTextFormatCanBeGeneratedOnDemand) {
+  Store store;
+  const auto one = store.insert(MicroversionId{}, 0, "Hello");
+  const auto two = store.insert(one, 5, " World");
+  const auto del = store.erase(two, 5, 6);
+
+  const std::string text = store.exportOsmicText();
+  EXPECT_FALSE(text.empty());
+  EXPECT_NE(text.find("1 insert 0 0 0 0 5 0 0 0 0 0"), std::string::npos);
+  EXPECT_NE(text.find("2 insert 5 0 0 5 6 0 0 0 0 0"), std::string::npos);
+  EXPECT_NE(text.find("3 delete 5 6 0 0 0 0 0 0 0 0"), std::string::npos);
+}
+
+TEST_F(StoreRoundTripTest, saveOsmicTextSurvivesBeingLoadedBack) {
+  std::filesystem::create_directories(dir);
+  {
+    Store store;
+    const auto one = store.insert(MicroversionId{}, 0, "legacy osmic");
+    store.insert(one, 12, " test");
+    store.saveOsmicText(dir.string());
+  }
+
+  Store reloaded;
+  reloaded.load(dir.string());
+  EXPECT_EQ(reloaded.opCount(), 2U);
+  EXPECT_EQ(reloaded.textOf(MicroversionId::parse("2")), "legacy osmic test");
+}
