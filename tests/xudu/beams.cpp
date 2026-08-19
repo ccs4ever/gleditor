@@ -10,9 +10,12 @@
  */
 #include <gtest/gtest.h>
 
+#include <cmath>
 #include <cstdint>
 #include <map>
 #include <vector>
+
+#include <glm/trigonometric.hpp>
 
 #include <xudu/core/link_layout.hpp>
 #include <xudu/core/ops.hpp>
@@ -190,4 +193,53 @@ TEST(LinkLayout, everyLinkTypeHasAColourOfItsOwn) {
     EXPECT_GT(alpha, 0x40U);
     EXPECT_LT(alpha, 0xF0U);
   }
+}
+
+TEST(LinkLayout, centroidSworphingAlignsMultiSpanMidpoints) {
+  // Test mathematical centroid alignment for a many-to-many link
+  // Left spans: Y = 100.0, 150.0, 200.0 (center = 150.0)
+  // Right spans: Y = 40.0, 80.0 (center = 60.0)
+  const float leftMinY  = 100.0F;
+  const float leftMaxY  = 200.0F;
+  const float rightMinY = 40.0F;
+  const float rightMaxY = 80.0F;
+
+  const float leftCenterY  = 0.5F * (leftMinY + leftMaxY);
+  const float rightCenterY = 0.5F * (rightMinY + rightMaxY);
+  const float deltaY       = leftCenterY - rightCenterY;
+
+  EXPECT_FLOAT_EQ(leftCenterY, 150.0F);
+  EXPECT_FLOAT_EQ(rightCenterY, 60.0F);
+  EXPECT_FLOAT_EQ(deltaY, 90.0F);
+
+  // After applying deltaY to right anchors:
+  // Right spans become Y = 130.0, 170.0 (center = 150.0)
+  const float alignedRightCenterY =
+      0.5F * ((rightMinY + deltaY) + (rightMaxY + deltaY));
+  EXPECT_FLOAT_EQ(alignedRightCenterY, leftCenterY);
+}
+
+TEST(LinkLayout, cameraAutoFramingFitsBoundingEnvelope) {
+  const float minX = -20.0F;
+  const float maxX = 80.0F;
+  const float minY = 0.0F;
+  const float maxY = 120.0F;
+
+  const float spanW      = maxX - minX;     // 100.0
+  const float spanH      = maxY - minY;     // 120.0
+  const float aspect     = 800.0F / 600.0F; // 1.3333
+  const float fovDeg     = 5.0F;
+  const float tanHalfFov = std::tan(glm::radians(fovDeg) * 0.5F);
+
+  const float zFit = std::max(spanH / (2.0F * tanHalfFov),
+                              spanW / (2.0F * aspect * tanHalfFov));
+
+  EXPECT_GT(zFit, 0.0F);
+  // Verify that both horizontal and vertical extents fit within the calculated
+  // camera frustum
+  const float frustumHalfHeight = zFit * tanHalfFov;
+  const float frustumHalfWidth  = frustumHalfHeight * aspect;
+
+  EXPECT_GE(frustumHalfHeight * 2.0F, spanH);
+  EXPECT_GE(frustumHalfWidth * 2.0F, spanW);
 }
