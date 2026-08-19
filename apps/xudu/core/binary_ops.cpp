@@ -70,8 +70,11 @@ bool readMicroversionId(std::istream &in, MicroversionId &id) {
   if (!readVarint(in, count)) {
     return false;
   }
+  if (count > 4096) {
+    return false;
+  }
   std::vector<MicroversionId::Segment> segs;
-  segs.reserve(count);
+  segs.reserve(std::min<std::size_t>(static_cast<std::size_t>(count), 64));
   for (std::uint64_t i = 0; i < count; i++) {
     const int c = in.get();
     if (c == std::char_traits<char>::eof()) {
