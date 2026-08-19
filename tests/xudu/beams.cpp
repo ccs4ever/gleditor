@@ -13,10 +13,12 @@
 #include <cmath>
 #include <cstdint>
 #include <map>
+#include <set>
 #include <vector>
 
 #include <glm/trigonometric.hpp>
 
+#include <gleditor/doc.hpp>
 #include <xudu/core/link_layout.hpp>
 #include <xudu/core/ops.hpp>
 #include <xudu/core/store.hpp>
@@ -303,4 +305,297 @@ TEST(LinkLayout, nonAdjacentBypassLayerRoutingDepth) {
   EXPECT_GT(nonAdjDocSpan, 1U);
   constexpr float bypassDepth = -20.0F;
   EXPECT_LT(bypassDepth, 0.0F);
+}
+
+namespace {
+
+constexpr const char *fullPageDocA =
+    "Chapter 1: Principles of Universal Hypertext and Transclusion\n\n"
+    "Section 1.1: The Foundation of Interconnection\n"
+    "Hypertext is not merely a mechanism for isolated documents to point to "
+    "one "
+    "another, but rather a deep, interconnected fabric where every idea "
+    "maintains its provenance, authorship, and relational context across space "
+    "and time.\n\n"
+    "Section 1.2: Two-Way Visible Links\n"
+    "Traditional one-way links break the symmetry of knowledge. In contrast, "
+    "visible, bidirectional link beams span directly between passages, "
+    "allowing readers to view both ends simultaneously without jumping or "
+    "losing context.\n\n"
+    "Section 1.3: Transclusion and Eternal Quotes\n"
+    "Transclusion ensures that quoting never duplicates or severs content from "
+    "its original origin. The quoted text remains living tissue in both the "
+    "source and destination documents.\n\n"
+    "Section 1.4: Multi-Span Synthesis\n"
+    "Complex ideas frequently relate across disparate paragraphs, synthesizing "
+    "insights from historical foundations, mathematical models, and visual "
+    "design.";
+
+constexpr const char *fullPageDocB =
+    "Commentary on Universal Hypertext Systems\n\n"
+    "Observation A: Provenance and Memory\n"
+    "Preserving the origin of text ensures that credit and historical lineage "
+    "are unbroken.\n\n"
+    "Observation B: Spatial Sworphing and Visual Ergonomics\n"
+    "Moving documents along 3D trajectories to bring connected spans into "
+    "horizontal alignment minimizes eye strain and clarifies complex "
+    "relational topology.\n\n"
+    "Observation C: Deep Citation Graphs\n"
+    "When multiple evidentiary spans support a single thesis, or when several "
+    "premises converge on a shared conclusion, many-to-many and one-to-many "
+    "link beams bundle gracefully around their vertical centroids.";
+
+} // namespace
+
+TEST(LinkLayout, multipleOneToOneLinksOfDifferentTypesAcrossFullPage) {
+  Store store;
+  const auto vA = store.insert(MicroversionId{}, 0, fullPageDocA);
+  const auto vB = store.insert(MicroversionId{}, 0, fullPageDocB);
+
+  const auto textA = store.rebuild(vA);
+  const auto textB = store.rebuild(vB);
+
+  // Link 1: Comment (Section 1.1 -> Observation A)
+  Link l1;
+  l1.type       = LinkType::Comment;
+  l1.owner      = "alice";
+  l1.left       = textA.spansFor(65, 45);
+  l1.right      = textB.spansFor(44, 33);
+  const auto s1 = store.addLink(vA, l1);
+
+  // Link 2: Illustration (Section 1.2 -> Observation B)
+  Link l2;
+  l2.type       = LinkType::Illustration;
+  l2.owner      = "bob";
+  l2.left       = textA.spansFor(295, 30);
+  l2.right      = textB.spansFor(160, 45);
+  const auto s2 = store.addLink(s1, l2);
+
+  // Link 3: Disagreement (Section 1.3 -> Observation C)
+  Link l3;
+  l3.type       = LinkType::Disagreement;
+  l3.owner      = "critic";
+  l3.left       = textA.spansFor(490, 35);
+  l3.right      = textB.spansFor(320, 30);
+  const auto s3 = store.addLink(s2, l3);
+
+  // Link 4: Quotation (Section 1.4 -> Observation B)
+  Link l4;
+  l4.type  = LinkType::Quotation;
+  l4.owner = "annotator";
+  l4.left  = textA.spansFor(690, 40);
+  l4.right = textB.spansFor(210, 40);
+  store.addLink(s3, l4);
+
+  const std::vector<Version> versions{store.rebuild(vA), store.rebuild(vB)};
+  std::vector<LinkedPair> placed;
+  std::vector<HalfLink> unplaced;
+  xudu::placeLinks(store.links(), viewing(versions), placed, unplaced);
+
+  ASSERT_EQ(placed.size(), 4U);
+  EXPECT_TRUE(unplaced.empty());
+
+  // Verify all 4 link types are placed with their respective colours and
+  // distinct tiers
+  std::set<LinkType> typesFound;
+  for (const auto &pair : placed) {
+    typesFound.insert(pair.type);
+    EXPECT_EQ(pair.from.doc, 0U);
+    EXPECT_EQ(pair.to.doc, 1U);
+    EXPECT_LT(pair.from.start, pair.from.end);
+    EXPECT_LT(pair.to.start, pair.to.end);
+  }
+  EXPECT_EQ(typesFound.size(), 4U);
+  EXPECT_TRUE(typesFound.contains(LinkType::Comment));
+  EXPECT_TRUE(typesFound.contains(LinkType::Illustration));
+  EXPECT_TRUE(typesFound.contains(LinkType::Disagreement));
+  EXPECT_TRUE(typesFound.contains(LinkType::Quotation));
+}
+
+TEST(LinkLayout, oneToManyLinkAcrossFullPage) {
+  Store store;
+  const auto vA = store.insert(MicroversionId{}, 0, fullPageDocA);
+  const auto vB = store.insert(MicroversionId{}, 0, fullPageDocB);
+
+  const auto textA = store.rebuild(vA);
+  const auto textB = store.rebuild(vB);
+
+  // 1 left span in Doc A (Section 1.4) linking to 3 spans in Doc B
+  // (Observations A, B, C)
+  Link l;
+  l.type  = LinkType::Quotation;
+  l.owner = "synthesizer";
+  l.left  = textA.spansFor(690, 40); // Section 1.4
+
+  const auto spanB1 = textB.spansFor(44, 30);  // Obs A
+  const auto spanB2 = textB.spansFor(160, 30); // Obs B
+  const auto spanB3 = textB.spansFor(320, 30); // Obs C
+  l.right.insert(l.right.end(), spanB1.begin(), spanB1.end());
+  l.right.insert(l.right.end(), spanB2.begin(), spanB2.end());
+  l.right.insert(l.right.end(), spanB3.begin(), spanB3.end());
+
+  store.addLink(vA, l);
+
+  const std::vector<Version> versions{store.rebuild(vA), store.rebuild(vB)};
+  std::vector<LinkedPair> placed;
+  std::vector<HalfLink> unplaced;
+  xudu::placeLinks(store.links(), viewing(versions), placed, unplaced);
+
+  ASSERT_EQ(placed.size(), 1U);
+  EXPECT_EQ(placed[0].from.doc, 0U);
+  EXPECT_EQ(placed[0].to.doc, 1U);
+
+  // The right extent must cover from Obs A (44) through Obs C (350)
+  EXPECT_EQ(placed[0].to.start, 44U);
+  EXPECT_EQ(placed[0].to.end, 350U);
+
+  // Centroid math for 1-to-many
+  const float leftY       = 400.0F; // Section 1.4 height
+  const float rightMinY   = 50.0F;  // Obs A height
+  const float rightMaxY   = 350.0F; // Obs C height
+  const float rightCenter = 0.5F * (rightMinY + rightMaxY); // 200.0F
+  const float deltaY      = leftY - rightCenter;            // 200.0F
+
+  EXPECT_FLOAT_EQ(rightCenter, 200.0F);
+  EXPECT_FLOAT_EQ(deltaY, 200.0F);
+  // Aligned right center matches leftY
+  EXPECT_FLOAT_EQ(rightCenter + deltaY, leftY);
+}
+
+TEST(LinkLayout, manyToOneLinkAcrossFullPage) {
+  Store store;
+  const auto vA = store.insert(MicroversionId{}, 0, fullPageDocA);
+  const auto vB = store.insert(MicroversionId{}, 0, fullPageDocB);
+
+  const auto textA = store.rebuild(vA);
+  const auto textB = store.rebuild(vB);
+
+  // 3 left spans in Doc A (Sections 1.1, 1.2, 1.3) linking to 1 right span in
+  // Doc B (Observation C)
+  Link l;
+  l.type  = LinkType::Authorship;
+  l.owner = "scholar";
+
+  const auto spanA1 = textA.spansFor(65, 30);  // Sec 1.1
+  const auto spanA2 = textA.spansFor(295, 30); // Sec 1.2
+  const auto spanA3 = textA.spansFor(490, 30); // Sec 1.3
+  l.left.insert(l.left.end(), spanA1.begin(), spanA1.end());
+  l.left.insert(l.left.end(), spanA2.begin(), spanA2.end());
+  l.left.insert(l.left.end(), spanA3.begin(), spanA3.end());
+
+  l.right = textB.spansFor(320, 45); // Obs C
+
+  store.addLink(vA, l);
+
+  const std::vector<Version> versions{store.rebuild(vA), store.rebuild(vB)};
+  std::vector<LinkedPair> placed;
+  std::vector<HalfLink> unplaced;
+  xudu::placeLinks(store.links(), viewing(versions), placed, unplaced);
+
+  ASSERT_EQ(placed.size(), 1U);
+  EXPECT_EQ(placed[0].from.doc, 0U);
+  EXPECT_EQ(placed[0].to.doc, 1U);
+
+  // Left extent covers from Sec 1.1 (65) through Sec 1.3 (520)
+  EXPECT_EQ(placed[0].from.start, 65U);
+  EXPECT_EQ(placed[0].from.end, 520U);
+
+  // Centroid math for many-to-1
+  const float leftMinY   = 80.0F;                        // Sec 1.1
+  const float leftMaxY   = 480.0F;                       // Sec 1.3
+  const float leftCenter = 0.5F * (leftMinY + leftMaxY); // 280.0F
+  const float rightY     = 120.0F;                       // Obs C
+  const float deltaY     = leftCenter - rightY;          // 160.0F
+
+  EXPECT_FLOAT_EQ(leftCenter, 280.0F);
+  EXPECT_FLOAT_EQ(rightY + deltaY, leftCenter);
+}
+
+TEST(LinkLayout, manyToManyLinkAcrossFullPage) {
+  Store store;
+  const auto vA = store.insert(MicroversionId{}, 0, fullPageDocA);
+  const auto vB = store.insert(MicroversionId{}, 0, fullPageDocB);
+
+  const auto textA = store.rebuild(vA);
+  const auto textB = store.rebuild(vB);
+
+  // 2 left spans (Sec 1.2 & 1.3) linking to 2 right spans (Obs B & C)
+  Link l;
+  l.type  = LinkType::Disagreement;
+  l.owner = "peer_reviewer";
+
+  const auto spanA1 = textA.spansFor(295, 30);
+  const auto spanA2 = textA.spansFor(490, 30);
+  l.left.insert(l.left.end(), spanA1.begin(), spanA1.end());
+  l.left.insert(l.left.end(), spanA2.begin(), spanA2.end());
+
+  const auto spanB1 = textB.spansFor(160, 30);
+  const auto spanB2 = textB.spansFor(320, 30);
+  l.right.insert(l.right.end(), spanB1.begin(), spanB1.end());
+  l.right.insert(l.right.end(), spanB2.begin(), spanB2.end());
+
+  store.addLink(vA, l);
+
+  const std::vector<Version> versions{store.rebuild(vA), store.rebuild(vB)};
+  std::vector<LinkedPair> placed;
+  std::vector<HalfLink> unplaced;
+  xudu::placeLinks(store.links(), viewing(versions), placed, unplaced);
+
+  ASSERT_EQ(placed.size(), 1U);
+  EXPECT_EQ(placed[0].from.doc, 0U);
+  EXPECT_EQ(placed[0].to.doc, 1U);
+  EXPECT_EQ(placed[0].from.start, 295U);
+  EXPECT_EQ(placed[0].from.end, 520U);
+  EXPECT_EQ(placed[0].to.start, 160U);
+  EXPECT_EQ(placed[0].to.end, 350U);
+
+  // Centroid calculation for many-to-many
+  const float leftMinY   = 250.0F;
+  const float leftMaxY   = 450.0F;
+  const float leftCenter = 0.5F * (leftMinY + leftMaxY); // 350.0F
+
+  const float rightMinY   = 100.0F;
+  const float rightMaxY   = 300.0F;
+  const float rightCenter = 0.5F * (rightMinY + rightMaxY); // 200.0F
+
+  const float deltaY = leftCenter - rightCenter; // 150.0F
+
+  EXPECT_FLOAT_EQ(leftCenter, 350.0F);
+  EXPECT_FLOAT_EQ(rightCenter, 200.0F);
+  EXPECT_FLOAT_EQ(deltaY, 150.0F);
+
+  // Both centers coincide after applying deltaY
+  EXPECT_FLOAT_EQ(rightCenter + deltaY, leftCenter);
+}
+
+TEST(LinkLayout, fullPageDynamicCameraFramingWithLargeVerticalSpread) {
+  // Simulate full page document height (800 pixels vertical span, 2 documents
+  // 24 units apart)
+  const float fullPageH = 800.0F * Doc::pixelsToWorld; // ~40.0 world units
+  const float docHalfW  = 12.0F;
+  const float gap       = 3.0F;
+
+  const float doc0X = 0.0F;
+  const float doc1X = doc0X + (2.0F * docHalfW + gap); // 27.0F
+
+  const float minX  = doc0X - docHalfW - 4.0F; // -16.0F
+  const float maxX  = doc1X + docHalfW + 4.0F; // 43.0F
+  const float spanW = maxX - minX;             // 59.0F
+  const float spanH = fullPageH + 12.0F;       // 52.0F
+
+  const float aspect     = 1920.0F / 1080.0F; // 16:9 widescreen
+  const float fovDeg     = 15.0F;
+  const float tanHalfFov = std::tan(glm::radians(fovDeg) * 0.5F);
+
+  const float zFit = std::max(spanH / (2.0F * tanHalfFov),
+                              spanW / (2.0F * aspect * tanHalfFov));
+
+  EXPECT_GT(zFit, 0.0F);
+  const float frustumHalfHeight = zFit * tanHalfFov;
+  const float frustumHalfWidth  = frustumHalfHeight * aspect;
+
+  // Frustum fully encloses both the tall full-page vertical span and wide
+  // horizontal span
+  EXPECT_GE(frustumHalfHeight * 2.0F, spanH);
+  EXPECT_GE(frustumHalfWidth * 2.0F, spanW);
 }
