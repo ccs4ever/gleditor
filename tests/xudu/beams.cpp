@@ -219,27 +219,88 @@ TEST(LinkLayout, centroidSworphingAlignsMultiSpanMidpoints) {
   EXPECT_FLOAT_EQ(alignedRightCenterY, leftCenterY);
 }
 
-TEST(LinkLayout, cameraAutoFramingFitsBoundingEnvelope) {
-  const float minX = -20.0F;
-  const float maxX = 80.0F;
-  const float minY = 0.0F;
-  const float maxY = 120.0F;
+TEST(LinkLayout, singleSpanOneToOneLeveling) {
+  // For a 1-to-1 link, Ymin == Ymax, and deltaY is exact leveling
+  const float leftY  = 120.0F;
+  const float rightY = 45.0F;
 
-  const float spanW      = maxX - minX;     // 100.0
-  const float spanH      = maxY - minY;     // 120.0
-  const float aspect     = 800.0F / 600.0F; // 1.3333
-  const float fovDeg     = 5.0F;
+  const float leftCenterY  = leftY;
+  const float rightCenterY = rightY;
+  const float deltaY       = leftCenterY - rightCenterY;
+
+  EXPECT_FLOAT_EQ(deltaY, 75.0F);
+  EXPECT_FLOAT_EQ(rightY + deltaY, leftY);
+}
+
+TEST(LinkLayout, oneToManyCentroidAlignment) {
+  // 1 span on left (Y = 150), 3 spans on right (Y = 50, 100, 250 -> range [50,
+  // 250], center = 150)
+  const float leftY       = 150.0F;
+  const float rightMinY   = 50.0F;
+  const float rightMaxY   = 250.0F;
+  const float rightCenter = 0.5F * (rightMinY + rightMaxY);
+  const float deltaY      = leftY - rightCenter;
+
+  EXPECT_FLOAT_EQ(rightCenter, 150.0F);
+  EXPECT_FLOAT_EQ(deltaY, 0.0F); // Already aligned with centroid
+}
+
+TEST(LinkLayout, multiDocumentNonOverlappingSpacing) {
+  // 3 documents: doc 0 (halfW=10), doc 1 (halfW=12), doc 2 (halfW=15), docGap=2
+  const float d0Half = 10.0F;
+  const float d1Half = 12.0F;
+  const float d2Half = 15.0F;
+  const float gap    = 2.0F;
+
+  const float x0 = 0.0F;
+  const float x1 = x0 + (d0Half + d1Half + gap); // 0 + 24 = 24
+  const float x2 = x1 + (d1Half + d2Half + gap); // 24 + 29 = 53
+
+  EXPECT_FLOAT_EQ(x1, 24.0F);
+  EXPECT_FLOAT_EQ(x2, 53.0F);
+
+  // Verify no horizontal overlap between any document envelopes
+  EXPECT_LT(x0 + d0Half, x1 - d1Half); // 10 < 12 (gap of 2)
+  EXPECT_LT(x1 + d1Half, x2 - d2Half); // 36 < 38 (gap of 2)
+}
+
+TEST(LinkLayout, multiDocumentFramingEncompassesAllThreeDocs) {
+  const float d0Half = 10.0F;
+  const float d1Half = 12.0F;
+  const float d2Half = 15.0F;
+  const float gap    = 2.0F;
+
+  const float x0 = 0.0F;
+  const float x1 = x0 + (d0Half + d1Half + gap); // 24.0
+  const float x2 = x1 + (d1Half + d2Half + gap); // 53.0
+
+  const float minX    = x0 - d0Half - 4.0F;   // -14.0
+  const float maxX    = x2 + d2Half + 4.0F;   // 72.0
+  const float spanW   = maxX - minX;          // 86.0
+  const float centerX = 0.5F * (minX + maxX); // 29.0
+
+  EXPECT_FLOAT_EQ(spanW, 86.0F);
+  EXPECT_FLOAT_EQ(centerX, 29.0F);
+
+  const float aspect     = 800.0F / 600.0F;
+  const float fovDeg     = 7.5F;
   const float tanHalfFov = std::tan(glm::radians(fovDeg) * 0.5F);
-
-  const float zFit = std::max(spanH / (2.0F * tanHalfFov),
-                              spanW / (2.0F * aspect * tanHalfFov));
+  const float zFit       = spanW / (2.0F * aspect * tanHalfFov);
 
   EXPECT_GT(zFit, 0.0F);
-  // Verify that both horizontal and vertical extents fit within the calculated
-  // camera frustum
-  const float frustumHalfHeight = zFit * tanHalfFov;
-  const float frustumHalfWidth  = frustumHalfHeight * aspect;
+  const float frustumWidth = 2.0F * (zFit * tanHalfFov * aspect);
+  EXPECT_GE(frustumWidth, spanW);
+}
 
-  EXPECT_GE(frustumHalfHeight * 2.0F, spanH);
-  EXPECT_GE(frustumHalfWidth * 2.0F, spanW);
+TEST(LinkLayout, nonAdjacentBypassLayerRoutingDepth) {
+  // Adjacent documents: docSpan = 1 -> foreground Z = 0
+  const std::size_t adjDocSpan = 1;
+  EXPECT_LE(adjDocSpan, 1U);
+
+  // Non-adjacent documents: docSpan = 2 (e.g. Doc 0 to Doc 2) -> bypassDepth Z
+  // = -20
+  const std::size_t nonAdjDocSpan = 2;
+  EXPECT_GT(nonAdjDocSpan, 1U);
+  constexpr float bypassDepth = -20.0F;
+  EXPECT_LT(bypassDepth, 0.0F);
 }

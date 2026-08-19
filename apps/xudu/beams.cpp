@@ -182,8 +182,43 @@ void LinkBeams::align(const Strand &strand, RenderState &state,
   const float farCenterY  = 0.5F * (farMinY + farMaxY);
   const float deltaY      = nearCenterY - farCenterY;
 
-  const auto side = farPos.x >= nearPos.x ? 1.0F : -1.0F;
-  const glm::vec3 target{nearPos.x + (side * apart), farPos.y + deltaY,
+  const auto nearDocIdx = strand.from.doc;
+  const auto farDocIdx  = strand.to.doc;
+
+  float totalApart = 0.0F;
+  if (farDocIdx > nearDocIdx) {
+    for (std::size_t d = nearDocIdx; d < farDocIdx && d + 1 < state.docs.size();
+         ++d) {
+      float d1Half = 10.0F;
+      float d2Half = 10.0F;
+      if (const auto *p1 = state.docs[d]->page(0)) {
+        d1Half = (p1->widthPixels() * 0.5F) * Doc::pixelsToWorld;
+      }
+      if (const auto *p2 = state.docs[d + 1]->page(0)) {
+        d2Half = (p2->widthPixels() * 0.5F) * Doc::pixelsToWorld;
+      }
+      totalApart += d1Half + d2Half + documentGap;
+    }
+  } else if (nearDocIdx > farDocIdx) {
+    for (std::size_t d = farDocIdx; d < nearDocIdx && d + 1 < state.docs.size();
+         ++d) {
+      float d1Half = 10.0F;
+      float d2Half = 10.0F;
+      if (const auto *p1 = state.docs[d]->page(0)) {
+        d1Half = (p1->widthPixels() * 0.5F) * Doc::pixelsToWorld;
+      }
+      if (const auto *p2 = state.docs[d + 1]->page(0)) {
+        d2Half = (p2->widthPixels() * 0.5F) * Doc::pixelsToWorld;
+      }
+      totalApart += d1Half + d2Half + documentGap;
+    }
+  }
+  if (totalApart <= 0.0F) {
+    totalApart = apart;
+  }
+
+  const auto side = farDocIdx >= nearDocIdx ? 1.0F : -1.0F;
+  const glm::vec3 target{nearPos.x + (side * totalApart), farPos.y + deltaY,
                          nearPos.z};
 
   if (glm::distance(target, farPos) >= alreadyAligned) {
@@ -192,14 +227,30 @@ void LinkBeams::align(const Strand &strand, RenderState &state,
     far->animateMoveTo(timeline, target);
   }
 
-  // Dynamic Camera Auto-Framing: calculate world bounding envelope and fit view
+  // Dynamic Camera Auto-Framing: calculate world bounding envelope across all
+  // open documents and fit view
   if (renderer && renderer->appState()) {
-    const float minX =
-        std::min(nearPos.x - nearHalfWidth, target.x - farHalfWidth) - 4.0F;
-    const float maxX =
-        std::max(nearPos.x + nearHalfWidth, target.x + farHalfWidth) + 4.0F;
-    const float minY = std::min(nearMinY, farMinY + deltaY) - 6.0F;
-    const float maxY = std::max(nearMaxY, farMaxY + deltaY) + 6.0F;
+    float minX = std::min(nearPos.x - nearHalfWidth, target.x - farHalfWidth);
+    float maxX = std::max(nearPos.x + nearHalfWidth, target.x + farHalfWidth);
+    float minY = std::min(nearMinY, farMinY + deltaY);
+    float maxY = std::max(nearMaxY, farMaxY + deltaY);
+
+    for (std::size_t d = 0; d < state.docs.size(); ++d) {
+      if (d == farDocIdx) {
+        continue;
+      }
+      const glm::vec3 docPos(state.docs[d]->modelMatrix()[3]);
+      float halfW = 10.0F;
+      if (const auto *p = state.docs[d]->page(0)) {
+        halfW = (p->widthPixels() * 0.5F) * Doc::pixelsToWorld;
+      }
+      minX = std::min(minX, docPos.x - halfW);
+      maxX = std::max(maxX, docPos.x + halfW);
+    }
+    minX -= 4.0F;
+    maxX += 4.0F;
+    minY -= 6.0F;
+    maxY += 6.0F;
 
     const float spanW = std::max(maxX - minX, 10.0F);
     const float spanH = std::max(maxY - minY, 10.0F);
