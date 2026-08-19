@@ -499,4 +499,371 @@ TEST(E2EBinaryOrchestrationTest,
             << " colors)\n";
 }
 
+TEST(E2EBinaryOrchestrationTest,
+     fullPageMultiTopologyBinaryOrchestrationWithVisualVerification) {
+  const auto xuduBin = findXuduBinary();
+  ASSERT_TRUE(fs::exists(xuduBin)) << "xudu binary not found at " << xuduBin;
+
+  const auto testRoot =
+      fs::current_path() / "build" / "integration_workspace_fullpage";
+  const auto screenshotDir =
+      fs::current_path() / "build" / "integration_screenshots";
+
+  fs::remove_all(testRoot);
+  fs::create_directories(testRoot);
+  fs::create_directories(screenshotDir);
+
+  // Write source torrent files and payloads
+  const auto s1Dir = testRoot / "sources" / "source1";
+  const auto s2Dir = testRoot / "sources" / "source2";
+  const auto s3Dir = testRoot / "sources" / "source3";
+  fs::create_directories(s1Dir);
+  fs::create_directories(s2Dir / "sub");
+  fs::create_directories(s3Dir);
+
+  const auto s1TorrentPath = s1Dir / "source1.torrent";
+  {
+    std::ofstream out(s1TorrentPath, std::ios::binary);
+    out << xudu_test::singleFileTorrent;
+  }
+  {
+    std::ofstream out(s1Dir / "fox.txt", std::ios::binary);
+    out << xudu_test::singleFileText;
+  }
+
+  const auto s2TorrentPath = s2Dir / "source2.torrent";
+  {
+    std::ofstream out(s2TorrentPath, std::ios::binary);
+    out << xudu_test::multiFileTorrent;
+  }
+  {
+    std::ofstream out(s2Dir / "one.txt", std::ios::binary);
+    out << xudu_test::multiFileFirst;
+  }
+  {
+    std::ofstream out(s2Dir / "sub" / "two.txt", std::ios::binary);
+    out << xudu_test::multiFileSecond;
+  }
+
+  const auto s3TorrentPath = s3Dir / "source3.torrent";
+  {
+    std::ofstream out(s3TorrentPath, std::ios::binary);
+    out << source3Torrent;
+  }
+  {
+    std::ofstream out(s3Dir / "epilogue.txt", std::ios::binary);
+    out << source3Text;
+  }
+
+  const std::string torrentArgs = " --torrent " + s1TorrentPath.string() +
+                                  " --torrent " + s2TorrentPath.string() +
+                                  " --torrent " + s3TorrentPath.string();
+
+  const auto s1Hash   = InfoHash::fromHex(xudu_test::singleFileHash);
+  const auto s1Scroll = Scroll::ofTorrentFile(s1Hash, 0, "fox.txt", 0, 62);
+
+  const auto s2Hash   = InfoHash::fromHex(xudu_test::multiFileHash);
+  const auto s2Scroll = Scroll::ofTorrentFile(s2Hash, 0, "one.txt", 0, 27);
+  const auto s2Scroll2 =
+      Scroll::ofTorrentFile(s2Hash, 1, "sub/two.txt", 27, 28);
+
+  const auto s3Hash   = InfoHash::fromHex(source3Hash);
+  const auto s3Scroll = Scroll::ofTorrentFile(s3Hash, 0, "epilogue.txt", 0, 84);
+
+  // Author A publishes full document (combining source 1 + source 3)
+  const auto authorA = createMutableKeys();
+  Store storeA;
+  auto vA = storeA.transcludeExternal(MicroversionId{}, 0, s1Scroll, 0, 62);
+  vA      = storeA.transcludeExternal(vA, 62, s3Scroll, 0, 84);
+
+  auto pubA = publish(storeA, vA, authorA, "pub_a",
+                      "Universal Hypertext Principles", 1, 1700000001, nullptr);
+  pubA.signature = signMutableItem(publicationSigningBuffer(pubA), authorA);
+
+  const auto pubAPath = testRoot / "pub_a.manifest";
+  {
+    std::ofstream out(pubAPath, std::ios::binary);
+    out << encodePublication(pubA);
+  }
+
+  // Author B publishes full commentary (combining source 2 parts 1 and 2)
+  const auto authorB = createMutableKeys();
+  Store storeB;
+  auto vB = storeB.transcludeExternal(MicroversionId{}, 0, s2Scroll, 0, 27);
+  vB      = storeB.transcludeExternal(vB, 27, s2Scroll2, 0, 28);
+
+  auto pubB = publish(storeB, vB, authorB, "pub_b",
+                      "Commentary on Visual Topology", 1, 1700000002, nullptr);
+  pubB.signature = signMutableItem(publicationSigningBuffer(pubB), authorB);
+
+  const auto pubBPath = testRoot / "pub_b.manifest";
+  {
+    std::ofstream out(pubBPath, std::ios::binary);
+    out << encodePublication(pubB);
+  }
+
+  // Create multi-topology LinkPackage
+  const auto curator    = createMutableKeys();
+  const std::string k1  = scrollKey(s1Scroll);
+  const std::string k2  = scrollKey(s2Scroll);
+  const std::string k3  = scrollKey(s3Scroll);
+  const std::string k2b = scrollKey(s2Scroll2);
+
+  std::vector<GlobalLink> links;
+
+  // 1-to-1 links of multiple types
+  GlobalLink l1;
+  l1.type = LinkType::Comment;
+  l1.left.push_back(GlobalSpan{k1, 0, 20});
+  l1.right.push_back(GlobalSpan{k2, 0, 15});
+  links.push_back(l1);
+
+  GlobalLink l2;
+  l2.type = LinkType::Illustration;
+  l2.left.push_back(GlobalSpan{k1, 25, 20});
+  l2.right.push_back(GlobalSpan{k2b, 0, 15});
+  links.push_back(l2);
+
+  GlobalLink l3;
+  l3.type = LinkType::Disagreement;
+  l3.left.push_back(GlobalSpan{k3, 0, 30});
+  l3.right.push_back(GlobalSpan{k2, 10, 15});
+  links.push_back(l3);
+
+  // 1-to-Many link (Doc A section -> Doc B multiple points)
+  GlobalLink l4;
+  l4.type = LinkType::Quotation;
+  l4.left.push_back(GlobalSpan{k1, 40, 20});
+  l4.right.push_back(GlobalSpan{k2, 0, 10});
+  l4.right.push_back(GlobalSpan{k2b, 0, 10});
+  links.push_back(l4);
+
+  // Many-to-1 link
+  GlobalLink l5;
+  l5.type = LinkType::Authorship;
+  l5.left.push_back(GlobalSpan{k1, 0, 15});
+  l5.left.push_back(GlobalSpan{k3, 10, 15});
+  l5.right.push_back(GlobalSpan{k2b, 10, 15});
+  links.push_back(l5);
+
+  // Many-to-Many link
+  GlobalLink l6;
+  l6.type = LinkType::Other;
+  l6.left.push_back(GlobalSpan{k1, 10, 15});
+  l6.left.push_back(GlobalSpan{k3, 30, 15});
+  l6.right.push_back(GlobalSpan{k2, 5, 10});
+  l6.right.push_back(GlobalSpan{k2b, 5, 10});
+  links.push_back(l6);
+
+  std::map<std::string, Scroll> pkgScrolls;
+  pkgScrolls.insert_or_assign(k1, s1Scroll);
+  pkgScrolls.insert_or_assign(k2, s2Scroll);
+  pkgScrolls.insert_or_assign(k3, s3Scroll);
+  pkgScrolls.insert_or_assign(k2b, s2Scroll2);
+
+  const auto pkg =
+      publishLinkPackage(curator, "pkg_full", "MultiTopologyPackage", 1,
+                         1700000010, std::move(links), std::move(pkgScrolls));
+
+  const auto storePath = testRoot / "store_reader";
+  Store readerStore;
+  adopt(readerStore, pubA);
+  adopt(readerStore, pubB);
+  adoptLinkPackage(readerStore, pkg, ProminenceTier::Curated);
+  readerStore.save(storePath.string());
+
+  const auto step6Ppm = screenshotDir / "step6_full_page_multi_topology.ppm";
+  const auto step6Png = screenshotDir / "step6_full_page_multi_topology.png";
+
+  std::string cmd =
+      xuduBin.string() +
+      " --backend opengl --no-present --profile --fov 15 --coarse-below 0" +
+      torrentArgs + " --read " + pubAPath.string() + " --read " +
+      pubBPath.string() + " --screenshot " + step6Ppm.string() + " " +
+      storePath.string();
+
+  const auto res = executeProcess(cmd);
+  EXPECT_EQ(res.exitCode, 0) << "Step 6 failed: " << res.output;
+  EXPECT_TRUE(fs::exists(step6Ppm)) << "Step 6 screenshot missing";
+
+  const auto info = inspectPpm(step6Ppm);
+  EXPECT_TRUE(info.valid) << "Step 6 PPM invalid: " << info.errorMessage;
+  EXPECT_GE(info.distinctColors, 30U);
+  exportToPng(step6Ppm, step6Png);
+  std::cout << "  - Step 6: " << step6Png << " (" << info.distinctColors
+            << " colors)\n";
+}
+
+TEST(E2EBinaryOrchestrationTest,
+     threeDocumentNonAdjacentBypassRoutingBinaryOrchestrationWithVisualVerification) {
+  const auto xuduBin = findXuduBinary();
+  ASSERT_TRUE(fs::exists(xuduBin)) << "xudu binary not found at " << xuduBin;
+
+  const auto testRoot =
+      fs::current_path() / "build" / "integration_workspace_3doc";
+  const auto screenshotDir =
+      fs::current_path() / "build" / "integration_screenshots";
+
+  fs::remove_all(testRoot);
+  fs::create_directories(testRoot);
+  fs::create_directories(screenshotDir);
+
+  const auto s1Dir = testRoot / "sources" / "source1";
+  const auto s2Dir = testRoot / "sources" / "source2";
+  const auto s3Dir = testRoot / "sources" / "source3";
+  fs::create_directories(s1Dir);
+  fs::create_directories(s2Dir / "sub");
+  fs::create_directories(s3Dir);
+
+  const auto s1TorrentPath = s1Dir / "source1.torrent";
+  {
+    std::ofstream out(s1TorrentPath, std::ios::binary);
+    out << xudu_test::singleFileTorrent;
+  }
+  {
+    std::ofstream out(s1Dir / "fox.txt", std::ios::binary);
+    out << xudu_test::singleFileText;
+  }
+
+  const auto s2TorrentPath = s2Dir / "source2.torrent";
+  {
+    std::ofstream out(s2TorrentPath, std::ios::binary);
+    out << xudu_test::multiFileTorrent;
+  }
+  {
+    std::ofstream out(s2Dir / "one.txt", std::ios::binary);
+    out << xudu_test::multiFileFirst;
+  }
+
+  const auto s3TorrentPath = s3Dir / "source3.torrent";
+  {
+    std::ofstream out(s3TorrentPath, std::ios::binary);
+    out << source3Torrent;
+  }
+  {
+    std::ofstream out(s3Dir / "epilogue.txt", std::ios::binary);
+    out << source3Text;
+  }
+
+  const std::string torrentArgs = " --torrent " + s1TorrentPath.string() +
+                                  " --torrent " + s2TorrentPath.string() +
+                                  " --torrent " + s3TorrentPath.string();
+
+  const auto s1Hash   = InfoHash::fromHex(xudu_test::singleFileHash);
+  const auto s1Scroll = Scroll::ofTorrentFile(s1Hash, 0, "fox.txt", 0, 62);
+
+  const auto s2Hash   = InfoHash::fromHex(xudu_test::multiFileHash);
+  const auto s2Scroll = Scroll::ofTorrentFile(s2Hash, 0, "one.txt", 0, 27);
+
+  const auto s3Hash   = InfoHash::fromHex(source3Hash);
+  const auto s3Scroll = Scroll::ofTorrentFile(s3Hash, 0, "epilogue.txt", 0, 84);
+
+  const auto author1 = createMutableKeys();
+  const auto author2 = createMutableKeys();
+  const auto author3 = createMutableKeys();
+
+  Store store1, store2, store3;
+  const auto v1 =
+      store1.transcludeExternal(MicroversionId{}, 0, s1Scroll, 0, 62);
+  const auto v2 =
+      store2.transcludeExternal(MicroversionId{}, 0, s2Scroll, 0, 27);
+  const auto v3 =
+      store3.transcludeExternal(MicroversionId{}, 0, s3Scroll, 0, 84);
+
+  auto pub1 =
+      publish(store1, v1, author1, "p1", "Doc 1", 1, 1700000001, nullptr);
+  pub1.signature = signMutableItem(publicationSigningBuffer(pub1), author1);
+
+  auto pub2 =
+      publish(store2, v2, author2, "p2", "Doc 2", 1, 1700000002, nullptr);
+  pub2.signature = signMutableItem(publicationSigningBuffer(pub2), author2);
+
+  auto pub3 =
+      publish(store3, v3, author3, "p3", "Doc 3", 1, 1700000003, nullptr);
+  pub3.signature = signMutableItem(publicationSigningBuffer(pub3), author3);
+
+  const auto pub1Path = testRoot / "p1.manifest";
+  const auto pub2Path = testRoot / "p2.manifest";
+  const auto pub3Path = testRoot / "p3.manifest";
+  {
+    std::ofstream out(pub1Path, std::ios::binary);
+    out << encodePublication(pub1);
+  }
+  {
+    std::ofstream out(pub2Path, std::ios::binary);
+    out << encodePublication(pub2);
+  }
+  {
+    std::ofstream out(pub3Path, std::ios::binary);
+    out << encodePublication(pub3);
+  }
+
+  // Links:
+  // 1 <-> 2 (adjacent: foreground Z = 0)
+  // 2 <-> 3 (adjacent: foreground Z = 0)
+  // 1 <-> 3 (non-adjacent: background bypass layer Z = -20)
+  const auto curator   = createMutableKeys();
+  const std::string k1 = scrollKey(s1Scroll);
+  const std::string k2 = scrollKey(s2Scroll);
+  const std::string k3 = scrollKey(s3Scroll);
+
+  std::vector<GlobalLink> links;
+
+  GlobalLink l12;
+  l12.type = LinkType::Comment;
+  l12.left.push_back(GlobalSpan{k1, 0, 20});
+  l12.right.push_back(GlobalSpan{k2, 0, 20});
+  links.push_back(l12);
+
+  GlobalLink l23;
+  l23.type = LinkType::Illustration;
+  l23.left.push_back(GlobalSpan{k2, 10, 15});
+  l23.right.push_back(GlobalSpan{k3, 0, 20});
+  links.push_back(l23);
+
+  GlobalLink l13;
+  l13.type = LinkType::Quotation;
+  l13.left.push_back(GlobalSpan{k1, 30, 20});
+  l13.right.push_back(GlobalSpan{k3, 30, 20});
+  links.push_back(l13);
+
+  std::map<std::string, Scroll> pkgScrolls;
+  pkgScrolls.insert_or_assign(k1, s1Scroll);
+  pkgScrolls.insert_or_assign(k2, s2Scroll);
+  pkgScrolls.insert_or_assign(k3, s3Scroll);
+
+  const auto pkg =
+      publishLinkPackage(curator, "pkg_3doc", "3DocRoutingNetwork", 1,
+                         1700000010, std::move(links), std::move(pkgScrolls));
+
+  const auto storePath = testRoot / "store_3doc";
+  Store readerStore;
+  adopt(readerStore, pub1);
+  adopt(readerStore, pub2);
+  adopt(readerStore, pub3);
+  adoptLinkPackage(readerStore, pkg, ProminenceTier::Curated);
+  readerStore.save(storePath.string());
+
+  const auto step7Ppm = screenshotDir / "step7_three_doc_bypass_routing.ppm";
+  const auto step7Png = screenshotDir / "step7_three_doc_bypass_routing.png";
+
+  std::string cmd =
+      xuduBin.string() +
+      " --backend opengl --no-present --profile --fov 18 --coarse-below 0" +
+      torrentArgs + " --read " + pub1Path.string() + " --read " +
+      pub2Path.string() + " --read " + pub3Path.string() + " --screenshot " +
+      step7Ppm.string() + " " + storePath.string();
+
+  const auto res = executeProcess(cmd);
+  EXPECT_EQ(res.exitCode, 0) << "Step 7 failed: " << res.output;
+  EXPECT_TRUE(fs::exists(step7Ppm)) << "Step 7 screenshot missing";
+
+  const auto info = inspectPpm(step7Ppm);
+  EXPECT_TRUE(info.valid) << "Step 7 PPM invalid: " << info.errorMessage;
+  EXPECT_GE(info.distinctColors, 25U);
+  exportToPng(step7Ppm, step7Png);
+  std::cout << "  - Step 7: " << step7Png << " (" << info.distinctColors
+            << " colors)\n";
+}
+
 } // namespace
