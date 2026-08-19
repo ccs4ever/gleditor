@@ -35,8 +35,9 @@ backends="opengl opengles"
 # reliable way to ask: --help returns before the backend is ever looked at.
 if "$BIN" --backend vulkan --profile $STRICT "$SAMPLE" >"$OUT/vkprobe.log" 2>&1; then
   backends="$backends vulkan"
-elif grep -q 'was not compiled into this binary' "$OUT/vkprobe.log"; then
-  echo "vulkan backend not compiled in, skipping"
+elif grep -q 'was not compiled into this binary' "$OUT/vkprobe.log" ||
+  grep -q 'not available in current SDL video driver' "$OUT/vkprobe.log"; then
+  echo "vulkan backend not available on this platform/driver, skipping"
 else
   echo "FAIL: vulkan backend is compiled in but did not run"
   tail -20 "$OUT/vkprobe.log"
