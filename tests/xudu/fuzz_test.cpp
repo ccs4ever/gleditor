@@ -36,7 +36,8 @@ using xudu::readVarint;
 using xudu::SecretKey;
 using xudu::Signature;
 
-std::vector<std::uint8_t> generateRandomBytes(std::mt19937 &rng, std::size_t maxLen) {
+std::vector<std::uint8_t> generateRandomBytes(std::mt19937 &rng,
+                                              std::size_t maxLen) {
   std::uniform_int_distribution<std::size_t> lenDist(0, maxLen);
   std::uniform_int_distribution<int> byteDist(0, 255);
   const auto len = lenDist(rng);
@@ -49,14 +50,16 @@ std::vector<std::uint8_t> generateRandomBytes(std::mt19937 &rng, std::size_t max
 
 std::string generateRandomString(std::mt19937 &rng, std::size_t maxLen) {
   const auto bytes = generateRandomBytes(rng, maxLen);
-  return std::string{reinterpret_cast<const char *>(bytes.data()), bytes.size()};
+  return std::string{reinterpret_cast<const char *>(bytes.data()),
+                     bytes.size()};
 }
 
 TEST(FuzzTest, binaryOpsParserNeverCrashesOnRandomBytes) {
   std::mt19937 rng(42);
   for (int iter = 0; iter < 5000; iter++) {
     const auto bytes = generateRandomBytes(rng, 512);
-    const std::string data{reinterpret_cast<const char *>(bytes.data()), bytes.size()};
+    const std::string data{reinterpret_cast<const char *>(bytes.data()),
+                           bytes.size()};
 
     // 1. readOpsSpool (auto-detecting binary vs text)
     std::istringstream in1(data);

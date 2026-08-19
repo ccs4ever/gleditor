@@ -1,6 +1,7 @@
 /**
  * @file link_discovery.cpp
- * @brief Implementation of link package discovery, ranking, and prominence filtering.
+ * @brief Implementation of link package discovery, ranking, and prominence
+ * filtering.
  */
 #include "link_discovery.hpp"
 
@@ -18,7 +19,7 @@ bool LinkDiscoveryEngine::addBlessing(Blessing blessing) {
 
 std::vector<const Blessing *>
 LinkDiscoveryEngine::blessingsFor(const std::string &targetDocument,
-                                 const std::string &packageKey) const {
+                                  const std::string &packageKey) const {
   std::vector<const Blessing *> found;
   for (const auto &blessing : registeredBlessings) {
     if (blessing.targetDocument == targetDocument &&
@@ -29,11 +30,9 @@ LinkDiscoveryEngine::blessingsFor(const std::string &targetDocument,
   return found;
 }
 
-std::vector<RankedLinkPackage>
-LinkDiscoveryEngine::rankPackages(
+std::vector<RankedLinkPackage> LinkDiscoveryEngine::rankPackages(
     const std::vector<const LinkPackage *> &candidates,
-    const PublicKey &documentAuthor,
-    const std::string &targetDocumentKey,
+    const PublicKey &documentAuthor, const std::string &targetDocumentKey,
     const std::vector<PublicKey> &transcludedAuthors) const {
 
   std::vector<RankedLinkPackage> curatedPackages;

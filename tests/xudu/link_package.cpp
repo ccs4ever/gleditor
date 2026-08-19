@@ -1,6 +1,7 @@
 /**
  * @file link_package.cpp
- * @brief Tests for standalone link packages, author blessings, discovery ranking, and XanaDoc interactions.
+ * @brief Tests for standalone link packages, author blessings, discovery
+ * ranking, and XanaDoc interactions.
  */
 #include <gmock/gmock.h>
 #include <gtest/gtest.h>
@@ -33,9 +34,9 @@ using xudu::GlobalSpan;
 using xudu::HalfLink;
 using xudu::linkColour;
 using xudu::LinkDiscoveryEngine;
+using xudu::LinkedPair;
 using xudu::LinkPackage;
 using xudu::linkPackageRendezvousTarget;
-using xudu::LinkedPair;
 using xudu::LinkType;
 using xudu::MicroversionId;
 using xudu::MutableKeys;
@@ -77,22 +78,24 @@ std::vector<const Version *> viewing(const std::vector<Version> &versions) {
 TEST(LinkPackageTest, roundTripEncodingAndVerification) {
   const auto curatorKeys = createMutableKeys();
   const auto scrollKeys  = createMutableKeys();
-  const auto scroll      = makeNamedScroll(scrollKeys.publicKey, "scroll-1", 5000);
+  const auto scroll = makeNamedScroll(scrollKeys.publicKey, "scroll-1", 5000);
 
   GlobalLink glink;
   glink.type    = LinkType::Comment;
   glink.tier    = ProminenceTier::Curated;
   glink.owner   = "Critical Annotator";
   glink.curator = curatorKeys.publicKey.hex();
-  glink.left.push_back(GlobalSpan{"btpk:" + scrollKeys.publicKey.hex() + ":scroll-1", 100, 50});
-  glink.right.push_back(GlobalSpan{"btpk:" + scrollKeys.publicKey.hex() + ":scroll-1", 500, 30});
+  glink.left.push_back(
+      GlobalSpan{"btpk:" + scrollKeys.publicKey.hex() + ":scroll-1", 100, 50});
+  glink.right.push_back(
+      GlobalSpan{"btpk:" + scrollKeys.publicKey.hex() + ":scroll-1", 500, 30});
 
   std::map<std::string, Scroll> scrolls;
   scrolls.emplace("btpk:" + scrollKeys.publicKey.hex() + ":scroll-1", scroll);
 
-  const auto pkg = publishLinkPackage(curatorKeys, "annotations-v1",
-                                      "Critical Annotations", 1, 1700000000,
-                                      {glink}, scrolls);
+  const auto pkg =
+      publishLinkPackage(curatorKeys, "annotations-v1", "Critical Annotations",
+                         1, 1700000000, {glink}, scrolls);
 
   EXPECT_TRUE(verifyLinkPackage(pkg));
 
@@ -113,8 +116,8 @@ TEST(LinkPackageTest, roundTripEncodingAndVerification) {
 
 TEST(LinkPackageTest, tamperedPackageFailsVerification) {
   const auto curatorKeys = createMutableKeys();
-  auto pkg = publishLinkPackage(curatorKeys, "notes", "Notes", 1, 1700000000,
-                                {}, {});
+  auto pkg =
+      publishLinkPackage(curatorKeys, "notes", "Notes", 1, 1700000000, {}, {});
   EXPECT_TRUE(verifyLinkPackage(pkg));
 
   // Alter payload
@@ -125,7 +128,8 @@ TEST(LinkPackageTest, tamperedPackageFailsVerification) {
 TEST(LinkPackageTest, adoptionAddsLinksAndScrollsWithoutModifyingDocuments) {
   const auto authorKeys  = createMutableKeys();
   const auto curatorKeys = createMutableKeys();
-  const auto scroll      = makeNamedScroll(authorKeys.publicKey, "essay-scroll", 2000);
+  const auto scroll =
+      makeNamedScroll(authorKeys.publicKey, "essay-scroll", 2000);
 
   Store store;
   // Local document typing
@@ -133,15 +137,18 @@ TEST(LinkPackageTest, adoptionAddsLinksAndScrollsWithoutModifyingDocuments) {
 
   GlobalLink glink;
   glink.type = LinkType::Illustration;
-  glink.left.push_back(GlobalSpan{"btpk:" + authorKeys.publicKey.hex() + ":essay-scroll", 0, 10});
-  glink.right.push_back(GlobalSpan{"btpk:" + authorKeys.publicKey.hex() + ":essay-scroll", 100, 20});
+  glink.left.push_back(GlobalSpan{
+      "btpk:" + authorKeys.publicKey.hex() + ":essay-scroll", 0, 10});
+  glink.right.push_back(GlobalSpan{
+      "btpk:" + authorKeys.publicKey.hex() + ":essay-scroll", 100, 20});
 
   std::map<std::string, Scroll> scrolls;
-  scrolls.emplace("btpk:" + authorKeys.publicKey.hex() + ":essay-scroll", scroll);
+  scrolls.emplace("btpk:" + authorKeys.publicKey.hex() + ":essay-scroll",
+                  scroll);
 
-  const auto pkg = publishLinkPackage(curatorKeys, "illustrations",
-                                      "Illustrations", 1, 1700000000,
-                                      {glink}, scrolls);
+  const auto pkg =
+      publishLinkPackage(curatorKeys, "illustrations", "Illustrations", 1,
+                         1700000000, {glink}, scrolls);
 
   const auto result = adoptLinkPackage(store, pkg, ProminenceTier::Curated);
   EXPECT_EQ(result.scrollsAdded, 1U);
@@ -161,20 +168,23 @@ TEST(LinkPackageTest, unresolvableSpansAreSafelySkipped) {
 
   GlobalLink glinkValid;
   glinkValid.type = LinkType::Comment;
-  glinkValid.left.push_back(GlobalSpan{"btpk:" + knownKeys.publicKey.hex() + ":known", 10, 20});
-  glinkValid.right.push_back(GlobalSpan{"btpk:" + knownKeys.publicKey.hex() + ":known", 50, 20});
+  glinkValid.left.push_back(
+      GlobalSpan{"btpk:" + knownKeys.publicKey.hex() + ":known", 10, 20});
+  glinkValid.right.push_back(
+      GlobalSpan{"btpk:" + knownKeys.publicKey.hex() + ":known", 50, 20});
 
   GlobalLink glinkInvalid; // References an unknown scroll not in pkg.scrolls
   glinkInvalid.type = LinkType::Disagreement;
   glinkInvalid.left.push_back(GlobalSpan{"btpk:unknown_pubkey:unknown", 0, 10});
-  glinkInvalid.right.push_back(GlobalSpan{"btpk:unknown_pubkey:unknown", 20, 10});
+  glinkInvalid.right.push_back(
+      GlobalSpan{"btpk:unknown_pubkey:unknown", 20, 10});
 
   std::map<std::string, Scroll> scrolls;
   scrolls.emplace("btpk:" + knownKeys.publicKey.hex() + ":known", knownScroll);
 
-  const auto pkg = publishLinkPackage(curatorKeys, "mixed", "Mixed", 1,
-                                      1700000000, {glinkValid, glinkInvalid},
-                                      scrolls);
+  const auto pkg =
+      publishLinkPackage(curatorKeys, "mixed", "Mixed", 1, 1700000000,
+                         {glinkValid, glinkInvalid}, scrolls);
 
   Store store;
   const auto result = adoptLinkPackage(store, pkg, ProminenceTier::Curated);
@@ -187,7 +197,8 @@ TEST(LinkPackageTest, unresolvableSpansAreSafelySkipped) {
 // Cross-Document Interactions with XanaDocs
 // -----------------------------------------------------------------------------
 
-TEST(LinkPackageInteractionTest, crossDocumentLinkingBetweenTwoAdoptedXanadocs) {
+TEST(LinkPackageInteractionTest,
+     crossDocumentLinkingBetweenTwoAdoptedXanadocs) {
   const auto authorA = createMutableKeys();
   const auto authorB = createMutableKeys();
   const auto curator = createMutableKeys();
@@ -197,34 +208,43 @@ TEST(LinkPackageInteractionTest, crossDocumentLinkingBetweenTwoAdoptedXanadocs) 
 
   // Author A writes and publishes Doc A (100 bytes from scrollA at offset 50)
   Store storeA;
-  const auto verA = storeA.transcludeExternal(MicroversionId{}, 0, scrollA, 50, 100);
-  const auto pubA = publish(storeA, verA, authorA, "docA", "Document A", 1, 1700000000);
+  const auto verA =
+      storeA.transcludeExternal(MicroversionId{}, 0, scrollA, 50, 100);
+  const auto pubA =
+      publish(storeA, verA, authorA, "docA", "Document A", 1, 1700000000);
 
   // Author B writes and publishes Doc B (200 bytes from scrollB at offset 100)
   Store storeB;
-  const auto verB = storeB.transcludeExternal(MicroversionId{}, 0, scrollB, 100, 200);
-  const auto pubB = publish(storeB, verB, authorB, "docB", "Document B", 1, 1700000000);
+  const auto verB =
+      storeB.transcludeExternal(MicroversionId{}, 0, scrollB, 100, 200);
+  const auto pubB =
+      publish(storeB, verB, authorB, "docB", "Document B", 1, 1700000000);
 
-  // Third-party Curator publishes a LinkPackage connecting Doc A's span to Doc B's span
+  // Third-party Curator publishes a LinkPackage connecting Doc A's span to Doc
+  // B's span
   GlobalLink crossLink;
   crossLink.type  = LinkType::Quotation;
   crossLink.owner = "Literary Comparison";
-  crossLink.left.push_back(GlobalSpan{"btpk:" + authorA.publicKey.hex() + ":scrollA", 60, 30});
-  crossLink.right.push_back(GlobalSpan{"btpk:" + authorB.publicKey.hex() + ":scrollB", 120, 40});
+  crossLink.left.push_back(
+      GlobalSpan{"btpk:" + authorA.publicKey.hex() + ":scrollA", 60, 30});
+  crossLink.right.push_back(
+      GlobalSpan{"btpk:" + authorB.publicKey.hex() + ":scrollB", 120, 40});
 
   std::map<std::string, Scroll> pkgScrolls;
   pkgScrolls.emplace("btpk:" + authorA.publicKey.hex() + ":scrollA", scrollA);
   pkgScrolls.emplace("btpk:" + authorB.publicKey.hex() + ":scrollB", scrollB);
 
-  const auto pkg = publishLinkPackage(curator, "comparison-pkg",
-                                      "Literary Comparison", 1, 1700000000,
-                                      {crossLink}, pkgScrolls);
+  const auto pkg =
+      publishLinkPackage(curator, "comparison-pkg", "Literary Comparison", 1,
+                         1700000000, {crossLink}, pkgScrolls);
 
-  // A reader opens a fresh store, adopts Doc A, Doc B, and the third-party LinkPackage
+  // A reader opens a fresh store, adopts Doc A, Doc B, and the third-party
+  // LinkPackage
   Store readerStore;
   const auto adoptedA = adopt(readerStore, pubA);
   const auto adoptedB = adopt(readerStore, pubB);
-  const auto adoptedPkg = adoptLinkPackage(readerStore, pkg, ProminenceTier::Curated);
+  const auto adoptedPkg =
+      adoptLinkPackage(readerStore, pkg, ProminenceTier::Curated);
 
   EXPECT_EQ(adoptedPkg.linksAdopted, 1U);
 
@@ -241,10 +261,12 @@ TEST(LinkPackageInteractionTest, crossDocumentLinkingBetweenTwoAdoptedXanadocs) 
   // Verify the connection beam between Doc A and Doc B was placed
   ASSERT_EQ(between.size(), 1U);
   EXPECT_EQ(between[0].from.doc, 0U) << "Left end in Doc A";
-  EXPECT_EQ(between[0].from.start, 10U) << "Offset 60 is 10 bytes into Doc A (starts at 50)";
+  EXPECT_EQ(between[0].from.start, 10U)
+      << "Offset 60 is 10 bytes into Doc A (starts at 50)";
   EXPECT_EQ(between[0].from.end, 40U);
   EXPECT_EQ(between[0].to.doc, 1U) << "Right end in Doc B";
-  EXPECT_EQ(between[0].to.start, 20U) << "Offset 120 is 20 bytes into Doc B (starts at 100)";
+  EXPECT_EQ(between[0].to.start, 20U)
+      << "Offset 120 is 20 bytes into Doc B (starts at 100)";
   EXPECT_EQ(between[0].to.end, 60U);
   EXPECT_EQ(between[0].tier, ProminenceTier::Curated);
   EXPECT_EQ(between[0].type, LinkType::Quotation);
@@ -260,13 +282,17 @@ TEST(LinkPackageInteractionTest, halfLinkReportedWhenOnlyOneDocumentIsOpen) {
   const auto scrollB = makeNamedScroll(authorB.publicKey, "scrollB", 1000);
 
   Store storeA;
-  const auto verA = storeA.transcludeExternal(MicroversionId{}, 0, scrollA, 0, 100);
-  const auto pubA = publish(storeA, verA, authorA, "docA", "Document A", 1, 1700000000);
+  const auto verA =
+      storeA.transcludeExternal(MicroversionId{}, 0, scrollA, 0, 100);
+  const auto pubA =
+      publish(storeA, verA, authorA, "docA", "Document A", 1, 1700000000);
 
   GlobalLink crossLink;
   crossLink.type = LinkType::Comment;
-  crossLink.left.push_back(GlobalSpan{"btpk:" + authorA.publicKey.hex() + ":scrollA", 10, 20});
-  crossLink.right.push_back(GlobalSpan{"btpk:" + authorB.publicKey.hex() + ":scrollB", 50, 30});
+  crossLink.left.push_back(
+      GlobalSpan{"btpk:" + authorA.publicKey.hex() + ":scrollA", 10, 20});
+  crossLink.right.push_back(
+      GlobalSpan{"btpk:" + authorB.publicKey.hex() + ":scrollB", 50, 30});
 
   std::map<std::string, Scroll> pkgScrolls;
   pkgScrolls.emplace("btpk:" + authorA.publicKey.hex() + ":scrollA", scrollA);
@@ -315,32 +341,40 @@ TEST(LinkPackageInteractionTest, multiTierCoexistenceAcrossDocuments) {
   authorLink.tier  = ProminenceTier::Author;
   authorLink.left  = spansA.spansFor(0, 10);
   authorLink.right = spansA.spansFor(50, 10);
-  verA = storeA.addLink(verA, authorLink);
-  const auto pubA = publish(storeA, verA, authorA, "docA", "Doc A", 1, 1700000000);
+  verA             = storeA.addLink(verA, authorLink);
+  const auto pubA =
+      publish(storeA, verA, authorA, "docA", "Doc A", 1, 1700000000);
 
   Store storeB;
-  const auto verB = storeB.transcludeExternal(MicroversionId{}, 0, scrollB, 0, 100);
-  const auto pubB = publish(storeB, verB, authorB, "docB", "Doc B", 1, 1700000000);
+  const auto verB =
+      storeB.transcludeExternal(MicroversionId{}, 0, scrollB, 0, 100);
+  const auto pubB =
+      publish(storeB, verB, authorB, "docB", "Doc B", 1, 1700000000);
 
   // Curated link connecting Doc A to Doc B
   GlobalLink curatedLink;
   curatedLink.type = LinkType::Comment;
-  curatedLink.left.push_back(GlobalSpan{"btpk:" + authorA.publicKey.hex() + ":scrollA", 20, 10});
-  curatedLink.right.push_back(GlobalSpan{"btpk:" + authorB.publicKey.hex() + ":scrollB", 20, 10});
+  curatedLink.left.push_back(
+      GlobalSpan{"btpk:" + authorA.publicKey.hex() + ":scrollA", 20, 10});
+  curatedLink.right.push_back(
+      GlobalSpan{"btpk:" + authorB.publicKey.hex() + ":scrollB", 20, 10});
   std::map<std::string, Scroll> pkgScrolls = {
       {"btpk:" + authorA.publicKey.hex() + ":scrollA", scrollA},
       {"btpk:" + authorB.publicKey.hex() + ":scrollB", scrollB},
   };
-  const auto curatedPkg = publishLinkPackage(curator, "c-pkg", "Curated Pkg", 1, 1700000000,
-                                             {curatedLink}, pkgScrolls);
+  const auto curatedPkg =
+      publishLinkPackage(curator, "c-pkg", "Curated Pkg", 1, 1700000000,
+                         {curatedLink}, pkgScrolls);
 
   // Public link connecting Doc A to Doc B
   GlobalLink publicLink;
   publicLink.type = LinkType::Disagreement;
-  publicLink.left.push_back(GlobalSpan{"btpk:" + authorA.publicKey.hex() + ":scrollA", 40, 10});
-  publicLink.right.push_back(GlobalSpan{"btpk:" + authorB.publicKey.hex() + ":scrollB", 40, 10});
-  const auto publicPkg = publishLinkPackage(stranger, "p-pkg", "Public Pkg", 1, 1700000000,
-                                            {publicLink}, pkgScrolls);
+  publicLink.left.push_back(
+      GlobalSpan{"btpk:" + authorA.publicKey.hex() + ":scrollA", 40, 10});
+  publicLink.right.push_back(
+      GlobalSpan{"btpk:" + authorB.publicKey.hex() + ":scrollB", 40, 10});
+  const auto publicPkg = publishLinkPackage(
+      stranger, "p-pkg", "Public Pkg", 1, 1700000000, {publicLink}, pkgScrolls);
 
   // Reader adopts everything
   Store readerStore;
@@ -390,7 +424,8 @@ TEST(LinkPackageInteractionTest, multiTierCoexistenceAcrossDocuments) {
   EXPECT_TRUE(foundAuthorLink);
 }
 
-TEST(LinkPackageInteractionTest, linkPackageAttachesToTranscludedManifestations) {
+TEST(LinkPackageInteractionTest,
+     linkPackageAttachesToTranscludedManifestations) {
   const auto authorA = createMutableKeys();
   const auto authorB = createMutableKeys();
   const auto authorC = createMutableKeys();
@@ -402,20 +437,26 @@ TEST(LinkPackageInteractionTest, linkPackageAttachesToTranscludedManifestations)
 
   // Doc B (target)
   Store storeB;
-  const auto verB = storeB.transcludeExternal(MicroversionId{}, 0, scrollB, 0, 100);
-  const auto pubB = publish(storeB, verB, authorB, "docB", "Doc B", 1, 1700000000);
+  const auto verB =
+      storeB.transcludeExternal(MicroversionId{}, 0, scrollB, 0, 100);
+  const auto pubB =
+      publish(storeB, verB, authorB, "docB", "Doc B", 1, 1700000000);
 
-  // Doc C quotes scrollC (prefix 8 bytes) and then transcludes scrollA (50..100)
+  // Doc C quotes scrollC (prefix 8 bytes) and then transcludes scrollA
+  // (50..100)
   Store storeC;
   auto verC = storeC.transcludeExternal(MicroversionId{}, 0, scrollC, 0, 8);
-  verC = storeC.transcludeExternal(verC, 8, scrollA, 50, 50);
-  const auto pubC = publish(storeC, verC, authorC, "docC", "Doc C", 1, 1700000000);
+  verC      = storeC.transcludeExternal(verC, 8, scrollA, 50, 50);
+  const auto pubC =
+      publish(storeC, verC, authorC, "docC", "Doc C", 1, 1700000000);
 
   // LinkPackage attaches to scrollA [60..80]
   GlobalLink glink;
   glink.type = LinkType::Illustration;
-  glink.left.push_back(GlobalSpan{"btpk:" + authorA.publicKey.hex() + ":scrollA", 60, 20});
-  glink.right.push_back(GlobalSpan{"btpk:" + authorB.publicKey.hex() + ":scrollB", 10, 20});
+  glink.left.push_back(
+      GlobalSpan{"btpk:" + authorA.publicKey.hex() + ":scrollA", 60, 20});
+  glink.right.push_back(
+      GlobalSpan{"btpk:" + authorB.publicKey.hex() + ":scrollB", 10, 20});
 
   std::map<std::string, Scroll> pkgScrolls = {
       {"btpk:" + authorA.publicKey.hex() + ":scrollA", scrollA},
@@ -442,7 +483,8 @@ TEST(LinkPackageInteractionTest, linkPackageAttachesToTranscludedManifestations)
   // The link lands on Doc C because Doc C manifests the transcluded span!
   ASSERT_EQ(between.size(), 1U);
   EXPECT_EQ(between[0].from.doc, 0U) << "Lands on Doc C";
-  EXPECT_EQ(between[0].from.start, 18U) << "Prefix (8) + offset into transclusion (60-50=10)";
+  EXPECT_EQ(between[0].from.start, 18U)
+      << "Prefix (8) + offset into transclusion (60-50=10)";
   EXPECT_EQ(between[0].from.end, 38U);
   EXPECT_EQ(between[0].to.doc, 1U) << "Lands on Doc B";
   EXPECT_EQ(between[0].to.start, 10U);
@@ -479,7 +521,8 @@ TEST(BlessingTest, roundTripAndVerification) {
 
 TEST(BlessingTest, tamperedBlessingFailsVerification) {
   const auto authorKeys = createMutableKeys();
-  auto blessing = createBlessing(authorKeys, "doc-1", "pkg-1", "Note", 1700000000);
+  auto blessing =
+      createBlessing(authorKeys, "doc-1", "pkg-1", "Note", 1700000000);
   EXPECT_TRUE(verifyBlessing(blessing));
 
   blessing.targetDocument = "doc-tampered";
@@ -489,12 +532,12 @@ TEST(BlessingTest, tamperedBlessingFailsVerification) {
 TEST(LinkDiscoveryTest, rankingAppliesTierAndBlessingWeights) {
   LinkDiscoveryEngine engine;
 
-  const auto authorKeys    = createMutableKeys();
-  const auto transAuthor   = createMutableKeys();
-  const auto curator1Keys  = createMutableKeys();
-  const auto curator2Keys  = createMutableKeys();
-  const auto public1Keys   = createMutableKeys();
-  const auto public2Keys   = createMutableKeys();
+  const auto authorKeys   = createMutableKeys();
+  const auto transAuthor  = createMutableKeys();
+  const auto curator1Keys = createMutableKeys();
+  const auto curator2Keys = createMutableKeys();
+  const auto public1Keys  = createMutableKeys();
+  const auto public2Keys  = createMutableKeys();
 
   const std::string docKey = "btpk:" + authorKeys.publicKey.hex() + ":essay";
 
@@ -502,27 +545,32 @@ TEST(LinkDiscoveryTest, rankingAppliesTierAndBlessingWeights) {
   engine.followCurator(curator1Keys.publicKey);
 
   // Author blesses public1 package (+500)
-  const auto blessing1 = createBlessing(authorKeys, docKey,
-                                        "btpk:" + public1Keys.publicKey.hex() + ":public1",
-                                        "Author approved", 1700000000);
+  const auto blessing1 = createBlessing(
+      authorKeys, docKey, "btpk:" + public1Keys.publicKey.hex() + ":public1",
+      "Author approved", 1700000000);
   EXPECT_TRUE(engine.addBlessing(blessing1));
 
   // Transcluded author blesses public2 package (+200)
-  const auto blessing2 = createBlessing(transAuthor, docKey,
-                                        "btpk:" + public2Keys.publicKey.hex() + ":public2",
-                                        "Transcluded author approved", 1700000000);
+  const auto blessing2 = createBlessing(
+      transAuthor, docKey, "btpk:" + public2Keys.publicKey.hex() + ":public2",
+      "Transcluded author approved", 1700000000);
   EXPECT_TRUE(engine.addBlessing(blessing2));
 
-  const auto pkgCurated1 = publishLinkPackage(curator1Keys, "c1", "Curated 1", 1, 1700000000, {}, {});
-  const auto pkgCurated2 = publishLinkPackage(curator2Keys, "c2", "Unfollowed", 1, 1700000000, {}, {});
-  const auto pkgBlessed1 = publishLinkPackage(public1Keys, "public1", "Author Blessed Public", 1, 1700000000, {}, {});
-  const auto pkgBlessed2 = publishLinkPackage(public2Keys, "public2", "Transcluded Blessed Public", 1, 1700000000, {}, {});
+  const auto pkgCurated1 = publishLinkPackage(curator1Keys, "c1", "Curated 1",
+                                              1, 1700000000, {}, {});
+  const auto pkgCurated2 = publishLinkPackage(curator2Keys, "c2", "Unfollowed",
+                                              1, 1700000000, {}, {});
+  const auto pkgBlessed1 = publishLinkPackage(
+      public1Keys, "public1", "Author Blessed Public", 1, 1700000000, {}, {});
+  const auto pkgBlessed2 =
+      publishLinkPackage(public2Keys, "public2", "Transcluded Blessed Public",
+                         1, 1700000000, {}, {});
 
   const std::vector<const LinkPackage *> candidates = {
       &pkgCurated2, &pkgBlessed2, &pkgBlessed1, &pkgCurated1};
 
-  const auto ranked = engine.rankPackages(candidates, authorKeys.publicKey, docKey,
-                                          {transAuthor.publicKey});
+  const auto ranked = engine.rankPackages(candidates, authorKeys.publicKey,
+                                          docKey, {transAuthor.publicKey});
 
   ASSERT_EQ(ranked.size(), 4U);
   // 1: Curated 1 (score >= 1000)
@@ -547,7 +595,7 @@ TEST(LinkDiscoveryTest, publicPackagesAreBoundedByConfiguredLimit) {
   LinkDiscoveryEngine engine;
   engine.setMaxPublicPackages(2);
 
-  const auto authorKeys = createMutableKeys();
+  const auto authorKeys    = createMutableKeys();
   const std::string docKey = "btpk:" + authorKeys.publicKey.hex() + ":doc";
 
   std::vector<MutableKeys> keys;
@@ -557,9 +605,9 @@ TEST(LinkDiscoveryTest, publicPackagesAreBoundedByConfiguredLimit) {
 
   for (int i = 0; i < 5; i++) {
     keys.push_back(createMutableKeys());
-    packages.push_back(publishLinkPackage(keys.back(), "salt-" + std::to_string(i),
-                                          "Pkg " + std::to_string(i), i + 1,
-                                          1700000000, {}, {}));
+    packages.push_back(publishLinkPackage(
+        keys.back(), "salt-" + std::to_string(i), "Pkg " + std::to_string(i),
+        i + 1, 1700000000, {}, {}));
   }
 
   std::vector<const LinkPackage *> candidates;
@@ -568,7 +616,8 @@ TEST(LinkDiscoveryTest, publicPackagesAreBoundedByConfiguredLimit) {
     candidates.push_back(&pkg);
   }
 
-  const auto ranked = engine.rankPackages(candidates, authorKeys.publicKey, docKey);
+  const auto ranked =
+      engine.rankPackages(candidates, authorKeys.publicKey, docKey);
 
   // Bounded to 2 public packages
   ASSERT_EQ(ranked.size(), 2U);
@@ -578,16 +627,19 @@ TEST(LinkDiscoveryTest, publicPackagesAreBoundedByConfiguredLimit) {
 
 TEST(LinkDiscoveryTest, rendezvousTargetIsDeterministic) {
   const std::string scrollKey = "btpk:0123456789abcdef:salt";
-  const auto t1 = linkPackageRendezvousTarget(scrollKey);
-  const auto t2 = linkPackageRendezvousTarget(scrollKey);
+  const auto t1               = linkPackageRendezvousTarget(scrollKey);
+  const auto t2               = linkPackageRendezvousTarget(scrollKey);
   EXPECT_EQ(t1, t2);
   EXPECT_FALSE(t1.hex().empty());
 }
 
 TEST(LinkLayoutTest, linkColourAppliesTierAlpha) {
-  const auto authorColor  = linkColour(LinkType::Comment, ProminenceTier::Author);
-  const auto curatedColor = linkColour(LinkType::Comment, ProminenceTier::Curated);
-  const auto publicColor  = linkColour(LinkType::Comment, ProminenceTier::Public);
+  const auto authorColor =
+      linkColour(LinkType::Comment, ProminenceTier::Author);
+  const auto curatedColor =
+      linkColour(LinkType::Comment, ProminenceTier::Curated);
+  const auto publicColor =
+      linkColour(LinkType::Comment, ProminenceTier::Public);
 
   // RGB components should match
   EXPECT_EQ(authorColor & 0xFFFFFF00U, curatedColor & 0xFFFFFF00U);

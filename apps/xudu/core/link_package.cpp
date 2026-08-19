@@ -70,7 +70,8 @@ bencode::Value encodeSpans(const std::vector<GlobalSpan> &spans) {
   return bencode::Value::list(std::move(out));
 }
 
-std::optional<std::vector<GlobalSpan>> decodeSpans(const bencode::Value &value) {
+std::optional<std::vector<GlobalSpan>>
+decodeSpans(const bencode::Value &value) {
   if (!value.isList()) {
     return std::nullopt;
   }
@@ -242,7 +243,8 @@ bencode::Dict manifestOf(const LinkPackage &pkg, const bool includeSignature) {
       {keySalt, bencode::Value::string(pkg.salt)},
       {keyScrolls, bencode::Value::dict(std::move(scrollsDict))},
       {keySequence, bencode::Value::integer(pkg.sequence)},
-      {keyTime, bencode::Value::integer(static_cast<std::int64_t>(pkg.published))},
+      {keyTime,
+       bencode::Value::integer(static_cast<std::int64_t>(pkg.published))},
       {keyTitle, bencode::Value::string(pkg.title)},
   };
 
@@ -273,9 +275,8 @@ std::string LinkPackage::packageKey() const {
 }
 
 std::string LinkPackage::describe() const {
-  return std::format("LinkPackage \"{}\" by {}… seq {}, {} links",
-                     title, curator.hex().substr(0, 8), sequence,
-                     links.size());
+  return std::format("LinkPackage \"{}\" by {}… seq {}, {} links", title,
+                     curator.hex().substr(0, 8), sequence, links.size());
 }
 
 std::string linkPackageSigningBuffer(const LinkPackage &pkg) {

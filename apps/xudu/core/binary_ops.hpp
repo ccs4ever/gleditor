@@ -34,16 +34,14 @@ void writeBinaryOpsSpool(std::ostream &out,
                          const std::map<MicroversionId, Op> &ops);
 
 /// Read operations from compact binary format.
-void readBinaryOpsSpool(std::istream &in,
-                        std::map<MicroversionId, Op> &ops);
+void readBinaryOpsSpool(std::istream &in, std::map<MicroversionId, Op> &ops);
 
 /// Write operations in standard human-readable OSMIC text format.
 void writeOsmicTextOpsSpool(std::ostream &out,
                             const std::map<MicroversionId, Op> &ops);
 
 /// Read operations from standard human-readable OSMIC text format.
-void readOsmicTextOpsSpool(std::istream &in,
-                           std::map<MicroversionId, Op> &ops);
+void readOsmicTextOpsSpool(std::istream &in, std::map<MicroversionId, Op> &ops);
 
 /// Auto-detects binary vs. text format by peeking magic bytes and decodes.
 void readOpsSpool(std::istream &in, std::map<MicroversionId, Op> &ops);

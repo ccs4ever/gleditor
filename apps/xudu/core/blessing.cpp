@@ -38,7 +38,8 @@ bencode::Dict dictOf(const Blessing &blessing, const bool includeSignature) {
       {keyAuthor, bencode::Value::string(rawBytes(blessing.author))},
       {keyTargetDoc, bencode::Value::string(blessing.targetDocument)},
       {keyEndorsedPackage, bencode::Value::string(blessing.endorsedPackage)},
-      {keyTime, bencode::Value::integer(static_cast<std::int64_t>(blessing.timestamp))},
+      {keyTime,
+       bencode::Value::integer(static_cast<std::int64_t>(blessing.timestamp))},
   };
   if (!blessing.note.empty()) {
     dict.emplace(keyNote, bencode::Value::string(blessing.note));
@@ -54,7 +55,8 @@ bencode::Dict dictOf(const Blessing &blessing, const bool includeSignature) {
 
 std::string Blessing::describe() const {
   return std::format("Blessing by {}… of pkg \"{}\" for doc \"{}\"",
-                     author.hex().substr(0, 8), endorsedPackage, targetDocument);
+                     author.hex().substr(0, 8), endorsedPackage,
+                     targetDocument);
 }
 
 std::string blessingSigningBuffer(const Blessing &blessing) {
@@ -88,11 +90,11 @@ std::optional<Blessing> decodeBlessing(const std::string_view encoded) {
   const auto *note      = root.find(keyNote);
   const auto *sig       = root.find(keySignature);
 
-  if (nullptr == author || !author->isString() || author->asString().size() != 32 ||
-      nullptr == targetDoc || !targetDoc->isString() ||
-      nullptr == endorsed || !endorsed->isString() ||
-      nullptr == time || !time->isInteger() ||
-      nullptr == sig || !sig->isString() || sig->asString().size() != 64) {
+  if (nullptr == author || !author->isString() ||
+      author->asString().size() != 32 || nullptr == targetDoc ||
+      !targetDoc->isString() || nullptr == endorsed || !endorsed->isString() ||
+      nullptr == time || !time->isInteger() || nullptr == sig ||
+      !sig->isString() || sig->asString().size() != 64) {
     return std::nullopt;
   }
 
@@ -111,10 +113,8 @@ std::optional<Blessing> decodeBlessing(const std::string_view encoded) {
   return blessing;
 }
 
-Blessing createBlessing(const MutableKeys &keys,
-                        std::string targetDocument,
-                        std::string endorsedPackage,
-                        std::string note,
+Blessing createBlessing(const MutableKeys &keys, std::string targetDocument,
+                        std::string endorsedPackage, std::string note,
                         const std::uint64_t timestamp) {
   Blessing blessing;
   blessing.author          = keys.publicKey;

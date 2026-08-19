@@ -1,6 +1,7 @@
 /**
  * @file link_package.hpp
- * @brief Standalone, signed bundles of links published independently of documents.
+ * @brief Standalone, signed bundles of links published independently of
+ * documents.
  */
 #ifndef XUDU_LINK_PACKAGE_HPP
 #define XUDU_LINK_PACKAGE_HPP
@@ -23,7 +24,8 @@ class Store;
 
 /**
  * @struct LinkPackage
- * @brief A standalone, signed bundle of links published independently by any party.
+ * @brief A standalone, signed bundle of links published independently by any
+ * party.
  *
  * In Xanadu's pluralistic link architecture, anyone can curate and publish a
  * link package that connects spans across documents. Link packages can be
@@ -55,9 +57,9 @@ decodeLinkPackage(std::string_view encoded);
 [[nodiscard]] bool verifyLinkPackage(const LinkPackage &pkg);
 
 [[nodiscard]] LinkPackage
-publishLinkPackage(const MutableKeys &keys, std::string salt,
-                   std::string title, std::int64_t sequence,
-                   std::uint64_t published, std::vector<GlobalLink> links,
+publishLinkPackage(const MutableKeys &keys, std::string salt, std::string title,
+                   std::int64_t sequence, std::uint64_t published,
+                   std::vector<GlobalLink> links,
                    std::map<std::string, Scroll> scrolls);
 
 /// Result of adopting a standalone link package into a store.
@@ -76,7 +78,8 @@ adoptLinkPackage(Store &store, const LinkPackage &pkg,
  * Computes SHA1("xanalinks:" + scrollKey) so that anyone looking for links
  * referencing a given scroll/document queries this target in the DHT.
  */
-[[nodiscard]] DhtTarget linkPackageRendezvousTarget(const std::string &scrollKey);
+[[nodiscard]] DhtTarget
+linkPackageRendezvousTarget(const std::string &scrollKey);
 
 } // namespace xudu
 

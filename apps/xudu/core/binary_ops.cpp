@@ -9,19 +9,19 @@ namespace xudu {
 namespace {
 
 enum OpBinaryKind : std::uint8_t {
-  BinInsert            = 0,
-  BinDelete            = 1,
-  BinRearrange         = 2,
+  BinInsert             = 0,
+  BinDelete             = 1,
+  BinRearrange          = 2,
   BinTranscludeInternal = 3,
   BinTranscludeExternal = 4,
-  BinLink              = 5,
+  BinLink               = 5,
 };
 
-constexpr std::uint8_t FLAG_KIND_MASK         = 0x07;
-constexpr std::uint8_t FLAG_SEQUENTIAL        = 0x08;
-constexpr std::uint8_t FLAG_LOCAL_SCROLL      = 0x10;
-constexpr std::uint8_t FLAG_AT_EQUALS_START   = 0x20;
-constexpr std::uint8_t FLAG_SINGLE_BYTE       = 0x40;
+constexpr std::uint8_t FLAG_KIND_MASK       = 0x07;
+constexpr std::uint8_t FLAG_SEQUENTIAL      = 0x08;
+constexpr std::uint8_t FLAG_LOCAL_SCROLL    = 0x10;
+constexpr std::uint8_t FLAG_AT_EQUALS_START = 0x20;
+constexpr std::uint8_t FLAG_SINGLE_BYTE     = 0x40;
 
 } // namespace
 
@@ -37,7 +37,7 @@ void writeVarint(std::ostream &out, std::uint64_t val) {
 }
 
 bool readVarint(std::istream &in, std::uint64_t &val) {
-  val = 0;
+  val       = 0;
   int shift = 0;
   while (true) {
     const int c = in.get();
@@ -84,8 +84,8 @@ bool readMicroversionId(std::istream &in, MicroversionId &id) {
     if (!readVarint(in, num)) {
       return false;
     }
-    segs.push_back(MicroversionId::Segment{
-        static_cast<char>(c), static_cast<std::uint32_t>(num)});
+    segs.push_back(MicroversionId::Segment{static_cast<char>(c),
+                                           static_cast<std::uint32_t>(num)});
   }
   id = MicroversionId(std::move(segs));
   return true;
@@ -93,11 +93,12 @@ bool readMicroversionId(std::istream &in, MicroversionId &id) {
 
 void writeBinaryOpsSpool(std::ostream &out,
                          const std::map<MicroversionId, Op> &ops) {
-  out.write(binaryOpsMagic.data(), static_cast<std::streamsize>(binaryOpsMagic.size()));
+  out.write(binaryOpsMagic.data(),
+            static_cast<std::streamsize>(binaryOpsMagic.size()));
 
   MicroversionId lastProduces{};
   for (const auto &[produces, op] : ops) {
-    std::uint8_t tag = 0;
+    std::uint8_t tag        = 0;
     const bool isSequential = (produces == lastProduces.next());
     if (isSequential) {
       tag |= FLAG_SEQUENTIAL;
@@ -195,17 +196,16 @@ void writeBinaryOpsSpool(std::ostream &out,
   }
 }
 
-void readBinaryOpsSpool(std::istream &in,
-                        std::map<MicroversionId, Op> &ops) {
+void readBinaryOpsSpool(std::istream &in, std::map<MicroversionId, Op> &ops) {
   MicroversionId lastProduces{};
   while (true) {
     const int c = in.get();
     if (c == std::char_traits<char>::eof()) {
       break;
     }
-    const auto tag = static_cast<std::uint8_t>(c);
+    const auto tag          = static_cast<std::uint8_t>(c);
     const bool isSequential = (tag & FLAG_SEQUENTIAL) != 0;
-    const auto kindCode = static_cast<OpBinaryKind>(tag & FLAG_KIND_MASK);
+    const auto kindCode     = static_cast<OpBinaryKind>(tag & FLAG_KIND_MASK);
 
     MicroversionId produces;
     if (isSequential) {
@@ -301,8 +301,8 @@ void readBinaryOpsSpool(std::istream &in,
 
     case BinTranscludeExternal:
       op.kind = OpKind::Transclude;
-      if (!readVarint(in, v1) || !readVarint(in, v2) ||
-          !readVarint(in, v3) || !readVarint(in, v4)) {
+      if (!readVarint(in, v1) || !readVarint(in, v2) || !readVarint(in, v3) ||
+          !readVarint(in, v4)) {
         throw std::runtime_error("malformed binary external transclude op");
       }
       op.at          = static_cast<std::uint32_t>(v1);
@@ -320,7 +320,8 @@ void readBinaryOpsSpool(std::istream &in,
       break;
 
     default:
-      throw std::runtime_error("unknown binary op kind tag: " + std::to_string(tag));
+      throw std::runtime_error("unknown binary op kind tag: " +
+                               std::to_string(tag));
     }
 
     ops.emplace(produces, op);
@@ -333,10 +334,9 @@ void writeOsmicTextOpsSpool(std::ostream &out,
   for (const auto &[id, op] : ops) {
     out << id.str() << ' ' << opKindName(op.kind) << ' ' << op.at << ' '
         << op.length << ' ' << op.to << ' ' << op.span.start << ' '
-        << op.span.length << ' '
-        << (op.source.isZero() ? "0" : op.source.str()) << ' ' << op.sourceAt
-        << ' ' << op.sourceLength << ' ' << op.link << ' ' << op.span.scroll
-        << '\n';
+        << op.span.length << ' ' << (op.source.isZero() ? "0" : op.source.str())
+        << ' ' << op.sourceAt << ' ' << op.sourceLength << ' ' << op.link << ' '
+        << op.span.scroll << '\n';
   }
 }
 

@@ -1,6 +1,7 @@
 /**
  * @file fuzz_link_package.cpp
- * @brief LLVM libFuzzer harness for link package, publication, and blessing decoding.
+ * @brief LLVM libFuzzer harness for link package, publication, and blessing
+ * decoding.
  */
 #include <cstddef>
 #include <cstdint>
