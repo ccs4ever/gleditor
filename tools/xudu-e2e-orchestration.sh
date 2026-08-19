@@ -28,7 +28,7 @@ echo "==> Running E2E Binary Orchestration Test Suite..."
 "$TEST_BIN" --gtest_filter='*E2EBinaryOrchestration*'
 
 echo "==> Verifying generated visual screenshots in ${SCREENSHOT_DIR}:"
-for step in step1_source_torrents step2_xanadocs_loaded step3_cross_linking step4_transclusion step5_link_packages_applied; do
+for step in step1_source_torrents step2_xanadocs_loaded step3_cross_linking step4_transclusion step5_link_packages_applied step6_full_page_multi_topology step7_three_doc_bypass_routing; do
   ppm="${SCREENSHOT_DIR}/${step}.ppm"
   png="${SCREENSHOT_DIR}/${step}.png"
   if [ -f "$ppm" ]; then
@@ -42,4 +42,4 @@ for step in step1_source_torrents step2_xanadocs_loaded step3_cross_linking step
   fi
 done
 
-echo "==> All 5 E2E integration test scenarios orchestrated with screenshots verified successfully!"
+echo "==> All 7 E2E integration test scenarios orchestrated with screenshots verified successfully!"
