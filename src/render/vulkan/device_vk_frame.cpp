@@ -143,9 +143,9 @@ VkCommandBuffer DeviceVK::beginSecondary(RecordSlot &slot) {
   inherit.framebuffer = framebuffer;
 
   VkCommandBufferBeginInfo begin{};
-  begin.sType            = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
-  begin.flags            = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT |
-                           VK_COMMAND_BUFFER_USAGE_RENDER_PASS_CONTINUE_BIT;
+  begin.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+  begin.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT |
+                VK_COMMAND_BUFFER_USAGE_RENDER_PASS_CONTINUE_BIT;
   begin.pInheritanceInfo = &inherit;
   check(vkBeginCommandBuffer(commands, &begin),
         "vkBeginCommandBuffer (secondary)");
@@ -399,9 +399,9 @@ void DeviceVK::drawGlyphBatches(const std::span<const GlyphBatch> batches) {
   // timing. Timing only during the comparison is what keeps the choice from
   // drifting with the noise of whichever strategy happens to be in use.
   const bool probing = recordingProbeFrame < recordingProbeFrames;
-  const bool split = probing
-                         ? (recordingProbeFrame < recordingProbeBlock)
-                         : parallelCost.median() < sequentialCost.median() *
+  const bool split   = probing
+                           ? (recordingProbeFrame < recordingProbeBlock)
+                           : parallelCost.median() < sequentialCost.median() *
                                                        parallelRecordingMargin;
   // The opening frames of each block are thrown away: the first split frame
   // after a run of sequential ones wakes workers that have been parked, which

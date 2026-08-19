@@ -858,9 +858,9 @@ void Renderer::renderLoop(AutoSDLWindow &window) {
     }
 
     if (!firstPageRecorded && !state.pageBatches.empty()) {
-      timeToFirstPage   = std::chrono::duration<double, std::milli>(
-                              std::chrono::steady_clock::now() - loopStart)
-                              .count();
+      timeToFirstPage = std::chrono::duration<double, std::milli>(
+                            std::chrono::steady_clock::now() - loopStart)
+                            .count();
       firstPageRecorded = true;
       std::cout << std::format(
           "[TIMING] First page rendered: {:.2f} ms (docs in render: {})\n",
