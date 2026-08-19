@@ -66,9 +66,7 @@ void placeLinks(const std::map<std::uint64_t, Link> &links,
     // Both sides absent is a link about something else entirely, and both
     // present has already been dealt with above.
     if (lefts.empty() != rights.empty()) {
-      leaving.push_back(HalfLink{id,
-                                 link.type,
-                                 link.tier,
+      leaving.push_back(HalfLink{id, link.type, link.tier,
                                  lefts.empty() ? rights.front() : lefts.front(),
                                  lefts.empty() ? link.left : link.right});
     }

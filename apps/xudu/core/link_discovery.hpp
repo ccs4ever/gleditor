@@ -20,7 +20,8 @@ namespace xudu {
 
 /**
  * @struct RankedLinkPackage
- * @brief A link package evaluated and ranked by prominence and blessing weights.
+ * @brief A link package evaluated and ranked by prominence and blessing
+ * weights.
  */
 struct RankedLinkPackage {
   const LinkPackage *package{nullptr};
@@ -32,19 +33,26 @@ struct RankedLinkPackage {
 
 /**
  * @class LinkDiscoveryEngine
- * @brief Manages curator subscriptions, author blessings, and bounded public discovery ranking.
+ * @brief Manages curator subscriptions, author blessings, and bounded public
+ * discovery ranking.
  */
 class LinkDiscoveryEngine {
 public:
   LinkDiscoveryEngine() = default;
 
   /// Curator subscriptions
-  void followCurator(const PublicKey &curator) { followedCurators.insert(curator); }
-  void unfollowCurator(const PublicKey &curator) { followedCurators.erase(curator); }
+  void followCurator(const PublicKey &curator) {
+    followedCurators.insert(curator);
+  }
+  void unfollowCurator(const PublicKey &curator) {
+    followedCurators.erase(curator);
+  }
   [[nodiscard]] bool isFollowed(const PublicKey &curator) const {
     return followedCurators.contains(curator);
   }
-  [[nodiscard]] const std::set<PublicKey> &curators() const { return followedCurators; }
+  [[nodiscard]] const std::set<PublicKey> &curators() const {
+    return followedCurators;
+  }
 
   /// Blessings registry
   bool addBlessing(Blessing blessing);
@@ -53,8 +61,12 @@ public:
                const std::string &packageKey) const;
 
   /// Public packages bound
-  void setMaxPublicPackages(const std::size_t maxCount) { maxPublicPackages = maxCount; }
-  [[nodiscard]] std::size_t getMaxPublicPackages() const { return maxPublicPackages; }
+  void setMaxPublicPackages(const std::size_t maxCount) {
+    maxPublicPackages = maxCount;
+  }
+  [[nodiscard]] std::size_t getMaxPublicPackages() const {
+    return maxPublicPackages;
+  }
 
   /**
    * @brief Evaluate and rank candidate link packages for a document.
@@ -63,7 +75,8 @@ public:
    * @param documentAuthor The author of the active document.
    * @param targetDocumentKey The full key of the document (e.g. "btpk:...").
    * @param transcludedAuthors Authors of sources quoted in the active document.
-   * @return Ordered list of ranked link packages, with public ones bounded by maxPublicPackages.
+   * @return Ordered list of ranked link packages, with public ones bounded by
+   * maxPublicPackages.
    */
   [[nodiscard]] std::vector<RankedLinkPackage>
   rankPackages(const std::vector<const LinkPackage *> &candidates,

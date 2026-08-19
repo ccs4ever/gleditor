@@ -50,18 +50,18 @@ using xudu::Library;
 using xudu::linkColour;
 using xudu::LinkDiscoveryEngine;
 using xudu::LinkPackage;
+using xudu::LinkType;
 using xudu::linkTypeFromName;
 using xudu::linkTypeName;
-using xudu::LinkType;
 using xudu::MicroversionId;
 using xudu::MutableKeys;
 using xudu::MutableLink;
 using xudu::Op;
-using xudu::opKindName;
 using xudu::OpKind;
+using xudu::opKindName;
 using xudu::PrimediaSpan;
-using xudu::prominenceTierName;
 using xudu::ProminenceTier;
+using xudu::prominenceTierName;
 using xudu::Publication;
 using xudu::PublicKey;
 using xudu::publish;
@@ -134,9 +134,9 @@ TEST(CoverageBoostTest, scrollMethodsAndEdgeCases) {
   EXPECT_TRUE(scroll.segments.empty());
 
   // Named scroll describe
-  const auto keys = createMutableKeys();
+  const auto keys  = createMutableKeys();
   scroll.publisher = keys.publicKey;
-  scroll.salt = "salt1";
+  scroll.salt      = "salt1";
   EXPECT_TRUE(scroll.isNamed());
   EXPECT_EQ(scroll.describe(), "urn:btpk:" + keys.publicKey.hex() + "/salt1");
 
@@ -194,7 +194,8 @@ TEST(CoverageBoostTest, binaryOpsCodecErrorHandling) {
   rearrangeOp.length = 10;
   rearrangeOp.to     = 20;
 
-  std::map<MicroversionId, Op> opsMap = {{MicroversionId::parse("2"), rearrangeOp}};
+  std::map<MicroversionId, Op> opsMap = {
+      {MicroversionId::parse("2"), rearrangeOp}};
 
   // Binary round-trip
   std::stringstream binOut;
@@ -221,10 +222,12 @@ TEST(CoverageBoostTest, binaryOpsCodecErrorHandling) {
 
 TEST(CoverageBoostTest, blessingAndLinkPackageDescribers) {
   const auto keys = createMutableKeys();
-  const auto blessing = createBlessing(keys, "doc1", "pkg1", "My Note", 1700000000);
+  const auto blessing =
+      createBlessing(keys, "doc1", "pkg1", "My Note", 1700000000);
   EXPECT_FALSE(blessing.describe().empty());
 
-  const auto pkg = publishLinkPackage(keys, "salt1", "Pkg 1", 1, 1700000000, {}, {});
+  const auto pkg =
+      publishLinkPackage(keys, "salt1", "Pkg 1", 1, 1700000000, {}, {});
   EXPECT_FALSE(pkg.describe().empty());
   EXPECT_FALSE(pkg.packageKey().empty());
   EXPECT_FALSE(pkg.uri().empty());
@@ -255,8 +258,10 @@ TEST(CoverageBoostTest, publicationLibraryIndex) {
   const auto scroll = makeNamedScroll(authorKeys.publicKey, "scroll1", 1000);
 
   Store store;
-  const auto ver = store.transcludeExternal(MicroversionId{}, 0, scroll, 0, 100);
-  const auto pub = publish(store, ver, authorKeys, "salt1", "Title 1", 1, 1700000000);
+  const auto ver =
+      store.transcludeExternal(MicroversionId{}, 0, scroll, 0, 100);
+  const auto pub =
+      publish(store, ver, authorKeys, "salt1", "Title 1", 1, 1700000000);
 
   EXPECT_TRUE(library.add(pub));
   EXPECT_EQ(library.size(), 1U);
@@ -267,7 +272,8 @@ TEST(CoverageBoostTest, publicationLibraryIndex) {
   EXPECT_FALSE(library.add(pub));
 
   // Query showing spans
-  const auto sightings = library.showing(GlobalSpan{"btpk:" + authorKeys.publicKey.hex() + ":scroll1", 10, 20});
+  const auto sightings = library.showing(
+      GlobalSpan{"btpk:" + authorKeys.publicKey.hex() + ":scroll1", 10, 20});
   ASSERT_EQ(sightings.size(), 1U);
   EXPECT_EQ(sightings[0].start, 10U);
   EXPECT_EQ(sightings[0].end, 30U);
@@ -279,22 +285,28 @@ TEST(CoverageBoostTest, mutableLinkAndHexParsers) {
   EXPECT_TRUE(pkZero.isZero());
 
   // fromHex errors
-  EXPECT_THROW(static_cast<void>(PublicKey::fromHex("short")), std::runtime_error);
-  EXPECT_THROW(static_cast<void>(SecretKey::fromHex("short")), std::runtime_error);
-  EXPECT_THROW(static_cast<void>(Signature::fromHex("short")), std::runtime_error);
+  EXPECT_THROW(static_cast<void>(PublicKey::fromHex("short")),
+               std::runtime_error);
+  EXPECT_THROW(static_cast<void>(SecretKey::fromHex("short")),
+               std::runtime_error);
+  EXPECT_THROW(static_cast<void>(Signature::fromHex("short")),
+               std::runtime_error);
 
   // MutableLink::parse with non-magnet
-  EXPECT_THROW(static_cast<void>(MutableLink::parse("http://example.com")), std::runtime_error);
+  EXPECT_THROW(static_cast<void>(MutableLink::parse("http://example.com")),
+               std::runtime_error);
 
   // MutableLink with display name & trackers
   const auto keys = createMutableKeys();
   MutableLink link;
-  link.key = keys.publicKey;
-  link.salt = "salt1";
+  link.key         = keys.publicKey;
+  link.salt        = "salt1";
   link.displayName = "My Doc";
-  link.trackers = {"http://tracker.example.com/announce"};
-  const auto uri = link.uri();
-  EXPECT_TRUE(uri.find("dn=My+Doc") != std::string::npos || uri.find("dn=My%20Doc") != std::string::npos || uri.find("dn=My Doc") != std::string::npos);
+  link.trackers    = {"http://tracker.example.com/announce"};
+  const auto uri   = link.uri();
+  EXPECT_TRUE(uri.find("dn=My+Doc") != std::string::npos ||
+              uri.find("dn=My%20Doc") != std::string::npos ||
+              uri.find("dn=My Doc") != std::string::npos);
   EXPECT_TRUE(MutableLink::looksLikeMutableLink(uri));
 
   const auto parsed = MutableLink::parse(uri);
@@ -306,7 +318,7 @@ TEST(CoverageBoostTest, storeHypertimeRearrange) {
   Store store;
   auto v1 = store.insert(MicroversionId{}, 0, "ABCDEFGHIJ");
   // Rearrange: move 3 bytes at 0 ("ABC") to position 7
-  auto v2 = store.rearrange(v1, 0, 3, 7);
+  auto v2         = store.rearrange(v1, 0, 3, 7);
   const auto text = store.textOf(v2);
   EXPECT_EQ(text, "DEFGABCHIJ");
 

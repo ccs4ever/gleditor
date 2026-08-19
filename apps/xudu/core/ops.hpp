@@ -53,9 +53,12 @@ LinkType linkTypeFromName(const std::string &name);
 
 /// The prominence hierarchy of a link.
 enum class ProminenceTier : std::uint8_t {
-  Author  = 0, ///< Bundled with the author's document publication (highest prominence).
-  Curated = 1, ///< From the user's subscribed curator graph (secondary prominence).
-  Public  = 2, ///< Discovered via public DHT swarm rendezvous (bounded / tertiary).
+  Author = 0, ///< Bundled with the author's document publication (highest
+              ///< prominence).
+  Curated =
+      1, ///< From the user's subscribed curator graph (secondary prominence).
+  Public =
+      2, ///< Discovered via public DHT swarm rendezvous (bounded / tertiary).
 };
 
 const char *prominenceTierName(ProminenceTier tier);

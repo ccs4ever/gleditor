@@ -17,29 +17,31 @@ using gleditor::Mod;
 TEST(LibCoverageBoost, modCombinationsAndBit) {
   const auto m1 = Mod::Ctrl | Mod::Shift;
   EXPECT_EQ(static_cast<std::uint16_t>(m1),
-            static_cast<std::uint16_t>(Mod::Ctrl) | static_cast<std::uint16_t>(Mod::Shift));
+            static_cast<std::uint16_t>(Mod::Ctrl) |
+                static_cast<std::uint16_t>(Mod::Shift));
 
   // A11y action bit conversion
   EXPECT_EQ(gleditor::a11y::bit(gleditor::a11y::Action::Focus), 1U << 0);
   EXPECT_EQ(gleditor::a11y::bit(gleditor::a11y::Action::Click), 1U << 1);
   EXPECT_EQ(gleditor::a11y::bit(gleditor::a11y::Action::SetValue), 1U << 2);
-  EXPECT_EQ(gleditor::a11y::bit(gleditor::a11y::Action::ScrollIntoView), 1U << 3);
+  EXPECT_EQ(gleditor::a11y::bit(gleditor::a11y::Action::ScrollIntoView),
+            1U << 3);
 }
 
 TEST(LibCoverageBoost, drawBudgetOperations) {
   DrawBudget budget;
   budget.screenWidth = 1920.0F;
   budget.coarseBelow = 2.0F;
-  budget.cull = true;
+  budget.cull        = true;
 
   EXPECT_EQ(budget.screenWidth, 1920.0F);
   EXPECT_EQ(budget.coarseBelow, 2.0F);
   EXPECT_TRUE(budget.cull);
 
   DrawStats stats;
-  stats.pages = 5;
-  stats.culled = 2;
-  stats.coarse = 1;
+  stats.pages    = 5;
+  stats.culled   = 2;
+  stats.coarse   = 1;
   stats.detailed = 2;
 
   EXPECT_EQ(stats.pages, 5U);
@@ -50,12 +52,12 @@ TEST(LibCoverageBoost, drawBudgetOperations) {
 
 TEST(LibCoverageBoost, a11yNodeHierarchy) {
   gleditor::a11y::Node root;
-  root.id = 1;
-  root.role = gleditor::a11y::Role::Document;
-  root.label = "Main Document";
+  root.id          = 1;
+  root.role        = gleditor::a11y::Role::Document;
+  root.label       = "Main Document";
   root.description = "Root document node";
-  root.bounds = gleditor::a11y::Rect{0.0, 0.0, 800.0, 600.0};
-  root.children = {2, 3};
+  root.bounds      = gleditor::a11y::Rect{0.0, 0.0, 800.0, 600.0};
+  root.children    = {2, 3};
 
   EXPECT_EQ(root.id, 1U);
   EXPECT_EQ(root.role, gleditor::a11y::Role::Document);
