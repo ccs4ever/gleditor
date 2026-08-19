@@ -604,6 +604,19 @@ xudu_test: $(OBJDIR)/xudu_test
 $(OBJDIR)/xudu_test: $(XUDU_TEST_OBJS) $(XUDU_CORE_OBJS)
 	$(CXX) $(LDFLAGS) -o $@ $^ $(XUDU_LIBS) $(TEST_LIBS)
 
+.PHONY: fuzz fuzz_binary_ops fuzz_link_package
+fuzz_binary_ops: $(OBJDIR)/fuzz_binary_ops
+$(OBJDIR)/fuzz_binary_ops: tests/fuzz/fuzz_binary_ops.cpp $(XUDU_CORE_OBJS)
+	@$(MKDIR) -p $(@D)
+	$(CXX) -fsanitize=fuzzer,address,undefined $(CXXFLAGS) $< $(XUDU_CORE_OBJS) $(XUDU_LIBS) -o $@
+
+fuzz_link_package: $(OBJDIR)/fuzz_link_package
+$(OBJDIR)/fuzz_link_package: tests/fuzz/fuzz_link_package.cpp $(XUDU_CORE_OBJS)
+	@$(MKDIR) -p $(@D)
+	$(CXX) -fsanitize=fuzzer,address,undefined $(CXXFLAGS) $< $(XUDU_CORE_OBJS) $(XUDU_LIBS) -o $@
+
+fuzz: fuzz_binary_ops fuzz_link_package
+
 # The other end of the swarm tests: a peer that offers a torrent's content and
 # waits to be asked. A separate program because the two peers are meant to be
 # separate machines -- tools/swarm-netns-test.sh runs this one in a network
