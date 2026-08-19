@@ -212,6 +212,11 @@ public:
   }
 
   /**
+   * @brief Access the shared application state.
+   */
+  [[nodiscard]] AppStateRef appState() const { return state; }
+
+  /**
    * @brief Register something that colours ranges of a document, or draws into
    *        the frame.
    *

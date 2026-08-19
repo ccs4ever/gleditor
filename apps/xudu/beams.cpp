@@ -5,11 +5,13 @@
 #include "beams.hpp"
 
 #include <algorithm>
+#include <cmath>
 #include <cstdint>
 #include <iostream>
 #include <utility>
 
 #include <glm/ext/vector_float4.hpp>
+#include <glm/trigonometric.hpp>
 
 #include <gleditor/caret.hpp>
 #include <gleditor/paths.hpp>
@@ -139,38 +141,83 @@ void LinkBeams::align(const Strand &strand, RenderState &state,
   const glm::vec3 nearPos(near->modelMatrix()[3]);
   const glm::vec3 farPos(far->modelMatrix()[3]);
 
-  // Side by side with a gap between them, rather than one resting place over.
-  // The point of moving it is that both ends of the link can be seen at once,
-  // and a fixed distance cannot promise that: two wide documents a slot apart
-  // overlap, and two narrow ones are further apart than they need to be. Edge
-  // to edge is as close as they can be without touching, which is as much of
-  // both as any view can hold.
   const auto *const nearPage = near->page(strand.fromAnchor->pageIndex);
   const auto *const farPage  = far->page(strand.toAnchor->pageIndex);
   auto apart                 = AbstractRenderer::docSpacing;
+  float nearHalfWidth        = 10.0F;
+  float farHalfWidth         = 10.0F;
   if (nullptr != nearPage && nullptr != farPage) {
-    // Pages are centred on their own origin, so what separates two documents
-    // that just clear each other is half of each, plus the gap.
-    apart = (((nearPage->widthPixels() + farPage->widthPixels()) / 2.0F) *
-             Doc::pixelsToWorld) +
-            documentGap;
+    nearHalfWidth = (nearPage->widthPixels() * 0.5F) * Doc::pixelsToWorld;
+    farHalfWidth  = (farPage->widthPixels() * 0.5F) * Doc::pixelsToWorld;
+    apart         = nearHalfWidth + farHalfWidth + documentGap;
   }
-  // On the side the far document is already on: moving it across the near one
-  // to get there would be a longer journey to the same relation.
-  const auto side = farPos.x >= nearPos.x ? 1.0F : -1.0F;
-  const glm::vec3 target{
-      nearPos.x + (side * apart),
-      // Lifted or dropped by however far apart the two ends currently are, so
-      // that afterwards they are level and the beam between them is a straight
-      // run rather than a diagonal across two documents.
-      farPos.y + (nearAt->y - farAt->y), nearPos.z};
 
-  if (glm::distance(target, farPos) < alreadyAligned) {
-    return;
+  // Gather all strands belonging to the same link connecting this document pair
+  // to compute the vertical centroid of the connected span ranges.
+  float nearMinY = nearAt->y;
+  float nearMaxY = nearAt->y;
+  float farMinY  = farAt->y;
+  float farMaxY  = farAt->y;
+
+  for (auto &s : strands) {
+    if (s.link == strand.link && s.from.doc == strand.from.doc &&
+        s.to.doc == strand.to.doc) {
+      s.aligned = true;
+      if (s.fromAnchor) {
+        if (const auto pt = near->worldPoint(*s.fromAnchor)) {
+          nearMinY = std::min(nearMinY, pt->y);
+          nearMaxY = std::max(nearMaxY, pt->y);
+        }
+      }
+      if (s.toAnchor) {
+        if (const auto pt = far->worldPoint(*s.toAnchor)) {
+          farMinY = std::min(farMinY, pt->y);
+          farMaxY = std::max(farMaxY, pt->y);
+        }
+      }
+    }
   }
-  std::cout << "xudu: link " << strand.link << " brings doc " << strand.to.doc
-            << " alongside doc " << strand.from.doc << "\n";
-  far->animateMoveTo(timeline, target);
+
+  const float nearCenterY = 0.5F * (nearMinY + nearMaxY);
+  const float farCenterY  = 0.5F * (farMinY + farMaxY);
+  const float deltaY      = nearCenterY - farCenterY;
+
+  const auto side = farPos.x >= nearPos.x ? 1.0F : -1.0F;
+  const glm::vec3 target{nearPos.x + (side * apart), farPos.y + deltaY,
+                         nearPos.z};
+
+  if (glm::distance(target, farPos) >= alreadyAligned) {
+    std::cout << "xudu: link " << strand.link << " aligns centroid of doc "
+              << strand.to.doc << " with doc " << strand.from.doc << "\n";
+    far->animateMoveTo(timeline, target);
+  }
+
+  // Dynamic Camera Auto-Framing: calculate world bounding envelope and fit view
+  if (renderer && renderer->appState()) {
+    const float minX =
+        std::min(nearPos.x - nearHalfWidth, target.x - farHalfWidth) - 4.0F;
+    const float maxX =
+        std::max(nearPos.x + nearHalfWidth, target.x + farHalfWidth) + 4.0F;
+    const float minY = std::min(nearMinY, farMinY + deltaY) - 6.0F;
+    const float maxY = std::max(nearMaxY, farMaxY + deltaY) + 6.0F;
+
+    const float spanW = std::max(maxX - minX, 10.0F);
+    const float spanH = std::max(maxY - minY, 10.0F);
+    const glm::vec3 center(0.5F * (minX + maxX), 0.5F * (minY + maxY), 0.0F);
+
+    std::scoped_lock locker(renderer->appState()->view);
+    auto &view             = renderer->appState()->view;
+    const float aspect     = (view.screenHeight > 0 && view.screenWidth > 0)
+                                 ? static_cast<float>(view.screenWidth) /
+                                       static_cast<float>(view.screenHeight)
+                                 : 1.333F;
+    const float fovRad     = glm::radians(view.fov);
+    const float tanHalfFov = std::tan(fovRad * 0.5F);
+    const float zFit       = std::max(spanH / (2.0F * tanHalfFov),
+                                      spanW / (2.0F * aspect * tanHalfFov));
+
+    view.pos = glm::vec3(center.x, center.y, std::max(zFit, 50.0F));
+  }
 }
 
 void LinkBeams::openDangling(RenderState &state) {
@@ -294,8 +341,8 @@ void LinkBeams::drawFrame(gleditor::FrameContext &ctx) {
 
     const auto rightwards = glm::vec3(to->modelMatrix()[3]).x >=
                             glm::vec3(from->modelMatrix()[3]).x;
-    const auto fromAt = edgePoint(*from, *strand.fromAnchor, rightwards);
-    const auto toAt   = edgePoint(*to, *strand.toAnchor, !rightwards);
+    const auto fromAt     = edgePoint(*from, *strand.fromAnchor, rightwards);
+    const auto toAt       = edgePoint(*to, *strand.toAnchor, !rightwards);
     if (!fromAt || !toAt) {
       continue;
     }
@@ -304,8 +351,30 @@ void LinkBeams::drawFrame(gleditor::FrameContext &ctx) {
     // one drawn at a fixed width would swamp small text and vanish in large.
     const auto width =
         strand.fromAnchor->height * Doc::pixelsToWorld * beamWidthOfLine;
-    beams->add(*fromAt, *toAt, width, linkColour(strand.type),
-               static_cast<std::uint32_t>(i));
+
+    const std::size_t docSpan = strand.from.doc > strand.to.doc
+                                    ? (strand.from.doc - strand.to.doc)
+                                    : (strand.to.doc - strand.from.doc);
+
+    if (docSpan <= 1) {
+      // Adjacent documents: direct foreground beam
+      beams->add(*fromAt, *toAt, width, linkColour(strand.type),
+                 static_cast<std::uint32_t>(i));
+    } else {
+      // Non-adjacent documents: route through background depth layer (Z < 0)
+      // to pass behind intermediate documents without occluding text.
+      constexpr float bypassDepth = -20.0F;
+      const float gapOffset       = rightwards ? 2.0F : -2.0F;
+      const glm::vec3 mid1(fromAt->x + gapOffset, fromAt->y, bypassDepth);
+      const glm::vec3 mid2(toAt->x - gapOffset, toAt->y, bypassDepth);
+
+      beams->add(*fromAt, mid1, width, linkColour(strand.type),
+                 static_cast<std::uint32_t>(i));
+      beams->add(mid1, mid2, width, linkColour(strand.type),
+                 static_cast<std::uint32_t>(i));
+      beams->add(mid2, *toAt, width, linkColour(strand.type),
+                 static_cast<std::uint32_t>(i));
+    }
 
     // A link coming into view is what brings its far document over. Judged on
     // the near end rather than on both, because the far one being off screen
@@ -360,7 +429,7 @@ void LinkBeams::describe(gleditor::a11y::Builder &into) {
                        std::to_string(strand.from.end) + ", and bytes " +
                        std::to_string(strand.to.start) + " to " +
                        std::to_string(strand.to.end);
-    node.focusable = true;
+    node.focusable   = true;
     node.actions =
         a11y::bit(a11y::Action::Focus) | a11y::bit(a11y::Action::Click);
   }
