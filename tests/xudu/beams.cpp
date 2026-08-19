@@ -19,17 +19,24 @@
 #include <glm/trigonometric.hpp>
 
 #include <gleditor/doc.hpp>
+#include <xudu/core/framing.hpp>
 #include <xudu/core/link_layout.hpp>
 #include <xudu/core/ops.hpp>
 #include <xudu/core/store.hpp>
 
 namespace {
 
+using xudu::centroidAlignmentDeltaY;
+using xudu::centroidY;
+using xudu::framingDistance;
+using xudu::framingFov;
 using xudu::HalfLink;
 using xudu::Link;
 using xudu::LinkedPair;
 using xudu::LinkType;
 using xudu::MicroversionId;
+using xudu::pageStackExtent;
+using xudu::PageStackExtent;
 using xudu::Store;
 using xudu::Version;
 
@@ -713,4 +720,137 @@ TEST(LinkLayout, multipageBackgroundCorpusAndForegroundFlyInGeometry) {
   // 3D spatial distance bridging between fly-in page and background corpus
   const float depthSpan = glm::distance(flyInPagePos, backgroundCorpusPos);
   EXPECT_GT(depthSpan, 30.0F);
+}
+
+// =============================================================================
+// apps/xudu/core/framing.hpp: centroid alignment and camera-fit distance as
+// pure functions of page counts and heights, independently unit-tested here
+// against hand-derived closed forms rather than only exercised end to end
+// through a screenshot. Not yet wired into LinkBeams::align(), which computes
+// its own camera-fit and centroid inline; kept as a tested, reusable
+// alternative.
+// =============================================================================
+
+namespace {
+
+// Mirrors Doc::pageGapWorld (include/gleditor/doc.hpp) -- this binary is
+// built without the graphics library, so the value is named the same and
+// kept beside the source it mirrors rather than pulled in by including it.
+constexpr float testPageGapWorld = 100.0F;
+
+/// A document of @p pageCount pages, each @p heightWorld tall.
+PageStackExtent uniformStack(const std::size_t pageCount,
+                             const float heightWorld) {
+  return pageStackExtent(std::vector<float>(pageCount, heightWorld),
+                         testPageGapWorld);
+}
+
+} // namespace
+
+// Two documents of the same length, page for page, already share a vertical
+// centre: bringing one alongside the other should ask for no vertical move at
+// all, symmetric or not in every other respect.
+TEST(PageFraming, symmetricPageCountsNeedNoVerticalOffset) {
+  for (const std::size_t pages : {3U, 5U, 8U, 10U}) {
+    const auto a = uniformStack(pages, 80.0F);
+    const auto b = uniformStack(pages, 80.0F);
+    EXPECT_FLOAT_EQ(centroidAlignmentDeltaY(a, b), 0.0F)
+        << pages << "x" << pages << " symmetric stacks did not centre";
+  }
+}
+
+// A document differing only in length from another still has one right
+// answer for how far to move it: the closed form here is worked out by hand
+// (not by calling the function under test) from the same reasoning
+// centroidAlignmentDeltaY() is documented to follow --
+// $\Delta Y = Y_{midA} - Y_{midB}$ -- so this cross-checks the
+// implementation against an independent derivation rather than against
+// itself.
+TEST(PageFraming, asymmetricPageCountsMatchTheClosedFormOffset) {
+  const std::vector<std::pair<std::size_t, std::size_t>> cases{{3, 8}, {5, 10}};
+  for (const auto &[pagesA, pagesB] : cases) {
+    const auto a = uniformStack(pagesA, 80.0F);
+    const auto b = uniformStack(pagesB, 80.0F);
+    // centroidY(n pages, gap g) = -(g * (n - 1)) / 2, independent of a
+    // uniform page height (it cancels between the first page's top and the
+    // last page's bottom), so deltaY = (g / 2) * (pagesB - pagesA).
+    const auto expected =
+        (testPageGapWorld / 2.0F) *
+        (static_cast<float>(pagesB) - static_cast<float>(pagesA));
+    EXPECT_NEAR(centroidAlignmentDeltaY(a, b), expected, 1e-3F)
+        << pagesA << "x" << pagesB << " asymmetric offset";
+    // Moving B to meet A is the exact opposite of moving A to meet B.
+    EXPECT_FLOAT_EQ(centroidAlignmentDeltaY(a, b),
+                    -centroidAlignmentDeltaY(b, a));
+  }
+}
+
+// The plan this suite implements calls out $H_A \\ne H_B$ explicitly: a
+// document whose last page runs short (the ordinary case -- pagination fills
+// every page but the final one) has a top and a bottom that do not mirror
+// each other, and the centroid has to be worked out from both rather than
+// assumed from the page count alone.
+TEST(PageFraming, asymmetricPageHeightsShiftTheCentroidByTheHeightDifference) {
+  const std::vector<float> uniform(5, 80.0F);
+  std::vector<float> shortLastPage(uniform);
+  shortLastPage.back() = 20.0F; // a much shorter final page
+
+  const auto full   = pageStackExtent(uniform, testPageGapWorld);
+  const auto short_ = pageStackExtent(shortLastPage, testPageGapWorld);
+
+  // Only the bottom edge moves: the shorter last page's bottom sits higher up
+  // by half of what it lost, and nothing else about the stack changed.
+  EXPECT_FLOAT_EQ(full.topWorld, short_.topWorld);
+  EXPECT_FLOAT_EQ(short_.bottomWorld,
+                  full.bottomWorld + (80.0F - 20.0F) / 2.0F);
+  EXPECT_GT(centroidY(short_), centroidY(full))
+      << "a shorter final page should raise the stack's centre, not lower it";
+}
+
+// A box exactly as tall as the frustum is wide at 90 degrees vertical field
+// of view sits at a distance equal to its own half-height -- tan(45) is 1,
+// so this is the one input where the formula reduces to something checkable
+// without a calculator.
+TEST(PageFraming, framingDistanceAtNinetyDegreesIsHalfTheHeight) {
+  constexpr float aspect = 1.0F; // width term must not dominate here
+  const auto distance    = framingDistance(/*worldWidth=*/10.0F,
+                                           /*worldHeight=*/200.0F,
+                                           /*fovYDegrees=*/90.0F, aspect);
+  EXPECT_NEAR(distance, 100.0F, 1e-2F);
+}
+
+// framingFov() is framingDistance() solved for the angle instead of the
+// distance; feeding one's output into the other should come back out where
+// it started, for any box and any distance a camera might actually sit at.
+TEST(PageFraming, framingDistanceAndFramingFovInvertEachOther) {
+  constexpr float aspect = 800.0F / 600.0F;
+  for (const float distance : {50.0F, 250.0F, 1000.0F, 4000.0F}) {
+    for (const float worldHeight : {80.0F, 780.0F, 1580.0F}) {
+      const auto worldWidth = 200.0F;
+      const auto fov = framingFov(worldWidth, worldHeight, distance, aspect,
+                                  /*margin=*/1.15F);
+      const auto roundTrip = framingDistance(worldWidth, worldHeight, fov,
+                                             aspect, /*margin=*/1.15F);
+      EXPECT_NEAR(roundTrip, distance, distance * 1e-3F)
+          << "distance " << distance << ", height " << worldHeight;
+    }
+  }
+}
+
+// A taller pair of documents (more pages) needs a camera further back to
+// hold them both at a fixed field of view -- the whole reason the extreme
+// framing suite computes this per page count rather than picking one fov and
+// hoping it fits every N x N case.
+TEST(PageFraming, framingDistanceGrowsWithPageCount) {
+  constexpr float fov    = 20.0F;
+  constexpr float aspect = 800.0F / 600.0F;
+  constexpr float width  = 260.0F;
+  float previous         = 0.0F;
+  for (const std::size_t pages : {3U, 5U, 8U, 10U}) {
+    const auto extent   = uniformStack(pages, 80.0F);
+    const auto height   = extent.topWorld - extent.bottomWorld;
+    const auto distance = framingDistance(width, height, fov, aspect);
+    EXPECT_GT(distance, previous) << pages << " pages did not need more room";
+    previous = distance;
+  }
 }

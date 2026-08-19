@@ -4,6 +4,7 @@
 #include <filesystem>
 #include <fstream>
 #include <iterator>
+#include <locale>
 #include <sstream>
 #include <stdexcept>
 #include <string>
@@ -29,6 +30,32 @@ std::string readWholeFile(const std::filesystem::path &path) {
     return {};
   }
   return {std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>()};
+}
+
+/// Open @p path for writing one of the store's plain-text spools (scrolls,
+/// links, or the OSMIC text ops export), imbued with the classic "C" locale
+/// rather than whatever gleditor::initLocale() has set the process to.
+///
+/// These files are whitespace-delimited plain digits, meant to be read back
+/// by splitting on spaces -- not by a locale-aware parser. Most locales'
+/// numpunct groups large integers with a thousands separator, which a
+/// document long enough to need a four-digit byte offset or length would
+/// put in the middle of a field the reader expects to be one token,
+/// producing a "malformed" error over a store that was never actually
+/// corrupt, only written under the wrong locale.
+std::ofstream openTextSpoolForWrite(const std::filesystem::path &path) {
+  std::ofstream out(path, std::ios::trunc);
+  out.imbue(std::locale::classic());
+  return out;
+}
+
+/// The read side of openTextSpoolForWrite(), imbued the same way so a store
+/// written correctly (in the classic locale) is also read that way,
+/// regardless of what locale the reading process happens to be in.
+std::ifstream openTextSpoolForRead(const std::filesystem::path &path) {
+  std::ifstream in(path);
+  in.imbue(std::locale::classic());
+  return in;
 }
 
 } // namespace
@@ -323,7 +350,7 @@ void Store::save(const std::string &directory) const {
     // torrent carries which stretch. They are separate lines because they are
     // separate kinds of fact with separate lifetimes: the first never changes,
     // and the second is rewritten every time something is sealed.
-    std::ofstream out(dir / scrollsFile, std::ios::trunc);
+    auto out = openTextSpoolForWrite(dir / scrollsFile);
     for (std::size_t i = 0; i < externals.size(); i++) {
       const auto &scroll = externals[i];
       out << "scroll " << (i + 1) << ' '
@@ -338,7 +365,7 @@ void Store::save(const std::string &directory) const {
     }
   }
   {
-    std::ofstream out(dir / linksFile, std::ios::trunc);
+    auto out = openTextSpoolForWrite(dir / linksFile);
     for (const auto &[id, link] : linkTable) {
       out << id << ' ' << linkTypeName(link.type) << ' '
           << (link.owner.empty() ? "-" : link.owner) << ' ' << link.left.size()
@@ -364,11 +391,11 @@ void Store::saveOsmicText(const std::string &directory) const {
   }
   {
     // Canonical line-by-line OSMIC text format.
-    std::ofstream out(dir / opsFile, std::ios::trunc);
+    auto out = openTextSpoolForWrite(dir / opsFile);
     writeOsmicTextOpsSpool(out, ops);
   }
   {
-    std::ofstream out(dir / scrollsFile, std::ios::trunc);
+    auto out = openTextSpoolForWrite(dir / scrollsFile);
     for (std::size_t i = 0; i < externals.size(); i++) {
       const auto &scroll = externals[i];
       out << "scroll " << (i + 1) << ' '
@@ -383,7 +410,7 @@ void Store::saveOsmicText(const std::string &directory) const {
     }
   }
   {
-    std::ofstream out(dir / linksFile, std::ios::trunc);
+    auto out = openTextSpoolForWrite(dir / linksFile);
     for (const auto &[id, link] : linkTable) {
       out << id << ' ' << linkTypeName(link.type) << ' '
           << (link.owner.empty() ? "-" : link.owner) << ' ' << link.left.size()
@@ -418,7 +445,7 @@ void Store::load(const std::string &directory) {
   nextLinkId = 1;
 
   if (std::filesystem::exists(dir / scrollsFile)) {
-    std::ifstream in(dir / scrollsFile);
+    auto in = openTextSpoolForRead(dir / scrollsFile);
     std::string line;
     while (std::getline(in, line)) {
       if (line.empty()) {
@@ -506,7 +533,7 @@ void Store::load(const std::string &directory) {
   }
 
   if (std::filesystem::exists(dir / linksFile)) {
-    std::ifstream in(dir / linksFile);
+    auto in = openTextSpoolForRead(dir / linksFile);
     std::string line;
     while (std::getline(in, line)) {
       if (line.empty()) {
