@@ -652,4 +652,170 @@ TEST(E2EIntegrationTest,
   EXPECT_FLOAT_EQ(totalWidth, 72.0F);
 }
 
+TEST(E2EIntegrationTest,
+     extremeMultiPageFramingSymmetricAndAsymmetricTopology) {
+  // Author Doc A with multi-page structure (10 pages, 400 bytes per page =
+  // 4000 bytes)
+  const auto authorA = createMutableKeys();
+  const auto scrollA = makeNamedScroll(authorA.publicKey, "corpusA", 8000);
+
+  Store storeA;
+  const auto vA =
+      storeA.transcludeExternal(MicroversionId{}, 0, scrollA, 0, 4000);
+  const auto pubA = publish(storeA, vA, authorA, "doc_a",
+                            "Multi-Page Master Volume", 1, 1700000000);
+
+  // Author Doc B with multi-page structure (10 pages, 400 bytes per page =
+  // 4000 bytes)
+  const auto authorB = createMutableKeys();
+  const auto scrollB = makeNamedScroll(authorB.publicKey, "corpusB", 8000);
+
+  Store storeB;
+  const auto vB =
+      storeB.transcludeExternal(MicroversionId{}, 0, scrollB, 0, 4000);
+  const auto pubB = publish(storeB, vB, authorB, "doc_b",
+                            "Multi-Page Concordance", 1, 1700000000);
+
+  const auto curator   = createMutableKeys();
+  const std::string kA = "btpk:" + authorA.publicKey.hex() + ":corpusA";
+  const std::string kB = "btpk:" + authorB.publicKey.hex() + ":corpusB";
+
+  // Test 1: Symmetric 10-page vs 10-page Many-to-Many link from {Page 1
+  // Sentence 1, Page 10 Last Sentence}
+  std::vector<GlobalLink> links;
+  GlobalLink symmLink;
+  symmLink.type  = LinkType::Quotation;
+  symmLink.owner = "SymmetricCurator";
+  // Doc A: Page 1 sentence 1 [0..60] and Page 10 last sentence [3940..4000]
+  symmLink.left.push_back(GlobalSpan{kA, 0, 60});
+  symmLink.left.push_back(GlobalSpan{kA, 3940, 60});
+  // Doc B: Page 1 sentence 1 [0..60] and Page 10 last sentence [3940..4000]
+  symmLink.right.push_back(GlobalSpan{kB, 0, 60});
+  symmLink.right.push_back(GlobalSpan{kB, 3940, 60});
+  links.push_back(symmLink);
+
+  // Test 2: Asymmetric 3-page vs 8-page Many-to-Many link
+  // Doc A: Page 1 sentence 1 [0..60] and Page 3 last sentence [1140..1200]
+  // Doc B: Page 1 sentence 1 [0..60] and Page 8 last sentence [3140..3200]
+  GlobalLink asymmLink;
+  asymmLink.type  = LinkType::Illustration;
+  asymmLink.owner = "AsymmetricCurator";
+  asymmLink.left.push_back(GlobalSpan{kA, 0, 60});
+  asymmLink.left.push_back(GlobalSpan{kA, 1140, 60});
+  asymmLink.right.push_back(GlobalSpan{kB, 0, 60});
+  asymmLink.right.push_back(GlobalSpan{kB, 3140, 60});
+  links.push_back(asymmLink);
+
+  std::map<std::string, Scroll> scrolls;
+  scrolls.insert_or_assign(kA, scrollA);
+  scrolls.insert_or_assign(kB, scrollB);
+
+  const auto pkg =
+      publishLinkPackage(curator, "pkg_extreme", "Extreme Framing", 1,
+                         1700000020, std::move(links), std::move(scrolls));
+
+  Store readerStore;
+  const auto adA = adopt(readerStore, pubA);
+  const auto adB = adopt(readerStore, pubB);
+  adoptLinkPackage(readerStore, pkg, ProminenceTier::Curated);
+
+  const auto verA = readerStore.rebuild(adA.version);
+  const auto verB = readerStore.rebuild(adB.version);
+
+  std::vector<LinkedPair> between;
+  std::vector<HalfLink> leaving;
+  placeLinks(readerStore.links(), viewing({verA, verB}), between, leaving);
+
+  // 2 links with multi-page spans produce 2 LinkedPair records spanning the
+  // covering extents
+  ASSERT_EQ(between.size(), 2U);
+
+  // 1. Symmetric Link: Spans Page 1 start [0] to Page 10 end [4000] in both Doc
+  // A and Doc B
+  const auto pSymm = std::ranges::find_if(between, [](const LinkedPair &p) {
+    return p.type == LinkType::Quotation;
+  });
+  ASSERT_NE(pSymm, between.end());
+  EXPECT_EQ(pSymm->from.doc, 0U);
+  EXPECT_EQ(pSymm->from.start, 0U);
+  EXPECT_EQ(pSymm->from.end, 4000U);
+  EXPECT_EQ(pSymm->to.doc, 1U);
+  EXPECT_EQ(pSymm->to.start, 0U);
+  EXPECT_EQ(pSymm->to.end, 4000U);
+
+  // 2. Asymmetric Link: Spans Doc A Page 1..3 [0..1200] to Doc B Page 1..8
+  // [0..3200]
+  const auto pAsymm = std::ranges::find_if(between, [](const LinkedPair &p) {
+    return p.type == LinkType::Illustration;
+  });
+  ASSERT_NE(pAsymm, between.end());
+  EXPECT_EQ(pAsymm->from.doc, 0U);
+  EXPECT_EQ(pAsymm->from.start, 0U);
+  EXPECT_EQ(pAsymm->from.end, 1200U);
+  EXPECT_EQ(pAsymm->to.doc, 1U);
+  EXPECT_EQ(pAsymm->to.start, 0U);
+  EXPECT_EQ(pAsymm->to.end, 3200U);
+}
+
+TEST(E2EIntegrationTest,
+     largeMultipageBackgroundCorpusWithForegroundLinkedPageFlyIn) {
+  // Author Doc 1: Main Thesis in Foreground
+  const auto author1 = createMutableKeys();
+  const auto scroll1 = makeNamedScroll(author1.publicKey, "thesis", 2000);
+  Store store1;
+  const auto v1 =
+      store1.transcludeExternal(MicroversionId{}, 0, scroll1, 0, 500);
+  const auto pub1 =
+      publish(store1, v1, author1, "doc1", "Primary Thesis", 1, 1700000000);
+
+  // Author Doc 2: Massive Background Corpus (10 pages, 5000 bytes)
+  const auto author2 = createMutableKeys();
+  const auto scroll2 = makeNamedScroll(author2.publicKey, "corpus", 10000);
+  Store store2;
+  const auto v2 =
+      store2.transcludeExternal(MicroversionId{}, 0, scroll2, 0, 5000);
+  const auto pub2 = publish(store2, v2, author2, "doc2",
+                            "Massive Reference Corpus", 1, 1700000000);
+
+  // Link connects section on Thesis [100..200] to Page 7 of Corpus [3000..3200]
+  const auto curator   = createMutableKeys();
+  const std::string k1 = "btpk:" + author1.publicKey.hex() + ":thesis";
+  const std::string k2 = "btpk:" + author2.publicKey.hex() + ":corpus";
+
+  std::vector<GlobalLink> links;
+  GlobalLink deepLink;
+  deepLink.type  = LinkType::Quotation;
+  deepLink.owner = "CorpusCurator";
+  deepLink.left.push_back(GlobalSpan{k1, 100, 100});
+  deepLink.right.push_back(GlobalSpan{k2, 3000, 200});
+  links.push_back(deepLink);
+
+  std::map<std::string, Scroll> scrolls;
+  scrolls.insert_or_assign(k1, scroll1);
+  scrolls.insert_or_assign(k2, scroll2);
+
+  const auto pkg =
+      publishLinkPackage(curator, "pkg_deep", "Deep Corpus Reference", 1,
+                         1700000030, std::move(links), std::move(scrolls));
+
+  Store readerStore;
+  const auto ad1 = adopt(readerStore, pub1);
+  const auto ad2 = adopt(readerStore, pub2);
+  adoptLinkPackage(readerStore, pkg, ProminenceTier::Curated);
+
+  const auto ver1 = readerStore.rebuild(ad1.version);
+  const auto ver2 = readerStore.rebuild(ad2.version);
+
+  std::vector<LinkedPair> between;
+  std::vector<HalfLink> leaving;
+  placeLinks(readerStore.links(), viewing({ver1, ver2}), between, leaving);
+
+  ASSERT_EQ(between.size(), 1U);
+  EXPECT_EQ(between[0].from.doc, 0U);
+  EXPECT_EQ(between[0].from.start, 100U);
+  EXPECT_EQ(between[0].to.doc, 1U);
+  EXPECT_EQ(between[0].to.start, 3000U);
+  EXPECT_EQ(between[0].to.end, 3200U);
+}
+
 } // namespace

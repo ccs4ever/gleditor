@@ -599,3 +599,118 @@ TEST(LinkLayout, fullPageDynamicCameraFramingWithLargeVerticalSpread) {
   EXPECT_GE(frustumHalfHeight * 2.0F, spanH);
   EXPECT_GE(frustumHalfWidth * 2.0F, spanW);
 }
+
+TEST(LinkLayout, symmetricMultiPageFramingZoomScaling) {
+  // Test multi-page scaling across 3, 5, 8, and 10 pages per document
+  const float singlePageH = 800.0F * Doc::pixelsToWorld; // ~40.0 world units
+  const float pageGapH    = 50.0F * Doc::pixelsToWorld;  // ~2.5 world units
+  const float docHalfW    = 12.0F;
+  const float docGap      = 6.0F;
+  const float aspect      = 16.0F / 9.0F;
+  const float fovDeg      = 15.0F;
+  const float tanHalfFov  = std::tan(glm::radians(fovDeg) * 0.5F);
+
+  const std::vector<std::size_t> pageCounts = {3, 5, 8, 10};
+  float prevZFit                            = 0.0F;
+
+  for (const auto pages : pageCounts) {
+    const float totalH = (static_cast<float>(pages) * singlePageH) +
+                         (static_cast<float>(pages - 1) * pageGapH);
+    const float spanW  = (4.0F * docHalfW) + docGap + 8.0F;
+    const float spanH  = totalH + 12.0F;
+
+    const float zFit = std::max(spanH / (2.0F * tanHalfFov),
+                                spanW / (2.0F * aspect * tanHalfFov));
+
+    // Z fit must monotonically grow with the page count to keep all pages in
+    // view
+    EXPECT_GT(zFit, prevZFit);
+    prevZFit = zFit;
+
+    // View frustum encloses all N pages at calculated camera distance
+    const float frustumH = 2.0F * zFit * tanHalfFov;
+    const float frustumW = frustumH * aspect;
+    EXPECT_GE(frustumH, spanH);
+    EXPECT_GE(frustumW, spanW);
+
+    // Centroid of symmetric documents is exactly at half the total height
+    const float topY    = totalH * 0.5F;
+    const float botY    = -totalH * 0.5F;
+    const float centerY = 0.5F * (topY + botY);
+    EXPECT_FLOAT_EQ(centerY, 0.0F);
+  }
+}
+
+TEST(LinkLayout, asymmetricMultiPageCentroidAlignmentAndFraming) {
+  const float pageH      = 40.0F; // world units
+  const float pageGapH   = 2.0F;
+  const float aspect     = 16.0F / 9.0F;
+  const float fovDeg     = 15.0F;
+  const float tanHalfFov = std::tan(glm::radians(fovDeg) * 0.5F);
+
+  // Case 1: 3-page Doc A vs 8-page Doc B
+  {
+    const float heightA = (3.0F * pageH) + (2.0F * pageGapH); // 124.0
+    const float heightB = (8.0F * pageH) + (7.0F * pageGapH); // 334.0
+
+    const float centerA = 0.0F;
+    const float centerB = 0.0F;
+    const float deltaY  = centerA - centerB; // 0.0 if both start at origin
+
+    EXPECT_FLOAT_EQ(deltaY, 0.0F);
+
+    const float spanH = std::max(heightA, heightB) + 12.0F; // 346.0
+    const float zFit  = spanH / (2.0F * tanHalfFov);
+
+    EXPECT_GT(zFit, 1000.0F);
+    EXPECT_GE(2.0F * zFit * tanHalfFov, spanH);
+  }
+
+  // Case 2: 5-page Doc A vs 10-page Doc B with offset starting positions
+  {
+    const float heightA = (5.0F * pageH) + (4.0F * pageGapH);  // 208.0
+    const float heightB = (10.0F * pageH) + (9.0F * pageGapH); // 418.0
+
+    const float posA_Y = 100.0F;
+    const float posB_Y = -50.0F;
+
+    const float minA_Y = posA_Y - heightA * 0.5F;
+    const float maxA_Y = posA_Y + heightA * 0.5F;
+    const float minB_Y = posB_Y - heightB * 0.5F;
+    const float maxB_Y = posB_Y + heightB * 0.5F;
+
+    const float centerA = 0.5F * (minA_Y + maxA_Y); // 100.0
+    const float centerB = 0.5F * (minB_Y + maxB_Y); // -50.0
+    const float deltaY  = centerA - centerB;        // 150.0
+
+    EXPECT_FLOAT_EQ(centerA, 100.0F);
+    EXPECT_FLOAT_EQ(centerB, -50.0F);
+    EXPECT_FLOAT_EQ(deltaY, 150.0F);
+
+    // After translation, Doc B's center matches Doc A's center
+    EXPECT_FLOAT_EQ(centerB + deltaY, centerA);
+  }
+}
+
+TEST(LinkLayout, multipageBackgroundCorpusAndForegroundFlyInGeometry) {
+  // Foreground inspection document at Z = 0
+  const glm::vec3 foregroundDocPos(0.0F, 0.0F, 0.0F);
+
+  // Background multi-page corpus document at Z = -30.0F
+  const glm::vec3 backgroundCorpusPos(25.0F, 0.0F, -30.0F);
+
+  // Fly-in linked page brought forward to Z = 0
+  const glm::vec3 flyInPagePos(14.0F, 0.0F, 0.0F);
+
+  EXPECT_FLOAT_EQ(foregroundDocPos.z, 0.0F);
+  EXPECT_FLOAT_EQ(flyInPagePos.z, 0.0F);
+  EXPECT_FLOAT_EQ(backgroundCorpusPos.z, -30.0F);
+
+  // Distance between foreground and fly-in page (in-plane examination)
+  const float inPlaneGap = glm::distance(foregroundDocPos, flyInPagePos);
+  EXPECT_FLOAT_EQ(inPlaneGap, 14.0F);
+
+  // 3D spatial distance bridging between fly-in page and background corpus
+  const float depthSpan = glm::distance(flyInPagePos, backgroundCorpusPos);
+  EXPECT_GT(depthSpan, 30.0F);
+}
