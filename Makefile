@@ -650,7 +650,7 @@ test/swarm: $(OBJDIR)/xudu-swarm-peer $(OBJDIR)/xudu_test
 #
 # The pull request checks run them for real; see the swarm job in
 # .github/workflows/c-cpp.yml, and `make test/swarm` to run them here.
-SLOW_TESTS  := SwarmTest.*:MutableNameTest.*
+SLOW_TESTS  := SwarmTest.*:MutableNameTest.*:E2EBinaryOrchestrationTest.*
 # Override to run something else, including everything: make test TEST_FILTER='*'
 TEST_FILTER ?= -$(SLOW_TESTS)
 
