@@ -1,7 +1,3 @@
-/**
- * @file link_layout.cpp
- * @brief Implementation of the link placement rules.
- */
 #include "link_layout.hpp"
 
 #include <algorithm>
@@ -62,7 +58,7 @@ void placeLinks(const std::map<std::uint64_t, Link> &links,
         if (left.doc == right.doc) {
           continue;
         }
-        between.push_back(LinkedPair{id, link.type, left, right});
+        between.push_back(LinkedPair{id, link.type, link.tier, left, right});
       }
     }
 
@@ -71,28 +67,50 @@ void placeLinks(const std::map<std::uint64_t, Link> &links,
     // present has already been dealt with above.
     if (lefts.empty() != rights.empty()) {
       leaving.push_back(HalfLink{id,
+                                 link.type,
+                                 link.tier,
                                  lefts.empty() ? rights.front() : lefts.front(),
                                  lefts.empty() ? link.left : link.right});
     }
   }
 }
 
-std::uint32_t linkColour(const LinkType type) {
+std::uint32_t linkColour(const LinkType type, const ProminenceTier tier) {
+  std::uint32_t rgb = 0xCFCFCF00U;
   switch (type) {
   case LinkType::Comment:
-    return 0x7FB2FFB0U;
+    rgb = 0x7FB2FF00U;
+    break;
   case LinkType::Illustration:
-    return 0xFFC46BB0U;
+    rgb = 0xFFC46B00U;
+    break;
   case LinkType::Disagreement:
-    return 0xFF7A6BB0U;
+    rgb = 0xFF7A6B00U;
+    break;
   case LinkType::Authorship:
-    return 0xB98CFFB0U;
+    rgb = 0xB98CFF00U;
+    break;
   case LinkType::Quotation:
-    return 0x7FE0A8B0U;
+    rgb = 0x7FE0A800U;
+    break;
   case LinkType::Other:
+    rgb = 0xCFCFCF00U;
     break;
   }
-  return 0xCFCFCFB0U;
+
+  std::uint32_t alpha = 0xE0U;
+  switch (tier) {
+  case ProminenceTier::Author:
+    alpha = 0xE0U;
+    break;
+  case ProminenceTier::Curated:
+    alpha = 0xB0U;
+    break;
+  case ProminenceTier::Public:
+    alpha = 0x60U;
+    break;
+  }
+  return rgb | alpha;
 }
 
 } // namespace xudu

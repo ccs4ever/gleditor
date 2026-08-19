@@ -40,9 +40,6 @@ const char *linkTypeName(const LinkType type) {
 }
 
 LinkType linkTypeFromName(const std::string &name) {
-  // Unrecognised types become Other rather than an error: a store written by
-  // something that knows a type this build does not is still readable, and
-  // losing the name of a link is better than losing the link.
   if ("comment" == name) {
     return LinkType::Comment;
   }
@@ -59,6 +56,18 @@ LinkType linkTypeFromName(const std::string &name) {
     return LinkType::Quotation;
   }
   return LinkType::Other;
+}
+
+const char *prominenceTierName(const ProminenceTier tier) {
+  switch (tier) {
+  case ProminenceTier::Author:
+    return "author";
+  case ProminenceTier::Curated:
+    return "curated";
+  case ProminenceTier::Public:
+    return "public";
+  }
+  return "author";
 }
 
 bool Link::touches(const PrimediaSpan &span) const {

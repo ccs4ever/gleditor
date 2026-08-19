@@ -166,19 +166,26 @@ std::optional<Scroll> decodeScroll(const bencode::Value &value) {
 }
 
 bencode::Value encodeLink(const GlobalLink &link) {
-  return bencode::Value::dict({
+  bencode::Dict dict = {
       {"left", encodeSpans(link.left)},
       {"owner", bencode::Value::string(link.owner)},
       {"right", encodeSpans(link.right)},
+      {"tier", bencode::Value::string(prominenceTierName(link.tier))},
       {"type", bencode::Value::string(linkTypeName(link.type))},
-  });
+  };
+  if (!link.curator.empty()) {
+    dict.emplace("curator", bencode::Value::string(link.curator));
+  }
+  return bencode::Value::dict(std::move(dict));
 }
 
 std::optional<GlobalLink> decodeLink(const bencode::Value &value) {
-  const auto *type  = value.find("type");
-  const auto *owner = value.find("owner");
-  const auto *left  = value.find("left");
-  const auto *right = value.find("right");
+  const auto *type    = value.find("type");
+  const auto *owner   = value.find("owner");
+  const auto *left    = value.find("left");
+  const auto *right   = value.find("right");
+  const auto *tier    = value.find("tier");
+  const auto *curator = value.find("curator");
   if (nullptr == type || !type->isString() || nullptr == owner ||
       !owner->isString() || nullptr == left || nullptr == right) {
     return std::nullopt;
@@ -193,6 +200,20 @@ std::optional<GlobalLink> decodeLink(const bencode::Value &value) {
   link.owner = owner->asString();
   link.left  = std::move(*lefts);
   link.right = std::move(*rights);
+  if (nullptr != tier && tier->isString()) {
+    if ("curated" == tier->asString()) {
+      link.tier = ProminenceTier::Curated;
+    } else if ("public" == tier->asString()) {
+      link.tier = ProminenceTier::Public;
+    } else {
+      link.tier = ProminenceTier::Author;
+    }
+  } else {
+    link.tier = ProminenceTier::Author;
+  }
+  if (nullptr != curator && curator->isString()) {
+    link.curator = curator->asString();
+  }
   return link;
 }
 

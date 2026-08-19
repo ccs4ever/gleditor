@@ -51,6 +51,15 @@ enum class LinkType : std::uint8_t {
 const char *linkTypeName(LinkType type);
 LinkType linkTypeFromName(const std::string &name);
 
+/// The prominence hierarchy of a link.
+enum class ProminenceTier : std::uint8_t {
+  Author  = 0, ///< Bundled with the author's document publication (highest prominence).
+  Curated = 1, ///< From the user's subscribed curator graph (secondary prominence).
+  Public  = 2, ///< Discovered via public DHT swarm rendezvous (bounded / tertiary).
+};
+
+const char *prominenceTierName(ProminenceTier tier);
+
 /**
  * @brief A butterfly link: two lists of spans, an identity and a type.
  *
@@ -70,8 +79,11 @@ LinkType linkTypeFromName(const std::string &name);
 struct Link {
   std::uint64_t id{};
   LinkType type{LinkType::Comment};
+  ProminenceTier tier{ProminenceTier::Author};
   /// Who made it. Prestige, not permission.
   std::string owner;
+  /// Curator or publisher key if from a third-party link package.
+  std::string curator;
   std::vector<PrimediaSpan> left;
   std::vector<PrimediaSpan> right;
 
