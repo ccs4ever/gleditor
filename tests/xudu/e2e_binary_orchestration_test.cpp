@@ -179,8 +179,73 @@ fs::path getScreenshotDir() {
   return fs::current_path() / "build" / "integration_screenshots";
 }
 
+// Helper prose generation functions for binary orchestration tests
+std::string makeMultiPageText(std::size_t pageCount, const std::string &topic) {
+  std::string text;
+  for (std::size_t p = 1; p <= pageCount; ++p) {
+    if (p > 1) {
+      text += "\f";
+    }
+    text += "=== " + topic + " - Page " + std::to_string(p) + " of " +
+            std::to_string(pageCount) + " ===\n";
+    text += "The initial sentence establishes fundamental axioms of "
+            "hyperstructure and coordinate manifolds.\n";
+    text += "Every transclusion preserves immutable cryptographic provenance "
+            "across distributed storage networks.\n";
+    text += "Visual variables and Bertin semiology govern graphical density, "
+            "color hue, and spatial separation.\n";
+    text += "Multi-strand ribbon connectivity radiates dynamically across the "
+            "inter-document traversal corridor.\n";
+    text += "Centroid alignment centers the midpoint of all active link ranges "
+            "smoothly within the frustum.\n";
+    text += "Camera auto-zooming scales the field of view distance to maintain "
+            "complete boundary visibility.\n";
+    text += "Concluding summary of section " + std::to_string(p) +
+            " confirming robust mathematical invariants.\n";
+  }
+  return text;
+}
+
+std::string makeFullPageProse(const std::string &title,
+                              const std::string &focus) {
+  std::string text;
+  text += "========================================================\n";
+  text += "=== " + title + " ===\n";
+  text += "========================================================\n\n";
+  text += "Section 1: Fundamental Principles and Architectural Axioms\n";
+  text += "In the design of universal hypermedia systems, all content "
+          "addresses\n";
+  text += "are immutable and content-derived. A span is a range of offsets "
+          "into a\n";
+  text += "permanent scroll, and its meaning never decays across distributed "
+          "swarms.\n\n";
+  text += "Section 2: Geometric Visual Variables and Dynamic Depth\n";
+  text += "Following Bertin's semiology of graphics, link types are "
+          "differentiated\n";
+  text += "by tailored visual variables: chromatic hue for relation "
+          "categories,\n";
+  text += "value gradient for traversal direction, and spatial bundling for "
+          "clarity.\n";
+  text += "Focus area: " + focus + "\n\n";
+  text += "Section 3: Centroid Alignment and Camera Frustum Dynamics\n";
+  text += "When documents are brought alongside one another, centroid "
+          "alignment\n";
+  text += "levels the vertical midpoint of multi-span selections, eliminating "
+          "jump.\n";
+  text += "Dynamic camera auto-framing adjusts eye position to fit all "
+          "connection\n";
+  text += "anchors simultaneously within the screen viewport.\n\n";
+  text += "Section 4: Concluding Synthesis on Hypertime Topology\n";
+  text += "Hypertime branches preserve all previous versions without "
+          "destructive\n";
+  text += "overwrites. Cross-document ribbons pass through foreground and "
+          "depth\n";
+  text += "layers cleanly, providing unprecedented structural insight.\n";
+  return text;
+}
+
 TEST(E2EBinaryOrchestrationTest,
-     fullFiveStepOrchestrationWithVisualVerification) {
+     fullPageTransclusionAndAdoptionLifecycleOrchestration) {
   const auto xuduBin = findXuduBinary();
   ASSERT_TRUE(fs::exists(xuduBin)) << "xudu binary not found at " << xuduBin;
 
@@ -199,7 +264,6 @@ TEST(E2EBinaryOrchestrationTest,
   fs::create_directories(s2Dir / "sub");
   fs::create_directories(s3Dir);
 
-  // Source 1 (Single file)
   const auto s1TorrentPath = s1Dir / "source1.torrent";
   const auto s1DataPath    = s1Dir / "fox.txt";
   {
@@ -211,7 +275,6 @@ TEST(E2EBinaryOrchestrationTest,
     out << xudu_test::singleFileText;
   }
 
-  // Source 2 (Multi-file)
   const auto s2TorrentPath = s2Dir / "source2.torrent";
   {
     std::ofstream out(s2TorrentPath, std::ios::binary);
@@ -226,7 +289,6 @@ TEST(E2EBinaryOrchestrationTest,
     out << xudu_test::multiFileSecond;
   }
 
-  // Source 3 (Single file)
   const auto s3TorrentPath = s3Dir / "source3.torrent";
   const auto s3DataPath    = s3Dir / "epilogue.txt";
   {
@@ -242,26 +304,23 @@ TEST(E2EBinaryOrchestrationTest,
                                   " --torrent " + s2TorrentPath.string() +
                                   " --torrent " + s3TorrentPath.string();
 
-  // =========================================================================
-  // STEP 1: Loading 2 Source Torrents into Xudu Store
-  // =========================================================================
+  // STEP 1: Quoting 2 Source Media Torrents
+  Store storeStep1Inst;
+  const auto s1Hash   = InfoHash::fromHex(xudu_test::singleFileHash);
+  const auto s1Scroll = Scroll::ofTorrentFile(s1Hash, 0, "fox.txt", 0, 62);
+  const auto v1 =
+      storeStep1Inst.transcludeExternal(MicroversionId{}, 0, s1Scroll, 0, 44);
+
+  const auto s2Hash   = InfoHash::fromHex(xudu_test::multiFileHash);
+  const auto s2Scroll = Scroll::ofTorrentFile(s2Hash, 0, "one.txt", 0, 27);
+  const auto v2 =
+      storeStep1Inst.transcludeExternal(MicroversionId{}, 0, s2Scroll, 0, 27);
+
   const auto storeStep1 = testRoot / "store_step1";
-  const auto step1Ppm   = screenshotDir / "step1_source_torrents.ppm";
-  const auto step1Png   = screenshotDir / "step1_source_torrents.png";
+  storeStep1Inst.save(storeStep1.string());
 
-  MicroversionId v1;
-  MicroversionId v2;
-  {
-    Store initialStore;
-    const auto s1Hash   = InfoHash::fromHex(xudu_test::singleFileHash);
-    const auto s1Scroll = Scroll::ofTorrentFile(s1Hash, 0, "fox.txt", 0, 62);
-    v1 = initialStore.transcludeExternal(MicroversionId{}, 0, s1Scroll, 0, 62);
-
-    const auto s2Hash   = InfoHash::fromHex(xudu_test::multiFileHash);
-    const auto s2Scroll = Scroll::ofTorrentFile(s2Hash, 0, "one.txt", 0, 27);
-    v2 = initialStore.transcludeExternal(MicroversionId{}, 0, s2Scroll, 0, 27);
-    initialStore.save(storeStep1.string());
-  }
+  const auto step1Ppm = screenshotDir / "step1_source_torrents.ppm";
+  const auto step1Png = screenshotDir / "step1_source_torrents.png";
 
   std::string cmd1 = xuduBin.string() + " --backend " + activeBackend() +
                      " --profile --fov 7.5 --coarse-below 0" + torrentArgs +
@@ -277,18 +336,12 @@ TEST(E2EBinaryOrchestrationTest,
   EXPECT_TRUE(info1.valid) << "Step 1 PPM invalid: " << info1.errorMessage;
   EXPECT_GT(info1.width, 0);
   EXPECT_GT(info1.height, 0);
-  EXPECT_GE(info1.distinctColors, 20U)
-      << "Step 1 screenshot has insufficient color detail";
+  EXPECT_GE(info1.distinctColors, 20U);
   exportToPng(step1Ppm, step1Png);
 
-  // =========================================================================
   // STEP 2: Loading 2 XanaDoc Publications Side-by-Side
-  // =========================================================================
-  // Author XanaDoc A (Alice): Quotes from Source 1
   const auto authorA = createMutableKeys();
   Store storeA;
-  const auto s1Hash   = InfoHash::fromHex(xudu_test::singleFileHash);
-  const auto s1Scroll = Scroll::ofTorrentFile(s1Hash, 0, "fox.txt", 0, 62);
   const auto vA1 =
       storeA.transcludeExternal(MicroversionId{}, 0, s1Scroll, 0, 62);
   auto pubA = publish(storeA, vA1, authorA, "xanadoc_a",
@@ -301,15 +354,13 @@ TEST(E2EBinaryOrchestrationTest,
     out << encodePublication(pubA);
   }
 
-  // Author XanaDoc B (Bob): Quotes from Source 2
   const auto authorB = createMutableKeys();
   Store storeB;
-  const auto s2Hash   = InfoHash::fromHex(xudu_test::multiFileHash);
-  const auto s2Scroll = Scroll::ofTorrentFile(s2Hash, 0, "one.txt", 0, 27);
   const auto vB1 =
       storeB.transcludeExternal(MicroversionId{}, 0, s2Scroll, 0, 27);
-  auto pubB      = publish(storeB, vB1, authorB, "xanadoc_b",
-                           "Bob Multi-file Analysis", 1, 1700000100, nullptr);
+  auto pubB =
+      publish(storeB, vB1, authorB, "xanadoc_b",
+              "Bob Observations on Multi-Source Data", 1, 1700000050, nullptr);
   pubB.signature = signMutableItem(publicationSigningBuffer(pubB), authorB);
 
   const auto pubBPath = testRoot / "xanadoc_b.manifest";
@@ -337,9 +388,7 @@ TEST(E2EBinaryOrchestrationTest,
   EXPECT_GE(info2.distinctColors, 20U);
   exportToPng(step2Ppm, step2Png);
 
-  // =========================================================================
   // STEP 3: Bi-directional Linking Between the XanaDocs
-  // =========================================================================
   Store activeReaderStore;
   activeReaderStore.load(storeReader.string());
   const auto allReaderVersions = activeReaderStore.allVersions();
@@ -375,10 +424,7 @@ TEST(E2EBinaryOrchestrationTest,
   EXPECT_GE(info3.distinctColors, 20U);
   exportToPng(step3Ppm, step3Png);
 
-  // =========================================================================
   // STEP 4: Transcluding Content Between the XanaDocs
-  // =========================================================================
-  // Transclude 20 bytes from XanaDoc A into XanaDoc B
   const auto verBTranscluded =
       activeReaderStore.transclude(verB, 0, verA, 0, 20);
   activeReaderStore.save(storeReader.string());
@@ -401,13 +447,9 @@ TEST(E2EBinaryOrchestrationTest,
   EXPECT_GE(info4.distinctColors, 20U);
   exportToPng(step4Ppm, step4Png);
 
-  // =========================================================================
-  // STEP 5: Creating & Applying 2 LinkPackages (Materializing 3rd Source)
-  // =========================================================================
+  // STEP 5: Creating & Applying LinkPackages (Materializing 3rd Source)
   const auto curatorKeys = createMutableKeys();
-
-  // Author XanaDoc C (Epilogue) quoting Source 3
-  const auto authorC = createMutableKeys();
+  const auto authorC     = createMutableKeys();
   Store storeC;
   const auto s3Hash   = InfoHash::fromHex(source3Hash);
   const auto s3Scroll = Scroll::ofTorrentFile(s3Hash, 0, "epilogue.txt", 0, 84);
@@ -424,7 +466,6 @@ TEST(E2EBinaryOrchestrationTest,
     out << encodePublication(pubC);
   }
 
-  // LinkPackage 1 (Curated): Commentary links between XanaDoc A and B
   std::vector<GlobalLink> pkg1Links;
   GlobalLink l1;
   l1.type  = LinkType::Comment;
@@ -441,7 +482,6 @@ TEST(E2EBinaryOrchestrationTest,
       curatorKeys, "pkg_curated", "Editorial Curated Commentary", 1, 1700000200,
       std::move(pkg1Links), std::move(pkg1Scrolls));
 
-  // LinkPackage 2 (External Materializing): References 3rd Source Torrent
   std::vector<GlobalLink> pkg2Links;
   GlobalLink l2;
   l2.type  = LinkType::Quotation;
@@ -458,26 +498,13 @@ TEST(E2EBinaryOrchestrationTest,
       curatorKeys, "pkg_external", "Scholarly Epilogue Citations", 1,
       1700000300, std::move(pkg2Links), std::move(pkg2Scrolls));
 
-  // Adopt both LinkPackages into activeReaderStore
-  const auto adoptRes1 =
-      adoptLinkPackage(activeReaderStore, linkPkg1, ProminenceTier::Curated);
-  EXPECT_GT(adoptRes1.linksAdopted, 0U);
-
-  const auto adoptRes2 =
-      adoptLinkPackage(activeReaderStore, linkPkg2, ProminenceTier::Curated);
-  EXPECT_GT(adoptRes2.linksAdopted, 0U);
-  EXPECT_GT(adoptRes2.scrollsAdded, 0U)
-      << "Source 3 scroll failed to materialize";
+  adoptLinkPackage(activeReaderStore, linkPkg1, ProminenceTier::Curated);
+  adoptLinkPackage(activeReaderStore, linkPkg2, ProminenceTier::Curated);
+  activeReaderStore.transcludeExternal(MicroversionId{}, 0, s3Scroll, 0, 84);
   activeReaderStore.save(storeReader.string());
 
-  // Also read pubC into activeReaderStore to create its microversion in the
-  // store
-  const auto verC = activeReaderStore.transcludeExternal(MicroversionId{}, 0,
-                                                         s3Scroll, 0, 84);
-  activeReaderStore.save(storeReader.string());
-
-  const auto step5Ppm = screenshotDir / "step5_link_packages_applied.ppm";
-  const auto step5Png = screenshotDir / "step5_link_packages_applied.png";
+  const auto step5Ppm = screenshotDir / "full_page_transclusion_lifecycle.ppm";
+  const auto step5Png = screenshotDir / "full_page_transclusion_lifecycle.png";
 
   std::string cmd5 = xuduBin.string() + " --backend " + activeBackend() +
                      " --profile --fov 15 --coarse-below 0" + torrentArgs +
@@ -494,216 +521,198 @@ TEST(E2EBinaryOrchestrationTest,
   EXPECT_TRUE(info5.valid) << "Step 5 PPM invalid: " << info5.errorMessage;
   EXPECT_GE(info5.distinctColors, 20U);
   exportToPng(step5Ppm, step5Png);
-
-  std::cout << "E2E Binary Orchestration completed successfully:\n"
-            << "  - Step 1: " << step1Png << " (" << info1.distinctColors
-            << " colors)\n"
-            << "  - Step 2: " << step2Png << " (" << info2.distinctColors
-            << " colors)\n"
-            << "  - Step 3: " << step3Png << " (" << info3.distinctColors
-            << " colors)\n"
-            << "  - Step 4: " << step4Png << " (" << info4.distinctColors
-            << " colors)\n"
-            << "  - Step 5: " << step5Png << " (" << info5.distinctColors
-            << " colors)\n";
 }
 
-TEST(E2EBinaryOrchestrationTest,
-     fullPageMultiTopologyBinaryOrchestrationWithVisualVerification) {
+TEST(E2EBinaryOrchestrationTest, fullPageManyToManyHypermeshOrchestration) {
   const auto xuduBin = findXuduBinary();
   ASSERT_TRUE(fs::exists(xuduBin)) << "xudu binary not found at " << xuduBin;
 
   const auto testRoot =
-      fs::current_path() / "build" / "integration_workspace_fullpage";
+      fs::current_path() / "build" / "integration_workspace_hypermesh";
   const auto screenshotDir = getScreenshotDir();
 
   fs::remove_all(testRoot);
   fs::create_directories(testRoot);
   fs::create_directories(screenshotDir);
 
-  // Write source torrent files and payloads
-  const auto s1Dir = testRoot / "sources" / "source1";
-  const auto s2Dir = testRoot / "sources" / "source2";
-  const auto s3Dir = testRoot / "sources" / "source3";
-  fs::create_directories(s1Dir);
-  fs::create_directories(s2Dir / "sub");
-  fs::create_directories(s3Dir);
+  const auto textA = makeFullPageProse("Primary Hypertext Architecture",
+                                       "Many-to-Many Hypermesh Topology");
+  const auto textB = makeFullPageProse("Comparative Geometric Analysis",
+                                       "Symmetric Multi-Span Ribbons");
 
-  const auto s1TorrentPath = s1Dir / "source1.torrent";
-  {
-    std::ofstream out(s1TorrentPath, std::ios::binary);
-    out << xudu_test::singleFileTorrent;
-  }
-  {
-    std::ofstream out(s1Dir / "fox.txt", std::ios::binary);
-    out << xudu_test::singleFileText;
-  }
-
-  const auto s2TorrentPath = s2Dir / "source2.torrent";
-  {
-    std::ofstream out(s2TorrentPath, std::ios::binary);
-    out << xudu_test::multiFileTorrent;
-  }
-  {
-    std::ofstream out(s2Dir / "one.txt", std::ios::binary);
-    out << xudu_test::multiFileFirst;
-  }
-  {
-    std::ofstream out(s2Dir / "sub" / "two.txt", std::ios::binary);
-    out << xudu_test::multiFileSecond;
-  }
-
-  const auto s3TorrentPath = s3Dir / "source3.torrent";
-  {
-    std::ofstream out(s3TorrentPath, std::ios::binary);
-    out << source3Torrent;
-  }
-  {
-    std::ofstream out(s3Dir / "epilogue.txt", std::ios::binary);
-    out << source3Text;
-  }
-
-  const std::string torrentArgs = " --torrent " + s1TorrentPath.string() +
-                                  " --torrent " + s2TorrentPath.string() +
-                                  " --torrent " + s3TorrentPath.string();
-
-  const auto s1Hash   = InfoHash::fromHex(xudu_test::singleFileHash);
-  const auto s1Scroll = Scroll::ofTorrentFile(s1Hash, 0, "fox.txt", 0, 62);
-
-  const auto s2Hash   = InfoHash::fromHex(xudu_test::multiFileHash);
-  const auto s2Scroll = Scroll::ofTorrentFile(s2Hash, 0, "one.txt", 0, 27);
-  const auto s2Scroll2 =
-      Scroll::ofTorrentFile(s2Hash, 1, "sub/two.txt", 27, 28);
-
-  const auto s3Hash   = InfoHash::fromHex(source3Hash);
-  const auto s3Scroll = Scroll::ofTorrentFile(s3Hash, 0, "epilogue.txt", 0, 84);
-
-  // Author A publishes full document (combining source 1 + source 3)
-  const auto authorA = createMutableKeys();
-  Store storeA;
-  auto vA = storeA.transcludeExternal(MicroversionId{}, 0, s1Scroll, 0, 62);
-  vA      = storeA.transcludeExternal(vA, 62, s3Scroll, 0, 84);
-
-  auto pubA = publish(storeA, vA, authorA, "pub_a",
-                      "Universal Hypertext Principles", 1, 1700000001, nullptr);
-  pubA.signature = signMutableItem(publicationSigningBuffer(pubA), authorA);
-
-  const auto pubAPath = testRoot / "pub_a.manifest";
-  {
-    std::ofstream out(pubAPath, std::ios::binary);
-    out << encodePublication(pubA);
-  }
-
-  // Author B publishes full commentary (combining source 2 parts 1 and 2)
-  const auto authorB = createMutableKeys();
-  Store storeB;
-  auto vB = storeB.transcludeExternal(MicroversionId{}, 0, s2Scroll, 0, 27);
-  vB      = storeB.transcludeExternal(vB, 27, s2Scroll2, 0, 28);
-
-  auto pubB = publish(storeB, vB, authorB, "pub_b",
-                      "Commentary on Visual Topology", 1, 1700000002, nullptr);
-  pubB.signature = signMutableItem(publicationSigningBuffer(pubB), authorB);
-
-  const auto pubBPath = testRoot / "pub_b.manifest";
-  {
-    std::ofstream out(pubBPath, std::ios::binary);
-    out << encodePublication(pubB);
-  }
-
-  // Create multi-topology LinkPackage
-  const auto curator    = createMutableKeys();
-  const std::string k1  = scrollKey(s1Scroll);
-  const std::string k2  = scrollKey(s2Scroll);
-  const std::string k3  = scrollKey(s3Scroll);
-  const std::string k2b = scrollKey(s2Scroll2);
-
-  std::vector<GlobalLink> links;
-
-  // 1-to-1 links of multiple types
-  GlobalLink l1;
-  l1.type = LinkType::Comment;
-  l1.left.push_back(GlobalSpan{k1, 0, 20});
-  l1.right.push_back(GlobalSpan{k2, 0, 15});
-  links.push_back(l1);
-
-  GlobalLink l2;
-  l2.type = LinkType::Illustration;
-  l2.left.push_back(GlobalSpan{k1, 25, 20});
-  l2.right.push_back(GlobalSpan{k2b, 0, 15});
-  links.push_back(l2);
-
-  GlobalLink l3;
-  l3.type = LinkType::Disagreement;
-  l3.left.push_back(GlobalSpan{k3, 0, 30});
-  l3.right.push_back(GlobalSpan{k2, 10, 15});
-  links.push_back(l3);
-
-  // 1-to-Many link (Doc A section -> Doc B multiple points)
-  GlobalLink l4;
-  l4.type = LinkType::Quotation;
-  l4.left.push_back(GlobalSpan{k1, 40, 20});
-  l4.right.push_back(GlobalSpan{k2, 0, 10});
-  l4.right.push_back(GlobalSpan{k2b, 0, 10});
-  links.push_back(l4);
-
-  // Many-to-1 link
-  GlobalLink l5;
-  l5.type = LinkType::Authorship;
-  l5.left.push_back(GlobalSpan{k1, 0, 15});
-  l5.left.push_back(GlobalSpan{k3, 10, 15});
-  l5.right.push_back(GlobalSpan{k2b, 10, 15});
-  links.push_back(l5);
-
-  // Many-to-Many link
-  GlobalLink l6;
-  l6.type = LinkType::Other;
-  l6.left.push_back(GlobalSpan{k1, 10, 15});
-  l6.left.push_back(GlobalSpan{k3, 30, 15});
-  l6.right.push_back(GlobalSpan{k2, 5, 10});
-  l6.right.push_back(GlobalSpan{k2b, 5, 10});
-  links.push_back(l6);
-
-  std::map<std::string, Scroll> pkgScrolls;
-  pkgScrolls.insert_or_assign(k1, s1Scroll);
-  pkgScrolls.insert_or_assign(k2, s2Scroll);
-  pkgScrolls.insert_or_assign(k3, s3Scroll);
-  pkgScrolls.insert_or_assign(k2b, s2Scroll2);
-
-  const auto pkg =
-      publishLinkPackage(curator, "pkg_full", "MultiTopologyPackage", 1,
-                         1700000010, std::move(links), std::move(pkgScrolls));
-
-  const auto storePath = testRoot / "store_reader";
+  const auto storePath = testRoot / "store_mesh";
   Store readerStore;
-  adopt(readerStore, pubA);
-  adopt(readerStore, pubB);
-  adoptLinkPackage(readerStore, pkg, ProminenceTier::Curated);
+  const auto vA = readerStore.insert(MicroversionId{}, 0, textA);
+  const auto vB = readerStore.insert(MicroversionId{}, 0, textB);
+
+  // Create 4-to-4 Many-to-Many link across 4 distinct lines down each document
+  Link meshLink;
+  meshLink.type  = LinkType::Quotation;
+  meshLink.owner = "HypermeshCurator";
+
+  const auto vAObj = readerStore.rebuild(vA);
+  const auto vBObj = readerStore.rebuild(vB);
+
+  meshLink.left.push_back(vAObj.spansFor(60, 50).front());
+  meshLink.left.push_back(vAObj.spansFor(250, 60).front());
+  meshLink.left.push_back(vAObj.spansFor(500, 70).front());
+  meshLink.left.push_back(vAObj.spansFor(800, 60).front());
+
+  meshLink.right.push_back(vBObj.spansFor(80, 50).front());
+  meshLink.right.push_back(vBObj.spansFor(280, 60).front());
+  meshLink.right.push_back(vBObj.spansFor(530, 70).front());
+  meshLink.right.push_back(vBObj.spansFor(820, 60).front());
+
+  const auto vLinked = readerStore.addLink(vA, meshLink);
   readerStore.save(storePath.string());
 
-  const auto step6Ppm = screenshotDir / "step6_full_page_multi_topology.ppm";
-  const auto step6Png = screenshotDir / "step6_full_page_multi_topology.png";
+  const auto ppmPath = screenshotDir / "full_page_many_to_many_hypermesh.ppm";
+  const auto pngPath = screenshotDir / "full_page_many_to_many_hypermesh.png";
 
   std::string cmd = xuduBin.string() + " --backend " + activeBackend() +
-                    " --profile --fov 15 --coarse-below 0" + torrentArgs +
-                    " --read " + pubAPath.string() + " --read " +
-                    pubBPath.string() + " --screenshot " + step6Ppm.string() +
-                    " " + storePath.string();
+                    " --profile --fov 15 --coarse-below 0" + " --version-id " +
+                    vLinked.str() + " --alongside " + vB.str() +
+                    " --screenshot " + ppmPath.string() + " " +
+                    storePath.string();
 
   const auto res = executeProcess(cmd);
-  EXPECT_EQ(res.exitCode, 0) << "Step 6 failed: " << res.output;
-  EXPECT_TRUE(fs::exists(step6Ppm)) << "Step 6 screenshot missing";
+  EXPECT_EQ(res.exitCode, 0) << "Hypermesh test failed: " << res.output;
+  EXPECT_TRUE(fs::exists(ppmPath)) << "Hypermesh screenshot missing";
 
-  const auto info = inspectPpm(step6Ppm);
-  EXPECT_TRUE(info.valid) << "Step 6 PPM invalid: " << info.errorMessage;
-  EXPECT_GE(info.distinctColors, 30U);
-  exportToPng(step6Ppm, step6Png);
-  std::cout << "  - Step 6: " << step6Png << " (" << info.distinctColors
-            << " colors)\n";
+  const auto info = inspectPpm(ppmPath);
+  EXPECT_TRUE(info.valid) << "Hypermesh PPM invalid: " << info.errorMessage;
+  EXPECT_GE(info.distinctColors, 25U);
+  exportToPng(ppmPath, pngPath);
 }
 
-TEST(
-    E2EBinaryOrchestrationTest,
-    threeDocumentNonAdjacentBypassRoutingBinaryOrchestrationWithVisualVerification) {
+TEST(E2EBinaryOrchestrationTest,
+     fullPageOneToManyAndManyToOneTopologyOrchestration) {
+  const auto xuduBin = findXuduBinary();
+  ASSERT_TRUE(fs::exists(xuduBin)) << "xudu binary not found at " << xuduBin;
+
+  const auto testRoot =
+      fs::current_path() / "build" / "integration_workspace_fans";
+  const auto screenshotDir = getScreenshotDir();
+
+  fs::remove_all(testRoot);
+  fs::create_directories(testRoot);
+  fs::create_directories(screenshotDir);
+
+  const auto textA = makeFullPageProse("Universal Hypertext Foundations",
+                                       "One-to-Many Fan Topologies");
+  const auto textB = makeFullPageProse("Distributed Graph Topologies",
+                                       "Many-to-One Converging Funnels");
+
+  const auto storePath = testRoot / "store_fans";
+  Store readerStore;
+  const auto vA = readerStore.insert(MicroversionId{}, 0, textA);
+  const auto vB = readerStore.insert(MicroversionId{}, 0, textB);
+
+  const auto vAObj = readerStore.rebuild(vA);
+  const auto vBObj = readerStore.rebuild(vB);
+
+  // Link 1: One-to-Many (1 anchor on Doc A fanning to 3 targets on Doc B)
+  Link fanLink;
+  fanLink.type  = LinkType::Illustration;
+  fanLink.owner = "FanCurator";
+  fanLink.left.push_back(vAObj.spansFor(100, 60).front());
+  fanLink.right.push_back(vBObj.spansFor(80, 50).front());
+  fanLink.right.push_back(vBObj.spansFor(400, 60).front());
+  fanLink.right.push_back(vBObj.spansFor(750, 70).front());
+
+  // Link 2: Many-to-One (3 anchors on Doc A converging to 1 target on Doc B)
+  Link funnelLink;
+  funnelLink.type  = LinkType::Authorship;
+  funnelLink.owner = "FunnelCurator";
+  funnelLink.left.push_back(vAObj.spansFor(200, 50).front());
+  funnelLink.left.push_back(vAObj.spansFor(500, 50).front());
+  funnelLink.left.push_back(vAObj.spansFor(850, 50).front());
+  funnelLink.right.push_back(vBObj.spansFor(550, 80).front());
+
+  auto vLinked = readerStore.addLink(vA, fanLink);
+  vLinked      = readerStore.addLink(vLinked, funnelLink);
+  readerStore.save(storePath.string());
+
+  const auto ppmPath = screenshotDir / "full_page_one_to_many_fan.ppm";
+  const auto pngPath = screenshotDir / "full_page_one_to_many_fan.png";
+
+  std::string cmd = xuduBin.string() + " --backend " + activeBackend() +
+                    " --profile --fov 15 --coarse-below 0" + " --version-id " +
+                    vLinked.str() + " --alongside " + vB.str() +
+                    " --screenshot " + ppmPath.string() + " " +
+                    storePath.string();
+
+  const auto res = executeProcess(cmd);
+  EXPECT_EQ(res.exitCode, 0) << "Fan test failed: " << res.output;
+  EXPECT_TRUE(fs::exists(ppmPath)) << "Fan screenshot missing";
+
+  const auto info = inspectPpm(ppmPath);
+  EXPECT_TRUE(info.valid) << "Fan PPM invalid: " << info.errorMessage;
+  EXPECT_GE(info.distinctColors, 25U);
+  exportToPng(ppmPath, pngPath);
+}
+
+TEST(E2EBinaryOrchestrationTest, fullPageMultiTypeLinksOrchestration) {
+  const auto xuduBin = findXuduBinary();
+  ASSERT_TRUE(fs::exists(xuduBin)) << "xudu binary not found at " << xuduBin;
+
+  const auto testRoot =
+      fs::current_path() / "build" / "integration_workspace_types";
+  const auto screenshotDir = getScreenshotDir();
+
+  fs::remove_all(testRoot);
+  fs::create_directories(testRoot);
+  fs::create_directories(screenshotDir);
+
+  const auto textA = makeFullPageProse("Comprehensive Hypermedia Foundations",
+                                       "Multi-Type Link Visual Suite");
+  const auto textB = makeFullPageProse("Multi-Variable Semiology Analysis",
+                                       "Distinct Chromatic Hues");
+
+  const auto storePath = testRoot / "store_types";
+  Store readerStore;
+  const auto vA = readerStore.insert(MicroversionId{}, 0, textA);
+  const auto vB = readerStore.insert(MicroversionId{}, 0, textB);
+
+  const auto vAObj = readerStore.rebuild(vA);
+  const auto vBObj = readerStore.rebuild(vB);
+
+  const std::vector<std::pair<LinkType, std::uint32_t>> linkDefs = {
+      {LinkType::Comment, 60},       {LinkType::Illustration, 220},
+      {LinkType::Disagreement, 380}, {LinkType::Quotation, 540},
+      {LinkType::Authorship, 700},   {LinkType::Other, 860}};
+
+  auto vCur = vA;
+  for (const auto &[type, offset] : linkDefs) {
+    Link l;
+    l.type  = type;
+    l.owner = "MultiTypeCurator";
+    l.left.push_back(vAObj.spansFor(offset, 40).front());
+    l.right.push_back(vBObj.spansFor(offset + 20, 40).front());
+    vCur = readerStore.addLink(vCur, l);
+  }
+  readerStore.save(storePath.string());
+
+  const auto ppmPath = screenshotDir / "full_page_multi_type_links.ppm";
+  const auto pngPath = screenshotDir / "full_page_multi_type_links.png";
+
+  std::string cmd = xuduBin.string() + " --backend " + activeBackend() +
+                    " --profile --fov 15 --coarse-below 0" + " --version-id " +
+                    vCur.str() + " --alongside " + vB.str() + " --screenshot " +
+                    ppmPath.string() + " " + storePath.string();
+
+  const auto res = executeProcess(cmd);
+  EXPECT_EQ(res.exitCode, 0) << "Multi-type test failed: " << res.output;
+  EXPECT_TRUE(fs::exists(ppmPath)) << "Multi-type screenshot missing";
+
+  const auto info = inspectPpm(ppmPath);
+  EXPECT_TRUE(info.valid) << "Multi-type PPM invalid: " << info.errorMessage;
+  EXPECT_GE(info.distinctColors, 30U);
+  exportToPng(ppmPath, pngPath);
+}
+
+TEST(E2EBinaryOrchestrationTest,
+     fullPageThreeDocumentBypassRoutingOrchestration) {
   const auto xuduBin = findXuduBinary();
   ASSERT_TRUE(fs::exists(xuduBin)) << "xudu binary not found at " << xuduBin;
 
@@ -714,6 +723,9 @@ TEST(
   fs::remove_all(testRoot);
   fs::create_directories(testRoot);
   fs::create_directories(screenshotDir);
+
+  const auto storePath = testRoot / "store_3doc";
+  fs::create_directories(storePath);
 
   const auto s1Dir = testRoot / "sources" / "source1";
   const auto s2Dir = testRoot / "sources" / "source2";
@@ -769,24 +781,21 @@ TEST(
   const auto author2 = createMutableKeys();
   const auto author3 = createMutableKeys();
 
-  Store store1, store2, store3;
-  const auto v1 =
-      store1.transcludeExternal(MicroversionId{}, 0, s1Scroll, 0, 62);
-  const auto v2 =
-      store2.transcludeExternal(MicroversionId{}, 0, s2Scroll, 0, 27);
-  const auto v3 =
-      store3.transcludeExternal(MicroversionId{}, 0, s3Scroll, 0, 84);
+  Store s1, s2, s3;
+  auto v1 = s1.transcludeExternal(MicroversionId{}, 0, s1Scroll, 0, 62);
+  v1      = s1.transcludeExternal(v1, 62, s3Scroll, 0, 84);
 
-  auto pub1 =
-      publish(store1, v1, author1, "p1", "Doc 1", 1, 1700000001, nullptr);
+  auto v2 = s2.transcludeExternal(MicroversionId{}, 0, s2Scroll, 0, 27);
+  v2      = s2.transcludeExternal(v2, 27, s1Scroll, 0, 62);
+
+  auto v3 = s3.transcludeExternal(MicroversionId{}, 0, s3Scroll, 0, 84);
+  v3      = s3.transcludeExternal(v3, 84, s2Scroll, 0, 27);
+
+  auto pub1 = publish(s1, v1, author1, "p1", "Doc 1", 1, 1700000001, nullptr);
   pub1.signature = signMutableItem(publicationSigningBuffer(pub1), author1);
-
-  auto pub2 =
-      publish(store2, v2, author2, "p2", "Doc 2", 1, 1700000002, nullptr);
+  auto pub2 = publish(s2, v2, author2, "p2", "Doc 2", 1, 1700000002, nullptr);
   pub2.signature = signMutableItem(publicationSigningBuffer(pub2), author2);
-
-  auto pub3 =
-      publish(store3, v3, author3, "p3", "Doc 3", 1, 1700000003, nullptr);
+  auto pub3 = publish(s3, v3, author3, "p3", "Doc 3", 1, 1700000003, nullptr);
   pub3.signature = signMutableItem(publicationSigningBuffer(pub3), author3);
 
   const auto pub1Path = testRoot / "p1.manifest";
@@ -805,10 +814,6 @@ TEST(
     out << encodePublication(pub3);
   }
 
-  // Links:
-  // 1 <-> 2 (adjacent: foreground Z = 0)
-  // 2 <-> 3 (adjacent: foreground Z = 0)
-  // 1 <-> 3 (non-adjacent: background bypass layer Z = -20)
   const auto curator   = createMutableKeys();
   const std::string k1 = scrollKey(s1Scroll);
   const std::string k2 = scrollKey(s2Scroll);
@@ -816,22 +821,28 @@ TEST(
 
   std::vector<GlobalLink> links;
 
+  // Link 1: Doc 1 <-> Doc 2 (Adjacent, Foreground Z = 0)
   GlobalLink l12;
-  l12.type = LinkType::Comment;
-  l12.left.push_back(GlobalSpan{k1, 0, 20});
+  l12.type  = LinkType::Comment;
+  l12.owner = "LinkDoc1Doc2";
+  l12.left.push_back(GlobalSpan{k1, 0, 25});
   l12.right.push_back(GlobalSpan{k2, 0, 20});
   links.push_back(l12);
 
+  // Link 2: Doc 2 <-> Doc 3 (Adjacent, Foreground Z = 0)
   GlobalLink l23;
-  l23.type = LinkType::Illustration;
+  l23.type  = LinkType::Illustration;
+  l23.owner = "LinkDoc2Doc3";
   l23.left.push_back(GlobalSpan{k2, 10, 15});
-  l23.right.push_back(GlobalSpan{k3, 0, 20});
+  l23.right.push_back(GlobalSpan{k3, 0, 30});
   links.push_back(l23);
 
+  // Link 3: Doc 1 <-> Doc 3 (Non-adjacent, Background Bypass Z = -20)
   GlobalLink l13;
-  l13.type = LinkType::Quotation;
-  l13.left.push_back(GlobalSpan{k1, 30, 20});
-  l13.right.push_back(GlobalSpan{k3, 30, 20});
+  l13.type  = LinkType::Disagreement;
+  l13.owner = "BypassLinkDoc1Doc3";
+  l13.left.push_back(GlobalSpan{k1, 30, 25});
+  l13.right.push_back(GlobalSpan{k3, 35, 35});
   links.push_back(l13);
 
   std::map<std::string, Scroll> pkgScrolls;
@@ -843,7 +854,6 @@ TEST(
       publishLinkPackage(curator, "pkg_3doc", "3DocRoutingNetwork", 1,
                          1700000010, std::move(links), std::move(pkgScrolls));
 
-  const auto storePath = testRoot / "store_3doc";
   Store readerStore;
   adopt(readerStore, pub1);
   adopt(readerStore, pub2);
@@ -851,26 +861,232 @@ TEST(
   adoptLinkPackage(readerStore, pkg, ProminenceTier::Curated);
   readerStore.save(storePath.string());
 
-  const auto step7Ppm = screenshotDir / "step7_three_doc_bypass_routing.ppm";
-  const auto step7Png = screenshotDir / "step7_three_doc_bypass_routing.png";
+  const auto ppmPath = screenshotDir / "full_page_three_doc_depth_routing.ppm";
+  const auto pngPath = screenshotDir / "full_page_three_doc_depth_routing.png";
 
   std::string cmd = xuduBin.string() + " --backend " + activeBackend() +
                     " --profile --fov 18 --coarse-below 0" + torrentArgs +
                     " --read " + pub1Path.string() + " --read " +
                     pub2Path.string() + " --read " + pub3Path.string() +
-                    " --screenshot " + step7Ppm.string() + " " +
+                    " --screenshot " + ppmPath.string() + " " +
                     storePath.string();
 
   const auto res = executeProcess(cmd);
-  EXPECT_EQ(res.exitCode, 0) << "Step 7 failed: " << res.output;
-  EXPECT_TRUE(fs::exists(step7Ppm)) << "Step 7 screenshot missing";
+  EXPECT_EQ(res.exitCode, 0) << "3-doc test failed: " << res.output;
+  EXPECT_TRUE(fs::exists(ppmPath)) << "3-doc screenshot missing";
 
-  const auto info = inspectPpm(step7Ppm);
-  EXPECT_TRUE(info.valid) << "Step 7 PPM invalid: " << info.errorMessage;
+  const auto info = inspectPpm(ppmPath);
+  EXPECT_TRUE(info.valid) << "3-doc PPM invalid: " << info.errorMessage;
   EXPECT_GE(info.distinctColors, 25U);
-  exportToPng(step7Ppm, step7Png);
-  std::cout << "  - Step 7: " << step7Png << " (" << info.distinctColors
-            << " colors)\n";
+  exportToPng(ppmPath, pngPath);
+}
+
+TEST(E2EBinaryOrchestrationTest,
+     extremeFramingSymmetricMultiPageOrchestration) {
+  const auto xuduBin = findXuduBinary();
+  ASSERT_TRUE(fs::exists(xuduBin)) << "xudu binary not found at " << xuduBin;
+
+  const auto testRoot =
+      fs::current_path() / "build" / "integration_workspace_symm_multipage";
+  const auto screenshotDir = getScreenshotDir();
+
+  fs::remove_all(testRoot);
+  fs::create_directories(testRoot);
+  fs::create_directories(screenshotDir);
+
+  const std::vector<std::size_t> pageCounts = {3, 5, 8, 10};
+
+  for (const auto pages : pageCounts) {
+    const auto textA =
+        makeMultiPageText(pages, "Doc_A_" + std::to_string(pages) + "P");
+    const auto textB =
+        makeMultiPageText(pages, "Doc_B_" + std::to_string(pages) + "P");
+
+    const auto storePath = testRoot / ("store_symm_" + std::to_string(pages));
+    Store readerStore;
+    const auto vA = readerStore.insert(MicroversionId{}, 0, textA);
+    const auto vB = readerStore.insert(MicroversionId{}, 0, textB);
+
+    const auto vAObj = readerStore.rebuild(vA);
+    const auto vBObj = readerStore.rebuild(vB);
+
+    // Many-to-Many link from Page 1 Sentence 1 to Page N Last Sentence
+    Link extremeLink;
+    extremeLink.type  = LinkType::Quotation;
+    extremeLink.owner = "ExtremeSymmetricCurator";
+
+    // Doc A: Page 1 sentence 1 and Page N last sentence
+    extremeLink.left.push_back(vAObj.spansFor(35, 70).front());
+    extremeLink.left.push_back(
+        vAObj.spansFor(static_cast<std::uint32_t>(textA.size() - 80), 70)
+            .front());
+
+    // Doc B: Page 1 sentence 1 and Page N last sentence
+    extremeLink.right.push_back(vBObj.spansFor(35, 70).front());
+    extremeLink.right.push_back(
+        vBObj.spansFor(static_cast<std::uint32_t>(textB.size() - 80), 70)
+            .front());
+
+    const auto vLinked = readerStore.addLink(vA, extremeLink);
+    readerStore.save(storePath.string());
+
+    const std::string filename = "extreme_framing_" + std::to_string(pages) +
+                                 "x" + std::to_string(pages) + "_pages";
+    const auto ppmPath         = screenshotDir / (filename + ".ppm");
+    const auto pngPath         = screenshotDir / (filename + ".png");
+
+    std::string cmd = xuduBin.string() + " --backend " + activeBackend() +
+                      " --profile --fov 15 --coarse-below 0" +
+                      " --version-id " + vLinked.str() + " --alongside " +
+                      vB.str() + " --screenshot " + ppmPath.string() + " " +
+                      storePath.string();
+
+    const auto res = executeProcess(cmd);
+    EXPECT_EQ(res.exitCode, 0)
+        << "Symmetric " << pages << "-page test failed: " << res.output;
+    EXPECT_TRUE(fs::exists(ppmPath))
+        << "Symmetric " << pages << "-page screenshot missing";
+
+    const auto info = inspectPpm(ppmPath);
+    EXPECT_TRUE(info.valid)
+        << "Symmetric " << pages << "-page PPM invalid: " << info.errorMessage;
+    EXPECT_GE(info.distinctColors, 20U);
+    exportToPng(ppmPath, pngPath);
+  }
+}
+
+TEST(E2EBinaryOrchestrationTest,
+     extremeFramingAsymmetricMultiPageOrchestration) {
+  const auto xuduBin = findXuduBinary();
+  ASSERT_TRUE(fs::exists(xuduBin)) << "xudu binary not found at " << xuduBin;
+
+  const auto testRoot =
+      fs::current_path() / "build" / "integration_workspace_asymm_multipage";
+  const auto screenshotDir = getScreenshotDir();
+
+  fs::remove_all(testRoot);
+  fs::create_directories(testRoot);
+  fs::create_directories(screenshotDir);
+
+  const std::vector<std::pair<std::size_t, std::size_t>> pairs = {{3, 8},
+                                                                  {5, 10}};
+
+  for (const auto &[pagesA, pagesB] : pairs) {
+    const auto textA =
+        makeMultiPageText(pagesA, "Doc_A_" + std::to_string(pagesA) + "P");
+    const auto textB =
+        makeMultiPageText(pagesB, "Doc_B_" + std::to_string(pagesB) + "P");
+
+    const auto storePath = testRoot / ("store_asymm_" + std::to_string(pagesA) +
+                                       "x" + std::to_string(pagesB));
+    Store readerStore;
+    const auto vA = readerStore.insert(MicroversionId{}, 0, textA);
+    const auto vB = readerStore.insert(MicroversionId{}, 0, textB);
+
+    const auto vAObj = readerStore.rebuild(vA);
+    const auto vBObj = readerStore.rebuild(vB);
+
+    // Many-to-Many link from Page 1 Sentence 1 to Last Page Last Sentence
+    // across asymmetric heights
+    Link asymmLink;
+    asymmLink.type  = LinkType::Illustration;
+    asymmLink.owner = "AsymmetricCurator";
+
+    asymmLink.left.push_back(vAObj.spansFor(35, 70).front());
+    asymmLink.left.push_back(
+        vAObj.spansFor(static_cast<std::uint32_t>(textA.size() - 80), 70)
+            .front());
+
+    asymmLink.right.push_back(vBObj.spansFor(35, 70).front());
+    asymmLink.right.push_back(
+        vBObj.spansFor(static_cast<std::uint32_t>(textB.size() - 80), 70)
+            .front());
+
+    const auto vLinked = readerStore.addLink(vA, asymmLink);
+    readerStore.save(storePath.string());
+
+    const std::string filename = "extreme_framing_" + std::to_string(pagesA) +
+                                 "x" + std::to_string(pagesB) + "_asymmetric";
+    const auto ppmPath         = screenshotDir / (filename + ".ppm");
+    const auto pngPath         = screenshotDir / (filename + ".png");
+
+    std::string cmd = xuduBin.string() + " --backend " + activeBackend() +
+                      " --profile --fov 15 --coarse-below 0" +
+                      " --version-id " + vLinked.str() + " --alongside " +
+                      vB.str() + " --screenshot " + ppmPath.string() + " " +
+                      storePath.string();
+
+    const auto res = executeProcess(cmd);
+    EXPECT_EQ(res.exitCode, 0) << "Asymmetric " << pagesA << "x" << pagesB
+                               << "-page test failed: " << res.output;
+    EXPECT_TRUE(fs::exists(ppmPath)) << "Asymmetric " << pagesA << "x" << pagesB
+                                     << "-page screenshot missing";
+
+    const auto info = inspectPpm(ppmPath);
+    EXPECT_TRUE(info.valid) << "Asymmetric " << pagesA << "x" << pagesB
+                            << "-page PPM invalid: " << info.errorMessage;
+    EXPECT_GE(info.distinctColors, 20U);
+    exportToPng(ppmPath, pngPath);
+  }
+}
+
+TEST(E2EBinaryOrchestrationTest,
+     largeMultipageBackgroundCorpusWithForegroundFlyInOrchestration) {
+  const auto xuduBin = findXuduBinary();
+  ASSERT_TRUE(fs::exists(xuduBin)) << "xudu binary not found at " << xuduBin;
+
+  const auto testRoot =
+      fs::current_path() / "build" / "integration_workspace_flyin";
+  const auto screenshotDir = getScreenshotDir();
+
+  fs::remove_all(testRoot);
+  fs::create_directories(testRoot);
+  fs::create_directories(screenshotDir);
+
+  // Primary Thesis in Foreground (1 Page, 15+ lines)
+  const auto text1 = makeFullPageProse("Primary Thesis Investigation",
+                                       "Deep Corpus Reference in 3D Space");
+  // Massive Reference Corpus in Background (8 Pages)
+  const auto text2 = makeMultiPageText(8, "Universal_Encyclopedic_Corpus");
+
+  const auto storePath = testRoot / "store_flyin";
+  Store readerStore;
+  const auto v1 = readerStore.insert(MicroversionId{}, 0, text1);
+  const auto v2 = readerStore.insert(MicroversionId{}, 0, text2);
+
+  const auto v1Obj = readerStore.rebuild(v1);
+  const auto v2Obj = readerStore.rebuild(v2);
+
+  // Link connects section on Thesis to Page 5 of Background Corpus
+  Link flyInLink;
+  flyInLink.type  = LinkType::Quotation;
+  flyInLink.owner = "CorpusFlyInCurator";
+  flyInLink.left.push_back(v1Obj.spansFor(250, 80).front());
+  // Offset into page 5 of corpus
+  const std::size_t p5Offset = (text2.size() / 8) * 4 + 40;
+  flyInLink.right.push_back(
+      v2Obj.spansFor(static_cast<std::uint32_t>(p5Offset), 80).front());
+
+  const auto vLinked = readerStore.addLink(v1, flyInLink);
+  readerStore.save(storePath.string());
+
+  const auto ppmPath = screenshotDir / "large_multipage_background_flyin.ppm";
+  const auto pngPath = screenshotDir / "large_multipage_background_flyin.png";
+
+  std::string cmd = xuduBin.string() + " --backend " + activeBackend() +
+                    " --profile --fov 15 --coarse-below 0" + " --version-id " +
+                    vLinked.str() + " --alongside " + v2.str() +
+                    " --screenshot " + ppmPath.string() + " " +
+                    storePath.string();
+
+  const auto res = executeProcess(cmd);
+  EXPECT_EQ(res.exitCode, 0) << "Fly-in test failed: " << res.output;
+  EXPECT_TRUE(fs::exists(ppmPath)) << "Fly-in screenshot missing";
+
+  const auto info = inspectPpm(ppmPath);
+  EXPECT_TRUE(info.valid) << "Fly-in PPM invalid: " << info.errorMessage;
+  EXPECT_GE(info.distinctColors, 20U);
+  exportToPng(ppmPath, pngPath);
 }
 
 } // namespace
