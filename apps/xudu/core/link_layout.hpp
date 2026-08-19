@@ -39,6 +39,7 @@ struct LinkEnd {
 struct LinkedPair {
   std::uint64_t link{};
   LinkType type{LinkType::Comment};
+  ProminenceTier tier{ProminenceTier::Author};
   LinkEnd from; ///< The left list, which is the end the link was attached at.
   LinkEnd to;   ///< The right list, which is what it points at.
 };
@@ -48,6 +49,8 @@ struct LinkedPair {
 /// to be open.
 struct HalfLink {
   std::uint64_t link{};
+  LinkType type{LinkType::Comment};
+  ProminenceTier tier{ProminenceTier::Author};
   LinkEnd here;
   /// The spans of the end that is nowhere, for finding a version showing it.
   std::vector<PrimediaSpan> elsewhere;
@@ -75,14 +78,13 @@ void placeLinks(const std::map<std::uint64_t, Link> &links,
                 std::vector<HalfLink> &leaving);
 
 /**
- * @brief Colour a link of @p type is shown in, as packed RGBA8.
+ * @brief Colour a link of @p type and @p tier is shown in, as packed RGBA8.
  *
- * Types are told apart by colour rather than by a label, because a label on a
- * connection between two documents would have to be legible at whatever angle
- * the connection runs at. Not opaque: what a link crosses is the space between
- * two documents, and it is not the thing being read.
+ * Types are told apart by colour rather than by a label. Opacity reflects the
+ * prominence tier (Author > Curated > Public).
  */
-[[nodiscard]] std::uint32_t linkColour(LinkType type);
+[[nodiscard]] std::uint32_t
+linkColour(LinkType type, ProminenceTier tier = ProminenceTier::Author);
 
 } // namespace xudu
 

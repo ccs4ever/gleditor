@@ -99,7 +99,9 @@ struct GlobalSpan {
 /// addressed for one store.
 struct GlobalLink {
   LinkType type{LinkType::Comment};
+  ProminenceTier tier{ProminenceTier::Author};
   std::string owner;
+  std::string curator;
   std::vector<GlobalSpan> left;
   std::vector<GlobalSpan> right;
 
