@@ -154,7 +154,7 @@ jobs:
     # agree. A backend that silently stops drawing still exits zero, so the
     # comparison -- not the exit code -- is what actually proves it works.
     - name: backend parity
-      run: xvfb-run -s "-screen 0 1024x768x24" ./tools/compare-backends.sh
+      run: xvfb-run -a -s "-screen 0 1024x768x24" ./tools/compare-backends.sh
       env:
         LIBGL_ALWAYS_SOFTWARE: "1"
         GALLIUM_DRIVER: llvmpipe
