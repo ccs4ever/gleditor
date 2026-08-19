@@ -9,11 +9,14 @@
 #include <string>
 #include <vector>
 
+#include "binary_ops.hpp"
+#include "windows_quoting.hpp"
+
 namespace xudu {
 
 namespace {
 
-/// Names of the three files a store is written as.
+/// Names of the files a store is written as.
 constexpr const char *primediaFile = "primedia.spool";
 constexpr const char *opsFile      = "ops.spool";
 constexpr const char *linksFile    = "links.spool";
@@ -307,17 +310,9 @@ void Store::save(const std::string &directory) const {
     out << spool.bytes();
   }
   {
-    // One line per operation, in replay order: an append-only file on disk as
-    // well as in memory, and readable without this program.
-    std::ofstream out(dir / opsFile, std::ios::trunc);
-    for (const auto &[id, op] : ops) {
-      out << id.str() << ' ' << opKindName(op.kind) << ' ' << op.at << ' '
-          << op.length << ' ' << op.to << ' ' << op.span.start << ' '
-          << op.span.length << ' '
-          << (op.source.isZero() ? "0" : op.source.str()) << ' ' << op.sourceAt
-          << ' ' << op.sourceLength << ' ' << op.link << ' ' << op.span.scroll
-          << '\n';
-    }
+    // Write operations spool in compact binary format.
+    std::ofstream out(dir / opsFile, std::ios::binary | std::ios::trunc);
+    writeBinaryOpsSpool(out, ops);
   }
   {
     // The scroll table: what a span's ScrollId means. Without it an id is a
@@ -357,6 +352,61 @@ void Store::save(const std::string &directory) const {
       out << '\n';
     }
   }
+}
+
+void Store::saveOsmicText(const std::string &directory) const {
+  const std::filesystem::path dir(directory);
+  std::filesystem::create_directories(dir);
+
+  {
+    std::ofstream out(dir / primediaFile, std::ios::binary | std::ios::trunc);
+    out << spool.bytes();
+  }
+  {
+    // Canonical line-by-line OSMIC text format.
+    std::ofstream out(dir / opsFile, std::ios::trunc);
+    writeOsmicTextOpsSpool(out, ops);
+  }
+  {
+    std::ofstream out(dir / scrollsFile, std::ios::trunc);
+    for (std::size_t i = 0; i < externals.size(); i++) {
+      const auto &scroll = externals[i];
+      out << "scroll " << (i + 1) << ' '
+          << (scroll.isNamed() ? scroll.publisher.hex() : "-") << ' '
+          << (scroll.salt.empty() ? "-" : toHex(scroll.salt)) << '\n';
+      for (const auto &segment : scroll.segments) {
+        out << "segment " << (i + 1) << ' ' << segment.at << ' '
+            << segment.length << ' ' << segment.torrent.hex() << ' '
+            << segment.streamOffset << ' ' << segment.fileIndex << ' '
+            << (segment.path.empty() ? "-" : segment.path) << '\n';
+      }
+    }
+  }
+  {
+    std::ofstream out(dir / linksFile, std::ios::trunc);
+    for (const auto &[id, link] : linkTable) {
+      out << id << ' ' << linkTypeName(link.type) << ' '
+          << (link.owner.empty() ? "-" : link.owner) << ' ' << link.left.size()
+          << ' ' << link.right.size();
+      for (const auto &span : link.left) {
+        out << ' ' << span.start << ' ' << span.length;
+      }
+      for (const auto &span : link.right) {
+        out << ' ' << span.start << ' ' << span.length;
+      }
+      out << '\n';
+    }
+  }
+}
+
+std::string Store::exportOsmicText() const {
+  std::ostringstream out;
+  writeOsmicText(out);
+  return out.str();
+}
+
+void Store::writeOsmicText(std::ostream &out) const {
+  writeOsmicTextOpsSpool(out, ops);
 }
 
 void Store::load(const std::string &directory) {
@@ -422,7 +472,7 @@ void Store::load(const std::string &directory) {
                                  (dir / scrollsFile).string() + ": " + line);
       }
     }
-  } else {
+  } else if (std::filesystem::exists(dir / originsFile)) {
     // A store written before scrolls existed. Every entry was one file of one
     // torrent, which is a scroll with a single segment covering all of it --
     // and because a one-segment scroll's offsets are that file's offsets, the
@@ -450,51 +500,12 @@ void Store::load(const std::string &directory) {
     }
   }
 
-  {
-    std::ifstream in(dir / opsFile);
-    std::string line;
-    while (std::getline(in, line)) {
-      if (line.empty()) {
-        continue;
-      }
-      std::istringstream fields(line);
-      std::string id;
-      std::string kind;
-      std::string source;
-      Op op;
-      fields >> id >> kind >> op.at >> op.length >> op.to >> op.span.start >>
-          op.span.length >> source >> op.sourceAt >> op.sourceLength >> op.link;
-      // Added after the first stores were written, so its absence means the
-      // local spool -- which is what every span in such a store was.
-      if (!(fields >> op.span.scroll)) {
-        op.span.scroll = localScroll;
-      }
-      if (!fields) {
-        throw std::runtime_error("malformed operation in " +
-                                 (dir / opsFile).string() + ": " + line);
-      }
-      const auto produces = MicroversionId::parse(id);
-      op.source           = MicroversionId::parse(source);
-      op.parent           = produces.parent();
-      if ("insert" == kind) {
-        op.kind = OpKind::Insert;
-      } else if ("delete" == kind) {
-        op.kind = OpKind::Delete;
-      } else if ("rearrange" == kind) {
-        op.kind = OpKind::Rearrange;
-      } else if ("transclude" == kind) {
-        op.kind = OpKind::Transclude;
-      } else if ("link" == kind) {
-        op.kind = OpKind::Link;
-      } else {
-        throw std::runtime_error("unknown operation \"" + kind + "\" in " +
-                                 (dir / opsFile).string());
-      }
-      ops.emplace(produces, op);
-    }
+  if (std::filesystem::exists(dir / opsFile)) {
+    std::ifstream in(dir / opsFile, std::ios::binary);
+    readOpsSpool(in, ops);
   }
 
-  {
+  if (std::filesystem::exists(dir / linksFile)) {
     std::ifstream in(dir / linksFile);
     std::string line;
     while (std::getline(in, line)) {

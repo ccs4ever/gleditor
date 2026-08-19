@@ -21,6 +21,7 @@
 #define XUDU_STORE_H
 
 #include <cstdint>
+#include <iosfwd>
 #include <map>
 #include <optional>
 #include <string>
@@ -232,15 +233,24 @@ public:
    * @brief Write the store to @p directory as its two spools and a link file.
    *
    * The primedia spool is written as the bytes it is. The operations spool is
-   * written as one line per op, which keeps an append-only file append-only on
-   * disk as well as in memory, and makes a store readable without this
-   * program.
+   * written in an ultra-compact binary format.
    */
   void save(const std::string &directory) const;
 
-  /// Read back what save() wrote. A directory with no store in it produces an
-  /// empty one rather than an error, so a program can open a name that does
-  /// not exist yet.
+  /**
+   * @brief Write the store to @p directory using canonical human-readable
+   *        OSMIC text format for the operations spool.
+   */
+  void saveOsmicText(const std::string &directory) const;
+
+  /// Generate standard OSMIC text format of all operations on demand.
+  [[nodiscard]] std::string exportOsmicText() const;
+
+  /// Stream standard OSMIC text format of all operations on demand.
+  void writeOsmicText(std::ostream &out) const;
+
+  /// Read back what save() or saveOsmicText() wrote. Auto-detects binary and
+  /// text formats. A directory with no store in it produces an empty one.
   void load(const std::string &directory);
 
 private:
