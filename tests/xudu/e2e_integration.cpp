@@ -133,7 +133,8 @@ TEST(E2EIntegrationTest,
   // B adds original text from own scroll (25 bytes)
   vB = storeB.transcludeExternal(vB, 58, scrollB, 0, 25);
 
-  // B creates an Author Link connecting B's original text to the transcluded commentary
+  // B creates an Author Link connecting B's original text to the transcluded
+  // commentary
   const auto spansB = storeB.rebuild(vB);
   Link authorLinkB;
   authorLinkB.type  = LinkType::Quotation;
@@ -170,9 +171,10 @@ TEST(E2EIntegrationTest,
     EXPECT_EQ(p.tier, ProminenceTier::Author);
   }
 
-  // Cross-document beam from Doc B's note (doc 1, 58..83) to Doc A's commentary (doc 0, 19..49)
-  const auto authorBeamIt = std::ranges::find_if(
-      between, [](const LinkedPair &p) {
+  // Cross-document beam from Doc B's note (doc 1, 58..83) to Doc A's commentary
+  // (doc 0, 19..49)
+  const auto authorBeamIt =
+      std::ranges::find_if(between, [](const LinkedPair &p) {
         return p.from.doc == 1U && p.to.doc == 0U;
       });
   ASSERT_NE(authorBeamIt, between.end());
@@ -210,11 +212,10 @@ TEST(E2EIntegrationTest,
   leaving.clear();
   placeLinks(readerStore.links(), viewing({verA, verB}), between, leaving);
 
-  const auto curatedIt = std::ranges::find_if(
-      between, [](const LinkedPair &p) {
-        return p.tier == ProminenceTier::Curated &&
-               p.type == LinkType::Disagreement;
-      });
+  const auto curatedIt = std::ranges::find_if(between, [](const LinkedPair &p) {
+    return p.tier == ProminenceTier::Curated &&
+           p.type == LinkType::Disagreement;
+  });
   ASSERT_NE(curatedIt, between.end());
   EXPECT_EQ(curatedIt->from.doc, 0U); // Doc A (offset 19 into Doc A)
   EXPECT_EQ(curatedIt->from.start, 19U);
@@ -261,8 +262,8 @@ TEST(E2EIntegrationTest,
   leaving.clear();
   placeLinks(readerStore.links(), viewing({verA, verB}), between, leaving);
 
-  const auto publicHalfIt = std::ranges::find_if(
-      leaving, [](const HalfLink &h) {
+  const auto publicHalfIt =
+      std::ranges::find_if(leaving, [](const HalfLink &h) {
         return h.tier == ProminenceTier::Public &&
                h.type == LinkType::Illustration;
       });
@@ -270,7 +271,8 @@ TEST(E2EIntegrationTest,
   EXPECT_EQ(publicHalfIt->here.doc, 0U);          // On Doc A
   EXPECT_EQ(publicHalfIt->here.start, 19U + 15U); // Offset into Doc A
   EXPECT_EQ(publicHalfIt->here.end, 19U + 30U);
-  ASSERT_EQ(publicHalfIt->elsewhere.size(), 1U); // Points to materialized scrollC
+  ASSERT_EQ(publicHalfIt->elsewhere.size(),
+            1U); // Points to materialized scrollC
   EXPECT_EQ(publicHalfIt->elsewhere[0].start, 100U);
   EXPECT_EQ(publicHalfIt->elsewhere[0].length, 50U);
 
@@ -283,16 +285,15 @@ TEST(E2EIntegrationTest,
   const auto adoptedC = adopt(readerStore, pubC);
   const auto verC     = readerStore.rebuild(adoptedC.version);
 
-  // When Reader opens Doc A and Doc C: the Link Package completes into a LinkedPair beam!
+  // When Reader opens Doc A and Doc C: the Link Package completes into a
+  // LinkedPair beam!
   between.clear();
   leaving.clear();
   placeLinks(readerStore.links(), viewing({verA, verC}), between, leaving);
 
-  const auto beamACIt = std::ranges::find_if(
-      between, [](const LinkedPair &p) {
-        return p.tier == ProminenceTier::Public &&
-               p.type == LinkType::Illustration;
-      });
+  const auto beamACIt = std::ranges::find_if(between, [](const LinkedPair &p) {
+    return p.tier == ProminenceTier::Public && p.type == LinkType::Illustration;
+  });
   ASSERT_NE(beamACIt, between.end());
   EXPECT_EQ(beamACIt->from.doc, 0U); // Doc A
   EXPECT_EQ(beamACIt->from.start, 19U + 15U);
@@ -364,7 +365,8 @@ TEST(E2EIntegrationTest, transclusionInheritsPrimalLinksAcrossAdoptions) {
   EXPECT_EQ(between[0].to.start, 70U);
   EXPECT_EQ(between[0].to.end, 90U);
 
-  // And on Doc 2 alone ([80..100] is at offset 10 in Doc 2, [120..140] is not in Doc 2):
+  // And on Doc 2 alone ([80..100] is at offset 10 in Doc 2, [120..140] is not
+  // in Doc 2):
   between.clear();
   leaving.clear();
   placeLinks(readerStore.links(), viewing({ver2}), between, leaving);
@@ -376,6 +378,278 @@ TEST(E2EIntegrationTest, transclusionInheritsPrimalLinksAcrossAdoptions) {
   EXPECT_EQ(halfDoc2It->here.doc, 0U);
   EXPECT_EQ(halfDoc2It->here.start, 10U);
   EXPECT_EQ(halfDoc2It->here.end, 30U);
+}
+
+TEST(E2EIntegrationTest,
+     fullPageMultiLinkPackageWithMultipleLinkTypesAndTopology) {
+  // Author A writes a full-page document (750 bytes across 4 sections)
+  const auto authorA = createMutableKeys();
+  const auto scrollA = makeNamedScroll(authorA.publicKey, "essayA", 1500);
+
+  Store storeA;
+  const auto vA =
+      storeA.transcludeExternal(MicroversionId{}, 0, scrollA, 0, 750);
+  const auto pubA = publish(storeA, vA, authorA, "essay_a",
+                            "Universal Hypertext Principles", 1, 1700000100);
+
+  // Author B writes a full-page commentary (700 bytes across 3 observations)
+  const auto authorB = createMutableKeys();
+  const auto scrollB = makeNamedScroll(authorB.publicKey, "commentaryB", 1500);
+
+  Store storeB;
+  const auto vB =
+      storeB.transcludeExternal(MicroversionId{}, 0, scrollB, 0, 700);
+  const auto pubB = publish(storeB, vB, authorB, "commentary_b",
+                            "Commentary on Visual Topology", 1, 1700000150);
+
+  // Editorial team publishes a comprehensive multi-topology LinkPackage
+  const auto editorialKeys     = createMutableKeys();
+  const std::string scrollKeyA = "btpk:" + authorA.publicKey.hex() + ":essayA";
+  const std::string scrollKeyB =
+      "btpk:" + authorB.publicKey.hex() + ":commentaryB";
+
+  std::vector<GlobalLink> links;
+
+  // 1. Multiple 1-to-1 links of different types:
+  // - Comment: Sec 1.1 [0..150] -> Obs A [0..200]
+  GlobalLink l1;
+  l1.type = LinkType::Comment;
+  l1.left.push_back(GlobalSpan{scrollKeyA, 0, 150});
+  l1.right.push_back(GlobalSpan{scrollKeyB, 0, 200});
+  links.push_back(l1);
+
+  // - Illustration: Sec 1.2 [150..350] -> Obs B [200..450]
+  GlobalLink l2;
+  l2.type = LinkType::Illustration;
+  l2.left.push_back(GlobalSpan{scrollKeyA, 150, 200});
+  l2.right.push_back(GlobalSpan{scrollKeyB, 200, 250});
+  links.push_back(l2);
+
+  // - Disagreement: Sec 1.3 [350..550] -> Obs C [450..700]
+  GlobalLink l3;
+  l3.type = LinkType::Disagreement;
+  l3.left.push_back(GlobalSpan{scrollKeyA, 350, 200});
+  l3.right.push_back(GlobalSpan{scrollKeyB, 450, 250});
+  links.push_back(l3);
+
+  // 2. One-to-Many Link:
+  // - Quotation: Sec 1.4 [550..750] -> Obs A, Obs B, Obs C
+  GlobalLink l4;
+  l4.type = LinkType::Quotation;
+  l4.left.push_back(GlobalSpan{scrollKeyA, 550, 200});
+  l4.right.push_back(GlobalSpan{scrollKeyB, 0, 100});
+  l4.right.push_back(GlobalSpan{scrollKeyB, 250, 100});
+  l4.right.push_back(GlobalSpan{scrollKeyB, 500, 100});
+  links.push_back(l4);
+
+  // 3. Many-to-One Link:
+  // - Authorship: Sec 1.1, 1.2, 1.3 -> Obs C [500..650]
+  GlobalLink l5;
+  l5.type = LinkType::Authorship;
+  l5.left.push_back(GlobalSpan{scrollKeyA, 50, 80});
+  l5.left.push_back(GlobalSpan{scrollKeyA, 200, 80});
+  l5.left.push_back(GlobalSpan{scrollKeyA, 400, 80});
+  l5.right.push_back(GlobalSpan{scrollKeyB, 500, 150});
+  links.push_back(l5);
+
+  // 4. Many-to-Many Link:
+  // - Other: Sec 1.2 & 1.3 -> Obs B & Obs C
+  GlobalLink l6;
+  l6.type = LinkType::Other;
+  l6.left.push_back(GlobalSpan{scrollKeyA, 180, 100});
+  l6.left.push_back(GlobalSpan{scrollKeyA, 380, 100});
+  l6.right.push_back(GlobalSpan{scrollKeyB, 220, 100});
+  l6.right.push_back(GlobalSpan{scrollKeyB, 480, 100});
+  links.push_back(l6);
+
+  std::map<std::string, Scroll> pkgScrolls;
+  pkgScrolls.insert_or_assign(scrollKeyA, scrollA);
+  pkgScrolls.insert_or_assign(scrollKeyB, scrollB);
+
+  const auto pkg = publishLinkPackage(
+      editorialKeys, "pkg_full_topology", "Comprehensive Multi-Topology Suite",
+      1, 1700000300, std::move(links), std::move(pkgScrolls));
+
+  // Reader adopts both publications and the multi-topology LinkPackage
+  Store readerStore;
+  const auto adA = adopt(readerStore, pubA);
+  const auto adB = adopt(readerStore, pubB);
+  const auto adoptResult =
+      adoptLinkPackage(readerStore, pkg, ProminenceTier::Curated);
+
+  EXPECT_EQ(adoptResult.linksAdopted, 6U);
+
+  const auto versionA = readerStore.rebuild(adA.version);
+  const auto versionB = readerStore.rebuild(adB.version);
+
+  std::vector<LinkedPair> between;
+  std::vector<HalfLink> leaving;
+  placeLinks(readerStore.links(), viewing({versionA, versionB}), between,
+             leaving);
+
+  EXPECT_EQ(between.size(), 6U);
+  EXPECT_TRUE(leaving.empty());
+
+  // Verify all 5 link types are represented
+  std::set<LinkType> linkTypes;
+  for (const auto &pair : between) {
+    linkTypes.insert(pair.type);
+    EXPECT_EQ(pair.from.doc, 0U);
+    EXPECT_EQ(pair.to.doc, 1U);
+  }
+  EXPECT_EQ(linkTypes.size(), 6U);
+  EXPECT_TRUE(linkTypes.contains(LinkType::Comment));
+  EXPECT_TRUE(linkTypes.contains(LinkType::Illustration));
+  EXPECT_TRUE(linkTypes.contains(LinkType::Disagreement));
+  EXPECT_TRUE(linkTypes.contains(LinkType::Quotation));
+  EXPECT_TRUE(linkTypes.contains(LinkType::Authorship));
+  EXPECT_TRUE(linkTypes.contains(LinkType::Other));
+
+  // Verify 1-to-Many bounding extent: covers Obs A (0) through Obs C (600)
+  const auto qIt = std::ranges::find_if(between, [](const LinkedPair &p) {
+    return p.type == LinkType::Quotation;
+  });
+  ASSERT_NE(qIt, between.end());
+  EXPECT_EQ(qIt->from.start, 550U);
+  EXPECT_EQ(qIt->from.end, 750U);
+  EXPECT_EQ(qIt->to.start, 0U);
+  EXPECT_EQ(qIt->to.end, 600U);
+
+  // Verify Many-to-1 bounding extent: covers Sec 1.1 (50) through Sec 1.3 (480)
+  const auto aIt = std::ranges::find_if(between, [](const LinkedPair &p) {
+    return p.type == LinkType::Authorship;
+  });
+  ASSERT_NE(aIt, between.end());
+  EXPECT_EQ(aIt->from.start, 50U);
+  EXPECT_EQ(aIt->from.end, 480U);
+  EXPECT_EQ(aIt->to.start, 500U);
+  EXPECT_EQ(aIt->to.end, 650U);
+}
+
+TEST(E2EIntegrationTest,
+     threeDocumentNonOverlappingPlacementAndBackgroundBypassRouting) {
+  // Setup 3 authored documents: Doc 0, Doc 1, Doc 2
+  const auto author1 = createMutableKeys();
+  const auto author2 = createMutableKeys();
+  const auto author3 = createMutableKeys();
+
+  const auto scroll1 = makeNamedScroll(author1.publicKey, "doc1", 800);
+  const auto scroll2 = makeNamedScroll(author2.publicKey, "doc2", 800);
+  const auto scroll3 = makeNamedScroll(author3.publicKey, "doc3", 800);
+
+  Store s1, s2, s3;
+  const auto v1 = s1.transcludeExternal(MicroversionId{}, 0, scroll1, 0, 400);
+  const auto v2 = s2.transcludeExternal(MicroversionId{}, 0, scroll2, 0, 400);
+  const auto v3 = s3.transcludeExternal(MicroversionId{}, 0, scroll3, 0, 400);
+
+  const auto pub1 = publish(s1, v1, author1, "p1", "Document 1", 1, 1700000001);
+  const auto pub2 = publish(s2, v2, author2, "p2", "Document 2", 1, 1700000002);
+  const auto pub3 = publish(s3, v3, author3, "p3", "Document 3", 1, 1700000003);
+
+  // Links:
+  // Link 1: Doc 1 <-> Doc 2 (Adjacent, docSpan = 1)
+  // Link 2: Doc 2 <-> Doc 3 (Adjacent, docSpan = 1)
+  // Link 3: Doc 1 <-> Doc 3 (Non-adjacent, docSpan = 2 -> Background Bypass
+  // Layer Z = -20)
+  const auto curator   = createMutableKeys();
+  const std::string k1 = "btpk:" + author1.publicKey.hex() + ":doc1";
+  const std::string k2 = "btpk:" + author2.publicKey.hex() + ":doc2";
+  const std::string k3 = "btpk:" + author3.publicKey.hex() + ":doc3";
+
+  std::vector<GlobalLink> links;
+
+  GlobalLink l12;
+  l12.type = LinkType::Comment;
+  l12.left.push_back(GlobalSpan{k1, 50, 50});
+  l12.right.push_back(GlobalSpan{k2, 50, 50});
+  links.push_back(l12);
+
+  GlobalLink l23;
+  l23.type = LinkType::Illustration;
+  l23.left.push_back(GlobalSpan{k2, 150, 50});
+  l23.right.push_back(GlobalSpan{k3, 150, 50});
+  links.push_back(l23);
+
+  GlobalLink l13;
+  l13.type = LinkType::Quotation;
+  l13.left.push_back(GlobalSpan{k1, 250, 50});
+  l13.right.push_back(GlobalSpan{k3, 250, 50});
+  links.push_back(l13);
+
+  std::map<std::string, Scroll> scrolls;
+  scrolls.insert_or_assign(k1, scroll1);
+  scrolls.insert_or_assign(k2, scroll2);
+  scrolls.insert_or_assign(k3, scroll3);
+
+  const auto pkg =
+      publishLinkPackage(curator, "pkg_3doc", "3-Doc Network", 1, 1700000010,
+                         std::move(links), std::move(scrolls));
+
+  // Reader adopts all 3 docs and link package
+  Store readerStore;
+  const auto ad1 = adopt(readerStore, pub1);
+  const auto ad2 = adopt(readerStore, pub2);
+  const auto ad3 = adopt(readerStore, pub3);
+  adoptLinkPackage(readerStore, pkg, ProminenceTier::Curated);
+
+  const auto ver1 = readerStore.rebuild(ad1.version);
+  const auto ver2 = readerStore.rebuild(ad2.version);
+  const auto ver3 = readerStore.rebuild(ad3.version);
+
+  std::vector<LinkedPair> between;
+  std::vector<HalfLink> leaving;
+  placeLinks(readerStore.links(), viewing({ver1, ver2, ver3}), between,
+             leaving);
+
+  ASSERT_EQ(between.size(), 3U);
+  EXPECT_TRUE(leaving.empty());
+
+  // Check the three link pairs:
+  // 1. Doc 0 <-> Doc 1 (Adjacent)
+  const auto p01 = std::ranges::find_if(between, [](const LinkedPair &p) {
+    return p.from.doc == 0U && p.to.doc == 1U;
+  });
+  ASSERT_NE(p01, between.end());
+  const std::size_t span01 = p01->to.doc - p01->from.doc;
+  EXPECT_EQ(span01, 1U); // Foreground Z = 0
+
+  // 2. Doc 1 <-> Doc 2 (Adjacent)
+  const auto p12 = std::ranges::find_if(between, [](const LinkedPair &p) {
+    return p.from.doc == 1U && p.to.doc == 2U;
+  });
+  ASSERT_NE(p12, between.end());
+  const std::size_t span12 = p12->to.doc - p12->from.doc;
+  EXPECT_EQ(span12, 1U); // Foreground Z = 0
+
+  // 3. Doc 0 <-> Doc 2 (Non-adjacent across Doc 1)
+  const auto p02 = std::ranges::find_if(between, [](const LinkedPair &p) {
+    return p.from.doc == 0U && p.to.doc == 2U;
+  });
+  ASSERT_NE(p02, between.end());
+  const std::size_t span02 = p02->to.doc - p02->from.doc;
+  EXPECT_EQ(
+      span02,
+      2U); // Non-adjacent -> routes through background bypass layer (Z = -20)
+
+  // Verify non-overlapping layout geometry:
+  // Document 0 at X0, Document 1 at X1 = X0 + W0/2 + W1/2 + Gap, Document 2 at
+  // X2 = X1 + W1/2 + W2/2 + Gap
+  const float halfW = 10.0F;
+  const float gap   = 2.0F;
+  const float x0    = 0.0F;
+  const float x1    = x0 + (2.0F * halfW + gap); // 22.0
+  const float x2    = x1 + (2.0F * halfW + gap); // 44.0
+
+  EXPECT_LT(x0 + halfW, x1 - halfW);
+  EXPECT_LT(x1 + halfW, x2 - halfW);
+
+  // Dynamic Camera Framing encompasses all three docs [x0 - halfW - margin, x2
+  // + halfW + margin]
+  const float minX       = x0 - halfW - 4.0F; // -14.0
+  const float maxX       = x2 + halfW + 4.0F; // 58.0
+  const float totalWidth = maxX - minX;       // 72.0
+
+  EXPECT_FLOAT_EQ(totalWidth, 72.0F);
 }
 
 } // namespace
