@@ -660,10 +660,14 @@ test: $(OBJDIR)/gleditor_test $(OBJDIR)/xudu_test
 
 # Everything, slow suites included. What the pull request checks run, and what
 # to run here before pushing.
-.PHONY: test/all
+.PHONY: test/all test/integration test/e2e-orchestration
 test/all: $(OBJDIR)/gleditor_test $(OBJDIR)/xudu_test
 	$(OBJDIR)/gleditor_test
 	$(OBJDIR)/xudu_test
+
+test/integration: test/e2e-orchestration
+test/e2e-orchestration: $(OBJDIR)/xudu $(OBJDIR)/xudu_test
+	tools/xudu-e2e-orchestration.sh
 
 # produces gleditor_test.prof (a human-readable code coverage report) and
 # coverage.lcov (a coverage report in lcov format) suitable for feeding into other tools like NeoVim
