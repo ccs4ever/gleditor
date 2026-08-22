@@ -5,7 +5,10 @@
 #include <gmock/gmock.h>
 #include <gtest/gtest.h>
 
+#include <array>
 #include <filesystem>
+#include <fstream>
+#include <sstream>
 #include <stdexcept>
 #include <string>
 #include <vector>
@@ -350,6 +353,87 @@ TEST_F(StoreRoundTripTest, aQuotationIntoASecondDocumentSurvivesSaving) {
   // copy has to mean after a round trip.
   EXPECT_EQ(reloaded.textOf(quoted), "Hello");
   EXPECT_EQ(reloaded.textOf(MicroversionId::parse("1")), "Hello there");
+}
+
+TEST_F(StoreRoundTripTest, savingTwiceOnlyWritesWhatIsNew) {
+  // save() appends rather than rewrites once the file on disk already agrees
+  // with this store's history, so a second save with nothing new in between
+  // must not duplicate what the first one already wrote.
+  Store store;
+  const auto one = store.insert(MicroversionId{}, 0, "one");
+  store.save(dir.string());
+  store.save(dir.string());
+
+  Store reloaded;
+  reloaded.load(dir.string());
+  EXPECT_EQ(reloaded.opCount(), 1U);
+  EXPECT_EQ(reloaded.textOf(one), "one");
+
+  // And a save with something new in between adds exactly that, not the
+  // whole history rewritten and appended to.
+  const auto two = store.insert(one, 3, " two");
+  store.save(dir.string());
+
+  Store reloadedAgain;
+  reloadedAgain.load(dir.string());
+  EXPECT_EQ(reloadedAgain.opCount(), 2U);
+  EXPECT_EQ(reloadedAgain.textOf(two), "one two");
+}
+
+TEST_F(StoreRoundTripTest, aLegacyTextOperationsSpoolStillReads) {
+  // Stores written before the operations spool became binary records hold
+  // one line per operation. load() has to keep reading that shape, or every
+  // store written by an older build becomes unreadable the moment this one
+  // opens it.
+  std::filesystem::create_directories(dir);
+  {
+    std::ofstream out(dir / "primedia.spool", std::ios::binary);
+    out << "hello world";
+  }
+  {
+    std::ofstream out(dir / "ops.spool");
+    out << "1 insert 0 5 0 0 5 0 0 0 0 0\n";
+    out << "2 insert 5 6 0 5 6 0 0 0 0 0\n";
+  }
+
+  Store loaded;
+  loaded.load(dir.string());
+  EXPECT_EQ(loaded.opCount(), 2U);
+  EXPECT_EQ(loaded.textOf(MicroversionId::parse("2")), "hello world");
+
+  // Saved again, the operations spool is migrated to the binary shape --
+  // which a further, otherwise-untouched save must be able to append to
+  // rather than mistake for text a second time.
+  loaded.save(dir.string());
+  const auto three = loaded.insert(MicroversionId::parse("2"), 11, "!");
+  loaded.save(dir.string());
+
+  Store reloaded;
+  reloaded.load(dir.string());
+  EXPECT_EQ(reloaded.opCount(), 3U);
+  EXPECT_EQ(reloaded.textOf(three), "hello world!");
+}
+
+TEST(StoreTest, theOpsLogDecodesBackToWhatProducedIt) {
+  // What sealLocalSpool() folds into a torrent, so anybody fetching it can
+  // rebuild this store's history without this store.
+  Store store;
+  const auto one = store.insert(MicroversionId{}, 0, "a");
+  store.insert(one, 1, "b");
+
+  std::istringstream in(store.opsLog());
+  // The four-byte tag plus the version byte that marks the binary shape.
+  std::array<char, 5> header{};
+  in.read(header.data(), static_cast<std::streamsize>(header.size()));
+  ASSERT_EQ(in.gcount(), static_cast<std::streamsize>(header.size()));
+
+  MicroversionId produces;
+  Op op;
+  std::vector<std::string> decoded;
+  while (xudu::decodeOpRecord(in, produces, op)) {
+    decoded.push_back(produces.str());
+  }
+  EXPECT_EQ(decoded, (std::vector<std::string>{"1", "2"}));
 }
 
 } // namespace

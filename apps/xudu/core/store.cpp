@@ -1,5 +1,7 @@
 #include "store.hpp"
 
+#include <algorithm>
+#include <array>
 #include <cstdint>
 #include <filesystem>
 #include <fstream>
@@ -7,6 +9,7 @@
 #include <sstream>
 #include <stdexcept>
 #include <string>
+#include <string_view>
 #include <vector>
 
 namespace xudu {
@@ -19,6 +22,14 @@ constexpr const char *opsFile      = "ops.spool";
 constexpr const char *linksFile    = "links.spool";
 constexpr const char *originsFile  = "origins.spool"; // pre-scroll stores
 constexpr const char *scrollsFile  = "scrolls.spool";
+
+/// Marks an operations spool written in the binary shape encodeOpRecord()
+/// produces, so load() can tell one from the one-line-per-operation text a
+/// store written before this existed still holds. The version byte is there
+/// for the next time the shape has to change; nothing reads it yet because
+/// there is only the one.
+constexpr std::array<char, 5> opsMagicBytes{'X', 'U', 'O', 'P', 1};
+constexpr std::string_view opsMagic{opsMagicBytes.data(), opsMagicBytes.size()};
 
 std::string readWholeFile(const std::filesystem::path &path) {
   std::ifstream in(path, std::ios::binary);
@@ -46,6 +57,7 @@ void Store::putOp(const MicroversionId &produces, const Op &op) {
         op.parent.str() + ", but that name follows " + produces.parent().str());
   }
   ops.emplace(produces, op);
+  opOrder.push_back(produces);
 }
 
 const Op *Store::getOp(const MicroversionId &id) const {
@@ -112,6 +124,14 @@ Version Store::rebuild(const MicroversionId &version) const {
 
 std::string Store::textOf(const MicroversionId &version) const {
   return rebuild(version).materialize(*this);
+}
+
+std::string Store::opsLog() const {
+  std::string out{opsMagic};
+  for (const auto &id : opOrder) {
+    out += encodeOpRecord(id, ops.at(id));
+  }
+  return out;
 }
 
 ScrollId Store::addScroll(const Scroll &scroll) {
@@ -307,17 +327,28 @@ void Store::save(const std::string &directory) const {
     out << spool.bytes();
   }
   {
-    // One line per operation, in replay order: an append-only file on disk as
-    // well as in memory, and readable without this program.
-    std::ofstream out(dir / opsFile, std::ios::trunc);
-    for (const auto &[id, op] : ops) {
-      out << id.str() << ' ' << opKindName(op.kind) << ' ' << op.at << ' '
-          << op.length << ' ' << op.to << ' ' << op.span.start << ' '
-          << op.span.length << ' '
-          << (op.source.isZero() ? "0" : op.source.str()) << ' ' << op.sourceAt
-          << ' ' << op.sourceLength << ' ' << op.link << ' ' << op.span.scroll
-          << '\n';
+    // Binary records, appended to rather than rewritten once the file on disk
+    // already agrees with this store's history: a save then costs what was
+    // typed since the last one, not the whole history every time, which is
+    // what made saving a long-lived document slower with every save it had
+    // ever had. The first save to a directory -- or the one right after
+    // loading a store still in the one-line-per-operation text shape older
+    // builds wrote -- writes everything once, the same as it always did.
+    const bool fresh = flushedOpsDirectory != directory;
+    std::ofstream out(dir / opsFile,
+                      std::ios::binary |
+                          (fresh ? std::ios::trunc : std::ios::app));
+    std::size_t from = fresh ? 0 : opsFlushed;
+    if (fresh) {
+      out.write(opsMagic.data(), static_cast<std::streamsize>(opsMagic.size()));
     }
+    for (; from < opOrder.size(); from++) {
+      const auto &id    = opOrder[from];
+      const auto record = encodeOpRecord(id, ops.at(id));
+      out.write(record.data(), static_cast<std::streamsize>(record.size()));
+    }
+    flushedOpsDirectory = directory;
+    opsFlushed          = opOrder.size();
   }
   {
     // The scroll table: what a span's ScrollId means. Without it an id is a
@@ -363,9 +394,17 @@ void Store::load(const std::string &directory) {
   const std::filesystem::path dir(directory);
   spool.adopt(readWholeFile(dir / primediaFile));
   ops.clear();
+  opOrder.clear();
   linkTable.clear();
   externals.clear();
   nextLinkId = 1;
+  // Assume the worst until the binary branch below says otherwise: that the
+  // operations spool just read is not one save() can safely append to,
+  // because there either was none or it was the old text shape. Either way
+  // the next save() has to write the whole history once to get to a file this
+  // store's cursor actually agrees with.
+  flushedOpsDirectory.clear();
+  opsFlushed = 0;
 
   if (std::filesystem::exists(dir / scrollsFile)) {
     std::ifstream in(dir / scrollsFile);
@@ -451,46 +490,77 @@ void Store::load(const std::string &directory) {
   }
 
   {
-    std::ifstream in(dir / opsFile);
-    std::string line;
-    while (std::getline(in, line)) {
-      if (line.empty()) {
-        continue;
-      }
-      std::istringstream fields(line);
-      std::string id;
-      std::string kind;
-      std::string source;
-      Op op;
-      fields >> id >> kind >> op.at >> op.length >> op.to >> op.span.start >>
-          op.span.length >> source >> op.sourceAt >> op.sourceLength >> op.link;
-      // Added after the first stores were written, so its absence means the
-      // local spool -- which is what every span in such a store was.
-      if (!(fields >> op.span.scroll)) {
-        op.span.scroll = localScroll;
-      }
-      if (!fields) {
+    std::ifstream in(dir / opsFile, std::ios::binary);
+    std::array<char, opsMagicBytes.size()> header{};
+    bool binary = false;
+    if (in) {
+      in.read(header.data(), static_cast<std::streamsize>(header.size()));
+      binary = in.gcount() == static_cast<std::streamsize>(header.size()) &&
+               std::equal(header.begin(), header.end(), opsMagicBytes.begin());
+    }
+    if (binary) {
+      try {
+        MicroversionId produces;
+        Op op;
+        while (decodeOpRecord(in, produces, op)) {
+          op.parent = produces.parent();
+          ops.emplace(produces, op);
+          opOrder.push_back(produces);
+        }
+      } catch (const std::exception &ex) {
         throw std::runtime_error("malformed operation in " +
-                                 (dir / opsFile).string() + ": " + line);
+                                 (dir / opsFile).string() + ": " + ex.what());
       }
-      const auto produces = MicroversionId::parse(id);
-      op.source           = MicroversionId::parse(source);
-      op.parent           = produces.parent();
-      if ("insert" == kind) {
-        op.kind = OpKind::Insert;
-      } else if ("delete" == kind) {
-        op.kind = OpKind::Delete;
-      } else if ("rearrange" == kind) {
-        op.kind = OpKind::Rearrange;
-      } else if ("transclude" == kind) {
-        op.kind = OpKind::Transclude;
-      } else if ("link" == kind) {
-        op.kind = OpKind::Link;
-      } else {
-        throw std::runtime_error("unknown operation \"" + kind + "\" in " +
-                                 (dir / opsFile).string());
+      // The file on disk already holds exactly this history in this shape, so
+      // the next save() can append to it rather than rewrite it.
+      flushedOpsDirectory = directory;
+      opsFlushed          = opOrder.size();
+    } else {
+      // Either no file, or one written before binary records existed: one
+      // line per operation, in whatever order they were saved.
+      std::ifstream legacy(dir / opsFile);
+      std::string line;
+      while (std::getline(legacy, line)) {
+        if (line.empty()) {
+          continue;
+        }
+        std::istringstream fields(line);
+        std::string id;
+        std::string kind;
+        std::string source;
+        Op op;
+        fields >> id >> kind >> op.at >> op.length >> op.to >> op.span.start >>
+            op.span.length >> source >> op.sourceAt >> op.sourceLength >>
+            op.link;
+        // Added after the first stores were written, so its absence means the
+        // local spool -- which is what every span in such a store was.
+        if (!(fields >> op.span.scroll)) {
+          op.span.scroll = localScroll;
+        }
+        if (!fields) {
+          throw std::runtime_error("malformed operation in " +
+                                   (dir / opsFile).string() + ": " + line);
+        }
+        const auto produces = MicroversionId::parse(id);
+        op.source           = MicroversionId::parse(source);
+        op.parent           = produces.parent();
+        if ("insert" == kind) {
+          op.kind = OpKind::Insert;
+        } else if ("delete" == kind) {
+          op.kind = OpKind::Delete;
+        } else if ("rearrange" == kind) {
+          op.kind = OpKind::Rearrange;
+        } else if ("transclude" == kind) {
+          op.kind = OpKind::Transclude;
+        } else if ("link" == kind) {
+          op.kind = OpKind::Link;
+        } else {
+          throw std::runtime_error("unknown operation \"" + kind + "\" in " +
+                                   (dir / opsFile).string());
+        }
+        ops.emplace(produces, op);
+        opOrder.push_back(produces);
       }
-      ops.emplace(produces, op);
     }
   }
 

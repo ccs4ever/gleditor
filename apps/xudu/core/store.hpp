@@ -164,6 +164,18 @@ public:
   [[nodiscard]] const PrimediaSpool &primedia() const { return spool; }
   [[nodiscard]] std::size_t opCount() const { return ops.size(); }
 
+  /**
+   * @brief The whole operations history, as encodeOpRecord() bytes.
+   *
+   * The same encoding save() writes to the operations spool, so this is what
+   * lets the ops history participate in sealing the way the primedia spool
+   * already does -- see sealLocalSpool() in publication.hpp, which folds this
+   * into the same torrent as a further file. Always the whole history, like
+   * primedia().bytes(): resealing has no notion yet of a segment covering
+   * only what is new, for either spool.
+   */
+  [[nodiscard]] std::string opsLog() const;
+
   // -- content that was not typed here --------------------------------------
 
   /**
@@ -257,6 +269,18 @@ private:
   /// The operations spool, filed by the state each op produces. Ordered, so
   /// iteration is replay order.
   std::map<MicroversionId, Op> ops;
+  /// The states in @ref ops, in the order putOp() recorded them -- which is
+  /// append order, not @ref ops's replay order: a branch off an earlier state
+  /// is filed after states that already follow it. save() walks this rather
+  /// than the map so that writing what is new since the last save costs what
+  /// is new, not the whole history.
+  std::vector<MicroversionId> opOrder;
+  /// How many of @ref opOrder are already written to disk, and where. Reset by
+  /// load(); advanced by save(). A save to a directory this does not match
+  /// rewrites the operations spool from scratch instead of assuming an
+  /// unrelated file's prefix already agrees with this store's history.
+  mutable std::size_t opsFlushed{0};
+  mutable std::string flushedOpsDirectory;
   std::map<std::uint64_t, Link> linkTable;
   std::uint64_t nextLinkId{1};
 };

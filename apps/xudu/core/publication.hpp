@@ -195,20 +195,35 @@ decodePublication(std::string_view encoded);
  * segment; the address of everything already sealed is untouched. See
  * scroll.hpp for why the carrier and the address have to be separable.
  *
- * The torrent carries three files: the content, the authorship record, and the
- * OpenPGP signature over that record. The record is signed before any of this
- * happens and is sealed in unchanged, so the info hash covers the content and
- * the claim about who wrote it together -- neither can be substituted for
- * another afterwards without the address changing. The content is file zero
- * and begins at offset zero of the stream, which is what keeps every address
- * already handed out pointing where it always did.
+ * The torrent carries four files: the content, the authorship record, the
+ * OpenPGP signature over that record, and the operations that produced the
+ * content -- Store::opsLog(), the same bytes save() keeps on disk. The record
+ * is signed before any of this happens and is sealed in unchanged, so the
+ * info hash covers the content and the claim about who wrote it together --
+ * neither can be substituted for another afterwards without the address
+ * changing. The content is file zero and begins at offset zero of the stream,
+ * which is what keeps every address already handed out pointing where it
+ * always did.
+ *
+ * The operations ride along under their own scroll identity rather than the
+ * content's: an ops-log offset and a primedia offset are different streams
+ * that happen to both start at zero, and folding them into one scroll would
+ * let two unrelated bytes claim the same address. Nothing today resolves a
+ * span into it -- no document quotes "operation 47" -- so it exists purely to
+ * make the history as durable and fetchable as the content it explains,
+ * which is the sense in which it now participates in sealing the way the
+ * primedia spool always has.
  *
  * @param into Directory to write the torrent and its files into, so that
  *        something can seed them. Nothing is written when it is empty.
- * @return The scroll the local spool now is, ready to be handed to publish().
+ * @return The scroll the local spool now is, ready to be handed to publish(),
+ *         and the scroll its operations history now is.
  */
 struct SealedScroll {
   Scroll scroll;
+  /// The operations history, sealed into the same torrent as a further file.
+  /// See the note above on why it is a separate scroll from @ref scroll.
+  Scroll opsScroll;
   /// The .torrent describing the files, for handing to a seeder.
   std::string torrentFile;
   InfoHash hash;

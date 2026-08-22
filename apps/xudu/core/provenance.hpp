@@ -222,6 +222,9 @@ verifyProvenance(const SignedProvenance &signed_,
 inline constexpr auto provenanceFileName = "AUTHORSHIP.yaml";
 inline constexpr auto provenanceSigName  = "AUTHORSHIP.yaml.asc";
 inline constexpr auto sealedContentName  = "primedia";
+/// The operations history, sealed in alongside the content it produced -- see
+/// Store::opsLog() and sealLocalSpool().
+inline constexpr auto opsFileName = "ops";
 
 } // namespace xudu
 

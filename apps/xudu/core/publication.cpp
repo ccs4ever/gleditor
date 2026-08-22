@@ -33,6 +33,10 @@ constexpr auto keyTime      = "time";
 constexpr auto keyTitle     = "title";
 constexpr auto keyVersion   = "version";
 
+/// Appended to the salt naming the primedia scroll to name the ops scroll
+/// sealed alongside it, so the two never collide under one publisher's key.
+constexpr auto opsScrollSaltSuffix = "+ops";
+
 std::string rawBytes(const PublicKey &key) {
   return std::string{reinterpret_cast<const char *>(key.bytes.data()),
                      key.bytes.size()};
@@ -404,15 +408,18 @@ SealedScroll sealLocalSpool(const Store &store, const MutableKeys &keys,
   }
 
   const auto &bytes = store.primedia().bytes();
+  const auto opsLog = store.opsLog();
   const auto name   = salt.empty() ? std::string{"primedia"} : salt;
 
   // The content first, so it begins at offset zero of the piece stream and
-  // every address already handed out still points where it did. The record and
-  // its signature follow it.
-  const std::array<TorrentContent, 3> files{
+  // every address already handed out still points where it did. The record
+  // and its signature follow it, and the operations that produced the content
+  // ride along last.
+  const std::array<TorrentContent, 4> files{
       TorrentContent{sealedContentName, bytes},
       TorrentContent{provenanceFileName, provenance.yaml},
       TorrentContent{provenanceSigName, provenance.signature},
+      TorrentContent{opsFileName, opsLog},
   };
   auto made = makeTorrent(files, name);
 
@@ -431,6 +438,20 @@ SealedScroll sealLocalSpool(const Store &store, const MutableKeys &keys,
   segment.fileIndex    = 0;
   segment.path         = sealedContentName;
   sealed.scroll.segments.push_back(segment);
+
+  // A separate scroll identity for a separate stream of bytes -- see the
+  // comment on SealedScroll for why this cannot share the content's.
+  sealed.opsScroll.publisher = keys.publicKey;
+  sealed.opsScroll.salt      = salt + opsScrollSaltSuffix;
+  ScrollSegment opsSegment;
+  opsSegment.at      = 0;
+  opsSegment.length  = opsLog.size();
+  opsSegment.torrent = sealed.hash;
+  opsSegment.streamOffset =
+      bytes.size() + provenance.yaml.size() + provenance.signature.size();
+  opsSegment.fileIndex = 3;
+  opsSegment.path      = opsFileName;
+  sealed.opsScroll.segments.push_back(opsSegment);
 
   if (!into.empty()) {
     // A directory named as the torrent names it, holding the files it

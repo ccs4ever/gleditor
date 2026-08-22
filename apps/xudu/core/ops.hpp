@@ -18,6 +18,7 @@
 #define XUDU_OPS_H
 
 #include <cstdint>
+#include <iosfwd>
 #include <string>
 #include <vector>
 
@@ -109,6 +110,39 @@ struct Op {
   /// Link: which link was made.
   std::uint64_t link{};
 };
+
+/**
+ * @brief One operations-spool record, as bytes.
+ *
+ * Every fixed-size field is written big-endian; a MicroversionId is a byte
+ * giving its segment count followed by that many (branch letter, number)
+ * pairs. That makes a record self-delimiting -- a reader can tell where it
+ * ends without being told separately -- which is what lets records be
+ * concatenated with nothing between them, on disk or inside a torrent, and
+ * still be read back one at a time.
+ *
+ * @p op.parent is not written: it is @p produces one step back, which
+ * decodeOpRecord()'s caller can always compute, and storing it twice would be
+ * a second place for a corrupt record to disagree with itself.
+ */
+[[nodiscard]] std::string encodeOpRecord(const MicroversionId &produces,
+                                         const Op &op);
+
+/**
+ * @brief Read one record written by encodeOpRecord() from @p in.
+ *
+ * @p in must be open in binary mode and positioned at the start of a record.
+ * @p op.parent is not filled in; it is @p produces.parent().
+ *
+ * @return false when @p in is at end of file before any byte of a record is
+ *         read, which is how a caller finds the end of the log.
+ * @throws std::runtime_error for anything that stops partway through a
+ *         record, or names a kind this build does not know: a truncated or
+ *         unrecognised record is not safely skippable, since there is no way
+ *         to know how long it was meant to be.
+ */
+[[nodiscard]] bool decodeOpRecord(std::istream &in, MicroversionId &produces,
+                                  Op &op);
 
 } // namespace xudu
 

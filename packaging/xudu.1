@@ -173,7 +173,9 @@ Stop pointing at the selection.
 Every byte ever typed, at the address it was given.
 .TP
 .I STORE/ops.spool
-One line per operation, in replay order.
+One binary record per operation, appended in the order each was made. A
+store written by an older build holds one line per operation instead; it is
+still read, and rewritten in the binary shape the next time it is saved.
 .TP
 .I STORE/links.spool
 Links, as their two lists of primedia spans, a type and an owner.

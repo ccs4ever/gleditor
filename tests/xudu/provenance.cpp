@@ -241,7 +241,7 @@ TEST(ProvenanceTest, theSealCarriesTheContentAndTheRecordUnderOneHash) {
 
   const auto meta = xudu::Metainfo::parse(sealed.torrentFile);
   EXPECT_EQ(meta.hash(), sealed.hash);
-  ASSERT_EQ(meta.files().size(), 3U);
+  ASSERT_EQ(meta.files().size(), 4U);
 
   // The content is file zero at offset zero, which is what keeps every address
   // already handed out pointing where it did.
@@ -257,8 +257,23 @@ TEST(ProvenanceTest, theSealCarriesTheContentAndTheRecordUnderOneHash) {
   EXPECT_EQ(meta.files()[1].length, signed_.yaml.size());
   EXPECT_EQ(meta.files()[2].path, xudu::provenanceSigName);
   EXPECT_EQ(meta.files()[2].length, signed_.signature.size());
-  EXPECT_EQ(meta.totalLength(),
+
+  // So does the operations history that produced the content, as its own
+  // file under its own scroll -- sealing now makes hypertime as durable and
+  // fetchable as the text it explains, the same way sealing the content
+  // always has.
+  const auto opsLog = store.opsLog();
+  EXPECT_EQ(meta.files()[3].path, xudu::opsFileName);
+  EXPECT_EQ(meta.files()[3].length, opsLog.size());
+  EXPECT_EQ(sealed.opsScroll.segments.at(0).fileIndex, 3U);
+  EXPECT_EQ(sealed.opsScroll.segments.at(0).streamOffset,
             bytes.size() + signed_.yaml.size() + signed_.signature.size());
+  EXPECT_EQ(sealed.opsScroll.segments.at(0).at, 0U);
+  EXPECT_TRUE(sealed.opsScroll.isNamed());
+  EXPECT_NE(xudu::scrollKey(sealed.opsScroll), xudu::scrollKey(sealed.scroll));
+
+  EXPECT_EQ(meta.totalLength(), bytes.size() + signed_.yaml.size() +
+                                    signed_.signature.size() + opsLog.size());
 
   // Sealing the same content with a different record is a different address:
   // the two cannot be substituted for one another.
