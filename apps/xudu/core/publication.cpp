@@ -428,30 +428,23 @@ SealedScroll sealLocalSpool(const Store &store, const MutableKeys &keys,
   sealed.torrentFile = std::move(made.file);
   sealed.provenance  = provenance;
 
+  // One segment covering the whole of a stream, from scroll offset zero --
+  // Scroll::ofTorrentFile() already builds exactly that shape for content
+  // with no publisher name; a scroll that has one is the same segment with a
+  // name attached.
+  sealed.scroll =
+      Scroll::ofTorrentFile(sealed.hash, 0, sealedContentName, 0, bytes.size());
   sealed.scroll.publisher = keys.publicKey;
   sealed.scroll.salt      = salt;
-  ScrollSegment segment;
-  segment.at           = 0;
-  segment.length       = bytes.size();
-  segment.torrent      = sealed.hash;
-  segment.streamOffset = 0;
-  segment.fileIndex    = 0;
-  segment.path         = sealedContentName;
-  sealed.scroll.segments.push_back(segment);
 
   // A separate scroll identity for a separate stream of bytes -- see the
   // comment on SealedScroll for why this cannot share the content's.
+  sealed.opsScroll = Scroll::ofTorrentFile(
+      sealed.hash, 3, opsFileName,
+      bytes.size() + provenance.yaml.size() + provenance.signature.size(),
+      opsLog.size());
   sealed.opsScroll.publisher = keys.publicKey;
   sealed.opsScroll.salt      = salt + opsScrollSaltSuffix;
-  ScrollSegment opsSegment;
-  opsSegment.at      = 0;
-  opsSegment.length  = opsLog.size();
-  opsSegment.torrent = sealed.hash;
-  opsSegment.streamOffset =
-      bytes.size() + provenance.yaml.size() + provenance.signature.size();
-  opsSegment.fileIndex = 3;
-  opsSegment.path      = opsFileName;
-  sealed.opsScroll.segments.push_back(opsSegment);
 
   if (!into.empty()) {
     // A directory named as the torrent names it, holding the files it

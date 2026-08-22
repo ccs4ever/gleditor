@@ -358,11 +358,17 @@ TEST_F(StoreRoundTripTest, aQuotationIntoASecondDocumentSurvivesSaving) {
 TEST_F(StoreRoundTripTest, savingTwiceOnlyWritesWhatIsNew) {
   // save() appends rather than rewrites once the file on disk already agrees
   // with this store's history, so a second save with nothing new in between
-  // must not duplicate what the first one already wrote.
+  // must not duplicate what the first one already wrote. True of both
+  // spools: a round trip alone would not catch a duplicated primedia spool,
+  // since stale trailing bytes past an address already handed out do not
+  // change what that address reads as -- so this checks the file's size
+  // directly rather than only what loading it back produces.
   Store store;
   const auto one = store.insert(MicroversionId{}, 0, "one");
   store.save(dir.string());
   store.save(dir.string());
+
+  EXPECT_EQ(std::filesystem::file_size(dir / "primedia.spool"), 3U);
 
   Store reloaded;
   reloaded.load(dir.string());
@@ -374,10 +380,13 @@ TEST_F(StoreRoundTripTest, savingTwiceOnlyWritesWhatIsNew) {
   const auto two = store.insert(one, 3, " two");
   store.save(dir.string());
 
+  EXPECT_EQ(std::filesystem::file_size(dir / "primedia.spool"), 7U);
+
   Store reloadedAgain;
   reloadedAgain.load(dir.string());
   EXPECT_EQ(reloadedAgain.opCount(), 2U);
   EXPECT_EQ(reloadedAgain.textOf(two), "one two");
+  EXPECT_EQ(reloadedAgain.primedia().bytes(), "one two");
 }
 
 TEST_F(StoreRoundTripTest, aLegacyTextOperationsSpoolStillReads) {

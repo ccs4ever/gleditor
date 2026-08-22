@@ -117,6 +117,29 @@ smaller when integers are four or eight raw bytes instead of decimal digits
 with separators around them, and a record ends where its fields say it ends
 instead of at the next `\n` an `std::getline` has to scan for.
 
+## The primedia spool got the same treatment
+
+The first version of this change left `primedia.spool` alone: `save()` still
+opened it with `std::ios::trunc` and wrote `spool.bytes()` in full every time.
+That was deliberate at first -- copying a `std::string` to disk was never the
+cost that motivated this work, unlike re-encoding a few hundred thousand text
+lines -- but it left the two spools inconsistent for no reason that survives
+scrutiny: both are append-only in memory, both are read whole exactly once
+(on open) and written whole on every save after, and nothing about the
+primedia spool's format needed to change to fix that, only the same
+"remember how much is already on disk" bookkeeping the operations spool
+already has.
+
+`primediaFlushed` and `flushedPrimediaDirectory` are that bookkeeping,
+independent of `opsFlushed`/`flushedOpsDirectory` rather than sharing a single
+cursor: the two spools are always saved to the same directory in practice
+(one `Store::save(directory)` call writes both), but nothing requires that,
+and keeping the trackers separate means neither block has to reason about the
+other's state to know whether it can append. Unlike the operations spool,
+`primedia.spool` has never had a second on-disk shape -- it has always been
+exactly the bytes typed, nothing to detect or migrate -- so `load()` can mark
+it flushed unconditionally, with no binary-tag check standing in for it.
+
 ## Sealing the ops log like the primedia spool
 
 `sealLocalSpool()` bundles the local spool into a torrent as one of several
@@ -140,6 +163,17 @@ gets its own publisher-key-and-salt identity -- the same key, salted
 `<salt>+ops` -- which is a second, independent append-only sequence sealed
 into the same torrent as the first, the same way two unrelated files can
 share a `.tar` without their contents merging.
+
+Both scrolls are still "one segment, the whole stream, starting at scroll
+offset zero" -- the same shape `Scroll::ofTorrentFile()` already built for
+content sealed with no publisher name at all (`scroll.hpp`'s pre-BEP-46
+case). `sealLocalSpool()` reuses it for both rather than constructing a
+`ScrollSegment` by hand twice: `Scroll::ofTorrentFile(hash, fileIndex, path,
+streamOffset, length)` gives back the segment, and the publisher/salt that
+make it *this machine's* scroll rather than an anonymous one are set
+afterwards. What differs between the content and the ops log is exactly the
+five arguments -- which file, where it starts in the piece stream, how long
+it is, and what salt names it -- not the shape of the scroll each becomes.
 
 **Why nothing resolves a span into it.** The primedia scroll exists because
 `PrimediaSpan`s point into it -- a document's text is pointers into that

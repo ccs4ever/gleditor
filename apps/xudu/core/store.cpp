@@ -323,8 +323,21 @@ void Store::save(const std::string &directory) const {
   std::filesystem::create_directories(dir);
 
   {
-    std::ofstream out(dir / primediaFile, std::ios::binary | std::ios::trunc);
-    out << spool.bytes();
+    // Appended to rather than rewritten once the file on disk already agrees
+    // with what is in memory -- the same reasoning as the operations spool
+    // below, and the same shape: a save then costs what was typed since the
+    // last one, not the whole spool every time.
+    const auto &bytes = spool.bytes();
+    const bool fresh  = flushedPrimediaDirectory != directory;
+    std::ofstream out(dir / primediaFile,
+                      std::ios::binary |
+                          (fresh ? std::ios::trunc : std::ios::app));
+    const auto from =
+        fresh ? std::size_t{0} : static_cast<std::size_t>(primediaFlushed);
+    out.write(bytes.data() + from,
+              static_cast<std::streamsize>(bytes.size() - from));
+    flushedPrimediaDirectory = directory;
+    primediaFlushed          = bytes.size();
   }
   {
     // Binary records, appended to rather than rewritten once the file on disk
@@ -393,6 +406,11 @@ void Store::save(const std::string &directory) const {
 void Store::load(const std::string &directory) {
   const std::filesystem::path dir(directory);
   spool.adopt(readWholeFile(dir / primediaFile));
+  // Everything just read is already durable at this directory -- unlike the
+  // operations spool, the primedia spool has never had a second on-disk shape
+  // to migrate away from, so there is nothing to force a rewrite over.
+  flushedPrimediaDirectory = directory;
+  primediaFlushed          = spool.size();
   ops.clear();
   opOrder.clear();
   linkTable.clear();

@@ -243,10 +243,12 @@ public:
   /**
    * @brief Write the store to @p directory as its two spools and a link file.
    *
-   * The primedia spool is written as the bytes it is. The operations spool is
-   * written as one line per op, which keeps an append-only file append-only on
-   * disk as well as in memory, and makes a store readable without this
-   * program.
+   * Both spools are append-only in memory, and save() keeps them append-only
+   * on disk as well: a save to the same directory as the last one writes only
+   * the bytes and the operations added since, rather than the whole history
+   * again. A save to a different directory -- or the first one this store has
+   * made -- writes everything once, since there is nothing on disk yet to
+   * agree with.
    */
   void save(const std::string &directory) const;
 
@@ -261,6 +263,12 @@ private:
   void replay(const Op &op, Version &onto) const;
 
   PrimediaSpool spool;
+  /// How many bytes of @ref spool are already written to disk, and where.
+  /// The same bookkeeping as @ref opsFlushed, for the other spool: reset by
+  /// load(), advanced by save(), and a save to a directory this does not
+  /// match rewrites the primedia spool from scratch.
+  mutable std::uint64_t primediaFlushed{0};
+  mutable std::string flushedPrimediaDirectory;
   /// Scrolls other than the local spool, in the order they were first
   /// recorded. A span's ScrollId is one more than the index here, so that zero
   /// stays the local spool.
