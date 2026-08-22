@@ -113,5 +113,3 @@ TEST(GlyphBatches, eachBatchKeepsItsOwnTransform) {
   device.drawGlyphBatches(batches);
   EXPECT_THAT(seen, testing::ElementsAre(11.0F, 22.0F));
 }
-
-// vi: set sw=2 sts=2 ts=2 et:

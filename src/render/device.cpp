@@ -78,12 +78,11 @@ std::unique_ptr<RenderDevice> createDevice(const Backend backend) {
     return std::make_unique<vulkan::DeviceVK>();
 #else
     throw std::runtime_error(
-        "The Vulkan backend was not compiled in. Rebuild with "
-        "GLEDITOR_ENABLE_VULKAN=1.");
+        "The Vulkan backend was not compiled in. Rebuild without "
+        "GLEDITOR_DISABLE_VULKAN=1.");
 #endif
   }
   throw std::invalid_argument("createDevice: unknown backend");
 }
 
 } // namespace render
-// vi: set sw=2 sts=2 ts=2 et:

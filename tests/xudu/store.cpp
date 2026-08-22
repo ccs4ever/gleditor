@@ -102,6 +102,46 @@ TEST(StoreTest, rearrangingMovesText) {
   EXPECT_EQ(store.textOf(store.rearrange(one, 4, 2, 0)), "efabcd");
 }
 
+TEST(StoreTest, insertBreakRecordsAPageBreakOp) {
+  Store store;
+  const auto one = store.insert(MicroversionId{}, 0, "abcdef");
+  const auto two = store.insertBreak(one, 3);
+
+  EXPECT_EQ(two.str(), "2");
+  // A break op changes no text, same as a link op.
+  EXPECT_EQ(store.textOf(two), "abcdef");
+  // rebuild() replays from the null document every time -- nothing here
+  // stores a version -- so this is proof the break comes back from the op
+  // itself, not from some Version object it happened to be created on.
+  EXPECT_THAT(store.rebuild(two).forcedBreaks(), testing::ElementsAre(3U));
+}
+
+TEST(StoreTest, aBreakSurvivesFurtherEditsInTheSameChain) {
+  Store store;
+  const auto one   = store.insert(MicroversionId{}, 0, "abcdef");
+  const auto two   = store.insertBreak(one, 3);
+  const auto three = store.insert(two, 0, "XY");
+
+  EXPECT_EQ(store.textOf(three), "XYabcdef");
+  EXPECT_THAT(store.rebuild(three).forcedBreaks(), testing::ElementsAre(5U));
+}
+
+TEST(StoreTest, aBreakDoesNotSurviveTranscludingThePassageItSitsIn) {
+  // The property the whole feature exists for: content quoted elsewhere
+  // carries its links (see aLinkIsPresentOnEveryDocumentQuotingTheContent
+  // below) but must not carry a break that only meant something about how
+  // the source happened to be laid out.
+  Store store;
+  const auto typed  = store.insert(MicroversionId{}, 0, "abcdef");
+  const auto source = store.insertBreak(typed, 3);
+
+  const auto quoting = store.insert(MicroversionId{}, 0, "prefix-");
+  const auto quoted  = store.transclude(quoting, 7, source, 0, 6);
+
+  EXPECT_EQ(store.textOf(quoted), "prefix-abcdef");
+  EXPECT_THAT(store.rebuild(quoted).forcedBreaks(), testing::IsEmpty());
+}
+
 TEST(StoreTest, nothingStoresAVersion) {
   // Versioning on demand: what is kept is content and operations, and the
   // number of operations is the number of edits -- no version among them.
@@ -301,6 +341,23 @@ TEST_F(StoreRoundTripTest, aStoreSurvivesBeingWrittenAndReadBack) {
   EXPECT_EQ(link.right.front(), (PrimediaSpan{localScroll, 5, 6}));
 }
 
+TEST_F(StoreRoundTripTest, aForcedBreakSurvivesTheCompactBinaryFormat) {
+  MicroversionId broken;
+  {
+    Store store;
+    const auto one = store.insert(MicroversionId{}, 0, "abcdef");
+    broken         = store.insertBreak(one, 3);
+    store.save(dir.string());
+  }
+
+  Store reloaded;
+  reloaded.load(dir.string());
+
+  EXPECT_EQ(reloaded.textOf(broken), "abcdef");
+  EXPECT_THAT(reloaded.rebuild(broken).forcedBreaks(),
+              testing::ElementsAre(3U));
+}
+
 TEST_F(StoreRoundTripTest, aStoreThatIsNotThereOpensEmpty) {
   Store store;
   store.load((dir / "never-written").string());
@@ -354,4 +411,30 @@ TEST_F(StoreRoundTripTest, aQuotationIntoASecondDocumentSurvivesSaving) {
 
 } // namespace
 
-// vi: set sw=2 sts=2 ts=2 et:
+TEST_F(StoreRoundTripTest, osmicTextFormatCanBeGeneratedOnDemand) {
+  Store store;
+  const auto one = store.insert(MicroversionId{}, 0, "Hello");
+  const auto two = store.insert(one, 5, " World");
+  const auto del = store.erase(two, 5, 6);
+
+  const std::string text = store.exportOsmicText();
+  EXPECT_FALSE(text.empty());
+  EXPECT_NE(text.find("1 insert 0 0 0 0 5 0 0 0 0 0"), std::string::npos);
+  EXPECT_NE(text.find("2 insert 5 0 0 5 6 0 0 0 0 0"), std::string::npos);
+  EXPECT_NE(text.find("3 delete 5 6 0 0 0 0 0 0 0 0"), std::string::npos);
+}
+
+TEST_F(StoreRoundTripTest, saveOsmicTextSurvivesBeingLoadedBack) {
+  std::filesystem::create_directories(dir);
+  {
+    Store store;
+    const auto one = store.insert(MicroversionId{}, 0, "legacy osmic");
+    store.insert(one, 12, " test");
+    store.saveOsmicText(dir.string());
+  }
+
+  Store reloaded;
+  reloaded.load(dir.string());
+  EXPECT_EQ(reloaded.opCount(), 2U);
+  EXPECT_EQ(reloaded.textOf(MicroversionId::parse("2")), "legacy osmic test");
+}

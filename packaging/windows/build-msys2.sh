@@ -7,9 +7,7 @@
 #
 #   ./packaging/windows/build-msys2.sh
 #
-# The dependencies are the GTK stack -- pangomm, cairomm, glibmm -- which MSYS2
-# packages and vcpkg largely does not. That is the reason this is an MSYS2
-# build rather than an MSVC one.
+# The dependencies are FreeType, HarfBuzz, FriBidi, libunibreak, Fontconfig, and SDL3.
 #
 # What comes out is a directory tree, not an installer:
 #

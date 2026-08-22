@@ -77,7 +77,7 @@ struct TorrentDataTest : testing::Test {
 };
 
 TEST_F(TorrentDataTest, aRangeOfAFileReadsBack) {
-  const Resolver resolver(&source);
+  const Resolver resolver(&source, dir / "cache");
   const auto fox = scrollFor(xudu_test::singleFileHash, 0);
   EXPECT_EQ(resolver.read(fox, PrimediaSpan{1, 4, 5}), "quick");
   EXPECT_EQ(resolver.read(fox, PrimediaSpan{1, 0, 3}), "The");
@@ -86,7 +86,7 @@ TEST_F(TorrentDataTest, aRangeOfAFileReadsBack) {
 TEST_F(TorrentDataTest, aRangeSpanningAPieceBoundaryReadsBack) {
   // Pieces are 32 bytes; this range crosses the boundary, so two pieces have
   // to be fetched and verified to answer it.
-  const Resolver resolver(&source);
+  const Resolver resolver(&source, dir / "cache");
   const auto fox = scrollFor(xudu_test::singleFileHash, 0);
   EXPECT_EQ(resolver.read(fox, PrimediaSpan{1, 28, 8}),
             xudu_test::singleFileText.substr(28, 8));
@@ -532,5 +532,3 @@ TEST_F(TorrentDataTest, aTorrentNamedAfterItsOwnFirstFileStillResolves) {
 }
 
 } // namespace
-
-// vi: set sw=2 sts=2 ts=2 et:

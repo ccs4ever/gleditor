@@ -170,7 +170,7 @@ decodeMutablePointer(const std::string_view encodedValue) {
       return std::nullopt;
     }
     InfoHash hash;
-    std::copy(raw.begin(), raw.end(), hash.bytes.begin());
+    std::ranges::copy(raw, hash.bytes.begin());
     return hash;
   } catch (const std::exception &) {
     // Not bencode, or not a dictionary. A name may hold anything at all; this
@@ -180,5 +180,3 @@ decodeMutablePointer(const std::string_view encodedValue) {
 }
 
 } // namespace xudu
-
-// vi: set sw=2 sts=2 ts=2 et:

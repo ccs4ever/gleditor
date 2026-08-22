@@ -1,7 +1,7 @@
 name: Android
 
 # Path-filtered on push, since this build is expensive (vcpkg compiles
-# pango's whole dependency stack from source, for two ABIs) and most pushes
+# the dependency stack from source, for two ABIs) and most pushes
 # touch neither the Android project nor the library code it builds.
 # workflow_dispatch is kept alongside it for re-running against an unchanged
 # tree, which the path filter would otherwise never allow.
@@ -79,8 +79,8 @@ jobs:
           echo "VCPKG_ROOT=$RUNNER_TEMP/vcpkg" >> "$GITHUB_ENV"
 
       # vcpkg's own binary cache, keyed on the manifest and the pinned vcpkg
-      # commit: pango's dependency stack (glib, cairo, harfbuzz, freetype,
-      # fontconfig, glibmm, pangomm) compiling from source for two triplets is
+      # commit: text stack dependencies (harfbuzz, freetype, fontconfig,
+      # fribidi, libunibreak) compiling from source for two triplets is
       # the slow part of this workflow by far, and none of it changes between
       # runs that touch only this project's own sources.
       #
@@ -272,7 +272,7 @@ jobs:
           adb install -r apks/x86_64/debug/app-x86_64-debug.apk
           adb shell am start -n io.github.ccs4ever.gleditor/org.libsdl.app.SDLActivity
           # SDL's own startup (loading libSDL3.so and libmain.so, then this
-          # project's asset extraction and Pango/fontconfig initialisation in
+          # project's asset extraction and FontManager/fontconfig initialisation in
           # androidBootstrap()) is what this sleep is giving room to finish
           # before the process is checked for rather than caught mid-launch.
           sleep 15

@@ -34,7 +34,7 @@ struct RenderState {
       : device(aDevice), glyphCache(aDevice) {}
 
   render::RenderDevice *device;           ///< Active graphics device.
-  GlyphCache glyphCache;                  ///< Shared glyph atlas.
+  gleditor::GlyphCache glyphCache;        ///< Shared glyph atlas.
   render::PipelineHandle glyphPipeline{}; ///< Pipeline all documents draw with.
   std::vector<std::shared_ptr<Doc>> docs; ///< Open documents.
   /**
@@ -50,4 +50,3 @@ struct RenderState {
 };
 
 #endif // GLEDITOR_RENDER_STATE_H
-// vi: set sw=2 sts=2 ts=2 et:

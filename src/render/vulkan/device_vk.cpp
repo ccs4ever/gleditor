@@ -756,9 +756,15 @@ void DeviceVK::initialize(AutoSDLWindow &window) {
   createFramebuffers();
   createCommandResources();
   createDescriptorPool();
+  stagingStream = std::make_unique<StreamBufferVK>(
+      device, memoryProperties, 16 * 1024 * 1024,
+      VK_BUFFER_USAGE_TRANSFER_SRC_BIT | VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT |
+          VK_BUFFER_USAGE_VERTEX_BUFFER_BIT);
 
-  highlightBuffer = createBuffer(BufferKind::Uniform,
-                                 sizeof(HighlightRange) * maxHighlightRanges);
+  for (auto &hb : highlightBuffers) {
+    hb = createBuffer(BufferKind::Uniform,
+                      sizeof(HighlightRange) * maxHighlightRanges);
+  }
 
   initialised = true;
 }
@@ -770,6 +776,8 @@ void DeviceVK::shutdown() {
   initialised = false;
 
   vkDeviceWaitIdle(device);
+
+  stagingStream.reset();
 
   for (auto &[id, record] : pipelines) {
     vkDestroyPipeline(device, record.pipeline, nullptr);
@@ -886,4 +894,3 @@ void DeviceVK::ensureIdleForMutation() {
 }
 
 } // namespace render::vulkan
-// vi: set sw=2 sts=2 ts=2 et:

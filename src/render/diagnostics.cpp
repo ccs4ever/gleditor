@@ -36,7 +36,7 @@ void DiagnosticSink::record(const DiagnosticSeverity severity,
     bool shouldLog = false;
 
     {
-      const std::lock_guard lock(mutex);
+      const std::scoped_lock lock(mutex);
       if (seen.size() < maxRemembered) {
         if (!seen.insert(text).second) {
           // Already reported once. Drivers repeat the same complaint every
@@ -68,34 +68,34 @@ void DiagnosticSink::record(const DiagnosticSeverity severity,
 }
 
 std::vector<Diagnostic> DiagnosticSink::drain() {
-  const std::lock_guard lock(mutex);
+  const std::scoped_lock lock(mutex);
   return std::exchange(undrained, {});
 }
 
 void DiagnosticSink::setStrict(const bool value) {
-  const std::lock_guard lock(mutex);
+  const std::scoped_lock lock(mutex);
   strictMode = value;
 }
 
 bool DiagnosticSink::strict() const {
-  const std::lock_guard lock(mutex);
+  const std::scoped_lock lock(mutex);
   return strictMode;
 }
 
 void DiagnosticSink::setLogging(const bool value) {
-  const std::lock_guard lock(mutex);
+  const std::scoped_lock lock(mutex);
   logging = value;
 }
 
 bool DiagnosticSink::hasError() const {
-  const std::lock_guard lock(mutex);
+  const std::scoped_lock lock(mutex);
   return errorPending;
 }
 
 void DiagnosticSink::raiseIfError(const std::string_view context) {
   std::string message;
   {
-    const std::lock_guard lock(mutex);
+    const std::scoped_lock lock(mutex);
     if (!errorPending) {
       return;
     }
@@ -113,7 +113,7 @@ void DiagnosticSink::raiseIfError(const std::string_view context) {
 }
 
 void DiagnosticSink::clear() {
-  const std::lock_guard lock(mutex);
+  const std::scoped_lock lock(mutex);
   seen.clear();
   undrained.clear();
   firstError.clear();
@@ -121,9 +121,8 @@ void DiagnosticSink::clear() {
 }
 
 std::size_t DiagnosticSink::distinctCount() const {
-  const std::lock_guard lock(mutex);
+  const std::scoped_lock lock(mutex);
   return seen.size();
 }
 
 } // namespace render
-// vi: set sw=2 sts=2 ts=2 et:

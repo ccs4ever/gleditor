@@ -289,7 +289,7 @@ public:
 
   void update(const Tree &tree) override {
     {
-      const std::lock_guard locker(guard);
+      const std::scoped_lock locker(guard);
       kept = tree;
     }
     if (nullptr == adapter) {
@@ -355,7 +355,7 @@ public:
   }
 
   std::optional<ActionRequest> nextAction() override {
-    const std::lock_guard locker(actionGuard);
+    const std::scoped_lock locker(actionGuard);
     if (actions.empty()) {
       return std::nullopt;
     }
@@ -378,7 +378,7 @@ private:
    */
   static accesskit_tree_update *supplyTree(void *const opaque) {
     auto *const self = static_cast<AccessKitPlatform *>(opaque);
-    const std::lock_guard locker(self->guard);
+    const std::scoped_lock locker(self->guard);
     if (self->kept.empty()) {
       return nullptr;
     }
@@ -412,7 +412,7 @@ private:
         asked.value = request->data.value.value;
       }
 
-      const std::lock_guard locker(self->actionGuard);
+      const std::scoped_lock locker(self->actionGuard);
       // Bounded, because nothing guarantees the event loop is still draining
       // this -- it is blocked for as long as a native message box is up.
       // Dropping the oldest is right: an action nobody carried out while a
@@ -480,5 +480,3 @@ std::unique_ptr<Platform> openPlatform(void *const nativeWindow,
 bool platformAvailable() { return true; }
 
 } // namespace gleditor::a11y
-
-// vi: set sw=2 sts=2 ts=2 et:

@@ -18,7 +18,6 @@
 #include <thread>
 #include <vector>
 
-#include <glibmm/fileutils.h>
 #include <glm/ext/matrix_clip_space.hpp>
 #include <glm/ext/matrix_float4x4.hpp>
 #include <glm/ext/matrix_transform.hpp>
@@ -152,7 +151,14 @@ void Renderer::closeDoc(RenderState &state, const std::uint32_t index) {
   // stale would make clicks land on the wrong document.
   for (std::size_t i = 0; i < state.docs.size(); i++) {
     state.docs[i]->setDocIndex(static_cast<std::uint32_t>(i));
-    state.docs[i]->animateMoveTo(timeline, AbstractRenderer::documentSlot(i));
+    // Z is carried forward from the resting place the document opened at
+    // rather than reset to documentSlot(i)'s zero: a document opened into
+    // the background (RenderItemOpenDoc::depthZ) stays there when
+    // something ahead of it in the list closes, instead of snapping to the
+    // foreground plane every other document renumbers onto.
+    const auto slot = AbstractRenderer::documentSlot(i);
+    state.docs[i]->animateMoveTo(
+        timeline, glm::vec3(slot.x, slot.y, state.docs[i]->getModel()[3].z));
   }
 }
 
@@ -177,7 +183,7 @@ void Renderer::saveDoc(RenderState &state, const std::uint32_t index) {
                  "nothing to save this document as yet", state);
     return;
   }
-  const std::string content = doc->contents().raw();
+  const auto &content = doc->contents();
 
 #ifdef __ANDROID__
   // Writes through the content:// Uri this document was opened from, when it
@@ -195,20 +201,34 @@ void Renderer::saveDoc(RenderState &state, const std::uint32_t index) {
   }
 #endif
 
-  try {
-    Glib::file_set_contents(name, content);
-  } catch (const Glib::FileError &err) {
+  std::ofstream file(name, std::ios::binary | std::ios::trunc);
+  if (!file.is_open()) {
     toasts->post(render::DiagnosticSeverity::Error,
-                 std::format("save failed: {}", err.what()), state);
+                 std::format("save failed: could not open {}", name), state);
+    return;
+  }
+  file.write(content.data(), static_cast<std::streamsize>(content.size()));
+  if (!file.good()) {
+    toasts->post(render::DiagnosticSeverity::Error,
+                 std::format("save failed: write error on {}", name), state);
     return;
   }
   toasts->post(render::DiagnosticSeverity::Info, std::format("saved {}", name),
                state);
 }
 
-void Renderer::openDoc(RenderState &state, const gleditor::TextSource &source) {
-  const auto newDocPosition = glm::translate(
-      glm::mat4(1.0), AbstractRenderer::documentSlot(state.docs.size()));
+void Renderer::openDoc(RenderState &state, const gleditor::TextSource &source,
+                       const float depthZ) {
+  // A background document (depthZ < 0) does not take the next seat in the
+  // foreground row -- documentSlot(state.docs.size()) counts every open
+  // document, background ones included, so it would otherwise land a corpus
+  // wedged in X between whatever foreground documents happen to flank it in
+  // the open order. Centred at the origin instead, it sits behind the row
+  // as a backdrop rather than inside it.
+  auto slot = depthZ < 0.0F ? glm::vec3(0.0F, 0.0F, 0.0F)
+                            : AbstractRenderer::documentSlot(state.docs.size());
+  slot.z                    = depthZ;
+  const auto newDocPosition = glm::translate(glm::mat4(1.0), slot);
   std::cout << "doc pos: " << state.docs.size() << " "
             << glm::to_string(newDocPosition) << "\n";
   auto docPtr = Doc::create(getPtr(), device.get(), newDocPosition, source);
@@ -249,16 +269,17 @@ bool Renderer::update(RenderState &state, const bool settled) {
   int screenWidth  = 0;
   int screenHeight = 0;
   {
-    std::lock_guard locker(this->state->view);
+    std::scoped_lock locker(this->state->view);
     const auto &view = this->state->view;
     screenWidth      = view.screenWidth;
     screenHeight     = view.screenHeight;
 
+    const auto aspect = (view.screenHeight > 0 && view.screenWidth > 0)
+                            ? static_cast<float>(view.screenWidth) /
+                                  static_cast<float>(view.screenHeight)
+                            : 1.0F;
     const glm::mat4 projection =
-        glm::perspective(glm::radians(view.fov),
-                         static_cast<float>(view.screenWidth) /
-                             static_cast<float>(view.screenHeight),
-                         0.1F, 10000.0F);
+        glm::perspective(glm::radians(view.fov), aspect, 0.1F, 10000.0F);
     const glm::mat4 camera =
         glm::lookAt(view.pos, view.pos + view.front, view.upward);
 
@@ -399,7 +420,8 @@ bool Renderer::update(RenderState &state, const bool settled) {
     }
   }
 
-  if (settled && scriptFinished() && !this->state->screenshotPath.empty()) {
+  if (settled && !hasPendingWork() && scriptFinished() &&
+      !this->state->screenshotPath.empty()) {
     writeScreenshot(device->captureColorTarget(), this->state->screenshotPath);
     this->state->screenshotPath.clear();
   }
@@ -599,8 +621,15 @@ void Renderer::advanceScript(RenderState &state) {
     if (!caret->active() || caret->documentIndex() >= state.docs.size()) {
       std::cerr << "--type with no caret to type at; use --click first\n";
     } else {
-      state.docs[caret->documentIndex()]->insert(state, caret->byteOffset(),
-                                                 step.text, caret.get());
+      // Read before insert() moves the caret past what it is about to place.
+      const auto at  = caret->byteOffset();
+      auto &document = *state.docs[caret->documentIndex()];
+      document.insert(state, at, step.text, caret.get());
+      if (0 != step.decorations && this->state->onDecoratedInsert) {
+        this->state->onDecoratedInsert(
+            document, at, static_cast<std::uint32_t>(step.text.size()),
+            step.decorations);
+      }
     }
     // An edit schedules a reflow, and this frame was judged settled before it
     // was made. So the step is not finished here: it finishes on the next
@@ -716,7 +745,7 @@ void Renderer::applyTypedText(RenderState &state) {
   }
   std::string typed;
   {
-    const std::lock_guard locker(this->state->typedMutex);
+    const std::scoped_lock locker(this->state->typedMutex);
     if (this->state->typedText.empty()) {
       return;
     }
@@ -762,8 +791,8 @@ void Renderer::dispatch(RenderState &state, RenderItem &item) {
     break;
   }
   case RenderItem::Type::OpenDoc: {
-    const auto &source = *dynamic_cast<RenderItemOpenDoc &>(item).source;
-    openDoc(state, source);
+    const auto &openItem = dynamic_cast<RenderItemOpenDoc &>(item);
+    openDoc(state, *openItem.source, openItem.depthZ);
     break;
   }
   case RenderItem::Type::Run: {
@@ -803,6 +832,15 @@ void Renderer::renderLoop(AutoSDLWindow &window) {
     device->setPresentEnabled(false);
   }
 
+  int winW = 0;
+  int winH = 0;
+  SDL_GetWindowSizeInPixels(window.window, &winW, &winH);
+  if (winW > 0 && winH > 0) {
+    std::scoped_lock locker(this->state->view);
+    this->state->view.screenWidth  = winW;
+    this->state->view.screenHeight = winH;
+  }
+
   RenderState state(device.get());
   toasts = std::make_unique<ToastOverlay>(device.get(),
                                           std::string(defaultFontName()));
@@ -826,6 +864,10 @@ void Renderer::renderLoop(AutoSDLWindow &window) {
     toasts->post(severity, message, state);
   }
 
+  const auto loopStart   = std::chrono::steady_clock::now();
+  double timeToFirstPage = 0.0;
+  bool firstPageRecorded = false;
+
   while (this->state->alive) {
 
     // Drain queued commands before drawing, so that work requested before this
@@ -846,6 +888,16 @@ void Renderer::renderLoop(AutoSDLWindow &window) {
     // queue
     if (!update(state, settled)) {
       break;
+    }
+
+    if (!firstPageRecorded && !state.pageBatches.empty()) {
+      timeToFirstPage   = std::chrono::duration<double, std::milli>(
+                              std::chrono::steady_clock::now() - loopStart)
+                              .count();
+      firstPageRecorded = true;
+      std::cout << std::format(
+          "[TIMING] First page rendered: {:.2f} ms (docs in render: {})\n",
+          timeToFirstPage, state.docs.size());
     }
 
     // Presenting is what paces this loop: it blocks until the display is ready
@@ -875,6 +927,17 @@ void Renderer::renderLoop(AutoSDLWindow &window) {
     // for, so quitting before it finished would report on a document the
     // command line did not ask for.
     if (settled && this->state->profiling && scriptFinished()) {
+      const auto completeRender =
+          std::chrono::duration<double, std::milli>(
+              std::chrono::steady_clock::now() - loopStart)
+              .count();
+      std::size_t totalPages = 0;
+      for (const auto &doc : state.docs) {
+        totalPages += doc->numPages();
+      }
+      std::cout << std::format("[TIMING] Complete render settled: {:.2f} ms "
+                               "(docs: {}, total pages: {})\n",
+                               completeRender, state.docs.size(), totalPages);
       this->state->alive = false;
       break;
     }
@@ -901,4 +964,3 @@ void Renderer::renderLoop(AutoSDLWindow &window) {
   toasts.reset();
   device->shutdown();
 }
-// vi: set sw=2 sts=2 ts=2 et:

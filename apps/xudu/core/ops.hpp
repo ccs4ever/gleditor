@@ -33,6 +33,22 @@ enum class OpKind : std::uint8_t {
   Rearrange,  ///< Move pointers within the sequence.
   Transclude, ///< Insert pointers to material another version already uses.
   Link,       ///< Make a connection between spans of content.
+  /// Force a page break at a point in this version's own text. Not one of
+  /// OSMIC's hyperops -- an addition beyond the six it names -- because
+  /// nothing in OSMIC needs a concept that is deliberately NOT a primedia
+  /// address. A Link's ends survive transclusion by design: content quoted
+  /// into a second document carries its links with it, because a link
+  /// attaches to the address, not the document. A page break must not do
+  /// that. Where a version breaks into pages is a fact about that version's
+  /// own assembled text -- its concatext -- and a passage quoted into some
+  /// other document, laid out alongside completely different neighbours, has
+  /// no reason to break in the same place. So this names a position with
+  /// Op::at, exactly like Insert or Delete, rather than a PrimediaSpan: it is
+  /// concatext-relative and content-address-less on purpose, and Version
+  /// carries it as a zero-length marker so it is re-split, shifted and
+  /// moved by ordinary edits without ever being resolvable back to an
+  /// address the way a real piece is.
+  PageBreak,
 };
 
 const char *opKindName(OpKind kind);
@@ -46,10 +62,34 @@ enum class LinkType : std::uint8_t {
   Authorship,
   Quotation,
   Other,
+  /**
+   * A presentation attribute, attached the same way any other link attaches
+   * to content. Nelson's own answer to "where does formatting live" -- see
+   * format.hpp for FormatAttribute and how the right end names one without
+   * Link needing a field no other link type has. Unlike OpKind::PageBreak,
+   * this is exactly Nelson's link, and it gets exactly Nelson's guarantee for
+   * free: attach italics to a span once, and it shows up wherever that span
+   * is quoted, because the link is attached to the address and not to any
+   * one document's position. That is also why a page break could not be one
+   * of these -- see OpKind::PageBreak for why that had to go the other way.
+   */
+  Format,
 };
 
 const char *linkTypeName(LinkType type);
 LinkType linkTypeFromName(const std::string &name);
+
+/// The prominence hierarchy of a link.
+enum class ProminenceTier : std::uint8_t {
+  Author = 0, ///< Bundled with the author's document publication (highest
+              ///< prominence).
+  Curated =
+      1, ///< From the user's subscribed curator graph (secondary prominence).
+  Public =
+      2, ///< Discovered via public DHT swarm rendezvous (bounded / tertiary).
+};
+
+const char *prominenceTierName(ProminenceTier tier);
 
 /**
  * @brief A butterfly link: two lists of spans, an identity and a type.
@@ -70,8 +110,11 @@ LinkType linkTypeFromName(const std::string &name);
 struct Link {
   std::uint64_t id{};
   LinkType type{LinkType::Comment};
+  ProminenceTier tier{ProminenceTier::Author};
   /// Who made it. Prestige, not permission.
   std::string owner;
+  /// Curator or publisher key if from a third-party link package.
+  std::string curator;
   std::vector<PrimediaSpan> left;
   std::vector<PrimediaSpan> right;
 
@@ -113,4 +156,3 @@ struct Op {
 } // namespace xudu
 
 #endif // XUDU_OPS_H
-// vi: set sw=2 sts=2 ts=2 et:

@@ -21,14 +21,16 @@ class Gleditor < Formula
   # platforms have those on the compiler's default search path already
   # (whatever their libgtest-dev / gtest-devel / gtest package installed);
   # Homebrew has no such ambient location.
-  depends_on "googletest" => :build
   depends_on "boost"
-  depends_on "cairomm"
-  depends_on "glibmm"
+  depends_on "fontconfig"
+  depends_on "freetype"
+  depends_on "fribidi"
   depends_on "glm"
+  depends_on "harfbuzz"
   depends_on "libtorrent-rasterbar"
+  depends_on "libunibreak"
+  depends_on "lmdb"
   depends_on "openssl@3"
-  depends_on "pangomm"
   depends_on "sdl3"
   depends_on "sdl3_image"
 

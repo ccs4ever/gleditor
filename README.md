@@ -3,7 +3,7 @@
 A GPU-rendered document library, with OpenGL, OpenGL ES and Vulkan backends, and
 two programs built on it.
 
-[![C/C++ CI](https://github.com/ccs4ever/gleditor/actions/workflows/c-cpp.yml/badge.svg)](https://github.com/ccs4ever/gleditor/actions/workflows/c-cpp.yml)
+[![C/C++ CI](https://github.com/ccs4ever/gleditor/actions/workflows/c-cpp.yml/badge.svg)][ci-badge]
 
 Still a work in progress.
 
@@ -11,11 +11,11 @@ Still a work in progress.
 
 This tree builds three things.
 
-**`libgleditor`** is the library: SDL for windowing and input, Pango and Cairo
-for shaping and rasterisation, a device abstraction with three backends, a glyph
-atlas, a buffer allocator, a paginated document model and a render loop. It
-names no document format and no application. Everything under `src/` is part of
-it.
+**`libgleditor`** is the library: SDL for windowing and input, HarfBuzz and
+FreeType for shaping and rasterisation, libunibreak for Unicode line breaking,
+a device abstraction with three backends, a glyph atlas, a buffer allocator,
+a paginated document model and a render loop. It names no document format and
+no application. Everything under `src/` is part of it.
 
 **`gleditor`** is the plain editor -- open files, look at them, type into them.
 It is `apps/gleditor/main.cpp`, and it is 119 lines: a command line, a key map,
@@ -33,11 +33,11 @@ what one program did with it.
 
 The graphics API is chosen at run time with `--backend`:
 
-| Backend            | Requires        | Notes                                           |
-| ------------------ | --------------- | ----------------------------------------------- |
-| `opengl` (default) | OpenGL 3.3 core |                                                 |
-| `opengles`         | OpenGL ES 3.0   |                                                 |
-| `vulkan`           | Vulkan 1.0      | Only when built with `GLEDITOR_ENABLE_VULKAN=1` |
+| Backend            | Requires        | Notes                                                                   |
+| ------------------ | --------------- | ----------------------------------------------------------------------- |
+| `opengl` (default) | OpenGL 3.3 core |                                                                         |
+| `opengles`         | OpenGL ES 3.0   |                                                                         |
+| `vulkan`           | Vulkan 1.0      | Enabled by default when found; disable with `GLEDITOR_DISABLE_VULKAN=1` |
 
 Everything above the backend -- documents, pages, the glyph cache, the buffer
 allocator -- is written against `render::RenderDevice` (`include/gleditor/render/`)
@@ -51,9 +51,9 @@ it does not mean touching the document code.
   shader would rule out OpenGL ES 3.0, which has no geometry stage.
 - **The draw offset is a buffer binding offset**, not a base-instance draw:
   OpenGL ES has no `glDrawArraysInstancedBaseInstance`.
-- **The glyph atlas is single-channel coverage**, narrowed from Cairo's ARGB32
-  on the CPU. Uploading BGRA and letting the driver keep one channel is an
-  OpenGL convenience with no Vulkan equivalent.
+- **The glyph atlas is single-channel coverage**, rasterised directly as 8-bit
+  coverage bitmaps via FreeType on the CPU. Uploading BGRA and letting the
+  driver keep one channel is an OpenGL convenience with no Vulkan equivalent.
 - **The shaders have one source.** `assets/shaders/*.glsl` are written in the
   common subset of GLSL 3.30, GLSL ES 3.00 and Vulkan GLSL; the version
   directive, precision qualifiers, varying locations and uniform declarations
@@ -168,15 +168,12 @@ wrong one -- 0.25 ms out of a 2.5 s frame here. Where it would cost more, it has
 been right every time. `GLEDITOR_RECORD_THREADS` settles it by hand when that is
 not good enough.
 
-There is one other thread boundary worth naming, because it is easy to cross by
-accident. Documents are paginated on a loader thread, but each finished layout
-is handed to the render thread through the render queue, and the `RefPtr` means
-both threads then hold the same `Pango::Layout`. A layout computes its lines
-lazily, so *asking it a question mutates it* -- `get_line_count()` shapes the
-text. Anything the loader thread wants to know about a layout has to be asked
-before the layout is handed over, not after. Doing it in the other order crashed
-about one run in five, always somewhere inside Pango or glib's allocator, and
-also corrupted the shaping badly enough to produce clusters 237 texels wide.
+There is one other thread boundary worth naming: documents are paginated on a
+loader thread using `TextLayout::layoutPage()`, and each finished page is
+handed to the render thread as an immutable `PageShaping` value struct via the
+render queue. Because `PageShaping` holds plain positioned cluster and glyph
+arrays rather than a mutable layout object, ownership passes cleanly between
+threads with zero locking and zero lazy mutation hazards.
 
 The frame time is dominated by none of them: it is 4.6 million quads being
 rasterised, every page of the document, every frame, whether or not the page is
@@ -432,15 +429,14 @@ those ligatures -- FreeSerif has all five; DejaVu Serif lacks `ffi`; Liberation
 Serif has none -- each is drawn as a single joined glyph, and clicking across
 one steps the caret through the characters inside it.
 
-**One quad is one cluster, and a cluster is not a character.** Pango shapes
+**One quad is one cluster, and a cluster is not a character.** HarfBuzz shapes
 "ffi" into a single ligature, and a letter with its combining marks into a
 single cluster; each is drawn as one quad covering several characters. The
 character boundaries inside it have no geometry to click on. So the fragment
 stage writes out how far across its quad each fragment sits, and the cluster's
 character count says how many boundaries to divide that among -- subdividing a
-cluster's width evenly, which is what Pango's own `x_to_index` does. Caret
-geometry comes back from Pango's `get_cursor_pos`, which already knows about
-right-to-left runs.
+cluster's width evenly across its characters. Caret geometry is computed directly
+from `PageShaping` cluster bounds and line geometry, supporting bidirectional runs.
 
 **Reflow stops where pagination re-syncs.** Typing splices the text
 immediately and schedules the layout onto the render thread. A page that still
@@ -453,9 +449,8 @@ the 4.6 MB sample.
 The reflow reports its scope so the fast path is observable rather than merely
 claimed: `line` when no line break moved, `page` when they moved but the page
 still ends where it did, `document` when it did not. Line and page both confine
-the work to one page; the distinction is diagnostic, since Pango cannot lay out
-one line of a page again in isolation. A genuinely line-local relayout would
-want a layout object per line.
+the work to one page; the distinction is diagnostic. A genuinely line-local
+relayout would want a layout object per line.
 
 The caret and the notifications write the picking attachment like everything
 else, and are drawn last, so they cover the tag of whatever is beneath them.
@@ -1440,7 +1435,8 @@ What SDL does have, this program uses:
 - Compiler: clang++ by default (gcc should work)
 - Package discovery: pkg-config
 - Libraries (via pkg-config):
-  - pangomm-2.48 (Pango) and cairomm
+  - FreeType 2 (`freetype2`), HarfBuzz (`harfbuzz`), libunibreak
+    (`libunibreak`), FriBidi (`fribidi`), and Fontconfig (`fontconfig`)
   - SDL3 or SDL2 (see below)
   - SDL_image (optional; supplies the window icon and nothing else, and is
     skipped when pkg-config cannot find it)
@@ -1472,11 +1468,12 @@ On Ubuntu/Debian, for example:
 ```
 sudo apt-get update && sudo apt-get install \
   clang libclang-rt-dev make pkg-config doxygen \
-  libglm-dev libpangomm-2.48-dev \
+  libglm-dev libfreetype-dev libharfbuzz-dev \
+  libfribidi-dev libunibreak-dev libfontconfig-dev \
   libsdl3-dev \
   libgl-dev libgl1-mesa-dev libglu1-mesa-dev \
   libgtest-dev libgmock-dev \
-  libtorrent-rasterbar-dev gnupg
+  libtorrent-rasterbar-dev libssl-dev liblmdb-dev gnupg
 ```
 
 `libtorrent-rasterbar-dev` is required, not optional: it is where the ed25519
@@ -1525,8 +1522,8 @@ Common targets (see `Makefile`):
   - `make lib` → `build/libgleditor.so.0`, plus the `build/libgleditor.so` linker name
 - Build the xanadoc editor only:
   - `make xudu` → `build/xudu`
-- Build with the Vulkan backend:
-  - `make GLEDITOR_ENABLE_VULKAN=1` → also compiles `assets/shaders/vulkan/*.spv`
+- Disable the Vulkan backend:
+  - `make GLEDITOR_DISABLE_VULKAN=1` (Vulkan is built by default if available)
 - Build against a particular SDL:
   - `make GLEDITOR_SDL=2` or `make GLEDITOR_SDL=3`
 - Compile the SPIR-V modules only:
@@ -1546,7 +1543,7 @@ Compile commands database (for clangd, etc.):
 Optional Make variables:
 
 - `DEBUG=1` enables debug flags and sanitizer flag sets.
-- `GLEDITOR_ENABLE_VULKAN=1` compiles the Vulkan backend.
+- `GLEDITOR_DISABLE_VULKAN=1` disables the Vulkan backend (built by default when available).
 - `GLEDITOR_SDL=2` or `GLEDITOR_SDL=3` picks the SDL major version; unset means
   SDL3 when pkg-config finds it, SDL2 otherwise.
 - `GLEDITOR_ENABLE_A11Y=1` requires AccessKit and fails the build without it;
@@ -1598,7 +1595,7 @@ building the same tarball with the same `install` target:
 | macOS           | `packaging/macos/gleditor.rb`             | 3   | clang        |
 
 Android is not in this table: an APK is not a tarball an `install` target can
-produce, and none of pango, cairo, glib or SDL are things a distribution
+produce, and none of freetype, harfbuzz, glib or SDL are things a distribution
 installs there for the Makefile to find with pkg-config -- vcpkg cross-builds
 that whole stack from source instead, against the Android NDK. It is `gleditor`
 only for now, not `xudu`, and lives under `packaging/android/` with its own
@@ -1637,11 +1634,10 @@ on whichever version the build happened to find; everything else gets SDL3,
 stated rather than probed for the same reason.
 
 Windows is an MSYS2/MinGW build producing a zip rather than an MSVC installer.
-The dependencies are the GTK stack -- pangomm, cairomm, glibmm -- which MSYS2
-packages and vcpkg largely does not. The zip carries every non-system DLL,
-found by walking `ldd` until it settles, and puts the assets *beside* the
-executable, which is the first place the search looks; unzip it anywhere and it
-finds its own data.
+The dependencies are FreeType, HarfBuzz, libunibreak, FriBidi, Fontconfig, and SDL3.
+The zip carries every non-system DLL, found by walking `ldd` until it settles,
+and puts the assets *beside* the executable, which is the first place the search looks;
+unzip it anywhere and it finds its own data.
 
 `gleditor --print-asset-dir` reports where that search landed and exits before
 opening a window, which is how the answer can be checked on a machine whose
@@ -1811,7 +1807,7 @@ for eight seconds and no capture should wait that long.
 
 `ccache` is used when it is installed, unless `GLEDITOR_NO_CCACHE=1` or an
 explicit `CXX` says otherwise. It matters most for one thing: turning
-`GLEDITOR_ENABLE_VULKAN` on or off changes the flags every object is compiled
+`GLEDITOR_DISABLE_VULKAN` on or off changes the flags every object is compiled
 with, so a flip rebuilds all seventy of them. On four cores that is around a
 hundred seconds each way; with ccache the second flip is a second and a half,
 because the objects for the configuration being returned to are still there.
@@ -1901,7 +1897,7 @@ recompiling the sixty-nine files that did not change.
 ## Environment and Make variables
 
 - `DEBUG=1` enable debug flags and sanitizer options in builds.
-- `GLEDITOR_ENABLE_VULKAN=1` compile the Vulkan backend and its SPIR-V.
+- `GLEDITOR_DISABLE_VULKAN=1` disable building the Vulkan backend and its SPIR-V.
 - `GLEDITOR_SDL=2` / `GLEDITOR_SDL=3` build against that SDL major version.
 - `GLEDITOR_RECORD_THREADS=N` threads the Vulkan backend records a frame with,
   and an instruction rather than a ceiling: setting it takes the choice away
@@ -1931,3 +1927,5 @@ TODO: Confirm whether the intent is GPL-3.0-only or GPL-3.0-or-later.
   the packaging table above.
 - The app resolves `assets/glsl` and `logo.png` relative to the working
   directory, so it must be started from the repository root (`make run` does).
+
+[ci-badge]: https://github.com/ccs4ever/gleditor/actions/workflows/c-cpp.yml

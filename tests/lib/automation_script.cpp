@@ -115,6 +115,69 @@ TEST(AutomationScript, typingCanBeEmptyAndIsStillAStep) {
   EXPECT_TRUE(script[0].text.empty());
 }
 
-} // namespace
+TEST(AutomationScript, typeWithoutBracketsIsPlainTextAsBefore) {
+  const auto script = scriptOf({"--type", "hello world"});
+  ASSERT_EQ(script.size(), 1U);
+  EXPECT_EQ(script[0].text, "hello world");
+  EXPECT_EQ(script[0].decorations, gleditor::DecorationMask{0});
+}
 
-// vi: set sw=2 sts=2 ts=2 et:
+TEST(AutomationScript, typeWithOneBracketedDecoration) {
+  const auto script = scriptOf({"--type", "[bold]hello"});
+  ASSERT_EQ(script.size(), 1U);
+  EXPECT_EQ(script[0].text, "hello");
+  EXPECT_TRUE(gleditor::hasDecoration(script[0].decorations,
+                                      gleditor::Decoration::Bold));
+  EXPECT_FALSE(gleditor::hasDecoration(script[0].decorations,
+                                       gleditor::Decoration::Italic));
+}
+
+TEST(AutomationScript, typeWithSeveralBracketedDecorations) {
+  const auto script = scriptOf({"--type", "[bold,italic,underline]hello"});
+  ASSERT_EQ(script.size(), 1U);
+  EXPECT_EQ(script[0].text, "hello");
+  EXPECT_TRUE(gleditor::hasDecoration(script[0].decorations,
+                                      gleditor::Decoration::Bold));
+  EXPECT_TRUE(gleditor::hasDecoration(script[0].decorations,
+                                      gleditor::Decoration::Italic));
+  EXPECT_TRUE(gleditor::hasDecoration(script[0].decorations,
+                                      gleditor::Decoration::Underline));
+  EXPECT_FALSE(gleditor::hasDecoration(script[0].decorations,
+                                       gleditor::Decoration::Overline));
+}
+
+TEST(AutomationScript, typeBracketsCanBeEmpty) {
+  const auto script = scriptOf({"--type", "[]hello"});
+  ASSERT_EQ(script.size(), 1U);
+  EXPECT_EQ(script[0].text, "hello");
+  EXPECT_EQ(script[0].decorations, gleditor::DecorationMask{0});
+}
+
+TEST(AutomationScript, typeWithAnUnrecognisedDecorationNameIsIgnored) {
+  // Reported to stderr, not asserted here, but the recognised name beside it
+  // still applies and the bracket is still stripped from the text.
+  const auto script = scriptOf({"--type", "[bold,not-a-thing]hello"});
+  ASSERT_EQ(script.size(), 1U);
+  EXPECT_EQ(script[0].text, "hello");
+  EXPECT_TRUE(gleditor::hasDecoration(script[0].decorations,
+                                      gleditor::Decoration::Bold));
+}
+
+TEST(AutomationScript, typeWithNoClosingBracketIsPlainText) {
+  // '[' this far into ordinary text is vanishingly unlikely, but it must not
+  // eat the rest of the string when it happens.
+  const auto script = scriptOf({"--type", "[oops forgot the bracket"});
+  ASSERT_EQ(script.size(), 1U);
+  EXPECT_EQ(script[0].text, "[oops forgot the bracket");
+  EXPECT_EQ(script[0].decorations, gleditor::DecorationMask{0});
+}
+
+TEST(AutomationScript, typeCanBracketDecorateEmptyText) {
+  const auto script = scriptOf({"--type", "[bold]"});
+  ASSERT_EQ(script.size(), 1U);
+  EXPECT_TRUE(script[0].text.empty());
+  EXPECT_TRUE(gleditor::hasDecoration(script[0].decorations,
+                                      gleditor::Decoration::Bold));
+}
+
+} // namespace

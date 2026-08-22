@@ -226,5 +226,3 @@ TEST(Diagnostics, concurrentRecordingIsSafe) {
   EXPECT_TRUE(sink.hasError());
   EXPECT_LE(sink.distinctCount(), 256U);
 }
-
-// vi: set sw=2 sts=2 ts=2 et:

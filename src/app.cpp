@@ -18,14 +18,15 @@
 #include <string>
 #include <string_view>
 #include <thread>
+#include <tuple>
 #include <utility>
 #include <vector>
 
 #include <argparse/argparse.hpp>
-#include <glibmm/init.h>
+#include <fontconfig/fontconfig.h>
+#include <gleditor/text/font.hpp>
 #include <glm/ext/vector_float3.hpp>
 #include <glm/geometric.hpp>
-#include <pangomm/wrap_init.h>
 
 #include <gleditor/paths.hpp>
 #include <gleditor/render/device.hpp>
@@ -210,6 +211,46 @@ std::pair<int, int> parsePair(const std::string &value,
           std::stoi(value.substr(comma + 1))};
 }
 
+/**
+ * @brief Split --type's value into decorations and the text to insert.
+ *
+ * "[bold,italic]text" names decorations for text; anything that does not
+ * start with '[', or has no matching ']', is taken whole as plain text with
+ * no decorations -- so every --type written before this syntax existed still
+ * means exactly what it always did, and only a script that opts in by
+ * starting with '[' can be misread.
+ */
+std::pair<gleditor::DecorationMask, std::string>
+parseTypeValue(const std::string &value) {
+  if (value.empty() || '[' != value.front()) {
+    return {0, value};
+  }
+  const auto close = value.find(']');
+  if (std::string::npos == close) {
+    return {0, value};
+  }
+  gleditor::DecorationMask mask = 0;
+  const std::string_view names(value.data() + 1, close - 1);
+  std::size_t pos = 0;
+  while (pos <= names.size()) {
+    const auto comma = names.find(',', pos);
+    const auto name  = names.substr(pos, comma - pos);
+    if (!name.empty()) {
+      if (const auto d = gleditor::decorationNamed(name)) {
+        mask = static_cast<gleditor::DecorationMask>(
+            mask | gleditor::decorationBit(*d));
+      } else {
+        std::cerr << "--type: no decoration called \"" << name << "\"\n";
+      }
+    }
+    if (std::string_view::npos == comma) {
+      break;
+    }
+    pos = comma + 1;
+  }
+  return {mask, value.substr(close + 1)};
+}
+
 /// The backend a run starts with, absent an explicit --backend.
 /// GLEDITOR_BACKEND overrides the compiled-in default without a rebuild --
 /// there is no command line to pass --backend on, on Android, so the Android
@@ -256,7 +297,7 @@ readAutomationScript(const int argc, const char *const *const argv) {
       script.push_back(std::move(step));
     } else if ("--type" == option) {
       Step step{Step::Kind::Type};
-      step.text = value;
+      std::tie(step.decorations, step.text) = parseTypeValue(value);
       script.push_back(std::move(step));
     } else if ("--do" == option) {
       Step step{Step::Kind::Command};
@@ -533,8 +574,8 @@ render::Backend applyCommonArguments(argparse::ArgumentParser &parser,
   if (!render::backendCompiledIn(backend)) {
     throw std::runtime_error("The " + render::backendName(backend) +
                              " backend was not compiled into this binary. "
-                             "Rebuild with GLEDITOR_ENABLE_VULKAN=1 to enable "
-                             "Vulkan.");
+                             "Rebuild without GLEDITOR_DISABLE_VULKAN=1 to "
+                             "enable Vulkan.");
   }
 
   state->defaultFontName = parser.get("--font");
@@ -548,7 +589,7 @@ render::Backend applyCommonArguments(argparse::ArgumentParser &parser,
   state->strictDiagnostics = parser["--strict-diagnostics"] == true;
   state->noPresent         = parser["--no-present"] == true;
   {
-    const std::lock_guard locker(state->view);
+    const std::scoped_lock locker(state->view);
     state->view.fov = std::stof(parser.get<std::string>("--fov"));
   }
 
@@ -576,7 +617,7 @@ void Application::bindDefaultViewCommands() {
   const auto move =
       [this](const std::function<void(AppState::ViewPerspective &)> &fun) {
         return [this, fun] {
-          const std::lock_guard locker(state->view);
+          const std::scoped_lock locker(state->view);
           fun(state->view);
         };
       };
@@ -634,13 +675,11 @@ void Application::bindDefaultViewCommands() {
 }
 
 int Application::run() {
-  Glib::init();
-  // What Pango::init() does, spelled out, because on MinGW it is not there to
-  // call: the DLL exports what the headers mark for export, and pangomm's
-  // init.cc is the one file that defines a function without including its own
-  // header, so the marking never reaches the definition. wrap_init is generated
-  // with its header included and is exported everywhere.
-  Pango::wrap_init();
+  FcInit();
+
+  // Warm up Fontconfig and FontManager on the main thread so that font cache
+  // initialization completes before background loader threads spawn.
+  text::FontManager::instance().getFont("Sans 12");
 
   AutoSDL sdlScoped(SDL_INIT_VIDEO);
 
@@ -761,7 +800,7 @@ int Application::run() {
   const auto sayWhatIsWaiting = [this, &window](const bool canShow) {
     std::vector<AppState::PendingDialog> waiting;
     {
-      const std::lock_guard locker(state->dialogMutex);
+      const std::scoped_lock locker(state->dialogMutex);
       waiting.swap(state->dialogs);
     }
     for (const auto &dialog : waiting) {
@@ -883,7 +922,7 @@ int Application::run() {
           break;
         }
         if (textInput) {
-          const std::lock_guard locker(state->typedMutex);
+          const std::scoped_lock locker(state->typedMutex);
           state->typedText += evt.text.text;
         }
         break;
@@ -911,7 +950,7 @@ int Application::run() {
         {
           // The render thread reads these under the same lock while building
           // its projection matrix.
-          const std::lock_guard locker(state->view);
+          const std::scoped_lock locker(state->view);
           state->view.screenWidth  = width;
           state->view.screenHeight = height;
         }
@@ -932,5 +971,3 @@ int Application::run() {
 }
 
 } // namespace gleditor
-
-// vi: set sw=2 sts=2 ts=2 et:

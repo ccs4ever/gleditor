@@ -258,7 +258,7 @@ inline void stopTextInput([[maybe_unused]] SDL_Window *window) {
 inline void setTextInputArea([[maybe_unused]] SDL_Window *window,
                              const int posX, const int posY, const int width,
                              const int height) {
-  const SDL_Rect area{posX, posY, width, height};
+  const SDL_Rect area{.x = posX, .y = posY, .w = width, .h = height};
 #if GLEDITOR_SDL_MAJOR == 3
   // The third argument is where the caret is within the area, which SDL3 uses
   // to place a candidate window against the insertion point rather than the
@@ -283,7 +283,7 @@ inline void setTextInputArea([[maybe_unused]] SDL_Window *window,
  * is why this is here rather than at the one call site.
  */
 inline void *nativeWindowHandle([[maybe_unused]] SDL_Window *window) {
-#if defined(_WIN32)
+#ifdef _WIN32
 #if GLEDITOR_SDL_MAJOR == 3
   return SDL_GetPointerProperty(SDL_GetWindowProperties(window),
                                 SDL_PROP_WINDOW_WIN32_HWND_POINTER, nullptr);
@@ -295,7 +295,7 @@ inline void *nativeWindowHandle([[maybe_unused]] SDL_Window *window) {
   }
   return static_cast<void *>(info.info.win.window);
 #endif
-#elif defined(__APPLE__)
+#elifdef __APPLE__
 #if GLEDITOR_SDL_MAJOR == 3
   return SDL_GetPointerProperty(SDL_GetWindowProperties(window),
                                 SDL_PROP_WINDOW_COCOA_WINDOW_POINTER, nullptr);
@@ -351,9 +351,14 @@ inline WindowPlacement windowPlacement(SDL_Window *window) {
   // zero, which is the right answer there anyway.
   static_cast<void>(
       SDL_GetWindowBordersSize(window, &top, &left, &bottom, &right));
-  return WindowPlacement{
-      posX - left, posY - top, posX + width + right, posY + height + bottom,
-      posX,        posY,       posX + width,         posY + height};
+  return WindowPlacement{.outerLeft   = posX - left,
+                         .outerTop    = posY - top,
+                         .outerRight  = posX + width + right,
+                         .outerBottom = posY + height + bottom,
+                         .innerLeft   = posX,
+                         .innerTop    = posY,
+                         .innerRight  = posX + width,
+                         .innerBottom = posY + height};
 }
 
 /// What a message box is telling somebody, which decides its icon.
@@ -390,14 +395,30 @@ inline int showMessageBox(SDL_Window *parent, const MessageKind kind,
     if (i + 1 == buttons.size()) {
       flags |= SDL_MESSAGEBOX_BUTTON_ESCAPEKEY_DEFAULT;
     }
-    laid.push_back(SDL_MessageBoxButtonData{flags, static_cast<int>(i),
-                                            buttons[i].c_str()});
+    SDL_MessageBoxButtonData btn{};
+    btn.flags = flags;
+#if GLEDITOR_SDL_MAJOR == 3
+    btn.buttonID = static_cast<int>(i);
+#else
+    btn.buttonid = static_cast<int>(i);
+#endif
+    btn.text = buttons[i].c_str();
+    laid.push_back(btn);
   }
 
   SDL_MessageBoxData data{};
-  data.flags      = MessageKind::Error == kind     ? SDL_MESSAGEBOX_ERROR
-                    : MessageKind::Warning == kind ? SDL_MESSAGEBOX_WARNING
-                                                   : SDL_MESSAGEBOX_INFORMATION;
+  switch (kind) {
+  case MessageKind::Error:
+    data.flags = SDL_MESSAGEBOX_ERROR;
+    break;
+  case MessageKind::Warning:
+    data.flags = SDL_MESSAGEBOX_WARNING;
+    break;
+  case MessageKind::Info:
+  default:
+    data.flags = SDL_MESSAGEBOX_INFORMATION;
+    break;
+  }
   data.window     = parent;
   data.title      = title.c_str();
   data.message    = message.c_str();
@@ -469,4 +490,3 @@ inline std::uint16_t keyModifiers(const SDL_Event &event) {
 } // namespace sdl
 
 #endif // GLEDITOR_SDL_COMPAT_H
-// vi: set sw=2 sts=2 ts=2 et:

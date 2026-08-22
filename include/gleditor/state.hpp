@@ -14,10 +14,12 @@
 #include <vector>
 
 #include <gleditor/a11y/publisher.hpp>
+#include <gleditor/glyphcache/types.hpp>
 #include <gleditor/modal_input.hpp>
 #include <gleditor/render/diagnostics.hpp>
 
 struct RenderItem;
+class Doc;
 
 struct AppState {
   /// Shared state between main and renderer threads
@@ -56,6 +58,10 @@ struct AppState {
     std::string text;    ///< Type: the UTF-8 to insert. Command: which command.
     gleditor::Key key{}; ///< Press: which key.
     gleditor::KeyMods mods{}; ///< Press: held with it.
+    /// Type: decorations named by a "[comma,separated,names]" prefix on
+    /// --type's value, stripped from text above. Zero -- the default, and
+    /// every --type before this existed -- means plain text.
+    gleditor::DecorationMask decorations{};
   };
   /// The script, in command line order. Written before the render thread
   /// starts and only read after.
@@ -174,6 +180,19 @@ struct AppState {
   std::function<bool(const std::string &)> runCommand;
 
   /**
+   * @brief A --type step named decorations for the text it just inserted.
+   *
+   * Unset by default: plain gleditor has no concept of formatting a span of
+   * a document, only xudu does. Set by xudu's Application before the render
+   * thread starts, the same as runCommand, so this stays the one place a
+   * base-library automation step reaches into an xudu-specific idea rather
+   * than Doc or Renderer needing to know Store or Link exist.
+   */
+  std::function<void(Doc &doc, std::uint32_t at, std::uint32_t length,
+                     gleditor::DecorationMask)>
+      onDecoratedInsert;
+
+  /**
    * @brief Native message boxes waiting to be shown.
    *
    * SDL's message box is modal and blocking and must be called from the thread
@@ -196,7 +215,7 @@ struct AppState {
   /// Ask for one. Safe from any thread; shown within a frame or two.
   void showDialog(const render::DiagnosticSeverity severity, std::string title,
                   std::string message) {
-    const std::lock_guard locker(dialogMutex);
+    const std::scoped_lock locker(dialogMutex);
     dialogs.push_back(
         PendingDialog{severity, std::move(title), std::move(message)});
   }

@@ -35,5 +35,3 @@ std::wstring quoteWindowsArgument(const std::wstring &arg) {
 }
 
 } // namespace xudu
-
-// vi: set sw=2 sts=2 ts=2 et:

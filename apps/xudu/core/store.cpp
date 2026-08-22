@@ -4,21 +4,34 @@
 #include <filesystem>
 #include <fstream>
 #include <iterator>
+#include <limits>
+#include <locale>
 #include <sstream>
 #include <stdexcept>
 #include <string>
 #include <vector>
 
+#include "binary_ops.hpp"
+#include "windows_quoting.hpp"
+
 namespace xudu {
 
 namespace {
 
-/// Names of the three files a store is written as.
+/// Names of the files a store is written as.
 constexpr const char *primediaFile = "primedia.spool";
 constexpr const char *opsFile      = "ops.spool";
 constexpr const char *linksFile    = "links.spool";
 constexpr const char *originsFile  = "origins.spool"; // pre-scroll stores
 constexpr const char *scrollsFile  = "scrolls.spool";
+
+/// Not a protocol limit -- a branch ordinal is a plain std::uint32_t and the
+/// compact binary format can encode any value that fits in one, past 254,
+/// by escaping to a varint -- only a backstop so a search for a free branch
+/// terminates instead of looping forever if every one of four billion
+/// somehow were taken.
+constexpr std::uint32_t branchSearchCeiling =
+    std::numeric_limits<std::uint32_t>::max();
 
 std::string readWholeFile(const std::filesystem::path &path) {
   std::ifstream in(path, std::ios::binary);
@@ -26,6 +39,32 @@ std::string readWholeFile(const std::filesystem::path &path) {
     return {};
   }
   return {std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>()};
+}
+
+/// Open @p path for writing one of the store's plain-text spools (scrolls,
+/// links, or the OSMIC text ops export), imbued with the classic "C" locale
+/// rather than whatever gleditor::initLocale() has set the process to.
+///
+/// These files are whitespace-delimited plain digits, meant to be read back
+/// by splitting on spaces -- not by a locale-aware parser. Most locales'
+/// numpunct groups large integers with a thousands separator, which a
+/// document long enough to need a four-digit byte offset or length would
+/// put in the middle of a field the reader expects to be one token,
+/// producing a "malformed" error over a store that was never actually
+/// corrupt, only written under the wrong locale.
+std::ofstream openTextSpoolForWrite(const std::filesystem::path &path) {
+  std::ofstream out(path, std::ios::trunc);
+  out.imbue(std::locale::classic());
+  return out;
+}
+
+/// The read side of openTextSpoolForWrite(), imbued the same way so a store
+/// written correctly (in the classic locale) is also read that way,
+/// regardless of what locale the reading process happens to be in.
+std::ifstream openTextSpoolForRead(const std::filesystem::path &path) {
+  std::ifstream in(path);
+  in.imbue(std::locale::classic());
+  return in;
 }
 
 } // namespace
@@ -46,6 +85,12 @@ void Store::putOp(const MicroversionId &produces, const Op &op) {
         op.parent.str() + ", but that name follows " + produces.parent().str());
   }
   ops.emplace(produces, op);
+
+  const auto parentIdx = opsSpool.indexOf(op.parent);
+  const auto sourceIdx =
+      op.source.isZero() ? 0U : opsSpool.indexOf(op.source);
+  const auto node = CompactOpNode::fromOp(op, parentIdx, sourceIdx);
+  opsSpool.append(node, produces);
 }
 
 const Op *Store::getOp(const MicroversionId &id) const {
@@ -97,14 +142,29 @@ void Store::replay(const Op &op, Version &onto) const {
     // reader go back to before it was made.
     break;
   }
+  case OpKind::PageBreak: {
+    onto.insertBreak(op.at);
+    break;
+  }
   }
 }
 
 Version Store::rebuild(const MicroversionId &version) const {
   Version built;
-  for (const auto &step : version.path()) {
-    if (const auto *const op = getOp(step); nullptr != op) {
-      replay(*op, built);
+  const auto targetIdx = opsSpool.indexOf(version);
+  if (targetIdx > 0) {
+    const auto path = opsSpool.ancestralPath(targetIdx);
+    for (const auto idx : path) {
+      const auto id = opsSpool.idOf(idx);
+      if (const auto *const op = getOp(id); nullptr != op) {
+        replay(*op, built);
+      }
+    }
+  } else {
+    for (const auto &step : version.path()) {
+      if (const auto *const op = getOp(step); nullptr != op) {
+        replay(*op, built);
+      }
     }
   }
   return built;
@@ -151,6 +211,9 @@ std::string Store::read(const PrimediaSpan &span) const {
   if (span.isLocal()) {
     return spool.read(span);
   }
+  if (const auto vocab = readVocabulary(span)) {
+    return *vocab;
+  }
   const auto *const which = scroll(span.scroll);
   if (nullptr == which) {
     return {};
@@ -177,6 +240,14 @@ MicroversionId Store::transcludeExternal(const MicroversionId &parent,
   return apply(parent, op);
 }
 
+MicroversionId Store::insertBreak(const MicroversionId &parent,
+                                  const std::uint32_t at) {
+  Op op;
+  op.kind = OpKind::PageBreak;
+  op.at   = at;
+  return apply(parent, op);
+}
+
 MicroversionId Store::apply(const MicroversionId &parent, Op op) {
   op.parent = parent;
 
@@ -189,15 +260,18 @@ MicroversionId Store::apply(const MicroversionId &parent, Op op) {
 
   // Something already follows it, so this is a second future for the same
   // state and gets a branch of its own. Nothing that already existed moves.
-  for (char letter = 'a'; letter <= 'z'; letter++) {
-    const auto branched = parent.branch(letter);
+  // Ordinals rather than 'a'..'z': a state can have more than twenty-six
+  // futures now, and the search just keeps counting past z into aa, ab, ...
+  // rather than giving up there.
+  for (std::uint32_t ordinal = 1; ordinal < branchSearchCeiling; ordinal++) {
+    const auto branched = parent.branch(ordinal);
     if (!ops.contains(branched)) {
       putOp(branched, op);
       return branched;
     }
   }
   throw std::runtime_error("microversion " + parent.str() +
-                           " already has twenty-six branches");
+                           " already has every branch a name can hold");
 }
 
 MicroversionId Store::insert(const MicroversionId &parent,
@@ -268,16 +342,36 @@ std::vector<const Link *> Store::linksTouching(const PrimediaSpan &span) const {
   return found;
 }
 
+std::optional<FormatAttribute>
+Store::formatAttributeOf(const Link &link) const {
+  if (LinkType::Format != link.type || link.right.empty()) {
+    return std::nullopt;
+  }
+  const auto &named = link.right.front();
+  for (const auto attribute : allFormatAttributes) {
+    if (named == vocabularySpanFor(attribute)) {
+      return attribute;
+    }
+  }
+  return std::nullopt;
+}
+
 std::vector<MicroversionId> Store::children(const MicroversionId &id) const {
   std::vector<MicroversionId> found;
   if (ops.contains(id.next())) {
     found.push_back(id.next());
   }
-  for (char letter = 'a'; letter <= 'z'; letter++) {
-    const auto branched = id.branch(letter);
-    if (ops.contains(branched)) {
-      found.push_back(branched);
+  // apply() always hands out the first free ordinal, and the spool is
+  // append-only, so branches off one state are never sparse -- ordinal 3
+  // existing means 1 and 2 were already taken when it was assigned. The
+  // first ordinal not found is therefore where the real ones stop, not a
+  // gap with more waiting past it.
+  for (std::uint32_t ordinal = 1; ordinal < branchSearchCeiling; ordinal++) {
+    const auto branched = id.branch(ordinal);
+    if (!ops.contains(branched)) {
+      break;
     }
+    found.push_back(branched);
   }
   return found;
 }
@@ -307,17 +401,9 @@ void Store::save(const std::string &directory) const {
     out << spool.bytes();
   }
   {
-    // One line per operation, in replay order: an append-only file on disk as
-    // well as in memory, and readable without this program.
-    std::ofstream out(dir / opsFile, std::ios::trunc);
-    for (const auto &[id, op] : ops) {
-      out << id.str() << ' ' << opKindName(op.kind) << ' ' << op.at << ' '
-          << op.length << ' ' << op.to << ' ' << op.span.start << ' '
-          << op.span.length << ' '
-          << (op.source.isZero() ? "0" : op.source.str()) << ' ' << op.sourceAt
-          << ' ' << op.sourceLength << ' ' << op.link << ' ' << op.span.scroll
-          << '\n';
-    }
+    // Write operations spool in compact binary format.
+    std::ofstream out(dir / opsFile, std::ios::binary | std::ios::trunc);
+    writeBinaryOpsSpool(out, ops);
   }
   {
     // The scroll table: what a span's ScrollId means. Without it an id is a
@@ -328,7 +414,7 @@ void Store::save(const std::string &directory) const {
     // torrent carries which stretch. They are separate lines because they are
     // separate kinds of fact with separate lifetimes: the first never changes,
     // and the second is rewritten every time something is sealed.
-    std::ofstream out(dir / scrollsFile, std::ios::trunc);
+    auto out = openTextSpoolForWrite(dir / scrollsFile);
     for (std::size_t i = 0; i < externals.size(); i++) {
       const auto &scroll = externals[i];
       out << "scroll " << (i + 1) << ' '
@@ -343,32 +429,88 @@ void Store::save(const std::string &directory) const {
     }
   }
   {
-    std::ofstream out(dir / linksFile, std::ios::trunc);
+    auto out = openTextSpoolForWrite(dir / linksFile);
     for (const auto &[id, link] : linkTable) {
       out << id << ' ' << linkTypeName(link.type) << ' '
           << (link.owner.empty() ? "-" : link.owner) << ' ' << link.left.size()
           << ' ' << link.right.size();
       for (const auto &span : link.left) {
-        out << ' ' << span.start << ' ' << span.length;
+        out << ' ' << span.scroll << ' ' << span.start << ' ' << span.length;
       }
       for (const auto &span : link.right) {
-        out << ' ' << span.start << ' ' << span.length;
+        out << ' ' << span.scroll << ' ' << span.start << ' ' << span.length;
       }
       out << '\n';
     }
   }
 }
 
+void Store::saveOsmicText(const std::string &directory) const {
+  const std::filesystem::path dir(directory);
+  std::filesystem::create_directories(dir);
+
+  {
+    std::ofstream out(dir / primediaFile, std::ios::binary | std::ios::trunc);
+    out << spool.bytes();
+  }
+  {
+    // Canonical line-by-line OSMIC text format.
+    auto out = openTextSpoolForWrite(dir / opsFile);
+    writeOsmicTextOpsSpool(out, ops);
+  }
+  {
+    auto out = openTextSpoolForWrite(dir / scrollsFile);
+    for (std::size_t i = 0; i < externals.size(); i++) {
+      const auto &scroll = externals[i];
+      out << "scroll " << (i + 1) << ' '
+          << (scroll.isNamed() ? scroll.publisher.hex() : "-") << ' '
+          << (scroll.salt.empty() ? "-" : toHex(scroll.salt)) << '\n';
+      for (const auto &segment : scroll.segments) {
+        out << "segment " << (i + 1) << ' ' << segment.at << ' '
+            << segment.length << ' ' << segment.torrent.hex() << ' '
+            << segment.streamOffset << ' ' << segment.fileIndex << ' '
+            << (segment.path.empty() ? "-" : segment.path) << '\n';
+      }
+    }
+  }
+  {
+    auto out = openTextSpoolForWrite(dir / linksFile);
+    for (const auto &[id, link] : linkTable) {
+      out << id << ' ' << linkTypeName(link.type) << ' '
+          << (link.owner.empty() ? "-" : link.owner) << ' ' << link.left.size()
+          << ' ' << link.right.size();
+      for (const auto &span : link.left) {
+        out << ' ' << span.scroll << ' ' << span.start << ' ' << span.length;
+      }
+      for (const auto &span : link.right) {
+        out << ' ' << span.scroll << ' ' << span.start << ' ' << span.length;
+      }
+      out << '\n';
+    }
+  }
+}
+
+std::string Store::exportOsmicText() const {
+  std::ostringstream out;
+  writeOsmicText(out);
+  return out.str();
+}
+
+void Store::writeOsmicText(std::ostream &out) const {
+  writeOsmicTextOpsSpool(out, ops);
+}
+
 void Store::load(const std::string &directory) {
   const std::filesystem::path dir(directory);
   spool.adopt(readWholeFile(dir / primediaFile));
   ops.clear();
+  opsSpool.clear();
   linkTable.clear();
   externals.clear();
   nextLinkId = 1;
 
   if (std::filesystem::exists(dir / scrollsFile)) {
-    std::ifstream in(dir / scrollsFile);
+    auto in = openTextSpoolForRead(dir / scrollsFile);
     std::string line;
     while (std::getline(in, line)) {
       if (line.empty()) {
@@ -422,7 +564,7 @@ void Store::load(const std::string &directory) {
                                  (dir / scrollsFile).string() + ": " + line);
       }
     }
-  } else {
+  } else if (std::filesystem::exists(dir / originsFile)) {
     // A store written before scrolls existed. Every entry was one file of one
     // torrent, which is a scroll with a single segment covering all of it --
     // and because a one-segment scroll's offsets are that file's offsets, the
@@ -450,52 +592,20 @@ void Store::load(const std::string &directory) {
     }
   }
 
-  {
-    std::ifstream in(dir / opsFile);
-    std::string line;
-    while (std::getline(in, line)) {
-      if (line.empty()) {
-        continue;
-      }
-      std::istringstream fields(line);
-      std::string id;
-      std::string kind;
-      std::string source;
-      Op op;
-      fields >> id >> kind >> op.at >> op.length >> op.to >> op.span.start >>
-          op.span.length >> source >> op.sourceAt >> op.sourceLength >> op.link;
-      // Added after the first stores were written, so its absence means the
-      // local spool -- which is what every span in such a store was.
-      if (!(fields >> op.span.scroll)) {
-        op.span.scroll = localScroll;
-      }
-      if (!fields) {
-        throw std::runtime_error("malformed operation in " +
-                                 (dir / opsFile).string() + ": " + line);
-      }
-      const auto produces = MicroversionId::parse(id);
-      op.source           = MicroversionId::parse(source);
-      op.parent           = produces.parent();
-      if ("insert" == kind) {
-        op.kind = OpKind::Insert;
-      } else if ("delete" == kind) {
-        op.kind = OpKind::Delete;
-      } else if ("rearrange" == kind) {
-        op.kind = OpKind::Rearrange;
-      } else if ("transclude" == kind) {
-        op.kind = OpKind::Transclude;
-      } else if ("link" == kind) {
-        op.kind = OpKind::Link;
-      } else {
-        throw std::runtime_error("unknown operation \"" + kind + "\" in " +
-                                 (dir / opsFile).string());
-      }
-      ops.emplace(produces, op);
+  if (std::filesystem::exists(dir / opsFile)) {
+    std::ifstream in(dir / opsFile, std::ios::binary);
+    readOpsSpool(in, ops);
+    for (const auto &[produces, op] : ops) {
+      const auto parentIdx = opsSpool.indexOf(op.parent);
+      const auto sourceIdx =
+          op.source.isZero() ? 0U : opsSpool.indexOf(op.source);
+      const auto node = CompactOpNode::fromOp(op, parentIdx, sourceIdx);
+      opsSpool.append(node, produces);
     }
   }
 
-  {
-    std::ifstream in(dir / linksFile);
+  if (std::filesystem::exists(dir / linksFile)) {
+    auto in = openTextSpoolForRead(dir / linksFile);
     std::string line;
     while (std::getline(in, line)) {
       if (line.empty()) {
@@ -519,7 +629,7 @@ void Store::load(const std::string &directory) {
                                        std::vector<PrimediaSpan> &into) {
         for (std::size_t i = 0; i < count; i++) {
           PrimediaSpan span;
-          fields >> span.start >> span.length;
+          fields >> span.scroll >> span.start >> span.length;
           into.push_back(span);
         }
       };
@@ -532,5 +642,3 @@ void Store::load(const std::string &directory) {
 }
 
 } // namespace xudu
-
-// vi: set sw=2 sts=2 ts=2 et:

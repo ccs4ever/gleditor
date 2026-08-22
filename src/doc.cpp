@@ -17,32 +17,23 @@
 #include <glm/gtc/type_ptr.hpp>
 #include <iostream> // for basic_ostream, operator<<
 #include <limits>
-#include <memory>                 // for __shared_ptr_access, shared...
-#include <pangomm/cairofontmap.h> // for CairoFontMap
-#include <span>                   // for span
-#include <stdexcept>              // for logic_error
-#include <string>                 // for char_traits, basic_string
-#include <string_view>            // for string_view
-#include <utility>                // for move
-#include <vector>                 // for vector
+#include <memory> // for __shared_ptr_access, shared...
+#include <mutex>
+#include <span>        // for span
+#include <stdexcept>   // for logic_error
+#include <string>      // for char_traits, basic_string
+#include <string_view> // for string_view
+#include <utility>     // for move
+#include <vector>      // for vector
 
-#include "glibmm/convert.h"              // for get_charset
-#include "glibmm/fileutils.h"            // for file_get_contents
-#include "glibmm/refptr.h"               // for RefPtr
-#include "glibmm/ustring.h"              // for ustring, operator==, UStrin...
-#include "pango/pango-layout.h"          // for pango_layout_set_text
-#include "pango/pango-types.h"           // for PANGO_SCALE
-#include "pangomm/attributes.h"          // for AttrFontDesc, Attribute
-#include "pangomm/attrlist.h"            // for AttrList
-#include "pangomm/fontdescription.h"     // for FontDescription
-#include "pangomm/layout.h"              // for Layout, EllipsizeMode
-#include "pangomm/layoutiter.h"          // for LayoutIter
-#include "pangomm/layoutline.h"          // for LayoutLine
-#include "pangomm/rectangle.h"           // for Rectangle
+#include <fontconfig/fontconfig.h>
 #include <gleditor/caret.hpp>            // for Caret
 #include <gleditor/drawable.hpp>         // for Drawable
 #include <gleditor/glyphcache/cache.hpp> // for GlyphCache
 #include <gleditor/glyphcache/types.hpp> // for TextureCoords, PointF, Rect
+#include <gleditor/text/font.hpp>        // for FontManager
+#include <gleditor/text/layout.hpp>      // for TextLayout
+#include <gleditor/utf8.hpp>             // for validateUtf8, makeValidUtf8
 #include <glm/gtx/string_cast.hpp>
 
 namespace {
@@ -102,23 +93,6 @@ unsigned char greekedShade(const float coverage) {
   return static_cast<unsigned char>(std::lround(255.0F * (1.0F - inked)));
 }
 
-/// Convert Pango units to pixels.
-double toPixels(const int pangoUnits) {
-  return static_cast<double>(pangoUnits) / PANGO_SCALE;
-}
-
-/// Byte offset of the character after the one starting at @p pos. Always
-/// advances, so a caller stepping through text cannot get stuck on a malformed
-/// byte.
-std::size_t nextCharacter(const std::string &text, std::size_t pos) {
-  pos = std::min(pos + 1, text.size());
-  while (pos < text.size() &&
-         0x80 == (static_cast<unsigned char>(text[pos]) & 0xC0)) {
-    pos++;
-  }
-  return pos;
-}
-
 /// Number of characters in a UTF-8 range, counting lead bytes.
 std::size_t utf8Length(const std::string_view text) {
   return static_cast<std::size_t>(
@@ -145,7 +119,7 @@ std::array<float, 16> toArray(const glm::mat4 &mat) {
 
 // Neither header can see the other, so the two ends of the layer limit are
 // tied together here: the atlas refuses to grow past what the packing can name.
-static_assert(GlyphCache::maxEncodableLayers ==
+static_assert(gleditor::GlyphCache::maxEncodableLayers ==
                   static_cast<int>(Doc::VBORow::maxAtlasLayers),
               "the glyph cache's layer ceiling and the vertex packing's layer "
               "field have drifted apart");
@@ -175,184 +149,54 @@ render::VertexLayout Doc::vertexLayout() {
   return layout;
 }
 
-// The constructor parameters are named with a leading `a` so that the body can
-// refer to the members without ambiguity: the members are move-constructed from
-// the parameters, which leaves the parameters empty.
 Page::Page(std::shared_ptr<Doc> aDoc, RenderState &state, glm::mat4 &model,
-           Glib::RefPtr<Pango::Layout> aLayout, const std::uint32_t aTextOffset,
+           PageShaping aShaping, const std::uint32_t aTextOffset,
            const std::uint32_t aPageIndex,
            const BufferPool::Allocation &inherited)
     : Drawable(model), doc(std::move(aDoc)), pageBacking(inherited),
-      layout(std::move(aLayout)), textOffset(aTextOffset),
-      pageIndex(aPageIndex) {
-  const auto &layout = this->layout;
-
+      textOffset(aTextOffset), pageIndex(aPageIndex) {
   const auto color = Doc::VBORow::color;
   const auto box   = Doc::VBORow::box;
 
-  // Everything below is in layout pixels, the unit Pango reports positions and
-  // sizes in. The page's model matrix scales them to world units, so a glyph's
-  // quad and the advance that places it shrink together -- they did not before,
-  // and the mismatch drew every glyph on top of its neighbours.
-  int textWidthPx  = 0;
-  int textHeightPx = 0;
-  layout->get_pixel_size(textWidthPx, textHeightPx);
-  pageWidth  = static_cast<float>(textWidthPx) + (2 * pageMargin);
-  pageHeight = static_cast<float>(textHeightPx) + (2 * pageMargin);
+  pageWidth  = static_cast<float>(aShaping.textWidthPx) + (2 * pageMargin);
+  pageHeight = static_cast<float>(aShaping.textHeightPx) + (2 * pageMargin);
 
-  // The page is centred on its own origin, so that the model matrix placing it
-  // in the scene positions its middle rather than its top left corner. Kept as
-  // members so caret geometry lands in the same space as the glyphs.
   originX = -pageWidth / 2.0F;
   originY = pageHeight / 2.0F;
 
-  // Which document and page these quads belong to is the same for every one of
-  // them, so it is not written into any of them: the draw carries it, and a
-  // quad carries only the kind, which does vary -- the background and the bars
-  // are the page itself, where a glyph is a character within it.
   identity = render::packTagIdentity(0, this->doc->documentIndex(), aPageIndex);
 
-  // The allocation holds two draws back to back: the full-detail one -- page
-  // background followed by a glyph per cluster -- and then the coarse one,
-  // which repeats the background and follows it with a solid bar per line.
-  // Repeating the background costs one row and is what lets either draw be
-  // aimed at with a byte offset and a count, with no second allocation and no
-  // stitching of two ranges.
   std::vector<Doc::VBORow> vertexData;
   const auto pushBackground = [&] {
-    vertexData.push_back(Doc::VBORow{
-        {0.0F, 0.0F},
-        Doc::VBORow::fill(color(255), Doc::VBORow::onPaper),
-        0,
-        box(0,
-            std::min(Doc::VBORow::maxQuadExtent,
-                     static_cast<unsigned int>(pageWidth)),
-            std::min(Doc::VBORow::maxQuadExtent,
-                     static_cast<unsigned int>(pageHeight)),
-            render::tagKindPage),
-        // A click on bare paper resolves to the start of the page, which is
-        // what a page-kind tag with no cluster already means.
-        Doc::VBORow::paperAt(color(255), 0)});
+    vertexData.push_back(
+        Doc::VBORow{{0.0F, 0.0F},
+                    Doc::VBORow::fill(color(255), Doc::VBORow::onPaper),
+                    0,
+                    box(0,
+                        std::min(Doc::VBORow::maxQuadExtent,
+                                 static_cast<unsigned int>(pageWidth)),
+                        std::min(Doc::VBORow::maxQuadExtent,
+                                 static_cast<unsigned int>(pageHeight)),
+                        render::tagKindPage),
+                    Doc::VBORow::paperAt(color(255), 0)});
   };
   pushBackground();
 
-  const auto text = layout->get_text().raw();
-  const auto font =
-      layout->get_context()->load_font(layout->get_font_description());
+  auto font = gleditor::text::FontManager::instance().getFont(
+      std::string{this->doc->renderer->defaultFontName()});
 
-  // A page layout is handed the whole rest of the document and limited by
-  // height, so its text runs far past what the page shows. Everything below is
-  // bounded by what the page actually consumes -- without which the final
-  // cluster's end ran to the end of the document, producing a "cluster" of
-  // tens of kilobytes.
-  // Not const: a page that would hold more clusters than one can name gives
-  // the rest back to the next page, which is what keeps every cluster on this
-  // one pickable.
-  auto limit = std::min<std::size_t>(text.size(), Doc::consumedBytes(layout));
-
-  // Sizes are clamped rather than asserted. They come from whatever font the
-  // caller asked for, and a glyph too large to describe is a visual mistake
-  // where a failed assertion is a crash.
   const auto extent = [](const float value) {
     return static_cast<unsigned int>(std::clamp(
         value, 0.0F, static_cast<float>(Doc::VBORow::maxQuadExtent)));
   };
 
-  // Glyph box area per line, accumulated as the clusters are placed. This is
-  // what tells the coarse path how full each line is, so that its bar is as
-  // dark as the glyphs it stands in for without anything having to be assumed
-  // about the text.
-  std::vector<float> lineInk(
-      static_cast<std::size_t>(std::max(0, layout->get_line_count())), 0.0F);
-  std::size_t lineOfCluster = 0;
-  // Byte at which the next line begins, so the running cluster offset can be
-  // attributed to a line without searching. Clusters arrive in text order.
-  const auto lineStartAt = [&layout](const std::size_t index) {
-    const auto &line = layout->get_const_line(static_cast<int>(index));
-    return line ? static_cast<std::size_t>(line->get_start_index())
-                : std::numeric_limits<std::size_t>::max();
-  };
-  auto nextLineStart = lineInk.size() > 1
-                           ? lineStartAt(1)
-                           : std::numeric_limits<std::size_t>::max();
+  std::vector<float> lineInk(aShaping.lineCount, 0.0F);
 
-  // Walk the clusters. A cluster is the smallest run Pango will not break
-  // apart, so it is what one quad can represent: an "ffi" ligature or a letter
-  // with its combining marks is one cluster covering several characters.
-  auto iter = layout->get_iter();
-  while (true) {
-    Pango::Rectangle clusterInk;
-    Pango::Rectangle clusterLogical;
-    iter.get_cluster_extents(clusterInk, clusterLogical);
+  clusters = std::move(aShaping.clusters);
 
-    const auto start = static_cast<std::size_t>(std::max(0, iter.get_index()));
-    const bool more  = iter.next_cluster();
-    // Where the next cluster begins is where this one ends. When there is no
-    // next cluster the answer is one character, not "the rest of the page":
-    // Pango stops producing clusters partway through the final line, and
-    // taking the page's end instead handed the cache a bitmap of the whole
-    // remaining run -- a "glyph" 848 texels wide, and hundreds of them across
-    // a document. Everything past the last cluster was never shaped, so it
-    // belongs to the next page rather than to this one; textBytes below is set
-    // from what was actually consumed.
-    const auto end = std::min(
-        limit, more ? static_cast<std::size_t>(std::max(0, iter.get_index()))
-                    : nextCharacter(text, start));
-
-    if (start >= limit) {
-      break;
-    }
-    if (end <= start) {
-      if (!more) {
-        break;
-      }
-      continue;
-    }
-
-    // A trailing newline is part of the cluster's byte range but has nothing
-    // to draw; it still has to be counted so offsets stay in step with the
-    // text.
-    std::size_t drawEnd = end;
-    while (drawEnd > start &&
-           ('\n' == text[drawEnd - 1] || '\r' == text[drawEnd - 1])) {
-      drawEnd--;
-    }
-
-    // A quad names its cluster in sixteen bits, so a page holds that many and
-    // no more. Reached only at font sizes small enough that a page carries
-    // fourteen times what a real one does; the page simply ends here and the
-    // next one starts where it left off.
-    if (clusters.size() >= Doc::VBORow::maxClustersPerPage) {
-      limit = start;
-      break;
-    }
-
-    clusters.push_back(
-        ClusterBox{static_cast<std::uint32_t>(start),
-                   static_cast<std::uint32_t>(end - start),
-                   static_cast<std::uint32_t>(utf8Length(
-                       std::string_view(text).substr(start, end - start)))});
-
-    if (drawEnd == start) {
-      if (!more) {
-        break;
-      }
-      continue;
-    }
-
-    // The whole cluster is rasterised, not just its first codepoint. Taking
-    // the leading sequence dropped the rest of every ligature and every
-    // combining mark from the page. A cluster too long for the cache to key on
-    // is skipped rather than allowed to stop the editor: it is pathological
-    // input, not a reason to fail to open a file.
-    if (drawEnd - start > GlyphCache::maxClusterBytes) {
-      if (!more) {
-        break;
-      }
-      continue;
-    }
-    const std::string_view chr(text.data() + start, drawEnd - start);
-    const auto glyph    = state.glyphCache.put(chr, font);
+  for (const auto &g : aShaping.glyphs) {
+    const auto glyph = state.glyphCache.put(
+        g.chr, font, gleditor::decorationSetFor(g.decorations));
     const auto &coords  = glyph.texCoords;
     const auto &extents = glyph.dims;
 
@@ -360,103 +204,48 @@ Page::Page(std::shared_ptr<Doc> aDoc, RenderState &state, glm::mat4 &model,
     const auto glyphHeight =
         static_cast<float>(static_cast<int>(extents.height));
 
-    while (start >= nextLineStart && lineOfCluster + 1 < lineInk.size()) {
-      lineOfCluster++;
-      nextLineStart = lineOfCluster + 1 < lineInk.size()
-                          ? lineStartAt(lineOfCluster + 1)
-                          : std::numeric_limits<std::size_t>::max();
-    }
-
     if (0.0F < glyphWidth && 0.0F < glyphHeight) {
-      if (lineOfCluster < lineInk.size()) {
-        lineInk[lineOfCluster] += glyphWidth * glyphHeight * glyph.ink;
+      if (g.lineIndex < lineInk.size()) {
+        lineInk[g.lineIndex] += glyphWidth * glyphHeight * glyph.ink;
       }
-      // Pango measures from the top left of the text block downwards; the page
-      // runs upwards from its own origin, hence the negated Y.
-      const auto left =
-          pageMargin + static_cast<float>(toPixels(clusterLogical.get_x()));
-      const auto top =
-          pageMargin + static_cast<float>(toPixels(clusterLogical.get_y()));
+      const auto left = pageMargin + g.clusterLeft;
+      const auto top  = pageMargin + g.clusterTop;
 
       vertexData.push_back(Doc::VBORow{
           {originX + left + (glyphWidth / 2.0F),
            originY - (top + (glyphHeight / 2.0F))},
           Doc::VBORow::ink(color(0), Doc::VBORow::onText, false),
-          // Where the glyph sits in the atlas. How large it is there is not
-          // written down: the atlas holds it at its own size, so the box below
-          // is the same rectangle in texels as it is in layout pixels.
           Doc::VBORow::atlasAt(static_cast<unsigned int>(coords.topLeft.x),
                                static_cast<unsigned int>(coords.topLeft.y)),
           box(static_cast<unsigned char>(glyph.layer), extent(glyphWidth),
               extent(glyphHeight), render::tagKindGlyph),
-          // The cluster index into this page's cluster table, which is what
-          // turns a picked fragment back into a text position; the draw says
-          // which document and page that table belongs to.
-          Doc::VBORow::paperAt(
-              color(255), static_cast<unsigned int>(clusters.size() - 1))});
-    }
-
-    if (!more) {
-      break;
+          Doc::VBORow::paperAt(color(255),
+                               static_cast<unsigned int>(g.clusterIndex))});
     }
   }
 
-  textBytes       = static_cast<std::uint32_t>(limit);
+  textBytes       = static_cast<std::uint32_t>(aShaping.limit);
   detailInstances = static_cast<std::uint32_t>(vertexData.size());
 
-  // The coarse draw. One quad per line, covering the line's ink box -- the box
-  // the glyphs actually mark, not the logical box, which runs to the wrapping
-  // width whether or not there is text out there. At the size this is used at
-  // a line is a few pixels tall and its glyphs are indistinguishable anyway,
-  // so what matters is that the bar sits where the text sits and is about as
-  // dark.
   pushBackground();
-  {
-    auto lineIter         = layout->get_iter();
-    std::size_t lineIndex = 0;
-    do {
-      const auto &line = layout->get_const_line(static_cast<int>(lineIndex));
-      // Lines past what this page consumes belong to the next page; the layout
-      // is handed the rest of the document and bounded by height, so it has
-      // them and the page must not draw them.
-      if (!line || static_cast<std::size_t>(line->get_start_index()) >= limit) {
-        break;
-      }
-      const auto inkArea =
-          lineIndex < lineInk.size() ? lineInk[lineIndex] : 0.0F;
-      lineIndex++;
-
-      Pango::Rectangle ink;
-      Pango::Rectangle logical;
-      lineIter.get_line_extents(ink, logical);
-
-      const auto barWidth  = static_cast<float>(toPixels(ink.get_width()));
-      const auto barHeight = static_cast<float>(toPixels(ink.get_height()));
-      // A blank line has no ink and needs no bar.
-      if (0.0F >= barWidth || 0.0F >= barHeight) {
-        continue;
-      }
-      const auto left = pageMargin + static_cast<float>(toPixels(ink.get_x()));
-      const auto top  = pageMargin + static_cast<float>(toPixels(ink.get_y()));
-
-      // Solid, so the fragment stage fills it with this colour and never
-      // samples the atlas. That is what lets the coarse path share the glyph
-      // pipeline instead of needing one of its own, and it keeps all eight
-      // bits of the shade: a bar is drawn as ink, not as paper.
-      const auto shade = greekedShade(inkArea / (barWidth * barHeight));
-      vertexData.push_back(Doc::VBORow{
-          {originX + left + (barWidth / 2.0F),
-           originY - (top + (barHeight / 2.0F))},
-          Doc::VBORow::fill(color(shade), Doc::VBORow::onText),
-          0,
-          box(0, extent(barWidth), extent(barHeight), render::tagKindPage),
-          Doc::VBORow::paperAt(color(shade), 0)});
-    } while (lineIter.next_line());
+  for (const auto &line : aShaping.lines) {
+    const auto inkArea =
+        line.lineIndex < lineInk.size() ? lineInk[line.lineIndex] : 0.0F;
+    const auto left  = pageMargin + line.left;
+    const auto top   = pageMargin + line.top;
+    const auto shade = greekedShade(inkArea / (line.barWidth * line.barHeight));
+    vertexData.push_back(
+        Doc::VBORow{{originX + left + (line.barWidth / 2.0F),
+                     originY - (top + (line.barHeight / 2.0F))},
+                    Doc::VBORow::fill(color(shade), Doc::VBORow::onText),
+                    0,
+                    box(0, extent(line.barWidth), extent(line.barHeight),
+                        render::tagKindPage),
+                    Doc::VBORow::paperAt(color(shade), 0)});
   }
+
   coarseInstances =
       static_cast<std::uint32_t>(vertexData.size()) - detailInstances;
-  // A page with no lines to bar would draw its background alone, which is not
-  // what the page looks like; fall back to the detailed draw instead.
   if (1 >= coarseInstances) {
     vertexData.resize(detailInstances);
     coarseInstances = 0;
@@ -466,18 +255,9 @@ Page::Page(std::shared_ptr<Doc> aDoc, RenderState &state, glm::mat4 &model,
   if (pageBacking.empty()) {
     pageBacking = this->doc->pool->reserve(rows);
   } else {
-    // Taking over the rows of the page this one replaces. Every one of them is
-    // written below, so the pool is told not to carry the old contents along
-    // if it does have to move them.
     this->doc->pool->resize(pageBacking, rows, BufferPool::Contents::Discard);
   }
   this->doc->pool->write(pageBacking, 0, asBytes(vertexData));
-
-  // The shaping has done what it was for: the quads are in the buffer and the
-  // cluster table records where each one came from. Keeping it is what made a
-  // megabyte of text cost ninety megabytes of Pango, and a document that is
-  // read rather than edited never asks for it again. See Page::layout.
-  dropLayout();
 }
 
 bool Page::contains(const std::uint32_t globalOffset) const {
@@ -487,70 +267,55 @@ bool Page::contains(const std::uint32_t globalOffset) const {
   return globalOffset >= textOffset && globalOffset <= textOffset + textBytes;
 }
 
-void Doc::keepLayoutOf(const std::uint32_t pageIndex) const {
-  // Already the most recent, so there is nothing to record and nothing to
-  // drop; a caret sitting still asks its page for a layout every frame.
-  if (!liveLayouts.empty() && liveLayouts.back() == pageIndex) {
-    return;
-  }
-  std::erase(liveLayouts, pageIndex);
-  liveLayouts.push_back(pageIndex);
-
-  while (liveLayouts.size() > maxLiveLayouts) {
-    const auto oldest = liveLayouts.front();
-    liveLayouts.pop_front();
-    // Pages are renumbered by a reflow, so an index recorded before one may
-    // now name a different page or none at all. Dropping the wrong page's
-    // layout costs it a reshaping and nothing else, and dropping none is only
-    // a page kept a little longer.
-    if (oldest < pages.size()) {
-      pages[oldest].dropLayout();
-    }
-  }
-}
+void Doc::keepLayoutOf(const std::uint32_t pageIndex) const { (void)pageIndex; }
 
 std::string_view Page::pageText() const {
-  const std::string_view whole{doc->contents().raw()};
+  const std::string_view whole{doc->contents()};
   if (textOffset >= whole.size()) {
     return {};
   }
   return whole.substr(textOffset, textBytes);
 }
 
-Glib::RefPtr<Pango::Layout> Page::ensureLayout() const {
-  if (!layout) {
-    // The same call, on the same bytes, that produced this page in the first
-    // place, so what comes back is what was drawn.
-    layout = doc->layoutFrom(textOffset);
-    doc->keepLayoutOf(pageIndex);
-  }
-  return layout;
-}
+PageShaping Page::ensureShaping() const { return doc->layoutFrom(textOffset); }
 
 bool Page::caretGeometry(const std::uint32_t globalOffset, float &posX,
                          float &posY, float &height) const {
-  // Whether the caret is on this page is answered before the page is shaped
-  // again, or drawing a caret would shape every page of the document to find
-  // the one page it is on.
   if (!contains(globalOffset)) {
     return false;
   }
-  const auto shaped = ensureLayout();
-  if (!shaped) {
-    return false;
+  const auto shaped = ensureShaping();
+  auto font         = gleditor::text::FontManager::instance().getFont(
+      std::string{doc->renderer->defaultFontName()});
+  height = font ? font->metrics().lineHeight : 16.0F;
+
+  const auto relOffset = globalOffset - textOffset;
+  float left           = pageMargin;
+  float top            = pageMargin;
+
+  bool found = false;
+  for (const auto &g : shaped.glyphs) {
+    if (g.clusterIndex < shaped.clusters.size()) {
+      const auto &cl = shaped.clusters[g.clusterIndex];
+      if (relOffset >= cl.byteStart &&
+          relOffset <= cl.byteStart + cl.byteLength) {
+        left = pageMargin + g.clusterLeft;
+        if (g.lineIndex < shaped.lines.size()) {
+          top = pageMargin + shaped.lines[g.lineIndex].top;
+        }
+        found = true;
+        break;
+      }
+    }
   }
-  Pango::Rectangle strong;
-  Pango::Rectangle weak;
-  shaped->get_cursor_pos(static_cast<int>(globalOffset - textOffset), strong,
-                         weak);
+  if (!found && !shaped.lines.empty()) {
+    const auto &lastLine = shaped.lines.back();
+    left                 = pageMargin + lastLine.barWidth;
+    top                  = pageMargin + lastLine.top;
+  }
 
-  const auto left = pageMargin + static_cast<float>(toPixels(strong.get_x()));
-  const auto top  = pageMargin + static_cast<float>(toPixels(strong.get_y()));
-  const auto tall = static_cast<float>(toPixels(strong.get_height()));
-
-  posX   = originX + left + (Caret::widthPixels / 2.0F);
-  posY   = originY - (top + (tall / 2.0F));
-  height = tall;
+  posX = originX + left + (Caret::widthPixels / 2.0F);
+  posY = originY - (top + (height / 2.0F));
   return true;
 }
 
@@ -757,11 +522,11 @@ Page::highlightFor(const std::uint32_t selStart, const std::uint32_t selEnd,
   };
 
   render::HighlightRange range;
-  range.identity      = render::packTagIdentity(render::tagKindGlyph,
-                                                doc->documentIndex(), pageIndex);
-  range.firstCluster  = static_cast<std::uint32_t>(*first);
-  range.lastCluster   = static_cast<std::uint32_t>(last);
-  range.colour        = colour;
+  range.identity     = render::packTagIdentity(render::tagKindGlyph,
+                                               doc->documentIndex(), pageIndex);
+  range.firstCluster = static_cast<std::uint32_t>(*first);
+  range.lastCluster  = static_cast<std::uint32_t>(last);
+  range.colour       = colour;
   range.startFraction = fractionInto(clusters[*first], localStart);
   range.endFraction   = fractionInto(clusters[last], localEnd);
   return range;
@@ -821,68 +586,77 @@ const char *reflowScopeName(const ReflowScope scope) {
   return "unknown";
 }
 
-Glib::RefPtr<Pango::Layout> Doc::layoutFrom(const std::uint32_t offset) const {
-  const auto fontDesc =
-      Pango::FontDescription(renderer->defaultFontName().data());
-  const auto fonts = Pango::CairoFontMap::get_default();
-  const auto ctx   = fonts->create_context();
-  ctx->set_font_description(fontDesc);
-
-  auto lay = Pango::Layout::create(ctx);
-  lay->set_font_description(fontDesc);
-  lay->set_single_paragraph_mode(false);
-  lay->set_height(std::ceil(139.70 * 11 * PANGO_SCALE));
-  lay->set_width(std::ceil(139.70 * 8.5 * PANGO_SCALE));
-  lay->set_ellipsize(Pango::EllipsizeMode::END);
-
-  const char *txt = text.raw().c_str();
-  const auto size = text.bytes();
-  if (offset >= size) {
-    lay->set_text("");
-    return lay;
+PageShaping Doc::layoutFrom(const std::uint32_t offset) const {
+  if (offset >= text.size()) {
+    return PageShaping{};
   }
-  // The same slice makePages() uses. This path is the one an edit reflows
-  // through, so leaving it handing Pango the whole document would have left
-  // the fault in place for every keystroke in a long one.
-  fillPage(lay, txt + offset, size - offset);
-  return lay;
-}
+  auto font = gleditor::text::FontManager::instance().getFont(
+      std::string{renderer->defaultFontName()});
+  gleditor::text::LayoutOptions opts{
+      .maxWidthPx      = 139.70F * 8.5F,
+      .maxHeightPx     = 139.70F * 11.0F,
+      .singleParagraph = false,
+      .ellipsize       = true,
+  };
 
-std::uint32_t Doc::consumedBytes(const Glib::RefPtr<Pango::Layout> &layout) {
-  // How much of the text this page actually shows.
-  //
-  // A page bounds its layout by height, and Pango implements that by
-  // ellipsizing: the final line is cut short and replaced by an ellipsis, while
-  // still reporting its full logical length. Taking that length made the page
-  // claim bytes it never drew -- the following page then started past them, and
-  // the cluster walk handed the glyph cache one bitmap covering the whole
-  // remaining run, hundreds of texels wide and one per page.
-  //
-  // So an ellipsized last line belongs to the next page, not this one. Asking
-  // whether the layout ellipsized costs nothing; counting the clusters that
-  // survived would mean shaping the text here, on the loader thread, while the
-  // render thread is shaping through the same global font map -- which
-  // corrupts the heap inside fontconfig often enough to be caught in a handful
-  // of runs.
-  const auto lines = layout->get_line_count();
-  if (0 >= lines) {
-    return 0;
+  // Bounded to the nearest forced break past this page's start, if there is
+  // one, so layoutPage() never sees text on the far side of it: the break's
+  // whole point is that the remainder of a page's height goes unused rather
+  // than being filled with what comes after. forcedBreaks is sorted
+  // ascending (see TextSource::forcedBreaks()), so the first entry greater
+  // than offset is the nearest one -- strictly greater, since a break sitting
+  // exactly at offset already did its job ending the previous page and says
+  // nothing about this one.
+  auto available = text.size() - offset;
+  for (const auto breakAt : forcedBreaks) {
+    if (breakAt > offset) {
+      available = std::min(available, static_cast<std::size_t>(breakAt) -
+                                          static_cast<std::size_t>(offset));
+      break;
+    }
   }
-  const auto &last = layout->get_const_line(lines - 1);
-  const int len    = last->get_length();
-  const auto whole = static_cast<std::uint32_t>(last->get_start_index() +
-                                                (0 == len ? 1 : len));
-  if (!layout->is_ellipsized()) {
-    return whole;
+
+  // decoratedRanges is in this document's own offsets, same as forcedBreaks,
+  // but layoutPage() only ever sees the slice starting at offset -- so each
+  // range is clipped to what this page actually covers and rebased to that
+  // slice's own coordinates, the same translation forcedBreaks gets above.
+  const auto pageEnd = offset + available;
+  for (const auto &range : decoratedRanges) {
+    const auto from = std::max<std::uint32_t>(range.start, offset);
+    const auto to    = std::min<std::uint32_t>(range.end,
+                                             static_cast<std::uint32_t>(pageEnd));
+    if (from < to) {
+      opts.decoratedRanges.push_back(gleditor::DecoratedRange{
+          .start       = from - offset,
+          .end         = to - offset,
+          .decorations = range.decorations,
+      });
+    }
   }
-  // Everything before the cut line. A single line that ellipsizes has nothing
-  // before it, and a page that consumed nothing would never advance, so the
-  // whole line is taken in that case and the overrun tolerated.
-  const auto upToCut = static_cast<std::uint32_t>(last->get_start_index());
-  return 0 == upToCut ? whole : upToCut;
+
+  return gleditor::text::TextLayout::layoutPage(
+      std::string_view{text.data() + offset, available}, font, opts);
 }
 
 namespace {
+
+std::vector<int> lineStartsFromShaping(const PageShaping &shaping) {
+  std::vector<int> starts;
+  starts.reserve(shaping.lineCount);
+  std::size_t curLine = 0;
+  for (const auto &g : shaping.glyphs) {
+    while (curLine <= g.lineIndex && curLine < shaping.lineCount) {
+      if (g.clusterIndex < shaping.clusters.size()) {
+        starts.push_back(
+            static_cast<int>(shaping.clusters[g.clusterIndex].byteStart));
+      } else {
+        starts.push_back(0);
+      }
+      curLine++;
+    }
+  }
+  return starts;
+}
 
 /**
  * @brief Whether an insertion left every line break where it was.
@@ -909,16 +683,6 @@ bool sameLineBreaks(const std::vector<int> &before,
 
 } // namespace
 
-std::vector<int> Doc::lineStarts(const Glib::RefPtr<Pango::Layout> &layout) {
-  std::vector<int> starts;
-  const int count = layout->get_line_count();
-  starts.reserve(static_cast<std::size_t>(count));
-  for (int i = 0; i < count; i++) {
-    starts.push_back(layout->get_const_line(i)->get_start_index());
-  }
-  return starts;
-}
-
 void Doc::addObserver(gleditor::DocumentObserver *const observer) {
   if (nullptr == observer) {
     return;
@@ -935,16 +699,6 @@ void Doc::removeObserver(gleditor::DocumentObserver *const observer) {
 }
 
 std::vector<int> Doc::lineBreaksAround(const std::uint32_t at) const {
-  // The line breaks of the page the edit lands on, as they are *now*.
-  //
-  // Taken before the text is spliced, and that is the whole point. A page
-  // shapes itself again on demand, so asking it afterwards asks about text
-  // that already contains the edit: the answer came back equal to the line
-  // breaks after the edit, and the comparison that is supposed to tell a
-  // line-local change from one that moved a word onto another line said "it
-  // moved" every time. Whether it did depended on whether the page happened to
-  // still be holding its layout, which is not something the answer should turn
-  // on.
   if (pages.empty()) {
     return {};
   }
@@ -954,7 +708,7 @@ std::vector<int> Doc::lineBreaksAround(const std::uint32_t at) const {
       firstPage = i;
     }
   }
-  return lineStarts(pages[firstPage].ensureLayout());
+  return lineStartsFromShaping(pages[firstPage].ensureShaping());
 }
 
 void Doc::scheduleReflow(RenderState &state, const std::uint32_t at,
@@ -986,15 +740,14 @@ void Doc::insert(RenderState &state, const std::uint32_t offset,
     return;
   }
   const auto inserted = static_cast<std::uint32_t>(utf8.size());
-  const auto at       = std::min<std::uint32_t>(offset, text.bytes());
+  const auto at =
+      std::min<std::uint32_t>(offset, static_cast<std::uint32_t>(text.size()));
   // Before the splice: see lineBreaksAround().
   const auto oldStarts = lineBreaksAround(at);
 
   // Splice first: the document is the source of truth and must be correct
   // before anything asynchronous looks at it.
-  auto raw = text.raw();
-  raw.insert(at, utf8);
-  text = raw;
+  text.insert(at, utf8);
   edits++;
 
   if (nullptr != caret) {
@@ -1010,8 +763,7 @@ void Doc::insert(RenderState &state, const std::uint32_t offset,
 
 std::string Doc::erase(RenderState &state, const std::uint32_t offset,
                        const std::uint32_t bytes, Caret *caret) {
-  auto raw = text.raw();
-  if (0 == bytes || raw.empty() || offset >= raw.size()) {
+  if (0 == bytes || text.empty() || offset >= text.size()) {
     return {};
   }
 
@@ -1021,19 +773,18 @@ std::string Doc::erase(RenderState &state, const std::uint32_t offset,
   // collapse a range naming part of one character to nothing, and would make
   // "delete one byte of a two-byte character" mean something other than
   // deleting that character.
-  const auto start = gleditor::alignToCharacterStart(raw, offset);
+  const auto start = gleditor::alignToCharacterStart(text, offset);
   const auto end   = gleditor::alignToCharacterEnd(
-      raw, std::min<std::uint32_t>(offset + bytes,
-                                     static_cast<std::uint32_t>(raw.size())));
+      text, std::min<std::uint32_t>(offset + bytes,
+                                    static_cast<std::uint32_t>(text.size())));
   if (end <= start) {
     return {};
   }
-  const auto removed = raw.substr(start, end - start);
+  const auto removed = text.substr(start, end - start);
   // Before the erasure, for the same reason as in insert().
   const auto oldStarts = lineBreaksAround(start);
 
-  raw.erase(start, removed.size());
-  text = raw;
+  text.erase(start, removed.size());
   edits++;
 
   const auto delta = -static_cast<std::int32_t>(removed.size());
@@ -1066,15 +817,18 @@ void Doc::reflowFrom(RenderState &state, const std::size_t firstPage,
   // re-sync test would otherwise be an unsigned subtraction that wraps rather
   // than going below zero, and would match at a wildly wrong page.
   const auto shift = static_cast<std::int64_t>(delta);
-  std::vector<std::pair<std::uint32_t, Glib::RefPtr<Pango::Layout>>> rebuilt;
+  std::vector<std::pair<std::uint32_t, PageShaping>> rebuilt;
   auto offset     = pages[firstPage].baseOffset();
   auto pageCursor = firstPage;
   auto scope      = ReflowScope::Document;
 
-  while (offset < text.bytes()) {
-    auto lay            = layoutFrom(offset);
-    const auto consumed = consumedBytes(lay);
-    rebuilt.emplace_back(offset, lay);
+  while (offset < text.size()) {
+    auto shaping        = layoutFrom(offset);
+    const auto consumed = static_cast<std::uint32_t>(shaping.limit);
+    if (consumed == 0) {
+      break;
+    }
+    rebuilt.emplace_back(offset, shaping);
 
     if (pageCursor == firstPage) {
       // The edited page absorbed the change when it still ends where it did,
@@ -1083,8 +837,8 @@ void Doc::reflowFrom(RenderState &state, const std::size_t firstPage,
           static_cast<std::int64_t>(oldConsumed) + shift) {
         const auto relativeAt =
             static_cast<int>(at - pages[firstPage].baseOffset());
-        scope = sameLineBreaks(oldStarts, lineStarts(lay), relativeAt,
-                               static_cast<int>(delta))
+        scope = sameLineBreaks(oldStarts, lineStartsFromShaping(shaping),
+                               relativeAt, static_cast<int>(delta))
                     ? ReflowScope::Line
                     : ReflowScope::Page;
       }
@@ -1134,15 +888,16 @@ void Doc::reflowFrom(RenderState &state, const std::size_t firstPage,
               pages.end());
 
   for (std::size_t i = 0; i < rebuilt.size(); i++) {
-    auto &[base, lay] = rebuilt[i];
-    const auto index  = firstPage + i;
+    auto &[base, shaping] = rebuilt[i];
+    const auto index      = firstPage + i;
     glm::mat4 trans =
         glm::translate(glm::mat4(1.0),
                        glm::vec3(0.0F, -100 * static_cast<float>(index), 0.0F));
     trans = glm::scale(trans, glm::vec3(pixelsToWorld, pixelsToWorld, 1.0F));
-    pages.emplace_back(
-        getPtr(), state, trans, lay, base, static_cast<std::uint32_t>(index),
-        i < inherited.size() ? inherited[i] : BufferPool::Allocation{});
+    pages.emplace_back(getPtr(), state, trans, std::move(shaping), base,
+                       static_cast<std::uint32_t>(index),
+                       i < inherited.size() ? inherited[i]
+                                            : BufferPool::Allocation{});
   }
   // Untouched pages keep their shaping and their vertex rows; only the offset
   // they report moves.
@@ -1171,21 +926,18 @@ Doc::Doc(const RendererRef &renderer, render::RenderDevice *device,
   docName = source.name();
   std::cout << "NEW DOC: " << this << " " << docName << " "
             << glm::to_string(model) << "\n";
-  text = source.text();
+  text            = source.text();
+  forcedBreaks    = source.forcedBreaks();
+  decoratedRanges = source.decoratedRanges();
 
   // Validated here rather than by the source, because every source needs it
   // and none of them can promise otherwise: the bytes come from a file
   // somebody else wrote, or from a program that assembled them out of pieces.
-  // A document holding invalid UTF-8 crashes Pango somewhere inside shaping,
-  // a long way from whatever produced it.
-  auto iter = text.begin();
-  if (!text.validate(iter)) {
-    // Only a failed validate() leaves `iter` on a real character; on success it
-    // is the end iterator and must not be dereferenced.
+  std::size_t badOffset = 0;
+  if (!gleditor::validateUtf8(text, badOffset)) {
     std::cout << "invalid utf-8 in " << docName
-              << ", first bad offset: " << std::distance(text.begin(), iter)
-              << "\n";
-    text = text.make_valid();
+              << ", first bad offset: " << badOffset << "\n";
+    text = gleditor::makeValidUtf8(text);
   }
 
   // The whole buffer in one allocation, before a page of it is laid out. Doing
@@ -1193,60 +945,19 @@ Doc::Doc(const RendererRef &renderer, render::RenderDevice *device,
   // size is an allocation the driver keeps rather than returns, so arriving at
   // twenty-five megabytes through seven of them was worse for peak memory than
   // arriving at forty-eight through four.
-  pool->reserveCapacity(rowsFor(text.length()));
-}
-
-namespace {
-
-/**
- * @brief Where a page starts guessing at how much text it can hold.
- *
- * A page of the default geometry and font holds about four and a half thousand
- * bytes, so one slice of this size fills it with room to spare and the guess
- * is right first time. A font small enough to fit more gets a second attempt;
- * see fillPage().
- */
-constexpr std::size_t firstPageGuess = 8 * 1024;
-
-} // namespace
-
-void Doc::fillPage(const Glib::RefPtr<Pango::Layout> &layout, const char *from,
-                   const std::size_t remaining) {
-  for (auto budget = firstPageGuess;; budget *= 4) {
-    if (remaining <= budget) {
-      pango_layout_set_text(layout->gobj(), from, static_cast<int>(remaining));
-      return;
-    }
-    const auto offered = gleditor::alignToCharacterEnd(
-        std::string_view{from, remaining}, static_cast<std::uint32_t>(budget));
-    pango_layout_set_text(layout->gobj(), from, static_cast<int>(offered));
-    if (layout->is_ellipsized()) {
-      // Out of room, so the rest of the document could not have been shown on
-      // this page however much of it Pango had been given.
-      return;
-    }
-  }
+  pool->reserveCapacity(rowsFor(text.size()));
 }
 
 void Doc::makePages(RenderState &state) {
   std::cout << "MAKING PAGES: " << this << " " << glm::to_string(model) << "\n";
   auto tSize = 0UL;
-  while (tSize < text.bytes()) {
-    // The same call a page uses to shape itself again once it has let its
-    // layout go, so what a caret is placed against is what was drawn. These
-    // were two copies of the same page setup until a page's layout became
-    // something it could be without; two copies that had to agree exactly and
-    // nothing to say so.
-    auto lay = layoutFrom(static_cast<std::uint32_t>(tSize));
-    // Measured before the layout is handed over, never after. newPage() queues
-    // the page onto the render thread and the layout goes with it, so from
-    // that call on it belongs to two threads at once -- and a Pango layout
-    // computes its lines lazily, so merely asking it a question mutates it.
-    // Reading it here means this thread does that work while it is still the
-    // only owner. The same measure the page itself will record, so that page
-    // N+1 starts exactly where page N stopped drawing.
-    const auto consumed = consumedBytes(lay);
-    newPage(state, lay, static_cast<std::uint32_t>(tSize));
+  while (tSize < text.size()) {
+    auto shaping        = layoutFrom(static_cast<std::uint32_t>(tSize));
+    const auto consumed = static_cast<std::uint32_t>(shaping.limit);
+    if (consumed == 0) {
+      break;
+    }
+    newPage(state, std::move(shaping), static_cast<std::uint32_t>(tSize));
     tSize += consumed;
   }
 
@@ -1255,12 +966,15 @@ void Doc::makePages(RenderState &state) {
   // pool belongs to the render thread, which is still building the last pages
   // this loop handed it, and it is those pages that say how much is in use.
   auto self = getPtr();
-  renderer->run([self] { self->pool->trim(); });
+  renderer->run([self] {
+    self->pool->trim();
+    self->fullyLoaded = true;
+  });
 }
 
-void Doc::newPage(RenderState &state, Glib::RefPtr<Pango::Layout> &layout,
+void Doc::newPage(RenderState &state, PageShaping aShaping,
                   const std::uint32_t textOffset) {
-  renderer->run([this, &state, layout, textOffset] {
+  renderer->run([this, &state, shaping = std::move(aShaping), textOffset] {
     const auto numPages = this->pages.size();
     // Pages are laid out in pixels and scaled here, so the stacking distance is
     // in world units while everything inside the page is not.
@@ -1268,8 +982,7 @@ void Doc::newPage(RenderState &state, Glib::RefPtr<Pango::Layout> &layout,
         glm::mat4(1.0),
         glm::vec3(0.0F, -100 * static_cast<float>(numPages), 0.0F));
     trans = glm::scale(trans, glm::vec3(pixelsToWorld, pixelsToWorld, 1.0F));
-    pages.emplace_back(this->getPtr(), state, trans, layout, textOffset,
-                       static_cast<std::uint32_t>(numPages));
+    pages.emplace_back(this->getPtr(), state, trans, std::move(shaping),
+                       textOffset, static_cast<std::uint32_t>(numPages));
   });
 }
-// vi: set sw=2 sts=2 ts=2 et:

@@ -367,5 +367,3 @@ TEST_F(ChoiceFormTest, anEmptyChoiceAnswersWithNothing) {
   EXPECT_TRUE(form.grabbing());
   EXPECT_TRUE(form.complaint().contains("Signing key"));
 }
-
-// vi: set sw=2 sts=2 ts=2 et:

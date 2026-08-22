@@ -81,6 +81,29 @@ public:
   void insertSpans(std::uint32_t at, const std::vector<PrimediaSpan> &spans);
 
   /**
+   * @brief Force a page break at @p at. See OpKind::PageBreak.
+   *
+   * Recorded as a zero-length marker woven into the same ordered list real
+   * pieces live in, so splitAt(), insert(), remove() and rearrange() carry it
+   * along, split around it and shift it exactly as they would a real piece --
+   * without this needing to duplicate any of that logic. Two breaks landing
+   * at the same point collapse into one, the same way two adjacent pieces of
+   * the same content do.
+   */
+  void insertBreak(std::uint32_t at);
+
+  /**
+   * @brief Every point insertBreak() has put a break at, in this version's
+   *        own text offsets.
+   *
+   * Deliberately not exposed through occurrencesOf() or anything else that
+   * resolves by address: a break is a fact about this version's concatext,
+   * not about the content, so nothing here answers "does this break appear
+   * in some other version too" the way it would for a real piece.
+   */
+  [[nodiscard]] std::vector<std::uint32_t> forcedBreaks() const;
+
+  /**
    * @brief The text this version stands for.
    *
    * Read through @p reader rather than out of a spool, because a version's
@@ -150,4 +173,3 @@ private:
 } // namespace xudu
 
 #endif // XUDU_VERSION_H
-// vi: set sw=2 sts=2 ts=2 et:

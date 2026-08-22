@@ -18,13 +18,12 @@ chooses between them.
   `apps/gleditor/main.cpp` is still the entry point -- `SDL_main.h`'s macro
   redirection is what lets SDL's JNI glue call the same `main()` the desktop
   binary uses.
-- **vcpkg for pango's dependency stack.** `pangomm` (which pulls in cairo,
-  glib, glibmm, harfbuzz, freetype and fontconfig) has no Android package
-  anywhere; vcpkg's `arm64-android` and `x64-android` triplets build it from
-  source, and both default to static linkage, so none of it needs a separate
-  packaging step to end up in the APK -- it links straight into `libmain.so`.
-  See `vcpkg.json` for the manifest and `/CMakeLists.txt` for how the
-  toolchain is chained under the NDK's own.
+- **vcpkg for text stack dependencies.** FreeType, HarfBuzz, FriBidi,
+  libunibreak, Fontconfig, and GLM are built via vcpkg's `arm64-android` and
+  `x64-android` triplets from source, and both default to static linkage, so
+  none of it needs a separate packaging step to end up in the APK -- it links
+  straight into `libmain.so`. See `vcpkg.json` for the manifest and
+  `/CMakeLists.txt` for how the toolchain is chained under the NDK's own.
 - **Two ABIs, two product flavors.** `arm64-v8a` for real devices, `x86_64`
   for the classic Android Studio emulator image (Apple Silicon hosts default
   to `arm64-v8a` emulator images instead, which this also covers). Each
@@ -101,8 +100,8 @@ cd packaging/android
 ./gradlew assembleDebug
 ```
 
-The first configure is slow: vcpkg is compiling glib, cairo, harfbuzz,
-freetype, fontconfig, glibmm and pangomm from source, for both `arm64-v8a`
+The first configure is slow: vcpkg is compiling freetype, harfbuzz, fribidi,
+libunibreak, fontconfig and glm from source, for both `arm64-v8a`
 and `x86_64`. Set `VCPKG_BINARY_SOURCES` to a
 [binary cache](https://learn.microsoft.com/en-us/vcpkg/users/binarycaching)
 to avoid paying that twice; the CI workflow does this with

@@ -119,7 +119,7 @@ void Publisher::addSource(Source *const source,
   if (nullptr == source) {
     return;
   }
-  const std::lock_guard locker(sourcesGuard);
+  const std::scoped_lock locker(sourcesGuard);
   sources.push_back(Registered{source, owner.value_or(nextOwner)});
   if (!owner) {
     nextOwner++;
@@ -148,21 +148,21 @@ bool Publisher::start(void *const nativeWindow) {
 }
 
 void Publisher::setWindowTitle(std::string title) {
-  const std::lock_guard locker(guard);
+  const std::scoped_lock locker(guard);
   windowTitle = std::move(title);
   // Forces the next rebuild to happen even if no source moved.
   everBuilt = false;
 }
 
 void Publisher::rebuild(const int width, const int height) {
-  const std::lock_guard registered(sourcesGuard);
+  const std::scoped_lock registered(sourcesGuard);
   std::uint64_t revision = 0;
   for (const auto &[source, owner] : sources) {
     revision += source->accessibilityRevision();
   }
 
   {
-    const std::lock_guard locker(guard);
+    const std::scoped_lock locker(guard);
     if (everBuilt && revision == builtFrom) {
       return;
     }
@@ -186,7 +186,7 @@ void Publisher::rebuild(const int width, const int height) {
   }
 
   {
-    const std::lock_guard locker(guard);
+    const std::scoped_lock locker(guard);
     auto &root    = tree.nodes[rootIndex];
     root.label    = windowTitle;
     root.children = std::move(topLevel);
@@ -201,7 +201,7 @@ void Publisher::rebuild(const int width, const int height) {
 void Publisher::publish() {
   Tree current;
   {
-    const std::lock_guard locker(guard);
+    const std::scoped_lock locker(guard);
     if (built.empty() || built == sent) {
       return;
     }
@@ -217,7 +217,7 @@ std::size_t Publisher::pumpActions() {
   if (nullptr == platform) {
     return 0;
   }
-  const std::lock_guard registered(sourcesGuard);
+  const std::scoped_lock registered(sourcesGuard);
   std::size_t done = 0;
   while (const auto asked = platform->nextAction()) {
     const auto owner = Ids::ownerOf(asked->node);
@@ -249,7 +249,7 @@ void Publisher::setWindowBounds(const Rect &outer, const Rect &inner) {
 }
 
 Tree Publisher::snapshot() const {
-  const std::lock_guard locker(guard);
+  const std::scoped_lock locker(guard);
   return built;
 }
 
@@ -269,5 +269,3 @@ std::string Publisher::describe(const Tree &tree) {
 }
 
 } // namespace gleditor::a11y
-
-// vi: set sw=2 sts=2 ts=2 et:

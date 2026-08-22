@@ -17,6 +17,8 @@ const char *opKindName(const OpKind kind) {
     return "transclude";
   case OpKind::Link:
     return "link";
+  case OpKind::PageBreak:
+    return "pagebreak";
   }
   return "insert";
 }
@@ -35,14 +37,13 @@ const char *linkTypeName(const LinkType type) {
     return "quotation";
   case LinkType::Other:
     return "other";
+  case LinkType::Format:
+    return "format";
   }
   return "other";
 }
 
 LinkType linkTypeFromName(const std::string &name) {
-  // Unrecognised types become Other rather than an error: a store written by
-  // something that knows a type this build does not is still readable, and
-  // losing the name of a link is better than losing the link.
   if ("comment" == name) {
     return LinkType::Comment;
   }
@@ -58,7 +59,22 @@ LinkType linkTypeFromName(const std::string &name) {
   if ("quotation" == name) {
     return LinkType::Quotation;
   }
+  if ("format" == name) {
+    return LinkType::Format;
+  }
   return LinkType::Other;
+}
+
+const char *prominenceTierName(const ProminenceTier tier) {
+  switch (tier) {
+  case ProminenceTier::Author:
+    return "author";
+  case ProminenceTier::Curated:
+    return "curated";
+  case ProminenceTier::Public:
+    return "public";
+  }
+  return "author";
 }
 
 bool Link::touches(const PrimediaSpan &span) const {
@@ -69,5 +85,3 @@ bool Link::touches(const PrimediaSpan &span) const {
 }
 
 } // namespace xudu
-
-// vi: set sw=2 sts=2 ts=2 et:

@@ -1,5 +1,6 @@
 #include "microversion.hpp"
 
+#include <algorithm>
 #include <cctype>
 #include <cstdint>
 #include <limits>
@@ -10,6 +11,35 @@
 
 namespace xudu {
 
+namespace {
+
+/// Bijective base 26: the letters spell like a spreadsheet column name, so
+/// a=1 rather than a=0 and z increments to aa rather than wrapping. Ordinary
+/// base 26 would need a true zero digit to do that and 'a' is not one --
+/// it is the reason "aa" is not the same name as "a" the way "01" and "1"
+/// are the same number.
+std::uint32_t branchOrdinalFromLetters(const std::string_view letters) {
+  std::uint32_t ordinal = 0;
+  for (const char c : letters) {
+    ordinal = (ordinal * 26) +
+              (static_cast<std::uint32_t>(c - 'a') + 1);
+  }
+  return ordinal;
+}
+
+} // namespace
+
+std::string MicroversionId::branchLetters(std::uint32_t ordinal) {
+  std::string letters;
+  while (ordinal > 0) {
+    ordinal -= 1;
+    letters.push_back(static_cast<char>('a' + (ordinal % 26)));
+    ordinal /= 26;
+  }
+  std::reverse(letters.begin(), letters.end());
+  return letters;
+}
+
 MicroversionId MicroversionId::parse(const std::string_view text) {
   // Both spellings of the root, because a program printing state zero writes
   // "0" and a program printing an empty history writes nothing.
@@ -18,23 +48,30 @@ MicroversionId MicroversionId::parse(const std::string_view text) {
   }
 
   std::vector<Segment> parsed;
-  std::size_t pos = 0;
-  char branch     = noBranch;
+  std::size_t pos      = 0;
+  std::uint32_t branch = noBranch;
 
   while (pos < text.size()) {
-    // A branch is introduced by its letter. Every segment after the first must
-    // have one -- there is no way to reach a second segment except by
-    // branching -- and the first segment may, because the null document can be
-    // branched from like any other state: quoting a passage into a second
+    // A branch is introduced by its letters. Every segment after the first
+    // must have some -- there is no way to reach a second segment except by
+    // branching -- and the first segment may, because the null document can
+    // be branched from like any other state: quoting a passage into a second
     // document does exactly that, and the state it produces is a1.
     //
     // Reading one back was the omission. str() has always written a1, so a
     // store holding a quotation into a second document could be written and
     // not read: "expected a number at offset 0".
     if (0 != std::isalpha(static_cast<unsigned char>(text[pos]))) {
-      branch = static_cast<char>(
-          std::tolower(static_cast<unsigned char>(text[pos])));
-      pos++;
+      const auto lettersFrom = pos;
+      while (pos < text.size() &&
+             0 != std::isalpha(static_cast<unsigned char>(text[pos]))) {
+        pos++;
+      }
+      std::string letters{text.substr(lettersFrom, pos - lettersFrom)};
+      for (auto &c : letters) {
+        c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+      }
+      branch = branchOrdinalFromLetters(letters);
     } else if (!parsed.empty()) {
       throw std::invalid_argument("microversion \"" + std::string{text} +
                                   "\": expected a branch letter at offset " +
@@ -76,7 +113,7 @@ std::string MicroversionId::str() const {
   std::string out;
   for (const auto &segment : parts) {
     if (noBranch != segment.branch) {
-      out.push_back(segment.branch);
+      out += branchLetters(segment.branch);
     }
     out += std::to_string(segment.number);
   }
@@ -109,10 +146,9 @@ MicroversionId MicroversionId::next() const {
   return MicroversionId{std::move(further)};
 }
 
-MicroversionId MicroversionId::branch(const char letter) const {
+MicroversionId MicroversionId::branch(const std::uint32_t ordinal) const {
   auto branched = parts;
-  branched.push_back(Segment{
-      static_cast<char>(std::tolower(static_cast<unsigned char>(letter))), 1});
+  branched.push_back(Segment{ordinal, 1});
   return MicroversionId{std::move(branched)};
 }
 
@@ -161,6 +197,11 @@ bool MicroversionId::isAncestorOf(const MicroversionId &other) const {
 bool MicroversionId::operator<(const MicroversionId &other) const {
   const auto common = std::min(parts.size(), other.parts.size());
   for (std::size_t i = 0; i < common; i++) {
+    // Correct because branch is the ordinal and not the letters: comparing
+    // "aa" < "z" as strings gets this backwards (aa is the 27th branch, z
+    // the 26th), and getting it right for letters means comparing length
+    // first and lexicographically second. Plain integer comparison of the
+    // ordinal is that closed form, for free.
     if (parts[i].branch != other.parts[i].branch) {
       return parts[i].branch < other.parts[i].branch;
     }
@@ -172,5 +213,3 @@ bool MicroversionId::operator<(const MicroversionId &other) const {
 }
 
 } // namespace xudu
-
-// vi: set sw=2 sts=2 ts=2 et:

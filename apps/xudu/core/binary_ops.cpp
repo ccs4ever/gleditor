@@ -1,0 +1,527 @@
+#include "binary_ops.hpp"
+
+#include <functional>
+#include <iostream>
+#include <sstream>
+#include <stdexcept>
+
+namespace xudu {
+
+namespace {
+
+enum OpBinaryKind : std::uint8_t {
+  BinInsert             = 0,
+  BinDelete             = 1,
+  BinRearrange          = 2,
+  BinTranscludeInternal = 3,
+  BinTranscludeExternal = 4,
+  BinLink               = 5,
+  BinPageBreak          = 6,
+};
+
+constexpr std::uint8_t FLAG_KIND_MASK       = 0x07;
+constexpr std::uint8_t FLAG_SEQUENTIAL      = 0x08;
+constexpr std::uint8_t FLAG_LOCAL_SCROLL    = 0x10;
+constexpr std::uint8_t FLAG_AT_EQUALS_START = 0x20;
+constexpr std::uint8_t FLAG_SINGLE_BYTE     = 0x40;
+
+/// Version 2's branch byte: 0-254 name that ordinal directly, and 255 means
+/// "the real ordinal is a varint that follows" -- see
+/// OpsSpoolVersion::CompactBinaryV2. 254 direct values covers every branch
+/// count a document has ever needed here by a wide margin; the escape exists
+/// for whatever documents this has not seen yet, at the cost of one byte only
+/// when it is actually used.
+constexpr std::uint32_t branchOrdinalEscape = 255;
+
+} // namespace
+
+void writeVarint(std::ostream &out, std::uint64_t val) {
+  do {
+    auto byte = static_cast<std::uint8_t>(val & 0x7FU);
+    val >>= 7U;
+    if (val != 0) {
+      byte |= 0x80U;
+    }
+    out.put(static_cast<char>(byte));
+  } while (val != 0);
+}
+
+bool readVarint(std::istream &in, std::uint64_t &val) {
+  val       = 0;
+  int shift = 0;
+  while (true) {
+    const int c = in.get();
+    if (c == std::char_traits<char>::eof()) {
+      return false;
+    }
+    const auto byte = static_cast<std::uint8_t>(c);
+    val |= static_cast<std::uint64_t>(byte & 0x7FU) << shift;
+    if ((byte & 0x80U) == 0) {
+      return true;
+    }
+    shift += 7;
+    if (shift > 63) {
+      return false;
+    }
+  }
+}
+
+void writeMicroversionId(std::ostream &out, const MicroversionId &id) {
+  const auto &segs = id.segments();
+  writeVarint(out, segs.size());
+  for (const auto &seg : segs) {
+    if (seg.branch < branchOrdinalEscape) {
+      out.put(static_cast<char>(seg.branch));
+    } else {
+      out.put(static_cast<char>(branchOrdinalEscape));
+      writeVarint(out, seg.branch);
+    }
+    writeVarint(out, seg.number);
+  }
+}
+
+bool readMicroversionId(std::istream &in, MicroversionId &id) {
+  std::uint64_t count = 0;
+  if (!readVarint(in, count)) {
+    return false;
+  }
+  if (count > 4096) {
+    return false;
+  }
+  std::vector<MicroversionId::Segment> segs;
+  segs.reserve(std::min<std::size_t>(static_cast<std::size_t>(count), 64));
+  for (std::uint64_t i = 0; i < count; i++) {
+    const int c = in.get();
+    if (c == std::char_traits<char>::eof()) {
+      return false;
+    }
+    auto branch = static_cast<std::uint32_t>(static_cast<std::uint8_t>(c));
+    if (branchOrdinalEscape == branch) {
+      std::uint64_t extended = 0;
+      if (!readVarint(in, extended)) {
+        return false;
+      }
+      branch = static_cast<std::uint32_t>(extended);
+    }
+    std::uint64_t num = 0;
+    if (!readVarint(in, num)) {
+      return false;
+    }
+    segs.push_back(
+        MicroversionId::Segment{branch, static_cast<std::uint32_t>(num)});
+  }
+  id = MicroversionId(std::move(segs));
+  return true;
+}
+
+bool readMicroversionIdV1(std::istream &in, MicroversionId &id) {
+  std::uint64_t count = 0;
+  if (!readVarint(in, count)) {
+    return false;
+  }
+  if (count > 4096) {
+    return false;
+  }
+  std::vector<MicroversionId::Segment> segs;
+  segs.reserve(std::min<std::size_t>(static_cast<std::size_t>(count), 64));
+  for (std::uint64_t i = 0; i < count; i++) {
+    const int c = in.get();
+    if (c == std::char_traits<char>::eof()) {
+      return false;
+    }
+    std::uint64_t num = 0;
+    if (!readVarint(in, num)) {
+      return false;
+    }
+    // A version 1 byte is the literal branch letter, or ' ' for none. Only
+    // ever one letter -- version 1 could not write more -- so its ordinal is
+    // the same one-letter arithmetic MicroversionId::parse() uses, inlined
+    // rather than shared: this is the one place bijective base 26 stays a
+    // single letter forever, by construction of the format being read.
+    std::uint32_t branch = MicroversionId::noBranch;
+    if (' ' != c) {
+      branch = static_cast<std::uint32_t>(std::tolower(c) - 'a') + 1;
+    }
+    segs.push_back(
+        MicroversionId::Segment{branch, static_cast<std::uint32_t>(num)});
+  }
+  id = MicroversionId(std::move(segs));
+  return true;
+}
+
+void writeBinaryOpsSpool(std::ostream &out,
+                         const std::map<MicroversionId, Op> &ops) {
+  out.write(binaryOpsMagic.data(),
+            static_cast<std::streamsize>(binaryOpsMagic.size()));
+
+  MicroversionId lastProduces{};
+  for (const auto &[produces, op] : ops) {
+    std::uint8_t tag        = 0;
+    const bool isSequential = (produces == lastProduces.next());
+    if (isSequential) {
+      tag |= FLAG_SEQUENTIAL;
+    }
+
+    switch (op.kind) {
+    case OpKind::Insert:
+      tag |= BinInsert;
+      if (op.span.scroll == localScroll) {
+        tag |= FLAG_LOCAL_SCROLL;
+      }
+      if (op.at == op.span.start) {
+        tag |= FLAG_AT_EQUALS_START;
+      }
+      if (op.span.length == 1) {
+        tag |= FLAG_SINGLE_BYTE;
+      }
+      out.put(static_cast<char>(tag));
+      if (!isSequential) {
+        writeMicroversionId(out, produces);
+      }
+      writeVarint(out, op.at);
+      if (!(tag & FLAG_AT_EQUALS_START)) {
+        writeVarint(out, op.span.start);
+      }
+      if (!(tag & FLAG_SINGLE_BYTE)) {
+        writeVarint(out, op.span.length);
+      }
+      if (!(tag & FLAG_LOCAL_SCROLL)) {
+        writeVarint(out, op.span.scroll);
+      }
+      break;
+
+    case OpKind::Delete:
+      tag |= BinDelete;
+      if (op.length == 1) {
+        tag |= FLAG_SINGLE_BYTE;
+      }
+      out.put(static_cast<char>(tag));
+      if (!isSequential) {
+        writeMicroversionId(out, produces);
+      }
+      writeVarint(out, op.at);
+      if (!(tag & FLAG_SINGLE_BYTE)) {
+        writeVarint(out, op.length);
+      }
+      break;
+
+    case OpKind::Rearrange:
+      tag |= BinRearrange;
+      out.put(static_cast<char>(tag));
+      if (!isSequential) {
+        writeMicroversionId(out, produces);
+      }
+      writeVarint(out, op.at);
+      writeVarint(out, op.length);
+      writeVarint(out, op.to);
+      break;
+
+    case OpKind::Transclude:
+      if (op.source.isZero()) {
+        tag |= BinTranscludeExternal;
+        out.put(static_cast<char>(tag));
+        if (!isSequential) {
+          writeMicroversionId(out, produces);
+        }
+        writeVarint(out, op.at);
+        writeVarint(out, op.span.scroll);
+        writeVarint(out, op.span.start);
+        writeVarint(out, op.span.length);
+      } else {
+        tag |= BinTranscludeInternal;
+        out.put(static_cast<char>(tag));
+        if (!isSequential) {
+          writeMicroversionId(out, produces);
+        }
+        writeVarint(out, op.at);
+        writeMicroversionId(out, op.source);
+        writeVarint(out, op.sourceAt);
+        writeVarint(out, op.sourceLength);
+      }
+      break;
+
+    case OpKind::Link:
+      tag |= BinLink;
+      out.put(static_cast<char>(tag));
+      if (!isSequential) {
+        writeMicroversionId(out, produces);
+      }
+      writeVarint(out, op.link);
+      break;
+
+    case OpKind::PageBreak:
+      tag |= BinPageBreak;
+      out.put(static_cast<char>(tag));
+      if (!isSequential) {
+        writeMicroversionId(out, produces);
+      }
+      writeVarint(out, op.at);
+      break;
+    }
+
+    lastProduces = produces;
+  }
+}
+
+/// Shared by readBinaryOpsSpool() and readBinaryOpsSpoolV1(): everything
+/// about the tag-based op encoding is the same between the two versions,
+/// and @p readId is the one place they differ -- see
+/// OpsSpoolVersion::CompactBinaryV2.
+void readBinaryOpsSpoolImpl(
+    std::istream &in, std::map<MicroversionId, Op> &ops,
+    const std::function<bool(std::istream &, MicroversionId &)> &readId) {
+  MicroversionId lastProduces{};
+  while (true) {
+    const int c = in.get();
+    if (c == std::char_traits<char>::eof()) {
+      break;
+    }
+    const auto tag          = static_cast<std::uint8_t>(c);
+    const bool isSequential = (tag & FLAG_SEQUENTIAL) != 0;
+    const auto kindCode     = static_cast<OpBinaryKind>(tag & FLAG_KIND_MASK);
+
+    MicroversionId produces;
+    if (isSequential) {
+      produces = lastProduces.next();
+    } else {
+      if (!readId(in, produces)) {
+        throw std::runtime_error("malformed binary op: truncated microversion");
+      }
+    }
+
+    Op op;
+    op.parent = produces.parent();
+
+    std::uint64_t v1 = 0, v2 = 0, v3 = 0, v4 = 0;
+
+    switch (kindCode) {
+    case BinInsert:
+      op.kind = OpKind::Insert;
+      if (!readVarint(in, v1)) {
+        throw std::runtime_error("malformed binary insert op at");
+      }
+      op.at = static_cast<std::uint32_t>(v1);
+
+      if (tag & FLAG_AT_EQUALS_START) {
+        op.span.start = op.at;
+      } else {
+        if (!readVarint(in, v2)) {
+          throw std::runtime_error("malformed binary insert op start");
+        }
+        op.span.start = v2;
+      }
+
+      if (tag & FLAG_SINGLE_BYTE) {
+        op.span.length = 1;
+      } else {
+        if (!readVarint(in, v3)) {
+          throw std::runtime_error("malformed binary insert op length");
+        }
+        op.span.length = v3;
+      }
+
+      if (tag & FLAG_LOCAL_SCROLL) {
+        op.span.scroll = localScroll;
+      } else {
+        if (!readVarint(in, v4)) {
+          throw std::runtime_error("malformed binary insert op scroll");
+        }
+        op.span.scroll = static_cast<ScrollId>(v4);
+      }
+      break;
+
+    case BinDelete:
+      op.kind = OpKind::Delete;
+      if (!readVarint(in, v1)) {
+        throw std::runtime_error("malformed binary delete op at");
+      }
+      op.at = static_cast<std::uint32_t>(v1);
+      if (tag & FLAG_SINGLE_BYTE) {
+        op.length = 1;
+      } else {
+        if (!readVarint(in, v2)) {
+          throw std::runtime_error("malformed binary delete op length");
+        }
+        op.length = static_cast<std::uint32_t>(v2);
+      }
+      break;
+
+    case BinRearrange:
+      op.kind = OpKind::Rearrange;
+      if (!readVarint(in, v1) || !readVarint(in, v2) || !readVarint(in, v3)) {
+        throw std::runtime_error("malformed binary rearrange op");
+      }
+      op.at     = static_cast<std::uint32_t>(v1);
+      op.length = static_cast<std::uint32_t>(v2);
+      op.to     = static_cast<std::uint32_t>(v3);
+      break;
+
+    case BinTranscludeInternal:
+      op.kind = OpKind::Transclude;
+      if (!readVarint(in, v1)) {
+        throw std::runtime_error("malformed binary transclude op");
+      }
+      op.at = static_cast<std::uint32_t>(v1);
+      if (!readId(in, op.source)) {
+        throw std::runtime_error("malformed binary transclude source");
+      }
+      if (!readVarint(in, v2) || !readVarint(in, v3)) {
+        throw std::runtime_error("malformed binary transclude offsets");
+      }
+      op.sourceAt     = static_cast<std::uint32_t>(v2);
+      op.sourceLength = static_cast<std::uint32_t>(v3);
+      break;
+
+    case BinTranscludeExternal:
+      op.kind = OpKind::Transclude;
+      if (!readVarint(in, v1) || !readVarint(in, v2) || !readVarint(in, v3) ||
+          !readVarint(in, v4)) {
+        throw std::runtime_error("malformed binary external transclude op");
+      }
+      op.at          = static_cast<std::uint32_t>(v1);
+      op.span.scroll = static_cast<ScrollId>(v2);
+      op.span.start  = v3;
+      op.span.length = v4;
+      break;
+
+    case BinLink:
+      op.kind = OpKind::Link;
+      if (!readVarint(in, v1)) {
+        throw std::runtime_error("malformed binary link op");
+      }
+      op.link = v1;
+      break;
+
+    case BinPageBreak:
+      op.kind = OpKind::PageBreak;
+      if (!readVarint(in, v1)) {
+        throw std::runtime_error("malformed binary pagebreak op");
+      }
+      op.at = static_cast<std::uint32_t>(v1);
+      break;
+
+    default:
+      throw std::runtime_error("unknown binary op kind tag: " +
+                               std::to_string(tag));
+    }
+
+    ops.emplace(produces, op);
+    lastProduces = produces;
+  }
+}
+
+void readBinaryOpsSpool(std::istream &in, std::map<MicroversionId, Op> &ops) {
+  readBinaryOpsSpoolImpl(in, ops, readMicroversionId);
+}
+
+void readBinaryOpsSpoolV1(std::istream &in, std::map<MicroversionId, Op> &ops) {
+  readBinaryOpsSpoolImpl(in, ops, readMicroversionIdV1);
+}
+
+void writeOsmicTextOpsSpool(std::ostream &out,
+                            const std::map<MicroversionId, Op> &ops) {
+  for (const auto &[id, op] : ops) {
+    out << id.str() << ' ' << opKindName(op.kind) << ' ' << op.at << ' '
+        << op.length << ' ' << op.to << ' ' << op.span.start << ' '
+        << op.span.length << ' ' << (op.source.isZero() ? "0" : op.source.str())
+        << ' ' << op.sourceAt << ' ' << op.sourceLength << ' ' << op.link << ' '
+        << op.span.scroll << '\n';
+  }
+}
+
+void readOsmicTextOpsSpool(std::istream &in,
+                           std::map<MicroversionId, Op> &ops) {
+  std::string line;
+  while (std::getline(in, line)) {
+    if (line.empty()) {
+      continue;
+    }
+    std::istringstream fields(line);
+    std::string id;
+    std::string kind;
+    std::string source;
+    Op op;
+    fields >> id >> kind >> op.at >> op.length >> op.to >> op.span.start >>
+        op.span.length >> source >> op.sourceAt >> op.sourceLength >> op.link;
+    if (!(fields >> op.span.scroll)) {
+      op.span.scroll = localScroll;
+    }
+    if (!fields) {
+      throw std::runtime_error("malformed operation: " + line);
+    }
+    const auto produces = MicroversionId::parse(id);
+    op.source           = MicroversionId::parse(source);
+    op.parent           = produces.parent();
+    if ("insert" == kind) {
+      op.kind = OpKind::Insert;
+    } else if ("delete" == kind) {
+      op.kind = OpKind::Delete;
+    } else if ("rearrange" == kind) {
+      op.kind = OpKind::Rearrange;
+    } else if ("transclude" == kind) {
+      op.kind = OpKind::Transclude;
+    } else if ("link" == kind) {
+      op.kind = OpKind::Link;
+    } else if ("pagebreak" == kind) {
+      op.kind = OpKind::PageBreak;
+    } else {
+      throw std::runtime_error("unknown operation \"" + kind + "\"");
+    }
+    ops.emplace(produces, op);
+  }
+}
+
+const char *opsSpoolVersionName(const OpsSpoolVersion version) {
+  switch (version) {
+  case OpsSpoolVersion::StandardOsmicText:
+    return "OSMIC text (v0)";
+  case OpsSpoolVersion::CompactBinaryV1:
+    return "Compact binary (v1)";
+  case OpsSpoolVersion::CompactBinaryV2:
+    return "Compact binary (v2)";
+  }
+  return "unknown";
+}
+
+OpsSpoolVersion detectOpsSpoolVersion(std::istream &in) {
+  std::string prefix(binaryOpsMagicPrefix.size(), '\0');
+  in.read(prefix.data(),
+          static_cast<std::streamsize>(binaryOpsMagicPrefix.size()));
+  if (in.gcount() ==
+          static_cast<std::streamsize>(binaryOpsMagicPrefix.size()) &&
+      prefix == binaryOpsMagicPrefix) {
+    const int ver = in.get();
+    if (ver == std::char_traits<char>::eof()) {
+      throw std::runtime_error(
+          "truncated binary ops spool header: missing version");
+    }
+    if (ver == static_cast<int>(OpsSpoolVersion::CompactBinaryV1)) {
+      return OpsSpoolVersion::CompactBinaryV1;
+    }
+    if (ver == static_cast<int>(OpsSpoolVersion::CompactBinaryV2)) {
+      return OpsSpoolVersion::CompactBinaryV2;
+    }
+    throw std::runtime_error("unsupported binary ops spool version: " +
+                             std::to_string(ver));
+  }
+  in.clear();
+  in.seekg(0, std::ios::beg);
+  return OpsSpoolVersion::StandardOsmicText;
+}
+
+void readOpsSpool(std::istream &in, std::map<MicroversionId, Op> &ops) {
+  const auto version = detectOpsSpoolVersion(in);
+  switch (version) {
+  case OpsSpoolVersion::CompactBinaryV1:
+    readBinaryOpsSpoolV1(in, ops);
+    break;
+  case OpsSpoolVersion::CompactBinaryV2:
+    readBinaryOpsSpool(in, ops);
+    break;
+  case OpsSpoolVersion::StandardOsmicText:
+    readOsmicTextOpsSpool(in, ops);
+    break;
+  }
+}
+
+} // namespace xudu

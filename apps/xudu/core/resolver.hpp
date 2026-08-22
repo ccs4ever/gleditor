@@ -30,6 +30,7 @@
 #include <string>
 #include <vector>
 
+#include "lmdb_cache.hpp"
 #include "scroll.hpp"
 #include "spool.hpp"
 #include "torrent.hpp"
@@ -113,7 +114,9 @@ class Resolver {
 public:
   /// @param source Where external content comes from. Not owned; may be null,
   ///        in which case external spans simply do not resolve.
-  explicit Resolver(const ContentSource *aSource = nullptr) : source(aSource) {}
+  explicit Resolver(const ContentSource *aSource          = nullptr,
+                    const std::filesystem::path &cacheDir = "/tmp/xudu_cache")
+      : source(aSource), cache(cacheDir) {}
 
   void setSource(const ContentSource *aSource) { source = aSource; }
   [[nodiscard]] const ContentSource *contentSource() const { return source; }
@@ -152,9 +155,9 @@ private:
                                         std::uint64_t count) const;
 
   const ContentSource *source{};
+  mutable LMDBContentCache cache;
 };
 
 } // namespace xudu
 
 #endif // XUDU_RESOLVER_H
-// vi: set sw=2 sts=2 ts=2 et:

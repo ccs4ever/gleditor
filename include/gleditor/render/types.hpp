@@ -9,7 +9,9 @@
 #ifndef GLEDITOR_RENDER_TYPES_H
 #define GLEDITOR_RENDER_TYPES_H
 
+#include <algorithm>
 #include <array>
+#include <cmath>
 #include <cstddef>
 #include <cstdint>
 #include <string>
@@ -351,11 +353,10 @@ inline std::uint32_t clusterCharStep(const std::uint32_t charCount,
   if (0 == charCount) {
     return 0;
   }
-  const auto clamped =
-      fraction < 0.0F ? 0.0F : (fraction > 1.0F ? 1.0F : fraction);
-  const auto scaled = static_cast<double>(clamped) * charCount;
-  const auto steps  = static_cast<std::uint32_t>(scaled + 0.5);
-  return steps > charCount ? charCount : steps;
+  const auto clamped = std::clamp(fraction, 0.0F, 1.0F);
+  const auto scaled  = static_cast<double>(clamped) * charCount;
+  const auto steps   = static_cast<std::uint32_t>(std::lround(scaled));
+  return std::min(steps, charCount);
 }
 
 /// Decode the four words read back from the picking attachment.
@@ -428,4 +429,3 @@ inline constexpr int maxHighlightRanges = 64;
 } // namespace render
 
 #endif // GLEDITOR_RENDER_TYPES_H
-// vi: set sw=2 sts=2 ts=2 et:

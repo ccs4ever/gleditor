@@ -15,7 +15,7 @@
 #include "mocks/device.hpp" // for MockRenderDevice
 #include <gmock/gmock.h>    // for NiceMock, EXPECT_CALL
 
-enum class Length : int;
+using namespace gleditor;
 
 using testing::ElementsAre;
 using testing::WhenSorted;
@@ -249,5 +249,3 @@ TEST_F(GlyphPaletteTest, toString) {
   str << alice;
   EXPECT_NE(str.str(), "");
 }
-
-// vi: set sw=2 sts=2 ts=2 et:

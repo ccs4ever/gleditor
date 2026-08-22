@@ -90,22 +90,22 @@ void Form::deviceReady(render::RenderDevice &device,
 }
 
 bool Form::grabbing() const {
-  const std::lock_guard locker(guard);
+  const std::scoped_lock locker(guard);
   return open_;
 }
 
 std::vector<Form::Field> Form::current() const {
-  const std::lock_guard locker(guard);
+  const std::scoped_lock locker(guard);
   return fields;
 }
 
 std::size_t Form::focused() const {
-  const std::lock_guard locker(guard);
+  const std::scoped_lock locker(guard);
   return focus;
 }
 
 std::string Form::complaint() const {
-  const std::lock_guard locker(guard);
+  const std::scoped_lock locker(guard);
   return trouble;
 }
 
@@ -151,7 +151,7 @@ constexpr std::uint64_t optionId(const std::size_t which,
 } // namespace
 
 void Form::describe(a11y::Builder &into) {
-  const std::lock_guard locker(guard);
+  const std::scoped_lock locker(guard);
   if (!open_) {
     return;
   }
@@ -248,7 +248,7 @@ void Form::describe(a11y::Builder &into) {
 }
 
 std::uint64_t Form::accessibilityRevision() const {
-  const std::lock_guard locker(guard);
+  const std::scoped_lock locker(guard);
   // The same counter the drawing uses, which is bumped by every key the form
   // takes. Nothing else changes what a form has to say.
   return open_ ? revision : 0;
@@ -263,7 +263,7 @@ bool Form::performAction(const std::uint64_t nodeId, const a11y::Action action,
   const auto which  = (local - firstField) / perField;
   const auto within = (local - firstField) % perField;
 
-  const std::lock_guard locker(guard);
+  const std::scoped_lock locker(guard);
   if (!open_ || which >= fields.size()) {
     return false;
   }
@@ -320,13 +320,13 @@ bool Form::performAction(const std::uint64_t nodeId, const a11y::Action action,
 }
 
 std::optional<InputArea> Form::textArea() const {
-  const std::lock_guard locker(guard);
+  const std::scoped_lock locker(guard);
   return typingAt;
 }
 
 void Form::open(std::string aTitle, std::string aNote,
                 std::vector<Field> aFields, Accepted onAccept) {
-  const std::lock_guard locker(guard);
+  const std::scoped_lock locker(guard);
   title    = std::move(aTitle);
   note     = std::move(aNote);
   fields   = std::move(aFields);
@@ -347,7 +347,7 @@ void Form::open(std::string aTitle, std::string aNote,
 }
 
 void Form::close() {
-  const std::lock_guard locker(guard);
+  const std::scoped_lock locker(guard);
   open_    = false;
   accepted = nullptr;
   // Nothing is being typed into any more, so there is nowhere for an input
@@ -372,12 +372,12 @@ bool Form::complete(std::string &missing) const {
 }
 
 bool Form::listOpen() const {
-  const std::lock_guard locker(guard);
+  const std::scoped_lock locker(guard);
   return open_ && expanded;
 }
 
 bool Form::secretsShown() const {
-  const std::lock_guard locker(guard);
+  const std::scoped_lock locker(guard);
   return std::ranges::any_of(fields, [](const Field &one) {
     return Kind::Toggle == one.kind && one.revealsSecrets && one.on;
   });
@@ -421,7 +421,7 @@ bool Form::keyPressed(const Key key, const KeyMods mods) {
   Accepted toCall;
   std::vector<Field> answers;
   {
-    const std::lock_guard locker(guard);
+    const std::scoped_lock locker(guard);
     if (!open_) {
       return false;
     }
@@ -557,7 +557,7 @@ bool Form::keyPressed(const Key key, const KeyMods mods) {
 }
 
 void Form::textTyped(const std::string &utf8) {
-  const std::lock_guard locker(guard);
+  const std::scoped_lock locker(guard);
   if (!open_ || fields.empty()) {
     return;
   }
@@ -605,7 +605,7 @@ void Form::drawFrame(FrameContext &ctx) {
   std::size_t lit    = 0;
   bool reveal        = false;
   {
-    const std::lock_guard locker(guard);
+    const std::scoped_lock locker(guard);
     if (!open_) {
       return;
     }
@@ -710,7 +710,7 @@ void Form::drawFrame(FrameContext &ctx) {
         // keyboard, in the pixels SDL counts in: from the top of the window
         // rather than the bottom, which is what the canvas draws in. Only for
         // fields that take text -- a button raises no keyboard.
-        const std::lock_guard locker(guard);
+        const std::scoped_lock locker(guard);
         typingAt =
             Kind::Text == one.kind || Kind::Secret == one.kind
                 ? std::optional<InputArea>{InputArea{
@@ -770,5 +770,3 @@ void Form::drawFrame(FrameContext &ctx) {
 }
 
 } // namespace gleditor
-
-// vi: set sw=2 sts=2 ts=2 et:

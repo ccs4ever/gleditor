@@ -92,12 +92,21 @@ endif
 # includes -- is vendored rather than pulled from a package whose layout on
 # macOS is not this project's to depend on.
 GL_CFLAGS :=
-PKGS := pangomm-2.48 $(SDL_PKG)
+PKGS := freetype2 harfbuzz fribidi libunibreak fontconfig $(SDL_PKG)
 ifeq ($(shell pkg-config --exists gl && echo 1),1)
 PKGS += gl
 else ifeq ($(shell uname -s 2>/dev/null),Darwin)
 GL_CFLAGS := -Ithirdparty/opengl-registry
 endif
+
+# Vulkan backend is enabled by default if available through pkg-config,
+# unless explicitly disabled with GLEDITOR_DISABLE_VULKAN=1.
+ifndef GLEDITOR_DISABLE_VULKAN
+ifeq ($(shell pkg-config --exists vulkan && echo 1),1)
+GLEDITOR_ENABLE_VULKAN := 1
+endif
+endif
+
 ifdef GLEDITOR_ENABLE_VULKAN
 PKGS += vulkan
 endif
@@ -115,31 +124,30 @@ endif
 # rest, so the build carries on with no include paths and fails on whichever
 # header happens to come first. That names a header rather than a package, and
 # the header is never the one belonging to what is actually missing. Several of
-# these ship under names that differ per distribution -- pangomm has parallel
-# ABIs, and vulkan.pc comes from the loader rather than the headers -- so
-# getting one wrong is an ordinary packaging mistake to make.
+# these ship under names that differ per distribution -- and vulkan.pc comes
+# from the loader rather than the headers -- so getting one wrong is an ordinary
+# packaging mistake to make.
 ifneq (,$(filter-out $(NO_SDL_GOALS),$(or $(MAKECMDGOALS),all)))
 MISSING_PKGS := $(strip $(foreach p,$(PKGS),\
   $(if $(shell pkg-config --exists $(p) && echo 1),,$(p))))
 ifneq ($(MISSING_PKGS),)
 $(error pkg-config cannot find: $(MISSING_PKGS). Install the development \
-packages providing them, or unset GLEDITOR_ENABLE_VULKAN to build without \
+packages providing them, or set GLEDITOR_DISABLE_VULKAN=1 to build without \
 the Vulkan backend)
 endif
 endif
 TEST_PKGS := gmock_main
-# What the xanalogical engine is allowed to link. glibmm supplies SHA-1, which
-# is what a torrent's info hash is, and glibmm is already a hard dependency of
-# the library. The point of keeping this list short is that the engine must not
-# need a graphics device -- not that it must need nothing at all -- so a
-# utility library is fine here and pangomm, cairo and SDL are not.
+# What the xanalogical engine is allowed to link. The point of keeping this
+# list short is that the engine must not need a graphics device -- not that
+# it must need nothing at all -- so OpenSSL and utility libraries are fine
+# here and graphics and SDL are not.
 # libtorrent is required, not optional. It is what lets a reference be fetched
 # from peers rather than only from a disk here, and what signs and resolves the
 # names a publisher is known by -- so a build without it produces a program
 # whose documents cannot leave the machine that wrote them, which is the one
 # thing this program is for. Better to fail at configure time than to ship a
 # xanadoc editor that quietly cannot publish.
-XUDU_PKGS := glibmm-2.68 libtorrent-rasterbar
+XUDU_PKGS := libtorrent-rasterbar openssl lmdb
 ifneq (,$(filter-out $(NO_SDL_GOALS),$(or $(MAKECMDGOALS),all)))
 ifneq ($(shell pkg-config --exists libtorrent-rasterbar && echo 1),1)
 $(error libtorrent-rasterbar was not found by pkg-config. It is required: \
@@ -310,9 +318,9 @@ ifeq ($(HAVE_SDL_IMAGE),1)
 override CXXFLAGS += -DGLEDITOR_HAVE_SDL_IMAGE=1
 endif
 override LDFLAGS += $(DEBUG_OPTS) $(findstring $(STATIC),-static)
-ifeq ($(CXX_IS_CLANG),1)
-override LDFLAGS += -rtlib=compiler-rt
-endif
+#ifeq ($(CXX_IS_CLANG),1)
+#override LDFLAGS += -rtlib=compiler-rt
+#endif
 # XXX: work on this in a separate branch, get tests working again for now
 #CXXFLAGS += -stdlib=libc++ -fexperimental-library
 #LDFLAGS += -v -stdlib=libc++ -fexperimental-library
@@ -526,7 +534,7 @@ lib: $(LIBLINK)
 # Libraries after the objects that need them. GNU ld resolves left to right, so
 # the other order only ever worked because clang's linker is forgiving about
 # it; gcc with link-time optimisation, which is what Debian builds with,
-# reported every pangomm and glibmm symbol as undefined.
+# reported every library symbol as undefined.
 $(LIBREAL): $(LIB_OBJS)
 	$(CXX) $(LDFLAGS) -shared $(LIB_LINKARG) -o $@ $^ $(LIBS) $(A11Y_LIBS)
 
@@ -596,6 +604,19 @@ xudu_test: $(OBJDIR)/xudu_test
 $(OBJDIR)/xudu_test: $(XUDU_TEST_OBJS) $(XUDU_CORE_OBJS)
 	$(CXX) $(LDFLAGS) -o $@ $^ $(XUDU_LIBS) $(TEST_LIBS)
 
+.PHONY: fuzz fuzz_binary_ops fuzz_link_package
+fuzz_binary_ops: $(OBJDIR)/fuzz_binary_ops
+$(OBJDIR)/fuzz_binary_ops: tests/fuzz/fuzz_binary_ops.cpp $(XUDU_CORE_OBJS)
+	@$(MKDIR) -p $(@D)
+	$(CXX) -fsanitize=fuzzer,address,undefined $(CXXFLAGS) $< $(XUDU_CORE_OBJS) $(XUDU_LIBS) -o $@
+
+fuzz_link_package: $(OBJDIR)/fuzz_link_package
+$(OBJDIR)/fuzz_link_package: tests/fuzz/fuzz_link_package.cpp $(XUDU_CORE_OBJS)
+	@$(MKDIR) -p $(@D)
+	$(CXX) -fsanitize=fuzzer,address,undefined $(CXXFLAGS) $< $(XUDU_CORE_OBJS) $(XUDU_LIBS) -o $@
+
+fuzz: fuzz_binary_ops fuzz_link_package
+
 # The other end of the swarm tests: a peer that offers a torrent's content and
 # waits to be asked. A separate program because the two peers are meant to be
 # separate machines -- tools/swarm-netns-test.sh runs this one in a network
@@ -612,7 +633,7 @@ $(OBJDIR)/xudu-swarm-peer: $(OBJDIR)/tools/xudu-swarm-peer.o $(XUDU_CORE_OBJS)
 # when somebody is already unsure what is slow.
 .PHONY: layout-latency-probe
 layout-latency-probe: $(OBJDIR)/layout-latency-probe
-$(OBJDIR)/layout-latency-probe: $(OBJDIR)/tools/layout-latency-probe.o
+$(OBJDIR)/layout-latency-probe: $(OBJDIR)/tools/layout-latency-probe.o $(LIBLINK)
 	$(CXX) $(LDFLAGS) -o $@ $^ $(LIBS)
 
 # The swarm tests proper, with the two peers on separate network stacks. Needs
@@ -629,7 +650,7 @@ test/swarm: $(OBJDIR)/xudu-swarm-peer $(OBJDIR)/xudu_test
 #
 # The pull request checks run them for real; see the swarm job in
 # .github/workflows/c-cpp.yml, and `make test/swarm` to run them here.
-SLOW_TESTS  := SwarmTest.*:MutableNameTest.*
+SLOW_TESTS  := SwarmTest.*:MutableNameTest.*:E2EBinaryOrchestrationTest.*
 # Override to run something else, including everything: make test TEST_FILTER='*'
 TEST_FILTER ?= -$(SLOW_TESTS)
 
@@ -639,10 +660,14 @@ test: $(OBJDIR)/gleditor_test $(OBJDIR)/xudu_test
 
 # Everything, slow suites included. What the pull request checks run, and what
 # to run here before pushing.
-.PHONY: test/all
+.PHONY: test/all test/integration test/e2e-orchestration
 test/all: $(OBJDIR)/gleditor_test $(OBJDIR)/xudu_test
 	$(OBJDIR)/gleditor_test
 	$(OBJDIR)/xudu_test
+
+test/integration: test/e2e-orchestration
+test/e2e-orchestration: $(OBJDIR)/xudu $(OBJDIR)/xudu_test
+	tools/xudu-e2e-orchestration.sh
 
 # produces gleditor_test.prof (a human-readable code coverage report) and
 # coverage.lcov (a coverage report in lcov format) suitable for feeding into other tools like NeoVim
@@ -660,6 +685,31 @@ profile: gleditor_test
 		-show-line-counts-or-regions -show-branches=count -show-expansions > gleditor_test.prof; \
 	llvm-cov export $(OBJDIR)/gleditor_test --format=lcov --instr-profile=$${data} > coverage.lcov; \
 	$(RM) -f $${raw} $${data};
+
+profile/xudu: CXXFLAGS += $(PROFILE_OPTS)
+profile/xudu: LDFLAGS += $(PROFILE_OPTS)
+profile/xudu: xudu_test
+	set -e; \
+	raw=xudu_test.profraw; data=xudu_test.profdata; \
+	trap "$(RM) -f $${raw} $${data}" EXIT HUP KILL TERM; \
+	LLVM_PROFILE_FILE=$${raw} $(OBJDIR)/xudu_test 2>&1 >/dev/null; \
+	llvm-profdata merge -sparse $${raw} -o $${data}; \
+	llvm-cov show $(OBJDIR)/xudu_test -instr-profile=$${data} \
+		-show-line-counts-or-regions -show-branches=count -show-expansions > xudu_test.prof; \
+	llvm-cov export $(OBJDIR)/xudu_test --format=lcov --instr-profile=$${data} > xudu_coverage.lcov; \
+	$(RM) -f $${raw} $${data};
+
+profile/all: CXXFLAGS += $(PROFILE_OPTS)
+profile/all: LDFLAGS += $(PROFILE_OPTS)
+profile/all: gleditor_test xudu_test
+	set -e; \
+	raw_gl=gleditor_test.profraw; raw_xu=xudu_test.profraw; data=all.profdata; \
+	trap "$(RM) -f $${raw_gl} $${raw_xu} $${data}" EXIT HUP KILL TERM; \
+	LLVM_PROFILE_FILE=$${raw_gl} $(OBJDIR)/gleditor_test 2>&1 >/dev/null; \
+	LLVM_PROFILE_FILE=$${raw_xu} $(OBJDIR)/xudu_test 2>&1 >/dev/null; \
+	llvm-profdata merge -sparse $${raw_gl} $${raw_xu} -o $${data}; \
+	llvm-cov report $(OBJDIR)/xudu_test -instr-profile=$${data}; \
+	$(RM) -f $${raw_gl} $${raw_xu} $${data};
 
 profile/main: CXXFLAGS += $(PROFILE_OPTS)
 profile/main: LDFLAGS += $(PROFILE_OPTS)
@@ -684,8 +734,13 @@ run: private .UNVEIL += rx:gleditor
 run: $(OBJDIR)/gleditor
 	$(OBJDIR)/gleditor tests/samples/quick_brown_fox.txt
 
+DOXYGEN := $(shell command -v doxygen 2>/dev/null)
 doc:
-	doxygen
+ifdef DOXYGEN
+	$(DOXYGEN)
+else
+	@echo "doxygen not found, skipping documentation build"
+endif
 
 # -- formatting and linting ----------------------------------------------
 
@@ -699,25 +754,67 @@ SH_FORMAT_FILES  = $(shell git ls-files '*.sh' | grep -v '^thirdparty/')
 YAML_FORMAT_FILES = .github/workflows/c-cpp.yml .github/workflows/packaging.yml .github/dependabot.yml
 MD_FORMAT_FILES  = README.md CLAUDE.md design/btfs-and-permascrolls.md
 
+CLANG_FORMAT := $(shell command -v clang-format 2>/dev/null)
+SHFMT        := $(shell command -v shfmt 2>/dev/null)
+YAMLFMT      := $(shell command -v yamlfmt 2>/dev/null)
+MDFORMAT     := $(shell command -v mdformat 2>/dev/null)
+SHELLCHECK   := $(shell command -v shellcheck 2>/dev/null)
+YAMLLINT     := $(shell command -v yamllint 2>/dev/null)
+MDL          := $(shell command -v mdl 2>/dev/null)
+
 # yamlfmt and mdformat read their settings from .yamlfmt and (via .mdlrc's
 # sibling .mdl_style.rb) the same conventions yamllint and mdl check for, so
 # a file the formatter just wrote is a file the linter already accepts --
 # see the "coalesce" note in CLAUDE.md if that ever stops being true.
 format:
-	echo "$(CXX_FORMAT_FILES)" | xargs clang-format -i --style=file
-	echo "$(SH_FORMAT_FILES)" | xargs shfmt -i 2 -ci -w
-	yamlfmt $(YAML_FORMAT_FILES)
-	mdformat --wrap keep $(MD_FORMAT_FILES)
+ifdef CLANG_FORMAT
+	echo "$(CXX_FORMAT_FILES)" | xargs $(CLANG_FORMAT) -i --style=file
+else
+	@echo "clang-format not found, skipping C++ formatting"
+endif
+ifdef SHFMT
+	echo "$(SH_FORMAT_FILES)" | xargs $(SHFMT) -i 2 -ci -w
+else
+	@echo "shfmt not found, skipping shell formatting"
+endif
+ifdef YAMLFMT
+	$(YAMLFMT) $(YAML_FORMAT_FILES)
+else
+	@echo "yamlfmt not found, skipping YAML formatting"
+endif
+ifdef MDFORMAT
+	$(MDFORMAT) --wrap keep $(MD_FORMAT_FILES)
+else
+	@echo "mdformat not found, skipping Markdown formatting"
+endif
 .PHONY: format
 
 # What the CI format job runs. clang-format --dry-run --Werror, shfmt -d,
 # yamlfmt -lint and mdformat --check all exit non-zero on the first
-# unformatted file rather than rewriting it.
+# unformatted file rather than rewriting it. tools/check-config-harmony.sh
+# ensures .editorconfig and .clang-format do not drift out of harmony.
 format-check:
-	echo "$(CXX_FORMAT_FILES)" | xargs clang-format --style=file --dry-run --Werror
-	echo "$(SH_FORMAT_FILES)" | xargs shfmt -i 2 -ci -d
-	yamlfmt -lint $(YAML_FORMAT_FILES)
-	mdformat --check --wrap keep $(MD_FORMAT_FILES)
+	./tools/check-config-harmony.sh
+ifdef CLANG_FORMAT
+	echo "$(CXX_FORMAT_FILES)" | xargs $(CLANG_FORMAT) --style=file --dry-run --Werror
+else
+	@echo "clang-format not found, skipping C++ format check"
+endif
+ifdef SHFMT
+	echo "$(SH_FORMAT_FILES)" | xargs $(SHFMT) -i 2 -ci -d
+else
+	@echo "shfmt not found, skipping shell format check"
+endif
+ifdef YAMLFMT
+	$(YAMLFMT) -lint $(YAML_FORMAT_FILES)
+else
+	@echo "yamlfmt not found, skipping YAML format check"
+endif
+ifdef MDFORMAT
+	$(MDFORMAT) --check --wrap keep $(MD_FORMAT_FILES)
+else
+	@echo "mdformat not found, skipping Markdown format check"
+endif
 .PHONY: format-check
 
 # The languages formatting does not reach: shellcheck for correctness bugs
@@ -728,9 +825,22 @@ format-check:
 # Homebrew formula) are covered where a linter for them is actually reliable
 # outside their native distribution -- see CLAUDE.md.
 lint:
-	echo "$(SH_FORMAT_FILES)" "packaging/arch/PKGBUILD" | xargs shellcheck
-	yamllint $(YAML_FORMAT_FILES)
-	mdl $(MD_FORMAT_FILES)
+	./tools/check-config-harmony.sh
+ifdef SHELLCHECK
+	echo "$(SH_FORMAT_FILES)" "packaging/arch/PKGBUILD" | xargs $(SHELLCHECK)
+else
+	@echo "shellcheck not found, skipping shell lint"
+endif
+ifdef YAMLLINT
+	$(YAMLLINT) $(YAML_FORMAT_FILES)
+else
+	@echo "yamllint not found, skipping YAML lint"
+endif
+ifdef MDL
+	$(MDL) $(MD_FORMAT_FILES)
+else
+	@echo "mdl not found, skipping Markdown lint"
+endif
 .PHONY: lint
 
 clean: private .UNVEIL += w:gleditor w:gleditor_test w:xudu w:xudu_test
@@ -854,7 +964,7 @@ $(OBJDIR)/compile_commands.json: $(JFILES)
 # the compiler over every source. Including them for those goals meant `make
 # dist` needed every header the build needs -- which is how the Arch package,
 # whose only job at that point was to roll a tarball, failed on a missing
-# glibmm header. format, format-check and lint compile nothing either, and are
+# dependency header. format, format-check and lint compile nothing either, and are
 # meant to run on a checkout that has not installed the build dependencies at
 # all.
 ifeq (,$(filter clean dist $(NO_SDL_GOALS),$(MAKECMDGOALS)))

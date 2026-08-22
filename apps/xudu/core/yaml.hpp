@@ -68,4 +68,3 @@ void writeList(std::string &out, std::string_view key,
 } // namespace xudu::yaml
 
 #endif // XUDU_YAML_H
-// vi: set sw=2 sts=2 ts=2 et:

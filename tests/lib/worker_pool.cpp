@@ -72,7 +72,7 @@ TEST(WorkerPool, sharesRunConcurrently) {
 
   pool.run(count, [&](std::uint32_t) {
     {
-      const std::lock_guard locker(guard);
+      const std::scoped_lock locker(guard);
       threads.insert(std::this_thread::get_id());
     }
     started++;
@@ -98,7 +98,7 @@ TEST(WorkerPool, theCallerTakesAShare) {
   std::mutex guard;
   std::set<std::thread::id> threads;
   pool.run(pool.parallelism(), [&](std::uint32_t) {
-    const std::lock_guard locker(guard);
+    const std::scoped_lock locker(guard);
     threads.insert(std::this_thread::get_id());
   });
   EXPECT_TRUE(threads.contains(std::this_thread::get_id()));
@@ -156,5 +156,3 @@ TEST(WorkerPool, handlesManyBatchesInARow) {
   // 0 + 1 + ... + 8 is 36, five hundred times over.
   EXPECT_EQ(36 * 500, total.load());
 }
-
-// vi: set sw=2 sts=2 ts=2 et:

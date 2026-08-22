@@ -47,6 +47,10 @@ GLEDITOR_OUT(6) float vOpacity;
 // fragment stage to skip the atlas entirely: a page background covers more
 // fragments than all its text put together, and none of them need a sample.
 GLEDITOR_OUT_FLAT(7) uint vSolid;
+// Where vertically across the quad this vertex sits, 0 at the bottom edge and 1
+// at the top. Interpolated, allowing vertical multi-banding when multiple
+// highlight ranges overlap.
+GLEDITOR_OUT(8) float vQuadV;
 
 // Field widths must stay in step with Doc::VBORow.
 const uint depthMask = 3u;
@@ -91,6 +95,7 @@ void main() {
     vLayer      = 0.0;
     vTag        = uvec2(0u);
     vQuadU      = 0.0;
+    vQuadV      = 0.0;
     vSolid      = 1u;
     return;
   }
@@ -132,7 +137,7 @@ void main() {
   vTag     = uvec2(uIdentity | (uint(whlk.w) << GLEDITOR_TAG_KIND_SHIFT),
                    paper & 65535u);
   vQuadU   = (0 != (corner & 1)) ? 1.0 : 0.0;
+  vQuadV   = (0 != (corner & 2)) ? 1.0 : 0.0;
   vOpacity = uOpacity;
   vSolid   = (0u != (flags & solidFlag)) ? 1u : 0u;
 }
-// vi: set sw=2 sts=2 ts=2 et:

@@ -13,6 +13,7 @@ GLEDITOR_IN_FLAT(4) uvec2 vTag;
 GLEDITOR_IN(5) float vQuadU;
 GLEDITOR_IN(6) float vOpacity;
 GLEDITOR_IN_FLAT(7) uint vSolid;
+GLEDITOR_IN(8) float vQuadV;
 
 GLEDITOR_FRAG_OUT(0) vec4 outColor;
 // identity word, cluster index, fractional position across the quad, unused.
@@ -32,7 +33,17 @@ vec4 unpackColor(uint bits) {
 // where across the quad this fragment sits, so a span ending between the "f"
 // and the "i" of an "fi" ligature highlights the "f" alone -- the two share a
 // single quad and have no geometry to tell them apart.
+//
+// When multiple highlight ranges overlap across the same glyph or passage (for
+// example, a transclusion span and a link annotation), vertical multi-banding
+// partitions the quad into stacked horizontal stripes. This preserves the
+// distinct color and identity of each overlapping layer.
+#define GLEDITOR_MAX_OVERLAPPING_HIGHLIGHTS 4
+
 vec3 selectedBackground(vec3 base) {
+  uint matches[GLEDITOR_MAX_OVERLAPPING_HIGHLIGHTS];
+  int matchCount = 0;
+
   for (int i = 0; i < GLEDITOR_MAX_HIGHLIGHTS; i++) {
     // Identity zero is not a glyph, so it terminates the list.
     if (0u == uRanges[i].identity) {
@@ -49,10 +60,28 @@ vec3 selectedBackground(vec3 base) {
     float hi =
         (vTag.y == uRanges[i].lastCluster) ? uRanges[i].endFraction : 1.0;
     if (vQuadU >= lo && vQuadU < hi) {
-      return unpackColor(uRanges[i].colour).rgb;
+      if (matchCount < GLEDITOR_MAX_OVERLAPPING_HIGHLIGHTS) {
+        matches[matchCount] = uRanges[i].colour;
+        matchCount++;
+      }
     }
   }
-  return base;
+
+  if (0 == matchCount) {
+    return base;
+  }
+
+  if (1 == matchCount) {
+    return unpackColor(matches[0]).rgb;
+  }
+
+  // Vertical multi-banding: split the quad into matchCount stacked horizontal
+  // bands. The earliest highlight appears at the top band, subsequent ranges
+  // stack downwards. vQuadV is 0.0 at the bottom and 1.0 at the top.
+  float clampedV = clamp(vQuadV, 0.0, 0.9999);
+  int band       = int((1.0 - clampedV) * float(matchCount));
+  band           = clamp(band, 0, matchCount - 1);
+  return unpackColor(matches[band]).rgb;
 }
 
 void main() {
@@ -77,4 +106,3 @@ void main() {
   // match render::tagFractionScale.
   outTag = uvec4(vTag, uint(clamp(vQuadU, 0.0, 1.0) * 65535.0), 0u);
 }
-// vi: set sw=2 sts=2 ts=2 et:

@@ -152,4 +152,22 @@ TEST(ShaderSource, missingShaderFileReportsThePath) {
                std::runtime_error);
 }
 
-// vi: set sw=2 sts=2 ts=2 et:
+TEST(ShaderSource, glyphShadersAssembleWithVerticalMultiBanding) {
+  const auto vertBody =
+      render::readShaderBody("assets/shaders/glyph.vert.glsl");
+  const auto fragBody =
+      render::readShaderBody("assets/shaders/glyph.frag.glsl");
+
+  for (const auto backend :
+       {Backend::OpenGL, Backend::OpenGLES, Backend::Vulkan}) {
+    const auto vertSource =
+        render::assembleShaderSource(backend, ShaderStage::Vertex, vertBody);
+    const auto fragSource =
+        render::assembleShaderSource(backend, ShaderStage::Fragment, fragBody);
+
+    EXPECT_THAT(vertSource, HasSubstr("vQuadV"));
+    EXPECT_THAT(fragSource, HasSubstr("vQuadV"));
+    EXPECT_THAT(fragSource, HasSubstr("GLEDITOR_MAX_OVERLAPPING_HIGHLIGHTS"));
+    EXPECT_THAT(fragSource, HasSubstr("selectedBackground"));
+  }
+}

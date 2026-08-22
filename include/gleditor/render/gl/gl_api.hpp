@@ -55,10 +55,12 @@ struct GLApi {
   PFNGLDELETEBUFFERSPROC DeleteBuffers{};
   PFNGLBINDBUFFERPROC BindBuffer{};
   PFNGLBINDBUFFERBASEPROC BindBufferBase{};
+  PFNGLBINDBUFFERRANGEPROC BindBufferRange{};
   PFNGLBUFFERDATAPROC BufferData{};
   PFNGLBUFFERSUBDATAPROC BufferSubData{};
   PFNGLCOPYBUFFERSUBDATAPROC CopyBufferSubData{};
   PFNGLMAPBUFFERRANGEPROC MapBufferRange{};
+  PFNGLFLUSHMAPPEDBUFFERRANGEPROC FlushMappedBufferRange{};
   PFNGLUNMAPBUFFERPROC UnmapBuffer{};
 
   // -- vertex arrays
@@ -165,4 +167,3 @@ struct GLApi {
 } // namespace render::gl
 
 #endif // GLEDITOR_RENDER_GL_API_H
-// vi: set sw=2 sts=2 ts=2 et:

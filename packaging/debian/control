@@ -4,15 +4,19 @@ Priority: optional
 Maintainer: ccs4ever <ccs4ever@gmail.com>
 Build-Depends: debhelper-compat (= 13),
                pkg-config,
-               libpangomm-2.48-dev,
-               libcairomm-1.16-dev,
-               libglibmm-2.68-dev,
-               libsdl2-dev (>= 2.0.22),
+               libfreetype-dev,
+               libharfbuzz-dev,
+               libfribidi-dev,
+               libunibreak-dev,
+               libfontconfig-dev,
+               libsdl2-dev,
                libsdl2-image-dev,
                libgl-dev,
                libglm-dev,
                libvulkan-dev,
+               libssl-dev,
                libtorrent-rasterbar-dev,
+               liblmdb-dev,
                glslang-tools,
                g++ (>= 13)
 Standards-Version: 4.7.0
@@ -25,7 +29,7 @@ Depends: ${shlibs:Depends}, ${misc:Depends}
 Recommends: fonts-dejavu-core
 Description: GPU-rendered text editor with three graphics backends
  GL Editor draws text on the GPU. Documents are laid out as pages in a 3D
- scene, shaped and rasterised with Pango and Cairo, and drawn as instanced
+ scene, shaped with HarfBuzz, rasterised with FreeType, and drawn as instanced
  quads sampled from a glyph atlas.
  .
  One rendering pipeline serves three graphics APIs. Everything above the

@@ -253,6 +253,100 @@ TEST_F(VersionTest, adjacentPiecesOfOneQuotationReadAsOne) {
   EXPECT_THAT(version.occurrencesOf(span), testing::ElementsAre(Extent{0, 6}));
 }
 
-} // namespace
+TEST_F(VersionTest, aForcedBreakAddsNoTextOfItsOwn) {
+  type(0, "abcdef");
+  version.insertBreak(3);
 
-// vi: set sw=2 sts=2 ts=2 et:
+  EXPECT_EQ(text(), "abcdef");
+  EXPECT_EQ(version.length(), 6U);
+  EXPECT_THAT(version.forcedBreaks(), testing::ElementsAre(3U));
+}
+
+TEST_F(VersionTest, twoBreaksAtOnePointReadAsOne) {
+  type(0, "abcdef");
+  version.insertBreak(3);
+  version.insertBreak(3);
+
+  EXPECT_THAT(version.forcedBreaks(), testing::ElementsAre(3U));
+}
+
+TEST_F(VersionTest, insertingBeforeABreakShiftsIt) {
+  type(0, "abcdef");
+  version.insertBreak(3); // between "abc" and "def"
+  version.insert(0, spool.append("XY"));
+
+  EXPECT_EQ(text(), "XYabcdef");
+  EXPECT_THAT(version.forcedBreaks(), testing::ElementsAre(5U));
+}
+
+TEST_F(VersionTest, insertingAfterABreakLeavesItWhereItWas) {
+  type(0, "abcdef");
+  version.insertBreak(3);
+  version.insert(6, spool.append("XY"));
+
+  EXPECT_EQ(text(), "abcdefXY");
+  EXPECT_THAT(version.forcedBreaks(), testing::ElementsAre(3U));
+}
+
+TEST_F(VersionTest, deletingTheBreakItselfRemovesIt) {
+  type(0, "abcdef");
+  version.insertBreak(3);
+  // Deleting the text on both sides of the boundary erases the piece
+  // boundary the break was recorded at.
+  version.remove(2, 2); // takes "cd"
+
+  EXPECT_EQ(text(), "abef");
+  EXPECT_THAT(version.forcedBreaks(), testing::IsEmpty());
+}
+
+TEST_F(VersionTest, deletingAroundABreakLeavesItInPlace) {
+  type(0, "abcdef");
+  version.insertBreak(3);
+  version.remove(0, 1); // takes "a", well clear of the boundary at 3
+
+  EXPECT_EQ(text(), "bcdef");
+  // The boundary shifted back by one with everything after the deletion.
+  EXPECT_THAT(version.forcedBreaks(), testing::ElementsAre(2U));
+}
+
+TEST_F(VersionTest, rearrangeCarriesAnEmbeddedBreakAlong) {
+  type(0, "abcdef");
+  version.insertBreak(1); // "a" | "bcdef", strictly inside the range below
+  // Move "abc" -- offsets [0, 3), which contains the break at 1 -- to the
+  // end.
+  version.rearrange(0, 3, 6);
+
+  EXPECT_EQ(text(), "defabc");
+  // The break was one character into the moved range ("a" | "bc"), and it
+  // is still one character into "abc" now that "abc" sits at the end.
+  EXPECT_THAT(version.forcedBreaks(), testing::ElementsAre(4U));
+}
+
+TEST_F(VersionTest, rearrangeLeavesABreakAtTheEdgeOfTheMovedRangeBehind) {
+  type(0, "abcdef");
+  version.insertBreak(3); // "abc" | "def", exactly at the edge
+  // Move "abc" -- offsets [0, 3) -- which does not include position 3 itself.
+  version.rearrange(0, 3, 6);
+
+  EXPECT_EQ(text(), "defabc");
+  // The break sat at the boundary right after "abc", not inside it, so it
+  // stays with what "abc" left behind: immediately before "def", now the
+  // front of the document.
+  EXPECT_THAT(version.forcedBreaks(), testing::ElementsAre(0U));
+}
+
+TEST_F(VersionTest, aBreakDoesNotTravelThroughTransclusion) {
+  // The whole point of a break being concatext-relative rather than
+  // content-addressed: quoting the passage must not quote the break.
+  type(0, "abcdef");
+  version.insertBreak(3);
+  const auto quoted = version.spansFor(0, 6);
+
+  Version other;
+  other.insertSpans(0, quoted);
+
+  EXPECT_EQ(other.materialize(spool), "abcdef");
+  EXPECT_THAT(other.forcedBreaks(), testing::IsEmpty());
+}
+
+} // namespace

@@ -7,7 +7,7 @@
 #include <string>
 #include <string_view>
 
-#include <glibmm/checksum.h>
+#include <openssl/sha.h>
 
 #include "bencode.hpp"
 
@@ -128,19 +128,9 @@ MadeTorrent makeTorrent(const std::span<const TorrentContent> files,
 }
 
 std::array<std::uint8_t, 20> sha1(const std::string_view data) {
-  // glib's checksum rather than a hand-rolled SHA-1: glibmm is already a hard
-  // dependency of this tree, and a wrong hash here would not be a bug in this
-  // program so much as a permanent corruption of every address it hands out.
-  Glib::Checksum checksum(Glib::Checksum::Type::SHA1);
-  checksum.update(reinterpret_cast<const guchar *>(data.data()), data.size());
-
   std::array<std::uint8_t, 20> out{};
-  gsize size = out.size();
-  checksum.get_digest(out.data(), &size);
-  if (size != out.size()) {
-    throw std::runtime_error("torrent: sha1 produced " + std::to_string(size) +
-                             " bytes");
-  }
+  SHA1(reinterpret_cast<const unsigned char *>(data.data()), data.size(),
+       out.data());
   return out;
 }
 
@@ -510,5 +500,3 @@ std::string Metainfo::magnet() const {
 }
 
 } // namespace xudu
-
-// vi: set sw=2 sts=2 ts=2 et:

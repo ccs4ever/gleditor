@@ -333,7 +333,8 @@ void BufferPool::trim() {
   const auto used = totalRows - trailing;
 
   const std::uint64_t wanted = std::max<std::uint64_t>(
-      static_cast<std::uint64_t>(used) + (used / 16 * trimHeadroom),
+      static_cast<std::uint64_t>(used) +
+          (static_cast<std::uint64_t>(used / 16) * trimHeadroom),
       trimFloorRows);
   if (wanted >= totalRows) {
     return;
@@ -380,5 +381,3 @@ void BufferPool::write(const Allocation &allocation,
       static_cast<std::size_t>(placement.rowOffset + firstRow) * rowStrideBytes;
   device->updateBuffer(handle, offset, data);
 }
-
-// vi: set sw=2 sts=2 ts=2 et:

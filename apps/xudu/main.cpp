@@ -60,6 +60,17 @@ using xudu::MicroversionId;
 using xudu::Session;
 using xudu::signingKeys;
 
+/// Z a --background document opens at. LinkBeams::align() fits the camera
+/// to the foreground documents alone (background ones are deliberately
+/// excluded from that envelope), so the distance from camera to background
+/// is what has to sell the "background" read through perspective
+/// foreshortening -- and that distance is typically in the hundreds of
+/// units for a tightly framed scene. A small offset like -30 is lost in
+/// the noise at that range and reads as full-size overlap, not backdrop;
+/// -500 is a large enough fraction of a typical camera distance to shrink
+/// visibly while staying well inside the 10000-unit far clip plane.
+constexpr float backgroundDepthZ = -500.0F;
+
 /**
  * @brief Report who signed the authorship record at @p where.
  *
@@ -161,8 +172,10 @@ public:
   }
 
   /// Open @p version as another document beside whatever is already there.
-  void showAlongside(const MicroversionId &version) {
-    renderer->push(RenderItemOpenDoc(session.sourceFor(version)));
+  /// @param depthZ World-unit Z the document opens at; see
+  ///        RenderItemOpenDoc::depthZ. Zero for the ordinary case.
+  void showAlongside(const MicroversionId &version, const float depthZ = 0.0F) {
+    renderer->push(RenderItemOpenDoc(session.sourceFor(version), depthZ));
     renderer->runWithState([this, version](RenderState &state) {
       if (state.docs.empty()) {
         return;
@@ -354,11 +367,11 @@ public:
                           "the caret is what gets published.");
         return;
       }
-      auto *const caret  = renderer->editCaret();
-      const auto which   = nullptr != caret && caret->active() &&
+      auto *const caret = renderer->editCaret();
+      const auto which = nullptr != caret && caret->active() &&
                                  caret->documentIndex() < session.views().size()
-                               ? caret->documentIndex()
-                               : 0U;
+                             ? caret->documentIndex()
+                             : 0U;
       const auto version = session.versionOf(which);
       const auto who     = session.author();
       const auto where   = session.publishedDir();
@@ -645,6 +658,14 @@ int main(const int argc, char **argv) {
             "states or two documents against each other; passages they share "
             "are shaded in both")
       .default_value(std::string{});
+  parser.add_argument("--background")
+      .help("open this microversion behind the documents opened by "
+            "--version-id, --alongside and --read, at a fixed distance "
+            "rather than beside them; repeatable. For a corpus shown for "
+            "context rather than read -- a link into one still brings it "
+            "forward and lines it up, the same as sworph does for any "
+            "other document")
+      .append();
   parser.add_argument("--author-name")
       .help("who publishes, as a person. Kept in the per-user configuration "
             "file, so it is said once for every store; --author-here puts it "
@@ -711,6 +732,7 @@ int main(const int argc, char **argv) {
   std::string alongside;
   std::string publishAs;
   std::vector<MicroversionId> read;
+  std::vector<MicroversionId> background;
   try {
     parser.parse_args(argc, argv);
     if (parser["--show-config"] == true) {
@@ -729,6 +751,14 @@ int main(const int argc, char **argv) {
     quiet    = parser["--print-asset-dir"] == true;
 
     session = std::make_unique<Session>(parser.get<std::string>("store"));
+    // --type's "[bold,italic]text" syntax: the base library parses which
+    // decorations were named and inserts the text itself without knowing
+    // what a Format link is; this is the one place that connects the two.
+    state->onDecoratedInsert = [&session](Doc &doc, const std::uint32_t at,
+                                          const std::uint32_t length,
+                                          const gleditor::DecorationMask mask) {
+      session->markDecorated(doc, at, length, mask);
+    };
 
     // A new xanadoc is the null document, which has nothing to click on and
     // no text to quote. Importing is how one gets started, and is refused on a
@@ -921,13 +951,19 @@ int main(const int argc, char **argv) {
       }
       session->save();
     }
+    if (parser.present<std::vector<std::string>>("--background")) {
+      for (const auto &verStr :
+           parser.get<std::vector<std::string>>("--background")) {
+        background.push_back(MicroversionId::parse(verStr));
+      }
+    }
 
     const auto asked = parser.get<std::string>("--version-id");
-    opening          = asked.empty()
-                           ? (read.empty() ? session->store().latest() : read.front())
-                           : MicroversionId::parse(asked);
-    alongside        = parser.get<std::string>("--alongside");
-    publishAs        = parser.get<std::string>("--publish");
+    opening   = asked.empty()
+                    ? (read.empty() ? session->store().latest() : read.front())
+                    : MicroversionId::parse(asked);
+    alongside = parser.get<std::string>("--alongside");
+    publishAs = parser.get<std::string>("--publish");
     if (!publishAs.empty()) {
       // Done before anything is printed about it: publishing may have to mint
       // this machine's name, which says so, and a half-written line with that
@@ -1004,6 +1040,13 @@ int main(const int argc, char **argv) {
         views.showAlongside(also);
       }
     }
+    // Behind everything above, at a fixed distance rather than another slot
+    // along the row: a corpus given for context and not for reading, that
+    // sworph is still free to bring forward the same as any other document
+    // once a link into it comes into view.
+    for (const auto &behind : background) {
+      views.showAlongside(behind, backgroundDepthZ);
+    }
 
     gleditor::Application app(state, renderer, backend, "Xudu");
     bindCommands(app, state, views, map, links, *session,
@@ -1020,5 +1063,3 @@ int main(const int argc, char **argv) {
     return 1;
   }
 }
-
-// vi: set sw=2 sts=2 ts=2 et:

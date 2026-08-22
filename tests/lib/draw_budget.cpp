@@ -118,5 +118,3 @@ TEST(ScreenScale, somethingOnTheCameraPlaneReadsAsVeryClose) {
       glm::translate(glm::mat4(1.0F), glm::vec3(0.0F, 0.0F, 200.0F));
   EXPECT_GT(screenScaleAt(mvp, 800.0F), 1e6F);
 }
-
-// vi: set sw=2 sts=2 ts=2 et:

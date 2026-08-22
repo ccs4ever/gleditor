@@ -6,6 +6,7 @@
 
 #include <array>
 #include <cstddef>
+#include <cstring>
 #include <format>
 #include <iostream>
 #include <stdexcept>
@@ -90,6 +91,11 @@ void DeviceGL::initialize(AutoSDLWindow &window) {
       nullptr, GL_DYNAMIC_DRAW);
   api.BindBufferBase(GL_UNIFORM_BUFFER, highlightBinding, highlightUbo);
   api.BindBuffer(GL_UNIFORM_BUFFER, 0);
+
+  pboStream = std::make_unique<StreamBufferGL>(api, GL_PIXEL_UNPACK_BUFFER,
+                                               16 * 1024 * 1024);
+  highlightUboStream =
+      std::make_unique<StreamBufferGL>(api, GL_UNIFORM_BUFFER, 2 * 1024 * 1024);
 
   api.Enable(GL_DEPTH_TEST);
   // Equal depths pass, and the later draw wins. A page puts its glyphs a tenth
@@ -237,6 +243,9 @@ void DeviceGL::shutdown() {
     api.DeleteTextures(1, &record.name);
   }
   textures.clear();
+
+  pboStream.reset();
+  highlightUboStream.reset();
 
   if (0 != highlightUbo) {
     api.DeleteBuffers(1, &highlightUbo);
@@ -467,8 +476,23 @@ void DeviceGL::updateTextureLayer(const TextureHandle texture, const int layer,
   // Glyph rows are tightly packed rather than padded to the default 4-byte
   // row alignment.
   api.PixelStorei(GL_UNPACK_ALIGNMENT, 1);
-  api.TexSubImage3D(GL_TEXTURE_2D_ARRAY, 0, xOffset, yOffset, layer, width,
-                    height, 1, GL_RED, GL_UNSIGNED_BYTE, data.data());
+
+  if (pboStream && data.size() <= pboStream->capacityBytes()) {
+    const auto chunk = pboStream->allocate(data.size(), 4);
+    std::memcpy(chunk.ptr, data.data(), data.size());
+    pboStream->flushAndUnmap(chunk.offset, data.size());
+
+    api.BindBuffer(GL_PIXEL_UNPACK_BUFFER, pboStream->id());
+    api.TexSubImage3D(GL_TEXTURE_2D_ARRAY, 0, xOffset, yOffset, layer, width,
+                      height, 1, GL_RED, GL_UNSIGNED_BYTE,
+                      // NOLINTNEXTLINE(performance-no-int-to-ptr)
+                      reinterpret_cast<const void *>(chunk.offset));
+    api.BindBuffer(GL_PIXEL_UNPACK_BUFFER, 0);
+  } else {
+    api.TexSubImage3D(GL_TEXTURE_2D_ARRAY, 0, xOffset, yOffset, layer, width,
+                      height, 1, GL_RED, GL_UNSIGNED_BYTE, data.data());
+  }
+
   api.PixelStorei(GL_UNPACK_ALIGNMENT, 4);
   api.BindTexture(GL_TEXTURE_2D_ARRAY, 0);
 }
@@ -625,6 +649,33 @@ void DeviceGL::bindGlyphTexture(const TextureHandle texture) {
 
 void DeviceGL::setHighlights(const std::span<const HighlightRange> ranges) {
   const auto count = std::min<std::size_t>(ranges.size(), maxHighlightRanges);
+  const auto neededCount =
+      count < static_cast<std::size_t>(maxHighlightRanges) ? count + 1 : count;
+  const auto neededBytes = neededCount * sizeof(HighlightRange);
+
+  if (highlightUboStream && 0 != neededBytes) {
+    GLint alignment = 256;
+    api.GetIntegerv(GL_UNIFORM_BUFFER_OFFSET_ALIGNMENT, &alignment);
+    const auto alignBytes =
+        static_cast<std::size_t>(alignment > 0 ? alignment : 256);
+
+    const auto chunk = highlightUboStream->allocate(neededBytes, alignBytes);
+    auto *dst        = static_cast<HighlightRange *>(chunk.ptr);
+    if (0 != count) {
+      std::memcpy(dst, ranges.data(), count * sizeof(HighlightRange));
+    }
+    if (count < static_cast<std::size_t>(maxHighlightRanges)) {
+      dst[count] = HighlightRange{};
+    }
+    highlightUboStream->flushAndUnmap(chunk.offset, neededBytes);
+
+    api.BindBufferRange(GL_UNIFORM_BUFFER, highlightBinding,
+                        highlightUboStream->id(),
+                        static_cast<GLintptr>(chunk.offset),
+                        static_cast<GLsizeiptr>(neededBytes));
+    return;
+  }
+
   api.BindBuffer(GL_UNIFORM_BUFFER, highlightUbo);
   if (0 != count) {
     api.BufferSubData(GL_UNIFORM_BUFFER, 0,
@@ -641,6 +692,7 @@ void DeviceGL::setHighlights(const std::span<const HighlightRange> ranges) {
                       static_cast<GLsizeiptr>(sizeof(HighlightRange)),
                       &terminator);
   }
+  api.BindBufferBase(GL_UNIFORM_BUFFER, highlightBinding, highlightUbo);
   api.BindBuffer(GL_UNIFORM_BUFFER, 0);
 }
 
@@ -728,8 +780,9 @@ void DeviceGL::destroyPickingSlots() {
   nextPickingSlot = 0;
 }
 
-void DeviceGL::requestPickingTag(const int x, const int y) {
-  if (x < 0 || y < 0 || x >= targetWidth || y >= targetHeight) {
+void DeviceGL::requestPickingTag(const int coordX, const int coordY) {
+  if (coordX < 0 || coordY < 0 || coordX >= targetWidth ||
+      coordY >= targetHeight) {
     return;
   }
 
@@ -752,13 +805,14 @@ void DeviceGL::requestPickingTag(const int x, const int y) {
   // The read is four components even though the attachment has two: OpenGL ES
   // only guarantees GL_RGBA_INTEGER for an integer colour buffer, and desktop
   // GL accepts it too, so one format works on both.
-  api.ReadPixels(x, flipY(y), 1, 1, GL_RGBA_INTEGER, GL_UNSIGNED_INT, nullptr);
+  api.ReadPixels(coordX, flipY(coordY), 1, 1, GL_RGBA_INTEGER, GL_UNSIGNED_INT,
+                 nullptr);
 
   api.BindBuffer(GL_PIXEL_PACK_BUFFER, 0);
 
   slot.fence      = api.FenceSync(GL_SYNC_GPU_COMMANDS_COMPLETE, 0);
-  slot.x          = x;
-  slot.y          = y;
+  slot.x          = coordX;
+  slot.y          = coordY;
   slot.pending    = true;
   nextPickingSlot = (nextPickingSlot + 1) % picking.size();
 }
@@ -834,4 +888,3 @@ void DeviceGL::waitIdle() {
 }
 
 } // namespace render::gl
-// vi: set sw=2 sts=2 ts=2 et:

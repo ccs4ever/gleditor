@@ -46,10 +46,12 @@ void GLApi::load() {
   GLEDITOR_RESOLVE(DeleteBuffers);
   GLEDITOR_RESOLVE(BindBuffer);
   GLEDITOR_RESOLVE(BindBufferBase);
+  GLEDITOR_RESOLVE(BindBufferRange);
   GLEDITOR_RESOLVE(BufferData);
   GLEDITOR_RESOLVE(BufferSubData);
   GLEDITOR_RESOLVE(CopyBufferSubData);
   GLEDITOR_RESOLVE(MapBufferRange);
+  GLEDITOR_RESOLVE(FlushMappedBufferRange);
   GLEDITOR_RESOLVE(UnmapBuffer);
 
   GLEDITOR_RESOLVE(GenVertexArrays);
@@ -162,4 +164,3 @@ bool GLApi::loadDebugOutput() {
 }
 
 } // namespace render::gl
-// vi: set sw=2 sts=2 ts=2 et:

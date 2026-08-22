@@ -21,15 +21,19 @@
 #define XUDU_STORE_H
 
 #include <cstdint>
+#include <iosfwd>
 #include <map>
 #include <optional>
 #include <string>
 #include <vector>
 
+#include "compact_op.hpp"
+#include "format.hpp"
 #include "microversion.hpp"
 #include "ops.hpp"
 #include "resolver.hpp"
 #include "scroll.hpp"
+#include "segmented_ops_spool.hpp"
 #include "spool.hpp"
 #include "version.hpp"
 
@@ -56,6 +60,21 @@ public:
 
   /// Function 2: the op filed under @p id, or nothing.
   [[nodiscard]] const Op *getOp(const MicroversionId &id) const;
+
+  /// Fast zero-copy access to 64-byte compact node by microversion or index.
+  [[nodiscard]] const CompactOpNode *
+  getCompactOp(const MicroversionId &id) const {
+    return opsSpool.get(id);
+  }
+  [[nodiscard]] const CompactOpNode *
+  getCompactOp(const std::uint32_t index) const {
+    return opsSpool.get(index);
+  }
+
+  [[nodiscard]] const SegmentedOpsSpool &segmentedOps() const {
+    return opsSpool;
+  }
+  [[nodiscard]] SegmentedOpsSpool &segmentedOps() { return opsSpool; }
 
   /**
    * @brief Function 3: every op number needed to regenerate @p version, in the
@@ -98,8 +117,9 @@ public:
    * arguing for -- "the previous work... do not have to be lost" -- and it is
    * one branch here rather than a policy anything has to opt into.
    *
-   * @throws std::runtime_error when the parent already has a successor on
-   *         every branch letter, which takes twenty-six of them.
+   * @throws std::runtime_error on the practically-unreachable case that the
+   *         parent already has a successor on every ordinal a branch name
+   *         can hold (see MicroversionId::branch()).
    */
   MicroversionId apply(const MicroversionId &parent, Op op);
 
@@ -130,6 +150,17 @@ public:
                             const MicroversionId &source,
                             std::uint32_t sourceAt, std::uint32_t sourceLength);
 
+  /**
+   * @brief Force a page break at @p at in @p parent. Records an
+   *        OpKind::PageBreak.
+   *
+   * Unlike insert(), erase() or transclude(), this names no primedia address
+   * at all: see the comment on OpKind::PageBreak for why a break has to be
+   * concatext-relative rather than content-addressed, and therefore does not
+   * travel with a passage the way a Link does when it is quoted elsewhere.
+   */
+  MicroversionId insertBreak(const MicroversionId &parent, std::uint32_t at);
+
   // -- links ----------------------------------------------------------------
 
   /**
@@ -146,6 +177,26 @@ public:
   [[nodiscard]] const std::map<std::uint64_t, Link> &links() const {
     return linkTable;
   }
+
+  // -- formatting -------------------------------------------------------------
+  //
+  // See format.hpp. A format link is made the same way as any other: build a
+  // Link with type Format, left naming the content, right naming
+  // vocabularySpanFor(attribute) -- the free function; a Store is not needed
+  // to compute it -- and call addLink(). There is no separate addFormat(),
+  // because nothing about making one differs from any other link once the
+  // right end is in hand.
+
+  /**
+   * @brief Which attribute @p link names, if it is a recognised format link.
+   *
+   * Nothing but LinkType::Format and a right end that is exactly
+   * vocabularySpanFor() of some attribute qualifies -- a Format link with a
+   * right end some other program wrote and this one does not recognise reads
+   * as unformatted rather than guessed at.
+   */
+  [[nodiscard]] std::optional<FormatAttribute>
+  formatAttributeOf(const Link &link) const;
 
   // -- the hypertime map ----------------------------------------------------
 
@@ -232,15 +283,24 @@ public:
    * @brief Write the store to @p directory as its two spools and a link file.
    *
    * The primedia spool is written as the bytes it is. The operations spool is
-   * written as one line per op, which keeps an append-only file append-only on
-   * disk as well as in memory, and makes a store readable without this
-   * program.
+   * written in an ultra-compact binary format.
    */
   void save(const std::string &directory) const;
 
-  /// Read back what save() wrote. A directory with no store in it produces an
-  /// empty one rather than an error, so a program can open a name that does
-  /// not exist yet.
+  /**
+   * @brief Write the store to @p directory using canonical human-readable
+   *        OSMIC text format for the operations spool.
+   */
+  void saveOsmicText(const std::string &directory) const;
+
+  /// Generate standard OSMIC text format of all operations on demand.
+  [[nodiscard]] std::string exportOsmicText() const;
+
+  /// Stream standard OSMIC text format of all operations on demand.
+  void writeOsmicText(std::ostream &out) const;
+
+  /// Read back what save() or saveOsmicText() wrote. Auto-detects binary and
+  /// text formats. A directory with no store in it produces an empty one.
   void load(const std::string &directory);
 
 private:
@@ -256,6 +316,7 @@ private:
   Resolver resolver;
   /// The operations spool, filed by the state each op produces. Ordered, so
   /// iteration is replay order.
+  SegmentedOpsSpool opsSpool;
   std::map<MicroversionId, Op> ops;
   std::map<std::uint64_t, Link> linkTable;
   std::uint64_t nextLinkId{1};
@@ -264,4 +325,3 @@ private:
 } // namespace xudu
 
 #endif // XUDU_STORE_H
-// vi: set sw=2 sts=2 ts=2 et:

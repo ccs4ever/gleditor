@@ -20,6 +20,7 @@
 #include <gleditor/render/device.hpp>
 #include <gleditor/render/diagnostics.hpp>
 #include <gleditor/render/gl/gl_api.hpp>
+#include <gleditor/render/gl/stream_buffer.hpp>
 
 namespace render::gl {
 
@@ -78,7 +79,7 @@ public:
   void drawGlyphs(const DrawUniforms &uniforms, BufferHandle vertices,
                   std::size_t vertexByteOffset,
                   std::uint32_t instanceCount) override;
-  void requestPickingTag(int x, int y) override;
+  void requestPickingTag(int coordX, int coordY) override;
   std::optional<PickingResult> takePickingTag() override;
   FrameImage captureColorTarget() override;
   void waitIdle() override;
@@ -186,6 +187,8 @@ private:
   std::size_t nextPickingSlot{};
 
   GLuint highlightUbo{};
+  std::unique_ptr<StreamBufferGL> pboStream;
+  std::unique_ptr<StreamBufferGL> highlightUboStream;
   GLuint offscreenFbo{};
   GLuint colourRbo{};
   GLuint pickingRbo{};
@@ -198,4 +201,3 @@ private:
 } // namespace render::gl
 
 #endif // GLEDITOR_RENDER_GL_DEVICE_H
-// vi: set sw=2 sts=2 ts=2 et:

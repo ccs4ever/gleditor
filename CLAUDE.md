@@ -29,11 +29,11 @@ the resulting gitlink change in the parent repo.
 ## Build
 
 ```sh
-make                              # library, both programs, both test binaries, compile_commands.json
+make                              # library, both programs, both test binaries, compile_commands.json (includes Vulkan if available)
 make lib                          # library only
 make gleditor                     # apps/gleditor only
 make xudu                         # apps/xudu only
-make GLEDITOR_ENABLE_VULKAN=1     # also compiles the Vulkan backend + SPIR-V (needs glslangValidator)
+make GLEDITOR_DISABLE_VULKAN=1    # disables the Vulkan backend and SPIR-V compilation
 make GLEDITOR_SDL=2               # force SDL2 instead of the SDL3/SDL2 auto-probe
 make clean
 make format                       # clang-format + shfmt, in place; no build deps needed
@@ -44,10 +44,11 @@ make lint                         # shellcheck + yamllint + mdl; what CI runs
 Key variables:
 
 - `DEBUG=1` — debug flags + sanitizer flag sets available.
-- `GLEDITOR_ENABLE_VULKAN=1` — compile the Vulkan backend. **This flips the
-  compile flags for every object file**, so toggling it rebuilds the whole
-  tree. `ccache` (used automatically when installed; disable with
-  `GLEDITOR_NO_CCACHE=1`) is what makes flipping it back and forth cheap.
+- `GLEDITOR_DISABLE_VULKAN=1` — disable the Vulkan backend (Vulkan is built by
+  default when available via pkg-config). **This flips the compile flags for
+  every object file**, so toggling it rebuilds the whole tree. `ccache` (used
+  automatically when installed; disable with `GLEDITOR_NO_CCACHE=1`) is what
+  makes flipping it back and forth cheap.
 - `GLEDITOR_SDL=2` / `=3` — pick SDL major version explicitly; unset probes
   via pkg-config (SDL3 if present, else SDL2).
 - `GLEDITOR_ENABLE_A11Y=1` / `=0` — require/disable AccessKit; unset uses it
@@ -61,18 +62,20 @@ Makefile already probes for what the toolchain supports.
 ## Tests
 
 ```sh
-make test        # builds + runs gleditor_test and xudu_test, skips slow/network suites
-make test/all     # the same, nothing skipped — this is what CI (PR checks) runs
+make -j$(nproc) test        # builds + runs gleditor_test and xudu_test in parallel, skips slow/network suites
+make -j$(nproc) test/all     # the same, nothing skipped — this is what CI (PR checks) runs
 make test TEST_FILTER='SwarmTest.*'   # run/override a specific gtest filter
 ```
 
+- **Parallelism**: Always run `make -j$(nproc) test` or
+  `make -j$(nproc) test/all` to utilize all available cores.
 - `gleditor_test` links the real shared library (catches export-boundary
   bugs); `xudu_test` links only the xanalogical engine, with no graphics
   device, on purpose — that's the boundary being tested.
 - `make test/swarm` runs the network-namespace swarm tests; needs root, not
   part of `make test`.
-- Before pushing non-trivial changes, prefer `make test/all` over
-  `make test` since that's what CI actually gates on.
+- Before pushing non-trivial changes, prefer `make -j$(nproc) test/all` over
+  `make -j$(nproc) test` since that's what CI actually gates on.
 - `./tools/compare-backends.sh` renders a sample through every compiled-in
   backend and diffs the output — the real check that a backend still draws
   correctly, since a backend that draws nothing still exits 0.
@@ -100,10 +103,10 @@ GoogleTest style already in use.
   or shell script; `make lint` runs the linters below. Both run without the
   graphics/build dependencies installed — see "Gotchas" below for how that
   works.
-- Every `.cpp`/`.hpp`/`.glsl` file ends with a vim modeline,
-  `// vi: set sw=2 sts=2 ts=2 et:`, matching `.clang-format`'s
-  `IndentWidth: 2`. Carry it over verbatim into new files; a formatter change
-  to the indent width should update both.
+- Indentation and coding style are defined in `.editorconfig` at the root
+  of the project and strictly aligned with `.clang-format` (`IndentWidth: 2`,
+  `UseTab: Never`, `ColumnLimit: 80`). Vim modelines have been removed across
+  the codebase in favor of `.editorconfig`.
 - `.clangd` enables `modernize-*`, `bugprone-*`, `cppcoreguidelines-*`,
   `performance-*`, `readability-*`, and `portability-*` clang-tidy checks
   (minus a few disabled ones — see `.clangd`) and builds with
@@ -154,6 +157,10 @@ rejects:
   line: mdformat canonicalizes that onto one line regardless of `--wrap`,
   which can push it over the line-length limit — keep code spans on one
   physical line rather than wrapping through them.
+- `tools/check-config-harmony.sh` validates that `.editorconfig`,
+  `.clang-format`, `.yamlfmt`, `.yamllint`, and `.mdl_style.rb` remain in
+  strict harmony across all languages so configuration rules never drift. It
+  is wired into both `make format-check` and `make lint`.
 - nixfmt-rfc-style and nix-linter check disjoint things (whitespace/layout
   vs. semantic style like unused arguments), so there is nothing for them to
   disagree about.
@@ -168,21 +175,63 @@ to sanity-check `.editorconfig` itself, not as a gate.
 ## Project structure
 
 - `src/` — the library: document model, glyph cache, SDL wrappers, render loop
+- `src/text/` — native text layout engine: `FontManager`, `FontFace`,
+  `TextLayout` (HarfBuzz, FreeType, libunibreak, FriBidi)
 - `src/render/` — device abstraction and backends (`gl/`, `vulkan/`)
 - `src/a11y/` — accessibility tree / AccessKit integration
 - `include/gleditor/` — the library's public headers
+- `include/gleditor/text/` — text layout and font management public headers
 - `apps/gleditor/` — the plain editor program
-- `apps/xudu/` — the xanadoc editor; `apps/xudu/core/` is its engine (no graphics dependency)
+- `apps/xudu/` — the xanadoc editor; `apps/xudu/core/` is its engine (no graphics
+  dependency)
 - `assets/shaders/` — portable GLSL bodies; `vulkan/` holds generated SPIR-V
-- `tests/lib/`, `tests/xudu/` — unit tests for the library and the engine, respectively
-- `tools/` — build-time and verification helpers (`compare-backends.sh`, `shader_assemble.cpp`, ...)
+- `tests/lib/`, `tests/xudu/` — unit tests for the library and engine
+- `tools/` — build-time and verification helpers (`compare-backends.sh`,
+  `benchmark-kjv-load.py`, `layout-latency-probe.cpp`, `shader_assemble.cpp`)
 - `packaging/` — distro packaging (arch, debian, fedora, macos, windows, nix)
 - `design/` — design notes and the reasoning behind non-obvious decisions
 - `thirdparty/` — vendored dependencies (git submodules; see above)
 
+## Text Architecture & Shaping Pipeline
+
+- **Zero Cairo / Zero Pango**: The text stack is built directly on
+  **FreeType 2**, **HarfBuzz**, **libunibreak** (UAX #14), **FriBidi**, and
+  **Fontconfig**. Cairo, Pango, PangoFT2, and Pangomm are eliminated.
+- **`text::FontManager` & `text::FontFace`** (`src/text/font.cpp`):
+  - Resolves font descriptions (e.g. `"Monospace 16"`, `"Sans Bold 12"`) via
+    Fontconfig (`FcPattern*`) and loads them into thread-safe FreeType `FT_Face`
+    and HarfBuzz `hb_font_t` instances.
+  - Computes typographic metrics (`ascent`, `descent`, `lineHeight`, `spaceWidth`).
+- **`text::TextLayout`** (`src/text/layout.cpp`):
+  - `layoutPage(text, font, options)`: Breaks lines with `libunibreak`
+    (`set_linebreaks_utf8`), shapes runs with HarfBuzz (`hb_shape`), wraps at
+    `maxWidthPx`, and paginates by `maxHeightPx`.
+  - **Height-Budgeted Slicing**: When `maxHeightPx > 0`, input text is sliced
+    to the maximum lines that could fit the height budget. This guarantees
+    $O(1)$ page generation time rather than $O(N^2)$ whole-document shaping
+    across thousands of pages.
+  - `layoutSingleLine(text, font, options)`: Single-line fast path for toasts
+    and canvas measurement.
+  - Outputs `PageShaping` (`limit`, `lineCount`, `clusters`, `glyphs`, `lines`)
+    consumed directly by `Doc` and `Page`.
+- **`GlyphCache`** (`src/glyphcache/cache.cpp`):
+  - Direct 8-bit grayscale coverage texture rasterization using FreeType
+    (`FT_Load_Glyph`, `FT_Glyph_To_Bitmap`).
+  - Clusters are shaped via HarfBuzz and rendered into a dynamic 2D texture
+    array atlas (512x512 growing up to 16384x16384 across 64 layers).
+- **Baseline Alignment & Quad Geometry**:
+  - `Doc` glyph quads are anchored to `line.top` with height set to the font's
+    logical `lineHeight`.
+  - `GlyphCache` cluster textures are sized to `lineHeight` with baseline fixed
+    at $Y = \\text{ascent}$.
+  - When modifying text shaping or layout, always run
+    `./tools/compare-backends.sh` and visually inspect screenshots with visual
+    tools (`view_file`) to check for flat baselines, correct cluster height,
+    and sharp glyph rendering.
+
 ## Gotchas worth knowing before editing the Makefile
 
-- Toggling `GLEDITOR_ENABLE_VULKAN` or `DEBUG` changes flags for *every*
+- Toggling `GLEDITOR_DISABLE_VULKAN` or `DEBUG` changes flags for *every*
   object; the build records a flags signature (`$(OBJDIR)/.buildflags`) so
   stale objects get rebuilt rather than silently linked in — preserve that
   mechanism if you touch flag handling.
@@ -191,12 +240,15 @@ to sanity-check `.editorconfig` itself, not as a gate.
   `GLEDITOR_SDL` handling.
 - GL/GLES entry points are resolved at runtime via `SDL_GL_GetProcAddress`,
   not linked — don't add `-lGL` or equivalent link flags.
+- `format`, `format-check`, `lint`, and `doc` targets probe tool existence
+  dynamically via `command -v` and gracefully echo missing tool notices rather
+  than failing when optional linters/formatters are not installed locally.
 - `format`, `format-check` and `lint` are the one place `NO_SDL_GOALS` is
   checked: they're exempted from the top-of-Makefile pkg-config checks *and*
   from `include $(DEPS)` (the same exemption `clean`/`dist` already had, for
   the same reason — see the comment above that `include`), because they
   compile nothing and are meant to run on a checkout that never installed
-  SDL, pangomm, or anything else the build needs. A goal that does need a
+  SDL, font packages, or anything else the build needs. A goal that does need a
   compiler must not be added to `NO_SDL_GOALS`.
 
 ## Known gaps / TODO

@@ -40,6 +40,8 @@
 
 #include <gleditor/render/device.hpp>
 #include <gleditor/render/diagnostics.hpp>
+#include <gleditor/render/vulkan/sdl_vulkan_compat.hpp>
+#include <gleditor/render/vulkan/stream_buffer_vk.hpp>
 #include <gleditor/render/worker_pool.hpp>
 
 namespace render::vulkan {
@@ -104,7 +106,7 @@ public:
                   std::size_t vertexByteOffset,
                   std::uint32_t instanceCount) override;
   void drawGlyphBatches(std::span<const GlyphBatch> batches) override;
-  void requestPickingTag(int x, int y) override;
+  void requestPickingTag(int coordX, int coordY) override;
   std::optional<PickingResult> takePickingTag() override;
   FrameImage captureColorTarget() override;
   void waitIdle() override;
@@ -400,7 +402,8 @@ private:
   bool framesSubmitted{};
   bool swapchainOutOfDate{};
 
-  BufferHandle highlightBuffer{};
+  std::array<BufferHandle, framesInFlight> highlightBuffers{};
+  std::unique_ptr<StreamBufferVK> stagingStream;
   TextureHandle boundTexture{};
   PipelineHandle boundPipeline{};
 
@@ -456,4 +459,3 @@ private:
 } // namespace render::vulkan
 
 #endif // GLEDITOR_RENDER_VULKAN_DEVICE_H
-// vi: set sw=2 sts=2 ts=2 et:

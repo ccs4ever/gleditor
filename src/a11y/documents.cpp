@@ -116,7 +116,7 @@ void DocumentsSource::observe(const RenderState &state,
   std::uint64_t signature        = state.docs.size();
   for (const auto &doc : state.docs) {
     mix(signature, doc->editGeneration());
-    mix(signature, doc->contents().bytes());
+    mix(signature, doc->contents().size());
     if (const auto rect = boundsOf(*doc, viewProjection, width, height); rect) {
       mix(signature, static_cast<std::uint64_t>(static_cast<std::int64_t>(
                          rect->left / boundsQuantum)));
@@ -149,7 +149,7 @@ void DocumentsSource::observe(const RenderState &state,
     Described described;
     described.index  = index;
     described.name   = doc->name();
-    described.text   = doc->contents().raw();
+    described.text   = doc->contents();
     described.breaks = runBreaks(described.text);
     described.bounds = boundsOf(*doc, viewProjection, width, height);
     if (nullptr != caret && caret->active() &&
@@ -261,7 +261,7 @@ bool DocumentsSource::performAction(const std::uint64_t nodeId,
     if (0 != withinIt) {
       asked.run = static_cast<std::size_t>(withinIt - 1);
     }
-    const std::lock_guard locker(wantedGuard);
+    const std::scoped_lock locker(wantedGuard);
     wanted.push_back(asked);
     return true;
   }
@@ -277,7 +277,7 @@ bool DocumentsSource::performAction(const std::uint64_t nodeId,
 std::vector<DocumentsSource::Wanted> DocumentsSource::takeWanted() {
   std::vector<Asked> asked;
   {
-    const std::lock_guard locker(wantedGuard);
+    const std::scoped_lock locker(wantedGuard);
     asked.swap(wanted);
   }
 
@@ -304,5 +304,3 @@ std::vector<DocumentsSource::Wanted> DocumentsSource::takeWanted() {
 }
 
 } // namespace gleditor::a11y
-
-// vi: set sw=2 sts=2 ts=2 et:

@@ -9,18 +9,16 @@
 #include <gleditor/buffer_pool.hpp>
 #include <gleditor/drawable.hpp>
 #include <gleditor/renderer.hpp>
-#include <glibmm/refptr.h>
-#include <glibmm/ustring.h>
 #include <glm/ext/matrix_float4x4.hpp>
 #include <glm/ext/vector_float3.hpp>
 #include <memory>
 #include <optional>
-#include <pangomm/layout.h>
 #include <string>
 #include <string_view>
 #include <vector>
 
 #include <gleditor/draw_budget.hpp>
+#include <gleditor/glyphcache/types.hpp>
 #include <gleditor/render/types.hpp>
 
 class Caret;
@@ -53,6 +51,39 @@ struct ClusterBox {
   /// Characters the cluster covers. Greater than one for a ligature, which is
   /// what makes a click inside the quad ambiguous without interpolation.
   std::uint32_t charCount{};
+};
+
+/**
+ * @brief Extracted layout metrics and shaping data for a single page.
+ *
+ * Extracted on background loader threads so that Pango layouts, contexts, and
+ * fontmaps never cross thread boundaries into the render thread.
+ */
+struct PageShaping {
+  int textWidthPx{};
+  int textHeightPx{};
+  std::size_t limit{};
+  std::vector<ClusterBox> clusters;
+  struct GlyphEntry {
+    std::string chr;
+    float clusterLeft{};
+    float clusterTop{};
+    std::size_t clusterIndex{};
+    std::size_t lineIndex{};
+    /// Which Decoration values this cluster rasterises with. Zero -- no bits
+    /// set -- is the overwhelming common case of plain text.
+    gleditor::DecorationMask decorations{};
+  };
+  std::vector<GlyphEntry> glyphs;
+  struct LineEntry {
+    float barWidth{};
+    float barHeight{};
+    float left{};
+    float top{};
+    std::size_t lineIndex{};
+  };
+  std::vector<LineEntry> lines;
+  std::size_t lineCount{};
 };
 
 class Page : public Drawable {
@@ -89,7 +120,6 @@ private:
    * caret and reflowing an edit need one, and both are things a person does to
    * one page at a time.
    */
-  mutable Glib::RefPtr<Pango::Layout> layout;
   /// Byte offset of this page's text within the whole document, so a picking
   /// result can name a position in the document rather than in the page.
   std::uint32_t textOffset{};
@@ -118,19 +148,11 @@ public:
    *        Empty for a page that has no predecessor.
    */
   Page(std::shared_ptr<Doc> aDoc, RenderState &state, glm::mat4 &model,
-       Glib::RefPtr<Pango::Layout> aLayout, std::uint32_t aTextOffset,
+       PageShaping aShaping, std::uint32_t aTextOffset,
        std::uint32_t aPageIndex, const BufferPool::Allocation &inherited = {});
   /**
    * @brief Append this page's draw to @p batches, or decide it needs none.
    * @param docTransform projection * view * document model.
-   *
-   * Collected rather than issued so that the whole frame's page draws reach the
-   * device in one call, which is what a backend needs in order to record them
-   * on more than one thread. Two decisions are made here rather than by the
-   * device, because both need to know what the page is rather than what the
-   * draw is: a page entirely outside the view contributes nothing and is
-   * skipped, and a page too small on screen for its glyphs to be legible is
-   * drawn as one solid bar per line instead.
    */
   void collect(std::vector<render::GlyphBatch> &batches,
                const glm::mat4 &docTransform, float opacity,
@@ -140,15 +162,8 @@ public:
   [[nodiscard]] const std::vector<ClusterBox> &clusterBoxes() const {
     return clusters;
   }
-  /**
-   * @brief This page's shaping, produced again if it is not being kept.
-   *
-   * Returned by value rather than by reference: the document keeps only a few
-   * of these at a time, and asking for one may be what pushes another out.
-   */
-  [[nodiscard]] Glib::RefPtr<Pango::Layout> ensureLayout() const;
-  /// Let go of the shaping. Whatever needs it next asks for it again.
-  void dropLayout() const { layout.reset(); }
+  [[nodiscard]] PageShaping ensureShaping() const;
+  void dropLayout() const {}
   [[nodiscard]] const BufferPool::Allocation &allocation() const {
     return pageBacking;
   }
@@ -256,7 +271,19 @@ private:
   /// What this document is called: a path for one opened from disk, whatever
   /// the source said otherwise.
   std::string docName;
-  Glib::ustring text;
+  std::string text;
+  /// Where a page must end regardless of how much height is left on it, as
+  /// offsets into text. Read once from the TextSource at construction, same
+  /// as text itself -- see TextSource::forcedBreaks() -- and kept sorted
+  /// ascending, which layoutFrom() relies on to find the nearest one past a
+  /// given offset without scanning the whole list.
+  std::vector<std::uint32_t> forcedBreaks;
+  /// Which decorations apply where in text, as offsets into it. Read once
+  /// from the TextSource at construction, same as text and forcedBreaks --
+  /// see TextSource::decoratedRanges() -- and translated to page-relative
+  /// ranges in layoutFrom() the same way forcedBreaks is translated to a
+  /// slice-length clamp there.
+  std::vector<gleditor::DecoratedRange> decoratedRanges;
   /// Told about every edit. Bare pointers, not owned; see DocumentObserver.
   std::vector<gleditor::DocumentObserver *> observers;
   RendererRef renderer;
@@ -284,62 +311,14 @@ private:
   /// on its way out rather than merely transparent for a moment.
   bool closing{};
 
-  /// Build a page layout for text starting at @p offset, with the page
+  /// Build a page shaping for text starting at @p offset, with the page
   /// geometry makePages() uses. Safe to call off the render thread.
-  [[nodiscard]] Glib::RefPtr<Pango::Layout>
-  layoutFrom(std::uint32_t offset) const;
+  [[nodiscard]] PageShaping layoutFrom(std::uint32_t offset) const;
 
-  /// Record that page @p pageIndex has shaped itself again, and let go of the
-  /// least recently shaped page once more than a few are being kept.
+  /// Record that page @p pageIndex has shaped itself again.
   void keepLayoutOf(std::uint32_t pageIndex) const;
 
-public:
-  /**
-   * @brief Bytes of document text a finished page layout consumes.
-   *
-   * Public alongside fillPage() below, and for the same reason: between them
-   * these two decide where one page ends and the next begins, they are pure
-   * functions of a layout, and the property that matters -- that bounding the
-   * text a layout is given does not move that boundary -- can only be checked
-   * by asking both.
-   */
-  [[nodiscard]] static std::uint32_t
-  consumedBytes(const Glib::RefPtr<Pango::Layout> &layout);
-
-  /**
-   * @brief Give @p layout the least text that still fills the page.
-   *
-   * A page cannot show more than its height allows, so text past that point
-   * changes nothing about what the page holds -- but Pango does not know it is
-   * unwanted, and breaking lines through it is what asking a layout anything
-   * pays for. Handed a whole document, that made building pages cost time
-   * proportional to the document once per page.
-   *
-   * How much a page holds depends on the font and the geometry, so it cannot
-   * be a constant. The slice starts small and grows until the layout
-   * ellipsizes, which is Pango saying it ran out of room -- at which point
-   * more text provably cannot change what the page shows. A slice that reaches
-   * the end of the text is likewise complete. So the page ends up holding
-   * exactly what it would have held given everything.
-   *
-   * Each slice ends on a character boundary, since cutting through one would
-   * hand Pango invalid UTF-8 that was never in the document.
-   *
-   * Public because it is worth testing directly: handed a document with no
-   * line breaks in it, Pango stops wrapping past a certain length and lays the
-   * whole thing out as one enormously wide line, which this avoids.
-   *
-   * @param from Start of the remaining text, which need not be NUL-terminated
-   *        at the point the page ends.
-   * @param remaining Bytes available from @p from.
-   */
-  static void fillPage(const Glib::RefPtr<Pango::Layout> &layout,
-                       const char *from, std::size_t remaining);
-
 private:
-  /// Byte offsets at which each line of a layout starts.
-  [[nodiscard]] static std::vector<int>
-  lineStarts(const Glib::RefPtr<Pango::Layout> &layout);
   /**
    * @brief Rebuild the pages an edit disturbed. Render thread only.
    * @param delta Bytes the document grew by, negative for a removal. Every
@@ -573,7 +552,7 @@ public:
   void collect(std::vector<render::GlyphBatch> &batches,
                const glm::mat4 &viewProjection, const DrawBudget &budget,
                DrawStats &stats) const;
-  void newPage(RenderState &state, Glib::RefPtr<Pango::Layout> &layout,
+  void newPage(RenderState &state, PageShaping aShaping,
                std::uint32_t textOffset);
 
   /**
@@ -626,7 +605,7 @@ public:
   /// Scope of the most recent reflow, and how many pages it rebuilt.
   [[nodiscard]] ReflowScope lastReflowScope() const { return reflowScope; }
   [[nodiscard]] std::size_t lastReflowPages() const { return reflowPages; }
-  [[nodiscard]] const Glib::ustring &contents() const { return text; }
+  [[nodiscard]] const std::string &contents() const { return text; }
   /// Position among the renderer's open documents, carried in the picking tag
   /// so a result names which document was clicked.
   void setDocIndex(const std::uint32_t index) { docIndex = index; }
@@ -695,6 +674,7 @@ public:
                      std::uint32_t colour,
                      std::vector<render::HighlightRange> &out) const;
   [[nodiscard]] size_t numPages() const { return pages.size(); }
+  [[nodiscard]] bool isFullyLoaded() const { return fullyLoaded; }
 
   /**
    * @brief Ease this document into place and fade it in.
@@ -739,6 +719,7 @@ public:
   /// Alpha this document currently draws at.
   [[nodiscard]] float currentOpacity() const { return opacity(); }
 
+  bool fullyLoaded{false};
   friend class Page;
 };
 

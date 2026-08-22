@@ -16,21 +16,15 @@
 #include <utility>
 #include <vector>
 
-#include <glm/ext/matrix_clip_space.hpp>
-#include <glm/ext/matrix_transform.hpp>
-#include <glm/gtc/type_ptr.hpp>
-
-#include <pango/pango-types.h>
-#include <pangomm/cairofontmap.h>
-#include <pangomm/fontdescription.h>
-#include <pangomm/layout.h>
-#include <pangomm/layoutiter.h>
-#include <pangomm/rectangle.h>
-
 #include <gleditor/doc.hpp>
 #include <gleditor/glyphcache/cache.hpp>
 #include <gleditor/render/device.hpp>
 #include <gleditor/render_state.hpp>
+#include <gleditor/text/font.hpp>
+#include <gleditor/text/layout.hpp>
+#include <glm/ext/matrix_clip_space.hpp>
+#include <glm/ext/matrix_transform.hpp>
+#include <glm/gtc/type_ptr.hpp>
 
 namespace {
 
@@ -54,25 +48,6 @@ unsigned int panelColour(const render::DiagnosticSeverity severity) {
   return Doc::VBORow::color3(38, 42, 54);
 }
 
-/// Length in bytes of the UTF-8 sequence introduced by @p lead. Continuation
-/// and invalid bytes report 1 so that callers always make forward progress.
-int utf8SequenceLength(const char lead) {
-  const auto byte = static_cast<unsigned char>(lead);
-  if (byte < 0x80U) {
-    return 1;
-  }
-  if ((byte & 0xE0U) == 0xC0U) {
-    return 2;
-  }
-  if ((byte & 0xF0U) == 0xE0U) {
-    return 3;
-  }
-  if ((byte & 0xF8U) == 0xF0U) {
-    return 4;
-  }
-  return 1;
-}
-
 /// View a row vector as the raw bytes the buffer pool wants.
 std::span<const std::byte> asBytes(const std::vector<Doc::VBORow> &rows) {
   return {reinterpret_cast<const std::byte *>(rows.data()),
@@ -85,10 +60,6 @@ std::array<float, 16> toArray(const glm::mat4 &mat) {
   const auto *src = glm::value_ptr(mat);
   std::copy_n(src, out.size(), out.begin());
   return out;
-}
-
-double toPixels(const int pangoUnits) {
-  return static_cast<double>(pangoUnits) / PANGO_SCALE;
 }
 
 } // namespace
@@ -119,31 +90,25 @@ void ToastOverlay::dropOldest() {
 
 void ToastOverlay::post(const render::DiagnosticSeverity severity,
                         const std::string_view message, RenderState &state) {
-  const auto fontDesc = Pango::FontDescription(fontName);
-  const auto ctx      = Pango::CairoFontMap::get_default()->create_context();
-  ctx->set_font_description(fontDesc);
-
-  auto layout = Pango::Layout::create(ctx);
-  layout->set_font_description(fontDesc);
-  layout->set_single_paragraph_mode(true);
-  layout->set_width(maxTextWidthPx * PANGO_SCALE);
-  layout->set_ellipsize(Pango::EllipsizeMode::END);
-  layout->set_text(std::string{message});
-
-  const auto font = ctx->load_font(fontDesc);
+  auto font = gleditor::text::FontManager::instance().getFont(fontName);
   if (!font) {
-    // No usable font means no text to draw; the message has already been
-    // logged, which is the part that must not be lost.
     return;
   }
 
-  int textWidth  = 0;
-  int textHeight = 0;
-  layout->get_pixel_size(textWidth, textHeight);
-  if (0 >= textWidth || 0 >= textHeight) {
+  gleditor::text::LayoutOptions opts{
+      .maxWidthPx      = static_cast<float>(maxTextWidthPx),
+      .maxHeightPx     = 0.0F,
+      .singleParagraph = true,
+      .ellipsize       = true,
+  };
+  auto shaping =
+      gleditor::text::TextLayout::layoutSingleLine(message, font, opts);
+  if (shaping.textWidthPx <= 0 || shaping.textHeightPx <= 0) {
     return;
   }
 
+  const auto textWidth   = shaping.textWidthPx;
+  const auto textHeight  = shaping.textHeightPx;
   const auto panelWidth  = static_cast<float>(textWidth) + (2 * padding);
   const auto panelHeight = static_cast<float>(textHeight) + (2 * padding);
 
@@ -151,76 +116,26 @@ void ToastOverlay::post(const render::DiagnosticSeverity severity,
   const auto text  = Doc::VBORow::color(236);
 
   std::vector<Doc::VBORow> rows;
-  // Row 0 is the panel; the glyphs follow it, drawn over it because the
-  // overlay pipeline does not depth test.
-  //
-  // The panel is a solid quad, so the fragment stage fills it with its colour
-  // and never samples the atlas. That is what gives a solid panel without a
-  // second pipeline, a blend state or a reserved blank texel.
-  rows.push_back(Doc::VBORow{
-      {panelWidth / 2.0F, panelHeight / 2.0F},
-      Doc::VBORow::fill(panel, Doc::VBORow::onPaper),
-      0,
-      // A kind of its own rather than none: a notification tagged zero would
-      // read as empty space, so clicking one would clear the caret.
-      Doc::VBORow::box(0, static_cast<unsigned int>(panelWidth),
-                       static_cast<unsigned int>(panelHeight),
-                       render::tagKindOverlay),
-      Doc::VBORow::paperAt(panel, 0)});
+  rows.push_back(
+      Doc::VBORow{{panelWidth / 2.0F, panelHeight / 2.0F},
+                  Doc::VBORow::fill(panel, Doc::VBORow::onPaper),
+                  0,
+                  Doc::VBORow::box(0, static_cast<unsigned int>(panelWidth),
+                                   static_cast<unsigned int>(panelHeight),
+                                   render::tagKindOverlay),
+                  Doc::VBORow::paperAt(panel, 0)});
 
-  const auto raw = layout->get_text().raw();
-
-  // Collect the cluster boundaries first: positioning a cluster needs the
-  // extents of the cluster the iterator is on and the byte index of the next
-  // one, which is one step ahead of it.
-  struct Cluster {
-    int start;
-    Pango::Rectangle logical;
-  };
-  std::vector<Cluster> clusters;
-  {
-    auto iter = layout->get_iter();
-    while (true) {
-      Pango::Rectangle ink;
-      Pango::Rectangle logical;
-      iter.get_cluster_extents(ink, logical);
-      clusters.push_back(Cluster{iter.get_index(), logical});
-      if (!iter.next_cluster()) {
-        break;
-      }
-    }
-  }
-
-  rows.reserve(clusters.size() + 1);
-  for (std::size_t i = 0; i < clusters.size(); i++) {
-    const auto &cluster = clusters[i];
-    const int end       = i + 1 < clusters.size() ? clusters[i + 1].start
-                                                  : static_cast<int>(raw.size());
-    if (end <= cluster.start || cluster.start >= static_cast<int>(raw.size())) {
-      continue;
-    }
-    // Render the leading codepoint of the cluster, cut on a sequence boundary
-    // so Pango is never handed half of a multi-byte character.
-    const int length =
-        std::min(end - cluster.start, utf8SequenceLength(raw[cluster.start]));
-    const std::string_view chr(raw.data() + cluster.start,
-                               static_cast<std::size_t>(length));
-
-    const auto glyph  = state.glyphCache.put(chr, font);
+  rows.reserve(shaping.glyphs.size() + 1);
+  for (const auto &g : shaping.glyphs) {
+    const auto glyph  = state.glyphCache.put(g.chr, font);
     const auto width  = static_cast<float>(static_cast<int>(glyph.dims.width));
     const auto height = static_cast<float>(static_cast<int>(glyph.dims.height));
     if (0.0F == width || 0.0F == height) {
       continue;
     }
 
-    // Local coordinates run up from the bottom left of the panel, matching the
-    // orthographic projection draw() builds and the bottom-up rows the glyph
-    // atlas is packed with. Pango measures down from the top of the text
-    // block, hence the subtraction.
-    const auto left =
-        padding + static_cast<float>(toPixels(cluster.logical.get_x()));
-    const auto top = padding + static_cast<float>(textHeight) -
-                     static_cast<float>(toPixels(cluster.logical.get_y()));
+    const auto left = padding + g.clusterLeft;
+    const auto top  = padding + static_cast<float>(textHeight) - g.clusterTop;
 
     rows.push_back(
         Doc::VBORow{{left + (width / 2.0F), top - (height / 2.0F)},
@@ -364,4 +279,3 @@ void ToastOverlay::draw(RenderState &state, const int screenWidth,
     penY += toast.height + gap;
   }
 }
-// vi: set sw=2 sts=2 ts=2 et:

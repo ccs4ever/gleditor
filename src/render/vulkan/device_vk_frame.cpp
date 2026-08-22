@@ -219,7 +219,7 @@ void DeviceVK::bindGlyphTexture(const TextureHandle texture) {
     return;
   }
 
-  const auto highlightIt = buffers.find(highlightBuffer.id);
+  const auto highlightIt = buffers.find(highlightBuffers[frameIndex].id);
   if (buffers.end() == highlightIt) {
     return;
   }
@@ -257,13 +257,12 @@ void DeviceVK::bindGlyphTexture(const TextureHandle texture) {
 }
 
 void DeviceVK::setHighlights(const std::span<const HighlightRange> ranges) {
-  const auto it = buffers.find(highlightBuffer.id);
+  const auto it = buffers.find(highlightBuffers[frameIndex].id);
   if (buffers.end() == it) {
     return;
   }
   const auto count = std::min<std::size_t>(ranges.size(), maxHighlightRanges);
-  ensureIdleForMutation();
-  auto *dst = static_cast<std::byte *>(it->second.mapped);
+  auto *dst        = static_cast<std::byte *>(it->second.mapped);
   if (0 != count) {
     std::memcpy(dst, ranges.data(), count * sizeof(HighlightRange));
   }
@@ -444,12 +443,13 @@ void DeviceVK::drawGlyphBatches(const std::span<const GlyphBatch> batches) {
   }
 }
 
-void DeviceVK::requestPickingTag(const int x, const int y) {
+void DeviceVK::requestPickingTag(const int coordX, const int coordY) {
   if (!frameActive) {
     return;
   }
-  if (x < 0 || y < 0 || x >= static_cast<int>(swapchainExtent.width) ||
-      y >= static_cast<int>(swapchainExtent.height)) {
+  if (coordX < 0 || coordY < 0 ||
+      coordX >= static_cast<int>(swapchainExtent.width) ||
+      coordY >= static_cast<int>(swapchainExtent.height)) {
     return;
   }
 
@@ -463,8 +463,8 @@ void DeviceVK::requestPickingTag(const int x, const int y) {
   // The copy itself cannot be recorded here: the render pass is still open and
   // the tag image only reaches TRANSFER_SRC layout when the pass ends. Note the
   // pixel now and emit the copy in endFrame().
-  frame.pickX       = x;
-  frame.pickY       = y;
+  frame.pickX       = coordX;
+  frame.pickY       = coordY;
   frame.pickPending = true;
 }
 
@@ -657,4 +657,3 @@ FrameImage DeviceVK::captureColorTarget() {
 }
 
 } // namespace render::vulkan
-// vi: set sw=2 sts=2 ts=2 et:

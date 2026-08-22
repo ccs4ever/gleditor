@@ -99,7 +99,9 @@ struct GlobalSpan {
 /// addressed for one store.
 struct GlobalLink {
   LinkType type{LinkType::Comment};
+  ProminenceTier tier{ProminenceTier::Author};
   std::string owner;
+  std::string curator;
   std::vector<GlobalSpan> left;
   std::vector<GlobalSpan> right;
 
@@ -380,4 +382,3 @@ private:
 } // namespace xudu
 
 #endif // XUDU_PUBLICATION_H
-// vi: set sw=2 sts=2 ts=2 et:

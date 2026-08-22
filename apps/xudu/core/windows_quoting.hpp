@@ -37,4 +37,3 @@ namespace xudu {
 } // namespace xudu
 
 #endif // XUDU_WINDOWS_QUOTING_H
-// vi: set sw=2 sts=2 ts=2 et:

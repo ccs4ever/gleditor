@@ -8,30 +8,31 @@
  * per-font map of cached entries. All device interaction goes through
  * RenderDevice, so the cache is the same on every backend.
  */
-#ifndef GLEDITOR_GLYPH_CACHE_H
-#define GLEDITOR_GLYPH_CACHE_H
+#ifndef GLEDITOR_GLYPHCACHE_CACHE_H
+#define GLEDITOR_GLYPHCACHE_CACHE_H
 
 #include <compare>
 #include <cstddef>
 #include <functional>
 #include <memory>
-#include <pangomm/font.h>
 
-#include "glibmm/refptr.h"
-#include "glibmm/ustring.h"
 #include <gleditor/glyphcache/palette.hpp>
 #include <gleditor/glyphcache/types.hpp>
 #include <gleditor/log.hpp>
 #include <gleditor/render/types.hpp>
+#include <gleditor/text/font.hpp>
 #include <string>
 #include <string_view>
 #include <unordered_map>
+#include <unordered_set>
 #include <utility>
 #include <vector>
 
 namespace render {
 class RenderDevice;
 }
+
+namespace gleditor {
 
 /**
  * @brief Helper for creating an overload set of call operators.
@@ -60,42 +61,22 @@ using transparent_string_hash =
     overload<std::hash<std::string>, std::hash<std::string_view>,
              char_pointer_hash>;
 
-/// Shared pointer alias to a Pango font instance.
-using FontPtr = Glib::RefPtr<Pango::Font>;
+/// Pointer alias to a font face instance.
+using FontPtr = text::FontFacePtr;
 
 /**
  * @class FontMapKeyAdapter
- * @brief Compares Pango::Font objects by their fully described absolute size
- * strings.
- *
- * Provides a strict-weak-ordering and hash based on the casefolded string
- * from Pango's describe_with_absolute_size(). Useful as a key in maps.
+ * @brief Compares FontFace objects by their unique key description strings.
  */
 class FontMapKeyAdapter {
 private:
-  FontPtr font_;
-  /**
-   * @brief The casefolded description, worked out once here.
-   *
-   * Describing a font, printing the description and casefolding the result are
-   * three allocations, and this used to do all three on every comparison --
-   * twice, once for each side -- and again for every hash. A hash lookup does
-   * that once to find the bucket and once more per key already in it, so the
-   * cost fell on the cache's hottest path: a glyph is looked up per cluster
-   * per page.
-   *
-   * Held as bytes rather than as a ustring because what is wanted of it is
-   * equality, and casefolding is what makes byte equality the right question.
-   */
+  FontPtr font_{};
   std::string key_;
-  /// Worked out with the key, so that a probe that will fail usually fails on
-  /// a size_t comparison rather than on a string one.
-  std::size_t hash_;
+  std::size_t hash_{};
 
 public:
   explicit FontMapKeyAdapter(FontPtr font)
-      : font_(std::move(font)),
-        key_(font_->describe_with_absolute_size().to_string().casefold().raw()),
+      : font_(std::move(font)), key_(font_ ? font_->key() : ""),
         hash_(std::hash<std::string>{}(key_)) {}
   FontMapKeyAdapter(const FontMapKeyAdapter &oth)            = default;
   FontMapKeyAdapter &operator=(const FontMapKeyAdapter &oth) = default;
@@ -132,21 +113,31 @@ public:
   }
 };
 
+} // namespace gleditor
+
 /**
  * @brief std::hash specialization for FontMapKeyAdapter based on font
  * description.
+ *
+ * Written in namespace std directly rather than from within gleditor: an
+ * explicit specialization of a standard library template is only allowed in
+ * std itself (or the global namespace), not from an arbitrary namespace that
+ * merely happens to name std::hash with a qualified id.
  */
-template <> struct std::hash<FontMapKeyAdapter> {
-  std::size_t operator()(const FontMapKeyAdapter &adapter) const noexcept {
+template <> struct std::hash<gleditor::FontMapKeyAdapter> {
+  std::size_t operator()(const gleditor::FontMapKeyAdapter &adapter) const
+      noexcept {
     return adapter.hash();
   }
 };
+
+namespace gleditor {
 
 /**
  * @class GlyphCache
  * @brief Caches rendered glyphs into a device array texture and returns UVs.
  *
- * GlyphCache uses Pango/Cairo to rasterize text for a given Pango::Font,
+ * GlyphCache uses FreeType to rasterize text for a given font,
  * converts the result to single-channel coverage, and packs it into a layered
  * texture via GlyphPalette. The put() API returns texture coordinates, in
  * texels, and pixel dimensions for rendering.
@@ -218,10 +209,17 @@ public:
    *            character with its combining marks -- rasterised as a unit so
    *            that what is drawn matches what Pango shaped.
    * @param font Loaded Pango font to use for rasterization.
+   * @param decorations Presentation attributes this particular rasterisation
+   *            carries -- see Decoration. Defaults to none, which is every
+   *            existing caller and the overwhelmingly common case: two
+   *            requests for the same cluster and font with the same
+   *            decorations (usually both empty) share one cache entry, and
+   *            different decorations get their own.
    * @return Sizes with texel coordinates and pixel dimensions.
    * @throws std::invalid_argument if the cluster exceeds maxClusterBytes.
    */
-  Sizes put(const std::string_view &chr, const FontPtr &font);
+  Sizes put(const std::string_view &chr, const FontPtr &font,
+            const std::unordered_set<Decoration> &decorations = {});
 
   /// Handle of the array texture holding every cached glyph.
   [[nodiscard]] render::TextureHandle textureHandle() const { return texture; }
@@ -298,10 +296,29 @@ private:
 
   /// Keys by font address. Holds a reference to each font through the adapter,
   /// so an address used as a key cannot be reused by a different font.
-  std::unordered_map<const Pango::Font *, FontMapKeyAdapter> fontKeys;
-  std::unordered_map<std::string, std::unordered_map<FontMapKeyAdapter, Sizes>,
-                     transparent_string_hash, std::equal_to<>>
-      glyphs; ///< Map: character string -> (font -> cached sizes).
+  std::unordered_map<const gleditor::text::FontFace *, FontMapKeyAdapter>
+      fontKeys;
+
+  /**
+   * @brief One rasterisation of a cluster in a font: the decorations that
+   *        produced it, and the bitmap's own sizes.
+   *
+   * A cluster and font can have several of these -- plain, italic, bold,
+   * both -- which is why the map below holds a vector of them rather than
+   * one Sizes. Looked up by comparing decoration sets, size first: the
+   * overwhelmingly common case is an empty set on both sides, which that
+   * comparison answers without touching a single element.
+   */
+  struct DecoratedSizes {
+    std::unordered_set<Decoration> decorations;
+    Sizes sizes;
+  };
+
+  std::unordered_map<
+      std::string,
+      std::unordered_map<FontMapKeyAdapter, std::vector<DecoratedSizes>>,
+      transparent_string_hash, std::equal_to<>>
+      glyphs; ///< Map: character string -> (font -> decorated variants).
   render::RenderDevice *device;    ///< Device the atlas lives on.
   render::TextureHandle texture{}; ///< Array texture holding the glyph atlas.
   int size{};                      ///< Current side length of each atlas layer.
@@ -319,8 +336,10 @@ private:
   /**
    * @brief Rasterize and pack a new glyph into the cache.
    */
-  Sizes addToCache(const std::string &chr, const FontPtr &font);
+  Sizes addToCache(const std::string &chr, const FontPtr &font,
+                   const std::unordered_set<Decoration> &decorations);
 };
 
-#endif // GLEDITOR_GLYPH_CACHE_H
-// vi: set sw=2 sts=2 ts=2 et:
+} // namespace gleditor
+
+#endif // GLEDITOR_GLYPHCACHE_CACHE_H

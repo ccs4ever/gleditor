@@ -14,6 +14,20 @@
  * state, because it spells out the sequence of edits from the empty document
  * that leads to it: 2a4 is reached by doing 1, 2, 2a1, 2a2, 2a3, 2a4 and
  * nothing else. That is why nothing here stores a version.
+ *
+ * An extension beyond what Nelson wrote down: a branch letter here is not
+ * limited to one character. Twenty-six siblings off one state was a limit
+ * nothing about the underlying idea asked for, only the single-letter
+ * alphabet OSMIC's examples happened to use. Past z, a branch spells the same
+ * way a spreadsheet names a column past Z: aa, ab, ..., az, ba, ..., zz, aaa
+ * -- bijective base 26, not the base 26 a number would use, which is why z
+ * increments to aa rather than repeating a digit. In memory a branch is kept
+ * as the ordinal that letter run names (a=1, z=26, aa=27, ...) rather than
+ * the letters themselves, which is what keeps comparing two ids plain integer
+ * comparison instead of "shorter sorts first, then lexicographic" -- the
+ * closed form for ordering bijective base-26 strings correctly, and an easy
+ * one to get quietly wrong. The letters are spelled out only where a name
+ * meets text: parse() and str().
  */
 #ifndef XUDU_MICROVERSION_H
 #define XUDU_MICROVERSION_H
@@ -39,18 +53,19 @@ public:
   /**
    * @brief One "branch letter, then a number" step of a name.
    *
-   * The first segment of a name has no letter, which is written here as a
-   * space rather than a nul so that a malformed name cannot be mistaken for a
-   * well-formed one by an equality test.
+   * branch is the ordinal a letter run names (see this file's own comment),
+   * not the letters: zero means the first segment's absent branch, which
+   * cannot be confused with a real one, since a real branch's letters are
+   * never empty and so never name ordinal zero.
    */
   struct Segment {
-    char branch{noBranch};
+    std::uint32_t branch{noBranch};
     std::uint32_t number{};
     bool operator==(const Segment &) const = default;
   };
 
-  /// The first segment's absent branch letter.
-  static constexpr char noBranch = ' ';
+  /// The first segment's absent branch, which no letter run ever names.
+  static constexpr std::uint32_t noBranch = 0;
 
   MicroversionId() = default;
   explicit MicroversionId(std::vector<Segment> aSegments)
@@ -89,12 +104,18 @@ public:
   [[nodiscard]] MicroversionId next() const;
 
   /**
-   * @brief The first state of a new branch off this one, under @p letter.
+   * @brief The first state of a new branch off this one, under @p ordinal.
    *
-   * 2 with 'a' gives 2a1. Which letter is free is a question about what has
-   * been recorded, so the store answers it rather than this.
+   * 2 with ordinal 1 (the letter "a") gives 2a1. Which ordinal is free is a
+   * question about what has been recorded, so the store answers it rather
+   * than this; see nextBranchOrdinal().
    */
-  [[nodiscard]] MicroversionId branch(char letter) const;
+  [[nodiscard]] MicroversionId branch(std::uint32_t ordinal) const;
+
+  /// The letters (a=1, z=26, aa=27, ...) @p ordinal names. What str() calls
+  /// to spell out a branch, exposed so a store enumerating candidate
+  /// ordinals can report one back the way a person wrote it.
+  [[nodiscard]] static std::string branchLetters(std::uint32_t ordinal);
 
   /**
    * @brief Every state from the first edit up to and including this one.
@@ -121,4 +142,3 @@ private:
 } // namespace xudu
 
 #endif // XUDU_MICROVERSION_H
-// vi: set sw=2 sts=2 ts=2 et:

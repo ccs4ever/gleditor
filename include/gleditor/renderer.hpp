@@ -49,11 +49,14 @@ struct RenderItem {
   Type type;
 
   explicit RenderItem(const Type type) : type(type) {}
-  virtual ~RenderItem() = default;
+  virtual ~RenderItem()                     = default;
+  RenderItem(const RenderItem &)            = default;
+  RenderItem &operator=(const RenderItem &) = default;
+  RenderItem(RenderItem &&)                 = default;
+  RenderItem &operator=(RenderItem &&)      = default;
 };
 struct RenderItemNewDoc : RenderItem {
   RenderItemNewDoc() : RenderItem(Type::NewDoc) {}
-  ~RenderItemNewDoc() override = default;
 };
 
 /**
@@ -68,7 +71,6 @@ struct RenderItemCloseDoc : RenderItem {
   std::uint32_t docIndex;
   explicit RenderItemCloseDoc(const std::uint32_t index = mostRecent)
       : RenderItem(Type::CloseDoc), docIndex(index) {}
-  ~RenderItemCloseDoc() override = default;
 };
 
 /**
@@ -85,14 +87,12 @@ struct RenderItemSaveDoc : RenderItem {
   std::uint32_t docIndex;
   explicit RenderItemSaveDoc(const std::uint32_t index = mostRecent)
       : RenderItem(Type::SaveDoc), docIndex(index) {}
-  ~RenderItemSaveDoc() override = default;
 };
 
 struct RenderItemResize : RenderItem {
   int width, height;
   RenderItemResize(const int width, const int height)
       : RenderItem(Type::Resize), width(width), height(height) {}
-  ~RenderItemResize() override = default;
 };
 
 /**
@@ -104,20 +104,26 @@ struct RenderItemResize : RenderItem {
  */
 struct RenderItemOpenDoc : RenderItem {
   std::shared_ptr<gleditor::TextSource> source;
-  explicit RenderItemOpenDoc(std::shared_ptr<gleditor::TextSource> aSource)
-      : RenderItem(Type::OpenDoc), source(std::move(aSource)) {}
+  /// World-unit Z the document opens at, in front of (positive) or behind
+  /// (negative) the usual plane every other document sits on. Zero for the
+  /// ordinary case; a program placing something in the background -- a
+  /// corpus behind the documents actually being read -- gives its own
+  /// depth here rather than moving the document again once it exists.
+  float depthZ{0.0F};
+  explicit RenderItemOpenDoc(std::shared_ptr<gleditor::TextSource> aSource,
+                             const float aDepthZ = 0.0F)
+      : RenderItem(Type::OpenDoc), source(std::move(aSource)), depthZ(aDepthZ) {
+  }
   /// Convenience for the common case: a document that is a file on disk.
   explicit RenderItemOpenDoc(const std::string &fileName)
       : RenderItem(Type::OpenDoc),
         source(std::make_shared<gleditor::FileTextSource>(fileName)) {}
-  ~RenderItemOpenDoc() override = default;
 };
 
 struct RenderItemRun : RenderItem {
   std::function<void()> fun;
   explicit RenderItemRun(std::invocable auto fun)
       : RenderItem(Type::Run), fun(std::move(fun)) {}
-  ~RenderItemRun() override = default;
   void operator()() const { fun(); }
 };
 
@@ -133,7 +139,6 @@ struct RenderItemRunState : RenderItem {
   std::function<void(RenderState &)> fun;
   explicit RenderItemRunState(std::invocable<RenderState &> auto fun)
       : RenderItem(Type::RunState), fun(std::move(fun)) {}
-  ~RenderItemRunState() override = default;
   void operator()(RenderState &state) const { fun(state); }
 };
 
@@ -213,6 +218,11 @@ public:
   [[nodiscard]] std::string_view defaultFontName() const {
     return state->defaultFontName;
   }
+
+  /**
+   * @brief Access the shared application state.
+   */
+  [[nodiscard]] AppStateRef appState() const { return state; }
 
   /**
    * @brief Register something that colours ranges of a document, or draws into
@@ -400,8 +410,11 @@ private:
 protected:
   /**
    * Open a document over @p source and prepare it for rendering.
+   * @param depthZ Z the document's resting place is offset by; see
+   *        RenderItemOpenDoc::depthZ.
    */
-  void openDoc(RenderState &state, const gleditor::TextSource &source);
+  void openDoc(RenderState &state, const gleditor::TextSource &source,
+               float depthZ = 0.0F);
 
   /**
    * Create a new empty document and initialize any default resources.

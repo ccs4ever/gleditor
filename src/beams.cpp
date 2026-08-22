@@ -107,5 +107,3 @@ void Beams::draw(RenderState &state, const glm::mat4 &transform,
 }
 
 } // namespace gleditor
-
-// vi: set sw=2 sts=2 ts=2 et:

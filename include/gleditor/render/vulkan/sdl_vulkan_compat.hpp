@@ -76,4 +76,3 @@ inline bool vulkanCreateSurface(SDL_Window *window, const VkInstance instance,
 } // namespace sdl
 
 #endif // GLEDITOR_RENDER_VULKAN_SDL_COMPAT_H
-// vi: set sw=2 sts=2 ts=2 et:

@@ -61,3 +61,5 @@ assets/shaders/vulkan/*.spv
 
 # Stores written by xudu when it is run from the source tree with no path.
 /xanadoc/
+
+.token-optimizer/

@@ -42,7 +42,7 @@
 extern char **environ;
 #endif
 
-#include <glibmm/checksum.h>
+#include <openssl/sha.h>
 
 namespace xudu {
 
@@ -384,9 +384,17 @@ std::string Provenance::toYaml() const {
 }
 
 std::string sha256Hex(const std::string_view data) {
-  Glib::Checksum checksum(Glib::Checksum::Type::SHA256);
-  checksum.update(reinterpret_cast<const guchar *>(data.data()), data.size());
-  return checksum.get_string();
+  std::array<unsigned char, SHA256_DIGEST_LENGTH> digest{};
+  SHA256(reinterpret_cast<const unsigned char *>(data.data()), data.size(),
+         digest.data());
+  static constexpr char hexDigits[] = "0123456789abcdef";
+  std::string hex;
+  hex.reserve(digest.size() * 2);
+  for (const auto byte : digest) {
+    hex.push_back(hexDigits[(byte >> 4) & 0x0F]);
+    hex.push_back(hexDigits[byte & 0x0F]);
+  }
+  return hex;
 }
 
 namespace {
@@ -694,5 +702,3 @@ std::optional<Provenance> parseProvenance(const std::string_view text) {
 }
 
 } // namespace xudu
-
-// vi: set sw=2 sts=2 ts=2 et:

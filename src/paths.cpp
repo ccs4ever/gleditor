@@ -85,7 +85,7 @@ std::string assetDir() {
   // Worked out once. The search stats a handful of directories and the answer
   // is wanted from more than one place; caching it also stops the answer
   // changing under a program that has already acted on it.
-  const std::lock_guard guard(cacheLock);
+  const std::scoped_lock guard(cacheLock);
   if (!cachedDir.has_value()) {
     cachedDir = findAssetDir();
   }
@@ -97,9 +97,8 @@ std::string assetPath(const std::string_view relative) {
 }
 
 void resetAssetDirForTesting() {
-  const std::lock_guard guard(cacheLock);
+  const std::scoped_lock guard(cacheLock);
   cachedDir.reset();
 }
 
 } // namespace gleditor
-// vi: set sw=2 sts=2 ts=2 et:

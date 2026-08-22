@@ -7,8 +7,8 @@
  * coverage data into the appropriate sub-rect of that layer. Nothing here
  * knows which graphics API is in use; uploads go through RenderDevice.
  */
-#ifndef GLYPH_PALETTE_H
-#define GLYPH_PALETTE_H
+#ifndef GLEDITOR_GLYPHCACHE_PALETTE_H
+#define GLEDITOR_GLYPHCACHE_PALETTE_H
 
 #include <algorithm>                     // for for_each
 #include <compare>                       // for partial_ordering
@@ -25,6 +25,8 @@
 namespace render {
 class RenderDevice;
 }
+
+namespace gleditor {
 
 enum class Length : int;
 
@@ -133,5 +135,6 @@ public:
   friend bool operator==(const GlyphPalette &left, const GlyphPalette &right);
 };
 
-#endif // GLYPH_PALETTE_H
-// vi: set sw=2 sts=2 ts=2 et:
+} // namespace gleditor
+
+#endif // GLEDITOR_GLYPHCACHE_PALETTE_H

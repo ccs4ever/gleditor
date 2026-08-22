@@ -293,5 +293,3 @@ TEST(ConfigTest, aKeyWithAPassphraseIsSignedWithWhenGivenOne) {
                                     .c_str()));
   std::filesystem::remove_all(dir);
 }
-
-// vi: set sw=2 sts=2 ts=2 et:
