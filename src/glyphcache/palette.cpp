@@ -17,6 +17,8 @@
 #include <utility>                       // for to_underlying
 #include <vector>                        // for vector
 
+namespace gleditor {
+
 enum class Length : int;
 enum class Offset : int;
 
@@ -90,3 +92,5 @@ void GlyphPalette::grow(const Rect &newDims,
                               const GlyphPalette &right) {
   return right.usedHeight == left.usedHeight;
 }
+
+} // namespace gleditor

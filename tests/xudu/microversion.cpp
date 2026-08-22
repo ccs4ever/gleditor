@@ -50,24 +50,58 @@ TEST(MicroversionTest, aBranchOffTheNullDocumentReadsBack) {
   }
 
   // Not merely parseable -- the same name the store would produce.
-  EXPECT_EQ(MicroversionId{}.branch('a').str(), "a1");
-  EXPECT_EQ(MicroversionId::parse("a1"), MicroversionId{}.branch('a'));
+  EXPECT_EQ(MicroversionId{}.branch(1).str(), "a1");
+  EXPECT_EQ(MicroversionId::parse("a1"), MicroversionId{}.branch(1));
   // And it still comes back to the root, which is what makes it a branch of
   // the null document rather than a state of its own.
   EXPECT_TRUE(MicroversionId::parse("a1").parent().isZero());
 }
 
 TEST(MicroversionTest, malformedNamesAreRefused) {
-  // Two letters running, a zero segment, and a trailing letter with no
-  // number: none of these could have been produced.
+  // A zero segment and a trailing letter with no number: neither could have
+  // been produced.
   //
   // A leading letter used to be in this list. It did not belong: str()
   // produces one for any branch off the null document, so refusing it made a
-  // name the program writes a name the program cannot read.
-  EXPECT_THROW((void)MicroversionId::parse("2ab1"), std::invalid_argument);
+  // name the program writes a name the program cannot read. A run of two or
+  // more letters used to be in this list too, for the same reason: past z, a
+  // branch is aa, ab, ... and str() writes exactly that, so refusing it here
+  // made those unreadable as well.
   EXPECT_THROW((void)MicroversionId::parse("2a0"), std::invalid_argument);
   EXPECT_THROW((void)MicroversionId::parse("2a"), std::invalid_argument);
   EXPECT_THROW((void)MicroversionId::parse("2-4"), std::invalid_argument);
+}
+
+TEST(MicroversionTest, branchLettersRunPastZLikeASpreadsheetColumn) {
+  // Bijective base 26: z (ordinal 26) increments to aa (27), not to a
+  // wraparound "ba" or a two-digit-in-base-26 reading.
+  EXPECT_EQ(MicroversionId::branchLetters(1), "a");
+  EXPECT_EQ(MicroversionId::branchLetters(26), "z");
+  EXPECT_EQ(MicroversionId::branchLetters(27), "aa");
+  EXPECT_EQ(MicroversionId::branchLetters(28), "ab");
+  EXPECT_EQ(MicroversionId::branchLetters(702), "zz");
+  EXPECT_EQ(MicroversionId::branchLetters(703), "aaa");
+}
+
+TEST(MicroversionTest, multiLetterBranchNamesSurviveBeingWrittenAndReadBack) {
+  for (const auto *name : {"2aa1", "2az3", "2ba1", "2zz9", "2aaa1"}) {
+    EXPECT_EQ(MicroversionId::parse(name).str(), name);
+  }
+}
+
+TEST(MicroversionTest, branchOrdinalPastZProducesTheRightLetters) {
+  EXPECT_EQ(MicroversionId::parse("2").branch(26).str(), "2z1");
+  EXPECT_EQ(MicroversionId::parse("2").branch(27).str(), "2aa1");
+  EXPECT_EQ(MicroversionId::parse("2").branch(28).str(), "2ab1");
+}
+
+TEST(MicroversionTest, multiLetterBranchesOrderByOrdinalNotLexicographically) {
+  // "aa" (ordinal 27) is the branch after "z" (ordinal 26), even though the
+  // string "aa" sorts before "z" lexicographically.
+  const auto z  = MicroversionId::parse("2").branch(26);
+  const auto aa = MicroversionId::parse("2").branch(27);
+  EXPECT_LT(z, aa);
+  EXPECT_FALSE(aa < z);
 }
 
 TEST(MicroversionTest, anImpossiblyLargeNumberIsRefused) {
@@ -84,8 +118,8 @@ TEST(MicroversionTest, theNextStateContinuesTheChain) {
 TEST(MicroversionTest, aBranchRestartsTheNumbering) {
   // Nelson's own example: "A branch is given a letter, after which new
   // integers begin with 1 again."
-  EXPECT_EQ(MicroversionId::parse("2").branch('a').str(), "2a1");
-  EXPECT_EQ(MicroversionId::parse("2a4").branch('b').str(), "2a4b1");
+  EXPECT_EQ(MicroversionId::parse("2").branch(1).str(), "2a1");
+  EXPECT_EQ(MicroversionId::parse("2a4").branch(2).str(), "2a4b1");
 }
 
 TEST(MicroversionTest, theParentIsOneStepBack) {

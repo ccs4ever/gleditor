@@ -14,10 +14,12 @@
 #include <vector>
 
 #include <gleditor/a11y/publisher.hpp>
+#include <gleditor/glyphcache/types.hpp>
 #include <gleditor/modal_input.hpp>
 #include <gleditor/render/diagnostics.hpp>
 
 struct RenderItem;
+class Doc;
 
 struct AppState {
   /// Shared state between main and renderer threads
@@ -56,6 +58,10 @@ struct AppState {
     std::string text;    ///< Type: the UTF-8 to insert. Command: which command.
     gleditor::Key key{}; ///< Press: which key.
     gleditor::KeyMods mods{}; ///< Press: held with it.
+    /// Type: decorations named by a "[comma,separated,names]" prefix on
+    /// --type's value, stripped from text above. Zero -- the default, and
+    /// every --type before this existed -- means plain text.
+    gleditor::DecorationMask decorations{};
   };
   /// The script, in command line order. Written before the render thread
   /// starts and only read after.
@@ -172,6 +178,19 @@ struct AppState {
    * from the render thread is the same as somebody pressing the key.
    */
   std::function<bool(const std::string &)> runCommand;
+
+  /**
+   * @brief A --type step named decorations for the text it just inserted.
+   *
+   * Unset by default: plain gleditor has no concept of formatting a span of
+   * a document, only xudu does. Set by xudu's Application before the render
+   * thread starts, the same as runCommand, so this stays the one place a
+   * base-library automation step reaches into an xudu-specific idea rather
+   * than Doc or Renderer needing to know Store or Link exist.
+   */
+  std::function<void(Doc &doc, std::uint32_t at, std::uint32_t length,
+                     gleditor::DecorationMask)>
+      onDecoratedInsert;
 
   /**
    * @brief Native message boxes waiting to be shown.

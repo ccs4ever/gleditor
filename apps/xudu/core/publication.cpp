@@ -431,7 +431,7 @@ SealedScroll sealLocalSpool(const Store &store, const MutableKeys &keys,
   // every address already handed out still points where it did. The record and
   // its signature follow it.
   const std::array<TorrentContent, 3> files{
-      TorrentContent{sealedContentName, bytes},
+      TorrentContent{sealedContentName, std::string{bytes}},
       TorrentContent{provenanceFileName, provenance.yaml},
       TorrentContent{provenanceSigName, provenance.signature},
   };

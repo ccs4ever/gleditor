@@ -6,14 +6,16 @@
  * single row (lane) of a palette texture, tracking used width and providing
  * utilities to test and insert glyphs.
  */
-#ifndef GLYPH_LANE_H
-#define GLYPH_LANE_H
+#ifndef GLEDITOR_GLYPHCACHE_LANE_H
+#define GLEDITOR_GLYPHCACHE_LANE_H
 
 #include <compare>                       // for partial_ordering
 #include <gleditor/glyphcache/types.hpp> // for operator<<, Rect, Point
 #include <gleditor/log.hpp>              // for Loggable
 #include <stdexcept>                     // for invalid_argument
 #include <utility>                       // for to_underlying
+
+namespace gleditor {
 
 enum class Length : int;
 
@@ -108,4 +110,6 @@ public:
   friend bool operator==(const GlyphLane &left, const GlyphLane &right);
 };
 
-#endif // GLYPH_LANE_H
+} // namespace gleditor
+
+#endif // GLEDITOR_GLYPHCACHE_LANE_H

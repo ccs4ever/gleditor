@@ -39,6 +39,14 @@ void placeLinks(const std::map<std::uint64_t, Link> &links,
   leaving.clear();
 
   for (const auto &[id, link] : links) {
+    // A format link's right end names an attribute, not a passage anywhere a
+    // document is open -- see format.hpp -- so it would never find a right
+    // side and would misreport as a HalfLink reaching off-screen for every
+    // document showing the formatted text. Not a beam-placement concern at
+    // all.
+    if (LinkType::Format == link.type) {
+      continue;
+    }
     std::vector<LinkEnd> lefts;
     std::vector<LinkEnd> rights;
     for (std::uint32_t doc = 0; doc < views.size(); doc++) {
@@ -92,6 +100,14 @@ std::uint32_t linkColour(const LinkType type, const ProminenceTier tier) {
     rgb = 0x7FE0A800U;
     break;
   case LinkType::Other:
+    rgb = 0xCFCFCF00U;
+    break;
+  case LinkType::Format:
+    // Not drawn as a highlighted passage at all in the end -- a format link
+    // changes the glyphs themselves, which is a shaping concern rather than
+    // the background-colour one this function answers -- but a case is kept
+    // here so adding it did not leave this switch silently wrong about a
+    // link type it does not know how to colour.
     rgb = 0xCFCFCF00U;
     break;
   }

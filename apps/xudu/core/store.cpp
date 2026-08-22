@@ -4,6 +4,7 @@
 #include <filesystem>
 #include <fstream>
 #include <iterator>
+#include <limits>
 #include <locale>
 #include <sstream>
 #include <stdexcept>
@@ -23,6 +24,14 @@ constexpr const char *opsFile      = "ops.spool";
 constexpr const char *linksFile    = "links.spool";
 constexpr const char *originsFile  = "origins.spool"; // pre-scroll stores
 constexpr const char *scrollsFile  = "scrolls.spool";
+
+/// Not a protocol limit -- a branch ordinal is a plain std::uint32_t and the
+/// compact binary format can encode any value that fits in one, past 254,
+/// by escaping to a varint -- only a backstop so a search for a free branch
+/// terminates instead of looping forever if every one of four billion
+/// somehow were taken.
+constexpr std::uint32_t branchSearchCeiling =
+    std::numeric_limits<std::uint32_t>::max();
 
 std::string readWholeFile(const std::filesystem::path &path) {
   std::ifstream in(path, std::ios::binary);
@@ -76,6 +85,12 @@ void Store::putOp(const MicroversionId &produces, const Op &op) {
         op.parent.str() + ", but that name follows " + produces.parent().str());
   }
   ops.emplace(produces, op);
+
+  const auto parentIdx = opsSpool.indexOf(op.parent);
+  const auto sourceIdx =
+      op.source.isZero() ? 0U : opsSpool.indexOf(op.source);
+  const auto node = CompactOpNode::fromOp(op, parentIdx, sourceIdx);
+  opsSpool.append(node, produces);
 }
 
 const Op *Store::getOp(const MicroversionId &id) const {
@@ -127,14 +142,29 @@ void Store::replay(const Op &op, Version &onto) const {
     // reader go back to before it was made.
     break;
   }
+  case OpKind::PageBreak: {
+    onto.insertBreak(op.at);
+    break;
+  }
   }
 }
 
 Version Store::rebuild(const MicroversionId &version) const {
   Version built;
-  for (const auto &step : version.path()) {
-    if (const auto *const op = getOp(step); nullptr != op) {
-      replay(*op, built);
+  const auto targetIdx = opsSpool.indexOf(version);
+  if (targetIdx > 0) {
+    const auto path = opsSpool.ancestralPath(targetIdx);
+    for (const auto idx : path) {
+      const auto id = opsSpool.idOf(idx);
+      if (const auto *const op = getOp(id); nullptr != op) {
+        replay(*op, built);
+      }
+    }
+  } else {
+    for (const auto &step : version.path()) {
+      if (const auto *const op = getOp(step); nullptr != op) {
+        replay(*op, built);
+      }
     }
   }
   return built;
@@ -181,6 +211,9 @@ std::string Store::read(const PrimediaSpan &span) const {
   if (span.isLocal()) {
     return spool.read(span);
   }
+  if (const auto vocab = readVocabulary(span)) {
+    return *vocab;
+  }
   const auto *const which = scroll(span.scroll);
   if (nullptr == which) {
     return {};
@@ -207,6 +240,14 @@ MicroversionId Store::transcludeExternal(const MicroversionId &parent,
   return apply(parent, op);
 }
 
+MicroversionId Store::insertBreak(const MicroversionId &parent,
+                                  const std::uint32_t at) {
+  Op op;
+  op.kind = OpKind::PageBreak;
+  op.at   = at;
+  return apply(parent, op);
+}
+
 MicroversionId Store::apply(const MicroversionId &parent, Op op) {
   op.parent = parent;
 
@@ -219,15 +260,18 @@ MicroversionId Store::apply(const MicroversionId &parent, Op op) {
 
   // Something already follows it, so this is a second future for the same
   // state and gets a branch of its own. Nothing that already existed moves.
-  for (char letter = 'a'; letter <= 'z'; letter++) {
-    const auto branched = parent.branch(letter);
+  // Ordinals rather than 'a'..'z': a state can have more than twenty-six
+  // futures now, and the search just keeps counting past z into aa, ab, ...
+  // rather than giving up there.
+  for (std::uint32_t ordinal = 1; ordinal < branchSearchCeiling; ordinal++) {
+    const auto branched = parent.branch(ordinal);
     if (!ops.contains(branched)) {
       putOp(branched, op);
       return branched;
     }
   }
   throw std::runtime_error("microversion " + parent.str() +
-                           " already has twenty-six branches");
+                           " already has every branch a name can hold");
 }
 
 MicroversionId Store::insert(const MicroversionId &parent,
@@ -298,16 +342,36 @@ std::vector<const Link *> Store::linksTouching(const PrimediaSpan &span) const {
   return found;
 }
 
+std::optional<FormatAttribute>
+Store::formatAttributeOf(const Link &link) const {
+  if (LinkType::Format != link.type || link.right.empty()) {
+    return std::nullopt;
+  }
+  const auto &named = link.right.front();
+  for (const auto attribute : allFormatAttributes) {
+    if (named == vocabularySpanFor(attribute)) {
+      return attribute;
+    }
+  }
+  return std::nullopt;
+}
+
 std::vector<MicroversionId> Store::children(const MicroversionId &id) const {
   std::vector<MicroversionId> found;
   if (ops.contains(id.next())) {
     found.push_back(id.next());
   }
-  for (char letter = 'a'; letter <= 'z'; letter++) {
-    const auto branched = id.branch(letter);
-    if (ops.contains(branched)) {
-      found.push_back(branched);
+  // apply() always hands out the first free ordinal, and the spool is
+  // append-only, so branches off one state are never sparse -- ordinal 3
+  // existing means 1 and 2 were already taken when it was assigned. The
+  // first ordinal not found is therefore where the real ones stop, not a
+  // gap with more waiting past it.
+  for (std::uint32_t ordinal = 1; ordinal < branchSearchCeiling; ordinal++) {
+    const auto branched = id.branch(ordinal);
+    if (!ops.contains(branched)) {
+      break;
     }
+    found.push_back(branched);
   }
   return found;
 }
@@ -440,6 +504,7 @@ void Store::load(const std::string &directory) {
   const std::filesystem::path dir(directory);
   spool.adopt(readWholeFile(dir / primediaFile));
   ops.clear();
+  opsSpool.clear();
   linkTable.clear();
   externals.clear();
   nextLinkId = 1;
@@ -530,6 +595,13 @@ void Store::load(const std::string &directory) {
   if (std::filesystem::exists(dir / opsFile)) {
     std::ifstream in(dir / opsFile, std::ios::binary);
     readOpsSpool(in, ops);
+    for (const auto &[produces, op] : ops) {
+      const auto parentIdx = opsSpool.indexOf(op.parent);
+      const auto sourceIdx =
+          op.source.isZero() ? 0U : opsSpool.indexOf(op.source);
+      const auto node = CompactOpNode::fromOp(op, parentIdx, sourceIdx);
+      opsSpool.append(node, produces);
+    }
   }
 
   if (std::filesystem::exists(dir / linksFile)) {

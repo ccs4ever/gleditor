@@ -151,7 +151,14 @@ void Renderer::closeDoc(RenderState &state, const std::uint32_t index) {
   // stale would make clicks land on the wrong document.
   for (std::size_t i = 0; i < state.docs.size(); i++) {
     state.docs[i]->setDocIndex(static_cast<std::uint32_t>(i));
-    state.docs[i]->animateMoveTo(timeline, AbstractRenderer::documentSlot(i));
+    // Z is carried forward from the resting place the document opened at
+    // rather than reset to documentSlot(i)'s zero: a document opened into
+    // the background (RenderItemOpenDoc::depthZ) stays there when
+    // something ahead of it in the list closes, instead of snapping to the
+    // foreground plane every other document renumbers onto.
+    const auto slot = AbstractRenderer::documentSlot(i);
+    state.docs[i]->animateMoveTo(
+        timeline, glm::vec3(slot.x, slot.y, state.docs[i]->getModel()[3].z));
   }
 }
 
@@ -210,9 +217,18 @@ void Renderer::saveDoc(RenderState &state, const std::uint32_t index) {
                state);
 }
 
-void Renderer::openDoc(RenderState &state, const gleditor::TextSource &source) {
-  const auto newDocPosition = glm::translate(
-      glm::mat4(1.0), AbstractRenderer::documentSlot(state.docs.size()));
+void Renderer::openDoc(RenderState &state, const gleditor::TextSource &source,
+                       const float depthZ) {
+  // A background document (depthZ < 0) does not take the next seat in the
+  // foreground row -- documentSlot(state.docs.size()) counts every open
+  // document, background ones included, so it would otherwise land a corpus
+  // wedged in X between whatever foreground documents happen to flank it in
+  // the open order. Centred at the origin instead, it sits behind the row
+  // as a backdrop rather than inside it.
+  auto slot = depthZ < 0.0F ? glm::vec3(0.0F, 0.0F, 0.0F)
+                            : AbstractRenderer::documentSlot(state.docs.size());
+  slot.z                    = depthZ;
+  const auto newDocPosition = glm::translate(glm::mat4(1.0), slot);
   std::cout << "doc pos: " << state.docs.size() << " "
             << glm::to_string(newDocPosition) << "\n";
   auto docPtr = Doc::create(getPtr(), device.get(), newDocPosition, source);
@@ -404,7 +420,8 @@ bool Renderer::update(RenderState &state, const bool settled) {
     }
   }
 
-  if (settled && scriptFinished() && !this->state->screenshotPath.empty()) {
+  if (settled && !hasPendingWork() && scriptFinished() &&
+      !this->state->screenshotPath.empty()) {
     writeScreenshot(device->captureColorTarget(), this->state->screenshotPath);
     this->state->screenshotPath.clear();
   }
@@ -604,8 +621,15 @@ void Renderer::advanceScript(RenderState &state) {
     if (!caret->active() || caret->documentIndex() >= state.docs.size()) {
       std::cerr << "--type with no caret to type at; use --click first\n";
     } else {
-      state.docs[caret->documentIndex()]->insert(state, caret->byteOffset(),
-                                                 step.text, caret.get());
+      // Read before insert() moves the caret past what it is about to place.
+      const auto at  = caret->byteOffset();
+      auto &document = *state.docs[caret->documentIndex()];
+      document.insert(state, at, step.text, caret.get());
+      if (0 != step.decorations && this->state->onDecoratedInsert) {
+        this->state->onDecoratedInsert(
+            document, at, static_cast<std::uint32_t>(step.text.size()),
+            step.decorations);
+      }
     }
     // An edit schedules a reflow, and this frame was judged settled before it
     // was made. So the step is not finished here: it finishes on the next
@@ -767,8 +791,8 @@ void Renderer::dispatch(RenderState &state, RenderItem &item) {
     break;
   }
   case RenderItem::Type::OpenDoc: {
-    const auto &source = *dynamic_cast<RenderItemOpenDoc &>(item).source;
-    openDoc(state, source);
+    const auto &openItem = dynamic_cast<RenderItemOpenDoc &>(item);
+    openDoc(state, *openItem.source, openItem.depthZ);
     break;
   }
   case RenderItem::Type::Run: {
@@ -806,6 +830,15 @@ void Renderer::renderLoop(AutoSDLWindow &window) {
   device->setStrictDiagnostics(this->state->strictDiagnostics);
   if (this->state->noPresent) {
     device->setPresentEnabled(false);
+  }
+
+  int winW = 0;
+  int winH = 0;
+  SDL_GetWindowSizeInPixels(window.window, &winW, &winH);
+  if (winW > 0 && winH > 0) {
+    std::scoped_lock locker(this->state->view);
+    this->state->view.screenWidth  = winW;
+    this->state->view.screenHeight = winH;
   }
 
   RenderState state(device.get());
@@ -858,9 +891,9 @@ void Renderer::renderLoop(AutoSDLWindow &window) {
     }
 
     if (!firstPageRecorded && !state.pageBatches.empty()) {
-      timeToFirstPage = std::chrono::duration<double, std::milli>(
-                            std::chrono::steady_clock::now() - loopStart)
-                            .count();
+      timeToFirstPage   = std::chrono::duration<double, std::milli>(
+                              std::chrono::steady_clock::now() - loopStart)
+                              .count();
       firstPageRecorded = true;
       std::cout << std::format(
           "[TIMING] First page rendered: {:.2f} ms (docs in render: {})\n",

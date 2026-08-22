@@ -17,8 +17,11 @@
 #ifndef GLEDITOR_TEXT_SOURCE_H
 #define GLEDITOR_TEXT_SOURCE_H
 
+#include <cstdint>
+#include <gleditor/glyphcache/types.hpp>
 #include <string>
 #include <utility>
+#include <vector>
 
 namespace gleditor {
 
@@ -53,6 +56,33 @@ public:
   /// What to call this document in diagnostics and in the window. Need not be
   /// a path, and need not be unique.
   [[nodiscard]] virtual std::string name() const = 0;
+
+  /**
+   * @brief Byte offsets into text() where a page must end, whatever room is
+   *        left on it.
+   *
+   * Empty by default: a plain file or an in-memory buffer has no opinion
+   * about where it paginates, which is what every existing source keeps
+   * meaning by not overriding this. A source that does have forced breaks --
+   * xudu's, reading them out of Version::forcedBreaks() -- returns them
+   * sorted ascending, which is what lets a document find "the next one after
+   * here" by taking the first that is greater than the current offset rather
+   * than scanning for a minimum.
+   */
+  [[nodiscard]] virtual std::vector<std::uint32_t> forcedBreaks() const {
+    return {};
+  }
+
+  /**
+   * @brief Which decorations apply where in text(), as byte ranges into it.
+   *
+   * Empty by default, for the same reason forcedBreaks() is: plain text has
+   * no opinion about how it should be shown. Ranges may overlap; a glyph
+   * within more than one gets every decoration named across all of them.
+   */
+  [[nodiscard]] virtual std::vector<DecoratedRange> decoratedRanges() const {
+    return {};
+  }
 };
 
 /**

@@ -102,6 +102,46 @@ TEST(StoreTest, rearrangingMovesText) {
   EXPECT_EQ(store.textOf(store.rearrange(one, 4, 2, 0)), "efabcd");
 }
 
+TEST(StoreTest, insertBreakRecordsAPageBreakOp) {
+  Store store;
+  const auto one = store.insert(MicroversionId{}, 0, "abcdef");
+  const auto two = store.insertBreak(one, 3);
+
+  EXPECT_EQ(two.str(), "2");
+  // A break op changes no text, same as a link op.
+  EXPECT_EQ(store.textOf(two), "abcdef");
+  // rebuild() replays from the null document every time -- nothing here
+  // stores a version -- so this is proof the break comes back from the op
+  // itself, not from some Version object it happened to be created on.
+  EXPECT_THAT(store.rebuild(two).forcedBreaks(), testing::ElementsAre(3U));
+}
+
+TEST(StoreTest, aBreakSurvivesFurtherEditsInTheSameChain) {
+  Store store;
+  const auto one   = store.insert(MicroversionId{}, 0, "abcdef");
+  const auto two   = store.insertBreak(one, 3);
+  const auto three = store.insert(two, 0, "XY");
+
+  EXPECT_EQ(store.textOf(three), "XYabcdef");
+  EXPECT_THAT(store.rebuild(three).forcedBreaks(), testing::ElementsAre(5U));
+}
+
+TEST(StoreTest, aBreakDoesNotSurviveTranscludingThePassageItSitsIn) {
+  // The property the whole feature exists for: content quoted elsewhere
+  // carries its links (see aLinkIsPresentOnEveryDocumentQuotingTheContent
+  // below) but must not carry a break that only meant something about how
+  // the source happened to be laid out.
+  Store store;
+  const auto typed  = store.insert(MicroversionId{}, 0, "abcdef");
+  const auto source = store.insertBreak(typed, 3);
+
+  const auto quoting = store.insert(MicroversionId{}, 0, "prefix-");
+  const auto quoted  = store.transclude(quoting, 7, source, 0, 6);
+
+  EXPECT_EQ(store.textOf(quoted), "prefix-abcdef");
+  EXPECT_THAT(store.rebuild(quoted).forcedBreaks(), testing::IsEmpty());
+}
+
 TEST(StoreTest, nothingStoresAVersion) {
   // Versioning on demand: what is kept is content and operations, and the
   // number of operations is the number of edits -- no version among them.
@@ -299,6 +339,23 @@ TEST_F(StoreRoundTripTest, aStoreSurvivesBeingWrittenAndReadBack) {
   EXPECT_EQ(link.owner, "someone");
   EXPECT_EQ(link.left.front(), (PrimediaSpan{localScroll, 0, 5}));
   EXPECT_EQ(link.right.front(), (PrimediaSpan{localScroll, 5, 6}));
+}
+
+TEST_F(StoreRoundTripTest, aForcedBreakSurvivesTheCompactBinaryFormat) {
+  MicroversionId broken;
+  {
+    Store store;
+    const auto one = store.insert(MicroversionId{}, 0, "abcdef");
+    broken         = store.insertBreak(one, 3);
+    store.save(dir.string());
+  }
+
+  Store reloaded;
+  reloaded.load(dir.string());
+
+  EXPECT_EQ(reloaded.textOf(broken), "abcdef");
+  EXPECT_THAT(reloaded.rebuild(broken).forcedBreaks(),
+              testing::ElementsAre(3U));
 }
 
 TEST_F(StoreRoundTripTest, aStoreThatIsNotThereOpensEmpty) {

@@ -122,6 +122,8 @@ private:
     LinkEnd to;
     std::optional<Doc::Anchor> fromAnchor;
     std::optional<Doc::Anchor> toAnchor;
+    std::optional<Doc::Anchor> fromEndAnchor;
+    std::optional<Doc::Anchor> toEndAnchor;
     /// Whether the far document has already been brought alongside for this
     /// link. Once per link per generation: a document the reader has since
     /// moved should stay moved.
@@ -170,6 +172,18 @@ private:
   std::size_t builtDocs{static_cast<std::size_t>(-1)};
   bool visible{true};
   bool sworph{true};
+
+  /// Where the camera is easing towards, once align() has computed a new
+  /// framing target. Seeded from the camera's actual position the first time
+  /// it is used (see cameraAnimating), so the first move starts from wherever
+  /// the camera already was rather than from a default-constructed origin --
+  /// the same seed-then-ramp pattern Doc::animateArrival() uses for
+  /// documents themselves.
+  ch::Output<glm::vec3> cameraTarget;
+  /// Whether cameraTarget has been seeded yet. False until the first
+  /// alignment, so a scene nobody has sworphed in never moves the camera at
+  /// all.
+  bool cameraAnimating{false};
 
   /// Which beam an assistive technology asked to follow, if any. Filled on the
   /// event thread and taken on the render thread, where following one means

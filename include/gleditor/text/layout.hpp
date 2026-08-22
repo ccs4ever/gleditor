@@ -2,6 +2,7 @@
 
 #include <cstdint>
 #include <gleditor/doc.hpp>
+#include <gleditor/glyphcache/types.hpp>
 #include <gleditor/text/font.hpp>
 #include <memory>
 #include <string_view>
@@ -21,6 +22,10 @@ struct LayoutOptions {
                                ///< single-line titles/toasts)
   bool ellipsize{
       false}; ///< True to truncate with "..." if exceeding maxWidthPx
+  /// Which decorations apply where in this text slice, checked per glyph
+  /// cluster by its byte offset. Empty -- the default, and every caller
+  /// before this existed -- means no glyph in the page carries any.
+  std::vector<DecoratedRange> decoratedRanges{};
 };
 
 /**

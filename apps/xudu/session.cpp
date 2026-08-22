@@ -20,6 +20,8 @@
 #include <gleditor/render/types.hpp>
 #include <gleditor/render_state.hpp>
 
+#include "core/link_layout.hpp"
+
 namespace xudu {
 
 Session::Session(std::string aStorePath) : storePath(std::move(aStorePath)) {
@@ -420,7 +422,11 @@ void Session::refresh(const std::uint32_t docIndex,
 
 std::shared_ptr<VersionTextSource>
 Session::sourceFor(const MicroversionId &version) const {
-  return std::make_shared<VersionTextSource>(docStore.textOf(version), version);
+  // rebuild() once rather than textOf() (which would replay the same history
+  // again internally) plus a second rebuild() for forcedBreaks().
+  const auto rebuilt = docStore.rebuild(version);
+  return std::make_shared<VersionTextSource>(rebuilt.materialize(docStore),
+                                             version, rebuilt.forcedBreaks());
 }
 
 void Session::textInserted(Doc &doc, const std::uint32_t at,
@@ -451,6 +457,45 @@ void Session::textErased(Doc &doc, const std::uint32_t at,
   refresh(which, produced);
   std::cout << "xudu: " << produced.str() << " delete " << removed.size()
             << " bytes at " << at << "\n";
+}
+
+void Session::markDecorated(Doc &doc, const std::uint32_t at,
+                            const std::uint32_t length,
+                            const gleditor::DecorationMask mask) {
+  const auto which = doc.documentIndex();
+  if (which >= open.size()) {
+    return;
+  }
+  const auto content = docStore.rebuild(open[which].version).spansFor(at, length);
+  if (content.empty()) {
+    return;
+  }
+  auto version = open[which].version;
+  for (const auto decoration : {gleditor::Decoration::Bold,
+                                gleditor::Decoration::Italic,
+                                gleditor::Decoration::Underline,
+                                gleditor::Decoration::Overline,
+                                gleditor::Decoration::Strikethrough,
+                                gleditor::Decoration::Superscript,
+                                gleditor::Decoration::Subscript}) {
+    if (!gleditor::hasDecoration(mask, decoration)) {
+      continue;
+    }
+    const auto attribute = xudu::formatAttributeFromDecoration(decoration);
+    if (!attribute) {
+      continue; // unreachable: every gleditor::Decoration maps to one
+    }
+    Link link;
+    link.type = LinkType::Format;
+    link.owner = "--type";
+    link.left = content;
+    link.right.push_back(xudu::vocabularySpanFor(*attribute));
+    version = docStore.addLink(version, link);
+    std::cout << "xudu: " << version.str() << " format "
+              << xudu::formatAttributeName(*attribute) << " [" << at << ", "
+              << (at + length) << ")\n";
+  }
+  refresh(which, version);
 }
 
 void Session::decorate(const Doc &doc, std::vector<gleditor::SpanStyle> &out) {
@@ -484,14 +529,21 @@ void Session::decorate(const Doc &doc, std::vector<gleditor::SpanStyle> &out) {
   }
 
   // Passages a link is attached to. A link names content, so it shows up here
-  // for any document quoting that content, which is the whole of Nelson's
-  // "present on all manifestations".
+  // for any document quoting that content, matching the link beam's color.
+  // Format links are excluded: they change the glyphs themselves rather than
+  // painting a background behind them, and until that shaping path exists
+  // the honest behaviour is no visible effect at all rather than a
+  // background colour that looks like a stray comment or quotation link.
   for (const auto &[id, link] : docStore.links()) {
+    if (xudu::LinkType::Format == link.type) {
+      continue;
+    }
+    const auto colour = xudu::linkColour(link.type, link.tier);
     for (const auto *const ends : {&link.left, &link.right}) {
       for (const auto &span : *ends) {
         for (const auto &extent : mine.occurrencesOf(span)) {
-          found.push_back(gleditor::SpanStyle{extent.start, extent.end,
-                                              Session::linkColour});
+          found.push_back(
+              gleditor::SpanStyle{extent.start, extent.end, colour});
         }
       }
     }

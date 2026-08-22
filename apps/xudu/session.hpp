@@ -56,16 +56,22 @@ class Session;
  */
 class VersionTextSource : public gleditor::TextSource {
 public:
-  VersionTextSource(std::string aText, MicroversionId aVersion)
-      : contents(std::move(aText)), id(std::move(aVersion)) {}
+  VersionTextSource(std::string aText, MicroversionId aVersion,
+                    std::vector<std::uint32_t> aBreaks = {})
+      : contents(std::move(aText)), id(std::move(aVersion)),
+        breaks(std::move(aBreaks)) {}
 
   [[nodiscard]] std::string text() const override { return contents; }
   [[nodiscard]] std::string name() const override { return id.str(); }
   [[nodiscard]] const MicroversionId &version() const { return id; }
+  [[nodiscard]] std::vector<std::uint32_t> forcedBreaks() const override {
+    return breaks;
+  }
 
 private:
   std::string contents;
   MicroversionId id;
+  std::vector<std::uint32_t> breaks;
 };
 
 /**
@@ -384,6 +390,19 @@ public:
                     const std::string &utf8) override;
   void textErased(Doc &doc, std::uint32_t at,
                   const std::string &removed) override;
+
+  /**
+   * @brief AppState::onDecoratedInsert's target: --type named decorations
+   *        for text it just inserted, so record them as format links.
+   *
+   * Called after textInserted() has already advanced this document to the
+   * version the insertion produced, so @p at / @p length address that
+   * version directly. One Format link per decoration named in @p mask, all
+   * sharing the same left content, each its own point in hypertime the same
+   * as any other link.
+   */
+  void markDecorated(Doc &doc, std::uint32_t at, std::uint32_t length,
+                     gleditor::DecorationMask mask);
 
   // -- gleditor::SpanDecorator ----------------------------------------------
   //

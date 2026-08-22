@@ -1,5 +1,6 @@
 #include "binary_ops.hpp"
 
+#include <functional>
 #include <iostream>
 #include <sstream>
 #include <stdexcept>
@@ -15,6 +16,7 @@ enum OpBinaryKind : std::uint8_t {
   BinTranscludeInternal = 3,
   BinTranscludeExternal = 4,
   BinLink               = 5,
+  BinPageBreak          = 6,
 };
 
 constexpr std::uint8_t FLAG_KIND_MASK       = 0x07;
@@ -22,6 +24,14 @@ constexpr std::uint8_t FLAG_SEQUENTIAL      = 0x08;
 constexpr std::uint8_t FLAG_LOCAL_SCROLL    = 0x10;
 constexpr std::uint8_t FLAG_AT_EQUALS_START = 0x20;
 constexpr std::uint8_t FLAG_SINGLE_BYTE     = 0x40;
+
+/// Version 2's branch byte: 0-254 name that ordinal directly, and 255 means
+/// "the real ordinal is a varint that follows" -- see
+/// OpsSpoolVersion::CompactBinaryV2. 254 direct values covers every branch
+/// count a document has ever needed here by a wide margin; the escape exists
+/// for whatever documents this has not seen yet, at the cost of one byte only
+/// when it is actually used.
+constexpr std::uint32_t branchOrdinalEscape = 255;
 
 } // namespace
 
@@ -60,7 +70,12 @@ void writeMicroversionId(std::ostream &out, const MicroversionId &id) {
   const auto &segs = id.segments();
   writeVarint(out, segs.size());
   for (const auto &seg : segs) {
-    out.put(seg.branch);
+    if (seg.branch < branchOrdinalEscape) {
+      out.put(static_cast<char>(seg.branch));
+    } else {
+      out.put(static_cast<char>(branchOrdinalEscape));
+      writeVarint(out, seg.branch);
+    }
     writeVarint(out, seg.number);
   }
 }
@@ -80,12 +95,55 @@ bool readMicroversionId(std::istream &in, MicroversionId &id) {
     if (c == std::char_traits<char>::eof()) {
       return false;
     }
+    auto branch = static_cast<std::uint32_t>(static_cast<std::uint8_t>(c));
+    if (branchOrdinalEscape == branch) {
+      std::uint64_t extended = 0;
+      if (!readVarint(in, extended)) {
+        return false;
+      }
+      branch = static_cast<std::uint32_t>(extended);
+    }
     std::uint64_t num = 0;
     if (!readVarint(in, num)) {
       return false;
     }
-    segs.push_back(MicroversionId::Segment{static_cast<char>(c),
-                                           static_cast<std::uint32_t>(num)});
+    segs.push_back(
+        MicroversionId::Segment{branch, static_cast<std::uint32_t>(num)});
+  }
+  id = MicroversionId(std::move(segs));
+  return true;
+}
+
+bool readMicroversionIdV1(std::istream &in, MicroversionId &id) {
+  std::uint64_t count = 0;
+  if (!readVarint(in, count)) {
+    return false;
+  }
+  if (count > 4096) {
+    return false;
+  }
+  std::vector<MicroversionId::Segment> segs;
+  segs.reserve(std::min<std::size_t>(static_cast<std::size_t>(count), 64));
+  for (std::uint64_t i = 0; i < count; i++) {
+    const int c = in.get();
+    if (c == std::char_traits<char>::eof()) {
+      return false;
+    }
+    std::uint64_t num = 0;
+    if (!readVarint(in, num)) {
+      return false;
+    }
+    // A version 1 byte is the literal branch letter, or ' ' for none. Only
+    // ever one letter -- version 1 could not write more -- so its ordinal is
+    // the same one-letter arithmetic MicroversionId::parse() uses, inlined
+    // rather than shared: this is the one place bijective base 26 stays a
+    // single letter forever, by construction of the format being read.
+    std::uint32_t branch = MicroversionId::noBranch;
+    if (' ' != c) {
+      branch = static_cast<std::uint32_t>(std::tolower(c) - 'a') + 1;
+    }
+    segs.push_back(
+        MicroversionId::Segment{branch, static_cast<std::uint32_t>(num)});
   }
   id = MicroversionId(std::move(segs));
   return true;
@@ -190,13 +248,28 @@ void writeBinaryOpsSpool(std::ostream &out,
       }
       writeVarint(out, op.link);
       break;
+
+    case OpKind::PageBreak:
+      tag |= BinPageBreak;
+      out.put(static_cast<char>(tag));
+      if (!isSequential) {
+        writeMicroversionId(out, produces);
+      }
+      writeVarint(out, op.at);
+      break;
     }
 
     lastProduces = produces;
   }
 }
 
-void readBinaryOpsSpool(std::istream &in, std::map<MicroversionId, Op> &ops) {
+/// Shared by readBinaryOpsSpool() and readBinaryOpsSpoolV1(): everything
+/// about the tag-based op encoding is the same between the two versions,
+/// and @p readId is the one place they differ -- see
+/// OpsSpoolVersion::CompactBinaryV2.
+void readBinaryOpsSpoolImpl(
+    std::istream &in, std::map<MicroversionId, Op> &ops,
+    const std::function<bool(std::istream &, MicroversionId &)> &readId) {
   MicroversionId lastProduces{};
   while (true) {
     const int c = in.get();
@@ -211,7 +284,7 @@ void readBinaryOpsSpool(std::istream &in, std::map<MicroversionId, Op> &ops) {
     if (isSequential) {
       produces = lastProduces.next();
     } else {
-      if (!readMicroversionId(in, produces)) {
+      if (!readId(in, produces)) {
         throw std::runtime_error("malformed binary op: truncated microversion");
       }
     }
@@ -289,7 +362,7 @@ void readBinaryOpsSpool(std::istream &in, std::map<MicroversionId, Op> &ops) {
         throw std::runtime_error("malformed binary transclude op");
       }
       op.at = static_cast<std::uint32_t>(v1);
-      if (!readMicroversionId(in, op.source)) {
+      if (!readId(in, op.source)) {
         throw std::runtime_error("malformed binary transclude source");
       }
       if (!readVarint(in, v2) || !readVarint(in, v3)) {
@@ -319,6 +392,14 @@ void readBinaryOpsSpool(std::istream &in, std::map<MicroversionId, Op> &ops) {
       op.link = v1;
       break;
 
+    case BinPageBreak:
+      op.kind = OpKind::PageBreak;
+      if (!readVarint(in, v1)) {
+        throw std::runtime_error("malformed binary pagebreak op");
+      }
+      op.at = static_cast<std::uint32_t>(v1);
+      break;
+
     default:
       throw std::runtime_error("unknown binary op kind tag: " +
                                std::to_string(tag));
@@ -327,6 +408,14 @@ void readBinaryOpsSpool(std::istream &in, std::map<MicroversionId, Op> &ops) {
     ops.emplace(produces, op);
     lastProduces = produces;
   }
+}
+
+void readBinaryOpsSpool(std::istream &in, std::map<MicroversionId, Op> &ops) {
+  readBinaryOpsSpoolImpl(in, ops, readMicroversionId);
+}
+
+void readBinaryOpsSpoolV1(std::istream &in, std::map<MicroversionId, Op> &ops) {
+  readBinaryOpsSpoolImpl(in, ops, readMicroversionIdV1);
 }
 
 void writeOsmicTextOpsSpool(std::ostream &out,
@@ -373,6 +462,8 @@ void readOsmicTextOpsSpool(std::istream &in,
       op.kind = OpKind::Transclude;
     } else if ("link" == kind) {
       op.kind = OpKind::Link;
+    } else if ("pagebreak" == kind) {
+      op.kind = OpKind::PageBreak;
     } else {
       throw std::runtime_error("unknown operation \"" + kind + "\"");
     }
@@ -386,6 +477,8 @@ const char *opsSpoolVersionName(const OpsSpoolVersion version) {
     return "OSMIC text (v0)";
   case OpsSpoolVersion::CompactBinaryV1:
     return "Compact binary (v1)";
+  case OpsSpoolVersion::CompactBinaryV2:
+    return "Compact binary (v2)";
   }
   return "unknown";
 }
@@ -405,6 +498,9 @@ OpsSpoolVersion detectOpsSpoolVersion(std::istream &in) {
     if (ver == static_cast<int>(OpsSpoolVersion::CompactBinaryV1)) {
       return OpsSpoolVersion::CompactBinaryV1;
     }
+    if (ver == static_cast<int>(OpsSpoolVersion::CompactBinaryV2)) {
+      return OpsSpoolVersion::CompactBinaryV2;
+    }
     throw std::runtime_error("unsupported binary ops spool version: " +
                              std::to_string(ver));
   }
@@ -417,6 +513,9 @@ void readOpsSpool(std::istream &in, std::map<MicroversionId, Op> &ops) {
   const auto version = detectOpsSpoolVersion(in);
   switch (version) {
   case OpsSpoolVersion::CompactBinaryV1:
+    readBinaryOpsSpoolV1(in, ops);
+    break;
+  case OpsSpoolVersion::CompactBinaryV2:
     readBinaryOpsSpool(in, ops);
     break;
   case OpsSpoolVersion::StandardOsmicText:
