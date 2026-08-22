@@ -199,6 +199,30 @@ to sanity-check `.editorconfig` itself, not as a gate.
   SDL, pangomm, or anything else the build needs. A goal that does need a
   compiler must not be added to `NO_SDL_GOALS`.
 
+## Gotchas worth knowing before editing xudu's spool persistence
+
+- `apps/xudu/core/store.cpp`'s `ops.spool` is binary records
+  (`encodeOpRecord()`/`decodeOpRecord()` in `ops.hpp`), not the
+  one-line-per-operation text older builds wrote. `load()` still reads that
+  text shape when it finds no binary magic header at the start of the file —
+  don't remove that fallback without a migration story for anyone still
+  holding a store written before this existed.
+- `Store::save()` is incremental for both spools: `opsFlushed` /
+  `flushedOpsDirectory` and `primediaFlushed` / `flushedPrimediaDirectory`
+  track how much of each is already on disk, and a save to the same
+  directory as the last one appends only what changed rather than rewriting
+  the whole spool. Touching either save block without keeping its cursor in
+  step turns an O(new) save back into an O(total history) one, or worse,
+  duplicates bytes already on disk.
+- `sealLocalSpool()` (`publication.cpp`) folds the operations history into
+  the sealed torrent too, as a fourth file addressed by its own
+  `SealedScroll::opsScroll` — a separate `Scroll` identity from the
+  content's `scroll`, since the two are different byte streams that both
+  start at offset zero. See `design/ops-spool-format.md` for the full
+  reasoning behind the binary format, the incremental-save cursors, and why
+  the ops log gets its own scroll rather than a further segment of the
+  content's.
+
 ## Known gaps / TODO
 
 - **Touch and gesture support.** The Android build (`packaging/android/`)
