@@ -104,8 +104,16 @@ struct RenderItemResize : RenderItem {
  */
 struct RenderItemOpenDoc : RenderItem {
   std::shared_ptr<gleditor::TextSource> source;
-  explicit RenderItemOpenDoc(std::shared_ptr<gleditor::TextSource> aSource)
-      : RenderItem(Type::OpenDoc), source(std::move(aSource)) {}
+  /// World-unit Z the document opens at, in front of (positive) or behind
+  /// (negative) the usual plane every other document sits on. Zero for the
+  /// ordinary case; a program placing something in the background -- a
+  /// corpus behind the documents actually being read -- gives its own
+  /// depth here rather than moving the document again once it exists.
+  float depthZ{0.0F};
+  explicit RenderItemOpenDoc(std::shared_ptr<gleditor::TextSource> aSource,
+                             const float aDepthZ = 0.0F)
+      : RenderItem(Type::OpenDoc), source(std::move(aSource)), depthZ(aDepthZ) {
+  }
   /// Convenience for the common case: a document that is a file on disk.
   explicit RenderItemOpenDoc(const std::string &fileName)
       : RenderItem(Type::OpenDoc),
@@ -402,8 +410,11 @@ private:
 protected:
   /**
    * Open a document over @p source and prepare it for rendering.
+   * @param depthZ Z the document's resting place is offset by; see
+   *        RenderItemOpenDoc::depthZ.
    */
-  void openDoc(RenderState &state, const gleditor::TextSource &source);
+  void openDoc(RenderState &state, const gleditor::TextSource &source,
+               float depthZ = 0.0F);
 
   /**
    * Create a new empty document and initialize any default resources.

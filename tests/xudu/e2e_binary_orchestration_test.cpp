@@ -179,29 +179,32 @@ fs::path getScreenshotDir() {
   return fs::current_path() / "build" / "integration_screenshots";
 }
 
-// Helper prose generation functions for binary orchestration tests
 std::string makeMultiPageText(std::size_t pageCount, const std::string &topic) {
+  // Calibrated against the app's actual page layout (139.7 DPI, 11in-tall
+  // Letter page) rather than guessed: with a ~30-character topic name
+  // embedded in every filler line, 22 filler lines is where a page's real
+  // rendered capacity tips over into a second physical page (measured with
+  // a throwaway single-page probe against the real xudu binary). 20 leaves
+  // a small margin so a somewhat longer topic name still lands close to
+  // one requested page per one rendered page, instead of the ~3x overshoot
+  // the old fixed 82-line count produced (an 8-page request rendering as
+  // 27 real pages).
+  constexpr std::size_t linesPerLogicalPage = 20;
   std::string text;
   for (std::size_t p = 1; p <= pageCount; ++p) {
-    if (p > 1) {
-      text += "\f";
-    }
     text += "=== " + topic + " - Page " + std::to_string(p) + " of " +
             std::to_string(pageCount) + " ===\n";
     text += "The initial sentence establishes fundamental axioms of "
             "hyperstructure and coordinate manifolds.\n";
-    text += "Every transclusion preserves immutable cryptographic provenance "
-            "across distributed storage networks.\n";
+    for (std::size_t line = 3; line <= 2 + linesPerLogicalPage; ++line) {
+      text += "Line " + std::to_string(line) +
+              ": Content chunk validating manifold invariants in " + topic +
+              " page " + std::to_string(p) + ".\n";
+    }
     text += "Visual variables and Bertin semiology govern graphical density, "
             "color hue, and spatial separation.\n";
-    text += "Multi-strand ribbon connectivity radiates dynamically across the "
-            "inter-document traversal corridor.\n";
-    text += "Centroid alignment centers the midpoint of all active link ranges "
-            "smoothly within the frustum.\n";
-    text += "Camera auto-zooming scales the field of view distance to maintain "
-            "complete boundary visibility.\n";
     text += "Concluding summary of section " + std::to_string(p) +
-            " confirming robust mathematical invariants.\n";
+            " confirming robust mathematical invariants.\n\n";
   }
   return text;
 }
@@ -912,7 +915,15 @@ TEST(E2EBinaryOrchestrationTest,
 
     // Many-to-Many link from Page 1 Sentence 1 to Page N Last Sentence
     Link extremeLink;
-    extremeLink.type  = LinkType::Quotation;
+    if (pages == 3) {
+      extremeLink.type = LinkType::Illustration;
+    } else if (pages == 5) {
+      extremeLink.type = LinkType::Comment;
+    } else if (pages == 8) {
+      extremeLink.type = LinkType::Disagreement;
+    } else {
+      extremeLink.type = LinkType::Authorship;
+    }
     extremeLink.owner = "ExtremeSymmetricCurator";
 
     // Doc A: Page 1 sentence 1 and Page N last sentence
@@ -1017,6 +1028,8 @@ TEST(E2EBinaryOrchestrationTest,
                       storePath.string();
 
     const auto res = executeProcess(cmd);
+    std::cout << "ASYMM (" << pagesA << "x" << pagesB << ") OUTPUT:\n"
+              << res.output << "\n";
     EXPECT_EQ(res.exitCode, 0) << "Asymmetric " << pagesA << "x" << pagesB
                                << "-page test failed: " << res.output;
     EXPECT_TRUE(fs::exists(ppmPath)) << "Asymmetric " << pagesA << "x" << pagesB
@@ -1043,50 +1056,235 @@ TEST(E2EBinaryOrchestrationTest,
   fs::create_directories(testRoot);
   fs::create_directories(screenshotDir);
 
-  // Primary Thesis in Foreground (1 Page, 15+ lines)
+  // The exact sentences the corpus opens and closes on, reused verbatim as
+  // the text of two small standalone "page" documents below. Reused rather
+  // than transcluded (a virtual copy sharing the corpus's own primedia
+  // address) on purpose: a link built on a shared address would match
+  // wherever that address appears, including the corpus itself once it is
+  // open, and sworph would be just as willing to bring the whole corpus
+  // forward as the small excerpt -- exactly what putting the corpus in the
+  // background is meant to avoid. Independent text keeps the link aimed at
+  // only the small page, while still reading, word for word, as the same
+  // page a reader would find inside the corpus.
+  const std::string openingSentence =
+      "This exact opening sentence also begins the corpus shown behind it, "
+      "verbatim.";
+  const std::string closingSentence =
+      "This exact closing sentence also ends the corpus shown behind it, "
+      "verbatim.";
+
+  // Foreground: a short thesis whose opening and closing claims each cite
+  // one of those two corpus pages.
   const auto text1 = makeFullPageProse("Primary Thesis Investigation",
-                                       "Deep Corpus Reference in 3D Space");
-  // Massive Reference Corpus in Background (8 Pages)
-  const auto text2 = makeMultiPageText(8, "Universal_Encyclopedic_Corpus");
+                                       "Corpus Cross-Reference Study");
+
+  // Background: the corpus itself, large, opening and closing on the same
+  // two sentences -- shown in full for spatial context (where do these two
+  // excerpts actually sit in it), but never itself the target of a link,
+  // so it never becomes the far end an alignment brings forward.
+  const auto corpusBody = makeMultiPageText(8, "Universal_Encyclopedic_Corpus");
+  const auto corpusText =
+      openingSentence + "\n\n" + corpusBody + "\n\n" + closingSentence;
 
   const auto storePath = testRoot / "store_flyin";
   Store readerStore;
-  const auto v1 = readerStore.insert(MicroversionId{}, 0, text1);
-  const auto v2 = readerStore.insert(MicroversionId{}, 0, text2);
+  const auto vThesis = readerStore.insert(MicroversionId{}, 0, text1);
+  const auto vCorpus = readerStore.insert(MicroversionId{}, 0, corpusText);
+  const auto vPageTop =
+      readerStore.insert(MicroversionId{}, 0, openingSentence);
+  const auto vPageBottom =
+      readerStore.insert(MicroversionId{}, 0, closingSentence);
 
-  const auto v1Obj = readerStore.rebuild(v1);
-  const auto v2Obj = readerStore.rebuild(v2);
+  const auto thesisObj     = readerStore.rebuild(vThesis);
+  const auto pageTopObj    = readerStore.rebuild(vPageTop);
+  const auto pageBottomObj = readerStore.rebuild(vPageBottom);
 
-  // Link connects section on Thesis to Page 5 of Background Corpus
-  Link flyInLink;
-  flyInLink.type  = LinkType::Quotation;
-  flyInLink.owner = "CorpusFlyInCurator";
-  flyInLink.left.push_back(v1Obj.spansFor(250, 80).front());
-  // Offset into page 5 of corpus
-  const std::size_t p5Offset = (text2.size() / 8) * 4 + 40;
-  flyInLink.right.push_back(
-      v2Obj.spansFor(static_cast<std::uint32_t>(p5Offset), 80).front());
+  // The thesis's own opening claim and closing claim -- the same
+  // "top sentence / bottom sentence" shape the asymmetric extreme-framing
+  // suite links between two whole documents, here linking instead to the
+  // two small pages pulled out of the corpus.
+  const std::string thesisTopPhrase = "In the design of universal hypermedia";
+  const std::string thesisBottomPhrase = "Hypertime branches preserve";
+  const auto thesisTopAt               = text1.find(thesisTopPhrase);
+  ASSERT_NE(thesisTopAt, std::string::npos);
+  const auto thesisBottomAt = text1.find(thesisBottomPhrase);
+  ASSERT_NE(thesisBottomAt, std::string::npos);
 
-  const auto vLinked = readerStore.addLink(v1, flyInLink);
+  Link topLink;
+  topLink.type  = LinkType::Quotation;
+  topLink.owner = "CorpusFlyInCurator";
+  topLink.left.push_back(
+      thesisObj
+          .spansFor(static_cast<std::uint32_t>(thesisTopAt),
+                    static_cast<std::uint32_t>(thesisTopPhrase.size()))
+          .front());
+  topLink.right.push_back(
+      pageTopObj.spansFor(0, static_cast<std::uint32_t>(openingSentence.size()))
+          .front());
+  auto vLinked = readerStore.addLink(vThesis, topLink);
+
+  Link bottomLink;
+  bottomLink.type  = LinkType::Quotation;
+  bottomLink.owner = "CorpusFlyInCurator";
+  bottomLink.left.push_back(
+      thesisObj
+          .spansFor(static_cast<std::uint32_t>(thesisBottomAt),
+                    static_cast<std::uint32_t>(thesisBottomPhrase.size()))
+          .front());
+  bottomLink.right.push_back(
+      pageBottomObj
+          .spansFor(0, static_cast<std::uint32_t>(closingSentence.size()))
+          .front());
+  vLinked = readerStore.addLink(vLinked, bottomLink);
+
   readerStore.save(storePath.string());
 
   const auto ppmPath = screenshotDir / "large_multipage_background_flyin.ppm";
   const auto pngPath = screenshotDir / "large_multipage_background_flyin.png";
 
+  // Foreground: the thesis. Background: the corpus, and the two pages --
+  // opened alongside it at the same depth, so each starts out part of the
+  // unread background and sworphs forward into the foreground row only
+  // once its link to the thesis comes into view.
   std::string cmd = xuduBin.string() + " --backend " + activeBackend() +
                     " --profile --fov 15 --coarse-below 0" + " --version-id " +
-                    vLinked.str() + " --alongside " + v2.str() +
-                    " --screenshot " + ppmPath.string() + " " +
-                    storePath.string();
+                    vLinked.str() + " --background " + vCorpus.str() +
+                    " --background " + vPageTop.str() + " --background " +
+                    vPageBottom.str() + " --screenshot " + ppmPath.string() +
+                    " " + storePath.string();
 
   const auto res = executeProcess(cmd);
   EXPECT_EQ(res.exitCode, 0) << "Fly-in test failed: " << res.output;
   EXPECT_TRUE(fs::exists(ppmPath)) << "Fly-in screenshot missing";
+  // LinkBeams::align()'s trace: proof the two pages actually flew forward
+  // rather than merely being linked.
+  EXPECT_NE(res.output.find("aligns centroid"), std::string::npos)
+      << "background flyin never brought a linked page forward:\n"
+      << res.output;
 
   const auto info = inspectPpm(ppmPath);
   EXPECT_TRUE(info.valid) << "Fly-in PPM invalid: " << info.errorMessage;
   EXPECT_GE(info.distinctColors, 20U);
   exportToPng(ppmPath, pngPath);
+}
+
+TEST(E2EBinaryOrchestrationTest,
+     forcedPageBreakSplitsAPageThatWouldOtherwiseFit) {
+  const auto xuduBin = findXuduBinary();
+  ASSERT_TRUE(fs::exists(xuduBin)) << "xudu binary not found at " << xuduBin;
+
+  const auto testRoot =
+      fs::current_path() / "build" / "integration_workspace_pagebreak";
+  const auto screenshotDir = getScreenshotDir();
+  fs::remove_all(testRoot);
+  fs::create_directories(testRoot);
+  fs::create_directories(screenshotDir);
+
+  const std::string firstParagraph = "First paragraph, short and plain.\n\n";
+  const std::string secondParagraph =
+      "Second paragraph, also short and plain.\n";
+  const std::string text = firstParagraph + secondParagraph;
+
+  Store store;
+  const auto whole = store.insert(MicroversionId{}, 0, text);
+  // A break exactly between the two paragraphs: nothing about laying out
+  // twenty-odd words should ever need a second physical page on its own,
+  // which is the point -- the only reason one exists here is the break.
+  const auto broken = store.insertBreak(
+      whole, static_cast<std::uint32_t>(firstParagraph.size()));
+  const auto storePath = testRoot / "store";
+  store.save(storePath.string());
+
+  const auto runAndCountPages = [&](const MicroversionId &version,
+                                    const std::string &label) {
+    const auto ppmPath    = screenshotDir / (label + ".ppm");
+    const std::string cmd = xuduBin.string() + " --backend " + activeBackend() +
+                            " --profile --version-id " + version.str() +
+                            " --screenshot " + ppmPath.string() + " " +
+                            storePath.string();
+    const auto res        = executeProcess(cmd);
+    EXPECT_EQ(res.exitCode, 0) << label << " failed: " << res.output;
+    const auto marker = std::string("total pages: ");
+    const auto at     = res.output.find(marker);
+    EXPECT_NE(at, std::string::npos) << label << ": no page count in output:\n"
+                                     << res.output;
+    return at == std::string::npos
+               ? -1
+               : std::atoi(res.output.c_str() + at + marker.size());
+  };
+
+  EXPECT_EQ(runAndCountPages(whole, "pagebreak_unbroken"), 1)
+      << "the unbroken text was expected to fit on one physical page";
+  EXPECT_EQ(runAndCountPages(broken, "pagebreak_forced"), 2)
+      << "a forced break between the two paragraphs should split them onto "
+         "separate physical pages";
+}
+
+TEST(E2EBinaryOrchestrationTest, typeWithDecorationsRecordsAFormatLink) {
+  const auto xuduBin = findXuduBinary();
+  ASSERT_TRUE(fs::exists(xuduBin)) << "xudu binary not found at " << xuduBin;
+
+  const auto testRoot =
+      fs::current_path() / "build" / "integration_workspace_type_decorated";
+  const auto screenshotDir = getScreenshotDir();
+  fs::remove_all(testRoot);
+  fs::create_directories(testRoot);
+  fs::create_directories(screenshotDir);
+
+  Store store;
+  const auto whole     = store.insert(MicroversionId{}, 0, "hello world");
+  const auto storePath = testRoot / "store";
+  store.save(storePath.string());
+
+  const auto ppmPath = screenshotDir / "type_decorated.ppm";
+  // The click lands at the middle of the screenshot, which for a single
+  // short line centred in frame resolves to a caret offset inside the text
+  // -- exactly where is read back from "caret ...: doc 0 offset N" below
+  // rather than assumed, so this does not silently start asserting against
+  // the wrong byte range if rendering ever centres the line differently.
+  std::string cmd = xuduBin.string() + " --backend " + activeBackend() +
+                    " --profile --fov 15 --version-id " + whole.str() +
+                    " --click 1918,1053 --type '[bold,italic]MARKERWORD' "
+                    "--do save --screenshot " +
+                    ppmPath.string() + " " + storePath.string();
+
+  const auto res = executeProcess(cmd);
+  EXPECT_EQ(res.exitCode, 0) << "type-decorated test failed: " << res.output;
+
+  const auto caretMarker = std::string("offset ");
+  const auto caretAt     = res.output.find(caretMarker);
+  ASSERT_NE(caretAt, std::string::npos)
+      << "--click never resolved to a caret offset:\n"
+      << res.output;
+  const auto insertedAt = static_cast<std::uint32_t>(
+      std::atoi(res.output.c_str() + caretAt + caretMarker.size()));
+
+  const std::string marker = "MARKERWORD";
+
+  Store reloaded;
+  reloaded.load(storePath.string());
+  const auto finalVersion = reloaded.latest();
+  const auto finalText    = reloaded.textOf(finalVersion);
+  ASSERT_NE(finalText.find(marker), std::string::npos)
+      << "typed text never made it into the saved store: " << finalText;
+
+  const auto typedSpans =
+      reloaded.rebuild(finalVersion).spansFor(insertedAt, marker.size());
+  ASSERT_FALSE(typedSpans.empty());
+
+  std::set<xudu::FormatAttribute> found;
+  for (const auto &span : typedSpans) {
+    for (const auto *const link : reloaded.linksTouching(span)) {
+      if (const auto attribute = reloaded.formatAttributeOf(*link)) {
+        found.insert(*attribute);
+      }
+    }
+  }
+  EXPECT_THAT(found,
+              testing::UnorderedElementsAre(xudu::FormatAttribute::Bold,
+                                            xudu::FormatAttribute::Italic))
+      << "--type '[bold,italic]...' should have recorded both as Format "
+         "links over the typed text";
 }
 
 } // namespace

@@ -503,11 +503,25 @@ if [ -x "$XUDU_TEST_BIN" ]; then
     echo "  $backend completed all E2E binary orchestration scenarios"
   done
 
-  # Allow 20% tolerance across backends for extreme multi-page and full-page
-  # ribbon suites due to subpixel text filtering at extreme distance (Z > 1000)
-  # and cubic Bézier gradient blend rasterization across diverse GPU drivers.
-  XUDU_GL_TOLERANCE_PCT="${XUDU_GL_TOLERANCE_PCT:-20}"
-  XUDU_VK_TOLERANCE_PCT="${XUDU_VK_TOLERANCE_PCT:-20}"
+  # Measured directly against fullPageMultiTypeLinksOrchestration (the
+  # scenario with the most beam geometry: a full-page many-to-many mesh),
+  # each backend in its own fresh, non-overwritten screenshot directory so
+  # a stale file from an earlier run cannot read back as a false parity
+  # failure or a false pass:
+  #   opengl vs opengl, two separate runs (repeatability floor): 0.0017%
+  #   opengl vs opengles:                                        0.0008%
+  #   opengl vs vulkan:                                          9.25%
+  # OpenGL and OpenGL ES agree almost exactly, same as this script's own
+  # GL_TOLERANCE_PCT expects for plain document rendering above -- the beam
+  # pipeline (src/beams.cpp, assets/shaders/beam.*.glsl) does not
+  # meaningfully diverge between them. Vulkan's gap is real and an order of
+  # magnitude past its own VK_TOLERANCE_PCT (1%) for glyph-only rendering,
+  # which says the beam shaders specifically rasterise more differently on
+  # Vulkan than glyphs do -- worth narrowing down on its own, but not
+  # something this suite has done yet, so the limit here is set with
+  # headroom over what was actually measured rather than a guess.
+  XUDU_GL_TOLERANCE_PCT="${XUDU_GL_TOLERANCE_PCT:-1}"
+  XUDU_VK_TOLERANCE_PCT="${XUDU_VK_TOLERANCE_PCT:-12}"
 
   OUT="$OUT" BACKENDS="$backends" XUDU_STEPS="$XUDU_STEPS" \
     XUDU_GL_TOLERANCE_PCT="$XUDU_GL_TOLERANCE_PCT" \
@@ -565,5 +579,3 @@ sys.exit(1 if failed else 0)
 PYEOF
   echo "all backends agree across all E2E binary orchestration integration scenarios"
 fi
-
-

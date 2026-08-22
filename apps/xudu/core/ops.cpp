@@ -17,6 +17,8 @@ const char *opKindName(const OpKind kind) {
     return "transclude";
   case OpKind::Link:
     return "link";
+  case OpKind::PageBreak:
+    return "pagebreak";
   }
   return "insert";
 }
@@ -35,6 +37,8 @@ const char *linkTypeName(const LinkType type) {
     return "quotation";
   case LinkType::Other:
     return "other";
+  case LinkType::Format:
+    return "format";
   }
   return "other";
 }
@@ -54,6 +58,9 @@ LinkType linkTypeFromName(const std::string &name) {
   }
   if ("quotation" == name) {
     return LinkType::Quotation;
+  }
+  if ("format" == name) {
+    return LinkType::Format;
   }
   return LinkType::Other;
 }

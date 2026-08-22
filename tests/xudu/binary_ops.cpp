@@ -64,6 +64,33 @@ TEST(BinaryOpsTest, microversionIdRoundTrips) {
   }
 }
 
+TEST(BinaryOpsTest, microversionIdRoundTripsPastTheBranchByteEscape) {
+  // Ordinals 1-254 fit directly in the branch byte; 255 and up (branches
+  // "ix" onward) take the escape-to-varint path instead -- see
+  // OpsSpoolVersion::CompactBinaryV2.
+  const auto direct = MicroversionId{}.branch(254);
+  std::stringstream directStream;
+  writeMicroversionId(directStream, direct);
+  MicroversionId decodedDirect;
+  ASSERT_TRUE(readMicroversionId(directStream, decodedDirect));
+  EXPECT_EQ(decodedDirect, direct);
+
+  const auto escaped = MicroversionId{}.branch(255);
+  std::stringstream escapedStream;
+  writeMicroversionId(escapedStream, escaped);
+  MicroversionId decodedEscaped;
+  ASSERT_TRUE(readMicroversionId(escapedStream, decodedEscaped));
+  EXPECT_EQ(decodedEscaped, escaped);
+  EXPECT_EQ(decodedEscaped.str(), escaped.str());
+
+  const auto farPast = MicroversionId{}.branch(100000);
+  std::stringstream farStream;
+  writeMicroversionId(farStream, farPast);
+  MicroversionId decodedFar;
+  ASSERT_TRUE(readMicroversionId(farStream, decodedFar));
+  EXPECT_EQ(decodedFar, farPast);
+}
+
 TEST(BinaryOpsTest, allOpKindsBinaryRoundTrip) {
   std::map<MicroversionId, Op> original;
 
@@ -240,6 +267,33 @@ TEST(BinaryOpsTest, autoDetectionHandlesBothBinaryAndText) {
   }
 }
 
+TEST(BinaryOpsTest, version1StreamsStillReadBackWithTheirLiteralBranchByte) {
+  // A hand-built Version 1 stream: its branch byte was always the literal
+  // ASCII letter (never an ordinal), which is why Version 1 could only ever
+  // have single-letter branches. This is what a file already on disk before
+  // CompactBinaryV2 existed looks like, and it must still open.
+  std::string bytes;
+  bytes += "\x7fXOP\x01";
+  bytes.push_back(static_cast<char>(0x70)); // tag: local scroll, at==start,
+                                             // single byte, BinInsert
+  bytes.push_back(static_cast<char>(0x01)); // one segment
+  bytes.push_back('a');                     // literal branch letter
+  bytes.push_back(static_cast<char>(0x01)); // segment number 1 (varint)
+  bytes.push_back(static_cast<char>(0x00)); // op.at (varint)
+
+  std::stringstream ss(bytes);
+  std::map<MicroversionId, Op> decoded;
+  readOpsSpool(ss, decoded);
+
+  ASSERT_EQ(decoded.size(), 1U);
+  EXPECT_EQ(decoded.begin()->first.str(), "a1");
+  EXPECT_EQ(decoded.begin()->second.kind, OpKind::Insert);
+  EXPECT_EQ(decoded.begin()->second.at, 0U);
+  EXPECT_EQ(decoded.begin()->second.span.start, 0U);
+  EXPECT_EQ(decoded.begin()->second.span.length, 1U);
+  EXPECT_EQ(decoded.begin()->second.span.scroll, localScroll);
+}
+
 TEST(BinaryOpsTest, versioningAndDetection) {
   using xudu::detectOpsSpoolVersion;
   using xudu::OpsSpoolVersion;
@@ -249,6 +303,8 @@ TEST(BinaryOpsTest, versioningAndDetection) {
                "OSMIC text (v0)");
   EXPECT_STREQ(opsSpoolVersionName(OpsSpoolVersion::CompactBinaryV1),
                "Compact binary (v1)");
+  EXPECT_STREQ(opsSpoolVersionName(OpsSpoolVersion::CompactBinaryV2),
+               "Compact binary (v2)");
 
   // Standard OSMIC text is Version 0
   std::stringstream textStream("1 insert 0 5 0 0 5 0 0 0 0 0\n");
@@ -259,12 +315,16 @@ TEST(BinaryOpsTest, versioningAndDetection) {
   std::stringstream binStream("\x7fXOP\x01\x00\x00\x00\x00");
   EXPECT_EQ(detectOpsSpoolVersion(binStream), OpsSpoolVersion::CompactBinaryV1);
 
+  // Binary stream is Version 2 -- what is written now, not a future version.
+  std::stringstream binStreamV2("\x7fXOP\x02\x00\x00\x00\x00");
+  EXPECT_EQ(detectOpsSpoolVersion(binStreamV2), OpsSpoolVersion::CompactBinaryV2);
+
   // Truncated magic header throws
   std::stringstream truncMagic("\x7fXOP");
   EXPECT_THROW(detectOpsSpoolVersion(truncMagic), std::runtime_error);
 
   // Unsupported future binary version throws
-  std::stringstream futureVer("\x7fXOP\x02");
+  std::stringstream futureVer("\x7fXOP\x03");
   EXPECT_THROW(detectOpsSpoolVersion(futureVer), std::runtime_error);
 }
 

@@ -98,7 +98,12 @@ void Version::insertSpans(const std::uint32_t at,
   wanted.reserve(spans.size());
   std::uint64_t added = 0;
   for (const auto &span : spans) {
-    if (span.empty()) {
+    // An empty span is normally nothing to insert, but a break marker is
+    // also zero-length by definition (see breakMarkerScroll) and must not be
+    // dropped here: this is the path rearrange() uses to put back what
+    // remove() took out, and a break caught inside a moved range should move
+    // with it rather than silently vanish.
+    if (span.empty() && breakMarkerScroll != span.scroll) {
       continue;
     }
     added += span.length;
@@ -127,6 +132,30 @@ void Version::insertSpans(const std::uint32_t at,
   // there is nothing here to compact either.
 }
 
+void Version::insertBreak(const std::uint32_t at) {
+  const auto where = splitAt(std::min(at, length()));
+  const PrimediaSpan marker{breakMarkerScroll, 0, 0};
+  runs.insert(runs.begin() + static_cast<std::ptrdiff_t>(where), marker);
+  // Merge with a marker already sitting on either side, the same seams
+  // insertSpans() checks for a batch of real pieces.
+  joinFollowing(where);
+  if (where > 0) {
+    joinFollowing(where - 1);
+  }
+}
+
+std::vector<std::uint32_t> Version::forcedBreaks() const {
+  std::vector<std::uint32_t> breaks;
+  std::uint32_t seen = 0;
+  for (const auto &run : runs) {
+    if (breakMarkerScroll == run.scroll) {
+      breaks.push_back(seen);
+    }
+    seen += static_cast<std::uint32_t>(run.length);
+  }
+  return breaks;
+}
+
 std::vector<PrimediaSpan> Version::spansFor(const std::uint32_t at,
                                             const std::uint32_t length) const {
   std::vector<PrimediaSpan> taken;
@@ -139,7 +168,12 @@ std::vector<PrimediaSpan> Version::spansFor(const std::uint32_t at,
 
   for (const auto &run : runs) {
     const auto after = seen + run.length;
-    if (after > from && seen < to) {
+    // A break marker points at no address at all -- see breakMarkerScroll --
+    // so it is not among "the spans this range points at" no matter how the
+    // doc comment's range happens to fall around it. This is what keeps a
+    // transclusion from ever picking one up: Store::replay's Transclude case
+    // builds what it inserts from exactly this method.
+    if (breakMarkerScroll != run.scroll && after > from && seen < to) {
       // The overlap of this piece with the range asked for, expressed as an
       // offset into the piece rather than into the version.
       const auto begin = std::max(seen, from) - seen;
@@ -160,12 +194,19 @@ std::vector<PrimediaSpan> Version::remove(const std::uint32_t at,
     return {};
   }
   const auto count = std::min(length, this->length() - at);
-  const auto taken = spansFor(at, count);
 
   // Cut at both ends first, so that the pieces between them are exactly what
   // is going and no piece is partly kept.
   const auto first = splitAt(at);
   const auto last  = splitAt(at + count);
+  // Taken directly from the piece list rather than through spansFor(), which
+  // deliberately omits break markers: a marker caught inside the removed
+  // range is exactly what a rearrangement (remove() then insertSpans() of
+  // what came back) needs to carry along, so that a break embedded in a
+  // moved passage moves with it instead of being silently dropped.
+  const std::vector<PrimediaSpan> taken(
+      runs.begin() + static_cast<std::ptrdiff_t>(first),
+      runs.begin() + static_cast<std::ptrdiff_t>(last));
   runs.erase(runs.begin() + static_cast<std::ptrdiff_t>(first),
              runs.begin() + static_cast<std::ptrdiff_t>(last));
   total -= count;
@@ -199,6 +240,15 @@ std::string Version::materialize(const SpanReader &reader) const {
   std::string out;
   out.reserve(length());
   for (const auto &run : runs) {
+    // A break marker names no real content -- see breakMarkerScroll -- and
+    // asking a reader to resolve it is not just wasted work, it is asking a
+    // reader that only knows its own local spool (PrimediaSpool::read(), as
+    // opposed to Store::read()'s more forgiving "unreachable reads as
+    // nothing") to make sense of a scroll id that was never meant to name
+    // anything.
+    if (breakMarkerScroll == run.scroll) {
+      continue;
+    }
     out += reader.read(run);
   }
   return out;

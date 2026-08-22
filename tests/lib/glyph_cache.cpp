@@ -12,6 +12,8 @@
 
 #include "mocks/device.hpp"
 
+using namespace gleditor;
+
 using testing::NiceMock;
 using testing::Return;
 
@@ -32,6 +34,12 @@ protected:
   /// Textures handed out, so a test can tell a fresh one from a reused one.
   int nextTexture{};
   int uploads{};
+  /// The coverage bytes of the most recent updateTextureLayer() call, so a
+  /// test can tell two rasterisations apart by their actual pixels rather
+  /// than only by the mean-ink summary Sizes reports -- two decorations
+  /// adding equal-sized bars at different rows still average to the same
+  /// ink, so ink alone cannot tell them apart.
+  std::vector<std::byte> lastUpload;
 
   void SetUp() override {}
 
@@ -42,6 +50,7 @@ protected:
     nextTexture = 0;
     uploads     = 0;
     allocations.clear();
+    lastUpload.clear();
     ON_CALL(*device, textureLimits())
         .WillByDefault(Return(render::TextureLimits{maxSize, maxLayers}));
     ON_CALL(*device,
@@ -56,7 +65,10 @@ protected:
             updateTextureLayer(testing::_, testing::_, testing::_, testing::_,
                                testing::_, testing::_, testing::_))
         .WillByDefault([this](render::TextureHandle, int, int, int, int, int,
-                              std::span<const std::byte>) { uploads++; });
+                              std::span<const std::byte> data) {
+          uploads++;
+          lastUpload.assign(data.begin(), data.end());
+        });
     return std::make_unique<GlyphCache>(device.get());
   }
 
@@ -201,4 +213,227 @@ TEST_F(GlyphCacheTest, survivesAGlyphItCannotHold) {
   EXPECT_THROW(cache->put("W", font("Serif 400")), std::overflow_error);
   EXPECT_NO_THROW(cache->put("a", small));
   EXPECT_LE(cache->atlasSize(), 256);
+}
+
+TEST_F(GlyphCacheTest, noDecorationsIsTheDefaultAndItsOwnEntry) {
+  const auto cache = makeCache(1024, 2);
+  const auto face  = font("Serif 40");
+
+  const auto plain    = cache->put("a", face);
+  const auto uploaded = uploads;
+  // The two-argument call and an explicit empty set both mean "no
+  // decorations", so this is the same entry: no second rasterisation.
+  const auto again = cache->put("a", face, {});
+
+  EXPECT_EQ(uploads, uploaded) << "an explicit empty set should hit the same "
+                                  "entry the two-argument call made";
+  EXPECT_EQ(plain.layer, again.layer);
+  EXPECT_EQ(plain.texCoords.topLeft.x, again.texCoords.topLeft.x);
+  EXPECT_EQ(plain.texCoords.topLeft.y, again.texCoords.topLeft.y);
+}
+
+TEST_F(GlyphCacheTest, theSameDecorationsAreOneCacheEntry) {
+  const auto cache = makeCache(1024, 2);
+  const auto face  = font("Serif 40");
+
+  cache->put("a", face, {Decoration::Bold});
+  const auto uploaded = uploads;
+  cache->put("a", face, {Decoration::Bold});
+
+  EXPECT_EQ(uploads, uploaded)
+      << "asking for the same cluster, font and decorations twice must not "
+         "rasterise a second time";
+}
+
+TEST_F(GlyphCacheTest, decorationSetMembershipOrderDoesNotMatter) {
+  // std::unordered_set has no order to begin with, but the two insertion
+  // orders below are worth pinning down: {Bold, Italic} and {Italic, Bold}
+  // must be recognised as the same request.
+  const auto cache = makeCache(1024, 2);
+  const auto face  = font("Serif 40");
+
+  const auto first =
+      cache->put("a", face, {Decoration::Bold, Decoration::Italic});
+  const auto uploaded = uploads;
+  const auto second =
+      cache->put("a", face, {Decoration::Italic, Decoration::Bold});
+
+  EXPECT_EQ(uploads, uploaded);
+  EXPECT_EQ(first.layer, second.layer);
+  EXPECT_EQ(first.texCoords.topLeft.x, second.texCoords.topLeft.x);
+}
+
+TEST_F(GlyphCacheTest, differentDecorationsAreDifferentCacheEntries) {
+  const auto cache = makeCache(1024, 2);
+  const auto face  = font("Serif 40");
+
+  cache->put("a", face);
+  const auto afterPlain = uploads;
+  cache->put("a", face, {Decoration::Bold});
+  const auto afterBold = uploads;
+  cache->put("a", face, {Decoration::Italic});
+  const auto afterItalic = uploads;
+
+  EXPECT_GT(afterBold, afterPlain)
+      << "bold must rasterise separately from undecorated";
+  EXPECT_GT(afterItalic, afterBold)
+      << "italic is a third distinct entry, not the same as bold";
+}
+
+TEST_F(GlyphCacheTest, aSupersetOfDecorationsIsAnotherEntry) {
+  // {Bold} and {Bold, Underline} must not be confused for one another just
+  // because one's set contains the other's.
+  const auto cache = makeCache(1024, 2);
+  const auto face  = font("Serif 40");
+
+  cache->put("a", face, {Decoration::Bold});
+  const auto afterBold = uploads;
+  cache->put("a", face, {Decoration::Bold, Decoration::Underline});
+
+  EXPECT_GT(uploads, afterBold);
+}
+
+// Beyond this point, decorations are checked for actually changing the
+// rasterised bitmap -- not just for landing in a separate cache entry, which
+// the tests above already cover.
+
+TEST_F(GlyphCacheTest, boldHasMoreInkThanPlain) {
+  const auto cache = makeCache(1024, 2);
+  const auto face  = font("Serif 60");
+
+  const auto plain = cache->put("A", face);
+  const auto bold  = cache->put("A", face, {Decoration::Bold});
+
+  EXPECT_GT(bold.ink, plain.ink)
+      << "FT_GlyphSlot_Embolden thickens the outline, which should ink more "
+         "of the glyph's own box, not just occupy a different cache slot";
+}
+
+TEST_F(GlyphCacheTest, italicChangesTheGlyphsFootprint) {
+  const auto cache = makeCache(1024, 2);
+  const auto face  = font("Serif 60");
+
+  const auto plain  = cache->put("A", face);
+  const auto italic = cache->put("A", face, {Decoration::Italic});
+
+  EXPECT_NE(std::to_underlying(italic.dims.width),
+            std::to_underlying(plain.dims.width))
+      << "FT_GlyphSlot_Oblique shears the outline, which widens an upright "
+         "glyph's bounding box";
+}
+
+TEST_F(GlyphCacheTest, underlineAddsInkBelowTheGlyph) {
+  const auto cache = makeCache(1024, 2);
+  const auto face  = font("Serif 60");
+
+  const auto plain      = cache->put("A", face);
+  const auto underlined = cache->put("A", face, {Decoration::Underline});
+
+  EXPECT_GT(underlined.ink, plain.ink);
+}
+
+TEST_F(GlyphCacheTest, overlineAddsInkAboveTheGlyph) {
+  const auto cache = makeCache(1024, 2);
+  const auto face  = font("Serif 60");
+
+  const auto plain     = cache->put("A", face);
+  const auto overlined = cache->put("A", face, {Decoration::Overline});
+
+  EXPECT_GT(overlined.ink, plain.ink);
+}
+
+TEST_F(GlyphCacheTest, strikethroughAddsInkThroughTheGlyph) {
+  const auto cache = makeCache(1024, 2);
+  const auto face  = font("Serif 60");
+
+  const auto plain  = cache->put("A", face);
+  const auto struck = cache->put("A", face, {Decoration::Strikethrough});
+
+  EXPECT_GT(struck.ink, plain.ink);
+}
+
+TEST_F(GlyphCacheTest, eachLineDecorationLandsAtADifferentHeight) {
+  // Not just "adds ink somewhere" -- underline, overline and strikethrough
+  // must not all be drawing over one another at the same row. Bars of equal
+  // thickness and width add equal ink regardless of which row they land on,
+  // so mean ink cannot tell three different heights apart; the actual
+  // uploaded bytes can.
+  const auto cache = makeCache(1024, 2);
+  const auto face  = font("Serif 60");
+
+  cache->put("A", face, {Decoration::Underline});
+  const auto underlined = lastUpload;
+  cache->put("A", face, {Decoration::Overline});
+  const auto overlined = lastUpload;
+  cache->put("A", face, {Decoration::Strikethrough});
+  const auto struckThrough = lastUpload;
+
+  ASSERT_FALSE(underlined.empty());
+  EXPECT_NE(underlined, overlined);
+  EXPECT_NE(underlined, struckThrough);
+  EXPECT_NE(overlined, struckThrough);
+}
+
+TEST_F(GlyphCacheTest, superscriptAndSubscriptRaiseNoDecorationSpecificCode) {
+  // Deliberately not tested for a different bitmap: per Decoration's own
+  // comment, these name only a reduced rasterisation size, and that size is
+  // expected to come from the caller requesting a smaller FontPtr -- the
+  // ordinary per-font cache key already handles that -- rather than from
+  // anything in addToCache(). This just pins down that passing them does not
+  // throw or otherwise misbehave.
+  const auto cache = makeCache(1024, 2);
+  const auto face  = font("Serif 60");
+
+  EXPECT_NO_THROW(cache->put("A", face, {Decoration::Superscript}));
+  EXPECT_NO_THROW(cache->put("A", face, {Decoration::Subscript}));
+}
+
+// Beyond this point: resolveRealVariant() preferring a genuine bold/italic
+// file over synthesising one. Nothing in GlyphCache's public API exposes
+// which FT_Face ended up doing the rasterising, so these are necessarily
+// indirect -- real hinted weights and synthetic embolden both increase ink,
+// so a passing boldHasMoreInkThanPlain-style test does not by itself prove
+// which path ran. What is checked here is behaviour a real-vs-synthetic
+// switch could plausibly get wrong: that decoration still works at all for a
+// family fontconfig actually has a matching file for (real path exercised,
+// per fc-match against this test environment's fonts) and for one it does
+// not (synthetic fallback exercised), and that requesting a real variant
+// never throws even when none exists.
+
+TEST_F(GlyphCacheTest, boldStillIncreasesInkWhenARealBoldFileExists) {
+  // Confirmed via `fc-match "Serif:bold"` against this environment: resolves
+  // to a genuine Bold file, not a re-served Regular one.
+  const auto cache = makeCache(1024, 2);
+  const auto face  = font("Serif 60");
+
+  const auto plain = cache->put("A", face);
+  const auto bold  = cache->put("A", face, {Decoration::Bold});
+
+  EXPECT_GT(bold.ink, plain.ink);
+}
+
+TEST_F(GlyphCacheTest, boldStillIncreasesInkWithNoRealBoldFile) {
+  // Confirmed via `fc-match "Z003:bold"` against this environment: fontconfig
+  // has no bold weight for this family and answers with its one italic style
+  // instead, so this only ever exercises the synthetic embolden fallback.
+  const auto cache = makeCache(1024, 2);
+  const auto face  = font("Z003 60");
+
+  const auto plain = cache->put("A", face);
+  const auto bold  = cache->put("A", face, {Decoration::Bold});
+
+  EXPECT_GT(bold.ink, plain.ink)
+      << "a family with no real bold file must still fall back to "
+         "FT_GlyphSlot_Embolden rather than silently rendering plain";
+}
+
+TEST_F(GlyphCacheTest, aFamilyWithNoBoldFileStillCachesSeparately) {
+  const auto cache = makeCache(1024, 2);
+  const auto face  = font("Z003 60");
+
+  cache->put("A", face);
+  const auto afterPlain = uploads;
+  cache->put("A", face, {Decoration::Bold});
+
+  EXPECT_GT(uploads, afterPlain);
 }

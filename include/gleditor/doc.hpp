@@ -18,6 +18,7 @@
 #include <vector>
 
 #include <gleditor/draw_budget.hpp>
+#include <gleditor/glyphcache/types.hpp>
 #include <gleditor/render/types.hpp>
 
 class Caret;
@@ -69,6 +70,9 @@ struct PageShaping {
     float clusterTop{};
     std::size_t clusterIndex{};
     std::size_t lineIndex{};
+    /// Which Decoration values this cluster rasterises with. Zero -- no bits
+    /// set -- is the overwhelming common case of plain text.
+    gleditor::DecorationMask decorations{};
   };
   std::vector<GlyphEntry> glyphs;
   struct LineEntry {
@@ -268,6 +272,18 @@ private:
   /// the source said otherwise.
   std::string docName;
   std::string text;
+  /// Where a page must end regardless of how much height is left on it, as
+  /// offsets into text. Read once from the TextSource at construction, same
+  /// as text itself -- see TextSource::forcedBreaks() -- and kept sorted
+  /// ascending, which layoutFrom() relies on to find the nearest one past a
+  /// given offset without scanning the whole list.
+  std::vector<std::uint32_t> forcedBreaks;
+  /// Which decorations apply where in text, as offsets into it. Read once
+  /// from the TextSource at construction, same as text and forcedBreaks --
+  /// see TextSource::decoratedRanges() -- and translated to page-relative
+  /// ranges in layoutFrom() the same way forcedBreaks is translated to a
+  /// slice-length clamp there.
+  std::vector<gleditor::DecoratedRange> decoratedRanges;
   /// Told about every edit. Bare pointers, not owned; see DocumentObserver.
   std::vector<gleditor::DocumentObserver *> observers;
   RendererRef renderer;
@@ -658,6 +674,7 @@ public:
                      std::uint32_t colour,
                      std::vector<render::HighlightRange> &out) const;
   [[nodiscard]] size_t numPages() const { return pages.size(); }
+  [[nodiscard]] bool isFullyLoaded() const { return fullyLoaded; }
 
   /**
    * @brief Ease this document into place and fade it in.
@@ -702,6 +719,7 @@ public:
   /// Alpha this document currently draws at.
   [[nodiscard]] float currentOpacity() const { return opacity(); }
 
+  bool fullyLoaded{false};
   friend class Page;
 };
 

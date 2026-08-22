@@ -15,7 +15,7 @@
 #include "mocks/device.hpp" // for MockRenderDevice
 #include <gmock/gmock.h>    // for NiceMock, EXPECT_CALL
 
-enum class Length : int;
+using namespace gleditor;
 
 using testing::ElementsAre;
 using testing::WhenSorted;

@@ -10,8 +10,7 @@
 #include <gmock/gmock.h> // for ElementsAreMatcher, Element...
 #include <gtest/gtest.h> // for Message, AssertionResult
 
-enum class Length : int;
-enum class Offset : int;
+using namespace gleditor;
 
 using testing::ElementsAre;
 using testing::WhenSorted;

@@ -30,6 +30,9 @@
 #include <vector>        // for vector
 #include FT_FREETYPE_H
 #include FT_GLYPH_H
+#include FT_SYNTHESIS_H
+
+namespace gleditor {
 
 enum class Length : int;
 
@@ -113,8 +116,8 @@ extractPaddedCoverage(const std::span<const unsigned char> surface,
                                 std::byte{0});
   std::uint64_t totalInk = 0;
   for (int row = 0; row < height; row++) {
-    const auto *src = surface.data() + static_cast<std::size_t>(row) *
-                                           static_cast<std::size_t>(stride);
+    const auto *src   = surface.data() + static_cast<std::size_t>(row) *
+                                             static_cast<std::size_t>(stride);
     const auto dstRow = height - 1 - row;
     auto *dst =
         padded.data() +
@@ -133,6 +136,96 @@ extractPaddedCoverage(const std::span<const unsigned char> surface,
                                                 (255.0 * totalPixels))
                            : 0.0F;
   return PaddedCoverage{std::move(padded), meanInk};
+}
+
+/// Paint rows [top, top + thickness) of a width * height, stride-wide 8-bit
+/// coverage buffer solid, clamped to the buffer's own bounds. What underline,
+/// overline and strikethrough are: none of the three has a glyph outline to
+/// rasterise, only a bar at a computed height.
+void fillHorizontalBar(std::vector<unsigned char> &data, const int width,
+                       const int height, const int stride, const int top,
+                       const int thickness) {
+  const auto first = std::max(0, top);
+  const auto last  = std::min(height, top + thickness);
+  for (int row = first; row < last; row++) {
+    auto *dstRow = data.data() + (static_cast<std::size_t>(row) * stride);
+    std::fill(dstRow, dstRow + width, static_cast<unsigned char>(255));
+  }
+}
+
+/// Which font to actually shape and rasterise a decorated cluster with, and
+/// which of its decorations are still left to synthesise on top of it.
+struct ResolvedFont {
+  FontPtr font;
+  std::unordered_set<Decoration> stillSynthetic;
+};
+
+/**
+ * @brief Prefer a real bold and/or italic file over synthesising one, when
+ *        @p decorations asks for either and the family @p font names has one.
+ *
+ * FontManager::getFont() resolves a fontconfig spec the same way the rest of
+ * this codebase already asks for a family and a size -- "family size", with
+ * style properties appended as ":bold" / ":italic" -- and fontconfig always
+ * answers with its single closest match rather than refusing, so getting
+ * something back is not proof it is actually bold or italic. FT_Face's own
+ * style_flags is: it reports what the returned file's metadata really says,
+ * which is checked here so a family with no true bold file does not get
+ * silently rendered in a face that only claims to be one.
+ *
+ * A decoration whose real file was not found stays in stillSynthetic, to be
+ * embolden'd or obliqued the way it always was. Bold and italic separately,
+ * because a family can easily have one real file and not the other -- an
+ * italic-only match still gets synthetic bold layered on top of it, rather
+ * than losing the italic to fall back on synthesising both.
+ */
+ResolvedFont
+resolveRealVariant(const FontPtr &font,
+                   const std::unordered_set<Decoration> &decorations) {
+  const bool wantBold   = decorations.contains(Decoration::Bold);
+  const bool wantItalic = decorations.contains(Decoration::Italic);
+  if (!wantBold && !wantItalic) {
+    return {font, decorations};
+  }
+
+  auto spec = std::format("{} {:.1f}", font->family(), font->pointSize());
+  if (wantBold) {
+    spec += ":bold";
+  }
+  if (wantItalic) {
+    spec += ":italic";
+  }
+
+  FontPtr candidate;
+  try {
+    candidate = text::FontManager::instance().getFont(spec);
+  } catch (const std::exception &error) {
+    std::cerr << "glyph cache: could not resolve \"" << spec
+              << "\", synthesising instead: " << error.what() << "\n";
+    return {font, decorations};
+  }
+  if (!candidate || nullptr == candidate->face()) {
+    return {font, decorations};
+  }
+
+  const auto flags     = candidate->face()->style_flags;
+  const bool gotBold   = wantBold && (0 != (flags & FT_STYLE_FLAG_BOLD));
+  const bool gotItalic = wantItalic && (0 != (flags & FT_STYLE_FLAG_ITALIC));
+  if (!gotBold && !gotItalic) {
+    // Fontconfig matched something -- it always does -- but not a file that
+    // actually carries either style bit asked for. Switching to it would
+    // change nothing but the shaping metrics, to no benefit.
+    return {font, decorations};
+  }
+
+  auto remaining = decorations;
+  if (gotBold) {
+    remaining.erase(Decoration::Bold);
+  }
+  if (gotItalic) {
+    remaining.erase(Decoration::Italic);
+  }
+  return {candidate, std::move(remaining)};
 }
 
 } // namespace
@@ -269,20 +362,30 @@ void GlyphCache::makeRoomFor(const Rect &padded) {
   }
 }
 
-GlyphCache::Sizes GlyphCache::addToCache(const std::string &chr,
-                                         const FontPtr &font) {
+GlyphCache::Sizes
+GlyphCache::addToCache(const std::string &chr, const FontPtr &font,
+                       const std::unordered_set<Decoration> &decorations) {
   if (!font || chr.empty()) {
     const auto empty =
         Sizes{TextureCoords{}, Rect{Length{0}, Length{0}}, 0, 0.0F};
-    glyphs[chr][keyFor(font)] = empty;
+    glyphs[chr][keyFor(font)].push_back(DecoratedSizes{decorations, empty});
     return empty;
   }
+
+  // Shaped and rasterised with whichever font actually carries the requested
+  // decorations, which is not always the one requested: see
+  // resolveRealVariant(). The cache is still keyed on the caller's own font
+  // (keyFor(font) below, untouched) -- which face ended up doing the
+  // rasterising is this function's own business, not part of what a caller
+  // asked to look up.
+  const auto resolved = resolveRealVariant(font, decorations);
+  const auto &useFont = resolved.font;
 
   hb_buffer_t *buf = hb_buffer_create();
   hb_buffer_add_utf8(buf, chr.data(), static_cast<int>(chr.size()), 0,
                      static_cast<int>(chr.size()));
   hb_buffer_guess_segment_properties(buf);
-  hb_shape(font->hbFont(), buf, nullptr, 0);
+  hb_shape(useFont->hbFont(), buf, nullptr, 0);
 
   unsigned int glyphCount  = 0;
   hb_glyph_info_t *info    = hb_buffer_get_glyph_infos(buf, &glyphCount);
@@ -292,11 +395,11 @@ GlyphCache::Sizes GlyphCache::addToCache(const std::string &chr,
     hb_buffer_destroy(buf);
     const auto empty =
         Sizes{TextureCoords{}, Rect{Length{0}, Length{0}}, 0, 0.0F};
-    glyphs[chr][keyFor(font)] = empty;
+    glyphs[chr][keyFor(font)].push_back(DecoratedSizes{decorations, empty});
     return empty;
   }
 
-  FT_Face face = font->face();
+  FT_Face face = useFont->face();
   int penX     = 0;
   int minX = 0, maxX = 0;
   int minY = 0, maxY = 0;
@@ -312,6 +415,18 @@ GlyphCache::Sizes GlyphCache::addToCache(const std::string &chr,
   for (unsigned int i = 0; i < glyphCount; i++) {
     if (FT_Load_Glyph(face, info[i].codepoint, FT_LOAD_DEFAULT) != 0) {
       continue;
+    }
+    // Only for whichever of bold/italic resolveRealVariant() could not find
+    // a genuine file for -- useFont may already be a real bold and/or
+    // italic face, in which case its own outline needs no help. These act
+    // on the live outline in the slot, so they have to run before
+    // FT_Get_Glyph copies it out and before FT_Glyph_To_Bitmap rasterises it
+    // -- afterwards there is no outline left to embolden or slant.
+    if (resolved.stillSynthetic.contains(Decoration::Bold)) {
+      FT_GlyphSlot_Embolden(face->glyph);
+    }
+    if (resolved.stillSynthetic.contains(Decoration::Italic)) {
+      FT_GlyphSlot_Oblique(face->glyph);
     }
     FT_Glyph glyph = nullptr;
     if (FT_Get_Glyph(face->glyph, &glyph) != 0) {
@@ -337,7 +452,7 @@ GlyphCache::Sizes GlyphCache::addToCache(const std::string &chr,
   }
   hb_buffer_destroy(buf);
 
-  const auto &metrics = font->metrics();
+  const auto &metrics = useFont->metrics();
   const int height =
       std::max(1, static_cast<int>(std::ceil(metrics.lineHeight)));
   const int baselineY = static_cast<int>(std::round(metrics.ascent));
@@ -359,8 +474,8 @@ GlyphCache::Sizes GlyphCache::addToCache(const std::string &chr,
     for (auto &r : rendered) {
       FT_Done_Glyph(reinterpret_cast<FT_Glyph>(r.bitmapGlyph));
     }
-    const auto empty          = Sizes{TextureCoords{}, extents, 0, 0.0F};
-    glyphs[chr][keyFor(font)] = empty;
+    const auto empty = Sizes{TextureCoords{}, extents, 0, 0.0F};
+    glyphs[chr][keyFor(font)].push_back(DecoratedSizes{decorations, empty});
     return empty;
   }
 
@@ -394,6 +509,54 @@ GlyphCache::Sizes GlyphCache::addToCache(const std::string &chr,
       }
     }
     FT_Done_Glyph(reinterpret_cast<FT_Glyph>(bg));
+  }
+
+  // Underline, overline and strikethrough have no outline of their own --
+  // they are a bar composited straight onto the assembled bitmap, the same
+  // one glyph after glyph was composited onto above, so a decorated cluster
+  // still rasterises as one quad rather than a glyph plus a separate
+  // rectangle some other draw call would have to align underneath it.
+  if (!decorations.empty()) {
+    // Font-unit metrics scaled to the pixels this face is currently sized
+    // for, the same FT_MulFix(value, y_scale) idiom FreeType's own docs use
+    // to scale face->ascender -- and >> 6 rather than a rounding macro, to
+    // match every other 26.6 value already truncated that way in this
+    // function (pos[i].x_advance and friends, above).
+    const auto scaleToPixels = [face](const FT_Short value) {
+      return static_cast<int>(FT_MulFix(value, face->size->metrics.y_scale) >>
+                              6);
+    };
+    // usually negative: this is often 0 for a font that never set it.
+    const int thickness = std::max(1, scaleToPixels(face->underline_thickness));
+
+    if (decorations.contains(Decoration::Underline)) {
+      // underline_position is negative (below the baseline), so subtracting
+      // it moves down from baselineY -- see the dstY = baselineY - r.y
+      // convention above, where a larger row index is further down.
+      const int underlineY =
+          baselineY - scaleToPixels(face->underline_position);
+      fillHorizontalBar(data, width, height, stride, underlineY, thickness);
+    }
+    if (decorations.contains(Decoration::Strikethrough)) {
+      // No FreeType metric names this position at all. A third of the
+      // ascent above the baseline is the approximation most renderers fall
+      // back to in the same absence, and it passes through the middle of
+      // ordinary lowercase letters at typical proportions.
+      const int strikeY =
+          baselineY -
+          static_cast<int>(static_cast<float>(metrics.ascent) * 0.3F);
+      fillHorizontalBar(data, width, height, stride, strikeY, thickness);
+    }
+    if (decorations.contains(Decoration::Overline)) {
+      // Row 0 is already the top of the ascent -- baselineY is round(ascent)
+      // pixels down from it, by construction of baselineY above -- so there
+      // is no headroom in this buffer to sit an overline any higher than
+      // that; pinned to the very top edge instead of computed further above
+      // it, which is what put a first attempt here at a negative row and
+      // saw it clamped away entirely.
+      const int overlineY = 0;
+      fillHorizontalBar(data, width, height, stride, overlineY, thickness);
+    }
   }
 
   // The glyph goes into the atlas inside a zeroed border, so that the mip
@@ -433,8 +596,8 @@ GlyphCache::Sizes GlyphCache::addToCache(const std::string &chr,
 
   const auto sizes = Sizes{inner, extents, palette->layerIndex(), inked};
   // Level zero moved, so the chain below it is stale until it is rebuilt.
-  atlasDirty                = true;
-  glyphs[chr][keyFor(font)] = sizes;
+  atlasDirty = true;
+  glyphs[chr][keyFor(font)].push_back(DecoratedSizes{decorations, sizes});
   return sizes;
 }
 
@@ -446,8 +609,9 @@ const FontMapKeyAdapter &GlyphCache::keyFor(const FontPtr &font) {
   return fontKeys.emplace(font.get(), FontMapKeyAdapter(font)).first->second;
 }
 
-GlyphCache::Sizes GlyphCache::put(const std::string_view &chr,
-                                  const FontPtr &font) {
+GlyphCache::Sizes
+GlyphCache::put(const std::string_view &chr, const FontPtr &font,
+                const std::unordered_set<Decoration> &decorations) {
   // A whole shaped cluster is cached, not a single codepoint: a ligature or a
   // base letter with its combining marks is one quad covering several
   // characters, and rasterising only the first of them dropped the rest from
@@ -461,11 +625,19 @@ GlyphCache::Sizes GlyphCache::put(const std::string_view &chr,
   }
   if (const auto &chrToFontMap = glyphs.find(chr);
       chrToFontMap != glyphs.cend()) {
-    if (const auto &fontMapToGlyphSizes =
-            chrToFontMap->second.find(keyFor(font));
-        fontMapToGlyphSizes != chrToFontMap->second.cend()) {
-      return fontMapToGlyphSizes->second;
+    if (const auto &variants = chrToFontMap->second.find(keyFor(font));
+        variants != chrToFontMap->second.cend()) {
+      // Size first, so the common case of "no decorations at all" on either
+      // side is settled without comparing a single element.
+      for (const auto &variant : variants->second) {
+        if (variant.decorations.size() == decorations.size() &&
+            variant.decorations == decorations) {
+          return variant.sizes;
+        }
+      }
     }
   }
-  return addToCache(std::string{chr}, font);
+  return addToCache(std::string{chr}, font, decorations);
 }
+
+} // namespace gleditor

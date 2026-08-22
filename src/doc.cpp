@@ -119,7 +119,7 @@ std::array<float, 16> toArray(const glm::mat4 &mat) {
 
 // Neither header can see the other, so the two ends of the layer limit are
 // tied together here: the atlas refuses to grow past what the packing can name.
-static_assert(GlyphCache::maxEncodableLayers ==
+static_assert(gleditor::GlyphCache::maxEncodableLayers ==
                   static_cast<int>(Doc::VBORow::maxAtlasLayers),
               "the glyph cache's layer ceiling and the vertex packing's layer "
               "field have drifted apart");
@@ -195,7 +195,8 @@ Page::Page(std::shared_ptr<Doc> aDoc, RenderState &state, glm::mat4 &model,
   clusters = std::move(aShaping.clusters);
 
   for (const auto &g : aShaping.glyphs) {
-    const auto glyph    = state.glyphCache.put(g.chr, font);
+    const auto glyph = state.glyphCache.put(
+        g.chr, font, gleditor::decorationSetFor(g.decorations));
     const auto &coords  = glyph.texCoords;
     const auto &extents = glyph.dims;
 
@@ -521,11 +522,11 @@ Page::highlightFor(const std::uint32_t selStart, const std::uint32_t selEnd,
   };
 
   render::HighlightRange range;
-  range.identity      = render::packTagIdentity(render::tagKindGlyph,
-                                                doc->documentIndex(), pageIndex);
-  range.firstCluster  = static_cast<std::uint32_t>(*first);
-  range.lastCluster   = static_cast<std::uint32_t>(last);
-  range.colour        = colour;
+  range.identity     = render::packTagIdentity(render::tagKindGlyph,
+                                               doc->documentIndex(), pageIndex);
+  range.firstCluster = static_cast<std::uint32_t>(*first);
+  range.lastCluster  = static_cast<std::uint32_t>(last);
+  range.colour       = colour;
   range.startFraction = fractionInto(clusters[*first], localStart);
   range.endFraction   = fractionInto(clusters[last], localEnd);
   return range;
@@ -597,8 +598,44 @@ PageShaping Doc::layoutFrom(const std::uint32_t offset) const {
       .singleParagraph = false,
       .ellipsize       = true,
   };
+
+  // Bounded to the nearest forced break past this page's start, if there is
+  // one, so layoutPage() never sees text on the far side of it: the break's
+  // whole point is that the remainder of a page's height goes unused rather
+  // than being filled with what comes after. forcedBreaks is sorted
+  // ascending (see TextSource::forcedBreaks()), so the first entry greater
+  // than offset is the nearest one -- strictly greater, since a break sitting
+  // exactly at offset already did its job ending the previous page and says
+  // nothing about this one.
+  auto available = text.size() - offset;
+  for (const auto breakAt : forcedBreaks) {
+    if (breakAt > offset) {
+      available = std::min(available, static_cast<std::size_t>(breakAt) -
+                                          static_cast<std::size_t>(offset));
+      break;
+    }
+  }
+
+  // decoratedRanges is in this document's own offsets, same as forcedBreaks,
+  // but layoutPage() only ever sees the slice starting at offset -- so each
+  // range is clipped to what this page actually covers and rebased to that
+  // slice's own coordinates, the same translation forcedBreaks gets above.
+  const auto pageEnd = offset + available;
+  for (const auto &range : decoratedRanges) {
+    const auto from = std::max<std::uint32_t>(range.start, offset);
+    const auto to    = std::min<std::uint32_t>(range.end,
+                                             static_cast<std::uint32_t>(pageEnd));
+    if (from < to) {
+      opts.decoratedRanges.push_back(gleditor::DecoratedRange{
+          .start       = from - offset,
+          .end         = to - offset,
+          .decorations = range.decorations,
+      });
+    }
+  }
+
   return gleditor::text::TextLayout::layoutPage(
-      std::string_view{text.data() + offset, text.size() - offset}, font, opts);
+      std::string_view{text.data() + offset, available}, font, opts);
 }
 
 namespace {
@@ -739,7 +776,7 @@ std::string Doc::erase(RenderState &state, const std::uint32_t offset,
   const auto start = gleditor::alignToCharacterStart(text, offset);
   const auto end   = gleditor::alignToCharacterEnd(
       text, std::min<std::uint32_t>(offset + bytes,
-                                      static_cast<std::uint32_t>(text.size())));
+                                    static_cast<std::uint32_t>(text.size())));
   if (end <= start) {
     return {};
   }
@@ -889,7 +926,9 @@ Doc::Doc(const RendererRef &renderer, render::RenderDevice *device,
   docName = source.name();
   std::cout << "NEW DOC: " << this << " " << docName << " "
             << glm::to_string(model) << "\n";
-  text = source.text();
+  text            = source.text();
+  forcedBreaks    = source.forcedBreaks();
+  decoratedRanges = source.decoratedRanges();
 
   // Validated here rather than by the source, because every source needs it
   // and none of them can promise otherwise: the bytes come from a file
@@ -927,7 +966,10 @@ void Doc::makePages(RenderState &state) {
   // pool belongs to the render thread, which is still building the last pages
   // this loop handed it, and it is those pages that say how much is in use.
   auto self = getPtr();
-  renderer->run([self] { self->pool->trim(); });
+  renderer->run([self] {
+    self->pool->trim();
+    self->fullyLoaded = true;
+  });
 }
 
 void Doc::newPage(RenderState &state, PageShaping aShaping,

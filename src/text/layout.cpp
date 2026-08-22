@@ -70,6 +70,23 @@ std::size_t countUtf8Chars(std::string_view str) {
   return count;
 }
 
+/// Every decoration named by a range covering @p byteOffset, combined.
+/// Overlapping ranges are additive rather than a conflict: a glyph inside
+/// two ranges gets both sets of decorations, which is what lets an italic
+/// span and a bold span meet or overlap without either caller needing to
+/// know about the other.
+gleditor::DecorationMask
+decorationsAt(const std::size_t byteOffset,
+             const std::vector<gleditor::DecoratedRange> &ranges) {
+  gleditor::DecorationMask mask = 0;
+  for (const auto &range : ranges) {
+    if (byteOffset >= range.start && byteOffset < range.end) {
+      mask = static_cast<gleditor::DecorationMask>(mask | range.decorations);
+    }
+  }
+  return mask;
+}
+
 } // namespace
 
 PageShaping TextLayout::layoutPage(std::string_view text,
@@ -296,6 +313,7 @@ PageShaping TextLayout::layoutPage(std::string_view text,
           .clusterTop   = line.top,
           .clusterIndex = clusterBoxIdx,
           .lineIndex    = lineIdx,
+          .decorations  = decorationsAt(byteOff, options.decoratedRanges),
       });
 
       penX += g.xAdvance;

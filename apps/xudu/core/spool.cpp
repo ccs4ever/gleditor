@@ -1,39 +1,47 @@
 #include "spool.hpp"
+#include "segmented_primedia_spool.hpp"
 
-#include <algorithm>
+#include <memory>
 #include <stdexcept>
 #include <string>
 #include <string_view>
 
 namespace xudu {
 
+class PrimediaSpool::Impl {
+public:
+  SegmentedPrimediaSpool spool;
+};
+
+PrimediaSpool::PrimediaSpool() : impl(std::make_unique<Impl>()) {}
+PrimediaSpool::~PrimediaSpool() = default;
+
 PrimediaSpan PrimediaSpool::append(const std::string_view bytes) {
-  const PrimediaSpan span{localScroll,
-                          static_cast<std::uint64_t>(contents.size()),
-                          static_cast<std::uint64_t>(bytes.size())};
-  contents.append(bytes);
-  return span;
+  return impl->spool.append(bytes);
 }
 
 std::string PrimediaSpool::read(const PrimediaSpan &span) const {
-  // A span into a torrent cannot be answered from here, and answering with
-  // whatever happens to sit at that offset locally would be worse than not
-  // answering: a caller cannot tell substituted bytes from the real thing,
-  // which is the failure content addressing exists to prevent. The store is
-  // the reader that knows about every scroll.
   if (!span.isLocal()) {
     throw std::runtime_error("primedia spool: asked for a span into scroll " +
                              std::to_string(span.scroll) +
                              ", which is not the local spool");
   }
-  // Clamped rather than checked, because a span can outlive the run that
-  // produced it only by being read from a store written by an older version --
-  // and returning what is there beats refusing to open the document.
-  const auto from = std::min<std::size_t>(static_cast<std::size_t>(span.start),
-                                          contents.size());
-  const auto to   = std::min<std::size_t>(static_cast<std::size_t>(span.end()),
-                                          contents.size());
-  return contents.substr(from, to - from);
+  return impl->spool.read(span);
+}
+
+std::string_view
+PrimediaSpool::readView(const PrimediaSpan &span) const {
+  return impl->spool.readView(span);
+}
+
+std::uint64_t PrimediaSpool::size() const { return impl->spool.size(); }
+
+std::string_view PrimediaSpool::bytes() const {
+  return impl->spool.bytes();
+}
+
+void PrimediaSpool::adopt(const std::string_view stored) {
+  impl->spool.adopt(stored);
 }
 
 } // namespace xudu

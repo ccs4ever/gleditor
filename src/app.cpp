@@ -18,6 +18,7 @@
 #include <string>
 #include <string_view>
 #include <thread>
+#include <tuple>
 #include <utility>
 #include <vector>
 
@@ -210,6 +211,46 @@ std::pair<int, int> parsePair(const std::string &value,
           std::stoi(value.substr(comma + 1))};
 }
 
+/**
+ * @brief Split --type's value into decorations and the text to insert.
+ *
+ * "[bold,italic]text" names decorations for text; anything that does not
+ * start with '[', or has no matching ']', is taken whole as plain text with
+ * no decorations -- so every --type written before this syntax existed still
+ * means exactly what it always did, and only a script that opts in by
+ * starting with '[' can be misread.
+ */
+std::pair<gleditor::DecorationMask, std::string>
+parseTypeValue(const std::string &value) {
+  if (value.empty() || '[' != value.front()) {
+    return {0, value};
+  }
+  const auto close = value.find(']');
+  if (std::string::npos == close) {
+    return {0, value};
+  }
+  gleditor::DecorationMask mask = 0;
+  const std::string_view names(value.data() + 1, close - 1);
+  std::size_t pos = 0;
+  while (pos <= names.size()) {
+    const auto comma = names.find(',', pos);
+    const auto name  = names.substr(pos, comma - pos);
+    if (!name.empty()) {
+      if (const auto d = gleditor::decorationNamed(name)) {
+        mask = static_cast<gleditor::DecorationMask>(
+            mask | gleditor::decorationBit(*d));
+      } else {
+        std::cerr << "--type: no decoration called \"" << name << "\"\n";
+      }
+    }
+    if (std::string_view::npos == comma) {
+      break;
+    }
+    pos = comma + 1;
+  }
+  return {mask, value.substr(close + 1)};
+}
+
 /// The backend a run starts with, absent an explicit --backend.
 /// GLEDITOR_BACKEND overrides the compiled-in default without a rebuild --
 /// there is no command line to pass --backend on, on Android, so the Android
@@ -256,7 +297,7 @@ readAutomationScript(const int argc, const char *const *const argv) {
       script.push_back(std::move(step));
     } else if ("--type" == option) {
       Step step{Step::Kind::Type};
-      step.text = value;
+      std::tie(step.decorations, step.text) = parseTypeValue(value);
       script.push_back(std::move(step));
     } else if ("--do" == option) {
       Step step{Step::Kind::Command};
