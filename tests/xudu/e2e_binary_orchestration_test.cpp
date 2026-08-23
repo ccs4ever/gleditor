@@ -1244,7 +1244,7 @@ TEST(E2EBinaryOrchestrationTest, typeWithDecorationsRecordsAFormatLink) {
   // the wrong byte range if rendering ever centres the line differently.
   std::string cmd = xuduBin.string() + " --backend " + activeBackend() +
                     " --profile --fov 15 --version-id " + whole.str() +
-                    " --click 1918,1053 --type '[bold,italic]MARKERWORD' "
+                    " --click 400,300 --type '[bold,italic]MARKERWORD' "
                     "--do save --screenshot " +
                     ppmPath.string() + " " + storePath.string();
 
