@@ -1,30 +1,25 @@
 /**
  * @file main.cpp
- * @brief Xudu: a xanadoc editor.
+ * @brief The OSMIC client: versioning, transclusion and links.
  *
- * The same library the plain editor uses, told about a different idea of what
- * a document is. Text typed here is appended to a permanent spool and the edit
- * is recorded as an operation, so every state the document has ever been in
- * stays reachable and going back to one and editing it branches rather than
- * destroys. A passage quoted from one document into another is one copy with
- * two pointers to it, which is why both show it shaded and why editing around
- * it does not break the connection.
+ * Runs on the library and adds the things that make Xanadu different from an
+ * ordinary editor: a history where nothing is deleted, connections drawn
+ * between passages, and a map of hypertime.
  *
- * None of that is in the library. What the library was given is the ability to
- * take its text from something other than a file, to say what changed, to
- * colour ranges somebody else cares about, and to let a program draw. Xanadu
- * is assembled out of those here.
+ * The window and the renderer are the library's; this file is the client
+ * logic, the commands and the command-line options.
  */
+#include <algorithm>
 #include <chrono>
+#include <cstdlib>
 #include <exception>
 #include <filesystem>
 #include <fstream>
 #include <iostream>
 #include <memory>
-#include <optional>
-#include <stdexcept>
 #include <string>
 #include <string_view>
+#include <utility>
 #include <vector>
 
 #include "config.h" // for GLEDITOR_VERSION, TOSTRING
@@ -33,42 +28,48 @@
 #include <gleditor/app.hpp>
 #include <gleditor/caret.hpp>
 #include <gleditor/doc.hpp>
+#include <gleditor/doc_switcher.hpp>
 #include <gleditor/form.hpp>
+#include <gleditor/render/diagnostics.hpp>
 #include <gleditor/render/types.hpp>
-#include <gleditor/render_state.hpp>
 #include <gleditor/renderer.hpp>
+#include <gleditor/render_state.hpp>
 #include <gleditor/sdl_compat.hpp>
 #include <gleditor/state.hpp>
 #include <gleditor/text_source.hpp>
 
-#include "beams.hpp"
-#include "core/config.hpp"
-#include "core/microversion.hpp"
-#include "core/mutable_link.hpp"
-#include "core/ops.hpp"
-#include "core/provenance.hpp"
-#include "core/torrent.hpp"
-#include "session.hpp"
-
-namespace {
+#include "xudu/beams.hpp"
+#include "xudu/core/provenance.hpp"
+#include "xudu/core/config.hpp"
+#include "xudu/core/ops.hpp"
+#include "xudu/core/microversion.hpp"
+#include "xudu/core/publication.hpp"
+#include "xudu/core/resolver.hpp"
+#include "xudu/core/store.hpp"
+#include "xudu/session.hpp"
 
 using gleditor::Mod;
 using xudu::Author;
+using xudu::Config;
 using xudu::HypertimeMap;
+using xudu::Link;
 using xudu::LinkBeams;
+using xudu::LinkType;
 using xudu::MicroversionId;
+using xudu::Provenance;
 using xudu::Session;
-using xudu::signingKeys;
 
-/// Z a --background document opens at. LinkBeams::align() fits the camera
-/// to the foreground documents alone (background ones are deliberately
-/// excluded from that envelope), so the distance from camera to background
-/// is what has to sell the "background" read through perspective
-/// foreshortening -- and that distance is typically in the hundreds of
-/// units for a tightly framed scene. A small offset like -30 is lost in
-/// the noise at that range and reads as full-size overlap, not backdrop;
-/// -500 is a large enough fraction of a typical camera distance to shrink
-/// visibly while staying well inside the 10000-unit far clip plane.
+namespace {
+
+/**
+ * @brief Z a --background document opens at. LinkBeams::align() fits the camera
+ *        to the foreground row (documents with depthZ < 0 are deliberately
+ *        excluded from that envelope), so the distance from camera to background
+ *        is roughly (cameraDistance + |backgroundDepthZ|).
+ *
+ * -500 is a large enough fraction of a typical camera distance to shrink
+ * a background document to roughly half its normal size on screen.
+ */
 constexpr float backgroundDepthZ = -500.0F;
 
 /**
@@ -84,8 +85,9 @@ constexpr float backgroundDepthZ = -500.0F;
 int checkAuthorship(const std::string &where) {
   namespace fs = std::filesystem;
   const fs::path given(where);
-  const auto record =
-      fs::is_directory(given) ? given / xudu::provenanceFileName : given;
+  const auto record = fs::is_directory(given)
+                          ? given / xudu::provenanceFileName
+                          : given;
   const auto sig = fs::path(record.string() + ".asc");
 
   const auto slurp = [](const fs::path &path) {
@@ -102,9 +104,6 @@ int checkAuthorship(const std::string &where) {
   const auto check = xudu::verifyProvenance(sealed);
   std::cout << sealed.yaml;
   if (!check.signatureValid) {
-    // Covers both "the signature is bad" and "your keyring has never heard of
-    // this key", which are different problems with the same consequence: you
-    // have no more reason to believe this record than any other text.
     std::cout << "\nxudu: this record is NOT vouched for -- " << check.detail
               << "\n";
     return 1;
@@ -119,7 +118,6 @@ int checkAuthorship(const std::string &where) {
                       "only their say-so")
             << "\n";
 
-  // What the record claims to cover, checked against what is actually there.
   if (const auto said = xudu::parseProvenance(sealed.yaml); said) {
     const auto content = record.parent_path() / xudu::sealedContentName;
     if (const auto bytes = slurp(content); !bytes.empty()) {
@@ -136,6 +134,9 @@ int checkAuthorship(const std::string &where) {
   return 0;
 }
 
+/**
+ * @brief Whether --help-all appears on the command line.
+ */
 bool wantsEveryOption(const int argc, const char *const *const argv) {
   for (int i = 1; i < argc; i++) {
     if (nullptr != argv[i] && std::string_view{"--help-all"} == argv[i]) {
@@ -147,46 +148,36 @@ bool wantsEveryOption(const int argc, const char *const *const argv) {
 
 /**
  * @brief What is on screen, and the commands that change it.
- *
- * Every command runs on the event thread and does its work inside
- * runWithState(), because touching a document or the caret is the render
- * thread's business. That is also what makes the ordering work: the render
- * queue is first in, first out, so a close pushed before an open happens
- * before it.
  */
 class Views {
 public:
   Views(Session &aSession, RendererRef aRenderer, HypertimeMap &aMap,
-        gleditor::Form &aForm, AppStateRef aState)
+        gleditor::Form &aForm, AppStateRef aState,
+        std::shared_ptr<gleditor::DocumentSwitcher> aSwitcher)
       : session(aSession), renderer(std::move(aRenderer)), map(aMap),
-        form(aForm), state(std::move(aState)) {}
+        form(aForm), state(std::move(aState)), switcher(std::move(aSwitcher)) {}
 
   /// Replace everything on screen with one document showing @p version.
-  void showOnly(const MicroversionId &version) {
+  void showOnly(const MicroversionId &version, const std::size_t storeIndex = 0) {
     const auto count = session.views().size();
     for (std::size_t i = 0; i < count; i++) {
       renderer->push(RenderItemCloseDoc());
     }
     renderer->runWithState([this](RenderState &) { session.clearViews(); });
-    showAlongside(version);
+    showAlongside(version, 0.0F, storeIndex);
   }
 
   /// Open @p version as another document beside whatever is already there.
-  /// @param depthZ World-unit Z the document opens at; see
-  ///        RenderItemOpenDoc::depthZ. Zero for the ordinary case.
-  void showAlongside(const MicroversionId &version, const float depthZ = 0.0F) {
-    renderer->push(RenderItemOpenDoc(session.sourceFor(version), depthZ));
-    renderer->runWithState([this, version](RenderState &state) {
-      if (state.docs.empty()) {
+  void showAlongside(const MicroversionId &version, const float depthZ = 0.0F,
+                     const std::size_t storeIndex = 0) {
+    renderer->push(
+        RenderItemOpenDoc(session.sourceFor(version, storeIndex), depthZ));
+    renderer->runWithState([this, version, storeIndex](RenderState &rState) {
+      if (rState.docs.empty()) {
         return;
       }
-      // The document the queue has just opened is the last one, and it needs
-      // to report its edits here: that is what turns typing into operations.
-      state.docs.back()->addObserver(&session);
-      session.viewOpened(version);
-      // The map marks where the reader is, which is the first document --
-      // the one the commands act on. A second opened beside it is context,
-      // and marking that instead would point at the wrong state.
+      rState.docs.back()->addObserver(&session);
+      session.viewOpened(version, storeIndex);
       map.setCurrent(session.views().front().version);
     });
   }
@@ -199,13 +190,11 @@ public:
     bool hasRange{};
   };
 
-  /// Run @p fun with the caret's position, if it has one and it lands on an
-  /// open document.
   template <typename Fun> void withCaret(Fun fun) {
-    renderer->runWithState([this, fun](RenderState &state) {
+    renderer->runWithState([this, fun](RenderState &rState) {
       auto *const caret = renderer->editCaret();
       if (nullptr == caret || !caret->active() ||
-          caret->documentIndex() >= state.docs.size()) {
+          caret->documentIndex() >= rState.docs.size()) {
         return;
       }
       Where where{caret->documentIndex(), caret->byteOffset(),
@@ -214,12 +203,10 @@ public:
         where.start = caret->selectionStart();
         where.end   = caret->selectionEnd();
       }
-      fun(state, where, caret);
+      fun(rState, where, caret);
     });
   }
 
-  /// Go back one state in hypertime. Nothing is undone: the state being left
-  /// keeps existing, and editing from here makes a branch.
   void back() {
     renderer->runWithState([this](RenderState &) {
       if (session.views().empty()) {
@@ -232,18 +219,18 @@ public:
       }
       const auto there = here.parent();
       std::cout << "xudu: " << here.str() << " -> " << there.str() << "\n";
-      showOnly(there);
+      showOnly(there, session.views().front().storeIndex);
     });
   }
 
-  /// Go forward, along the first continuation this state has.
   void forward() {
     renderer->runWithState([this](RenderState &) {
       if (session.views().empty()) {
         return;
       }
+      const auto sIdx     = session.views().front().storeIndex;
       const auto here     = session.views().front().version;
-      const auto children = session.store().children(here);
+      const auto children = session.store(sIdx).children(here);
       if (children.empty()) {
         std::cout << "xudu: " << here.str() << " has no successor\n";
         return;
@@ -253,22 +240,20 @@ public:
         std::cout << " (of " << children.size() << " futures)";
       }
       std::cout << "\n";
-      showOnly(children.front());
+      showOnly(children.front(), sIdx);
     });
   }
 
-  /// Stop pointing at the selection. The content stays in the spool.
   void deleteSelection() {
-    withCaret([](RenderState &state, const Where &where, Caret *caret) {
+    withCaret([](RenderState &rState, const Where &where, Caret *caret) {
       if (!where.hasRange) {
         return;
       }
-      state.docs[where.doc]->erase(state, where.start, where.end - where.start,
-                                   caret);
+      rState.docs[where.doc]->erase(rState, where.start, where.end - where.start,
+                                    caret);
     });
   }
 
-  /// Quote the selection into a second document beside this one.
   void transcludeSelection() {
     withCaret([this](RenderState &, const Where &where, Caret *) {
       if (!where.hasRange) {
@@ -276,26 +261,15 @@ public:
         return;
       }
       const auto from = session.versionOf(where.doc);
-      // A virtual copy: what goes into the new document is pointers to the
-      // addresses this one already uses, so there is one copy of the content
-      // and two documents showing it.
-      const auto quoted = session.store().transclude(
+      const auto sIdx = session.storeIndexOf(where.doc);
+      const auto quoted = session.store(sIdx).transclude(
           MicroversionId{}, 0, from, where.start, where.end - where.start);
       std::cout << "xudu: quoted [" << where.start << "," << where.end
                 << ") of " << from.str() << " into " << quoted.str() << "\n";
-      showAlongside(quoted);
+      showAlongside(quoted, 0.0F, sIdx);
     });
   }
 
-  /**
-   * @brief Mark one end of a link, then join it to another selection.
-   *
-   * Two presses rather than one, because a link has two ends and the second is
-   * usually in another document -- which is the case worth being able to make
-   * at all. The far end may be a document read in from somebody else's
-   * publication, and this one need never be published: what a link relates is
-   * content, so only an end that has to travel needs a name that travels.
-   */
   void linkSelection() {
     withCaret([this](RenderState &, const Where &where, Caret *) {
       if (!where.hasRange) {
@@ -303,10 +277,8 @@ public:
         return;
       }
       const auto version = session.versionOf(where.doc);
-      // The ends are primedia addresses rather than positions in this
-      // document, which is what makes the link show up on everything that
-      // quotes the content and survive editing around it.
-      auto spans = session.store().rebuild(version).spansFor(
+      const auto sIdx    = session.storeIndexOf(where.doc);
+      auto spans         = session.store(sIdx).rebuild(version).spansFor(
           where.start, where.end - where.start);
 
       if (!pending) {
@@ -331,7 +303,6 @@ public:
     });
   }
 
-  /// Forget a link that was begun and not finished.
   void cancelLink() {
     renderer->runWithState([this](RenderState &) {
       if (!pending) {
@@ -344,19 +315,6 @@ public:
     });
   }
 
-  /**
-   * @brief Ask what this publication should say, then make it.
-   *
-   * Asked rather than assumed, because publishing is the irreversible act in
-   * this program: a document goes out under somebody's name, signed, and
-   * cannot be recalled from whoever has it. Everything the record will say is
-   * on screen and editable first, filled in from the configuration and the
-   * store -- so the common case is still one keystroke and a look.
-   *
-   * The form runs on the event thread and the store is the render thread's,
-   * so what is offered is gathered inside runWithState() and what comes back
-   * is applied inside another.
-   */
   void publishCurrent(const std::string &salt) {
     renderer->runWithState([this, salt](RenderState &) {
       if (session.views().empty()) {
@@ -372,16 +330,14 @@ public:
                                  caret->documentIndex() < session.views().size()
                              ? caret->documentIndex()
                              : 0U;
-      const auto version = session.versionOf(which);
-      const auto who     = session.author();
-      const auto where   = session.publishedDir();
+      const auto version  = session.versionOf(which);
+      const auto storeIdx = session.storeIndexOf(which);
+      const auto who      = session.author();
+      const auto where    = session.publishedDir(storeIdx);
 
       using Field = gleditor::Form::Field;
       using Kind  = gleditor::Form::Kind;
 
-      // What the keyring can sign with, offered rather than typed: a
-      // fingerprint is not something anybody remembers, and a key that is not
-      // there is a failure at the last step of publishing.
       Field keys{"Signing key",
                  {},
                  "no signing key in the keyring",
@@ -390,8 +346,6 @@ public:
       for (const auto &key : signingKeys(session.settings().signing())) {
         keys.options.push_back(key.describe());
         keys.optionValues.push_back(key.fingerprint);
-        // Whichever the configuration names, or failing that whichever gpg
-        // would reach for on its own, is what the list starts on.
         const bool wanted = who.gpgKey.empty()
                                 ? key.preferred
                                 : key.fingerprint.ends_with(who.gpgKey) ||
@@ -400,9 +354,6 @@ public:
           keys.chosen = keys.options.size() - 1;
         }
       }
-      // Nothing to sign with is the end of it: the record is signed before the
-      // content is sealed, so there is no half-published state to offer. Said
-      // now rather than after nine fields have been filled in.
       if (keys.options.empty()) {
         std::cout << "xudu: no signing key in the keyring\n";
         state->showDialog(
@@ -436,23 +387,19 @@ public:
           Field{"Rights", {}, "how others may use this; optional", false},
           Field{"Note", {}, "anything else worth recording; optional", false},
       };
-      // The title defaults to the name, since a one-word name is a passable
-      // title and an empty required field would stop somebody who meant to
-      // accept everything.
       asked[1].value = asked[0].value;
 
       form.open("Publish " + version.str(),
                 "Signed as an authorship record, then sealed into " + where,
                 std::move(asked),
-                [this, version, which](const std::vector<Field> &answers) {
-                  publishAnswers(version, which, answers);
+                [this, version, which, storeIdx](const std::vector<Field> &answers) {
+                  publishAnswers(version, which, storeIdx, answers);
                 });
     });
   }
 
-  /// Carry out what the dialog was told. Called on the event thread by the
-  /// form, so the work goes back through the queue like every other command.
   void publishAnswers(const MicroversionId &version, const std::uint32_t which,
+                      const std::size_t storeIdx,
                       const std::vector<gleditor::Form::Field> &answers) {
     Session::PublishRequest request;
     request.salt          = answers[0].answer();
@@ -460,9 +407,7 @@ public:
     request.author.name   = answers[2].answer();
     request.author.email  = answers[3].answer();
     request.author.gpgKey = answers[4].answer();
-    // Used for this one signature and not kept anywhere: a passphrase written
-    // down is a passphrase somebody else can read.
-    request.passphrase = answers[5].answer();
+    request.passphrase    = answers[5].answer();
     if (!answers[7].answer().empty()) {
       request.extra.emplace_back("rights", answers[7].answer());
     }
@@ -470,19 +415,11 @@ public:
       request.extra.emplace_back("note", answers[8].answer());
     }
 
-    renderer->runWithState([this, version, which, request](RenderState &) {
+    renderer->runWithState([this, version, which, storeIdx, request](RenderState &) {
       try {
-        const auto path = session.publishDocument(version, request);
+        const auto path = session.publishDocument(version, request, storeIdx);
         std::cout << "xudu: published doc " << which << " as " << path << "\n";
       } catch (const std::exception &err) {
-        // Said in the platform's own dialog rather than drawn in the window.
-        // The form was a question and it has been answered; this is the answer
-        // going wrong, and what gpg says when it will not sign is several lines
-        // of somebody else's diagnostics -- a shape a message box already
-        // handles, wraps and lets somebody select from, on every platform,
-        // without this program growing a scrollable text panel to hold it.
-        //
-        // On the terminal as well, since a scripted run has no window.
         std::cout << "xudu: cannot publish: " << err.what() << "\n";
         state->showDialog(render::DiagnosticSeverity::Error,
                           "Could not publish " + version.str(), err.what());
@@ -490,17 +427,136 @@ public:
     });
   }
 
-  /// Print the whole of hypertime, which is easier to read than the map when
-  /// there is a lot of it.
+  /// Save or preserve current document
+  void saveCurrent() {
+    renderer->runWithState([this](RenderState &) {
+      if (session.views().empty()) {
+        session.saveAll();
+        return;
+      }
+      auto *const caret = renderer->editCaret();
+      const auto which = nullptr != caret && caret->active() &&
+                                 caret->documentIndex() < session.views().size()
+                             ? caret->documentIndex()
+                             : (switcher ? switcher->activeDocIndex() : 0U);
+      if (which >= session.views().size()) {
+        session.saveAll();
+        return;
+      }
+      const auto storeIdx = session.storeIndexOf(which);
+      if (session.isTemporaryStore(storeIdx)) {
+        // Open folder dialog to preserve temporary store
+        using Field = gleditor::Form::Field;
+        namespace fs = std::filesystem;
+        std::string curDir = fs::current_path().string();
+        std::string defName = "doc_" + std::to_string(storeIdx) + ".xanadoc";
+
+        std::vector<Field> fields{
+            Field{"Folder", curDir, "directory where the xanadoc folder will live", true},
+            Field{"Name", defName, "name of the xanadoc folder", true},
+        };
+
+        form.open("Preserve Temporary Xanadoc",
+                  "Designate a permanent directory and name for this temporary store",
+                  std::move(fields),
+                  [this, storeIdx](const std::vector<Field> &answers) {
+                    preserveAnswers(storeIdx, answers);
+                  });
+      } else {
+        session.save(storeIdx);
+        std::cout << "xudu: saved to " << session.path(storeIdx) << "\n";
+      }
+    });
+  }
+
+  void preserveAnswers(const std::size_t storeIdx,
+                       const std::vector<gleditor::Form::Field> &answers) {
+    namespace fs = std::filesystem;
+    const std::string folder = answers[0].answer();
+    const std::string name   = answers[1].answer();
+    const fs::path targetDir = fs::path(folder) / name;
+
+    renderer->runWithState([this, storeIdx, targetDir](RenderState &) {
+      try {
+        namespace fs = std::filesystem;
+        fs::create_directories(targetDir);
+        auto &st = session.store(storeIdx);
+        st.save(targetDir.string());
+        session.setStorePath(storeIdx, targetDir.string(), false);
+        std::cout << "xudu: preserved temporary store to " << targetDir.string() << "\n";
+      } catch (const std::exception &err) {
+        std::cout << "xudu: cannot preserve store: " << err.what() << "\n";
+        state->showDialog(render::DiagnosticSeverity::Error,
+                          "Could not preserve xanadoc", err.what());
+      }
+    });
+  }
+
+  void closeActive() {
+    renderer->runWithState([this](RenderState &rState) {
+      if (rState.docs.empty()) {
+        return;
+      }
+      auto *const caret = renderer->editCaret();
+      const auto which = nullptr != caret && caret->active() &&
+                                 caret->documentIndex() < rState.docs.size()
+                             ? caret->documentIndex()
+                             : (switcher ? switcher->activeDocIndex() : 0U);
+      if (which < rState.docs.size()) {
+        renderer->push(RenderItemCloseDoc(which));
+      }
+    });
+  }
+
+  void selectDoc(const std::uint32_t index) {
+    renderer->runWithState([this, index](RenderState &rState) {
+      if (index < rState.docs.size() && rState.docs[index]) {
+        if (switcher) {
+          switcher->setActiveDocIndex(index);
+        }
+        auto *const caret = renderer->editCaret();
+        if (caret) {
+          caret->placeAt(index, 0);
+        }
+      }
+    });
+  }
+
+  void nextDoc() {
+    renderer->runWithState([this](RenderState &rState) {
+      if (rState.docs.empty()) {
+        return;
+      }
+      const auto total = static_cast<std::uint32_t>(rState.docs.size());
+      const auto cur   = switcher ? switcher->activeDocIndex() : 0U;
+      const auto next  = (cur + 1U) % total;
+      selectDoc(next);
+    });
+  }
+
+  void prevDoc() {
+    renderer->runWithState([this](RenderState &rState) {
+      if (rState.docs.empty()) {
+        return;
+      }
+      const auto total = static_cast<std::uint32_t>(rState.docs.size());
+      const auto cur   = switcher ? switcher->activeDocIndex() : 0U;
+      const auto prev  = (cur + total - 1U) % total;
+      selectDoc(prev);
+    });
+  }
+
   void printHistory() {
     renderer->runWithState([this](RenderState &) {
       const auto here = session.views().empty()
                             ? MicroversionId{}
                             : session.views().front().version;
-      std::cout << "xudu: " << session.store().opCount() << " operations, "
-                << session.store().primedia().size() << " bytes of primedia\n";
-      for (const auto &id : session.store().allVersions()) {
-        const auto *const op = session.store().getOp(id);
+      const auto sIdx = session.views().empty() ? 0 : session.views().front().storeIndex;
+      const auto &st  = session.store(sIdx);
+      std::cout << "xudu: " << st.opCount() << " operations, "
+                << st.primedia().size() << " bytes of primedia\n";
+      for (const auto &id : st.allVersions()) {
+        const auto *const op = st.getOp(id);
         std::cout << (id == here ? "  * " : "    ") << id.str() << "  "
                   << (nullptr == op ? "?" : xudu::opKindName(op->kind)) << "\n";
       }
@@ -508,7 +564,6 @@ public:
   }
 
 private:
-  /// One end of a link that has been marked and not yet joined to another.
   struct Pending {
     std::uint32_t doc{};
     std::uint32_t start{};
@@ -520,9 +575,8 @@ private:
   RendererRef renderer;
   HypertimeMap &map;
   gleditor::Form &form;
-  /// Held for the one thing it offers that this class cannot do itself: a
-  /// native dialog, put up by the thread that owns the window.
   AppStateRef state;
+  std::shared_ptr<gleditor::DocumentSwitcher> switcher;
   std::optional<Pending> pending;
 };
 
@@ -531,18 +585,32 @@ void bindCommands(gleditor::Application &app, const AppStateRef &state,
                   Session &session, const std::string &publishAs) {
   app.bindDefaultViewCommands();
 
-  // Commands take control, because a bare letter is text: this program's
-  // whole point is that typing is an edit, so it must reach the document.
   app.commands().bind(SDL_SCANCODE_Q, Mod::Ctrl, "quit", "save and close",
                       [state, &session] {
-                        session.save();
+                        session.saveAll();
                         state->alive = false;
                       });
   app.commands().bind(
-      SDL_SCANCODE_S, Mod::Ctrl, "save", "write the spools out", [&session] {
-        session.save();
-        std::cout << "xudu: saved to " << session.path() << "\n";
-      });
+      SDL_SCANCODE_S, Mod::Ctrl, "save", "save or preserve active document",
+      [&views] { views.saveCurrent(); });
+  app.commands().bind(SDL_SCANCODE_W, Mod::Ctrl, "close",
+                      "close the active document",
+                      [&views] { views.closeActive(); });
+  app.commands().bind(SDL_SCANCODE_TAB, Mod::Ctrl, "next-doc",
+                      "switch to next document", [&views] { views.nextDoc(); });
+  app.commands().bind(SDL_SCANCODE_TAB, Mod::Ctrl | Mod::Shift, "prev-doc",
+                      "switch to previous document",
+                      [&views] { views.prevDoc(); });
+
+  for (int i = 1; i <= 9; ++i) {
+    const auto scancode    = static_cast<SDL_Scancode>(SDL_SCANCODE_1 + (i - 1));
+    const auto targetIndex = static_cast<std::uint32_t>(i - 1);
+    app.commands().bind(
+        scancode, Mod::Ctrl, "doc-" + std::to_string(i),
+        "switch to document " + std::to_string(i),
+        [&views, targetIndex] { views.selectDoc(targetIndex); });
+  }
+
   app.commands().bind(SDL_SCANCODE_M, Mod::Ctrl, "map",
                       "show or hide the hypertime map",
                       [&map] { map.toggle(); });
@@ -590,7 +658,7 @@ int main(const int argc, char **argv) {
   argparse::ArgumentParser parser("xudu", TOSTRING(GLEDITOR_VERSION));
   gleditor::addCommonArguments(parser, detailed);
   parser.add_argument("store")
-      .help("directory the two spools live in; created if it is not there")
+      .help("directory the primary spools live in; created if it is not there")
       .default_value(std::string{"xanadoc"});
   parser.add_argument("--version-id")
       .help("microversion to open, for example 2a4; the default is the most "
@@ -598,106 +666,80 @@ int main(const int argc, char **argv) {
       .default_value(std::string{});
   parser.add_argument("--torrent")
       .help("a .torrent file, a magnet link naming one already given, or a "
-            "BEP 46 name (magnet:?xs=urn:btpk:KEY); repeatable. The info hash "
-            "is a content-derived name, so a quotation into it means the same "
-            "thing to anyone who has the reference and keeps meaning it after "
-            "this machine is gone. A magnet carries only that name -- the "
-            "piece hashes it must be verified against are in the torrent's "
-            "info dictionary, which a client normally fetches from the swarm. "
-            "A btpk name carries less still: it is a public key, and what it "
-            "points at is looked up in the DHT and believed only if the "
-            "answer is signed by that key")
-      .append();
-  parser.add_argument("--dht-node")
-      .help("introduce a DHT node as HOST:PORT; repeatable. A DHT is joined by "
-            "knowing somebody already in it, and no public routers are "
-            "contacted unless named here. Needed to resolve a btpk name")
-      .append();
-  parser.add_argument("--private-dht")
-      .help("this DHT is one private network, so do not apply the public rule "
-            "that keeps the routing table to one node per /8 -- on a LAN every "
-            "node is in the same /8 and the rule leaves a DHT of one")
-      .flag();
-  parser.add_argument("--swarm")
-      .help("fetch quoted content from BitTorrent peers rather than only from "
-            "this disk. Without it a reference resolves only when this machine "
-            "already holds the bytes, which is the dependency on one machine "
-            "that addressing content by its hash exists to remove")
-      .flag();
-  parser.add_argument("--peer")
-      .help("introduce a peer as HOST:PORT; repeatable. Needed only when there "
-            "is no tracker or DHT to find one through")
+            "name (magnet:?xs=urn:btpk:KEY); repeatable. Content referenced "
+            "by the document is resolved from these")
       .append();
   parser.add_argument("--torrent-data")
-      .help("directory the torrent's files are in; the default is the "
-            "directory the .torrent file itself is in")
+      .help("directory where files described by --torrent are; empty means "
+            "beside each .torrent file")
       .default_value(std::string{});
-  parser.add_argument("--quote")
-      .help("quote a range of the most recently given --torrent into the "
-            "document, as FILE,OFFSET,LENGTH. A length of 0 means the rest of "
-            "the file. Repeatable")
+  parser.add_argument("--swarm")
+      .help("fetch quoted content from the BitTorrent network rather than from "
+            "a disk here")
+      .default_value(false)
+      .implicit_value(true);
+  parser.add_argument("--private-dht")
+      .help("allow more than one DHT node on the same /8 network. Used for "
+            "automated tests where several nodes run on 127.0.0.1")
+      .default_value(false)
+      .implicit_value(true);
+  parser.add_argument("--peer")
+      .help("introduce a peer as HOST:PORT; repeatable. Useful when two "
+            "machines are testing together and have not found each other "
+            "through the DHT")
       .append();
-  parser.add_argument("--map")
-      .help("start with the hypertime map shown; ctrl-m toggles it")
-      .flag();
-  parser.add_argument("--no-beams")
-      .help("do not draw the links between open documents as beams; ctrl-k "
-            "toggles them. A link is a visible relation between two passages "
-            "and both ends are meant to be on screen, which is what the beams "
-            "are for")
-      .flag();
-  parser.add_argument("--no-sworph")
-      .help("leave the documents where they are put. By default a link coming "
-            "into view brings the document at its far end alongside the one at "
-            "its near end and lines the two ends up, opening that document if "
-            "nothing on screen shows it; clicking a beam still does so, since "
-            "that was asked for")
-      .flag();
+  parser.add_argument("--dht-node")
+      .help("bootstrap the DHT from a known node as HOST:PORT; repeatable")
+      .append();
+  parser.add_argument("--quote")
+      .help("quote a byte range of a torrent-backed file, as "
+            "FILE_INDEX,OFFSET,LENGTH; repeatable. Appended to the store's "
+            "latest state")
+      .append();
   parser.add_argument("--alongside")
-      .help("also open this microversion as a second document, for reading two "
-            "states or two documents against each other; passages they share "
-            "are shaded in both")
+      .help("a second microversion to show beside the opening one, for instance "
+            "to compare two states")
       .default_value(std::string{});
   parser.add_argument("--background")
-      .help("open this microversion behind the documents opened by "
-            "--version-id, --alongside and --read, at a fixed distance "
-            "rather than beside them; repeatable. For a corpus shown for "
-            "context rather than read -- a link into one still brings it "
-            "forward and lines it up, the same as sworph does for any "
-            "other document")
+      .help("open this microversion as a background document (depthZ < 0), "
+            "standing behind the foreground row and excluded from camera "
+            "auto-framing; repeatable")
       .append();
+  parser.add_argument("--no-beams")
+      .help("do not draw the connections between documents")
+      .default_value(false)
+      .implicit_value(true);
+  parser.add_argument("--no-sworph")
+      .help("do not let a link coming into view bring its far document over")
+      .default_value(false)
+      .implicit_value(true);
+  parser.add_argument("--map")
+      .help("show the hypertime map on startup; ctrl-m toggles it while "
+            "running")
+      .default_value(false)
+      .implicit_value(true);
   parser.add_argument("--author-name")
-      .help("who publishes, as a person. Kept in the per-user configuration "
-            "file, so it is said once for every store; --author-here puts it "
-            "in this store instead. Publishing writes an authorship record "
-            "naming them and has GnuPG sign it before the content is sealed, "
-            "so that the torrent's info hash covers the content and the claim "
-            "about who wrote it together")
+      .help("name to record on publications made from this machine")
       .default_value(std::string{});
   parser.add_argument("--author-email")
-      .help("the author's email address, recorded alongside the name")
+      .help("email to record alongside the author name")
       .default_value(std::string{});
   parser.add_argument("--gpg-key")
-      .help("which OpenPGP key signs the authorship record: a fingerprint, a "
-            "long key id, or an email address -- anything gpg accepts. The "
-            "default is gpg's own default signing key. A key kept outside the "
-            "usual keyring is named by gpg_secret_key or gpg_home in the "
-            "configuration file")
+      .help("fingerprint of the secret key to sign authorship records with")
       .default_value(std::string{});
   parser.add_argument("--author-here")
-      .help("record the author in this store rather than in the per-user "
-            "configuration: a pen name, or an identity used for one project")
-      .flag();
+      .help("keep the --author-* settings in this store (author.yaml) rather "
+            "than in the per-user configuration (~/.config/xudu/config.yaml)")
+      .default_value(false)
+      .implicit_value(true);
   parser.add_argument("--show-config")
-      .help("print where the configuration file is and what it says, and stop")
-      .flag();
+      .help("print the current configuration and quit")
+      .default_value(false)
+      .implicit_value(true);
   parser.add_argument("--check-authorship")
-      .help("check the authorship record sealed with somebody's content and "
-            "print who signed it. Give the directory the torrent's files are "
-            "in, or the record itself; the signature beside it is what gpg is "
-            "asked about. Says both whether the signature is good and whether "
-            "the key is one you have any reason to trust, because those are "
-            "different questions")
+      .help("verify the signature on this publication, report who signed it, "
+            "and quit. Answers 'who is this from?' without importing it into "
+            "a store -- the two are different questions")
       .default_value(std::string{});
   parser.add_argument("--read")
       .help("open a published document from a manifest file; repeatable. It is "
@@ -714,10 +756,11 @@ int main(const int argc, char **argv) {
             "same document. Ctrl-shift-s does the same while running")
       .default_value(std::string{});
   parser.add_argument("--import")
-      .help("read this file into an empty store as its first operation; a "
-            "store that already has operations is left alone, since importing "
-            "into one would be an edit rather than a beginning")
-      .default_value(std::string{});
+      .help("read files into stores as initial operations; repeatable. The "
+            "first file goes into the primary store (if empty), while additional "
+            "files receive independent temporary stores")
+      .append();
+  parser.add_argument("files").help("source files to import or open").remaining();
 
   if (detailed) {
     std::cout << parser << "\n";
@@ -733,6 +776,8 @@ int main(const int argc, char **argv) {
   std::string publishAs;
   std::vector<MicroversionId> read;
   std::vector<MicroversionId> background;
+  std::vector<std::pair<MicroversionId, std::size_t>> extraImports;
+
   try {
     parser.parse_args(argc, argv);
     if (parser["--show-config"] == true) {
@@ -740,8 +785,6 @@ int main(const int argc, char **argv) {
                 << xudu::loadConfig().toYaml();
       return 0;
     }
-    // Answered before a window is opened or a store is touched: this asks
-    // about a file somebody was sent, and needs neither.
     if (const auto where = parser.get<std::string>("--check-authorship");
         !where.empty()) {
       return checkAuthorship(where);
@@ -751,31 +794,49 @@ int main(const int argc, char **argv) {
     quiet    = parser["--print-asset-dir"] == true;
 
     session = std::make_unique<Session>(parser.get<std::string>("store"));
-    // --type's "[bold,italic]text" syntax: the base library parses which
-    // decorations were named and inserts the text itself without knowing
-    // what a Format link is; this is the one place that connects the two.
     state->onDecoratedInsert = [&session](Doc &doc, const std::uint32_t at,
                                           const std::uint32_t length,
                                           const gleditor::DecorationMask mask) {
       session->markDecorated(doc, at, length, mask);
     };
 
-    // A new xanadoc is the null document, which has nothing to click on and
-    // no text to quote. Importing is how one gets started, and is refused on a
-    // store with a history because putting a file into that would be an
-    // ordinary edit and should be made as one.
-    if (const auto file = parser.get<std::string>("--import"); !file.empty()) {
-      if (0 != session->store().opCount()) {
-        throw std::runtime_error("--import: " + session->path() +
-                                 " already has operations; import into an "
-                                 "empty store");
+    // Collect import files from --import and positional files
+    std::vector<std::string> importFiles;
+    if (parser.present<std::vector<std::string>>("--import")) {
+      for (const auto &f : parser.get<std::vector<std::string>>("--import")) {
+        if (!f.empty()) {
+          importFiles.push_back(f);
+        }
       }
-      const gleditor::FileTextSource source(file);
-      const auto imported =
-          session->store().insert(MicroversionId{}, 0, source.text());
-      session->save();
-      quiet || std::cout << "xudu: imported " << file << " as "
-                         << imported.str() << "\n";
+    }
+    if (parser.present<std::vector<std::string>>("files")) {
+      for (const auto &f : parser.get<std::vector<std::string>>("files")) {
+        if (!f.empty()) {
+          importFiles.push_back(f);
+        }
+      }
+    }
+
+    if (!importFiles.empty()) {
+      std::size_t startIdx = 0;
+      if (0 == session->store(0).opCount()) {
+        const auto &firstFile = importFiles[0];
+        const gleditor::FileTextSource source(firstFile);
+        const auto imported =
+            session->store(0).insert(MicroversionId{}, 0, source.text());
+        session->save(0);
+        opening = imported;
+        quiet || std::cout << "xudu: imported " << firstFile << " as "
+                           << imported.str() << "\n";
+        startIdx = 1;
+      }
+      for (std::size_t i = startIdx; i < importFiles.size(); ++i) {
+        const auto &f = importFiles[i];
+        const auto [sIdx, imported] = session->importFileToTemporaryStore(f);
+        extraImports.emplace_back(imported, sIdx);
+        quiet || std::cout << "xudu: imported " << f << " to temp store "
+                           << sIdx << " as " << imported.str() << "\n";
+      }
     }
 
     if (parser["--swarm"] == true) {
@@ -784,7 +845,6 @@ int main(const int argc, char **argv) {
                          << session->swarmPort() << "\n";
     }
 
-    // Before any torrent, since resolving a name needs a DHT to ask.
     if (parser.present<std::vector<std::string>>("--dht-node")) {
       for (const auto &spec :
            parser.get<std::vector<std::string>>("--dht-node")) {
@@ -800,25 +860,17 @@ int main(const int argc, char **argv) {
       }
     }
 
-    // Torrents first, so a --quote has something to name.
     std::vector<xudu::InfoHash> available;
     if (parser.present<std::vector<std::string>>("--torrent")) {
       const auto root = parser.get<std::string>("--torrent-data");
       for (const auto &file :
            parser.get<std::vector<std::string>>("--torrent")) {
-        // A name is tried first: both spellings begin "magnet:?", and the one
-        // that has to be looked up is the one carrying xs=urn:btpk.
         const auto hash = xudu::MutableLink::looksLikeMutableLink(file)
                               ? session->addName(file)
                           : xudu::MagnetLink::looksLikeMagnet(file)
                               ? session->addMagnet(file)
                               : session->addTorrent(file, root);
         available.push_back(hash);
-        // A magnet, and so a name, joins a swarm knowing only which content is
-        // meant: the file list and the piece hashes come from a peer
-        // afterwards. Until they do there is nothing to describe, which is a
-        // stage to report rather than a failure -- the wait happens where the
-        // metadata is first needed, by which time a --peer has been given.
         if (const auto *const meta = session->content().metainfo(hash);
             nullptr != meta) {
           quiet || std::cout << "xudu: " << file << " is " << meta->magnet()
@@ -852,9 +904,6 @@ int main(const int argc, char **argv) {
       if (available.empty()) {
         throw std::runtime_error("--quote needs a --torrent to quote from");
       }
-      // Nothing can be quoted out of content that cannot be described, since
-      // the piece hashes are what a quotation is checked against. This is the
-      // first point where that is true, and peers have been introduced by now.
       if (!session->awaitMetadata(available.back(), std::chrono::seconds{60})) {
         throw std::runtime_error(
             "--quote: no metadata arrived for " + available.back().hex() +
@@ -875,32 +924,24 @@ int main(const int argc, char **argv) {
             std::stoull(spec.substr(first + 1, second - first - 1));
         const auto length = std::stoull(spec.substr(second + 1));
 
-        // Appended to whatever the document is now, which for a fresh store is
-        // the null document -- so a store made entirely of quotations holds no
-        // content of its own at all.
         const auto at = static_cast<std::uint32_t>(
-            session->store().rebuild(session->store().latest()).length());
+            session->store(0).rebuild(session->store(0).latest()).length());
         const auto produced =
-            session->quoteTorrent(session->store().latest(), at,
+            session->quoteTorrent(session->store(0).latest(), at,
                                   available.back(), fileIndex, offset, length);
         quiet || std::cout << "xudu: " << produced.str() << " quotes "
                            << available.back().hex() << " file " << fileIndex
                            << " [" << offset << "," << offset + length << ")\n";
       }
-      session->save();
+      session->save(0);
     }
 
-    // Who publishes here, when it was given. Before anything is published,
-    // and kept, so that it is said once rather than every time.
     if (const auto name = parser.get<std::string>("--author-name"),
         email           = parser.get<std::string>("--author-email"),
         key             = parser.get<std::string>("--gpg-key");
         !name.empty() || !email.empty() || !key.empty()) {
       xudu::Author who{name, email, key};
       if (!who.named() && parser["--author-here"] != true) {
-        // Half of one is accepted when it is being added to what is already
-        // there -- somebody changing only their key -- and refused when it is
-        // all there is, since a record with half a person in it names nobody.
         const auto existing = xudu::loadConfig();
         if (!Author{name.empty() ? existing.author.name : name,
                     email.empty() ? existing.author.email : email, key}
@@ -915,8 +956,6 @@ int main(const int argc, char **argv) {
       if (here) {
         session->setAuthor(who);
       } else {
-        // Merged into whatever is already there, so setting only the key does
-        // not blank the name somebody set last week.
         auto config = xudu::loadConfig();
         if (!who.name.empty()) {
           config.author.name = who.name;
@@ -930,26 +969,21 @@ int main(const int argc, char **argv) {
         xudu::saveConfig(config);
         recorded = config.author;
       }
-      // What it now says, rather than what was passed: somebody setting only
-      // their key wants to see the name it was added to.
       quiet || std::cout << "xudu: publishing as " << recorded.name << " <"
                          << recorded.email << ">"
                          << (recorded.gpgKey.empty()
                                  ? std::string{}
                                  : ", signed by " + recorded.gpgKey)
-                         << (here ? " from " + session->path()
+                         << (here ? " from " + session->path(0)
                                   : " (kept in " + xudu::configPath() + ")")
                          << "\n";
     }
 
-    // Before the opening version is chosen, so that reading a document in and
-    // saying nothing else opens the thing that was just read rather than
-    // whatever this store happened to be showing.
     if (parser.present<std::vector<std::string>>("--read")) {
       for (const auto &file : parser.get<std::vector<std::string>>("--read")) {
         read.push_back(session->readPublication(file));
       }
-      session->save();
+      session->save(0);
     }
     if (parser.present<std::vector<std::string>>("--background")) {
       for (const auto &verStr :
@@ -959,24 +993,23 @@ int main(const int argc, char **argv) {
     }
 
     const auto asked = parser.get<std::string>("--version-id");
-    opening   = asked.empty()
-                    ? (read.empty() ? session->store().latest() : read.front())
+    if (opening.isZero()) {
+      opening = asked.empty()
+                    ? (read.empty() ? session->store(0).latest() : read.front())
                     : MicroversionId::parse(asked);
+    }
     alongside = parser.get<std::string>("--alongside");
     publishAs = parser.get<std::string>("--publish");
     if (!publishAs.empty()) {
-      // Done before anything is printed about it: publishing may have to mint
-      // this machine's name, which says so, and a half-written line with that
-      // in the middle of it is not a message anybody can read.
       const auto manifest = session->publishDocument(
-          opening, Session::PublishRequest{publishAs, publishAs});
+          opening, Session::PublishRequest{publishAs, publishAs, {}, {}, {}}, 0);
       quiet || std::cout << "xudu: published " << opening.str() << " as "
                          << manifest << "\n";
     }
 
     quiet || std::cout << "xudu " << TOSTRING(GLEDITOR_VERSION) << ": "
-                       << session->store().opCount() << " operations in "
-                       << session->path() << ", opening " << opening.str()
+                       << session->store(0).opCount() << " operations in "
+                       << session->path(0) << ", opening " << opening.str()
                        << "\n";
   } catch (const std::exception &err) {
     std::cerr << err.what() << "\n" << parser;
@@ -984,79 +1017,74 @@ int main(const int argc, char **argv) {
   }
 
   try {
-    // Deliberately not the document's font. The map is chrome: it has to stay
-    // legible and the same size whatever the document is being read at, and a
-    // 24-point label does not fit in a node box.
     HypertimeMap map("Sans 10", *session);
     map.setVisible(parser["--map"] == true);
-    // The panel a publication is described in. Chrome rather than document, so
-    // it keeps its own small font whatever the text is being read at.
+
+    auto docSwitcher = std::make_shared<gleditor::DocumentSwitcher>("Sans 10");
+    docSwitcher->setCloseHandler([&renderer](const std::uint32_t docIndex) {
+      renderer->push(RenderItemCloseDoc(docIndex));
+    });
+    docSwitcher->setSelectHandler([&renderer](const std::uint32_t docIndex) {
+      renderer->runWithState([&renderer, docIndex](RenderState &rState) {
+        if (docIndex < rState.docs.size() && rState.docs[docIndex]) {
+          auto *const caret = renderer->editCaret();
+          if (caret) {
+            caret->placeAt(docIndex, 0);
+          }
+        }
+      });
+    });
+
     gleditor::Form publishForm("Sans 11");
-    Views views(*session, renderer, map, publishForm, state);
+    Views views(*session, renderer, map, publishForm, state, docSwitcher);
 
     LinkBeams links(*session, renderer);
     links.setVisible(parser["--no-beams"] != true);
     links.setSworph(parser["--no-sworph"] != true);
-    // A link's far end is usually in a document nobody has opened, and this is
-    // how one gets opened. Queued rather than done on the spot: it is called
-    // from the render thread, and opening a document is that thread's work.
     links.setOpener([&views](const MicroversionId &version) {
       views.showAlongside(version);
     });
 
-    // All registered before the render thread starts, which is the contract:
-    // the decorator is asked every frame, and the map and the beams need the
-    // device the moment there is one.
     renderer->addSpanDecorator(session.get());
+    renderer->addFrameContributor(docSwitcher.get());
     renderer->addFrameContributor(&map);
     renderer->addFrameContributor(&links);
-    // And the same three to the accessibility tree, in the order somebody
-    // moving through the window should meet them: the links between the
-    // documents, then the map of hypertime, then whatever modal is up.
+
+    state->accessibility->addSource(docSwitcher.get());
     state->accessibility->addSource(&links);
     state->accessibility->addSource(&map);
     state->accessibility->addSource(&publishForm);
     state->accessibility->setToolkit("gleditor", TOSTRING(GLEDITOR_VERSION));
-    // Going to a state is the program's business rather than the map's; this
-    // is the same move ctrl-b and ctrl-n make.
+
     map.setGoer([&views](const MicroversionId &id) { views.showOnly(id); });
-    // Last of the three, so the modal draws over both of them.
     renderer->addFrameContributor(&publishForm);
-    // And it takes the keyboard while it is up, so that typing a title does
-    // not type into the document behind it.
     state->modal = &publishForm;
-    // Before the caret gets a click, so that clicking a beam follows it rather
-    // than putting the caret behind it.
+    renderer->addPickObserver(docSwitcher.get());
     renderer->addPickObserver(&links);
 
-    views.showAlongside(opening);
-    if (!alongside.empty()) {
-      views.showAlongside(MicroversionId::parse(alongside));
+    views.showAlongside(opening, 0.0F, 0);
+    for (const auto &[extraVer, sIdx] : extraImports) {
+      views.showAlongside(extraVer, 0.0F, sIdx);
     }
-    // Anything else read in, so that a link between two published documents is
-    // a link between two documents on screen.
+    if (!alongside.empty()) {
+      views.showAlongside(MicroversionId::parse(alongside), 0.0F, 0);
+    }
     for (const auto &also : read) {
       if (also != opening) {
-        views.showAlongside(also);
+        views.showAlongside(also, 0.0F, 0);
       }
     }
-    // Behind everything above, at a fixed distance rather than another slot
-    // along the row: a corpus given for context and not for reading, that
-    // sworph is still free to bring forward the same as any other document
-    // once a link into it comes into view.
     for (const auto &behind : background) {
-      views.showAlongside(behind, backgroundDepthZ);
+      views.showAlongside(behind, backgroundDepthZ, 0);
     }
 
     gleditor::Application app(state, renderer, backend, "Xudu");
     bindCommands(app, state, views, map, links, *session,
                  publishAs.empty() ? std::string{"document"} : publishAs);
-    // A query prints its answer and nothing else: --print-asset-dir is read by
-    // scripts, and a command listing in front of the path is not a path.
     quiet || std::cout << "commands:\n" << app.commands().helpText();
 
     const auto status = app.run();
-    session->save();
+    session->saveAll();
     return status;
   } catch (const std::exception &err) {
     std::cerr << "Error: " << err.what() << "\n";

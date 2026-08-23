@@ -39,10 +39,10 @@
 #include <gleditor/pick_observer.hpp>
 #include <gleditor/renderer.hpp>
 
-#include "core/link_layout.hpp"
-#include "core/microversion.hpp"
-#include "core/ops.hpp"
-#include "session.hpp"
+#include "xudu/core/link_layout.hpp"
+#include "xudu/core/microversion.hpp"
+#include "xudu/core/ops.hpp"
+#include "xudu/session.hpp"
 
 namespace xudu {
 

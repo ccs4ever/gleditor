@@ -20,8 +20,11 @@
 
 #include <gleditor/android_bootstrap.hpp>
 #include <gleditor/app.hpp>
+#include <gleditor/caret.hpp>
+#include <gleditor/doc_switcher.hpp>
 #include <gleditor/render/types.hpp>
 #include <gleditor/renderer.hpp>
+#include <gleditor/render_state.hpp>
 #include <gleditor/sdl_compat.hpp>
 #include <gleditor/state.hpp>
 
@@ -56,26 +59,79 @@ bool wantsEveryOption(const int argc, const char *const *const argv) {
 /// Bind the keys this program answers to. The camera controls come from the
 /// library, since they are about the view rather than about editing.
 void bindCommands(gleditor::Application &app, const AppStateRef &state,
-                  const RendererRef &renderer) {
+                  const RendererRef &renderer,
+                  const std::shared_ptr<gleditor::DocumentSwitcher> &switcher) {
   app.bindDefaultViewCommands();
   app.commands().bind(SDL_SCANCODE_Q, "quit", "close the editor",
                       [state] { state->alive = false; });
   app.commands().bind(SDL_SCANCODE_N, "new", "open an empty document",
                       [renderer] { renderer->push(RenderItemNewDoc()); });
-  app.commands().bind(SDL_SCANCODE_W, "close",
-                      "close the most recently opened document",
-                      // Which document that is, is something only the render
-                      // thread knows.
-                      [renderer] { renderer->push(RenderItemCloseDoc()); });
-  // Ctrl, not a bare key like the bindings above: a bare "s" is also the
-  // letter someone typing into the document is trying to enter, and would
-  // reach it too (SDL_EVENT_TEXT_INPUT fires independently of whatever a
-  // SDL_EVENT_KEY_DOWN on the same keypress dispatched as a command -- see
-  // src/app.cpp's event loop). apps/xudu/main.cpp settled the same question
-  // the same way, for the same reason.
+  app.commands().bind(SDL_SCANCODE_W, Mod::Ctrl, "close",
+                      "close the active document",
+                      [renderer, switcher] {
+                        renderer->push(RenderItemCloseDoc(switcher->activeDocIndex()));
+                      });
   app.commands().bind(SDL_SCANCODE_S, Mod::Ctrl, "save",
-                      "write the most recently opened document back to disk",
-                      [renderer] { renderer->push(RenderItemSaveDoc()); });
+                      "write the active document back to disk",
+                      [renderer, switcher] {
+                        renderer->push(RenderItemSaveDoc(switcher->activeDocIndex()));
+                      });
+
+  // Document switching keyboard navigation
+  app.commands().bind(SDL_SCANCODE_TAB, Mod::Ctrl, "next-doc",
+                      "switch to next document", [renderer, switcher] {
+                        renderer->runWithState([renderer, switcher](RenderState &rState) {
+                          if (rState.docs.empty()) {
+                            return;
+                          }
+                          const auto cur = switcher->activeDocIndex();
+                          const auto next =
+                              (cur + 1U) % static_cast<std::uint32_t>(rState.docs.size());
+                          switcher->setActiveDocIndex(next);
+                          auto *const caret = renderer->editCaret();
+                          if (caret) {
+                            caret->placeAt(next, 0);
+                          }
+                        });
+                      });
+
+  app.commands().bind(SDL_SCANCODE_TAB, Mod::Ctrl | Mod::Shift, "prev-doc",
+                      "switch to previous document", [renderer, switcher] {
+                        renderer->runWithState([renderer, switcher](RenderState &rState) {
+                          if (rState.docs.empty()) {
+                            return;
+                          }
+                          const auto total =
+                              static_cast<std::uint32_t>(rState.docs.size());
+                          const auto cur  = switcher->activeDocIndex();
+                          const auto prev = (cur + total - 1U) % total;
+                          switcher->setActiveDocIndex(prev);
+                          auto *const caret = renderer->editCaret();
+                          if (caret) {
+                            caret->placeAt(prev, 0);
+                          }
+                        });
+                      });
+
+  for (int i = 1; i <= 9; ++i) {
+    const auto scancode =
+        static_cast<SDL_Scancode>(SDL_SCANCODE_1 + (i - 1));
+    const auto targetIndex = static_cast<std::uint32_t>(i - 1);
+    app.commands().bind(
+        scancode, Mod::Ctrl, "doc-" + std::to_string(i),
+        "switch to document " + std::to_string(i),
+        [renderer, switcher, targetIndex] {
+          renderer->runWithState([renderer, switcher, targetIndex](RenderState &rState) {
+            if (targetIndex < rState.docs.size()) {
+              switcher->setActiveDocIndex(targetIndex);
+              auto *const caret = renderer->editCaret();
+              if (caret) {
+                caret->placeAt(targetIndex, 0);
+              }
+            }
+          });
+        });
+  }
 }
 
 } // namespace
@@ -139,8 +195,27 @@ int main(const int argc, char **argv) {
   }
 
   try {
+    auto docSwitcher = std::make_shared<gleditor::DocumentSwitcher>(state->defaultFontName);
+    docSwitcher->setCloseHandler([&renderer](const std::uint32_t docIndex) {
+      renderer->push(RenderItemCloseDoc(docIndex));
+    });
+    docSwitcher->setSelectHandler([&renderer](const std::uint32_t docIndex) {
+      renderer->runWithState([&renderer, docIndex](RenderState &rState) {
+        if (docIndex < rState.docs.size() && rState.docs[docIndex]) {
+          auto *const caret = renderer->editCaret();
+          if (caret) {
+            caret->placeAt(docIndex, 0);
+          }
+        }
+      });
+    });
+
+    renderer->addFrameContributor(docSwitcher.get());
+    renderer->addPickObserver(docSwitcher.get());
+    state->accessibility->addSource(docSwitcher.get());
+
     gleditor::Application app(state, renderer, backend, "GL Editor");
-    bindCommands(app, state, renderer);
+    bindCommands(app, state, renderer, docSwitcher);
     return app.run();
   } catch (const std::exception &err) {
     std::cerr << "Error: " << err.what() << "\n";

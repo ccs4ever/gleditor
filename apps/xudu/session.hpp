@@ -28,15 +28,16 @@
 #include <gleditor/canvas.hpp>
 #include <gleditor/document_observer.hpp>
 #include <gleditor/frame_contributor.hpp>
+#include <gleditor/pick_observer.hpp>
 #include <gleditor/span_decorator.hpp>
 #include <gleditor/text_source.hpp>
 
-#include "core/config.hpp"
-#include "core/microversion.hpp"
-#include "core/publication.hpp"
-#include "core/resolver.hpp"
-#include "core/store.hpp"
-#include "core/swarm.hpp"
+#include "xudu/core/config.hpp"
+#include "xudu/core/microversion.hpp"
+#include "xudu/core/publication.hpp"
+#include "xudu/core/resolver.hpp"
+#include "xudu/core/store.hpp"
+#include "xudu/core/swarm.hpp"
 
 class Caret;
 class Doc;
@@ -75,13 +76,14 @@ private:
 };
 
 /**
- * @brief One open document: which version it shows, and where it sits.
+ * @brief One open document: which version it shows, which store it belongs to, and where it sits.
  *
  * The library indexes open documents by position, and the picking tags carry
  * that index, so this is kept in the same order.
  */
 struct OpenView {
   MicroversionId version;
+  std::size_t storeIndex{0};
   /// The version rebuilt, kept so that decorating does not replay the whole
   /// history once per frame per document.
   Version pieces;
@@ -96,7 +98,7 @@ struct OpenView {
 
 /**
  * @class Session
- * @brief A store, the views onto it, and the hooks that keep the two in step.
+ * @brief Stores, the views onto them, and the hooks that keep them in step.
  */
 class Session : public gleditor::DocumentObserver,
                 public gleditor::SpanDecorator {
@@ -107,6 +109,7 @@ public:
   static constexpr std::uint32_t linkColour         = 0xB9E8C4FFU;
 
   explicit Session(std::string aStorePath);
+  ~Session() override;
 
   /**
    * @brief Make a torrent's content available to this store.
@@ -311,10 +314,11 @@ public:
   };
 
   std::string publishDocument(const MicroversionId &version,
-                              const PublishRequest &request);
+                              const PublishRequest &request,
+                              std::size_t storeIndex = 0);
 
   /// Where publishing writes manifests, torrents and the sealed spool.
-  [[nodiscard]] std::string publishedDir() const;
+  [[nodiscard]] std::string publishedDir(std::size_t storeIndex = 0) const;
 
   /**
    * @brief Record a link, and move @p docIndex's view to the state that made
@@ -326,16 +330,26 @@ public:
    */
   MicroversionId addLink(std::uint32_t docIndex, Link link);
 
-  [[nodiscard]] Store &store() { return docStore; }
-  [[nodiscard]] const Store &store() const { return docStore; }
+  [[nodiscard]] std::size_t storeCount() const { return stores.size(); }
+  [[nodiscard]] Store &store(std::size_t index = 0);
+  [[nodiscard]] const Store &store(std::size_t index = 0) const;
 
   /// Where the store is kept, and writing it there.
-  [[nodiscard]] const std::string &path() const { return storePath; }
-  void save() const { docStore.save(storePath); }
+  [[nodiscard]] const std::string &path(std::size_t index = 0) const;
+  [[nodiscard]] bool isTemporaryStore(std::size_t index = 0) const;
+  void setStorePath(std::size_t index, std::string newPath, bool isTemporary = false);
+
+  std::size_t addStore(std::unique_ptr<Store> aStore, std::string aPath, bool aIsTemporary = false);
+  std::pair<std::size_t, MicroversionId> importFileToTemporaryStore(const std::string &filePath);
+  std::size_t loadAuxiliaryStore(const std::string &aPath);
+
+  void save(std::size_t index = 0) const;
+  void saveAll() const;
 
   /// The version each open document shows, in the library's document order.
   [[nodiscard]] const std::vector<OpenView> &views() const { return open; }
   [[nodiscard]] MicroversionId versionOf(std::uint32_t docIndex) const;
+  [[nodiscard]] std::size_t storeIndexOf(std::uint32_t docIndex) const;
 
   /**
    * @brief What has changed that anything derived from the views depends on.
@@ -368,17 +382,11 @@ public:
 
   /// Note that a document showing @p version has been opened. Called from the
   /// render thread as documents come and go.
-  ///
-  /// There is no matching "one closed": travelling to another state replaces
-  /// everything on screen rather than editing what is there, so clearViews()
-  /// is the only way a view goes away. A version an open document is showing
-  /// changes only by being edited, which comes back through textInserted() and
-  /// textErased().
-  void viewOpened(const MicroversionId &version);
+  void viewOpened(const MicroversionId &version, std::size_t storeIndex = 0);
 
   /// A source for @p version, ready to hand to the render queue.
   [[nodiscard]] std::shared_ptr<VersionTextSource>
-  sourceFor(const MicroversionId &version) const;
+  sourceFor(const MicroversionId &version, std::size_t storeIndex = 0) const;
 
   // -- gleditor::DocumentObserver -------------------------------------------
   //
@@ -418,21 +426,20 @@ private:
   void invalidate() { epoch++; }
 
   /// Where the bytes of torrent-backed scrolls come from.
-  ///
-  /// Declared before the store, and therefore destroyed after it: the store
-  /// keeps a bare pointer to this, and members are torn down in reverse
-  /// declaration order. Nothing dereferences it during destruction today,
-  /// which is exactly why the order should be right now rather than after
-  /// something does.
   DirectoryContentSource contentSource;
-  /// Null unless useSwarm() was called. Declared before the store for the same
-  /// reason as the directory source: the store points at whichever is active.
+  /// Null unless useSwarm() was called.
   std::unique_ptr<SwarmContentSource> swarmSource;
-  Store docStore;
+
+  struct StoreEntry {
+    std::unique_ptr<Store> store;
+    std::string path;
+    bool isTemporary{false};
+  };
+  std::vector<StoreEntry> stores;
+
   /// Bumped whenever a view or a link changes, which is what a cached set of
   /// decorations is checked against.
   std::uint64_t epoch{1};
-  std::string storePath;
   std::vector<OpenView> open;
   /// This machine's key pair, read or minted the first time it is wanted.
   std::optional<MutableKeys> keys;
@@ -459,71 +466,63 @@ public:
  * line an undo stack offers.
  */
 class HypertimeMap : public gleditor::FrameContributor,
+                     public gleditor::PickObserver,
                      public gleditor::a11y::Source {
 public:
   HypertimeMap(std::string aFontName, const Session &aSession);
+  ~HypertimeMap() override;
 
-  /// The canvas is built here rather than in the constructor, because the
-  /// device does not exist until the render thread has started.
+  HypertimeMap(const HypertimeMap &)            = delete;
+  HypertimeMap &operator=(const HypertimeMap &) = delete;
+  HypertimeMap(HypertimeMap &&)                 = delete;
+  HypertimeMap &operator=(HypertimeMap &&)      = delete;
+
   void deviceReady(render::RenderDevice &device,
                    const render::PipelineDesc &documentPipeline) override;
 
-  /// Whether the map is shown at all.
-  void setVisible(const bool shown) { visible = shown; }
-  [[nodiscard]] bool isVisible() const { return visible; }
+  void drawFrame(gleditor::FrameContext &ctx) override;
+  [[nodiscard]] bool picked(const render::PickingResult &pick,
+                            RenderState &state) override;
+  void describe(gleditor::a11y::Builder &into) override;
+  [[nodiscard]] std::uint64_t accessibilityRevision() const override {
+    return builtAt;
+  }
+
+  /// What happens when somebody clicks a state: show it.
+  void setGoer(std::function<void(const MicroversionId &)> aGoer) {
+    goer = std::move(aGoer);
+  }
+
+  void setVisible(const bool show) { visible = show; }
   void toggle() { visible = !visible; }
 
-  /// Which state to mark as where the reader is.
-  void setCurrent(MicroversionId id) { current = std::move(id); }
-
-  void drawFrame(gleditor::FrameContext &ctx) override;
-
-  // -- gleditor::a11y::Source ------------------------------------------------
-  //
-  // The map is a picture of the shape of hypertime: boxes in columns, with the
-  // one the reader is on marked. Said in words it is a list of states, in
-  // order, saying which is which -- which is the only form of it available to
-  // somebody who cannot see the boxes.
-  void describe(gleditor::a11y::Builder &into) override;
-  [[nodiscard]] std::uint64_t accessibilityRevision() const override;
-  bool performAction(std::uint64_t nodeId, gleditor::a11y::Action action,
-                     std::string_view value) override;
-
-  /// How a state the reader asked to go to is reached. Set by the program,
-  /// because moving through hypertime is its business and not the map's.
-  using Goer = std::function<void(const MicroversionId &)>;
-  void setGoer(Goer aGoer) { goer = std::move(aGoer); }
+  /// Where the reader currently is. Highlighted in the graph.
+  void setCurrent(const MicroversionId &id) { current = id; }
 
 private:
-  /// Pixel geometry of the map. A node is a labelled box; a generation is a
-  /// column, so time runs left to right and branches stack downwards.
-  static constexpr float nodeWidth  = 74.0F;
-  static constexpr float nodeHeight = 26.0F;
-  static constexpr float columnGap  = 34.0F;
-  static constexpr float rowGap     = 10.0F;
-  static constexpr float mapMargin  = 16.0F;
-  static constexpr float padding    = 10.0F;
+  struct Node {
+    MicroversionId id;
+    float x{}, y{};
+    float width{}, height{};
+    std::string label;
+  };
+  struct Edge {
+    std::size_t from{};
+    std::size_t to{};
+    bool isBranch{};
+  };
 
   std::string fontName;
-  std::unique_ptr<gleditor::Canvas> canvas;
   const Session &session;
+  std::unique_ptr<gleditor::Canvas> canvas;
+  bool visible{false};
   MicroversionId current;
-  bool visible{};
-  /// What the map showed when it was last built, so that a frame in which
-  /// nothing changed does not rebuild and re-upload it.
-  std::size_t builtForOps{static_cast<std::size_t>(-1)};
-  MicroversionId builtForCurrent;
-  bool builtForVisible{};
-  int builtForHeight{};
+  std::vector<Node> nodes;
+  std::vector<Edge> edges;
+  std::function<void(const MicroversionId &)> goer;
+  std::uint64_t builtAt{};
 
-  Goer goer;
-  /// The states as the description last listed them, and any an assistive
-  /// technology has asked to go to. One lock over both: the first is written
-  /// while describing and read when a request arrives, the second the other
-  /// way round.
-  mutable std::mutex askedGuard;
-  std::vector<MicroversionId> listed;
-  std::vector<MicroversionId> askedToVisit;
+  void layout(RenderState &state);
 };
 
 } // namespace xudu
