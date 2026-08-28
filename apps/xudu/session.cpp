@@ -30,7 +30,8 @@ Session::Session(std::string aStorePath) {
   auto primaryStore = std::make_unique<Store>();
   primaryStore->load(aStorePath);
   primaryStore->setContentSource(&contentSource);
-  stores.push_back(StoreEntry{std::move(primaryStore), std::move(aStorePath), false});
+  stores.push_back(
+      StoreEntry{std::move(primaryStore), std::move(aStorePath), false});
 }
 
 Session::~Session() {
@@ -155,7 +156,7 @@ Session::quoteTorrent(const MicroversionId &parent, const std::uint32_t at,
     throw std::runtime_error("torrent " + hash.hex() + " has no file " +
                              std::to_string(fileIndex));
   }
-  const auto &file = meta->files()[fileIndex];
+  const auto &file  = meta->files()[fileIndex];
   const auto scroll = Scroll::ofTorrentFile(hash, fileIndex, file.path,
                                             file.offset, file.length);
   const auto count =
@@ -165,7 +166,8 @@ Session::quoteTorrent(const MicroversionId &parent, const std::uint32_t at,
 
 std::string Session::publishedDir(const std::size_t storeIndex) const {
   const auto &p = path(storeIndex);
-  return p.empty() ? "published" : (std::filesystem::path(p) / "published").string();
+  return p.empty() ? "published"
+                   : (std::filesystem::path(p) / "published").string();
 }
 
 namespace {
@@ -252,7 +254,7 @@ const MutableKeys &Session::identity() {
 std::string Session::publishDocument(const MicroversionId &version,
                                      const PublishRequest &request,
                                      const std::size_t storeIndex) {
-  auto &st = store(storeIndex);
+  auto &st         = store(storeIndex);
   const auto &mine = identity();
   const auto into  = publishedDir(storeIndex);
   const auto now   = static_cast<std::uint64_t>(
@@ -307,8 +309,7 @@ std::string Session::publishDocument(const MicroversionId &version,
   const auto provenance =
       signProvenance(record, settings().signing(request.passphrase));
 
-  const auto sealed =
-      sealLocalSpool(st, mine, "primedia", into, provenance);
+  const auto sealed = sealLocalSpool(st, mine, "primedia", into, provenance);
 
   const auto pub = publish(st, version, mine, request.salt, request.title,
                            static_cast<std::int64_t>(now), now, &sealed.scroll);
@@ -335,7 +336,7 @@ MicroversionId Session::readPublication(const std::string &aPath) {
                 "to be from. A manifest that does not verify is somebody's "
                 "claim to have published what they did not.");
   }
-  auto &st = store(0);
+  auto &st         = store(0);
   const auto taken = adopt(st, *pub);
   invalidate();
   std::cout << "xudu: read " << pub->describe() << " as " << taken.version.str()
@@ -348,10 +349,9 @@ MicroversionId Session::addLink(const std::uint32_t docIndex, Link link) {
   if (docIndex >= open.size()) {
     return MicroversionId{};
   }
-  const auto sIdx = open[docIndex].storeIndex;
-  auto &st        = store(sIdx);
-  const auto produced =
-      st.addLink(open[docIndex].version, std::move(link));
+  const auto sIdx     = open[docIndex].storeIndex;
+  auto &st            = store(sIdx);
+  const auto produced = st.addLink(open[docIndex].version, std::move(link));
   refresh(docIndex, produced);
   save(sIdx);
   return produced;
@@ -359,14 +359,16 @@ MicroversionId Session::addLink(const std::uint32_t docIndex, Link link) {
 
 Store &Session::store(const std::size_t index) {
   if (index >= stores.size()) {
-    throw std::out_of_range("store index out of range: " + std::to_string(index));
+    throw std::out_of_range("store index out of range: " +
+                            std::to_string(index));
   }
   return *stores[index].store;
 }
 
 const Store &Session::store(const std::size_t index) const {
   if (index >= stores.size()) {
-    throw std::out_of_range("store index out of range: " + std::to_string(index));
+    throw std::out_of_range("store index out of range: " +
+                            std::to_string(index));
   }
   return *stores[index].store;
 }
@@ -398,7 +400,8 @@ std::size_t Session::addStore(std::unique_ptr<Store> aStore, std::string aPath,
   } else {
     aStore->setContentSource(&contentSource);
   }
-  stores.push_back(StoreEntry{std::move(aStore), std::move(aPath), aIsTemporary});
+  stores.push_back(
+      StoreEntry{std::move(aStore), std::move(aPath), aIsTemporary});
   return stores.size() - 1U;
 }
 
@@ -408,9 +411,8 @@ Session::importFileToTemporaryStore(const std::string &filePath) {
   const auto nowNanos =
       std::chrono::steady_clock::now().time_since_epoch().count();
   const auto tempDir =
-      fs::temp_directory_path() /
-      ("xudu_temp_" + std::to_string(nowNanos) + "_" +
-       std::to_string(stores.size()));
+      fs::temp_directory_path() / ("xudu_temp_" + std::to_string(nowNanos) +
+                                   "_" + std::to_string(stores.size()));
   fs::create_directories(tempDir);
 
   auto newStore = std::make_unique<Store>();
@@ -487,10 +489,17 @@ void Session::refresh(const std::uint32_t docIndex,
   if (docIndex >= open.size()) {
     return;
   }
-  const auto sIdx        = open[docIndex].storeIndex;
-  const auto &st         = store(sIdx);
+  const auto sIdx = open[docIndex].storeIndex;
+  const auto &st  = store(sIdx);
+  // The document this view is already showing is the one the edit was made
+  // to, so the usual case is one operation away and the pieces in hand are
+  // most of the answer. Only a move that is not one step on -- travelling in
+  // hypertime, or several edits recorded before anything asked to see them --
+  // has to replay the history from the null document.
+  if (!st.advance(open[docIndex].pieces, open[docIndex].version, version)) {
+    open[docIndex].pieces = st.rebuild(version);
+  }
   open[docIndex].version = version;
-  open[docIndex].pieces  = st.rebuild(version);
   invalidate();
 }
 
@@ -499,8 +508,8 @@ Session::sourceFor(const MicroversionId &version,
                    const std::size_t storeIndex) const {
   const auto &st     = store(storeIndex);
   const auto rebuilt = st.rebuild(version);
-  return std::make_shared<VersionTextSource>(rebuilt.materialize(st),
-                                             version, rebuilt.forcedBreaks());
+  return std::make_shared<VersionTextSource>(rebuilt.materialize(st), version,
+                                             rebuilt.forcedBreaks());
 }
 
 void Session::textInserted(Doc &doc, const std::uint32_t at,
@@ -526,8 +535,8 @@ void Session::textErased(Doc &doc, const std::uint32_t at,
   }
   const auto sIdx     = open[which].storeIndex;
   auto &st            = store(sIdx);
-  const auto produced = st.erase(
-      open[which].version, at, static_cast<std::uint32_t>(removed.size()));
+  const auto produced = st.erase(open[which].version, at,
+                                 static_cast<std::uint32_t>(removed.size()));
   refresh(which, produced);
   save(sIdx);
   std::cout << "xudu: " << produced.str() << " delete " << removed.size()
@@ -548,13 +557,11 @@ void Session::markDecorated(Doc &doc, const std::uint32_t at,
     return;
   }
   auto version = open[which].version;
-  for (const auto decoration : {gleditor::Decoration::Bold,
-                                gleditor::Decoration::Italic,
-                                gleditor::Decoration::Underline,
-                                gleditor::Decoration::Overline,
-                                gleditor::Decoration::Strikethrough,
-                                gleditor::Decoration::Superscript,
-                                gleditor::Decoration::Subscript}) {
+  for (const auto decoration :
+       {gleditor::Decoration::Bold, gleditor::Decoration::Italic,
+        gleditor::Decoration::Underline, gleditor::Decoration::Overline,
+        gleditor::Decoration::Strikethrough, gleditor::Decoration::Superscript,
+        gleditor::Decoration::Subscript}) {
     if (!gleditor::hasDecoration(mask, decoration)) {
       continue;
     }
@@ -652,7 +659,7 @@ void HypertimeMap::layout([[maybe_unused]] RenderState &state) {
   }
 
   // Linear layout for hypertime nodes in reverse chronological order
-  float y = 70.0F;
+  float y           = 70.0F;
   constexpr float x = 20.0F;
   constexpr float w = 160.0F;
   constexpr float h = 28.0F;
@@ -661,12 +668,12 @@ void HypertimeMap::layout([[maybe_unused]] RenderState &state) {
 
   for (const auto &id : all) {
     Node node;
-    node.id     = id;
-    node.x      = x;
-    node.y      = y;
-    node.width  = w;
-    node.height = h;
-    node.label  = "State " + id.str();
+    node.id         = id;
+    node.x          = x;
+    node.y          = y;
+    node.width      = w;
+    node.height     = h;
+    node.label      = "State " + id.str();
     nodeIndices[id] = nodes.size();
     nodes.push_back(node);
     y += h + 10.0F;
@@ -676,10 +683,10 @@ void HypertimeMap::layout([[maybe_unused]] RenderState &state) {
     const auto &parent = nodes[i].id.parent();
     if (!parent.isZero() && nodeIndices.contains(parent)) {
       Edge edge;
-      edge.from     = nodeIndices[parent];
-      edge.to       = i;
+      edge.from        = nodeIndices[parent];
+      edge.to          = i;
       const auto &segs = nodes[i].id.segments();
-      edge.isBranch = segs.size() > 1 && segs.back().number == 1;
+      edge.isBranch    = segs.size() > 1 && segs.back().number == 1;
       edges.push_back(edge);
     }
   }
@@ -709,14 +716,14 @@ void HypertimeMap::drawFrame(gleditor::FrameContext &ctx) {
       const auto &n1 = nodes[edge.from];
       const auto &n2 = nodes[edge.to];
       canvas->addLine(n1.x + (n1.width / 2.0F), n1.y + (n1.height / 2.0F),
-                      n2.x + (n2.width / 2.0F), n2.y + (n2.height / 2.0F),
-                      2.0F, edge.isBranch ? 0xFFC040FFU : 0x708090FFU);
+                      n2.x + (n2.width / 2.0F), n2.y + (n2.height / 2.0F), 2.0F,
+                      edge.isBranch ? 0xFFC040FFU : 0x708090FFU);
     }
   }
 
   for (std::size_t i = 0; i < nodes.size(); i++) {
-    const auto &n = nodes[i];
-    const bool isCur = (n.id == current);
+    const auto &n     = nodes[i];
+    const bool isCur  = (n.id == current);
     const auto nodeBg = isCur ? 0x2A623DFFU : 0x282C34FFU;
     canvas->setTag(render::tagKindOverlay, static_cast<std::uint32_t>(i));
     canvas->addRect(n.x, n.y, n.width, n.height, nodeBg);
@@ -750,13 +757,13 @@ void HypertimeMap::describe(gleditor::a11y::Builder &into) {
   auto &mapNode                 = into.add(mapId, gleditor::a11y::Role::List);
   mapNode.label                 = "Hypertime Map";
   for (std::size_t i = 0; i < nodes.size(); ++i) {
-    const auto &n      = nodes[i];
-    const auto nodeId  = 1000U + i;
-    auto &node         = into.add(nodeId, gleditor::a11y::Role::ListItem);
-    node.label         = n.label;
-    node.value         = (n.id == current) ? "selected" : "";
-    node.toggled       = (n.id == current);
-    node.actions       = gleditor::a11y::bit(gleditor::a11y::Action::Click);
+    const auto &n     = nodes[i];
+    const auto nodeId = 1000U + i;
+    auto &node        = into.add(nodeId, gleditor::a11y::Role::ListItem);
+    node.label        = n.label;
+    node.value        = (n.id == current) ? "selected" : "";
+    node.toggled      = (n.id == current);
+    node.actions      = gleditor::a11y::bit(gleditor::a11y::Action::Click);
     mapNode.children.push_back(into.id(nodeId));
   }
   into.contribute(into.id(mapId));
