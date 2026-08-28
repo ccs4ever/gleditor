@@ -87,9 +87,8 @@ void Store::putOp(const MicroversionId &produces, const Op &op) {
   ops.emplace(produces, op);
 
   const auto parentIdx = opsSpool.indexOf(op.parent);
-  const auto sourceIdx =
-      op.source.isZero() ? 0U : opsSpool.indexOf(op.source);
-  const auto node = CompactOpNode::fromOp(op, parentIdx, sourceIdx);
+  const auto sourceIdx = op.source.isZero() ? 0U : opsSpool.indexOf(op.source);
+  const auto node      = CompactOpNode::fromOp(op, parentIdx, sourceIdx);
   opsSpool.append(node, produces);
 }
 
@@ -397,8 +396,30 @@ void Store::save(const std::string &directory) const {
   std::filesystem::create_directories(dir);
 
   {
-    std::ofstream out(dir / primediaFile, std::ios::binary | std::ios::trunc);
-    out << spool.bytes();
+    // Appended to rather than rewritten once the file already holds a prefix
+    // of what is in memory. The primedia spool only ever grows, so what is
+    // already on disk is still correct and only the tail is new -- which
+    // makes a save cost what was typed since the last one instead of the
+    // whole document every time.
+    //
+    // The operations spool below cannot do this, and it is worth saying why
+    // rather than leaving the asymmetry looking like an oversight: its
+    // records are delta-coded against the record before them in name order
+    // (see FLAG_SEQUENTIAL in binary_ops.cpp), and a branch off an early
+    // state sorts into the middle of that order, not the end. There is no
+    // tail to append. SegmentedOpsSpool is what carries the operations
+    // incrementally; ops.spool is a compact whole-file export of them.
+    const auto &bytes = spool.bytes();
+    const bool fresh  = flushedPrimediaDirectory != directory;
+    std::ofstream out(dir / primediaFile,
+                      std::ios::binary |
+                          (fresh ? std::ios::trunc : std::ios::app));
+    const auto from =
+        fresh ? std::size_t{0} : static_cast<std::size_t>(primediaFlushed);
+    out.write(bytes.data() + from,
+              static_cast<std::streamsize>(bytes.size() - from));
+    flushedPrimediaDirectory = directory;
+    primediaFlushed          = bytes.size();
   }
   {
     // Write operations spool in compact binary format.
@@ -503,6 +524,10 @@ void Store::writeOsmicText(std::ostream &out) const {
 void Store::load(const std::string &directory) {
   const std::filesystem::path dir(directory);
   spool.adopt(readWholeFile(dir / primediaFile));
+  // What was just read is already on disk here, so the next save to this
+  // directory can append to it rather than write it out again.
+  flushedPrimediaDirectory = directory;
+  primediaFlushed          = spool.size();
   ops.clear();
   opsSpool.clear();
   linkTable.clear();

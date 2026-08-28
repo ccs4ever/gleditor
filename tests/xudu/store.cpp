@@ -378,6 +378,40 @@ TEST_F(StoreRoundTripTest, editingContinuesAfterAReload) {
   EXPECT_EQ(store.textOf(next), "one two");
 }
 
+TEST_F(StoreRoundTripTest, savingTwiceOnlyAppendsWhatIsNewToThePrimediaSpool) {
+  // The primedia spool only grows, so a save to the directory the last one
+  // went to appends the new bytes rather than writing the whole document out
+  // again. A round trip alone would not catch a duplicated spool -- stale
+  // bytes past an address already handed out do not change what that address
+  // reads as -- so this checks the file's size directly.
+  Store store;
+  const auto one = store.insert(MicroversionId{}, 0, "one");
+  store.save(dir.string());
+  store.save(dir.string());
+
+  EXPECT_EQ(std::filesystem::file_size(dir / "primedia.spool"), 3U);
+
+  Store reloaded;
+  reloaded.load(dir.string());
+  EXPECT_EQ(reloaded.textOf(one), "one");
+
+  const auto two = store.insert(one, 3, " two");
+  store.save(dir.string());
+  EXPECT_EQ(std::filesystem::file_size(dir / "primedia.spool"), 7U);
+
+  Store again;
+  again.load(dir.string());
+  EXPECT_EQ(again.textOf(two), "one two");
+  EXPECT_EQ(again.primedia().bytes(), "one two");
+
+  // A save to a directory this store has not written to before knows nothing
+  // about what is already there, so it writes the whole spool out.
+  const auto elsewhere = dir / "elsewhere";
+  std::filesystem::create_directories(elsewhere);
+  store.save(elsewhere.string());
+  EXPECT_EQ(std::filesystem::file_size(elsewhere / "primedia.spool"), 7U);
+}
+
 TEST_F(StoreRoundTripTest, aQuotationIntoASecondDocumentSurvivesSaving) {
   // What ctrl-t does: quote the selection into a second document. That second
   // document starts from the null document, so the state it produces is a

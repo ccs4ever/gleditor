@@ -309,6 +309,15 @@ private:
   void replay(const Op &op, Version &onto) const;
 
   PrimediaSpool spool;
+  /// How many bytes of @ref spool are already on disk, and in which directory.
+  /// The primedia spool only ever grows, so a save to the directory the last
+  /// one went to appends what is new rather than rewriting the whole thing --
+  /// which is what made saving cost the length of the document rather than
+  /// the length of what had just been typed. Reset by load(); advanced by
+  /// save(). A save to any other directory rewrites from scratch, since
+  /// nothing is known about what is already there.
+  mutable std::uint64_t primediaFlushed{0};
+  mutable std::string flushedPrimediaDirectory;
   /// Scrolls other than the local spool, in the order they were first
   /// recorded. A span's ScrollId is one more than the index here, so that zero
   /// stays the local spool.
