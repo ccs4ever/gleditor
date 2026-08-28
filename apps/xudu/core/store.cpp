@@ -107,32 +107,32 @@ std::vector<MicroversionId> Store::opsFor(const MicroversionId &version) const {
   return needed;
 }
 
-void Store::replay(const Op &op, Version &onto) const {
-  switch (op.kind) {
+void Store::replay(const CompactOpNode &node, Version &onto) const {
+  switch (node.kind) {
   case OpKind::Insert: {
-    onto.insert(op.at, op.span);
+    onto.insert(node.at, node.span());
     break;
   }
   case OpKind::Delete: {
-    onto.remove(op.at, op.length);
+    onto.remove(node.at, node.length);
     break;
   }
   case OpKind::Rearrange: {
-    onto.rearrange(op.at, op.length, op.to);
+    onto.rearrange(node.at, node.length, node.to);
     break;
   }
   case OpKind::Transclude: {
-    if (!op.span.empty()) {
+    if (!node.span().empty()) {
       // Named directly by a content address, so there is no source document to
       // go through: the reference is already global.
-      onto.insert(op.at, op.span);
+      onto.insert(node.at, node.span());
       break;
     }
     // Resolved against the source version as it stands, which is what makes
     // this a virtual copy: the spans it yields are the source's own addresses,
     // so both versions end up pointing at one copy of the content.
-    const auto from = rebuild(op.source);
-    onto.insertSpans(op.at, from.spansFor(op.sourceAt, op.sourceLength));
+    const auto from = rebuildFromIndex(node.sourceOpIndex);
+    onto.insertSpans(node.at, from.spansFor(node.sourceAt, node.sourceLength));
     break;
   }
   case OpKind::Link: {
@@ -142,28 +142,34 @@ void Store::replay(const Op &op, Version &onto) const {
     break;
   }
   case OpKind::PageBreak: {
-    onto.insertBreak(op.at);
+    onto.insertBreak(node.at);
     break;
   }
   }
 }
 
-Version Store::rebuild(const MicroversionId &version) const {
+Version Store::rebuildFromIndex(const std::uint32_t index) const {
   Version built;
-  const auto targetIdx = opsSpool.indexOf(version);
-  if (targetIdx > 0) {
-    const auto path = opsSpool.ancestralPath(targetIdx);
-    for (const auto idx : path) {
-      const auto id = opsSpool.idOf(idx);
-      if (const auto *const op = getOp(id); nullptr != op) {
-        replay(*op, built);
-      }
+  for (const auto idx : opsSpool.ancestralPath(index)) {
+    if (const auto *const node = opsSpool.get(idx); nullptr != node) {
+      replay(*node, built);
     }
-  } else {
-    for (const auto &step : version.path()) {
-      if (const auto *const op = getOp(step); nullptr != op) {
-        replay(*op, built);
-      }
+  }
+  return built;
+}
+
+Version Store::rebuild(const MicroversionId &version) const {
+  if (const auto targetIdx = opsSpool.indexOf(version); targetIdx > 0) {
+    return rebuildFromIndex(targetIdx);
+  }
+  // Nothing is filed under this name. Replaying the longest recorded prefix of
+  // it is still the right answer -- asking for a state one edit past the end
+  // gets the end -- and the ancestral walk above cannot give it, having no
+  // node to start from.
+  Version built;
+  for (const auto &step : version.path()) {
+    if (const auto *const node = opsSpool.get(step); nullptr != node) {
+      replay(*node, built);
     }
   }
   return built;
@@ -177,11 +183,11 @@ bool Store::advance(Version &document, const MicroversionId &known,
   if (version.isZero() || version.parent() != known) {
     return false;
   }
-  const auto *const op = getOp(version);
-  if (nullptr == op) {
+  const auto *const node = opsSpool.get(version);
+  if (nullptr == node) {
     return false;
   }
-  replay(*op, document);
+  replay(*node, document);
   return true;
 }
 

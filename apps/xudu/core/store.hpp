@@ -326,9 +326,21 @@ public:
   void load(const std::string &directory);
 
 private:
-  /// Apply one recorded op to @p onto. Shared by rebuild() and nothing else;
-  /// separated because replaying and recording must not drift.
-  void replay(const Op &op, Version &onto) const;
+  /// Apply one recorded op to @p onto. The single replay path: everything that
+  /// rebuilds a document comes through here, so replaying and recording cannot
+  /// drift.
+  ///
+  /// Takes the spool's own 64-byte node rather than an Op. The two carry the
+  /// same operation -- CompactOpNode names the parent and transclusion source
+  /// by spool index where Op names them by microversion -- but the node is
+  /// what the ancestral walk already has in hand, and going back through the
+  /// Op map for it cost about nine tenths of a rebuild.
+  void replay(const CompactOpNode &node, Version &onto) const;
+
+  /// rebuild(), for a state already known to be in the spool at @p index.
+  /// Split out because a transclusion replays its source the same way, and it
+  /// has the index rather than the name.
+  [[nodiscard]] Version rebuildFromIndex(std::uint32_t index) const;
 
   PrimediaSpool spool;
   /// How many bytes of @ref spool are already on disk, and in which directory.

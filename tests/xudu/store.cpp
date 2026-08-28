@@ -261,6 +261,21 @@ TEST(StoreTest, advancingCarriesForcedBreaksAndLinksLikeAReplayDoes) {
   EXPECT_THAT(carried.forcedBreaks(), testing::ElementsAre(3U));
 }
 
+TEST(StoreTest, rebuildingTerminatesWhenATransclusionNamesAnUnrecordedSource) {
+  // A transclusion whose source was never recorded used to be unbounded
+  // recursion rather than an error: replaying it rebuilt the source by name,
+  // and the name's own path ran back through the transclusion that asked for
+  // it. Replaying off the spool cannot loop that way -- the source is a spool
+  // index, which stayed zero because there was nothing to point at -- so the
+  // quotation comes out empty and the rest of the document still opens.
+  Store store;
+  const auto one = store.insert(MicroversionId{}, 0, "abcdef");
+  const auto two = store.transclude(one, 0, MicroversionId::parse("9"), 0, 3);
+
+  EXPECT_EQ(store.textOf(two), "abcdef");
+  EXPECT_EQ(store.rebuild(two).pieces(), store.rebuild(one).pieces());
+}
+
 TEST(StoreTest, transclusionSharesOneCopyOfTheContent) {
   Store store;
   const auto source = store.insert(MicroversionId{}, 0, "the quick brown fox");
