@@ -125,8 +125,8 @@ public:
  * merely happens to name std::hash with a qualified id.
  */
 template <> struct std::hash<gleditor::FontMapKeyAdapter> {
-  std::size_t operator()(const gleditor::FontMapKeyAdapter &adapter) const
-      noexcept {
+  std::size_t
+  operator()(const gleditor::FontMapKeyAdapter &adapter) const noexcept {
     return adapter.hash();
   }
 };

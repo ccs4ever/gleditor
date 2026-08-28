@@ -275,7 +275,7 @@ TEST(BinaryOpsTest, version1StreamsStillReadBackWithTheirLiteralBranchByte) {
   std::string bytes;
   bytes += "\x7fXOP\x01";
   bytes.push_back(static_cast<char>(0x70)); // tag: local scroll, at==start,
-                                             // single byte, BinInsert
+                                            // single byte, BinInsert
   bytes.push_back(static_cast<char>(0x01)); // one segment
   bytes.push_back('a');                     // literal branch letter
   bytes.push_back(static_cast<char>(0x01)); // segment number 1 (varint)
@@ -317,7 +317,8 @@ TEST(BinaryOpsTest, versioningAndDetection) {
 
   // Binary stream is Version 2 -- what is written now, not a future version.
   std::stringstream binStreamV2("\x7fXOP\x02\x00\x00\x00\x00");
-  EXPECT_EQ(detectOpsSpoolVersion(binStreamV2), OpsSpoolVersion::CompactBinaryV2);
+  EXPECT_EQ(detectOpsSpoolVersion(binStreamV2),
+            OpsSpoolVersion::CompactBinaryV2);
 
   // Truncated magic header throws
   std::stringstream truncMagic("\x7fXOP");

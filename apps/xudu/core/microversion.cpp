@@ -21,8 +21,7 @@ namespace {
 std::uint32_t branchOrdinalFromLetters(const std::string_view letters) {
   std::uint32_t ordinal = 0;
   for (const char c : letters) {
-    ordinal = (ordinal * 26) +
-              (static_cast<std::uint32_t>(c - 'a') + 1);
+    ordinal = (ordinal * 26) + (static_cast<std::uint32_t>(c - 'a') + 1);
   }
   return ordinal;
 }

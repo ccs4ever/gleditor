@@ -115,10 +115,10 @@ decorationNamed(const std::string_view name) {
 [[nodiscard]] inline std::unordered_set<Decoration>
 decorationSetFor(const DecorationMask mask) {
   std::unordered_set<Decoration> out;
-  for (const auto d : {Decoration::Bold, Decoration::Italic,
-                       Decoration::Underline, Decoration::Overline,
-                       Decoration::Strikethrough, Decoration::Superscript,
-                       Decoration::Subscript}) {
+  for (const auto d :
+       {Decoration::Bold, Decoration::Italic, Decoration::Underline,
+        Decoration::Overline, Decoration::Strikethrough,
+        Decoration::Superscript, Decoration::Subscript}) {
     if (hasDecoration(mask, d)) {
       out.insert(d);
     }

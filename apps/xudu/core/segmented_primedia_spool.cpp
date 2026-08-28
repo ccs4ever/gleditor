@@ -21,12 +21,9 @@ SegmentedPrimediaSpool::~SegmentedPrimediaSpool() { clear(); }
 
 SegmentedPrimediaSpool::SegmentedPrimediaSpool(
     SegmentedPrimediaSpool &&other) noexcept
-    : arena(std::move(other.arena)),
-      segmentList(std::move(other.segmentList)),
-      totalBytes(other.totalBytes),
-      committedBytes(other.committedBytes),
-      activeFd(other.activeFd),
-      activePath(std::move(other.activePath)) {
+    : arena(std::move(other.arena)), segmentList(std::move(other.segmentList)),
+      totalBytes(other.totalBytes), committedBytes(other.committedBytes),
+      activeFd(other.activeFd), activePath(std::move(other.activePath)) {
   other.totalBytes     = 0;
   other.committedBytes = 0;
   other.activeFd       = -1;
@@ -134,8 +131,9 @@ bool SegmentedPrimediaSpool::addSealedSegment(
   const auto segSize = static_cast<std::size_t>(st.st_size);
   const auto start   = totalBytes;
 
-  // Try Tier 1 MAP_FIXED only if both start offset and segment size are page-aligned
-  bool mapped = false;
+  // Try Tier 1 MAP_FIXED only if both start offset and segment size are
+  // page-aligned
+  bool mapped   = false;
   const auto ps = VirtualMemoryArena::pageSize();
   if (arena.isValid() && (start % ps == 0) && (segSize % ps == 0)) {
     mapped = arena.mapFileFixed(arena.base() + start, fd, 0, segSize, false);
@@ -150,8 +148,7 @@ bool SegmentedPrimediaSpool::addSealedSegment(
       ::close(fd);
       return false;
     }
-    const auto readBytes =
-        ::read(fd, arena.base() + start, segSize);
+    const auto readBytes = ::read(fd, arena.base() + start, segSize);
     if (readBytes != static_cast<ssize_t>(segSize)) {
       ::close(fd);
       return false;

@@ -32,17 +32,17 @@
 #include <gleditor/form.hpp>
 #include <gleditor/render/diagnostics.hpp>
 #include <gleditor/render/types.hpp>
-#include <gleditor/renderer.hpp>
 #include <gleditor/render_state.hpp>
+#include <gleditor/renderer.hpp>
 #include <gleditor/sdl_compat.hpp>
 #include <gleditor/state.hpp>
 #include <gleditor/text_source.hpp>
 
 #include "xudu/beams.hpp"
-#include "xudu/core/provenance.hpp"
 #include "xudu/core/config.hpp"
-#include "xudu/core/ops.hpp"
 #include "xudu/core/microversion.hpp"
+#include "xudu/core/ops.hpp"
+#include "xudu/core/provenance.hpp"
 #include "xudu/core/publication.hpp"
 #include "xudu/core/resolver.hpp"
 #include "xudu/core/store.hpp"
@@ -64,8 +64,8 @@ namespace {
 /**
  * @brief Z a --background document opens at. LinkBeams::align() fits the camera
  *        to the foreground row (documents with depthZ < 0 are deliberately
- *        excluded from that envelope), so the distance from camera to background
- *        is roughly (cameraDistance + |backgroundDepthZ|).
+ *        excluded from that envelope), so the distance from camera to
+ * background is roughly (cameraDistance + |backgroundDepthZ|).
  *
  * -500 is a large enough fraction of a typical camera distance to shrink
  * a background document to roughly half its normal size on screen.
@@ -85,9 +85,8 @@ constexpr float backgroundDepthZ = -500.0F;
 int checkAuthorship(const std::string &where) {
   namespace fs = std::filesystem;
   const fs::path given(where);
-  const auto record = fs::is_directory(given)
-                          ? given / xudu::provenanceFileName
-                          : given;
+  const auto record =
+      fs::is_directory(given) ? given / xudu::provenanceFileName : given;
   const auto sig = fs::path(record.string() + ".asc");
 
   const auto slurp = [](const fs::path &path) {
@@ -158,7 +157,8 @@ public:
         form(aForm), state(std::move(aState)), switcher(std::move(aSwitcher)) {}
 
   /// Replace everything on screen with one document showing @p version.
-  void showOnly(const MicroversionId &version, const std::size_t storeIndex = 0) {
+  void showOnly(const MicroversionId &version,
+                const std::size_t storeIndex = 0) {
     const auto count = session.views().size();
     for (std::size_t i = 0; i < count; i++) {
       renderer->push(RenderItemCloseDoc());
@@ -249,8 +249,8 @@ public:
       if (!where.hasRange) {
         return;
       }
-      rState.docs[where.doc]->erase(rState, where.start, where.end - where.start,
-                                    caret);
+      rState.docs[where.doc]->erase(rState, where.start,
+                                    where.end - where.start, caret);
     });
   }
 
@@ -260,8 +260,8 @@ public:
         std::cout << "xudu: select something to quote first\n";
         return;
       }
-      const auto from = session.versionOf(where.doc);
-      const auto sIdx = session.storeIndexOf(where.doc);
+      const auto from   = session.versionOf(where.doc);
+      const auto sIdx   = session.storeIndexOf(where.doc);
       const auto quoted = session.store(sIdx).transclude(
           MicroversionId{}, 0, from, where.start, where.end - where.start);
       std::cout << "xudu: quoted [" << where.start << "," << where.end
@@ -325,11 +325,11 @@ public:
                           "the caret is what gets published.");
         return;
       }
-      auto *const caret = renderer->editCaret();
-      const auto which = nullptr != caret && caret->active() &&
+      auto *const caret   = renderer->editCaret();
+      const auto which    = nullptr != caret && caret->active() &&
                                  caret->documentIndex() < session.views().size()
-                             ? caret->documentIndex()
-                             : 0U;
+                                ? caret->documentIndex()
+                                : 0U;
       const auto version  = session.versionOf(which);
       const auto storeIdx = session.storeIndexOf(which);
       const auto who      = session.author();
@@ -389,12 +389,13 @@ public:
       };
       asked[1].value = asked[0].value;
 
-      form.open("Publish " + version.str(),
-                "Signed as an authorship record, then sealed into " + where,
-                std::move(asked),
-                [this, version, which, storeIdx](const std::vector<Field> &answers) {
-                  publishAnswers(version, which, storeIdx, answers);
-                });
+      form.open(
+          "Publish " + version.str(),
+          "Signed as an authorship record, then sealed into " + where,
+          std::move(asked),
+          [this, version, which, storeIdx](const std::vector<Field> &answers) {
+            publishAnswers(version, which, storeIdx, answers);
+          });
     });
   }
 
@@ -415,7 +416,8 @@ public:
       request.extra.emplace_back("note", answers[8].answer());
     }
 
-    renderer->runWithState([this, version, which, storeIdx, request](RenderState &) {
+    renderer->runWithState([this, version, which, storeIdx,
+                            request](RenderState &) {
       try {
         const auto path = session.publishDocument(version, request, storeIdx);
         std::cout << "xudu: published doc " << which << " as " << path << "\n";
@@ -435,10 +437,10 @@ public:
         return;
       }
       auto *const caret = renderer->editCaret();
-      const auto which = nullptr != caret && caret->active() &&
+      const auto which  = nullptr != caret && caret->active() &&
                                  caret->documentIndex() < session.views().size()
-                             ? caret->documentIndex()
-                             : (switcher ? switcher->activeDocIndex() : 0U);
+                              ? caret->documentIndex()
+                              : (switcher ? switcher->activeDocIndex() : 0U);
       if (which >= session.views().size()) {
         session.saveAll();
         return;
@@ -446,22 +448,24 @@ public:
       const auto storeIdx = session.storeIndexOf(which);
       if (session.isTemporaryStore(storeIdx)) {
         // Open folder dialog to preserve temporary store
-        using Field = gleditor::Form::Field;
-        namespace fs = std::filesystem;
-        std::string curDir = fs::current_path().string();
+        using Field         = gleditor::Form::Field;
+        namespace fs        = std::filesystem;
+        std::string curDir  = fs::current_path().string();
         std::string defName = "doc_" + std::to_string(storeIdx) + ".xanadoc";
 
         std::vector<Field> fields{
-            Field{"Folder", curDir, "directory where the xanadoc folder will live", true},
+            Field{"Folder", curDir,
+                  "directory where the xanadoc folder will live", true},
             Field{"Name", defName, "name of the xanadoc folder", true},
         };
 
-        form.open("Preserve Temporary Xanadoc",
-                  "Designate a permanent directory and name for this temporary store",
-                  std::move(fields),
-                  [this, storeIdx](const std::vector<Field> &answers) {
-                    preserveAnswers(storeIdx, answers);
-                  });
+        form.open(
+            "Preserve Temporary Xanadoc",
+            "Designate a permanent directory and name for this temporary store",
+            std::move(fields),
+            [this, storeIdx](const std::vector<Field> &answers) {
+              preserveAnswers(storeIdx, answers);
+            });
       } else {
         session.save(storeIdx);
         std::cout << "xudu: saved to " << session.path(storeIdx) << "\n";
@@ -471,7 +475,7 @@ public:
 
   void preserveAnswers(const std::size_t storeIdx,
                        const std::vector<gleditor::Form::Field> &answers) {
-    namespace fs = std::filesystem;
+    namespace fs             = std::filesystem;
     const std::string folder = answers[0].answer();
     const std::string name   = answers[1].answer();
     const fs::path targetDir = fs::path(folder) / name;
@@ -483,7 +487,8 @@ public:
         auto &st = session.store(storeIdx);
         st.save(targetDir.string());
         session.setStorePath(storeIdx, targetDir.string(), false);
-        std::cout << "xudu: preserved temporary store to " << targetDir.string() << "\n";
+        std::cout << "xudu: preserved temporary store to " << targetDir.string()
+                  << "\n";
       } catch (const std::exception &err) {
         std::cout << "xudu: cannot preserve store: " << err.what() << "\n";
         state->showDialog(render::DiagnosticSeverity::Error,
@@ -498,10 +503,10 @@ public:
         return;
       }
       auto *const caret = renderer->editCaret();
-      const auto which = nullptr != caret && caret->active() &&
+      const auto which  = nullptr != caret && caret->active() &&
                                  caret->documentIndex() < rState.docs.size()
-                             ? caret->documentIndex()
-                             : (switcher ? switcher->activeDocIndex() : 0U);
+                              ? caret->documentIndex()
+                              : (switcher ? switcher->activeDocIndex() : 0U);
       if (which < rState.docs.size()) {
         renderer->push(RenderItemCloseDoc(which));
       }
@@ -551,8 +556,9 @@ public:
       const auto here = session.views().empty()
                             ? MicroversionId{}
                             : session.views().front().version;
-      const auto sIdx = session.views().empty() ? 0 : session.views().front().storeIndex;
-      const auto &st  = session.store(sIdx);
+      const auto sIdx =
+          session.views().empty() ? 0 : session.views().front().storeIndex;
+      const auto &st = session.store(sIdx);
       std::cout << "xudu: " << st.opCount() << " operations, "
                 << st.primedia().size() << " bytes of primedia\n";
       for (const auto &id : st.allVersions()) {
@@ -590,9 +596,9 @@ void bindCommands(gleditor::Application &app, const AppStateRef &state,
                         session.saveAll();
                         state->alive = false;
                       });
-  app.commands().bind(
-      SDL_SCANCODE_S, Mod::Ctrl, "save", "save or preserve active document",
-      [&views] { views.saveCurrent(); });
+  app.commands().bind(SDL_SCANCODE_S, Mod::Ctrl, "save",
+                      "save or preserve active document",
+                      [&views] { views.saveCurrent(); });
   app.commands().bind(SDL_SCANCODE_W, Mod::Ctrl, "close",
                       "close the active document",
                       [&views] { views.closeActive(); });
@@ -603,7 +609,7 @@ void bindCommands(gleditor::Application &app, const AppStateRef &state,
                       [&views] { views.prevDoc(); });
 
   for (int i = 1; i <= 9; ++i) {
-    const auto scancode    = static_cast<SDL_Scancode>(SDL_SCANCODE_1 + (i - 1));
+    const auto scancode = static_cast<SDL_Scancode>(SDL_SCANCODE_1 + (i - 1));
     const auto targetIndex = static_cast<std::uint32_t>(i - 1);
     app.commands().bind(
         scancode, Mod::Ctrl, "doc-" + std::to_string(i),
@@ -697,8 +703,9 @@ int main(const int argc, char **argv) {
             "latest state")
       .append();
   parser.add_argument("--alongside")
-      .help("a second microversion to show beside the opening one, for instance "
-            "to compare two states")
+      .help(
+          "a second microversion to show beside the opening one, for instance "
+          "to compare two states")
       .default_value(std::string{});
   parser.add_argument("--background")
       .help("open this microversion as a background document (depthZ < 0), "
@@ -756,11 +763,14 @@ int main(const int argc, char **argv) {
             "same document. Ctrl-shift-s does the same while running")
       .default_value(std::string{});
   parser.add_argument("--import")
-      .help("read files into stores as initial operations; repeatable. The "
-            "first file goes into the primary store (if empty), while additional "
-            "files receive independent temporary stores")
+      .help(
+          "read files into stores as initial operations; repeatable. The "
+          "first file goes into the primary store (if empty), while additional "
+          "files receive independent temporary stores")
       .append();
-  parser.add_argument("files").help("source files to import or open").remaining();
+  parser.add_argument("files")
+      .help("source files to import or open")
+      .remaining();
 
   if (detailed) {
     std::cout << parser << "\n";
@@ -831,7 +841,7 @@ int main(const int argc, char **argv) {
         startIdx = 1;
       }
       for (std::size_t i = startIdx; i < importFiles.size(); ++i) {
-        const auto &f = importFiles[i];
+        const auto &f               = importFiles[i];
         const auto [sIdx, imported] = session->importFileToTemporaryStore(f);
         extraImports.emplace_back(imported, sIdx);
         quiet || std::cout << "xudu: imported " << f << " to temp store "
@@ -1002,7 +1012,8 @@ int main(const int argc, char **argv) {
     publishAs = parser.get<std::string>("--publish");
     if (!publishAs.empty()) {
       const auto manifest = session->publishDocument(
-          opening, Session::PublishRequest{publishAs, publishAs, {}, {}, {}}, 0);
+          opening, Session::PublishRequest{publishAs, publishAs, {}, {}, {}},
+          0);
       quiet || std::cout << "xudu: published " << opening.str() << " as "
                          << manifest << "\n";
     }

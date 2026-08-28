@@ -20,22 +20,24 @@ namespace gleditor {
 
 namespace {
 
-constexpr float barHeight      = 32.0F;
-constexpr float tabPaddingX    = 12.0F;
-constexpr float closeButtonW   = 20.0F;
-constexpr float minTabWidth    = 90.0F;
-constexpr float maxTabWidth    = 220.0F;
+constexpr float barHeight    = 32.0F;
+constexpr float tabPaddingX  = 12.0F;
+constexpr float closeButtonW = 20.0F;
+constexpr float minTabWidth  = 90.0F;
+constexpr float maxTabWidth  = 220.0F;
 
-constexpr std::uint32_t barBackground   = 0x14171DFAU; // Dark translucent
-constexpr std::uint32_t barBorder       = 0x282D38FFU; // Bottom edge border
-constexpr std::uint32_t tabActiveBg     = 0x2A3242FFU; // Active tab background
-constexpr std::uint32_t tabInactiveBg   = 0x1A1E26D0U; // Inactive tab background
-constexpr std::uint32_t tabActiveBorder = 0x5C8DFFFFU; // Active tab highlight line
+constexpr std::uint32_t barBackground = 0x14171DFAU; // Dark translucent
+constexpr std::uint32_t barBorder     = 0x282D38FFU; // Bottom edge border
+constexpr std::uint32_t tabActiveBg   = 0x2A3242FFU; // Active tab background
+constexpr std::uint32_t tabInactiveBg = 0x1A1E26D0U; // Inactive tab background
+constexpr std::uint32_t tabActiveBorder =
+    0x5C8DFFFFU; // Active tab highlight line
 constexpr std::uint32_t tabTextActive   = 0xFFFFFFFFU; // White text
 constexpr std::uint32_t tabTextInactive = 0x9AA3B2FFU; // Muted text
 constexpr std::uint32_t closeTextColour = 0x7E889BFFU; // Close button text
 
-std::string formatDocTitle(const std::string &rawName, const std::size_t index) {
+std::string formatDocTitle(const std::string &rawName,
+                           const std::size_t index) {
   if (rawName.empty()) {
     return "Doc " + std::to_string(index + 1);
   }
@@ -189,13 +191,13 @@ void DocumentSwitcher::describe(a11y::Builder &into) {
   bar.label                     = "Open Documents";
 
   for (std::size_t i = 0; i < currentTabs.size(); ++i) {
-    const auto &tab     = currentTabs[i];
+    const auto &tab      = currentTabs[i];
     const auto tabNodeId = 100U + i;
-    auto &node          = into.add(tabNodeId, a11y::Role::ListItem);
-    node.label          = tab.name;
-    node.value          = tab.active ? "selected" : "";
-    node.toggled        = tab.active;
-    node.actions        = a11y::bit(a11y::Action::Click);
+    auto &node           = into.add(tabNodeId, a11y::Role::ListItem);
+    node.label           = tab.name;
+    node.value           = tab.active ? "selected" : "";
+    node.toggled         = tab.active;
+    node.actions         = a11y::bit(a11y::Action::Click);
     bar.children.push_back(into.id(tabNodeId));
   }
   into.contribute(into.id(barId));

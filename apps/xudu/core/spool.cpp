@@ -29,16 +29,13 @@ std::string PrimediaSpool::read(const PrimediaSpan &span) const {
   return impl->spool.read(span);
 }
 
-std::string_view
-PrimediaSpool::readView(const PrimediaSpan &span) const {
+std::string_view PrimediaSpool::readView(const PrimediaSpan &span) const {
   return impl->spool.readView(span);
 }
 
 std::uint64_t PrimediaSpool::size() const { return impl->spool.size(); }
 
-std::string_view PrimediaSpool::bytes() const {
-  return impl->spool.bytes();
-}
+std::string_view PrimediaSpool::bytes() const { return impl->spool.bytes(); }
 
 void PrimediaSpool::adopt(const std::string_view stored) {
   impl->spool.adopt(stored);

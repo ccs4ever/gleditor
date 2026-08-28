@@ -27,12 +27,12 @@ struct alignas(64) CompactOpNode {
   std::uint16_t branchOrdinal{0};    ///< Branch ordinal (0 for continuation).
 
   // Position & geometry coordinates (24 bytes)
-  std::uint32_t at{0};           ///< Position in version.
-  std::uint32_t length{0};       ///< Delete/Rearrange length.
-  std::uint32_t to{0};           ///< Rearrange destination.
-  std::uint32_t sourceAt{0};     ///< Transclude source offset.
-  std::uint32_t sourceLength{0}; ///< Transclude source length.
-  std::uint32_t sourceOpIndex{0};///< Transclude source version index.
+  std::uint32_t at{0};            ///< Position in version.
+  std::uint32_t length{0};        ///< Delete/Rearrange length.
+  std::uint32_t to{0};            ///< Rearrange destination.
+  std::uint32_t sourceAt{0};      ///< Transclude source offset.
+  std::uint32_t sourceLength{0};  ///< Transclude source length.
+  std::uint32_t sourceOpIndex{0}; ///< Transclude source version index.
 
   // Content span & link reference (24 bytes)
   ScrollId scrollId{localScroll}; ///< Scroll ID of content span.

@@ -51,8 +51,7 @@ TEST(VirtualMemoryArenaTest, reserveAndCommitAnonymous) {
 }
 
 TEST(VirtualMemoryArenaTest, mapFileFixedIfSupported) {
-  const auto tempDir =
-      std::filesystem::temp_directory_path() / "xudu_vma_test";
+  const auto tempDir = std::filesystem::temp_directory_path() / "xudu_vma_test";
   std::filesystem::create_directories(tempDir);
   const auto testFile = tempDir / "test_segment.bin";
 

@@ -23,8 +23,8 @@
 #include <gleditor/caret.hpp>
 #include <gleditor/doc_switcher.hpp>
 #include <gleditor/render/types.hpp>
-#include <gleditor/renderer.hpp>
 #include <gleditor/render_state.hpp>
+#include <gleditor/renderer.hpp>
 #include <gleditor/sdl_compat.hpp>
 #include <gleditor/state.hpp>
 
@@ -67,69 +67,70 @@ void bindCommands(gleditor::Application &app, const AppStateRef &state,
   app.commands().bind(SDL_SCANCODE_N, "new", "open an empty document",
                       [renderer] { renderer->push(RenderItemNewDoc()); });
   app.commands().bind(SDL_SCANCODE_W, Mod::Ctrl, "close",
-                      "close the active document",
-                      [renderer, switcher] {
-                        renderer->push(RenderItemCloseDoc(switcher->activeDocIndex()));
+                      "close the active document", [renderer, switcher] {
+                        renderer->push(
+                            RenderItemCloseDoc(switcher->activeDocIndex()));
                       });
-  app.commands().bind(SDL_SCANCODE_S, Mod::Ctrl, "save",
-                      "write the active document back to disk",
-                      [renderer, switcher] {
-                        renderer->push(RenderItemSaveDoc(switcher->activeDocIndex()));
-                      });
+  app.commands().bind(
+      SDL_SCANCODE_S, Mod::Ctrl, "save",
+      "write the active document back to disk", [renderer, switcher] {
+        renderer->push(RenderItemSaveDoc(switcher->activeDocIndex()));
+      });
 
   // Document switching keyboard navigation
-  app.commands().bind(SDL_SCANCODE_TAB, Mod::Ctrl, "next-doc",
-                      "switch to next document", [renderer, switcher] {
-                        renderer->runWithState([renderer, switcher](RenderState &rState) {
-                          if (rState.docs.empty()) {
-                            return;
-                          }
-                          const auto cur = switcher->activeDocIndex();
-                          const auto next =
-                              (cur + 1U) % static_cast<std::uint32_t>(rState.docs.size());
-                          switcher->setActiveDocIndex(next);
-                          auto *const caret = renderer->editCaret();
-                          if (caret) {
-                            caret->placeAt(next, 0);
-                          }
-                        });
-                      });
+  app.commands().bind(
+      SDL_SCANCODE_TAB, Mod::Ctrl, "next-doc", "switch to next document",
+      [renderer, switcher] {
+        renderer->runWithState([renderer, switcher](RenderState &rState) {
+          if (rState.docs.empty()) {
+            return;
+          }
+          const auto cur = switcher->activeDocIndex();
+          const auto next =
+              (cur + 1U) % static_cast<std::uint32_t>(rState.docs.size());
+          switcher->setActiveDocIndex(next);
+          auto *const caret = renderer->editCaret();
+          if (caret) {
+            caret->placeAt(next, 0);
+          }
+        });
+      });
 
-  app.commands().bind(SDL_SCANCODE_TAB, Mod::Ctrl | Mod::Shift, "prev-doc",
-                      "switch to previous document", [renderer, switcher] {
-                        renderer->runWithState([renderer, switcher](RenderState &rState) {
-                          if (rState.docs.empty()) {
-                            return;
-                          }
-                          const auto total =
-                              static_cast<std::uint32_t>(rState.docs.size());
-                          const auto cur  = switcher->activeDocIndex();
-                          const auto prev = (cur + total - 1U) % total;
-                          switcher->setActiveDocIndex(prev);
-                          auto *const caret = renderer->editCaret();
-                          if (caret) {
-                            caret->placeAt(prev, 0);
-                          }
-                        });
-                      });
+  app.commands().bind(
+      SDL_SCANCODE_TAB, Mod::Ctrl | Mod::Shift, "prev-doc",
+      "switch to previous document", [renderer, switcher] {
+        renderer->runWithState([renderer, switcher](RenderState &rState) {
+          if (rState.docs.empty()) {
+            return;
+          }
+          const auto total = static_cast<std::uint32_t>(rState.docs.size());
+          const auto cur   = switcher->activeDocIndex();
+          const auto prev  = (cur + total - 1U) % total;
+          switcher->setActiveDocIndex(prev);
+          auto *const caret = renderer->editCaret();
+          if (caret) {
+            caret->placeAt(prev, 0);
+          }
+        });
+      });
 
   for (int i = 1; i <= 9; ++i) {
-    const auto scancode =
-        static_cast<SDL_Scancode>(SDL_SCANCODE_1 + (i - 1));
+    const auto scancode = static_cast<SDL_Scancode>(SDL_SCANCODE_1 + (i - 1));
     const auto targetIndex = static_cast<std::uint32_t>(i - 1);
     app.commands().bind(
         scancode, Mod::Ctrl, "doc-" + std::to_string(i),
         "switch to document " + std::to_string(i),
         [renderer, switcher, targetIndex] {
-          renderer->runWithState([renderer, switcher, targetIndex](RenderState &rState) {
-            if (targetIndex < rState.docs.size()) {
-              switcher->setActiveDocIndex(targetIndex);
-              auto *const caret = renderer->editCaret();
-              if (caret) {
-                caret->placeAt(targetIndex, 0);
-              }
-            }
-          });
+          renderer->runWithState(
+              [renderer, switcher, targetIndex](RenderState &rState) {
+                if (targetIndex < rState.docs.size()) {
+                  switcher->setActiveDocIndex(targetIndex);
+                  auto *const caret = renderer->editCaret();
+                  if (caret) {
+                    caret->placeAt(targetIndex, 0);
+                  }
+                }
+              });
         });
   }
 }
@@ -195,7 +196,8 @@ int main(const int argc, char **argv) {
   }
 
   try {
-    auto docSwitcher = std::make_shared<gleditor::DocumentSwitcher>(state->defaultFontName);
+    auto docSwitcher =
+        std::make_shared<gleditor::DocumentSwitcher>(state->defaultFontName);
     docSwitcher->setCloseHandler([&renderer](const std::uint32_t docIndex) {
       renderer->push(RenderItemCloseDoc(docIndex));
     });
