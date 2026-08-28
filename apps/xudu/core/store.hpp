@@ -100,6 +100,28 @@ public:
    */
   [[nodiscard]] Version rebuild(const MicroversionId &version) const;
 
+  /**
+   * @brief Carry @p document, which is the document at @p known, forward to
+   *        @p version by replaying only the operation between them.
+   *
+   * Editing moves a document one operation at a time, and whoever is showing
+   * it still has what it looked like a moment ago. Replaying just that one
+   * operation costs what the operation costs; rebuild() would replay the
+   * whole history to arrive at the same place, which for a long document is
+   * the difference between a keystroke being free and a keystroke being felt.
+   *
+   * A branch counts as one step, since the state a branch begins is one
+   * operation past the state it forks from -- so going back and typing gets
+   * this too, not just typing on the end.
+   *
+   * @return false when @p version is not one operation past @p known --
+   *         travelling in hypertime, opening some other state, or several
+   *         edits recorded before anything asked to see them. @p document is
+   *         left untouched, and the caller wants rebuild() instead.
+   */
+  [[nodiscard]] bool advance(Version &document, const MicroversionId &known,
+                             const MicroversionId &version) const;
+
   /// The text of @p version, which is rebuild() followed by materialize().
   /// Content quoted from a torrent this machine cannot reach comes out empty,
   /// so a document is readable even when part of what it points at is not.

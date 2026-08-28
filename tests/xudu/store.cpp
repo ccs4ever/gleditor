@@ -190,6 +190,77 @@ TEST(StoreTest, theOpSequenceForAVersionIsWhatRebuildsIt) {
   EXPECT_EQ(names(store.opsFor(two)), (std::vector<std::string>{"1", "2"}));
 }
 
+// advance() is what keeps a keystroke from costing the whole document: the
+// view already holds the pieces for the state being edited, so only the one
+// operation between them has to be replayed. What it must never do is give a
+// different answer than replaying from the null document would.
+
+TEST(StoreTest, advancingOneStepAgreesWithRebuildingFromNothing) {
+  Store store;
+  const auto one   = store.insert(MicroversionId{}, 0, "hello");
+  const auto two   = store.insert(one, 5, " world");
+  const auto three = store.erase(two, 0, 1);
+
+  auto carried = store.rebuild(one);
+  EXPECT_TRUE(store.advance(carried, one, two));
+  EXPECT_EQ(carried.pieces(), store.rebuild(two).pieces());
+  EXPECT_TRUE(store.advance(carried, two, three));
+  EXPECT_EQ(carried.pieces(), store.rebuild(three).pieces());
+  EXPECT_EQ(carried.materialize(store), store.textOf(three));
+}
+
+TEST(StoreTest, advancingCountsABranchAsOneStep) {
+  // Going back and typing is one operation past the state forked from, so it
+  // gets the cheap path too -- not just typing on the end.
+  Store store;
+  const auto one = store.insert(MicroversionId{}, 0, "hello");
+  store.insert(one, 5, " world");
+  const auto branched = store.insert(one, 5, " there");
+  ASSERT_EQ(branched.str(), "1a1");
+
+  auto carried = store.rebuild(one);
+  EXPECT_TRUE(store.advance(carried, one, branched));
+  EXPECT_EQ(carried.materialize(store), "hello there");
+}
+
+TEST(StoreTest, advancingRefusesAnythingFurtherThanOneStep) {
+  Store store;
+  const auto one   = store.insert(MicroversionId{}, 0, "a");
+  const auto two   = store.insert(one, 1, "b");
+  const auto three = store.insert(two, 2, "c");
+
+  auto carried      = store.rebuild(one);
+  const auto before = carried.pieces();
+  // Two steps on, so the caller has to rebuild -- and the document it handed
+  // in must come back exactly as it went, not half-advanced.
+  EXPECT_FALSE(store.advance(carried, one, three));
+  EXPECT_EQ(carried.pieces(), before);
+  // Backwards is not one step on either.
+  EXPECT_FALSE(store.advance(carried, two, one));
+  EXPECT_EQ(carried.pieces(), before);
+  // Nor is a state nothing has recorded yet.
+  EXPECT_FALSE(store.advance(carried, three, MicroversionId::parse("4")));
+  EXPECT_EQ(carried.pieces(), before);
+}
+
+TEST(StoreTest, advancingCarriesForcedBreaksAndLinksLikeAReplayDoes) {
+  // The op kinds that change no text still have to travel: a break op moves
+  // the page, a link op moves nothing, and both must land the same way.
+  Store store;
+  const auto one = store.insert(MicroversionId{}, 0, "abcdef");
+  const auto two = store.insertBreak(one, 3);
+  Link link;
+  link.left.push_back(PrimediaSpan{localScroll, 0, 3});
+  const auto three = store.addLink(two, link);
+
+  auto carried = store.rebuild(one);
+  ASSERT_TRUE(store.advance(carried, one, two));
+  EXPECT_THAT(carried.forcedBreaks(), testing::ElementsAre(3U));
+  ASSERT_TRUE(store.advance(carried, two, three));
+  EXPECT_EQ(carried.pieces(), store.rebuild(three).pieces());
+  EXPECT_THAT(carried.forcedBreaks(), testing::ElementsAre(3U));
+}
+
 TEST(StoreTest, transclusionSharesOneCopyOfTheContent) {
   Store store;
   const auto source = store.insert(MicroversionId{}, 0, "the quick brown fox");

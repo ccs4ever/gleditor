@@ -169,6 +169,22 @@ Version Store::rebuild(const MicroversionId &version) const {
   return built;
 }
 
+bool Store::advance(Version &document, const MicroversionId &known,
+                    const MicroversionId &version) const {
+  // One step on means the op filed under `version` names `known` as its
+  // parent -- which is what putOp() checks when it is recorded, so asking
+  // MicroversionId is asking the same question the spool already answered.
+  if (version.isZero() || version.parent() != known) {
+    return false;
+  }
+  const auto *const op = getOp(version);
+  if (nullptr == op) {
+    return false;
+  }
+  replay(*op, document);
+  return true;
+}
+
 std::string Store::textOf(const MicroversionId &version) const {
   return rebuild(version).materialize(*this);
 }
