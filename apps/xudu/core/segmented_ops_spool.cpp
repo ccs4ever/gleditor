@@ -7,6 +7,10 @@
 #include <sys/stat.h>
 #include <unistd.h>
 
+#if defined(_WIN32)
+#include <io.h> // _commit
+#endif
+
 namespace xudu {
 
 namespace {
@@ -200,7 +204,8 @@ SegmentedOpsSpool::ancestralPath(const std::uint32_t targetIndex) const {
 }
 
 bool SegmentedOpsSpool::addSealedSegment(const std::filesystem::path &path) {
-  const int fd = ::open(path.c_str(), O_RDONLY);
+  // path.c_str() is a wchar_t* on Windows; open() needs a narrow string.
+  const int fd = ::open(path.string().c_str(), O_RDONLY);
   if (fd < 0) {
     return false;
   }
@@ -259,7 +264,7 @@ bool SegmentedOpsSpool::openActiveSegment(const std::filesystem::path &path) {
     activeFd = -1;
   }
   activePath = path.string();
-  activeFd   = ::open(path.c_str(), O_RDWR | O_CREAT, 0644);
+  activeFd   = ::open(activePath.c_str(), O_RDWR | O_CREAT, 0644);
   return activeFd >= 0;
 }
 
@@ -281,7 +286,13 @@ bool SegmentedOpsSpool::flush() {
     arena.flush(arena.base(), bytes);
   }
   if (activeFd >= 0 && !activePath.empty()) {
+    // MinGW's io.h has no fsync(); _commit() is its file-durability
+    // equivalent.
+#if defined(_WIN32)
+    ::_commit(activeFd);
+#else
     ::fsync(activeFd);
+#endif
   }
   return true;
 }
