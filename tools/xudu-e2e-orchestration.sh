@@ -51,15 +51,14 @@ for step in "${SCENARIOS[@]}"; do
   ppm="${SCREENSHOT_DIR}/${step}.ppm"
   png="${SCREENSHOT_DIR}/${step}.png"
   if [ -f "$ppm" ]; then
-    echo "  [OK] $ppm ($(stat -c%s "$ppm" 2>/dev/null || wc -c < "$ppm") bytes)"
+    echo "  [OK] $ppm ($(stat -c%s "$ppm" 2>/dev/null || wc -c <"$ppm") bytes)"
   else
     echo "  [FAIL] $ppm missing" >&2
     exit 1
   fi
   if [ -f "$png" ]; then
-    echo "  [OK] $png ($(stat -c%s "$png" 2>/dev/null || wc -c < "$png") bytes)"
+    echo "  [OK] $png ($(stat -c%s "$png" 2>/dev/null || wc -c <"$png") bytes)"
   fi
 done
 
 echo "==> All E2E binary orchestration test scenarios and screenshots verified successfully!"
-
