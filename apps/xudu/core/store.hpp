@@ -27,6 +27,7 @@
 #include <string>
 #include <vector>
 
+#include "binary_ops.hpp"
 #include "compact_op.hpp"
 #include "format.hpp"
 #include "microversion.hpp"
@@ -58,8 +59,17 @@ public:
    */
   void putOp(const MicroversionId &produces, const Op &op);
 
-  /// Function 2: the op filed under @p id, or nothing.
-  [[nodiscard]] const Op *getOp(const MicroversionId &id) const;
+  /**
+   * @brief Function 2: the op filed under @p id, or nothing.
+   *
+   * By value: what the spool holds is a CompactOpNode, which names this op's
+   * parent and transclusion source by spool index rather than by microversion,
+   * so an Op is built to answer rather than pointed at. Replaying does not go
+   * through here -- see replay(), which reads the node -- so this is for
+   * callers that want the operation itself, and there is nothing to keep a
+   * pointer into.
+   */
+  [[nodiscard]] std::optional<Op> getOp(const MicroversionId &id) const;
 
   /// Fast zero-copy access to 64-byte compact node by microversion or index.
   [[nodiscard]] const CompactOpNode *
@@ -235,7 +245,7 @@ public:
   [[nodiscard]] MicroversionId latest() const;
 
   [[nodiscard]] const PrimediaSpool &primedia() const { return spool; }
-  [[nodiscard]] std::size_t opCount() const { return ops.size(); }
+  [[nodiscard]] std::size_t opCount() const { return opsSpool.size(); }
 
   // -- content that was not typed here --------------------------------------
 
@@ -342,6 +352,28 @@ private:
   /// has the index rather than the name.
   [[nodiscard]] Version rebuildFromIndex(std::uint32_t index) const;
 
+  /**
+   * @brief Every recorded operation, in the order they are serialized.
+   *
+   * Built on demand for save() and the OSMIC text export, and not kept: the
+   * spool is what holds the operations, and a second copy of them that had to
+   * be maintained in step was what this replaced.
+   *
+   * The order is by microversion, which is the order the spool used to be
+   * iterated in when a std::map held it, and so is the order every ops.spool
+   * already on disk was written in. It is not the order that would compress
+   * best -- a branch sorts into the middle of the chain it forks from, which
+   * breaks the run of names FLAG_SEQUENTIAL depends on and leaves the main
+   * chain in pieces -- but changing it changes the bytes written, so it is a
+   * format decision rather than a detail of how operations are held.
+   */
+  [[nodiscard]] std::vector<OpRecord> opRecords() const;
+
+  /// Record @p records into the spool, skipping any state already filed --
+  /// which is what the std::map these were read into used to do on a
+  /// duplicate, and keeps a corrupt file opening rather than throwing.
+  void adoptOpRecords(const std::vector<OpRecord> &records);
+
   PrimediaSpool spool;
   /// How many bytes of @ref spool are already on disk, and in which directory.
   /// The primedia spool only ever grows, so a save to the directory the last
@@ -357,10 +389,12 @@ private:
   /// stays the local spool.
   std::vector<Scroll> externals;
   Resolver resolver;
-  /// The operations spool, filed by the state each op produces. Ordered, so
-  /// iteration is replay order.
+  /// The operations spool, filed by the state each op produces: the single
+  /// copy of them. Every question about what has been recorded is asked of
+  /// this -- a parallel std::map<MicroversionId, Op> used to answer most of
+  /// them, holding the same operations a second time at about twice the size
+  /// and three heap allocations apiece.
   SegmentedOpsSpool opsSpool;
-  std::map<MicroversionId, Op> ops;
   std::map<std::uint64_t, Link> linkTable;
   std::uint64_t nextLinkId{1};
 };

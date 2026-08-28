@@ -562,9 +562,10 @@ public:
       std::cout << "xudu: " << st.opCount() << " operations, "
                 << st.primedia().size() << " bytes of primedia\n";
       for (const auto &id : st.allVersions()) {
-        const auto *const op = st.getOp(id);
+        const auto op = st.getOp(id);
         std::cout << (id == here ? "  * " : "    ") << id.str() << "  "
-                  << (nullptr == op ? "?" : xudu::opKindName(op->kind)) << "\n";
+                  << (op.has_value() ? xudu::opKindName(op->kind) : "?")
+                  << "\n";
       }
     });
   }

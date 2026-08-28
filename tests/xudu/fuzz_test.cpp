@@ -63,7 +63,7 @@ TEST(FuzzTest, binaryOpsParserNeverCrashesOnRandomBytes) {
 
     // 1. readOpsSpool (auto-detecting binary vs text)
     std::istringstream in1(data);
-    std::map<MicroversionId, Op> ops1;
+    std::vector<xudu::OpRecord> ops1;
     try {
       readOpsSpool(in1, ops1);
     } catch (const std::exception &) {
@@ -72,7 +72,7 @@ TEST(FuzzTest, binaryOpsParserNeverCrashesOnRandomBytes) {
 
     // 2. readBinaryOpsSpool directly
     std::istringstream in2(data);
-    std::map<MicroversionId, Op> ops2;
+    std::vector<xudu::OpRecord> ops2;
     try {
       readBinaryOpsSpool(in2, ops2);
     } catch (const std::exception &) {

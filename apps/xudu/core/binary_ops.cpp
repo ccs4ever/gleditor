@@ -149,8 +149,7 @@ bool readMicroversionIdV1(std::istream &in, MicroversionId &id) {
   return true;
 }
 
-void writeBinaryOpsSpool(std::ostream &out,
-                         const std::map<MicroversionId, Op> &ops) {
+void writeBinaryOpsSpool(std::ostream &out, const std::vector<OpRecord> &ops) {
   out.write(binaryOpsMagic.data(),
             static_cast<std::streamsize>(binaryOpsMagic.size()));
 
@@ -268,7 +267,7 @@ void writeBinaryOpsSpool(std::ostream &out,
 /// and @p readId is the one place they differ -- see
 /// OpsSpoolVersion::CompactBinaryV2.
 void readBinaryOpsSpoolImpl(
-    std::istream &in, std::map<MicroversionId, Op> &ops,
+    std::istream &in, std::vector<OpRecord> &ops,
     const std::function<bool(std::istream &, MicroversionId &)> &readId) {
   MicroversionId lastProduces{};
   while (true) {
@@ -405,21 +404,21 @@ void readBinaryOpsSpoolImpl(
                                std::to_string(tag));
     }
 
-    ops.emplace(produces, op);
+    ops.push_back(OpRecord{produces, op});
     lastProduces = produces;
   }
 }
 
-void readBinaryOpsSpool(std::istream &in, std::map<MicroversionId, Op> &ops) {
+void readBinaryOpsSpool(std::istream &in, std::vector<OpRecord> &ops) {
   readBinaryOpsSpoolImpl(in, ops, readMicroversionId);
 }
 
-void readBinaryOpsSpoolV1(std::istream &in, std::map<MicroversionId, Op> &ops) {
+void readBinaryOpsSpoolV1(std::istream &in, std::vector<OpRecord> &ops) {
   readBinaryOpsSpoolImpl(in, ops, readMicroversionIdV1);
 }
 
 void writeOsmicTextOpsSpool(std::ostream &out,
-                            const std::map<MicroversionId, Op> &ops) {
+                            const std::vector<OpRecord> &ops) {
   for (const auto &[id, op] : ops) {
     out << id.str() << ' ' << opKindName(op.kind) << ' ' << op.at << ' '
         << op.length << ' ' << op.to << ' ' << op.span.start << ' '
@@ -429,8 +428,7 @@ void writeOsmicTextOpsSpool(std::ostream &out,
   }
 }
 
-void readOsmicTextOpsSpool(std::istream &in,
-                           std::map<MicroversionId, Op> &ops) {
+void readOsmicTextOpsSpool(std::istream &in, std::vector<OpRecord> &ops) {
   std::string line;
   while (std::getline(in, line)) {
     if (line.empty()) {
@@ -467,7 +465,7 @@ void readOsmicTextOpsSpool(std::istream &in,
     } else {
       throw std::runtime_error("unknown operation \"" + kind + "\"");
     }
-    ops.emplace(produces, op);
+    ops.push_back(OpRecord{produces, op});
   }
 }
 
@@ -509,7 +507,7 @@ OpsSpoolVersion detectOpsSpoolVersion(std::istream &in) {
   return OpsSpoolVersion::StandardOsmicText;
 }
 
-void readOpsSpool(std::istream &in, std::map<MicroversionId, Op> &ops) {
+void readOpsSpool(std::istream &in, std::vector<OpRecord> &ops) {
   const auto version = detectOpsSpoolVersion(in);
   switch (version) {
   case OpsSpoolVersion::CompactBinaryV1:
