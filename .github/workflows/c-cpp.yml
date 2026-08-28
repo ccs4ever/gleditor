@@ -148,7 +148,19 @@ jobs:
     # test/all rather than test: `make test` leaves the network suites out so
     # that the tests a person runs after every change stay quick, and the pull
     # request checks are where they are not left out.
+    # SDL_VIDEODRIVER is forced rather than left to SDL's own probing: with no
+    # DISPLAY, SDL2 happens to fall through to a driver backed by the runner's
+    # DRM render node and gets a real GL context, but SDL3 does not -- it
+    # picks "dummy", which has no GL support, and every E2EBinaryOrchestration
+    # test that launches xudu to screenshot fails with "SDL init failed: No
+    # available video device" (or, under dummy, "OpenGL support is ... not
+    # available in current SDL video driver"). "offscreen" gives a real GL
+    # context under both, verified locally to produce byte-identical output to
+    # whatever SDL2 was implicitly choosing -- so this is not a behaviour
+    # change for the SDL2 job, only a fix for the SDL3 one.
     - name: make test
+      env:
+        SDL_VIDEODRIVER: offscreen
       run: make -j$(nproc) GLEDITOR_SDL=${{ matrix.sdl }} GLEDITOR_ENABLE_VULKAN=1 test/all
     # Render the sample document through each backend and require that they
     # agree. A backend that silently stops drawing still exits zero, so the
