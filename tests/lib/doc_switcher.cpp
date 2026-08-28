@@ -1,13 +1,13 @@
-#include <gtest/gtest.h>
 #include <gmock/gmock.h>
+#include <gtest/gtest.h>
 
 #include <memory>
 #include <string>
 
+#include "mocks/device.hpp"
 #include <gleditor/doc_switcher.hpp>
 #include <gleditor/render/types.hpp>
 #include <gleditor/render_state.hpp>
-#include "mocks/device.hpp"
 
 using gleditor::DocumentSwitcher;
 using testing::NiceMock;
@@ -53,9 +53,8 @@ TEST_F(DocumentSwitcherTest, defaultVisibilityAndSelection) {
 
 TEST_F(DocumentSwitcherTest, pickTabSelectionTriggersHandler) {
   std::uint32_t selectedDoc = ~0U;
-  switcher->setSelectHandler([&selectedDoc](const std::uint32_t index) {
-    selectedDoc = index;
-  });
+  switcher->setSelectHandler(
+      [&selectedDoc](const std::uint32_t index) { selectedDoc = index; });
 
   // Mock picking tag for selecting docIndex 1: (1 << 1) | 0 = 2
   render::PickingResult pick;
@@ -72,9 +71,8 @@ TEST_F(DocumentSwitcherTest, pickTabSelectionTriggersHandler) {
 
 TEST_F(DocumentSwitcherTest, pickCloseButtonTriggersCloseHandler) {
   std::uint32_t closedDoc = ~0U;
-  switcher->setCloseHandler([&closedDoc](const std::uint32_t index) {
-    closedDoc = index;
-  });
+  switcher->setCloseHandler(
+      [&closedDoc](const std::uint32_t index) { closedDoc = index; });
 
   // Mock picking tag for closing docIndex 0: (0 << 1) | 1 = 1
   render::PickingResult pick;

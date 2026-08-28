@@ -623,8 +623,8 @@ TEST(LinkLayout, symmetricMultiPageFramingZoomScaling) {
   for (const auto pages : pageCounts) {
     const float totalH = (static_cast<float>(pages) * singlePageH) +
                          (static_cast<float>(pages - 1) * pageGapH);
-    const float spanW  = (4.0F * docHalfW) + docGap + 8.0F;
-    const float spanH  = totalH + 12.0F;
+    const float spanW = (4.0F * docHalfW) + docGap + 8.0F;
+    const float spanH = totalH + 12.0F;
 
     const float zFit = std::max(spanH / (2.0F * tanHalfFov),
                                 spanW / (2.0F * aspect * tanHalfFov));
@@ -814,8 +814,8 @@ TEST(PageFraming, asymmetricPageHeightsShiftTheCentroidByTheHeightDifference) {
 TEST(PageFraming, framingDistanceAtNinetyDegreesIsHalfTheHeight) {
   constexpr float aspect = 1.0F; // width term must not dominate here
   const auto distance    = framingDistance(/*worldWidth=*/10.0F,
-                                           /*worldHeight=*/200.0F,
-                                           /*fovYDegrees=*/90.0F, aspect);
+                                        /*worldHeight=*/200.0F,
+                                        /*fovYDegrees=*/90.0F, aspect);
   EXPECT_NEAR(distance, 100.0F, 1e-2F);
 }
 

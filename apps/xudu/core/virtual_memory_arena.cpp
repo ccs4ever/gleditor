@@ -66,8 +66,8 @@ bool VirtualMemoryArena::reserve(const std::size_t maxBytes) {
     return false;
   }
 #else
-  void *const ptr = mmap(nullptr, aligned, PROT_NONE,
-                         MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+  void *const ptr =
+      mmap(nullptr, aligned, PROT_NONE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
   if (MAP_FAILED == ptr) {
     return false;
   }
@@ -79,9 +79,9 @@ bool VirtualMemoryArena::reserve(const std::size_t maxBytes) {
 }
 
 bool VirtualMemoryArena::mapFileFixed(void *const targetAddr, const int fd,
-                                     const std::uint64_t fileOffset,
-                                     const std::size_t length,
-                                     const bool writable) {
+                                      const std::uint64_t fileOffset,
+                                      const std::size_t length,
+                                      const bool writable) {
   if (nullptr == baseAddress || nullptr == targetAddr || 0 == length ||
       fd < 0) {
     return false;
@@ -94,19 +94,19 @@ bool VirtualMemoryArena::mapFileFixed(void *const targetAddr, const int fd,
 
 #ifdef _WIN32
   // Windows MapViewOfFileEx requires matching allocation granularity.
-  // When MAP_FIXED isn't supported, caller falls back to commitAnonymous + read.
+  // When MAP_FIXED isn't supported, caller falls back to commitAnonymous +
+  // read.
   return false;
 #else
-  const int prot = writable ? (PROT_READ | PROT_WRITE) : PROT_READ;
-  void *const mapped =
-      mmap(targetAddr, length, prot, MAP_SHARED | MAP_FIXED, fd,
-           static_cast<off_t>(fileOffset));
+  const int prot     = writable ? (PROT_READ | PROT_WRITE) : PROT_READ;
+  void *const mapped = mmap(targetAddr, length, prot, MAP_SHARED | MAP_FIXED,
+                            fd, static_cast<off_t>(fileOffset));
   return mapped == targetAddr;
 #endif
 }
 
 bool VirtualMemoryArena::commitAnonymous(void *const targetAddr,
-                                        const std::size_t length) {
+                                         const std::size_t length) {
   if (nullptr == baseAddress || nullptr == targetAddr || 0 == length) {
     return false;
   }

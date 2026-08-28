@@ -225,8 +225,8 @@ void Renderer::openDoc(RenderState &state, const gleditor::TextSource &source,
   // wedged in X between whatever foreground documents happen to flank it in
   // the open order. Centred at the origin instead, it sits behind the row
   // as a backdrop rather than inside it.
-  auto slot = depthZ < 0.0F ? glm::vec3(0.0F, 0.0F, 0.0F)
-                            : AbstractRenderer::documentSlot(state.docs.size());
+  auto slot                 = depthZ < 0.0F ? glm::vec3(0.0F, 0.0F, 0.0F)
+                                            : AbstractRenderer::documentSlot(state.docs.size());
   slot.z                    = depthZ;
   const auto newDocPosition = glm::translate(glm::mat4(1.0), slot);
   std::cout << "doc pos: " << state.docs.size() << " "
@@ -891,9 +891,9 @@ void Renderer::renderLoop(AutoSDLWindow &window) {
     }
 
     if (!firstPageRecorded && !state.pageBatches.empty()) {
-      timeToFirstPage   = std::chrono::duration<double, std::milli>(
-                              std::chrono::steady_clock::now() - loopStart)
-                              .count();
+      timeToFirstPage = std::chrono::duration<double, std::milli>(
+                            std::chrono::steady_clock::now() - loopStart)
+                            .count();
       firstPageRecorded = true;
       std::cout << std::format(
           "[TIMING] First page rendered: {:.2f} ms (docs in render: {})\n",

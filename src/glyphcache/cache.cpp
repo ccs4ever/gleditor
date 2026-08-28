@@ -116,8 +116,8 @@ extractPaddedCoverage(const std::span<const unsigned char> surface,
                                 std::byte{0});
   std::uint64_t totalInk = 0;
   for (int row = 0; row < height; row++) {
-    const auto *src   = surface.data() + static_cast<std::size_t>(row) *
-                                             static_cast<std::size_t>(stride);
+    const auto *src = surface.data() + static_cast<std::size_t>(row) *
+                                           static_cast<std::size_t>(stride);
     const auto dstRow = height - 1 - row;
     auto *dst =
         padded.data() +

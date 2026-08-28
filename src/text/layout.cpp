@@ -77,7 +77,7 @@ std::size_t countUtf8Chars(std::string_view str) {
 /// know about the other.
 gleditor::DecorationMask
 decorationsAt(const std::size_t byteOffset,
-             const std::vector<gleditor::DecoratedRange> &ranges) {
+              const std::vector<gleditor::DecoratedRange> &ranges) {
   gleditor::DecorationMask mask = 0;
   for (const auto &range : ranges) {
     if (byteOffset >= range.start && byteOffset < range.end) {

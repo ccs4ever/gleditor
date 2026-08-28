@@ -398,7 +398,7 @@ void LinkBeams::align(const Strand &strand, RenderState &state,
     auto &view             = renderer->appState()->view;
     const float aspect     = (view.screenHeight > 0 && view.screenWidth > 0)
                                  ? static_cast<float>(view.screenWidth) /
-                                       static_cast<float>(view.screenHeight)
+                                   static_cast<float>(view.screenHeight)
                                  : fallbackAspect;
     const float fovRad     = glm::radians(view.fov);
     const float tanHalfFov = std::tan(fovRad * 0.5F);
@@ -563,8 +563,8 @@ void LinkBeams::drawFrame(gleditor::FrameContext &ctx) {
 
     const auto rightwards = glm::vec3(to->modelMatrix()[3]).x >=
                             glm::vec3(from->modelMatrix()[3]).x;
-    const auto fromAt     = edgePoint(*from, *strand.fromAnchor, rightwards);
-    const auto toAt       = edgePoint(*to, *strand.toAnchor, !rightwards);
+    const auto fromAt = edgePoint(*from, *strand.fromAnchor, rightwards);
+    const auto toAt   = edgePoint(*to, *strand.toAnchor, !rightwards);
     if (!fromAt || !toAt) {
       continue;
     }
@@ -664,7 +664,7 @@ void LinkBeams::describe(gleditor::a11y::Builder &into) {
                        std::to_string(strand.from.end) + ", and bytes " +
                        std::to_string(strand.to.start) + " to " +
                        std::to_string(strand.to.end);
-    node.focusable   = true;
+    node.focusable = true;
     node.actions =
         a11y::bit(a11y::Action::Focus) | a11y::bit(a11y::Action::Click);
   }
