@@ -138,7 +138,8 @@ bool SegmentedPrimediaSpool::addSealedSegment(
   if (arena.isValid() && (start % ps == 0) && (segSize % ps == 0)) {
     mapped = arena.mapFileFixed(arena.base() + start, fd, 0, segSize, false);
     if (mapped) {
-      committedBytes = std::max(committedBytes, start + segSize);
+      committedBytes =
+          std::max(committedBytes, static_cast<std::size_t>(start + segSize));
     }
   }
 
