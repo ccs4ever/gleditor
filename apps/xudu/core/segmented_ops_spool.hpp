@@ -94,21 +94,44 @@ public:
   ancestralPath(std::uint32_t targetIndex) const;
 
   /**
-   * @brief Add a sealed read-only segment file.
+   * @brief Add a sealed read-only segment file, mapped in after what is
+   *        already held.
+   *
+   * The file is a bare run of CompactOpNodes and nothing else -- no header, no
+   * state-zero slot, no names. The names are worked out from the nodes: each
+   * one says which index produced it and by which branch ordinal, so its
+   * microversion follows from its parent's, and a parent always sits at a
+   * lower index than its children. Segments are therefore written and read
+   * back in the same order, and the indices inside them are the ones they had
+   * when they were sealed rather than positions within the file.
+   *
+   * @return false if the file cannot be read, is not a whole number of nodes,
+   *         or names a parent this spool does not hold -- which is what a
+   *         segment loaded out of order looks like.
    */
   bool addSealedSegment(const std::filesystem::path &path);
 
   /**
-   * @brief Open the active writable segment file.
+   * @brief Open the writable segment that new operations are appended to.
+   *
+   * A file that already holds nodes is adopted rather than overwritten, so
+   * reopening a spool picks up where it left off. Anything appended after
+   * that is written to this file by flush().
    */
   bool openActiveSegment(const std::filesystem::path &path);
 
   /**
-   * @brief Seal the active segment and open a new active segment.
+   * @brief Seal the active segment and start a new one at @p newActivePath.
+   *
+   * The operations already in hand do not move: sealing writes out whatever
+   * has not been written yet and re-files the range as a read-only segment.
+   * It does not read them back in -- they are already here.
    */
   bool sealActive(const std::filesystem::path &newActivePath);
 
-  /// Synchronize unwritten active operations to disk.
+  /// Write operations appended since the last flush to the active segment
+  /// file. Only the tail is written, so this costs what was appended rather
+  /// than what is held.
   bool flush();
 
   /// Reset to empty state.
@@ -156,8 +179,19 @@ private:
   [[nodiscard]] std::uint32_t idHashFind(const MicroversionId &id) const;
   void idHashRehash(std::size_t newCapacity);
 
+  /// Place @p nodeCount nodes from @p fd into the arena after what is already
+  /// held, work out the microversion each produces, and index them. Shared by
+  /// addSealedSegment() and openActiveSegment(), which differ only in whether
+  /// the range may be mapped read-only and in what is recorded about it.
+  bool adoptSegmentNodes(int fd, std::uint32_t nodeCount, bool mayMap);
+
   int activeFd{-1};
   std::string activePath;
+  /// Where the active segment starts, and how much of it flush() has already
+  /// written. The file holds the range [activeStartIndex, activeStartIndex +
+  /// activeFlushedOps), so a flush writes from where it left off.
+  std::uint32_t activeStartIndex{1};
+  std::uint32_t activeFlushedOps{0};
 };
 
 } // namespace xudu

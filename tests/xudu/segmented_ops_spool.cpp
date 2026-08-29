@@ -124,4 +124,203 @@ TEST(SegmentedOpsSpoolTest, pointerStabilityUnderGrowth) {
   }
 }
 
+// -- segments on disk --------------------------------------------------------
+//
+// A segment file is a bare run of CompactOpNodes: no header, no state-zero
+// slot, and no microversion names anywhere in it. The names come back out of
+// the tree, each node saying which index produced it and by which branch
+// ordinal, which is what these cover.
+
+namespace {
+
+std::filesystem::path scratchDir(const std::string &name) {
+  const auto dir =
+      std::filesystem::temp_directory_path() / ("xudu_seg_" + name);
+  std::filesystem::remove_all(dir);
+  std::filesystem::create_directories(dir);
+  return dir;
+}
+
+/// A chain of @p count operations appended to @p spool, continuing from
+/// whatever it already holds.
+void appendChain(SegmentedOpsSpool &spool, const std::uint32_t count) {
+  for (std::uint32_t i = 0; i < count; i++) {
+    const auto index = static_cast<std::uint32_t>(spool.size()) + 1U;
+    CompactOpNode node;
+    node.kind          = OpKind::Insert;
+    node.parentIndex   = index - 1U;
+    node.branchOrdinal = 0;
+    node.at            = index;
+    spool.append(node, MicroversionId::parse(std::to_string(index)));
+  }
+}
+
+} // namespace
+
+TEST(SegmentedOpsSpoolTest, appendedOpsReachTheActiveSegmentFile) {
+  const auto dir    = scratchDir("active");
+  const auto active = dir / "active.ops";
+
+  SegmentedOpsSpool spool;
+  ASSERT_TRUE(spool.openActiveSegment(active));
+  appendChain(spool, 10);
+  // Nothing is on disk until it is asked for: appending is a write to memory.
+  ASSERT_TRUE(spool.flush());
+  EXPECT_EQ(std::filesystem::file_size(active), 10 * sizeof(CompactOpNode));
+
+  // Flushing again writes nothing further -- only the tail is ever written.
+  ASSERT_TRUE(spool.flush());
+  EXPECT_EQ(std::filesystem::file_size(active), 10 * sizeof(CompactOpNode));
+
+  appendChain(spool, 5);
+  ASSERT_TRUE(spool.flush());
+  EXPECT_EQ(std::filesystem::file_size(active), 15 * sizeof(CompactOpNode));
+}
+
+TEST(SegmentedOpsSpoolTest, anActiveSegmentIsPickedUpWhereItWasLeft) {
+  const auto dir    = scratchDir("reopen");
+  const auto active = dir / "active.ops";
+  {
+    SegmentedOpsSpool spool;
+    ASSERT_TRUE(spool.openActiveSegment(active));
+    appendChain(spool, 6);
+    ASSERT_TRUE(spool.flush());
+  }
+
+  SegmentedOpsSpool reopened;
+  ASSERT_TRUE(reopened.openActiveSegment(active));
+  EXPECT_EQ(reopened.size(), 6U);
+  // The names were never written down; they come back out of the tree.
+  for (std::uint32_t i = 1; i <= 6; i++) {
+    const auto id = MicroversionId::parse(std::to_string(i));
+    EXPECT_TRUE(reopened.contains(id)) << "state " << i << " went missing";
+    EXPECT_EQ(reopened.indexOf(id), i);
+    EXPECT_EQ(reopened.idOf(i).str(), id.str());
+  }
+  // and it keeps growing from there rather than starting over
+  appendChain(reopened, 2);
+  EXPECT_EQ(reopened.size(), 8U);
+  EXPECT_TRUE(reopened.contains(MicroversionId::parse("8")));
+}
+
+TEST(SegmentedOpsSpoolTest, sealedSegmentsAreFoundByTheStateTheyProduce) {
+  const auto dir = scratchDir("sealed");
+  {
+    SegmentedOpsSpool writer;
+    ASSERT_TRUE(writer.openActiveSegment(dir / "seg0.ops"));
+    appendChain(writer, 4);
+    ASSERT_TRUE(writer.flush());
+  }
+
+  SegmentedOpsSpool spool;
+  ASSERT_TRUE(spool.addSealedSegment(dir / "seg0.ops"));
+  EXPECT_EQ(spool.size(), 4U);
+  ASSERT_EQ(spool.segments().size(), 1U);
+  EXPECT_EQ(spool.segments().front().startOpIndex, 1U);
+  EXPECT_EQ(spool.segments().front().opCount, 4U);
+
+  for (std::uint32_t i = 1; i <= 4; i++) {
+    const auto id = MicroversionId::parse(std::to_string(i));
+    EXPECT_TRUE(spool.contains(id)) << "sealed state " << i << " is invisible";
+    EXPECT_EQ(spool.indexOf(id), i);
+    ASSERT_NE(spool.get(id), nullptr);
+    EXPECT_EQ(spool.get(id)->at, i);
+  }
+  // The ancestral walk has to cross into the sealed range like any other.
+  EXPECT_THAT(spool.ancestralPath(4), testing::ElementsAre(1U, 2U, 3U, 4U));
+}
+
+TEST(SegmentedOpsSpoolTest, sealingKeepsTheOperationsItAlreadyHas) {
+  // Sealing renames a range; it must not read it back in and file every
+  // operation a second time.
+  const auto dir = scratchDir("seal");
+  SegmentedOpsSpool spool;
+  ASSERT_TRUE(spool.openActiveSegment(dir / "seg0.ops"));
+  appendChain(spool, 5);
+
+  ASSERT_TRUE(spool.sealActive(dir / "seg1.ops"));
+  EXPECT_EQ(spool.size(), 5U) << "sealing duplicated the operations";
+  ASSERT_EQ(spool.segments().size(), 1U);
+  EXPECT_EQ(spool.segments().front().opCount, 5U);
+
+  // Appending continues after the sealed range, into the new active segment.
+  appendChain(spool, 3);
+  EXPECT_EQ(spool.size(), 8U);
+  ASSERT_TRUE(spool.flush());
+  EXPECT_EQ(std::filesystem::file_size(dir / "seg0.ops"),
+            5 * sizeof(CompactOpNode));
+  EXPECT_EQ(std::filesystem::file_size(dir / "seg1.ops"),
+            3 * sizeof(CompactOpNode));
+
+  for (std::uint32_t i = 1; i <= 8; i++) {
+    EXPECT_TRUE(spool.contains(MicroversionId::parse(std::to_string(i))))
+        << "state " << i << " lost across the seal";
+  }
+}
+
+TEST(SegmentedOpsSpoolTest, branchesSurviveBeingSealedAndReopened) {
+  const auto dir = scratchDir("branches");
+  {
+    SegmentedOpsSpool writer;
+    ASSERT_TRUE(writer.openActiveSegment(dir / "seg0.ops"));
+    appendChain(writer, 3); // states 1, 2, 3
+    // A branch off state 1, then a continuation of that branch: the case a
+    // branch ordinal exists for, and the one a name cannot be guessed from
+    // position alone.
+    CompactOpNode branched;
+    branched.parentIndex   = 1;
+    branched.branchOrdinal = 1;
+    branched.at            = 100;
+    writer.append(branched, MicroversionId::parse("1a1"));
+    CompactOpNode onward;
+    onward.parentIndex   = 4;
+    onward.branchOrdinal = 0;
+    onward.at            = 101;
+    writer.append(onward, MicroversionId::parse("1a2"));
+    ASSERT_TRUE(writer.flush());
+  }
+
+  SegmentedOpsSpool spool;
+  ASSERT_TRUE(spool.addSealedSegment(dir / "seg0.ops"));
+  EXPECT_EQ(spool.size(), 5U);
+  for (const auto *name : {"1", "2", "3", "1a1", "1a2"}) {
+    EXPECT_TRUE(spool.contains(MicroversionId::parse(name)))
+        << name << " did not come back";
+  }
+  // 1a2 continues 1a1 -- ordinal zero, despite its own last segment saying
+  // branch a. Deriving that from the segment letter rather than from the step
+  // is the way to get this wrong.
+  EXPECT_EQ(spool.idOf(5).str(), "1a2");
+  EXPECT_THAT(spool.ancestralPath(5), testing::ElementsAre(1U, 4U, 5U));
+}
+
+TEST(SegmentedOpsSpoolTest, aSegmentThatDoesNotFitIsRefused) {
+  const auto dir = scratchDir("refuse");
+
+  // Not a whole number of nodes.
+  {
+    std::ofstream out(dir / "ragged.ops", std::ios::binary);
+    const std::string junk(sizeof(CompactOpNode) + 7, '\0');
+    out.write(junk.data(), static_cast<std::streamsize>(junk.size()));
+  }
+  SegmentedOpsSpool spool;
+  EXPECT_FALSE(spool.addSealedSegment(dir / "ragged.ops"));
+  EXPECT_EQ(spool.size(), 0U);
+
+  // Two nodes claiming the same parent and ordinal name one state twice.
+  {
+    std::vector<CompactOpNode> nodes(2);
+    nodes[0].parentIndex = 0;
+    nodes[1].parentIndex = 0;
+    std::ofstream out(dir / "twins.ops", std::ios::binary);
+    out.write(
+        reinterpret_cast<const char *>(nodes.data()),
+        static_cast<std::streamsize>(nodes.size() * sizeof(CompactOpNode)));
+  }
+  EXPECT_FALSE(spool.addSealedSegment(dir / "twins.ops"));
+  EXPECT_EQ(spool.size(), 0U) << "a refused segment must leave nothing behind";
+
+  EXPECT_FALSE(spool.addSealedSegment(dir / "no-such-file.ops"));
+}
+
 } // namespace

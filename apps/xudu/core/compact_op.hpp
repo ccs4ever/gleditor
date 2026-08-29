@@ -66,6 +66,27 @@ struct alignas(64) CompactOpNode {
     return op;
   }
 
+  /**
+   * @brief The branch ordinal that reaches @p produces from its parent.
+   *
+   * Zero for a continuation, otherwise the ordinal the branch was filed under.
+   * Not the last segment's branch field, which is a common way to get this
+   * wrong: 1a2 continues 1a1 and so is ordinal zero, while its last segment
+   * still says branch a. What settles it is whether the name is one step on
+   * from the parent or a fork away from it.
+   *
+   * This is what lets a node's name be worked out from the tree rather than
+   * stored beside it -- see SegmentedOpsSpool::adoptSegmentNodes(), which has
+   * a file of nodes and no names at all.
+   */
+  static std::uint16_t branchOrdinalFor(const MicroversionId &produces) {
+    const auto parent = produces.parent();
+    if (produces == parent.next()) {
+      return 0;
+    }
+    return static_cast<std::uint16_t>(produces.segments().back().branch);
+  }
+
   static CompactOpNode fromOp(const Op &op, const std::uint32_t parentIdx,
                               const std::uint32_t sourceIdx = 0,
                               const std::uint16_t branchOrd = 0) {

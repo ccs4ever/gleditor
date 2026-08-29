@@ -42,11 +42,15 @@ SegmentedOpsSpool::SegmentedOpsSpool(SegmentedOpsSpool &&other) noexcept
       opCount(other.opCount), committedBytes(other.committedBytes),
       indexLookup(std::move(other.indexLookup)),
       idHashSlots(std::move(other.idHashSlots)), idHashCount(other.idHashCount),
-      activeFd(other.activeFd), activePath(std::move(other.activePath)) {
-  other.opCount        = 0;
-  other.committedBytes = 0;
-  other.idHashCount    = 0;
-  other.activeFd       = -1;
+      activeFd(other.activeFd), activePath(std::move(other.activePath)),
+      activeStartIndex(other.activeStartIndex),
+      activeFlushedOps(other.activeFlushedOps) {
+  other.opCount          = 0;
+  other.committedBytes   = 0;
+  other.idHashCount      = 0;
+  other.activeFd         = -1;
+  other.activeStartIndex = 1;
+  other.activeFlushedOps = 0;
   // A moved-from vector is left empty, not just cleared of its old contents
   // -- so the index-0 sentinel the constructor promised has to be put back,
   // or the next append() on the moved-from object would misfile everything
@@ -58,19 +62,23 @@ SegmentedOpsSpool &
 SegmentedOpsSpool::operator=(SegmentedOpsSpool &&other) noexcept {
   if (this != &other) {
     clear();
-    arena                = std::move(other.arena);
-    segmentList          = std::move(other.segmentList);
-    opCount              = other.opCount;
-    committedBytes       = other.committedBytes;
-    indexLookup          = std::move(other.indexLookup);
-    idHashSlots          = std::move(other.idHashSlots);
-    idHashCount          = other.idHashCount;
-    activeFd             = other.activeFd;
-    activePath           = std::move(other.activePath);
-    other.opCount        = 0;
-    other.committedBytes = 0;
-    other.idHashCount    = 0;
-    other.activeFd       = -1;
+    arena                  = std::move(other.arena);
+    segmentList            = std::move(other.segmentList);
+    opCount                = other.opCount;
+    committedBytes         = other.committedBytes;
+    indexLookup            = std::move(other.indexLookup);
+    idHashSlots            = std::move(other.idHashSlots);
+    idHashCount            = other.idHashCount;
+    activeFd               = other.activeFd;
+    activePath             = std::move(other.activePath);
+    activeStartIndex       = other.activeStartIndex;
+    activeFlushedOps       = other.activeFlushedOps;
+    other.opCount          = 0;
+    other.committedBytes   = 0;
+    other.idHashCount      = 0;
+    other.activeFd         = -1;
+    other.activeStartIndex = 1;
+    other.activeFlushedOps = 0;
     other.indexLookup.push_back(MicroversionId{});
   }
   return *this;
@@ -270,6 +278,82 @@ SegmentedOpsSpool::ancestralPath(const std::uint32_t targetIndex) const {
   return path;
 }
 
+bool SegmentedOpsSpool::adoptSegmentNodes(const int fd,
+                                          const std::uint32_t nodeCount,
+                                          const bool mayMap) {
+  const auto bytes       = nodeCount * sizeof(CompactOpNode);
+  const auto startIndex  = opCount + 1U;
+  const auto startOffset = startIndex * sizeof(CompactOpNode);
+
+  bool mapped   = false;
+  const auto ps = VirtualMemoryArena::pageSize();
+  if (mayMap && arena.isValid() && (startOffset % ps == 0) &&
+      (bytes % ps == 0)) {
+    mapped =
+        arena.mapFileFixed(arena.base() + startOffset, fd, 0, bytes, false);
+    if (mapped) {
+      committedBytes = std::max(committedBytes, startOffset + bytes);
+    }
+  }
+  if (!mapped) {
+    if (!ensureCommitted(startOffset + bytes)) {
+      return false;
+    }
+    if (::lseek(fd, 0, SEEK_SET) < 0) {
+      return false;
+    }
+    if (::read(fd, arena.base() + startOffset, bytes) !=
+        static_cast<ssize_t>(bytes)) {
+      return false;
+    }
+  }
+
+  // Name each node before anything is committed to opCount, so a segment that
+  // does not belong here -- one whose parents are missing because it was
+  // loaded out of order -- leaves the spool as it was rather than half read.
+  std::vector<MicroversionId> names;
+  names.reserve(nodeCount);
+  const auto *const nodes =
+      reinterpret_cast<const CompactOpNode *>(arena.base());
+  for (std::uint32_t i = 0; i < nodeCount; i++) {
+    const auto &node  = nodes[startIndex + i];
+    const auto parent = node.parentIndex < startIndex
+                            ? idOf(node.parentIndex)
+                            : names[node.parentIndex - startIndex];
+    if (node.parentIndex >= startIndex + i) {
+      return false; // a parent at or after its own child is not a tree
+    }
+    if (0 != node.parentIndex && parent.isZero()) {
+      return false; // names a parent this spool does not hold
+    }
+    const auto name = 0 == node.branchOrdinal
+                          ? parent.next()
+                          : parent.branch(node.branchOrdinal);
+    // A state is produced by one operation and no more. Two nodes claiming the
+    // same parent and the same ordinal name the same state, which a tree
+    // cannot mean -- and taking them both would leave two entries a lookup
+    // could return either of.
+    if (0 != idHashFind(name)) {
+      return false;
+    }
+    names.push_back(name);
+  }
+  {
+    auto sorted = names;
+    std::sort(sorted.begin(), sorted.end());
+    if (std::adjacent_find(sorted.begin(), sorted.end()) != sorted.end()) {
+      return false; // two nodes in this segment name the same state
+    }
+  }
+
+  for (std::uint32_t i = 0; i < nodeCount; i++) {
+    indexLookup.push_back(names[i]);
+    idHashInsert(names[i], startIndex + i);
+  }
+  opCount += nodeCount;
+  return true;
+}
+
 bool SegmentedOpsSpool::addSealedSegment(const std::filesystem::path &path) {
   // path.c_str() is a wchar_t* on Windows; open() needs a narrow string.
   const int fd = ::open(path.string().c_str(), O_RDONLY);
@@ -277,51 +361,27 @@ bool SegmentedOpsSpool::addSealedSegment(const std::filesystem::path &path) {
     return false;
   }
   struct stat st;
-  if (::fstat(fd, &st) < 0 || st.st_size <= 0) {
+  if (::fstat(fd, &st) < 0 || st.st_size <= 0 ||
+      static_cast<std::size_t>(st.st_size) % sizeof(CompactOpNode) != 0) {
     ::close(fd);
     return false;
   }
-  const auto bytes = static_cast<std::size_t>(st.st_size);
   const auto segCount =
-      static_cast<std::uint32_t>(bytes / sizeof(CompactOpNode));
-  if (0 == segCount) {
+      static_cast<std::uint32_t>(st.st_size / sizeof(CompactOpNode));
+
+  const auto startIndex = opCount + 1U;
+  if (!adoptSegmentNodes(fd, segCount, true)) {
     ::close(fd);
     return false;
-  }
-
-  const auto startOffset = (opCount + 1U) * sizeof(CompactOpNode);
-
-  bool mapped   = false;
-  const auto ps = VirtualMemoryArena::pageSize();
-  if (arena.isValid() && (startOffset % ps == 0) && (bytes % ps == 0)) {
-    mapped =
-        arena.mapFileFixed(arena.base() + startOffset, fd, 0, bytes, false);
-    if (mapped) {
-      committedBytes = std::max(committedBytes, startOffset + bytes);
-    }
-  }
-
-  if (!mapped) {
-    if (!ensureCommitted(startOffset + bytes)) {
-      ::close(fd);
-      return false;
-    }
-    const auto readBytes = ::read(fd, arena.base() + startOffset, bytes);
-    if (readBytes != static_cast<ssize_t>(bytes)) {
-      ::close(fd);
-      return false;
-    }
   }
 
   SegmentInfo info;
-  info.startOpIndex = opCount + 1U;
+  info.startOpIndex = startIndex;
   info.opCount      = segCount;
   info.path         = path.string();
   info.fd           = fd;
   info.isReadOnly   = true;
   segmentList.push_back(std::move(info));
-
-  opCount += segCount;
   return true;
 }
 
@@ -330,27 +390,76 @@ bool SegmentedOpsSpool::openActiveSegment(const std::filesystem::path &path) {
     ::close(activeFd);
     activeFd = -1;
   }
-  activePath = path.string();
-  activeFd   = ::open(activePath.c_str(), O_RDWR | O_CREAT, 0644);
-  return activeFd >= 0;
+  const int fd = ::open(path.string().c_str(), O_RDWR | O_CREAT, 0644);
+  if (fd < 0) {
+    return false;
+  }
+  struct stat st;
+  if (::fstat(fd, &st) < 0 ||
+      static_cast<std::size_t>(st.st_size) % sizeof(CompactOpNode) != 0) {
+    ::close(fd);
+    return false;
+  }
+  // Whatever the file already holds is taken in rather than written over --
+  // never mapped, since this range has to stay writable for what comes next.
+  const auto held =
+      static_cast<std::uint32_t>(st.st_size / sizeof(CompactOpNode));
+  const auto startIndex = opCount + 1U;
+  if (held > 0 && !adoptSegmentNodes(fd, held, false)) {
+    ::close(fd);
+    return false;
+  }
+
+  activeFd         = fd;
+  activePath       = path.string();
+  activeStartIndex = startIndex;
+  activeFlushedOps = held;
+  return true;
 }
 
 bool SegmentedOpsSpool::sealActive(const std::filesystem::path &newActivePath) {
-  flush();
-  if (activeFd >= 0) {
+  if (!flush()) {
+    return false;
+  }
+  // The operations stay exactly where they are. Sealing is a change of what
+  // the range is called -- read-only, backed by a file that is now complete
+  // -- and reading them back in would file every one of them a second time.
+  if (activeFd >= 0 && activeFlushedOps > 0) {
+    SegmentInfo info;
+    info.startOpIndex = activeStartIndex;
+    info.opCount      = activeFlushedOps;
+    info.path         = activePath;
+    info.fd           = activeFd;
+    info.isReadOnly   = true;
+    segmentList.push_back(std::move(info));
+    activeFd = -1; // the segment owns the descriptor now
+  } else if (activeFd >= 0) {
     ::close(activeFd);
     activeFd = -1;
   }
-  if (!activePath.empty()) {
-    addSealedSegment(activePath);
-  }
+  activePath.clear();
   return openActiveSegment(newActivePath);
 }
 
 bool SegmentedOpsSpool::flush() {
-  if (nullptr != arena.base() && opCount > 0) {
-    const auto bytes = (opCount + 1U) * sizeof(CompactOpNode);
-    arena.flush(arena.base(), bytes);
+  if (activeFd >= 0 && opCount >= activeStartIndex) {
+    const auto pending = (opCount - activeStartIndex + 1U) - activeFlushedOps;
+    if (pending > 0) {
+      const auto *const nodes =
+          reinterpret_cast<const CompactOpNode *>(arena.base());
+      const auto from  = activeStartIndex + activeFlushedOps;
+      const auto bytes = pending * sizeof(CompactOpNode);
+      const auto at =
+          static_cast<off_t>(activeFlushedOps * sizeof(CompactOpNode));
+      if (::lseek(activeFd, at, SEEK_SET) < 0) {
+        return false;
+      }
+      if (::write(activeFd, &nodes[from], bytes) !=
+          static_cast<ssize_t>(bytes)) {
+        return false;
+      }
+      activeFlushedOps += pending;
+    }
   }
   if (activeFd >= 0 && !activePath.empty()) {
     // MinGW's io.h has no fsync(); _commit() is its file-durability
@@ -381,8 +490,10 @@ void SegmentedOpsSpool::clear() {
   idHashSlots.clear();
   idHashCount = 0;
   arena.release();
-  opCount        = 0;
-  committedBytes = 0;
+  opCount          = 0;
+  committedBytes   = 0;
+  activeStartIndex = 1;
+  activeFlushedOps = 0;
   activePath.clear();
 }
 

@@ -88,7 +88,10 @@ void Store::putOp(const MicroversionId &produces, const Op &op) {
 
   const auto parentIdx = opsSpool.indexOf(op.parent);
   const auto sourceIdx = op.source.isZero() ? 0U : opsSpool.indexOf(op.source);
-  const auto node      = CompactOpNode::fromOp(op, parentIdx, sourceIdx);
+  // The ordinal is what makes the name recoverable from the tree, which is
+  // how a sealed segment -- a file of nodes and nothing else -- gets indexed.
+  const auto node = CompactOpNode::fromOp(
+      op, parentIdx, sourceIdx, CompactOpNode::branchOrdinalFor(produces));
   opsSpool.append(node, produces);
 }
 
