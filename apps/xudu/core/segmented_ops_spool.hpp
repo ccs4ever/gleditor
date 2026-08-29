@@ -9,7 +9,6 @@
 #include <filesystem>
 #include <map>
 #include <string>
-#include <unordered_map>
 #include <vector>
 
 #include "compact_op.hpp"
@@ -132,8 +131,30 @@ private:
   std::uint32_t opCount{0};
   std::size_t committedBytes{0};
 
-  std::unordered_map<std::string, std::uint32_t> idLookup;
+  /// index -> the microversion produced at that index. What every lookup
+  /// below is ultimately answered from; a spool index is meaningless on its
+  /// own, so this is the one place that names it.
   std::vector<MicroversionId> indexLookup;
+
+  /// microversion -> index, without holding a second copy of the id to
+  /// compare against: indexLookup already has one at the index this points
+  /// to, so a candidate slot is verified against that instead. Open
+  /// addressing with linear probing and no tombstones, which append-only
+  /// storage can get away with -- nothing is ever removed from a slot except
+  /// by clear() resetting the whole table, so "empty" only ever means
+  /// "nothing has been inserted here yet" and probing always terminates.
+  ///
+  /// This is the difference between the ~73 bytes per operation an
+  /// unordered_map<std::string, uint32_t> cost here (a heap-allocated hash
+  /// node plus a rendered id string per entry) and the few bytes a slot
+  /// array costs: nothing is stored per entry that indexLookup was not
+  /// storing already.
+  std::vector<std::uint32_t> idHashSlots; // 0 = empty; else a 1-based index
+  std::uint32_t idHashCount{0};
+
+  void idHashInsert(const MicroversionId &id, std::uint32_t index);
+  [[nodiscard]] std::uint32_t idHashFind(const MicroversionId &id) const;
+  void idHashRehash(std::size_t newCapacity);
 
   int activeFd{-1};
   std::string activePath;

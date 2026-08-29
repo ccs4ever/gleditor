@@ -15,7 +15,20 @@ namespace xudu {
 
 namespace {
 constexpr std::size_t defaultOpsReservation = 512 * 1024 * 1024; // 512 MB
+
+/// FNV-1a over a MicroversionId's segments. Nothing but idHash* uses this, and
+/// they only need two ids with the same segments to land in the same bucket
+/// -- which segment, branch and number is folded into, is not otherwise
+/// meaningful.
+std::size_t hashMicroversionId(const MicroversionId &id) {
+  std::size_t h = 1469598103934665603ULL;
+  for (const auto &seg : id.segments()) {
+    h = (h ^ seg.branch) * 1099511628211ULL;
+    h = (h ^ seg.number) * 1099511628211ULL;
+  }
+  return h;
 }
+} // namespace
 
 SegmentedOpsSpool::SegmentedOpsSpool() {
   arena.reserve(defaultOpsReservation);
@@ -27,12 +40,18 @@ SegmentedOpsSpool::~SegmentedOpsSpool() { clear(); }
 SegmentedOpsSpool::SegmentedOpsSpool(SegmentedOpsSpool &&other) noexcept
     : arena(std::move(other.arena)), segmentList(std::move(other.segmentList)),
       opCount(other.opCount), committedBytes(other.committedBytes),
-      idLookup(std::move(other.idLookup)),
-      indexLookup(std::move(other.indexLookup)), activeFd(other.activeFd),
-      activePath(std::move(other.activePath)) {
+      indexLookup(std::move(other.indexLookup)),
+      idHashSlots(std::move(other.idHashSlots)), idHashCount(other.idHashCount),
+      activeFd(other.activeFd), activePath(std::move(other.activePath)) {
   other.opCount        = 0;
   other.committedBytes = 0;
+  other.idHashCount    = 0;
   other.activeFd       = -1;
+  // A moved-from vector is left empty, not just cleared of its old contents
+  // -- so the index-0 sentinel the constructor promised has to be put back,
+  // or the next append() on the moved-from object would misfile everything
+  // one slot short of where idOf() expects to find it.
+  other.indexLookup.push_back(MicroversionId{});
 }
 
 SegmentedOpsSpool &
@@ -43,15 +62,68 @@ SegmentedOpsSpool::operator=(SegmentedOpsSpool &&other) noexcept {
     segmentList          = std::move(other.segmentList);
     opCount              = other.opCount;
     committedBytes       = other.committedBytes;
-    idLookup             = std::move(other.idLookup);
     indexLookup          = std::move(other.indexLookup);
+    idHashSlots          = std::move(other.idHashSlots);
+    idHashCount          = other.idHashCount;
     activeFd             = other.activeFd;
     activePath           = std::move(other.activePath);
     other.opCount        = 0;
     other.committedBytes = 0;
+    other.idHashCount    = 0;
     other.activeFd       = -1;
+    other.indexLookup.push_back(MicroversionId{});
   }
   return *this;
+}
+
+void SegmentedOpsSpool::idHashRehash(const std::size_t newCapacity) {
+  std::vector<std::uint32_t> grown(newCapacity, 0);
+  const auto mask = newCapacity - 1;
+  for (const auto slot : idHashSlots) {
+    if (0 == slot) {
+      continue;
+    }
+    auto probe = hashMicroversionId(indexLookup[slot]) & mask;
+    while (0 != grown[probe]) {
+      probe = (probe + 1) & mask;
+    }
+    grown[probe] = slot;
+  }
+  idHashSlots = std::move(grown);
+}
+
+void SegmentedOpsSpool::idHashInsert(const MicroversionId &id,
+                                     const std::uint32_t index) {
+  // Kept below 70% full: linear probing degrades sharply past that, and this
+  // table only ever grows, so there is no later chance to reclaim slack.
+  if (idHashSlots.empty()) {
+    idHashRehash(16);
+  } else if (static_cast<double>(idHashCount + 1) >
+             0.7 * static_cast<double>(idHashSlots.size())) {
+    idHashRehash(idHashSlots.size() * 2);
+  }
+  const auto mask = idHashSlots.size() - 1;
+  auto probe      = hashMicroversionId(id) & mask;
+  while (0 != idHashSlots[probe]) {
+    probe = (probe + 1) & mask;
+  }
+  idHashSlots[probe] = index;
+  idHashCount++;
+}
+
+std::uint32_t SegmentedOpsSpool::idHashFind(const MicroversionId &id) const {
+  if (idHashSlots.empty()) {
+    return 0;
+  }
+  const auto mask = idHashSlots.size() - 1;
+  auto probe      = hashMicroversionId(id) & mask;
+  while (0 != idHashSlots[probe]) {
+    if (indexLookup[idHashSlots[probe]] == id) {
+      return idHashSlots[probe];
+    }
+    probe = (probe + 1) & mask;
+  }
+  return 0;
 }
 
 bool SegmentedOpsSpool::ensureCommitted(const std::size_t requiredBytes) {
@@ -112,8 +184,8 @@ std::uint32_t SegmentedOpsSpool::append(CompactOpNode node,
     }
   }
 
-  idLookup[produces.str()] = newIndex;
   indexLookup.push_back(produces);
+  idHashInsert(produces, newIndex);
   opCount = newIndex;
   return newIndex;
 }
@@ -133,20 +205,15 @@ CompactOpNode *SegmentedOpsSpool::get(const std::uint32_t index) {
 }
 
 const CompactOpNode *SegmentedOpsSpool::get(const MicroversionId &id) const {
-  const auto it = idLookup.find(id.str());
-  if (it == idLookup.end()) {
-    return nullptr;
-  }
-  return get(it->second);
+  return get(idHashFind(id));
 }
 
 bool SegmentedOpsSpool::contains(const MicroversionId &id) const {
-  return idLookup.contains(id.str());
+  return idHashFind(id) != 0;
 }
 
 std::uint32_t SegmentedOpsSpool::indexOf(const MicroversionId &id) const {
-  const auto it = idLookup.find(id.str());
-  return it == idLookup.end() ? 0U : it->second;
+  return idHashFind(id);
 }
 
 MicroversionId SegmentedOpsSpool::idOf(const std::uint32_t index) const {
@@ -309,9 +376,10 @@ void SegmentedOpsSpool::clear() {
     }
   }
   segmentList.clear();
-  idLookup.clear();
   indexLookup.clear();
   indexLookup.push_back(MicroversionId{});
+  idHashSlots.clear();
+  idHashCount = 0;
   arena.release();
   opCount        = 0;
   committedBytes = 0;
