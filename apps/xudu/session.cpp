@@ -293,6 +293,12 @@ std::string Session::publishDocument(const MicroversionId &version,
   record.published     = now;
   record.contentLength = st.primedia().bytes().size();
   record.contentDigest = sha256Hex(st.primedia().bytes());
+  // The history is sealed beside the content and vouched for beside it. This
+  // has to be the same bytes sealLocalSpool() puts in the torrent, so it asks
+  // the store the same way rather than describing them a second time.
+  const auto sealedOps = sealableOps(st);
+  record.opsLength     = sealedOps.size();
+  record.opsDigest     = sha256Hex(sealedOps);
 
   for (const auto &piece : st.rebuild(version).pieces()) {
     if (piece.isLocal()) {

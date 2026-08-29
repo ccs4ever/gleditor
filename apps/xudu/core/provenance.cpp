@@ -376,6 +376,12 @@ std::string Provenance::toYaml() const {
   }
   out += std::format("content_length: {}\n", contentLength);
   yaml::write(out, "content_sha256", contentDigest);
+  // Written only when there is a history to vouch for, so a record about
+  // content alone still reads exactly as it did before these existed.
+  if (0 != opsLength || !opsDigest.empty()) {
+    out += std::format("ops_length: {}\n", opsLength);
+    yaml::write(out, "ops_sha256", opsDigest);
+  }
   for (const auto &[key, value] : extra) {
     yaml::write(out, key, value);
   }
@@ -687,6 +693,10 @@ std::optional<Provenance> parseProvenance(const std::string_view text) {
       out.contentLength = std::strtoull(value.c_str(), nullptr, 10);
     } else if ("content_sha256" == key) {
       out.contentDigest = value;
+    } else if ("ops_length" == key) {
+      out.opsLength = std::strtoull(value.c_str(), nullptr, 10);
+    } else if ("ops_sha256" == key) {
+      out.opsDigest = value;
     } else if ("quotes" != key) {
       // Anything this version does not know about is kept rather than
       // dropped: a record written by a later one still says what it said, and

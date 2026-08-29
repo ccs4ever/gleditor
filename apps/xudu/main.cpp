@@ -127,7 +127,28 @@ int checkAuthorship(const std::string &where) {
                             : "BUT THE CONTENT BESIDE IT IS NOT WHAT IT "
                               "DESCRIBES")
                 << "\n";
-      return matches ? 0 : 1;
+      if (!matches) {
+        return 1;
+      }
+      // The history, checked the same way and reported separately. A record
+      // written before the operations were sealed in says nothing about them,
+      // which is not the same as saying they are empty -- so it is reported as
+      // not covered rather than passed over in silence.
+      const auto ops = record.parent_path() / xudu::sealedOpsName;
+      if (said->opsDigest.empty() && 0 == said->opsLength) {
+        std::cout << "      but it says nothing about the history sealed "
+                     "beside it\n";
+        return 0;
+      }
+      const auto opsBytes  = slurp(ops);
+      const auto opsAgrees = xudu::sha256Hex(opsBytes) == said->opsDigest &&
+                             opsBytes.size() == said->opsLength;
+      std::cout << "      "
+                << (opsAgrees
+                        ? "and about the history sealed beside it"
+                        : "BUT THE HISTORY BESIDE IT IS NOT WHAT IT DESCRIBES")
+                << "\n";
+      return opsAgrees ? 0 : 1;
     }
   }
   return 0;

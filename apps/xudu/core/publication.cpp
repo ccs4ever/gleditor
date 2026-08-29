@@ -6,6 +6,7 @@
 
 #include <algorithm>
 #include <format>
+#include <sstream>
 #include <stdexcept>
 #include <utility>
 
@@ -13,6 +14,7 @@
 #include <fstream>
 
 #include "bencode.hpp"
+#include "binary_ops.hpp"
 #include "store.hpp"
 #include "swarm.hpp"
 
@@ -442,7 +444,7 @@ SealedScroll sealLocalSpool(const Store &store, const MutableKeys &keys,
   // off as the publisher's any more than the content can.
   const std::array<TorrentContent, 4> files{
       TorrentContent{sealedContentName, std::string{bytes}},
-      TorrentContent{sealedOpsName, store.exportBinaryOps()},
+      TorrentContent{sealedOpsName, sealableOps(store)},
       TorrentContent{provenanceFileName, provenance.yaml},
       TorrentContent{provenanceSigName, provenance.signature},
   };
@@ -520,6 +522,119 @@ localise(Store &store, const GlobalSpan &span,
     return std::nullopt;
   }
   return PrimediaSpan{store.addScroll(found->second), span.start, span.length};
+}
+
+namespace {
+
+/// Magic and version for the operations file inside a seal. Its own, rather
+/// than the ops spool's: what follows the table below is an ops spool, but the
+/// file as a whole is not one and must not be read as one by mistake.
+constexpr std::string_view sealedOpsMagic = "\x7fXSO\x01";
+
+} // namespace
+
+std::string sealableOps(const Store &store) {
+  // Which scrolls the operations actually name -- all of them, across every
+  // branch, since the whole tree is what gets sealed.
+  std::map<ScrollId, std::string> named;
+  for (std::uint32_t index = 1; index <= store.segmentedOps().size(); index++) {
+    const auto *const node = store.segmentedOps().get(index);
+    if (nullptr == node || node->scrollId == localScroll) {
+      continue; // zero is the scroll being sealed; see sealableOps()'s comment
+    }
+    if (named.contains(node->scrollId)) {
+      continue;
+    }
+    const auto *const scroll = store.scroll(node->scrollId);
+    if (nullptr == scroll) {
+      throw std::runtime_error(std::format(
+          "cannot seal these operations: one of them quotes scroll {}, which "
+          "this store does not hold. An operation naming content nobody can "
+          "resolve is an operation with a hole in it.",
+          node->scrollId));
+    }
+    auto key = scrollKey(*scroll);
+    if (key.empty()) {
+      throw std::runtime_error(
+          "cannot seal these operations: one of them quotes a scroll with no "
+          "global name. Content has to be published before a history that "
+          "points at it can be.");
+    }
+    named.emplace(node->scrollId, std::move(key));
+  }
+
+  std::string out{sealedOpsMagic};
+  std::ostringstream table(std::ios::binary);
+  writeVarint(table, named.size());
+  for (const auto &[id, key] : named) {
+    writeVarint(table, id);
+    writeVarint(table, key.size());
+    table << key;
+  }
+  out += table.str();
+  out += store.exportBinaryOps();
+  return out;
+}
+
+std::unique_ptr<Store>
+historyFromSeal(const std::string_view sealed, const Scroll &from,
+                const std::map<std::string, Scroll> &scrolls) {
+  if (!sealed.starts_with(sealedOpsMagic)) {
+    throw std::runtime_error(
+        "these are not a seal's operations: the file does not begin the way "
+        "one does.");
+  }
+  std::istringstream in(std::string{sealed.substr(sealedOpsMagic.size())},
+                        std::ios::binary);
+
+  std::uint64_t count = 0;
+  if (!readVarint(in, count)) {
+    throw std::runtime_error("a seal's operations end before their scrolls do");
+  }
+  auto history = std::make_unique<Store>();
+  // Zero is the scroll these were sealed beside, and is the one entry that is
+  // never written down: its bytes begin at offset zero of the same stream.
+  std::map<ScrollId, ScrollId> remap;
+  remap.emplace(localScroll, history->addScroll(from));
+  for (std::uint64_t i = 0; i < count; i++) {
+    std::uint64_t id     = 0;
+    std::uint64_t keyLen = 0;
+    if (!readVarint(in, id) || !readVarint(in, keyLen)) {
+      throw std::runtime_error("a seal's scroll table ends part way through");
+    }
+    std::string key(keyLen, '\0');
+    in.read(key.data(), static_cast<std::streamsize>(keyLen));
+    if (!in) {
+      throw std::runtime_error("a seal's scroll table ends part way through");
+    }
+    const auto found = scrolls.find(key);
+    if (scrolls.end() == found) {
+      throw std::runtime_error(std::format(
+          "a seal's operations quote \"{}\" and the seal does not say where "
+          "that is.",
+          key));
+    }
+    remap.emplace(static_cast<ScrollId>(id), history->addScroll(found->second));
+  }
+
+  std::vector<OpRecord> records;
+  readOpsSpool(in, records);
+  for (auto &record : records) {
+    // The publisher's ScrollIds meant something in their store; these mean the
+    // same content in this one. Everything else about the operation -- where
+    // it applies, what it produced, which state it followed -- travels as it
+    // was written.
+    const auto at = remap.find(record.op.span.scroll);
+    if (remap.end() == at) {
+      throw std::runtime_error(
+          std::format("a seal's operations name scroll {} and its table does "
+                      "not say what that was.",
+                      record.op.span.scroll));
+    }
+    record.op.span.scroll = at->second;
+    history->putOp(record.produces, record.op);
+  }
+  return history;
 }
 
 Adopted adopt(Store &store, const Publication &pub) {

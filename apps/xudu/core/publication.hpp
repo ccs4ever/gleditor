@@ -32,6 +32,7 @@
 
 #include <cstdint>
 #include <map>
+#include <memory>
 #include <optional>
 #include <string>
 #include <vector>
@@ -282,6 +283,47 @@ globalise(const Store &store, const PrimediaSpan &span,
 [[nodiscard]] std::optional<PrimediaSpan>
 localise(Store &store, const GlobalSpan &span,
          const std::map<std::string, Scroll> &scrolls);
+
+/**
+ * @brief The operations of a published document, ready to be sealed.
+ *
+ * Not simply the store's own encoding of them. An operation names content by
+ * a ScrollId, which is a small integer meaning something only in the store
+ * that handed it out -- and the most common one, zero, means "my own primedia
+ * spool". Sealed as they stand, every operation a publisher typed would point
+ * a reader at the reader's own spool, and resolve to whatever happened to be
+ * at those offsets. So the seal carries the table that says what those
+ * integers meant, in global keys.
+ *
+ * Zero is not in the table. It is the scroll being sealed alongside these
+ * operations, whose bytes begin at offset zero of the same piece stream, so a
+ * local offset and a scroll offset are the same number and the reader already
+ * holds the answer.
+ */
+[[nodiscard]] std::string sealableOps(const Store &store);
+
+/**
+ * @brief Read back what sealableOps() wrote, into a store of its own.
+ *
+ * The publisher's names are kept. A microversion is "a name among the
+ * versions of one document in one store", so their 2a4 belongs to their
+ * document and not to whatever this machine happens to call its own second
+ * state -- and a reader who can say "2a4" and mean what the publisher means
+ * is the point of carrying the history at all.
+ *
+ * Which is why this returns a store rather than putting the operations into
+ * one: their history is theirs. What links it to this machine's own documents
+ * is the content, which both point at by the same global addresses.
+ *
+ * @param sealed  the bytes of the seal's operations file.
+ * @param from    the scroll those operations were sealed beside, which is
+ *                what their ScrollId zero means.
+ * @throws std::runtime_error if the bytes are not a sealed operations file,
+ *         or name a scroll the seal does not carry.
+ */
+[[nodiscard]] std::unique_ptr<Store>
+historyFromSeal(std::string_view sealed, const Scroll &from,
+                const std::map<std::string, Scroll> &scrolls);
 
 /// What taking a publication in produced.
 struct Adopted {

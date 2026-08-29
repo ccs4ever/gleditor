@@ -20,6 +20,7 @@
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
+#include <map>
 #include <sstream>
 #include <string>
 #include <vector>
@@ -35,6 +36,7 @@ namespace {
 using xudu::Author;
 using xudu::MicroversionId;
 using xudu::Provenance;
+using xudu::Scroll;
 using xudu::SignedProvenance;
 using xudu::Store;
 
@@ -258,7 +260,7 @@ TEST(ProvenanceTest, theSealCarriesTheContentAndTheRecordUnderOneHash) {
   // the whole tree and not the state it reached. In the compact encoding,
   // which is what crosses machines -- the array of nodes a store keeps is
   // native-endian and means nothing on the other end.
-  const auto ops = store.exportBinaryOps();
+  const auto ops = xudu::sealableOps(store);
   EXPECT_EQ(meta.files()[1].path, xudu::sealedOpsName);
   EXPECT_EQ(meta.files()[1].length, ops.size());
   EXPECT_EQ(meta.files()[1].offset, bytes.size());
@@ -322,6 +324,83 @@ TEST(ProvenanceTest, theSealedOperationsAreTheWholeTreeAndDecodeBack) {
   EXPECT_EQ(reader.rebuild(three).pieces(), store.rebuild(three).pieces());
   EXPECT_EQ(reader.rebuild(branched).pieces(),
             store.rebuild(branched).pieces());
+}
+
+TEST(ProvenanceTest, aSealedHistoryComesBackWithThePublishersOwnNames) {
+  // The seal has to be readable on a machine that did not write it. What makes
+  // that awkward is that an operation names content by a ScrollId, and zero
+  // means "my own primedia spool" -- so operations sealed as they stand would
+  // point a reader at the reader's spool.
+  Store publisher;
+  const auto one   = publisher.insert(MicroversionId{}, 0, "hello");
+  const auto two   = publisher.insert(one, 5, " world");
+  const auto three = publisher.erase(two, 0, 1);
+  const auto other = publisher.insert(one, 5, " there");
+  static_cast<void>(publisher.insert(other, 0, "X"));
+
+  const auto sealed = xudu::sealableOps(publisher);
+  ASSERT_FALSE(sealed.empty());
+
+  // The scroll the publisher's local spool became, which is what their
+  // ScrollId zero meant.
+  Scroll became;
+  became.publisher = xudu::createMutableKeys().publicKey;
+  became.salt      = "essay";
+
+  const auto history = xudu::historyFromSeal(sealed, became, {});
+  ASSERT_NE(history, nullptr);
+
+  // Their names, not renamed into this store's numbering: "2a4" is a name
+  // among the versions of one document, and a reader who can say it and mean
+  // what the publisher means is why the history travels at all.
+  EXPECT_EQ(history->opCount(), publisher.opCount());
+  for (const auto &id : publisher.allVersions()) {
+    EXPECT_TRUE(history->getOp(id).has_value())
+        << id.str() << " did not survive the seal";
+  }
+  EXPECT_EQ(history->latest().str(), publisher.latest().str());
+  EXPECT_EQ(history->rebuild(three).pieces().size(),
+            publisher.rebuild(three).pieces().size());
+
+  // And every piece now names the scroll the content was sealed as, rather
+  // than scroll zero, which on this machine would have been this machine's.
+  for (const auto &id : history->allVersions()) {
+    for (const auto &piece : history->rebuild(id).pieces()) {
+      EXPECT_FALSE(piece.isLocal())
+          << id.str() << " still points at a local spool after travelling";
+    }
+  }
+}
+
+TEST(ProvenanceTest, aSealWhoseScrollsAreMissingIsRefused) {
+  Store publisher;
+  const auto typed = publisher.insert(MicroversionId{}, 0, "mine");
+  // Quote somebody else's scroll, so the seal has a table entry to resolve.
+  Scroll theirs;
+  theirs.publisher = xudu::createMutableKeys().publicKey;
+  theirs.salt      = "theirs";
+  static_cast<void>(publisher.transcludeExternal(typed, 0, theirs, 0, 4));
+
+  const auto sealed = xudu::sealableOps(publisher);
+  Scroll became;
+  became.publisher = xudu::createMutableKeys().publicKey;
+
+  // Handed no scrolls, the entry cannot be resolved and the whole thing is
+  // refused rather than read with a hole in it.
+  EXPECT_THROW(static_cast<void>(xudu::historyFromSeal(sealed, became, {})),
+               std::runtime_error);
+
+  // Handed the scroll it names, it reads.
+  std::map<std::string, Scroll> carried;
+  carried.emplace(xudu::scrollKey(theirs), theirs);
+  const auto history = xudu::historyFromSeal(sealed, became, carried);
+  ASSERT_NE(history, nullptr);
+  EXPECT_EQ(history->opCount(), publisher.opCount());
+
+  // Bytes that are not a seal's operations are not read as one.
+  EXPECT_THROW(
+      static_cast<void>(xudu::historyFromSeal("not a seal", became, carried)),
+      std::runtime_error);
 }
 
 TEST(ProvenanceTest, sealingWithoutASignedRecordIsRefused) {
