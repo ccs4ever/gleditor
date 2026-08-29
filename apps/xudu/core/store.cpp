@@ -624,6 +624,12 @@ std::string Store::exportOsmicText() const {
   return out.str();
 }
 
+std::string Store::exportBinaryOps() const {
+  std::ostringstream out(std::ios::binary);
+  writeBinaryOpsSpool(out, opRecords());
+  return out.str();
+}
+
 void Store::writeOsmicText(std::ostream &out) const {
   writeOsmicTextOpsSpool(out, opRecords());
 }

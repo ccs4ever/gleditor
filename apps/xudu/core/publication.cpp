@@ -428,10 +428,21 @@ SealedScroll sealLocalSpool(const Store &store, const MutableKeys &keys,
   const auto name   = salt.empty() ? std::string{"primedia"} : salt;
 
   // The content first, so it begins at offset zero of the piece stream and
-  // every address already handed out still points where it did. The record and
-  // its signature follow it.
-  const std::array<TorrentContent, 3> files{
+  // every address already handed out still points where it did. The
+  // operations, the record and its signature follow it, in that order and
+  // never before it.
+  //
+  // The operations are sealed in because a xanadoc is its history and not the
+  // state it happens to have reached: a reader given the pieces alone gets a
+  // document that cannot be gone back through, which is the one thing this
+  // model exists to make possible. They ride in the torrent rather than the
+  // manifest because they are bulk -- fetched in pieces, from peers, only by
+  // a reader who wants them -- and because the info hash then covers them, so
+  // operations that do not hash to what the reference names cannot be passed
+  // off as the publisher's any more than the content can.
+  const std::array<TorrentContent, 4> files{
       TorrentContent{sealedContentName, std::string{bytes}},
+      TorrentContent{sealedOpsName, store.exportBinaryOps()},
       TorrentContent{provenanceFileName, provenance.yaml},
       TorrentContent{provenanceSigName, provenance.signature},
   };

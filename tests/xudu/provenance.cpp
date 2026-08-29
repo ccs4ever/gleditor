@@ -20,9 +20,11 @@
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
+#include <sstream>
 #include <string>
 #include <vector>
 
+#include <xudu/core/binary_ops.hpp>
 #include <xudu/core/provenance.hpp>
 #include <xudu/core/publication.hpp>
 #include <xudu/core/store.hpp>
@@ -241,7 +243,7 @@ TEST(ProvenanceTest, theSealCarriesTheContentAndTheRecordUnderOneHash) {
 
   const auto meta = xudu::Metainfo::parse(sealed.torrentFile);
   EXPECT_EQ(meta.hash(), sealed.hash);
-  ASSERT_EQ(meta.files().size(), 3U);
+  ASSERT_EQ(meta.files().size(), 4U);
 
   // The content is file zero at offset zero, which is what keeps every address
   // already handed out pointing where it did.
@@ -252,13 +254,23 @@ TEST(ProvenanceTest, theSealCarriesTheContentAndTheRecordUnderOneHash) {
   EXPECT_EQ(sealed.scroll.segments.at(0).streamOffset, 0U);
   EXPECT_EQ(sealed.scroll.segments.at(0).at, 0U);
 
+  // The operations follow it: a xanadoc is its history, so what is sealed is
+  // the whole tree and not the state it reached. In the compact encoding,
+  // which is what crosses machines -- the array of nodes a store keeps is
+  // native-endian and means nothing on the other end.
+  const auto ops = store.exportBinaryOps();
+  EXPECT_EQ(meta.files()[1].path, xudu::sealedOpsName);
+  EXPECT_EQ(meta.files()[1].length, ops.size());
+  EXPECT_EQ(meta.files()[1].offset, bytes.size());
+
   // And the record travels with it, under the same hash.
-  EXPECT_EQ(meta.files()[1].path, xudu::provenanceFileName);
-  EXPECT_EQ(meta.files()[1].length, signed_.yaml.size());
-  EXPECT_EQ(meta.files()[2].path, xudu::provenanceSigName);
-  EXPECT_EQ(meta.files()[2].length, signed_.signature.size());
-  EXPECT_EQ(meta.totalLength(),
-            bytes.size() + signed_.yaml.size() + signed_.signature.size());
+  EXPECT_EQ(meta.files()[2].path, xudu::provenanceFileName);
+  EXPECT_EQ(meta.files()[2].length, signed_.yaml.size());
+  EXPECT_EQ(meta.files()[3].path, xudu::provenanceSigName);
+  EXPECT_EQ(meta.files()[3].length, signed_.signature.size());
+  EXPECT_EQ(meta.totalLength(), bytes.size() + ops.size() +
+                                    signed_.yaml.size() +
+                                    signed_.signature.size());
 
   // Sealing the same content with a different record is a different address:
   // the two cannot be substituted for one another.
@@ -268,6 +280,48 @@ TEST(ProvenanceTest, theSealCarriesTheContentAndTheRecordUnderOneHash) {
   const auto elsewise = xudu::sealLocalSpool(store, mine, "primedia", "",
                                              xudu::signProvenance(other));
   EXPECT_NE(elsewise.hash, sealed.hash);
+}
+
+TEST(ProvenanceTest, theSealedOperationsAreTheWholeTreeAndDecodeBack) {
+  // What is sealed has to be a history somebody else can actually replay --
+  // every branch of it, not the ancestry of whichever state was published.
+  Store store;
+  const auto one   = store.insert(MicroversionId{}, 0, "hello");
+  const auto two   = store.insert(one, 5, " world");
+  const auto three = store.erase(two, 0, 1);
+  // Two branches off an early state, one of them with a future of its own.
+  const auto branched = store.insert(one, 5, " there");
+  store.insert(branched, 0, "X");
+  store.insert(one, 5, " again");
+
+  const auto encoded = store.exportBinaryOps();
+  ASSERT_FALSE(encoded.empty());
+
+  std::istringstream in(encoded, std::ios::binary);
+  std::vector<xudu::OpRecord> records;
+  xudu::readOpsSpool(in, records);
+  EXPECT_EQ(records.size(), store.opCount())
+      << "the seal carried a version rather than a history";
+
+  // Replayed into an empty store, every state comes back -- including the
+  // branches, which a reader given only the published version's pieces could
+  // not have reached at all. Compared as pieces rather than as text: the
+  // spans are what the operations produce, and the bytes they name travel in
+  // the torrent's other file.
+  Store reader;
+  for (const auto &record : records) {
+    reader.putOp(record.produces, record.op);
+  }
+  EXPECT_EQ(reader.opCount(), store.opCount());
+  EXPECT_EQ(reader.allVersions().size(), store.allVersions().size());
+  for (const auto &id : store.allVersions()) {
+    EXPECT_TRUE(reader.getOp(id).has_value()) << id.str() << " did not travel";
+    EXPECT_EQ(reader.rebuild(id).pieces(), store.rebuild(id).pieces())
+        << id.str() << " rebuilt differently";
+  }
+  EXPECT_EQ(reader.rebuild(three).pieces(), store.rebuild(three).pieces());
+  EXPECT_EQ(reader.rebuild(branched).pieces(),
+            store.rebuild(branched).pieces());
 }
 
 TEST(ProvenanceTest, sealingWithoutASignedRecordIsRefused) {

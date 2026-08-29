@@ -222,6 +222,12 @@ verifyProvenance(const SignedProvenance &signed_,
 inline constexpr auto provenanceFileName = "AUTHORSHIP.yaml";
 inline constexpr auto provenanceSigName  = "AUTHORSHIP.yaml.asc";
 inline constexpr auto sealedContentName  = "primedia";
+/// The operations, in the compact binary encoding rather than the array of
+/// nodes a store keeps locally: this one crosses machines, and a node is a
+/// native-endian struct while the compact encoding is a byte stream that
+/// means the same thing everywhere. It is also about a sixteenth the size,
+/// which matters rather more once it is being fetched from peers.
+inline constexpr auto sealedOpsName = "ops";
 
 } // namespace xudu
 

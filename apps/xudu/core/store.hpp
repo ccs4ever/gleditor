@@ -328,6 +328,21 @@ public:
   /// Generate standard OSMIC text format of all operations on demand.
   [[nodiscard]] std::string exportOsmicText() const;
 
+  /**
+   * @brief Every operation, in the compact binary encoding, for publishing.
+   *
+   * Generated rather than stored, the same way the OSMIC text export is. What
+   * a store keeps on disk is the array of nodes it holds in memory, which is
+   * quick to read back and native-endian -- fine for a file that stays put,
+   * and no use at all to a reader on another machine. This encoding is a byte
+   * stream: no struct layout, no word order, and about a sixteenth the size.
+   *
+   * The whole tree, not the ancestry of any one state: what is published is a
+   * document's history, and a reader who cannot reach the branches cannot go
+   * anywhere their publisher went.
+   */
+  [[nodiscard]] std::string exportBinaryOps() const;
+
   /// Stream standard OSMIC text format of all operations on demand.
   void writeOsmicText(std::ostream &out) const;
 
