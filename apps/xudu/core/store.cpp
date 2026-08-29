@@ -21,7 +21,8 @@ namespace {
 
 /// Names of the files a store is written as.
 constexpr const char *primediaFile = "primedia.spool";
-constexpr const char *opsFile      = "ops.spool";
+constexpr const char *opsFile      = "ops.spool"; // pre-node-array stores
+constexpr const char *opsNodesFile = "ops.nodes";
 constexpr const char *linksFile    = "links.spool";
 constexpr const char *originsFile  = "origins.spool"; // pre-scroll stores
 constexpr const char *scrollsFile  = "scrolls.spool";
@@ -503,9 +504,34 @@ void Store::save(const std::string &directory) const {
     primediaFlushed          = bytes.size();
   }
   {
-    // Write operations spool in compact binary format.
-    std::ofstream out(dir / opsFile, std::ios::binary | std::ios::trunc);
-    writeBinaryOpsSpool(out, opRecords());
+    // The operations, as the array-backed tree they are held as: the file is
+    // what the spool has in memory, so reading it back is a read rather than
+    // a parse and a replay. The state-zero slot at index 0 is the arena's, not
+    // the file's -- see SegmentedOpsSpool::addSealedSegment().
+    //
+    // Costs about sixteen times what the compact binary encoding did, which
+    // for a file that never leaves the machine buys back the whole of the
+    // decode. Writing it is a copy rather than an encode, so saving got
+    // quicker as well as loading.
+    //
+    // It also settles what the emission order should be, by removing the
+    // question: FLAG_SEQUENTIAL dropped a record's name when it continued the
+    // one before it, which made the order records were written in worth
+    // arguing about. Fixed-size nodes carry no names at all -- they are worked
+    // out from the tree -- so there is no ordering left to choose.
+    std::ofstream out(dir / opsNodesFile, std::ios::binary | std::ios::trunc);
+    if (0 != opsSpool.size()) {
+      out.write(reinterpret_cast<const char *>(opsSpool.rawOps() + 1),
+                static_cast<std::streamsize>(opsSpool.size() *
+                                             sizeof(CompactOpNode)));
+    }
+  }
+  // A store written before the node array is superseded once it has been
+  // written out in the new shape. Leaving it would leave two answers to what
+  // the operations are, and load() would quietly prefer this one.
+  if (std::filesystem::exists(dir / opsNodesFile)) {
+    std::error_code ignored;
+    std::filesystem::remove(dir / opsFile, ignored);
   }
   {
     // The scroll table: what a span's ScrollId means. Without it an id is a
@@ -697,7 +723,17 @@ void Store::load(const std::string &directory) {
     }
   }
 
-  if (std::filesystem::exists(dir / opsFile)) {
+  if (std::filesystem::exists(dir / opsNodesFile)) {
+    // Taken in whole: the nodes are already the shape they are held in, and
+    // every name is worked out from the tree rather than read from the file.
+    if (!opsSpool.openActiveSegment(dir / opsNodesFile)) {
+      throw std::runtime_error("cannot read the operations in " +
+                               (dir / opsNodesFile).string());
+    }
+  } else if (std::filesystem::exists(dir / opsFile)) {
+    // Written before the operations were kept as nodes, in the compact binary
+    // encoding or the OSMIC text one. Still read, and written back out as
+    // nodes by the next save().
     std::ifstream in(dir / opsFile, std::ios::binary);
     std::vector<OpRecord> records;
     readOpsSpool(in, records);

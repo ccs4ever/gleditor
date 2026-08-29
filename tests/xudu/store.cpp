@@ -6,10 +6,13 @@
 #include <gtest/gtest.h>
 
 #include <filesystem>
+#include <fstream>
 #include <stdexcept>
 #include <string>
 #include <vector>
 
+#include <xudu/core/binary_ops.hpp>
+#include <xudu/core/compact_op.hpp>
 #include <xudu/core/microversion.hpp>
 #include <xudu/core/ops.hpp>
 #include <xudu/core/store.hpp>
@@ -530,6 +533,78 @@ TEST_F(StoreRoundTripTest, aQuotationIntoASecondDocumentSurvivesSaving) {
 }
 
 } // namespace
+
+TEST_F(StoreRoundTripTest, operationsAreWrittenAsTheTreeTheyAreHeldAs) {
+  Store store;
+  auto at = MicroversionId{};
+  for (int i = 0; i < 4; i++) {
+    at = store.insert(at, static_cast<std::uint32_t>(i), "x");
+  }
+  const auto branched = store.insert(MicroversionId::parse("1"), 1, "y");
+  store.save(dir.string());
+
+  // One node per operation and nothing else: no header, no names, no
+  // state-zero slot. What is on disk is what the arena holds.
+  ASSERT_TRUE(std::filesystem::exists(dir / "ops.nodes"));
+  EXPECT_EQ(std::filesystem::file_size(dir / "ops.nodes"),
+            store.opCount() * sizeof(xudu::CompactOpNode));
+  EXPECT_FALSE(std::filesystem::exists(dir / "ops.spool"));
+
+  Store reloaded;
+  reloaded.load(dir.string());
+  EXPECT_EQ(reloaded.opCount(), store.opCount());
+  EXPECT_EQ(reloaded.textOf(at), store.textOf(at));
+  EXPECT_EQ(reloaded.textOf(branched), store.textOf(branched));
+  EXPECT_EQ(reloaded.latest().str(), store.latest().str());
+  // The names were not written down, so this is the derivation working.
+  EXPECT_EQ(names(reloaded.allVersions()), names(store.allVersions()));
+}
+
+TEST_F(StoreRoundTripTest, aStoreWrittenBeforeTheNodeArrayStillOpens) {
+  // The compact binary encoding is no longer written, but stores are already
+  // on disk in it. They open, and the next save writes them out as nodes.
+  std::filesystem::create_directories(dir);
+  MicroversionId tip;
+  std::string expected;
+  {
+    Store original;
+    auto at = MicroversionId{};
+    for (int i = 0; i < 6; i++) {
+      at = original.insert(at, static_cast<std::uint32_t>(i), "z");
+    }
+    original.insert(MicroversionId::parse("2"), 1, "w"); // a branch too
+    tip      = at;
+    expected = original.textOf(at);
+
+    // Save normally for the primedia the operations point into, then put the
+    // operations back the way a store written before this change had them.
+    original.save(dir.string());
+    std::vector<xudu::OpRecord> records;
+    for (const auto &id : original.allVersions()) {
+      records.push_back(xudu::OpRecord{id, *original.getOp(id)});
+    }
+    std::ofstream out(dir / "ops.spool", std::ios::binary | std::ios::trunc);
+    xudu::writeBinaryOpsSpool(out, records);
+  }
+  std::filesystem::remove(dir / "ops.nodes");
+  ASSERT_TRUE(std::filesystem::exists(dir / "ops.spool"));
+
+  Store opened;
+  opened.load(dir.string());
+  EXPECT_EQ(opened.opCount(), 7U);
+  EXPECT_EQ(opened.textOf(tip), expected);
+
+  // Saving moves it over, and takes the superseded file with it so that
+  // nothing is left holding a second answer.
+  opened.save(dir.string());
+  EXPECT_TRUE(std::filesystem::exists(dir / "ops.nodes"));
+  EXPECT_FALSE(std::filesystem::exists(dir / "ops.spool"));
+
+  Store again;
+  again.load(dir.string());
+  EXPECT_EQ(again.opCount(), 7U);
+  EXPECT_EQ(again.textOf(tip), expected);
+}
 
 TEST_F(StoreRoundTripTest, osmicTextFormatCanBeGeneratedOnDemand) {
   Store store;
