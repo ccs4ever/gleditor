@@ -441,10 +441,11 @@ MicroversionId Store::latest() const {
   return newest;
 }
 
-std::vector<OpRecord> Store::opRecords() const {
+std::vector<OpRecord>
+Store::opRecords(const std::uint32_t sinceExclusive) const {
   std::vector<OpRecord> records;
   records.reserve(opsSpool.size());
-  for (std::uint32_t idx = 1; idx <= opsSpool.size(); idx++) {
+  for (std::uint32_t idx = sinceExclusive + 1; idx <= opsSpool.size(); idx++) {
     const auto *const node = opsSpool.get(idx);
     if (nullptr == node) {
       continue;
@@ -624,9 +625,9 @@ std::string Store::exportOsmicText() const {
   return out.str();
 }
 
-std::string Store::exportBinaryOps() const {
+std::string Store::exportBinaryOps(const std::uint32_t sinceExclusive) const {
   std::ostringstream out(std::ios::binary);
-  writeBinaryOpsSpool(out, opRecords());
+  writeBinaryOpsSpool(out, opRecords(sinceExclusive));
   return out.str();
 }
 

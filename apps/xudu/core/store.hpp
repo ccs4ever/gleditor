@@ -340,8 +340,17 @@ public:
    * The whole tree, not the ancestry of any one state: what is published is a
    * document's history, and a reader who cannot reach the branches cannot go
    * anywhere their publisher went.
+   *
+   * @param sinceExclusive See opRecords(). Publishing again seals only what
+   *        was recorded since the last seal; every record it carries still
+   *        names its parent and source by full microversion, so a reader
+   *        applying this after what an earlier seal gave them needs nothing
+   *        more than that -- see historyFromSeal() in publication.hpp, which
+   *        is why encoding by name rather than by spool index was worth
+   *        keeping even after the local store stopped doing either.
    */
-  [[nodiscard]] std::string exportBinaryOps() const;
+  [[nodiscard]] std::string
+  exportBinaryOps(std::uint32_t sinceExclusive = 0) const;
 
   /// Stream standard OSMIC text format of all operations on demand.
   void writeOsmicText(std::ostream &out) const;
@@ -381,8 +390,14 @@ private:
    * breaks the run of names FLAG_SEQUENTIAL depends on and leaves the main
    * chain in pieces -- but changing it changes the bytes written, so it is a
    * format decision rather than a detail of how operations are held.
+   *
+   * @param sinceExclusive Only operations past this spool index. Zero, the
+   *        default, is every operation ever recorded; a store already knows
+   *        which index a previous save or seal reached, and asking for
+   *        everything past it is what makes that save or seal incremental.
    */
-  [[nodiscard]] std::vector<OpRecord> opRecords() const;
+  [[nodiscard]] std::vector<OpRecord>
+  opRecords(std::uint32_t sinceExclusive = 0) const;
 
   /// Record @p records into the spool, skipping any state already filed --
   /// which is what the std::map these were read into used to do on a
