@@ -712,10 +712,28 @@ void LinkBeams::drawFrame(gleditor::FrameContext &ctx) {
     }
   }
 
-  if (session.generation() != builtFor || state.docs.size() != builtDocs) {
+  bool docTransformsChanged = false;
+  if (lastDocTransforms.size() != state.docs.size()) {
+    docTransformsChanged = true;
+    lastDocTransforms.resize(state.docs.size());
+  }
+  for (std::size_t i = 0; i < state.docs.size(); i++) {
+    if (state.docs[i]) {
+      const auto &curMat = state.docs[i]->getModel();
+      if (curMat != lastDocTransforms[i]) {
+        docTransformsChanged = true;
+        lastDocTransforms[i] = curMat;
+      }
+    }
+  }
+
+  const bool topologyChanged =
+      (session.generation() != builtFor || state.docs.size() != builtDocs);
+  if (topologyChanged) {
     builtFor  = session.generation();
     builtDocs = state.docs.size();
     rebuildStrands(state);
+    strandsRebuilt = true;
   }
 
   // Clicks arriving through an assistive technology are queued rather than
@@ -733,163 +751,139 @@ void LinkBeams::drawFrame(gleditor::FrameContext &ctx) {
         traverse(*found, state);
       }
     }
-  }
-  resolveAnchors(state);
+    if (docTransformsChanged || topologyChanged || strandsRebuilt ||
+        unsettled) {
+      resolveAnchors(state);
 
-  beams->clear();
-  // Bring far ends of links into view, one per frame so a document with several
-  // links into it is not asked to be in two places at once.
-  bool moved        = false;
-  bool stillToAlign = false;
+      beams->clear();
+      bool moved        = false;
+      bool stillToAlign = false;
 
-  for (std::size_t i = 0; i < strands.size(); i++) {
-    auto &strand = strands[i];
-    if (!strand.fromAnchor || !strand.toAnchor ||
-        strand.from.doc >= state.docs.size() ||
-        strand.to.doc >= state.docs.size()) {
-      continue;
-    }
-    const auto &from = state.docs[strand.from.doc];
-    const auto &to   = state.docs[strand.to.doc];
+      for (std::size_t i = 0; i < strands.size(); i++) {
+        auto &strand = strands[i];
+        if (!strand.fromAnchor || !strand.toAnchor ||
+            strand.from.doc >= state.docs.size() ||
+            strand.to.doc >= state.docs.size()) {
+          continue;
+        }
+        const auto &from = state.docs[strand.from.doc];
+        const auto &to   = state.docs[strand.to.doc];
 
-    // Which margin each end leaves from is decided by where the documents are
-    // going rather than by where they currently are. animateMoveTo() records
-    // the destination as it starts the move, so this is settled for the whole
-    // of a sworph -- where reading the live position instead flipped the beam
-    // to the other side of the page in the frame one document overtook the
-    // other, which is a jump in the middle of a movement drawn to be followed.
-    const auto rightwards =
-        glm::vec3(to->getModel()[3]).x >= glm::vec3(from->getModel()[3]).x;
-    const auto nearEdge =
-        edgeOf(*from, strand.fromAnchor, strand.fromEndAnchor, rightwards);
-    const auto farEdge =
-        edgeOf(*to, strand.toAnchor, strand.toEndAnchor, !rightwards);
-    if (!nearEdge || !farEdge) {
-      continue;
-    }
+        const auto rightwards =
+            glm::vec3(to->getModel()[3]).x >= glm::vec3(from->getModel()[3]).x;
+        const auto nearEdge =
+            edgeOf(*from, strand.fromAnchor, strand.fromEndAnchor, rightwards);
+        const auto farEdge =
+            edgeOf(*to, strand.toAnchor, strand.toEndAnchor, !rightwards);
+        if (!nearEdge || !farEdge) {
+          continue;
+        }
 
-    const std::size_t docSpan = strand.from.doc > strand.to.doc
-                                    ? (strand.from.doc - strand.to.doc)
-                                    : (strand.to.doc - strand.from.doc);
+        const std::size_t docSpan = strand.from.doc > strand.to.doc
+                                        ? (strand.from.doc - strand.to.doc)
+                                        : (strand.to.doc - strand.from.doc);
 
-    // As faint as the fainter of the two documents it runs between, so a beam
-    // reaching a page still flying in materialises with it instead of hanging
-    // in the air waiting for it, and one reaching into the background corpus
-    // is as recessive as the corpus. The tier is the link's own claim on
-    // attention and is already what shades the passages at both ends
-    // (Session::decorate); the beam now agrees with them.
-    const auto docAlpha =
-        std::min(from->currentOpacity(), to->currentOpacity());
-    const auto colour = fade(linkColour(strand.type, strand.tier), docAlpha);
-    const auto tagId  = static_cast<std::uint32_t>(i);
+        const auto docAlpha =
+            std::min(from->currentOpacity(), to->currentOpacity());
+        const auto colour =
+            fade(linkColour(strand.type, strand.tier), docAlpha);
+        const auto tagId = static_cast<std::uint32_t>(i);
 
-    band(*nearEdge, *farEdge, docSpan, colour, tagId);
-    // Both ends bracketed on the page margin. Which page of a stack a link
-    // reaches is otherwise only implied by where the band happens to meet it,
-    // and at any distance -- which is most of the time, since framing a
-    // sworph backs the camera off far enough to hold both documents -- that
-    // is a guess.
-    anchorStub(*nearEdge, colour, tagId, false);
-    anchorStub(*farEdge, colour, tagId, true);
+        band(*nearEdge, *farEdge, docSpan, colour, tagId);
+        anchorStub(*nearEdge, colour, tagId, false);
+        anchorStub(*farEdge, colour, tagId, true);
 
-    // A link coming into view brings its far document over and auto-frames
-    // the camera so that all pages and connection points fit comfortably on
-    // screen. One a frame, so a document with several links into it is not
-    // asked to be in two places at once; the rest are noted as owed, which is
-    // what keeps the render loop from calling the frame settled with a sworph
-    // still to come. Noted here, past every guard above, rather than counted
-    // afterwards: a strand whose anchors have never been found -- a link end
-    // reaching past what its document turned out to hold -- is not work the
-    // next frame will do either, and waiting on one would be waiting forever.
-    if (sworph && !strand.aligned) {
-      if (moved) {
-        stillToAlign = true;
-      } else {
-        strand.aligned = true;
-        align(strand, state, ctx.timeline);
-        moved = true;
+        if (sworph && !strand.aligned) {
+          if (moved) {
+            stillToAlign = true;
+          } else {
+            strand.aligned = true;
+            align(strand, state, ctx.timeline);
+            moved = true;
+          }
+        }
       }
+
+      const bool stillToOpen =
+          sworph && (moved ? danglingOutstanding(state) : openDangling(state));
+
+      unsettled = stillToAlign || stillToOpen;
+
+      beams->commit();
+      strandsRebuilt = false;
+    }
+
+    // Document and page zero, with no kind: the kind is the beam pipeline's,
+    // and which beam it is rides in the beam's own tag.
+    beams->draw(state, ctx.viewProjection, 1.0F,
+                render::packTagIdentity(0, 0, 0));
+  }
+
+  void LinkBeams::describe(gleditor::a11y::Builder & into) {
+    namespace a11y = gleditor::a11y;
+    if (strands.empty()) {
+      return;
+    }
+
+    auto &group = into.add(0, a11y::Role::List);
+    group.label = "links between the open documents";
+    for (std::size_t which = 0; which < strands.size(); which++) {
+      group.children.push_back(into.id(strands[which].link + 1));
+    }
+    into.contribute(into.id(0));
+
+    for (std::size_t which = 0; which < strands.size(); which++) {
+      const auto &strand = strands[which];
+      // Numbered by the link rather than by its position, so that a link keeps
+      // its identity as others are found and lost around it -- and so that what
+      // comes back names a link this can look up. Link ids are small sequential
+      // counters from the store, well inside the forty-eight bits a node id
+      // leaves for them.
+      auto &node = into.add(strand.link + 1, a11y::Role::Link);
+      // Named by what it connects rather than by what it looks like. A beam is
+      // a coloured line and its colour is its type, which is exactly the kind
+      // of thing that has to be said in words for anybody who is not looking at
+      // it.
+      node.label = std::string{linkTypeName(strand.type)} + " link, document " +
+                   std::to_string(strand.from.doc) + " to document " +
+                   std::to_string(strand.to.doc);
+      node.description = "bytes " + std::to_string(strand.from.start) + " to " +
+                         std::to_string(strand.from.end) + ", and bytes " +
+                         std::to_string(strand.to.start) + " to " +
+                         std::to_string(strand.to.end);
+      node.focusable   = true;
+      node.actions =
+          a11y::bit(a11y::Action::Focus) | a11y::bit(a11y::Action::Click);
     }
   }
 
-  const bool stillToOpen =
-      sworph && (moved ? danglingOutstanding(state) : openDangling(state));
-
-  // What the next frame still owes, decided after this one has done whatever
-  // it was going to; see busy().
-  unsettled = stillToAlign || stillToOpen;
-
-  beams->commit();
-  // Document and page zero, with no kind: the kind is the beam pipeline's, and
-  // which beam it is rides in the beam's own tag.
-  beams->draw(state, ctx.viewProjection, 1.0F,
-              render::packTagIdentity(0, 0, 0));
-}
-
-void LinkBeams::describe(gleditor::a11y::Builder &into) {
-  namespace a11y = gleditor::a11y;
-  if (strands.empty()) {
-    return;
+  std::uint64_t LinkBeams::accessibilityRevision() const {
+    // Not the strand count alone: two links can be replaced by two others
+    // without the count moving. `described` is bumped wherever they are found
+    // again.
+    return described;
   }
 
-  auto &group = into.add(0, a11y::Role::List);
-  group.label = "links between the open documents";
-  for (std::size_t which = 0; which < strands.size(); which++) {
-    group.children.push_back(into.id(strands[which].link + 1));
+  bool LinkBeams::performAction(const std::uint64_t nodeId,
+                                const gleditor::a11y::Action action,
+                                const std::string_view /*value*/) {
+    namespace a11y = gleditor::a11y;
+    if (a11y::Action::Click != action) {
+      // Focus alone moves nothing: a beam is not somewhere the caret can be,
+      // and claiming to have focused it would be a lie an assistive technology
+      // acts on.
+      return false;
+    }
+    const auto link = a11y::Ids::localOf(nodeId);
+    if (0 == link) {
+      return false;
+    }
+    // Under no lock and against nothing: the strand list is the render
+    // thread's, so what is recorded is the link's own identity and the lookup
+    // happens there. A link that has gone by then is simply not found.
+    const std::scoped_lock locker(askedGuard);
+    askedToFollow.push_back(link - 1);
+    return true;
   }
-  into.contribute(into.id(0));
-
-  for (std::size_t which = 0; which < strands.size(); which++) {
-    const auto &strand = strands[which];
-    // Numbered by the link rather than by its position, so that a link keeps
-    // its identity as others are found and lost around it -- and so that what
-    // comes back names a link this can look up. Link ids are small sequential
-    // counters from the store, well inside the forty-eight bits a node id
-    // leaves for them.
-    auto &node = into.add(strand.link + 1, a11y::Role::Link);
-    // Named by what it connects rather than by what it looks like. A beam is a
-    // coloured line and its colour is its type, which is exactly the kind of
-    // thing that has to be said in words for anybody who is not looking at it.
-    node.label = std::string{linkTypeName(strand.type)} + " link, document " +
-                 std::to_string(strand.from.doc) + " to document " +
-                 std::to_string(strand.to.doc);
-    node.description = "bytes " + std::to_string(strand.from.start) + " to " +
-                       std::to_string(strand.from.end) + ", and bytes " +
-                       std::to_string(strand.to.start) + " to " +
-                       std::to_string(strand.to.end);
-    node.focusable   = true;
-    node.actions =
-        a11y::bit(a11y::Action::Focus) | a11y::bit(a11y::Action::Click);
-  }
-}
-
-std::uint64_t LinkBeams::accessibilityRevision() const {
-  // Not the strand count alone: two links can be replaced by two others
-  // without the count moving. `described` is bumped wherever they are found
-  // again.
-  return described;
-}
-
-bool LinkBeams::performAction(const std::uint64_t nodeId,
-                              const gleditor::a11y::Action action,
-                              const std::string_view /*value*/) {
-  namespace a11y = gleditor::a11y;
-  if (a11y::Action::Click != action) {
-    // Focus alone moves nothing: a beam is not somewhere the caret can be, and
-    // claiming to have focused it would be a lie an assistive technology acts
-    // on.
-    return false;
-  }
-  const auto link = a11y::Ids::localOf(nodeId);
-  if (0 == link) {
-    return false;
-  }
-  // Under no lock and against nothing: the strand list is the render thread's,
-  // so what is recorded is the link's own identity and the lookup happens
-  // there. A link that has gone by then is simply not found.
-  const std::scoped_lock locker(askedGuard);
-  askedToFollow.push_back(link - 1);
-  return true;
-}
 
 } // namespace xudu
