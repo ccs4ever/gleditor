@@ -382,4 +382,103 @@ loadZzStructure(const std::string &path) {
   return parseZzStructure(ss.str(), path);
 }
 
+std::string serializeZzStructure(const ZzStructureDocument &doc) {
+  std::ostringstream ss;
+  ss << "zzstructure:\n";
+  ss << "  meta:\n";
+  ss << "    name: \""
+     << (doc.meta.name.empty() ? "ZigZag Document" : doc.meta.name) << "\"\n";
+  if (!doc.meta.description.empty()) {
+    ss << "    description: \"" << doc.meta.description << "\"\n";
+  }
+  if (!doc.meta.author.empty()) {
+    ss << "    author: \"" << doc.meta.author << "\"\n";
+  }
+  ss << "    version: \""
+     << (doc.meta.version.empty() ? "1.0" : doc.meta.version) << "\"\n";
+
+  ss << "  focus: " << (doc.focus == 0 ? 1 : doc.focus) << "\n\n";
+
+  ss << "  view:\n";
+  ss << "    x_dimension: "
+     << (doc.view.x_dimension.empty() ? "d.1" : doc.view.x_dimension) << "\n";
+  ss << "    y_dimension: "
+     << (doc.view.y_dimension.empty() ? "d.2" : doc.view.y_dimension) << "\n";
+  ss << "    z_dimension: "
+     << (doc.view.z_dimension.empty() ? "d.3" : doc.view.z_dimension) << "\n\n";
+
+  if (!doc.dimension_meta.empty()) {
+    ss << "  dimensions:\n";
+    for (const auto &[dim, meta] : doc.dimension_meta) {
+      ss << "    " << dim << ":\n";
+      if (!meta.label.empty()) {
+        ss << "      label: \"" << meta.label << "\"\n";
+      }
+      if (!meta.description.empty()) {
+        ss << "      description: \"" << meta.description << "\"\n";
+      }
+      ss << "      color: \"#"
+         << std::format("{:02x}{:02x}{:02x}",
+                        static_cast<int>(meta.color.r * 255.0F),
+                        static_cast<int>(meta.color.g * 255.0F),
+                        static_cast<int>(meta.color.b * 255.0F))
+         << "\"\n";
+      if (meta.spacing > 0.0F) {
+        ss << "      spacing: " << meta.spacing << "\n";
+      }
+    }
+    ss << "\n";
+  }
+
+  ss << "  cells:\n";
+  for (const auto &[id, cell] : doc.cells) {
+    ss << "    - id: " << id << "\n";
+    ss << "      text: \"" << cell.text_data << "\"\n";
+    if (!cell.type.empty() && cell.type != "text") {
+      ss << "      type: " << cell.type << "\n";
+    }
+    if (!cell.dimensions.empty()) {
+      ss << "      dimensions: {";
+      bool first = true;
+      for (const auto &[dim, links] : cell.dimensions) {
+        if (!first) ss << ", ";
+        first = false;
+        if (links.pos != 0 && links.neg != 0) {
+          ss << dim << ": { pos: " << links.pos << ", neg: " << links.neg
+             << " }";
+        } else if (links.pos != 0) {
+          ss << dim << ": { pos: " << links.pos << " }";
+        } else if (links.neg != 0) {
+          ss << dim << ": { neg: " << links.neg << " }";
+        }
+      }
+      ss << "}\n";
+    }
+    if (cell.preflet) {
+      ss << "      preflet:\n";
+      ss << "        resource_identifier: \""
+         << cell.preflet->resource_identifier << "\"\n";
+      if (cell.preflet->target_cell_id != 0) {
+        ss << "        target_cell_id: " << cell.preflet->target_cell_id
+           << "\n";
+      }
+      if (!cell.preflet->version.empty()) {
+        ss << "        version: \"" << cell.preflet->version << "\"\n";
+      }
+    }
+    ss << "\n";
+  }
+
+  return ss.str();
+}
+
+bool saveZzStructure(const ZzStructureDocument &doc, const std::string &path) {
+  std::ofstream out(path, std::ios::trunc);
+  if (!out.is_open()) {
+    return false;
+  }
+  out << serializeZzStructure(doc);
+  return out.good();
+}
+
 } // namespace zigzag

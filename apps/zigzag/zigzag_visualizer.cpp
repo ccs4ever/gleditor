@@ -205,6 +205,126 @@ ZzStructureDocument ZigzagVisualizer::document() const {
   return doc;
 }
 
+CellID ZigzagVisualizer::createCell(std::string text, std::string type) {
+  CellID newId = 1;
+  for (const auto &[id, _] : space_) {
+    if (id >= newId) {
+      newId = id + 1;
+    }
+  }
+  space_[newId] = zzCell{
+      .id         = newId,
+      .text_data  = std::move(text),
+      .type       = std::move(type),
+      .dimensions = {},
+      .preflet    = std::nullopt,
+  };
+  if (accursed_cell_focus_ == 0) {
+    accursed_cell_focus_ = newId;
+  }
+  rebuildActiveViewTopology();
+  invalidateAccessibility();
+  return newId;
+}
+
+bool ZigzagVisualizer::insertConnectedCell(std::string text,
+                                           const DimID &dimension,
+                                           const bool positive) {
+  if (space_.empty() || accursed_cell_focus_ == 0) {
+    createCell(std::move(text));
+    return true;
+  }
+  const auto newId = createCell(std::move(text));
+  if (positive) {
+    const auto oldPos = space_[accursed_cell_focus_].dimensions[dimension].pos;
+    space_[accursed_cell_focus_].dimensions[dimension].pos = newId;
+    space_[newId].dimensions[dimension].neg = accursed_cell_focus_;
+    if (oldPos != 0 && space_.contains(oldPos)) {
+      space_[newId].dimensions[dimension].pos  = oldPos;
+      space_[oldPos].dimensions[dimension].neg = newId;
+    }
+  } else {
+    const auto oldNeg = space_[accursed_cell_focus_].dimensions[dimension].neg;
+    space_[accursed_cell_focus_].dimensions[dimension].neg = newId;
+    space_[newId].dimensions[dimension].pos = accursed_cell_focus_;
+    if (oldNeg != 0 && space_.contains(oldNeg)) {
+      space_[newId].dimensions[dimension].neg  = oldNeg;
+      space_[oldNeg].dimensions[dimension].pos = newId;
+    }
+  }
+  accursed_cell_focus_ = newId;
+  rebuildActiveViewTopology();
+  invalidateAccessibility();
+  return true;
+}
+
+bool ZigzagVisualizer::linkFocusAlong(const DimID &dimension,
+                                      const CellID targetId,
+                                      const bool positive) {
+  if (targetId == 0 || targetId == accursed_cell_focus_ ||
+      !space_.contains(targetId) || !space_.contains(accursed_cell_focus_)) {
+    return false;
+  }
+  if (positive) {
+    space_[accursed_cell_focus_].dimensions[dimension].pos = targetId;
+    space_[targetId].dimensions[dimension].neg = accursed_cell_focus_;
+  } else {
+    space_[accursed_cell_focus_].dimensions[dimension].neg = targetId;
+    space_[targetId].dimensions[dimension].pos = accursed_cell_focus_;
+  }
+  rebuildActiveViewTopology();
+  invalidateAccessibility();
+  return true;
+}
+
+bool ZigzagVisualizer::unlinkFocusAlong(const DimID &dimension,
+                                        const bool positive) {
+  if (accursed_cell_focus_ == 0 || !space_.contains(accursed_cell_focus_)) {
+    return false;
+  }
+  if (positive) {
+    const auto targetId =
+        space_[accursed_cell_focus_].dimensions[dimension].pos;
+    if (targetId == 0) {
+      return false;
+    }
+    space_[accursed_cell_focus_].dimensions[dimension].pos = 0;
+    if (space_.contains(targetId)) {
+      space_[targetId].dimensions[dimension].neg = 0;
+    }
+  } else {
+    const auto targetId =
+        space_[accursed_cell_focus_].dimensions[dimension].neg;
+    if (targetId == 0) {
+      return false;
+    }
+    space_[accursed_cell_focus_].dimensions[dimension].neg = 0;
+    if (space_.contains(targetId)) {
+      space_[targetId].dimensions[dimension].pos = 0;
+    }
+  }
+  rebuildActiveViewTopology();
+  invalidateAccessibility();
+  return true;
+}
+
+void ZigzagVisualizer::updateFocusCellText(std::string text) {
+  if (space_.contains(accursed_cell_focus_)) {
+    space_[accursed_cell_focus_].text_data = std::move(text);
+    rebuildActiveViewTopology();
+    invalidateAccessibility();
+  }
+}
+
+bool ZigzagVisualizer::saveStructureYaml(const std::string &filePath) const {
+  const auto savePath = filePath.empty() ? current_slice_path_ : filePath;
+  if (savePath.empty()) {
+    return false;
+  }
+  const auto doc = document();
+  return saveZzStructure(doc, savePath);
+}
+
 const zzCell *ZigzagVisualizer::findCell(const CellID id) const {
   return zzcore::findCell(space_, id);
 }

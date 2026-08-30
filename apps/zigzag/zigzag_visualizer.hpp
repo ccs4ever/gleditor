@@ -117,6 +117,16 @@ public:
   void returnToPreviousSlice();
   void cancelPrefletFetch();
 
+  // -- In-App Interactive Cell & Dimension Editing --------------------------
+  CellID createCell(std::string text = "", std::string type = "text");
+  bool insertConnectedCell(std::string text, const DimID &dimension,
+                           bool positive = true);
+  bool linkFocusAlong(const DimID &dimension, CellID targetId,
+                      bool positive = true);
+  bool unlinkFocusAlong(const DimID &dimension, bool positive = true);
+  void updateFocusCellText(std::string text);
+  bool saveStructureYaml(const std::string &filePath) const;
+
   [[nodiscard]] CellID focusCellId() const { return accursed_cell_focus_; }
   [[nodiscard]] const std::string &structureName() const {
     return structure_name_;

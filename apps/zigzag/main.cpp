@@ -122,6 +122,47 @@ void bindCommands(gleditor::Application &app, const AppStateRef &state,
                             << "Exported Xudu LinkPackage: " << pkg.describe()
                             << " (" << pkg.links.size() << " links)\n";
                       });
+
+  // Interactive In-App Cell & Dimension Editing
+  app.commands().bind(SDL_SCANCODE_N, "insert-cell-x-pos",
+                      "insert connected cell positive along active X dimension",
+                      [viz] {
+                        viz->insertConnectedCell(
+                            "New Cell", viz->currentView().x_dimension, true);
+                      });
+  app.commands().bind(SDL_SCANCODE_N, Mod::Shift, "insert-cell-x-neg",
+                      "insert connected cell negative along active X dimension",
+                      [viz] {
+                        viz->insertConnectedCell(
+                            "New Cell", viz->currentView().x_dimension, false);
+                      });
+  app.commands().bind(SDL_SCANCODE_D, "insert-cell-y-pos",
+                      "insert connected cell positive along active Y dimension",
+                      [viz] {
+                        viz->insertConnectedCell(
+                            "New Cell", viz->currentView().y_dimension, true);
+                      });
+  app.commands().bind(SDL_SCANCODE_D, Mod::Shift, "insert-cell-y-neg",
+                      "insert connected cell negative along active Y dimension",
+                      [viz] {
+                        viz->insertConnectedCell(
+                            "New Cell", viz->currentView().y_dimension, false);
+                      });
+  app.commands().bind(
+      SDL_SCANCODE_U, "unlink-x-pos",
+      "unlink focused cell along positive X dimension",
+      [viz] { viz->unlinkFocusAlong(viz->currentView().x_dimension, true); });
+  app.commands().bind(
+      SDL_SCANCODE_U, Mod::Shift, "unlink-x-neg",
+      "unlink focused cell along negative X dimension",
+      [viz] { viz->unlinkFocusAlong(viz->currentView().x_dimension, false); });
+  app.commands().bind(SDL_SCANCODE_S, Mod::Ctrl | Mod::Shift, "save-slice",
+                      "save current slice to disk YAML", [viz] {
+                        if (viz->saveStructureYaml("")) {
+                          std::cout
+                              << "Successfully saved ZigZag slice YAML.\n";
+                        }
+                      });
 }
 
 } // namespace

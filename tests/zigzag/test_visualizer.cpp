@@ -135,3 +135,51 @@ TEST(ZigzagVisualizerTest, AccessibilityTree) {
   // Focus action on a cell node (local ID >= 10)
   EXPECT_TRUE(viz.performAction(10U, gleditor::a11y::Action::Focus, ""));
 }
+
+TEST(ZigzagVisualizerTest, InAppInteractiveCellAndDimensionEditing) {
+  ZigzagVisualizer viz("Sans 12", false);
+
+  // Focus starts at Cell 1
+  EXPECT_EQ(viz.focusCellId(), 1U);
+
+  // Insert connected cell along positive X ("d.1")
+  EXPECT_TRUE(viz.insertConnectedCell("Newly Inserted Topic", "d.1", true));
+  const auto newCellId = viz.focusCellId();
+  EXPECT_NE(newCellId, 1U);
+
+  // Update cell text
+  viz.updateFocusCellText("Edited Topic Name");
+
+  // Step back along negative X to cell 1
+  viz.navigateFocus("d.1", false);
+  EXPECT_EQ(viz.focusCellId(), 1U);
+
+  // Step forward to our edited cell
+  viz.navigateFocus("d.1", true);
+  EXPECT_EQ(viz.focusCellId(), newCellId);
+
+  // Unlink along negative X
+  EXPECT_TRUE(viz.unlinkFocusAlong("d.1", false));
+
+  // Stepping back should now stay at newCellId since link was broken
+  viz.navigateFocus("d.1", false);
+  EXPECT_EQ(viz.focusCellId(), newCellId);
+
+  // Re-link manually
+  EXPECT_TRUE(viz.linkFocusAlong("d.1", 1U, false));
+  viz.navigateFocus("d.1", false);
+  EXPECT_EQ(viz.focusCellId(), 1U);
+}
+
+TEST(ZigzagVisualizerTest, YamlSerializationRoundTrip) {
+  ZigzagVisualizer viz("Sans 12", false);
+  const auto doc = viz.document();
+
+  const auto yamlStr = serializeZzStructure(doc);
+  EXPECT_FALSE(yamlStr.empty());
+
+  const auto roundtripped = parseZzStructure(yamlStr, "roundtrip");
+  ASSERT_TRUE(roundtripped.has_value());
+  EXPECT_EQ(roundtripped->meta.name, doc.meta.name);
+  EXPECT_EQ(roundtripped->cells.size(), doc.cells.size());
+}

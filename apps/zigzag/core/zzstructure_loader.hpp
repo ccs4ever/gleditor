@@ -32,6 +32,17 @@ loadZzStructure(const std::string &path);
 parseZzStructure(const std::string &yamlText,
                  const std::string &originLabel = "inline");
 
+/**
+ * @brief Serializes a ZigZag structure document to a YAML string.
+ */
+[[nodiscard]] std::string serializeZzStructure(const ZzStructureDocument &doc);
+
+/**
+ * @brief Saves a ZigZag structure document to a YAML file on disk.
+ */
+[[nodiscard]] bool saveZzStructure(const ZzStructureDocument &doc,
+                                   const std::string &path);
+
 } // namespace zigzag
 
 #endif // ZIGZAG_ZZSTRUCTURE_LOADER_HPP
