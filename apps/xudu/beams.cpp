@@ -119,7 +119,8 @@ constexpr float bypassDepthLimit  = -120.0F;
 constexpr std::size_t bypassSegments = 9;
 
 /// How near the camera has to be to where it is being taken before the ease is
-/// treated as arrived and the camera handed back, in world units.
+/// treated as arrived, in world units. It is then put exactly there and handed
+/// back; see the snap in drawFrame() for why exactly matters.
 constexpr float cameraArrived = 0.05F;
 
 } // namespace
@@ -324,14 +325,33 @@ void LinkBeams::align(const Strand &strand, RenderState &state,
   const auto &near = state.docs[strand.from.doc];
   const auto &far  = state.docs[strand.to.doc];
 
-  const auto nearAt = near->worldPoint(*strand.fromAnchor);
-  const auto farAt  = far->worldPoint(*strand.toAnchor);
+  // Everything below is worked out against where the documents are going
+  // rather than where they are. A document part way through an earlier move
+  // is not at its resting place, and levelling against where it happens to
+  // have got to makes the answer depend on which frame this ran on: a scene
+  // with several links settled somewhere slightly different every time it was
+  // opened, because the aligns landed a different number of frames apart.
+  // getModel() is the destination animateMoveTo() recorded as it started, so a
+  // run of alignments composes to one arrangement however they are spread out.
+  const auto atRest = [](const Doc &doc, const glm::vec3 &point) {
+    return point + glm::vec3(doc.getModel()[3]) -
+           glm::vec3(doc.modelMatrix()[3]);
+  };
+  const auto restingPoint =
+      [&atRest](const Doc &doc,
+                const Doc::Anchor &anchor) -> std::optional<glm::vec3> {
+    const auto point = doc.worldPoint(anchor);
+    return point ? std::optional{atRest(doc, *point)} : std::nullopt;
+  };
+
+  const auto nearAt = restingPoint(*near, *strand.fromAnchor);
+  const auto farAt  = restingPoint(*far, *strand.toAnchor);
   if (!nearAt || !farAt) {
     return;
   }
 
-  const glm::vec3 nearPos(near->modelMatrix()[3]);
-  const glm::vec3 farPos(far->modelMatrix()[3]);
+  const glm::vec3 nearPos(near->getModel()[3]);
+  const glm::vec3 farPos(far->getModel()[3]);
 
   const auto *const nearPage = near->page(strand.fromAnchor->pageIndex);
   const auto *const farPage  = far->page(strand.toAnchor->pageIndex);
@@ -347,50 +367,32 @@ void LinkBeams::align(const Strand &strand, RenderState &state,
   // pages.
   float nearMinY = nearAt->y;
   float nearMaxY = nearAt->y;
-  if (strand.fromEndAnchor) {
-    if (const auto pt = near->worldPoint(*strand.fromEndAnchor)) {
-      nearMinY = std::min(nearMinY, pt->y);
-      nearMaxY = std::max(nearMaxY, pt->y);
-    }
-  }
+  float farMinY  = farAt->y;
+  float farMaxY  = farAt->y;
 
-  float farMinY = farAt->y;
-  float farMaxY = farAt->y;
-  if (strand.toEndAnchor) {
-    if (const auto pt = far->worldPoint(*strand.toEndAnchor)) {
-      farMinY = std::min(farMinY, pt->y);
-      farMaxY = std::max(farMaxY, pt->y);
+  const auto reach = [&restingPoint](const Doc &doc,
+                                     const std::optional<Doc::Anchor> &anchor,
+                                     float &lowest, float &highest) {
+    if (!anchor) {
+      return;
     }
-  }
+    if (const auto pt = restingPoint(doc, *anchor)) {
+      lowest  = std::min(lowest, pt->y);
+      highest = std::max(highest, pt->y);
+    }
+  };
+
+  reach(*near, strand.fromEndAnchor, nearMinY, nearMaxY);
+  reach(*far, strand.toEndAnchor, farMinY, farMaxY);
 
   for (auto &s : strands) {
     if (s.link == strand.link && s.from.doc == strand.from.doc &&
         s.to.doc == strand.to.doc) {
       s.aligned = true;
-      if (s.fromAnchor) {
-        if (const auto pt = near->worldPoint(*s.fromAnchor)) {
-          nearMinY = std::min(nearMinY, pt->y);
-          nearMaxY = std::max(nearMaxY, pt->y);
-        }
-      }
-      if (s.fromEndAnchor) {
-        if (const auto pt = near->worldPoint(*s.fromEndAnchor)) {
-          nearMinY = std::min(nearMinY, pt->y);
-          nearMaxY = std::max(nearMaxY, pt->y);
-        }
-      }
-      if (s.toAnchor) {
-        if (const auto pt = far->worldPoint(*s.toAnchor)) {
-          farMinY = std::min(farMinY, pt->y);
-          farMaxY = std::max(farMaxY, pt->y);
-        }
-      }
-      if (s.toEndAnchor) {
-        if (const auto pt = far->worldPoint(*s.toEndAnchor)) {
-          farMinY = std::min(farMinY, pt->y);
-          farMaxY = std::max(farMaxY, pt->y);
-        }
-      }
+      reach(*near, s.fromAnchor, nearMinY, nearMaxY);
+      reach(*near, s.fromEndAnchor, nearMinY, nearMaxY);
+      reach(*far, s.toAnchor, farMinY, farMaxY);
+      reach(*far, s.toEndAnchor, farMinY, farMaxY);
     }
   }
 
@@ -408,8 +410,7 @@ void LinkBeams::align(const Strand &strand, RenderState &state,
   // here would leave docSlots with no entry for the very document that
   // needs one.
   const auto isBackground = [&](const std::size_t d) {
-    return d != farDocIdx &&
-           glm::vec3(state.docs[d]->modelMatrix()[3]).z < 0.0F;
+    return d != farDocIdx && glm::vec3(state.docs[d]->getModel()[3]).z < 0.0F;
   };
 
   // Sequential non-overlapping horizontal layout of the foreground row.
@@ -421,7 +422,7 @@ void LinkBeams::align(const Strand &strand, RenderState &state,
   bool anyForegroundYet = false;
   for (std::size_t d = 0; d < state.docs.size(); ++d) {
     if (isBackground(d)) {
-      docSlots[d] = glm::vec3(state.docs[d]->modelMatrix()[3]).x;
+      docSlots[d] = glm::vec3(state.docs[d]->getModel()[3]).x;
       continue;
     }
     float halfW = fallbackDocHalfWidth;
@@ -460,7 +461,7 @@ void LinkBeams::align(const Strand &strand, RenderState &state,
     if (d == farDocIdx || isBackground(d)) {
       continue;
     }
-    const glm::vec3 cur(state.docs[d]->modelMatrix()[3]);
+    const glm::vec3 cur(state.docs[d]->getModel()[3]);
     if (std::abs(cur.x - docSlots[d]) >= alreadyAligned) {
       // Held a moment, then shorter than the document it is making room for,
       // so the row reads as answering the arrival rather than as every
@@ -490,7 +491,7 @@ void LinkBeams::align(const Strand &strand, RenderState &state,
       if (!doc || isBackground(d)) {
         continue;
       }
-      const glm::vec3 curPos(state.docs[d]->modelMatrix()[3]);
+      const glm::vec3 curPos(state.docs[d]->getModel()[3]);
       const glm::vec3 docOffset =
           (d == farDocIdx) ? (target - curPos)
                            : glm::vec3(docSlots[d] - curPos.x, 0.0F, 0.0F);
@@ -503,22 +504,20 @@ void LinkBeams::align(const Strand &strand, RenderState &state,
         const float halfW = page->widthPixels() * 0.5F;
         const float halfH = page->heightPixels() * 0.5F;
 
-        if (const auto topLeft =
-                doc->worldPoint(static_cast<std::uint32_t>(p), -halfW, halfH)) {
-          const glm::vec3 pt = *topLeft + docOffset;
+        const auto corner = [&](const float pageX, const float pageY) {
+          const auto point =
+              doc->worldPoint(static_cast<std::uint32_t>(p), pageX, pageY);
+          if (!point) {
+            return;
+          }
+          const glm::vec3 pt = atRest(*doc, *point) + docOffset;
           minX               = std::min(minX, pt.x);
           maxX               = std::max(maxX, pt.x);
           minY               = std::min(minY, pt.y);
           maxY               = std::max(maxY, pt.y);
-        }
-        if (const auto botRight =
-                doc->worldPoint(static_cast<std::uint32_t>(p), halfW, -halfH)) {
-          const glm::vec3 pt = *botRight + docOffset;
-          minX               = std::min(minX, pt.x);
-          maxX               = std::max(maxX, pt.x);
-          minY               = std::min(minY, pt.y);
-          maxY               = std::max(maxY, pt.y);
-        }
+        };
+        corner(-halfW, halfH);
+        corner(halfW, -halfH);
       }
     }
 
@@ -683,14 +682,20 @@ void LinkBeams::drawFrame(gleditor::FrameContext &ctx) {
   // goes false again the moment the ease arrives, which is what gives the
   // camera back to whoever is at the keyboard.
   if (cameraDriving && renderer && renderer->appState()) {
-    const auto now = cameraTarget();
+    // Snapped to the goal on the last step rather than left wherever the ease
+    // had reached when it came within the threshold. The camera is where a
+    // capture is taken from, and stopping a fraction of a world unit short of
+    // the same place every time -- a different fraction depending on how the
+    // frames happened to fall -- moves every glyph on screen by a fraction of
+    // a pixel and makes two runs of the same scene different pictures.
+    const bool arrived =
+        glm::distance(cameraTarget(), cameraGoal) <= cameraArrived;
+    const auto now = arrived ? cameraGoal : cameraTarget();
     {
       const std::scoped_lock locker(renderer->appState()->view);
       renderer->appState()->view.pos = now;
     }
-    if (glm::distance(now, cameraGoal) <= cameraArrived) {
-      cameraDriving = false;
-    }
+    cameraDriving = !arrived;
   }
 
   // Wait until all open documents have completed building their pages before
