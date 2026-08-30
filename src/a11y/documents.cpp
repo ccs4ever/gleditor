@@ -214,9 +214,9 @@ void DocumentsSource::describe(Builder &into) {
         node.selection   = TextSelection{
             doc.hasSelection ? pointAt(doc, first,
                                        doc.selectionStart == doc.caretByte
-                                             ? doc.selectionEnd
-                                             : doc.selectionStart)
-                               : focus,
+                                           ? doc.selectionEnd
+                                           : doc.selectionStart)
+                             : focus,
             focus};
         into.takeFocus(into.id(id));
       }

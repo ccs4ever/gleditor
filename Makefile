@@ -325,7 +325,9 @@ override LDFLAGS += $(DEBUG_OPTS) $(findstring $(STATIC),-static)
 #CXXFLAGS += -stdlib=libc++ -fexperimental-library
 #LDFLAGS += -v -stdlib=libc++ -fexperimental-library
 LIBS := $(shell pkg-config $(STATIC) --libs $(PKGS))
-XUDU_LIBS := $(shell pkg-config $(STATIC) --libs $(XUDU_PKGS))
+XUDU_LIBS := $(shell pkg-config $(STATIC) --libs $(XUDU_PKGS)) -lryml
+ZIGZAG_PKGS := libtorrent-rasterbar openssl
+ZIGZAG_LIBS := $(shell pkg-config $(STATIC) --libs $(ZIGZAG_PKGS)) -lryml
 # glslangValidator is the traditional name and glslang the current one; which
 # of the two a distribution installs varies, so both are tried.
 #
@@ -363,8 +365,11 @@ GLEDITOR_SRCS  := $(shell find apps/gleditor -name '*.cpp' 2>/dev/null)
 # and links is decidable from the store alone.
 XUDU_CORE_SRCS := $(shell find apps/xudu/core -name '*.cpp' 2>/dev/null)
 XUDU_SRCS      := $(filter-out $(XUDU_CORE_SRCS),$(shell find apps/xudu -name '*.cpp' 2>/dev/null))
+ZIGZAG_CORE_SRCS := $(shell find apps/zigzag/core -name '*.cpp' 2>/dev/null)
+ZIGZAG_SRCS      := $(filter-out $(ZIGZAG_CORE_SRCS),$(shell find apps/zigzag -name '*.cpp' 2>/dev/null))
 LIB_TEST_SRCS  := $(shell find tests/lib -name '*.cpp' 2>/dev/null)
 XUDU_TEST_SRCS := $(shell find tests/xudu -name '*.cpp' 2>/dev/null)
+ZIGZAG_TEST_SRCS := $(shell find tests/zigzag -name '*.cpp' 2>/dev/null)
 
 OBJDIR := build/
 obj = $(addprefix $(OBJDIR)/,$(patsubst %.cpp,%.o,$(1)))
@@ -372,8 +377,11 @@ LIB_OBJS        := $(call obj,$(LIB_SRCS))
 GLEDITOR_OBJS   := $(call obj,$(GLEDITOR_SRCS))
 XUDU_CORE_OBJS  := $(call obj,$(XUDU_CORE_SRCS))
 XUDU_OBJS       := $(call obj,$(XUDU_SRCS))
+ZIGZAG_CORE_OBJS := $(call obj,$(ZIGZAG_CORE_SRCS))
+ZIGZAG_OBJS      := $(call obj,$(ZIGZAG_SRCS))
 LIB_TEST_OBJS   := $(call obj,$(LIB_TEST_SRCS))
 XUDU_TEST_OBJS  := $(call obj,$(XUDU_TEST_SRCS))
+ZIGZAG_TEST_OBJS := $(call obj,$(ZIGZAG_TEST_SRCS))
 SWARM_PEER_OBJS := $(call obj,tools/xudu-swarm-peer.cpp)
 
 # What a shared library is called, and how a program finds it, differ enough
@@ -436,6 +444,7 @@ endif
 endif
 
 ALL_OBJS := $(sort $(LIB_OBJS) $(GLEDITOR_OBJS) $(XUDU_CORE_OBJS) $(XUDU_OBJS) \
+	$(ZIGZAG_CORE_OBJS) $(ZIGZAG_OBJS) $(ZIGZAG_TEST_OBJS) \
 	$(LIB_TEST_OBJS) $(XUDU_TEST_OBJS) $(SWARM_PEER_OBJS))
 ALL_OBJ_DIRS := $(sort $(OBJDIR)/ $(OBJDIR)/tmp/ $(dir $(ALL_OBJS)))
 DEPS := $(sort $(patsubst %.o,%.dep,$(ALL_OBJS)))
@@ -464,7 +473,7 @@ endif
 SPIRV := assets/shaders/vulkan/glyph.vert.spv assets/shaders/vulkan/glyph.frag.spv \
 	assets/shaders/vulkan/beam.vert.spv assets/shaders/vulkan/beam.frag.spv
 
-all: lib gleditor xudu gleditor_test xudu_test $(OBJDIR)/compile_commands.json
+all: lib gleditor xudu zigzag gleditor_test xudu_test zigzag_test $(OBJDIR)/compile_commands.json
 ifdef GLEDITOR_ENABLE_VULKAN
 all: shaders
 endif
@@ -477,7 +486,7 @@ $(ALL_OBJ_DIRS):
 
 $(ALL_OBJS): | $(ALL_OBJ_DIRS)
 $(DEPS) $(JFILES) $(OBJDIR)/src/config.h: | $(ALL_OBJ_DIRS)
-$(LIB_TEST_OBJS) $(XUDU_TEST_OBJS): CXXFLAGS += $(shell pkg-config $(STATIC) --cflags $(TEST_PKGS))
+$(LIB_TEST_OBJS) $(XUDU_TEST_OBJS) $(ZIGZAG_TEST_OBJS): CXXFLAGS += $(shell pkg-config $(STATIC) --cflags $(TEST_PKGS))
 
 ifeq (,$(filter clean,$(MAKECMDGOALS)))
 MKCFG = $(SED) 's/\@\@VERS\@\@/$(VERS)/'
@@ -510,6 +519,7 @@ $(ALL_OBJS): $(FLAGSTAMP)
 
 $(OBJDIR)/apps/gleditor/main.o $(OBJDIR)/apps/gleditor/main.dep: $(OBJDIR)/src/config.h
 $(OBJDIR)/apps/xudu/main.o $(OBJDIR)/apps/xudu/main.dep: $(OBJDIR)/src/config.h
+$(OBJDIR)/apps/zigzag/main.o $(OBJDIR)/apps/zigzag/main.dep: $(OBJDIR)/src/config.h
 
 # The SPIR-V the Vulkan backend loads is produced from the same portable shader
 # bodies the GL backends compile at runtime, and through the same preamble
@@ -562,6 +572,13 @@ $(OBJDIR)/xudu: $(XUDU_OBJS) $(XUDU_CORE_OBJS) $(LIBLINK)
 	$(CXX) $(LDFLAGS) -o $@ $(XUDU_OBJS) $(XUDU_CORE_OBJS) $(APP_LDFLAGS) $(LIBS) $(XUDU_LIBS)
 .PHONY: xudu
 
+ZIGZAG_SHARED_CORE_OBJS := $(OBJDIR)/apps/xudu/core/torrent.o $(OBJDIR)/apps/xudu/core/bencode.o
+
+zigzag: $(OBJDIR)/zigzag
+$(OBJDIR)/zigzag: $(ZIGZAG_OBJS) $(ZIGZAG_CORE_OBJS) $(ZIGZAG_SHARED_CORE_OBJS) $(LIBLINK)
+	$(CXX) $(LDFLAGS) -o $@ $(ZIGZAG_OBJS) $(ZIGZAG_CORE_OBJS) $(ZIGZAG_SHARED_CORE_OBJS) $(APP_LDFLAGS) $(LIBS) $(ZIGZAG_LIBS)
+.PHONY: zigzag
+
 sanitize/address: CXXFLAGS += $(SANITIZE_ADDR_OPTS)
 sanitize/address: LDFLAGS += $(SANITIZE_ADDR_OPTS)
 sanitize/address: gleditor
@@ -586,7 +603,7 @@ sanitize/memory/run: sanitize/memory
 	MSAN_OPTIONS=check_initialization_order=1:detect_leaks=1:strict_string_checks=1 $(OBJDIR)/gleditor
 
 
-.PHONY: gleditor_test xudu_test
+.PHONY: gleditor_test xudu_test zigzag_test
 TEST_LIBS = $(shell pkg-config $(STATIC) --libs $(TEST_PKGS))
 
 # The library's own tests, linked against the library the programs link
@@ -603,6 +620,11 @@ $(OBJDIR)/gleditor_test: $(LIB_TEST_OBJS) $(LIBLINK)
 xudu_test: $(OBJDIR)/xudu_test
 $(OBJDIR)/xudu_test: $(XUDU_TEST_OBJS) $(XUDU_CORE_OBJS)
 	$(CXX) $(LDFLAGS) -o $@ $^ $(XUDU_LIBS) $(TEST_LIBS)
+
+zigzag_test: $(OBJDIR)/zigzag_test
+$(OBJDIR)/zigzag_test: $(ZIGZAG_TEST_OBJS) $(filter-out $(OBJDIR)/apps/zigzag/main.o,$(ZIGZAG_OBJS)) $(ZIGZAG_CORE_OBJS) $(ZIGZAG_SHARED_CORE_OBJS) $(LIBLINK)
+	$(CXX) $(LDFLAGS) -o $@ $^ $(APP_LDFLAGS) $(LIBS) $(ZIGZAG_LIBS) $(TEST_LIBS)
+
 
 .PHONY: fuzz fuzz_binary_ops fuzz_link_package
 fuzz_binary_ops: $(OBJDIR)/fuzz_binary_ops
@@ -654,16 +676,18 @@ SLOW_TESTS  := SwarmTest.*:MutableNameTest.*:E2EBinaryOrchestrationTest.*
 # Override to run something else, including everything: make test TEST_FILTER='*'
 TEST_FILTER ?= -$(SLOW_TESTS)
 
-test: $(OBJDIR)/gleditor_test $(OBJDIR)/xudu_test
+test: $(OBJDIR)/gleditor_test $(OBJDIR)/xudu_test $(OBJDIR)/zigzag_test
 	$(OBJDIR)/gleditor_test --gtest_filter='$(TEST_FILTER)'
 	$(OBJDIR)/xudu_test --gtest_filter='$(TEST_FILTER)'
+	$(OBJDIR)/zigzag_test --gtest_filter='$(TEST_FILTER)'
 
 # Everything, slow suites included. What the pull request checks run, and what
 # to run here before pushing.
 .PHONY: test/all test/integration test/e2e-orchestration
-test/all: $(OBJDIR)/gleditor_test $(OBJDIR)/xudu_test
+test/all: $(OBJDIR)/gleditor_test $(OBJDIR)/xudu_test $(OBJDIR)/zigzag_test
 	$(OBJDIR)/gleditor_test
 	$(OBJDIR)/xudu_test
+	$(OBJDIR)/zigzag_test
 
 test/integration: test/e2e-orchestration
 test/e2e-orchestration: $(OBJDIR)/xudu $(OBJDIR)/xudu_test

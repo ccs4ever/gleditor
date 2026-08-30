@@ -76,7 +76,8 @@ private:
 };
 
 /**
- * @brief One open document: which version it shows, which store it belongs to, and where it sits.
+ * @brief One open document: which version it shows, which store it belongs to,
+ * and where it sits.
  *
  * The library indexes open documents by position, and the picking tags carry
  * that index, so this is kept in the same order.
@@ -337,10 +338,13 @@ public:
   /// Where the store is kept, and writing it there.
   [[nodiscard]] const std::string &path(std::size_t index = 0) const;
   [[nodiscard]] bool isTemporaryStore(std::size_t index = 0) const;
-  void setStorePath(std::size_t index, std::string newPath, bool isTemporary = false);
+  void setStorePath(std::size_t index, std::string newPath,
+                    bool isTemporary = false);
 
-  std::size_t addStore(std::unique_ptr<Store> aStore, std::string aPath, bool aIsTemporary = false);
-  std::pair<std::size_t, MicroversionId> importFileToTemporaryStore(const std::string &filePath);
+  std::size_t addStore(std::unique_ptr<Store> aStore, std::string aPath,
+                       bool aIsTemporary = false);
+  std::pair<std::size_t, MicroversionId>
+  importFileToTemporaryStore(const std::string &filePath);
   std::size_t loadAuxiliaryStore(const std::string &aPath);
 
   void save(std::size_t index = 0) const;

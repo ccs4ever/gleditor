@@ -1,6 +1,7 @@
 /**
  * @file segmented_ops_spool.cpp
- * @brief Tests for contiguous segmented virtual memory operations spool and tree.
+ * @brief Tests for contiguous segmented virtual memory operations spool and
+ * tree.
  */
 #include <gmock/gmock.h>
 #include <gtest/gtest.h>
@@ -27,8 +28,8 @@ TEST(SegmentedOpsSpoolTest, appendAndTraverseLinearChain) {
 
   // Op 1: Insert "hello" -> state 1
   CompactOpNode n1;
-  n1.kind       = OpKind::Insert;
-  n1.at         = 0;
+  n1.kind = OpKind::Insert;
+  n1.at   = 0;
   n1.setSpan(PrimediaSpan{xudu::localScroll, 0, 5});
   const auto id1  = MicroversionId::parse("1");
   const auto idx1 = spool.append(n1, id1);
@@ -68,12 +69,12 @@ TEST(SegmentedOpsSpoolTest, branchingTreeTopologyAndSiblings) {
 
   // 1
   CompactOpNode n1;
-  n1.kind = OpKind::Insert;
+  n1.kind         = OpKind::Insert;
   const auto idx1 = spool.append(n1, MicroversionId::parse("1"));
 
   // 2 (child 1 of 1)
   CompactOpNode n2;
-  n2.parentIndex = idx1;
+  n2.parentIndex  = idx1;
   const auto idx2 = spool.append(n2, MicroversionId::parse("2"));
 
   // 1a1 (child 2 of 1 / branch)

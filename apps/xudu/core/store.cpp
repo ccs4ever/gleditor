@@ -87,9 +87,8 @@ void Store::putOp(const MicroversionId &produces, const Op &op) {
   ops.emplace(produces, op);
 
   const auto parentIdx = opsSpool.indexOf(op.parent);
-  const auto sourceIdx =
-      op.source.isZero() ? 0U : opsSpool.indexOf(op.source);
-  const auto node = CompactOpNode::fromOp(op, parentIdx, sourceIdx);
+  const auto sourceIdx = op.source.isZero() ? 0U : opsSpool.indexOf(op.source);
+  const auto node      = CompactOpNode::fromOp(op, parentIdx, sourceIdx);
   opsSpool.append(node, produces);
 }
 

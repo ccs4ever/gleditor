@@ -623,8 +623,8 @@ PageShaping Doc::layoutFrom(const std::uint32_t offset) const {
   const auto pageEnd = offset + available;
   for (const auto &range : decoratedRanges) {
     const auto from = std::max<std::uint32_t>(range.start, offset);
-    const auto to    = std::min<std::uint32_t>(range.end,
-                                             static_cast<std::uint32_t>(pageEnd));
+    const auto to =
+        std::min<std::uint32_t>(range.end, static_cast<std::uint32_t>(pageEnd));
     if (from < to) {
       opts.decoratedRanges.push_back(gleditor::DecoratedRange{
           .start       = from - offset,

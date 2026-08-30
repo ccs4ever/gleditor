@@ -17,6 +17,7 @@
 #include <gleditor/caret.hpp>
 #include <gleditor/paths.hpp>
 #include <gleditor/render_state.hpp>
+#include <gleditor/spatial.hpp>
 
 namespace xudu {
 
@@ -164,13 +165,7 @@ std::optional<glm::vec3> LinkBeams::edgePoint(const Doc &doc,
 
 bool LinkBeams::onScreen(const glm::mat4 &viewProjection,
                          const glm::vec3 &point) {
-  const auto clip = viewProjection * glm::vec4(point, 1.0F);
-  if (clip.w <= 0.0F) {
-    return false;
-  }
-  const auto ndcX = clip.x / clip.w;
-  const auto ndcY = clip.y / clip.w;
-  return ndcX >= -1.0F && ndcX <= 1.0F && ndcY >= -1.0F && ndcY <= 1.0F;
+  return gleditor::spatial::onScreen(viewProjection, point);
 }
 
 void LinkBeams::align(const Strand &strand, RenderState &state,

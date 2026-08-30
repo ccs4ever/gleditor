@@ -227,7 +227,7 @@ void Renderer::openDoc(RenderState &state, const gleditor::TextSource &source,
   // as a backdrop rather than inside it.
   auto slot = depthZ < 0.0F ? glm::vec3(0.0F, 0.0F, 0.0F)
                             : AbstractRenderer::documentSlot(state.docs.size());
-  slot.z                    = depthZ;
+  slot.z    = depthZ;
   const auto newDocPosition = glm::translate(glm::mat4(1.0), slot);
   std::cout << "doc pos: " << state.docs.size() << " "
             << glm::to_string(newDocPosition) << "\n";

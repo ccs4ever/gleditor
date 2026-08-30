@@ -1,7 +1,7 @@
 # gleditor
 
 A GPU-rendered document library, with OpenGL, OpenGL ES and Vulkan backends, and
-two programs built on it.
+three programs built on it.
 
 [![C/C++ CI](https://github.com/ccs4ever/gleditor/actions/workflows/c-cpp.yml/badge.svg)][ci-badge]
 
@@ -9,7 +9,7 @@ Still a work in progress.
 
 ## Overview
 
-This tree builds three things.
+This tree builds four things.
 
 **`libgleditor`** is the library: SDL for windowing and input, HarfBuzz and
 FreeType for shaping and rasterisation, libunibreak for Unicode line breaking,
@@ -18,16 +18,22 @@ a paginated document model and a render loop. It names no document format and
 no application. Everything under `src/` is part of it.
 
 **`gleditor`** is the plain editor -- open files, look at them, type into them.
-It is `apps/gleditor/main.cpp`, and it is 119 lines: a command line, a key map,
-and the library doing the rest.
+It is `apps/gleditor/main.cpp`: a command line, a key map, and the library doing
+the rest.
 
 **`xudu`** is a second program that keeps a versioned hypertext instead of a
 file, after Ted Nelson's OSMIC and Project Xanadu. It is `apps/xudu/`. It shares
 the library with the editor and shares no code with it.
 
+**`zigzag`** is a third program that visualizes and navigates Project Xanadu
+multidimensional Zigzag structures (zzstructures / slices) in interactive 3D,
+with animated rank transitions, customizable dimension bindings, and BitTorrent
+Preflet resolution. It is `apps/zigzag/`.
+
 The split is the point. See [Building on the library](#building-on-the-library)
-for what a program gets to hook into, and [xudu](#xudu-a-xanadoc-editor) for
-what one program did with it.
+for what a program gets to hook into, [xudu](#xudu-a-xanadoc-editor) for the
+xanadoc editor, and [zigzag](#zigzag-a-project-xanadu-zigzag-visualizer) for the
+multidimensional visualizer.
 
 ## Rendering backends
 
@@ -1189,6 +1195,107 @@ demand, a `DocumentObserver` that turns each keystroke into a hyperop, a
 `SpanDecorator` that shades shared passages, and a `FrameContributor` that draws
 the map. Deep intercomparison -- the shading in the picture above -- took no
 code in the library at all.
+
+## zigzag: a Project Xanadu Zigzag visualizer
+
+[Project Xanadu Zigzag](https://xanadu.com.au/zigzag/) is Ted Nelson's
+multidimensional data structure and spatial visualization paradigm. Unlike
+conventional trees, tables, or relational schemas, Zigzag organizes information
+into **cells** interconnected across an arbitrary number of named **dimensions**
+(`d.1`, `d.2`, `d.3`, `d.time`, `d.cursor`, `d.details`, etc.). In any given
+dimension, a cell has at most one **posward** (+1) and one **negward** (-1)
+neighbor, forming continuous non-crossing sequences called **ranks**.
+
+`zigzag` (`apps/zigzag/`) is a standalone visualizer and navigator built directly
+on `libgleditor`. It renders multidimensional slice spaces in interactive 3D,
+supports animated rank transitions, mouse picking, accessibility tree publishing,
+and asynchronous BitTorrent-backed **Preflet** slice fetching.
+
+### Data Model and Slices
+
+A Zigzag space is represented as a YAML document called a **Slice** (`zzstructure`):
+
+```yaml
+zzstructure:
+  meta:
+    name: "Sample Xanadu Outline"
+    version: "1.0.0"
+  focus: 1
+  view:
+    x_dimension: "d.1"
+    y_dimension: "d.2"
+    z_dimension: "d.3"
+  dimensions:
+    - name: "d.1"
+      label: "Sequence"
+      color: "#e35d5b"
+      spacing: 2.4
+    - name: "d.2"
+      label: "Detail"
+      color: "#59c37b"
+      spacing: 1.8
+    - name: "d.3"
+      label: "Reference"
+      color: "#4f9ee0"
+      spacing: 2.0
+  cells:
+    - id: 1
+      text: "Root Topic Node"
+      type: "root"
+      dimensions:
+        d.1: [2, 0]
+        d.2: [3, 0]
+    - id: 2
+      text: "Second Chapter"
+      type: "item"
+      dimensions:
+        d.1: [0, 1]
+    - id: 3
+      text: "Extended Details"
+      type: "detail"
+      preflet: "magnet:?xt=urn:btih:0123456789abcdef0123456789abcdef01234567&dn=subslice.yaml"
+      dimensions:
+        d.2: [0, 1]
+```
+
+- **Accursed Cell Focus**: Navigation centers around the active cell (the
+  "accursed cell" in Xanadu parlance), rendered at world origin $(0, 0, 0)$.
+- **Rank Projection**: Neighboring cells along the active $X$, $Y$, and $Z$ view
+  dimensions are positioned in 3D space with colored connection beams
+  (`gleditor::Beams`) and rendered text quads (`gleditor::Canvas`).
+- **Backward Link Derivation**: If cell $A$ defines a link to cell $B$ on
+  dimension $D$, the loader automatically derives the reciprocal backward link
+  $B \to A$ if not explicitly overridden.
+- **Preflets**: Cells can link to external slices via BitTorrent magnet URIs,
+  SHA-1 infohashes, or local YAML files. The built-in `PrefletFetcher`
+  (`libtorrent-rasterbar`) fetches referenced slices asynchronously into the
+  XDG cache directory (`~/.cache/zigzag/slices/`) and automatically adopts them
+  upon completion.
+
+### Controls and Navigation
+
+| Key / Input               | Action                                                      |
+| ------------------------- | ----------------------------------------------------------- |
+| `Left` / `Right` / `A` / `D` | Step accursed cell focus along primary X dimension ($d_1$)  |
+| `Up` / `Down` / `W` / `S`    | Step accursed cell focus along primary Y dimension ($d_2$)  |
+| `PageUp` / `PageDown` / `Q` / `E` | Step accursed cell focus along primary Z dimension ($d_3$) |
+| `Space`                   | Swap primary X and Y dimensions                             |
+| `Tab` / `Shift-Tab`       | Cycle assigned dimensions across viewport axes              |
+| `Enter`                   | Resolve and navigate into Preflet target slice              |
+| `Backspace`               | Return to parent slice                                      |
+| `R`                       | Reset camera view to default orientation                    |
+| Left Click                | Pick cell directly under the mouse pointer to shift focus   |
+
+### Integration with gleditor
+
+`apps/zigzag` implements:
+- **`gleditor::FrameContributor`**: Submits 3D colored connection beams and 3D
+  text cell billboards in the world canvas, followed by an orthographic 2D HUD
+  displaying active dimension assignments, focus information, and fetch status.
+- **`gleditor::PickObserver`**: Receives asynchronous GPU picking queries to
+  select and navigate cells upon mouse clicks.
+- **`gleditor::a11y::Source`**: Publishes the interactive Zigzag grid structure
+  to assistive technologies via AccessKit.
 
 ## Accessibility
 

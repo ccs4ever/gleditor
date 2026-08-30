@@ -1,26 +1,35 @@
 /**
  * @file yaml.cpp
- * @brief Implementation of the small YAML subset.
+ * @brief Implementation of YAML reading and writing using rapidyaml.
  */
 #include "yaml.hpp" // IWYU pragma: associated
 
+#include <ryml.hpp>
+#include <ryml_std.hpp>
+
 #include <format>
-#include <sstream>
+#include <stdexcept>
+#include <vector>
 
 namespace xudu::yaml {
 
 namespace {
 
-std::string_view trimmed(std::string_view text) {
-  while (!text.empty() && (' ' == text.front() || '\t' == text.front())) {
-    text.remove_prefix(1);
-  }
-  while (!text.empty() &&
-         (' ' == text.back() || '\t' == text.back() || '\r' == text.back())) {
-    text.remove_suffix(1);
-  }
-  return text;
+void rymlErrorHandler(const c4::csubstr msg, const c4::yml::ErrorDataBasic &,
+                      void *) {
+  throw std::runtime_error(std::string{msg.str, msg.len});
 }
+
+struct ScopedCallbacks {
+  c4::yml::Callbacks prev;
+  ScopedCallbacks() {
+    prev = c4::yml::get_callbacks();
+    c4::yml::Callbacks cb;
+    cb.m_error_basic = rymlErrorHandler;
+    c4::yml::set_callbacks(cb);
+  }
+  ~ScopedCallbacks() { c4::yml::set_callbacks(prev); }
+};
 
 } // namespace
 
@@ -81,38 +90,46 @@ std::string unquote(std::string_view text) {
 }
 
 std::optional<std::vector<Entry>> read(const std::string_view text) {
-  std::vector<Entry> out;
-  std::string under;
+  if (text.empty()) {
+    return std::vector<Entry>{};
+  }
 
-  std::istringstream lines{std::string{text}};
-  std::string raw;
-  while (std::getline(lines, raw)) {
-    const auto line = trimmed(raw);
-    if (line.empty() || line.starts_with("#")) {
-      continue;
+  const ScopedCallbacks scoped;
+  std::vector<Entry> out;
+
+  try {
+    const c4::yml::Tree tree =
+        c4::yml::parse_in_arena(c4::csubstr{text.data(), text.size()});
+    if (tree.empty()) {
+
+      return std::vector<Entry>{};
     }
-    if (line.starts_with("- ")) {
-      if (under.empty()) {
-        // An item with nothing to belong to. Refused rather than attached to
-        // whatever came last, which would put somebody's data under the wrong
-        // name.
-        return std::nullopt;
-      }
-      out.push_back(Entry{under, unquote(trimmed(line.substr(2))), true});
-      continue;
-    }
-    const auto colon = line.find(':');
-    if (std::string_view::npos == colon) {
+    const auto root = tree.rootref();
+    if (!root.is_map()) {
       return std::nullopt;
     }
-    const auto key   = std::string{trimmed(line.substr(0, colon))};
-    const auto value = trimmed(line.substr(colon + 1));
-    // A key with nothing after it introduces a list; one with a value ends
-    // whatever list was open.
-    under = value.empty() ? key : std::string{};
-    out.push_back(Entry{key, unquote(value), false});
+    for (const auto child : root.children()) {
+      if (!child.has_key()) {
+        continue;
+      }
+      const std::string key = std::string{child.key().str, child.key().len};
+      if (child.is_seq()) {
+        for (const auto item : child.children()) {
+          std::string val;
+          if (item.has_val()) {
+            val = std::string{item.val().str, item.val().len};
+          }
+          out.push_back(Entry{.key = key, .value = val, .listItem = true});
+        }
+      } else if (child.has_val()) {
+        const std::string val{child.val().str, child.val().len};
+        out.push_back(Entry{.key = key, .value = val, .listItem = false});
+      }
+    }
+    return out;
+  } catch (const std::exception &) {
+    return std::nullopt;
   }
-  return out;
 }
 
 void write(std::string &out, const std::string_view key,

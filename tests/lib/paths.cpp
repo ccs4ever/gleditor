@@ -81,3 +81,32 @@ TEST_F(AssetPathTest, theSourceTreeFallbackNamesRealShaders) {
                                       "/glyph.vert.glsl"))
       << "run the tests from the repository root";
 }
+
+TEST(XdgPathsTest, respectsEnvironmentAndFallbacks) {
+  const auto *prevConfig = std::getenv("XDG_CONFIG_HOME");
+  const auto *prevHome   = std::getenv("HOME");
+
+  setenv("XDG_CONFIG_HOME", "/custom/config", 1);
+  EXPECT_EQ(gleditor::paths::configDir("xudu"), "/custom/config/xudu");
+  EXPECT_EQ(gleditor::paths::configPath("xudu", "config.yaml"),
+            "/custom/config/xudu/config.yaml");
+
+  unsetenv("XDG_CONFIG_HOME");
+  setenv("HOME", "/home/testuser", 1);
+  EXPECT_EQ(gleditor::paths::configDir("xudu"), "/home/testuser/.config/xudu");
+  EXPECT_EQ(gleditor::paths::cacheDir("zigzag/slices"),
+            "/home/testuser/.cache/zigzag/slices");
+  EXPECT_EQ(gleditor::paths::dataDir("gleditor"),
+            "/home/testuser/.local/share/gleditor");
+
+  if (nullptr != prevConfig) {
+    setenv("XDG_CONFIG_HOME", prevConfig, 1);
+  } else {
+    unsetenv("XDG_CONFIG_HOME");
+  }
+  if (nullptr != prevHome) {
+    setenv("HOME", prevHome, 1);
+  } else {
+    unsetenv("HOME");
+  }
+}

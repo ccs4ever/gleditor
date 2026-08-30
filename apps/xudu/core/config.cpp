@@ -13,6 +13,8 @@
 
 #include "yaml.hpp"
 
+#include <gleditor/paths.hpp>
+
 namespace xudu {
 
 namespace {
@@ -27,6 +29,7 @@ std::string environment(const char *const name) {
 } // namespace
 
 std::string Config::toYaml() const {
+
   std::string out =
       "# Who this machine publishes xanadocs as. The name and email go into\n"
       "# the authorship record sealed with every document; the key is what\n"
@@ -68,17 +71,7 @@ std::string configPath() {
   if (const auto named = environment("XUDU_CONFIG"); !named.empty()) {
     return named;
   }
-  auto base = environment("XDG_CONFIG_HOME");
-  if (base.empty()) {
-    const auto home = environment("HOME");
-    if (home.empty()) {
-      // Nowhere to put it. The current directory is a worse guess than an
-      // obviously wrong path, which at least says what was expected.
-      return ".xudu-config.yaml";
-    }
-    base = (std::filesystem::path(home) / ".config").string();
-  }
-  return (std::filesystem::path(base) / "xudu" / "config.yaml").string();
+  return gleditor::paths::configPath("xudu", "config.yaml");
 }
 
 Config loadConfig(const std::string &path) {

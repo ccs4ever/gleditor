@@ -1244,20 +1244,19 @@ TEST(E2EBinaryOrchestrationTest, typeWithDecorationsRecordsAFormatLink) {
   // the wrong byte range if rendering ever centres the line differently.
   std::string cmd = xuduBin.string() + " --backend " + activeBackend() +
                     " --profile --fov 15 --version-id " + whole.str() +
-                    " --click 400,300 --type '[bold,italic]MARKERWORD' "
+                    " --select 5,5 --type '[bold,italic]MARKERWORD' "
                     "--do save --screenshot " +
                     ppmPath.string() + " " + storePath.string();
 
   const auto res = executeProcess(cmd);
   EXPECT_EQ(res.exitCode, 0) << "type-decorated test failed: " << res.output;
 
-  const auto caretMarker = std::string("offset ");
-  const auto caretAt     = res.output.find(caretMarker);
-  ASSERT_NE(caretAt, std::string::npos)
-      << "--click never resolved to a caret offset:\n"
-      << res.output;
+  const auto selectMarker = std::string("select: doc 0 [");
+  const auto selectAt     = res.output.find(selectMarker);
+  ASSERT_NE(selectAt, std::string::npos) << "--select never resolved:\n"
+                                         << res.output;
   const auto insertedAt = static_cast<std::uint32_t>(
-      std::atoi(res.output.c_str() + caretAt + caretMarker.size()));
+      std::atoi(res.output.c_str() + selectAt + selectMarker.size()));
 
   const std::string marker = "MARKERWORD";
 

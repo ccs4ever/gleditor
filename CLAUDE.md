@@ -1,14 +1,15 @@
 # gleditor
 
-GPU-rendered text editor library (`gleditor`) plus two programs built on it:
-`apps/gleditor` (plain editor) and `apps/xudu` (a xanadoc/xanalogical editor).
+GPU-rendered text editor library (`gleditor`) plus three programs built on it:
+`apps/gleditor` (plain editor), `apps/xudu` (a xanadoc/xanalogical editor), and
+`apps/zigzag` (a Project Xanadu Zigzag multidimensional slice visualizer).
 Backends: OpenGL, OpenGL ES, and optionally Vulkan, all driven from one
 rendering pipeline. C++23, built with GNU Make + pkg-config — **no CMake**.
 
 The README is the source of truth for anything not covered below (rendering
-architecture, accessibility, xudu's data model, SDL2/SDL3 differences, etc.)
-— read the relevant section there before making non-trivial changes in that
-area.
+architecture, accessibility, xudu's data model, zigzag's multidimensional space,
+SDL2/SDL3 differences, etc.) — read the relevant section there before making
+non-trivial changes in that area.
 
 ## Setup: submodules
 
@@ -29,10 +30,11 @@ the resulting gitlink change in the parent repo.
 ## Build
 
 ```sh
-make                              # library, both programs, both test binaries, compile_commands.json (includes Vulkan if available)
+make                              # library, all three programs, test binaries, compile_commands.json (includes Vulkan if available)
 make lib                          # library only
 make gleditor                     # apps/gleditor only
 make xudu                         # apps/xudu only
+make zigzag                       # apps/zigzag only
 make GLEDITOR_DISABLE_VULKAN=1    # disables the Vulkan backend and SPIR-V compilation
 make GLEDITOR_SDL=2               # force SDL2 instead of the SDL3/SDL2 auto-probe
 make clean
@@ -184,8 +186,11 @@ to sanity-check `.editorconfig` itself, not as a gate.
 - `apps/gleditor/` — the plain editor program
 - `apps/xudu/` — the xanadoc editor; `apps/xudu/core/` is its engine (no graphics
   dependency)
+- `apps/zigzag/` — the Xanadu Zigzag multidimensional visualizer; `apps/zigzag/core/`
+  is its engine (data model, YAML loader via `rapidyaml`, BitTorrent slice fetcher)
 - `assets/shaders/` — portable GLSL bodies; `vulkan/` holds generated SPIR-V
-- `tests/lib/`, `tests/xudu/` — unit tests for the library and engine
+- `assets/zigzag/` — sample slice YAML documents
+- `tests/lib/`, `tests/xudu/`, `tests/zigzag/` — unit tests for the library and engines
 - `tools/` — build-time and verification helpers (`compare-backends.sh`,
   `benchmark-kjv-load.py`, `layout-latency-probe.cpp`, `shader_assemble.cpp`)
 - `packaging/` — distro packaging (arch, debian, fedora, macos, windows, nix)

@@ -21,13 +21,10 @@ SegmentedOpsSpool::SegmentedOpsSpool() {
 SegmentedOpsSpool::~SegmentedOpsSpool() { clear(); }
 
 SegmentedOpsSpool::SegmentedOpsSpool(SegmentedOpsSpool &&other) noexcept
-    : arena(std::move(other.arena)),
-      segmentList(std::move(other.segmentList)),
-      opCount(other.opCount),
-      committedBytes(other.committedBytes),
+    : arena(std::move(other.arena)), segmentList(std::move(other.segmentList)),
+      opCount(other.opCount), committedBytes(other.committedBytes),
       idLookup(std::move(other.idLookup)),
-      indexLookup(std::move(other.indexLookup)),
-      activeFd(other.activeFd),
+      indexLookup(std::move(other.indexLookup)), activeFd(other.activeFd),
       activePath(std::move(other.activePath)) {
   other.opCount        = 0;
   other.committedBytes = 0;
@@ -85,9 +82,8 @@ std::uint32_t SegmentedOpsSpool::append(CompactOpNode node,
   node.firstChildIndex  = 0;
   node.nextSiblingIndex = 0;
 
-  auto *const opsArray =
-      reinterpret_cast<CompactOpNode *>(arena.base());
-  opsArray[newIndex] = node;
+  auto *const opsArray = reinterpret_cast<CompactOpNode *>(arena.base());
+  opsArray[newIndex]   = node;
 
   // Maintain child & sibling tree pointers in contiguous memory
   if (node.parentIndex > 0 && node.parentIndex <= opCount) {
@@ -132,8 +128,7 @@ CompactOpNode *SegmentedOpsSpool::get(const std::uint32_t index) {
   return &reinterpret_cast<CompactOpNode *>(arena.base())[index];
 }
 
-const CompactOpNode *
-SegmentedOpsSpool::get(const MicroversionId &id) const {
+const CompactOpNode *SegmentedOpsSpool::get(const MicroversionId &id) const {
   const auto it = idLookup.find(id.str());
   if (it == idLookup.end()) {
     return nullptr;
@@ -145,8 +140,7 @@ bool SegmentedOpsSpool::contains(const MicroversionId &id) const {
   return idLookup.contains(id.str());
 }
 
-std::uint32_t
-SegmentedOpsSpool::indexOf(const MicroversionId &id) const {
+std::uint32_t SegmentedOpsSpool::indexOf(const MicroversionId &id) const {
   const auto it = idLookup.find(id.str());
   return it == idLookup.end() ? 0U : it->second;
 }
@@ -215,8 +209,9 @@ bool SegmentedOpsSpool::addSealedSegment(const std::filesystem::path &path) {
     ::close(fd);
     return false;
   }
-  const auto bytes    = static_cast<std::size_t>(st.st_size);
-  const auto segCount = static_cast<std::uint32_t>(bytes / sizeof(CompactOpNode));
+  const auto bytes = static_cast<std::size_t>(st.st_size);
+  const auto segCount =
+      static_cast<std::uint32_t>(bytes / sizeof(CompactOpNode));
   if (0 == segCount) {
     ::close(fd);
     return false;
@@ -224,10 +219,11 @@ bool SegmentedOpsSpool::addSealedSegment(const std::filesystem::path &path) {
 
   const auto startOffset = (opCount + 1U) * sizeof(CompactOpNode);
 
-  bool mapped = false;
+  bool mapped   = false;
   const auto ps = VirtualMemoryArena::pageSize();
   if (arena.isValid() && (startOffset % ps == 0) && (bytes % ps == 0)) {
-    mapped = arena.mapFileFixed(arena.base() + startOffset, fd, 0, bytes, false);
+    mapped =
+        arena.mapFileFixed(arena.base() + startOffset, fd, 0, bytes, false);
     if (mapped) {
       committedBytes = std::max(committedBytes, startOffset + bytes);
     }
@@ -238,8 +234,7 @@ bool SegmentedOpsSpool::addSealedSegment(const std::filesystem::path &path) {
       ::close(fd);
       return false;
     }
-    const auto readBytes =
-        ::read(fd, arena.base() + startOffset, bytes);
+    const auto readBytes = ::read(fd, arena.base() + startOffset, bytes);
     if (readBytes != static_cast<ssize_t>(bytes)) {
       ::close(fd);
       return false;
@@ -258,8 +253,7 @@ bool SegmentedOpsSpool::addSealedSegment(const std::filesystem::path &path) {
   return true;
 }
 
-bool SegmentedOpsSpool::openActiveSegment(
-    const std::filesystem::path &path) {
+bool SegmentedOpsSpool::openActiveSegment(const std::filesystem::path &path) {
   if (activeFd >= 0) {
     ::close(activeFd);
     activeFd = -1;
@@ -269,8 +263,7 @@ bool SegmentedOpsSpool::openActiveSegment(
   return activeFd >= 0;
 }
 
-bool SegmentedOpsSpool::sealActive(
-    const std::filesystem::path &newActivePath) {
+bool SegmentedOpsSpool::sealActive(const std::filesystem::path &newActivePath) {
   flush();
   if (activeFd >= 0) {
     ::close(activeFd);

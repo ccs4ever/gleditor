@@ -12,6 +12,8 @@
 #ifndef GLEDITOR_PATHS_H
 #define GLEDITOR_PATHS_H
 
+#include <cstdlib>
+#include <filesystem>
 #include <string>
 #include <string_view>
 
@@ -53,6 +55,98 @@ namespace gleditor {
  * process and would otherwise see whichever was set first.
  */
 void resetAssetDirForTesting();
+
+namespace paths {
+
+/// User's home directory ($HOME or USERPROFILE), or empty if unset.
+[[nodiscard]] inline std::string userHome() {
+  if (const auto *home = std::getenv("HOME");
+      nullptr != home && '\0' != home[0]) {
+    return home;
+  }
+#if defined(_WIN32)
+  if (const auto *userProfile = std::getenv("USERPROFILE");
+      nullptr != userProfile && '\0' != userProfile[0]) {
+    return userProfile;
+  }
+#endif
+  return {};
+}
+
+/// Base XDG config directory ($XDG_CONFIG_HOME or ~/.config), optionally
+/// appended with appName.
+[[nodiscard]] inline std::string
+configDir(const std::string_view appName = {}) {
+  std::filesystem::path base;
+  if (const auto *env = std::getenv("XDG_CONFIG_HOME");
+      nullptr != env && '\0' != env[0]) {
+    base = env;
+  } else if (const auto home = userHome(); !home.empty()) {
+    base = std::filesystem::path(home) / ".config";
+  } else {
+    base = ".config";
+  }
+  if (!appName.empty()) {
+    base /= appName;
+  }
+  return base.string();
+}
+
+/// Base XDG data directory ($XDG_DATA_HOME or ~/.local/share), optionally
+/// appended with appName.
+[[nodiscard]] inline std::string dataDir(const std::string_view appName = {}) {
+  std::filesystem::path base;
+  if (const auto *env = std::getenv("XDG_DATA_HOME");
+      nullptr != env && '\0' != env[0]) {
+    base = env;
+  } else if (const auto home = userHome(); !home.empty()) {
+    base = std::filesystem::path(home) / ".local" / "share";
+  } else {
+    base = ".local/share";
+  }
+  if (!appName.empty()) {
+    base /= appName;
+  }
+  return base.string();
+}
+
+/// Base XDG cache directory ($XDG_CACHE_HOME or ~/.cache), optionally
+/// appended with appName.
+[[nodiscard]] inline std::string cacheDir(const std::string_view appName = {}) {
+  std::filesystem::path base;
+  if (const auto *env = std::getenv("XDG_CACHE_HOME");
+      nullptr != env && '\0' != env[0]) {
+    base = env;
+  } else if (const auto home = userHome(); !home.empty()) {
+    base = std::filesystem::path(home) / ".cache";
+  } else {
+    base = ".cache";
+  }
+  if (!appName.empty()) {
+    base /= appName;
+  }
+  return base.string();
+}
+
+/// Path to @p filename inside configDir(appName).
+[[nodiscard]] inline std::string configPath(const std::string_view appName,
+                                            const std::string_view filename) {
+  return (std::filesystem::path(configDir(appName)) / filename).string();
+}
+
+/// Path to @p filename inside dataDir(appName).
+[[nodiscard]] inline std::string dataPath(const std::string_view appName,
+                                          const std::string_view filename) {
+  return (std::filesystem::path(dataDir(appName)) / filename).string();
+}
+
+/// Path to @p filename inside cacheDir(appName).
+[[nodiscard]] inline std::string cachePath(const std::string_view appName,
+                                           const std::string_view filename) {
+  return (std::filesystem::path(cacheDir(appName)) / filename).string();
+}
+
+} // namespace paths
 
 } // namespace gleditor
 
