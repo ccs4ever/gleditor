@@ -62,6 +62,8 @@ public:
   static FontManager &instance();
 
   FontFacePtr getFont(const std::string &fontSpec);
+  FontFacePtr getFallbackFont(const FontFacePtr &primaryFont,
+                              uint32_t codepoint);
 
 private:
   FontManager();
@@ -69,6 +71,7 @@ private:
 
   FT_Library ftLib_{};
   std::unordered_map<std::string, FontFacePtr> cache_;
+  std::unordered_map<std::string, FontFacePtr> fallbackCache_;
 };
 
 } // namespace gleditor::text

@@ -165,6 +165,7 @@ FontManager::FontManager() {
 
 FontManager::~FontManager() {
   cache_.clear();
+  fallbackCache_.clear();
   if (ftLib_) {
     FT_Done_FreeType(ftLib_);
     ftLib_ = nullptr;
@@ -182,6 +183,61 @@ FontFacePtr FontManager::getFont(const std::string &fontSpec) {
   auto font = std::make_shared<FontFace>(ftLib_, fontPath, parsed.pointSize);
   cache_[fontSpec] = font;
   return font;
+}
+
+FontFacePtr FontManager::getFallbackFont(const FontFacePtr &primaryFont,
+                                         const uint32_t codepoint) {
+  if (!primaryFont) {
+    return nullptr;
+  }
+  const auto cacheKey = std::format("{}_{:#x}", primaryFont->key(), codepoint);
+  const auto it       = fallbackCache_.find(cacheKey);
+  if (it != fallbackCache_.end()) {
+    return it->second;
+  }
+
+  FcInit();
+  FcPattern *pat = FcPatternCreate();
+  FcCharSet *cs  = FcCharSetCreate();
+  FcCharSetAddChar(cs, codepoint);
+  FcPatternAddCharSet(pat, FC_CHARSET, cs);
+  FcPatternAddDouble(pat, FC_SIZE, primaryFont->pointSize());
+  FcPatternAddString(
+      pat, FC_FAMILY,
+      reinterpret_cast<const FcChar8 *>(primaryFont->family().c_str()));
+
+  FcConfigSubstitute(nullptr, pat, FcMatchPattern);
+  FcDefaultSubstitute(pat);
+
+  FcResult result  = FcResultNoMatch;
+  FcPattern *match = FcFontMatch(nullptr, pat, &result);
+  FcCharSetDestroy(cs);
+  FcPatternDestroy(pat);
+
+  if (!match) {
+    fallbackCache_[cacheKey] = nullptr;
+    return nullptr;
+  }
+
+  FcChar8 *file = nullptr;
+  if (FcPatternGetString(match, FC_FILE, 0, &file) != FcResultMatch || !file) {
+    FcPatternDestroy(match);
+    fallbackCache_[cacheKey] = nullptr;
+    return nullptr;
+  }
+
+  std::string fontPath = reinterpret_cast<const char *>(file);
+  FcPatternDestroy(match);
+
+  try {
+    auto fallback =
+        std::make_shared<FontFace>(ftLib_, fontPath, primaryFont->pointSize());
+    fallbackCache_[cacheKey] = fallback;
+    return fallback;
+  } catch (...) {
+    fallbackCache_[cacheKey] = nullptr;
+    return nullptr;
+  }
 }
 
 } // namespace gleditor::text

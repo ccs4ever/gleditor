@@ -150,3 +150,18 @@ TEST(TextLayoutTest, overlappingDecoratedRangesCombine) {
     }
   }
 }
+
+TEST(TextLayoutTest, MultiFontFallbackShaping) {
+  auto &fm  = FontManager::instance();
+  auto font = fm.getFont("Monospace 16");
+  ASSERT_NE(font, nullptr);
+
+  // Test Unicode text containing CJK and symbol glyphs
+  const std::string text = "Hello 世界 🌍 test";
+  auto shaping           = TextLayout::layoutSingleLine(text, font);
+
+  EXPECT_GT(shaping.limit, 0);
+  EXPECT_GT(shaping.textWidthPx, 0);
+  EXPECT_FALSE(shaping.glyphs.empty());
+  EXPECT_FALSE(shaping.clusters.empty());
+}

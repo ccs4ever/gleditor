@@ -26,9 +26,9 @@ struct ShapedRun {
   std::vector<ShapedGlyph> glyphs;
 };
 
-ShapedRun shapeText(std::string_view text, hb_font_t *hbFont) {
+ShapedRun shapeText(std::string_view text, const FontFacePtr &font) {
   ShapedRun run;
-  if (text.empty() || !hbFont) {
+  if (text.empty() || !font || !font->hbFont()) {
     return run;
   }
 
@@ -37,7 +37,7 @@ ShapedRun shapeText(std::string_view text, hb_font_t *hbFont) {
                      static_cast<int>(text.size()));
   hb_buffer_guess_segment_properties(buf);
 
-  hb_shape(hbFont, buf, nullptr, 0);
+  hb_shape(font->hbFont(), buf, nullptr, 0);
 
   unsigned int glyphCount    = 0;
   hb_glyph_info_t *glyphInfo = hb_buffer_get_glyph_infos(buf, &glyphCount);
@@ -46,13 +46,64 @@ ShapedRun shapeText(std::string_view text, hb_font_t *hbFont) {
 
   run.glyphs.reserve(glyphCount);
   for (unsigned int i = 0; i < glyphCount; i++) {
+    auto glyphIdx = glyphInfo[i].codepoint;
+    float xAdv    = static_cast<float>(glyphPos[i].x_advance) / 64.0F;
+    float yAdv    = static_cast<float>(glyphPos[i].y_advance) / 64.0F;
+    float xOff    = static_cast<float>(glyphPos[i].x_offset) / 64.0F;
+    float yOff    = static_cast<float>(glyphPos[i].y_offset) / 64.0F;
+
+    if (glyphIdx == 0 && glyphInfo[i].cluster < text.size()) {
+      const char *p   = text.data() + glyphInfo[i].cluster;
+      const char *end = text.data() + text.size();
+      uint32_t cp     = 0;
+      if (p < end) {
+        const auto c = static_cast<unsigned char>(*p);
+        if (c < 0x80) {
+          cp = c;
+        } else if ((c & 0xE0) == 0xC0 && p + 1 < end) {
+          cp = ((c & 0x1F) << 6) | (static_cast<unsigned char>(p[1]) & 0x3F);
+        } else if ((c & 0xF0) == 0xE0 && p + 2 < end) {
+          cp = ((c & 0x0F) << 12) |
+               ((static_cast<unsigned char>(p[1]) & 0x3F) << 6) |
+               (static_cast<unsigned char>(p[2]) & 0x3F);
+        } else if ((c & 0xF8) == 0xF0 && p + 3 < end) {
+          cp = ((c & 0x07) << 18) |
+               ((static_cast<unsigned char>(p[1]) & 0x3F) << 12) |
+               ((static_cast<unsigned char>(p[2]) & 0x3F) << 6) |
+               (static_cast<unsigned char>(p[3]) & 0x3F);
+        }
+      }
+      if (cp > 32) {
+        auto fallback = FontManager::instance().getFallbackFont(font, cp);
+        if (fallback && fallback->hbFont()) {
+          hb_buffer_t *fbuf = hb_buffer_create();
+          hb_buffer_add_utf8(fbuf, text.data() + glyphInfo[i].cluster, -1, 0,
+                             -1);
+          hb_buffer_guess_segment_properties(fbuf);
+          hb_shape(fallback->hbFont(), fbuf, nullptr, 0);
+          unsigned int fCount    = 0;
+          hb_glyph_info_t *fInfo = hb_buffer_get_glyph_infos(fbuf, &fCount);
+          hb_glyph_position_t *fPos =
+              hb_buffer_get_glyph_positions(fbuf, &fCount);
+          if (fCount > 0 && fInfo[0].codepoint != 0) {
+            glyphIdx = fInfo[0].codepoint;
+            xAdv     = static_cast<float>(fPos[0].x_advance) / 64.0F;
+            yAdv     = static_cast<float>(fPos[0].y_advance) / 64.0F;
+            xOff     = static_cast<float>(fPos[0].x_offset) / 64.0F;
+            yOff     = static_cast<float>(fPos[0].y_offset) / 64.0F;
+          }
+          hb_buffer_destroy(fbuf);
+        }
+      }
+    }
+
     run.glyphs.push_back(ShapedGlyph{
-        .glyphIndex        = glyphInfo[i].codepoint,
+        .glyphIndex        = glyphIdx,
         .clusterByteOffset = glyphInfo[i].cluster,
-        .xAdvance          = static_cast<float>(glyphPos[i].x_advance) / 64.0F,
-        .yAdvance          = static_cast<float>(glyphPos[i].y_advance) / 64.0F,
-        .xOffset           = static_cast<float>(glyphPos[i].x_offset) / 64.0F,
-        .yOffset           = static_cast<float>(glyphPos[i].y_offset) / 64.0F,
+        .xAdvance          = xAdv,
+        .yAdvance          = yAdv,
+        .xOffset           = xOff,
+        .yOffset           = yOff,
     });
   }
 
@@ -129,8 +180,8 @@ PageShaping TextLayout::layoutPage(std::string_view text,
                       text.size(), "",
                       reinterpret_cast<char *>(breakAttrs.data()));
 
-  // 2. Shape the text with HarfBuzz
-  const auto shaped = shapeText(text, font->hbFont());
+  // 2. Shape the text with HarfBuzz (with multi-font fallback)
+  const auto shaped = shapeText(text, font);
   if (shaped.glyphs.empty()) {
     shaping.limit = 0;
     return shaping;
