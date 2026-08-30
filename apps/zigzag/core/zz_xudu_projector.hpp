@@ -37,7 +37,8 @@ struct XuduProjectorOptions {
   bool split_by_paragraphs{true};
 };
 
-/// Result of linearizing / rasterizing a Zigzag space into a readable text stream.
+/// Result of linearizing / rasterizing a Zigzag space into a readable text
+/// stream.
 struct ZzRasterResult {
   std::string text;
   std::vector<CellID> cell_sequence;
@@ -59,7 +60,8 @@ projectXuduToZigzag(const std::vector<XuduDocInput> &docs,
                     const XuduProjectorOptions &opts = {});
 
 /**
- * @brief Project a Xudu Store and its active microversions into a Zigzag structure.
+ * @brief Project a Xudu Store and its active microversions into a Zigzag
+ * structure.
  */
 [[nodiscard]] ZzStructureDocument
 projectStoreToZigzag(const xudu::Store &store,
@@ -71,25 +73,23 @@ projectStoreToZigzag(const xudu::Store &store,
  *        suitable for Xanadoc editing or reading.
  *
  * Traverses cells starting from @p startCell (or document focus if 0) along
- * @p primaryDim (e.g. lines/sentences) and optionally @p secondaryDim (e.g. paragraphs).
+ * @p primaryDim (e.g. lines/sentences) and optionally @p secondaryDim (e.g.
+ * paragraphs).
  */
-[[nodiscard]] ZzRasterResult
-rasterizeZzStructure(const ZzStructureDocument &doc,
-                     const DimID &primaryDim   = "d.doc",
-                     const DimID &secondaryDim = "d.transclude",
-                     CellID startCell          = 0);
+[[nodiscard]] ZzRasterResult rasterizeZzStructure(
+    const ZzStructureDocument &doc, const DimID &primaryDim = "d.doc",
+    const DimID &secondaryDim = "d.transclude", CellID startCell = 0);
 
 /**
- * @brief Convert a Zigzag structure document into a signed, standalone xudu::LinkPackage.
+ * @brief Convert a Zigzag structure document into a signed, standalone
+ * xudu::LinkPackage.
  *
  * Dimensional connections are encoded as typed Xanalinks (LinkType::Dimension)
  * with owner "dim:<dimension>".
  */
-[[nodiscard]] xudu::LinkPackage
-zzStructureToLinkPackage(const ZzStructureDocument &doc,
-                         const xudu::MutableKeys &keys,
-                         const std::string &salt = "zigzag_slice",
-                         std::int64_t sequence   = 1);
+[[nodiscard]] xudu::LinkPackage zzStructureToLinkPackage(
+    const ZzStructureDocument &doc, const xudu::MutableKeys &keys,
+    const std::string &salt = "zigzag_slice", std::int64_t sequence = 1);
 
 /**
  * @brief Convert a xudu::LinkPackage containing dimensional links back into a
@@ -99,12 +99,12 @@ zzStructureToLinkPackage(const ZzStructureDocument &doc,
 linkPackageToZzStructure(const xudu::LinkPackage &pkg);
 
 /**
- * @brief Validate that a Zigzag structure strictly satisfies the 2-rank manifold
- *        invariant (at most 1 positive and 1 negative link per dimension per cell).
+ * @brief Validate that a Zigzag structure strictly satisfies the 2-rank
+ * manifold invariant (at most 1 positive and 1 negative link per dimension per
+ * cell).
  */
-[[nodiscard]] bool
-validate2RankManifold(const ZzStructureDocument &doc,
-                      std::string *errorOut = nullptr);
+[[nodiscard]] bool validate2RankManifold(const ZzStructureDocument &doc,
+                                         std::string *errorOut = nullptr);
 
 } // namespace zigzag
 

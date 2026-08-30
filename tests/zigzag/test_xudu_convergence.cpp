@@ -97,7 +97,8 @@ TEST(ZzXuduConvergenceTest, RasterizeZzStructure) {
   EXPECT_EQ(raster.cell_sequence[2], 3U);
   EXPECT_EQ(raster.cell_sequence[3], 4U);
 
-  EXPECT_EQ(raster.text, "Chapter One. The Beginning.\n\nChapter Two. The Continuation.");
+  EXPECT_EQ(raster.text,
+            "Chapter One. The Beginning.\n\nChapter Two. The Continuation.");
 }
 
 TEST(ZzXuduConvergenceTest, LinkPackageRoundTrip) {

@@ -346,11 +346,11 @@ public:
                           "the caret is what gets published.");
         return;
       }
-      auto *const caret   = renderer->editCaret();
-      const auto which    = nullptr != caret && caret->active() &&
+      auto *const caret = renderer->editCaret();
+      const auto which = nullptr != caret && caret->active() &&
                                  caret->documentIndex() < session.views().size()
-                                ? caret->documentIndex()
-                                : 0U;
+                             ? caret->documentIndex()
+                             : 0U;
       const auto version  = session.versionOf(which);
       const auto storeIdx = session.storeIndexOf(which);
       const auto who      = session.author();
@@ -458,10 +458,10 @@ public:
         return;
       }
       auto *const caret = renderer->editCaret();
-      const auto which  = nullptr != caret && caret->active() &&
+      const auto which = nullptr != caret && caret->active() &&
                                  caret->documentIndex() < session.views().size()
-                              ? caret->documentIndex()
-                              : (switcher ? switcher->activeDocIndex() : 0U);
+                             ? caret->documentIndex()
+                             : (switcher ? switcher->activeDocIndex() : 0U);
       if (which >= session.views().size()) {
         session.saveAll();
         return;
@@ -525,7 +525,7 @@ public:
       }
       auto *const caret = renderer->editCaret();
       const auto which  = nullptr != caret && caret->active() &&
-                                 caret->documentIndex() < rState.docs.size()
+                                  caret->documentIndex() < rState.docs.size()
                               ? caret->documentIndex()
                               : (switcher ? switcher->activeDocIndex() : 0U);
       if (which < rState.docs.size()) {

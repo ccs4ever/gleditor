@@ -28,10 +28,9 @@ bool spansOverlap(const xudu::PrimediaSpan &a, const xudu::PrimediaSpan &b) {
 
 } // namespace
 
-ZzStructureDocument
-projectXuduToZigzag(const std::vector<XuduDocInput> &docs,
-                    const std::vector<xudu::Link> &links,
-                    const XuduProjectorOptions &opts) {
+ZzStructureDocument projectXuduToZigzag(const std::vector<XuduDocInput> &docs,
+                                        const std::vector<xudu::Link> &links,
+                                        const XuduProjectorOptions &opts) {
   ZzStructureDocument result;
   result.meta.name = "Xudu Xanadoc Space";
   result.focus     = 1;
@@ -90,12 +89,11 @@ projectXuduToZigzag(const std::vector<XuduDocInput> &docs,
           end = doc.text.size();
         }
 
-        std::string paraText = doc.text.substr(start, end - start);
+        std::string paraText  = doc.text.substr(start, end - start);
         const auto firstNonWs = paraText.find_first_not_of(" \t\r\n");
         const auto lastNonWs  = paraText.find_last_not_of(" \t\r\n");
         if (firstNonWs != std::string::npos && lastNonWs != std::string::npos) {
-          paraText =
-              paraText.substr(firstNonWs, lastNonWs - firstNonWs + 1);
+          paraText = paraText.substr(firstNonWs, lastNonWs - firstNonWs + 1);
         }
 
         if (!paraText.empty()) {
@@ -144,8 +142,8 @@ projectXuduToZigzag(const std::vector<XuduDocInput> &docs,
   // --- 1. Link sequential reading order along opts.doc_dimension ---
   for (const auto &chain : docCellChains) {
     for (std::size_t i = 0; i + 1 < chain.size(); ++i) {
-      const CellID c1 = chain[i];
-      const CellID c2 = chain[i + 1];
+      const CellID c1                                     = chain[i];
+      const CellID c2                                     = chain[i + 1];
       result.cells[c1].dimensions[opts.doc_dimension].pos = c2;
       result.cells[c2].dimensions[opts.doc_dimension].neg = c1;
     }
@@ -204,8 +202,8 @@ projectStoreToZigzag(const xudu::Store &store,
                      const XuduProjectorOptions &opts) {
   std::vector<XuduDocInput> docInputs;
   for (const auto &verId : versions) {
-    const auto ver            = store.rebuild(verId);
-    std::string assembledText = store.textOf(verId);
+    const auto ver                        = store.rebuild(verId);
+    std::string assembledText             = store.textOf(verId);
     std::vector<xudu::PrimediaSpan> spans = ver.pieces();
 
     docInputs.push_back(XuduDocInput{
@@ -224,12 +222,10 @@ projectStoreToZigzag(const xudu::Store &store,
   return projectXuduToZigzag(docInputs, allLinks, opts);
 }
 
-
-ZzRasterResult
-rasterizeZzStructure(const ZzStructureDocument &doc,
-                     const DimID &primaryDim,
-                     const DimID &secondaryDim,
-                     CellID startCell) {
+ZzRasterResult rasterizeZzStructure(const ZzStructureDocument &doc,
+                                    const DimID &primaryDim,
+                                    const DimID &secondaryDim,
+                                    CellID startCell) {
   ZzRasterResult result;
   if (doc.cells.empty()) {
     return result;
@@ -287,7 +283,7 @@ rasterizeZzStructure(const ZzStructureDocument &doc,
     }
 
     visitedCols.clear();
-    CellID current = colHead;
+    CellID current  = colHead;
     bool firstInRow = true;
 
     while (current != 0 && !visitedCols.contains(current)) {
@@ -324,18 +320,18 @@ rasterizeZzStructure(const ZzStructureDocument &doc,
   }
 
   // Remove trailing newlines
-  while (!result.text.empty() && (result.text.back() == '\n' || result.text.back() == ' ')) {
+  while (!result.text.empty() &&
+         (result.text.back() == '\n' || result.text.back() == ' ')) {
     result.text.pop_back();
   }
 
   return result;
 }
 
-xudu::LinkPackage
-zzStructureToLinkPackage(const ZzStructureDocument &doc,
-                         const xudu::MutableKeys &keys,
-                         const std::string &salt,
-                         const std::int64_t sequence) {
+xudu::LinkPackage zzStructureToLinkPackage(const ZzStructureDocument &doc,
+                                           const xudu::MutableKeys &keys,
+                                           const std::string &salt,
+                                           const std::int64_t sequence) {
   std::vector<xudu::GlobalLink> links;
   std::map<std::string, xudu::Scroll> scrolls;
 
@@ -367,12 +363,11 @@ zzStructureToLinkPackage(const ZzStructureDocument &doc,
 
   return xudu::publishLinkPackage(
       keys, salt, doc.meta.name, sequence,
-      static_cast<std::uint64_t>(std::time(nullptr)),
-      std::move(links), std::move(scrolls));
+      static_cast<std::uint64_t>(std::time(nullptr)), std::move(links),
+      std::move(scrolls));
 }
 
-ZzStructureDocument
-linkPackageToZzStructure(const xudu::LinkPackage &pkg) {
+ZzStructureDocument linkPackageToZzStructure(const xudu::LinkPackage &pkg) {
   ZzStructureDocument doc;
   doc.meta.name = pkg.title.empty() ? "Imported Link Package" : pkg.title;
   doc.focus     = 1;
@@ -384,24 +379,24 @@ linkPackageToZzStructure(const xudu::LinkPackage &pkg) {
     if (link.type == xudu::LinkType::Dimension) {
       for (const auto &span : link.left) {
         if (!spanToCell.contains(span)) {
-          const CellID id = nextCellId++;
+          const CellID id  = nextCellId++;
           spanToCell[span] = id;
           zzCell cell;
-          cell.id = id;
-          cell.type = "cell";
+          cell.id        = id;
+          cell.type      = "cell";
           cell.text_data = std::format("Cell #{} [{}]", id, span.scroll);
-          doc.cells[id] = std::move(cell);
+          doc.cells[id]  = std::move(cell);
         }
       }
       for (const auto &span : link.right) {
         if (!spanToCell.contains(span)) {
-          const CellID id = nextCellId++;
+          const CellID id  = nextCellId++;
           spanToCell[span] = id;
           zzCell cell;
-          cell.id = id;
-          cell.type = "cell";
+          cell.id        = id;
+          cell.type      = "cell";
           cell.text_data = std::format("Cell #{} [{}]", id, span.scroll);
-          doc.cells[id] = std::move(cell);
+          doc.cells[id]  = std::move(cell);
         }
       }
 
@@ -411,8 +406,8 @@ linkPackageToZzStructure(const xudu::LinkPackage &pkg) {
       }
 
       if (!link.left.empty() && !link.right.empty()) {
-        const CellID c1 = spanToCell[link.left.front()];
-        const CellID c2 = spanToCell[link.right.front()];
+        const CellID c1                       = spanToCell[link.left.front()];
+        const CellID c2                       = spanToCell[link.right.front()];
         doc.cells[c1].dimensions[dimName].pos = c2;
         doc.cells[c2].dimensions[dimName].neg = c1;
       }
@@ -422,23 +417,27 @@ linkPackageToZzStructure(const xudu::LinkPackage &pkg) {
   return doc;
 }
 
-bool validate2RankManifold(const ZzStructureDocument &doc, std::string *errorOut) {
+bool validate2RankManifold(const ZzStructureDocument &doc,
+                           std::string *errorOut) {
   for (const auto &[id, cell] : doc.cells) {
     for (const auto &[dim, linkPairs] : cell.dimensions) {
       if (linkPairs.pos != 0) {
         const auto targetIt = doc.cells.find(linkPairs.pos);
         if (targetIt == doc.cells.end()) {
           if (errorOut) {
-            *errorOut = std::format("Cell {} links to non-existent positive target {} on dimension {}",
+            *errorOut = std::format("Cell {} links to non-existent positive "
+                                    "target {} on dimension {}",
                                     id, linkPairs.pos, dim);
           }
           return false;
         }
         const auto backIt = targetIt->second.dimensions.find(dim);
-        if (backIt == targetIt->second.dimensions.end() || backIt->second.neg != id) {
+        if (backIt == targetIt->second.dimensions.end() ||
+            backIt->second.neg != id) {
           if (errorOut) {
-            *errorOut = std::format("Asymmetric link between {} and {} on dimension {}",
-                                    id, linkPairs.pos, dim);
+            *errorOut =
+                std::format("Asymmetric link between {} and {} on dimension {}",
+                            id, linkPairs.pos, dim);
           }
           return false;
         }
@@ -447,16 +446,19 @@ bool validate2RankManifold(const ZzStructureDocument &doc, std::string *errorOut
         const auto targetIt = doc.cells.find(linkPairs.neg);
         if (targetIt == doc.cells.end()) {
           if (errorOut) {
-            *errorOut = std::format("Cell {} links to non-existent negative target {} on dimension {}",
+            *errorOut = std::format("Cell {} links to non-existent negative "
+                                    "target {} on dimension {}",
                                     id, linkPairs.neg, dim);
           }
           return false;
         }
         const auto backIt = targetIt->second.dimensions.find(dim);
-        if (backIt == targetIt->second.dimensions.end() || backIt->second.pos != id) {
+        if (backIt == targetIt->second.dimensions.end() ||
+            backIt->second.pos != id) {
           if (errorOut) {
-            *errorOut = std::format("Asymmetric link between {} and {} on dimension {}",
-                                    id, linkPairs.neg, dim);
+            *errorOut =
+                std::format("Asymmetric link between {} and {} on dimension {}",
+                            id, linkPairs.neg, dim);
           }
           return false;
         }
