@@ -32,8 +32,11 @@
 
 #include <cstdint>
 #include <map>
+#include <memory>
 #include <optional>
+#include <span>
 #include <string>
+#include <string_view>
 #include <vector>
 
 #include "microversion.hpp"
@@ -143,6 +146,16 @@ struct Publication {
   /// them.
   std::map<std::string, Scroll> scrolls;
 
+  /// Where the operations are, in the order they must be read to reconstruct
+  /// the history: republishing seals only what is new, so a reader wanting
+  /// the whole of it fetches one torrent per segment, in this order --
+  /// segment.at and segment.length are operation counts here, not bytes, and
+  /// segment.torrent (with segment.path, always sealedOpsName) is where to
+  /// find the file. Empty in a manifest published before this existed, which
+  /// is not the same as a document with no history -- a reader gets the
+  /// pieces either way and no more.
+  std::vector<ScrollSegment> opsSegments;
+
   Signature signature;
 
   /// Where a reader looks for the newest publication of this document.
@@ -205,23 +218,73 @@ decodePublication(std::string_view encoded);
  * and begins at offset zero of the stream, which is what keeps every address
  * already handed out pointing where it always did.
  *
+ * The operations are sealed the same way, as a segment of their own -- see
+ * sealableOps() -- but addressed by operation count rather than by byte, since
+ * an operation has no fixed size. @p opsAlreadySealed is how many the last
+ * seal already carried; @p opsSegment comes back empty when nothing has been
+ * recorded since, which republishing over no new edits leaves it free to
+ * treat as "nothing to add" rather than sealing a segment with nothing in it.
+ *
  * @param into Directory to write the torrent and its files into, so that
  *        something can seed them. Nothing is written when it is empty.
- * @return The scroll the local spool now is, ready to be handed to publish().
+ * @param priorScroll The scroll the local spool already is, from the last
+ *        seal -- a default-constructed one, with no segments, for a first
+ *        seal. Its segments are carried forward; only what has been written
+ *        since its last one becomes a new segment.
+ * @param opsAlreadySealed How many operations, by Store::opCount(), the last
+ *        seal already carried. Zero for a first seal.
+ * @return The scroll the local spool now is, every segment included, ready to
+ *         be handed to publish(); and the new operations segment, if there
+ *         were any operations to seal.
  */
 struct SealedScroll {
   Scroll scroll;
+  /// The new operations segment this seal produced, if it recorded anything
+  /// since @p opsAlreadySealed. Not part of @p scroll: operations are not
+  /// addressed by pieces the way primedia is, so nothing above resolves an
+  /// offset into them -- this is carried separately, for the manifest's own
+  /// ops-segment list, and assembled by historyFromSeal() rather than by
+  /// Resolver::read().
+  std::optional<ScrollSegment> opsSegment;
   /// The .torrent describing the files, for handing to a seeder.
   std::string torrentFile;
   InfoHash hash;
   /// The authorship record sealed in with the content, and its signature.
   SignedProvenance provenance;
 };
-[[nodiscard]] SealedScroll sealLocalSpool(const Store &store,
-                                          const MutableKeys &keys,
-                                          const std::string &salt,
-                                          const std::string &into,
-                                          const SignedProvenance &provenance);
+[[nodiscard]] SealedScroll sealLocalSpool(
+    const Store &store, const MutableKeys &keys, const std::string &salt,
+    const std::string &into, const SignedProvenance &provenance,
+    const Scroll &priorScroll = {}, std::uint32_t opsAlreadySealed = 0);
+
+/**
+ * @brief What a caller needs remembered between one seal and the next, to
+ *        make the next one incremental.
+ *
+ * sealLocalSpool() takes a prior scroll and how many operations were already
+ * sealed; publish() takes every operations segment sealed so far. This is
+ * the three of them together, since a caller across two runs of the program
+ * has nowhere else to keep them.
+ */
+struct SealState {
+  /// The scroll the local spool has become, as of the last seal -- what
+  /// @ref sealLocalSpool's priorScroll parameter wants next time.
+  Scroll scroll;
+  /// How many operations, by Store::opCount(), the last seal already
+  /// carried -- what @ref sealLocalSpool's opsAlreadySealed parameter wants
+  /// next time.
+  std::uint32_t opsAlreadySealed{};
+  /// Every operations segment sealed so far, oldest first -- what publish()'s
+  /// opsSegments parameter wants next time.
+  std::vector<ScrollSegment> opsSegments;
+};
+
+/// @p state, encoded so it can be written to a file and read back exactly.
+[[nodiscard]] std::string encodeSealState(const SealState &state);
+
+/// The inverse of encodeSealState(), or nothing when @p encoded is not one.
+[[nodiscard]] std::optional<SealState>
+decodeSealState(std::string_view encoded);
 
 /**
  * @brief Publish @p version of @p store under @p keys.
@@ -234,14 +297,18 @@ struct SealedScroll {
  *
  * @param sequence Which publication of this name. Must rise, or readers who
  *        already have an earlier one will keep it.
+ * @param opsSegments Every operations segment sealed so far, oldest first --
+ *        SealedScroll::opsSegment from this seal and every one before it, the
+ *        way @p localSealedAs already carries every primedia segment forward.
+ *        Carried into the manifest as-is; see Publication::opsSegments.
  * @throws std::runtime_error if the version points at unpublished content.
  */
-[[nodiscard]] Publication publish(const Store &store,
-                                  const MicroversionId &version,
-                                  const MutableKeys &keys, std::string salt,
-                                  std::string title, std::int64_t sequence,
-                                  std::uint64_t published,
-                                  const Scroll *localSealedAs = nullptr);
+[[nodiscard]] Publication
+publish(const Store &store, const MicroversionId &version,
+        const MutableKeys &keys, std::string salt, std::string title,
+        std::int64_t sequence, std::uint64_t published,
+        const Scroll *localSealedAs                   = nullptr,
+        const std::vector<ScrollSegment> &opsSegments = {});
 
 /**
  * @brief The global name of the scroll @p span points into.
@@ -282,6 +349,69 @@ globalise(const Store &store, const PrimediaSpan &span,
 [[nodiscard]] std::optional<PrimediaSpan>
 localise(Store &store, const GlobalSpan &span,
          const std::map<std::string, Scroll> &scrolls);
+
+/**
+ * @brief The operations of a published document, ready to be sealed.
+ *
+ * Not simply the store's own encoding of them. An operation names content by
+ * a ScrollId, which is a small integer meaning something only in the store
+ * that handed it out -- and the most common one, zero, means "my own primedia
+ * spool". Sealed as they stand, every operation a publisher typed would point
+ * a reader at the reader's own spool, and resolve to whatever happened to be
+ * at those offsets. So the seal carries the table that says what those
+ * integers meant, in global keys.
+ *
+ * Zero is not in the table. It is the scroll being sealed alongside these
+ * operations, whose bytes begin at offset zero of the same piece stream, so a
+ * local offset and a scroll offset are the same number and the reader already
+ * holds the answer.
+ *
+ * @param sinceExclusive See Store::opRecords(). A publisher republishing
+ *        seals only the operations recorded since their last seal; each one
+ *        still names its own parent and source by full microversion, so a
+ *        reader who already has everything up to that point needs nothing
+ *        else to apply what this adds. The default, zero, seals everything --
+ *        what a first publish needs.
+ */
+[[nodiscard]] std::string sealableOps(const Store &store,
+                                      std::uint32_t sinceExclusive = 0);
+
+/**
+ * @brief Read back what one or more sealableOps() calls wrote, into a store
+ *        of its own.
+ *
+ * @p segments in the order they were sealed in -- oldest first, the order a
+ * scroll's own segments are kept in. Each was built knowing only the
+ * operations up to that point, so a later segment's records may name parents
+ * an earlier segment produced; applying them in seal order is what makes that
+ * resolve. Nothing about a segment's own scroll table survives past it: each
+ * is decoded and folded into the same running history before the next one is
+ * read, exactly as if the whole thing had been sealed at once.
+ *
+ * The publisher's names are kept. A microversion is "a name among the
+ * versions of one document in one store", so their 2a4 belongs to their
+ * document and not to whatever this machine happens to call its own second
+ * state -- and a reader who can say "2a4" and mean what the publisher means
+ * is the point of carrying the history at all.
+ *
+ * Which is why this returns a store rather than putting the operations into
+ * one: their history is theirs. What links it to this machine's own documents
+ * is the content, which both point at by the same global addresses.
+ *
+ * @param segments the bytes of each seal's operations file, oldest first.
+ * @param from     the scroll those operations were sealed beside, which is
+ *                 what their ScrollId zero means.
+ * @throws std::runtime_error if any segment's bytes are not a sealed
+ *         operations file, or name a scroll the seal does not carry.
+ */
+[[nodiscard]] std::unique_ptr<Store>
+historyFromSeal(std::span<const std::string_view> segments, const Scroll &from,
+                const std::map<std::string, Scroll> &scrolls);
+
+/// Convenience for the single-seal case: everything was sealed at once.
+[[nodiscard]] std::unique_ptr<Store>
+historyFromSeal(std::string_view sealed, const Scroll &from,
+                const std::map<std::string, Scroll> &scrolls);
 
 /// What taking a publication in produced.
 struct Adopted {

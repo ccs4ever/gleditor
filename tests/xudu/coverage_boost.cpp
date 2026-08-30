@@ -168,22 +168,22 @@ TEST(CoverageBoostTest, binaryOpsCodecErrorHandling) {
 
   // Invalid binary op kind throws
   std::istringstream badBinary("\x07"); // 7 is invalid kindCode
-  std::map<MicroversionId, Op> ops1;
+  std::vector<xudu::OpRecord> ops1;
   EXPECT_THROW(readBinaryOpsSpool(badBinary, ops1), std::runtime_error);
 
   // Empty stream to readBinaryOpsSpool returns empty map
   std::istringstream emptyStream("");
-  std::map<MicroversionId, Op> ops2;
+  std::vector<xudu::OpRecord> ops2;
   readBinaryOpsSpool(emptyStream, ops2);
   EXPECT_TRUE(ops2.empty());
 
   // Text ops reader error cases
   std::istringstream malformedText("1 invalid_kind 0 0\n");
-  std::map<MicroversionId, Op> ops3;
+  std::vector<xudu::OpRecord> ops3;
   EXPECT_THROW(readOsmicTextOpsSpool(malformedText, ops3), std::runtime_error);
 
   std::istringstream shortText("1 insert 0\n");
-  std::map<MicroversionId, Op> ops4;
+  std::vector<xudu::OpRecord> ops4;
   EXPECT_THROW(readOsmicTextOpsSpool(shortText, ops4), std::runtime_error);
 
   // Rearrange Op in both binary and text formats
@@ -194,30 +194,30 @@ TEST(CoverageBoostTest, binaryOpsCodecErrorHandling) {
   rearrangeOp.length = 10;
   rearrangeOp.to     = 20;
 
-  std::map<MicroversionId, Op> opsMap = {
-      {MicroversionId::parse("2"), rearrangeOp}};
+  const std::vector<xudu::OpRecord> opsMap = {
+      xudu::OpRecord{MicroversionId::parse("2"), rearrangeOp}};
 
   // Binary round-trip
   std::stringstream binOut;
   writeBinaryOpsSpool(binOut, opsMap);
-  std::map<MicroversionId, Op> binRead;
+  std::vector<xudu::OpRecord> binRead;
   readOpsSpool(binOut, binRead);
   ASSERT_EQ(binRead.size(), 1U);
-  EXPECT_EQ(binRead.begin()->second.kind, OpKind::Rearrange);
-  EXPECT_EQ(binRead.begin()->second.at, 5U);
-  EXPECT_EQ(binRead.begin()->second.length, 10U);
-  EXPECT_EQ(binRead.begin()->second.to, 20U);
+  EXPECT_EQ(binRead.front().op.kind, OpKind::Rearrange);
+  EXPECT_EQ(binRead.front().op.at, 5U);
+  EXPECT_EQ(binRead.front().op.length, 10U);
+  EXPECT_EQ(binRead.front().op.to, 20U);
 
   // Text round-trip
   std::stringstream textOut;
   writeOsmicTextOpsSpool(textOut, opsMap);
-  std::map<MicroversionId, Op> textRead;
+  std::vector<xudu::OpRecord> textRead;
   readOpsSpool(textOut, textRead);
   ASSERT_EQ(textRead.size(), 1U);
-  EXPECT_EQ(textRead.begin()->second.kind, OpKind::Rearrange);
-  EXPECT_EQ(textRead.begin()->second.at, 5U);
-  EXPECT_EQ(textRead.begin()->second.length, 10U);
-  EXPECT_EQ(textRead.begin()->second.to, 20U);
+  EXPECT_EQ(textRead.front().op.kind, OpKind::Rearrange);
+  EXPECT_EQ(textRead.front().op.at, 5U);
+  EXPECT_EQ(textRead.front().op.length, 10U);
+  EXPECT_EQ(textRead.front().op.to, 20U);
 }
 
 TEST(CoverageBoostTest, blessingAndLinkPackageDescribers) {

@@ -5,7 +5,9 @@
 #include "publication.hpp" // IWYU pragma: associated
 
 #include <algorithm>
+#include <array>
 #include <format>
+#include <sstream>
 #include <stdexcept>
 #include <utility>
 
@@ -13,6 +15,7 @@
 #include <fstream>
 
 #include "bencode.hpp"
+#include "binary_ops.hpp"
 #include "store.hpp"
 #include "swarm.hpp"
 
@@ -23,6 +26,7 @@ namespace {
 /// Keys of the manifest dictionary. Short, and written once here so that a
 /// reader and a writer cannot disagree about them.
 constexpr auto keyLinks     = "links";
+constexpr auto keyOpsSegs   = "ops";
 constexpr auto keyPieces    = "pieces";
 constexpr auto keyPublisher = "publisher";
 constexpr auto keySalt      = "salt";
@@ -231,8 +235,15 @@ bencode::Dict manifestOf(const Publication &pub, const bool withSignature) {
     scrolls.emplace(key, encodeScroll(scroll));
   }
 
+  bencode::List opsSegs;
+  opsSegs.reserve(pub.opsSegments.size());
+  for (const auto &segment : pub.opsSegments) {
+    opsSegs.push_back(encodeSegment(segment));
+  }
+
   bencode::Dict manifest{
       {keyLinks, bencode::Value::list(std::move(links))},
+      {keyOpsSegs, bencode::Value::list(std::move(opsSegs))},
       {keyPieces, encodeSpans(pub.pieces)},
       {keyPublisher, bencode::Value::string(rawBytes(pub.publisher))},
       {keySalt, bencode::Value::string(pub.salt)},
@@ -404,6 +415,21 @@ std::optional<Publication> decodePublication(const std::string_view encoded) {
     pub.scrolls.emplace(key, std::move(*scroll));
   }
 
+  // Absent in a manifest published before the operations were sealed in --
+  // not a decode failure, since the pieces still decode to a whole document
+  // on their own; that manifest simply says nothing about the history behind
+  // them.
+  if (const auto *opsSegs = root.find(keyOpsSegs);
+      nullptr != opsSegs && opsSegs->isList()) {
+    for (const auto &item : opsSegs->asList()) {
+      auto segment = decodeSegment(item);
+      if (!segment) {
+        return std::nullopt;
+      }
+      pub.opsSegments.push_back(std::move(*segment));
+    }
+  }
+
   // Checked last, over everything just read: a manifest that does not verify
   // is somebody's claim to have published what they did not, and the only
   // thing to do with it is to fail to read it.
@@ -415,7 +441,9 @@ std::optional<Publication> decodePublication(const std::string_view encoded) {
 
 SealedScroll sealLocalSpool(const Store &store, const MutableKeys &keys,
                             const std::string &salt, const std::string &into,
-                            const SignedProvenance &provenance) {
+                            const SignedProvenance &provenance,
+                            const Scroll &priorScroll,
+                            const std::uint32_t opsAlreadySealed) {
   if (provenance.yaml.empty() || provenance.signature.empty()) {
     throw std::runtime_error(
         "cannot seal without a signed authorship record. The record is signed "
@@ -424,17 +452,49 @@ SealedScroll sealLocalSpool(const Store &store, const MutableKeys &keys,
         "put their name to.");
   }
 
-  const auto &bytes = store.primedia().bytes();
-  const auto name   = salt.empty() ? std::string{"primedia"} : salt;
+  const auto allBytes = store.primedia().bytes();
+  const auto name     = salt.empty() ? std::string{"primedia"} : salt;
 
-  // The content first, so it begins at offset zero of the piece stream and
-  // every address already handed out still points where it did. The record and
-  // its signature follow it.
-  const std::array<TorrentContent, 3> files{
-      TorrentContent{sealedContentName, std::string{bytes}},
-      TorrentContent{provenanceFileName, provenance.yaml},
-      TorrentContent{provenanceSigName, provenance.signature},
-  };
+  const auto primediaAlreadySealed = priorScroll.length();
+  if (primediaAlreadySealed > allBytes.size()) {
+    throw std::runtime_error(
+        "cannot seal: the prior scroll already covers more bytes than this "
+        "store's local spool holds -- it belongs to a different store.");
+  }
+  const auto newPrimedia    = allBytes.substr(primediaAlreadySealed);
+  const bool hasNewPrimedia = !newPrimedia.empty();
+
+  const auto opsTotal  = static_cast<std::uint32_t>(store.opCount());
+  const bool hasNewOps = opsAlreadySealed < opsTotal;
+  const auto newOps =
+      hasNewOps ? sealableOps(store, opsAlreadySealed) : std::string{};
+
+  // The content first, so a fresh segment's bytes begin at offset zero of its
+  // own piece stream -- what keeps every address already handed out pointing
+  // where it did. New operations, when there are any, follow it; the record
+  // and its signature always come last, since they describe this seal rather
+  // than being seal-specific content of their own.
+  //
+  // Only what is new is sealed: what @p priorScroll already carries is not
+  // reread or rehashed here, only carried forward into the scroll this
+  // returns. The operations are sealed in because a xanadoc is its history
+  // and not the state it happens to have reached: a reader given the pieces
+  // alone gets a document that cannot be gone back through, which is the one
+  // thing this model exists to make possible. They ride in the torrent
+  // rather than the manifest because they are bulk -- fetched in pieces, from
+  // peers, only by a reader who wants them -- and because the info hash then
+  // covers them, so operations that do not hash to what the reference names
+  // cannot be passed off as the publisher's any more than the content can.
+  std::vector<TorrentContent> files;
+  if (hasNewPrimedia) {
+    files.push_back(
+        TorrentContent{sealedContentName, std::string{newPrimedia}});
+  }
+  if (hasNewOps) {
+    files.push_back(TorrentContent{sealedOpsName, newOps});
+  }
+  files.push_back(TorrentContent{provenanceFileName, provenance.yaml});
+  files.push_back(TorrentContent{provenanceSigName, provenance.signature});
   auto made = makeTorrent(files, name);
 
   SealedScroll sealed;
@@ -442,16 +502,34 @@ SealedScroll sealLocalSpool(const Store &store, const MutableKeys &keys,
   sealed.torrentFile = std::move(made.file);
   sealed.provenance  = provenance;
 
+  sealed.scroll           = priorScroll;
   sealed.scroll.publisher = keys.publicKey;
   sealed.scroll.salt      = salt;
-  ScrollSegment segment;
-  segment.at           = 0;
-  segment.length       = bytes.size();
-  segment.torrent      = sealed.hash;
-  segment.streamOffset = 0;
-  segment.fileIndex    = 0;
-  segment.path         = sealedContentName;
-  sealed.scroll.segments.push_back(segment);
+
+  std::uint64_t streamOffset = 0;
+  std::uint32_t fileIndex    = 0;
+  if (hasNewPrimedia) {
+    ScrollSegment segment;
+    segment.at           = primediaAlreadySealed;
+    segment.length       = newPrimedia.size();
+    segment.torrent      = sealed.hash;
+    segment.streamOffset = streamOffset;
+    segment.fileIndex    = fileIndex;
+    segment.path         = sealedContentName;
+    sealed.scroll.segments.push_back(segment);
+    streamOffset += newPrimedia.size();
+    fileIndex++;
+  }
+  if (hasNewOps) {
+    ScrollSegment segment;
+    segment.at           = opsAlreadySealed;
+    segment.length       = opsTotal - opsAlreadySealed;
+    segment.torrent      = sealed.hash;
+    segment.streamOffset = streamOffset;
+    segment.fileIndex    = fileIndex;
+    segment.path         = sealedOpsName;
+    sealed.opsSegment    = segment;
+  }
 
   if (!into.empty()) {
     // A directory named as the torrent names it, holding the files it
@@ -469,6 +547,63 @@ SealedScroll sealLocalSpool(const Store &store, const MutableKeys &keys,
     }
   }
   return sealed;
+}
+
+namespace {
+constexpr auto keySealScroll    = "scroll";
+constexpr auto keySealOpsSealed = "opsSealed";
+constexpr auto keySealOpsSegs   = "opsSegs";
+} // namespace
+
+std::string encodeSealState(const SealState &state) {
+  bencode::List opsSegs;
+  opsSegs.reserve(state.opsSegments.size());
+  for (const auto &segment : state.opsSegments) {
+    opsSegs.push_back(encodeSegment(segment));
+  }
+  return bencode::Value::dict(
+             {
+                 {keySealScroll, encodeScroll(state.scroll)},
+                 {keySealOpsSealed,
+                  bencode::Value::integer(
+                      static_cast<std::int64_t>(state.opsAlreadySealed))},
+                 {keySealOpsSegs, bencode::Value::list(std::move(opsSegs))},
+             })
+      .encode();
+}
+
+std::optional<SealState> decodeSealState(const std::string_view encoded) {
+  bencode::Value root;
+  try {
+    root = bencode::decode(encoded);
+  } catch (const std::exception &) {
+    return std::nullopt;
+  }
+  if (!root.isDict()) {
+    return std::nullopt;
+  }
+  const auto *scroll    = root.find(keySealScroll);
+  const auto *opsSealed = root.find(keySealOpsSealed);
+  const auto *opsSegs   = root.find(keySealOpsSegs);
+  if (nullptr == scroll || nullptr == opsSealed || !opsSealed->isInteger() ||
+      opsSealed->asInteger() < 0 || nullptr == opsSegs || !opsSegs->isList()) {
+    return std::nullopt;
+  }
+  auto decodedScroll = decodeScroll(*scroll);
+  if (!decodedScroll) {
+    return std::nullopt;
+  }
+  SealState state;
+  state.scroll           = std::move(*decodedScroll);
+  state.opsAlreadySealed = static_cast<std::uint32_t>(opsSealed->asInteger());
+  for (const auto &item : opsSegs->asList()) {
+    auto segment = decodeSegment(item);
+    if (!segment) {
+      return std::nullopt;
+    }
+    state.opsSegments.push_back(std::move(*segment));
+  }
+  return state;
 }
 
 std::string globalKeyOf(const Store &store, const PrimediaSpan &span,
@@ -509,6 +644,150 @@ localise(Store &store, const GlobalSpan &span,
     return std::nullopt;
   }
   return PrimediaSpan{store.addScroll(found->second), span.start, span.length};
+}
+
+namespace {
+
+/// Magic and version for the operations file inside a seal. Its own, rather
+/// than the ops spool's: what follows the table below is an ops spool, but the
+/// file as a whole is not one and must not be read as one by mistake.
+constexpr std::string_view sealedOpsMagic = "\x7fXSO\x01";
+
+} // namespace
+
+std::string sealableOps(const Store &store,
+                        const std::uint32_t sinceExclusive) {
+  // Which scrolls the operations being sealed actually name. Only these
+  // operations, not every one the store holds: a segment carries its own
+  // table because it stands alone until historyFromSeal() folds it in beside
+  // whatever segments came before it.
+  std::map<ScrollId, std::string> named;
+  for (std::uint32_t index = sinceExclusive + 1;
+       index <= store.segmentedOps().size(); index++) {
+    const auto *const node = store.segmentedOps().get(index);
+    if (nullptr == node || node->scrollId == localScroll) {
+      continue; // zero is the scroll being sealed; see sealableOps()'s comment
+    }
+    if (named.contains(node->scrollId)) {
+      continue;
+    }
+    const auto *const scroll = store.scroll(node->scrollId);
+    if (nullptr == scroll) {
+      throw std::runtime_error(std::format(
+          "cannot seal these operations: one of them quotes scroll {}, which "
+          "this store does not hold. An operation naming content nobody can "
+          "resolve is an operation with a hole in it.",
+          node->scrollId));
+    }
+    auto key = scrollKey(*scroll);
+    if (key.empty()) {
+      throw std::runtime_error(
+          "cannot seal these operations: one of them quotes a scroll with no "
+          "global name. Content has to be published before a history that "
+          "points at it can be.");
+    }
+    named.emplace(node->scrollId, std::move(key));
+  }
+
+  std::string out{sealedOpsMagic};
+  std::ostringstream table(std::ios::binary);
+  writeVarint(table, named.size());
+  for (const auto &[id, key] : named) {
+    writeVarint(table, id);
+    writeVarint(table, key.size());
+    table << key;
+  }
+  out += table.str();
+  out += store.exportBinaryOps(sinceExclusive);
+  return out;
+}
+
+namespace {
+
+/// One sealableOps() segment, applied into @p history. remap's entry for
+/// localScroll (the primedia scroll this history was sealed beside) is
+/// carried in by the caller and reused across every segment; every other
+/// entry is local to this one segment's own table, since a fresh table is
+/// where each segment's numbering starts over.
+void applyOpsSegment(const std::string_view sealed, Store &history,
+                     const ScrollId selfScrollInHistory,
+                     const std::map<std::string, Scroll> &scrolls) {
+  if (!sealed.starts_with(sealedOpsMagic)) {
+    throw std::runtime_error(
+        "these are not a seal's operations: the file does not begin the way "
+        "one does.");
+  }
+  std::istringstream in(std::string{sealed.substr(sealedOpsMagic.size())},
+                        std::ios::binary);
+
+  std::uint64_t count = 0;
+  if (!readVarint(in, count)) {
+    throw std::runtime_error("a seal's operations end before their scrolls do");
+  }
+  // Zero is the scroll this segment was sealed beside, and is the one entry
+  // that is never written down: its bytes begin at offset zero of the same
+  // stream.
+  std::map<ScrollId, ScrollId> remap;
+  remap.emplace(localScroll, selfScrollInHistory);
+  for (std::uint64_t i = 0; i < count; i++) {
+    std::uint64_t id     = 0;
+    std::uint64_t keyLen = 0;
+    if (!readVarint(in, id) || !readVarint(in, keyLen)) {
+      throw std::runtime_error("a seal's scroll table ends part way through");
+    }
+    std::string key(keyLen, '\0');
+    in.read(key.data(), static_cast<std::streamsize>(keyLen));
+    if (!in) {
+      throw std::runtime_error("a seal's scroll table ends part way through");
+    }
+    const auto found = scrolls.find(key);
+    if (scrolls.end() == found) {
+      throw std::runtime_error(std::format(
+          "a seal's operations quote \"{}\" and the seal does not say where "
+          "that is.",
+          key));
+    }
+    remap.emplace(static_cast<ScrollId>(id), history.addScroll(found->second));
+  }
+
+  std::vector<OpRecord> records;
+  readOpsSpool(in, records);
+  for (auto &record : records) {
+    // The publisher's ScrollIds meant something in their store; these mean the
+    // same content in this one. Everything else about the operation -- where
+    // it applies, what it produced, which state it followed -- travels as it
+    // was written.
+    const auto at = remap.find(record.op.span.scroll);
+    if (remap.end() == at) {
+      throw std::runtime_error(
+          std::format("a seal's operations name scroll {} and its table does "
+                      "not say what that was.",
+                      record.op.span.scroll));
+    }
+    record.op.span.scroll = at->second;
+    history.putOp(record.produces, record.op);
+  }
+}
+
+} // namespace
+
+std::unique_ptr<Store>
+historyFromSeal(const std::span<const std::string_view> segments,
+                const Scroll &from,
+                const std::map<std::string, Scroll> &scrolls) {
+  auto history                   = std::make_unique<Store>();
+  const auto selfScrollInHistory = history->addScroll(from);
+  for (const auto &segment : segments) {
+    applyOpsSegment(segment, *history, selfScrollInHistory, scrolls);
+  }
+  return history;
+}
+
+std::unique_ptr<Store>
+historyFromSeal(const std::string_view sealed, const Scroll &from,
+                const std::map<std::string, Scroll> &scrolls) {
+  const std::array<std::string_view, 1> one{sealed};
+  return historyFromSeal(std::span<const std::string_view>{one}, from, scrolls);
 }
 
 Adopted adopt(Store &store, const Publication &pub) {
@@ -595,14 +874,16 @@ Publication publish(const Store &store, const MicroversionId &version,
                     const MutableKeys &keys, std::string salt,
                     std::string title, const std::int64_t sequence,
                     const std::uint64_t published,
-                    const Scroll *const localSealedAs) {
+                    const Scroll *const localSealedAs,
+                    const std::vector<ScrollSegment> &opsSegments) {
   Publication pub;
-  pub.publisher = keys.publicKey;
-  pub.salt      = std::move(salt);
-  pub.title     = std::move(title);
-  pub.version   = version;
-  pub.sequence  = sequence;
-  pub.published = published;
+  pub.publisher   = keys.publicKey;
+  pub.salt        = std::move(salt);
+  pub.title       = std::move(title);
+  pub.version     = version;
+  pub.sequence    = sequence;
+  pub.opsSegments = opsSegments;
+  pub.published   = published;
 
   const auto document  = store.rebuild(version);
   const auto scrollFor = [&store, localSealedAs](const PrimediaSpan &span) {

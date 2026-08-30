@@ -8,7 +8,6 @@
 
 #include <cstdint>
 #include <iosfwd>
-#include <map>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -78,25 +77,42 @@ bool readMicroversionId(std::istream &in, MicroversionId &id);
 /// written by.
 bool readMicroversionIdV1(std::istream &in, MicroversionId &id);
 
-/// Write operations in compact binary format (version 2).
-void writeBinaryOpsSpool(std::ostream &out,
-                         const std::map<MicroversionId, Op> &ops);
+/**
+ * @struct OpRecord
+ * @brief One operation as the serializers see it: the state it produces, and
+ *        the operation that produced it.
+ *
+ * A sequence rather than a map, because the order records are written in is
+ * part of the format and not an incidental consequence of how they were held.
+ * FLAG_SEQUENTIAL drops a record's name entirely when it continues the one
+ * before it, so what is adjacent to what decides the size of the file; see
+ * Store::opRecords(), which is where the order is chosen.
+ */
+struct OpRecord {
+  MicroversionId produces;
+  Op op;
+};
 
-/// Read operations from compact binary format, version 2.
-void readBinaryOpsSpool(std::istream &in, std::map<MicroversionId, Op> &ops);
+/// Write operations in compact binary format (version 2).
+void writeBinaryOpsSpool(std::ostream &out, const std::vector<OpRecord> &ops);
+
+/// Read operations from compact binary format, version 2, in the order the
+/// file holds them -- which the caller needs, since a record may name its
+/// state only relative to the one before it.
+void readBinaryOpsSpool(std::istream &in, std::vector<OpRecord> &ops);
 
 /// Read operations from compact binary format, version 1.
-void readBinaryOpsSpoolV1(std::istream &in, std::map<MicroversionId, Op> &ops);
+void readBinaryOpsSpoolV1(std::istream &in, std::vector<OpRecord> &ops);
 
 /// Write operations in standard human-readable OSMIC text format.
 void writeOsmicTextOpsSpool(std::ostream &out,
-                            const std::map<MicroversionId, Op> &ops);
+                            const std::vector<OpRecord> &ops);
 
 /// Read operations from standard human-readable OSMIC text format.
-void readOsmicTextOpsSpool(std::istream &in, std::map<MicroversionId, Op> &ops);
+void readOsmicTextOpsSpool(std::istream &in, std::vector<OpRecord> &ops);
 
 /// Auto-detects binary vs. text format by peeking magic bytes and decodes.
-void readOpsSpool(std::istream &in, std::map<MicroversionId, Op> &ops);
+void readOpsSpool(std::istream &in, std::vector<OpRecord> &ops);
 
 } // namespace xudu
 

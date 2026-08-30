@@ -115,13 +115,17 @@ add_subdirectory("${GLEDITOR_ROOT}/thirdparty/SDL" "${CMAKE_BINARY_DIR}/SDL3")
 # this is one fewer set of .so files Gradle would otherwise need telling to
 # package. Found through pkg-config, same as the desktop Makefile, since that
 # is the form vcpkg's own meson/cmake ports install; vcpkg's toolchain file
-# points pkg-config at the triplet's install tree on its own.
+# points pkg-config at the triplet's install tree on its own. libunibreak is
+# the exception -- its vcpkg port installs a CMake package config instead of a
+# .pc file, so it is found through find_package() and linked as an imported
+# target rather than folded into TEXT_DEPS.
 #
 # The _STATIC_ variables, not the plain ones: vcpkg's triplets build
 # everything static, and only `pkg-config --static` walks the full transitive
 # dependency graph and adds the system libraries (-pthread and the like) a static link needs.
 find_package(PkgConfig REQUIRED)
-pkg_check_modules(TEXT_DEPS REQUIRED freetype2 harfbuzz fribidi libunibreak fontconfig)
+pkg_check_modules(TEXT_DEPS REQUIRED freetype2 harfbuzz fribidi fontconfig)
+find_package(libunibreak CONFIG REQUIRED)
 find_package(glm CONFIG REQUIRED)
 
 # libvulkan.so is the NDK's own stub for the platform loader, present from
@@ -136,6 +140,7 @@ target_link_libraries(main PRIVATE
   SDL3::SDL3
   ${TEXT_DEPS_STATIC_LIBRARIES}
   ${TEXT_DEPS_STATIC_LDFLAGS_OTHER}
+  libunibreak::libunibreak
   glm::glm
   ${GLEDITOR_VULKAN_LIB}
 )

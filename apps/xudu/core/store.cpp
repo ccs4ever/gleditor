@@ -1,5 +1,6 @@
 #include "store.hpp"
 
+#include <algorithm>
 #include <cstdint>
 #include <filesystem>
 #include <fstream>
@@ -20,7 +21,8 @@ namespace {
 
 /// Names of the files a store is written as.
 constexpr const char *primediaFile = "primedia.spool";
-constexpr const char *opsFile      = "ops.spool";
+constexpr const char *opsFile      = "ops.spool"; // pre-node-array stores
+constexpr const char *opsNodesFile = "ops.nodes";
 constexpr const char *linksFile    = "links.spool";
 constexpr const char *originsFile  = "origins.spool"; // pre-scroll stores
 constexpr const char *scrollsFile  = "scrolls.spool";
@@ -74,7 +76,7 @@ void Store::putOp(const MicroversionId &produces, const Op &op) {
     throw std::invalid_argument(
         "state zero is the null document and is not produced by an operation");
   }
-  if (ops.contains(produces)) {
+  if (opsSpool.contains(produces)) {
     throw std::invalid_argument("microversion " + produces.str() +
                                 " already has an operation; the operations "
                                 "spool is append-only");
@@ -84,55 +86,63 @@ void Store::putOp(const MicroversionId &produces, const Op &op) {
         "operation filed under " + produces.str() + " claims parent " +
         op.parent.str() + ", but that name follows " + produces.parent().str());
   }
-  ops.emplace(produces, op);
 
   const auto parentIdx = opsSpool.indexOf(op.parent);
   const auto sourceIdx = op.source.isZero() ? 0U : opsSpool.indexOf(op.source);
-  const auto node      = CompactOpNode::fromOp(op, parentIdx, sourceIdx);
+  // The ordinal is what makes the name recoverable from the tree, which is
+  // how a sealed segment -- a file of nodes and nothing else -- gets indexed.
+  const auto node = CompactOpNode::fromOp(
+      op, parentIdx, sourceIdx, CompactOpNode::branchOrdinalFor(produces));
   opsSpool.append(node, produces);
 }
 
-const Op *Store::getOp(const MicroversionId &id) const {
-  const auto found = ops.find(id);
-  return found == ops.end() ? nullptr : &found->second;
+std::optional<Op> Store::getOp(const MicroversionId &id) const {
+  const auto *const node = opsSpool.get(id);
+  if (nullptr == node) {
+    return std::nullopt;
+  }
+  // The node names its parent and source by spool index; an Op names them the
+  // way a person writes them, so both come back through idOf().
+  return node->toOp(opsSpool.idOf(node->parentIndex),
+                    opsSpool.idOf(node->sourceOpIndex));
 }
 
 std::vector<MicroversionId> Store::opsFor(const MicroversionId &version) const {
   std::vector<MicroversionId> needed;
   for (const auto &step : version.path()) {
-    if (ops.contains(step)) {
+    if (opsSpool.contains(step)) {
       needed.push_back(step);
     }
   }
   return needed;
 }
 
-void Store::replay(const Op &op, Version &onto) const {
-  switch (op.kind) {
+void Store::replay(const CompactOpNode &node, Version &onto) const {
+  switch (node.kind) {
   case OpKind::Insert: {
-    onto.insert(op.at, op.span);
+    onto.insert(node.at, node.span());
     break;
   }
   case OpKind::Delete: {
-    onto.remove(op.at, op.length);
+    onto.remove(node.at, node.length);
     break;
   }
   case OpKind::Rearrange: {
-    onto.rearrange(op.at, op.length, op.to);
+    onto.rearrange(node.at, node.length, node.to);
     break;
   }
   case OpKind::Transclude: {
-    if (!op.span.empty()) {
+    if (!node.span().empty()) {
       // Named directly by a content address, so there is no source document to
       // go through: the reference is already global.
-      onto.insert(op.at, op.span);
+      onto.insert(node.at, node.span());
       break;
     }
     // Resolved against the source version as it stands, which is what makes
     // this a virtual copy: the spans it yields are the source's own addresses,
     // so both versions end up pointing at one copy of the content.
-    const auto from = rebuild(op.source);
-    onto.insertSpans(op.at, from.spansFor(op.sourceAt, op.sourceLength));
+    const auto from = rebuildFromIndex(node.sourceOpIndex);
+    onto.insertSpans(node.at, from.spansFor(node.sourceAt, node.sourceLength));
     break;
   }
   case OpKind::Link: {
@@ -142,31 +152,53 @@ void Store::replay(const Op &op, Version &onto) const {
     break;
   }
   case OpKind::PageBreak: {
-    onto.insertBreak(op.at);
+    onto.insertBreak(node.at);
     break;
   }
   }
 }
 
-Version Store::rebuild(const MicroversionId &version) const {
+Version Store::rebuildFromIndex(const std::uint32_t index) const {
   Version built;
-  const auto targetIdx = opsSpool.indexOf(version);
-  if (targetIdx > 0) {
-    const auto path = opsSpool.ancestralPath(targetIdx);
-    for (const auto idx : path) {
-      const auto id = opsSpool.idOf(idx);
-      if (const auto *const op = getOp(id); nullptr != op) {
-        replay(*op, built);
-      }
-    }
-  } else {
-    for (const auto &step : version.path()) {
-      if (const auto *const op = getOp(step); nullptr != op) {
-        replay(*op, built);
-      }
+  for (const auto idx : opsSpool.ancestralPath(index)) {
+    if (const auto *const node = opsSpool.get(idx); nullptr != node) {
+      replay(*node, built);
     }
   }
   return built;
+}
+
+Version Store::rebuild(const MicroversionId &version) const {
+  if (const auto targetIdx = opsSpool.indexOf(version); targetIdx > 0) {
+    return rebuildFromIndex(targetIdx);
+  }
+  // Nothing is filed under this name. Replaying the longest recorded prefix of
+  // it is still the right answer -- asking for a state one edit past the end
+  // gets the end -- and the ancestral walk above cannot give it, having no
+  // node to start from.
+  Version built;
+  for (const auto &step : version.path()) {
+    if (const auto *const node = opsSpool.get(step); nullptr != node) {
+      replay(*node, built);
+    }
+  }
+  return built;
+}
+
+bool Store::advance(Version &document, const MicroversionId &known,
+                    const MicroversionId &version) const {
+  // One step on means the op filed under `version` names `known` as its
+  // parent -- which is what putOp() checks when it is recorded, so asking
+  // MicroversionId is asking the same question the spool already answered.
+  if (version.isZero() || version.parent() != known) {
+    return false;
+  }
+  const auto *const node = opsSpool.get(version);
+  if (nullptr == node) {
+    return false;
+  }
+  replay(*node, document);
+  return true;
 }
 
 std::string Store::textOf(const MicroversionId &version) const {
@@ -252,7 +284,7 @@ MicroversionId Store::apply(const MicroversionId &parent, Op op) {
 
   // Straight on, when nothing has followed this state yet.
   const auto onward = parent.next();
-  if (!ops.contains(onward)) {
+  if (!opsSpool.contains(onward)) {
     putOp(onward, op);
     return onward;
   }
@@ -264,7 +296,7 @@ MicroversionId Store::apply(const MicroversionId &parent, Op op) {
   // rather than giving up there.
   for (std::uint32_t ordinal = 1; ordinal < branchSearchCeiling; ordinal++) {
     const auto branched = parent.branch(ordinal);
-    if (!ops.contains(branched)) {
+    if (!opsSpool.contains(branched)) {
       putOp(branched, op);
       return branched;
     }
@@ -357,7 +389,7 @@ Store::formatAttributeOf(const Link &link) const {
 
 std::vector<MicroversionId> Store::children(const MicroversionId &id) const {
   std::vector<MicroversionId> found;
-  if (ops.contains(id.next())) {
+  if (opsSpool.contains(id.next())) {
     found.push_back(id.next());
   }
   // apply() always hands out the first free ordinal, and the spool is
@@ -367,7 +399,7 @@ std::vector<MicroversionId> Store::children(const MicroversionId &id) const {
   // gap with more waiting past it.
   for (std::uint32_t ordinal = 1; ordinal < branchSearchCeiling; ordinal++) {
     const auto branched = id.branch(ordinal);
-    if (!ops.contains(branched)) {
+    if (!opsSpool.contains(branched)) {
       break;
     }
     found.push_back(branched);
@@ -376,11 +408,16 @@ std::vector<MicroversionId> Store::children(const MicroversionId &id) const {
 }
 
 std::vector<MicroversionId> Store::allVersions() const {
+  // Sorted rather than in the order the spool holds them: a std::map used to
+  // hold these and answered in this order, which is the one a person reading a
+  // list of states expects -- 1, 1a1, 2, 3 -- and not the order they happened
+  // to be typed in.
   std::vector<MicroversionId> found;
-  found.reserve(ops.size());
-  for (const auto &[id, op] : ops) {
-    found.push_back(id);
+  found.reserve(opsSpool.size());
+  for (std::uint32_t idx = 1; idx <= opsSpool.size(); idx++) {
+    found.push_back(opsSpool.idOf(idx));
   }
+  std::sort(found.begin(), found.end());
   return found;
 }
 
@@ -388,7 +425,53 @@ MicroversionId Store::latest() const {
   // The last in replay order, which for a document edited straight through is
   // the newest. A store whose most recent work was on an earlier branch has no
   // single answer to "the latest", and this at least names a real state.
-  return ops.empty() ? MicroversionId{} : ops.rbegin()->first;
+  //
+  // The greatest name, deliberately, and not the last operation the spool
+  // holds: the spool is in the order operations arrived, which is the order
+  // they were typed while a store is open and the order they were written
+  // while one is being read back, and those are not the same order once a
+  // branch exists. Picking by name is the one answer that does not change
+  // across a save and a load.
+  MicroversionId newest;
+  for (std::uint32_t idx = 1; idx <= opsSpool.size(); idx++) {
+    if (const auto id = opsSpool.idOf(idx); newest < id) {
+      newest = id;
+    }
+  }
+  return newest;
+}
+
+std::vector<OpRecord>
+Store::opRecords(const std::uint32_t sinceExclusive) const {
+  std::vector<OpRecord> records;
+  records.reserve(opsSpool.size());
+  for (std::uint32_t idx = sinceExclusive + 1; idx <= opsSpool.size(); idx++) {
+    const auto *const node = opsSpool.get(idx);
+    if (nullptr == node) {
+      continue;
+    }
+    records.push_back(OpRecord{opsSpool.idOf(idx),
+                               node->toOp(opsSpool.idOf(node->parentIndex),
+                                          opsSpool.idOf(node->sourceOpIndex))});
+  }
+  std::sort(records.begin(), records.end(),
+            [](const OpRecord &lhs, const OpRecord &rhs) {
+              return lhs.produces < rhs.produces;
+            });
+  return records;
+}
+
+void Store::adoptOpRecords(const std::vector<OpRecord> &records) {
+  for (const auto &record : records) {
+    // Sorted by name, so a parent is always read before the state it produced
+    // -- which putOp() needs, since it resolves the parent to a spool index.
+    // A repeated name is dropped rather than thrown over: the std::map these
+    // used to be read into kept the first of a duplicate and said nothing,
+    // and a store that opened before must not stop opening now.
+    if (!opsSpool.contains(record.produces)) {
+      putOp(record.produces, record.op);
+    }
+  }
 }
 
 void Store::save(const std::string &directory) const {
@@ -396,13 +479,60 @@ void Store::save(const std::string &directory) const {
   std::filesystem::create_directories(dir);
 
   {
-    std::ofstream out(dir / primediaFile, std::ios::binary | std::ios::trunc);
-    out << spool.bytes();
+    // Appended to rather than rewritten once the file already holds a prefix
+    // of what is in memory. The primedia spool only ever grows, so what is
+    // already on disk is still correct and only the tail is new -- which
+    // makes a save cost what was typed since the last one instead of the
+    // whole document every time.
+    //
+    // The operations spool below cannot do this, and it is worth saying why
+    // rather than leaving the asymmetry looking like an oversight: its
+    // records are delta-coded against the record before them in name order
+    // (see FLAG_SEQUENTIAL in binary_ops.cpp), and a branch off an early
+    // state sorts into the middle of that order, not the end. There is no
+    // tail to append. SegmentedOpsSpool is what carries the operations
+    // incrementally; ops.spool is a compact whole-file export of them.
+    const auto &bytes = spool.bytes();
+    const bool fresh  = flushedPrimediaDirectory != directory;
+    std::ofstream out(dir / primediaFile,
+                      std::ios::binary |
+                          (fresh ? std::ios::trunc : std::ios::app));
+    const auto from =
+        fresh ? std::size_t{0} : static_cast<std::size_t>(primediaFlushed);
+    out.write(bytes.data() + from,
+              static_cast<std::streamsize>(bytes.size() - from));
+    flushedPrimediaDirectory = directory;
+    primediaFlushed          = bytes.size();
   }
   {
-    // Write operations spool in compact binary format.
-    std::ofstream out(dir / opsFile, std::ios::binary | std::ios::trunc);
-    writeBinaryOpsSpool(out, ops);
+    // The operations, as the array-backed tree they are held as: the file is
+    // what the spool has in memory, so reading it back is a read rather than
+    // a parse and a replay. The state-zero slot at index 0 is the arena's, not
+    // the file's -- see SegmentedOpsSpool::addSealedSegment().
+    //
+    // Costs about sixteen times what the compact binary encoding did, which
+    // for a file that never leaves the machine buys back the whole of the
+    // decode. Writing it is a copy rather than an encode, so saving got
+    // quicker as well as loading.
+    //
+    // It also settles what the emission order should be, by removing the
+    // question: FLAG_SEQUENTIAL dropped a record's name when it continued the
+    // one before it, which made the order records were written in worth
+    // arguing about. Fixed-size nodes carry no names at all -- they are worked
+    // out from the tree -- so there is no ordering left to choose.
+    std::ofstream out(dir / opsNodesFile, std::ios::binary | std::ios::trunc);
+    if (0 != opsSpool.size()) {
+      out.write(reinterpret_cast<const char *>(opsSpool.rawOps() + 1),
+                static_cast<std::streamsize>(opsSpool.size() *
+                                             sizeof(CompactOpNode)));
+    }
+  }
+  // A store written before the node array is superseded once it has been
+  // written out in the new shape. Leaving it would leave two answers to what
+  // the operations are, and load() would quietly prefer this one.
+  if (std::filesystem::exists(dir / opsNodesFile)) {
+    std::error_code ignored;
+    std::filesystem::remove(dir / opsFile, ignored);
   }
   {
     // The scroll table: what a span's ScrollId means. Without it an id is a
@@ -455,7 +585,7 @@ void Store::saveOsmicText(const std::string &directory) const {
   {
     // Canonical line-by-line OSMIC text format.
     auto out = openTextSpoolForWrite(dir / opsFile);
-    writeOsmicTextOpsSpool(out, ops);
+    writeOsmicTextOpsSpool(out, opRecords());
   }
   {
     auto out = openTextSpoolForWrite(dir / scrollsFile);
@@ -495,14 +625,23 @@ std::string Store::exportOsmicText() const {
   return out.str();
 }
 
+std::string Store::exportBinaryOps(const std::uint32_t sinceExclusive) const {
+  std::ostringstream out(std::ios::binary);
+  writeBinaryOpsSpool(out, opRecords(sinceExclusive));
+  return out.str();
+}
+
 void Store::writeOsmicText(std::ostream &out) const {
-  writeOsmicTextOpsSpool(out, ops);
+  writeOsmicTextOpsSpool(out, opRecords());
 }
 
 void Store::load(const std::string &directory) {
   const std::filesystem::path dir(directory);
   spool.adopt(readWholeFile(dir / primediaFile));
-  ops.clear();
+  // What was just read is already on disk here, so the next save to this
+  // directory can append to it rather than write it out again.
+  flushedPrimediaDirectory = directory;
+  primediaFlushed          = spool.size();
   opsSpool.clear();
   linkTable.clear();
   externals.clear();
@@ -591,16 +730,21 @@ void Store::load(const std::string &directory) {
     }
   }
 
-  if (std::filesystem::exists(dir / opsFile)) {
-    std::ifstream in(dir / opsFile, std::ios::binary);
-    readOpsSpool(in, ops);
-    for (const auto &[produces, op] : ops) {
-      const auto parentIdx = opsSpool.indexOf(op.parent);
-      const auto sourceIdx =
-          op.source.isZero() ? 0U : opsSpool.indexOf(op.source);
-      const auto node = CompactOpNode::fromOp(op, parentIdx, sourceIdx);
-      opsSpool.append(node, produces);
+  if (std::filesystem::exists(dir / opsNodesFile)) {
+    // Taken in whole: the nodes are already the shape they are held in, and
+    // every name is worked out from the tree rather than read from the file.
+    if (!opsSpool.openActiveSegment(dir / opsNodesFile)) {
+      throw std::runtime_error("cannot read the operations in " +
+                               (dir / opsNodesFile).string());
     }
+  } else if (std::filesystem::exists(dir / opsFile)) {
+    // Written before the operations were kept as nodes, in the compact binary
+    // encoding or the OSMIC text one. Still read, and written back out as
+    // nodes by the next save().
+    std::ifstream in(dir / opsFile, std::ios::binary);
+    std::vector<OpRecord> records;
+    readOpsSpool(in, records);
+    adoptOpRecords(records);
   }
 
   if (std::filesystem::exists(dir / linksFile)) {

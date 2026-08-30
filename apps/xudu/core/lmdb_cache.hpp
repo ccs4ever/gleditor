@@ -99,7 +99,8 @@ public:
 
     const unsigned int env_flags = MDB_NOTLS | MDB_NOSYNC | MDB_NOMETASYNC;
 
-    if (const int rc = mdb_env_open(env_, cache_dir.c_str(), env_flags, 0644);
+    if (const int rc =
+            mdb_env_open(env_, cache_dir.string().c_str(), env_flags, 0644);
         rc != MDB_SUCCESS) {
       mdb_env_close(env_);
       env_ = nullptr;

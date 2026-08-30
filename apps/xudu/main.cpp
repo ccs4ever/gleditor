@@ -127,7 +127,28 @@ int checkAuthorship(const std::string &where) {
                             : "BUT THE CONTENT BESIDE IT IS NOT WHAT IT "
                               "DESCRIBES")
                 << "\n";
-      return matches ? 0 : 1;
+      if (!matches) {
+        return 1;
+      }
+      // The history, checked the same way and reported separately. A record
+      // written before the operations were sealed in says nothing about them,
+      // which is not the same as saying they are empty -- so it is reported as
+      // not covered rather than passed over in silence.
+      const auto ops = record.parent_path() / xudu::sealedOpsName;
+      if (said->opsDigest.empty() && 0 == said->opsLength) {
+        std::cout << "      but it says nothing about the history sealed "
+                     "beside it\n";
+        return 0;
+      }
+      const auto opsBytes  = slurp(ops);
+      const auto opsAgrees = xudu::sha256Hex(opsBytes) == said->opsDigest &&
+                             opsBytes.size() == said->opsLength;
+      std::cout << "      "
+                << (opsAgrees
+                        ? "and about the history sealed beside it"
+                        : "BUT THE HISTORY BESIDE IT IS NOT WHAT IT DESCRIBES")
+                << "\n";
+      return opsAgrees ? 0 : 1;
     }
   }
   return 0;
@@ -325,11 +346,11 @@ public:
                           "the caret is what gets published.");
         return;
       }
-      auto *const caret = renderer->editCaret();
-      const auto which = nullptr != caret && caret->active() &&
+      auto *const caret   = renderer->editCaret();
+      const auto which    = nullptr != caret && caret->active() &&
                                  caret->documentIndex() < session.views().size()
-                             ? caret->documentIndex()
-                             : 0U;
+                                ? caret->documentIndex()
+                                : 0U;
       const auto version  = session.versionOf(which);
       const auto storeIdx = session.storeIndexOf(which);
       const auto who      = session.author();
@@ -437,10 +458,10 @@ public:
         return;
       }
       auto *const caret = renderer->editCaret();
-      const auto which = nullptr != caret && caret->active() &&
+      const auto which  = nullptr != caret && caret->active() &&
                                  caret->documentIndex() < session.views().size()
-                             ? caret->documentIndex()
-                             : (switcher ? switcher->activeDocIndex() : 0U);
+                              ? caret->documentIndex()
+                              : (switcher ? switcher->activeDocIndex() : 0U);
       if (which >= session.views().size()) {
         session.saveAll();
         return;
@@ -504,7 +525,7 @@ public:
       }
       auto *const caret = renderer->editCaret();
       const auto which  = nullptr != caret && caret->active() &&
-                                  caret->documentIndex() < rState.docs.size()
+                                 caret->documentIndex() < rState.docs.size()
                               ? caret->documentIndex()
                               : (switcher ? switcher->activeDocIndex() : 0U);
       if (which < rState.docs.size()) {
@@ -562,9 +583,10 @@ public:
       std::cout << "xudu: " << st.opCount() << " operations, "
                 << st.primedia().size() << " bytes of primedia\n";
       for (const auto &id : st.allVersions()) {
-        const auto *const op = st.getOp(id);
+        const auto op = st.getOp(id);
         std::cout << (id == here ? "  * " : "    ") << id.str() << "  "
-                  << (nullptr == op ? "?" : xudu::opKindName(op->kind)) << "\n";
+                  << (op.has_value() ? xudu::opKindName(op->kind) : "?")
+                  << "\n";
       }
     });
   }

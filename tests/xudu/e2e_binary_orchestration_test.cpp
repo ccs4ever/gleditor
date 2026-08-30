@@ -347,8 +347,8 @@ TEST(E2EBinaryOrchestrationTest,
   Store storeA;
   const auto vA1 =
       storeA.transcludeExternal(MicroversionId{}, 0, s1Scroll, 0, 62);
-  auto pubA = publish(storeA, vA1, authorA, "xanadoc_a",
-                      "Alice Study on Fox Behavior", 1, 1700000000, nullptr);
+  auto pubA      = publish(storeA, vA1, authorA, "xanadoc_a",
+                           "Alice Study on Fox Behavior", 1, 1700000000, nullptr);
   pubA.signature = signMutableItem(publicationSigningBuffer(pubA), authorA);
 
   const auto pubAPath = testRoot / "xanadoc_a.manifest";
@@ -943,8 +943,8 @@ TEST(E2EBinaryOrchestrationTest,
 
     const std::string filename = "extreme_framing_" + std::to_string(pages) +
                                  "x" + std::to_string(pages) + "_pages";
-    const auto ppmPath         = screenshotDir / (filename + ".ppm");
-    const auto pngPath         = screenshotDir / (filename + ".png");
+    const auto ppmPath = screenshotDir / (filename + ".ppm");
+    const auto pngPath = screenshotDir / (filename + ".png");
 
     std::string cmd = xuduBin.string() + " --backend " + activeBackend() +
                       " --profile --fov 15 --coarse-below 0" +
@@ -1018,8 +1018,8 @@ TEST(E2EBinaryOrchestrationTest,
 
     const std::string filename = "extreme_framing_" + std::to_string(pagesA) +
                                  "x" + std::to_string(pagesB) + "_asymmetric";
-    const auto ppmPath         = screenshotDir / (filename + ".ppm");
-    const auto pngPath         = screenshotDir / (filename + ".png");
+    const auto ppmPath = screenshotDir / (filename + ".ppm");
+    const auto pngPath = screenshotDir / (filename + ".png");
 
     std::string cmd = xuduBin.string() + " --backend " + activeBackend() +
                       " --profile --fov 15 --coarse-below 0" +
@@ -1202,7 +1202,7 @@ TEST(E2EBinaryOrchestrationTest,
                             " --profile --version-id " + version.str() +
                             " --screenshot " + ppmPath.string() + " " +
                             storePath.string();
-    const auto res        = executeProcess(cmd);
+    const auto res = executeProcess(cmd);
     EXPECT_EQ(res.exitCode, 0) << label << " failed: " << res.output;
     const auto marker = std::string("total pages: ");
     const auto at     = res.output.find(marker);
@@ -1244,19 +1244,20 @@ TEST(E2EBinaryOrchestrationTest, typeWithDecorationsRecordsAFormatLink) {
   // the wrong byte range if rendering ever centres the line differently.
   std::string cmd = xuduBin.string() + " --backend " + activeBackend() +
                     " --profile --fov 15 --version-id " + whole.str() +
-                    " --select 5,5 --type '[bold,italic]MARKERWORD' "
+                    " --click 400,300 --type '[bold,italic]MARKERWORD' "
                     "--do save --screenshot " +
                     ppmPath.string() + " " + storePath.string();
 
   const auto res = executeProcess(cmd);
   EXPECT_EQ(res.exitCode, 0) << "type-decorated test failed: " << res.output;
 
-  const auto selectMarker = std::string("select: doc 0 [");
-  const auto selectAt     = res.output.find(selectMarker);
-  ASSERT_NE(selectAt, std::string::npos) << "--select never resolved:\n"
-                                         << res.output;
+  const auto caretMarker = std::string("offset ");
+  const auto caretAt     = res.output.find(caretMarker);
+  ASSERT_NE(caretAt, std::string::npos)
+      << "--click never resolved to a caret offset:\n"
+      << res.output;
   const auto insertedAt = static_cast<std::uint32_t>(
-      std::atoi(res.output.c_str() + selectAt + selectMarker.size()));
+      std::atoi(res.output.c_str() + caretAt + caretMarker.size()));
 
   const std::string marker = "MARKERWORD";
 

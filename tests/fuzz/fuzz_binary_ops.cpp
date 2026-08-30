@@ -17,21 +17,21 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size) {
   const std::string input(reinterpret_cast<const char *>(data), size);
 
   std::istringstream in1(input);
-  std::map<xudu::MicroversionId, xudu::Op> ops1;
+  std::vector<xudu::OpRecord> ops1;
   try {
     xudu::readOpsSpool(in1, ops1);
   } catch (...) {
   }
 
   std::istringstream in2(input);
-  std::map<xudu::MicroversionId, xudu::Op> ops2;
+  std::vector<xudu::OpRecord> ops2;
   try {
     xudu::readBinaryOpsSpool(in2, ops2);
   } catch (...) {
   }
 
   std::istringstream in3(input);
-  std::map<xudu::MicroversionId, xudu::Op> ops3;
+  std::vector<xudu::OpRecord> ops3;
   try {
     xudu::readOsmicTextOpsSpool(in3, ops3);
   } catch (...) {

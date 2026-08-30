@@ -27,6 +27,7 @@
 #include <string>
 #include <vector>
 
+#include "binary_ops.hpp"
 #include "compact_op.hpp"
 #include "format.hpp"
 #include "microversion.hpp"
@@ -58,8 +59,17 @@ public:
    */
   void putOp(const MicroversionId &produces, const Op &op);
 
-  /// Function 2: the op filed under @p id, or nothing.
-  [[nodiscard]] const Op *getOp(const MicroversionId &id) const;
+  /**
+   * @brief Function 2: the op filed under @p id, or nothing.
+   *
+   * By value: what the spool holds is a CompactOpNode, which names this op's
+   * parent and transclusion source by spool index rather than by microversion,
+   * so an Op is built to answer rather than pointed at. Replaying does not go
+   * through here -- see replay(), which reads the node -- so this is for
+   * callers that want the operation itself, and there is nothing to keep a
+   * pointer into.
+   */
+  [[nodiscard]] std::optional<Op> getOp(const MicroversionId &id) const;
 
   /// Fast zero-copy access to 64-byte compact node by microversion or index.
   [[nodiscard]] const CompactOpNode *
@@ -99,6 +109,28 @@ public:
    * change and would not be fast enough to do on every frame.
    */
   [[nodiscard]] Version rebuild(const MicroversionId &version) const;
+
+  /**
+   * @brief Carry @p document, which is the document at @p known, forward to
+   *        @p version by replaying only the operation between them.
+   *
+   * Editing moves a document one operation at a time, and whoever is showing
+   * it still has what it looked like a moment ago. Replaying just that one
+   * operation costs what the operation costs; rebuild() would replay the
+   * whole history to arrive at the same place, which for a long document is
+   * the difference between a keystroke being free and a keystroke being felt.
+   *
+   * A branch counts as one step, since the state a branch begins is one
+   * operation past the state it forks from -- so going back and typing gets
+   * this too, not just typing on the end.
+   *
+   * @return false when @p version is not one operation past @p known --
+   *         travelling in hypertime, opening some other state, or several
+   *         edits recorded before anything asked to see them. @p document is
+   *         left untouched, and the caller wants rebuild() instead.
+   */
+  [[nodiscard]] bool advance(Version &document, const MicroversionId &known,
+                             const MicroversionId &version) const;
 
   /// The text of @p version, which is rebuild() followed by materialize().
   /// Content quoted from a torrent this machine cannot reach comes out empty,
@@ -213,7 +245,7 @@ public:
   [[nodiscard]] MicroversionId latest() const;
 
   [[nodiscard]] const PrimediaSpool &primedia() const { return spool; }
-  [[nodiscard]] std::size_t opCount() const { return ops.size(); }
+  [[nodiscard]] std::size_t opCount() const { return opsSpool.size(); }
 
   // -- content that was not typed here --------------------------------------
 
@@ -296,6 +328,30 @@ public:
   /// Generate standard OSMIC text format of all operations on demand.
   [[nodiscard]] std::string exportOsmicText() const;
 
+  /**
+   * @brief Every operation, in the compact binary encoding, for publishing.
+   *
+   * Generated rather than stored, the same way the OSMIC text export is. What
+   * a store keeps on disk is the array of nodes it holds in memory, which is
+   * quick to read back and native-endian -- fine for a file that stays put,
+   * and no use at all to a reader on another machine. This encoding is a byte
+   * stream: no struct layout, no word order, and about a sixteenth the size.
+   *
+   * The whole tree, not the ancestry of any one state: what is published is a
+   * document's history, and a reader who cannot reach the branches cannot go
+   * anywhere their publisher went.
+   *
+   * @param sinceExclusive See opRecords(). Publishing again seals only what
+   *        was recorded since the last seal; every record it carries still
+   *        names its parent and source by full microversion, so a reader
+   *        applying this after what an earlier seal gave them needs nothing
+   *        more than that -- see historyFromSeal() in publication.hpp, which
+   *        is why encoding by name rather than by spool index was worth
+   *        keeping even after the local store stopped doing either.
+   */
+  [[nodiscard]] std::string
+  exportBinaryOps(std::uint32_t sinceExclusive = 0) const;
+
   /// Stream standard OSMIC text format of all operations on demand.
   void writeOsmicText(std::ostream &out) const;
 
@@ -304,20 +360,71 @@ public:
   void load(const std::string &directory);
 
 private:
-  /// Apply one recorded op to @p onto. Shared by rebuild() and nothing else;
-  /// separated because replaying and recording must not drift.
-  void replay(const Op &op, Version &onto) const;
+  /// Apply one recorded op to @p onto. The single replay path: everything that
+  /// rebuilds a document comes through here, so replaying and recording cannot
+  /// drift.
+  ///
+  /// Takes the spool's own 64-byte node rather than an Op. The two carry the
+  /// same operation -- CompactOpNode names the parent and transclusion source
+  /// by spool index where Op names them by microversion -- but the node is
+  /// what the ancestral walk already has in hand, and going back through the
+  /// Op map for it cost about nine tenths of a rebuild.
+  void replay(const CompactOpNode &node, Version &onto) const;
+
+  /// rebuild(), for a state already known to be in the spool at @p index.
+  /// Split out because a transclusion replays its source the same way, and it
+  /// has the index rather than the name.
+  [[nodiscard]] Version rebuildFromIndex(std::uint32_t index) const;
+
+  /**
+   * @brief Every recorded operation, in the order they are serialized.
+   *
+   * Built on demand for save() and the OSMIC text export, and not kept: the
+   * spool is what holds the operations, and a second copy of them that had to
+   * be maintained in step was what this replaced.
+   *
+   * The order is by microversion, which is the order the spool used to be
+   * iterated in when a std::map held it, and so is the order every ops.spool
+   * already on disk was written in. It is not the order that would compress
+   * best -- a branch sorts into the middle of the chain it forks from, which
+   * breaks the run of names FLAG_SEQUENTIAL depends on and leaves the main
+   * chain in pieces -- but changing it changes the bytes written, so it is a
+   * format decision rather than a detail of how operations are held.
+   *
+   * @param sinceExclusive Only operations past this spool index. Zero, the
+   *        default, is every operation ever recorded; a store already knows
+   *        which index a previous save or seal reached, and asking for
+   *        everything past it is what makes that save or seal incremental.
+   */
+  [[nodiscard]] std::vector<OpRecord>
+  opRecords(std::uint32_t sinceExclusive = 0) const;
+
+  /// Record @p records into the spool, skipping any state already filed --
+  /// which is what the std::map these were read into used to do on a
+  /// duplicate, and keeps a corrupt file opening rather than throwing.
+  void adoptOpRecords(const std::vector<OpRecord> &records);
 
   PrimediaSpool spool;
+  /// How many bytes of @ref spool are already on disk, and in which directory.
+  /// The primedia spool only ever grows, so a save to the directory the last
+  /// one went to appends what is new rather than rewriting the whole thing --
+  /// which is what made saving cost the length of the document rather than
+  /// the length of what had just been typed. Reset by load(); advanced by
+  /// save(). A save to any other directory rewrites from scratch, since
+  /// nothing is known about what is already there.
+  mutable std::uint64_t primediaFlushed{0};
+  mutable std::string flushedPrimediaDirectory;
   /// Scrolls other than the local spool, in the order they were first
   /// recorded. A span's ScrollId is one more than the index here, so that zero
   /// stays the local spool.
   std::vector<Scroll> externals;
   Resolver resolver;
-  /// The operations spool, filed by the state each op produces. Ordered, so
-  /// iteration is replay order.
+  /// The operations spool, filed by the state each op produces: the single
+  /// copy of them. Every question about what has been recorded is asked of
+  /// this -- a parallel std::map<MicroversionId, Op> used to answer most of
+  /// them, holding the same operations a second time at about twice the size
+  /// and three heap allocations apiece.
   SegmentedOpsSpool opsSpool;
-  std::map<MicroversionId, Op> ops;
   std::map<std::uint64_t, Link> linkTable;
   std::uint64_t nextLinkId{1};
 };

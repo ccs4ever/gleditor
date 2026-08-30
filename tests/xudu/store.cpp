@@ -6,10 +6,13 @@
 #include <gtest/gtest.h>
 
 #include <filesystem>
+#include <fstream>
 #include <stdexcept>
 #include <string>
 #include <vector>
 
+#include <xudu/core/binary_ops.hpp>
+#include <xudu/core/compact_op.hpp>
 #include <xudu/core/microversion.hpp>
 #include <xudu/core/ops.hpp>
 #include <xudu/core/store.hpp>
@@ -188,6 +191,92 @@ TEST(StoreTest, theOpSequenceForAVersionIsWhatRebuildsIt) {
   store.insert(one, 1, "z"); // a branch, which must not appear below
 
   EXPECT_EQ(names(store.opsFor(two)), (std::vector<std::string>{"1", "2"}));
+}
+
+// advance() is what keeps a keystroke from costing the whole document: the
+// view already holds the pieces for the state being edited, so only the one
+// operation between them has to be replayed. What it must never do is give a
+// different answer than replaying from the null document would.
+
+TEST(StoreTest, advancingOneStepAgreesWithRebuildingFromNothing) {
+  Store store;
+  const auto one   = store.insert(MicroversionId{}, 0, "hello");
+  const auto two   = store.insert(one, 5, " world");
+  const auto three = store.erase(two, 0, 1);
+
+  auto carried = store.rebuild(one);
+  EXPECT_TRUE(store.advance(carried, one, two));
+  EXPECT_EQ(carried.pieces(), store.rebuild(two).pieces());
+  EXPECT_TRUE(store.advance(carried, two, three));
+  EXPECT_EQ(carried.pieces(), store.rebuild(three).pieces());
+  EXPECT_EQ(carried.materialize(store), store.textOf(three));
+}
+
+TEST(StoreTest, advancingCountsABranchAsOneStep) {
+  // Going back and typing is one operation past the state forked from, so it
+  // gets the cheap path too -- not just typing on the end.
+  Store store;
+  const auto one = store.insert(MicroversionId{}, 0, "hello");
+  store.insert(one, 5, " world");
+  const auto branched = store.insert(one, 5, " there");
+  ASSERT_EQ(branched.str(), "1a1");
+
+  auto carried = store.rebuild(one);
+  EXPECT_TRUE(store.advance(carried, one, branched));
+  EXPECT_EQ(carried.materialize(store), "hello there");
+}
+
+TEST(StoreTest, advancingRefusesAnythingFurtherThanOneStep) {
+  Store store;
+  const auto one   = store.insert(MicroversionId{}, 0, "a");
+  const auto two   = store.insert(one, 1, "b");
+  const auto three = store.insert(two, 2, "c");
+
+  auto carried      = store.rebuild(one);
+  const auto before = carried.pieces();
+  // Two steps on, so the caller has to rebuild -- and the document it handed
+  // in must come back exactly as it went, not half-advanced.
+  EXPECT_FALSE(store.advance(carried, one, three));
+  EXPECT_EQ(carried.pieces(), before);
+  // Backwards is not one step on either.
+  EXPECT_FALSE(store.advance(carried, two, one));
+  EXPECT_EQ(carried.pieces(), before);
+  // Nor is a state nothing has recorded yet.
+  EXPECT_FALSE(store.advance(carried, three, MicroversionId::parse("4")));
+  EXPECT_EQ(carried.pieces(), before);
+}
+
+TEST(StoreTest, advancingCarriesForcedBreaksAndLinksLikeAReplayDoes) {
+  // The op kinds that change no text still have to travel: a break op moves
+  // the page, a link op moves nothing, and both must land the same way.
+  Store store;
+  const auto one = store.insert(MicroversionId{}, 0, "abcdef");
+  const auto two = store.insertBreak(one, 3);
+  Link link;
+  link.left.push_back(PrimediaSpan{localScroll, 0, 3});
+  const auto three = store.addLink(two, link);
+
+  auto carried = store.rebuild(one);
+  ASSERT_TRUE(store.advance(carried, one, two));
+  EXPECT_THAT(carried.forcedBreaks(), testing::ElementsAre(3U));
+  ASSERT_TRUE(store.advance(carried, two, three));
+  EXPECT_EQ(carried.pieces(), store.rebuild(three).pieces());
+  EXPECT_THAT(carried.forcedBreaks(), testing::ElementsAre(3U));
+}
+
+TEST(StoreTest, rebuildingTerminatesWhenATransclusionNamesAnUnrecordedSource) {
+  // A transclusion whose source was never recorded used to be unbounded
+  // recursion rather than an error: replaying it rebuilt the source by name,
+  // and the name's own path ran back through the transclusion that asked for
+  // it. Replaying off the spool cannot loop that way -- the source is a spool
+  // index, which stayed zero because there was nothing to point at -- so the
+  // quotation comes out empty and the rest of the document still opens.
+  Store store;
+  const auto one = store.insert(MicroversionId{}, 0, "abcdef");
+  const auto two = store.transclude(one, 0, MicroversionId::parse("9"), 0, 3);
+
+  EXPECT_EQ(store.textOf(two), "abcdef");
+  EXPECT_EQ(store.rebuild(two).pieces(), store.rebuild(one).pieces());
 }
 
 TEST(StoreTest, transclusionSharesOneCopyOfTheContent) {
@@ -378,6 +467,40 @@ TEST_F(StoreRoundTripTest, editingContinuesAfterAReload) {
   EXPECT_EQ(store.textOf(next), "one two");
 }
 
+TEST_F(StoreRoundTripTest, savingTwiceOnlyAppendsWhatIsNewToThePrimediaSpool) {
+  // The primedia spool only grows, so a save to the directory the last one
+  // went to appends the new bytes rather than writing the whole document out
+  // again. A round trip alone would not catch a duplicated spool -- stale
+  // bytes past an address already handed out do not change what that address
+  // reads as -- so this checks the file's size directly.
+  Store store;
+  const auto one = store.insert(MicroversionId{}, 0, "one");
+  store.save(dir.string());
+  store.save(dir.string());
+
+  EXPECT_EQ(std::filesystem::file_size(dir / "primedia.spool"), 3U);
+
+  Store reloaded;
+  reloaded.load(dir.string());
+  EXPECT_EQ(reloaded.textOf(one), "one");
+
+  const auto two = store.insert(one, 3, " two");
+  store.save(dir.string());
+  EXPECT_EQ(std::filesystem::file_size(dir / "primedia.spool"), 7U);
+
+  Store again;
+  again.load(dir.string());
+  EXPECT_EQ(again.textOf(two), "one two");
+  EXPECT_EQ(again.primedia().bytes(), "one two");
+
+  // A save to a directory this store has not written to before knows nothing
+  // about what is already there, so it writes the whole spool out.
+  const auto elsewhere = dir / "elsewhere";
+  std::filesystem::create_directories(elsewhere);
+  store.save(elsewhere.string());
+  EXPECT_EQ(std::filesystem::file_size(elsewhere / "primedia.spool"), 7U);
+}
+
 TEST_F(StoreRoundTripTest, aQuotationIntoASecondDocumentSurvivesSaving) {
   // What ctrl-t does: quote the selection into a second document. That second
   // document starts from the null document, so the state it produces is a
@@ -410,6 +533,78 @@ TEST_F(StoreRoundTripTest, aQuotationIntoASecondDocumentSurvivesSaving) {
 }
 
 } // namespace
+
+TEST_F(StoreRoundTripTest, operationsAreWrittenAsTheTreeTheyAreHeldAs) {
+  Store store;
+  auto at = MicroversionId{};
+  for (int i = 0; i < 4; i++) {
+    at = store.insert(at, static_cast<std::uint32_t>(i), "x");
+  }
+  const auto branched = store.insert(MicroversionId::parse("1"), 1, "y");
+  store.save(dir.string());
+
+  // One node per operation and nothing else: no header, no names, no
+  // state-zero slot. What is on disk is what the arena holds.
+  ASSERT_TRUE(std::filesystem::exists(dir / "ops.nodes"));
+  EXPECT_EQ(std::filesystem::file_size(dir / "ops.nodes"),
+            store.opCount() * sizeof(xudu::CompactOpNode));
+  EXPECT_FALSE(std::filesystem::exists(dir / "ops.spool"));
+
+  Store reloaded;
+  reloaded.load(dir.string());
+  EXPECT_EQ(reloaded.opCount(), store.opCount());
+  EXPECT_EQ(reloaded.textOf(at), store.textOf(at));
+  EXPECT_EQ(reloaded.textOf(branched), store.textOf(branched));
+  EXPECT_EQ(reloaded.latest().str(), store.latest().str());
+  // The names were not written down, so this is the derivation working.
+  EXPECT_EQ(names(reloaded.allVersions()), names(store.allVersions()));
+}
+
+TEST_F(StoreRoundTripTest, aStoreWrittenBeforeTheNodeArrayStillOpens) {
+  // The compact binary encoding is no longer written, but stores are already
+  // on disk in it. They open, and the next save writes them out as nodes.
+  std::filesystem::create_directories(dir);
+  MicroversionId tip;
+  std::string expected;
+  {
+    Store original;
+    auto at = MicroversionId{};
+    for (int i = 0; i < 6; i++) {
+      at = original.insert(at, static_cast<std::uint32_t>(i), "z");
+    }
+    original.insert(MicroversionId::parse("2"), 1, "w"); // a branch too
+    tip      = at;
+    expected = original.textOf(at);
+
+    // Save normally for the primedia the operations point into, then put the
+    // operations back the way a store written before this change had them.
+    original.save(dir.string());
+    std::vector<xudu::OpRecord> records;
+    for (const auto &id : original.allVersions()) {
+      records.push_back(xudu::OpRecord{id, *original.getOp(id)});
+    }
+    std::ofstream out(dir / "ops.spool", std::ios::binary | std::ios::trunc);
+    xudu::writeBinaryOpsSpool(out, records);
+  }
+  std::filesystem::remove(dir / "ops.nodes");
+  ASSERT_TRUE(std::filesystem::exists(dir / "ops.spool"));
+
+  Store opened;
+  opened.load(dir.string());
+  EXPECT_EQ(opened.opCount(), 7U);
+  EXPECT_EQ(opened.textOf(tip), expected);
+
+  // Saving moves it over, and takes the superseded file with it so that
+  // nothing is left holding a second answer.
+  opened.save(dir.string());
+  EXPECT_TRUE(std::filesystem::exists(dir / "ops.nodes"));
+  EXPECT_FALSE(std::filesystem::exists(dir / "ops.spool"));
+
+  Store again;
+  again.load(dir.string());
+  EXPECT_EQ(again.opCount(), 7U);
+  EXPECT_EQ(again.textOf(tip), expected);
+}
 
 TEST_F(StoreRoundTripTest, osmicTextFormatCanBeGeneratedOnDemand) {
   Store store;

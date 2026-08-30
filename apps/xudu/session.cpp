@@ -176,6 +176,33 @@ std::string authorPath(const std::string &storePath) {
   return (std::filesystem::path(storePath) / "author.yaml").string();
 }
 
+/// Where a store's SealState lives -- what makes the next publishDocument()
+/// know what the last one already sealed, across separate runs of the
+/// program. One file per store rather than per document: the local spool is
+/// one scroll shared by every document the store holds, sealed under one
+/// name ("primedia") regardless of which document's salt is being published.
+std::string sealStatePath(const std::string &storePath) {
+  return (std::filesystem::path(storePath) / "seal-state").string();
+}
+
+SealState loadSealState(const std::string &storePath) {
+  if (std::ifstream in(sealStatePath(storePath), std::ios::binary); in) {
+    const std::string text{std::istreambuf_iterator<char>(in),
+                           std::istreambuf_iterator<char>()};
+    if (auto state = decodeSealState(text); state) {
+      return std::move(*state);
+    }
+  }
+  return {};
+}
+
+void saveSealState(const std::string &storePath, const SealState &state) {
+  std::filesystem::create_directories(storePath);
+  std::ofstream out(sealStatePath(storePath),
+                    std::ios::binary | std::ios::trunc);
+  out << encodeSealState(state);
+}
+
 } // namespace
 
 void Session::setAuthor(Author aWho) {
@@ -294,6 +321,15 @@ std::string Session::publishDocument(const MicroversionId &version,
   record.contentLength = st.primedia().bytes().size();
   record.contentDigest = sha256Hex(st.primedia().bytes());
 
+  const auto priorState = loadSealState(path(storeIndex));
+  // The history is sealed beside the content and vouched for beside it. This
+  // has to be the same bytes sealLocalSpool() puts in the torrent, so it asks
+  // the store the same way rather than describing them a second time -- only
+  // what is new since the last seal, exactly as sealLocalSpool() will seal.
+  const auto sealedOps = sealableOps(st, priorState.opsAlreadySealed);
+  record.opsLength     = sealedOps.size();
+  record.opsDigest     = sha256Hex(sealedOps);
+
   for (const auto &piece : st.rebuild(version).pieces()) {
     if (piece.isLocal()) {
       continue;
@@ -309,10 +345,23 @@ std::string Session::publishDocument(const MicroversionId &version,
   const auto provenance =
       signProvenance(record, settings().signing(request.passphrase));
 
-  const auto sealed = sealLocalSpool(st, mine, "primedia", into, provenance);
+  const auto sealed =
+      sealLocalSpool(st, mine, "primedia", into, provenance, priorState.scroll,
+                     priorState.opsAlreadySealed);
 
-  const auto pub = publish(st, version, mine, request.salt, request.title,
-                           static_cast<std::int64_t>(now), now, &sealed.scroll);
+  auto opsSegments = priorState.opsSegments;
+  if (sealed.opsSegment.has_value()) {
+    opsSegments.push_back(*sealed.opsSegment);
+  }
+  const auto pub =
+      publish(st, version, mine, request.salt, request.title,
+              static_cast<std::int64_t>(now), now, &sealed.scroll, opsSegments);
+
+  SealState nextState;
+  nextState.scroll           = sealed.scroll;
+  nextState.opsAlreadySealed = static_cast<std::uint32_t>(st.opCount());
+  nextState.opsSegments      = opsSegments;
+  saveSealState(path(storeIndex), nextState);
 
   std::filesystem::create_directories(into);
   const auto outPath =
@@ -489,10 +538,17 @@ void Session::refresh(const std::uint32_t docIndex,
   if (docIndex >= open.size()) {
     return;
   }
-  const auto sIdx        = open[docIndex].storeIndex;
-  const auto &st         = store(sIdx);
+  const auto sIdx = open[docIndex].storeIndex;
+  const auto &st  = store(sIdx);
+  // The document this view is already showing is the one the edit was made
+  // to, so the usual case is one operation away and the pieces in hand are
+  // most of the answer. Only a move that is not one step on -- travelling in
+  // hypertime, or several edits recorded before anything asked to see them --
+  // has to replay the history from the null document.
+  if (!st.advance(open[docIndex].pieces, open[docIndex].version, version)) {
+    open[docIndex].pieces = st.rebuild(version);
+  }
   open[docIndex].version = version;
-  open[docIndex].pieces  = st.rebuild(version);
   invalidate();
 }
 

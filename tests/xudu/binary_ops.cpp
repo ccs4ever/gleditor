@@ -30,6 +30,28 @@ using xudu::readVarint;
 using xudu::writeBinaryOpsSpool;
 using xudu::writeMicroversionId;
 using xudu::writeOsmicTextOpsSpool;
+
+/// The serializers take a sequence now rather than a map, because the order
+/// records are written in is part of the format -- FLAG_SEQUENTIAL drops a
+/// record's name when it continues the one before it. These tests still say
+/// what they expect as "an operation filed under this state", so they convert
+/// at the call and go on describing it that way.
+std::vector<xudu::OpRecord> asRecords(const std::map<MicroversionId, Op> &ops) {
+  std::vector<xudu::OpRecord> records;
+  records.reserve(ops.size());
+  for (const auto &[id, op] : ops) {
+    records.push_back(xudu::OpRecord{id, op});
+  }
+  return records;
+}
+
+std::map<MicroversionId, Op> asMap(const std::vector<xudu::OpRecord> &records) {
+  std::map<MicroversionId, Op> ops;
+  for (const auto &record : records) {
+    ops.emplace(record.produces, record.op);
+  }
+  return ops;
+}
 using xudu::writeVarint;
 
 TEST(BinaryOpsTest, varintEncodesAndDecodesCorrectly) {
@@ -174,15 +196,16 @@ TEST(BinaryOpsTest, allOpKindsBinaryRoundTrip) {
   }
 
   std::stringstream ss;
-  writeBinaryOpsSpool(ss, original);
+  writeBinaryOpsSpool(ss, asRecords(original));
 
   // Strip magic bytes for readBinaryOpsSpool test
   std::string binaryData = ss.str();
   ASSERT_GE(binaryData.size(), 5U);
   std::stringstream payload(binaryData.substr(5));
 
-  std::map<MicroversionId, Op> decoded;
-  readBinaryOpsSpool(payload, decoded);
+  std::vector<xudu::OpRecord> decodedRecords;
+  readBinaryOpsSpool(payload, decodedRecords);
+  const auto decoded = asMap(decodedRecords);
 
   ASSERT_EQ(decoded.size(), original.size());
   for (const auto &[id, op] : original) {
@@ -216,11 +239,11 @@ TEST(BinaryOpsTest, spaceShrinkageExceedsEightyPercent) {
   }
 
   std::stringstream textStream;
-  writeOsmicTextOpsSpool(textStream, ops);
+  writeOsmicTextOpsSpool(textStream, asRecords(ops));
   const std::size_t textSize = textStream.str().size();
 
   std::stringstream binStream;
-  writeBinaryOpsSpool(binStream, ops);
+  writeBinaryOpsSpool(binStream, asRecords(ops));
   const std::size_t binSize = binStream.str().size();
 
   // Text size should be ~18-20 KB, Binary should be ~2 KB (approx 4 bytes/op)
@@ -247,9 +270,10 @@ TEST(BinaryOpsTest, autoDetectionHandlesBothBinaryAndText) {
   // 1. Binary auto-detect
   {
     std::stringstream ss;
-    writeBinaryOpsSpool(ss, original);
-    std::map<MicroversionId, Op> decoded;
-    readOpsSpool(ss, decoded);
+    writeBinaryOpsSpool(ss, asRecords(original));
+    std::vector<xudu::OpRecord> decodedRecords;
+    readOpsSpool(ss, decodedRecords);
+    const auto decoded = asMap(decodedRecords);
     ASSERT_EQ(decoded.size(), 1U);
     EXPECT_EQ(decoded.begin()->first.str(), "1");
     EXPECT_EQ(decoded.begin()->second.kind, OpKind::Insert);
@@ -258,9 +282,10 @@ TEST(BinaryOpsTest, autoDetectionHandlesBothBinaryAndText) {
   // 2. Text auto-detect
   {
     std::stringstream ss;
-    writeOsmicTextOpsSpool(ss, original);
-    std::map<MicroversionId, Op> decoded;
-    readOpsSpool(ss, decoded);
+    writeOsmicTextOpsSpool(ss, asRecords(original));
+    std::vector<xudu::OpRecord> decodedRecords;
+    readOpsSpool(ss, decodedRecords);
+    const auto decoded = asMap(decodedRecords);
     ASSERT_EQ(decoded.size(), 1U);
     EXPECT_EQ(decoded.begin()->first.str(), "1");
     EXPECT_EQ(decoded.begin()->second.kind, OpKind::Insert);
@@ -282,8 +307,9 @@ TEST(BinaryOpsTest, version1StreamsStillReadBackWithTheirLiteralBranchByte) {
   bytes.push_back(static_cast<char>(0x00)); // op.at (varint)
 
   std::stringstream ss(bytes);
-  std::map<MicroversionId, Op> decoded;
-  readOpsSpool(ss, decoded);
+  std::vector<xudu::OpRecord> decodedRecords;
+  readOpsSpool(ss, decodedRecords);
+  const auto decoded = asMap(decodedRecords);
 
   ASSERT_EQ(decoded.size(), 1U);
   EXPECT_EQ(decoded.begin()->first.str(), "a1");

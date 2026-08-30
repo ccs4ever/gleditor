@@ -17,12 +17,17 @@
  */
 #include <gtest/gtest.h>
 
+#include <array>
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
+#include <map>
+#include <sstream>
 #include <string>
+#include <string_view>
 #include <vector>
 
+#include <xudu/core/binary_ops.hpp>
 #include <xudu/core/provenance.hpp>
 #include <xudu/core/publication.hpp>
 #include <xudu/core/store.hpp>
@@ -33,6 +38,7 @@ namespace {
 using xudu::Author;
 using xudu::MicroversionId;
 using xudu::Provenance;
+using xudu::Scroll;
 using xudu::SignedProvenance;
 using xudu::Store;
 
@@ -241,7 +247,7 @@ TEST(ProvenanceTest, theSealCarriesTheContentAndTheRecordUnderOneHash) {
 
   const auto meta = xudu::Metainfo::parse(sealed.torrentFile);
   EXPECT_EQ(meta.hash(), sealed.hash);
-  ASSERT_EQ(meta.files().size(), 3U);
+  ASSERT_EQ(meta.files().size(), 4U);
 
   // The content is file zero at offset zero, which is what keeps every address
   // already handed out pointing where it did.
@@ -252,13 +258,23 @@ TEST(ProvenanceTest, theSealCarriesTheContentAndTheRecordUnderOneHash) {
   EXPECT_EQ(sealed.scroll.segments.at(0).streamOffset, 0U);
   EXPECT_EQ(sealed.scroll.segments.at(0).at, 0U);
 
+  // The operations follow it: a xanadoc is its history, so what is sealed is
+  // the whole tree and not the state it reached. In the compact encoding,
+  // which is what crosses machines -- the array of nodes a store keeps is
+  // native-endian and means nothing on the other end.
+  const auto ops = xudu::sealableOps(store);
+  EXPECT_EQ(meta.files()[1].path, xudu::sealedOpsName);
+  EXPECT_EQ(meta.files()[1].length, ops.size());
+  EXPECT_EQ(meta.files()[1].offset, bytes.size());
+
   // And the record travels with it, under the same hash.
-  EXPECT_EQ(meta.files()[1].path, xudu::provenanceFileName);
-  EXPECT_EQ(meta.files()[1].length, signed_.yaml.size());
-  EXPECT_EQ(meta.files()[2].path, xudu::provenanceSigName);
-  EXPECT_EQ(meta.files()[2].length, signed_.signature.size());
-  EXPECT_EQ(meta.totalLength(),
-            bytes.size() + signed_.yaml.size() + signed_.signature.size());
+  EXPECT_EQ(meta.files()[2].path, xudu::provenanceFileName);
+  EXPECT_EQ(meta.files()[2].length, signed_.yaml.size());
+  EXPECT_EQ(meta.files()[3].path, xudu::provenanceSigName);
+  EXPECT_EQ(meta.files()[3].length, signed_.signature.size());
+  EXPECT_EQ(meta.totalLength(), bytes.size() + ops.size() +
+                                    signed_.yaml.size() +
+                                    signed_.signature.size());
 
   // Sealing the same content with a different record is a different address:
   // the two cannot be substituted for one another.
@@ -268,6 +284,271 @@ TEST(ProvenanceTest, theSealCarriesTheContentAndTheRecordUnderOneHash) {
   const auto elsewise = xudu::sealLocalSpool(store, mine, "primedia", "",
                                              xudu::signProvenance(other));
   EXPECT_NE(elsewise.hash, sealed.hash);
+}
+
+// Republishing must not reseal what a previous seal already carried: only the
+// bytes and operations written since that seal become the new torrent, which
+// is what makes republishing cheap on a document that has grown large.
+TEST(ProvenanceTest, republishingSealsOnlyWhatIsNewSinceTheLastSeal) {
+  const Keyring keys;
+  if (!keys.usable()) {
+    GTEST_SKIP() << "no gpg keyring could be made here";
+  }
+
+  Store store;
+  const auto one = store.insert(MicroversionId{}, 0, "First.");
+  static_cast<void>(one);
+
+  const auto signed1 = xudu::signProvenance(signable());
+  const auto mine    = xudu::createMutableKeys();
+  const auto first = xudu::sealLocalSpool(store, mine, "primedia", "", signed1);
+
+  const auto firstPrimediaLength = store.primedia().bytes().size();
+  const auto firstOpCount        = store.opCount();
+  ASSERT_EQ(first.scroll.segments.size(), 1U);
+  EXPECT_EQ(first.scroll.segments.at(0).at, 0U);
+  EXPECT_EQ(first.scroll.segments.at(0).length, firstPrimediaLength);
+  ASSERT_TRUE(first.opsSegment.has_value());
+  EXPECT_EQ(first.opsSegment->at, 0U);
+  EXPECT_EQ(first.opsSegment->length, firstOpCount);
+
+  // Write more after the first seal, then seal again knowing what that seal
+  // already covered.
+  static_cast<void>(store.insert(one, 6, " And more."));
+  const auto signed2 = xudu::signProvenance(signable());
+  const auto second =
+      xudu::sealLocalSpool(store, mine, "primedia", "", signed2, first.scroll,
+                           static_cast<std::uint32_t>(firstOpCount));
+
+  // The first segment is carried forward untouched -- its bytes are not read
+  // or rehashed again -- and exactly one new segment is added for what was
+  // written since.
+  ASSERT_EQ(second.scroll.segments.size(), 2U);
+  EXPECT_EQ(second.scroll.segments.at(0), first.scroll.segments.at(0));
+  EXPECT_EQ(second.scroll.segments.at(1).at, firstPrimediaLength);
+  EXPECT_EQ(second.scroll.segments.at(1).length,
+            store.primedia().bytes().size() - firstPrimediaLength);
+  EXPECT_EQ(second.scroll.segments.at(1).torrent, second.hash);
+
+  // Likewise for the operations: the new segment starts exactly where the
+  // last seal's left off.
+  ASSERT_TRUE(second.opsSegment.has_value());
+  EXPECT_EQ(second.opsSegment->at, firstOpCount);
+  EXPECT_EQ(second.opsSegment->length, store.opCount() - firstOpCount);
+
+  // And the second torrent itself is small: only the new content, the new
+  // operations, and the (re-signed) authorship record -- not the whole
+  // spool sealed over again.
+  const auto meta = xudu::Metainfo::parse(second.torrentFile);
+  EXPECT_EQ(meta.files()[0].length,
+            store.primedia().bytes().size() - firstPrimediaLength);
+}
+
+// Republishing with nothing written since the last seal has nothing new to
+// carry: no new primedia segment, no operations segment, and no ops file in
+// the torrent at all.
+TEST(ProvenanceTest, resealingWithNothingNewAddsNoNewSegments) {
+  const Keyring keys;
+  if (!keys.usable()) {
+    GTEST_SKIP() << "no gpg keyring could be made here";
+  }
+
+  Store store;
+  static_cast<void>(store.insert(MicroversionId{}, 0, "Unchanging."));
+
+  const auto signed1 = xudu::signProvenance(signable());
+  const auto mine    = xudu::createMutableKeys();
+  const auto first = xudu::sealLocalSpool(store, mine, "primedia", "", signed1);
+
+  const auto signed2 = xudu::signProvenance(signable());
+  const auto second =
+      xudu::sealLocalSpool(store, mine, "primedia", "", signed2, first.scroll,
+                           static_cast<std::uint32_t>(store.opCount()));
+
+  EXPECT_EQ(second.scroll.segments, first.scroll.segments);
+  EXPECT_FALSE(second.opsSegment.has_value());
+
+  const auto meta = xudu::Metainfo::parse(second.torrentFile);
+  for (const auto &file : meta.files()) {
+    EXPECT_NE(file.path, xudu::sealedContentName);
+    EXPECT_NE(file.path, xudu::sealedOpsName);
+  }
+}
+
+TEST(ProvenanceTest, theSealedOperationsAreTheWholeTreeAndDecodeBack) {
+  // What is sealed has to be a history somebody else can actually replay --
+  // every branch of it, not the ancestry of whichever state was published.
+  Store store;
+  const auto one   = store.insert(MicroversionId{}, 0, "hello");
+  const auto two   = store.insert(one, 5, " world");
+  const auto three = store.erase(two, 0, 1);
+  // Two branches off an early state, one of them with a future of its own.
+  const auto branched = store.insert(one, 5, " there");
+  store.insert(branched, 0, "X");
+  store.insert(one, 5, " again");
+
+  const auto encoded = store.exportBinaryOps();
+  ASSERT_FALSE(encoded.empty());
+
+  std::istringstream in(encoded, std::ios::binary);
+  std::vector<xudu::OpRecord> records;
+  xudu::readOpsSpool(in, records);
+  EXPECT_EQ(records.size(), store.opCount())
+      << "the seal carried a version rather than a history";
+
+  // Replayed into an empty store, every state comes back -- including the
+  // branches, which a reader given only the published version's pieces could
+  // not have reached at all. Compared as pieces rather than as text: the
+  // spans are what the operations produce, and the bytes they name travel in
+  // the torrent's other file.
+  Store reader;
+  for (const auto &record : records) {
+    reader.putOp(record.produces, record.op);
+  }
+  EXPECT_EQ(reader.opCount(), store.opCount());
+  EXPECT_EQ(reader.allVersions().size(), store.allVersions().size());
+  for (const auto &id : store.allVersions()) {
+    EXPECT_TRUE(reader.getOp(id).has_value()) << id.str() << " did not travel";
+    EXPECT_EQ(reader.rebuild(id).pieces(), store.rebuild(id).pieces())
+        << id.str() << " rebuilt differently";
+  }
+  EXPECT_EQ(reader.rebuild(three).pieces(), store.rebuild(three).pieces());
+  EXPECT_EQ(reader.rebuild(branched).pieces(),
+            store.rebuild(branched).pieces());
+}
+
+TEST(ProvenanceTest, aSealedHistoryComesBackWithThePublishersOwnNames) {
+  // The seal has to be readable on a machine that did not write it. What makes
+  // that awkward is that an operation names content by a ScrollId, and zero
+  // means "my own primedia spool" -- so operations sealed as they stand would
+  // point a reader at the reader's spool.
+  Store publisher;
+  const auto one   = publisher.insert(MicroversionId{}, 0, "hello");
+  const auto two   = publisher.insert(one, 5, " world");
+  const auto three = publisher.erase(two, 0, 1);
+  const auto other = publisher.insert(one, 5, " there");
+  static_cast<void>(publisher.insert(other, 0, "X"));
+
+  const auto sealed = xudu::sealableOps(publisher);
+  ASSERT_FALSE(sealed.empty());
+
+  // The scroll the publisher's local spool became, which is what their
+  // ScrollId zero meant.
+  Scroll became;
+  became.publisher = xudu::createMutableKeys().publicKey;
+  became.salt      = "essay";
+
+  const auto history = xudu::historyFromSeal(sealed, became, {});
+  ASSERT_NE(history, nullptr);
+
+  // Their names, not renamed into this store's numbering: "2a4" is a name
+  // among the versions of one document, and a reader who can say it and mean
+  // what the publisher means is why the history travels at all.
+  EXPECT_EQ(history->opCount(), publisher.opCount());
+  for (const auto &id : publisher.allVersions()) {
+    EXPECT_TRUE(history->getOp(id).has_value())
+        << id.str() << " did not survive the seal";
+  }
+  EXPECT_EQ(history->latest().str(), publisher.latest().str());
+  EXPECT_EQ(history->rebuild(three).pieces().size(),
+            publisher.rebuild(three).pieces().size());
+
+  // And every piece now names the scroll the content was sealed as, rather
+  // than scroll zero, which on this machine would have been this machine's.
+  for (const auto &id : history->allVersions()) {
+    for (const auto &piece : history->rebuild(id).pieces()) {
+      EXPECT_FALSE(piece.isLocal())
+          << id.str() << " still points at a local spool after travelling";
+    }
+  }
+}
+
+// The read side of incremental sealing: a segment sealed after an earlier
+// publish may name parents the earlier segment produced, and applying both in
+// seal order has to resolve exactly as if everything had been sealed at once.
+TEST(ProvenanceTest, historyFromSealAssemblesSegmentsSealedAcrossTwoPublishes) {
+  Store publisher;
+  const auto one = publisher.insert(MicroversionId{}, 0, "hello");
+  const auto two = publisher.insert(one, 5, " world");
+
+  const auto firstOpCount = publisher.opCount();
+  const auto firstSegment = xudu::sealableOps(publisher);
+
+  const auto three = publisher.erase(two, 0, 1);
+  static_cast<void>(publisher.insert(one, 5, " again"));
+  const auto secondSegment =
+      xudu::sealableOps(publisher, static_cast<std::uint32_t>(firstOpCount));
+
+  Scroll became;
+  became.publisher = xudu::createMutableKeys().publicKey;
+  became.salt      = "essay";
+
+  const std::array<std::string_view, 2> segments{firstSegment, secondSegment};
+  const auto history = xudu::historyFromSeal(segments, became, {});
+  ASSERT_NE(history, nullptr);
+
+  EXPECT_EQ(history->opCount(), publisher.opCount());
+  for (const auto &id : publisher.allVersions()) {
+    EXPECT_TRUE(history->getOp(id).has_value())
+        << id.str() << " did not survive the two-part seal";
+  }
+
+  // Compared by offset rather than by raw scroll id: the publisher's local
+  // spool is scroll zero in their own store, but became scroll one (the
+  // first non-local slot) once it was sealed and taken into this history --
+  // the same renumbering aSealedHistoryComesBackWithThePublishersOwnNames
+  // checks for a single-segment seal.
+  const auto byOffset = [](const std::vector<xudu::PrimediaSpan> &pieces) {
+    std::vector<std::pair<std::uint64_t, std::uint64_t>> out;
+    out.reserve(pieces.size());
+    for (const auto &piece : pieces) {
+      out.emplace_back(piece.start, piece.length);
+    }
+    return out;
+  };
+  EXPECT_EQ(byOffset(history->rebuild(three).pieces()),
+            byOffset(publisher.rebuild(three).pieces()));
+  for (const auto &piece : history->rebuild(three).pieces()) {
+    EXPECT_FALSE(piece.isLocal())
+        << "a piece still points at a local spool after travelling";
+  }
+
+  // The first segment alone gives only the history it actually carried: the
+  // second is genuinely additional operations, not a re-seal of everything.
+  const auto partial = xudu::historyFromSeal(firstSegment, became, {});
+  ASSERT_NE(partial, nullptr);
+  EXPECT_EQ(partial->opCount(), firstOpCount);
+}
+
+TEST(ProvenanceTest, aSealWhoseScrollsAreMissingIsRefused) {
+  Store publisher;
+  const auto typed = publisher.insert(MicroversionId{}, 0, "mine");
+  // Quote somebody else's scroll, so the seal has a table entry to resolve.
+  Scroll theirs;
+  theirs.publisher = xudu::createMutableKeys().publicKey;
+  theirs.salt      = "theirs";
+  static_cast<void>(publisher.transcludeExternal(typed, 0, theirs, 0, 4));
+
+  const auto sealed = xudu::sealableOps(publisher);
+  Scroll became;
+  became.publisher = xudu::createMutableKeys().publicKey;
+
+  // Handed no scrolls, the entry cannot be resolved and the whole thing is
+  // refused rather than read with a hole in it.
+  EXPECT_THROW(static_cast<void>(xudu::historyFromSeal(sealed, became, {})),
+               std::runtime_error);
+
+  // Handed the scroll it names, it reads.
+  std::map<std::string, Scroll> carried;
+  carried.emplace(xudu::scrollKey(theirs), theirs);
+  const auto history = xudu::historyFromSeal(sealed, became, carried);
+  ASSERT_NE(history, nullptr);
+  EXPECT_EQ(history->opCount(), publisher.opCount());
+
+  // Bytes that are not a seal's operations are not read as one.
+  EXPECT_THROW(
+      static_cast<void>(xudu::historyFromSeal("not a seal", became, carried)),
+      std::runtime_error);
 }
 
 TEST(ProvenanceTest, sealingWithoutASignedRecordIsRefused) {

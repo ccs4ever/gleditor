@@ -85,6 +85,17 @@ struct Provenance {
   /// Bytes of content this record covers, and their SHA-256 in lowercase hex.
   std::uint64_t contentLength{};
   std::string contentDigest;
+  /// The same, for the operations sealed beside the content. A xanadoc is its
+  /// history as much as its bytes, so a record vouching for one and not the
+  /// other vouches for half a document: the info hash already stops the
+  /// operations being swapped, but the info hash says nothing about who wrote
+  /// them, and that is the whole of what this record is for.
+  ///
+  /// Zero and empty in records written before the operations were sealed in,
+  /// which is how a reader tells "this record does not cover the history"
+  /// from "this record says the history is empty".
+  std::uint64_t opsLength{};
+  std::string opsDigest;
   /// Global keys of scrolls the document quotes, so the record says what it
   /// was built out of as well as who built it.
   std::vector<std::string> quotes;
@@ -222,6 +233,12 @@ verifyProvenance(const SignedProvenance &signed_,
 inline constexpr auto provenanceFileName = "AUTHORSHIP.yaml";
 inline constexpr auto provenanceSigName  = "AUTHORSHIP.yaml.asc";
 inline constexpr auto sealedContentName  = "primedia";
+/// The operations, in the compact binary encoding rather than the array of
+/// nodes a store keeps locally: this one crosses machines, and a node is a
+/// native-endian struct while the compact encoding is a byte stream that
+/// means the same thing everywhere. It is also about a sixteenth the size,
+/// which matters rather more once it is being fetched from peers.
+inline constexpr auto sealedOpsName = "ops";
 
 } // namespace xudu
 
