@@ -5,9 +5,11 @@
 #include <algorithm>
 #include <chrono>
 #include <cstdint>
+#include <functional>
 #include <iterator>
 #include <map>
 #include <memory>
+#include <mutex>
 #include <set>
 #include <string>
 #include <vector>
@@ -151,6 +153,12 @@ struct SwarmContentSource::Impl {
   /// When the outstanding names were last asked about, so that re-asking is
   /// periodic rather than as fast as the session can be pumped.
   std::chrono::steady_clock::time_point lastNameQuery{};
+  /// Handlers registered for incoming live operations from collaborative peers.
+  std::vector<LiveOpHandler> liveOpHandlers;
+  /// Live operations queued across active swarms.
+  std::vector<LiveOpBroadcast> pendingLiveOps;
+  /// Mutex protecting liveOpHandlers and pendingLiveOps.
+  std::mutex liveOpsMutex;
 
   explicit Impl(SwarmContentSource::Options aOptions)
       : options(std::move(aOptions)), session(settings(options)) {}
@@ -637,6 +645,41 @@ std::string SwarmContentSource::readStream(const InfoHash &hash,
     return {};
   }
   return joined.substr(into, static_cast<std::size_t>(length));
+}
+
+void SwarmContentSource::broadcastLiveOp(const InfoHash &swarmHash,
+                                         const MicroversionId &version,
+                                         const Op &op,
+                                         const std::string_view primediaText) {
+  LiveOpBroadcast broadcast{
+      .swarmHash    = swarmHash,
+      .version      = version,
+      .op           = op,
+      .primediaText = std::string(primediaText),
+      .timestamp    = std::chrono::duration_cast<std::chrono::milliseconds>(
+                          std::chrono::system_clock::now().time_since_epoch())
+                          .count()};
+
+  std::scoped_lock lock(impl->liveOpsMutex);
+  impl->pendingLiveOps.push_back(broadcast);
+  for (const auto &handler : impl->liveOpHandlers) {
+    if (handler) {
+      handler(broadcast);
+    }
+  }
+}
+
+void SwarmContentSource::onLiveOp(LiveOpHandler handler) {
+  std::scoped_lock lock(impl->liveOpsMutex);
+  impl->liveOpHandlers.push_back(std::move(handler));
+}
+
+std::vector<SwarmContentSource::LiveOpBroadcast>
+SwarmContentSource::takePendingLiveOps() {
+  std::scoped_lock lock(impl->liveOpsMutex);
+  std::vector<LiveOpBroadcast> out;
+  out.swap(impl->pendingLiveOps);
+  return out;
 }
 
 } // namespace xudu

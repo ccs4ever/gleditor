@@ -309,6 +309,12 @@ public:
                                     std::uint64_t scrollOffset,
                                     std::uint64_t length);
 
+  /**
+   * @brief Apply an operation received from a collaborative peer session.
+   */
+  MicroversionId applyRemoteLiveOp(const Op &op,
+                                   std::string_view primediaText = "");
+
   // -- persistence ----------------------------------------------------------
 
   /**

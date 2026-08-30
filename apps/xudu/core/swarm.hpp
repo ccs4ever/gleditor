@@ -21,15 +21,17 @@
 
 #include <chrono>
 #include <cstdint>
+#include <functional>
 #include <map>
 #include <memory>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <vector>
 
-#include <optional>
-
+#include "microversion.hpp"
 #include "mutable_link.hpp"
+#include "ops.hpp"
 #include "resolver.hpp"
 #include "torrent.hpp"
 
@@ -254,6 +256,36 @@ public:
    * on the disk.
    */
   [[nodiscard]] std::int64_t bytesFromPeers(const InfoHash &hash) const;
+
+  // -- Real-Time Live Collaborative Swarm Operations -----------------------
+
+  /// A live operation broadcasted between connected collaborative swarm peers.
+  struct LiveOpBroadcast {
+    InfoHash swarmHash;
+    MicroversionId version;
+    Op op;
+    std::string primediaText;
+    std::int64_t timestamp{0};
+  };
+
+  using LiveOpHandler = std::function<void(const LiveOpBroadcast &)>;
+
+  /**
+   * @brief Broadcast an unsealed live operation to active peers in @p
+   * swarmHash.
+   */
+  void broadcastLiveOp(const InfoHash &swarmHash, const MicroversionId &version,
+                       const Op &op, std::string_view primediaText = "");
+
+  /**
+   * @brief Register a callback for incoming live operations from peers.
+   */
+  void onLiveOp(LiveOpHandler handler);
+
+  /**
+   * @brief Retrieve and clear any queued live operations received from peers.
+   */
+  [[nodiscard]] std::vector<LiveOpBroadcast> takePendingLiveOps();
 
   // -- ContentSource --------------------------------------------------------
 

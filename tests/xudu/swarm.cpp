@@ -375,4 +375,56 @@ TEST_F(MutableNameTest, theSaltIsPartOfTheName) {
   EXPECT_FALSE(swarm.resolveMutable(salted, 3s).has_value());
 }
 
+TEST(LiveCollaborativeSwarmTest, broadcastAndApplyLiveOpsAcrossPeerStores) {
+  SwarmContentSource peerSource;
+  Store aliceStore;
+  Store bobStore;
+
+  // Alice creates initial document
+  const auto rootVer = aliceStore.insert(MicroversionId{}, 0, "Hello World");
+  EXPECT_EQ(aliceStore.textOf(rootVer), "Hello World");
+
+  // Hook live op receiver on Bob's side
+  std::vector<SwarmContentSource::LiveOpBroadcast> received;
+  peerSource.onLiveOp([&received, &bobStore](const auto &broadcast) {
+    received.push_back(broadcast);
+    bobStore.applyRemoteLiveOp(broadcast.op, broadcast.primediaText);
+  });
+
+  // Alice inserts text and broadcasts live op to swarm
+  const InfoHash docSwarm{};
+  xudu::Op insertOp;
+  insertOp.kind   = xudu::OpKind::Insert;
+  insertOp.parent = MicroversionId{};
+  insertOp.at     = 0;
+
+  peerSource.broadcastLiveOp(docSwarm, rootVer, insertOp, "Hello World");
+
+  // Verify Bob received and applied the live op
+  EXPECT_EQ(received.size(), 1U);
+  EXPECT_EQ(bobStore.textOf(rootVer), "Hello World");
+
+  // Alice performs an edit
+  const auto editVer =
+      aliceStore.insert(rootVer, 11, " from Collaborative Swarm!");
+  EXPECT_EQ(aliceStore.textOf(editVer),
+            "Hello World from Collaborative Swarm!");
+
+  xudu::Op editOp;
+  editOp.kind   = xudu::OpKind::Insert;
+  editOp.parent = rootVer;
+  editOp.at     = 11;
+
+  peerSource.broadcastLiveOp(docSwarm, editVer, editOp,
+                             " from Collaborative Swarm!");
+
+  // Verify Bob's store synchronized Alice's edit in real time
+  EXPECT_EQ(received.size(), 2U);
+  EXPECT_EQ(bobStore.textOf(editVer), "Hello World from Collaborative Swarm!");
+
+  const auto pending = peerSource.takePendingLiveOps();
+  EXPECT_EQ(pending.size(), 2U);
+  EXPECT_TRUE(peerSource.takePendingLiveOps().empty());
+}
+
 } // namespace

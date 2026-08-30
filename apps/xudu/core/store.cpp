@@ -279,6 +279,16 @@ MicroversionId Store::insertBreak(const MicroversionId &parent,
   return apply(parent, op);
 }
 
+MicroversionId Store::applyRemoteLiveOp(const Op &op,
+                                        const std::string_view primediaText) {
+  Op localOp = op;
+  if (localOp.kind == OpKind::Insert && !primediaText.empty()) {
+    const auto span = spool.append(primediaText);
+    localOp.span    = span;
+  }
+  return apply(localOp.parent, localOp);
+}
+
 MicroversionId Store::apply(const MicroversionId &parent, Op op) {
   op.parent = parent;
 
