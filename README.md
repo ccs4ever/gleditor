@@ -1862,6 +1862,17 @@ settles last. Giving all three the same duration -- which they had -- made the
 whole view look as though it had jumped, because nothing in it appeared to be
 the cause of anything else.
 
+A sworph is worked out against where the documents are going rather than where
+they are. A document part way through an earlier move is not at its resting
+place, and levelling against where it happens to have got to made the answer
+depend on which frame the alignment ran on: a scene with several links between
+its documents settled somewhere slightly different every time it was opened,
+and two screenshots of it were two pictures. The camera is likewise put exactly
+on its framing target on the last step of its ease rather than left wherever it
+had reached when it came within the threshold -- the camera is where a capture
+is taken from, and a fraction of a world unit there is a fraction of a pixel on
+every glyph on screen.
+
 A document opened behind the row with `--background` settles at a lower alpha
 than one in it. Perspective alone is a weak depth cue for a flat page of text: a
 corpus held five hundred units back still draws every glyph at full strength,
