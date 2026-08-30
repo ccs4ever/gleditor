@@ -35,12 +35,18 @@ cleanup() {
   ip netns del "$TEST_NS" 2>/dev/null || true
   rm -rf "$WORK"
 }
-trap cleanup EXIT INT TERM
-
 if [ "$(id -u)" != 0 ]; then
-  echo "swarm-netns-test: needs root to create network namespaces" >&2
+  if command -v unshare >/dev/null 2>&1 && unshare -Urnm true 2>/dev/null; then
+    exec unshare -Urnm sh -c '
+      mount -t tmpfs tmpfs /var/run 2>/dev/null || true
+      mkdir -p /var/run/netns 2>/dev/null || true
+      exec "$@"
+    ' -- "$0" "$@"
+  fi
+  echo "swarm-netns-test: needs root or unprivileged user namespaces (unshare -Urnm) to create network namespaces" >&2
   exit 77
 fi
+trap cleanup EXIT INT TERM
 # A one-item list on purpose, so a second required tool is one more word
 # rather than a second copy of this loop.
 # shellcheck disable=SC2043
