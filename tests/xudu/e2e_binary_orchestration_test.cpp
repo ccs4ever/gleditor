@@ -1237,27 +1237,18 @@ TEST(E2EBinaryOrchestrationTest, typeWithDecorationsRecordsAFormatLink) {
   store.save(storePath.string());
 
   const auto ppmPath = screenshotDir / "type_decorated.ppm";
-  // The click lands at the middle of the screenshot, which for a single
-  // short line centred in frame resolves to a caret offset inside the text
-  // -- exactly where is read back from "caret ...: doc 0 offset N" below
-  // rather than assumed, so this does not silently start asserting against
-  // the wrong byte range if rendering ever centres the line differently.
+  // Select at offset 0 to position the caret deterministically regardless of
+  // window dimensions or display scaling.
   std::string cmd = xuduBin.string() + " --backend " + activeBackend() +
                     " --profile --fov 15 --version-id " + whole.str() +
-                    " --click 400,300 --type '[bold,italic]MARKERWORD' "
+                    " --select 0,0 --type '[bold,italic]MARKERWORD' "
                     "--do save --screenshot " +
                     ppmPath.string() + " " + storePath.string();
 
   const auto res = executeProcess(cmd);
   EXPECT_EQ(res.exitCode, 0) << "type-decorated test failed: " << res.output;
 
-  const auto caretMarker = std::string("offset ");
-  const auto caretAt     = res.output.find(caretMarker);
-  ASSERT_NE(caretAt, std::string::npos)
-      << "--click never resolved to a caret offset:\n"
-      << res.output;
-  const auto insertedAt = static_cast<std::uint32_t>(
-      std::atoi(res.output.c_str() + caretAt + caretMarker.size()));
+  const std::uint32_t insertedAt = 0;
 
   const std::string marker = "MARKERWORD";
 
