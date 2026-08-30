@@ -18,6 +18,8 @@
 #include <gleditor/paths.hpp>
 #include <gleditor/render_state.hpp>
 
+#include "xudu/core/framing.hpp"
+
 namespace xudu {
 
 namespace {
@@ -72,6 +74,53 @@ constexpr float framingMarginFraction = 0.10F;
 constexpr float framingMarginFloorX   = 4.0F;
 constexpr float framingMarginFloorY   = 6.0F;
 
+/// Most strands one band is drawn with. A link between two whole pages would
+/// otherwise ask for one strand per line of text at both ends, which is a
+/// hundred ribbons saying what five say just as well.
+constexpr std::size_t bandStrandLimit = 5;
+
+/// Space between a band's strands, in beam widths. Comfortably more than one,
+/// so the strands stay clear of each other where the band is at its tallest:
+/// ribbons that abut only just overlap, and a strip of doubled alpha down
+/// every seam prints as stripes running the length of the band. Separated,
+/// they read as what they are -- a few threads spanning the passage -- and
+/// the only place they gather is the end where the link is attached to less
+/// text, which is where the eye should be going anyway.
+constexpr float bandStrandPitch = 2.2F;
+
+/// Alpha the strands inside a band are drawn at, relative to the two that
+/// bound it. The edges are what say how far the passage reaches; the fill says
+/// the space between them is one relation and not several.
+constexpr float bandFillAlpha = 0.55F;
+
+/// Width of the bracket drawn down the margin at each end of a link, relative
+/// to the beam's own width.
+constexpr float stubWidthOfBeam = 1.35F;
+
+/// Shortest bracket drawn at a link end, as a fraction of the line height
+/// there. A link attached to a single line has no vertical extent to draw, and
+/// a bracket of no length is not drawn at all -- the vertex stage collapses a
+/// beam whose ends coincide.
+constexpr float stubMinOfLine = 0.9F;
+
+/// How far behind the page plane a beam dips to pass a document standing
+/// between its two ends, per document passed, and the deepest it may go. Deep
+/// enough to clear the pages, shallow enough that the dip still reads as the
+/// same beam rather than as something disappearing off the back of the scene.
+constexpr float bypassDepthPerDoc = -20.0F;
+constexpr float bypassDepthLimit  = -120.0F;
+
+/// Points the bypass curve is drawn with. Enough that the dip reads as a curve
+/// rather than as a beam broken into three pieces at two corners -- which is
+/// what it was, and what left the middle piece running nearly straight away
+/// from the camera where a ribbon in the page plane has almost no width to be
+/// seen edge-on.
+constexpr std::size_t bypassSegments = 9;
+
+/// How near the camera has to be to where it is being taken before the ease is
+/// treated as arrived and the camera handed back, in world units.
+constexpr float cameraArrived = 0.05F;
+
 } // namespace
 
 LinkBeams::LinkBeams(Session &aSession, RendererRef aRenderer)
@@ -104,8 +153,8 @@ void LinkBeams::rebuildStrands(RenderState &state) {
   strands.clear();
   strands.reserve(placed.size());
   for (const auto &one : placed) {
-    strands.push_back(
-        Strand{one.link, one.type, one.from, one.to, {}, {}, {}, {}, false});
+    strands.push_back(Strand{
+        one.link, one.type, one.tier, one.from, one.to, {}, {}, {}, {}, false});
   }
   dangling.clear();
   dangling.reserve(unplaced.size());
@@ -160,6 +209,103 @@ std::optional<glm::vec3> LinkBeams::edgePoint(const Doc &doc,
   const auto edge = towardsRight ? page->leftPixels() + page->widthPixels()
                                  : page->leftPixels();
   return doc.worldPoint(anchor.pageIndex, edge, anchor.y);
+}
+
+std::optional<LinkBeams::Edge>
+LinkBeams::edgeOf(const Doc &doc, const std::optional<Doc::Anchor> &startAnchor,
+                  const std::optional<Doc::Anchor> &endAnchor,
+                  const bool towardsRight) {
+  if (!startAnchor) {
+    return std::nullopt;
+  }
+  const auto first = edgePoint(doc, *startAnchor, towardsRight);
+  if (!first) {
+    return std::nullopt;
+  }
+  Edge out{*first, *first, startAnchor->height};
+  // The end anchor is where the link's last byte fell, which on a link running
+  // over several lines is lower down and on a link within one line is the same
+  // place. Either is a usable edge; only a page that has not built yet is not.
+  if (endAnchor) {
+    if (const auto last = edgePoint(doc, *endAnchor, towardsRight)) {
+      out.top        = first->y >= last->y ? *first : *last;
+      out.bottom     = first->y >= last->y ? *last : *first;
+      out.lineHeight = std::max(startAnchor->height, endAnchor->height);
+    }
+  }
+  return out;
+}
+
+std::uint32_t LinkBeams::fade(const std::uint32_t colour, const float factor) {
+  const auto alpha =
+      static_cast<float>(colour & 0xFFU) * std::clamp(factor, 0.0F, 1.0F);
+  return (colour & 0xFFFFFF00U) |
+         static_cast<std::uint32_t>(std::lround(alpha));
+}
+
+void LinkBeams::band(const Edge &nearSide, const Edge &farSide,
+                     const std::size_t documentsApart,
+                     const std::uint32_t colour, const std::uint32_t tag) {
+  const float baseWidth = std::max(nearSide.lineHeight, farSide.lineHeight) *
+                          Doc::pixelsToWorld * beamWidthOfLine;
+  const float nearSpan = std::abs(nearSide.top.y - nearSide.bottom.y);
+  const float farSpan  = std::abs(farSide.top.y - farSide.bottom.y);
+
+  // How many strands comes from the taller of the two ends, so that end is
+  // drawn at its full reach rather than reduced to whatever the other end
+  // happens to be; see bandStrandCount() for why they are spaced rather than
+  // packed. Each strand keeps the beam's own text-scaled weight. Towards the
+  // shorter end they converge and, past the point where the spacing falls
+  // below the width, overlap -- smoothly, because the spacing closes
+  // monotonically, so the band gathers into a denser attachment rather than
+  // breaking into stripes.
+  const float wide = std::max(nearSpan, farSpan);
+  const auto count =
+      bandStrandCount(wide, baseWidth, bandStrandPitch, bandStrandLimit);
+
+  const float depth = std::max(
+      bypassDepthPerDoc *
+          static_cast<float>(documentsApart > 1 ? documentsApart - 1 : 0),
+      bypassDepthLimit);
+
+  for (std::size_t k = 0; k < count; k++) {
+    const float where =
+        count > 1 ? static_cast<float>(k) / static_cast<float>(count - 1)
+                  : 0.5F;
+    const auto p1 = glm::mix(nearSide.top, nearSide.bottom, where);
+    const auto p2 = glm::mix(farSide.top, farSide.bottom, where);
+    // The two that bound the band keep the link's own colour; the ones filling
+    // it are dimmer, so the band reads as one relation with a reach rather
+    // than as a fistful of separate ones.
+    const auto strandColour =
+        (0 == k || count - 1 == k) ? colour : fade(colour, bandFillAlpha);
+
+    if (documentsApart <= 1) {
+      beams->add(p1, p2, baseWidth, strandColour, tag);
+      continue;
+    }
+    // A document stands between these two, so the beam goes behind it rather
+    // than through its text; see bypassRoute().
+    beams->addPath(bypassRoute(p1, p2, depth, bypassSegments), baseWidth,
+                   strandColour, tag);
+  }
+}
+
+void LinkBeams::anchorStub(const Edge &edge, const std::uint32_t colour,
+                           const std::uint32_t tag, const bool farEnd) {
+  const float lineWorld = edge.lineHeight * Doc::pixelsToWorld;
+  const float half      = std::max(std::abs(edge.top.y - edge.bottom.y) * 0.5F,
+                                   lineWorld * stubMinOfLine * 0.5F);
+  const auto middle     = 0.5F * (edge.top + edge.bottom);
+  const glm::vec3 up(0.0F, half, 0.0F);
+  // Held at one end of the route rather than spanning it, so the bracket is as
+  // bright as the beam is where it meets it: the fade along a beam's length is
+  // there to say which way the link points, and a bracket that faded down its
+  // own height would say something about the page instead.
+  const float at = farEnd ? 1.0F : 0.0F;
+  beams->add(middle - up, middle + up,
+             lineWorld * beamWidthOfLine * stubWidthOfBeam, colour, tag, at,
+             at);
 }
 
 bool LinkBeams::onScreen(const glm::mat4 &viewProjection,
@@ -309,7 +455,10 @@ void LinkBeams::align(const Strand &strand, RenderState &state,
   if (glm::distance(target, farPos) >= alreadyAligned) {
     std::cout << "xudu: link " << strand.link << " aligns centroid of doc "
               << strand.to.doc << " with doc " << strand.from.doc << "\n";
-    far->animateMoveTo(timeline, target);
+    // The document being brought over is the subject of the move, so it is the
+    // one that takes longest and starts first. Everything else in this
+    // function is timed against it; see gleditor::anim::sworphSubject.
+    far->animateMoveTo(timeline, target, gleditor::anim::sworphSubject);
   }
 
   for (std::size_t d = 0; d < state.docs.size(); ++d) {
@@ -318,8 +467,14 @@ void LinkBeams::align(const Strand &strand, RenderState &state,
     }
     const glm::vec3 cur(state.docs[d]->modelMatrix()[3]);
     if (std::abs(cur.x - docSlots[d]) >= alreadyAligned) {
-      state.docs[d]->animateMoveTo(timeline,
-                                   glm::vec3(docSlots[d], cur.y, cur.z));
+      // Held a moment, then shorter than the document it is making room for,
+      // so the row reads as answering the arrival rather than as every
+      // document on screen sliding at once -- which is what giving them all
+      // the same timing looked like, and what made a sworph read as the whole
+      // view jumping.
+      state.docs[d]->animateMoveTo(
+          timeline, glm::vec3(docSlots[d], cur.y, cur.z),
+          gleditor::anim::sworphRow, gleditor::anim::sworphRowDelay);
     }
   }
 
@@ -408,24 +563,42 @@ void LinkBeams::align(const Strand &strand, RenderState &state,
     const glm::vec3 newCameraPos(
         center.x, center.y,
         std::clamp(zFit, minCameraDistance, maxCameraDistance));
-    // Seeded from the camera's actual current position the first time this
-    // runs, then ramped like a document move (Doc::animateMoveTo): a direct
-    // assignment here would make the camera jump to every new framing
-    // target instantly while every document in the same scene glides there,
-    // which reads as the whole view snapping rather than settling.
-    if (!cameraAnimating) {
-      cameraTarget    = view.pos;
-      cameraAnimating = true;
+    // Seeded from where the camera actually is, then ramped like a document
+    // move (Doc::animateMoveTo): a direct assignment here would make the
+    // camera jump to every new framing target instantly while every document
+    // in the same scene glides there, which reads as the whole view snapping
+    // rather than settling. Re-seeded whenever an ease is not already
+    // running, so a framing that follows a pan starts from where the reader
+    // left the camera rather than from wherever the last one ended.
+    if (!cameraDriving) {
+      cameraTarget  = view.pos;
+      cameraDriving = true;
     }
+    cameraGoal = newCameraPos;
+    // Last to move and slowest of the three, so the frame closes around an
+    // arrangement that has already been made rather than chasing one still
+    // being made.
     timeline.apply(&cameraTarget)
-        .then<ch::RampTo>(newCameraPos, gleditor::anim::docArrival,
+        .then<ch::Hold>(cameraTarget(), gleditor::anim::cameraSettleDelay)
+        .then<ch::RampTo>(newCameraPos, gleditor::anim::cameraSettle,
                           ch::EaseInOutQuad());
   }
 }
 
-void LinkBeams::openDangling(RenderState &state) {
+bool LinkBeams::danglingOutstanding(const RenderState &state) const {
+  // Exactly the ones openDangling() will act on -- the same test it makes. A
+  // half-link it would skip on every frame is not work outstanding, and
+  // counting one would leave the render loop waiting for a frame that has
+  // nothing left to do: a run that never settles and never quits.
+  return nullptr != opener &&
+         std::ranges::any_of(dangling, [&state](const Dangling &one) {
+           return !one.looked && one.link.here.doc < state.docs.size();
+         });
+}
+
+bool LinkBeams::openDangling(RenderState &state) {
   if (!opener) {
-    return;
+    return false;
   }
   // Every version already on screen, so that the search does not offer back a
   // document that is open -- which for a link whose ends are both quoted from
@@ -452,9 +625,11 @@ void LinkBeams::openDangling(RenderState &state) {
     opener(*showing);
     // One a frame. Opening a document is a load and a page build, and the
     // strands are worked out again when it lands, which is when the next one
-    // can be judged.
-    return;
+    // can be judged -- so there is more to come.
+    return true;
   }
+  // Every half-link that could be looked for has been.
+  return false;
 }
 
 void LinkBeams::traverse(const Strand &strand, RenderState &state) {
@@ -494,10 +669,12 @@ bool LinkBeams::picked(const render::PickingResult &pick, RenderState &state) {
 }
 
 void LinkBeams::drawFrame(gleditor::FrameContext &ctx) {
-  if (nullptr == beams) {
-    return;
-  }
-  if (!visible) {
+  if (nullptr == beams || !visible) {
+    // Nothing will be drawn and so nothing will be moved. Saying so rather
+    // than leaving the flag where it was matters: --no-beams would otherwise
+    // leave the render loop waiting forever for a sworph that is never going
+    // to happen.
+    unsettled = false;
     return;
   }
   auto &state = ctx.state;
@@ -505,19 +682,32 @@ void LinkBeams::drawFrame(gleditor::FrameContext &ctx) {
   // Carries the camera towards wherever align() last framed, every frame --
   // not only the frame align() itself ran on. cameraTarget is a Choreograph
   // output the timeline eases on its own schedule; this is what reads back
-  // whatever step the ease has reached and puts it where the camera
-  // actually looks. Before the first alignment cameraAnimating is false and
-  // this is a no-op, so a scene nobody has sworphed in never moves the
-  // camera.
-  if (cameraAnimating && renderer && renderer->appState()) {
-    const std::scoped_lock locker(renderer->appState()->view);
-    renderer->appState()->view.pos = cameraTarget();
+  // whatever step the ease has reached and puts it where the camera actually
+  // looks. Before the first alignment cameraDriving is false and this is a
+  // no-op, so a scene nobody has sworphed in never moves the camera -- and it
+  // goes false again the moment the ease arrives, which is what gives the
+  // camera back to whoever is at the keyboard.
+  if (cameraDriving && renderer && renderer->appState()) {
+    const auto now = cameraTarget();
+    {
+      const std::scoped_lock locker(renderer->appState()->view);
+      renderer->appState()->view.pos = now;
+    }
+    if (glm::distance(now, cameraGoal) <= cameraArrived) {
+      cameraDriving = false;
+    }
   }
 
   // Wait until all open documents have completed building their pages before
   // resolving anchors and performing centroid alignment and auto-framing.
   for (const auto &doc : state.docs) {
     if (!doc || !doc->isFullyLoaded()) {
+      // Still building, so nothing has been placed yet and every link is still
+      // owed a look. Saying so is what reserves the frame on which the last
+      // page lands: that frame is the first on which a sworph can be decided
+      // and, with nothing else left pending by then, the one the render loop
+      // would otherwise have called settled and quit on.
+      unsettled = true;
       return;
     }
   }
@@ -549,7 +739,8 @@ void LinkBeams::drawFrame(gleditor::FrameContext &ctx) {
   beams->clear();
   // Bring far ends of links into view, one per frame so a document with several
   // links into it is not asked to be in two places at once.
-  bool moved = false;
+  bool moved        = false;
+  bool stillToAlign = false;
 
   for (std::size_t i = 0; i < strands.size(); i++) {
     auto &strand = strands[i];
@@ -561,70 +752,72 @@ void LinkBeams::drawFrame(gleditor::FrameContext &ctx) {
     const auto &from = state.docs[strand.from.doc];
     const auto &to   = state.docs[strand.to.doc];
 
-    const auto rightwards = glm::vec3(to->modelMatrix()[3]).x >=
-                            glm::vec3(from->modelMatrix()[3]).x;
-    const auto fromAt = edgePoint(*from, *strand.fromAnchor, rightwards);
-    const auto toAt   = edgePoint(*to, *strand.toAnchor, !rightwards);
-    if (!fromAt || !toAt) {
+    // Which margin each end leaves from is decided by where the documents are
+    // going rather than by where they currently are. animateMoveTo() records
+    // the destination as it starts the move, so this is settled for the whole
+    // of a sworph -- where reading the live position instead flipped the beam
+    // to the other side of the page in the frame one document overtook the
+    // other, which is a jump in the middle of a movement drawn to be followed.
+    const auto rightwards =
+        glm::vec3(to->getModel()[3]).x >= glm::vec3(from->getModel()[3]).x;
+    const auto nearEdge =
+        edgeOf(*from, strand.fromAnchor, strand.fromEndAnchor, rightwards);
+    const auto farEdge =
+        edgeOf(*to, strand.toAnchor, strand.toEndAnchor, !rightwards);
+    if (!nearEdge || !farEdge) {
       continue;
     }
-
-    // Thickness follows the text: a beam is a relation between two lines, and
-    // one drawn at a fixed width would swamp small text and vanish in large.
-    const auto width =
-        strand.fromAnchor->height * Doc::pixelsToWorld * beamWidthOfLine;
 
     const std::size_t docSpan = strand.from.doc > strand.to.doc
                                     ? (strand.from.doc - strand.to.doc)
                                     : (strand.to.doc - strand.from.doc);
 
-    const auto addRibbon = [&](const glm::vec3 &p1, const glm::vec3 &p2,
-                               std::uint32_t tagId) {
-      if (docSpan <= 1) {
-        // Adjacent documents: direct foreground beam
-        beams->add(p1, p2, width, linkColour(strand.type), tagId);
-      } else {
-        // Non-adjacent documents: route through background depth layer (Z < 0)
-        // to pass behind intermediate documents without occluding text.
-        constexpr float bypassDepth = -20.0F;
-        const float gapOffset       = rightwards ? 2.0F : -2.0F;
-        const glm::vec3 mid1(p1.x + gapOffset, p1.y, bypassDepth);
-        const glm::vec3 mid2(p2.x - gapOffset, p2.y, bypassDepth);
+    // As faint as the fainter of the two documents it runs between, so a beam
+    // reaching a page still flying in materialises with it instead of hanging
+    // in the air waiting for it, and one reaching into the background corpus
+    // is as recessive as the corpus. The tier is the link's own claim on
+    // attention and is already what shades the passages at both ends
+    // (Session::decorate); the beam now agrees with them.
+    const auto docAlpha =
+        std::min(from->currentOpacity(), to->currentOpacity());
+    const auto colour = fade(linkColour(strand.type, strand.tier), docAlpha);
+    const auto tagId  = static_cast<std::uint32_t>(i);
 
-        beams->add(p1, mid1, width, linkColour(strand.type), tagId);
-        beams->add(mid1, mid2, width, linkColour(strand.type), tagId);
-        beams->add(mid2, p2, width, linkColour(strand.type), tagId);
-      }
-    };
-
-    addRibbon(*fromAt, *toAt, static_cast<std::uint32_t>(i));
-
-    if (strand.fromEndAnchor && strand.toEndAnchor) {
-      const auto fromEndAt =
-          edgePoint(*from, *strand.fromEndAnchor, rightwards);
-      const auto toEndAt = edgePoint(*to, *strand.toEndAnchor, !rightwards);
-      if (fromEndAt && toEndAt &&
-          (glm::distance(*fromAt, *fromEndAt) > 1.0F ||
-           glm::distance(*toAt, *toEndAt) > 1.0F)) {
-        addRibbon(*fromEndAt, *toEndAt, static_cast<std::uint32_t>(i));
-        addRibbon(*fromAt, *toEndAt, static_cast<std::uint32_t>(i));
-        addRibbon(*fromEndAt, *toAt, static_cast<std::uint32_t>(i));
-      }
-    }
+    band(*nearEdge, *farEdge, docSpan, colour, tagId);
+    // Both ends bracketed on the page margin. Which page of a stack a link
+    // reaches is otherwise only implied by where the band happens to meet it,
+    // and at any distance -- which is most of the time, since framing a
+    // sworph backs the camera off far enough to hold both documents -- that
+    // is a guess.
+    anchorStub(*nearEdge, colour, tagId, false);
+    anchorStub(*farEdge, colour, tagId, true);
 
     // A link coming into view brings its far document over and auto-frames
     // the camera so that all pages and connection points fit comfortably on
-    // screen.
-    if (sworph && !moved && !strand.aligned) {
-      strand.aligned = true;
-      align(strand, state, ctx.timeline);
-      moved = true;
+    // screen. One a frame, so a document with several links into it is not
+    // asked to be in two places at once; the rest are noted as owed, which is
+    // what keeps the render loop from calling the frame settled with a sworph
+    // still to come. Noted here, past every guard above, rather than counted
+    // afterwards: a strand whose anchors have never been found -- a link end
+    // reaching past what its document turned out to hold -- is not work the
+    // next frame will do either, and waiting on one would be waiting forever.
+    if (sworph && !strand.aligned) {
+      if (moved) {
+        stillToAlign = true;
+      } else {
+        strand.aligned = true;
+        align(strand, state, ctx.timeline);
+        moved = true;
+      }
     }
   }
 
-  if (sworph && !moved) {
-    openDangling(state);
-  }
+  const bool stillToOpen =
+      sworph && (moved ? danglingOutstanding(state) : openDangling(state));
+
+  // What the next frame still owes, decided after this one has done whatever
+  // it was going to; see busy().
+  unsettled = stillToAlign || stillToOpen;
 
   beams->commit();
   // Document and page zero, with no kind: the kind is the beam pipeline's, and

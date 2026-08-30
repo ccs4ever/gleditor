@@ -6,6 +6,7 @@
 #include <choreograph/Choreograph.h>
 #include <cstdint>
 #include <deque>
+#include <gleditor/animation.hpp>
 #include <gleditor/buffer_pool.hpp>
 #include <gleditor/drawable.hpp>
 #include <gleditor/renderer.hpp>
@@ -307,6 +308,8 @@ private:
   ch::Output<glm::vec3> position;
   /// Alpha the whole document is drawn at. Zero until it has arrived.
   ch::Output<float> opacity{1.0F};
+  /// Alpha an arrival settles at; see setRestingOpacity().
+  float restingOpacity{1.0F};
   /// Whether a departure has been started, so the owner knows this document is
   /// on its way out rather than merely transparent for a moment.
   bool closing{};
@@ -688,6 +691,23 @@ public:
   void animateArrival(ch::Timeline &timeline);
 
   /**
+   * @brief Alpha this document settles at once it has arrived.
+   *
+   * One, unless something says otherwise -- which is what a document opened
+   * behind the row says. Perspective alone is a weak depth cue for a flat page
+   * of text: a corpus held far back still draws every glyph at full strength,
+   * and picking the document that just arrived out of one that never moved is
+   * then a matter of reading both. Dimming what is behind is the cue that
+   * costs nothing to read, and it is a resting value rather than a draw-time
+   * multiplier so that a departure still fades from wherever the document
+   * actually was.
+   *
+   * Set before animateArrival(); a later change takes effect on the next
+   * arrival rather than retroactively.
+   */
+  void setRestingOpacity(const float alpha) { restingOpacity = alpha; }
+
+  /**
    * @brief Fade this document out and drift it towards the viewer.
    *
    * The reverse of the arrival, and deliberately not an immediate removal: the
@@ -703,8 +723,16 @@ public:
    * Used when a document closes and the ones after it move up. Retargets the
    * animation from wherever the document currently is, so a move that
    * interrupts another move does not jump.
+   *
+   * @param seconds How long the move takes. Given rather than assumed because
+   *        several documents moved at once are not all the same move: see
+   *        gleditor::anim::sworphSubject and gleditor::anim::sworphRow.
+   * @param delay Seconds to hold still first. What lets a row read as making
+   *        way for a document rather than sliding alongside it.
    */
-  void animateMoveTo(ch::Timeline &timeline, const glm::vec3 &target);
+  void animateMoveTo(ch::Timeline &timeline, const glm::vec3 &target,
+                     double seconds = gleditor::anim::docArrival,
+                     double delay   = 0.0);
 
   /// True once a departure has been started.
   [[nodiscard]] bool isClosing() const { return closing; }

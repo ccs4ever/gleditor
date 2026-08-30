@@ -21,6 +21,11 @@ GLEDITOR_IN(1) float beamWidth;
 GLEDITOR_IN(2) vec3 beamTo;     // the other
 GLEDITOR_IN(3) uint beamColour; // packed RGBA8
 GLEDITOR_IN(4) uint beamTag;    // which beam this is, for picking
+// Where this segment falls along the whole route, 0 at the route's start and
+// 1 at its end. A beam drawn on its own is (0, 1); a segment of a route that
+// bends carries its own share, so the fade below runs once end to end instead
+// of restarting at every joint.
+GLEDITOR_IN(5) vec2 beamAlong;
 
 GLEDITOR_OUT(0) vec4 vColour;
 // Distance across the ribbon, -1 at one edge and 1 at the other, so the
@@ -67,7 +72,7 @@ void main() {
 
   vColour  = unpackColour(beamColour);
   vAcross  = across;
-  vAlong   = along;
+  vAlong   = mix(beamAlong.x, beamAlong.y, along);
   vTag     = uvec2(uIdentity |
                        (uint(GLEDITOR_TAG_KIND_BEAM) << GLEDITOR_TAG_KIND_SHIFT),
                    beamTag);

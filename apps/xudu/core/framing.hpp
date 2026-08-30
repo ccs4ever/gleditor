@@ -20,7 +20,10 @@
 #ifndef XUDU_FRAMING_H
 #define XUDU_FRAMING_H
 
+#include <cstddef>
 #include <vector>
+
+#include <glm/ext/vector_float3.hpp>
 
 namespace xudu {
 
@@ -87,6 +90,51 @@ pageStackExtent(const std::vector<float> &pageHeightsWorld, float pageGapWorld);
 [[nodiscard]] float framingFov(float worldWidth, float worldHeight,
                                float distance, float aspect,
                                float margin = 1.0F);
+
+/**
+ * @brief How many strands a link is drawn with, given the taller of its two
+ *        ends.
+ *
+ * A link end is a range of bytes and so a range of lines, not a point, and
+ * what is drawn between two of them is a band. The count comes from the taller
+ * end, so that end is drawn at its full reach rather than reduced to whatever
+ * the other end happens to be, and the strands are spaced @p pitch beam widths
+ * apart there: comfortably more than one, so they stay clear of each other
+ * where the band is at its tallest. Ribbons that merely abut overlap in a thin
+ * seam and print a strip of doubled alpha down it, which reads as stripes
+ * running the length of the band rather than as one connection.
+ *
+ * @param spanWorld Vertical reach of the taller end, in world units.
+ * @param beamWidthWorld Width one strand is drawn at.
+ * @param pitch Spacing between strands, in beam widths.
+ * @param limit Most strands to use. A link between two whole pages would
+ *        otherwise ask for one per line of text.
+ * @return At least one, at most @p limit.
+ */
+[[nodiscard]] std::size_t bandStrandCount(float spanWorld, float beamWidthWorld,
+                                          float pitch, std::size_t limit);
+
+/**
+ * @brief The route a beam takes to pass behind whatever stands between its
+ *        two ends.
+ *
+ * A quadratic curve dipping to @p depth at its midpoint and meeting both ends
+ * exactly, sampled into @p segments straight runs. Three straight pieces
+ * through two corners would do as much geometrically and did, but the middle
+ * of one runs almost straight away from the camera, and a ribbon that lies in
+ * the plane of the pages has next to no width left when it is seen end on --
+ * so what should have read as one beam going the long way round read as two
+ * stubs with a gap between them.
+ *
+ * @param depth How far behind the page plane the middle of the route sits,
+ *        as an offset in Z. Negative goes away from the camera.
+ * @return @p segments + 1 points, ends included; @p from and @p to alone when
+ *         @p segments is zero.
+ */
+[[nodiscard]] std::vector<glm::vec3> bypassRoute(const glm::vec3 &from,
+                                                 const glm::vec3 &to,
+                                                 float depth,
+                                                 std::size_t segments);
 
 } // namespace xudu
 

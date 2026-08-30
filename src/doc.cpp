@@ -443,8 +443,8 @@ void Doc::animateArrival(ch::Timeline &timeline) {
   // is what makes it read as arriving somewhere rather than being dragged.
   timeline.apply(&position).then<ch::RampTo>(target, gleditor::anim::docArrival,
                                              ch::EaseOutCubic());
-  timeline.apply(&opacity).then<ch::RampTo>(1.0F, gleditor::anim::docArrival,
-                                            ch::EaseOutQuad());
+  timeline.apply(&opacity).then<ch::RampTo>(
+      restingOpacity, gleditor::anim::docArrival, ch::EaseOutQuad());
 }
 
 void Doc::animateDeparture(ch::Timeline &timeline) {
@@ -460,15 +460,21 @@ void Doc::animateDeparture(ch::Timeline &timeline) {
                                             ch::EaseInQuad());
 }
 
-void Doc::animateMoveTo(ch::Timeline &timeline, const glm::vec3 &target) {
+void Doc::animateMoveTo(ch::Timeline &timeline, const glm::vec3 &target,
+                        const double seconds, const double delay) {
   // The resting place is recorded as well as animated towards: a later
   // arrival or departure reads it back out of the base matrix.
   model = glm::translate(glm::mat4(1.0F), target);
   // apply() replaces whatever motion was on this output, so a move that
   // interrupts another one continues from where that one had got to rather
   // than restarting from the old target.
-  timeline.apply(&position).then<ch::RampTo>(target, gleditor::anim::docArrival,
-                                             ch::EaseInOutQuad());
+  auto motion = timeline.apply(&position);
+  if (delay > 0.0) {
+    // Held at where the document is now rather than at where it was told to
+    // go, so the wait is a wait and not a jump followed by one.
+    motion.then<ch::Hold>(position(), delay);
+  }
+  motion.then<ch::RampTo>(target, seconds, ch::EaseInOutQuad());
 }
 
 std::optional<render::HighlightRange>

@@ -24,6 +24,7 @@
 #include <glm/gtx/string_cast.hpp>
 
 #include <gleditor/android_bootstrap.hpp>
+#include <gleditor/animation.hpp>
 #include <gleditor/doc.hpp>
 #include <gleditor/paths.hpp>
 #include <gleditor/render/device.hpp>
@@ -233,6 +234,13 @@ void Renderer::openDoc(RenderState &state, const gleditor::TextSource &source,
             << glm::to_string(newDocPosition) << "\n";
   auto docPtr = Doc::create(getPtr(), device.get(), newDocPosition, source);
   docPtr->setDocIndex(static_cast<std::uint32_t>(state.docs.size()));
+  // A document opened behind the row settles dimmer than one in it. It is
+  // there for context -- a corpus to see the row against -- and at full
+  // strength it competes with the row for the same attention; see
+  // Doc::setRestingOpacity().
+  if (depthZ < 0.0F) {
+    docPtr->setRestingOpacity(gleditor::anim::backgroundOpacity);
+  }
   docPtr->animateArrival(timeline);
   reapFinishedDocLoads();
   pendingDocLoads.push_back(std::async(
