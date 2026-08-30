@@ -63,6 +63,12 @@ ZzStructureDocument projectXuduToZigzag(const std::vector<XuduDocInput> &docs,
       .color       = RgbColor{0.3F, 0.85F, 0.4F},
       .spacing     = 2.0F,
   };
+  result.dimension_meta[opts.clone_dimension] = DimensionMeta{
+      .label       = "Clone Family",
+      .description = "Identical unchanged primedia spans across hypertime",
+      .color       = RgbColor{0.0F, 0.74F, 0.83F},
+      .spacing     = 2.0F,
+  };
 
   CellID nextCellId = 1;
   struct CellMapping {
@@ -72,6 +78,24 @@ ZzStructureDocument projectXuduToZigzag(const std::vector<XuduDocInput> &docs,
   };
   std::vector<CellMapping> cellMappings;
   std::vector<std::vector<CellID>> docCellChains(docs.size());
+
+  struct SpanTracker {
+    CellID masterCellId{0};
+    CellID latestCellId{0};
+  };
+  struct SpanLess {
+    bool operator()(const xudu::PrimediaSpan &a,
+                    const xudu::PrimediaSpan &b) const noexcept {
+      if (a.scroll != b.scroll) {
+        return a.scroll < b.scroll;
+      }
+      if (a.start != b.start) {
+        return a.start < b.start;
+      }
+      return a.length < b.length;
+    }
+  };
+  std::map<xudu::PrimediaSpan, SpanTracker, SpanLess> spanTrackers;
 
   for (std::size_t docIdx = 0; docIdx < docs.size(); ++docIdx) {
     const auto &doc = docs[docIdx];
@@ -97,17 +121,35 @@ ZzStructureDocument projectXuduToZigzag(const std::vector<XuduDocInput> &docs,
         }
 
         if (!paraText.empty()) {
-          const CellID id = nextCellId++;
-          zzCell cell;
-          cell.id        = id;
-          cell.text_data = std::move(paraText);
-          cell.type      = "xudu_span";
-
           xudu::PrimediaSpan span;
           if (!doc.spans.empty() && paraIdx < doc.spans.size()) {
             span = doc.spans[paraIdx];
           }
           ++paraIdx;
+
+          const bool isUnchangedClone =
+              (span.length > 0 && spanTrackers.contains(span));
+          const CellID id = nextCellId++;
+          zzCell cell;
+          cell.id = id;
+
+          if (isUnchangedClone) {
+            // Clones do not store redundant text; content is derived from
+            // master
+            cell.text_data      = "";
+            cell.type           = "xudu_clone";
+            const CellID prevId = spanTrackers[span].latestCellId;
+            result.cells[prevId].dimensions[opts.clone_dimension].pos = id;
+            cell.dimensions[opts.clone_dimension].neg                 = prevId;
+            spanTrackers[span].latestCellId                           = id;
+          } else {
+            cell.text_data = std::move(paraText);
+            cell.type      = "xudu_span";
+            if (span.length > 0) {
+              spanTrackers[span] =
+                  SpanTracker{.masterCellId = id, .latestCellId = id};
+            }
+          }
 
           result.cells[id] = std::move(cell);
           docCellChains[docIdx].push_back(id);
@@ -117,16 +159,31 @@ ZzStructureDocument projectXuduToZigzag(const std::vector<XuduDocInput> &docs,
         start = (end == doc.text.size()) ? end : end + 2;
       }
     } else {
-
-      const CellID id = nextCellId++;
-      zzCell cell;
-      cell.id        = id;
-      cell.text_data = doc.text;
-      cell.type      = "xudu_document";
-
       xudu::PrimediaSpan span;
       if (!doc.spans.empty()) {
         span = doc.spans.front();
+      }
+
+      const bool isUnchangedClone =
+          (span.length > 0 && spanTrackers.contains(span));
+      const CellID id = nextCellId++;
+      zzCell cell;
+      cell.id = id;
+
+      if (isUnchangedClone) {
+        cell.text_data      = "";
+        cell.type           = "xudu_clone";
+        const CellID prevId = spanTrackers[span].latestCellId;
+        result.cells[prevId].dimensions[opts.clone_dimension].pos = id;
+        cell.dimensions[opts.clone_dimension].neg                 = prevId;
+        spanTrackers[span].latestCellId                           = id;
+      } else {
+        cell.text_data = doc.text;
+        cell.type      = "xudu_document";
+        if (span.length > 0) {
+          spanTrackers[span] =
+              SpanTracker{.masterCellId = id, .latestCellId = id};
+        }
       }
 
       result.cells[id] = std::move(cell);
@@ -162,6 +219,22 @@ ZzStructureDocument projectXuduToZigzag(const std::vector<XuduDocInput> &docs,
           c1.dimensions[opts.transclusion_dimension].pos = m2.id;
           c2.dimensions[opts.transclusion_dimension].neg = m1.id;
         }
+      }
+    }
+  }
+
+  // --- 3. Link sequential microversion steps along opts.version_dimension ---
+  for (std::size_t docIdx = 0; docIdx + 1 < docCellChains.size(); ++docIdx) {
+    const auto &c1Chain       = docCellChains[docIdx];
+    const auto &c2Chain       = docCellChains[docIdx + 1];
+    const std::size_t minSize = std::min(c1Chain.size(), c2Chain.size());
+    for (std::size_t p = 0; p < minSize; ++p) {
+      const CellID c1 = c1Chain[p];
+      const CellID c2 = c2Chain[p];
+      if (result.cells[c1].dimensions[opts.version_dimension].pos == 0 &&
+          result.cells[c2].dimensions[opts.version_dimension].neg == 0) {
+        result.cells[c1].dimensions[opts.version_dimension].pos = c2;
+        result.cells[c2].dimensions[opts.version_dimension].neg = c1;
       }
     }
   }
@@ -300,7 +373,7 @@ ZzRasterResult rasterizeZzStructure(const ZzStructureDocument &doc,
       }
       firstInRow = false;
 
-      result.text += it->second.text_data;
+      result.text += zzcore::getEffectiveCellText(doc.cells, current);
       result.cell_sequence.push_back(current);
 
       const auto lIt = it->second.dimensions.find(primaryDim);
@@ -341,7 +414,8 @@ xudu::LinkPackage zzStructureToLinkPackage(const ZzStructureDocument &doc,
   std::unordered_map<CellID, xudu::GlobalSpan> cellSpans;
 
   for (const auto &[id, cell] : doc.cells) {
-    const auto len = static_cast<std::uint64_t>(cell.text_data.size());
+    const auto effectiveText = zzcore::getEffectiveCellText(doc.cells, id);
+    const auto len           = static_cast<std::uint64_t>(effectiveText.size());
     const xudu::GlobalSpan span{scrollName, currentOffset, len};
     cellSpans[id] = span;
     currentOffset += len;

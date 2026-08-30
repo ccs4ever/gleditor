@@ -183,3 +183,41 @@ TEST(ZigzagVisualizerTest, YamlSerializationRoundTrip) {
   EXPECT_EQ(roundtripped->meta.name, doc.meta.name);
   EXPECT_EQ(roundtripped->cells.size(), doc.cells.size());
 }
+
+TEST(ZigzagVisualizerTest, CloneCellEditingSync) {
+  ZigzagVisualizer viz("Sans 12", false);
+
+  const std::string yaml = R"(
+zzstructure:
+  meta:
+    name: "Clone Sync Test"
+  focus: 2
+  view:
+    x_dimension: d.1
+    y_dimension: d.clone
+    z_dimension: d.3
+  cells:
+    - id: 1
+      text: "Original Text"
+      dimensions:
+        d.clone: { pos: 2 }
+    - id: 2
+      dimensions:
+        d.clone: { neg: 1 }
+)";
+
+  auto doc = parseZzStructure(yaml, "clone_test");
+  ASSERT_TRUE(doc.has_value());
+
+  viz.adoptDocument(std::move(*doc), "clone_test.yaml");
+  EXPECT_EQ(viz.focusCellId(), 2U);
+
+  // Focus is at clone cell 2. Editing focus cell text should update the master
+  // cell 1.
+  viz.updateFocusCellText("Mutated Text From Clone");
+
+  const auto currentDoc = viz.document();
+  EXPECT_EQ(currentDoc.cells.at(1).text_data, "Mutated Text From Clone");
+  EXPECT_EQ(zzcore::getEffectiveCellText(currentDoc.cells, 2),
+            "Mutated Text From Clone");
+}

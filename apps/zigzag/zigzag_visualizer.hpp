@@ -38,6 +38,8 @@ struct RenderStateCell {
   std::string text;
   std::string type;
   bool has_preflet{false};
+  bool is_clone{false};
+  CellID clone_master_id{0};
 
   glm::vec3 current_pos{0.0F, 0.0F, 0.0F};
   glm::vec3 target_pos{0.0F, 0.0F, 0.0F};

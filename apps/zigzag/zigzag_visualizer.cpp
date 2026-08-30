@@ -310,7 +310,7 @@ bool ZigzagVisualizer::unlinkFocusAlong(const DimID &dimension,
 
 void ZigzagVisualizer::updateFocusCellText(std::string text) {
   if (space_.contains(accursed_cell_focus_)) {
-    space_[accursed_cell_focus_].text_data = std::move(text);
+    zzcore::updateMasterText(space_, accursed_cell_focus_, std::move(text));
     rebuildActiveViewTopology();
     invalidateAccessibility();
   }
@@ -362,13 +362,25 @@ void ZigzagVisualizer::rebuildActiveViewTopology() {
   }
 
   const zzCell *const focus = findCell(accursed_cell_focus_);
+  const bool focusIsClone   = zzcore::isCloneCell(space_, accursed_cell_focus_);
+  const CellID focusMaster =
+      zzcore::findCloneMaster(space_, accursed_cell_focus_);
+  const auto focusText =
+      zzcore::getEffectiveCellText(space_, accursed_cell_focus_);
+
   if (!visible_cells_.contains(accursed_cell_focus_)) {
     visible_cells_[accursed_cell_focus_] = RenderStateCell{
-        .id          = accursed_cell_focus_,
-        .text        = focus ? focus->text_data : "",
-        .type        = focus ? focus->type : "",
-        .has_preflet = focus && focus->preflet.has_value(),
+        .id              = accursed_cell_focus_,
+        .text            = std::string{focusText},
+        .type            = focus ? focus->type : "",
+        .has_preflet     = focus && focus->preflet.has_value(),
+        .is_clone        = focusIsClone,
+        .clone_master_id = focusMaster,
     };
+  } else {
+    visible_cells_[accursed_cell_focus_].text     = std::string{focusText};
+    visible_cells_[accursed_cell_focus_].is_clone = focusIsClone;
+    visible_cells_[accursed_cell_focus_].clone_master_id = focusMaster;
   }
 
   auto &focusRenderState        = visible_cells_[accursed_cell_focus_];
@@ -383,15 +395,25 @@ void ZigzagVisualizer::rebuildActiveViewTopology() {
       return;
     }
     const zzCell *const child = findCell(childId);
+    const bool childIsClone   = zzcore::isCloneCell(space_, childId);
+    const CellID childMaster  = zzcore::findCloneMaster(space_, childId);
+    const auto childText      = zzcore::getEffectiveCellText(space_, childId);
+
     if (!visible_cells_.contains(childId)) {
       RenderStateCell newCell{
-          .id          = childId,
-          .text        = child ? child->text_data : "",
-          .type        = child ? child->type : "",
-          .has_preflet = child && child->preflet.has_value(),
-          .current_pos = visible_cells_[parentId].current_pos,
+          .id              = childId,
+          .text            = std::string{childText},
+          .type            = child ? child->type : "",
+          .has_preflet     = child && child->preflet.has_value(),
+          .is_clone        = childIsClone,
+          .clone_master_id = childMaster,
+          .current_pos     = visible_cells_[parentId].current_pos,
       };
       visible_cells_[childId] = newCell;
+    } else {
+      visible_cells_[childId].text            = std::string{childText};
+      visible_cells_[childId].is_clone        = childIsClone;
+      visible_cells_[childId].clone_master_id = childMaster;
     }
 
     auto &childCell        = visible_cells_[childId];
@@ -686,11 +708,14 @@ void ZigzagVisualizer::drawFrame(gleditor::FrameContext &ctx) {
     worldCanvas_->addText(ctx.state, left + 6.0F, bottom + nodeHeight - 26.0F,
                           textPreview, textCol, bgCol);
 
-    // Badges: type & preflet
-    if (!cell.type.empty() || cell.has_preflet) {
+    // Badges: type, clone, & preflet
+    if (!cell.type.empty() || cell.is_clone || cell.has_preflet) {
       std::string badge;
       if (!cell.type.empty()) {
         badge += "[" + cell.type + "] ";
+      }
+      if (cell.is_clone) {
+        badge += std::format("[clone #{}] ", cell.clone_master_id);
       }
       if (cell.has_preflet) {
         badge += "-> [preflet]";
@@ -700,10 +725,8 @@ void ZigzagVisualizer::drawFrame(gleditor::FrameContext &ctx) {
     }
   }
 
-  if (!worldCanvas_->empty()) {
-    worldCanvas_->commit();
-    worldCanvas_->draw(ctx.state, ctx.viewProjection, 1.0F);
-  }
+  worldCanvas_->commit();
+  worldCanvas_->draw(ctx.state, ctx.viewProjection, 1.0F);
 
   // --- 3. Draw 2D Screen Overlay HUD ---
   hudCanvas_->clear();
@@ -718,19 +741,26 @@ void ZigzagVisualizer::drawFrame(gleditor::FrameContext &ctx) {
                       0x333344FFU);
 
   // Structure Name
-  hudCanvas_->addText(ctx.state, 16.0F, 22.0F, structure_name_, 0xF4C542FFU,
-                      0x0D0D12DDU);
+  hudCanvas_->addText(ctx.state, 16.0F, height - 12.0F, structure_name_,
+                      0xF4C542FFU, 0x0D0D12DDU);
 
   // Focus Status
   std::string focusLabel = "Focus: none";
   if (const zzCell *const cur = findCell(accursed_cell_focus_)) {
-    focusLabel = std::format("Focus: #{} \"{}\" {}", cur->id, cur->text_data,
+    const auto effText =
+        zzcore::getEffectiveCellText(space_, accursed_cell_focus_);
+    focusLabel = std::format("Focus: #{} \"{}\" {}", cur->id, effText,
                              cur->type.empty() ? "" : "[" + cur->type + "]");
+    if (zzcore::isCloneCell(space_, accursed_cell_focus_)) {
+      focusLabel +=
+          std::format(" [clone of #{}]",
+                      zzcore::findCloneMaster(space_, accursed_cell_focus_));
+    }
     if (cur->preflet) {
       focusLabel += " -> (Preflet link attached)";
     }
   }
-  hudCanvas_->addText(ctx.state, 16.0F, 46.0F, focusLabel, 0xFFFFFFFFU,
+  hudCanvas_->addText(ctx.state, 16.0F, height - 34.0F, focusLabel, 0xFFFFFFFFU,
                       0x0D0D12DDU);
 
   // Dimension Bindings on Top Right
@@ -745,8 +775,8 @@ void ZigzagVisualizer::drawFrame(gleditor::FrameContext &ctx) {
                   zVis.label.empty() ? current_view_.z_dimension : zVis.label);
 
   const auto dimsMetrics = hudCanvas_->measureText(dimsInfo);
-  hudCanvas_->addText(ctx.state, width - dimsMetrics.width - 16.0F, 22.0F,
-                      dimsInfo, 0x70B0FFFFU, 0x0D0D12DDU);
+  hudCanvas_->addText(ctx.state, width - dimsMetrics.width - 16.0F,
+                      height - 12.0F, dimsInfo, 0x70B0FFFFU, 0x0D0D12DDU);
 
   // Preflet Fetch Progress Banner
   const auto &fetch = preflet_fetcher_.progress();
@@ -755,13 +785,13 @@ void ZigzagVisualizer::drawFrame(gleditor::FrameContext &ctx) {
         std::format("Fetching Slice: {:.0f}% -- {}", fetch.fraction * 100.0F,
                     fetch.message);
     hudCanvas_->addRect(0.0F, height - 90.0F, width, 30.0F, 0x332244EEU);
-    hudCanvas_->addText(ctx.state, 16.0F, 82.0F, fetchMsg, 0xE080FFFFU,
+    hudCanvas_->addText(ctx.state, 16.0F, height - 68.0F, fetchMsg, 0xE080FFFFU,
                         0x332244EEU);
   } else if (fetch.status == PrefletFetcher::Status::Failed) {
     const std::string failMsg =
         std::format("Preflet Fetch Failed: {}", fetch.message);
     hudCanvas_->addRect(0.0F, height - 90.0F, width, 30.0F, 0x551111EEU);
-    hudCanvas_->addText(ctx.state, 16.0F, 82.0F, failMsg, 0xFF8888FFU,
+    hudCanvas_->addText(ctx.state, 16.0F, height - 68.0F, failMsg, 0xFF8888FFU,
                         0x551111EEU);
   }
 
@@ -771,14 +801,11 @@ void ZigzagVisualizer::drawFrame(gleditor::FrameContext &ctx) {
   const std::string hints =
       "Arrows: Step X/Y | PgUp/PgDn: Step Z | Space: Swap X/Y | Tab: Cycle | "
       "Enter: Follow Preflet | Bksp: Back | R: Reset View";
-  hudCanvas_->addText(ctx.state, 16.0F, height - 8.0F, hints, 0x888899FFU,
-                      0x0D0D12DDU);
+  hudCanvas_->addText(ctx.state, 16.0F, 22.0F, hints, 0x888899FFU, 0x0D0D12DDU);
 
-  if (!hudCanvas_->empty()) {
-    hudCanvas_->commit();
-    const glm::mat4 ortho = glm::ortho(0.0F, width, 0.0F, height, -1.0F, 1.0F);
-    hudCanvas_->draw(ctx.state, ortho, 1.0F);
-  }
+  hudCanvas_->commit();
+  const glm::mat4 ortho = glm::ortho(0.0F, width, 0.0F, height, -1.0F, 1.0F);
+  hudCanvas_->draw(ctx.state, ortho, 1.0F);
 }
 
 void ZigzagVisualizer::describe(gleditor::a11y::Builder &into) {
@@ -793,9 +820,14 @@ void ZigzagVisualizer::describe(gleditor::a11y::Builder &into) {
   std::uint64_t nextNodeId = 10;
   for (const auto &[id, cell] : space_) {
     const bool isFocus = (id == accursed_cell_focus_);
-    std::string desc   = std::format("Cell #{}: {}", id, cell.text_data);
+    const auto effText = zzcore::getEffectiveCellText(space_, id);
+    std::string desc   = std::format("Cell #{}: {}", id, effText);
     if (!cell.type.empty()) {
       desc += " [" + cell.type + "]";
+    }
+    if (zzcore::isCloneCell(space_, id)) {
+      desc +=
+          std::format(" [Clone of #{}]", zzcore::findCloneMaster(space_, id));
     }
     if (isFocus) {
       desc += " (Focused)";

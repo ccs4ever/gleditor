@@ -282,4 +282,79 @@ LinkPairs linksOn(const zzCell *cell, const std::string_view dimension) {
   return it != cell->dimensions.end() ? it->second : LinkPairs{};
 }
 
+CellID findCloneMaster(const std::unordered_map<CellID, zzCell> &cells,
+                       const CellID id) {
+  if (0 == id) {
+    return 0;
+  }
+  std::unordered_set<CellID> visited;
+  CellID current = id;
+  while (current != 0 && visited.insert(current).second) {
+    const auto *cell = findCell(cells, current);
+    if (!cell) {
+      break;
+    }
+    const CellID neg = linksOn(cell, cloneDimension).neg;
+    if (0 == neg || !cells.contains(neg)) {
+      return current;
+    }
+    current = neg;
+  }
+  return current != 0 ? current : id;
+}
+
+bool isCloneCell(const std::unordered_map<CellID, zzCell> &cells,
+                 const CellID id) {
+  const auto *cell = findCell(cells, id);
+  if (!cell) {
+    return false;
+  }
+  const CellID neg = linksOn(cell, cloneDimension).neg;
+  return neg != 0 && cells.contains(neg);
+}
+
+std::string_view
+getEffectiveCellText(const std::unordered_map<CellID, zzCell> &cells,
+                     const CellID id) {
+  const CellID masterId = findCloneMaster(cells, id);
+  const auto *master    = findCell(cells, masterId);
+  if (master && !master->text_data.empty()) {
+    return master->text_data;
+  }
+  const auto *cell = findCell(cells, id);
+  return cell ? std::string_view{cell->text_data} : std::string_view{};
+}
+
+std::vector<CellID>
+getCloneRank(const std::unordered_map<CellID, zzCell> &cells, const CellID id) {
+  std::vector<CellID> rank;
+  const CellID masterId = findCloneMaster(cells, id);
+  if (0 == masterId) {
+    return rank;
+  }
+  std::unordered_set<CellID> visited;
+  CellID current = masterId;
+  while (current != 0 && visited.insert(current).second) {
+    rank.push_back(current);
+    const auto *cell = findCell(cells, current);
+    if (!cell) {
+      break;
+    }
+    const CellID pos = linksOn(cell, cloneDimension).pos;
+    if (0 == pos || !cells.contains(pos)) {
+      break;
+    }
+    current = pos;
+  }
+  return rank;
+}
+
+void updateMasterText(std::unordered_map<CellID, zzCell> &cells,
+                      const CellID id, std::string newText) {
+  const CellID masterId = findCloneMaster(cells, id);
+  if (auto it = cells.find(masterId); it != cells.end()) {
+    it->second.text_data = std::move(newText);
+  }
+}
+
 } // namespace zigzag::zzcore

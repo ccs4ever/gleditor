@@ -201,3 +201,55 @@ TEST(ZzCoreTest, AxisNeighbours) {
   EXPECT_EQ(neighbours[4], 6U); // z+
   EXPECT_EQ(neighbours[5], 7U); // z-
 }
+
+TEST(ZzCoreTest, CloneMasterResolutionAlongDClone) {
+  std::unordered_map<CellID, zzCell> cells;
+
+  // Rank: Cell 10 (Master) -> Cell 20 (Clone 1) -> Cell 30 (Clone 2)
+  cells[10]                       = makeCell(10, "master");
+  cells[10].text_data             = "Universal Truth";
+  cells[10].dimensions["d.clone"] = LinkPairs{.pos = 20, .neg = 0};
+
+  cells[20]                       = makeCell(20, "xudu_clone");
+  cells[20].text_data             = ""; // Clone stores no text
+  cells[20].dimensions["d.clone"] = LinkPairs{.pos = 30, .neg = 10};
+
+  cells[30]                       = makeCell(30, "xudu_clone");
+  cells[30].text_data             = ""; // Clone stores no text
+  cells[30].dimensions["d.clone"] = LinkPairs{.pos = 0, .neg = 20};
+
+  // Standalone unlinked cell 40
+  cells[40]           = makeCell(40, "standalone");
+  cells[40].text_data = "Independent Content";
+
+  EXPECT_EQ(findCloneMaster(cells, 10), 10U);
+  EXPECT_EQ(findCloneMaster(cells, 20), 10U);
+  EXPECT_EQ(findCloneMaster(cells, 30), 10U);
+  EXPECT_EQ(findCloneMaster(cells, 40), 40U);
+
+  EXPECT_FALSE(isCloneCell(cells, 10));
+  EXPECT_TRUE(isCloneCell(cells, 20));
+  EXPECT_TRUE(isCloneCell(cells, 30));
+  EXPECT_FALSE(isCloneCell(cells, 40));
+
+  // Effective text derivation from master head
+  EXPECT_EQ(getEffectiveCellText(cells, 10), "Universal Truth");
+  EXPECT_EQ(getEffectiveCellText(cells, 20), "Universal Truth");
+  EXPECT_EQ(getEffectiveCellText(cells, 30), "Universal Truth");
+  EXPECT_EQ(getEffectiveCellText(cells, 40), "Independent Content");
+
+  // Rank retrieval
+  const auto rank = getCloneRank(cells, 20);
+  ASSERT_EQ(rank.size(), 3U);
+  EXPECT_EQ(rank[0], 10U);
+  EXPECT_EQ(rank[1], 20U);
+  EXPECT_EQ(rank[2], 30U);
+
+  // Updating text on clone 20 updates the master cell 10 and reflects across
+  // the rank
+  updateMasterText(cells, 20, "Updated Universal Truth");
+  EXPECT_EQ(cells[10].text_data, "Updated Universal Truth");
+  EXPECT_EQ(getEffectiveCellText(cells, 10), "Updated Universal Truth");
+  EXPECT_EQ(getEffectiveCellText(cells, 20), "Updated Universal Truth");
+  EXPECT_EQ(getEffectiveCellText(cells, 30), "Updated Universal Truth");
+}

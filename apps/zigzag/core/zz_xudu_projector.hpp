@@ -34,6 +34,7 @@ struct XuduProjectorOptions {
   DimID transclusion_dimension{"d.transclude"};
   DimID link_dimension{"d.link"};
   DimID version_dimension{"d.version"};
+  DimID clone_dimension{"d.clone"};
   bool split_by_paragraphs{true};
 };
 

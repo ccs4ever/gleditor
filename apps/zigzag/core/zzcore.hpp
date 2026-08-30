@@ -51,6 +51,7 @@ private:
 
 inline constexpr std::string_view prefletDimension  = "d.preflet";
 inline constexpr std::string_view prefletTypePrefix = "preflet_";
+inline constexpr std::string_view cloneDimension    = "d.clone";
 
 [[nodiscard]] bool isPrefletChainNode(std::string_view type);
 [[nodiscard]] bool looksLikeBitTorrentMagnet(std::string_view identifier);
@@ -95,6 +96,45 @@ void resolveAllPreflets(std::unordered_map<CellID, zzCell> &cells,
 findCell(const std::unordered_map<CellID, zzCell> &cells, CellID id);
 
 [[nodiscard]] LinkPairs linksOn(const zzCell *cell, std::string_view dimension);
+
+/**
+ * @brief Find the master cell at the head of a cell's d.clone rank.
+ *
+ * In ZigZag, a d.clone rank links a master cell to all its clones. Following
+ * negward links on d.clone leads to the head of the rank, which is the Master
+ * Cell. If the cell has no negward d.clone link, it is its own master.
+ */
+[[nodiscard]] CellID
+findCloneMaster(const std::unordered_map<CellID, zzCell> &cells, CellID id);
+
+/**
+ * @brief Returns true iff this cell is a clone (i.e. has a negward link on
+ * d.clone).
+ */
+[[nodiscard]] bool isCloneCell(const std::unordered_map<CellID, zzCell> &cells,
+                               CellID id);
+
+/**
+ * @brief Returns the effective text of a cell by looking up its master cell at
+ * the head of its d.clone rank.
+ */
+[[nodiscard]] std::string_view
+getEffectiveCellText(const std::unordered_map<CellID, zzCell> &cells,
+                     CellID id);
+
+/**
+ * @brief Returns all cells in the d.clone rank containing @p id, starting from
+ * the head master cell and walking posward.
+ */
+[[nodiscard]] std::vector<CellID>
+getCloneRank(const std::unordered_map<CellID, zzCell> &cells, CellID id);
+
+/**
+ * @brief Updates the text on the master cell at the head of @p id's d.clone
+ * rank.
+ */
+void updateMasterText(std::unordered_map<CellID, zzCell> &cells, CellID id,
+                      std::string newText);
 
 } // namespace zigzag::zzcore
 

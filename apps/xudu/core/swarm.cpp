@@ -432,12 +432,11 @@ InfoHash SwarmContentSource::addTorrent(const std::string_view torrentFile,
   }
 
   auto handle = impl->session.add_torrent(params);
-  impl->swarms.insert_or_assign(
-      hash, Swarm{.handle        = handle,
-                  .meta          = std::move(meta),
-                  .pieces        = {},
-                  .wantedPeers   = {},
-                  .pendingPieces = {}});
+  impl->swarms.insert_or_assign(hash, Swarm{.handle        = handle,
+                                            .meta          = std::move(meta),
+                                            .pieces        = {},
+                                            .wantedPeers   = {},
+                                            .pendingPieces = {}});
   return hash;
 }
 
@@ -459,12 +458,11 @@ InfoHash SwarmContentSource::addMagnet(const std::string &uri,
 
   auto handle = impl->session.add_torrent(params);
   // No metadata yet: that is what a magnet lacks, and it arrives from a peer.
-  impl->swarms.insert_or_assign(
-      link.hash, Swarm{.handle        = handle,
-                       .meta          = nullptr,
-                       .pieces        = {},
-                       .wantedPeers   = {},
-                       .pendingPieces = {}});
+  impl->swarms.insert_or_assign(link.hash, Swarm{.handle        = handle,
+                                                 .meta          = nullptr,
+                                                 .pieces        = {},
+                                                 .wantedPeers   = {},
+                                                 .pendingPieces = {}});
   return link.hash;
 }
 

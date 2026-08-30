@@ -11,6 +11,7 @@
 #include "xudu/core/store.hpp"
 #include "xudu/core/swarm.hpp"
 #include "zigzag/core/zz_xudu_projector.hpp"
+#include "zigzag/core/zzcore.hpp"
 #include "zigzag/core/zzstructure.hpp"
 
 using namespace zigzag;
@@ -151,4 +152,117 @@ TEST(ZzXuduConvergenceTest, ManifoldValidation) {
   // Fix the backlink
   doc.cells[2].dimensions["d.1"].neg = 1;
   EXPECT_TRUE(validate2RankManifold(doc, &error));
+}
+
+TEST(ZzXuduConvergenceTest, XuduHypertimeUnchangedSpansBecomeCloneCells) {
+  // Create a Xudu store with two microversions:
+  // Version 1: Paragraph 1 (spool 1, offset 0, len 20), Paragraph 2 (spool 1,
+  // offset 20, len 20) Version 2: Paragraph 1 (spool 1, offset 0, len 20 -
+  // UNCHANGED), Paragraph 3 (spool 2, offset 0, len 25 - EDITED)
+  const xudu::PrimediaSpan span1{1, 0, 20};
+  const xudu::PrimediaSpan span2{1, 20, 20};
+  const xudu::PrimediaSpan span3{2, 0, 25};
+
+  std::vector<XuduDocInput> docs;
+  docs.push_back(XuduDocInput{
+      .name    = "v1",
+      .text    = "First unchanged text\n\nOriginal second text",
+      .version = xudu::MicroversionId::parse("1"),
+      .spans   = {span1, span2},
+  });
+
+  docs.push_back(XuduDocInput{
+      .name    = "v2",
+      .text    = "First unchanged text\n\nEdited second text here",
+      .version = xudu::MicroversionId::parse("2"),
+      .spans   = {span1, span3},
+  });
+
+  auto zzDoc = projectXuduToZigzag(docs, {});
+
+  std::string error;
+  EXPECT_TRUE(validate2RankManifold(zzDoc, &error)) << error;
+
+  // We should have 4 cells total:
+  // Cell 1: v1 para 1 (Master)
+  // Cell 2: v1 para 2
+  // Cell 3: v2 para 1 (Clone of Cell 1)
+  // Cell 4: v2 para 2 (New span3)
+  ASSERT_EQ(zzDoc.cells.size(), 4U);
+
+  const auto &c1 = zzDoc.cells[1];
+  const auto &c2 = zzDoc.cells[2];
+  const auto &c3 = zzDoc.cells[3];
+  const auto &c4 = zzDoc.cells[4];
+
+  EXPECT_EQ(c1.type, "xudu_span");
+  EXPECT_EQ(c1.text_data, "First unchanged text");
+
+  // Cell 3 is an unchanged span across microversions, so it is a clone of Cell
+  // 1
+  EXPECT_EQ(c3.type, "xudu_clone");
+  EXPECT_TRUE(c3.text_data.empty()); // Clones do not duplicate text
+
+  // d.clone rank links
+  EXPECT_EQ(c1.dimensions.at("d.clone").pos, 3U);
+  EXPECT_EQ(c3.dimensions.at("d.clone").neg, 1U);
+
+  EXPECT_FALSE(zzcore::isCloneCell(zzDoc.cells, 1));
+  EXPECT_TRUE(zzcore::isCloneCell(zzDoc.cells, 3));
+  EXPECT_EQ(zzcore::findCloneMaster(zzDoc.cells, 3), 1U);
+
+  // Content lookup
+  EXPECT_EQ(zzcore::getEffectiveCellText(zzDoc.cells, 1),
+            "First unchanged text");
+  EXPECT_EQ(zzcore::getEffectiveCellText(zzDoc.cells, 3),
+            "First unchanged text");
+
+  // d.version links connect microversions
+  EXPECT_EQ(c1.dimensions.at("d.version").pos, 3U);
+  EXPECT_EQ(c3.dimensions.at("d.version").neg, 1U);
+  EXPECT_EQ(c2.dimensions.at("d.version").pos, 4U);
+  EXPECT_EQ(c4.dimensions.at("d.version").neg, 2U);
+}
+
+TEST(ZzXuduConvergenceTest, RasterizeZzStructureWithCloneCells) {
+  ZzStructureDocument doc;
+  doc.focus = 1;
+
+  // Master cell
+  zzCell c1;
+  c1.id                        = 1;
+  c1.text_data                 = "Shared Header.";
+  c1.type                      = "master";
+  c1.dimensions["d.doc"].pos   = 2;
+  c1.dimensions["d.clone"].pos = 3;
+
+  zzCell c2;
+  c2.id                      = 2;
+  c2.text_data               = "Doc 1 Body.";
+  c2.type                    = "cell";
+  c2.dimensions["d.doc"].neg = 1;
+
+  // Clone cell (empty text_data, pos of c1 on d.clone)
+  zzCell c3;
+  c3.id                        = 3;
+  c3.text_data                 = "";
+  c3.type                      = "xudu_clone";
+  c3.dimensions["d.clone"].neg = 1;
+  c3.dimensions["d.doc"].pos   = 4;
+
+  zzCell c4;
+  c4.id                      = 4;
+  c4.text_data               = "Doc 2 Body.";
+  c4.type                    = "cell";
+  c4.dimensions["d.doc"].neg = 3;
+
+  doc.cells[1] = c1;
+  doc.cells[2] = c2;
+  doc.cells[3] = c3;
+  doc.cells[4] = c4;
+
+  // Rasterize starting from clone cell 3
+  const auto raster = rasterizeZzStructure(doc, "d.doc", "d.clone", 3);
+  EXPECT_EQ(raster.text,
+            "Shared Header. Doc 1 Body.\n\nShared Header. Doc 2 Body.");
 }

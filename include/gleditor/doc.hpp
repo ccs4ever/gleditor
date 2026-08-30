@@ -550,6 +550,7 @@ public:
   Doc(const RendererRef &renderer, render::RenderDevice *device,
       const glm::mat4 &model, const gleditor::TextSource &source, Private);
   ~Doc() override = default;
+  void load(const gleditor::TextSource &source);
   void makePages();
   void makePages(RenderState &state);
   /// Build any pending shaped pages on the render thread in page order.
