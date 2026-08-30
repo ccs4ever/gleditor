@@ -39,6 +39,8 @@ const char *linkTypeName(const LinkType type) {
     return "other";
   case LinkType::Format:
     return "format";
+  case LinkType::Dimension:
+    return "dimension";
   }
   return "other";
 }
@@ -61,6 +63,9 @@ LinkType linkTypeFromName(const std::string &name) {
   }
   if ("format" == name) {
     return LinkType::Format;
+  }
+  if ("dimension" == name) {
+    return LinkType::Dimension;
   }
   return LinkType::Other;
 }
