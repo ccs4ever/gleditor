@@ -24,6 +24,7 @@
 
 #include <cstdint>
 #include <memory>
+#include <span>
 #include <vector>
 
 #include <glm/ext/matrix_float4x4.hpp>
@@ -60,6 +61,19 @@ public:
     std::array<float, 3> to{};
     std::uint32_t colour{};
     std::uint32_t tag{};
+    /**
+     * @brief Where this segment falls along the route it belongs to, as a
+     *        fraction at each end.
+     *
+     * A beam drawn on its own runs the whole route, so {0, 1}. A segment of a
+     * route that bends -- one going the long way round behind the documents
+     * between its ends -- carries only its own share, so that the fade along
+     * the length runs once from one end of the route to the other instead of
+     * restarting at every joint. Which way a link points is the one thing the
+     * fade is there to say, and a fade that resets three times says it three
+     * times over and means none of them.
+     */
+    std::array<float, 2> along{0.0F, 1.0F};
   };
 
   /// Per-instance layout describing Row to the device.
@@ -107,7 +121,20 @@ public:
    *        tell which of its own beams was clicked.
    */
   void add(const glm::vec3 &from, const glm::vec3 &to, float width,
-           std::uint32_t colour, std::uint32_t tag);
+           std::uint32_t colour, std::uint32_t tag, float alongFrom = 0.0F,
+           float alongTo = 1.0F);
+
+  /**
+   * @brief Add a route through several points as one run of beams.
+   *
+   * The segments are given their share of the route by arc length, so the
+   * fade along the length crosses the joints without a step -- see Row::along.
+   * Fewer than two points adds nothing.
+   *
+   * @param through The route's points in order, ends included.
+   */
+  void addPath(std::span<const glm::vec3> through, float width,
+               std::uint32_t colour, std::uint32_t tag);
 
   /// Hand what has been added to the device. Nothing is drawn until this.
   void commit();

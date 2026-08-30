@@ -8,6 +8,7 @@
 #include <cstddef>
 #include <span>
 
+#include <glm/geometric.hpp>
 #include <glm/gtc/type_ptr.hpp>
 
 #include <gleditor/render/device.hpp>
@@ -30,7 +31,7 @@ std::array<float, 16> toArray(const glm::mat4 &mat) {
 
 render::VertexLayout Beams::layout() {
   using render::AttributeType;
-  static_assert(sizeof(Beams::Row) == 36,
+  static_assert(sizeof(Beams::Row) == 44,
                 "the beam record is read by a shader that names its fields by "
                 "offset; padding it would silently shift every attribute");
 
@@ -42,6 +43,7 @@ render::VertexLayout Beams::layout() {
       {"beamTo", 2, AttributeType::Float, 3, offsetof(Row, to)},
       {"beamColour", 3, AttributeType::UnsignedInt, 1, offsetof(Row, colour)},
       {"beamTag", 4, AttributeType::UnsignedInt, 1, offsetof(Row, tag)},
+      {"beamAlong", 5, AttributeType::Float, 2, offsetof(Row, along)},
   };
   return out;
 }
@@ -71,9 +73,38 @@ void Beams::createPipeline(const std::string &assetDir,
 void Beams::clear() { rows.clear(); }
 
 void Beams::add(const glm::vec3 &from, const glm::vec3 &to, const float width,
-                const std::uint32_t colour, const std::uint32_t tag) {
-  rows.push_back(
-      Row{{from.x, from.y, from.z}, width, {to.x, to.y, to.z}, colour, tag});
+                const std::uint32_t colour, const std::uint32_t tag,
+                const float alongFrom, const float alongTo) {
+  rows.push_back(Row{{from.x, from.y, from.z},
+                     width,
+                     {to.x, to.y, to.z},
+                     colour,
+                     tag,
+                     {alongFrom, alongTo}});
+}
+
+void Beams::addPath(const std::span<const glm::vec3> through, const float width,
+                    const std::uint32_t colour, const std::uint32_t tag) {
+  if (through.size() < 2) {
+    return;
+  }
+  // By arc length rather than by segment count, so a route made of one long
+  // run and two short elbows fades over the run rather than spending a third
+  // of the fade on each elbow.
+  float total = 0.0F;
+  for (std::size_t i = 1; i < through.size(); i++) {
+    total += glm::distance(through[i - 1], through[i]);
+  }
+  if (total <= 0.0F) {
+    return;
+  }
+  float travelled = 0.0F;
+  for (std::size_t i = 1; i < through.size(); i++) {
+    const float here = travelled;
+    travelled += glm::distance(through[i - 1], through[i]);
+    add(through[i - 1], through[i], width, colour, tag, here / total,
+        travelled / total);
+  }
 }
 
 void Beams::commit() {

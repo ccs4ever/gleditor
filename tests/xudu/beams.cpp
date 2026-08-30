@@ -11,11 +11,13 @@
 #include <gtest/gtest.h>
 
 #include <cmath>
+#include <cstddef>
 #include <cstdint>
 #include <map>
 #include <set>
 #include <vector>
 
+#include <glm/ext/vector_float3.hpp>
 #include <glm/trigonometric.hpp>
 
 #include <gleditor/doc.hpp>
@@ -26,6 +28,8 @@
 
 namespace {
 
+using xudu::bandStrandCount;
+using xudu::bypassRoute;
 using xudu::centroidAlignmentDeltaY;
 using xudu::centroidY;
 using xudu::framingDistance;
@@ -853,4 +857,104 @@ TEST(PageFraming, framingDistanceGrowsWithPageCount) {
     EXPECT_GT(distance, previous) << pages << " pages did not need more room";
     previous = distance;
   }
+}
+
+// =============================================================================
+// What a link is drawn as. A link end is a range of bytes -- so a range of
+// lines -- rather than a point, and the two ends need not be the same size.
+// These are the rules that turn that into ribbons, kept here with the rest of
+// the geometry that needs no device.
+// =============================================================================
+
+// Two ends of the same height get strands spaced at the pitch across that
+// height, so a passage joined to the passage it was quoted from is drawn as a
+// band rather than as one line through the middle of it.
+TEST(BandGeometry, tallerEndsAreDrawnWithMoreStrands) {
+  constexpr float beamWidth = 1.0F;
+  constexpr float pitch     = 2.0F;
+  constexpr std::size_t cap = 5;
+
+  // Nothing to span: one line to one line is one strand.
+  EXPECT_EQ(bandStrandCount(0.0F, beamWidth, pitch, cap), 1U);
+  // Two beam widths of reach is one pitch, which is two strands: one at each
+  // end of the reach.
+  EXPECT_EQ(bandStrandCount(2.0F, beamWidth, pitch, cap), 2U);
+  EXPECT_EQ(bandStrandCount(4.0F, beamWidth, pitch, cap), 3U);
+  EXPECT_EQ(bandStrandCount(6.0F, beamWidth, pitch, cap), 4U);
+
+  // Never fewer than one, and never more than asked for however tall the end
+  // is: a link between two whole pages would otherwise want one strand per
+  // line of text at both ends.
+  EXPECT_EQ(bandStrandCount(10000.0F, beamWidth, pitch, cap), cap);
+  EXPECT_EQ(bandStrandCount(-5.0F, beamWidth, pitch, cap), 1U);
+  EXPECT_EQ(bandStrandCount(4.0F, 0.0F, pitch, cap), 1U);
+  EXPECT_EQ(bandStrandCount(4.0F, beamWidth, 0.0F, cap), 1U);
+}
+
+// The strands are spaced further apart than they are wide wherever the band is
+// at its tallest. Ribbons that merely abut overlap in a seam and print a strip
+// of doubled alpha down it, which reads as stripes running the length of the
+// band rather than as one connection.
+TEST(BandGeometry, strandsAreSpacedFurtherApartThanTheyAreWide) {
+  constexpr float beamWidth = 0.8F;
+  constexpr float pitch     = 2.2F;
+  constexpr std::size_t cap = 5;
+
+  for (const float span : {0.5F, 1.0F, 2.0F, 3.5F, 6.0F, 7.0F}) {
+    const auto count = bandStrandCount(span, beamWidth, pitch, cap);
+    if (count < 2 || count == cap) {
+      // One strand has nothing to be spaced from, and a band that hit the cap
+      // is spreading a fixed number of strands over whatever height it has --
+      // which only ever moves them further apart.
+      continue;
+    }
+    const float spacing = span / static_cast<float>(count - 1);
+    EXPECT_GT(spacing, beamWidth) << "strands " << span << " apart over "
+                                  << count << " would overlap at the tall end";
+  }
+}
+
+// A beam going the long way round to pass behind a document standing between
+// its two ends still has to meet both of them exactly, and the dip has to be
+// the depth it was asked for rather than twice it -- a quadratic curve reaches
+// only half way to its control point.
+TEST(BypassRoute, theCurveMeetsBothEndsAndDipsToTheDepthAsked) {
+  const glm::vec3 from(-30.0F, 4.0F, 0.0F);
+  const glm::vec3 to(30.0F, -2.0F, 0.0F);
+  constexpr float depth = -40.0F;
+
+  const auto route = bypassRoute(from, to, depth, 8);
+  ASSERT_EQ(route.size(), 9U);
+  EXPECT_FLOAT_EQ(route.front().x, from.x);
+  EXPECT_FLOAT_EQ(route.front().y, from.y);
+  EXPECT_FLOAT_EQ(route.front().z, from.z);
+  EXPECT_FLOAT_EQ(route.back().x, to.x);
+  EXPECT_FLOAT_EQ(route.back().y, to.y);
+  EXPECT_FLOAT_EQ(route.back().z, to.z);
+
+  // Deepest in the middle, at the depth asked for.
+  EXPECT_NEAR(route[4].z, depth, 1e-4F);
+
+  // And it gets there and back without turning a corner: every step changes Z
+  // by about as much as the one before it, which three straight pieces through
+  // two elbows -- what this replaced -- emphatically did not.
+  float deepest = 0.0F;
+  for (std::size_t i = 1; i < route.size(); i++) {
+    deepest          = std::min(deepest, route[i].z);
+    const float step = std::abs(route[i].z - route[i - 1].z);
+    EXPECT_LT(step, std::abs(depth) * 0.5F)
+        << "step " << i << " jumps most of the way to the bypass depth";
+  }
+  EXPECT_NEAR(deepest, depth, 1e-4F);
+}
+
+// Nothing to sample is still a beam between two points rather than nothing at
+// all.
+TEST(BypassRoute, noSegmentsIsAStraightRun) {
+  const glm::vec3 from(0.0F, 0.0F, 0.0F);
+  const glm::vec3 to(10.0F, 0.0F, 0.0F);
+  const auto route = bypassRoute(from, to, -20.0F, 0);
+  ASSERT_EQ(route.size(), 2U);
+  EXPECT_FLOAT_EQ(route.front().x, from.x);
+  EXPECT_FLOAT_EQ(route.back().x, to.x);
 }

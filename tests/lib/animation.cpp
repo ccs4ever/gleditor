@@ -84,6 +84,60 @@ TEST(Animation, InterruptingAMotionContinuesFromWhereItGot) {
       << "retargeting starts from the current value, not from a reset one";
 }
 
+// A sworph moves three things: the document being brought over, the row making
+// way for it, and the camera closing around the result. Giving them all the
+// same timing is what made it read as the whole view jumping rather than as
+// one document being brought to another, so the order they finish in is a
+// property of the design and not an accident of the numbers.
+TEST(Animation, TheSworphLeadsWithTheDocumentAndSettlesWithTheCamera) {
+  namespace anim = gleditor::anim;
+
+  // The subject of the move is the one the eye is meant to follow, so it takes
+  // longer than an ordinary move and longer than the row answering it.
+  EXPECT_GT(anim::sworphSubject, anim::docArrival);
+  EXPECT_GT(anim::sworphSubject, anim::sworphRow);
+
+  // The row waits, and having waited is still done before the document it made
+  // room for has finished arriving -- otherwise the row would be the last
+  // thing moving, and the last thing moving is what the eye ends on.
+  EXPECT_GT(anim::sworphRowDelay, 0.0);
+  EXPECT_LT(anim::sworphRowDelay + anim::sworphRow, anim::sworphSubject);
+
+  // And the camera is last: it waits too, and is still going after everything
+  // it is framing has stopped.
+  EXPECT_GT(anim::cameraSettleDelay, 0.0);
+  EXPECT_GT(anim::cameraSettleDelay + anim::cameraSettle, anim::sworphSubject);
+
+  // The whole thing is still short enough to be one gesture rather than a
+  // pause -- and short enough that waiting for it before a screenshot is not
+  // waiting long.
+  EXPECT_LT(anim::cameraSettleDelay + anim::cameraSettle, 1.5);
+}
+
+// A move can be asked to wait before it starts, which is what lets the row
+// answer a sworph rather than move with it. Waiting has to mean standing still
+// where the document already is: holding at the destination instead would jump
+// there and then ease nowhere.
+TEST(Animation, ADelayedMoveStandsStillBeforeItStarts) {
+  ch::Timeline timeline;
+  ch::Output<float> value{10.0F};
+  constexpr double delay = 0.2;
+  timeline.apply(&value)
+      .then<ch::Hold>(value(), delay)
+      .then<ch::RampTo>(100.0F, 0.4, ch::EaseInOutQuad());
+
+  run(timeline, delay * 0.75);
+  EXPECT_FLOAT_EQ(10.0F, value()) << "nothing moves during the wait";
+
+  run(timeline, 0.2);
+  EXPECT_GT(value(), 10.0F) << "and then it does";
+  EXPECT_LT(value(), 100.0F);
+
+  run(timeline, 0.5);
+  EXPECT_FLOAT_EQ(100.0F, value());
+  EXPECT_TRUE(timeline.empty());
+}
+
 TEST(ToastFade, RisesFromNothingAndReturnsToIt) {
   const auto posted  = Clock::now();
   const auto expires = posted + ToastOverlay::lifetime;

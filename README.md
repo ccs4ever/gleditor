@@ -1187,6 +1187,48 @@ this program is that typing is an edit, so it has to reach the document.
 | `ctrl-q`                  | save and quit                                             |
 | `backspace`               | stop pointing at the selection                            |
 
+### What a link is drawn as
+
+Both ends of a link are ranges of bytes -- so ranges of lines -- and they need
+not be the same size. What is drawn between them is a band: strands spread
+across the taller end and converging on the shorter one, plus a bracket down
+each document's margin covering the end it attaches to.
+
+The strands are deliberately spaced further apart than they are wide. Ribbons
+that merely abut overlap in a thin seam, and a strip of doubled alpha down every
+seam prints as stripes running the length of the band rather than as one
+connection; separated, they read as what they are. Where the two ends differ in
+height the spacing closes towards the shorter one and the strands gather into
+the attachment, which is the shape the relation actually has. Before this the
+two edges were drawn *and* both diagonals, so a link between a two-line passage
+and a one-line one came out as a bow tie with a twist in the middle of it.
+
+The brackets are what say which page of a stack a link reaches. Framing a sworph
+backs the camera off far enough to hold both documents, and at that distance
+where a band happens to meet a page is a guess.
+
+A beam is drawn as faint as the fainter of the two documents it runs between, so
+one reaching a page still flying in materialises with it rather than hanging in
+the air waiting for it, and one reaching into the background corpus is as
+recessive as the corpus. Its colour carries the link's prominence tier as well
+as its type -- the same `linkColour(type, tier)` that shades the passages at
+both ends, so the beam and the passages agree about how much attention the link
+is claiming.
+
+When a document stands between a link's two ends, the beam goes behind it rather
+than through its text, along a curve that dips and returns. Three straight
+pieces through two corners would clear it as well geometrically, and did -- but
+the middle piece runs almost straight away from the camera, and a ribbon lying
+in the plane of the pages has next to no width left when it is seen end on, so
+what
+should have read as one beam going the long way round read as two stubs with a
+gap between them. The fade along a beam's length, which is what says which way
+the link points, is shared out among the pieces of a route by arc length instead
+of restarting at each of them.
+
+`bandStrandCount()` and `bypassRoute()` live in `apps/xudu/core/framing.hpp`
+with the rest of the geometry that needs no device, and are unit-tested there.
+
 ### What the library did not learn
 
 Nothing in `src/` or `include/` mentions a version, a transclusion, a link or a
@@ -1909,6 +1951,30 @@ wait for the settled frame: a capture shows the finished document, never the
 middle of a fade. Notifications are the exception. They fade at both ends too,
 but from their own clock rather than from the timeline, because a toast lives
 for eight seconds and no capture should wait that long.
+
+So does work that has not been started yet, which is what a frame contributor's
+`busy()` is for. Xudu's beams decide inside `drawFrame()` whether a link should
+bring its far document alongside, and the first frame on which they can decide
+that is the first frame on which every document has finished building -- which
+is exactly the frame the loop would otherwise have called settled. Saying so
+before the fact is what stops a run quitting in the instant before it moves and
+capturing the arrangement it was about to replace.
+
+A movement made of several parts is timed as several parts.
+`gleditor/animation.hpp` holds the durations rather than each caller inventing
+one, and the ones a sworph uses are deliberately different from each other: the
+document being brought over takes longest and leads, the rest of the row waits a
+moment and then closes up behind it, and the camera waits longer still and
+settles last. Giving all three the same duration -- which they had -- made the
+whole view look as though it had jumped, because nothing in it appeared to be
+the cause of anything else.
+
+A document opened behind the row with `--background` settles at a lower alpha
+than one in it. Perspective alone is a weak depth cue for a flat page of text: a
+corpus held five hundred units back still draws every glyph at full strength,
+and picking out the document that just arrived then means reading both. The
+resting alpha is a property of the document rather than a multiplier at draw
+time, so a departure still fades from wherever the document actually was.
 
 ## Build speed
 

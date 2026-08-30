@@ -97,26 +97,87 @@ protected:
 
 TEST_F(BeamsTest, theRecordIsWhatTheShaderDeclares) {
   using Row = Beams::Row;
-  EXPECT_EQ(sizeof(Row), 36U);
+  EXPECT_EQ(sizeof(Row), 44U);
 
   const auto layout = Beams::layout();
   EXPECT_EQ(layout.stride, sizeof(Row));
-  ASSERT_EQ(layout.attributes.size(), 5U);
+  ASSERT_EQ(layout.attributes.size(), 6U);
   EXPECT_EQ(layout.attributes[0].offset, offsetof(Row, from));
   EXPECT_EQ(layout.attributes[1].offset, offsetof(Row, width));
   EXPECT_EQ(layout.attributes[2].offset, offsetof(Row, to));
   EXPECT_EQ(layout.attributes[3].offset, offsetof(Row, colour));
   EXPECT_EQ(layout.attributes[4].offset, offsetof(Row, tag));
+  EXPECT_EQ(layout.attributes[5].offset, offsetof(Row, along));
   for (std::uint32_t i = 0; i < layout.attributes.size(); i++) {
     EXPECT_EQ(layout.attributes[i].location, i);
   }
-  // Three floats then one, twice over: a compiler that padded between them
-  // would leave the shader reading the wrong words with no complaint from
-  // anybody.
+  // Three floats then one, twice over, then a pair: a compiler that padded
+  // between them would leave the shader reading the wrong words with no
+  // complaint from anybody.
   EXPECT_EQ(offsetof(Row, width), 12U);
   EXPECT_EQ(offsetof(Row, to), 16U);
   EXPECT_EQ(offsetof(Row, colour), 28U);
   EXPECT_EQ(offsetof(Row, tag), 32U);
+  EXPECT_EQ(offsetof(Row, along), 36U);
+}
+
+// A beam added on its own runs the whole route it belongs to. The fade along
+// a beam's length is the only thing saying which way the link points, and a
+// beam that arrived claiming to be the middle third of something would draw
+// that fade wrong.
+TEST_F(BeamsTest, aBeamAddedOnItsOwnCoversTheWholeRoute) {
+  Beams beams(device.get(), 4);
+  beams.add({0.0F, 0.0F, 0.0F}, {1.0F, 0.0F, 0.0F}, 1.0F, 0xFFFFFFFF, 0);
+  beams.commit();
+
+  const auto row = device->rowAt(0);
+  EXPECT_FLOAT_EQ(row.along[0], 0.0F);
+  EXPECT_FLOAT_EQ(row.along[1], 1.0F);
+}
+
+// A route that bends is still one beam as far as the fade is concerned: the
+// segments carry their own share of the whole, by arc length, and the shares
+// join up. Splitting the fade per segment instead restarted it at every
+// corner, which said "this way" three times over for one link.
+TEST_F(BeamsTest, aPathSharesOneFadeOutAmongItsSegments) {
+  Beams beams(device.get(), 8);
+  // Ten units, then thirty: the first segment is a quarter of the route and
+  // has to be given a quarter of the fade, not half of it.
+  const std::array<glm::vec3, 3> route{glm::vec3{0.0F, 0.0F, 0.0F},
+                                       glm::vec3{10.0F, 0.0F, 0.0F},
+                                       glm::vec3{40.0F, 0.0F, 0.0F}};
+  beams.addPath(route, 1.0F, 0xABCDEF12, 5);
+  beams.commit();
+  ASSERT_EQ(beams.committed(), 2U);
+
+  const auto first  = device->rowAt(0);
+  const auto second = device->rowAt(sizeof(Beams::Row));
+  EXPECT_FLOAT_EQ(first.along[0], 0.0F);
+  EXPECT_FLOAT_EQ(first.along[1], 0.25F);
+  // No gap and no overlap where they meet, which is what makes the fade
+  // continuous across the joint.
+  EXPECT_FLOAT_EQ(second.along[0], first.along[1]);
+  EXPECT_FLOAT_EQ(second.along[1], 1.0F);
+
+  // And the rest of the record is the same beam either side of the corner.
+  EXPECT_EQ(first.colour, 0xABCDEF12U);
+  EXPECT_EQ(second.colour, 0xABCDEF12U);
+  EXPECT_EQ(second.tag, 5U);
+  EXPECT_FLOAT_EQ(first.to[0], second.from[0]);
+}
+
+// Degenerate routes add nothing rather than dividing by a length of zero.
+TEST_F(BeamsTest, aPathThatGoesNowhereAddsNothing) {
+  Beams beams(device.get(), 4);
+  const std::array<glm::vec3, 1> alone{glm::vec3{1.0F, 2.0F, 3.0F}};
+  beams.addPath(alone, 1.0F, 0xFFFFFFFF, 0);
+  EXPECT_EQ(beams.pending(), 0U);
+
+  const std::array<glm::vec3, 3> stuck{glm::vec3{1.0F, 2.0F, 3.0F},
+                                       glm::vec3{1.0F, 2.0F, 3.0F},
+                                       glm::vec3{1.0F, 2.0F, 3.0F}};
+  beams.addPath(stuck, 1.0F, 0xFFFFFFFF, 0);
+  EXPECT_EQ(beams.pending(), 0U);
 }
 
 TEST_F(BeamsTest, addedBeamsReachTheBufferInOrder) {
