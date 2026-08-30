@@ -413,7 +413,8 @@ GlyphCache::addToCache(const std::string &chr, const FontPtr &font,
   rendered.reserve(glyphCount);
 
   for (unsigned int i = 0; i < glyphCount; i++) {
-    if (FT_Load_Glyph(face, info[i].codepoint, FT_LOAD_DEFAULT) != 0) {
+    if (FT_Load_Glyph(face, info[i].codepoint,
+                      FT_LOAD_DEFAULT | FT_LOAD_TARGET_LIGHT) != 0) {
       continue;
     }
     // Only for whichever of bold/italic resolveRealVariant() could not find

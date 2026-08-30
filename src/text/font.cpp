@@ -157,10 +157,13 @@ FontManager &FontManager::instance() {
   return inst;
 }
 
+#include FT_LCD_FILTER_H
+
 FontManager::FontManager() {
   if (FT_Init_FreeType(&ftLib_) != 0) {
     throw std::runtime_error("FreeType initialization failed");
   }
+  FT_Library_SetLcdFilter(ftLib_, FT_LCD_FILTER_DEFAULT);
 }
 
 FontManager::~FontManager() {
