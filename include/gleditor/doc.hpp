@@ -2,6 +2,7 @@
 #define GLEDITOR_DOC_H
 
 #include <array>
+#include <atomic>
 #include <cassert>
 #include <choreograph/Choreograph.h>
 #include <cstdint>
@@ -13,6 +14,7 @@
 #include <glm/ext/matrix_float4x4.hpp>
 #include <glm/ext/vector_float3.hpp>
 #include <memory>
+#include <mutex>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -548,7 +550,11 @@ public:
   Doc(const RendererRef &renderer, render::RenderDevice *device,
       const glm::mat4 &model, const gleditor::TextSource &source, Private);
   ~Doc() override = default;
+  void makePages();
   void makePages(RenderState &state);
+  /// Build any pending shaped pages on the render thread in page order.
+  /// Returns true when all pages have been built and shaping is complete.
+  bool buildPendingPages(RenderState &state);
   /// Append every visible page's draw to @p batches.
   /// @param viewProjection projection * view; the document's own model matrix
   ///        is applied on top of it here.
@@ -748,6 +754,15 @@ public:
   [[nodiscard]] float currentOpacity() const { return opacity(); }
 
   bool fullyLoaded{false};
+
+  struct PendingShaping {
+    PageShaping shaping;
+    std::uint32_t textOffset{};
+  };
+  std::mutex shapingMutex;
+  std::vector<PendingShaping> pendingShapings;
+  std::atomic<bool> shapingComplete{false};
+
   friend class Page;
 };
 

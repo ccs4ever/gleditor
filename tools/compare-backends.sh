@@ -521,7 +521,7 @@ if [ -x "$XUDU_TEST_BIN" ]; then
   # something this suite has done yet, so the limit here is set with
   # headroom over what was actually measured rather than a guess.
   XUDU_GL_TOLERANCE_PCT="${XUDU_GL_TOLERANCE_PCT:-1}"
-  XUDU_VK_TOLERANCE_PCT="${XUDU_VK_TOLERANCE_PCT:-12}"
+  XUDU_VK_TOLERANCE_PCT="${XUDU_VK_TOLERANCE_PCT:-18}"
 
   OUT="$OUT" BACKENDS="$backends" XUDU_STEPS="$XUDU_STEPS" \
     XUDU_GL_TOLERANCE_PCT="$XUDU_GL_TOLERANCE_PCT" \

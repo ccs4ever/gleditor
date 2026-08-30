@@ -63,3 +63,4 @@ assets/shaders/vulkan/*.spv
 /xanadoc/
 
 .token-optimizer/
+.worktrees/

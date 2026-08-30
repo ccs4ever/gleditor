@@ -70,11 +70,11 @@ void main() {
   vec3 point  = mix(beamFrom, beamTo, along) + offset;
   gl_Position = uMVP * vec4(point, 1.0);
 
-  vColour  = unpackColour(beamColour);
-  vAcross  = across;
-  vAlong   = mix(beamAlong.x, beamAlong.y, along);
-  vTag     = uvec2(uIdentity |
-                       (uint(GLEDITOR_TAG_KIND_BEAM) << GLEDITOR_TAG_KIND_SHIFT),
-                   beamTag);
+  vColour = unpackColour(beamColour);
+  vAcross = across;
+  vAlong  = mix(beamAlong.x, beamAlong.y, along);
+  vTag    = uvec2(uIdentity |
+                      (uint(GLEDITOR_TAG_KIND_BEAM) << GLEDITOR_TAG_KIND_SHIFT),
+                  beamTag);
   vOpacity = uOpacity;
 }

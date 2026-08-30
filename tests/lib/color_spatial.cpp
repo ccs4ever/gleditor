@@ -13,8 +13,7 @@ TEST(ColorTest, packAndUnpackRgbaRoundtrip) {
   const float a = 1.0F;
 
   const std::uint32_t packed = gleditor::color::packRgba(r, g, b, a);
-  const gleditor::color::Color4 unpacked =
-      gleditor::color::unpackRgba(packed);
+  const gleditor::color::Color4 unpacked = gleditor::color::unpackRgba(packed);
 
   EXPECT_NEAR(unpacked.r, r, 0.01F);
   EXPECT_NEAR(unpacked.g, g, 0.01F);

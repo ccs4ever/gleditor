@@ -954,7 +954,9 @@ Doc::Doc(const RendererRef &renderer, render::RenderDevice *device,
   pool->reserveCapacity(rowsFor(text.size()));
 }
 
-void Doc::makePages(RenderState &state) {
+void Doc::makePages([[maybe_unused]] RenderState &state) { makePages(); }
+
+void Doc::makePages() {
   std::cout << "MAKING PAGES: " << this << " " << glm::to_string(model) << "\n";
   auto tSize = 0UL;
   while (tSize < text.size()) {
@@ -963,32 +965,52 @@ void Doc::makePages(RenderState &state) {
     if (consumed == 0) {
       break;
     }
-    newPage(state, std::move(shaping), static_cast<std::uint32_t>(tSize));
+    {
+      std::lock_guard lock(shapingMutex);
+      pendingShapings.push_back(PendingShaping{
+          std::move(shaping), static_cast<std::uint32_t>(tSize)});
+    }
     tSize += consumed;
   }
+  shapingComplete.store(true, std::memory_order_release);
+}
 
-  // The document is as long as it is going to get without an edit, so the room
-  // growth reserved beyond it can go back. Queued rather than done here: the
-  // pool belongs to the render thread, which is still building the last pages
-  // this loop handed it, and it is those pages that say how much is in use.
-  auto self = getPtr();
-  renderer->run([self] {
-    self->pool->trim();
-    self->fullyLoaded = true;
-  });
+bool Doc::buildPendingPages(RenderState &state) {
+  if (fullyLoaded) {
+    return true;
+  }
+  std::vector<PendingShaping> toBuild;
+  {
+    std::lock_guard lock(shapingMutex);
+    toBuild.swap(pendingShapings);
+  }
+  for (auto &[shaping, textOffset] : toBuild) {
+    const auto numPages = pages.size();
+    glm::mat4 trans     = glm::translate(
+        glm::mat4(1.0),
+        glm::vec3(0.0F, -100 * static_cast<float>(numPages), 0.0F));
+    trans = glm::scale(trans, glm::vec3(pixelsToWorld, pixelsToWorld, 1.0F));
+    pages.emplace_back(getPtr(), state, trans, std::move(shaping), textOffset,
+                       static_cast<std::uint32_t>(numPages));
+  }
+  if (shapingComplete.load(std::memory_order_acquire)) {
+    std::lock_guard lock(shapingMutex);
+    if (pendingShapings.empty()) {
+      pool->trim();
+      fullyLoaded = true;
+      return true;
+    }
+  }
+  return false;
 }
 
 void Doc::newPage(RenderState &state, PageShaping aShaping,
                   const std::uint32_t textOffset) {
-  renderer->run([this, &state, shaping = std::move(aShaping), textOffset] {
-    const auto numPages = this->pages.size();
-    // Pages are laid out in pixels and scaled here, so the stacking distance is
-    // in world units while everything inside the page is not.
-    glm::mat4 trans = glm::translate(
-        glm::mat4(1.0),
-        glm::vec3(0.0F, -100 * static_cast<float>(numPages), 0.0F));
-    trans = glm::scale(trans, glm::vec3(pixelsToWorld, pixelsToWorld, 1.0F));
-    pages.emplace_back(this->getPtr(), state, trans, std::move(shaping),
-                       textOffset, static_cast<std::uint32_t>(numPages));
-  });
+  const auto numPages = this->pages.size();
+  glm::mat4 trans     = glm::translate(
+      glm::mat4(1.0),
+      glm::vec3(0.0F, -100 * static_cast<float>(numPages), 0.0F));
+  trans = glm::scale(trans, glm::vec3(pixelsToWorld, pixelsToWorld, 1.0F));
+  pages.emplace_back(this->getPtr(), state, trans, std::move(aShaping),
+                     textOffset, static_cast<std::uint32_t>(numPages));
 }

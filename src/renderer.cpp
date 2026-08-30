@@ -243,8 +243,8 @@ void Renderer::openDoc(RenderState &state, const gleditor::TextSource &source,
   }
   docPtr->animateArrival(timeline);
   reapFinishedDocLoads();
-  pendingDocLoads.push_back(std::async(
-      std::launch::async, [&state, docPtr] { docPtr->makePages(state); }));
+  pendingDocLoads.push_back(
+      std::async(std::launch::async, [docPtr] { docPtr->makePages(); }));
   state.docs.push_back(docPtr->getPtr());
 }
 
@@ -887,10 +887,22 @@ void Renderer::renderLoop(AutoSDLWindow &window) {
 
     reapFinishedDocLoads();
 
+    for (auto &doc : state.docs) {
+      if (!doc->isFullyLoaded()) {
+        doc->buildPendingPages(state);
+        if (!doc->isFullyLoaded()) {
+          break;
+        }
+      }
+    }
+
+    const bool docsLoading = std::ranges::any_of(
+        state.docs, [](const auto &doc) { return !doc->isFullyLoaded(); });
+
     // Everything queued has been carried out and every document has finished
     // loading, so this frame shows the finished result. That is the frame a
     // screenshot should capture, and the point at which --profile may quit.
-    const bool settled = !hasPendingWork();
+    const bool settled = !hasPendingWork() && !docsLoading;
 
     // still want to update once even if we don't have anything in the render
     // queue

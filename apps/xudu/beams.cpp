@@ -250,8 +250,8 @@ void LinkBeams::band(const Edge &nearSide, const Edge &farSide,
                      const std::uint32_t colour, const std::uint32_t tag) {
   const float baseWidth = std::max(nearSide.lineHeight, farSide.lineHeight) *
                           Doc::pixelsToWorld * beamWidthOfLine;
-  const float nearSpan = std::abs(nearSide.top.y - nearSide.bottom.y);
-  const float farSpan  = std::abs(farSide.top.y - farSide.bottom.y);
+  const float nearSpan  = std::abs(nearSide.top.y - nearSide.bottom.y);
+  const float farSpan   = std::abs(farSide.top.y - farSide.bottom.y);
 
   // How many strands comes from the taller of the two ends, so that end is
   // drawn at its full reach rather than reduced to whatever the other end
