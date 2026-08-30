@@ -392,6 +392,31 @@ public:
   [[nodiscard]] std::shared_ptr<VersionTextSource>
   sourceFor(const MicroversionId &version, std::size_t storeIndex = 0) const;
 
+  // -- Hypertime History & Scrubbing ----------------------------------------
+
+  /**
+   * @brief Return the linear ancestral microversion history chain for @p
+   * docIndex.
+   */
+  [[nodiscard]] std::vector<MicroversionId>
+  historyOf(std::uint32_t docIndex) const;
+
+  /**
+   * @brief Scrub/travel the document view at @p docIndex to @p version.
+   */
+  void scrubToVersion(std::uint32_t docIndex, const MicroversionId &version,
+                      Doc &doc);
+
+  /**
+   * @brief Scrub document view backward by @p steps in its hypertime history.
+   */
+  bool scrubBackward(std::uint32_t docIndex, Doc &doc, std::size_t steps = 1);
+
+  /**
+   * @brief Scrub document view forward by @p steps in its hypertime history.
+   */
+  bool scrubForward(std::uint32_t docIndex, Doc &doc, std::size_t steps = 1);
+
   // -- gleditor::DocumentObserver -------------------------------------------
   //
   // Every edit the library applies becomes a hyperop against the version that

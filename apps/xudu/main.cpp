@@ -265,6 +265,34 @@ public:
     });
   }
 
+  void scrubHistory(const bool backward) {
+    renderer->runWithState([this, backward](RenderState &rState) {
+      if (session.views().empty() || rState.docs.empty()) {
+        return;
+      }
+      auto *const caret = renderer->editCaret();
+      const auto docIdx = (nullptr != caret && caret->active() &&
+                           caret->documentIndex() < rState.docs.size())
+                              ? caret->documentIndex()
+                              : 0U;
+
+      auto &doc           = *rState.docs[docIdx];
+      const bool scrubbed = backward ? session.scrubBackward(docIdx, doc, 1)
+                                     : session.scrubForward(docIdx, doc, 1);
+      if (scrubbed) {
+        const auto newVer = session.versionOf(docIdx);
+        const auto hist   = session.historyOf(docIdx);
+        const auto it     = std::ranges::find(hist, newVer);
+        const auto step =
+            (it != hist.end())
+                ? static_cast<std::size_t>(std::distance(hist.begin(), it) + 1)
+                : 0U;
+        std::cout << "xudu: hypertime scrub -> " << newVer.str() << " (" << step
+                  << "/" << hist.size() << ")\n";
+      }
+    });
+  }
+
   void deleteSelection() {
     withCaret([](RenderState &rState, const Where &where, Caret *caret) {
       if (!where.hasRange) {
@@ -647,6 +675,12 @@ void bindCommands(gleditor::Application &app, const AppStateRef &state,
                       [&views] { views.back(); });
   app.commands().bind(SDL_SCANCODE_N, Mod::Ctrl, "forward",
                       "go to the next state", [&views] { views.forward(); });
+  app.commands().bind(SDL_SCANCODE_LEFTBRACKET, Mod::Ctrl, "scrub-back",
+                      "scrub backward in hypertime history",
+                      [&views] { views.scrubHistory(true); });
+  app.commands().bind(SDL_SCANCODE_RIGHTBRACKET, Mod::Ctrl, "scrub-forward",
+                      "scrub forward in hypertime history",
+                      [&views] { views.scrubHistory(false); });
   app.commands().bind(SDL_SCANCODE_T, Mod::Ctrl, "transclude",
                       "quote the selection into a second document",
                       [&views] { views.transcludeSelection(); });

@@ -113,3 +113,25 @@ TEST_F(StoreMultiStoreTest, preserveTemporaryStoreToPermanentDirectory) {
   EXPECT_EQ(preservedStore.rebuild(ver).materialize(preservedStore),
             "Notes typed in temporary store.");
 }
+
+TEST_F(StoreMultiStoreTest, storeHypertimeHistoryAndTraversal) {
+  const auto storePath = (testDir / "scrub_test.xanadoc").string();
+  xudu::Store store;
+  store.load(storePath);
+
+  // Setup sequential microversions in store
+  const auto v1 = store.insert(xudu::MicroversionId{}, 0, "Initial");
+  const auto v2 = store.insert(v1, 7, " Version");
+  const auto v3 = store.insert(v2, 15, " Three");
+
+  const auto hist = v3.path();
+  ASSERT_GE(hist.size(), 3U);
+  EXPECT_EQ(hist[0], v1);
+  EXPECT_EQ(hist[1], v2);
+  EXPECT_EQ(hist[2], v3);
+
+  // Rebuilding text at each step
+  EXPECT_EQ(store.textOf(v1), "Initial");
+  EXPECT_EQ(store.textOf(v2), "Initial Version");
+  EXPECT_EQ(store.textOf(v3), "Initial Version Three");
+}

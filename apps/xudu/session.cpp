@@ -561,6 +561,86 @@ Session::sourceFor(const MicroversionId &version,
                                              rebuilt.forcedBreaks());
 }
 
+std::vector<MicroversionId>
+Session::historyOf(const std::uint32_t docIndex) const {
+  if (docIndex >= open.size()) {
+    return {};
+  }
+  const auto sIdx       = open[docIndex].storeIndex;
+  const auto curVersion = open[docIndex].version;
+  const auto &st        = store(sIdx);
+
+  // Ancestral path leading to current version
+  std::vector<MicroversionId> history = curVersion.path();
+  if (history.empty()) {
+    history.push_back(MicroversionId{});
+  }
+
+  // Follow forward descendants along main sequential branch
+  auto head = curVersion;
+  while (true) {
+    const auto children = st.children(head);
+    if (children.empty()) {
+      break;
+    }
+    head = children.front();
+    history.push_back(head);
+  }
+  return history;
+}
+
+void Session::scrubToVersion(const std::uint32_t docIndex,
+                             const MicroversionId &version, Doc &doc) {
+  if (docIndex >= open.size()) {
+    return;
+  }
+  refresh(docIndex, version);
+  doc.load(sourceFor(version, open[docIndex].storeIndex));
+}
+
+bool Session::scrubBackward(const std::uint32_t docIndex, Doc &doc,
+                            const std::size_t steps) {
+  if (docIndex >= open.size()) {
+    return false;
+  }
+  const auto cur  = open[docIndex].version;
+  const auto hist = historyOf(docIndex);
+  const auto it   = std::ranges::find(hist, cur);
+  if (it == hist.end() || it == hist.begin()) {
+    return false;
+  }
+  const auto curIdx = static_cast<std::size_t>(std::distance(hist.begin(), it));
+  const auto targetIdx = (curIdx >= steps) ? (curIdx - steps) : 0U;
+  if (targetIdx == curIdx) {
+    return false;
+  }
+  scrubToVersion(docIndex, hist[targetIdx], doc);
+  return true;
+}
+
+bool Session::scrubForward(const std::uint32_t docIndex, Doc &doc,
+                           const std::size_t steps) {
+  if (docIndex >= open.size()) {
+    return false;
+  }
+  const auto cur  = open[docIndex].version;
+  const auto hist = historyOf(docIndex);
+  const auto it   = std::ranges::find(hist, cur);
+  if (it == hist.end()) {
+    return false;
+  }
+  const auto curIdx = static_cast<std::size_t>(std::distance(hist.begin(), it));
+  if (curIdx + 1 >= hist.size()) {
+    return false;
+  }
+  const auto targetIdx = std::min(hist.size() - 1, curIdx + steps);
+  if (targetIdx == curIdx) {
+    return false;
+  }
+  scrubToVersion(docIndex, hist[targetIdx], doc);
+  return true;
+}
+
 void Session::textInserted(Doc &doc, const std::uint32_t at,
                            const std::string &utf8) {
   const auto which = doc.documentIndex();
