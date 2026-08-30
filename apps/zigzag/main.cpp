@@ -104,6 +104,24 @@ void bindCommands(gleditor::Application &app, const AppStateRef &state,
   app.commands().bind(SDL_SCANCODE_ESCAPE, "cancel-fetch",
                       "cancel in-flight Preflet download",
                       [viz] { viz->cancelPrefletFetch(); });
+
+  // Xudu convergence operations
+  app.commands().bind(SDL_SCANCODE_R, "rasterize-print",
+                      "print 2D raster reading text to stdout", [viz] {
+                        const auto res = viz->rasterize();
+                        std::cout
+                            << "\n=== ZigZag 2D Raster Reading Stream ===\n"
+                            << res.text
+                            << "\n=======================================\n";
+                      });
+  app.commands().bind(SDL_SCANCODE_S, Mod::Ctrl, "export-link-package",
+                      "export current slice as Xudu LinkPackage", [viz] {
+                        xudu::MutableKeys keys{};
+                        const auto pkg = viz->exportAsLinkPackage(keys);
+                        std::cout
+                            << "Exported Xudu LinkPackage: " << pkg.describe()
+                            << " (" << pkg.links.size() << " links)\n";
+                      });
 }
 
 } // namespace
@@ -122,6 +140,12 @@ int main(const int argc, char **argv) {
   parser.add_argument("--no-fetch")
       .flag()
       .help("disable BitTorrent Preflet fetching");
+  parser.add_argument("--raster")
+      .flag()
+      .help("print 1D/2D raster text of the slice to stdout and exit");
+  parser.add_argument("--xudu")
+      .default_value(std::string{})
+      .help("load a Xudu store path or document");
   parser.add_argument("slice").help("Slice YAML file to load").remaining();
 
   if (detailed) {
@@ -136,19 +160,76 @@ int main(const int argc, char **argv) {
 
   try {
     parser.parse_args(argc, argv);
-    backend  = gleditor::applyCommonArguments(parser, state, argc, argv);
-    renderer = Renderer::create(state, backend);
 
     if (parser["--no-fetch"] == true) {
       fetchingEnabled = false;
     }
 
+    bool rasterMode = false;
+    if (parser["--raster"] == true || parser.is_used("--raster")) {
+      rasterMode = true;
+    }
+
     if (parser.present<std::vector<std::string>>("slice")) {
       const auto slices = parser.get<std::vector<std::string>>("slice");
-      if (!slices.empty()) {
-        slicePath = slices.front();
+      for (const auto &s : slices) {
+        if (s == "--raster") {
+          rasterMode = true;
+        } else if (slicePath.empty() && !s.starts_with("-")) {
+          slicePath = s;
+        }
       }
     }
+
+    if (rasterMode) {
+      const std::string xuduPath = parser.get<std::string>("--xudu");
+      zigzag::ZzStructureDocument doc;
+      bool loaded = false;
+
+      if (!xuduPath.empty() && fs::exists(xuduPath)) {
+        xudu::Store store;
+        store.load(xuduPath);
+        auto versions = store.allVersions();
+        if (versions.empty()) {
+          versions.push_back(xudu::MicroversionId::parse("1"));
+        }
+        doc    = zigzag::projectStoreToZigzag(store, versions);
+        loaded = true;
+      }
+
+      if (!loaded) {
+        std::vector<std::string> candidates;
+        if (!slicePath.empty()) {
+          candidates.push_back(slicePath);
+        } else {
+          const std::string homeSlice = resolveHomeSlicePath();
+          if (!homeSlice.empty()) {
+            candidates.push_back(homeSlice);
+          }
+          candidates.push_back(
+              gleditor::assetPath("zigzag/zigzag_structure.yaml"));
+          candidates.push_back("assets/zigzag/zigzag_structure.yaml");
+          candidates.push_back("zigzag_structure.yaml");
+        }
+
+        for (const auto &candidate : candidates) {
+          if (fs::exists(candidate)) {
+            if (auto loadedDoc = zigzag::loadZzStructure(candidate)) {
+              doc    = std::move(*loadedDoc);
+              loaded = true;
+              break;
+            }
+          }
+        }
+      }
+
+      const auto res = zigzag::rasterizeZzStructure(doc);
+      std::cout << res.text << "\n";
+      return 0;
+    }
+
+    backend  = gleditor::applyCommonArguments(parser, state, argc, argv);
+    renderer = Renderer::create(state, backend);
   } catch (const std::exception &err) {
     std::cerr << err.what() << "\n" << parser;
     return 1;
@@ -158,34 +239,63 @@ int main(const int argc, char **argv) {
     auto viz = std::make_shared<zigzag::ZigzagVisualizer>(
         state->defaultFontName, fetchingEnabled);
 
-    // Resolve Slice file cascade: CLI -> Home Slice -> Bundled -> Fallback
-    std::vector<std::string> candidates;
-    if (!slicePath.empty()) {
-      candidates.push_back(slicePath);
-    } else {
-      const std::string homeSlice = resolveHomeSlicePath();
-      if (!homeSlice.empty()) {
-        candidates.push_back(homeSlice);
+    std::string xuduPath = parser.get<std::string>("--xudu");
+    bool loaded          = false;
+
+    if (!xuduPath.empty() && fs::exists(xuduPath)) {
+      try {
+        xudu::Store store;
+        store.load(xuduPath);
+        auto versions = store.allVersions();
+        if (versions.empty()) {
+          versions.push_back(xudu::MicroversionId::parse("1"));
+        }
+        viz->adoptXuduStore(store, versions);
+        loaded = true;
+        std::cout << "Loaded Xudu Store into ZigZag Hypermesh from: "
+                  << xuduPath << " (" << versions.size() << " versions)\n";
+      } catch (const std::exception &err) {
+        std::cerr << "Warning: could not load Xudu store: " << err.what()
+                  << "\n";
       }
-      candidates.push_back(gleditor::assetPath("zigzag/zigzag_structure.yaml"));
-      candidates.push_back("assets/zigzag/zigzag_structure.yaml");
-      candidates.push_back("zigzag_structure.yaml");
     }
 
-    bool loaded = false;
-    for (const auto &candidate : candidates) {
-      if (fs::exists(candidate)) {
-        if (auto doc = zigzag::loadZzStructure(candidate)) {
-          viz->adoptDocument(std::move(*doc), candidate);
-          loaded = true;
-          std::cout << "Loaded ZigZag Slice from: " << candidate << "\n";
-          break;
+    if (!loaded) {
+      // Resolve Slice file cascade: CLI -> Home Slice -> Bundled -> Fallback
+      std::vector<std::string> candidates;
+      if (!slicePath.empty()) {
+        candidates.push_back(slicePath);
+      } else {
+        const std::string homeSlice = resolveHomeSlicePath();
+        if (!homeSlice.empty()) {
+          candidates.push_back(homeSlice);
+        }
+        candidates.push_back(
+            gleditor::assetPath("zigzag/zigzag_structure.yaml"));
+        candidates.push_back("assets/zigzag/zigzag_structure.yaml");
+        candidates.push_back("zigzag_structure.yaml");
+      }
+
+      for (const auto &candidate : candidates) {
+        if (fs::exists(candidate)) {
+          if (auto doc = zigzag::loadZzStructure(candidate)) {
+            viz->adoptDocument(std::move(*doc), candidate);
+            loaded = true;
+            std::cout << "Loaded ZigZag Slice from: " << candidate << "\n";
+            break;
+          }
         }
       }
     }
 
     if (!loaded) {
       std::cout << "Using built-in sample ZigZag structure\n";
+    }
+
+    if (parser["--raster"] == true) {
+      const auto res = viz->rasterize();
+      std::cout << res.text << "\n";
+      return 0;
     }
 
     renderer->addFrameContributor(viz.get());

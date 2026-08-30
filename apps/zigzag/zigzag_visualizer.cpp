@@ -160,6 +160,51 @@ void ZigzagVisualizer::adoptDocument(ZzStructureDocument &&doc,
   invalidateAccessibility();
 }
 
+void ZigzagVisualizer::adoptXuduStore(
+    const xudu::Store &store,
+    const std::vector<xudu::MicroversionId> &versions) {
+  auto doc = projectStoreToZigzag(store, versions);
+  adoptDocument(std::move(doc), "xudu_store");
+}
+
+void ZigzagVisualizer::adoptXuduDocs(const std::vector<XuduDocInput> &docs,
+                                     const std::vector<xudu::Link> &links) {
+  auto doc = projectXuduToZigzag(docs, links);
+  adoptDocument(std::move(doc), "xudu_documents");
+}
+
+ZzRasterResult ZigzagVisualizer::rasterize(const DimID &primaryDim,
+                                           const DimID &secondaryDim) const {
+  const auto doc = document();
+  return rasterizeZzStructure(doc, primaryDim, secondaryDim,
+                              accursed_cell_focus_);
+}
+
+xudu::LinkPackage
+ZigzagVisualizer::exportAsLinkPackage(const xudu::MutableKeys &keys,
+                                      const std::string &salt,
+                                      const std::int64_t sequence) const {
+  const auto doc = document();
+  return zzStructureToLinkPackage(doc, keys, salt, sequence);
+}
+
+ZzStructureDocument ZigzagVisualizer::document() const {
+  ZzStructureDocument doc;
+  doc.meta.name = structure_name_;
+  doc.focus     = accursed_cell_focus_;
+  doc.view      = current_view_;
+  doc.cells     = space_;
+  for (const auto &[dim, vis] : dimension_visuals_) {
+    doc.dimension_meta[dim] = DimensionMeta{
+        .label       = vis.label,
+        .description = "",
+        .color       = RgbColor{vis.color.r, vis.color.g, vis.color.b},
+        .spacing     = vis.spacing / 100.0F,
+    };
+  }
+  return doc;
+}
+
 const zzCell *ZigzagVisualizer::findCell(const CellID id) const {
   return zzcore::findCell(space_, id);
 }

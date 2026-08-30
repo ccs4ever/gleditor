@@ -6,6 +6,7 @@
 #define ZIGZAG_VISUALIZER_HPP
 
 #include "core/preflet_fetcher.hpp"
+#include "core/zz_xudu_projector.hpp"
 #include "core/zzcore.hpp"
 #include "core/zzstructure.hpp"
 
@@ -94,6 +95,18 @@ public:
   void adoptDocument(ZzStructureDocument &&doc, std::string sourcePath);
   void populateFallbackStructure();
 
+  void adoptXuduStore(const xudu::Store &store,
+                      const std::vector<xudu::MicroversionId> &versions);
+  void adoptXuduDocs(const std::vector<XuduDocInput> &docs,
+                     const std::vector<xudu::Link> &links = {});
+  [[nodiscard]] ZzRasterResult
+  rasterize(const DimID &primaryDim   = "d.doc",
+            const DimID &secondaryDim = "d.transclude") const;
+  [[nodiscard]] xudu::LinkPackage
+  exportAsLinkPackage(const xudu::MutableKeys &keys,
+                      const std::string &salt = "zigzag_slice",
+                      std::int64_t sequence   = 1) const;
+
   void navigateFocus(const DimID &dimension, bool positive);
   void navigateFocusTo(CellID id);
 
@@ -111,6 +124,7 @@ public:
   [[nodiscard]] const ViewAxisBinding &currentView() const {
     return current_view_;
   }
+  [[nodiscard]] ZzStructureDocument document() const;
 
 private:
   void rebuildActiveViewTopology();

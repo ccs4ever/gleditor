@@ -326,8 +326,9 @@ override LDFLAGS += $(DEBUG_OPTS) $(findstring $(STATIC),-static)
 #LDFLAGS += -v -stdlib=libc++ -fexperimental-library
 LIBS := $(shell pkg-config $(STATIC) --libs $(PKGS))
 XUDU_LIBS := $(shell pkg-config $(STATIC) --libs $(XUDU_PKGS)) -lryml
-ZIGZAG_PKGS := libtorrent-rasterbar openssl
+ZIGZAG_PKGS := libtorrent-rasterbar openssl lmdb
 ZIGZAG_LIBS := $(shell pkg-config $(STATIC) --libs $(ZIGZAG_PKGS)) -lryml
+
 # glslangValidator is the traditional name and glslang the current one; which
 # of the two a distribution installs varies, so both are tried.
 #
@@ -572,7 +573,8 @@ $(OBJDIR)/xudu: $(XUDU_OBJS) $(XUDU_CORE_OBJS) $(LIBLINK)
 	$(CXX) $(LDFLAGS) -o $@ $(XUDU_OBJS) $(XUDU_CORE_OBJS) $(APP_LDFLAGS) $(LIBS) $(XUDU_LIBS)
 .PHONY: xudu
 
-ZIGZAG_SHARED_CORE_OBJS := $(OBJDIR)/apps/xudu/core/torrent.o $(OBJDIR)/apps/xudu/core/bencode.o
+ZIGZAG_SHARED_CORE_OBJS := $(XUDU_CORE_OBJS)
+
 
 zigzag: $(OBJDIR)/zigzag
 $(OBJDIR)/zigzag: $(ZIGZAG_OBJS) $(ZIGZAG_CORE_OBJS) $(ZIGZAG_SHARED_CORE_OBJS) $(LIBLINK)
@@ -684,10 +686,11 @@ test: $(OBJDIR)/gleditor_test $(OBJDIR)/xudu_test $(OBJDIR)/zigzag_test
 # Everything, slow suites included. What the pull request checks run, and what
 # to run here before pushing.
 .PHONY: test/all test/integration test/e2e-orchestration
-test/all: $(OBJDIR)/gleditor_test $(OBJDIR)/xudu_test $(OBJDIR)/zigzag_test
+test/all: $(OBJDIR)/gleditor $(OBJDIR)/xudu $(OBJDIR)/zigzag $(OBJDIR)/gleditor_test $(OBJDIR)/xudu_test $(OBJDIR)/zigzag_test
 	$(OBJDIR)/gleditor_test
 	$(OBJDIR)/xudu_test
 	$(OBJDIR)/zigzag_test
+
 
 test/integration: test/e2e-orchestration
 test/e2e-orchestration: $(OBJDIR)/xudu $(OBJDIR)/xudu_test

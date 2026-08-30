@@ -74,6 +74,12 @@ enum class LinkType : std::uint8_t {
    * of these -- see OpKind::PageBreak for why that had to go the other way.
    */
   Format,
+  /**
+   * A Project Xanadu ZigZag 2-rank dimensional manifold link. Left span
+   * connects to Right span along the dimension specified in Link::owner
+   * ("dimension:d.1" or "d.1").
+   */
+  Dimension,
 };
 
 const char *linkTypeName(LinkType type);
