@@ -692,3 +692,32 @@ jobs:
         export DYLD_LIBRARY_PATH="$PWD/stage/usr/local/lib"
         packaging/smoke-test.sh stage/usr/local/bin/gleditor
         packaging/smoke-test.sh stage/usr/local/bin/xudu
+
+  # ----------------------------------------------------------- WebAssembly ---
+  wasm:
+    name: wasm (Emscripten, WebGL2)
+    runs-on: ubuntu-latest
+    container: emscripten/emsdk:latest
+    steps:
+    - uses: actions/checkout@v7
+      with:
+        submodules: recursive
+
+    - name: build WebAssembly targets
+      run: packaging/wasm/build.sh dist/wasm
+
+    - name: check generated artifacts
+      run: |
+        test -f dist/wasm/index.html
+        test -f dist/wasm/gleditor.html
+        test -f dist/wasm/gleditor.wasm
+        test -f dist/wasm/gleditor.js
+        test -f dist/wasm/gleditor.data
+        test -f dist/wasm/zigzag.html
+        test -f dist/wasm/zigzag.wasm
+
+    - uses: actions/upload-artifact@v7
+      with:
+        name: gleditor-wasm
+        path: dist/wasm/*
+
