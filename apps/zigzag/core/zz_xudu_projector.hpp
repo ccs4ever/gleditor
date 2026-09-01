@@ -12,6 +12,7 @@
 #include <vector>
 
 #include "xudu/core/link_package.hpp"
+#include "xudu/core/merkle_ledger.hpp"
 #include "xudu/core/microversion.hpp"
 #include "xudu/core/ops.hpp"
 #include "xudu/core/scroll.hpp"
@@ -106,6 +107,16 @@ linkPackageToZzStructure(const xudu::LinkPackage &pkg);
  */
 [[nodiscard]] bool validate2RankManifold(const ZzStructureDocument &doc,
                                          std::string *errorOut = nullptr);
+
+/**
+ * @brief Verify a Zigzag Slice's declared author against a verified Merkle
+ *        identity ledger root.
+ */
+[[nodiscard]] bool
+verifySliceAuthor(const ZzStructureDocument &doc,
+                  const xudu::MerkleLedger &ledger,
+                  const std::array<std::uint8_t, 32> &expectedRoot,
+                  std::string *errorOut = nullptr);
 
 } // namespace zigzag
 

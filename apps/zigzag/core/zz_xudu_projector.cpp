@@ -542,4 +542,50 @@ bool validate2RankManifold(const ZzStructureDocument &doc,
   return true;
 }
 
+bool verifySliceAuthor(const ZzStructureDocument &doc,
+                       const xudu::MerkleLedger &ledger,
+                       const std::array<std::uint8_t, 32> &expectedRoot,
+                       std::string *errorOut) {
+  if (doc.meta.author.empty()) {
+    if (errorOut) {
+      *errorOut = "Slice metadata has no author declared";
+    }
+    return false;
+  }
+  std::string email;
+  const auto start = doc.meta.author.find('<');
+  const auto end   = doc.meta.author.find('>');
+  if (start != std::string::npos && end != std::string::npos &&
+      end > start + 1) {
+    email = doc.meta.author.substr(start + 1, end - start - 1);
+  } else {
+    email = doc.meta.author;
+  }
+
+  const auto links = ledger.findByEmail(email);
+  if (links.empty()) {
+    if (errorOut) {
+      *errorOut = "No verified ledger entry found for author email: " + email;
+    }
+    return false;
+  }
+
+  const auto *link = links.front();
+  if (link->revoked) {
+    if (errorOut) {
+      *errorOut = "Ledger entry for author email is revoked";
+    }
+    return false;
+  }
+
+  const auto proof = ledger.generateProof(link->sequence);
+  if (!xudu::MerkleLedger::verifyInclusion(*link, proof, expectedRoot)) {
+    if (errorOut) {
+      *errorOut = "Merkle inclusion proof failed against expected root";
+    }
+    return false;
+  }
+  return true;
+}
+
 } // namespace zigzag
