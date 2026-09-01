@@ -422,6 +422,16 @@ UnifiedTransclusionEngine::stageVisibleCells(
     const auto shaping =
         gleditor::text::TextLayout::layoutPage(text, font, opts);
 
+    const auto *cell       = findCell(cid);
+    std::uint32_t paperCol = Doc::VBORow::color(25);
+    if (cell != nullptr) {
+      if (cell->isWithheld()) {
+        paperCol = Doc::VBORow::color3(17, 24, 39);
+      } else if (cell->isTranscopyrightLocked()) {
+        paperCol = Doc::VBORow::color3(245, 158, 11);
+      }
+    }
+
     for (const auto &glyph : shaping.glyphs) {
       const auto sizes = glyphCache.put(glyph.chr, font);
       Doc::VBORow row{};
@@ -437,7 +447,7 @@ UnifiedTransclusionEngine::stageVisibleCells(
           static_cast<unsigned int>(std::to_underlying(sizes.dims.height));
       row.quad =
           Doc::VBORow::box(static_cast<unsigned char>(sizes.layer), w, h, 0);
-      row.paper = Doc::VBORow::paperAt(Doc::VBORow::color(25), 0);
+      row.paper = Doc::VBORow::paperAt(paperCol, 0);
       batch.rows.push_back(row);
     }
   }

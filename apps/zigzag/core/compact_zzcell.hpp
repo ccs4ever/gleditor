@@ -129,6 +129,17 @@ struct CompactZZCell {
   std::optional<Preflet> preflet{};
   std::string type{"cell"};
   std::string ephemeralText{};
+  xudu::ResolutionStatus resolutionStatus{
+      xudu::ResolutionStatus::VerifiedBytes};
+  std::optional<xudu::TranscopyrightDescriptor> transcopyrightInfo{};
+  std::optional<xudu::PublishedHoleRecord> holeRecord{};
+
+  [[nodiscard]] bool isWithheld() const noexcept {
+    return resolutionStatus == xudu::ResolutionStatus::WithheldRedacted;
+  }
+  [[nodiscard]] bool isTranscopyrightLocked() const noexcept {
+    return resolutionStatus == xudu::ResolutionStatus::TranscopyrightLocked;
+  }
 
   [[nodiscard]] LinkPairs linksOn(DimOrdinal ord) const noexcept {
     const auto idx = static_cast<std::size_t>(ord);
@@ -180,6 +191,16 @@ struct CompactZZCell {
     if (!ephemeralText.empty()) {
       return ephemeralText;
     }
+    if (isWithheld()) {
+      return "[Redacted - Withheld]";
+    }
+    if (isTranscopyrightLocked()) {
+      if (transcopyrightInfo) {
+        return "[🔒 " + std::to_string(transcopyrightInfo->priceAtomicUnits) +
+               " " + transcopyrightInfo->currencySymbol + "]";
+      }
+      return "[🔒 Locked]";
+    }
     if (span.empty()) {
       return {};
     }
@@ -188,7 +209,20 @@ struct CompactZZCell {
     }
     const auto scrollIdx = static_cast<std::size_t>(span.scroll - 1);
     if (scrollIdx < externals.size()) {
-      return resolver.read(externals[scrollIdx], span);
+      const auto res = resolver.resolve(externals[scrollIdx], span);
+      if (res.status == xudu::ResolutionStatus::VerifiedBytes) {
+        return res.text;
+      }
+      if (res.status == xudu::ResolutionStatus::WithheldRedacted) {
+        return "[Redacted - Withheld]";
+      }
+      if (res.status == xudu::ResolutionStatus::TranscopyrightLocked) {
+        if (res.lockInfo) {
+          return "[🔒 " + std::to_string(res.lockInfo->priceAtomicUnits) + " " +
+                 res.lockInfo->currencySymbol + "]";
+        }
+        return "[🔒 Locked]";
+      }
     }
     return {};
   }
@@ -200,6 +234,16 @@ struct CompactZZCell {
     if (!ephemeralText.empty()) {
       return ephemeralText;
     }
+    if (isWithheld()) {
+      return "[Redacted - Withheld]";
+    }
+    if (isTranscopyrightLocked()) {
+      if (transcopyrightInfo) {
+        return "[🔒 " + std::to_string(transcopyrightInfo->priceAtomicUnits) +
+               " " + transcopyrightInfo->currencySymbol + "]";
+      }
+      return "[🔒 Locked]";
+    }
     if (span.empty()) {
       return {};
     }
@@ -208,7 +252,20 @@ struct CompactZZCell {
     }
     const auto scrollIdx = static_cast<std::size_t>(span.scroll - 1);
     if (scrollIdx < externals.size()) {
-      return resolver.read(externals[scrollIdx], span);
+      const auto res = resolver.resolve(externals[scrollIdx], span);
+      if (res.status == xudu::ResolutionStatus::VerifiedBytes) {
+        return res.text;
+      }
+      if (res.status == xudu::ResolutionStatus::WithheldRedacted) {
+        return "[Redacted - Withheld]";
+      }
+      if (res.status == xudu::ResolutionStatus::TranscopyrightLocked) {
+        if (res.lockInfo) {
+          return "[🔒 " + std::to_string(res.lockInfo->priceAtomicUnits) + " " +
+                 res.lockInfo->currencySymbol + "]";
+        }
+        return "[🔒 Locked]";
+      }
     }
     return {};
   }

@@ -266,3 +266,47 @@ TEST(ZzXuduConvergenceTest, RasterizeZzStructureWithCloneCells) {
   EXPECT_EQ(raster.text,
             "Shared Header. Doc 1 Body.\n\nShared Header. Doc 2 Body.");
 }
+
+TEST(ZzXuduConvergenceTest, ProjectStoreWithHolesAndTranscopyrightToZigzag) {
+  xudu::Store store;
+  const auto v1 = store.insert(xudu::MicroversionId{}, 0, "Public Intro. ");
+
+  // Add external scroll with withheld and locked segments
+  xudu::Scroll extScroll;
+  xudu::ScrollSegment segWithheld;
+  segWithheld.at     = 0;
+  segWithheld.length = 30;
+  segWithheld.kind   = xudu::SegmentKind::Withheld;
+  xudu::PublishedHoleRecord hole1;
+  hole1.at               = 0;
+  hole1.length           = 30;
+  hole1.reason           = xudu::HoleReason::Withheld;
+  segWithheld.holeRecord = hole1;
+  extScroll.segments.push_back(segWithheld);
+
+  xudu::ScrollSegment segLocked;
+  segLocked.at     = 30;
+  segLocked.length = 40;
+  segLocked.kind   = xudu::SegmentKind::Withheld;
+  xudu::PublishedHoleRecord hole2;
+  hole2.at     = 30;
+  hole2.length = 40;
+  hole2.reason = xudu::HoleReason::TranscopyrightLock;
+  xudu::TranscopyrightDescriptor tc;
+  tc.priceAtomicUnits  = 75;
+  tc.currencySymbol    = "XU";
+  hole2.transcopyright = tc;
+  segLocked.holeRecord = hole2;
+  extScroll.segments.push_back(segLocked);
+
+  const auto scrollId = store.addScroll(extScroll);
+
+  const auto v2 = store.transcludeExternal(v1, 14, extScroll, 0, 30);
+  const auto v3 = store.transcludeExternal(v2, 14 + 30, extScroll, 30, 40);
+
+  const auto zzDoc = projectStoreToZigzag(store, {v3});
+  EXPECT_FALSE(zzDoc.cells.empty());
+
+  std::string error;
+  EXPECT_TRUE(validate2RankManifold(zzDoc, &error)) << error;
+}

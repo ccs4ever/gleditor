@@ -204,3 +204,75 @@ TEST(UnifiedTransclusionEngineTest, StageVisibleCellsForRender) {
   EXPECT_GT(batch.instanceCount, 0U);
   EXPECT_EQ(batch.rows.size(), batch.instanceCount);
 }
+
+TEST(CompactZZCellTest, WithheldAndTranscopyrightHoles) {
+  CompactZZCell withheldCell;
+  withheldCell.id               = 10;
+  withheldCell.resolutionStatus = xudu::ResolutionStatus::WithheldRedacted;
+  EXPECT_TRUE(withheldCell.isWithheld());
+  EXPECT_FALSE(withheldCell.isTranscopyrightLocked());
+
+  xudu::PrimediaSpool primedia;
+  xudu::Resolver resolver;
+  std::vector<xudu::Scroll> externals;
+  EXPECT_EQ(withheldCell.readText(primedia, resolver, externals),
+            "[Redacted - Withheld]");
+
+  CompactZZCell tcCell;
+  tcCell.id                 = 11;
+  tcCell.resolutionStatus   = xudu::ResolutionStatus::TranscopyrightLocked;
+  tcCell.transcopyrightInfo = xudu::TranscopyrightDescriptor{
+      .priceAtomicUnits = 50,
+      .currencySymbol   = "XU",
+  };
+  EXPECT_FALSE(tcCell.isWithheld());
+  EXPECT_TRUE(tcCell.isTranscopyrightLocked());
+  EXPECT_EQ(tcCell.readText(primedia, resolver, externals), "[🔒 50 XU]");
+}
+
+TEST(UnifiedTransclusionEngineTest, StageWithheldAndTranscopyrightCells) {
+  xudu::Store store;
+  UnifiedTransclusionEngine engine(store);
+
+  CompactZZCell cellWithheld;
+  cellWithheld.id               = 1;
+  cellWithheld.resolutionStatus = xudu::ResolutionStatus::WithheldRedacted;
+  engine.addCell(cellWithheld);
+
+  CompactZZCell cellLocked;
+  cellLocked.id                 = 2;
+  cellLocked.resolutionStatus   = xudu::ResolutionStatus::TranscopyrightLocked;
+  cellLocked.transcopyrightInfo = xudu::TranscopyrightDescriptor{
+      .priceAtomicUnits = 25,
+      .currencySymbol   = "XU",
+  };
+  engine.addCell(cellLocked);
+
+  engine.linkCells(1, 2, DimOrdinal::D1);
+
+  auto &fm  = gleditor::text::FontManager::instance();
+  auto font = fm.getFont("Monospace 12");
+  ASSERT_NE(font, nullptr);
+
+  testing::NiceMock<MockRenderDevice> device;
+  ON_CALL(device, textureLimits())
+      .WillByDefault(testing::Return(render::TextureLimits{4096, 64}));
+  ON_CALL(device,
+          createTextureArray(testing::_, testing::_, testing::_, testing::_))
+      .WillByDefault(testing::Return(render::TextureHandle{1}));
+
+  gleditor::GlyphCache glyphCache(&device);
+
+  UnifiedTransclusionEngine::RenderSliceRequest req{
+      .focusCellId = 1,
+      .axisX       = "d.1",
+      .axisY       = "d.2",
+      .axisZ       = "d.3",
+      .radiusX     = 2,
+      .radiusY     = 1,
+      .radiusZ     = 1,
+  };
+
+  const auto batch = engine.stageVisibleCells(req, font, glyphCache);
+  EXPECT_GT(batch.instanceCount, 0U);
+}

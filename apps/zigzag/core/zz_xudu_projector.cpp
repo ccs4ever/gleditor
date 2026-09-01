@@ -275,9 +275,29 @@ projectStoreToZigzag(const xudu::Store &store,
                      const XuduProjectorOptions &opts) {
   std::vector<XuduDocInput> docInputs;
   for (const auto &verId : versions) {
-    const auto ver                        = store.rebuild(verId);
-    std::string assembledText             = store.textOf(verId);
+    const auto ver = store.rebuild(verId);
+    std::string assembledText;
     std::vector<xudu::PrimediaSpan> spans = ver.pieces();
+    for (const auto &piece : spans) {
+      if (piece.isLocal()) {
+        assembledText += store.read(piece);
+      } else {
+        const auto res = store.resolve(piece);
+        if (res.status == xudu::ResolutionStatus::VerifiedBytes) {
+          assembledText += res.text;
+        } else if (res.status == xudu::ResolutionStatus::WithheldRedacted) {
+          assembledText += "[Redacted - Withheld]";
+        } else if (res.status == xudu::ResolutionStatus::TranscopyrightLocked) {
+          if (res.lockInfo) {
+            assembledText += "[🔒 " +
+                             std::to_string(res.lockInfo->priceAtomicUnits) +
+                             " " + res.lockInfo->currencySymbol + "]";
+          } else {
+            assembledText += "[🔒 Locked]";
+          }
+        }
+      }
+    }
 
     docInputs.push_back(XuduDocInput{
         .name    = verId.str(),
