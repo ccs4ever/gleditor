@@ -88,18 +88,17 @@ void writePPM(const render::FrameImage &image, const std::string &path) {
 } // namespace
 
 int main(int argc, char **argv) {
-  const std::string outDir =
-      (argc > 1) ? argv[1] : "/tmp/xudu_demo_frames";
+  const std::string outDir = (argc > 1) ? argv[1] : "/tmp/xudu_demo_frames";
   fs::create_directories(outDir);
 
   std::cout << "==> Initializing xudu multi-modal demonstration renderer...\n";
 
-  auto state = std::make_shared<AppState>();
-  state->windowWidth = 1920;
+  auto state          = std::make_shared<AppState>();
+  state->windowWidth  = 1920;
   state->windowHeight = 1080;
-  state->noPresent = true;
-  state->profiling = false;
-  state->fov = 8.5f;
+  state->noPresent    = true;
+  state->profiling    = false;
+  state->fov          = 8.5f;
 
   const std::string storePath = "/tmp/xudu_multimodal_store";
   fs::remove_all(storePath);
@@ -110,12 +109,14 @@ int main(int argc, char **argv) {
   // 1. IMPORT PDF INTO PRIMARY STORE (Doc 0)
   const std::string pdfPath = "tests/samples/sample.pdf";
   FileTextSource pdfSource(pdfPath);
-  auto importedPdf = session->store(0).insert(MicroversionId{}, 0, pdfSource.text());
+  auto importedPdf =
+      session->store(0).insert(MicroversionId{}, 0, pdfSource.text());
   for (const auto breakAt : pdfSource.forcedBreaks()) {
     importedPdf = session->store(0).insertBreak(importedPdf, breakAt);
   }
   session->save(0);
-  std::cout << "  [1/4] Imported PDF source: " << pdfPath << " (" << pdfSource.text().size() << " bytes)\n";
+  std::cout << "  [1/4] Imported PDF source: " << pdfPath << " ("
+            << pdfSource.text().size() << " bytes)\n";
 
   // 2. IMPORT TEXT DOCUMENT INTO SECONDARY STORE (Doc 1)
   const std::string textContent =
@@ -128,7 +129,8 @@ int main(int argc, char **argv) {
       "Section 3: Video Decoding Viewport\n"
       "Sample video surface rendered with hardware acceleration.\n";
 
-  const auto [sIdx, importedText] = session->importFileToTemporaryStore("tests/samples/quick_brown_fox.txt");
+  const auto [sIdx, importedText] =
+      session->importFileToTemporaryStore("tests/samples/quick_brown_fox.txt");
   session->store(sIdx).insert(importedText, 0, textContent);
   session->save(sIdx);
   std::cout << "  [2/4] Imported Text document to secondary store\n";
@@ -139,15 +141,16 @@ int main(int argc, char **argv) {
 
   // 3. ESTABLISH BI-DIRECTIONAL LINK BETWEEN PDF AND TEXT DOCUMENT
   Link link;
-  link.type = LinkType::Quotation;
-  link.left.docIndex = 0;
-  link.left.start = 0;
-  link.left.end = 17; // "Hello PDF World!"
+  link.type           = LinkType::Quotation;
+  link.left.docIndex  = 0;
+  link.left.start     = 0;
+  link.left.end       = 17; // "Hello PDF World!"
   link.right.docIndex = 1;
-  link.right.start = 120;
-  link.right.end = 137;
+  link.right.start    = 120;
+  link.right.end      = 137;
   session->addLink(0, link);
-  std::cout << "  [3/4] Created transclusion link between PDF [0..17] and Text [120..137]\n";
+  std::cout << "  [3/4] Created transclusion link between PDF [0..17] and Text "
+               "[120..137]\n";
 
   // Create Renderer and connect to session docs
   auto renderer = Renderer::create(state, render::Backend::OpenGL);
@@ -155,7 +158,8 @@ int main(int argc, char **argv) {
   // 4. CREATE AUDIO WIDGET (Playing white noise)
   auto audioPlayer = std::make_shared<MediaPlayer>(true);
   std::vector<uint8_t> dummyAudioData(1024, 0x55);
-  auto audioStream = std::make_shared<MemoryMediaStream>(dummyAudioData, "audio/wav");
+  auto audioStream =
+      std::make_shared<MemoryMediaStream>(dummyAudioData, "audio/wav");
   auto audioResource = MediaResource::fromStream(audioStream, "whitenoise.wav");
   audioPlayer->load(audioResource);
   audioPlayer->play();
@@ -169,8 +173,10 @@ int main(int argc, char **argv) {
   // 5. CREATE MEDIA WIDGET (Playing video)
   auto videoPlayer = std::make_shared<MediaPlayer>(true);
   std::vector<uint8_t> dummyVideoData(2048, 0xAA);
-  auto videoStream = std::make_shared<MemoryMediaStream>(dummyVideoData, "video/mp4");
-  auto videoResource = MediaResource::fromStream(videoStream, "sample_video.mp4");
+  auto videoStream =
+      std::make_shared<MemoryMediaStream>(dummyVideoData, "video/mp4");
+  auto videoResource =
+      MediaResource::fromStream(videoStream, "sample_video.mp4");
   videoPlayer->load(videoResource);
   videoPlayer->play();
 
@@ -196,7 +202,8 @@ int main(int argc, char **argv) {
 
   // ANIMATION & FRAME GENERATION (360 frames = 12.0s at 30 fps)
   constexpr int totalFrames = 360;
-  std::cout << "==> Rendering " << totalFrames << " frames (12.0s @ 30fps) to " << outDir << "...\n";
+  std::cout << "==> Rendering " << totalFrames << " frames (12.0s @ 30fps) to "
+            << outDir << "...\n";
 
   for (int frameIdx = 0; frameIdx < totalFrames; ++frameIdx) {
     const float timeSec = static_cast<float>(frameIdx) / 30.0f;
@@ -215,11 +222,11 @@ int main(int argc, char **argv) {
     } else if (timeSec < 8.0f) {
       // Scene 2: Focus / Dolly onto AudioWidget playing white noise
       const float t = (timeSec - 4.0f) / 4.0f;
-      state->fov = 11.5f - 2.5f * std::sin(t * std::numbers::pi_v<float>);
+      state->fov    = 11.5f - 2.5f * std::sin(t * std::numbers::pi_v<float>);
     } else if (timeSec < 11.0f) {
       // Scene 3: Focus / Dolly onto VideoWidget playing sample video
       const float t = (timeSec - 8.0f) / 3.0f;
-      state->fov = 11.5f - 2.0f * std::sin(t * std::numbers::pi_v<float>);
+      state->fov    = 11.5f - 2.0f * std::sin(t * std::numbers::pi_v<float>);
     } else {
       // Scene 4: Wide cinematic pull back
       state->fov = 12.0f;
@@ -235,8 +242,8 @@ int main(int argc, char **argv) {
     writePPM(captured, framePath);
 
     if (frameIdx % 60 == 0 || frameIdx == totalFrames - 1) {
-      std::cout << std::format("  Rendered frame {}/{} ({:.1f}s)\n", frameIdx + 1,
-                               totalFrames, timeSec);
+      std::cout << std::format("  Rendered frame {}/{} ({:.1f}s)\n",
+                               frameIdx + 1, totalFrames, timeSec);
     }
   }
 

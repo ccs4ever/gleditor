@@ -1271,11 +1271,17 @@ int main(const int argc, char **argv) {
               auto rightSpans = ver2.spansFor(s2, e2 > s2 ? e2 - s2 : 1);
 
               xudu::Link l;
-              l.type  = xudu::LinkType::Quotation;
-              l.owner = "you";
-              l.left  = leftSpans;
-              l.right = rightSpans;
-              session->addLink(d1, std::move(l));
+              l.type          = xudu::LinkType::Quotation;
+              l.owner         = "you";
+              l.left          = leftSpans;
+              l.right         = rightSpans;
+              const auto prod = session->addLink(d1, std::move(l));
+              renderer->runWithState(
+                  [d1, sIdx1, prod, &session](RenderState &rState) {
+                    if (d1 < rState.docs.size() && rState.docs[d1]) {
+                      rState.docs[d1]->load(*session->sourceFor(prod, sIdx1));
+                    }
+                  });
             }
           }
         }

@@ -30,8 +30,8 @@ constexpr float separatorMargin = 6.0F;
 constexpr std::uint32_t hudBackground = 0x121722F0U; // Dark frosted slate
 constexpr std::uint32_t hudBorder     = 0x2A3448FFU; // Slate border
 constexpr std::uint32_t hudTopAccent  = 0x06B6D4FFU; // Cyan accent
-constexpr std::uint32_t btnDefaultBg  = 0x1B2332E0U; // Button default background
-constexpr std::uint32_t btnActiveBg   = 0x0E4656F0U; // Active toggled button
+constexpr std::uint32_t btnDefaultBg = 0x1B2332E0U; // Button default background
+constexpr std::uint32_t btnActiveBg  = 0x0E4656F0U; // Active toggled button
 constexpr std::uint32_t btnActiveBorder = 0x06B6D4FFU;
 constexpr std::uint32_t textPrimary     = 0xF1F5F9FFU;
 constexpr std::uint32_t textActive      = 0x38BDF8FFU;
@@ -128,7 +128,8 @@ void FloatingToolbar3D::drawFrame(FrameContext &ctx) {
     }
   }
 
-  // Anchor toolbar horizontally centered, floating above the top margin of the viewport
+  // Anchor toolbar horizontally centered, floating above the top margin of the
+  // viewport
   const float barY = screenH - toolbarHeight - 42.0F;
   const float barX = std::max(16.0F, (screenW - totalWidth) * 0.5F);
 
@@ -153,10 +154,10 @@ void FloatingToolbar3D::drawFrame(FrameContext &ctx) {
 
     const std::uint32_t bgCol = def.active ? btnActiveBg : btnDefaultBg;
     const std::uint32_t txtCol =
-        def.active ? textActive : (def.label == "+ New" ? 0x38BDF8FFU : textPrimary);
+        def.active ? textActive
+                   : (def.label == "+ New" ? 0x38BDF8FFU : textPrimary);
 
-    canvas->setTag(render::tagKindOverlay,
-                   static_cast<std::uint32_t>(def.id));
+    canvas->setTag(render::tagKindOverlay, static_cast<std::uint32_t>(def.id));
     canvas->addRect(curX, curY, btnW, btnHeight, bgCol);
 
     if (def.active) {
@@ -171,15 +172,15 @@ void FloatingToolbar3D::drawFrame(FrameContext &ctx) {
     canvas->addText(ctx.state, textX, textY, def.label, txtCol, bgCol);
 
     currentButtons.push_back(ButtonLayout{
-        .id             = def.id,
-        .label          = def.label,
-        .tooltip        = def.tooltip,
-        .x              = curX,
-        .y              = curY,
-        .width          = btnW,
-        .height         = btnHeight,
-        .active         = def.active,
-        .isSeparator    = false,
+        .id          = def.id,
+        .label       = def.label,
+        .tooltip     = def.tooltip,
+        .x           = curX,
+        .y           = curY,
+        .width       = btnW,
+        .height      = btnHeight,
+        .active      = def.active,
+        .isSeparator = false,
     });
 
     curX += btnW + 4.0F;

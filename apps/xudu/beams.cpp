@@ -28,7 +28,7 @@ namespace {
 /// Beam thickness as a fraction of the line height at the anchor. A beam is
 /// meant to read as attached to a line of text rather than as a pipe running
 /// between two buildings.
-constexpr float beamWidthOfLine = 0.45F;
+constexpr float beamWidthOfLine = 1.25F;
 
 /// How near a document has to be to where it is being brought before moving it
 /// is not worth the animation, in world units.
@@ -36,7 +36,7 @@ constexpr float alreadyAligned = 1.0F;
 
 /// Space left between two documents brought alongside each other, in world
 /// units. Enough for the beam to be a beam and not a join.
-constexpr float documentGap = 6.0F;
+constexpr float documentGap = 24.0F;
 
 /// Half-width assumed for a document whose first page has not built yet, in
 /// world units -- just enough that layout math has something to work with
@@ -78,7 +78,7 @@ constexpr float framingMarginFloorY   = 6.0F;
 /// Most strands one band is drawn with. A link between two whole pages would
 /// otherwise ask for one strand per line of text at both ends, which is a
 /// hundred ribbons saying what five say just as well.
-constexpr std::size_t bandStrandLimit = 5;
+constexpr std::size_t bandStrandLimit = 7;
 
 /// Space between a band's strands, in beam widths. Comfortably more than one,
 /// so the strands stay clear of each other where the band is at its tallest:
@@ -92,7 +92,7 @@ constexpr float bandStrandPitch = 2.2F;
 /// Alpha the strands inside a band are drawn at, relative to the two that
 /// bound it. The edges are what say how far the passage reaches; the fill says
 /// the space between them is one relation and not several.
-constexpr float bandFillAlpha = 0.55F;
+constexpr float bandFillAlpha = 0.85F;
 
 /// Width of the bracket drawn down the margin at each end of a link, relative
 /// to the beam's own width.

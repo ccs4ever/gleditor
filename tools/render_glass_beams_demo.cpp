@@ -69,9 +69,9 @@ int main(int argc, char **argv) {
       "anchored to primary text and streaming media.\n"
       "Exploring authentic transclusion mechanisms...",
       "Source Document");
-  auto doc1 = Doc::create(renderer, renderer->device(),
-                          glm::translate(glm::mat4(1.0F), glm::vec3(0.0F, 0.0F, 0.0F)),
-                          src1);
+  auto doc1 = Doc::create(
+      renderer, renderer->device(),
+      glm::translate(glm::mat4(1.0F), glm::vec3(0.0F, 0.0F, 0.0F)), src1);
 
   gleditor::StaticTextSource src2(
       "Commentary & Transcluded Quoted Text:\n"
@@ -130,7 +130,7 @@ int main(int argc, char **argv) {
 
   auto img = renderer->device()->captureColorTarget();
   writePPM(img, outPath);
-  std::cout << "Successfully rendered glass beams demo to " << outPath
-            << " (" << img.width << "x" << img.height << ")\n";
+  std::cout << "Successfully rendered glass beams demo to " << outPath << " ("
+            << img.width << "x" << img.height << ")\n";
   return 0;
 }
