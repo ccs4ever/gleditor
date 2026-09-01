@@ -27,6 +27,7 @@
 #include <cstdint>
 #include <map>
 #include <memory>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -34,8 +35,36 @@
 #include "scroll.hpp"
 #include "spool.hpp"
 #include "torrent.hpp"
+#include "transcopyright_crypto.hpp"
 
 namespace xudu {
+
+/// Status of a span resolution attempt.
+enum class ResolutionStatus : std::uint8_t {
+  VerifiedBytes        = 0,
+  MissingPieces        = 1,
+  UnverifiedHash       = 2,
+  WithheldRedacted     = 3,
+  TranscopyrightLocked = 4
+};
+
+/// Result of resolving a span, including text or lock/hole metadata.
+struct ResolveResult {
+  ResolutionStatus status{ResolutionStatus::VerifiedBytes};
+  std::string text{};
+  std::optional<TranscopyrightDescriptor> lockInfo{};
+  std::optional<PublishedHoleRecord> holeRecord{};
+
+  [[nodiscard]] bool isVerified() const noexcept {
+    return status == ResolutionStatus::VerifiedBytes;
+  }
+  [[nodiscard]] bool isLocked() const noexcept {
+    return status == ResolutionStatus::TranscopyrightLocked;
+  }
+  [[nodiscard]] bool isWithheld() const noexcept {
+    return status == ResolutionStatus::WithheldRedacted;
+  }
+};
 
 /**
  * @brief Somewhere the bytes of a torrent can be obtained from.
@@ -143,9 +172,27 @@ public:
   [[nodiscard]] std::string read(const Scroll &scroll,
                                  const PrimediaSpan &span) const;
 
+  /**
+   * @brief Resolve @p span of @p scroll, returning full verification status,
+   *        withheld reason, or Transcopyright lock descriptor.
+   */
+  [[nodiscard]] ResolveResult resolve(const Scroll &scroll,
+                                      const PrimediaSpan &span) const;
+
   /// Whether every segment of @p scroll names a torrent this source knows, so
   /// that the whole of it could be read and verified.
   [[nodiscard]] bool available(const Scroll &scroll) const;
+
+  /// Cache an unlocked Transcopyright Content Encryption Key.
+  bool unlockTranscopyright(const std::array<std::uint8_t, 32> &keyId,
+                            const crypto::Key32 &cek,
+                            std::uint64_t pricePaid         = 0,
+                            std::string_view currencySymbol = "XU") const;
+
+  [[nodiscard]] LMDBContentCache &contentCache() noexcept { return cache; }
+  [[nodiscard]] const LMDBContentCache &contentCache() const noexcept {
+    return cache;
+  }
 
 private:
   /// One segment's worth: [@p from, @p from + @p count) in scroll

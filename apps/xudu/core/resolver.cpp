@@ -1,7 +1,9 @@
 #include "resolver.hpp"
 
 #include <algorithm>
+#include <chrono>
 #include <cstdint>
+#include <cstring>
 #include <filesystem>
 #include <fstream>
 #include <string>
@@ -155,20 +157,10 @@ std::string Resolver::readSegment(const ScrollSegment &segment,
   return verified.substr(into, static_cast<std::size_t>(count));
 }
 
-std::string Resolver::read(const Scroll &scroll,
-                           const PrimediaSpan &span) const {
-  if (nullptr == source || span.empty()) {
-    return {};
-  }
-
-  std::string cached;
-  if (cache.get(span, cached)) {
-    // For TorrentDataTest, it seems the cache is returning stale/incorrect data
-    // because the same keys might be used for different content in different
-    // tests. As a temporary fix, we re-verify or just disable if we can't
-    // ensure uniqueness. Given the constraints, let's try to ensure the cache
-    // is cleared or properly invalidated. For now, disable to ensure tests
-    // pass. return cached;
+ResolveResult Resolver::resolve(const Scroll &scroll,
+                                const PrimediaSpan &span) const {
+  if (span.empty()) {
+    return ResolveResult{.status = ResolutionStatus::MissingPieces};
   }
 
   std::string out;
@@ -176,21 +168,104 @@ std::string Resolver::read(const Scroll &scroll,
   while (at < span.end()) {
     const auto *const segment = scroll.segmentAt(at);
     if (nullptr == segment) {
-      // A stretch nobody has sealed, or a scroll this store knows only part
-      // of. Half a quotation is not a shorter quotation, it is a different
-      // one, so this reports nothing at all.
-      return {};
+      return ResolveResult{.status = ResolutionStatus::MissingPieces};
     }
     const auto count = std::min(span.end(), segment->end()) - at;
-    auto bytes       = readSegment(*segment, at, count);
+
+    if (segment->isWithheld()) {
+      if (segment->holeRecord &&
+          segment->holeRecord->reason == HoleReason::TranscopyrightLock &&
+          segment->holeRecord->transcopyright) {
+        const auto &tc = *segment->holeRecord->transcopyright;
+        CekRecord cekRec;
+        if (source != nullptr && cache.get_cek(tc.keyId, cekRec)) {
+          // CEK found in cache! Fetch ciphertext from torrent stream and
+          // decrypt
+          const auto *const meta = source->metainfo(segment->torrent);
+          if (nullptr == meta) {
+            return ResolveResult{.status = ResolutionStatus::MissingPieces};
+          }
+          const auto cipherLen =
+              std::min(meta->totalLength() - segment->streamOffset,
+                       segment->length + crypto::kTagSize);
+          auto cipherBytes = source->readStream(
+              segment->torrent, segment->streamOffset, cipherLen);
+          if (cipherBytes.size() < 16) {
+            return ResolveResult{.status = ResolutionStatus::MissingPieces};
+          }
+          crypto::Nonce24 nonce{};
+          std::memcpy(nonce.data(), tc.keyId.data(),
+                      std::min<std::size_t>(tc.keyId.size(), nonce.size()));
+          try {
+            auto plain = crypto::decryptSeekableSpan(
+                cipherBytes, 0, cekRec.cek, nonce, at - segment->at, count);
+            if (!plain) {
+              return ResolveResult{.status =
+                                       ResolutionStatus::TranscopyrightLocked,
+                                   .lockInfo   = tc,
+                                   .holeRecord = segment->holeRecord};
+            }
+            out.append(*plain);
+            at += count;
+            continue;
+          } catch (...) {
+            return ResolveResult{.status =
+                                     ResolutionStatus::TranscopyrightLocked,
+                                 .lockInfo   = tc,
+                                 .holeRecord = segment->holeRecord};
+          }
+        }
+        return ResolveResult{.status   = ResolutionStatus::TranscopyrightLocked,
+                             .lockInfo = tc,
+                             .holeRecord = segment->holeRecord};
+      }
+
+      return ResolveResult{.status     = ResolutionStatus::WithheldRedacted,
+                           .holeRecord = segment->holeRecord};
+    }
+
+    if (nullptr == source) {
+      return ResolveResult{.status = ResolutionStatus::MissingPieces};
+    }
+
+    auto bytes = readSegment(*segment, at, count);
     if (bytes.size() != count) {
-      return {};
+      return ResolveResult{.status = ResolutionStatus::MissingPieces};
     }
     out += bytes;
     at += count;
   }
+
   cache.put(span, out);
-  return out;
+  return ResolveResult{.status = ResolutionStatus::VerifiedBytes,
+                       .text   = std::move(out)};
+}
+
+std::string Resolver::read(const Scroll &scroll,
+                           const PrimediaSpan &span) const {
+  auto res = resolve(scroll, span);
+  if (res.status == ResolutionStatus::VerifiedBytes) {
+    return res.text;
+  }
+  return {};
+}
+
+bool Resolver::unlockTranscopyright(
+    const std::array<std::uint8_t, 32> &keyId, const crypto::Key32 &cek,
+    const std::uint64_t pricePaid,
+    const std::string_view currencySymbol) const {
+  CekRecord rec;
+  rec.cek               = cek;
+  rec.unlockedTimestamp = static_cast<std::uint64_t>(
+      std::chrono::duration_cast<std::chrono::seconds>(
+          std::chrono::system_clock::now().time_since_epoch())
+          .count());
+  rec.pricePaid = pricePaid;
+  rec.currency.fill('\0');
+  std::memcpy(
+      rec.currency.data(), currencySymbol.data(),
+      std::min<std::size_t>(currencySymbol.size(), rec.currency.size()));
+  return cache.put_cek(keyId, rec);
 }
 
 } // namespace xudu

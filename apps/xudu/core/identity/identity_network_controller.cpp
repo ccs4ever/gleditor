@@ -43,6 +43,7 @@ void IdentityPeerPlugin::add_handshake(libtorrent::entry &h) {
   m[kExtIdentityLookupName] = kExtIdentityLookupMsgId;
   m[kExtOracleVoteName]     = kExtOracleVoteMsgId;
   m[kExtOracleVerifyName]   = kExtOracleVerifyMsgId;
+  m[kExtTranscopyrightName] = kExtTranscopyrightMsgId;
 }
 
 bool IdentityPeerPlugin::on_extension_handshake(
@@ -68,6 +69,11 @@ bool IdentityPeerPlugin::on_extension_handshake(
   const auto verifyNode = m.dict_find_int(kExtOracleVerifyName);
   if (verifyNode) {
     remoteOracleVerifyId_ = static_cast<int>(verifyNode.int_value());
+  }
+
+  const auto tcNode = m.dict_find_int(kExtTranscopyrightName);
+  if (tcNode) {
+    remoteTranscopyrightId_ = static_cast<int>(tcNode.int_value());
   }
 
   // Issue peer authentication challenge
@@ -204,6 +210,26 @@ bool IdentityPeerPlugin::on_extended(int length, int /*msg*/,
     return true;
   }
 
+  case MessageType::TcInvoiceQuery: {
+    const auto qRes = decodeTcInvoiceQuery(frame.payload);
+    return qRes.has_value();
+  }
+
+  case MessageType::TcInvoiceResponse: {
+    const auto respRes = decodeTcInvoiceResponse(frame.payload);
+    return respRes.has_value();
+  }
+
+  case MessageType::TcSettleRequest: {
+    const auto setRes = decodeTcSettleRequest(frame.payload);
+    return setRes.has_value();
+  }
+
+  case MessageType::TcKeyDelivery: {
+    const auto delRes = decodeTcKeyDelivery(frame.payload);
+    return delRes.has_value();
+  }
+
   default:
     break;
   }
@@ -288,6 +314,35 @@ bool IdentityPeerPlugin::sendEmailVerifyRequest(
   const std::string frame =
       encodeExtendedMessage(MessageType::EmailVerifyRequest, bencoded);
   return sendExtendedRaw(remoteOracleVerifyId_, frame);
+}
+
+bool IdentityPeerPlugin::sendTcInvoiceQuery(const TcInvoiceQueryMsg &query) {
+  const std::string bencoded = serialize(query);
+  const std::string frame =
+      encodeExtendedMessage(MessageType::TcInvoiceQuery, bencoded);
+  return sendExtendedRaw(remoteTranscopyrightId_, frame);
+}
+
+bool IdentityPeerPlugin::sendTcInvoiceResponse(
+    const TcInvoiceResponseMsg &resp) {
+  const std::string bencoded = serialize(resp);
+  const std::string frame =
+      encodeExtendedMessage(MessageType::TcInvoiceResponse, bencoded);
+  return sendExtendedRaw(remoteTranscopyrightId_, frame);
+}
+
+bool IdentityPeerPlugin::sendTcSettleRequest(const TcSettleRequestMsg &req) {
+  const std::string bencoded = serialize(req);
+  const std::string frame =
+      encodeExtendedMessage(MessageType::TcSettleRequest, bencoded);
+  return sendExtendedRaw(remoteTranscopyrightId_, frame);
+}
+
+bool IdentityPeerPlugin::sendTcKeyDelivery(const TcKeyDeliveryMsg &delivery) {
+  const std::string bencoded = serialize(delivery);
+  const std::string frame =
+      encodeExtendedMessage(MessageType::TcKeyDelivery, bencoded);
+  return sendExtendedRaw(remoteTranscopyrightId_, frame);
 }
 
 void IdentityPeerPlugin::isolateAndDisconnect(std::string_view reason) {

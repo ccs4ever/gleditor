@@ -241,7 +241,14 @@ enum class MessageType : std::uint8_t {
   // 0x20 - 0x2F: Oracle Email Verification (Extension "xudu_oracle_verify")
   EmailVerifyRequest      = 0x20,
   EmailVerifyChallengeAck = 0x21,
-  EmailVerifyAttestation  = 0x22
+  EmailVerifyAttestation  = 0x22,
+
+  // 0x30 - 0x3F: Transcopyright Micropayments & Key Delivery (Extension
+  // "xudu_transcopyright")
+  TcInvoiceQuery    = 0x30,
+  TcInvoiceResponse = 0x31,
+  TcSettleRequest   = 0x32,
+  TcKeyDelivery     = 0x33
 };
 
 /// Serialization and Deserialization Errors
@@ -410,6 +417,61 @@ struct EmailVerifyRequestMsg {
            !requesterSignature.isZero() && difficultyBits > 0;
   }
   [[nodiscard]] bool operator==(const EmailVerifyRequestMsg &) const = default;
+};
+
+/// BEP 10 Transcopyright Invoice Query message.
+struct TcInvoiceQueryMsg {
+  Hash32 keyId{};
+  std::uint64_t requestedBytes{0};
+
+  [[nodiscard]] bool isValid() const noexcept { return !keyId.isZero(); }
+  [[nodiscard]] bool operator==(const TcInvoiceQueryMsg &) const = default;
+};
+
+/// BEP 10 Transcopyright Invoice Response message.
+struct TcInvoiceResponseMsg {
+  Hash32 keyId{};
+  std::uint64_t priceAtomicUnits{0};
+  bool flatFee{false};
+  std::string currencySymbol{"XU"};
+  Fingerprint authorWallet{};
+  PubKey32 authorPubKey{};
+  Hash32 paymentChallenge{};
+  std::uint64_t expiresTimestamp{0};
+
+  [[nodiscard]] bool isValid() const noexcept {
+    return !keyId.isZero() && authorWallet.isValid() &&
+           !authorPubKey.isZero() && !currencySymbol.empty();
+  }
+  [[nodiscard]] bool operator==(const TcInvoiceResponseMsg &) const = default;
+};
+
+/// BEP 10 Transcopyright Micropayment Settlement Request message.
+struct TcSettleRequestMsg {
+  Hash32 keyId{};
+  Hash32 paymentChallenge{};
+  std::uint64_t amountAtomicUnits{0};
+  Fingerprint payerWallet{};
+  PubKey32 payerPubKey{}; // X25519 public key for KEM CEK delivery
+  Signature64 paymentProofSignature{};
+  std::string micropaymentTicket{};
+
+  [[nodiscard]] bool isValid() const noexcept {
+    return !keyId.isZero() && !payerPubKey.isZero() && payerWallet.isValid();
+  }
+  [[nodiscard]] bool operator==(const TcSettleRequestMsg &) const = default;
+};
+
+/// BEP 10 Transcopyright CEK Key Delivery message.
+struct TcKeyDeliveryMsg {
+  Hash32 keyId{};
+  std::vector<std::uint8_t> wrappedCek{}; // 104-byte KEM payload
+  Signature64 authorSignature{};
+
+  [[nodiscard]] bool isValid() const noexcept {
+    return !keyId.isZero() && !wrappedCek.empty();
+  }
+  [[nodiscard]] bool operator==(const TcKeyDeliveryMsg &) const = default;
 };
 
 } // namespace xudu::identity

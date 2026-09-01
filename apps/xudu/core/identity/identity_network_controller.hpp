@@ -33,10 +33,12 @@ namespace xudu::identity {
 inline constexpr const char *kExtIdentityLookupName = "xudu_identity_lookup";
 inline constexpr const char *kExtOracleVoteName     = "xudu_oracle_vote";
 inline constexpr const char *kExtOracleVerifyName   = "xudu_oracle_verify";
+inline constexpr const char *kExtTranscopyrightName = "xudu_transcopyright";
 
 inline constexpr int kExtIdentityLookupMsgId = 2;
 inline constexpr int kExtOracleVoteMsgId     = 3;
 inline constexpr int kExtOracleVerifyMsgId   = 4;
+inline constexpr int kExtTranscopyrightMsgId = 5;
 
 inline constexpr std::uint8_t kBtMsgExtended = 20;
 
@@ -73,6 +75,10 @@ public:
                             const LedgerMerkleProof &proof);
   bool sendVoteBroadcast(const VoteEntry &vote);
   bool sendEmailVerifyRequest(const EmailVerifyRequestMsg &req);
+  bool sendTcInvoiceQuery(const TcInvoiceQueryMsg &query);
+  bool sendTcInvoiceResponse(const TcInvoiceResponseMsg &resp);
+  bool sendTcSettleRequest(const TcSettleRequestMsg &req);
+  bool sendTcKeyDelivery(const TcKeyDeliveryMsg &delivery);
 
   void isolateAndDisconnect(std::string_view reason);
 
@@ -98,6 +104,7 @@ private:
   int remoteIdentityLookupId_{0};
   int remoteOracleVoteId_{0};
   int remoteOracleVerifyId_{0};
+  int remoteTranscopyrightId_{0};
 
   bool isAuthenticated_{false};
   bool isIsolated_{false};

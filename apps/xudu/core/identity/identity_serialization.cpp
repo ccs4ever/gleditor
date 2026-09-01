@@ -68,6 +68,22 @@ extractSignature64(const libtorrent::bdecode_node &dict,
   return sig;
 }
 
+[[nodiscard]] std::expected<PubKey32, SerializationError>
+extractPubKey32(const libtorrent::bdecode_node &dict,
+                std::string_view key) noexcept {
+  const auto node = dict.dict_find_string(key);
+  if (!node) {
+    return std::unexpected(SerializationError::MissingField);
+  }
+  const auto str = node.string_value();
+  if (str.size() != 32) {
+    return std::unexpected(SerializationError::InvalidFieldLength);
+  }
+  PubKey32 pk;
+  std::memcpy(pk.bytes.data(), str.data(), 32);
+  return pk;
+}
+
 } // namespace
 
 // ============================================================================
@@ -412,6 +428,178 @@ decodeEmailVerifyRequest(std::span<const std::uint8_t> bytes) {
   return decodeEmailVerifyRequest(node);
 }
 
+std::expected<TcInvoiceQueryMsg, SerializationError>
+decodeTcInvoiceQuery(const libtorrent::bdecode_node &node) {
+  if (node.type() != libtorrent::bdecode_node::dict_t) {
+    return std::unexpected(SerializationError::TypeMismatch);
+  }
+
+  TcInvoiceQueryMsg query;
+  const auto keyRes = extractHash32(node, "key_id");
+  if (!keyRes) return std::unexpected(keyRes.error());
+  query.keyId = *keyRes;
+  query.requestedBytes =
+      static_cast<std::uint64_t>(node.dict_find_int_value("bytes", 0));
+  return query;
+}
+
+std::expected<TcInvoiceQueryMsg, SerializationError>
+decodeTcInvoiceQuery(std::span<const std::uint8_t> bytes) {
+  if (bytes.size() > kMaxPayloadBytes) {
+    return std::unexpected(SerializationError::PayloadOverflow);
+  }
+  libtorrent::bdecode_node node;
+  libtorrent::error_code ec;
+  const char *data = reinterpret_cast<const char *>(bytes.data());
+  if (libtorrent::bdecode(data, data + bytes.size(), node, ec) != 0) {
+    return std::unexpected(SerializationError::InvalidBencode);
+  }
+  return decodeTcInvoiceQuery(node);
+}
+
+std::expected<TcInvoiceResponseMsg, SerializationError>
+decodeTcInvoiceResponse(const libtorrent::bdecode_node &node) {
+  if (node.type() != libtorrent::bdecode_node::dict_t) {
+    return std::unexpected(SerializationError::TypeMismatch);
+  }
+
+  TcInvoiceResponseMsg resp;
+  const auto keyRes = extractHash32(node, "key_id");
+  if (!keyRes) return std::unexpected(keyRes.error());
+  resp.keyId = *keyRes;
+
+  resp.priceAtomicUnits =
+      static_cast<std::uint64_t>(node.dict_find_int_value("price", 0));
+  resp.flatFee = node.dict_find_int_value("flat", 0) != 0;
+
+  const auto currNode = node.dict_find_string("curr");
+  if (currNode) {
+    resp.currencySymbol = std::string(currNode.string_value());
+  }
+
+  const auto walletRes = extractFingerprint(node, "wallet");
+  if (!walletRes) return std::unexpected(walletRes.error());
+  resp.authorWallet = *walletRes;
+
+  const auto pubRes = extractPubKey32(node, "pubkey");
+  if (!pubRes) return std::unexpected(pubRes.error());
+  resp.authorPubKey = *pubRes;
+
+  const auto chalRes = extractHash32(node, "challenge");
+  if (!chalRes) return std::unexpected(chalRes.error());
+  resp.paymentChallenge = *chalRes;
+
+  resp.expiresTimestamp =
+      static_cast<std::uint64_t>(node.dict_find_int_value("expires", 0));
+
+  return resp;
+}
+
+std::expected<TcInvoiceResponseMsg, SerializationError>
+decodeTcInvoiceResponse(std::span<const std::uint8_t> bytes) {
+  if (bytes.size() > kMaxPayloadBytes) {
+    return std::unexpected(SerializationError::PayloadOverflow);
+  }
+  libtorrent::bdecode_node node;
+  libtorrent::error_code ec;
+  const char *data = reinterpret_cast<const char *>(bytes.data());
+  if (libtorrent::bdecode(data, data + bytes.size(), node, ec) != 0) {
+    return std::unexpected(SerializationError::InvalidBencode);
+  }
+  return decodeTcInvoiceResponse(node);
+}
+
+std::expected<TcSettleRequestMsg, SerializationError>
+decodeTcSettleRequest(const libtorrent::bdecode_node &node) {
+  if (node.type() != libtorrent::bdecode_node::dict_t) {
+    return std::unexpected(SerializationError::TypeMismatch);
+  }
+
+  TcSettleRequestMsg req;
+  const auto keyRes = extractHash32(node, "key_id");
+  if (!keyRes) return std::unexpected(keyRes.error());
+  req.keyId = *keyRes;
+
+  const auto chalRes = extractHash32(node, "challenge");
+  if (!chalRes) return std::unexpected(chalRes.error());
+  req.paymentChallenge = *chalRes;
+
+  req.amountAtomicUnits =
+      static_cast<std::uint64_t>(node.dict_find_int_value("amount", 0));
+
+  const auto walletRes = extractFingerprint(node, "payer_wallet");
+  if (!walletRes) return std::unexpected(walletRes.error());
+  req.payerWallet = *walletRes;
+
+  const auto pubRes = extractPubKey32(node, "payer_pubkey");
+  if (!pubRes) return std::unexpected(pubRes.error());
+  req.payerPubKey = *pubRes;
+
+  const auto sigRes = extractSignature64(node, "sig");
+  if (sigRes) {
+    req.paymentProofSignature = *sigRes;
+  }
+
+  const auto ticketNode = node.dict_find_string("ticket");
+  if (ticketNode) {
+    req.micropaymentTicket = std::string(ticketNode.string_value());
+  }
+
+  return req;
+}
+
+std::expected<TcSettleRequestMsg, SerializationError>
+decodeTcSettleRequest(std::span<const std::uint8_t> bytes) {
+  if (bytes.size() > kMaxPayloadBytes) {
+    return std::unexpected(SerializationError::PayloadOverflow);
+  }
+  libtorrent::bdecode_node node;
+  libtorrent::error_code ec;
+  const char *data = reinterpret_cast<const char *>(bytes.data());
+  if (libtorrent::bdecode(data, data + bytes.size(), node, ec) != 0) {
+    return std::unexpected(SerializationError::InvalidBencode);
+  }
+  return decodeTcSettleRequest(node);
+}
+
+std::expected<TcKeyDeliveryMsg, SerializationError>
+decodeTcKeyDelivery(const libtorrent::bdecode_node &node) {
+  if (node.type() != libtorrent::bdecode_node::dict_t) {
+    return std::unexpected(SerializationError::TypeMismatch);
+  }
+
+  TcKeyDeliveryMsg del;
+  const auto keyRes = extractHash32(node, "key_id");
+  if (!keyRes) return std::unexpected(keyRes.error());
+  del.keyId = *keyRes;
+
+  const auto wrapNode = node.dict_find_string("wrapped_cek");
+  if (!wrapNode) return std::unexpected(SerializationError::MissingField);
+  const auto wrapStr = wrapNode.string_value();
+  del.wrappedCek.assign(wrapStr.begin(), wrapStr.end());
+
+  const auto sigRes = extractSignature64(node, "sig");
+  if (sigRes) {
+    del.authorSignature = *sigRes;
+  }
+
+  return del;
+}
+
+std::expected<TcKeyDeliveryMsg, SerializationError>
+decodeTcKeyDelivery(std::span<const std::uint8_t> bytes) {
+  if (bytes.size() > kMaxPayloadBytes) {
+    return std::unexpected(SerializationError::PayloadOverflow);
+  }
+  libtorrent::bdecode_node node;
+  libtorrent::error_code ec;
+  const char *data = reinterpret_cast<const char *>(bytes.data());
+  if (libtorrent::bdecode(data, data + bytes.size(), node, ec) != 0) {
+    return std::unexpected(SerializationError::InvalidBencode);
+  }
+  return decodeTcKeyDelivery(node);
+}
+
 // ============================================================================
 // Encoders to libtorrent::entry
 // ============================================================================
@@ -517,6 +705,65 @@ libtorrent::entry encodeToEntry(const EmailVerifyRequestMsg &req) {
   return e;
 }
 
+libtorrent::entry encodeToEntry(const TcInvoiceQueryMsg &query) {
+  libtorrent::entry e(libtorrent::entry::dictionary_t);
+  e["key_id"] =
+      std::string(reinterpret_cast<const char *>(query.keyId.bytes.data()), 32);
+  e["bytes"] = static_cast<std::int64_t>(query.requestedBytes);
+  return e;
+}
+
+libtorrent::entry encodeToEntry(const TcInvoiceResponseMsg &resp) {
+  libtorrent::entry e(libtorrent::entry::dictionary_t);
+  e["key_id"] =
+      std::string(reinterpret_cast<const char *>(resp.keyId.bytes.data()), 32);
+  e["price"]  = static_cast<std::int64_t>(resp.priceAtomicUnits);
+  e["flat"]   = resp.flatFee ? 1 : 0;
+  e["curr"]   = resp.currencySymbol;
+  e["wallet"] = resp.authorWallet.toString();
+  e["pubkey"] = std::string(
+      reinterpret_cast<const char *>(resp.authorPubKey.bytes.data()), 32);
+  e["challenge"] = std::string(
+      reinterpret_cast<const char *>(resp.paymentChallenge.bytes.data()), 32);
+  e["expires"] = static_cast<std::int64_t>(resp.expiresTimestamp);
+  return e;
+}
+
+libtorrent::entry encodeToEntry(const TcSettleRequestMsg &req) {
+  libtorrent::entry e(libtorrent::entry::dictionary_t);
+  e["key_id"] =
+      std::string(reinterpret_cast<const char *>(req.keyId.bytes.data()), 32);
+  e["challenge"] = std::string(
+      reinterpret_cast<const char *>(req.paymentChallenge.bytes.data()), 32);
+  e["amount"]       = static_cast<std::int64_t>(req.amountAtomicUnits);
+  e["payer_wallet"] = req.payerWallet.toString();
+  e["payer_pubkey"] = std::string(
+      reinterpret_cast<const char *>(req.payerPubKey.bytes.data()), 32);
+  if (!req.paymentProofSignature.isZero()) {
+    e["sig"] = std::string(
+        reinterpret_cast<const char *>(req.paymentProofSignature.bytes.data()),
+        64);
+  }
+  if (!req.micropaymentTicket.empty()) {
+    e["ticket"] = req.micropaymentTicket;
+  }
+  return e;
+}
+
+libtorrent::entry encodeToEntry(const TcKeyDeliveryMsg &delivery) {
+  libtorrent::entry e(libtorrent::entry::dictionary_t);
+  e["key_id"] = std::string(
+      reinterpret_cast<const char *>(delivery.keyId.bytes.data()), 32);
+  e["wrapped_cek"] =
+      std::string(delivery.wrappedCek.begin(), delivery.wrappedCek.end());
+  if (!delivery.authorSignature.isZero()) {
+    e["sig"] = std::string(
+        reinterpret_cast<const char *>(delivery.authorSignature.bytes.data()),
+        64);
+  }
+  return e;
+}
+
 // ============================================================================
 // String Serializers
 // ============================================================================
@@ -566,6 +813,30 @@ std::string serialize(const IdentityQueryMsg &query) {
 std::string serialize(const EmailVerifyRequestMsg &req) {
   std::string out;
   libtorrent::bencode(std::back_inserter(out), encodeToEntry(req));
+  return out;
+}
+
+std::string serialize(const TcInvoiceQueryMsg &query) {
+  std::string out;
+  libtorrent::bencode(std::back_inserter(out), encodeToEntry(query));
+  return out;
+}
+
+std::string serialize(const TcInvoiceResponseMsg &resp) {
+  std::string out;
+  libtorrent::bencode(std::back_inserter(out), encodeToEntry(resp));
+  return out;
+}
+
+std::string serialize(const TcSettleRequestMsg &req) {
+  std::string out;
+  libtorrent::bencode(std::back_inserter(out), encodeToEntry(req));
+  return out;
+}
+
+std::string serialize(const TcKeyDeliveryMsg &delivery) {
+  std::string out;
+  libtorrent::bencode(std::back_inserter(out), encodeToEntry(delivery));
   return out;
 }
 

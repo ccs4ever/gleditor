@@ -67,6 +67,30 @@ decodeEmailVerifyRequest(std::span<const std::uint8_t> bytes);
 [[nodiscard]] std::expected<EmailVerifyRequestMsg, SerializationError>
 decodeEmailVerifyRequest(const libtorrent::bdecode_node &node);
 
+[[nodiscard]] std::expected<TcInvoiceQueryMsg, SerializationError>
+decodeTcInvoiceQuery(std::span<const std::uint8_t> bytes);
+
+[[nodiscard]] std::expected<TcInvoiceQueryMsg, SerializationError>
+decodeTcInvoiceQuery(const libtorrent::bdecode_node &node);
+
+[[nodiscard]] std::expected<TcInvoiceResponseMsg, SerializationError>
+decodeTcInvoiceResponse(std::span<const std::uint8_t> bytes);
+
+[[nodiscard]] std::expected<TcInvoiceResponseMsg, SerializationError>
+decodeTcInvoiceResponse(const libtorrent::bdecode_node &node);
+
+[[nodiscard]] std::expected<TcSettleRequestMsg, SerializationError>
+decodeTcSettleRequest(std::span<const std::uint8_t> bytes);
+
+[[nodiscard]] std::expected<TcSettleRequestMsg, SerializationError>
+decodeTcSettleRequest(const libtorrent::bdecode_node &node);
+
+[[nodiscard]] std::expected<TcKeyDeliveryMsg, SerializationError>
+decodeTcKeyDelivery(std::span<const std::uint8_t> bytes);
+
+[[nodiscard]] std::expected<TcKeyDeliveryMsg, SerializationError>
+decodeTcKeyDelivery(const libtorrent::bdecode_node &node);
+
 // Bencoding conversion functions to libtorrent::entry
 [[nodiscard]] libtorrent::entry encodeToEntry(const IdentityEntry &entry);
 [[nodiscard]] libtorrent::entry encodeToEntry(const VoteEntry &vote);
@@ -77,6 +101,10 @@ decodeEmailVerifyRequest(const libtorrent::bdecode_node &node);
 encodeToEntry(const PeerChallengeResponse &resp);
 [[nodiscard]] libtorrent::entry encodeToEntry(const IdentityQueryMsg &query);
 [[nodiscard]] libtorrent::entry encodeToEntry(const EmailVerifyRequestMsg &req);
+[[nodiscard]] libtorrent::entry encodeToEntry(const TcInvoiceQueryMsg &query);
+[[nodiscard]] libtorrent::entry encodeToEntry(const TcInvoiceResponseMsg &resp);
+[[nodiscard]] libtorrent::entry encodeToEntry(const TcSettleRequestMsg &req);
+[[nodiscard]] libtorrent::entry encodeToEntry(const TcKeyDeliveryMsg &delivery);
 
 // Serialization to bencoded binary string
 [[nodiscard]] std::string serialize(const IdentityEntry &entry);
@@ -87,6 +115,10 @@ encodeToEntry(const PeerChallengeResponse &resp);
 [[nodiscard]] std::string serialize(const PeerChallengeResponse &resp);
 [[nodiscard]] std::string serialize(const IdentityQueryMsg &query);
 [[nodiscard]] std::string serialize(const EmailVerifyRequestMsg &req);
+[[nodiscard]] std::string serialize(const TcInvoiceQueryMsg &query);
+[[nodiscard]] std::string serialize(const TcInvoiceResponseMsg &resp);
+[[nodiscard]] std::string serialize(const TcSettleRequestMsg &req);
+[[nodiscard]] std::string serialize(const TcKeyDeliveryMsg &delivery);
 
 // BEP 10 Message Frame Wrapper
 struct ExtendedMessageFrame {
