@@ -15,25 +15,37 @@ GLEDITOR_FRAG_OUT(0) vec4 outColour;
 GLEDITOR_FRAG_OUT(1) uvec4 outTag;
 
 void main() {
-  // Soften the long edges over roughly one pixel rather than over a fixed
-  // fraction of the width. A beam is thin and usually seen at an angle, which
-  // is where a hard edge crawls -- and a fixed fraction gets that wrong from
-  // both directions: it blurs a beam drawn close and near head-on into a
-  // gradient with no edge at all, and leaves one drawn small or steeply
-  // foreshortened as stepped as it ever was. fwidth is how wide a pixel is in
-  // this ribbon's own across-coordinate, which is the width the fade actually
-  // wants. Capped short of the full half-width so a beam thinner than a pixel
-  // keeps a core rather than fading away entirely.
+  // Soften the outer long edges over roughly one pixel with fwidth
   float pixelAcross = min(fwidth(vAcross), 0.9);
   float edge        = 1.0 - smoothstep(1.0 - pixelAcross, 1.0, abs(vAcross));
 
-  // And fade along its length, brightest at the end it starts from. Which
-  // way a link points is a fact about the link, and this says it without an
-  // arrowhead to draw or a direction to explain. vAlong is the fraction of
-  // the whole route rather than of this segment (see beam.vert.glsl), so a
-  // route that bends fades once from end to end instead of once per segment.
-  float along = mix(1.0, 0.55, vAlong);
+  // 1. Polished Glass Optical Core:
+  // Concentrated bright transmission channel down the centerline
+  float core = exp(-pow(abs(vAcross) * 3.2, 2.0));
 
-  outColour = vec4(vColour.rgb, vColour.a * edge * along * vOpacity);
+  // 2. Beveled Glass Fresnel Rim:
+  // Specular sheen catching the refractive edge of the glass ribbon
+  float rim = smoothstep(0.65, 0.95, abs(vAcross)) *
+              (1.0 - smoothstep(0.95, 1.0, abs(vAcross)));
+
+  // 3. Active Selection Pulse Wave:
+  // Traveling photonic pulse packets running along the transclusion conduit
+  float wave   = 0.5 + 0.5 * sin(vAlong * 32.0);
+  float packet = exp(-pow(fract(vAlong * 3.0) - 0.5, 2.0) * 36.0);
+  float pulse  = mix(0.85, 1.45, wave * 0.35 + packet * 0.65);
+
+  // Directional transmission along the path
+  float along = mix(1.0, 0.60, vAlong);
+
+  // Synthesize refractive glass colors
+  vec3 glassBase = vColour.rgb * (0.6 + 0.4 * core);
+  vec3 glassGlow =
+      mix(glassBase, vec3(1.0, 1.0, 1.0), core * 0.55 + rim * 0.45);
+  vec3 finalRgb = glassGlow * pulse;
+
+  float alpha =
+      vColour.a * edge * (0.45 + 0.55 * core + 0.35 * rim) * along * vOpacity;
+
+  outColour = vec4(finalRgb, clamp(alpha, 0.0, 1.0));
   outTag    = uvec4(vTag, 0u, 0u);
 }

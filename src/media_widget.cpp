@@ -176,7 +176,7 @@ void MediaWidget::drawFrame(FrameContext &ctx) {
     if (explicitPage_) {
       pageIdx = pageIndex_;
       anchorX = pageX_;
-      anchorY = pageY_;
+      anchorY = -pageY_;
     } else {
       const auto anchor = doc_->anchorFor(docOffset_);
       if (!anchor.has_value()) {
@@ -184,7 +184,7 @@ void MediaWidget::drawFrame(FrameContext &ctx) {
       }
       pageIdx = anchor->pageIndex;
       anchorX = anchor->x;
-      anchorY = anchor->y - 20.0F;
+      anchorY = -(anchor->y + height_ + 20.0F);
     }
 
     const auto docModel = doc_->modelMatrix();

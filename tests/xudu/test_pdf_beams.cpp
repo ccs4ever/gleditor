@@ -37,12 +37,16 @@ std::vector<const Version *> viewing(const std::vector<Version> &versions) {
 
 TEST(PdfBeamsTest, forcedBreaksPreservePageBoundariesInStore) {
   Store store;
-  // Simulate importing a 3-page document with text on each page and forced breaks
-  const std::string page0 = "First Page Header\nAlpha Bravo Charlie Delta Echo\n";
-  const std::string page1 = "Second Page Header\nFoxtrot Golf Hotel India Juliet\n";
-  const std::string page2 = "Third Page Header\nKilo Lima Mike November Oscar\n";
+  // Simulate importing a 3-page document with text on each page and forced
+  // breaks
+  const std::string page0 =
+      "First Page Header\nAlpha Bravo Charlie Delta Echo\n";
+  const std::string page1 =
+      "Second Page Header\nFoxtrot Golf Hotel India Juliet\n";
+  const std::string page2 =
+      "Third Page Header\nKilo Lima Mike November Oscar\n";
 
-  const std::string allText = page0 + page1 + page2;
+  const std::string allText               = page0 + page1 + page2;
   const std::vector<std::uint32_t> breaks = {
       static_cast<std::uint32_t>(page0.size()),
       static_cast<std::uint32_t>(page0.size() + page1.size()),
@@ -57,7 +61,7 @@ TEST(PdfBeamsTest, forcedBreaksPreservePageBoundariesInStore) {
   const auto text = store.textOf(imported);
   EXPECT_EQ(text, allText);
 
-  const auto rebuilt = store.rebuild(imported);
+  const auto rebuilt      = store.rebuild(imported);
   const auto actualBreaks = rebuilt.forcedBreaks();
   EXPECT_EQ(actualBreaks.size(), 3U);
   EXPECT_EQ(actualBreaks, breaks);
@@ -65,11 +69,14 @@ TEST(PdfBeamsTest, forcedBreaksPreservePageBoundariesInStore) {
 
 TEST(PdfBeamsTest, linksBetweenMultiPageSpansCreateBeams) {
   Store store;
-  const std::string page0 = "First Page Header\nAlpha Bravo Charlie Delta Echo\n";
-  const std::string page1 = "Second Page Header\nFoxtrot Golf Hotel India Juliet\n";
-  const std::string page2 = "Third Page Header\nKilo Lima Mike November Oscar\n";
+  const std::string page0 =
+      "First Page Header\nAlpha Bravo Charlie Delta Echo\n";
+  const std::string page1 =
+      "Second Page Header\nFoxtrot Golf Hotel India Juliet\n";
+  const std::string page2 =
+      "Third Page Header\nKilo Lima Mike November Oscar\n";
 
-  const std::string allText = page0 + page1 + page2;
+  const std::string allText               = page0 + page1 + page2;
   const std::vector<std::uint32_t> breaks = {
       static_cast<std::uint32_t>(page0.size()),
       static_cast<std::uint32_t>(page0.size() + page1.size()),
@@ -101,8 +108,9 @@ TEST(PdfBeamsTest, linksBetweenMultiPageSpansCreateBeams) {
   const auto linkedVersion = store.addLink(docVersion, link);
 
   // When transcluding a quote from Page 1 into a second document:
-  const auto quotedVersion = store.transclude(
-      MicroversionId{}, 0, linkedVersion, static_cast<std::uint32_t>(p1Pos), 12);
+  const auto quotedVersion =
+      store.transclude(MicroversionId{}, 0, linkedVersion,
+                       static_cast<std::uint32_t>(p1Pos), 12);
 
   const std::vector<Version> versions{store.rebuild(linkedVersion),
                                       store.rebuild(quotedVersion)};
