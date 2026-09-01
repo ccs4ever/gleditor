@@ -311,6 +311,19 @@ publish(const Store &store, const MicroversionId &version,
         const std::vector<ScrollSegment> &opsSegments = {});
 
 /**
+ * @brief Publish a document under @p documentKeys, incrementally sealing the
+ *        user's shared permascroll.
+ */
+[[nodiscard]] Publication
+publishDocument(Store &store, const MicroversionId &version,
+                const MutableKeys &documentKeys, std::string salt,
+                std::string title, std::int64_t sequence,
+                std::uint64_t published,
+                const SignedProvenance &permascrollProvenance,
+                const SignedProvenance &documentProvenance,
+                const std::string &torrentOutputDir = {});
+
+/**
  * @brief The global name of the scroll @p span points into.
  *
  * Empty when it has none, which is the case for content typed here and not yet

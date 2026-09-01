@@ -71,6 +71,12 @@ std::ifstream openTextSpoolForRead(const std::filesystem::path &path) {
 
 } // namespace
 
+Store::Store() : userPermascroll_(std::make_shared<UserPermascroll>()) {}
+
+Store::Store(std::shared_ptr<UserPermascroll> userPermascroll)
+    : userPermascroll_(userPermascroll ? std::move(userPermascroll)
+                                       : std::make_shared<UserPermascroll>()) {}
+
 void Store::putOp(const MicroversionId &produces, const Op &op) {
   if (produces.isZero()) {
     throw std::invalid_argument(
@@ -240,7 +246,7 @@ const Scroll *Store::scroll(const ScrollId id) const {
 
 std::string Store::read(const PrimediaSpan &span) const {
   if (span.isLocal()) {
-    return spool.read(span);
+    return userPermascroll_->read(span);
   }
   if (const auto vocab = readVocabulary(span)) {
     return *vocab;
@@ -279,11 +285,24 @@ MicroversionId Store::insertBreak(const MicroversionId &parent,
   return apply(parent, op);
 }
 
-MicroversionId Store::applyRemoteLiveOp(const Op &op,
-                                        const std::string_view primediaText) {
+MicroversionId
+Store::applyRemoteLiveOp(const Op &op, const std::string_view primediaText,
+                         const std::string_view authorScrollKey) {
   Op localOp = op;
-  if (localOp.kind == OpKind::Insert && !primediaText.empty()) {
-    const auto span = spool.append(primediaText);
+  if (!authorScrollKey.empty() && localOp.kind == OpKind::Insert) {
+    Scroll targetScroll;
+    if (authorScrollKey.starts_with("btpk:")) {
+      const auto rest  = authorScrollKey.substr(5);
+      const auto colon = rest.find(':');
+      if (colon != std::string_view::npos) {
+        targetScroll.publisher = PublicKey::fromHex(rest.substr(0, colon));
+        targetScroll.salt      = std::string(rest.substr(colon + 1));
+      }
+    }
+    const auto scrollId = addScroll(targetScroll);
+    localOp.span.scroll = scrollId;
+  } else if (localOp.kind == OpKind::Insert && !primediaText.empty()) {
+    const auto span = userPermascroll_->append(primediaText);
     localOp.span    = span;
   }
   return apply(localOp.parent, localOp);
@@ -323,7 +342,7 @@ MicroversionId Store::insert(const MicroversionId &parent,
   op.at   = at;
   // Into the spool first: the op records where the content went, never the
   // content, so the content has to have gone somewhere before there is an op.
-  op.span = spool.append(text);
+  op.span = userPermascroll_->append(text);
   return apply(parent, op);
 }
 
@@ -502,7 +521,7 @@ void Store::save(const std::string &directory) const {
     // state sorts into the middle of that order, not the end. There is no
     // tail to append. SegmentedOpsSpool is what carries the operations
     // incrementally; ops.spool is a compact whole-file export of them.
-    const auto &bytes = spool.bytes();
+    const auto &bytes = userPermascroll_->bytes();
     const bool fresh  = flushedPrimediaDirectory != directory;
     std::ofstream out(dir / primediaFile,
                       std::ios::binary |
@@ -590,7 +609,7 @@ void Store::saveOsmicText(const std::string &directory) const {
 
   {
     std::ofstream out(dir / primediaFile, std::ios::binary | std::ios::trunc);
-    out << spool.bytes();
+    out << userPermascroll_->bytes();
   }
   {
     // Canonical line-by-line OSMIC text format.
@@ -647,11 +666,13 @@ void Store::writeOsmicText(std::ostream &out) const {
 
 void Store::load(const std::string &directory) {
   const std::filesystem::path dir(directory);
-  spool.adopt(readWholeFile(dir / primediaFile));
+  if (std::filesystem::exists(dir / primediaFile)) {
+    userPermascroll_->adopt(readWholeFile(dir / primediaFile));
+  }
   // What was just read is already on disk here, so the next save to this
   // directory can append to it rather than write it out again.
   flushedPrimediaDirectory = directory;
-  primediaFlushed          = spool.size();
+  primediaFlushed          = userPermascroll_->size();
   opsSpool.clear();
   linkTable.clear();
   externals.clear();

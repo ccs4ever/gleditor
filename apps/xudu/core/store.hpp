@@ -35,7 +35,9 @@
 #include "resolver.hpp"
 #include "scroll.hpp"
 #include "segmented_ops_spool.hpp"
+#include "segmented_primedia_spool.hpp"
 #include "spool.hpp"
+#include "user_permascroll.hpp"
 #include "version.hpp"
 
 namespace xudu {
@@ -46,6 +48,8 @@ namespace xudu {
  */
 class Store : public SpanReader {
 public:
+  Store();
+  explicit Store(std::shared_ptr<UserPermascroll> userPermascroll);
   // -- OSMIC's three server functions ---------------------------------------
 
   /**
@@ -244,7 +248,18 @@ public:
   /// opened a store should start.
   [[nodiscard]] MicroversionId latest() const;
 
-  [[nodiscard]] const PrimediaSpool &primedia() const { return spool; }
+  [[nodiscard]] const SegmentedPrimediaSpool &primedia() const {
+    return userPermascroll_->spool();
+  }
+  [[nodiscard]] SegmentedPrimediaSpool &primedia() {
+    return userPermascroll_->spool();
+  }
+  [[nodiscard]] const UserPermascroll &userPermascroll() const {
+    return *userPermascroll_;
+  }
+  [[nodiscard]] std::shared_ptr<UserPermascroll> userPermascrollPtr() const {
+    return userPermascroll_;
+  }
   [[nodiscard]] std::size_t opCount() const { return opsSpool.size(); }
 
   // -- content that was not typed here --------------------------------------
@@ -313,7 +328,8 @@ public:
    * @brief Apply an operation received from a collaborative peer session.
    */
   MicroversionId applyRemoteLiveOp(const Op &op,
-                                   std::string_view primediaText = "");
+                                   std::string_view primediaText    = "",
+                                   std::string_view authorScrollKey = "");
 
   // -- persistence ----------------------------------------------------------
 
@@ -410,8 +426,9 @@ private:
   /// duplicate, and keeps a corrupt file opening rather than throwing.
   void adoptOpRecords(const std::vector<OpRecord> &records);
 
-  PrimediaSpool spool;
-  /// How many bytes of @ref spool are already on disk, and in which directory.
+  std::shared_ptr<UserPermascroll> userPermascroll_;
+  /// How many bytes of @ref userPermascroll_ are already on disk, and in which
+  /// directory.
   /// The primedia spool only ever grows, so a save to the directory the last
   /// one went to appends what is new rather than rewriting the whole thing --
   /// which is what made saving cost the length of the document rather than

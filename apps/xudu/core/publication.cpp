@@ -1017,4 +1017,26 @@ Library::linksTouching(const GlobalSpan &span) const {
   return out;
 }
 
+Publication
+publishDocument(Store &store, const MicroversionId &version,
+                const MutableKeys &documentKeys, std::string salt,
+                std::string title, const std::int64_t sequence,
+                const std::uint64_t published,
+                const SignedProvenance &permascrollProvenance,
+                [[maybe_unused]] const SignedProvenance &documentProvenance,
+                const std::string &torrentOutputDir) {
+  if (!torrentOutputDir.empty()) {
+    std::error_code ec;
+    std::filesystem::create_directories(torrentOutputDir, ec);
+  }
+  if (store.userPermascrollPtr()) {
+    store.userPermascrollPtr()->sealIncremental(torrentOutputDir,
+                                                permascrollProvenance);
+  }
+
+  const auto userScroll = store.userPermascroll().currentScroll();
+  return publish(store, version, documentKeys, std::move(salt),
+                 std::move(title), sequence, published, &userScroll);
+}
+
 } // namespace xudu
