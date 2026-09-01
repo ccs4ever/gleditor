@@ -713,16 +713,20 @@ void LinkBeams::drawFrame(gleditor::FrameContext &ctx) {
   }
 
   bool docTransformsChanged = false;
-  if (lastDocTransforms.size() != state.docs.size()) {
+  if (lastDocTransforms.size() != state.docs.size() ||
+      lastDocOpacities.size() != state.docs.size()) {
     docTransformsChanged = true;
-    lastDocTransforms.resize(state.docs.size());
+    lastDocTransforms.resize(state.docs.size(), glm::mat4(0.0F));
+    lastDocOpacities.resize(state.docs.size(), -1.0F);
   }
   for (std::size_t i = 0; i < state.docs.size(); i++) {
     if (state.docs[i]) {
-      const auto &curMat = state.docs[i]->getModel();
-      if (curMat != lastDocTransforms[i]) {
+      const auto curMat = state.docs[i]->modelMatrix();
+      const auto curOp  = state.docs[i]->currentOpacity();
+      if (curMat != lastDocTransforms[i] || curOp != lastDocOpacities[i]) {
         docTransformsChanged = true;
         lastDocTransforms[i] = curMat;
+        lastDocOpacities[i]  = curOp;
       }
     }
   }

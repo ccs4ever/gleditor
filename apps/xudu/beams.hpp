@@ -251,6 +251,7 @@ private:
   std::uint64_t builtFor{};
   std::size_t builtDocs{static_cast<std::size_t>(-1)};
   std::vector<glm::mat4> lastDocTransforms;
+  std::vector<float> lastDocOpacities;
   bool strandsRebuilt{true};
   bool visible{true};
   bool sworph{true};

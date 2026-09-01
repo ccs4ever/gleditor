@@ -35,16 +35,16 @@ void main() {
   float pulse  = mix(0.85, 1.45, wave * 0.35 + packet * 0.65);
 
   // Directional transmission along the path
-  float along = mix(1.0, 0.60, vAlong);
+  float along = mix(1.0, 0.75, vAlong);
 
   // Synthesize refractive glass colors
-  vec3 glassBase = vColour.rgb * (0.6 + 0.4 * core);
+  vec3 glassBase = vColour.rgb * (0.7 + 0.3 * core);
   vec3 glassGlow =
-      mix(glassBase, vec3(1.0, 1.0, 1.0), core * 0.55 + rim * 0.45);
+      mix(glassBase, vec3(1.0, 1.0, 1.0), core * 0.65 + rim * 0.55);
   vec3 finalRgb = glassGlow * pulse;
 
   float alpha =
-      vColour.a * edge * (0.45 + 0.55 * core + 0.35 * rim) * along * vOpacity;
+      vColour.a * edge * (0.70 + 0.30 * core + 0.25 * rim) * along * vOpacity;
 
   outColour = vec4(finalRgb, clamp(alpha, 0.0, 1.0));
   outTag    = uvec4(vTag, 0u, 0u);
