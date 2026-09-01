@@ -524,7 +524,7 @@ GlyphCache::addToCache(const std::string &chr, const FontPtr &font,
   }
 
   const auto extents = Rect{Length{width}, Length{height}};
-  if (0 == width || rendered.empty()) {
+  if (0 == width) {
     for (auto &r : rendered) {
       FT_Done_Glyph(reinterpret_cast<FT_Glyph>(r.bitmapGlyph));
     }

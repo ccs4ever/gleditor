@@ -200,16 +200,21 @@ void LinkBeams::resolveAnchors(RenderState &state) {
 
 std::optional<glm::vec3> LinkBeams::edgePoint(const Doc &doc,
                                               const Doc::Anchor &anchor,
-                                              const bool towardsRight) {
+                                              const bool towardsRight,
+                                              const bool atTextBorder) {
   const auto *const page = doc.page(anchor.pageIndex);
   if (nullptr == page) {
     return std::nullopt;
   }
-  // The margin on the side the other document is on, level with the anchor.
-  // Leaving from the text itself would run the beam back across the page it
-  // came from before it got anywhere.
-  const auto edge = towardsRight ? page->leftPixels() + page->widthPixels()
-                                 : page->leftPixels();
+  // Margin on the side the other document is on.
+  // 24.0F is pageMargin in layout pixels.
+  float edge = 0.0F;
+  if (towardsRight) {
+    edge = atTextBorder ? (page->leftPixels() + page->widthPixels() - 24.0F)
+                        : (page->leftPixels() + page->widthPixels());
+  } else {
+    edge = atTextBorder ? (page->leftPixels() + 24.0F) : page->leftPixels();
+  }
   return doc.worldPoint(anchor.pageIndex, edge, anchor.y);
 }
 
@@ -220,18 +225,36 @@ LinkBeams::edgeOf(const Doc &doc, const std::optional<Doc::Anchor> &startAnchor,
   if (!startAnchor) {
     return std::nullopt;
   }
-  const auto first = edgePoint(doc, *startAnchor, towardsRight);
-  if (!first) {
+  const auto pageFirst = edgePoint(doc, *startAnchor, towardsRight, false);
+  const auto textFirst = edgePoint(doc, *startAnchor, towardsRight, true);
+  if (!pageFirst || !textFirst) {
     return std::nullopt;
   }
-  Edge out{*first, *first, startAnchor->height};
+  Edge out{
+      .top        = *pageFirst,
+      .bottom     = *pageFirst,
+      .textTop    = *textFirst,
+      .textBottom = *textFirst,
+      .lineHeight = startAnchor->height,
+  };
   // The end anchor is where the link's last byte fell, which on a link running
   // over several lines is lower down and on a link within one line is the same
   // place. Either is a usable edge; only a page that has not built yet is not.
   if (endAnchor) {
-    if (const auto last = edgePoint(doc, *endAnchor, towardsRight)) {
-      out.top        = first->y >= last->y ? *first : *last;
-      out.bottom     = first->y >= last->y ? *last : *first;
+    const auto pageLast = edgePoint(doc, *endAnchor, towardsRight, false);
+    const auto textLast = edgePoint(doc, *endAnchor, towardsRight, true);
+    if (pageLast && textLast) {
+      if (pageFirst->y >= pageLast->y) {
+        out.top        = *pageFirst;
+        out.bottom     = *pageLast;
+        out.textTop    = *textFirst;
+        out.textBottom = *textLast;
+      } else {
+        out.top        = *pageLast;
+        out.bottom     = *pageFirst;
+        out.textTop    = *textLast;
+        out.textBottom = *textFirst;
+      }
       out.lineHeight = std::max(startAnchor->height, endAnchor->height);
     }
   }
@@ -299,59 +322,71 @@ void LinkBeams::anchorStub(const Edge &edge, const std::uint32_t colour,
   const float lineWorld = edge.lineHeight * Doc::pixelsToWorld;
   const float half      = std::max(std::abs(edge.top.y - edge.bottom.y) * 0.5F,
                                    lineWorld * stubMinOfLine * 0.5F);
-  const auto middle     = 0.5F * (edge.top + edge.bottom);
+  const auto pageMid    = 0.5F * (edge.top + edge.bottom);
+  const auto textMid    = 0.5F * (edge.textTop + edge.textBottom);
   const glm::vec3 up(0.0F, half, 0.0F);
-  // Held at one end of the route rather than spanning it, so the bracket is as
-  // bright as the beam is where it meets it: the fade along a beam's length is
-  // there to say which way the link points, and a bracket that faded down its
-  // own height would say something about the page instead.
   const float at = farEnd ? 1.0F : 0.0F;
-  beams->add(middle - up, middle + up,
+
+  // Margin fill connecting text edge across margin to outer page edge
+  beams->add(textMid, pageMid, half * 2.0F, colour, tag, at, at);
+
+  // Outer page margin bracket
+  beams->add(pageMid - up, pageMid + up,
              lineWorld * beamWidthOfLine * stubWidthOfBeam, colour, tag, at,
              at);
 }
 
-void LinkBeams::drawMarginAnchorLane(
-    const Edge &edge, const std::uint32_t colour, const std::uint32_t tag,
-    const bool farEnd, const bool towardsRight, const int laneIndex,
-    [[maybe_unused]] const int laneCount, const bool isActive) {
+void LinkBeams::drawMarginAnchorLane(const Edge &edge,
+                                     const std::uint32_t colour,
+                                     const std::uint32_t tag, const bool farEnd,
+                                     [[maybe_unused]] const bool towardsRight,
+                                     const int laneIndex, const int laneCount,
+                                     const bool isActive) {
   const float lineWorld = edge.lineHeight * Doc::pixelsToWorld;
   const float half      = std::max(std::abs(edge.top.y - edge.bottom.y) * 0.5F,
                                    lineWorld * stubMinOfLine * 0.5F);
-  const auto middle     = 0.5F * (edge.top + edge.bottom);
-  const glm::vec3 up(0.0F, half, 0.0F);
-  const float at = farEnd ? 1.0F : 0.0F;
+  const auto pageMid    = 0.5F * (edge.top + edge.bottom);
+  const auto textMid    = 0.5F * (edge.textTop + edge.textBottom);
+  const float at        = farEnd ? 1.0F : 0.0F;
 
-  // Base stub geometry and lane spacing
-  const float baseStubWidth = lineWorld * beamWidthOfLine * stubWidthOfBeam;
-  const float laneSpacing   = baseStubWidth * 1.15F;
+  const int totalLanes = std::clamp(laneCount, 1, 4);
+  const float fraction = 1.0F / static_cast<float>(totalLanes);
 
-  // Offset lane into the margin (outward from the text edge)
-  const float dir = towardsRight ? 1.0F : -1.0F;
-  const glm::vec3 lateralOffset(
-      dir *
-          (static_cast<float>(laneIndex) * laneSpacing + baseStubWidth * 0.5F),
-      0.0F, 0.01F * static_cast<float>(laneIndex));
+  // Sub-band height and vertical offset within the line span for this lane
+  const float subHalf    = half * fraction;
+  const float subCenterY = (static_cast<float>(totalLanes - 1) * 0.5F -
+                            static_cast<float>(laneIndex)) *
+                           (2.0F * subHalf);
+  const glm::vec3 subUp(0.0F, subHalf, 0.0F);
+  const glm::vec3 laneOffset(0.0F, subCenterY,
+                             0.02F * static_cast<float>(laneIndex));
 
-  const auto topPos = middle + up + lateralOffset;
-  const auto botPos = middle - up + lateralOffset;
+  const auto textP1 = textMid + laneOffset - subUp;
+  const auto textP2 = textMid + laneOffset + subUp;
+  const auto pageP1 = pageMid + laneOffset - subUp;
+  const auto pageP2 = pageMid + laneOffset + subUp;
 
-  // Active anchor is wider, bolder, and fully saturated with pulse
-  const float width =
-      isActive ? (baseStubWidth * 1.4F) : (baseStubWidth * 0.95F);
-  const auto drawColour = isActive ? (colour | 0xFFU) : fade(colour, 0.90F);
+  const auto textCenter = 0.5F * (textP1 + textP2);
+  const auto pageCenter = 0.5F * (pageP1 + pageP2);
 
-  // 1. Vertical anchor bar filling the margin lane
-  beams->add(botPos, topPos, width, drawColour, tag, at, at);
+  // Prominence styling
+  const auto drawColour = isActive ? (colour | 0xFFU) : fade(colour, 0.92F);
+  const float bandThick = (subHalf * 2.0F) * (isActive ? 1.2F : 0.95F);
+  const float stubWidth =
+      lineWorld * beamWidthOfLine * stubWidthOfBeam * (isActive ? 1.4F : 1.0F);
 
-  // 2. Horizontal tick brackets connecting the outer lane back to the text edge
-  if (laneIndex > 0) {
-    const auto textEdgeTop = middle + up;
-    const auto textEdgeBot = middle - up;
-    const float tickWidth  = width * 0.65F;
-    beams->add(textEdgeTop, topPos, tickWidth, drawColour, tag, at, at);
-    beams->add(textEdgeBot, botPos, tickWidth, drawColour, tag, at, at);
-  }
+  // 1. Margin coloring fill: horizontal band connecting from text boundary
+  // across margin to page boundary
+  beams->add(textCenter, pageCenter, std::max(bandThick, 1.6F), drawColour, tag,
+             at, at);
+
+  // 2. Outer page edge anchor bracket: solid vertical bracket along the outer
+  // page edge
+  beams->add(pageP1, pageP2, stubWidth, drawColour, tag, at, at);
+
+  // 3. Inner text edge anchor bracket: subtle vertical bracket along the text
+  // boundary
+  beams->add(textP1, textP2, stubWidth * 0.8F, drawColour, tag, at, at);
 }
 
 bool LinkBeams::onScreen(const glm::mat4 &viewProjection,

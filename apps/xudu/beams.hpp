@@ -179,7 +179,8 @@ private:
   /// World point a beam leaves a document from: the page margin on the side
   /// the other document is on, level with the anchor.
   [[nodiscard]] static std::optional<glm::vec3>
-  edgePoint(const Doc &doc, const Doc::Anchor &anchor, bool towardsRight);
+  edgePoint(const Doc &doc, const Doc::Anchor &anchor, bool towardsRight,
+            bool atTextBorder = false);
 
   /**
    * @brief Where one end of a link meets its document's margin, top and
@@ -193,6 +194,8 @@ private:
   struct Edge {
     glm::vec3 top{};
     glm::vec3 bottom{};
+    glm::vec3 textTop{};
+    glm::vec3 textBottom{};
     /// Line height at the anchor, in world units. What sets the beam's weight,
     /// so that a relation between two lines of text is drawn at the scale of
     /// the text rather than at some fixed size that swamps small type and
