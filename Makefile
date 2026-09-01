@@ -296,7 +296,7 @@ endif
 # requires it; a program does not, but compiling the two trees differently
 # would mean two object directories and two sets of rules for one flag whose
 # cost here is not measurable.
-override CXXFLAGS += $(DEBUG_OPTS) $(STD_FLAG) -fPIC -Ibuild/src -Iinclude -Iapps -Ithirdparty/Choreograph/src -Ithirdparty/argparse/include -Wall -Wextra $(shell pkg-config $(STATIC) --cflags $(PKGS)) $(GL_CFLAGS)
+override CXXFLAGS += $(DEBUG_OPTS) $(STD_FLAG) -fPIC -Ibuild/src -Iinclude -Iapps -Ithirdparty/Choreograph/src -Ithirdparty/argparse/include -isystem thirdparty/merklecpp -Wall -Wextra $(shell pkg-config $(STATIC) --cflags $(PKGS)) $(GL_CFLAGS)
 ifdef GLEDITOR_DATADIR
 override CXXFLAGS += -DGLEDITOR_DATADIR='"$(GLEDITOR_DATADIR)"'
 endif

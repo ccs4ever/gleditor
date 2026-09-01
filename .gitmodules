@@ -11,3 +11,6 @@
 	# SDL through pkg-config, same as before. Pinned to the release-3.4.14 tag
 	# (recorded as this submodule's commit) since Android has no system SDL to
 	# link against instead.
+[submodule "thirdparty/merklecpp"]
+	path = thirdparty/merklecpp
+	url = https://github.com/microsoft/merklecpp.git
