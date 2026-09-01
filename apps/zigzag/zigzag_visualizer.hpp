@@ -119,6 +119,18 @@ public:
   void returnToPreviousSlice();
   void cancelPrefletFetch();
 
+  // -- Multi-View Modes (Cell Content View vs. Topology View) ---------------
+  enum class ViewMode : std::uint8_t {
+    CellContent =
+        0, ///< Dynamic sizing, full content, close XYZ spring alignment
+    Topology =
+        1, ///< Partial/abbreviated content, fixed-size cells on rigid lattice
+  };
+
+  void setViewMode(ViewMode mode);
+  [[nodiscard]] ViewMode viewMode() const { return view_mode_; }
+  void toggleViewMode();
+
   // -- In-App Interactive Cell & Dimension Editing --------------------------
   CellID createCell(std::string text = "", std::string type = "text");
   bool insertConnectedCell(std::string text, const DimID &dimension,
@@ -162,6 +174,7 @@ private:
   ViewAxisBinding current_view_;
 
   SceneVisual scene_;
+  ViewMode view_mode_{ViewMode::CellContent};
   std::unordered_map<DimID, DimensionVisual> dimension_visuals_;
 
   std::unordered_map<CellID, RenderStateCell> visible_cells_;

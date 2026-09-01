@@ -432,20 +432,27 @@ void ZigzagVisualizer::rebuildActiveViewTopology() {
     const DimensionVisual yVisual = dimensionVisual(current_view_.y_dimension);
     const DimensionVisual zVisual = dimensionVisual(current_view_.z_dimension);
 
-    mapNeighbor(accursed_cell_focus_, xLinks.pos,
-                glm::vec3{xVisual.spacing, 0.0F, 0.0F}, xVisual.color);
+    const float xSpace =
+        (view_mode_ == ViewMode::CellContent) ? 260.0F : xVisual.spacing;
+    const float ySpace =
+        (view_mode_ == ViewMode::CellContent) ? 140.0F : yVisual.spacing;
+    const float zSpace =
+        (view_mode_ == ViewMode::CellContent) ? 180.0F : zVisual.spacing;
+
+    mapNeighbor(accursed_cell_focus_, xLinks.pos, glm::vec3{xSpace, 0.0F, 0.0F},
+                xVisual.color);
     mapNeighbor(accursed_cell_focus_, xLinks.neg,
-                glm::vec3{-xVisual.spacing, 0.0F, 0.0F}, xVisual.color);
+                glm::vec3{-xSpace, 0.0F, 0.0F}, xVisual.color);
 
-    mapNeighbor(accursed_cell_focus_, yLinks.pos,
-                glm::vec3{0.0F, yVisual.spacing, 0.0F}, yVisual.color);
+    mapNeighbor(accursed_cell_focus_, yLinks.pos, glm::vec3{0.0F, ySpace, 0.0F},
+                yVisual.color);
     mapNeighbor(accursed_cell_focus_, yLinks.neg,
-                glm::vec3{0.0F, -yVisual.spacing, 0.0F}, yVisual.color);
+                glm::vec3{0.0F, -ySpace, 0.0F}, yVisual.color);
 
-    mapNeighbor(accursed_cell_focus_, zLinks.pos,
-                glm::vec3{0.0F, 0.0F, zVisual.spacing}, zVisual.color);
+    mapNeighbor(accursed_cell_focus_, zLinks.pos, glm::vec3{0.0F, 0.0F, zSpace},
+                zVisual.color);
     mapNeighbor(accursed_cell_focus_, zLinks.neg,
-                glm::vec3{0.0F, 0.0F, -zVisual.spacing}, zVisual.color);
+                glm::vec3{0.0F, 0.0F, -zSpace}, zVisual.color);
   }
 }
 
@@ -522,6 +529,17 @@ void ZigzagVisualizer::navigateFocusTo(const CellID id) {
   accursed_cell_focus_ = id;
   rebuildActiveViewTopology();
   invalidateAccessibility();
+}
+
+void ZigzagVisualizer::setViewMode(const ViewMode mode) {
+  view_mode_ = mode;
+  rebuildActiveViewTopology();
+  invalidateAccessibility();
+}
+
+void ZigzagVisualizer::toggleViewMode() {
+  setViewMode(view_mode_ == ViewMode::CellContent ? ViewMode::Topology
+                                                  : ViewMode::CellContent);
 }
 
 void ZigzagVisualizer::swapDimensions(const int axis1, const int axis2) {
@@ -669,8 +687,12 @@ void ZigzagVisualizer::drawFrame(gleditor::FrameContext &ctx) {
                          static_cast<std::uint32_t>(id));
 
     const bool isFocus     = (id == accursed_cell_focus_);
-    const float nodeWidth  = isFocus ? 160.0F : 120.0F;
-    const float nodeHeight = isFocus ? 70.0F : 50.0F;
+    const float nodeWidth  = (view_mode_ == ViewMode::CellContent)
+                                 ? (isFocus ? 260.0F : 200.0F)
+                                 : (isFocus ? 140.0F : 110.0F);
+    const float nodeHeight = (view_mode_ == ViewMode::CellContent)
+                                 ? (isFocus ? 95.0F : 70.0F)
+                                 : (isFocus ? 54.0F : 45.0F);
 
     const float left   = cell.current_pos.x - (nodeWidth / 2.0F);
     const float bottom = cell.current_pos.y - (nodeHeight / 2.0F);
@@ -704,7 +726,10 @@ void ZigzagVisualizer::drawFrame(gleditor::FrameContext &ctx) {
                           idText, borderCol, bgCol);
 
     // Label Text
-    const std::string textPreview = shortenText(cell.text, isFocus ? 18 : 12);
+    const std::size_t maxTextLen  = (view_mode_ == ViewMode::CellContent)
+                                        ? (isFocus ? 48 : 32)
+                                        : (isFocus ? 16 : 10);
+    const std::string textPreview = shortenText(cell.text, maxTextLen);
     worldCanvas_->addText(ctx.state, left + 6.0F, bottom + nodeHeight - 26.0F,
                           textPreview, textCol, bgCol);
 
@@ -777,6 +802,15 @@ void ZigzagVisualizer::drawFrame(gleditor::FrameContext &ctx) {
   const auto dimsMetrics = hudCanvas_->measureText(dimsInfo);
   hudCanvas_->addText(ctx.state, width - dimsMetrics.width - 16.0F,
                       height - 12.0F, dimsInfo, 0x70B0FFFFU, 0x0D0D12DDU);
+
+  // View Mode Status Indicator
+  const std::string modeLabel = (view_mode_ == ViewMode::CellContent)
+                                    ? "[ View: 📄 Content (1/V) ]"
+                                    : "[ View: 🌐 Topology (2/T) ]";
+  const auto modeMetrics      = hudCanvas_->measureText(modeLabel);
+  hudCanvas_->addText(ctx.state,
+                      width - dimsMetrics.width - modeMetrics.width - 32.0F,
+                      height - 12.0F, modeLabel, 0xF59E0BFFU, 0x0D0D12DDU);
 
   // Preflet Fetch Progress Banner
   const auto &fetch = preflet_fetcher_.progress();

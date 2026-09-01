@@ -58,6 +58,28 @@ void bindCommands(gleditor::Application &app, const AppStateRef &state,
   app.commands().bind(SDL_SCANCODE_Q, "quit", "close the visualizer",
                       [state] { state->alive = false; });
 
+  // Multi-View Modes (Cell Content View vs. Topology View)
+  app.commands().bind(
+      SDL_SCANCODE_1, "view-mode-content",
+      "switch to Cell Content View (full content & XYZ alignment)", [viz] {
+        viz->setViewMode(zigzag::ZigzagVisualizer::ViewMode::CellContent);
+      });
+  app.commands().bind(
+      SDL_SCANCODE_V, "view-mode-content-v",
+      "switch to Cell Content View (full content & XYZ alignment)", [viz] {
+        viz->setViewMode(zigzag::ZigzagVisualizer::ViewMode::CellContent);
+      });
+  app.commands().bind(
+      SDL_SCANCODE_2, "view-mode-topology",
+      "switch to Topology View (fixed-size cells & lattice geometry)", [viz] {
+        viz->setViewMode(zigzag::ZigzagVisualizer::ViewMode::Topology);
+      });
+  app.commands().bind(
+      SDL_SCANCODE_T, "view-mode-topology-t",
+      "switch to Topology View (fixed-size cells & lattice geometry)", [viz] {
+        viz->setViewMode(zigzag::ZigzagVisualizer::ViewMode::Topology);
+      });
+
   // Navigation along active dimensions
   app.commands().bind(
       SDL_SCANCODE_RIGHT, "step-x-pos", "step focus positive along X dimension",

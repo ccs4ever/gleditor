@@ -221,3 +221,19 @@ zzstructure:
   EXPECT_EQ(zzcore::getEffectiveCellText(currentDoc.cells, 2),
             "Mutated Text From Clone");
 }
+
+TEST(ZigzagVisualizerTest, MultiViewModeToggle) {
+  ZigzagVisualizer viz("Sans 12", false);
+
+  // Default is CellContent view
+  EXPECT_EQ(viz.viewMode(), ZigzagVisualizer::ViewMode::CellContent);
+
+  viz.setViewMode(ZigzagVisualizer::ViewMode::Topology);
+  EXPECT_EQ(viz.viewMode(), ZigzagVisualizer::ViewMode::Topology);
+
+  viz.toggleViewMode();
+  EXPECT_EQ(viz.viewMode(), ZigzagVisualizer::ViewMode::CellContent);
+
+  viz.toggleViewMode();
+  EXPECT_EQ(viz.viewMode(), ZigzagVisualizer::ViewMode::Topology);
+}
