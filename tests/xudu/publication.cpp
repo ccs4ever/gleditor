@@ -310,4 +310,155 @@ TEST(PublicationTest, theSameDocumentEncodesToTheSameBytes) {
   EXPECT_EQ(once, twice);
 }
 
+TEST(PublicationTest, publicationWithWithheldHolesRoundTripsAndVerifies) {
+  const auto keys   = xudu::createMutableKeys();
+  const auto scroll = namedScroll(keys.publicKey, "permascroll", 5000);
+  xudu::Store store;
+  const auto version = quoting(store, scroll, 0, 1000);
+  auto pub = xudu::publish(store, version, keys, "essay", "Withheld Essay", 1,
+                           1700000000);
+
+  xudu::PublishedHoleRecord hole;
+  hole.at     = 200;
+  hole.length = 300;
+  hole.reason = xudu::HoleReason::Withheld;
+  hole.contentCommitment.fill(0xAB);
+  pub.holes.push_back(hole);
+
+  // Re-sign with the new hole included
+  pub.signature =
+      xudu::signMutableItem(xudu::publicationSigningBuffer(pub), keys);
+  EXPECT_TRUE(xudu::verifyPublication(pub));
+
+  const auto encoded = xudu::encodePublication(pub);
+  const auto decoded = xudu::decodePublication(encoded);
+  ASSERT_TRUE(decoded.has_value());
+  ASSERT_EQ(decoded->holes.size(), 1U);
+  EXPECT_EQ(decoded->holes[0].at, 200U);
+  EXPECT_EQ(decoded->holes[0].length, 300U);
+  EXPECT_EQ(decoded->holes[0].reason, xudu::HoleReason::Withheld);
+  EXPECT_EQ(decoded->holes[0].contentCommitment, hole.contentCommitment);
+  EXPECT_FALSE(decoded->holes[0].transcopyright.has_value());
+
+  // Tampering with the hole record invalidates the signature
+  auto tampered = pub;
+  tampered.holes[0].length += 1;
+  EXPECT_FALSE(xudu::verifyPublication(tampered));
+  EXPECT_FALSE(
+      xudu::decodePublication(xudu::encodePublication(tampered)).has_value());
+}
+
+TEST(PublicationTest,
+     publicationWithTranscopyrightPaywallRoundTripsAndVerifies) {
+  const auto keys   = xudu::createMutableKeys();
+  const auto scroll = namedScroll(keys.publicKey, "permascroll", 5000);
+  xudu::Store store;
+  const auto version = quoting(store, scroll, 0, 1000);
+  auto pub = xudu::publish(store, version, keys, "essay", "Commercial Essay", 1,
+                           1700000000);
+
+  xudu::TranscopyrightDescriptor tc;
+  tc.priceAtomicUnits = 25000000; // 0.025 XU (25 million nano-xu)
+  tc.flatFee          = false;
+  tc.currencySymbol   = "XU";
+  tc.licenseMemo      = "Nelson-Transcopyright-v1";
+  tc.authorWallet     = *xudu::identity::Fingerprint::fromString(
+      "4A7F1234567890ABCDEF1234567890ABCDEF1234");
+  tc.authorPubKey.bytes.fill(0x33);
+  tc.keyId.fill(0x44);
+  tc.nonce.fill(0x55);
+
+  xudu::PublishedHoleRecord hole;
+  hole.at     = 500;
+  hole.length = 250;
+  hole.reason = xudu::HoleReason::TranscopyrightLock;
+  hole.contentCommitment.fill(0x66);
+  hole.transcopyright = tc;
+  pub.holes.push_back(hole);
+
+  // Re-sign with transcopyright paywall included
+  pub.signature =
+      xudu::signMutableItem(xudu::publicationSigningBuffer(pub), keys);
+  EXPECT_TRUE(xudu::verifyPublication(pub));
+
+  const auto encoded = xudu::encodePublication(pub);
+  const auto decoded = xudu::decodePublication(encoded);
+  ASSERT_TRUE(decoded.has_value());
+  ASSERT_EQ(decoded->holes.size(), 1U);
+  EXPECT_EQ(decoded->holes[0].at, 500U);
+  EXPECT_EQ(decoded->holes[0].length, 250U);
+  EXPECT_EQ(decoded->holes[0].reason, xudu::HoleReason::TranscopyrightLock);
+  ASSERT_TRUE(decoded->holes[0].transcopyright.has_value());
+
+  const auto &decodedTc = *decoded->holes[0].transcopyright;
+  EXPECT_EQ(decodedTc.priceAtomicUnits, 25000000U);
+  EXPECT_FALSE(decodedTc.flatFee);
+  EXPECT_EQ(decodedTc.computeCost(250), 25000000ULL * 250ULL);
+  EXPECT_EQ(decodedTc.currencySymbol, "XU");
+  EXPECT_EQ(decodedTc.licenseMemo, "Nelson-Transcopyright-v1");
+  EXPECT_EQ(decodedTc.authorWallet, tc.authorWallet);
+  EXPECT_EQ(decodedTc.authorPubKey, tc.authorPubKey);
+  EXPECT_EQ(decodedTc.keyId, tc.keyId);
+  EXPECT_EQ(decodedTc.nonce, tc.nonce);
+
+  // Tampering with the price invalidates signature
+  auto tampered                                      = pub;
+  tampered.holes[0].transcopyright->priceAtomicUnits = 1;
+  EXPECT_FALSE(xudu::verifyPublication(tampered));
+  EXPECT_FALSE(
+      xudu::decodePublication(xudu::encodePublication(tampered)).has_value());
+}
+
+TEST(PublicationTest, scrollSegmentWithHoleRecordEncodesAndDecodesInScroll) {
+  const auto keys = xudu::createMutableKeys();
+  xudu::Scroll scroll;
+  scroll.publisher = keys.publicKey;
+  scroll.salt      = "permascroll";
+
+  xudu::ScrollSegment seg0;
+  seg0.at     = 0;
+  seg0.length = 1000;
+  seg0.path   = "permascroll";
+  scroll.segments.push_back(seg0);
+
+  xudu::PublishedHoleRecord hole;
+  hole.at     = 1000;
+  hole.length = 500;
+  hole.reason = xudu::HoleReason::Withheld;
+
+  xudu::ScrollSegment seg1;
+  seg1.at         = 1000;
+  seg1.length     = 500;
+  seg1.kind       = xudu::SegmentKind::Withheld;
+  seg1.holeRecord = hole;
+  scroll.segments.push_back(seg1);
+
+  xudu::ScrollSegment seg2;
+  seg2.at     = 1500;
+  seg2.length = 3500;
+  seg2.path   = "permascroll";
+  scroll.segments.push_back(seg2);
+
+  xudu::Store store;
+  const auto version = quoting(store, scroll, 0, 1000);
+  const auto pub     = xudu::publish(store, version, keys, "essay",
+                                     "Segmented Essay", 1, 1700000000);
+
+  const auto encoded = xudu::encodePublication(pub);
+  const auto decoded = xudu::decodePublication(encoded);
+  ASSERT_TRUE(decoded.has_value());
+
+  const auto scrollKey = xudu::scrollKeyFor(keys.publicKey, "permascroll");
+  ASSERT_TRUE(decoded->scrolls.contains(scrollKey));
+  const auto &decodedScroll = decoded->scrolls.at(scrollKey);
+  ASSERT_EQ(decodedScroll.segments.size(), 3U);
+
+  const auto *withheldSeg = decodedScroll.segmentAt(1200);
+  ASSERT_NE(withheldSeg, nullptr);
+  EXPECT_TRUE(withheldSeg->isWithheld());
+  EXPECT_EQ(withheldSeg->kind, xudu::SegmentKind::Withheld);
+  ASSERT_TRUE(withheldSeg->holeRecord.has_value());
+  EXPECT_EQ(withheldSeg->holeRecord->reason, xudu::HoleReason::Withheld);
+}
+
 } // namespace

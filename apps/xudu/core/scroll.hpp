@@ -38,15 +38,128 @@
 #ifndef XUDU_SCROLL_H
 #define XUDU_SCROLL_H
 
+#include <array>
 #include <cstdint>
+#include <optional>
 #include <string>
+#include <string_view>
 #include <vector>
 
+#include "identity/identity_layout.hpp"
 #include "mutable_link.hpp"
 #include "spool.hpp"
 #include "torrent.hpp"
 
 namespace xudu {
+
+/**
+ * @enum HoleReason
+ * @brief Semantic reason why a contiguous scroll span cannot be resolved in the
+ * clear.
+ */
+enum class HoleReason : std::uint8_t {
+  Withheld = 0x00, ///< Author redacted/withheld (editorial/embargo)
+  Revoked  = 0x01, ///< Cryptographic revocation / tombstoned
+  Takedown = 0x02, ///< Legal takedown / dispute
+  TranscopyrightLock =
+      0x03,       ///< Ted Nelson Transcopyright: pay tokens to unlock
+  Unsealed = 0x04 ///< Local span not yet sealed into BitTorrent
+};
+
+[[nodiscard]] inline std::string_view
+holeReasonName(const HoleReason reason) noexcept {
+  switch (reason) {
+  case HoleReason::Withheld:
+    return "withheld";
+  case HoleReason::Revoked:
+    return "revoked";
+  case HoleReason::Takedown:
+    return "takedown";
+  case HoleReason::TranscopyrightLock:
+    return "transcopyright";
+  case HoleReason::Unsealed:
+    return "unsealed";
+  }
+  return "unknown";
+}
+
+[[nodiscard]] inline HoleReason
+holeReasonFromName(const std::string_view name) noexcept {
+  if (name == "transcopyright") return HoleReason::TranscopyrightLock;
+  if (name == "revoked") return HoleReason::Revoked;
+  if (name == "takedown") return HoleReason::Takedown;
+  if (name == "unsealed") return HoleReason::Unsealed;
+  return HoleReason::Withheld;
+}
+
+/**
+ * @enum SegmentKind
+ * @brief Classification of carrier data for a scroll segment.
+ */
+enum class SegmentKind : std::uint8_t {
+  Plain    = 0x00, ///< Cleartext verified torrent payload
+  Withheld = 0x01  ///< Withheld or encrypted under Transcopyright CEK
+};
+
+/**
+ * @struct TranscopyrightDescriptor
+ * @brief Cryptographic and economic metadata required to invoice and unlock a
+ * paywalled span.
+ */
+struct TranscopyrightDescriptor {
+  /// Micropayment pricing in atomic units (nano-xu: 1 XU = 10^9 nano-xu)
+  std::uint64_t priceAtomicUnits{0};
+
+  /// Fee calculation model: true = flat rate for the span; false = per-byte
+  bool flatFee{true};
+
+  /// Author settlement destination (40-char OpenPGP v4 fingerprint)
+  identity::Fingerprint authorWallet{};
+  /// 32-byte Ed25519 PubKey
+  identity::PubKey32 authorPubKey{};
+
+  /// 32-byte Blake3/SHA-256 identifier of the Content Encryption Key (CEK)
+  std::array<std::uint8_t, 32> keyId{};
+
+  /// 24-byte nonce for XChaCha20-Poly1305 payload decryption
+  std::array<std::uint8_t, 24> nonce{};
+
+  /// Currency denomination symbol: "XU", "SAT", "USDN"
+  std::string currencySymbol{"XU"};
+
+  /// Human-readable terms of use / licensing terms
+  std::string licenseMemo{"Nelson-Transcopyright-v1"};
+
+  [[nodiscard]] std::uint64_t
+  computeCost(const std::uint64_t byteCount) const noexcept {
+    return flatFee ? priceAtomicUnits : (priceAtomicUnits * byteCount);
+  }
+
+  bool operator==(const TranscopyrightDescriptor &) const = default;
+};
+
+/**
+ * @struct PublishedHoleRecord
+ * @brief Authoritative signed record of a withheld/locked span within a
+ * published manifest.
+ */
+struct PublishedHoleRecord {
+  std::uint64_t at{};
+  std::uint64_t length{};
+  HoleReason reason{HoleReason::Withheld};
+  std::optional<TranscopyrightDescriptor> transcopyright{};
+
+  /// Cryptographic commitment (Blake3 / SHA-256 Merkle root) over the withheld
+  /// cleartext
+  std::array<std::uint8_t, 32> contentCommitment{};
+
+  [[nodiscard]] std::uint64_t end() const noexcept { return at + length; }
+  [[nodiscard]] bool covers(const std::uint64_t offset) const noexcept {
+    return offset >= at && offset < end();
+  }
+
+  bool operator==(const PublishedHoleRecord &) const = default;
+};
 
 /**
  * @brief One stretch of a scroll, and the torrent currently carrying it.
@@ -70,9 +183,19 @@ struct ScrollSegment {
   std::uint32_t fileIndex{};
   std::string path;
 
-  [[nodiscard]] std::uint64_t end() const { return at + length; }
-  [[nodiscard]] bool covers(const std::uint64_t offset) const {
+  SegmentKind kind{SegmentKind::Plain};
+  std::optional<PublishedHoleRecord> holeRecord{};
+
+  [[nodiscard]] std::uint64_t end() const noexcept { return at + length; }
+  [[nodiscard]] bool covers(const std::uint64_t offset) const noexcept {
     return offset >= at && offset < end();
+  }
+  [[nodiscard]] bool isWithheld() const noexcept {
+    return kind != SegmentKind::Plain;
+  }
+  [[nodiscard]] bool isLocked() const noexcept {
+    return kind == SegmentKind::Withheld && holeRecord.has_value() &&
+           holeRecord->reason == HoleReason::TranscopyrightLock;
   }
 
   bool operator==(const ScrollSegment &) const = default;

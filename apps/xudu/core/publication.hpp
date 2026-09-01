@@ -156,6 +156,9 @@ struct Publication {
   /// pieces either way and no more.
   std::vector<ScrollSegment> opsSegments;
 
+  /// Explicit signed table of withheld and transcopyright-locked ranges.
+  std::vector<PublishedHoleRecord> holes;
+
   Signature signature;
 
   /// Where a reader looks for the newest publication of this document.
