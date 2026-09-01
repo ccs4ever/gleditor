@@ -26,11 +26,13 @@ int main() {
         "is a device in which an individual "
         "stores all his books, records, and communications, and which is "
         "mechanized so that it may be consulted with "
-        "exceeding speed and flexibility. It is an enlarged intimate supplement "
+        "exceeding speed and flexibility. It is an enlarged intimate "
+        "supplement "
         "to his memory.\n\n"
         "The process of tying two items together is the important thing. When "
         "the user is building a trail, "
-        "he names it, inserts the nickname in his code book, and taps it out on "
+        "he names it, inserts the nickname in his code book, and taps it out "
+        "on "
         "his keyboard.\n";
 
     auto vOriginal = st.insert(MicroversionId{}, 0, textOriginal);
@@ -53,10 +55,10 @@ int main() {
     auto verOrig  = st.rebuild(vOriginal);
     auto verFinal = st.rebuild(vFinal);
     Link l1;
-    l1.type  = LinkType::Quotation;
-    l1.owner = "ted";
-    l1.left  = verOrig.spansFor(140, 240);
-    l1.right = verFinal.spansFor(essayPrefix.size(), 240);
+    l1.type        = LinkType::Quotation;
+    l1.owner       = "ted";
+    l1.left        = verOrig.spansFor(140, 240);
+    l1.right       = verFinal.spansFor(essayPrefix.size(), 240);
     auto vWithLink = st.addLink(vOriginal, l1);
 
     session.save(0);
@@ -89,7 +91,8 @@ int main() {
         "across distributed docuverses.\n\n"
         "Point 3 Commentary: Transclusion enforces attribution and copyright "
         "royalties automatically.\n\n"
-        "Point 4 Commentary: Micro-version trees allow hypertime scrubbing back "
+        "Point 4 Commentary: Micro-version trees allow hypertime scrubbing "
+        "back "
         "to document origins.\n\n"
         "Point 5 Commentary: Spring layouts balance readability against "
         "optical ribbon aesthetic harmony.\n";
@@ -156,17 +159,21 @@ int main() {
 
     std::string critique =
         "MULTILATERAL COMMENTARY MATRIX\n\n"
-        "Comment 1 (Quotation): Transclusion enforces exact textual attribution.\n\n"
+        "Comment 1 (Quotation): Transclusion enforces exact textual "
+        "attribution.\n\n"
         "Comment 2 (Analysis): Bidirectional links prevent 404 dead-ends.\n\n"
-        "Comment 3 (Correction): Granular provenance requires cryptographic trees.\n\n"
-        "Comment 4 (Illustration): Optical ribbons visually bridge shared passages.\n";
+        "Comment 3 (Correction): Granular provenance requires cryptographic "
+        "trees.\n\n"
+        "Comment 4 (Illustration): Optical ribbons visually bridge shared "
+        "passages.\n";
 
     auto vCrit = st.insert(MicroversionId{}, 0, critique);
 
     auto verOrig = st.rebuild(vOrig);
     auto verCrit = st.rebuild(vCrit);
 
-    // 4 overlapping links attaching to the same Point [1] span in Doc 1 (bytes 69..133)
+    // 4 overlapping links attaching to the same Point [1] span in Doc 1
+    // (bytes 69..133)
     // 1. Quotation (Mint)
     Link l1;
     l1.type  = LinkType::Quotation;
@@ -224,7 +231,8 @@ int main() {
         "COMMENTARY TARGET MATRIX\n\n"
         "Target A1: Analysis for separate Link 1 (Comment type).\n\n"
         "Target A2: Analysis for separate Link 2 (Comment type).\n\n"
-        "Target B: Comprehensive synthesis for multi-span Link (covers B1 and B2).\n";
+        "Target B: Comprehensive synthesis for multi-span Link (covers B1 and "
+        "B2).\n";
 
     auto vTgt = st.insert(MicroversionId{}, 0, targetText);
 
@@ -247,13 +255,14 @@ int main() {
     l2.right = verTgt.spansFor(84, 54);
     auto v2  = st.addLink(v1, l2);
 
-    // Link 3: Single Multi-Span Link (covers B1 and B2 on left -> Target B on right)
+    // Link 3: Single Multi-Span Link (covers B1 and B2 on left -> Target B on
+    // right)
     Link l3;
-    l3.type  = LinkType::Comment;
-    l3.owner = "curator_3";
+    l3.type     = LinkType::Comment;
+    l3.owner    = "curator_3";
     auto spanB1 = verSrc.spansFor(167, 43);
     auto spanB2 = verSrc.spansFor(214, 46);
-    l3.left = spanB1;
+    l3.left     = spanB1;
     l3.left.insert(l3.left.end(), spanB2.begin(), spanB2.end());
     l3.right = verTgt.spansFor(142, 73);
     auto v3  = st.addLink(v2, l3);

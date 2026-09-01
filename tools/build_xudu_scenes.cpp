@@ -24,11 +24,13 @@ int main() {
         "is a device in which an individual "
         "stores all his books, records, and communications, and which is "
         "mechanized so that it may be consulted with "
-        "exceeding speed and flexibility. It is an enlarged intimate supplement "
+        "exceeding speed and flexibility. It is an enlarged intimate "
+        "supplement "
         "to his memory.\n\n"
         "The process of tying two items together is the important thing. When "
         "the user is building a trail, "
-        "he names it, inserts the nickname in his code book, and taps it out on "
+        "he names it, inserts the nickname in his code book, and taps it out "
+        "on "
         "his keyboard.\n";
 
     auto vOriginal = st.insert(MicroversionId{}, 0, textOriginal);
@@ -51,10 +53,10 @@ int main() {
     auto verOrig  = st.rebuild(vOriginal);
     auto verFinal = st.rebuild(vFinal);
     Link l1;
-    l1.type  = LinkType::Quotation;
-    l1.owner = "ted";
-    l1.left  = verOrig.spansFor(150, 220);
-    l1.right = verFinal.spansFor(essayPrefix.size(), 220);
+    l1.type        = LinkType::Quotation;
+    l1.owner       = "ted";
+    l1.left        = verOrig.spansFor(150, 220);
+    l1.right       = verFinal.spansFor(essayPrefix.size(), 220);
     auto vWithLink = st.addLink(vOriginal, l1);
 
     session.save(0);
@@ -87,7 +89,8 @@ int main() {
         "across distributed docuverses.\n\n"
         "Point 3 Commentary: Transclusion enforces attribution and copyright "
         "royalties automatically.\n\n"
-        "Point 4 Commentary: Micro-version trees allow hypertime scrubbing back "
+        "Point 4 Commentary: Micro-version trees allow hypertime scrubbing "
+        "back "
         "to document origins.\n\n"
         "Point 5 Commentary: Spring layouts balance readability against "
         "optical ribbon aesthetic harmony.\n";
