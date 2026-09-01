@@ -96,8 +96,8 @@ DeviceDelegation::fromYaml(const std::string_view yamlText) {
 // -- UserPermascroll ---------------------------------------------------------
 
 UserPermascroll::UserPermascroll() {
-  config_.deviceKeys = createMutableKeys();
-  config_.deviceId   = "main";
+  config_.deviceKeys       = createMutableKeys();
+  config_.deviceId         = "main";
   currentScroll_.publisher = config_.deviceKeys.publicKey;
   currentScroll_.salt      = "permascroll";
 }
@@ -111,9 +111,9 @@ UserPermascroll::UserPermascroll(Config config) : config_(std::move(config)) {
   }
 
   currentScroll_.publisher = config_.deviceKeys.publicKey;
-  currentScroll_.salt =
-      (config_.deviceId == "main") ? "permascroll"
-                                   : "permascroll/" + config_.deviceId;
+  currentScroll_.salt      = (config_.deviceId == "main")
+                                 ? "permascroll"
+                                 : "permascroll/" + config_.deviceId;
 
   if (!config_.storageDir.empty()) {
     std::error_code ec;
@@ -175,9 +175,9 @@ std::string UserPermascroll::globalScrollKey() const {
   return scrollKey(currentScroll_);
 }
 
-std::optional<ScrollSegment>
-UserPermascroll::sealIncremental(const std::filesystem::path &outputDir,
-                                 const SignedProvenance &provenance) {
+std::optional<ScrollSegment> UserPermascroll::sealIncremental(
+    const std::filesystem::path &outputDir, const SignedProvenance &provenance,
+    const std::vector<PublishedHoleRecord> &holes) {
   std::lock_guard lock(appendMutex_);
 
   const auto allBytes = spool_.bytes();
@@ -190,9 +190,36 @@ UserPermascroll::sealIncremental(const std::filesystem::path &outputDir,
     return std::nullopt;
   }
 
+  // Construct wire payload: zero-fill withheld ranges to preserve piece
+  // alignment
+  std::string wirePayload{unsealedSlice};
+  const auto sliceStart = sealedBytes_;
+  const auto sliceEnd   = sealedBytes_ + unsealedSlice.size();
+
+  for (const auto &hole : holes) {
+    const auto holeStart = hole.at;
+    const auto holeEnd   = hole.at + hole.length;
+    if (holeEnd <= sliceStart || holeStart >= sliceEnd) {
+      continue;
+    }
+
+    const auto overlapStart = std::max(holeStart, sliceStart);
+    const auto overlapEnd   = std::min(holeEnd, sliceEnd);
+    const auto relStart     = overlapStart - sliceStart;
+    const auto relLength    = overlapEnd - overlapStart;
+
+    if (hole.reason == HoleReason::Withheld ||
+        hole.reason == HoleReason::Revoked ||
+        hole.reason == HoleReason::Takedown) {
+      std::fill(wirePayload.begin() + static_cast<std::ptrdiff_t>(relStart),
+                wirePayload.begin() +
+                    static_cast<std::ptrdiff_t>(relStart + relLength),
+                '\0');
+    }
+  }
+
   std::vector<TorrentContent> files;
-  files.push_back(
-      TorrentContent{sealedContentName, std::string{unsealedSlice}});
+  files.push_back(TorrentContent{sealedContentName, wirePayload});
   if (!provenance.yaml.empty()) {
     files.push_back(TorrentContent{provenanceFileName, provenance.yaml});
   }
@@ -208,7 +235,8 @@ UserPermascroll::sealIncremental(const std::filesystem::path &outputDir,
     const auto torrentPath = outputDir / (made.hash.hex() + ".torrent");
     std::ofstream out(torrentPath, std::ios::binary);
     if (out.is_open()) {
-      out.write(made.file.data(), static_cast<std::streamsize>(made.file.size()));
+      out.write(made.file.data(),
+                static_cast<std::streamsize>(made.file.size()));
     }
   }
 
@@ -256,7 +284,7 @@ PermascrollRegistry::getOrCreate(const identity::Fingerprint &fingerprint,
     config.storageDir = resolveDefaultStorageDir(key);
   }
 
-  auto scroll     = std::make_shared<UserPermascroll>(std::move(config));
+  auto scroll    = std::make_shared<UserPermascroll>(std::move(config));
   registry_[key] = scroll;
   return scroll;
 }

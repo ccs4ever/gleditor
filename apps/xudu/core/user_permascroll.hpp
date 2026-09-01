@@ -1,6 +1,7 @@
 /**
  * @file user_permascroll.hpp
- * @brief Sovereign append-only permascroll bound to a verified cryptographic identity.
+ * @brief Sovereign append-only permascroll bound to a verified cryptographic
+ * identity.
  */
 #ifndef XUDU_USER_PERMASCROLL_HPP
 #define XUDU_USER_PERMASCROLL_HPP
@@ -28,7 +29,8 @@ namespace xudu {
 
 /**
  * @struct DeviceDelegation
- * @brief Attestation binding a device-specific Ed25519 key to a master OpenPGP identity.
+ * @brief Attestation binding a device-specific Ed25519 key to a master OpenPGP
+ * identity.
  */
 struct DeviceDelegation {
   identity::Fingerprint masterFingerprint;
@@ -39,7 +41,8 @@ struct DeviceDelegation {
 
   [[nodiscard]] bool verify() const;
   [[nodiscard]] std::string toYaml() const;
-  [[nodiscard]] static std::optional<DeviceDelegation> fromYaml(std::string_view yaml);
+  [[nodiscard]] static std::optional<DeviceDelegation>
+  fromYaml(std::string_view yaml);
 
   bool operator==(const DeviceDelegation &) const = default;
 };
@@ -51,11 +54,13 @@ struct DeviceDelegation {
 class UserPermascroll : public SpanReader {
 public:
   struct Config {
-    std::filesystem::path storageDir;              ///< e.g. ~/.local/share/xudu/permascroll/<fp>/
-    identity::Fingerprint masterIdentity;         ///< 40-hex OpenPGP fingerprint
-    MutableKeys deviceKeys;                       ///< Active BEP 46 keypair
-    std::string deviceId{"main"};                 ///< Device identifier for subscroll salting
-    std::size_t segmentAlignmentBytes{64 * 1024}; ///< 64 KiB alignment for BitTorrent/mmap
+    std::filesystem::path
+        storageDir; ///< e.g. ~/.local/share/xudu/permascroll/<fp>/
+    identity::Fingerprint masterIdentity; ///< 40-hex OpenPGP fingerprint
+    MutableKeys deviceKeys;               ///< Active BEP 46 keypair
+    std::string deviceId{"main"}; ///< Device identifier for subscroll salting
+    std::size_t segmentAlignmentBytes{
+        64 * 1024}; ///< 64 KiB alignment for BitTorrent/mmap
   };
 
   UserPermascroll();
@@ -70,14 +75,16 @@ public:
   /**
    * @brief Atomically append keystrokes to the user's permascroll.
    * @param text The newly typed UTF-8 or primedia byte sequence.
-   * @return PrimediaSpan with scroll=localScroll (0) and 64-bit continuous offset.
+   * @return PrimediaSpan with scroll=localScroll (0) and 64-bit continuous
+   * offset.
    */
   PrimediaSpan append(std::string_view text);
 
   /// Read a span of local primedia as a string copy.
   [[nodiscard]] std::string read(const PrimediaSpan &span) const override;
 
-  /// Fast lock-free zero-copy view into contiguous virtual memory for 120 FPS UI.
+  /// Fast lock-free zero-copy view into contiguous virtual memory for 120 FPS
+  /// UI.
   [[nodiscard]] std::string_view readView(const PrimediaSpan &span) const;
 
   /// Total bytes recorded across all historical segments and active buffer.
@@ -93,7 +100,9 @@ public:
   void clear();
 
   /// Access underlying segmented primedia spool.
-  [[nodiscard]] const SegmentedPrimediaSpool &spool() const noexcept { return spool_; }
+  [[nodiscard]] const SegmentedPrimediaSpool &spool() const noexcept {
+    return spool_;
+  }
   [[nodiscard]] SegmentedPrimediaSpool &spool() noexcept { return spool_; }
 
   /// The active Scroll descriptor containing all sealed torrent segments.
@@ -103,14 +112,20 @@ public:
   [[nodiscard]] std::string globalScrollKey() const;
 
   /**
-   * @brief Incrementally seal unsealed primedia bytes into a standalone BitTorrent segment.
-   * @param outputDir Directory where torrent and payload files are written for seeding.
-   * @param provenance Signed authorship provenance record covering the new byte range.
+   * @brief Incrementally seal unsealed primedia bytes into a standalone
+   * BitTorrent segment, with zero-fill padding or encryption for holes.
+   * @param outputDir Directory where torrent and payload files are written for
+   * seeding.
+   * @param provenance Signed authorship provenance record covering the new byte
+   * range.
+   * @param holes Optional holes (withheld or transcopyright paywall spans) in
+   * this slice.
    * @return The newly sealed ScrollSegment, or std::nullopt if nothing to seal.
    */
-  std::optional<ScrollSegment> sealIncremental(
-      const std::filesystem::path &outputDir,
-      const SignedProvenance &provenance);
+  std::optional<ScrollSegment>
+  sealIncremental(const std::filesystem::path &outputDir,
+                  const SignedProvenance &provenance,
+                  const std::vector<PublishedHoleRecord> &holes = {});
 
   /// Synchronize unwritten active bytes to disk.
   bool flush();
@@ -127,7 +142,8 @@ private:
 
 /**
  * @class PermascrollRegistry
- * @brief Process-wide registry managing shared UserPermascroll instances across open stores.
+ * @brief Process-wide registry managing shared UserPermascroll instances across
+ * open stores.
  */
 class PermascrollRegistry {
 public:

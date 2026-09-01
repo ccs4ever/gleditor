@@ -82,11 +82,12 @@ TEST(UserPermascrollTest, CrossDocumentSelfTransclusion) {
       storeA.insert(MicroversionId{}, 0, "The foundational theorem.");
   const auto bytesBeforeTransclusion = sharedPermascroll->size();
 
-  // Document B transcludes the exact span from the shared author's permascroll (slot 0)
+  // Document B transcludes the exact span from the shared author's permascroll
+  // (slot 0)
   Op op;
-  op.kind = OpKind::Insert;
-  op.at   = 0;
-  op.span = PrimediaSpan{0, 4, 12}; // Points to "foundational"
+  op.kind         = OpKind::Insert;
+  op.at           = 0;
+  op.span         = PrimediaSpan{0, 4, 12}; // Points to "foundational"
   const auto verB = storeB.apply(MicroversionId{}, op);
 
   EXPECT_EQ(storeB.textOf(verB), "foundational");
@@ -105,8 +106,9 @@ TEST(UserPermascrollTest, IncrementalSealing) {
   scroll.append("First segment content.");
 
   SignedProvenance prov1;
-  prov1.yaml      = "title: \"Permascroll Seg 1\"\n";
-  prov1.signature = "-----BEGIN PGP SIGNATURE-----\ntest\n-----END PGP SIGNATURE-----\n";
+  prov1.yaml = "title: \"Permascroll Seg 1\"\n";
+  prov1.signature =
+      "-----BEGIN PGP SIGNATURE-----\ntest\n-----END PGP SIGNATURE-----\n";
 
   const auto seg1 = scroll.sealIncremental(tempDir, prov1);
   ASSERT_TRUE(seg1.has_value());
@@ -117,8 +119,9 @@ TEST(UserPermascrollTest, IncrementalSealing) {
   scroll.append(" Second segment content.");
 
   SignedProvenance prov2;
-  prov2.yaml      = "title: \"Permascroll Seg 2\"\n";
-  prov2.signature = "-----BEGIN PGP SIGNATURE-----\ntest2\n-----END PGP SIGNATURE-----\n";
+  prov2.yaml = "title: \"Permascroll Seg 2\"\n";
+  prov2.signature =
+      "-----BEGIN PGP SIGNATURE-----\ntest2\n-----END PGP SIGNATURE-----\n";
 
   const auto seg2 = scroll.sealIncremental(tempDir, prov2);
   ASSERT_TRUE(seg2.has_value());
@@ -155,8 +158,7 @@ TEST(UserPermascrollTest, CollaborativeLiveEditingZeroPayload) {
   remoteOp.span   = PrimediaSpan{0, 100, 15}; // Alice's offset 100, len 15
 
   // Apply remote live op with Alice's authorScrollKey (zero raw text passed)
-  const auto bobV2 =
-      bobStore.applyRemoteLiveOp(remoteOp, "", aliceScrollKey);
+  const auto bobV2 = bobStore.applyRemoteLiveOp(remoteOp, "", aliceScrollKey);
 
   EXPECT_EQ(bobV2.str(), "2");
 
@@ -172,18 +174,19 @@ TEST(UserPermascrollTest, CollaborativeLiveEditingZeroPayload) {
 }
 
 TEST(UserPermascrollTest, DeviceDelegationCertificateRoundTrip) {
-  const auto masterFp = Fingerprint::fromString(
-      "8A9C1234567890ABCDEF1234567890ABCDEF1234");
+  const auto masterFp =
+      Fingerprint::fromString("8A9C1234567890ABCDEF1234567890ABCDEF1234");
   ASSERT_TRUE(masterFp.has_value());
 
   const auto deviceKeys = xudu::createMutableKeys();
 
   xudu::DeviceDelegation cert;
-  cert.masterFingerprint   = *masterFp;
-  cert.devicePublicKey     = deviceKeys.publicKey;
-  cert.deviceName          = "thinkpad-laptop";
-  cert.issuedTimestamp     = 1700000000;
-  cert.gpgSignatureArmored = "-----BEGIN PGP SIGNATURE-----\nmock\n-----END PGP SIGNATURE-----";
+  cert.masterFingerprint = *masterFp;
+  cert.devicePublicKey   = deviceKeys.publicKey;
+  cert.deviceName        = "thinkpad-laptop";
+  cert.issuedTimestamp   = 1700000000;
+  cert.gpgSignatureArmored =
+      "-----BEGIN PGP SIGNATURE-----\nmock\n-----END PGP SIGNATURE-----";
 
   EXPECT_TRUE(cert.verify());
 
@@ -200,8 +203,8 @@ TEST(UserPermascrollTest, PermascrollRegistrySingleton) {
   auto &reg = PermascrollRegistry::instance();
   reg.clear();
 
-  const auto fp1 = Fingerprint::fromString(
-      "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA");
+  const auto fp1 =
+      Fingerprint::fromString("AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA");
   ASSERT_TRUE(fp1.has_value());
 
   const auto scroll1a = reg.getOrCreate(*fp1);

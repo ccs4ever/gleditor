@@ -1,0 +1,122 @@
+/**
+ * @file transcopyright_crypto.hpp
+ * @brief Cryptographic engine for Transcopyright micropayments and Permascroll Holes.
+ *
+ * Implements:
+ * 1. AEAD Encryption/Decryption: ChaCha20-Poly1305 / XChaCha20 authenticated encryption.
+ * 2. Seekable Block Math: 64-byte block counter indexing for random-access span decryption.
+ * 3. Hierarchical Key Derivation: HKDF-SHA256 derivation of SpanCEK from SegmentMasterKey.
+ * 4. HPKE / X25519 Key Encapsulation: Wrap/unwrap CEKs for peer-to-peer delivery over BEP 10.
+ * 5. Content Commitments: SHA-256 Merkle root computation over withheld primedia.
+ */
+#ifndef XUDU_TRANSCOPYRIGHT_CRYPTO_HPP
+#define XUDU_TRANSCOPYRIGHT_CRYPTO_HPP
+
+#include <array>
+#include <cstddef>
+#include <cstdint>
+#include <optional>
+#include <string>
+#include <string_view>
+#include <vector>
+
+namespace xudu::crypto {
+
+/// Standard cryptographic dimensions
+constexpr std::size_t kKeySize   = 32; ///< 256-bit symmetric key
+constexpr std::size_t kNonceSize = 24; ///< 192-bit extended nonce
+constexpr std::size_t kTagSize   = 16; ///< 128-bit Poly1305 tag
+constexpr std::size_t kBlockSize = 64; ///< 64-byte ChaCha20 cipher block size
+
+using Key32   = std::array<std::uint8_t, kKeySize>;
+using Nonce24 = std::array<std::uint8_t, kNonceSize>;
+using Tag16   = std::array<std::uint8_t, kTagSize>;
+
+/// Generate cryptographically secure random bytes
+[[nodiscard]] Key32 generateKey();
+[[nodiscard]] Nonce24 generateNonce();
+
+/**
+ * @brief Derive a span-specific Content Encryption Key (CEK) from a master segment key.
+ *
+ * Uses HKDF-SHA256 with info = "xudu-transcopyright-span-v1:<start>:<length>".
+ */
+[[nodiscard]] Key32 deriveSpanCek(const Key32 &masterKey, std::uint64_t spanStart,
+                                  std::uint64_t spanLength);
+
+/**
+ * @brief Authenticated encryption of plaintext using AEAD ChaCha20-Poly1305.
+ * @param plaintext Unencrypted data bytes.
+ * @param key 256-bit symmetric key.
+ * @param nonce 192-bit extended nonce.
+ * @param ad Optional associated authenticated data.
+ * @return Encrypted ciphertext with 16-byte Poly1305 tag appended.
+ */
+[[nodiscard]] std::string encryptAead(std::string_view plaintext,
+                                      const Key32 &key, const Nonce24 &nonce,
+                                      std::string_view ad = {});
+
+/**
+ * @brief Authenticated decryption of ciphertext using AEAD ChaCha20-Poly1305.
+ * @param ciphertextWithTag Ciphertext ending with 16-byte Poly1305 tag.
+ * @param key 256-bit symmetric key.
+ * @param nonce 192-bit extended nonce.
+ * @param ad Optional associated authenticated data.
+ * @return Decrypted plaintext, or std::nullopt if authentication fails.
+ */
+[[nodiscard]] std::optional<std::string>
+decryptAead(std::string_view ciphertextWithTag, const Key32 &key,
+            const Nonce24 &nonce, std::string_view ad = {});
+
+/**
+ * @brief Direct seekable ChaCha20 keystream decryption for arbitrary span slices.
+ *
+ * Calculates starting 64-byte block counter from `reqOffset`, applies counter-mode
+ * keystream, and extracts the requested subspan without decrypting the entire file.
+ */
+[[nodiscard]] std::optional<std::string>
+decryptSeekableSpan(std::string_view ciphertext, std::uint64_t cipherBaseOffset,
+                    const Key32 &key, const Nonce24 &nonce,
+                    std::uint64_t reqOffset, std::uint64_t reqLength);
+
+/**
+ * @brief Compute a 256-bit cryptographic commitment (SHA-256) over withheld bytes.
+ */
+[[nodiscard]] std::array<std::uint8_t, 32>
+computeHoleCommitment(std::string_view bytes);
+
+/**
+ * @struct X25519KeyPair
+ * @brief Asymmetric X25519 curve25519 keypair for HPKE key encapsulation.
+ */
+struct X25519KeyPair {
+  Key32 publicKey{};
+  Key32 privateKey{};
+
+  [[nodiscard]] static X25519KeyPair generate();
+  [[nodiscard]] static X25519KeyPair fromSeed(const Key32 &seed);
+  [[nodiscard]] static Key32 derivePublicKey(const Key32 &privateKey);
+
+  bool operator==(const X25519KeyPair &) const = default;
+};
+
+/**
+ * @brief Wrap a 32-byte Content Encryption Key (CEK) for an X25519 public key.
+ *
+ * Ephemeral-Static ECDH -> HKDF-SHA256 -> ChaCha20-Poly1305.
+ * Output payload layout: [32-byte EphemeralPubKey][24-byte Nonce][32-byte EncryptedCEK][16-byte Tag] = 104 bytes.
+ */
+[[nodiscard]] std::vector<std::uint8_t> wrapCek(const Key32 &cek,
+                                                const Key32 &recipientPubKey);
+
+/**
+ * @brief Unwrap a 32-byte CEK using the recipient's X25519 private key.
+ * @return Decrypted CEK, or std::nullopt if unwrap/authentication fails.
+ */
+[[nodiscard]] std::optional<Key32>
+unwrapCek(const std::vector<std::uint8_t> &wrapped,
+          const Key32 &recipientPrivKey);
+
+} // namespace xudu::crypto
+
+#endif // XUDU_TRANSCOPYRIGHT_CRYPTO_HPP

@@ -80,6 +80,16 @@ struct TextHeader {
   std::uint32_t length{0};
 };
 
+/// Transcopyright unlocked Content Encryption Key record.
+struct CekRecord {
+  std::array<std::uint8_t, 32> cek{};
+  std::uint64_t unlockedTimestamp{0};
+  std::uint64_t pricePaid{0};
+  std::array<char, 8> currency{};
+
+  bool operator==(const CekRecord &) const = default;
+};
+
 class LMDBContentCache {
 public:
   explicit LMDBContentCache(const std::filesystem::path &cache_dir,
@@ -122,7 +132,8 @@ public:
   LMDBContentCache &operator=(const LMDBContentCache &) = delete;
   LMDBContentCache(LMDBContentCache &&other) noexcept
       : env_(other.env_), dbi_pieces_(other.dbi_pieces_),
-        dbi_vspans_(other.dbi_vspans_), dbi_ext_spans_(other.dbi_ext_spans_) {
+        dbi_vspans_(other.dbi_vspans_), dbi_ext_spans_(other.dbi_ext_spans_),
+        dbi_ceks_(other.dbi_ceks_) {
     other.env_ = nullptr;
   }
   LMDBContentCache &operator=(LMDBContentCache &&other) noexcept {
@@ -134,6 +145,7 @@ public:
       dbi_pieces_    = other.dbi_pieces_;
       dbi_vspans_    = other.dbi_vspans_;
       dbi_ext_spans_ = other.dbi_ext_spans_;
+      dbi_ceks_      = other.dbi_ceks_;
       other.env_     = nullptr;
     }
     return *this;
@@ -681,6 +693,78 @@ public:
     return evicted;
   }
 
+  // -- Transcopyright CEK (Content Encryption Key) Operations ----------------
+
+  /// Store a verified Content Encryption Key (CEK) under keyId (32 bytes).
+  bool put_cek(const std::array<std::uint8_t, 32> &keyId,
+               const CekRecord &record) {
+    if (!env_) {
+      return false;
+    }
+    MDB_txn *txn = nullptr;
+    if (mdb_txn_begin(env_, nullptr, 0, &txn) != MDB_SUCCESS) {
+      return false;
+    }
+
+    MDB_val k{keyId.size(), const_cast<std::uint8_t *>(keyId.data())};
+    MDB_val v{sizeof(record), const_cast<CekRecord *>(&record)};
+
+    if (mdb_put(txn, dbi_ceks_, &k, &v, 0) != MDB_SUCCESS) {
+      mdb_txn_abort(txn);
+      return false;
+    }
+    return mdb_txn_commit(txn) == MDB_SUCCESS;
+  }
+
+  /// Retrieve a stored CEK by keyId.
+  [[nodiscard]] bool get_cek(const std::array<std::uint8_t, 32> &keyId,
+                             CekRecord &out) const {
+    if (!env_) {
+      return false;
+    }
+    MDB_txn *txn = nullptr;
+    if (mdb_txn_begin(env_, nullptr, MDB_RDONLY, &txn) != MDB_SUCCESS) {
+      return false;
+    }
+
+    MDB_val k{keyId.size(), const_cast<std::uint8_t *>(keyId.data())};
+    MDB_val v{};
+
+    if (mdb_get(txn, dbi_ceks_, &k, &v) != MDB_SUCCESS ||
+        v.mv_size != sizeof(CekRecord)) {
+      mdb_txn_abort(txn);
+      return false;
+    }
+
+    std::memcpy(&out, v.mv_data, sizeof(CekRecord));
+    mdb_txn_abort(txn);
+    return true;
+  }
+
+  /// Check whether a CEK exists in the local cache.
+  [[nodiscard]] bool has_cek(const std::array<std::uint8_t, 32> &keyId) const {
+    CekRecord record;
+    return get_cek(keyId, record);
+  }
+
+  /// Delete a CEK from the local cache.
+  bool erase_cek(const std::array<std::uint8_t, 32> &keyId) {
+    if (!env_) {
+      return false;
+    }
+    MDB_txn *txn = nullptr;
+    if (mdb_txn_begin(env_, nullptr, 0, &txn) != MDB_SUCCESS) {
+      return false;
+    }
+
+    MDB_val k{keyId.size(), const_cast<std::uint8_t *>(keyId.data())};
+    if (mdb_del(txn, dbi_ceks_, &k, nullptr) != MDB_SUCCESS) {
+      mdb_txn_abort(txn);
+      return false;
+    }
+    return mdb_txn_commit(txn) == MDB_SUCCESS;
+  }
+
 private:
   void open_databases() {
     MDB_txn *txn = nullptr;
@@ -693,6 +777,7 @@ private:
     mdb_dbi_open(txn, "pieces", MDB_CREATE, &dbi_pieces_);
     mdb_dbi_open(txn, "vspans", MDB_CREATE, &dbi_vspans_);
     mdb_dbi_open(txn, "ext_spans", MDB_CREATE, &dbi_ext_spans_);
+    mdb_dbi_open(txn, "ceks", MDB_CREATE, &dbi_ceks_);
 
     mdb_txn_commit(txn);
   }
@@ -701,6 +786,7 @@ private:
   MDB_dbi dbi_pieces_{0};
   MDB_dbi dbi_vspans_{0};
   MDB_dbi dbi_ext_spans_{0};
+  MDB_dbi dbi_ceks_{0};
 };
 
 } // namespace xudu
