@@ -434,6 +434,21 @@ bool Renderer::update(RenderState &state, const bool settled) {
     this->state->screenshotPath.clear();
   }
 
+  if (settled && !hasPendingWork() && scriptFinished() &&
+      this->state->recordFrames > 0) {
+    const auto pfx = this->state->recordPrefix.empty()
+                         ? "scratch/frame"
+                         : this->state->recordPrefix;
+    std::ostringstream fn;
+    fn << pfx << "_" << std::setfill('0') << std::setw(3)
+       << this->state->recordedFrames << ".ppm";
+    writeScreenshot(device->captureColorTarget(), fn.str());
+    this->state->recordedFrames++;
+    if (this->state->recordedFrames >= this->state->recordFrames) {
+      this->state->alive = false;
+    }
+  }
+
   const auto end              = std::chrono::steady_clock::now();
   this->state->frameTimeDelta = end - start;
 
@@ -896,8 +911,11 @@ void Renderer::renderLoop(AutoSDLWindow &window) {
       }
     }
 
-    const bool docsLoading = std::ranges::any_of(
-        state.docs, [](const auto &doc) { return !doc->isFullyLoaded(); });
+    const bool docsLoading =
+        state.docs.empty() ||
+        std::ranges::any_of(state.docs, [](const auto &doc) {
+          return !doc->isFullyLoaded() || 0 == doc->numPages();
+        });
 
     // Everything queued has been carried out and every document has finished
     // loading, so this frame shows the finished result. That is the frame a
@@ -947,6 +965,10 @@ void Renderer::renderLoop(AutoSDLWindow &window) {
     // for, so quitting before it finished would report on a document the
     // command line did not ask for.
     if (settled && this->state->profiling && scriptFinished()) {
+      if (this->state->recordFrames > 0 &&
+          this->state->recordedFrames < this->state->recordFrames) {
+        continue;
+      }
       const auto completeRender =
           std::chrono::duration<double, std::milli>(
               std::chrono::steady_clock::now() - loopStart)

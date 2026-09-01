@@ -231,6 +231,12 @@ private:
   void anchorStub(const Edge &edge, std::uint32_t colour, std::uint32_t tag,
                   bool farEnd);
 
+  /// Draw one anchor lane in the margin when up to 4 link anchors overlap
+  /// vertically along the same document edge.
+  void drawMarginAnchorLane(const Edge &edge, std::uint32_t colour,
+                            std::uint32_t tag, bool farEnd, bool towardsRight,
+                            int laneIndex, int laneCount, bool isActive);
+
   /// @p colour with its alpha scaled by @p factor, for a beam that has to be
   /// as faint as the documents it runs between.
   [[nodiscard]] static std::uint32_t fade(std::uint32_t colour, float factor);
@@ -255,6 +261,8 @@ private:
   bool strandsRebuilt{true};
   bool visible{true};
   bool sworph{true};
+  float pulsePhase{0.0F};
+  std::optional<std::uint64_t> activeLink;
 
   /// Where the camera is easing towards, once align() has computed a new
   /// framing target. Seeded from the camera's actual position whenever no ease

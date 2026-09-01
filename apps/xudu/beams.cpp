@@ -283,7 +283,8 @@ void LinkBeams::band(const Edge &nearSide, const Edge &farSide,
         (0 == k || count - 1 == k) ? colour : fade(colour, bandFillAlpha);
 
     if (documentsApart <= 1) {
-      beams->add(p1, p2, baseWidth, strandColour, tag);
+      beams->add(p1, p2, baseWidth, strandColour, tag, 0.0F - pulsePhase,
+                 1.0F - pulsePhase);
       continue;
     }
     // A document stands between these two, so the beam goes behind it rather
@@ -308,6 +309,49 @@ void LinkBeams::anchorStub(const Edge &edge, const std::uint32_t colour,
   beams->add(middle - up, middle + up,
              lineWorld * beamWidthOfLine * stubWidthOfBeam, colour, tag, at,
              at);
+}
+
+void LinkBeams::drawMarginAnchorLane(
+    const Edge &edge, const std::uint32_t colour, const std::uint32_t tag,
+    const bool farEnd, const bool towardsRight, const int laneIndex,
+    [[maybe_unused]] const int laneCount, const bool isActive) {
+  const float lineWorld = edge.lineHeight * Doc::pixelsToWorld;
+  const float half      = std::max(std::abs(edge.top.y - edge.bottom.y) * 0.5F,
+                                   lineWorld * stubMinOfLine * 0.5F);
+  const auto middle     = 0.5F * (edge.top + edge.bottom);
+  const glm::vec3 up(0.0F, half, 0.0F);
+  const float at = farEnd ? 1.0F : 0.0F;
+
+  // Base stub geometry and lane spacing
+  const float baseStubWidth = lineWorld * beamWidthOfLine * stubWidthOfBeam;
+  const float laneSpacing   = baseStubWidth * 1.15F;
+
+  // Offset lane into the margin (outward from the text edge)
+  const float dir = towardsRight ? 1.0F : -1.0F;
+  const glm::vec3 lateralOffset(
+      dir *
+          (static_cast<float>(laneIndex) * laneSpacing + baseStubWidth * 0.5F),
+      0.0F, 0.01F * static_cast<float>(laneIndex));
+
+  const auto topPos = middle + up + lateralOffset;
+  const auto botPos = middle - up + lateralOffset;
+
+  // Active anchor is wider, bolder, and fully saturated with pulse
+  const float width =
+      isActive ? (baseStubWidth * 1.4F) : (baseStubWidth * 0.95F);
+  const auto drawColour = isActive ? (colour | 0xFFU) : fade(colour, 0.90F);
+
+  // 1. Vertical anchor bar filling the margin lane
+  beams->add(botPos, topPos, width, drawColour, tag, at, at);
+
+  // 2. Horizontal tick brackets connecting the outer lane back to the text edge
+  if (laneIndex > 0) {
+    const auto textEdgeTop = middle + up;
+    const auto textEdgeBot = middle - up;
+    const float tickWidth  = width * 0.65F;
+    beams->add(textEdgeTop, topPos, tickWidth, drawColour, tag, at, at);
+    beams->add(textEdgeBot, botPos, tickWidth, drawColour, tag, at, at);
+  }
 }
 
 bool LinkBeams::onScreen(const glm::mat4 &viewProjection,
@@ -757,12 +801,32 @@ void LinkBeams::drawFrame(gleditor::FrameContext &ctx) {
     }
   }
 
-  if (docTransformsChanged || topologyChanged || strandsRebuilt || unsettled) {
+  // Advance pulse phase every frame for live photonic traveling wave packets
+  pulsePhase = std::fmod(pulsePhase + 0.02F, 1.0F);
+
+  if (docTransformsChanged || topologyChanged || strandsRebuilt || unsettled ||
+      !strands.empty()) {
     resolveAnchors(state);
 
     beams->clear();
     bool moved        = false;
     bool stillToAlign = false;
+
+    struct MarginAnchor {
+      Edge edge;
+      std::uint32_t colour{};
+      std::uint32_t tagId{};
+      bool farEnd{};
+      bool isActive{};
+      std::size_t docIndex{};
+      bool towardsRight{};
+      std::uint64_t linkId{};
+      ProminenceTier tier{};
+      LinkType type{};
+    };
+
+    std::vector<MarginAnchor> allAnchors;
+    allAnchors.reserve(strands.size() * 2);
 
     for (std::size_t i = 0; i < strands.size(); i++) {
       auto &strand = strands[i];
@@ -792,10 +856,35 @@ void LinkBeams::drawFrame(gleditor::FrameContext &ctx) {
           std::min(from->currentOpacity(), to->currentOpacity());
       const auto colour = fade(linkColour(strand.type, strand.tier), docAlpha);
       const auto tagId  = static_cast<std::uint32_t>(i);
+      const bool isAct  = (activeLink && *activeLink == strand.link);
 
       band(*nearEdge, *farEdge, docSpan, colour, tagId);
-      anchorStub(*nearEdge, colour, tagId, false);
-      anchorStub(*farEdge, colour, tagId, true);
+
+      allAnchors.push_back(MarginAnchor{
+          .edge         = *nearEdge,
+          .colour       = colour,
+          .tagId        = tagId,
+          .farEnd       = false,
+          .isActive     = isAct,
+          .docIndex     = strand.from.doc,
+          .towardsRight = rightwards,
+          .linkId       = strand.link,
+          .tier         = strand.tier,
+          .type         = strand.type,
+      });
+
+      allAnchors.push_back(MarginAnchor{
+          .edge         = *farEdge,
+          .colour       = colour,
+          .tagId        = tagId,
+          .farEnd       = true,
+          .isActive     = isAct,
+          .docIndex     = strand.to.doc,
+          .towardsRight = !rightwards,
+          .linkId       = strand.link,
+          .tier         = strand.tier,
+          .type         = strand.type,
+      });
 
       // Tenuous connection: subtle elastic tether ribbon connecting flying page
       // to background origin
@@ -818,10 +907,62 @@ void LinkBeams::drawFrame(gleditor::FrameContext &ctx) {
       }
     }
 
-    const bool stillToOpen =
-        sworph && (moved ? danglingOutstanding(state) : openDangling(state));
+    // Render multi-lane margin anchors: up to 4 overlapping link anchor colors
+    // filling the margin side-by-side with prominence highlighting.
+    for (std::size_t d = 0; d < state.docs.size(); ++d) {
+      for (const bool towardsRight : {true, false}) {
+        std::vector<MarginAnchor> sideAnchors;
+        for (const auto &anc : allAnchors) {
+          if (anc.docIndex == d && anc.towardsRight == towardsRight) {
+            sideAnchors.push_back(anc);
+          }
+        }
+        if (sideAnchors.empty()) {
+          continue;
+        }
 
-    unsettled = stillToAlign || stillToOpen;
+        for (std::size_t idx = 0; idx < sideAnchors.size(); ++idx) {
+          const auto &curr    = sideAnchors[idx];
+          const float currTop = std::max(curr.edge.top.y, curr.edge.bottom.y);
+          const float currBot = std::min(curr.edge.top.y, curr.edge.bottom.y);
+
+          std::vector<std::size_t> overlapping;
+          for (std::size_t o = 0; o < sideAnchors.size(); ++o) {
+            const auto &other = sideAnchors[o];
+            const float oTop  = std::max(other.edge.top.y, other.edge.bottom.y);
+            const float oBot  = std::min(other.edge.top.y, other.edge.bottom.y);
+            if (std::max(currBot, oBot) <= std::min(currTop, oTop) + 0.001F) {
+              overlapping.push_back(o);
+            }
+          }
+
+          std::ranges::sort(
+              overlapping, [&sideAnchors](std::size_t a, std::size_t b) {
+                const auto &oa = sideAnchors[a];
+                const auto &ob = sideAnchors[b];
+                if (oa.isActive != ob.isActive)
+                  return oa.isActive > ob.isActive;
+                if (oa.tier != ob.tier)
+                  return static_cast<int>(oa.tier) < static_cast<int>(ob.tier);
+                return oa.linkId < ob.linkId;
+              });
+
+          int lane         = 0;
+          const auto found = std::ranges::find(overlapping, idx);
+          if (found != overlapping.end()) {
+            lane = std::min<int>(
+                3, static_cast<int>(std::distance(overlapping.begin(), found)));
+          }
+          const int clusterCount =
+              std::min<int>(4, static_cast<int>(overlapping.size()));
+
+          drawMarginAnchorLane(curr.edge, curr.colour, curr.tagId, curr.farEnd,
+                               towardsRight, lane, clusterCount, curr.isActive);
+        }
+      }
+    }
+
+    unsettled = stillToAlign;
 
     beams->commit();
     strandsRebuilt = false;

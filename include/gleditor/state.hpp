@@ -28,6 +28,9 @@ struct AppState {
   /// When set, the first fully drawn frame is written here as a PPM and the
   /// path is cleared. Used to compare backends pixel for pixel.
   std::string screenshotPath;
+  int recordFrames{0};
+  int recordedFrames{0};
+  std::string recordPrefix;
   /**
    * @brief One thing to do to the document once it has settled.
    *

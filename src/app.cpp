@@ -500,6 +500,14 @@ void addCommonArguments(argparse::ArgumentParser &parser, const bool detailed) {
              "capture shows the finished result rather than the middle of a "
              "fade.");
   automation(
+      parser.add_argument("--record-frames").default_value(0).scan<'i', int>(),
+      "capture N consecutive settled frames and exit",
+      "Capture N consecutive settled frames as binary PPMs and exit.");
+  automation(
+      parser.add_argument("--record-prefix").default_value(std::string{}),
+      "output filename prefix for recorded frames",
+      "Prefix for recorded frame PPM filenames.");
+  automation(
       parser.add_argument("--no-present").flag(),
       "draw frames without showing them",
       "Draw frames without showing them, for capturing a frame on a "
@@ -588,6 +596,8 @@ render::Backend applyCommonArguments(argparse::ArgumentParser &parser,
   state->cullPages       = parser["--no-cull"] == false;
   state->coarseBelow     = std::stof(parser.get<std::string>("--coarse-below"));
   state->screenshotPath  = parser.get<std::string>("--screenshot");
+  state->recordFrames    = parser.get<int>("--record-frames");
+  state->recordPrefix    = parser.get<std::string>("--record-prefix");
   state->dumpAccessibility = parser["--dump-a11y"] == true;
   state->strictDiagnostics = parser["--strict-diagnostics"] == true;
   state->noPresent         = parser["--no-present"] == true;
