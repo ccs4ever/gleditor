@@ -86,6 +86,22 @@ void placeLinks(const std::map<std::uint64_t, Link> &links,
 [[nodiscard]] std::uint32_t
 linkColour(LinkType type, ProminenceTier tier = ProminenceTier::Author);
 
+/**
+ * @brief Colour for a specific link instance, applying a subtle deterministic
+ *        micro-hue shift so distinct links of the same type are easily told
+ * apart while spans of the same link remain strictly identical in colour.
+ */
+[[nodiscard]] std::uint32_t
+linkColourWithInstanceShift(std::uint64_t linkId, LinkType type,
+                            ProminenceTier tier = ProminenceTier::Author);
+
+/**
+ * @brief Deterministic temporal phase offset for traveling photonic waves.
+ *        Spans of the same link share identical phase (pulsing in synchrony),
+ *        while separate links pulse asynchronously.
+ */
+[[nodiscard]] float linkPhaseOffset(std::uint64_t linkId);
+
 } // namespace xudu
 
 #endif // XUDU_LINK_LAYOUT_H

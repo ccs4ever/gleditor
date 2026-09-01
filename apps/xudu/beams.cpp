@@ -270,7 +270,8 @@ std::uint32_t LinkBeams::fade(const std::uint32_t colour, const float factor) {
 
 void LinkBeams::band(const Edge &nearSide, const Edge &farSide,
                      const std::size_t documentsApart,
-                     const std::uint32_t colour, const std::uint32_t tag) {
+                     const std::uint32_t colour, const std::uint32_t tag,
+                     const float phase) {
   const float baseWidth = std::max(nearSide.lineHeight, farSide.lineHeight) *
                           Doc::pixelsToWorld * beamWidthOfLine;
   const float nearSpan  = std::abs(nearSide.top.y - nearSide.bottom.y);
@@ -306,8 +307,8 @@ void LinkBeams::band(const Edge &nearSide, const Edge &farSide,
         (0 == k || count - 1 == k) ? colour : fade(colour, bandFillAlpha);
 
     if (documentsApart <= 1) {
-      beams->add(p1, p2, baseWidth, strandColour, tag, 0.0F - pulsePhase,
-                 1.0F - pulsePhase);
+      beams->add(p1, p2, baseWidth, strandColour, tag, 0.0F - phase,
+                 1.0F - phase);
       continue;
     }
     // A document stands between these two, so the beam goes behind it rather
@@ -393,9 +394,11 @@ void LinkBeams::drawMarginAnchorLane(const Edge &edge,
   const auto textCenter = 0.5F * (textP1 + textP2);
   const auto pageCenter = 0.5F * (pageP1 + pageP2);
 
-  // Prominence styling
+  // Prominence styling and subtle contrast kerfs between stacked sub-bands
   const auto drawColour = isActive ? (colour | 0xFFU) : fade(colour, 0.92F);
-  const float bandThick = (subHalf * 2.0F) * (isActive ? 1.05F : 0.98F);
+  const float kerf = (totalLanes > 1) ? std::min(0.04F, subHalf * 0.15F) : 0.0F;
+  const float bandThick =
+      std::max(0.05F, ((subHalf * 2.0F) - kerf) * (isActive ? 1.05F : 0.98F));
 
   // 1. Margin coloring fill: horizontal band connecting from text boundary
   // across margin to outer bracket
@@ -403,11 +406,14 @@ void LinkBeams::drawMarginAnchorLane(const Edge &edge,
 
   // 2. Outer page edge anchor bracket: solid vertical bracket completely inside
   // the page edge
-  beams->add(pageP1, pageP2, bracketThick, drawColour, tag, at, at);
+  const glm::vec3 kerfUp(0.0F, kerf * 0.5F, 0.0F);
+  beams->add(pageP1 + kerfUp, pageP2 - kerfUp, bracketThick, drawColour, tag,
+             at, at);
 
   // 3. Inner text edge anchor bracket: subtle vertical bracket along the text
   // boundary
-  beams->add(textP1, textP2, bracketThick * 0.7F, drawColour, tag, at, at);
+  beams->add(textP1 + kerfUp, textP2 - kerfUp, bracketThick * 0.7F, drawColour,
+             tag, at, at);
 }
 
 bool LinkBeams::onScreen(const glm::mat4 &viewProjection,
@@ -910,11 +916,15 @@ void LinkBeams::drawFrame(gleditor::FrameContext &ctx) {
 
       const auto docAlpha =
           std::min(from->currentOpacity(), to->currentOpacity());
-      const auto colour = fade(linkColour(strand.type, strand.tier), docAlpha);
-      const auto tagId  = static_cast<std::uint32_t>(i);
-      const bool isAct  = (activeLink && *activeLink == strand.link);
+      const auto colour = fade(
+          linkColourWithInstanceShift(strand.link, strand.type, strand.tier),
+          docAlpha);
+      const auto tagId = static_cast<std::uint32_t>(i);
+      const bool isAct = (activeLink && *activeLink == strand.link);
+      const float linkPhase =
+          std::fmod(pulsePhase + linkPhaseOffset(strand.link), 1.0F);
 
-      band(*nearEdge, *farEdge, docSpan, colour, tagId);
+      band(*nearEdge, *farEdge, docSpan, colour, tagId, linkPhase);
 
       allAnchors.push_back(MarginAnchor{
           .edge         = *nearEdge,
@@ -1014,6 +1024,42 @@ void LinkBeams::drawFrame(gleditor::FrameContext &ctx) {
 
           drawMarginAnchorLane(curr.edge, curr.colour, curr.tagId, curr.farEnd,
                                towardsRight, lane, clusterCount, curr.isActive);
+        }
+
+        // Multi-span links: if a single link has multiple disjoint anchor spans
+        // on the same document edge, render a unifying vertical spine
+        // connecting them.
+        std::map<std::uint64_t, std::vector<MarginAnchor>> linkGroups;
+        for (const auto &anc : sideAnchors) {
+          linkGroups[anc.linkId].push_back(anc);
+        }
+
+        for (auto &[linkId, group] : linkGroups) {
+          if (group.size() <= 1) {
+            continue;
+          }
+          std::ranges::sort(group,
+                            [](const MarginAnchor &a, const MarginAnchor &b) {
+                              return a.edge.top.y > b.edge.top.y;
+                            });
+
+          for (std::size_t g = 0; g + 1 < group.size(); ++g) {
+            const auto &upper = group[g];
+            const auto &lower = group[g + 1];
+            const auto pTop   = upper.edge.bottom;
+            const auto pBot   = lower.edge.top;
+            if (pTop.y > pBot.y + 0.05F) {
+              const float spineWidth = std::max(
+                  0.12F, upper.edge.lineHeight * Doc::pixelsToWorld *
+                             beamWidthOfLine * stubWidthOfBeam * 0.45F);
+              const auto spineColour = upper.isActive
+                                           ? (upper.colour | 0xFFU)
+                                           : fade(upper.colour, 0.85F);
+              const float at         = upper.farEnd ? 1.0F : 0.0F;
+              beams->add(pBot, pTop, spineWidth, spineColour, upper.tagId, at,
+                         at);
+            }
+          }
         }
       }
     }

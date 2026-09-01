@@ -1,6 +1,7 @@
 #include "link_layout.hpp"
 
 #include <algorithm>
+#include <cmath>
 #include <limits>
 #include <optional>
 #include <utility>
@@ -125,6 +126,103 @@ std::uint32_t linkColour(const LinkType type, const ProminenceTier tier) {
     break;
   }
   return rgb | alpha;
+}
+
+std::uint32_t linkColourWithInstanceShift(const std::uint64_t linkId,
+                                          const LinkType type,
+                                          const ProminenceTier tier) {
+  const auto base = linkColour(type, tier);
+  if (0 == linkId) {
+    return base;
+  }
+  const float r = static_cast<float>((base >> 24) & 0xFFU) / 255.0F;
+  const float g = static_cast<float>((base >> 16) & 0xFFU) / 255.0F;
+  const float b = static_cast<float>((base >> 8) & 0xFFU) / 255.0F;
+  const auto a  = base & 0xFFU;
+
+  const float maxVal = std::max({r, g, b});
+  const float minVal = std::min({r, g, b});
+  const float delta  = maxVal - minVal;
+
+  float h = 0.0F;
+  if (delta > 0.0001F) {
+    if (maxVal == r) {
+      h = std::fmod((g - b) / delta, 6.0F);
+    } else if (maxVal == g) {
+      h = ((b - r) / delta) + 2.0F;
+    } else {
+      h = ((r - g) / delta) + 4.0F;
+    }
+    h /= 6.0F;
+    if (h < 0.0F) {
+      h += 1.0F;
+    }
+  }
+  const float s = maxVal > 0.0001F ? delta / maxVal : 0.0F;
+  const float v = maxVal;
+
+  // Deterministic micro-hue offset of +/- 7% based on golden ratio hash of
+  // linkId
+  const float hashFrac =
+      static_cast<float>((linkId * 0x9E3779B97F4A7C15ULL) % 10000ULL) /
+      10000.0F;
+  const float hueShift = (hashFrac - 0.5F) * 0.14F;
+  float newH           = std::fmod(h + hueShift + 1.0F, 1.0F);
+
+  // Convert back to RGB
+  const float c = v * s;
+  const float x = c * (1.0F - std::abs(std::fmod(newH * 6.0F, 2.0F) - 1.0F));
+  const float m = v - c;
+
+  float newR = 0.0F, newG = 0.0F, newB = 0.0F;
+  const int hSector = static_cast<int>(newH * 6.0F) % 6;
+  switch (hSector) {
+  case 0:
+    newR = c;
+    newG = x;
+    newB = 0.0F;
+    break;
+  case 1:
+    newR = x;
+    newG = c;
+    newB = 0.0F;
+    break;
+  case 2:
+    newR = 0.0F;
+    newG = c;
+    newB = x;
+    break;
+  case 3:
+    newR = 0.0F;
+    newG = x;
+    newB = c;
+    break;
+  case 4:
+    newR = x;
+    newG = 0.0F;
+    newB = c;
+    break;
+  case 5:
+  default:
+    newR = c;
+    newG = 0.0F;
+    newB = x;
+    break;
+  }
+
+  const auto outR =
+      static_cast<std::uint32_t>(std::clamp((newR + m) * 255.0F, 0.0F, 255.0F));
+  const auto outG =
+      static_cast<std::uint32_t>(std::clamp((newG + m) * 255.0F, 0.0F, 255.0F));
+  const auto outB =
+      static_cast<std::uint32_t>(std::clamp((newB + m) * 255.0F, 0.0F, 255.0F));
+
+  return (outR << 24) | (outG << 16) | (outB << 8) | a;
+}
+
+float linkPhaseOffset(const std::uint64_t linkId) {
+  return static_cast<float>((linkId * 0x517CC1B727220A95ULL) % 10000ULL) /
+         10000.0F;
 }
 
 } // namespace xudu

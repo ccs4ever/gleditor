@@ -754,7 +754,8 @@ void Session::decorate(const Doc &doc, std::vector<gleditor::SpanStyle> &out) {
       if (xudu::LinkType::Format == link.type) {
         continue;
       }
-      const auto colour = xudu::linkColour(link.type, link.tier);
+      const auto colour =
+          xudu::linkColourWithInstanceShift(id, link.type, link.tier);
       for (const auto *const ends : {&link.left, &link.right}) {
         for (const auto &span : *ends) {
           for (const auto &extent : mine.occurrencesOf(span)) {

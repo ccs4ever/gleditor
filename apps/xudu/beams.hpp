@@ -225,8 +225,8 @@ private:
    * the end attached to less text.
    */
   void band(const Edge &nearSide, const Edge &farSide,
-            std::size_t documentsApart, std::uint32_t colour,
-            std::uint32_t tag);
+            std::size_t documentsApart, std::uint32_t colour, std::uint32_t tag,
+            float phase = 0.0F);
 
   /// A short bracket down the page margin covering one end of a link. Which
   /// page of a stack a link attaches to is otherwise only implied by where a
