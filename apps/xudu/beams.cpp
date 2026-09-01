@@ -1032,12 +1032,28 @@ void LinkBeams::drawFrame(gleditor::FrameContext &ctx) {
 
       const auto docAlpha =
           std::min(from->currentOpacity(), to->currentOpacity());
-      // Identity Gold transclusion beam
-      const auto colour = fade(0xFFD700FFU, docAlpha);
+
+      // Check if transcluded span is withheld or transcopyright-locked
+      std::uint32_t baseBeamColour = 0xFFD700FFU; // Default Identity Gold
+      float phase                  = 0.0F;
+
+      if (tStrand.from.doc < session.views().size()) {
+        const auto sIdx = session.storeIndexOf(tStrand.from.doc);
+        const auto &st  = session.store(sIdx);
+        const auto res  = st.resolve(tStrand.span);
+        if (res.status == ResolutionStatus::WithheldRedacted) {
+          baseBeamColour = 0x1F2937FFU; // Obsidian Redaction Beam
+        } else if (res.status == ResolutionStatus::TranscopyrightLocked) {
+          baseBeamColour = 0xF59E0BFFU; // Transcopyright Amber Gold Beam
+          phase          = pulsePhase;  // Active photonic energy pulse
+        }
+      }
+
+      const auto colour = fade(baseBeamColour, docAlpha);
       const auto tagId  = static_cast<std::uint32_t>(strands.size() + i);
 
       // Transclusion beams are solid, continuous volumetric identity bands
-      band(*nearEdge, *farEdge, docSpan, colour, tagId, 0.0F);
+      band(*nearEdge, *farEdge, docSpan, colour, tagId, phase);
 
       allAnchors.push_back(MarginAnchor{
           .edge         = *nearEdge,

@@ -766,6 +766,31 @@ void Session::decorate(const Doc &doc, std::vector<gleditor::SpanStyle> &out) {
       }
     }
   }
+
+  // Passages that are withheld or transcopyright-locked in this document's
+  // store
+  if (view.storeIndex < stores.size() && stores[view.storeIndex].store) {
+    const auto &st = *stores[view.storeIndex].store;
+    for (const auto &piece : mine.pieces()) {
+      if (piece.isLocal() || piece.empty() ||
+          breakMarkerScroll == piece.scroll ||
+          vocabularyScroll == piece.scroll) {
+        continue;
+      }
+      const auto res = st.resolve(piece);
+      if (res.status == xudu::ResolutionStatus::WithheldRedacted) {
+        for (const auto &extent : mine.occurrencesOf(piece)) {
+          found.push_back(gleditor::SpanStyle{extent.start, extent.end,
+                                              Session::redactionColour});
+        }
+      } else if (res.status == xudu::ResolutionStatus::TranscopyrightLocked) {
+        for (const auto &extent : mine.occurrencesOf(piece)) {
+          found.push_back(gleditor::SpanStyle{
+              extent.start, extent.end, Session::transcopyrightLockedColour});
+        }
+      }
+    }
+  }
 }
 
 HypertimeMap::HypertimeMap(std::string aFontName, const Session &aSession)

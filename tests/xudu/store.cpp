@@ -633,3 +633,32 @@ TEST_F(StoreRoundTripTest, saveOsmicTextSurvivesBeingLoadedBack) {
   EXPECT_EQ(reloaded.opCount(), 2U);
   EXPECT_EQ(reloaded.textOf(MicroversionId::parse("2")), "legacy osmic test");
 }
+
+TEST_F(StoreRoundTripTest, storeResolveHandlesLocalAndExternalHoles) {
+  Store store;
+  const auto v1 = store.insert(MicroversionId{}, 0, "Local author text");
+  EXPECT_EQ(v1.str(), "1");
+
+  // Local span resolution
+  const auto resLocal = store.resolve(PrimediaSpan{localScroll, 0, 5});
+  EXPECT_EQ(resLocal.status, xudu::ResolutionStatus::VerifiedBytes);
+  EXPECT_EQ(resLocal.text, "Local");
+
+  // External scroll with withheld redaction segment
+  xudu::Scroll external;
+  xudu::ScrollSegment seg;
+  seg.at     = 0;
+  seg.length = 50;
+  seg.kind   = xudu::SegmentKind::Withheld;
+  xudu::PublishedHoleRecord hole;
+  hole.at        = 0;
+  hole.length    = 50;
+  hole.reason    = xudu::HoleReason::Withheld;
+  seg.holeRecord = hole;
+  external.segments.push_back(seg);
+
+  const auto scrollId    = store.addScroll(external);
+  const auto resWithheld = store.resolve(PrimediaSpan{scrollId, 0, 50});
+  EXPECT_EQ(resWithheld.status, xudu::ResolutionStatus::WithheldRedacted);
+  EXPECT_TRUE(resWithheld.isWithheld());
+}

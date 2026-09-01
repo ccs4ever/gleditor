@@ -293,11 +293,16 @@ public:
   [[nodiscard]] const Scroll *scroll(ScrollId id) const;
   [[nodiscard]] const std::vector<Scroll> &scrolls() const { return externals; }
 
-  /// Where the bytes of external scrolls are fetched from. Not owned.
   void setContentSource(const ContentSource *source) {
     resolver.setSource(source);
   }
   [[nodiscard]] const Resolver &contentResolver() const { return resolver; }
+  [[nodiscard]] Resolver &contentResolver() { return resolver; }
+
+  /**
+   * @brief Resolve a span with rich status (verified bytes, withheld, locked).
+   */
+  [[nodiscard]] ResolveResult resolve(const PrimediaSpan &span) const;
 
   /**
    * @brief Read a span, wherever its content lives.

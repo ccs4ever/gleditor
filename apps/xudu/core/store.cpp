@@ -244,6 +244,22 @@ const Scroll *Store::scroll(const ScrollId id) const {
   return &externals[id - 1];
 }
 
+ResolveResult Store::resolve(const PrimediaSpan &span) const {
+  if (span.isLocal()) {
+    return ResolveResult{.status = ResolutionStatus::VerifiedBytes,
+                         .text   = userPermascroll_->read(span)};
+  }
+  if (const auto vocab = readVocabulary(span)) {
+    return ResolveResult{.status = ResolutionStatus::VerifiedBytes,
+                         .text   = *vocab};
+  }
+  const auto *const which = scroll(span.scroll);
+  if (nullptr == which) {
+    return ResolveResult{.status = ResolutionStatus::MissingPieces};
+  }
+  return resolver.resolve(*which, span);
+}
+
 std::string Store::read(const PrimediaSpan &span) const {
   if (span.isLocal()) {
     return userPermascroll_->read(span);

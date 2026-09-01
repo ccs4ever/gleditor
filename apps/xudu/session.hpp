@@ -106,8 +106,11 @@ class Session : public gleditor::DocumentObserver,
 public:
   /// Colours the decorator paints with. Backgrounds behind text, so they are
   /// pale enough to read through.
-  static constexpr std::uint32_t transclusionColour = 0xFFE9A8FFU;
-  static constexpr std::uint32_t linkColour         = 0xB9E8C4FFU;
+  static constexpr std::uint32_t transclusionColour           = 0xFFE9A8FFU;
+  static constexpr std::uint32_t linkColour                   = 0xB9E8C4FFU;
+  static constexpr std::uint32_t redactionColour              = 0x111827FFU;
+  static constexpr std::uint32_t transcopyrightLockedColour   = 0xF59E0BCCU;
+  static constexpr std::uint32_t transcopyrightUnlockedColour = 0x10B981AAU;
 
   explicit Session(std::string aStorePath);
   ~Session() override;
