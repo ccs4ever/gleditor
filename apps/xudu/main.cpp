@@ -26,10 +26,15 @@
 #include <argparse/argparse.hpp>
 
 #include <gleditor/app.hpp>
+#include <gleditor/audio.hpp>
+#include <gleditor/audio_widget.hpp>
 #include <gleditor/caret.hpp>
 #include <gleditor/doc.hpp>
 #include <gleditor/doc_switcher.hpp>
 #include <gleditor/form.hpp>
+#include <gleditor/media.hpp>
+#include <gleditor/media_stream.hpp>
+#include <gleditor/media_widget.hpp>
 #include <gleditor/render/diagnostics.hpp>
 #include <gleditor/render/types.hpp>
 #include <gleditor/render_state.hpp>
@@ -824,6 +829,18 @@ int main(const int argc, char **argv) {
           "first file goes into the primary store (if empty), while additional "
           "files receive independent temporary stores")
       .append();
+  parser.add_argument("--audio")
+      .help(
+          "open an audio stream or file as an embedded AudioWidget; repeatable")
+      .append();
+  parser.add_argument("--video")
+      .help(
+          "open a video stream or file as an embedded MediaWidget; repeatable")
+      .append();
+  parser.add_argument("--link")
+      .help("create a link between open document spans as "
+            "DOC1:START:END,DOC2:START:END; repeatable")
+      .append();
   parser.add_argument("files")
       .help("source files to import or open")
       .remaining();
@@ -1146,6 +1163,123 @@ int main(const int argc, char **argv) {
     }
     for (const auto &behind : background) {
       views.showAlongside(behind, backgroundDepthZ, 0);
+    }
+
+    std::vector<std::shared_ptr<gleditor::AudioWidget>> audioWidgets;
+    if (parser.present<std::vector<std::string>>("--audio")) {
+      for (const auto &mrl : parser.get<std::vector<std::string>>("--audio")) {
+        auto w = std::make_shared<gleditor::AudioWidget>("Sans 11");
+        if (mrl == "white-noise" || mrl == "test") {
+          std::vector<std::byte> dummy(1024, std::byte{0x55});
+          auto stream =
+              std::make_shared<gleditor::MemoryMediaStream>(std::move(dummy));
+          w->load(gleditor::MediaResource::fromStream(stream,
+                                                      "White Noise (48 kHz)"));
+        } else {
+          w->load(gleditor::MediaResource::fromFile(mrl));
+        }
+        w->setTitle(std::filesystem::path(mrl).filename().string());
+        w->setVisible(true);
+        renderer->addFrameContributor(w.get());
+        renderer->addPickObserver(w.get());
+        state->accessibility->addSource(w.get());
+        audioWidgets.push_back(w);
+      }
+    }
+
+    std::vector<std::shared_ptr<gleditor::MediaWidget>> videoWidgets;
+    if (parser.present<std::vector<std::string>>("--video")) {
+      for (const auto &mrl : parser.get<std::vector<std::string>>("--video")) {
+        auto w = std::make_shared<gleditor::MediaWidget>("Sans 11");
+        if (mrl == "test" || mrl == "pattern") {
+          std::vector<std::byte> dummy(2048, std::byte{0xAA});
+          auto stream =
+              std::make_shared<gleditor::MemoryMediaStream>(std::move(dummy));
+          w->load(gleditor::MediaResource::fromStream(stream,
+                                                      "Sample Video (1080p)"));
+        } else {
+          w->load(gleditor::MediaResource::fromFile(mrl));
+        }
+        w->setTitle(std::filesystem::path(mrl).filename().string());
+        w->setVisible(true);
+        renderer->addFrameContributor(w.get());
+        renderer->addPickObserver(w.get());
+        state->accessibility->addSource(w.get());
+        videoWidgets.push_back(w);
+      }
+    }
+
+    renderer->runWithState([&audioWidgets, &videoWidgets](RenderState &rState) {
+      if (!rState.docs.empty()) {
+        for (std::size_t i = 0; i < audioWidgets.size(); ++i) {
+          const auto dIdx = std::min(i, rState.docs.size() - 1);
+          if (rState.docs[dIdx]) {
+            audioWidgets[i]->attachToPage(rState.docs[dIdx], 0, 30.0F,
+                                          110.0F +
+                                              static_cast<float>(i) * 140.0F);
+            audioWidgets[i]->setSize(320.0F, 120.0F);
+          }
+        }
+        for (std::size_t i = 0; i < videoWidgets.size(); ++i) {
+          const auto dIdx = (rState.docs.size() > 1) ? 1 : 0;
+          if (rState.docs[dIdx]) {
+            videoWidgets[i]->attachToPage(rState.docs[dIdx], 0, 30.0F,
+                                          190.0F +
+                                              static_cast<float>(i) * 200.0F);
+            videoWidgets[i]->setSize(320.0F, 180.0F);
+          }
+        }
+      }
+    });
+
+    if (parser.present<std::vector<std::string>>("--link")) {
+      for (const auto &spec : parser.get<std::vector<std::string>>("--link")) {
+        const auto comma = spec.find(',');
+        if (comma != std::string::npos) {
+          const auto leftStr  = spec.substr(0, comma);
+          const auto rightStr = spec.substr(comma + 1);
+          const auto c1       = leftStr.find(':');
+          const auto c2       = leftStr.rfind(':');
+          const auto c3       = rightStr.find(':');
+          const auto c4       = rightStr.rfind(':');
+          if (c1 != std::string::npos && c2 != std::string::npos &&
+              c3 != std::string::npos && c4 != std::string::npos) {
+            const auto d1 =
+                static_cast<std::uint32_t>(std::stoul(leftStr.substr(0, c1)));
+            const auto s1 = static_cast<std::uint32_t>(
+                std::stoul(leftStr.substr(c1 + 1, c2 - c1 - 1)));
+            const auto e1 =
+                static_cast<std::uint32_t>(std::stoul(leftStr.substr(c2 + 1)));
+
+            const auto d2 =
+                static_cast<std::uint32_t>(std::stoul(rightStr.substr(0, c3)));
+            const auto s2 = static_cast<std::uint32_t>(
+                std::stoul(rightStr.substr(c3 + 1, c4 - c3 - 1)));
+            const auto e2 =
+                static_cast<std::uint32_t>(std::stoul(rightStr.substr(c4 + 1)));
+
+            const auto vList = session->views();
+            if (d1 < vList.size() && d2 < vList.size()) {
+              const auto sIdx1 = vList[d1].storeIndex;
+              const auto sIdx2 = vList[d2].storeIndex;
+              const auto ver1 =
+                  session->store(sIdx1).rebuild(vList[d1].version);
+              const auto ver2 =
+                  session->store(sIdx2).rebuild(vList[d2].version);
+
+              auto leftSpans  = ver1.spansFor(s1, e1 > s1 ? e1 - s1 : 1);
+              auto rightSpans = ver2.spansFor(s2, e2 > s2 ? e2 - s2 : 1);
+
+              xudu::Link l;
+              l.type  = xudu::LinkType::Quotation;
+              l.owner = "you";
+              l.left  = leftSpans;
+              l.right = rightSpans;
+              session->addLink(d1, std::move(l));
+            }
+          }
+        }
+      }
     }
 
     gleditor::Application app(state, renderer, backend, "Xudu");

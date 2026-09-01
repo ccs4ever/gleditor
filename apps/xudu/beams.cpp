@@ -793,6 +793,16 @@ void LinkBeams::drawFrame(gleditor::FrameContext &ctx) {
       anchorStub(*nearEdge, colour, tagId, false);
       anchorStub(*farEdge, colour, tagId, true);
 
+      // Tenuous connection: subtle elastic tether ribbon connecting flying page
+      // to background origin
+      if (to && glm::vec3(to->getModel()[3]).z < 0.0F) {
+        const glm::vec3 originPos(0.0F, glm::vec3(to->getModel()[3]).y, -60.0F);
+        const glm::vec3 currentPos(to->getModel()[3]);
+        const auto tetherCol = fade(
+            linkColour(strand.type, ProminenceTier::Public), 0.22F * docAlpha);
+        beams->add(originPos, currentPos, 1.6F, tetherCol, tagId, 0.0F, 1.0F);
+      }
+
       if (sworph && !strand.aligned) {
         if (moved) {
           stillToAlign = true;
