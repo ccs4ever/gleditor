@@ -327,13 +327,23 @@ void LinkBeams::anchorStub(const Edge &edge, const std::uint32_t colour,
   const glm::vec3 up(0.0F, half, 0.0F);
   const float at = farEnd ? 1.0F : 0.0F;
 
-  // Margin fill connecting text edge across margin to outer page edge
-  beams->add(textMid, pageMid, half * 2.0F, colour, tag, at, at);
+  const glm::vec3 marginVec = pageMid - textMid;
+  const float marginWidth   = glm::length(marginVec);
+  const glm::vec3 marginDir = marginWidth > 0.001F
+                                  ? (marginVec / marginWidth)
+                                  : glm::vec3(1.0F, 0.0F, 0.0F);
 
-  // Outer page margin bracket
-  beams->add(pageMid - up, pageMid + up,
-             lineWorld * beamWidthOfLine * stubWidthOfBeam, colour, tag, at,
-             at);
+  // Bracket thickness strictly scaled to fit inside margin without overhanging
+  // page
+  const float bracketThick      = std::min(0.24F, marginWidth * 0.12F);
+  const auto outerBracketCenter = pageMid - marginDir * (bracketThick * 0.5F);
+
+  // 1. Margin fill connecting text edge across margin to outer bracket
+  beams->add(textMid, outerBracketCenter, half * 2.0F, colour, tag, at, at);
+
+  // 2. Outer page margin bracket (flush with inside of page boundary)
+  beams->add(outerBracketCenter - up, outerBracketCenter + up, bracketThick,
+             colour, tag, at, at);
 }
 
 void LinkBeams::drawMarginAnchorLane(const Edge &edge,
@@ -361,32 +371,43 @@ void LinkBeams::drawMarginAnchorLane(const Edge &edge,
   const glm::vec3 laneOffset(0.0F, subCenterY,
                              0.02F * static_cast<float>(laneIndex));
 
+  const glm::vec3 marginVec = pageMid - textMid;
+  const float marginWidth   = glm::length(marginVec);
+  const glm::vec3 marginDir = marginWidth > 0.001F
+                                  ? (marginVec / marginWidth)
+                                  : glm::vec3(1.0F, 0.0F, 0.0F);
+
+  // Bracket thickness strictly scaled to fit inside margin without overhanging
+  // page
+  const float baseBracketThick = std::min(0.24F, marginWidth * 0.12F);
+  const float bracketThick     = baseBracketThick * (isActive ? 1.4F : 1.0F);
+
+  // Outer bracket center sits flush against the inside edge of the page border
+  const auto outerBracketCenter = pageMid - marginDir * (bracketThick * 0.5F);
+
   const auto textP1 = textMid + laneOffset - subUp;
   const auto textP2 = textMid + laneOffset + subUp;
-  const auto pageP1 = pageMid + laneOffset - subUp;
-  const auto pageP2 = pageMid + laneOffset + subUp;
+  const auto pageP1 = outerBracketCenter + laneOffset - subUp;
+  const auto pageP2 = outerBracketCenter + laneOffset + subUp;
 
   const auto textCenter = 0.5F * (textP1 + textP2);
   const auto pageCenter = 0.5F * (pageP1 + pageP2);
 
   // Prominence styling
   const auto drawColour = isActive ? (colour | 0xFFU) : fade(colour, 0.92F);
-  const float bandThick = (subHalf * 2.0F) * (isActive ? 1.2F : 0.95F);
-  const float stubWidth =
-      lineWorld * beamWidthOfLine * stubWidthOfBeam * (isActive ? 1.4F : 1.0F);
+  const float bandThick = (subHalf * 2.0F) * (isActive ? 1.05F : 0.98F);
 
   // 1. Margin coloring fill: horizontal band connecting from text boundary
-  // across margin to page boundary
-  beams->add(textCenter, pageCenter, std::max(bandThick, 1.6F), drawColour, tag,
-             at, at);
+  // across margin to outer bracket
+  beams->add(textCenter, pageCenter, bandThick, drawColour, tag, at, at);
 
-  // 2. Outer page edge anchor bracket: solid vertical bracket along the outer
-  // page edge
-  beams->add(pageP1, pageP2, stubWidth, drawColour, tag, at, at);
+  // 2. Outer page edge anchor bracket: solid vertical bracket completely inside
+  // the page edge
+  beams->add(pageP1, pageP2, bracketThick, drawColour, tag, at, at);
 
   // 3. Inner text edge anchor bracket: subtle vertical bracket along the text
   // boundary
-  beams->add(textP1, textP2, stubWidth * 0.8F, drawColour, tag, at, at);
+  beams->add(textP1, textP2, bracketThick * 0.7F, drawColour, tag, at, at);
 }
 
 bool LinkBeams::onScreen(const glm::mat4 &viewProjection,
