@@ -22,12 +22,15 @@ It is `apps/gleditor/main.cpp`: a command line, a key map, and the library doing
 the rest.
 
 **`xudu`** is a second program that keeps a versioned hypertext instead of a
-file, after Ted Nelson's OSMIC and Project Xanadu. It is `apps/xudu/`. It shares
-the library with the editor and shares no code with it.
+file, after Ted Nelson's OSMIC and Project Xanadu. It is `apps/xudu/`: sovereign
+user permascrolls, decentralized Merkle identity consensus, multi-author live
+editing, and 3D transclusion beam optics. It shares the library with the editor
+and shares no code with it.
 
 **`zigzag`** is a third program that visualizes and navigates Project Xanadu
 multidimensional Zigzag structures (zzstructures / slices) in interactive 3D,
-with animated rank transitions, customizable dimension bindings, and BitTorrent
+with a 120 FPS unified transclusion engine, animated rank transitions,
+Merkle author verification, customizable dimension bindings, and BitTorrent
 Preflet resolution. It is `apps/zigzag/`.
 
 The split is the point. See [Building on the library](#building-on-the-library)
@@ -606,17 +609,54 @@ their full complexity, rather than simplified for programmer convenience."
 `xudu` implements it. The engine is `apps/xudu/core/` and needs no graphics
 device, which is why it has its own test binary that does not link the library.
 
-### The two spools
+### The two spools: One Permascroll Per User
 
 "In OSMIC, data is logically saved in the server as two cumulative spools --
 that is, Append-and-Read-Only files."
 
-Text that is typed goes into the **primedia spool** at an address it keeps
-forever. Each edit goes into the **operations spool**, filed under the state it
-produced. Nothing is ever removed from either.
+In the pure Xanadu formulation, primedia is never siloed per document. All text
+typed by a user flows into a single, sovereign **User Permascroll**
+(`UserPermascroll`, stored under `~/.local/share/xudu/permascroll/<fingerprint>/`)
+bound to their verified OpenPGP / BEP 46 cryptographic identity.
 
-An address says *which* content as well as where in it. The local spool is one
-**scroll**; somebody else's append-only sequence is another, and two addresses
+Documents (`Store`) are lightweight virtual Edit Decision Lists (EDLs). Slot 0
+in a document store is always the author's sovereign permascroll, while foreign
+quotations and collaborator inputs are registered as external scrolls
+(`ScrollId > 0`). Each edit goes into the document's **operations spool**, filed
+under the state it produced. Nothing is ever removed from either.
+
+```
++---------------------------------------------------------------+
+|             User Permascroll (~/.local/share/...)             |
+|  [0 .............. 64KiB) [64KiB ........... 128KiB) ...      |
++---------------------------------------------------------------+
+          ^                              ^
+          | (slot 0)                     | (slot 0)
++--------------------+         +--------------------+
+|  Document A (EDL)  |         |  Document B (EDL)  |
+|  ops: [0, 40)      |         |  ops: [64KiB, 80)  |
++--------------------+         +--------------------+
+```
+
+Key invariants of this model:
+
+- **64 KiB Page Alignment**: Spool segments are aligned to 64 KiB boundaries.
+  This aligns with BitTorrent v2 Merkle piece sizes and enables zero-copy
+  `mmap(MAP_FIXED)` address space extension in local memory.
+- **Collaborative Live Editing (Zero Payload)**: Live operations transmitted
+  across peers carry only a 48-byte operation descriptor and canonical
+  `GlobalSpan` coordinates. Remote keystrokes never inject raw text into the
+  local slot 0 spool, completely preventing spool contamination and offset drift.
+- **Cross-Document Self-Transclusion**: Quoting a passage between two documents
+  written by the same author allocates zero additional storage bytes in the
+  permascroll—Document B simply points directly to the existing span in slot 0.
+- **Dual-Key Device Delegation**: A user's OpenPGP master key signs
+  `DeviceDelegation` certificates authorizing device-specific BEP 46 keypairs
+  (`subscroll:laptop`, `subscroll:desktop`), allowing concurrent offline typing
+  without split-brain collisions.
+
+An address says *which* content as well as where in it. The author's permascroll
+is slot 0; somebody else's append-only sequence is another, and two addresses
 into different scrolls never overlap however close their numbers are. A scroll
 only grows, so an offset into it is settled when the bytes are written and no
 later event moves it -- in particular not a change in which torrent carries
@@ -1168,6 +1208,29 @@ with nothing in it that can sign -- what comes back is a native message box,
 put up by SDL. See "What SDL provides for dialogs" below for why that half is
 the platform's and the form itself is not.
 
+### Decentralized Identity & Merkle Ledger Subsystem
+
+In a global Xanadulogical network, authors need to verify identities (OpenPGP
+fingerprints bound to validated email addresses) without trusting central certificate
+authorities. `xudu` integrates an append-only **Merkle Identity Ledger**
+(`MerkleLedger`, using `microsoft/merklecpp`) managed by a dedicated background
+swarm (`SystemTorrentManager` coordinating `identities.torrent`).
+
+Key mechanisms:
+
+- **BEP 10 Wire Protocol Extensions**: Peers communicate identity facts directly
+  over the BitTorrent wire via custom message types:
+  - `xudu_identity_lookup`: Query for an identity record and cryptographic Merkle proof.
+  - `xudu_oracle_vote`: Gossip oracle attestation votes for new identity claims.
+  - `xudu_oracle_verify`: Broadcast validated ledger root updates across the swarm.
+- **Dynamic Hashcash Proof-of-Work (`HashcashEngine`)**: To prevent Sybil attacks
+  and swarm flooding, identity queries and update submissions require solving a
+  SHA-256 Hashcash puzzle scaled dynamically to network load. Peers enforce strict
+  PoW gating before allocating connection or verification resources.
+- **Merkle Proof Auditing**: Clients verify any author's identity claim in $O(\log N)$
+  time against the signed oracle quorum root hash without downloading the entire
+  identities history.
+
 ### Commands
 
 Control is used throughout, because a bare letter is text: the whole point of
@@ -1187,44 +1250,41 @@ this program is that typing is an edit, so it has to reach the document.
 | `ctrl-q`                  | save and quit                                             |
 | `backspace`               | stop pointing at the selection                            |
 
-### What a link is drawn as
+### What a link is drawn as: Optical Beams & Transclusion Prisms
 
-Both ends of a link are ranges of bytes -- so ranges of lines -- and they need
-not be the same size. What is drawn between them is a band: strands spread
-across the taller end and converging on the shorter one, plus a bracket down
-each document's margin covering the end it attaches to.
+Links in Xanadu connect ranges of bytes across hypertime and space. `xudu` draws
+two distinct optical structures:
 
-The strands are deliberately spaced further apart than they are wide. Ribbons
-that merely abut overlap in a thin seam, and a strip of doubled alpha down every
-seam prints as stripes running the length of the band rather than as one
-connection; separated, they read as what they are. Where the two ends differ in
-height the spacing closes towards the shorter one and the strands gather into
-the attachment, which is the shape the relation actually has. Before this the
-two edges were drawn *and* both diagonals, so a link between a two-line passage
-and a one-line one came out as a bow tie with a twist in the middle of it.
+1. **Explicit Xanalinks**: Directed user-created connections between passages,
+   drawn as translucent cyan/magenta ribbons that twist and converge gracefully.
+2. **Emergent Transclusion Prisms**: Spontaneous shared content occurrences across
+   independent documents, rendered as glowing **Identity Gold** volumetric prisms
+   that visually bridge identical primedia addresses.
 
-The brackets are what say which page of a stack a link reaches. Framing a sworph
-backs the camera off far enough to hold both documents, and at that distance
-where a band happens to meet a page is a guess.
+```
+       [Document A]                           [Document B]
+    +-----------------+                    +-----------------+
+    |  Page Margin    |                    |  Page Margin    |
+    | [|||| Anchor]   |~~~~~~ Ribbon ~~~~~~| [|||| Anchor]   |
+    |  "quoted text"  |====== Prism =======|  "quoted text"  |
+    +-----------------+ (Identity Gold)    +-----------------+
+```
 
-A beam is drawn as faint as the fainter of the two documents it runs between, so
-one reaching a page still flying in materialises with it rather than hanging in
-the air waiting for it, and one reaching into the background corpus is as
-recessive as the corpus. Its colour carries the link's prominence tier as well
-as its type -- the same `linkColour(type, tier)` that shades the passages at
-both ends, so the beam and the passages agree about how much attention the link
-is claiming.
+Key optical improvements in the rendering pipeline:
 
-When a document stands between a link's two ends, the beam goes behind it rather
-than through its text, along a curve that dips and returns. Three straight
-pieces through two corners would clear it as well geometrically, and did -- but
-the middle piece runs almost straight away from the camera, and a ribbon lying
-in the plane of the pages has next to no width left when it is seen end on, so
-what
-should have read as one beam going the long way round read as two stubs with a
-gap between them. The fade along a beam's length, which is what says which way
-the link points, is shared out among the pieces of a route by arc length instead
-of restarting at each of them.
+- **Strands and Spacing**: Strands are spaced further apart than their width to
+  prevent alpha-doubling stripes along seams. Where the two ends differ in height,
+  the spacing tapers and gathers into the anchor attachment.
+- **Flush Margin Brackets & Overlapping Anchors**: Margin brackets sit flush
+  inside document boundaries, dividing page margins vertically to display up to
+  **4 distinct overlapping link anchor colors** simultaneously without visual
+  clobbering.
+- **Multi-Span Disambiguation Spines**: When a single xanalink spans multiple
+  non-contiguous target ranges, a central spine coordinates tributary strands,
+  applying instance hue shifts to visually disambiguate distinct link targets.
+- **Obstacle Avoidance**: When an intermediate document obstructs the direct path
+  between two linked spans, the beam bends around the obstacle in 3D along a
+  smooth arc curve (`bypassRoute()`), fading gracefully across its physical arc length.
 
 `bandStrandCount()` and `bypassRoute()` live in `apps/xudu/core/framing.hpp`
 with the rest of the geometry that needs no device, and are unit-tested there.
@@ -1327,6 +1387,26 @@ zzstructure:
 | `Backspace`               | Return to parent slice                                      |
 | `R`                       | Reset camera view to default orientation                    |
 | Left Click                | Pick cell directly under the mouse pointer to shift focus   |
+
+### Unified Transclusion Engine & 120 FPS Rendering
+
+`zigzag` features a high-performance engine for large-scale multidimensional spaces:
+
+- **`CompactZZCell` Layout**: Cells are laid out in a cache-friendly 64-byte
+  aligned POD structure. Static dimensions (`d.1`, `d.2`, `d.3`, `d.clone`, `d.time`)
+  have $O(1)$ direct array slot lookup, while arbitrary dynamic dimensions
+  are stored via an inline overflow link-pair table.
+- **`UnifiedTransclusionEngine`**: Coordinates live document state from `Store`
+  and stages visible cells and link beams directly for the render pipeline at
+  120 FPS without allocation spikes. Validates 2-manifold invariants (ensuring
+  posward/negward link symmetry across all dimensions).
+- **Merkle Author Verification**: Integrates with the `MerkleLedger` to verify
+  the OpenPGP identity of remote slice authors before displaying untrusted
+  zzstructures.
+- **Xanadoc to Zigzag Projection (`zz_xudu_projector`)**: Bidirectionally maps
+  `xudu` document spans, EDL pieces, and hypertime versions into Zigzag cells.
+  Unchanged text spans across hypertime branches are automatically projected as
+  **clone cells** linked along the `d.clone` dimension.
 
 ### Integration with gleditor
 

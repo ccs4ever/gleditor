@@ -1,5 +1,7 @@
 # gleditor
 
+> Refer to [`CLAUDE.md`](CLAUDE.md) for full developer guidance, build/test workflows, coding style, and architecture references.
+
 GPU-rendered text editor library (`gleditor`) plus three programs built on it:
 `apps/gleditor` (plain editor), `apps/xudu` (a xanadoc/xanalogical editor), and
 `apps/zigzag` (a Project Xanadu Zigzag multidimensional slice visualizer).
@@ -13,8 +15,9 @@ non-trivial changes in that area.
 
 ## Setup: submodules
 
-Vendored deps (`thirdparty/argparse`, `thirdparty/Choreograph`) are git
-submodules and the tree will not build without them:
+Vendored deps (`thirdparty/argparse`, `thirdparty/Choreograph`,
+`thirdparty/merklecpp`) are git submodules and the tree will not build
+without them:
 
 ```sh
 git submodule update --init --recursive
@@ -182,18 +185,60 @@ to sanity-check `.editorconfig` itself, not as a gate.
 - `include/gleditor/` — the library's public headers
 - `include/gleditor/text/` — text layout and font management public headers
 - `apps/gleditor/` — the plain editor program
-- `apps/xudu/` — the xanadoc editor; `apps/xudu/core/` is its engine (no graphics
-  dependency)
-- `apps/zigzag/` — the Xanadu Zigzag multidimensional visualizer; `apps/zigzag/core/`
-  is its engine (data model, YAML loader via `rapidyaml`, BitTorrent slice fetcher)
+- `apps/xudu/` — the xanadoc editor; `apps/xudu/core/` is its engine:
+  - `user_permascroll.hpp/.cpp`: Sovereign user permascroll stream and registry
+  - `merkle_ledger.hpp/.cpp`: Append-only Merkle ledger for identity consensus
+  - `managed_torrent.hpp/.cpp`: System-managed torrent swarms coordinator
+  - `identity/`: BEP 10 plugins, Hashcash PoW engine, and network controller
+  - `store.hpp/.cpp`: OSMIC time branches, microversions, and EDL operations
+  - `beams.hpp/.cpp`, `framing.hpp/.cpp`: 3D link ribbons and transclusion prisms
+- `apps/zigzag/` — the Xanadu Zigzag multidimensional visualizer; `apps/zigzag/core/`:
+  - `zigzag_engine.hpp/.cpp`: Multidimensional slice data model and YAML parser
+  - `compact_cell.hpp`: 64-byte aligned compact cell layout
+  - `unified_transclusion_engine.hpp/.cpp`: 120 FPS render staging and manifold checks
+  - `zz_xudu_projector.hpp/.cpp`: Bidirectional xanadoc-to-zigzag mapping
 - `assets/shaders/` — portable GLSL bodies; `vulkan/` holds generated SPIR-V
 - `assets/zigzag/` — sample slice YAML documents
 - `tests/lib/`, `tests/xudu/`, `tests/zigzag/` — unit tests for the library and engines
 - `tools/` — build-time and verification helpers (`compare-backends.sh`,
-  `benchmark-kjv-load.py`, `layout-latency-probe.cpp`, `shader_assemble.cpp`)
+  `benchmark-kjv-load.py`, `layout-latency-probe.cpp`, `shader_assemble.cpp`,
+  `swarm-netns-test.sh`)
 - `packaging/` — distro packaging (arch, debian, fedora, macos, windows, nix)
 - `design/` — design notes and the reasoning behind non-obvious decisions
 - `thirdparty/` — vendored dependencies (git submodules; see above)
+
+## Xanadulogical & Identity Architecture
+
+- **One Permascroll Per User**:
+  - Primedia is never siloed per document; all typing flows into a single
+    append-only `UserPermascroll` bound to the author's OpenPGP / BEP 46 identity.
+  - Page-aligned 64 KiB segments preserve BitTorrent v2 Merkle piece stability
+    and enable zero-copy `mmap(MAP_FIXED)` address space expansion.
+  - Documents (`Store`) are lightweight Edit Decision Lists referencing slot 0
+    (local author's permascroll) or external scrolls (`ScrollId > 0`).
+  - Dual-key delegation (`DeviceDelegation`) maps master GPG fingerprints to
+    device-salted BEP 46 keypairs for offline multi-device authoring.
+  - Collaborative live editing operates with **zero raw text in live ops**,
+    passing canonical 48-byte descriptors and `GlobalSpan` references to eliminate
+    local spool pollution.
+- **Decentralized Merkle Identity Ledger**:
+  - `MerkleLedger` maintains an append-only tree of verified GPG fingerprints
+    and email mappings using `microsoft/merklecpp`.
+  - BEP 10 peer wire protocol plugins (`xudu_identity_lookup`, `xudu_oracle_vote`,
+    `xudu_oracle_verify`) handle challenge-response authentication and peer gating.
+  - Dynamic `HashcashEngine` PoW enforcement protects swarms against Sybil/DoS.
+- **Beam & Optical Rendering**:
+  - Distinguishes emergent transclusion prisms (Identity Gold volumetric
+    quads) from explicit xanalinks (cyan/magenta ribbons).
+  - Multi-span link disambiguation spines and instance hue shifts prevent visual
+    overlap in dense hypertexts.
+  - Document margin anchor brackets sit flush inside page boundaries, supporting
+    up to 4 distinct overlapping link anchor colors.
+- **Zigzag Transclusion & Manifold Engine**:
+  - `CompactZZCell` and `UnifiedTransclusionEngine` stage cells and link beams
+    for 120 FPS high-throughput rendering.
+  - `zz_xudu_projector` projects xanadocs and hypertime branches into Zigzag
+    cells, mapping unchanged spans across revisions to clone cells.
 
 ## Text Architecture & Shaping Pipeline
 
