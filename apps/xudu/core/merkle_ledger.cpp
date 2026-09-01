@@ -202,8 +202,8 @@ struct MerkleLedger::Impl {
 };
 
 MerkleLedger::MerkleLedger() : impl_(std::make_unique<Impl>()) {}
-MerkleLedger::~MerkleLedger()                                 = default;
-MerkleLedger::MerkleLedger(MerkleLedger &&) noexcept          = default;
+MerkleLedger::~MerkleLedger()                                   = default;
+MerkleLedger::MerkleLedger(MerkleLedger &&) noexcept            = default;
 MerkleLedger &MerkleLedger::operator=(MerkleLedger &&) noexcept = default;
 
 MerkleLedger::MerkleLedger(const MerkleLedger &other)
@@ -416,7 +416,8 @@ bool MerkleLedger::saveToFile(const std::string &path) const {
   return out.good();
 }
 
-std::optional<MerkleLedger> MerkleLedger::loadFromFile(const std::string &path) {
+std::optional<MerkleLedger>
+MerkleLedger::loadFromFile(const std::string &path) {
   std::ifstream in(path, std::ios::binary);
   if (!in.is_open()) {
     return std::nullopt;

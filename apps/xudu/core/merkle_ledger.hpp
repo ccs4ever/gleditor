@@ -32,8 +32,8 @@
 
 namespace xudu {
 
-/// A single entry in the append-only ledger linking an OpenPGP key to a verified
-/// email address.
+/// A single entry in the append-only ledger linking an OpenPGP key to a
+/// verified email address.
 struct GpgKeyLink {
   /// Primary OpenPGP key fingerprint (40 hex digits, normalized).
   std::string fingerprint;
@@ -181,7 +181,7 @@ public:
    * Produces a torrent containing LEDGER.yaml, ROOT.hex, and KEYS.pub.
    */
   [[nodiscard]] MadeTorrent
-  sealToTorrent(std::string_view name         = "gpg_identity_ledger",
+  sealToTorrent(std::string_view name     = "gpg_identity_ledger",
                 std::uint64_t pieceLength = 32ULL * 1024ULL) const;
 
   /**

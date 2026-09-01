@@ -37,12 +37,12 @@ protected:
 
 TEST_F(ManagedTorrentTest, RegisterAndSeedMerkleLedger) {
   SystemTorrentManager::Options opts;
-  opts.cacheRoot                       = testDir.string();
-  opts.enableDht                       = false;
-  opts.enableLsd                       = false;
-  opts.enableTrackers                  = false;
-  opts.restrictDhtToDistinctNetworks   = false;
-  opts.allowManyConnectionsPerAddress  = true;
+  opts.cacheRoot                      = testDir.string();
+  opts.enableDht                      = false;
+  opts.enableLsd                      = false;
+  opts.enableTrackers                 = false;
+  opts.restrictDhtToDistinctNetworks  = false;
+  opts.allowManyConnectionsPerAddress = true;
 
   SystemTorrentManager manager(opts);
 
@@ -55,7 +55,8 @@ TEST_F(ManagedTorrentTest, RegisterAndSeedMerkleLedger) {
   ledger.appendKey(link);
 
   std::string error;
-  const InfoHash hash = manager.registerLedger(ledger, std::nullopt, "identity_ledger", &error);
+  const InfoHash hash =
+      manager.registerLedger(ledger, std::nullopt, "identity_ledger", &error);
   EXPECT_FALSE(hash.isZero());
   EXPECT_TRUE(error.empty());
 
@@ -92,7 +93,8 @@ TEST_F(ManagedTorrentTest, RegisterSpoolAndSlice) {
   }
 
   std::string error;
-  const InfoHash spoolHash = manager.registerSpool(spoolFile.string(), "sample_spool", &error);
+  const InfoHash spoolHash =
+      manager.registerSpool(spoolFile.string(), "sample_spool", &error);
   EXPECT_FALSE(spoolHash.isZero());
   EXPECT_TRUE(error.empty());
 
@@ -100,10 +102,12 @@ TEST_F(ManagedTorrentTest, RegisterSpoolAndSlice) {
   const fs::path sliceFile = testDir / "slice.yaml";
   {
     std::ofstream out(sliceFile);
-    out << "meta:\n  name: TestSlice\n  author: Ada\ncells:\n  1:\n    text: Hello\n";
+    out << "meta:\n  name: TestSlice\n  author: Ada\ncells:\n  1:\n    text: "
+           "Hello\n";
   }
 
-  const InfoHash sliceHash = manager.registerSlice(sliceFile.string(), "slice.yaml", &error);
+  const InfoHash sliceHash =
+      manager.registerSlice(sliceFile.string(), "slice.yaml", &error);
   EXPECT_FALSE(sliceHash.isZero());
   EXPECT_TRUE(error.empty());
 

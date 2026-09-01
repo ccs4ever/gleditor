@@ -150,8 +150,9 @@ SystemTorrentManager::SystemTorrentManager(Options options)
   impl_->ensureSession();
 }
 
-SystemTorrentManager::~SystemTorrentManager()                                     = default;
-SystemTorrentManager::SystemTorrentManager(SystemTorrentManager &&) noexcept    = default;
+SystemTorrentManager::~SystemTorrentManager() = default;
+SystemTorrentManager::SystemTorrentManager(SystemTorrentManager &&) noexcept =
+    default;
 SystemTorrentManager &
 SystemTorrentManager::operator=(SystemTorrentManager &&) noexcept = default;
 
@@ -222,16 +223,16 @@ InfoHash SystemTorrentManager::registerLedger(
 
   // Publish mutable pointer on DHT if keys were provided
   if (keys) {
-    const std::string payload = encodeMutablePointer(made.hash);
-    const MutableKeys k       = *keys;
-    const std::int64_t seq    = 1;
+    const std::string payload        = encodeMutablePointer(made.hash);
+    const MutableKeys k              = *keys;
+    const std::int64_t seq           = 1;
     impl_->items[made.hash].sequence = seq;
 
     impl_->session->dht_put_item(
         toLtKey(k.publicKey),
         [k, payload](lt::entry &value, std::array<char, 64> &sig,
                      std::int64_t &outSeq, const std::string &itemSalt) {
-          value = lt::bdecode(lt::span<char const>{
+          value        = lt::bdecode(lt::span<char const>{
               payload.data(), static_cast<std::ptrdiff_t>(payload.size())});
           outSeq       = 1;
           const auto s = signMutableItem(
@@ -264,9 +265,9 @@ InfoHash SystemTorrentManager::updateLedger(const InfoHash &oldHash,
         [keys, payload, nextSeq](lt::entry &value, std::array<char, 64> &sig,
                                  std::int64_t &outSeq,
                                  const std::string &itemSalt) {
-          value = lt::bdecode(lt::span<char const>{
+          value        = lt::bdecode(lt::span<char const>{
               payload.data(), static_cast<std::ptrdiff_t>(payload.size())});
-          outSeq = nextSeq;
+          outSeq       = nextSeq;
           const auto s = signMutableItem(
               mutableSigningBuffer(itemSalt, nextSeq, encodedValueOf(value)),
               keys);
@@ -441,9 +442,9 @@ bool SystemTorrentManager::removeTorrent(const InfoHash &hash,
   }
 
   if (impl_->session && it->second.handle.is_valid()) {
-    impl_->session->remove_torrent(
-        it->second.handle,
-        deleteFiles ? lt::session::delete_files : lt::remove_flags_t{});
+    impl_->session->remove_torrent(it->second.handle,
+                                   deleteFiles ? lt::session::delete_files
+                                               : lt::remove_flags_t{});
   }
 
   if (deleteFiles && !it->second.desc.dataRoot.empty()) {
@@ -489,14 +490,11 @@ void SystemTorrentManager::poll() {
     }
     const lt::torrent_status st = item.handle.status();
     item.status.progress        = st.progress;
-    item.status.downloadedBytes =
-        static_cast<std::uint64_t>(st.total_done);
-    item.status.uploadedBytes =
-        static_cast<std::uint64_t>(st.total_upload);
-    item.status.totalBytes =
-        static_cast<std::uint64_t>(st.total_wanted);
-    item.status.numPeers = st.num_peers;
-    item.status.numSeeds = st.num_seeds;
+    item.status.downloadedBytes = static_cast<std::uint64_t>(st.total_done);
+    item.status.uploadedBytes   = static_cast<std::uint64_t>(st.total_upload);
+    item.status.totalBytes      = static_cast<std::uint64_t>(st.total_wanted);
+    item.status.numPeers        = st.num_peers;
+    item.status.numSeeds        = st.num_seeds;
     item.status.state =
         mapTorrentState(st.state, bool(st.flags & lt::torrent_flags::paused));
   }

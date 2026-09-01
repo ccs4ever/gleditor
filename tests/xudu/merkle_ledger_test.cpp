@@ -13,30 +13,32 @@ namespace xudu {
 namespace {
 
 using ::testing::Eq;
+using ::testing::IsNull;
 using ::testing::Ne;
 using ::testing::NotNull;
-using ::testing::IsNull;
 
 TEST(MerkleLedgerTest, EntryNormalizationAndLeafHashing) {
   GpgKeyLink link1;
-  link1.fingerprint = "4a 5b 6c 7d 8e 9f 00 11 22 33 44 55 66 77 88 99 aa bb cc dd";
-  link1.identity = "Ada Lovelace";
-  link1.email = "Ada@Example.ORG";
-  link1.gpgKeyId = "0x8E9F001122334455";
+  link1.fingerprint =
+      "4a 5b 6c 7d 8e 9f 00 11 22 33 44 55 66 77 88 99 aa bb cc dd";
+  link1.identity  = "Ada Lovelace";
+  link1.email     = "Ada@Example.ORG";
+  link1.gpgKeyId  = "0x8E9F001122334455";
   link1.timestamp = 1700000000;
-  link1.sequence = 0;
+  link1.sequence  = 0;
 
   const auto hash1 = link1.leafHash();
   EXPECT_THAT(link1.leafHashHex().size(), Eq(64U));
 
-  // Same content with different case/spaces in fingerprint and email must produce identical hash
+  // Same content with different case/spaces in fingerprint and email must
+  // produce identical hash
   GpgKeyLink link2;
   link2.fingerprint = "4A5B6C7D8E9F00112233445566778899AABBCCDD";
-  link2.identity = "Ada Lovelace";
-  link2.email = "ada@example.org";
-  link2.gpgKeyId = "0x8E9F001122334455";
-  link2.timestamp = 1700000000;
-  link2.sequence = 0;
+  link2.identity    = "Ada Lovelace";
+  link2.email       = "ada@example.org";
+  link2.gpgKeyId    = "0x8E9F001122334455";
+  link2.timestamp   = 1700000000;
+  link2.sequence    = 0;
 
   EXPECT_THAT(link1.leafHash(), Eq(link2.leafHash()));
 
@@ -52,9 +54,9 @@ TEST(MerkleLedgerTest, AppendEntriesAndRootProgression) {
 
   GpgKeyLink entry1;
   entry1.fingerprint = "1111222233334444555566667777888899990000";
-  entry1.identity = "Alice";
-  entry1.email = "alice@example.com";
-  entry1.timestamp = 1000;
+  entry1.identity    = "Alice";
+  entry1.email       = "alice@example.com";
+  entry1.timestamp   = 1000;
 
   const auto [seq1, root1] = ledger.appendKey(entry1);
   EXPECT_THAT(seq1, Eq(0U));
@@ -65,9 +67,9 @@ TEST(MerkleLedgerTest, AppendEntriesAndRootProgression) {
 
   GpgKeyLink entry2;
   entry2.fingerprint = "AAAA22223333444455556666777788889999BBBB";
-  entry2.identity = "Bob";
-  entry2.email = "bob@example.com";
-  entry2.timestamp = 2000;
+  entry2.identity    = "Bob";
+  entry2.email       = "bob@example.com";
+  entry2.timestamp   = 2000;
 
   const auto [seq2, root2] = ledger.appendKey(entry2);
   EXPECT_THAT(seq2, Eq(1U));
@@ -79,9 +81,9 @@ TEST(MerkleLedgerTest, AppendEntriesAndRootProgression) {
 TEST(MerkleLedgerTest, InclusionProofGenerationAndVerification) {
   MerkleLedger ledger;
 
-  const std::vector<std::string> emails = {
-      "user0@test.org", "user1@test.org", "user2@test.org",
-      "user3@test.org", "user4@test.org", "user5@test.org"};
+  const std::vector<std::string> emails = {"user0@test.org", "user1@test.org",
+                                           "user2@test.org", "user3@test.org",
+                                           "user4@test.org", "user5@test.org"};
 
   for (std::size_t i = 0; i < emails.size(); ++i) {
     GpgKeyLink link;
@@ -105,7 +107,7 @@ TEST(MerkleLedgerTest, InclusionProofGenerationAndVerification) {
     EXPECT_TRUE(MerkleLedger::verifyInclusion(entry, proof, expectedRoot));
 
     // Tampered entry must fail verification
-    auto tampered = entry;
+    auto tampered  = entry;
     tampered.email = "attacker@evil.org";
     EXPECT_FALSE(MerkleLedger::verifyInclusion(tampered, proof, expectedRoot));
   }
@@ -115,10 +117,11 @@ TEST(MerkleLedgerTest, ProofSerializationRoundTrip) {
   MerkleLedger ledger;
   for (int i = 0; i < 4; ++i) {
     GpgKeyLink link;
-    link.fingerprint = std::format("111122223333444455556666777788889999000{}", i);
-    link.identity    = std::format("Person {}", i);
-    link.email       = std::format("person{}@test.net", i);
-    link.timestamp   = 1000 + i;
+    link.fingerprint =
+        std::format("111122223333444455556666777788889999000{}", i);
+    link.identity  = std::format("Person {}", i);
+    link.email     = std::format("person{}@test.net", i);
+    link.timestamp = 1000 + i;
     ledger.appendKey(link);
   }
 
@@ -162,8 +165,12 @@ TEST(MerkleLedgerTest, LedgerYamlSerializationAndLookup) {
   link3.timestamp   = 700;
   ledger.appendKey(link3);
 
-  EXPECT_THAT(ledger.findByFingerprint("AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"), NotNull());
-  EXPECT_THAT(ledger.findByFingerprint("0000000000000000000000000000000000000000"), IsNull());
+  EXPECT_THAT(
+      ledger.findByFingerprint("AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"),
+      NotNull());
+  EXPECT_THAT(
+      ledger.findByFingerprint("0000000000000000000000000000000000000000"),
+      IsNull());
 
   const auto aliceKeys = ledger.findByEmail("alice@wonderland.org");
   EXPECT_THAT(aliceKeys.size(), Eq(2U));
@@ -180,11 +187,13 @@ TEST(MerkleLedgerTest, LedgerYamlSerializationAndLookup) {
 TEST(MerkleLedgerTest, SealToTorrent) {
   MerkleLedger ledger;
   GpgKeyLink link;
-  link.fingerprint      = "1234567890123456789012345678901234567890";
-  link.identity         = "Test Author";
-  link.email            = "author@test.com";
-  link.publicKeyArmored = "-----BEGIN PGP PUBLIC KEY BLOCK-----\ntest\n-----END PGP PUBLIC KEY BLOCK-----";
-  link.timestamp        = 1000;
+  link.fingerprint = "1234567890123456789012345678901234567890";
+  link.identity    = "Test Author";
+  link.email       = "author@test.com";
+  link.publicKeyArmored =
+      "-----BEGIN PGP PUBLIC KEY BLOCK-----\ntest\n-----END PGP PUBLIC KEY "
+      "BLOCK-----";
+  link.timestamp = 1000;
   ledger.appendKey(link);
 
   const MadeTorrent made = ledger.sealToTorrent("test_ledger", 16384);
@@ -224,7 +233,8 @@ TEST(MerkleLedgerTest, VerifyProvenanceAuthorAgainstRoot) {
   Author unknownAuthor;
   unknownAuthor.name  = "Eve";
   unknownAuthor.email = "eve@unknown.com";
-  EXPECT_FALSE(ledger.verifyProvenanceAuthor(unknownAuthor, prov, root, &error));
+  EXPECT_FALSE(
+      ledger.verifyProvenanceAuthor(unknownAuthor, prov, root, &error));
   EXPECT_FALSE(error.empty());
 
   // Wrong root hash fails
