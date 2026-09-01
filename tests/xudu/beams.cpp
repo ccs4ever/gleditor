@@ -41,7 +41,9 @@ using xudu::LinkType;
 using xudu::MicroversionId;
 using xudu::pageStackExtent;
 using xudu::PageStackExtent;
+using xudu::placeTransclusions;
 using xudu::Store;
+using xudu::TransclusionPair;
 using xudu::Version;
 
 constexpr const char *sentence   = "alpha beta gamma delta";
@@ -957,4 +959,92 @@ TEST(BypassRoute, noSegmentsIsAStraightRun) {
   ASSERT_EQ(route.size(), 2U);
   EXPECT_FLOAT_EQ(route.front().x, from.x);
   EXPECT_FLOAT_EQ(route.back().x, to.x);
+}
+
+// True Transclusion tests: "Transclusions are not links".
+// Transclusions are emergent coordinate overlaps in the primedia spool.
+TEST(TransclusionLayout,
+     pureTransclusionAcrossDocumentsCreatesTransclusionPairWithoutLinks) {
+  Store store;
+  const auto d1 = store.insert(
+      MicroversionId{}, 0, "The primordial docuverse is deeply intertwingled.");
+  // Transclude "deeply intertwingled" into a second document
+  constexpr std::uint32_t transStart = 27;
+  constexpr std::uint32_t transLen   = 20;
+  const auto d2 =
+      store.transclude(MicroversionId{}, 0, d1, transStart, transLen);
+
+  const std::vector<Version> versions{store.rebuild(d1), store.rebuild(d2)};
+
+  // 1. Relational links must be empty
+  std::vector<LinkedPair> placedLinks;
+  std::vector<HalfLink> unplacedLinks;
+  xudu::placeLinks(store.links(), viewing(versions), placedLinks,
+                   unplacedLinks);
+  EXPECT_TRUE(placedLinks.empty());
+  EXPECT_TRUE(unplacedLinks.empty());
+
+  // 2. Emergent transclusion must be discovered directly from address overlaps
+  std::vector<TransclusionPair> tPairs;
+  placeTransclusions(viewing(versions), tPairs);
+
+  ASSERT_EQ(tPairs.size(), 1U);
+  EXPECT_EQ(tPairs[0].from.doc, 0U);
+  EXPECT_EQ(tPairs[0].from.start, transStart);
+  EXPECT_EQ(tPairs[0].from.end, transStart + transLen);
+
+  EXPECT_EQ(tPairs[0].to.doc, 1U);
+  EXPECT_EQ(tPairs[0].to.start, 0U);
+  EXPECT_EQ(tPairs[0].to.end, transLen);
+}
+
+TEST(TransclusionLayout,
+     independentNonTranscludedDocumentsHaveNoTransclusionPairs) {
+  Store store;
+  // Two documents typing identical text create distinct primedia addresses
+  const auto d1 = store.insert(MicroversionId{}, 0, "Unique primedia run");
+  const auto d2 = store.insert(MicroversionId{}, 0, "Unique primedia run");
+
+  const std::vector<Version> versions{store.rebuild(d1), store.rebuild(d2)};
+
+  std::vector<TransclusionPair> tPairs;
+  placeTransclusions(viewing(versions), tPairs);
+  EXPECT_TRUE(tPairs.empty());
+}
+
+TEST(TransclusionLayout, simultaneousRelationalLinkAndTransclusionCoexist) {
+  Store store;
+  const auto d1 = store.insert(MicroversionId{}, 0, "alpha beta gamma delta");
+  const auto d2 =
+      store.transclude(MicroversionId{}, 0, d1, 0, 10); // "alpha beta"
+
+  // Add explicit comment link from d1's "gamma" (11..16) to d2's "alpha" (0..5)
+  const auto text1 = store.rebuild(d1);
+  const auto text2 = store.rebuild(d2);
+
+  Link link;
+  link.type  = LinkType::Comment;
+  link.owner = "curator";
+  link.left  = text1.spansFor(11, 5); // "gamma"
+  link.right = text2.spansFor(0, 5);  // "alpha" (transcluded)
+  store.addLink(d1, link);
+
+  const std::vector<Version> versions{store.rebuild(d1), store.rebuild(d2)};
+
+  // 1. Relational link
+  std::vector<LinkedPair> placedLinks;
+  std::vector<HalfLink> unplacedLinks;
+  xudu::placeLinks(store.links(), viewing(versions), placedLinks,
+                   unplacedLinks);
+  ASSERT_EQ(placedLinks.size(), 1U);
+  EXPECT_EQ(placedLinks[0].type, LinkType::Comment);
+
+  // 2. Identity transclusion
+  std::vector<TransclusionPair> tPairs;
+  placeTransclusions(viewing(versions), tPairs);
+  ASSERT_EQ(tPairs.size(), 1U);
+  EXPECT_EQ(tPairs[0].from.start, 0U);
+  EXPECT_EQ(tPairs[0].from.end, 10U);
+  EXPECT_EQ(tPairs[0].to.start, 0U);
+  EXPECT_EQ(tPairs[0].to.end, 10U);
 }

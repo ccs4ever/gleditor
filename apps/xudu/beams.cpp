@@ -163,18 +163,28 @@ void LinkBeams::rebuildStrands(RenderState &state) {
   for (auto &one : unplaced) {
     dangling.push_back(Dangling{std::move(one), false});
   }
+
+  std::vector<TransclusionPair> tPairs;
+  placeTransclusions(versions, tPairs);
+  transclusionStrands.clear();
+  transclusionStrands.reserve(tPairs.size());
+  for (const auto &tp : tPairs) {
+    transclusionStrands.push_back(
+        TransclusionStrand{tp.from, tp.to, tp.span, {}, {}, {}, {}});
+  }
 }
 
 void LinkBeams::resolveAnchors(RenderState &state) {
+  const auto anchorIn =
+      [&state](const LinkEnd &end,
+               std::uint32_t offset) -> std::optional<Doc::Anchor> {
+    if (end.doc >= state.docs.size()) {
+      return std::nullopt;
+    }
+    return state.docs[end.doc]->anchorFor(offset);
+  };
+
   for (auto &strand : strands) {
-    const auto anchorIn =
-        [&state](const LinkEnd &end,
-                 std::uint32_t offset) -> std::optional<Doc::Anchor> {
-      if (end.doc >= state.docs.size()) {
-        return std::nullopt;
-      }
-      return state.docs[end.doc]->anchorFor(offset);
-    };
     // Retried until it answers rather than given up on: a document opened this
     // frame has no pages yet, and the link is no less real for that.
     if (!strand.fromAnchor) {
@@ -194,6 +204,27 @@ void LinkBeams::resolveAnchors(RenderState &state) {
                                ? (strand.to.end - 1)
                                : strand.to.start;
       strand.toEndAnchor = anchorIn(strand.to, endOff);
+    }
+  }
+
+  for (auto &tStrand : transclusionStrands) {
+    if (!tStrand.fromAnchor) {
+      tStrand.fromAnchor = anchorIn(tStrand.from, tStrand.from.start);
+    }
+    if (!tStrand.toAnchor) {
+      tStrand.toAnchor = anchorIn(tStrand.to, tStrand.to.start);
+    }
+    if (!tStrand.fromEndAnchor) {
+      const auto endOff     = (tStrand.from.end > tStrand.from.start)
+                                  ? (tStrand.from.end - 1)
+                                  : tStrand.from.start;
+      tStrand.fromEndAnchor = anchorIn(tStrand.from, endOff);
+    }
+    if (!tStrand.toEndAnchor) {
+      const auto endOff   = (tStrand.to.end > tStrand.to.start)
+                                ? (tStrand.to.end - 1)
+                                : tStrand.to.start;
+      tStrand.toEndAnchor = anchorIn(tStrand.to, endOff);
     }
   }
 }
@@ -867,7 +898,7 @@ void LinkBeams::drawFrame(gleditor::FrameContext &ctx) {
   pulsePhase = std::fmod(pulsePhase + 0.02F, 1.0F);
 
   if (docTransformsChanged || topologyChanged || strandsRebuilt || unsettled ||
-      !strands.empty()) {
+      !strands.empty() || !transclusionStrands.empty()) {
     resolveAnchors(state);
 
     beams->clear();
@@ -888,7 +919,7 @@ void LinkBeams::drawFrame(gleditor::FrameContext &ctx) {
     };
 
     std::vector<MarginAnchor> allAnchors;
-    allAnchors.reserve(strands.size() * 2);
+    allAnchors.reserve((strands.size() + transclusionStrands.size()) * 2);
 
     for (std::size_t i = 0; i < strands.size(); i++) {
       auto &strand = strands[i];
@@ -971,6 +1002,68 @@ void LinkBeams::drawFrame(gleditor::FrameContext &ctx) {
           moved = true;
         }
       }
+    }
+
+    // Render pure transclusion beams (solid continuous identity prisms between
+    // identical primedia spans across documents)
+    for (std::size_t i = 0; i < transclusionStrands.size(); i++) {
+      auto &tStrand = transclusionStrands[i];
+      if (!tStrand.fromAnchor || !tStrand.toAnchor ||
+          tStrand.from.doc >= state.docs.size() ||
+          tStrand.to.doc >= state.docs.size()) {
+        continue;
+      }
+      const auto &from = state.docs[tStrand.from.doc];
+      const auto &to   = state.docs[tStrand.to.doc];
+
+      const auto rightwards =
+          glm::vec3(to->getModel()[3]).x >= glm::vec3(from->getModel()[3]).x;
+      const auto nearEdge =
+          edgeOf(*from, tStrand.fromAnchor, tStrand.fromEndAnchor, rightwards);
+      const auto farEdge =
+          edgeOf(*to, tStrand.toAnchor, tStrand.toEndAnchor, !rightwards);
+      if (!nearEdge || !farEdge) {
+        continue;
+      }
+
+      const std::size_t docSpan = tStrand.from.doc > tStrand.to.doc
+                                      ? (tStrand.from.doc - tStrand.to.doc)
+                                      : (tStrand.to.doc - tStrand.from.doc);
+
+      const auto docAlpha =
+          std::min(from->currentOpacity(), to->currentOpacity());
+      // Identity Gold transclusion beam
+      const auto colour = fade(0xFFD700FFU, docAlpha);
+      const auto tagId  = static_cast<std::uint32_t>(strands.size() + i);
+
+      // Transclusion beams are solid, continuous volumetric identity bands
+      band(*nearEdge, *farEdge, docSpan, colour, tagId, 0.0F);
+
+      allAnchors.push_back(MarginAnchor{
+          .edge         = *nearEdge,
+          .colour       = colour,
+          .tagId        = tagId,
+          .farEnd       = false,
+          .isActive     = false,
+          .docIndex     = tStrand.from.doc,
+          .towardsRight = rightwards,
+          .linkId       = 0,
+          .tier         = ProminenceTier::Author,
+          .type         = LinkType::Other,
+      });
+
+      allAnchors.push_back(MarginAnchor{
+          .edge         = *farEdge,
+          .colour       = colour,
+          .tagId        = tagId,
+          .farEnd       = true,
+          .isActive     = false,
+          .docIndex     = tStrand.to.doc,
+          .towardsRight = !rightwards,
+          .linkId       = 0,
+          .tier         = ProminenceTier::Author,
+          .type         = LinkType::Other,
+      });
     }
 
     // Render multi-lane margin anchors: up to 4 overlapping link anchor colors

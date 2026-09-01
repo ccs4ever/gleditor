@@ -119,6 +119,9 @@ public:
   /// Links that would be drawn if the documents holding them are built. For
   /// tests and for reporting what a frame did.
   [[nodiscard]] std::size_t strandCount() const { return strands.size(); }
+  [[nodiscard]] std::size_t transclusionStrandCount() const {
+    return transclusionStrands.size();
+  }
 
 private:
   /**
@@ -148,6 +151,22 @@ private:
     /// moved should stay moved.
     bool aligned{};
   };
+
+  /**
+   * @brief One emergent transclusion with identical primedia spans in both
+   *        documents: an identity beam.
+   */
+  struct TransclusionStrand {
+    LinkEnd from;
+    LinkEnd to;
+    PrimediaSpan span;
+    std::optional<Doc::Anchor> fromAnchor;
+    std::optional<Doc::Anchor> toAnchor;
+    std::optional<Doc::Anchor> fromEndAnchor;
+    std::optional<Doc::Anchor> toEndAnchor;
+  };
+
+  std::vector<TransclusionStrand> transclusionStrands;
 
   /// A link with one end on screen and the other in no open document, and
   /// whether the search for a document showing that end has been made.

@@ -311,14 +311,14 @@ public:
   void transcludeSelection() {
     withCaret([this](RenderState &, const Where &where, Caret *) {
       if (!where.hasRange) {
-        std::cout << "xudu: select something to quote first\n";
+        std::cout << "xudu: select something to transclude first\n";
         return;
       }
       const auto from   = session.versionOf(where.doc);
       const auto sIdx   = session.storeIndexOf(where.doc);
       const auto quoted = session.store(sIdx).transclude(
           MicroversionId{}, 0, from, where.start, where.end - where.start);
-      std::cout << "xudu: quoted [" << where.start << "," << where.end
+      std::cout << "xudu: transcluded [" << where.start << "," << where.end
                 << ") of " << from.str() << " into " << quoted.str() << "\n";
       showAlongside(quoted, 0.0F, sIdx);
     });
@@ -327,7 +327,7 @@ public:
   void linkSelection() {
     withCaret([this](RenderState &, const Where &where, Caret *) {
       if (!where.hasRange) {
-        std::cout << "xudu: select something to link first\n";
+        std::cout << "xudu: select something to xanalink first\n";
         return;
       }
       const auto version = session.versionOf(where.doc);
@@ -337,8 +337,8 @@ public:
 
       if (!pending) {
         pending = Pending{where.doc, where.start, where.end, std::move(spans)};
-        std::cout << "xudu: link from doc " << where.doc << " [" << where.start
-                  << "," << where.end
+        std::cout << "xudu: xanalink from doc " << where.doc << " ["
+                  << where.start << "," << where.end
                   << ") -- select the other end and press ctrl-l again\n";
         return;
       }
@@ -687,18 +687,19 @@ void bindCommands(gleditor::Application &app, const AppStateRef &state,
                       "scrub forward in hypertime history",
                       [&views] { views.scrubHistory(false); });
   app.commands().bind(SDL_SCANCODE_T, Mod::Ctrl, "transclude",
-                      "quote the selection into a second document",
+                      "transclude the selection into a second document",
                       [&views] { views.transcludeSelection(); });
-  app.commands().bind(SDL_SCANCODE_L, Mod::Ctrl, "link",
-                      "mark one end of a link, then join it to another "
+  app.commands().bind(SDL_SCANCODE_L, Mod::Ctrl, "xanalink",
+                      "mark one end of a xanalink, then join it to another "
                       "selection -- in this document or any other open one",
                       [&views] { views.linkSelection(); });
   app.commands().bind(SDL_SCANCODE_L, Mod::Ctrl | Mod::Shift, "cancel link",
-                      "forget a link that was begun and not finished",
+                      "forget a xanalink that was begun and not finished",
                       [&views] { views.cancelLink(); });
-  app.commands().bind(SDL_SCANCODE_K, Mod::Ctrl, "beams",
-                      "show or hide the links between documents",
-                      [&links] { links.toggle(); });
+  app.commands().bind(
+      SDL_SCANCODE_K, Mod::Ctrl, "beams",
+      "show or hide the links and transclusions between documents",
+      [&links] { links.toggle(); });
   app.commands().bind(SDL_SCANCODE_K, Mod::Ctrl | Mod::Shift, "sworph",
                       "let a link coming into view bring its far document over",
                       [&links] { links.setSworph(!links.sworphing()); });

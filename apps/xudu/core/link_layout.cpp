@@ -82,6 +82,59 @@ void placeLinks(const std::map<std::uint64_t, Link> &links,
   }
 }
 
+void placeTransclusions(const std::vector<const Version *> &views,
+                        std::vector<TransclusionPair> &pairs) {
+  pairs.clear();
+  if (views.size() < 2) {
+    return;
+  }
+
+  for (std::uint32_t i = 0; i < views.size(); ++i) {
+    if (nullptr == views[i]) {
+      continue;
+    }
+    const auto &docA = *views[i];
+
+    for (std::uint32_t j = i + 1; j < views.size(); ++j) {
+      if (nullptr == views[j]) {
+        continue;
+      }
+      const auto &docB = *views[j];
+
+      for (const auto &pieceA : docA.pieces()) {
+        if (pieceA.empty()) {
+          continue;
+        }
+        for (const auto &pieceB : docB.pieces()) {
+          if (pieceB.empty()) {
+            continue;
+          }
+          const auto shared = pieceA.intersect(pieceB);
+          if (shared.empty()) {
+            continue;
+          }
+
+          const auto occsA = docA.occurrencesOf(shared);
+          const auto occsB = docB.occurrencesOf(shared);
+
+          for (const auto &extA : occsA) {
+            for (const auto &extB : occsB) {
+              TransclusionPair tp{
+                  .from = LinkEnd{i, extA.start, extA.end},
+                  .to   = LinkEnd{j, extB.start, extB.end},
+                  .span = shared,
+              };
+              if (std::ranges::find(pairs, tp) == pairs.end()) {
+                pairs.push_back(tp);
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}
+
 std::uint32_t linkColour(const LinkType type, const ProminenceTier tier) {
   std::uint32_t rgb = 0xCFCFCF00U;
   switch (type) {

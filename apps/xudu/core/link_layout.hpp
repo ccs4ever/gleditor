@@ -56,6 +56,22 @@ struct HalfLink {
   std::vector<PrimediaSpan> elsewhere;
 };
 
+/// A transclusion where identical primedia spans appear across distinct open
+/// documents.
+struct TransclusionPair {
+  LinkEnd from;
+  LinkEnd to;
+  PrimediaSpan span;
+  bool operator==(const TransclusionPair &) const = default;
+};
+
+/**
+ * @brief Discover emergent transclusions (shared primedia spans) between open
+ *        @p views.
+ */
+void placeTransclusions(const std::vector<const Version *> &views,
+                        std::vector<TransclusionPair> &pairs);
+
 /**
  * @brief Sort @p links into the ones that run between @p views and the ones
  *        that run off them.
