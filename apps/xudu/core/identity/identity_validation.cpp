@@ -489,4 +489,143 @@ EnginePipeline::verifyOracleAttestation(const OracleAttestation &att,
   return {};
 }
 
+// ============================================================================
+// HashcashEngine Implementation
+// ============================================================================
+
+namespace {
+
+constexpr std::uint64_t toBigEndian64(std::uint64_t v) noexcept {
+  if constexpr (std::endian::native == std::endian::little) {
+    return std::byteswap(v);
+  }
+  return v;
+}
+
+} // namespace
+
+struct HashcashEngine::Impl {
+  std::map<std::pair<std::string, std::uint64_t>, std::uint64_t> spentNonces;
+};
+
+HashcashEngine::HashcashEngine() : impl_(std::make_unique<Impl>()) {}
+HashcashEngine::~HashcashEngine() = default;
+
+HashcashEngine::HashcashEngine(const HashcashEngine &other)
+    : impl_(std::make_unique<Impl>(*other.impl_)) {}
+
+HashcashEngine &HashcashEngine::operator=(const HashcashEngine &other) {
+  if (this != &other) {
+    impl_ = std::make_unique<Impl>(*other.impl_);
+  }
+  return *this;
+}
+
+HashcashEngine::HashcashEngine(HashcashEngine &&) noexcept            = default;
+HashcashEngine &HashcashEngine::operator=(HashcashEngine &&) noexcept = default;
+
+std::size_t
+HashcashEngine::countLeadingZeroBits(const Hash32 &digest) noexcept {
+  std::size_t leadingZeros = 0;
+  for (const std::uint8_t byte : digest.bytes) {
+    if (byte == 0) {
+      leadingZeros += 8;
+    } else {
+      leadingZeros += static_cast<std::size_t>(std::countl_zero(byte));
+      break;
+    }
+  }
+  return leadingZeros;
+}
+
+Hash32 HashcashEngine::computeDigest(std::string_view resource,
+                                     std::uint64_t timestamp,
+                                     std::uint64_t nonce) noexcept {
+  libtorrent::hasher256 h;
+  h.update(resource.data(), static_cast<int>(resource.size()));
+
+  const std::uint64_t tsBe    = toBigEndian64(timestamp);
+  const std::uint64_t nonceBe = toBigEndian64(nonce);
+  h.update(reinterpret_cast<const char *>(&tsBe), sizeof(tsBe));
+  h.update(reinterpret_cast<const char *>(&nonceBe), sizeof(nonceBe));
+
+  const auto digest = h.final();
+  Hash32 out;
+  std::memcpy(out.bytes.data(), digest.data(), 32);
+  return out;
+}
+
+std::expected<void, ValidationError>
+HashcashEngine::verify(std::string_view resource, std::uint64_t timestamp,
+                       std::uint64_t nonce, std::uint8_t difficultyBits,
+                       std::uint8_t minDifficulty,
+                       std::uint64_t currentSystemTime) {
+  // Invariant 1: Sufficient difficulty
+  if (difficultyBits < minDifficulty || difficultyBits > 256) {
+    return std::unexpected(ValidationError::InsufficientProofOfWork);
+  }
+
+  // Invariant 2: Clock skew check (anti-premining window)
+  if (currentSystemTime > 0) {
+    const std::uint64_t diff = (currentSystemTime >= timestamp)
+                                   ? (currentSystemTime - timestamp)
+                                   : (timestamp - currentSystemTime);
+    if (diff > kMaxClockSkewSeconds) {
+      return std::unexpected(ValidationError::ProofOfWorkExpired);
+    }
+  }
+
+  // Invariant 3: Target difficulty check
+  const auto digest = computeDigest(resource, timestamp, nonce);
+  if (countLeadingZeroBits(digest) < difficultyBits) {
+    return std::unexpected(ValidationError::InsufficientProofOfWork);
+  }
+
+  // Invariant 4: Anti-replay protection
+  const std::pair<std::string, std::uint64_t> key{std::string(resource), nonce};
+  if (impl_->spentNonces.contains(key)) {
+    return std::unexpected(ValidationError::ProofOfWorkReplayDetected);
+  }
+
+  impl_->spentNonces[key] = timestamp;
+
+  // Prune expired spent entries
+  if (currentSystemTime > 0) {
+    pruneSpentCache(currentSystemTime);
+  }
+
+  return {};
+}
+
+std::optional<std::uint64_t>
+HashcashEngine::mint(std::string_view resource, std::uint64_t timestamp,
+                     std::uint8_t targetDifficultyBits,
+                     std::uint64_t maxIterations) {
+  if (targetDifficultyBits > 256) {
+    return std::nullopt;
+  }
+
+  for (std::uint64_t nonce = 0; nonce < maxIterations; ++nonce) {
+    const auto digest = computeDigest(resource, timestamp, nonce);
+    if (countLeadingZeroBits(digest) >= targetDifficultyBits) {
+      return nonce;
+    }
+  }
+  return std::nullopt;
+}
+
+void HashcashEngine::pruneSpentCache(std::uint64_t currentSystemTime) {
+  if (currentSystemTime < 2 * kMaxClockSkewSeconds) {
+    return;
+  }
+  const std::uint64_t cutoff = currentSystemTime - 2 * kMaxClockSkewSeconds;
+  for (auto it = impl_->spentNonces.begin(); it != impl_->spentNonces.end();) {
+    if (it->second < cutoff) {
+      it = impl_->spentNonces.erase(it);
+    } else {
+      ++it;
+    }
+  }
+}
+
 } // namespace xudu::identity

@@ -189,6 +189,61 @@ private:
   std::unique_ptr<Impl> impl_;
 };
 
+/**
+ * @class HashcashEngine
+ * @brief Native, hardware-accelerated Hashcash Proof-of-Work verifier,
+ *        miner, and anti-replay tracker.
+ */
+class HashcashEngine {
+public:
+  HashcashEngine();
+  ~HashcashEngine();
+
+  HashcashEngine(const HashcashEngine &);
+  HashcashEngine &operator=(const HashcashEngine &);
+  HashcashEngine(HashcashEngine &&) noexcept;
+  HashcashEngine &operator=(HashcashEngine &&) noexcept;
+
+  /// Counts leading zero bits in a 32-byte digest in constant time.
+  [[nodiscard]] static std::size_t
+  countLeadingZeroBits(const Hash32 &digest) noexcept;
+
+  /// Computes SHA-256 Hashcash digest over (resource || timestamp || nonce).
+  [[nodiscard]] static Hash32 computeDigest(std::string_view resource,
+                                            std::uint64_t timestamp,
+                                            std::uint64_t nonce) noexcept;
+
+  /**
+   * @brief Verifies a Hashcash stamp with strict invariant checks.
+   *
+   * Invariant 1: difficultyBits >= minDifficulty
+   * Invariant 2: |currentSystemTime - timestamp| <= kMaxClockSkewSeconds
+   * Invariant 3: countLeadingZeroBits(digest) >= difficultyBits
+   * Invariant 4: No nonce replay within active timestamp window
+   */
+  [[nodiscard]] std::expected<void, ValidationError>
+  verify(std::string_view resource, std::uint64_t timestamp,
+         std::uint64_t nonce, std::uint8_t difficultyBits,
+         std::uint8_t minDifficulty      = kDefaultHashcashDifficulty,
+         std::uint64_t currentSystemTime = 0);
+
+  /**
+   * @brief Mints a Hashcash stamp by finding a nonce satisfying
+   * targetDifficultyBits.
+   */
+  [[nodiscard]] static std::optional<std::uint64_t>
+  mint(std::string_view resource, std::uint64_t timestamp,
+       std::uint8_t targetDifficultyBits,
+       std::uint64_t maxIterations = 10'000'000ULL);
+
+  /// Clears expired spent nonces older than the active window.
+  void pruneSpentCache(std::uint64_t currentSystemTime);
+
+private:
+  struct Impl;
+  std::unique_ptr<Impl> impl_;
+};
+
 } // namespace xudu::identity
 
 #endif // XUDU_IDENTITY_VALIDATION_HPP

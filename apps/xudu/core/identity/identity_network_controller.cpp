@@ -175,7 +175,20 @@ bool IdentityPeerPlugin::on_extended(int length, int /*msg*/,
 
   case MessageType::EmailVerifyRequest: {
     const auto reqRes = decodeEmailVerifyRequest(frame.payload);
-    return reqRes.has_value();
+    if (!reqRes) {
+      isolateAndDisconnect("Malformed email verification request");
+      return false;
+    }
+    if (controller_) {
+      const auto powRes = controller_->hashcashEngine().verify(
+          reqRes->targetEmail, reqRes->timestamp, reqRes->powNonce,
+          reqRes->difficultyBits, kDefaultHashcashDifficulty, 0);
+      if (!powRes) {
+        isolateAndDisconnect("Insufficient or invalid Hashcash proof-of-work");
+        return false;
+      }
+    }
+    return true;
   }
 
   case MessageType::EmailVerifyAttestation: {

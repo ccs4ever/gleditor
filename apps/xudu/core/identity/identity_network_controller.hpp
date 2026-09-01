@@ -158,6 +158,14 @@ public:
     return pipeline_;
   }
 
+  /// Reference to Hashcash proof-of-work engine.
+  [[nodiscard]] HashcashEngine &hashcashEngine() noexcept {
+    return hashcashEngine_;
+  }
+  [[nodiscard]] const HashcashEngine &hashcashEngine() const noexcept {
+    return hashcashEngine_;
+  }
+
   /// Options getter.
   [[nodiscard]] const Options &options() const noexcept { return options_; }
 
@@ -187,6 +195,7 @@ public:
 private:
   Options options_;
   EnginePipeline pipeline_;
+  HashcashEngine hashcashEngine_;
   std::mutex quarantineMutex_;
   std::unordered_set<std::string> quarantinedPeers_;
 };
