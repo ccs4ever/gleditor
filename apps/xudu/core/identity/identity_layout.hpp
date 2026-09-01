@@ -257,6 +257,8 @@ enum class SerializationError : std::uint8_t {
   TrailingData
 };
 
+inline constexpr std::uint8_t kDefaultHashcashDifficulty = 20;
+
 /// Ledger and Engine Validation Errors
 enum class ValidationError : std::uint8_t {
   None = 0,
@@ -272,7 +274,10 @@ enum class ValidationError : std::uint8_t {
   InvalidSignature,
   AttestationExpired,
   OracleNotAuthorized,
-  UnauthorizedAction
+  UnauthorizedAction,
+  InsufficientProofOfWork,
+  ProofOfWorkExpired,
+  ProofOfWorkReplayDetected
 };
 
 /// A single verified identity record in the Merkle ledger.
@@ -380,17 +385,29 @@ struct IdentityQueryMsg {
   [[nodiscard]] bool operator==(const IdentityQueryMsg &) const = default;
 };
 
+/// A verified Hashcash Proof-of-Work stamp.
+struct HashcashStamp {
+  std::string resource;
+  std::uint64_t timestamp{};
+  std::uint64_t nonce{};
+  std::uint8_t difficultyBits{kDefaultHashcashDifficulty};
+
+  [[nodiscard]] bool operator==(const HashcashStamp &) const = default;
+};
+
 /// BEP 10 Email Verification Request payload sent to an Oracle.
 struct EmailVerifyRequestMsg {
   Fingerprint requesterFingerprint{};
   std::string targetEmail;
   std::uint64_t timestamp{};
+  std::uint64_t powNonce{0};
+  std::uint8_t difficultyBits{kDefaultHashcashDifficulty};
   Signature64 requesterSignature{};
 
   [[nodiscard]] bool isValid() const noexcept {
     return requesterFingerprint.isValid() && !targetEmail.empty() &&
            targetEmail.size() <= kMaxEmailLength &&
-           !requesterSignature.isZero();
+           !requesterSignature.isZero() && difficultyBits > 0;
   }
   [[nodiscard]] bool operator==(const EmailVerifyRequestMsg &) const = default;
 };

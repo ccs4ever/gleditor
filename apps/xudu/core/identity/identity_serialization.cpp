@@ -387,6 +387,9 @@ decodeEmailVerifyRequest(const libtorrent::bdecode_node &node) {
   }
 
   req.timestamp = static_cast<std::uint64_t>(node.dict_find_int_value("ts", 0));
+  req.powNonce = static_cast<std::uint64_t>(node.dict_find_int_value("pow", 0));
+  req.difficultyBits = static_cast<std::uint8_t>(
+      node.dict_find_int_value("diff", kDefaultHashcashDifficulty));
 
   const auto sigRes = extractSignature64(node, "sig");
   if (!sigRes) return std::unexpected(sigRes.error());
@@ -507,6 +510,8 @@ libtorrent::entry encodeToEntry(const EmailVerifyRequestMsg &req) {
   e["req_fp"] = req.requesterFingerprint.toString();
   e["email"]  = req.targetEmail;
   e["ts"]     = static_cast<std::int64_t>(req.timestamp);
+  e["pow"]    = static_cast<std::int64_t>(req.powNonce);
+  e["diff"]   = static_cast<std::int64_t>(req.difficultyBits);
   e["sig"]    = std::string(
       reinterpret_cast<const char *>(req.requesterSignature.bytes.data()), 64);
   return e;
