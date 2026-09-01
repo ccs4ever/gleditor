@@ -1,5 +1,5 @@
-#!/bin/sh
-# Build gleditor, xudu, and zigzag as WebAssembly / WebGL2 web applications using Emscripten.
+#!/usr/bin/env bash
+# Build gleditor and zigzag as WebAssembly / WebGL2 web applications using Emscripten.
 #
 # Usage:
 #   packaging/wasm/build.sh [output-dir]

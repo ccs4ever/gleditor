@@ -92,7 +92,7 @@ endif
 # includes -- is vendored rather than pulled from a package whose layout on
 # macOS is not this project's to depend on.
 GL_CFLAGS :=
-PKGS := freetype2 harfbuzz fribidi libunibreak fontconfig $(SDL_PKG)
+PKGS := freetype2 harfbuzz fribidi libunibreak fontconfig poppler-cpp libmagic libvlc $(SDL_PKG)
 ifeq ($(shell pkg-config --exists gl && echo 1),1)
 PKGS += gl
 else ifeq ($(shell uname -s 2>/dev/null),Darwin)
@@ -660,36 +660,27 @@ layout-latency-probe: $(OBJDIR)/layout-latency-probe
 $(OBJDIR)/layout-latency-probe: $(OBJDIR)/tools/layout-latency-probe.o $(LIBLINK)
 	$(CXX) $(LDFLAGS) -o $@ $^ $(LIBS)
 
-# The swarm tests proper, with the two peers on separate network stacks. Needs
-# root, so it is not part of `make test`.
+# The swarm tests proper, with the two peers on separate network stacks via
+# unprivileged user namespaces (unshare -Urnm).
 .PHONY: test/swarm
 test/swarm: $(OBJDIR)/xudu-swarm-peer $(OBJDIR)/xudu_test
 	tools/swarm-netns-test.sh
 
-# Suites kept out of the tests a person runs after every change. Not because
-# they are unimportant -- they cover the network path, which is where the
-# surprises are -- but because they need a peer on another network stack to do
-# anything, and take their time deciding there is not one. Without that peer
-# they skip, which is worse than not running: a skip reads as a pass.
-#
-# The pull request checks run them for real; see the swarm job in
-# .github/workflows/c-cpp.yml, and `make test/swarm` to run them here.
-SLOW_TESTS  := SwarmTest.*:MutableNameTest.*:E2EBinaryOrchestrationTest.*
-# Override to run something else, including everything: make test TEST_FILTER='*'
-TEST_FILTER ?= -$(SLOW_TESTS)
+# Network namespace suites that require two peers on separate network stacks.
+# Standalone xudu_test skips these; tools/swarm-netns-test.sh runs them.
+SWARM_NETNS_TESTS := SwarmTest.*:MutableNameTest.*
+TEST_FILTER ?= -$(SWARM_NETNS_TESTS)
 
-test: $(OBJDIR)/gleditor_test $(OBJDIR)/xudu_test $(OBJDIR)/zigzag_test
-	$(OBJDIR)/gleditor_test --gtest_filter='$(TEST_FILTER)'
-	$(OBJDIR)/xudu_test --gtest_filter='$(TEST_FILTER)'
-	$(OBJDIR)/zigzag_test --gtest_filter='$(TEST_FILTER)'
+.PHONY: test test/all test/integration test/e2e-orchestration
+test: $(OBJDIR)/gleditor $(OBJDIR)/xudu $(OBJDIR)/zigzag $(OBJDIR)/gleditor_test $(OBJDIR)/xudu_test $(OBJDIR)/zigzag_test $(OBJDIR)/xudu-swarm-peer
+	$(OBJDIR)/gleditor_test $(if $(TEST_FILTER),--gtest_filter='$(TEST_FILTER)')
+	$(OBJDIR)/xudu_test $(if $(TEST_FILTER),--gtest_filter='$(TEST_FILTER)')
+	$(OBJDIR)/zigzag_test $(if $(TEST_FILTER),--gtest_filter='$(TEST_FILTER)')
+	@if [ -z "$(TEST_FILTER)" ] || [ "$(TEST_FILTER)" = "-$(SWARM_NETNS_TESTS)" ] || echo "$(TEST_FILTER)" | grep -qE 'Swarm|MutableName|\*'; then \
+		tools/swarm-netns-test.sh; \
+	fi
 
-# Everything, slow suites included. What the pull request checks run, and what
-# to run here before pushing.
-.PHONY: test/all test/integration test/e2e-orchestration
-test/all: $(OBJDIR)/gleditor $(OBJDIR)/xudu $(OBJDIR)/zigzag $(OBJDIR)/gleditor_test $(OBJDIR)/xudu_test $(OBJDIR)/zigzag_test
-	$(OBJDIR)/gleditor_test
-	$(OBJDIR)/xudu_test
-	$(OBJDIR)/zigzag_test
+test/all: test
 
 
 test/integration: test/e2e-orchestration

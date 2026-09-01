@@ -287,6 +287,20 @@ public:
    */
   [[nodiscard]] std::vector<LiveOpBroadcast> takePendingLiveOps();
 
+  /**
+   * @brief Encode a live operation broadcast to bencoded byte buffer for BEP 10
+   * transmission.
+   */
+  [[nodiscard]] static std::string
+  encodeLiveOp(const LiveOpBroadcast &broadcast);
+
+  /**
+   * @brief Decode a bencoded byte buffer received via BEP 10 into a
+   * LiveOpBroadcast.
+   */
+  [[nodiscard]] static std::optional<LiveOpBroadcast>
+  decodeLiveOp(std::string_view body);
+
   // -- ContentSource --------------------------------------------------------
 
   [[nodiscard]] const Metainfo *metainfo(const InfoHash &hash) const override;
@@ -295,6 +309,8 @@ public:
                                        std::uint64_t length) const override;
 
 private:
+  friend class XuduTorrentPlugin;
+  friend class XuduPeerPlugin;
   struct Impl;
   std::unique_ptr<Impl> impl;
 };

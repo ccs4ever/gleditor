@@ -163,6 +163,8 @@ FontManager::FontManager() {
   if (FT_Init_FreeType(&ftLib_) != 0) {
     throw std::runtime_error("FreeType initialization failed");
   }
+  // Initialize standard LCD subpixel decimation filters on the FreeType library
+  // instance for subpixel font rendering and hinting compatibility.
   FT_Library_SetLcdFilter(ftLib_, FT_LCD_FILTER_DEFAULT);
 }
 

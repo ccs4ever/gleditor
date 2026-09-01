@@ -437,3 +437,14 @@ TEST_F(GlyphCacheTest, aFamilyWithNoBoldFileStillCachesSeparately) {
 
   EXPECT_GT(uploads, afterPlain);
 }
+
+TEST_F(GlyphCacheTest, fallbackFontRasterizesInkForMissingGlyphs) {
+  const auto cache = makeCache(1024, 2);
+  const auto face  = font("Monospace 32");
+
+  // CJK glyph not in Monospace face must fall back and produce non-zero ink.
+  const auto cjk = cache->put("世", face);
+  EXPECT_GT(cjk.ink, 0.0F);
+  EXPECT_GT(cjk.dims.width, Length{0});
+  EXPECT_GT(cjk.dims.height, Length{0});
+}

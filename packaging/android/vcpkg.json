@@ -8,6 +8,8 @@
     "fribidi",
     "libunibreak",
     "fontconfig",
+    "poppler",
+    "libmagic",
     "glm"
   ],
   "builtin-baseline": "f298fb4ef3a7ae09766b6a5beb92ce171a767927"

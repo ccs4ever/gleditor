@@ -8,6 +8,6 @@ Exec=gleditor %F
 Icon=gleditor
 Terminal=false
 Categories=Utility;TextEditor;Development;
-MimeType=text/plain;
+MimeType=text/plain;application/pdf;
 Keywords=text;editor;gpu;opengl;vulkan;
 StartupNotify=true

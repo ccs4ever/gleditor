@@ -8,6 +8,8 @@
   fribidi,
   libunibreak,
   fontconfig,
+  poppler,
+  file,
   sdl3,
   sdl3-image,
   libGL,
@@ -63,6 +65,8 @@ stdenv.mkDerivation {
     fribidi
     libunibreak
     fontconfig
+    poppler
+    file
     sdl3
     sdl3-image
     libGL

@@ -253,3 +253,45 @@ TEST(ZzCoreTest, CloneMasterResolutionAlongDClone) {
   EXPECT_EQ(getEffectiveCellText(cells, 20), "Updated Universal Truth");
   EXPECT_EQ(getEffectiveCellText(cells, 30), "Updated Universal Truth");
 }
+
+TEST(ZzCoreTest, DescribeLoadErrorsAndDiagnosticsCount) {
+  EXPECT_FALSE(describe(LoadError::Kind::FileUnreadable).empty());
+  EXPECT_FALSE(describe(LoadError::Kind::MalformedYaml).empty());
+  EXPECT_FALSE(describe(LoadError::Kind::SchemaViolation).empty());
+  EXPECT_FALSE(describe(LoadError::Kind::DanglingFocus).empty());
+
+  Diagnostics diag;
+  EXPECT_EQ(diag.count(Severity::Error), 0U);
+  EXPECT_EQ(diag.count(Severity::Warning), 0U);
+
+  diag.error("test error");
+  diag.warn("test warning");
+
+  EXPECT_EQ(diag.count(Severity::Error), 1U);
+  EXPECT_EQ(diag.count(Severity::Warning), 1U);
+}
+
+TEST(ZzCoreTest, SelectSliceFileAndResolveXdgPath) {
+  std::vector<std::string> files = {
+      "readme.txt",
+      "assets/icon.png",
+      "data/home_slice.yaml",
+      "data/secondary.zz.yaml",
+  };
+
+  // Preferred match
+  EXPECT_EQ(selectSliceFile(files, "secondary.zz.yaml"),
+            "data/secondary.zz.yaml");
+
+  // Fallback to first .yaml file
+  EXPECT_EQ(selectSliceFile(files, "nonexistent.yaml"), "data/home_slice.yaml");
+
+  // No yaml files
+  std::vector<std::string> noYaml = {"file1.txt", "file2.png"};
+  EXPECT_EQ(selectSliceFile(noYaml, ""), "");
+
+  // resolveXdgPath
+  const auto path =
+      resolveXdgPath("XDG_DATA_HOME", ".local/share", "zigzag", "default.yaml");
+  EXPECT_FALSE(path.empty());
+}

@@ -375,6 +375,44 @@ TEST_F(MutableNameTest, theSaltIsPartOfTheName) {
   EXPECT_FALSE(swarm.resolveMutable(salted, 3s).has_value());
 }
 
+TEST(LiveCollaborativeSwarmTest, bep10LiveOpEncodingAndDecoding) {
+  SwarmContentSource::LiveOpBroadcast broadcast{
+      .swarmHash =
+          InfoHash::fromHex("0123456789abcdef0123456789abcdef01234567"),
+      .version      = MicroversionId::parse("2a1"),
+      .op           = xudu::Op{.kind         = xudu::OpKind::Insert,
+                               .parent       = MicroversionId::parse("2"),
+                               .at           = 42,
+                               .length       = 10,
+                               .to           = 0,
+                               .span         = xudu::PrimediaSpan{1, 100, 25},
+                               .source       = MicroversionId{},
+                               .sourceAt     = 0,
+                               .sourceLength = 0,
+                               .link         = 7},
+      .primediaText = "Collaborative Text Span",
+      .timestamp    = 1700000000123LL,
+  };
+
+  const auto encoded = SwarmContentSource::encodeLiveOp(broadcast);
+  EXPECT_FALSE(encoded.empty());
+
+  const auto decoded = SwarmContentSource::decodeLiveOp(encoded);
+  ASSERT_TRUE(decoded.has_value());
+  EXPECT_EQ(decoded->swarmHash, broadcast.swarmHash);
+  EXPECT_EQ(decoded->version, broadcast.version);
+  EXPECT_EQ(decoded->op.kind, broadcast.op.kind);
+  EXPECT_EQ(decoded->op.parent, broadcast.op.parent);
+  EXPECT_EQ(decoded->op.at, broadcast.op.at);
+  EXPECT_EQ(decoded->op.length, broadcast.op.length);
+  EXPECT_EQ(decoded->op.span.scroll, broadcast.op.span.scroll);
+  EXPECT_EQ(decoded->op.span.start, broadcast.op.span.start);
+  EXPECT_EQ(decoded->op.span.length, broadcast.op.span.length);
+  EXPECT_EQ(decoded->op.link, broadcast.op.link);
+  EXPECT_EQ(decoded->primediaText, broadcast.primediaText);
+  EXPECT_EQ(decoded->timestamp, broadcast.timestamp);
+}
+
 TEST(LiveCollaborativeSwarmTest, broadcastAndApplyLiveOpsAcrossPeerStores) {
   SwarmContentSource peerSource;
   Store aliceStore;

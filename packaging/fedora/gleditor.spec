@@ -15,6 +15,8 @@ BuildRequires:  pkgconfig(harfbuzz)
 BuildRequires:  pkgconfig(fribidi)
 BuildRequires:  pkgconfig(libunibreak)
 BuildRequires:  pkgconfig(fontconfig)
+BuildRequires:  pkgconfig(poppler-cpp)
+BuildRequires:  file-devel
 BuildRequires:  SDL3-devel
 BuildRequires:  SDL3_image-devel
 BuildRequires:  pkgconfig(gl)

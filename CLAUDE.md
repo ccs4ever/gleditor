@@ -64,20 +64,18 @@ Makefile already probes for what the toolchain supports.
 ## Tests
 
 ```sh
-make -j$(nproc) test        # builds + runs gleditor_test and xudu_test in parallel, skips slow/network suites
-make -j$(nproc) test/all     # the same, nothing skipped — this is what CI (PR checks) runs
-make test TEST_FILTER='SwarmTest.*'   # run/override a specific gtest filter
+make -j$(nproc) test        # builds + runs gleditor_test, xudu_test, zigzag_test, and rootless swarm tests
+make test TEST_FILTER='MediaTest.*'   # run/override a specific gtest filter
 ```
 
-- **Parallelism**: Always run `make -j$(nproc) test` or
-  `make -j$(nproc) test/all` to utilize all available cores.
+- **Parallelism**: Always run `make -j$(nproc) test` to utilize all available cores.
 - `gleditor_test` links the real shared library (catches export-boundary
   bugs); `xudu_test` links only the xanalogical engine, with no graphics
   device, on purpose — that's the boundary being tested.
-- `make test/swarm` runs the network-namespace swarm tests; needs root, not
-  part of `make test`.
-- Before pushing non-trivial changes, prefer `make -j$(nproc) test/all` over
-  `make -j$(nproc) test` since that's what CI actually gates on.
+- `make test` automatically runs the isolated network-namespace swarm tests
+  (`tools/swarm-netns-test.sh`) rootlessly via unprivileged user namespaces
+  (`unshare -Urnm`).
+- `test/all` is aliased directly to `test`.
 - `./tools/compare-backends.sh` renders a sample through every compiled-in
   backend and diffs the output — the real check that a backend still draws
   correctly, since a backend that draws nothing still exits 0.

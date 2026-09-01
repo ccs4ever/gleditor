@@ -15,6 +15,7 @@
 #include <gleditor/glyphcache/palette.hpp> // for GlyphPalette, operator<=>
 #include <gleditor/glyphcache/types.hpp>   // for TextureCoords, Rect
 #include <gleditor/render/device.hpp>      // for RenderDevice
+#include <gleditor/text/font.hpp>          // for FontManager
 #include <hb.h>
 #include <iostream>      // for basic_ostream, operator<<
 #include <numeric>       // for format
@@ -413,7 +414,56 @@ GlyphCache::addToCache(const std::string &chr, const FontPtr &font,
   rendered.reserve(glyphCount);
 
   for (unsigned int i = 0; i < glyphCount; i++) {
-    if (FT_Load_Glyph(face, info[i].codepoint,
+    FT_Face glyphFace = face;
+    auto glyphCode    = info[i].codepoint;
+    int advX          = (pos[i].x_advance >> 6);
+    const int offX    = (pos[i].x_offset >> 6);
+    const int offY    = (pos[i].y_offset >> 6);
+
+    // If the primary face lacks the glyph (.notdef / 0), query the Fontconfig
+    // fallback chain for a face that supports the cluster's Unicode codepoint.
+    if (glyphCode == 0 && info[i].cluster < chr.size()) {
+      uint32_t cp     = 0;
+      const char *p   = chr.data() + info[i].cluster;
+      const char *end = chr.data() + chr.size();
+      if (p < end) {
+        const auto c = static_cast<unsigned char>(*p);
+        if (c < 0x80) {
+          cp = c;
+        } else if ((c & 0xE0) == 0xC0 && p + 1 < end) {
+          cp = ((c & 0x1F) << 6) | (static_cast<unsigned char>(p[1]) & 0x3F);
+        } else if ((c & 0xF0) == 0xE0 && p + 2 < end) {
+          cp = ((c & 0x0F) << 12) |
+               ((static_cast<unsigned char>(p[1]) & 0x3F) << 6) |
+               (static_cast<unsigned char>(p[2]) & 0x3F);
+        } else if ((c & 0xF8) == 0xF0 && p + 3 < end) {
+          cp = ((c & 0x07) << 18) |
+               ((static_cast<unsigned char>(p[1]) & 0x3F) << 12) |
+               ((static_cast<unsigned char>(p[2]) & 0x3F) << 6) |
+               (static_cast<unsigned char>(p[3]) & 0x3F);
+        }
+      }
+      if (cp > 32) {
+        if (auto fallback =
+                text::FontManager::instance().getFallbackFont(useFont, cp);
+            fallback && fallback->face()) {
+          const auto fbIdx = FT_Get_Char_Index(fallback->face(), cp);
+          if (fbIdx != 0) {
+            glyphFace = fallback->face();
+            glyphCode = fbIdx;
+            if (advX == 0 && glyphFace->glyph) {
+              advX = static_cast<int>(glyphFace->glyph->advance.x >> 6);
+            }
+          }
+        }
+      }
+    }
+
+    // Light hinting (FT_LOAD_TARGET_LIGHT) fits glyph outlines to the vertical
+    // pixel grid for clean contrast and sharp rendering in the single-channel
+    // 8-bit grayscale atlas, avoiding color fringing while keeping flat
+    // baselines.
+    if (FT_Load_Glyph(glyphFace, glyphCode,
                       FT_LOAD_DEFAULT | FT_LOAD_TARGET_LIGHT) != 0) {
       continue;
     }
@@ -424,13 +474,13 @@ GlyphCache::addToCache(const std::string &chr, const FontPtr &font,
     // FT_Get_Glyph copies it out and before FT_Glyph_To_Bitmap rasterises it
     // -- afterwards there is no outline left to embolden or slant.
     if (resolved.stillSynthetic.contains(Decoration::Bold)) {
-      FT_GlyphSlot_Embolden(face->glyph);
+      FT_GlyphSlot_Embolden(glyphFace->glyph);
     }
     if (resolved.stillSynthetic.contains(Decoration::Italic)) {
-      FT_GlyphSlot_Oblique(face->glyph);
+      FT_GlyphSlot_Oblique(glyphFace->glyph);
     }
     FT_Glyph glyph = nullptr;
-    if (FT_Get_Glyph(face->glyph, &glyph) != 0) {
+    if (FT_Get_Glyph(glyphFace->glyph, &glyph) != 0) {
       continue;
     }
     if (FT_Glyph_To_Bitmap(&glyph, FT_RENDER_MODE_NORMAL, nullptr, 1) != 0) {
@@ -438,8 +488,8 @@ GlyphCache::addToCache(const std::string &chr, const FontPtr &font,
       continue;
     }
     auto bg    = reinterpret_cast<FT_BitmapGlyph>(glyph);
-    int gx     = penX + (pos[i].x_offset >> 6) + bg->left;
-    int gy     = (pos[i].y_offset >> 6) + bg->top;
+    int gx     = penX + offX + bg->left;
+    int gy     = offY + bg->top;
     int right  = gx + static_cast<int>(bg->bitmap.width);
     int bottom = gy - static_cast<int>(bg->bitmap.rows);
 
@@ -449,7 +499,10 @@ GlyphCache::addToCache(const std::string &chr, const FontPtr &font,
     minY = rendered.empty() ? bottom : std::min(minY, bottom);
 
     rendered.push_back({bg, gx, gy});
-    penX += (pos[i].x_advance >> 6);
+    if (advX == 0 && bg->bitmap.width > 0) {
+      advX = static_cast<int>(bg->bitmap.width);
+    }
+    penX += advX;
   }
   hb_buffer_destroy(buf);
 

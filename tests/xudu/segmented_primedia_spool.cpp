@@ -71,4 +71,72 @@ TEST(SegmentedPrimediaSpoolTest, multiSegmentContinuityAcrossSeals) {
   std::filesystem::remove_all(tempDir);
 }
 
+TEST(SegmentedPrimediaSpoolTest, LifecycleAndActiveSegments) {
+  const auto tempDir =
+      std::filesystem::temp_directory_path() / "xudu_primedia_lifecycle_test";
+  std::filesystem::create_directories(tempDir);
+  const auto active1 = tempDir / "active1.spool";
+  const auto active2 = tempDir / "active2.spool";
+
+  SegmentedPrimediaSpool spool;
+  EXPECT_TRUE(spool.openActiveSegment(active1));
+  spool.append("Active segment text 1.");
+  EXPECT_TRUE(spool.flush());
+
+  // Seal active segment and rotate to active2
+  EXPECT_TRUE(spool.sealActive(active2));
+  spool.append("Active segment text 2.");
+  EXPECT_TRUE(spool.flush());
+
+  // Move constructor
+  SegmentedPrimediaSpool moved(std::move(spool));
+  EXPECT_GT(moved.size(), 0U);
+
+  // Move assignment
+  SegmentedPrimediaSpool assigned;
+  assigned = std::move(moved);
+  EXPECT_GT(assigned.size(), 0U);
+
+  std::filesystem::remove_all(tempDir);
+}
+
+TEST(SegmentedPrimediaSpoolTest, AdoptAndFlush) {
+  SegmentedPrimediaSpool spool;
+  spool.append("Initial text");
+  EXPECT_EQ(spool.bytes(), "Initial text");
+
+  // Adopt replaces contents
+  spool.adopt("Replaced text");
+  EXPECT_EQ(spool.bytes(), "Replaced text");
+  EXPECT_EQ(spool.size(), 13U);
+  EXPECT_TRUE(spool.flush());
+}
+
+TEST(SegmentedPrimediaSpoolTest, ErrorsAndBounds) {
+  SegmentedPrimediaSpool spool;
+  spool.append("Sample text");
+
+  // Non-local span throws
+  PrimediaSpan nonLocal{42U, 0, 5};
+  EXPECT_THROW(static_cast<void>(spool.read(nonLocal)), std::runtime_error);
+  EXPECT_TRUE(spool.readView(nonLocal).empty());
+
+  // Empty span
+  PrimediaSpan emptySpan{xudu::localScroll, 0, 0};
+  EXPECT_EQ(spool.read(emptySpan), "");
+  EXPECT_EQ(spool.readView(emptySpan), "");
+
+  // Out of bounds span
+  PrimediaSpan oobSpan{xudu::localScroll, 1000, 50};
+  EXPECT_EQ(spool.read(oobSpan), "");
+  EXPECT_EQ(spool.readView(oobSpan), "");
+
+  // Empty append returns 0-length span
+  auto emptyAppended = spool.append("");
+  EXPECT_EQ(emptyAppended.length, 0U);
+
+  // Non-existent sealed segment fails
+  EXPECT_FALSE(spool.addSealedSegment("/non/existent/path/xyz_123.bin"));
+}
+
 } // namespace

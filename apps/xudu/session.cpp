@@ -466,7 +466,10 @@ Session::importFileToTemporaryStore(const std::string &filePath) {
 
   auto newStore = std::make_unique<Store>();
   const gleditor::FileTextSource source(filePath);
-  const auto imported = newStore->insert(MicroversionId{}, 0, source.text());
+  auto imported = newStore->insert(MicroversionId{}, 0, source.text());
+  for (const auto breakAt : source.forcedBreaks()) {
+    imported = newStore->insertBreak(imported, breakAt);
+  }
   newStore->save(tempDir.string());
 
   const auto idx = addStore(std::move(newStore), tempDir.string(), true);

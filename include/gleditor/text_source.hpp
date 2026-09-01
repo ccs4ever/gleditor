@@ -101,17 +101,48 @@ public:
 [[nodiscard]] std::string stripByteOrderMark(std::string bytes);
 
 /// Reads the whole of a file. What a plain editor opens from its command line.
+/// Automatically detects PDF files and paginates them per page.
 class FileTextSource : public TextSource {
 public:
-  explicit FileTextSource(std::string path) : filePath(std::move(path)) {}
+  explicit FileTextSource(std::string path);
 
-  /// @throws std::runtime_error if the file cannot be read, and
-  ///         std::logic_error for a UTF-16 or UTF-32 byte order mark.
+  /// @throws std::runtime_error if the file cannot be read or PDF is locked,
+  ///         and std::logic_error for a UTF-16 or UTF-32 byte order mark.
   [[nodiscard]] std::string text() const override;
   [[nodiscard]] std::string name() const override { return filePath; }
+  [[nodiscard]] std::vector<std::uint32_t> forcedBreaks() const override;
 
 private:
+  void ensureLoaded() const;
+
   std::string filePath;
+  mutable bool loaded{false};
+  mutable std::string content;
+  mutable std::vector<std::uint32_t> breaks;
+};
+
+/// Reads a PDF document using poppler-cpp, paginating per PDF page via
+/// forcedBreaks.
+class PdfTextSource : public TextSource {
+public:
+  explicit PdfTextSource(std::string path);
+  PdfTextSource(const char *data, std::size_t size, std::string aName = {});
+
+  [[nodiscard]] std::string text() const override { return buffer; }
+  [[nodiscard]] std::string name() const override { return label; }
+  [[nodiscard]] std::vector<std::uint32_t> forcedBreaks() const override {
+    return breaks;
+  }
+  [[nodiscard]] std::size_t pageCount() const { return numPages; }
+
+private:
+  void loadPdfFile(const std::string &path);
+  void loadPdfData(const char *data, std::size_t size);
+
+  std::string buffer;
+  std::string label;
+  std::vector<std::uint32_t> breaks;
+  std::size_t numPages{0};
 };
 
 /// Text a caller already has. The source for a document built rather than

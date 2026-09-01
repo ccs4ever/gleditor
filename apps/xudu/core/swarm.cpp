@@ -5,6 +5,7 @@
 #include <algorithm>
 #include <chrono>
 #include <cstdint>
+#include <cstring>
 #include <functional>
 #include <iterator>
 #include <map>
@@ -15,13 +16,18 @@
 #include <vector>
 
 #include <libtorrent/alert_types.hpp>
+#include <libtorrent/bdecode.hpp>
 #include <libtorrent/bencode.hpp>
 #include <libtorrent/create_torrent.hpp>
+#include <libtorrent/entry.hpp>
+#include <libtorrent/extensions.hpp>
 #include <libtorrent/kademlia/ed25519.hpp>
 #include <libtorrent/kademlia/types.hpp>
 #include <libtorrent/magnet_uri.hpp>
+#include <libtorrent/peer_connection_handle.hpp>
 #include <libtorrent/session.hpp>
 #include <libtorrent/settings_pack.hpp>
+#include <libtorrent/span.hpp>
 #include <libtorrent/torrent_flags.hpp>
 #include <libtorrent/torrent_handle.hpp>
 #include <libtorrent/torrent_info.hpp>
@@ -142,6 +148,9 @@ struct PendingName {
   std::optional<MutablePointer> best;
 };
 
+class XuduPeerPlugin;
+class XuduTorrentPlugin;
+
 struct SwarmContentSource::Impl {
   SwarmContentSource::Options options;
   lt::session session;
@@ -159,9 +168,15 @@ struct SwarmContentSource::Impl {
   std::vector<LiveOpBroadcast> pendingLiveOps;
   /// Mutex protecting liveOpHandlers and pendingLiveOps.
   std::mutex liveOpsMutex;
+  /// Active torrent plugins keyed by info hash.
+  std::map<InfoHash, std::shared_ptr<XuduTorrentPlugin>> torrentPlugins;
+  /// Mutex protecting torrentPlugins.
+  std::mutex pluginsMutex;
 
-  explicit Impl(SwarmContentSource::Options aOptions)
-      : options(std::move(aOptions)), session(settings(options)) {}
+  explicit Impl(SwarmContentSource::Options aOptions);
+
+  void receiveIncomingLiveOp(const LiveOpBroadcast &broadcast);
+  void broadcastLiveOpToPeers(const InfoHash &hash, const std::string &payload);
 
   static lt::settings_pack
   settings(const SwarmContentSource::Options &options) {
@@ -400,6 +415,176 @@ struct SwarmContentSource::Impl {
     }
   }
 };
+
+// -- BEP 10 BitTorrent Extension Protocol Plugins ----------------------------
+//
+// Extensible framework for libtorrent peer plugins supporting custom extension
+// protocols (e.g. "xudu_live_op", and upcoming merkle ledger sync /
+// decentralized oracle consensus).
+
+static constexpr const char *kExtLiveOpName  = "xudu_live_op";
+static constexpr int kExtLiveOpMsgId         = 1;
+static constexpr std::uint8_t kBtMsgExtended = 20;
+
+class XuduPeerPlugin : public lt::peer_plugin,
+                       public std::enable_shared_from_this<XuduPeerPlugin> {
+public:
+  XuduPeerPlugin(lt::peer_connection_handle pc, const InfoHash &swarmHash,
+                 SwarmContentSource::Impl *impl)
+      : pc_(std::move(pc)), swarmHash_(swarmHash), impl_(impl) {}
+
+  [[nodiscard]] lt::string_view type() const override {
+    return "xudu_peer_plugin";
+  }
+
+  void add_handshake(lt::entry &h) override {
+    if (h.type() != lt::entry::dictionary_t) {
+      h = lt::entry(lt::entry::dictionary_t);
+    }
+    auto &m = h["m"];
+    if (m.type() != lt::entry::dictionary_t) {
+      m = lt::entry(lt::entry::dictionary_t);
+    }
+    m[kExtLiveOpName] = kExtLiveOpMsgId;
+  }
+
+  bool on_extension_handshake(lt::bdecode_node const &node) override {
+    if (node.type() != lt::bdecode_node::dict_t) {
+      return true;
+    }
+    const auto m = node.dict_find_dict("m");
+    if (m) {
+      const auto opNode = m.dict_find_int("xudu_live_op");
+      if (opNode) {
+        remoteLiveOpId_ = static_cast<int>(opNode.int_value());
+      }
+    }
+    return true;
+  }
+
+  bool on_extended(int length, int msg, lt::span<char const> body) override {
+    if (msg == kExtLiveOpMsgId && static_cast<int>(body.size()) == length) {
+      const std::string_view payload(body.data(), body.size());
+      if (auto broadcast = SwarmContentSource::decodeLiveOp(payload)) {
+        if (impl_) {
+          impl_->receiveIncomingLiveOp(*broadcast);
+        }
+      }
+      return true;
+    }
+    return false;
+  }
+
+  bool sendLiveOp(const std::string &bencodedPayload) {
+    if (remoteLiveOpId_ <= 0) {
+      return false;
+    }
+    const std::uint32_t payloadLen =
+        1 + 1 + static_cast<std::uint32_t>(bencodedPayload.size());
+    std::string packet;
+    packet.resize(4 + payloadLen);
+    packet[0] = static_cast<char>((payloadLen >> 24) & 0xFF);
+    packet[1] = static_cast<char>((payloadLen >> 16) & 0xFF);
+    packet[2] = static_cast<char>((payloadLen >> 8) & 0xFF);
+    packet[3] = static_cast<char>(payloadLen & 0xFF);
+    packet[4] = static_cast<char>(kBtMsgExtended);
+    packet[5] = static_cast<char>(remoteLiveOpId_);
+    std::memcpy(&packet[6], bencodedPayload.data(), bencodedPayload.size());
+
+    try {
+      pc_.send_buffer(packet.data(), static_cast<int>(packet.size()));
+      return true;
+    } catch (...) {
+      return false;
+    }
+  }
+
+  [[nodiscard]] bool supportsLiveOp() const { return remoteLiveOpId_ > 0; }
+  [[nodiscard]] const InfoHash &swarmHash() const { return swarmHash_; }
+
+private:
+  lt::peer_connection_handle pc_;
+  InfoHash swarmHash_;
+  SwarmContentSource::Impl *impl_{nullptr};
+  int remoteLiveOpId_{0};
+};
+
+class XuduTorrentPlugin : public lt::torrent_plugin {
+public:
+  XuduTorrentPlugin(lt::torrent_handle handle, const InfoHash &swarmHash,
+                    SwarmContentSource::Impl *impl)
+      : handle_(std::move(handle)), swarmHash_(swarmHash), impl_(impl) {}
+
+  std::shared_ptr<lt::peer_plugin>
+  new_connection(lt::peer_connection_handle const &pc) override {
+    auto plugin = std::make_shared<XuduPeerPlugin>(pc, swarmHash_, impl_);
+    std::scoped_lock lock(mutex_);
+    peers_.push_back(plugin);
+    return plugin;
+  }
+
+  void broadcastLiveOp(const std::string &bencodedPayload) {
+    std::scoped_lock lock(mutex_);
+    for (auto it = peers_.begin(); it != peers_.end();) {
+      if (auto peer = it->lock()) {
+        peer->sendLiveOp(bencodedPayload);
+        ++it;
+      } else {
+        it = peers_.erase(it);
+      }
+    }
+  }
+
+  [[nodiscard]] const InfoHash &swarmHash() const { return swarmHash_; }
+
+private:
+  lt::torrent_handle handle_;
+  InfoHash swarmHash_;
+  SwarmContentSource::Impl *impl_{nullptr};
+  std::mutex mutex_;
+  std::vector<std::weak_ptr<XuduPeerPlugin>> peers_;
+};
+
+SwarmContentSource::Impl::Impl(SwarmContentSource::Options aOptions)
+    : options(std::move(aOptions)), session(settings(options)) {
+  session.add_extension(
+      [this](lt::torrent_handle const &h,
+             lt::client_data_t) -> std::shared_ptr<lt::torrent_plugin> {
+        const auto hash = fromLt(h.info_hashes().v1);
+        auto plugin     = std::make_shared<XuduTorrentPlugin>(h, hash, this);
+        std::scoped_lock lock(pluginsMutex);
+        torrentPlugins[hash] = plugin;
+        return plugin;
+      });
+}
+
+void SwarmContentSource::Impl::receiveIncomingLiveOp(
+    const LiveOpBroadcast &broadcast) {
+  std::scoped_lock lock(liveOpsMutex);
+  pendingLiveOps.push_back(broadcast);
+  for (const auto &handler : liveOpHandlers) {
+    if (handler) {
+      handler(broadcast);
+    }
+  }
+}
+
+void SwarmContentSource::Impl::broadcastLiveOpToPeers(
+    const InfoHash &hash, const std::string &payload) {
+  std::scoped_lock lock(pluginsMutex);
+  if (hash.isZero()) {
+    for (const auto &[_, plugin] : torrentPlugins) {
+      if (plugin) {
+        plugin->broadcastLiveOp(payload);
+      }
+    }
+  } else {
+    const auto it = torrentPlugins.find(hash);
+    if (it != torrentPlugins.end() && it->second) {
+      it->second->broadcastLiveOp(payload);
+    }
+  }
+}
 
 SwarmContentSource::SwarmContentSource() : SwarmContentSource(Options{}) {}
 
@@ -655,6 +840,75 @@ std::string SwarmContentSource::readStream(const InfoHash &hash,
   return joined.substr(into, static_cast<std::size_t>(length));
 }
 
+std::string SwarmContentSource::encodeLiveOp(const LiveOpBroadcast &broadcast) {
+  lt::entry e(lt::entry::dictionary_t);
+  e["h"]    = broadcast.swarmHash.hex();
+  e["v"]    = broadcast.version.str();
+  e["k"]    = static_cast<std::int64_t>(broadcast.op.kind);
+  e["p"]    = broadcast.op.parent.str();
+  e["at"]   = static_cast<std::int64_t>(broadcast.op.at);
+  e["len"]  = static_cast<std::int64_t>(broadcast.op.length);
+  e["to"]   = static_cast<std::int64_t>(broadcast.op.to);
+  e["ss"]   = static_cast<std::int64_t>(broadcast.op.span.scroll);
+  e["so"]   = static_cast<std::int64_t>(broadcast.op.span.start);
+  e["sl"]   = static_cast<std::int64_t>(broadcast.op.span.length);
+  e["src"]  = broadcast.op.source.str();
+  e["sa"]   = static_cast<std::int64_t>(broadcast.op.sourceAt);
+  e["slen"] = static_cast<std::int64_t>(broadcast.op.sourceLength);
+  e["link"] = static_cast<std::int64_t>(broadcast.op.link);
+  e["txt"]  = broadcast.primediaText;
+  e["ts"]   = broadcast.timestamp;
+
+  std::string out;
+  lt::bencode(std::back_inserter(out), e);
+  return out;
+}
+
+std::optional<SwarmContentSource::LiveOpBroadcast>
+SwarmContentSource::decodeLiveOp(const std::string_view body) {
+  lt::bdecode_node node;
+  lt::error_code ec;
+  if (lt::bdecode(body.data(), body.data() + body.size(), node, ec) != 0 ||
+      node.type() != lt::bdecode_node::dict_t) {
+    return std::nullopt;
+  }
+
+  LiveOpBroadcast b;
+  const auto hStr = node.dict_find_string_value("h");
+  if (!hStr.empty()) {
+    b.swarmHash = InfoHash::fromHex(hStr);
+  }
+  const auto vStr = node.dict_find_string_value("v");
+  if (!vStr.empty()) {
+    b.version = MicroversionId::parse(vStr);
+  }
+  b.op.kind       = static_cast<OpKind>(node.dict_find_int_value("k", 0));
+  const auto pStr = node.dict_find_string_value("p");
+  if (!pStr.empty()) {
+    b.op.parent = MicroversionId::parse(pStr);
+  }
+  b.op.at     = static_cast<std::uint32_t>(node.dict_find_int_value("at", 0));
+  b.op.length = static_cast<std::uint32_t>(node.dict_find_int_value("len", 0));
+  b.op.to     = static_cast<std::uint32_t>(node.dict_find_int_value("to", 0));
+  b.op.span.scroll = static_cast<ScrollId>(node.dict_find_int_value("ss", 0));
+  b.op.span.start =
+      static_cast<std::uint64_t>(node.dict_find_int_value("so", 0));
+  b.op.span.length =
+      static_cast<std::uint64_t>(node.dict_find_int_value("sl", 0));
+  const auto srcStr = node.dict_find_string_value("src");
+  if (!srcStr.empty()) {
+    b.op.source = MicroversionId::parse(srcStr);
+  }
+  b.op.sourceAt = static_cast<std::uint32_t>(node.dict_find_int_value("sa", 0));
+  b.op.sourceLength =
+      static_cast<std::uint32_t>(node.dict_find_int_value("slen", 0));
+  b.op.link = static_cast<std::uint64_t>(node.dict_find_int_value("link", 0));
+  b.primediaText = std::string(node.dict_find_string_value("txt"));
+  b.timestamp    = node.dict_find_int_value("ts", 0);
+
+  return b;
+}
+
 void SwarmContentSource::broadcastLiveOp(const InfoHash &swarmHash,
                                          const MicroversionId &version,
                                          const Op &op,
@@ -668,6 +922,11 @@ void SwarmContentSource::broadcastLiveOp(const InfoHash &swarmHash,
                           std::chrono::system_clock::now().time_since_epoch())
                           .count()};
 
+  // 1. Broadcast over libtorrent peer connections via BEP 10 extension plugin
+  const auto payload = encodeLiveOp(broadcast);
+  impl->broadcastLiveOpToPeers(swarmHash, payload);
+
+  // 2. Deliver to local session handlers
   std::scoped_lock lock(impl->liveOpsMutex);
   impl->pendingLiveOps.push_back(broadcast);
   for (const auto &handler : impl->liveOpHandlers) {

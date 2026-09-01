@@ -888,8 +888,11 @@ int main(const int argc, char **argv) {
       if (0 == session->store(0).opCount()) {
         const auto &firstFile = importFiles[0];
         const gleditor::FileTextSource source(firstFile);
-        const auto imported =
+        auto imported =
             session->store(0).insert(MicroversionId{}, 0, source.text());
+        for (const auto breakAt : source.forcedBreaks()) {
+          imported = session->store(0).insertBreak(imported, breakAt);
+        }
         session->save(0);
         opening = imported;
         quiet || std::cout << "xudu: imported " << firstFile << " as "

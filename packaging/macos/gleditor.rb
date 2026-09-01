@@ -27,10 +27,12 @@ class Gleditor < Formula
   depends_on "fribidi"
   depends_on "glm"
   depends_on "harfbuzz"
+  depends_on "libmagic"
   depends_on "libtorrent-rasterbar"
   depends_on "libunibreak"
   depends_on "lmdb"
   depends_on "openssl@3"
+  depends_on "poppler"
   depends_on "sdl3"
   depends_on "sdl3_image"
 
