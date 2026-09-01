@@ -241,6 +241,7 @@ public:
    * on the render thread, so reach it from inside run() or runWithState().
    */
   [[nodiscard]] virtual Caret *editCaret() { return nullptr; }
+  [[nodiscard]] virtual ch::Timeline *animTimeline() { return nullptr; }
 
   /**
    * @brief World units between the resting places of adjacent documents.
@@ -472,6 +473,7 @@ public:
   std::shared_ptr<Renderer> getPtr() { return shared_from_this(); }
 
   [[nodiscard]] Caret *editCaret() override { return caret.get(); }
+  [[nodiscard]] ch::Timeline *animTimeline() override { return &timeline; }
 
   Renderer(const AppStateRef &state, render::Backend backend,
            [[maybe_unused]] Private _priv)

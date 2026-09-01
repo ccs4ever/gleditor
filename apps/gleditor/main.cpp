@@ -21,7 +21,9 @@
 #include <gleditor/android_bootstrap.hpp>
 #include <gleditor/app.hpp>
 #include <gleditor/caret.hpp>
+#include <gleditor/doc.hpp>
 #include <gleditor/doc_switcher.hpp>
+#include <gleditor/floating_toolbar_3d.hpp>
 #include <gleditor/render/types.hpp>
 #include <gleditor/render_state.hpp>
 #include <gleditor/renderer.hpp>
@@ -56,15 +58,61 @@ bool wantsEveryOption(const int argc, const char *const *const argv) {
   return false;
 }
 
+/// Animate documents along a 3D spatial orbital arc centered on the active
+/// document
+void updateDocumentSpatialPositions(
+    RenderState &rState, const std::uint32_t activeIndex,
+    const RendererRef &renderer,
+    const std::shared_ptr<gleditor::DocumentSwitcher> &switcher,
+    const std::shared_ptr<gleditor::FloatingToolbar3D> &toolbar) {
+  if (rState.docs.empty()) {
+    return;
+  }
+  switcher->setActiveDocIndex(activeIndex);
+  toolbar->setActiveDocIndex(activeIndex);
+
+  auto *const caret = renderer->editCaret();
+  if (caret) {
+    caret->placeAt(activeIndex, 0);
+  }
+
+  auto *const tl = renderer->animTimeline();
+  for (std::size_t i = 0; i < rState.docs.size(); ++i) {
+    auto &doc = rState.docs[i];
+    if (!doc || doc->isClosing()) {
+      continue;
+    }
+    const auto offset = static_cast<int>(i) - static_cast<int>(activeIndex);
+    if (offset == 0) {
+      doc->setRestingOpacity(1.0F);
+      if (tl) {
+        doc->animateMoveTo(*tl, glm::vec3(0.0F, 0.0F, 0.0F),
+                           gleditor::anim::docArrival);
+      }
+    } else {
+      const float spacingX = 70.0F;
+      const float depthZ   = -45.0F * static_cast<float>(std::abs(offset));
+      const float posX     = static_cast<float>(offset) * spacingX;
+      doc->setRestingOpacity(gleditor::anim::backgroundOpacity);
+      if (tl) {
+        doc->animateMoveTo(*tl, glm::vec3(posX, 0.0F, depthZ),
+                           gleditor::anim::docArrival);
+      }
+    }
+  }
+}
+
 /// Bind the keys this program answers to. The camera controls come from the
 /// library, since they are about the view rather than about editing.
 void bindCommands(gleditor::Application &app, const AppStateRef &state,
                   const RendererRef &renderer,
-                  const std::shared_ptr<gleditor::DocumentSwitcher> &switcher) {
+                  const std::shared_ptr<gleditor::DocumentSwitcher> &switcher,
+                  const std::shared_ptr<gleditor::FloatingToolbar3D> &toolbar) {
   app.bindDefaultViewCommands();
   app.commands().bind(SDL_SCANCODE_Q, "quit", "close the editor",
                       [state] { state->alive = false; });
-  app.commands().bind(SDL_SCANCODE_N, "new", "open an empty document",
+  app.commands().bind(SDL_SCANCODE_N, Mod::Ctrl, "new",
+                      "open an empty document",
                       [renderer] { renderer->push(RenderItemNewDoc()); });
   app.commands().bind(SDL_SCANCODE_W, Mod::Ctrl, "close",
                       "close the active document", [renderer, switcher] {
@@ -77,41 +125,48 @@ void bindCommands(gleditor::Application &app, const AppStateRef &state,
         renderer->push(RenderItemSaveDoc(switcher->activeDocIndex()));
       });
 
-  // Document switching keyboard navigation
+  // Formatting keybindings
+  app.commands().bind(SDL_SCANCODE_B, Mod::Ctrl, "bold",
+                      "toggle bold formatting", [] {});
+  app.commands().bind(SDL_SCANCODE_I, Mod::Ctrl, "italic",
+                      "toggle italic formatting", [] {});
+  app.commands().bind(SDL_SCANCODE_U, Mod::Ctrl, "underline",
+                      "toggle underline formatting", [] {});
   app.commands().bind(
-      SDL_SCANCODE_TAB, Mod::Ctrl, "next-doc", "switch to next document",
-      [renderer, switcher] {
-        renderer->runWithState([renderer, switcher](RenderState &rState) {
-          if (rState.docs.empty()) {
-            return;
-          }
-          const auto cur = switcher->activeDocIndex();
-          const auto next =
-              (cur + 1U) % static_cast<std::uint32_t>(rState.docs.size());
-          switcher->setActiveDocIndex(next);
-          auto *const caret = renderer->editCaret();
-          if (caret) {
-            caret->placeAt(next, 0);
-          }
-        });
-      });
+      SDL_SCANCODE_F10, "3d-overview", "toggle 3D spatial overview tray",
+      [toolbar] { toolbar->setVisible(!toolbar->isVisible()); });
+
+  // Document switching keyboard navigation
+  app.commands().bind(SDL_SCANCODE_TAB, Mod::Ctrl, "next-doc",
+                      "switch to next document", [renderer, switcher, toolbar] {
+                        renderer->runWithState([renderer, switcher,
+                                                toolbar](RenderState &rState) {
+                          if (rState.docs.empty()) {
+                            return;
+                          }
+                          const auto cur = switcher->activeDocIndex();
+                          const auto next =
+                              (cur + 1U) %
+                              static_cast<std::uint32_t>(rState.docs.size());
+                          updateDocumentSpatialPositions(rState, next, renderer,
+                                                         switcher, toolbar);
+                        });
+                      });
 
   app.commands().bind(
       SDL_SCANCODE_TAB, Mod::Ctrl | Mod::Shift, "prev-doc",
-      "switch to previous document", [renderer, switcher] {
-        renderer->runWithState([renderer, switcher](RenderState &rState) {
-          if (rState.docs.empty()) {
-            return;
-          }
-          const auto total = static_cast<std::uint32_t>(rState.docs.size());
-          const auto cur   = switcher->activeDocIndex();
-          const auto prev  = (cur + total - 1U) % total;
-          switcher->setActiveDocIndex(prev);
-          auto *const caret = renderer->editCaret();
-          if (caret) {
-            caret->placeAt(prev, 0);
-          }
-        });
+      "switch to previous document", [renderer, switcher, toolbar] {
+        renderer->runWithState(
+            [renderer, switcher, toolbar](RenderState &rState) {
+              if (rState.docs.empty()) {
+                return;
+              }
+              const auto total = static_cast<std::uint32_t>(rState.docs.size());
+              const auto cur   = switcher->activeDocIndex();
+              const auto prev  = (cur + total - 1U) % total;
+              updateDocumentSpatialPositions(rState, prev, renderer, switcher,
+                                             toolbar);
+            });
       });
 
   for (int i = 1; i <= 9; ++i) {
@@ -120,15 +175,12 @@ void bindCommands(gleditor::Application &app, const AppStateRef &state,
     app.commands().bind(
         scancode, Mod::Ctrl, "doc-" + std::to_string(i),
         "switch to document " + std::to_string(i),
-        [renderer, switcher, targetIndex] {
+        [renderer, switcher, toolbar, targetIndex] {
           renderer->runWithState(
-              [renderer, switcher, targetIndex](RenderState &rState) {
+              [renderer, switcher, toolbar, targetIndex](RenderState &rState) {
                 if (targetIndex < rState.docs.size()) {
-                  switcher->setActiveDocIndex(targetIndex);
-                  auto *const caret = renderer->editCaret();
-                  if (caret) {
-                    caret->placeAt(targetIndex, 0);
-                  }
+                  updateDocumentSpatialPositions(rState, targetIndex, renderer,
+                                                 switcher, toolbar);
                 }
               });
         });
@@ -198,26 +250,70 @@ int main(const int argc, char **argv) {
   try {
     auto docSwitcher =
         std::make_shared<gleditor::DocumentSwitcher>(state->defaultFontName);
+    auto floatingToolbar =
+        std::make_shared<gleditor::FloatingToolbar3D>(state->defaultFontName);
+
     docSwitcher->setCloseHandler([&renderer](const std::uint32_t docIndex) {
       renderer->push(RenderItemCloseDoc(docIndex));
     });
-    docSwitcher->setSelectHandler([&renderer](const std::uint32_t docIndex) {
-      renderer->runWithState([&renderer, docIndex](RenderState &rState) {
-        if (docIndex < rState.docs.size() && rState.docs[docIndex]) {
-          auto *const caret = renderer->editCaret();
-          if (caret) {
-            caret->placeAt(docIndex, 0);
-          }
-        }
+    docSwitcher->setSelectHandler([&renderer, &docSwitcher, &floatingToolbar](
+                                      const std::uint32_t docIndex) {
+      renderer->runWithState([&renderer, &docSwitcher, &floatingToolbar,
+                              docIndex](RenderState &rState) {
+        updateDocumentSpatialPositions(rState, docIndex, renderer, docSwitcher,
+                                       floatingToolbar);
       });
     });
+
+    floatingToolbar->setActionHandler(
+        [&renderer,
+         &floatingToolbar](const gleditor::FloatingToolbar3D::ButtonId btn,
+                           const std::uint32_t activeDocIndex) {
+          using ButtonId = gleditor::FloatingToolbar3D::ButtonId;
+          switch (btn) {
+          case ButtonId::NewDoc:
+            renderer->push(RenderItemNewDoc());
+            break;
+          case ButtonId::SaveDoc:
+            renderer->push(RenderItemSaveDoc(activeDocIndex));
+            break;
+          case ButtonId::CloseDoc:
+            renderer->push(RenderItemCloseDoc(activeDocIndex));
+            break;
+          case ButtonId::OverviewTray:
+            floatingToolbar->setVisible(!floatingToolbar->isVisible());
+            break;
+          case ButtonId::Bold:
+          case ButtonId::Italic:
+          case ButtonId::Underline:
+          case ButtonId::Strikethrough:
+          case ButtonId::Heading1:
+          case ButtonId::Heading2:
+          case ButtonId::Heading3:
+          case ButtonId::FontDec:
+          case ButtonId::FontInc:
+          case ButtonId::AlignLeft:
+          case ButtonId::AlignCenter:
+          case ButtonId::AlignRight:
+          case ButtonId::ListBullet:
+          case ButtonId::ListNumbered:
+          case ButtonId::CodeBlock:
+          case ButtonId::QuoteBlock:
+          case ButtonId::OpenFile:
+            break;
+          }
+        });
 
     renderer->addFrameContributor(docSwitcher.get());
     renderer->addPickObserver(docSwitcher.get());
     state->accessibility->addSource(docSwitcher.get());
 
+    renderer->addFrameContributor(floatingToolbar.get());
+    renderer->addPickObserver(floatingToolbar.get());
+    state->accessibility->addSource(floatingToolbar.get());
+
     gleditor::Application app(state, renderer, backend, "GL Editor");
-    bindCommands(app, state, renderer, docSwitcher);
+    bindCommands(app, state, renderer, docSwitcher, floatingToolbar);
     return app.run();
   } catch (const std::exception &err) {
     std::cerr << "Error: " << err.what() << "\n";
