@@ -339,5 +339,103 @@ TEST(IdentityBEP10Test, HandshakeDictionaryPopulation) {
               Eq(kExtOracleVerifyMsgId));
 }
 
+// ============================================================================
+// Hashcash Proof-of-Work Tests
+// ============================================================================
+
+TEST(IdentityHashcashTest, MintAndVerifyProofOfWork) {
+  HashcashEngine engine;
+  const std::string resource    = "ada@example.org";
+  const std::uint64_t timestamp = 1700000000;
+  const std::uint8_t difficulty = 16; // 16 bits = ~65536 iterations
+
+  const auto nonceOpt = HashcashEngine::mint(resource, timestamp, difficulty);
+  ASSERT_TRUE(nonceOpt.has_value());
+
+  const auto digest =
+      HashcashEngine::computeDigest(resource, timestamp, *nonceOpt);
+  EXPECT_GE(HashcashEngine::countLeadingZeroBits(digest), difficulty);
+
+  // Verify stamp with engine
+  auto verifyRes = engine.verify(resource, timestamp, *nonceOpt, difficulty,
+                                 difficulty, timestamp);
+  EXPECT_TRUE(verifyRes.has_value());
+}
+
+TEST(IdentityHashcashTest, RejectsInsufficientDifficulty) {
+  HashcashEngine engine;
+  const std::string resource    = "target@domain.org";
+  const std::uint64_t timestamp = 1700000000;
+
+  // Mint 8-bit stamp
+  const auto nonceOpt = HashcashEngine::mint(resource, timestamp, 8);
+  ASSERT_TRUE(nonceOpt.has_value());
+
+  // Verifying requiring 20 bits must fail with InsufficientProofOfWork
+  auto verifyRes =
+      engine.verify(resource, timestamp, *nonceOpt, 8, 20, timestamp);
+  ASSERT_FALSE(verifyRes.has_value());
+  EXPECT_THAT(verifyRes.error(), Eq(ValidationError::InsufficientProofOfWork));
+}
+
+TEST(IdentityHashcashTest, RejectsExpiredTimestampAntiPremining) {
+  HashcashEngine engine;
+  const std::string resource       = "target@domain.org";
+  const std::uint64_t oldTimestamp = 1700000000;
+  const std::uint64_t currentTime =
+      1700000000 + 1000; // 1000s later (> 300s skew)
+
+  const auto nonceOpt = HashcashEngine::mint(resource, oldTimestamp, 10);
+  ASSERT_TRUE(nonceOpt.has_value());
+
+  auto verifyRes =
+      engine.verify(resource, oldTimestamp, *nonceOpt, 10, 10, currentTime);
+  ASSERT_FALSE(verifyRes.has_value());
+  EXPECT_THAT(verifyRes.error(), Eq(ValidationError::ProofOfWorkExpired));
+}
+
+TEST(IdentityHashcashTest, RejectsReplayedNonce) {
+  HashcashEngine engine;
+  const std::string resource    = "replay@test.org";
+  const std::uint64_t timestamp = 1700000000;
+  const std::uint8_t difficulty = 10;
+
+  const auto nonceOpt = HashcashEngine::mint(resource, timestamp, difficulty);
+  ASSERT_TRUE(nonceOpt.has_value());
+
+  // First verification succeeds
+  auto res1 = engine.verify(resource, timestamp, *nonceOpt, difficulty,
+                            difficulty, timestamp);
+  EXPECT_TRUE(res1.has_value());
+
+  // Replayed submission must be rejected
+  auto res2 = engine.verify(resource, timestamp, *nonceOpt, difficulty,
+                            difficulty, timestamp);
+  ASSERT_FALSE(res2.has_value());
+  EXPECT_THAT(res2.error(), Eq(ValidationError::ProofOfWorkReplayDetected));
+}
+
+TEST(IdentityHashcashTest, EmailVerifyRequestPoWSerializationRoundTrip) {
+  EmailVerifyRequestMsg req;
+  req.requesterFingerprint =
+      *Fingerprint::fromString("1111222233334444555566667777888899990000");
+  req.targetEmail    = "target@domain.org";
+  req.timestamp      = 1700000000;
+  req.powNonce       = 123456789;
+  req.difficultyBits = 22;
+  req.requesterSignature.bytes.fill(0x99);
+
+  const std::string serialized = serialize(req);
+  const auto spanBytes         = std::span<const std::uint8_t>(
+      reinterpret_cast<const std::uint8_t *>(serialized.data()),
+      serialized.size());
+
+  const auto decodedRes = decodeEmailVerifyRequest(spanBytes);
+  ASSERT_TRUE(decodedRes.has_value());
+  EXPECT_THAT(decodedRes->powNonce, Eq(123456789ULL));
+  EXPECT_THAT(decodedRes->difficultyBits, Eq(22U));
+  EXPECT_THAT(*decodedRes, Eq(req));
+}
+
 } // namespace
 } // namespace xudu::identity
