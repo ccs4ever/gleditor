@@ -31,6 +31,8 @@
 #include <string>
 #include <vector>
 
+#include <gleditor/paths.hpp>
+
 #include "lmdb_cache.hpp"
 #include "scroll.hpp"
 #include "spool.hpp"
@@ -141,10 +143,20 @@ private:
  */
 class Resolver {
 public:
+  /// The cache holds unlocked Content Encryption Keys, so it belongs under
+  /// the user's own cache directory rather than a fixed path in /tmp: a
+  /// predictable world-writable name is one another account can create first
+  /// and then read out of.
+  [[nodiscard]] static std::filesystem::path defaultCacheDir() {
+    return std::filesystem::path(gleditor::paths::cacheDir("xudu")) / "content";
+  }
+
   /// @param source Where external content comes from. Not owned; may be null,
   ///        in which case external spans simply do not resolve.
-  explicit Resolver(const ContentSource *aSource          = nullptr,
-                    const std::filesystem::path &cacheDir = "/tmp/xudu_cache")
+  explicit Resolver(const ContentSource *aSource = nullptr)
+      : Resolver(aSource, defaultCacheDir()) {}
+
+  Resolver(const ContentSource *aSource, const std::filesystem::path &cacheDir)
       : source(aSource), cache(cacheDir) {}
 
   void setSource(const ContentSource *aSource) { source = aSource; }

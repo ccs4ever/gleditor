@@ -565,19 +565,23 @@ HashcashEngine::verify(std::string_view resource, std::uint64_t timestamp,
                        std::uint64_t nonce, std::uint8_t difficultyBits,
                        std::uint8_t minDifficulty,
                        std::uint64_t currentSystemTime) {
-  // Invariant 1: Sufficient difficulty
-  if (difficultyBits < minDifficulty || difficultyBits > 256) {
+  // Invariant 1: Sufficient difficulty. No upper bound is checked:
+  // difficultyBits is a uint8_t, so it cannot exceed 255, and countLeading-
+  // ZeroBits caps at 256 -- a "difficultyBits > 256" guard here was always
+  // false and read as a range check that was not one.
+  if (difficultyBits < minDifficulty) {
     return std::unexpected(ValidationError::InsufficientProofOfWork);
   }
 
-  // Invariant 2: Clock skew check (anti-premining window)
-  if (currentSystemTime > 0) {
-    const std::uint64_t diff = (currentSystemTime >= timestamp)
-                                   ? (currentSystemTime - timestamp)
-                                   : (timestamp - currentSystemTime);
-    if (diff > kMaxClockSkewSeconds) {
-      return std::unexpected(ValidationError::ProofOfWorkExpired);
-    }
+  // Invariant 2: Clock skew check (anti-premining window). Unconditional:
+  // this used to be skipped when currentSystemTime was zero, and the only
+  // caller in the program passed zero, so the invariant was documented,
+  // tested, and never once enforced against a peer.
+  const std::uint64_t diff = (currentSystemTime >= timestamp)
+                                 ? (currentSystemTime - timestamp)
+                                 : (timestamp - currentSystemTime);
+  if (diff > kMaxClockSkewSeconds) {
+    return std::unexpected(ValidationError::ProofOfWorkExpired);
   }
 
   // Invariant 3: Target difficulty check
@@ -594,10 +598,12 @@ HashcashEngine::verify(std::string_view resource, std::uint64_t timestamp,
 
   impl_->spentNonces[key] = timestamp;
 
-  // Prune expired spent entries
-  if (currentSystemTime > 0) {
-    pruneSpentCache(currentSystemTime);
-  }
+  // Prune expired spent entries. Also unconditional, and for a sharper reason
+  // than invariant 2: the resource half of the key is peer-supplied, so a
+  // guard that skipped pruning left a remote caller able to grow this map
+  // without bound -- a memory exhaustion route through the component whose
+  // whole job is refusing them.
+  pruneSpentCache(currentSystemTime);
 
   return {};
 }

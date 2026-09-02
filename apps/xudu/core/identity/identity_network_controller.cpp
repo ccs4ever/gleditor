@@ -5,6 +5,7 @@
 #include "identity_network_controller.hpp"
 
 #include <boost/system/error_code.hpp>
+#include <chrono>
 #include <cstring>
 #include <libtorrent/error_code.hpp>
 #include <libtorrent/operations.hpp>
@@ -17,6 +18,15 @@ InfoHash fromLt(const libtorrent::sha1_hash &hash) {
   InfoHash out;
   std::memcpy(out.bytes.data(), hash.data(), 20);
   return out;
+}
+
+/// Wall clock in Unix seconds, for the freshness and expiry checks that
+/// compare a peer's claimed timestamp against now.
+std::uint64_t unixNow() {
+  return static_cast<std::uint64_t>(
+      std::chrono::duration_cast<std::chrono::seconds>(
+          std::chrono::system_clock::now().time_since_epoch())
+          .count());
 }
 
 } // namespace
@@ -188,7 +198,7 @@ bool IdentityPeerPlugin::on_extended(int length, int /*msg*/,
     if (controller_) {
       const auto powRes = controller_->hashcashEngine().verify(
           reqRes->targetEmail, reqRes->timestamp, reqRes->powNonce,
-          reqRes->difficultyBits, kDefaultHashcashDifficulty, 0);
+          reqRes->difficultyBits, kDefaultHashcashDifficulty, unixNow());
       if (!powRes) {
         isolateAndDisconnect("Insufficient or invalid Hashcash proof-of-work");
         return false;
@@ -201,7 +211,7 @@ bool IdentityPeerPlugin::on_extended(int length, int /*msg*/,
     const auto attRes = decodeOracleAttestation(frame.payload);
     if (attRes && controller_) {
       auto verifyRes =
-          controller_->pipeline().verifyOracleAttestation(*attRes, 0);
+          controller_->pipeline().verifyOracleAttestation(*attRes, unixNow());
       if (!verifyRes) {
         isolateAndDisconnect("Invalid Oracle attestation received");
         return false;

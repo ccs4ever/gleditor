@@ -418,6 +418,23 @@ TEST(IdentityHashcashTest, RejectsExpiredTimestampAntiPremining) {
   EXPECT_THAT(verifyRes.error(), Eq(ValidationError::ProofOfWorkExpired));
 }
 
+// A zero clock used to mean "skip the skew check", and the peer-wire caller
+// passed zero -- so the anti-premining invariant above held in this test file
+// and nowhere else. Zero is now just a clock reading like any other, which
+// makes a stamp dated well after it as stale as one dated well before.
+TEST(IdentityHashcashTest, ZeroClockIsNotAnEscapeHatch) {
+  HashcashEngine engine;
+  const std::string resource    = "zeroclock@test.org";
+  const std::uint64_t timestamp = 1700000000;
+
+  const auto nonceOpt = HashcashEngine::mint(resource, timestamp, 10);
+  ASSERT_TRUE(nonceOpt.has_value());
+
+  auto verifyRes = engine.verify(resource, timestamp, *nonceOpt, 10, 10, 0);
+  ASSERT_FALSE(verifyRes.has_value());
+  EXPECT_THAT(verifyRes.error(), Eq(ValidationError::ProofOfWorkExpired));
+}
+
 TEST(IdentityHashcashTest, RejectsReplayedNonce) {
   HashcashEngine engine;
   const std::string resource    = "replay@test.org";
