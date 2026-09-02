@@ -21,6 +21,7 @@
 #include <glm/trigonometric.hpp>
 
 #include <gleditor/doc.hpp>
+#include <xudu/core/anchor_lanes.hpp>
 #include <xudu/core/framing.hpp>
 #include <xudu/core/link_layout.hpp>
 #include <xudu/core/ops.hpp>
@@ -28,6 +29,8 @@
 
 namespace {
 
+using xudu::AnchorExtent;
+using xudu::assignAnchorLanes;
 using xudu::bandStrandCount;
 using xudu::bypassRoute;
 using xudu::centroidAlignmentDeltaY;
@@ -38,6 +41,8 @@ using xudu::HalfLink;
 using xudu::Link;
 using xudu::LinkedPair;
 using xudu::LinkType;
+using xudu::marginLane;
+using xudu::marginLaneLimit;
 using xudu::MicroversionId;
 using xudu::pageStackExtent;
 using xudu::PageStackExtent;
@@ -1047,4 +1052,133 @@ TEST(TransclusionLayout, simultaneousRelationalLinkAndTransclusionCoexist) {
   EXPECT_EQ(tPairs[0].from.end, 10U);
   EXPECT_EQ(tPairs[0].to.start, 0U);
   EXPECT_EQ(tPairs[0].to.end, 10U);
+}
+
+// Margin anchors: which link is attached where, said in the one place a
+// document has left to say it. Two anchors that cover the same lines cannot
+// both have the margin, and one drawn over the other says one link where
+// there are two -- so the margin is divided, and how it is divided is what
+// these check.
+TEST(AnchorLanes, anchorsThatDoNotOverlapBothKeepThePageEdge) {
+  const std::vector<AnchorExtent> extents{{.top = 10.0F, .bottom = 8.0F},
+                                          {.top = 4.0F, .bottom = 2.0F}};
+  const auto lanes = assignAnchorLanes(extents, marginLaneLimit);
+  ASSERT_EQ(lanes.size(), 2U);
+  EXPECT_EQ(lanes[0].lane, 0);
+  EXPECT_EQ(lanes[1].lane, 0);
+  // Nothing is competing for either margin, so neither is divided: an anchor
+  // stepped inwards from the paper's edge for no reason claims a crowd that
+  // is not there.
+  EXPECT_EQ(lanes[0].lanes, 1);
+  EXPECT_EQ(lanes[1].lanes, 1);
+}
+
+TEST(AnchorLanes, anchorsThatTouchWithoutOverlappingShareALane) {
+  const std::vector<AnchorExtent> extents{{.top = 6.0F, .bottom = 4.0F},
+                                          {.top = 4.0F, .bottom = 2.0F}};
+  const auto lanes = assignAnchorLanes(extents, marginLaneLimit);
+  EXPECT_EQ(lanes[0].lane, 0);
+  EXPECT_EQ(lanes[1].lane, 0);
+  EXPECT_EQ(lanes[0].lanes, 1);
+}
+
+TEST(AnchorLanes, overlappingAnchorsGetLanesOfTheirOwnAndAgreeOnHowMany) {
+  const std::vector<AnchorExtent> extents{{.top = 10.0F, .bottom = 4.0F},
+                                          {.top = 8.0F, .bottom = 2.0F}};
+  const auto lanes = assignAnchorLanes(extents, marginLaneLimit);
+  EXPECT_NE(lanes[0].lane, lanes[1].lane);
+  // Both must size their slice the same way or the two would not tile the
+  // margin: one would leave a gap the other overhung.
+  EXPECT_EQ(lanes[0].lanes, 2);
+  EXPECT_EQ(lanes[1].lanes, 2);
+}
+
+TEST(AnchorLanes, theFirstGivenTakesThePageEdge) {
+  // Equal reaches, so nothing in the geometry decides between them: the order
+  // they were handed over in does, which is how the link the reader is
+  // following ends up flush against the paper.
+  const std::vector<AnchorExtent> extents{{.top = 9.0F, .bottom = 3.0F},
+                                          {.top = 9.0F, .bottom = 3.0F}};
+  const auto lanes = assignAnchorLanes(extents, marginLaneLimit);
+  EXPECT_EQ(lanes[0].lane, 0);
+  EXPECT_EQ(lanes[1].lane, 1);
+}
+
+TEST(AnchorLanes, aChainOfOverlapsSizesEveryLaneByTheWholeChain) {
+  // A over B and B over C, but A and C never touch. A and C may share a lane;
+  // all three have to divide the margin the same number of ways, or C's slice
+  // would be the whole margin where A's was half of it and the two would not
+  // line up down the page.
+  const std::vector<AnchorExtent> extents{{.top = 10.0F, .bottom = 6.0F},
+                                          {.top = 7.0F, .bottom = 3.0F},
+                                          {.top = 4.0F, .bottom = 0.0F}};
+  const auto lanes = assignAnchorLanes(extents, marginLaneLimit);
+  EXPECT_EQ(lanes[0].lane, 0);
+  EXPECT_EQ(lanes[1].lane, 1);
+  EXPECT_EQ(lanes[2].lane, 0);
+  for (const auto &one : lanes) {
+    EXPECT_EQ(one.lanes, 2);
+  }
+}
+
+TEST(AnchorLanes, noTwoOverlappingAnchorsEverShareALane) {
+  // Five links attached to overlapping passages, which is more than a margin
+  // has room to tell apart. The ones that fit still must not collide.
+  std::vector<AnchorExtent> extents;
+  for (int i = 0; i < 5; i++) {
+    extents.push_back(AnchorExtent{.top    = 10.0F - static_cast<float>(i),
+                                   .bottom = 1.0F - static_cast<float>(i)});
+  }
+  const auto lanes = assignAnchorLanes(extents, marginLaneLimit);
+  for (std::size_t a = 0; a < lanes.size(); a++) {
+    EXPECT_GE(lanes[a].lane, 0);
+    EXPECT_LT(lanes[a].lane, marginLaneLimit);
+  }
+  // The first four are told apart; the fifth shares the innermost lane, which
+  // is a smaller lie than a lane too thin to have a colour at all.
+  std::set<int> distinct;
+  for (std::size_t a = 0; a < 4; a++) {
+    distinct.insert(lanes[a].lane);
+  }
+  EXPECT_EQ(distinct.size(), 4U);
+  EXPECT_EQ(lanes[4].lane, marginLaneLimit - 1);
+}
+
+TEST(MarginLanes, oneLaneFillsTheMarginFlushWithBothEdges) {
+  const auto only = marginLane(3.0F, 0, 1, 0.04F);
+  EXPECT_FLOAT_EQ(only.fromPageEdge, 0.0F);
+  EXPECT_FLOAT_EQ(only.toPageEdge, 3.0F);
+}
+
+TEST(MarginLanes, lanesTileTheMarginWithoutOverhangingThePage) {
+  constexpr float margin = 4.0F;
+  constexpr float kerf   = 0.1F;
+  std::vector<xudu::MarginLane> slices;
+  for (int lane = 0; lane < marginLaneLimit; lane++) {
+    slices.push_back(marginLane(margin, lane, marginLaneLimit, kerf));
+  }
+  // Flush inside the page boundary at one end and against the text at the
+  // other: an anchor outside either is not in the margin at all.
+  EXPECT_FLOAT_EQ(slices.front().fromPageEdge, 0.0F);
+  EXPECT_FLOAT_EQ(slices.back().toPageEdge, margin);
+  for (const auto &slice : slices) {
+    EXPECT_GT(slice.toPageEdge, slice.fromPageEdge);
+  }
+  for (std::size_t i = 0; i + 1 < slices.size(); i++) {
+    EXPECT_LE(slices[i].toPageEdge, slices[i + 1].fromPageEdge);
+    EXPECT_NEAR(slices[i + 1].fromPageEdge - slices[i].toPageEdge, kerf, 1e-5F);
+  }
+}
+
+TEST(MarginLanes, aKerfWiderThanTheLaneLeavesSomethingToDraw) {
+  const auto slice = marginLane(1.0F, 1, marginLaneLimit, 100.0F);
+  EXPECT_GT(slice.toPageEdge, slice.fromPageEdge);
+  EXPECT_GE(slice.fromPageEdge, 0.0F);
+  EXPECT_LE(slice.toPageEdge, 1.0F);
+}
+
+TEST(MarginLanes, aPageWithNoMarginHasNoLaneToDrawIn) {
+  const auto slice = marginLane(0.0F, 0, 1, 0.04F);
+  EXPECT_FLOAT_EQ(slice.fromPageEdge, 0.0F);
+  EXPECT_FLOAT_EQ(slice.toPageEdge, 0.0F);
 }
