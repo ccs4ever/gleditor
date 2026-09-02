@@ -67,8 +67,10 @@ std::uint32_t rowsFor(const std::size_t characters) {
       estimate, std::numeric_limits<std::uint32_t>::max()));
 }
 
-/// Margin in layout pixels between the page edge and its text.
-constexpr float pageMargin = 24.0F;
+/// Margin in layout pixels between the page edge and its text. The one
+/// definition lives on Page, where anything drawing in a page's margin can
+/// reach it; this is the short name the layout below reads it by.
+constexpr float pageMargin = Page::marginPixels;
 
 /// How far in front of the page background its glyphs and bars sit, in the
 /// same layout-pixel space. Small enough to be a depth tie-break rather than a

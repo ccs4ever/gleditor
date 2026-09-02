@@ -8,7 +8,9 @@
 #include <cmath>
 #include <cstdint>
 #include <iostream>
+#include <map>
 #include <utility>
+#include <vector>
 
 #include <glm/ext/vector_float4.hpp>
 #include <glm/trigonometric.hpp>
@@ -19,6 +21,7 @@
 #include <gleditor/render_state.hpp>
 #include <gleditor/spatial.hpp>
 
+#include "xudu/core/anchor_lanes.hpp"
 #include "xudu/core/framing.hpp"
 
 namespace xudu {
@@ -94,15 +97,21 @@ constexpr float bandStrandPitch = 2.2F;
 /// the space between them is one relation and not several.
 constexpr float bandFillAlpha = 0.85F;
 
-/// Width of the bracket drawn down the margin at each end of a link, relative
-/// to the beam's own width.
+/// Width of the spine joining one link's separate anchors down a margin,
+/// relative to the beam's own width.
 constexpr float stubWidthOfBeam = 1.35F;
 
 /// Shortest bracket drawn at a link end, as a fraction of the line height
-/// there. A link attached to a single line has no vertical extent to draw, and
-/// a bracket of no length is not drawn at all -- the vertex stage collapses a
-/// beam whose ends coincide.
+/// there. An anchor covers the lines its link is attached to, so this is only
+/// reached by one whose page reported no line height at all -- and a bracket
+/// of no length is not drawn at all, since the vertex stage collapses a beam
+/// whose ends coincide.
 constexpr float stubMinOfLine = 0.9F;
+
+/// Gap left between two anchors sharing a margin, in world units. Wide enough
+/// that two colours meeting are two colours, narrow enough that four lanes
+/// still leave something of each to see.
+constexpr float marginKerf = 0.04F;
 
 /// How far behind the page plane a beam dips to pass a document standing
 /// between its two ends, per document passed, and the deepest it may go. Deep
@@ -232,21 +241,23 @@ void LinkBeams::resolveAnchors(RenderState &state) {
 std::optional<glm::vec3> LinkBeams::edgePoint(const Doc &doc,
                                               const Doc::Anchor &anchor,
                                               const bool towardsRight,
-                                              const bool atTextBorder) {
+                                              const bool atTextBorder,
+                                              const float yOffsetPixels) {
   const auto *const page = doc.page(anchor.pageIndex);
   if (nullptr == page) {
     return std::nullopt;
   }
-  // Margin on the side the other document is on.
-  // 24.0F is pageMargin in layout pixels.
+  // Margin on the side the other document is on, asked of the page rather
+  // than reconstructed from a copy of the layout's margin: a margin that
+  // changed in the library and not here would put every anchor over the text
+  // or off the paper, and nothing would say so.
   float edge = 0.0F;
   if (towardsRight) {
-    edge = atTextBorder ? (page->leftPixels() + page->widthPixels() - 24.0F)
-                        : (page->leftPixels() + page->widthPixels());
+    edge = atTextBorder ? page->textRightPixels() : page->rightPixels();
   } else {
-    edge = atTextBorder ? (page->leftPixels() + 24.0F) : page->leftPixels();
+    edge = atTextBorder ? page->textLeftPixels() : page->leftPixels();
   }
-  return doc.worldPoint(anchor.pageIndex, edge, anchor.y);
+  return doc.worldPoint(anchor.pageIndex, edge, anchor.y + yOffsetPixels);
 }
 
 std::optional<LinkBeams::Edge>
@@ -256,40 +267,61 @@ LinkBeams::edgeOf(const Doc &doc, const std::optional<Doc::Anchor> &startAnchor,
   if (!startAnchor) {
     return std::nullopt;
   }
-  const auto pageFirst = edgePoint(doc, *startAnchor, towardsRight, false);
-  const auto textFirst = edgePoint(doc, *startAnchor, towardsRight, true);
-  if (!pageFirst || !textFirst) {
-    return std::nullopt;
-  }
-  Edge out{
-      .top        = *pageFirst,
-      .bottom     = *pageFirst,
-      .textTop    = *textFirst,
-      .textBottom = *textFirst,
-      .lineHeight = startAnchor->height,
-  };
-  // The end anchor is where the link's last byte fell, which on a link running
-  // over several lines is lower down and on a link within one line is the same
-  // place. Either is a usable edge; only a page that has not built yet is not.
+  // Which of the two anchors is the upper one decides which line's top edge
+  // the anchor starts at and which line's bottom edge it ends at, so the two
+  // are settled before any point is asked for. The end anchor is where the
+  // link's last byte fell, which on a link running over several lines is lower
+  // down and on a link within one line is the same place. Either is usable;
+  // only a page that has not built yet is not.
+  const Doc::Anchor *upper = &*startAnchor;
+  const Doc::Anchor *lower = &*startAnchor;
   if (endAnchor) {
-    const auto pageLast = edgePoint(doc, *endAnchor, towardsRight, false);
-    const auto textLast = edgePoint(doc, *endAnchor, towardsRight, true);
-    if (pageLast && textLast) {
-      if (pageFirst->y >= pageLast->y) {
-        out.top        = *pageFirst;
-        out.bottom     = *pageLast;
-        out.textTop    = *textFirst;
-        out.textBottom = *textLast;
-      } else {
-        out.top        = *pageLast;
-        out.bottom     = *pageFirst;
-        out.textTop    = *textLast;
-        out.textBottom = *textFirst;
-      }
-      out.lineHeight = std::max(startAnchor->height, endAnchor->height);
+    const auto first = edgePoint(doc, *startAnchor, towardsRight, false);
+    const auto last  = edgePoint(doc, *endAnchor, towardsRight, false);
+    if (first && last) {
+      const bool startIsUpper = first->y >= last->y;
+      upper                   = startIsUpper ? &*startAnchor : &*endAnchor;
+      lower                   = startIsUpper ? &*endAnchor : &*startAnchor;
     }
   }
-  return out;
+
+  // An anchor sits at the middle of its line -- Page::caretGeometry() returns
+  // the caret's centre -- so the distance between the first and the last is a
+  // line short of what the link covers, and for a link inside one line it is
+  // nothing at all. Half a line at each end makes the anchor the passage's
+  // own reach: the commonest link of all, attached within a single line, is
+  // then one line tall rather than invisible. The half-line is asked for in
+  // the page's pixels and converted by the page's own matrix, since that is
+  // the only thing that knows what a pixel is worth in the world.
+  const float upHalf   = upper->height * 0.5F;
+  const float downHalf = -lower->height * 0.5F;
+
+  const auto pageTop    = edgePoint(doc, *upper, towardsRight, false, upHalf);
+  const auto pageBottom = edgePoint(doc, *lower, towardsRight, false, downHalf);
+  const auto textTop    = edgePoint(doc, *upper, towardsRight, true, upHalf);
+  const auto textBottom = edgePoint(doc, *lower, towardsRight, true, downHalf);
+  if (!pageTop || !pageBottom || !textTop || !textBottom) {
+    return std::nullopt;
+  }
+  return Edge{
+      .top        = *pageTop,
+      .bottom     = *pageBottom,
+      .textTop    = *textTop,
+      .textBottom = *textBottom,
+      .lineHeight = std::max(upper->height, lower->height),
+  };
+}
+
+float LinkBeams::drawnHalfExtent(const Edge &edge) {
+  const float lineWorld = edge.lineHeight * Doc::pixelsToWorld;
+  return std::max(std::abs(edge.top.y - edge.bottom.y) * 0.5F,
+                  lineWorld * stubMinOfLine * 0.5F);
+}
+
+AnchorExtent LinkBeams::drawnExtent(const Edge &edge) {
+  const float middle = 0.5F * (edge.top.y + edge.bottom.y);
+  const float half   = drawnHalfExtent(edge);
+  return AnchorExtent{.top = middle + half, .bottom = middle - half};
 }
 
 std::uint32_t LinkBeams::fade(const std::uint32_t colour, const float factor) {
@@ -305,8 +337,8 @@ void LinkBeams::band(const Edge &nearSide, const Edge &farSide,
                      const float phase) {
   const float baseWidth = std::max(nearSide.lineHeight, farSide.lineHeight) *
                           Doc::pixelsToWorld * beamWidthOfLine;
-  const float nearSpan  = std::abs(nearSide.top.y - nearSide.bottom.y);
-  const float farSpan   = std::abs(farSide.top.y - farSide.bottom.y);
+  const float nearSpan = std::abs(nearSide.top.y - nearSide.bottom.y);
+  const float farSpan  = std::abs(farSide.top.y - farSide.bottom.y);
 
   // How many strands comes from the taller of the two ends, so that end is
   // drawn at its full reach rather than reduced to whatever the other end
@@ -325,12 +357,27 @@ void LinkBeams::band(const Edge &nearSide, const Edge &farSide,
           static_cast<float>(documentsApart > 1 ? documentsApart - 1 : 0),
       bypassDepthLimit);
 
+  // The outermost strand is pulled in by half a beam width at each end, so
+  // the band fills the passage exactly instead of overhanging it by half a
+  // ribbon at the top and the bottom -- which is where the anchor marking the
+  // same passage ends, and a band that reached past its own anchor claimed a
+  // line of text the link is not attached to.
+  const auto within = [baseWidth](const Edge &edge) {
+    const float span = std::abs(edge.top.y - edge.bottom.y);
+    const float pull =
+        span > 0.0F ? std::min(0.5F, (baseWidth * 0.5F) / span) : 0.0F;
+    return std::pair{glm::mix(edge.top, edge.bottom, pull),
+                     glm::mix(edge.bottom, edge.top, pull)};
+  };
+  const auto [nearTop, nearBottom] = within(nearSide);
+  const auto [farTop, farBottom]   = within(farSide);
+
   for (std::size_t k = 0; k < count; k++) {
     const float where =
         count > 1 ? static_cast<float>(k) / static_cast<float>(count - 1)
                   : 0.5F;
-    const auto p1 = glm::mix(nearSide.top, nearSide.bottom, where);
-    const auto p2 = glm::mix(farSide.top, farSide.bottom, where);
+    const auto p1 = glm::mix(nearTop, nearBottom, where);
+    const auto p2 = glm::mix(farTop, farBottom, where);
     // The two that bound the band keep the link's own colour; the ones filling
     // it are dimmer, so the band reads as one relation with a reach rather
     // than as a fistful of separate ones.
@@ -349,102 +396,46 @@ void LinkBeams::band(const Edge &nearSide, const Edge &farSide,
   }
 }
 
-void LinkBeams::anchorStub(const Edge &edge, const std::uint32_t colour,
-                           const std::uint32_t tag, const bool farEnd) {
-  const float lineWorld = edge.lineHeight * Doc::pixelsToWorld;
-  const float half      = std::max(std::abs(edge.top.y - edge.bottom.y) * 0.5F,
-                                   lineWorld * stubMinOfLine * 0.5F);
-  const auto pageMid    = 0.5F * (edge.top + edge.bottom);
-  const auto textMid    = 0.5F * (edge.textTop + edge.textBottom);
-  const glm::vec3 up(0.0F, half, 0.0F);
-  const float at = farEnd ? 1.0F : 0.0F;
-
-  const glm::vec3 marginVec = pageMid - textMid;
-  const float marginWidth   = glm::length(marginVec);
-  const glm::vec3 marginDir = marginWidth > 0.001F
-                                  ? (marginVec / marginWidth)
-                                  : glm::vec3(1.0F, 0.0F, 0.0F);
-
-  // Bracket thickness strictly scaled to fit inside margin without overhanging
-  // page
-  const float bracketThick      = std::min(0.24F, marginWidth * 0.12F);
-  const auto outerBracketCenter = pageMid - marginDir * (bracketThick * 0.5F);
-
-  // 1. Margin fill connecting text edge across margin to outer bracket
-  beams->add(textMid, outerBracketCenter, half * 2.0F, colour, tag, at, at);
-
-  // 2. Outer page margin bracket (flush with inside of page boundary)
-  beams->add(outerBracketCenter - up, outerBracketCenter + up, bracketThick,
-             colour, tag, at, at);
-}
-
 void LinkBeams::drawMarginAnchorLane(const Edge &edge,
                                      const std::uint32_t colour,
                                      const std::uint32_t tag, const bool farEnd,
-                                     [[maybe_unused]] const bool towardsRight,
                                      const int laneIndex, const int laneCount,
                                      const bool isActive) {
-  const float lineWorld = edge.lineHeight * Doc::pixelsToWorld;
-  const float half      = std::max(std::abs(edge.top.y - edge.bottom.y) * 0.5F,
-                                   lineWorld * stubMinOfLine * 0.5F);
-  const auto pageMid    = 0.5F * (edge.top + edge.bottom);
-  const auto textMid    = 0.5F * (edge.textTop + edge.textBottom);
-  const float at        = farEnd ? 1.0F : 0.0F;
+  const float half   = drawnHalfExtent(edge);
+  const auto pageMid = 0.5F * (edge.top + edge.bottom);
+  const auto textMid = 0.5F * (edge.textTop + edge.textBottom);
+  const float at     = farEnd ? 1.0F : 0.0F;
 
-  const int totalLanes = std::clamp(laneCount, 1, 4);
-  const float fraction = 1.0F / static_cast<float>(totalLanes);
-
-  // Sub-band height and vertical offset within the line span for this lane
-  const float subHalf    = half * fraction;
-  const float subCenterY = (static_cast<float>(totalLanes - 1) * 0.5F -
-                            static_cast<float>(laneIndex)) *
-                           (2.0F * subHalf);
-  const glm::vec3 subUp(0.0F, subHalf, 0.0F);
-  const glm::vec3 laneOffset(0.0F, subCenterY,
-                             0.02F * static_cast<float>(laneIndex));
-
+  // Which way the margin runs and how wide it is come from the two points the
+  // edge already holds: one at the page's border and one at the text's. A page
+  // narrow enough for those to coincide has no margin to draw in, and the
+  // anchor is skipped rather than drawn somewhere invented.
   const glm::vec3 marginVec = pageMid - textMid;
   const float marginWidth   = glm::length(marginVec);
-  const glm::vec3 marginDir = marginWidth > 0.001F
-                                  ? (marginVec / marginWidth)
-                                  : glm::vec3(1.0F, 0.0F, 0.0F);
+  if (!(marginWidth > 0.0F) || !(half > 0.0F)) {
+    return;
+  }
+  const glm::vec3 marginDir = marginVec / marginWidth;
 
-  // Bracket thickness strictly scaled to fit inside margin without overhanging
-  // page
-  const float baseBracketThick = std::min(0.24F, marginWidth * 0.12F);
-  const float bracketThick     = baseBracketThick * (isActive ? 1.4F : 1.0F);
+  const auto slice = marginLane(marginWidth, laneIndex, laneCount, marginKerf);
+  const float thickness = slice.toPageEdge - slice.fromPageEdge;
+  if (!(thickness > 0.0F)) {
+    return;
+  }
+  // Measured inwards from the page edge, which is where lane 0 sits: an
+  // anchor is flush with the paper's border and grows towards the text, so a
+  // margin holding one link and a margin holding four both start in the same
+  // place and the outermost bar is always the most prominent one.
+  const auto centre =
+      pageMid - (marginDir * (0.5F * (slice.fromPageEdge + slice.toPageEdge)));
+  const glm::vec3 up(0.0F, half, 0.0F);
 
-  // Outer bracket center sits flush against the inside edge of the page border
-  const auto outerBracketCenter = pageMid - marginDir * (bracketThick * 0.5F);
-
-  const auto textP1 = textMid + laneOffset - subUp;
-  const auto textP2 = textMid + laneOffset + subUp;
-  const auto pageP1 = outerBracketCenter + laneOffset - subUp;
-  const auto pageP2 = outerBracketCenter + laneOffset + subUp;
-
-  const auto textCenter = 0.5F * (textP1 + textP2);
-  const auto pageCenter = 0.5F * (pageP1 + pageP2);
-
-  // Prominence styling and subtle contrast kerfs between stacked sub-bands
+  // The link being followed is drawn at full strength and the rest a shade
+  // under it, which is the only difference between the lanes beyond their
+  // colours -- widening the active one would break the tiling that keeps the
+  // others where their neighbours expect them.
   const auto drawColour = isActive ? (colour | 0xFFU) : fade(colour, 0.92F);
-  const float kerf = (totalLanes > 1) ? std::min(0.04F, subHalf * 0.15F) : 0.0F;
-  const float bandThick =
-      std::max(0.05F, ((subHalf * 2.0F) - kerf) * (isActive ? 1.05F : 0.98F));
-
-  // 1. Margin coloring fill: horizontal band connecting from text boundary
-  // across margin to outer bracket
-  beams->add(textCenter, pageCenter, bandThick, drawColour, tag, at, at);
-
-  // 2. Outer page edge anchor bracket: solid vertical bracket completely inside
-  // the page edge
-  const glm::vec3 kerfUp(0.0F, kerf * 0.5F, 0.0F);
-  beams->add(pageP1 + kerfUp, pageP2 - kerfUp, bracketThick, drawColour, tag,
-             at, at);
-
-  // 3. Inner text edge anchor bracket: subtle vertical bracket along the text
-  // boundary
-  beams->add(textP1 + kerfUp, textP2 - kerfUp, bracketThick * 0.7F, drawColour,
-             tag, at, at);
+  beams->add(centre - up, centre + up, thickness, drawColour, tag, at, at);
 }
 
 bool LinkBeams::onScreen(const glm::mat4 &viewProjection,
@@ -917,6 +908,12 @@ void LinkBeams::drawFrame(gleditor::FrameContext &ctx) {
       std::uint64_t linkId{};
       ProminenceTier tier{};
       LinkType type{};
+      /// Whether this anchor belongs to an emergent transclusion rather than
+      /// to a link. A transclusion has no link id to be told apart by, so
+      /// without this every transclusion along one margin would answer to the
+      /// same one and be joined into a single multi-span link that nobody
+      /// made.
+      bool transclusion{};
     };
 
     std::vector<MarginAnchor> allAnchors;
@@ -1067,6 +1064,7 @@ void LinkBeams::drawFrame(gleditor::FrameContext &ctx) {
           .linkId       = 0,
           .tier         = ProminenceTier::Author,
           .type         = LinkType::Other,
+          .transclusion = true,
       });
 
       allAnchors.push_back(MarginAnchor{
@@ -1080,82 +1078,93 @@ void LinkBeams::drawFrame(gleditor::FrameContext &ctx) {
           .linkId       = 0,
           .tier         = ProminenceTier::Author,
           .type         = LinkType::Other,
+          .transclusion = true,
       });
     }
 
-    // Render multi-lane margin anchors: up to 4 overlapping link anchor colors
-    // filling the margin side-by-side with prominence highlighting.
+    // Every anchor along one edge of one document shares that edge's margin.
+    // Which of them can have it flush against the paper, and how the rest are
+    // stepped inwards from there, is decided per edge rather than per anchor:
+    // two anchors that overlap must not be handed the same lane, and two that
+    // do not overlap must not be pushed apart for nothing.
     for (std::size_t d = 0; d < state.docs.size(); ++d) {
       for (const bool towardsRight : {true, false}) {
-        std::vector<MarginAnchor> sideAnchors;
-        for (const auto &anc : allAnchors) {
-          if (anc.docIndex == d && anc.towardsRight == towardsRight) {
-            sideAnchors.push_back(anc);
+        std::vector<std::size_t> sideAnchors;
+        for (std::size_t a = 0; a < allAnchors.size(); ++a) {
+          if (allAnchors[a].docIndex == d &&
+              allAnchors[a].towardsRight == towardsRight) {
+            sideAnchors.push_back(a);
           }
         }
         if (sideAnchors.empty()) {
           continue;
         }
 
-        for (std::size_t idx = 0; idx < sideAnchors.size(); ++idx) {
-          const auto &curr    = sideAnchors[idx];
-          const float currTop = std::max(curr.edge.top.y, curr.edge.bottom.y);
-          const float currBot = std::min(curr.edge.top.y, curr.edge.bottom.y);
-
-          std::vector<std::size_t> overlapping;
-          for (std::size_t o = 0; o < sideAnchors.size(); ++o) {
-            const auto &other = sideAnchors[o];
-            const float oTop  = std::max(other.edge.top.y, other.edge.bottom.y);
-            const float oBot  = std::min(other.edge.top.y, other.edge.bottom.y);
-            if (std::max(currBot, oBot) <= std::min(currTop, oTop) + 0.001F) {
-              overlapping.push_back(o);
-            }
-          }
-
-          std::ranges::sort(
-              overlapping, [&sideAnchors](std::size_t a, std::size_t b) {
-                const auto &oa = sideAnchors[a];
-                const auto &ob = sideAnchors[b];
-                if (oa.isActive != ob.isActive)
-                  return oa.isActive > ob.isActive;
-                if (oa.tier != ob.tier)
-                  return static_cast<int>(oa.tier) < static_cast<int>(ob.tier);
+        // The order lanes are handed out in, most prominent first: the link
+        // being followed, then the tier that vouched for it, then the link's
+        // own id and its place among the anchors. The last two carry no
+        // meaning beyond being the same from one frame to the next -- without
+        // them two anchors of equal standing would swap lanes whenever the
+        // strands were found in a different order, and the margin would
+        // flicker between two arrangements that are both correct.
+        std::ranges::sort(
+            sideAnchors, [&allAnchors](std::size_t a, std::size_t b) {
+              const auto &oa = allAnchors[a];
+              const auto &ob = allAnchors[b];
+              if (oa.isActive != ob.isActive) {
+                return oa.isActive;
+              }
+              if (oa.tier != ob.tier) {
+                return static_cast<int>(oa.tier) < static_cast<int>(ob.tier);
+              }
+              if (oa.linkId != ob.linkId) {
                 return oa.linkId < ob.linkId;
-              });
+              }
+              return a < b;
+            });
 
-          int lane         = 0;
-          const auto found = std::ranges::find(overlapping, idx);
-          if (found != overlapping.end()) {
-            lane = std::min<int>(
-                3, static_cast<int>(std::distance(overlapping.begin(), found)));
+        std::vector<AnchorExtent> extents;
+        extents.reserve(sideAnchors.size());
+        for (const auto which : sideAnchors) {
+          extents.push_back(drawnExtent(allAnchors[which].edge));
+        }
+        const auto lanes = assignAnchorLanes(extents, marginLaneLimit);
+
+        for (std::size_t k = 0; k < sideAnchors.size(); ++k) {
+          const auto &anchor = allAnchors[sideAnchors[k]];
+          drawMarginAnchorLane(anchor.edge, anchor.colour, anchor.tagId,
+                               anchor.farEnd, lanes[k].lane, lanes[k].lanes,
+                               anchor.isActive);
+        }
+
+        // Multi-span links: if a single link has several disjoint anchor spans
+        // on the same document edge, a vertical spine connects them, so the
+        // margin says they are one relation rather than several. Keyed on
+        // which end of the link an anchor is as well as on the link, since a
+        // link with both of its ends on one edge is two attachments and not
+        // one span in two pieces -- and transclusions, which have no link id,
+        // are left out rather than all answering to zero.
+        std::map<std::pair<std::uint64_t, bool>, std::vector<std::size_t>>
+            linkGroups;
+        for (const auto which : sideAnchors) {
+          const auto &anchor = allAnchors[which];
+          if (anchor.transclusion) {
+            continue;
           }
-          const int clusterCount =
-              std::min<int>(4, static_cast<int>(overlapping.size()));
-
-          drawMarginAnchorLane(curr.edge, curr.colour, curr.tagId, curr.farEnd,
-                               towardsRight, lane, clusterCount, curr.isActive);
+          linkGroups[{anchor.linkId, anchor.farEnd}].push_back(which);
         }
 
-        // Multi-span links: if a single link has multiple disjoint anchor spans
-        // on the same document edge, render a unifying vertical spine
-        // connecting them.
-        std::map<std::uint64_t, std::vector<MarginAnchor>> linkGroups;
-        for (const auto &anc : sideAnchors) {
-          linkGroups[anc.linkId].push_back(anc);
-        }
-
-        for (auto &[linkId, group] : linkGroups) {
+        for (auto &[key, group] : linkGroups) {
           if (group.size() <= 1) {
             continue;
           }
-          std::ranges::sort(group,
-                            [](const MarginAnchor &a, const MarginAnchor &b) {
-                              return a.edge.top.y > b.edge.top.y;
-                            });
+          std::ranges::sort(group, [&allAnchors](std::size_t a, std::size_t b) {
+            return allAnchors[a].edge.top.y > allAnchors[b].edge.top.y;
+          });
 
           for (std::size_t g = 0; g + 1 < group.size(); ++g) {
-            const auto &upper = group[g];
-            const auto &lower = group[g + 1];
+            const auto &upper = allAnchors[group[g]];
+            const auto &lower = allAnchors[group[g + 1]];
             const auto pTop   = upper.edge.bottom;
             const auto pBot   = lower.edge.top;
             if (pTop.y > pBot.y + 0.05F) {
@@ -1218,7 +1227,7 @@ void LinkBeams::describe(gleditor::a11y::Builder &into) {
                        std::to_string(strand.from.end) + ", and bytes " +
                        std::to_string(strand.to.start) + " to " +
                        std::to_string(strand.to.end);
-    node.focusable   = true;
+    node.focusable = true;
     node.actions =
         a11y::bit(a11y::Action::Focus) | a11y::bit(a11y::Action::Click);
   }
