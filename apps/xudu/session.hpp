@@ -110,9 +110,13 @@ class Session : public gleditor::DocumentObserver,
 public:
   /// Colours the decorator paints with. Backgrounds behind text, so they are
   /// pale enough to read through.
-  static constexpr std::uint32_t transclusionColour           = 0xFFE9A8FFU;
-  static constexpr std::uint32_t linkColour                   = 0xB9E8C4FFU;
-  static constexpr std::uint32_t redactionColour              = 0x111827FFU;
+  static constexpr std::uint32_t transclusionColour = 0xFFE9A8FFU;
+  static constexpr std::uint32_t linkColour         = 0xB9E8C4FFU;
+  /// Withheld holes, and any hole whose reason did not reach us. The rest of
+  /// the hole palette lives beside HoleReason in scroll.hpp, so that the
+  /// mapping from reason to colour is testable without a graphics device --
+  /// see colourForHole() there.
+  static constexpr std::uint32_t redactionColour              = kWithheldColour;
   static constexpr std::uint32_t transcopyrightLockedColour   = 0xF59E0BCCU;
   static constexpr std::uint32_t transcopyrightUnlockedColour = 0x10B981AAU;
 
@@ -450,8 +454,7 @@ public:
                      gleditor::DecorationMask mask);
 
   // -- Uncommitted Replay Log & Macro-Epoch Flush --------------------------
-  static constexpr auto idleFlushTimeout          = std::chrono::seconds(5);
-  static constexpr std::size_t minSpanDedupLength = 24;
+  static constexpr auto idleFlushTimeout = std::chrono::seconds(5);
 
   /**
    * @brief Flush any uncommitted edits in the replay log for @p docIndex (or

@@ -204,9 +204,7 @@ ResolveResult Resolver::resolve(const Scroll &scroll,
               cipherBytes.size() < crypto::kTagSize) {
             return ResolveResult{.status = ResolutionStatus::UnverifiedHash};
           }
-          crypto::Nonce24 nonce{};
-          std::memcpy(nonce.data(), tc.keyId.data(),
-                      std::min<std::size_t>(tc.keyId.size(), nonce.size()));
+          const auto nonce = crypto::nonceForKeyId(tc.keyId);
           try {
             auto plain = crypto::decryptSpanSlice(
                 cipherBytes, 0, cekRec.cek, nonce, at - segment->at, count);
@@ -247,7 +245,26 @@ ResolveResult Resolver::resolve(const Scroll &scroll,
     at += count;
   }
 
-  cache.put(span, out);
+  // Resolved text is deliberately not cached, and the cache.put(span, out)
+  // that used to sit here is gone. Nothing ever read it back, and that hid
+  // two reasons it could not be:
+  //
+  // The key is not unique. A PrimediaSpan names a scroll by its slot index in
+  // *this* Store's externals table, so document A's scroll 1 and document B's
+  // scroll 1 are different scrolls with one key, in a process-wide LMDB that
+  // outlives them both.
+  //
+  // The obvious repair -- cache verified pieces by (info hash, piece index),
+  // which does name the bytes -- costs more than it looks. `alteredContent-
+  // IsNotReturned` and its neighbours in tests/xudu/resolver.cpp exist
+  // because a reference whose local copy has been altered must stop
+  // resolving rather than quietly yield something else, and a cache that
+  // outlives the tampering answers from before it. That is a real tradeoff
+  // to weigh, not one to take by accident while removing a dead write.
+  //
+  // The cost this leaves is real: Session::decorate resolves every piece of
+  // every open document on each pass. Somewhere to cache it belongs is above
+  // the resolver, where a document knows when its own content changed.
   return ResolveResult{.status = ResolutionStatus::VerifiedBytes,
                        .text   = std::move(out)};
 }

@@ -68,7 +68,7 @@ TEST(TranscopyrightCryptoTest, aeadEncryptionRoundTripAndAuthentication) {
   EXPECT_FALSE(crypto::decryptAead(tamperedTag, key, nonce, ad).has_value());
 }
 
-TEST(TranscopyrightCryptoTest, seekableSpanDecryption) {
+TEST(TranscopyrightCryptoTest, decryptsAndSlicesASpan) {
   const auto key   = crypto::generateKey();
   const auto nonce = crypto::generateNonce();
   const std::string pt =
@@ -76,7 +76,8 @@ TEST(TranscopyrightCryptoTest, seekableSpanDecryption) {
 
   const auto ct = crypto::encryptAead(pt, key, nonce);
 
-  // Request subspan [10, 36) -> "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+  // Request subspan [10, 36). The whole segment is decrypted and this
+  // slice returned -- there is no seeking, and the name no longer says so.
   const auto sub = crypto::decryptSpanSlice(ct, 0, key, nonce, 10, 26);
   ASSERT_TRUE(sub.has_value());
   EXPECT_EQ(*sub, "ABCDEFGHIJKLMNOPQRSTUVWXYZ");
@@ -422,8 +423,9 @@ TEST(TranscopyrightEndToEndTest,
   // Derive Transcopyright CEK and KeyId
   const auto tcCek   = crypto::generateKey();
   const auto tcKeyId = crypto::generateKey();
-  crypto::Nonce24 nonce{};
-  std::memcpy(nonce.data(), tcKeyId.data(), nonce.size());
+  // Same derivation the reader uses -- one named function now, rather than
+  // this memcpy and a matching one in the resolver.
+  const auto nonce    = crypto::nonceForKeyId(tcKeyId);
   const auto tcCipher = crypto::encryptAead(tcChapter, tcCek, nonce, {});
 
   // Build torrent payload where withheld is zeroed and tc is ciphertext

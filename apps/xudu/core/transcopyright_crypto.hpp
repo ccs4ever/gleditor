@@ -43,6 +43,27 @@ using Tag16   = std::array<std::uint8_t, kTagSize>;
 [[nodiscard]] Nonce24 generateNonce();
 
 /**
+ * @brief The nonce a segment sealed under @p keyId is encrypted with.
+ *
+ * Deterministic, so a reader can decrypt without the author having to ship a
+ * nonce alongside the ciphertext. Safe because ChaCha20-Poly1305 needs a
+ * nonce unique *per key*, and a keyId names exactly one CEK encrypting
+ * exactly one segment: distinct segments have distinct keyIds and therefore
+ * distinct keys, so no keystream is ever reused.
+ *
+ * That invariant is the whole safety argument, so it is worth stating
+ * plainly: **reusing a keyId for a second segment reuses a keystream**, and
+ * an attacker holding both ciphertexts recovers the XOR of the plaintexts.
+ * Mint a fresh keyId per sealed span.
+ *
+ * This convention previously lived as an open-coded memcpy in the resolver
+ * and another in a test -- two copies of an unwritten rule, which is how
+ * conventions drift into incompatibility.
+ */
+[[nodiscard]] Nonce24
+nonceForKeyId(const std::array<std::uint8_t, 32> &keyId) noexcept;
+
+/**
  * @brief Derive a span-specific Content Encryption Key (CEK) from a master
  * segment key.
  *

@@ -7,6 +7,7 @@
 #include <string>
 
 #include "xudu/core/microversion.hpp"
+#include "xudu/core/scroll.hpp"
 #include "xudu/core/store.hpp"
 
 namespace fs = std::filesystem;
@@ -134,4 +135,26 @@ TEST_F(StoreMultiStoreTest, storeHypertimeHistoryAndTraversal) {
   EXPECT_EQ(store.textOf(v1), "Initial");
   EXPECT_EQ(store.textOf(v2), "Initial Version");
   EXPECT_EQ(store.textOf(v3), "Initial Version Three");
+}
+
+// Every hole used to paint as redactionColour, so a reader could not tell an
+// author's embargo from a court order, or from a span that simply has not
+// been sealed yet. The reason was carried all the way through in holeRecord
+// and then discarded at the last step.
+TEST(HoleRenderingTest, EachHoleReasonHasItsOwnColour) {
+  const auto colourFor = &xudu::colourForHole;
+
+  const auto withheld = colourFor(xudu::HoleReason::Withheld);
+  const auto revoked  = colourFor(xudu::HoleReason::Revoked);
+  const auto takedown = colourFor(xudu::HoleReason::Takedown);
+  const auto unsealed = colourFor(xudu::HoleReason::Unsealed);
+
+  EXPECT_EQ(withheld, xudu::kWithheldColour);
+  EXPECT_NE(revoked, withheld);
+  EXPECT_NE(takedown, withheld);
+  EXPECT_NE(unsealed, withheld);
+  EXPECT_NE(revoked, takedown) << "withdrawn and taken down are not the same";
+
+  // Transcopyright is its own case, not folded into withheld.
+  EXPECT_NE(colourFor(xudu::HoleReason::TranscopyrightLock), withheld);
 }

@@ -281,7 +281,7 @@ In the Zigzag visualizer:
 | **Length Leakage Attack** | The byte length of a hole is visible in the coordinate space. For ultra-sensitive secrets (e.g. passwords), authors pad withheld spans with random whitespace prior to sealing. |
 | **Data Withholding / Fake Holes** | Seeder nodes cannot falsely claim a plain segment is a hole. Readers verify the author's PGP/BEP 46 signature on the Bencoded publication manifest. |
 | **Sybil & DoS Attacks** | BEP 10 invoice queries are gated by dynamic Hashcash Proof-of-Work (`HashcashEngine`). |
-| **Keystream Reuse** | Every segment uses a unique 24-byte nonce derived from the HKDF key identifier, preventing ChaCha20 nonce reuse. |
+| **Keystream Reuse** | A segment's nonce is derived from its `keyId` (`crypto::nonceForKeyId`), so a reader needs no nonce shipped alongside the ciphertext. This is safe *only because* a `keyId` names one CEK encrypting one segment — the uniqueness ChaCha20-Poly1305 requires is per key, not per nonce. Reusing a `keyId` across two spans reuses a keystream and leaks the XOR of both plaintexts to anyone holding both. Mint a fresh `keyId` per sealed span. |
 | **Free-Riding / Key Theft** | Micropayments settle via atomic state-channel tickets. CEKs are cached locally per device. |
 
 ---

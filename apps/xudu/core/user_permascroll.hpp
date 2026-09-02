@@ -103,16 +103,22 @@ public:
    */
   PrimediaSpan append(std::string_view text);
 
-  /**
-   * @brief Search for an exact matching span in the author's permascroll.
-   * @param text The candidate text to find.
-   * @param minMatchLength Minimum length in bytes to consider for reuse
-   * (default 24).
-   * @return The canonical PrimediaSpan if found, or std::nullopt.
-   */
-  [[nodiscard]] std::optional<PrimediaSpan>
-  findExistingSpan(std::string_view text,
-                   std::size_t minMatchLength = 24) const;
+  // findExistingSpan used to live here: a flat search of the whole
+  // permascroll for text about to be appended, so an insert could point at an
+  // existing span instead of adding bytes. It is gone, because in this model
+  // sharing a coordinate is not an optimisation, it is a claim. Two documents
+  // at the same primedia address *are* transcluded -- that is what
+  // Version::occurrencesOf reports and what the gold beams draw -- so
+  // deduplicating on a text match asserted a quotation that never happened,
+  // and under transcopyright would have paid royalties for it.
+  //
+  // It could also match inside a withheld or revoked region, since bytes()
+  // is the flat local view: a public document would then point into a hole,
+  // render as a redaction, and leak the offset and length of private text.
+  //
+  // Storage economy is still worth having. It belongs below the address
+  // layer -- compression within a sealed segment -- where saving space does
+  // not change what a span means.
 
   /// Read a span of local primedia as a string copy.
   [[nodiscard]] std::string read(const PrimediaSpan &span) const override;

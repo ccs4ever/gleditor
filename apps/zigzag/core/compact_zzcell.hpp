@@ -112,8 +112,25 @@ struct DynamicDimensionLink {
 
 /**
  * @struct CompactZZCell
- * @brief High-density, zero-copy ZigZag cell structure linking directly into
- *        Xudu primedia and operations spools.
+ * @brief A ZigZag cell: its address in the primedia spool, its links along
+ *        each dimension, and how its content resolved.
+ *
+ * **Not 64 bytes, and not zero-copy** -- which this comment, the design
+ * document and CLAUDE.md all used to claim. It is around 960 bytes, aligned
+ * to 8, and it heap-allocates: a vector of dynamic dimensions, three
+ * optionals, a std::string type tag, and `ephemeralText`, which holds a copy
+ * of the very primedia that `span` already addresses.
+ *
+ * The claim survived as long as it did because nothing checked it. The
+ * static_assert at the end of this file does now -- not at 64, which would be
+ * a lie in the other direction, but at a ceiling this cannot quietly drift
+ * past again.
+ *
+ * Reaching 64 bytes is a real refactor and worth doing: split the hot fields
+ * (id, spoolOpIndex, span, standardDimensions) from the cold ones and put the
+ * cold ones in a side table keyed by CellID, so a staging pass walks cache
+ * lines instead of chasing pointers. Until somebody does that, the honest
+ * thing is to say what the struct costs.
  */
 struct CompactZZCell {
   CellID id{0};
@@ -295,6 +312,15 @@ struct CompactZZCell {
     return primedia.readView(span);
   }
 };
+
+// A ceiling, not a target. Its job is to make the next field somebody adds
+// to CompactZZCell an explicit decision rather than a silent one -- the
+// documented size was 64 and the real size had reached 960 without anyone
+// having to notice. Lower it as the hot/cold split above gets done.
+static_assert(sizeof(CompactZZCell) <= 1024,
+              "CompactZZCell has grown past its budget. It is meant to be "
+              "shrinking towards a cache-line-sized hot struct, not growing: "
+              "put new cold fields in a side table keyed by CellID.");
 
 } // namespace zigzag
 

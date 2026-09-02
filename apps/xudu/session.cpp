@@ -680,17 +680,18 @@ void Session::flushUncommitted(const std::optional<std::uint32_t> docIndex) {
     for (const auto &op : compacted) {
       if (op.kind == OpKind::Insert) {
         if (!op.text.empty()) {
-          if (const auto existing = st.userPermascroll().findExistingSpan(
-                  op.text, minSpanDedupLength)) {
-            curVersion = st.insertSpan(curVersion, op.at, *existing);
-            std::cout << "xudu: " << curVersion.str()
-                      << " insert (reused span [" << existing->start << ", +"
-                      << existing->length << ")) at " << op.at << "\n";
-          } else {
-            curVersion = st.insert(curVersion, op.at, op.text);
-            std::cout << "xudu: " << curVersion.str() << " insert "
-                      << op.text.size() << " bytes at " << op.at << "\n";
-          }
+          // Always a fresh append. This used to search the whole permascroll
+          // for a matching run of 24 bytes or more and reuse that span
+          // instead -- which meant two documents that happened to contain the
+          // same boilerplate line ended up at the same primedia coordinates,
+          // and shared coordinates are what transclusion *is* here. It drew
+          // gold prisms between documents nobody had quoted from each other,
+          // and under transcopyright it would have routed royalties to
+          // whoever typed the line first. Storage economy is a real goal, but
+          // it belongs below the address layer, not at it.
+          curVersion = st.insert(curVersion, op.at, op.text);
+          std::cout << "xudu: " << curVersion.str() << " insert "
+                    << op.text.size() << " bytes at " << op.at << "\n";
         }
       } else if (op.kind == OpKind::Delete) {
         if (op.length > 0) {
@@ -854,9 +855,12 @@ void Session::decorate(const Doc &doc, std::vector<gleditor::SpanStyle> &out) {
       }
       const auto res = st.resolve(piece);
       if (res.status == xudu::ResolutionStatus::WithheldRedacted) {
+        const auto colour = res.holeRecord
+                                ? colourForHole(res.holeRecord->reason)
+                                : Session::redactionColour;
         for (const auto &extent : mine.occurrencesOf(piece)) {
-          found.push_back(gleditor::SpanStyle{extent.start, extent.end,
-                                              Session::redactionColour});
+          found.push_back(
+              gleditor::SpanStyle{extent.start, extent.end, colour});
         }
       } else if (res.status == xudu::ResolutionStatus::TranscopyrightLocked) {
         for (const auto &extent : mine.occurrencesOf(piece)) {
