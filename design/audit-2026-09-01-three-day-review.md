@@ -286,6 +286,42 @@ spools" in the same comment. There is **no `static_assert` on the size**
 anywhere in `apps/zigzag/core/` — the central invariant of the "120 FPS
 staging" design is unenforced, which is why it drifted 15×.
 
+#### Follow-up: the refactor this implies is not the one to do
+
+Measured on a 32,768-cell lattice, and the numbers do not support the plan
+this finding originally implied — including in the first version of the
+`static_assert` comment I wrote, which asserted a performance benefit without
+measuring one. Same failure mode as the code being audited.
+
+| what | cost |
+| :--- | :--- |
+| BFS at the default radius of 3 (≈60 cells) | **1.1 µs**, 0.013% of a 8.33 ms frame |
+| Same BFS with a 52-byte cell and flat containers | 0.2 µs |
+| BFS at radius 20 (≈32k cells) | 392 µs → 20 µs |
+| `TextLayout::layoutPage` per cell | **14.3 µs** |
+| …×60 cells, as `stageVisibleCells` does every call | **0.86 ms** |
+| …×500 cells | **7.1 ms** — the budget runs out here |
+| Resident cells, 32k lattice | **30 MiB**, vs 1.6 MiB at 52 bytes |
+
+Three conclusions:
+
+**64 bytes was never reachable as specified.** `standardDimensions` alone is
+192 bytes — twelve dimensions × two directions × an 8-byte `CellID`. A cache
+line needs 32-bit dense indices and all but three or four dimensions moved to
+a side table: a different data model, not a tighter packing of this one.
+
+**The refactor buys memory, not speed.** 18× less resident for a large
+lattice is a real result and the honest reason to do the work. Frame time is
+not: at the radius the code uses, the traversal is noise, and shrinking the
+cell moves 1.1 µs to 0.9 µs.
+
+**The frame-time risk is somewhere else entirely.** `stageVisibleCells`
+re-shapes every visited cell through HarfBuzz on every call with no cache,
+and that scales with radius until it eats the budget. If anything here is
+worth doing for 120 FPS, it is caching shaped output — not the cell layout.
+
+The `static_assert` ceiling stays as drift protection either way.
+
 ### 4.2 `decryptSeekableSpan` does not seek
 
 [`transcopyright_crypto.cpp:268`](apps/xudu/core/transcopyright_crypto.cpp:268)

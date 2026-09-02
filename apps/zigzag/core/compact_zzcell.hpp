@@ -126,11 +126,29 @@ struct DynamicDimensionLink {
  * a lie in the other direction, but at a ceiling this cannot quietly drift
  * past again.
  *
- * Reaching 64 bytes is a real refactor and worth doing: split the hot fields
- * (id, spoolOpIndex, span, standardDimensions) from the cold ones and put the
- * cold ones in a side table keyed by CellID, so a staging pass walks cache
- * lines instead of chasing pointers. Until somebody does that, the honest
- * thing is to say what the struct costs.
+ * **64 bytes was never reachable as specified.** `standardDimensions` alone
+ * is 192: twelve dimensions, two directions each, an eight-byte CellID per
+ * link. Getting to a cache line means 32-bit dense indices and moving all but
+ * the three or four hottest dimensions to a side table -- a different data
+ * model, not a tighter packing of this one.
+ *
+ * **It would not buy frame time either.** Measured on a 32,768-cell lattice
+ * at the default radius of 3, which visits about sixty cells: the BFS in
+ * stageVisibleCells costs 1.1 microseconds, or 0.013% of a 8.33 ms frame.
+ * Shrinking the cell to 52 bytes and swapping the std::set and std::queue for
+ * flat containers takes that to 0.2 microseconds. Both are noise. The
+ * traversal only becomes expensive at radii nothing asks for.
+ *
+ * What the size does cost is memory: 30 MiB of resident cells for that
+ * lattice against 1.6 MiB for a cache-line-sized one, before `ephemeralText`
+ * adds a copy of each cell's text on top. If large lattices matter, that is
+ * the reason to do this work -- and it is a different reason from the one
+ * this comment used to give.
+ *
+ * The thing actually worth watching in a frame is above: stageVisibleCells
+ * re-shapes every visited cell through HarfBuzz on every call, with no cache.
+ * That is 14.3 microseconds per cell, so 0.86 ms at sixty cells and 7.1 ms at
+ * five hundred -- the frame budget runs out there, not here.
  */
 struct CompactZZCell {
   CellID id{0};
