@@ -1,13 +1,19 @@
 /**
  * @file transcopyright_crypto.hpp
- * @brief Cryptographic engine for Transcopyright micropayments and Permascroll Holes.
+ * @brief Cryptographic engine for Transcopyright micropayments and Permascroll
+ * Holes.
  *
  * Implements:
- * 1. AEAD Encryption/Decryption: ChaCha20-Poly1305 / XChaCha20 authenticated encryption.
- * 2. Seekable Block Math: 64-byte block counter indexing for random-access span decryption.
- * 3. Hierarchical Key Derivation: HKDF-SHA256 derivation of SpanCEK from SegmentMasterKey.
- * 4. HPKE / X25519 Key Encapsulation: Wrap/unwrap CEKs for peer-to-peer delivery over BEP 10.
- * 5. Content Commitments: SHA-256 Merkle root computation over withheld primedia.
+ * 1. AEAD Encryption/Decryption: ChaCha20-Poly1305 / XChaCha20 authenticated
+ * encryption.
+ * 2. Seekable Block Math: 64-byte block counter indexing for random-access span
+ * decryption.
+ * 3. Hierarchical Key Derivation: HKDF-SHA256 derivation of SpanCEK from
+ * SegmentMasterKey.
+ * 4. HPKE / X25519 Key Encapsulation: Wrap/unwrap CEKs for peer-to-peer
+ * delivery over BEP 10.
+ * 5. Content Commitments: SHA-256 Merkle root computation over withheld
+ * primedia.
  */
 #ifndef XUDU_TRANSCOPYRIGHT_CRYPTO_HPP
 #define XUDU_TRANSCOPYRIGHT_CRYPTO_HPP
@@ -37,11 +43,13 @@ using Tag16   = std::array<std::uint8_t, kTagSize>;
 [[nodiscard]] Nonce24 generateNonce();
 
 /**
- * @brief Derive a span-specific Content Encryption Key (CEK) from a master segment key.
+ * @brief Derive a span-specific Content Encryption Key (CEK) from a master
+ * segment key.
  *
  * Uses HKDF-SHA256 with info = "xudu-transcopyright-span-v1:<start>:<length>".
  */
-[[nodiscard]] Key32 deriveSpanCek(const Key32 &masterKey, std::uint64_t spanStart,
+[[nodiscard]] Key32 deriveSpanCek(const Key32 &masterKey,
+                                  std::uint64_t spanStart,
                                   std::uint64_t spanLength);
 
 /**
@@ -69,10 +77,12 @@ decryptAead(std::string_view ciphertextWithTag, const Key32 &key,
             const Nonce24 &nonce, std::string_view ad = {});
 
 /**
- * @brief Direct seekable ChaCha20 keystream decryption for arbitrary span slices.
+ * @brief Direct seekable ChaCha20 keystream decryption for arbitrary span
+ * slices.
  *
- * Calculates starting 64-byte block counter from `reqOffset`, applies counter-mode
- * keystream, and extracts the requested subspan without decrypting the entire file.
+ * Calculates starting 64-byte block counter from `reqOffset`, applies
+ * counter-mode keystream, and extracts the requested subspan without decrypting
+ * the entire file.
  */
 [[nodiscard]] std::optional<std::string>
 decryptSeekableSpan(std::string_view ciphertext, std::uint64_t cipherBaseOffset,
@@ -80,7 +90,8 @@ decryptSeekableSpan(std::string_view ciphertext, std::uint64_t cipherBaseOffset,
                     std::uint64_t reqOffset, std::uint64_t reqLength);
 
 /**
- * @brief Compute a 256-bit cryptographic commitment (SHA-256) over withheld bytes.
+ * @brief Compute a 256-bit cryptographic commitment (SHA-256) over withheld
+ * bytes.
  */
 [[nodiscard]] std::array<std::uint8_t, 32>
 computeHoleCommitment(std::string_view bytes);
@@ -104,7 +115,8 @@ struct X25519KeyPair {
  * @brief Wrap a 32-byte Content Encryption Key (CEK) for an X25519 public key.
  *
  * Ephemeral-Static ECDH -> HKDF-SHA256 -> ChaCha20-Poly1305.
- * Output payload layout: [32-byte EphemeralPubKey][24-byte Nonce][32-byte EncryptedCEK][16-byte Tag] = 104 bytes.
+ * Output payload layout: [32-byte EphemeralPubKey][24-byte Nonce][32-byte
+ * EncryptedCEK][16-byte Tag] = 104 bytes.
  */
 [[nodiscard]] std::vector<std::uint8_t> wrapCek(const Key32 &cek,
                                                 const Key32 &recipientPubKey);

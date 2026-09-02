@@ -1,7 +1,7 @@
-#include <gtest/gtest.h>
 #include <chrono>
 #include <filesystem>
 #include <fstream>
+#include <gtest/gtest.h>
 
 #include <xudu/core/identity/identity_layout.hpp>
 #include <xudu/core/identity/identity_serialization.hpp>
@@ -40,9 +40,10 @@ TEST(TranscopyrightCryptoTest, derivesDeterministicSpanCek) {
 }
 
 TEST(TranscopyrightCryptoTest, aeadEncryptionRoundTripAndAuthentication) {
-  const auto key       = crypto::generateKey();
-  const auto nonce     = crypto::generateNonce();
-  const std::string pt = "Nelsonian Transcopyright: Instant micropayment settlement!";
+  const auto key   = crypto::generateKey();
+  const auto nonce = crypto::generateNonce();
+  const std::string pt =
+      "Nelsonian Transcopyright: Instant micropayment settlement!";
   const std::string ad = "xudu-transcopyright-ad-header";
 
   const auto ct = crypto::encryptAead(pt, key, nonce, ad);
@@ -68,9 +69,10 @@ TEST(TranscopyrightCryptoTest, aeadEncryptionRoundTripAndAuthentication) {
 }
 
 TEST(TranscopyrightCryptoTest, seekableSpanDecryption) {
-  const auto key       = crypto::generateKey();
-  const auto nonce     = crypto::generateNonce();
-  const std::string pt = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz";
+  const auto key   = crypto::generateKey();
+  const auto nonce = crypto::generateNonce();
+  const std::string pt =
+      "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz";
 
   const auto ct = crypto::encryptAead(pt, key, nonce);
 
@@ -84,7 +86,8 @@ TEST(TranscopyrightCryptoTest, holeCommitmentSha256) {
   const std::string secret = "Classified authorial draft paragraph.";
   const auto commitment1   = crypto::computeHoleCommitment(secret);
   const auto commitment2   = crypto::computeHoleCommitment(secret);
-  const auto diffCommit    = crypto::computeHoleCommitment("Different draft paragraph.");
+  const auto diffCommit =
+      crypto::computeHoleCommitment("Different draft paragraph.");
 
   EXPECT_EQ(commitment1, commitment2);
   EXPECT_NE(commitment1, diffCommit);
@@ -110,7 +113,8 @@ TEST(TranscopyrightCryptoTest, x25519KemWrapAndUnwrapCek) {
   // Tampered payload fails
   auto tampered = wrapped;
   tampered[50] ^= 0x01;
-  EXPECT_FALSE(crypto::unwrapCek(tampered, recipientPair.privateKey).has_value());
+  EXPECT_FALSE(
+      crypto::unwrapCek(tampered, recipientPair.privateKey).has_value());
 }
 
 TEST(TranscopyrightStorageTest, lmdbCekCachePutGetErase) {
@@ -160,28 +164,29 @@ TEST(TranscopyrightStorageTest, virtualMemoryArenaZeroPagesAndHotSwap) {
   EXPECT_EQ(arena.base()[size - 1], 0);
 
   // Remap / hot-swap decrypted plaintext over range
-  const std::string plaintext = "Decrypted Transcopyright Plaintext at 120 FPS!";
+  const std::string plaintext =
+      "Decrypted Transcopyright Plaintext at 120 FPS!";
   ASSERT_TRUE(arena.remapSpanFixed(arena.base() + 1024, plaintext.data(),
                                    plaintext.size()));
 
-  const std::string_view view{reinterpret_cast<const char *>(arena.base() + 1024),
-                              plaintext.size()};
+  const std::string_view view{
+      reinterpret_cast<const char *>(arena.base() + 1024), plaintext.size()};
   EXPECT_EQ(view, plaintext);
 
   arena.release();
 }
 
 TEST(TranscopyrightStorageTest, userPermascrollSealsHolesAsZeroFillOnWire) {
-  const auto tempDir =
-      std::filesystem::temp_directory_path() / "xudu_user_permascroll_holes_test";
+  const auto tempDir = std::filesystem::temp_directory_path() /
+                       "xudu_user_permascroll_holes_test";
   std::error_code ec;
   std::filesystem::remove_all(tempDir, ec);
 
   UserPermascroll scroll;
   // Append 100 bytes of author text
-  const std::string text =
-      "0123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789";
-  const auto span = scroll.append(text);
+  const std::string text = "012345678901234567890123456789012345678901234567890"
+                           "1234567890123456789012345678901234567890123456789";
+  const auto span        = scroll.append(text);
   EXPECT_EQ(span.length, 100U);
 
   // Withhold bytes [20, 50)
@@ -208,11 +213,12 @@ TEST(TranscopyrightBep10Test, bep10MessagesSerializationRoundTrip) {
   // 1. TcInvoiceQueryMsg
   identity::TcInvoiceQueryMsg q;
   q.keyId.bytes.fill(0x11);
-  q.requestedBytes = 500;
+  q.requestedBytes  = 500;
   const auto qBytes = identity::serialize(q);
-  const auto qDecoded = identity::decodeTcInvoiceQuery(
-      std::span<const std::uint8_t>{
-          reinterpret_cast<const std::uint8_t *>(qBytes.data()), qBytes.size()});
+  const auto qDecoded =
+      identity::decodeTcInvoiceQuery(std::span<const std::uint8_t>{
+          reinterpret_cast<const std::uint8_t *>(qBytes.data()),
+          qBytes.size()});
   ASSERT_TRUE(qDecoded.has_value());
   EXPECT_EQ(qDecoded->keyId, q.keyId);
   EXPECT_EQ(qDecoded->requestedBytes, 500U);
@@ -228,9 +234,9 @@ TEST(TranscopyrightBep10Test, bep10MessagesSerializationRoundTrip) {
   resp.authorPubKey.bytes.fill(0x33);
   resp.paymentChallenge.bytes.fill(0x44);
   resp.expiresTimestamp = 1700000000;
-  const auto respBytes = identity::serialize(resp);
-  const auto respDecoded = identity::decodeTcInvoiceResponse(
-      std::span<const std::uint8_t>{
+  const auto respBytes  = identity::serialize(resp);
+  const auto respDecoded =
+      identity::decodeTcInvoiceResponse(std::span<const std::uint8_t>{
           reinterpret_cast<const std::uint8_t *>(respBytes.data()),
           respBytes.size()});
   ASSERT_TRUE(respDecoded.has_value());
@@ -253,9 +259,9 @@ TEST(TranscopyrightBep10Test, bep10MessagesSerializationRoundTrip) {
   req.payerPubKey.bytes.fill(0x77);
   req.paymentProofSignature.bytes.fill(0x88);
   req.micropaymentTicket = "ticket:xu:signature_hex";
-  const auto reqBytes = identity::serialize(req);
-  const auto reqDecoded = identity::decodeTcSettleRequest(
-      std::span<const std::uint8_t>{
+  const auto reqBytes    = identity::serialize(req);
+  const auto reqDecoded =
+      identity::decodeTcSettleRequest(std::span<const std::uint8_t>{
           reinterpret_cast<const std::uint8_t *>(reqBytes.data()),
           reqBytes.size()});
   ASSERT_TRUE(reqDecoded.has_value());
@@ -270,8 +276,8 @@ TEST(TranscopyrightBep10Test, bep10MessagesSerializationRoundTrip) {
   del.wrappedCek = {0x01, 0x02, 0x03, 0x04, 0x05};
   del.authorSignature.bytes.fill(0xAA);
   const auto delBytes = identity::serialize(del);
-  const auto delDecoded = identity::decodeTcKeyDelivery(
-      std::span<const std::uint8_t>{
+  const auto delDecoded =
+      identity::decodeTcKeyDelivery(std::span<const std::uint8_t>{
           reinterpret_cast<const std::uint8_t *>(delBytes.data()),
           delBytes.size()});
   ASSERT_TRUE(delDecoded.has_value());
@@ -282,15 +288,16 @@ TEST(TranscopyrightBep10Test, bep10MessagesSerializationRoundTrip) {
   // 5. Extended Frame Framing
   const auto frameStr = identity::encodeExtendedMessage(
       identity::MessageType::TcInvoiceQuery, qBytes);
-  const auto frameDecoded = identity::decodeExtendedMessage(
-      std::span<const std::uint8_t>{
+  const auto frameDecoded =
+      identity::decodeExtendedMessage(std::span<const std::uint8_t>{
           reinterpret_cast<const std::uint8_t *>(frameStr.data()),
           frameStr.size()});
   ASSERT_TRUE(frameDecoded.has_value());
   EXPECT_EQ(frameDecoded->type, identity::MessageType::TcInvoiceQuery);
 }
 
-TEST(TranscopyrightResolverTest, resolverHandlesWithheldHoleAndTranscopyrightLock) {
+TEST(TranscopyrightResolverTest,
+     resolverHandlesWithheldHoleAndTranscopyrightLock) {
   const auto tempDir =
       std::filesystem::temp_directory_path() / "xudu_resolver_tc_test";
   std::error_code ec;
@@ -299,14 +306,13 @@ TEST(TranscopyrightResolverTest, resolverHandlesWithheldHoleAndTranscopyrightLoc
 
   // Prepare encrypted primedia and regular primedia
   const std::string plainSecret = "This is protected transcopyright primedia!";
-  const auto cek = crypto::generateKey();
+  const auto cek                = crypto::generateKey();
   std::array<std::uint8_t, 32> keyId{};
   keyId.fill(0x42);
   crypto::Nonce24 nonce{};
   std::memcpy(nonce.data(), keyId.data(), nonce.size());
 
-  const auto cipherBytes =
-      crypto::encryptAead(plainSecret, cek, nonce, {});
+  const auto cipherBytes = crypto::encryptAead(plainSecret, cek, nonce, {});
 
   // Write files for DirectoryContentSource
   const auto &cipherStr = cipherBytes;
@@ -346,7 +352,8 @@ TEST(TranscopyrightResolverTest, resolverHandlesWithheldHoleAndTranscopyrightLoc
 
   scroll.segments.push_back(seg);
 
-  // 1. Before unlock: Resolver::resolve returns TranscopyrightLocked with descriptor
+  // 1. Before unlock: Resolver::resolve returns TranscopyrightLocked with
+  // descriptor
   const auto resLocked =
       resolver.resolve(scroll, PrimediaSpan{1, 0, seg.length});
   EXPECT_EQ(resLocked.status, ResolutionStatus::TranscopyrightLocked);
@@ -362,7 +369,8 @@ TEST(TranscopyrightResolverTest, resolverHandlesWithheldHoleAndTranscopyrightLoc
   // 2. Unlock the span by caching the CEK
   ASSERT_TRUE(resolver.unlockTranscopyright(keyId, cek, 250, "XU"));
 
-  // 3. After unlock: Resolver::resolve returns VerifiedBytes with decrypted plaintext
+  // 3. After unlock: Resolver::resolve returns VerifiedBytes with decrypted
+  // plaintext
   const auto resUnlocked =
       resolver.resolve(scroll, PrimediaSpan{1, 0, seg.length});
   EXPECT_EQ(resUnlocked.status, ResolutionStatus::VerifiedBytes);
@@ -375,7 +383,8 @@ TEST(TranscopyrightResolverTest, resolverHandlesWithheldHoleAndTranscopyrightLoc
   std::filesystem::remove_all(tempDir, ec);
 }
 
-TEST(TranscopyrightEndToEndTest, FullLifecyclePublishingHolesAndTranscopyright) {
+TEST(TranscopyrightEndToEndTest,
+     FullLifecyclePublishingHolesAndTranscopyright) {
   std::error_code ec;
   const auto baseDir =
       std::filesystem::temp_directory_path() /
@@ -449,11 +458,12 @@ TEST(TranscopyrightEndToEndTest, FullLifecyclePublishingHolesAndTranscopyright) 
           .streamOffset = hole1Start,
           .path         = "spool",
           .kind         = SegmentKind::Withheld,
-          .holeRecord   = PublishedHoleRecord{
-              .at     = hole1Start,
-              .length = hole1Len,
-              .reason = HoleReason::Withheld,
-          },
+          .holeRecord =
+              PublishedHoleRecord{
+                  .at     = hole1Start,
+                  .length = hole1Len,
+                  .reason = HoleReason::Withheld,
+              },
       },
       ScrollSegment{
           .at           = hole2Start,
@@ -462,16 +472,18 @@ TEST(TranscopyrightEndToEndTest, FullLifecyclePublishingHolesAndTranscopyright) 
           .streamOffset = hole2Start,
           .path         = "spool",
           .kind         = SegmentKind::Withheld,
-          .holeRecord   = PublishedHoleRecord{
-              .at             = hole2Start,
-              .length         = hole2Len,
-              .reason         = HoleReason::TranscopyrightLock,
-              .transcopyright = TranscopyrightDescriptor{
-                  .priceAtomicUnits = 100,
-                  .keyId            = tcKeyId,
-                  .currencySymbol   = "XU",
+          .holeRecord =
+              PublishedHoleRecord{
+                  .at     = hole2Start,
+                  .length = hole2Len,
+                  .reason = HoleReason::TranscopyrightLock,
+                  .transcopyright =
+                      TranscopyrightDescriptor{
+                          .priceAtomicUnits = 100,
+                          .keyId            = tcKeyId,
+                          .currencySymbol   = "XU",
+                      },
               },
-          },
       },
       ScrollSegment{
           .at           = hole2Start + hole2Len,
@@ -519,20 +531,20 @@ TEST(TranscopyrightEndToEndTest, FullLifecyclePublishingHolesAndTranscopyright) 
   std::memcpy(query.keyId.bytes.data(), tcKeyId.data(), 32);
   query.requestedBytes = 58;
   const auto queryWire = identity::serialize(query);
-  const auto decodedQuery = identity::decodeTcInvoiceQuery(
-      std::span<const std::uint8_t>{
+  const auto decodedQuery =
+      identity::decodeTcInvoiceQuery(std::span<const std::uint8_t>{
           reinterpret_cast<const std::uint8_t *>(queryWire.data()),
           queryWire.size()});
   ASSERT_TRUE(decodedQuery.has_value());
 
   identity::TcInvoiceResponseMsg invoice;
-  invoice.keyId             = query.keyId;
-  invoice.priceAtomicUnits  = 100;
-  invoice.currencySymbol    = "XU";
-  invoice.expiresTimestamp  = 1800000000;
-  const auto invoiceWire    = identity::serialize(invoice);
-  const auto decodedInvoice = identity::decodeTcInvoiceResponse(
-      std::span<const std::uint8_t>{
+  invoice.keyId            = query.keyId;
+  invoice.priceAtomicUnits = 100;
+  invoice.currencySymbol   = "XU";
+  invoice.expiresTimestamp = 1800000000;
+  const auto invoiceWire   = identity::serialize(invoice);
+  const auto decodedInvoice =
+      identity::decodeTcInvoiceResponse(std::span<const std::uint8_t>{
           reinterpret_cast<const std::uint8_t *>(invoiceWire.data()),
           invoiceWire.size()});
   ASSERT_TRUE(decodedInvoice.has_value());
@@ -543,25 +555,25 @@ TEST(TranscopyrightEndToEndTest, FullLifecyclePublishingHolesAndTranscopyright) 
   settle.amountAtomicUnits  = 100;
   settle.micropaymentTicket = "ticket:xu:signature_hex";
   const auto settleWire     = identity::serialize(settle);
-  const auto decodedSettle  = identity::decodeTcSettleRequest(
-      std::span<const std::uint8_t>{
+  const auto decodedSettle =
+      identity::decodeTcSettleRequest(std::span<const std::uint8_t>{
           reinterpret_cast<const std::uint8_t *>(settleWire.data()),
           settleWire.size()});
   ASSERT_TRUE(decodedSettle.has_value());
 
   identity::TcKeyDeliveryMsg keyDelivery;
-  keyDelivery.keyId      = query.keyId;
-  keyDelivery.wrappedCek = {0x01, 0x02, 0x03};
+  keyDelivery.keyId          = query.keyId;
+  keyDelivery.wrappedCek     = {0x01, 0x02, 0x03};
   const auto keyDeliveryWire = identity::serialize(keyDelivery);
-  const auto decodedKey      = identity::decodeTcKeyDelivery(
-      std::span<const std::uint8_t>{
+  const auto decodedKey =
+      identity::decodeTcKeyDelivery(std::span<const std::uint8_t>{
           reinterpret_cast<const std::uint8_t *>(keyDeliveryWire.data()),
           keyDeliveryWire.size()});
   ASSERT_TRUE(decodedKey.has_value());
 
   // Reader caches CEK
-  ASSERT_TRUE(readerStore.contentResolver().unlockTranscopyright(
-      tcKeyId, tcCek, 100, "XU"));
+  ASSERT_TRUE(readerStore.contentResolver().unlockTranscopyright(tcKeyId, tcCek,
+                                                                 100, "XU"));
 
   // 4. Post-Unlock Resolution
   const auto res3Unlocked =

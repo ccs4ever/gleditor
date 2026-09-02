@@ -96,7 +96,8 @@ deriveXChaChaSubkeys(const Key32 &key, const Nonce24 &nonce) {
       std::span<const std::uint8_t>{key.data(), key.size()},
       std::span<const std::uint8_t>{nonce.data(), 16}, "xudu-xchacha20-subkey");
 
-  // Remaining 8 bytes form the 12-byte standard IETF ChaCha20 IV with zero prefix
+  // Remaining 8 bytes form the 12-byte standard IETF ChaCha20 IV with zero
+  // prefix
   std::array<std::uint8_t, 12> iv{};
   std::memcpy(iv.data() + 4, nonce.data() + 16, 8);
   return {subKey, iv};
@@ -192,8 +193,8 @@ std::string encryptAead(const std::string_view plaintext, const Key32 &key,
 }
 
 std::optional<std::string> decryptAead(const std::string_view ciphertextWithTag,
-                                      const Key32 &key, const Nonce24 &nonce,
-                                      const std::string_view ad) {
+                                       const Key32 &key, const Nonce24 &nonce,
+                                       const std::string_view ad) {
   if (ciphertextWithTag.size() < kTagSize) {
     return std::nullopt;
   }
@@ -253,10 +254,10 @@ std::optional<std::string> decryptAead(const std::string_view ciphertextWithTag,
   }
 
   int finalLen = 0;
-  if (EVP_DecryptFinal_ex(
-          ctx.get(),
-          reinterpret_cast<unsigned char *>(plaintext.data()) + outlen,
-          &finalLen) <= 0) {
+  if (EVP_DecryptFinal_ex(ctx.get(),
+                          reinterpret_cast<unsigned char *>(plaintext.data()) +
+                              outlen,
+                          &finalLen) <= 0) {
     // Poly1305 authentication failed
     return std::nullopt;
   }
@@ -289,7 +290,8 @@ decryptSeekableSpan(const std::string_view ciphertext,
   return fullDecrypted->substr(relOffset, reqLength);
 }
 
-std::array<std::uint8_t, 32> computeHoleCommitment(const std::string_view bytes) {
+std::array<std::uint8_t, 32>
+computeHoleCommitment(const std::string_view bytes) {
   std::array<std::uint8_t, 32> hash{};
   SHA256(reinterpret_cast<const unsigned char *>(bytes.data()), bytes.size(),
          hash.data());
@@ -329,7 +331,7 @@ X25519KeyPair X25519KeyPair::fromSeed(const Key32 &seed) {
   }
 
   X25519KeyPair pair;
-  pair.privateKey = seed;
+  pair.privateKey    = seed;
   std::size_t pubLen = pair.publicKey.size();
   if (EVP_PKEY_get_raw_public_key(pkey.get(), pair.publicKey.data(), &pubLen) <=
       0) {
@@ -350,8 +352,8 @@ std::vector<std::uint8_t> wrapCek(const Key32 &cek,
   // 2. Perform ECDH to compute shared secret
   ScopedPkey ephPriv{EVP_PKEY_new_raw_private_key(
       EVP_PKEY_X25519, nullptr, ephemeral.privateKey.data(), 32)};
-  ScopedPkey recipPub{EVP_PKEY_new_raw_public_key(
-      EVP_PKEY_X25519, nullptr, recipientPubKey.data(), 32)};
+  ScopedPkey recipPub{EVP_PKEY_new_raw_public_key(EVP_PKEY_X25519, nullptr,
+                                                  recipientPubKey.data(), 32)};
   if (!ephPriv || !recipPub) {
     throw std::runtime_error("Failed to load X25519 keys for KEM wrap");
   }
@@ -376,12 +378,13 @@ std::vector<std::uint8_t> wrapCek(const Key32 &cek,
       "xudu-tc-kem-wrap-v1");
 
   // 4. Encrypt CEK
-  const auto nonce = generateNonce();
+  const auto nonce               = generateNonce();
   const auto encryptedCekWithTag = encryptAead(
       std::string_view{reinterpret_cast<const char *>(cek.data()), cek.size()},
       wrapKey, nonce, "xudu-tc-cek-v1");
 
-  // Layout: [32B EphemeralPub][24B Nonce][32B EncryptedCEK + 16B Tag] = 104 bytes
+  // Layout: [32B EphemeralPub][24B Nonce][32B EncryptedCEK + 16B Tag] = 104
+  // bytes
   std::vector<std::uint8_t> payload;
   payload.reserve(32 + 24 + encryptedCekWithTag.size());
   payload.insert(payload.end(), ephemeral.publicKey.begin(),
@@ -393,8 +396,9 @@ std::vector<std::uint8_t> wrapCek(const Key32 &cek,
 }
 
 std::optional<Key32> unwrapCek(const std::vector<std::uint8_t> &wrapped,
-                              const Key32 &recipientPrivKey) {
-  // Wrapped structure: 32B ephPub + 24B nonce + 32B cipher + 16B tag = 104 bytes
+                               const Key32 &recipientPrivKey) {
+  // Wrapped structure: 32B ephPub + 24B nonce + 32B cipher + 16B tag = 104
+  // bytes
   if (wrapped.size() != 32 + 24 + 32 + 16) {
     return std::nullopt;
   }
