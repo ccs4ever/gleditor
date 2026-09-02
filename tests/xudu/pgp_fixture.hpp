@@ -99,7 +99,6 @@ WUlr2GlrbP53Q6tM+ZfdQqX6ZrqoZQ==
 -----END PGP SIGNATURE-----
 )PGP";
 
-
 /// A delegation of the all-0x11 device key to the author's master key,
 /// signed by GnuPG over exactly the bytes DeviceDelegation::signingBuffer()
 /// produces for it. Regenerate if that format ever changes -- the point of
@@ -115,6 +114,33 @@ ZtFlLB+bENgrmC5jvpvTDS28LSRaBJQLN4Ow+ajNhNcLyg6LOBQJ6cwJVCMbnSQg
 /+BsW0u6QthdxR4AvCUCj5Ayy0c1CHl7H6bEuk6ikgtaXZrxkDe6NwMrpCu4jkzG
 W5JfVvv8IozWssISTIhyDKq0qz+uDg==
 =FE/1
+-----END PGP SIGNATURE-----
+)PGP";
+
+/// A fixed Ed25519 device keypair, and the author's delegation of it.
+/// Fixed rather than minted per run because the delegation signature
+/// covers the device key, so a fresh key each time would need a fresh
+/// signature each time -- which would mean the test signing its own
+/// attestations, and proving nothing.
+inline constexpr std::string_view kTestDevicePublicKeyHex =
+    "535618716e531bea9985cb29e22e1ae86e3b78f61a4951e363b460d9ecad95c6";
+inline constexpr std::string_view kTestDeviceSecretKeyHex =
+    "d03cc92386a942ff91df41c6b7dc1c6a065357a4e9ddd7cd7677a78fd5c3d963"
+    "7b72208256c3a8b5a37035b5f2884872416bd4eb0b7f4873ddc50171b841a7e4";
+
+/// Signed over the delegation naming kTestDevicePublicKeyHex, device name
+/// "peer-under-test", issued 1700000000.
+inline constexpr std::string_view kDelegationForTestDeviceKey = R"PGP(
+-----BEGIN PGP SIGNATURE-----
+
+iQEzBAABCgAdFiEEIVGwSt+Z0KuYhszVq4PMLgodgPAFAmqYK/gACgkQq4PMLgod
+gPCyHgf+J8fbT0OVf6bUp0uf0YJfBf6wc6bfQBtrVVNb+ev9HyEF38A9QaVlh8fc
+l/EVWGxIpmSbv4GaRg4F70B5v7js1eIhpHz/9VtNymwjaDMKMbhXl5CK2gs00pux
+aEyWOXNPpNXMzCTb5BIjWfdEBGnbDuPBQhf6yqQF9FD5cMy9EZVuIGlTHdCdGze0
+OaM23mnW2ljykZjDEuJHX7uDkv2i/+aykEJHGaqeTDBfQPDn551NUsLDj92M/3v3
+4medFfa+To+AiQd9udT1TJe/6GI9s2wvKCekd4w4GKe2+Aby3r2OqpNO+KvbW0/n
+uAyesf9Z1vKqi3u/xC9ckuxQpRjVEQ==
+=xM1/
 -----END PGP SIGNATURE-----
 )PGP";
 

@@ -9,6 +9,10 @@
 #include <xudu/core/identity/identity_network_controller.hpp>
 #include <xudu/core/identity/identity_serialization.hpp>
 #include <xudu/core/identity/identity_validation.hpp>
+#include <xudu/core/swarm.hpp>
+#include <xudu/core/user_permascroll.hpp>
+
+#include "pgp_fixture.hpp"
 
 namespace xudu::identity {
 namespace {
@@ -376,14 +380,51 @@ challengedPlugin(IdentityNetworkController &controller) {
       InfoHash{}, &controller);
 
   const std::string handshake =
-      "d1:md21:xudu_identity_lookupi3e16:xudu_oracle_votei4eee";
+      "d1:md20:xudu_identity_lookupi3e16:xudu_oracle_votei4eee";
   libtorrent::bdecode_node node;
   libtorrent::error_code ec;
   libtorrent::bdecode(handshake.data(), handshake.data() + handshake.size(),
                       node, ec);
   EXPECT_FALSE(ec);
   plugin->on_extension_handshake(node);
+  EXPECT_TRUE(plugin->pendingChallengeNonce().has_value());
   return plugin;
+}
+
+/// The fixed device keypair the checked-in delegation attests to.
+xudu::MutableKeys testDeviceKeys() {
+  xudu::MutableKeys keys;
+  keys.publicKey =
+      xudu::PublicKey::fromHex(xudu::testing::kTestDevicePublicKeyHex);
+  keys.secretKey =
+      xudu::SecretKey::fromHex(xudu::testing::kTestDeviceSecretKeyHex);
+  return keys;
+}
+
+/// Teaches @p controller that the fixture author delegated to that device
+/// key -- the state a peer must reach before any of its signatures count.
+[[nodiscard]] bool
+trustFixtureDelegation(IdentityNetworkController &controller) {
+  xudu::DeviceDelegation cert;
+  cert.masterFingerprint =
+      *Fingerprint::fromString(xudu::testing::kAuthorFingerprint);
+  cert.devicePublicKey = testDeviceKeys().publicKey;
+  cert.deviceName      = "peer-under-test";
+  cert.issuedTimestamp = 1700000000;
+  cert.gpgSignatureArmored =
+      std::string(xudu::testing::kDelegationForTestDeviceKey);
+  return controller.trustDelegation(cert, xudu::testing::kAuthorPublicKey);
+}
+
+/// Signs a challenge nonce the way a well-behaved peer does.
+Signature64 signNonce(const Hash32 &nonce, const xudu::MutableKeys &keys) {
+  std::string buffer = "xudu-peer-auth-v1:";
+  buffer.append(reinterpret_cast<const char *>(nonce.bytes.data()),
+                nonce.bytes.size());
+  const auto sig = xudu::signMutableItem(buffer, keys);
+  Signature64 out;
+  std::memcpy(out.bytes.data(), sig.bytes.data(), out.bytes.size());
+  return out;
 }
 
 /// Hands @p payload to the plugin as an incoming BEP 10 extended message.
@@ -397,20 +438,45 @@ bool deliver(IdentityPeerPlugin &plugin, const MessageType type,
 
 } // namespace
 
-// A peer that answers the challenge with bytes that are not a signature over
-// anything must not end up authenticated. This asserted nothing before the
-// verification existed: the check was "the signature field is not all zeroes",
-// so any non-zero 64 bytes -- including the 0x55 filler the challenge handler
-// sent when no signing key was configured -- claimed any fingerprint at all.
-TEST(IdentityBEP10Test, RejectsAuthResponseWithAnUnverifiableSignature) {
+// The whole chain, end to end: a master OpenPGP key delegates to an Ed25519
+// device key, and that device key signs the nonce this connection chose.
+TEST(IdentityBEP10Test, AuthenticatesAPeerWithADelegatedDeviceKey) {
   IdentityNetworkController controller;
+  ASSERT_TRUE(trustFixtureDelegation(controller));
+
   auto plugin = challengedPlugin(controller);
   ASSERT_FALSE(plugin->isAuthenticated());
 
   PeerChallengeResponse resp;
-  resp.nonce.bytes.fill(0xAA); // matches the challenge the plugin issued
+  resp.nonce = *plugin->pendingChallengeNonce();
   resp.claimedIdentity =
-      *Fingerprint::fromString("DEADBEEFDEADBEEFDEADBEEFDEADBEEFDEADBEEF");
+      *Fingerprint::fromString(xudu::testing::kAuthorFingerprint);
+  resp.devicePublicKey = testDeviceKeys().publicKey.bytes;
+  resp.signature       = signNonce(resp.nonce, testDeviceKeys());
+
+  deliver(*plugin, MessageType::PeerAuthResponse, serialize(resp));
+
+  EXPECT_TRUE(plugin->isAuthenticated());
+  ASSERT_TRUE(plugin->authenticatedIdentity().has_value());
+  EXPECT_THAT(plugin->authenticatedIdentity()->toString(),
+              Eq(std::string(xudu::testing::kAuthorFingerprint)));
+}
+
+// The bypass, in the form it actually shipped. The check was "the signature
+// field is not all zeroes", so any non-zero 64 bytes claimed any fingerprint
+// -- including the 0x55 filler the challenge handler itself sent when no
+// signing key was configured, which was the default path.
+TEST(IdentityBEP10Test, RejectsAuthResponseWithAnUnverifiableSignature) {
+  IdentityNetworkController controller;
+  ASSERT_TRUE(trustFixtureDelegation(controller));
+
+  auto plugin = challengedPlugin(controller);
+
+  PeerChallengeResponse resp;
+  resp.nonce = *plugin->pendingChallengeNonce();
+  resp.claimedIdentity =
+      *Fingerprint::fromString(xudu::testing::kAuthorFingerprint);
+  resp.devicePublicKey = testDeviceKeys().publicKey.bytes;
   resp.signature.bytes.fill(0x55); // not a signature, merely not zero
 
   deliver(*plugin, MessageType::PeerAuthResponse, serialize(resp));
@@ -420,7 +486,84 @@ TEST(IdentityBEP10Test, RejectsAuthResponseWithAnUnverifiableSignature) {
   EXPECT_FALSE(plugin->authenticatedIdentity().has_value());
 }
 
-// Votes feed oracle consensus, so a peer that has not authenticated must not
+// A peer that signs correctly, but with a key its claimed identity never
+// delegated to. The signature verifies against the key it names -- which is
+// why the key it names cannot be the one that decides.
+TEST(IdentityBEP10Test, RejectsAValidSignatureByAnUndelegatedKey) {
+  IdentityNetworkController controller;
+  ASSERT_TRUE(trustFixtureDelegation(controller));
+
+  auto plugin        = challengedPlugin(controller);
+  const auto ownKeys = xudu::createMutableKeys();
+
+  PeerChallengeResponse resp;
+  resp.nonce = *plugin->pendingChallengeNonce();
+  resp.claimedIdentity =
+      *Fingerprint::fromString(xudu::testing::kAuthorFingerprint);
+  resp.devicePublicKey = ownKeys.publicKey.bytes;
+  resp.signature       = signNonce(resp.nonce, ownKeys);
+
+  deliver(*plugin, MessageType::PeerAuthResponse, serialize(resp));
+
+  EXPECT_FALSE(plugin->isAuthenticated())
+      << "a peer authenticated as an identity using a key of its own";
+}
+
+// No delegation on file means the claim cannot be checked, and an unverifiable
+// claim is refused rather than believed.
+TEST(IdentityBEP10Test, RejectsAnIdentityWithNoDelegationOnFile) {
+  IdentityNetworkController controller; // nothing trusted
+  auto plugin = challengedPlugin(controller);
+
+  PeerChallengeResponse resp;
+  resp.nonce = *plugin->pendingChallengeNonce();
+  resp.claimedIdentity =
+      *Fingerprint::fromString(xudu::testing::kAuthorFingerprint);
+  resp.devicePublicKey = testDeviceKeys().publicKey.bytes;
+  resp.signature       = signNonce(resp.nonce, testDeviceKeys());
+
+  deliver(*plugin, MessageType::PeerAuthResponse, serialize(resp));
+
+  EXPECT_FALSE(plugin->isAuthenticated());
+}
+
+// A correct signature over the wrong nonce is a replay of an older exchange.
+TEST(IdentityBEP10Test, RejectsASignatureOverAStaleNonce) {
+  IdentityNetworkController controller;
+  ASSERT_TRUE(trustFixtureDelegation(controller));
+
+  auto plugin = challengedPlugin(controller);
+
+  Hash32 otherNonce;
+  otherNonce.bytes.fill(0xAA); // the old hardcoded challenge value
+
+  PeerChallengeResponse resp;
+  resp.nonce = otherNonce;
+  resp.claimedIdentity =
+      *Fingerprint::fromString(xudu::testing::kAuthorFingerprint);
+  resp.devicePublicKey = testDeviceKeys().publicKey.bytes;
+  resp.signature       = signNonce(otherNonce, testDeviceKeys());
+
+  deliver(*plugin, MessageType::PeerAuthResponse, serialize(resp));
+
+  EXPECT_FALSE(plugin->isAuthenticated());
+}
+
+// Challenges must be unpredictable. A fixed nonce -- and this was 0xAA
+// repeated -- means one captured response authenticates forever, from anyone,
+// no matter how sound the signature check over it is.
+TEST(IdentityBEP10Test, ChallengeNoncesDifferPerConnection) {
+  IdentityNetworkController controller;
+  const auto first  = challengedPlugin(controller)->pendingChallengeNonce();
+  const auto second = challengedPlugin(controller)->pendingChallengeNonce();
+
+  ASSERT_TRUE(first.has_value());
+  ASSERT_TRUE(second.has_value());
+  EXPECT_FALSE(first->isZero());
+  EXPECT_THAT(*first, Ne(*second));
+}
+
+// Votes decide oracle consensus, so a peer that has not authenticated must not
 // be able to put one in. The handler used to decode and forward without
 // consulting isAuthenticated_ at all.
 TEST(IdentityBEP10Test, IgnoresVotesFromUnauthenticatedPeers) {
@@ -440,6 +583,36 @@ TEST(IdentityBEP10Test, IgnoresVotesFromUnauthenticatedPeers) {
 
   EXPECT_THAT(controller.pipeline().size(), Eq(0U))
       << "an unauthenticated peer got a vote into the ledger";
+}
+
+// Having authenticated as one identity does not license voting as another.
+TEST(IdentityBEP10Test, RejectsAVoteCastUnderAnotherIdentity) {
+  IdentityNetworkController controller;
+  ASSERT_TRUE(trustFixtureDelegation(controller));
+
+  auto plugin = challengedPlugin(controller);
+
+  PeerChallengeResponse resp;
+  resp.nonce = *plugin->pendingChallengeNonce();
+  resp.claimedIdentity =
+      *Fingerprint::fromString(xudu::testing::kAuthorFingerprint);
+  resp.devicePublicKey = testDeviceKeys().publicKey.bytes;
+  resp.signature       = signNonce(resp.nonce, testDeviceKeys());
+  deliver(*plugin, MessageType::PeerAuthResponse, serialize(resp));
+  ASSERT_TRUE(plugin->isAuthenticated());
+
+  VoteEntry vote;
+  vote.voterFingerprint =
+      *Fingerprint::fromString("1111222233334444555566667777888899990001");
+  vote.candidateOracle =
+      *Fingerprint::fromString("1111222233334444555566667777888899990002");
+  vote.timestamp = 1700000000;
+  vote.signature.bytes.fill(0x3C);
+
+  deliver(*plugin, MessageType::OracleVoteBroadcast, serialize(vote));
+
+  EXPECT_THAT(controller.pipeline().size(), Eq(0U))
+      << "an authenticated peer voted as somebody else";
 }
 
 // ============================================================================

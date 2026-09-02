@@ -9,6 +9,7 @@
 #include <cstring>
 #include <libtorrent/error_code.hpp>
 #include <libtorrent/operations.hpp>
+#include <openssl/rand.h>
 
 namespace xudu::identity {
 
@@ -27,6 +28,33 @@ std::uint64_t unixNow() {
       std::chrono::duration_cast<std::chrono::seconds>(
           std::chrono::system_clock::now().time_since_epoch())
           .count());
+}
+
+/// The bytes a challenge response signs. Tagged so that a signature made for
+/// one purpose cannot be replayed as one made for another: a bare 32-byte
+/// nonce is the same shape as plenty of other things this program signs.
+std::string challengeSigningBuffer(const Hash32 &nonce) {
+  std::string out = "xudu-peer-auth-v1:";
+  out.append(reinterpret_cast<const char *>(nonce.bytes.data()),
+             nonce.bytes.size());
+  return out;
+}
+
+Signature64 signChallengeNonce(const Hash32 &nonce, const MutableKeys &keys) {
+  const auto sig = signMutableItem(challengeSigningBuffer(nonce), keys);
+  Signature64 out;
+  std::memcpy(out.bytes.data(), sig.bytes.data(), out.bytes.size());
+  return out;
+}
+
+bool verifyChallengeSignature(const Hash32 &nonce,
+                              const std::array<std::uint8_t, 32> &devicePubKey,
+                              const Signature64 &sig) {
+  PublicKey key;
+  key.bytes = devicePubKey;
+  Signature wire;
+  std::memcpy(wire.bytes.data(), sig.bytes.data(), wire.bytes.size());
+  return verifyMutableItem(challengeSigningBuffer(nonce), wire, key);
 }
 
 } // namespace
@@ -86,9 +114,16 @@ bool IdentityPeerPlugin::on_extension_handshake(
     remoteTranscopyrightId_ = static_cast<int>(tcNode.int_value());
   }
 
-  // Issue peer authentication challenge
+  // Issue peer authentication challenge. The nonce has to be unpredictable:
+  // a fixed pattern -- and this was 0xAA repeated -- means one captured
+  // response is a valid response forever, from anybody, however sound the
+  // signature check over it is.
   Hash32 nonce;
-  nonce.bytes.fill(0xAA); // Initial deterministic nonce pattern
+  if (RAND_bytes(nonce.bytes.data(), static_cast<int>(nonce.bytes.size())) !=
+      1) {
+    isolateAndDisconnect("No entropy for an authentication challenge");
+    return false;
+  }
   pendingChallengeNonce_ = nonce;
   sendAuthChallenge(nonce);
 
@@ -141,16 +176,19 @@ bool IdentityPeerPlugin::on_extended(int length, int /*msg*/,
 
   case MessageType::PeerAuthChallenge: {
     const auto chRes = decodePeerChallenge(frame.payload);
-    if (chRes && controller_ && controller_->options().localFingerprint) {
-      Signature64 sig;
-      if (controller_->options().localSigningKey) {
-        sig = *controller_->options().localSigningKey;
-      } else {
-        sig.bytes.fill(0x55);
-      }
-      sendAuthResponse(chRes->nonce, *controller_->options().localFingerprint,
-                       sig);
+    if (!chRes || !controller_) {
+      return true;
     }
+    const auto &opts = controller_->options();
+    // No identity or no key means no answer. There used to be a fallback that
+    // sent 0x55 repeated, which the far end accepted, so a node with nothing
+    // configured authenticated as whatever fingerprint it named.
+    if (!opts.localFingerprint || !opts.localDeviceKeys) {
+      return true;
+    }
+    sendAuthResponse(chRes->nonce, *opts.localFingerprint,
+                     opts.localDeviceKeys->publicKey.bytes,
+                     signChallengeNonce(chRes->nonce, *opts.localDeviceKeys));
     return true;
   }
 
@@ -171,6 +209,32 @@ bool IdentityPeerPlugin::on_extended(int length, int /*msg*/,
       return false;
     }
 
+    // The device key in the response is the peer's own choice, so it settles
+    // nothing until the claimed identity is known to have delegated to it.
+    // Absent a verified delegation there is no way to tell this peer from one
+    // impersonating it, so the answer is no.
+    if (!controller_) {
+      isolateAndDisconnect("No controller to check the delegation against");
+      return false;
+    }
+    const auto delegated = controller_->deviceKeyFor(respRes->claimedIdentity);
+    if (!delegated) {
+      isolateAndDisconnect("No verified delegation for the claimed identity");
+      return false;
+    }
+    if (*delegated != respRes->devicePublicKey) {
+      isolateAndDisconnect("Device key is not the one this identity delegated");
+      return false;
+    }
+
+    // Only now does the signature mean anything: it is over the nonce we
+    // chose this connection, by the key that identity vouched for.
+    if (!verifyChallengeSignature(respRes->nonce, respRes->devicePublicKey,
+                                  respRes->signature)) {
+      isolateAndDisconnect("Challenge signature does not verify");
+      return false;
+    }
+
     isAuthenticated_       = true;
     authenticatedIdentity_ = respRes->claimedIdentity;
     return true;
@@ -182,8 +246,25 @@ bool IdentityPeerPlugin::on_extended(int length, int /*msg*/,
   }
 
   case MessageType::OracleVoteBroadcast: {
+    // Votes decide oracle consensus, so an unauthenticated peer must not be
+    // able to put one in. This used to decode and forward without consulting
+    // isAuthenticated_ at all.
+    if (!isAuthenticated_) {
+      isolateAndDisconnect("Vote from a peer that has not authenticated");
+      return false;
+    }
     const auto voteRes = decodeVoteEntry(frame.payload);
-    if (voteRes && controller_) {
+    if (!voteRes) {
+      isolateAndDisconnect("Malformed vote payload");
+      return false;
+    }
+    // A peer may only vote as itself.
+    if (!authenticatedIdentity_ ||
+        voteRes->voterFingerprint != *authenticatedIdentity_) {
+      isolateAndDisconnect("Vote cast under another peer's identity");
+      return false;
+    }
+    if (controller_) {
       controller_->handleIncomingVote(*voteRes);
     }
     return true;
@@ -249,7 +330,18 @@ bool IdentityPeerPlugin::on_extended(int length, int /*msg*/,
 
 bool IdentityPeerPlugin::sendExtendedRaw(int remoteExtId,
                                          std::string_view payload) {
-  if (remoteExtId <= 0) {
+  // A BEP 10 message id is one byte on the wire. The peer chooses this value
+  // in its handshake, so a value that does not fit is a peer's error and not
+  // ours -- but truncating it silently addresses the message to whichever
+  // extension the low byte happens to name.
+  if (remoteExtId <= 0 || remoteExtId > 0xFF) {
+    return false;
+  }
+  // peer_connection_handle holds a weak reference, and a connection can be
+  // torn down between a plugin being handed work and the plugin doing it.
+  // send_buffer does not check, so this has to: the failure is a null
+  // dereference inside libtorrent, which no catch here would have caught.
+  if (!pc_.native_handle()) {
     return false;
   }
   const auto payloadLen = static_cast<std::uint32_t>(1 + 1 + payload.size());
@@ -281,12 +373,14 @@ bool IdentityPeerPlugin::sendAuthChallenge(const Hash32 &nonce) {
   return sendExtendedRaw(remoteIdentityLookupId_, frame);
 }
 
-bool IdentityPeerPlugin::sendAuthResponse(const Hash32 &nonce,
-                                          const Fingerprint &claimed,
-                                          const Signature64 &sig) {
+bool IdentityPeerPlugin::sendAuthResponse(
+    const Hash32 &nonce, const Fingerprint &claimed,
+    const std::array<std::uint8_t, 32> &devicePublicKey,
+    const Signature64 &sig) {
   PeerChallengeResponse resp;
   resp.nonce                 = nonce;
   resp.claimedIdentity       = claimed;
+  resp.devicePublicKey       = devicePublicKey;
   resp.signature             = sig;
   const std::string bencoded = serialize(resp);
   const std::string frame =
@@ -357,8 +451,21 @@ bool IdentityPeerPlugin::sendTcKeyDelivery(const TcKeyDeliveryMsg &delivery) {
 
 void IdentityPeerPlugin::isolateAndDisconnect(std::string_view reason) {
   isIsolated_ = true;
-  if (controller_) {
-    controller_->quarantinePeer(reason);
+  // Same weak reference as in sendExtendedRaw: nothing below may touch the
+  // connection once it has gone, and disconnect() does not check either.
+  const bool live = static_cast<bool>(pc_.native_handle());
+  if (controller_ && live) {
+    // Keyed on the peer, not on the reason. This passed `reason` -- so the
+    // quarantine list filled up with strings like "Challenge nonce mismatch"
+    // and isPeerQuarantined(), asked about an address, never matched one.
+    try {
+      controller_->quarantinePeer(pc_.remote().address().to_string() + ":" +
+                                  std::to_string(pc_.remote().port()));
+    } catch (...) {
+    }
+  }
+  if (!live) {
+    return;
   }
   try {
     const auto ec = boost::system::errc::make_error_code(
@@ -459,6 +566,28 @@ std::expected<void, ValidationError> IdentityNetworkController::onPiecePassed(
 
 void IdentityNetworkController::handleIncomingVote(const VoteEntry &vote) {
   std::ignore = pipeline_.appendVote(vote);
+}
+
+bool IdentityNetworkController::trustDelegation(
+    const DeviceDelegation &delegation,
+    const std::string_view masterPublicKeyArmored) {
+  if (!delegation.verify(masterPublicKeyArmored)) {
+    return false;
+  }
+  std::scoped_lock lock(delegationMutex_);
+  delegatedDeviceKeys_.insert_or_assign(delegation.masterFingerprint,
+                                        delegation.devicePublicKey.bytes);
+  return true;
+}
+
+std::optional<std::array<std::uint8_t, 32>>
+IdentityNetworkController::deviceKeyFor(const Fingerprint &fingerprint) const {
+  std::scoped_lock lock(delegationMutex_);
+  const auto found = delegatedDeviceKeys_.find(fingerprint);
+  if (found == delegatedDeviceKeys_.end()) {
+    return std::nullopt;
+  }
+  return found->second;
 }
 
 void IdentityNetworkController::quarantinePeer(std::string_view peerAddress) {

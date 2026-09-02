@@ -57,9 +57,9 @@ using ScopedIterator =
 ScopedInput inputFrom(const std::string_view bytes) {
   rnp_input_t raw = nullptr;
   // Copies, because RNP outlives the string_view in every caller here.
-  if (rnp_input_from_memory(&raw,
-                            reinterpret_cast<const std::uint8_t *>(bytes.data()),
-                            bytes.size(), true) != RNP_SUCCESS) {
+  if (rnp_input_from_memory(
+          &raw, reinterpret_cast<const std::uint8_t *>(bytes.data()),
+          bytes.size(), true) != RNP_SUCCESS) {
     return nullptr;
   }
   return ScopedInput{raw};

@@ -328,6 +328,16 @@ decodePeerChallengeResponse(const libtorrent::bdecode_node &node) {
   if (!claimedRes) return std::unexpected(claimedRes.error());
   resp.claimedIdentity = *claimedRes;
 
+  const auto devKeyNode = node.dict_find_string("devkey");
+  if (!devKeyNode) {
+    return std::unexpected(SerializationError::MissingField);
+  }
+  const auto devKeyStr = devKeyNode.string_value();
+  if (devKeyStr.size() != 32) {
+    return std::unexpected(SerializationError::InvalidFieldLength);
+  }
+  std::memcpy(resp.devicePublicKey.data(), devKeyStr.data(), 32);
+
   const auto sigRes = extractSignature64(node, "sig");
   if (!sigRes) return std::unexpected(sigRes.error());
   resp.signature = *sigRes;
@@ -679,7 +689,9 @@ libtorrent::entry encodeToEntry(const PeerChallengeResponse &resp) {
   e["nonce"] =
       std::string(reinterpret_cast<const char *>(resp.nonce.bytes.data()), 32);
   e["claimed"] = resp.claimedIdentity.toString();
-  e["sig"]     = std::string(
+  e["devkey"]  = std::string(
+      reinterpret_cast<const char *>(resp.devicePublicKey.data()), 32);
+  e["sig"] = std::string(
       reinterpret_cast<const char *>(resp.signature.bytes.data()), 64);
   return e;
 }

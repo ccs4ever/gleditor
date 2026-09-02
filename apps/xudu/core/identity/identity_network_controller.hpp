@@ -14,6 +14,7 @@
 #include <libtorrent/session.hpp>
 #include <libtorrent/span.hpp>
 #include <libtorrent/torrent_handle.hpp>
+#include <map>
 #include <memory>
 #include <mutex>
 #include <optional>
@@ -24,6 +25,7 @@
 #include <vector>
 
 #include "../torrent.hpp"
+#include "../user_permascroll.hpp"
 #include "identity_layout.hpp"
 #include "identity_serialization.hpp"
 #include "identity_validation.hpp"
@@ -69,6 +71,7 @@ public:
   // Connection gate & Challenge-Response
   bool sendAuthChallenge(const Hash32 &nonce);
   bool sendAuthResponse(const Hash32 &nonce, const Fingerprint &claimed,
+                        const std::array<std::uint8_t, 32> &devicePublicKey,
                         const Signature64 &sig);
   bool sendIdentityQuery(const Fingerprint &fp);
   bool sendIdentityResponse(const IdentityEntry &entry,
@@ -92,6 +95,14 @@ public:
   }
   [[nodiscard]] const InfoHash &swarmHash() const noexcept {
     return swarmHash_;
+  }
+
+  /// The challenge this connection is waiting on an answer to. Public because
+  /// it is sent to the peer the moment it is generated -- it is unpredictable,
+  /// not secret -- and because a test cannot otherwise answer a random one.
+  [[nodiscard]] const std::optional<Hash32> &
+  pendingChallengeNonce() const noexcept {
+    return pendingChallengeNonce_;
   }
 
 private:
@@ -151,7 +162,11 @@ class IdentityNetworkController {
 public:
   struct Options {
     std::optional<Fingerprint> localFingerprint;
-    std::optional<Signature64> localSigningKey;
+    /// The Ed25519 keypair this node signs challenges with. Was an
+    /// std::optional<Signature64> -- a signature type holding a key -- which
+    /// could not sign anything, so the code that "signed" a challenge sent
+    /// the field verbatim and the same bytes answered every challenge.
+    std::optional<MutableKeys> localDeviceKeys;
     bool isOracleNode{false};
   };
 
@@ -175,6 +190,32 @@ public:
 
   /// Options getter.
   [[nodiscard]] const Options &options() const noexcept { return options_; }
+
+  /**
+   * @brief Record that @p masterFingerprint has delegated signing authority
+   *        to a device key, having checked that it really did.
+   *
+   * @param delegation The attestation, as published by the master.
+   * @param masterPublicKeyArmored The master's OpenPGP public key.
+   * @return false, changing nothing, when the delegation does not verify.
+   *
+   * This is the only way a device key becomes acceptable for peer
+   * authentication. Everything the peer wire trusts descends from a call to
+   * this that returned true.
+   */
+  bool trustDelegation(const DeviceDelegation &delegation,
+                       std::string_view masterPublicKeyArmored);
+
+  /**
+   * @brief The device key @p fingerprint is known to have delegated to, if
+   *        any.
+   *
+   * std::nullopt means no verified delegation has been seen, which is a
+   * refusal rather than a gap: a peer claiming an identity we have no
+   * delegation for cannot be distinguished from one impersonating it.
+   */
+  [[nodiscard]] std::optional<std::array<std::uint8_t, 32>>
+  deviceKeyFor(const Fingerprint &fingerprint) const;
 
   /**
    * @brief Intercepts piece_finished_alert for identities.torrent and
@@ -205,6 +246,9 @@ private:
   HashcashEngine hashcashEngine_;
   std::mutex quarantineMutex_;
   std::unordered_set<std::string> quarantinedPeers_;
+
+  mutable std::mutex delegationMutex_;
+  std::map<Fingerprint, std::array<std::uint8_t, 32>> delegatedDeviceKeys_;
 };
 
 } // namespace xudu::identity

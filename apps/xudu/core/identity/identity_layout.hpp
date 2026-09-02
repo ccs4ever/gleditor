@@ -372,6 +372,11 @@ struct PeerChallenge {
 struct PeerChallengeResponse {
   Hash32 nonce{};
   Fingerprint claimedIdentity{};
+  /// The Ed25519 device key the signature is by. Carried so the verifier
+  /// knows which key to check against -- but on its own it proves nothing,
+  /// since a peer picks it freely. What decides the question is whether the
+  /// claimed identity ever delegated to this key.
+  std::array<std::uint8_t, 32> devicePublicKey{};
   Signature64 signature{};
 
   [[nodiscard]] bool isValid() const noexcept {

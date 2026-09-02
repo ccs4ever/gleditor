@@ -61,8 +61,8 @@ TEST(PgpVerifyTest, AcceptsAGenuineDetachedSignature) {
 }
 
 TEST(PgpVerifyTest, RejectsASignatureOverDifferentBytes) {
-  EXPECT_FALSE(verifyDetached(kAuthorPublicKey, "device-delegation-canonical-byteS",
-                              kAuthorSignature));
+  EXPECT_FALSE(verifyDetached(
+      kAuthorPublicKey, "device-delegation-canonical-byteS", kAuthorSignature));
   EXPECT_FALSE(verifyDetached(kAuthorPublicKey, "", kAuthorSignature));
 }
 
