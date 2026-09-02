@@ -133,6 +133,25 @@ PrimediaSpan UserPermascroll::append(const std::string_view text) {
   return spool_.append(text);
 }
 
+std::optional<PrimediaSpan>
+UserPermascroll::findExistingSpan(const std::string_view text,
+                                  const std::size_t minMatchLength) const {
+  if (text.size() < minMatchLength) {
+    return std::nullopt;
+  }
+  std::lock_guard lock(appendMutex_);
+  const auto all = spool_.bytes();
+  if (all.size() < text.size()) {
+    return std::nullopt;
+  }
+  const auto pos = all.find(text);
+  if (pos == std::string_view::npos) {
+    return std::nullopt;
+  }
+  return PrimediaSpan{localScroll, static_cast<std::uint64_t>(pos),
+                      static_cast<std::uint64_t>(text.size())};
+}
+
 std::string UserPermascroll::read(const PrimediaSpan &span) const {
   std::lock_guard lock(appendMutex_);
   return spool_.read(span);

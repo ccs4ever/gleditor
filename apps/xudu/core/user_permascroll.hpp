@@ -80,6 +80,17 @@ public:
    */
   PrimediaSpan append(std::string_view text);
 
+  /**
+   * @brief Search for an exact matching span in the author's permascroll.
+   * @param text The candidate text to find.
+   * @param minMatchLength Minimum length in bytes to consider for reuse
+   * (default 24).
+   * @return The canonical PrimediaSpan if found, or std::nullopt.
+   */
+  [[nodiscard]] std::optional<PrimediaSpan>
+  findExistingSpan(std::string_view text,
+                   std::size_t minMatchLength = 24) const;
+
   /// Read a span of local primedia as a string copy.
   [[nodiscard]] std::string read(const PrimediaSpan &span) const override;
 

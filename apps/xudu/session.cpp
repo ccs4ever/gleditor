@@ -35,6 +35,7 @@ Session::Session(std::string aStorePath) {
 }
 
 Session::~Session() {
+  flushUncommitted();
   for (const auto &entry : stores) {
     if (entry.isTemporary && !entry.path.empty()) {
       std::error_code ec;
@@ -281,6 +282,7 @@ const MutableKeys &Session::identity() {
 std::string Session::publishDocument(const MicroversionId &version,
                                      const PublishRequest &request,
                                      const std::size_t storeIndex) {
+  flushUncommitted();
   auto &st         = store(storeIndex);
   const auto &mine = identity();
   const auto into  = publishedDir(storeIndex);
@@ -395,6 +397,7 @@ MicroversionId Session::readPublication(const std::string &aPath) {
 }
 
 MicroversionId Session::addLink(const std::uint32_t docIndex, Link link) {
+  flushUncommitted(docIndex);
   if (docIndex >= open.size()) {
     return MicroversionId{};
   }
@@ -483,6 +486,7 @@ std::size_t Session::loadAuxiliaryStore(const std::string &aPath) {
 }
 
 void Session::save(const std::size_t index) const {
+  const_cast<Session *>(this)->flushUncommitted();
   if (index < stores.size() && stores[index].store &&
       !stores[index].path.empty()) {
     stores[index].store->save(stores[index].path);
@@ -490,12 +494,16 @@ void Session::save(const std::size_t index) const {
 }
 
 void Session::saveAll() const {
+  const_cast<Session *>(this)->flushUncommitted();
   for (std::size_t i = 0; i < stores.size(); ++i) {
     save(i);
   }
 }
 
 MicroversionId Session::versionOf(const std::uint32_t docIndex) const {
+  if (docIndex < open.size() && !open[docIndex].uncommittedLog.empty()) {
+    const_cast<Session *>(this)->flushUncommitted(docIndex);
+  }
   return docIndex < open.size() ? open[docIndex].version : MicroversionId{};
 }
 
@@ -532,7 +540,7 @@ Session::versionShowing(const std::vector<PrimediaSpan> &ends,
 void Session::viewOpened(const MicroversionId &version,
                          const std::size_t storeIndex) {
   const auto &st = store(storeIndex);
-  open.push_back(OpenView{version, storeIndex, st.rebuild(version), {}, 0});
+  open.push_back(OpenView{version, storeIndex, st.rebuild(version), {}, 0, {}});
   invalidate();
 }
 
@@ -594,6 +602,7 @@ Session::historyOf(const std::uint32_t docIndex) const {
 
 void Session::scrubToVersion(const std::uint32_t docIndex,
                              const MicroversionId &version, Doc &doc) {
+  flushUncommitted(docIndex);
   if (docIndex >= open.size()) {
     return;
   }
@@ -605,6 +614,7 @@ void Session::scrubToVersion(const std::uint32_t docIndex,
 
 bool Session::scrubBackward(const std::uint32_t docIndex, Doc &doc,
                             const std::size_t steps) {
+  flushUncommitted(docIndex);
   if (docIndex >= open.size()) {
     return false;
   }
@@ -625,6 +635,7 @@ bool Session::scrubBackward(const std::uint32_t docIndex, Doc &doc,
 
 bool Session::scrubForward(const std::uint32_t docIndex, Doc &doc,
                            const std::size_t steps) {
+  flushUncommitted(docIndex);
   if (docIndex >= open.size()) {
     return false;
   }
@@ -646,19 +657,86 @@ bool Session::scrubForward(const std::uint32_t docIndex, Doc &doc,
   return true;
 }
 
+void Session::flushUncommitted(const std::optional<std::uint32_t> docIndex) {
+  const auto flushOne = [this](const std::size_t which) {
+    if (which >= open.size()) {
+      return;
+    }
+    auto &view = open[which];
+    if (view.uncommittedLog.empty()) {
+      return;
+    }
+
+    const auto compacted = view.uncommittedLog.compact();
+    view.uncommittedLog.clear();
+    if (compacted.empty()) {
+      return;
+    }
+
+    const auto sIdx = view.storeIndex;
+    auto &st        = store(sIdx);
+    auto curVersion = view.version;
+
+    for (const auto &op : compacted) {
+      if (op.kind == OpKind::Insert) {
+        if (!op.text.empty()) {
+          if (const auto existing = st.userPermascroll().findExistingSpan(
+                  op.text, minSpanDedupLength)) {
+            curVersion = st.insertSpan(curVersion, op.at, *existing);
+            std::cout << "xudu: " << curVersion.str()
+                      << " insert (reused span [" << existing->start << ", +"
+                      << existing->length << ")) at " << op.at << "\n";
+          } else {
+            curVersion = st.insert(curVersion, op.at, op.text);
+            std::cout << "xudu: " << curVersion.str() << " insert "
+                      << op.text.size() << " bytes at " << op.at << "\n";
+          }
+        }
+      } else if (op.kind == OpKind::Delete) {
+        if (op.length > 0) {
+          curVersion = st.erase(curVersion, op.at, op.length);
+          std::cout << "xudu: " << curVersion.str() << " delete " << op.length
+                    << " bytes at " << op.at << "\n";
+        }
+      }
+    }
+
+    refresh(static_cast<std::uint32_t>(which), curVersion);
+    save(sIdx);
+  };
+
+  if (docIndex) {
+    flushOne(*docIndex);
+  } else {
+    for (std::size_t i = 0; i < open.size(); ++i) {
+      flushOne(i);
+    }
+  }
+}
+
+void Session::tick(const std::chrono::steady_clock::time_point now) {
+  for (std::size_t i = 0; i < open.size(); ++i) {
+    auto &view = open[i];
+    if (!view.uncommittedLog.empty()) {
+      const auto elapsed = now - view.uncommittedLog.lastActivity();
+      if (elapsed >= idleFlushTimeout) {
+        flushUncommitted(static_cast<std::uint32_t>(i));
+      }
+    }
+  }
+}
+
+bool Session::hasUncommitted(const std::uint32_t docIndex) const {
+  return docIndex < open.size() && !open[docIndex].uncommittedLog.empty();
+}
+
 void Session::textInserted(Doc &doc, const std::uint32_t at,
                            const std::string &utf8) {
   const auto which = doc.documentIndex();
   if (which >= open.size()) {
     return;
   }
-  const auto sIdx     = open[which].storeIndex;
-  auto &st            = store(sIdx);
-  const auto produced = st.insert(open[which].version, at, utf8);
-  refresh(which, produced);
-  save(sIdx);
-  std::cout << "xudu: " << produced.str() << " insert " << utf8.size()
-            << " bytes at " << at << "\n";
+  open[which].uncommittedLog.recordInsert(at, utf8);
 }
 
 void Session::textErased(Doc &doc, const std::uint32_t at,
@@ -667,14 +745,7 @@ void Session::textErased(Doc &doc, const std::uint32_t at,
   if (which >= open.size()) {
     return;
   }
-  const auto sIdx     = open[which].storeIndex;
-  auto &st            = store(sIdx);
-  const auto produced = st.erase(open[which].version, at,
-                                 static_cast<std::uint32_t>(removed.size()));
-  refresh(which, produced);
-  save(sIdx);
-  std::cout << "xudu: " << produced.str() << " delete " << removed.size()
-            << " bytes at " << at << "\n";
+  open[which].uncommittedLog.recordErase(at, removed);
 }
 
 void Session::markDecorated(Doc &doc, const std::uint32_t at,
@@ -684,6 +755,7 @@ void Session::markDecorated(Doc &doc, const std::uint32_t at,
   if (which >= open.size()) {
     return;
   }
+  flushUncommitted(which);
   const auto sIdx    = open[which].storeIndex;
   auto &st           = store(sIdx);
   const auto content = st.rebuild(open[which].version).spansFor(at, length);
@@ -721,6 +793,9 @@ void Session::decorate(const Doc &doc, std::vector<gleditor::SpanStyle> &out) {
   const auto which = doc.documentIndex();
   if (which >= open.size()) {
     return;
+  }
+  if (!open[which].uncommittedLog.empty()) {
+    flushUncommitted(which);
   }
   auto &view = open[which];
   if (view.decoratedAt == epoch) {

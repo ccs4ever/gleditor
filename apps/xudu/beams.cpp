@@ -800,6 +800,7 @@ bool LinkBeams::picked(const render::PickingResult &pick, RenderState &state) {
 }
 
 void LinkBeams::drawFrame(gleditor::FrameContext &ctx) {
+  session.tick();
   if (nullptr == beams || !visible) {
     // Nothing will be drawn and so nothing will be moved. Saying so rather
     // than leaving the flag where it was matters: --no-beams would otherwise

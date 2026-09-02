@@ -223,6 +223,7 @@ public:
           caret->documentIndex() >= rState.docs.size()) {
         return;
       }
+      session.flushUncommitted(caret->documentIndex());
       Where where{caret->documentIndex(), caret->byteOffset(),
                   caret->byteOffset(), caret->hasSelection()};
       if (where.hasRange) {
@@ -569,6 +570,7 @@ public:
 
   void selectDoc(const std::uint32_t index) {
     renderer->runWithState([this, index](RenderState &rState) {
+      session.flushUncommitted();
       if (index < rState.docs.size() && rState.docs[index]) {
         if (switcher) {
           switcher->setActiveDocIndex(index);

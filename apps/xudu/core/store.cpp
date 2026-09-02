@@ -362,6 +362,16 @@ MicroversionId Store::insert(const MicroversionId &parent,
   return apply(parent, op);
 }
 
+MicroversionId Store::insertSpan(const MicroversionId &parent,
+                                 const std::uint32_t at,
+                                 const PrimediaSpan &span) {
+  Op op;
+  op.kind = OpKind::Insert;
+  op.at   = at;
+  op.span = span;
+  return apply(parent, op);
+}
+
 MicroversionId Store::erase(const MicroversionId &parent,
                             const std::uint32_t at,
                             const std::uint32_t length) {

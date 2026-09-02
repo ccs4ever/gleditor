@@ -164,6 +164,11 @@ public:
   MicroversionId insert(const MicroversionId &parent, std::uint32_t at,
                         std::string_view text);
 
+  /// Insert @p span into @p parent at @p at. Records an INSERT referencing an
+  /// existing span without appending new bytes to the spool.
+  MicroversionId insertSpan(const MicroversionId &parent, std::uint32_t at,
+                            const PrimediaSpan &span);
+
   /// Stop pointing at [@p at, @p at + @p length) of @p parent. The content
   /// stays in the spool; see OpKind::Delete.
   MicroversionId erase(const MicroversionId &parent, std::uint32_t at,

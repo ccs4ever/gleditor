@@ -38,6 +38,7 @@
 #include "xudu/core/resolver.hpp"
 #include "xudu/core/store.hpp"
 #include "xudu/core/swarm.hpp"
+#include "xudu/core/uncommitted_op_log.hpp"
 
 class Caret;
 class Doc;
@@ -95,6 +96,9 @@ struct OpenView {
   /// affordable sixty times a second.
   std::vector<gleditor::SpanStyle> decorations;
   std::uint64_t decoratedAt{};
+  /// Uncommitted interactive edits waiting to be compacted and flushed to the
+  /// store.
+  UncommittedOpLog uncommittedLog;
 };
 
 /**
@@ -355,6 +359,7 @@ public:
 
   /// The version each open document shows, in the library's document order.
   [[nodiscard]] const std::vector<OpenView> &views() const { return open; }
+  [[nodiscard]] std::vector<OpenView> &views() { return open; }
   [[nodiscard]] MicroversionId versionOf(std::uint32_t docIndex) const;
   [[nodiscard]] std::size_t storeIndexOf(std::uint32_t docIndex) const;
 
@@ -443,6 +448,26 @@ public:
    */
   void markDecorated(Doc &doc, std::uint32_t at, std::uint32_t length,
                      gleditor::DecorationMask mask);
+
+  // -- Uncommitted Replay Log & Macro-Epoch Flush --------------------------
+  static constexpr auto idleFlushTimeout          = std::chrono::seconds(5);
+  static constexpr std::size_t minSpanDedupLength = 24;
+
+  /**
+   * @brief Flush any uncommitted edits in the replay log for @p docIndex (or
+   * all open documents when nullopt) to the store.
+   */
+  void flushUncommitted(std::optional<std::uint32_t> docIndex = std::nullopt);
+
+  /**
+   * @brief Periodic tick called from the frame loop to flush uncommitted logs
+   *        that have been idle for >= idleFlushTimeout.
+   */
+  void tick(std::chrono::steady_clock::time_point now =
+                std::chrono::steady_clock::now());
+
+  /// Whether @p docIndex has uncommitted edits waiting in the replay log.
+  [[nodiscard]] bool hasUncommitted(std::uint32_t docIndex) const;
 
   // -- gleditor::SpanDecorator ----------------------------------------------
   //
