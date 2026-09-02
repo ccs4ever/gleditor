@@ -363,6 +363,85 @@ TEST(IdentityBEP10Test, HandshakeDictionaryPopulation) {
               Eq(kExtOracleVerifyMsgId));
 }
 
+namespace {
+
+/// Drives a peer plugin through the handshake so that it has issued a
+/// challenge and is waiting on the response, which is the state every
+/// authentication test starts from.
+std::shared_ptr<IdentityPeerPlugin>
+challengedPlugin(IdentityNetworkController &controller) {
+  auto plugin = std::make_shared<IdentityPeerPlugin>(
+      libtorrent::peer_connection_handle(
+          std::weak_ptr<libtorrent::aux::peer_connection>{}),
+      InfoHash{}, &controller);
+
+  const std::string handshake =
+      "d1:md21:xudu_identity_lookupi3e16:xudu_oracle_votei4eee";
+  libtorrent::bdecode_node node;
+  libtorrent::error_code ec;
+  libtorrent::bdecode(handshake.data(), handshake.data() + handshake.size(),
+                      node, ec);
+  EXPECT_FALSE(ec);
+  plugin->on_extension_handshake(node);
+  return plugin;
+}
+
+/// Hands @p payload to the plugin as an incoming BEP 10 extended message.
+bool deliver(IdentityPeerPlugin &plugin, const MessageType type,
+             const std::string &bencoded) {
+  const std::string frame = encodeExtendedMessage(type, bencoded);
+  return plugin.on_extended(static_cast<int>(frame.size()),
+                            kExtIdentityLookupMsgId,
+                            libtorrent::span<char const>(frame));
+}
+
+} // namespace
+
+// A peer that answers the challenge with bytes that are not a signature over
+// anything must not end up authenticated. This asserted nothing before the
+// verification existed: the check was "the signature field is not all zeroes",
+// so any non-zero 64 bytes -- including the 0x55 filler the challenge handler
+// sent when no signing key was configured -- claimed any fingerprint at all.
+TEST(IdentityBEP10Test, RejectsAuthResponseWithAnUnverifiableSignature) {
+  IdentityNetworkController controller;
+  auto plugin = challengedPlugin(controller);
+  ASSERT_FALSE(plugin->isAuthenticated());
+
+  PeerChallengeResponse resp;
+  resp.nonce.bytes.fill(0xAA); // matches the challenge the plugin issued
+  resp.claimedIdentity =
+      *Fingerprint::fromString("DEADBEEFDEADBEEFDEADBEEFDEADBEEFDEADBEEF");
+  resp.signature.bytes.fill(0x55); // not a signature, merely not zero
+
+  deliver(*plugin, MessageType::PeerAuthResponse, serialize(resp));
+
+  EXPECT_FALSE(plugin->isAuthenticated())
+      << "a peer authenticated with 64 bytes that sign nothing";
+  EXPECT_FALSE(plugin->authenticatedIdentity().has_value());
+}
+
+// Votes feed oracle consensus, so a peer that has not authenticated must not
+// be able to put one in. The handler used to decode and forward without
+// consulting isAuthenticated_ at all.
+TEST(IdentityBEP10Test, IgnoresVotesFromUnauthenticatedPeers) {
+  IdentityNetworkController controller;
+  auto plugin = challengedPlugin(controller);
+  ASSERT_FALSE(plugin->isAuthenticated());
+
+  VoteEntry vote;
+  vote.voterFingerprint =
+      *Fingerprint::fromString("1111222233334444555566667777888899990001");
+  vote.candidateOracle =
+      *Fingerprint::fromString("1111222233334444555566667777888899990002");
+  vote.timestamp = 1700000000;
+  vote.signature.bytes.fill(0x3C);
+
+  deliver(*plugin, MessageType::OracleVoteBroadcast, serialize(vote));
+
+  EXPECT_THAT(controller.pipeline().size(), Eq(0U))
+      << "an unauthenticated peer got a vote into the ledger";
+}
+
 // ============================================================================
 // Hashcash Proof-of-Work Tests
 // ============================================================================

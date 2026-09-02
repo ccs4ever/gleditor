@@ -19,6 +19,8 @@
 #include <xudu/core/store.hpp>
 #include <xudu/core/user_permascroll.hpp>
 
+#include "pgp_fixture.hpp"
+
 namespace {
 
 using xudu::MicroversionId;
@@ -173,22 +175,28 @@ TEST(UserPermascrollTest, CollaborativeLiveEditingZeroPayload) {
   EXPECT_EQ(node->spanLength, 15U);
 }
 
-TEST(UserPermascrollTest, DeviceDelegationCertificateRoundTrip) {
-  const auto masterFp =
-      Fingerprint::fromString("8A9C1234567890ABCDEF1234567890ABCDEF1234");
-  ASSERT_TRUE(masterFp.has_value());
+namespace {
 
-  const auto deviceKeys = xudu::createMutableKeys();
-
+/// The delegation kDeviceDelegationSignature was generated over. Built by
+/// hand rather than with createMutableKeys() because the signature covers the
+/// device key, so it has to be the same key every run.
+xudu::DeviceDelegation fixtureDelegation() {
   xudu::DeviceDelegation cert;
-  cert.masterFingerprint = *masterFp;
-  cert.devicePublicKey   = deviceKeys.publicKey;
-  cert.deviceName        = "thinkpad-laptop";
-  cert.issuedTimestamp   = 1700000000;
+  cert.masterFingerprint =
+      *Fingerprint::fromString(xudu::testing::kAuthorFingerprint);
+  cert.devicePublicKey = xudu::PublicKey{};
+  cert.devicePublicKey.bytes.fill(0x11);
+  cert.deviceName      = "thinkpad-laptop";
+  cert.issuedTimestamp = 1700000000;
   cert.gpgSignatureArmored =
-      "-----BEGIN PGP SIGNATURE-----\nmock\n-----END PGP SIGNATURE-----";
+      std::string(xudu::testing::kDeviceDelegationSignature);
+  return cert;
+}
 
-  EXPECT_TRUE(cert.verify());
+} // namespace
+
+TEST(UserPermascrollTest, DeviceDelegationCertificateRoundTrip) {
+  const auto cert = fixtureDelegation();
 
   const auto yaml = cert.toYaml();
   EXPECT_NE(yaml.find("thinkpad-laptop"), std::string::npos);
@@ -196,7 +204,54 @@ TEST(UserPermascrollTest, DeviceDelegationCertificateRoundTrip) {
   const auto decoded = xudu::DeviceDelegation::fromYaml(yaml);
   ASSERT_TRUE(decoded.has_value());
   EXPECT_EQ(*decoded, cert);
-  EXPECT_TRUE(decoded->verify());
+}
+
+TEST(UserPermascrollTest, DeviceDelegationVerifiesAgainstItsMasterKey) {
+  const auto cert = fixtureDelegation();
+  EXPECT_TRUE(cert.verify(xudu::testing::kAuthorPublicKey));
+
+  // Survives a round trip through YAML, which is how it reaches another
+  // machine.
+  const auto decoded = xudu::DeviceDelegation::fromYaml(cert.toYaml());
+  ASSERT_TRUE(decoded.has_value());
+  EXPECT_TRUE(decoded->verify(xudu::testing::kAuthorPublicKey));
+}
+
+// This case used to pass with the signature field set to the literal text
+// "mock": verify() checked that three fields were non-empty. Every rejection
+// below was accepted before there was anything here to reject it.
+TEST(UserPermascrollTest, DeviceDelegationRejectsWhatItShould) {
+  const auto good = fixtureDelegation();
+
+  auto mockSignature = good;
+  mockSignature.gpgSignatureArmored =
+      "-----BEGIN PGP SIGNATURE-----\nmock\n-----END PGP SIGNATURE-----";
+  EXPECT_FALSE(mockSignature.verify(xudu::testing::kAuthorPublicKey))
+      << "the word 'mock' passed as an OpenPGP signature";
+
+  // A different key, with a real signature of its own, is still not this
+  // delegation's master.
+  EXPECT_FALSE(good.verify(xudu::testing::kImpostorPublicKey));
+
+  // Every signed field is covered: changing any one invalidates the whole.
+  auto renamed       = good;
+  renamed.deviceName = "someone-elses-laptop";
+  EXPECT_FALSE(renamed.verify(xudu::testing::kAuthorPublicKey));
+
+  auto reissued            = good;
+  reissued.issuedTimestamp = 1700000001;
+  EXPECT_FALSE(reissued.verify(xudu::testing::kAuthorPublicKey));
+
+  auto swappedDevice = good;
+  swappedDevice.devicePublicKey.bytes.fill(0x22);
+  EXPECT_FALSE(swappedDevice.verify(xudu::testing::kAuthorPublicKey))
+      << "a delegation was retargeted to a different device key";
+
+  auto unsignedCert = good;
+  unsignedCert.gpgSignatureArmored.clear();
+  EXPECT_FALSE(unsignedCert.verify(xudu::testing::kAuthorPublicKey));
+
+  EXPECT_FALSE(good.verify("")) << "no master key means no verification";
 }
 
 TEST(UserPermascrollTest, PermascrollRegistrySingleton) {

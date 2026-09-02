@@ -39,7 +39,30 @@ struct DeviceDelegation {
   std::uint64_t issuedTimestamp{0};
   std::string gpgSignatureArmored;
 
-  [[nodiscard]] bool verify() const;
+  /**
+   * @brief The bytes the master key signs: everything but the signature.
+   *
+   * Canonical and unambiguous -- each field is length-prefixed, so no
+   * combination of a device name and a fingerprint can be rearranged into a
+   * different delegation that produces the same bytes.
+   */
+  [[nodiscard]] std::string signingBuffer() const;
+
+  /**
+   * @brief Whether this delegation really is signed by the master key.
+   *
+   * @param masterPublicKeyArmored The master's OpenPGP public key. Required
+   *        rather than carried in the struct: a delegation that supplied its
+   *        own verification key would only ever attest to itself. The key is
+   *        checked against masterFingerprint before the signature is checked
+   *        against the key, so supplying the wrong key fails rather than
+   *        silently verifying a different identity's delegation.
+   *
+   * Was previously a check that three fields were non-empty, which is to say
+   * it was not a verification at all -- so it has no callers to migrate.
+   */
+  [[nodiscard]] bool verify(std::string_view masterPublicKeyArmored) const;
+
   [[nodiscard]] std::string toYaml() const;
   [[nodiscard]] static std::optional<DeviceDelegation>
   fromYaml(std::string_view yaml);
