@@ -26,7 +26,7 @@ enum class UncommittedKind : std::uint8_t {
 struct UncommittedEntry {
   UncommittedKind kind{UncommittedKind::Insert};
   std::uint32_t at{0};
-  std::string text;        ///< Inserted text, or captured erased text for delete
+  std::string text; ///< Inserted text, or captured erased text for delete
   std::uint32_t length{0}; ///< Length in bytes
   std::chrono::steady_clock::time_point timestamp{};
 };
@@ -34,8 +34,8 @@ struct UncommittedEntry {
 struct CompactedOp {
   OpKind kind{OpKind::Insert};
   std::uint32_t at{0};
-  std::string text;           ///< If insert: text to be spanned
-  std::uint32_t length{0};    ///< If delete: length to erase
+  std::string text;                       ///< If insert: text to be spanned
+  std::uint32_t length{0};                ///< If delete: length to erase
   std::optional<PrimediaSpan> reusedSpan; ///< Set if span was deduplicated
 };
 
@@ -53,7 +53,8 @@ public:
 
   [[nodiscard]] bool empty() const noexcept { return entries.empty(); }
   [[nodiscard]] std::size_t size() const noexcept { return entries.size(); }
-  [[nodiscard]] const std::vector<UncommittedEntry> &rawEntries() const noexcept {
+  [[nodiscard]] const std::vector<UncommittedEntry> &
+  rawEntries() const noexcept {
     return entries;
   }
 
@@ -70,8 +71,8 @@ public:
    *        annihilation rules.
    *
    * 1. Contiguous sequential inserts are merged into single spans.
-   * 2. Consecutive backspaces (left-deletes) and forward deletes are merged into
-   *    single delete ranges.
+   * 2. Consecutive backspaces (left-deletes) and forward deletes are merged
+   * into single delete ranges.
    * 3. Insertions immediately followed by backspaces on the newly inserted text
    *    are truncated or annihilated.
    */

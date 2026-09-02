@@ -243,5 +243,39 @@ TEST(MerkleLedgerTest, VerifyProvenanceAuthorAgainstRoot) {
   EXPECT_FALSE(ledger.verifyProvenanceAuthor(author, prov, fakeRoot, &error));
 }
 
+// A leaf and an interior node must not be hashed the same way. Without a
+// domain tag, the SHA-256 an interior node takes over its two children is also
+// reachable as a leaf whose content happens to be those 64 bytes -- the
+// standard Merkle second-preimage construction (RFC 6962 section 2.1). A
+// forged proof then presents a fabricated leaf and one fewer path element and
+// verifies against a root nobody else could have produced.
+//
+// Stated as "the same 64 bytes hash differently in the two positions" rather
+// than by building a forgery, because the separation is the property that
+// protects us; a forgery only demonstrates one route through its absence.
+TEST(MerkleLedgerTest, LeafAndInteriorHashingAreDomainSeparated) {
+  std::array<std::uint8_t, 32> left{};
+  std::array<std::uint8_t, 32> right{};
+  left.fill(0xA1);
+  right.fill(0xB2);
+
+  // The 64 bytes an interior node hashes over, offered instead as leaf content.
+  std::string asLeafContent;
+  asLeafContent.append(reinterpret_cast<const char *>(left.data()), 32);
+  asLeafContent.append(reinterpret_cast<const char *>(right.data()), 32);
+
+  // The interior digest, reached the only way a caller can: a one-element
+  // path joining `left` to `right`.
+  MerkleProof proof;
+  proof.leafHash = left;
+  proof.path.push_back(MerkleProof::Element{.hash = right, .isLeft = false});
+
+  // Shared domain means the concatenation hashed as a leaf reproduces the
+  // interior digest exactly, and the proof verifies against it.
+  EXPECT_FALSE(proof.verify(sha256Digest(asLeafContent)))
+      << "leaf and interior hashing share a domain: a 64-byte leaf is "
+         "indistinguishable from an interior node over its two halves";
+}
+
 } // namespace
 } // namespace xudu

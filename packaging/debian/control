@@ -19,6 +19,7 @@ Build-Depends: debhelper-compat (= 13),
                libssl-dev,
                libtorrent-rasterbar-dev,
                liblmdb-dev,
+               librnp-dev,
                glslang-tools,
                g++ (>= 13)
 Standards-Version: 4.7.0

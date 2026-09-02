@@ -33,6 +33,7 @@ class Gleditor < Formula
   depends_on "lmdb"
   depends_on "openssl@3"
   depends_on "poppler"
+  depends_on "rnp"
   depends_on "sdl3"
   depends_on "sdl3_image"
 

@@ -147,12 +147,25 @@ TEST_PKGS := gmock_main
 # whose documents cannot leave the machine that wrote them, which is the one
 # thing this program is for. Better to fail at configure time than to ship a
 # xanadoc editor that quietly cannot publish.
-XUDU_PKGS := libtorrent-rasterbar openssl lmdb
+#
+# librnp is required for the same kind of reason. It is what checks that an
+# armored key really is the key its fingerprint claims to name, and what
+# verifies the OpenPGP signature delegating authority to a device key -- so it
+# is the root of every trust decision the identity ledger makes. Made optional,
+# the absent-RNP build would have to decide what an unverifiable identity
+# means, and the only safe answer refuses every peer, which is not a build
+# worth having. RNP rather than GnuPG's gpgme because it is a library first
+# and links the same way on every platform this ships to.
+XUDU_PKGS := libtorrent-rasterbar openssl lmdb librnp
 ifneq (,$(filter-out $(NO_SDL_GOALS),$(or $(MAKECMDGOALS),all)))
 ifneq ($(shell pkg-config --exists libtorrent-rasterbar && echo 1),1)
 $(error libtorrent-rasterbar was not found by pkg-config. It is required: \
 install libtorrent-rasterbar-dev (Debian, Ubuntu), libtorrent-rasterbar-devel \
 (Fedora), or libtorrent-rasterbar (Arch, Homebrew).)
+endif
+ifneq ($(shell pkg-config --exists librnp && echo 1),1)
+$(error librnp was not found by pkg-config. It is required: install \
+librnp-dev (Debian, Ubuntu), rnp-devel (Fedora), or rnp (Arch, Homebrew).)
 endif
 endif
 
@@ -326,7 +339,9 @@ override LDFLAGS += $(DEBUG_OPTS) $(findstring $(STATIC),-static)
 #LDFLAGS += -v -stdlib=libc++ -fexperimental-library
 LIBS := $(shell pkg-config $(STATIC) --libs $(PKGS))
 XUDU_LIBS := $(shell pkg-config $(STATIC) --libs $(XUDU_PKGS)) -lryml
-ZIGZAG_PKGS := libtorrent-rasterbar openssl lmdb
+# Matches XUDU_PKGS because ZIGZAG_SHARED_CORE_OBJS is XUDU_CORE_OBJS: zigzag
+# links the whole xanalogical engine, so it needs whatever that engine needs.
+ZIGZAG_PKGS := libtorrent-rasterbar openssl lmdb librnp
 ZIGZAG_LIBS := $(shell pkg-config $(STATIC) --libs $(ZIGZAG_PKGS)) -lryml
 
 # glslangValidator is the traditional name and glslang the current one; which

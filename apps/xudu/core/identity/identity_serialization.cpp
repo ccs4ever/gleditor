@@ -604,7 +604,8 @@ decodeTcKeyDelivery(std::span<const std::uint8_t> bytes) {
 // Encoders to libtorrent::entry
 // ============================================================================
 
-libtorrent::entry encodeToEntry(const IdentityEntry &entry) {
+libtorrent::entry encodeToEntry(const IdentityEntry &entry,
+                                const bool withSignature) {
   libtorrent::entry e(libtorrent::entry::dictionary_t);
   e["fp"]    = entry.fingerprint.toString();
   e["email"] = entry.email;
@@ -619,20 +620,21 @@ libtorrent::entry encodeToEntry(const IdentityEntry &entry) {
   if (entry.revoked) {
     e["rev"] = 1;
   }
-  if (!entry.signature.isZero()) {
+  if (withSignature && !entry.signature.isZero()) {
     e["sig"] = std::string(
         reinterpret_cast<const char *>(entry.signature.bytes.data()), 64);
   }
   return e;
 }
 
-libtorrent::entry encodeToEntry(const VoteEntry &vote) {
+libtorrent::entry encodeToEntry(const VoteEntry &vote,
+                                const bool withSignature) {
   libtorrent::entry e(libtorrent::entry::dictionary_t);
   e["voter"] = vote.voterFingerprint.toString();
   e["cand"]  = vote.candidateOracle.toString();
   e["ts"]    = static_cast<std::int64_t>(vote.timestamp);
   e["seq"]   = static_cast<std::int64_t>(vote.sequence);
-  if (!vote.signature.isZero()) {
+  if (withSignature && !vote.signature.isZero()) {
     e["sig"] = std::string(
         reinterpret_cast<const char *>(vote.signature.bytes.data()), 64);
   }
@@ -777,6 +779,18 @@ std::string serialize(const IdentityEntry &entry) {
 std::string serialize(const VoteEntry &vote) {
   std::string out;
   libtorrent::bencode(std::back_inserter(out), encodeToEntry(vote));
+  return out;
+}
+
+std::string identityEntrySigningBuffer(const IdentityEntry &entry) {
+  std::string out;
+  libtorrent::bencode(std::back_inserter(out), encodeToEntry(entry, false));
+  return out;
+}
+
+std::string voteEntrySigningBuffer(const VoteEntry &vote) {
+  std::string out;
+  libtorrent::bencode(std::back_inserter(out), encodeToEntry(vote, false));
   return out;
 }
 

@@ -23,9 +23,18 @@ namespace xudu {
 
 namespace {
 
+// RFC 6962 section 2.1 domain tags. Leaves and interior nodes must hash into
+// separate domains, or SHA256(l || r) is reachable two ways -- as an interior
+// node, and as a leaf whose content happens to be those 64 bytes -- and a
+// forged proof can pass off a fabricated leaf as a subtree. The tags are the
+// whole defence, so they are named here rather than spelled inline twice.
+constexpr char kLeafDomain     = '\x00';
+constexpr char kInteriorDomain = '\x01';
+
 void sha256_lt(const merkle::HashT<32> &l, const merkle::HashT<32> &r,
                merkle::HashT<32> &out) {
   libtorrent::hasher256 h;
+  h.update(&kInteriorDomain, 1);
   h.update(reinterpret_cast<const char *>(l.bytes), 32);
   h.update(reinterpret_cast<const char *>(r.bytes), 32);
   const libtorrent::sha256_hash digest = h.final();
@@ -120,7 +129,10 @@ std::string GpgKeyLink::canonicalForm() const {
 }
 
 std::array<std::uint8_t, 32> GpgKeyLink::leafHash() const {
-  return sha256Digest(canonicalForm());
+  // Tagged, to keep this out of the domain sha256_lt hashes interior nodes
+  // into. sha256Digest stays an untagged SHA-256 because its other callers
+  // want a plain digest rather than a tree leaf.
+  return sha256Digest(kLeafDomain + canonicalForm());
 }
 
 std::string GpgKeyLink::leafHashHex() const { return toHex32(leafHash()); }

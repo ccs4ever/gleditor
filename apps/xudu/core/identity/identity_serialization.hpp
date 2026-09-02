@@ -91,9 +91,16 @@ decodeTcKeyDelivery(std::span<const std::uint8_t> bytes);
 [[nodiscard]] std::expected<TcKeyDeliveryMsg, SerializationError>
 decodeTcKeyDelivery(const libtorrent::bdecode_node &node);
 
-// Bencoding conversion functions to libtorrent::entry
-[[nodiscard]] libtorrent::entry encodeToEntry(const IdentityEntry &entry);
-[[nodiscard]] libtorrent::entry encodeToEntry(const VoteEntry &vote);
+// Bencoding conversion functions to libtorrent::entry.
+//
+// The two signed record types take a flag rather than having a second
+// encoder: a signing buffer that drifts from the encoder it is meant to
+// mirror verifies signatures over bytes nobody ever sent, and the drift is
+// invisible until an entry stops verifying for no apparent reason.
+[[nodiscard]] libtorrent::entry encodeToEntry(const IdentityEntry &entry,
+                                              bool withSignature = true);
+[[nodiscard]] libtorrent::entry encodeToEntry(const VoteEntry &vote,
+                                              bool withSignature = true);
 [[nodiscard]] libtorrent::entry encodeToEntry(const BlockHeader &header);
 [[nodiscard]] libtorrent::entry encodeToEntry(const OracleAttestation &att);
 [[nodiscard]] libtorrent::entry encodeToEntry(const PeerChallenge &challenge);
@@ -119,6 +126,18 @@ encodeToEntry(const PeerChallengeResponse &resp);
 [[nodiscard]] std::string serialize(const TcInvoiceResponseMsg &resp);
 [[nodiscard]] std::string serialize(const TcSettleRequestMsg &req);
 [[nodiscard]] std::string serialize(const TcKeyDeliveryMsg &delivery);
+
+/**
+ * @brief The bytes a record's signature is over: everything but the signature.
+ *
+ * Canonical because libtorrent's bencoder writes dictionary keys in sorted
+ * order, so two machines encoding the same record produce the same bytes --
+ * which is what makes a signature checkable rather than a coincidence. Same
+ * shape as publicationSigningBuffer() in publication.hpp, for the same reason.
+ */
+[[nodiscard]] std::string
+identityEntrySigningBuffer(const IdentityEntry &entry);
+[[nodiscard]] std::string voteEntrySigningBuffer(const VoteEntry &vote);
 
 // BEP 10 Message Frame Wrapper
 struct ExtendedMessageFrame {

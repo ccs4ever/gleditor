@@ -13,9 +13,19 @@ namespace xudu::identity {
 
 namespace {
 
+// RFC 6962 section 2.1 domain tags. Leaves and interior nodes must hash into
+// separate domains, or SHA256(l || r) is reachable two ways -- as an interior
+// node, and as a leaf whose content happens to be those 64 bytes -- and a
+// forged proof can pass off a fabricated leaf as a subtree. The same pair is
+// defined in merkle_ledger.cpp: the two trees are separate implementations
+// over separate record types, and neither can borrow the other's tagging.
+constexpr char kLeafDomain     = '\x00';
+constexpr char kInteriorDomain = '\x01';
+
 void sha256_lt(const merkle::HashT<32> &l, const merkle::HashT<32> &r,
                merkle::HashT<32> &out) {
   libtorrent::hasher256 h;
+  h.update(&kInteriorDomain, 1);
   h.update(reinterpret_cast<const char *>(l.bytes), 32);
   h.update(reinterpret_cast<const char *>(r.bytes), 32);
   const libtorrent::sha256_hash digest = h.final();
@@ -53,26 +63,21 @@ Hash32 computeBlockHash(const BlockHeader &header) {
 
 Hash32 computeLeafHash(const IdentityEntry &entry) {
   const std::string bencoded = serialize(entry);
-  libtorrent::hasher256 h;
-  h.update(bencoded.data(), static_cast<int>(bencoded.size()));
-  const auto digest = h.final();
-  Hash32 out;
-  std::memcpy(out.bytes.data(), digest.data(), 32);
-  return out;
+  return computeLeafHash(std::span<const std::uint8_t>(
+      reinterpret_cast<const std::uint8_t *>(bencoded.data()),
+      bencoded.size()));
 }
 
 Hash32 computeLeafHash(const VoteEntry &vote) {
   const std::string bencoded = serialize(vote);
-  libtorrent::hasher256 h;
-  h.update(bencoded.data(), static_cast<int>(bencoded.size()));
-  const auto digest = h.final();
-  Hash32 out;
-  std::memcpy(out.bytes.data(), digest.data(), 32);
-  return out;
+  return computeLeafHash(std::span<const std::uint8_t>(
+      reinterpret_cast<const std::uint8_t *>(bencoded.data()),
+      bencoded.size()));
 }
 
 Hash32 computeLeafHash(std::span<const std::uint8_t> bencodedData) {
   libtorrent::hasher256 h;
+  h.update(&kLeafDomain, 1);
   h.update(reinterpret_cast<const char *>(bencodedData.data()),
            static_cast<int>(bencodedData.size()));
   const auto digest = h.final();

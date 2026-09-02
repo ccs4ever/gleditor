@@ -205,6 +205,30 @@ TEST(IdentityValidationTest, MerkleTreeAppendAndInclusionProof) {
       EnginePipeline::verifyInclusion(tampered, *proof1, pipeline.root()));
 }
 
+// The identity tree is a second, independent Merkle implementation, so it
+// needs its own domain separation and its own test: fixing merkle_ledger.cpp
+// does nothing for this one. See the matching case in merkle_ledger_test.cpp
+// for why the separation matters (RFC 6962 section 2.1).
+TEST(IdentityValidationTest, LeafAndInteriorHashingAreDomainSeparated) {
+  Hash32 left;
+  Hash32 right;
+  left.bytes.fill(0xA1);
+  right.bytes.fill(0xB2);
+
+  // The 64 bytes an interior node hashes over, offered instead as leaf content.
+  std::array<std::uint8_t, 64> asLeafContent{};
+  std::copy(left.bytes.begin(), left.bytes.end(), asLeafContent.begin());
+  std::copy(right.bytes.begin(), right.bytes.end(), asLeafContent.begin() + 32);
+
+  LedgerMerkleProof proof;
+  proof.leafHash = left;
+  proof.path.push_back(MerkleProofElement{.hash = right, .isLeft = false});
+
+  EXPECT_FALSE(proof.verify(computeLeafHash(asLeafContent)))
+      << "leaf and interior hashing share a domain: a 64-byte leaf is "
+         "indistinguishable from an interior node over its two halves";
+}
+
 TEST(IdentityValidationTest, StagedBlockAtomicCommitAndRollback) {
   EnginePipeline pipeline;
 
