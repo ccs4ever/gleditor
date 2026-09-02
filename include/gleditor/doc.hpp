@@ -196,6 +196,13 @@ public:
   [[nodiscard]] bool caretGeometry(std::uint32_t globalOffset, float &posX,
                                    float &posY, float &height) const;
 
+  /// Blank border between a page's edge and the text on it, in that same
+  /// pixel space. Public because it is not only the layout's business: what
+  /// draws in a page's margin -- an anchor marking where a link attaches --
+  /// has to know where the margin starts, and reading it off a page beats
+  /// each caller carrying its own copy of the number.
+  static constexpr float marginPixels = 24.0F;
+
   /// Page size in the pixel space its glyph positions are in, which is what
   /// the model matrix scales to world units.
   [[nodiscard]] float widthPixels() const { return pageWidth; }
@@ -205,6 +212,14 @@ public:
   /// anything drawing alongside a page has to know to find its margin.
   [[nodiscard]] float leftPixels() const { return originX; }
   [[nodiscard]] float topPixels() const { return originY; }
+  /// Right edge, and both edges of the text between them. The four together
+  /// are the two margins, which is where anything belonging to a passage but
+  /// not to the text itself is drawn.
+  [[nodiscard]] float rightPixels() const { return originX + pageWidth; }
+  [[nodiscard]] float textLeftPixels() const { return originX + marginPixels; }
+  [[nodiscard]] float textRightPixels() const {
+    return originX + pageWidth - marginPixels;
+  }
 
   /// This page's own text, as a view into the document's. The offsets the
   /// cluster table carries are relative to its start, and asking the document

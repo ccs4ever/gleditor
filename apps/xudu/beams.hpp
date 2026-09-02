@@ -39,6 +39,7 @@
 #include <gleditor/pick_observer.hpp>
 #include <gleditor/renderer.hpp>
 
+#include "xudu/core/anchor_lanes.hpp"
 #include "xudu/core/link_layout.hpp"
 #include "xudu/core/microversion.hpp"
 #include "xudu/core/ops.hpp"
@@ -196,10 +197,14 @@ private:
   void traverse(const Strand &strand, RenderState &state);
 
   /// World point a beam leaves a document from: the page margin on the side
-  /// the other document is on, level with the anchor.
+  /// the other document is on, level with the anchor. @p yOffsetPixels moves
+  /// it up the page in the page's own pixels, which is how the top and bottom
+  /// edges of the anchor's line are asked for rather than assumed to be half a
+  /// line either side of its centre in world units -- the page's own matrix
+  /// does that conversion, and it is the only thing that knows the scale.
   [[nodiscard]] static std::optional<glm::vec3>
   edgePoint(const Doc &doc, const Doc::Anchor &anchor, bool towardsRight,
-            bool atTextBorder = false);
+            bool atTextBorder = false, float yOffsetPixels = 0.0F);
 
   /**
    * @brief Where one end of a link meets its document's margin, top and
@@ -215,12 +220,23 @@ private:
     glm::vec3 bottom{};
     glm::vec3 textTop{};
     glm::vec3 textBottom{};
-    /// Line height at the anchor, in world units. What sets the beam's weight,
-    /// so that a relation between two lines of text is drawn at the scale of
-    /// the text rather than at some fixed size that swamps small type and
-    /// disappears in large.
+    /// Line height at the anchor, in the page's pixels. What sets the beam's
+    /// weight, so that a relation between two lines of text is drawn at the
+    /// scale of the text rather than at some fixed size that swamps small type
+    /// and disappears in large.
     float lineHeight{};
   };
+
+  /// How far an anchor reaches above and below its middle when drawn: its own
+  /// reach, or the floor a link attached to nothing with any height is given
+  /// so that a bracket of no length is never asked for -- the vertex stage
+  /// collapses a beam whose ends coincide, and the anchor would simply not
+  /// appear. Used both to draw the anchor and to decide what it overlaps, so
+  /// that two anchors drawn across each other are two the lanes separate.
+  [[nodiscard]] static float drawnHalfExtent(const Edge &edge);
+  /// The vertical reach @ref drawnHalfExtent gives, as an extent to hand to
+  /// xudu::assignAnchorLanes().
+  [[nodiscard]] static AnchorExtent drawnExtent(const Edge &edge);
 
   /// Both ends of one link end at its document's margin, or nothing if the
   /// pages holding it are not built yet.
@@ -247,17 +263,20 @@ private:
             std::size_t documentsApart, std::uint32_t colour, std::uint32_t tag,
             float phase = 0.0F);
 
-  /// A short bracket down the page margin covering one end of a link. Which
-  /// page of a stack a link attaches to is otherwise only implied by where a
-  /// beam happens to meet it, which at any distance is a guess.
-  void anchorStub(const Edge &edge, std::uint32_t colour, std::uint32_t tag,
-                  bool farEnd);
-
-  /// Draw one anchor lane in the margin when up to 4 link anchors overlap
-  /// vertically along the same document edge.
+  /**
+   * @brief Mark one end of a link down its document's margin.
+   *
+   * Which page of a stack a link attaches to, and how far down it reaches, is
+   * otherwise only implied by where a beam happens to meet the document, which
+   * at any distance is a guess. The mark is a bar filling this anchor's slice
+   * of the margin -- @p laneIndex of @p laneCount, worked out by
+   * xudu::assignAnchorLanes() -- over the anchor's whole height. One lane
+   * fills the margin outright, which is the ordinary case and the one this
+   * reduces to.
+   */
   void drawMarginAnchorLane(const Edge &edge, std::uint32_t colour,
-                            std::uint32_t tag, bool farEnd, bool towardsRight,
-                            int laneIndex, int laneCount, bool isActive);
+                            std::uint32_t tag, bool farEnd, int laneIndex,
+                            int laneCount, bool isActive);
 
   /// @p colour with its alpha scaled by @p factor, for a beam that has to be
   /// as faint as the documents it runs between.
