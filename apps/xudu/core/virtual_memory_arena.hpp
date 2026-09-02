@@ -70,29 +70,18 @@ public:
    */
   bool commitAnonymous(void *targetAddr, std::size_t length);
 
-  /**
-   * @brief Map anonymous zeroed pages at a fixed virtual address within the
-   * arena.
-   *
-   * Used for withheld/redacted holes and unallocated sparse ranges.
-   *
-   * @param targetAddr Address within the reserved arena (page-aligned).
-   * @param length Number of bytes to map (page-aligned).
-   * @return true on success.
-   */
-  bool mapZeroPagesFixed(void *targetAddr, std::size_t length);
-
-  /**
-   * @brief Atomic zero-copy hot-swapping or copying of decrypted plaintext over
-   * a span.
-   *
-   * @param targetAddr Destination address within the arena.
-   * @param sourceData Source plaintext buffer.
-   * @param length Number of bytes to write.
-   * @return true on success.
-   */
-  bool remapSpanFixed(void *targetAddr, const void *sourceData,
-                      std::size_t length);
+  // mapZeroPagesFixed and remapSpanFixed used to live here, described as the
+  // mechanism for withheld holes and for hot-swapping decrypted plaintext
+  // into a span. Neither had a production caller, and neither could have
+  // worked: mmap(MAP_FIXED) needs page-aligned arguments, holes are byte
+  // ranges, and the design's own worked example -- [10000, 25000) -- returns
+  // EINVAL. Even aligned, mapping zero pages over a hole would flatten the
+  // neighbouring plaintext sharing those pages. mapFileFixed above is the
+  // one that survived, and its two callers check alignment before calling.
+  //
+  // Holes need no memory mapping: Resolver::resolve answers WithheldRedacted
+  // for the span and the renderer draws a blackout over it, which is where
+  // the behaviour actually lives.
 
   /**
    * @brief Synchronize dirty pages in a range to backing storage or disk.

@@ -6,6 +6,7 @@
 #define XUDU_IDENTITY_NETWORK_CONTROLLER_HPP
 
 #include <expected>
+#include <functional>
 #include <libtorrent/alert_types.hpp>
 #include <libtorrent/bdecode.hpp>
 #include <libtorrent/entry.hpp>
@@ -18,6 +19,7 @@
 #include <memory>
 #include <mutex>
 #include <optional>
+#include <set>
 #include <span>
 #include <string>
 #include <string_view>
@@ -25,12 +27,27 @@
 #include <vector>
 
 #include "../torrent.hpp"
+#include "../transcopyright_crypto.hpp"
 #include "../user_permascroll.hpp"
 #include "identity_layout.hpp"
 #include "identity_serialization.hpp"
 #include "identity_validation.hpp"
+#include "payment_verifier.hpp"
 
 namespace xudu::identity {
+
+/**
+ * @struct TranscopyrightOffer
+ * @brief A span this node sells, and the key that opens it.
+ *
+ * The CEK is the whole of what a reader is paying for, so this never leaves
+ * the author's machine except wrapped under a paying reader's public key.
+ */
+struct TranscopyrightOffer {
+  Hash32 keyId{};
+  xudu::TranscopyrightDescriptor descriptor{};
+  crypto::Key32 cek{};
+};
 
 inline constexpr const char *kExtIdentityLookupName = "xudu_identity_lookup";
 inline constexpr const char *kExtOracleVoteName     = "xudu_oracle_vote";
@@ -43,6 +60,11 @@ inline constexpr int kExtOracleVerifyMsgId   = 4;
 inline constexpr int kExtTranscopyrightMsgId = 5;
 
 inline constexpr std::uint8_t kBtMsgExtended = 20;
+
+/// How long an invoice stands. Short, because the challenge inside it is
+/// single-use and held in memory until spent: a long window is an author
+/// holding open state for readers who wandered off.
+inline constexpr std::uint64_t kInvoiceLifetimeSeconds = 300ULL;
 
 class IdentityNetworkController;
 
@@ -105,7 +127,59 @@ public:
     return pendingChallengeNonce_;
   }
 
+  /**
+   * @brief Begin buying the span @p keyId opens, over this connection.
+   *
+   * Mints the ephemeral X25519 keypair the CEK will come back wrapped under
+   * and asks for an invoice. Recording the purchase before asking is what
+   * lets the reader tell an answer to its own question from an invoice a peer
+   * sent unprompted.
+   *
+   * @param ticket Whatever the configured settlement system calls proof of
+   *        payment. Opaque here; only the seeder's PaymentVerifier reads it.
+   */
+  bool beginTranscopyrightPurchase(const Hash32 &keyId,
+                                   std::uint64_t requestedBytes,
+                                   const Fingerprint &payerWallet,
+                                   std::string ticket);
+
+  /// Whether this connection is part-way through buying @p keyId.
+  [[nodiscard]] bool isPurchasing(const Hash32 &keyId) const {
+    return pendingPurchases_.contains(keyId);
+  }
+
+  /// The last identity this peer sent that proved to be in the ledger we
+  /// follow. Empty until one does: an entry whose proof did not check is not
+  /// a weaker answer to be kept with a caveat, it is an answer to discard.
+  [[nodiscard]] const std::optional<IdentityEntry> &
+  lastVerifiedIdentity() const noexcept {
+    return lastVerifiedIdentity_;
+  }
+
+  /**
+   * @brief Divert outgoing frames instead of writing them to the connection.
+   *
+   * The peer wire is otherwise only reachable through a live libtorrent
+   * connection, which meant none of these handlers could be exercised without
+   * two real peers -- and that is how four of them came to be
+   * decode-and-discard stubs that nothing noticed. With a sink, two plugins
+   * can be wired to each other in a test and the whole exchange driven
+   * through the real encoders and decoders.
+   */
+  using FrameSink = std::function<bool(int remoteExtId, std::string_view)>;
+  void setFrameSink(FrameSink sink) { frameSink_ = std::move(sink); }
+
 private:
+  /// A purchase this connection has started but not finished. The private
+  /// half of kemKeys never leaves the process: it is what makes the delivered
+  /// CEK readable here and nowhere else.
+  struct PendingPurchase {
+    crypto::X25519KeyPair kemKeys{};
+    Fingerprint payerWallet{};
+    std::string ticket;
+    TcInvoiceResponseMsg invoice{};
+  };
+
   bool sendExtendedRaw(int remoteExtId, std::string_view payload);
 
   libtorrent::peer_connection_handle pc_;
@@ -121,6 +195,9 @@ private:
   bool isIsolated_{false};
   std::optional<Fingerprint> authenticatedIdentity_;
   std::optional<Hash32> pendingChallengeNonce_;
+  std::map<Hash32, PendingPurchase> pendingPurchases_;
+  std::optional<IdentityEntry> lastVerifiedIdentity_;
+  FrameSink frameSink_;
 };
 
 /**
@@ -207,6 +284,50 @@ public:
                        std::string_view masterPublicKeyArmored);
 
   /**
+   * @brief Register a span this node sells, and the key that opens it.
+   *
+   * Only the author holds this. A seeder that has not been given an offer for
+   * a keyId cannot invoice for it and cannot deliver it, which is what stops
+   * a relay from selling somebody else's work.
+   */
+  void offerTranscopyright(const TranscopyrightOffer &offer);
+
+  /// The offer for @p keyId, if this node has one.
+  [[nodiscard]] std::optional<TranscopyrightOffer>
+  transcopyrightOffer(const Hash32 &keyId) const;
+
+  /**
+   * @brief Mint a single-use payment challenge for @p keyId.
+   *
+   * Binds a settlement request to the invoice that prompted it: a request
+   * quoting a challenge this node never issued, or one already spent, is a
+   * replay.
+   */
+  [[nodiscard]] Hash32 issuePaymentChallenge(const Hash32 &keyId);
+
+  /// Spend a challenge. False if it was never issued for @p keyId, or has
+  /// already been used -- both of which mean the request cannot be honoured.
+  [[nodiscard]] bool consumePaymentChallenge(const Hash32 &keyId,
+                                             const Hash32 &challenge);
+
+  /// How this node decides it has been paid. Defaults to RefusingVerifier:
+  /// a node not told how it gets paid is not one that gives things away.
+  void setPaymentVerifier(std::shared_ptr<PaymentVerifier> verifier);
+  [[nodiscard]] PaymentVerifier &paymentVerifier() const noexcept {
+    return *paymentVerifier_;
+  }
+
+  /// Where a reader's unlocked keys go. Set by whatever owns the Resolver,
+  /// since the wire layer has no business knowing about content caches.
+  using CekSink =
+      std::function<void(const Hash32 &keyId, const crypto::Key32 &cek,
+                         std::uint64_t pricePaid, std::string_view currency)>;
+  void setCekSink(CekSink sink);
+  void deliverUnlockedCek(const Hash32 &keyId, const crypto::Key32 &cek,
+                          std::uint64_t pricePaid,
+                          std::string_view currency) const;
+
+  /**
    * @brief The device key @p fingerprint is known to have delegated to, if
    *        any.
    *
@@ -249,6 +370,15 @@ private:
 
   mutable std::mutex delegationMutex_;
   std::map<Fingerprint, std::array<std::uint8_t, 32>> delegatedDeviceKeys_;
+
+  mutable std::mutex transcopyrightMutex_;
+  std::map<Hash32, TranscopyrightOffer> offers_;
+  /// Outstanding challenges per keyId. A set rather than a single value
+  /// because several readers can be part-way through buying the same span.
+  std::map<Hash32, std::set<Hash32>> openChallenges_;
+  std::shared_ptr<PaymentVerifier> paymentVerifier_{
+      std::make_shared<RefusingVerifier>()};
+  CekSink cekSink_;
 };
 
 } // namespace xudu::identity

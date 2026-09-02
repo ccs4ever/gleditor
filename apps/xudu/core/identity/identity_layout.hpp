@@ -385,6 +385,42 @@ struct PeerChallengeResponse {
   [[nodiscard]] bool operator==(const PeerChallengeResponse &) const = default;
 };
 
+/// Audit proof path element for Merkle tree inclusion verification.
+struct MerkleProofElement {
+  Hash32 hash{};
+  bool isLeft{false};
+
+  [[nodiscard]] bool operator==(const MerkleProofElement &) const = default;
+};
+
+/// Merkle inclusion proof for a ledger record.
+struct LedgerMerkleProof {
+  std::size_t leafIndex{};
+  std::size_t maxIndex{};
+  Hash32 leafHash{};
+  Hash32 rootHash{};
+  std::vector<MerkleProofElement> path;
+
+  [[nodiscard]] bool verify(const Hash32 &expectedRoot) const;
+  [[nodiscard]] bool operator==(const LedgerMerkleProof &) const = default;
+};
+
+/**
+ * @struct IdentityResponseMsg
+ * @brief An identity, together with the proof that it is in the ledger.
+ *
+ * The two travel as one message because either alone is useless: an entry
+ * without a proof is a claim, and a proof without the entry it covers has
+ * nothing to be a proof of.
+ */
+struct IdentityResponseMsg {
+  IdentityEntry entry{};
+  LedgerMerkleProof proof{};
+
+  [[nodiscard]] bool isValid() const noexcept { return entry.isValid(); }
+  [[nodiscard]] bool operator==(const IdentityResponseMsg &) const = default;
+};
+
 /// BEP 10 Identity Query request payload.
 struct IdentityQueryMsg {
   Fingerprint targetFingerprint{};

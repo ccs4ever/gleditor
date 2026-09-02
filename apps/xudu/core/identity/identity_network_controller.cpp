@@ -170,8 +170,30 @@ bool IdentityPeerPlugin::on_extended(int length, int /*msg*/,
   }
 
   case MessageType::IdentityResponse: {
-    const auto idRes = decodeIdentityEntry(frame.payload);
-    return idRes.has_value();
+    // Decoded and thrown away before, which made an identity lookup a way of
+    // learning what a peer wished were true.
+    const auto respRes = decodeIdentityResponse(frame.payload);
+    if (!respRes) {
+      isolateAndDisconnect("Malformed identity response");
+      return false;
+    }
+    if (!respRes->entry.isValid()) {
+      isolateAndDisconnect("Identity response carries an invalid entry");
+      return false;
+    }
+    if (!controller_) {
+      return false;
+    }
+    // Against our own view of the root: a proof checked against the root the
+    // proof itself carries proves only that the sender can do arithmetic.
+    const auto expectedRoot = controller_->pipeline().root();
+    if (!EnginePipeline::verifyInclusion(respRes->entry, respRes->proof,
+                                         expectedRoot)) {
+      isolateAndDisconnect("Identity is not in the ledger we are following");
+      return false;
+    }
+    lastVerifiedIdentity_ = respRes->entry;
+    return true;
   }
 
   case MessageType::PeerAuthChallenge: {
@@ -301,24 +323,136 @@ bool IdentityPeerPlugin::on_extended(int length, int /*msg*/,
     return true;
   }
 
+    // -- Transcopyright: the author's side ------------------------------------
+
   case MessageType::TcInvoiceQuery: {
     const auto qRes = decodeTcInvoiceQuery(frame.payload);
-    return qRes.has_value();
-  }
+    if (!qRes || !controller_) {
+      return false;
+    }
+    // Only the author holds an offer for a keyId, so a relay cannot invoice
+    // for somebody else's work. Silence rather than an error: not selling
+    // something is not a protocol violation.
+    const auto offer = controller_->transcopyrightOffer(qRes->keyId);
+    if (!offer) {
+      return true;
+    }
 
-  case MessageType::TcInvoiceResponse: {
-    const auto respRes = decodeTcInvoiceResponse(frame.payload);
-    return respRes.has_value();
+    TcInvoiceResponseMsg resp;
+    resp.keyId          = qRes->keyId;
+    resp.flatFee        = offer->descriptor.flatFee;
+    resp.currencySymbol = offer->descriptor.currencySymbol;
+    resp.authorWallet   = offer->descriptor.authorWallet;
+    resp.authorPubKey   = offer->descriptor.authorPubKey;
+    resp.priceAtomicUnits =
+        offer->descriptor.flatFee
+            ? offer->descriptor.priceAtomicUnits
+            : offer->descriptor.priceAtomicUnits * qRes->requestedBytes;
+    resp.paymentChallenge = controller_->issuePaymentChallenge(qRes->keyId);
+    resp.expiresTimestamp = unixNow() + kInvoiceLifetimeSeconds;
+    if (resp.paymentChallenge.isZero()) {
+      return false; // no entropy; better to answer nothing than predictably
+    }
+    return sendTcInvoiceResponse(resp);
   }
 
   case MessageType::TcSettleRequest: {
     const auto setRes = decodeTcSettleRequest(frame.payload);
-    return setRes.has_value();
+    if (!setRes || !controller_) {
+      return false;
+    }
+    if (!setRes->isValid()) {
+      isolateAndDisconnect("Malformed transcopyright settlement request");
+      return false;
+    }
+    const auto offer = controller_->transcopyrightOffer(setRes->keyId);
+    if (!offer) {
+      return true;
+    }
+    // The challenge ties this request to an invoice this node issued, and is
+    // spent on use -- so a captured request buys nothing the second time.
+    if (!controller_->consumePaymentChallenge(setRes->keyId,
+                                              setRes->paymentChallenge)) {
+      isolateAndDisconnect("Settlement quotes an unknown or spent challenge");
+      return false;
+    }
+    const auto expected = offer->descriptor.flatFee
+                              ? offer->descriptor.priceAtomicUnits
+                              : setRes->amountAtomicUnits;
+    if (setRes->amountAtomicUnits < expected) {
+      return true; // underpaid: no key, and nothing to say about it
+    }
+    if (!controller_->paymentVerifier().verify(*setRes, expected)) {
+      return true;
+    }
+
+    // Paid. The CEK travels wrapped under the payer's X25519 key, so it is
+    // readable by the peer that bought it and by nobody watching.
+    TcKeyDeliveryMsg delivery;
+    delivery.keyId = setRes->keyId;
+    try {
+      delivery.wrappedCek =
+          crypto::wrapCek(offer->cek, setRes->payerPubKey.bytes);
+    } catch (const std::exception &) {
+      return false;
+    }
+    return sendTcKeyDelivery(delivery);
+  }
+
+    // -- Transcopyright: the reader's side ------------------------------------
+
+  case MessageType::TcInvoiceResponse: {
+    const auto respRes = decodeTcInvoiceResponse(frame.payload);
+    if (!respRes || !controller_) {
+      return false;
+    }
+    if (!respRes->isValid() || respRes->paymentChallenge.isZero()) {
+      return false;
+    }
+    // An invoice for something this node never asked about is unsolicited,
+    // and answering it would let any peer start a purchase on our behalf.
+    const auto pending = pendingPurchases_.find(respRes->keyId);
+    if (pending == pendingPurchases_.end()) {
+      return true;
+    }
+    if (respRes->expiresTimestamp != 0 &&
+        respRes->expiresTimestamp < unixNow()) {
+      return true;
+    }
+
+    pending->second.invoice = *respRes;
+
+    TcSettleRequestMsg settle;
+    settle.keyId              = respRes->keyId;
+    settle.paymentChallenge   = respRes->paymentChallenge;
+    settle.amountAtomicUnits  = respRes->priceAtomicUnits;
+    settle.payerWallet        = pending->second.payerWallet;
+    settle.payerPubKey        = PubKey32{pending->second.kemKeys.publicKey};
+    settle.micropaymentTicket = pending->second.ticket;
+    return sendTcSettleRequest(settle);
   }
 
   case MessageType::TcKeyDelivery: {
     const auto delRes = decodeTcKeyDelivery(frame.payload);
-    return delRes.has_value();
+    if (!delRes || !controller_) {
+      return false;
+    }
+    const auto pending = pendingPurchases_.find(delRes->keyId);
+    if (pending == pendingPurchases_.end()) {
+      return true; // a key for something we are not buying
+    }
+    const auto cek = crypto::unwrapCek(delRes->wrappedCek,
+                                       pending->second.kemKeys.privateKey);
+    if (!cek) {
+      // Wrapped for somebody else, or tampered with. Either way it is not
+      // the key we paid for.
+      return false;
+    }
+    controller_->deliverUnlockedCek(delRes->keyId, *cek,
+                                    pending->second.invoice.priceAtomicUnits,
+                                    pending->second.invoice.currencySymbol);
+    pendingPurchases_.erase(pending);
+    return true;
   }
 
   default:
@@ -326,6 +460,31 @@ bool IdentityPeerPlugin::on_extended(int length, int /*msg*/,
   }
 
   return false;
+}
+
+bool IdentityPeerPlugin::beginTranscopyrightPurchase(
+    const Hash32 &keyId, const std::uint64_t requestedBytes,
+    const Fingerprint &payerWallet, std::string ticket) {
+  if (keyId.isZero()) {
+    return false;
+  }
+  PendingPurchase purchase;
+  try {
+    purchase.kemKeys = crypto::X25519KeyPair::generate();
+  } catch (const std::exception &) {
+    return false;
+  }
+  purchase.payerWallet = payerWallet;
+  purchase.ticket      = std::move(ticket);
+  // Recorded before the question is asked, so that the answer -- which
+  // arrives on the same connection -- can be told from an invoice some peer
+  // sent unprompted.
+  pendingPurchases_.insert_or_assign(keyId, std::move(purchase));
+
+  TcInvoiceQueryMsg query;
+  query.keyId          = keyId;
+  query.requestedBytes = requestedBytes;
+  return sendTcInvoiceQuery(query);
 }
 
 bool IdentityPeerPlugin::sendExtendedRaw(int remoteExtId,
@@ -336,6 +495,12 @@ bool IdentityPeerPlugin::sendExtendedRaw(int remoteExtId,
   // extension the low byte happens to name.
   if (remoteExtId <= 0 || remoteExtId > 0xFF) {
     return false;
+  }
+  // A sink takes the frame in place of the connection, and gets the payload
+  // rather than the BitTorrent length prefix and message id -- which is what
+  // the far end's on_extended is handed anyway.
+  if (frameSink_) {
+    return frameSink_(remoteExtId, payload);
   }
   // peer_connection_handle holds a weak reference, and a connection can be
   // torn down between a plugin being handed work and the plugin doing it.
@@ -397,9 +562,14 @@ bool IdentityPeerPlugin::sendIdentityQuery(const Fingerprint &fp) {
   return sendExtendedRaw(remoteIdentityLookupId_, frame);
 }
 
-bool IdentityPeerPlugin::sendIdentityResponse(
-    const IdentityEntry &entry, const LedgerMerkleProof & /*proof*/) {
-  const std::string bencoded = serialize(entry);
+bool IdentityPeerPlugin::sendIdentityResponse(const IdentityEntry &entry,
+                                              const LedgerMerkleProof &proof) {
+  // The proof used to be accepted here and dropped, so what went out was an
+  // entry nobody could check against a root.
+  IdentityResponseMsg resp;
+  resp.entry                 = entry;
+  resp.proof                 = proof;
+  const std::string bencoded = serialize(resp);
   const std::string frame =
       encodeExtendedMessage(MessageType::IdentityResponse, bencoded);
   return sendExtendedRaw(remoteIdentityLookupId_, frame);
@@ -578,6 +748,80 @@ bool IdentityNetworkController::trustDelegation(
   delegatedDeviceKeys_.insert_or_assign(delegation.masterFingerprint,
                                         delegation.devicePublicKey.bytes);
   return true;
+}
+
+void IdentityNetworkController::offerTranscopyright(
+    const TranscopyrightOffer &offer) {
+  std::scoped_lock lock(transcopyrightMutex_);
+  offers_.insert_or_assign(offer.keyId, offer);
+}
+
+std::optional<TranscopyrightOffer>
+IdentityNetworkController::transcopyrightOffer(const Hash32 &keyId) const {
+  std::scoped_lock lock(transcopyrightMutex_);
+  const auto found = offers_.find(keyId);
+  if (found == offers_.end()) {
+    return std::nullopt;
+  }
+  return found->second;
+}
+
+Hash32 IdentityNetworkController::issuePaymentChallenge(const Hash32 &keyId) {
+  Hash32 challenge;
+  if (RAND_bytes(challenge.bytes.data(),
+                 static_cast<int>(challenge.bytes.size())) != 1) {
+    // A predictable challenge is worse than none: it lets a settlement
+    // request be prepared before the invoice that supposedly prompted it.
+    return Hash32{};
+  }
+  std::scoped_lock lock(transcopyrightMutex_);
+  openChallenges_[keyId].insert(challenge);
+  return challenge;
+}
+
+bool IdentityNetworkController::consumePaymentChallenge(
+    const Hash32 &keyId, const Hash32 &challenge) {
+  if (challenge.isZero()) {
+    return false;
+  }
+  std::scoped_lock lock(transcopyrightMutex_);
+  const auto forKey = openChallenges_.find(keyId);
+  if (forKey == openChallenges_.end()) {
+    return false;
+  }
+  // Erasing is the point: a challenge answers exactly one settlement, so
+  // replaying a captured request buys nothing the second time.
+  const bool had = forKey->second.erase(challenge) > 0;
+  if (forKey->second.empty()) {
+    openChallenges_.erase(forKey);
+  }
+  return had;
+}
+
+void IdentityNetworkController::setPaymentVerifier(
+    std::shared_ptr<PaymentVerifier> verifier) {
+  std::scoped_lock lock(transcopyrightMutex_);
+  paymentVerifier_ = verifier ? std::move(verifier)
+                              : std::static_pointer_cast<PaymentVerifier>(
+                                    std::make_shared<RefusingVerifier>());
+}
+
+void IdentityNetworkController::setCekSink(CekSink sink) {
+  std::scoped_lock lock(transcopyrightMutex_);
+  cekSink_ = std::move(sink);
+}
+
+void IdentityNetworkController::deliverUnlockedCek(
+    const Hash32 &keyId, const crypto::Key32 &cek,
+    const std::uint64_t pricePaid, const std::string_view currency) const {
+  CekSink sink;
+  {
+    std::scoped_lock lock(transcopyrightMutex_);
+    sink = cekSink_;
+  }
+  if (sink) {
+    sink(keyId, cek, pricePaid, currency);
+  }
 }
 
 std::optional<std::array<std::uint8_t, 32>>

@@ -26,25 +26,9 @@ inline constexpr std::uint64_t kMinVoterAgeSeconds = 30ULL * 86400ULL;
 // Maximum allowed clock skew in seconds (5 minutes)
 inline constexpr std::uint64_t kMaxClockSkewSeconds = 300ULL;
 
-/// Audit proof path element for Merkle tree inclusion verification
-struct MerkleProofElement {
-  Hash32 hash{};
-  bool isLeft{false};
-
-  [[nodiscard]] bool operator==(const MerkleProofElement &) const = default;
-};
-
-/// Merkle inclusion proof for a ledger record
-struct LedgerMerkleProof {
-  std::size_t leafIndex{};
-  std::size_t maxIndex{};
-  Hash32 leafHash{};
-  Hash32 rootHash{};
-  std::vector<MerkleProofElement> path;
-
-  [[nodiscard]] bool verify(const Hash32 &expectedRoot) const;
-  [[nodiscard]] bool operator==(const LedgerMerkleProof &) const = default;
-};
+// MerkleProofElement and LedgerMerkleProof live in identity_layout.hpp: they
+// are wire types now that a proof travels with the entry it covers, and
+// identity_serialization.hpp cannot include this header to reach them.
 
 /// Computes SHA-256 leaf hash of an IdentityEntry
 [[nodiscard]] Hash32 computeLeafHash(const IdentityEntry &entry);

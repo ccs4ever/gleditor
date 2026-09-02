@@ -128,26 +128,49 @@ To guarantee cryptographic integrity:
    declaring the exact byte offsets, lengths, cryptographic commitments, and
    pricing of all holes.
 
-### Virtual Memory Hot-Swapping (`VirtualMemoryArena`)
+### Virtual Memory (`VirtualMemoryArena`)
 
-The virtual memory subsystem (`VirtualMemoryArena`) allocates a 64 GiB sparse
-address space using `mmap(MAP_ANONYMOUS | MAP_NORESERVE)`.
-- When a hole is encountered, `mapZeroPagesFixed()` maps read-only physical zero
-  pages into the span, preventing memory allocation overhead.
-- When a Transcopyright span is unlocked, `remapSpanFixed()` dynamically updates
-  the virtual address mapping with the decrypted plaintext without modifying
-  surrounding pages.
+The virtual memory subsystem reserves a sparse address space with
+`mmap(PROT_NONE, MAP_PRIVATE | MAP_ANONYMOUS)` and commits segments into it as
+they are opened. `SegmentedPrimediaSpool` and `SegmentedOpsSpool` map sealed
+segment files into it with `mapFileFixed()`, both checking page alignment
+first and falling back to a plain read when a segment does not qualify.
+
+**Holes need no memory mapping, and an earlier version of this section was
+wrong to say they did.** It described `mapZeroPagesFixed()` mapping zero pages
+over a hole and `remapSpanFixed()` hot-swapping decrypted plaintext into one.
+Neither function ever had a caller outside its own test, and neither could
+have done that job: `mmap(MAP_FIXED)` requires page-aligned addresses and
+lengths, a hole is an arbitrary byte range, and the worked example this
+document uses — $[10000, 25000)$ — returns `EINVAL`. Page-aligning it would
+not help either, since zeroing whole pages would flatten the surrounding
+plaintext that shares them.
+
+Both functions have been removed. What a hole actually does is simpler and
+lives a layer up: `Resolver::resolve()` answers `WithheldRedacted` or
+`TranscopyrightLocked` for the span, and the renderer draws over it. The
+coordinate space is preserved by the segment table, not by the page tables.
 
 ### Cryptographic Subsystem (`transcopyright_crypto.hpp`)
 
 The cryptographic engine provides:
 - **ChaCha20-Poly1305 AEAD**: Authenticated encryption and decryption with 24-byte
   extended nonces.
-- **Seekable Block Decryption (`decryptSeekableSpan`)**: Decrypts arbitrary sub-spans
-  without decrypting the entire multi-megabyte stream:
-  $$\text{BlockIndex} = \lfloor \text{OffsetInSegment} / 64 \rfloor$$
-  ChaCha20 initializes its internal 32-bit counter to $\text{BlockIndex}$,
-  generating the keystream slice on the fly.
+- **Span Slicing (`decryptSpanSlice`)**: Decrypts a segment and returns the
+  requested range of the plaintext.
+
+  This was specified as seekable block decryption — set ChaCha20's counter to
+  $\lfloor \text{OffsetInSegment} / 64 \rfloor$ and generate only the keystream
+  the range needs — and named `decryptSeekableSpan`. **That specification was
+  not implementable as written and was never implemented.** A Poly1305 tag
+  authenticates a whole message, so decrypting a fragment in isolation means
+  returning bytes nothing has vouched for, in a subsystem whose entire purpose
+  is that a reader can trust what they paid for. The code always decrypted the
+  whole segment; only the name and this paragraph claimed otherwise.
+
+  Genuine random access needs a chunked AEAD framing with a tag per chunk.
+  Until then, callers that resolve the same span repeatedly should cache the
+  plaintext rather than decrypt per frame.
 - **X25519 Key Encapsulation (KEM)**: Wraps Content Encryption Keys (CEKs) under
   recipient public keys.
 - **HKDF-SHA256**: Deterministically derives per-span CEKs from master secret keys.
@@ -170,19 +193,43 @@ sequenceDiagram
     Reader->>Seeder: TcInvoiceQueryMsg (keyId, requestedBytes)
     Seeder-->>Reader: TcInvoiceResponseMsg (keyId, priceAtomicUnits, authorWallet, paymentChallenge)
     Reader->>Reader: Generate Micropayment Ticket (xucoin / state-channel)
-    Reader->>Seeder: TcSettleRequestMsg (keyId, paymentChallenge, micropaymentTicket)
-    Seeder->>Seeder: Verify Payment Ticket
-    Seeder-->>Reader: TcKeyDeliveryMsg (keyId, wrappedCek, authorSignature)
+    Reader->>Seeder: TcSettleRequestMsg (keyId, paymentChallenge, ticket, payerPubKey)
+    Seeder->>Seeder: PaymentVerifier::verify (interface; no backend implemented)
+    Seeder-->>Reader: TcKeyDeliveryMsg (keyId, wrappedCek under payerPubKey)
     Reader->>LMDB: Put CEK into LMDB 'ceks' Table
-    Reader->>Reader: Resolver::resolve(span) -> VerifiedBytes (Seekable Decrypt)
+    Reader->>Reader: Resolver::resolve(span) -> VerifiedBytes
 ```
 
 ### Message Structs (`identity_layout.hpp`)
 1. **`TcInvoiceQueryMsg`**: Requests an invoice and pricing for a `keyId`.
-2. **`TcInvoiceResponseMsg`**: Delivers signed pricing, wallet address, and an
+2. **`TcInvoiceResponseMsg`**: Delivers pricing, wallet address, and an
    ephemeral `paymentChallenge`.
-3. **`TcSettleRequestMsg`**: Provides the signed micropayment ticket or proof.
-4. **`TcKeyDeliveryMsg`**: Returns the encrypted CEK and author signature.
+3. **`TcSettleRequestMsg`**: Provides the micropayment ticket, and the X25519
+   public key the CEK is to be wrapped under.
+4. **`TcKeyDeliveryMsg`**: Returns the wrapped CEK.
+
+### What is implemented, and what settlement is not
+
+The protocol above is implemented: an author registers an offer
+(`IdentityNetworkController::offerTranscopyright`), invoices on request with a
+single-use `paymentChallenge`, and on settlement wraps the CEK under the
+payer's X25519 key. A reader that never asked for an invoice ignores one; a
+challenge is spent when used, so a captured settlement request buys nothing
+twice; a CEK wrapped for a different reader does not unwrap.
+
+**Settlement itself is not implemented, and nothing here should be read as
+claiming otherwise.** There is no xucoin, no state channel and no Lightning
+node in this tree, so what a `micropaymentTicket` should contain is a question
+about a system that does not exist yet. The decision is left behind a
+`PaymentVerifier` interface:
+
+- `RefusingVerifier` is the default. A node that has not been told how it gets
+  paid refuses to sell, which is not the same as giving the work away.
+- `AlwaysAcceptVerifier` is for development and warns on every call, because a
+  seeder running it hands paywalled content to anyone who asks.
+
+Implementing real settlement means implementing `PaymentVerifier` and nothing
+else on this path.
 
 ### LMDB Storage (`lmdb_cache.hpp`)
 The reader persists unlocked CEKs in LMDB table `ceks`, indexed by the 32-byte
@@ -245,10 +292,11 @@ In the Zigzag visualizer:
 | :--- | :--- | :--- |
 | **Core Models** | [`apps/xudu/core/scroll.hpp`](apps/xudu/core/scroll.hpp) | `HoleReason`, `SegmentKind`, `TranscopyrightDescriptor`, `PublishedHoleRecord` |
 | **Publication** | [`apps/xudu/core/publication.hpp/.cpp`](apps/xudu/core/publication.hpp) | Bencode hole serialization and manifest verification |
-| **Cryptography** | [`apps/xudu/core/transcopyright_crypto.hpp/.cpp`](apps/xudu/core/transcopyright_crypto.hpp) | ChaCha20-Poly1305, seekable decrypt, HKDF, X25519 KEM |
-| **Storage** | [`apps/xudu/core/lmdb_cache.hpp`](apps/xudu/core/lmdb_cache.hpp) | LMDB `ceks` key-storage table |
-| **Memory** | [`apps/xudu/core/virtual_memory_arena.hpp/.cpp`](apps/xudu/core/virtual_memory_arena.hpp) | Fixed zero-page mapping and span hot-swapping |
+| **Cryptography** | [`apps/xudu/core/transcopyright_crypto.hpp/.cpp`](apps/xudu/core/transcopyright_crypto.hpp) | ChaCha20-Poly1305, whole-segment decrypt with slicing, HKDF, X25519 KEM |
+| **Storage** | [`apps/xudu/core/lmdb_cache.hpp`](apps/xudu/core/lmdb_cache.hpp) | LMDB `ceks` key-storage table, owner-only under `$XDG_CACHE_HOME` |
+| **Memory** | [`apps/xudu/core/virtual_memory_arena.hpp/.cpp`](apps/xudu/core/virtual_memory_arena.hpp) | Sparse reservation and page-aligned segment mapping. Not used for holes — see §3 |
 | **BEP 10 Protocol** | [`apps/xudu/core/identity/`](apps/xudu/core/identity/) | Micropayment layout, serialization, and network controller |
+| **Settlement** | [`apps/xudu/core/identity/payment_verifier.hpp`](apps/xudu/core/identity/payment_verifier.hpp) | **Interface only.** No settlement backend exists; the default refuses every payment |
 | **Resolver & Store** | [`apps/xudu/core/resolver.hpp/.cpp`](apps/xudu/core/resolver.hpp), [`apps/xudu/core/store.hpp/.cpp`](apps/xudu/core/store.hpp) | Multi-span resolution, unlock pipeline, and caching |
 | **2D / 3D Rendering**| [`apps/xudu/session.cpp`](apps/xudu/session.cpp), [`apps/xudu/beams.cpp`](apps/xudu/beams.cpp) | Obsidian blackout quads, amber ribbons, and pulse shaders |
 | **Zigzag Engine** | [`apps/zigzag/core/compact_zzcell.hpp`](apps/zigzag/core/compact_zzcell.hpp), [`apps/zigzag/core/unified_transclusion_engine.cpp`](apps/zigzag/core/unified_transclusion_engine.cpp) | Holographic cell styling and manifold projection |

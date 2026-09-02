@@ -25,6 +25,21 @@ decodeIdentityEntry(std::span<const std::uint8_t> bytes);
 [[nodiscard]] std::expected<IdentityEntry, SerializationError>
 decodeIdentityEntry(const libtorrent::bdecode_node &node);
 
+/**
+ * @brief An identity together with the proof it is in the ledger.
+ *
+ * The two travel as one message because either alone is useless: an entry
+ * without a proof is a claim, and a proof without the entry it covers has
+ * nothing to be a proof of. sendIdentityResponse used to take a proof and
+ * drop it, so the entry went out unaccompanied and no receiver could check
+ * inclusion even in principle.
+ */
+[[nodiscard]] std::expected<IdentityResponseMsg, SerializationError>
+decodeIdentityResponse(std::span<const std::uint8_t> bytes);
+
+[[nodiscard]] std::expected<IdentityResponseMsg, SerializationError>
+decodeIdentityResponse(const libtorrent::bdecode_node &node);
+
 [[nodiscard]] std::expected<VoteEntry, SerializationError>
 decodeVoteEntry(std::span<const std::uint8_t> bytes);
 
@@ -101,6 +116,7 @@ decodeTcKeyDelivery(const libtorrent::bdecode_node &node);
                                               bool withSignature = true);
 [[nodiscard]] libtorrent::entry encodeToEntry(const VoteEntry &vote,
                                               bool withSignature = true);
+[[nodiscard]] libtorrent::entry encodeToEntry(const IdentityResponseMsg &resp);
 [[nodiscard]] libtorrent::entry encodeToEntry(const BlockHeader &header);
 [[nodiscard]] libtorrent::entry encodeToEntry(const OracleAttestation &att);
 [[nodiscard]] libtorrent::entry encodeToEntry(const PeerChallenge &challenge);
@@ -116,6 +132,7 @@ encodeToEntry(const PeerChallengeResponse &resp);
 // Serialization to bencoded binary string
 [[nodiscard]] std::string serialize(const IdentityEntry &entry);
 [[nodiscard]] std::string serialize(const VoteEntry &vote);
+[[nodiscard]] std::string serialize(const IdentityResponseMsg &resp);
 [[nodiscard]] std::string serialize(const BlockHeader &header);
 [[nodiscard]] std::string serialize(const OracleAttestation &att);
 [[nodiscard]] std::string serialize(const PeerChallenge &challenge);

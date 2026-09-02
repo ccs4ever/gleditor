@@ -152,22 +152,24 @@ TEST(TranscopyrightStorageTest, lmdbCekCachePutGetErase) {
   std::filesystem::remove_all(tempDir, ec);
 }
 
-TEST(TranscopyrightStorageTest, virtualMemoryArenaZeroPagesAndHotSwap) {
+// Was virtualMemoryArenaZeroPagesAndHotSwap, covering mapZeroPagesFixed and
+// remapSpanFixed. Both are gone: no production caller ever reached them, and
+// neither could have served the purpose they were documented for, since a
+// hole is a byte range and mmap(MAP_FIXED) wants page-aligned ones. What is
+// left is the part of the arena the segment spools genuinely use.
+TEST(TranscopyrightStorageTest, virtualMemoryArenaCommitsAndReadsBack) {
   VirtualMemoryArena arena;
   const std::size_t size = 64 * 1024; // 64 KiB
   ASSERT_TRUE(arena.reserve(size));
   ASSERT_TRUE(arena.isValid());
 
-  // Map zero pages
-  ASSERT_TRUE(arena.mapZeroPagesFixed(arena.base(), size));
+  ASSERT_TRUE(arena.commitAnonymous(arena.base(), size));
   EXPECT_EQ(arena.base()[0], 0);
   EXPECT_EQ(arena.base()[size - 1], 0);
 
-  // Remap / hot-swap decrypted plaintext over range
   const std::string plaintext =
       "Decrypted Transcopyright Plaintext at 120 FPS!";
-  ASSERT_TRUE(arena.remapSpanFixed(arena.base() + 1024, plaintext.data(),
-                                   plaintext.size()));
+  std::memcpy(arena.base() + 1024, plaintext.data(), plaintext.size());
 
   const std::string_view view{
       reinterpret_cast<const char *>(arena.base() + 1024), plaintext.size()};
