@@ -8,6 +8,28 @@ Build: clean (`make -j`, exit 0). Tests: 63 pass, 0 fail, including the
 rootless netns swarm suite. **Nothing below was caught by the test suite**,
 which is itself part of the finding.
 
+## Status
+
+Phases 1 and 2 of the remediation have landed. Everything in §2 (Critical),
+§3 (High) except §3.1, and §4.2, §4.3 and part of §4.5 is fixed, each with a
+test confirmed to fail against the code as audited. Three findings were
+sharpened from "structural" to "demonstrated" in the process:
+
+- **§2.2** — the Merkle second-preimage forgery, which this report hedged on,
+  is real. `proof.verify(sha256Digest(leaf))` returned `true`.
+- **§4.3** — the arena's unaligned `mmap(MAP_FIXED)` was confirmed to return
+  `EINVAL` for the design's own worked example, `[10000, 25000)`.
+- **§4.1** — `sizeof(CompactZZCell)` measured at 960 bytes, align 8.
+
+Four defects not in this report were found while fixing it: two null-pointer
+dereferences in `sendExtendedRaw` and `isolateAndDisconnect`, a challenge
+nonce hardcoded to `0xAA`, `quarantinePeer` keyed on the disconnect *reason*
+rather than the peer, and all three fuzz targets linking uninstrumented
+objects so libFuzzer had no coverage to steer by.
+
+**Still outstanding: §3.1 (span deduplication), §4.1, §4.4, §4.6, the rest of
+§4.5, and §5** — Phase 3 of the plan.
+
 ---
 
 ## 1. Summary
