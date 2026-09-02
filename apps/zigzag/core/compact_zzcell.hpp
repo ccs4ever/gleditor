@@ -112,8 +112,46 @@ struct DynamicDimensionLink {
 
 /**
  * @struct CompactZZCell
- * @brief High-density, zero-copy ZigZag cell structure linking directly into
- *        Xudu primedia and operations spools.
+ * @brief A ZigZag cell: its address in the primedia spool, its links along
+ *        each dimension, and how its content resolved.
+ *
+ * **Not 64 bytes, and not zero-copy** -- which this comment, the design
+ * document and CLAUDE.md all used to claim. It is around 960 bytes, aligned
+ * to 8, and it heap-allocates: a vector of dynamic dimensions, three
+ * optionals, a std::string type tag, and `ephemeralText`, which holds a copy
+ * of the very primedia that `span` already addresses.
+ *
+ * The claim survived as long as it did because nothing checked it. The
+ * static_assert at the end of this file does now -- not at 64, which would be
+ * a lie in the other direction, but at a ceiling this cannot quietly drift
+ * past again.
+ *
+ * **64 bytes was never reachable as specified.** `standardDimensions` alone
+ * is 192: twelve dimensions, two directions each, an eight-byte CellID per
+ * link. Getting to a cache line means 32-bit dense indices and moving all but
+ * the three or four hottest dimensions to a side table -- a different data
+ * model, not a tighter packing of this one.
+ *
+ * **It would not buy frame time either.** Measured on a 32,768-cell lattice
+ * at the default radius of 3, which visits about sixty cells: the BFS in
+ * stageVisibleCells costs 1.1 microseconds, or 0.013% of a 8.33 ms frame.
+ * Shrinking the cell to 52 bytes and swapping the std::set and std::queue for
+ * flat containers takes that to 0.2 microseconds. Both are noise. The
+ * traversal only becomes expensive at radii nothing asks for.
+ *
+ * What the size does cost is memory: 30 MiB of resident cells for that
+ * lattice against 1.6 MiB for a cache-line-sized one, before `ephemeralText`
+ * adds a copy of each cell's text on top. If large lattices matter, that is
+ * the reason to do this work -- and it is a different reason from the one
+ * this comment used to give.
+ *
+ * The thing actually worth watching in a frame was above, and is now fixed:
+ * stageVisibleCells re-shaped every visited cell through HarfBuzz on every
+ * call. That was 14.3 microseconds per cell, and the frame budget ran out
+ * around five hundred cells. UnifiedTransclusionEngine caches shaped pages
+ * now, which measures 0.695 ms to 0.240 ms over sixty cells -- 2.9x, and the
+ * remainder is the glyph atlas lookups, which cannot be cached because their
+ * coordinates move when the atlas grows.
  */
 struct CompactZZCell {
   CellID id{0};
@@ -295,6 +333,15 @@ struct CompactZZCell {
     return primedia.readView(span);
   }
 };
+
+// A ceiling, not a target. Its job is to make the next field somebody adds
+// to CompactZZCell an explicit decision rather than a silent one -- the
+// documented size was 64 and the real size had reached 960 without anyone
+// having to notice. Lower it as the hot/cold split above gets done.
+static_assert(sizeof(CompactZZCell) <= 1024,
+              "CompactZZCell has grown past its budget. It is meant to be "
+              "shrinking towards a cache-line-sized hot struct, not growing: "
+              "put new cold fields in a side table keyed by CellID.");
 
 } // namespace zigzag
 

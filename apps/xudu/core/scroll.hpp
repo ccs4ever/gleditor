@@ -92,6 +92,46 @@ holeReasonFromName(const std::string_view name) noexcept {
   return HoleReason::Withheld;
 }
 
+/// RGBA the renderer paints a hole in, one per reason.
+///
+/// Beside HoleReason rather than in the session, because which reason a hole
+/// has is a fact about the document, and the mapping needs testing without a
+/// graphics device -- xudu_test links the engine and no renderer, on purpose.
+constexpr std::uint32_t kWithheldColour = 0x111827FFU; ///< Obsidian: embargoed
+constexpr std::uint32_t kRevokedColour  = 0x7F1D1DFFU; ///< Deep red: withdrawn
+constexpr std::uint32_t kTakedownColour = 0x334155FFU; ///< Slate: compelled
+constexpr std::uint32_t kUnsealedColour = 0x6B7280AAU; ///< Grey: not yet sealed
+constexpr std::uint32_t kTranscopyrightColour = 0xF59E0BCCU; ///< Amber: on sale
+
+/**
+ * @brief The colour a hole is drawn in, by why it is a hole.
+ *
+ * All of these used to paint as kWithheldColour, so a reader could not tell
+ * an author's embargo from a court order, or from a span that simply has not
+ * been sealed yet -- even though the reason was carried the whole way through
+ * in PublishedHoleRecord and then dropped at the last step.
+ */
+[[nodiscard]] inline std::uint32_t
+colourForHole(const HoleReason reason) noexcept {
+  switch (reason) {
+  case HoleReason::Revoked:
+    return kRevokedColour;
+  case HoleReason::Takedown:
+    return kTakedownColour;
+  case HoleReason::Unsealed:
+    return kUnsealedColour;
+  case HoleReason::TranscopyrightLock:
+    // Reached when a locked span resolved as merely withheld, which means its
+    // descriptor never arrived. Painted as on sale anyway: the reader can buy
+    // it, and saying otherwise sends them away from something they could have
+    // read.
+    return kTranscopyrightColour;
+  case HoleReason::Withheld:
+    break;
+  }
+  return kWithheldColour;
+}
+
 /**
  * @enum SegmentKind
  * @brief Classification of carrier data for a scroll segment.

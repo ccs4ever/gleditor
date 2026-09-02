@@ -8,6 +8,19 @@
 
 namespace xudu {
 
+namespace {
+
+/// Whether @p at is the start of a character in @p text, so cutting there
+/// leaves valid UTF-8 on both sides. Continuation bytes are 10xxxxxx.
+bool isUtf8Boundary(const std::string &text, const std::size_t at) noexcept {
+  if (at >= text.size()) {
+    return at == text.size();
+  }
+  return (static_cast<unsigned char>(text[at]) & 0xC0U) != 0x80U;
+}
+
+} // namespace
+
 void UncommittedOpLog::recordInsert(const std::uint32_t at,
                                     const std::string_view utf8) {
   if (utf8.empty()) {
@@ -74,11 +87,18 @@ std::vector<CompactedOp> UncommittedOpLog::compact() const {
         // Check if delete hits within the tail of the recent insert
         if (delEnd == insEnd && entry.at >= insAt) {
           const auto remainingLen = entry.at - insAt;
-          out.back().text.resize(remainingLen);
-          if (out.back().text.empty()) {
-            out.pop_back();
+          // These offsets are byte offsets -- recordInsert takes length from
+          // utf8.size() -- so a cut can land inside a multi-byte character.
+          // Coalescing is an optimisation, and an optimisation that can
+          // produce invalid UTF-8 is not one: leave the ops uncombined and
+          // let them apply in sequence, which is always correct.
+          if (isUtf8Boundary(out.back().text, remainingLen)) {
+            out.back().text.resize(remainingLen);
+            if (out.back().text.empty()) {
+              out.pop_back();
+            }
+            handled = true;
           }
-          handled = true;
           break;
         }
 

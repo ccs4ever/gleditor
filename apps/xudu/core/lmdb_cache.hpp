@@ -95,8 +95,15 @@ public:
   explicit LMDBContentCache(const std::filesystem::path &cache_dir,
                             std::size_t map_size_bytes = 1024ULL * 1024 *
                                                          1024) {
+    // This holds Content Encryption Keys bought with real micropayments, and
+    // the plaintext they unlock. Owner-only, both on the directory and on the
+    // files LMDB creates inside it: 0644 would hand another local account
+    // somebody's purchased keys.
     if (!std::filesystem::exists(cache_dir)) {
       std::filesystem::create_directories(cache_dir);
+      std::error_code ec;
+      std::filesystem::permissions(cache_dir, std::filesystem::perms::owner_all,
+                                   std::filesystem::perm_options::replace, ec);
     }
 
     if (const int rc = mdb_env_create(&env_); rc != MDB_SUCCESS) {
@@ -110,7 +117,7 @@ public:
     const unsigned int env_flags = MDB_NOTLS | MDB_NOSYNC | MDB_NOMETASYNC;
 
     if (const int rc =
-            mdb_env_open(env_, cache_dir.string().c_str(), env_flags, 0644);
+            mdb_env_open(env_, cache_dir.string().c_str(), env_flags, 0600);
         rc != MDB_SUCCESS) {
       mdb_env_close(env_);
       env_ = nullptr;

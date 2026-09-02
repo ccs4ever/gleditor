@@ -11,6 +11,7 @@
 #include <stdexcept>
 #include <utility>
 
+#include "identity/pgp_verify.hpp"
 #include "publication.hpp"
 #include "yaml.hpp"
 
@@ -45,9 +46,38 @@ std::filesystem::path resolveDefaultStorageDir(std::string_view subDir) {
 
 // -- DeviceDelegation --------------------------------------------------------
 
-bool DeviceDelegation::verify() const {
-  return masterFingerprint.isValid() && !devicePublicKey.isZero() &&
-         !gpgSignatureArmored.empty();
+std::string DeviceDelegation::signingBuffer() const {
+  // Length-prefixed rather than delimited: a device named "x\nmaster:..."
+  // must not be able to spell out a different delegation.
+  const auto field = [](const std::string_view label,
+                        const std::string_view value) {
+    return std::string(label) + ":" + std::to_string(value.size()) + ":" +
+           std::string(value) + "\n";
+  };
+
+  std::string out = "xudu-device-delegation-v1\n";
+  out += field("master", masterFingerprint.toString());
+  out += field("device", devicePublicKey.hex());
+  out += field("name", deviceName);
+  out += field("issued", std::to_string(issuedTimestamp));
+  return out;
+}
+
+bool DeviceDelegation::verify(
+    const std::string_view masterPublicKeyArmored) const {
+  if (!masterFingerprint.isValid() || devicePublicKey.isZero() ||
+      gpgSignatureArmored.empty()) {
+    return false;
+  }
+  // The key has to be the one this delegation names before its signature
+  // means anything. Otherwise any valid key with any valid signature over
+  // these bytes would do, which is the hole this whole layer exists to close.
+  if (!identity::pgp::keyMatchesFingerprint(masterPublicKeyArmored,
+                                            masterFingerprint)) {
+    return false;
+  }
+  return identity::pgp::verifyDetached(masterPublicKeyArmored, signingBuffer(),
+                                       gpgSignatureArmored);
 }
 
 std::string DeviceDelegation::toYaml() const {
@@ -131,25 +161,6 @@ UserPermascroll::~UserPermascroll() = default;
 PrimediaSpan UserPermascroll::append(const std::string_view text) {
   std::lock_guard lock(appendMutex_);
   return spool_.append(text);
-}
-
-std::optional<PrimediaSpan>
-UserPermascroll::findExistingSpan(const std::string_view text,
-                                  const std::size_t minMatchLength) const {
-  if (text.size() < minMatchLength) {
-    return std::nullopt;
-  }
-  std::lock_guard lock(appendMutex_);
-  const auto all = spool_.bytes();
-  if (all.size() < text.size()) {
-    return std::nullopt;
-  }
-  const auto pos = all.find(text);
-  if (pos == std::string_view::npos) {
-    return std::nullopt;
-  }
-  return PrimediaSpan{localScroll, static_cast<std::uint64_t>(pos),
-                      static_cast<std::uint64_t>(text.size())};
 }
 
 std::string UserPermascroll::read(const PrimediaSpan &span) const {

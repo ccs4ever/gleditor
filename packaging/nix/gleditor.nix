@@ -19,6 +19,7 @@
   vulkan-loader,
   libtorrent-rasterbar,
   lmdb,
+  rnp,
   # libtorrent-rasterbar's own public headers reach into boost/predef and
   # openssl/opensslv.h, but nixpkgs' derivation for it does not propagate
   # either as a build input of its own -- so a consumer that only links
@@ -77,6 +78,7 @@ stdenv.mkDerivation {
     vulkan-loader
     libtorrent-rasterbar
     lmdb
+    rnp
     boost
     openssl
   ];

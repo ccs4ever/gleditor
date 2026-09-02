@@ -134,52 +134,6 @@ bool VirtualMemoryArena::commitAnonymous(void *const targetAddr,
 #endif
 }
 
-bool VirtualMemoryArena::mapZeroPagesFixed(void *const targetAddr,
-                                           const std::size_t length) {
-  if (nullptr == baseAddress || nullptr == targetAddr || 0 == length) {
-    return false;
-  }
-  const auto *const target = static_cast<const std::uint8_t *>(targetAddr);
-  if (target < baseAddress ||
-      (target + length) > (baseAddress + reservedBytes)) {
-    return false;
-  }
-
-#ifdef _WIN32
-  void *const ptr =
-      VirtualAlloc(targetAddr, length, MEM_COMMIT, PAGE_READWRITE);
-  if (ptr) {
-    std::memset(ptr, 0, length);
-    return true;
-  }
-  return false;
-#else
-  void *const mapped = mmap(targetAddr, length, PROT_READ | PROT_WRITE,
-                            MAP_PRIVATE | MAP_ANONYMOUS | MAP_FIXED, -1, 0);
-  return mapped == targetAddr;
-#endif
-}
-
-bool VirtualMemoryArena::remapSpanFixed(void *const targetAddr,
-                                        const void *const sourceData,
-                                        const std::size_t length) {
-  if (nullptr == baseAddress || nullptr == targetAddr ||
-      nullptr == sourceData || 0 == length) {
-    return false;
-  }
-  const auto *const target = static_cast<const std::uint8_t *>(targetAddr);
-  if (target < baseAddress ||
-      (target + length) > (baseAddress + reservedBytes)) {
-    return false;
-  }
-
-  if (!commitAnonymous(targetAddr, length)) {
-    return false;
-  }
-  std::memcpy(targetAddr, sourceData, length);
-  return true;
-}
-
 bool VirtualMemoryArena::flush(void *const addr, const std::size_t length) {
   if (nullptr == baseAddress || nullptr == addr || 0 == length) {
     return false;

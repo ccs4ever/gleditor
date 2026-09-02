@@ -195,7 +195,9 @@ to sanity-check `.editorconfig` itself, not as a gate.
   - `beams.hpp/.cpp`, `framing.hpp/.cpp`: 3D link ribbons and transclusion prisms
 - `apps/zigzag/` — the Xanadu Zigzag multidimensional visualizer; `apps/zigzag/core/`:
   - `zigzag_engine.hpp/.cpp`: Multidimensional slice data model and YAML parser
-  - `compact_cell.hpp`: 64-byte aligned compact cell layout
+  - `compact_zzcell.hpp`: cell layout — primedia span, per-dimension links,
+    resolution status. Around 960 bytes, not the 64 it claimed for a while;
+    a `static_assert` holds the line until the hot/cold split is done
   - `unified_transclusion_engine.hpp/.cpp`: 120 FPS render staging and manifold checks
   - `zz_xudu_projector.hpp/.cpp`: Bidirectional xanadoc-to-zigzag mapping
 - `assets/shaders/` — portable GLSL bodies; `vulkan/` holds generated SPIR-V

@@ -179,38 +179,47 @@ ResolveResult Resolver::resolve(const Scroll &scroll,
         const auto &tc = *segment->holeRecord->transcopyright;
         CekRecord cekRec;
         if (source != nullptr && cache.get_cek(tc.keyId, cekRec)) {
-          // CEK found in cache! Fetch ciphertext from torrent stream and
-          // decrypt
+          // The key is held, so this span has been paid for. What is left is
+          // to fetch the ciphertext and open it.
           const auto *const meta = source->metainfo(segment->torrent);
           if (nullptr == meta) {
             return ResolveResult{.status = ResolutionStatus::MissingPieces};
           }
+          // Unsigned, so a segment claiming to start past the end of the
+          // stream would otherwise wrap into an enormous length.
+          if (segment->streamOffset > meta->totalLength()) {
+            return ResolveResult{.status = ResolutionStatus::UnverifiedHash};
+          }
           const auto cipherLen =
               std::min(meta->totalLength() - segment->streamOffset,
                        segment->length + crypto::kTagSize);
-          auto cipherBytes = source->readStream(
-              segment->torrent, segment->streamOffset, cipherLen);
-          if (cipherBytes.size() < 16) {
-            return ResolveResult{.status = ResolutionStatus::MissingPieces};
+          // Through readSegment, so the ciphertext is piece-verified before
+          // it is decrypted -- the same discipline the plain path below uses.
+          // Reading it straight off the source meant a hostile seeder's bytes
+          // reached the decryptor, and Poly1305 rejecting them was reported as
+          // "you have not paid", which is a different thing and the one thing
+          // the reader most needs to be able to tell apart.
+          auto cipherBytes = readSegment(*segment, segment->at, cipherLen);
+          if (cipherBytes.size() != cipherLen ||
+              cipherBytes.size() < crypto::kTagSize) {
+            return ResolveResult{.status = ResolutionStatus::UnverifiedHash};
           }
-          crypto::Nonce24 nonce{};
-          std::memcpy(nonce.data(), tc.keyId.data(),
-                      std::min<std::size_t>(tc.keyId.size(), nonce.size()));
+          const auto nonce = crypto::nonceForKeyId(tc.keyId);
           try {
-            auto plain = crypto::decryptSeekableSpan(
+            auto plain = crypto::decryptSpanSlice(
                 cipherBytes, 0, cekRec.cek, nonce, at - segment->at, count);
             if (!plain) {
-              return ResolveResult{.status =
-                                       ResolutionStatus::TranscopyrightLocked,
-                                   .lockInfo   = tc,
+              // Verified bytes that the held key does not open: the key is
+              // wrong or the author re-sealed, not an unpaid span.
+              return ResolveResult{.status   = ResolutionStatus::UnverifiedHash,
+                                   .lockInfo = tc,
                                    .holeRecord = segment->holeRecord};
             }
             out.append(*plain);
             at += count;
             continue;
           } catch (...) {
-            return ResolveResult{.status =
-                                     ResolutionStatus::TranscopyrightLocked,
+            return ResolveResult{.status     = ResolutionStatus::UnverifiedHash,
                                  .lockInfo   = tc,
                                  .holeRecord = segment->holeRecord};
           }
@@ -236,7 +245,26 @@ ResolveResult Resolver::resolve(const Scroll &scroll,
     at += count;
   }
 
-  cache.put(span, out);
+  // Resolved text is deliberately not cached, and the cache.put(span, out)
+  // that used to sit here is gone. Nothing ever read it back, and that hid
+  // two reasons it could not be:
+  //
+  // The key is not unique. A PrimediaSpan names a scroll by its slot index in
+  // *this* Store's externals table, so document A's scroll 1 and document B's
+  // scroll 1 are different scrolls with one key, in a process-wide LMDB that
+  // outlives them both.
+  //
+  // The obvious repair -- cache verified pieces by (info hash, piece index),
+  // which does name the bytes -- costs more than it looks. `alteredContent-
+  // IsNotReturned` and its neighbours in tests/xudu/resolver.cpp exist
+  // because a reference whose local copy has been altered must stop
+  // resolving rather than quietly yield something else, and a cache that
+  // outlives the tampering answers from before it. That is a real tradeoff
+  // to weigh, not one to take by accident while removing a dead write.
+  //
+  // The cost this leaves is real: Session::decorate resolves every piece of
+  // every open document on each pass. Somewhere to cache it belongs is above
+  // the resolver, where a document knows when its own content changed.
   return ResolveResult{.status = ResolutionStatus::VerifiedBytes,
                        .text   = std::move(out)};
 }

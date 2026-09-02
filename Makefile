@@ -147,12 +147,25 @@ TEST_PKGS := gmock_main
 # whose documents cannot leave the machine that wrote them, which is the one
 # thing this program is for. Better to fail at configure time than to ship a
 # xanadoc editor that quietly cannot publish.
-XUDU_PKGS := libtorrent-rasterbar openssl lmdb libmagic
+#
+# librnp is required for the same kind of reason. It is what checks that an
+# armored key really is the key its fingerprint claims to name, and what
+# verifies the OpenPGP signature delegating authority to a device key -- so it
+# is the root of every trust decision the identity ledger makes. Made optional,
+# the absent-RNP build would have to decide what an unverifiable identity
+# means, and the only safe answer refuses every peer, which is not a build
+# worth having. RNP rather than GnuPG's gpgme because it is a library first
+# and links the same way on every platform this ships to.
+XUDU_PKGS := libtorrent-rasterbar openssl lmdb libmagic librnp
 ifneq (,$(filter-out $(NO_SDL_GOALS),$(or $(MAKECMDGOALS),all)))
 ifneq ($(shell pkg-config --exists libtorrent-rasterbar && echo 1),1)
 $(error libtorrent-rasterbar was not found by pkg-config. It is required: \
 install libtorrent-rasterbar-dev (Debian, Ubuntu), libtorrent-rasterbar-devel \
 (Fedora), or libtorrent-rasterbar (Arch, Homebrew).)
+endif
+ifneq ($(shell pkg-config --exists librnp && echo 1),1)
+$(error librnp was not found by pkg-config. It is required: install \
+librnp-dev (Debian, Ubuntu), rnp-devel (Fedora), or rnp (Arch, Homebrew).)
 endif
 endif
 
@@ -326,7 +339,9 @@ override LDFLAGS += $(DEBUG_OPTS) $(findstring $(STATIC),-static)
 #LDFLAGS += -v -stdlib=libc++ -fexperimental-library
 LIBS := $(shell pkg-config $(STATIC) --libs $(PKGS))
 XUDU_LIBS := $(shell pkg-config $(STATIC) --libs $(XUDU_PKGS)) -lryml
-ZIGZAG_PKGS := libtorrent-rasterbar openssl lmdb
+# Matches XUDU_PKGS because ZIGZAG_SHARED_CORE_OBJS is XUDU_CORE_OBJS: zigzag
+# links the whole xanalogical engine, so it needs whatever that engine needs.
+ZIGZAG_PKGS := libtorrent-rasterbar openssl lmdb librnp
 ZIGZAG_LIBS := $(shell pkg-config $(STATIC) --libs $(ZIGZAG_PKGS)) -lryml
 
 # glslangValidator is the traditional name and glslang the current one; which
@@ -629,18 +644,39 @@ $(OBJDIR)/zigzag_test: $(ZIGZAG_TEST_OBJS) $(filter-out $(OBJDIR)/apps/zigzag/ma
 	$(CXX) $(LDFLAGS) -o $@ $^ $(APP_LDFLAGS) $(LIBS) $(ZIGZAG_LIBS) $(TEST_LIBS)
 
 
-.PHONY: fuzz fuzz_binary_ops fuzz_link_package
-fuzz_binary_ops: $(OBJDIR)/fuzz_binary_ops
-$(OBJDIR)/fuzz_binary_ops: tests/fuzz/fuzz_binary_ops.cpp $(XUDU_CORE_OBJS)
-	@$(MKDIR) -p $(@D)
-	$(CXX) -fsanitize=fuzzer,address,undefined $(CXXFLAGS) $< $(XUDU_CORE_OBJS) $(XUDU_LIBS) -o $@
+# Fuzzing needs its own copy of the engine, built with the sanitizers. Linking
+# the ordinary $(XUDU_CORE_OBJS) -- which is what these targets used to do --
+# leaves every function the harness actually exercises uninstrumented, so
+# libFuzzer sees coverage only from whatever inlines into the harness itself
+# and has nothing to steer by: it degenerates into throwing random bytes at
+# the decoders. ASan and UBSan still fire, which is why the old shape looked
+# like it worked, but the coverage-guided part was not happening.
+FUZZ_OBJDIR   := $(OBJDIR)/fuzz
+FUZZ_FLAGS    := -fsanitize=fuzzer-no-link,address,undefined
+FUZZ_CORE_OBJS := $(patsubst %.cpp,$(FUZZ_OBJDIR)/%.o,$(XUDU_CORE_SRCS))
 
-fuzz_link_package: $(OBJDIR)/fuzz_link_package
-$(OBJDIR)/fuzz_link_package: tests/fuzz/fuzz_link_package.cpp $(XUDU_CORE_OBJS)
+$(FUZZ_OBJDIR)/%.o: %.cpp
 	@$(MKDIR) -p $(@D)
-	$(CXX) -fsanitize=fuzzer,address,undefined $(CXXFLAGS) $< $(XUDU_CORE_OBJS) $(XUDU_LIBS) -o $@
+	$(CXX) $(FUZZ_FLAGS) $(CXXFLAGS) -c -o $@ $<
 
-fuzz: fuzz_binary_ops fuzz_link_package
+# $(1) target name
+define fuzz-target
+.PHONY: fuzz_$(1)
+fuzz_$(1): $$(OBJDIR)/fuzz_$(1)
+$$(OBJDIR)/fuzz_$(1): tests/fuzz/fuzz_$(1).cpp $$(FUZZ_CORE_OBJS)
+	@$$(MKDIR) -p $$(@D)
+	$$(CXX) -fsanitize=fuzzer,address,undefined $$(CXXFLAGS) $$< \
+	  $$(FUZZ_CORE_OBJS) $$(XUDU_LIBS) -o $$@
+endef
+
+$(eval $(call fuzz-target,binary_ops))
+$(eval $(call fuzz-target,link_package))
+# The BEP 10 identity decoders parse bytes from a peer that has not yet
+# authenticated, which makes them the outermost attack surface here.
+$(eval $(call fuzz-target,identity_wire))
+
+.PHONY: fuzz
+fuzz: fuzz_binary_ops fuzz_link_package fuzz_identity_wire
 
 # The other end of the swarm tests: a peer that offers a torrent's content and
 # waits to be asked. A separate program because the two peers are meant to be

@@ -25,8 +25,7 @@ std::string MagicMimeDetector::identifyBuffer(const void *data,
   if (cookie == nullptr || data == nullptr || size == 0) {
     return {};
   }
-  const char *res =
-      magic_buffer(static_cast<magic_t>(cookie), data, size);
+  const char *res = magic_buffer(static_cast<magic_t>(cookie), data, size);
   return res != nullptr ? std::string(res) : std::string{};
 }
 
@@ -34,8 +33,7 @@ std::string MagicMimeDetector::identifyFile(const std::string &path) const {
   if (cookie == nullptr || path.empty()) {
     return {};
   }
-  const char *res =
-      magic_file(static_cast<magic_t>(cookie), path.c_str());
+  const char *res = magic_file(static_cast<magic_t>(cookie), path.c_str());
   return res != nullptr ? std::string(res) : std::string{};
 }
 

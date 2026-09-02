@@ -46,7 +46,10 @@ EM_FLAGS=(
   -sFULL_ES3=1
   -sALLOW_MEMORY_GROWTH=1
   -sINITIAL_MEMORY=67108864
-  -sEXPORTED_RUNTIME_METHODS=['ccall','cwrap','FS']
+  # Quoted because the brackets are emcc's list syntax, not the shell's: bare,
+  # this is a glob that silently rewrites the flag if anything in the working
+  # directory happens to match it, and shfmt refuses to parse it at all.
+  "-sEXPORTED_RUNTIME_METHODS=['ccall','cwrap','FS']"
   --shell-file packaging/wasm/shell.html
   --preload-file assets@assets
 )
@@ -70,7 +73,7 @@ em++ "${EM_FLAGS[@]}" \
   -o "$OUTPUT_DIR/zigzag.html"
 
 # Generate index page
-cat > "$OUTPUT_DIR/index.html" << 'EOF'
+cat >"$OUTPUT_DIR/index.html" <<'EOF'
 <!doctype html>
 <html lang="en">
 <head>

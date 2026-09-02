@@ -4,6 +4,7 @@
 #include <format>
 #include <memory>
 #include <openssl/core_names.h>
+#include <openssl/crypto.h>
 #include <openssl/evp.h>
 #include <openssl/kdf.h>
 #include <openssl/params.h>
@@ -11,6 +12,7 @@
 #include <openssl/sha.h>
 #include <span>
 #include <stdexcept>
+#include <tuple>
 
 namespace xudu::crypto {
 
@@ -89,6 +91,25 @@ Key32 hkdfSha256(const std::span<const std::uint8_t> ikm,
   return out;
 }
 
+/// Wipes key material on the way out of scope. Ordinary destructors are free
+/// to leave the bytes in place, and a compiler is free to elide a memset it
+/// can prove nobody reads -- OPENSSL_cleanse is the one that survives that.
+template <typename T> struct Cleansed {
+  T value{};
+  ~Cleansed() { OPENSSL_cleanse(&value, sizeof(value)); }
+  Cleansed()                            = default;
+  Cleansed(const Cleansed &)            = delete;
+  Cleansed &operator=(const Cleansed &) = delete;
+  Cleansed(Cleansed &&)                 = delete;
+  Cleansed &operator=(Cleansed &&)      = delete;
+};
+
+// NOT XChaCha20, despite the name this kept for continuity with its callers.
+// Real XChaCha20 derives its subkey with HChaCha20; this uses HKDF-SHA256
+// over the key with the first 16 nonce bytes as salt. That is a sound
+// construction, but it will not interoperate with any implementation of the
+// actual standard, and nothing here should be described to anyone as
+// XChaCha20 on the strength of the identifier.
 std::pair<Key32, std::array<std::uint8_t, 12>>
 deriveXChaChaSubkeys(const Key32 &key, const Nonce24 &nonce) {
   // First 16 bytes of nonce act as salt to derive 32-byte subkey
@@ -121,6 +142,12 @@ Nonce24 generateNonce() {
   return n;
 }
 
+Nonce24 nonceForKeyId(const std::array<std::uint8_t, 32> &keyId) noexcept {
+  Nonce24 nonce{};
+  std::memcpy(nonce.data(), keyId.data(), nonce.size());
+  return nonce;
+}
+
 Key32 deriveSpanCek(const Key32 &masterKey, const std::uint64_t spanStart,
                     const std::uint64_t spanLength) {
   const auto info =
@@ -132,7 +159,10 @@ Key32 deriveSpanCek(const Key32 &masterKey, const std::uint64_t spanStart,
 
 std::string encryptAead(const std::string_view plaintext, const Key32 &key,
                         const Nonce24 &nonce, const std::string_view ad) {
-  const auto [subKey, iv] = deriveXChaChaSubkeys(key, nonce);
+  Cleansed<Key32> subKeyGuard;
+  std::array<std::uint8_t, 12> iv{};
+  std::tie(subKeyGuard.value, iv) = deriveXChaChaSubkeys(key, nonce);
+  const auto &subKey              = subKeyGuard.value;
 
   ScopedCipherCtx ctx{EVP_CIPHER_CTX_new()};
   if (!ctx) {
@@ -203,7 +233,10 @@ std::optional<std::string> decryptAead(const std::string_view ciphertextWithTag,
   const auto cipherData       = ciphertextWithTag.substr(0, cipherLen);
   const auto tagData          = ciphertextWithTag.substr(cipherLen, kTagSize);
 
-  const auto [subKey, iv] = deriveXChaChaSubkeys(key, nonce);
+  Cleansed<Key32> subKeyGuard;
+  std::array<std::uint8_t, 12> iv{};
+  std::tie(subKeyGuard.value, iv) = deriveXChaChaSubkeys(key, nonce);
+  const auto &subKey              = subKeyGuard.value;
 
   ScopedCipherCtx ctx{EVP_CIPHER_CTX_new()};
   if (!ctx) {
@@ -266,10 +299,10 @@ std::optional<std::string> decryptAead(const std::string_view ciphertextWithTag,
 }
 
 std::optional<std::string>
-decryptSeekableSpan(const std::string_view ciphertext,
-                    const std::uint64_t cipherBaseOffset, const Key32 &key,
-                    const Nonce24 &nonce, const std::uint64_t reqOffset,
-                    const std::uint64_t reqLength) {
+decryptSpanSlice(const std::string_view ciphertext,
+                 const std::uint64_t cipherBaseOffset, const Key32 &key,
+                 const Nonce24 &nonce, const std::uint64_t reqOffset,
+                 const std::uint64_t reqLength) {
   if (reqLength == 0) {
     return std::string{};
   }
@@ -364,18 +397,30 @@ std::vector<std::uint8_t> wrapCek(const Key32 &cek,
     throw std::runtime_error("ECDH key agreement init failed");
   }
 
-  Key32 sharedSecret{};
-  std::size_t secretLen = sharedSecret.size();
-  if (EVP_PKEY_derive(dctx.get(), sharedSecret.data(), &secretLen) <= 0) {
+  Cleansed<Key32> sharedSecret;
+  std::size_t secretLen = sharedSecret.value.size();
+  if (EVP_PKEY_derive(dctx.get(), sharedSecret.value.data(), &secretLen) <= 0) {
     throw std::runtime_error("ECDH derivation failed");
   }
+  // A short secret would leave the tail of the buffer at whatever the stack
+  // held, and HKDF would happily derive a key from it.
+  if (secretLen != kKeySize) {
+    throw std::runtime_error("ECDH produced a shared secret of the wrong size");
+  }
 
-  // 3. Derive KEM wrapping key via HKDF
-  const auto wrapKey = hkdfSha256(
-      std::span<const std::uint8_t>{sharedSecret.data(), sharedSecret.size()},
-      std::span<const std::uint8_t>{ephemeral.publicKey.data(),
-                                    ephemeral.publicKey.size()},
-      "xudu-tc-kem-wrap-v1");
+  // 3. Derive KEM wrapping key via HKDF. Both public keys go into the salt:
+  // binding the recipient as well as the ephemeral key means a wrap made for
+  // one recipient cannot be replayed as one made for another.
+  std::array<std::uint8_t, 64> kemSalt{};
+  std::memcpy(kemSalt.data(), ephemeral.publicKey.data(), 32);
+  std::memcpy(kemSalt.data() + 32, recipientPubKey.data(), 32);
+  Cleansed<Key32> wrapKeyGuard;
+  wrapKeyGuard.value =
+      hkdfSha256(std::span<const std::uint8_t>{sharedSecret.value.data(),
+                                               sharedSecret.value.size()},
+                 std::span<const std::uint8_t>{kemSalt.data(), kemSalt.size()},
+                 "xudu-tc-kem-wrap-v1");
+  const auto &wrapKey = wrapKeyGuard.value;
 
   // 4. Encrypt CEK
   const auto nonce               = generateNonce();
@@ -425,25 +470,37 @@ std::optional<Key32> unwrapCek(const std::vector<std::uint8_t> &wrapped,
     return std::nullopt;
   }
 
-  Key32 sharedSecret{};
-  std::size_t secretLen = sharedSecret.size();
-  if (EVP_PKEY_derive(dctx.get(), sharedSecret.data(), &secretLen) <= 0) {
+  Cleansed<Key32> sharedSecret;
+  std::size_t secretLen = sharedSecret.value.size();
+  if (EVP_PKEY_derive(dctx.get(), sharedSecret.value.data(), &secretLen) <= 0) {
+    return std::nullopt;
+  }
+  if (secretLen != kKeySize) {
     return std::nullopt;
   }
 
-  const auto wrapKey = hkdfSha256(
-      std::span<const std::uint8_t>{sharedSecret.data(), sharedSecret.size()},
-      std::span<const std::uint8_t>{ephPub.data(), ephPub.size()},
-      "xudu-tc-kem-wrap-v1");
+  // Must match wrapCek's salt exactly, recipient key included.
+  std::array<std::uint8_t, 64> kemSalt{};
+  std::memcpy(kemSalt.data(), ephPub.data(), 32);
+  std::memcpy(kemSalt.data() + 32,
+              X25519KeyPair::derivePublicKey(recipientPrivKey).data(), 32);
+  Cleansed<Key32> wrapKey;
+  wrapKey.value =
+      hkdfSha256(std::span<const std::uint8_t>{sharedSecret.value.data(),
+                                               sharedSecret.value.size()},
+                 std::span<const std::uint8_t>{kemSalt.data(), kemSalt.size()},
+                 "xudu-tc-kem-wrap-v1");
 
   auto decrypted =
-      decryptAead(encryptedWithTag, wrapKey, nonce, "xudu-tc-cek-v1");
+      decryptAead(encryptedWithTag, wrapKey.value, nonce, "xudu-tc-cek-v1");
   if (!decrypted || decrypted->size() != kKeySize) {
     return std::nullopt;
   }
 
   Key32 cek{};
   std::memcpy(cek.data(), decrypted->data(), kKeySize);
+  // The plaintext CEK also lived in `decrypted`, which is about to be freed.
+  OPENSSL_cleanse(decrypted->data(), decrypted->size());
   return cek;
 }
 

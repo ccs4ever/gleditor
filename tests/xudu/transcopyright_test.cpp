@@ -68,7 +68,7 @@ TEST(TranscopyrightCryptoTest, aeadEncryptionRoundTripAndAuthentication) {
   EXPECT_FALSE(crypto::decryptAead(tamperedTag, key, nonce, ad).has_value());
 }
 
-TEST(TranscopyrightCryptoTest, seekableSpanDecryption) {
+TEST(TranscopyrightCryptoTest, decryptsAndSlicesASpan) {
   const auto key   = crypto::generateKey();
   const auto nonce = crypto::generateNonce();
   const std::string pt =
@@ -76,8 +76,9 @@ TEST(TranscopyrightCryptoTest, seekableSpanDecryption) {
 
   const auto ct = crypto::encryptAead(pt, key, nonce);
 
-  // Request subspan [10, 36) -> "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
-  const auto sub = crypto::decryptSeekableSpan(ct, 0, key, nonce, 10, 26);
+  // Request subspan [10, 36). The whole segment is decrypted and this
+  // slice returned -- there is no seeking, and the name no longer says so.
+  const auto sub = crypto::decryptSpanSlice(ct, 0, key, nonce, 10, 26);
   ASSERT_TRUE(sub.has_value());
   EXPECT_EQ(*sub, "ABCDEFGHIJKLMNOPQRSTUVWXYZ");
 }
@@ -152,22 +153,24 @@ TEST(TranscopyrightStorageTest, lmdbCekCachePutGetErase) {
   std::filesystem::remove_all(tempDir, ec);
 }
 
-TEST(TranscopyrightStorageTest, virtualMemoryArenaZeroPagesAndHotSwap) {
+// Was virtualMemoryArenaZeroPagesAndHotSwap, covering mapZeroPagesFixed and
+// remapSpanFixed. Both are gone: no production caller ever reached them, and
+// neither could have served the purpose they were documented for, since a
+// hole is a byte range and mmap(MAP_FIXED) wants page-aligned ones. What is
+// left is the part of the arena the segment spools genuinely use.
+TEST(TranscopyrightStorageTest, virtualMemoryArenaCommitsAndReadsBack) {
   VirtualMemoryArena arena;
   const std::size_t size = 64 * 1024; // 64 KiB
   ASSERT_TRUE(arena.reserve(size));
   ASSERT_TRUE(arena.isValid());
 
-  // Map zero pages
-  ASSERT_TRUE(arena.mapZeroPagesFixed(arena.base(), size));
+  ASSERT_TRUE(arena.commitAnonymous(arena.base(), size));
   EXPECT_EQ(arena.base()[0], 0);
   EXPECT_EQ(arena.base()[size - 1], 0);
 
-  // Remap / hot-swap decrypted plaintext over range
   const std::string plaintext =
       "Decrypted Transcopyright Plaintext at 120 FPS!";
-  ASSERT_TRUE(arena.remapSpanFixed(arena.base() + 1024, plaintext.data(),
-                                   plaintext.size()));
+  std::memcpy(arena.base() + 1024, plaintext.data(), plaintext.size());
 
   const std::string_view view{
       reinterpret_cast<const char *>(arena.base() + 1024), plaintext.size()};
@@ -420,8 +423,9 @@ TEST(TranscopyrightEndToEndTest,
   // Derive Transcopyright CEK and KeyId
   const auto tcCek   = crypto::generateKey();
   const auto tcKeyId = crypto::generateKey();
-  crypto::Nonce24 nonce{};
-  std::memcpy(nonce.data(), tcKeyId.data(), nonce.size());
+  // Same derivation the reader uses -- one named function now, rather than
+  // this memcpy and a matching one in the resolver.
+  const auto nonce    = crypto::nonceForKeyId(tcKeyId);
   const auto tcCipher = crypto::encryptAead(tcChapter, tcCek, nonce, {});
 
   // Build torrent payload where withheld is zeroed and tc is ciphertext
@@ -596,8 +600,7 @@ TEST(TranscopyrightBenchmarkTest, SeekableDecryptionLatencyUnder1ms) {
   const auto start = std::chrono::high_resolution_clock::now();
   for (std::size_t i = 0; i < 1000; ++i) {
     const std::uint64_t offset = (i * 37) % 65000;
-    const auto sub =
-        crypto::decryptSeekableSpan(ct, 0, key, nonce, offset, 256);
+    const auto sub = crypto::decryptSpanSlice(ct, 0, key, nonce, offset, 256);
     ASSERT_TRUE(sub.has_value());
     EXPECT_EQ(sub->size(), 256U);
   }

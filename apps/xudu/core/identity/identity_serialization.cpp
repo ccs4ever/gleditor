@@ -152,6 +152,81 @@ decodeIdentityEntry(std::span<const std::uint8_t> bytes) {
   return decodeIdentityEntry(node);
 }
 
+std::expected<IdentityResponseMsg, SerializationError>
+decodeIdentityResponse(const libtorrent::bdecode_node &node) {
+  if (node.type() != libtorrent::bdecode_node::dict_t) {
+    return std::unexpected(SerializationError::TypeMismatch);
+  }
+
+  IdentityResponseMsg resp;
+  const auto entryNode = node.dict_find_dict("entry");
+  if (!entryNode) {
+    return std::unexpected(SerializationError::MissingField);
+  }
+  const auto entryRes = decodeIdentityEntry(entryNode);
+  if (!entryRes) {
+    return std::unexpected(entryRes.error());
+  }
+  resp.entry = *entryRes;
+
+  const auto proofNode = node.dict_find_dict("proof");
+  if (!proofNode) {
+    return std::unexpected(SerializationError::MissingField);
+  }
+
+  const auto leafRes = extractHash32(proofNode, "leaf");
+  if (!leafRes) return std::unexpected(leafRes.error());
+  resp.proof.leafHash = *leafRes;
+
+  const auto rootRes = extractHash32(proofNode, "root");
+  if (!rootRes) return std::unexpected(rootRes.error());
+  resp.proof.rootHash = *rootRes;
+
+  resp.proof.leafIndex =
+      static_cast<std::size_t>(proofNode.dict_find_int_value("idx", 0));
+  resp.proof.maxIndex =
+      static_cast<std::size_t>(proofNode.dict_find_int_value("max", 0));
+
+  const auto pathNode = proofNode.dict_find_string("path");
+  if (!pathNode) {
+    return std::unexpected(SerializationError::MissingField);
+  }
+  const auto path = pathNode.string_value();
+  if (path.size() % 33 != 0) {
+    return std::unexpected(SerializationError::InvalidFieldLength);
+  }
+  // A proof longer than the tree could ever be is not a proof; verifying it
+  // would just be a lot of hashing on a peer's say-so. 64 levels is 2^64
+  // leaves, which is more ledger than there will ever be.
+  if (path.size() / 33 > 64) {
+    return std::unexpected(SerializationError::PayloadOverflow);
+  }
+  for (std::size_t at = 0; at < path.size(); at += 33) {
+    MerkleProofElement step;
+    step.isLeft = path[at] != '\x00';
+    std::memcpy(step.hash.bytes.data(), path.data() + at + 1, 32);
+    resp.proof.path.push_back(step);
+  }
+
+  return resp;
+}
+
+std::expected<IdentityResponseMsg, SerializationError>
+decodeIdentityResponse(std::span<const std::uint8_t> bytes) {
+  if (bytes.size() > kMaxPayloadBytes) {
+    return std::unexpected(SerializationError::PayloadOverflow);
+  }
+  libtorrent::bdecode_node node;
+  libtorrent::error_code ec;
+  libtorrent::bdecode(
+      reinterpret_cast<const char *>(bytes.data()),
+      reinterpret_cast<const char *>(bytes.data()) + bytes.size(), node, ec);
+  if (ec) {
+    return std::unexpected(SerializationError::InvalidBencode);
+  }
+  return decodeIdentityResponse(node);
+}
+
 std::expected<VoteEntry, SerializationError>
 decodeVoteEntry(const libtorrent::bdecode_node &node) {
   if (node.type() != libtorrent::bdecode_node::dict_t) {
@@ -327,6 +402,16 @@ decodePeerChallengeResponse(const libtorrent::bdecode_node &node) {
   const auto claimedRes = extractFingerprint(node, "claimed");
   if (!claimedRes) return std::unexpected(claimedRes.error());
   resp.claimedIdentity = *claimedRes;
+
+  const auto devKeyNode = node.dict_find_string("devkey");
+  if (!devKeyNode) {
+    return std::unexpected(SerializationError::MissingField);
+  }
+  const auto devKeyStr = devKeyNode.string_value();
+  if (devKeyStr.size() != 32) {
+    return std::unexpected(SerializationError::InvalidFieldLength);
+  }
+  std::memcpy(resp.devicePublicKey.data(), devKeyStr.data(), 32);
 
   const auto sigRes = extractSignature64(node, "sig");
   if (!sigRes) return std::unexpected(sigRes.error());
@@ -604,7 +689,8 @@ decodeTcKeyDelivery(std::span<const std::uint8_t> bytes) {
 // Encoders to libtorrent::entry
 // ============================================================================
 
-libtorrent::entry encodeToEntry(const IdentityEntry &entry) {
+libtorrent::entry encodeToEntry(const IdentityEntry &entry,
+                                const bool withSignature) {
   libtorrent::entry e(libtorrent::entry::dictionary_t);
   e["fp"]    = entry.fingerprint.toString();
   e["email"] = entry.email;
@@ -619,23 +705,51 @@ libtorrent::entry encodeToEntry(const IdentityEntry &entry) {
   if (entry.revoked) {
     e["rev"] = 1;
   }
-  if (!entry.signature.isZero()) {
+  if (withSignature && !entry.signature.isZero()) {
     e["sig"] = std::string(
         reinterpret_cast<const char *>(entry.signature.bytes.data()), 64);
   }
   return e;
 }
 
-libtorrent::entry encodeToEntry(const VoteEntry &vote) {
+libtorrent::entry encodeToEntry(const VoteEntry &vote,
+                                const bool withSignature) {
   libtorrent::entry e(libtorrent::entry::dictionary_t);
   e["voter"] = vote.voterFingerprint.toString();
   e["cand"]  = vote.candidateOracle.toString();
   e["ts"]    = static_cast<std::int64_t>(vote.timestamp);
   e["seq"]   = static_cast<std::int64_t>(vote.sequence);
-  if (!vote.signature.isZero()) {
+  if (withSignature && !vote.signature.isZero()) {
     e["sig"] = std::string(
         reinterpret_cast<const char *>(vote.signature.bytes.data()), 64);
   }
+  return e;
+}
+
+libtorrent::entry encodeToEntry(const IdentityResponseMsg &resp) {
+  libtorrent::entry e(libtorrent::entry::dictionary_t);
+  e["entry"] = encodeToEntry(resp.entry);
+
+  libtorrent::entry proof(libtorrent::entry::dictionary_t);
+  proof["leaf"] = std::string(
+      reinterpret_cast<const char *>(resp.proof.leafHash.bytes.data()), 32);
+  proof["root"] = std::string(
+      reinterpret_cast<const char *>(resp.proof.rootHash.bytes.data()), 32);
+  proof["idx"] = static_cast<std::int64_t>(resp.proof.leafIndex);
+  proof["max"] = static_cast<std::int64_t>(resp.proof.maxIndex);
+
+  // Each step is the sibling hash with a byte saying which side it sits on.
+  // Encoded as one flat string rather than a list of dicts: the path is the
+  // hot part of a proof and this keeps it to 33 bytes a level.
+  std::string path;
+  path.reserve(resp.proof.path.size() * 33);
+  for (const auto &step : resp.proof.path) {
+    path.push_back(step.isLeft ? '\x01' : '\x00');
+    path.append(reinterpret_cast<const char *>(step.hash.bytes.data()), 32);
+  }
+  proof["path"] = path;
+
+  e["proof"] = proof;
   return e;
 }
 
@@ -677,7 +791,9 @@ libtorrent::entry encodeToEntry(const PeerChallengeResponse &resp) {
   e["nonce"] =
       std::string(reinterpret_cast<const char *>(resp.nonce.bytes.data()), 32);
   e["claimed"] = resp.claimedIdentity.toString();
-  e["sig"]     = std::string(
+  e["devkey"]  = std::string(
+      reinterpret_cast<const char *>(resp.devicePublicKey.data()), 32);
+  e["sig"] = std::string(
       reinterpret_cast<const char *>(resp.signature.bytes.data()), 64);
   return e;
 }
@@ -777,6 +893,24 @@ std::string serialize(const IdentityEntry &entry) {
 std::string serialize(const VoteEntry &vote) {
   std::string out;
   libtorrent::bencode(std::back_inserter(out), encodeToEntry(vote));
+  return out;
+}
+
+std::string identityEntrySigningBuffer(const IdentityEntry &entry) {
+  std::string out;
+  libtorrent::bencode(std::back_inserter(out), encodeToEntry(entry, false));
+  return out;
+}
+
+std::string voteEntrySigningBuffer(const VoteEntry &vote) {
+  std::string out;
+  libtorrent::bencode(std::back_inserter(out), encodeToEntry(vote, false));
+  return out;
+}
+
+std::string serialize(const IdentityResponseMsg &resp) {
+  std::string out;
+  libtorrent::bencode(std::back_inserter(out), encodeToEntry(resp));
   return out;
 }
 

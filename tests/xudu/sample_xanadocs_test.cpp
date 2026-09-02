@@ -1,8 +1,8 @@
 /**
  * @file sample_xanadocs_test.cpp
  * @brief Comprehensive automated tests verifying generated sample xanadocs,
- *        dummy permascroll 000.scroll, 8 author link types, emergent transclusions,
- *        multimedia demonstrations, and complex beam topologies.
+ *        dummy permascroll 000.scroll, 8 author link types, emergent
+ * transclusions, multimedia demonstrations, and complex beam topologies.
  */
 #include <gmock/gmock.h>
 #include <gtest/gtest.h>
@@ -15,8 +15,8 @@
 #include <vector>
 
 #include <xudu/core/format.hpp>
-#include <xudu/core/magic_mime.hpp>
 #include <xudu/core/link_layout.hpp>
+#include <xudu/core/magic_mime.hpp>
 #include <xudu/core/microversion.hpp>
 #include <xudu/core/ops.hpp>
 #include <xudu/core/store.hpp>
@@ -52,9 +52,11 @@ std::vector<const Version *> viewing(const std::vector<Version> &versions) {
 // -----------------------------------------------------------------------------
 TEST(SampleXanadocsTest, Permascroll000ScrollExistsAndIsNonEmpty) {
   const auto scrollPath = kSampleBaseDir / "000.scroll";
-  ASSERT_TRUE(fs::exists(scrollPath)) << "000.scroll must exist at " << scrollPath;
+  ASSERT_TRUE(fs::exists(scrollPath))
+      << "000.scroll must exist at " << scrollPath;
   const auto size = fs::file_size(scrollPath);
-  EXPECT_GT(size, 1000U) << "000.scroll should contain generated primedia byte stream";
+  EXPECT_GT(size, 1000U)
+      << "000.scroll should contain generated primedia byte stream";
 }
 
 // -----------------------------------------------------------------------------
@@ -77,25 +79,29 @@ TEST(SampleXanadocsTest, CoreHypertextLoadsAndDiscoversTransclusion) {
   const auto builtA = storeA.rebuild(verA);
   const auto builtB = storeB.rebuild(verB);
 
-  EXPECT_THAT(storeA.textOf(verA), testing::HasSubstr("Chapter 1: The Nature of Hypertext"));
-  EXPECT_THAT(storeB.textOf(verB), testing::HasSubstr("Commentary on Xanadulogical Systems"));
+  EXPECT_THAT(storeA.textOf(verA),
+              testing::HasSubstr("Chapter 1: The Nature of Hypertext"));
+  EXPECT_THAT(storeB.textOf(verB),
+              testing::HasSubstr("Commentary on Xanadulogical Systems"));
 
   // Check emergent transclusion
   std::vector<TransclusionPair> tPairs;
   xudu::placeTransclusions(viewing({builtA, builtB}), tPairs);
 
-  ASSERT_FALSE(tPairs.empty()) << "Expected emergent transclusion between Doc A and Doc B";
+  ASSERT_FALSE(tPairs.empty())
+      << "Expected emergent transclusion between Doc A and Doc B";
   EXPECT_EQ(tPairs[0].from.doc, 0U);
   EXPECT_EQ(tPairs[0].to.doc, 1U);
   EXPECT_GT(tPairs[0].from.end, tPairs[0].from.start);
 
-  const auto transcludedTextA =
-      storeA.textOf(verA).substr(tPairs[0].from.start, tPairs[0].from.end - tPairs[0].from.start);
-  const auto transcludedTextB =
-      storeB.textOf(verB).substr(tPairs[0].to.start, tPairs[0].to.end - tPairs[0].to.start);
+  const auto transcludedTextA = storeA.textOf(verA).substr(
+      tPairs[0].from.start, tPairs[0].from.end - tPairs[0].from.start);
+  const auto transcludedTextB = storeB.textOf(verB).substr(
+      tPairs[0].to.start, tPairs[0].to.end - tPairs[0].to.start);
 
   EXPECT_EQ(transcludedTextA, transcludedTextB);
-  EXPECT_THAT(transcludedTextA, testing::HasSubstr("EVERYTHING IS DEEPLY INTERTWINGLED"));
+  EXPECT_THAT(transcludedTextA,
+              testing::HasSubstr("EVERYTHING IS DEEPLY INTERTWINGLED"));
 }
 
 TEST(SampleXanadocsTest, CoreHypertextContainsAll8AuthorLinkTypes) {
@@ -121,7 +127,8 @@ TEST(SampleXanadocsTest, CoreHypertextContainsAll8AuthorLinkTypes) {
   }
 
   // Verify all 8 Link Types are present:
-  // Comment, Illustration, Disagreement, Authorship, Quotation, Other, Format, Dimension
+  // Comment, Illustration, Disagreement, Authorship, Quotation, Other, Format,
+  // Dimension
   EXPECT_TRUE(foundTypes.contains(LinkType::Comment));
   EXPECT_TRUE(foundTypes.contains(LinkType::Illustration));
   EXPECT_TRUE(foundTypes.contains(LinkType::Disagreement));
@@ -150,7 +157,7 @@ TEST(SampleXanadocsTest, CoreHypertextUnifiedStoreLoadsBothVersions) {
   unified.load(unifiedDir.string());
   EXPECT_GE(unified.allVersions().size(), 2U);
 
-  const auto all = unified.allVersions();
+  const auto all    = unified.allVersions();
   const auto built1 = unified.rebuild(all.front());
   const auto built2 = unified.rebuild(all.back());
 
@@ -172,7 +179,7 @@ TEST(SampleXanadocsTest, Multimedia01MultipagePdfHasForcedBreaks) {
   Store store;
   store.load(pdfDir.string());
 
-  const auto ver = store.latest();
+  const auto ver     = store.latest();
   const auto rebuilt = store.rebuild(ver);
 
   EXPECT_THAT(store.textOf(ver), testing::HasSubstr("First Page Header"));
@@ -195,7 +202,8 @@ TEST(SampleXanadocsTest, Multimedia02PdfLinkedXanadocCrossDocumentLinks) {
 
   std::vector<LinkedPair> placed;
   std::vector<HalfLink> unplaced;
-  xudu::placeLinks(store.links(), viewing({pdfBuilt, comBuilt}), placed, unplaced);
+  xudu::placeLinks(store.links(), viewing({pdfBuilt, comBuilt}), placed,
+                   unplaced);
 
   ASSERT_GE(placed.size(), 2U);
   EXPECT_EQ(placed[0].from.doc, 0U);
@@ -207,7 +215,7 @@ TEST(SampleXanadocsTest, Multimedia03MixedTextImageContainsRasterAndText) {
   Store store;
   store.load(dir.string());
 
-  const auto ver = store.latest();
+  const auto ver     = store.latest();
   const auto rebuilt = store.rebuild(ver);
   xudu::MagicMimeDetector magic;
 
@@ -224,8 +232,7 @@ TEST(SampleXanadocsTest, Multimedia03MixedTextImageContainsRasterAndText) {
   }
   EXPECT_TRUE(hasImage)
       << "Expected raw image primedia span in 03_mixed_text_image";
-  EXPECT_TRUE(hasText)
-      << "Expected text primedia span in 03_mixed_text_image";
+  EXPECT_TRUE(hasText) << "Expected text primedia span in 03_mixed_text_image";
 }
 
 TEST(SampleXanadocsTest,
@@ -234,7 +241,7 @@ TEST(SampleXanadocsTest,
   Store store;
   store.load(dir.string());
 
-  const auto ver = store.latest();
+  const auto ver     = store.latest();
   const auto rebuilt = store.rebuild(ver);
   xudu::MagicMimeDetector magic;
 
@@ -246,17 +253,15 @@ TEST(SampleXanadocsTest,
       hasAudio = true;
     }
   }
-  EXPECT_TRUE(hasAudio)
-      << "Expected raw audio primedia span in 04_audio_doc";
+  EXPECT_TRUE(hasAudio) << "Expected raw audio primedia span in 04_audio_doc";
 }
 
-TEST(SampleXanadocsTest,
-     Multimedia05VideoDocContainsMp4ContainerAndKeyframes) {
+TEST(SampleXanadocsTest, Multimedia05VideoDocContainsMp4ContainerAndKeyframes) {
   const auto dir = kSampleBaseDir / "multimedia" / "05_video_doc";
   Store store;
   store.load(dir.string());
 
-  const auto ver = store.latest();
+  const auto ver     = store.latest();
   const auto rebuilt = store.rebuild(ver);
   xudu::MagicMimeDetector magic;
 
@@ -268,8 +273,7 @@ TEST(SampleXanadocsTest,
       hasVideo = true;
     }
   }
-  EXPECT_TRUE(hasVideo)
-      << "Expected raw video primedia span in 05_video_doc";
+  EXPECT_TRUE(hasVideo) << "Expected raw video primedia span in 05_video_doc";
 }
 
 TEST(SampleXanadocsTest, Multimedia06EmbeddedMediaPageHasPageBreaksAndFlow) {
@@ -277,13 +281,14 @@ TEST(SampleXanadocsTest, Multimedia06EmbeddedMediaPageHasPageBreaksAndFlow) {
   Store store;
   store.load(dir.string());
 
-  const auto ver = store.latest();
+  const auto ver     = store.latest();
   const auto rebuilt = store.rebuild(ver);
 
   EXPECT_GE(rebuilt.forcedBreaks().size(), 2U);
 }
 
-TEST(SampleXanadocsTest, Multimedia07AudioTransclusionVerifiesE5ToneTemporalSubspan) {
+TEST(SampleXanadocsTest,
+     Multimedia07AudioTransclusionVerifiesE5ToneTemporalSubspan) {
   const auto dir = kSampleBaseDir / "multimedia" / "07_audio_transclusion";
   Store store;
   store.load(dir.string());
@@ -296,13 +301,15 @@ TEST(SampleXanadocsTest, Multimedia07AudioTransclusionVerifiesE5ToneTemporalSubs
   std::vector<TransclusionPair> tPairs;
   xudu::placeTransclusions(viewing({v1Built, v2Built}), tPairs);
 
-  ASSERT_FALSE(tPairs.empty()) << "Expected audio subspan transclusion between Page 1 and Page 2";
+  ASSERT_FALSE(tPairs.empty())
+      << "Expected audio subspan transclusion between Page 1 and Page 2";
   EXPECT_EQ(tPairs[0].from.doc, 0U);
   EXPECT_EQ(tPairs[0].to.doc, 1U);
   EXPECT_GT(tPairs[0].from.end, tPairs[0].from.start);
 }
 
-TEST(SampleXanadocsTest, Multimedia08VideoTransclusionVerifiesSceneGammaTemporalClip) {
+TEST(SampleXanadocsTest,
+     Multimedia08VideoTransclusionVerifiesSceneGammaTemporalClip) {
   const auto dir = kSampleBaseDir / "multimedia" / "08_video_transclusion";
   Store store;
   store.load(dir.string());
@@ -315,7 +322,8 @@ TEST(SampleXanadocsTest, Multimedia08VideoTransclusionVerifiesSceneGammaTemporal
   std::vector<TransclusionPair> tPairs;
   xudu::placeTransclusions(viewing({v1Built, v2Built}), tPairs);
 
-  ASSERT_FALSE(tPairs.empty()) << "Expected video clip transclusion between Page 1 and Page 2";
+  ASSERT_FALSE(tPairs.empty())
+      << "Expected video clip transclusion between Page 1 and Page 2";
   EXPECT_EQ(tPairs[0].from.doc, 0U);
   EXPECT_EQ(tPairs[0].to.doc, 1U);
 }
@@ -333,7 +341,8 @@ TEST(SampleXanadocsTest, Multimedia09ImageTransclusionVerifiesSpatialIdatCrop) {
   std::vector<TransclusionPair> tPairs;
   xudu::placeTransclusions(viewing({v1Built, v2Built}), tPairs);
 
-  ASSERT_FALSE(tPairs.empty()) << "Expected image crop transclusion between Page 1 and Page 2";
+  ASSERT_FALSE(tPairs.empty())
+      << "Expected image crop transclusion between Page 1 and Page 2";
   EXPECT_EQ(tPairs[0].from.doc, 0U);
   EXPECT_EQ(tPairs[0].to.doc, 1U);
 }
@@ -414,7 +423,8 @@ TEST(SampleXanadocsTest, Beams03MultiSpanStackedLinks) {
   const auto &links = store.links();
   ASSERT_EQ(links.size(), 3U);
 
-  // Link 1: Broad multi-span link connecting both top and bottom non-contiguous spans
+  // Link 1: Broad multi-span link connecting both top and bottom non-contiguous
+  // spans
   ASSERT_TRUE(links.contains(1));
   ASSERT_TRUE(links.contains(2));
   ASSERT_TRUE(links.contains(3));
