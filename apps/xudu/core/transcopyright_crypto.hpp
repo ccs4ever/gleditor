@@ -6,8 +6,8 @@
  * Implements:
  * 1. AEAD Encryption/Decryption: ChaCha20-Poly1305 / XChaCha20 authenticated
  * encryption.
- * 2. Seekable Block Math: 64-byte block counter indexing for random-access span
- * decryption.
+ * 2. Whole-segment AEAD decryption with plaintext slicing.
+ *
  * 3. Hierarchical Key Derivation: HKDF-SHA256 derivation of SpanCEK from
  * SegmentMasterKey.
  * 4. HPKE / X25519 Key Encapsulation: Wrap/unwrap CEKs for peer-to-peer
@@ -77,17 +77,23 @@ decryptAead(std::string_view ciphertextWithTag, const Key32 &key,
             const Nonce24 &nonce, std::string_view ad = {});
 
 /**
- * @brief Direct seekable ChaCha20 keystream decryption for arbitrary span
- * slices.
+ * @brief Decrypt a segment and return the requested slice of the plaintext.
  *
- * Calculates starting 64-byte block counter from `reqOffset`, applies
- * counter-mode keystream, and extracts the requested subspan without decrypting
- * the entire file.
+ * Named for what it does. It was decryptSeekableSpan, documented as seeking
+ * to a 64-byte block counter and decrypting only the requested range -- which
+ * it never did, and could not: a Poly1305 tag authenticates a whole message,
+ * so decrypting a fragment means returning bytes nothing has vouched for.
+ * Whole-segment decryption is the right call; only the name and the claim
+ * were wrong.
+ *
+ * The cost is real, so callers that resolve the same span repeatedly should
+ * cache the plaintext rather than call this per frame. Genuine random access
+ * would need a chunked AEAD framing, with a tag per chunk.
  */
 [[nodiscard]] std::optional<std::string>
-decryptSeekableSpan(std::string_view ciphertext, std::uint64_t cipherBaseOffset,
-                    const Key32 &key, const Nonce24 &nonce,
-                    std::uint64_t reqOffset, std::uint64_t reqLength);
+decryptSpanSlice(std::string_view ciphertext, std::uint64_t cipherBaseOffset,
+                 const Key32 &key, const Nonce24 &nonce,
+                 std::uint64_t reqOffset, std::uint64_t reqLength);
 
 /**
  * @brief Compute a 256-bit cryptographic commitment (SHA-256) over withheld

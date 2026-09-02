@@ -77,7 +77,7 @@ TEST(TranscopyrightCryptoTest, seekableSpanDecryption) {
   const auto ct = crypto::encryptAead(pt, key, nonce);
 
   // Request subspan [10, 36) -> "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
-  const auto sub = crypto::decryptSeekableSpan(ct, 0, key, nonce, 10, 26);
+  const auto sub = crypto::decryptSpanSlice(ct, 0, key, nonce, 10, 26);
   ASSERT_TRUE(sub.has_value());
   EXPECT_EQ(*sub, "ABCDEFGHIJKLMNOPQRSTUVWXYZ");
 }
@@ -596,8 +596,7 @@ TEST(TranscopyrightBenchmarkTest, SeekableDecryptionLatencyUnder1ms) {
   const auto start = std::chrono::high_resolution_clock::now();
   for (std::size_t i = 0; i < 1000; ++i) {
     const std::uint64_t offset = (i * 37) % 65000;
-    const auto sub =
-        crypto::decryptSeekableSpan(ct, 0, key, nonce, offset, 256);
+    const auto sub = crypto::decryptSpanSlice(ct, 0, key, nonce, offset, 256);
     ASSERT_TRUE(sub.has_value());
     EXPECT_EQ(sub->size(), 256U);
   }

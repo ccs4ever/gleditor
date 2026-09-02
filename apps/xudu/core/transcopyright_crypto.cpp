@@ -266,10 +266,10 @@ std::optional<std::string> decryptAead(const std::string_view ciphertextWithTag,
 }
 
 std::optional<std::string>
-decryptSeekableSpan(const std::string_view ciphertext,
-                    const std::uint64_t cipherBaseOffset, const Key32 &key,
-                    const Nonce24 &nonce, const std::uint64_t reqOffset,
-                    const std::uint64_t reqLength) {
+decryptSpanSlice(const std::string_view ciphertext,
+                 const std::uint64_t cipherBaseOffset, const Key32 &key,
+                 const Nonce24 &nonce, const std::uint64_t reqOffset,
+                 const std::uint64_t reqLength) {
   if (reqLength == 0) {
     return std::string{};
   }

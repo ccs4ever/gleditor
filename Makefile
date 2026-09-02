@@ -643,18 +643,39 @@ $(OBJDIR)/zigzag_test: $(ZIGZAG_TEST_OBJS) $(filter-out $(OBJDIR)/apps/zigzag/ma
 	$(CXX) $(LDFLAGS) -o $@ $^ $(APP_LDFLAGS) $(LIBS) $(ZIGZAG_LIBS) $(TEST_LIBS)
 
 
-.PHONY: fuzz fuzz_binary_ops fuzz_link_package
-fuzz_binary_ops: $(OBJDIR)/fuzz_binary_ops
-$(OBJDIR)/fuzz_binary_ops: tests/fuzz/fuzz_binary_ops.cpp $(XUDU_CORE_OBJS)
-	@$(MKDIR) -p $(@D)
-	$(CXX) -fsanitize=fuzzer,address,undefined $(CXXFLAGS) $< $(XUDU_CORE_OBJS) $(XUDU_LIBS) -o $@
+# Fuzzing needs its own copy of the engine, built with the sanitizers. Linking
+# the ordinary $(XUDU_CORE_OBJS) -- which is what these targets used to do --
+# leaves every function the harness actually exercises uninstrumented, so
+# libFuzzer sees coverage only from whatever inlines into the harness itself
+# and has nothing to steer by: it degenerates into throwing random bytes at
+# the decoders. ASan and UBSan still fire, which is why the old shape looked
+# like it worked, but the coverage-guided part was not happening.
+FUZZ_OBJDIR   := $(OBJDIR)/fuzz
+FUZZ_FLAGS    := -fsanitize=fuzzer-no-link,address,undefined
+FUZZ_CORE_OBJS := $(patsubst %.cpp,$(FUZZ_OBJDIR)/%.o,$(XUDU_CORE_SRCS))
 
-fuzz_link_package: $(OBJDIR)/fuzz_link_package
-$(OBJDIR)/fuzz_link_package: tests/fuzz/fuzz_link_package.cpp $(XUDU_CORE_OBJS)
+$(FUZZ_OBJDIR)/%.o: %.cpp
 	@$(MKDIR) -p $(@D)
-	$(CXX) -fsanitize=fuzzer,address,undefined $(CXXFLAGS) $< $(XUDU_CORE_OBJS) $(XUDU_LIBS) -o $@
+	$(CXX) $(FUZZ_FLAGS) $(CXXFLAGS) -c -o $@ $<
 
-fuzz: fuzz_binary_ops fuzz_link_package
+# $(1) target name
+define fuzz-target
+.PHONY: fuzz_$(1)
+fuzz_$(1): $$(OBJDIR)/fuzz_$(1)
+$$(OBJDIR)/fuzz_$(1): tests/fuzz/fuzz_$(1).cpp $$(FUZZ_CORE_OBJS)
+	@$$(MKDIR) -p $$(@D)
+	$$(CXX) -fsanitize=fuzzer,address,undefined $$(CXXFLAGS) $$< \
+	  $$(FUZZ_CORE_OBJS) $$(XUDU_LIBS) -o $$@
+endef
+
+$(eval $(call fuzz-target,binary_ops))
+$(eval $(call fuzz-target,link_package))
+# The BEP 10 identity decoders parse bytes from a peer that has not yet
+# authenticated, which makes them the outermost attack surface here.
+$(eval $(call fuzz-target,identity_wire))
+
+.PHONY: fuzz
+fuzz: fuzz_binary_ops fuzz_link_package fuzz_identity_wire
 
 # The other end of the swarm tests: a peer that offers a torrent's content and
 # waits to be asked. A separate program because the two peers are meant to be
