@@ -1,0 +1,8 @@
+Page 1: Master Audio Track Recording (4 Harmonic Tones: A4, C#5, E5, A5)
+
+[AUDIO_STREAM_RESOURCE: tests/samples/sample_audio.wav]
+Full Track Timeline:
+  - Tone 1 [00:00 - 00:01]: 440.00 Hz (A4)
+  - Tone 2 [00:01 - 00:02]: 554.37 Hz (C#5)
+  - Tone 3 [00:02 - 00:03]: 659.25 Hz (E5 Keynote Tone)
+  - Tone 4 [00:03 - 00:04]: 880.00 Hz (A5)

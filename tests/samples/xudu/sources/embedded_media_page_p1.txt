@@ -1,0 +1,8 @@
+Embedded Multimedia Xanadoc: Integrated Lecture & Demonstration
+
+1. Theoretical Introduction
+The fundamental architecture of Project Xanadu integrates sound, moving imagery, and typography into a single continuous primedia space.
+
+[EMBEDDED_AUDIO_WIDGET: tests/samples/sample_audio.wav (00:01.00 - 00:03.00)]
+Title: 'Acoustic Hypertext Keynote'
+Status: Active Playback Stream

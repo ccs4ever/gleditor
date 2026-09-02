@@ -1,0 +1,8 @@
+Page 1: Master High-Resolution Quadrant Blueprint (64x64 RGBA)
+
+[IMAGE_DATA_STREAM: tests/samples/sample_image.png]
+Quadrant Map:
+  - Quadrant Alpha (Top-Left): Red (220, 38, 38)
+  - Quadrant Beta (Top-Right): Green (34, 197, 94)
+  - Quadrant Gamma (Bottom-Left): Blue (59, 130, 246)
+  - Quadrant Delta (Bottom-Right): Gold (250, 204, 21)

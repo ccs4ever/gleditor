@@ -1,0 +1,10 @@
+Figure 1.1: Multi-Planar Geometric Docuverse Topology
+
+[EMBEDDED_IMAGE_ASSET: tests/samples/sample_image.png]
+Resolution: 64x64 RGBA8
+Quadrant Alpha (Top-Left): Red (220, 38, 38)
+Quadrant Beta (Top-Right): Green (34, 197, 94)
+Quadrant Gamma (Bottom-Left): Blue (59, 130, 246)
+Quadrant Delta (Bottom-Right): Gold (250, 204, 21)
+
+Figure Caption: The above diagram illustrates the optical path of identity gold transclusion ribbons flowing across 3D canvas coordinates.

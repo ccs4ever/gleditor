@@ -893,23 +893,49 @@ void Doc::reflowFrom(RenderState &state, const std::size_t firstPage,
   pages.erase(pages.begin() + static_cast<std::ptrdiff_t>(firstPage),
               pages.end());
 
+  constexpr float pageGapPx = 32.0F;
+  float currentTopY         = 0.0F;
+  if (firstPage > 0 && firstPage <= pages.size()) {
+    const auto &prevPage        = pages[firstPage - 1];
+    const float prevCenterY     = prevPage.getModel()[3][1];
+    const float prevHeightWorld = prevPage.heightPixels() * pixelsToWorld;
+    const float prevBottomY     = prevCenterY - (prevHeightWorld / 2.0F);
+    currentTopY                 = prevBottomY - (pageGapPx * pixelsToWorld);
+  }
+
   for (std::size_t i = 0; i < rebuilt.size(); i++) {
     auto &[base, shaping] = rebuilt[i];
     const auto index      = firstPage + i;
+    const float pageHeightPx =
+        static_cast<float>(shaping.textHeightPx) + (2.0F * pageMargin);
+    const float pageHeightWorld = pageHeightPx * pixelsToWorld;
+    const float centerY         = currentTopY - (pageHeightWorld / 2.0F);
+
     glm::mat4 trans =
-        glm::translate(glm::mat4(1.0),
-                       glm::vec3(0.0F, -100 * static_cast<float>(index), 0.0F));
+        glm::translate(glm::mat4(1.0F), glm::vec3(0.0F, centerY, 0.0F));
     trans = glm::scale(trans, glm::vec3(pixelsToWorld, pixelsToWorld, 1.0F));
     pages.emplace_back(getPtr(), state, trans, std::move(shaping), base,
                        static_cast<std::uint32_t>(index),
                        i < inherited.size() ? inherited[i]
                                             : BufferPool::Allocation{});
+
+    currentTopY =
+        (centerY - (pageHeightWorld / 2.0F)) - (pageGapPx * pixelsToWorld);
   }
   // Untouched pages keep their shaping and their vertex rows; only the offset
-  // they report moves.
+  // they report moves. Update their model matrix with the new vertical
+  // position.
   for (auto &page : tail) {
     page.shiftBaseOffset(delta);
+    const float pageHeightWorld = page.heightPixels() * pixelsToWorld;
+    const float centerY         = currentTopY - (pageHeightWorld / 2.0F);
+    glm::mat4 trans =
+        glm::translate(glm::mat4(1.0F), glm::vec3(0.0F, centerY, 0.0F));
+    trans = glm::scale(trans, glm::vec3(pixelsToWorld, pixelsToWorld, 1.0F));
+    page.setModel(trans);
     pages.push_back(std::move(page));
+    currentTopY =
+        (centerY - (pageHeightWorld / 2.0F)) - (pageGapPx * pixelsToWorld);
   }
 
   reflowScope = scope;
@@ -1007,14 +1033,31 @@ bool Doc::buildPendingPages(RenderState &state) {
     std::lock_guard lock(shapingMutex);
     toBuild.swap(pendingShapings);
   }
+  constexpr float pageGapPx = 32.0F;
+  float currentTopY         = 0.0F;
+  if (!pages.empty()) {
+    const auto &lastPage        = pages.back();
+    const float lastCenterY     = lastPage.getModel()[3][1];
+    const float lastHeightWorld = lastPage.heightPixels() * pixelsToWorld;
+    const float lastBottomY     = lastCenterY - (lastHeightWorld / 2.0F);
+    currentTopY                 = lastBottomY - (pageGapPx * pixelsToWorld);
+  }
+
   for (auto &[shaping, textOffset] : toBuild) {
     const auto numPages = pages.size();
-    glm::mat4 trans     = glm::translate(
-        glm::mat4(1.0),
-        glm::vec3(0.0F, -100 * static_cast<float>(numPages), 0.0F));
+    const float pageHeightPx =
+        static_cast<float>(shaping.textHeightPx) + (2.0F * pageMargin);
+    const float pageHeightWorld = pageHeightPx * pixelsToWorld;
+    const float centerY         = currentTopY - (pageHeightWorld / 2.0F);
+
+    glm::mat4 trans =
+        glm::translate(glm::mat4(1.0F), glm::vec3(0.0F, centerY, 0.0F));
     trans = glm::scale(trans, glm::vec3(pixelsToWorld, pixelsToWorld, 1.0F));
     pages.emplace_back(getPtr(), state, trans, std::move(shaping), textOffset,
                        static_cast<std::uint32_t>(numPages));
+
+    currentTopY =
+        (centerY - (pageHeightWorld / 2.0F)) - (pageGapPx * pixelsToWorld);
   }
   if (shapingComplete.load(std::memory_order_acquire)) {
     std::lock_guard lock(shapingMutex);
@@ -1029,10 +1072,23 @@ bool Doc::buildPendingPages(RenderState &state) {
 
 void Doc::newPage(RenderState &state, PageShaping aShaping,
                   const std::uint32_t textOffset) {
-  const auto numPages = this->pages.size();
-  glm::mat4 trans     = glm::translate(
-      glm::mat4(1.0),
-      glm::vec3(0.0F, -100 * static_cast<float>(numPages), 0.0F));
+  const auto numPages       = this->pages.size();
+  constexpr float pageGapPx = 32.0F;
+  float currentTopY         = 0.0F;
+  if (!pages.empty()) {
+    const auto &prevPage        = pages.back();
+    const float prevCenterY     = prevPage.getModel()[3][1];
+    const float prevHeightWorld = prevPage.heightPixels() * pixelsToWorld;
+    const float prevBottomY     = prevCenterY - (prevHeightWorld / 2.0F);
+    currentTopY                 = prevBottomY - (pageGapPx * pixelsToWorld);
+  }
+  const float pageHeightPx =
+      static_cast<float>(aShaping.textHeightPx) + (2.0F * pageMargin);
+  const float pageHeightWorld = pageHeightPx * pixelsToWorld;
+  const float centerY         = currentTopY - (pageHeightWorld / 2.0F);
+
+  glm::mat4 trans =
+      glm::translate(glm::mat4(1.0F), glm::vec3(0.0F, centerY, 0.0F));
   trans = glm::scale(trans, glm::vec3(pixelsToWorld, pixelsToWorld, 1.0F));
   pages.emplace_back(this->getPtr(), state, trans, std::move(aShaping),
                      textOffset, static_cast<std::uint32_t>(numPages));

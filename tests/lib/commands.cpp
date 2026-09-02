@@ -10,6 +10,7 @@
 #include <vector>
 
 #include <gleditor/app.hpp>
+#include <gleditor/sdl_compat.hpp>
 
 namespace {
 
@@ -106,6 +107,26 @@ TEST(CommandTableTest, everyBindingIsListed) {
   table.bind(keyB, Mod::Alt, "two", "", [] {});
   EXPECT_EQ(table.all().size(), 2U);
   EXPECT_EQ(table.all()[1].mods, Mod::Alt);
+}
+
+TEST(MouseWheelTest, WheelHelpersExtractCoordinates) {
+  SDL_Event evt{};
+  evt.type = SDL_EVENT_MOUSE_WHEEL;
+#if GLEDITOR_SDL_MAJOR == 3
+  evt.wheel.x = 2.0F;
+  evt.wheel.y = -3.0F;
+#else
+  evt.wheel.x = 2;
+  evt.wheel.y = -3;
+#endif
+  evt.wheel.direction = SDL_MOUSEWHEEL_NORMAL;
+
+  EXPECT_FLOAT_EQ(sdl::wheelX(evt), 2.0F);
+  EXPECT_FLOAT_EQ(sdl::wheelY(evt), -3.0F);
+  EXPECT_FALSE(sdl::wheelFlipped(evt));
+
+  evt.wheel.direction = SDL_MOUSEWHEEL_FLIPPED;
+  EXPECT_TRUE(sdl::wheelFlipped(evt));
 }
 
 } // namespace

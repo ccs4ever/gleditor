@@ -1,0 +1,13 @@
+Audio Document: Nelson 1974 Hypertext Lecture Excerpt & Waveform (44.1 kHz)
+
+[EMBEDDED_AUDIO_STREAM: tests/samples/sample_audio.wav]
+Encoding: RIFF WAVE 16-bit PCM Mono @ 44.1 kHz
+Duration: 00:04.00
+
+Harmonic Progression Sequence:
+  - 00:00.00 - 00:01.00: Frequency 440.00 Hz (A4 Reference Tone)
+  - 00:01.00 - 00:02.00: Frequency 554.37 Hz (C#5 Major Third)
+  - 00:02.00 - 00:03.00: Frequency 659.25 Hz (E5 Keynote Tone)
+  - 00:03.00 - 00:04.00: Frequency 880.00 Hz (A5 Harmonic Octave)
+
+Transcript: 'Knowledge is an interconnected web; words are points in continuous sound.'

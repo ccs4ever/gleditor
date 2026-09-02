@@ -108,7 +108,8 @@ std::vector<CompactedOp> UncommittedOpLog::compact() const {
           break;
         }
 
-        // Sequential right-delete (Delete key): e.g. Delete at 5 then Delete at 5
+        // Sequential right-delete (Delete key): e.g. Delete at 5 then Delete at
+        // 5
         if (entry.at == out.back().at) {
           out.back().length += entry.length;
           handled = true;

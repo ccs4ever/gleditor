@@ -693,12 +693,21 @@ void Store::writeOsmicText(std::ostream &out) const {
 void Store::load(const std::string &directory) {
   const std::filesystem::path dir(directory);
   if (std::filesystem::exists(dir / primediaFile)) {
-    userPermascroll_->adopt(readWholeFile(dir / primediaFile));
+    const auto stored = readWholeFile(dir / primediaFile);
+    if (userPermascroll_->size() == 0) {
+      userPermascroll_->adopt(stored);
+    } else if (stored.size() > userPermascroll_->size()) {
+      userPermascroll_->append(
+          std::string_view(stored).substr(userPermascroll_->size()));
+    }
+    // What was just read is already on disk here, so the next save to this
+    // directory can append to it rather than write it out again.
+    flushedPrimediaDirectory = directory;
+    primediaFlushed          = userPermascroll_->size();
+  } else {
+    flushedPrimediaDirectory.clear();
+    primediaFlushed = 0;
   }
-  // What was just read is already on disk here, so the next save to this
-  // directory can append to it rather than write it out again.
-  flushedPrimediaDirectory = directory;
-  primediaFlushed          = userPermascroll_->size();
   opsSpool.clear();
   linkTable.clear();
   externals.clear();

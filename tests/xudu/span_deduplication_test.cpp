@@ -36,7 +36,7 @@ protected:
 TEST_F(SpanDeduplicationTest, UserPermascrollFindsExactMatchingSpan) {
   UserPermascroll scroll;
   const std::string sample = "The quick brown fox jumps over the lazy dog.";
-  const auto span = scroll.append(sample);
+  const auto span          = scroll.append(sample);
 
   EXPECT_EQ(span.start, 0U);
   EXPECT_EQ(span.length, sample.size());
@@ -115,4 +115,3 @@ TEST_F(SpanDeduplicationTest, UncommittedLogAndStoreReuseExistingSpan) {
 
 } // namespace
 } // namespace xudu
-

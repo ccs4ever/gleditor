@@ -193,6 +193,37 @@ public:
     showAlongside(version, 0.0F, storeIndex);
   }
 
+  void syncMediaWidgets(RenderState &rState) {
+    mediaWidgets.clear();
+    for (std::size_t dIdx = 0;
+         dIdx < rState.docs.size() && dIdx < session.views().size(); ++dIdx) {
+      if (!rState.docs[dIdx]) {
+        continue;
+      }
+      const auto &vInfo = session.views()[dIdx];
+      const auto &st    = session.store(vInfo.storeIndex);
+      const auto spans = session.mediaSpansFor(vInfo.version, vInfo.storeIndex);
+      for (const auto &mSpan : spans) {
+        auto widget      = std::make_shared<gleditor::MediaWidget>("Sans 11");
+        const auto bytes = st.read(mSpan.span);
+        auto stream      = std::make_shared<gleditor::MemoryMediaStream>(bytes);
+        widget->load(gleditor::MediaResource::fromStream(stream, mSpan.label));
+        widget->setTitle(mSpan.label);
+        widget->attachToDocument(rState.docs[dIdx], mSpan.docOffset);
+        if (mSpan.isAudio) {
+          widget->setSize(340.0F, 120.0F);
+        } else {
+          widget->setSize(340.0F, 180.0F);
+        }
+        widget->setVisible(true);
+        renderer->addFrameContributor(widget.get());
+        renderer->addPickObserver(widget.get());
+        state->accessibility->addSource(widget.get());
+        mediaWidgets.push_back(std::move(widget));
+      }
+    }
+  }
+
   /// Open @p version as another document beside whatever is already there.
   void showAlongside(const MicroversionId &version, const float depthZ = 0.0F,
                      const std::size_t storeIndex = 0) {
@@ -205,6 +236,7 @@ public:
       rState.docs.back()->addObserver(&session);
       session.viewOpened(version, storeIndex);
       map.setCurrent(session.views().front().version);
+      syncMediaWidgets(rState);
     });
   }
 
@@ -286,6 +318,7 @@ public:
       const bool scrubbed = backward ? session.scrubBackward(docIdx, doc, 1)
                                      : session.scrubForward(docIdx, doc, 1);
       if (scrubbed) {
+        syncMediaWidgets(rState);
         const auto newVer = session.versionOf(docIdx);
         const auto hist   = session.historyOf(docIdx);
         const auto it     = std::ranges::find(hist, newVer);
@@ -641,6 +674,7 @@ private:
   AppStateRef state;
   std::shared_ptr<gleditor::DocumentSwitcher> switcher;
   std::optional<Pending> pending;
+  std::vector<std::shared_ptr<gleditor::MediaWidget>> mediaWidgets;
 };
 
 void bindCommands(gleditor::Application &app, const AppStateRef &state,
@@ -715,6 +749,165 @@ void bindCommands(gleditor::Application &app, const AppStateRef &state,
   app.commands().bind(SDL_SCANCODE_BACKSPACE, "delete",
                       "stop pointing at the selection",
                       [&views] { views.deleteSelection(); });
+}
+
+xudu::LinkType parseLinkType(const std::string_view str) {
+  if (str == "comment" || str == "Comment") {
+    return xudu::LinkType::Comment;
+  }
+  if (str == "illustration" || str == "Illustration") {
+    return xudu::LinkType::Illustration;
+  }
+  if (str == "disagreement" || str == "Disagreement") {
+    return xudu::LinkType::Disagreement;
+  }
+  if (str == "authorship" || str == "Authorship") {
+    return xudu::LinkType::Authorship;
+  }
+  if (str == "quotation" || str == "Quotation") {
+    return xudu::LinkType::Quotation;
+  }
+  if (str == "format" || str == "Format") {
+    return xudu::LinkType::Format;
+  }
+  if (str == "dimension" || str == "Dimension") {
+    return xudu::LinkType::Dimension;
+  }
+  return xudu::LinkType::Other;
+}
+
+xudu::ProminenceTier parseProminenceTier(const std::string_view str) {
+  if (str == "curator" || str == "Curator" || str == "curated" ||
+      str == "Curated") {
+    return xudu::ProminenceTier::Curated;
+  }
+  if (str == "public" || str == "Public" || str == "reader" ||
+      str == "Reader") {
+    return xudu::ProminenceTier::Public;
+  }
+  return xudu::ProminenceTier::Author;
+}
+
+xudu::FormatAttribute parseFormatAttribute(const std::string_view str) {
+  if (str == "italic" || str == "Italic") {
+    return xudu::FormatAttribute::Italic;
+  }
+  if (str == "underline" || str == "Underline") {
+    return xudu::FormatAttribute::Underline;
+  }
+  if (str == "overline" || str == "Overline") {
+    return xudu::FormatAttribute::Overline;
+  }
+  if (str == "strikethrough" || str == "Strikethrough") {
+    return xudu::FormatAttribute::Strikethrough;
+  }
+  if (str == "superscript" || str == "Superscript") {
+    return xudu::FormatAttribute::Superscript;
+  }
+  if (str == "subscript" || str == "Subscript") {
+    return xudu::FormatAttribute::Subscript;
+  }
+  return xudu::FormatAttribute::Bold;
+}
+
+std::vector<xudu::PrimediaSpan>
+resolveSingleSpanToken(const xudu::Session &session, const std::string &token,
+                       const std::optional<std::uint32_t> defaultDocIdx) {
+  if (token.starts_with("vocab:") || token.starts_with("VOCAB:")) {
+    const auto attrName = token.substr(6);
+    return {xudu::vocabularySpanFor(parseFormatAttribute(attrName))};
+  }
+
+  const auto atPos = token.find('@');
+  if (atPos != std::string::npos) {
+    const auto docIdx =
+        static_cast<std::uint32_t>(std::stoul(token.substr(0, atPos)));
+    auto rem = token.substr(atPos + 1);
+    std::string query;
+    std::optional<std::uint32_t> customLen;
+    const auto colon = rem.rfind(':');
+    if (colon != std::string::npos && colon > 0 &&
+        std::isdigit(static_cast<unsigned char>(rem[colon + 1]))) {
+      query     = rem.substr(0, colon);
+      customLen = static_cast<std::uint32_t>(std::stoul(rem.substr(colon + 1)));
+    } else {
+      query = rem;
+    }
+    if (query.size() >= 2 && query.front() == '"' && query.back() == '"') {
+      query = query.substr(1, query.size() - 2);
+    }
+    const auto vList = session.views();
+    if (docIdx >= vList.size()) {
+      throw std::runtime_error("document index out of range: " + token);
+    }
+    const auto sIdx     = vList[docIdx].storeIndex;
+    const auto docText  = session.store(sIdx).textOf(vList[docIdx].version);
+    const auto matchPos = docText.find(query);
+    if (matchPos == std::string::npos) {
+      throw std::runtime_error("query substring not found in document " +
+                               std::to_string(docIdx) + ": " + query);
+    }
+    const auto ver = session.store(sIdx).rebuild(vList[docIdx].version);
+    const auto spanLen =
+        customLen ? *customLen : static_cast<std::uint32_t>(query.size());
+    return ver.spansFor(static_cast<std::uint32_t>(matchPos), spanLen);
+  }
+
+  const auto firstColon = token.find(':');
+  if (firstColon == std::string::npos) {
+    throw std::runtime_error("invalid span specifier: " + token);
+  }
+  const auto secondColon = token.find(':', firstColon + 1);
+  std::uint32_t docIdx   = 0;
+  std::uint32_t start    = 0;
+  std::uint32_t len      = 0;
+  if (secondColon != std::string::npos) {
+    docIdx =
+        static_cast<std::uint32_t>(std::stoul(token.substr(0, firstColon)));
+    start = static_cast<std::uint32_t>(
+        std::stoul(token.substr(firstColon + 1, secondColon - firstColon - 1)));
+    len = static_cast<std::uint32_t>(std::stoul(token.substr(secondColon + 1)));
+  } else {
+    if (!defaultDocIdx) {
+      throw std::runtime_error("span specifier missing document index: " +
+                               token);
+    }
+    docIdx = *defaultDocIdx;
+    start = static_cast<std::uint32_t>(std::stoul(token.substr(0, firstColon)));
+    len = static_cast<std::uint32_t>(std::stoul(token.substr(firstColon + 1)));
+  }
+  const auto vList = session.views();
+  if (docIdx >= vList.size()) {
+    throw std::runtime_error("document index out of range: " + token);
+  }
+  const auto sIdx = vList[docIdx].storeIndex;
+  const auto ver  = session.store(sIdx).rebuild(vList[docIdx].version);
+  return ver.spansFor(start, len);
+}
+
+std::vector<xudu::PrimediaSpan> resolveSpans(const xudu::Session &session,
+                                             const std::string &spec) {
+  std::vector<xudu::PrimediaSpan> result;
+  std::stringstream ss(spec);
+  std::string token;
+  std::optional<std::uint32_t> leadingDocIdx;
+
+  while (std::getline(ss, token, '+')) {
+    if (token.empty()) {
+      continue;
+    }
+    auto sp = resolveSingleSpanToken(session, token, leadingDocIdx);
+    if (!token.empty() && token.find(':') != std::string::npos &&
+        !leadingDocIdx) {
+      const auto c = token.find(':');
+      if (token.find(':', c + 1) != std::string::npos) {
+        leadingDocIdx =
+            static_cast<std::uint32_t>(std::stoul(token.substr(0, c)));
+      }
+    }
+    result.insert(result.end(), sp.begin(), sp.end());
+  }
+  return result;
 }
 
 } // namespace
@@ -832,6 +1025,51 @@ int main(const int argc, char **argv) {
           "first file goes into the primary store (if empty), while additional "
           "files receive independent temporary stores")
       .append();
+  parser.add_argument("--import-branch")
+      .help("import a file as a new root microversion branch in the primary "
+            "store; repeatable")
+      .append();
+  parser.add_argument("--import-break")
+      .help("insert a page break and append text from file into the opening "
+            "document; repeatable")
+      .append();
+  parser.add_argument("--insert-text")
+      .help("insert text into document as DOC:POS:FILE_OR_TEXT; repeatable")
+      .append();
+  parser.add_argument("--transclude")
+      .help("transclude span from one doc into another as "
+            "SRCDOC:START:LEN,DESTDOC:POS; repeatable")
+      .append();
+  parser.add_argument("--transclude-text")
+      .help("transclude text matching query from one doc into another as "
+            "SRCDOC:QUERY,DESTDOC:POS; repeatable")
+      .append();
+  parser.add_argument("--format-link")
+      .help("create formatting link as DOC:START:LEN:ATTR[:TIER[:OWNER]]; "
+            "repeatable")
+      .append();
+  parser.add_argument("--dimension-link")
+      .help("create dimension link as "
+            "DOC1:START:LEN,DOC2:START:LEN:DIMNAME; repeatable")
+      .append();
+  parser.add_argument("--permascroll")
+      .help("path to sovereign user permascroll to load or bind")
+      .default_value(std::string{});
+  parser.add_argument("--dump-permascroll")
+      .help("dump sovereign user permascroll bytes to a file upon exit")
+      .default_value(std::string{});
+  parser.add_argument("--open-store")
+      .help("open an existing xanadoc store as an auxiliary document; "
+            "repeatable")
+      .append();
+  parser.add_argument("--export-osmic")
+      .help("export human-readable OSMIC text spools alongside binary stores")
+      .default_value(false)
+      .implicit_value(true);
+  parser.add_argument("--headless", "--batch")
+      .help("run batch commands non-interactively and exit without GUI")
+      .default_value(false)
+      .implicit_value(true);
   parser.add_argument("--audio")
       .help(
           "open an audio stream or file as an embedded AudioWidget; repeatable")
@@ -842,7 +1080,7 @@ int main(const int argc, char **argv) {
       .append();
   parser.add_argument("--link")
       .help("create a link between open document spans as "
-            "DOC1:START:END,DOC2:START:END; repeatable")
+            "DOC1:START:LEN,DOC2:START:LEN[:TYPE[:TIER[:OWNER]]]; repeatable")
       .append();
   parser.add_argument("files")
       .help("source files to import or open")
@@ -858,6 +1096,7 @@ int main(const int argc, char **argv) {
   std::unique_ptr<Session> session;
   bool quiet = false;
   MicroversionId opening;
+  std::string asked;
   std::string alongside;
   std::string publishAs;
   std::vector<MicroversionId> read;
@@ -875,16 +1114,37 @@ int main(const int argc, char **argv) {
         !where.empty()) {
       return checkAuthorship(where);
     }
-    backend  = gleditor::applyCommonArguments(parser, state, argc, argv);
-    renderer = Renderer::create(state, backend);
-    quiet    = parser["--print-asset-dir"] == true;
+    const bool headless =
+        parser["--headless"] == true || parser["--batch"] == true;
+    quiet = parser["--print-asset-dir"] == true || headless;
 
-    session = std::make_unique<Session>(parser.get<std::string>("store"));
+    std::shared_ptr<xudu::UserPermascroll> userPermascroll;
+    if (const auto permaPath = parser.get<std::string>("--permascroll");
+        !permaPath.empty() && std::filesystem::exists(permaPath)) {
+      std::ifstream in(permaPath, std::ios::binary);
+      if (in) {
+        std::string bytes((std::istreambuf_iterator<char>(in)),
+                          std::istreambuf_iterator<char>());
+        userPermascroll = std::make_shared<xudu::UserPermascroll>();
+        userPermascroll->append(bytes);
+      }
+    }
+
+    session = std::make_unique<Session>(parser.get<std::string>("store"),
+                                        userPermascroll);
     state->onDecoratedInsert = [&session](Doc &doc, const std::uint32_t at,
                                           const std::uint32_t length,
                                           const gleditor::DecorationMask mask) {
       session->markDecorated(doc, at, length, mask);
     };
+
+    // If in headless/batch mode, register existing versions for span resolution
+    if (headless && session->views().empty() &&
+        session->store(0).opCount() > 0) {
+      for (const auto &v : session->store(0).allVersions()) {
+        session->viewOpened(v, 0);
+      }
+    }
 
     // Collect import files from --import and positional files
     std::vector<std::string> importFiles;
@@ -915,6 +1175,7 @@ int main(const int argc, char **argv) {
         }
         session->save(0);
         opening = imported;
+        session->viewOpened(imported, 0);
         quiet || std::cout << "xudu: imported " << firstFile << " as "
                            << imported.str() << "\n";
         startIdx = 1;
@@ -922,11 +1183,341 @@ int main(const int argc, char **argv) {
       for (std::size_t i = startIdx; i < importFiles.size(); ++i) {
         const auto &f               = importFiles[i];
         const auto [sIdx, imported] = session->importFileToTemporaryStore(f);
+        session->viewOpened(imported, sIdx);
         extraImports.emplace_back(imported, sIdx);
         quiet || std::cout << "xudu: imported " << f << " to temp store "
                            << sIdx << " as " << imported.str() << "\n";
       }
     }
+
+    if (parser.present<std::vector<std::string>>("--open-store")) {
+      for (const auto &p :
+           parser.get<std::vector<std::string>>("--open-store")) {
+        if (!p.empty() && std::filesystem::exists(p)) {
+          const auto sIdx = session->loadAuxiliaryStore(p);
+          if (session->store(sIdx).opCount() > 0) {
+            const auto latestVer = session->store(sIdx).latest();
+            session->viewOpened(latestVer, sIdx);
+          }
+        }
+      }
+    }
+
+    if (parser.present<std::vector<std::string>>("--import-branch")) {
+      for (const auto &f :
+           parser.get<std::vector<std::string>>("--import-branch")) {
+        if (!f.empty()) {
+          const auto imported = session->importBranch(0, f);
+          session->viewOpened(imported, 0);
+          quiet || std::cout << "xudu: imported branch " << f << " as "
+                             << imported.str() << "\n";
+        }
+      }
+    }
+
+    if (parser.present<std::vector<std::string>>("--import-break")) {
+      for (const auto &f :
+           parser.get<std::vector<std::string>>("--import-break")) {
+        if (!f.empty()) {
+          const gleditor::FileTextSource source(f);
+          const auto curVer = session->store(0).latest();
+          const auto len    = session->store(0).rebuild(curVer).length();
+          auto nextVer      = session->store(0).insertBreak(
+              curVer, static_cast<std::uint32_t>(len));
+          nextVer = session->store(0).insert(
+              nextVer, static_cast<std::uint32_t>(len), source.text());
+          for (const auto brk : source.forcedBreaks()) {
+            nextVer = session->store(0).insertBreak(
+                nextVer, static_cast<std::uint32_t>(len + brk));
+          }
+          session->save(0);
+          session->viewOpened(nextVer, 0);
+        }
+      }
+    }
+
+    if (parser.present<std::vector<std::string>>("--transclude")) {
+      for (const auto &spec :
+           parser.get<std::vector<std::string>>("--transclude")) {
+        // SRCDOC:START:LEN,DESTDOC:POS
+        const auto comma = spec.find(',');
+        if (comma != std::string::npos) {
+          const auto leftStr  = spec.substr(0, comma);
+          const auto rightStr = spec.substr(comma + 1);
+          const auto c1       = leftStr.find(':');
+          const auto c2       = leftStr.rfind(':');
+          const auto c3       = rightStr.find(':');
+          if (c1 != std::string::npos && c2 != std::string::npos &&
+              c3 != std::string::npos) {
+            const auto srcDoc =
+                static_cast<std::uint32_t>(std::stoul(leftStr.substr(0, c1)));
+            const auto srcStart = static_cast<std::uint32_t>(
+                std::stoul(leftStr.substr(c1 + 1, c2 - c1 - 1)));
+            const auto srcLen =
+                static_cast<std::uint32_t>(std::stoul(leftStr.substr(c2 + 1)));
+
+            const auto destDoc =
+                static_cast<std::uint32_t>(std::stoul(rightStr.substr(0, c3)));
+            const auto destPosStr = rightStr.substr(c3 + 1);
+            const auto vList      = session->views();
+            if (srcDoc < vList.size() && destDoc < vList.size()) {
+              const auto &destSt = session->store(vList[destDoc].storeIndex);
+              const auto destLen =
+                  destSt.rebuild(vList[destDoc].version).length();
+              const auto destPos =
+                  (destPosStr == "append" || destPosStr == "end")
+                      ? static_cast<std::uint32_t>(destLen)
+                      : static_cast<std::uint32_t>(std::stoul(destPosStr));
+              session->transclude(destDoc, destPos, srcDoc, srcStart, srcLen);
+            }
+          }
+        }
+      }
+    }
+
+    if (parser.present<std::vector<std::string>>("--transclude-text")) {
+      for (const auto &spec :
+           parser.get<std::vector<std::string>>("--transclude-text")) {
+        // SRCDOC:QUERY,DESTDOC:DESTPOS
+        const auto comma = spec.rfind(',');
+        if (comma != std::string::npos) {
+          const auto leftStr   = spec.substr(0, comma);
+          const auto rightStr  = spec.substr(comma + 1);
+          const auto atOrColon = leftStr.find('@');
+          const auto c1 =
+              (atOrColon != std::string::npos) ? atOrColon : leftStr.find(':');
+          const auto c2 = rightStr.find(':');
+          if (c1 != std::string::npos && c2 != std::string::npos) {
+            const auto srcDoc =
+                static_cast<std::uint32_t>(std::stoul(leftStr.substr(0, c1)));
+            const auto query = leftStr.substr(c1 + 1);
+            const auto destDoc =
+                static_cast<std::uint32_t>(std::stoul(rightStr.substr(0, c2)));
+            const auto destPosStr = rightStr.substr(c2 + 1);
+            const auto vList      = session->views();
+            if (srcDoc < vList.size() && destDoc < vList.size()) {
+              const auto &destSt = session->store(vList[destDoc].storeIndex);
+              const auto destLen =
+                  destSt.rebuild(vList[destDoc].version).length();
+              const auto destPos =
+                  (destPosStr == "append" || destPosStr == "end")
+                      ? static_cast<std::uint32_t>(destLen)
+                      : static_cast<std::uint32_t>(std::stoul(destPosStr));
+              session->transcludeText(destDoc, destPos, srcDoc, query);
+            }
+          }
+        }
+      }
+    }
+
+    if (parser.present<std::vector<std::string>>("--insert-text")) {
+      for (const auto &spec :
+           parser.get<std::vector<std::string>>("--insert-text")) {
+        const auto c1 = spec.find(':');
+        if (c1 != std::string::npos) {
+          const auto c2 = spec.find(':', c1 + 1);
+          if (c2 != std::string::npos) {
+            const auto docIdx =
+                static_cast<std::uint32_t>(std::stoul(spec.substr(0, c1)));
+            const auto posStr     = spec.substr(c1 + 1, c2 - c1 - 1);
+            const auto textOrFile = spec.substr(c2 + 1);
+            std::string content;
+            if (std::filesystem::exists(textOrFile)) {
+              std::ifstream in(textOrFile, std::ios::binary);
+              content.assign(std::istreambuf_iterator<char>(in),
+                             std::istreambuf_iterator<char>());
+            } else {
+              content = textOrFile;
+            }
+            const auto vList = session->views();
+            if (docIdx < vList.size()) {
+              const auto &st    = session->store(vList[docIdx].storeIndex);
+              const auto curLen = st.rebuild(vList[docIdx].version).length();
+              const auto pos =
+                  (posStr == "append" || posStr == "end")
+                      ? static_cast<std::uint32_t>(curLen)
+                      : static_cast<std::uint32_t>(std::stoul(posStr));
+              session->insertText(docIdx, pos, content);
+            }
+          }
+        }
+      }
+    }
+
+    if (parser.present<std::vector<std::string>>("--link")) {
+      for (const auto &spec : parser.get<std::vector<std::string>>("--link")) {
+        const auto comma = spec.find(',');
+        if (comma != std::string::npos) {
+          const auto leftSpec = spec.substr(0, comma);
+          const auto rem      = spec.substr(comma + 1);
+
+          static const std::vector<std::string> knownTypes = {
+              "comment",   "illustration", "disagreement", "authorship",
+              "quotation", "format",       "dimension",    "other"};
+
+          std::size_t foundTypePos = std::string::npos;
+          for (const auto &kt : knownTypes) {
+            auto pos = rem.find(":" + kt);
+            while (pos != std::string::npos) {
+              const auto after = pos + 1 + kt.size();
+              if (after == rem.size() || rem[after] == ':') {
+                if (foundTypePos == std::string::npos || pos > foundTypePos) {
+                  foundTypePos = pos;
+                }
+              }
+              pos = rem.find(":" + kt, pos + 1);
+            }
+          }
+
+          std::string rightSpec;
+          std::string typeStr  = "quotation";
+          std::string tierStr  = "author";
+          std::string ownerStr = "Theodor_Holm_Nelson";
+
+          if (foundTypePos != std::string::npos) {
+            rightSpec          = rem.substr(0, foundTypePos);
+            const auto attrStr = rem.substr(foundTypePos + 1);
+            const auto c1      = attrStr.find(':');
+            if (c1 != std::string::npos) {
+              typeStr       = attrStr.substr(0, c1);
+              const auto c2 = attrStr.find(':', c1 + 1);
+              if (c2 != std::string::npos) {
+                tierStr  = attrStr.substr(c1 + 1, c2 - c1 - 1);
+                ownerStr = attrStr.substr(c2 + 1);
+              } else {
+                tierStr = attrStr.substr(c1 + 1);
+              }
+            } else {
+              typeStr = attrStr;
+            }
+          } else {
+            rightSpec = rem;
+          }
+
+          auto leftSpans  = resolveSpans(*session, leftSpec);
+          auto rightSpans = resolveSpans(*session, rightSpec);
+
+          xudu::Link l;
+          l.type  = parseLinkType(typeStr);
+          l.tier  = parseProminenceTier(tierStr);
+          l.owner = ownerStr;
+          l.left  = std::move(leftSpans);
+          l.right = std::move(rightSpans);
+
+          session->addLink(0, std::move(l));
+        }
+      }
+    }
+
+    if (parser.present<std::vector<std::string>>("--format-link")) {
+      for (const auto &spec :
+           parser.get<std::vector<std::string>>("--format-link")) {
+        static const std::vector<std::string> knownAttrs = {
+            "bold",          "italic",      "underline", "overline",
+            "strikethrough", "superscript", "subscript",
+        };
+
+        std::size_t foundAttrPos = std::string::npos;
+        for (const auto &ka : knownAttrs) {
+          auto pos = spec.find(":" + ka);
+          while (pos != std::string::npos) {
+            const auto after = pos + 1 + ka.size();
+            if (after == spec.size() || spec[after] == ':') {
+              if (foundAttrPos == std::string::npos || pos > foundAttrPos) {
+                foundAttrPos = pos;
+              }
+            }
+            pos = spec.find(":" + ka, pos + 1);
+          }
+        }
+
+        std::string spanSpec;
+        std::string attrStr  = "bold";
+        std::string tierStr  = "author";
+        std::string ownerStr = "Theodor_Holm_Nelson";
+
+        if (foundAttrPos != std::string::npos) {
+          spanSpec           = spec.substr(0, foundAttrPos);
+          const auto attrRem = spec.substr(foundAttrPos + 1);
+          const auto c1      = attrRem.find(':');
+          if (c1 != std::string::npos) {
+            attrStr       = attrRem.substr(0, c1);
+            const auto c2 = attrRem.find(':', c1 + 1);
+            if (c2 != std::string::npos) {
+              tierStr  = attrRem.substr(c1 + 1, c2 - c1 - 1);
+              ownerStr = attrRem.substr(c2 + 1);
+            } else {
+              tierStr = attrRem.substr(c1 + 1);
+            }
+          } else {
+            attrStr = attrRem;
+          }
+        } else {
+          spanSpec = spec;
+        }
+
+        auto targetSpans = resolveSpans(*session, spanSpec);
+        xudu::Link l;
+        l.type  = xudu::LinkType::Format;
+        l.tier  = parseProminenceTier(tierStr);
+        l.owner = ownerStr;
+        l.left  = std::move(targetSpans);
+        l.right = {xudu::vocabularySpanFor(parseFormatAttribute(attrStr))};
+        session->addLink(0, std::move(l));
+      }
+    }
+
+    if (parser.present<std::vector<std::string>>("--dimension-link")) {
+      for (const auto &spec :
+           parser.get<std::vector<std::string>>("--dimension-link")) {
+        const auto comma = spec.find(',');
+        if (comma != std::string::npos) {
+          const auto leftSpec = spec.substr(0, comma);
+          const auto rem      = spec.substr(comma + 1);
+          std::string rightSpec;
+          std::string dimName = "dimension:d.concept";
+          const auto dimPos   = rem.find(":dimension:");
+          const auto dDotPos  = rem.find(":d.");
+          if (dimPos != std::string::npos) {
+            rightSpec = rem.substr(0, dimPos);
+            dimName   = rem.substr(dimPos + 1);
+          } else if (dDotPos != std::string::npos) {
+            rightSpec = rem.substr(0, dDotPos);
+            dimName   = "dimension:" + rem.substr(dDotPos + 1);
+          } else {
+            const auto colon = rem.rfind(':');
+            rightSpec =
+                (colon != std::string::npos) ? rem.substr(0, colon) : rem;
+            dimName = (colon != std::string::npos) ? rem.substr(colon + 1)
+                                                   : "dimension:d.concept";
+          }
+          auto leftSpans  = resolveSpans(*session, leftSpec);
+          auto rightSpans = resolveSpans(*session, rightSpec);
+          xudu::Link l;
+          l.type  = xudu::LinkType::Dimension;
+          l.tier  = xudu::ProminenceTier::Author;
+          l.owner = dimName;
+          l.left  = std::move(leftSpans);
+          l.right = std::move(rightSpans);
+          session->addLink(0, std::move(l));
+        }
+      }
+    }
+
+    if (headless) {
+      session->saveAll();
+      if (parser["--export-osmic"] == true) {
+        session->saveOsmicTextAll();
+      }
+      if (const auto outPerma = parser.get<std::string>("--dump-permascroll");
+          !outPerma.empty()) {
+        session->dumpPermascroll(outPerma);
+      }
+      return 0;
+    }
+
+    backend  = gleditor::applyCommonArguments(parser, state, argc, argv);
+    renderer = Renderer::create(state, backend);
 
     if (parser["--swarm"] == true) {
       session->useSwarm(parser["--private-dht"] == true);
@@ -1081,7 +1672,7 @@ int main(const int argc, char **argv) {
       }
     }
 
-    const auto asked = parser.get<std::string>("--version-id");
+    asked = parser.get<std::string>("--version-id");
     if (opening.isZero()) {
       opening = asked.empty()
                     ? (read.empty() ? session->store(0).latest() : read.front())
@@ -1152,7 +1743,20 @@ int main(const int argc, char **argv) {
     renderer->addPickObserver(docSwitcher.get());
     renderer->addPickObserver(&links);
 
-    views.showAlongside(opening, 0.0F, 0);
+    if (asked.empty() && read.empty() && alongside.empty() &&
+        extraImports.empty()) {
+      const auto &primaryStore = session->store(0);
+      const auto allVers       = primaryStore.allVersions();
+      if (allVers.size() > 1) {
+        for (std::size_t vIdx = 0; vIdx < allVers.size(); ++vIdx) {
+          views.showAlongside(allVers[vIdx], 0.0F, 0);
+        }
+      } else {
+        views.showAlongside(opening, 0.0F, 0);
+      }
+    } else {
+      views.showAlongside(opening, 0.0F, 0);
+    }
     for (const auto &[extraVer, sIdx] : extraImports) {
       views.showAlongside(extraVer, 0.0F, sIdx);
     }
@@ -1220,76 +1824,20 @@ int main(const int argc, char **argv) {
             audioWidgets[i]->attachToPage(rState.docs[dIdx], 0, 30.0F,
                                           110.0F +
                                               static_cast<float>(i) * 140.0F);
-            audioWidgets[i]->setSize(320.0F, 120.0F);
+            audioWidgets[i]->setSize(340.0F, 120.0F);
           }
         }
         for (std::size_t i = 0; i < videoWidgets.size(); ++i) {
           const auto dIdx = (rState.docs.size() > 1) ? 1 : 0;
           if (rState.docs[dIdx]) {
             videoWidgets[i]->attachToPage(rState.docs[dIdx], 0, 30.0F,
-                                          190.0F +
+                                          240.0F +
                                               static_cast<float>(i) * 200.0F);
-            videoWidgets[i]->setSize(320.0F, 180.0F);
+            videoWidgets[i]->setSize(340.0F, 180.0F);
           }
         }
       }
     });
-
-    if (parser.present<std::vector<std::string>>("--link")) {
-      for (const auto &spec : parser.get<std::vector<std::string>>("--link")) {
-        const auto comma = spec.find(',');
-        if (comma != std::string::npos) {
-          const auto leftStr  = spec.substr(0, comma);
-          const auto rightStr = spec.substr(comma + 1);
-          const auto c1       = leftStr.find(':');
-          const auto c2       = leftStr.rfind(':');
-          const auto c3       = rightStr.find(':');
-          const auto c4       = rightStr.rfind(':');
-          if (c1 != std::string::npos && c2 != std::string::npos &&
-              c3 != std::string::npos && c4 != std::string::npos) {
-            const auto d1 =
-                static_cast<std::uint32_t>(std::stoul(leftStr.substr(0, c1)));
-            const auto s1 = static_cast<std::uint32_t>(
-                std::stoul(leftStr.substr(c1 + 1, c2 - c1 - 1)));
-            const auto e1 =
-                static_cast<std::uint32_t>(std::stoul(leftStr.substr(c2 + 1)));
-
-            const auto d2 =
-                static_cast<std::uint32_t>(std::stoul(rightStr.substr(0, c3)));
-            const auto s2 = static_cast<std::uint32_t>(
-                std::stoul(rightStr.substr(c3 + 1, c4 - c3 - 1)));
-            const auto e2 =
-                static_cast<std::uint32_t>(std::stoul(rightStr.substr(c4 + 1)));
-
-            const auto vList = session->views();
-            if (d1 < vList.size() && d2 < vList.size()) {
-              const auto sIdx1 = vList[d1].storeIndex;
-              const auto sIdx2 = vList[d2].storeIndex;
-              const auto ver1 =
-                  session->store(sIdx1).rebuild(vList[d1].version);
-              const auto ver2 =
-                  session->store(sIdx2).rebuild(vList[d2].version);
-
-              auto leftSpans  = ver1.spansFor(s1, e1 > s1 ? e1 - s1 : 1);
-              auto rightSpans = ver2.spansFor(s2, e2 > s2 ? e2 - s2 : 1);
-
-              xudu::Link l;
-              l.type          = xudu::LinkType::Quotation;
-              l.owner         = "you";
-              l.left          = leftSpans;
-              l.right         = rightSpans;
-              const auto prod = session->addLink(d1, std::move(l));
-              renderer->runWithState(
-                  [d1, sIdx1, prod, &session](RenderState &rState) {
-                    if (d1 < rState.docs.size() && rState.docs[d1]) {
-                      rState.docs[d1]->load(*session->sourceFor(prod, sIdx1));
-                    }
-                  });
-            }
-          }
-        }
-      }
-    }
 
     gleditor::Application app(state, renderer, backend, "Xudu");
     bindCommands(app, state, views, map, links, *session,

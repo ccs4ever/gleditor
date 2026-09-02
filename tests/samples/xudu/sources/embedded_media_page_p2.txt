@@ -1,0 +1,6 @@
+2. Mid-Page Commentary and Flow
+As the audio lecture plays above, typographic text flows continuously into mathematical models of 3D spatial coordinate projection.
+
+[EMBEDDED_VIDEO_WIDGET: tests/samples/sample_video.mp4 (00:02.00 - 00:06.00)]
+Title: 'Zigzag 3D Visualizer'
+Status: Video Surface Rendered with Hardware Acceleration

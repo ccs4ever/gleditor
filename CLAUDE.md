@@ -33,21 +33,22 @@ the resulting gitlink change in the parent repo.
 ## Build
 
 ```sh
-make                              # library, all three programs, test binaries, compile_commands.json (includes Vulkan if available)
-make lib                          # library only
-make gleditor                     # apps/gleditor only
-make xudu                         # apps/xudu only
-make zigzag                       # apps/zigzag only
-make GLEDITOR_DISABLE_VULKAN=1    # disables the Vulkan backend and SPIR-V compilation
-make GLEDITOR_SDL=2               # force SDL2 instead of the SDL3/SDL2 auto-probe
+make -j$(nproc)                   # library, all three programs, test binaries, compile_commands.json (includes Vulkan if available)
+make -j$(nproc) lib               # library only
+make -j$(nproc) gleditor          # apps/gleditor only
+make -j$(nproc) xudu              # apps/xudu only
+make -j$(nproc) zigzag            # apps/zigzag only
+make -j$(nproc) GLEDITOR_DISABLE_VULKAN=1 # disables the Vulkan backend and SPIR-V compilation
+make -j$(nproc) GLEDITOR_SDL=2    # force SDL2 instead of the SDL3/SDL2 auto-probe
 make clean
 make format                       # clang-format + shfmt, in place; no build deps needed
 make format-check                 # same, --dry-run; what CI runs
 make lint                         # shellcheck + yamllint + mdl; what CI runs
 ```
 
-Key variables:
+Key variables and guidelines:
 
+- **Parallelism**: Always use `make -j$(nproc)` when invoking `make` to maximize build throughput across all available CPU cores.
 - `DEBUG=1` — debug flags + sanitizer flag sets available.
 - `GLEDITOR_DISABLE_VULKAN=1` — disable the Vulkan backend (Vulkan is built by
   default when available via pkg-config). **This flips the compile flags for

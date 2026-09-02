@@ -37,63 +37,78 @@ bool startsWith(const std::string &str,
   return true;
 }
 
-class MagicMimeDetector {
-public:
-  MagicMimeDetector() {
-    cookie = magic_open(MAGIC_MIME_TYPE | MAGIC_SYMLINK);
-    if (cookie != nullptr) {
-      if (magic_load(cookie, nullptr) != 0) {
-        magic_close(cookie);
-        cookie = nullptr;
-      }
+} // namespace
+
+namespace gleditor {
+
+MagicMimeDetector::MagicMimeDetector() {
+  cookie = magic_open(MAGIC_MIME_TYPE | MAGIC_SYMLINK);
+  if (cookie != nullptr) {
+    if (magic_load(static_cast<magic_t>(cookie), nullptr) != 0) {
+      magic_close(static_cast<magic_t>(cookie));
+      cookie = nullptr;
     }
   }
-
-  ~MagicMimeDetector() {
-    if (cookie != nullptr) {
-      magic_close(cookie);
-    }
-  }
-
-  MagicMimeDetector(const MagicMimeDetector &)            = delete;
-  MagicMimeDetector &operator=(const MagicMimeDetector &) = delete;
-
-  [[nodiscard]] std::string identifyBuffer(const void *data,
-                                           const std::size_t size) const {
-    if (cookie == nullptr || data == nullptr || size == 0) {
-      return {};
-    }
-    const char *res = magic_buffer(cookie, data, size);
-    return res != nullptr ? std::string(res) : std::string{};
-  }
-
-  [[nodiscard]] std::string identifyFile(const std::string &path) const {
-    if (cookie == nullptr || path.empty()) {
-      return {};
-    }
-    const char *res = magic_file(cookie, path.c_str());
-    return res != nullptr ? std::string(res) : std::string{};
-  }
-
-private:
-  magic_t cookie{nullptr};
-};
-
-bool isPdfMime(const std::string &mime) {
-  return mime.find("application/pdf") != std::string::npos;
 }
 
+MagicMimeDetector::~MagicMimeDetector() {
+  if (cookie != nullptr) {
+    magic_close(static_cast<magic_t>(cookie));
+  }
+}
+
+std::string MagicMimeDetector::identifyBuffer(const void *data,
+                                              const std::size_t size) const {
+  if (cookie == nullptr || data == nullptr || size == 0) {
+    return {};
+  }
+  const char *res = magic_buffer(static_cast<magic_t>(cookie), data, size);
+  return res != nullptr ? std::string(res) : std::string{};
+}
+
+std::string MagicMimeDetector::identifyFile(const std::string &path) const {
+  if (cookie == nullptr || path.empty()) {
+    return {};
+  }
+  const char *res = magic_file(static_cast<magic_t>(cookie), path.c_str());
+  return res != nullptr ? std::string(res) : std::string{};
+}
+
+bool MagicMimeDetector::isAudioMime(const std::string_view mime) {
+  return mime.find("audio/") != std::string_view::npos;
+}
+
+bool MagicMimeDetector::isVideoMime(const std::string_view mime) {
+  return mime.find("video/") != std::string_view::npos;
+}
+
+bool MagicMimeDetector::isImageMime(const std::string_view mime) {
+  return mime.find("image/") != std::string_view::npos;
+}
+
+bool MagicMimeDetector::isPdfMime(const std::string_view mime) {
+  return mime.find("application/pdf") != std::string_view::npos;
+}
+
+bool MagicMimeDetector::isMediaMime(const std::string_view mime) {
+  return isAudioMime(mime) || isVideoMime(mime) || isImageMime(mime);
+}
+
+} // namespace gleditor
+
+namespace {
+
 bool isPdfFile(const std::string &filePath, const std::string &rawBytes) {
-  MagicMimeDetector magic;
+  gleditor::MagicMimeDetector magic;
   if (!rawBytes.empty()) {
     const auto mime = magic.identifyBuffer(rawBytes.data(), rawBytes.size());
-    if (isPdfMime(mime)) {
+    if (gleditor::MagicMimeDetector::isPdfMime(mime)) {
       return true;
     }
   }
   if (!filePath.empty()) {
     const auto mime = magic.identifyFile(filePath);
-    if (isPdfMime(mime)) {
+    if (gleditor::MagicMimeDetector::isPdfMime(mime)) {
       return true;
     }
   }

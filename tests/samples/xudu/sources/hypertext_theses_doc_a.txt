@@ -1,0 +1,7 @@
+Document A: Hypertext Theses and System Architecture
+
+Thesis 1 (Central Synthesis):
+Complex ideas synthesize insights across disparate domains including foundational philosophy, mathematical topology, and optical rendering.
+
+Thesis 2 (Decentralized Identity):
+Cryptographic fingerprints and append-only ledgers ensure authorial sovereignty without centralized gatekeepers.

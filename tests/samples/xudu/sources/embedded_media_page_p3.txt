@@ -1,0 +1,2 @@
+3. Experimental Conclusions
+Multi-modal primedia streams preserve temporal and spatial fidelity across all transclusion coordinates in hypertime.

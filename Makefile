@@ -147,7 +147,7 @@ TEST_PKGS := gmock_main
 # whose documents cannot leave the machine that wrote them, which is the one
 # thing this program is for. Better to fail at configure time than to ship a
 # xanadoc editor that quietly cannot publish.
-XUDU_PKGS := libtorrent-rasterbar openssl lmdb
+XUDU_PKGS := libtorrent-rasterbar openssl lmdb libmagic
 ifneq (,$(filter-out $(NO_SDL_GOALS),$(or $(MAKECMDGOALS),all)))
 ifneq ($(shell pkg-config --exists libtorrent-rasterbar && echo 1),1)
 $(error libtorrent-rasterbar was not found by pkg-config. It is required: \
@@ -446,7 +446,8 @@ endif
 
 ALL_OBJS := $(sort $(LIB_OBJS) $(GLEDITOR_OBJS) $(XUDU_CORE_OBJS) $(XUDU_OBJS) \
 	$(ZIGZAG_CORE_OBJS) $(ZIGZAG_OBJS) $(ZIGZAG_TEST_OBJS) \
-	$(LIB_TEST_OBJS) $(XUDU_TEST_OBJS) $(SWARM_PEER_OBJS))
+	$(LIB_TEST_OBJS) $(XUDU_TEST_OBJS) $(SWARM_PEER_OBJS) \
+	$(GENERATE_SAMPLE_XANADOCS_OBJS))
 ALL_OBJ_DIRS := $(sort $(OBJDIR)/ $(OBJDIR)/tmp/ $(dir $(ALL_OBJS)))
 DEPS := $(sort $(patsubst %.o,%.dep,$(ALL_OBJS)))
 JFILES := $(sort $(patsubst %.o,%.j,$(ALL_OBJS)))
@@ -659,6 +660,10 @@ $(OBJDIR)/xudu-swarm-peer: $(OBJDIR)/tools/xudu-swarm-peer.o $(XUDU_CORE_OBJS)
 layout-latency-probe: $(OBJDIR)/layout-latency-probe
 $(OBJDIR)/layout-latency-probe: $(OBJDIR)/tools/layout-latency-probe.o $(LIBLINK)
 	$(CXX) $(LDFLAGS) -o $@ $^ $(LIBS)
+
+.PHONY: sample-xanadocs
+sample-xanadocs: $(OBJDIR)/xudu
+	tools/create-sample-xanadocs.sh
 
 # The swarm tests proper, with the two peers on separate network stacks via
 # unprivileged user namespaces (unshare -Urnm).

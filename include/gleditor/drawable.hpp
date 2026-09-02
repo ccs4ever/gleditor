@@ -11,6 +11,7 @@ public:
   explicit Drawable(const glm::mat4 &model) : model(model) {}
   virtual ~Drawable() = default;
   [[nodiscard]] glm::mat4 getModel() const { return model; }
+  void setModel(const glm::mat4 &m) { model = m; }
 };
 
 #endif // GLEDITOR_DRAWABLE_H

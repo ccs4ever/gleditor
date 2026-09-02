@@ -187,12 +187,22 @@ void MediaWidget::drawFrame(FrameContext &ctx) {
       anchorY = -(anchor->y + height_ + 20.0F);
     }
 
+    const auto *pageObj     = doc_->page(pageIdx);
+    const float pageCenterY = (pageObj != nullptr)
+                                  ? pageObj->getModel()[3][1]
+                                  : (-100.0F * static_cast<float>(pageIdx));
+    const float pageHeightWorld =
+        (pageObj != nullptr) ? (pageObj->heightPixels() * Doc::pixelsToWorld)
+                             : 100.0F;
+    const float pageTopY = pageCenterY + (pageHeightWorld / 2.0F);
+
     const auto docModel = doc_->modelMatrix();
     // Scale from widget layout pixel space to document world space
     const auto widgetModel =
         glm::translate(docModel,
                        glm::vec3{anchorX * Doc::pixelsToWorld,
-                                 anchorY * Doc::pixelsToWorld, 0.05F}) *
+                                 pageTopY + (anchorY * Doc::pixelsToWorld),
+                                 0.05F}) *
         glm::scale(glm::mat4(1.0F),
                    glm::vec3{Doc::pixelsToWorld, Doc::pixelsToWorld, 1.0F});
     transform = ctx.viewProjection * widgetModel;

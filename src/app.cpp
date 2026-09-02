@@ -991,6 +991,48 @@ int Application::run() {
         state->clickPending = true;
         break;
       }
+      case SDL_EVENT_MOUSE_WHEEL: {
+        if (nullptr != state->modal && state->modal->grabbing()) {
+          break;
+        }
+        const std::lock_guard locker(state->view);
+        const auto sdlMods = static_cast<std::uint16_t>(SDL_GetModState());
+        float wx           = sdl::wheelX(evt);
+        float wy           = sdl::wheelY(evt);
+        if (sdl::wheelFlipped(evt)) {
+          wx = -wx;
+          wy = -wy;
+        }
+
+        const float perPixel          = worldPerPixel(state->view);
+        constexpr float pixelsPerTick = 48.0F;
+
+        if (0 != (sdlMods & SDL_KMOD_CTRL)) {
+          // Ctrl: Zoom in / out
+          // Wheel up (wy > 0) zooms in (moves towards documents along front)
+          // Wheel down (wy < 0) zooms out
+          const float zoomDelta = wy * (pixelsPerTick * perPixel * 1.5F);
+          state->view.pos += zoomDelta * state->view.front;
+        } else if (0 != (sdlMods & SDL_KMOD_SHIFT)) {
+          // Shift: Scroll right / left
+          const auto rightAxis =
+              glm::normalize(glm::cross(state->view.front, state->view.upward));
+          const float scrollX =
+              (wy != 0.0F ? -wy : wx) * (pixelsPerTick * perPixel);
+          state->view.pos += rightAxis * scrollX;
+        } else {
+          // Unmodified: Scroll up / down
+          const auto vertAxis = glm::normalize(
+              glm::cross(state->view.front, glm::vec3(1.0F, 0.0F, 0.0F)));
+          const auto rightAxis =
+              glm::normalize(glm::cross(state->view.front, state->view.upward));
+          const float scrollY = wy * (pixelsPerTick * perPixel);
+          const float scrollX = wx * (pixelsPerTick * perPixel);
+          state->view.pos -= vertAxis * scrollY;
+          state->view.pos += rightAxis * scrollX;
+        }
+        break;
+      }
       case SDL_EVENT_FINGER_DOWN: {
         if (nullptr != state->modal && state->modal->grabbing()) {
           break;

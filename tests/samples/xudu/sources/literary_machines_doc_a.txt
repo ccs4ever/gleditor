@@ -1,0 +1,12 @@
+Chapter 1: The Nature of Hypertext and Primedia
+
+"By 'hypertext' I mean non-sequential writing--text that branches and allows choices to the reader, best read at an interactive screen."
+
+Section 1.1: The Docuverse Continuum
+The world of ideas is not a set of isolated pigeonholes, but a universal continuum. EVERYTHING IS DEEPLY INTERTWINGLED. In an important sense there are no 'subjects' at all; there is only all knowledge, since the brute facts, but the aspects of reality and the thoughts which have already been thought are interconnectable into the same great tangle.
+
+Section 1.2: Intrinsic Bidirectionality
+Links must be two-way and visible. A link to any portion is present on all manifestations. Traditional one-way links sever connections and decay into dead ends. In the Xanadu architecture, butterfly links bind content addresses across hypertime.
+
+Section 1.3: Transclusion and Provenance
+Transclusion is not copy-and-paste. Quotation must preserve identity: when text is quoted into a new context, it remains the exact same bytes in the author's permascroll.

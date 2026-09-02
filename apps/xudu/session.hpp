@@ -116,8 +116,28 @@ public:
   static constexpr std::uint32_t transcopyrightLockedColour   = 0xF59E0BCCU;
   static constexpr std::uint32_t transcopyrightUnlockedColour = 0x10B981AAU;
 
-  explicit Session(std::string aStorePath);
+  explicit Session(std::string aStorePath,
+                   std::shared_ptr<UserPermascroll> scroll = nullptr);
   ~Session() override;
+
+  [[nodiscard]] const UserPermascroll *userPermascroll() const;
+  void dumpPermascroll(const std::string &filePath) const;
+  void saveOsmicTextAll() const;
+
+  MicroversionId importBranch(std::size_t storeIndex,
+                              const std::string &filePath);
+  MicroversionId insertText(std::uint32_t docIndex, std::uint32_t at,
+                            std::string_view newText);
+  MicroversionId insertBreak(std::uint32_t docIndex, std::uint32_t at);
+  MicroversionId insertSpan(std::uint32_t docIndex, std::uint32_t at,
+                            const PrimediaSpan &span);
+  MicroversionId transclude(std::uint32_t destDocIndex, std::uint32_t destPos,
+                            std::uint32_t srcDocIndex, std::uint32_t srcStart,
+                            std::uint32_t srcLength);
+  MicroversionId transcludeText(std::uint32_t destDocIndex,
+                                std::uint32_t destPos,
+                                std::uint32_t srcDocIndex,
+                                std::string_view queryText);
 
   /**
    * @brief Make a torrent's content available to this store.
@@ -399,6 +419,21 @@ public:
   /// A source for @p version, ready to hand to the render queue.
   [[nodiscard]] std::shared_ptr<VersionTextSource>
   sourceFor(const MicroversionId &version, std::size_t storeIndex = 0) const;
+
+  struct MediaSpanInfo {
+    PrimediaSpan span;
+    std::uint32_t docOffset{0};
+    std::string mime;
+    bool isAudio{false};
+    bool isVideo{false};
+    bool isImage{false};
+    std::string label;
+  };
+
+  /// Discovered media spans for @p version with their document byte offsets.
+  [[nodiscard]] std::vector<MediaSpanInfo>
+  mediaSpansFor(const MicroversionId &version,
+                std::size_t storeIndex = 0) const;
 
   // -- Hypertime History & Scrubbing ----------------------------------------
 

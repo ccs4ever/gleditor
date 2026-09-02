@@ -20,18 +20,148 @@
 #include <gleditor/doc.hpp>
 #include <gleditor/render/types.hpp>
 #include <gleditor/render_state.hpp>
+#include <gleditor/text_source.hpp>
 
 #include "xudu/core/link_layout.hpp"
 #include "xudu/core/provenance.hpp"
 
 namespace xudu {
 
-Session::Session(std::string aStorePath) {
-  auto primaryStore = std::make_unique<Store>();
+Session::Session(std::string aStorePath,
+                 std::shared_ptr<UserPermascroll> scroll) {
+  auto primaryStore = std::make_unique<Store>(std::move(scroll));
   primaryStore->load(aStorePath);
   primaryStore->setContentSource(&contentSource);
   stores.push_back(
       StoreEntry{std::move(primaryStore), std::move(aStorePath), false});
+}
+
+const UserPermascroll *Session::userPermascroll() const {
+  if (stores.empty() || !stores[0].store) {
+    return nullptr;
+  }
+  return &stores[0].store->userPermascroll();
+}
+
+void Session::dumpPermascroll(const std::string &filePath) const {
+  std::filesystem::create_directories(
+      std::filesystem::path(filePath).parent_path());
+  std::ofstream out(filePath, std::ios::binary | std::ios::trunc);
+  if (out && !stores.empty() && stores[0].store) {
+    const auto &bytes = stores[0].store->userPermascroll().bytes();
+    out.write(reinterpret_cast<const char *>(bytes.data()),
+              static_cast<std::streamsize>(bytes.size()));
+  }
+}
+
+void Session::saveOsmicTextAll() const {
+  for (const auto &entry : stores) {
+    if (entry.store && !entry.path.empty()) {
+      entry.store->saveOsmicText(entry.path);
+    }
+  }
+}
+
+MicroversionId Session::importBranch(const std::size_t storeIndex,
+                                     const std::string &filePath) {
+  if (storeIndex >= stores.size() || !stores[storeIndex].store) {
+    return MicroversionId{};
+  }
+  auto &st = *stores[storeIndex].store;
+  const gleditor::FileTextSource source(filePath);
+  auto imported = st.insert(MicroversionId{}, 0, source.text());
+  for (const auto breakAt : source.forcedBreaks()) {
+    imported = st.insertBreak(imported, breakAt);
+  }
+  save(storeIndex);
+  return imported;
+}
+
+MicroversionId Session::insertText(const std::uint32_t docIndex,
+                                   const std::uint32_t at,
+                                   std::string_view newText) {
+  if (docIndex >= open.size()) {
+    return MicroversionId{};
+  }
+  const auto sIdx        = open[docIndex].storeIndex;
+  auto &st               = store(sIdx);
+  const auto prod        = st.insert(open[docIndex].version, at, newText);
+  open[docIndex].version = prod;
+  open[docIndex].pieces  = st.rebuild(prod);
+  invalidate();
+  return prod;
+}
+
+MicroversionId Session::insertBreak(const std::uint32_t docIndex,
+                                    const std::uint32_t at) {
+  if (docIndex >= open.size()) {
+    return MicroversionId{};
+  }
+  const auto sIdx        = open[docIndex].storeIndex;
+  auto &st               = store(sIdx);
+  const auto prod        = st.insertBreak(open[docIndex].version, at);
+  open[docIndex].version = prod;
+  open[docIndex].pieces  = st.rebuild(prod);
+  invalidate();
+  return prod;
+}
+
+MicroversionId Session::insertSpan(const std::uint32_t docIndex,
+                                   const std::uint32_t at,
+                                   const PrimediaSpan &span) {
+  if (docIndex >= open.size()) {
+    return MicroversionId{};
+  }
+  const auto sIdx        = open[docIndex].storeIndex;
+  auto &st               = store(sIdx);
+  const auto prod        = st.insertSpan(open[docIndex].version, at, span);
+  open[docIndex].version = prod;
+  open[docIndex].pieces  = st.rebuild(prod);
+  invalidate();
+  return prod;
+}
+
+MicroversionId Session::transclude(const std::uint32_t destDocIndex,
+                                   const std::uint32_t destPos,
+                                   const std::uint32_t srcDocIndex,
+                                   const std::uint32_t srcStart,
+                                   const std::uint32_t srcLength) {
+  if (destDocIndex >= open.size() || srcDocIndex >= open.size()) {
+    return MicroversionId{};
+  }
+  const auto srcVer    = open[srcDocIndex].pieces;
+  const auto spans     = srcVer.spansFor(srcStart, srcLength);
+  const auto destSIdx  = open[destDocIndex].storeIndex;
+  auto &st             = store(destSIdx);
+  auto curVer          = open[destDocIndex].version;
+  std::uint32_t curPos = destPos;
+  for (const auto &span : spans) {
+    curVer = st.insertSpan(curVer, curPos, span);
+    curPos += span.length;
+  }
+  open[destDocIndex].version = curVer;
+  open[destDocIndex].pieces  = st.rebuild(curVer);
+  invalidate();
+  return curVer;
+}
+
+MicroversionId Session::transcludeText(const std::uint32_t destDocIndex,
+                                       const std::uint32_t destPos,
+                                       const std::uint32_t srcDocIndex,
+                                       std::string_view queryText) {
+  if (destDocIndex >= open.size() || srcDocIndex >= open.size()) {
+    return MicroversionId{};
+  }
+  const auto srcSIdx = open[srcDocIndex].storeIndex;
+  const auto srcText = store(srcSIdx).textOf(open[srcDocIndex].version);
+  const auto pos     = srcText.find(queryText);
+  if (pos == std::string::npos) {
+    throw std::runtime_error("query text not found in source document: " +
+                             std::string(queryText));
+  }
+  return transclude(destDocIndex, destPos, srcDocIndex,
+                    static_cast<std::uint32_t>(pos),
+                    static_cast<std::uint32_t>(queryText.size()));
 }
 
 Session::~Session() {
@@ -467,7 +597,10 @@ Session::importFileToTemporaryStore(const std::string &filePath) {
                                    "_" + std::to_string(stores.size()));
   fs::create_directories(tempDir);
 
-  auto newStore = std::make_unique<Store>();
+  auto perma    = (stores.empty() || !stores[0].store)
+                      ? nullptr
+                      : stores[0].store->userPermascrollPtr();
+  auto newStore = std::make_unique<Store>(perma);
   const gleditor::FileTextSource source(filePath);
   auto imported = newStore->insert(MicroversionId{}, 0, source.text());
   for (const auto breakAt : source.forcedBreaks()) {
@@ -480,7 +613,10 @@ Session::importFileToTemporaryStore(const std::string &filePath) {
 }
 
 std::size_t Session::loadAuxiliaryStore(const std::string &aPath) {
-  auto newStore = std::make_unique<Store>();
+  auto perma    = (stores.empty() || !stores[0].store)
+                      ? nullptr
+                      : stores[0].store->userPermascrollPtr();
+  auto newStore = std::make_unique<Store>(perma);
   newStore->load(aPath);
   return addStore(std::move(newStore), aPath, false);
 }
@@ -563,13 +699,77 @@ void Session::refresh(const std::uint32_t docIndex,
   invalidate();
 }
 
+namespace {
+constexpr std::string_view kMediaSpacingPlaceholder = "\n\n\n\n\n\n\n\n\n\n";
+} // namespace
+
 std::shared_ptr<VersionTextSource>
 Session::sourceFor(const MicroversionId &version,
                    const std::size_t storeIndex) const {
   const auto &st     = store(storeIndex);
   const auto rebuilt = st.rebuild(version);
-  return std::make_shared<VersionTextSource>(rebuilt.materialize(st), version,
-                                             rebuilt.forcedBreaks());
+  gleditor::MagicMimeDetector magic;
+
+  std::string concatext;
+  const auto breaks = rebuilt.forcedBreaks();
+
+  for (const auto &run : rebuilt.pieces()) {
+    if (breakMarkerScroll == run.scroll) {
+      continue;
+    }
+    const auto bytes = st.read(run);
+    const auto mime  = magic.identifyBuffer(bytes.data(), bytes.size());
+    if (gleditor::MagicMimeDetector::isMediaMime(mime)) {
+      concatext += kMediaSpacingPlaceholder;
+    } else {
+      concatext += bytes;
+    }
+  }
+
+  return std::make_shared<VersionTextSource>(concatext, version, breaks);
+}
+
+std::vector<Session::MediaSpanInfo>
+Session::mediaSpansFor(const MicroversionId &version,
+                       const std::size_t storeIndex) const {
+  if (storeIndex >= stores.size() || !stores[storeIndex].store) {
+    return {};
+  }
+  const auto &st     = store(storeIndex);
+  const auto rebuilt = st.rebuild(version);
+  gleditor::MagicMimeDetector magic;
+
+  std::vector<MediaSpanInfo> list;
+  std::uint32_t docOffset = 0;
+
+  for (const auto &run : rebuilt.pieces()) {
+    if (breakMarkerScroll == run.scroll) {
+      continue;
+    }
+    const auto bytes = st.read(run);
+    const auto mime  = magic.identifyBuffer(bytes.data(), bytes.size());
+    if (gleditor::MagicMimeDetector::isMediaMime(mime)) {
+      MediaSpanInfo info;
+      info.span      = run;
+      info.docOffset = docOffset;
+      info.mime      = mime;
+      info.isAudio   = gleditor::MagicMimeDetector::isAudioMime(mime);
+      info.isVideo   = gleditor::MagicMimeDetector::isVideoMime(mime);
+      info.isImage   = gleditor::MagicMimeDetector::isImageMime(mime);
+      if (info.isAudio) {
+        info.label = "Audio Stream";
+      } else if (info.isVideo) {
+        info.label = "Video Stream";
+      } else if (info.isImage) {
+        info.label = "Image Graphic";
+      }
+      list.push_back(info);
+      docOffset += static_cast<std::uint32_t>(kMediaSpacingPlaceholder.size());
+    } else {
+      docOffset += static_cast<std::uint32_t>(bytes.size());
+    }
+  }
+  return list;
 }
 
 std::vector<MicroversionId>

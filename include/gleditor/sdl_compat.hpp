@@ -63,6 +63,7 @@
 #define SDL_EVENT_KEY_DOWN SDL_KEYDOWN
 #define SDL_EVENT_MOUSE_MOTION SDL_MOUSEMOTION
 #define SDL_EVENT_MOUSE_BUTTON_DOWN SDL_MOUSEBUTTONDOWN
+#define SDL_EVENT_MOUSE_WHEEL SDL_MOUSEWHEEL
 #define SDL_EVENT_TEXT_INPUT SDL_TEXTINPUT
 #define SDL_EVENT_FINGER_DOWN SDL_FINGERDOWN
 #define SDL_EVENT_FINGER_MOTION SDL_FINGERMOTION
@@ -536,6 +537,27 @@ inline bool fingerLifted(const SDL_Event &event) {
  */
 inline void disableTouchMouseSynthesis() {
   SDL_SetHint(SDL_HINT_TOUCH_MOUSE_EVENTS, "0");
+}
+
+/// Horizontal and vertical scroll amounts for a mouse wheel event.
+inline float wheelX(const SDL_Event &event) {
+#if GLEDITOR_SDL_MAJOR == 3
+  return event.wheel.x;
+#else
+  return static_cast<float>(event.wheel.x);
+#endif
+}
+
+inline float wheelY(const SDL_Event &event) {
+#if GLEDITOR_SDL_MAJOR == 3
+  return event.wheel.y;
+#else
+  return static_cast<float>(event.wheel.y);
+#endif
+}
+
+inline bool wheelFlipped(const SDL_Event &event) {
+  return SDL_MOUSEWHEEL_FLIPPED == event.wheel.direction;
 }
 
 } // namespace sdl

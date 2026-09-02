@@ -1,0 +1,12 @@
+Video Document: Xanadu Space 3D Interactive Media Container
+
+[EMBEDDED_VIDEO_STREAM: tests/samples/sample_video.mp4]
+Container: ISO Base Media File Format (MP4 / H.264)
+Resolution: 1920x1080 @ 60 FPS
+Duration: 00:08.00
+
+Scene Keyframe Progression:
+  - Scene 01 [00:00 - 02:00]: KEYFRAME_ALPHA_RED (Docuverse Overview)
+  - Scene 02 [02:00 - 04:00]: KEYFRAME_BETA_GREEN (Permascroll Addressing)
+  - Scene 03 [04:00 - 06:00]: KEYFRAME_GAMMA_BLUE (3D Link Geometry)
+  - Scene 04 [06:00 - 08:00]: KEYFRAME_DELTA_GOLD (Identity Ledger)
