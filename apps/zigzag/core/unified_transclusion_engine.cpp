@@ -278,6 +278,80 @@ bool UnifiedTransclusionEngine::validate2RankManifold(
   return true;
 }
 
+std::size_t UnifiedTransclusionEngine::ShapingKeyHash::operator()(
+    const ShapingKey &k) const noexcept {
+  // The text dominates; the rest are folded in so that the same words shaped
+  // at a different width, or with different decorations, land elsewhere.
+  std::size_t h  = std::hash<std::string>{}(k.text);
+  const auto mix = [&h](const std::size_t v) {
+    h ^= v + 0x9e3779b97f4a7c15ULL + (h << 6U) + (h >> 2U);
+  };
+  mix(std::hash<const void *>{}(k.font));
+  mix(std::hash<float>{}(k.maxWidthPx));
+  mix(std::hash<float>{}(k.maxHeightPx));
+  mix(static_cast<std::size_t>(k.singleParagraph) |
+      (static_cast<std::size_t>(k.ellipsize) << 1U));
+  for (const auto &range : k.decoratedRanges) {
+    mix(static_cast<std::size_t>(range.start));
+    mix(static_cast<std::size_t>(range.end));
+    mix(static_cast<std::size_t>(range.decorations));
+  }
+  return h;
+}
+
+const PageShaping &UnifiedTransclusionEngine::shapedPage(
+    const std::string_view text, const gleditor::text::FontFacePtr &font,
+    const gleditor::text::LayoutOptions &opts) {
+  ShapingKey key{.text            = std::string(text),
+                 .font            = font.get(),
+                 .maxWidthPx      = opts.maxWidthPx,
+                 .maxHeightPx     = opts.maxHeightPx,
+                 .singleParagraph = opts.singleParagraph,
+                 .ellipsize       = opts.ellipsize,
+                 .decoratedRanges = opts.decoratedRanges};
+
+  shapingTick_++;
+  if (const auto found = shapingCache_.find(key);
+      found != shapingCache_.end()) {
+    found->second.lastUsedTick = shapingTick_;
+    shapingHits_++;
+    return found->second.shaping;
+  }
+  shapingMisses_++;
+
+  // Evict before inserting, so the cache never exceeds capacity even briefly.
+  // Oldest-used first: a staging pass sweeps a neighbourhood, so the entry
+  // asked for least recently is the one the camera has moved away from.
+  if (shapingCache_.size() >= kShapingCacheCapacity) {
+    auto oldest = shapingCache_.begin();
+    for (auto it = shapingCache_.begin(); it != shapingCache_.end(); ++it) {
+      if (it->second.lastUsedTick < oldest->second.lastUsedTick) {
+        oldest = it;
+      }
+    }
+    shapingCache_.erase(oldest);
+    shapingEvictions_++;
+  }
+
+  auto shaping = gleditor::text::TextLayout::layoutPage(text, font, opts);
+  const auto [it, inserted] = shapingCache_.emplace(
+      std::move(key), ShapingEntry{.shaping      = std::move(shaping),
+                                   .lastUsedTick = shapingTick_});
+  return it->second.shaping;
+}
+
+UnifiedTransclusionEngine::ShapingCacheStats
+UnifiedTransclusionEngine::shapingCacheStats() const noexcept {
+  return ShapingCacheStats{.entries   = shapingCache_.size(),
+                           .hits      = shapingHits_,
+                           .misses    = shapingMisses_,
+                           .evictions = shapingEvictions_};
+}
+
+void UnifiedTransclusionEngine::clearShapingCache() noexcept {
+  shapingCache_.clear();
+}
+
 std::string UnifiedTransclusionEngine::resolveCellText(const CellID id) const {
   const auto *cell = findCell(id);
   if (!cell) {
@@ -413,14 +487,17 @@ UnifiedTransclusionEngine::stageVisibleCells(
       continue;
     }
 
-    gleditor::text::LayoutOptions opts{.maxWidthPx      = 380.0F,
-                                       .maxHeightPx     = 240.0F,
-                                       .singleParagraph = false,
-                                       .ellipsize       = true,
-                                       .decoratedRanges = {}};
+    const gleditor::text::LayoutOptions opts{.maxWidthPx      = 380.0F,
+                                             .maxHeightPx     = 240.0F,
+                                             .singleParagraph = false,
+                                             .ellipsize       = true,
+                                             .decoratedRanges = {}};
 
-    const auto shaping =
-        gleditor::text::TextLayout::layoutPage(text, font, opts);
+    // Shaping the same unchanged text again every frame is what a staging
+    // pass used to spend nearly all of its time on. The glyph cache lookups
+    // below still run each time, because their atlas coordinates move when
+    // the atlas grows and a cached copy of them would go stale.
+    const auto &shaping = shapedPage(text, font, opts);
 
     const auto *cell       = findCell(cid);
     std::uint32_t paperCol = Doc::VBORow::color(25);

@@ -140,6 +140,10 @@ struct DecoratedRange {
   std::uint32_t start{};
   std::uint32_t end{}; ///< Half-open: covers [start, end).
   DecorationMask decorations{};
+
+  /// Needed by anything keying a cache on the layout options a page was
+  /// shaped with, since the decorations change the result.
+  [[nodiscard]] bool operator==(const DecoratedRange &) const = default;
 };
 
 /**

@@ -316,9 +316,25 @@ not: at the radius the code uses, the traversal is noise, and shrinking the
 cell moves 1.1 µs to 0.9 µs.
 
 **The frame-time risk is somewhere else entirely.** `stageVisibleCells`
-re-shapes every visited cell through HarfBuzz on every call with no cache,
-and that scales with radius until it eats the budget. If anything here is
-worth doing for 120 FPS, it is caching shaped output — not the cell layout.
+re-shaped every visited cell through HarfBuzz on every call with no cache,
+and that scales with radius until it eats the budget.
+
+That one is now fixed, which is the only code change this follow-up produced.
+`UnifiedTransclusionEngine` caches shaped pages, keyed on the text and the
+layout options rather than on the cell id — a cell's text changes and its id
+does not, and keying on the id would serve the old words forever. The hash is
+for lookup and the text is compared on hit, because an unchecked collision
+would draw one cell's words in another's place, which is a worse failure than
+being slow. Bounded at 512 entries, about 2.5 MiB.
+
+Measured over sixty cells: **0.695 ms → 0.240 ms, 2.9×**. The remainder is
+the glyph atlas lookups, which are deliberately not cached: their coordinates
+move when the atlas grows, and a stale copy would draw the wrong glyphs.
+
+Four tests cover it — cached output byte-identical to uncached, changed text
+not served from a stale entry, capacity respected under a pan wider than the
+cache, and clearing working. A fifth reports the timing rather than asserting
+on wall-clock, since a flaky timing test gets disabled and then deleted.
 
 The `static_assert` ceiling stays as drift protection either way.
 

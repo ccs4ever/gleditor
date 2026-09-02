@@ -164,8 +164,71 @@ public:
                         gleditor::GlyphCache &glyphCache,
                         render::gl::StreamBufferGL &streamBuffer);
 
+  /// How many shaped pages to keep. A staging pass visits the cells inside
+  /// the request radius, so this only needs to outlast a couple of frames'
+  /// worth of neighbourhood to stop the churn. It is not a document cache.
+  ///
+  /// A shaped page of a short paragraph measures about 5 KB, nearly all of it
+  /// the per-glyph vector, so this ceiling is roughly 2.5 MiB and scales with
+  /// how much text a cell holds. Bounded rather than generous on purpose: an
+  /// unbounded cache is not a cache.
+  static constexpr std::size_t kShapingCacheCapacity = 512;
+
+  struct ShapingCacheStats {
+    std::size_t entries{};
+    std::uint64_t hits{};
+    std::uint64_t misses{};
+    std::uint64_t evictions{};
+  };
+  [[nodiscard]] ShapingCacheStats shapingCacheStats() const noexcept;
+
+  /// Drop every shaped page. The cache keys on the FontFace address, and an
+  /// address can be reused after a font is released and another loaded, so
+  /// anything swapping fonts under the engine has to say so.
+  void clearShapingCache() noexcept;
+
 private:
   void buildCellFromOp(std::uint32_t opIndex, const xudu::CompactOpNode &node);
+
+  /**
+   * @brief Shaped output for @p text, from cache when it is there.
+   *
+   * Shaping is what a staging pass actually spends its time on: 14.3
+   * microseconds per cell measured, against roughly 1 microsecond for the
+   * whole neighbourhood traversal. stageVisibleCells redid it for every
+   * visited cell on every call.
+   *
+   * Keyed on the text rather than on the cell id, because a cell's text
+   * changes and its id does not. The hash is for lookup and the text is kept
+   * beside it so a hit is confirmed by comparison -- an unchecked collision
+   * here would draw one cell's words in another's place, which is a worse
+   * failure than being slow.
+   */
+  [[nodiscard]] const PageShaping &
+  shapedPage(std::string_view text, const gleditor::text::FontFacePtr &font,
+             const gleditor::text::LayoutOptions &opts);
+
+  /// Everything layoutPage's output depends on. If a field is added to
+  /// LayoutOptions that changes the result, it belongs here too -- otherwise
+  /// the cache starts answering a question it was not asked.
+  struct ShapingKey {
+    std::string text;
+    const gleditor::text::FontFace *font{nullptr};
+    float maxWidthPx{};
+    float maxHeightPx{};
+    bool singleParagraph{};
+    bool ellipsize{};
+    std::vector<gleditor::DecoratedRange> decoratedRanges;
+
+    [[nodiscard]] bool operator==(const ShapingKey &) const = default;
+  };
+  struct ShapingKeyHash {
+    [[nodiscard]] std::size_t operator()(const ShapingKey &k) const noexcept;
+  };
+  struct ShapingEntry {
+    PageShaping shaping;
+    std::uint64_t lastUsedTick{};
+  };
 
   xudu::Store &store_;
   std::uint32_t lastSyncedOpIndex_{0};
@@ -174,6 +237,12 @@ private:
   std::unordered_map<CellID, CompactZZCell> cells_;
   std::unordered_map<std::uint32_t, CellID> opIndexToCell_;
   std::map<xudu::PrimediaSpan, CellID, SpanLess> spanToMasterCell_;
+
+  std::unordered_map<ShapingKey, ShapingEntry, ShapingKeyHash> shapingCache_;
+  std::uint64_t shapingTick_{0};
+  std::uint64_t shapingHits_{0};
+  std::uint64_t shapingMisses_{0};
+  std::uint64_t shapingEvictions_{0};
 };
 
 } // namespace zigzag
