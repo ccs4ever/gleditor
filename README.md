@@ -256,13 +256,34 @@ between black and white. The violent changes -- the ones that read as crawling
 
 Mipmapping an atlas is not free of consequences, because a mip texel at level L
 averages a 2^L block of level zero aligned to level zero's grid, and so reaches
-up to 2^L-1 texels outside whatever it covers. Glyphs were packed edge to edge,
-so level one alone would have averaged each glyph with its neighbour. Each glyph
-now sits inside a zeroed border sized for the deepest level the atlas carries,
-and the texture coordinates handed to the shader are narrowed back to the glyph,
-so nothing downstream knows the border is there. Four levels reach one eighth
-scale, a little past where the coarse path takes over entirely, so between them
-the two cover every size a page is drawn at.
+up to 2^L-1 texels outside whatever it covers. That has two separate
+consequences, and a glyph needs both answered.
+
+The first is contamination. Glyphs were packed edge to edge, so level one alone
+would have averaged each glyph with its neighbour. Each glyph now sits inside a
+zeroed border sized for the deepest level the atlas carries, and the texture
+coordinates handed to the shader are narrowed back to the glyph, so nothing
+downstream knows the border is there. Four levels reach one eighth scale, a
+little past where the coarse path takes over entirely, so between them the two
+cover every size a page is drawn at.
+
+The second is phase, and the border does nothing about it: where a glyph
+*starts* decides which of its own texels get averaged together. A glyph at
+x = 29 has its level-one pairs cut at odd offsets and the same glyph at x = 32
+has them cut at even ones, so the same letter minifies to different pixels
+depending only on where it landed. Where it lands is decided by the order
+glyphs were asked for, and that is decided by which of several documents
+loading at once reached the render thread first -- so the same scene rendered
+a different picture from one run to the next, and `tools/compare-backends.sh`
+failed a different set of its scenarios on each run of an unchanged tree.
+
+So glyph boxes now begin on a block boundary of the deepest level, in both
+axes: lanes advance by a rounded-up width and stack by a rounded-up height. The
+blocks then line up with a glyph's own origin wherever it sits, and packing
+order stops being something the picture can depend on. It costs packing
+density -- a 512x512 layer takes about 158 glyphs of a mixed Latin, Greek and
+Cyrillic sample where it took 205 before, so the atlas reaches its next
+doubling sooner. What that buys is in the table below.
 
 OpenGL has `glGenerateMipmap`; Vulkan has nothing equivalent and `DeviceVK`
 blits each level from the one above with the layout transitions to go with it.
@@ -302,19 +323,27 @@ help. End to end, `GLEDITOR_ATLAS_SIZE=64` makes ordinary text overflow the
 atlas twice over, and `tools/compare-backends.sh` renders that against the
 ungrown frame on every backend.
 
-That last comparison is not a byte comparison, and the reason is worth stating
-because it looks like a tolerance chosen for convenience. A smaller atlas packs
-glyphs at different texels, and a mip texel averages a block aligned to level
-zero's grid rather than to the glyph, so the same glyph at an odd offset
-genuinely has a different mip chain from one at an even offset. An atlas opened
-at 256, which never grows at all, differs from one opened at 512 by as much as
-one opened at 64, which grows twice -- so the difference is packing, not growth.
-What a failed re-upload looks like is glyphs missing outright, and the limits
-were set by breaking it on purpose:
+That last comparison used not to be a byte comparison, and the reason is worth
+keeping because it is what the alignment above was found by. A smaller atlas
+packs glyphs at different texels, and a mip texel averages a block aligned to
+level zero's grid rather than to the glyph, so the same glyph at an odd offset
+genuinely had a different mip chain from one at an even offset. An atlas opened
+at 256, which never grows at all, differed from one opened at 512 by as much as
+one opened at 64, which grows twice -- the difference was packing, not growth,
+and no tolerance could tell the two apart.
+
+Now that every glyph starts on a block boundary the packing is no longer
+visible at all: an atlas opened at 64 and grown twice renders the frame an
+ungrown one renders, and the mean change across a growth went from 0.86 to
+0.00. The limit is 0.05 rather than zero only for the floating point in the
+shader's texel-to-fraction divide, which does depend on the atlas size. What a
+failed re-upload looks like is glyphs missing outright, and the limits were set
+by breaking it on purpose:
 
 |                   | mean change | >32 levels | >64   | >100   |
 | ----------------- | ----------- | ---------- | ----- | ------ |
-| working           | 0.64        | 0.38%      | 0.02% | 0.000% |
+| aligned           | 0.00        | 0.00%      | 0.00% | 0.000% |
+| before alignment  | 0.64        | 0.38%      | 0.02% | 0.000% |
 | re-upload dropped | 2.24        | 1.92%      | 1.19% | 0.739% |
 
 The phase shift nudges pixels; a missing glyph flips them from ink to paper. The

@@ -9,6 +9,7 @@
 #ifndef GLEDITOR_GLYPHCACHE_LANE_H
 #define GLEDITOR_GLYPHCACHE_LANE_H
 
+#include <algorithm>                     // for min
 #include <compare>                       // for partial_ordering
 #include <gleditor/glyphcache/types.hpp> // for operator<<, Rect, Point
 #include <gleditor/log.hpp>              // for Loggable
@@ -96,10 +97,15 @@ public:
     }
     const auto ret =
         Point{Offset{std::to_underlying(usedWidth)}, paletteYOffset};
-    // std::cout << "put usedWidth: " << usedWidth << "\n";
+    // Rounded up rather than advanced exactly, so the next glyph starts on a
+    // mip block boundary as this one did. What that buys is in
+    // gleditor::glyphAlignment: a glyph's minified appearance stops depending
+    // on where in the atlas it happened to land, which is what made the same
+    // scene render differently from one run to the next.
     usedWidth =
-        Length{std::to_underlying(usedWidth) + std::to_underlying(charWidth)};
-    // std::cout << "put usedWidth after: " << usedWidth << "\n";
+        Length{std::min(std::to_underlying(paletteWidth),
+                        std::to_underlying(usedWidth) +
+                            alignedToMipBlock(std::to_underlying(charWidth)))};
     return ret;
   }
 

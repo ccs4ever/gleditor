@@ -33,8 +33,14 @@ auto GlyphPalette::getBestLane(const Rect &charBox) {
   }
   lanes.emplace_back(Offset{std::to_underlying(usedHeight)},
                      Rect{paletteDims.width, charBox.height});
-  usedHeight = Length{std::to_underlying(usedHeight) +
-                      std::to_underlying(charBox.height)};
+  // Rounded up for the same reason GlyphLane::put() rounds its advance: the
+  // next lane has to start on a mip block boundary, or every glyph in it is
+  // cut across by the block grid at whatever phase this lane's height left
+  // behind. Alignment is only worth having on both axes.
+  usedHeight = Length{
+      std::min(std::to_underlying(paletteDims.height),
+               std::to_underlying(usedHeight) +
+                   alignedToMipBlock(std::to_underlying(charBox.height)))};
   return std::prev(lanes.end());
 }
 

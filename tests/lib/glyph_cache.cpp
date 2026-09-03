@@ -160,6 +160,48 @@ TEST_F(GlyphCacheTest, everyAllocationStaysWithinTheReportedLimits) {
   }
 }
 
+// Every glyph starts on a mip block boundary, whatever order the glyphs were
+// asked for in. The chain averages 2^L blocks on the texture's own grid, so a
+// glyph that began anywhere else would have its own texels averaged together
+// at whatever phase the glyphs before it happened to leave -- and since that
+// order follows which of several documents loading at once reached the render
+// thread first, the same page rendered differently from one run to the next.
+// See gleditor::glyphAlignment.
+TEST_F(GlyphCacheTest, everyGlyphLandsOnAMipBlockBoundary) {
+  const auto cache = makeCache(4096, 8);
+  // Two sizes, so the boxes are of assorted widths and heights and the lanes
+  // are not all the same: a run of identical boxes would line up on any
+  // alignment at all and prove nothing.
+  for (const auto *const name : {"Serif 40", "Serif 90"}) {
+    const auto face = font(name);
+    for (const auto &chr : alphabet(20)) {
+      const auto placed = cache->put(chr, face);
+      EXPECT_EQ(static_cast<int>(placed.texCoords.topLeft.x) % glyphAlignment,
+                0)
+          << chr << " at " << name
+          << " starts at x = " << placed.texCoords.topLeft.x
+          << ", which no mip block starts at";
+      EXPECT_EQ(static_cast<int>(placed.texCoords.topLeft.y) % glyphAlignment,
+                0)
+          << chr << " at " << name
+          << " starts at y = " << placed.texCoords.topLeft.y
+          << ", which no mip block starts at";
+    }
+  }
+}
+
+// The border a glyph is rasterised inside has to be a whole number of blocks
+// too, or aligning the padded box would leave the glyph itself off the grid --
+// the coordinates handed out point past the border, not at it.
+TEST(GlyphAtlas, theBorderIsAWholeNumberOfMipBlocks) {
+  EXPECT_EQ(glyphPadding % glyphAlignment, 0);
+  EXPECT_GE(glyphPadding, 1 << (atlasMipLevels - 1))
+      << "the border has to reach as far as the deepest level averages";
+  EXPECT_GE(glyphAlignment, 1 << (atlasMipLevels - 1))
+      << "a shallower alignment leaves the deepest level cutting across "
+         "glyphs";
+}
+
 // The texture coordinates of a glyph are already sitting in the vertex buffer
 // of every page that drew it, so growth must leave them alone. Texels rather
 // than a fraction of the texture is what makes that possible.

@@ -128,13 +128,17 @@ TEST_F(GlyphPaletteTest, availHeight) {
   EXPECT_EQ(alice.availHeight(), dims.height);
 }
 
+// A lane costs its height rounded up to the next mip block, not its height:
+// the lane above it has to begin on a block boundary, the same way every glyph
+// within a lane does. See gleditor::glyphAlignment.
 TEST_F(GlyphPaletteTest, availHeightPut1Lane) {
   GlyphPalette alice = makePalette();
   alice.put(Rect{Length{10}, Length{10}}, kPixels);
   alice.put(Rect{Length{10}, Length{10}}, kPixels);
   alice.put(Rect{Length{10}, Length{10}}, kPixels);
   alice.put(Rect{Length{10}, Length{10}}, kPixels);
-  EXPECT_EQ(alice.availHeight(), Length{std::to_underlying(dims.height) - 10});
+  EXPECT_EQ(alice.availHeight(),
+            Length{std::to_underlying(dims.height) - alignedToMipBlock(10)});
 }
 
 TEST_F(GlyphPaletteTest, availHeightPut2Lanes) {
@@ -143,13 +147,16 @@ TEST_F(GlyphPaletteTest, availHeightPut2Lanes) {
   alice.put(Rect{Length{10}, Length{10}}, kPixels);
   alice.put(Rect{Length{10}, Length{20}}, kPixels);
   alice.put(Rect{Length{10}, Length{20}}, kPixels);
-  EXPECT_EQ(alice.availHeight(), Length{std::to_underlying(dims.height) - 30});
+  EXPECT_EQ(alice.availHeight(),
+            Length{std::to_underlying(dims.height) - alignedToMipBlock(10) -
+                   alignedToMipBlock(20)});
 }
 
 TEST_F(GlyphPaletteTest, availHeightFullLane) {
   GlyphPalette alice = makePalette();
   alice.put(Rect{dims.width, Length{10}}, kPixels);
-  EXPECT_EQ(alice.availHeight(), Length{std::to_underlying(dims.height) - 10});
+  EXPECT_EQ(alice.availHeight(),
+            Length{std::to_underlying(dims.height) - alignedToMipBlock(10)});
 }
 
 TEST_F(GlyphPaletteTest, availHeightLaneExpand) {
@@ -157,8 +164,25 @@ TEST_F(GlyphPaletteTest, availHeightLaneExpand) {
   GlyphPalette alice = makePalette();
   EXPECT_NE(alice.put(Rect{dims.width, Length{10}}, kPixels), std::nullopt);
   EXPECT_NE(alice.put(Rect{dims.width, Length{10}}, kPixels), std::nullopt);
-  EXPECT_EQ(alice.availHeight(), Length{std::to_underlying(dims.height) - 20})
+  EXPECT_EQ(alice.availHeight(), Length{std::to_underlying(dims.height) -
+                                        (2 * alignedToMipBlock(10))})
       << alice;
+}
+
+// Lanes stack on block boundaries however tall they are, which is the other
+// half of what keeps a glyph's mip texels the same wherever it is packed:
+// aligning x alone would still leave the block grid cutting across every lane
+// above the first.
+TEST_F(GlyphPaletteTest, everyLaneStartsOnAMipBlockBoundary) {
+  GlyphPalette alice = makePalette();
+  for (const int height : {3, 7, 8, 13, 17, 32, 41}) {
+    const auto placed = alice.put(Rect{dims.width, Length{height}}, kPixels);
+    ASSERT_NE(placed, std::nullopt)
+        << "a lane " << height << " tall did not fit";
+    EXPECT_EQ(static_cast<int>(placed->topLeft.y) % glyphAlignment, 0)
+        << "a lane " << height << " tall began at y = " << placed->topLeft.y
+        << ", which no mip block starts at";
+  }
 }
 
 TEST_F(GlyphPaletteTest, canFit) {

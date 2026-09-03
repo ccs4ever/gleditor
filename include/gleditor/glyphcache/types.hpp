@@ -24,6 +24,46 @@ enum class Length : int; ///< Integer length unit used for glyph cache packing
 enum class Offset : int; ///< Integer offset unit used for glyph cache packing
 
 /**
+ * @brief Mip levels the atlas carries, and the two things that make them safe.
+ *
+ * A mip texel at level L is the average of a 2^L block of level zero, aligned
+ * to level zero's own grid rather than to anything in it. Two separate
+ * consequences follow, and a glyph needs both answered.
+ *
+ * The first is contamination: packed edge to edge, level one already averages
+ * a glyph with whatever was placed beside it. @ref glyphPadding answers that,
+ * by giving every glyph a zeroed border wide enough for the deepest level.
+ *
+ * The second is phase, and the border does nothing about it. Where a glyph
+ * *starts* decides which of its own texels get averaged together: a glyph at
+ * x = 29 has its level-one pairs cut at odd offsets, and the same glyph at
+ * x = 32 has them cut at even ones -- so the same letter minifies to different
+ * pixels depending on where it happened to land. Since where it lands depends
+ * on the order glyphs were asked for, and that depends on which of two
+ * documents loading at once reached the render thread first, the same scene
+ * rendered two different pictures from one run to the next.
+ * @ref glyphAlignment answers that, by starting every glyph on a block
+ * boundary of the deepest level, so the blocks line up with the glyph's own
+ * origin wherever it sits.
+ *
+ * Four levels reach one eighth scale, which is a little past the point where
+ * the coarse path takes the page over entirely (0.15 screen pixels per layout
+ * pixel, see AppState::coarseBelow), so between them the two cover every size
+ * a page is drawn at. Going deeper would quadruple both the border and the
+ * alignment waste for sizes nothing ever samples.
+ */
+constexpr int atlasMipLevels = 4;
+/// Zeroed border each glyph is rasterised inside, in texels per side.
+constexpr int glyphPadding = 1 << (atlasMipLevels - 1);
+/// Texel multiple every glyph box begins on, in both axes.
+constexpr int glyphAlignment = 1 << (atlasMipLevels - 1);
+
+/// @p value rounded up to the next multiple of @ref glyphAlignment.
+[[nodiscard]] constexpr int alignedToMipBlock(const int value) {
+  return ((value + glyphAlignment - 1) / glyphAlignment) * glyphAlignment;
+}
+
+/**
  * @brief A presentation attribute a glyph can be rasterised with.
  *
  * Where a cache key normally names a cluster and a font, this is the third

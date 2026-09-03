@@ -314,7 +314,14 @@ def load(path):
     data = open(path, "rb").read()
     return data[data.index(b"255\n") + 4:]
 
-meanLimit = 1.2
+# Nothing at all, near enough: glyphs are packed on mip block boundaries, so
+# an atlas that grew twice holds the same mip chain as one that never grew and
+# the two frames come out identical. The allowance left is for the floating
+# point in the shader's texel-to-fraction divide, which does depend on the
+# atlas size. Before that alignment this sat at 1.2, because a glyph at an odd
+# offset genuinely had a different mip chain from the same glyph at an even
+# one -- a limit wide enough to hide a real regression behind.
+meanLimit = 0.05
 lostLevel = 100
 lostPct   = 0.05
 failed = False

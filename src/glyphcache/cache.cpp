@@ -75,24 +75,6 @@ int openingAtlasSize() {
   return initialAtlasSize;
 }
 
-/**
- * @brief Mip levels the atlas carries, and the gutter that makes them safe.
- *
- * A mip texel at level L is the average of a 2^L block of level zero, aligned
- * to level zero's grid, so the texels covering a glyph reach up to 2^L - 1
- * texels outside it. Packed edge to edge, as glyphs were, that means level one
- * already averages a glyph with whatever was placed beside it. Each glyph
- * therefore sits inside a zeroed border wide enough for the deepest level.
- *
- * Four levels reach one eighth scale, which is a little past the point where
- * the coarse path takes the page over entirely (0.15 screen pixels per layout
- * pixel, see AppState::coarseBelow), so between them the two cover every size
- * a page is drawn at. Going deeper would quadruple the gutter for sizes
- * nothing ever samples.
- */
-constexpr int atlasMipLevels = 4;
-constexpr int glyphPadding   = 1 << (atlasMipLevels - 1);
-
 struct PaddedCoverage {
   std::vector<std::byte> data;
   float meanInk{};
