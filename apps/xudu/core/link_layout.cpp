@@ -82,6 +82,16 @@ void placeLinks(const std::map<std::uint64_t, Link> &links,
   }
 }
 
+namespace {
+
+struct DocPiece {
+  PrimediaSpan span;
+  std::uint32_t docIdx{0};
+  std::uint32_t docStart{0};
+};
+
+} // namespace
+
 void placeTransclusions(const std::vector<const Version *> &views,
                         std::vector<TransclusionPair> &pairs) {
   pairs.clear();
@@ -89,48 +99,110 @@ void placeTransclusions(const std::vector<const Version *> &views,
     return;
   }
 
+  // 1. Collect all non-empty primedia pieces from open document views with
+  // their concatext offsets. This is an O(total_pieces) single pass over each
+  // document.
+  std::vector<DocPiece> pieces;
   for (std::uint32_t i = 0; i < views.size(); ++i) {
     if (nullptr == views[i]) {
       continue;
     }
-    const auto &docA = *views[i];
+    const auto &doc    = *views[i];
+    std::uint32_t seen = 0;
+    for (const auto &run : doc.pieces()) {
+      if (!run.empty() && breakMarkerScroll != run.scroll) {
+        pieces.push_back(DocPiece{
+            .span     = run,
+            .docIdx   = i,
+            .docStart = seen,
+        });
+      }
+      seen += static_cast<std::uint32_t>(run.length);
+    }
+  }
 
-    for (std::uint32_t j = i + 1; j < views.size(); ++j) {
-      if (nullptr == views[j]) {
+  if (pieces.size() < 2) {
+    return;
+  }
+
+  // 2. Sort pieces by (scroll, start, docIdx) to enable linear dual-pointer
+  // sweeping.
+  std::ranges::sort(pieces, [](const DocPiece &a, const DocPiece &b) {
+    if (a.span.scroll != b.span.scroll) {
+      return a.span.scroll < b.span.scroll;
+    }
+    if (a.span.start != b.span.start) {
+      return a.span.start < b.span.start;
+    }
+    return a.docIdx < b.docIdx;
+  });
+
+  // 3. Bucket transclusion pairs per (u, v) view pair (u < v) so contiguous
+  // adjacent runs merge seamlessly without O(pairs) lookups.
+  const auto viewCount = views.size();
+  std::vector<std::vector<TransclusionPair>> pairBuckets(viewCount * viewCount);
+
+  for (std::size_t i = 0; i < pieces.size(); ++i) {
+    const auto &pI = pieces[i];
+    for (std::size_t j = i + 1; j < pieces.size(); ++j) {
+      const auto &pJ = pieces[j];
+      // If scroll changes or pJ starts at or after pI ends, no subsequent
+      // pieces can overlap pI.
+      if (pJ.span.scroll != pI.span.scroll || pJ.span.start >= pI.span.end()) {
+        break;
+      }
+      if (pI.docIdx == pJ.docIdx) {
         continue;
       }
-      const auto &docB = *views[j];
 
-      for (const auto &pieceA : docA.pieces()) {
-        if (pieceA.empty()) {
-          continue;
-        }
-        for (const auto &pieceB : docB.pieces()) {
-          if (pieceB.empty()) {
-            continue;
-          }
-          const auto shared = pieceA.intersect(pieceB);
-          if (shared.empty()) {
-            continue;
-          }
+      const auto u   = std::min(pI.docIdx, pJ.docIdx);
+      const auto v   = std::max(pI.docIdx, pJ.docIdx);
+      const auto &pU = (pI.docIdx == u) ? pI : pJ;
+      const auto &pV = (pI.docIdx == v) ? pI : pJ;
 
-          const auto occsA = docA.occurrencesOf(shared);
-          const auto occsB = docB.occurrencesOf(shared);
+      const auto sharedStart = std::max(pU.span.start, pV.span.start);
+      const auto sharedEnd   = std::min(pU.span.end(), pV.span.end());
+      if (sharedStart >= sharedEnd) {
+        continue;
+      }
+      const auto sharedLen = sharedEnd - sharedStart;
 
-          for (const auto &extA : occsA) {
-            for (const auto &extB : occsB) {
-              TransclusionPair tp{
-                  .from = LinkEnd{i, extA.start, extA.end},
-                  .to   = LinkEnd{j, extB.start, extB.end},
-                  .span = shared,
-              };
-              if (std::ranges::find(pairs, tp) == pairs.end()) {
-                pairs.push_back(tp);
-              }
-            }
-          }
+      const auto startU =
+          pU.docStart + static_cast<std::uint32_t>(sharedStart - pU.span.start);
+      const auto endU = startU + static_cast<std::uint32_t>(sharedLen);
+
+      const auto startV =
+          pV.docStart + static_cast<std::uint32_t>(sharedStart - pV.span.start);
+      const auto endV = startV + static_cast<std::uint32_t>(sharedLen);
+
+      const PrimediaSpan sharedSpan{pU.span.scroll, sharedStart, sharedLen};
+      auto &bucket = pairBuckets[u * viewCount + v];
+
+      // Merge with previous contiguous span if adjacent in both documents and
+      // primedia.
+      if (!bucket.empty() && bucket.back().from.end == startU &&
+          bucket.back().to.end == startV &&
+          bucket.back().span.scroll == sharedSpan.scroll &&
+          bucket.back().span.end() == sharedSpan.start) {
+        bucket.back().from.end = endU;
+        bucket.back().to.end   = endV;
+        bucket.back().span.length += sharedSpan.length;
+      } else {
+        TransclusionPair tp{
+            .from = LinkEnd{u, startU, endU},
+            .to   = LinkEnd{v, startV, endV},
+            .span = sharedSpan,
+        };
+        if (bucket.empty() || !(bucket.back() == tp)) {
+          bucket.push_back(tp);
         }
       }
+    }
+  }
+
+  for (auto &bucket : pairBuckets) {
+    for (auto &tp : bucket) {
+      pairs.push_back(std::move(tp));
     }
   }
 }
