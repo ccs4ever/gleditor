@@ -751,139 +751,138 @@ void LinkBeams::drawFrame(gleditor::FrameContext &ctx) {
         traverse(*found, state);
       }
     }
-    if (docTransformsChanged || topologyChanged || strandsRebuilt ||
-        unsettled) {
-      resolveAnchors(state);
+  }
+  if (docTransformsChanged || topologyChanged || strandsRebuilt || unsettled) {
+    resolveAnchors(state);
 
-      beams->clear();
-      bool moved        = false;
-      bool stillToAlign = false;
+    beams->clear();
+    bool moved        = false;
+    bool stillToAlign = false;
 
-      for (std::size_t i = 0; i < strands.size(); i++) {
-        auto &strand = strands[i];
-        if (!strand.fromAnchor || !strand.toAnchor ||
-            strand.from.doc >= state.docs.size() ||
-            strand.to.doc >= state.docs.size()) {
-          continue;
-        }
-        const auto &from = state.docs[strand.from.doc];
-        const auto &to   = state.docs[strand.to.doc];
+    for (std::size_t i = 0; i < strands.size(); i++) {
+      auto &strand = strands[i];
+      if (!strand.fromAnchor || !strand.toAnchor ||
+          strand.from.doc >= state.docs.size() ||
+          strand.to.doc >= state.docs.size()) {
+        continue;
+      }
+      const auto &from = state.docs[strand.from.doc];
+      const auto &to   = state.docs[strand.to.doc];
 
-        const auto rightwards =
-            glm::vec3(to->getModel()[3]).x >= glm::vec3(from->getModel()[3]).x;
-        const auto nearEdge =
-            edgeOf(*from, strand.fromAnchor, strand.fromEndAnchor, rightwards);
-        const auto farEdge =
-            edgeOf(*to, strand.toAnchor, strand.toEndAnchor, !rightwards);
-        if (!nearEdge || !farEdge) {
-          continue;
-        }
-
-        const std::size_t docSpan = strand.from.doc > strand.to.doc
-                                        ? (strand.from.doc - strand.to.doc)
-                                        : (strand.to.doc - strand.from.doc);
-
-        const auto docAlpha =
-            std::min(from->currentOpacity(), to->currentOpacity());
-        const auto colour =
-            fade(linkColour(strand.type, strand.tier), docAlpha);
-        const auto tagId = static_cast<std::uint32_t>(i);
-
-        band(*nearEdge, *farEdge, docSpan, colour, tagId);
-        anchorStub(*nearEdge, colour, tagId, false);
-        anchorStub(*farEdge, colour, tagId, true);
-
-        if (sworph && !strand.aligned) {
-          if (moved) {
-            stillToAlign = true;
-          } else {
-            strand.aligned = true;
-            align(strand, state, ctx.timeline);
-            moved = true;
-          }
-        }
+      const auto rightwards =
+          glm::vec3(to->getModel()[3]).x >= glm::vec3(from->getModel()[3]).x;
+      const auto nearEdge =
+          edgeOf(*from, strand.fromAnchor, strand.fromEndAnchor, rightwards);
+      const auto farEdge =
+          edgeOf(*to, strand.toAnchor, strand.toEndAnchor, !rightwards);
+      if (!nearEdge || !farEdge) {
+        continue;
       }
 
-      const bool stillToOpen =
-          sworph && (moved ? danglingOutstanding(state) : openDangling(state));
+      const std::size_t docSpan = strand.from.doc > strand.to.doc
+                                      ? (strand.from.doc - strand.to.doc)
+                                      : (strand.to.doc - strand.from.doc);
 
-      unsettled = stillToAlign || stillToOpen;
+      const auto docAlpha =
+          std::min(from->currentOpacity(), to->currentOpacity());
+      const auto colour = fade(linkColour(strand.type, strand.tier), docAlpha);
+      const auto tagId  = static_cast<std::uint32_t>(i);
 
-      beams->commit();
-      strandsRebuilt = false;
+      band(*nearEdge, *farEdge, docSpan, colour, tagId);
+      anchorStub(*nearEdge, colour, tagId, false);
+      anchorStub(*farEdge, colour, tagId, true);
+
+      if (sworph && !strand.aligned) {
+        if (moved) {
+          stillToAlign = true;
+        } else {
+          strand.aligned = true;
+          align(strand, state, ctx.timeline);
+          moved = true;
+        }
+      }
     }
 
-    // Document and page zero, with no kind: the kind is the beam pipeline's,
-    // and which beam it is rides in the beam's own tag.
-    beams->draw(state, ctx.viewProjection, 1.0F,
-                render::packTagIdentity(0, 0, 0));
+    const bool stillToOpen =
+        sworph && (moved ? danglingOutstanding(state) : openDangling(state));
+
+    unsettled = stillToAlign || stillToOpen;
+
+    beams->commit();
+    strandsRebuilt = false;
   }
 
-  void LinkBeams::describe(gleditor::a11y::Builder & into) {
-    namespace a11y = gleditor::a11y;
-    if (strands.empty()) {
-      return;
-    }
+  // Document and page zero, with no kind: the kind is the beam pipeline's,
+  // and which beam it is rides in the beam's own tag.
+  beams->draw(state, ctx.viewProjection, 1.0F,
+              render::packTagIdentity(0, 0, 0));
+}
 
-    auto &group = into.add(0, a11y::Role::List);
-    group.label = "links between the open documents";
-    for (std::size_t which = 0; which < strands.size(); which++) {
-      group.children.push_back(into.id(strands[which].link + 1));
-    }
-    into.contribute(into.id(0));
-
-    for (std::size_t which = 0; which < strands.size(); which++) {
-      const auto &strand = strands[which];
-      // Numbered by the link rather than by its position, so that a link keeps
-      // its identity as others are found and lost around it -- and so that what
-      // comes back names a link this can look up. Link ids are small sequential
-      // counters from the store, well inside the forty-eight bits a node id
-      // leaves for them.
-      auto &node = into.add(strand.link + 1, a11y::Role::Link);
-      // Named by what it connects rather than by what it looks like. A beam is
-      // a coloured line and its colour is its type, which is exactly the kind
-      // of thing that has to be said in words for anybody who is not looking at
-      // it.
-      node.label = std::string{linkTypeName(strand.type)} + " link, document " +
-                   std::to_string(strand.from.doc) + " to document " +
-                   std::to_string(strand.to.doc);
-      node.description = "bytes " + std::to_string(strand.from.start) + " to " +
-                         std::to_string(strand.from.end) + ", and bytes " +
-                         std::to_string(strand.to.start) + " to " +
-                         std::to_string(strand.to.end);
-      node.focusable   = true;
-      node.actions =
-          a11y::bit(a11y::Action::Focus) | a11y::bit(a11y::Action::Click);
-    }
+void LinkBeams::describe(gleditor::a11y::Builder &into) {
+  namespace a11y = gleditor::a11y;
+  if (strands.empty()) {
+    return;
   }
 
-  std::uint64_t LinkBeams::accessibilityRevision() const {
-    // Not the strand count alone: two links can be replaced by two others
-    // without the count moving. `described` is bumped wherever they are found
-    // again.
-    return described;
+  auto &group = into.add(0, a11y::Role::List);
+  group.label = "links between the open documents";
+  for (std::size_t which = 0; which < strands.size(); which++) {
+    group.children.push_back(into.id(strands[which].link + 1));
   }
+  into.contribute(into.id(0));
 
-  bool LinkBeams::performAction(const std::uint64_t nodeId,
-                                const gleditor::a11y::Action action,
-                                const std::string_view /*value*/) {
-    namespace a11y = gleditor::a11y;
-    if (a11y::Action::Click != action) {
-      // Focus alone moves nothing: a beam is not somewhere the caret can be,
-      // and claiming to have focused it would be a lie an assistive technology
-      // acts on.
-      return false;
-    }
-    const auto link = a11y::Ids::localOf(nodeId);
-    if (0 == link) {
-      return false;
-    }
-    // Under no lock and against nothing: the strand list is the render
-    // thread's, so what is recorded is the link's own identity and the lookup
-    // happens there. A link that has gone by then is simply not found.
-    const std::scoped_lock locker(askedGuard);
-    askedToFollow.push_back(link - 1);
-    return true;
+  for (std::size_t which = 0; which < strands.size(); which++) {
+    const auto &strand = strands[which];
+    // Numbered by the link rather than by its position, so that a link keeps
+    // its identity as others are found and lost around it -- and so that what
+    // comes back names a link this can look up. Link ids are small sequential
+    // counters from the store, well inside the forty-eight bits a node id
+    // leaves for them.
+    auto &node = into.add(strand.link + 1, a11y::Role::Link);
+    // Named by what it connects rather than by what it looks like. A beam is
+    // a coloured line and its colour is its type, which is exactly the kind
+    // of thing that has to be said in words for anybody who is not looking at
+    // it.
+    node.label = std::string{linkTypeName(strand.type)} + " link, document " +
+                 std::to_string(strand.from.doc) + " to document " +
+                 std::to_string(strand.to.doc);
+    node.description = "bytes " + std::to_string(strand.from.start) + " to " +
+                       std::to_string(strand.from.end) + ", and bytes " +
+                       std::to_string(strand.to.start) + " to " +
+                       std::to_string(strand.to.end);
+    node.focusable   = true;
+    node.actions =
+        a11y::bit(a11y::Action::Focus) | a11y::bit(a11y::Action::Click);
   }
+}
+
+std::uint64_t LinkBeams::accessibilityRevision() const {
+  // Not the strand count alone: two links can be replaced by two others
+  // without the count moving. `described` is bumped wherever they are found
+  // again.
+  return described;
+}
+
+bool LinkBeams::performAction(const std::uint64_t nodeId,
+                              const gleditor::a11y::Action action,
+                              const std::string_view /*value*/) {
+  namespace a11y = gleditor::a11y;
+  if (a11y::Action::Click != action) {
+    // Focus alone moves nothing: a beam is not somewhere the caret can be,
+    // and claiming to have focused it would be a lie an assistive technology
+    // acts on.
+    return false;
+  }
+  const auto link = a11y::Ids::localOf(nodeId);
+  if (0 == link) {
+    return false;
+  }
+  // Under no lock and against nothing: the strand list is the render
+  // thread's, so what is recorded is the link's own identity and the lookup
+  // happens there. A link that has gone by then is simply not found.
+  const std::scoped_lock locker(askedGuard);
+  askedToFollow.push_back(link - 1);
+  return true;
+}
 
 } // namespace xudu

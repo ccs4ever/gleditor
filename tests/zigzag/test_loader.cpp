@@ -176,3 +176,34 @@ zzstructure:
   ASSERT_TRUE(doc->cells.at(1).preflet.has_value());
   EXPECT_EQ(doc->cells.at(1).preflet->version, "3.5");
 }
+
+TEST(ZzLoaderTest, ParseMediaAndImageCells) {
+  const std::string mediaYaml = R"(
+zzstructure:
+  focus: 1
+  cells:
+    - id: 1
+      text: "Text Cell"
+      dimensions: { d.1: 2 }
+
+    - id: 2
+      text: "Image Cell"
+      type: image
+      mime_type: "image/png"
+      media_path: "assets/textures/diagram.png"
+)";
+
+  const auto doc = parseZzStructure(mediaYaml, "test");
+  ASSERT_TRUE(doc.has_value());
+  ASSERT_EQ(doc->cells.size(), 2U);
+
+  const auto &cell1 = doc->cells.at(1);
+  EXPECT_FALSE(cell1.isMedia());
+  EXPECT_FALSE(cell1.isImage());
+
+  const auto &cell2 = doc->cells.at(2);
+  EXPECT_TRUE(cell2.isMedia());
+  EXPECT_TRUE(cell2.isImage());
+  EXPECT_EQ(cell2.mime_type, "image/png");
+  EXPECT_EQ(cell2.media_path, "assets/textures/diagram.png");
+}

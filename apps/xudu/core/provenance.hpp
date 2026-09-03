@@ -228,6 +228,46 @@ verifyProvenance(const SignedProvenance &signed_,
  */
 [[nodiscard]] std::optional<Provenance> parseProvenance(std::string_view yaml);
 
+/// A published work in an author's body of work, indexed by GPG key identity.
+struct PublishedWork {
+  std::string infoHash;
+  std::string title;
+  std::string mimeType;
+  std::string publisherKey;
+  std::string gpgFingerprint;
+  std::string authorName;
+  std::string authorEmail;
+  std::uint64_t contentLength{};
+  std::string contentSha256;
+  std::uint64_t published{};
+  bool transcopyrightPermitted{true};
+  std::string rights;
+};
+
+/**
+ * @class AuthorCatalog
+ * @brief Manages published works linked to author GPG key identities for
+ * copyright tracking.
+ */
+class AuthorCatalog {
+public:
+  void recordWork(std::string infoHash, const SignedProvenance &signedProv);
+  [[nodiscard]] std::vector<PublishedWork>
+  worksByAuthor(std::string_view authorOrEmail) const;
+  [[nodiscard]] std::vector<PublishedWork>
+  worksByGpgKey(std::string_view fingerprint) const;
+  [[nodiscard]] std::optional<PublishedWork>
+  workForContentHash(std::string_view sha256) const;
+  [[nodiscard]] std::optional<PublishedWork>
+  workForTorrent(std::string_view infoHash) const;
+  [[nodiscard]] const std::vector<PublishedWork> &allWorks() const {
+    return works_;
+  }
+
+private:
+  std::vector<PublishedWork> works_;
+};
+
 /// Names the sealed files carry inside a torrent, so a reader knows what to
 /// look for and a writer cannot spell them differently.
 inline constexpr auto provenanceFileName = "AUTHORSHIP.yaml";

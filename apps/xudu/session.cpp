@@ -595,7 +595,10 @@ void Session::scrubToVersion(const std::uint32_t docIndex,
     return;
   }
   refresh(docIndex, version);
-  doc.load(sourceFor(version, open[docIndex].storeIndex));
+  const auto src = sourceFor(version, open[docIndex].storeIndex);
+  if (src) {
+    doc.load(*src);
+  }
 }
 
 bool Session::scrubBackward(const std::uint32_t docIndex, Doc &doc,

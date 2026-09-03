@@ -130,6 +130,20 @@ inline SDL_Window *createWindow(const char *title, const int width,
 }
 
 /**
+ * @brief Convert any SDL_Surface to packed RGBA32 format.
+ */
+inline SDL_Surface *convertSurfaceToRgba32(SDL_Surface *surface) {
+  if (nullptr == surface) {
+    return nullptr;
+  }
+#if GLEDITOR_SDL_MAJOR == 3
+  return SDL_ConvertSurface(surface, SDL_PIXELFORMAT_RGBA32);
+#else
+  return SDL_ConvertSurfaceFormat(surface, SDL_PIXELFORMAT_RGBA32, 0);
+#endif
+}
+
+/**
  * @brief Report a window's new size in pixels, if this event carries one.
  *
  * SDL2 delivers every window change as SDL_WINDOWEVENT with a sub-type in

@@ -390,7 +390,14 @@ BufferHandle DeviceGL::resizeBuffer(const BufferHandle buffer,
 TextureHandle DeviceGL::createTextureArray(const int size, const int layers,
                                            const TextureFormat format,
                                            const int levels) {
-  if (TextureFormat::R8 != format) {
+  GLint internalFormat = GL_R8;
+  GLenum formatEnum    = GL_RED;
+  std::size_t bpp      = 1;
+  if (TextureFormat::RGBA8 == format) {
+    internalFormat = GL_RGBA8;
+    formatEnum     = GL_RGBA;
+    bpp            = 4;
+  } else if (TextureFormat::R8 != format) {
     throw std::invalid_argument("DeviceGL: unsupported texture format");
   }
 
@@ -398,6 +405,7 @@ TextureHandle DeviceGL::createTextureArray(const int size, const int layers,
   record.size   = size;
   record.layers = layers;
   record.levels = std::max(1, levels);
+  record.format = format;
   api.GenTextures(1, &record.name);
   api.ActiveTexture(GL_TEXTURE0);
   api.BindTexture(GL_TEXTURE_2D_ARRAY, record.name);
@@ -420,12 +428,12 @@ TextureHandle DeviceGL::createTextureArray(const int size, const int layers,
   for (int level = 0; level < record.levels; level++) {
     const auto extent = std::max(1, size >> level);
     const std::vector<std::uint8_t> zeros(
-        static_cast<std::size_t>(extent) * extent * layers, 0);
-    api.TexImage3D(GL_TEXTURE_2D_ARRAY, level, GL_R8, extent, extent, layers, 0,
-                   GL_RED, GL_UNSIGNED_BYTE, zeros.data());
+        static_cast<std::size_t>(extent) * extent * layers * bpp, 0);
+    api.TexImage3D(GL_TEXTURE_2D_ARRAY, level, internalFormat, extent, extent,
+                   layers, 0, formatEnum, GL_UNSIGNED_BYTE, zeros.data());
   }
   api.BindTexture(GL_TEXTURE_2D_ARRAY, 0);
-  diagnostics.raiseIfError("creating the glyph atlas");
+  diagnostics.raiseIfError("creating texture array");
 
   const TextureHandle handle{nextHandleId++};
   textures.emplace(handle.id, record);
@@ -464,17 +472,20 @@ void DeviceGL::updateTextureLayer(const TextureHandle texture, const int layer,
     throw std::invalid_argument(
         "DeviceGL::updateTextureLayer: unknown texture");
   }
+  const auto bpp = (TextureFormat::RGBA8 == it->second.format) ? 4U : 1U;
   const auto expected =
-      static_cast<std::size_t>(width) * static_cast<std::size_t>(height);
+      static_cast<std::size_t>(width) * static_cast<std::size_t>(height) * bpp;
   if (data.size() < expected) {
     throw std::invalid_argument(
         "DeviceGL::updateTextureLayer: data shorter than the given rectangle");
   }
 
+  const GLenum formatEnum =
+      (TextureFormat::RGBA8 == it->second.format) ? GL_RGBA : GL_RED;
   api.ActiveTexture(GL_TEXTURE0);
   api.BindTexture(GL_TEXTURE_2D_ARRAY, it->second.name);
-  // Glyph rows are tightly packed rather than padded to the default 4-byte
-  // row alignment.
+  // Glyph/image rows are tightly packed rather than padded to the default
+  // 4-byte row alignment.
   api.PixelStorei(GL_UNPACK_ALIGNMENT, 1);
 
   if (pboStream && data.size() <= pboStream->capacityBytes()) {
@@ -484,13 +495,13 @@ void DeviceGL::updateTextureLayer(const TextureHandle texture, const int layer,
 
     api.BindBuffer(GL_PIXEL_UNPACK_BUFFER, pboStream->id());
     api.TexSubImage3D(GL_TEXTURE_2D_ARRAY, 0, xOffset, yOffset, layer, width,
-                      height, 1, GL_RED, GL_UNSIGNED_BYTE,
+                      height, 1, formatEnum, GL_UNSIGNED_BYTE,
                       // NOLINTNEXTLINE(performance-no-int-to-ptr)
                       reinterpret_cast<const void *>(chunk.offset));
     api.BindBuffer(GL_PIXEL_UNPACK_BUFFER, 0);
   } else {
     api.TexSubImage3D(GL_TEXTURE_2D_ARRAY, 0, xOffset, yOffset, layer, width,
-                      height, 1, GL_RED, GL_UNSIGNED_BYTE, data.data());
+                      height, 1, formatEnum, GL_UNSIGNED_BYTE, data.data());
   }
 
   api.PixelStorei(GL_UNPACK_ALIGNMENT, 4);

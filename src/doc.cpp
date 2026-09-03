@@ -954,6 +954,27 @@ Doc::Doc(const RendererRef &renderer, render::RenderDevice *device,
   pool->reserveCapacity(rowsFor(text.size()));
 }
 
+void Doc::load(const gleditor::TextSource &source) {
+  docName         = source.name();
+  text            = source.text();
+  forcedBreaks    = source.forcedBreaks();
+  decoratedRanges = source.decoratedRanges();
+
+  std::size_t badOffset = 0;
+  if (!gleditor::validateUtf8(text, badOffset)) {
+    text = gleditor::makeValidUtf8(text);
+  }
+
+  pool->reserveCapacity(rowsFor(text.size()));
+  pages.clear();
+  {
+    std::lock_guard lock(shapingMutex);
+    pendingShapings.clear();
+  }
+  edits++;
+  makePages();
+}
+
 void Doc::makePages([[maybe_unused]] RenderState &state) { makePages(); }
 
 void Doc::makePages() {

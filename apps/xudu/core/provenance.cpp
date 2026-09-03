@@ -711,4 +711,86 @@ std::optional<Provenance> parseProvenance(const std::string_view text) {
   return out;
 }
 
+void AuthorCatalog::recordWork(std::string infoHash,
+                               const SignedProvenance &signedProv) {
+  const auto prov = parseProvenance(signedProv.yaml);
+  if (!prov) {
+    return;
+  }
+
+  PublishedWork work;
+  work.infoHash       = std::move(infoHash);
+  work.title          = prov->title;
+  work.publisherKey   = prov->publisher;
+  work.authorName     = prov->author.name;
+  work.authorEmail    = prov->author.email;
+  work.gpgFingerprint = prov->author.gpgKey;
+  work.contentLength  = prov->contentLength;
+  work.contentSha256  = prov->contentDigest;
+  work.published      = prov->published;
+
+  for (const auto &[k, v] : prov->extra) {
+    if ("mime_type" == k) {
+      work.mimeType = v;
+    } else if ("transcopyright" == k) {
+      work.transcopyrightPermitted = ("true" == v || "1" == v || !v.empty());
+    } else if ("rights" == k) {
+      work.rights = v;
+    }
+  }
+
+  std::erase_if(works_, [&](const PublishedWork &w) {
+    return (!work.infoHash.empty() && w.infoHash == work.infoHash) ||
+           (!work.contentSha256.empty() &&
+            w.contentSha256 == work.contentSha256);
+  });
+
+  works_.push_back(std::move(work));
+}
+
+std::vector<PublishedWork>
+AuthorCatalog::worksByAuthor(const std::string_view authorOrEmail) const {
+  std::vector<PublishedWork> result;
+  for (const auto &w : works_) {
+    if (w.authorName.contains(authorOrEmail) ||
+        w.authorEmail.contains(authorOrEmail)) {
+      result.push_back(w);
+    }
+  }
+  return result;
+}
+
+std::vector<PublishedWork>
+AuthorCatalog::worksByGpgKey(const std::string_view fingerprint) const {
+  std::vector<PublishedWork> result;
+  for (const auto &w : works_) {
+    if (!w.gpgFingerprint.empty() &&
+        (w.gpgFingerprint.ends_with(fingerprint) ||
+         fingerprint.ends_with(w.gpgFingerprint))) {
+      result.push_back(w);
+    }
+  }
+  return result;
+}
+
+std::optional<PublishedWork>
+AuthorCatalog::workForContentHash(const std::string_view sha256) const {
+  for (const auto &w : works_) {
+    if (w.contentSha256 == sha256) {
+      return w;
+    }
+  }
+  return std::nullopt;
+}
+
+std::optional<PublishedWork>
+AuthorCatalog::workForTorrent(const std::string_view infoHash) const {
+  for (const auto &w : works_) {
+    if (w.infoHash == infoHash) {
+      return w;
+    }
+  }
+  return std::nullopt;
+}
+
 } // namespace xudu

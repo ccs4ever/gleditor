@@ -8,6 +8,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <filesystem>
 #include <format>
 #include <iostream>
 #include <utility>
@@ -60,6 +61,8 @@ void ZigzagVisualizer::deviceReady(
   beams_ = std::make_unique<gleditor::Beams>(&device);
   beams_->createPipeline(gleditor::assetPath("shaders"),
                          gleditor::assetPath("shaders/vulkan"), true);
+
+  imageCache_ = std::make_unique<gleditor::ImageCache>(&device);
 }
 
 bool ZigzagVisualizer::busy() const {
@@ -367,6 +370,9 @@ void ZigzagVisualizer::rebuildActiveViewTopology() {
         .id          = accursed_cell_focus_,
         .text        = focus ? focus->text_data : "",
         .type        = focus ? focus->type : "",
+        .mime_type   = focus ? focus->mime_type : "",
+        .media_path  = focus ? focus->media_path : "",
+        .is_image    = focus && focus->isImage(),
         .has_preflet = focus && focus->preflet.has_value(),
     };
   }
@@ -388,6 +394,9 @@ void ZigzagVisualizer::rebuildActiveViewTopology() {
           .id          = childId,
           .text        = child ? child->text_data : "",
           .type        = child ? child->type : "",
+          .mime_type   = child ? child->mime_type : "",
+          .media_path  = child ? child->media_path : "",
+          .is_image    = child && child->isImage(),
           .has_preflet = child && child->preflet.has_value(),
           .current_pos = visible_cells_[parentId].current_pos,
       };
@@ -646,9 +655,10 @@ void ZigzagVisualizer::drawFrame(gleditor::FrameContext &ctx) {
     worldCanvas_->setTag(render::tagKindOverlay,
                          static_cast<std::uint32_t>(id));
 
-    const bool isFocus     = (id == accursed_cell_focus_);
-    const float nodeWidth  = isFocus ? 160.0F : 120.0F;
-    const float nodeHeight = isFocus ? 70.0F : 50.0F;
+    const bool isFocus    = (id == accursed_cell_focus_);
+    const float nodeWidth = isFocus ? 160.0F : 120.0F;
+    const float nodeHeight =
+        cell.is_image ? (isFocus ? 120.0F : 90.0F) : (isFocus ? 70.0F : 50.0F);
 
     const float left   = cell.current_pos.x - (nodeWidth / 2.0F);
     const float bottom = cell.current_pos.y - (nodeHeight / 2.0F);
@@ -664,6 +674,31 @@ void ZigzagVisualizer::drawFrame(gleditor::FrameContext &ctx) {
 
     // Node Box Body
     worldCanvas_->addRect(left, bottom, nodeWidth, nodeHeight, bgCol);
+
+    // Image Preview (if image cell with media path)
+    if (cell.is_image && !cell.media_path.empty() && imageCache_) {
+      std::string resolvedPath = cell.media_path;
+      if (!current_slice_path_.empty() && !resolvedPath.starts_with("/")) {
+        const auto parent =
+            std::filesystem::path(current_slice_path_).parent_path();
+        if (!parent.empty()) {
+          resolvedPath = (parent / resolvedPath).string();
+        }
+      }
+      auto imgRes = imageCache_->find(resolvedPath);
+      if (!imgRes) {
+        imgRes = imageCache_->loadFile(resolvedPath);
+      }
+      if (imgRes && imgRes->valid()) {
+        const float imgMargin = 6.0F;
+        const float imgW      = nodeWidth - (imgMargin * 2.0F);
+        const float imgH      = isFocus ? 60.0F : 40.0F;
+        const float imgLeft   = left + imgMargin;
+        const float imgBottom = bottom + 24.0F;
+        worldCanvas_->addImage(imgLeft, imgBottom, imgW, imgH, *imgRes,
+                               packRgba(1.0F, 1.0F, 1.0F, cell.current_alpha));
+      }
+    }
 
     // Node Border
     constexpr float borderThick = 2.0F;
@@ -683,14 +718,16 @@ void ZigzagVisualizer::drawFrame(gleditor::FrameContext &ctx) {
 
     // Label Text
     const std::string textPreview = shortenText(cell.text, isFocus ? 18 : 12);
-    worldCanvas_->addText(ctx.state, left + 6.0F, bottom + nodeHeight - 26.0F,
+    worldCanvas_->addText(ctx.state, left + 6.0F, bottom + nodeHeight - 24.0F,
                           textPreview, textCol, bgCol);
 
-    // Badges: type & preflet
-    if (!cell.type.empty() || cell.has_preflet) {
+    // Badges: type, mime & preflet
+    if (!cell.type.empty() || !cell.mime_type.empty() || cell.has_preflet) {
       std::string badge;
       if (!cell.type.empty()) {
         badge += "[" + cell.type + "] ";
+      } else if (!cell.mime_type.empty()) {
+        badge += "<" + cell.mime_type + "> ";
       }
       if (cell.has_preflet) {
         badge += "-> [preflet]";
@@ -724,8 +761,13 @@ void ZigzagVisualizer::drawFrame(gleditor::FrameContext &ctx) {
   // Focus Status
   std::string focusLabel = "Focus: none";
   if (const zzCell *const cur = findCell(accursed_cell_focus_)) {
-    focusLabel = std::format("Focus: #{} \"{}\" {}", cur->id, cur->text_data,
-                             cur->type.empty() ? "" : "[" + cur->type + "]");
+    std::string mediaTag;
+    if (!cur->mime_type.empty()) {
+      mediaTag = std::format(" <{}>", cur->mime_type);
+    }
+    focusLabel =
+        std::format("Focus: #{}{} \"{}\" {}", cur->id, mediaTag, cur->text_data,
+                    cur->type.empty() ? "" : "[" + cur->type + "]");
     if (cur->preflet) {
       focusLabel += " -> (Preflet link attached)";
     }

@@ -5,6 +5,7 @@
 #include <gmock/gmock.h>
 #include <gtest/gtest.h>
 
+#include <cstring>
 #include <filesystem>
 #include <fstream>
 #include <string>
@@ -69,6 +70,23 @@ TEST(SegmentedPrimediaSpoolTest, multiSegmentContinuityAcrossSeals) {
   EXPECT_EQ(spool.readView(fullSpan), text1 + text2);
 
   std::filesystem::remove_all(tempDir);
+}
+
+TEST(SegmentedPrimediaSpoolTest, appendAndReadBinaryMediaPayload) {
+  SegmentedPrimediaSpool spool;
+  const std::vector<std::uint8_t> pngBytes = {
+      0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A,
+      0x00, 0x00, 0x00, 0x0D, 0x49, 0x48, 0x44, 0x52,
+  };
+
+  const auto span = spool.append(pngBytes);
+  EXPECT_EQ(span.start, 0U);
+  EXPECT_EQ(span.length, pngBytes.size());
+  EXPECT_EQ(spool.size(), pngBytes.size());
+
+  const std::string readBack = spool.read(span);
+  ASSERT_EQ(readBack.size(), pngBytes.size());
+  EXPECT_EQ(std::memcmp(readBack.data(), pngBytes.data(), pngBytes.size()), 0);
 }
 
 } // namespace

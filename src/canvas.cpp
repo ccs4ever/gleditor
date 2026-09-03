@@ -15,6 +15,7 @@
 
 #include <gleditor/doc.hpp>
 #include <gleditor/glyphcache/cache.hpp>
+#include <gleditor/image_cache.hpp>
 #include <gleditor/render/device.hpp>
 #include <gleditor/render_state.hpp>
 #include <gleditor/text/font.hpp>
@@ -118,6 +119,29 @@ void Canvas::addLine(const float fromX, const float fromY, const float toX,
   // axis-aligned quad gets.
   addRect(minX - (thickness / 2.0F), minY - (thickness / 2.0F),
           std::max(spanX, thickness), std::max(spanY, thickness), colour);
+}
+
+void Canvas::addImage(const float left, const float bottom, const float width,
+                      const float height, const ImageResource &image,
+                      const std::uint32_t tint) {
+  if (width <= 0.0F || height <= 0.0F || !image.valid()) {
+    return;
+  }
+  const float atlasExtent = static_cast<float>(Doc::VBORow::maxQuadExtent);
+  addImage(left, bottom, width, height, image.layer, image.u0 * atlasExtent,
+           image.v0 * atlasExtent, (image.u1 - image.u0) * atlasExtent,
+           (image.v1 - image.v0) * atlasExtent, tint);
+}
+
+void Canvas::addImage(const float left, const float bottom, const float width,
+                      const float height, const int layer, const float texX,
+                      const float texY, const float /*texW*/,
+                      const float /*texH*/, const std::uint32_t tint) {
+  if (width <= 0.0F || height <= 0.0F || layer < 0) {
+    return;
+  }
+  pushQuad(left + (width / 2.0F), bottom + (height / 2.0F), width, height, tint,
+           0x00000000U, static_cast<std::uint32_t>(layer), texX, texY, false);
 }
 
 TextMetrics Canvas::measureText(const std::string_view utf8) const {

@@ -50,9 +50,28 @@ struct Preflet {
 struct zzCell {
   CellID id = 0;
   std::string text_data;
-  std::string type; // Category e.g. "chapter", "detail", "note"
+  std::string type; // Category e.g. "chapter", "detail", "note", "image"
+  std::string
+      mime_type; // MIME type e.g. "image/png", "image/jpeg", "text/plain"
+  std::string media_path;              // Relative or absolute file path or URI
+  std::vector<std::uint8_t> blob_data; // Optional inline binary payload
   std::unordered_map<DimID, LinkPairs> dimensions;
   std::optional<Preflet> preflet;
+
+  [[nodiscard]] bool isMedia() const {
+    return (!mime_type.empty() && !mime_type.starts_with("text/")) ||
+           !media_path.empty() || !blob_data.empty() || type == "image" ||
+           type == "media";
+  }
+
+  [[nodiscard]] bool isImage() const {
+    return mime_type.starts_with("image/") || type == "image" ||
+           (!media_path.empty() &&
+            (media_path.ends_with(".png") || media_path.ends_with(".jpg") ||
+             media_path.ends_with(".jpeg") || media_path.ends_with(".webp") ||
+             media_path.ends_with(".gif") || media_path.ends_with(".svg") ||
+             media_path.ends_with(".bmp")));
+  }
 };
 
 struct ViewAxisBinding {

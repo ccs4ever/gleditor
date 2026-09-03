@@ -92,7 +92,7 @@ endif
 # includes -- is vendored rather than pulled from a package whose layout on
 # macOS is not this project's to depend on.
 GL_CFLAGS :=
-PKGS := freetype2 harfbuzz fribidi libunibreak fontconfig $(SDL_PKG)
+PKGS := freetype2 harfbuzz fribidi libunibreak fontconfig libmagic openssl $(SDL_PKG)
 ifeq ($(shell pkg-config --exists gl && echo 1),1)
 PKGS += gl
 else ifeq ($(shell uname -s 2>/dev/null),Darwin)
@@ -147,7 +147,7 @@ TEST_PKGS := gmock_main
 # whose documents cannot leave the machine that wrote them, which is the one
 # thing this program is for. Better to fail at configure time than to ship a
 # xanadoc editor that quietly cannot publish.
-XUDU_PKGS := libtorrent-rasterbar openssl lmdb
+XUDU_PKGS := libtorrent-rasterbar openssl lmdb libmagic
 ifneq (,$(filter-out $(NO_SDL_GOALS),$(or $(MAKECMDGOALS),all)))
 ifneq ($(shell pkg-config --exists libtorrent-rasterbar && echo 1),1)
 $(error libtorrent-rasterbar was not found by pkg-config. It is required: \
@@ -326,7 +326,7 @@ override LDFLAGS += $(DEBUG_OPTS) $(findstring $(STATIC),-static)
 #LDFLAGS += -v -stdlib=libc++ -fexperimental-library
 LIBS := $(shell pkg-config $(STATIC) --libs $(PKGS))
 XUDU_LIBS := $(shell pkg-config $(STATIC) --libs $(XUDU_PKGS)) -lryml
-ZIGZAG_PKGS := libtorrent-rasterbar openssl lmdb
+ZIGZAG_PKGS := libtorrent-rasterbar openssl lmdb libmagic
 ZIGZAG_LIBS := $(shell pkg-config $(STATIC) --libs $(ZIGZAG_PKGS)) -lryml
 
 # glslangValidator is the traditional name and glslang the current one; which
@@ -620,7 +620,7 @@ $(OBJDIR)/gleditor_test: $(LIB_TEST_OBJS) $(LIBLINK)
 # merely asserted: if a rule about versions, links or content addresses ever
 # needed a renderer, this would stop linking.
 xudu_test: $(OBJDIR)/xudu_test
-$(OBJDIR)/xudu_test: $(XUDU_TEST_OBJS) $(XUDU_CORE_OBJS)
+$(OBJDIR)/xudu_test: $(XUDU_TEST_OBJS) $(XUDU_CORE_OBJS) $(OBJDIR)/src/mimetype.o $(OBJDIR)/src/source_grounder.o
 	$(CXX) $(LDFLAGS) -o $@ $^ $(XUDU_LIBS) $(TEST_LIBS)
 
 zigzag_test: $(OBJDIR)/zigzag_test
@@ -630,14 +630,14 @@ $(OBJDIR)/zigzag_test: $(ZIGZAG_TEST_OBJS) $(filter-out $(OBJDIR)/apps/zigzag/ma
 
 .PHONY: fuzz fuzz_binary_ops fuzz_link_package
 fuzz_binary_ops: $(OBJDIR)/fuzz_binary_ops
-$(OBJDIR)/fuzz_binary_ops: tests/fuzz/fuzz_binary_ops.cpp $(XUDU_CORE_OBJS)
+$(OBJDIR)/fuzz_binary_ops: tests/fuzz/fuzz_binary_ops.cpp $(XUDU_CORE_OBJS) $(OBJDIR)/src/mimetype.o $(OBJDIR)/src/source_grounder.o
 	@$(MKDIR) -p $(@D)
-	$(CXX) -fsanitize=fuzzer,address,undefined $(CXXFLAGS) $< $(XUDU_CORE_OBJS) $(XUDU_LIBS) -o $@
+	$(CXX) -fsanitize=fuzzer,address,undefined $(CXXFLAGS) $< $(XUDU_CORE_OBJS) $(OBJDIR)/src/mimetype.o $(OBJDIR)/src/source_grounder.o $(XUDU_LIBS) -o $@
 
 fuzz_link_package: $(OBJDIR)/fuzz_link_package
-$(OBJDIR)/fuzz_link_package: tests/fuzz/fuzz_link_package.cpp $(XUDU_CORE_OBJS)
+$(OBJDIR)/fuzz_link_package: tests/fuzz/fuzz_link_package.cpp $(XUDU_CORE_OBJS) $(OBJDIR)/src/mimetype.o $(OBJDIR)/src/source_grounder.o
 	@$(MKDIR) -p $(@D)
-	$(CXX) -fsanitize=fuzzer,address,undefined $(CXXFLAGS) $< $(XUDU_CORE_OBJS) $(XUDU_LIBS) -o $@
+	$(CXX) -fsanitize=fuzzer,address,undefined $(CXXFLAGS) $< $(XUDU_CORE_OBJS) $(OBJDIR)/src/mimetype.o $(OBJDIR)/src/source_grounder.o $(XUDU_LIBS) -o $@
 
 fuzz: fuzz_binary_ops fuzz_link_package
 
@@ -647,7 +647,7 @@ fuzz: fuzz_binary_ops fuzz_link_package
 # namespace of its own.
 .PHONY: xudu-swarm-peer
 xudu-swarm-peer: $(OBJDIR)/xudu-swarm-peer
-$(OBJDIR)/xudu-swarm-peer: $(OBJDIR)/tools/xudu-swarm-peer.o $(XUDU_CORE_OBJS)
+$(OBJDIR)/xudu-swarm-peer: $(OBJDIR)/tools/xudu-swarm-peer.o $(XUDU_CORE_OBJS) $(OBJDIR)/src/mimetype.o $(OBJDIR)/src/source_grounder.o
 	$(CXX) $(LDFLAGS) -o $@ $^ $(XUDU_LIBS)
 
 # What the loader pays to lay a page out, against the two ways of asking Pango
