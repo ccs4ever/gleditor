@@ -5,6 +5,7 @@
 #include "zzstructure_loader.hpp"
 #include "zzcore.hpp"
 
+#include <gleditor/mimetype.hpp>
 #include <ryml.hpp>
 #include <ryml_std.hpp>
 
@@ -119,6 +120,25 @@ zzCell readCell(const ryml::ConstNodeRef &cellNode,
   }
   if (cellNode.has_child("type") && cellNode["type"].has_val()) {
     cellNode["type"] >> cell.type;
+  }
+  if (cellNode.has_child("mime_type") && cellNode["mime_type"].has_val()) {
+    cellNode["mime_type"] >> cell.mime_type;
+  }
+  if (cellNode.has_child("media_path") && cellNode["media_path"].has_val()) {
+    cellNode["media_path"] >> cell.media_path;
+  } else if (cellNode.has_child("image_path") &&
+             cellNode["image_path"].has_val()) {
+    cellNode["image_path"] >> cell.media_path;
+  } else if (cellNode.has_child("data_path") &&
+             cellNode["data_path"].has_val()) {
+    cellNode["data_path"] >> cell.media_path;
+  }
+
+  if (cell.mime_type.empty() && !cell.media_path.empty()) {
+    const auto detected = gleditor::MimeDetector::detectFile(cell.media_path);
+    if (!detected.empty() && detected != gleditor::MimeType::OctetStream) {
+      cell.mime_type = detected.essence();
+    }
   }
 
   if (!cellNode.has_child("dimensions")) {

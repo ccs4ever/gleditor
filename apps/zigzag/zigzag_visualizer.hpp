@@ -28,6 +28,7 @@
 #include <gleditor/beams.hpp>
 #include <gleditor/canvas.hpp>
 #include <gleditor/frame_contributor.hpp>
+#include <gleditor/image_cache.hpp>
 #include <gleditor/pick_observer.hpp>
 #include <gleditor/renderer.hpp>
 
@@ -37,6 +38,9 @@ struct RenderStateCell {
   CellID id{};
   std::string text;
   std::string type;
+  std::string mime_type;
+  std::string media_path;
+  bool is_image{false};
   bool has_preflet{false};
   bool is_clone{false};
   CellID clone_master_id{0};
@@ -186,6 +190,7 @@ private:
   std::unique_ptr<gleditor::Canvas> worldCanvas_;
   std::unique_ptr<gleditor::Canvas> hudCanvas_;
   std::unique_ptr<gleditor::Beams> beams_;
+  std::unique_ptr<gleditor::ImageCache> imageCache_;
 };
 
 } // namespace zigzag

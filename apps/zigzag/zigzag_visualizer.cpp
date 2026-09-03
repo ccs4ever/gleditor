@@ -8,6 +8,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <filesystem>
 #include <format>
 #include <iostream>
 #include <utility>
@@ -60,6 +61,8 @@ void ZigzagVisualizer::deviceReady(
   beams_ = std::make_unique<gleditor::Beams>(&device);
   beams_->createPipeline(gleditor::assetPath("shaders"),
                          gleditor::assetPath("shaders/vulkan"), true);
+
+  imageCache_ = std::make_unique<gleditor::ImageCache>(&device);
 }
 
 bool ZigzagVisualizer::busy() const {
@@ -373,6 +376,9 @@ void ZigzagVisualizer::rebuildActiveViewTopology() {
         .id              = accursed_cell_focus_,
         .text            = std::string{focusText},
         .type            = focus ? focus->type : "",
+        .mime_type       = focus ? focus->mime_type : "",
+        .media_path      = focus ? focus->media_path : "",
+        .is_image        = focus && focus->isImage(),
         .has_preflet     = focus && focus->preflet.has_value(),
         .is_clone        = focusIsClone,
         .clone_master_id = focusMaster,
@@ -404,6 +410,9 @@ void ZigzagVisualizer::rebuildActiveViewTopology() {
           .id              = childId,
           .text            = std::string{childText},
           .type            = child ? child->type : "",
+          .mime_type       = child ? child->mime_type : "",
+          .media_path      = child ? child->media_path : "",
+          .is_image        = child && child->isImage(),
           .has_preflet     = child && child->preflet.has_value(),
           .is_clone        = childIsClone,
           .clone_master_id = childMaster,
@@ -686,13 +695,19 @@ void ZigzagVisualizer::drawFrame(gleditor::FrameContext &ctx) {
     worldCanvas_->setTag(render::tagKindOverlay,
                          static_cast<std::uint32_t>(id));
 
-    const bool isFocus     = (id == accursed_cell_focus_);
-    const float nodeWidth  = (view_mode_ == ViewMode::CellContent)
-                                 ? (isFocus ? 260.0F : 200.0F)
-                                 : (isFocus ? 140.0F : 110.0F);
-    const float nodeHeight = (view_mode_ == ViewMode::CellContent)
-                                 ? (isFocus ? 95.0F : 70.0F)
-                                 : (isFocus ? 54.0F : 45.0F);
+    const bool isFocus    = (id == accursed_cell_focus_);
+    const float nodeWidth = (view_mode_ == ViewMode::CellContent)
+                                ? (isFocus ? 260.0F : 200.0F)
+                                : (isFocus ? 140.0F : 110.0F);
+    // Extra vertical room for the inline image preview below, on top of
+    // whichever view mode's height already applies -- the same +50/+40px an
+    // image cell got before CellContent mode existed, carried forward rather
+    // than only honoured in Topology mode.
+    const float imageBonus = cell.is_image ? (isFocus ? 50.0F : 40.0F) : 0.0F;
+    const float nodeHeight =
+        ((view_mode_ == ViewMode::CellContent) ? (isFocus ? 95.0F : 70.0F)
+                                               : (isFocus ? 54.0F : 45.0F)) +
+        imageBonus;
 
     const float left   = cell.current_pos.x - (nodeWidth / 2.0F);
     const float bottom = cell.current_pos.y - (nodeHeight / 2.0F);
@@ -708,6 +723,31 @@ void ZigzagVisualizer::drawFrame(gleditor::FrameContext &ctx) {
 
     // Node Box Body
     worldCanvas_->addRect(left, bottom, nodeWidth, nodeHeight, bgCol);
+
+    // Image Preview (if image cell with media path)
+    if (cell.is_image && !cell.media_path.empty() && imageCache_) {
+      std::string resolvedPath = cell.media_path;
+      if (!current_slice_path_.empty() && !resolvedPath.starts_with("/")) {
+        const auto parent =
+            std::filesystem::path(current_slice_path_).parent_path();
+        if (!parent.empty()) {
+          resolvedPath = (parent / resolvedPath).string();
+        }
+      }
+      auto imgRes = imageCache_->find(resolvedPath);
+      if (!imgRes) {
+        imgRes = imageCache_->loadFile(resolvedPath);
+      }
+      if (imgRes && imgRes->valid()) {
+        const float imgMargin = 6.0F;
+        const float imgW      = nodeWidth - (imgMargin * 2.0F);
+        const float imgH      = isFocus ? 60.0F : 40.0F;
+        const float imgLeft   = left + imgMargin;
+        const float imgBottom = bottom + 24.0F;
+        worldCanvas_->addImage(imgLeft, imgBottom, imgW, imgH, *imgRes,
+                               packRgba(1.0F, 1.0F, 1.0F, cell.current_alpha));
+      }
+    }
 
     // Node Border
     constexpr float borderThick = 2.0F;
@@ -730,14 +770,17 @@ void ZigzagVisualizer::drawFrame(gleditor::FrameContext &ctx) {
                                         ? (isFocus ? 48 : 32)
                                         : (isFocus ? 16 : 10);
     const std::string textPreview = shortenText(cell.text, maxTextLen);
-    worldCanvas_->addText(ctx.state, left + 6.0F, bottom + nodeHeight - 26.0F,
+    worldCanvas_->addText(ctx.state, left + 6.0F, bottom + nodeHeight - 24.0F,
                           textPreview, textCol, bgCol);
 
-    // Badges: type, clone, & preflet
-    if (!cell.type.empty() || cell.is_clone || cell.has_preflet) {
+    // Badges: type, mime, clone, & preflet
+    if (!cell.type.empty() || !cell.mime_type.empty() || cell.is_clone ||
+        cell.has_preflet) {
       std::string badge;
       if (!cell.type.empty()) {
         badge += "[" + cell.type + "] ";
+      } else if (!cell.mime_type.empty()) {
+        badge += "<" + cell.mime_type + "> ";
       }
       if (cell.is_clone) {
         badge += std::format("[clone #{}] ", cell.clone_master_id);
@@ -774,8 +817,13 @@ void ZigzagVisualizer::drawFrame(gleditor::FrameContext &ctx) {
   if (const zzCell *const cur = findCell(accursed_cell_focus_)) {
     const auto effText =
         zzcore::getEffectiveCellText(space_, accursed_cell_focus_);
-    focusLabel = std::format("Focus: #{} \"{}\" {}", cur->id, effText,
-                             cur->type.empty() ? "" : "[" + cur->type + "]");
+    std::string mediaTag;
+    if (!cur->mime_type.empty()) {
+      mediaTag = std::format(" <{}>", cur->mime_type);
+    }
+    focusLabel =
+        std::format("Focus: #{}{} \"{}\" {}", cur->id, mediaTag, effText,
+                    cur->type.empty() ? "" : "[" + cur->type + "]");
     if (zzcore::isCloneCell(space_, accursed_cell_focus_)) {
       focusLabel +=
           std::format(" [clone of #{}]",

@@ -7,6 +7,7 @@
 
 #include <cstdint>
 #include <filesystem>
+#include <span>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -44,6 +45,14 @@ public:
    * @return The canonical PrimediaSpan where the bytes were recorded.
    */
   PrimediaSpan append(std::string_view bytes);
+
+  /**
+   * @brief Append binary payload bytes to the active primedia segment.
+   */
+  PrimediaSpan append(const std::span<const std::uint8_t> bytes) {
+    return append(std::string_view(reinterpret_cast<const char *>(bytes.data()),
+                                   bytes.size()));
+  }
 
   /**
    * @brief Read a span of content as a copy.

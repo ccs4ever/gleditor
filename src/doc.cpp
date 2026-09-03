@@ -992,6 +992,9 @@ void Doc::load(const gleditor::TextSource &source) {
   if (!gleditor::validateUtf8(text, badOffset)) {
     text = gleditor::makeValidUtf8(text);
   }
+  // Splice first, as in insert()/erase(): the document is the source of
+  // truth and must be correct before anything asynchronous looks at it.
+  edits++;
 
   pages.clear();
   liveLayouts.clear();
@@ -999,6 +1002,11 @@ void Doc::load(const gleditor::TextSource &source) {
     std::lock_guard lock(shapingMutex);
     pendingShapings.clear();
   }
+  // A load replaces the document wholesale, so whatever the previous content
+  // had already finished laying out says nothing about this one: without
+  // resetting these, isFullyLoaded() would keep answering as of the old text,
+  // and anything (LinkBeams::drawFrame among them) waiting on the new content
+  // to finish paginating would never see it become pending.
   fullyLoaded = false;
   shapingComplete.store(false, std::memory_order_release);
   pool->reserveCapacity(rowsFor(text.size()));

@@ -76,7 +76,8 @@ enum class BufferKind : std::uint8_t {
  * of per-backend swizzling.
  */
 enum class TextureFormat : std::uint8_t {
-  R8, ///< One unsigned normalised byte per texel.
+  R8,    ///< One unsigned normalised byte per texel (glyph coverage).
+  RGBA8, ///< Four unsigned normalised bytes per texel (full-colour images).
 };
 
 /**

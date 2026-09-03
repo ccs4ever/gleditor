@@ -255,9 +255,30 @@ struct SealedScroll {
   /// The authorship record sealed in with the content, and its signature.
   SignedProvenance provenance;
 };
+
+struct StagedMediaTorrent {
+  InfoHash hash;
+  std::string torrentFile;
+  std::string mediaPath;
+  std::string mimeType;
+  std::uint64_t length{};
+  SignedProvenance provenance;
+};
+
+struct CompoundPublication {
+  SealedScroll mainSeal;
+  std::vector<StagedMediaTorrent> mediaTorrents;
+};
+
 [[nodiscard]] SealedScroll sealLocalSpool(
     const Store &store, const MutableKeys &keys, const std::string &salt,
     const std::string &into, const SignedProvenance &provenance,
+    const Scroll &priorScroll = {}, std::uint32_t opsAlreadySealed = 0);
+
+[[nodiscard]] CompoundPublication sealCompound(
+    const Store &store, const MutableKeys &keys, const std::string &salt,
+    const std::string &into, const SignedProvenance &provenance,
+    const std::vector<std::filesystem::path> &stagedMediaFiles,
     const Scroll &priorScroll = {}, std::uint32_t opsAlreadySealed = 0);
 
 /**

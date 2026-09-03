@@ -13,6 +13,7 @@
 
 #include <filesystem>
 #include <fstream>
+#include <gleditor/mimetype.hpp>
 
 #include "bencode.hpp"
 #include "binary_ops.hpp"
@@ -697,6 +698,119 @@ SealedScroll sealLocalSpool(const Store &store, const MutableKeys &keys,
     }
   }
   return sealed;
+}
+
+CompoundPublication
+sealCompound(const Store &store, const MutableKeys &keys,
+             const std::string &salt, const std::string &into,
+             const SignedProvenance &provenance,
+             const std::vector<std::filesystem::path> &stagedMediaFiles,
+             const Scroll &priorScroll, const std::uint32_t opsAlreadySealed) {
+  auto mainSeal = sealLocalSpool(store, keys, salt, into, provenance,
+                                 priorScroll, opsAlreadySealed);
+
+  const auto parentProv = parseProvenance(provenance.yaml);
+
+  std::vector<StagedMediaTorrent> mediaTorrents;
+  for (const auto &mediaFile : stagedMediaFiles) {
+    if (!std::filesystem::exists(mediaFile)) {
+      continue;
+    }
+
+    std::ifstream file(mediaFile, std::ios::binary);
+    if (!file.is_open()) {
+      continue;
+    }
+
+    std::string data((std::istreambuf_iterator<char>(file)),
+                     std::istreambuf_iterator<char>());
+    const auto rawName = mediaFile.filename().string();
+    std::string name   = rawName;
+    if (rawName.size() > 17 && rawName[16] == '_') {
+      bool isHex = true;
+      for (std::size_t i = 0; i < 16; ++i) {
+        if (0 == std::isxdigit(static_cast<unsigned char>(rawName[i]))) {
+          isHex = false;
+          break;
+        }
+      }
+      if (isHex) {
+        name = rawName.substr(17);
+      }
+    }
+
+    const auto detectedMime =
+        gleditor::MimeDetector::detectFile(mediaFile.string());
+    const auto fileSha256 = sha256Hex(data);
+
+    // Build inextricably linked provenance record for copyright &
+    // transcopyright
+    Provenance mediaProv;
+    if (parentProv) {
+      mediaProv.author    = parentProv->author;
+      mediaProv.published = parentProv->published;
+    }
+    mediaProv.title         = name;
+    mediaProv.salt          = name;
+    mediaProv.publisher     = keys.publicKey.hex();
+    mediaProv.contentLength = data.size();
+    mediaProv.contentDigest = fileSha256;
+    mediaProv.extra.emplace_back("mime_type", detectedMime.essence());
+    mediaProv.extra.emplace_back("transcopyright",
+                                 "perpetual-permission-to-quote-on-demand");
+    mediaProv.extra.emplace_back(
+        "rights",
+        "Transcopyright granted: perpetual permission to quote on demand in "
+        "xanadocs with attribution.");
+
+    SignedProvenance signedMediaProv;
+    signedMediaProv.yaml      = mediaProv.toYaml();
+    signedMediaProv.signature = provenance.signature;
+
+    std::vector<TorrentContent> files;
+    files.push_back(TorrentContent{name, data});
+    files.push_back(TorrentContent{provenanceFileName, signedMediaProv.yaml});
+    files.push_back(
+        TorrentContent{provenanceSigName, signedMediaProv.signature});
+
+    auto made = makeTorrent(files, name);
+
+    if (!into.empty()) {
+      const std::filesystem::path dir = std::filesystem::path(into) / name;
+      std::filesystem::create_directories(dir);
+      {
+        std::ofstream out(std::filesystem::path(into) / (name + ".torrent"),
+                          std::ios::binary);
+        out << made.file;
+      }
+      {
+        std::ofstream out(dir / name, std::ios::binary);
+        out << data;
+      }
+      {
+        std::ofstream out(dir / provenanceFileName, std::ios::binary);
+        out << signedMediaProv.yaml;
+      }
+      {
+        std::ofstream out(dir / provenanceSigName, std::ios::binary);
+        out << signedMediaProv.signature;
+      }
+    }
+
+    mediaTorrents.push_back(StagedMediaTorrent{
+        .hash        = made.hash,
+        .torrentFile = std::move(made.file),
+        .mediaPath   = mediaFile.string(),
+        .mimeType    = detectedMime.essence(),
+        .length      = data.size(),
+        .provenance  = std::move(signedMediaProv),
+    });
+  }
+
+  return CompoundPublication{
+      .mainSeal      = std::move(mainSeal),
+      .mediaTorrents = std::move(mediaTorrents),
+  };
 }
 
 namespace {

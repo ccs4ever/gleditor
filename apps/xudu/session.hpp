@@ -28,11 +28,13 @@
 #include <gleditor/canvas.hpp>
 #include <gleditor/document_observer.hpp>
 #include <gleditor/frame_contributor.hpp>
+#include <gleditor/grounding_modal.hpp>
 #include <gleditor/pick_observer.hpp>
 #include <gleditor/span_decorator.hpp>
 #include <gleditor/text_source.hpp>
 
 #include "xudu/core/config.hpp"
+#include "xudu/core/media_manager.hpp"
 #include "xudu/core/microversion.hpp"
 #include "xudu/core/publication.hpp"
 #include "xudu/core/resolver.hpp"
@@ -543,7 +545,21 @@ private:
   /// The per-user configuration, read once.
   std::optional<Config> config;
 
+  MediaManager mediaManager_;
+  gleditor::GroundingModal groundingModal_;
+
 public:
+  [[nodiscard]] MediaManager &mediaManager() { return mediaManager_; }
+  [[nodiscard]] const MediaManager &mediaManager() const {
+    return mediaManager_;
+  }
+  [[nodiscard]] gleditor::GroundingModal &groundingModal() {
+    return groundingModal_;
+  }
+  [[nodiscard]] const gleditor::GroundingModal &groundingModal() const {
+    return groundingModal_;
+  }
+
   /// Forget every open view. Used when the program replaces what is on screen
   /// wholesale, which is how travelling to another state is done.
   void clearViews() {

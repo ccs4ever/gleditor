@@ -222,6 +222,8 @@ struct ScrollSegment {
   /// Which file, and its path. Display and diagnostics; not the identity.
   std::uint32_t fileIndex{};
   std::string path;
+  /// Standard MIME type describing the underlying media format (RFC 2046).
+  std::string mimeType{"text/plain;charset=utf-8"};
 
   SegmentKind kind{SegmentKind::Plain};
   std::optional<PublishedHoleRecord> holeRecord{};
@@ -256,6 +258,8 @@ struct Scroll {
   PublicKey publisher;
   /// The salt distinguishing this scroll from others under the same key.
   std::string salt;
+  /// Default MIME type for content in this scroll.
+  std::string defaultMimeType{"text/plain;charset=utf-8"};
   /// Where the bytes are, ordered by @p at and not overlapping. May have gaps:
   /// a stretch nobody has sealed yet is simply not here, and reads as missing
   /// rather than as something else.

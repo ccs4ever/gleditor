@@ -129,6 +129,7 @@ private:
     int layers{};
     /// Mip levels allocated. One means the chain is never generated.
     int levels{1};
+    TextureFormat format{TextureFormat::R8};
   };
 
   struct PipelineRecord {

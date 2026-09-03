@@ -270,7 +270,10 @@ void DeviceVK::endOneShot(const VkCommandBuffer commands) const {
 TextureHandle DeviceVK::createTextureArray(const int size, const int layers,
                                            const TextureFormat format,
                                            const int levels) {
-  if (TextureFormat::R8 != format) {
+  VkFormat vkFormat = VK_FORMAT_R8_UNORM;
+  if (TextureFormat::RGBA8 == format) {
+    vkFormat = VK_FORMAT_R8G8B8A8_UNORM;
+  } else if (TextureFormat::R8 != format) {
     throw std::invalid_argument("DeviceVK: unsupported texture format");
   }
 
@@ -278,11 +281,12 @@ TextureHandle DeviceVK::createTextureArray(const int size, const int layers,
   record.size   = size;
   record.layers = layers;
   record.levels = std::max(1, levels);
+  record.format = format;
 
   VkImageCreateInfo info{};
   info.sType       = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
   info.imageType   = VK_IMAGE_TYPE_2D;
-  info.format      = VK_FORMAT_R8_UNORM;
+  info.format      = vkFormat;
   info.extent      = {static_cast<std::uint32_t>(size),
                       static_cast<std::uint32_t>(size), 1};
   info.mipLevels   = static_cast<std::uint32_t>(record.levels);
@@ -314,7 +318,7 @@ TextureHandle DeviceVK::createTextureArray(const int size, const int layers,
   viewInfo.sType            = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
   viewInfo.image            = record.image;
   viewInfo.viewType         = VK_IMAGE_VIEW_TYPE_2D_ARRAY;
-  viewInfo.format           = VK_FORMAT_R8_UNORM;
+  viewInfo.format           = vkFormat;
   viewInfo.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0,
                                static_cast<std::uint32_t>(record.levels), 0,
                                static_cast<std::uint32_t>(layers)};
@@ -470,8 +474,9 @@ void DeviceVK::updateTextureLayer(const TextureHandle texture, const int layer,
     throw std::invalid_argument(
         "DeviceVK::updateTextureLayer: unknown texture");
   }
+  const auto bpp = (TextureFormat::RGBA8 == it->second.format) ? 4U : 1U;
   const auto expected =
-      static_cast<std::size_t>(width) * static_cast<std::size_t>(height);
+      static_cast<std::size_t>(width) * static_cast<std::size_t>(height) * bpp;
   if (data.size() < expected) {
     throw std::invalid_argument(
         "DeviceVK::updateTextureLayer: data shorter than the given rectangle");

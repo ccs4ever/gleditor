@@ -325,12 +325,14 @@ std::optional<InputArea> Form::textArea() const {
 }
 
 void Form::open(std::string aTitle, std::string aNote,
-                std::vector<Field> aFields, Accepted onAccept) {
+                std::vector<Field> aFields, Accepted onAccept,
+                Cancelled onCancel) {
   const std::scoped_lock locker(guard);
-  title    = std::move(aTitle);
-  note     = std::move(aNote);
-  fields   = std::move(aFields);
-  accepted = std::move(onAccept);
+  title     = std::move(aTitle);
+  note      = std::move(aNote);
+  fields    = std::move(aFields);
+  accepted  = std::move(onAccept);
+  cancelled = std::move(onCancel);
   trouble.clear();
   focus    = 0;
   expanded = false;
@@ -347,13 +349,21 @@ void Form::open(std::string aTitle, std::string aNote,
 }
 
 void Form::close() {
-  const std::scoped_lock locker(guard);
-  open_    = false;
-  accepted = nullptr;
-  // Nothing is being typed into any more, so there is nowhere for an input
-  // method to put itself.
-  typingAt.reset();
-  revision++;
+  Cancelled onCancel;
+  {
+    const std::scoped_lock locker(guard);
+    open_     = false;
+    accepted  = nullptr;
+    onCancel  = std::move(cancelled);
+    cancelled = nullptr;
+    // Nothing is being typed into any more, so there is nowhere for an input
+    // method to put itself.
+    typingAt.reset();
+    revision++;
+  }
+  if (onCancel) {
+    onCancel();
+  }
 }
 
 Form::Field &Form::field() {
@@ -419,6 +429,7 @@ void Form::moveCaret(const int by) {
 
 bool Form::keyPressed(const Key key, const KeyMods mods) {
   Accepted toCall;
+  Cancelled toCancel;
   std::vector<Field> answers;
   {
     const std::scoped_lock locker(guard);
@@ -428,17 +439,20 @@ bool Form::keyPressed(const Key key, const KeyMods mods) {
     revision++;
 
     switch (key) {
-    case Key::Escape:
+    case Key::Escape: {
       if (expanded) {
         // The list closes and the form stays: escape undoes the smaller thing
         // first, which is what every list that opens like this does.
         expanded = false;
         return true;
       }
-      open_    = false;
-      accepted = nullptr;
+      open_     = false;
+      toCancel  = std::move(cancelled);
+      accepted  = nullptr;
+      cancelled = nullptr;
       typingAt.reset();
-      return true;
+      break;
+    }
 
     case Key::Return: {
       if (expanded) {
@@ -550,6 +564,9 @@ bool Form::keyPressed(const Key key, const KeyMods mods) {
     }
   }
 
+  if (toCancel) {
+    toCancel();
+  }
   if (toCall) {
     toCall(answers);
   }

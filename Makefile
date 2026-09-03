@@ -92,7 +92,7 @@ endif
 # includes -- is vendored rather than pulled from a package whose layout on
 # macOS is not this project's to depend on.
 GL_CFLAGS :=
-PKGS := freetype2 harfbuzz fribidi libunibreak fontconfig poppler-cpp libmagic libvlc $(SDL_PKG)
+PKGS := freetype2 harfbuzz fribidi libunibreak fontconfig poppler-cpp libmagic libvlc openssl $(SDL_PKG)
 ifeq ($(shell pkg-config --exists gl && echo 1),1)
 PKGS += gl
 else ifeq ($(shell uname -s 2>/dev/null),Darwin)
@@ -341,7 +341,7 @@ LIBS := $(shell pkg-config $(STATIC) --libs $(PKGS))
 XUDU_LIBS := $(shell pkg-config $(STATIC) --libs $(XUDU_PKGS)) -lryml
 # Matches XUDU_PKGS because ZIGZAG_SHARED_CORE_OBJS is XUDU_CORE_OBJS: zigzag
 # links the whole xanalogical engine, so it needs whatever that engine needs.
-ZIGZAG_PKGS := libtorrent-rasterbar openssl lmdb librnp
+ZIGZAG_PKGS := libtorrent-rasterbar openssl lmdb libmagic librnp
 ZIGZAG_LIBS := $(shell pkg-config $(STATIC) --libs $(ZIGZAG_PKGS)) -lryml
 
 # glslangValidator is the traditional name and glslang the current one; which
@@ -636,7 +636,7 @@ $(OBJDIR)/gleditor_test: $(LIB_TEST_OBJS) $(LIBLINK)
 # merely asserted: if a rule about versions, links or content addresses ever
 # needed a renderer, this would stop linking.
 xudu_test: $(OBJDIR)/xudu_test
-$(OBJDIR)/xudu_test: $(XUDU_TEST_OBJS) $(XUDU_CORE_OBJS)
+$(OBJDIR)/xudu_test: $(XUDU_TEST_OBJS) $(XUDU_CORE_OBJS) $(OBJDIR)/src/mimetype.o $(OBJDIR)/src/source_grounder.o
 	$(CXX) $(LDFLAGS) -o $@ $^ $(XUDU_LIBS) $(TEST_LIBS)
 
 zigzag_test: $(OBJDIR)/zigzag_test
@@ -654,6 +654,12 @@ $(OBJDIR)/zigzag_test: $(ZIGZAG_TEST_OBJS) $(filter-out $(OBJDIR)/apps/zigzag/ma
 FUZZ_OBJDIR   := $(OBJDIR)/fuzz
 FUZZ_FLAGS    := -fsanitize=fuzzer-no-link,address,undefined
 FUZZ_CORE_OBJS := $(patsubst %.cpp,$(FUZZ_OBJDIR)/%.o,$(XUDU_CORE_SRCS))
+# scroll.cpp and publication.cpp (both under XUDU_CORE_SRCS above) now call
+# into MimeType and SourceGrounder, which live under src/ rather than
+# apps/xudu/core/ and so are not swept up by XUDU_CORE_SRCS. Needed here for
+# the same reason xudu-swarm-peer needs them below: anything linking the
+# engine now needs these two as well.
+FUZZ_CORE_OBJS += $(FUZZ_OBJDIR)/src/mimetype.o $(FUZZ_OBJDIR)/src/source_grounder.o
 
 $(FUZZ_OBJDIR)/%.o: %.cpp
 	@$(MKDIR) -p $(@D)
@@ -684,7 +690,7 @@ fuzz: fuzz_binary_ops fuzz_link_package fuzz_identity_wire
 # namespace of its own.
 .PHONY: xudu-swarm-peer
 xudu-swarm-peer: $(OBJDIR)/xudu-swarm-peer
-$(OBJDIR)/xudu-swarm-peer: $(OBJDIR)/tools/xudu-swarm-peer.o $(XUDU_CORE_OBJS)
+$(OBJDIR)/xudu-swarm-peer: $(OBJDIR)/tools/xudu-swarm-peer.o $(XUDU_CORE_OBJS) $(OBJDIR)/src/mimetype.o $(OBJDIR)/src/source_grounder.o
 	$(CXX) $(LDFLAGS) -o $@ $^ $(XUDU_LIBS)
 
 # What the loader pays to lay a page out, against the two ways of asking Pango

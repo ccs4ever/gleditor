@@ -41,6 +41,8 @@ class RenderDevice;
 
 namespace gleditor {
 
+struct ImageResource;
+
 /// Size of a laid-out piece of text, in the pixel space a canvas draws in.
 struct TextMetrics {
   float width{};
@@ -134,6 +136,19 @@ public:
    */
   void addLine(float fromX, float fromY, float toX, float toY, float thickness,
                std::uint32_t colour);
+
+  /**
+   * @brief An image quad from an ImageResource.
+   */
+  void addImage(float left, float bottom, float width, float height,
+                const ImageResource &image, std::uint32_t tint = 0xFFFFFFFFU);
+
+  /**
+   * @brief An image quad specifying explicit atlas texel coordinates and layer.
+   */
+  void addImage(float left, float bottom, float width, float height, int layer,
+                float texX, float texY, float texW, float texH,
+                std::uint32_t tint = 0xFFFFFFFFU);
 
   /**
    * @brief Text, with the top left of the block at (@p left, @p top).

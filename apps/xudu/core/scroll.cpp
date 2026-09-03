@@ -5,6 +5,8 @@
 #include <string>
 #include <utility>
 
+#include <gleditor/mimetype.hpp>
+
 namespace xudu {
 
 const ScrollSegment *Scroll::segmentAt(const std::uint64_t offset) const {
@@ -68,12 +70,27 @@ Scroll Scroll::ofTorrentFile(const InfoHash &torrent,
                              const std::uint64_t fileOffset,
                              const std::uint64_t fileLength) {
   Scroll scroll;
+  std::string mime = "text/plain;charset=utf-8";
+  if (!path.empty()) {
+    const auto detected = gleditor::MimeDetector::detectFile(path);
+    if (!detected.empty() && detected != gleditor::MimeType::OctetStream) {
+      mime = detected.essence();
+    }
+  }
+  scroll.defaultMimeType = mime;
   // One segment covering the whole file, so scroll offset and file offset are
   // the same number. That equivalence is why this change did not disturb any
   // existing reference: content that is one torrent file always was addressed
   // this way, and now it is a scroll that happens to have one segment.
-  scroll.segments.push_back(ScrollSegment{0, fileLength, torrent, fileOffset,
-                                          fileIndex, std::move(path)});
+  scroll.segments.push_back(ScrollSegment{
+      .at           = 0,
+      .length       = fileLength,
+      .torrent      = torrent,
+      .streamOffset = fileOffset,
+      .fileIndex    = fileIndex,
+      .path         = std::move(path),
+      .mimeType     = mime,
+  });
   return scroll;
 }
 

@@ -107,7 +107,8 @@ public:
 
   /// What to do with the answers. Called on the event thread, with the form
   /// already closed, so an implementation may open another.
-  using Accepted = std::function<void(const std::vector<Field> &fields)>;
+  using Accepted  = std::function<void(const std::vector<Field> &fields)>;
+  using Cancelled = std::function<void()>;
 
   /**
    * @param aFontName Pango description the panel is drawn in. Deliberately not
@@ -142,9 +143,11 @@ public:
    * @param aFields The questions, in the order they are asked.
    * @param onAccept Called with the answers when the form is accepted. Not
    *        called at all if it is abandoned.
+   * @param onCancel Called when the form is abandoned / closed without being
+   * accepted.
    */
   void open(std::string aTitle, std::string aNote, std::vector<Field> aFields,
-            Accepted onAccept);
+            Accepted onAccept, Cancelled onCancel = nullptr);
 
   /// Take it down without accepting it.
   void close();
@@ -188,6 +191,7 @@ private:
   std::string trouble;
   std::vector<Field> fields;
   Accepted accepted;
+  Cancelled cancelled;
   std::size_t focus{};
   /// Caret position within the focused field, as a byte offset.
   std::size_t caret{};
