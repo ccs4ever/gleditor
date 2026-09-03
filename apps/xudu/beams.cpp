@@ -337,8 +337,8 @@ void LinkBeams::band(const Edge &nearSide, const Edge &farSide,
                      const float phase) {
   const float baseWidth = std::max(nearSide.lineHeight, farSide.lineHeight) *
                           Doc::pixelsToWorld * beamWidthOfLine;
-  const float nearSpan = std::abs(nearSide.top.y - nearSide.bottom.y);
-  const float farSpan  = std::abs(farSide.top.y - farSide.bottom.y);
+  const float nearSpan  = std::abs(nearSide.top.y - nearSide.bottom.y);
+  const float farSpan   = std::abs(farSide.top.y - farSide.bottom.y);
 
   // How many strands comes from the taller of the two ends, so that end is
   // drawn at its full reach rather than reduced to whatever the other end
@@ -1227,7 +1227,7 @@ void LinkBeams::describe(gleditor::a11y::Builder &into) {
                        std::to_string(strand.from.end) + ", and bytes " +
                        std::to_string(strand.to.start) + " to " +
                        std::to_string(strand.to.end);
-    node.focusable = true;
+    node.focusable   = true;
     node.actions =
         a11y::bit(a11y::Action::Focus) | a11y::bit(a11y::Action::Click);
   }
