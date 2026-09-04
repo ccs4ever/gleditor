@@ -508,6 +508,41 @@ void DeviceGL::updateTextureLayer(const TextureHandle texture, const int layer,
   api.BindTexture(GL_TEXTURE_2D_ARRAY, 0);
 }
 
+bool DeviceGL::renderIntoTextureLayer(
+    const TextureHandle texture, const int layer,
+    const std::function<void(unsigned fbo, void *glContext)> &fn) {
+  const auto it = textures.find(texture.id);
+  if (textures.end() == it) {
+    diagnostics.record(DiagnosticSeverity::Error,
+                       "DeviceGL::renderIntoTextureLayer: unknown texture");
+    return false;
+  }
+
+  GLint previousFbo = 0;
+  api.GetIntegerv(GL_FRAMEBUFFER_BINDING, &previousFbo);
+
+  GLuint scratchFbo{};
+  api.GenFramebuffers(1, &scratchFbo);
+  api.BindFramebuffer(GL_FRAMEBUFFER, scratchFbo);
+  api.FramebufferTextureLayer(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0,
+                              it->second.name, 0, layer);
+
+  const bool complete =
+      GL_FRAMEBUFFER_COMPLETE == api.CheckFramebufferStatus(GL_FRAMEBUFFER);
+  if (!complete) {
+    diagnostics.record(
+        DiagnosticSeverity::Error,
+        "DeviceGL::renderIntoTextureLayer: incomplete framebuffer");
+  } else {
+    fn(scratchFbo, glContext);
+  }
+
+  api.BindFramebuffer(GL_FRAMEBUFFER, static_cast<GLuint>(previousFbo));
+  api.DeleteFramebuffers(1, &scratchFbo);
+  diagnostics.raiseIfError("rendering into a texture layer");
+  return complete;
+}
+
 GLuint DeviceGL::compileStage(const GLenum stage, const std::string &source,
                               const std::string &name) const {
   const GLuint shader = api.CreateShader(stage);

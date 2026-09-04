@@ -12,6 +12,7 @@
 
 #include <array>
 #include <cstdint>
+#include <functional>
 #include <optional>
 #include <string>
 #include <unordered_map>
@@ -68,6 +69,28 @@ public:
                           int yOffset, int width, int height,
                           std::span<const std::byte> data) override;
   [[nodiscard]] TextureLimits textureLimits() const override { return limits; }
+
+  /**
+   * @brief Render directly into one layer of a texture array via a
+   *        caller-supplied GL callback -- the narrow escape hatch that lets
+   *        a GL-native integration (ThorVG's GlCanvas, see SvgCache) skip
+   *        the host round trip every other texture upload takes.
+   *
+   * Binds a scratch FBO whose GL_COLOR_ATTACHMENT0 is @p layer of
+   * @p texture (a single-layer array from createTextureArray()), then calls
+   * @p fn with that FBO's GL object name and this device's native GL
+   * context handle -- the same context createOffscreenTarget() made current
+   * on this thread, still current for the whole call. The previously bound
+   * framebuffer is restored, and the scratch FBO destroyed, before
+   * returning.
+   *
+   * @return false without calling @p fn if @p texture is invalid or the
+   *         scratch framebuffer is incomplete (both logged as a
+   *         Diagnostic); true otherwise.
+   */
+  bool renderIntoTextureLayer(
+      TextureHandle texture, int layer,
+      const std::function<void(unsigned fbo, void *glContext)> &fn);
 
   PipelineHandle createPipeline(const PipelineDesc &desc) override;
 

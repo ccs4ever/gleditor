@@ -34,6 +34,7 @@
 #include <gleditor/image_cache.hpp>
 #include <gleditor/pick_observer.hpp>
 #include <gleditor/span_decorator.hpp>
+#include <gleditor/svg_cache.hpp>
 #include <gleditor/text_source.hpp>
 
 #include "xudu/core/config.hpp"
@@ -760,6 +761,7 @@ private:
   std::string fontName;
   std::unique_ptr<gleditor::Canvas> canvas;
   std::unique_ptr<gleditor::ImageCache> imageCache;
+  std::unique_ptr<gleditor::SvgCache> svgCache;
   std::vector<Placement> placements;
 };
 

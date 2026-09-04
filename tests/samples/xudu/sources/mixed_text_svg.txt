@@ -1,0 +1,11 @@
+Figure 1.2: Vector Quadrant Docuverse Topology
+
+[EMBEDDED_IMAGE_ASSET: tests/samples/sample_image.svg]
+Rendering: static SVG, rasterized via ThorVG
+Quadrant Alpha (Top-Left): Red (#dc2626)
+Quadrant Beta (Top-Right): Green (#22c55e)
+Quadrant Gamma (Bottom-Left): Blue (#3b82f6)
+Quadrant Delta (Bottom-Right): Gold (#facc15)
+Centre: White disc, proving curved paths rasterize alongside the quadrant rects.
+
+Figure Caption: The above diagram is vector primedia, not a raster bitmap -- the same page layout and transclusion machinery as Figure 1.1 applies unchanged.

@@ -179,6 +179,14 @@ ifeq ($(HAVE_DECODE_INDEX_TIFF),1)
 PKGS += libtiff-4
 endif
 
+# src/svg_cache.cpp: static SVG display via ThorVG (thorvg-1.pc). Optional
+# like every decoder above -- a build without it just cannot show SVG spans,
+# the same graceful-degradation shape decode_index.cpp's own formats use.
+HAVE_SVG_THORVG := $(shell pkg-config --exists thorvg-1 && echo 1)
+ifeq ($(HAVE_SVG_THORVG),1)
+PKGS += thorvg-1
+endif
+
 # tools/decode-index-spike.cpp only, never PKGS: nothing else links FFmpeg,
 # calls zlib directly, calls libjpeg's own API, or calls libwebp (libpng and
 # libjpeg both only arrive today as transitive dependencies of SDL_image;
@@ -425,6 +433,9 @@ override CXXFLAGS += -DGLEDITOR_HAVE_DECODE_INDEX_FLAC=1
 endif
 ifeq ($(HAVE_DECODE_INDEX_TIFF),1)
 override CXXFLAGS += -DGLEDITOR_HAVE_DECODE_INDEX_TIFF=1
+endif
+ifeq ($(HAVE_SVG_THORVG),1)
+override CXXFLAGS += -DGLEDITOR_HAVE_SVG_THORVG=1
 endif
 override LDFLAGS += $(DEBUG_OPTS) $(findstring $(STATIC),-static)
 #ifeq ($(CXX_IS_CLANG),1)

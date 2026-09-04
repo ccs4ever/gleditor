@@ -823,7 +823,14 @@ std::string placeholderFor(const std::span<const std::uint8_t> bytes,
   const float lineHeight = lineHeightFor(fontName);
 
   float reservedHeightPx = 0.0F;
-  if (gleditor::MagicMimeDetector::isImageMime(mime)) {
+  if (gleditor::MimeType{mime} == gleditor::MimeType::ImageSvg) {
+    // No rasterization needed just to size a placeholder -- SvgCache's own
+    // GPU texture and GL/SwCanvas rendering are for ImageOverlay::place()
+    // to set up once the span is actually drawn.
+    const auto size    = gleditor::SvgCache::peekSize(bytes);
+    const float aspect = size ? (size->first / size->second) : 1.0F;
+    reservedHeightPx   = imageFitSize(aspect).height + kImageGapBelowAnchorPx;
+  } else if (gleditor::MagicMimeDetector::isImageMime(mime)) {
     const auto decoded =
         gleditor::decodeImageBuffer(bytes, gleditor::MimeType{mime});
     const float aspect = decoded.valid() ? decoded.aspectRatio() : 1.0F;
@@ -1469,16 +1476,19 @@ void ImageOverlay::deviceReady(render::RenderDevice &device,
   // behind it.
   canvas->createPipeline(documentPipeline, true);
   imageCache = std::make_unique<gleditor::ImageCache>(&device);
+  svgCache   = std::make_unique<gleditor::SvgCache>(&device);
 }
 
 void ImageOverlay::place(std::shared_ptr<Doc> doc,
                          const std::uint32_t docOffset, const std::string &id,
                          const std::span<const std::uint8_t> bytes,
                          const gleditor::MimeType &mime) {
-  if (!imageCache) {
+  if (!imageCache || !svgCache) {
     return;
   }
-  const auto resource = imageCache->loadBuffer(id, bytes, mime);
+  const auto resource = (gleditor::MimeType::ImageSvg == mime)
+                            ? svgCache->loadBuffer(id, bytes)
+                            : imageCache->loadBuffer(id, bytes, mime);
   if (!resource || !resource->valid()) {
     return;
   }

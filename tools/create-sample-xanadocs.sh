@@ -161,6 +161,15 @@ ${XUDU} "${BASE_DIR}/multimedia/09_image_transclusion" \
   --dump-permascroll "${SCROLL}" \
   --export-osmic --headless
 
+# 10_svg_static_image
+${XUDU} "${BASE_DIR}/multimedia/10_svg_static_image" \
+  --permascroll "${SCROLL}" \
+  --import "tests/samples/sample_image.svg" \
+  --import-branch "${SOURCES_DIR}/mixed_text_svg.txt" \
+  --transclude "0:0:428,1:append" \
+  --dump-permascroll "${SCROLL}" \
+  --export-osmic --headless
+
 # -----------------------------------------------------------------------------
 # 3. Complex Beams Topologies
 # -----------------------------------------------------------------------------

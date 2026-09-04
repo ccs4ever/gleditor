@@ -102,6 +102,7 @@ void GLApi::load() {
   GLEDITOR_RESOLVE(BindRenderbuffer);
   GLEDITOR_RESOLVE(RenderbufferStorage);
   GLEDITOR_RESOLVE(FramebufferRenderbuffer);
+  GLEDITOR_RESOLVE(FramebufferTextureLayer);
   GLEDITOR_RESOLVE(CheckFramebufferStatus);
   GLEDITOR_RESOLVE(DrawBuffers);
   GLEDITOR_RESOLVE(BlitFramebuffer);

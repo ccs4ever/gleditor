@@ -27,7 +27,8 @@ tests/samples/xudu/
 │   ├── 06_embedded_media_page/                 # Embedded audio & video with flowing multi-page text
 │   ├── 07_audio_transclusion/                  # Audio temporal subspan (E5 659Hz tone) transcluded
 │   ├── 08_video_transclusion/                  # Video temporal clip (Scene Gamma) transcluded
-│   └── 09_image_transclusion/                  # Image spatial sub-region (IDAT quadrant) transcluded
+│   ├── 09_image_transclusion/                  # Image spatial sub-region (IDAT quadrant) transcluded
+│   └── 10_svg_static_image/                    # Static SVG vector primedia, rasterized via ThorVG
 │
 └── beams/                                      # Complex 3D Beam Topologies
     ├── 01_one_to_many/                         # 1 thesis span -> 3 observation spans
@@ -69,6 +70,7 @@ When opened together in `xudu` or evaluated via `placeTransclusions()`, the engi
 - **`07_audio_transclusion`**: Page 1 contains the 4-tone master audio recording; Page 2 transcludes the 1-second E5 (659.25 Hz) tone without copying audio bytes.
 - **`08_video_transclusion`**: Page 1 contains the 4-scene master video stream; Page 2 transcludes the Scene Gamma clip.
 - **`09_image_transclusion`**: Page 1 contains the master 64x64 quadrant image; Page 2 transcludes the compressed IDAT quadrant detail crop.
+- **`10_svg_static_image`**: Interleaves static SVG vector primedia (`sample_image.svg`, four quadrant rects plus a circle) with descriptive text, rasterized via ThorVG rather than a raster decoder -- otherwise the same layout `03_mixed_text_image` demonstrates for a raster PNG.
 
 ---
 
