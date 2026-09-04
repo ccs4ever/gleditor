@@ -328,11 +328,13 @@ PageShaping TextLayout::layoutPage(std::string_view text,
     maxSeenWidth     = std::max(maxSeenWidth, line.width);
 
     shaping.lines.push_back(PageShaping::LineEntry{
-        .barWidth  = line.width,
-        .barHeight = lineHeight,
-        .left      = 0.0F,
-        .top       = line.top,
-        .lineIndex = lineIdx,
+        .barWidth   = line.width,
+        .barHeight  = lineHeight,
+        .left       = 0.0F,
+        .top        = line.top,
+        .lineIndex  = lineIdx,
+        .byteStart  = static_cast<std::uint32_t>(line.startByte),
+        .byteLength = static_cast<std::uint32_t>(line.endByte - line.startByte),
     });
 
     float penX = 0.0F;

@@ -154,8 +154,10 @@ public:
   /// Select the pipeline subsequent draws use.
   virtual void bindPipeline(PipelineHandle pipeline) = 0;
 
-  /// Bind the glyph atlas subsequent draws sample from.
-  virtual void bindGlyphTexture(TextureHandle texture) = 0;
+  /// Bind the texture subsequent draws sample from -- the glyph atlas for
+  /// text, or any other array texture a pipeline's fragment stage reads, such
+  /// as the image cache's.
+  virtual void bindAtlasTexture(TextureHandle texture) = 0;
 
   /// Replace the highlight range table.
   virtual void setHighlights(std::span<const HighlightRange> ranges) = 0;

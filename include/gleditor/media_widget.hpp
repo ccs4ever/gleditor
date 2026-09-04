@@ -56,6 +56,28 @@ public:
 
   bool load(MediaResourcePtr resource);
 
+  /**
+   * @brief Load @p resource as before, then constrain playback to
+   *        [@p fragment.start, @p fragment.end()) of the @p containerLength
+   *        -byte file it was cut from.
+   *
+   * @p resource must be the *whole* container's bytes, not just the
+   * fragment -- a byte range in the middle of a media file carries no
+   * header of its own for a decoder to make sense of. The time range that
+   * constrains playback to just the fragment cannot be computed until
+   * MediaPlayer::durationSeconds() is known, which for LibVLC is only true
+   * once its own asynchronous metadata parsing has finished; this records
+   * @p fragment and applies it the first time drawFrame() observes a
+   * duration, rather than failing silently the way calling setTimeRange()
+   * with a still-zero duration would.
+   *
+   * A no-op fragment (@p fragment.length >= @p containerLength, the common
+   * case of a span that already covers its whole container) behaves exactly
+   * like load(): nothing is deferred and no range is ever applied.
+   */
+  bool loadFragment(MediaResourcePtr resource, const ByteRange &fragment,
+                    std::uint64_t containerLength);
+
   // -- Document Attachment & Positioning --------------------------------------
   void attachToDocument(std::shared_ptr<Doc> aDoc, std::uint32_t byteOffset);
   void attachToPage(std::shared_ptr<Doc> aDoc, std::uint32_t pageIndex, float x,
@@ -66,6 +88,30 @@ public:
   void setWorldPosition(const glm::vec3 &worldPos);
   void setScreenPosition(float x, float y);
   [[nodiscard]] glm::vec3 worldPosition() const { return worldPos_; }
+
+  /**
+   * @brief This widget's own rectangle, as an anchor a beam can use
+   *        directly -- pageIndex/x/y of its centre and its own height, in
+   *        the same page-pixel-space convention Doc::anchorFor() returns.
+   *
+   * @p doc and @p docOffset are the caller's way of asking "is this the
+   * widget for that span" without a separate accessor exposing doc_/
+   * docOffset_ directly -- the same shape as ImageOverlay::rectFor(), so a
+   * caller checking a list of widgets and a list of image placements for
+   * whichever one matches a link's offset does it the same way for both.
+   *
+   * Shares bottomLeftOf() with drawFrame() rather than recomputing the
+   * position formula a second time, which is what keeps the two from
+   * drifting into disagreement the way this widget's own two anchor
+   * branches once did before Phase 3 unified them.
+   *
+   * @return nullopt when @p doc/@p docOffset do not match this widget, when
+   *         it was attached via attachToPage() rather than
+   *         attachToDocument() (an explicit-page widget has no meaningful
+   *         docOffset_ to match against), or when its page is not built yet.
+   */
+  [[nodiscard]] std::optional<Doc::Anchor>
+  rectFor(const Doc &doc, std::uint32_t docOffset) const;
 
   void setSize(float width, float height);
   [[nodiscard]] float width() const { return width_; }
@@ -103,10 +149,91 @@ public:
   static constexpr std::uint32_t tagSeekBase = 100U;
   static constexpr std::uint32_t tagSeekMax  = 1100U;
 
+  /**
+   * @brief Chrome around the video viewport: the title bar, transport
+   *        buttons, seek bar and margins drawFrame() draws outside it.
+   *
+   * Exposed so a caller sizing a widget from a desired video *viewport*
+   * size -- fitting a decoded frame's aspect ratio to a page's text width,
+   * say -- can compute the whole card's setSize() from it without
+   * duplicating drawFrame()'s own layout numbers and drifting from them.
+   */
+  static constexpr float chromeWidthPx  = 24.0F;
+  static constexpr float chromeHeightPx = 88.0F;
+
+  /// A widget sized before a real aspect is known -- or a document's own
+  /// placeholder space, reserved before any widget exists at all -- has
+  /// nothing else to go on. Same value MediaPlayer::aspectRatio() itself
+  /// falls back to, so the two agree until a real frame arrives.
+  static constexpr float defaultAspect = MediaPlayer::defaultAspect;
+
 private:
+  /// This widget's bottom-left corner in its own page's pixel space, and
+  /// which page -- the one formula drawFrame() (to build a world transform)
+  /// and rectFor() (to build a beam anchor) both derive from, so the two
+  /// cannot drift into disagreeing about where the widget actually is.
+  /// nullopt when not attached to a document, or (for an attachToDocument()
+  /// widget) when docOffset_'s page is not built yet.
+  struct Corner {
+    std::uint32_t pageIndex{};
+    float x{};
+    float y{};
+  };
+  [[nodiscard]] std::optional<Corner> bottomLeftOf() const;
+
+  /// Upload the player's latest decoded frame to videoTexture_, if a new one
+  /// has arrived since the last call. Reallocates the texture only when the
+  /// frame's own size changes, not every frame.
+  void updateVideoTexture();
+
+  /// Apply pendingFragment_ as a time range once player_->durationSeconds()
+  /// is known, and forget it -- called once per drawFrame() so a fragment
+  /// requested before LibVLC has finished parsing the container's metadata
+  /// still gets constrained as soon as it can be.
+  void applyPendingFragment();
+
+  /// player_->play(), plus setting awaitingPlaybackStart_ -- the one place
+  /// playback is started, so picked() and performAction() cannot start it
+  /// one way and forget the flag the other. See awaitingPlaybackStart_'s own
+  /// comment for why the flag exists at all.
+  void startPlayback();
+
   std::string fontName_;
   std::shared_ptr<MediaPlayer> player_;
   std::unique_ptr<Canvas> canvas_;
+
+  /// Set by loadFragment() when its fragment is a real sub-range of the
+  /// container, cleared once applyPendingFragment() has translated it into a
+  /// time range and handed it to player_. std::nullopt otherwise -- for a
+  /// widget showing a whole file, which is the common case and needs no
+  /// deferred step at all.
+  std::optional<ByteRange> pendingFragment_;
+  std::uint64_t pendingContainerLength_{0};
+
+  /// Set by startPlayback(), cleared the first time drawFrame() observes
+  /// state() leave Stopped or a frame become available. LibVLC's
+  /// play() call (libvlc_media_player_play()) is asynchronous: state() can
+  /// still report Stopped for a real stretch of wall-clock time after
+  /// play() returns, before its own internal thread has processed the
+  /// request at all. busy() treating only Playing/Buffering (and, since
+  /// this flag was added, Opening) as busy left a window right after
+  /// play() where none of those were true yet -- an automation harness
+  /// polling busy() to decide when to capture a screenshot would see false
+  /// and capture before the video had genuinely started, which is what this
+  /// flag closes.
+  bool awaitingPlaybackStart_{false};
+
+  /// Set in deviceReady(), which is also where canvas_ is built; kept so the
+  /// video texture can be (re)created and updated later, in drawFrame(),
+  /// rather than only at the one moment a pipeline is stood up.
+  render::RenderDevice *device_{nullptr};
+  /// Square, sized to max(frame width, frame height): createTextureArray()
+  /// only makes square textures, the same constraint the glyph and image
+  /// atlases work within, so a frame is uploaded into its top-left corner and
+  /// addressed by a UV rect rather than the whole texture.
+  render::TextureHandle videoTexture_{};
+  int videoFrameWidth_{0};
+  int videoFrameHeight_{0};
 
   std::shared_ptr<Doc> doc_;
   std::uint32_t docOffset_{0};

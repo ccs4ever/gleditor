@@ -20,15 +20,18 @@
 #include <memory>
 #include <mutex>
 #include <optional>
+#include <span>
 #include <string>
 #include <string_view>
 #include <vector>
 
 #include <gleditor/a11y/tree.hpp>
 #include <gleditor/canvas.hpp>
+#include <gleditor/doc.hpp>
 #include <gleditor/document_observer.hpp>
 #include <gleditor/frame_contributor.hpp>
 #include <gleditor/grounding_modal.hpp>
+#include <gleditor/image_cache.hpp>
 #include <gleditor/pick_observer.hpp>
 #include <gleditor/span_decorator.hpp>
 #include <gleditor/text_source.hpp>
@@ -134,6 +137,14 @@ public:
                               const std::string &filePath);
   MicroversionId insertText(std::uint32_t docIndex, std::uint32_t at,
                             std::string_view newText);
+  /// Like insertText(), but for a whole media file's bytes: routes through
+  /// Store::insertMedia() so the range is tagged with @p mimeType and a later
+  /// transclusion of a fragment of it can still be classified. See
+  /// Store::insertMedia() for why insertText() itself must not be used for
+  /// this -- it would coalesce with adjacent locally-typed text into one
+  /// piece libmagic cannot identify.
+  MicroversionId insertMedia(std::uint32_t docIndex, std::uint32_t at,
+                             std::string_view bytes, std::string mimeType);
   MicroversionId insertBreak(std::uint32_t docIndex, std::uint32_t at);
   MicroversionId insertSpan(std::uint32_t docIndex, std::uint32_t at,
                             const PrimediaSpan &span);
@@ -422,9 +433,20 @@ public:
   /// render thread as documents come and go.
   void viewOpened(const MicroversionId &version, std::size_t storeIndex = 0);
 
-  /// A source for @p version, ready to hand to the render queue.
+  /**
+   * @brief A source for @p version, ready to hand to the render queue.
+   *
+   * @param fontName What the reader's page will actually be laid out with.
+   *        A media placeholder's height is sized from the decoded image (or
+   *        the default video aspect) and this font's line pitch, so it must
+   *        match whatever font the caller's Doc will use -- a mismatch here
+   *        does not corrupt anything, but the reserved space and the
+   *        widget's own size would disagree by however far the two fonts'
+   *        line heights differ.
+   */
   [[nodiscard]] std::shared_ptr<VersionTextSource>
-  sourceFor(const MicroversionId &version, std::size_t storeIndex = 0) const;
+  sourceFor(const MicroversionId &version, std::size_t storeIndex = 0,
+            std::string_view fontName = "Monospace 16") const;
 
   struct MediaSpanInfo {
     PrimediaSpan span;
@@ -434,12 +456,28 @@ public:
     bool isVideo{false};
     bool isImage{false};
     std::string label;
+    /// Where @p span sits within the whole media file it was classified
+    /// against -- the offset (and that file's own total length) a
+    /// transclusion of only part of a file leaves for a temporal or spatial
+    /// sub-range to be computed from. Zero and equal to span.length when
+    /// @p span already covers the whole file, which is the common case and
+    /// needs no such translation.
+    std::uint64_t containerOffset{0};
+    std::uint64_t containerLength{0};
+    /// The byte length of the placeholderFor() run reserved for this span in
+    /// the document's concatext, immediately following @p docOffset -- what
+    /// lets a caller outside session.cpp (LinkBeams::resolveAnchors) answer
+    /// "does offset X fall inside this span's reserved range" without
+    /// recomputing placeholder sizing itself.
+    std::uint32_t reservedLength{0};
   };
 
   /// Discovered media spans for @p version with their document byte offsets.
+  /// @param fontName See sourceFor(): must be the same font passed there, so
+  ///        the offsets line up with what that call actually reserved.
   [[nodiscard]] std::vector<MediaSpanInfo>
-  mediaSpansFor(const MicroversionId &version,
-                std::size_t storeIndex = 0) const;
+  mediaSpansFor(const MicroversionId &version, std::size_t storeIndex = 0,
+                std::string_view fontName = "Monospace 16") const;
 
   // -- Hypertime History & Scrubbing ----------------------------------------
 
@@ -634,6 +672,95 @@ private:
   std::uint64_t builtAt{};
 
   void layout(RenderState &state);
+};
+
+/**
+ * @brief Still images placed at document byte offsets, drawn as real pixels.
+ *
+ * A media span classified as an image has no business going through
+ * MediaWidget -- there is no play, pause or seek for a picture -- and no
+ * business owning a pipeline of its own either: a document with a dozen
+ * figures would need a dozen MediaWidget-style Canvases, and Vulkan's
+ * descriptor pool is only sized for DeviceVK::maxPipelines. So this holds
+ * one shared Canvas and one shared ImageCache for every image span across
+ * every open document, and draws each placement with its own clear/commit/
+ * draw cycle -- one shared pipeline, one draw call per image, rather than
+ * one pipeline per image.
+ */
+class ImageOverlay : public gleditor::FrameContributor {
+public:
+  explicit ImageOverlay(std::string aFontName);
+  ~ImageOverlay() override;
+
+  ImageOverlay(const ImageOverlay &)            = delete;
+  ImageOverlay &operator=(const ImageOverlay &) = delete;
+  ImageOverlay(ImageOverlay &&)                 = delete;
+  ImageOverlay &operator=(ImageOverlay &&)      = delete;
+
+  void deviceReady(render::RenderDevice &device,
+                   const render::PipelineDesc &documentPipeline) override;
+  void drawFrame(gleditor::FrameContext &ctx) override;
+
+  /// Forget every placed image. Called before syncMediaWidgets rebuilds its
+  /// list from scratch, the same way mediaWidgets itself is rebuilt.
+  void clear() { placements.clear(); }
+
+  /**
+   * @brief Decode @p bytes once (cached by @p id) and place it at
+   *        @p docOffset within @p doc.
+   *
+   * Silently does nothing if the bytes fail to decode or the device is not
+   * ready yet: a span libmagic called an image but SDL_image cannot open is
+   * an image span with nothing usable in it, not a program error.
+   */
+  void place(std::shared_ptr<Doc> doc, std::uint32_t docOffset,
+             const std::string &id, std::span<const std::uint8_t> bytes,
+             const gleditor::MimeType &mime);
+
+  /**
+   * @brief The placed image at @p docOffset within @p doc, as an anchor
+   *        naming its own centre and height -- the same page-pixel-space
+   *        convention Doc::anchorFor() returns, so a caller (LinkBeams) can
+   *        feed it through exactly the code that already turns a text
+   *        anchor into a beam endpoint.
+   *
+   * Refactored out of drawFrame()'s own position math rather than
+   * duplicated: an image's rectangle is anchorFor(docOffset) offset by the
+   * same (height + 20px caption gap) and centred over the same width/height
+   * drawFrame() draws, so keeping one formula is what keeps them from
+   * drifting apart the way MediaWidget's two position branches once did
+   * (see Phase 3's own writeup).
+   *
+   * @return nullopt when no placement matches @p docOffset exactly (nothing
+   *         placed there, or the page it anchors to is not built yet).
+   */
+  [[nodiscard]] std::optional<Doc::Anchor>
+  rectFor(const Doc &doc, std::uint32_t docOffset) const;
+
+private:
+  struct Placement {
+    std::shared_ptr<Doc> doc;
+    std::uint32_t docOffset{};
+    gleditor::ImageResource image;
+    float width{};
+    float height{};
+  };
+
+  /// A placement's bottom-left corner in its own page's pixel space, and
+  /// which page -- the one formula drawFrame() (to build a world transform)
+  /// and rectFor() (to build a beam anchor) both derive from, so the two
+  /// cannot drift into disagreeing about where an image actually is.
+  struct Corner {
+    std::uint32_t pageIndex{};
+    float x{};
+    float y{};
+  };
+  [[nodiscard]] static std::optional<Corner> bottomLeftOf(const Placement &p);
+
+  std::string fontName;
+  std::unique_ptr<gleditor::Canvas> canvas;
+  std::unique_ptr<gleditor::ImageCache> imageCache;
+  std::vector<Placement> placements;
 };
 
 } // namespace xudu

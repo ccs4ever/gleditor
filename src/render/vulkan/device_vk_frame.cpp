@@ -210,7 +210,7 @@ void DeviceVK::bindPipeline(const PipelineHandle pipeline) {
   }
 }
 
-void DeviceVK::bindGlyphTexture(const TextureHandle texture) {
+void DeviceVK::bindAtlasTexture(const TextureHandle texture) {
   boundTexture = texture;
 
   const auto pipelineIt = pipelines.find(boundPipeline.id);

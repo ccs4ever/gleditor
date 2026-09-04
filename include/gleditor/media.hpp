@@ -38,6 +38,30 @@ enum class PlaybackState : std::uint8_t {
 [[nodiscard]] const char *playbackStateName(PlaybackState state);
 
 /**
+ * @brief Where in playback time @p fragment of a @p containerLength-byte file
+ *        falls, given that file's own @p durationSeconds.
+ *
+ * A transcluded audio or video fragment is addressed in bytes -- an offset
+ * and a length into the file it was cut from -- but MediaPlayer only honours
+ * a *time* range (setByteRange() is not wired to anything; see its own
+ * comment). This is the byte-to-time translation that makes that fragment
+ * playable: linear in the file's own byte size, which assumes roughly
+ * constant bitrate. Exact for PCM WAV, an honest approximation for most
+ * encoded audio and video, and wrong for a file whose bitrate genuinely
+ * varies a lot -- which is a real limitation worth knowing about rather than
+ * a rare enough case to ignore, but not one this pass solves; the transcluded
+ * fragment is at least in roughly the right place rather than not
+ * constrained at all.
+ *
+ * Returns an empty range (duration() <= 0) when @p containerLength or
+ * @p durationSeconds is not yet known, which a caller polling for it -- a
+ * duration LibVLC has not finished parsing yet -- can use as "not ready".
+ */
+[[nodiscard]] TimeRange fragmentTimeRange(const ByteRange &fragment,
+                                          std::uint64_t containerLength,
+                                          float durationSeconds);
+
+/**
  * @struct VideoFrame
  * @brief A decoded RGBA video frame buffer.
  */
@@ -136,6 +160,12 @@ public:
 
   void setLooping(bool loop);
   [[nodiscard]] bool isLooping() const;
+
+  /// Assumed until a real frame reports otherwise -- aspectRatio() falls
+  /// back to it, and anything sizing a video's space before playback starts
+  /// (a document's reserved placeholder height, an unplayed widget's
+  /// initial size) has nothing else to go on either.
+  static constexpr float defaultAspect = 16.0F / 9.0F;
 
   // Video properties & frame access
   [[nodiscard]] bool hasVideo() const;

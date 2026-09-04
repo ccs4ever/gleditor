@@ -54,7 +54,7 @@ public:
   MOCK_METHOD(void, endFrame, (), (override));
   MOCK_METHOD(void, bindPipeline, (render::PipelineHandle pipeline),
               (override));
-  MOCK_METHOD(void, bindGlyphTexture, (render::TextureHandle texture),
+  MOCK_METHOD(void, bindAtlasTexture, (render::TextureHandle texture),
               (override));
   MOCK_METHOD(void, setHighlights,
               (std::span<const render::HighlightRange> ranges), (override));

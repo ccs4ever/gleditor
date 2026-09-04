@@ -131,7 +131,7 @@ void Beams::draw(RenderState &state, const glm::mat4 &transform,
   // as every other one -- the highlight block and the atlas -- and Vulkan wants
   // it filled in whether or not the shader reads from it. Binding the atlas is
   // what fills it.
-  state.device->bindGlyphTexture(state.glyphCache.textureHandle());
+  state.device->bindAtlasTexture(state.glyphCache.textureHandle());
   const render::DrawUniforms uniforms{toArray(transform), opacity, identity};
   state.device->drawGlyphs(uniforms, pool->buffer(), pool->byteOffset(backing),
                            committedRows);

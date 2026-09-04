@@ -92,7 +92,13 @@ endif
 # includes -- is vendored rather than pulled from a package whose layout on
 # macOS is not this project's to depend on.
 GL_CFLAGS :=
-PKGS := freetype2 harfbuzz fribidi libunibreak fontconfig poppler-cpp libmagic libvlc openssl $(SDL_PKG)
+# poppler-cpp's own cflags already resolve poppler core's headers (its .pc
+# file's Cflags puts both -I.../poppler/cpp and -I.../poppler on one line),
+# but its Libs only names -lpoppler-cpp -- core's OutputDev/PDFDoc/GfxState,
+# the PDF figure extraction in text_source.cpp needs, live in libpoppler
+# itself. Listed separately so pkg-config contributes -lpoppler too, not to
+# add new cflags on top of what poppler-cpp already provides.
+PKGS := freetype2 harfbuzz fribidi libunibreak fontconfig poppler-cpp poppler libmagic libvlc openssl $(SDL_PKG)
 ifeq ($(shell pkg-config --exists gl && echo 1),1)
 PKGS += gl
 else ifeq ($(shell uname -s 2>/dev/null),Darwin)

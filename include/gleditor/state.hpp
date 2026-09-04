@@ -25,6 +25,21 @@ struct AppState {
   /// Shared state between main and renderer threads
   // set before the render thread starts, no need to synchronize
   std::string defaultFontName;
+  /**
+   * @brief Whether "settled" should wait for RenderState::docs to be
+   *        non-empty and fully loaded.
+   *
+   * True for xudu and the plain editor, where a document really is what the
+   * program is waiting to load -- an empty doc list at startup genuinely
+   * means "still loading". zigzag sets this false: it never populates
+   * RenderState::docs at all (it draws CompactZZCell slices through its own
+   * FrameContributor, not Doc pages), so the default left this permanently
+   * true and --profile/--screenshot waited on a condition that could never
+   * become false. zigzag's own loading state (BitTorrent Preflet fetches,
+   * slice staging) is already reported correctly through its FrameContributor
+   * ::busy(), which hasPendingWork() already checks regardless of this flag.
+   */
+  bool usesDocPages{true};
   /// When set, the first fully drawn frame is written here as a PPM and the
   /// path is cleared. Used to compare backends pixel for pixel.
   std::string screenshotPath;

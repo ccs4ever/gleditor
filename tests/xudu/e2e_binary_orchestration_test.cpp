@@ -1278,4 +1278,312 @@ TEST(E2EBinaryOrchestrationTest, typeWithDecorationsRecordsAFormatLink) {
          "links over the typed text";
 }
 
+// Gap E, named in the multimedia pipeline plan: a media fragment transcluded
+// out of the middle of a larger file carries no header of its own for
+// libmagic to identify (a PNG's IDAT bytes have no PNG signature), so
+// classifying a piece from its own bytes alone fails and the fragment is
+// spliced into the document's text verbatim -- binary bytes reaching
+// Doc::load(), which survives only because makeValidUtf8() replaces what it
+// cannot decode, logging "invalid utf-8" on the way. Session::sourceFor() /
+// mediaSpansFor() now resolve a piece to the *container* segment
+// Store::insertMedia() recorded when the whole file was first imported, so a
+// fragment classifies by address rather than by its own possibly-headerless
+// bytes. This is the regression test the plan's own Phase 5 verify section
+// asks for: no media fragment ever reaches the concatext as raw bytes.
+TEST(E2EBinaryOrchestrationTest,
+     transcludedMediaFragmentNeverReachesConcatextAsRawBytes) {
+  const auto xuduBin = findXuduBinary();
+  ASSERT_TRUE(fs::exists(xuduBin)) << "xudu binary not found at " << xuduBin;
+
+  const auto testRoot =
+      fs::current_path() / "build" / "integration_workspace_media_fragment";
+  const auto screenshotDir = getScreenshotDir();
+  fs::remove_all(testRoot);
+  fs::create_directories(testRoot);
+  fs::create_directories(screenshotDir);
+
+  std::ifstream pngIn("tests/samples/sample_image.png", std::ios::binary);
+  ASSERT_TRUE(pngIn) << "missing tests/samples/sample_image.png fixture";
+  const std::string pngBytes((std::istreambuf_iterator<char>(pngIn)),
+                             std::istreambuf_iterator<char>());
+  ASSERT_GT(pngBytes.size(), 120U);
+
+  const std::string paragraph1 =
+      "First paragraph, before the transcluded fragment.\n\n";
+  const std::string paragraph2 =
+      "Second paragraph, after the transcluded fragment.\n";
+
+  // One Store, two independent root branches -- an image import and a text
+  // document -- exactly what --import (whole file) and --import-branch
+  // (text) build in the real CLI, and what 09_image_transclusion's own
+  // sample generation does with them: transclude a narrow slice of the
+  // former into the middle of the latter.
+  Store store;
+  const auto imageVersion =
+      store.insertMedia(MicroversionId{}, 0, pngBytes, "image/png").version;
+  const auto textVersion =
+      store.insert(MicroversionId{}, 0, paragraph1 + paragraph2);
+  const auto withFragment = store.transclude(
+      textVersion, static_cast<std::uint32_t>(paragraph1.size()), imageVersion,
+      20, 100);
+
+  const auto storePath = testRoot / "store";
+  store.save(storePath.string());
+
+  const auto ppmPath    = screenshotDir / "media_fragment.ppm";
+  const std::string cmd = xuduBin.string() + " --backend " + activeBackend() +
+                          " --profile --strict-diagnostics --version-id " +
+                          withFragment.str() + " --screenshot " +
+                          ppmPath.string() + " " + storePath.string();
+  const auto res        = executeProcess(cmd);
+  EXPECT_EQ(res.exitCode, 0) << "media fragment test failed: " << res.output;
+  EXPECT_EQ(res.output.find("invalid utf-8"), std::string::npos)
+      << "a transcluded media fragment reached the concatext as raw bytes -- "
+         "Gap E has regressed:\n"
+      << res.output;
+
+  // The storage layer's own half of the guarantee: the fragment resolves to
+  // the whole PNG as its container, not to nothing.
+  Store reloaded;
+  reloaded.load(storePath.string());
+  bool foundImageContainer = false;
+  for (const auto &piece : reloaded.rebuild(withFragment).pieces()) {
+    if (const auto *segment = reloaded.containerFor(piece);
+        nullptr != segment && "image/png" == segment->mimeType) {
+      foundImageContainer = true;
+      EXPECT_EQ(segment->length, pngBytes.size())
+          << "the container segment should span the whole original PNG "
+             "file, not just the transcluded fragment";
+    }
+  }
+  EXPECT_TRUE(foundImageContainer)
+      << "no piece of the transcluded document resolved to the PNG's "
+         "container segment";
+}
+
+// Phase 10 of the multimedia pipeline plan: a PDF figure repeated across
+// pages used to reach the store through its own Store::insertMedia() call
+// per occurrence -- a logo on two pages meant two stored copies of
+// identical bytes. pieces() now marks the second occurrence as a duplicate
+// of the first (see PdfTextSourceTest.
+// piecesMarksARepeatedFigureAsDuplicateOfItsFirstOccurrence), and the real
+// ingest call sites (main.cpp's --import, Session::importFileToTemporaryStore)
+// route a marked piece through Store::insertSpan() -- which records an
+// Insert op referencing the existing span, appending nothing to the
+// primedia spool -- instead of Store::insertMedia(). The one directly
+// observable consequence: exactly one "localsegment ... image/png" line in
+// the saved store's scrolls.spool, not two, despite the figure rendering on
+// both pages.
+TEST(E2EBinaryOrchestrationTest, repeatedPdfFigureIsStoredOnceNotOncePerPage) {
+  const auto xuduBin = findXuduBinary();
+  ASSERT_TRUE(fs::exists(xuduBin)) << "xudu binary not found at " << xuduBin;
+
+  const auto testRoot =
+      fs::current_path() / "build" / "integration_workspace_pdf_dedup";
+  fs::remove_all(testRoot);
+  fs::create_directories(testRoot);
+
+  const auto storePath = testRoot / "store";
+  const std::string importCmd =
+      xuduBin.string() + " --headless --import tests/samples/" +
+      "pdf_with_repeated_figure.pdf " + storePath.string();
+  const auto importRes = executeProcess(importCmd);
+  EXPECT_EQ(importRes.exitCode, 0)
+      << "importing the repeated-figure PDF failed: " << importRes.output;
+
+  const auto scrollsPath = storePath / "scrolls.spool";
+  ASSERT_TRUE(fs::exists(scrollsPath))
+      << "no scrolls.spool written for " << storePath.string();
+  std::ifstream scrollsIn(scrollsPath);
+  ASSERT_TRUE(scrollsIn) << "could not open " << scrollsPath.string();
+
+  std::size_t imageSegments = 0;
+  std::string line;
+  while (std::getline(scrollsIn, line)) {
+    if (line.starts_with("localsegment") && line.ends_with("image/png")) {
+      ++imageSegments;
+    }
+  }
+  EXPECT_EQ(imageSegments, 1U)
+      << "the figure appears once per page but should only be stored once "
+         "-- scrolls.spool:\n"
+      << scrollsPath.string();
+
+  // A real render still succeeds after routing the duplicate through
+  // insertSpan() rather than insertMedia() -- the fix must not change what
+  // gets displayed, only how many times identical bytes are stored.
+  const auto ppmPath = getScreenshotDir() / "repeated_pdf_figure_dedup.ppm";
+  const std::string screenshotCmd =
+      xuduBin.string() + " --backend " + activeBackend() +
+      " --profile --strict-diagnostics --screenshot " + ppmPath.string() + " " +
+      storePath.string();
+  const auto screenshotRes = executeProcess(screenshotCmd);
+  EXPECT_EQ(screenshotRes.exitCode, 0)
+      << "screenshotting the deduplicated store failed: "
+      << screenshotRes.output;
+  EXPECT_TRUE(fs::exists(ppmPath))
+      << "no screenshot produced for the deduplicated store";
+}
+
+// Phase 11 of the multimedia pipeline plan: a link whose endpoint lands
+// inside a media span's placeholder range used to resolve to a text
+// geometry point on that span's blank filler line via Doc::anchorFor()
+// unconditionally -- LinkBeams::resolveAnchors() now checks
+// Session::mediaSpansFor() first (through the injected MediaRectResolver,
+// wired in main.cpp to ImageOverlay::rectFor()/Views::widgetRectFor()) and
+// anchors to the widget's own rectangle instead, for a whole-span link.
+// This exercises the wiring end to end through the real binary: a comment
+// document linked to an image transcluded into a second document must
+// still render without error, which is the one thing a screenshot-based
+// e2e test can check about beam placement without a pixel-exact tracer for
+// where a beam's margin mark landed.
+TEST(E2EBinaryOrchestrationTest, linkIntoATranscludedImageSpanRendersCleanly) {
+  const auto xuduBin = findXuduBinary();
+  ASSERT_TRUE(fs::exists(xuduBin)) << "xudu binary not found at " << xuduBin;
+
+  const auto testRoot =
+      fs::current_path() / "build" / "integration_workspace_media_link";
+  const auto screenshotDir = getScreenshotDir();
+  fs::remove_all(testRoot);
+  fs::create_directories(testRoot);
+  fs::create_directories(screenshotDir);
+
+  std::ifstream pngIn("tests/samples/sample_image.png", std::ios::binary);
+  ASSERT_TRUE(pngIn) << "missing tests/samples/sample_image.png fixture";
+  const std::string pngBytes((std::istreambuf_iterator<char>(pngIn)),
+                             std::istreambuf_iterator<char>());
+  ASSERT_GT(pngBytes.size(), 120U);
+
+  Store store;
+  const auto insertedImage =
+      store.insertMedia(MicroversionId{}, 0, pngBytes, "image/png");
+  const auto imageSpan = insertedImage.span;
+
+  const std::string before = "Before the figure.\n\n";
+  const std::string after  = "\n\nAfter the figure.\n";
+  auto textVer             = store.insert(MicroversionId{}, 0, before);
+  textVer = store.transclude(textVer, static_cast<std::uint32_t>(before.size()),
+                             insertedImage.version, 0,
+                             static_cast<std::uint32_t>(imageSpan.length));
+  textVer = store.insert(
+      textVer, static_cast<std::uint32_t>(before.size() + imageSpan.length),
+      after);
+
+  const std::string comment = "This annotation points at the figure.\n";
+  const auto commentVer     = store.insert(MicroversionId{}, 0, comment);
+
+  const auto commentPieces = store.rebuild(commentVer).pieces();
+  ASSERT_FALSE(commentPieces.empty());
+  const auto commentSpan = commentPieces.front();
+
+  store.addLink(commentVer, xudu::Link{.type  = LinkType::Comment,
+                                       .owner = "author",
+                                       .left  = {commentSpan},
+                                       .right = {imageSpan}});
+
+  const auto storePath = testRoot / "store";
+  store.save(storePath.string());
+
+  const auto ppmPath    = screenshotDir / "media_link_target.ppm";
+  const std::string cmd = xuduBin.string() + " --backend " + activeBackend() +
+                          " --profile --strict-diagnostics --version-id " +
+                          textVer.str() + " --alongside " + commentVer.str() +
+                          " --screenshot " + ppmPath.string() + " " +
+                          storePath.string();
+  const auto res        = executeProcess(cmd);
+  EXPECT_EQ(res.exitCode, 0)
+      << "linking into a transcluded image span crashed or hung: "
+      << res.output;
+  EXPECT_TRUE(fs::exists(ppmPath))
+      << "no screenshot produced for the media-linked store";
+
+  const auto info = inspectPpm(ppmPath);
+  EXPECT_TRUE(info.valid) << "media link screenshot PPM invalid: "
+                          << info.errorMessage;
+  EXPECT_GE(info.distinctColors, 4U)
+      << "expected the figure, its widget, both pages of text and a beam "
+         "between them to produce a reasonably varied image";
+}
+
+// Phase 14 of the multimedia pipeline plan: ImageCache's atlas had never
+// been exercised with more than one distinct image through the real
+// binary. Unit-level coverage (tests/lib/test_image_cache.cpp) already
+// found and fixed a real stride bug and confirmed the shelf-packer never
+// overlaps two images, using a mock device that can inspect exact upload
+// rects and bytes -- this test is the complementary real-load check:
+// several *different* images (two formats, two very different sizes)
+// transcluded into one document and rendered through the actual
+// ImageCache/SDL_image/GPU-upload path, confirming no crash and that more
+// than one image's pixels actually made it on screen.
+TEST(E2EBinaryOrchestrationTest, severalDistinctImagesRenderTogetherCleanly) {
+  const auto xuduBin = findXuduBinary();
+  ASSERT_TRUE(fs::exists(xuduBin)) << "xudu binary not found at " << xuduBin;
+
+  const auto testRoot =
+      fs::current_path() / "build" / "integration_workspace_many_images";
+  const auto screenshotDir = getScreenshotDir();
+  fs::remove_all(testRoot);
+  fs::create_directories(testRoot);
+  fs::create_directories(screenshotDir);
+
+  const auto readWhole = [](const std::string &path) {
+    std::ifstream in(path, std::ios::binary);
+    return std::string((std::istreambuf_iterator<char>(in)),
+                       std::istreambuf_iterator<char>());
+  };
+  const auto pngBytes = readWhole("tests/samples/sample_image.png");
+  ASSERT_GT(pngBytes.size(), 120U)
+      << "missing tests/samples/sample_image.png fixture";
+  const auto jpegBytes = readWhole("tests/samples/sample_image_restart.jpg");
+  ASSERT_GT(jpegBytes.size(), 1000U)
+      << "missing tests/samples/sample_image_restart.jpg fixture (Phase 13)";
+
+  Store store;
+  const auto pngVersion =
+      store.insertMedia(MicroversionId{}, 0, pngBytes, "image/png").version;
+  const auto jpegVersion =
+      store.insertMedia(MicroversionId{}, 0, jpegBytes, "image/jpeg").version;
+
+  const std::string before  = "Two distinct images, different formats and "
+                              "sizes, in one document.\n\n";
+  const std::string between = "\n\nA 64x64 PNG above, a 512x512 JPEG "
+                              "below.\n\n";
+  const std::string after   = "\n\nEnd of document.\n";
+
+  auto textVer     = store.insert(MicroversionId{}, 0, before);
+  std::uint32_t at = static_cast<std::uint32_t>(before.size());
+  textVer = store.transclude(textVer, at, pngVersion, 0,
+                             static_cast<std::uint32_t>(pngBytes.size()));
+  at += static_cast<std::uint32_t>(pngBytes.size());
+  textVer = store.insert(textVer, at, between);
+  at += static_cast<std::uint32_t>(between.size());
+  textVer = store.transclude(textVer, at, jpegVersion, 0,
+                             static_cast<std::uint32_t>(jpegBytes.size()));
+  at += static_cast<std::uint32_t>(jpegBytes.size());
+  textVer = store.insert(textVer, at, after);
+
+  const auto storePath = testRoot / "store";
+  store.save(storePath.string());
+
+  const auto ppmPath    = screenshotDir / "several_distinct_images.ppm";
+  const std::string cmd = xuduBin.string() + " --backend " + activeBackend() +
+                          " --profile --strict-diagnostics --version-id " +
+                          textVer.str() + " --screenshot " + ppmPath.string() +
+                          " " + storePath.string();
+  const auto res        = executeProcess(cmd);
+  EXPECT_EQ(res.exitCode, 0)
+      << "rendering several distinct transcluded images crashed or hung: "
+      << res.output;
+  EXPECT_TRUE(fs::exists(ppmPath))
+      << "no screenshot produced for the many-images store";
+
+  const auto info = inspectPpm(ppmPath);
+  EXPECT_TRUE(info.valid) << "several-distinct-images screenshot PPM invalid: "
+                          << info.errorMessage;
+  EXPECT_GE(info.distinctColors, 8U)
+      << "expected two differently-coloured images plus surrounding text "
+         "to produce a reasonably varied image, not a blank or single-"
+         "image page";
+}
+
 } // namespace

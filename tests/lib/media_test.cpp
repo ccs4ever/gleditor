@@ -215,3 +215,40 @@ TEST(MediaTest, MediaPlayerUnloadAndByteRanges) {
   player.unload();
   EXPECT_EQ(player.state(), PlaybackState::Stopped);
 }
+
+TEST(MediaTest, FragmentTimeRangeScalesLinearlyByByteOffset) {
+  // A fragment covering the second half of a 1000-byte, 10-second file lands
+  // at [5, 10) seconds.
+  const auto half = fragmentTimeRange(ByteRange{500, 500}, 1000, 10.0F);
+  EXPECT_FLOAT_EQ(half.startSeconds, 5.0F);
+  EXPECT_FLOAT_EQ(half.endSeconds, 10.0F);
+
+  // A fragment covering the whole file is the whole duration.
+  const auto whole = fragmentTimeRange(ByteRange{0, 1000}, 1000, 10.0F);
+  EXPECT_FLOAT_EQ(whole.startSeconds, 0.0F);
+  EXPECT_FLOAT_EQ(whole.endSeconds, 10.0F);
+
+  // An interior slice lands proportionally in the middle.
+  const auto slice = fragmentTimeRange(ByteRange{250, 250}, 1000, 10.0F);
+  EXPECT_FLOAT_EQ(slice.startSeconds, 2.5F);
+  EXPECT_FLOAT_EQ(slice.endSeconds, 5.0F);
+}
+
+TEST(MediaTest, FragmentTimeRangeEmptyWhenNotYetKnown) {
+  // Zero duration means LibVLC has not finished parsing metadata yet -- the
+  // caller's signal to try again next frame, not to seek to 0,0.
+  EXPECT_TRUE(fragmentTimeRange(ByteRange{0, 500}, 1000, 0.0F).empty());
+  // Zero container length is likewise "not known", not "the whole file is
+  // nothing".
+  EXPECT_TRUE(fragmentTimeRange(ByteRange{0, 500}, 0, 10.0F).empty());
+}
+
+TEST(MediaTest, FragmentTimeRangeClampsAFragmentPastTheContainerEnd) {
+  // A fragment whose recorded length would run past the container it was cut
+  // from -- data corruption, or an off-by-one somewhere upstream -- clamps
+  // to the container's own end rather than scaling past 1.0 and handing
+  // MediaPlayer a range beyond the file's actual duration.
+  const auto clamped = fragmentTimeRange(ByteRange{900, 500}, 1000, 10.0F);
+  EXPECT_FLOAT_EQ(clamped.startSeconds, 9.0F);
+  EXPECT_FLOAT_EQ(clamped.endSeconds, 10.0F);
+}

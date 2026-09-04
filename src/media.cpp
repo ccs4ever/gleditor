@@ -42,6 +42,21 @@ const char *playbackStateName(const PlaybackState state) {
   return "Stopped";
 }
 
+TimeRange fragmentTimeRange(const ByteRange &fragment,
+                            const std::uint64_t containerLength,
+                            const float durationSeconds) {
+  if (0 == containerLength || durationSeconds <= 0.0F) {
+    return {};
+  }
+  const auto total = static_cast<float>(containerLength);
+  const auto start =
+      static_cast<float>(std::min(fragment.start, containerLength));
+  const auto end =
+      static_cast<float>(std::min(fragment.end(), containerLength));
+  return TimeRange{(start / total) * durationSeconds,
+                   (end / total) * durationSeconds};
+}
+
 // -- MediaResource ------------------------------------------------------------
 
 MediaResource::MediaResource(const Type type, std::string name,
@@ -538,7 +553,7 @@ float MediaPlayer::aspectRatio() const {
     return static_cast<float>(impl->frameWidth) /
            static_cast<float>(impl->frameHeight);
   }
-  return 16.0F / 9.0F; // Standard default aspect ratio
+  return MediaPlayer::defaultAspect;
 }
 
 std::shared_ptr<VideoFrame> MediaPlayer::latestFrame() const {

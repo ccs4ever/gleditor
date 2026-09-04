@@ -299,12 +299,43 @@ bool Page::caretGeometry(const std::uint32_t globalOffset, float &posX,
   for (const auto &g : shaped.glyphs) {
     if (g.clusterIndex < shaped.clusters.size()) {
       const auto &cl = shaped.clusters[g.clusterIndex];
+      // Exclusive upper bound: relOffset sitting exactly on the boundary
+      // between two clusters means "the start of the next one", not "the end
+      // of the previous one". Inclusive matched the previous cluster instead,
+      // because shaped.glyphs is walked in document order and the previous
+      // cluster is seen first -- indistinguishable from the correct answer
+      // for two adjacent visible clusters (same on-screen X either way), but
+      // wrong whenever what follows has no cluster of its own to lose to, the
+      // case the fallback below exists for. A media placeholder's reserved
+      // blank lines are exactly that: relOffset landing on the byte where the
+      // preceding paragraph's last cluster ends *is* where the placeholder
+      // begins, and this loop must not claim it first.
       if (relOffset >= cl.byteStart &&
-          relOffset <= cl.byteStart + cl.byteLength) {
+          relOffset < cl.byteStart + cl.byteLength) {
         left = pageMargin + g.clusterLeft;
         if (g.lineIndex < shaped.lines.size()) {
           top = pageMargin + shaped.lines[g.lineIndex].top;
         }
+        found = true;
+        break;
+      }
+    }
+  }
+  if (!found) {
+    // No cluster covers this offset -- the common reason is a blank line, a
+    // media placeholder's reserved newlines having no glyph of their own to
+    // match above. Locate the *line* directly by its own byte range instead
+    // of falling back to the page's last line regardless of where relOffset
+    // actually falls: two placeholders on the same page would otherwise both
+    // resolve to that one last line and land on top of each other.
+    for (const auto &ln : shaped.lines) {
+      // Same exclusive-upper-bound reasoning as the cluster loop above: the
+      // line this offset ends still-inclusive would be the *previous* line,
+      // not the blank one this offset actually names.
+      if (relOffset >= ln.byteStart &&
+          relOffset < ln.byteStart + ln.byteLength) {
+        left  = pageMargin + ln.barWidth;
+        top   = pageMargin + ln.top;
         found = true;
         break;
       }
@@ -601,8 +632,8 @@ PageShaping Doc::layoutFrom(const std::uint32_t offset) const {
   auto font = gleditor::text::FontManager::instance().getFont(
       std::string{renderer->defaultFontName()});
   gleditor::text::LayoutOptions opts{
-      .maxWidthPx      = 139.70F * 8.5F,
-      .maxHeightPx     = 139.70F * 11.0F,
+      .maxWidthPx      = Doc::textWidthPx,
+      .maxHeightPx     = Doc::textHeightPx,
       .singleParagraph = false,
       .ellipsize       = true,
   };

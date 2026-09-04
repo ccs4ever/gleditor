@@ -192,11 +192,42 @@ ImageResource ImageCache::put(const std::string &id,
   }
 
   if (nullptr != device_ && atlasHandle_.valid()) {
-    device_->updateTextureLayer(
-        atlasHandle_, chosenLayer, posX, posY, imgW, imgH,
-        std::span<const std::byte>(
-            reinterpret_cast<const std::byte *>(image.rgba.data()),
-            static_cast<std::size_t>(imgW * imgH * 4)));
+    if (imgW == image.width && imgH == image.height) {
+      // Common case: image.rgba is already exactly imgW*imgH*4 tightly
+      // packed bytes, so it can go straight to the device.
+      device_->updateTextureLayer(
+          atlasHandle_, chosenLayer, posX, posY, imgW, imgH,
+          std::span<const std::byte>(
+              reinterpret_cast<const std::byte *>(image.rgba.data()),
+              static_cast<std::size_t>(imgW) * imgH * 4));
+    } else {
+      // image is larger than the atlas in some dimension: updateTextureLayer
+      // requires a tightly packed imgW*imgH*4 buffer, but image.rgba's own
+      // rows are image.width*4 bytes apart, not imgW*4 -- slicing
+      // imgW*imgH*4 contiguous bytes off the front would silently walk
+      // across row boundaries at the wrong offsets whenever image.width !=
+      // imgW, uploading a diagonally-skewed image rather than a real crop.
+      // Repack the top-left imgW x imgH crop into its own tightly packed
+      // buffer instead.
+      std::cerr << "warning: image " << id << " (" << image.width << "x"
+                << image.height << ") exceeds the atlas (" << atlasSize_ << "x"
+                << atlasSize_ << "); uploading a top-left crop\n";
+      std::vector<std::uint8_t> cropped(static_cast<std::size_t>(imgW) * imgH *
+                                        4);
+      const auto srcStride = static_cast<std::size_t>(image.width) * 4;
+      const auto dstStride = static_cast<std::size_t>(imgW) * 4;
+      for (int y = 0; y < imgH; ++y) {
+        std::memcpy(cropped.data() + (static_cast<std::size_t>(y) * dstStride),
+                    image.rgba.data() +
+                        (static_cast<std::size_t>(y) * srcStride),
+                    dstStride);
+      }
+      device_->updateTextureLayer(
+          atlasHandle_, chosenLayer, posX, posY, imgW, imgH,
+          std::span<const std::byte>(
+              reinterpret_cast<const std::byte *>(cropped.data()),
+              cropped.size()));
+    }
   }
 
   const float atlasF = static_cast<float>(atlasSize_);

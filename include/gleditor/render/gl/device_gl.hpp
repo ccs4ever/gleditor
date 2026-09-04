@@ -74,7 +74,7 @@ public:
   bool beginFrame() override;
   void endFrame() override;
   void bindPipeline(PipelineHandle pipeline) override;
-  void bindGlyphTexture(TextureHandle texture) override;
+  void bindAtlasTexture(TextureHandle texture) override;
   void setHighlights(std::span<const HighlightRange> ranges) override;
   void drawGlyphs(const DrawUniforms &uniforms, BufferHandle vertices,
                   std::size_t vertexByteOffset,

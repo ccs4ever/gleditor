@@ -138,17 +138,16 @@ public:
                std::uint32_t colour);
 
   /**
-   * @brief An image quad from an ImageResource.
+   * @brief An image quad from an ImageResource, drawn through the image
+   *        pipeline rather than the glyph one.
+   *
+   * The resource's UV rect is carried through to the vertex data directly, so
+   * @p width and @p height may differ from the image's own pixel size --
+   * scaling and cropping are both just a matter of what rect and what quad
+   * size are given.
    */
   void addImage(float left, float bottom, float width, float height,
                 const ImageResource &image, std::uint32_t tint = 0xFFFFFFFFU);
-
-  /**
-   * @brief An image quad specifying explicit atlas texel coordinates and layer.
-   */
-  void addImage(float left, float bottom, float width, float height, int layer,
-                float texX, float texY, float texW, float texH,
-                std::uint32_t tint = 0xFFFFFFFFU);
 
   /**
    * @brief Text, with the top left of the block at (@p left, @p top).
@@ -174,7 +173,9 @@ public:
   /// this has been called.
   void commit();
 
-  [[nodiscard]] bool empty() const { return 0 == committedInstances; }
+  [[nodiscard]] bool empty() const {
+    return 0 == committedInstances && 0 == committedImageInstances;
+  }
 
   /**
    * @brief Draw the committed geometry.
@@ -192,6 +193,13 @@ private:
                 std::uint32_t foreground, std::uint32_t background,
                 std::uint32_t layer, float texX, float texY, bool solid);
 
+  /// A row of the image instance buffer. See ImageRow in canvas.cpp for the
+  /// field layout; not worth dragging into this header for a caller that only
+  /// ever calls addImage().
+  void pushImageRow(float left, float bottom, float width, float height,
+                    int layer, float u0, float v0, float u1, float v1,
+                    std::uint32_t tint);
+
   render::RenderDevice *device;
   std::string fontName;
   std::unique_ptr<BufferPool> pool;
@@ -208,6 +216,28 @@ private:
   /// document model and is not worth dragging into this header.
   std::vector<std::byte> rows;
   std::uint32_t pendingInstances{};
+
+  /**
+   * @brief Second pipeline and instance stream, for addImage() alone.
+   *
+   * A quad sampling the glyph atlas and one sampling the image atlas need
+   * different vertex data -- an explicit UV rect rather than a texel offset
+   * derived from quad size -- so they cannot share pushQuad()'s stream. Kept
+   * as a fully parallel clear()/commit()/draw() rather than folding the two
+   * together, the same way the document and the overlay stay separate draws
+   * of one canvas.
+   */
+  std::unique_ptr<BufferPool> imagePool;
+  render::PipelineHandle imagePipeline{};
+  BufferPool::Allocation imageBacking{};
+  std::uint32_t committedImageInstances{};
+  std::vector<std::byte> imageRows;
+  std::uint32_t pendingImageInstances{};
+  /// Atlas the pending/committed image rows were built against. Every
+  /// ImageResource a program hands one Canvas comes from the same
+  /// ImageCache in practice, so one handle for the whole batch is enough;
+  /// addImage() overwrites it each call rather than tracking one per row.
+  render::TextureHandle imageAtlas{};
 };
 
 } // namespace gleditor

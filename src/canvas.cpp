@@ -16,7 +16,9 @@
 #include <gleditor/doc.hpp>
 #include <gleditor/glyphcache/cache.hpp>
 #include <gleditor/image_cache.hpp>
+#include <gleditor/paths.hpp>
 #include <gleditor/render/device.hpp>
+#include <gleditor/render/shader_source.hpp>
 #include <gleditor/render_state.hpp>
 #include <gleditor/text/font.hpp>
 #include <gleditor/text/layout.hpp>
@@ -32,6 +34,45 @@ std::array<float, 16> toArray(const glm::mat4 &mat) {
   return out;
 }
 
+/**
+ * @brief One instance of the image pipeline, matching image.vert.glsl.
+ *
+ * Unlike Doc::VBORow this is not bit-packed: a page holds dozens of images at
+ * most, not a million glyphs, so there is nothing to gain from squeezing it
+ * and clarity is worth more. Field order and offsets must stay in step with
+ * imageLayout() and with the attribute locations in
+ * assets/shaders/image.vert.glsl.
+ */
+struct ImageRow {
+  std::array<float, 2> pos;  ///< Centre of the quad, model space.
+  std::array<float, 2> size; ///< Width, height, in layout pixels.
+  std::array<float, 4> uv;   ///< u0, v0 (bottom left), u1, v1 (top right).
+  std::uint32_t layer{};
+  std::uint32_t tint{}; ///< Packed RGBA8.
+  /// Picking index; the kind half of the tag is hardcoded in the vertex
+  /// stage, since every quad this pipeline draws is an image.
+  std::uint32_t index{};
+};
+
+render::VertexLayout imageLayout() {
+  using render::AttributeType;
+  static_assert(sizeof(ImageRow) == 44,
+                "read by a shader that names its fields by offset; padding "
+                "it would silently shift every attribute");
+
+  render::VertexLayout out;
+  out.stride     = sizeof(ImageRow);
+  out.attributes = {
+      {"imgPos", 0, AttributeType::Float, 2, offsetof(ImageRow, pos)},
+      {"imgSize", 1, AttributeType::Float, 2, offsetof(ImageRow, size)},
+      {"imgUv", 2, AttributeType::Float, 4, offsetof(ImageRow, uv)},
+      {"imgLayer", 3, AttributeType::UnsignedInt, 1, offsetof(ImageRow, layer)},
+      {"imgTint", 4, AttributeType::UnsignedInt, 1, offsetof(ImageRow, tint)},
+      {"imgIndex", 5, AttributeType::UnsignedInt, 1, offsetof(ImageRow, index)},
+  };
+  return out;
+}
+
 } // namespace
 
 namespace gleditor {
@@ -41,7 +82,9 @@ Canvas::Canvas(render::RenderDevice *const aDevice, std::string aFontName,
     : device(aDevice), fontName(std::move(aFontName)),
       pool(std::make_unique<BufferPool>(aDevice, sizeof(Doc::VBORow),
                                         initialRows)),
-      tagKind(render::tagKindOverlay) {}
+      tagKind(render::tagKindOverlay),
+      imagePool(std::make_unique<BufferPool>(aDevice, sizeof(ImageRow),
+                                             initialRows / 16)) {}
 
 Canvas::~Canvas() = default;
 
@@ -51,11 +94,25 @@ void Canvas::createPipeline(const render::PipelineDesc &documentDesc,
   desc.name                 = "canvas";
   desc.depthTest            = depthTest;
   pipeline                  = device->createPipeline(desc);
+
+  const auto shaders = assetPath("shaders");
+  render::PipelineDesc imageDesc;
+  imageDesc.name         = "canvas-image";
+  imageDesc.shaderName   = "image";
+  imageDesc.vertexSource = render::readShaderBody(shaders + "/image.vert.glsl");
+  imageDesc.fragmentSource =
+      render::readShaderBody(shaders + "/image.frag.glsl");
+  imageDesc.spirvDir  = documentDesc.spirvDir;
+  imageDesc.layout    = imageLayout();
+  imageDesc.depthTest = depthTest;
+  imagePipeline       = device->createPipeline(imageDesc);
 }
 
 void Canvas::clear() {
   rows.clear();
   pendingInstances = 0;
+  imageRows.clear();
+  pendingImageInstances = 0;
 }
 
 void Canvas::setTag(const std::uint32_t kind, const std::uint32_t index) {
@@ -121,27 +178,32 @@ void Canvas::addLine(const float fromX, const float fromY, const float toX,
           std::max(spanX, thickness), std::max(spanY, thickness), colour);
 }
 
+void Canvas::pushImageRow(const float left, const float bottom,
+                          const float width, const float height,
+                          const int layer, const float u0, const float v0,
+                          const float u1, const float v1,
+                          const std::uint32_t tint) {
+  const ImageRow row{{left + (width / 2.0F), bottom + (height / 2.0F)},
+                     {width, height},
+                     {u0, v0, u1, v1},
+                     static_cast<std::uint32_t>(layer),
+                     tint,
+                     tagIndex};
+
+  const auto *const bytes = reinterpret_cast<const std::byte *>(&row);
+  imageRows.insert(imageRows.end(), bytes, bytes + sizeof(row));
+  pendingImageInstances++;
+}
+
 void Canvas::addImage(const float left, const float bottom, const float width,
                       const float height, const ImageResource &image,
                       const std::uint32_t tint) {
   if (width <= 0.0F || height <= 0.0F || !image.valid()) {
     return;
   }
-  const float atlasExtent = static_cast<float>(Doc::VBORow::maxQuadExtent);
-  addImage(left, bottom, width, height, image.layer, image.u0 * atlasExtent,
-           image.v0 * atlasExtent, (image.u1 - image.u0) * atlasExtent,
-           (image.v1 - image.v0) * atlasExtent, tint);
-}
-
-void Canvas::addImage(const float left, const float bottom, const float width,
-                      const float height, const int layer, const float texX,
-                      const float texY, const float /*texW*/,
-                      const float /*texH*/, const std::uint32_t tint) {
-  if (width <= 0.0F || height <= 0.0F || layer < 0) {
-    return;
-  }
-  pushQuad(left + (width / 2.0F), bottom + (height / 2.0F), width, height, tint,
-           0x00000000U, static_cast<std::uint32_t>(layer), texX, texY, false);
+  imageAtlas = image.texture;
+  pushImageRow(left, bottom, width, height, image.layer, image.u0, image.v0,
+               image.u1, image.v1, tint);
 }
 
 TextMetrics Canvas::measureText(const std::string_view utf8) const {
@@ -206,23 +268,41 @@ void Canvas::commit() {
     backing = {};
   }
   committedInstances = pendingInstances;
-  if (0 == committedInstances) {
-    return;
+  if (0 != committedInstances) {
+    backing = pool->reserve(committedInstances);
+    pool->write(backing, 0, std::span<const std::byte>(rows));
   }
-  backing = pool->reserve(committedInstances);
-  pool->write(backing, 0, std::span<const std::byte>(rows));
+
+  if (!imageBacking.empty()) {
+    imagePool->release(imageBacking);
+    imageBacking = {};
+  }
+  committedImageInstances = pendingImageInstances;
+  if (0 != committedImageInstances) {
+    imageBacking = imagePool->reserve(committedImageInstances);
+    imagePool->write(imageBacking, 0, std::span<const std::byte>(imageRows));
+  }
 }
 
 void Canvas::draw(RenderState &state, const glm::mat4 &transform,
                   const float opacity) const {
-  if (0 == committedInstances || !pipeline.valid()) {
-    return;
+  if (0 != committedInstances && pipeline.valid()) {
+    state.device->bindPipeline(pipeline);
+    state.device->bindAtlasTexture(state.glyphCache.textureHandle());
+    const render::DrawUniforms uniforms{toArray(transform), opacity, identity};
+    state.device->drawGlyphs(uniforms, pool->buffer(),
+                             pool->byteOffset(backing), committedInstances);
   }
-  state.device->bindPipeline(pipeline);
-  state.device->bindGlyphTexture(state.glyphCache.textureHandle());
-  const render::DrawUniforms uniforms{toArray(transform), opacity, identity};
-  state.device->drawGlyphs(uniforms, pool->buffer(), pool->byteOffset(backing),
-                           committedInstances);
+
+  if (0 != committedImageInstances && imagePipeline.valid() &&
+      imageAtlas.valid()) {
+    state.device->bindPipeline(imagePipeline);
+    state.device->bindAtlasTexture(imageAtlas);
+    const render::DrawUniforms uniforms{toArray(transform), opacity, identity};
+    state.device->drawGlyphs(uniforms, imagePool->buffer(),
+                             imagePool->byteOffset(imageBacking),
+                             committedImageInstances);
+  }
 }
 
 } // namespace gleditor

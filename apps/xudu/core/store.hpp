@@ -164,6 +164,31 @@ public:
   MicroversionId insert(const MicroversionId &parent, std::uint32_t at,
                         std::string_view text);
 
+  /// The result of insertMedia(): the version it produced, plus the span the
+  /// bytes were appended as -- so a caller inserting a PDF's repeated figure
+  /// a second time can hand that span straight to insertSpan() instead of
+  /// storing the same bytes again.
+  struct InsertedMedia {
+    MicroversionId version;
+    PrimediaSpan span;
+  };
+
+  /**
+   * @brief Insert a whole media file's bytes into @p parent at @p at,
+   *        recording where it came from so a later fragment of it can still
+   *        be classified.
+   *
+   * Identical to insert() except for that one extra fact: it also records a
+   * local media segment covering the bytes just appended, tagged with
+   * @p mimeType. That is what lets a byte range transcluded out of the
+   * middle of this file later -- carrying no header of its own for libmagic
+   * to recognise -- still resolve to "an offset into a file of this MIME
+   * type" instead of being classified from its own, headerless bytes and
+   * failing.
+   */
+  InsertedMedia insertMedia(const MicroversionId &parent, std::uint32_t at,
+                            std::string_view bytes, std::string mimeType);
+
   /// Insert @p span into @p parent at @p at. Records an INSERT referencing an
   /// existing span without appending new bytes to the spool.
   MicroversionId insertSpan(const MicroversionId &parent, std::uint32_t at,
@@ -297,6 +322,34 @@ public:
   /// this store has never recorded.
   [[nodiscard]] const Scroll *scroll(ScrollId id) const;
   [[nodiscard]] const std::vector<Scroll> &scrolls() const { return externals; }
+
+  /**
+   * @brief The segment @p span's own start offset falls in, local or
+   *        external, or nullptr if nothing covers it.
+   *
+   * The one place a fragment resolves back to the whole file it was cut
+   * from: local content looks up the segment table insertMedia() populated,
+   * external content looks up the scroll's own ScrollSegment table the same
+   * way Resolver already does to fetch bytes. Either way the answer is the
+   * container's own [at, at+length) in @p span's scroll coordinates and its
+   * mimeType -- what @p span's own byte offset is relative to.
+   */
+  [[nodiscard]] const ScrollSegment *
+  containerFor(const PrimediaSpan &span) const;
+
+  /**
+   * @brief Every segment -- local or external -- overlapping
+   *        [@p start, @p start + @p length) of @p scroll, in address order.
+   *
+   * A piece can straddle a segment boundary (typed text immediately
+   * following a media file in the same scroll, say), so classifying it can
+   * need more than one answer. Empty when nothing recorded covers any of the
+   * range, which reads as "plain text, or content from before segments
+   * existed" rather than as an error.
+   */
+  [[nodiscard]] std::vector<ScrollSegment>
+  segmentsOverlapping(ScrollId scroll, std::uint64_t start,
+                      std::uint64_t length) const;
 
   void setContentSource(const ContentSource *source) {
     resolver.setSource(source);
@@ -451,6 +504,13 @@ private:
   /// recorded. A span's ScrollId is one more than the index here, so that zero
   /// stays the local spool.
   std::vector<Scroll> externals;
+  /// Where whole media files insertMedia() has appended to the local spool
+  /// began and ended, and what MIME type each was -- the local spool's own
+  /// equivalent of a Scroll's segment table, kept separately because scroll
+  /// id zero has no entry in @ref externals to hold it. Only Scroll's
+  /// segmentAt()/addSegment() are used here; its torrent-facing fields go
+  /// unused, the same way ScrollSegment's do for anything Plain.
+  Scroll localSegments;
   Resolver resolver;
   /// The operations spool, filed by the state each op produces: the single
   /// copy of them. Every question about what has been recorded is asked of

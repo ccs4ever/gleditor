@@ -143,7 +143,7 @@ void Caret::draw(RenderState &state, const glm::mat4 &pageTransform) const {
   // otherwise come down to rounding -- and the glyph backgrounds won, punching
   // white holes through it. Submitted after the documents, it is simply on top.
   state.device->bindPipeline(pipeline);
-  state.device->bindGlyphTexture(state.glyphCache.textureHandle());
+  state.device->bindAtlasTexture(state.glyphCache.textureHandle());
 
   const render::DrawUniforms uniforms{toArray(pageTransform)};
   state.device->drawGlyphs(uniforms, pool->buffer(), pool->byteOffset(backing),

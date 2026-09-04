@@ -649,7 +649,7 @@ void DeviceGL::bindPipeline(const PipelineHandle pipeline) {
   api.BlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
 }
 
-void DeviceGL::bindGlyphTexture(const TextureHandle texture) {
+void DeviceGL::bindAtlasTexture(const TextureHandle texture) {
   const auto it = textures.find(texture.id);
   if (textures.end() == it) {
     return;

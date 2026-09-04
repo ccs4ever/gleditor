@@ -301,7 +301,7 @@ bool Renderer::update(RenderState &state, const bool settled) {
   state.glyphCache.flush();
 
   device->bindPipeline(state.glyphPipeline);
-  device->bindGlyphTexture(state.glyphCache.textureHandle());
+  device->bindAtlasTexture(state.glyphCache.textureHandle());
 
   // Every page of every open document in one list, then one call. Collecting
   // first is what gives a device the chance to record the run on more than one
@@ -912,10 +912,11 @@ void Renderer::renderLoop(AutoSDLWindow &window) {
     }
 
     const bool docsLoading =
-        state.docs.empty() ||
-        std::ranges::any_of(state.docs, [](const auto &doc) {
-          return !doc->isFullyLoaded() || 0 == doc->numPages();
-        });
+        this->state->usesDocPages &&
+        (state.docs.empty() ||
+         std::ranges::any_of(state.docs, [](const auto &doc) {
+           return !doc->isFullyLoaded() || 0 == doc->numPages();
+         }));
 
     // Everything queued has been carried out and every document has finished
     // loading, so this frame shows the finished result. That is the frame a

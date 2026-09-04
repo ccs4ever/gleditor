@@ -315,6 +315,15 @@ inline constexpr std::uint32_t tagKindGlyph   = 3;
  * word has four bits of kind, which is what bounds this.
  */
 inline constexpr std::uint32_t tagKindBeam = 4;
+/**
+ * @brief An image quad, drawn by the image pipeline rather than the glyph
+ *        one.
+ *
+ * Same reasoning as @ref tagKindBeam: the image pipeline has its own instance
+ * record with an explicit UV rect rather than the glyph packing, and hardcodes
+ * this in its vertex stage rather than reading a per-instance kind.
+ */
+inline constexpr std::uint32_t tagKindImage = 5;
 
 /// Bit widths of the identity word a glyph instance carries. Packed rather
 /// than given a word each because the attachment is four words wide and the

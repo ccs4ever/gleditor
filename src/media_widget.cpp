@@ -7,8 +7,11 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstddef>
 #include <format>
 #include <iomanip>
+#include <iostream>
+#include <span>
 #include <sstream>
 #include <string>
 #include <utility>
@@ -18,6 +21,7 @@
 
 #include <gleditor/canvas.hpp>
 #include <gleditor/doc.hpp>
+#include <gleditor/image_cache.hpp>
 #include <gleditor/media.hpp>
 #include <gleditor/render/device.hpp>
 #include <gleditor/render_state.hpp>
@@ -63,7 +67,11 @@ MediaWidget::MediaWidget(std::string aFontName,
   }
 }
 
-MediaWidget::~MediaWidget() = default;
+MediaWidget::~MediaWidget() {
+  if (nullptr != device_ && videoTexture_.valid()) {
+    device_->destroyTexture(videoTexture_);
+  }
+}
 
 void MediaWidget::setPlayer(std::shared_ptr<MediaPlayer> aPlayer) {
   player_ = std::move(aPlayer);
@@ -79,6 +87,44 @@ bool MediaWidget::load(MediaResourcePtr resource) {
     return player_->load(std::move(resource));
   }
   return false;
+}
+
+bool MediaWidget::loadFragment(MediaResourcePtr resource,
+                               const ByteRange &fragment,
+                               const std::uint64_t containerLength) {
+  pendingFragment_.reset();
+  if (!load(std::move(resource))) {
+    return false;
+  }
+  if (containerLength > 0 && fragment.length < containerLength) {
+    pendingFragment_        = fragment;
+    pendingContainerLength_ = containerLength;
+  }
+  return true;
+}
+
+void MediaWidget::applyPendingFragment() {
+  if (!pendingFragment_.has_value() || nullptr == player_) {
+    return;
+  }
+  const auto duration = player_->durationSeconds();
+  if (duration <= 0.0F) {
+    return; // LibVLC has not finished parsing the container's metadata yet.
+  }
+  const auto range =
+      fragmentTimeRange(*pendingFragment_, pendingContainerLength_, duration);
+  if (!range.empty()) {
+    player_->setTimeRange(range.startSeconds, range.endSeconds);
+  }
+  pendingFragment_.reset();
+}
+
+void MediaWidget::startPlayback() {
+  if (nullptr == player_) {
+    return;
+  }
+  player_->play();
+  awaitingPlaybackStart_ = true;
 }
 
 void MediaWidget::attachToDocument(std::shared_ptr<Doc> aDoc,
@@ -140,23 +186,122 @@ void MediaWidget::setTitle(std::string title) {
 
 void MediaWidget::deviceReady(render::RenderDevice &device,
                               const render::PipelineDesc &documentPipeline) {
+  device_ = &device;
   canvas_ = std::make_unique<Canvas>(&device, fontName_);
   // Embedded in 3D world space uses depth testing; screen overlay turns it off
   canvas_->createPipeline(documentPipeline, !screenSpace_);
 }
 
+void MediaWidget::updateVideoTexture() {
+  if (nullptr == device_ || nullptr == player_ ||
+      !player_->isNewFrameAvailable()) {
+    return;
+  }
+  const auto frame = player_->latestFrame();
+  if (!frame || frame->width <= 0 || frame->height <= 0) {
+    return;
+  }
+
+  if (frame->width != videoFrameWidth_ || frame->height != videoFrameHeight_) {
+    if (videoTexture_.valid()) {
+      device_->destroyTexture(videoTexture_);
+      videoTexture_ = {};
+    }
+    const int texSize = std::max(frame->width, frame->height);
+    videoTexture_ =
+        device_->createTextureArray(texSize, 1, render::TextureFormat::RGBA8);
+    videoFrameWidth_  = frame->width;
+    videoFrameHeight_ = frame->height;
+  }
+  if (!videoTexture_.valid()) {
+    return;
+  }
+
+  device_->updateTextureLayer(
+      videoTexture_, 0, 0, 0, frame->width, frame->height,
+      std::span<const std::byte>(
+          reinterpret_cast<const std::byte *>(frame->rgba.data()),
+          static_cast<std::size_t>(frame->width) * frame->height * 4));
+}
+
 bool MediaWidget::busy() const {
   if (player_ != nullptr) {
-    return player_->state() == PlaybackState::Playing ||
+    return awaitingPlaybackStart_ ||
+           player_->state() == PlaybackState::Opening ||
+           player_->state() == PlaybackState::Playing ||
            player_->state() == PlaybackState::Buffering;
   }
   return false;
+}
+
+std::optional<MediaWidget::Corner> MediaWidget::bottomLeftOf() const {
+  if (nullptr == doc_) {
+    return std::nullopt;
+  }
+  float anchorX         = 0.0F;
+  std::uint32_t pageIdx = 0;
+  // Filled in below, in pixels, up-positive and measured from the page's
+  // own centre -- the same space Page::getModel()'s translation lands in,
+  // so pageCenterY + effectiveY*pixelsToWorld needs no further correction.
+  float effectiveY = 0.0F;
+
+  if (explicitPage_) {
+    pageIdx = pageIndex_;
+    anchorX = pageX_;
+    // pageY_ is a caller-given distance down from the page's top margin
+    // (attachToPage()'s own convention -- see main.cpp's --video/--audio
+    // placement), which is a different origin from anchor->y below, though
+    // the same up-positive direction: converting means locating the top
+    // edge in this same centre-relative pixel space, half the page's own
+    // height above centre, then stepping down by pageY_.
+    const auto *const pageObj = doc_->page(pageIdx);
+    const float halfHeightPixels =
+        (pageObj != nullptr) ? (pageObj->heightPixels() / 2.0F) : 50.0F;
+    effectiveY = halfHeightPixels - pageY_;
+  } else {
+    const auto anchor = doc_->anchorFor(docOffset_);
+    if (!anchor.has_value()) {
+      return std::nullopt;
+    }
+    pageIdx = anchor->pageIndex;
+    anchorX = anchor->x;
+    // Page::caretGeometry (src/doc.cpp) hands back Y increasing upward from
+    // the page's own centre -- posY = originY - (top + height/2), with
+    // originY the page's top edge in that same up-positive space -- so
+    // moving below the anchor line is *subtracting* a pixel offset here,
+    // not negating and re-adding one as if Y increased downward from the
+    // page's top margin.
+    effectiveY = anchor->y - (height_ + 20.0F);
+  }
+  return Corner{pageIdx, anchorX, effectiveY};
+}
+
+std::optional<Doc::Anchor>
+MediaWidget::rectFor(const Doc &doc, const std::uint32_t docOffset) const {
+  if (explicitPage_ || doc_.get() != &doc || docOffset_ != docOffset) {
+    return std::nullopt;
+  }
+  const auto corner = bottomLeftOf();
+  if (!corner.has_value()) {
+    return std::nullopt;
+  }
+  Doc::Anchor rect;
+  rect.pageIndex = corner->pageIndex;
+  rect.x         = corner->x + (width_ * 0.5F);
+  rect.y         = corner->y + (height_ * 0.5F);
+  rect.height    = height_;
+  return rect;
 }
 
 void MediaWidget::drawFrame(FrameContext &ctx) {
   if (!visible_ || nullptr == canvas_ || nullptr == player_) {
     return;
   }
+  if (awaitingPlaybackStart_ && (player_->state() != PlaybackState::Stopped ||
+                                 player_->isNewFrameAvailable())) {
+    awaitingPlaybackStart_ = false;
+  }
+  applyPendingFragment();
 
   glm::mat4 transform{1.0F};
 
@@ -169,40 +314,26 @@ void MediaWidget::drawFrame(FrameContext &ctx) {
     if (doc_->isClosing()) {
       return;
     }
-    float anchorX         = 0.0F;
-    float anchorY         = 0.0F;
-    std::uint32_t pageIdx = 0;
-
-    if (explicitPage_) {
-      pageIdx = pageIndex_;
-      anchorX = pageX_;
-      anchorY = -pageY_;
-    } else {
-      const auto anchor = doc_->anchorFor(docOffset_);
-      if (!anchor.has_value()) {
-        return;
-      }
-      pageIdx = anchor->pageIndex;
-      anchorX = anchor->x;
-      anchorY = -(anchor->y + height_ + 20.0F);
+    const auto corner = bottomLeftOf();
+    if (!corner.has_value()) {
+      return;
     }
+    const auto pageIdx     = corner->pageIndex;
+    const float anchorX    = corner->x;
+    const float effectiveY = corner->y;
 
-    const auto *pageObj     = doc_->page(pageIdx);
-    const float pageCenterY = (pageObj != nullptr)
-                                  ? pageObj->getModel()[3][1]
-                                  : (-100.0F * static_cast<float>(pageIdx));
-    const float pageHeightWorld =
-        (pageObj != nullptr) ? (pageObj->heightPixels() * Doc::pixelsToWorld)
-                             : 100.0F;
-    const float pageTopY = pageCenterY + (pageHeightWorld / 2.0F);
+    const auto *const pageObj = doc_->page(pageIdx);
+    const float pageCenterY   = (pageObj != nullptr)
+                                    ? pageObj->getModel()[3][1]
+                                    : (-100.0F * static_cast<float>(pageIdx));
 
     const auto docModel = doc_->modelMatrix();
     // Scale from widget layout pixel space to document world space
     const auto widgetModel =
-        glm::translate(docModel,
-                       glm::vec3{anchorX * Doc::pixelsToWorld,
-                                 pageTopY + (anchorY * Doc::pixelsToWorld),
-                                 0.05F}) *
+        glm::translate(
+            docModel,
+            glm::vec3{anchorX * Doc::pixelsToWorld,
+                      pageCenterY + (effectiveY * Doc::pixelsToWorld), 0.05F}) *
         glm::scale(glm::mat4(1.0F),
                    glm::vec3{Doc::pixelsToWorld, Doc::pixelsToWorld, 1.0F});
     transform = ctx.viewProjection * widgetModel;
@@ -274,16 +405,50 @@ void MediaWidget::drawFrame(FrameContext &ctx) {
   // 3. Video Viewport / Audio Badge Area
   const float mediaAreaLeft   = 12.0F;
   const float mediaAreaBottom = 54.0F;
-  const float mediaAreaWidth  = width_ - 24.0F;
-  const float mediaAreaHeight = height_ - 88.0F;
+  const float mediaAreaWidth  = width_ - chromeWidthPx;
+  const float mediaAreaHeight = height_ - chromeHeightPx;
 
   if (mediaAreaHeight > 10.0F) {
     if (player_->hasVideo()) {
       canvas_->addRect(mediaAreaLeft, mediaAreaBottom, mediaAreaWidth,
                        mediaAreaHeight, videoAreaBg);
-      canvas_->addText(ctx.state, mediaAreaLeft + 8.0F,
-                       mediaAreaBottom + (mediaAreaHeight / 2.0F) + 6.0F,
-                       "🎬 Video Surface", textDim, videoAreaBg);
+      updateVideoTexture();
+      if (videoTexture_.valid() && videoFrameWidth_ > 0 &&
+          videoFrameHeight_ > 0) {
+        // Letterboxed within the viewport rather than stretched: a frame
+        // whose aspect does not match the card would otherwise distort.
+        const float texSize =
+            static_cast<float>(std::max(videoFrameWidth_, videoFrameHeight_));
+        const float frameAspect = static_cast<float>(videoFrameWidth_) /
+                                  static_cast<float>(videoFrameHeight_);
+        const float areaAspect  = mediaAreaWidth / mediaAreaHeight;
+        float drawW             = mediaAreaWidth;
+        float drawH             = mediaAreaHeight;
+        if (frameAspect > areaAspect) {
+          drawH = mediaAreaWidth / frameAspect;
+        } else {
+          drawW = mediaAreaHeight * frameAspect;
+        }
+        const float drawX = mediaAreaLeft + ((mediaAreaWidth - drawW) / 2.0F);
+        const float drawY =
+            mediaAreaBottom + ((mediaAreaHeight - drawH) / 2.0F);
+
+        ImageResource frameResource;
+        frameResource.width   = videoFrameWidth_;
+        frameResource.height  = videoFrameHeight_;
+        frameResource.layer   = 0;
+        frameResource.u0      = 0.0F;
+        frameResource.v0      = 0.0F;
+        frameResource.u1      = static_cast<float>(videoFrameWidth_) / texSize;
+        frameResource.v1      = static_cast<float>(videoFrameHeight_) / texSize;
+        frameResource.texture = videoTexture_;
+        canvas_->addImage(drawX, drawY, drawW, drawH, frameResource,
+                          0xFFFFFFFFU);
+      } else {
+        canvas_->addText(ctx.state, mediaAreaLeft + 8.0F,
+                         mediaAreaBottom + (mediaAreaHeight / 2.0F) + 6.0F,
+                         "🎬 Video Surface", textDim, videoAreaBg);
+      }
     } else {
       canvas_->addRect(mediaAreaLeft, mediaAreaBottom, mediaAreaWidth,
                        mediaAreaHeight, 0x1A202BF0U);
@@ -387,7 +552,7 @@ bool MediaWidget::picked(const render::PickingResult &pick,
   const auto offset = tag - tagBase_;
 
   if (offset == tagPlay) {
-    player_->play();
+    startPlayback();
     revision_++;
     return true;
   }
@@ -474,7 +639,7 @@ bool MediaWidget::performAction(const std::uint64_t nodeId,
   }
   const auto rootId = static_cast<std::uint64_t>(tagBase_);
   if (nodeId == rootId + tagPlay) {
-    player_->play();
+    startPlayback();
     revision_++;
     return true;
   }

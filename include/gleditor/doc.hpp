@@ -84,6 +84,14 @@ struct PageShaping {
     float left{};
     float top{};
     std::size_t lineIndex{};
+    /// Byte range of this line within the page's own text, the same way
+    /// ClusterBox carries one for a cluster. A blank line -- one of the
+    /// newlines a media placeholder reserves, say -- has no glyphs and so no
+    /// cluster for caretGeometry() to match against; this is what lets it
+    /// locate such a line directly instead of falling back to some other
+    /// line entirely.
+    std::uint32_t byteStart{};
+    std::uint32_t byteLength{};
   };
   std::vector<LineEntry> lines;
   std::size_t lineCount{};
@@ -537,6 +545,19 @@ public:
    * overlapping its neighbours.
    */
   static constexpr float pixelsToWorld = 1.0F / 18.0F;
+
+  /**
+   * @brief The page geometry layoutFrom() wraps and paginates to.
+   *
+   * An 8.5x11in "Letter" page at pageDpi pixels per inch. Exposed so a
+   * caller deciding how much room something needs before a page exists --
+   * how many blank lines a media placeholder should reserve, say -- wraps to
+   * the same width layoutFrom() will actually use, rather than a second
+   * guess of its own that can drift from this one.
+   */
+  static constexpr float pageDpi      = 139.70F;
+  static constexpr float textWidthPx  = pageDpi * 8.5F;
+  static constexpr float textHeightPx = pageDpi * 11.0F;
 
   /// An empty document.
   static std::shared_ptr<Doc> create(const RendererRef &renderer,

@@ -144,6 +144,7 @@ std::string assembleShaderSource(const Backend backend, const ShaderStage stage,
   out += std::format("#define GLEDITOR_TAG_KIND_SHIFT {}\n",
                      tagDocBits + tagPageBits);
   out += std::format("#define GLEDITOR_TAG_KIND_BEAM {}\n", tagKindBeam);
+  out += std::format("#define GLEDITOR_TAG_KIND_IMAGE {}\n", tagKindImage);
   out += interfaceMacros(backend, stage);
   out += uniformBlock(backend, stage);
   // Reset the line counter so compiler diagnostics point at lines of the

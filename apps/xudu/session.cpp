@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <chrono>
+#include <cmath>
 #include <cstdint>
 #include <filesystem>
 #include <fstream>
@@ -10,16 +11,20 @@
 #include <map>
 #include <memory>
 #include <ranges>
+#include <span>
 #include <stdexcept>
 #include <string>
 #include <utility>
 #include <vector>
 
 #include <glm/ext/matrix_clip_space.hpp>
+#include <glm/ext/matrix_transform.hpp>
 
 #include <gleditor/doc.hpp>
+#include <gleditor/media_widget.hpp>
 #include <gleditor/render/types.hpp>
 #include <gleditor/render_state.hpp>
+#include <gleditor/text/font.hpp>
 #include <gleditor/text_source.hpp>
 
 #include "xudu/core/link_layout.hpp"
@@ -86,6 +91,24 @@ MicroversionId Session::insertText(const std::uint32_t docIndex,
   const auto sIdx        = open[docIndex].storeIndex;
   auto &st               = store(sIdx);
   const auto prod        = st.insert(open[docIndex].version, at, newText);
+  open[docIndex].version = prod;
+  open[docIndex].pieces  = st.rebuild(prod);
+  invalidate();
+  return prod;
+}
+
+MicroversionId Session::insertMedia(const std::uint32_t docIndex,
+                                    const std::uint32_t at,
+                                    std::string_view bytes,
+                                    std::string mimeType) {
+  if (docIndex >= open.size()) {
+    return MicroversionId{};
+  }
+  const auto sIdx = open[docIndex].storeIndex;
+  auto &st        = store(sIdx);
+  const auto prod =
+      st.insertMedia(open[docIndex].version, at, bytes, std::move(mimeType))
+          .version;
   open[docIndex].version = prod;
   open[docIndex].pieces  = st.rebuild(prod);
   invalidate();
@@ -602,9 +625,40 @@ Session::importFileToTemporaryStore(const std::string &filePath) {
                       : stores[0].store->userPermascrollPtr();
   auto newStore = std::make_unique<Store>(perma);
   const gleditor::FileTextSource source(filePath);
-  auto imported = newStore->insert(MicroversionId{}, 0, source.text());
-  for (const auto breakAt : source.forcedBreaks()) {
-    imported = newStore->insertBreak(imported, breakAt);
+  // Piece by piece rather than one whole-file insert(), the same way and for
+  // the same reason as the very first --import (see main.cpp): a plain file
+  // is one plain-text piece and this changes nothing for it, but a PDF's
+  // embedded figures only reach the store as classifiable primedia spans
+  // through insertMedia(), which pieces() is what makes reachable here.
+  MicroversionId imported;
+  std::uint32_t at = 0;
+  // Indexed by piece position, parallel to source.pieces(): the span each
+  // piece landed at, so a later piece naming an earlier one via
+  // duplicateOfPieceIndex (a PDF figure repeated across pages) can be
+  // inserted via insertSpan() -- pointing at the bytes already stored --
+  // instead of appending its own copy through insertMedia().
+  std::vector<PrimediaSpan> insertedSpans;
+  const auto pieces = source.pieces();
+  insertedSpans.reserve(pieces.size());
+  for (const auto &piece : pieces) {
+    PrimediaSpan span;
+    if (piece.duplicateOfPieceIndex.has_value() &&
+        *piece.duplicateOfPieceIndex < insertedSpans.size()) {
+      span     = insertedSpans[*piece.duplicateOfPieceIndex];
+      imported = newStore->insertSpan(imported, at, span);
+    } else if (piece.mimeType.empty()) {
+      imported = newStore->insert(imported, at, piece.bytes);
+    } else {
+      auto inserted =
+          newStore->insertMedia(imported, at, piece.bytes, piece.mimeType);
+      imported = inserted.version;
+      span     = inserted.span;
+    }
+    insertedSpans.push_back(span);
+    at += static_cast<std::uint32_t>(piece.bytes.size());
+    if (piece.pageBreakAfter) {
+      imported = newStore->insertBreak(imported, at);
+    }
   }
   newStore->save(tempDir.string());
 
@@ -700,12 +754,182 @@ void Session::refresh(const std::uint32_t docIndex,
 }
 
 namespace {
-constexpr std::string_view kMediaSpacingPlaceholder = "\n\n\n\n\n\n\n\n\n\n";
+
+/// Audio has no aspect ratio to size a placeholder from -- it is a fixed
+/// player card regardless of content -- so its reservation stays the fixed
+/// line count this used to be for every kind of media.
+constexpr std::uint32_t kAudioPlaceholderLines = 10;
+
+/// Line pitch of @p fontName, or a plausible guess if it fails to resolve --
+/// a placeholder's whole job is reserving *some* room, and a slightly wrong
+/// guess is a smaller visual glitch than a placeholder that renders nothing.
+float lineHeightFor(const std::string_view fontName) {
+  const auto font =
+      gleditor::text::FontManager::instance().getFont(std::string{fontName});
+  return (font != nullptr) ? font->metrics().lineHeight : 19.0F;
+}
+
+/// The box one image is drawn into: the page's full text width, at the
+/// image's own aspect ratio -- unless that would stand taller than a whole
+/// page, which a portrait image (aspect < 1) run through the same formula
+/// otherwise would, since textWidthPx / aspect grows without bound as aspect
+/// shrinks. Capping height to one page and deriving width from *that*
+/// instead is the same "fit inside the box" rule a landscape image already
+/// satisfies at full width -- so this changes nothing for the images Phase 4
+/// was first verified with, only for ones taller than they are wide.
+///
+/// Both placeholderFor() (how much room to reserve) and ImageOverlay::place()
+/// (how big to actually draw it) must call this and agree, for the same
+/// reason they must agree on everything else here: a placeholder sized one
+/// way and a widget sized another either overlaps the text that follows or
+/// leaves a gap before it.
+struct ImageFitSize {
+  float width;
+  float height;
+};
+
+ImageFitSize imageFitSize(const float aspect) {
+  float width  = Doc::textWidthPx;
+  float height = width / aspect;
+  if (height > Doc::textHeightPx) {
+    height = Doc::textHeightPx;
+    width  = height * aspect;
+  }
+  return {width, height};
+}
+
+/// Vertical gap ImageOverlay::bottomLeftOf() leaves between the anchor line
+/// and the top of the image it draws. placeholderFor() must reserve this
+/// same amount, on top of imageFitSize()'s own height, or the widget draws
+/// into space nothing in the text flow set aside for it -- invisible for a
+/// small image with page to spare, but a real overflow past the page's own
+/// bottom edge for one tall enough to nearly fill the remaining page height,
+/// which is exactly what this constant being reserved nowhere used to cause.
+constexpr float kImageGapBelowAnchorPx = 20.0F;
+
+/// How many blank lines to reserve for one media span, sized so the widget
+/// eventually placed there -- an image fit within the page (see
+/// imageFitSize()), a video card at the page's full text width plus its
+/// chrome -- fits without overlapping the text that follows or leaving a gap
+/// before it.
+///
+/// Must be the only place this decision is made: sourceFor() spends this
+/// many newline bytes and mediaSpansFor() advances docOffset by the same
+/// amount, and the two disagreeing would misalign every anchor into media
+/// that follows a shorter span.
+std::string placeholderFor(const std::span<const std::uint8_t> bytes,
+                           const std::string_view mime,
+                           const std::string_view fontName) {
+  const float lineHeight = lineHeightFor(fontName);
+
+  float reservedHeightPx = 0.0F;
+  if (gleditor::MagicMimeDetector::isImageMime(mime)) {
+    const auto decoded =
+        gleditor::decodeImageBuffer(bytes, gleditor::MimeType{mime});
+    const float aspect = decoded.valid() ? decoded.aspectRatio() : 1.0F;
+    reservedHeightPx   = imageFitSize(aspect).height + kImageGapBelowAnchorPx;
+  } else if (gleditor::MagicMimeDetector::isVideoMime(mime)) {
+    reservedHeightPx =
+        (Doc::textWidthPx / gleditor::MediaWidget::defaultAspect) +
+        gleditor::MediaWidget::chromeHeightPx;
+  } else {
+    return std::string(kAudioPlaceholderLines, '\n');
+  }
+
+  const auto lines = static_cast<std::uint32_t>(
+      std::max(1.0F, std::ceil(reservedHeightPx / lineHeight)));
+  return std::string(lines, '\n');
+}
+
+/// One stretch of a piece, classified as plain text or media. See
+/// classifyRun() for why a piece can hold more than one of these.
+struct ClassifiedStretch {
+  bool isMedia{false};
+  std::uint64_t start{}; ///< Scroll-relative, same coordinates as the piece.
+  std::uint64_t length{};
+  std::string mime;                ///< Set only when isMedia.
+  std::uint64_t containerStart{};  ///< Scroll-relative start of the whole
+                                   ///< file this stretch belongs to. Set only
+                                   ///< when isMedia.
+  std::uint64_t containerLength{}; ///< That file's own total length.
+};
+
+/// Splits [@p run.start, @p run.start + @p run.length) into stretches of
+/// plain text and media, resolving each media stretch to the whole file it
+/// was cut from -- via Store::segmentsOverlapping(), which is what
+/// Store::insertMedia() populated -- rather than MIME-sniffing the piece's
+/// own bytes outright.
+///
+/// This is what makes a fragment transcluded out of the middle of a media
+/// file still classify correctly: cut loose from its container it carries no
+/// header of its own for libmagic to recognise (a PNG's IDAT bytes, a WAV's
+/// PCM samples with no RIFF chunk in front of them), so sniffing the
+/// fragment's own bytes is exactly the failure Gap E named. Resolving by
+/// address instead means the fragment's *origin* is what gets classified,
+/// which still has its header, regardless of what got cut out of it.
+///
+/// A run can also straddle a segment boundary -- typed text immediately
+/// following a media file in the same scroll coalesces into one piece (see
+/// Store::insertMedia()'s own comment) -- so this walks every segment
+/// overlapping the run rather than assuming one answer for the whole thing.
+/// Any stretch no segment covers falls back to sniffing its own bytes
+/// directly, which is what makes this correct for content from before
+/// segments existed as well as for genuinely plain typed text.
+std::vector<ClassifiedStretch> classifyRun(const Store &st,
+                                           const PrimediaSpan &run,
+                                           gleditor::MagicMimeDetector &magic) {
+  std::vector<ClassifiedStretch> out;
+  const auto runEnd = run.start + run.length;
+
+  const auto classifyPlain = [&](const std::uint64_t start,
+                                 const std::uint64_t length) {
+    if (0 == length) {
+      return;
+    }
+    const auto bytes = st.read(PrimediaSpan{run.scroll, start, length});
+    const auto mime  = magic.identifyBuffer(bytes.data(), bytes.size());
+    if (gleditor::MagicMimeDetector::isMediaMime(mime)) {
+      out.push_back(ClassifiedStretch{.isMedia         = true,
+                                      .start           = start,
+                                      .length          = length,
+                                      .mime            = mime,
+                                      .containerStart  = start,
+                                      .containerLength = length});
+    } else {
+      out.push_back(ClassifiedStretch{
+          .isMedia = false, .start = start, .length = length});
+    }
+  };
+
+  std::uint64_t cursor = run.start;
+  for (const auto &segment :
+       st.segmentsOverlapping(run.scroll, run.start, run.length)) {
+    if (segment.at > cursor) {
+      classifyPlain(cursor, segment.at - cursor);
+      cursor = segment.at;
+    }
+    const auto mediaEnd = std::min(runEnd, segment.end());
+    if (mediaEnd > cursor) {
+      out.push_back(ClassifiedStretch{.isMedia         = true,
+                                      .start           = cursor,
+                                      .length          = mediaEnd - cursor,
+                                      .mime            = segment.mimeType,
+                                      .containerStart  = segment.at,
+                                      .containerLength = segment.length});
+      cursor = mediaEnd;
+    }
+  }
+  if (cursor < runEnd) {
+    classifyPlain(cursor, runEnd - cursor);
+  }
+  return out;
+}
+
 } // namespace
 
 std::shared_ptr<VersionTextSource>
-Session::sourceFor(const MicroversionId &version,
-                   const std::size_t storeIndex) const {
+Session::sourceFor(const MicroversionId &version, const std::size_t storeIndex,
+                   const std::string_view fontName) const {
   const auto &st     = store(storeIndex);
   const auto rebuilt = st.rebuild(version);
   gleditor::MagicMimeDetector magic;
@@ -717,12 +941,23 @@ Session::sourceFor(const MicroversionId &version,
     if (breakMarkerScroll == run.scroll) {
       continue;
     }
-    const auto bytes = st.read(run);
-    const auto mime  = magic.identifyBuffer(bytes.data(), bytes.size());
-    if (gleditor::MagicMimeDetector::isMediaMime(mime)) {
-      concatext += kMediaSpacingPlaceholder;
-    } else {
-      concatext += bytes;
+    for (const auto &stretch : classifyRun(st, run, magic)) {
+      if (!stretch.isMedia) {
+        concatext +=
+            st.read(PrimediaSpan{run.scroll, stretch.start, stretch.length});
+        continue;
+      }
+      // The whole container's bytes, not just this stretch: a fragment of a
+      // compressed image or media file cannot be sized (or, for images,
+      // meaningfully shown at all -- see ImageOverlay's own container
+      // fallback) from a slice of it alone.
+      const auto containerBytes = st.read(PrimediaSpan{
+          run.scroll, stretch.containerStart, stretch.containerLength});
+      concatext += placeholderFor(
+          std::span<const std::uint8_t>(
+              reinterpret_cast<const std::uint8_t *>(containerBytes.data()),
+              containerBytes.size()),
+          stretch.mime, fontName);
     }
   }
 
@@ -731,7 +966,8 @@ Session::sourceFor(const MicroversionId &version,
 
 std::vector<Session::MediaSpanInfo>
 Session::mediaSpansFor(const MicroversionId &version,
-                       const std::size_t storeIndex) const {
+                       const std::size_t storeIndex,
+                       const std::string_view fontName) const {
   if (storeIndex >= stores.size() || !stores[storeIndex].store) {
     return {};
   }
@@ -746,16 +982,20 @@ Session::mediaSpansFor(const MicroversionId &version,
     if (breakMarkerScroll == run.scroll) {
       continue;
     }
-    const auto bytes = st.read(run);
-    const auto mime  = magic.identifyBuffer(bytes.data(), bytes.size());
-    if (gleditor::MagicMimeDetector::isMediaMime(mime)) {
+    for (const auto &stretch : classifyRun(st, run, magic)) {
+      if (!stretch.isMedia) {
+        docOffset += static_cast<std::uint32_t>(stretch.length);
+        continue;
+      }
       MediaSpanInfo info;
-      info.span      = run;
+      info.span      = PrimediaSpan{run.scroll, stretch.start, stretch.length};
       info.docOffset = docOffset;
-      info.mime      = mime;
-      info.isAudio   = gleditor::MagicMimeDetector::isAudioMime(mime);
-      info.isVideo   = gleditor::MagicMimeDetector::isVideoMime(mime);
-      info.isImage   = gleditor::MagicMimeDetector::isImageMime(mime);
+      info.mime      = stretch.mime;
+      info.isAudio   = gleditor::MagicMimeDetector::isAudioMime(stretch.mime);
+      info.isVideo   = gleditor::MagicMimeDetector::isVideoMime(stretch.mime);
+      info.isImage   = gleditor::MagicMimeDetector::isImageMime(stretch.mime);
+      info.containerOffset = stretch.start - stretch.containerStart;
+      info.containerLength = stretch.containerLength;
       if (info.isAudio) {
         info.label = "Audio Stream";
       } else if (info.isVideo) {
@@ -763,10 +1003,18 @@ Session::mediaSpansFor(const MicroversionId &version,
       } else if (info.isImage) {
         info.label = "Image Graphic";
       }
+
+      const auto containerBytes = st.read(PrimediaSpan{
+          run.scroll, stretch.containerStart, stretch.containerLength});
+      info.reservedLength       = static_cast<std::uint32_t>(
+          placeholderFor(
+              std::span<const std::uint8_t>(
+                  reinterpret_cast<const std::uint8_t *>(containerBytes.data()),
+                  containerBytes.size()),
+              stretch.mime, fontName)
+              .size());
       list.push_back(info);
-      docOffset += static_cast<std::uint32_t>(kMediaSpacingPlaceholder.size());
-    } else {
-      docOffset += static_cast<std::uint32_t>(bytes.size());
+      docOffset += info.reservedLength;
     }
   }
   return list;
@@ -1206,6 +1454,125 @@ void HypertimeMap::describe(gleditor::a11y::Builder &into) {
     mapNode.children.push_back(into.id(nodeId));
   }
   into.contribute(into.id(mapId));
+}
+
+ImageOverlay::ImageOverlay(std::string aFontName)
+    : fontName(std::move(aFontName)) {}
+
+ImageOverlay::~ImageOverlay() = default;
+
+void ImageOverlay::deviceReady(render::RenderDevice &device,
+                               const render::PipelineDesc &documentPipeline) {
+  canvas = std::make_unique<gleditor::Canvas>(&device, fontName);
+  // Embedded in the document's own world space, so depth-tested the same way
+  // a page's own text is: an image behind the page it sits on should stay
+  // behind it.
+  canvas->createPipeline(documentPipeline, true);
+  imageCache = std::make_unique<gleditor::ImageCache>(&device);
+}
+
+void ImageOverlay::place(std::shared_ptr<Doc> doc,
+                         const std::uint32_t docOffset, const std::string &id,
+                         const std::span<const std::uint8_t> bytes,
+                         const gleditor::MimeType &mime) {
+  if (!imageCache) {
+    return;
+  }
+  const auto resource = imageCache->loadBuffer(id, bytes, mime);
+  if (!resource || !resource->valid()) {
+    return;
+  }
+
+  // Fit within one page -- matching what Session::placeholderFor()
+  // (session.cpp) reserved for it when the document's text was built. The
+  // two must agree: this is drawn at the same byte offset that placeholder's
+  // blank lines start at, and a differently-sized image here would either
+  // leave a gap or overlap the text that follows.
+  const auto [width, height] = imageFitSize(resource->aspectRatio());
+
+  placements.push_back(
+      Placement{std::move(doc), docOffset, *resource, width, height});
+}
+
+std::optional<ImageOverlay::Corner>
+ImageOverlay::bottomLeftOf(const Placement &p) {
+  if (!p.doc) {
+    return std::nullopt;
+  }
+  const auto anchor = p.doc->anchorFor(p.docOffset);
+  if (!anchor.has_value()) {
+    return std::nullopt;
+  }
+  // Page::caretGeometry (src/doc.cpp) hands back Y increasing upward from
+  // the page's own centre -- posY = originY - (top + height/2), and originY
+  // is the page's top edge in that same up-positive space -- so moving
+  // below the anchor line is *subtracting* a pixel offset, not negating and
+  // re-adding one as if Y increased downward from the page's top margin.
+  return Corner{anchor->pageIndex, anchor->x,
+                anchor->y - (p.height + kImageGapBelowAnchorPx)};
+}
+
+void ImageOverlay::drawFrame(gleditor::FrameContext &ctx) {
+  if (!canvas) {
+    return;
+  }
+  for (const auto &p : placements) {
+    if (!p.doc || p.doc->isClosing()) {
+      continue;
+    }
+    const auto corner = bottomLeftOf(p);
+    if (!corner.has_value()) {
+      continue;
+    }
+    const auto pageIdx  = corner->pageIndex;
+    const float anchorX = corner->x;
+    const float anchorY = corner->y;
+
+    const auto *const pageObj = p.doc->page(pageIdx);
+    // World-Y of this page's own origin, which callers use to convert a
+    // page-pixel-space Y (already the same up-positive, centre-relative
+    // convention as anchor->y) into world space: pageCenterY + Y*pixelsToWorld.
+    const float pageCenterY = (nullptr != pageObj)
+                                  ? pageObj->getModel()[3][1]
+                                  : (-100.0F * static_cast<float>(pageIdx));
+
+    const auto docModel = p.doc->modelMatrix();
+    const auto widgetModel =
+        glm::translate(docModel,
+                       glm::vec3{anchorX * Doc::pixelsToWorld,
+                                 pageCenterY + (anchorY * Doc::pixelsToWorld),
+                                 0.05F}) *
+        glm::scale(glm::mat4(1.0F),
+                   glm::vec3{Doc::pixelsToWorld, Doc::pixelsToWorld, 1.0F});
+    const auto transform = ctx.viewProjection * widgetModel;
+
+    canvas->setIdentity(p.doc->documentIndex(), pageIdx);
+    canvas->setTag(render::tagKindOverlay, 0);
+    canvas->clear();
+    canvas->addImage(0.0F, 0.0F, p.width, p.height, p.image, 0xFFFFFFFFU);
+    canvas->commit();
+    canvas->draw(ctx.state, transform, 1.0F);
+  }
+}
+
+std::optional<Doc::Anchor>
+ImageOverlay::rectFor(const Doc &doc, const std::uint32_t docOffset) const {
+  for (const auto &p : placements) {
+    if (p.doc.get() != &doc || p.docOffset != docOffset) {
+      continue;
+    }
+    const auto corner = bottomLeftOf(p);
+    if (!corner.has_value()) {
+      return std::nullopt;
+    }
+    Doc::Anchor rect;
+    rect.pageIndex = corner->pageIndex;
+    rect.x         = corner->x + (p.width * 0.5F);
+    rect.y         = corner->y + (p.height * 0.5F);
+    rect.height    = p.height;
+    return rect;
+  }
+  return std::nullopt;
 }
 
 } // namespace xudu

@@ -195,7 +195,12 @@ int main(const int argc, char **argv) {
 #endif
   gleditor::initLocale();
 
-  const auto state    = std::make_shared<AppState>();
+  const auto state = std::make_shared<AppState>();
+  // zigzag draws CompactZZCell slices through its own FrameContributor, not
+  // Doc pages -- RenderState::docs stays empty for the whole run by design,
+  // so the default (waiting for it to be non-empty and loaded) would make
+  // --profile/--screenshot wait on a condition that can never become true.
+  state->usesDocPages = false;
   const bool detailed = wantsEveryOption(argc, argv);
 
   argparse::ArgumentParser parser("zigzag", TOSTRING(GLEDITOR_VERSION));

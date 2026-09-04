@@ -67,8 +67,35 @@ public:
    */
   using Opener = std::function<void(const MicroversionId &)>;
 
+  /**
+   * @brief Where a media span's own widget sits, as an anchor a beam can use
+   *        directly -- pageIndex/x/y of the widget's centre, height of the
+   *        widget itself, in the same page-pixel-space convention
+   *        Doc::anchorFor() already returns, so no other beam code needs to
+   *        know a media anchor is any different from a text one.
+   *
+   * Deliberately a callback rather than a direct dependency on ImageOverlay
+   * or Views: both are defined in main.cpp (Views is a local class there),
+   * and resolving a rectangle needs concrete knowledge of how each was laid
+   * out (imageFitSize(), MediaWidget::chromeHeightPx, ...) that belongs with
+   * whichever of the two actually placed the widget, not with the class that
+   * draws links between documents.
+   *
+   * @return nullopt when @p docOffset names no media span's widget --
+   *         plain text, or a span whose widget has not been placed yet --
+   *         which is what tells resolveAnchors() to fall back to
+   *         Doc::anchorFor() the same way it always has.
+   */
+  using MediaRectResolver = std::function<std::optional<Doc::Anchor>(
+      const Doc &doc, std::size_t storeIndex, const MicroversionId &version,
+      std::uint32_t docOffset)>;
+
   LinkBeams(Session &aSession, RendererRef aRenderer);
   ~LinkBeams() override;
+
+  void setMediaRectResolver(MediaRectResolver resolver) {
+    mediaRectResolver = std::move(resolver);
+  }
 
   void deviceReady(render::RenderDevice &device,
                    const render::PipelineDesc &documentPipeline) override;
@@ -290,6 +317,7 @@ private:
   Session &session;
   RendererRef renderer;
   Opener opener;
+  MediaRectResolver mediaRectResolver;
   std::unique_ptr<gleditor::Beams> beams;
   std::vector<Strand> strands;
   std::vector<Dangling> dangling;

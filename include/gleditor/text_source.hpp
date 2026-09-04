@@ -19,6 +19,7 @@
 
 #include <cstdint>
 #include <gleditor/glyphcache/types.hpp>
+#include <optional>
 #include <string>
 #include <utility>
 #include <vector>
@@ -51,6 +52,43 @@ public:
 
 private:
   void *cookie{nullptr};
+};
+
+/**
+ * @brief One typed run of a source's content: plain text, or a whole media
+ *        file's bytes tagged with its MIME type.
+ *
+ * What lets pieces() emit a figure a PDF embeds without the document model
+ * growing a case for it: the figure is just another piece, interleaved with
+ * the text pieces around it, and a caller that understands both (xudu's
+ * ingest, inserting one Store op per piece) ends up with the same store an
+ * ordinary mixed text-and-image xanadoc would have. A caller that does not
+ * understand pieces() -- anything only asking for text() -- never sees a
+ * media piece at all, since text() and forcedBreaks() keep their existing,
+ * text-only meaning; see pieces()'s own comment.
+ */
+struct ContentPiece {
+  std::string bytes;
+  /// Empty for plain text -- the overwhelmingly common case, and the only
+  /// kind text()-only sources ever produce. Set to a real MIME type (e.g.
+  /// "image/png") for a piece that is a whole media file's bytes, meant to
+  /// reach Store::insertMedia() rather than Store::insert().
+  std::string mimeType;
+  /// Whether a forced page break belongs immediately after this piece, in
+  /// the concatenation of all of pieces()' bytes -- the reason this cannot
+  /// simply reuse forcedBreaks(), whose offsets are into text() alone and
+  /// would misalign the moment a media piece's raw bytes (never part of
+  /// text()) sit between two pages' worth of text.
+  bool pageBreakAfter{false};
+  /// Set when this piece's bytes are identical to an earlier piece in the
+  /// same pieces() call -- e.g. a letterhead logo embedded on every page of
+  /// a PDF -- naming that earlier piece's index. A caller inserting through
+  /// Store should route this piece through Store::insertSpan() against the
+  /// span the earlier piece was inserted as, rather than calling
+  /// Store::insertMedia() again and storing the same bytes a second time.
+  /// std::nullopt for the overwhelmingly common case of a piece with no
+  /// earlier duplicate.
+  std::optional<std::size_t> duplicateOfPieceIndex;
 };
 
 /**
@@ -111,6 +149,21 @@ public:
   [[nodiscard]] virtual std::vector<DecoratedRange> decoratedRanges() const {
     return {};
   }
+
+  /**
+   * @brief text(), split into typed pieces a caller that cares about media
+   *        can insert individually instead of as one plain-text block.
+   *
+   * Default is the whole of text() as one plain piece with no forced break
+   * after it -- exactly what every source except PdfTextSource means by not
+   * overriding this, the same way not overriding forcedBreaks() means "no
+   * opinion". A caller that only ever uses text()/forcedBreaks() is
+   * unaffected by any source overriding this: the two accessors keep their
+   * existing, independent meaning regardless of what pieces() returns.
+   */
+  [[nodiscard]] virtual std::vector<ContentPiece> pieces() const {
+    return {ContentPiece{text(), {}, false}};
+  }
 };
 
 /**
@@ -139,6 +192,7 @@ public:
   [[nodiscard]] std::string text() const override;
   [[nodiscard]] std::string name() const override { return filePath; }
   [[nodiscard]] std::vector<std::uint32_t> forcedBreaks() const override;
+  [[nodiscard]] std::vector<ContentPiece> pieces() const override;
 
 private:
   void ensureLoaded() const;
@@ -147,6 +201,7 @@ private:
   mutable bool loaded{false};
   mutable std::string content;
   mutable std::vector<std::uint32_t> breaks;
+  mutable std::vector<ContentPiece> piecesCache;
 };
 
 /// Reads a PDF document using poppler-cpp, paginating per PDF page via
@@ -162,6 +217,21 @@ public:
     return breaks;
   }
   [[nodiscard]] std::size_t pageCount() const { return numPages; }
+  /// Per page: that page's text as one piece (the same bytes text()'s own
+  /// concatenation carries for it), then one piece per embedded figure found
+  /// on it, each tagged "image/png" -- see PdfImageExtractor in
+  /// text_source.cpp. A figure follows its page's text rather than being
+  /// interleaved at its exact reading position: doing that precisely would
+  /// mean reconciling core poppler's page-content coordinate space (where
+  /// the image extraction runs) with poppler-cpp's text_list() coordinate
+  /// space (where the text layout comes from), and getting that subtly
+  /// wrong is worse than not attempting it, per this being exactly the
+  /// class of failure Gap E was about. Deduplicated by the PDF's own image
+  /// object reference, so a logo repeated across many pages is one piece,
+  /// referenced by figures list order rather than stored again.
+  [[nodiscard]] std::vector<ContentPiece> pieces() const override {
+    return piecesOf;
+  }
 
 private:
   void loadPdfFile(const std::string &path);
@@ -170,6 +240,7 @@ private:
   std::string buffer;
   std::string label;
   std::vector<std::uint32_t> breaks;
+  std::vector<ContentPiece> piecesOf;
   std::size_t numPages{0};
 };
 

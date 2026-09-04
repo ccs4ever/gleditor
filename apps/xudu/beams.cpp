@@ -185,10 +185,23 @@ void LinkBeams::rebuildStrands(RenderState &state) {
 
 void LinkBeams::resolveAnchors(RenderState &state) {
   const auto anchorIn =
-      [&state](const LinkEnd &end,
-               std::uint32_t offset) -> std::optional<Doc::Anchor> {
+      [&state, this](const LinkEnd &end,
+                     std::uint32_t offset) -> std::optional<Doc::Anchor> {
     if (end.doc >= state.docs.size()) {
       return std::nullopt;
+    }
+    // A link landing inside a media span's reserved placeholder range
+    // anchors to that widget's own rectangle instead of a text-geometry
+    // point on the blank filler line -- see MediaRectResolver's own comment.
+    // Falls through to the ordinary text anchor for anything the resolver
+    // does not recognise as media, which is every plain-text offset and
+    // (until it is set) every build that predates this.
+    if (mediaRectResolver && end.doc < session.views().size()) {
+      const auto &view = session.views()[end.doc];
+      if (auto rect = mediaRectResolver(*state.docs[end.doc], view.storeIndex,
+                                        view.version, offset)) {
+        return rect;
+      }
     }
     return state.docs[end.doc]->anchorFor(offset);
   };

@@ -244,6 +244,32 @@ const Scroll *Store::scroll(const ScrollId id) const {
   return &externals[id - 1];
 }
 
+const ScrollSegment *Store::containerFor(const PrimediaSpan &span) const {
+  if (span.isLocal()) {
+    return localSegments.segmentAt(span.start);
+  }
+  const auto *external = scroll(span.scroll);
+  return nullptr == external ? nullptr : external->segmentAt(span.start);
+}
+
+std::vector<ScrollSegment>
+Store::segmentsOverlapping(const ScrollId scrollId, const std::uint64_t start,
+                           const std::uint64_t length) const {
+  const auto *const owner =
+      localScroll == scrollId ? &localSegments : scroll(scrollId);
+  std::vector<ScrollSegment> found;
+  if (nullptr == owner) {
+    return found;
+  }
+  const auto rangeEnd = start + length;
+  for (const auto &segment : owner->segments) {
+    if (segment.at < rangeEnd && segment.end() > start) {
+      found.push_back(segment);
+    }
+  }
+  return found;
+}
+
 ResolveResult Store::resolve(const PrimediaSpan &span) const {
   if (span.isLocal()) {
     return ResolveResult{.status = ResolutionStatus::VerifiedBytes,
@@ -360,6 +386,22 @@ MicroversionId Store::insert(const MicroversionId &parent,
   // content, so the content has to have gone somewhere before there is an op.
   op.span = userPermascroll_->append(text);
   return apply(parent, op);
+}
+
+Store::InsertedMedia Store::insertMedia(const MicroversionId &parent,
+                                        const std::uint32_t at,
+                                        const std::string_view bytes,
+                                        std::string mimeType) {
+  Op op;
+  op.kind = OpKind::Insert;
+  op.at   = at;
+  op.span = userPermascroll_->append(bytes);
+  localSegments.addSegment(ScrollSegment{
+      .at       = op.span.start,
+      .length   = op.span.length,
+      .mimeType = std::move(mimeType),
+  });
+  return InsertedMedia{apply(parent, op), op.span};
 }
 
 MicroversionId Store::insertSpan(const MicroversionId &parent,
@@ -603,13 +645,24 @@ void Store::save(const std::string &directory) const {
       const auto &scroll = externals[i];
       out << "scroll " << (i + 1) << ' '
           << (scroll.isNamed() ? scroll.publisher.hex() : "-") << ' '
-          << (scroll.salt.empty() ? "-" : toHex(scroll.salt)) << '\n';
+          << (scroll.salt.empty() ? "-" : toHex(scroll.salt)) << ' '
+          << scroll.defaultMimeType << '\n';
       for (const auto &segment : scroll.segments) {
         out << "segment " << (i + 1) << ' ' << segment.at << ' '
             << segment.length << ' ' << segment.torrent.hex() << ' '
             << segment.streamOffset << ' ' << segment.fileIndex << ' '
-            << (segment.path.empty() ? "-" : segment.path) << '\n';
+            << (segment.path.empty() ? "-" : segment.path) << ' '
+            << segment.mimeType << '\n';
       }
+    }
+    // The local spool's own segment table: what insertMedia() has recorded
+    // about whole media files typed into scroll zero, which has no entry in
+    // externals to hold it (see the comment on localSegments). No index
+    // field, unlike a "segment" line -- there is only ever the one local
+    // spool for it to refer to.
+    for (const auto &segment : localSegments.segments) {
+      out << "localsegment " << segment.at << ' ' << segment.length << ' '
+          << segment.mimeType << '\n';
     }
   }
   {
@@ -648,13 +701,24 @@ void Store::saveOsmicText(const std::string &directory) const {
       const auto &scroll = externals[i];
       out << "scroll " << (i + 1) << ' '
           << (scroll.isNamed() ? scroll.publisher.hex() : "-") << ' '
-          << (scroll.salt.empty() ? "-" : toHex(scroll.salt)) << '\n';
+          << (scroll.salt.empty() ? "-" : toHex(scroll.salt)) << ' '
+          << scroll.defaultMimeType << '\n';
       for (const auto &segment : scroll.segments) {
         out << "segment " << (i + 1) << ' ' << segment.at << ' '
             << segment.length << ' ' << segment.torrent.hex() << ' '
             << segment.streamOffset << ' ' << segment.fileIndex << ' '
-            << (segment.path.empty() ? "-" : segment.path) << '\n';
+            << (segment.path.empty() ? "-" : segment.path) << ' '
+            << segment.mimeType << '\n';
       }
+    }
+    // The local spool's own segment table: what insertMedia() has recorded
+    // about whole media files typed into scroll zero, which has no entry in
+    // externals to hold it (see the comment on localSegments). No index
+    // field, unlike a "segment" line -- there is only ever the one local
+    // spool for it to refer to.
+    for (const auto &segment : localSegments.segments) {
+      out << "localsegment " << segment.at << ' ' << segment.length << ' '
+          << segment.mimeType << '\n';
     }
   }
   {
@@ -711,7 +775,8 @@ void Store::load(const std::string &directory) {
   opsSpool.clear();
   linkTable.clear();
   externals.clear();
-  nextLinkId = 1;
+  localSegments = Scroll{};
+  nextLinkId    = 1;
 
   if (std::filesystem::exists(dir / scrollsFile)) {
     auto in = openTextSpoolForRead(dir / scrollsFile);
@@ -722,8 +787,21 @@ void Store::load(const std::string &directory) {
       }
       std::istringstream fields(line);
       std::string what;
+      fields >> what;
+
+      if ("localsegment" == what) {
+        ScrollSegment segment;
+        fields >> segment.at >> segment.length >> segment.mimeType;
+        if (!fields) {
+          throw std::runtime_error("malformed localsegment in " +
+                                   (dir / scrollsFile).string() + ": " + line);
+        }
+        localSegments.addSegment(segment);
+        continue;
+      }
+
       std::size_t which{};
-      fields >> what >> which;
+      fields >> which;
       if (!fields || 0 == which) {
         throw std::runtime_error("malformed scroll table in " +
                                  (dir / scrollsFile).string() + ": " + line);
@@ -749,6 +827,12 @@ void Store::load(const std::string &directory) {
         if ("-" != salt) {
           scroll.salt = fromHex(salt);
         }
+        // Older stores never wrote a trailing MIME type; leaving the
+        // default in place for one of those is correct, not a parse error.
+        std::string mime;
+        if (fields >> mime && "-" != mime) {
+          scroll.defaultMimeType = mime;
+        }
       } else if ("segment" == what) {
         ScrollSegment segment;
         std::string hash;
@@ -761,6 +845,10 @@ void Store::load(const std::string &directory) {
         segment.torrent = InfoHash::fromHex(hash);
         if ("-" == segment.path) {
           segment.path.clear();
+        }
+        std::string mime;
+        if (fields >> mime && "-" != mime) {
+          segment.mimeType = mime;
         }
         scroll.addSegment(segment);
       } else {

@@ -14,9 +14,11 @@
 #include <cstdlib>
 #include <exception>
 #include <filesystem>
+#include <format>
 #include <fstream>
 #include <iostream>
 #include <memory>
+#include <span>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -57,6 +59,7 @@ using gleditor::Mod;
 using xudu::Author;
 using xudu::Config;
 using xudu::HypertimeMap;
+using xudu::ImageOverlay;
 using xudu::Link;
 using xudu::LinkBeams;
 using xudu::LinkType;
@@ -174,13 +177,51 @@ bool wantsEveryOption(const int argc, const char *const *const argv) {
 /**
  * @brief What is on screen, and the commands that change it.
  */
-class Views {
+/**
+ * @brief Opens documents, and the media widgets and image placements that
+ *        come with them.
+ *
+ * A FrameContributor for one reason only: deviceReady() is the sole place a
+ * device and a document pipeline description ever reach anything, and it is
+ * only ever called for contributors registered before the render thread
+ * starts. MediaWidget instances made later, inside syncMediaWidgets(), are
+ * registered from well after that point -- so without capturing both here and
+ * handing them on explicitly, a widget's own deviceReady() never runs, its
+ * canvas_ stays null, and drawFrame() quietly draws nothing forever. Views
+ * itself draws nothing; drawFrame() is a deliberate no-op.
+ */
+class Views : public gleditor::FrameContributor {
 public:
   Views(Session &aSession, RendererRef aRenderer, HypertimeMap &aMap,
-        gleditor::Form &aForm, AppStateRef aState,
+        ImageOverlay &aImages, gleditor::Form &aForm, AppStateRef aState,
         std::shared_ptr<gleditor::DocumentSwitcher> aSwitcher)
       : session(aSession), renderer(std::move(aRenderer)), map(aMap),
-        form(aForm), state(std::move(aState)), switcher(std::move(aSwitcher)) {}
+        images(aImages), form(aForm), state(std::move(aState)),
+        switcher(std::move(aSwitcher)) {}
+
+  void deviceReady(render::RenderDevice &device,
+                   const render::PipelineDesc &documentPipeline) override {
+    device_       = &device;
+    documentDesc_ = documentPipeline;
+  }
+
+  void drawFrame(gleditor::FrameContext & /*ctx*/) override {}
+
+  /// The audio/video widget attached at @p docOffset within @p doc, as an
+  /// anchor a beam can use directly -- see MediaWidget::rectFor(), which
+  /// this just forwards to across every widget syncMediaWidgets() has
+  /// placed. nullopt when no widget matches, which is any offset that is
+  /// plain text, an image (ImageOverlay::rectFor() is the one for those),
+  /// or a span whose widget has not been placed yet.
+  [[nodiscard]] std::optional<Doc::Anchor>
+  widgetRectFor(const Doc &doc, const std::uint32_t docOffset) const {
+    for (const auto &widget : mediaWidgets) {
+      if (auto rect = widget->rectFor(doc, docOffset)) {
+        return rect;
+      }
+    }
+    return std::nullopt;
+  }
 
   /// Replace everything on screen with one document showing @p version.
   void showOnly(const MicroversionId &version,
@@ -207,6 +248,7 @@ public:
       state->accessibility->removeSource(old.get());
     }
     mediaWidgets.clear();
+    images.clear();
     for (std::size_t dIdx = 0;
          dIdx < rState.docs.size() && dIdx < session.views().size(); ++dIdx) {
       if (!rState.docs[dIdx]) {
@@ -214,18 +256,70 @@ public:
       }
       const auto &vInfo = session.views()[dIdx];
       const auto &st    = session.store(vInfo.storeIndex);
-      const auto spans = session.mediaSpansFor(vInfo.version, vInfo.storeIndex);
+      const auto spans  = session.mediaSpansFor(vInfo.version, vInfo.storeIndex,
+                                                state->defaultFontName);
       for (const auto &mSpan : spans) {
-        auto widget      = std::make_shared<gleditor::MediaWidget>("Sans 11");
-        const auto bytes = st.read(mSpan.span);
-        auto stream      = std::make_shared<gleditor::MemoryMediaStream>(bytes);
-        widget->load(gleditor::MediaResource::fromStream(stream, mSpan.label));
+        // The whole file this span was classified against, not just the
+        // (possibly narrower) span itself: a fragment transcluded out of the
+        // middle of a media file carries no header of its own, so a decoder
+        // needs the container's bytes to make sense of any of it. Reading
+        // this unconditionally costs nothing extra for the common case,
+        // where the span already covers the whole file (containerOffset is
+        // 0 and containerLength equals the span's own length, so this is the
+        // same span read()'s always been given).
+        const auto bytes = st.read(xudu::PrimediaSpan{
+            mSpan.span.scroll, mSpan.span.start - mSpan.containerOffset,
+            mSpan.containerLength});
+        if (mSpan.isImage) {
+          // A picture has no play, pause or seek: it goes to the image
+          // overlay's shared pipeline rather than a MediaWidget, whose whole
+          // UI is built around a MediaPlayer this span does not have.
+          //
+          // Keyed by the *container's* coordinates rather than this span's
+          // own, so that two different fragments transcluded out of the same
+          // image -- which now both decode and show that whole image, see
+          // above -- share one cache entry instead of decoding it twice.
+          const auto id = std::format("{}:{}:{}", mSpan.span.scroll,
+                                      mSpan.span.start - mSpan.containerOffset,
+                                      mSpan.containerLength);
+          images.place(rState.docs[dIdx], mSpan.docOffset, id,
+                       std::span<const std::uint8_t>(
+                           reinterpret_cast<const std::uint8_t *>(bytes.data()),
+                           bytes.size()),
+                       gleditor::MimeType(mSpan.mime));
+          continue;
+        }
+        auto widget = std::make_shared<gleditor::MediaWidget>("Sans 11");
+        // addFrameContributor() below does not call deviceReady() -- that
+        // only happens once, for whatever is already registered when the
+        // render thread starts, which this widget is not. Without this call
+        // its canvas_ stays null and drawFrame() never draws anything.
+        if (nullptr != device_) {
+          widget->deviceReady(*device_, documentDesc_);
+        }
+        auto stream = std::make_shared<gleditor::MemoryMediaStream>(bytes);
+        // loadFragment() with a fragment covering the whole container (the
+        // common case) behaves exactly like load(); only a span narrower
+        // than its container -- a temporal transclusion -- ends up deferring
+        // a setTimeRange() call until playback reports a real duration.
+        widget->loadFragment(
+            gleditor::MediaResource::fromStream(stream, mSpan.label),
+            gleditor::ByteRange{mSpan.containerOffset, mSpan.span.length},
+            mSpan.containerLength);
         widget->setTitle(mSpan.label);
         widget->attachToDocument(rState.docs[dIdx], mSpan.docOffset);
         if (mSpan.isAudio) {
+          // Audio has no aspect ratio to size a viewport from -- it is a
+          // fixed player card regardless of content.
           widget->setSize(340.0F, 120.0F);
         } else {
-          widget->setSize(340.0F, 180.0F);
+          // Matches Session::placeholderFor()'s reservation for this span
+          // (apps/xudu/session.cpp): the page's full text width, at
+          // MediaWidget::defaultAspect until a real frame reports better.
+          widget->setSize(
+              Doc::textWidthPx,
+              (Doc::textWidthPx / gleditor::MediaWidget::defaultAspect) +
+                  gleditor::MediaWidget::chromeHeightPx);
         }
         widget->setVisible(true);
         renderer->addFrameContributor(widget.get());
@@ -239,8 +333,9 @@ public:
   /// Open @p version as another document beside whatever is already there.
   void showAlongside(const MicroversionId &version, const float depthZ = 0.0F,
                      const std::size_t storeIndex = 0) {
-    renderer->push(
-        RenderItemOpenDoc(session.sourceFor(version, storeIndex), depthZ));
+    renderer->push(RenderItemOpenDoc(
+        session.sourceFor(version, storeIndex, state->defaultFontName),
+        depthZ));
     renderer->runWithState([this, version, storeIndex](RenderState &rState) {
       if (rState.docs.empty()) {
         return;
@@ -682,11 +777,17 @@ private:
   Session &session;
   RendererRef renderer;
   HypertimeMap &map;
+  ImageOverlay &images;
   gleditor::Form &form;
   AppStateRef state;
   std::shared_ptr<gleditor::DocumentSwitcher> switcher;
   std::optional<Pending> pending;
   std::vector<std::shared_ptr<gleditor::MediaWidget>> mediaWidgets;
+
+  /// Set in deviceReady(), so a MediaWidget made later in syncMediaWidgets()
+  /// can be handed the same device and pipeline description explicitly.
+  render::RenderDevice *device_{nullptr};
+  render::PipelineDesc documentDesc_;
 };
 
 void bindCommands(gleditor::Application &app, const AppStateRef &state,
@@ -1180,10 +1281,43 @@ int main(const int argc, char **argv) {
       if (0 == session->store(0).opCount()) {
         const auto &firstFile = importFiles[0];
         const gleditor::FileTextSource source(firstFile);
-        auto imported =
-            session->store(0).insert(MicroversionId{}, 0, source.text());
-        for (const auto breakAt : source.forcedBreaks()) {
-          imported = session->store(0).insertBreak(imported, breakAt);
+        // Piece by piece rather than one whole-file insert(): a plain file
+        // is exactly one plain-text piece (pieces()' own default), so this
+        // changes nothing for it, but a PDF with an embedded figure is
+        // several -- that page's text, then that figure tagged "image/png"
+        // -- and inserting each through the call insertMedia() vs insert()
+        // that its own mimeType calls for is what makes the figure a real,
+        // classifiable primedia span instead of bytes pieces() never had a
+        // way to hand the caller before this loop existed.
+        MicroversionId imported;
+        std::uint32_t at = 0;
+        // Indexed by piece position: the span each piece landed at, so a
+        // later piece naming an earlier one via duplicateOfPieceIndex (a PDF
+        // figure repeated across pages) can be inserted via insertSpan()
+        // against the bytes already stored, instead of appending its own
+        // copy through insertMedia().
+        std::vector<xudu::PrimediaSpan> insertedSpans;
+        const auto pieces = source.pieces();
+        insertedSpans.reserve(pieces.size());
+        for (const auto &piece : pieces) {
+          xudu::PrimediaSpan span;
+          if (piece.duplicateOfPieceIndex.has_value() &&
+              *piece.duplicateOfPieceIndex < insertedSpans.size()) {
+            span     = insertedSpans[*piece.duplicateOfPieceIndex];
+            imported = session->store(0).insertSpan(imported, at, span);
+          } else if (piece.mimeType.empty()) {
+            imported = session->store(0).insert(imported, at, piece.bytes);
+          } else {
+            auto inserted = session->store(0).insertMedia(
+                imported, at, piece.bytes, piece.mimeType);
+            imported = inserted.version;
+            span     = inserted.span;
+          }
+          insertedSpans.push_back(span);
+          at += static_cast<std::uint32_t>(piece.bytes.size());
+          if (piece.pageBreakAfter) {
+            imported = session->store(0).insertBreak(imported, at);
+          }
         }
         session->save(0);
         opening = imported;
@@ -1334,7 +1468,9 @@ int main(const int argc, char **argv) {
             const auto posStr     = spec.substr(c1 + 1, c2 - c1 - 1);
             const auto textOrFile = spec.substr(c2 + 1);
             std::string content;
+            bool isFile = false;
             if (std::filesystem::exists(textOrFile)) {
+              isFile = true;
               std::ifstream in(textOrFile, std::ios::binary);
               content.assign(std::istreambuf_iterator<char>(in),
                              std::istreambuf_iterator<char>());
@@ -1349,7 +1485,18 @@ int main(const int argc, char **argv) {
                   (posStr == "append" || posStr == "end")
                       ? static_cast<std::uint32_t>(curLen)
                       : static_cast<std::uint32_t>(std::stoul(posStr));
-              session->insertText(docIdx, pos, content);
+              // A file's bytes are tagged with their MIME type when they are
+              // media, the same way --import does, so this can no longer
+              // silently coalesce with adjacent locally-typed text into one
+              // piece libmagic cannot identify (see Store::insertMedia()).
+              const gleditor::MagicMimeDetector magic;
+              const auto mime =
+                  isFile ? magic.identifyFile(textOrFile) : std::string{};
+              if (isFile && gleditor::MagicMimeDetector::isMediaMime(mime)) {
+                session->insertMedia(docIdx, pos, content, mime);
+              } else {
+                session->insertText(docIdx, pos, content);
+              }
             }
           }
         }
@@ -1713,6 +1860,8 @@ int main(const int argc, char **argv) {
     HypertimeMap map("Sans 10", *session);
     map.setVisible(parser["--map"] == true);
 
+    ImageOverlay images("Sans 11");
+
     auto docSwitcher = std::make_shared<gleditor::DocumentSwitcher>("Sans 10");
     docSwitcher->setCloseHandler([&renderer](const std::uint32_t docIndex) {
       renderer->push(RenderItemCloseDoc(docIndex));
@@ -1729,7 +1878,8 @@ int main(const int argc, char **argv) {
     });
 
     gleditor::Form publishForm("Sans 11");
-    Views views(*session, renderer, map, publishForm, state, docSwitcher);
+    Views views(*session, renderer, map, images, publishForm, state,
+                docSwitcher);
 
     LinkBeams links(*session, renderer);
     links.setVisible(parser["--no-beams"] != true);
@@ -1737,11 +1887,35 @@ int main(const int argc, char **argv) {
     links.setOpener([&views](const MicroversionId &version) {
       views.showAlongside(version);
     });
+    links.setMediaRectResolver(
+        [&images, &views, &session,
+         state](const Doc &doc, const std::size_t storeIndex,
+                const MicroversionId &version,
+                const std::uint32_t docOffset) -> std::optional<Doc::Anchor> {
+          // fontName must match sourceFor()/mediaSpansFor()'s own convention
+          // (see MediaSpanInfo::reservedLength's comment): the same font
+          // syncMediaWidgets() already uses to find these same spans.
+          const auto spans = session->mediaSpansFor(version, storeIndex,
+                                                    state->defaultFontName);
+          for (const auto &mSpan : spans) {
+            if (docOffset < mSpan.docOffset ||
+                docOffset >= mSpan.docOffset + mSpan.reservedLength) {
+              continue;
+            }
+            if (mSpan.isImage) {
+              return images.rectFor(doc, mSpan.docOffset);
+            }
+            return views.widgetRectFor(doc, mSpan.docOffset);
+          }
+          return std::nullopt;
+        });
 
     renderer->addSpanDecorator(session.get());
     renderer->addFrameContributor(docSwitcher.get());
     renderer->addFrameContributor(&map);
     renderer->addFrameContributor(&links);
+    renderer->addFrameContributor(&images);
+    renderer->addFrameContributor(&views);
 
     state->accessibility->addSource(docSwitcher.get());
     state->accessibility->addSource(&links);

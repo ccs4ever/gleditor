@@ -1,6 +1,7 @@
 /**
  * @file transclusion_layout_perf_test.cpp
- * @brief Performance and correctness validation for interval-sweep placeTransclusions.
+ * @brief Performance and correctness validation for interval-sweep
+ * placeTransclusions.
  */
 #include <gtest/gtest.h>
 
@@ -28,8 +29,9 @@ TEST(TransclusionLayoutPerfTest, SubSpanAndContiguousMerging) {
   Store store;
 
   // Master doc 0 has text of length 100
-  const std::string text = "0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ!@#$%^&*()_+~`|}{[]:;?><,./-=01234567";
-  const auto v0 = store.insert(MicroversionId{}, 0, text);
+  const std::string text = "0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNO"
+                           "PQRSTUVWXYZ!@#$%^&*()_+~`|}{[]:;?><,./-=01234567";
+  const auto v0          = store.insert(MicroversionId{}, 0, text);
 
   // Doc 1 transcludes [10, 50) and [50, 90) as two separate ops
   const auto v1a = store.transclude(MicroversionId{}, 0, v0, 10, 40);
@@ -40,7 +42,8 @@ TEST(TransclusionLayoutPerfTest, SubSpanAndContiguousMerging) {
   std::vector<TransclusionPair> tPairs;
   placeTransclusions(viewing(versions), tPairs);
 
-  // Contiguous transcluded runs [10, 50) and [50, 90) must merge into a single seamless [10, 90) span
+  // Contiguous transcluded runs [10, 50) and [50, 90) must merge into a single
+  // seamless [10, 90) span
   ASSERT_EQ(tPairs.size(), 1U);
   EXPECT_EQ(tPairs[0].from.doc, 0U);
   EXPECT_EQ(tPairs[0].from.start, 10U);
@@ -67,7 +70,8 @@ TEST(TransclusionLayoutPerfTest, MultiDocumentWorkspaceScalesSubMillisecond) {
   for (std::size_t i = 1; i < kNumDocs; ++i) {
     const auto offset = static_cast<std::uint32_t>((i * 5) % 30);
     const auto len    = static_cast<std::uint32_t>(20 + (i * 3));
-    const auto docVer = store.transclude(MicroversionId{}, 0, root, offset, len);
+    const auto docVer =
+        store.transclude(MicroversionId{}, 0, root, offset, len);
     versions.push_back(store.rebuild(docVer));
   }
 
@@ -81,9 +85,8 @@ TEST(TransclusionLayoutPerfTest, MultiDocumentWorkspaceScalesSubMillisecond) {
 
   EXPECT_FALSE(tPairs.empty());
   // Sub-millisecond budget for 8 documents (must be < 1000 microseconds)
-  EXPECT_LT(elapsedUs, 2000)
-      << "placeTransclusions took " << elapsedUs
-      << " us, exceeding interactive layout budget";
+  EXPECT_LT(elapsedUs, 2000) << "placeTransclusions took " << elapsedUs
+                             << " us, exceeding interactive layout budget";
 }
 
 } // namespace

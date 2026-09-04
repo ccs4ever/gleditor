@@ -262,7 +262,7 @@ void ToastOverlay::draw(RenderState &state, const int screenWidth,
                  static_cast<float>(screenHeight));
 
   state.device->bindPipeline(pipeline);
-  state.device->bindGlyphTexture(state.glyphCache.textureHandle());
+  state.device->bindAtlasTexture(state.glyphCache.textureHandle());
 
   // Newest nearest the corner, older ones stacked above it.
   const auto now = Clock::now();
