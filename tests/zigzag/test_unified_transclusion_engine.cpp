@@ -481,3 +481,35 @@ TEST(ShapingCacheTest, ReportsTheCostOfAStagingPass) {
   // The one thing worth asserting: caching did not make it slower.
   EXPECT_LT(warm, cold * 1.5);
 }
+
+TEST(UnifiedTransclusionEngineTest, SubSpanTransclusionLinksOnDimTransclude) {
+  xudu::Store store;
+  UnifiedTransclusionEngine engine(store);
+
+  // Op 1: Master document text [0, 51)
+  const xudu::MicroversionId v0{};
+  const auto v1 =
+      store.insert(v0, 0, "The quick brown fox jumps over the lazy dog today.");
+
+  // Op 2: In another branch, transclude a sub-span "fox jumps" [16, 25)
+  static_cast<void>(store.transclude(v0, 0, v1, 16, 9));
+  engine.syncIncremental();
+
+  const auto masterCellId = engine.cellForOp(1);
+  const auto quoteCellId  = engine.cellForOp(2);
+  ASSERT_NE(masterCellId, 0U);
+  ASSERT_NE(quoteCellId, 0U);
+
+  const auto *cMaster = engine.findCell(masterCellId);
+  const auto *cQuote  = engine.findCell(quoteCellId);
+  ASSERT_NE(cMaster, nullptr);
+  ASSERT_NE(cQuote, nullptr);
+
+  // Sub-span must be connected along DimOrdinal::Transclude
+  EXPECT_EQ(cMaster->linksOn(DimOrdinal::Transclude).pos, quoteCellId);
+  EXPECT_EQ(cQuote->linksOn(DimOrdinal::Transclude).neg, masterCellId);
+
+  // Manifold must remain strictly valid
+  std::string err;
+  EXPECT_TRUE(engine.validate2RankManifold(&err)) << err;
+}

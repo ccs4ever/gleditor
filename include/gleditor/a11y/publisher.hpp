@@ -78,6 +78,16 @@ public:
   void addSource(Source *source, std::optional<std::uint16_t> owner = {});
 
   /**
+   * @brief Unregister a source added by addSource().
+   *
+   * For anything shorter-lived than the publisher: a widget torn down and
+   * rebuilt while the window stays open must take itself out first, or the
+   * next rebuild() calls accessibilityRevision() on a dangling pointer.
+   * Harmless if @p source was never registered or already removed.
+   */
+  void removeSource(Source *source);
+
+  /**
    * @brief Open the platform's connection.
    *
    * @param nativeWindow On Windows the HWND, which the adapter subclasses

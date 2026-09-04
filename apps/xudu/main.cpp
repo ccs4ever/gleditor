@@ -194,6 +194,18 @@ public:
   }
 
   void syncMediaWidgets(RenderState &rState) {
+    // Unregister before clear() destroys them: every widget here was handed
+    // to the renderer and the picker as a raw pointer, and this function is
+    // called again each time another document is opened alongside. Without
+    // this, the second call destroys the first call's widgets while their
+    // pointers are still live in frameContributors/pickObservers -- which
+    // segfaults the next time a frame is drawn, on whichever dangling entry
+    // the vector happens to walk into first.
+    for (const auto &old : mediaWidgets) {
+      renderer->removeFrameContributor(old.get());
+      renderer->removePickObserver(old.get());
+      state->accessibility->removeSource(old.get());
+    }
     mediaWidgets.clear();
     for (std::size_t dIdx = 0;
          dIdx < rState.docs.size() && dIdx < session.views().size(); ++dIdx) {

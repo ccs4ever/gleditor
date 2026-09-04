@@ -43,6 +43,17 @@ void UnifiedTransclusionEngine::buildCellFromOp(
   cell.span         = node.span();
   cell.type         = "op";
 
+  // If node is a transclusion by document offset, resolve its primedia span
+  if (cell.span.empty() && node.kind == xudu::OpKind::Transclude &&
+      node.sourceOpIndex != 0) {
+    const auto sourceVer = store_.segmentedOps().idOf(node.sourceOpIndex);
+    const auto from      = store_.rebuild(sourceVer);
+    const auto spans     = from.spansFor(node.sourceAt, node.sourceLength);
+    if (!spans.empty()) {
+      cell.span = spans.front();
+    }
+  }
+
   // 1. Link d.ops_time (Sequential spool order)
   if (opIndex > 1 && opIndexToCell_.contains(opIndex - 1)) {
     const CellID prevId = opIndexToCell_[opIndex - 1];
@@ -67,19 +78,46 @@ void UnifiedTransclusionEngine::buildCellFromOp(
     }
   }
 
-  // 3. Link d.transclude (Primedia Span Address Equivalence)
+  // 3. Link d.transclude (Primedia Span Address Equivalence & Sub-Spans)
   if (!cell.span.empty()) {
+    std::optional<CellID> targetMasterId;
     if (spanToMasterCell_.contains(cell.span)) {
-      const CellID masterId = spanToMasterCell_[cell.span];
-      cell.setLinks(DimOrdinal::Transclude, {.pos = 0, .neg = masterId});
-      if (cells_.contains(masterId)) {
-        auto masterLp = cells_[masterId].linksOn(DimOrdinal::Transclude);
-        masterLp.pos  = id;
-        cells_[masterId].setLinks(DimOrdinal::Transclude, masterLp);
-      }
+      targetMasterId = spanToMasterCell_[cell.span];
     } else {
-      spanToMasterCell_[cell.span] = id;
+      for (const auto &[masterSpan, mId] : spanToMasterCell_) {
+        if (masterSpan.scroll == cell.span.scroll &&
+            !masterSpan.intersect(cell.span).empty()) {
+          targetMasterId = mId;
+          break;
+        }
+      }
     }
+
+    if (!targetMasterId.has_value() && node.kind == xudu::OpKind::Transclude &&
+        node.sourceOpIndex != 0 &&
+        opIndexToCell_.contains(node.sourceOpIndex)) {
+      targetMasterId = opIndexToCell_[node.sourceOpIndex];
+    }
+
+    if (targetMasterId.has_value() && *targetMasterId != id) {
+      CellID tailId = *targetMasterId;
+      while (cells_.contains(tailId)) {
+        const auto nextPos = cells_[tailId].linksOn(DimOrdinal::Transclude).pos;
+        if (nextPos == 0 || !cells_.contains(nextPos) || nextPos == tailId) {
+          break;
+        }
+        tailId = nextPos;
+      }
+      if (tailId != id) {
+        cell.setLinks(DimOrdinal::Transclude, {.pos = 0, .neg = tailId});
+        if (cells_.contains(tailId)) {
+          auto tailLp = cells_[tailId].linksOn(DimOrdinal::Transclude);
+          tailLp.pos  = id;
+          cells_[tailId].setLinks(DimOrdinal::Transclude, tailLp);
+        }
+      }
+    }
+    spanToMasterCell_[cell.span] = id;
   }
 
   opIndexToCell_[opIndex] = id;

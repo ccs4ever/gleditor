@@ -928,6 +928,9 @@ void LinkBeams::drawFrame(gleditor::FrameContext &ctx) {
       }
       const auto &from = state.docs[strand.from.doc];
       const auto &to   = state.docs[strand.to.doc];
+      if (from->currentOpacity() <= 0.001F || to->currentOpacity() <= 0.001F) {
+        continue;
+      }
 
       const auto rightwards =
           glm::vec3(to->getModel()[3]).x >= glm::vec3(from->getModel()[3]).x;
@@ -1013,6 +1016,9 @@ void LinkBeams::drawFrame(gleditor::FrameContext &ctx) {
       }
       const auto &from = state.docs[tStrand.from.doc];
       const auto &to   = state.docs[tStrand.to.doc];
+      if (from->currentOpacity() <= 0.001F || to->currentOpacity() <= 0.001F) {
+        continue;
+      }
 
       const auto rightwards =
           glm::vec3(to->getModel()[3]).x >= glm::vec3(from->getModel()[3]).x;

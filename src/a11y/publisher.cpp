@@ -134,6 +134,13 @@ void Publisher::addSource(Source *const source,
   std::ranges::stable_sort(sources, {}, &Registered::owner);
 }
 
+void Publisher::removeSource(Source *const source) {
+  const std::scoped_lock locker(sourcesGuard);
+  std::erase_if(sources, [source](const Registered &reg) {
+    return reg.source == source;
+  });
+}
+
 void Publisher::setToolkit(std::string aToolkit, std::string aVersion) {
   toolkit = std::move(aToolkit);
   version = std::move(aVersion);
