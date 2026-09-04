@@ -39,6 +39,15 @@ CXX := $(CCACHE) $(CXX)
 endif
 endif
 endif
+
+# Only needed for thirdparty/zstd/contrib/seekable_format's two vendored .c
+# files (see the HAVE_DECODE_INDEX_ZSTD block below) -- otherwise-unused in
+# a tree that is C++ throughout, so this is not wired into ccache the way
+# CXX is: those two files change only when the submodule's pinned commit
+# does, which a full rebuild already handles.
+ifeq ($(origin CC),default)
+CC := $(shell command -v clang 2>/dev/null || command -v cc)
+endif
 #CXX = thirdparty/cosmocc-4.0.2/bin/cosmoc++ -mclang
 #CXX = thirdparty/cosmocc/bin/x86_64-linux-cosmo-gcc
 # cocmd gives us a builtin in-process sed hook
@@ -123,6 +132,66 @@ HAVE_SDL_IMAGE := $(shell pkg-config --exists $(SDL_IMAGE_PKG) && echo 1)
 ifeq ($(HAVE_SDL_IMAGE),1)
 PKGS += $(SDL_IMAGE_PKG)
 endif
+
+# src/decode_index.cpp (design/decode-index-spike.md's mechanisms, promoted
+# into a real library component) needs six optional dependencies, one flag
+# per format family so a build missing one still gets partial coverage: zlib
+# for PNG's inflateCopy()-based checkpoints, libjpeg for restart-marker
+# detection, libavformat/libavcodec/libavutil together for video and MP3
+# (both go through the same FFmpeg demuxer/index API, so there is nothing to
+# gain from splitting them further), libzstd for zstd's own seekable format,
+# flac++ for FLAC's native SEEKTABLE metadata block, and libtiff-4 for
+# TIFF's native strip/tile offset tags. Not WebP: the spike's own
+# investigation found no viable partial-decode mechanism for it at all, so
+# there is nothing here for a flag to gate.
+HAVE_DECODE_INDEX_ZLIB := $(shell pkg-config --exists zlib && echo 1)
+ifeq ($(HAVE_DECODE_INDEX_ZLIB),1)
+PKGS += zlib
+endif
+HAVE_DECODE_INDEX_LIBJPEG := $(shell pkg-config --exists libjpeg && echo 1)
+ifeq ($(HAVE_DECODE_INDEX_LIBJPEG),1)
+PKGS += libjpeg
+endif
+DECODE_INDEX_LIBAV_PKGS := libavformat libavcodec libavutil
+HAVE_DECODE_INDEX_LIBAV := $(shell pkg-config --exists $(DECODE_INDEX_LIBAV_PKGS) && echo 1)
+ifeq ($(HAVE_DECODE_INDEX_LIBAV),1)
+PKGS += $(DECODE_INDEX_LIBAV_PKGS)
+endif
+# libzstd itself is found via pkg-config like the other three, but the
+# seekable *format* (ZSTD_seekable_*) is not part of the core library or any
+# distro package -- its own two .c files are vendored at
+# thirdparty/zstd/contrib/seekable_format instead (see .gitmodules and the
+# LIB_SRCS_C block below) and compiled straight into libgleditor, gated by
+# this same flag so one pkg-config check controls both halves.
+HAVE_DECODE_INDEX_ZSTD := $(shell pkg-config --exists libzstd && echo 1)
+ifeq ($(HAVE_DECODE_INDEX_ZSTD),1)
+PKGS += libzstd
+endif
+# flac++'s own pkg-config file pulls in flac (the C library) transitively
+# via its own Requires -- named separately here only because "flac++" is
+# the package decode_index.cpp's FLAC++/*.h includes actually correspond to.
+HAVE_DECODE_INDEX_FLAC := $(shell pkg-config --exists flac++ && echo 1)
+ifeq ($(HAVE_DECODE_INDEX_FLAC),1)
+PKGS += flac++
+endif
+HAVE_DECODE_INDEX_TIFF := $(shell pkg-config --exists libtiff-4 && echo 1)
+ifeq ($(HAVE_DECODE_INDEX_TIFF),1)
+PKGS += libtiff-4
+endif
+
+# tools/decode-index-spike.cpp only, never PKGS: nothing else links FFmpeg,
+# calls zlib directly, calls libjpeg's own API, or calls libwebp (libpng and
+# libjpeg both only arrive today as transitive dependencies of SDL_image;
+# libwebp likewise via SDL_image, which also handles .webp). Kept out of
+# the hard dependency list on purpose -- this is a standalone verification
+# tool for the not-yet-load-bearing decode-index prototype
+# (design/decode-index-spike.md), not a capability any shipped program
+# needs, so a checkout without these dev headers still builds everything
+# else exactly as before. MP3 needs no new package: libavcodec's mp3float
+# decoder is already reachable through the same libavformat/libavcodec this
+# file's audio/video spike already links.
+DECODE_INDEX_SPIKE_PKGS := libavformat libavcodec libavutil zlib libjpeg libwebp
+HAVE_DECODE_INDEX_SPIKE := $(shell pkg-config --exists $(DECODE_INDEX_SPIKE_PKGS) && echo 1)
 
 # Every package, named individually, before anything asks for their flags.
 # pkg-config is all-or-nothing: given a set where one member is missing it
@@ -336,6 +405,27 @@ endif
 ifeq ($(HAVE_SDL_IMAGE),1)
 override CXXFLAGS += -DGLEDITOR_HAVE_SDL_IMAGE=1
 endif
+ifeq ($(HAVE_DECODE_INDEX_ZLIB),1)
+override CXXFLAGS += -DGLEDITOR_HAVE_DECODE_INDEX_ZLIB=1
+endif
+ifeq ($(HAVE_DECODE_INDEX_LIBJPEG),1)
+override CXXFLAGS += -DGLEDITOR_HAVE_DECODE_INDEX_LIBJPEG=1
+endif
+ifeq ($(HAVE_DECODE_INDEX_LIBAV),1)
+override CXXFLAGS += -DGLEDITOR_HAVE_DECODE_INDEX_LIBAV=1
+endif
+ifeq ($(HAVE_DECODE_INDEX_ZSTD),1)
+override CXXFLAGS += -DGLEDITOR_HAVE_DECODE_INDEX_ZSTD=1
+# zstd_seekable.h lives only in the vendored submodule (see .gitmodules),
+# not anywhere pkg-config's own --cflags for libzstd would find.
+override CXXFLAGS += -Ithirdparty/zstd/contrib/seekable_format
+endif
+ifeq ($(HAVE_DECODE_INDEX_FLAC),1)
+override CXXFLAGS += -DGLEDITOR_HAVE_DECODE_INDEX_FLAC=1
+endif
+ifeq ($(HAVE_DECODE_INDEX_TIFF),1)
+override CXXFLAGS += -DGLEDITOR_HAVE_DECODE_INDEX_TIFF=1
+endif
 override LDFLAGS += $(DEBUG_OPTS) $(findstring $(STATIC),-static)
 #ifeq ($(CXX_IS_CLANG),1)
 #override LDFLAGS += -rtlib=compiler-rt
@@ -381,6 +471,28 @@ endif
 # AccessKit or the one that does nothing -- since they define the same
 # functions.
 LIB_SRCS := $(filter-out src/a11y/platform_$(if $(GLEDITOR_HAVE_A11Y),none,accesskit).cpp,$(LIB_SRCS))
+# The only vendored C (not C++) sources this tree compiles -- see the
+# HAVE_DECODE_INDEX_ZSTD block above and .gitmodules' own comment on why
+# zstd's seekable format is vendored rather than found via pkg-config.
+# Named and gated separately from LIB_SRCS/obj, which are hardcoded to the
+# .cpp extension every other source in this tree actually has.
+ZSTD_SEEKABLE_DIR := thirdparty/zstd/contrib/seekable_format
+ZSTD_SEEKABLE_SRCS := $(ZSTD_SEEKABLE_DIR)/zstdseek_compress.c \
+                     $(ZSTD_SEEKABLE_DIR)/zstdseek_decompress.c
+# These two files' own #include "zstd.h"/"zstd_errors.h" resolve against
+# thirdparty/zstd/lib rather than the system libzstd this build otherwise
+# links (both are pinned to the same v1.5.7, so which one wins is not
+# supposed to matter -- see .gitmodules -- but pointing them at the vendored
+# copy is what makes that a documented invariant rather than an assumption
+# about pkg-config's own -I ordering). lib/common holds the private
+# xxhash.h/mem.h headers these two files need that installed zstd.h never
+# exposes.
+ZSTD_SEEKABLE_CFLAGS := -Ithirdparty/zstd/lib -Ithirdparty/zstd/lib/common \
+                       -I$(ZSTD_SEEKABLE_DIR)
+LIB_SRCS_C :=
+ifeq ($(HAVE_DECODE_INDEX_ZSTD),1)
+LIB_SRCS_C += $(ZSTD_SEEKABLE_SRCS)
+endif
 GLEDITOR_SRCS  := $(shell find apps/gleditor -name '*.cpp' 2>/dev/null)
 # The xanalogical engine is separated from the program that displays it so that
 # it can be tested without a graphics device: every rule about versions, spans
@@ -395,7 +507,8 @@ ZIGZAG_TEST_SRCS := $(shell find tests/zigzag -name '*.cpp' 2>/dev/null)
 
 OBJDIR := build/
 obj = $(addprefix $(OBJDIR)/,$(patsubst %.cpp,%.o,$(1)))
-LIB_OBJS        := $(call obj,$(LIB_SRCS))
+objc = $(addprefix $(OBJDIR)/,$(patsubst %.c,%.o,$(1)))
+LIB_OBJS        := $(call obj,$(LIB_SRCS)) $(call objc,$(LIB_SRCS_C))
 GLEDITOR_OBJS   := $(call obj,$(GLEDITOR_SRCS))
 XUDU_CORE_OBJS  := $(call obj,$(XUDU_CORE_SRCS))
 XUDU_OBJS       := $(call obj,$(XUDU_SRCS))
@@ -709,6 +822,40 @@ layout-latency-probe: $(OBJDIR)/layout-latency-probe
 $(OBJDIR)/layout-latency-probe: $(OBJDIR)/tools/layout-latency-probe.o $(LIBLINK)
 	$(CXX) $(LDFLAGS) -o $@ $^ $(LIBS)
 
+# Proves the decode-index prototype (design/decode-index-spike.md) on real
+# files rather than leaving it a paper design: a PNG scanline checkpoint
+# spike (zlib inflateCopy()), an audio/video seek spike (FFmpeg
+# av_seek_frame()), a JPEG restart-marker spike (libjpeg-turbo
+# jpeg_skip_scanlines()), an MP3 seek spike (the same av_seek_frame()
+# mechanism, applied to a compressed audio stream instead of video -- with
+# a real decoder-warmup caveat found doing it), and a WebP crop spike
+# (libwebp's own cropped decode, which turns out to buy no decode-time
+# savings at all) -- see the file's own comments for why each needs a
+# different amount of bespoke code, or none, or offers nothing usable at
+# all. Not part of `all`, the same reasoning as layout-latency-probe above
+# -- it verifies a not-yet-load-bearing prototype rather than building
+# anything a shipped program needs -- and only defined when its optional
+# deps are present, so a checkout without these dev headers is told why
+# rather than failing on a missing header.
+.PHONY: decode-index-spike
+ifeq ($(HAVE_DECODE_INDEX_SPIKE),1)
+decode-index-spike: $(OBJDIR)/decode-index-spike
+$(OBJDIR)/tools/decode-index-spike.o: CXXFLAGS += \
+  $(shell pkg-config --cflags $(DECODE_INDEX_SPIKE_PKGS))
+# Links the core library now that the PNG/JPEG/video/MP3 mechanisms this
+# spike verifies live in gleditor::decode_index rather than duplicated here
+# -- see the file's own top comment. Still links DECODE_INDEX_SPIKE_PKGS
+# directly too: the JPEG/video/MP3/WebP correctness demonstrations call
+# libjpeg-turbo's jpeg_skip_scanlines() and FFmpeg's av_seek_frame() as
+# public APIs in their own right, not things gleditor::decode_index wraps.
+$(OBJDIR)/decode-index-spike: $(OBJDIR)/tools/decode-index-spike.o $(LIBLINK)
+	$(CXX) $(LDFLAGS) -o $@ $(OBJDIR)/tools/decode-index-spike.o \
+	  $(APP_LDFLAGS) $(LIBS) $(shell pkg-config --libs $(DECODE_INDEX_SPIKE_PKGS))
+else
+decode-index-spike:
+	@echo "decode-index-spike: libavformat/libavcodec/libavutil/zlib/libjpeg/libwebp not all found by pkg-config -- skipping (optional, see tools/decode-index-spike.cpp)"
+endif
+
 .PHONY: sample-xanadocs
 sample-xanadocs: $(OBJDIR)/xudu
 	tools/create-sample-xanadocs.sh
@@ -1019,6 +1166,24 @@ $(OBJDIR)/%.dep: %.cpp
 
 $(OBJDIR)/%.j: %.cpp
 	$(REAL_CXX) -MJ $@ $(CXXFLAGS) -E $< > /dev/null
+
+# Same three rules as above, for the one vendored C source this tree
+# compiles (thirdparty/zstd/contrib/seekable_format, see LIB_SRCS_C). Uses
+# $(CC) and $(ZSTD_SEEKABLE_CFLAGS) rather than $(CXX)/$(CXXFLAGS): almost
+# none of the C++-specific half of CXXFLAGS applies to this vendored C code,
+# and the parts that do (debug/optimisation level) are pulled in via
+# $(DEBUG_OPTS) directly instead.
+$(OBJDIR)/%.o: %.c
+	$(CC) $(DEBUG_OPTS) $(ZSTD_SEEKABLE_CFLAGS) -c -o $@ $<
+
+$(OBJDIR)/%.dep: %.c
+	set -e; $(RM) -f $@; \
+	$(CC) -MM -MP $(ZSTD_SEEKABLE_CFLAGS) $< > $@.$$$$; \
+	$(SED) 's,^\($(*F)\)\.o[ :]*,$(OBJDIR)/$*.o $(OBJDIR)/$*.j : ,' < $@.$$$$ > $@; \
+	$(RM) -f $@.$$$$
+
+$(OBJDIR)/%.j: %.c
+	$(CC) -MJ $@ $(ZSTD_SEEKABLE_CFLAGS) -E $< > /dev/null
 
 # clang -MJ emits one trailing-comma-terminated object per file, so the comma on
 # the final entry has to go: JSON has no trailing commas and clangd rejects the

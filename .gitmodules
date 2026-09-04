@@ -14,3 +14,18 @@
 [submodule "thirdparty/merklecpp"]
 	path = thirdparty/merklecpp
 	url = https://github.com/microsoft/merklecpp.git
+[submodule "thirdparty/zstd"]
+	path = thirdparty/zstd
+	url = https://github.com/facebook/zstd
+	# Only contrib/seekable_format's own two .c files and the header are
+	# compiled from here -- decode_index.cpp still links the system libzstd
+	# via pkg-config for everything else. The seekable format's real durable
+	# seek table (compressed+decompressed offset per frame) is not part of
+	# the core zstd library and ships nowhere as its own distro package;
+	# vendoring is the documented way to use it, since its two .c files
+	# compile against any standard libzstd once its own private headers
+	# (lib/common/xxhash.h, lib/common/mem.h) are reachable, which only this
+	# submodule checkout provides. Pinned to v1.5.7 to match the system
+	# libzstd this was verified against -- an ABI mismatch here is a
+	# same-symbol-different-behavior risk, not a compile error, so drifting
+	# the two apart silently is worse than a build failure would be.
