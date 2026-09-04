@@ -142,12 +142,21 @@ private:
    * Vulkan pools are fixed at creation, so this is a ceiling rather than a
    * hint, and running into it is a driver error rather than a slow path -- so
    * it has to allow for what a program adds as well as what the library
-   * creates. The library makes three (documents, the overlay, the caret) and a
-   * program makes one per drawing surface of its own: Xudu has a canvas for
-   * the hypertime map and a batch for the beams between documents, which is
-   * five. Eight leaves room for another two without this having to move.
+   * creates. The library makes three (the shared document glyph pipeline,
+   * the toast overlay, the caret) and every Canvas::createPipeline() call
+   * makes *two* -- its own glyph pipeline plus an image pipeline, since the
+   * image atlas work gave every canvas an image-drawing pipeline alongside
+   * its text one, whether or not that particular canvas ever draws an image.
+   * Xudu keeps four Canvas-owning singletons alive for the whole session
+   * (the hypertime map, the image overlay, the document switcher, and the
+   * publish form) at 2 each, plus Beams' own single non-Canvas pipeline for
+   * the 3D links between documents: 3 + 4*2 + 1 = 12 before a single
+   * document or media widget is open. Each open MediaWidget (audio or
+   * video) adds another 2 on top of that fixed floor. 32 leaves comfortable
+   * room for several concurrently open media widgets without this having to
+   * move again for a while.
    */
-  static constexpr std::uint32_t maxPipelines = 8;
+  static constexpr std::uint32_t maxPipelines = 32;
 
   struct BufferRecord {
     VkBuffer buffer{VK_NULL_HANDLE};
