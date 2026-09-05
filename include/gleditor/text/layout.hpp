@@ -3,6 +3,7 @@
 #include <cstdint>
 #include <gleditor/doc.hpp>
 #include <gleditor/glyphcache/types.hpp>
+#include <gleditor/layout_box.hpp>
 #include <gleditor/text/font.hpp>
 #include <memory>
 #include <string_view>
@@ -35,6 +36,13 @@ struct LayoutOptions {
   /// Empty by default: plain text has no atomic ranges, the same "no
   /// opinion" meaning decoratedRanges' own empty default carries.
   std::vector<AtomicRange> atomicRanges{};
+  /// The page these constraints came from, forwarded to PageShaping so a
+  /// Page sizes its quad from its document's own page rather than from how
+  /// much text happened to land on it. Default-constructed (FitContent,
+  /// zero size) means "no page was named": every caller before this existed
+  /// -- Canvas measuring a run of text, Toast sizing a message -- gets
+  /// exactly that, since none of them read PageShaping::page back out.
+  gleditor::PageSize page{};
 };
 
 /**

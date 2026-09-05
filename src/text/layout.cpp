@@ -279,6 +279,7 @@ PageShaping TextLayout::layoutPage(std::string_view text,
                                    const FontFacePtr &font,
                                    const LayoutOptions &options) {
   PageShaping shaping;
+  shaping.page = options.page;
   if (text.empty() || !font) {
     shaping.limit = 0;
     return shaping;

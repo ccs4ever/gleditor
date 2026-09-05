@@ -84,4 +84,10 @@ TEST(MemoryTextSourceTest, theNameIsOptional) {
   EXPECT_EQ(source.name(), "");
 }
 
+TEST(TextSourcePageSizeTest,
+     defaultsToLetterAndNeverChangesForASourceThatDoesNotOverrideIt) {
+  const MemoryTextSource source("some text");
+  EXPECT_EQ(source.pageSize(), gleditor::letterPage);
+}
+
 } // namespace

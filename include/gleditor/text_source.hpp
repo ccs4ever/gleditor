@@ -19,6 +19,7 @@
 
 #include <cstdint>
 #include <gleditor/glyphcache/types.hpp>
+#include <gleditor/layout_box.hpp>
 #include <optional>
 #include <string>
 #include <utility>
@@ -165,6 +166,19 @@ public:
   [[nodiscard]] virtual std::vector<AtomicRange> atomicRanges() const {
     return {};
   }
+
+  /**
+   * @brief This document's page geometry.
+   *
+   * Defaults to gleditor::letterPage -- 8.5x11in Letter, the size every
+   * gleditor/xudu document had before a page's size became something a
+   * source could choose -- so a source that does not override this changes
+   * nothing for it. A source wanting its own page size (a different paper
+   * size, or PageSizing::FitContent to let a page grow to whatever landed
+   * on it, the way zigzag's cells already do by calling TextLayout directly
+   * rather than through a Doc) overrides this instead.
+   */
+  [[nodiscard]] virtual PageSize pageSize() const { return letterPage; }
 
   /**
    * @brief text(), split into typed pieces a caller that cares about media

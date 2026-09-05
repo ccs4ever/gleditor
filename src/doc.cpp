@@ -123,14 +123,23 @@ std::array<float, 16> toArray(const glm::mat4 &mat) {
 /// and the three that position a page in the document by stacking it under
 /// the one before -- and they had to agree, since a page drawn one size and
 /// stacked as another either overlaps its neighbour or leaves a gap. Here so
-/// that they cannot drift, and so that there is a single place for a page to
-/// stop being sized by how much text happened to land on it.
+/// that they cannot drift.
+///
+/// A Fixed page (shaping.page, from TextSource::pageSize()) answers with its
+/// own author-chosen size regardless of how much text landed on it -- a
+/// short page is still a whole page, with room to grow into. FitContent (or
+/// a page nobody named) keeps the answer every page gave before a document
+/// could choose its own size: exactly as big as its own content.
 struct PageBox {
   float width{};
   float height{};
 };
 
 PageBox pageBoxFor(const PageShaping &shaping) {
+  if (gleditor::PageSizing::Fixed == shaping.page.mode &&
+      shaping.page.widthPx > 0.0F) {
+    return {shaping.page.widthPx, shaping.page.heightPx};
+  }
   return {static_cast<float>(shaping.textWidthPx) + (2.0F * pageMargin),
           static_cast<float>(shaping.textHeightPx) + (2.0F * pageMargin)};
 }
@@ -652,11 +661,20 @@ PageShaping Doc::layoutFrom(const std::uint32_t offset) const {
   }
   auto font = gleditor::text::FontManager::instance().getFont(
       std::string{renderer->defaultFontName()});
+  // A Fixed page wraps text at its own text-area width and never past its
+  // own text-area height; FitContent (or a page nobody named, the default
+  // before this existed) keeps wrapping at the Letter geometry every page
+  // used to, since a Doc has always needed *some* wrap width and nothing
+  // yet asks a FitContent Doc page for a different one.
+  const bool fixedPage = gleditor::PageSizing::Fixed == pageGeometry.mode &&
+                         pageGeometry.widthPx > 0.0F;
   gleditor::text::LayoutOptions opts{
-      .maxWidthPx      = Doc::textWidthPx,
-      .maxHeightPx     = Doc::textHeightPx,
+      .maxWidthPx = fixedPage ? pageGeometry.textWidthPx() : Doc::textWidthPx,
+      .maxHeightPx =
+          fixedPage ? pageGeometry.textHeightPx() : Doc::textHeightPx,
       .singleParagraph = false,
       .ellipsize       = true,
+      .page            = pageGeometry,
   };
 
   // Bounded to the nearest forced break past this page's start, if there is
@@ -1036,6 +1054,7 @@ Doc::Doc(const RendererRef &renderer, render::RenderDevice *device,
   forcedBreaks    = source.forcedBreaks();
   decoratedRanges = source.decoratedRanges();
   atomicRanges    = source.atomicRanges();
+  pageGeometry    = source.pageSize();
 
   // Validated here rather than by the source, because every source needs it
   // and none of them can promise otherwise: the bytes come from a file
@@ -1061,6 +1080,7 @@ void Doc::load(const gleditor::TextSource &source) {
   forcedBreaks    = source.forcedBreaks();
   decoratedRanges = source.decoratedRanges();
   atomicRanges    = source.atomicRanges();
+  pageGeometry    = source.pageSize();
 
   std::size_t badOffset = 0;
   if (!gleditor::validateUtf8(text, badOffset)) {

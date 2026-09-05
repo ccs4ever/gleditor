@@ -23,6 +23,7 @@
 
 #include <gleditor/draw_budget.hpp>
 #include <gleditor/glyphcache/types.hpp>
+#include <gleditor/layout_box.hpp>
 #include <gleditor/render/types.hpp>
 
 class Caret;
@@ -66,6 +67,11 @@ struct ClusterBox {
 struct PageShaping {
   int textWidthPx{};
   int textHeightPx{};
+  /// The page this text was flowed onto, echoed from LayoutOptions::page.
+  /// Default (FitContent, zero size) means no page was named: Page sizes
+  /// its quad from textWidthPx/textHeightPx above instead, the same as
+  /// every page did before a document could choose its own size.
+  gleditor::PageSize page{};
   std::size_t limit{};
   std::vector<ClusterBox> clusters;
   struct GlyphEntry {
@@ -318,6 +324,11 @@ private:
   /// gleditor::text::LayoutOptions::atomicRanges for that page's
   /// TextLayout::layoutPage() call.
   std::vector<gleditor::AtomicRange> atomicRanges;
+  /// This document's page geometry. Read once from the TextSource at
+  /// construction -- see TextSource::pageSize() -- and carried into every
+  /// layoutFrom() call's LayoutOptions, from which Page reads it back to
+  /// size its own quad.
+  gleditor::PageSize pageGeometry{gleditor::letterPage};
   /// Told about every edit. Bare pointers, not owned; see DocumentObserver.
   std::vector<gleditor::DocumentObserver *> observers;
   RendererRef renderer;

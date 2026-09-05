@@ -280,3 +280,34 @@ TEST(TextLayoutTest, MultiFontFallbackShaping) {
   EXPECT_FALSE(shaping.clusters.empty());
 }
 
+TEST(TextLayoutTest, PageGeometryIsEchoedBackUnchanged) {
+  auto &fm  = FontManager::instance();
+  auto font = fm.getFont("Monospace 16");
+  ASSERT_NE(font, nullptr);
+
+  const gleditor::PageSize page{
+      .mode     = gleditor::PageSizing::Fixed,
+      .widthPx  = 1235.45F,
+      .heightPx = 1584.7F,
+      .marginPx = 24.0F,
+  };
+  LayoutOptions opts{
+      .maxWidthPx = 500.0F, .maxHeightPx = 1000.0F, .page = page};
+
+  auto shaping = TextLayout::layoutPage("short document", font, opts);
+
+  EXPECT_EQ(shaping.page, page);
+}
+
+TEST(TextLayoutTest, UnnamedPageDefaultsToFitContentAndIsNotEchoedAsFixed) {
+  auto &fm  = FontManager::instance();
+  auto font = fm.getFont("Monospace 16");
+  ASSERT_NE(font, nullptr);
+
+  // No .page set at all -- every caller before PageSize existed, and every
+  // caller measuring a single line (Canvas, Toast) still today.
+  auto shaping =
+      TextLayout::layoutPage("short document", font, LayoutOptions{});
+
+  EXPECT_EQ(shaping.page.mode, gleditor::PageSizing::FitContent);
+}
