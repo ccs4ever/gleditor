@@ -59,7 +59,7 @@ vec3 selectedBackground(vec3 base) {
         (vTag.y == uRanges[i].firstCluster) ? uRanges[i].startFraction : 0.0;
     float hi =
         (vTag.y == uRanges[i].lastCluster) ? uRanges[i].endFraction : 1.0;
-    if (vQuadU >= lo && vQuadU < hi) {
+    if (vQuadU >= lo && (vQuadU < hi || (hi >= 1.0 && vQuadU <= 1.0))) {
       if (matchCount < GLEDITOR_MAX_OVERLAPPING_HIGHLIGHTS) {
         matches[matchCount] = uRanges[i].colour;
         matchCount++;
