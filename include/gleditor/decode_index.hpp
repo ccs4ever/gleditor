@@ -60,6 +60,7 @@ enum class DecodeIndexFormat : std::uint8_t {
   Zstd,
   Flac,
   Tiff,
+  Gif,
   Unsupported,
 };
 
@@ -166,6 +167,23 @@ struct DecodeIndex {
  */
 [[nodiscard]] std::optional<std::pair<std::uint32_t, std::uint32_t>>
 peekVideoSize(std::span<const std::uint8_t> videoBytes);
+
+/**
+ * @brief Intrinsic size of a GIF from its Logical Screen Descriptor.
+ *
+ * Reads canvas dimensions without decoding frame data. Returns nullopt if
+ * bytes do not start with a valid GIF header ("GIF87a" or "GIF89a").
+ */
+[[nodiscard]] std::optional<std::pair<std::uint32_t, std::uint32_t>>
+peekGifSize(std::span<const std::uint8_t> gifBytes);
+
+/**
+ * @brief Whether @p gifBytes contains an animated (multi-frame) GIF.
+ *
+ * Fast header/record scan detecting whether more than one image descriptor
+ * record exists in the stream.
+ */
+[[nodiscard]] bool isAnimatedGif(std::span<const std::uint8_t> gifBytes);
 
 /**
  * @brief Decompresses @p zstdBytes and recompresses it into zstd's own

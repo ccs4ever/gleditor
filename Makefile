@@ -178,6 +178,12 @@ HAVE_DECODE_INDEX_TIFF := $(shell pkg-config --exists libtiff-4 && echo 1)
 ifeq ($(HAVE_DECODE_INDEX_TIFF),1)
 PKGS += libtiff-4
 endif
+HAVE_DECODE_INDEX_GIF := $(shell pkg-config --exists giflib && echo 1 || (test -f /usr/include/gif_lib.h && echo 1))
+ifeq ($(HAVE_DECODE_INDEX_GIF),1)
+ifeq ($(shell pkg-config --exists giflib && echo 1),1)
+PKGS += giflib
+endif
+endif
 
 # src/svg_cache.cpp: static SVG display via ThorVG (thorvg-1.pc). Optional
 # like every decoder above -- a build without it just cannot show SVG spans,
@@ -434,6 +440,9 @@ endif
 ifeq ($(HAVE_DECODE_INDEX_TIFF),1)
 override CXXFLAGS += -DGLEDITOR_HAVE_DECODE_INDEX_TIFF=1
 endif
+ifeq ($(HAVE_DECODE_INDEX_GIF),1)
+override CXXFLAGS += -DGLEDITOR_HAVE_DECODE_INDEX_GIF=1
+endif
 ifeq ($(HAVE_SVG_THORVG),1)
 override CXXFLAGS += -DGLEDITOR_HAVE_SVG_THORVG=1
 endif
@@ -445,6 +454,11 @@ override LDFLAGS += $(DEBUG_OPTS) $(findstring $(STATIC),-static)
 #CXXFLAGS += -stdlib=libc++ -fexperimental-library
 #LDFLAGS += -v -stdlib=libc++ -fexperimental-library
 LIBS := $(shell pkg-config $(STATIC) --libs $(PKGS))
+ifeq ($(HAVE_DECODE_INDEX_GIF),1)
+ifneq ($(shell pkg-config --exists giflib && echo 1),1)
+LIBS += -lgif
+endif
+endif
 XUDU_LIBS := $(shell pkg-config $(STATIC) --libs $(XUDU_PKGS)) -lryml
 # Matches XUDU_PKGS because ZIGZAG_SHARED_CORE_OBJS is XUDU_CORE_OBJS: zigzag
 # links the whole xanalogical engine, so it needs whatever that engine needs.

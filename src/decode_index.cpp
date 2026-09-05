@@ -56,6 +56,10 @@ extern "C" {
 #include <tiffio.h>
 #endif
 
+#ifdef GLEDITOR_HAVE_DECODE_INDEX_GIF
+#include <gif_lib.h>
+#endif
+
 namespace gleditor {
 
 // -- PNG ------------------------------------------------------------------
@@ -1315,11 +1319,173 @@ reencodeTiffSeekable(std::span<const std::uint8_t> /*tiffBytes*/,
 
 #endif // GLEDITOR_HAVE_DECODE_INDEX_TIFF
 
+// -- GIF --------------------------------------------------------------------
+
+std::optional<std::pair<std::uint32_t, std::uint32_t>>
+peekGifSize(const std::span<const std::uint8_t> gifBytes) {
+  if (gifBytes.size() < 10) {
+    return std::nullopt;
+  }
+  const std::string_view sig(reinterpret_cast<const char *>(gifBytes.data()),
+                             6);
+  if (sig != "GIF87a" && sig != "GIF89a") {
+    return std::nullopt;
+  }
+  const auto w = static_cast<std::uint32_t>(gifBytes[6]) |
+                 (static_cast<std::uint32_t>(gifBytes[7]) << 8U);
+  const auto h = static_cast<std::uint32_t>(gifBytes[8]) |
+                 (static_cast<std::uint32_t>(gifBytes[9]) << 8U);
+  if (0 == w || 0 == h) {
+    return std::nullopt;
+  }
+  return std::make_pair(w, h);
+}
+
+bool isAnimatedGif(const std::span<const std::uint8_t> gifBytes) {
+  if (gifBytes.size() < 13) {
+    return false;
+  }
+  const std::string_view sig(reinterpret_cast<const char *>(gifBytes.data()),
+                             6);
+  if (sig != "GIF87a" && sig != "GIF89a") {
+    return false;
+  }
+
+  // Check Logical Screen Descriptor for Global Color Table
+  const std::uint8_t packed = gifBytes[10];
+  std::size_t offset        = 13;
+  if ((packed & 0x80U) != 0) {
+    const std::size_t gctEntries = 1U << ((packed & 0x07U) + 1U);
+    offset += 3U * gctEntries;
+  }
+
+  std::size_t imageCount = 0;
+  while (offset < gifBytes.size()) {
+    const std::uint8_t blockType = gifBytes[offset++];
+    if (0x3BU == blockType) { // Trailer ';'
+      break;
+    }
+    if (0x2CU == blockType) { // Image Descriptor ','
+      ++imageCount;
+      if (imageCount > 1) {
+        return true;
+      }
+      if (offset + 9 > gifBytes.size()) {
+        break;
+      }
+      const std::uint8_t imgPacked = gifBytes[offset + 8];
+      offset += 9;
+      if ((imgPacked & 0x80U) != 0) {
+        const std::size_t lctEntries = 1U << ((imgPacked & 0x07U) + 1U);
+        offset += 3U * lctEntries;
+      }
+      if (offset >= gifBytes.size()) {
+        break;
+      }
+      // LZW minimum code size
+      ++offset;
+      // Skip sub-blocks
+      while (offset < gifBytes.size()) {
+        const std::size_t blockSize = gifBytes[offset++];
+        if (0 == blockSize) {
+          break;
+        }
+        offset += blockSize;
+      }
+    } else if (0x21U == blockType) { // Extension '!'
+      if (offset >= gifBytes.size()) {
+        break;
+      }
+      // Extension label
+      ++offset;
+      // Skip sub-blocks
+      while (offset < gifBytes.size()) {
+        const std::size_t blockSize = gifBytes[offset++];
+        if (0 == blockSize) {
+          break;
+        }
+        offset += blockSize;
+      }
+    } else {
+      break;
+    }
+  }
+  return imageCount > 1;
+}
+
+#ifdef GLEDITOR_HAVE_DECODE_INDEX_GIF
+
+namespace {
+
+struct GifMemorySource {
+  const std::uint8_t *data;
+  std::size_t size;
+  std::size_t offset;
+};
+
+int gifMemoryRead(GifFileType *gif, GifByteType *buf, int len) {
+  auto *src = static_cast<GifMemorySource *>(gif->UserData);
+  if (src->offset >= src->size) {
+    return 0;
+  }
+  const auto toRead =
+      std::min(static_cast<std::size_t>(len), src->size - src->offset);
+  std::memcpy(buf, src->data + src->offset, toRead);
+  src->offset += toRead;
+  return static_cast<int>(toRead);
+}
+
+DecodeIndex buildGifIndex(const std::span<const std::uint8_t> bytes) {
+  DecodeIndex index;
+  index.format = DecodeIndexFormat::Gif;
+
+  GifMemorySource src{bytes.data(), bytes.size(), 0};
+  int err   = 0;
+  auto *gif = DGifOpen(&src, gifMemoryRead, &err);
+  if (nullptr == gif) {
+    return index;
+  }
+  if (DGifSlurp(gif) != GIF_OK) {
+    DGifCloseFile(gif, &err);
+    return index;
+  }
+
+  index.seekable           = gif->ImageCount > 0;
+  index.durableIndex       = true;
+  index.uncompressedExtent = static_cast<std::uint64_t>(gif->ImageCount);
+
+  for (int i = 0; i < gif->ImageCount; ++i) {
+    index.seekPoints.push_back(SeekPoint{
+        .uncompressedPosition = static_cast<std::uint64_t>(i),
+        .compressedByteOffset = 0,
+    });
+  }
+
+  DGifCloseFile(gif, &err);
+  return index;
+}
+
+} // namespace
+
+#else // !GLEDITOR_HAVE_DECODE_INDEX_GIF
+
+namespace {
+DecodeIndex buildGifIndex(std::span<const std::uint8_t> /*bytes*/) {
+  return DecodeIndex{};
+}
+} // namespace
+
+#endif // GLEDITOR_HAVE_DECODE_INDEX_GIF
+
 // -- Dispatch ---------------------------------------------------------------
 
 DecodeIndex buildDecodeIndex(const std::span<const std::uint8_t> bytes,
                              const MimeType &mime) {
   const auto essence = mime.essence();
+
+  if ("image/gif" == essence) {
+    return buildGifIndex(bytes);
+  }
 
   if ("image/png" == essence) {
 #ifdef GLEDITOR_HAVE_DECODE_INDEX_ZLIB
