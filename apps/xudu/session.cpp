@@ -25,6 +25,7 @@
 #include <gleditor/media_widget.hpp>
 #include <gleditor/render/types.hpp>
 #include <gleditor/render_state.hpp>
+#include <gleditor/svg_animator.hpp>
 #include <gleditor/text/font.hpp>
 #include <gleditor/text_source.hpp>
 
@@ -862,7 +863,16 @@ ImageFitSize mediaFitFor(const std::span<const std::uint8_t> bytes,
     // set up once the span is actually drawn.
     const auto size         = gleditor::SvgCache::peekSize(bytes);
     const auto [natW, natH] = size.value_or(std::make_pair(1.0F, 1.0F));
+    if (gleditor::SvgAnimator::isAnimated(bytes)) {
+      return videoFitSize(natW, natH);
+    }
     return imageFitSize(natW, natH);
+  }
+  if (mime == "image/gif" && gleditor::isAnimatedGif(bytes)) {
+    const auto size  = gleditor::peekGifSize(bytes);
+    const float natW = size ? static_cast<float>(size->first) : 1.0F;
+    const float natH = size ? static_cast<float>(size->second) : 1.0F;
+    return videoFitSize(natW, natH);
   }
   if (gleditor::MagicMimeDetector::isImageMime(mime)) {
     const auto decoded =
@@ -1006,21 +1016,25 @@ Session::sourceFor(const MicroversionId &version,
       // fallback) from a slice of it alone.
       const auto containerBytes = st.read(PrimediaSpan{
           run.scroll, stretch.containerStart, stretch.containerLength});
-      const auto fit            = mediaFitFor(
-          std::span<const std::uint8_t>(
-              reinterpret_cast<const std::uint8_t *>(containerBytes.data()),
-              containerBytes.size()),
-          stretch.mime);
+      const std::span<const std::uint8_t> containerSpan(
+          reinterpret_cast<const std::uint8_t *>(containerBytes.data()),
+          containerBytes.size());
+      const auto fit = mediaFitFor(containerSpan, stretch.mime);
 
       // An image narrow enough to leave a usable column beside it floats, so
-      // text wraps there instead of stepping over it; audio and video stay
-      // Block regardless of width, since their transport chrome (play/pause,
-      // seek bar, title) wants the full column to itself, not a half-width
-      // sliver squeezed beside text. kFloatWidthFraction is "at most half the
-      // page" -- narrower than that and there is nothing left worth wrapping
-      // text into.
+      // text wraps there instead of stepping over it; audio, video and
+      // animations stay Block regardless of width, since their transport chrome
+      // (play/pause, seek bar, title) wants the full column to itself, not a
+      // half-width sliver squeezed beside text. kFloatWidthFraction is "at most
+      // half the page" -- narrower than that and there is nothing left worth
+      // wrapping text into.
+      const bool isAnim =
+          (stretch.mime == "image/gif" &&
+           gleditor::isAnimatedGif(containerSpan)) ||
+          (gleditor::MimeType{stretch.mime} == gleditor::MimeType::ImageSvg &&
+           gleditor::SvgAnimator::isAnimated(containerSpan));
       const bool isImage =
-          gleditor::MagicMimeDetector::isImageMime(stretch.mime);
+          !isAnim && gleditor::MagicMimeDetector::isImageMime(stretch.mime);
       constexpr float kFloatWidthFraction = 0.5F;
       const bool floats =
           isImage && fit.width <= Doc::textWidthPx * kFloatWidthFraction;
@@ -1077,6 +1091,12 @@ Session::mediaSpansFor(const MicroversionId &version,
         docOffset += static_cast<std::uint32_t>(stretch.length);
         continue;
       }
+      const auto containerBytes = st.read(PrimediaSpan{
+          run.scroll, stretch.containerStart, stretch.containerLength});
+      const std::span<const std::uint8_t> containerSpan(
+          reinterpret_cast<const std::uint8_t *>(containerBytes.data()),
+          containerBytes.size());
+
       MediaSpanInfo info;
       info.span      = PrimediaSpan{run.scroll, stretch.start, stretch.length};
       info.docOffset = docOffset;
@@ -1084,22 +1104,28 @@ Session::mediaSpansFor(const MicroversionId &version,
       info.isAudio   = gleditor::MagicMimeDetector::isAudioMime(stretch.mime);
       info.isVideo   = gleditor::MagicMimeDetector::isVideoMime(stretch.mime);
       info.isImage   = gleditor::MagicMimeDetector::isImageMime(stretch.mime);
+      if (info.mime == "image/gif" && gleditor::isAnimatedGif(containerSpan)) {
+        info.isAnimation = true;
+        info.isImage     = false;
+      } else if (gleditor::MimeType{info.mime} ==
+                     gleditor::MimeType::ImageSvg &&
+                 gleditor::SvgAnimator::isAnimated(containerSpan)) {
+        info.isAnimation = true;
+        info.isImage     = false;
+      }
       info.containerOffset = stretch.start - stretch.containerStart;
       info.containerLength = stretch.containerLength;
       if (info.isAudio) {
         info.label = "Audio Stream";
       } else if (info.isVideo) {
         info.label = "Video Stream";
+      } else if (info.isAnimation) {
+        info.label = "Animation";
       } else if (info.isImage) {
         info.label = "Image Graphic";
       }
 
-      if (info.isAudio || info.isVideo) {
-        const auto containerBytes = st.read(PrimediaSpan{
-            run.scroll, stretch.containerStart, stretch.containerLength});
-        const std::span<const std::uint8_t> containerSpan(
-            reinterpret_cast<const std::uint8_t *>(containerBytes.data()),
-            containerBytes.size());
+      if (info.isAudio || info.isVideo || info.isAnimation) {
         const auto fit    = mediaFitFor(containerSpan, stretch.mime);
         info.widgetWidth  = fit.width;
         info.widgetHeight = fit.height;

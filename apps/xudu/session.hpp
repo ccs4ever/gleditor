@@ -480,6 +480,7 @@ public:
     bool isAudio{false};
     bool isVideo{false};
     bool isImage{false};
+    bool isAnimation{false};
     std::string label;
     /// Where @p span sits within the whole media file it was classified
     /// against -- the offset (and that file's own total length) a
