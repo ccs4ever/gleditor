@@ -756,15 +756,6 @@ void Session::refresh(const std::uint32_t docIndex,
 
 namespace {
 
-/// Line pitch of @p fontName, or a plausible guess if it fails to resolve --
-/// a placeholder's whole job is reserving *some* room, and a slightly wrong
-/// guess is a smaller visual glitch than a placeholder that renders nothing.
-float lineHeightFor(const std::string_view fontName) {
-  const auto font =
-      gleditor::text::FontManager::instance().getFont(std::string{fontName});
-  return (font != nullptr) ? font->metrics().lineHeight : 19.0F;
-}
-
 /// A box shown at its own @p naturalWidth x @p naturalHeight -- one image
 /// pixel to one layout pixel, the same convention every raster format here
 /// already uses (see design/svg-vector-primedia.md's own note that a static
@@ -889,43 +880,16 @@ ImageFitSize mediaFitFor(const std::span<const std::uint8_t> bytes,
   return {Session::audioCardWidthPx, Session::audioCardHeightPx};
 }
 
-/// What sourceFor() spends in a document's concatext to reserve room for one
-/// media span: a run of blank lines sized so the widget eventually placed
-/// there (mediaFitFor()) fits without overlapping the text that follows or
-/// leaving a gap before it, and @p minWidthPx -- the same widget's actual
-/// width -- for AtomicRange::minWidthPx, so the page it lands on widens to
-/// cover it even though a blank line has no glyphs of its own to do that.
-///
-/// Reserved height adds gleditor::MediaWidget::anchorGapPx on top of the
-/// widget's own height: both ImageOverlay::bottomLeftOf() and
-/// MediaWidget::bottomLeftOf() draw that far below the anchor line before
-/// the widget itself starts, and a reservation that omitted it would be
-/// exactly the widget's own height short of what its actual footprint
-/// needs -- invisible for a small one with page to spare, a real overflow
-/// past the page's own bottom edge for one tall enough to nearly fill the
-/// remaining page height.
-///
-/// Must be the only place this decision is made: sourceFor() spends
-/// @p placeholder's many newline bytes and mediaSpansFor() advances
-/// docOffset by the same amount, and the two disagreeing would misalign
-/// every anchor into media that follows a shorter span.
-struct ReservedMedia {
-  std::string placeholder;
-  float minWidthPx;
-};
-
-ReservedMedia placeholderFor(const std::span<const std::uint8_t> bytes,
-                             const std::string_view mime,
-                             const std::string_view fontName) {
-  const float lineHeight = lineHeightFor(fontName);
-  const auto fit         = mediaFitFor(bytes, mime);
-  const float reservedHeightPx =
-      fit.height + gleditor::MediaWidget::anchorGapPx;
-
-  const auto lines = static_cast<std::uint32_t>(
-      std::max(1.0F, std::ceil(reservedHeightPx / lineHeight)));
-  return {std::string(lines, '\n'), fit.width};
-}
+/// What sourceFor() anchors one media span's LayoutBox to in a document's
+/// concatext: a single OBJECT REPLACEMENT CHARACTER, 3 bytes in UTF-8, so a
+/// widget's own pixel size no longer decides how many bytes of the document
+/// it occupies -- only LayoutBox::widthPx/heightPx do, which the layout
+/// engine turns into reserved space once it knows the font it is flowing
+/// into. sourceFor() and mediaSpansFor() both anchor at this same fixed
+/// width, which is what lets mediaSpansFor()'s docOffset bookkeeping stay in
+/// step with sourceFor()'s concatext without either recomputing anything
+/// about the other.
+constexpr std::string_view kMediaAnchor = "\xEF\xBF\xBC";
 
 /// One stretch of a piece, classified as plain text or media. See
 /// classifyRun() for why a piece can hold more than one of these.
@@ -1014,15 +978,17 @@ std::vector<ClassifiedStretch> classifyRun(const Store &st,
 } // namespace
 
 std::shared_ptr<VersionTextSource>
-Session::sourceFor(const MicroversionId &version, const std::size_t storeIndex,
-                   const std::string_view fontName) const {
+Session::sourceFor(const MicroversionId &version,
+                   const std::size_t storeIndex) const {
   const auto &st     = store(storeIndex);
   const auto rebuilt = st.rebuild(version);
   gleditor::MagicMimeDetector magic;
 
   std::string concatext;
   const auto breaks = rebuilt.forcedBreaks();
-  std::vector<gleditor::AtomicRange> atomicRanges;
+  std::vector<gleditor::LayoutBox> boxes;
+  std::vector<gleditor::BlockStyleRange> blockStyles;
+  std::uint32_t nextBoxId = 0;
 
   for (const auto &run : rebuilt.pieces()) {
     if (breakMarkerScroll == run.scroll) {
@@ -1040,36 +1006,41 @@ Session::sourceFor(const MicroversionId &version, const std::size_t storeIndex,
       // fallback) from a slice of it alone.
       const auto containerBytes = st.read(PrimediaSpan{
           run.scroll, stretch.containerStart, stretch.containerLength});
-      const auto reserved       = placeholderFor(
+      const auto fit            = mediaFitFor(
           std::span<const std::uint8_t>(
               reinterpret_cast<const std::uint8_t *>(containerBytes.data()),
               containerBytes.size()),
-          stretch.mime, fontName);
-      // Reserved so the whole run of blank lines below lands on one page,
-      // and the page it lands on widens to fit reserved.minWidthPx -- see
-      // TextSource::atomicRanges() -- rather than the widget eventually
-      // drawn over it splitting across a page boundary, or drawing past the
-      // page's own background quad, the text layout engine had no way to
-      // know not to.
-      const auto rangeStart = static_cast<std::uint32_t>(concatext.size());
-      atomicRanges.push_back(gleditor::AtomicRange{
-          .start      = rangeStart,
-          .end        = rangeStart +
-                        static_cast<std::uint32_t>(reserved.placeholder.size()),
-          .minWidthPx = reserved.minWidthPx,
+          stretch.mime);
+
+      // Block, not Float or Inline: a figure steps the flow around it the
+      // way the many-newline placeholder always did, rather than text
+      // wrapping beside it or sharing its own line -- reaching for either of
+      // those is future work, not something this migration changes.
+      const auto anchorOffset = static_cast<std::uint32_t>(concatext.size());
+      boxes.push_back(gleditor::LayoutBox{
+          .anchor    = anchorOffset,
+          .widthPx   = fit.width,
+          .heightPx  = fit.height,
+          .marginPx  = gleditor::MediaWidget::anchorGapPx,
+          .placement = gleditor::BoxPlacement::Block,
+          .id        = nextBoxId++,
       });
-      concatext += reserved.placeholder;
+      blockStyles.push_back(gleditor::BlockStyleRange{
+          .start = anchorOffset,
+          .end = anchorOffset + static_cast<std::uint32_t>(kMediaAnchor.size()),
+          .align = gleditor::TextAlign::Centre,
+      });
+      concatext += kMediaAnchor;
     }
   }
 
-  return std::make_shared<VersionTextSource>(concatext, version, breaks,
-                                             atomicRanges);
+  return std::make_shared<VersionTextSource>(concatext, version, breaks, boxes,
+                                             blockStyles);
 }
 
 std::vector<Session::MediaSpanInfo>
 Session::mediaSpansFor(const MicroversionId &version,
-                       const std::size_t storeIndex,
-                       const std::string_view fontName) const {
+                       const std::size_t storeIndex) const {
   if (storeIndex >= stores.size() || !stores[storeIndex].store) {
     return {};
   }
@@ -1106,21 +1077,18 @@ Session::mediaSpansFor(const MicroversionId &version,
         info.label = "Image Graphic";
       }
 
-      const auto containerBytes = st.read(PrimediaSpan{
-          run.scroll, stretch.containerStart, stretch.containerLength});
-      const std::span<const std::uint8_t> containerSpan(
-          reinterpret_cast<const std::uint8_t *>(containerBytes.data()),
-          containerBytes.size());
-      info.reservedLength = static_cast<std::uint32_t>(
-          placeholderFor(containerSpan, stretch.mime, fontName)
-              .placeholder.size());
       if (info.isAudio || info.isVideo) {
+        const auto containerBytes = st.read(PrimediaSpan{
+            run.scroll, stretch.containerStart, stretch.containerLength});
+        const std::span<const std::uint8_t> containerSpan(
+            reinterpret_cast<const std::uint8_t *>(containerBytes.data()),
+            containerBytes.size());
         const auto fit    = mediaFitFor(containerSpan, stretch.mime);
         info.widgetWidth  = fit.width;
         info.widgetHeight = fit.height;
       }
       list.push_back(info);
-      docOffset += info.reservedLength;
+      docOffset += static_cast<std::uint32_t>(kMediaAnchor.size());
     }
   }
   return list;
@@ -1610,17 +1578,16 @@ ImageOverlay::bottomLeftOf(const Placement &p) {
   if (!p.doc) {
     return std::nullopt;
   }
-  const auto anchor = p.doc->anchorFor(p.docOffset);
-  if (!anchor.has_value()) {
+  // The layout engine already decided where this image's LayoutBox landed --
+  // Doc::boxFor() hands back that box's own bottom-left corner directly, in
+  // the same page-pixel space Corner is in, so there is no anchorGapPx
+  // arithmetic left to redo here (it is baked into the box's own reserved
+  // space via LayoutBox::marginPx, set once in Session::sourceFor()).
+  const auto box = p.doc->boxFor(p.docOffset);
+  if (!box.has_value()) {
     return std::nullopt;
   }
-  // Page::caretGeometry (src/doc.cpp) hands back Y increasing upward from
-  // the page's own centre -- posY = originY - (top + height/2), and originY
-  // is the page's top edge in that same up-positive space -- so moving
-  // below the anchor line is *subtracting* a pixel offset, not negating and
-  // re-adding one as if Y increased downward from the page's top margin.
-  return Corner{anchor->pageIndex, anchor->x,
-                anchor->y - (p.height + gleditor::MediaWidget::anchorGapPx)};
+  return Corner{box->pageIndex, box->x, box->y};
 }
 
 void ImageOverlay::drawFrame(gleditor::FrameContext &ctx) {

@@ -744,29 +744,10 @@ PageShaping Doc::layoutFrom(const std::uint32_t offset) const {
     }
   }
 
-  // atomicRanges is in this document's own offsets, same as forcedBreaks and
-  // decoratedRanges, but -- unlike decoratedRanges -- must reach
-  // layoutPage() with its full, untruncated length even when part of it
-  // would extend past what a forced break bounds this page to: layoutPage()
-  // computes a range's own height from (end - start) alone, so clipping
-  // that the way decoratedRanges is above would make it look shorter than
-  // what it actually needs, defeating the whole point of an atomic range.
-  // Only forwarded when its start falls within this page's own slice --
-  // layoutPage() only ever asks "does an atomic range start at this byte",
-  // so one that starts elsewhere is never queried and safe to leave out.
-  for (const auto &range : atomicRanges) {
-    if (range.start >= offset &&
-        range.start < static_cast<std::uint32_t>(pageEnd)) {
-      opts.atomicRanges.push_back(gleditor::AtomicRange{
-          .start      = range.start - offset,
-          .end        = range.end - offset,
-          .minWidthPx = range.minWidthPx,
-      });
-    }
-  }
-
-  // layoutBoxes is a single anchor byte each, the same "start falls on this
-  // page or it does not" rule as atomicRanges above.
+  // layoutBoxes is a single anchor byte each -- forwarded only when that
+  // anchor falls within this page's own slice, the same "start falls on
+  // this page or it does not" rule decoratedRanges' clipping does not
+  // need, since a box has no length of its own to be truncated.
   for (const auto &box : layoutBoxes) {
     if (box.anchor >= offset &&
         box.anchor < static_cast<std::uint32_t>(pageEnd)) {
@@ -1111,7 +1092,6 @@ Doc::Doc(const RendererRef &renderer, render::RenderDevice *device,
   text            = source.text();
   forcedBreaks    = source.forcedBreaks();
   decoratedRanges = source.decoratedRanges();
-  atomicRanges    = source.atomicRanges();
   layoutBoxes     = source.layoutBoxes();
   blockStyles     = source.blockStyles();
   pageGeometry    = source.pageSize();
@@ -1139,7 +1119,6 @@ void Doc::load(const gleditor::TextSource &source) {
   text            = source.text();
   forcedBreaks    = source.forcedBreaks();
   decoratedRanges = source.decoratedRanges();
-  atomicRanges    = source.atomicRanges();
   layoutBoxes     = source.layoutBoxes();
   blockStyles     = source.blockStyles();
   pageGeometry    = source.pageSize();

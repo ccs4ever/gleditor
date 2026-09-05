@@ -219,7 +219,6 @@ private:
     bool singleParagraph{};
     bool ellipsize{};
     std::vector<gleditor::DecoratedRange> decoratedRanges;
-    std::vector<gleditor::AtomicRange> atomicRanges;
     std::vector<gleditor::LayoutBox> boxes;
     std::vector<gleditor::BlockStyleRange> blockStyles;
     gleditor::PageSize page;

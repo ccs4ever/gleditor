@@ -334,11 +334,6 @@ std::size_t UnifiedTransclusionEngine::ShapingKeyHash::operator()(
     mix(static_cast<std::size_t>(range.end));
     mix(static_cast<std::size_t>(range.decorations));
   }
-  for (const auto &range : k.atomicRanges) {
-    mix(static_cast<std::size_t>(range.start));
-    mix(static_cast<std::size_t>(range.end));
-    mix(std::hash<float>{}(range.minWidthPx));
-  }
   for (const auto &box : k.boxes) {
     mix(static_cast<std::size_t>(box.anchor));
     mix(std::hash<float>{}(box.widthPx));
@@ -366,7 +361,6 @@ const PageShaping &UnifiedTransclusionEngine::shapedPage(
                  .singleParagraph = opts.singleParagraph,
                  .ellipsize       = opts.ellipsize,
                  .decoratedRanges = opts.decoratedRanges,
-                 .atomicRanges    = opts.atomicRanges,
                  .boxes           = opts.boxes,
                  .blockStyles     = opts.blockStyles,
                  .page            = opts.page};

@@ -152,29 +152,14 @@ public:
   }
 
   /**
-   * @brief Byte ranges into text() that must not be split across a page
-   *        boundary -- see gleditor::text::LayoutOptions::atomicRanges,
-   *        which this feeds after Doc translates offsets into a given
-   *        page's own slice-relative coordinates the same way it already
-   *        does for decoratedRanges().
-   *
-   * Empty by default, for the same reason forcedBreaks() and
-   * decoratedRanges() are: plain text has no content that must stay whole
-   * across a page break. xudu's source overrides this to name each embedded
-   * media placeholder's reserved run of blank lines.
-   */
-  [[nodiscard]] virtual std::vector<AtomicRange> atomicRanges() const {
-    return {};
-  }
-
-  /**
    * @brief Boxes anchored somewhere in text() -- see LayoutBox's own
    *        comment. Fed, after Doc translates a box's absolute offset into
    *        a given page's own slice-relative coordinates, into
    *        gleditor::text::LayoutOptions::boxes.
    *
-   * Empty by default, for the same reason atomicRanges() is: plain text
-   * has no media to reserve a box for.
+   * Empty by default, for the same reason decoratedRanges() is: plain text
+   * has no media to reserve a box for. xudu's source overrides this to
+   * anchor each embedded media span's own LayoutBox.
    */
   [[nodiscard]] virtual std::vector<LayoutBox> layoutBoxes() const {
     return {};

@@ -66,11 +66,12 @@ class Session;
 class VersionTextSource : public gleditor::TextSource {
 public:
   VersionTextSource(std::string aText, MicroversionId aVersion,
-                    std::vector<std::uint32_t> aBreaks               = {},
-                    std::vector<gleditor::AtomicRange> aAtomicRanges = {})
+                    std::vector<std::uint32_t> aBreaks                  = {},
+                    std::vector<gleditor::LayoutBox> aBoxes             = {},
+                    std::vector<gleditor::BlockStyleRange> aBlockStyles = {})
       : contents(std::move(aText)), id(std::move(aVersion)),
-        breaks(std::move(aBreaks)), atomicByteRanges(std::move(aAtomicRanges)) {
-  }
+        breaks(std::move(aBreaks)), mediaBoxes(std::move(aBoxes)),
+        mediaBlockStyles(std::move(aBlockStyles)) {}
 
   [[nodiscard]] std::string text() const override { return contents; }
   [[nodiscard]] std::string name() const override { return id.str(); }
@@ -78,20 +79,24 @@ public:
   [[nodiscard]] std::vector<std::uint32_t> forcedBreaks() const override {
     return breaks;
   }
-  [[nodiscard]] std::vector<gleditor::AtomicRange>
-  atomicRanges() const override {
-    return atomicByteRanges;
+  [[nodiscard]] std::vector<gleditor::LayoutBox> layoutBoxes() const override {
+    return mediaBoxes;
+  }
+  [[nodiscard]] std::vector<gleditor::BlockStyleRange>
+  blockStyles() const override {
+    return mediaBlockStyles;
   }
 
 private:
   std::string contents;
   MicroversionId id;
   std::vector<std::uint32_t> breaks;
-  /// Each embedded media placeholder's [docOffset, docOffset+reservedLength)
-  /// run of blank lines, and how wide its widget actually is -- see
-  /// Session::sourceFor(), which builds this alongside contents itself so
-  /// the two cannot disagree about where a placeholder starts and ends.
-  std::vector<gleditor::AtomicRange> atomicByteRanges;
+  /// Each embedded media anchor's LayoutBox, and the BlockStyleRange
+  /// centring it -- see Session::sourceFor(), which builds these alongside
+  /// contents itself so none of the three can disagree about where an
+  /// anchor sits.
+  std::vector<gleditor::LayoutBox> mediaBoxes;
+  std::vector<gleditor::BlockStyleRange> mediaBlockStyles;
 };
 
 /**
@@ -458,17 +463,15 @@ public:
   /**
    * @brief A source for @p version, ready to hand to the render queue.
    *
-   * @param fontName What the reader's page will actually be laid out with.
-   *        A media placeholder's height is sized from the decoded image (or
-   *        the default video aspect) and this font's line pitch, so it must
-   *        match whatever font the caller's Doc will use -- a mismatch here
-   *        does not corrupt anything, but the reserved space and the
-   *        widget's own size would disagree by however far the two fonts'
-   *        line heights differ.
+   * Each media span is anchored by a single U+FFFC OBJECT REPLACEMENT
+   * CHARACTER rather than a font-sized run of blank lines, so unlike before
+   * this build, no font enters into how the result is built at all -- a
+   * figure's own LayoutBox carries its size, and the layout engine (not this
+   * call) is what turns that into reserved space once it knows which font's
+   * line pitch it is flowing into.
    */
   [[nodiscard]] std::shared_ptr<VersionTextSource>
-  sourceFor(const MicroversionId &version, std::size_t storeIndex = 0,
-            std::string_view fontName = "Monospace 16") const;
+  sourceFor(const MicroversionId &version, std::size_t storeIndex = 0) const;
 
   struct MediaSpanInfo {
     PrimediaSpan span;
@@ -486,32 +489,24 @@ public:
     /// needs no such translation.
     std::uint64_t containerOffset{0};
     std::uint64_t containerLength{0};
-    /// The byte length of the placeholderFor() run reserved for this span in
-    /// the document's concatext, immediately following @p docOffset -- what
-    /// lets a caller outside session.cpp (LinkBeams::resolveAnchors) answer
-    /// "does offset X fall inside this span's reserved range" without
-    /// recomputing placeholder sizing itself.
-    std::uint32_t reservedLength{0};
     /// The size to construct this span's MediaWidget at, in page pixels --
-    /// exactly the box placeholderFor() reserved @p reservedLength's worth of
-    /// blank lines for (the fixed audio card size for @p isAudio; the real
-    /// decoded aspect ratio, or MediaWidget::defaultAspect until a real frame
-    /// reports one, fit to the page and its chrome, for @p isVideo). Computed
-    /// once here rather than recomputed independently by syncMediaWidgets(),
-    /// so a widget's own size and the space reserved for it in the text flow
-    /// cannot drift into disagreeing the way two separate formulas would
-    /// risk. Left zero for @p isImage, whose sizing comes from
-    /// ImageOverlay/ImageResource instead.
+    /// exactly the LayoutBox sourceFor() anchored at @p docOffset (the fixed
+    /// audio card size for @p isAudio; the real decoded aspect ratio, or
+    /// MediaWidget::defaultAspect until a real frame reports one, fit to the
+    /// page and its chrome, for @p isVideo). Computed once here rather than
+    /// recomputed independently by syncMediaWidgets(), so a widget's own
+    /// size and the box reserved for it in the text flow cannot drift into
+    /// disagreeing the way two separate formulas would risk. Left zero for
+    /// @p isImage, whose sizing comes from ImageOverlay/ImageResource
+    /// instead.
     float widgetWidth{0.0F};
     float widgetHeight{0.0F};
   };
 
   /// Discovered media spans for @p version with their document byte offsets.
-  /// @param fontName See sourceFor(): must be the same font passed there, so
-  ///        the offsets line up with what that call actually reserved.
   [[nodiscard]] std::vector<MediaSpanInfo>
-  mediaSpansFor(const MicroversionId &version, std::size_t storeIndex = 0,
-                std::string_view fontName = "Monospace 16") const;
+  mediaSpansFor(const MicroversionId &version,
+                std::size_t storeIndex = 0) const;
 
   // -- Hypertime History & Scrubbing ----------------------------------------
 

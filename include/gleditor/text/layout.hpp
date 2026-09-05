@@ -28,19 +28,14 @@ struct LayoutOptions {
   /// cluster by its byte offset. Empty -- the default, and every caller
   /// before this existed -- means no glyph in the page carries any.
   std::vector<DecoratedRange> decoratedRanges{};
-  /// Ranges that must not be split across a page boundary -- see
-  /// AtomicRange's own comment. When starting a range whose full height
-  /// would not fit in what remains of maxHeightPx, layoutPage() ends the
-  /// page there instead of partway through the range, so the whole thing
-  /// begins fresh on the next page's call instead of splitting across both.
-  /// Empty by default: plain text has no atomic ranges, the same "no
-  /// opinion" meaning decoratedRanges' own empty default carries.
-  std::vector<AtomicRange> atomicRanges{};
   /// Boxes anchored somewhere in this text slice -- see LayoutBox's own
   /// comment. Unlike decoratedRanges, never clipped: a box is a single
   /// anchor character, so it is either on this page or it is not. Empty by
-  /// default, the same "no opinion" meaning atomicRanges' own empty default
-  /// carries.
+  /// default, the same "no opinion" meaning decoratedRanges' own empty
+  /// default carries. A Block box that would not fit what remains of
+  /// maxHeightPx rolls whole to the next page's call instead of splitting --
+  /// the same role AtomicRange used to serve for a media placeholder's
+  /// reserved blank lines, before boxes made that placeholder unnecessary.
   std::vector<gleditor::LayoutBox> boxes{};
   /// Paragraph style over ranges of this text slice -- see
   /// BlockStyleRange's own comment. A Block box takes its horizontal

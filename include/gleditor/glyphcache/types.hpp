@@ -147,35 +147,6 @@ struct DecoratedRange {
 };
 
 /**
- * @brief A byte range that must not be split across a page boundary.
- *
- * An embedded media placeholder's reserved blank lines, say, where a widget
- * drawn over that space expects the whole reserved rectangle to land on one
- * page. [@p start, @p end) is exactly (end - start) consecutive newline
- * characters (the shape every placeholder in this codebase takes), so its
- * own height at a layoutPage() call's line pitch is computable from its
- * length alone, with no separate pixel height to keep in sync -- only its
- * *width* needs to be carried separately, since a blank line has no glyphs
- * of its own for layoutPage()'s glyph-width scan to see. Same offset
- * convention as DecoratedRange: relative to whatever text it is handed
- * alongside, translated by the caller (Doc::layoutFrom()) between a whole
- * document's offsets and a single page's slice.
- */
-struct AtomicRange {
-  std::uint32_t start{};
-  std::uint32_t end{}; ///< Half-open: covers [start, end).
-  /// How wide the widget eventually drawn over this range actually is, so
-  /// layoutPage() can widen the page it lands on to match -- without this,
-  /// a page's own background quad (sized from the widest *rendered text*
-  /// line) has no way to know a media item wider than any surrounding text
-  /// needs more room, and the media draws past the quad's own right edge.
-  /// Zero -- the default -- asks for no widening at all.
-  float minWidthPx{0.0F};
-
-  [[nodiscard]] bool operator==(const AtomicRange &) const = default;
-};
-
-/**
  * @brief Integer 2D point (uses Offset units).
  */
 struct Point {

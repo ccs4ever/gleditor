@@ -256,8 +256,7 @@ public:
       }
       const auto &vInfo = session.views()[dIdx];
       const auto &st    = session.store(vInfo.storeIndex);
-      const auto spans  = session.mediaSpansFor(vInfo.version, vInfo.storeIndex,
-                                                state->defaultFontName);
+      const auto spans = session.mediaSpansFor(vInfo.version, vInfo.storeIndex);
       for (const auto &mSpan : spans) {
         // The whole file this span was classified against, not just the
         // (possibly narrower) span itself: a fragment transcluded out of the
@@ -327,9 +326,8 @@ public:
   /// Open @p version as another document beside whatever is already there.
   void showAlongside(const MicroversionId &version, const float depthZ = 0.0F,
                      const std::size_t storeIndex = 0) {
-    renderer->push(RenderItemOpenDoc(
-        session.sourceFor(version, storeIndex, state->defaultFontName),
-        depthZ));
+    renderer->push(
+        RenderItemOpenDoc(session.sourceFor(version, storeIndex), depthZ));
     renderer->runWithState([this, version, storeIndex](RenderState &rState) {
       if (rState.docs.empty()) {
         return;
@@ -1882,18 +1880,19 @@ int main(const int argc, char **argv) {
       views.showAlongside(version);
     });
     links.setMediaRectResolver(
-        [&images, &views, &session,
-         state](const Doc &doc, const std::size_t storeIndex,
-                const MicroversionId &version,
-                const std::uint32_t docOffset) -> std::optional<Doc::Anchor> {
-          // fontName must match sourceFor()/mediaSpansFor()'s own convention
-          // (see MediaSpanInfo::reservedLength's comment): the same font
-          // syncMediaWidgets() already uses to find these same spans.
-          const auto spans = session->mediaSpansFor(version, storeIndex,
-                                                    state->defaultFontName);
+        [&images, &views, &session](
+            const Doc &doc, const std::size_t storeIndex,
+            const MicroversionId &version,
+            const std::uint32_t docOffset) -> std::optional<Doc::Anchor> {
+          const auto spans = session->mediaSpansFor(version, storeIndex);
           for (const auto &mSpan : spans) {
+            // Every span's anchor is the same fixed-width U+FFFC run now
+            // (see Session::sourceFor()'s own comment), so the span this
+            // offset falls in is a span whose anchor starts at or before it
+            // and ends within 3 bytes -- no per-span reserved length to look
+            // up anymore.
             if (docOffset < mSpan.docOffset ||
-                docOffset >= mSpan.docOffset + mSpan.reservedLength) {
+                docOffset >= mSpan.docOffset + 3) {
               continue;
             }
             if (mSpan.isImage) {

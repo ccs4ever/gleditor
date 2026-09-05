@@ -259,19 +259,19 @@ std::optional<MediaWidget::Corner> MediaWidget::bottomLeftOf() const {
         (pageObj != nullptr) ? (pageObj->heightPixels() / 2.0F) : 50.0F;
     effectiveY = halfHeightPixels - pageY_;
   } else {
-    const auto anchor = doc_->anchorFor(docOffset_);
-    if (!anchor.has_value()) {
+    // The layout engine already decided where this widget's LayoutBox
+    // landed -- Doc::boxFor() hands back that box's own bottom-left corner
+    // directly, in the same page-pixel space Corner is in, so there is no
+    // anchorGapPx arithmetic left to redo here (it is baked into the box's
+    // own reserved space via LayoutBox::marginPx, set once by whichever
+    // TextSource anchored this offset).
+    const auto box = doc_->boxFor(docOffset_);
+    if (!box.has_value()) {
       return std::nullopt;
     }
-    pageIdx = anchor->pageIndex;
-    anchorX = anchor->x;
-    // Page::caretGeometry (src/doc.cpp) hands back Y increasing upward from
-    // the page's own centre -- posY = originY - (top + height/2), with
-    // originY the page's top edge in that same up-positive space -- so
-    // moving below the anchor line is *subtracting* a pixel offset here,
-    // not negating and re-adding one as if Y increased downward from the
-    // page's top margin.
-    effectiveY = anchor->y - (height_ + anchorGapPx);
+    pageIdx    = box->pageIndex;
+    anchorX    = box->x;
+    effectiveY = box->y;
   }
   return Corner{pageIdx, anchorX, effectiveY};
 }

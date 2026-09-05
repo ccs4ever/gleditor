@@ -140,24 +140,6 @@ decorationsAt(const std::size_t byteOffset,
   return mask;
 }
 
-/// The line count of the atomic range starting exactly at @p byteOffset, if
-/// any -- nullopt for a byte that is not the first byte of one of
-/// @p ranges. A range is (end - start) consecutive newline characters (see
-/// AtomicRange's own comment), so its line count at any font's pitch is just
-/// that byte length; no separate pixel height is carried alongside it to
-/// (dis)agree with this.
-std::optional<std::size_t>
-atomicRangeLinesStartingAt(const std::size_t byteOffset,
-                           const std::vector<AtomicRange> &ranges) {
-  for (const auto &range : ranges) {
-    if (static_cast<std::size_t>(range.start) == byteOffset &&
-        range.end > range.start) {
-      return static_cast<std::size_t>(range.end - range.start);
-    }
-  }
-  return std::nullopt;
-}
-
 /// The box anchored exactly at @p byteOffset, if any -- nullptr for a byte
 /// that is not one of @p boxes' own anchors.
 const gleditor::LayoutBox *
@@ -301,10 +283,6 @@ struct FilledLine {
   std::size_t endByte{};   ///< One past the last byte this line covers.
   std::size_t nextGlyph{}; ///< Where the following line starts.
   float width{};
-  /// Byte of the newline this line broke on, when it broke on one. What the
-  /// caller needs to ask whether something is anchored there before it
-  /// commits the line -- the page may have to end instead.
-  std::size_t breakByte{};
   bool brokeOnNewline{false};
   /// Set when the glyphs ran out rather than the line filling up. The
   /// height check such a line faces is one a line ended by a real break does
@@ -383,12 +361,11 @@ FilledLine fillLine(const ShapedRun &shaped, const std::string_view text,
       }
 
       FilledLine out;
-      out.width     = finalWidth;
-      out.endGlyph  = breakAt;
-      out.endByte   = (breakAt < shaped.glyphs.size())
-                          ? shaped.glyphs[breakAt].clusterByteOffset
-                          : text.size();
-      out.breakByte = bytePos;
+      out.width    = finalWidth;
+      out.endGlyph = breakAt;
+      out.endByte  = (breakAt < shaped.glyphs.size())
+                         ? shaped.glyphs[breakAt].clusterByteOffset
+                         : text.size();
 
       if (isNewline) {
         out.brokeOnNewline = true;
@@ -678,26 +655,6 @@ PageShaping TextLayout::layoutPage(std::string_view text,
         fillLine(shaped, text, breakAttrs, lineStart, band.right - band.left,
                  options.singleParagraph, options.boxes);
 
-    // An atomic range (a media placeholder's reserved lines) must not start
-    // on this page unless the whole thing fits: checked before committing
-    // the line whose newline the range begins at, so a range that does not
-    // fit rolls onto the next page's call in its entirety, together with
-    // whatever un-terminated text shares that line, rather than splitting
-    // mid-range. Skipped on an empty page (no lines committed yet) so a
-    // range taller than maxHeight itself -- which should not happen, since
-    // every placeholder height reaching here is already clamped to at most
-    // one page, but a future caller's mistake should not be able to spin
-    // this in place forever -- still makes progress.
-    if (filled.brokeOnNewline && !lines.empty()) {
-      if (const auto rangeLines = atomicRangeLinesStartingAt(
-              filled.breakByte, options.atomicRanges)) {
-        const float rangeHeight = static_cast<float>(*rangeLines) * lineHeight;
-        if (currentY + rangeHeight > maxHeight) {
-          break;
-        }
-      }
-    }
-
     // This line's own height: lineHeight, unless an Inline box committed to
     // it reaches further down from the line's top than that already does.
     // Computed before the hitEnd/commit checks below so both use the real
@@ -905,17 +862,6 @@ PageShaping TextLayout::layoutPage(std::string_view text,
   }
 
   shaping.boxes = std::move(placedBoxes);
-
-  // A blank placeholder line has no glyphs, so the scan above never sees
-  // whatever's actually drawn over it -- an atomic range fully included on
-  // this page (its start byte is before where this page ends) widens the
-  // page to at least its own minWidthPx, the same way a real text line's
-  // glyph width already does above.
-  for (const auto &range : options.atomicRanges) {
-    if (range.start < shaping.limit) {
-      maxSeenWidth = std::max(maxSeenWidth, range.minWidthPx);
-    }
-  }
 
   // A placed box's own rightmost extent, for the same reason: it has no
   // glyphs of its own for the scan above to see either. left + width rather

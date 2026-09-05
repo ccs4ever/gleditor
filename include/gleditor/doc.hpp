@@ -351,17 +351,10 @@ private:
   /// ranges in layoutFrom() the same way forcedBreaks is translated to a
   /// slice-length clamp there.
   std::vector<gleditor::DecoratedRange> decoratedRanges;
-  /// Byte ranges into text that must not be split across a page boundary.
-  /// Read once from the TextSource at construction -- see
-  /// TextSource::atomicRanges() -- and clipped/rebased into page-relative
-  /// coordinates in layoutFrom() the same way decoratedRanges is, becoming
-  /// gleditor::text::LayoutOptions::atomicRanges for that page's
-  /// TextLayout::layoutPage() call.
-  std::vector<gleditor::AtomicRange> atomicRanges;
   /// Boxes anchored somewhere in text. Read once from the TextSource at
   /// construction -- see TextSource::layoutBoxes() -- and forwarded
   /// unclipped in layoutFrom() when a box's anchor falls on that page's
-  /// slice, the same rule atomicRanges' own start offset gets, becoming
+  /// slice, the same rule decoratedRanges' own start offset gets, becoming
   /// gleditor::text::LayoutOptions::boxes for that page's
   /// TextLayout::layoutPage() call.
   std::vector<gleditor::LayoutBox> layoutBoxes;
