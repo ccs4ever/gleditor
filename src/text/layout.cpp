@@ -158,6 +158,121 @@ atomicRangeLinesStartingAt(const std::size_t byteOffset,
   return std::nullopt;
 }
 
+/// One line's worth of glyphs, and where the line after it picks up.
+struct FilledLine {
+  std::size_t endGlyph{};  ///< One past the last glyph drawn on this line.
+  std::size_t endByte{};   ///< One past the last byte this line covers.
+  std::size_t nextGlyph{}; ///< Where the following line starts.
+  float width{};
+  /// Byte of the newline this line broke on, when it broke on one. What the
+  /// caller needs to ask whether something is anchored there before it
+  /// commits the line -- the page may have to end instead.
+  std::size_t breakByte{};
+  bool brokeOnNewline{false};
+  /// Set when the glyphs ran out rather than the line filling up. The
+  /// height check such a line faces is one a line ended by a real break does
+  /// not: see layoutPage()'s own comment where this is consulted.
+  bool hitEnd{false};
+};
+
+/**
+ * @brief Fit as many of @p shaped's glyphs from @p lineStart as @p maxWidth
+ *        holds, breaking at the last opportunity libunibreak offered.
+ *
+ * Lifted out of layoutPage()'s own loop, where the same work was done with
+ * the glyph index rewound (`i = lineStart - 1; continue`) to re-measure the
+ * remainder of a line that had just been broken. Pulling it out is what lets
+ * the caller decide *where* a line goes -- which is the whole point of a
+ * layout that has to step around a float -- before deciding what fits on it:
+ * the width a line has available is no longer a constant the loop can close
+ * over.
+ *
+ * Breaks on the first newline (unless @p singleParagraph), else at the last
+ * break opportunity past @p lineStart, else -- a single word longer than the
+ * line -- at whatever glyph overflowed. A glyph wider than @p maxWidth on its
+ * own is still placed rather than looping forever, which is why the overflow
+ * test requires having placed something first.
+ */
+FilledLine fillLine(const ShapedRun &shaped, const std::string_view text,
+                    const std::vector<char> &breakAttrs,
+                    const std::size_t lineStart, const float maxWidth,
+                    const bool singleParagraph) {
+  float lineWidth            = 0.0F;
+  std::size_t lastBreakGlyph = lineStart;
+  float widthAtBreak         = 0.0F;
+
+  for (std::size_t i = lineStart; i < shaped.glyphs.size(); i++) {
+    const auto &g      = shaped.glyphs[i];
+    const auto bytePos = g.clusterByteOffset;
+
+    const bool isNewline =
+        (bytePos < text.size() && text[bytePos] == '\n' && !singleParagraph);
+
+    const auto charBreak =
+        bytePos < breakAttrs.size() ? breakAttrs[bytePos] : LINEBREAK_NOBREAK;
+    if (charBreak == LINEBREAK_ALLOWBREAK || charBreak == LINEBREAK_MUSTBREAK) {
+      lastBreakGlyph = i;
+      widthAtBreak   = lineWidth;
+    }
+
+    const float nextWidth = lineWidth + g.xAdvance;
+
+    if (isNewline || (nextWidth > maxWidth && i > lineStart)) {
+      std::size_t breakAt = i;
+      float finalWidth    = lineWidth;
+
+      if (!isNewline && lastBreakGlyph > lineStart) {
+        breakAt    = lastBreakGlyph;
+        finalWidth = widthAtBreak;
+      }
+      if (breakAt == lineStart) {
+        // Emergency single glyph break.
+        breakAt    = i;
+        finalWidth = lineWidth;
+      }
+
+      FilledLine out;
+      out.width     = finalWidth;
+      out.endGlyph  = breakAt;
+      out.endByte   = (breakAt < shaped.glyphs.size())
+                          ? shaped.glyphs[breakAt].clusterByteOffset
+                          : text.size();
+      out.breakByte = bytePos;
+
+      if (isNewline) {
+        out.brokeOnNewline = true;
+        out.endGlyph       = i;
+        out.endByte        = (i + 1 < shaped.glyphs.size())
+                                 ? shaped.glyphs[i + 1].clusterByteOffset
+                                 : text.size();
+        out.nextGlyph      = i + 1;
+        return out;
+      }
+
+      out.nextGlyph = breakAt;
+      // A line broken at a space leaves that space behind rather than
+      // opening the next line with it.
+      if (breakAt < shaped.glyphs.size() &&
+          shaped.glyphs[breakAt].clusterByteOffset < text.size() &&
+          text[shaped.glyphs[breakAt].clusterByteOffset] == ' ') {
+        out.nextGlyph = breakAt + 1;
+      }
+      return out;
+    }
+
+    lineWidth = nextWidth;
+  }
+
+  // Ran out of glyphs rather than out of room: everything left is one line.
+  FilledLine out;
+  out.width     = lineWidth;
+  out.endGlyph  = shaped.glyphs.size();
+  out.endByte   = text.size();
+  out.nextGlyph = shaped.glyphs.size();
+  out.hitEnd    = true;
+  return out;
+}
+
 } // namespace
 
 PageShaping TextLayout::layoutPage(std::string_view text,
@@ -208,7 +323,6 @@ PageShaping TextLayout::layoutPage(std::string_view text,
   }
 
   const float lineHeight = font->metrics().lineHeight;
-  const float ascent     = font->metrics().ascent;
   const float maxWidth = options.maxWidthPx > 0.0F ? options.maxWidthPx : 1e6F;
   const float maxHeight =
       options.maxHeightPx > 0.0F ? options.maxHeightPx : 1e6F;
@@ -223,150 +337,60 @@ PageShaping TextLayout::layoutPage(std::string_view text,
   };
 
   std::vector<LineInfo> lines;
-  float currentY             = 0.0F;
-  std::size_t lineStart      = 0;
-  float lineWidth            = 0.0F;
-  std::size_t lastBreakGlyph = 0;
-  float widthAtBreak         = 0.0F;
-  /// Set at either place the loop below breaks out early for lack of
-  /// height, so the trailing-line block after the loop -- meant only for
-  /// the case the loop ran out of glyphs to look at, not the case it ran
-  /// out of page -- knows to stay out of the way. The maxHeight break just
-  /// below happens to make this redundant for itself (its own condition and
-  /// the trailing block's are the same comparison, negated), but the
-  /// atomic-range break does not share that coincidence -- it can trip with
-  /// a whole line's worth of height still nominally free -- so this flag is
-  /// the one thing both breaks agree on instead.
-  bool pageFull = false;
+  float currentY        = 0.0F;
+  std::size_t lineStart = 0;
 
-  for (std::size_t i = 0; i < shaped.glyphs.size(); i++) {
-    const auto &g      = shaped.glyphs[i];
-    const auto bytePos = g.clusterByteOffset;
-
-    // Check if character is explicit newline
-    const bool isNewline = (bytePos < text.size() && text[bytePos] == '\n' &&
-                            !options.singleParagraph);
-
-    const auto charBreak =
-        bytePos < breakAttrs.size() ? breakAttrs[bytePos] : LINEBREAK_NOBREAK;
-    if (charBreak == LINEBREAK_ALLOWBREAK || charBreak == LINEBREAK_MUSTBREAK) {
-      lastBreakGlyph = i;
-      widthAtBreak   = lineWidth;
-    }
-
-    const float nextWidth = lineWidth + g.xAdvance;
+  // One iteration places one line. Where the line goes is settled before what
+  // goes on it, which is what a layout stepping around a float needs and what
+  // the single glyph-indexed loop this replaces could not express.
+  while (lineStart < shaped.glyphs.size()) {
+    const auto filled = fillLine(shaped, text, breakAttrs, lineStart, maxWidth,
+                                 options.singleParagraph);
 
     // An atomic range (a media placeholder's reserved lines) must not start
-    // on this page unless the whole thing fits: check before committing to
-    // the line this newline would otherwise end, so a range that does not
+    // on this page unless the whole thing fits: checked before committing
+    // the line whose newline the range begins at, so a range that does not
     // fit rolls onto the next page's call in its entirety, together with
-    // whatever un-terminated text shares this line with its first byte,
-    // rather than splitting mid-range. Skipped on an empty page (no lines
-    // committed yet) so a range taller than maxHeight itself -- which
-    // should not happen, since every placeholder height reaching here is
-    // already clamped to at most one page, but a future caller's mistake
-    // should not be able to spin this in place forever -- still makes
-    // progress rather than looping without ever advancing bytePos.
-    if (isNewline && !lines.empty()) {
-      if (const auto rangeLines =
-              atomicRangeLinesStartingAt(bytePos, options.atomicRanges)) {
+    // whatever un-terminated text shares that line, rather than splitting
+    // mid-range. Skipped on an empty page (no lines committed yet) so a
+    // range taller than maxHeight itself -- which should not happen, since
+    // every placeholder height reaching here is already clamped to at most
+    // one page, but a future caller's mistake should not be able to spin
+    // this in place forever -- still makes progress.
+    if (filled.brokeOnNewline && !lines.empty()) {
+      if (const auto rangeLines = atomicRangeLinesStartingAt(
+              filled.breakByte, options.atomicRanges)) {
         const float rangeHeight = static_cast<float>(*rangeLines) * lineHeight;
         if (currentY + rangeHeight > maxHeight) {
-          pageFull = true;
           break;
         }
       }
     }
 
-    if (isNewline || (nextWidth > maxWidth && i > lineStart)) {
-      std::size_t breakAt = i;
-      float finalWidth    = lineWidth;
-
-      if (!isNewline && lastBreakGlyph > lineStart) {
-        breakAt    = lastBreakGlyph;
-        finalWidth = widthAtBreak;
-      }
-
-      if (breakAt == lineStart) {
-        // Emergency single glyph break
-        breakAt    = i;
-        finalWidth = lineWidth;
-      }
-
-      const auto startByte = shaped.glyphs[lineStart].clusterByteOffset;
-      std::size_t endGlyph = breakAt;
-      std::size_t endByte  = (breakAt < shaped.glyphs.size())
-                                 ? shaped.glyphs[breakAt].clusterByteOffset
-                                 : text.size();
-
-      if (isNewline) {
-        endGlyph = i;
-        endByte  = (i + 1 < shaped.glyphs.size())
-                       ? shaped.glyphs[i + 1].clusterByteOffset
-                       : text.size();
-      }
-
-      lines.push_back(LineInfo{
-          .startGlyph = lineStart,
-          .endGlyph   = endGlyph,
-          .startByte  = startByte,
-          .endByte    = endByte,
-          .width      = finalWidth,
-          .top        = currentY,
-      });
-
-      currentY += lineHeight;
-
-      // Check if page capacity is exceeded
-      if (currentY + lineHeight > maxHeight) {
-        pageFull = true;
-        break;
-      }
-
-      // If broken on newline, advance past newline character
-      if (isNewline) {
-        lineStart = i + 1;
-      } else {
-        lineStart = breakAt;
-        if (breakAt < shaped.glyphs.size() &&
-            shaped.glyphs[breakAt].clusterByteOffset < text.size() &&
-            text[shaped.glyphs[breakAt].clusterByteOffset] == ' ') {
-          lineStart = breakAt + 1;
-        }
-      }
-
-      lineWidth      = 0.0F;
-      lastBreakGlyph = lineStart;
-      widthAtBreak   = 0.0F;
-
-      if (isNewline) {
-        continue;
-      }
-
-      // Re-measure remaining glyph
-      i = lineStart > 0 ? lineStart - 1 : 0;
-      continue;
+    // A line the glyphs simply ran out on has to clear the height bar before
+    // it is committed; a line ended by a real break does not, having already
+    // been started. The asymmetry is inherited deliberately -- it is what
+    // decided, before this loop was one loop, whether a page shorter than a
+    // single line came back empty (limit 0, which stops pagination) rather
+    // than with one line overhanging it.
+    if (filled.hitEnd && currentY + lineHeight > maxHeight) {
+      break;
     }
 
-    lineWidth = nextWidth;
-  }
-
-  // Trailing line -- only when the loop above ran out of glyphs to look at,
-  // not when it ran out of page (pageFull): otherwise this would swallow
-  // every glyph from lineStart to the end of the whole text -- not just the
-  // rest of one line -- into a single bogus final entry.
-  if (!pageFull && lineStart < shaped.glyphs.size() &&
-      currentY + lineHeight <= maxHeight) {
-    const auto startByte = shaped.glyphs[lineStart].clusterByteOffset;
     lines.push_back(LineInfo{
         .startGlyph = lineStart,
-        .endGlyph   = shaped.glyphs.size(),
-        .startByte  = startByte,
-        .endByte    = text.size(),
-        .width      = lineWidth,
+        .endGlyph   = filled.endGlyph,
+        .startByte  = shaped.glyphs[lineStart].clusterByteOffset,
+        .endByte    = filled.endByte,
+        .width      = filled.width,
         .top        = currentY,
     });
+
     currentY += lineHeight;
+    if (currentY + lineHeight > maxHeight) {
+      break;
+    }
+    lineStart = filled.nextGlyph;
   }
 
   if (lines.empty()) {

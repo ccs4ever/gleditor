@@ -117,6 +117,24 @@ std::array<float, 16> toArray(const glm::mat4 &mat) {
   return out;
 }
 
+/// The size of the quad a page fills, in layout pixels.
+///
+/// Four places used to work this out for themselves -- the page constructor
+/// and the three that position a page in the document by stacking it under
+/// the one before -- and they had to agree, since a page drawn one size and
+/// stacked as another either overlaps its neighbour or leaves a gap. Here so
+/// that they cannot drift, and so that there is a single place for a page to
+/// stop being sized by how much text happened to land on it.
+struct PageBox {
+  float width{};
+  float height{};
+};
+
+PageBox pageBoxFor(const PageShaping &shaping) {
+  return {static_cast<float>(shaping.textWidthPx) + (2.0F * pageMargin),
+          static_cast<float>(shaping.textHeightPx) + (2.0F * pageMargin)};
+}
+
 } // namespace
 
 // Neither header can see the other, so the two ends of the layer limit are
@@ -160,8 +178,9 @@ Page::Page(std::shared_ptr<Doc> aDoc, RenderState &state, glm::mat4 &model,
   const auto color = Doc::VBORow::color;
   const auto box   = Doc::VBORow::box;
 
-  pageWidth  = static_cast<float>(aShaping.textWidthPx) + (2 * pageMargin);
-  pageHeight = static_cast<float>(aShaping.textHeightPx) + (2 * pageMargin);
+  const auto pageBox = pageBoxFor(aShaping);
+  pageWidth          = pageBox.width;
+  pageHeight         = pageBox.height;
 
   originX = -pageWidth / 2.0F;
   originY = pageHeight / 2.0F;
@@ -334,7 +353,9 @@ bool Page::caretGeometry(const std::uint32_t globalOffset, float &posX,
       // not the blank one this offset actually names.
       if (relOffset >= ln.byteStart &&
           relOffset < ln.byteStart + ln.byteLength) {
-        left  = pageMargin + ln.barWidth;
+        // Past the end of the line's own ink, which starts at ln.left rather
+        // than at the text edge for anything not left-aligned.
+        left  = pageMargin + ln.left + ln.barWidth;
         top   = pageMargin + ln.top;
         found = true;
         break;
@@ -343,7 +364,7 @@ bool Page::caretGeometry(const std::uint32_t globalOffset, float &posX,
   }
   if (!found && !shaped.lines.empty()) {
     const auto &lastLine = shaped.lines.back();
-    left                 = pageMargin + lastLine.barWidth;
+    left                 = pageMargin + lastLine.left + lastLine.barWidth;
     top                  = pageMargin + lastLine.top;
   }
 
@@ -958,10 +979,9 @@ void Doc::reflowFrom(RenderState &state, const std::size_t firstPage,
   }
 
   for (std::size_t i = 0; i < rebuilt.size(); i++) {
-    auto &[base, shaping] = rebuilt[i];
-    const auto index      = firstPage + i;
-    const float pageHeightPx =
-        static_cast<float>(shaping.textHeightPx) + (2.0F * pageMargin);
+    auto &[base, shaping]       = rebuilt[i];
+    const auto index            = firstPage + i;
+    const float pageHeightPx    = pageBoxFor(shaping).height;
     const float pageHeightWorld = pageHeightPx * pixelsToWorld;
     const float centerY         = currentTopY - (pageHeightWorld / 2.0F);
 
@@ -1108,9 +1128,8 @@ bool Doc::buildPendingPages(RenderState &state) {
   }
 
   for (auto &[shaping, textOffset] : toBuild) {
-    const auto numPages = pages.size();
-    const float pageHeightPx =
-        static_cast<float>(shaping.textHeightPx) + (2.0F * pageMargin);
+    const auto numPages         = pages.size();
+    const float pageHeightPx    = pageBoxFor(shaping).height;
     const float pageHeightWorld = pageHeightPx * pixelsToWorld;
     const float centerY         = currentTopY - (pageHeightWorld / 2.0F);
 
@@ -1146,8 +1165,7 @@ void Doc::newPage(RenderState &state, PageShaping aShaping,
     const float prevBottomY     = prevCenterY - (prevHeightWorld / 2.0F);
     currentTopY                 = prevBottomY - (pageGapPx * pixelsToWorld);
   }
-  const float pageHeightPx =
-      static_cast<float>(aShaping.textHeightPx) + (2.0F * pageMargin);
+  const float pageHeightPx    = pageBoxFor(aShaping).height;
   const float pageHeightWorld = pageHeightPx * pixelsToWorld;
   const float centerY         = currentTopY - (pageHeightWorld / 2.0F);
 
