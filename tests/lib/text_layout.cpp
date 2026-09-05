@@ -769,3 +769,150 @@ TEST(TextLayoutTest, InlineBoxFlushOnTheBaselineDoesNotGrowBarHeight) {
   ASSERT_FALSE(shaping.lines.empty());
   EXPECT_FLOAT_EQ(shaping.lines.front().barHeight, lineHeight);
 }
+
+TEST(TextLayoutTest, LeftAlignmentIsUnchangedByDefault) {
+  auto &fm  = FontManager::instance();
+  auto font = fm.getFont("Monospace 16");
+  ASSERT_NE(font, nullptr);
+
+  auto shaping = TextLayout::layoutPage(
+      "Hi", font, LayoutOptions{.maxWidthPx = 500.0F, .maxHeightPx = 1000.0F});
+
+  ASSERT_FALSE(shaping.lines.empty());
+  EXPECT_FLOAT_EQ(shaping.lines.front().left, 0.0F);
+}
+
+TEST(TextLayoutTest, RightAlignedLineSitsFlushWithTheBandsRightEdge) {
+  auto &fm  = FontManager::instance();
+  auto font = fm.getFont("Monospace 16");
+  ASSERT_NE(font, nullptr);
+
+  const std::string text = "Hi";
+  LayoutOptions opts{.maxWidthPx = 500.0F, .maxHeightPx = 1000.0F};
+  opts.blockStyles.push_back(
+      gleditor::BlockStyleRange{.start = 0,
+                                .end = static_cast<std::uint32_t>(text.size()),
+                                .align = gleditor::TextAlign::Right});
+
+  auto shaping = TextLayout::layoutPage(text, font, opts);
+
+  ASSERT_FALSE(shaping.lines.empty());
+  const auto &line = shaping.lines.front();
+  EXPECT_FLOAT_EQ(line.left, 500.0F - line.barWidth);
+}
+
+TEST(TextLayoutTest, CentreAlignedLineSitsInTheMiddleOfTheBand) {
+  auto &fm  = FontManager::instance();
+  auto font = fm.getFont("Monospace 16");
+  ASSERT_NE(font, nullptr);
+
+  const std::string text = "Hi";
+  LayoutOptions opts{.maxWidthPx = 500.0F, .maxHeightPx = 1000.0F};
+  opts.blockStyles.push_back(
+      gleditor::BlockStyleRange{.start = 0,
+                                .end = static_cast<std::uint32_t>(text.size()),
+                                .align = gleditor::TextAlign::Centre});
+
+  auto shaping = TextLayout::layoutPage(text, font, opts);
+
+  ASSERT_FALSE(shaping.lines.empty());
+  const auto &line = shaping.lines.front();
+  EXPECT_FLOAT_EQ(line.left, (500.0F - line.barWidth) / 2.0F);
+}
+
+TEST(TextLayoutTest, JustifyStretchesInterWordSpacesToFillTheBand) {
+  auto &fm  = FontManager::instance();
+  auto font = fm.getFont("Monospace 16");
+  ASSERT_NE(font, nullptr);
+
+  auto single = TextLayout::layoutSingleLine("AB", font, 10000.0F);
+  ASSERT_EQ(single.glyphs.size(), 2u);
+  const float cw = single.glyphs[1].clusterLeft - single.glyphs[0].clusterLeft;
+
+  // "AB CD" (5 chars) fits within 6.5 char-widths; adding " EF" does not --
+  // the line wraps on width, not on an explicit break, so it is not this
+  // paragraph's last line and Justify applies to it.
+  const std::string text = "AB CD EF";
+  LayoutOptions opts{.maxWidthPx = cw * 6.5F, .maxHeightPx = 1000.0F};
+  opts.blockStyles.push_back(
+      gleditor::BlockStyleRange{.start = 0,
+                                .end = static_cast<std::uint32_t>(text.size()),
+                                .align = gleditor::TextAlign::Justify});
+
+  auto shaping = TextLayout::layoutPage(text, font, opts);
+
+  ASSERT_GE(shaping.lines.size(), 2u);
+  EXPECT_FLOAT_EQ(shaping.lines.front().left, 0.0F);
+  EXPECT_FLOAT_EQ(shaping.lines.front().barWidth, opts.maxWidthPx);
+}
+
+TEST(TextLayoutTest, JustifyLeavesAParagraphsLastLineRagged) {
+  auto &fm  = FontManager::instance();
+  auto font = fm.getFont("Monospace 16");
+  ASSERT_NE(font, nullptr);
+
+  const std::string text = "AB CD";
+  LayoutOptions leftOpts{.maxWidthPx = 500.0F, .maxHeightPx = 1000.0F};
+  auto leftShaping = TextLayout::layoutPage(text, font, leftOpts);
+
+  LayoutOptions justifyOpts = leftOpts;
+  justifyOpts.blockStyles.push_back(
+      gleditor::BlockStyleRange{.start = 0,
+                                .end = static_cast<std::uint32_t>(text.size()),
+                                .align = gleditor::TextAlign::Justify});
+  auto justifyShaping = TextLayout::layoutPage(text, font, justifyOpts);
+
+  ASSERT_FALSE(leftShaping.lines.empty());
+  ASSERT_FALSE(justifyShaping.lines.empty());
+  // The only line is also the paragraph's (and the text's) last line -- it
+  // stays ragged, matching what Left would have produced.
+  EXPECT_FLOAT_EQ(justifyShaping.lines.front().barWidth,
+                  leftShaping.lines.front().barWidth);
+  EXPECT_FLOAT_EQ(justifyShaping.lines.front().left, 0.0F);
+}
+
+TEST(TextLayoutTest, JustifyWithNoSpacesFallsBackToLeft) {
+  auto &fm  = FontManager::instance();
+  auto font = fm.getFont("Monospace 16");
+  ASSERT_NE(font, nullptr);
+
+  auto single = TextLayout::layoutSingleLine("AB", font, 10000.0F);
+  ASSERT_EQ(single.glyphs.size(), 2u);
+  const float cw = single.glyphs[1].clusterLeft - single.glyphs[0].clusterLeft;
+
+  // A single run of letters with no spaces at all -- forced to wrap
+  // partway through by width alone, not at any word boundary, so Justify
+  // has nothing to distribute slack between and falls back to Left.
+  const std::string text = "AAAAAAAAAABBBB";
+  LayoutOptions opts{.maxWidthPx = cw * 6.5F, .maxHeightPx = 1000.0F};
+  opts.blockStyles.push_back(
+      gleditor::BlockStyleRange{.start = 0,
+                                .end = static_cast<std::uint32_t>(text.size()),
+                                .align = gleditor::TextAlign::Justify});
+
+  auto shaping = TextLayout::layoutPage(text, font, opts);
+
+  ASSERT_GE(shaping.lines.size(), 2u);
+  EXPECT_FLOAT_EQ(shaping.lines.front().left, 0.0F);
+  // Not stretched to the band -- there was nothing to stretch.
+  EXPECT_LT(shaping.lines.front().barWidth, opts.maxWidthPx);
+}
+
+TEST(TextLayoutTest, TrailingSpacesDoNotShiftARightAlignedLinesInk) {
+  auto &fm  = FontManager::instance();
+  auto font = fm.getFont("Monospace 16");
+  ASSERT_NE(font, nullptr);
+
+  LayoutOptions opts{.maxWidthPx = 500.0F, .maxHeightPx = 1000.0F};
+  opts.blockStyles.push_back(gleditor::BlockStyleRange{
+      .start = 0, .end = 100, .align = gleditor::TextAlign::Right});
+
+  auto plain   = TextLayout::layoutPage("Hi\nMore", font, opts);
+  auto trailed = TextLayout::layoutPage("Hi   \nMore", font, opts);
+
+  ASSERT_FALSE(plain.lines.empty());
+  ASSERT_FALSE(trailed.lines.empty());
+  // The visible ink ("Hi") sits at the same right-aligned x regardless of
+  // how many trailing spaces follow it before the newline.
+  EXPECT_FLOAT_EQ(plain.lines.front().left, trailed.lines.front().left);
+}

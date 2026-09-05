@@ -501,6 +501,16 @@ PageShaping TextLayout::layoutPage(std::string_view text,
     /// nothing depends on whether a local class's default member initializer
     /// can see the enclosing function's lineHeight.
     float barHeight{};
+    /// Justify only: added to each inter-word space's own advance when this
+    /// line is assembled, so the line's ink reaches the band's far edge.
+    /// Zero for every other alignment, for a paragraph's own last line
+    /// (which stays ragged), and for a line with no spaces to stretch.
+    float extraPerSpace{};
+    /// One past the last glyph index eligible for extraPerSpace -- excludes
+    /// any trailing whitespace, which does not visually reach anywhere by
+    /// being stretched (nothing after the line's own last glyph is drawn).
+    /// Meaningless (and never read) when extraPerSpace is 0.
+    std::size_t stretchEnd{};
   };
 
   std::vector<LineInfo> lines;
@@ -721,15 +731,71 @@ PageShaping TextLayout::layoutPage(std::string_view text,
       break;
     }
 
+    const auto align = blockStyleAt(lineStartByte, options.blockStyles).align;
+
+    // Trailing whitespace -- any run of plain space glyphs right at the end
+    // of this line's own glyph range -- does not count as ink: a right-
+    // aligned or centred line should align its visible text, not a space
+    // nobody sees. Scanned directly rather than trusted to filled.width
+    // already excluding it -- true only for the single space a word-wrap
+    // breaks on, not for however many precede an explicit newline, which
+    // fillLine() has no reason to treat specially.
+    std::size_t trailingSpaceGlyphs = 0;
+    float trailingWhitespacePx      = 0.0F;
+    for (std::size_t gi = filled.endGlyph; gi > lineStart;) {
+      gi--;
+      const auto &g = shaped.glyphs[gi];
+      if (g.clusterByteOffset >= text.size() ||
+          text[g.clusterByteOffset] != ' ') {
+        break;
+      }
+      trailingWhitespacePx += g.xAdvance;
+      trailingSpaceGlyphs++;
+    }
+    const float ink = filled.width - trailingWhitespacePx;
+
+    // Inter-word spaces only -- the ones Justify is allowed to stretch.
+    std::size_t spaceCount = 0;
+    for (std::size_t gi = lineStart; gi + trailingSpaceGlyphs < filled.endGlyph;
+         gi++) {
+      const auto &g = shaped.glyphs[gi];
+      if (g.clusterByteOffset < text.size() &&
+          text[g.clusterByteOffset] == ' ') {
+        spaceCount++;
+      }
+    }
+
+    // A paragraph's own last line stays ragged under Justify -- the
+    // conventional rule, and the only sane one when there may be nothing
+    // left to stretch into a full band's width. brokeOnNewline marks an
+    // explicit paragraph break; hitEnd marks the true end of the text this
+    // layoutPage() call was given, which for justification purposes is the
+    // end of whatever paragraph it was in the middle of, page boundaries
+    // aside -- a line that stops only because the page ran out of height
+    // is neither, and still justifies.
+    const bool isParagraphEnd = filled.brokeOnNewline || filled.hitEnd;
+    const float bandWidth     = band.right - band.left;
+    float extraPerSpace       = 0.0F;
+    if (gleditor::TextAlign::Justify == align && !isParagraphEnd &&
+        spaceCount > 0) {
+      extraPerSpace = (bandWidth - ink) / static_cast<float>(spaceCount);
+    }
+
     lines.push_back(LineInfo{
         .startGlyph = lineStart,
         .endGlyph   = filled.endGlyph,
         .startByte  = shaped.glyphs[lineStart].clusterByteOffset,
         .endByte    = filled.endByte,
-        .width      = filled.width,
-        .top        = currentY,
-        .left       = band.left,
-        .barHeight  = lineBarHeight,
+        // A justified line's ink stretches to the band's far edge -- the
+        // bar (and the FitContent width scan below, which reads this same
+        // field) should say so, not report the line's pre-stretch width.
+        // A no-op everywhere extraPerSpace is 0.
+        .width = filled.width + static_cast<float>(spaceCount) * extraPerSpace,
+        .top   = currentY,
+        .left  = band.left + alignedLeft(bandWidth, ink, align),
+        .barHeight     = lineBarHeight,
+        .extraPerSpace = extraPerSpace,
+        .stretchEnd    = filled.endGlyph - trailingSpaceGlyphs,
     });
 
     currentY += lineBarHeight;
@@ -825,7 +891,16 @@ PageShaping TextLayout::layoutPage(std::string_view text,
           .decorations  = decorationsAt(byteOff, options.decoratedRanges),
       });
 
-      penX += g.xAdvance;
+      // A justified line's own inter-word spaces carry the slack that
+      // reaches the band's far edge -- gated to gi < line.stretchEnd so
+      // trailing whitespace is left at its natural width instead of
+      // overshooting the band nothing is drawn past anyway. Zero for every
+      // other alignment, so this is a no-op there.
+      const float extra = (gi < line.stretchEnd && byteOff < text.size() &&
+                           text[byteOff] == ' ')
+                              ? line.extraPerSpace
+                              : 0.0F;
+      penX += g.xAdvance + extra;
     }
   }
 
