@@ -642,3 +642,130 @@ TEST(TextLayoutTest, FloatMovesWholeToNextPageWhenItDoesNotFit) {
   EXPECT_EQ(shaping.limit, prefix.size());
   EXPECT_TRUE(shaping.boxes.empty());
 }
+
+TEST(TextLayoutTest, InlineBoxAdvancesThePenAndIsSkippedByLaterGlyphs) {
+  auto &fm  = FontManager::instance();
+  auto font = fm.getFont("Monospace 16");
+  ASSERT_NE(font, nullptr);
+
+  // 'X' stands in for the anchor byte -- any character works, since an
+  // Inline box's own width overrides whatever that byte would otherwise
+  // have shaped to, and the assembly pass suppresses its glyph outright.
+  const std::string text = "ABXCD";
+  LayoutOptions opts{.maxWidthPx = 500.0F, .maxHeightPx = 1000.0F};
+  opts.boxes.push_back(gleditor::LayoutBox{
+      .anchor    = 2,
+      .widthPx   = 50.0F,
+      .heightPx  = 10.0F,
+      .placement = gleditor::BoxPlacement::Inline,
+  });
+
+  auto shaping = TextLayout::layoutPage(text, font, opts);
+
+  // Four real characters (A, B, C, D) -- no glyph or cluster for the
+  // suppressed anchor byte.
+  EXPECT_EQ(shaping.glyphs.size(), 4u);
+  EXPECT_EQ(shaping.clusters.size(), 4u);
+
+  ASSERT_EQ(shaping.boxes.size(), 1u);
+  EXPECT_EQ(shaping.boxes.front().anchorByteOffset, 2u);
+  EXPECT_FLOAT_EQ(shaping.boxes.front().width, 50.0F);
+
+  const auto glyphFor = [&](const char *chr) {
+    return std::find_if(
+        shaping.glyphs.begin(), shaping.glyphs.end(),
+        [&](const auto &g) { return g.chr == std::string{chr}; });
+  };
+  const auto aGlyph = glyphFor("A");
+  const auto bGlyph = glyphFor("B");
+  const auto cGlyph = glyphFor("C");
+  ASSERT_NE(aGlyph, shaping.glyphs.end());
+  ASSERT_NE(bGlyph, shaping.glyphs.end());
+  ASSERT_NE(cGlyph, shaping.glyphs.end());
+
+  // Monospace, so B's own advance over A is exactly one character's width;
+  // C should sit that same distance past B, plus the inline box's own
+  // width in between.
+  const float charWidth = bGlyph->clusterLeft - aGlyph->clusterLeft;
+  EXPECT_FLOAT_EQ(cGlyph->clusterLeft, bGlyph->clusterLeft + charWidth + 50.0F);
+}
+
+TEST(TextLayoutTest,
+     InlineBoxIsPlacedRelativeToTheBaselineWithBaselineOffsetPx) {
+  auto &fm  = FontManager::instance();
+  auto font = fm.getFont("Monospace 16");
+  ASSERT_NE(font, nullptr);
+  const float ascent = font->metrics().ascent;
+
+  const std::string text = "AXB";
+  LayoutOptions opts{.maxWidthPx = 500.0F, .maxHeightPx = 1000.0F};
+  opts.boxes.push_back(gleditor::LayoutBox{
+      .anchor           = 1,
+      .widthPx          = 30.0F,
+      .heightPx         = 40.0F,
+      .placement        = gleditor::BoxPlacement::Inline,
+      .baselineOffsetPx = 5.0F,
+  });
+
+  auto shaping = TextLayout::layoutPage(text, font, opts);
+
+  ASSERT_EQ(shaping.boxes.size(), 1u);
+  const auto &placed = shaping.boxes.front();
+  // top is the box's own top edge: baseline (line.top + ascent) plus the
+  // offset its bottom hangs below it, minus its own height.
+  EXPECT_FLOAT_EQ(placed.top, ascent + 5.0F - 40.0F);
+  EXPECT_FLOAT_EQ(placed.height, 40.0F);
+}
+
+TEST(TextLayoutTest, InlineBoxGrowsTheLinesBarHeightAndPushesTheNextLineDown) {
+  auto &fm  = FontManager::instance();
+  auto font = fm.getFont("Monospace 16");
+  ASSERT_NE(font, nullptr);
+  const float lineHeight = font->metrics().lineHeight;
+  const float ascent     = font->metrics().ascent;
+
+  const std::string text = "AXB\nMore";
+  LayoutOptions opts{.maxWidthPx = 500.0F, .maxHeightPx = 1000.0F};
+  // Hangs far enough below the baseline that ascent + offset exceeds the
+  // font's own lineHeight -- the only way an Inline box makes a line
+  // taller than it would otherwise be (see the comment in layoutPage()).
+  opts.boxes.push_back(gleditor::LayoutBox{
+      .anchor           = 1,
+      .widthPx          = 30.0F,
+      .heightPx         = 10.0F,
+      .placement        = gleditor::BoxPlacement::Inline,
+      .baselineOffsetPx = lineHeight,
+  });
+
+  auto shaping = TextLayout::layoutPage(text, font, opts);
+
+  ASSERT_GE(shaping.lines.size(), 2u);
+  const float grownHeight = ascent + lineHeight;
+  EXPECT_FLOAT_EQ(shaping.lines[0].barHeight, grownHeight);
+  // The second line starts exactly where the grown first line ends, not one
+  // plain lineHeight down.
+  EXPECT_FLOAT_EQ(shaping.lines[1].top, grownHeight);
+}
+
+TEST(TextLayoutTest, InlineBoxFlushOnTheBaselineDoesNotGrowBarHeight) {
+  auto &fm  = FontManager::instance();
+  auto font = fm.getFont("Monospace 16");
+  ASSERT_NE(font, nullptr);
+  const float lineHeight = font->metrics().lineHeight;
+
+  const std::string text = "AXB";
+  LayoutOptions opts{.maxWidthPx = 500.0F, .maxHeightPx = 1000.0F};
+  // baselineOffsetPx defaults to 0 -- sitting on the baseline, same as any
+  // ordinary glyph, regardless of how tall the box itself is.
+  opts.boxes.push_back(gleditor::LayoutBox{
+      .anchor    = 1,
+      .widthPx   = 30.0F,
+      .heightPx  = 200.0F,
+      .placement = gleditor::BoxPlacement::Inline,
+  });
+
+  auto shaping = TextLayout::layoutPage(text, font, opts);
+
+  ASSERT_FALSE(shaping.lines.empty());
+  EXPECT_FLOAT_EQ(shaping.lines.front().barHeight, lineHeight);
+}

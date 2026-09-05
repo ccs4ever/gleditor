@@ -329,11 +329,19 @@ struct FilledLine {
  * line -- at whatever glyph overflowed. A glyph wider than @p maxWidth on its
  * own is still placed rather than looping forever, which is why the overflow
  * test requires having placed something first.
+ *
+ * An Inline box anchored at a glyph's byte offset fits like an oversized
+ * glyph: @p boxes' widthPx stands in for that glyph's own shaped advance,
+ * which is what lets the box's width -- not whatever an anchor character
+ * happens to shape to -- decide whether it fits this line. libunibreak's own
+ * break opportunities around the anchor byte are untouched, so it still
+ * wraps like any other character.
  */
 FilledLine fillLine(const ShapedRun &shaped, const std::string_view text,
                     const std::vector<char> &breakAttrs,
                     const std::size_t lineStart, const float maxWidth,
-                    const bool singleParagraph) {
+                    const bool singleParagraph,
+                    const std::vector<gleditor::LayoutBox> &boxes) {
   float lineWidth            = 0.0F;
   std::size_t lastBreakGlyph = lineStart;
   float widthAtBreak         = 0.0F;
@@ -352,7 +360,13 @@ FilledLine fillLine(const ShapedRun &shaped, const std::string_view text,
       widthAtBreak   = lineWidth;
     }
 
-    const float nextWidth = lineWidth + g.xAdvance;
+    const auto *inlineBox = boxAnchoredAt(bytePos, boxes);
+    const float advance =
+        (nullptr != inlineBox &&
+         gleditor::BoxPlacement::Inline == inlineBox->placement)
+            ? inlineBox->widthPx
+            : g.xAdvance;
+    const float nextWidth = lineWidth + advance;
 
     if (isNewline || (nextWidth > maxWidth && i > lineStart)) {
       std::size_t breakAt = i;
@@ -461,6 +475,7 @@ PageShaping TextLayout::layoutPage(std::string_view text,
   }
 
   const float lineHeight = font->metrics().lineHeight;
+  const float ascent     = font->metrics().ascent;
   const float maxWidth = options.maxWidthPx > 0.0F ? options.maxWidthPx : 1e6F;
   const float maxHeight =
       options.maxHeightPx > 0.0F ? options.maxHeightPx : 1e6F;
@@ -479,6 +494,13 @@ PageShaping TextLayout::layoutPage(std::string_view text,
     /// g.clusterLeft on its own (src/doc.cpp's glyph loop), so this is the
     /// one place that offset can still take effect.
     float left{};
+    /// This line's own height -- lineHeight, unless an Inline box anchored on
+    /// it reaches further down from the line's top (ascent + its own
+    /// baselineOffsetPx) than lineHeight already does. Always set explicitly
+    /// at every push_back site below (never left to this default), so
+    /// nothing depends on whether a local class's default member initializer
+    /// can see the enclosing function's lineHeight.
+    float barHeight{};
   };
 
   std::vector<LineInfo> lines;
@@ -546,6 +568,7 @@ PageShaping TextLayout::layoutPage(std::string_view text,
           .width      = width,
           .top        = currentY,
           .left       = left,
+          .barHeight  = lineHeight,
       });
 
       currentY += boxHeight;
@@ -601,6 +624,7 @@ PageShaping TextLayout::layoutPage(std::string_view text,
           .endByte    = nextByte,
           .width      = 0.0F,
           .top        = currentY,
+          .barHeight  = lineHeight,
       });
 
       lineStart += 1;
@@ -642,7 +666,7 @@ PageShaping TextLayout::layoutPage(std::string_view text,
 
     const auto filled =
         fillLine(shaped, text, breakAttrs, lineStart, band.right - band.left,
-                 options.singleParagraph);
+                 options.singleParagraph, options.boxes);
 
     // An atomic range (a media placeholder's reserved lines) must not start
     // on this page unless the whole thing fits: checked before committing
@@ -664,13 +688,36 @@ PageShaping TextLayout::layoutPage(std::string_view text,
       }
     }
 
+    // This line's own height: lineHeight, unless an Inline box committed to
+    // it reaches further down from the line's top than that already does.
+    // Computed before the hitEnd/commit checks below so both use the real
+    // figure rather than the plain per-line constant.
+    //
+    // Deliberately ascent + baselineOffsetPx, not heightPx: heightPx alone
+    // says nothing about where the box's bottom sits relative to line.top,
+    // only its own size, so folding it in directly would reserve height
+    // below a box shorter than it whenever most of that height sits above
+    // the baseline instead. A box taller than ascent + baselineOffsetPx
+    // still draws starting above line.top -- this stage grows a line
+    // downward to fit what hangs below the baseline, not upward to fit what
+    // rises above it, the same one-directional growth Block and Float boxes
+    // already accept (neither moves an already-committed line either).
+    float lineBarHeight = lineHeight;
+    for (auto gi = lineStart; gi < filled.endGlyph; gi++) {
+      if (const auto *ib =
+              boxAnchoredAt(shaped.glyphs[gi].clusterByteOffset, options.boxes);
+          nullptr != ib && gleditor::BoxPlacement::Inline == ib->placement) {
+        lineBarHeight = std::max(lineBarHeight, ascent + ib->baselineOffsetPx);
+      }
+    }
+
     // A line the glyphs simply ran out on has to clear the height bar before
     // it is committed; a line ended by a real break does not, having already
     // been started. The asymmetry is inherited deliberately -- it is what
     // decided, before this loop was one loop, whether a page shorter than a
     // single line came back empty (limit 0, which stops pagination) rather
     // than with one line overhanging it.
-    if (filled.hitEnd && currentY + lineHeight > maxHeight) {
+    if (filled.hitEnd && currentY + lineBarHeight > maxHeight) {
       break;
     }
 
@@ -682,9 +729,10 @@ PageShaping TextLayout::layoutPage(std::string_view text,
         .width      = filled.width,
         .top        = currentY,
         .left       = band.left,
+        .barHeight  = lineBarHeight,
     });
 
-    currentY += lineHeight;
+    currentY += lineBarHeight;
     if (currentY + lineHeight > maxHeight) {
       break;
     }
@@ -700,7 +748,10 @@ PageShaping TextLayout::layoutPage(std::string_view text,
   shaping.limit        = lines.back().endByte;
   shaping.textHeightPx = static_cast<int>(std::ceil(currentY));
   shaping.lineCount    = lines.size();
-  shaping.boxes        = std::move(placedBoxes);
+  // Moved into shaping.boxes only after the assembly loop below, which is
+  // where an Inline box's own placement is discovered (its left depends on
+  // the running pen position, only tracked there) and appended to the same
+  // placedBoxes a Block or Float box already populated above.
 
   float maxSeenWidth = 0.0F;
   for (std::size_t lineIdx = 0; lineIdx < lines.size(); lineIdx++) {
@@ -712,7 +763,7 @@ PageShaping TextLayout::layoutPage(std::string_view text,
 
     shaping.lines.push_back(PageShaping::LineEntry{
         .barWidth   = line.width,
-        .barHeight  = lineHeight,
+        .barHeight  = line.barHeight,
         .left       = line.left,
         .top        = line.top,
         .lineIndex  = lineIdx,
@@ -724,6 +775,28 @@ PageShaping TextLayout::layoutPage(std::string_view text,
     for (std::size_t gi = line.startGlyph; gi < line.endGlyph; gi++) {
       const auto &g      = shaped.glyphs[gi];
       const auto byteOff = g.clusterByteOffset;
+
+      // An Inline box's anchor sits on the line like an oversized glyph, but
+      // draws nothing of its own here: same suppression convention Block and
+      // Float boxes already use (no ClusterBox/GlyphEntry over a byte an
+      // application draws something else on top of), just per-glyph rather
+      // than for a whole line, since Inline shares its line with real text
+      // instead of owning one to itself.
+      if (const auto *ib = boxAnchoredAt(byteOff, options.boxes);
+          nullptr != ib && gleditor::BoxPlacement::Inline == ib->placement) {
+        const float baseline = line.top + ascent;
+        placedBoxes.push_back(PageShaping::PlacedBox{
+            .anchorByteOffset = static_cast<std::uint32_t>(byteOff),
+            .id               = ib->id,
+            .left             = line.left + penX,
+            .top              = baseline + ib->baselineOffsetPx - ib->heightPx,
+            .width            = ib->widthPx,
+            .height           = ib->heightPx,
+            .placement        = ib->placement,
+        });
+        penX += ib->widthPx;
+        continue;
+      }
 
       // Extract cluster substring
       std::size_t nextByte = text.size();
@@ -755,6 +828,8 @@ PageShaping TextLayout::layoutPage(std::string_view text,
       penX += g.xAdvance;
     }
   }
+
+  shaping.boxes = std::move(placedBoxes);
 
   // A blank placeholder line has no glyphs, so the scan above never sees
   // whatever's actually drawn over it -- an atomic range fully included on
