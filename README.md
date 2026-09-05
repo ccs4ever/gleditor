@@ -42,11 +42,11 @@ multidimensional visualizer.
 
 The graphics API is chosen at run time with `--backend`:
 
-| Backend            | Requires        | Notes                                                                   |
+| Backend | Requires | Notes |
 | ------------------ | --------------- | ----------------------------------------------------------------------- |
-| `opengl` (default) | OpenGL 3.3 core |                                                                         |
-| `opengles`         | OpenGL ES 3.0   |                                                                         |
-| `vulkan`           | Vulkan 1.0      | Enabled by default when found; disable with `GLEDITOR_DISABLE_VULKAN=1` |
+| `opengl` (default) | OpenGL 3.3 core | |
+| `opengles` | OpenGL ES 3.0 | |
+| `vulkan` | Vulkan 1.0 | Enabled by default when found; disable with `GLEDITOR_DISABLE_VULKAN=1` |
 
 Everything above the backend -- documents, pages, the glyph cache, the buffer
 allocator -- is written against `render::RenderDevice` (`include/gleditor/render/`)
@@ -131,10 +131,10 @@ driver info: recording 1152 draws on 1 thread(s): 495 ns/draw split against 247 
 benchmark: 40 frames, 1152 page draws, median frame 731.315 ms, median collect 0.044 ms, median record 0.285 ms, ...
 ```
 
-|                   | median frame | collect  | record   |
+| | median frame | collect | record |
 | ----------------- | ------------ | -------- | -------- |
-| Vulkan (lavapipe) | 731 ms       | 0.044 ms | 0.285 ms |
-| OpenGL (llvmpipe) | 738 ms       | 0.044 ms | 729 ms   |
+| Vulkan (lavapipe) | 731 ms | 0.044 ms | 0.285 ms |
+| OpenGL (llvmpipe) | 738 ms | 0.044 ms | 729 ms |
 
 Three things worth reading off that. Recording a frame costs about 0.3 ms, or
 247 ns per draw -- material against a 16.7 ms budget, invisible against this
@@ -151,11 +151,11 @@ and the draws add up: `gleditor a.txt b.txt c.txt` puts every page of all three
 in the one list. Running the 4.6 MB sample two and three times over, still under
 lavapipe on four cores:
 
-| documents | page draws | median frame | collect  | record   |
+| documents | page draws | median frame | collect | record |
 | --------- | ---------- | ------------ | -------- | -------- |
-| 1         | 1152       | 731 ms       | 0.044 ms | 0.285 ms |
-| 2         | 2304       | 1649 ms      | 0.077 ms | 0.695 ms |
-| 3         | 3456       | 2474 ms      | 0.115 ms | 1.279 ms |
+| 1 | 1152 | 731 ms | 0.044 ms | 0.285 ms |
+| 2 | 2304 | 1649 ms | 0.077 ms | 0.695 ms |
+| 3 | 3456 | 2474 ms | 0.115 ms | 1.279 ms |
 
 The gap between the two strategies closes as the fixed cost of a split is spread
 over more draws: the device measured them 2.0x apart at 1152 draws, 1.36x at
@@ -231,12 +231,12 @@ is assumed about the typeface, and a font change carries through on its own.
 
 **What it costs and what it saves.** On the 4.6 MB sample under lavapipe:
 
-|                             | page draws | median frame |
+| | page draws | median frame |
 | --------------------------- | ---------- | ------------ |
-| one document, every page    | 1152       | 962 ms       |
-| one document, culled        | 1          | 14 ms        |
-| three documents, every page | 3456       | 2657 ms      |
-| three documents, culled     | 2          | 15 ms        |
+| one document, every page | 1152 | 962 ms |
+| one document, culled | 1 | 14 ms |
+| three documents, every page | 3456 | 2657 ms |
+| three documents, culled | 2 | 15 ms |
 
 The last row is the one that matters: with culling, what a frame costs stops
 tracking how much is open and starts tracking how much is on screen, which is
@@ -253,10 +253,10 @@ land on. Nudge the camera and those samples jump between stroke and paper, which
 is the shimmer you see when panning. Measured by zooming 0.33% -- a change a
 filtered render should barely notice -- and asking how much of the page moved:
 
-|        | pixels changed | mean change | changed by >32 levels |
+| | pixels changed | mean change | changed by >32 levels |
 | ------ | -------------- | ----------- | --------------------- |
-| before | 6.5%           | 5.41        | 4.3%                  |
-| after  | 10.9%          | 0.78        | 0.1%                  |
+| before | 6.5% | 5.41 | 4.3% |
+| after | 10.9% | 0.78 | 0.1% |
 
 More pixels move and each moves less, which is exactly the shape of the fix: a
 sub-pixel zoom should nudge everything slightly rather than flip a few pixels
@@ -321,10 +321,10 @@ one opened at 64, which grows twice -- so the difference is packing, not growth.
 What a failed re-upload looks like is glyphs missing outright, and the limits
 were set by breaking it on purpose:
 
-|                   | mean change | >32 levels | >64   | >100   |
+| | mean change | >32 levels | >64 | >100 |
 | ----------------- | ----------- | ---------- | ----- | ------ |
-| working           | 0.64        | 0.38%      | 0.02% | 0.000% |
-| re-upload dropped | 2.24        | 1.92%      | 1.19% | 0.739% |
+| working | 0.64 | 0.38% | 0.02% | 0.000% |
+| re-upload dropped | 2.24 | 1.92% | 1.19% | 0.739% |
 
 The phase shift nudges pixels; a missing glyph flips them from ink to paper. The
 limit that carries the check is the one a working atlas does not reach at all.
@@ -490,11 +490,11 @@ divide.
 Selecting inside the three-character `ffi` ligature of
 `tests/samples/ligatures.txt`, whose quad is 29 pixels wide on screen:
 
-| selection       | highlighted           |
+| selection | highlighted |
 | --------------- | --------------------- |
-| first `f`       | 10 px                 |
-| `ff`            | 19 px                 |
-| whole `ffi`     | 29 px                 |
+| first `f` | 10 px |
+| `ff` | 19 px |
+| whole `ffi` | 29 px |
 | middle `f` only | 9 px, offset 10 px in |
 
 `--click X,Y` and `--type TEXT` drive both without a mouse or a keyboard, which
@@ -1227,7 +1227,7 @@ Key mechanisms:
   and swarm flooding, identity queries and update submissions require solving a
   SHA-256 Hashcash puzzle scaled dynamically to network load. Peers enforce strict
   PoW gating before allocating connection or verification resources.
-- **Merkle Proof Auditing**: Clients verify any author's identity claim in $O(\log N)$
+- **Merkle Proof Auditing**: Clients verify any author's identity claim in $O(\\log N)$
   time against the signed oracle quorum root hash without downloading the entire
   identities history.
 
@@ -1236,19 +1236,19 @@ Key mechanisms:
 Control is used throughout, because a bare letter is text: the whole point of
 this program is that typing is an edit, so it has to reach the document.
 
-| Key                       | Does                                                      |
+| Key | Does |
 | ------------------------- | --------------------------------------------------------- |
-| `ctrl-b` / `ctrl-n`       | go back or forward in hypertime, losing nothing           |
-| `ctrl-t`                  | quote the selection into a second document                |
-| `--torrent`, `--quote`    | quote a range of a torrent-backed file; see above         |
-| `ctrl-l`                  | mark one end of a link, then join it to another selection |
-| `ctrl-shift-l`            | forget a link that was begun and not finished             |
-| `ctrl-k` / `ctrl-shift-k` | show or hide the beams; stop them moving documents        |
-| `ctrl-m`                  | show or hide the hypertime map                            |
-| `ctrl-p`                  | print every state to the terminal                         |
-| `ctrl-s` / `ctrl-shift-s` | write the spools out; ask what to publish, then publish   |
-| `ctrl-q`                  | save and quit                                             |
-| `backspace`               | stop pointing at the selection                            |
+| `ctrl-b` / `ctrl-n` | go back or forward in hypertime, losing nothing |
+| `ctrl-t` | quote the selection into a second document |
+| `--torrent`, `--quote` | quote a range of a torrent-backed file; see above |
+| `ctrl-l` | mark one end of a link, then join it to another selection |
+| `ctrl-shift-l` | forget a link that was begun and not finished |
+| `ctrl-k` / `ctrl-shift-k` | show or hide the beams; stop them moving documents |
+| `ctrl-m` | show or hide the hypertime map |
+| `ctrl-p` | print every state to the terminal |
+| `ctrl-s` / `ctrl-shift-s` | write the spools out; ask what to publish, then publish |
+| `ctrl-q` | save and quit |
+| `backspace` | stop pointing at the selection |
 
 ### What a link is drawn as: Optical Beams & Transclusion Prisms
 
@@ -1257,7 +1257,7 @@ two distinct optical structures:
 
 1. **Explicit Xanalinks**: Directed user-created connections between passages,
    drawn as translucent cyan/magenta ribbons that twist and converge gracefully.
-2. **Emergent Transclusion Prisms**: Spontaneous shared content occurrences across
+1. **Emergent Transclusion Prisms**: Spontaneous shared content occurrences across
    independent documents, rendered as glowing **Identity Gold** volumetric prisms
    that visually bridge identical primedia addresses.
 
@@ -1367,7 +1367,7 @@ zzstructure:
   (`gleditor::Beams`) and rendered text quads (`gleditor::Canvas`).
 - **Backward Link Derivation**: If cell $A$ defines a link to cell $B$ on
   dimension $D$, the loader automatically derives the reciprocal backward link
-  $B \to A$ if not explicitly overridden.
+  $B \\to A$ if not explicitly overridden.
 - **Preflets**: Cells can link to external slices via BitTorrent magnet URIs,
   SHA-1 infohashes, or local YAML files. The built-in `PrefletFetcher`
   (`libtorrent-rasterbar`) fetches referenced slices asynchronously into the
@@ -1376,17 +1376,17 @@ zzstructure:
 
 ### Controls and Navigation
 
-| Key / Input               | Action                                                      |
+| Key / Input | Action |
 | ------------------------- | ----------------------------------------------------------- |
-| `Left` / `Right` / `A` / `D` | Step accursed cell focus along primary X dimension ($d_1$)  |
-| `Up` / `Down` / `W` / `S`    | Step accursed cell focus along primary Y dimension ($d_2$)  |
+| `Left` / `Right` / `A` / `D` | Step accursed cell focus along primary X dimension ($d_1$) |
+| `Up` / `Down` / `W` / `S` | Step accursed cell focus along primary Y dimension ($d_2$) |
 | `PageUp` / `PageDown` / `Q` / `E` | Step accursed cell focus along primary Z dimension ($d_3$) |
-| `Space`                   | Swap primary X and Y dimensions                             |
-| `Tab` / `Shift-Tab`       | Cycle assigned dimensions across viewport axes              |
-| `Enter`                   | Resolve and navigate into Preflet target slice              |
-| `Backspace`               | Return to parent slice                                      |
-| `R`                       | Reset camera view to default orientation                    |
-| Left Click                | Pick cell directly under the mouse pointer to shift focus   |
+| `Space` | Swap primary X and Y dimensions |
+| `Tab` / `Shift-Tab` | Cycle assigned dimensions across viewport axes |
+| `Enter` | Resolve and navigate into Preflet target slice |
+| `Backspace` | Return to parent slice |
+| `R` | Reset camera view to default orientation |
+| Left Click | Pick cell directly under the mouse pointer to shift focus |
 
 ### Unified Transclusion Engine & 120 FPS Rendering
 
@@ -1411,6 +1411,7 @@ zzstructure:
 ### Integration with gleditor
 
 `apps/zigzag` implements:
+
 - **`gleditor::FrameContributor`**: Submits 3D colored connection beams and 3D
   text cell billboards in the world canvas, followed by an orthographic 2D HUD
   displaying active dimension assignments, focus information, and fetch status.
@@ -1431,18 +1432,18 @@ and Wayland, NSAccessibility on macOS.
 
 ### What is described
 
-| On screen                      | As a node                                                            |
+| On screen | As a node |
 | ------------------------------ | -------------------------------------------------------------------- |
-| the window                     | `Window`, named by its title, sized to the drawing area              |
-| each open document             | `MultilineTextInput`, holding one `TextRun` per line                 |
-| the caret and the selection    | a text selection on the document node, in characters                 |
-| the notification overlay       | a `Log` whose entries are announced; an error interrupts             |
-| the publish dialog             | a modal `Dialog` of labelled fields                                  |
-| its drop-down of keys          | a `ComboBox` with a `ListItem` per key                               |
-| its passphrase field           | a `PasswordInput`, whose value is asterisks and never the passphrase |
-| its reveal button              | a `Switch`                                                           |
-| Xudu's links between documents | a `List` of `Link`s, each followable                                 |
-| Xudu's hypertime map           | a `List` of states, with the current one marked                      |
+| the window | `Window`, named by its title, sized to the drawing area |
+| each open document | `MultilineTextInput`, holding one `TextRun` per line |
+| the caret and the selection | a text selection on the document node, in characters |
+| the notification overlay | a `Log` whose entries are announced; an error interrupts |
+| the publish dialog | a modal `Dialog` of labelled fields |
+| its drop-down of keys | a `ComboBox` with a `ListItem` per key |
+| its passphrase field | a `PasswordInput`, whose value is asterisks and never the passphrase |
+| its reveal button | a `Switch` |
+| Xudu's links between documents | a `List` of `Link`s, each followable |
+| Xudu's hypertime map | a `List` of states, with the current one marked |
 
 A document is described as text runs rather than as one long value because
 that is the unit an assistive technology navigates in: it asks for the
@@ -1814,14 +1815,14 @@ tree.
 Definitions live under `packaging/`, one directory per format, all of them
 building the same tarball with the same `install` target:
 
-| Target          | Definition                                | SDL | Compiler     |
+| Target | Definition | SDL | Compiler |
 | --------------- | ----------------------------------------- | --- | ------------ |
-| Debian / Ubuntu | `packaging/debian/`                       | 2   | g++          |
-| Fedora          | `packaging/fedora/gleditor.spec`          | 3   | g++          |
-| Arch            | `packaging/arch/PKGBUILD`                 | 3   | gcc          |
-| Nix             | `flake.nix`, `packaging/nix/gleditor.nix` | 3   | stdenv       |
-| Windows         | `packaging/windows/build-msys2.sh`        | 3   | MSYS2 UCRT64 |
-| macOS           | `packaging/macos/gleditor.rb`             | 3   | clang        |
+| Debian / Ubuntu | `packaging/debian/` | 2 | g++ |
+| Fedora | `packaging/fedora/gleditor.spec` | 3 | g++ |
+| Arch | `packaging/arch/PKGBUILD` | 3 | gcc |
+| Nix | `flake.nix`, `packaging/nix/gleditor.nix` | 3 | stdenv |
+| Windows | `packaging/windows/build-msys2.sh` | 3 | MSYS2 UCRT64 |
+| macOS | `packaging/macos/gleditor.rb` | 3 | clang |
 
 Android is not in this table: an APK is not a tarball an `install` target can
 produce, and none of freetype, harfbuzz, glib or SDL are things a distribution
@@ -2001,14 +2002,14 @@ Movement keys:
 
 Other actions:
 
-| Key    | Action                                                         |
+| Key | Action |
 | ------ | -------------------------------------------------------------- |
-| n      | Create a new page                                              |
-| w      | Close the most recently opened document                        |
-| ctrl-s | Save the most recently opened document back to disk            |
-| r      | Reset view back to start                                       |
-| q      | Quit the application                                           |
-| g      | Increment fov by 1 (max 360); use Shift+g to decrement (min 1) |
+| n | Create a new page |
+| w | Close the most recently opened document |
+| ctrl-s | Save the most recently opened document back to disk |
+| r | Reset view back to start |
+| q | Quit the application |
+| g | Increment fov by 1 (max 360); use Shift+g to decrement (min 1) |
 
 ### Animation
 
