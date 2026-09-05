@@ -158,6 +158,55 @@ atomicRangeLinesStartingAt(const std::size_t byteOffset,
   return std::nullopt;
 }
 
+/// The box anchored exactly at @p byteOffset, if any -- nullptr for a byte
+/// that is not one of @p boxes' own anchors.
+const gleditor::LayoutBox *
+boxAnchoredAt(const std::size_t byteOffset,
+              const std::vector<gleditor::LayoutBox> &boxes) {
+  for (const auto &box : boxes) {
+    if (static_cast<std::size_t>(box.anchor) == byteOffset) {
+      return &box;
+    }
+  }
+  return nullptr;
+}
+
+/// The paragraph style covering @p byteOffset, or TextAlign::Left with no
+/// indent -- the meaning every line already had before BlockStyleRange
+/// existed -- for a byte no range covers. The first matching range wins,
+/// same as DecoratedRange callers already assume for a byte only ever
+/// meant to be covered once (unlike DecoratedRange itself, whose per-glyph
+/// decorations are deliberately additive).
+gleditor::BlockStyleRange
+blockStyleAt(const std::size_t byteOffset,
+             const std::vector<gleditor::BlockStyleRange> &ranges) {
+  for (const auto &range : ranges) {
+    if (byteOffset >= range.start && byteOffset < range.end) {
+      return range;
+    }
+  }
+  return gleditor::BlockStyleRange{};
+}
+
+/// Where a box of @p width fits horizontally within a column of
+/// @p maxWidth, per @p align. Justify has no meaning for a single box --
+/// there is nothing to distribute slack between -- so it is treated as
+/// Left, the same fallback a text line with no expansion opportunities
+/// will use once justification exists.
+float alignedLeft(const float maxWidth, const float width,
+                  const gleditor::TextAlign align) {
+  switch (align) {
+  case gleditor::TextAlign::Right:
+    return maxWidth - width;
+  case gleditor::TextAlign::Centre:
+    return (maxWidth - width) / 2.0F;
+  case gleditor::TextAlign::Left:
+  case gleditor::TextAlign::Justify:
+  default:
+    return 0.0F;
+  }
+}
+
 /// One line's worth of glyphs, and where the line after it picks up.
 struct FilledLine {
   std::size_t endGlyph{};  ///< One past the last glyph drawn on this line.
@@ -338,6 +387,7 @@ PageShaping TextLayout::layoutPage(std::string_view text,
   };
 
   std::vector<LineInfo> lines;
+  std::vector<PageShaping::PlacedBox> placedBoxes;
   float currentY        = 0.0F;
   std::size_t lineStart = 0;
 
@@ -345,6 +395,72 @@ PageShaping TextLayout::layoutPage(std::string_view text,
   // goes on it, which is what a layout stepping around a float needs and what
   // the single glyph-indexed loop this replaces could not express.
   while (lineStart < shaped.glyphs.size()) {
+    const auto lineStartByte = shaped.glyphs[lineStart].clusterByteOffset;
+
+    // A Block box anchored exactly here interrupts the flow: it takes
+    // vertical space of its own, aligned horizontally per the style range
+    // covering it, rather than being filled in among surrounding text the
+    // way an Inline box will be (a later stage) or fillLine()'s glyphs are.
+    // FloatLeft/FloatRight/Inline fall through to fillLine() untouched --
+    // stepping text around a float and threading a box into a line are not
+    // implemented yet, and nothing supplies those placements before they are.
+    if (const auto *box = boxAnchoredAt(lineStartByte, options.boxes);
+        nullptr != box && gleditor::BoxPlacement::Block == box->placement) {
+      const float boxHeight = box->heightPx + box->marginPx;
+
+      // Same rule as an atomic range just below: a box that would not fit
+      // what remains of this page rolls whole to the next page's call
+      // rather than starting here and being cut off partway through.
+      // Skipped on an empty page for the same reason -- a box taller than a
+      // whole page should not happen (callers are expected to fit media to
+      // the page before handing it a LayoutBox), but must still make
+      // progress rather than looping in place.
+      if (!lines.empty() && currentY + boxHeight > maxHeight) {
+        break;
+      }
+
+      const auto align = blockStyleAt(lineStartByte, options.blockStyles).align;
+      const float width   = std::min(box->widthPx, maxWidth);
+      const float left    = alignedLeft(maxWidth, width, align);
+      const auto nextByte = (lineStart + 1 < shaped.glyphs.size())
+                                ? shaped.glyphs[lineStart + 1].clusterByteOffset
+                                : text.size();
+
+      placedBoxes.push_back(PageShaping::PlacedBox{
+          .anchorByteOffset = static_cast<std::uint32_t>(lineStartByte),
+          .id               = box->id,
+          .left             = left,
+          .top              = currentY,
+          .width            = width,
+          .height           = box->heightPx,
+          .placement        = box->placement,
+      });
+
+      // A caret must still be able to land on the anchor: an empty glyph
+      // range (startGlyph == endGlyph) is the same convention a media
+      // placeholder's blank newlines already use, and for the same two
+      // reasons -- it keeps the assembly pass below from emitting a
+      // GlyphEntry nothing should draw a glyph over (an anchor character
+      // can shape to a real, visible fallback glyph otherwise -- confirmed
+      // empirically, not assumed), and it is what lets caretGeometry()'s
+      // line-range fallback find the anchor by byte range alone.
+      lines.push_back(LineInfo{
+          .startGlyph = lineStart,
+          .endGlyph   = lineStart,
+          .startByte  = lineStartByte,
+          .endByte    = nextByte,
+          .width      = width,
+          .top        = currentY,
+      });
+
+      currentY += boxHeight;
+      if (currentY + lineHeight > maxHeight) {
+        break;
+      }
+      lineStart += 1;
+      continue;
+    }
+
     const auto filled = fillLine(shaped, text, breakAttrs, lineStart, maxWidth,
                                  options.singleParagraph);
 
@@ -403,6 +519,7 @@ PageShaping TextLayout::layoutPage(std::string_view text,
   shaping.limit        = lines.back().endByte;
   shaping.textHeightPx = static_cast<int>(std::ceil(currentY));
   shaping.lineCount    = lines.size();
+  shaping.boxes        = std::move(placedBoxes);
 
   float maxSeenWidth = 0.0F;
   for (std::size_t lineIdx = 0; lineIdx < lines.size(); lineIdx++) {
@@ -464,6 +581,15 @@ PageShaping TextLayout::layoutPage(std::string_view text,
     if (range.start < shaping.limit) {
       maxSeenWidth = std::max(maxSeenWidth, range.minWidthPx);
     }
+  }
+
+  // A placed box's own width, for the same reason: it has no glyphs of its
+  // own for the scan above to see either. Already clamped to maxWidth when
+  // it was placed, so this can only matter for a page whose widest content
+  // is a box narrower than the column -- a page with nothing on it but one
+  // modestly-sized figure, say.
+  for (const auto &placed : shaping.boxes) {
+    maxSeenWidth = std::max(maxSeenWidth, placed.width);
   }
 
   shaping.textWidthPx = static_cast<int>(std::ceil(maxSeenWidth));

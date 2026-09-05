@@ -36,6 +36,19 @@ struct LayoutOptions {
   /// Empty by default: plain text has no atomic ranges, the same "no
   /// opinion" meaning decoratedRanges' own empty default carries.
   std::vector<AtomicRange> atomicRanges{};
+  /// Boxes anchored somewhere in this text slice -- see LayoutBox's own
+  /// comment. Unlike decoratedRanges, never clipped: a box is a single
+  /// anchor character, so it is either on this page or it is not. Empty by
+  /// default, the same "no opinion" meaning atomicRanges' own empty default
+  /// carries.
+  std::vector<gleditor::LayoutBox> boxes{};
+  /// Paragraph style over ranges of this text slice -- see
+  /// BlockStyleRange's own comment. A Block box takes its horizontal
+  /// placement from the range covering its anchor; text alignment
+  /// (Stage 1c) will take a line's from the range covering its first byte.
+  /// Empty by default: every line/box gets TextAlign::Left, the same
+  /// meaning every line already had before this existed.
+  std::vector<gleditor::BlockStyleRange> blockStyles{};
   /// The page these constraints came from, forwarded to PageShaping so a
   /// Page sizes its quad from its document's own page rather than from how
   /// much text happened to land on it. Default-constructed (FitContent,

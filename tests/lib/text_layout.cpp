@@ -311,3 +311,92 @@ TEST(TextLayoutTest, UnnamedPageDefaultsToFitContentAndIsNotEchoedAsFixed) {
 
   EXPECT_EQ(shaping.page.mode, gleditor::PageSizing::FitContent);
 }
+
+TEST(TextLayoutTest, BlockBoxConsumesHeightAndIsReportedInShapingBoxes) {
+  auto &fm  = FontManager::instance();
+  auto font = fm.getFont("Monospace 16");
+  ASSERT_NE(font, nullptr);
+  const float lineHeight = font->metrics().lineHeight;
+
+  // Three real lines, then one anchor byte a media figure attaches its
+  // LayoutBox to -- the same "prefix + anchor" shape the AtomicRange tests
+  // above use, but the anchor is a single character rather than a run sized
+  // to the media's height.
+  const std::string prefix = "Line one\nLine two\nLine three\n";
+  const std::string text   = prefix + "\n";
+
+  LayoutOptions opts{
+      .maxWidthPx  = 500.0F,
+      .maxHeightPx = lineHeight * 20.0F, // comfortably fits everything
+  };
+  opts.boxes.push_back(gleditor::LayoutBox{
+      .anchor    = static_cast<std::uint32_t>(prefix.size()),
+      .widthPx   = 200.0F,
+      .heightPx  = 150.0F,
+      .marginPx  = 0.0F,
+      .placement = gleditor::BoxPlacement::Block,
+  });
+
+  auto shaping = TextLayout::layoutPage(text, font, opts);
+
+  ASSERT_EQ(shaping.boxes.size(), 1u);
+  const auto &placed = shaping.boxes.front();
+  EXPECT_EQ(placed.anchorByteOffset, prefix.size());
+  EXPECT_FLOAT_EQ(placed.top, lineHeight * 3.0F);
+  EXPECT_FLOAT_EQ(placed.width, 200.0F);
+  EXPECT_FLOAT_EQ(placed.height, 150.0F);
+  EXPECT_EQ(placed.placement, gleditor::BoxPlacement::Block);
+  // Default alignment is Left -- the box sits flush with the column start.
+  EXPECT_FLOAT_EQ(placed.left, 0.0F);
+}
+
+TEST(TextLayoutTest, BlockBoxMovesWholeToNextPageWhenItDoesNotFit) {
+  auto &fm  = FontManager::instance();
+  auto font = fm.getFont("Monospace 16");
+  ASSERT_NE(font, nullptr);
+  const float lineHeight = font->metrics().lineHeight;
+
+  const std::string prefix = "Line one\nLine two\nLine three\n";
+  const std::string text   = prefix + "\n";
+
+  LayoutOptions opts{
+      .maxWidthPx  = 500.0F,
+      .maxHeightPx = lineHeight * 3.5F, // room for the 3 lines, not the box
+  };
+  opts.boxes.push_back(gleditor::LayoutBox{
+      .anchor    = static_cast<std::uint32_t>(prefix.size()),
+      .widthPx   = 200.0F,
+      .heightPx  = 150.0F,
+      .placement = gleditor::BoxPlacement::Block,
+  });
+
+  auto shaping = TextLayout::layoutPage(text, font, opts);
+
+  // The box rolls to the next page's call in its entirety rather than being
+  // cut off partway through -- same rule an AtomicRange follows.
+  EXPECT_EQ(shaping.lineCount, 3u);
+  EXPECT_EQ(shaping.limit, prefix.size());
+  EXPECT_TRUE(shaping.boxes.empty());
+}
+
+TEST(TextLayoutTest, BlockBoxCentresUnderACentreBlockStyleRange) {
+  auto &fm  = FontManager::instance();
+  auto font = fm.getFont("Monospace 16");
+  ASSERT_NE(font, nullptr);
+
+  const std::string text = "\n";
+  LayoutOptions opts{.maxWidthPx = 500.0F, .maxHeightPx = 1000.0F};
+  opts.boxes.push_back(gleditor::LayoutBox{
+      .anchor    = 0,
+      .widthPx   = 200.0F,
+      .heightPx  = 150.0F,
+      .placement = gleditor::BoxPlacement::Block,
+  });
+  opts.blockStyles.push_back(gleditor::BlockStyleRange{
+      .start = 0, .end = 1, .align = gleditor::TextAlign::Centre});
+
+  auto shaping = TextLayout::layoutPage(text, font, opts);
+
+  ASSERT_EQ(shaping.boxes.size(), 1u);
+  EXPECT_FLOAT_EQ(shaping.boxes.front().left, (500.0F - 200.0F) / 2.0F);
+}

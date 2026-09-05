@@ -102,6 +102,23 @@ struct PageShaping {
   };
   std::vector<LineEntry> lines;
   std::size_t lineCount{};
+  /// Where each LayoutBox anchored on this page actually landed, in the
+  /// same page-pixel space LineEntry::left/top are in. What replaces an
+  /// application guessing a box's position from a fixed gap below a text
+  /// anchor: the layout decided this, so the layout reports it.
+  struct PlacedBox {
+    /// Page-relative, the same convention LineEntry::byteStart is in.
+    std::uint32_t anchorByteOffset{};
+    std::uint32_t id{}; ///< Echoed from LayoutBox::id, opaque to the layout.
+    float left{};
+    float top{};
+    /// May differ from the LayoutBox's own width/height: a box wider than
+    /// the column is clamped to fit it rather than left to overflow.
+    float width{};
+    float height{};
+    gleditor::BoxPlacement placement{};
+  };
+  std::vector<PlacedBox> boxes;
 };
 
 class Page : public Drawable {
@@ -210,6 +227,23 @@ public:
    */
   [[nodiscard]] bool caretGeometry(std::uint32_t globalOffset, float &posX,
                                    float &posY, float &height) const;
+
+  /**
+   * @brief Where a LayoutBox anchored at a document-global byte offset
+   *        landed, if this page holds one there.
+   *
+   * @param[out] posX,posY The box's bottom-left corner in this page's pixel
+   *             space -- posY is the bottom edge, not the top, since every
+   *             caller wanting a box's position wants a corner to draw a
+   *             widget's rectangle up from.
+   * @param[out] width,height The box's placed size, which may be smaller
+   *             than what was asked for if it was wider than the column.
+   * @return false when the offset is not on this page, or nothing is
+   *         anchored there.
+   */
+  [[nodiscard]] bool boxGeometry(std::uint32_t globalOffset, float &posX,
+                                 float &posY, float &width,
+                                 float &height) const;
 
   /// Blank border between a page's edge and the text on it, in that same
   /// pixel space. Public because it is not only the layout's business: what
@@ -324,6 +358,18 @@ private:
   /// gleditor::text::LayoutOptions::atomicRanges for that page's
   /// TextLayout::layoutPage() call.
   std::vector<gleditor::AtomicRange> atomicRanges;
+  /// Boxes anchored somewhere in text. Read once from the TextSource at
+  /// construction -- see TextSource::layoutBoxes() -- and forwarded
+  /// unclipped in layoutFrom() when a box's anchor falls on that page's
+  /// slice, the same rule atomicRanges' own start offset gets, becoming
+  /// gleditor::text::LayoutOptions::boxes for that page's
+  /// TextLayout::layoutPage() call.
+  std::vector<gleditor::LayoutBox> layoutBoxes;
+  /// Paragraph style over ranges of text. Read once from the TextSource at
+  /// construction -- see TextSource::blockStyles() -- and clipped/rebased
+  /// into page-relative coordinates in layoutFrom() the same way
+  /// decoratedRanges is.
+  std::vector<gleditor::BlockStyleRange> blockStyles;
   /// This document's page geometry. Read once from the TextSource at
   /// construction -- see TextSource::pageSize() -- and carried into every
   /// layoutFrom() call's LayoutOptions, from which Page reads it back to
@@ -702,6 +748,28 @@ public:
   /// the answer while a document is still being built.
   [[nodiscard]] std::optional<Anchor>
   anchorFor(std::uint32_t globalOffset) const;
+
+  /**
+   * @brief Where a LayoutBox anchored at a byte offset actually landed.
+   *
+   * The layout decided this already (TextLayout::layoutPage()'s own
+   * PageShaping::PlacedBox), so this only has to find which page and
+   * translate: same page-pixel space Anchor is in, and @p y is the box's
+   * *bottom* edge in that up-positive, page-centre-relative space -- every
+   * caller wanting a box's position wants a bottom-left corner to draw
+   * from, and neither should have to redo that arithmetic itself.
+   */
+  struct BoxRect {
+    std::uint32_t pageIndex{};
+    float x{}; ///< In that page's pixel space.
+    float y{}; ///< The box's bottom edge, not its top.
+    float width{};
+    float height{};
+  };
+
+  /// Where the box anchored at @p globalOffset landed, or nothing when no
+  /// page holds it or nothing is anchored there.
+  [[nodiscard]] std::optional<BoxRect> boxFor(std::uint32_t globalOffset) const;
 
   /**
    * @brief A point in a page's pixel space, in world coordinates.

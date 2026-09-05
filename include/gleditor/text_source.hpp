@@ -168,6 +168,31 @@ public:
   }
 
   /**
+   * @brief Boxes anchored somewhere in text() -- see LayoutBox's own
+   *        comment. Fed, after Doc translates a box's absolute offset into
+   *        a given page's own slice-relative coordinates, into
+   *        gleditor::text::LayoutOptions::boxes.
+   *
+   * Empty by default, for the same reason atomicRanges() is: plain text
+   * has no media to reserve a box for.
+   */
+  [[nodiscard]] virtual std::vector<LayoutBox> layoutBoxes() const {
+    return {};
+  }
+
+  /**
+   * @brief Paragraph style over ranges of text() -- see BlockStyleRange's
+   *        own comment. Clipped and rebased into page-relative coordinates
+   *        the same way decoratedRanges() is.
+   *
+   * Empty by default: every line and box gets TextAlign::Left, the same
+   * meaning every line already had before this existed.
+   */
+  [[nodiscard]] virtual std::vector<BlockStyleRange> blockStyles() const {
+    return {};
+  }
+
+  /**
    * @brief This document's page geometry.
    *
    * Defaults to gleditor::letterPage -- 8.5x11in Letter, the size every

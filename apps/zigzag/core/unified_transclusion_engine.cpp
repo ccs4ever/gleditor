@@ -334,6 +334,25 @@ std::size_t UnifiedTransclusionEngine::ShapingKeyHash::operator()(
     mix(static_cast<std::size_t>(range.end));
     mix(static_cast<std::size_t>(range.decorations));
   }
+  for (const auto &range : k.atomicRanges) {
+    mix(static_cast<std::size_t>(range.start));
+    mix(static_cast<std::size_t>(range.end));
+    mix(std::hash<float>{}(range.minWidthPx));
+  }
+  for (const auto &box : k.boxes) {
+    mix(static_cast<std::size_t>(box.anchor));
+    mix(std::hash<float>{}(box.widthPx));
+    mix(std::hash<float>{}(box.heightPx));
+    mix(static_cast<std::size_t>(box.placement));
+  }
+  for (const auto &range : k.blockStyles) {
+    mix(static_cast<std::size_t>(range.start));
+    mix(static_cast<std::size_t>(range.end));
+    mix(static_cast<std::size_t>(range.align));
+  }
+  mix(static_cast<std::size_t>(k.page.mode));
+  mix(std::hash<float>{}(k.page.widthPx));
+  mix(std::hash<float>{}(k.page.heightPx));
   return h;
 }
 
@@ -346,7 +365,11 @@ const PageShaping &UnifiedTransclusionEngine::shapedPage(
                  .maxHeightPx     = opts.maxHeightPx,
                  .singleParagraph = opts.singleParagraph,
                  .ellipsize       = opts.ellipsize,
-                 .decoratedRanges = opts.decoratedRanges};
+                 .decoratedRanges = opts.decoratedRanges,
+                 .atomicRanges    = opts.atomicRanges,
+                 .boxes           = opts.boxes,
+                 .blockStyles     = opts.blockStyles,
+                 .page            = opts.page};
 
   shapingTick_++;
   if (const auto found = shapingCache_.find(key);

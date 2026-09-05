@@ -171,6 +171,8 @@ struct AtomicRange {
   /// needs more room, and the media draws past the quad's own right edge.
   /// Zero -- the default -- asks for no widening at all.
   float minWidthPx{0.0F};
+
+  [[nodiscard]] bool operator==(const AtomicRange &) const = default;
 };
 
 /**

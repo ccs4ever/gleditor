@@ -382,6 +382,26 @@ bool Page::caretGeometry(const std::uint32_t globalOffset, float &posX,
   return true;
 }
 
+bool Page::boxGeometry(const std::uint32_t globalOffset, float &posX,
+                       float &posY, float &width, float &height) const {
+  if (!contains(globalOffset)) {
+    return false;
+  }
+  const auto shaped    = ensureShaping();
+  const auto relOffset = globalOffset - textOffset;
+
+  for (const auto &placed : shaped.boxes) {
+    if (placed.anchorByteOffset == relOffset) {
+      posX   = originX + pageMargin + placed.left;
+      posY   = originY - (pageMargin + placed.top + placed.height);
+      width  = placed.width;
+      height = placed.height;
+      return true;
+    }
+  }
+  return false;
+}
+
 std::optional<std::uint32_t>
 Page::offsetForCluster(const std::uint32_t clusterIndex,
                        const float fraction) const {
@@ -478,6 +498,18 @@ Doc::anchorFor(const std::uint32_t globalOffset) const {
     if (pages[i].caretGeometry(globalOffset, anchor.x, anchor.y,
                                anchor.height)) {
       return anchor;
+    }
+  }
+  return std::nullopt;
+}
+
+std::optional<Doc::BoxRect>
+Doc::boxFor(const std::uint32_t globalOffset) const {
+  for (std::size_t i = 0; i < pages.size(); i++) {
+    BoxRect rect{static_cast<std::uint32_t>(i), 0.0F, 0.0F, 0.0F, 0.0F};
+    if (pages[i].boxGeometry(globalOffset, rect.x, rect.y, rect.width,
+                             rect.height)) {
+      return rect;
     }
   }
   return std::nullopt;
@@ -730,6 +762,32 @@ PageShaping Doc::layoutFrom(const std::uint32_t offset) const {
           .end        = range.end - offset,
           .minWidthPx = range.minWidthPx,
       });
+    }
+  }
+
+  // layoutBoxes is a single anchor byte each, the same "start falls on this
+  // page or it does not" rule as atomicRanges above.
+  for (const auto &box : layoutBoxes) {
+    if (box.anchor >= offset &&
+        box.anchor < static_cast<std::uint32_t>(pageEnd)) {
+      auto rebased   = box;
+      rebased.anchor = box.anchor - offset;
+      opts.boxes.push_back(rebased);
+    }
+  }
+
+  // blockStyles is clipped and rebased the same way decoratedRanges is
+  // above: a paragraph style, unlike an atomic range's height, is not
+  // wrong for being truncated to what this page covers.
+  for (const auto &range : blockStyles) {
+    const auto from = std::max<std::uint32_t>(range.start, offset);
+    const auto to =
+        std::min<std::uint32_t>(range.end, static_cast<std::uint32_t>(pageEnd));
+    if (from < to) {
+      auto rebased  = range;
+      rebased.start = from - offset;
+      rebased.end   = to - offset;
+      opts.blockStyles.push_back(rebased);
     }
   }
 
@@ -1054,6 +1112,8 @@ Doc::Doc(const RendererRef &renderer, render::RenderDevice *device,
   forcedBreaks    = source.forcedBreaks();
   decoratedRanges = source.decoratedRanges();
   atomicRanges    = source.atomicRanges();
+  layoutBoxes     = source.layoutBoxes();
+  blockStyles     = source.blockStyles();
   pageGeometry    = source.pageSize();
 
   // Validated here rather than by the source, because every source needs it
@@ -1080,6 +1140,8 @@ void Doc::load(const gleditor::TextSource &source) {
   forcedBreaks    = source.forcedBreaks();
   decoratedRanges = source.decoratedRanges();
   atomicRanges    = source.atomicRanges();
+  layoutBoxes     = source.layoutBoxes();
+  blockStyles     = source.blockStyles();
   pageGeometry    = source.pageSize();
 
   std::size_t badOffset = 0;
