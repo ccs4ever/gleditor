@@ -105,15 +105,33 @@ ______________________________________________________________________
   ($> 2560,\\text{px}$ width), the drawer automatically docks to the bezel
   closest to the active editing viewport.
 
-### 3.2 Partitioned Drop Zones
+### 3.2 Dynamic Partitioned Drop Zones with User-Selectable Colors
 
-Users can instantiate and name custom drop partitions:
+Rather than restricting the user to a hardcoded enum, drop zones are defined by
+**arbitrary string labels** that the user freely chooses, renames, and
+customizes. The drawer comes pre-populated with intuitive defaults:
 
-1. `ToLinkLeft` (Cyan accent aura `#06B6D4`): Staging source spans for link creation.
-1. `ToLinkRight` (Magenta accent aura `#EC4899`): Staging target spans for link creation.
-1. `NotesForLater` (Identity Gold aura `#EAB308`): Temporary research snippets.
-1. `DraftScraps` (Emerald aura `#10B981`): Uncommitted candidate phrasings.
-1. `Custom` (User-defined label and color).
+1. **`"To Link (Left)"`**: Staging source spans for link creation (Cyan aura
+   `#06B6D4`, tinted slate background).
+1. **`"To Link (Right)"`**: Staging target spans for link creation (Magenta
+   aura `#EC4899`, tinted plum background).
+1. **`"Notes"`**: General holding pouch for research quotes and thoughts
+   (Identity Gold aura `#EAB308`, warm amber tint).
+1. **`"Scratch"`**: Temporary workbench for rough drafts and fragments
+   (Emerald aura `#10B981`, mint tint).
+
+#### User-Selectable Background Colors & Visual Differentiation
+
+Each drop zone features independent styling controls:
+
+- **Aura & Border Accent**: A luminous 2px border and corner bracket tint
+  highlighting active drops and hovers.
+- **Translucent Background Tint**: A user-selectable frosted acrylic fill (RGBA)
+  that allows visual distinction between zones at a glance across the screen.
+- **Dynamic Partition Management**: Users can tap `[+ New Zone]`, specify a
+  custom string label (e.g. `"Rebuttal Points"`, `"Quotes for Chapter 3"`,
+  `"Bibliography"`), choose a color swatch, and drag partition dividers to
+  adjust relative vertical height weights ($W_y$).
 
 ### 3.3 Ghost Spanable Drag Interactions
 
@@ -163,6 +181,28 @@ Each drop zone in the drawer maps to an independent microversion branch:
   zone after link forging, the span is **rearranged to OSMIC limbo**, never
   deleted. Users can scrub backward in hypertime to recover any previously
   harvested span.
+
+### 4.3 Storage of Zone Definitions, Colors & Layout in the Backing Xanadoc
+
+The backing system xanadoc does not merely hold the transcluded `PrimediaSpan`
+references; it is the **authoritative persistent store for the entire drop-zone
+layout itself**.
+
+In pure Xanadulogical architecture:
+
+- **Zone Manifest as Metadata Links**: Each custom zone's configuration — its
+  user-chosen string label (e.g. `"Notes"`, `"Scratch"`), custom background
+  color tint (RGBA), aura color, and vertical height weight — is stored as a
+  first-class metadata link (`LinkType::Format` / structural attribute) anchored
+  to the pouch document's root microversion.
+- **Single-File Integrity**: No external `.json`, `.ini`, or dotfile settings
+  are required. The entire workspace layout, partitions, colors, and gathered
+  spans reside in the single sovereign EDL directory
+  (`~/.local/share/xudu/pouch/`).
+- **Synchronous Session Restoration**: When `PouchDrawer::load()` executes,
+  `Store::load()` reads the root manifest, instantiates the user's custom drop
+  partitions with their exact colors and labels, and repopulates the transcluded
+  cards across hypertime branches in $< 1,\\text{ms}$.
 
 ______________________________________________________________________
 
@@ -305,30 +345,53 @@ struct PouchItem {
 };
 
 /**
- * @enum class ZoneKind
- * @brief Semantic category of a drop partition.
+ * @struct DropZoneConfig
+ * @brief User-configurable partition definition stored within the backing xanadoc.
  */
-enum class ZoneKind : std::uint8_t {
-  ToLinkLeft,
-  ToLinkRight,
-  NotesForLater,
-  DraftScraps,
-  Custom
+struct DropZoneConfig {
+  std::string id;
+  std::string label{"Notes"};
+  glm::vec4 backgroundColor{0.12F, 0.15F, 0.20F, 0.85F};
+  std::uint32_t auraColor{0xFFEAB308U};
+  float heightWeight{1.0F};
 };
 
 /**
  * @class DropZone
- * @brief A drop partition with distinct geometry, color aura, and picking tag.
+ * @brief A drop partition with customizable geometry, colors, and picking tag.
  */
 class DropZone {
 public:
-  DropZone(std::string id, ZoneKind kind, std::string label,
-           std::uint32_t auraColor);
+  explicit DropZone(DropZoneConfig config);
 
-  [[nodiscard]] const std::string &id() const noexcept { return id_; }
-  [[nodiscard]] ZoneKind kind() const noexcept { return kind_; }
-  [[nodiscard]] const std::string &label() const noexcept { return label_; }
-  [[nodiscard]] std::uint32_t auraColor() const noexcept { return auraColor_; }
+  [[nodiscard]] const std::string &id() const noexcept { return config_.id; }
+  [[nodiscard]] const std::string &label() const noexcept {
+    return config_.label;
+  }
+  void setLabel(std::string label) { config_.label = std::move(label); }
+
+  [[nodiscard]] const glm::vec4 &backgroundColor() const noexcept {
+    return config_.backgroundColor;
+  }
+  void setBackgroundColor(const glm::vec4 &color) noexcept {
+    config_.backgroundColor = color;
+  }
+
+  [[nodiscard]] std::uint32_t auraColor() const noexcept {
+    return config_.auraColor;
+  }
+  void setAuraColor(std::uint32_t color) noexcept {
+    config_.auraColor = color;
+  }
+
+  [[nodiscard]] float heightWeight() const noexcept {
+    return config_.heightWeight;
+  }
+  void setHeightWeight(float weight) noexcept { config_.heightWeight = weight; }
+
+  [[nodiscard]] const DropZoneConfig &config() const noexcept {
+    return config_;
+  }
 
   void setRect(float x, float y, float width, float height) noexcept;
   [[nodiscard]] bool contains(float screenX, float screenY) const noexcept;
@@ -349,10 +412,7 @@ public:
   [[nodiscard]] std::uint32_t tagOffset() const noexcept { return tagOffset_; }
 
 private:
-  std::string id_;
-  ZoneKind kind_;
-  std::string label_;
-  std::uint32_t auraColor_{0xFFFFFFFFU};
+  DropZoneConfig config_;
   float x_{0.0F};
   float y_{0.0F};
   float width_{0.0F};
@@ -428,10 +488,21 @@ public:
   [[nodiscard]] std::uint64_t accessibilityRevision() const override;
 
   // Zone Partition Management
-  DropZone &addZone(std::string id, ZoneKind kind, std::string label,
-                    std::uint32_t color);
+  DropZone &addZone(DropZoneConfig config);
+  void removeZone(std::string_view id);
   [[nodiscard]] DropZone *zoneById(std::string_view id) noexcept;
   [[nodiscard]] DropZone *zoneAt(float screenX, float screenY) noexcept;
+  [[nodiscard]] const std::vector<std::unique_ptr<DropZone>> &zones()
+      const noexcept {
+    return zones_;
+  }
+
+  // Pre-Populated Defaults
+  static std::vector<DropZoneConfig> defaultConfigurations();
+
+  // Storage of Zone Layout & Config in Backing Xanadoc
+  void saveLayoutToPouchStore();
+  void loadLayoutFromPouchStore();
 
   // Drag Interaction Hooks
   bool handleGhostDrop(const GhostDragContext &ghost, float screenX,
