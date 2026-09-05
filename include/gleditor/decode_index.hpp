@@ -40,6 +40,7 @@
 #include <memory>
 #include <optional>
 #include <span>
+#include <utility>
 #include <vector>
 
 #include <gleditor/mimetype.hpp>
@@ -144,6 +145,27 @@ struct DecodeIndex {
  */
 [[nodiscard]] DecodeIndex buildDecodeIndex(std::span<const std::uint8_t> bytes,
                                            const MimeType &mime);
+
+/**
+ * @brief The pixel dimensions of @p videoBytes' first video stream, without
+ *        decoding a single frame.
+ *
+ * Reads only the container's own stream metadata (`avformat_find_stream_info()`
+ * followed by that stream's `AVCodecParameters::width`/`height`) -- the same
+ * "peek, don't decode" contract `SvgCache::peekSize()` and
+ * `PngCheckpoints::width()`/`height()` already keep, and for the same reason:
+ * a caller sizing a placeholder before anything is actually drawn has no GL
+ * context and no player yet, only bytes.
+ *
+ * Returns nullopt if @p videoBytes does not parse as a container FFmpeg
+ * recognises, has no video stream, or if this build lacks libavformat/
+ * libavcodec/libavutil (GLEDITOR_HAVE_DECODE_INDEX_LIBAV) -- the same
+ * "check before relying on it" contract as the rest of this header. A
+ * caller with no answer here has nothing worse to fall back to than
+ * whatever default aspect ratio it already assumed before this existed.
+ */
+[[nodiscard]] std::optional<std::pair<std::uint32_t, std::uint32_t>>
+peekVideoSize(std::span<const std::uint8_t> videoBytes);
 
 /**
  * @brief Decompresses @p zstdBytes and recompresses it into zstd's own

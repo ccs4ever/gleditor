@@ -308,19 +308,13 @@ public:
             mSpan.containerLength);
         widget->setTitle(mSpan.label);
         widget->attachToDocument(rState.docs[dIdx], mSpan.docOffset);
-        if (mSpan.isAudio) {
-          // Audio has no aspect ratio to size a viewport from -- it is a
-          // fixed player card regardless of content.
-          widget->setSize(340.0F, 120.0F);
-        } else {
-          // Matches Session::placeholderFor()'s reservation for this span
-          // (apps/xudu/session.cpp): the page's full text width, at
-          // MediaWidget::defaultAspect until a real frame reports better.
-          widget->setSize(
-              Doc::textWidthPx,
-              (Doc::textWidthPx / gleditor::MediaWidget::defaultAspect) +
-                  gleditor::MediaWidget::chromeHeightPx);
-        }
+        // mSpan.widgetWidth/widgetHeight is exactly what
+        // Session::placeholderFor() reserved for this span (see
+        // mediaSpansFor() in apps/xudu/session.cpp, which computes both from
+        // the one shared formula) -- read from there rather than
+        // recomputed here, so this widget's size and the room set aside for
+        // it in the text flow cannot drift into disagreeing.
+        widget->setSize(mSpan.widgetWidth, mSpan.widgetHeight);
         widget->setVisible(true);
         renderer->addFrameContributor(widget.get());
         renderer->addPickObserver(widget.get());

@@ -18,6 +18,7 @@
 #include <optional>
 #include <string>
 #include <string_view>
+#include <utility>
 #include <vector>
 
 #include <gleditor/draw_budget.hpp>
@@ -310,6 +311,13 @@ private:
   /// ranges in layoutFrom() the same way forcedBreaks is translated to a
   /// slice-length clamp there.
   std::vector<gleditor::DecoratedRange> decoratedRanges;
+  /// Byte ranges into text that must not be split across a page boundary.
+  /// Read once from the TextSource at construction -- see
+  /// TextSource::atomicRanges() -- and clipped/rebased into page-relative
+  /// coordinates in layoutFrom() the same way decoratedRanges is, becoming
+  /// gleditor::text::LayoutOptions::atomicRanges for that page's
+  /// TextLayout::layoutPage() call.
+  std::vector<gleditor::AtomicRange> atomicRanges;
   /// Told about every edit. Bare pointers, not owned; see DocumentObserver.
   std::vector<gleditor::DocumentObserver *> observers;
   RendererRef renderer;

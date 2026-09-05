@@ -6,6 +6,7 @@
 #include <gleditor/text/font.hpp>
 #include <memory>
 #include <string_view>
+#include <utility>
 #include <vector>
 
 namespace gleditor::text {
@@ -26,6 +27,14 @@ struct LayoutOptions {
   /// cluster by its byte offset. Empty -- the default, and every caller
   /// before this existed -- means no glyph in the page carries any.
   std::vector<DecoratedRange> decoratedRanges{};
+  /// Ranges that must not be split across a page boundary -- see
+  /// AtomicRange's own comment. When starting a range whose full height
+  /// would not fit in what remains of maxHeightPx, layoutPage() ends the
+  /// page there instead of partway through the range, so the whole thing
+  /// begins fresh on the next page's call instead of splitting across both.
+  /// Empty by default: plain text has no atomic ranges, the same "no
+  /// opinion" meaning decoratedRanges' own empty default carries.
+  std::vector<AtomicRange> atomicRanges{};
 };
 
 /**

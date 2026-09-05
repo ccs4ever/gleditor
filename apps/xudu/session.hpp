@@ -23,6 +23,7 @@
 #include <span>
 #include <string>
 #include <string_view>
+#include <utility>
 #include <vector>
 
 #include <gleditor/a11y/tree.hpp>
@@ -65,9 +66,11 @@ class Session;
 class VersionTextSource : public gleditor::TextSource {
 public:
   VersionTextSource(std::string aText, MicroversionId aVersion,
-                    std::vector<std::uint32_t> aBreaks = {})
+                    std::vector<std::uint32_t> aBreaks               = {},
+                    std::vector<gleditor::AtomicRange> aAtomicRanges = {})
       : contents(std::move(aText)), id(std::move(aVersion)),
-        breaks(std::move(aBreaks)) {}
+        breaks(std::move(aBreaks)), atomicByteRanges(std::move(aAtomicRanges)) {
+  }
 
   [[nodiscard]] std::string text() const override { return contents; }
   [[nodiscard]] std::string name() const override { return id.str(); }
@@ -75,11 +78,20 @@ public:
   [[nodiscard]] std::vector<std::uint32_t> forcedBreaks() const override {
     return breaks;
   }
+  [[nodiscard]] std::vector<gleditor::AtomicRange>
+  atomicRanges() const override {
+    return atomicByteRanges;
+  }
 
 private:
   std::string contents;
   MicroversionId id;
   std::vector<std::uint32_t> breaks;
+  /// Each embedded media placeholder's [docOffset, docOffset+reservedLength)
+  /// run of blank lines, and how wide its widget actually is -- see
+  /// Session::sourceFor(), which builds this alongside contents itself so
+  /// the two cannot disagree about where a placeholder starts and ends.
+  std::vector<gleditor::AtomicRange> atomicByteRanges;
 };
 
 /**
@@ -125,6 +137,15 @@ public:
   static constexpr std::uint32_t redactionColour              = kWithheldColour;
   static constexpr std::uint32_t transcopyrightLockedColour   = 0xF59E0BCCU;
   static constexpr std::uint32_t transcopyrightUnlockedColour = 0x10B981AAU;
+
+  /// The document-embedded audio card's fixed size. Audio has no aspect
+  /// ratio to size a viewport from -- unlike images and video, this never
+  /// varies with content -- so placeholderFor() (how much room to reserve)
+  /// and the actual MediaWidget::setSize() call in main.cpp's
+  /// syncMediaWidgets() both read it from here, rather than each keeping its
+  /// own copy of the same two numbers to (not) drift out of agreement.
+  static constexpr float audioCardWidthPx  = 340.0F;
+  static constexpr float audioCardHeightPx = 120.0F;
 
   explicit Session(std::string aStorePath,
                    std::shared_ptr<UserPermascroll> scroll = nullptr);
@@ -471,6 +492,18 @@ public:
     /// "does offset X fall inside this span's reserved range" without
     /// recomputing placeholder sizing itself.
     std::uint32_t reservedLength{0};
+    /// The size to construct this span's MediaWidget at, in page pixels --
+    /// exactly the box placeholderFor() reserved @p reservedLength's worth of
+    /// blank lines for (the fixed audio card size for @p isAudio; the real
+    /// decoded aspect ratio, or MediaWidget::defaultAspect until a real frame
+    /// reports one, fit to the page and its chrome, for @p isVideo). Computed
+    /// once here rather than recomputed independently by syncMediaWidgets(),
+    /// so a widget's own size and the space reserved for it in the text flow
+    /// cannot drift into disagreeing the way two separate formulas would
+    /// risk. Left zero for @p isImage, whose sizing comes from
+    /// ImageOverlay/ImageResource instead.
+    float widgetWidth{0.0F};
+    float widgetHeight{0.0F};
   };
 
   /// Discovered media spans for @p version with their document byte offsets.

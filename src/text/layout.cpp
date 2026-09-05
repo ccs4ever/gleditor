@@ -6,7 +6,9 @@
 #include <hb.h>
 #include <iostream>
 #include <linebreak.h>
+#include <optional>
 #include <string>
+#include <utility>
 #include <vector>
 
 namespace gleditor::text {
@@ -138,6 +140,24 @@ decorationsAt(const std::size_t byteOffset,
   return mask;
 }
 
+/// The line count of the atomic range starting exactly at @p byteOffset, if
+/// any -- nullopt for a byte that is not the first byte of one of
+/// @p ranges. A range is (end - start) consecutive newline characters (see
+/// AtomicRange's own comment), so its line count at any font's pitch is just
+/// that byte length; no separate pixel height is carried alongside it to
+/// (dis)agree with this.
+std::optional<std::size_t>
+atomicRangeLinesStartingAt(const std::size_t byteOffset,
+                           const std::vector<AtomicRange> &ranges) {
+  for (const auto &range : ranges) {
+    if (static_cast<std::size_t>(range.start) == byteOffset &&
+        range.end > range.start) {
+      return static_cast<std::size_t>(range.end - range.start);
+    }
+  }
+  return std::nullopt;
+}
+
 } // namespace
 
 PageShaping TextLayout::layoutPage(std::string_view text,
@@ -208,6 +228,16 @@ PageShaping TextLayout::layoutPage(std::string_view text,
   float lineWidth            = 0.0F;
   std::size_t lastBreakGlyph = 0;
   float widthAtBreak         = 0.0F;
+  /// Set at either place the loop below breaks out early for lack of
+  /// height, so the trailing-line block after the loop -- meant only for
+  /// the case the loop ran out of glyphs to look at, not the case it ran
+  /// out of page -- knows to stay out of the way. The maxHeight break just
+  /// below happens to make this redundant for itself (its own condition and
+  /// the trailing block's are the same comparison, negated), but the
+  /// atomic-range break does not share that coincidence -- it can trip with
+  /// a whole line's worth of height still nominally free -- so this flag is
+  /// the one thing both breaks agree on instead.
+  bool pageFull = false;
 
   for (std::size_t i = 0; i < shaped.glyphs.size(); i++) {
     const auto &g      = shaped.glyphs[i];
@@ -225,6 +255,28 @@ PageShaping TextLayout::layoutPage(std::string_view text,
     }
 
     const float nextWidth = lineWidth + g.xAdvance;
+
+    // An atomic range (a media placeholder's reserved lines) must not start
+    // on this page unless the whole thing fits: check before committing to
+    // the line this newline would otherwise end, so a range that does not
+    // fit rolls onto the next page's call in its entirety, together with
+    // whatever un-terminated text shares this line with its first byte,
+    // rather than splitting mid-range. Skipped on an empty page (no lines
+    // committed yet) so a range taller than maxHeight itself -- which
+    // should not happen, since every placeholder height reaching here is
+    // already clamped to at most one page, but a future caller's mistake
+    // should not be able to spin this in place forever -- still makes
+    // progress rather than looping without ever advancing bytePos.
+    if (isNewline && !lines.empty()) {
+      if (const auto rangeLines =
+              atomicRangeLinesStartingAt(bytePos, options.atomicRanges)) {
+        const float rangeHeight = static_cast<float>(*rangeLines) * lineHeight;
+        if (currentY + rangeHeight > maxHeight) {
+          pageFull = true;
+          break;
+        }
+      }
+    }
 
     if (isNewline || (nextWidth > maxWidth && i > lineStart)) {
       std::size_t breakAt = i;
@@ -267,6 +319,7 @@ PageShaping TextLayout::layoutPage(std::string_view text,
 
       // Check if page capacity is exceeded
       if (currentY + lineHeight > maxHeight) {
+        pageFull = true;
         break;
       }
 
@@ -298,8 +351,12 @@ PageShaping TextLayout::layoutPage(std::string_view text,
     lineWidth = nextWidth;
   }
 
-  // Trailing line
-  if (lineStart < shaped.glyphs.size() && currentY + lineHeight <= maxHeight) {
+  // Trailing line -- only when the loop above ran out of glyphs to look at,
+  // not when it ran out of page (pageFull): otherwise this would swallow
+  // every glyph from lineStart to the end of the whole text -- not just the
+  // rest of one line -- into a single bogus final entry.
+  if (!pageFull && lineStart < shaped.glyphs.size() &&
+      currentY + lineHeight <= maxHeight) {
     const auto startByte = shaped.glyphs[lineStart].clusterByteOffset;
     lines.push_back(LineInfo{
         .startGlyph = lineStart,
@@ -370,6 +427,17 @@ PageShaping TextLayout::layoutPage(std::string_view text,
       });
 
       penX += g.xAdvance;
+    }
+  }
+
+  // A blank placeholder line has no glyphs, so the scan above never sees
+  // whatever's actually drawn over it -- an atomic range fully included on
+  // this page (its start byte is before where this page ends) widens the
+  // page to at least its own minWidthPx, the same way a real text line's
+  // glyph width already does above.
+  for (const auto &range : options.atomicRanges) {
+    if (range.start < shaping.limit) {
+      maxSeenWidth = std::max(maxSeenWidth, range.minWidthPx);
     }
   }
 

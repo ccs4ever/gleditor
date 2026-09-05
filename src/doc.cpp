@@ -673,6 +673,27 @@ PageShaping Doc::layoutFrom(const std::uint32_t offset) const {
     }
   }
 
+  // atomicRanges is in this document's own offsets, same as forcedBreaks and
+  // decoratedRanges, but -- unlike decoratedRanges -- must reach
+  // layoutPage() with its full, untruncated length even when part of it
+  // would extend past what a forced break bounds this page to: layoutPage()
+  // computes a range's own height from (end - start) alone, so clipping
+  // that the way decoratedRanges is above would make it look shorter than
+  // what it actually needs, defeating the whole point of an atomic range.
+  // Only forwarded when its start falls within this page's own slice --
+  // layoutPage() only ever asks "does an atomic range start at this byte",
+  // so one that starts elsewhere is never queried and safe to leave out.
+  for (const auto &range : atomicRanges) {
+    if (range.start >= offset &&
+        range.start < static_cast<std::uint32_t>(pageEnd)) {
+      opts.atomicRanges.push_back(gleditor::AtomicRange{
+          .start      = range.start - offset,
+          .end        = range.end - offset,
+          .minWidthPx = range.minWidthPx,
+      });
+    }
+  }
+
   return gleditor::text::TextLayout::layoutPage(
       std::string_view{text.data() + offset, available}, font, opts);
 }
@@ -994,6 +1015,7 @@ Doc::Doc(const RendererRef &renderer, render::RenderDevice *device,
   text            = source.text();
   forcedBreaks    = source.forcedBreaks();
   decoratedRanges = source.decoratedRanges();
+  atomicRanges    = source.atomicRanges();
 
   // Validated here rather than by the source, because every source needs it
   // and none of them can promise otherwise: the bytes come from a file
@@ -1018,6 +1040,7 @@ void Doc::load(const gleditor::TextSource &source) {
   text            = source.text();
   forcedBreaks    = source.forcedBreaks();
   decoratedRanges = source.decoratedRanges();
+  atomicRanges    = source.atomicRanges();
 
   std::size_t badOffset = 0;
   if (!gleditor::validateUtf8(text, badOffset)) {

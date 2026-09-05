@@ -78,6 +78,120 @@ TEST(TextLayoutTest, LayoutPaginatesOnMaxHeight) {
   EXPECT_GT(shaping.limit, 0);
 }
 
+TEST(TextLayoutTest, WithoutAtomicRangesAPlaceholderCanSplitAcrossPages) {
+  auto &fm  = FontManager::instance();
+  auto font = fm.getFont("Monospace 16");
+  ASSERT_NE(font, nullptr);
+  const float lineHeight = font->metrics().lineHeight;
+
+  // Three real lines of text, then a ten-newline run standing in for a
+  // media placeholder -- the exact shape apps/xudu/session.cpp's
+  // placeholderFor() produces.
+  const std::string prefix = "Line one\nLine two\nLine three\n";
+  const std::string placeholder(10, '\n');
+  const std::string text = prefix + placeholder;
+
+  LayoutOptions opts{
+      .maxWidthPx  = 500.0F,
+      .maxHeightPx = lineHeight * 5.5F, // room for the 3 lines plus 2 more
+  };
+
+  auto shaping = TextLayout::layoutPage(text, font, opts);
+
+  // With no atomicRanges, the layout engine has no way to know these ten
+  // newlines belong together -- it paginates by line count alone and stops
+  // partway through them, exactly the split a widget drawn over that space
+  // must not be handed.
+  EXPECT_EQ(shaping.lineCount, 5);
+  EXPECT_GT(shaping.limit, prefix.size());
+  EXPECT_LT(shaping.limit, text.size());
+}
+
+TEST(TextLayoutTest, AtomicRangeMovesWholeToNextPageWhenItDoesNotFit) {
+  auto &fm  = FontManager::instance();
+  auto font = fm.getFont("Monospace 16");
+  ASSERT_NE(font, nullptr);
+  const float lineHeight = font->metrics().lineHeight;
+
+  const std::string prefix = "Line one\nLine two\nLine three\n";
+  const std::string placeholder(10, '\n');
+  const std::string text = prefix + placeholder;
+
+  LayoutOptions opts{
+      .maxWidthPx  = 500.0F,
+      .maxHeightPx = lineHeight * 5.5F, // same budget as the test above
+  };
+  opts.atomicRanges.push_back(gleditor::AtomicRange{
+      .start = static_cast<std::uint32_t>(prefix.size()),
+      .end   = static_cast<std::uint32_t>(prefix.size() + placeholder.size()),
+  });
+
+  auto shaping = TextLayout::layoutPage(text, font, opts);
+
+  // Now the whole placeholder rolls to the next page's call instead of
+  // splitting: this page ends exactly where the real lines did, and a
+  // second layoutPage() call starting at shaping.limit would see the whole
+  // ten-newline run fresh, with a full page's height to work with.
+  EXPECT_EQ(shaping.lineCount, 3);
+  EXPECT_EQ(shaping.limit, prefix.size());
+}
+
+TEST(TextLayoutTest, AtomicRangeDoesNotForceABreakWhenItFits) {
+  auto &fm  = FontManager::instance();
+  auto font = fm.getFont("Monospace 16");
+  ASSERT_NE(font, nullptr);
+  const float lineHeight = font->metrics().lineHeight;
+
+  const std::string prefix = "Line one\nLine two\nLine three\n";
+  const std::string placeholder(10, '\n');
+  const std::string text = prefix + placeholder;
+
+  LayoutOptions opts{
+      .maxWidthPx  = 500.0F,
+      .maxHeightPx = lineHeight * 20.0F, // comfortably fits all 13 lines
+  };
+  opts.atomicRanges.push_back(gleditor::AtomicRange{
+      .start = static_cast<std::uint32_t>(prefix.size()),
+      .end   = static_cast<std::uint32_t>(prefix.size() + placeholder.size()),
+  });
+
+  auto shaping = TextLayout::layoutPage(text, font, opts);
+
+  EXPECT_EQ(shaping.lineCount, 13);
+  EXPECT_EQ(shaping.limit, text.size());
+}
+
+TEST(TextLayoutTest, AtomicRangeMinWidthWidensThePage) {
+  auto &fm  = FontManager::instance();
+  auto font = fm.getFont("Monospace 16");
+  ASSERT_NE(font, nullptr);
+
+  // A short line of real text, far narrower than the media placeholder that
+  // follows it -- the shape a small caption above a wide image takes.
+  const std::string prefix = "Fig 1\n";
+  const std::string placeholder(3, '\n');
+  const std::string text = prefix + placeholder;
+
+  LayoutOptions opts{
+      .maxWidthPx  = 2000.0F,
+      .maxHeightPx = 1000.0F,
+  };
+  auto shaping = TextLayout::layoutPage(text, font, opts);
+  // Baseline: with no atomic range at all, the page is only as wide as the
+  // short text line -- a blank placeholder line has no glyphs to widen it.
+  const auto narrowWidthPx = shaping.textWidthPx;
+
+  opts.atomicRanges.push_back(gleditor::AtomicRange{
+      .start = static_cast<std::uint32_t>(prefix.size()),
+      .end   = static_cast<std::uint32_t>(prefix.size() + placeholder.size()),
+      .minWidthPx = 900.0F,
+  });
+  const auto widened = TextLayout::layoutPage(text, font, opts);
+
+  EXPECT_LT(narrowWidthPx, 900);
+  EXPECT_GE(widened.textWidthPx, 900);
+}
+
 TEST(TextLayoutTest, glyphsOutsideAnyDecoratedRangeCarryNone) {
   auto &fm  = FontManager::instance();
   auto font = fm.getFont("Monospace 16");
@@ -165,3 +279,4 @@ TEST(TextLayoutTest, MultiFontFallbackShaping) {
   EXPECT_FALSE(shaping.glyphs.empty());
   EXPECT_FALSE(shaping.clusters.empty());
 }
+

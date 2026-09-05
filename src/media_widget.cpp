@@ -271,7 +271,7 @@ std::optional<MediaWidget::Corner> MediaWidget::bottomLeftOf() const {
     // moving below the anchor line is *subtracting* a pixel offset here,
     // not negating and re-adding one as if Y increased downward from the
     // page's top margin.
-    effectiveY = anchor->y - (height_ + 20.0F);
+    effectiveY = anchor->y - (height_ + anchorGapPx);
   }
   return Corner{pageIdx, anchorX, effectiveY};
 }

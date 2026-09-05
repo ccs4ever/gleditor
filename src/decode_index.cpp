@@ -614,6 +614,31 @@ DecodeIndex buildAvIndex(std::span<const std::uint8_t> bytes,
 
 } // namespace
 
+std::optional<std::pair<std::uint32_t, std::uint32_t>>
+peekVideoSize(const std::span<const std::uint8_t> videoBytes) {
+  MemoryReader reader{videoBytes.data(), videoBytes.size()};
+  auto handle = openMemoryFormat(reader);
+  if (!handle.has_value()) {
+    return std::nullopt;
+  }
+  for (unsigned i = 0; i < handle->fmt->nb_streams; ++i) {
+    const auto *const params = handle->fmt->streams[i]->codecpar;
+    if (AVMEDIA_TYPE_VIDEO == params->codec_type && params->width > 0 &&
+        params->height > 0) {
+      return std::make_pair(static_cast<std::uint32_t>(params->width),
+                            static_cast<std::uint32_t>(params->height));
+    }
+  }
+  return std::nullopt;
+}
+
+#else // !GLEDITOR_HAVE_DECODE_INDEX_LIBAV
+
+std::optional<std::pair<std::uint32_t, std::uint32_t>>
+peekVideoSize(std::span<const std::uint8_t> /*videoBytes*/) {
+  return std::nullopt;
+}
+
 #endif // GLEDITOR_HAVE_DECODE_INDEX_LIBAV
 
 // -- Zstd ---------------------------------------------------------------

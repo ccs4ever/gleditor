@@ -151,6 +151,22 @@ public:
   }
 
   /**
+   * @brief Byte ranges into text() that must not be split across a page
+   *        boundary -- see gleditor::text::LayoutOptions::atomicRanges,
+   *        which this feeds after Doc translates offsets into a given
+   *        page's own slice-relative coordinates the same way it already
+   *        does for decoratedRanges().
+   *
+   * Empty by default, for the same reason forcedBreaks() and
+   * decoratedRanges() are: plain text has no content that must stay whole
+   * across a page break. xudu's source overrides this to name each embedded
+   * media placeholder's reserved run of blank lines.
+   */
+  [[nodiscard]] virtual std::vector<AtomicRange> atomicRanges() const {
+    return {};
+  }
+
+  /**
    * @brief text(), split into typed pieces a caller that cares about media
    *        can insert individually instead of as one plain-text block.
    *

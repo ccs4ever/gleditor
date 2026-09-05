@@ -167,6 +167,16 @@ public:
   /// falls back to, so the two agree until a real frame arrives.
   static constexpr float defaultAspect = MediaPlayer::defaultAspect;
 
+  /// Vertical gap bottomLeftOf() leaves between a document-embedded
+  /// widget's anchor line and its own top edge -- exposed for the same
+  /// reason chromeHeightPx is: a caller reserving room for this widget in a
+  /// document's text flow before it exists (apps/xudu/session.cpp's
+  /// placeholderFor()) must reserve this on top of the widget's own height,
+  /// or the widget draws into space nothing set aside for it, overlapping
+  /// whatever follows or, for one tall enough to nearly fill the remaining
+  /// page height, overflowing the page's own bottom edge.
+  static constexpr float anchorGapPx = 20.0F;
+
 private:
   /// This widget's bottom-left corner in its own page's pixel space, and
   /// which page -- the one formula drawFrame() (to build a world transform)

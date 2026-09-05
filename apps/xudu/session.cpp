@@ -20,6 +20,7 @@
 #include <glm/ext/matrix_clip_space.hpp>
 #include <glm/ext/matrix_transform.hpp>
 
+#include <gleditor/decode_index.hpp>
 #include <gleditor/doc.hpp>
 #include <gleditor/media_widget.hpp>
 #include <gleditor/render/types.hpp>
@@ -755,11 +756,6 @@ void Session::refresh(const std::uint32_t docIndex,
 
 namespace {
 
-/// Audio has no aspect ratio to size a placeholder from -- it is a fixed
-/// player card regardless of content -- so its reservation stays the fixed
-/// line count this used to be for every kind of media.
-constexpr std::uint32_t kAudioPlaceholderLines = 10;
-
 /// Line pitch of @p fontName, or a plausible guess if it fails to resolve --
 /// a placeholder's whole job is reserving *some* room, and a slightly wrong
 /// guess is a smaller visual glitch than a placeholder that renders nothing.
@@ -769,83 +765,166 @@ float lineHeightFor(const std::string_view fontName) {
   return (font != nullptr) ? font->metrics().lineHeight : 19.0F;
 }
 
-/// The box one image is drawn into: the page's full text width, at the
-/// image's own aspect ratio -- unless that would stand taller than a whole
-/// page, which a portrait image (aspect < 1) run through the same formula
-/// otherwise would, since textWidthPx / aspect grows without bound as aspect
-/// shrinks. Capping height to one page and deriving width from *that*
-/// instead is the same "fit inside the box" rule a landscape image already
-/// satisfies at full width -- so this changes nothing for the images Phase 4
-/// was first verified with, only for ones taller than they are wide.
+/// A box shown at its own @p naturalWidth x @p naturalHeight -- one image
+/// pixel to one layout pixel, the same convention every raster format here
+/// already uses (see design/svg-vector-primedia.md's own note that a static
+/// SVG rasterizes once at its intrinsic size for this exact reason) -- unless
+/// that would stand wider than @p maxWidth or taller than @p maxHeight, in
+/// which case it is shrunk, preserving aspect, until it fits. Never enlarged
+/// past its natural size: a 64x64 icon stays 64x64 layout pixels (tiny next
+/// to an 1188-wide page) rather than being blown up to fill the page the way
+/// stretching every image to @p maxWidth regardless of its own resolution
+/// used to.
 ///
-/// Both placeholderFor() (how much room to reserve) and ImageOverlay::place()
-/// (how big to actually draw it) must call this and agree, for the same
-/// reason they must agree on everything else here: a placeholder sized one
-/// way and a widget sized another either overlaps the text that follows or
-/// leaves a gap before it.
+/// Shared by every media kind with real pixel dimensions (images directly;
+/// video via videoFitSize(), which fits the viewport here before adding back
+/// the chrome drawn outside it) so "fit the page, preserve aspect, never
+/// upscale" is made exactly once rather than once per kind, each
+/// independently reachable to drift from the others.
 struct ImageFitSize {
   float width;
   float height;
 };
 
-ImageFitSize imageFitSize(const float aspect) {
-  float width  = Doc::textWidthPx;
-  float height = width / aspect;
-  if (height > Doc::textHeightPx) {
-    height = Doc::textHeightPx;
-    width  = height * aspect;
+ImageFitSize fitWithinBox(const float naturalWidth, const float naturalHeight,
+                          const float maxWidth, const float maxHeight) {
+  float width  = naturalWidth;
+  float height = naturalHeight;
+  if (width > maxWidth) {
+    height *= maxWidth / width;
+    width = maxWidth;
+  }
+  if (height > maxHeight) {
+    width *= maxHeight / height;
+    height = maxHeight;
   }
   return {width, height};
 }
 
-/// Vertical gap ImageOverlay::bottomLeftOf() leaves between the anchor line
-/// and the top of the image it draws. placeholderFor() must reserve this
-/// same amount, on top of imageFitSize()'s own height, or the widget draws
-/// into space nothing in the text flow set aside for it -- invisible for a
-/// small image with page to spare, but a real overflow past the page's own
-/// bottom edge for one tall enough to nearly fill the remaining page height,
-/// which is exactly what this constant being reserved nowhere used to cause.
-constexpr float kImageGapBelowAnchorPx = 20.0F;
+/// Both placeholderFor() (how much room to reserve) and ImageOverlay::place()
+/// (how big to actually draw it) must call this and agree, for the same
+/// reason they must agree on everything else here: a placeholder sized one
+/// way and a widget sized another either overlaps the text that follows or
+/// leaves a gap before it.
+ImageFitSize imageFitSize(const float naturalWidth, const float naturalHeight) {
+  return fitWithinBox(naturalWidth, naturalHeight, Doc::textWidthPx,
+                      Doc::textHeightPx);
+}
 
-/// How many blank lines to reserve for one media span, sized so the widget
-/// eventually placed there -- an image fit within the page (see
-/// imageFitSize()), a video card at the page's full text width plus its
-/// chrome -- fits without overlapping the text that follows or leaving a gap
-/// before it.
-///
-/// Must be the only place this decision is made: sourceFor() spends this
-/// many newline bytes and mediaSpansFor() advances docOffset by the same
-/// amount, and the two disagreeing would misalign every anchor into media
-/// that follows a shorter span.
-std::string placeholderFor(const std::span<const std::uint8_t> bytes,
-                           const std::string_view mime,
-                           const std::string_view fontName) {
-  const float lineHeight = lineHeightFor(fontName);
+/// A modest stand-in natural size for a video whose real one could not be
+/// read -- an unsupported container, or a build without libav
+/// (GLEDITOR_HAVE_DECODE_INDEX_LIBAV) -- at MediaWidget::defaultAspect, the
+/// same fallback MediaPlayer::aspectRatio() itself uses. Not the page's full
+/// text width: with no real dimensions to go on, guessing a modest video
+/// resolution is closer to what most video actually is than assuming it
+/// wants to fill the entire page.
+constexpr float kFallbackVideoNaturalWidthPx = 480.0F;
 
-  float reservedHeightPx = 0.0F;
+/// The real pixel dimensions of a video file's own bytes, from its
+/// container's stream metadata (gleditor::peekVideoSize() -- no frame
+/// decode, so this is cheap enough to call from both placeholderFor() and
+/// mediaSpansFor() without either caching or sharing the result between
+/// them) -- or the fallback above, when the container is not one FFmpeg
+/// recognises or carries no video stream this build was compiled to read.
+std::pair<float, float>
+videoNaturalSizeFor(const std::span<const std::uint8_t> bytes) {
+  const auto size = gleditor::peekVideoSize(bytes);
+  if (size && size->first > 0 && size->second > 0) {
+    return {static_cast<float>(size->first), static_cast<float>(size->second)};
+  }
+  return {kFallbackVideoNaturalWidthPx,
+          kFallbackVideoNaturalWidthPx / gleditor::MediaWidget::defaultAspect};
+}
+
+/// The whole video card's size at @p naturalWidth x @p naturalHeight: the
+/// viewport shown at its own resolution (never enlarged, same "1 pixel = 1
+/// layout pixel" rule imageFitSize() follows) unless that would not fit the
+/// page's text width or remaining height once the chrome MediaWidget draws
+/// outside the viewport (title bar, transport, seek bar) is set aside, then
+/// chromeHeightPx added back for the card as a whole. Without reserving
+/// chromeHeightPx *before* fitting, a video whose aspect makes it want the
+/// full remaining page height would leave no room for the chrome drawn
+/// below it, pushing the card's true height past what was reserved.
+ImageFitSize videoFitSize(const float naturalWidth, const float naturalHeight) {
+  const auto viewport =
+      fitWithinBox(naturalWidth, naturalHeight, Doc::textWidthPx,
+                   Doc::textHeightPx - gleditor::MediaWidget::chromeHeightPx);
+  return {viewport.width,
+          viewport.height + gleditor::MediaWidget::chromeHeightPx};
+}
+
+/// The widget size for one media span, by MIME type: an image or SVG fit at
+/// its own resolution (imageFitSize()), a video card fit at its own
+/// resolution (videoFitSize()), or the fixed audio card size. The one place
+/// this decision is made -- placeholderFor() (how much room to reserve),
+/// mediaSpansFor() (what to construct the widget at), and ImageOverlay::
+/// place() (images only, via imageFitSize() directly since it already has a
+/// decoded ImageResource in hand and would otherwise decode the same bytes
+/// twice) all end up at the same answer because they all either call this or
+/// its own imageFitSize()/videoFitSize() halves, rather than each keeping an
+/// independent copy of "how big is this."
+ImageFitSize mediaFitFor(const std::span<const std::uint8_t> bytes,
+                         const std::string_view mime) {
   if (gleditor::MimeType{mime} == gleditor::MimeType::ImageSvg) {
-    // No rasterization needed just to size a placeholder -- SvgCache's own
-    // GPU texture and GL/SwCanvas rendering are for ImageOverlay::place()
-    // to set up once the span is actually drawn.
-    const auto size    = gleditor::SvgCache::peekSize(bytes);
-    const float aspect = size ? (size->first / size->second) : 1.0F;
-    reservedHeightPx   = imageFitSize(aspect).height + kImageGapBelowAnchorPx;
-  } else if (gleditor::MagicMimeDetector::isImageMime(mime)) {
+    // No rasterization needed just to size this -- SvgCache's own GPU
+    // texture and GL/SwCanvas rendering are for ImageOverlay::place() to
+    // set up once the span is actually drawn.
+    const auto size         = gleditor::SvgCache::peekSize(bytes);
+    const auto [natW, natH] = size.value_or(std::make_pair(1.0F, 1.0F));
+    return imageFitSize(natW, natH);
+  }
+  if (gleditor::MagicMimeDetector::isImageMime(mime)) {
     const auto decoded =
         gleditor::decodeImageBuffer(bytes, gleditor::MimeType{mime});
-    const float aspect = decoded.valid() ? decoded.aspectRatio() : 1.0F;
-    reservedHeightPx   = imageFitSize(aspect).height + kImageGapBelowAnchorPx;
-  } else if (gleditor::MagicMimeDetector::isVideoMime(mime)) {
-    reservedHeightPx =
-        (Doc::textWidthPx / gleditor::MediaWidget::defaultAspect) +
-        gleditor::MediaWidget::chromeHeightPx;
-  } else {
-    return std::string(kAudioPlaceholderLines, '\n');
+    const float natW =
+        decoded.valid() ? static_cast<float>(decoded.width) : 1.0F;
+    const float natH =
+        decoded.valid() ? static_cast<float>(decoded.height) : 1.0F;
+    return imageFitSize(natW, natH);
   }
+  if (gleditor::MagicMimeDetector::isVideoMime(mime)) {
+    const auto [natW, natH] = videoNaturalSizeFor(bytes);
+    return videoFitSize(natW, natH);
+  }
+  return {Session::audioCardWidthPx, Session::audioCardHeightPx};
+}
+
+/// What sourceFor() spends in a document's concatext to reserve room for one
+/// media span: a run of blank lines sized so the widget eventually placed
+/// there (mediaFitFor()) fits without overlapping the text that follows or
+/// leaving a gap before it, and @p minWidthPx -- the same widget's actual
+/// width -- for AtomicRange::minWidthPx, so the page it lands on widens to
+/// cover it even though a blank line has no glyphs of its own to do that.
+///
+/// Reserved height adds gleditor::MediaWidget::anchorGapPx on top of the
+/// widget's own height: both ImageOverlay::bottomLeftOf() and
+/// MediaWidget::bottomLeftOf() draw that far below the anchor line before
+/// the widget itself starts, and a reservation that omitted it would be
+/// exactly the widget's own height short of what its actual footprint
+/// needs -- invisible for a small one with page to spare, a real overflow
+/// past the page's own bottom edge for one tall enough to nearly fill the
+/// remaining page height.
+///
+/// Must be the only place this decision is made: sourceFor() spends
+/// @p placeholder's many newline bytes and mediaSpansFor() advances
+/// docOffset by the same amount, and the two disagreeing would misalign
+/// every anchor into media that follows a shorter span.
+struct ReservedMedia {
+  std::string placeholder;
+  float minWidthPx;
+};
+
+ReservedMedia placeholderFor(const std::span<const std::uint8_t> bytes,
+                             const std::string_view mime,
+                             const std::string_view fontName) {
+  const float lineHeight = lineHeightFor(fontName);
+  const auto fit         = mediaFitFor(bytes, mime);
+  const float reservedHeightPx =
+      fit.height + gleditor::MediaWidget::anchorGapPx;
 
   const auto lines = static_cast<std::uint32_t>(
       std::max(1.0F, std::ceil(reservedHeightPx / lineHeight)));
-  return std::string(lines, '\n');
+  return {std::string(lines, '\n'), fit.width};
 }
 
 /// One stretch of a piece, classified as plain text or media. See
@@ -943,6 +1022,7 @@ Session::sourceFor(const MicroversionId &version, const std::size_t storeIndex,
 
   std::string concatext;
   const auto breaks = rebuilt.forcedBreaks();
+  std::vector<gleditor::AtomicRange> atomicRanges;
 
   for (const auto &run : rebuilt.pieces()) {
     if (breakMarkerScroll == run.scroll) {
@@ -960,15 +1040,30 @@ Session::sourceFor(const MicroversionId &version, const std::size_t storeIndex,
       // fallback) from a slice of it alone.
       const auto containerBytes = st.read(PrimediaSpan{
           run.scroll, stretch.containerStart, stretch.containerLength});
-      concatext += placeholderFor(
+      const auto reserved       = placeholderFor(
           std::span<const std::uint8_t>(
               reinterpret_cast<const std::uint8_t *>(containerBytes.data()),
               containerBytes.size()),
           stretch.mime, fontName);
+      // Reserved so the whole run of blank lines below lands on one page,
+      // and the page it lands on widens to fit reserved.minWidthPx -- see
+      // TextSource::atomicRanges() -- rather than the widget eventually
+      // drawn over it splitting across a page boundary, or drawing past the
+      // page's own background quad, the text layout engine had no way to
+      // know not to.
+      const auto rangeStart = static_cast<std::uint32_t>(concatext.size());
+      atomicRanges.push_back(gleditor::AtomicRange{
+          .start      = rangeStart,
+          .end        = rangeStart +
+                        static_cast<std::uint32_t>(reserved.placeholder.size()),
+          .minWidthPx = reserved.minWidthPx,
+      });
+      concatext += reserved.placeholder;
     }
   }
 
-  return std::make_shared<VersionTextSource>(concatext, version, breaks);
+  return std::make_shared<VersionTextSource>(concatext, version, breaks,
+                                             atomicRanges);
 }
 
 std::vector<Session::MediaSpanInfo>
@@ -1013,13 +1108,17 @@ Session::mediaSpansFor(const MicroversionId &version,
 
       const auto containerBytes = st.read(PrimediaSpan{
           run.scroll, stretch.containerStart, stretch.containerLength});
-      info.reservedLength       = static_cast<std::uint32_t>(
-          placeholderFor(
-              std::span<const std::uint8_t>(
-                  reinterpret_cast<const std::uint8_t *>(containerBytes.data()),
-                  containerBytes.size()),
-              stretch.mime, fontName)
-              .size());
+      const std::span<const std::uint8_t> containerSpan(
+          reinterpret_cast<const std::uint8_t *>(containerBytes.data()),
+          containerBytes.size());
+      info.reservedLength = static_cast<std::uint32_t>(
+          placeholderFor(containerSpan, stretch.mime, fontName)
+              .placeholder.size());
+      if (info.isAudio || info.isVideo) {
+        const auto fit    = mediaFitFor(containerSpan, stretch.mime);
+        info.widgetWidth  = fit.width;
+        info.widgetHeight = fit.height;
+      }
       list.push_back(info);
       docOffset += info.reservedLength;
     }
@@ -1498,7 +1597,9 @@ void ImageOverlay::place(std::shared_ptr<Doc> doc,
   // two must agree: this is drawn at the same byte offset that placeholder's
   // blank lines start at, and a differently-sized image here would either
   // leave a gap or overlap the text that follows.
-  const auto [width, height] = imageFitSize(resource->aspectRatio());
+  const auto [width, height] =
+      imageFitSize(static_cast<float>(resource->width),
+                   static_cast<float>(resource->height));
 
   placements.push_back(
       Placement{std::move(doc), docOffset, *resource, width, height});
@@ -1519,7 +1620,7 @@ ImageOverlay::bottomLeftOf(const Placement &p) {
   // below the anchor line is *subtracting* a pixel offset, not negating and
   // re-adding one as if Y increased downward from the page's top margin.
   return Corner{anchor->pageIndex, anchor->x,
-                anchor->y - (p.height + kImageGapBelowAnchorPx)};
+                anchor->y - (p.height + gleditor::MediaWidget::anchorGapPx)};
 }
 
 void ImageOverlay::drawFrame(gleditor::FrameContext &ctx) {
