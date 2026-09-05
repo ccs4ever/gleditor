@@ -1012,24 +1012,41 @@ Session::sourceFor(const MicroversionId &version,
               containerBytes.size()),
           stretch.mime);
 
-      // Block, not Float or Inline: a figure steps the flow around it the
-      // way the many-newline placeholder always did, rather than text
-      // wrapping beside it or sharing its own line -- reaching for either of
-      // those is future work, not something this migration changes.
+      // An image narrow enough to leave a usable column beside it floats, so
+      // text wraps there instead of stepping over it; audio and video stay
+      // Block regardless of width, since their transport chrome (play/pause,
+      // seek bar, title) wants the full column to itself, not a half-width
+      // sliver squeezed beside text. kFloatWidthFraction is "at most half the
+      // page" -- narrower than that and there is nothing left worth wrapping
+      // text into.
+      const bool isImage =
+          gleditor::MagicMimeDetector::isImageMime(stretch.mime);
+      constexpr float kFloatWidthFraction = 0.5F;
+      const bool floats =
+          isImage && fit.width <= Doc::textWidthPx * kFloatWidthFraction;
+
       const auto anchorOffset = static_cast<std::uint32_t>(concatext.size());
       boxes.push_back(gleditor::LayoutBox{
           .anchor    = anchorOffset,
           .widthPx   = fit.width,
           .heightPx  = fit.height,
           .marginPx  = gleditor::MediaWidget::anchorGapPx,
-          .placement = gleditor::BoxPlacement::Block,
+          .placement = floats ? gleditor::BoxPlacement::FloatLeft
+                              : gleditor::BoxPlacement::Block,
           .id        = nextBoxId++,
       });
-      blockStyles.push_back(gleditor::BlockStyleRange{
-          .start = anchorOffset,
-          .end = anchorOffset + static_cast<std::uint32_t>(kMediaAnchor.size()),
-          .align = gleditor::TextAlign::Centre,
-      });
+      // Centre alignment only matters for a Block box -- a Float box's left
+      // edge is fixed by placeFloat() against whichever side it floats to,
+      // not by BlockStyleRange::align, so a floated figure gets no entry
+      // here at all.
+      if (!floats) {
+        blockStyles.push_back(gleditor::BlockStyleRange{
+            .start = anchorOffset,
+            .end =
+                anchorOffset + static_cast<std::uint32_t>(kMediaAnchor.size()),
+            .align = gleditor::TextAlign::Centre,
+        });
+      }
       concatext += kMediaAnchor;
     }
   }

@@ -90,4 +90,29 @@ TEST(TextSourcePageSizeTest,
   EXPECT_EQ(source.pageSize(), gleditor::letterPage);
 }
 
+// A whole-file --import of a media file (as opposed to a PDF's embedded
+// figure) has to come back tagged as a media piece too, or the byte range it
+// occupies is Store::insertMedia() never learns about it, and classifyRun()
+// (apps/xudu/session.cpp) has no segment boundary to split plain text
+// appended right after it from the media itself -- both fall into one
+// stretch, sniffed by the media's own leading bytes, which is correct for
+// the media and wrong for everything after it.
+TEST(FileTextSourceTest, aWholeImageFileIsTaggedAsAMediaPiece) {
+  const gleditor::FileTextSource source("tests/samples/sample_image.png");
+  const auto pieces = source.pieces();
+  ASSERT_EQ(pieces.size(), 1U);
+  EXPECT_TRUE(gleditor::MagicMimeDetector::isImageMime(pieces.front().mimeType))
+      << "mimeType was [" << pieces.front().mimeType << "]";
+  // text()-only callers keep their existing, text-only meaning: the raw
+  // bytes are still there, just also tagged for a caller that asks pieces().
+  EXPECT_EQ(pieces.front().bytes, source.text());
+}
+
+TEST(FileTextSourceTest, aPlainTextFileIsStillOnePlainPiece) {
+  const gleditor::FileTextSource source("tests/samples/quick_brown_fox.txt");
+  const auto pieces = source.pieces();
+  ASSERT_EQ(pieces.size(), 1U);
+  EXPECT_TRUE(pieces.front().mimeType.empty());
+}
+
 } // namespace

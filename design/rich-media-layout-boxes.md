@@ -121,3 +121,95 @@ the page, does not overlap surrounding text, and the page background covers
 it. `./tools/compare-backends.sh` shows no divergence beyond the pre-existing
 ~1.2% Vulkan/OpenGL gap this codebase already carries independent of this
 work.
+
+## Stage 4: floating small images
+
+Every media box up to this point used `BoxPlacement::Block`, even though the
+layout engine has supported `FloatLeft`/`FloatRight` since Stage 2 — xudu
+just never reached for it. This stage does: an image narrow enough to leave a
+usable column beside it now floats, so a paragraph following it wraps instead
+of stepping over it the way a full-width figure has to.
+
+`Session::sourceFor()` (`apps/xudu/session.cpp`) decides per media span:
+
+```cpp
+const bool isImage = gleditor::MagicMimeDetector::isImageMime(stretch.mime);
+constexpr float kFloatWidthFraction = 0.5F;
+const bool floats =
+    isImage && fit.width <= Doc::textWidthPx * kFloatWidthFraction;
+```
+
+Only images float; audio and video stay `Block` regardless of width, since
+their transport chrome (play/pause, seek bar, title) wants the full column to
+itself rather than a half-width sliver beside text. `kFloatWidthFraction` of
+one half is deliberately simple: narrower than half the page and there is
+still a usable column beside it; wider, and there is nothing left worth
+wrapping text into, so it keeps stepping over it as a centred `Block` box
+always has. A floated box gets no `BlockStyleRange` entry — `align` only
+means something for a `Block` box's horizontal position; a float's `left`
+comes from `placeFloat()` against whichever side it floats to.
+
+Verified with a new fixture, `tests/samples/xudu/multimedia/11_floating_image`
+(built via `--import tests/samples/sample_image.png` then `--insert-text
+0:append:...floating_image_body.txt`, its own scroll, not the shared one the
+`tools/create-sample-xanadocs.sh` generator uses): the 64x64 image floats
+flush left, the paragraph's first few lines wrap narrowed beside it, and once
+the paragraph clears the image's own height the column widens back to its
+full measure — confirmed both visually (screenshot) and against the
+library's own `TextWrapsBesideAFloat` test's invariants. `03_mixed_text_image`
+now floats its own image too (same 64x64-vs-half-page-width math applies) —
+it used to sit `Block`-centred under all the caption text; it now floats flush
+left where its anchor lands, which happens to be after all the text since
+that document's image comes last with nothing to wrap. `04_audio_doc` and
+`05_video_doc` are unaffected, confirmed via `compare-backends.sh` and direct
+screenshot comparison against their Stage 1d baselines.
+
+### A pre-existing bug this stage exposed and fixed
+
+Building the floating-image fixture surfaced a real, pre-existing defect
+unrelated to boxes or floats: `Session::sourceFor()`'s box logic first
+appeared to be dropping every byte of the appended paragraph — `concatext`
+came back as just the 3-byte U+FFFC anchor, nothing else, no matter what
+`LayoutBox`/`BoxPlacement` it was given.
+
+The actual fault was two steps upstream, in how the *store* records what is
+media. `Store::insertMedia()` is the only thing that populates
+`localSegments` (`apps/xudu/core/store.cpp`), the table `classifyRun()` needs
+to correctly re-split a piece where media coalesced with immediately-following
+plain text (see that function's own comment on why a run can straddle a
+segment boundary). `apps/xudu/main.cpp`'s `--insert-text DOC:POS:file`
+handling already sniffs a file argument's MIME type and calls `insertMedia()`
+when it is a media type — but the *first* `--import file` of a session
+(`apps/xudu/main.cpp`'s `importFiles` loop) does not sniff at all: it trusts
+`ContentPiece::mimeType` from `FileTextSource::pieces()`
+(`src/text_source.cpp`), and that function's non-PDF branch always returned
+one piece with `mimeType` empty, on the reasoning that "a plain file is
+exactly one plain-text piece." True for a text file; false for a whole image,
+audio, or video file handed to `--import` directly, which is exactly what
+every existing multimedia sample does.
+
+With no segment recorded, `classifyRun()`'s fallback — sniff the whole
+run's bytes at once, since it has no boundary to split on — is correct only
+when a run is homogeneously one type. `03_mixed_text_image`, `04_audio_doc`,
+and `05_video_doc` never exercised the failure mode because each of their
+runs *is* homogeneous (a run that is only the media file, or only text,
+never both); `scrolls.spool` for all three is empty of `localsegment` lines,
+and it never mattered. The instant a run mixes a directly-imported media
+file with plain text immediately after it — a document not preceded by a
+page break, i.e. anything a floating figure with body text below it would
+naturally look like — the whole-buffer sniff sees the image's own leading
+signature (PNG's magic bytes, in this case) and misclassifies the entire
+run, image and paragraph both, as one media stretch. The paragraph never
+reaches `concatext` at all; it is silently swallowed into a single 3-byte
+anchor.
+
+Fixed at the source: `FileTextSource::ensureLoaded()`'s non-PDF branch now
+sniffs the whole file's own bytes with the same `MagicMimeDetector` used
+everywhere else in this codebase, and tags the piece's `mimeType` when it
+identifies as a media type — mirroring what a PDF's embedded figure
+sub-piece, and `--insert-text`'s own file argument, already did. This routes
+a whole-file `--import` of media through `Store::insertMedia()` (recording
+the segment `classifyRun()` needs) exactly like every other media ingestion
+path in the codebase, rather than being the one path that skipped it. No
+caller of `pieces()` changes: a plain text file still gets `mimeType` empty
+and one plain piece, exactly as before.

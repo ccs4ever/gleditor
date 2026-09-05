@@ -470,7 +470,21 @@ void FileTextSource::ensureLoaded() const {
   } else {
     content = stripByteOrderMark(raw);
     breaks.clear();
-    piecesCache = {ContentPiece{content, {}, false}};
+    // A whole file that is itself media (an image, audio, or video import,
+    // as opposed to a PDF's embedded figure, tagged above) gets the same
+    // MIME tag here so it reaches Store::insertMedia() rather than
+    // Store::insert() -- the same test --insert-text's own file argument
+    // already applies (apps/xudu/main.cpp). Without it, a whole-file media
+    // import registers no local segment, and plain text appended right
+    // after it in the same scroll (which coalesces into one piece with no
+    // break between them) has no segment boundary to be classified against
+    // -- only the media file's own leading bytes to sniff, which is wrong
+    // for anything past them.
+    const MagicMimeDetector magic;
+    const auto mime = magic.identifyBuffer(content.data(), content.size());
+    piecesCache     = {ContentPiece{
+        content, MagicMimeDetector::isMediaMime(mime) ? mime : std::string{},
+        false}};
   }
   loaded = true;
 }
