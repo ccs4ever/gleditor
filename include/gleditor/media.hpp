@@ -146,6 +146,9 @@ public:
   void setMuted(bool mute);
   [[nodiscard]] bool isMuted() const;
 
+  void setPlaybackRate(float rate);
+  [[nodiscard]] float playbackRate() const;
+
   [[nodiscard]] PlaybackState state() const;
   [[nodiscard]] float positionSeconds() const;
   [[nodiscard]] float durationSeconds() const;

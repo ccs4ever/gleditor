@@ -16,9 +16,11 @@
 #include <mutex>
 #include <string>
 #include <utility>
-#include <vector>
-
 #include <vlc/vlc.h>
+
+#include <gleditor/decode_index.hpp>
+#include <gleditor/gif_decoder.hpp>
+#include <gleditor/svg_animator.hpp>
 
 namespace gleditor {
 
@@ -117,10 +119,21 @@ MediaResource::subspan(const std::uint64_t offset,
 // -- MediaPlayer::Impl --------------------------------------------------------
 
 struct MediaPlayer::Impl {
+  enum class Backend : std::uint8_t { LibVlc, Gif, Thorvg, Dummy };
+  Backend backend{Backend::Dummy};
+  float currentPlaybackRate{1.0F};
+
   libvlc_instance_t *vlcInstance{nullptr};
   libvlc_media_player_t *mediaPlayer{nullptr};
   libvlc_media_t *vlcMedia{nullptr};
   std::unique_ptr<VlcStreamState> streamState;
+
+  // Animation backends (GIF via giflib, SVG via ThorVG)
+  std::unique_ptr<GifDecoder> gifDecoder;
+  std::unique_ptr<SvgAnimator> svgAnimator;
+  float animPosition{0.0F};
+  float animDuration{0.0F};
+  PlaybackState animState{PlaybackState::Stopped};
 
   MediaResourcePtr currentResource;
   std::optional<TimeRange> timeRange;
@@ -175,6 +188,37 @@ struct MediaPlayer::Impl {
       vlcMedia = nullptr;
     }
     streamState.reset();
+    gifDecoder.reset();
+    svgAnimator.reset();
+    backend = Backend::Dummy;
+  }
+
+  void updateAnimFrame() {
+    if (backend == Backend::Gif && gifDecoder) {
+      const auto &f = gifDecoder->frameAt(animPosition);
+      std::lock_guard<std::mutex> lock(videoMutex);
+      videoBuffer      = f.rgba;
+      auto newFrame    = std::make_shared<VideoFrame>();
+      newFrame->width  = frameWidth;
+      newFrame->height = frameHeight;
+      newFrame->rgba   = videoBuffer;
+      newFrame->timestampMs =
+          static_cast<std::uint64_t>(animPosition * 1000.0F);
+      frame          = newFrame;
+      frameAvailable = true;
+    } else if (backend == Backend::Thorvg && svgAnimator) {
+      std::lock_guard<std::mutex> lock(videoMutex);
+      if (svgAnimator->renderFrame(animPosition, videoBuffer)) {
+        auto newFrame    = std::make_shared<VideoFrame>();
+        newFrame->width  = frameWidth;
+        newFrame->height = frameHeight;
+        newFrame->rgba   = videoBuffer;
+        newFrame->timestampMs =
+            static_cast<std::uint64_t>(animPosition * 1000.0F);
+        frame          = newFrame;
+        frameAvailable = true;
+      }
+    }
   }
 
   static void *videoLock(void *opaque, void **planes) {
@@ -229,7 +273,49 @@ struct MediaPlayer::Impl {
       return false;
     }
 
+    if (res->stream() && res->stream()->size() > 0) {
+      const auto sz = static_cast<std::size_t>(
+          std::min<std::uint64_t>(res->stream()->size(), 64ULL * 1024 * 1024));
+      auto rawBytes = res->stream()->readBytes(0, sz);
+      const std::span<const std::uint8_t> span(
+          reinterpret_cast<const std::uint8_t *>(rawBytes.data()),
+          rawBytes.size());
+
+#ifdef GLEDITOR_HAVE_DECODE_INDEX_GIF
+      if (isAnimatedGif(span)) {
+        gifDecoder = GifDecoder::decode(span);
+        if (gifDecoder) {
+          backend      = Backend::Gif;
+          frameWidth   = gifDecoder->width();
+          frameHeight  = gifDecoder->height();
+          animPosition = 0.0F;
+          animDuration = gifDecoder->duration();
+          animState    = PlaybackState::Stopped;
+          updateAnimFrame();
+          return true;
+        }
+      }
+#endif
+
+#ifdef GLEDITOR_HAVE_SVG_THORVG
+      if (SvgAnimator::isAnimated(span)) {
+        svgAnimator = SvgAnimator::load(span);
+        if (svgAnimator) {
+          backend      = Backend::Thorvg;
+          frameWidth   = svgAnimator->width();
+          frameHeight  = svgAnimator->height();
+          animPosition = 0.0F;
+          animDuration = svgAnimator->duration();
+          animState    = PlaybackState::Stopped;
+          updateAnimFrame();
+          return true;
+        }
+      }
+#endif
+    }
+
     if (dummyMode || nullptr == vlcInstance) {
+      backend           = Backend::Dummy;
       simulatedPosition = 0.0F;
       simulatedState    = PlaybackState::Stopped;
       if (res->stream()) {
@@ -266,6 +352,7 @@ struct MediaPlayer::Impl {
       return false;
     }
 
+    backend = Backend::LibVlc;
     libvlc_video_set_callbacks(mediaPlayer, videoLock, videoUnlock,
                                videoDisplay, this);
     libvlc_video_set_format_callbacks(mediaPlayer, videoFormatSetup,
@@ -273,10 +360,23 @@ struct MediaPlayer::Impl {
 
     libvlc_audio_set_volume(mediaPlayer, volumeLevel);
     libvlc_audio_set_mute(mediaPlayer, muted ? 1 : 0);
+    if (currentPlaybackRate != 1.0F) {
+      libvlc_media_player_set_rate(mediaPlayer, currentPlaybackRate);
+    }
     return true;
   }
 
   bool play() {
+    if (backend == Backend::Gif || backend == Backend::Thorvg) {
+      if (timeRange && (animPosition < timeRange->startSeconds ||
+                        animPosition >= timeRange->endSeconds)) {
+        animPosition = timeRange->startSeconds;
+      }
+      animState = PlaybackState::Playing;
+      updateAnimFrame();
+      return true;
+    }
+
     if (dummyMode || nullptr == mediaPlayer) {
       if (timeRange && (simulatedPosition < timeRange->startSeconds ||
                         simulatedPosition >= timeRange->endSeconds)) {
@@ -296,6 +396,13 @@ struct MediaPlayer::Impl {
   }
 
   void pause() {
+    if (backend == Backend::Gif || backend == Backend::Thorvg) {
+      if (animState == PlaybackState::Playing) {
+        animState = PlaybackState::Paused;
+      }
+      return;
+    }
+
     if (dummyMode || nullptr == mediaPlayer) {
       if (simulatedState == PlaybackState::Playing) {
         simulatedState = PlaybackState::Paused;
@@ -306,6 +413,13 @@ struct MediaPlayer::Impl {
   }
 
   void stop() {
+    if (backend == Backend::Gif || backend == Backend::Thorvg) {
+      animState    = PlaybackState::Stopped;
+      animPosition = timeRange ? timeRange->startSeconds : 0.0F;
+      updateAnimFrame();
+      return;
+    }
+
     if (dummyMode || nullptr == mediaPlayer) {
       simulatedState    = PlaybackState::Stopped;
       simulatedPosition = timeRange ? timeRange->startSeconds : 0.0F;
@@ -321,6 +435,12 @@ struct MediaPlayer::Impl {
     float target = seconds;
     if (timeRange) {
       target = timeRange->clamp(target);
+    }
+
+    if (backend == Backend::Gif || backend == Backend::Thorvg) {
+      animPosition = std::clamp(target, 0.0F, animDuration);
+      updateAnimFrame();
+      return;
     }
 
     if (dummyMode || nullptr == mediaPlayer) {
@@ -344,6 +464,15 @@ struct MediaPlayer::Impl {
       }
     }
   }
+
+  void setPlaybackRate(const float rate) {
+    currentPlaybackRate = std::clamp(rate, 0.1F, 8.0F);
+    if (backend == Backend::LibVlc && mediaPlayer != nullptr) {
+      libvlc_media_player_set_rate(mediaPlayer, currentPlaybackRate);
+    }
+  }
+
+  [[nodiscard]] float playbackRate() const { return currentPlaybackRate; }
 
   void setVolume(const int percent) {
     volumeLevel = std::clamp(percent, 0, 100);
@@ -374,6 +503,10 @@ struct MediaPlayer::Impl {
   }
 
   [[nodiscard]] PlaybackState state() const {
+    if (backend == Backend::Gif || backend == Backend::Thorvg) {
+      return animState;
+    }
+
     if (dummyMode || nullptr == mediaPlayer) {
       return simulatedState;
     }
@@ -399,6 +532,10 @@ struct MediaPlayer::Impl {
   }
 
   [[nodiscard]] float positionSeconds() const {
+    if (backend == Backend::Gif || backend == Backend::Thorvg) {
+      return animPosition;
+    }
+
     if (dummyMode || nullptr == mediaPlayer) {
       return simulatedPosition;
     }
@@ -407,6 +544,10 @@ struct MediaPlayer::Impl {
   }
 
   [[nodiscard]] float durationSeconds() const {
+    if (backend == Backend::Gif || backend == Backend::Thorvg) {
+      return animDuration;
+    }
+
     if (dummyMode || nullptr == mediaPlayer) {
       return simulatedDuration;
     }
@@ -428,8 +569,26 @@ struct MediaPlayer::Impl {
   }
 
   void update(const float dtSeconds) {
+    if (backend == Backend::Gif || backend == Backend::Thorvg) {
+      if (animState == PlaybackState::Playing) {
+        animPosition += dtSeconds * currentPlaybackRate;
+        const auto minLimit = timeRange ? timeRange->startSeconds : 0.0F;
+        const auto maxLimit = timeRange ? timeRange->endSeconds : animDuration;
+        if (animPosition >= maxLimit) {
+          if (looping) {
+            animPosition = minLimit;
+          } else {
+            animPosition = maxLimit;
+            animState    = PlaybackState::Ended;
+          }
+        }
+        updateAnimFrame();
+      }
+      return;
+    }
+
     if (dummyMode && simulatedState == PlaybackState::Playing) {
-      simulatedPosition += dtSeconds;
+      simulatedPosition += dtSeconds * currentPlaybackRate;
       const auto maxLimit =
           timeRange ? timeRange->endSeconds : simulatedDuration;
       if (simulatedPosition >= maxLimit) {
@@ -494,6 +653,11 @@ int MediaPlayer::volume() const { return impl->volume(); }
 void MediaPlayer::setMuted(const bool mute) { impl->setMuted(mute); }
 bool MediaPlayer::isMuted() const { return impl->isMuted(); }
 
+void MediaPlayer::setPlaybackRate(const float rate) {
+  impl->setPlaybackRate(rate);
+}
+float MediaPlayer::playbackRate() const { return impl->playbackRate(); }
+
 PlaybackState MediaPlayer::state() const { return impl->state(); }
 float MediaPlayer::positionSeconds() const { return impl->positionSeconds(); }
 float MediaPlayer::durationSeconds() const { return impl->durationSeconds(); }
@@ -535,6 +699,10 @@ void MediaPlayer::setLooping(const bool loop) { impl->looping = loop; }
 bool MediaPlayer::isLooping() const { return impl->looping; }
 
 bool MediaPlayer::hasVideo() const {
+  if (impl->backend == Impl::Backend::Gif ||
+      impl->backend == Impl::Backend::Thorvg) {
+    return impl->frameWidth > 0 && impl->frameHeight > 0;
+  }
   if (impl->dummyMode) {
     return false;
   }
