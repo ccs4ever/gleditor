@@ -1358,7 +1358,9 @@ int main(const int argc, char **argv) {
            parser.get<std::vector<std::string>>("--import-break")) {
         if (!f.empty()) {
           const gleditor::FileTextSource source(f);
-          const auto curVer = session->store(0).latest();
+          const auto curVer = !session->views().empty()
+                                  ? session->views()[0].version
+                                  : session->store(0).latest();
           const auto len    = session->store(0).rebuild(curVer).length();
           auto nextVer      = session->store(0).insertBreak(
               curVer, static_cast<std::uint32_t>(len));
@@ -1369,7 +1371,13 @@ int main(const int argc, char **argv) {
                 nextVer, static_cast<std::uint32_t>(len + brk));
           }
           session->save(0);
-          session->viewOpened(nextVer, 0);
+          if (!session->views().empty()) {
+            session->views()[0].version = nextVer;
+            session->views()[0].pieces  = session->store(0).rebuild(nextVer);
+          } else {
+            session->viewOpened(nextVer, 0);
+          }
+          opening = nextVer;
         }
       }
     }
@@ -1755,11 +1763,20 @@ int main(const int argc, char **argv) {
             std::stoull(spec.substr(first + 1, second - first - 1));
         const auto length = std::stoull(spec.substr(second + 1));
 
-        const auto at = static_cast<std::uint32_t>(
-            session->store(0).rebuild(session->store(0).latest()).length());
-        const auto produced =
-            session->quoteTorrent(session->store(0).latest(), at,
-                                  available.back(), fileIndex, offset, length);
+        const auto curVer = !session->views().empty()
+                                ? session->views()[0].version
+                                : session->store(0).latest();
+        const auto at     = static_cast<std::uint32_t>(
+            session->store(0).rebuild(curVer).length());
+        const auto produced = session->quoteTorrent(
+            curVer, at, available.back(), fileIndex, offset, length);
+        if (!session->views().empty()) {
+          session->views()[0].version = produced;
+          session->views()[0].pieces  = session->store(0).rebuild(produced);
+        } else {
+          session->viewOpened(produced, 0);
+        }
+        opening = produced;
         quiet || std::cout << "xudu: " << produced.str() << " quotes "
                            << available.back().hex() << " file " << fileIndex
                            << " [" << offset << "," << offset + length << ")\n";
