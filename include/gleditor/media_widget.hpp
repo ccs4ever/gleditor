@@ -10,6 +10,7 @@
 #ifndef GLEDITOR_MEDIA_WIDGET_H
 #define GLEDITOR_MEDIA_WIDGET_H
 
+#include <chrono>
 #include <cstdint>
 #include <functional>
 #include <memory>
@@ -22,6 +23,7 @@
 
 #include <gleditor/a11y/tree.hpp>
 #include <gleditor/canvas.hpp>
+#include <gleditor/clickable_registry.hpp>
 #include <gleditor/doc.hpp>
 #include <gleditor/frame_contributor.hpp>
 #include <gleditor/media.hpp>
@@ -53,6 +55,9 @@ public:
   // -- Media Player & Resource ------------------------------------------------
   void setPlayer(std::shared_ptr<MediaPlayer> aPlayer);
   [[nodiscard]] std::shared_ptr<MediaPlayer> player() const { return player_; }
+
+  void setPlaybackRate(float rate);
+  [[nodiscard]] float playbackRate() const;
 
   bool load(MediaResourcePtr resource);
 
@@ -146,6 +151,7 @@ public:
   static constexpr std::uint32_t tagPause    = 2U;
   static constexpr std::uint32_t tagStop     = 3U;
   static constexpr std::uint32_t tagVolume   = 4U;
+  static constexpr std::uint32_t tagSpeed    = 5U;
   static constexpr std::uint32_t tagSeekBase = 100U;
   static constexpr std::uint32_t tagSeekMax  = 1100U;
 
@@ -207,10 +213,12 @@ private:
   /// one way and forget the flag the other. See awaitingPlaybackStart_'s own
   /// comment for why the flag exists at all.
   void startPlayback();
+  void initClickables();
 
   std::string fontName_;
   std::shared_ptr<MediaPlayer> player_;
   std::unique_ptr<Canvas> canvas_;
+  ClickableRegistry clickables_;
 
   /// Set by loadFragment() when its fragment is a real sub-range of the
   /// container, cleared once applyPendingFragment() has translated it into a
@@ -232,6 +240,7 @@ private:
   /// and capture before the video had genuinely started, which is what this
   /// flag closes.
   bool awaitingPlaybackStart_{false};
+  std::chrono::steady_clock::time_point lastDrawTime_{};
 
   /// Set in deviceReady(), which is also where canvas_ is built; kept so the
   /// video texture can be (re)created and updated later, in drawFrame(),

@@ -65,6 +65,7 @@ MediaWidget::MediaWidget(std::string aFontName,
   if (nullptr == player_) {
     player_ = std::make_shared<MediaPlayer>();
   }
+  initClickables();
 }
 
 MediaWidget::~MediaWidget() {
@@ -73,8 +74,93 @@ MediaWidget::~MediaWidget() {
   }
 }
 
+void MediaWidget::initClickables() {
+  clickables_.clear();
+  clickables_.registerControl("play", tagPlay, "▶", "Play",
+                              [this] { startPlayback(); });
+  clickables_.registerControl("pause", tagPause, "⏸", "Pause", [this] {
+    if (player_) {
+      player_->pause();
+    }
+  });
+  clickables_.registerControl("stop", tagStop, "⏹", "Stop", [this] {
+    if (player_) {
+      player_->stop();
+    }
+  });
+  clickables_.registerControl(
+      "volume", tagVolume,
+      [this] { return (player_ && player_->isMuted()) ? "🔈" : "🔊"; },
+      [this] { return (player_ && player_->isMuted()) ? "Unmute" : "Mute"; },
+      [this] {
+        if (player_) {
+          player_->setMuted(!player_->isMuted());
+        }
+      });
+  clickables_.registerControl(
+      "speed", tagSpeed,
+      [this]() -> std::string {
+        const float rate = playbackRate();
+        if (std::abs(rate - 0.25F) < 0.05F) {
+          return "0.25×";
+        }
+        if (std::abs(rate - 0.5F) < 0.05F) {
+          return "0.5×";
+        }
+        if (std::abs(rate - 1.0F) < 0.05F) {
+          return "1.0×";
+        }
+        if (std::abs(rate - 1.5F) < 0.05F) {
+          return "1.5×";
+        }
+        if (std::abs(rate - 2.0F) < 0.05F) {
+          return "2.0×";
+        }
+        std::ostringstream ss;
+        ss << std::fixed << std::setprecision(1) << rate << "×";
+        return ss.str();
+      },
+      [this] {
+        std::ostringstream ss;
+        ss << "Speed " << std::fixed << std::setprecision(1) << playbackRate()
+           << "x";
+        return ss.str();
+      },
+      [this] {
+        const float cur = playbackRate();
+        float nextRate  = 1.0F;
+        if (cur < 0.4F) {
+          nextRate = 0.5F;
+        } else if (cur < 0.9F) {
+          nextRate = 1.0F;
+        } else if (cur < 1.4F) {
+          nextRate = 1.5F;
+        } else if (cur < 1.9F) {
+          nextRate = 2.0F;
+        } else if (cur < 2.5F) {
+          nextRate = 0.25F;
+        } else {
+          nextRate = 1.0F;
+        }
+        setPlaybackRate(nextRate);
+      },
+      a11y::Role::Button, 42.0F);
+}
+
+void MediaWidget::setPlaybackRate(const float rate) {
+  if (player_) {
+    player_->setPlaybackRate(rate);
+  }
+  revision_++;
+}
+
+float MediaWidget::playbackRate() const {
+  return player_ ? player_->playbackRate() : 1.0F;
+}
+
 void MediaWidget::setPlayer(std::shared_ptr<MediaPlayer> aPlayer) {
   player_ = std::move(aPlayer);
+  initClickables();
   revision_++;
 }
 
@@ -99,6 +185,7 @@ bool MediaWidget::loadFragment(MediaResourcePtr resource,
   if (containerLength > 0 && fragment.length < containerLength) {
     pendingFragment_        = fragment;
     pendingContainerLength_ = containerLength;
+    applyPendingFragment();
   }
   return true;
 }
@@ -303,6 +390,15 @@ void MediaWidget::drawFrame(FrameContext &ctx) {
   }
   applyPendingFragment();
 
+  const auto now = std::chrono::steady_clock::now();
+  if (lastDrawTime_.time_since_epoch().count() > 0) {
+    const float dt = std::chrono::duration<float>(now - lastDrawTime_).count();
+    if (dt > 0.0F && dt < 1.0F) {
+      player_->update(dt);
+    }
+  }
+  lastDrawTime_ = now;
+
   glm::mat4 transform{1.0F};
 
   if (screenSpace_) {
@@ -458,51 +554,29 @@ void MediaWidget::drawFrame(FrameContext &ctx) {
     }
   }
 
-  // 4. Interactive Control Buttons: Play, Pause, Stop, Volume
+  // 4. Interactive Control Buttons: Play, Pause, Stop, Volume (and registered
+  // controls)
   const float btnY = 12.0F;
   const float btnH = 26.0F;
-  const float btnW = 32.0F;
   float btnX       = 12.0F;
 
-  // Play button [▶]
-  canvas_->setTag(render::tagKindOverlay, tagBase_ + tagPlay);
-  canvas_->addRect(btnX, btnY, btnW, btnH, buttonBg);
-  canvas_->addLine(btnX, btnY, btnX + btnW, btnY, 1.0F, buttonBorder);
-  canvas_->addLine(btnX, btnY + btnH, btnX + btnW, btnY + btnH, 1.0F,
-                   buttonBorder);
-  canvas_->addText(ctx.state, btnX + 11.0F, btnY + btnH - 6.0F, "▶", buttonText,
-                   buttonBg);
-  btnX += btnW + 6.0F;
-
-  // Pause button [⏸]
-  canvas_->setTag(render::tagKindOverlay, tagBase_ + tagPause);
-  canvas_->addRect(btnX, btnY, btnW, btnH, buttonBg);
-  canvas_->addLine(btnX, btnY, btnX + btnW, btnY, 1.0F, buttonBorder);
-  canvas_->addLine(btnX, btnY + btnH, btnX + btnW, btnY + btnH, 1.0F,
-                   buttonBorder);
-  canvas_->addText(ctx.state, btnX + 10.0F, btnY + btnH - 6.0F, "⏸", buttonText,
-                   buttonBg);
-  btnX += btnW + 6.0F;
-
-  // Stop button [⏹]
-  canvas_->setTag(render::tagKindOverlay, tagBase_ + tagStop);
-  canvas_->addRect(btnX, btnY, btnW, btnH, buttonBg);
-  canvas_->addLine(btnX, btnY, btnX + btnW, btnY, 1.0F, buttonBorder);
-  canvas_->addLine(btnX, btnY + btnH, btnX + btnW, btnY + btnH, 1.0F,
-                   buttonBorder);
-  canvas_->addText(ctx.state, btnX + 10.0F, btnY + btnH - 6.0F, "⏹", buttonText,
-                   buttonBg);
-  btnX += btnW + 6.0F;
-
-  // Volume button [🔊 / 🔈]
-  canvas_->setTag(render::tagKindOverlay, tagBase_ + tagVolume);
-  canvas_->addRect(btnX, btnY, btnW, btnH, buttonBg);
-  canvas_->addLine(btnX, btnY, btnX + btnW, btnY, 1.0F, buttonBorder);
-  canvas_->addLine(btnX, btnY + btnH, btnX + btnW, btnY + btnH, 1.0F,
-                   buttonBorder);
-  canvas_->addText(ctx.state, btnX + 7.0F, btnY + btnH - 6.0F,
-                   player_->isMuted() ? "🔈" : "🔊", buttonText, buttonBg);
-  btnX += btnW + 12.0F;
+  for (const auto &ctrl : clickables_.controls()) {
+    const float btnW = ctrl.width;
+    canvas_->setTag(render::tagKindOverlay, tagBase_ + ctrl.tagOffset);
+    canvas_->addRect(btnX, btnY, btnW, btnH, buttonBg);
+    canvas_->addLine(btnX, btnY, btnX + btnW, btnY, 1.0F, buttonBorder);
+    canvas_->addLine(btnX, btnY + btnH, btnX + btnW, btnY + btnH, 1.0F,
+                     buttonBorder);
+    const std::string label = ctrl.getLabel ? ctrl.getLabel() : ctrl.id;
+    const float textOffset =
+        (ctrl.tagOffset == tagVolume || ctrl.tagOffset == tagPlay)
+            ? 7.0F
+            : (ctrl.tagOffset == tagSpeed ? 4.0F : 10.0F);
+    canvas_->addText(ctx.state, btnX + textOffset, btnY + btnH - 6.0F, label,
+                     buttonText, buttonBg);
+    btnX += btnW + 6.0F;
+  }
+  btnX += 6.0F;
 
   // 5. Progress & Seek Bar
   const float barLeft   = btnX;
@@ -551,23 +625,7 @@ bool MediaWidget::picked(const render::PickingResult &pick,
 
   const auto offset = tag - tagBase_;
 
-  if (offset == tagPlay) {
-    startPlayback();
-    revision_++;
-    return true;
-  }
-  if (offset == tagPause) {
-    player_->pause();
-    revision_++;
-    return true;
-  }
-  if (offset == tagStop) {
-    player_->stop();
-    revision_++;
-    return true;
-  }
-  if (offset == tagVolume) {
-    player_->setMuted(!player_->isMuted());
+  if (clickables_.dispatch(offset)) {
     revision_++;
     return true;
   }
@@ -591,33 +649,13 @@ void MediaWidget::describe(a11y::Builder &into) {
   auto &mediaNode   = into.add(rootId, a11y::Role::Group);
   mediaNode.label   = title_.empty() ? "Media Player" : title_;
 
-  // Play Button
-  const auto playId = rootId + tagPlay;
-  auto &playNode    = into.add(playId, a11y::Role::Button);
-  playNode.label    = "Play";
-  playNode.actions  = a11y::bit(a11y::Action::Click);
-  mediaNode.children.push_back(into.id(playId));
-
-  // Pause Button
-  const auto pauseId = rootId + tagPause;
-  auto &pauseNode    = into.add(pauseId, a11y::Role::Button);
-  pauseNode.label    = "Pause";
-  pauseNode.actions  = a11y::bit(a11y::Action::Click);
-  mediaNode.children.push_back(into.id(pauseId));
-
-  // Stop Button
-  const auto stopId = rootId + tagStop;
-  auto &stopNode    = into.add(stopId, a11y::Role::Button);
-  stopNode.label    = "Stop";
-  stopNode.actions  = a11y::bit(a11y::Action::Click);
-  mediaNode.children.push_back(into.id(stopId));
-
-  // Volume Button
-  const auto volId = rootId + tagVolume;
-  auto &volNode    = into.add(volId, a11y::Role::Button);
-  volNode.label    = player_->isMuted() ? "Unmute" : "Mute";
-  volNode.actions  = a11y::bit(a11y::Action::Click);
-  mediaNode.children.push_back(into.id(volId));
+  for (const auto &ctrl : clickables_.controls()) {
+    const auto ctrlId = rootId + ctrl.tagOffset;
+    auto &ctrlNode    = into.add(ctrlId, ctrl.role);
+    ctrlNode.label    = ctrl.getA11yLabel ? ctrl.getA11yLabel() : ctrl.id;
+    ctrlNode.actions  = a11y::bit(a11y::Action::Click);
+    mediaNode.children.push_back(into.id(ctrlId));
+  }
 
   // Seek / Position Info
   const auto seekId = rootId + tagSeekBase;
@@ -638,25 +676,12 @@ bool MediaWidget::performAction(const std::uint64_t nodeId,
     return false;
   }
   const auto rootId = static_cast<std::uint64_t>(tagBase_);
-  if (nodeId == rootId + tagPlay) {
-    startPlayback();
-    revision_++;
-    return true;
-  }
-  if (nodeId == rootId + tagPause) {
-    player_->pause();
-    revision_++;
-    return true;
-  }
-  if (nodeId == rootId + tagStop) {
-    player_->stop();
-    revision_++;
-    return true;
-  }
-  if (nodeId == rootId + tagVolume) {
-    player_->setMuted(!player_->isMuted());
-    revision_++;
-    return true;
+  if (nodeId >= rootId) {
+    const auto offset = static_cast<std::uint32_t>(nodeId - rootId);
+    if (clickables_.dispatch(offset)) {
+      revision_++;
+      return true;
+    }
   }
   return false;
 }
