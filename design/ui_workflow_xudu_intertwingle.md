@@ -620,10 +620,36 @@ sequential stages:
 
 | Stage | Feature Area | Key Classes & Source Files | Milestone Deliverable |
 | :--- | :--- | :--- | :--- |
-| **Stage 1** | **Spatial Genesis & Local Open** | `apps/xudu/session.cpp`, `apps/xudu/main.cpp` | Floating `+ New Xanadoc` HUD chip, `Ctrl+N` handler, and spatial local document open palette (`Ctrl+O`). |
+| **Stage 1** | **Spatial Genesis & Local Open** | `apps/xudu/session.cpp`, `apps/xudu/main.cpp` | Floating `+ New Xanadoc` HUD chip, `Ctrl+N` handler, and spatial local document open palette (`Ctrl+O`). Seed `system://keymap`, `system://settings`, `system://layout`. |
 | **Stage 2** | **3D Radial Marking Menu** | `include/gleditor/radial_menu.hpp`, `src/radial_menu.cpp` | 8-way directional radial menu registered with `ClickableRegistry` under `tagKindOverlay`, applying `LinkType::Format` and `TextAlign`. |
 | **Stage 3** | **Interactive Hypertime DAG & Diff Visualizer** | `apps/xudu/hypertime_graph.hpp/.cpp`, `apps/xudu/store.cpp` | Replacing 1D `HypertimeMap` with 2D branching DAG, side-by-side comparative diffs, and keystroke scrub slider. |
-| **Stage 4** | **Pouch Drawer & Clasp Bench ($N \\times M$)** | `apps/xudu/pouch_drawer.hpp/.cpp`, `apps/xudu/link_forge.hpp/.cpp`, `apps/xudu/beams.cpp` | Pouch Drawer with partitioned drop zones, Clasp Assembly Bench ($N \\times M$), margin brackets `⟦...⟧`, and multi-spine connection ribbons. |
+| **Stage 4** | **Pouch Drawer & Clasp Bench ($N \times M$)** | `apps/xudu/pouch_drawer.hpp/.cpp`, `apps/xudu/link_forge.hpp/.cpp`, `apps/xudu/beams.cpp` | Pouch Drawer backed by `system://pouches`, Clasp Assembly Bench ($N \times M$), margin brackets `⟦...⟧`, and multi-spine connection ribbons. |
 | **Stage 5** | **Drag-to-Empty-Space Transclusion** | `apps/xudu/main.cpp`, `src/doc.cpp` | Kinetic drag tether spawning new pages or documents in void, with automatic `OpKind::Transclude` and volumetric prism rendering. |
 | **Stage 6** | **Page Break Controls** | `src/text/layout.cpp`, `apps/xudu/session.cpp` | Inter-paragraph hover gap splitter and `Ctrl+Enter` shortcut inserting `OpKind::PageBreak` without primedia pollution. |
 | **Stage 7** | **Decentralized Swarm Telescope** | `apps/xudu/core/managed_torrent.cpp`, `swarm_browser.hpp` | BEP 46 author catalog rendezvous, DHT topic swarms (`xudu:topic:<name>`), and 3D constellation browser. |
+
+______________________________________________________________________
+
+## 15. The System Xanadoc Paradigm for Universal Metasystem State
+
+As detailed in [`design/system-xanadocs-customization-and-metasystem.md`](system-xanadocs-customization-and-metasystem.md)
+and [`design/xudu-pouch-drawer-and-clasp-bench.md`](xudu-pouch-drawer-and-clasp-bench.md),
+all customizable aspects of the `xudu` environment are backed by first-class
+sovereign **System Xanadocs** rather than ad-hoc configuration files:
+
+1. **`system://keymap`**: Scancodes, modifiers, and command table actions.
+   Enables dynamic rebinding, time travel through keymap history, and
+   transclusion of community keybinding presets (Vim/Emacs).
+2. **`system://settings`**: Typographic hierarchy, UI text sizes (`ui.font.size`),
+   font families, line pitch, and color themes.
+3. **`system://layout`**: Spatial geometry, 3D camera presets, drawer dock sides,
+   and notification toast spawn anchors/coordinates.
+4. **`system://ui`**: Real-time overlay visibility toggles (HUD, beams, hypertime
+   DAG, drawer).
+5. **`system://pouches`**: Drop zone partitions ("To Link", "Notes", "Scratch"),
+   custom background tints, and transcluded ghost spanables.
+
+Because these are standard microversioned xanadocs bound to the author's
+`UserPermascroll`, all settings modifications enjoy full OSMIC hypertime
+branching, undoability, zero-copy transclusion, and Merkle-verified BEP 46
+swarm synchronization across all devices.
