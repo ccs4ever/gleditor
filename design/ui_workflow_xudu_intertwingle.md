@@ -345,6 +345,25 @@ ______________________________________________________________________
   - Each strand is rendered with instance hue shifting to prevent ribbon
     occlusion and visual tangling.
 
+### 8.4 Staging Spans via the Pouch Drawer & Clasp Assembly Bench
+
+To eliminate the cognitive load of juggling non-contiguous multi-span
+selections across active document views in 3D space, `xudu` provides an
+advanced spatial workflow: the **Pouch Drawer** and **Clasp Assembly Bench**.
+
+Instead of holding selection states simultaneously, users drag ghost spanables
+into partitioned drop zones docked along screen boundaries (`ToLinkLeft`,
+`ToLinkRight`, `NotesForLater`). These drop zones are backed by a persistent
+**system xanadoc** referencing the author's sovereign `UserPermascroll` with
+zero byte duplication. Staged spans can be dropped into the **Clasp Assembly
+Bench** to weave $N \\times M$ links, or clicked to execute a non-disorienting
+**collinear sworph** back to the origin text.
+
+For the full architectural specification, 120 FPS retained canvas slicing,
+Fitts's law screen bezel dynamics, and C++23 class design (`PouchDrawer`,
+`DropZone`, `LinkForgeWidget`), see:
+[`design/xudu-pouch-drawer-and-clasp-bench.md`](xudu-pouch-drawer-and-clasp-bench.md).
+
 ______________________________________________________________________
 
 ## 9. Transclusion by Drag-to-Empty-Space
@@ -604,7 +623,7 @@ sequential stages:
 | **Stage 1** | **Spatial Genesis & Local Open** | `apps/xudu/session.cpp`, `apps/xudu/main.cpp` | Floating `+ New Xanadoc` HUD chip, `Ctrl+N` handler, and spatial local document open palette (`Ctrl+O`). |
 | **Stage 2** | **3D Radial Marking Menu** | `include/gleditor/radial_menu.hpp`, `src/radial_menu.cpp` | 8-way directional radial menu registered with `ClickableRegistry` under `tagKindOverlay`, applying `LinkType::Format` and `TextAlign`. |
 | **Stage 3** | **Interactive Hypertime DAG & Diff Visualizer** | `apps/xudu/hypertime_graph.hpp/.cpp`, `apps/xudu/store.cpp` | Replacing 1D `HypertimeMap` with 2D branching DAG, side-by-side comparative diffs, and keystroke scrub slider. |
-| **Stage 4** | **Asymmetric Link Forge ($N \\times M$)** | `apps/xudu/link_forge.hpp/.cpp`, `apps/xudu/beams.cpp` | Left and right span accumulators with margin brackets `⟦...⟧`, type selection nexus, and multi-spine connection ribbons. |
+| **Stage 4** | **Pouch Drawer & Clasp Bench ($N \\times M$)** | `apps/xudu/pouch_drawer.hpp/.cpp`, `apps/xudu/link_forge.hpp/.cpp`, `apps/xudu/beams.cpp` | Pouch Drawer with partitioned drop zones, Clasp Assembly Bench ($N \\times M$), margin brackets `⟦...⟧`, and multi-spine connection ribbons. |
 | **Stage 5** | **Drag-to-Empty-Space Transclusion** | `apps/xudu/main.cpp`, `src/doc.cpp` | Kinetic drag tether spawning new pages or documents in void, with automatic `OpKind::Transclude` and volumetric prism rendering. |
 | **Stage 6** | **Page Break Controls** | `src/text/layout.cpp`, `apps/xudu/session.cpp` | Inter-paragraph hover gap splitter and `Ctrl+Enter` shortcut inserting `OpKind::PageBreak` without primedia pollution. |
 | **Stage 7** | **Decentralized Swarm Telescope** | `apps/xudu/core/managed_torrent.cpp`, `swarm_browser.hpp` | BEP 46 author catalog rendezvous, DHT topic swarms (`xudu:topic:<name>`), and 3D constellation browser. |
