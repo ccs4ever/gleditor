@@ -17,13 +17,20 @@ Following the precedent set by TIFF (`HAVE_DECODE_INDEX_TIFF`) and LibAV (`HAVE_
 3. **Decode Index**:
    `DecodeIndexFormat::Gif` is defined in `include/gleditor/decode_index.hpp`, backed by `peekGifSize(span)`, `isAnimatedGif(span)`, and `buildGifIndex(span)`.
 
-## ClickableRegistry & Compile-Time Tag Auto-Registration
+## ClickableRegistry & Multi-Kind Picking Tag Auto-Registration
 
-Previously, interactive widgets relied on manual sequential sub-tag constants and repetitive `if (offset == tagPlay) ... else if (offset == tagPause) ...` chains. To make interactive elements auto-registering without hardcoding picking ladders:
+Previously, interactive widgets relied on manual sequential sub-tag constants and repetitive `if (offset == tagPlay) ... else if (offset == tagPause) ...` chains. To make interactive elements auto-registering without hardcoding picking ladders across all visual layers:
 
-- **Compile-time Static Tags**: `StaticSubTag<FixedString>` uses compile-time FNV-1a 32-bit hashing masked to 15 bits (`0x7FFF`), providing deterministic, collision-free sub-tags for static controls.
-- **`ClickableRegistry`**: Houses ordered control definitions, including layout dimensions (`width`, `height`), label callbacks, accessibility labels, click handlers, and accessibility roles (`a11y::Role::Button`).
-- **Unified Dispatch**: `registerControl(...)` registers controls once; rendering iterates through `registry.controls()` to layout and tag buttons, mouse picking forwards offset to `registry.dispatch(offset)`, and accessibility exports each control to `into.add(rootId + ctrl.tagOffset, ctrl.role)`.
+- **Unified Multi-Kind Coverage**: `ClickableRegistry` handles all picking tag usages: `tagKindOverlay` (HUD/widget controls, dialog buttons), `tagKindPage` (page background clicks, margin navigation, page flipping), and `tagKindGlyph` (clickable words, hyperlinks, mentions, and multi-cluster text spans).
+- **Compile-time Static Tags**: `StaticTag<FixedString, Kind>` uses compile-time FNV-1a 32-bit hashing, providing deterministic, collision-free sub-tags for static controls across kinds:
+  - `StaticOverlayTag<Id>` / `StaticSubTag<Id>`: defaults to `tagKindOverlay`.
+  - `StaticPageTag<Id>`: compile-time static page control tag.
+  - `StaticGlyphTag<Id>`: compile-time static glyph/link control tag.
+- **Control Descriptors (`ClickableControl`)**: Stores `tagKind`, optional document/page constraints (`docIndex`, `pageIndex`), cluster/offset bounds (`tagOffset`, `tagEndOffset` for single clusters or span ranges `[start, end)`), callbacks (`onClick`, `onPickTag`, `onPick`), layout dimensions, and accessibility roles (`a11y::Role`).
+- **Unified Dispatching**:
+  - `dispatch(const render::PickingResult &pick)` / `dispatch(const render::PickingTag &tag)`: inspects `tag.kind`, verifies document/page filters, applies optional `tagBase_` offset subtraction for overlays, matches cluster spans, and executes callbacks with full coordinate and fraction data.
+  - `dispatch(tagOffset)`: backward-compatible fast path for overlay sub-tags.
+  - `picked(pick, state)`: drop-in compatibility with `PickObserver`.
 
 ## Animated GIF Decoding (`GifDecoder`)
 
