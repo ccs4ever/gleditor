@@ -1,3 +1,5 @@
+#include <algorithm>
+
 #include <gleditor/text/font.hpp>
 #include <gleditor/text/layout.hpp>
 #include <gtest/gtest.h>
@@ -399,4 +401,244 @@ TEST(TextLayoutTest, BlockBoxCentresUnderACentreBlockStyleRange) {
 
   ASSERT_EQ(shaping.boxes.size(), 1u);
   EXPECT_FLOAT_EQ(shaping.boxes.front().left, (500.0F - 200.0F) / 2.0F);
+}
+
+namespace {
+
+// A page-worth of word-wrapping text, its own anchor byte at the very
+// front for a FloatLeft/FloatRight box to attach to -- long enough that
+// some lines fall entirely within the float's vertical extent and some
+// fall entirely below it.
+std::string floatWrapFixture() {
+  std::string words = "\n";
+  for (int i = 0; i < 60; i++) {
+    words += "wordword ";
+  }
+  return words;
+}
+
+} // namespace
+
+TEST(TextLayoutTest, TextWrapsBesideAFloat) {
+  auto &fm  = FontManager::instance();
+  auto font = fm.getFont("Monospace 16");
+  ASSERT_NE(font, nullptr);
+  const float lineHeight = font->metrics().lineHeight;
+
+  const std::string text = floatWrapFixture();
+  LayoutOptions opts{.maxWidthPx = 500.0F, .maxHeightPx = lineHeight * 20.0F};
+  opts.boxes.push_back(gleditor::LayoutBox{
+      .anchor    = 0,
+      .widthPx   = 200.0F,
+      .heightPx  = lineHeight * 3.0F,
+      .placement = gleditor::BoxPlacement::FloatLeft,
+  });
+
+  auto shaping = TextLayout::layoutPage(text, font, opts);
+
+  ASSERT_EQ(shaping.boxes.size(), 1u);
+  const auto &placedFloat = shaping.boxes.front();
+  EXPECT_FLOAT_EQ(placedFloat.left, 0.0F);
+  EXPECT_FLOAT_EQ(placedFloat.width, 200.0F);
+
+  // Every real line (skipping the float's own zero-width anchor line) whose
+  // vertical span overlaps the float is pushed right of it and narrowed to
+  // what remains of the column.
+  bool sawNarrowedLine    = false;
+  const float floatBottom = placedFloat.top + placedFloat.height;
+  for (const auto &line : shaping.lines) {
+    if (line.barWidth > 0.0F && line.top < floatBottom) {
+      EXPECT_FLOAT_EQ(line.left, 200.0F);
+      EXPECT_LE(line.barWidth, 300.0F);
+      sawNarrowedLine = true;
+    }
+  }
+  EXPECT_TRUE(sawNarrowedLine);
+}
+
+TEST(TextLayoutTest, FloatRetiresBelowItsBottom) {
+  auto &fm  = FontManager::instance();
+  auto font = fm.getFont("Monospace 16");
+  ASSERT_NE(font, nullptr);
+  const float lineHeight = font->metrics().lineHeight;
+
+  const std::string text = floatWrapFixture();
+  LayoutOptions opts{.maxWidthPx = 500.0F, .maxHeightPx = lineHeight * 20.0F};
+  opts.boxes.push_back(gleditor::LayoutBox{
+      .anchor    = 0,
+      .widthPx   = 200.0F,
+      .heightPx  = lineHeight * 3.0F,
+      .placement = gleditor::BoxPlacement::FloatLeft,
+  });
+
+  auto shaping = TextLayout::layoutPage(text, font, opts);
+
+  ASSERT_EQ(shaping.boxes.size(), 1u);
+  const auto &placedFloat = shaping.boxes.front();
+  const float floatBottom = placedFloat.top + placedFloat.height;
+
+  // Once a line's span is entirely past the float's bottom, the band is back
+  // to the full column -- the float does not narrow anything below it.
+  bool sawFullWidthLine = false;
+  for (const auto &line : shaping.lines) {
+    if (line.top >= floatBottom) {
+      EXPECT_FLOAT_EQ(line.left, 0.0F);
+      sawFullWidthLine = true;
+    }
+  }
+  EXPECT_TRUE(sawFullWidthLine);
+}
+
+TEST(TextLayoutTest, TwoFloatsStackBesideEachOtherWhenTheColumnHasRoom) {
+  auto &fm  = FontManager::instance();
+  auto font = fm.getFont("Monospace 16");
+  ASSERT_NE(font, nullptr);
+  const float lineHeight = font->metrics().lineHeight;
+
+  // Two anchor bytes back to back, then real text so the page has a normal
+  // line too.
+  const std::string text = "\n\nHello";
+  LayoutOptions opts{.maxWidthPx = 500.0F, .maxHeightPx = lineHeight * 20.0F};
+  opts.boxes.push_back(gleditor::LayoutBox{
+      .anchor    = 0,
+      .widthPx   = 150.0F,
+      .heightPx  = lineHeight * 2.0F,
+      .placement = gleditor::BoxPlacement::FloatLeft,
+  });
+  opts.boxes.push_back(gleditor::LayoutBox{
+      .anchor    = 1,
+      .widthPx   = 150.0F,
+      .heightPx  = lineHeight * 2.0F,
+      .placement = gleditor::BoxPlacement::FloatLeft,
+  });
+
+  auto shaping = TextLayout::layoutPage(text, font, opts);
+
+  ASSERT_EQ(shaping.boxes.size(), 2u);
+  // 150 + 150 = 300, comfortably inside the 500px column -- the second float
+  // sits beside the first at the same top rather than dropping below it.
+  EXPECT_FLOAT_EQ(shaping.boxes[0].top, 0.0F);
+  EXPECT_FLOAT_EQ(shaping.boxes[0].left, 0.0F);
+  EXPECT_FLOAT_EQ(shaping.boxes[1].top, 0.0F);
+  EXPECT_FLOAT_EQ(shaping.boxes[1].left, 150.0F);
+}
+
+TEST(TextLayoutTest, ASecondFloatThatDoesNotFitBesideTheFirstDropsBelowIt) {
+  auto &fm  = FontManager::instance();
+  auto font = fm.getFont("Monospace 16");
+  ASSERT_NE(font, nullptr);
+  const float lineHeight = font->metrics().lineHeight;
+
+  const std::string text = "\n\nHello";
+  LayoutOptions opts{.maxWidthPx = 500.0F, .maxHeightPx = lineHeight * 20.0F};
+  opts.boxes.push_back(gleditor::LayoutBox{
+      .anchor    = 0,
+      .widthPx   = 150.0F,
+      .heightPx  = lineHeight * 2.0F,
+      .placement = gleditor::BoxPlacement::FloatLeft,
+  });
+  // 150 + 400 > 500 -- does not fit beside the first, so it drops below the
+  // first float's own bottom instead.
+  opts.boxes.push_back(gleditor::LayoutBox{
+      .anchor    = 1,
+      .widthPx   = 400.0F,
+      .heightPx  = lineHeight * 2.0F,
+      .placement = gleditor::BoxPlacement::FloatLeft,
+  });
+
+  auto shaping = TextLayout::layoutPage(text, font, opts);
+
+  ASSERT_EQ(shaping.boxes.size(), 2u);
+  EXPECT_FLOAT_EQ(shaping.boxes[0].top, 0.0F);
+  EXPECT_FLOAT_EQ(shaping.boxes[1].top, lineHeight * 2.0F);
+  EXPECT_FLOAT_EQ(shaping.boxes[1].left, 0.0F);
+}
+
+TEST(TextLayoutTest, OverWideFloatClampsToTheColumn) {
+  auto &fm  = FontManager::instance();
+  auto font = fm.getFont("Monospace 16");
+  ASSERT_NE(font, nullptr);
+  const float lineHeight = font->metrics().lineHeight;
+
+  const std::string text = "\nHello";
+  LayoutOptions opts{.maxWidthPx = 500.0F, .maxHeightPx = lineHeight * 20.0F};
+  opts.boxes.push_back(gleditor::LayoutBox{
+      .anchor    = 0,
+      .widthPx   = 700.0F, // wider than the column
+      .heightPx  = lineHeight * 2.0F,
+      .placement = gleditor::BoxPlacement::FloatLeft,
+  });
+
+  auto shaping = TextLayout::layoutPage(text, font, opts);
+
+  ASSERT_EQ(shaping.boxes.size(), 1u);
+  EXPECT_FLOAT_EQ(shaping.boxes.front().width, 500.0F);
+  EXPECT_FLOAT_EQ(shaping.boxes.front().left, 0.0F);
+}
+
+TEST(TextLayoutTest, ALineWithNoUsableBandPushesPastTheShorterFloat) {
+  auto &fm  = FontManager::instance();
+  auto font = fm.getFont("Monospace 16");
+  ASSERT_NE(font, nullptr);
+  const float lineHeight = font->metrics().lineHeight;
+
+  const std::string text = "\n\nSome text here";
+  LayoutOptions opts{.maxWidthPx = 500.0F, .maxHeightPx = lineHeight * 20.0F};
+  // A left float and a right float that together consume the whole column
+  // for the first line's worth of height -- the right one retires after one
+  // line, the left one after two.
+  opts.boxes.push_back(gleditor::LayoutBox{
+      .anchor    = 0,
+      .widthPx   = 250.0F,
+      .heightPx  = lineHeight * 2.0F,
+      .placement = gleditor::BoxPlacement::FloatLeft,
+  });
+  opts.boxes.push_back(gleditor::LayoutBox{
+      .anchor    = 1,
+      .widthPx   = 250.0F,
+      .heightPx  = lineHeight * 1.0F,
+      .placement = gleditor::BoxPlacement::FloatRight,
+  });
+
+  auto shaping = TextLayout::layoutPage(text, font, opts);
+
+  ASSERT_EQ(shaping.boxes.size(), 2u);
+  // Find the real text line -- the one with actual ink, not one of the two
+  // empty anchor placeholders (each of which still covers a nonzero byte
+  // range, just with nothing drawn over it).
+  const auto realLine =
+      std::find_if(shaping.lines.begin(), shaping.lines.end(),
+                   [](const auto &ln) { return ln.barWidth > 0.0F; });
+  ASSERT_NE(realLine, shaping.lines.end());
+  // Pushed past the right float's bottom (one line down), where the left
+  // float alone leaves a usable, narrowed band.
+  EXPECT_FLOAT_EQ(realLine->top, lineHeight);
+  EXPECT_FLOAT_EQ(realLine->left, 250.0F);
+}
+
+TEST(TextLayoutTest, FloatMovesWholeToNextPageWhenItDoesNotFit) {
+  auto &fm  = FontManager::instance();
+  auto font = fm.getFont("Monospace 16");
+  ASSERT_NE(font, nullptr);
+  const float lineHeight = font->metrics().lineHeight;
+
+  const std::string prefix = "Line one\nLine two\nLine three\n";
+  const std::string text   = prefix + "\n";
+
+  LayoutOptions opts{
+      .maxWidthPx  = 500.0F,
+      .maxHeightPx = lineHeight * 3.5F, // room for the 3 lines, not the float
+  };
+  opts.boxes.push_back(gleditor::LayoutBox{
+      .anchor    = static_cast<std::uint32_t>(prefix.size()),
+      .widthPx   = 200.0F,
+      .heightPx  = 150.0F,
+      .placement = gleditor::BoxPlacement::FloatLeft,
+  });
+
+  auto shaping = TextLayout::layoutPage(text, font, opts);
+
+  EXPECT_EQ(shaping.lineCount, 3u);
+  EXPECT_EQ(shaping.limit, prefix.size());
+  EXPECT_TRUE(shaping.boxes.empty());
 }

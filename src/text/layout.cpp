@@ -188,6 +188,94 @@ blockStyleAt(const std::size_t byteOffset,
   return gleditor::BlockStyleRange{};
 }
 
+/// A FloatLeft/FloatRight box already placed on the page, holding just
+/// enough to answer "how much does this narrow a line at height y" -- the
+/// one question availableAt() below needs an active float for.
+struct FloatSpan {
+  float top{};
+  float bottom{}; ///< Half-open: the float is active for y in [top, bottom).
+  bool leftSide{};
+  /// For a left float, the x just past its right edge (plus margin) -- a
+  /// line's left bound can be no smaller than this. For a right float, the x
+  /// just before its left edge (minus margin) -- a line's right bound can be
+  /// no larger. One field serves both because a line only ever needs to
+  /// compare against the edge nearer its own side.
+  float edge{};
+};
+
+/// The horizontal band still open for something spanning [y, y+height), once
+/// every float active over that span has narrowed it from its own side.
+/// Floats are always flushed to an edge -- never straddling the middle of a
+/// line -- so a line only ever sees one contiguous band rather than a set of
+/// gaps to route text through; that is what keeps this a pair of scalars
+/// instead of a list of spans.
+struct Band {
+  float left{};
+  float right{};
+};
+Band availableAt(const float y, const float height, const float maxWidth,
+                 const std::vector<FloatSpan> &floats) {
+  Band band{0.0F, maxWidth};
+  for (const auto &f : floats) {
+    if (f.top < y + height && f.bottom > y) {
+      if (f.leftSide) {
+        band.left = std::max(band.left, f.edge);
+      } else {
+        band.right = std::min(band.right, f.edge);
+      }
+    }
+  }
+  return band;
+}
+
+/// Where a newly anchored float box lands: beside any already-active float
+/// on the same side if the column still has room once the new one is
+/// clamped to it, else pushed down to below whatever is blocking it --
+/// repeated, since more than one float can already be stacked on that side.
+struct FloatPlacement {
+  float top{};
+  float left{};
+  float width{}; ///< Clamped to maxWidth -- see the comment at the call site.
+};
+FloatPlacement placeFloat(const float startY, const float rawWidth,
+                          const float heightPx, const bool leftSide,
+                          const float maxWidth,
+                          const std::vector<FloatSpan> &floats) {
+  const float width  = std::min(rawWidth, maxWidth);
+  float candidateTop = startY;
+  for (;;) {
+    const auto band = availableAt(candidateTop, heightPx, maxWidth, floats);
+    const float bandWidth = band.right - band.left;
+    if (bandWidth >= width) {
+      return FloatPlacement{
+          .top   = candidateTop,
+          .left  = leftSide ? band.left : (band.right - width),
+          .width = width,
+      };
+    }
+    // Doesn't fit beside what's already here -- find the nearest bottom
+    // among floats blocking this exact y and try again just past it.
+    float nextBottom = -1.0F;
+    for (const auto &f : floats) {
+      if (f.top <= candidateTop && f.bottom > candidateTop) {
+        nextBottom =
+            nextBottom < 0.0F ? f.bottom : std::min(nextBottom, f.bottom);
+      }
+    }
+    if (nextBottom < 0.0F) {
+      // Nothing at this y is actually blocking -- width alone must exceed
+      // maxWidth, which should not happen since it is already clamped to
+      // it. Place anyway rather than loop forever.
+      return FloatPlacement{
+          .top   = candidateTop,
+          .left  = leftSide ? band.left : (band.right - width),
+          .width = width,
+      };
+    }
+    candidateTop = nextBottom;
+  }
+}
+
 /// Where a box of @p width fits horizontally within a column of
 /// @p maxWidth, per @p align. Justify has no meaning for a single box --
 /// there is nothing to distribute slack between -- so it is treated as
@@ -384,10 +472,18 @@ PageShaping TextLayout::layoutPage(std::string_view text,
     std::size_t endByte{};
     float width{};
     float top{};
+    /// Where this line's ink starts, text-area-relative -- 0 except where a
+    /// float has pushed it in, or a Block box sits right/centred. Baked into
+    /// each glyph's clusterLeft and echoed in LineEntry.left below, rather
+    /// than left for a renderer to add: the renderer only ever draws
+    /// g.clusterLeft on its own (src/doc.cpp's glyph loop), so this is the
+    /// one place that offset can still take effect.
+    float left{};
   };
 
   std::vector<LineInfo> lines;
   std::vector<PageShaping::PlacedBox> placedBoxes;
+  std::vector<FloatSpan> floats;
   float currentY        = 0.0F;
   std::size_t lineStart = 0;
 
@@ -397,13 +493,11 @@ PageShaping TextLayout::layoutPage(std::string_view text,
   while (lineStart < shaped.glyphs.size()) {
     const auto lineStartByte = shaped.glyphs[lineStart].clusterByteOffset;
 
-    // A Block box anchored exactly here interrupts the flow: it takes
-    // vertical space of its own, aligned horizontally per the style range
-    // covering it, rather than being filled in among surrounding text the
-    // way an Inline box will be (a later stage) or fillLine()'s glyphs are.
-    // FloatLeft/FloatRight/Inline fall through to fillLine() untouched --
-    // stepping text around a float and threading a box into a line are not
-    // implemented yet, and nothing supplies those placements before they are.
+    // A Block or Float box anchored exactly here interrupts the flow rather
+    // than being filled in among surrounding text the way an Inline box will
+    // be (a later stage) or fillLine()'s glyphs are. Inline falls through to
+    // fillLine() untouched -- threading a box into the middle of a line is
+    // not implemented yet, and nothing supplies that placement before it is.
     if (const auto *box = boxAnchoredAt(lineStartByte, options.boxes);
         nullptr != box && gleditor::BoxPlacement::Block == box->placement) {
       const float boxHeight = box->heightPx + box->marginPx;
@@ -451,6 +545,7 @@ PageShaping TextLayout::layoutPage(std::string_view text,
           .endByte    = nextByte,
           .width      = width,
           .top        = currentY,
+          .left       = left,
       });
 
       currentY += boxHeight;
@@ -459,10 +554,95 @@ PageShaping TextLayout::layoutPage(std::string_view text,
       }
       lineStart += 1;
       continue;
+    } else if (nullptr != box &&
+               (gleditor::BoxPlacement::FloatLeft == box->placement ||
+                gleditor::BoxPlacement::FloatRight == box->placement)) {
+      const bool leftSide = gleditor::BoxPlacement::FloatLeft == box->placement;
+      const auto placed   = placeFloat(currentY, box->widthPx, box->heightPx,
+                                       leftSide, maxWidth, floats);
+
+      // Same roll-to-next-page rule as a Block box: this can push the float
+      // lower than currentY (stacked below a same-side float already here),
+      // so the check is against where it actually landed, not where its
+      // anchor was found.
+      if (!lines.empty() && placed.top + box->heightPx > maxHeight) {
+        break;
+      }
+
+      floats.push_back(FloatSpan{
+          .top      = placed.top,
+          .bottom   = placed.top + box->heightPx,
+          .leftSide = leftSide,
+          .edge     = leftSide ? (placed.left + placed.width + box->marginPx)
+                               : (placed.left - box->marginPx),
+      });
+
+      const auto nextByte = (lineStart + 1 < shaped.glyphs.size())
+                                ? shaped.glyphs[lineStart + 1].clusterByteOffset
+                                : text.size();
+      placedBoxes.push_back(PageShaping::PlacedBox{
+          .anchorByteOffset = static_cast<std::uint32_t>(lineStartByte),
+          .id               = box->id,
+          .left             = placed.left,
+          .top              = placed.top,
+          .width            = placed.width,
+          .height           = box->heightPx,
+          .placement        = box->placement,
+      });
+
+      // Same empty-glyph-range convention as a Block box's caret anchor, but
+      // this line carries no vertical weight of its own -- a float does not
+      // itself end the line its anchor sits on, text keeps flowing on it,
+      // just against a band the float has now narrowed.
+      lines.push_back(LineInfo{
+          .startGlyph = lineStart,
+          .endGlyph   = lineStart,
+          .startByte  = lineStartByte,
+          .endByte    = nextByte,
+          .width      = 0.0F,
+          .top        = currentY,
+      });
+
+      lineStart += 1;
+      continue;
     }
 
-    const auto filled = fillLine(shaped, text, breakAttrs, lineStart, maxWidth,
-                                 options.singleParagraph);
+    // The band still open at this height, once every active float has
+    // narrowed it from its own side. A line with nothing usable in it (two
+    // floats meeting in the middle) advances past the nearer float's bottom
+    // and tries again, rather than shaping a zero-width line.
+    Band band{0.0F, maxWidth};
+    bool pageFull = false;
+    for (;;) {
+      band = availableAt(currentY, lineHeight, maxWidth, floats);
+      if (band.right - band.left > 0.0F) {
+        break;
+      }
+      float nextBottom = -1.0F;
+      for (const auto &f : floats) {
+        if (f.top <= currentY && f.bottom > currentY) {
+          nextBottom =
+              nextBottom < 0.0F ? f.bottom : std::min(nextBottom, f.bottom);
+        }
+      }
+      if (nextBottom < 0.0F) {
+        // Nothing here is actually blocking -- maxWidth itself must be zero,
+        // which should not happen. Stop rather than spin in place.
+        break;
+      }
+      currentY = nextBottom;
+      if (!lines.empty() && currentY + lineHeight > maxHeight) {
+        pageFull = true;
+        break;
+      }
+    }
+    if (pageFull) {
+      break;
+    }
+
+    const auto filled =
+        fillLine(shaped, text, breakAttrs, lineStart, band.right - band.left,
+                 options.singleParagraph);
 
     // An atomic range (a media placeholder's reserved lines) must not start
     // on this page unless the whole thing fits: checked before committing
@@ -501,6 +681,7 @@ PageShaping TextLayout::layoutPage(std::string_view text,
         .endByte    = filled.endByte,
         .width      = filled.width,
         .top        = currentY,
+        .left       = band.left,
     });
 
     currentY += lineHeight;
@@ -524,12 +705,15 @@ PageShaping TextLayout::layoutPage(std::string_view text,
   float maxSeenWidth = 0.0F;
   for (std::size_t lineIdx = 0; lineIdx < lines.size(); lineIdx++) {
     const auto &line = lines[lineIdx];
-    maxSeenWidth     = std::max(maxSeenWidth, line.width);
+    // The rightmost extent, not the ink width alone -- a line pushed right by
+    // a float (or, later, a right/centre-aligned one) can end well past its
+    // own width from text-area x=0.
+    maxSeenWidth = std::max(maxSeenWidth, line.left + line.width);
 
     shaping.lines.push_back(PageShaping::LineEntry{
         .barWidth   = line.width,
         .barHeight  = lineHeight,
-        .left       = 0.0F,
+        .left       = line.left,
         .top        = line.top,
         .lineIndex  = lineIdx,
         .byteStart  = static_cast<std::uint32_t>(line.startByte),
@@ -561,7 +745,7 @@ PageShaping TextLayout::layoutPage(std::string_view text,
 
       shaping.glyphs.push_back(PageShaping::GlyphEntry{
           .chr          = std::string{clusterStr},
-          .clusterLeft  = penX + g.xOffset,
+          .clusterLeft  = line.left + penX + g.xOffset,
           .clusterTop   = line.top,
           .clusterIndex = clusterBoxIdx,
           .lineIndex    = lineIdx,
@@ -583,13 +767,12 @@ PageShaping TextLayout::layoutPage(std::string_view text,
     }
   }
 
-  // A placed box's own width, for the same reason: it has no glyphs of its
-  // own for the scan above to see either. Already clamped to maxWidth when
-  // it was placed, so this can only matter for a page whose widest content
-  // is a box narrower than the column -- a page with nothing on it but one
-  // modestly-sized figure, say.
+  // A placed box's own rightmost extent, for the same reason: it has no
+  // glyphs of its own for the scan above to see either. left + width rather
+  // than width alone, so a right-aligned or right-floated box still widens
+  // the page to reach its own right edge rather than just its own size.
   for (const auto &placed : shaping.boxes) {
-    maxSeenWidth = std::max(maxSeenWidth, placed.width);
+    maxSeenWidth = std::max(maxSeenWidth, placed.left + placed.width);
   }
 
   shaping.textWidthPx = static_cast<int>(std::ceil(maxSeenWidth));
