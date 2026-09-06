@@ -992,6 +992,18 @@ int Application::run() {
         state->clickPending = true;
         break;
       }
+      case SDL_EVENT_MOUSE_BUTTON_UP: {
+        if (nullptr != state->modal && state->modal->grabbing()) {
+          break;
+        }
+        const int mx   = static_cast<int>(evt.button.x);
+        const int my   = static_cast<int>(evt.button.y);
+        const auto btn = static_cast<std::uint8_t>(evt.button.button);
+        if (state->mouseUpHandler && state->mouseUpHandler(mx, my, btn)) {
+          break;
+        }
+        break;
+      }
       case SDL_EVENT_MOUSE_WHEEL: {
         if (nullptr != state->modal && state->modal->grabbing()) {
           break;

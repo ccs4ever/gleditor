@@ -57,6 +57,7 @@
 #include "xudu/core/resolver.hpp"
 #include "xudu/core/store.hpp"
 #include "xudu/core/system_docs.hpp"
+#include "xudu/pouch_drawer.hpp"
 #include "xudu/session.hpp"
 
 using gleditor::Mod;
@@ -68,6 +69,8 @@ using xudu::Link;
 using xudu::LinkBeams;
 using xudu::LinkType;
 using xudu::MicroversionId;
+using xudu::PouchDrawer;
+using xudu::PouchItem;
 using xudu::Provenance;
 using xudu::Session;
 
@@ -366,6 +369,49 @@ public:
         where.end   = caret->selectionEnd();
       }
       fun(rState, where, caret);
+    });
+  }
+
+  void swingBackToSpan(const PouchItem &item) {
+    renderer->runWithState([this, item](RenderState &rState) {
+      if (session.views().empty()) {
+        return;
+      }
+      std::optional<std::size_t> foundDocIdx;
+      for (std::size_t i = 0; i < session.views().size(); ++i) {
+        if (session.views()[i].version == item.originVersion) {
+          foundDocIdx = i;
+          break;
+        }
+      }
+
+      if (!foundDocIdx.has_value()) {
+        showAlongside(item.originVersion, 0.0F, 0);
+        foundDocIdx = session.views().size() - 1;
+      }
+
+      const auto docIdx = *foundDocIdx;
+      if (onionSkinMode_) {
+        activeOnionIdx_ = docIdx;
+        arrangeOnionSkin(rState);
+      }
+
+      if (docIdx >= session.views().size()) {
+        return;
+      }
+
+      const auto &st  = session.store(session.views()[docIdx].storeIndex);
+      const auto ver  = st.rebuild(item.originVersion);
+      const auto occs = ver.occurrencesOf(item.span);
+
+      if (!occs.empty()) {
+        const auto &occ   = occs.front();
+        auto *const caret = renderer->editCaret();
+        if (caret) {
+          caret->placeAt(static_cast<std::uint32_t>(docIdx), occ.start);
+          caret->extendTo(occ.end);
+        }
+      }
     });
   }
 
@@ -1087,7 +1133,8 @@ void bindCommands(gleditor::Application &app, const AppStateRef &state,
                   Views &views, HypertimeMap &map, LinkBeams &links,
                   Session &session,
                   const std::shared_ptr<gleditor::RadialMenu> &radialMenu,
-                  const RendererRef &renderer, const std::string &publishAs) {
+                  const RendererRef &renderer, PouchDrawer &pouchDrawer,
+                  const std::string &publishAs) {
   app.bindDefaultViewCommands();
 
   app.commands().bind(SDL_SCANCODE_Q, Mod::Ctrl, "quit", "save and close",
@@ -1167,6 +1214,12 @@ void bindCommands(gleditor::Application &app, const AppStateRef &state,
   app.commands().bind(SDL_SCANCODE_O, Mod::Ctrl | Mod::Shift, "onion-skin",
                       "toggle 3D multi-document onion skinning mode",
                       [&views] { views.toggleOnionSkin(); });
+  app.commands().bind(SDL_SCANCODE_BACKSLASH, Mod::Ctrl, "pouch-toggle",
+                      "toggle screen-edge pouch drawer and clasp bench",
+                      [&pouchDrawer] { pouchDrawer.toggle(); });
+  app.commands().bind(SDL_SCANCODE_F2, Mod::None, "pouch-toggle-f2",
+                      "toggle screen-edge pouch drawer and clasp bench",
+                      [&pouchDrawer] { pouchDrawer.toggle(); });
   app.commands().bind(SDL_SCANCODE_LEFTBRACKET, Mod::Ctrl, "scrub-back",
                       "scrub backward in hypertime history",
                       [&views] { views.scrubHistory(true); });
@@ -1443,6 +1496,16 @@ int main(const int argc, char **argv) {
   parser.add_argument("--onion-skin")
       .help("visualize open documents stacked in 3D depth with opacity decay; "
             "scroll wheel cycles")
+      .default_value(false)
+      .implicit_value(true);
+  parser.add_argument("--pouch")
+      .help("open the screen-edge pouch drawer on startup; ctrl-\\ or F2 "
+            "toggles it")
+      .default_value(false)
+      .implicit_value(true);
+  parser.add_argument("--pouch-sample")
+      .help("open pouch drawer with pre-seeded sample spans across drop zones "
+            "and clasp bench")
       .default_value(false)
       .implicit_value(true);
   parser.add_argument("--author-name")
@@ -2227,6 +2290,10 @@ int main(const int argc, char **argv) {
     HypertimeMap map("Sans 10", *session);
     map.setVisible(parser["--map"] == true);
 
+    PouchDrawer pouchDrawer(*session, renderer, "Sans 10");
+    pouchDrawer.setOpen(
+        parser["--pouch"] == true || parser["--pouch-sample"] == true, false);
+
     if (parser.present<std::vector<std::string>>("--alias")) {
       for (const auto &spec : parser.get<std::vector<std::string>>("--alias")) {
         const auto colon = spec.find(':');
@@ -2234,7 +2301,10 @@ int main(const int argc, char **argv) {
           const auto verStr   = spec.substr(0, colon);
           const auto aliasStr = spec.substr(colon + 1);
           session->store(0).setVersionAnnotation(MicroversionId::parse(verStr),
-                                                 {.alias = aliasStr});
+                                                 {.alias       = aliasStr,
+                                                  .description = {},
+                                                  .tag         = {},
+                                                  .timestamp   = {}});
         }
       }
     }
@@ -2272,6 +2342,62 @@ int main(const int argc, char **argv) {
         return true;
       }
       return false;
+    };
+
+    pouchDrawer.setSwingBackHandler(
+        [&views](const PouchItem &item) { views.swingBackToSpan(item); });
+
+    state->mouseUpHandler = [&pouchDrawer, &session, renderer,
+                             state](const int mx, const int my,
+                                    const std::uint8_t button) -> bool {
+      if (button != 1) { // 1 = SDL_BUTTON_LEFT
+        return false;
+      }
+      if (!pouchDrawer.isOpen() || pouchDrawer.currentWidth() < 50.0F) {
+        return false;
+      }
+      const float screenX = static_cast<float>(mx);
+      const float screenY = static_cast<float>(state->view.screenHeight - my);
+
+      const bool hitZone  = (pouchDrawer.zoneAt(screenX, screenY) != nullptr);
+      const bool hitLeft  = pouchDrawer.forge().containsLeft(screenX, screenY);
+      const bool hitRight = pouchDrawer.forge().containsRight(screenX, screenY);
+
+      if (!hitZone && !hitLeft && !hitRight) {
+        return false;
+      }
+
+      renderer->runWithState([&pouchDrawer, &session, screenX,
+                              screenY](RenderState &rState) {
+        auto *const caret = rState.caret;
+        if (!caret || !caret->hasSelection()) {
+          return;
+        }
+        const auto selStart = caret->selectionStart();
+        const auto selEnd   = caret->selectionEnd();
+        const auto docIdx   = caret->documentIndex();
+        if (docIdx >= session->views().size()) {
+          return;
+        }
+        const auto &openView = session->views()[docIdx];
+        const auto &st       = session->store(openView.storeIndex);
+        const auto ver       = st.rebuild(openView.version);
+        if (selEnd <= selStart) {
+          return;
+        }
+        const auto spans = ver.spansFor(selStart, selEnd - selStart);
+        if (spans.empty()) {
+          return;
+        }
+        const auto text = st.textOf(openView.version);
+        std::string preview;
+        if (selStart < text.size()) {
+          preview = text.substr(selStart, std::min(selEnd - selStart, 40U));
+        }
+        pouchDrawer.handleGhostDrop(spans.front(), preview, openView.version,
+                                    screenX, screenY, docIdx, selStart, selEnd);
+      });
+      return true;
     };
 
     docSwitcher->setCloseHandler([&views](const std::uint32_t docIndex) {
@@ -2403,6 +2529,7 @@ int main(const int argc, char **argv) {
     state->accessibility->addSource(&map);
     state->accessibility->addSource(&publishForm);
     state->accessibility->addSource(radialMenu.get());
+    state->accessibility->addSource(&pouchDrawer);
     state->accessibility->setToolkit("gleditor", TOSTRING(GLEDITOR_VERSION));
 
     map.setGoer([&views](const MicroversionId &id) { views.showOnly(id); });
@@ -2447,11 +2574,13 @@ int main(const int argc, char **argv) {
       views.showOnly(headVer);
     });
     renderer->addFrameContributor(&publishForm);
+    renderer->addFrameContributor(&pouchDrawer);
     state->modal = &publishForm;
     renderer->addPickObserver(docSwitcher.get());
     renderer->addPickObserver(&links);
     renderer->addPickObserver(radialMenu.get());
     renderer->addPickObserver(&map);
+    renderer->addPickObserver(&pouchDrawer);
 
     if (asked.empty() && read.empty() && alongside.empty() &&
         extraImports.empty()) {
@@ -2483,6 +2612,76 @@ int main(const int argc, char **argv) {
     }
     if (parser["--onion-skin"] == true) {
       views.setOnionSkin(true);
+    }
+
+    if (parser["--pouch-sample"] == true) {
+      pouchDrawer.setOpen(true, false);
+      const auto &st = session->store(0);
+      const auto ver = st.rebuild(opening);
+      const auto txt = st.textOf(opening);
+      if (!txt.empty()) {
+        const auto len = static_cast<std::uint32_t>(txt.size());
+        const auto p1  = std::min(len, 14U);
+        const auto p2  = std::min(len, 28U);
+
+        auto spans1 = ver.spansFor(0, p1);
+        if (!spans1.empty()) {
+          const PouchItem it1{
+              .itemId          = 1,
+              .span            = spans1.front(),
+              .previewText     = txt.substr(0, p1),
+              .originVersion   = opening,
+              .originDocIndex  = 0,
+              .originCharStart = 0,
+              .originCharEnd   = p1,
+              .timestampUtc    = 0,
+          };
+          if (auto *z = pouchDrawer.zoneById("to_link_left")) {
+            z->addItem(it1);
+          }
+          pouchDrawer.forge().dropLeft(it1);
+        }
+
+        if (p2 > p1) {
+          auto spans2 = ver.spansFor(p1, p2 - p1);
+          if (!spans2.empty()) {
+            const PouchItem it2{
+                .itemId          = 2,
+                .span            = spans2.front(),
+                .previewText     = txt.substr(p1, p2 - p1),
+                .originVersion   = opening,
+                .originDocIndex  = 0,
+                .originCharStart = p1,
+                .originCharEnd   = p2,
+                .timestampUtc    = 0,
+            };
+            if (auto *z = pouchDrawer.zoneById("to_link_right")) {
+              z->addItem(it2);
+            }
+            pouchDrawer.forge().dropRight(it2);
+          }
+        }
+
+        if (len > p2) {
+          const auto p3Len = std::min(len - p2, 30U);
+          auto spans3      = ver.spansFor(p2, p3Len);
+          if (!spans3.empty()) {
+            const PouchItem it3{
+                .itemId          = 3,
+                .span            = spans3.front(),
+                .previewText     = txt.substr(p2, p3Len),
+                .originVersion   = opening,
+                .originDocIndex  = 0,
+                .originCharStart = p2,
+                .originCharEnd   = p2 + p3Len,
+                .timestampUtc    = 0,
+            };
+            if (auto *z = pouchDrawer.zoneById("notes")) {
+              z->addItem(it3);
+            }
+          }
+        }
+      }
     }
 
     std::vector<std::shared_ptr<gleditor::AudioWidget>> audioWidgets;
@@ -2554,6 +2753,7 @@ int main(const int argc, char **argv) {
 
     gleditor::Application app(state, renderer, backend, "Xudu");
     bindCommands(app, state, views, map, links, *session, radialMenu, renderer,
+                 pouchDrawer,
                  publishAs.empty() ? std::string{"document"} : publishAs);
     quiet || std::cout << "commands:\n" << app.commands().helpText();
 

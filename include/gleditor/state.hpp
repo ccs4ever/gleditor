@@ -208,6 +208,14 @@ struct AppState {
   std::function<bool(float wx, float wy, std::uint16_t mods)> wheelHandler;
 
   /**
+   * @brief Interceptor for mouse button up events on the event thread.
+   *
+   * If set and returns true, consumes the mouse button up event.
+   * Used for drag-and-drop completions.
+   */
+  std::function<bool(int mx, int my, std::uint8_t button)> mouseUpHandler;
+
+  /**
    * @brief A --type step named decorations for the text it just inserted.
    *
    * Unset by default: plain gleditor has no concept of formatting a span of

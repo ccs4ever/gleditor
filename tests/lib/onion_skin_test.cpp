@@ -175,10 +175,10 @@ TEST(OnionSkinTest, AppStateWheelHandlerInterception) {
   AppState state;
   EXPECT_FALSE(state.wheelHandler);
 
-  bool intercepted = false;
-  float receivedWy = 0.0F;
-  state.wheelHandler =
-      [&](float /*wx*/, float wy, std::uint16_t /*mods*/) -> bool {
+  bool intercepted   = false;
+  float receivedWy   = 0.0F;
+  state.wheelHandler = [&](float /*wx*/, float wy,
+                           std::uint16_t /*mods*/) -> bool {
     intercepted = true;
     receivedWy  = wy;
     return true;
