@@ -250,8 +250,14 @@ public:
    * another it is connected to, say -- has to be able to say "one place over"
    * in the same units the renderer arranges them in. Guessing a distance would
    * leave the document somewhere no other document ever sits.
+   *
+   * Center-to-center spacing between document quads in the foreground row.
+   * Standard letter page width in world units is:
+   * (Doc::textWidthPx + 2.0F * Page::marginPixels) * Doc::pixelsToWorld
+   * ≈ 68.64. With a 24.0 unit inter-document gap (documentGap in beams),
+   * spacing is 92.0F.
    */
-  static constexpr float docSpacing = 50.0F;
+  static constexpr float docSpacing = 92.0F;
 
   /// Where the document at @p index rests when nothing is animating. The one
   /// place the row is described, so opening, closing, moving and anything a

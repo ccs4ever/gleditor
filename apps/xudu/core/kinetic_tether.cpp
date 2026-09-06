@@ -1,6 +1,7 @@
 /**
  * @file apps/xudu/core/kinetic_tether.cpp
- * @brief Dynamic Hookean spring tether state machine and detachment physics implementation.
+ * @brief Dynamic Hookean spring tether state machine and detachment physics
+ * implementation.
  */
 #include "kinetic_tether.hpp"
 

@@ -59,6 +59,7 @@
 #include "xudu/core/store.hpp"
 #include "xudu/core/system_docs.hpp"
 #include "xudu/kinetic_tether_overlay.hpp"
+#include "xudu/page_break_overlay.hpp"
 #include "xudu/pouch_drawer.hpp"
 #include "xudu/session.hpp"
 
@@ -73,6 +74,7 @@ using xudu::Link;
 using xudu::LinkBeams;
 using xudu::LinkType;
 using xudu::MicroversionId;
+using xudu::PageBreakOverlay;
 using xudu::PouchDrawer;
 using xudu::PouchItem;
 using xudu::PrimediaSpan;
@@ -818,6 +820,39 @@ public:
               << ", " << payload.originCharEnd << ")\n";
   }
 
+  void insertPageBreak(const std::uint32_t docIndex,
+                       const std::uint32_t charOffset) {
+    renderer->runWithState([this, docIndex, charOffset](RenderState &rState) {
+      if (docIndex >= rState.docs.size()) {
+        return;
+      }
+      const auto prod = session.insertBreak(docIndex, charOffset);
+      if (const auto src =
+              session.sourceFor(prod, session.storeIndexOf(docIndex))) {
+        rState.docs[docIndex]->load(*src);
+        syncMediaWidgets(rState);
+      }
+      std::cout << "xudu: page break inserted at doc " << docIndex << " offset "
+                << charOffset << "\n";
+    });
+  }
+
+  void insertPageBreakAtCaret() {
+    withCaret([this](RenderState &rState, const Where &where, Caret *) {
+      if (where.doc >= rState.docs.size()) {
+        return;
+      }
+      const auto prod = session.insertBreak(where.doc, where.start);
+      if (const auto src =
+              session.sourceFor(prod, session.storeIndexOf(where.doc))) {
+        rState.docs[where.doc]->load(*src);
+        syncMediaWidgets(rState);
+      }
+      std::cout << "xudu: page break inserted at doc " << where.doc
+                << " offset " << where.start << "\n";
+    });
+  }
+
   void openDocumentPalette() {
     using Field = gleditor::Form::Field;
     using Kind  = gleditor::Form::Kind;
@@ -1289,6 +1324,9 @@ void bindCommands(gleditor::Application &app, const AppStateRef &state,
   app.commands().bind(SDL_SCANCODE_BACKSPACE, "delete",
                       "stop pointing at the selection",
                       [&views] { views.deleteSelection(); });
+  app.commands().bind(SDL_SCANCODE_RETURN, Mod::Ctrl, "page-break",
+                      "insert a page break at the caret position",
+                      [&views] { views.insertPageBreakAtCaret(); });
 }
 
 xudu::LinkType parseLinkType(const std::string_view str) {
@@ -1552,6 +1590,16 @@ int main(const int argc, char **argv) {
   parser.add_argument("--tether-spawn-sample")
       .help("spawn a collinear transcluded document quad from the opening "
             "text into the 3D void")
+      .default_value(false)
+      .implicit_value(true);
+  parser.add_argument("--page-break-sample")
+      .help("force inter-paragraph hover gap affordance to render on the first "
+            "paragraph gap")
+      .default_value(false)
+      .implicit_value(true);
+  parser.add_argument("--page-break-split-sample")
+      .help("insert a page break between first and second paragraphs to "
+            "demonstrate multipage layout")
       .default_value(false)
       .implicit_value(true);
   parser.add_argument("--author-name")
@@ -2397,6 +2445,14 @@ int main(const int argc, char **argv) {
     KineticTetherOverlay kineticTetherOverlay(kineticTetherEngine, "Sans 10");
     renderer->addFrameContributor(&kineticTetherOverlay);
 
+    PageBreakOverlay pageBreakOverlay(*session, renderer, "Sans 10");
+    renderer->addFrameContributor(&pageBreakOverlay);
+    renderer->addPickObserver(&pageBreakOverlay);
+    pageBreakOverlay.setOnSplit(
+        [&views](const std::uint32_t docIdx, const std::uint32_t charOffset) {
+          views.insertPageBreak(docIdx, charOffset);
+        });
+
     kineticTetherEngine.setVoidSpawnHandler(
         [&views](const TetherPayload &payload, const float sx, const float sy) {
           views.spawnTranscludedDocument(payload, sx, sy);
@@ -2928,6 +2984,19 @@ int main(const int argc, char **argv) {
           .originScreenPos = glm::vec2(280.0F, 500.0F),
       };
       views.spawnTranscludedDocument(payload, 660.0F, 320.0F);
+    }
+
+    if (parser["--page-break-sample"] == true) {
+      pageBreakOverlay.setSampleForceVisible(true, 0, 0);
+    }
+
+    if (parser["--page-break-split-sample"] == true) {
+      const auto &st   = session->store(0);
+      const auto txt   = st.textOf(opening);
+      const auto nlPos = txt.find('\n');
+      if (nlPos != std::string::npos) {
+        views.insertPageBreak(0, static_cast<std::uint32_t>(nlPos + 1));
+      }
     }
 
     std::vector<std::shared_ptr<gleditor::AudioWidget>> audioWidgets;

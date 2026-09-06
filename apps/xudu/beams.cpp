@@ -458,13 +458,36 @@ bool LinkBeams::onScreen(const glm::mat4 &viewProjection,
 
 void LinkBeams::align(const Strand &strand, RenderState &state,
                       ch::Timeline &timeline) {
-  if (strand.from.doc >= state.docs.size() ||
-      strand.to.doc >= state.docs.size() || !strand.fromAnchor ||
-      !strand.toAnchor) {
+  if (!strand.fromAnchor || !strand.toAnchor) {
     return;
   }
-  const auto &near = state.docs[strand.from.doc];
-  const auto &far  = state.docs[strand.to.doc];
+  alignPair(strand.from.doc, strand.to.doc, *strand.fromAnchor,
+            *strand.toAnchor, strand.fromEndAnchor, strand.toEndAnchor,
+            strand.link, state, timeline);
+}
+
+void LinkBeams::alignTransclusion(const TransclusionStrand &tStrand,
+                                  RenderState &state, ch::Timeline &timeline) {
+  if (!tStrand.fromAnchor || !tStrand.toAnchor) {
+    return;
+  }
+  alignPair(tStrand.from.doc, tStrand.to.doc, *tStrand.fromAnchor,
+            *tStrand.toAnchor, tStrand.fromEndAnchor, tStrand.toEndAnchor,
+            std::nullopt, state, timeline);
+}
+
+void LinkBeams::alignPair(std::size_t fromDocIdx, std::size_t toDocIdx,
+                          const Doc::Anchor &fromAnchor,
+                          const Doc::Anchor &toAnchor,
+                          const std::optional<Doc::Anchor> &fromEndAnchor,
+                          const std::optional<Doc::Anchor> &toEndAnchor,
+                          std::optional<std::uint64_t> linkId,
+                          RenderState &state, ch::Timeline &timeline) {
+  if (fromDocIdx >= state.docs.size() || toDocIdx >= state.docs.size()) {
+    return;
+  }
+  const auto &near = state.docs[fromDocIdx];
+  const auto &far  = state.docs[toDocIdx];
 
   // Everything below is worked out against where the documents are going
   // rather than where they are. A document part way through an earlier move
@@ -485,8 +508,8 @@ void LinkBeams::align(const Strand &strand, RenderState &state,
     return point ? std::optional{atRest(doc, *point)} : std::nullopt;
   };
 
-  const auto nearAt = restingPoint(*near, *strand.fromAnchor);
-  const auto farAt  = restingPoint(*far, *strand.toAnchor);
+  const auto nearAt = restingPoint(*near, fromAnchor);
+  const auto farAt  = restingPoint(*far, toAnchor);
   if (!nearAt || !farAt) {
     return;
   }
@@ -494,8 +517,8 @@ void LinkBeams::align(const Strand &strand, RenderState &state,
   const glm::vec3 nearPos(near->getModel()[3]);
   const glm::vec3 farPos(far->getModel()[3]);
 
-  const auto *const nearPage = near->page(strand.fromAnchor->pageIndex);
-  const auto *const farPage  = far->page(strand.toAnchor->pageIndex);
+  const auto *const nearPage = near->page(fromAnchor.pageIndex);
+  const auto *const farPage  = far->page(toAnchor.pageIndex);
   float nearHalfWidth        = fallbackDocHalfWidth;
   float farHalfWidth         = fallbackDocHalfWidth;
   if (nullptr != nearPage && nullptr != farPage) {
@@ -523,12 +546,12 @@ void LinkBeams::align(const Strand &strand, RenderState &state,
     }
   };
 
-  reach(*near, strand.fromEndAnchor, nearMinY, nearMaxY);
-  reach(*far, strand.toEndAnchor, farMinY, farMaxY);
+  reach(*near, fromEndAnchor, nearMinY, nearMaxY);
+  reach(*far, toEndAnchor, farMinY, farMaxY);
 
   for (auto &s : strands) {
-    if (s.link == strand.link && s.from.doc == strand.from.doc &&
-        s.to.doc == strand.to.doc) {
+    if ((linkId && s.link == *linkId) ||
+        (s.from.doc == fromDocIdx && s.to.doc == toDocIdx)) {
       s.aligned = true;
       reach(*near, s.fromAnchor, nearMinY, nearMaxY);
       reach(*near, s.fromEndAnchor, nearMinY, nearMaxY);
@@ -537,11 +560,21 @@ void LinkBeams::align(const Strand &strand, RenderState &state,
     }
   }
 
+  for (auto &ts : transclusionStrands) {
+    if (ts.from.doc == fromDocIdx && ts.to.doc == toDocIdx) {
+      ts.aligned = true;
+      reach(*near, ts.fromAnchor, nearMinY, nearMaxY);
+      reach(*near, ts.fromEndAnchor, nearMinY, nearMaxY);
+      reach(*far, ts.toAnchor, farMinY, farMaxY);
+      reach(*far, ts.toEndAnchor, farMinY, farMaxY);
+    }
+  }
+
   const float nearCenterY = 0.5F * (nearMinY + nearMaxY);
   const float farCenterY  = 0.5F * (farMinY + farMaxY);
   const float deltaY      = nearCenterY - farCenterY;
 
-  const auto farDocIdx = strand.to.doc;
+  const auto farDocIdx = toDocIdx;
 
   // Whether document d sits on the background plane rather than the
   // foreground row: opened via --background (RenderItemOpenDoc::depthZ),
@@ -590,8 +623,13 @@ void LinkBeams::align(const Strand &strand, RenderState &state,
   const glm::vec3 target{docSlots[farDocIdx], farPos.y + deltaY, 0.0F};
 
   if (glm::distance(target, farPos) >= alreadyAligned) {
-    std::cout << "xudu: link " << strand.link << " aligns centroid of doc "
-              << strand.to.doc << " with doc " << strand.from.doc << "\n";
+    if (linkId) {
+      std::cout << "xudu: link " << *linkId << " aligns centroid of doc "
+                << toDocIdx << " with doc " << fromDocIdx << "\n";
+    } else {
+      std::cout << "xudu: transclusion aligns centroid of doc " << toDocIdx
+                << " with doc " << fromDocIdx << "\n";
+    }
     // The document being brought over is the subject of the move, so it is the
     // one that takes longest and starts first. Everything else in this
     // function is timed against it; see gleditor::anim::sworphSubject.
@@ -1099,6 +1137,16 @@ void LinkBeams::drawFrame(gleditor::FrameContext &ctx) {
           .type         = LinkType::Other,
           .transclusion = true,
       });
+
+      if (sworph && !tStrand.aligned) {
+        if (moved) {
+          stillToAlign = true;
+        } else {
+          tStrand.aligned = true;
+          alignTransclusion(tStrand, state, ctx.timeline);
+          moved = true;
+        }
+      }
     }
 
     // Every anchor along one edge of one document shares that edge's margin.

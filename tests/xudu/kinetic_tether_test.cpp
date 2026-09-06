@@ -1,6 +1,7 @@
 /**
  * @file kinetic_tether_test.cpp
- * @brief Unit tests for Stage 5 KineticTetherEngine, elastic spring physics, and void spawning.
+ * @brief Unit tests for Stage 5 KineticTetherEngine, elastic spring physics,
+ * and void spawning.
  */
 #include <gtest/gtest.h>
 
@@ -93,8 +94,8 @@ TEST_F(KineticTetherTest, VoidReleaseSpawnsNewDocumentWithTranscludeOp) {
   Store store(scroll);
 
   // Insert initial text into source doc
-  const auto v0 = store.insert(MicroversionId{}, 0,
-                               "Project Xanadu Literary Machines");
+  const auto v0 =
+      store.insert(MicroversionId{}, 0, "Project Xanadu Literary Machines");
   const auto initialPermascrollBytes = scroll->size();
 
   // Create tether payload from span [0, 14) ("Project Xanadu")

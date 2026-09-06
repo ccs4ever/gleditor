@@ -1,6 +1,7 @@
 /**
  * @file apps/xudu/kinetic_tether_overlay.cpp
- * @brief Visual overlay implementation for Hookean spring tether and floating blueprint quad.
+ * @brief Visual overlay implementation for Hookean spring tether and floating
+ * blueprint quad.
  */
 #include "kinetic_tether_overlay.hpp"
 
@@ -116,7 +117,8 @@ void KineticTetherOverlay::drawBlueprintQuad(gleditor::Canvas &canvas,
   const std::string statusPrompt =
       detached ? "[ RELEASE TO MATERIALIZE ]" : "[ SNAP-BACK ZONE (< 120px) ]";
   const std::uint32_t statusCol = detached ? 0x10B981FF : 0xEF4444FF;
-  canvas.addText(state, quadX + 8.0F, quadY + 16.0F, statusPrompt, statusCol, 0);
+  canvas.addText(state, quadX + 8.0F, quadY + 16.0F, statusPrompt, statusCol,
+                 0);
 }
 
 void KineticTetherOverlay::drawFrame(gleditor::FrameContext &ctx) {

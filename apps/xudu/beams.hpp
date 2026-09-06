@@ -192,6 +192,7 @@ private:
     std::optional<Doc::Anchor> toAnchor;
     std::optional<Doc::Anchor> fromEndAnchor;
     std::optional<Doc::Anchor> toEndAnchor;
+    bool aligned{};
   };
 
   std::vector<TransclusionStrand> transclusionStrands;
@@ -210,6 +211,16 @@ private:
   /// Bring the far document of @p strand alongside the near one, lined up so
   /// that both ends of the link are level with each other.
   void align(const Strand &strand, RenderState &state, ch::Timeline &timeline);
+  /// Bring the far document of @p tStrand alongside the near one, lined up so
+  /// that both ends of the transclusion are level with each other.
+  void alignTransclusion(const TransclusionStrand &tStrand, RenderState &state,
+                         ch::Timeline &timeline);
+  void alignPair(std::size_t fromDocIdx, std::size_t toDocIdx,
+                 const Doc::Anchor &fromAnchor, const Doc::Anchor &toAnchor,
+                 const std::optional<Doc::Anchor> &fromEndAnchor,
+                 const std::optional<Doc::Anchor> &toEndAnchor,
+                 std::optional<std::uint64_t> linkId, RenderState &state,
+                 ch::Timeline &timeline);
   /// Whether any half-link is still waiting to be looked for; see busy().
   [[nodiscard]] bool danglingOutstanding(const RenderState &state) const;
   /**

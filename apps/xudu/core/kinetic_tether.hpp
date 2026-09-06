@@ -49,18 +49,20 @@ struct TetherPayload {
  */
 class KineticTetherEngine {
 public:
-  static constexpr float kMinDetachmentDistance = 120.0F; // Fitts detachment threshold
-  static constexpr float kSpringK              = 0.22F;  // Hooke's spring constant
-  static constexpr float kDampingC             = 0.75F;  // Velocity damping coefficient
+  static constexpr float kMinDetachmentDistance =
+      120.0F;                               // Fitts detachment threshold
+  static constexpr float kSpringK  = 0.22F; // Hooke's spring constant
+  static constexpr float kDampingC = 0.75F; // Velocity damping coefficient
 
-  using VoidSpawnHandler =
-      std::function<void(const TetherPayload &payload, float screenX, float screenY)>;
+  using VoidSpawnHandler = std::function<void(const TetherPayload &payload,
+                                              float screenX, float screenY)>;
 
   KineticTetherEngine() = default;
 
   void startDrag(TetherPayload payload, float startX, float startY) noexcept;
   void updateDrag(float currentX, float currentY) noexcept;
-  bool endDrag(float endX, float endY) noexcept; // returns true if void spawn triggered
+  bool endDrag(float endX,
+               float endY) noexcept; // returns true if void spawn triggered
   void cancelDrag() noexcept;
   void stepPhysics() noexcept;
 
