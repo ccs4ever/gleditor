@@ -55,13 +55,16 @@
 #include "xudu/core/ops.hpp"
 #include "xudu/core/provenance.hpp"
 #include "xudu/core/publication.hpp"
+#include "xudu/core/publication_ledger.hpp"
 #include "xudu/core/resolver.hpp"
 #include "xudu/core/store.hpp"
+#include "xudu/core/swarm_catalog.hpp"
 #include "xudu/core/system_docs.hpp"
 #include "xudu/kinetic_tether_overlay.hpp"
 #include "xudu/page_break_overlay.hpp"
 #include "xudu/pouch_drawer.hpp"
 #include "xudu/session.hpp"
+#include "xudu/swarm_telescope_overlay.hpp"
 
 using gleditor::Mod;
 using xudu::Author;
@@ -79,7 +82,10 @@ using xudu::PouchDrawer;
 using xudu::PouchItem;
 using xudu::PrimediaSpan;
 using xudu::Provenance;
+using xudu::PublicationEntry;
 using xudu::Session;
+using xudu::SwarmCatalog;
+using xudu::SwarmTelescopeOverlay;
 using xudu::TetherPayload;
 
 namespace {
@@ -820,6 +826,50 @@ public:
               << ", " << payload.originCharEnd << ")\n";
   }
 
+  void summonPublication(const PublicationEntry &entry) {
+    const auto storeIndex = session.createNewStore("");
+    auto &st              = session.store(storeIndex);
+
+    std::string content;
+    content.reserve(entry.title.size() + entry.authorName.size() +
+                    entry.abstractText.size() + 256);
+    content.append("# ");
+    content.append(entry.title);
+    content.append("\n\nAuthor: ");
+    content.append(entry.authorName);
+    content.append("\nSwarm URI: ");
+    content.append(entry.bep46Uri);
+    content.append("\nInfoHash: ");
+    content.append(entry.infoHash);
+    content.append("\n\n");
+    content.append(entry.abstractText);
+    if (entry.hasTranscopyright) {
+      content.append("\n\n[Transcopyright Active: ");
+      content.append(entry.transcopyrightTerms);
+      content.append("]\n");
+    } else {
+      content.append("\n\n[Merkle Verified Docuverse Publication]\n");
+    }
+
+    const auto ver = st.insert(MicroversionId{}, 0, content);
+    showAlongside(ver, 0.0F, storeIndex);
+    renderer->runWithState([this](RenderState &rState) {
+      if (!rState.docs.empty()) {
+        const auto newDocIndex =
+            static_cast<std::uint32_t>(rState.docs.size() - 1);
+        if (switcher) {
+          switcher->setActiveDocIndex(newDocIndex);
+        }
+        auto *const caret = renderer->editCaret();
+        if (caret) {
+          caret->placeAt(newDocIndex, 0);
+        }
+      }
+    });
+    std::cout << "xudu: summoned publication '" << entry.title
+              << "' into 3D space (store " << storeIndex << ")\n";
+  }
+
   void insertPageBreak(const std::uint32_t docIndex,
                        const std::uint32_t charOffset) {
     renderer->runWithState([this, docIndex, charOffset](RenderState &rState) {
@@ -1205,6 +1255,7 @@ void bindCommands(gleditor::Application &app, const AppStateRef &state,
                   Session &session,
                   const std::shared_ptr<gleditor::RadialMenu> &radialMenu,
                   const RendererRef &renderer, PouchDrawer &pouchDrawer,
+                  SwarmTelescopeOverlay &swarmTelescope,
                   const std::string &publishAs) {
   app.bindDefaultViewCommands();
 
@@ -1291,6 +1342,13 @@ void bindCommands(gleditor::Application &app, const AppStateRef &state,
   app.commands().bind(SDL_SCANCODE_F2, Mod::None, "pouch-toggle-f2",
                       "toggle screen-edge pouch drawer and clasp bench",
                       [&pouchDrawer] { pouchDrawer.toggle(); });
+  app.commands().bind(SDL_SCANCODE_T, Mod::Ctrl | Mod::Shift,
+                      "telescope-toggle",
+                      "toggle decentralized swarm telescope overlay",
+                      [&swarmTelescope] { swarmTelescope.toggle(); });
+  app.commands().bind(SDL_SCANCODE_F3, Mod::None, "telescope-toggle-f3",
+                      "toggle decentralized swarm telescope overlay",
+                      [&swarmTelescope] { swarmTelescope.toggle(); });
   app.commands().bind(SDL_SCANCODE_LEFTBRACKET, Mod::Ctrl, "scrub-back",
                       "scrub backward in hypertime history",
                       [&views] { views.scrubHistory(true); });
@@ -1600,6 +1658,17 @@ int main(const int argc, char **argv) {
   parser.add_argument("--page-break-split-sample")
       .help("insert a page break between first and second paragraphs to "
             "demonstrate multipage layout")
+      .default_value(false)
+      .implicit_value(true);
+  parser.add_argument("--telescope")
+      .help(
+          "open decentralized swarm telescope overlay on startup; ctrl-shift-T "
+          "or F3 toggles it")
+      .default_value(false)
+      .implicit_value(true);
+  parser.add_argument("--swarm-sample")
+      .help("open decentralized swarm telescope overlay with pre-seeded sample "
+            "publications and topics")
       .default_value(false)
       .implicit_value(true);
   parser.add_argument("--author-name")
@@ -2422,6 +2491,18 @@ int main(const int argc, char **argv) {
     Views views(*session, renderer, map, images, publishForm, state,
                 docSwitcher);
 
+    SwarmCatalog swarmCatalog;
+    SwarmTelescopeOverlay swarmTelescope(swarmCatalog, renderer, "Sans 10");
+    swarmTelescope.setOnSummon([&views](const PublicationEntry &entry) {
+      views.summonPublication(entry);
+    });
+    if (parser["--telescope"] == true || parser["--swarm-sample"] == true) {
+      swarmTelescope.setVisible(true);
+    }
+    if (parser["--swarm-sample"] == true) {
+      swarmTelescope.setSampleForceVisible(true);
+    }
+
     state->wheelHandler = [&views](float /*wx*/, float wy,
                                    std::uint16_t /*mods*/) -> bool {
       if (!views.onionSkinMode()) {
@@ -2826,12 +2907,14 @@ int main(const int argc, char **argv) {
     });
     renderer->addFrameContributor(&publishForm);
     renderer->addFrameContributor(&pouchDrawer);
+    renderer->addFrameContributor(&swarmTelescope);
     state->modal = &publishForm;
     renderer->addPickObserver(docSwitcher.get());
     renderer->addPickObserver(&links);
     renderer->addPickObserver(radialMenu.get());
     renderer->addPickObserver(&map);
     renderer->addPickObserver(&pouchDrawer);
+    renderer->addPickObserver(&swarmTelescope);
 
     if (asked.empty() && read.empty() && alongside.empty() &&
         extraImports.empty()) {
@@ -3068,7 +3151,7 @@ int main(const int argc, char **argv) {
 
     gleditor::Application app(state, renderer, backend, "Xudu");
     bindCommands(app, state, views, map, links, *session, radialMenu, renderer,
-                 pouchDrawer,
+                 pouchDrawer, swarmTelescope,
                  publishAs.empty() ? std::string{"document"} : publishAs);
     quiet || std::cout << "commands:\n" << app.commands().helpText();
 

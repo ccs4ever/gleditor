@@ -245,7 +245,7 @@ TEST_PKGS := gmock_main
 # means, and the only safe answer refuses every peer, which is not a build
 # worth having. RNP rather than GnuPG's gpgme because it is a library first
 # and links the same way on every platform this ships to.
-XUDU_PKGS := libtorrent-rasterbar openssl lmdb libmagic librnp
+XUDU_PKGS := libtorrent-rasterbar openssl lmdb libmagic librnp sqlite3
 ifneq (,$(filter-out $(NO_SDL_GOALS),$(or $(MAKECMDGOALS),all)))
 ifneq ($(shell pkg-config --exists libtorrent-rasterbar && echo 1),1)
 $(error libtorrent-rasterbar was not found by pkg-config. It is required: \
@@ -462,7 +462,7 @@ endif
 XUDU_LIBS := $(shell pkg-config $(STATIC) --libs $(XUDU_PKGS)) -lryml
 # Matches XUDU_PKGS because ZIGZAG_SHARED_CORE_OBJS is XUDU_CORE_OBJS: zigzag
 # links the whole xanalogical engine, so it needs whatever that engine needs.
-ZIGZAG_PKGS := libtorrent-rasterbar openssl lmdb libmagic librnp
+ZIGZAG_PKGS := libtorrent-rasterbar openssl lmdb libmagic librnp sqlite3
 ZIGZAG_LIBS := $(shell pkg-config $(STATIC) --libs $(ZIGZAG_PKGS)) -lryml
 
 # glslangValidator is the traditional name and glslang the current one; which
