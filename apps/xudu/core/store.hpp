@@ -43,6 +43,17 @@
 namespace xudu {
 
 /**
+ * @brief Human-readable annotations, aliases, and semantic tags for a
+ * microversion.
+ */
+struct VersionAnnotation {
+  std::string alias;
+  std::string description;
+  std::string tag;
+  std::string timestamp;
+};
+
+/**
  * @class Store
  * @brief A xanadoc: one primedia spool, one operations spool, and its links.
  */
@@ -277,6 +288,54 @@ public:
   /// The most recently recorded state, which is where a program that has just
   /// opened a store should start.
   [[nodiscard]] MicroversionId latest() const;
+
+  // -- Current Versions (Author-Designated Heads) --------------------------
+
+  /// Author-designated current/active versions. Falls back to {latest()} when
+  /// unset.
+  [[nodiscard]] const std::vector<MicroversionId> &currentVersions() const;
+
+  /// The primary current version (the first active head).
+  [[nodiscard]] MicroversionId primaryCurrentVersion() const;
+
+  /// Explicitly designate the author's set of current versions.
+  void setCurrentVersions(std::vector<MicroversionId> versions);
+
+  /// Repoint the primary current version to @p version (for System Xanadocs or
+  /// switching heads).
+  void repointCurrentVersion(const MicroversionId &version);
+
+  /// Add an additional current version head.
+  void addCurrentVersion(const MicroversionId &version);
+
+  /// Remove a version from the set of current versions.
+  void removeCurrentVersion(const MicroversionId &version);
+
+  // -- Version Annotations & Aliases ----------------------------------------
+
+  /// Record an alias, description, or semantic tag for @p id.
+  void setVersionAnnotation(const MicroversionId &id,
+                            VersionAnnotation annotation);
+
+  /// Look up the annotation recorded for @p id, if any.
+  [[nodiscard]] std::optional<VersionAnnotation>
+  versionAnnotation(const MicroversionId &id) const;
+
+  /// Resolve a human-readable alias (e.g. "release-1.0") to its MicroversionId.
+  [[nodiscard]] std::optional<MicroversionId>
+  resolveAlias(std::string_view alias) const;
+
+  /// The display title for @p id: its alias if present, or id.str().
+  [[nodiscard]] std::string displayName(const MicroversionId &id) const;
+
+  /// All recorded version annotations.
+  [[nodiscard]] const std::map<MicroversionId, VersionAnnotation> &
+  allVersionAnnotations() const {
+    return versionAnnotations_;
+  }
+
+  [[nodiscard]] bool isSystem() const { return isSystem_; }
+  void setSystem(const bool sys) { isSystem_ = sys; }
 
   [[nodiscard]] const SegmentedPrimediaSpool &primedia() const {
     return userPermascroll_->spool();
@@ -520,6 +579,13 @@ private:
   SegmentedOpsSpool opsSpool;
   std::map<std::uint64_t, Link> linkTable;
   std::uint64_t nextLinkId{1};
+
+  void saveMetadata(const std::filesystem::path &dir) const;
+
+  mutable std::vector<MicroversionId> currentVersions_;
+  std::map<MicroversionId, VersionAnnotation> versionAnnotations_;
+  std::map<std::string, MicroversionId> aliasIndex_;
+  bool isSystem_{false};
 };
 
 } // namespace xudu

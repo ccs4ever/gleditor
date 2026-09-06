@@ -14,6 +14,7 @@
 
 #include "binary_ops.hpp"
 #include "windows_quoting.hpp"
+#include "yaml.hpp"
 
 namespace xudu {
 
@@ -26,6 +27,8 @@ constexpr const char *opsNodesFile = "ops.nodes";
 constexpr const char *linksFile    = "links.spool";
 constexpr const char *originsFile  = "origins.spool"; // pre-scroll stores
 constexpr const char *scrollsFile  = "scrolls.spool";
+constexpr const char *currentVersionsFile = "current.yaml";
+constexpr const char *versionsFile        = "versions.yaml";
 
 /// Not a protocol limit -- a branch ordinal is a plain std::uint32_t and the
 /// compact binary format can encode any value that fits in one, past 254,
@@ -538,6 +541,114 @@ MicroversionId Store::latest() const {
   return newest;
 }
 
+const std::vector<MicroversionId> &Store::currentVersions() const {
+  if (currentVersions_.empty()) {
+    const auto lat = latest();
+    if (!lat.isZero()) {
+      currentVersions_.push_back(lat);
+    }
+  }
+  return currentVersions_;
+}
+
+MicroversionId Store::primaryCurrentVersion() const {
+  const auto &cur = currentVersions();
+  return cur.empty() ? latest() : cur.front();
+}
+
+void Store::setCurrentVersions(std::vector<MicroversionId> versions) {
+  currentVersions_ = std::move(versions);
+}
+
+void Store::repointCurrentVersion(const MicroversionId &version) {
+  currentVersions_ = {version};
+}
+
+void Store::addCurrentVersion(const MicroversionId &version) {
+  if (std::ranges::find(currentVersions_, version) == currentVersions_.end()) {
+    currentVersions_.push_back(version);
+  }
+}
+
+void Store::removeCurrentVersion(const MicroversionId &version) {
+  std::erase(currentVersions_, version);
+}
+
+void Store::setVersionAnnotation(const MicroversionId &id,
+                                 VersionAnnotation annotation) {
+  if (!annotation.alias.empty()) {
+    aliasIndex_[annotation.alias] = id;
+  }
+  versionAnnotations_[id] = std::move(annotation);
+}
+
+std::optional<VersionAnnotation>
+Store::versionAnnotation(const MicroversionId &id) const {
+  const auto it = versionAnnotations_.find(id);
+  if (it != versionAnnotations_.end()) {
+    return it->second;
+  }
+  return std::nullopt;
+}
+
+std::optional<MicroversionId>
+Store::resolveAlias(std::string_view alias) const {
+  const auto it = aliasIndex_.find(std::string(alias));
+  if (it != aliasIndex_.end()) {
+    return it->second;
+  }
+  return std::nullopt;
+}
+
+std::string Store::displayName(const MicroversionId &id) const {
+  if (const auto ann = versionAnnotation(id); ann && !ann->alias.empty()) {
+    return ann->alias;
+  }
+  return id.str();
+}
+
+void Store::saveMetadata(const std::filesystem::path &dir) const {
+  // Save author-designated current versions
+  {
+    std::string currentYaml;
+    std::vector<std::string> curStrList;
+    const auto &curList = currentVersions();
+    curStrList.reserve(curList.size());
+    for (const auto &v : curList) {
+      curStrList.push_back(v.str());
+    }
+    yaml::writeList(currentYaml, "current", curStrList);
+    if (!currentYaml.empty()) {
+      std::ofstream out(dir / currentVersionsFile, std::ios::trunc);
+      out << currentYaml;
+    }
+  }
+
+  // Save version annotations (aliases, descriptions, tags, timestamps)
+  if (!versionAnnotations_.empty()) {
+    std::string verYaml;
+    for (const auto &[id, ann] : versionAnnotations_) {
+      yaml::write(verYaml, "version", id.str());
+      if (!ann.alias.empty()) {
+        yaml::write(verYaml, "alias", ann.alias);
+      }
+      if (!ann.description.empty()) {
+        yaml::write(verYaml, "description", ann.description);
+      }
+      if (!ann.tag.empty()) {
+        yaml::write(verYaml, "tag", ann.tag);
+      }
+      if (!ann.timestamp.empty()) {
+        yaml::write(verYaml, "timestamp", ann.timestamp);
+      }
+    }
+    if (!verYaml.empty()) {
+      std::ofstream out(dir / versionsFile, std::ios::trunc);
+      out << verYaml;
+    }
+  }
+}
+
 std::vector<OpRecord>
 Store::opRecords(const std::uint32_t sinceExclusive) const {
   std::vector<OpRecord> records;
@@ -680,6 +791,7 @@ void Store::save(const std::string &directory) const {
       out << '\n';
     }
   }
+  saveMetadata(dir);
 }
 
 void Store::saveOsmicText(const std::string &directory) const {
@@ -736,6 +848,7 @@ void Store::saveOsmicText(const std::string &directory) const {
       out << '\n';
     }
   }
+  saveMetadata(dir);
 }
 
 std::string Store::exportOsmicText() const {
@@ -777,6 +890,9 @@ void Store::load(const std::string &directory) {
   externals.clear();
   localSegments = Scroll{};
   nextLinkId    = 1;
+  currentVersions_.clear();
+  versionAnnotations_.clear();
+  aliasIndex_.clear();
 
   if (std::filesystem::exists(dir / scrollsFile)) {
     auto in = openTextSpoolForRead(dir / scrollsFile);
@@ -934,6 +1050,56 @@ void Store::load(const std::string &directory) {
       readSpans(rights, link.right);
       nextLinkId = std::max(nextLinkId, link.id + 1);
       linkTable.emplace(link.id, std::move(link));
+    }
+  }
+
+  if (std::filesystem::exists(dir / currentVersionsFile)) {
+    const auto content = readWholeFile(dir / currentVersionsFile);
+    if (const auto entries = yaml::read(content)) {
+      for (const auto &e : *entries) {
+        if (e.key == "current" && !e.value.empty()) {
+          try {
+            currentVersions_.push_back(MicroversionId::parse(e.value));
+          } catch (...) {
+          }
+        }
+      }
+    }
+  }
+
+  if (std::filesystem::exists(dir / versionsFile)) {
+    const auto content = readWholeFile(dir / versionsFile);
+    if (const auto entries = yaml::read(content)) {
+      std::optional<MicroversionId> currentId;
+      VersionAnnotation currentAnn;
+      const auto flushAnnotation = [&]() {
+        if (currentId.has_value()) {
+          setVersionAnnotation(*currentId, std::move(currentAnn));
+          currentId.reset();
+          currentAnn = {};
+        }
+      };
+      for (const auto &e : *entries) {
+        if (e.key == "version") {
+          flushAnnotation();
+          try {
+            currentId = MicroversionId::parse(e.value);
+          } catch (...) {
+            currentId.reset();
+          }
+        } else if (currentId.has_value()) {
+          if (e.key == "alias") {
+            currentAnn.alias = e.value;
+          } else if (e.key == "description") {
+            currentAnn.description = e.value;
+          } else if (e.key == "tag") {
+            currentAnn.tag = e.value;
+          } else if (e.key == "timestamp") {
+            currentAnn.timestamp = e.value;
+          }
+        }
+      }
+      flushAnnotation();
     }
   }
 }

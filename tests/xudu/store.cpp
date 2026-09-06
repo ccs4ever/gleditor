@@ -662,3 +662,97 @@ TEST_F(StoreRoundTripTest, storeResolveHandlesLocalAndExternalHoles) {
   EXPECT_EQ(resWithheld.status, xudu::ResolutionStatus::WithheldRedacted);
   EXPECT_TRUE(resWithheld.isWithheld());
 }
+
+TEST(StoreTest, currentVersionsAndRepointing) {
+  Store store;
+  EXPECT_TRUE(store.currentVersions().empty());
+  EXPECT_FALSE(store.isSystem());
+
+  store.setSystem(true);
+  EXPECT_TRUE(store.isSystem());
+
+  const auto v1 = store.insert(MicroversionId{}, 0, "alpha");
+  EXPECT_EQ(store.currentVersions(), std::vector<MicroversionId>{v1});
+  EXPECT_EQ(store.primaryCurrentVersion(), v1);
+
+  const auto v2 = store.insert(v1, 5, " beta");
+  const auto v3 = store.insert(v2, 10, " gamma");
+
+  store.setCurrentVersions({v1, v2});
+  EXPECT_EQ(store.currentVersions(), (std::vector<MicroversionId>{v1, v2}));
+  EXPECT_EQ(store.primaryCurrentVersion(), v1);
+
+  store.repointCurrentVersion(v3);
+  EXPECT_EQ(store.currentVersions(), std::vector<MicroversionId>{v3});
+  EXPECT_EQ(store.primaryCurrentVersion(), v3);
+
+  store.addCurrentVersion(v1);
+  EXPECT_EQ(store.currentVersions(), (std::vector<MicroversionId>{v3, v1}));
+
+  store.removeCurrentVersion(v3);
+  EXPECT_EQ(store.currentVersions(), std::vector<MicroversionId>{v1});
+}
+
+TEST(StoreTest, versionAnnotationsAndAliases) {
+  Store store;
+  const auto v1 = store.insert(MicroversionId{}, 0, "first");
+  const auto v2 = store.insert(v1, 5, " second");
+
+  EXPECT_EQ(store.displayName(v1), v1.str());
+  EXPECT_FALSE(store.resolveAlias("v1.0").has_value());
+
+  store.setVersionAnnotation(v1, {.alias       = "v1.0",
+                                  .description = "First stable release",
+                                  .tag         = "release",
+                                  .timestamp   = "2026-09-05T20:00:00Z"});
+
+  EXPECT_EQ(store.displayName(v1), "v1.0");
+  EXPECT_EQ(store.displayName(v2), v2.str());
+  EXPECT_EQ(store.resolveAlias("v1.0"), v1);
+
+  const auto ann = store.versionAnnotation(v1);
+  ASSERT_TRUE(ann.has_value());
+  EXPECT_EQ(ann->alias, "v1.0");
+  EXPECT_EQ(ann->description, "First stable release");
+  EXPECT_EQ(ann->tag, "release");
+  EXPECT_EQ(ann->timestamp, "2026-09-05T20:00:00Z");
+}
+
+TEST_F(StoreRoundTripTest,
+       currentVersionsAndAnnotationsPersistAcrossSaveAndLoad) {
+  std::filesystem::create_directories(dir);
+  MicroversionId v1;
+  MicroversionId v2;
+  {
+    Store store;
+    v1 = store.insert(MicroversionId{}, 0, "hello");
+    v2 = store.insert(v1, 5, " world");
+
+    store.setCurrentVersions({v1, v2});
+    store.setVersionAnnotation(v1, {.alias       = "genesis",
+                                    .description = "The beginning",
+                                    .tag         = "milestone",
+                                    .timestamp   = "2026-01-01T00:00:00Z"});
+
+    store.save(dir.string());
+  }
+
+  EXPECT_TRUE(std::filesystem::exists(dir / "current.yaml"));
+  EXPECT_TRUE(std::filesystem::exists(dir / "versions.yaml"));
+
+  Store reloaded;
+  reloaded.load(dir.string());
+
+  EXPECT_EQ(reloaded.currentVersions(), (std::vector<MicroversionId>{v1, v2}));
+  EXPECT_EQ(reloaded.primaryCurrentVersion(), v1);
+  EXPECT_EQ(reloaded.resolveAlias("genesis"), v1);
+  EXPECT_EQ(reloaded.displayName(v1), "genesis");
+  EXPECT_EQ(reloaded.displayName(v2), v2.str());
+
+  const auto ann = reloaded.versionAnnotation(v1);
+  ASSERT_TRUE(ann.has_value());
+  EXPECT_EQ(ann->alias, "genesis");
+  EXPECT_EQ(ann->description, "The beginning");
+  EXPECT_EQ(ann->tag, "milestone");
+  EXPECT_EQ(ann->timestamp, "2026-01-01T00:00:00Z");
+}

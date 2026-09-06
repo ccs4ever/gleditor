@@ -158,8 +158,8 @@ void DocumentSwitcher::drawFrame(FrameContext &ctx) {
     const float tabY = barY + 2.0F;
     canvas->setTag(render::tagKindOverlay, kNewDocTag);
     canvas->addRect(curX, tabY, newButtonW, tabH, tabInactiveBg);
-    canvas->addText(ctx.state, curX + 9.0F, height - 7.0F, "+",
-                    tabTextInactive, tabInactiveBg);
+    canvas->addText(ctx.state, curX + 9.0F, height - 7.0F, "+", tabTextInactive,
+                    tabInactiveBg);
   }
 
   canvas->commit();
