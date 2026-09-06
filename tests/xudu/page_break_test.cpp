@@ -1,6 +1,7 @@
 /**
  * @file tests/xudu/page_break_test.cpp
- * @brief Unit tests for PageBreak operations, forced breaks, and permascroll invariance.
+ * @brief Unit tests for PageBreak operations, forced breaks, and permascroll
+ * invariance.
  */
 #include <gmock/gmock.h>
 #include <gtest/gtest.h>
@@ -40,9 +41,9 @@ protected:
 
 TEST_F(PageBreakTest, InsertBreakDoesNotGrowPermascroll) {
   Store store;
-  const auto v1 = store.insert(
-      MicroversionId{}, 0,
-      "Paragraph one.\n\nParagraph two.\n\nParagraph three.");
+  const auto v1 =
+      store.insert(MicroversionId{}, 0,
+                   "Paragraph one.\n\nParagraph two.\n\nParagraph three.");
   const auto textLen = store.textOf(v1).size();
 
   // Permascroll size before break
@@ -123,7 +124,8 @@ TEST_F(PageBreakTest, TranscludedPassageExcludesBreaks) {
       doc2_v1, 9, doc1_v2, 0, static_cast<std::uint32_t>(srcText.size()));
 
   EXPECT_EQ(store.textOf(doc2_v2), "Quoting: Source text with page break.");
-  // The quotation must NOT carry over the page break from the source document layout
+  // The quotation must NOT carry over the page break from the source document
+  // layout
   EXPECT_THAT(store.rebuild(doc2_v2).forcedBreaks(), IsEmpty());
 }
 
@@ -131,9 +133,9 @@ TEST_F(PageBreakTest, StoreSaveAndReloadPreservesBreaks) {
   MicroversionId savedVer;
   {
     Store store;
-    const auto v1 = store.insert(
-        MicroversionId{}, 0, "First page text.\n\nSecond page text.");
-    savedVer = store.insertBreak(v1, 18);
+    const auto v1 = store.insert(MicroversionId{}, 0,
+                                 "First page text.\n\nSecond page text.");
+    savedVer      = store.insertBreak(v1, 18);
     store.save(testDir.string());
   }
 

@@ -70,7 +70,8 @@ void PageBreakOverlay::drawFrame(gleditor::FrameContext &ctx) {
       continue;
     }
     const auto &openView = session_.views()[d];
-    const auto text      = session_.store(openView.storeIndex).textOf(openView.version);
+    const auto text =
+        session_.store(openView.storeIndex).textOf(openView.version);
     if (text.empty()) {
       continue;
     }
@@ -178,15 +179,14 @@ void PageBreakOverlay::drawFrame(gleditor::FrameContext &ctx) {
   }
 
   if (hasHover_) {
-    const auto ortho =
-        glm::ortho(0.0F, screenW, 0.0F, screenH, -1.0F, 1.0F);
+    const auto ortho = glm::ortho(0.0F, screenW, 0.0F, screenH, -1.0F, 1.0F);
     canvas_->commit();
     canvas_->draw(ctx.state, ortho);
   }
 }
 
 bool PageBreakOverlay::picked(const render::PickingResult &pick,
-                              RenderState &/*state*/) {
+                              RenderState & /*state*/) {
   if (pick.tag.kind != render::tagKindOverlay ||
       pick.tag.clusterIndex != kTagPageBreakAffordance) {
     return false;
