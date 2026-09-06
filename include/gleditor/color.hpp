@@ -76,12 +76,39 @@ constexpr Color4 unpackRgba(const std::uint32_t packed) {
 }
 
 /**
- * @brief Parse a 6-digit hex RGB string (e.g. "#RRGGBB" or "RRGGBB").
+ * @brief Parse a 6-digit (or optionally 3-digit) hex RGB string (e.g.
+ *        "#RRGGBB" or "RRGGBB", and if @p allow3Digit is true, "#RGB" or
+ * "RGB").
  */
-inline std::optional<Color3> parseHexColor(const std::string_view text) {
+inline std::optional<Color3> parseHexColor(const std::string_view text,
+                                           const bool allow3Digit = false) {
   std::string_view hex = text;
   if (!hex.empty() && hex.front() == '#') {
     hex.remove_prefix(1);
+  }
+
+  const auto nibble = [](const char c) -> unsigned {
+    if (c >= '0' && c <= '9') {
+      return static_cast<unsigned>(c - '0');
+    }
+    return static_cast<unsigned>(std::tolower(static_cast<unsigned char>(c)) -
+                                 'a') +
+           10U;
+  };
+
+  if (hex.size() == 3) {
+    if (!allow3Digit) {
+      return std::nullopt;
+    }
+    if (!std::ranges::all_of(hex, [](const char c) {
+          return std::isxdigit(static_cast<unsigned char>(c)) != 0;
+        })) {
+      return std::nullopt;
+    }
+    const auto channel3 = [&](const std::size_t i) {
+      return static_cast<float>(nibble(hex[i]) * 17U) / 255.0F;
+    };
+    return Color3{channel3(0), channel3(1), channel3(2)};
   }
 
   if (hex.size() != 6) {
@@ -93,20 +120,12 @@ inline std::optional<Color3> parseHexColor(const std::string_view text) {
     return std::nullopt;
   }
 
-  const auto nibble = [](const char c) -> unsigned {
-    if (c >= '0' && c <= '9') {
-      return static_cast<unsigned>(c - '0');
-    }
-    return static_cast<unsigned>(std::tolower(static_cast<unsigned char>(c)) -
-                                 'a') +
-           10U;
-  };
-  const auto channel = [&](const std::size_t i) {
+  const auto channel6 = [&](const std::size_t i) {
     return static_cast<float>(nibble(hex[i]) * 16U + nibble(hex[i + 1])) /
            255.0F;
   };
 
-  return Color3{channel(0), channel(2), channel(4)};
+  return Color3{channel6(0), channel6(2), channel6(4)};
 }
 
 /**

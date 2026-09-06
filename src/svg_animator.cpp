@@ -2,6 +2,7 @@
  * @file svg_animator.cpp
  * @brief Vector animation and animated SVG (SMIL) playback engine via ThorVG.
  */
+#include <gleditor/color.hpp>
 #include <gleditor/svg_animator.hpp>
 
 #include <algorithm>
@@ -123,37 +124,13 @@ std::vector<std::string> splitSemicolons(std::string_view str) {
   return parts;
 }
 
-bool parseHexColor(std::string_view str, float &r, float &g, float &b) {
-  if (str.starts_with('#')) {
-    str.remove_prefix(1);
-  } else {
-    return false;
-  }
-  if (str.size() == 3) {
-    try {
-      const int rInt = std::stoi(std::string(1, str[0]), nullptr, 16);
-      const int gInt = std::stoi(std::string(1, str[1]), nullptr, 16);
-      const int bInt = std::stoi(std::string(1, str[2]), nullptr, 16);
-      r              = static_cast<float>(rInt * 17) / 255.0F;
-      g              = static_cast<float>(gInt * 17) / 255.0F;
-      b              = static_cast<float>(bInt * 17) / 255.0F;
-      return true;
-    } catch (...) {
-      return false;
-    }
-  }
-  if (str.size() == 6) {
-    try {
-      const int rInt = std::stoi(std::string(str.substr(0, 2)), nullptr, 16);
-      const int gInt = std::stoi(std::string(str.substr(2, 2)), nullptr, 16);
-      const int bInt = std::stoi(std::string(str.substr(4, 2)), nullptr, 16);
-      r              = static_cast<float>(rInt) / 255.0F;
-      g              = static_cast<float>(gInt) / 255.0F;
-      b              = static_cast<float>(bInt) / 255.0F;
-      return true;
-    } catch (...) {
-      return false;
-    }
+bool parseHexColor(const std::string_view str, float &r, float &g, float &b) {
+  if (const auto col =
+          gleditor::color::parseHexColor(str, /*allow3Digit=*/true)) {
+    r = col->r;
+    g = col->g;
+    b = col->b;
+    return true;
   }
   return false;
 }

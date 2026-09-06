@@ -2,21 +2,10 @@
 
 #include <algorithm>
 #include <cmath>
-#include <numbers>
+
+#include <gleditor/spatial.hpp>
 
 namespace xanadu {
-
-namespace {
-
-constexpr float degreesToRadians(const float degrees) {
-  return degrees * std::numbers::pi_v<float> / 180.0F;
-}
-
-constexpr float radiansToDegrees(const float radians) {
-  return radians * 180.0F / std::numbers::pi_v<float>;
-}
-
-} // namespace
 
 PageStackExtent pageStackExtent(const std::vector<float> &pageHeightsWorld,
                                 const float pageGapWorld) {
@@ -41,21 +30,14 @@ float centroidAlignmentDeltaY(const PageStackExtent &a,
 float framingDistance(const float worldWidth, const float worldHeight,
                       const float fovYDegrees, const float aspect,
                       const float margin) {
-  const auto halfHeight = (worldHeight * margin) / 2.0F;
-  const auto halfWidth  = (worldWidth * margin) / 2.0F;
-  const auto tanHalfFov = std::tan(degreesToRadians(fovYDegrees) / 2.0F);
-  const auto forHeight  = halfHeight / tanHalfFov;
-  const auto forWidth   = halfWidth / (tanHalfFov * aspect);
-  return std::max(forHeight, forWidth);
+  return gleditor::spatial::framingDistance(worldWidth, worldHeight,
+                                            fovYDegrees, aspect, margin);
 }
 
 float framingFov(const float worldWidth, const float worldHeight,
                  const float distance, const float aspect, const float margin) {
-  const auto halfHeight = (worldHeight * margin) / 2.0F;
-  const auto halfWidth  = (worldWidth * margin) / 2.0F;
-  const auto forHeight  = 2.0F * std::atan(halfHeight / distance);
-  const auto forWidth   = 2.0F * std::atan(halfWidth / (distance * aspect));
-  return radiansToDegrees(std::max(forHeight, forWidth));
+  return gleditor::spatial::framingFov(worldWidth, worldHeight, distance,
+                                       aspect, margin);
 }
 
 std::size_t bandStrandCount(const float spanWorld, const float beamWidthWorld,
@@ -89,8 +71,8 @@ std::vector<glm::vec3> bypassRoute(const glm::vec3 &from, const glm::vec3 &to,
   route.reserve(segments + 1);
   for (std::size_t i = 0; i <= segments; i++) {
     const float t = static_cast<float>(i) / static_cast<float>(segments);
-    const float u = 1.0F - t;
-    route.push_back((u * u * from) + (2.0F * u * t * control) + (t * t * to));
+    route.push_back(
+        gleditor::spatial::evaluateQuadraticBezier(from, control, to, t));
   }
   return route;
 }

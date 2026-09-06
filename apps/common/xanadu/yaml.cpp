@@ -11,25 +11,13 @@
 #include <stdexcept>
 #include <vector>
 
+#include "common/yaml_helpers.hpp"
+
 namespace xanadu::yaml {
 
 namespace {
 
-void rymlErrorHandler(const c4::csubstr msg, const c4::yml::ErrorDataBasic &,
-                      void *) {
-  throw std::runtime_error(std::string{msg.str, msg.len});
-}
-
-struct ScopedCallbacks {
-  c4::yml::Callbacks prev;
-  ScopedCallbacks() {
-    prev = c4::yml::get_callbacks();
-    c4::yml::Callbacks cb;
-    cb.m_error_basic = rymlErrorHandler;
-    c4::yml::set_callbacks(cb);
-  }
-  ~ScopedCallbacks() { c4::yml::set_callbacks(prev); }
-};
+using common::yaml::ScopedCallbacks;
 
 } // namespace
 

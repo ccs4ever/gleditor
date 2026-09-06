@@ -14,6 +14,7 @@
 #include <glm/geometric.hpp>
 
 #include <gleditor/render/types.hpp>
+#include <gleditor/spatial.hpp>
 
 namespace xudu {
 
@@ -52,10 +53,9 @@ void KineticTetherOverlay::drawTether(gleditor::Canvas &canvas, RenderState &,
   constexpr int kSegments = 16;
   glm::vec2 prevPt        = p0;
   for (int i = 1; i <= kSegments; ++i) {
-    const float t   = static_cast<float>(i) / static_cast<float>(kSegments);
-    const float inv = 1.0F - t;
+    const float t = static_cast<float>(i) / static_cast<float>(kSegments);
     const glm::vec2 pt =
-        (inv * inv * p0) + (2.0F * inv * t * mid) + (t * t * p1);
+        gleditor::spatial::evaluateQuadraticBezier(p0, mid, p1, t);
     canvas.addLine(prevPt.x, prevPt.y, pt.x, pt.y, thickness, col);
     prevPt = pt;
   }

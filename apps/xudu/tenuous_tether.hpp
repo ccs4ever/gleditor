@@ -23,6 +23,7 @@
 #include <gleditor/beams.hpp>
 #include <gleditor/frame_contributor.hpp>
 #include <gleditor/renderer.hpp>
+#include <gleditor/spatial.hpp>
 
 namespace xudu {
 
@@ -84,8 +85,8 @@ public:
                                                        const glm::vec3 &control,
                                                        const glm::vec3 &flying,
                                                        const float t) noexcept {
-    const float inv = 1.0F - t;
-    return (inv * inv * origin) + (2.0F * inv * t * control) + (t * t * flying);
+    return gleditor::spatial::evaluateQuadraticBezier(origin, control, flying,
+                                                      t);
   }
 
   /// Compute arched 3D control point dipping into depth.

@@ -14,6 +14,8 @@
 #include <ryml.hpp>
 #include <ryml_std.hpp>
 
+#include "common/yaml_helpers.hpp"
+
 namespace gleditor {
 
 std::string defaultEditorConfigYaml() {
@@ -61,70 +63,10 @@ std::string defaultEditorConfigYaml() {
 
 namespace {
 
-void rymlErrorHandler(const c4::csubstr msg, const c4::yml::ErrorDataBasic &,
-                      void *) {
-  throw std::runtime_error(std::string{msg.str, msg.len});
-}
-
-struct ScopedCallbacks {
-  c4::yml::Callbacks prev;
-  ScopedCallbacks() {
-    prev = c4::yml::get_callbacks();
-    c4::yml::Callbacks cb;
-    cb.m_error_basic = rymlErrorHandler;
-    c4::yml::set_callbacks(cb);
-  }
-  ~ScopedCallbacks() { c4::yml::set_callbacks(prev); }
-};
-
-std::string_view trimStr(std::string_view s) {
-  while (!s.empty() && (s.front() == ' ' || s.front() == '\t' ||
-                        s.front() == '\r' || s.front() == '\n')) {
-    s.remove_prefix(1);
-  }
-  while (!s.empty() && (s.back() == ' ' || s.back() == '\t' ||
-                        s.back() == '\r' || s.back() == '\n')) {
-    s.remove_suffix(1);
-  }
-  return s;
-}
-
-std::string stripQuotes(std::string_view s) {
-  s = trimStr(s);
-  if (s.size() >= 2 && ((s.front() == '"' && s.back() == '"') ||
-                        (s.front() == '\'' && s.back() == '\''))) {
-    s = s.substr(1, s.size() - 2);
-  }
-  return std::string{s};
-}
-
-float parseFloat(std::string_view s, const float fallback) {
-  s = trimStr(s);
-  if (s.size() >= 2 && ((s.front() == '"' && s.back() == '"') ||
-                        (s.front() == '\'' && s.back() == '\''))) {
-    s = s.substr(1, s.size() - 2);
-  }
-  float val      = fallback;
-  const auto res = std::from_chars(s.data(), s.data() + s.size(), val);
-  if (res.ec == std::errc{}) {
-    return val;
-  }
-  return fallback;
-}
-
-std::uint32_t parseUint(std::string_view s, const std::uint32_t fallback) {
-  s = trimStr(s);
-  if (s.size() >= 2 && ((s.front() == '"' && s.back() == '"') ||
-                        (s.front() == '\'' && s.back() == '\''))) {
-    s = s.substr(1, s.size() - 2);
-  }
-  std::uint32_t val = fallback;
-  const auto res    = std::from_chars(s.data(), s.data() + s.size(), val);
-  if (res.ec == std::errc{}) {
-    return val;
-  }
-  return fallback;
-}
+using common::yaml::parseFloat;
+using common::yaml::parseUint;
+using common::yaml::ScopedCallbacks;
+using common::yaml::stripQuotes;
 
 } // namespace
 

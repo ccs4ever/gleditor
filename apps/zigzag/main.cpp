@@ -46,9 +46,7 @@ bool wantsEveryOption(const int argc, const char *const *const argv) {
 }
 
 std::string resolveHomeSlicePath() {
-  return zigzag::zzcore::resolveXdgPath(std::getenv("XDG_CONFIG_HOME"),
-                                        std::getenv("HOME"), ".config",
-                                        "zigzag/home_slice.yaml");
+  return gleditor::paths::configPath("zigzag", "home_slice.yaml");
 }
 
 void bindCommands(gleditor::Application &app, const AppStateRef &state,

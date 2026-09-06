@@ -29,6 +29,22 @@ constexpr float radiansToDegrees(const float radians) {
 } // namespace detail
 
 /**
+ * @brief Evaluate a quadratic Bezier curve at parameter @p t in [0.0, 1.0].
+ *
+ * @tparam T Vector type (e.g. glm::vec2, glm::vec3).
+ * @param p0 Start point.
+ * @param p1 Control point.
+ * @param p2 End point.
+ * @param t Curve parameter in [0.0, 1.0].
+ */
+template <typename T>
+constexpr T evaluateQuadraticBezier(const T &p0, const T &p1, const T &p2,
+                                    const float t) noexcept {
+  const float inv = 1.0F - t;
+  return (inv * inv * p0) + (2.0F * inv * t * p1) + (t * t * p2);
+}
+
+/**
  * @brief Whether @p worldPoint is inside the view frustum.
  *
  * @param viewProjection Combined projection * view matrix.
