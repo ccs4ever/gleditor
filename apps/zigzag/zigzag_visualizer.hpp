@@ -101,15 +101,15 @@ public:
   void adoptDocument(ZzStructureDocument &&doc, std::string sourcePath);
   void populateFallbackStructure();
 
-  void adoptXuduStore(const xudu::Store &store,
-                      const std::vector<xudu::MicroversionId> &versions);
+  void adoptXuduStore(const xanadu::Store &store,
+                      const std::vector<xanadu::MicroversionId> &versions);
   void adoptXuduDocs(const std::vector<XuduDocInput> &docs,
-                     const std::vector<xudu::Link> &links = {});
+                     const std::vector<xanadu::Link> &links = {});
   [[nodiscard]] ZzRasterResult
   rasterize(const DimID &primaryDim   = "d.doc",
             const DimID &secondaryDim = "d.transclude") const;
-  [[nodiscard]] xudu::LinkPackage
-  exportAsLinkPackage(const xudu::MutableKeys &keys,
+  [[nodiscard]] xanadu::LinkPackage
+  exportAsLinkPackage(const xanadu::MutableKeys &keys,
                       const std::string &salt = "zigzag_slice",
                       std::int64_t sequence   = 1) const;
 

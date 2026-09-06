@@ -15,15 +15,15 @@
 #include <unordered_map>
 #include <vector>
 
+#include "common/xanadu/compact_op.hpp"
+#include "common/xanadu/microversion.hpp"
+#include "common/xanadu/store.hpp"
 #include "compact_zzcell.hpp"
 #include "gleditor/doc.hpp"
 #include "gleditor/glyphcache/cache.hpp"
 #include "gleditor/render/gl/stream_buffer.hpp"
 #include "gleditor/text/font.hpp"
 #include "gleditor/text/layout.hpp"
-#include "xudu/core/compact_op.hpp"
-#include "xudu/core/microversion.hpp"
-#include "xudu/core/store.hpp"
 #include "zigzag/core/zzstructure.hpp"
 
 namespace zigzag {
@@ -33,8 +33,8 @@ namespace zigzag {
  * @brief Strict weak ordering for PrimediaSpan keys in std::map.
  */
 struct SpanLess {
-  bool operator()(const xudu::PrimediaSpan &a,
-                  const xudu::PrimediaSpan &b) const noexcept {
+  bool operator()(const xanadu::PrimediaSpan &a,
+                  const xanadu::PrimediaSpan &b) const noexcept {
     if (a.scroll != b.scroll) {
       return a.scroll < b.scroll;
     }
@@ -53,7 +53,7 @@ struct SpanLess {
  */
 class UnifiedTransclusionEngine {
 public:
-  explicit UnifiedTransclusionEngine(xudu::Store &store);
+  explicit UnifiedTransclusionEngine(xanadu::Store &store);
   ~UnifiedTransclusionEngine() = default;
 
   UnifiedTransclusionEngine(const UnifiedTransclusionEngine &) = delete;
@@ -188,7 +188,8 @@ public:
   void clearShapingCache() noexcept;
 
 private:
-  void buildCellFromOp(std::uint32_t opIndex, const xudu::CompactOpNode &node);
+  void buildCellFromOp(std::uint32_t opIndex,
+                       const xanadu::CompactOpNode &node);
 
   /**
    * @brief Shaped output for @p text, from cache when it is there.
@@ -233,13 +234,13 @@ private:
     std::uint64_t lastUsedTick{};
   };
 
-  xudu::Store &store_;
+  xanadu::Store &store_;
   std::uint32_t lastSyncedOpIndex_{0};
   CellID nextCellId_{1};
 
   std::unordered_map<CellID, CompactZZCell> cells_;
   std::unordered_map<std::uint32_t, CellID> opIndexToCell_;
-  std::map<xudu::PrimediaSpan, CellID, SpanLess> spanToMasterCell_;
+  std::map<xanadu::PrimediaSpan, CellID, SpanLess> spanToMasterCell_;
 
   std::unordered_map<ShapingKey, ShapingEntry, ShapingKeyHash> shapingCache_;
   std::uint64_t shapingTick_{0};

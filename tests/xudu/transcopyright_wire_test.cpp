@@ -15,7 +15,7 @@
 #include <xudu/core/identity/payment_verifier.hpp>
 #include <xudu/core/transcopyright_crypto.hpp>
 
-namespace xudu::identity {
+namespace xanadu::identity {
 namespace {
 
 using ::testing::Eq;
@@ -418,4 +418,4 @@ TEST(IdentityLookupWireTest, ProofSurvivesEncodingIntact) {
 }
 
 } // namespace
-} // namespace xudu::identity
+} // namespace xanadu::identity

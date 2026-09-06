@@ -14,7 +14,7 @@
 
 #include "pgp_fixture.hpp"
 
-namespace xudu::identity {
+namespace xanadu::identity {
 namespace {
 
 using ::testing::Eq;
@@ -731,4 +731,4 @@ TEST(IdentityHashcashTest, EmailVerifyRequestPoWSerializationRoundTrip) {
 }
 
 } // namespace
-} // namespace xudu::identity
+} // namespace xanadu::identity

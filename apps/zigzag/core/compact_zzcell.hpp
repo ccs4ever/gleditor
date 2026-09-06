@@ -16,12 +16,12 @@
 #include <utility>
 #include <vector>
 
-#include "xudu/core/compact_op.hpp"
-#include "xudu/core/resolver.hpp"
-#include "xudu/core/scroll.hpp"
-#include "xudu/core/segmented_ops_spool.hpp"
-#include "xudu/core/segmented_primedia_spool.hpp"
-#include "xudu/core/spool.hpp"
+#include "common/xanadu/compact_op.hpp"
+#include "common/xanadu/resolver.hpp"
+#include "common/xanadu/scroll.hpp"
+#include "common/xanadu/segmented_ops_spool.hpp"
+#include "common/xanadu/segmented_primedia_spool.hpp"
+#include "common/xanadu/spool.hpp"
 #include "zigzag/core/zzstructure.hpp"
 
 namespace zigzag {
@@ -156,7 +156,7 @@ struct DynamicDimensionLink {
 struct CompactZZCell {
   CellID id{0};
   std::uint32_t spoolOpIndex{0}; ///< CompactOpNode index in SegmentedOpsSpool
-  xudu::PrimediaSpan span{};     ///< Canonical address in primedia spool
+  xanadu::PrimediaSpan span{};   ///< Canonical address in primedia spool
 
   /// Fast inline fixed-size link table for standard dimensions
   std::array<LinkPairs, StandardDimensionCount> standardDimensions{};
@@ -167,16 +167,16 @@ struct CompactZZCell {
   std::optional<Preflet> preflet{};
   std::string type{"cell"};
   std::string ephemeralText{};
-  xudu::ResolutionStatus resolutionStatus{
-      xudu::ResolutionStatus::VerifiedBytes};
-  std::optional<xudu::TranscopyrightDescriptor> transcopyrightInfo{};
-  std::optional<xudu::PublishedHoleRecord> holeRecord{};
+  xanadu::ResolutionStatus resolutionStatus{
+      xanadu::ResolutionStatus::VerifiedBytes};
+  std::optional<xanadu::TranscopyrightDescriptor> transcopyrightInfo{};
+  std::optional<xanadu::PublishedHoleRecord> holeRecord{};
 
   [[nodiscard]] bool isWithheld() const noexcept {
-    return resolutionStatus == xudu::ResolutionStatus::WithheldRedacted;
+    return resolutionStatus == xanadu::ResolutionStatus::WithheldRedacted;
   }
   [[nodiscard]] bool isTranscopyrightLocked() const noexcept {
-    return resolutionStatus == xudu::ResolutionStatus::TranscopyrightLocked;
+    return resolutionStatus == xanadu::ResolutionStatus::TranscopyrightLocked;
   }
 
   [[nodiscard]] LinkPairs linksOn(DimOrdinal ord) const noexcept {
@@ -224,8 +224,9 @@ struct CompactZZCell {
    * @brief Read cell content as a string.
    */
   [[nodiscard]] std::string
-  readText(const xudu::PrimediaSpool &primedia, const xudu::Resolver &resolver,
-           const std::vector<xudu::Scroll> &externals) const {
+  readText(const xanadu::PrimediaSpool &primedia,
+           const xanadu::Resolver &resolver,
+           const std::vector<xanadu::Scroll> &externals) const {
     if (!ephemeralText.empty()) {
       return ephemeralText;
     }
@@ -242,19 +243,19 @@ struct CompactZZCell {
     if (span.empty()) {
       return {};
     }
-    if (span.scroll == xudu::localScroll) {
+    if (span.scroll == xanadu::localScroll) {
       return std::string(primedia.readView(span));
     }
     const auto scrollIdx = static_cast<std::size_t>(span.scroll - 1);
     if (scrollIdx < externals.size()) {
       const auto res = resolver.resolve(externals[scrollIdx], span);
-      if (res.status == xudu::ResolutionStatus::VerifiedBytes) {
+      if (res.status == xanadu::ResolutionStatus::VerifiedBytes) {
         return res.text;
       }
-      if (res.status == xudu::ResolutionStatus::WithheldRedacted) {
+      if (res.status == xanadu::ResolutionStatus::WithheldRedacted) {
         return "[Redacted - Withheld]";
       }
-      if (res.status == xudu::ResolutionStatus::TranscopyrightLocked) {
+      if (res.status == xanadu::ResolutionStatus::TranscopyrightLocked) {
         if (res.lockInfo) {
           return "[🔒 " + std::to_string(res.lockInfo->priceAtomicUnits) + " " +
                  res.lockInfo->currencySymbol + "]";
@@ -266,9 +267,9 @@ struct CompactZZCell {
   }
 
   [[nodiscard]] std::string
-  readText(const xudu::SegmentedPrimediaSpool &primedia,
-           const xudu::Resolver &resolver,
-           const std::vector<xudu::Scroll> &externals) const {
+  readText(const xanadu::SegmentedPrimediaSpool &primedia,
+           const xanadu::Resolver &resolver,
+           const std::vector<xanadu::Scroll> &externals) const {
     if (!ephemeralText.empty()) {
       return ephemeralText;
     }
@@ -285,19 +286,19 @@ struct CompactZZCell {
     if (span.empty()) {
       return {};
     }
-    if (span.scroll == xudu::localScroll) {
+    if (span.scroll == xanadu::localScroll) {
       return std::string(primedia.readView(span));
     }
     const auto scrollIdx = static_cast<std::size_t>(span.scroll - 1);
     if (scrollIdx < externals.size()) {
       const auto res = resolver.resolve(externals[scrollIdx], span);
-      if (res.status == xudu::ResolutionStatus::VerifiedBytes) {
+      if (res.status == xanadu::ResolutionStatus::VerifiedBytes) {
         return res.text;
       }
-      if (res.status == xudu::ResolutionStatus::WithheldRedacted) {
+      if (res.status == xanadu::ResolutionStatus::WithheldRedacted) {
         return "[Redacted - Withheld]";
       }
-      if (res.status == xudu::ResolutionStatus::TranscopyrightLocked) {
+      if (res.status == xanadu::ResolutionStatus::TranscopyrightLocked) {
         if (res.lockInfo) {
           return "[🔒 " + std::to_string(res.lockInfo->priceAtomicUnits) + " " +
                  res.lockInfo->currencySymbol + "]";
@@ -312,22 +313,22 @@ struct CompactZZCell {
    * @brief Zero-copy view into local primedia spool memory.
    */
   [[nodiscard]] std::string_view
-  resolveLocalView(const xudu::PrimediaSpool &primedia) const noexcept {
+  resolveLocalView(const xanadu::PrimediaSpool &primedia) const noexcept {
     if (!ephemeralText.empty()) {
       return ephemeralText;
     }
-    if (span.empty() || span.scroll != xudu::localScroll) {
+    if (span.empty() || span.scroll != xanadu::localScroll) {
       return {};
     }
     return primedia.readView(span);
   }
 
   [[nodiscard]] std::string_view resolveLocalView(
-      const xudu::SegmentedPrimediaSpool &primedia) const noexcept {
+      const xanadu::SegmentedPrimediaSpool &primedia) const noexcept {
     if (!ephemeralText.empty()) {
       return ephemeralText;
     }
-    if (span.empty() || span.scroll != xudu::localScroll) {
+    if (span.empty() || span.scroll != xanadu::localScroll) {
       return {};
     }
     return primedia.readView(span);

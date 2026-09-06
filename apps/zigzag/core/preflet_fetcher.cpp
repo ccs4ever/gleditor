@@ -1,7 +1,7 @@
 #include "preflet_fetcher.hpp"
 #include "zzcore.hpp"
 
-#include <xudu/core/torrent.hpp>
+#include <common/xanadu/torrent.hpp>
 
 #include <gleditor/color.hpp>
 #include <gleditor/paths.hpp>
@@ -68,7 +68,7 @@ std::string sha1HexOfFile(const std::string &path, bool &ok) {
   if (!ok) {
     return {};
   }
-  const auto digest = xudu::sha1(contents);
+  const auto digest = xanadu::sha1(contents);
   return gleditor::color::toHex(std::string_view{
       reinterpret_cast<const char *>(digest.data()), digest.size()});
 }
@@ -155,7 +155,7 @@ bool PrefletFetcher::begin(const Preflet &preflet, std::string &error) {
   // Identify infohash for cache directory
   std::string hashHex;
   try {
-    const auto magnet = xudu::MagnetLink::parse(preflet.resource_identifier);
+    const auto magnet = xanadu::MagnetLink::parse(preflet.resource_identifier);
     hashHex           = magnet.hash.hex();
   } catch (const std::exception &) {
     if (params.info_hashes.has_v1()) {

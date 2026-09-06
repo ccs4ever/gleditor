@@ -138,7 +138,7 @@ void bindCommands(gleditor::Application &app, const AppStateRef &state,
                       });
   app.commands().bind(SDL_SCANCODE_S, Mod::Ctrl, "export-link-package",
                       "export current slice as Xudu LinkPackage", [viz] {
-                        xudu::MutableKeys keys{};
+                        xanadu::MutableKeys keys{};
                         const auto pkg = viz->exportAsLinkPackage(keys);
                         std::cout
                             << "Exported Xudu LinkPackage: " << pkg.describe()
@@ -255,11 +255,11 @@ int main(const int argc, char **argv) {
       bool loaded = false;
 
       if (!xuduPath.empty() && fs::exists(xuduPath)) {
-        xudu::Store store;
+        xanadu::Store store;
         store.load(xuduPath);
         auto versions = store.allVersions();
         if (versions.empty()) {
-          versions.push_back(xudu::MicroversionId::parse("1"));
+          versions.push_back(xanadu::MicroversionId::parse("1"));
         }
         doc    = zigzag::projectStoreToZigzag(store, versions);
         loaded = true;
@@ -312,11 +312,11 @@ int main(const int argc, char **argv) {
 
     if (!xuduPath.empty() && fs::exists(xuduPath)) {
       try {
-        xudu::Store store;
+        xanadu::Store store;
         store.load(xuduPath);
         auto versions = store.allVersions();
         if (versions.empty()) {
-          versions.push_back(xudu::MicroversionId::parse("1"));
+          versions.push_back(xanadu::MicroversionId::parse("1"));
         }
         viz->adoptXuduStore(store, versions);
         loaded = true;

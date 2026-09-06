@@ -15,7 +15,7 @@
 
 #include "pgp_fixture.hpp"
 
-namespace xudu::identity::pgp {
+namespace xanadu::identity::pgp {
 namespace {
 
 using ::testing::Eq;
@@ -85,4 +85,4 @@ TEST(PgpVerifyTest, RejectsMissingOrMalformedSignatures) {
 }
 
 } // namespace
-} // namespace xudu::identity::pgp
+} // namespace xanadu::identity::pgp

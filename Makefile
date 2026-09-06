@@ -518,12 +518,11 @@ LIB_SRCS_C :=
 ifeq ($(HAVE_DECODE_INDEX_ZSTD),1)
 LIB_SRCS_C += $(ZSTD_SEEKABLE_SRCS)
 endif
-GLEDITOR_SRCS  := $(shell find apps/gleditor -name '*.cpp' 2>/dev/null)
-# The xanalogical engine is separated from the program that displays it so that
-# it can be tested without a graphics device: every rule about versions, spans
-# and links is decidable from the store alone.
-XUDU_CORE_SRCS := $(shell find apps/xudu/core -name '*.cpp' 2>/dev/null)
-XUDU_SRCS      := $(filter-out $(XUDU_CORE_SRCS),$(shell find apps/xudu -name '*.cpp' 2>/dev/null))
+# The xanalogical engine and common data models are shared between xudu and zigzag
+# under apps/common/xanadu/.
+COMMON_XANADU_SRCS := $(shell find apps/common/xanadu -name '*.cpp' 2>/dev/null)
+XUDU_CORE_SRCS := $(COMMON_XANADU_SRCS)
+XUDU_SRCS      := $(shell find apps/xudu -maxdepth 1 -name '*.cpp' 2>/dev/null)
 ZIGZAG_CORE_SRCS := $(shell find apps/zigzag/core -name '*.cpp' 2>/dev/null)
 ZIGZAG_SRCS      := $(filter-out $(ZIGZAG_CORE_SRCS),$(shell find apps/zigzag -name '*.cpp' 2>/dev/null))
 LIB_TEST_SRCS  := $(shell find tests/lib -name '*.cpp' 2>/dev/null)
@@ -535,7 +534,8 @@ obj = $(addprefix $(OBJDIR)/,$(patsubst %.cpp,%.o,$(1)))
 objc = $(addprefix $(OBJDIR)/,$(patsubst %.c,%.o,$(1)))
 LIB_OBJS        := $(call obj,$(LIB_SRCS)) $(call objc,$(LIB_SRCS_C))
 GLEDITOR_OBJS   := $(call obj,$(GLEDITOR_SRCS))
-XUDU_CORE_OBJS  := $(call obj,$(XUDU_CORE_SRCS))
+COMMON_XANADU_OBJS := $(call obj,$(COMMON_XANADU_SRCS))
+XUDU_CORE_OBJS  := $(COMMON_XANADU_OBJS)
 XUDU_OBJS       := $(call obj,$(XUDU_SRCS))
 ZIGZAG_CORE_OBJS := $(call obj,$(ZIGZAG_CORE_SRCS))
 ZIGZAG_OBJS      := $(call obj,$(ZIGZAG_SRCS))
@@ -733,7 +733,7 @@ $(OBJDIR)/xudu: $(XUDU_OBJS) $(XUDU_CORE_OBJS) $(LIBLINK)
 	$(CXX) $(LDFLAGS) -o $@ $(XUDU_OBJS) $(XUDU_CORE_OBJS) $(APP_LDFLAGS) $(LIBS) $(XUDU_LIBS)
 .PHONY: xudu
 
-ZIGZAG_SHARED_CORE_OBJS := $(XUDU_CORE_OBJS)
+ZIGZAG_SHARED_CORE_OBJS := $(COMMON_XANADU_OBJS)
 
 
 zigzag: $(OBJDIR)/zigzag

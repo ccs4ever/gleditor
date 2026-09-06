@@ -1,6 +1,6 @@
 #include "zzcore.hpp"
 
-#include <xudu/core/torrent.hpp>
+#include <common/xanadu/torrent.hpp>
 
 #include <gleditor/color.hpp>
 #include <gleditor/paths.hpp>
@@ -48,7 +48,7 @@ bool isPrefletChainNode(const std::string_view type) {
 
 bool looksLikeBitTorrentMagnet(const std::string_view identifier) {
   try {
-    static_cast<void>(xudu::MagnetLink::parse(identifier));
+    static_cast<void>(xanadu::MagnetLink::parse(identifier));
     return true;
   } catch (...) {
     return false;

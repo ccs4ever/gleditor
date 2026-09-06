@@ -164,14 +164,14 @@ void ZigzagVisualizer::adoptDocument(ZzStructureDocument &&doc,
 }
 
 void ZigzagVisualizer::adoptXuduStore(
-    const xudu::Store &store,
-    const std::vector<xudu::MicroversionId> &versions) {
+    const xanadu::Store &store,
+    const std::vector<xanadu::MicroversionId> &versions) {
   auto doc = projectStoreToZigzag(store, versions);
   adoptDocument(std::move(doc), "xudu_store");
 }
 
 void ZigzagVisualizer::adoptXuduDocs(const std::vector<XuduDocInput> &docs,
-                                     const std::vector<xudu::Link> &links) {
+                                     const std::vector<xanadu::Link> &links) {
   auto doc = projectXuduToZigzag(docs, links);
   adoptDocument(std::move(doc), "xudu_documents");
 }
@@ -183,8 +183,8 @@ ZzRasterResult ZigzagVisualizer::rasterize(const DimID &primaryDim,
                               accursed_cell_focus_);
 }
 
-xudu::LinkPackage
-ZigzagVisualizer::exportAsLinkPackage(const xudu::MutableKeys &keys,
+xanadu::LinkPackage
+ZigzagVisualizer::exportAsLinkPackage(const xanadu::MutableKeys &keys,
                                       const std::string &salt,
                                       const std::int64_t sequence) const {
   const auto doc = document();

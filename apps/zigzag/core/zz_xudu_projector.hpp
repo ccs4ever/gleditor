@@ -11,12 +11,12 @@
 #include <string_view>
 #include <vector>
 
-#include "xudu/core/link_package.hpp"
-#include "xudu/core/merkle_ledger.hpp"
-#include "xudu/core/microversion.hpp"
-#include "xudu/core/ops.hpp"
-#include "xudu/core/scroll.hpp"
-#include "xudu/core/store.hpp"
+#include "common/xanadu/link_package.hpp"
+#include "common/xanadu/merkle_ledger.hpp"
+#include "common/xanadu/microversion.hpp"
+#include "common/xanadu/ops.hpp"
+#include "common/xanadu/scroll.hpp"
+#include "common/xanadu/store.hpp"
 #include "zzstructure.hpp"
 
 namespace zigzag {
@@ -25,8 +25,8 @@ namespace zigzag {
 struct XuduDocInput {
   std::string name;
   std::string text;
-  xudu::MicroversionId version;
-  std::vector<xudu::PrimediaSpan> spans;
+  xanadu::MicroversionId version;
+  std::vector<xanadu::PrimediaSpan> spans;
 };
 
 /// Configuration options for projecting Xudu documents into Zigzag space.
@@ -58,7 +58,7 @@ struct ZzRasterResult {
  */
 [[nodiscard]] ZzStructureDocument
 projectXuduToZigzag(const std::vector<XuduDocInput> &docs,
-                    const std::vector<xudu::Link> &links,
+                    const std::vector<xanadu::Link> &links,
                     const XuduProjectorOptions &opts = {});
 
 /**
@@ -66,8 +66,8 @@ projectXuduToZigzag(const std::vector<XuduDocInput> &docs,
  * structure.
  */
 [[nodiscard]] ZzStructureDocument
-projectStoreToZigzag(const xudu::Store &store,
-                     const std::vector<xudu::MicroversionId> &versions,
+projectStoreToZigzag(const xanadu::Store &store,
+                     const std::vector<xanadu::MicroversionId> &versions,
                      const XuduProjectorOptions &opts = {});
 
 /**
@@ -84,21 +84,21 @@ projectStoreToZigzag(const xudu::Store &store,
 
 /**
  * @brief Convert a Zigzag structure document into a signed, standalone
- * xudu::LinkPackage.
+ * xanadu::LinkPackage.
  *
  * Dimensional connections are encoded as typed Xanalinks (LinkType::Dimension)
  * with owner "dim:<dimension>".
  */
-[[nodiscard]] xudu::LinkPackage zzStructureToLinkPackage(
-    const ZzStructureDocument &doc, const xudu::MutableKeys &keys,
+[[nodiscard]] xanadu::LinkPackage zzStructureToLinkPackage(
+    const ZzStructureDocument &doc, const xanadu::MutableKeys &keys,
     const std::string &salt = "zigzag_slice", std::int64_t sequence = 1);
 
 /**
- * @brief Convert a xudu::LinkPackage containing dimensional links back into a
+ * @brief Convert a xanadu::LinkPackage containing dimensional links back into a
  *        ZzStructureDocument.
  */
 [[nodiscard]] ZzStructureDocument
-linkPackageToZzStructure(const xudu::LinkPackage &pkg);
+linkPackageToZzStructure(const xanadu::LinkPackage &pkg);
 
 /**
  * @brief Validate that a Zigzag structure strictly satisfies the 2-rank
@@ -114,7 +114,7 @@ linkPackageToZzStructure(const xudu::LinkPackage &pkg);
  */
 [[nodiscard]] bool
 verifySliceAuthor(const ZzStructureDocument &doc,
-                  const xudu::MerkleLedger &ledger,
+                  const xanadu::MerkleLedger &ledger,
                   const std::array<std::uint8_t, 32> &expectedRoot,
                   std::string *errorOut = nullptr);
 

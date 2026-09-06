@@ -12,14 +12,15 @@
 #include <sstream>
 #include <unordered_set>
 
-#include "xudu/core/format.hpp"
+#include "common/xanadu/format.hpp"
 #include "zzcore.hpp"
 
 namespace zigzag {
 
 namespace {
 
-bool spansOverlap(const xudu::PrimediaSpan &a, const xudu::PrimediaSpan &b) {
+bool spansOverlap(const xanadu::PrimediaSpan &a,
+                  const xanadu::PrimediaSpan &b) {
   if (a.scroll != b.scroll || a.empty() || b.empty()) {
     return false;
   }
@@ -29,7 +30,7 @@ bool spansOverlap(const xudu::PrimediaSpan &a, const xudu::PrimediaSpan &b) {
 } // namespace
 
 ZzStructureDocument projectXuduToZigzag(const std::vector<XuduDocInput> &docs,
-                                        const std::vector<xudu::Link> &links,
+                                        const std::vector<xanadu::Link> &links,
                                         const XuduProjectorOptions &opts) {
   ZzStructureDocument result;
   result.meta.name = "Xudu Xanadoc Space";
@@ -74,7 +75,7 @@ ZzStructureDocument projectXuduToZigzag(const std::vector<XuduDocInput> &docs,
   struct CellMapping {
     CellID id{0};
     std::size_t docIndex{0};
-    xudu::PrimediaSpan span;
+    xanadu::PrimediaSpan span;
   };
   std::vector<CellMapping> cellMappings;
   std::vector<std::vector<CellID>> docCellChains(docs.size());
@@ -84,8 +85,8 @@ ZzStructureDocument projectXuduToZigzag(const std::vector<XuduDocInput> &docs,
     CellID latestCellId{0};
   };
   struct SpanLess {
-    bool operator()(const xudu::PrimediaSpan &a,
-                    const xudu::PrimediaSpan &b) const noexcept {
+    bool operator()(const xanadu::PrimediaSpan &a,
+                    const xanadu::PrimediaSpan &b) const noexcept {
       if (a.scroll != b.scroll) {
         return a.scroll < b.scroll;
       }
@@ -95,7 +96,7 @@ ZzStructureDocument projectXuduToZigzag(const std::vector<XuduDocInput> &docs,
       return a.length < b.length;
     }
   };
-  std::map<xudu::PrimediaSpan, SpanTracker, SpanLess> spanTrackers;
+  std::map<xanadu::PrimediaSpan, SpanTracker, SpanLess> spanTrackers;
 
   for (std::size_t docIdx = 0; docIdx < docs.size(); ++docIdx) {
     const auto &doc = docs[docIdx];
@@ -121,7 +122,7 @@ ZzStructureDocument projectXuduToZigzag(const std::vector<XuduDocInput> &docs,
         }
 
         if (!paraText.empty()) {
-          xudu::PrimediaSpan span;
+          xanadu::PrimediaSpan span;
           if (!doc.spans.empty() && paraIdx < doc.spans.size()) {
             span = doc.spans[paraIdx];
           }
@@ -159,7 +160,7 @@ ZzStructureDocument projectXuduToZigzag(const std::vector<XuduDocInput> &docs,
         start = (end == doc.text.size()) ? end : end + 2;
       }
     } else {
-      xudu::PrimediaSpan span;
+      xanadu::PrimediaSpan span;
       if (!doc.spans.empty()) {
         span = doc.spans.front();
       }
@@ -270,24 +271,25 @@ ZzStructureDocument projectXuduToZigzag(const std::vector<XuduDocInput> &docs,
 }
 
 ZzStructureDocument
-projectStoreToZigzag(const xudu::Store &store,
-                     const std::vector<xudu::MicroversionId> &versions,
+projectStoreToZigzag(const xanadu::Store &store,
+                     const std::vector<xanadu::MicroversionId> &versions,
                      const XuduProjectorOptions &opts) {
   std::vector<XuduDocInput> docInputs;
   for (const auto &verId : versions) {
     const auto ver = store.rebuild(verId);
     std::string assembledText;
-    std::vector<xudu::PrimediaSpan> spans = ver.pieces();
+    std::vector<xanadu::PrimediaSpan> spans = ver.pieces();
     for (const auto &piece : spans) {
       if (piece.isLocal()) {
         assembledText += store.read(piece);
       } else {
         const auto res = store.resolve(piece);
-        if (res.status == xudu::ResolutionStatus::VerifiedBytes) {
+        if (res.status == xanadu::ResolutionStatus::VerifiedBytes) {
           assembledText += res.text;
-        } else if (res.status == xudu::ResolutionStatus::WithheldRedacted) {
+        } else if (res.status == xanadu::ResolutionStatus::WithheldRedacted) {
           assembledText += "[Redacted - Withheld]";
-        } else if (res.status == xudu::ResolutionStatus::TranscopyrightLocked) {
+        } else if (res.status ==
+                   xanadu::ResolutionStatus::TranscopyrightLocked) {
           if (res.lockInfo) {
             assembledText += "[🔒 " +
                              std::to_string(res.lockInfo->priceAtomicUnits) +
@@ -307,7 +309,7 @@ projectStoreToZigzag(const xudu::Store &store,
     });
   }
 
-  std::vector<xudu::Link> allLinks;
+  std::vector<xanadu::Link> allLinks;
   for (const auto &[linkId, link] : store.links()) {
     allLinks.push_back(link);
   }
@@ -421,22 +423,22 @@ ZzRasterResult rasterizeZzStructure(const ZzStructureDocument &doc,
   return result;
 }
 
-xudu::LinkPackage zzStructureToLinkPackage(const ZzStructureDocument &doc,
-                                           const xudu::MutableKeys &keys,
-                                           const std::string &salt,
-                                           const std::int64_t sequence) {
-  std::vector<xudu::GlobalLink> links;
-  std::map<std::string, xudu::Scroll> scrolls;
+xanadu::LinkPackage zzStructureToLinkPackage(const ZzStructureDocument &doc,
+                                             const xanadu::MutableKeys &keys,
+                                             const std::string &salt,
+                                             const std::int64_t sequence) {
+  std::vector<xanadu::GlobalLink> links;
+  std::map<std::string, xanadu::Scroll> scrolls;
 
   const std::string scrollName =
       "slice:" + (doc.meta.name.empty() ? "anonymous" : doc.meta.name);
   std::uint64_t currentOffset = 0;
-  std::unordered_map<CellID, xudu::GlobalSpan> cellSpans;
+  std::unordered_map<CellID, xanadu::GlobalSpan> cellSpans;
 
   for (const auto &[id, cell] : doc.cells) {
     const auto effectiveText = zzcore::getEffectiveCellText(doc.cells, id);
     const auto len           = static_cast<std::uint64_t>(effectiveText.size());
-    const xudu::GlobalSpan span{scrollName, currentOffset, len};
+    const xanadu::GlobalSpan span{scrollName, currentOffset, len};
     cellSpans[id] = span;
     currentOffset += len;
   }
@@ -444,9 +446,9 @@ xudu::LinkPackage zzStructureToLinkPackage(const ZzStructureDocument &doc,
   for (const auto &[id, cell] : doc.cells) {
     for (const auto &[dim, linkPairs] : cell.dimensions) {
       if (linkPairs.pos != 0 && cellSpans.contains(linkPairs.pos)) {
-        xudu::GlobalLink gLink;
-        gLink.type  = xudu::LinkType::Dimension;
-        gLink.tier  = xudu::ProminenceTier::Author;
+        xanadu::GlobalLink gLink;
+        gLink.type  = xanadu::LinkType::Dimension;
+        gLink.tier  = xanadu::ProminenceTier::Author;
         gLink.owner = "dim:" + dim;
         gLink.left.push_back(cellSpans[id]);
         gLink.right.push_back(cellSpans[linkPairs.pos]);
@@ -455,22 +457,22 @@ xudu::LinkPackage zzStructureToLinkPackage(const ZzStructureDocument &doc,
     }
   }
 
-  return xudu::publishLinkPackage(
+  return xanadu::publishLinkPackage(
       keys, salt, doc.meta.name, sequence,
       static_cast<std::uint64_t>(std::time(nullptr)), std::move(links),
       std::move(scrolls));
 }
 
-ZzStructureDocument linkPackageToZzStructure(const xudu::LinkPackage &pkg) {
+ZzStructureDocument linkPackageToZzStructure(const xanadu::LinkPackage &pkg) {
   ZzStructureDocument doc;
   doc.meta.name = pkg.title.empty() ? "Imported Link Package" : pkg.title;
   doc.focus     = 1;
 
-  std::map<xudu::GlobalSpan, CellID> spanToCell;
+  std::map<xanadu::GlobalSpan, CellID> spanToCell;
   CellID nextCellId = 1;
 
   for (const auto &link : pkg.links) {
-    if (link.type == xudu::LinkType::Dimension) {
+    if (link.type == xanadu::LinkType::Dimension) {
       for (const auto &span : link.left) {
         if (!spanToCell.contains(span)) {
           const CellID id  = nextCellId++;
@@ -563,7 +565,7 @@ bool validate2RankManifold(const ZzStructureDocument &doc,
 }
 
 bool verifySliceAuthor(const ZzStructureDocument &doc,
-                       const xudu::MerkleLedger &ledger,
+                       const xanadu::MerkleLedger &ledger,
                        const std::array<std::uint8_t, 32> &expectedRoot,
                        std::string *errorOut) {
   if (doc.meta.author.empty()) {
@@ -599,7 +601,7 @@ bool verifySliceAuthor(const ZzStructureDocument &doc,
   }
 
   const auto proof = ledger.generateProof(link->sequence);
-  if (!xudu::MerkleLedger::verifyInclusion(*link, proof, expectedRoot)) {
+  if (!xanadu::MerkleLedger::verifyInclusion(*link, proof, expectedRoot)) {
     if (errorOut) {
       *errorOut = "Merkle inclusion proof failed against expected root";
     }

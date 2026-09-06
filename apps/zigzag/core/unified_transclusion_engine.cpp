@@ -13,7 +13,7 @@
 
 namespace zigzag {
 
-UnifiedTransclusionEngine::UnifiedTransclusionEngine(xudu::Store &store)
+UnifiedTransclusionEngine::UnifiedTransclusionEngine(xanadu::Store &store)
     : store_(store) {}
 
 void UnifiedTransclusionEngine::syncIncremental() {
@@ -31,7 +31,7 @@ void UnifiedTransclusionEngine::syncIncremental() {
 }
 
 void UnifiedTransclusionEngine::buildCellFromOp(
-    const std::uint32_t opIndex, const xudu::CompactOpNode &node) {
+    const std::uint32_t opIndex, const xanadu::CompactOpNode &node) {
   if (opIndexToCell_.contains(opIndex)) {
     return;
   }
@@ -44,7 +44,7 @@ void UnifiedTransclusionEngine::buildCellFromOp(
   cell.type         = "op";
 
   // If node is a transclusion by document offset, resolve its primedia span
-  if (cell.span.empty() && node.kind == xudu::OpKind::Transclude &&
+  if (cell.span.empty() && node.kind == xanadu::OpKind::Transclude &&
       node.sourceOpIndex != 0) {
     const auto sourceVer = store_.segmentedOps().idOf(node.sourceOpIndex);
     const auto from      = store_.rebuild(sourceVer);
@@ -93,8 +93,8 @@ void UnifiedTransclusionEngine::buildCellFromOp(
       }
     }
 
-    if (!targetMasterId.has_value() && node.kind == xudu::OpKind::Transclude &&
-        node.sourceOpIndex != 0 &&
+    if (!targetMasterId.has_value() &&
+        node.kind == xanadu::OpKind::Transclude && node.sourceOpIndex != 0 &&
         opIndexToCell_.contains(node.sourceOpIndex)) {
       targetMasterId = opIndexToCell_[node.sourceOpIndex];
     }
