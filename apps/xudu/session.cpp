@@ -677,6 +677,31 @@ std::size_t Session::loadAuxiliaryStore(const std::string &aPath) {
   return addStore(std::move(newStore), aPath, false);
 }
 
+std::size_t Session::createNewStore(const std::string &aPath) {
+  namespace fs          = std::filesystem;
+  std::string targetDir = aPath;
+  bool isTemporary      = false;
+  if (targetDir.empty()) {
+    const auto nowNanos =
+        std::chrono::steady_clock::now().time_since_epoch().count();
+    const auto tempDir = fs::temp_directory_path() /
+                         ("xudu_genesis_" + std::to_string(nowNanos) + "_" +
+                          std::to_string(stores.size()));
+    fs::create_directories(tempDir);
+    targetDir   = tempDir.string();
+    isTemporary = true;
+  } else {
+    fs::create_directories(targetDir);
+  }
+
+  auto perma    = (stores.empty() || !stores[0].store)
+                      ? nullptr
+                      : stores[0].store->userPermascrollPtr();
+  auto newStore = std::make_unique<Store>(perma);
+  newStore->save(targetDir);
+  return addStore(std::move(newStore), targetDir, isTemporary);
+}
+
 void Session::save(const std::size_t index) const {
   const_cast<Session *>(this)->flushUncommitted();
   if (index < stores.size() && stores[index].store &&
@@ -734,6 +759,106 @@ void Session::viewOpened(const MicroversionId &version,
   const auto &st = store(storeIndex);
   open.push_back(OpenView{version, storeIndex, st.rebuild(version), {}, 0, {}});
   invalidate();
+}
+
+void Session::viewClosed(const std::uint32_t docIndex) {
+  if (docIndex >= open.size()) {
+    return;
+  }
+  flushUncommitted(docIndex);
+  open.erase(open.begin() + static_cast<std::ptrdiff_t>(docIndex));
+  invalidate();
+}
+
+std::size_t Session::systemStoreIndex(const SystemDocKind kind) {
+  const auto it = systemStoreIndices_.find(kind);
+  if (it != systemStoreIndices_.end()) {
+    return it->second;
+  }
+
+  const auto dir = systemDocDirectory(kind);
+  std::filesystem::create_directories(dir);
+
+  auto perma    = (stores.empty() || !stores[0].store)
+                      ? nullptr
+                      : stores[0].store->userPermascrollPtr();
+  auto sysStore = std::make_unique<Store>(perma);
+  sysStore->setSystem(true);
+
+  if (std::filesystem::exists(dir / "ops.nodes") ||
+      std::filesystem::exists(dir / "ops.spool") ||
+      std::filesystem::exists(dir / "current.yaml")) {
+    sysStore->load(dir.string());
+    if (sysStore->currentVersions().empty() && !sysStore->latest().isZero()) {
+      sysStore->repointCurrentVersion(sysStore->latest());
+    }
+  } else {
+    // Fresh system store: insert default content
+    const std::string defaultContent = defaultSystemDocContent(kind);
+    const auto genesis = sysStore->insert(MicroversionId{}, 0, defaultContent);
+    sysStore->repointCurrentVersion(genesis);
+    sysStore->setVersionAnnotation(
+        genesis,
+        {.alias       = "default",
+         .description = "System default " + std::string(systemDocName(kind)),
+         .tag         = "system",
+         .timestamp   = ""});
+    sysStore->save(dir.string());
+  }
+
+  const auto sIdx = addStore(std::move(sysStore), dir.string(), false);
+  systemStoreIndices_[kind] = sIdx;
+  return sIdx;
+}
+
+Store &Session::systemStore(const SystemDocKind kind) {
+  return store(systemStoreIndex(kind));
+}
+
+const Store &Session::systemStore(const SystemDocKind kind) const {
+  const auto it = systemStoreIndices_.find(kind);
+  if (it != systemStoreIndices_.end()) {
+    return store(it->second);
+  }
+  return const_cast<Session *>(this)->systemStore(kind);
+}
+
+std::optional<SystemDocKind>
+Session::systemDocKindForStoreIndex(const std::size_t storeIndex) const {
+  for (const auto &[kind, sIdx] : systemStoreIndices_) {
+    if (sIdx == storeIndex) {
+      return kind;
+    }
+  }
+  if (storeIndex < stores.size() && stores[storeIndex].store &&
+      stores[storeIndex].store->isSystem()) {
+    for (std::uint8_t k = 0;
+         k < static_cast<std::uint8_t>(SystemDocKind::Count); ++k) {
+      const auto kind = static_cast<SystemDocKind>(k);
+      if (stores[storeIndex].path == systemDocDirectory(kind).string() ||
+          stores[storeIndex].path == systemDocUri(kind)) {
+        return kind;
+      }
+    }
+  }
+  return std::nullopt;
+}
+
+void Session::repointSystemDoc(const SystemDocKind kind,
+                               const MicroversionId &version) {
+  const auto sIdx = systemStoreIndex(kind);
+  auto &st        = store(sIdx);
+  st.repointCurrentVersion(version);
+  st.save(stores[sIdx].path);
+  // Also update any open view showing this system store
+  for (std::size_t i = 0; i < open.size(); ++i) {
+    if (open[i].storeIndex == sIdx) {
+      refresh(static_cast<std::uint32_t>(i), version);
+    }
+  }
+  if (systemDocChangedCallback_) {
+    systemDocChangedCallback_(kind, st.textOf(version));
+  }
 }
 
 void Session::refresh(const std::uint32_t docIndex,
@@ -1065,8 +1190,21 @@ Session::sourceFor(const MicroversionId &version,
     }
   }
 
+  std::string title;
+  if (st.isSystem()) {
+    if (const auto kind = systemDocKindForStoreIndex(storeIndex)) {
+      title = std::string(systemDocUri(*kind));
+    }
+  }
+  if (title.empty() && !version.isZero()) {
+    if (const auto ann = st.versionAnnotation(version);
+        ann && !ann->alias.empty()) {
+      title = ann->alias;
+    }
+  }
+
   return std::make_shared<VersionTextSource>(concatext, version, breaks, boxes,
-                                             blockStyles);
+                                             blockStyles, title);
 }
 
 std::vector<Session::MediaSpanInfo>
@@ -1172,7 +1310,18 @@ void Session::scrubToVersion(const std::uint32_t docIndex,
     return;
   }
   refresh(docIndex, version);
-  if (const auto src = sourceFor(version, open[docIndex].storeIndex)) {
+  const auto sIdx = open[docIndex].storeIndex;
+  auto &st        = store(sIdx);
+  if (st.isSystem()) {
+    st.repointCurrentVersion(version);
+    st.save(stores[sIdx].path);
+    if (systemDocChangedCallback_) {
+      if (const auto kind = systemDocKindForStoreIndex(sIdx)) {
+        systemDocChangedCallback_(*kind, st.textOf(version));
+      }
+    }
+  }
+  if (const auto src = sourceFor(version, sIdx)) {
     doc.load(*src);
   }
 }
@@ -1268,6 +1417,14 @@ void Session::flushUncommitted(const std::optional<std::uint32_t> docIndex) {
     }
 
     refresh(static_cast<std::uint32_t>(which), curVersion);
+    if (st.isSystem()) {
+      st.repointCurrentVersion(curVersion);
+      if (systemDocChangedCallback_) {
+        if (const auto kind = systemDocKindForStoreIndex(sIdx)) {
+          systemDocChangedCallback_(*kind, st.textOf(curVersion));
+        }
+      }
+    }
     save(sIdx);
   };
 

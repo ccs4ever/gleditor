@@ -9,6 +9,8 @@
 #include "xudu/core/microversion.hpp"
 #include "xudu/core/scroll.hpp"
 #include "xudu/core/store.hpp"
+#include "xudu/core/system_docs.hpp"
+#include "xudu/core/yaml.hpp"
 
 namespace fs = std::filesystem;
 
@@ -157,4 +159,97 @@ TEST(HoleRenderingTest, EachHoleReasonHasItsOwnColour) {
 
   // Transcopyright is its own case, not folded into withheld.
   EXPECT_NE(colourFor(xudu::HoleReason::TranscopyrightLock), withheld);
+}
+
+TEST(SystemDocsTest, enumAndUriMappingRoundTrip) {
+  using xudu::SystemDocKind;
+  EXPECT_EQ(xudu::systemDocName(SystemDocKind::Keymap), "keymap");
+  EXPECT_EQ(xudu::systemDocName(SystemDocKind::Settings), "settings");
+  EXPECT_EQ(xudu::systemDocName(SystemDocKind::Layout), "layout");
+  EXPECT_EQ(xudu::systemDocName(SystemDocKind::UI), "ui");
+  EXPECT_EQ(xudu::systemDocName(SystemDocKind::Pouches), "pouches");
+
+  EXPECT_EQ(xudu::systemDocUri(SystemDocKind::Keymap), "system://keymap");
+  EXPECT_EQ(xudu::systemDocUri(SystemDocKind::Settings), "system://settings");
+  EXPECT_EQ(xudu::systemDocUri(SystemDocKind::Layout), "system://layout");
+  EXPECT_EQ(xudu::systemDocUri(SystemDocKind::UI), "system://ui");
+  EXPECT_EQ(xudu::systemDocUri(SystemDocKind::Pouches), "system://pouches");
+
+  EXPECT_EQ(xudu::systemDocKindFromUri("system://keymap"),
+            SystemDocKind::Keymap);
+  EXPECT_EQ(xudu::systemDocKindFromUri("system://settings"),
+            SystemDocKind::Settings);
+  EXPECT_EQ(xudu::systemDocKindFromUri("system://layout"),
+            SystemDocKind::Layout);
+  EXPECT_EQ(xudu::systemDocKindFromUri("system://ui"), SystemDocKind::UI);
+  EXPECT_EQ(xudu::systemDocKindFromUri("system://pouches"),
+            SystemDocKind::Pouches);
+  EXPECT_FALSE(xudu::systemDocKindFromUri("system://unknown").has_value());
+  EXPECT_FALSE(xudu::systemDocKindFromUri("file:///path").has_value());
+}
+
+TEST(SystemDocsTest, defaultContentIsValidYaml) {
+  using xudu::SystemDocKind;
+  for (const auto kind :
+       {SystemDocKind::Keymap, SystemDocKind::Settings, SystemDocKind::Layout,
+        SystemDocKind::UI, SystemDocKind::Pouches}) {
+    const std::string content = xudu::defaultSystemDocContent(kind);
+    EXPECT_FALSE(content.empty());
+    const auto parsed = xudu::yaml::read(content);
+    ASSERT_TRUE(parsed.has_value())
+        << "Failed to parse default YAML for " << xudu::systemDocName(kind);
+    EXPECT_FALSE(parsed->empty())
+        << "Parsed empty entries for " << xudu::systemDocName(kind);
+  }
+}
+
+TEST_F(StoreMultiStoreTest, systemStoreCreationAndHeadRestriction) {
+  const auto sysPath = (testDir / "system_keymap").string();
+  xudu::Store store;
+  store.setSystem(true);
+  EXPECT_TRUE(store.isSystem());
+
+  const auto defaultContent =
+      xudu::defaultSystemDocContent(xudu::SystemDocKind::Keymap);
+  const auto v1 = store.insert(xudu::MicroversionId{}, 0, defaultContent);
+  store.repointCurrentVersion(v1);
+  store.setVersionAnnotation(v1, {.alias       = "default",
+                                  .description = "System default keymap",
+                                  .tag         = "system",
+                                  .timestamp   = ""});
+
+  EXPECT_EQ(store.currentVersions().size(), 1U);
+  EXPECT_EQ(store.primaryCurrentVersion(), v1);
+  EXPECT_EQ(store.displayName(v1), "default");
+
+  // Create a customized keymap microversion
+  const auto v2 = store.insert(v1, 0, "# Custom Keymap\n");
+  store.repointCurrentVersion(v2);
+  store.setVersionAnnotation(v2, {.alias       = "custom-emacs",
+                                  .description = "Customized keybindings",
+                                  .tag         = "user",
+                                  .timestamp   = ""});
+
+  // Strict invariant: 1 current version head for system store
+  EXPECT_EQ(store.currentVersions().size(), 1U);
+  EXPECT_EQ(store.primaryCurrentVersion(), v2);
+  EXPECT_EQ(store.displayName(v2), "custom-emacs");
+
+  store.save(sysPath);
+
+  // Reload and verify persistence of single head and annotations
+  xudu::Store reloaded;
+  reloaded.load(sysPath);
+  reloaded.setSystem(true);
+
+  EXPECT_EQ(reloaded.currentVersions().size(), 1U);
+  EXPECT_EQ(reloaded.primaryCurrentVersion(), v2);
+  EXPECT_EQ(reloaded.displayName(v2), "custom-emacs");
+  EXPECT_EQ(reloaded.resolveAlias("default"), v1);
+  EXPECT_EQ(reloaded.resolveAlias("custom-emacs"), v2);
+
+  // Repoint back to default non-destructively
+  reloaded.repointCurrentVersion(v1);
+  EXPECT_EQ(reloaded.currentVersions().size(), 1U);
+  EXPECT_EQ(reloaded.primaryCurrentVersion(), v1);
 }

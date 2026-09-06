@@ -16,7 +16,9 @@
 
 #include <chrono>
 #include <cstdint>
+#include <filesystem>
 #include <functional>
+#include <map>
 #include <memory>
 #include <mutex>
 #include <optional>
@@ -45,6 +47,7 @@
 #include "xudu/core/resolver.hpp"
 #include "xudu/core/store.hpp"
 #include "xudu/core/swarm.hpp"
+#include "xudu/core/system_docs.hpp"
 #include "xudu/core/uncommitted_op_log.hpp"
 
 class Caret;
@@ -68,13 +71,17 @@ public:
   VersionTextSource(std::string aText, MicroversionId aVersion,
                     std::vector<std::uint32_t> aBreaks                  = {},
                     std::vector<gleditor::LayoutBox> aBoxes             = {},
-                    std::vector<gleditor::BlockStyleRange> aBlockStyles = {})
+                    std::vector<gleditor::BlockStyleRange> aBlockStyles = {},
+                    std::string aName                                   = {})
       : contents(std::move(aText)), id(std::move(aVersion)),
         breaks(std::move(aBreaks)), mediaBoxes(std::move(aBoxes)),
-        mediaBlockStyles(std::move(aBlockStyles)) {}
+        mediaBlockStyles(std::move(aBlockStyles)),
+        customName(std::move(aName)) {}
 
   [[nodiscard]] std::string text() const override { return contents; }
-  [[nodiscard]] std::string name() const override { return id.str(); }
+  [[nodiscard]] std::string name() const override {
+    return customName.empty() ? id.str() : customName;
+  }
   [[nodiscard]] const MicroversionId &version() const { return id; }
   [[nodiscard]] std::vector<std::uint32_t> forcedBreaks() const override {
     return breaks;
@@ -97,6 +104,7 @@ private:
   /// anchor sits.
   std::vector<gleditor::LayoutBox> mediaBoxes;
   std::vector<gleditor::BlockStyleRange> mediaBlockStyles;
+  std::string customName;
 };
 
 /**
@@ -461,6 +469,49 @@ public:
   void viewOpened(const MicroversionId &version, std::size_t storeIndex = 0);
 
   /**
+   * @brief Close an open document view. Flushes any uncommitted edits,
+   * removes the view from open list, and invalidates decorations.
+   */
+  void viewClosed(std::uint32_t docIndex);
+
+  /**
+   * @brief Create a new sovereign store bound to the author's UserPermascroll.
+   *
+   * @param path File system directory to persist this store. If empty, a
+   * temporary directory is allocated.
+   * @return The store index.
+   */
+  std::size_t createNewStore(const std::string &path = "");
+
+  // -- System Xanadocs & Subsystem Hot-Reload --------------------------------
+  using SystemDocChangedCallback =
+      std::function<void(SystemDocKind kind, const std::string &content)>;
+
+  void setSystemDocChangedCallback(SystemDocChangedCallback cb) {
+    systemDocChangedCallback_ = std::move(cb);
+  }
+  [[nodiscard]] const SystemDocChangedCallback &
+  systemDocChangedCallback() const {
+    return systemDocChangedCallback_;
+  }
+
+  /// The store index for a sovereign system xanadoc, loaded or initialized on
+  /// first access.
+  std::size_t systemStoreIndex(SystemDocKind kind);
+
+  /// Access a sovereign system xanadoc.
+  [[nodiscard]] Store &systemStore(SystemDocKind kind);
+  [[nodiscard]] const Store &systemStore(SystemDocKind kind) const;
+
+  /// Check if @p storeIndex corresponds to a system xanadoc.
+  [[nodiscard]] std::optional<SystemDocKind>
+  systemDocKindForStoreIndex(std::size_t storeIndex) const;
+
+  /// Non-destructively repoint a system xanadoc's primary head to @p version
+  /// and trigger subsystem notification.
+  void repointSystemDoc(SystemDocKind kind, const MicroversionId &version);
+
+  /**
    * @brief A source for @p version, ready to hand to the render queue.
    *
    * Each media span is anchored by a single U+FFFC OBJECT REPLACEMENT
@@ -612,6 +663,8 @@ private:
   std::optional<Author> who;
   /// The per-user configuration, read once.
   std::optional<Config> config;
+  std::map<SystemDocKind, std::size_t> systemStoreIndices_;
+  SystemDocChangedCallback systemDocChangedCallback_;
 
   MediaManager mediaManager_;
   gleditor::GroundingModal groundingModal_;
