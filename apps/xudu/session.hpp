@@ -723,6 +723,9 @@ public:
                          std::vector<std::shared_ptr<Doc>> &docs,
                          Caret *localCaret = nullptr);
 
+  void applyRemoteScrollSealed(
+      const SwarmContentSource::ScrollSealedBroadcast &sealed);
+
   [[nodiscard]] const std::map<std::string, RemoteCollaborator> &
   collaborators() const {
     return collaborators_;

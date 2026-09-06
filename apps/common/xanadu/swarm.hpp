@@ -318,6 +318,48 @@ public:
   [[nodiscard]] static std::optional<LiveOpBroadcast>
   decodeLiveOp(std::string_view body);
 
+  /// A notification that a range of an author's permascroll has been sealed
+  /// into a BitTorrent piece.
+  struct ScrollSealedBroadcast {
+    InfoHash swarmHash;
+    std::string authorScrollKey;
+    std::uint64_t sealedUpTo{0};
+    InfoHash pieceInfoHash;
+    std::int64_t timestamp{0};
+  };
+
+  using ScrollSealedHandler =
+      std::function<void(const ScrollSealedBroadcast &)>;
+
+  /**
+   * @brief Broadcast a sealed permascroll segment notification to peers.
+   */
+  void broadcastScrollSealed(const ScrollSealedBroadcast &broadcast);
+
+  /**
+   * @brief Register a callback for incoming scroll sealed notifications.
+   */
+  void onScrollSealed(ScrollSealedHandler handler);
+
+  /**
+   * @brief Retrieve and clear any queued scroll sealed notifications.
+   */
+  [[nodiscard]] std::vector<ScrollSealedBroadcast> takePendingScrollSealed();
+
+  /**
+   * @brief Encode a scroll sealed broadcast to bencoded byte buffer for BEP 10
+   * transmission.
+   */
+  [[nodiscard]] static std::string
+  encodeScrollSealed(const ScrollSealedBroadcast &broadcast);
+
+  /**
+   * @brief Decode a bencoded byte buffer received via BEP 10 into a
+   * ScrollSealedBroadcast.
+   */
+  [[nodiscard]] static std::optional<ScrollSealedBroadcast>
+  decodeScrollSealed(std::string_view body);
+
   // -- ContentSource --------------------------------------------------------
 
   [[nodiscard]] const Metainfo *metainfo(const InfoHash &hash) const override;

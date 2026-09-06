@@ -46,6 +46,10 @@ void CollaboratorCaretOverlay::drawFrame(gleditor::FrameContext &ctx) {
     for (const auto &b : pending) {
       session_.applyRemoteLiveOp(b, ctx.state.docs, ctx.state.caret);
     }
+    const auto sealedNotifications = sw->takePendingScrollSealed();
+    for (const auto &sealed : sealedNotifications) {
+      session_.applyRemoteScrollSealed(sealed);
+    }
   }
 
   // 2. Broadcast local caret movement on the main render thread

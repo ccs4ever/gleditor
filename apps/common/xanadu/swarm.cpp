@@ -168,6 +168,12 @@ struct SwarmContentSource::Impl {
   std::vector<LiveOpBroadcast> pendingLiveOps;
   /// Mutex protecting liveOpHandlers and pendingLiveOps.
   std::mutex liveOpsMutex;
+  /// Handlers registered for incoming scroll sealed notifications.
+  std::vector<ScrollSealedHandler> scrollSealedHandlers;
+  /// Scroll sealed notifications queued across active swarms.
+  std::vector<ScrollSealedBroadcast> pendingScrollSealed;
+  /// Mutex protecting scrollSealedHandlers and pendingScrollSealed.
+  std::mutex scrollSealedMutex;
   /// Active torrent plugins keyed by info hash.
   std::map<InfoHash, std::shared_ptr<XuduTorrentPlugin>> torrentPlugins;
   /// Mutex protecting torrentPlugins.
@@ -177,6 +183,10 @@ struct SwarmContentSource::Impl {
 
   void receiveIncomingLiveOp(const LiveOpBroadcast &broadcast);
   void broadcastLiveOpToPeers(const InfoHash &hash, const std::string &payload);
+
+  void receiveIncomingScrollSealed(const ScrollSealedBroadcast &broadcast);
+  void broadcastScrollSealedToPeers(const InfoHash &hash,
+                                    const std::string &payload);
 
   static lt::settings_pack
   settings(const SwarmContentSource::Options &options) {
@@ -422,9 +432,11 @@ struct SwarmContentSource::Impl {
 // protocols (e.g. "xudu_live_op", and upcoming merkle ledger sync /
 // decentralized oracle consensus).
 
-static constexpr const char *kExtLiveOpName  = "xudu_live_op";
-static constexpr int kExtLiveOpMsgId         = 1;
-static constexpr std::uint8_t kBtMsgExtended = 20;
+static constexpr const char *kExtLiveOpName       = "xudu_live_op";
+static constexpr int kExtLiveOpMsgId              = 1;
+static constexpr const char *kExtScrollSealedName = "xudu_scroll_sealed";
+static constexpr int kExtScrollSealedMsgId        = 2;
+static constexpr std::uint8_t kBtMsgExtended      = 20;
 
 class XuduPeerPlugin : public lt::peer_plugin,
                        public std::enable_shared_from_this<XuduPeerPlugin> {
@@ -445,7 +457,8 @@ public:
     if (m.type() != lt::entry::dictionary_t) {
       m = lt::entry(lt::entry::dictionary_t);
     }
-    m[kExtLiveOpName] = kExtLiveOpMsgId;
+    m[kExtLiveOpName]       = kExtLiveOpMsgId;
+    m[kExtScrollSealedName] = kExtScrollSealedMsgId;
   }
 
   bool on_extension_handshake(lt::bdecode_node const &node) override {
@@ -458,6 +471,10 @@ public:
       if (opNode) {
         remoteLiveOpId_ = static_cast<int>(opNode.int_value());
       }
+      const auto sealedNode = m.dict_find_int("xudu_scroll_sealed");
+      if (sealedNode) {
+        remoteScrollSealedId_ = static_cast<int>(sealedNode.int_value());
+      }
     }
     return true;
   }
@@ -468,6 +485,16 @@ public:
       if (auto broadcast = SwarmContentSource::decodeLiveOp(payload)) {
         if (impl_) {
           impl_->receiveIncomingLiveOp(*broadcast);
+        }
+      }
+      return true;
+    }
+    if (msg == kExtScrollSealedMsgId &&
+        static_cast<int>(body.size()) == length) {
+      const std::string_view payload(body.data(), body.size());
+      if (auto broadcast = SwarmContentSource::decodeScrollSealed(payload)) {
+        if (impl_) {
+          impl_->receiveIncomingScrollSealed(*broadcast);
         }
       }
       return true;
@@ -499,7 +526,34 @@ public:
     }
   }
 
+  bool sendScrollSealed(const std::string &bencodedPayload) {
+    if (remoteScrollSealedId_ <= 0) {
+      return false;
+    }
+    const std::uint32_t payloadLen =
+        1 + 1 + static_cast<std::uint32_t>(bencodedPayload.size());
+    std::string packet;
+    packet.resize(4 + payloadLen);
+    packet[0] = static_cast<char>((payloadLen >> 24) & 0xFF);
+    packet[1] = static_cast<char>((payloadLen >> 16) & 0xFF);
+    packet[2] = static_cast<char>((payloadLen >> 8) & 0xFF);
+    packet[3] = static_cast<char>(payloadLen & 0xFF);
+    packet[4] = static_cast<char>(kBtMsgExtended);
+    packet[5] = static_cast<char>(remoteScrollSealedId_);
+    std::memcpy(&packet[6], bencodedPayload.data(), bencodedPayload.size());
+
+    try {
+      pc_.send_buffer(packet.data(), static_cast<int>(packet.size()));
+      return true;
+    } catch (...) {
+      return false;
+    }
+  }
+
   [[nodiscard]] bool supportsLiveOp() const { return remoteLiveOpId_ > 0; }
+  [[nodiscard]] bool supportsScrollSealed() const {
+    return remoteScrollSealedId_ > 0;
+  }
   [[nodiscard]] const InfoHash &swarmHash() const { return swarmHash_; }
 
 private:
@@ -507,6 +561,7 @@ private:
   InfoHash swarmHash_;
   SwarmContentSource::Impl *impl_{nullptr};
   int remoteLiveOpId_{0};
+  int remoteScrollSealedId_{0};
 };
 
 class XuduTorrentPlugin : public lt::torrent_plugin {
@@ -528,6 +583,18 @@ public:
     for (auto it = peers_.begin(); it != peers_.end();) {
       if (auto peer = it->lock()) {
         peer->sendLiveOp(bencodedPayload);
+        ++it;
+      } else {
+        it = peers_.erase(it);
+      }
+    }
+  }
+
+  void broadcastScrollSealed(const std::string &bencodedPayload) {
+    std::scoped_lock lock(mutex_);
+    for (auto it = peers_.begin(); it != peers_.end();) {
+      if (auto peer = it->lock()) {
+        peer->sendScrollSealed(bencodedPayload);
         ++it;
       } else {
         it = peers_.erase(it);
@@ -582,6 +649,34 @@ void SwarmContentSource::Impl::broadcastLiveOpToPeers(
     const auto it = torrentPlugins.find(hash);
     if (it != torrentPlugins.end() && it->second) {
       it->second->broadcastLiveOp(payload);
+    }
+  }
+}
+
+void SwarmContentSource::Impl::receiveIncomingScrollSealed(
+    const ScrollSealedBroadcast &broadcast) {
+  std::scoped_lock lock(scrollSealedMutex);
+  pendingScrollSealed.push_back(broadcast);
+  for (const auto &handler : scrollSealedHandlers) {
+    if (handler) {
+      handler(broadcast);
+    }
+  }
+}
+
+void SwarmContentSource::Impl::broadcastScrollSealedToPeers(
+    const InfoHash &hash, const std::string &payload) {
+  std::scoped_lock lock(pluginsMutex);
+  if (hash.isZero()) {
+    for (const auto &[_, plugin] : torrentPlugins) {
+      if (plugin) {
+        plugin->broadcastScrollSealed(payload);
+      }
+    }
+  } else {
+    const auto it = torrentPlugins.find(hash);
+    if (it != torrentPlugins.end() && it->second) {
+      it->second->broadcastScrollSealed(payload);
     }
   }
 }
@@ -947,12 +1042,15 @@ void SwarmContentSource::broadcastLiveOp(const InfoHash &swarmHash,
                                          const MicroversionId &version,
                                          const Op &op,
                                          const std::string_view primediaText) {
-  broadcastLiveOp(LiveOpBroadcast{
-      .swarmHash    = swarmHash,
-      .version      = version,
-      .op           = op,
-      .primediaText = std::string(primediaText),
-  });
+  LiveOpBroadcast b;
+  b.swarmHash    = swarmHash;
+  b.version      = version;
+  b.op           = op;
+  b.primediaText = std::string(primediaText);
+  if (b.op.span.length == 0 && !primediaText.empty()) {
+    b.op.span.length = static_cast<std::uint64_t>(primediaText.size());
+  }
+  broadcastLiveOp(b);
 }
 
 InfoHash
@@ -975,6 +1073,79 @@ SwarmContentSource::takePendingLiveOps() {
   std::scoped_lock lock(impl->liveOpsMutex);
   std::vector<LiveOpBroadcast> out;
   out.swap(impl->pendingLiveOps);
+  return out;
+}
+
+std::string
+SwarmContentSource::encodeScrollSealed(const ScrollSealedBroadcast &broadcast) {
+  lt::entry e(lt::entry::dictionary_t);
+  e["h"]  = broadcast.swarmHash.hex();
+  e["sk"] = broadcast.authorScrollKey;
+  e["up"] = static_cast<std::int64_t>(broadcast.sealedUpTo);
+  e["ph"] = broadcast.pieceInfoHash.hex();
+  e["ts"] = broadcast.timestamp;
+
+  std::string out;
+  lt::bencode(std::back_inserter(out), e);
+  return out;
+}
+
+std::optional<SwarmContentSource::ScrollSealedBroadcast>
+SwarmContentSource::decodeScrollSealed(const std::string_view body) {
+  lt::bdecode_node node;
+  lt::error_code ec;
+  if (lt::bdecode(body.data(), body.data() + body.size(), node, ec) != 0 ||
+      node.type() != lt::bdecode_node::dict_t) {
+    return std::nullopt;
+  }
+
+  ScrollSealedBroadcast b;
+  const auto hStr = node.dict_find_string_value("h");
+  if (!hStr.empty()) {
+    b.swarmHash = InfoHash::fromHex(hStr);
+  }
+  b.authorScrollKey = std::string(node.dict_find_string_value("sk"));
+  b.sealedUpTo = static_cast<std::uint64_t>(node.dict_find_int_value("up", 0));
+  const auto phStr = node.dict_find_string_value("ph");
+  if (!phStr.empty()) {
+    b.pieceInfoHash = InfoHash::fromHex(phStr);
+  }
+  b.timestamp = node.dict_find_int_value("ts", 0);
+  return b;
+}
+
+void SwarmContentSource::broadcastScrollSealed(
+    const ScrollSealedBroadcast &broadcast) {
+  auto populated = broadcast;
+  if (populated.timestamp == 0) {
+    populated.timestamp =
+        std::chrono::duration_cast<std::chrono::milliseconds>(
+            std::chrono::system_clock::now().time_since_epoch())
+            .count();
+  }
+
+  const auto payload = encodeScrollSealed(populated);
+  impl->broadcastScrollSealedToPeers(populated.swarmHash, payload);
+
+  std::scoped_lock lock(impl->scrollSealedMutex);
+  impl->pendingScrollSealed.push_back(populated);
+  for (const auto &handler : impl->scrollSealedHandlers) {
+    if (handler) {
+      handler(populated);
+    }
+  }
+}
+
+void SwarmContentSource::onScrollSealed(ScrollSealedHandler handler) {
+  std::scoped_lock lock(impl->scrollSealedMutex);
+  impl->scrollSealedHandlers.push_back(std::move(handler));
+}
+
+std::vector<SwarmContentSource::ScrollSealedBroadcast>
+SwarmContentSource::takePendingScrollSealed() {
+  std::scoped_lock lock(impl->scrollSealedMutex);
+  std::vector<ScrollSealedBroadcast> out;
+  out.swap(impl->pendingScrollSealed);
   return out;
 }
 

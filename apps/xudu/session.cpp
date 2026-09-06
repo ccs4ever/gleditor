@@ -532,7 +532,24 @@ std::string Session::publishDocument(const MicroversionId &version,
 
   const auto withheldHoles = collectWithheldHoles();
   if (st.userPermascrollPtr()) {
-    st.userPermascrollPtr()->sealIncremental(into, provenance, withheldHoles);
+    const auto newlySealed = st.userPermascrollPtr()->sealIncremental(
+        into, provenance, withheldHoles);
+    if (newlySealed.has_value() && swarmSource) {
+      if (localAuthorScrollKey_.empty()) {
+        localAuthorScrollKey_ = st.userPermascroll().globalScrollKey();
+      }
+      swarmSource->broadcastScrollSealed(
+          SwarmContentSource::ScrollSealedBroadcast{
+              .swarmHash       = collabRoomHash_,
+              .authorScrollKey = localAuthorScrollKey_,
+              .sealedUpTo      = newlySealed->end(),
+              .pieceInfoHash   = newlySealed->torrent,
+              .timestamp =
+                  std::chrono::duration_cast<std::chrono::milliseconds>(
+                      std::chrono::system_clock::now().time_since_epoch())
+                      .count(),
+          });
+    }
   }
 
   const auto sealed =
@@ -1850,6 +1867,13 @@ void Session::broadcastLiveOp(const std::uint32_t /*docIndex*/, const Op &op,
   if (!swarmSource) {
     return;
   }
+  if (localAuthorScrollKey_.empty() && userPermascroll()) {
+    localAuthorScrollKey_ = userPermascroll()->globalScrollKey();
+  }
+  if (localAuthorFingerprint_.empty() && userPermascroll()) {
+    localAuthorFingerprint_ =
+        userPermascroll()->config().masterIdentity.toString();
+  }
   SwarmContentSource::LiveOpBroadcast broadcast;
   broadcast.swarmHash         = collabRoomHash_;
   broadcast.version           = version;
@@ -1874,6 +1898,13 @@ void Session::broadcastLocalCaret(const std::uint32_t docIndex,
   }
   if (docIndex >= open.size()) {
     return;
+  }
+  if (localAuthorScrollKey_.empty() && userPermascroll()) {
+    localAuthorScrollKey_ = userPermascroll()->globalScrollKey();
+  }
+  if (localAuthorFingerprint_.empty() && userPermascroll()) {
+    localAuthorFingerprint_ =
+        userPermascroll()->config().masterIdentity.toString();
   }
   SwarmContentSource::LiveOpBroadcast broadcast;
   broadcast.swarmHash         = collabRoomHash_;
@@ -1998,6 +2029,16 @@ bool Session::applyRemoteLiveOp(
   }
 
   return true;
+}
+
+void Session::applyRemoteScrollSealed(
+    const SwarmContentSource::ScrollSealedBroadcast &sealed) {
+  for (auto &entry : stores) {
+    if (entry.store) {
+      entry.store->trimRemoteAuthorBuffer(sealed.authorScrollKey,
+                                          sealed.sealedUpTo);
+    }
+  }
 }
 
 void Session::decorate(const Doc &doc, std::vector<gleditor::SpanStyle> &out) {

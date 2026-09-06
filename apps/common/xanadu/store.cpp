@@ -416,9 +416,26 @@ ResolveResult Store::resolve(const PrimediaSpan &span) const {
   }
   const auto *const which = scroll(span.scroll);
   if (nullptr == which) {
-    return ResolveResult{.status = ResolutionStatus::MissingPieces};
+    return ResolveResult{
+        .status     = ResolutionStatus::WithheldRedacted,
+        .holeRecord = PublishedHoleRecord{.at     = span.start,
+                                          .length = span.length,
+                                          .reason = HoleReason::Unsealed}};
   }
-  return resolver.resolve(*which, span);
+  // Check ephemeral live author buffer if not yet sealed into a torrent piece
+  const auto liveText = readRemoteAuthorBuffer(span);
+  if (!liveText.empty()) {
+    return ResolveResult{.status = ResolutionStatus::VerifiedBytes,
+                         .text   = liveText};
+  }
+  auto res = resolver.resolve(*which, span);
+  if (res.status == ResolutionStatus::MissingPieces) {
+    res.status     = ResolutionStatus::WithheldRedacted;
+    res.holeRecord = PublishedHoleRecord{.at     = span.start,
+                                         .length = span.length,
+                                         .reason = HoleReason::Unsealed};
+  }
+  return res;
 }
 
 std::string Store::read(const PrimediaSpan &span) const {
@@ -450,18 +467,58 @@ void Store::setExternalLiveBytes(const std::string_view authorScrollKey,
   if (authorScrollKey.empty() || text.empty()) {
     return;
   }
-  auto &chunks = remoteAuthorBuffers_[std::string(authorScrollKey)];
-  bool merged  = false;
+  auto &chunks      = remoteAuthorBuffers_[std::string(authorScrollKey)];
+  const auto newEnd = start + text.size();
+  bool merged       = false;
+
   for (auto &chunk : chunks) {
-    if (chunk.start + chunk.text.size() == start) {
+    const auto chunkEnd = chunk.start + chunk.text.size();
+    if (chunkEnd == start) {
       chunk.text.append(text);
       merged = true;
       break;
     }
+    if (newEnd == chunk.start) {
+      chunk.text.insert(0, text);
+      chunk.start = start;
+      merged      = true;
+      break;
+    }
+    if (start >= chunk.start && newEnd <= chunkEnd) {
+      merged = true;
+      break;
+    }
   }
+
   if (!merged) {
     chunks.push_back(
         RemoteAuthorChunk{.start = start, .text = std::string(text)});
+  }
+
+  if (chunks.size() > 1) {
+    std::sort(chunks.begin(), chunks.end(),
+              [](const RemoteAuthorChunk &a, const RemoteAuthorChunk &b) {
+                return a.start < b.start;
+              });
+    std::vector<RemoteAuthorChunk> consolidated;
+    consolidated.reserve(chunks.size());
+    for (auto &c : chunks) {
+      if (consolidated.empty()) {
+        consolidated.push_back(std::move(c));
+      } else {
+        auto &last         = consolidated.back();
+        const auto lastEnd = last.start + last.text.size();
+        if (c.start <= lastEnd) {
+          if (c.start + c.text.size() > lastEnd) {
+            const auto extraOffset = lastEnd - c.start;
+            last.text.append(c.text.substr(extraOffset));
+          }
+        } else {
+          consolidated.push_back(std::move(c));
+        }
+      }
+    }
+    chunks = std::move(consolidated);
   }
 }
 
@@ -497,6 +554,36 @@ void Store::clearRemoteAuthorBuffer(const std::string_view authorScrollKey) {
   remoteAuthorBuffers_.erase(std::string(authorScrollKey));
 }
 
+void Store::trimRemoteAuthorBuffer(const std::string_view authorScrollKey,
+                                   const std::uint64_t sealedUpTo) {
+  if (sealedUpTo == 0) {
+    clearRemoteAuthorBuffer(authorScrollKey);
+    return;
+  }
+  const auto it = remoteAuthorBuffers_.find(std::string(authorScrollKey));
+  if (it == remoteAuthorBuffers_.end()) {
+    return;
+  }
+  auto &chunks = it->second;
+  for (auto chunkIt = chunks.begin(); chunkIt != chunks.end();) {
+    const auto chunkEnd = chunkIt->start + chunkIt->text.size();
+    if (chunkEnd <= sealedUpTo) {
+      chunkIt = chunks.erase(chunkIt);
+    } else if (chunkIt->start < sealedUpTo) {
+      const auto trimBytes =
+          static_cast<std::size_t>(sealedUpTo - chunkIt->start);
+      chunkIt->text  = chunkIt->text.substr(trimBytes);
+      chunkIt->start = sealedUpTo;
+      ++chunkIt;
+    } else {
+      ++chunkIt;
+    }
+  }
+  if (chunks.empty()) {
+    remoteAuthorBuffers_.erase(it);
+  }
+}
+
 MicroversionId Store::transcludeExternal(const MicroversionId &parent,
                                          const std::uint32_t at,
                                          const Scroll &from,
@@ -523,11 +610,27 @@ MicroversionId Store::insertBreak(const MicroversionId &parent,
 MicroversionId
 Store::applyRemoteLiveOp(const Op &op, const std::string_view primediaText,
                          const std::string_view authorScrollKey) {
-  Op localOp = op;
-  if (!authorScrollKey.empty() && localOp.kind == OpKind::Insert) {
+  Op localOp               = op;
+  std::string effectiveKey = std::string(authorScrollKey);
+
+  if (effectiveKey.empty()) {
+    if (localOp.span.scroll > 0 && localOp.span.scroll <= externals.size()) {
+      const auto *sc = scroll(localOp.span.scroll);
+      if (sc) {
+        effectiveKey = "btpk:" + sc->publisher.hex() + ":" + sc->salt;
+      }
+    }
+  }
+  if (effectiveKey.empty()) {
+    effectiveKey =
+        "btpk:0000000000000000000000000000000000000000000000000000000000000000:"
+        "remote_author";
+  }
+
+  if (localOp.kind == OpKind::Insert) {
     Scroll targetScroll;
-    if (authorScrollKey.starts_with("btpk:")) {
-      const auto rest  = authorScrollKey.substr(5);
+    if (effectiveKey.starts_with("btpk:")) {
+      const auto rest  = std::string_view(effectiveKey).substr(5);
       const auto colon = rest.find(':');
       if (colon != std::string_view::npos) {
         targetScroll.publisher = PublicKey::fromHex(rest.substr(0, colon));
@@ -536,13 +639,29 @@ Store::applyRemoteLiveOp(const Op &op, const std::string_view primediaText,
     }
     const auto scrollId = addScroll(targetScroll);
     localOp.span.scroll = scrollId;
+
     if (!primediaText.empty()) {
-      setExternalLiveBytes(authorScrollKey, localOp.span.start, primediaText);
+      const auto it = remoteAuthorBuffers_.find(effectiveKey);
+      const std::uint64_t bufferEnd =
+          (it != remoteAuthorBuffers_.end() && !it->second.empty())
+              ? (it->second.back().start + it->second.back().text.size())
+              : 0;
+
+      // Newly typed primedia is strictly append-only on the author's scroll;
+      // if the op's span.start is before bufferEnd or was unassigned, anchor to
+      // bufferEnd.
+      if (localOp.span.start < bufferEnd) {
+        localOp.span.start = bufferEnd;
+      }
+      if (localOp.span.length == 0) {
+        localOp.span.length = static_cast<std::uint64_t>(primediaText.size());
+      }
+      setExternalLiveBytes(effectiveKey, localOp.span.start, primediaText);
     }
-  } else if (localOp.kind == OpKind::Insert && !primediaText.empty()) {
-    const auto span = userPermascroll_->append(primediaText);
-    localOp.span    = span;
   }
+
+  // NOTE: userPermascroll_->append() is NEVER called. Remote operations NEVER
+  // pollute Slot 0!
   return apply(localOp.parent, localOp);
 }
 

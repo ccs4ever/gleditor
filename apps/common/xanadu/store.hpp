@@ -537,6 +537,11 @@ public:
   /// Clear unsealed live buffer for an author once sealed segments exist.
   void clearRemoteAuthorBuffer(std::string_view authorScrollKey);
 
+  /// Trim or clear unsealed live buffer for an author once sealed segments
+  /// exist. If sealedUpTo == 0, clears all buffered chunks for authorScrollKey.
+  void trimRemoteAuthorBuffer(std::string_view authorScrollKey,
+                              std::uint64_t sealedUpTo = 0);
+
   // -- persistence ----------------------------------------------------------
 
   /**

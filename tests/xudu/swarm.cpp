@@ -517,10 +517,132 @@ TEST(LiveCollaborativeSwarmTest, broadcastAndApplyLiveOpsAcrossPeerStores) {
   // Verify Bob's store synchronized Alice's edit in real time
   EXPECT_EQ(received.size(), 2U);
   EXPECT_EQ(bobStore.textOf(editVer), "Hello World from Collaborative Swarm!");
+  EXPECT_EQ(bobStore.userPermascroll().size(), 0U);
 
   const auto pending = peerSource.takePendingLiveOps();
   EXPECT_EQ(pending.size(), 2U);
   EXPECT_TRUE(peerSource.takePendingLiveOps().empty());
+}
+
+TEST(LiveCollaborativeSwarmTest, unsealedRemoteSpanResolvesLiveTextAndHoles) {
+  Store bobStore;
+  const std::string aliceScrollKey =
+      "btpk:abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789:"
+      "main";
+
+  xudu::Op op;
+  op.kind        = xudu::OpKind::Insert;
+  op.parent      = MicroversionId{};
+  op.at          = 0;
+  op.span.scroll = 1;
+  op.span.start  = 100;
+  op.span.length = 15;
+
+  const std::string liveText = "Unsealed Text! ";
+  const auto ver = bobStore.applyRemoteLiveOp(op, liveText, aliceScrollKey);
+
+  // Bob's slot 0 permascroll is untouched (zero spool pollution)
+  EXPECT_EQ(bobStore.userPermascroll().size(), 0U);
+
+  // Resolving present unsealed remote span returns VerifiedBytes with live text
+  PrimediaSpan liveSpan{.scroll = 1, .start = 100, .length = 15};
+  const auto resLive = bobStore.resolve(liveSpan);
+  EXPECT_EQ(resLive.status, xanadu::ResolutionStatus::VerifiedBytes);
+  EXPECT_EQ(resLive.text, liveText);
+
+  // Resolving absent unsealed span on external scroll returns Unsealed Hole
+  PrimediaSpan absentSpan{.scroll = 1, .start = 200, .length = 10};
+  const auto resAbsent = bobStore.resolve(absentSpan);
+  EXPECT_EQ(resAbsent.status, xanadu::ResolutionStatus::WithheldRedacted);
+  ASSERT_TRUE(resAbsent.holeRecord.has_value());
+  EXPECT_EQ(resAbsent.holeRecord->reason, xanadu::HoleReason::Unsealed);
+  EXPECT_EQ(resAbsent.holeRecord->at, 200U);
+  EXPECT_EQ(resAbsent.holeRecord->length, 10U);
+}
+
+TEST(LiveCollaborativeSwarmTest, trimRemoteAuthorBufferOnSealedNotification) {
+  Store bobStore;
+  const std::string aliceScrollKey =
+      "btpk:111122223333444455556666777788889999aaaabbbbccccddddeeeeffff0000:"
+      "main";
+
+  xudu::Op op1;
+  op1.kind        = xudu::OpKind::Insert;
+  op1.parent      = MicroversionId{};
+  op1.at          = 0;
+  op1.span.scroll = 1;
+  op1.span.start  = 0;
+  op1.span.length = 8;
+  bobStore.applyRemoteLiveOp(op1, "ChunkOne", aliceScrollKey);
+
+  xudu::Op op2;
+  op2.kind        = xudu::OpKind::Insert;
+  op2.parent      = MicroversionId::parse("1");
+  op2.at          = 8;
+  op2.span.scroll = 1;
+  op2.span.start  = 8;
+  op2.span.length = 8;
+  bobStore.applyRemoteLiveOp(op2, "ChunkTwo", aliceScrollKey);
+
+  PrimediaSpan span1{.scroll = 1, .start = 0, .length = 8};
+  PrimediaSpan span2{.scroll = 1, .start = 8, .length = 8};
+
+  EXPECT_EQ(bobStore.readRemoteAuthorBuffer(span1), "ChunkOne");
+  EXPECT_EQ(bobStore.readRemoteAuthorBuffer(span2), "ChunkTwo");
+
+  // Trim sealed bytes up to offset 8 (ChunkOne is now sealed in BitTorrent)
+  bobStore.trimRemoteAuthorBuffer(aliceScrollKey, 8);
+
+  // ChunkOne is flushed from ephemeral buffer
+  EXPECT_TRUE(bobStore.readRemoteAuthorBuffer(span1).empty());
+  // ChunkTwo is retained
+  EXPECT_EQ(bobStore.readRemoteAuthorBuffer(span2), "ChunkTwo");
+
+  // Fully trim remaining bytes
+  bobStore.trimRemoteAuthorBuffer(aliceScrollKey, 16);
+  EXPECT_TRUE(bobStore.readRemoteAuthorBuffer(span2).empty());
+}
+
+TEST(LiveCollaborativeSwarmTest,
+     scrollSealedBroadcastSerializationAndDelivery) {
+  SwarmContentSource peerSource;
+
+  SwarmContentSource::ScrollSealedBroadcast original{
+      .swarmHash =
+          InfoHash::fromHex("0123456789abcdef0123456789abcdef01234567"),
+      .authorScrollKey = "btpk:testkey:salt",
+      .sealedUpTo      = 65536,
+      .pieceInfoHash =
+          InfoHash::fromHex("fedcba9876543210fedcba9876543210fedcba98"),
+      .timestamp = 1725667200000LL,
+  };
+
+  // 1. Test Bencode encode / decode round-trip
+  const auto encoded = SwarmContentSource::encodeScrollSealed(original);
+  EXPECT_FALSE(encoded.empty());
+
+  const auto decoded = SwarmContentSource::decodeScrollSealed(encoded);
+  ASSERT_TRUE(decoded.has_value());
+  EXPECT_EQ(decoded->swarmHash, original.swarmHash);
+  EXPECT_EQ(decoded->authorScrollKey, original.authorScrollKey);
+  EXPECT_EQ(decoded->sealedUpTo, original.sealedUpTo);
+  EXPECT_EQ(decoded->pieceInfoHash, original.pieceInfoHash);
+  EXPECT_EQ(decoded->timestamp, original.timestamp);
+
+  // 2. Test Broadcast delivery
+  std::vector<SwarmContentSource::ScrollSealedBroadcast> received;
+  peerSource.onScrollSealed(
+      [&received](const auto &broadcast) { received.push_back(broadcast); });
+
+  peerSource.broadcastScrollSealed(original);
+
+  EXPECT_EQ(received.size(), 1U);
+  EXPECT_EQ(received.front().authorScrollKey, "btpk:testkey:salt");
+  EXPECT_EQ(received.front().sealedUpTo, 65536U);
+
+  const auto pending = peerSource.takePendingScrollSealed();
+  EXPECT_EQ(pending.size(), 1U);
+  EXPECT_TRUE(peerSource.takePendingScrollSealed().empty());
 }
 
 } // namespace
