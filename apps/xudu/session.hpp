@@ -40,16 +40,17 @@
 #include <gleditor/svg_cache.hpp>
 #include <gleditor/text_source.hpp>
 
+#include "core/anchor_lanes.hpp"
+#include "core/mutable_link.hpp"
+#include "core/provenance.hpp"
+#include "core/system_docs.hpp"
+#include "core/transcopyright_logic.hpp"
+#include "core/uncommitted_op_log.hpp"
 #include "hypertime_graph.hpp"
 #include "xudu/core/config.hpp"
 #include "xudu/core/media_manager.hpp"
 #include "xudu/core/microversion.hpp"
 #include "xudu/core/publication.hpp"
-#include "xudu/core/resolver.hpp"
-#include "xudu/core/store.hpp"
-#include "xudu/core/swarm.hpp"
-#include "xudu/core/system_docs.hpp"
-#include "xudu/core/uncommitted_op_log.hpp"
 
 class Caret;
 class Doc;
@@ -567,6 +568,25 @@ public:
   mediaSpansFor(const MicroversionId &version,
                 std::size_t storeIndex = 0) const;
 
+  // -- Permascroll Holes & Transcopyright -----------------------------------
+  using TranscopyrightUnlockedHandler = std::function<void(
+      std::size_t docIndex, const PrimediaSpan &span, std::uint64_t cost)>;
+
+  void setTranscopyrightUnlockedHandler(TranscopyrightUnlockedHandler handler) {
+    tcUnlockedHandler_ = std::move(handler);
+  }
+
+  /// Unlock a transcopyright-locked span in @p storeIndex.
+  bool unlockTranscopyright(std::size_t storeIndex, const PrimediaSpan &span);
+
+  /// Unlock a transcopyright-locked span at character @p charOffset in view @p
+  /// docIndex.
+  bool unlockTranscopyrightAt(std::uint32_t docIndex, std::uint32_t charOffset);
+
+  /// Retrieve all active holes and locked spans for view @p docIndex.
+  [[nodiscard]] std::vector<HoleSpanInfo>
+  holesForView(std::uint32_t docIndex) const;
+
   // -- Hypertime History & Scrubbing ----------------------------------------
 
   /**
@@ -688,6 +708,7 @@ private:
 
   MediaManager mediaManager_;
   gleditor::GroundingModal groundingModal_;
+  TranscopyrightUnlockedHandler tcUnlockedHandler_;
 
 public:
   [[nodiscard]] MediaManager &mediaManager() { return mediaManager_; }

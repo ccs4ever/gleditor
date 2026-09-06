@@ -23,7 +23,8 @@ void TensionLayoutEngine::setBody(TensionBody body) {
   bodies_.push_back(body);
 }
 
-const TensionBody *TensionLayoutEngine::findBody(const std::size_t docIndex) const {
+const TensionBody *
+TensionLayoutEngine::findBody(const std::size_t docIndex) const {
   for (const auto &b : bodies_) {
     if (b.docIndex == docIndex) {
       return &b;
@@ -50,12 +51,10 @@ void TensionLayoutEngine::addConstraint(TensionConstraint constraint) {
   constraints_.push_back(constraint);
 }
 
-void TensionLayoutEngine::clearConstraints() {
-  constraints_.clear();
-}
+void TensionLayoutEngine::clearConstraints() { constraints_.clear(); }
 
 void TensionLayoutEngine::computeForces(const std::vector<TensionBody> &state,
-                                       std::vector<glm::vec3> &forces) const {
+                                        std::vector<glm::vec3> &forces) const {
   const std::size_t n = state.size();
   forces.assign(n, glm::vec3(0.0F));
 
@@ -93,8 +92,8 @@ void TensionLayoutEngine::computeForces(const std::vector<TensionBody> &state,
 
       if (std::abs(dx) < minXDist) {
         const float penetration = minXDist - std::abs(dx);
-        const float sign = (dx >= 0.0F) ? 1.0F : -1.0F;
-        const float forceX = params_.kRepel * (penetration / minXDist);
+        const float sign        = (dx >= 0.0F) ? 1.0F : -1.0F;
+        const float forceX      = params_.kRepel * (penetration / minXDist);
 
         if (!state[i].pinned) {
           forces[i].x += forceX * sign;
@@ -128,10 +127,11 @@ void TensionLayoutEngine::computeForces(const std::vector<TensionBody> &state,
     const auto &far  = state[toIdx];
 
     // Collinear target position for far document
-    const float targetX = near.position.x + 0.5F * (near.width + far.width) + c.targetGap;
+    const float targetX =
+        near.position.x + 0.5F * (near.width + far.width) + c.targetGap;
     const float deltaAnchorY = c.nearAnchorY - c.farAnchorY;
-    const float targetY = near.position.y + deltaAnchorY;
-    const float targetZ = near.position.z;
+    const float targetY      = near.position.y + deltaAnchorY;
+    const float targetZ      = near.position.z;
 
     const glm::vec3 targetPos(targetX, targetY, targetZ);
     const glm::vec3 error = targetPos - far.position;
@@ -168,7 +168,8 @@ void TensionLayoutEngine::step(const float dt) {
       k1_x[i] = glm::vec3(0.0F);
       continue;
     }
-    const float invM = (bodies_[i].mass > 0.0F) ? (1.0F / bodies_[i].mass) : 1.0F;
+    const float invM =
+        (bodies_[i].mass > 0.0F) ? (1.0F / bodies_[i].mass) : 1.0F;
     k1_v[i] = f1[i] * invM;
     k1_x[i] = bodies_[i].velocity;
 
@@ -190,7 +191,8 @@ void TensionLayoutEngine::step(const float dt) {
       k2_x[i] = glm::vec3(0.0F);
       continue;
     }
-    const float invM = (bodies_[i].mass > 0.0F) ? (1.0F / bodies_[i].mass) : 1.0F;
+    const float invM =
+        (bodies_[i].mass > 0.0F) ? (1.0F / bodies_[i].mass) : 1.0F;
     k2_v[i] = f2[i] * invM;
     k2_x[i] = s1[i].velocity;
 
@@ -212,7 +214,8 @@ void TensionLayoutEngine::step(const float dt) {
       k3_x[i] = glm::vec3(0.0F);
       continue;
     }
-    const float invM = (bodies_[i].mass > 0.0F) ? (1.0F / bodies_[i].mass) : 1.0F;
+    const float invM =
+        (bodies_[i].mass > 0.0F) ? (1.0F / bodies_[i].mass) : 1.0F;
     k3_v[i] = f3[i] * invM;
     k3_x[i] = s2[i].velocity;
 
@@ -231,7 +234,8 @@ void TensionLayoutEngine::step(const float dt) {
     if (bodies_[i].pinned) {
       continue;
     }
-    const float invM = (bodies_[i].mass > 0.0F) ? (1.0F / bodies_[i].mass) : 1.0F;
+    const float invM =
+        (bodies_[i].mass > 0.0F) ? (1.0F / bodies_[i].mass) : 1.0F;
     k4_v[i] = f4[i] * invM;
     k4_x[i] = s3[i].velocity;
 
@@ -246,7 +250,8 @@ void TensionLayoutEngine::step(const float dt) {
 
 bool TensionLayoutEngine::isSettled() const {
   for (const auto &b : bodies_) {
-    if (!b.pinned && glm::length(b.velocity) > params_.settleVelocityThreshold) {
+    if (!b.pinned &&
+        glm::length(b.velocity) > params_.settleVelocityThreshold) {
       return false;
     }
   }
@@ -259,7 +264,7 @@ void TensionLayoutEngine::solveEquilibrium() {
   }
 
   // 1. Separate foreground and background
-  float currX = 0.0F;
+  float currX  = 0.0F;
   bool firstFg = true;
 
   for (auto &b : bodies_) {

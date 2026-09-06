@@ -39,9 +39,7 @@ void TenuousTetherOverlay::removeTether(const std::size_t docIndex) {
   });
 }
 
-void TenuousTetherOverlay::clear() {
-  tethers_.clear();
-}
+void TenuousTetherOverlay::clear() { tethers_.clear(); }
 
 bool TenuousTetherOverlay::hasActiveTethers() const noexcept {
   return std::any_of(tethers_.begin(), tethers_.end(),
@@ -49,7 +47,7 @@ bool TenuousTetherOverlay::hasActiveTethers() const noexcept {
 }
 
 void TenuousTetherOverlay::deviceReady(render::RenderDevice &device,
-                                      const render::PipelineDesc &) {
+                                       const render::PipelineDesc &) {
   device_ = &device;
   beams_  = std::make_unique<gleditor::Beams>(&device, 256);
   beams_->createPipeline("assets/shaders", "assets/shaders/vulkan", false);
@@ -70,25 +68,27 @@ void TenuousTetherOverlay::drawFrame(gleditor::FrameContext &ctx) {
       continue;
     }
 
-    const glm::vec3 ctrl = computeControlPoint(t.originPos, t.currentPos, 18.0F);
+    const glm::vec3 ctrl =
+        computeControlPoint(t.originPos, t.currentPos, 18.0F);
 
     for (int i = 0; i <= kSegments; ++i) {
       const float param = static_cast<float>(i) / static_cast<float>(kSegments);
-      curve[i]          = evaluateBezier(t.originPos, ctrl, t.currentPos, param);
+      curve[i] = evaluateBezier(t.originPos, ctrl, t.currentPos, param);
     }
 
     // 1. Tenuous connecting ribbon
     beams_->addPath(curve, 0.40F, t.colour, 0);
 
     // 2. Origin footprint blueprint quad outline in background plane
-    const float halfW = 0.5F * t.width;
-    const float halfH = 0.5F * t.height;
+    const float halfW  = 0.5F * t.width;
+    const float halfH  = 0.5F * t.height;
     const glm::vec3 p0 = t.originPos + glm::vec3(-halfW, -halfH, 0.0F);
     const glm::vec3 p1 = t.originPos + glm::vec3(halfW, -halfH, 0.0F);
     const glm::vec3 p2 = t.originPos + glm::vec3(halfW, halfH, 0.0F);
     const glm::vec3 p3 = t.originPos + glm::vec3(-halfW, halfH, 0.0F);
 
-    const std::uint32_t footprintCol = (t.colour & 0xFFFFFF00U) | 0x2AU; // Faint alpha
+    const std::uint32_t footprintCol =
+        (t.colour & 0xFFFFFF00U) | 0x2AU; // Faint alpha
     beams_->add(p0, p1, 0.25F, footprintCol, 0);
     beams_->add(p1, p2, 0.25F, footprintCol, 0);
     beams_->add(p2, p3, 0.25F, footprintCol, 0);

@@ -41,7 +41,8 @@ struct TensionBody {
   /// True if currently participating in primary reading (Z ~ 0).
   bool isForeground{true};
 
-  /// True if brought forward from a background plane into active collinear focus.
+  /// True if brought forward from a background plane into active collinear
+  /// focus.
   bool isFlying{false};
 
   /// Physical mass for inertial momentum.
@@ -53,7 +54,8 @@ struct TensionBody {
 
 /**
  * @struct TensionConstraint
- * @brief Relational spring constraint connecting two documents (link or transclusion).
+ * @brief Relational spring constraint connecting two documents (link or
+ * transclusion).
  */
 struct TensionConstraint {
   std::size_t fromDoc{0};
@@ -84,7 +86,8 @@ struct TensionParams {
   /// Spring constant pulling active documents to reading plane Z = 0 (F_read).
   float kPlane{14.0F};
 
-  /// Collinear alignment spring constant pulling linked pages side-by-side (F_align).
+  /// Collinear alignment spring constant pulling linked pages side-by-side
+  /// (F_align).
   float kAlign{28.0F};
 
   /// Tier depth holding spring constant for background corpora (F_aest).
@@ -105,7 +108,8 @@ struct TensionParams {
 
 /**
  * @class TensionLayoutEngine
- * @brief Real-time continuous 3-way tension solver using 4th-order Runge-Kutta (RK4).
+ * @brief Real-time continuous 3-way tension solver using 4th-order Runge-Kutta
+ * (RK4).
  */
 class TensionLayoutEngine {
 public:
@@ -139,11 +143,13 @@ public:
   void clearConstraints();
 
   /// Retrieve constraints.
-  [[nodiscard]] const std::vector<TensionConstraint> &constraints() const noexcept {
+  [[nodiscard]] const std::vector<TensionConstraint> &
+  constraints() const noexcept {
     return constraints_;
   }
 
-  /// Advance simulation by dt seconds using 4th-order Runge-Kutta (RK4) numerical integration.
+  /// Advance simulation by dt seconds using 4th-order Runge-Kutta (RK4)
+  /// numerical integration.
   void step(float dt);
 
   /// Compute instantaneous forces acting on all bodies.
@@ -153,7 +159,8 @@ public:
   /// Check if the physical simulation has settled below the velocity threshold.
   [[nodiscard]] bool isSettled() const;
 
-  /// Analytical equilibrium solver: computes non-overlapping layout positions directly.
+  /// Analytical equilibrium solver: computes non-overlapping layout positions
+  /// directly.
   void solveEquilibrium();
 
   /// Enable or disable continuous physics stepping.

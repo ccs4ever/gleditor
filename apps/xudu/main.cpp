@@ -60,16 +60,21 @@
 #include "xudu/core/store.hpp"
 #include "xudu/core/swarm_catalog.hpp"
 #include "xudu/core/system_docs.hpp"
+#include "xudu/core/transcopyright_crypto.hpp"
+#include "xudu/core/transcopyright_logic.hpp"
 #include "xudu/kinetic_tether_overlay.hpp"
 #include "xudu/page_break_overlay.hpp"
 #include "xudu/pouch_drawer.hpp"
 #include "xudu/session.hpp"
 #include "xudu/swarm_telescope_overlay.hpp"
 #include "xudu/tenuous_tether.hpp"
+#include "xudu/transcopyright_overlay.hpp"
+#include "xudu/wireframe_hull.hpp"
 
 using gleditor::Mod;
 using xudu::Author;
 using xudu::Config;
+using xudu::HoleReason;
 using xudu::HypertimeMap;
 using xudu::ImageOverlay;
 using xudu::KineticTetherEngine;
@@ -81,6 +86,15 @@ using xudu::MicroversionId;
 using xudu::PageBreakOverlay;
 using xudu::PouchDrawer;
 using xudu::PouchItem;
+using xudu::PublishedHoleRecord;
+using xudu::Scroll;
+using xudu::ScrollSegment;
+using xudu::SegmentKind;
+using xudu::TranscopyrightDescriptor;
+using xudu::TranscopyrightLogic;
+using xudu::TranscopyrightOverlay;
+using xudu::WireframeHullOverlay;
+namespace crypto = xudu::crypto;
 using xudu::PrimediaSpan;
 using xudu::Provenance;
 using xudu::PublicationEntry;
@@ -855,6 +869,12 @@ public:
 
     const auto ver = st.insert(MicroversionId{}, 0, content);
     showAlongside(ver, 0.0F, storeIndex);
+    if (wireframeOverlay_ && !session.views().empty()) {
+      const auto newDocIndex = session.views().size() - 1;
+      wireframeOverlay_->startLoading(newDocIndex, entry.title, entry.infoHash,
+                                      16);
+      wireframeOverlay_->updateProgress(newDocIndex, 12);
+    }
     renderer->runWithState([this](RenderState &rState) {
       if (!rState.docs.empty()) {
         const auto newDocIndex =
@@ -902,6 +922,60 @@ public:
       }
       std::cout << "xudu: page break inserted at doc " << where.doc
                 << " offset " << where.start << "\n";
+    });
+  }
+
+  void setWireframeOverlay(WireframeHullOverlay *overlay) noexcept {
+    wireframeOverlay_ = overlay;
+  }
+
+  void unlockTranscopyright(const std::size_t storeIdx,
+                            const PrimediaSpan &span) {
+    if (session.unlockTranscopyright(storeIdx, span)) {
+      renderer->runWithState([this, storeIdx](RenderState &rState) {
+        for (std::size_t dIdx = 0;
+             dIdx < rState.docs.size() && dIdx < session.views().size();
+             ++dIdx) {
+          if (!rState.docs[dIdx]) {
+            continue;
+          }
+          const auto &vInfo = session.views()[dIdx];
+          if (vInfo.storeIndex == storeIdx) {
+            const auto src = session.sourceFor(vInfo.version, vInfo.storeIndex);
+            rState.docs[dIdx]->load(*src);
+          }
+        }
+        syncMediaWidgets(rState);
+      });
+    }
+  }
+
+  void unlockTranscopyrightAtCaret() {
+    renderer->runWithState([this](RenderState &rState) {
+      auto *const caret = rState.caret;
+      if (!caret) {
+        return;
+      }
+      const auto docIdx = caret->documentIndex();
+      if (docIdx >= session.views().size()) {
+        return;
+      }
+      const auto &openView = session.views()[docIdx];
+      const auto holes =
+          session.holesForView(static_cast<std::uint32_t>(docIdx));
+      const auto caretPos = caret->byteOffset();
+      for (const auto &hole : holes) {
+        if (hole.isLocked()) {
+          if ((caretPos >= hole.charOffset &&
+               caretPos <= hole.charOffset + hole.length) ||
+              (caret->hasSelection() &&
+               caret->selectionStart() < hole.charOffset + hole.length &&
+               caret->selectionEnd() > hole.charOffset)) {
+            unlockTranscopyright(openView.storeIndex, hole.span);
+            break;
+          }
+        }
+      }
     });
   }
 
@@ -1250,6 +1324,7 @@ private:
   /// can be handed the same device and pipeline description explicitly.
   render::RenderDevice *device_{nullptr};
   render::PipelineDesc documentDesc_;
+  WireframeHullOverlay *wireframeOverlay_{nullptr};
 };
 
 void bindCommands(gleditor::Application &app, const AppStateRef &state,
@@ -1354,6 +1429,12 @@ void bindCommands(gleditor::Application &app, const AppStateRef &state,
   app.commands().bind(SDL_SCANCODE_F4, Mod::None, "tension-physics-toggle",
                       "toggle 3-way tension spring layout simulation",
                       [&links] { links.togglePhysics(); });
+  app.commands().bind(SDL_SCANCODE_F5, Mod::None, "unlock-transcopyright-f5",
+                      "unlock transcopyright span at caret or selection",
+                      [&views] { views.unlockTranscopyrightAtCaret(); });
+  app.commands().bind(SDL_SCANCODE_U, Mod::Ctrl, "unlock-transcopyright-ctrl-u",
+                      "unlock transcopyright span at caret or selection",
+                      [&views] { views.unlockTranscopyrightAtCaret(); });
   app.commands().bind(SDL_SCANCODE_LEFTBRACKET, Mod::Ctrl, "scrub-back",
                       "scrub backward in hypertime history",
                       [&views] { views.scrubHistory(true); });
@@ -1674,6 +1755,20 @@ int main(const int argc, char **argv) {
   parser.add_argument("--swarm-sample")
       .help("open decentralized swarm telescope overlay with pre-seeded sample "
             "publications and topics")
+      .default_value(false)
+      .implicit_value(true);
+  parser.add_argument("--tc-sample")
+      .help("open sample document demonstrating withheld holes and "
+            "transcopyright paywalls")
+      .default_value(false)
+      .implicit_value(true);
+  parser.add_argument("--auto-unlock")
+      .help("automatically unlock transcopyright spans on launch")
+      .default_value(false)
+      .implicit_value(true);
+  parser.add_argument("--wireframe-sample")
+      .help("demonstrate progressive 3D streaming wireframe hull and swarm "
+            "materialization progress")
       .default_value(false)
       .implicit_value(true);
   parser.add_argument("--physics")
@@ -2548,6 +2643,25 @@ int main(const int argc, char **argv) {
           views.insertPageBreak(docIdx, charOffset);
         });
 
+    TranscopyrightOverlay transcopyrightOverlay(*session, renderer, "Sans 10");
+    renderer->addFrameContributor(&transcopyrightOverlay);
+    renderer->addPickObserver(&transcopyrightOverlay);
+    transcopyrightOverlay.setUnlockCallback(
+        [&views](const std::size_t sIdx, const PrimediaSpan &span) {
+          views.unlockTranscopyright(sIdx, span);
+        });
+
+    session->setTranscopyrightUnlockedHandler(
+        [&transcopyrightOverlay](const std::size_t docIdx,
+                                 const PrimediaSpan &span,
+                                 const std::uint64_t cost) {
+          transcopyrightOverlay.notifyUnlocked(docIdx, span, cost);
+        });
+
+    WireframeHullOverlay wireframeHullOverlay(renderer, "Sans 10");
+    renderer->addFrameContributor(&wireframeHullOverlay);
+    views.setWireframeOverlay(&wireframeHullOverlay);
+
     kineticTetherEngine.setVoidSpawnHandler(
         [&views](const TetherPayload &payload, const float sx, const float sy) {
           views.spawnTranscludedDocument(payload, sx, sy);
@@ -2936,8 +3050,134 @@ int main(const int argc, char **argv) {
     renderer->addPickObserver(&pouchDrawer);
     renderer->addPickObserver(&swarmTelescope);
 
-    if (asked.empty() && read.empty() && alongside.empty() &&
-        extraImports.empty()) {
+    if (parser["--tc-sample"] == true) {
+      namespace fs = std::filesystem;
+      const auto tempDir =
+          fs::temp_directory_path() /
+          ("xudu_tc_sample_" +
+           std::to_string(
+               std::chrono::steady_clock::now().time_since_epoch().count()));
+      std::error_code ec;
+      fs::create_directories(tempDir, ec);
+
+      const std::string public1 =
+          "Ted Nelson's Project Xanadu (1960): Universal Hypertext & "
+          "Transpublishing.\n\n";
+      const std::string withheldSecret =
+          "CONFIDENTIAL SYSTEM SPECIFICATION: [EMBARGOED]\n\n";
+      const std::string tcPlain =
+          "Nelsonian Deep Hypertext: Autonomous transcopyright micropayments "
+          "guarantee author royalty settlement across the universal "
+          "docuverse.\n\n";
+      const std::string public2 =
+          "All hypertime branches and transclusions remain perpetually "
+          "connected.\n";
+
+      const auto tcKeyId = TranscopyrightLogic::testKeyId("sample-tc-span-1");
+      const auto tcCek =
+          TranscopyrightLogic::deriveDeterministicTestCek(tcKeyId);
+      const auto tcNonce  = crypto::nonceForKeyId(tcKeyId);
+      const auto tcCipher = crypto::encryptAead(tcPlain, tcCek, tcNonce, {});
+
+      std::string torrentPayload;
+      torrentPayload += public1;
+      torrentPayload.append(withheldSecret.size(), '\0');
+      torrentPayload += tcCipher;
+      torrentPayload += public2;
+
+      const std::array<xudu::TorrentContent, 1> files{
+          xudu::TorrentContent{"spool", torrentPayload}};
+      const auto torrent = xudu::makeTorrent(files, "tc_sample_torrent", 16384);
+
+      std::ofstream spoolOut(tempDir / "spool", std::ios::binary);
+      spoolOut.write(torrentPayload.data(),
+                     static_cast<std::streamsize>(torrentPayload.size()));
+      spoolOut.close();
+
+      std::ofstream torrentOut(tempDir / "sample.torrent", std::ios::binary);
+      torrentOut.write(torrent.file.data(),
+                       static_cast<std::streamsize>(torrent.file.size()));
+      torrentOut.close();
+
+      session->addTorrent((tempDir / "sample.torrent").string(),
+                          tempDir.string());
+
+      Scroll sampleScroll;
+      // Seg 0: Plain text intro
+      ScrollSegment seg0;
+      seg0.at           = 0;
+      seg0.length       = public1.size();
+      seg0.torrent      = torrent.hash;
+      seg0.streamOffset = 0;
+      seg0.kind         = SegmentKind::Plain;
+      sampleScroll.segments.push_back(seg0);
+
+      // Seg 1: Withheld embargoed redaction
+      ScrollSegment seg1;
+      seg1.at           = seg0.end();
+      seg1.length       = withheldSecret.size();
+      seg1.torrent      = torrent.hash;
+      seg1.streamOffset = seg0.end();
+      seg1.kind         = SegmentKind::Withheld;
+      PublishedHoleRecord hole1;
+      hole1.at        = seg1.at;
+      hole1.length    = seg1.length;
+      hole1.reason    = HoleReason::Withheld;
+      seg1.holeRecord = hole1;
+      sampleScroll.segments.push_back(seg1);
+
+      // Seg 2: Transcopyright paywall
+      ScrollSegment seg2;
+      seg2.at           = seg1.end();
+      seg2.length       = tcPlain.size();
+      seg2.torrent      = torrent.hash;
+      seg2.streamOffset = seg1.streamOffset + seg1.length;
+      seg2.kind         = SegmentKind::Withheld;
+      PublishedHoleRecord hole2;
+      hole2.at     = seg2.at;
+      hole2.length = seg2.length;
+      hole2.reason = HoleReason::TranscopyrightLock;
+      TranscopyrightDescriptor tc;
+      tc.priceAtomicUnits  = 250;
+      tc.flatFee           = true;
+      tc.currencySymbol    = "nano-XU";
+      tc.keyId             = tcKeyId;
+      tc.nonce             = tcNonce;
+      tc.licenseMemo       = "Nelson-Transcopyright-v1";
+      hole2.transcopyright = tc;
+      seg2.holeRecord      = hole2;
+      sampleScroll.segments.push_back(seg2);
+
+      // Seg 3: Plain text outro
+      ScrollSegment seg3;
+      seg3.at           = seg2.end();
+      seg3.length       = public2.size();
+      seg3.torrent      = torrent.hash;
+      seg3.streamOffset = seg2.streamOffset + tcCipher.size();
+      seg3.kind         = SegmentKind::Plain;
+      sampleScroll.segments.push_back(seg3);
+
+      auto &st        = session->store(0);
+      const auto vNew = st.transcludeExternal(opening, 0, sampleScroll, 0,
+                                              sampleScroll.length());
+      opening         = vNew;
+
+      if (parser["--auto-unlock"] == true) {
+        const auto ver   = st.rebuild(vNew);
+        const auto holes = TranscopyrightLogic::inspectHoles(st, ver);
+        for (const auto &h : holes) {
+          if (h.isLocked()) {
+            session->unlockTranscopyright(0, h.span);
+            break;
+          }
+        }
+      }
+    }
+
+    if (parser["--tc-sample"] == true) {
+      views.showAlongside(opening, 0.0F, 0);
+    } else if (asked.empty() && read.empty() && alongside.empty() &&
+               extraImports.empty()) {
       const auto &primaryStore = session->store(0);
       const auto allVers       = primaryStore.allVersions();
       if (allVers.size() > 1) {
@@ -3100,6 +3340,12 @@ int main(const int argc, char **argv) {
       if (nlPos != std::string::npos) {
         views.insertPageBreak(0, static_cast<std::uint32_t>(nlPos + 1));
       }
+    }
+
+    if (parser["--wireframe-sample"] == true) {
+      wireframeHullOverlay.startLoading(0, "Xanadu Docuverse Materialization",
+                                        "e2e8f1920ac34b7911", 20);
+      wireframeHullOverlay.updateProgress(0, 13);
     }
 
     std::vector<std::shared_ptr<gleditor::AudioWidget>> audioWidgets;

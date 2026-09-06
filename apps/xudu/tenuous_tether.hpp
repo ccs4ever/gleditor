@@ -1,12 +1,13 @@
 /**
  * @file tenuous_tether.hpp
- * @brief Tenuous elastic tether ribbons connecting flying documents to origin context.
+ * @brief Tenuous elastic tether ribbons connecting flying documents to origin
+ * context.
  *
  * When a linked passage or document flies forward out of the background plane
  * (Z = -40) into collinear reading alignment (Z = 0), it remains anchored to
- * its origin slot via a faint, semi-transparent elastic tether ribbon (quadratic
- * Bezier arc with alpha ~ 0.25), preventing visual disorientation and maintaining
- * Nelsonian deep provenance.
+ * its origin slot via a faint, semi-transparent elastic tether ribbon
+ * (quadratic Bezier arc with alpha ~ 0.25), preventing visual disorientation
+ * and maintaining Nelsonian deep provenance.
  */
 #ifndef XUDU_TENUOUS_TETHER_HPP
 #define XUDU_TENUOUS_TETHER_HPP
@@ -27,11 +28,13 @@ namespace xudu {
 
 /**
  * @struct FlyingTetherAnchor
- * @brief Record of a document currently displaced from its background resting position.
+ * @brief Record of a document currently displaced from its background resting
+ * position.
  */
 struct FlyingTetherAnchor {
   std::size_t docIndex{0};
-  glm::vec3 originPos{0.0F};  ///< Resting home coordinate in background (Z ~ -40)
+  glm::vec3 originPos{
+      0.0F}; ///< Resting home coordinate in background (Z ~ -40)
   glm::vec3 currentPos{0.0F}; ///< Current physical coordinate (Z ~ 0)
   float width{50.0F};
   float height{70.0F};
@@ -41,7 +44,8 @@ struct FlyingTetherAnchor {
 
 /**
  * @class TenuousTetherOverlay
- * @brief FrameContributor that stages and draws quadratic Bezier ribbons and origin footprints.
+ * @brief FrameContributor that stages and draws quadratic Bezier ribbons and
+ * origin footprints.
  */
 class TenuousTetherOverlay : public gleditor::FrameContributor {
 public:
@@ -61,7 +65,8 @@ public:
   void clear();
 
   /// Retrieve all active tethers.
-  [[nodiscard]] const std::vector<FlyingTetherAnchor> &tethers() const noexcept {
+  [[nodiscard]] const std::vector<FlyingTetherAnchor> &
+  tethers() const noexcept {
     return tethers_;
   }
 
@@ -75,9 +80,10 @@ public:
   [[nodiscard]] bool busy() const override { return false; }
 
   /// Evaluate quadratic Bezier arc at parameter t in [0, 1].
-  [[nodiscard]] static inline glm::vec3
-  evaluateBezier(const glm::vec3 &origin, const glm::vec3 &control,
-                 const glm::vec3 &flying, const float t) noexcept {
+  [[nodiscard]] static inline glm::vec3 evaluateBezier(const glm::vec3 &origin,
+                                                       const glm::vec3 &control,
+                                                       const glm::vec3 &flying,
+                                                       const float t) noexcept {
     const float inv = 1.0F - t;
     return (inv * inv * origin) + (2.0F * inv * t * control) + (t * t * flying);
   }

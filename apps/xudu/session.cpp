@@ -1081,8 +1081,12 @@ std::vector<ClassifiedStretch> classifyRun(const Store &st,
                                       .containerStart  = start,
                                       .containerLength = length});
     } else {
-      out.push_back(ClassifiedStretch{
-          .isMedia = false, .start = start, .length = length});
+      out.push_back(ClassifiedStretch{.isMedia         = false,
+                                      .start           = start,
+                                      .length          = length,
+                                      .mime            = "text/plain",
+                                      .containerStart  = start,
+                                      .containerLength = length});
     }
   };
 
@@ -1095,12 +1099,23 @@ std::vector<ClassifiedStretch> classifyRun(const Store &st,
     }
     const auto mediaEnd = std::min(runEnd, segment.end());
     if (mediaEnd > cursor) {
-      out.push_back(ClassifiedStretch{.isMedia         = true,
-                                      .start           = cursor,
-                                      .length          = mediaEnd - cursor,
-                                      .mime            = segment.mimeType,
-                                      .containerStart  = segment.at,
-                                      .containerLength = segment.length});
+      const bool isMedia =
+          gleditor::MagicMimeDetector::isMediaMime(segment.mimeType);
+      if (isMedia) {
+        out.push_back(ClassifiedStretch{.isMedia         = true,
+                                        .start           = cursor,
+                                        .length          = mediaEnd - cursor,
+                                        .mime            = segment.mimeType,
+                                        .containerStart  = segment.at,
+                                        .containerLength = segment.length});
+      } else {
+        out.push_back(ClassifiedStretch{.isMedia         = false,
+                                        .start           = cursor,
+                                        .length          = mediaEnd - cursor,
+                                        .mime            = segment.mimeType,
+                                        .containerStart  = segment.at,
+                                        .containerLength = segment.length});
+      }
       cursor = mediaEnd;
     }
   }
@@ -1131,8 +1146,17 @@ Session::sourceFor(const MicroversionId &version,
     }
     for (const auto &stretch : classifyRun(st, run, magic)) {
       if (!stretch.isMedia) {
-        concatext +=
-            st.read(PrimediaSpan{run.scroll, stretch.start, stretch.length});
+        const auto span =
+            PrimediaSpan{run.scroll, stretch.start, stretch.length};
+        const auto res = st.resolve(span);
+        if (res.status == ResolutionStatus::VerifiedBytes) {
+          concatext += res.text;
+        } else if (res.status == ResolutionStatus::TranscopyrightLocked ||
+                   res.status == ResolutionStatus::WithheldRedacted) {
+          concatext.append(stretch.length > 0 ? stretch.length : 1U, ' ');
+        } else {
+          concatext += st.read(span);
+        }
         continue;
       }
       // The whole container's bytes, not just this stretch: a fragment of a
@@ -1312,6 +1336,66 @@ Session::mediaSpansFor(const MicroversionId &version,
     }
   }
   return list;
+}
+
+bool Session::unlockTranscopyright(const std::size_t storeIdx,
+                                   const PrimediaSpan &span) {
+  if (storeIdx >= stores.size() || !stores[storeIdx].store) {
+    return false;
+  }
+  auto &st       = *stores[storeIdx].store;
+  const auto res = st.resolve(span);
+  if (res.status != ResolutionStatus::TranscopyrightLocked ||
+      !res.lockInfo.has_value()) {
+    return false;
+  }
+  const auto &tc   = *res.lockInfo;
+  const auto cek   = TranscopyrightLogic::deriveDeterministicTestCek(tc.keyId);
+  const auto count = span.length > 0 ? span.length : 1U;
+  const auto cost  = tc.computeCost(count);
+  if (!st.contentResolver().unlockTranscopyright(tc.keyId, cek, cost,
+                                                 tc.currencySymbol)) {
+    return false;
+  }
+
+  // Invalidate cached decorations and notify observers
+  invalidate();
+  for (std::size_t d = 0; d < open.size(); ++d) {
+    if (open[d].storeIndex == storeIdx) {
+      open[d].decoratedAt = 0;
+      open[d].decorations.clear();
+      if (tcUnlockedHandler_) {
+        tcUnlockedHandler_(d, span, cost);
+      }
+    }
+  }
+  return true;
+}
+
+bool Session::unlockTranscopyrightAt(const std::uint32_t docIndex,
+                                     const std::uint32_t charOffset) {
+  if (docIndex >= open.size()) {
+    return false;
+  }
+  const auto sIdx     = open[docIndex].storeIndex;
+  const auto &st      = store(sIdx);
+  const auto &rebuilt = st.rebuild(open[docIndex].version);
+  const auto spans    = rebuilt.spansFor(charOffset, 1);
+  if (spans.empty()) {
+    return false;
+  }
+  return unlockTranscopyright(sIdx, spans.front());
+}
+
+std::vector<HoleSpanInfo>
+Session::holesForView(const std::uint32_t docIndex) const {
+  if (docIndex >= open.size()) {
+    return {};
+  }
+  const auto sIdx = open[docIndex].storeIndex;
+  const auto &st  = store(sIdx);
+  const auto &ver = st.rebuild(open[docIndex].version);
+  return TranscopyrightLogic::inspectHoles(st, ver, docIndex, sIdx);
 }
 
 std::vector<MicroversionId>

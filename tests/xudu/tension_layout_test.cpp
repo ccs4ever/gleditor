@@ -1,6 +1,7 @@
 /**
  * @file tension_layout_test.cpp
- * @brief Unit tests for the 3-Way Tension Layout Engine and Tenuous Parent Tethers.
+ * @brief Unit tests for the 3-Way Tension Layout Engine and Tenuous Parent
+ * Tethers.
  */
 #include <gmock/gmock.h>
 #include <gtest/gtest.h>
@@ -24,17 +25,17 @@ using ::testing::Lt;
 
 TEST(TensionLayoutTest, RK4DampedConvergence) {
   TensionParams params;
-  params.kDamping = 12.0F;
-  params.kPlane   = 25.0F;
+  params.kDamping                = 12.0F;
+  params.kPlane                  = 25.0F;
   params.settleVelocityThreshold = 0.01F;
 
   TensionLayoutEngine engine(params);
 
   TensionBody body;
-  body.docIndex   = 0;
-  body.position   = glm::vec3(0.0F, 0.0F, 20.0F); // Displaced from Z = 0
-  body.velocity   = glm::vec3(10.0F, -5.0F, 15.0F);
-  body.mass       = 1.0F;
+  body.docIndex     = 0;
+  body.position     = glm::vec3(0.0F, 0.0F, 20.0F); // Displaced from Z = 0
+  body.velocity     = glm::vec3(10.0F, -5.0F, 15.0F);
+  body.mass         = 1.0F;
   body.isForeground = true;
 
   engine.setBody(body);
@@ -54,8 +55,8 @@ TEST(TensionLayoutTest, RK4DampedConvergence) {
 
 TEST(TensionLayoutTest, CoulombRepulsionPreventsOverlap) {
   TensionParams params;
-  params.kRepel   = 6000.0F;
-  params.kDamping = 10.0F;
+  params.kRepel     = 6000.0F;
+  params.kDamping   = 10.0F;
   params.defaultGap = 8.0F;
 
   TensionLayoutEngine engine(params);
@@ -98,9 +99,9 @@ TEST(TensionLayoutTest, CoulombRepulsionPreventsOverlap) {
 
 TEST(TensionLayoutTest, CollinearAlignmentSpring) {
   TensionParams params;
-  params.kAlign   = 35.0F;
-  params.kDamping = 12.0F;
-  params.kPlane   = 20.0F;
+  params.kAlign     = 35.0F;
+  params.kDamping   = 12.0F;
+  params.kPlane     = 20.0F;
   params.defaultGap = 8.0F;
 
   TensionLayoutEngine engine(params);
@@ -129,13 +130,13 @@ TEST(TensionLayoutTest, CollinearAlignmentSpring) {
   // deltaAnchorY = 10 - (-10) = +20 => target far Y = 0 + 20 = 20
   // target far X = 0 + 0.5 * (50 + 50) + 8 = 58
   TensionConstraint link;
-  link.fromDoc      = 10;
-  link.toDoc        = 20;
-  link.nearAnchorY  = 10.0F;
-  link.farAnchorY   = -10.0F;
-  link.targetGap    = 8.0F;
-  link.prominence   = 1.0F;
-  link.active       = true;
+  link.fromDoc     = 10;
+  link.toDoc       = 20;
+  link.nearAnchorY = 10.0F;
+  link.farAnchorY  = -10.0F;
+  link.targetGap   = 8.0F;
+  link.prominence  = 1.0F;
+  link.active      = true;
 
   engine.addConstraint(link);
 
