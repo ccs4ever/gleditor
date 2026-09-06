@@ -96,6 +96,15 @@ MicroversionId Session::insertText(const std::uint32_t docIndex,
   open[docIndex].version = prod;
   open[docIndex].pieces  = st.rebuild(prod);
   invalidate();
+  if (st.isSystem()) {
+    st.repointCurrentVersion(prod);
+    save(sIdx);
+    if (systemDocChangedCallback_) {
+      if (const auto kind = systemDocKindForStoreIndex(sIdx)) {
+        systemDocChangedCallback_(*kind, st.textOf(prod));
+      }
+    }
+  }
   return prod;
 }
 
@@ -502,9 +511,14 @@ std::string Session::publishDocument(const MicroversionId &version,
   const auto provenance =
       signProvenance(record, settings().signing(request.passphrase));
 
+  const auto withheldHoles = collectWithheldHoles();
+  if (st.userPermascrollPtr()) {
+    st.userPermascrollPtr()->sealIncremental(into, provenance, withheldHoles);
+  }
+
   const auto sealed =
       sealLocalSpool(st, mine, "primedia", into, provenance, priorState.scroll,
-                     priorState.opsAlreadySealed);
+                     priorState.opsAlreadySealed, withheldHoles);
 
   auto opsSegments = priorState.opsSegments;
   if (sealed.opsSegment.has_value()) {
@@ -859,6 +873,83 @@ void Session::repointSystemDoc(const SystemDocKind kind,
   if (systemDocChangedCallback_) {
     systemDocChangedCallback_(kind, st.textOf(version));
   }
+}
+
+MicroversionId Session::openSystemDoc(const SystemDocKind kind) {
+  const auto sIdx = systemStoreIndex(kind);
+  auto &st        = store(sIdx);
+  auto ver        = st.primaryCurrentVersion();
+  if (ver.isZero()) {
+    ver = st.latest();
+  }
+  for (std::size_t i = 0; i < open.size(); ++i) {
+    if (open[i].storeIndex == sIdx) {
+      return open[i].version;
+    }
+  }
+  viewOpened(ver, sIdx);
+  return ver;
+}
+
+void Session::setSystemDocPublished(const SystemDocKind kind,
+                                    const bool published) {
+  if (published) {
+    publishedSystemDocs_.insert(kind);
+  } else {
+    publishedSystemDocs_.erase(kind);
+  }
+}
+
+bool Session::isSystemDocPublished(const SystemDocKind kind) const {
+  return publishedSystemDocs_.contains(kind);
+}
+
+std::vector<PublishedHoleRecord> Session::collectWithheldHoles() const {
+  std::vector<PublishedHoleRecord> holes;
+  for (std::size_t sIdx = 0; sIdx < stores.size(); ++sIdx) {
+    const auto &entry = stores[sIdx];
+    if (!entry.store || !entry.store->isSystem()) {
+      continue;
+    }
+    const auto kindOpt = systemDocKindForStoreIndex(sIdx);
+    if (kindOpt && publishedSystemDocs_.contains(*kindOpt)) {
+      continue;
+    }
+    const auto opCount = entry.store->opCount();
+    for (std::uint32_t i = 0; i < opCount; ++i) {
+      const auto *node = entry.store->getCompactOp(i);
+      if (node && node->scrollId == localScroll && node->spanLength > 0) {
+        holes.push_back(PublishedHoleRecord{
+            .at     = node->spanStart,
+            .length = node->spanLength,
+            .reason = HoleReason::Withheld,
+        });
+      }
+    }
+  }
+
+  if (holes.empty()) {
+    return holes;
+  }
+
+  std::sort(holes.begin(), holes.end(),
+            [](const auto &a, const auto &b) { return a.at < b.at; });
+
+  std::vector<PublishedHoleRecord> merged;
+  merged.reserve(holes.size());
+  for (const auto &hole : holes) {
+    if (merged.empty()) {
+      merged.push_back(hole);
+      continue;
+    }
+    auto &last = merged.back();
+    if (hole.at <= last.at + last.length) {
+      last.length = std::max(last.length, (hole.at + hole.length) - last.at);
+    } else {
+      merged.push_back(hole);
+    }
+  }
+  return merged;
 }
 
 void Session::refresh(const std::uint32_t docIndex,

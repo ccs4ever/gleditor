@@ -22,6 +22,7 @@
 #include <memory>
 #include <mutex>
 #include <optional>
+#include <set>
 #include <span>
 #include <string>
 #include <string_view>
@@ -519,6 +520,18 @@ public:
   /// and trigger subsystem notification.
   void repointSystemDoc(SystemDocKind kind, const MicroversionId &version);
 
+  /// Open a sovereign system xanadoc in the active session view.
+  MicroversionId openSystemDoc(SystemDocKind kind);
+
+  /// Set whether @p kind's primedia spans are published or withheld (default).
+  void setSystemDocPublished(SystemDocKind kind, bool published = true);
+
+  /// Whether @p kind has been explicitly designated for public export.
+  [[nodiscard]] bool isSystemDocPublished(SystemDocKind kind) const;
+
+  /// Collect all withheld primedia holes across non-published system xanadocs.
+  [[nodiscard]] std::vector<PublishedHoleRecord> collectWithheldHoles() const;
+
   /**
    * @brief A source for @p version, ready to hand to the render queue.
    *
@@ -705,6 +718,7 @@ private:
   std::optional<Config> config;
   std::map<SystemDocKind, std::size_t> systemStoreIndices_;
   SystemDocChangedCallback systemDocChangedCallback_;
+  std::set<SystemDocKind> publishedSystemDocs_;
 
   MediaManager mediaManager_;
   gleditor::GroundingModal groundingModal_;

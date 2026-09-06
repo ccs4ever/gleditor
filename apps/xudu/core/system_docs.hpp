@@ -88,6 +88,62 @@ systemDocKindFromUri(const std::string_view uri) noexcept {
 [[nodiscard]] std::string defaultSystemDocContent(SystemDocKind kind);
 [[nodiscard]] std::filesystem::path systemDocDirectory(SystemDocKind kind);
 
+struct KeymapConfig {
+  std::vector<std::pair<std::string, std::string>> bindings;
+  [[nodiscard]] std::optional<std::string>
+  bindingFor(const std::string_view action) const {
+    for (const auto &[act, key] : bindings) {
+      if (act == action) {
+        return key;
+      }
+    }
+    return std::nullopt;
+  }
+};
+
+struct SettingsConfig {
+  float fontSize{16.0F};
+  std::string fontFamily{"Monospace"};
+  float lineHeight{1.4F};
+  std::string theme{"system"};
+  std::uint32_t autoSaveSeconds{5};
+};
+
+enum class ToastAnchor : std::uint8_t {
+  TopRight,
+  TopLeft,
+  BottomRight,
+  BottomLeft,
+  TopCenter
+};
+
+enum class PouchDock : std::uint8_t { Left, Right };
+
+struct LayoutConfig {
+  std::uint32_t columns{2};
+  float pageWidthPx{800.0F};
+  float pageHeightPx{1000.0F};
+  ToastAnchor toastAnchor{ToastAnchor::TopRight};
+  float toastOffsetX{24.0F};
+  float toastOffsetY{48.0F};
+  PouchDock pouchDock{PouchDock::Right};
+  float documentSpacingX{70.0F};
+  bool transclusionPrisms{true};
+  bool xanalinkRibbons{true};
+};
+
+struct UIConfig {
+  bool tabBarVisible{true};
+  bool statusBarVisible{true};
+  bool hypertimeMapVisible{false};
+  gleditor::RadialConfig radialMenu;
+};
+
+[[nodiscard]] KeymapConfig parseKeymapConfig(std::string_view yamlText);
+[[nodiscard]] SettingsConfig parseSettingsConfig(std::string_view yamlText);
+[[nodiscard]] LayoutConfig parseLayoutConfig(std::string_view yamlText);
+[[nodiscard]] UIConfig parseUIConfig(std::string_view yamlText);
+
 [[nodiscard]] gleditor::RadialConfig
 parseRadialConfig(std::string_view yamlText);
 

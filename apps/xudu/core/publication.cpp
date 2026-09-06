@@ -594,7 +594,8 @@ SealedScroll sealLocalSpool(const Store &store, const MutableKeys &keys,
                             const std::string &salt, const std::string &into,
                             const SignedProvenance &provenance,
                             const Scroll &priorScroll,
-                            const std::uint32_t opsAlreadySealed) {
+                            const std::uint32_t opsAlreadySealed,
+                            const std::vector<PublishedHoleRecord> &holes) {
   if (provenance.yaml.empty() || provenance.signature.empty()) {
     throw std::runtime_error(
         "cannot seal without a signed authorship record. The record is signed "
@@ -620,26 +621,40 @@ SealedScroll sealLocalSpool(const Store &store, const MutableKeys &keys,
   const auto newOps =
       hasNewOps ? sealableOps(store, opsAlreadySealed) : std::string{};
 
+  std::string wirePayload{newPrimedia};
+  const auto sliceStart = primediaAlreadySealed;
+  const auto sliceEnd   = primediaAlreadySealed + newPrimedia.size();
+
+  for (const auto &hole : holes) {
+    const auto holeStart = hole.at;
+    const auto holeEnd   = hole.at + hole.length;
+    if (holeEnd <= sliceStart || holeStart >= sliceEnd) {
+      continue;
+    }
+
+    const auto overlapStart = std::max(holeStart, sliceStart);
+    const auto overlapEnd   = std::min(holeEnd, sliceEnd);
+    const auto relStart     = overlapStart - sliceStart;
+    const auto relLength    = overlapEnd - overlapStart;
+
+    if (hole.reason == HoleReason::Withheld ||
+        hole.reason == HoleReason::Revoked ||
+        hole.reason == HoleReason::Takedown) {
+      std::fill(wirePayload.begin() + static_cast<std::ptrdiff_t>(relStart),
+                wirePayload.begin() +
+                    static_cast<std::ptrdiff_t>(relStart + relLength),
+                '\0');
+    }
+  }
+
   // The content first, so a fresh segment's bytes begin at offset zero of its
   // own piece stream -- what keeps every address already handed out pointing
   // where it did. New operations, when there are any, follow it; the record
   // and its signature always come last, since they describe this seal rather
   // than being seal-specific content of their own.
-  //
-  // Only what is new is sealed: what @p priorScroll already carries is not
-  // reread or rehashed here, only carried forward into the scroll this
-  // returns. The operations are sealed in because a xanadoc is its history
-  // and not the state it happens to have reached: a reader given the pieces
-  // alone gets a document that cannot be gone back through, which is the one
-  // thing this model exists to make possible. They ride in the torrent
-  // rather than the manifest because they are bulk -- fetched in pieces, from
-  // peers, only by a reader who wants them -- and because the info hash then
-  // covers them, so operations that do not hash to what the reference names
-  // cannot be passed off as the publisher's any more than the content can.
   std::vector<TorrentContent> files;
   if (hasNewPrimedia) {
-    files.push_back(
-        TorrentContent{sealedContentName, std::string{newPrimedia}});
+    files.push_back(TorrentContent{sealedContentName, std::move(wirePayload)});
   }
   if (hasNewOps) {
     files.push_back(TorrentContent{sealedOpsName, newOps});
@@ -1288,14 +1303,15 @@ publishDocument(Store &store, const MicroversionId &version,
                 const std::uint64_t published,
                 const SignedProvenance &permascrollProvenance,
                 [[maybe_unused]] const SignedProvenance &documentProvenance,
-                const std::string &torrentOutputDir) {
+                const std::string &torrentOutputDir,
+                const std::vector<PublishedHoleRecord> &holes) {
   if (!torrentOutputDir.empty()) {
     std::error_code ec;
     std::filesystem::create_directories(torrentOutputDir, ec);
   }
   if (store.userPermascrollPtr()) {
     store.userPermascrollPtr()->sealIncremental(torrentOutputDir,
-                                                permascrollProvenance);
+                                                permascrollProvenance, holes);
   }
 
   const auto userScroll = store.userPermascroll().currentScroll();

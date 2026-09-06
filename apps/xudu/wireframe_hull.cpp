@@ -28,19 +28,16 @@ void WireframeHullOverlay::deviceReady(render::RenderDevice &device,
   canvas_->createPipeline(pipeline, false);
 }
 
-bool WireframeHullOverlay::busy() const {
-  return !dissolvingHulls_.empty();
-}
+bool WireframeHullOverlay::busy() const { return !dissolvingHulls_.empty(); }
 
 void WireframeHullOverlay::startLoading(const std::size_t docIndex,
-                                        std::string title,
-                                        std::string infoHash,
+                                        std::string title, std::string infoHash,
                                         const std::uint32_t totalPieces) {
   for (auto &ld : loadingDocs_) {
     if (ld.docIndex == docIndex) {
-      ld.title        = std::move(title);
-      ld.infoHash     = std::move(infoHash);
-      ld.totalPieces  = (totalPieces > 0 ? totalPieces : 1U);
+      ld.title         = std::move(title);
+      ld.infoHash      = std::move(infoHash);
+      ld.totalPieces   = (totalPieces > 0 ? totalPieces : 1U);
       ld.piecesFetched = 0;
       return;
     }
@@ -73,13 +70,15 @@ void WireframeHullOverlay::finishLoading(const std::size_t docIndex) {
   for (auto it = loadingDocs_.begin(); it != loadingDocs_.end(); ++it) {
     if (it->docIndex == docIndex) {
       loadingDocs_.erase(it);
-      dissolvingHulls_.push_back(DissolvingHull{.docIndex = docIndex, .opacity = 1.0F});
+      dissolvingHulls_.push_back(
+          DissolvingHull{.docIndex = docIndex, .opacity = 1.0F});
       return;
     }
   }
 }
 
-bool WireframeHullOverlay::isLoading(const std::size_t docIndex) const noexcept {
+bool WireframeHullOverlay::isLoading(
+    const std::size_t docIndex) const noexcept {
   for (const auto &ld : loadingDocs_) {
     if (ld.docIndex == docIndex) return true;
   }
@@ -127,8 +126,8 @@ void WireframeHullOverlay::drawFrame(gleditor::FrameContext &ctx) {
         const auto clip = ctx.viewProjection * origin4;
         if (clip.w > 0.001F) {
           const auto ndc = glm::vec3(clip) / clip.w;
-          cx = (ndc.x * 0.5F + 0.5F) * width;
-          cy = (ndc.y * 0.5F + 0.5F) * height;
+          cx             = (ndc.x * 0.5F + 0.5F) * width;
+          cy             = (ndc.y * 0.5F + 0.5F) * height;
         }
       }
     }

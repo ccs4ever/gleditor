@@ -273,7 +273,8 @@ struct CompoundPublication {
 [[nodiscard]] SealedScroll sealLocalSpool(
     const Store &store, const MutableKeys &keys, const std::string &salt,
     const std::string &into, const SignedProvenance &provenance,
-    const Scroll &priorScroll = {}, std::uint32_t opsAlreadySealed = 0);
+    const Scroll &priorScroll = {}, std::uint32_t opsAlreadySealed = 0,
+    const std::vector<PublishedHoleRecord> &holes = {});
 
 [[nodiscard]] CompoundPublication sealCompound(
     const Store &store, const MutableKeys &keys, const std::string &salt,
@@ -345,7 +346,8 @@ publishDocument(Store &store, const MicroversionId &version,
                 std::uint64_t published,
                 const SignedProvenance &permascrollProvenance,
                 const SignedProvenance &documentProvenance,
-                const std::string &torrentOutputDir = {});
+                const std::string &torrentOutputDir           = {},
+                const std::vector<PublishedHoleRecord> &holes = {});
 
 /**
  * @brief The global name of the scroll @p span points into.

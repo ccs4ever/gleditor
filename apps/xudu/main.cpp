@@ -1880,6 +1880,10 @@ int main(const int argc, char **argv) {
       .help("create a link between open document spans as "
             "DOC1:START:LEN,DOC2:START:LEN[:TYPE[:TIER[:OWNER]]]; repeatable")
       .append();
+  parser.add_argument("--system-doc")
+      .help("open a sovereign system xanadoc (keymap, settings, layout, ui, "
+            "pouches); repeatable")
+      .append();
   parser.add_argument("files")
       .help("source files to import or open")
       .remaining();
@@ -1962,9 +1966,17 @@ int main(const int argc, char **argv) {
     }
 
     if (!importFiles.empty()) {
-      std::size_t startIdx = 0;
-      if (0 == session->store(0).opCount()) {
-        const auto &firstFile = importFiles[0];
+      std::size_t startIdx  = 0;
+      const auto &firstFile = importFiles[0];
+      if (const auto kind = xudu::systemDocKindFromUri(firstFile)) {
+        const auto openedVer = session->openSystemDoc(*kind);
+        opening              = openedVer;
+        startIdx             = 1;
+        if (!quiet) {
+          std::cout << "xudu: opened system doc " << firstFile << " as "
+                    << openedVer.str() << "\n";
+        }
+      } else if (0 == session->store(0).opCount()) {
         const gleditor::FileTextSource source(firstFile);
         // Piece by piece rather than one whole-file insert(): a plain file
         // is exactly one plain-text piece (pieces()' own default), so this
@@ -2007,17 +2019,48 @@ int main(const int argc, char **argv) {
         session->save(0);
         opening = imported;
         session->viewOpened(imported, 0);
-        quiet || std::cout << "xudu: imported " << firstFile << " as "
-                           << imported.str() << "\n";
+        if (!quiet) {
+          std::cout << "xudu: imported " << firstFile << " as "
+                    << imported.str() << "\n";
+        }
         startIdx = 1;
       }
       for (std::size_t i = startIdx; i < importFiles.size(); ++i) {
-        const auto &f               = importFiles[i];
-        const auto [sIdx, imported] = session->importFileToTemporaryStore(f);
-        session->viewOpened(imported, sIdx);
-        extraImports.emplace_back(imported, sIdx);
-        quiet || std::cout << "xudu: imported " << f << " to temp store "
-                           << sIdx << " as " << imported.str() << "\n";
+        const auto &f = importFiles[i];
+        if (const auto kind = xudu::systemDocKindFromUri(f)) {
+          const auto sIdx      = session->systemStoreIndex(*kind);
+          const auto openedVer = session->openSystemDoc(*kind);
+          extraImports.emplace_back(openedVer, sIdx);
+          if (!quiet) {
+            std::cout << "xudu: opened " << f << " in system store " << sIdx
+                      << " as " << openedVer.str() << "\n";
+          }
+        } else {
+          const auto [sIdx, imported] = session->importFileToTemporaryStore(f);
+          session->viewOpened(imported, sIdx);
+          extraImports.emplace_back(imported, sIdx);
+          if (!quiet) {
+            std::cout << "xudu: imported " << f << " to temp store " << sIdx
+                      << " as " << imported.str() << "\n";
+          }
+        }
+      }
+    }
+
+    if (parser.present<std::vector<std::string>>("--system-doc")) {
+      for (const auto &name :
+           parser.get<std::vector<std::string>>("--system-doc")) {
+        const std::string uri =
+            name.starts_with("system://") ? name : "system://" + name;
+        if (const auto kind = xudu::systemDocKindFromUri(uri)) {
+          const auto sIdx      = session->systemStoreIndex(*kind);
+          const auto openedVer = session->openSystemDoc(*kind);
+          extraImports.emplace_back(openedVer, sIdx);
+          if (!quiet) {
+            std::cout << "xudu: opened system doc " << uri << " in store "
+                      << sIdx << " as " << openedVer.str() << "\n";
+          }
+        }
       }
     }
 
@@ -2936,16 +2979,6 @@ int main(const int argc, char **argv) {
           }
         });
 
-    session->setSystemDocChangedCallback(
-        [radialMenu](const xudu::SystemDocKind kind,
-                     const std::string &content) {
-          std::cout << "xudu: system doc updated (" << xudu::systemDocUri(kind)
-                    << ")\n";
-          if (kind == xudu::SystemDocKind::UI) {
-            radialMenu->setConfig(xudu::parseRadialConfig(content));
-          }
-        });
-
     LinkBeams links(*session, renderer);
     links.setVisible(parser["--no-beams"] != true);
     links.setSworph(parser["--no-sworph"] != true);
@@ -3420,6 +3453,69 @@ int main(const int argc, char **argv) {
                  pouchDrawer, swarmTelescope,
                  publishAs.empty() ? std::string{"document"} : publishAs);
     quiet || std::cout << "commands:\n" << app.commands().helpText();
+
+    session->setSystemDocChangedCallback(
+        [&app, radialMenu, docSwitcher, &pouchDrawer, &links,
+         &map](const xudu::SystemDocKind kind, const std::string &content) {
+          std::cout << "xudu: system doc updated (" << xudu::systemDocUri(kind)
+                    << ")\n";
+          switch (kind) {
+          case xudu::SystemDocKind::Keymap: {
+            app.commands().rebindFromText(content);
+            break;
+          }
+          case xudu::SystemDocKind::Settings: {
+            break;
+          }
+          case xudu::SystemDocKind::Layout: {
+            const auto layout = xudu::parseLayoutConfig(content);
+            links.setVisible(layout.xanalinkRibbons);
+            pouchDrawer.setDockSide(layout.pouchDock == xudu::PouchDock::Left
+                                        ? xudu::PouchDrawer::DockSide::Left
+                                        : xudu::PouchDrawer::DockSide::Right);
+            break;
+          }
+          case xudu::SystemDocKind::UI: {
+            const auto uiCfg = xudu::parseUIConfig(content);
+            radialMenu->setConfig(uiCfg.radialMenu);
+            docSwitcher->setVisible(uiCfg.tabBarVisible);
+            map.setVisible(uiCfg.hypertimeMapVisible);
+            break;
+          }
+          case xudu::SystemDocKind::Pouches:
+          case xudu::SystemDocKind::Count:
+            break;
+          }
+        });
+
+    // Apply active system doc configurations at launch
+    {
+      const auto kmIdx = session->systemStoreIndex(xudu::SystemDocKind::Keymap);
+      const auto &kmStore = session->store(kmIdx);
+      if (kmStore.opCount() > 0) {
+        app.commands().rebindFromText(
+            kmStore.textOf(kmStore.primaryCurrentVersion()));
+      }
+      const auto uiIdx    = session->systemStoreIndex(xudu::SystemDocKind::UI);
+      const auto &uiStore = session->store(uiIdx);
+      if (uiStore.opCount() > 0) {
+        const auto uiCfg = xudu::parseUIConfig(
+            uiStore.textOf(uiStore.primaryCurrentVersion()));
+        radialMenu->setConfig(uiCfg.radialMenu);
+        docSwitcher->setVisible(uiCfg.tabBarVisible);
+        map.setVisible(uiCfg.hypertimeMapVisible);
+      }
+      const auto loIdx = session->systemStoreIndex(xudu::SystemDocKind::Layout);
+      const auto &loStore = session->store(loIdx);
+      if (loStore.opCount() > 0) {
+        const auto loCfg = xudu::parseLayoutConfig(
+            loStore.textOf(loStore.primaryCurrentVersion()));
+        links.setVisible(loCfg.xanalinkRibbons);
+        pouchDrawer.setDockSide(loCfg.pouchDock == xudu::PouchDock::Left
+                                    ? xudu::PouchDrawer::DockSide::Left
+                                    : xudu::PouchDrawer::DockSide::Right);
+      }
+    }
 
     const auto status = app.run();
     session->saveAll();

@@ -23,9 +23,7 @@ TranscopyrightOverlay::TranscopyrightOverlay(Session &session,
       fontName_(std::move(fontName)) {
   session_.setTranscopyrightUnlockedHandler(
       [this](const std::size_t docIdx, const PrimediaSpan &span,
-             const std::uint64_t cost) {
-        notifyUnlocked(docIdx, span, cost);
-      });
+             const std::uint64_t cost) { notifyUnlocked(docIdx, span, cost); });
 }
 
 TranscopyrightOverlay::~TranscopyrightOverlay() = default;
@@ -36,9 +34,7 @@ void TranscopyrightOverlay::deviceReady(render::RenderDevice &device,
   canvas_->createPipeline(pipeline, false);
 }
 
-bool TranscopyrightOverlay::busy() const {
-  return !uncurlingAnims_.empty();
-}
+bool TranscopyrightOverlay::busy() const { return !uncurlingAnims_.empty(); }
 
 void TranscopyrightOverlay::notifyUnlocked(const std::size_t docIndex,
                                            const PrimediaSpan &span,
@@ -97,7 +93,8 @@ void TranscopyrightOverlay::drawFrame(gleditor::FrameContext &ctx) {
     const auto docIdx = doc->documentIndex();
     if (docIdx >= session_.views().size()) continue;
 
-    const auto holes = session_.holesForView(static_cast<std::uint32_t>(docIdx));
+    const auto holes =
+        session_.holesForView(static_cast<std::uint32_t>(docIdx));
     for (const auto &hole : holes) {
       const auto startAnchor = doc->anchorFor(hole.charStart);
       if (!startAnchor) continue;
@@ -120,8 +117,8 @@ void TranscopyrightOverlay::drawFrame(gleditor::FrameContext &ctx) {
           const glm::vec4 clipEnd = ctx.viewProjection * glm::vec4(*wEnd, 1.0F);
           if (clipEnd.w > 0.001F) {
             const glm::vec3 ndcEnd = glm::vec3(clipEnd) / clipEnd.w;
-            sxEnd = (ndcEnd.x * 0.5F + 0.5F) *
-                    static_cast<float>(ctx.screenWidth);
+            sxEnd =
+                (ndcEnd.x * 0.5F + 0.5F) * static_cast<float>(ctx.screenWidth);
           }
         }
       }
@@ -180,10 +177,10 @@ void TranscopyrightOverlay::drawFrame(gleditor::FrameContext &ctx) {
   // 3. Render active uncurling bloom animations
   canvas_->setTag(render::tagKindOverlay, 0);
   for (const auto &anim : uncurlingAnims_) {
-    const float alpha       = std::clamp(1.0F - anim.progress, 0.0F, 1.0F);
-    const auto alphaByte    = static_cast<std::uint32_t>(alpha * 220.0F);
-    const auto glowColor    = 0xF59E0B00U | (alphaByte & 0xFFU);
-    const float expansion   = anim.progress * 24.0F;
+    const float alpha     = std::clamp(1.0F - anim.progress, 0.0F, 1.0F);
+    const auto alphaByte  = static_cast<std::uint32_t>(alpha * 220.0F);
+    const auto glowColor  = 0xF59E0B00U | (alphaByte & 0xFFU);
+    const float expansion = anim.progress * 24.0F;
 
     canvas_->addRect(anim.screenX - expansion, anim.screenY - expansion,
                      anim.width + (expansion * 2.0F),

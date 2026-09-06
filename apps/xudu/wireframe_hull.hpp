@@ -52,7 +52,8 @@ public:
   [[nodiscard]] bool isLoading(std::size_t docIndex) const noexcept;
 
   /// All currently tracked loading documents
-  [[nodiscard]] const std::vector<WireframeProgress> &loadingDocs() const noexcept {
+  [[nodiscard]] const std::vector<WireframeProgress> &
+  loadingDocs() const noexcept {
     return loadingDocs_;
   }
 

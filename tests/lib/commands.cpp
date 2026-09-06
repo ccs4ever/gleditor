@@ -109,6 +109,89 @@ TEST(CommandTableTest, everyBindingIsListed) {
   EXPECT_EQ(table.all()[1].mods, Mod::Alt);
 }
 
+TEST(CommandTableTest, rebindSingleAction) {
+  CommandTable table;
+  int ran = 0;
+  table.bind(keyA, "save", "save doc", [&ran] { ran++; });
+
+  EXPECT_TRUE(table.dispatch(keyA, Mod::None));
+  EXPECT_EQ(ran, 1);
+
+  EXPECT_TRUE(table.rebind("save", keyB, Mod::Ctrl));
+  EXPECT_FALSE(table.dispatch(keyA, Mod::None));
+  EXPECT_TRUE(table.dispatch(keyB, Mod::Ctrl));
+  EXPECT_EQ(ran, 2);
+
+  const auto b = table.bindingFor("save");
+  ASSERT_TRUE(b.has_value());
+  EXPECT_EQ(b->first, keyB);
+  EXPECT_EQ(b->second, Mod::Ctrl);
+
+  EXPECT_FALSE(table.rebind("nonexistent", keyA, Mod::None));
+  EXPECT_FALSE(table.bindingFor("nonexistent").has_value());
+}
+
+TEST(CommandTableTest, rebindFromText) {
+  CommandTable table;
+  int newDocRan  = 0;
+  int openDocRan = 0;
+  table.bind(SDL_SCANCODE_N, Mod::Ctrl, "new-doc", "",
+             [&newDocRan] { newDocRan++; });
+  table.bind(SDL_SCANCODE_O, Mod::Ctrl, "open-doc", "",
+             [&openDocRan] { openDocRan++; });
+
+  const std::string keymapYaml = "# Custom keymap\n"
+                                 "new-doc: \"Ctrl+Shift+N\"\n"
+                                 "open-doc: \"Ctrl+Alt+O\"\n";
+
+  EXPECT_TRUE(table.rebindFromText(keymapYaml));
+
+  EXPECT_FALSE(table.dispatch(SDL_SCANCODE_N, Mod::Ctrl));
+  EXPECT_FALSE(table.dispatch(SDL_SCANCODE_O, Mod::Ctrl));
+
+  EXPECT_TRUE(table.dispatch(SDL_SCANCODE_N, Mod::Ctrl | Mod::Shift));
+  EXPECT_EQ(newDocRan, 1);
+  EXPECT_TRUE(table.dispatch(SDL_SCANCODE_O, Mod::Ctrl | Mod::Alt));
+  EXPECT_EQ(openDocRan, 1);
+}
+
+TEST(CommandTableTest, parseKeyComboVarious) {
+  using gleditor::parseKeyCombo;
+
+  const auto c1 = parseKeyCombo("Ctrl+N");
+  ASSERT_TRUE(c1.has_value());
+  EXPECT_EQ(c1->first, SDL_SCANCODE_N);
+  EXPECT_EQ(c1->second, Mod::Ctrl);
+
+  const auto c2 = parseKeyCombo("Ctrl+Shift+Alt+F5");
+  ASSERT_TRUE(c2.has_value());
+  EXPECT_EQ(c2->first, SDL_SCANCODE_F5);
+  EXPECT_EQ(c2->second, Mod::Ctrl | Mod::Shift | Mod::Alt);
+
+  const auto c3 = parseKeyCombo("Ctrl+[");
+  ASSERT_TRUE(c3.has_value());
+  EXPECT_EQ(c3->first, SDL_SCANCODE_LEFTBRACKET);
+  EXPECT_EQ(c3->second, Mod::Ctrl);
+
+  const auto c4 = parseKeyCombo("Ctrl+]");
+  ASSERT_TRUE(c4.has_value());
+  EXPECT_EQ(c4->first, SDL_SCANCODE_RIGHTBRACKET);
+  EXPECT_EQ(c4->second, Mod::Ctrl);
+
+  const auto c5 = parseKeyCombo("Space");
+  ASSERT_TRUE(c5.has_value());
+  EXPECT_EQ(c5->first, SDL_SCANCODE_SPACE);
+  EXPECT_EQ(c5->second, Mod::None);
+
+  const auto c6 = parseKeyCombo("Return");
+  ASSERT_TRUE(c6.has_value());
+  EXPECT_EQ(c6->first, SDL_SCANCODE_RETURN);
+  EXPECT_EQ(c6->second, Mod::None);
+
+  const auto c7 = parseKeyCombo("invalid-nonsense-key-xyz");
+  EXPECT_FALSE(c7.has_value());
+}
+
 TEST(MouseWheelTest, WheelHelpersExtractCoordinates) {
   SDL_Event evt{};
   evt.type = SDL_EVENT_MOUSE_WHEEL;

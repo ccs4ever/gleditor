@@ -15,7 +15,8 @@ namespace xudu {
 namespace {
 
 struct ArrayHash {
-  std::size_t operator()(const std::array<std::uint8_t, 32> &arr) const noexcept {
+  std::size_t
+  operator()(const std::array<std::uint8_t, 32> &arr) const noexcept {
     std::size_t seed = 0;
     for (std::size_t i = 0; i < 32; i += sizeof(std::size_t)) {
       std::size_t val = 0;
@@ -48,15 +49,15 @@ std::string TranscopyrightLogic::reasonLabel(const HoleReason reason) noexcept {
   return "UNKNOWN";
 }
 
-std::string TranscopyrightLogic::formatCost(
-    const TranscopyrightDescriptor &desc,
-    const std::uint64_t byteCount) noexcept {
+std::string
+TranscopyrightLogic::formatCost(const TranscopyrightDescriptor &desc,
+                                const std::uint64_t byteCount) noexcept {
   const auto cost = desc.computeCost(byteCount);
   return formatCost(cost, desc.currencySymbol);
 }
 
-std::string TranscopyrightLogic::formatCost(
-    const std::uint64_t cost, const std::string_view symbol) {
+std::string TranscopyrightLogic::formatCost(const std::uint64_t cost,
+                                            const std::string_view symbol) {
   if (symbol == "XU" && cost >= 1000000000ULL) {
     if (cost % 1000000000ULL == 0) {
       return std::to_string(cost / 1000000000ULL) + " " + std::string(symbol);
@@ -87,8 +88,8 @@ void TranscopyrightLogic::registerTestCek(
   s_keyVault[keyId] = cek;
 }
 
-std::optional<crypto::Key32> TranscopyrightLogic::lookupTestCek(
-    const std::array<std::uint8_t, 32> &keyId) {
+std::optional<crypto::Key32>
+TranscopyrightLogic::lookupTestCek(const std::array<std::uint8_t, 32> &keyId) {
   std::lock_guard<std::mutex> lock(s_keyVaultMutex);
   const auto it = s_keyVault.find(keyId);
   if (it != s_keyVault.end()) {
@@ -145,13 +146,13 @@ TranscopyrightLogic::inspectHoles(const Store &st, const Version &version,
       }
 
       const auto reason =
-          res.holeRecord ? res.holeRecord->reason
-                         : (segment.holeRecord
-                                ? segment.holeRecord->reason
-                                : (res.status ==
-                                           ResolutionStatus::TranscopyrightLocked
-                                       ? HoleReason::TranscopyrightLock
-                                       : HoleReason::Withheld));
+          res.holeRecord
+              ? res.holeRecord->reason
+              : (segment.holeRecord
+                     ? segment.holeRecord->reason
+                     : (res.status == ResolutionStatus::TranscopyrightLocked
+                            ? HoleReason::TranscopyrightLock
+                            : HoleReason::Withheld));
       const auto colour =
           (res.status == ResolutionStatus::TranscopyrightLocked ||
            reason == HoleReason::TranscopyrightLock)

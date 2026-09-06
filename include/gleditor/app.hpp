@@ -112,6 +112,26 @@ public:
    */
   bool run(std::string_view name) const;
 
+  /**
+   * @brief Rebind an existing command named @p name to a new key combination.
+   *
+   * @return True if the command was found and rebound, false otherwise.
+   */
+  bool rebind(std::string_view name, int scancode, Mod mods);
+
+  /**
+   * @brief Rebind commands from keymap text (e.g. YAML key-value lines).
+   *
+   * @return True if at least one command was successfully rebound.
+   */
+  bool rebindFromText(std::string_view yamlText);
+
+  /**
+   * @brief Look up the current scancode and modifiers bound to @p name.
+   */
+  [[nodiscard]] std::optional<std::pair<int, Mod>>
+  bindingFor(std::string_view name) const;
+
   [[nodiscard]] const std::vector<Command> &all() const { return bindings; }
   /// The bindings as lines of text, for a program that wants to print them.
   [[nodiscard]] std::string helpText() const;
@@ -119,6 +139,13 @@ public:
 private:
   std::vector<Command> bindings;
 };
+
+/**
+ * @brief Parse a key combination string like "Ctrl+N", "Shift+Alt+F5", "Ctrl+["
+ *        into an SDL scancode and modifier mask.
+ */
+[[nodiscard]] std::optional<std::pair<int, Mod>>
+parseKeyCombo(std::string_view combo);
 
 /**
  * @brief Register the options every program built on this library accepts.

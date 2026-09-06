@@ -131,6 +131,96 @@ struct ScopedRadialCallbacks {
   ~ScopedRadialCallbacks() { c4::yml::set_callbacks(prev); }
 };
 
+std::string_view trimStr(std::string_view s) {
+  while (!s.empty() && (s.front() == ' ' || s.front() == '\t' ||
+                        s.front() == '\r' || s.front() == '\n')) {
+    s.remove_prefix(1);
+  }
+  while (!s.empty() && (s.back() == ' ' || s.back() == '\t' ||
+                        s.back() == '\r' || s.back() == '\n')) {
+    s.remove_suffix(1);
+  }
+  return s;
+}
+
+std::string stripQuotes(std::string_view s) {
+  s = trimStr(s);
+  if (s.size() >= 2 && ((s.front() == '"' && s.back() == '"') ||
+                        (s.front() == '\'' && s.back() == '\''))) {
+    s = s.substr(1, s.size() - 2);
+  }
+  return std::string{s};
+}
+
+bool parseBool(std::string_view s, const bool fallback) {
+  s = trimStr(s);
+  if (s.size() >= 2 && ((s.front() == '"' && s.back() == '"') ||
+                        (s.front() == '\'' && s.back() == '\''))) {
+    s = s.substr(1, s.size() - 2);
+  }
+  if (s == "true" || s == "True" || s == "1" || s == "yes" || s == "on") {
+    return true;
+  }
+  if (s == "false" || s == "False" || s == "0" || s == "no" || s == "off") {
+    return false;
+  }
+  return fallback;
+}
+
+float parseFloat(std::string_view s, const float fallback) {
+  s = trimStr(s);
+  if (s.size() >= 2 && ((s.front() == '"' && s.back() == '"') ||
+                        (s.front() == '\'' && s.back() == '\''))) {
+    s = s.substr(1, s.size() - 2);
+  }
+  float val      = fallback;
+  const auto res = std::from_chars(s.data(), s.data() + s.size(), val);
+  if (res.ec == std::errc{}) {
+    return val;
+  }
+  return fallback;
+}
+
+std::uint32_t parseUint(std::string_view s, const std::uint32_t fallback) {
+  s = trimStr(s);
+  if (s.size() >= 2 && ((s.front() == '"' && s.back() == '"') ||
+                        (s.front() == '\'' && s.back() == '\''))) {
+    s = s.substr(1, s.size() - 2);
+  }
+  std::uint32_t val = fallback;
+  const auto res    = std::from_chars(s.data(), s.data() + s.size(), val);
+  if (res.ec == std::errc{}) {
+    return val;
+  }
+  return fallback;
+}
+
+std::vector<std::pair<std::string, std::string>>
+parseKeyValueLines(const std::string_view text) {
+  std::vector<std::pair<std::string, std::string>> pairs;
+  std::size_t start = 0;
+  while (start < text.size()) {
+    auto end = text.find('\n', start);
+    if (end == std::string_view::npos) {
+      end = text.size();
+    }
+    auto line = text.substr(start, end - start);
+    start     = end + 1;
+    if (const auto hash = line.find('#'); hash != std::string_view::npos) {
+      line = line.substr(0, hash);
+    }
+    const auto colon = line.find(':');
+    if (colon != std::string_view::npos) {
+      auto k = trimStr(line.substr(0, colon));
+      auto v = stripQuotes(line.substr(colon + 1));
+      if (!k.empty() && !v.empty()) {
+        pairs.emplace_back(std::string{k}, std::move(v));
+      }
+    }
+  }
+  return pairs;
+}
+
 } // namespace
 
 gleditor::RadialConfig parseRadialConfig(const std::string_view yamlText) {
@@ -286,6 +376,204 @@ gleditor::RadialConfig parseRadialConfig(const std::string_view yamlText) {
     // Return fallback cfg on parse error
   }
 
+  return cfg;
+}
+
+KeymapConfig parseKeymapConfig(const std::string_view yamlText) {
+  KeymapConfig cfg;
+  if (yamlText.empty()) {
+    return cfg;
+  }
+
+  const ScopedRadialCallbacks scoped;
+  try {
+    const c4::yml::Tree tree =
+        c4::yml::parse_in_arena(c4::csubstr{yamlText.data(), yamlText.size()});
+    if (!tree.empty()) {
+      const auto root = tree.rootref();
+      if (root.is_map()) {
+        for (const auto child : root.children()) {
+          if (child.has_key() && child.has_val()) {
+            std::string k{child.key().data(), child.key().size()};
+            std::string v = stripQuotes(
+                std::string_view{child.val().data(), child.val().size()});
+            cfg.bindings.emplace_back(std::move(k), std::move(v));
+          }
+        }
+        if (!cfg.bindings.empty()) {
+          return cfg;
+        }
+      }
+    }
+  } catch (const std::exception &) {
+    // Fall back to line-based parsing
+  }
+
+  cfg.bindings = parseKeyValueLines(yamlText);
+  return cfg;
+}
+
+SettingsConfig parseSettingsConfig(const std::string_view yamlText) {
+  SettingsConfig cfg;
+  if (yamlText.empty()) {
+    return cfg;
+  }
+
+  const auto applyKv = [&](const std::string_view k, const std::string_view v) {
+    if (k == "fontSize") {
+      cfg.fontSize = parseFloat(v, cfg.fontSize);
+    } else if (k == "fontFamily") {
+      cfg.fontFamily = stripQuotes(v);
+    } else if (k == "lineHeight") {
+      cfg.lineHeight = parseFloat(v, cfg.lineHeight);
+    } else if (k == "theme") {
+      cfg.theme = stripQuotes(v);
+    } else if (k == "autoSaveSeconds") {
+      cfg.autoSaveSeconds = parseUint(v, cfg.autoSaveSeconds);
+    }
+  };
+
+  const ScopedRadialCallbacks scoped;
+  try {
+    const c4::yml::Tree tree =
+        c4::yml::parse_in_arena(c4::csubstr{yamlText.data(), yamlText.size()});
+    if (!tree.empty()) {
+      const auto root = tree.rootref();
+      if (root.is_map()) {
+        for (const auto child : root.children()) {
+          if (child.has_key() && child.has_val()) {
+            const std::string_view k{child.key().data(), child.key().size()};
+            const std::string_view v{child.val().data(), child.val().size()};
+            applyKv(k, v);
+          }
+        }
+        return cfg;
+      }
+    }
+  } catch (const std::exception &) {
+    // Fall back to line-based parsing
+  }
+
+  for (const auto &[k, v] : parseKeyValueLines(yamlText)) {
+    applyKv(k, v);
+  }
+  return cfg;
+}
+
+LayoutConfig parseLayoutConfig(const std::string_view yamlText) {
+  LayoutConfig cfg;
+  if (yamlText.empty()) {
+    return cfg;
+  }
+
+  const auto applyKv = [&](const std::string_view k, const std::string_view v) {
+    if (k == "columns") {
+      cfg.columns = parseUint(v, cfg.columns);
+    } else if (k == "pageWidthPx") {
+      cfg.pageWidthPx = parseFloat(v, cfg.pageWidthPx);
+    } else if (k == "pageHeightPx") {
+      cfg.pageHeightPx = parseFloat(v, cfg.pageHeightPx);
+    } else if (k == "toastAnchor" || k == "notificationPosition") {
+      const auto val = stripQuotes(v);
+      if (val == "top-left" || val == "TopLeft") {
+        cfg.toastAnchor = ToastAnchor::TopLeft;
+      } else if (val == "bottom-right" || val == "BottomRight") {
+        cfg.toastAnchor = ToastAnchor::BottomRight;
+      } else if (val == "bottom-left" || val == "BottomLeft") {
+        cfg.toastAnchor = ToastAnchor::BottomLeft;
+      } else if (val == "top-center" || val == "TopCenter") {
+        cfg.toastAnchor = ToastAnchor::TopCenter;
+      } else {
+        cfg.toastAnchor = ToastAnchor::TopRight;
+      }
+    } else if (k == "toastOffsetX") {
+      cfg.toastOffsetX = parseFloat(v, cfg.toastOffsetX);
+    } else if (k == "toastOffsetY") {
+      cfg.toastOffsetY = parseFloat(v, cfg.toastOffsetY);
+    } else if (k == "pouchDock") {
+      const auto val = stripQuotes(v);
+      if (val == "left" || val == "Left") {
+        cfg.pouchDock = PouchDock::Left;
+      } else {
+        cfg.pouchDock = PouchDock::Right;
+      }
+    } else if (k == "documentSpacingX") {
+      cfg.documentSpacingX = parseFloat(v, cfg.documentSpacingX);
+    } else if (k == "transclusionPrisms") {
+      cfg.transclusionPrisms = parseBool(v, cfg.transclusionPrisms);
+    } else if (k == "xanalinkRibbons") {
+      cfg.xanalinkRibbons = parseBool(v, cfg.xanalinkRibbons);
+    }
+  };
+
+  const ScopedRadialCallbacks scoped;
+  try {
+    const c4::yml::Tree tree =
+        c4::yml::parse_in_arena(c4::csubstr{yamlText.data(), yamlText.size()});
+    if (!tree.empty()) {
+      const auto root = tree.rootref();
+      if (root.is_map()) {
+        for (const auto child : root.children()) {
+          if (child.has_key() && child.has_val()) {
+            const std::string_view k{child.key().data(), child.key().size()};
+            const std::string_view v{child.val().data(), child.val().size()};
+            applyKv(k, v);
+          }
+        }
+        return cfg;
+      }
+    }
+  } catch (const std::exception &) {
+    // Fall back to line-based parsing
+  }
+
+  for (const auto &[k, v] : parseKeyValueLines(yamlText)) {
+    applyKv(k, v);
+  }
+  return cfg;
+}
+
+UIConfig parseUIConfig(const std::string_view yamlText) {
+  UIConfig cfg;
+  cfg.radialMenu = parseRadialConfig(yamlText);
+  if (yamlText.empty()) {
+    return cfg;
+  }
+
+  const auto applyKv = [&](const std::string_view k, const std::string_view v) {
+    if (k == "tabBarVisible") {
+      cfg.tabBarVisible = parseBool(v, cfg.tabBarVisible);
+    } else if (k == "statusBarVisible") {
+      cfg.statusBarVisible = parseBool(v, cfg.statusBarVisible);
+    } else if (k == "hypertimeMapVisible") {
+      cfg.hypertimeMapVisible = parseBool(v, cfg.hypertimeMapVisible);
+    }
+  };
+
+  const ScopedRadialCallbacks scoped;
+  try {
+    const c4::yml::Tree tree =
+        c4::yml::parse_in_arena(c4::csubstr{yamlText.data(), yamlText.size()});
+    if (!tree.empty()) {
+      const auto root = tree.rootref();
+      if (root.is_map()) {
+        for (const auto child : root.children()) {
+          if (child.has_key() && child.has_val()) {
+            const std::string_view k{child.key().data(), child.key().size()};
+            const std::string_view v{child.val().data(), child.val().size()};
+            applyKv(k, v);
+          }
+        }
+        return cfg;
+      }
+    }
+  } catch (const std::exception &) {
+    // Fall back to line-based parsing
+  }
+
+  for (const auto &[k, v] : parseKeyValueLines(yamlText)) {
+    applyKv(k, v);
+  }
   return cfg;
 }
 

@@ -143,16 +143,16 @@ TEST(TranscopyrightUiTest, inspectsHolesInStoreAndVersion) {
   hole2.length = 40;
   hole2.reason = HoleReason::TranscopyrightLock;
   TranscopyrightDescriptor tc;
-  tc.priceAtomicUnits = 250;
-  tc.flatFee          = true;
-  tc.currencySymbol   = "nano-XU";
-  tc.keyId            = TranscopyrightLogic::testKeyId("test-seed");
+  tc.priceAtomicUnits  = 250;
+  tc.flatFee           = true;
+  tc.currencySymbol    = "nano-XU";
+  tc.keyId             = TranscopyrightLogic::testKeyId("test-seed");
   hole2.transcopyright = tc;
-  seg2.holeRecord     = hole2;
+  seg2.holeRecord      = hole2;
   externalScroll.segments.push_back(seg2);
 
-  const auto v = store.transcludeExternal(MicroversionId{}, 0, externalScroll,
-                                          0, externalScroll.length());
+  const auto v   = store.transcludeExternal(MicroversionId{}, 0, externalScroll,
+                                            0, externalScroll.length());
   const auto ver = store.rebuild(v);
 
   const auto holes = TranscopyrightLogic::inspectHoles(store, ver, 0, 0);
@@ -174,7 +174,8 @@ TEST(TranscopyrightUiTest, inspectsHolesInStoreAndVersion) {
   EXPECT_EQ(holes[1].badgeText(), "🔒 Transcopyright: 250 nano-XU | Unlock ✦");
 }
 
-TEST(TranscopyrightUiTest, storeAndResolverEndToEndTranscopyrightUnlockPipeline) {
+TEST(TranscopyrightUiTest,
+     storeAndResolverEndToEndTranscopyrightUnlockPipeline) {
   namespace fs = std::filesystem;
   const auto tempDir =
       fs::temp_directory_path() /

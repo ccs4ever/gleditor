@@ -379,6 +379,201 @@ bool CommandTable::dispatch(const int scancode, const Mod mods) const {
   return true;
 }
 
+bool CommandTable::rebind(const std::string_view name, const int scancode,
+                          const Mod mods) {
+  const auto found = std::ranges::find_if(
+      bindings, [name](const Command &cmd) { return cmd.name == name; });
+  if (found == bindings.end()) {
+    return false;
+  }
+  found->scancode = scancode;
+  found->mods     = mods;
+  return true;
+}
+
+bool CommandTable::rebindFromText(const std::string_view yamlText) {
+  bool anyRebound   = false;
+  std::size_t start = 0;
+  while (start < yamlText.size()) {
+    auto end = yamlText.find('\n', start);
+    if (end == std::string_view::npos) {
+      end = yamlText.size();
+    }
+    auto line = yamlText.substr(start, end - start);
+    start     = end + 1;
+    if (const auto hash = line.find('#'); hash != std::string_view::npos) {
+      line = line.substr(0, hash);
+    }
+    const auto colon = line.find(':');
+    if (colon != std::string_view::npos) {
+      auto act = line.substr(0, colon);
+      auto key = line.substr(colon + 1);
+      while (!act.empty() && (act.front() == ' ' || act.front() == '\t')) {
+        act.remove_prefix(1);
+      }
+      while (!act.empty() && (act.back() == ' ' || act.back() == '\t')) {
+        act.remove_suffix(1);
+      }
+      if (const auto combo = parseKeyCombo(key)) {
+        if (rebind(act, combo->first, combo->second)) {
+          anyRebound = true;
+        }
+      }
+    }
+  }
+  return anyRebound;
+}
+
+std::optional<std::pair<int, Mod>>
+CommandTable::bindingFor(const std::string_view name) const {
+  const auto found = std::ranges::find_if(
+      bindings, [name](const Command &cmd) { return cmd.name == name; });
+  if (found == bindings.end()) {
+    return std::nullopt;
+  }
+  return std::pair{found->scancode, found->mods};
+}
+
+std::optional<std::pair<int, Mod>> parseKeyCombo(std::string_view combo) {
+  while (!combo.empty() && (combo.front() == ' ' || combo.front() == '\t' ||
+                            combo.front() == '\r' || combo.front() == '\n' ||
+                            combo.front() == '"' || combo.front() == '\'')) {
+    combo.remove_prefix(1);
+  }
+  while (!combo.empty() && (combo.back() == ' ' || combo.back() == '\t' ||
+                            combo.back() == '\r' || combo.back() == '\n' ||
+                            combo.back() == '"' || combo.back() == '\'')) {
+    combo.remove_suffix(1);
+  }
+  if (combo.empty()) {
+    return std::nullopt;
+  }
+
+  auto mods = Mod::None;
+  std::string keyPart;
+
+  if (combo == "+") {
+    keyPart = "+";
+  } else if (combo.size() >= 2 && combo.ends_with("++")) {
+    keyPart = "+";
+    combo.remove_suffix(2);
+  } else {
+    std::size_t start = 0;
+    while (start < combo.size()) {
+      const auto plus = combo.find('+', start);
+      if (plus == std::string_view::npos) {
+        keyPart = std::string(combo.substr(start));
+        break;
+      }
+      auto token = combo.substr(start, plus - start);
+      start      = plus + 1;
+
+      while (!token.empty() &&
+             (token.front() == ' ' || token.front() == '\t')) {
+        token.remove_prefix(1);
+      }
+      while (!token.empty() && (token.back() == ' ' || token.back() == '\t')) {
+        token.remove_suffix(1);
+      }
+      if (token.empty()) {
+        continue;
+      }
+
+      std::string lowerTok;
+      lowerTok.reserve(token.size());
+      for (const char c : token) {
+        lowerTok.push_back(
+            static_cast<char>(std::tolower(static_cast<unsigned char>(c))));
+      }
+
+      if (lowerTok == "ctrl" || lowerTok == "control") {
+        mods = mods | Mod::Ctrl;
+      } else if (lowerTok == "shift") {
+        mods = mods | Mod::Shift;
+      } else if (lowerTok == "alt" || lowerTok == "option") {
+        mods = mods | Mod::Alt;
+      } else {
+        keyPart = std::string(token);
+      }
+    }
+  }
+
+  while (!keyPart.empty() &&
+         (keyPart.front() == ' ' || keyPart.front() == '\t')) {
+    keyPart.erase(keyPart.begin());
+  }
+  while (!keyPart.empty() &&
+         (keyPart.back() == ' ' || keyPart.back() == '\t')) {
+    keyPart.pop_back();
+  }
+  if (keyPart.empty()) {
+    return std::nullopt;
+  }
+
+  std::string lowerKey;
+  lowerKey.reserve(keyPart.size());
+  for (const char c : keyPart) {
+    lowerKey.push_back(
+        static_cast<char>(std::tolower(static_cast<unsigned char>(c))));
+  }
+
+  int scancode = SDL_SCANCODE_UNKNOWN;
+  if (lowerKey == "[" || lowerKey == "leftbracket" ||
+      lowerKey == "left-bracket") {
+    scancode = SDL_SCANCODE_LEFTBRACKET;
+  } else if (lowerKey == "]" || lowerKey == "rightbracket" ||
+             lowerKey == "right-bracket") {
+    scancode = SDL_SCANCODE_RIGHTBRACKET;
+  } else if (lowerKey == "\\" || lowerKey == "backslash") {
+    scancode = SDL_SCANCODE_BACKSLASH;
+  } else if (lowerKey == "/" || lowerKey == "slash") {
+    scancode = SDL_SCANCODE_SLASH;
+  } else if (lowerKey == "=" || lowerKey == "equals" || lowerKey == "+") {
+    scancode = SDL_SCANCODE_EQUALS;
+  } else if (lowerKey == "-" || lowerKey == "minus") {
+    scancode = SDL_SCANCODE_MINUS;
+  } else if (lowerKey == "enter" || lowerKey == "return") {
+    scancode = SDL_SCANCODE_RETURN;
+  } else if (lowerKey == "esc" || lowerKey == "escape") {
+    scancode = SDL_SCANCODE_ESCAPE;
+  } else if (lowerKey == "backspace") {
+    scancode = SDL_SCANCODE_BACKSPACE;
+  } else if (lowerKey == "tab") {
+    scancode = SDL_SCANCODE_TAB;
+  } else if (lowerKey == "space" || lowerKey == "spacebar") {
+    scancode = SDL_SCANCODE_SPACE;
+  } else if (lowerKey == "delete" || lowerKey == "del") {
+    scancode = SDL_SCANCODE_DELETE;
+  } else if (lowerKey == "left") {
+    scancode = SDL_SCANCODE_LEFT;
+  } else if (lowerKey == "right") {
+    scancode = SDL_SCANCODE_RIGHT;
+  } else if (lowerKey == "up") {
+    scancode = SDL_SCANCODE_UP;
+  } else if (lowerKey == "down") {
+    scancode = SDL_SCANCODE_DOWN;
+  } else if (lowerKey == "home") {
+    scancode = SDL_SCANCODE_HOME;
+  } else if (lowerKey == "end") {
+    scancode = SDL_SCANCODE_END;
+  } else if (lowerKey == "pageup" || lowerKey == "pgup") {
+    scancode = SDL_SCANCODE_PAGEUP;
+  } else if (lowerKey == "pagedown" || lowerKey == "pgdn") {
+    scancode = SDL_SCANCODE_PAGEDOWN;
+  } else {
+    scancode = SDL_GetScancodeFromName(keyPart.c_str());
+    if (scancode == SDL_SCANCODE_UNKNOWN) {
+      scancode = SDL_GetScancodeFromName(lowerKey.c_str());
+    }
+  }
+
+  if (scancode == SDL_SCANCODE_UNKNOWN) {
+    return std::nullopt;
+  }
+
+  return std::pair{scancode, mods};
+}
+
 std::string CommandTable::helpText() const {
   std::ostringstream out;
   for (const auto &cmd : bindings) {

@@ -120,7 +120,8 @@ class TranscopyrightLogic {
 public:
   [[nodiscard]] static std::string reasonLabel(HoleReason reason) noexcept;
 
-  [[nodiscard]] static std::uint32_t colorForReason(HoleReason reason) noexcept {
+  [[nodiscard]] static std::uint32_t
+  colorForReason(HoleReason reason) noexcept {
     return colourForHole(reason);
   }
 
@@ -128,8 +129,8 @@ public:
   formatCost(const TranscopyrightDescriptor &desc,
              std::uint64_t byteCount) noexcept;
 
-  [[nodiscard]] static std::string
-  formatCost(std::uint64_t cost, std::string_view symbol);
+  [[nodiscard]] static std::string formatCost(std::uint64_t cost,
+                                              std::string_view symbol);
 
   /// Generate deterministic test key ID
   [[nodiscard]] static std::array<std::uint8_t, 32>
@@ -149,8 +150,8 @@ public:
 
   /// Inspect a Store's version and find all active holes and locked spans
   [[nodiscard]] static std::vector<HoleSpanInfo>
-  inspectHoles(const Store &st, const Version &version, std::size_t docIndex = 0,
-               std::size_t storeIndex = 0);
+  inspectHoles(const Store &st, const Version &version,
+               std::size_t docIndex = 0, std::size_t storeIndex = 0);
 };
 
 } // namespace xudu
