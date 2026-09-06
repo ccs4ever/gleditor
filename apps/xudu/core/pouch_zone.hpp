@@ -1,6 +1,7 @@
 /**
  * @file pouch_zone.hpp
- * @brief Core data model and backing system xanadoc manager for drop zone pouches.
+ * @brief Core data model and backing system xanadoc manager for drop zone
+ * pouches.
  */
 #ifndef XUDU_CORE_POUCH_ZONE_HPP
 #define XUDU_CORE_POUCH_ZONE_HPP
@@ -39,7 +40,8 @@ struct PouchItem {
 
 /**
  * @struct DropZoneConfig
- * @brief User-configurable partition definition stored within the backing xanadoc.
+ * @brief User-configurable partition definition stored within the backing
+ * xanadoc.
  */
 struct DropZoneConfig {
   std::string id;
@@ -130,8 +132,7 @@ private:
  */
 class PouchManager {
 public:
-  explicit PouchManager(
-      std::shared_ptr<UserPermascroll> permascroll = nullptr);
+  explicit PouchManager(std::shared_ptr<UserPermascroll> permascroll = nullptr);
 
   DropZone &addZone(DropZoneConfig config);
   bool removeZone(std::string_view id);
@@ -146,7 +147,8 @@ public:
   /// Populate with default Nelsonian partitions.
   void initDefaultZones();
 
-  /// Drop a span into a zone, recording OpKind::Transclude in the backing store.
+  /// Drop a span into a zone, recording OpKind::Transclude in the backing
+  /// store.
   PouchItem dropSpan(std::string_view zoneId, const PrimediaSpan &span,
                      std::string previewText, const MicroversionId &sourceVer,
                      std::uint32_t docIndex = 0, std::uint32_t charStart = 0,

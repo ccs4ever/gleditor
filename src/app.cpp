@@ -967,6 +967,12 @@ int Application::run() {
         // convention is the GL backend's business, not the application's.
         state->mouseX = static_cast<int>(evt.motion.x);
         state->mouseY = static_cast<int>(evt.motion.y);
+        if (state->mouseMotionHandler &&
+            state->mouseMotionHandler(
+                state->mouseX, state->mouseY,
+                static_cast<std::uint32_t>(evt.motion.state))) {
+          break;
+        }
         // Motion with the left button held is a drag, which extends the
         // selection rather than moving the caret on its own.
         if (0 != (evt.motion.state & SDL_BUTTON_LMASK) &&
@@ -983,12 +989,18 @@ int Application::run() {
         if (nullptr != state->modal && state->modal->grabbing()) {
           break;
         }
+        const int mx   = static_cast<int>(evt.button.x);
+        const int my   = static_cast<int>(evt.button.y);
+        const auto btn = static_cast<std::uint8_t>(evt.button.button);
+        if (state->mouseDownHandler && state->mouseDownHandler(mx, my, btn)) {
+          break;
+        }
         // The render thread answers this: where a click lands in the text is a
         // question only the picking attachment can answer, and that read is
         // asynchronous.
-        state->clickX       = static_cast<int>(evt.button.x);
-        state->clickY       = static_cast<int>(evt.button.y);
-        state->clickButton  = static_cast<std::uint8_t>(evt.button.button);
+        state->clickX       = mx;
+        state->clickY       = my;
+        state->clickButton  = btn;
         state->clickPending = true;
         break;
       }

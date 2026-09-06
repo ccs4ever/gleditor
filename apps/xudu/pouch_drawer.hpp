@@ -1,6 +1,7 @@
 /**
  * @file pouch_drawer.hpp
- * @brief Screen-edge Pouch Drawer overlay with partitioned drop zones and clasp bench.
+ * @brief Screen-edge Pouch Drawer overlay with partitioned drop zones and clasp
+ * bench.
  */
 #ifndef XUDU_POUCH_DRAWER_HPP
 #define XUDU_POUCH_DRAWER_HPP
@@ -26,7 +27,8 @@ namespace xudu {
 
 /**
  * @class PouchDrawer
- * @brief High-performance overlay drawer containing partitioned drop zones and clasp assembly bench.
+ * @brief High-performance overlay drawer containing partitioned drop zones and
+ * clasp assembly bench.
  */
 class PouchDrawer : public gleditor::FrameContributor,
                     public gleditor::PickObserver,
@@ -44,8 +46,7 @@ public:
   using SwingBackHandler = std::function<void(const PouchItem &)>;
 
   PouchDrawer(Session &session, RendererRef renderer,
-              std::string fontName = "Sans 10",
-              DockSide side        = DockSide::Left);
+              std::string fontName = "Sans 10", DockSide side = DockSide::Left);
   ~PouchDrawer() override;
 
   // FrameContributor
@@ -77,9 +78,7 @@ public:
   DropZone &addZone(DropZoneConfig config) {
     return pouchManager_.addZone(std::move(config));
   }
-  bool removeZone(std::string_view id) {
-    return pouchManager_.removeZone(id);
-  }
+  bool removeZone(std::string_view id) { return pouchManager_.removeZone(id); }
   [[nodiscard]] DropZone *zoneById(std::string_view id) noexcept {
     return pouchManager_.zoneById(id);
   }

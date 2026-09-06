@@ -192,7 +192,8 @@ TEST(PouchTest, ForgeClaspCreatesBidirectionalCompoundLink) {
 TEST(PouchTest, SwingBackResolvesExactByteSpan) {
   Store st;
   const auto root = MicroversionId{};
-  const auto v1   = st.insert(root, 0, "Header text. Target premise passage. Footer notes.");
+  const auto v1 =
+      st.insert(root, 0, "Header text. Target premise passage. Footer notes.");
 
   const auto ver1 = st.rebuild(v1);
   // "Target premise passage." is at offset 13, length 23
@@ -206,12 +207,15 @@ TEST(PouchTest, SwingBackResolvesExactByteSpan) {
   EXPECT_EQ(occurrences.front().end, 36U);
 
   // Now create branch v2 that prepends 50 characters
-  const auto v2   = st.insert(v1, 0, "A long introductory section that shifts all offsets! ");
+  const auto v2 =
+      st.insert(v1, 0, "A long introductory section that shifts all offsets! ");
   const auto ver2 = st.rebuild(v2);
 
-  // Primedia span address did not change! In v2, occurrencesOf finds the shifted byte position
+  // Primedia span address did not change! In v2, occurrencesOf finds the
+  // shifted byte position
   const auto shiftedOccurrences = ver2.occurrencesOf(spans.front());
   ASSERT_EQ(shiftedOccurrences.size(), 1U);
   EXPECT_GT(shiftedOccurrences.front().start, 13U);
-  EXPECT_EQ(shiftedOccurrences.front().end - shiftedOccurrences.front().start, 23U);
+  EXPECT_EQ(shiftedOccurrences.front().end - shiftedOccurrences.front().start,
+            23U);
 }

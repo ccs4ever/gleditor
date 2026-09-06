@@ -1,6 +1,7 @@
 /**
  * @file pouch_drawer.cpp
- * @brief Screen-edge Pouch Drawer overlay with partitioned drop zones and clasp bench.
+ * @brief Screen-edge Pouch Drawer overlay with partitioned drop zones and clasp
+ * bench.
  */
 #include "pouch_drawer.hpp"
 
@@ -28,8 +29,8 @@ void PouchDrawer::deviceReady(render::RenderDevice &device,
 }
 
 void PouchDrawer::setOpen(const bool open, const bool animated) noexcept {
-  isOpen_            = open;
-  targetSlideWidth_  = open ? kDrawerWidth : 0.0F;
+  isOpen_           = open;
+  targetSlideWidth_ = open ? kDrawerWidth : 0.0F;
   if (!animated) {
     currentSlideWidth_ = targetSlideWidth_;
   }
@@ -89,12 +90,12 @@ void PouchDrawer::layout(const float screenWidth, const float screenHeight) {
 }
 
 bool PouchDrawer::handleGhostDrop(const PrimediaSpan &span,
-                                 const std::string &preview,
-                                 const MicroversionId &sourceVer,
-                                 const float screenX, const float screenY,
-                                 const std::uint32_t docIndex,
-                                 const std::uint32_t charStart,
-                                 const std::uint32_t charEnd) {
+                                  const std::string &preview,
+                                  const MicroversionId &sourceVer,
+                                  const float screenX, const float screenY,
+                                  const std::uint32_t docIndex,
+                                  const std::uint32_t charStart,
+                                  const std::uint32_t charEnd) {
   PouchItem item{
       .itemId          = 0,
       .span            = span,
@@ -182,8 +183,8 @@ void PouchDrawer::drawFrame(gleditor::FrameContext &ctx) {
   canvas_->setTag(render::tagKindOverlay, kTagDrawerFlipDock);
   canvas_->addRect(drawerX_ + drawerW_ - 124.0F, topY - 32.0F, 28.0F, 20.0F,
                    0x475569CC);
-  canvas_->addText(ctx.state, drawerX_ + drawerW_ - 120.0F, topY - 18.0F,
-                   "<>", 0xFFFFFFFF, 0);
+  canvas_->addText(ctx.state, drawerX_ + drawerW_ - 120.0F, topY - 18.0F, "<>",
+                   0xFFFFFFFF, 0);
 
   // 3. Clasp Assembly Bench
   forgeWidget_.draw(*canvas_, ctx.state);
@@ -198,22 +199,20 @@ void PouchDrawer::drawFrame(gleditor::FrameContext &ctx) {
 
     // Zone Background Tint
     canvas_->setTag(render::tagKindOverlay, 0);
-    const auto bg = zone.backgroundColor();
-    const auto bgCol =
-        (static_cast<std::uint32_t>(bg.r * 255.0F) << 24U) |
-        (static_cast<std::uint32_t>(bg.g * 255.0F) << 16U) |
-        (static_cast<std::uint32_t>(bg.b * 255.0F) << 8U) |
-        static_cast<std::uint32_t>(bg.a * 255.0F);
+    const auto bg    = zone.backgroundColor();
+    const auto bgCol = (static_cast<std::uint32_t>(bg.r * 255.0F) << 24U) |
+                       (static_cast<std::uint32_t>(bg.g * 255.0F) << 16U) |
+                       (static_cast<std::uint32_t>(bg.b * 255.0F) << 8U) |
+                       static_cast<std::uint32_t>(bg.a * 255.0F);
     canvas_->addRect(zone.x(), zone.y(), zone.width(), zone.height(), bgCol);
 
     // Glowing Aura Border
     const float auraThickness = zone.isHovered() ? 2.5F : 1.0F;
-    const auto auraCol = zone.auraColor();
+    const auto auraCol        = zone.auraColor();
     canvas_->addLine(zone.x(), zone.y(), zone.x() + zone.width(), zone.y(),
                      auraThickness, auraCol);
-    canvas_->addLine(zone.x() + zone.width(), zone.y(),
-                     zone.x() + zone.width(), zone.y() + zone.height(),
-                     auraThickness, auraCol);
+    canvas_->addLine(zone.x() + zone.width(), zone.y(), zone.x() + zone.width(),
+                     zone.y() + zone.height(), auraThickness, auraCol);
     canvas_->addLine(zone.x() + zone.width(), zone.y() + zone.height(),
                      zone.x(), zone.y() + zone.height(), auraThickness,
                      auraCol);
@@ -268,8 +267,8 @@ void PouchDrawer::drawFrame(gleditor::FrameContext &ctx) {
                           static_cast<std::uint32_t>(item.itemId));
       canvas_->addRect(cardX + cardW - 16.0F, cardY + cardH - 16.0F, 12.0F,
                        12.0F, 0xEF444488);
-      canvas_->addText(ctx.state, cardX + cardW - 13.0F,
-                       cardY + cardH - 6.0F, "x", 0xFFFFFFFF, 0);
+      canvas_->addText(ctx.state, cardX + cardW - 13.0F, cardY + cardH - 6.0F,
+                       "x", 0xFFFFFFFF, 0);
 
       // Preview snippet text (bottom line)
       std::string snippet = item.previewText;
@@ -287,8 +286,7 @@ void PouchDrawer::drawFrame(gleditor::FrameContext &ctx) {
   canvas_->draw(ctx.state, ortho);
 }
 
-bool PouchDrawer::picked(const render::PickingResult &pick,
-                         RenderState &) {
+bool PouchDrawer::picked(const render::PickingResult &pick, RenderState &) {
   if (!isOpen_ || currentSlideWidth_ < 1.0F ||
       pick.tag.kind != render::tagKindOverlay) {
     return false;
@@ -365,10 +363,11 @@ void PouchDrawer::describe(gleditor::a11y::Builder &into) {
   drawerNode.label = "Pouch Drawer";
 
   for (std::size_t i = 0; i < pouchManager_.zones().size(); ++i) {
-    const auto &z = pouchManager_.zones()[i];
+    const auto &z               = pouchManager_.zones()[i];
     const std::uint64_t zNodeId = 0x70000100ULL + i;
     auto &zNode = into.add(zNodeId, gleditor::a11y::Role::Group);
-    zNode.label = z->label() + " (" + std::to_string(z->items().size()) + " items)";
+    zNode.label =
+        z->label() + " (" + std::to_string(z->items().size()) + " items)";
     drawerNode.children.push_back(zNodeId);
   }
 }

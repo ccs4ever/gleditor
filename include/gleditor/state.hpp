@@ -208,6 +208,20 @@ struct AppState {
   std::function<bool(float wx, float wy, std::uint16_t mods)> wheelHandler;
 
   /**
+   * @brief Interceptor for mouse button down events on the event thread.
+   *
+   * If set and returns true, consumes the mouse button down event.
+   */
+  std::function<bool(int mx, int my, std::uint8_t button)> mouseDownHandler;
+
+  /**
+   * @brief Interceptor for mouse motion events on the event thread.
+   *
+   * If set and returns true, consumes the mouse motion event.
+   */
+  std::function<bool(int mx, int my, std::uint32_t buttons)> mouseMotionHandler;
+
+  /**
    * @brief Interceptor for mouse button up events on the event thread.
    *
    * If set and returns true, consumes the mouse button up event.

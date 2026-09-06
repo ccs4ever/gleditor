@@ -50,6 +50,7 @@
 
 #include "xudu/beams.hpp"
 #include "xudu/core/config.hpp"
+#include "xudu/core/kinetic_tether.hpp"
 #include "xudu/core/microversion.hpp"
 #include "xudu/core/ops.hpp"
 #include "xudu/core/provenance.hpp"
@@ -57,6 +58,7 @@
 #include "xudu/core/resolver.hpp"
 #include "xudu/core/store.hpp"
 #include "xudu/core/system_docs.hpp"
+#include "xudu/kinetic_tether_overlay.hpp"
 #include "xudu/pouch_drawer.hpp"
 #include "xudu/session.hpp"
 
@@ -65,14 +67,18 @@ using xudu::Author;
 using xudu::Config;
 using xudu::HypertimeMap;
 using xudu::ImageOverlay;
+using xudu::KineticTetherEngine;
+using xudu::KineticTetherOverlay;
 using xudu::Link;
 using xudu::LinkBeams;
 using xudu::LinkType;
 using xudu::MicroversionId;
 using xudu::PouchDrawer;
 using xudu::PouchItem;
+using xudu::PrimediaSpan;
 using xudu::Provenance;
 using xudu::Session;
+using xudu::TetherPayload;
 
 namespace {
 
@@ -780,6 +786,36 @@ public:
     });
     std::cout << "xudu: created new sovereign document (store " << storeIndex
               << ")\n";
+  }
+
+  void spawnTranscludedDocument(const TetherPayload &payload,
+                                const float /*screenX*/ = 0.0F,
+                                const float /*screenY*/ = 0.0F) {
+    if (payload.originCharEnd <= payload.originCharStart) {
+      return;
+    }
+    const auto len = payload.originCharEnd - payload.originCharStart;
+    const auto spawnedVer =
+        session.store(0).transclude(MicroversionId{}, 0, payload.originVersion,
+                                    payload.originCharStart, len);
+    showAlongside(spawnedVer, 0.0F, 0);
+    renderer->runWithState([this](RenderState &rState) {
+      if (!rState.docs.empty()) {
+        const auto newDocIndex =
+            static_cast<std::uint32_t>(rState.docs.size() - 1);
+        if (switcher) {
+          switcher->setActiveDocIndex(newDocIndex);
+        }
+        auto *const caret = renderer->editCaret();
+        if (caret) {
+          caret->placeAt(newDocIndex, 0);
+        }
+      }
+    });
+    std::cout << "xudu: spawned transcluded document version "
+              << spawnedVer.str() << " from origin version "
+              << payload.originVersion.str() << " [" << payload.originCharStart
+              << ", " << payload.originCharEnd << ")\n";
   }
 
   void openDocumentPalette() {
@@ -1506,6 +1542,16 @@ int main(const int argc, char **argv) {
   parser.add_argument("--pouch-sample")
       .help("open pouch drawer with pre-seeded sample spans across drop zones "
             "and clasp bench")
+      .default_value(false)
+      .implicit_value(true);
+  parser.add_argument("--tether-sample")
+      .help("seed an active Hookean spring tether and floating blueprint quad "
+            "for visual verification")
+      .default_value(false)
+      .implicit_value(true);
+  parser.add_argument("--tether-spawn-sample")
+      .help("spawn a collinear transcluded document quad from the opening "
+            "text into the 3D void")
       .default_value(false)
       .implicit_value(true);
   parser.add_argument("--author-name")
@@ -2347,18 +2393,167 @@ int main(const int argc, char **argv) {
     pouchDrawer.setSwingBackHandler(
         [&views](const PouchItem &item) { views.swingBackToSpan(item); });
 
-    state->mouseUpHandler = [&pouchDrawer, &session, renderer,
-                             state](const int mx, const int my,
-                                    const std::uint8_t button) -> bool {
-      if (button != 1) { // 1 = SDL_BUTTON_LEFT
+    KineticTetherEngine kineticTetherEngine;
+    KineticTetherOverlay kineticTetherOverlay(kineticTetherEngine, "Sans 10");
+    renderer->addFrameContributor(&kineticTetherOverlay);
+
+    kineticTetherEngine.setVoidSpawnHandler(
+        [&views](const TetherPayload &payload, const float sx, const float sy) {
+          views.spawnTranscludedDocument(payload, sx, sy);
+        });
+
+    state->mouseDownHandler = [&kineticTetherEngine, &session, renderer,
+                               state](const int mx, const int my,
+                                      const std::uint8_t button) -> bool {
+      if (button != 1) {
         return false;
       }
-      if (!pouchDrawer.isOpen() || pouchDrawer.currentWidth() < 50.0F) {
+      const auto modState = SDL_GetModState();
+      const bool altHeld  = (0 != (modState & SDL_KMOD_ALT));
+      bool dragStarted    = false;
+
+      renderer->runWithState([&kineticTetherEngine, &session, &dragStarted, mx,
+                              my, state, altHeld](RenderState &rState) {
+        auto *const caret = rState.caret;
+        if (!caret || !caret->hasSelection()) {
+          return;
+        }
+        const auto selStart = caret->selectionStart();
+        const auto selEnd   = caret->selectionEnd();
+        const auto docIdx   = caret->documentIndex();
+        if (docIdx >= session->views().size() || selEnd <= selStart) {
+          return;
+        }
+
+        const auto &openView = session->views()[docIdx];
+        const auto &st       = session->store(openView.storeIndex);
+        const auto ver       = st.rebuild(openView.version);
+        const auto spans     = ver.spansFor(selStart, selEnd - selStart);
+        if (spans.empty()) {
+          return;
+        }
+        const auto text = st.textOf(openView.version);
+        std::string preview;
+        if (selStart < text.size()) {
+          preview = text.substr(selStart, std::min(selEnd - selStart, 40U));
+        }
+
+        const float screenX = static_cast<float>(mx);
+        const float screenY = static_cast<float>(state->view.screenHeight - my);
+
+        TetherPayload payload{
+            .span            = spans.front(),
+            .previewText     = std::move(preview),
+            .originVersion   = openView.version,
+            .originDocIndex  = docIdx,
+            .originCharStart = selStart,
+            .originCharEnd   = selEnd,
+            .originScreenPos = glm::vec2(screenX, screenY),
+        };
+
+        if (altHeld) {
+          kineticTetherEngine.startDrag(std::move(payload), screenX, screenY);
+          dragStarted = true;
+        }
+      });
+
+      return dragStarted;
+    };
+
+    state->mouseMotionHandler = [&kineticTetherEngine, &session, renderer,
+                                 state](const int mx, const int my,
+                                        const std::uint32_t buttons) -> bool {
+      const float screenX = static_cast<float>(mx);
+      const float screenY = static_cast<float>(state->view.screenHeight - my);
+
+      if (kineticTetherEngine.isDragging()) {
+        kineticTetherEngine.updateDrag(screenX, screenY);
+        return true;
+      }
+
+      if (0 != (buttons & SDL_BUTTON_LMASK)) {
+        const auto modState = SDL_GetModState();
+        if (0 != (modState & SDL_KMOD_ALT)) {
+          renderer->runWithState([&kineticTetherEngine, &session, screenX,
+                                  screenY](RenderState &rState) {
+            auto *const caret = rState.caret;
+            if (!caret || !caret->hasSelection()) {
+              return;
+            }
+            const auto selStart = caret->selectionStart();
+            const auto selEnd   = caret->selectionEnd();
+            const auto docIdx   = caret->documentIndex();
+            if (docIdx >= session->views().size() || selEnd <= selStart) {
+              return;
+            }
+            const auto &openView = session->views()[docIdx];
+            const auto &st       = session->store(openView.storeIndex);
+            const auto ver       = st.rebuild(openView.version);
+            const auto spans     = ver.spansFor(selStart, selEnd - selStart);
+            if (spans.empty()) {
+              return;
+            }
+            const auto text = st.textOf(openView.version);
+            std::string preview;
+            if (selStart < text.size()) {
+              preview = text.substr(selStart, std::min(selEnd - selStart, 40U));
+            }
+            TetherPayload payload{
+                .span            = spans.front(),
+                .previewText     = std::move(preview),
+                .originVersion   = openView.version,
+                .originDocIndex  = docIdx,
+                .originCharStart = selStart,
+                .originCharEnd   = selEnd,
+                .originScreenPos = glm::vec2(screenX, screenY),
+            };
+            kineticTetherEngine.startDrag(std::move(payload), screenX, screenY);
+          });
+          if (kineticTetherEngine.isDragging()) {
+            return true;
+          }
+        }
+      }
+
+      return false;
+    };
+
+    state->mouseUpHandler =
+        [&pouchDrawer, &kineticTetherEngine, &session, renderer,
+         state](const int mx, const int my, const std::uint8_t button) -> bool {
+      if (button != 1) { // 1 = SDL_BUTTON_LEFT
         return false;
       }
       const float screenX = static_cast<float>(mx);
       const float screenY = static_cast<float>(state->view.screenHeight - my);
 
+      // 1. If kinetic tether is currently dragging:
+      if (kineticTetherEngine.isDragging()) {
+        if (pouchDrawer.isOpen() && pouchDrawer.currentWidth() >= 50.0F) {
+          const bool hitZone =
+              (pouchDrawer.zoneAt(screenX, screenY) != nullptr);
+          const bool hitLeft =
+              pouchDrawer.forge().containsLeft(screenX, screenY);
+          const bool hitRight =
+              pouchDrawer.forge().containsRight(screenX, screenY);
+          if (hitZone || hitLeft || hitRight) {
+            const auto &payload = kineticTetherEngine.payload();
+            pouchDrawer.handleGhostDrop(
+                payload.span, payload.previewText, payload.originVersion,
+                screenX, screenY, payload.originDocIndex,
+                payload.originCharStart, payload.originCharEnd);
+            kineticTetherEngine.cancelDrag();
+            return true;
+          }
+        }
+        kineticTetherEngine.endDrag(screenX, screenY);
+        return true;
+      }
+
+      // 2. Direct drop into open pouch drawer from selection:
+      if (!pouchDrawer.isOpen() || pouchDrawer.currentWidth() < 50.0F) {
+        return false;
+      }
       const bool hitZone  = (pouchDrawer.zoneAt(screenX, screenY) != nullptr);
       const bool hitLeft  = pouchDrawer.forge().containsLeft(screenX, screenY);
       const bool hitRight = pouchDrawer.forge().containsRight(screenX, screenY);
@@ -2682,6 +2877,57 @@ int main(const int argc, char **argv) {
           }
         }
       }
+    }
+
+    if (parser["--tether-sample"] == true) {
+      const auto &st   = session->store(0);
+      const auto ver   = st.rebuild(opening);
+      const auto txt   = st.textOf(opening);
+      const auto spans = ver.spansFor(
+          0, std::min(static_cast<std::uint32_t>(txt.size()), 28U));
+      PrimediaSpan span{0, 0, 28};
+      if (!spans.empty()) {
+        span = spans.front();
+      }
+      TetherPayload payload{
+          .span            = span,
+          .previewText     = txt.empty()
+                                 ? "Project Xanadu Literary Machines"
+                                 : txt.substr(0, std::min(txt.size(), 28UL)),
+          .originVersion   = opening,
+          .originDocIndex  = 0,
+          .originCharStart = 0,
+          .originCharEnd   = static_cast<std::uint32_t>(
+              std::min(txt.size(), static_cast<std::size_t>(28U))),
+          .originScreenPos = glm::vec2(280.0F, 500.0F),
+      };
+      kineticTetherEngine.startDrag(payload, 280.0F, 500.0F);
+      kineticTetherEngine.updateDrag(660.0F, 320.0F);
+    }
+
+    if (parser["--tether-spawn-sample"] == true) {
+      const auto &st   = session->store(0);
+      const auto ver   = st.rebuild(opening);
+      const auto txt   = st.textOf(opening);
+      const auto spans = ver.spansFor(
+          0, std::min(static_cast<std::uint32_t>(txt.size()), 28U));
+      PrimediaSpan span{0, 0, 28};
+      if (!spans.empty()) {
+        span = spans.front();
+      }
+      TetherPayload payload{
+          .span            = span,
+          .previewText     = txt.empty()
+                                 ? "Project Xanadu Literary Machines"
+                                 : txt.substr(0, std::min(txt.size(), 28UL)),
+          .originVersion   = opening,
+          .originDocIndex  = 0,
+          .originCharStart = 0,
+          .originCharEnd   = static_cast<std::uint32_t>(
+              std::min(txt.size(), static_cast<std::size_t>(28U))),
+          .originScreenPos = glm::vec2(280.0F, 500.0F),
+      };
+      views.spawnTranscludedDocument(payload, 660.0F, 320.0F);
     }
 
     std::vector<std::shared_ptr<gleditor::AudioWidget>> audioWidgets;

@@ -1,6 +1,7 @@
 /**
  * @file clasp_link_forge.hpp
- * @brief Tripartite Clasp Assembly Bench widget for N x M asymmetric hyperlinking.
+ * @brief Tripartite Clasp Assembly Bench widget for N x M asymmetric
+ * hyperlinking.
  */
 #ifndef XUDU_CLASP_LINK_FORGE_HPP
 #define XUDU_CLASP_LINK_FORGE_HPP
@@ -22,7 +23,8 @@ namespace xudu {
 
 /**
  * @class LinkForgeWidget
- * @brief Tripartite link creation control: Homestead (Left), Relation Nexus, Toward (Right).
+ * @brief Tripartite link creation control: Homestead (Left), Relation Nexus,
+ * Toward (Right).
  */
 class LinkForgeWidget {
 public:

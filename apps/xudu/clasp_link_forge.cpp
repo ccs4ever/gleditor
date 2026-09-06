@@ -1,6 +1,7 @@
 /**
  * @file clasp_link_forge.cpp
- * @brief Tripartite Clasp Assembly Bench widget for N x M asymmetric hyperlinking.
+ * @brief Tripartite Clasp Assembly Bench widget for N x M asymmetric
+ * hyperlinking.
  */
 #include "clasp_link_forge.hpp"
 
@@ -47,13 +48,9 @@ void LinkForgeWidget::dropRight(PouchItem item) {
   rightSpans_.push_back(std::move(item));
 }
 
-void LinkForgeWidget::clearLeft() noexcept {
-  leftSpans_.clear();
-}
+void LinkForgeWidget::clearLeft() noexcept { leftSpans_.clear(); }
 
-void LinkForgeWidget::clearRight() noexcept {
-  rightSpans_.clear();
-}
+void LinkForgeWidget::clearRight() noexcept { rightSpans_.clear(); }
 
 void LinkForgeWidget::cycleType() noexcept {
   switch (selectedType_) {
@@ -186,7 +183,8 @@ void LinkForgeWidget::draw(gleditor::Canvas &canvas, RenderState &state) {
   canvas.addText(state, leftX_ + 4.0F, leftY_ + leftH_ - 14.0F, "HOMESTEAD",
                  0x06B6D4FF, 0);
   const std::string leftCountStr =
-      std::to_string(leftSpans_.size()) + (leftSpans_.size() == 1 ? " Span" : " Spans");
+      std::to_string(leftSpans_.size()) +
+      (leftSpans_.size() == 1 ? " Span" : " Spans");
   canvas.addText(state, leftX_ + 4.0F, leftY_ + 14.0F, leftCountStr, 0xE2E8F0FF,
                  0);
 
@@ -210,8 +208,8 @@ void LinkForgeWidget::draw(gleditor::Canvas &canvas, RenderState &state) {
   canvas.addLine(rightX_, rightY_ + rightH_, rightX_, rightY_, 1.5F,
                  0xEC4899FF);
 
-  canvas.addText(state, rightX_ + 4.0F, rightY_ + rightH_ - 14.0F,
-                 "TOWARD", 0xEC4899FF, 0);
+  canvas.addText(state, rightX_ + 4.0F, rightY_ + rightH_ - 14.0F, "TOWARD",
+                 0xEC4899FF, 0);
   const std::string rightCountStr =
       std::to_string(rightSpans_.size()) +
       (rightSpans_.size() == 1 ? " Span" : " Spans");
@@ -236,8 +234,8 @@ void LinkForgeWidget::draw(gleditor::Canvas &canvas, RenderState &state) {
   canvas.addRect(nexusX, typeBtnY, nexusW, 18.0F, 0x334155EE);
   const std::string typeLabel =
       "[" + std::string(linkTypeName(selectedType_)) + " v]";
-  canvas.addText(state, nexusX + 4.0F, typeBtnY + 14.0F, typeLabel,
-                 0xF8FAFCFF, 0);
+  canvas.addText(state, nexusX + 4.0F, typeBtnY + 14.0F, typeLabel, 0xF8FAFCFF,
+                 0);
 
   // Tier Button
   const float tierBtnY = typeBtnY - 20.0F;
@@ -245,8 +243,8 @@ void LinkForgeWidget::draw(gleditor::Canvas &canvas, RenderState &state) {
   canvas.addRect(nexusX, tierBtnY, nexusW, 18.0F, 0x1E293BEE);
   const std::string tierLabel =
       "Tier: " + std::string(prominenceTierName(selectedTier_));
-  canvas.addText(state, nexusX + 4.0F, tierBtnY + 14.0F, tierLabel,
-                 0xCBD5E1FF, 0);
+  canvas.addText(state, nexusX + 4.0F, tierBtnY + 14.0F, tierLabel, 0xCBD5E1FF,
+                 0);
 
   // Forge Button
   const float forgeBtnY = leftY_;

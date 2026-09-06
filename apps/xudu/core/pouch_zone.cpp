@@ -1,6 +1,7 @@
 /**
  * @file pouch_zone.cpp
- * @brief Core data model and backing system xanadoc manager for drop zone pouches.
+ * @brief Core data model and backing system xanadoc manager for drop zone
+ * pouches.
  */
 #include "pouch_zone.hpp"
 
@@ -20,7 +21,8 @@ void DropZone::setRect(const float x, const float y, const float width,
   height_ = height;
 }
 
-bool DropZone::contains(const float screenX, const float screenY) const noexcept {
+bool DropZone::contains(const float screenX,
+                        const float screenY) const noexcept {
   if (width_ <= 0.0F || height_ <= 0.0F) {
     return false;
   }
@@ -28,15 +30,12 @@ bool DropZone::contains(const float screenX, const float screenY) const noexcept
          screenY <= (y_ + height_);
 }
 
-void DropZone::addItem(PouchItem item) {
-  items_.push_back(std::move(item));
-}
+void DropZone::addItem(PouchItem item) { items_.push_back(std::move(item)); }
 
 bool DropZone::removeItem(const std::uint64_t itemId) {
-  const auto it = std::find_if(items_.begin(), items_.end(),
-                               [itemId](const PouchItem &item) {
-                                 return item.itemId == itemId;
-                               });
+  const auto it = std::find_if(
+      items_.begin(), items_.end(),
+      [itemId](const PouchItem &item) { return item.itemId == itemId; });
   if (it != items_.end()) {
     items_.erase(it);
     return true;
@@ -44,9 +43,7 @@ bool DropZone::removeItem(const std::uint64_t itemId) {
   return false;
 }
 
-void DropZone::clear() {
-  items_.clear();
-}
+void DropZone::clear() { items_.clear(); }
 
 std::vector<PrimediaSpan> DropZone::allSpans() const {
   std::vector<PrimediaSpan> result;
@@ -119,9 +116,8 @@ DropZone &PouchManager::addZone(DropZoneConfig config) {
 }
 
 bool PouchManager::removeZone(const std::string_view id) {
-  const auto it =
-      std::find_if(zones_.begin(), zones_.end(),
-                   [id](const auto &z) { return z->id() == id; });
+  const auto it = std::find_if(zones_.begin(), zones_.end(),
+                               [id](const auto &z) { return z->id() == id; });
   if (it != zones_.end()) {
     zones_.erase(it);
     return true;
@@ -130,17 +126,15 @@ bool PouchManager::removeZone(const std::string_view id) {
 }
 
 DropZone *PouchManager::zoneById(const std::string_view id) noexcept {
-  const auto it =
-      std::find_if(zones_.begin(), zones_.end(),
-                   [id](const auto &z) { return z->id() == id; });
+  const auto it = std::find_if(zones_.begin(), zones_.end(),
+                               [id](const auto &z) { return z->id() == id; });
   return (it != zones_.end()) ? it->get() : nullptr;
 }
 
 const DropZone *
 PouchManager::zoneById(const std::string_view id) const noexcept {
-  const auto it =
-      std::find_if(zones_.begin(), zones_.end(),
-                   [id](const auto &z) { return z->id() == id; });
+  const auto it = std::find_if(zones_.begin(), zones_.end(),
+                               [id](const auto &z) { return z->id() == id; });
   return (it != zones_.end()) ? it->get() : nullptr;
 }
 
@@ -181,9 +175,10 @@ PouchItem PouchManager::dropSpan(const std::string_view zoneId,
           .alias       = std::string(zone->id()),
           .description = previewText,
           .tag         = "pouch-drop",
-          .timestamp   = std::to_string(std::chrono::duration_cast<std::chrono::seconds>(
-                                          std::chrono::system_clock::now().time_since_epoch())
-                                          .count()),
+          .timestamp   = std::to_string(
+              std::chrono::duration_cast<std::chrono::seconds>(
+                  std::chrono::system_clock::now().time_since_epoch())
+                  .count()),
       });
 
   PouchItem item{
@@ -240,9 +235,10 @@ void PouchManager::saveManifest() {
           .alias       = "pouch-manifest",
           .description = ss.str(),
           .tag         = "manifest",
-          .timestamp   = std::to_string(std::chrono::duration_cast<std::chrono::seconds>(
-                                          std::chrono::system_clock::now().time_since_epoch())
-                                          .count()),
+          .timestamp   = std::to_string(
+              std::chrono::duration_cast<std::chrono::seconds>(
+                  std::chrono::system_clock::now().time_since_epoch())
+                  .count()),
       });
 }
 
