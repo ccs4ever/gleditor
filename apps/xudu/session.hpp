@@ -40,6 +40,7 @@
 #include <gleditor/svg_cache.hpp>
 #include <gleditor/text_source.hpp>
 
+#include "hypertime_graph.hpp"
 #include "xudu/core/config.hpp"
 #include "xudu/core/media_manager.hpp"
 #include "xudu/core/microversion.hpp"
@@ -706,74 +707,6 @@ public:
     open.clear();
     invalidate();
   }
-};
-
-/**
- * @brief The hypertime map: every state of the document, and how they connect.
- *
- * Drawn as a frame contributor over the documents, in window pixels. Nelson's
- * prototype had one too, and it is the part of OSMIC that cannot be explained
- * without a picture: a graph where nothing is ever lost, as against the single
- * line an undo stack offers.
- */
-class HypertimeMap : public gleditor::FrameContributor,
-                     public gleditor::PickObserver,
-                     public gleditor::a11y::Source {
-public:
-  HypertimeMap(std::string aFontName, const Session &aSession);
-  ~HypertimeMap() override;
-
-  HypertimeMap(const HypertimeMap &)            = delete;
-  HypertimeMap &operator=(const HypertimeMap &) = delete;
-  HypertimeMap(HypertimeMap &&)                 = delete;
-  HypertimeMap &operator=(HypertimeMap &&)      = delete;
-
-  void deviceReady(render::RenderDevice &device,
-                   const render::PipelineDesc &documentPipeline) override;
-
-  void drawFrame(gleditor::FrameContext &ctx) override;
-  [[nodiscard]] bool picked(const render::PickingResult &pick,
-                            RenderState &state) override;
-  void describe(gleditor::a11y::Builder &into) override;
-  [[nodiscard]] std::uint64_t accessibilityRevision() const override {
-    return builtAt;
-  }
-
-  /// What happens when somebody clicks a state: show it.
-  void setGoer(std::function<void(const MicroversionId &)> aGoer) {
-    goer = std::move(aGoer);
-  }
-
-  void setVisible(const bool show) { visible = show; }
-  void toggle() { visible = !visible; }
-
-  /// Where the reader currently is. Highlighted in the graph.
-  void setCurrent(const MicroversionId &id) { current = id; }
-
-private:
-  struct Node {
-    MicroversionId id;
-    float x{}, y{};
-    float width{}, height{};
-    std::string label;
-  };
-  struct Edge {
-    std::size_t from{};
-    std::size_t to{};
-    bool isBranch{};
-  };
-
-  std::string fontName;
-  const Session &session;
-  std::unique_ptr<gleditor::Canvas> canvas;
-  bool visible{false};
-  MicroversionId current;
-  std::vector<Node> nodes;
-  std::vector<Edge> edges;
-  std::function<void(const MicroversionId &)> goer;
-  std::uint64_t builtAt{};
-
-  void layout(RenderState &state);
 };
 
 /**

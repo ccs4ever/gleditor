@@ -54,6 +54,55 @@ struct VersionAnnotation {
 };
 
 /**
+ * @brief Classification of text spans during mathematical primedia identity
+ * diffing.
+ */
+enum class DiffKind : std::uint8_t {
+  Universal, ///< Identity Gold: present across all compared versions
+             ///< (sharingCount == K).
+  Shared,    ///< Amber: present in >= 2 and < K compared versions.
+  Unique,    ///< Mint: unique to this version (sharingCount == 1).
+  Deleted    ///< Crimson: absent in this version, but present in others (in
+             ///< limbo).
+};
+
+/**
+ * @brief A contiguous character run of uniform sharing status in a version's
+ * text.
+ */
+struct DiffSpan {
+  DiffKind kind{DiffKind::Universal};
+  std::uint32_t offset{0};
+  std::uint32_t length{0};
+  std::size_t sharingCount{
+      0}; ///< How many compared versions contain this span.
+  bool operator==(const DiffSpan &) const = default;
+};
+
+/**
+ * @brief Primedia diff result for a single version within a multi-version
+ * comparison.
+ */
+struct SingleVersionDiff {
+  MicroversionId version;
+  std::string text;
+  std::vector<DiffSpan> spans;
+  std::size_t universalChars{0};
+  std::size_t sharedChars{0};
+  std::size_t uniqueChars{0};
+  std::size_t deletedChars{0};
+};
+
+/**
+ * @brief The result of comparing an arbitrary number of microversions
+ * simultaneously.
+ */
+struct MultiVersionDiffResult {
+  std::vector<SingleVersionDiff> versions;
+  std::size_t totalComparedVersions{0};
+};
+
+/**
  * @class Store
  * @brief A xanadoc: one primedia spool, one operations spool, and its links.
  */
@@ -151,6 +200,29 @@ public:
   /// Content quoted from a torrent this machine cannot reach comes out empty,
   /// so a document is readable even when part of what it points at is not.
   [[nodiscard]] std::string textOf(const MicroversionId &version) const;
+
+  // -- mathematical primedia identity diffing --------------------------------
+
+  /**
+   * @brief Compare an arbitrary number of microversions using character-level
+   *        primedia address identity.
+   *
+   * In Xanadu architecture, diffing is an exact mathematical primedia address
+   * frequency analysis rather than fuzzy text diffing. Character positions
+   * are classified into Universal (Identity Gold), Shared (Amber), Unique
+   * (Mint), and Deleted (Limbo Crimson).
+   *
+   * There is no limit to how many versions or documents can be compared at
+   * once.
+   */
+  [[nodiscard]] MultiVersionDiffResult
+  diffVersions(const std::vector<MicroversionId> &versions) const;
+
+  /// Convenience 2-way comparison overload.
+  [[nodiscard]] MultiVersionDiffResult
+  diffVersions(const MicroversionId &vA, const MicroversionId &vB) const {
+    return diffVersions(std::vector<MicroversionId>{vA, vB});
+  }
 
   // -- making new states ----------------------------------------------------
 

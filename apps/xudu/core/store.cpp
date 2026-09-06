@@ -10,6 +10,8 @@
 #include <sstream>
 #include <stdexcept>
 #include <string>
+#include <unordered_map>
+#include <utility>
 #include <vector>
 
 #include "binary_ops.hpp"
@@ -212,6 +214,136 @@ bool Store::advance(Version &document, const MicroversionId &known,
 
 std::string Store::textOf(const MicroversionId &version) const {
   return rebuild(version).materialize(*this);
+}
+
+MultiVersionDiffResult
+Store::diffVersions(const std::vector<MicroversionId> &versions) const {
+  MultiVersionDiffResult result;
+  result.totalComparedVersions = versions.size();
+  if (versions.empty()) {
+    return result;
+  }
+
+  struct VerData {
+    MicroversionId id;
+    Version doc;
+    std::string text;
+    std::vector<std::pair<ScrollId, std::uint64_t>> charAddresses;
+  };
+
+  std::vector<VerData> built;
+  built.reserve(versions.size());
+
+  struct GlobalAddr {
+    ScrollId scroll{0};
+    std::uint64_t address{0};
+    bool operator==(const GlobalAddr &) const = default;
+  };
+  struct GlobalAddrHash {
+    std::size_t operator()(const GlobalAddr &g) const noexcept {
+      return std::hash<std::uint64_t>{}(
+          (static_cast<std::uint64_t>(g.scroll) << 32) ^ g.address);
+    }
+  };
+
+  std::unordered_map<GlobalAddr, std::vector<std::size_t>, GlobalAddrHash>
+      addressPresence;
+
+  for (std::size_t vIdx = 0; vIdx < versions.size(); ++vIdx) {
+    VerData vd;
+    vd.id   = versions[vIdx];
+    vd.doc  = rebuild(vd.id);
+    vd.text = vd.doc.materialize(*this);
+
+    for (const auto &piece : vd.doc.pieces()) {
+      if (piece.scroll == breakMarkerScroll) {
+        continue;
+      }
+      for (std::uint64_t i = 0; i < piece.length; ++i) {
+        const GlobalAddr ga{piece.scroll, piece.start + i};
+        vd.charAddresses.emplace_back(piece.scroll, piece.start + i);
+
+        auto &vec = addressPresence[ga];
+        if (vec.empty() || vec.back() != vIdx) {
+          vec.push_back(vIdx);
+        }
+      }
+    }
+    built.push_back(std::move(vd));
+  }
+
+  const std::size_t K = versions.size();
+
+  for (std::size_t vIdx = 0; vIdx < built.size(); ++vIdx) {
+    const auto &vd = built[vIdx];
+    SingleVersionDiff sv;
+    sv.version = vd.id;
+    sv.text    = vd.text;
+
+    const std::size_t nChars = vd.charAddresses.size();
+    if (nChars == 0) {
+      if (K > 1) {
+        for (const auto &[addr, vList] : addressPresence) {
+          if (std::ranges::find(vList, vIdx) == vList.end()) {
+            sv.deletedChars++;
+          }
+        }
+      }
+      result.versions.push_back(std::move(sv));
+      continue;
+    }
+
+    std::vector<DiffKind> charKinds(nChars);
+    std::vector<std::size_t> charSharings(nChars);
+
+    for (std::size_t c = 0; c < nChars; ++c) {
+      const auto &[scroll, addr] = vd.charAddresses[c];
+      const auto it = addressPresence.find(GlobalAddr{scroll, addr});
+      const std::size_t shareCount =
+          (it != addressPresence.end()) ? it->second.size() : 1;
+      charSharings[c] = shareCount;
+
+      if (K <= 1) {
+        charKinds[c] = DiffKind::Universal;
+        sv.universalChars++;
+      } else if (shareCount == K) {
+        charKinds[c] = DiffKind::Universal;
+        sv.universalChars++;
+      } else if (shareCount > 1) {
+        charKinds[c] = DiffKind::Shared;
+        sv.sharedChars++;
+      } else {
+        charKinds[c] = DiffKind::Unique;
+        sv.uniqueChars++;
+      }
+    }
+
+    std::uint32_t spanStart = 0;
+    for (std::size_t c = 1; c <= nChars; ++c) {
+      if (c == nChars || charKinds[c] != charKinds[spanStart] ||
+          charSharings[c] != charSharings[spanStart]) {
+        DiffSpan ds;
+        ds.kind         = charKinds[spanStart];
+        ds.offset       = spanStart;
+        ds.length       = static_cast<std::uint32_t>(c - spanStart);
+        ds.sharingCount = charSharings[spanStart];
+        sv.spans.push_back(ds);
+        spanStart = static_cast<std::uint32_t>(c);
+      }
+    }
+
+    if (K > 1) {
+      for (const auto &[addr, vList] : addressPresence) {
+        if (std::ranges::find(vList, vIdx) == vList.end()) {
+          sv.deletedChars++;
+        }
+      }
+    }
+
+    result.versions.push_back(std::move(sv));
+  }
+
+  return result;
 }
 
 ScrollId Store::addScroll(const Scroll &scroll) {

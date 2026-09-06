@@ -19,6 +19,7 @@
 #include <iostream>
 #include <memory>
 #include <span>
+#include <sstream>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -1328,6 +1329,13 @@ int main(const int argc, char **argv) {
             "running")
       .default_value(false)
       .implicit_value(true);
+  parser.add_argument("--compare")
+      .help("compare microversions in hypertime map diff panel, e.g. "
+            "v1,v2,v3; repeatable")
+      .append();
+  parser.add_argument("--alias")
+      .help("assign alias to microversion as VERSION:ALIAS; repeatable")
+      .append();
   parser.add_argument("--author-name")
       .help("name to record on publications made from this machine")
       .default_value(std::string{});
@@ -2110,6 +2118,30 @@ int main(const int argc, char **argv) {
     HypertimeMap map("Sans 10", *session);
     map.setVisible(parser["--map"] == true);
 
+    if (parser.present<std::vector<std::string>>("--alias")) {
+      for (const auto &spec : parser.get<std::vector<std::string>>("--alias")) {
+        const auto colon = spec.find(':');
+        if (colon != std::string::npos) {
+          const auto verStr   = spec.substr(0, colon);
+          const auto aliasStr = spec.substr(colon + 1);
+          session->store(0).setVersionAnnotation(MicroversionId::parse(verStr),
+                                                 {.alias = aliasStr});
+        }
+      }
+    }
+    if (parser.present<std::vector<std::string>>("--compare")) {
+      for (const auto &spec :
+           parser.get<std::vector<std::string>>("--compare")) {
+        std::stringstream ss(spec);
+        std::string item;
+        while (std::getline(ss, item, ',')) {
+          if (!item.empty()) {
+            map.toggleComparison(MicroversionId::parse(item));
+          }
+        }
+      }
+    }
+
     ImageOverlay images("Sans 11");
 
     auto docSwitcher = std::make_shared<gleditor::DocumentSwitcher>("Sans 10");
@@ -2249,11 +2281,39 @@ int main(const int argc, char **argv) {
     state->accessibility->setToolkit("gleditor", TOSTRING(GLEDITOR_VERSION));
 
     map.setGoer([&views](const MicroversionId &id) { views.showOnly(id); });
+    map.setScrubHandler(
+        [&views](const MicroversionId &id) { views.showOnly(id); });
+    map.setCompareHandler(
+        [&views, &session, &renderer](const std::vector<MicroversionId> &vers) {
+          const auto count = session->views().size();
+          for (std::size_t i = 0; i < count; i++) {
+            renderer->push(RenderItemCloseDoc());
+          }
+          renderer->runWithState(
+              [&session](RenderState &) { session->clearViews(); });
+          for (const auto &v : vers) {
+            views.showAlongside(v, 0.0F, 0);
+          }
+        });
+    map.setQuoteHandler([&session, &views](const MicroversionId &srcVer,
+                                           const std::uint32_t srcAt,
+                                           const std::uint32_t srcLen) {
+      if (session->views().empty()) {
+        return;
+      }
+      auto &st           = session->store(0);
+      const auto headVer = session->views().front().version;
+      const auto headLen =
+          static_cast<std::uint32_t>(st.textOf(headVer).size());
+      st.transclude(headVer, headLen, srcVer, srcAt, srcLen);
+      views.showOnly(headVer);
+    });
     renderer->addFrameContributor(&publishForm);
     state->modal = &publishForm;
     renderer->addPickObserver(docSwitcher.get());
     renderer->addPickObserver(&links);
     renderer->addPickObserver(radialMenu.get());
+    renderer->addPickObserver(&map);
 
     if (asked.empty() && read.empty() && alongside.empty() &&
         extraImports.empty()) {
