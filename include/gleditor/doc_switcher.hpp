@@ -54,7 +54,7 @@ public:
     return revision;
   }
 
-  static constexpr std::uint32_t kNewDocTag = 0xFFFFFFFEU;
+  static constexpr std::uint32_t kNewDocTag = 0xFFFEU;
 
   void setCloseHandler(std::function<void(std::uint32_t docIndex)> handler) {
     closeHandler = std::move(handler);

@@ -684,6 +684,18 @@ public:
     });
   }
 
+  void closeDocument(const std::uint32_t docIndex) {
+    session.flushUncommitted(docIndex);
+    renderer->push(RenderItemCloseDoc(docIndex));
+    renderer->runWithState([this, docIndex](RenderState &rState) {
+      session.viewClosed(docIndex);
+      if (!session.views().empty()) {
+        map.setCurrent(session.views().front().version);
+      }
+      syncMediaWidgets(rState);
+    });
+  }
+
   void closeActive() {
     renderer->runWithState([this](RenderState &rState) {
       if (rState.docs.empty()) {
@@ -695,9 +707,194 @@ public:
                               ? caret->documentIndex()
                               : (switcher ? switcher->activeDocIndex() : 0U);
       if (which < rState.docs.size()) {
-        renderer->push(RenderItemCloseDoc(which));
+        closeDocument(which);
       }
     });
+  }
+
+  void newDocument() {
+    const auto storeIndex = session.createNewStore("");
+    showAlongside(MicroversionId{}, 0.0F, storeIndex);
+    renderer->runWithState([this](RenderState &rState) {
+      if (!rState.docs.empty()) {
+        const auto newDocIndex =
+            static_cast<std::uint32_t>(rState.docs.size() - 1);
+        if (switcher) {
+          switcher->setActiveDocIndex(newDocIndex);
+        }
+        auto *const caret = renderer->editCaret();
+        if (caret) {
+          caret->placeAt(newDocIndex, 0);
+        }
+      }
+    });
+    std::cout << "xudu: created new sovereign document (store " << storeIndex
+              << ")\n";
+  }
+
+  void openDocumentPalette() {
+    using Field = gleditor::Form::Field;
+    using Kind  = gleditor::Form::Kind;
+
+    Field choiceField;
+    choiceField.label = "Document";
+    choiceField.hint  = "select a document or system xanadoc";
+    choiceField.kind  = Kind::Choice;
+
+    // 1. Add all system xanadocs
+    for (std::uint8_t k = 0;
+         k < static_cast<std::uint8_t>(xudu::SystemDocKind::Count); ++k) {
+      const auto kind = static_cast<xudu::SystemDocKind>(k);
+      const auto uri  = std::string(xudu::systemDocUri(kind));
+      std::string desc;
+      switch (kind) {
+      case xudu::SystemDocKind::Keymap:
+        desc = "Keyboard shortcuts and bindings";
+        break;
+      case xudu::SystemDocKind::Settings:
+        desc = "Typography and editor preferences";
+        break;
+      case xudu::SystemDocKind::Layout:
+        desc = "Multi-column layout and ribbons";
+        break;
+      case xudu::SystemDocKind::UI:
+        desc = "Chrome, status bar, and notifications";
+        break;
+      case xudu::SystemDocKind::Pouches:
+        desc = "Drop zones and persistent span storage";
+        break;
+      default:
+        break;
+      }
+      choiceField.options.push_back("⚙ " + uri + " — " + desc);
+      choiceField.optionValues.push_back(uri);
+    }
+
+    // 2. Discover local xanadoc directories in current path
+    namespace fs = std::filesystem;
+    std::error_code ec;
+    const auto curPath = fs::current_path(ec);
+    if (!ec) {
+      for (const auto &dirEntry : fs::directory_iterator(curPath, ec)) {
+        if (dirEntry.is_directory()) {
+          const auto p = dirEntry.path();
+          if (fs::exists(p / "ops.nodes") || fs::exists(p / "ops.spool") ||
+              fs::exists(p / "current.yaml") || p.extension() == ".xanadoc") {
+            const auto dirName = p.filename().string();
+            choiceField.options.push_back("[Local] " + dirName);
+            choiceField.optionValues.push_back(p.string());
+          }
+        }
+      }
+    }
+
+    choiceField.options.push_back("Custom path or file...");
+    choiceField.optionValues.push_back("__custom__");
+
+    Field customPathField;
+    customPathField.label = "Custom path";
+    customPathField.hint  = "optional file or store path if custom chosen";
+
+    std::vector<Field> fields{
+        std::move(choiceField),
+        std::move(customPathField),
+    };
+
+    form.open("Open Document or System Xanadoc",
+              "Select a system xanadoc, local store, or file to open alongside",
+              std::move(fields), [this](const std::vector<Field> &answers) {
+                std::string chosen           = answers[0].answer();
+                const std::string customPath = answers[1].answer();
+                if (chosen == "__custom__" || !customPath.empty()) {
+                  chosen = customPath;
+                }
+                if (chosen.empty()) {
+                  return;
+                }
+                openDocumentFromPath(chosen);
+              });
+  }
+
+  void openDocumentFromPath(const std::string &chosen) {
+    if (const auto kind = xudu::systemDocKindFromUri(chosen)) {
+      const auto sIdx = session.systemStoreIndex(*kind);
+      auto &sysStore  = session.store(sIdx);
+      const auto head = sysStore.primaryCurrentVersion();
+      showAlongside(head, 0.0F, sIdx);
+      renderer->runWithState([this](RenderState &rState) {
+        if (!rState.docs.empty()) {
+          const auto newDocIndex =
+              static_cast<std::uint32_t>(rState.docs.size() - 1);
+          if (switcher) {
+            switcher->setActiveDocIndex(newDocIndex);
+          }
+          auto *const caret = renderer->editCaret();
+          if (caret) {
+            caret->placeAt(newDocIndex, 0);
+          }
+        }
+      });
+      std::cout << "xudu: opened system document " << chosen << " (store "
+                << sIdx << ")\n";
+      return;
+    }
+
+    namespace fs = std::filesystem;
+    const fs::path p(chosen);
+    if (fs::exists(p / "ops.nodes") || fs::exists(p / "ops.spool") ||
+        fs::exists(p / "current.yaml") || fs::is_directory(p)) {
+      try {
+        const auto sIdx = session.loadAuxiliaryStore(chosen);
+        auto &st        = session.store(sIdx);
+        const auto head = st.primaryCurrentVersion();
+        showAlongside(head, 0.0F, sIdx);
+        renderer->runWithState([this](RenderState &rState) {
+          if (!rState.docs.empty()) {
+            const auto newDocIndex =
+                static_cast<std::uint32_t>(rState.docs.size() - 1);
+            if (switcher) {
+              switcher->setActiveDocIndex(newDocIndex);
+            }
+            auto *const caret = renderer->editCaret();
+            if (caret) {
+              caret->placeAt(newDocIndex, 0);
+            }
+          }
+        });
+        std::cout << "xudu: opened store " << chosen << " (store " << sIdx
+                  << ")\n";
+      } catch (const std::exception &err) {
+        state->showDialog(render::DiagnosticSeverity::Error,
+                          "Could not open xanadoc", err.what());
+      }
+    } else if (fs::exists(p)) {
+      try {
+        const auto [sIdx, imported] =
+            session.importFileToTemporaryStore(chosen);
+        showAlongside(imported, 0.0F, sIdx);
+        renderer->runWithState([this](RenderState &rState) {
+          if (!rState.docs.empty()) {
+            const auto newDocIndex =
+                static_cast<std::uint32_t>(rState.docs.size() - 1);
+            if (switcher) {
+              switcher->setActiveDocIndex(newDocIndex);
+            }
+            auto *const caret = renderer->editCaret();
+            if (caret) {
+              caret->placeAt(newDocIndex, 0);
+            }
+          }
+        });
+        std::cout << "xudu: imported file " << chosen << " to temporary store "
+                  << sIdx << "\n";
+      } catch (const std::exception &err) {
+        state->showDialog(render::DiagnosticSeverity::Error,
+                          "Could not import file", err.what());
+      }
+    } else {
+      state->showDialog(render::DiagnosticSeverity::Error, "Path not found",
+                        "The specified path does not exist: " + chosen);
+    }
   }
 
   void selectDoc(const std::uint32_t index) {
@@ -819,8 +1016,15 @@ void bindCommands(gleditor::Application &app, const AppStateRef &state,
   app.commands().bind(SDL_SCANCODE_B, Mod::Ctrl, "back",
                       "go to the previous state, losing nothing",
                       [&views] { views.back(); });
-  app.commands().bind(SDL_SCANCODE_N, Mod::Ctrl, "forward",
-                      "go to the next state", [&views] { views.forward(); });
+  app.commands().bind(SDL_SCANCODE_N, Mod::Ctrl, "new-doc",
+                      "create a new sovereign document quad",
+                      [&views] { views.newDocument(); });
+  app.commands().bind(SDL_SCANCODE_N, Mod::Ctrl | Mod::Shift, "forward",
+                      "go to the next state in hypertime",
+                      [&views] { views.forward(); });
+  app.commands().bind(SDL_SCANCODE_O, Mod::Ctrl, "open-doc",
+                      "open a document or system xanadoc",
+                      [&views] { views.openDocumentPalette(); });
   app.commands().bind(SDL_SCANCODE_LEFTBRACKET, Mod::Ctrl, "scrub-back",
                       "scrub backward in hypertime history",
                       [&views] { views.scrubHistory(true); });
@@ -1872,9 +2076,14 @@ int main(const int argc, char **argv) {
     ImageOverlay images("Sans 11");
 
     auto docSwitcher = std::make_shared<gleditor::DocumentSwitcher>("Sans 10");
-    docSwitcher->setCloseHandler([&renderer](const std::uint32_t docIndex) {
-      renderer->push(RenderItemCloseDoc(docIndex));
+    gleditor::Form publishForm("Sans 11");
+    Views views(*session, renderer, map, images, publishForm, state,
+                docSwitcher);
+
+    docSwitcher->setCloseHandler([&views](const std::uint32_t docIndex) {
+      views.closeDocument(docIndex);
     });
+    docSwitcher->setNewDocHandler([&views]() { views.newDocument(); });
     docSwitcher->setSelectHandler([&renderer](const std::uint32_t docIndex) {
       renderer->runWithState([&renderer, docIndex](RenderState &rState) {
         if (docIndex < rState.docs.size() && rState.docs[docIndex]) {
@@ -1886,9 +2095,11 @@ int main(const int argc, char **argv) {
       });
     });
 
-    gleditor::Form publishForm("Sans 11");
-    Views views(*session, renderer, map, images, publishForm, state,
-                docSwitcher);
+    session->setSystemDocChangedCallback(
+        [](const xudu::SystemDocKind kind, const std::string & /*content*/) {
+          std::cout << "xudu: system doc updated (" << xudu::systemDocUri(kind)
+                    << ")\n";
+        });
 
     LinkBeams links(*session, renderer);
     links.setVisible(parser["--no-beams"] != true);
