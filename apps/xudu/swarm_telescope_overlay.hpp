@@ -1,6 +1,7 @@
 /**
  * @file swarm_telescope_overlay.hpp
- * @brief 3D Swarm Telescope discovery overlay with topic swarms and FTS5 search.
+ * @brief 3D Swarm Telescope discovery overlay with topic swarms and FTS5
+ * search.
  */
 #ifndef XUDU_SWARM_TELESCOPE_OVERLAY_HPP
 #define XUDU_SWARM_TELESCOPE_OVERLAY_HPP
@@ -29,14 +30,14 @@ namespace xudu {
 class SwarmTelescopeOverlay : public gleditor::FrameContributor,
                               public gleditor::PickObserver {
 public:
-  static constexpr std::uint32_t kTagTelescopeClose    = 14001U;
-  static constexpr std::uint32_t kTagTabRecent         = 14002U;
-  static constexpr std::uint32_t kTagTabAuthors        = 14003U;
-  static constexpr std::uint32_t kTagTabTopics         = 14004U;
-  static constexpr std::uint32_t kTagSummonButton      = 14005U;
-  static constexpr std::uint32_t kTagSearchBar         = 14006U;
-  static constexpr std::uint32_t kTagCategoryBase      = 14100U;
-  static constexpr std::uint32_t kTagPublicationBase   = 14300U;
+  static constexpr std::uint32_t kTagTelescopeClose  = 14001U;
+  static constexpr std::uint32_t kTagTabRecent       = 14002U;
+  static constexpr std::uint32_t kTagTabAuthors      = 14003U;
+  static constexpr std::uint32_t kTagTabTopics       = 14004U;
+  static constexpr std::uint32_t kTagSummonButton    = 14005U;
+  static constexpr std::uint32_t kTagSearchBar       = 14006U;
+  static constexpr std::uint32_t kTagCategoryBase    = 14100U;
+  static constexpr std::uint32_t kTagPublicationBase = 14300U;
 
   using SummonHandler = std::function<void(const PublicationEntry &)>;
 

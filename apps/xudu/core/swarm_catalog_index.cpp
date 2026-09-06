@@ -1,6 +1,7 @@
 /**
  * @file swarm_catalog_index.cpp
- * @brief Implementation of SQLite FTS5 search index for publications and topics.
+ * @brief Implementation of SQLite FTS5 search index for publications and
+ * topics.
  */
 #include "swarm_catalog_index.hpp"
 
@@ -66,14 +67,14 @@ std::string sanitizeFtsToken(std::string_view token) {
 
 } // namespace
 
-void SwarmCatalogIndex::parseNelsonianQuery(std::string_view query,
-                                            std::string &ftsMatch,
-                                            std::string &sqlFilter) {
+void SwarmCatalogIndex::parseXanadulogicalQuery(std::string_view query,
+                                                std::string &ftsMatch,
+                                                std::string &sqlFilter) {
   ftsMatch.clear();
   sqlFilter.clear();
 
   std::vector<std::string> ftsTerms;
-  std::size_t i = 0;
+  std::size_t i       = 0;
   const std::size_t n = query.size();
 
   while (i < n) {
@@ -140,7 +141,8 @@ void SwarmCatalogIndex::parseNelsonianQuery(std::string_view query,
     if (token.starts_with("quotes:") && token.size() > 7) {
       const auto uri = token.substr(7);
       sqlFilter += " AND (m.bep46Uri LIKE '%" + sanitizeFtsToken(uri) +
-                   "%' OR m.abstractText LIKE '%" + sanitizeFtsToken(uri) + "%')";
+                   "%' OR m.abstractText LIKE '%" + sanitizeFtsToken(uri) +
+                   "%')";
       continue;
     }
 
@@ -183,10 +185,10 @@ struct SwarmCatalogIndex::Impl {
   sqlite3 *db{nullptr};
 
   explicit Impl(const std::string &dbPath) {
-    const int rc = sqlite3_open_v2(
-        dbPath.c_str(), &db,
-        SQLITE_OPEN_READWRITE | SQLITE_OPEN_CREATE | SQLITE_OPEN_NOMUTEX,
-        nullptr);
+    const int rc = sqlite3_open_v2(dbPath.c_str(), &db,
+                                   SQLITE_OPEN_READWRITE | SQLITE_OPEN_CREATE |
+                                       SQLITE_OPEN_NOMUTEX,
+                                   nullptr);
     if (rc != SQLITE_OK) {
       const std::string msg = sqlite3_errmsg(db);
       sqlite3_close(db);
@@ -242,7 +244,8 @@ struct SwarmCatalogIndex::Impl {
     if (sqlite3_exec(db, kSchema, nullptr, nullptr, &errmsg) != SQLITE_OK) {
       std::string err = errmsg ? errmsg : "unknown error";
       sqlite3_free(errmsg);
-      throw std::runtime_error("Failed to init SwarmCatalogIndex schema: " + err);
+      throw std::runtime_error("Failed to init SwarmCatalogIndex schema: " +
+                               err);
     }
   }
 };
@@ -252,7 +255,7 @@ SwarmCatalogIndex::SwarmCatalogIndex() : SwarmCatalogIndex(":memory:") {}
 SwarmCatalogIndex::SwarmCatalogIndex(const std::string &dbPath)
     : impl_(std::make_unique<Impl>(dbPath)) {}
 
-SwarmCatalogIndex::~SwarmCatalogIndex() = default;
+SwarmCatalogIndex::~SwarmCatalogIndex()                             = default;
 SwarmCatalogIndex::SwarmCatalogIndex(SwarmCatalogIndex &&) noexcept = default;
 SwarmCatalogIndex &
 SwarmCatalogIndex::operator=(SwarmCatalogIndex &&) noexcept = default;
@@ -275,12 +278,15 @@ void SwarmCatalogIndex::indexPublication(const PublicationEntry &entry,
       "INSERT INTO publications_fts(infoHash, title, authorName, topics, "
       "abstract, bep46Uri) VALUES(?, ?, ?, ?, ?, ?);";
   sqlite3_stmt *stmtFts = nullptr;
-  if (sqlite3_prepare_v2(impl_->db, kInsertFts, -1, &stmtFts, nullptr) == SQLITE_OK) {
+  if (sqlite3_prepare_v2(impl_->db, kInsertFts, -1, &stmtFts, nullptr) ==
+      SQLITE_OK) {
     sqlite3_bind_text(stmtFts, 1, entry.infoHash.c_str(), -1, SQLITE_TRANSIENT);
     sqlite3_bind_text(stmtFts, 2, entry.title.c_str(), -1, SQLITE_TRANSIENT);
-    sqlite3_bind_text(stmtFts, 3, entry.authorName.c_str(), -1, SQLITE_TRANSIENT);
+    sqlite3_bind_text(stmtFts, 3, entry.authorName.c_str(), -1,
+                      SQLITE_TRANSIENT);
     sqlite3_bind_text(stmtFts, 4, topicsStr.c_str(), -1, SQLITE_TRANSIENT);
-    sqlite3_bind_text(stmtFts, 5, entry.abstractText.c_str(), -1, SQLITE_TRANSIENT);
+    sqlite3_bind_text(stmtFts, 5, entry.abstractText.c_str(), -1,
+                      SQLITE_TRANSIENT);
     sqlite3_bind_text(stmtFts, 6, entry.bep46Uri.c_str(), -1, SQLITE_TRANSIENT);
     sqlite3_step(stmtFts);
     sqlite3_finalize(stmtFts);
@@ -294,23 +300,33 @@ void SwarmCatalogIndex::indexPublication(const PublicationEntry &entry,
       "transcopyrightTerms, merkleRoot, signature, seederCount, peerCount) "
       "VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);";
   sqlite3_stmt *stmtMeta = nullptr;
-  if (sqlite3_prepare_v2(impl_->db, kInsertMeta, -1, &stmtMeta, nullptr) == SQLITE_OK) {
-    sqlite3_bind_text(stmtMeta, 1, entry.infoHash.c_str(), -1, SQLITE_TRANSIENT);
+  if (sqlite3_prepare_v2(impl_->db, kInsertMeta, -1, &stmtMeta, nullptr) ==
+      SQLITE_OK) {
+    sqlite3_bind_text(stmtMeta, 1, entry.infoHash.c_str(), -1,
+                      SQLITE_TRANSIENT);
     sqlite3_bind_text(stmtMeta, 2, entry.title.c_str(), -1, SQLITE_TRANSIENT);
-    sqlite3_bind_text(stmtMeta, 3, entry.authorName.c_str(), -1, SQLITE_TRANSIENT);
-    sqlite3_bind_text(stmtMeta, 4, entry.authorFingerprint.c_str(), -1, SQLITE_TRANSIENT);
+    sqlite3_bind_text(stmtMeta, 3, entry.authorName.c_str(), -1,
+                      SQLITE_TRANSIENT);
+    sqlite3_bind_text(stmtMeta, 4, entry.authorFingerprint.c_str(), -1,
+                      SQLITE_TRANSIENT);
     sqlite3_bind_text(stmtMeta, 5, topicsStr.c_str(), -1, SQLITE_TRANSIENT);
-    sqlite3_bind_text(stmtMeta, 6, entry.abstractText.c_str(), -1, SQLITE_TRANSIENT);
-    sqlite3_bind_text(stmtMeta, 7, entry.bep46Uri.c_str(), -1, SQLITE_TRANSIENT);
-    sqlite3_bind_int64(stmtMeta, 8, static_cast<sqlite3_int64>(entry.timestamp));
+    sqlite3_bind_text(stmtMeta, 6, entry.abstractText.c_str(), -1,
+                      SQLITE_TRANSIENT);
+    sqlite3_bind_text(stmtMeta, 7, entry.bep46Uri.c_str(), -1,
+                      SQLITE_TRANSIENT);
+    sqlite3_bind_int64(stmtMeta, 8,
+                       static_cast<sqlite3_int64>(entry.timestamp));
     sqlite3_bind_int64(stmtMeta, 9, static_cast<sqlite3_int64>(entry.sequence));
-    sqlite3_bind_int64(stmtMeta, 10, static_cast<sqlite3_int64>(entry.totalBytes));
+    sqlite3_bind_int64(stmtMeta, 10,
+                       static_cast<sqlite3_int64>(entry.totalBytes));
     sqlite3_bind_int(stmtMeta, 11, static_cast<int>(entry.microversions));
     sqlite3_bind_int(stmtMeta, 12, isVerified ? 1 : 0);
     sqlite3_bind_int(stmtMeta, 13, entry.hasTranscopyright ? 1 : 0);
-    sqlite3_bind_text(stmtMeta, 14, entry.transcopyrightTerms.c_str(), -1, SQLITE_TRANSIENT);
+    sqlite3_bind_text(stmtMeta, 14, entry.transcopyrightTerms.c_str(), -1,
+                      SQLITE_TRANSIENT);
     sqlite3_bind_text(stmtMeta, 15, rootHex.c_str(), -1, SQLITE_TRANSIENT);
-    sqlite3_bind_text(stmtMeta, 16, entry.signature.c_str(), -1, SQLITE_TRANSIENT);
+    sqlite3_bind_text(stmtMeta, 16, entry.signature.c_str(), -1,
+                      SQLITE_TRANSIENT);
     sqlite3_bind_int(stmtMeta, 17, seederCount);
     sqlite3_bind_int(stmtMeta, 18, peerCount);
     sqlite3_step(stmtMeta);
@@ -332,8 +348,10 @@ void SwarmCatalogIndex::removePublication(std::string_view infoHash) {
   static constexpr const char *kDelFts =
       "DELETE FROM publications_fts WHERE infoHash = ?;";
   sqlite3_stmt *stmtFts = nullptr;
-  if (sqlite3_prepare_v2(impl_->db, kDelFts, -1, &stmtFts, nullptr) == SQLITE_OK) {
-    sqlite3_bind_text(stmtFts, 1, infoHash.data(), static_cast<int>(infoHash.size()), SQLITE_TRANSIENT);
+  if (sqlite3_prepare_v2(impl_->db, kDelFts, -1, &stmtFts, nullptr) ==
+      SQLITE_OK) {
+    sqlite3_bind_text(stmtFts, 1, infoHash.data(),
+                      static_cast<int>(infoHash.size()), SQLITE_TRANSIENT);
     sqlite3_step(stmtFts);
     sqlite3_finalize(stmtFts);
   }
@@ -341,15 +359,17 @@ void SwarmCatalogIndex::removePublication(std::string_view infoHash) {
   static constexpr const char *kDelMeta =
       "DELETE FROM publications_meta WHERE infoHash = ?;";
   sqlite3_stmt *stmtMeta = nullptr;
-  if (sqlite3_prepare_v2(impl_->db, kDelMeta, -1, &stmtMeta, nullptr) == SQLITE_OK) {
-    sqlite3_bind_text(stmtMeta, 1, infoHash.data(), static_cast<int>(infoHash.size()), SQLITE_TRANSIENT);
+  if (sqlite3_prepare_v2(impl_->db, kDelMeta, -1, &stmtMeta, nullptr) ==
+      SQLITE_OK) {
+    sqlite3_bind_text(stmtMeta, 1, infoHash.data(),
+                      static_cast<int>(infoHash.size()), SQLITE_TRANSIENT);
     sqlite3_step(stmtMeta);
     sqlite3_finalize(stmtMeta);
   }
 }
 
 std::vector<SearchResult>
-SwarmCatalogIndex::search(std::string_view nqlQuery,
+SwarmCatalogIndex::search(std::string_view xqlQuery,
                           const std::size_t limit) const {
   std::vector<SearchResult> results;
   if (!impl_ || !impl_->db) {
@@ -358,7 +378,7 @@ SwarmCatalogIndex::search(std::string_view nqlQuery,
 
   std::string ftsMatch;
   std::string sqlFilter;
-  parseNelsonianQuery(nqlQuery, ftsMatch, sqlFilter);
+  parseXanadulogicalQuery(xqlQuery, ftsMatch, sqlFilter);
 
   sqlite3_stmt *stmt = nullptr;
   if (ftsMatch.empty()) {
@@ -372,7 +392,8 @@ SwarmCatalogIndex::search(std::string_view nqlQuery,
         "FROM publications_meta m WHERE 1=1" +
         sqlFilter + " ORDER BY m.seederCount DESC, m.timestamp DESC LIMIT ?;";
 
-    if (sqlite3_prepare_v2(impl_->db, sql.c_str(), -1, &stmt, nullptr) != SQLITE_OK) {
+    if (sqlite3_prepare_v2(impl_->db, sql.c_str(), -1, &stmt, nullptr) !=
+        SQLITE_OK) {
       return results;
     }
     sqlite3_bind_int(stmt, 1, static_cast<int>(limit));
@@ -390,7 +411,8 @@ SwarmCatalogIndex::search(std::string_view nqlQuery,
         "WHERE publications_fts MATCH ?" +
         sqlFilter + " ORDER BY f.rank LIMIT ?;";
 
-    if (sqlite3_prepare_v2(impl_->db, sql.c_str(), -1, &stmt, nullptr) != SQLITE_OK) {
+    if (sqlite3_prepare_v2(impl_->db, sql.c_str(), -1, &stmt, nullptr) !=
+        SQLITE_OK) {
       return results;
     }
     sqlite3_bind_text(stmt, 1, ftsMatch.c_str(), -1, SQLITE_TRANSIENT);
@@ -399,28 +421,43 @@ SwarmCatalogIndex::search(std::string_view nqlQuery,
 
   while (sqlite3_step(stmt) == SQLITE_ROW) {
     SearchResult res;
-    res.entry.infoHash          = reinterpret_cast<const char *>(sqlite3_column_text(stmt, 0));
-    res.entry.title             = reinterpret_cast<const char *>(sqlite3_column_text(stmt, 1));
-    res.entry.authorName        = reinterpret_cast<const char *>(sqlite3_column_text(stmt, 2));
-    res.entry.authorFingerprint = reinterpret_cast<const char *>(sqlite3_column_text(stmt, 3));
-    res.entry.topics            = stringToTopics(reinterpret_cast<const char *>(sqlite3_column_text(stmt, 4)));
-    res.entry.abstractText      = reinterpret_cast<const char *>(sqlite3_column_text(stmt, 5));
-    res.entry.bep46Uri          = reinterpret_cast<const char *>(sqlite3_column_text(stmt, 6));
-    res.entry.timestamp         = static_cast<std::uint64_t>(sqlite3_column_int64(stmt, 7));
-    res.entry.sequence          = static_cast<std::uint64_t>(sqlite3_column_int64(stmt, 8));
-    res.entry.totalBytes        = static_cast<std::uint64_t>(sqlite3_column_int64(stmt, 9));
-    res.entry.microversions     = static_cast<std::uint32_t>(sqlite3_column_int(stmt, 10));
+    res.entry.infoHash =
+        reinterpret_cast<const char *>(sqlite3_column_text(stmt, 0));
+    res.entry.title =
+        reinterpret_cast<const char *>(sqlite3_column_text(stmt, 1));
+    res.entry.authorName =
+        reinterpret_cast<const char *>(sqlite3_column_text(stmt, 2));
+    res.entry.authorFingerprint =
+        reinterpret_cast<const char *>(sqlite3_column_text(stmt, 3));
+    res.entry.topics = stringToTopics(
+        reinterpret_cast<const char *>(sqlite3_column_text(stmt, 4)));
+    res.entry.abstractText =
+        reinterpret_cast<const char *>(sqlite3_column_text(stmt, 5));
+    res.entry.bep46Uri =
+        reinterpret_cast<const char *>(sqlite3_column_text(stmt, 6));
+    res.entry.timestamp =
+        static_cast<std::uint64_t>(sqlite3_column_int64(stmt, 7));
+    res.entry.sequence =
+        static_cast<std::uint64_t>(sqlite3_column_int64(stmt, 8));
+    res.entry.totalBytes =
+        static_cast<std::uint64_t>(sqlite3_column_int64(stmt, 9));
+    res.entry.microversions =
+        static_cast<std::uint32_t>(sqlite3_column_int(stmt, 10));
     res.isVerified              = (sqlite3_column_int(stmt, 11) != 0);
     res.entry.hasTranscopyright = (sqlite3_column_int(stmt, 12) != 0);
-    res.entry.transcopyrightTerms = reinterpret_cast<const char *>(sqlite3_column_text(stmt, 13));
-    if (const auto opt = fromHex32(reinterpret_cast<const char *>(sqlite3_column_text(stmt, 14)))) {
+    res.entry.transcopyrightTerms =
+        reinterpret_cast<const char *>(sqlite3_column_text(stmt, 13));
+    if (const auto opt = fromHex32(
+            reinterpret_cast<const char *>(sqlite3_column_text(stmt, 14)))) {
       res.entry.merkleRoot = *opt;
     }
-    res.entry.signature = reinterpret_cast<const char *>(sqlite3_column_text(stmt, 15));
-    res.seederCount     = sqlite3_column_int(stmt, 16);
-    res.peerCount       = sqlite3_column_int(stmt, 17);
-    res.score           = static_cast<float>(sqlite3_column_double(stmt, 18));
-    if (const char *snip = reinterpret_cast<const char *>(sqlite3_column_text(stmt, 19))) {
+    res.entry.signature =
+        reinterpret_cast<const char *>(sqlite3_column_text(stmt, 15));
+    res.seederCount = sqlite3_column_int(stmt, 16);
+    res.peerCount   = sqlite3_column_int(stmt, 17);
+    res.score       = static_cast<float>(sqlite3_column_double(stmt, 18));
+    if (const char *snip =
+            reinterpret_cast<const char *>(sqlite3_column_text(stmt, 19))) {
       res.snippet = snip;
     }
     results.push_back(std::move(res));
@@ -438,14 +475,15 @@ SwarmCatalogIndex::topTopics(const std::size_t limit) const {
   }
 
   static constexpr const char *kSql = "SELECT topics FROM publications_meta;";
-  sqlite3_stmt *stmt = nullptr;
+  sqlite3_stmt *stmt                = nullptr;
   if (sqlite3_prepare_v2(impl_->db, kSql, -1, &stmt, nullptr) != SQLITE_OK) {
     return out;
   }
 
   std::map<std::string, std::size_t> counts;
   while (sqlite3_step(stmt) == SQLITE_ROW) {
-    const char *txt = reinterpret_cast<const char *>(sqlite3_column_text(stmt, 0));
+    const char *txt =
+        reinterpret_cast<const char *>(sqlite3_column_text(stmt, 0));
     if (txt) {
       for (const auto &t : stringToTopics(txt)) {
         if (!t.empty()) {
@@ -476,8 +514,8 @@ std::size_t SwarmCatalogIndex::count() const {
     return 0;
   }
   static constexpr const char *kSql = "SELECT COUNT(*) FROM publications_meta;";
-  sqlite3_stmt *stmt = nullptr;
-  std::size_t cnt = 0;
+  sqlite3_stmt *stmt                = nullptr;
+  std::size_t cnt                   = 0;
   if (sqlite3_prepare_v2(impl_->db, kSql, -1, &stmt, nullptr) == SQLITE_OK) {
     if (sqlite3_step(stmt) == SQLITE_ROW) {
       cnt = static_cast<std::size_t>(sqlite3_column_int64(stmt, 0));

@@ -113,7 +113,7 @@ Traditional web search engines assume a flat bag of text crawled from arbitrary 
 
 ### 4.1 Syntax Specification
 
-We define the **Nelsonian Query Language (NQL)**, compiled dynamically into FTS5 `MATCH` expressions and SQL predicates:
+We define the **Xanadulogical Query Language (XQL)**, compiled dynamically into FTS5 `MATCH` expressions and SQL predicates:
 
 ```
 [ Term / Phrase ]          "universal transclusion"
@@ -167,7 +167,7 @@ public:
 
   // Querying (Asynchronous / Non-blocking)
   [[nodiscard]] std::vector<SearchResult>
-  search(std::string_view nqlQuery, std::size_t limit = 50) const;
+  search(std::string_view xqlQuery, std::size_t limit = 50) const;
 
   // Topic Aggregation
   [[nodiscard]] std::vector<std::pair<std::string, std::size_t>>

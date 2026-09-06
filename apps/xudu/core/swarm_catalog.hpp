@@ -41,7 +41,8 @@ struct TopicSwarmNode {
 
 /**
  * @class SwarmCatalog
- * @brief Coordinates publication metadata, author hubs, topic swarms, and search.
+ * @brief Coordinates publication metadata, author hubs, topic swarms, and
+ * search.
  */
 class SwarmCatalog {
 public:
@@ -60,7 +61,7 @@ public:
   /// Retrieve active topic swarm nodes.
   [[nodiscard]] std::vector<TopicSwarmNode> topicSwarms() const;
 
-  /// Search publications using Nelsonian Query Language (NQL).
+  /// Search publications using Xanadulogical Query Language (XQL).
   [[nodiscard]] std::vector<SearchResult>
   search(std::string_view query,
          std::optional<CatalogCategory> category = std::nullopt,
@@ -71,8 +72,8 @@ public:
   findPublication(std::string_view infoHash) const;
 
   /// Add a publication entry to the catalog.
-  void addPublication(PublicationEntry entry, int seeders = 10,
-                      int peers = 2, bool verified = true);
+  void addPublication(PublicationEntry entry, int seeders = 10, int peers = 2,
+                      bool verified = true);
 
   /// Access underlying search index.
   [[nodiscard]] SwarmCatalogIndex &index();

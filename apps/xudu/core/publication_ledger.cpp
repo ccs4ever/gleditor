@@ -44,7 +44,8 @@ std::string normalizeTopicTag(std::string_view tag) {
     if (c == '#' || std::isspace(static_cast<unsigned char>(c))) {
       continue;
     }
-    out.push_back(static_cast<char>(std::tolower(static_cast<unsigned char>(c))));
+    out.push_back(
+        static_cast<char>(std::tolower(static_cast<unsigned char>(c))));
   }
   return out;
 }
@@ -183,19 +184,14 @@ std::array<std::uint8_t, 32> PublicationLedger::root() const {
   return out;
 }
 
-std::string PublicationLedger::rootHex() const {
-  return toHex32(root());
-}
+std::string PublicationLedger::rootHex() const { return toHex32(root()); }
 
-std::size_t PublicationLedger::size() const {
-  return impl_->entries.size();
-}
+std::size_t PublicationLedger::size() const { return impl_->entries.size(); }
 
-bool PublicationLedger::empty() const {
-  return impl_->entries.empty();
-}
+bool PublicationLedger::empty() const { return impl_->entries.empty(); }
 
-const PublicationEntry &PublicationLedger::entry(const std::size_t index) const {
+const PublicationEntry &
+PublicationLedger::entry(const std::size_t index) const {
   if (index >= impl_->entries.size()) {
     throw std::out_of_range("PublicationLedger index out of range");
   }
@@ -307,7 +303,8 @@ std::string PublicationLedger::toYaml() const {
        << "      sequence: " << e.sequence << "\n"
        << "      total_bytes: " << e.totalBytes << "\n"
        << "      microversions: " << e.microversions << "\n"
-       << "      has_transcopyright: " << (e.hasTranscopyright ? "true" : "false") << "\n"
+       << "      has_transcopyright: "
+       << (e.hasTranscopyright ? "true" : "false") << "\n"
        << "      transcopyright_terms: \"" << e.transcopyrightTerms << "\"\n"
        << "      merkle_root: \"" << toHex32(e.merkleRoot) << "\"\n"
        << "      signature: \"" << e.signature << "\"\n"
@@ -325,7 +322,7 @@ PublicationLedger PublicationLedger::fromYaml(std::string_view yaml) {
   std::istringstream stream{std::string(yaml)};
   std::string line;
   PublicationEntry cur;
-  bool inEntry = false;
+  bool inEntry  = false;
   bool inTopics = false;
 
   while (std::getline(stream, line)) {
@@ -340,8 +337,8 @@ PublicationLedger PublicationLedger::fromYaml(std::string_view yaml) {
         ledger.appendPublication(std::move(cur));
         cur = PublicationEntry{};
       }
-      inEntry = true;
-      inTopics = false;
+      inEntry       = true;
+      inTopics      = false;
       const auto q1 = content.find('"');
       const auto q2 = content.rfind('"');
       if (q1 != std::string::npos && q2 != std::string::npos && q2 > q1) {
@@ -376,7 +373,8 @@ PublicationLedger PublicationLedger::fromYaml(std::string_view yaml) {
       } else if (content.rfind("total_bytes:", 0) == 0) {
         cur.totalBytes = std::strtoull(content.substr(12).c_str(), nullptr, 10);
       } else if (content.rfind("microversions:", 0) == 0) {
-        cur.microversions = static_cast<std::uint32_t>(std::strtoul(content.substr(14).c_str(), nullptr, 10));
+        cur.microversions = static_cast<std::uint32_t>(
+            std::strtoul(content.substr(14).c_str(), nullptr, 10));
       } else if (content.rfind("has_transcopyright:", 0) == 0) {
         cur.hasTranscopyright = (content.find("true") != std::string::npos);
       } else if (content.rfind("transcopyright_terms:", 0) == 0) {
@@ -427,9 +425,8 @@ PublicationLedger::loadFromFile(const std::string &path) {
   return fromYaml(content);
 }
 
-MadeTorrent
-PublicationLedger::sealToTorrent(std::string_view name,
-                                 std::uint64_t pieceLength) const {
+MadeTorrent PublicationLedger::sealToTorrent(std::string_view name,
+                                             std::uint64_t pieceLength) const {
   std::vector<TorrentContent> files;
   const auto yamlStr = toYaml();
   files.push_back(TorrentContent{"PUBLICATION_LEDGER.yaml", yamlStr});

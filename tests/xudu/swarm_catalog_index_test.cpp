@@ -1,6 +1,6 @@
 /**
  * @file swarm_catalog_index_test.cpp
- * @brief Unit tests for SwarmCatalogIndex SQLite FTS5 search and NQL compiler.
+ * @brief Unit tests for SwarmCatalogIndex SQLite FTS5 search and XQL compiler.
  */
 #include <gmock/gmock.h>
 #include <gtest/gtest.h>
@@ -20,27 +20,26 @@ using ::testing::IsEmpty;
 using ::testing::Not;
 
 PublicationEntry makeEntry(const std::string &infoHash,
-                           const std::string &title,
-                           const std::string &author,
+                           const std::string &title, const std::string &author,
                            const std::vector<std::string> &topics,
                            const std::string &abstract,
                            const bool transcopyright) {
   PublicationEntry entry;
-  entry.infoHash = infoHash;
-  entry.bep46Uri = "btpk:key:doc:" + infoHash;
-  entry.title = title;
-  entry.authorName = author;
-  entry.authorFingerprint = "FP_" + author;
-  entry.topics = topics;
-  entry.abstractText = abstract;
-  entry.timestamp = 1700000000ULL;
-  entry.sequence = 1;
-  entry.totalBytes = 500000ULL;
-  entry.microversions = 5;
-  entry.hasTranscopyright = transcopyright;
+  entry.infoHash            = infoHash;
+  entry.bep46Uri            = "btpk:key:doc:" + infoHash;
+  entry.title               = title;
+  entry.authorName          = author;
+  entry.authorFingerprint   = "FP_" + author;
+  entry.topics              = topics;
+  entry.abstractText        = abstract;
+  entry.timestamp           = 1700000000ULL;
+  entry.sequence            = 1;
+  entry.totalBytes          = 500000ULL;
+  entry.microversions       = 5;
+  entry.hasTranscopyright   = transcopyright;
   entry.transcopyrightTerms = transcopyright ? "2 nano-XU/byte" : "";
-  entry.merkleRoot = {0x11, 0x22, 0x33, 0x44};
-  entry.signature = "sig_" + infoHash;
+  entry.merkleRoot          = {0x11, 0x22, 0x33, 0x44};
+  entry.signature           = "sig_" + infoHash;
   return entry;
 }
 
@@ -48,27 +47,30 @@ TEST(SwarmCatalogIndexTest, BasicIndexingAndCount) {
   SwarmCatalogIndex index(":memory:");
   EXPECT_THAT(index.count(), Eq(0U));
 
-  const auto doc1 = makeEntry("hash1", "Literary Machines", "Ted Nelson",
-                              {"hypertext", "xanadu"},
-                              "The report on Project Xanadu and universal literature.", false);
+  const auto doc1 = makeEntry(
+      "hash1", "Literary Machines", "Ted Nelson", {"hypertext", "xanadu"},
+      "The report on Project Xanadu and universal literature.", false);
   index.indexPublication(doc1, 10, 2, true);
   EXPECT_THAT(index.count(), Eq(1U));
 
-  const auto doc2 = makeEntry("hash2", "Augmenting Human Intellect", "Doug Engelbart",
-                              {"ui", "augmentation"},
-                              "Conceptual framework for augmentation of human intellect.", false);
+  const auto doc2 = makeEntry(
+      "hash2", "Augmenting Human Intellect", "Doug Engelbart",
+      {"ui", "augmentation"},
+      "Conceptual framework for augmentation of human intellect.", false);
   index.indexPublication(doc2, 8, 1, false);
   EXPECT_THAT(index.count(), Eq(2U));
 }
 
 TEST(SwarmCatalogIndexTest, PlainTextSearchAndSnippet) {
   SwarmCatalogIndex index(":memory:");
-  const auto doc1 = makeEntry("hash1", "Foundations of Transclusion", "Ted Nelson",
-                              {"hypertext", "transclusion"},
-                              "Deep explanation of non-destructive quotation and coordinate spaces.", false);
-  const auto doc2 = makeEntry("hash2", "Personal Dynamic Media", "Alan Kay",
-                              {"dynabook", "smalltalk"},
-                              "Dynamic personal media and active creative computing.", false);
+  const auto doc1 = makeEntry(
+      "hash1", "Foundations of Transclusion", "Ted Nelson",
+      {"hypertext", "transclusion"},
+      "Deep explanation of non-destructive quotation and coordinate spaces.",
+      false);
+  const auto doc2 = makeEntry(
+      "hash2", "Personal Dynamic Media", "Alan Kay", {"dynabook", "smalltalk"},
+      "Dynamic personal media and active creative computing.", false);
 
   index.indexPublication(doc1, 15, 3, true);
   index.indexPublication(doc2, 12, 4, true);
@@ -91,15 +93,17 @@ TEST(SwarmCatalogIndexTest, PlainTextSearchAndSnippet) {
   EXPECT_THAT(res3, IsEmpty());
 }
 
-TEST(SwarmCatalogIndexTest, NelsonianQueryLanguageCompiling) {
+TEST(SwarmCatalogIndexTest, XanadulogicalQueryLanguageCompiling) {
   SwarmCatalogIndex index(":memory:");
 
-  const auto doc1 = makeEntry("hash1", "Foundations of Transclusion", "Ted Nelson",
-                              {"hypertext", "transclusion"},
-                              "Coordinate space invariance and universal literature.", false);
-  const auto doc2 = makeEntry("hash2", "Transcopyright Protocol", "Ted Nelson",
-                              {"hypertext", "transcopyright"},
-                              "Economic micropayments for permissionless reuse.", true);
+  const auto doc1 =
+      makeEntry("hash1", "Foundations of Transclusion", "Ted Nelson",
+                {"hypertext", "transclusion"},
+                "Coordinate space invariance and universal literature.", false);
+  const auto doc2 =
+      makeEntry("hash2", "Transcopyright Protocol", "Ted Nelson",
+                {"hypertext", "transcopyright"},
+                "Economic micropayments for permissionless reuse.", true);
   const auto doc3 = makeEntry("hash3", "Augmenting Intellect", "Doug Engelbart",
                               {"hypertext", "augmentation"},
                               "Collaborative knowledge augmentation.", false);
@@ -138,7 +142,8 @@ TEST(SwarmCatalogIndexTest, NelsonianQueryLanguageCompiling) {
 
 TEST(SwarmCatalogIndexTest, SwarmHealthUpdate) {
   SwarmCatalogIndex index(":memory:");
-  const auto doc = makeEntry("hash1", "Title", "Author", {"topic"}, "Abstract", false);
+  const auto doc =
+      makeEntry("hash1", "Title", "Author", {"topic"}, "Abstract", false);
   index.indexPublication(doc, 5, 1, false);
 
   auto res = index.search("Title", 10);

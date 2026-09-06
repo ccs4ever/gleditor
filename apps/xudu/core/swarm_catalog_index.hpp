@@ -33,7 +33,8 @@ struct SearchResult {
 
 /**
  * @class SwarmCatalogIndex
- * @brief In-process SQLite FTS5 search index with Nelsonian Query Language support.
+ * @brief In-process SQLite FTS5 search index with Xanadulogical Query Language
+ * support.
  */
 class SwarmCatalogIndex {
 public:
@@ -56,9 +57,9 @@ public:
   /// Remove a publication from the index.
   void removePublication(std::string_view infoHash);
 
-  /// Execute an NQL (Nelsonian Query Language) search.
-  [[nodiscard]] std::vector<SearchResult>
-  search(std::string_view nqlQuery, std::size_t limit = 50) const;
+  /// Execute an XQL (Xanadulogical Query Language) search.
+  [[nodiscard]] std::vector<SearchResult> search(std::string_view xqlQuery,
+                                                 std::size_t limit = 50) const;
 
   /// Retrieve top topic tags with publication frequencies.
   [[nodiscard]] std::vector<std::pair<std::string, std::size_t>>
@@ -67,9 +68,10 @@ public:
   /// Total count of indexed publications.
   [[nodiscard]] std::size_t count() const;
 
-  /// Parse NQL query into FTS5 MATCH clause and SQL WHERE filter.
-  static void parseNelsonianQuery(std::string_view query, std::string &ftsMatch,
-                                  std::string &sqlFilter);
+  /// Parse XQL query into FTS5 MATCH clause and SQL WHERE filter.
+  static void parseXanadulogicalQuery(std::string_view query,
+                                      std::string &ftsMatch,
+                                      std::string &sqlFilter);
 
 private:
   struct Impl;
