@@ -245,11 +245,10 @@ void Renderer::openDoc(RenderState &state, const gleditor::TextSource &source,
       }
     }
     if (foundForeground) {
-      constexpr float kDocumentGap = 24.0F;
       const float newHalfW = 0.5F *
                              (Doc::textWidthPx + (2.0F * Page::marginPixels)) *
                              Doc::pixelsToWorld;
-      slot.x               = lastRight + kDocumentGap + newHalfW;
+      slot.x               = lastRight + render::kDefaultDocumentGap + newHalfW;
     }
   }
   slot.z                    = depthZ;
@@ -311,7 +310,8 @@ bool Renderer::update(RenderState &state, const bool settled) {
                                   static_cast<float>(view.screenHeight)
                             : 1.0F;
     const glm::mat4 projection =
-        glm::perspective(glm::radians(view.fov), aspect, 0.1F, 10000.0F);
+        glm::perspective(glm::radians(view.fov), aspect,
+                         render::kDefaultNearClipZ, render::kDefaultFarClipZ);
     const glm::mat4 camera =
         glm::lookAt(view.pos, view.pos + view.front, view.upward);
 
@@ -981,7 +981,7 @@ void Renderer::renderLoop(AutoSDLWindow &window) {
     // finish, and this loop will not settle until it does. Yielding a little
     // per frame costs a capture nothing and leaves that work somewhere to run.
     if (this->state->noPresent) {
-      std::this_thread::sleep_for(std::chrono::milliseconds(2));
+      std::this_thread::sleep_for(render::kNoPresentYieldDuration);
     }
 
     // A measured run outlives --profile: the point is the steady state, which

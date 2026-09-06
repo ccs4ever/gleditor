@@ -40,24 +40,29 @@ std::string defaultEditorConfigYaml() {
          "  next-doc: \"Ctrl+Tab\"\n"
          "  prev-doc: \"Ctrl+Shift+Tab\"\n\n"
          "schema:\n"
-         "  purpose: \"Configuration file for gleditor plain GPU text editor.\"\n"
+         "  purpose: \"Configuration file for gleditor plain GPU text "
+         "editor.\"\n"
          "  fields:\n"
          "    fontSize: \"Base font size in points.\"\n"
          "    fontFamily: \"Font family name resolved via fontconfig.\"\n"
          "    lineHeight: \"Line height multiplier.\"\n"
          "    autoSaveSeconds: \"Auto-save interval in seconds.\"\n"
-         "    documentSpacingX: \"Horizontal spacing between document columns in 3D space.\"\n"
-         "    depthZ: \"Depth offset in Z units per background document layer.\"\n"
+         "    documentSpacingX: \"Horizontal spacing between document columns "
+         "in 3D space.\"\n"
+         "    depthZ: \"Depth offset in Z units per background document "
+         "layer.\"\n"
          "    docArrivalSeconds: \"Arrival animation duration in seconds.\"\n"
-         "    backgroundOpacity: \"Resting opacity for inactive background documents.\"\n\n"
+         "    backgroundOpacity: \"Resting opacity for inactive background "
+         "documents.\"\n\n"
          "user_notes:\n"
-         "  notes: \"User notes and customization preferences for gleditor.\"\n";
+         "  notes: \"User notes and customization preferences for "
+         "gleditor.\"\n";
 }
 
 namespace {
 
-void rymlErrorHandler(const c4::csubstr msg,
-                      const c4::yml::ErrorDataBasic &, void *) {
+void rymlErrorHandler(const c4::csubstr msg, const c4::yml::ErrorDataBasic &,
+                      void *) {
   throw std::runtime_error(std::string{msg.str, msg.len});
 }
 
@@ -99,7 +104,7 @@ float parseFloat(std::string_view s, const float fallback) {
                         (s.front() == '\'' && s.back() == '\''))) {
     s = s.substr(1, s.size() - 2);
   }
-  float val = fallback;
+  float val      = fallback;
   const auto res = std::from_chars(s.data(), s.data() + s.size(), val);
   if (res.ec == std::errc{}) {
     return val;
@@ -114,7 +119,7 @@ std::uint32_t parseUint(std::string_view s, const std::uint32_t fallback) {
     s = s.substr(1, s.size() - 2);
   }
   std::uint32_t val = fallback;
-  const auto res = std::from_chars(s.data(), s.data() + s.size(), val);
+  const auto res    = std::from_chars(s.data(), s.data() + s.size(), val);
   if (res.ec == std::errc{}) {
     return val;
   }
@@ -131,8 +136,8 @@ EditorConfig parseEditorConfig(const std::string_view yamlText) {
 
   const ScopedCallbacks scoped;
   try {
-    const c4::yml::Tree tree = c4::yml::parse_in_arena(
-        c4::csubstr{yamlText.data(), yamlText.size()});
+    const c4::yml::Tree tree =
+        c4::yml::parse_in_arena(c4::csubstr{yamlText.data(), yamlText.size()});
     if (tree.empty()) {
       return cfg;
     }
@@ -144,44 +149,57 @@ EditorConfig parseEditorConfig(const std::string_view yamlText) {
     if (root.has_child("settings") && root["settings"].is_map()) {
       const auto s = root["settings"];
       if (s.has_child("fontSize") && s["fontSize"].has_val()) {
-        const auto v = s["fontSize"].val();
-        cfg.settings.fontSize = parseFloat(std::string_view{v.data(), v.size()}, cfg.settings.fontSize);
+        const auto v          = s["fontSize"].val();
+        cfg.settings.fontSize = parseFloat(std::string_view{v.data(), v.size()},
+                                           cfg.settings.fontSize);
       }
       if (s.has_child("fontFamily") && s["fontFamily"].has_val()) {
         const auto v = s["fontFamily"].val();
-        cfg.settings.fontFamily = stripQuotes(std::string_view{v.data(), v.size()});
+        cfg.settings.fontFamily =
+            stripQuotes(std::string_view{v.data(), v.size()});
       }
       if (s.has_child("lineHeight") && s["lineHeight"].has_val()) {
-        const auto v = s["lineHeight"].val();
-        cfg.settings.lineHeight = parseFloat(std::string_view{v.data(), v.size()}, cfg.settings.lineHeight);
+        const auto v            = s["lineHeight"].val();
+        cfg.settings.lineHeight = parseFloat(
+            std::string_view{v.data(), v.size()}, cfg.settings.lineHeight);
       }
       if (s.has_child("theme") && s["theme"].has_val()) {
-        const auto v = s["theme"].val();
+        const auto v       = s["theme"].val();
         cfg.settings.theme = stripQuotes(std::string_view{v.data(), v.size()});
       }
       if (s.has_child("autoSaveSeconds") && s["autoSaveSeconds"].has_val()) {
-        const auto v = s["autoSaveSeconds"].val();
-        cfg.settings.autoSaveSeconds = parseUint(std::string_view{v.data(), v.size()}, cfg.settings.autoSaveSeconds);
+        const auto v                 = s["autoSaveSeconds"].val();
+        cfg.settings.autoSaveSeconds = parseUint(
+            std::string_view{v.data(), v.size()}, cfg.settings.autoSaveSeconds);
       }
     }
 
     if (root.has_child("spatial") && root["spatial"].is_map()) {
       const auto sp = root["spatial"];
-      if (sp.has_child("documentSpacingX") && sp["documentSpacingX"].has_val()) {
-        const auto v = sp["documentSpacingX"].val();
-        cfg.spatial.documentSpacingX = parseFloat(std::string_view{v.data(), v.size()}, cfg.spatial.documentSpacingX);
+      if (sp.has_child("documentSpacingX") &&
+          sp["documentSpacingX"].has_val()) {
+        const auto v                 = sp["documentSpacingX"].val();
+        cfg.spatial.documentSpacingX = parseFloat(
+            std::string_view{v.data(), v.size()}, cfg.spatial.documentSpacingX);
       }
       if (sp.has_child("depthZ") && sp["depthZ"].has_val()) {
-        const auto v = sp["depthZ"].val();
-        cfg.spatial.depthZ = parseFloat(std::string_view{v.data(), v.size()}, cfg.spatial.depthZ);
+        const auto v       = sp["depthZ"].val();
+        cfg.spatial.depthZ = parseFloat(std::string_view{v.data(), v.size()},
+                                        cfg.spatial.depthZ);
       }
-      if (sp.has_child("docArrivalSeconds") && sp["docArrivalSeconds"].has_val()) {
+      if (sp.has_child("docArrivalSeconds") &&
+          sp["docArrivalSeconds"].has_val()) {
         const auto v = sp["docArrivalSeconds"].val();
-        cfg.spatial.docArrivalSeconds = parseFloat(std::string_view{v.data(), v.size()}, cfg.spatial.docArrivalSeconds);
+        cfg.spatial.docArrivalSeconds =
+            parseFloat(std::string_view{v.data(), v.size()},
+                       cfg.spatial.docArrivalSeconds);
       }
-      if (sp.has_child("backgroundOpacity") && sp["backgroundOpacity"].has_val()) {
+      if (sp.has_child("backgroundOpacity") &&
+          sp["backgroundOpacity"].has_val()) {
         const auto v = sp["backgroundOpacity"].val();
-        cfg.spatial.backgroundOpacity = parseFloat(std::string_view{v.data(), v.size()}, cfg.spatial.backgroundOpacity);
+        cfg.spatial.backgroundOpacity =
+            parseFloat(std::string_view{v.data(), v.size()},
+                       cfg.spatial.backgroundOpacity);
       }
     }
 
@@ -189,7 +207,8 @@ EditorConfig parseEditorConfig(const std::string_view yamlText) {
       for (const auto child : root["keymap"].children()) {
         if (child.has_key() && child.has_val()) {
           std::string k{child.key().data(), child.key().size()};
-          std::string v = stripQuotes(std::string_view{child.val().data(), child.val().size()});
+          std::string v = stripQuotes(
+              std::string_view{child.val().data(), child.val().size()});
           cfg.keymap.emplace_back(std::move(k), std::move(v));
         }
       }
@@ -198,7 +217,7 @@ EditorConfig parseEditorConfig(const std::string_view yamlText) {
     if (root.has_child("user_notes") && root["user_notes"].is_map()) {
       const auto un = root["user_notes"];
       if (un.has_child("notes") && un["notes"].has_val()) {
-        const auto v = un["notes"].val();
+        const auto v  = un["notes"].val();
         cfg.userNotes = stripQuotes(std::string_view{v.data(), v.size()});
       }
     }
@@ -216,9 +235,11 @@ EditorConfig loadEditorConfig(const std::string &path) {
   }
 
   if (const char *xdg = std::getenv("XDG_CONFIG_HOME"); xdg && *xdg) {
-    candidates.emplace_back(std::filesystem::path(xdg) / "gleditor" / "config.yaml");
+    candidates.emplace_back(std::filesystem::path(xdg) / "gleditor" /
+                            "config.yaml");
   } else if (const char *home = std::getenv("HOME"); home && *home) {
-    candidates.emplace_back(std::filesystem::path(home) / ".config" / "gleditor" / "config.yaml");
+    candidates.emplace_back(std::filesystem::path(home) / ".config" /
+                            "gleditor" / "config.yaml");
   }
 
   candidates.emplace_back("assets/gleditor/config.yaml");

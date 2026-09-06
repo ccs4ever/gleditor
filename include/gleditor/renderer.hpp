@@ -25,6 +25,7 @@
 #include <gleditor/draw_budget.hpp>
 #include <gleditor/frame_contributor.hpp>
 #include <gleditor/pick_observer.hpp>
+#include <gleditor/render/constants.hpp>
 #include <gleditor/render/device.hpp>
 #include <gleditor/render/types.hpp>
 #include <gleditor/span_decorator.hpp>
@@ -484,7 +485,10 @@ public:
 
   Renderer(const AppStateRef &state, render::Backend backend,
            [[maybe_unused]] Private _priv)
-      : AbstractRenderer(state, _priv), backendKind(backend) {}
+      : AbstractRenderer(state, _priv), backendKind(backend) {
+    highlights.reserve(render::maxHighlightRanges);
+    decoratedSpans.reserve(render::maxHighlightRanges);
+  }
   ~Renderer() override;
 
   /**
