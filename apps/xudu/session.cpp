@@ -20,6 +20,7 @@
 #include <glm/ext/matrix_clip_space.hpp>
 #include <glm/ext/matrix_transform.hpp>
 
+#include <gleditor/caret.hpp>
 #include <gleditor/decode_index.hpp>
 #include <gleditor/doc.hpp>
 #include <gleditor/media_widget.hpp>
@@ -33,6 +34,19 @@
 #include "xudu/core/provenance.hpp"
 
 namespace xudu {
+
+namespace {
+constexpr std::uint32_t kCollaboratorColors[] = {
+    0x38BDF8FF, // Sky 400
+    0xF43F5EFF, // Rose 500
+    0xA855F7FF, // Purple 500
+    0x22C55EFF, // Green 500
+    0xEAB308FF, // Yellow 500
+    0xEC4899FF, // Pink 500
+    0x06B6D4FF, // Cyan 500
+    0xF97316FF, // Orange 500
+};
+} // namespace
 
 Session::Session(std::string aStorePath,
                  std::shared_ptr<UserPermascroll> scroll) {
@@ -103,6 +117,11 @@ MicroversionId Session::insertText(const std::uint32_t docIndex,
       if (const auto kind = systemDocKindForStoreIndex(sIdx)) {
         systemDocChangedCallback_(*kind, st.textOf(prod));
       }
+    }
+  } else if (swarmSource) {
+    if (auto appliedOp = st.getOp(prod)) {
+      broadcastLiveOp(docIndex, *appliedOp, prod, newText,
+                      at + static_cast<std::uint32_t>(newText.size()), 0);
     }
   }
   return prod;
@@ -1620,12 +1639,26 @@ void Session::flushUncommitted(const std::optional<std::uint32_t> docIndex) {
           curVersion = st.insert(curVersion, op.at, op.text);
           std::cout << "xudu: " << curVersion.str() << " insert "
                     << op.text.size() << " bytes at " << op.at << "\n";
+          if (swarmSource && !st.isSystem()) {
+            if (auto appliedOp = st.getOp(curVersion)) {
+              broadcastLiveOp(
+                  static_cast<std::uint32_t>(which), *appliedOp, curVersion,
+                  op.text, op.at + static_cast<std::uint32_t>(op.text.size()),
+                  0);
+            }
+          }
         }
       } else if (op.kind == OpKind::Delete) {
         if (op.length > 0) {
           curVersion = st.erase(curVersion, op.at, op.length);
           std::cout << "xudu: " << curVersion.str() << " delete " << op.length
                     << " bytes at " << op.at << "\n";
+          if (swarmSource && !st.isSystem()) {
+            if (auto appliedOp = st.getOp(curVersion)) {
+              broadcastLiveOp(static_cast<std::uint32_t>(which), *appliedOp,
+                              curVersion, "", op.at, 0);
+            }
+          }
         }
       }
     }
@@ -1674,6 +1707,9 @@ void Session::textInserted(Doc &doc, const std::uint32_t at,
     return;
   }
   open[which].uncommittedLog.recordInsert(at, utf8);
+  if (swarmSource) {
+    flushUncommitted(static_cast<std::uint32_t>(which));
+  }
 }
 
 void Session::textErased(Doc &doc, const std::uint32_t at,
@@ -1683,6 +1719,9 @@ void Session::textErased(Doc &doc, const std::uint32_t at,
     return;
   }
   open[which].uncommittedLog.recordErase(at, removed);
+  if (swarmSource) {
+    flushUncommitted(static_cast<std::uint32_t>(which));
+  }
 }
 
 void Session::markDecorated(Doc &doc, const std::uint32_t at,
@@ -1800,6 +1839,172 @@ void Session::setAlignment(const std::size_t which, const std::uint32_t at,
             << (start + effLen) << ")\n";
   save(sIdx);
   refresh(which, version);
+}
+
+void Session::setLocalCollaboratorInfo(std::string name,
+                                       std::string fingerprint,
+                                       std::string authorScrollKey) {
+  localAuthorName_        = std::move(name);
+  localAuthorFingerprint_ = std::move(fingerprint);
+  localAuthorScrollKey_   = std::move(authorScrollKey);
+}
+
+void Session::broadcastLiveOp(const std::uint32_t /*docIndex*/, const Op &op,
+                              const MicroversionId &version,
+                              const std::string_view primediaText,
+                              const std::uint32_t caretOffset,
+                              const std::uint32_t selectionLength) {
+  if (!swarmSource) {
+    return;
+  }
+  SwarmContentSource::LiveOpBroadcast broadcast;
+  broadcast.swarmHash         = collabRoomHash_;
+  broadcast.version           = version;
+  broadcast.op                = op;
+  broadcast.primediaText      = std::string(primediaText);
+  broadcast.authorScrollKey   = localAuthorScrollKey_;
+  broadcast.authorName        = localAuthorName_;
+  broadcast.authorFingerprint = localAuthorFingerprint_;
+  broadcast.caretOffset       = caretOffset;
+  broadcast.selectionLength   = selectionLength;
+  broadcast.timestamp = std::chrono::duration_cast<std::chrono::milliseconds>(
+                            std::chrono::system_clock::now().time_since_epoch())
+                            .count();
+  swarmSource->broadcastLiveOp(broadcast);
+}
+
+void Session::broadcastLocalCaret(const std::uint32_t docIndex,
+                                  const std::uint32_t caretOffset,
+                                  const std::uint32_t selectionLength) {
+  if (!swarmSource) {
+    return;
+  }
+  if (docIndex >= open.size()) {
+    return;
+  }
+  SwarmContentSource::LiveOpBroadcast broadcast;
+  broadcast.swarmHash         = collabRoomHash_;
+  broadcast.version           = open[docIndex].version;
+  broadcast.op.kind           = OpKind::Insert;
+  broadcast.op.parent         = open[docIndex].version;
+  broadcast.op.at             = caretOffset;
+  broadcast.op.length         = 0;
+  broadcast.authorScrollKey   = localAuthorScrollKey_;
+  broadcast.authorName        = localAuthorName_;
+  broadcast.authorFingerprint = localAuthorFingerprint_;
+  broadcast.caretOffset       = caretOffset;
+  broadcast.selectionLength   = selectionLength;
+  broadcast.timestamp = std::chrono::duration_cast<std::chrono::milliseconds>(
+                            std::chrono::system_clock::now().time_since_epoch())
+                            .count();
+  swarmSource->broadcastLiveOp(broadcast);
+}
+
+bool Session::applyRemoteLiveOp(
+    const SwarmContentSource::LiveOpBroadcast &broadcast,
+    std::vector<std::shared_ptr<Doc>> &docs, Caret *localCaret) {
+  const std::string authorKey = !broadcast.authorFingerprint.empty()
+                                    ? broadcast.authorFingerprint
+                                    : broadcast.authorScrollKey;
+  if (authorKey.empty()) {
+    return false;
+  }
+  // Ignore echo of local operations
+  if (authorKey == localAuthorFingerprint_ ||
+      (!localAuthorScrollKey_.empty() && authorKey == localAuthorScrollKey_)) {
+    return false;
+  }
+
+  // Update collaborator metadata and presence
+  auto &collab           = collaborators_[authorKey];
+  collab.authorScrollKey = broadcast.authorScrollKey;
+  collab.name = broadcast.authorName.empty() ? "Peer" : broadcast.authorName;
+  collab.fingerprint     = broadcast.authorFingerprint;
+  collab.caretOffset     = broadcast.caretOffset;
+  collab.selectionLength = broadcast.selectionLength;
+  collab.lastSeen        = std::chrono::steady_clock::now();
+  if (collab.colorRgba == 0) {
+    std::size_t h    = std::hash<std::string>{}(authorKey);
+    collab.colorRgba = kCollaboratorColors[h % std::size(kCollaboratorColors)];
+  }
+
+  // Determine if this broadcast is merely a caret ping
+  const bool isCaretOnly =
+      (broadcast.op.kind == OpKind::Insert && broadcast.op.length == 0 &&
+       broadcast.primediaText.empty());
+  if (isCaretOnly) {
+    return true;
+  }
+
+  if (open.empty()) {
+    return false;
+  }
+
+  // Match target document view
+  std::size_t targetDocIndex = 0;
+  for (std::size_t i = 0; i < open.size(); ++i) {
+    if (open[i].version == broadcast.op.parent) {
+      targetDocIndex = i;
+      break;
+    }
+  }
+  collab.docIndex = static_cast<std::uint32_t>(targetDocIndex);
+
+  const auto sIdx = open[targetDocIndex].storeIndex;
+  auto &st        = store(sIdx);
+
+  // Apply op to the store
+  const auto newVersion = st.applyRemoteLiveOp(
+      broadcast.op, broadcast.primediaText, broadcast.authorScrollKey);
+  open[targetDocIndex].version = newVersion;
+  open[targetDocIndex].pieces  = st.rebuild(newVersion);
+  invalidate();
+  refresh(static_cast<std::uint32_t>(targetDocIndex), newVersion);
+
+  // Reload Doc text layout if loaded
+  if (targetDocIndex < docs.size() && docs[targetDocIndex]) {
+    if (const auto src = sourceFor(newVersion, sIdx)) {
+      docs[targetDocIndex]->load(*src);
+    }
+  }
+
+  // Displace local caret if active on this document
+  if (localCaret && localCaret->active() &&
+      localCaret->documentIndex() == targetDocIndex) {
+    if (broadcast.op.kind == OpKind::Insert) {
+      const std::uint32_t insertedBytes =
+          broadcast.op.length > 0
+              ? broadcast.op.length
+              : static_cast<std::uint32_t>(broadcast.primediaText.size());
+      localCaret->shiftForInsertion(broadcast.op.at, insertedBytes);
+    } else if (broadcast.op.kind == OpKind::Delete && broadcast.op.length > 0) {
+      localCaret->shiftForErasure(broadcast.op.at, broadcast.op.length);
+    }
+  }
+
+  // Displace other remote collaborator carets
+  for (auto &[k, other] : collaborators_) {
+    if (k == authorKey || other.docIndex != targetDocIndex) {
+      continue;
+    }
+    if (broadcast.op.kind == OpKind::Insert) {
+      const std::uint32_t insertedBytes =
+          broadcast.op.length > 0
+              ? broadcast.op.length
+              : static_cast<std::uint32_t>(broadcast.primediaText.size());
+      if (other.caretOffset >= broadcast.op.at) {
+        other.caretOffset += insertedBytes;
+      }
+    } else if (broadcast.op.kind == OpKind::Delete && broadcast.op.length > 0) {
+      if (other.caretOffset > broadcast.op.at + broadcast.op.length) {
+        other.caretOffset -= broadcast.op.length;
+      } else if (other.caretOffset > broadcast.op.at) {
+        other.caretOffset = broadcast.op.at;
+      }
+    }
+  }
+
+  return true;
 }
 
 void Session::decorate(const Doc &doc, std::vector<gleditor::SpanStyle> &out) {

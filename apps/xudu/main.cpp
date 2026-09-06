@@ -49,6 +49,7 @@
 #include <gleditor/text_source.hpp>
 
 #include "xudu/beams.hpp"
+#include "xudu/collaborator_overlay.hpp"
 #include "xudu/core/config.hpp"
 #include "xudu/core/kinetic_tether.hpp"
 #include "xudu/core/microversion.hpp"
@@ -1780,6 +1781,15 @@ int main(const int argc, char **argv) {
       .help("alias for --physics")
       .default_value(false)
       .implicit_value(true);
+  parser.add_argument("--collab-room")
+      .help("collaborative room name for real-time swarm editing")
+      .default_value(std::string{});
+  parser.add_argument("--collab-host")
+      .help("collaborative room host fingerprint")
+      .default_value(std::string{});
+  parser.add_argument("--collab-name")
+      .help("local author display name for collaborative carets")
+      .default_value(std::string{});
   parser.add_argument("--author-name")
       .help("name to record on publications made from this machine")
       .default_value(std::string{});
@@ -2414,10 +2424,33 @@ int main(const int argc, char **argv) {
     backend  = gleditor::applyCommonArguments(parser, state, argc, argv);
     renderer = Renderer::create(state, backend);
 
-    if (parser["--swarm"] == true) {
-      session->useSwarm(parser["--private-dht"] == true);
-      quiet || std::cout << "xudu: swarm listening on port "
-                         << session->swarmPort() << "\n";
+    const auto collabRoom = parser.get<std::string>("--collab-room");
+    if (parser["--swarm"] == true || !collabRoom.empty()) {
+      if (!session->swarmEnabled()) {
+        session->useSwarm(parser["--private-dht"] == true);
+        quiet || std::cout << "xudu: swarm listening on port "
+                           << session->swarmPort() << "\n";
+      }
+    }
+
+    if (!collabRoom.empty()) {
+      const auto collabHost = parser.get<std::string>("--collab-host");
+      auto collabName       = parser.get<std::string>("--collab-name");
+      if (collabName.empty()) {
+        collabName =
+            session->author().name.empty() ? "Author" : session->author().name;
+      }
+      const auto roomTarget =
+          xudu::SwarmContentSource::collabRoomTarget(collabHost, collabRoom);
+      session->setCollabRoom(roomTarget);
+
+      const std::string myFp = session->identity().publicKey.hex();
+      const std::string myScrollKey =
+          "btpk:" + session->identity().publicKey.hex() + ":main";
+      session->setLocalCollaboratorInfo(collabName, myFp, myScrollKey);
+      quiet || std::cout << "xudu: joined collaborative room '" << collabRoom
+                         << "' (target: " << roomTarget.hex() << ") as "
+                         << collabName << "\n";
     }
 
     if (parser.present<std::vector<std::string>>("--dht-node")) {
@@ -2704,6 +2737,10 @@ int main(const int argc, char **argv) {
     WireframeHullOverlay wireframeHullOverlay(renderer, "Sans 10");
     renderer->addFrameContributor(&wireframeHullOverlay);
     views.setWireframeOverlay(&wireframeHullOverlay);
+
+    xudu::CollaboratorCaretOverlay collaboratorOverlay(*session, renderer,
+                                                       "Sans 9");
+    renderer->addFrameContributor(&collaboratorOverlay);
 
     kineticTetherEngine.setVoidSpawnHandler(
         [&views](const TetherPayload &payload, const float sx, const float sy) {

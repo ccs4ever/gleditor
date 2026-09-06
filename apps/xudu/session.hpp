@@ -44,6 +44,7 @@
 #include "core/anchor_lanes.hpp"
 #include "core/mutable_link.hpp"
 #include "core/provenance.hpp"
+#include "core/swarm.hpp"
 #include "core/system_docs.hpp"
 #include "core/transcopyright_logic.hpp"
 #include "core/uncommitted_op_log.hpp"
@@ -59,6 +60,18 @@ class Doc;
 namespace xudu {
 
 class Session;
+
+struct RemoteCollaborator {
+  std::string authorScrollKey;
+  std::string name;
+  std::string fingerprint;
+  std::uint32_t caretOffset{0};
+  std::uint32_t selectionLength{0};
+  std::uint32_t docIndex{0};
+  std::chrono::steady_clock::time_point lastSeen{
+      std::chrono::steady_clock::now()};
+  std::uint32_t colorRgba{0};
+};
 
 /**
  * @brief The text of one microversion, rebuilt on demand.
@@ -681,6 +694,45 @@ public:
   /// Whether @p docIndex has uncommitted edits waiting in the replay log.
   [[nodiscard]] bool hasUncommitted(std::uint32_t docIndex) const;
 
+  // -- Collaborative Swarm Editing (Stage 11) -------------------------------
+  void setCollabRoom(const InfoHash &roomHash) { collabRoomHash_ = roomHash; }
+  [[nodiscard]] const InfoHash &collabRoom() const { return collabRoomHash_; }
+
+  void setLocalCollaboratorInfo(std::string name, std::string fingerprint,
+                                std::string authorScrollKey);
+  [[nodiscard]] const std::string &localCollaboratorName() const {
+    return localAuthorName_;
+  }
+  [[nodiscard]] const std::string &localCollaboratorFingerprint() const {
+    return localAuthorFingerprint_;
+  }
+  [[nodiscard]] const std::string &localCollaboratorScrollKey() const {
+    return localAuthorScrollKey_;
+  }
+
+  void broadcastLiveOp(std::uint32_t docIndex, const Op &op,
+                       const MicroversionId &version,
+                       std::string_view primediaText = "",
+                       std::uint32_t caretOffset     = 0,
+                       std::uint32_t selectionLength = 0);
+
+  void broadcastLocalCaret(std::uint32_t docIndex, std::uint32_t caretOffset,
+                           std::uint32_t selectionLength = 0);
+
+  bool applyRemoteLiveOp(const SwarmContentSource::LiveOpBroadcast &broadcast,
+                         std::vector<std::shared_ptr<Doc>> &docs,
+                         Caret *localCaret = nullptr);
+
+  [[nodiscard]] const std::map<std::string, RemoteCollaborator> &
+  collaborators() const {
+    return collaborators_;
+  }
+
+  [[nodiscard]] SwarmContentSource *swarm() { return swarmSource.get(); }
+  [[nodiscard]] const SwarmContentSource *swarm() const {
+    return swarmSource.get();
+  }
+
   // -- gleditor::SpanDecorator ----------------------------------------------
   //
   // Shades the passages this document shares with another open one, and the
@@ -723,6 +775,12 @@ private:
   MediaManager mediaManager_;
   gleditor::GroundingModal groundingModal_;
   TranscopyrightUnlockedHandler tcUnlockedHandler_;
+
+  std::string localAuthorName_{"Author"};
+  std::string localAuthorFingerprint_;
+  std::string localAuthorScrollKey_;
+  InfoHash collabRoomHash_;
+  std::map<std::string, RemoteCollaborator> collaborators_;
 
 public:
   [[nodiscard]] MediaManager &mediaManager() { return mediaManager_; }

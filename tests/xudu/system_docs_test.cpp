@@ -42,9 +42,9 @@ using xudu::UserPermascroll;
 
 SignedProvenance makeTestProvenance() {
   SignedProvenance prov;
-  prov.yaml = "title: \"System Doc Test\"\nauthor: \"Nelson\"\n";
-  prov.signature =
-      "-----BEGIN PGP SIGNATURE-----\ntest-signature\n-----END PGP SIGNATURE-----\n";
+  prov.yaml      = "title: \"System Doc Test\"\nauthor: \"Nelson\"\n";
+  prov.signature = "-----BEGIN PGP SIGNATURE-----\ntest-signature\n-----END "
+                   "PGP SIGNATURE-----\n";
   return prov;
 }
 
@@ -263,7 +263,7 @@ TEST(SystemDocsTest, SealLocalSpoolWithheldSpanZeroFilledOnWire) {
 
   // Insert public text into store
   const std::string publicText = "Chapter 1: The Open Docuverse. ";
-  const auto v1                = store.insert(xudu::MicroversionId{}, 0, publicText);
+  const auto v1 = store.insert(xudu::MicroversionId{}, 0, publicText);
 
   // Insert private system configuration into store (e.g. keymap edits)
   const std::string privateText = "PRIVATE_KEYMAP_SETTINGS_TOKEN_9999";
@@ -272,9 +272,9 @@ TEST(SystemDocsTest, SealLocalSpoolWithheldSpanZeroFilledOnWire) {
 
   // Insert more public text
   const std::string publicEnd = " Chapter 2: The Connected World.";
-  store.insert(v2,
-               static_cast<std::uint32_t>(publicText.size() + privateText.size()),
-               publicEnd);
+  store.insert(
+      v2, static_cast<std::uint32_t>(publicText.size() + privateText.size()),
+      publicEnd);
 
   // System span in primedia
   const auto sysOffset = static_cast<std::uint64_t>(publicText.size());
@@ -289,7 +289,7 @@ TEST(SystemDocsTest, SealLocalSpoolWithheldSpanZeroFilledOnWire) {
   const auto prov = makeTestProvenance();
 
   // 1. Seal with WITHHELD hole
-  const auto outDirWithheld = tempDir / "sealed_withheld";
+  const auto outDirWithheld         = tempDir / "sealed_withheld";
   [[maybe_unused]] const auto seal1 = xudu::sealLocalSpool(
       store, keys, "essay", outDirWithheld.string(), prov, {}, 0, {hole});
 
@@ -311,7 +311,7 @@ TEST(SystemDocsTest, SealLocalSpoolWithheldSpanZeroFilledOnWire) {
 
   // 2. Seal with PUBLISHED status (empty holes -> user explicitly chose to
   // export/publish)
-  const auto outDirPublished = tempDir / "sealed_published";
+  const auto outDirPublished        = tempDir / "sealed_published";
   [[maybe_unused]] const auto seal2 = xudu::sealLocalSpool(
       store, keys, "essay", outDirPublished.string(), prov, {}, 0, {});
 

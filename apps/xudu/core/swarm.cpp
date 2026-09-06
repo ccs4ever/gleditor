@@ -857,6 +857,11 @@ std::string SwarmContentSource::encodeLiveOp(const LiveOpBroadcast &broadcast) {
   e["slen"] = static_cast<std::int64_t>(broadcast.op.sourceLength);
   e["link"] = static_cast<std::int64_t>(broadcast.op.link);
   e["txt"]  = broadcast.primediaText;
+  e["sk"]   = broadcast.authorScrollKey;
+  e["name"] = broadcast.authorName;
+  e["fp"]   = broadcast.authorFingerprint;
+  e["co"]   = static_cast<std::int64_t>(broadcast.caretOffset);
+  e["sel"]  = static_cast<std::int64_t>(broadcast.selectionLength);
   e["ts"]   = broadcast.timestamp;
 
   std::string out;
@@ -903,37 +908,61 @@ SwarmContentSource::decodeLiveOp(const std::string_view body) {
   b.op.sourceLength =
       static_cast<std::uint32_t>(node.dict_find_int_value("slen", 0));
   b.op.link = static_cast<std::uint64_t>(node.dict_find_int_value("link", 0));
-  b.primediaText = std::string(node.dict_find_string_value("txt"));
-  b.timestamp    = node.dict_find_int_value("ts", 0);
+  b.primediaText      = std::string(node.dict_find_string_value("txt"));
+  b.authorScrollKey   = std::string(node.dict_find_string_value("sk"));
+  b.authorName        = std::string(node.dict_find_string_value("name"));
+  b.authorFingerprint = std::string(node.dict_find_string_value("fp"));
+  b.caretOffset = static_cast<std::uint32_t>(node.dict_find_int_value("co", 0));
+  b.selectionLength =
+      static_cast<std::uint32_t>(node.dict_find_int_value("sel", 0));
+  b.timestamp = node.dict_find_int_value("ts", 0);
 
   return b;
+}
+
+void SwarmContentSource::broadcastLiveOp(const LiveOpBroadcast &broadcast) {
+  auto populated = broadcast;
+  if (populated.timestamp == 0) {
+    populated.timestamp =
+        std::chrono::duration_cast<std::chrono::milliseconds>(
+            std::chrono::system_clock::now().time_since_epoch())
+            .count();
+  }
+
+  // 1. Broadcast over libtorrent peer connections via BEP 10 extension plugin
+  const auto payload = encodeLiveOp(populated);
+  impl->broadcastLiveOpToPeers(populated.swarmHash, payload);
+
+  // 2. Deliver to local session handlers
+  std::scoped_lock lock(impl->liveOpsMutex);
+  impl->pendingLiveOps.push_back(populated);
+  for (const auto &handler : impl->liveOpHandlers) {
+    if (handler) {
+      handler(populated);
+    }
+  }
 }
 
 void SwarmContentSource::broadcastLiveOp(const InfoHash &swarmHash,
                                          const MicroversionId &version,
                                          const Op &op,
                                          const std::string_view primediaText) {
-  LiveOpBroadcast broadcast{
+  broadcastLiveOp(LiveOpBroadcast{
       .swarmHash    = swarmHash,
       .version      = version,
       .op           = op,
       .primediaText = std::string(primediaText),
-      .timestamp    = std::chrono::duration_cast<std::chrono::milliseconds>(
-                          std::chrono::system_clock::now().time_since_epoch())
-                          .count()};
+  });
+}
 
-  // 1. Broadcast over libtorrent peer connections via BEP 10 extension plugin
-  const auto payload = encodeLiveOp(broadcast);
-  impl->broadcastLiveOpToPeers(swarmHash, payload);
-
-  // 2. Deliver to local session handlers
-  std::scoped_lock lock(impl->liveOpsMutex);
-  impl->pendingLiveOps.push_back(broadcast);
-  for (const auto &handler : impl->liveOpHandlers) {
-    if (handler) {
-      handler(broadcast);
-    }
-  }
+InfoHash
+SwarmContentSource::collabRoomTarget(const std::string_view hostFingerprint,
+                                     const std::string_view roomName) {
+  InfoHash h;
+  const std::string key = "xudu:collab:" + std::string(hostFingerprint) + ":" +
+                          std::string(roomName);
+  h.bytes               = sha1(key);
+  return h;
 }
 
 void SwarmContentSource::onLiveOp(LiveOpHandler handler) {

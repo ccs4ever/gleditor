@@ -525,6 +525,18 @@ public:
                                    std::string_view primediaText    = "",
                                    std::string_view authorScrollKey = "");
 
+  /// Store unsealed live primedia bytes from a remote collaborative author.
+  void setExternalLiveBytes(std::string_view authorScrollKey,
+                            std::uint64_t start, std::string_view text);
+
+  /// Read unsealed live primedia bytes from a remote collaborative author
+  /// buffer.
+  [[nodiscard]] std::string
+  readRemoteAuthorBuffer(const PrimediaSpan &span) const;
+
+  /// Clear unsealed live buffer for an author once sealed segments exist.
+  void clearRemoteAuthorBuffer(std::string_view authorScrollKey);
+
   // -- persistence ----------------------------------------------------------
 
   /**
@@ -658,6 +670,13 @@ private:
   std::map<MicroversionId, VersionAnnotation> versionAnnotations_;
   std::map<std::string, MicroversionId> aliasIndex_;
   bool isSystem_{false};
+
+  struct RemoteAuthorChunk {
+    std::uint64_t start{0};
+    std::string text;
+  };
+  mutable std::map<std::string, std::vector<RemoteAuthorChunk>>
+      remoteAuthorBuffers_;
 };
 
 } // namespace xudu

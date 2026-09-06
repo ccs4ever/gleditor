@@ -379,19 +379,27 @@ TEST(LiveCollaborativeSwarmTest, bep10LiveOpEncodingAndDecoding) {
   SwarmContentSource::LiveOpBroadcast broadcast{
       .swarmHash =
           InfoHash::fromHex("0123456789abcdef0123456789abcdef01234567"),
-      .version      = MicroversionId::parse("2a1"),
-      .op           = xudu::Op{.kind         = xudu::OpKind::Insert,
-                               .parent       = MicroversionId::parse("2"),
-                               .at           = 42,
-                               .length       = 10,
-                               .to           = 0,
-                               .span         = xudu::PrimediaSpan{1, 100, 25},
-                               .source       = MicroversionId{},
-                               .sourceAt     = 0,
-                               .sourceLength = 0,
-                               .link         = 7},
-      .primediaText = "Collaborative Text Span",
-      .timestamp    = 1700000000123LL,
+      .version         = MicroversionId::parse("2a1"),
+      .op              = xudu::Op{.kind         = xudu::OpKind::Insert,
+                                  .parent       = MicroversionId::parse("2"),
+                                  .at           = 42,
+                                  .length       = 10,
+                                  .to           = 0,
+                                  .span         = xudu::PrimediaSpan{1, 100, 25},
+                                  .source       = MicroversionId{},
+                                  .sourceAt     = 0,
+                                  .sourceLength = 0,
+                                  .link         = 7},
+      .primediaText    = "Collaborative Text Span",
+      .authorScrollKey = "btpk:"
+                         "0123456789abcdef0123456789abcdef0123456789abcdef01234"
+                         "56789abcdef:main",
+      .authorName      = "Alice",
+      .authorFingerprint =
+          "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+      .caretOffset     = 14,
+      .selectionLength = 6,
+      .timestamp       = 1700000000123LL,
   };
 
   const auto encoded = SwarmContentSource::encodeLiveOp(broadcast);
@@ -410,7 +418,57 @@ TEST(LiveCollaborativeSwarmTest, bep10LiveOpEncodingAndDecoding) {
   EXPECT_EQ(decoded->op.span.length, broadcast.op.span.length);
   EXPECT_EQ(decoded->op.link, broadcast.op.link);
   EXPECT_EQ(decoded->primediaText, broadcast.primediaText);
+  EXPECT_EQ(decoded->authorScrollKey, broadcast.authorScrollKey);
+  EXPECT_EQ(decoded->authorName, broadcast.authorName);
+  EXPECT_EQ(decoded->authorFingerprint, broadcast.authorFingerprint);
+  EXPECT_EQ(decoded->caretOffset, broadcast.caretOffset);
+  EXPECT_EQ(decoded->selectionLength, broadcast.selectionLength);
   EXPECT_EQ(decoded->timestamp, broadcast.timestamp);
+}
+
+TEST(LiveCollaborativeSwarmTest, collabRoomTargetDerivation) {
+  const auto target1 =
+      SwarmContentSource::collabRoomTarget("alice-fp", "room-alpha");
+  const auto target2 =
+      SwarmContentSource::collabRoomTarget("alice-fp", "room-alpha");
+  const auto target3 =
+      SwarmContentSource::collabRoomTarget("bob-fp", "room-alpha");
+
+  EXPECT_FALSE(target1.isZero());
+  EXPECT_EQ(target1, target2);
+  EXPECT_NE(target1, target3);
+}
+
+TEST(LiveCollaborativeSwarmTest, remoteAuthorBufferZeroPermascrollPollution) {
+  Store bobStore;
+  const std::string aliceScrollKey =
+      "btpk:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef:"
+      "main";
+
+  xudu::Op op;
+  op.kind        = xudu::OpKind::Insert;
+  op.parent      = MicroversionId{};
+  op.at          = 0;
+  op.span.scroll = 1;
+  op.span.start  = 0;
+  op.span.length = 18;
+
+  const std::string liveText = "Live Collaborative";
+  const auto ver = bobStore.applyRemoteLiveOp(op, liveText, aliceScrollKey);
+
+  // Text is successfully read from Bob's store via RemoteAuthorBuffer
+  EXPECT_EQ(bobStore.textOf(ver), liveText);
+
+  // Bob's slot 0 local author permascroll is untouched (zero spool pollution)
+  EXPECT_EQ(bobStore.userPermascroll().size(), 0U);
+
+  // Remote buffer reads correctly for subspan
+  PrimediaSpan subSpan{.scroll = 1, .start = 5, .length = 13};
+  EXPECT_EQ(bobStore.readRemoteAuthorBuffer(subSpan), "Collaborative");
+
+  // Clearing the remote buffer removes the live text
+  bobStore.clearRemoteAuthorBuffer(aliceScrollKey);
+  EXPECT_TRUE(bobStore.readRemoteAuthorBuffer(subSpan).empty());
 }
 
 TEST(LiveCollaborativeSwarmTest, broadcastAndApplyLiveOpsAcrossPeerStores) {

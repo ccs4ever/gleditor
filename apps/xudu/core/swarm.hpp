@@ -265,6 +265,11 @@ public:
     MicroversionId version;
     Op op;
     std::string primediaText;
+    std::string authorScrollKey;
+    std::string authorName;
+    std::string authorFingerprint;
+    std::uint32_t caretOffset{0};
+    std::uint32_t selectionLength{0};
     std::int64_t timestamp{0};
   };
 
@@ -276,6 +281,18 @@ public:
    */
   void broadcastLiveOp(const InfoHash &swarmHash, const MicroversionId &version,
                        const Op &op, std::string_view primediaText = "");
+
+  /**
+   * @brief Broadcast a fully populated live operation descriptor to peers.
+   */
+  void broadcastLiveOp(const LiveOpBroadcast &broadcast);
+
+  /**
+   * @brief Derive an ephemeral 20-byte DHT rendezvous target for a
+   * collaborative room.
+   */
+  [[nodiscard]] static InfoHash
+  collabRoomTarget(std::string_view hostFingerprint, std::string_view roomName);
 
   /**
    * @brief Register a callback for incoming live operations from peers.

@@ -432,11 +432,69 @@ std::string Store::read(const PrimediaSpan &span) const {
   if (nullptr == which) {
     return {};
   }
+  // Check ephemeral live author buffer if not yet sealed into a torrent piece
+  const auto liveText = readRemoteAuthorBuffer(span);
+  if (!liveText.empty()) {
+    return liveText;
+  }
   // Verified inside the resolver. Content that cannot be reached, or that does
   // not hash to what the reference named, comes back empty -- so a document
   // quoting a torrent nobody is seeding still opens, with the quotation blank
   // rather than with something invented in its place.
   return resolver.read(*which, span);
+}
+
+void Store::setExternalLiveBytes(const std::string_view authorScrollKey,
+                                 const std::uint64_t start,
+                                 const std::string_view text) {
+  if (authorScrollKey.empty() || text.empty()) {
+    return;
+  }
+  auto &chunks = remoteAuthorBuffers_[std::string(authorScrollKey)];
+  bool merged  = false;
+  for (auto &chunk : chunks) {
+    if (chunk.start + chunk.text.size() == start) {
+      chunk.text.append(text);
+      merged = true;
+      break;
+    }
+  }
+  if (!merged) {
+    chunks.push_back(
+        RemoteAuthorChunk{.start = start, .text = std::string(text)});
+  }
+}
+
+std::string Store::readRemoteAuthorBuffer(const PrimediaSpan &span) const {
+  if (span.scroll == 0) {
+    return {};
+  }
+  const auto *const which = scroll(span.scroll);
+  if (!which) {
+    return {};
+  }
+  const std::string key = "btpk:" + which->publisher.hex() + ":" + which->salt;
+  const auto it         = remoteAuthorBuffers_.find(key);
+  if (it == remoteAuthorBuffers_.end()) {
+    return {};
+  }
+
+  const auto reqStart = span.start;
+  const auto reqEnd   = span.start + span.length;
+  for (const auto &chunk : it->second) {
+    const auto chunkStart = chunk.start;
+    const auto chunkEnd   = chunk.start + chunk.text.size();
+    if (reqStart >= chunkStart && reqEnd <= chunkEnd) {
+      const auto relOffset = reqStart - chunkStart;
+      return chunk.text.substr(static_cast<std::size_t>(relOffset),
+                               static_cast<std::size_t>(span.length));
+    }
+  }
+  return {};
+}
+
+void Store::clearRemoteAuthorBuffer(const std::string_view authorScrollKey) {
+  remoteAuthorBuffers_.erase(std::string(authorScrollKey));
 }
 
 MicroversionId Store::transcludeExternal(const MicroversionId &parent,
@@ -478,6 +536,9 @@ Store::applyRemoteLiveOp(const Op &op, const std::string_view primediaText,
     }
     const auto scrollId = addScroll(targetScroll);
     localOp.span.scroll = scrollId;
+    if (!primediaText.empty()) {
+      setExternalLiveBytes(authorScrollKey, localOp.span.start, primediaText);
+    }
   } else if (localOp.kind == OpKind::Insert && !primediaText.empty()) {
     const auto span = userPermascroll_->append(primediaText);
     localOp.span    = span;
