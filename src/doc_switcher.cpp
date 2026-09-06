@@ -38,8 +38,11 @@ constexpr std::uint32_t closeTextColour = 0x7E889BFFU; // Close button text
 
 std::string formatDocTitle(const std::string &rawName,
                            const std::size_t index) {
-  if (rawName.empty()) {
+  if (rawName.empty() || rawName == "0") {
     return "Doc " + std::to_string(index + 1);
+  }
+  if (rawName.starts_with("system://")) {
+    return "⚙ " + rawName;
   }
   std::filesystem::path p(rawName);
   return p.filename().string();
@@ -148,6 +151,17 @@ void DocumentSwitcher::drawFrame(FrameContext &ctx) {
     curX += tabW + 2.0F;
   }
 
+  // [+ New Document] button
+  constexpr float newButtonW = 28.0F;
+  if (curX + newButtonW <= width) {
+    const float tabH = barHeight - 2.0F;
+    const float tabY = barY + 2.0F;
+    canvas->setTag(render::tagKindOverlay, kNewDocTag);
+    canvas->addRect(curX, tabY, newButtonW, tabH, tabInactiveBg);
+    canvas->addText(ctx.state, curX + 9.0F, height - 7.0F, "+",
+                    tabTextInactive, tabInactiveBg);
+  }
+
   canvas->commit();
   canvas->draw(ctx.state, ortho);
 }
@@ -158,7 +172,14 @@ bool DocumentSwitcher::picked(const render::PickingResult &pick,
     return false;
   }
 
-  const auto rawTag   = pick.tag.clusterIndex;
+  const auto rawTag = pick.tag.clusterIndex;
+  if (rawTag == kNewDocTag) {
+    if (newDocHandler) {
+      newDocHandler();
+    }
+    return true;
+  }
+
   const auto docIndex = rawTag >> 1U;
   const bool isClose  = (rawTag & 1U) != 0U;
 
@@ -200,6 +221,13 @@ void DocumentSwitcher::describe(a11y::Builder &into) {
     node.actions         = a11y::bit(a11y::Action::Click);
     bar.children.push_back(into.id(tabNodeId));
   }
+
+  const auto newDocNodeId = 99U;
+  auto &newNode           = into.add(newDocNodeId, a11y::Role::Button);
+  newNode.label           = "New Document";
+  newNode.actions         = a11y::bit(a11y::Action::Click);
+  bar.children.push_back(into.id(newDocNodeId));
+
   into.contribute(into.id(barId));
 }
 

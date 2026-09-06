@@ -95,6 +95,18 @@ TEST_F(DocumentSwitcherTest, ignoresNonOverlayPicks) {
   EXPECT_FALSE(switcher->picked(pick, *state));
 }
 
+TEST_F(DocumentSwitcherTest, pickNewDocButtonTriggersHandler) {
+  bool newDocTriggered = false;
+  switcher->setNewDocHandler([&newDocTriggered] { newDocTriggered = true; });
+
+  render::PickingResult pick;
+  pick.tag.kind         = render::tagKindOverlay;
+  pick.tag.clusterIndex = DocumentSwitcher::kNewDocTag;
+
+  EXPECT_TRUE(switcher->picked(pick, *state));
+  EXPECT_TRUE(newDocTriggered);
+}
+
 class FloatingToolbar3DTest : public testing::Test {
 protected:
   std::unique_ptr<NiceMock<MockRenderDevice>> device;
