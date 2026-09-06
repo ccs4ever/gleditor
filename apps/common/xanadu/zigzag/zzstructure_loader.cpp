@@ -2,13 +2,14 @@
  * @file zzstructure_loader.cpp
  * @brief Implementation of ZigZag Slice YAML loader using rapidyaml.
  */
-#include "zzstructure_loader.hpp"
-#include "zzcore.hpp"
+#include "common/xanadu/zigzag/zzstructure_loader.hpp"
+#include "common/xanadu/zigzag/zzcore.hpp"
 
 #include <gleditor/mimetype.hpp>
 #include <ryml.hpp>
 #include <ryml_std.hpp>
 
+#include "common/yaml_helpers.hpp"
 #include <algorithm>
 #include <fstream>
 #include <iostream>
@@ -17,7 +18,6 @@
 #include <string>
 #include <string_view>
 #include <utility>
-#include <vector>
 
 namespace zigzag {
 
@@ -26,27 +26,14 @@ namespace {
 using zzcore::Diagnostics;
 using zzcore::ExplicitLink;
 
-void rymlErrorHandler(const c4::csubstr msg, const c4::yml::ErrorDataBasic &,
-                      void *) {
-  throw std::runtime_error(std::string{msg.str, msg.len});
-}
-
-struct RymlCallbackSetup {
-  RymlCallbackSetup() {
-    c4::yml::Callbacks cb;
-    cb.m_error_basic = rymlErrorHandler;
-    c4::yml::set_callbacks(cb);
-  }
-};
-
-const RymlCallbackSetup setupRymlCallbacks;
-
 std::unexpected<LoadError> fail(const LoadError::Kind kind, std::string message,
                                 std::string path) {
   return std::unexpected(LoadError{kind, std::move(message), std::move(path)});
 }
 
-std::string str(const c4::csubstr s) { return std::string{s.str, s.len}; }
+std::string str(const c4::csubstr s) {
+  return common::yaml::csubstrToString(s);
+}
 
 CellID readCellIdOrZero(const ryml::ConstNodeRef &node) {
   if (!node.readable() || !node.has_val()) {
@@ -379,6 +366,7 @@ buildDocument(const ryml::ConstNodeRef &root, const std::string &origin) {
 
 std::expected<ZzStructureDocument, LoadError>
 parseZzStructure(const std::string &yamlText, const std::string &originLabel) {
+  const common::yaml::ScopedCallbacks scoped;
   try {
     ryml::Tree tree = ryml::parse_in_arena(ryml::to_csubstr(yamlText));
     return buildDocument(tree.rootref(), originLabel);

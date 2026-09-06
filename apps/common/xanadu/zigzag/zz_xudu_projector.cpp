@@ -3,7 +3,7 @@
  * @brief Implementation of bidirectional projection and rasterization between
  *        Xudu (Xanadocs/Xanalinks) and Zigzag (Multidimensional cell space).
  */
-#include "zz_xudu_projector.hpp"
+#include "common/xanadu/zigzag/zz_xudu_projector.hpp"
 
 #include <algorithm>
 #include <ctime>
@@ -13,7 +13,7 @@
 #include <unordered_set>
 
 #include "common/xanadu/format.hpp"
-#include "zzcore.hpp"
+#include "common/xanadu/zigzag/zzcore.hpp"
 
 namespace zigzag {
 

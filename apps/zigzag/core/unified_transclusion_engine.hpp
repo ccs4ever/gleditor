@@ -18,13 +18,13 @@
 #include "common/xanadu/compact_op.hpp"
 #include "common/xanadu/microversion.hpp"
 #include "common/xanadu/store.hpp"
-#include "compact_zzcell.hpp"
+#include "common/xanadu/zigzag/compact_zzcell.hpp"
+#include "common/xanadu/zigzag/zzstructure.hpp"
 #include "gleditor/doc.hpp"
 #include "gleditor/glyphcache/cache.hpp"
-#include "gleditor/render/gl/stream_buffer.hpp"
+#include "gleditor/render/stream_buffer.hpp"
 #include "gleditor/text/font.hpp"
 #include "gleditor/text/layout.hpp"
-#include "zigzag/core/zzstructure.hpp"
 
 namespace zigzag {
 
@@ -158,11 +158,9 @@ public:
    *        StreamBufferGL ring buffer.
    * @return The offset in bytes inside the ring buffer.
    */
-  [[nodiscard]] std::size_t
-  stageIntoStreamBuffer(const RenderSliceRequest &req,
-                        const gleditor::text::FontFacePtr &font,
-                        gleditor::GlyphCache &glyphCache,
-                        render::gl::StreamBufferGL &streamBuffer);
+  [[nodiscard]] std::size_t stageIntoStreamBuffer(
+      const RenderSliceRequest &req, const gleditor::text::FontFacePtr &font,
+      gleditor::GlyphCache &glyphCache, render::IStreamBuffer &streamBuffer);
 
   /// How many shaped pages to keep. A staging pass visits the cells inside
   /// the request radius, so this only needs to outlast a couple of frames'

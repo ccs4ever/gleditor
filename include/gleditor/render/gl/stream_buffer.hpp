@@ -27,13 +27,11 @@
 #include <utility>
 
 #include <gleditor/render/gl/gl_api.hpp>
+#include <gleditor/render/stream_buffer.hpp>
 
 namespace render::gl {
 
-struct MappedChunk {
-  void *ptr{nullptr};
-  std::size_t offset{0};
-};
+using MappedChunk = render::MappedChunk;
 
 struct SyncSegment {
   GLsync sync{nullptr};
@@ -41,7 +39,7 @@ struct SyncSegment {
   std::size_t size{0};
 };
 
-class StreamBufferGL {
+class StreamBufferGL : public render::IStreamBuffer {
 public:
   StreamBufferGL(const GLApi &glApi, const GLenum target,
                  const std::size_t capacityBytes)
@@ -92,7 +90,7 @@ public:
 
   /// Allocate a mapped chunk of @p size bytes with alignment @p alignment.
   MappedChunk allocate(const std::size_t size,
-                       const std::size_t alignment = 64) {
+                       const std::size_t alignment = 64) override {
     if (0 == size) {
       return {nullptr, head};
     }
@@ -132,7 +130,8 @@ public:
   }
 
   /// Explicitly flush the mapped chunk range and insert a fence sync.
-  void flushAndUnmap(const std::size_t offset, const std::size_t size) {
+  void flushAndUnmap(const std::size_t offset,
+                     const std::size_t size) override {
     if (0 == size) {
       return;
     }
@@ -149,7 +148,7 @@ public:
   }
 
   /// Wait on all outstanding sync fences and release them.
-  void waitAll() {
+  void waitAll() override {
     for (auto &s : syncs) {
       if (nullptr != s.sync) {
         api.ClientWaitSync(s.sync, GL_SYNC_FLUSH_COMMANDS_BIT,
@@ -162,7 +161,9 @@ public:
 
   [[nodiscard]] GLuint id() const { return bufferId; }
   [[nodiscard]] GLenum target() const { return targetKind; }
-  [[nodiscard]] std::size_t capacityBytes() const { return capacity; }
+  [[nodiscard]] std::size_t capacityBytes() const noexcept override {
+    return capacity;
+  }
 
 private:
   /// Wait on any in-flight sync fence that intersects [reqOffset, reqOffset +

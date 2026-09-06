@@ -590,8 +590,7 @@ UnifiedTransclusionEngine::stageVisibleCells(
 
 std::size_t UnifiedTransclusionEngine::stageIntoStreamBuffer(
     const RenderSliceRequest &req, const gleditor::text::FontFacePtr &font,
-    gleditor::GlyphCache &glyphCache,
-    render::gl::StreamBufferGL &streamBuffer) {
+    gleditor::GlyphCache &glyphCache, render::IStreamBuffer &streamBuffer) {
   const auto batch = stageVisibleCells(req, font, glyphCache);
   if (batch.rows.empty()) {
     return 0;
