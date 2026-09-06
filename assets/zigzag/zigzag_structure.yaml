@@ -39,6 +39,16 @@ zzstructure:
       description: "Cross-references between detail cells"
       color: "#4f9de0"
       spacing: 2.0
+    d.schema:
+      label: "Schema"
+      description: "Document schema specification and structure definitions"
+      color: "#f5a623"
+      spacing: 2.0
+    d.notes:
+      label: "Notes"
+      description: "User annotations and customization notes"
+      color: "#9b51e0"
+      spacing: 2.0
 
   scene:
     background_color: "#0d0d12"
@@ -50,7 +60,7 @@ zzstructure:
     - id: 1
       text: "Introduction"
       type: chapter
-      dimensions: { d.1: 2, d.2: 9 }
+      dimensions: { d.1: 2, d.2: 9, d.schema: 100, d.notes: 200 }
 
     - id: 2
       text: "Chapter 1: Origins"
@@ -108,3 +118,11 @@ zzstructure:
     - id: 13
       type: preflet_meta
       text: "note: demonstration link"
+
+    - id: 100
+      type: schema_doc
+      text: "Schema and Purpose\n\nOutline Structure Slice\nPurpose:\nOrganizes document chapters into sequential reading order (d.1) and topical elaboration branches (d.2)."
+
+    - id: 200
+      type: user_notes
+      text: "Notes\n\nUser Document Notes:\nOutline drafted for Project Xanadu ZigZag demonstration."

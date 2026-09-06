@@ -77,6 +77,20 @@ def check_markdown_in_system_docs():
             if md_header_re.match(line):
                 violations.append(f"{p.relative_to(WORKSPACE_ROOT)}:{line_no} Format Invariant: Markdown header syntax detected in system document! Headers must be raw text with format links (bold, align-centre, font-scale).")
                 
+    # Also verify system slices in assets/zigzag
+    zigzag_system_slices = list((WORKSPACE_ROOT / "assets/zigzag").glob("system_*.yaml"))
+    for p in zigzag_system_slices:
+        content = p.read_text(encoding="utf-8", errors="ignore")
+        if "d.schema:" not in content:
+            violations.append(f"{p.relative_to(WORKSPACE_ROOT)} Missing required 'd.schema' dimension for system slice schema link.")
+        if "d.notes:" not in content:
+            violations.append(f"{p.relative_to(WORKSPACE_ROOT)} Missing required 'd.notes' dimension for system slice user notes link.")
+        cell_text_matches = re.findall(r'text:\s*"([^"]+)"', content)
+        for text in cell_text_matches:
+            for line in text.split(r'\n'):
+                if md_header_re.match(line):
+                    violations.append(f"{p.relative_to(WORKSPACE_ROOT)} Format Invariant: Markdown header syntax in cell text '{line}'! Headers must be raw text.")
+                    
     return violations
 
 def run_audit():

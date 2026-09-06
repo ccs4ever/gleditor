@@ -86,7 +86,21 @@ systemDocKindFromUri(const std::string_view uri) noexcept {
 }
 
 [[nodiscard]] std::string defaultSystemDocContent(SystemDocKind kind);
+[[nodiscard]] std::string defaultSystemDocSchema(SystemDocKind kind);
+[[nodiscard]] std::string defaultSystemDocNotes(SystemDocKind kind);
 [[nodiscard]] std::filesystem::path systemDocDirectory(SystemDocKind kind);
+
+[[nodiscard]] inline std::string_view
+extractConfigSection(const std::string_view docText) noexcept {
+  const auto pos = docText.find("Schema and Purpose");
+  if (pos != std::string_view::npos) {
+    return docText.substr(0, pos);
+  }
+  return docText;
+}
+
+class Store;
+void initializeSystemStore(Store &store, SystemDocKind kind);
 
 struct KeymapConfig {
   std::vector<std::pair<std::string, std::string>> bindings;

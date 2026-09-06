@@ -826,16 +826,9 @@ std::size_t Session::systemStoreIndex(const SystemDocKind kind) {
       sysStore->repointCurrentVersion(sysStore->latest());
     }
   } else {
-    // Fresh system store: insert default content
-    const std::string defaultContent = defaultSystemDocContent(kind);
-    const auto genesis = sysStore->insert(MicroversionId{}, 0, defaultContent);
-    sysStore->repointCurrentVersion(genesis);
-    sysStore->setVersionAnnotation(
-        genesis,
-        {.alias       = "default",
-         .description = "System default " + std::string(systemDocName(kind)),
-         .tag         = "system",
-         .timestamp   = ""});
+    // Fresh system store: initialize 3-page store with schema, notes, and
+    // format links
+    initializeSystemStore(*sysStore, kind);
     sysStore->save(dir.string());
   }
 

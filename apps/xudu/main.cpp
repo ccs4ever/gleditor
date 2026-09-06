@@ -3498,7 +3498,7 @@ int main(const int argc, char **argv) {
                     << ")\n";
           switch (kind) {
           case xudu::SystemDocKind::Keymap: {
-            app.commands().rebindFromText(content);
+            app.commands().rebindFromText(xudu::extractConfigSection(content));
             break;
           }
           case xudu::SystemDocKind::Settings: {
@@ -3530,8 +3530,8 @@ int main(const int argc, char **argv) {
       const auto kmIdx = session->systemStoreIndex(xudu::SystemDocKind::Keymap);
       const auto &kmStore = session->store(kmIdx);
       if (kmStore.opCount() > 0) {
-        app.commands().rebindFromText(
-            kmStore.textOf(kmStore.primaryCurrentVersion()));
+        app.commands().rebindFromText(xudu::extractConfigSection(
+            kmStore.textOf(kmStore.primaryCurrentVersion())));
       }
       const auto uiIdx    = session->systemStoreIndex(xudu::SystemDocKind::UI);
       const auto &uiStore = session->store(uiIdx);

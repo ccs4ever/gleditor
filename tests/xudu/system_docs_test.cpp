@@ -13,6 +13,7 @@
 #include <string>
 #include <vector>
 
+#include <xudu/core/format.hpp>
 #include <xudu/core/ops.hpp>
 #include <xudu/core/provenance.hpp>
 #include <xudu/core/publication.hpp>
@@ -24,10 +25,12 @@
 
 namespace {
 
+using xudu::FormatAttribute;
 using xudu::HoleReason;
 using xudu::InfoHash;
 using xudu::KeymapConfig;
 using xudu::LayoutConfig;
+using xudu::LinkType;
 using xudu::PouchDock;
 using xudu::PublishedHoleRecord;
 using xudu::Scroll;
@@ -216,6 +219,102 @@ TEST(SystemDocsTest, ParseUIConfig) {
   EXPECT_FALSE(def.hypertimeMapVisible);
   EXPECT_FLOAT_EQ(def.radialMenu.radius, 130.0F);
   EXPECT_FLOAT_EQ(def.radialMenu.innerRadius, 42.0F);
+}
+
+TEST(SystemDocsTest, SchemaAndNotesNonEmptyAndNoMarkdown) {
+  for (const auto kind :
+       {SystemDocKind::Keymap, SystemDocKind::Settings, SystemDocKind::Layout,
+        SystemDocKind::UI, SystemDocKind::Pouches}) {
+    const std::string schema = xudu::defaultSystemDocSchema(kind);
+    EXPECT_FALSE(schema.empty());
+    EXPECT_TRUE(schema.starts_with("Schema and Purpose"));
+    EXPECT_EQ(schema.find('#'), std::string::npos);
+    EXPECT_EQ(schema.find("**"), std::string::npos);
+
+    const std::string notes = xudu::defaultSystemDocNotes(kind);
+    EXPECT_FALSE(notes.empty());
+    EXPECT_TRUE(notes.starts_with("Notes"));
+    EXPECT_EQ(notes.find('#'), std::string::npos);
+    EXPECT_EQ(notes.find("**"), std::string::npos);
+  }
+}
+
+TEST(SystemDocsTest, InitializeSystemStoreStructureAndFormatLinks) {
+  for (const auto kind :
+       {SystemDocKind::Keymap, SystemDocKind::Settings, SystemDocKind::Layout,
+        SystemDocKind::UI, SystemDocKind::Pouches}) {
+    Store store;
+    store.setSystem(true);
+    xudu::initializeSystemStore(store, kind);
+
+    // Single author-designated head
+    EXPECT_EQ(store.currentVersions().size(), 1U);
+    EXPECT_EQ(store.primaryCurrentVersion(), store.latest());
+    EXPECT_EQ(store.displayName(store.latest()), "default");
+
+    // 3 pages => exactly 2 forced page breaks
+    const auto doc = store.rebuild(store.latest());
+    EXPECT_EQ(doc.forcedBreaks().size(), 2U);
+
+    // Format links on headers
+    bool foundBold           = false;
+    bool foundCentre         = false;
+    std::size_t commentCount = 0;
+    for (const auto &[id, link] : store.links()) {
+      if (link.type == LinkType::Format) {
+        if (const auto attr = store.formatAttributeOf(link)) {
+          if (*attr == FormatAttribute::Bold) {
+            foundBold = true;
+          } else if (*attr == FormatAttribute::AlignCentre) {
+            foundCentre = true;
+          }
+        }
+      } else if (link.type == LinkType::Comment) {
+        commentCount++;
+      }
+    }
+    EXPECT_TRUE(foundBold);
+    EXPECT_TRUE(foundCentre);
+    // Two butterfly links: config->schema and config->notes
+    EXPECT_EQ(commentCount, 2U);
+
+    // Full doc text contains schema and notes headers
+    const std::string fullText = store.textOf(store.latest());
+    EXPECT_NE(fullText.find("Schema and Purpose"), std::string::npos);
+    EXPECT_NE(fullText.find("Notes"), std::string::npos);
+
+    // ExtractConfigSection isolates Page 1
+    const auto configPart = xudu::extractConfigSection(fullText);
+    EXPECT_EQ(configPart.find("Schema and Purpose"), std::string_view::npos);
+    EXPECT_EQ(configPart.find("Notes\n\n"), std::string_view::npos);
+    EXPECT_EQ(configPart, xudu::defaultSystemDocContent(kind));
+  }
+}
+
+TEST(SystemDocsTest, ParseFullInitializedSystemDocs) {
+  Store kmStore;
+  xudu::initializeSystemStore(kmStore, SystemDocKind::Keymap);
+  const auto kmCfg = xudu::parseKeymapConfig(kmStore.textOf(kmStore.latest()));
+  EXPECT_FALSE(kmCfg.bindings.empty());
+  EXPECT_EQ(kmCfg.bindingFor("new-doc"), "Ctrl+N");
+
+  Store setStore;
+  xudu::initializeSystemStore(setStore, SystemDocKind::Settings);
+  const auto setCfg =
+      xudu::parseSettingsConfig(setStore.textOf(setStore.latest()));
+  EXPECT_FLOAT_EQ(setCfg.fontSize, 16.0F);
+
+  Store loStore;
+  xudu::initializeSystemStore(loStore, SystemDocKind::Layout);
+  const auto loCfg = xudu::parseLayoutConfig(loStore.textOf(loStore.latest()));
+  EXPECT_EQ(loCfg.columns, 2U);
+  EXPECT_FLOAT_EQ(loCfg.pageWidthPx, 800.0F);
+
+  Store uiStore;
+  xudu::initializeSystemStore(uiStore, SystemDocKind::UI);
+  const auto uiCfg = xudu::parseUIConfig(uiStore.textOf(uiStore.latest()));
+  EXPECT_TRUE(uiCfg.tabBarVisible);
+  EXPECT_FLOAT_EQ(uiCfg.radialMenu.radius, 130.0F);
 }
 
 TEST(SystemDocsTest, UserPermascrollWithheldSpanSealing) {

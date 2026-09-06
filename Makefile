@@ -518,6 +518,7 @@ LIB_SRCS_C :=
 ifeq ($(HAVE_DECODE_INDEX_ZSTD),1)
 LIB_SRCS_C += $(ZSTD_SEEKABLE_SRCS)
 endif
+GLEDITOR_SRCS  := $(shell find apps/gleditor -name '*.cpp' 2>/dev/null)
 # The xanalogical engine and common data models are shared between xudu and zigzag
 # under apps/common/xanadu/.
 COMMON_XANADU_SRCS := $(shell find apps/common/xanadu -name '*.cpp' 2>/dev/null)

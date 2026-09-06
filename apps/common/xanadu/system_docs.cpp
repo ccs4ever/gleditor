@@ -14,15 +14,17 @@
 #include <ryml_std.hpp>
 
 #include "common/xanadu/config.hpp"
+#include "common/xanadu/format.hpp"
+#include "common/xanadu/ops.hpp"
+#include "common/xanadu/store.hpp"
+#include "common/xanadu/version.hpp"
 
 namespace xanadu {
 
 std::string defaultSystemDocContent(const SystemDocKind kind) {
   switch (kind) {
   case SystemDocKind::Keymap:
-    return "# Xudu System Keymap\n"
-           "# Key bindings and hotkeys\n"
-           "new-doc: \"Ctrl+N\"\n"
+    return "new-doc: \"Ctrl+N\"\n"
            "open-doc: \"Ctrl+O\"\n"
            "close-doc: \"Ctrl+W\"\n"
            "forward: \"Ctrl+Shift+N\"\n"
@@ -31,22 +33,19 @@ std::string defaultSystemDocContent(const SystemDocKind kind) {
            "hypertime-map: \"Ctrl+H\"\n"
            "radial-menu: \"Ctrl+M\"\n";
   case SystemDocKind::Settings:
-    return "# Xudu System Settings\n"
-           "fontSize: \"16\"\n"
+    return "fontSize: \"16\"\n"
            "fontFamily: \"Monospace\"\n"
            "lineHeight: \"1.4\"\n"
            "autoSaveSeconds: \"5\"\n"
            "theme: \"system\"\n";
   case SystemDocKind::Layout:
-    return "# Xudu System Layout\n"
-           "columns: \"2\"\n"
+    return "columns: \"2\"\n"
            "pageWidthPx: \"800\"\n"
            "pageHeightPx: \"1000\"\n"
            "transclusionPrisms: \"true\"\n"
            "xanalinkRibbons: \"true\"\n";
   case SystemDocKind::UI:
-    return "# Xudu System UI Configuration\n"
-           "notificationPosition: \"top-right\"\n"
+    return "notificationPosition: \"top-right\"\n"
            "notificationDurationMs: \"3000\"\n"
            "tabBarVisible: \"true\"\n"
            "statusBarVisible: \"true\"\n"
@@ -96,9 +95,7 @@ std::string defaultSystemDocContent(const SystemDocKind kind) {
            "      label: \"Author\"\n"
            "      icon: \"@\"\n";
   case SystemDocKind::Pouches:
-    return "# Xudu System Pouches\n"
-           "# Drop zones for ghost spanables\n"
-           "zone:\n"
+    return "zone:\n"
            "  - \"To Link\"\n"
            "  - \"Notes for Later\"\n"
            "  - \"Scratch\"\n";
@@ -106,6 +103,242 @@ std::string defaultSystemDocContent(const SystemDocKind kind) {
     return "";
   }
   return "";
+}
+
+std::string defaultSystemDocSchema(const SystemDocKind kind) {
+  switch (kind) {
+  case SystemDocKind::Keymap:
+    return "Schema and Purpose\n\n"
+           "Purpose:\n"
+           "The sovereign Keymap system xanadoc manages interactive keyboard "
+           "shortcuts and hotkey bindings across Xudu sessions. Each entry "
+           "maps an application action identifier to a key combination "
+           "string.\n\n"
+           "Schema:\n"
+           "new-doc: Action shortcut to create a new sovereign document. "
+           "Default is Ctrl+N.\n"
+           "open-doc: Action shortcut to open an existing xanadoc from "
+           "storage. Default is Ctrl+O.\n"
+           "close-doc: Action shortcut to close the active document. Default "
+           "is Ctrl+W.\n"
+           "forward: Action shortcut to advance document head. Default is "
+           "Ctrl+Shift+N.\n"
+           "scrub-forward: Action shortcut to scrub forward along hypertime "
+           "branch. Default is Ctrl+].\n"
+           "scrub-backward: Action shortcut to scrub backward along hypertime "
+           "branch. Default is Ctrl+[.\n"
+           "hypertime-map: Action shortcut to toggle visual hypertime tree "
+           "display. Default is Ctrl+H.\n"
+           "radial-menu: Action shortcut to open context-sensitive radial "
+           "menu. Default is Ctrl+M.\n";
+  case SystemDocKind::Settings:
+    return "Schema and Purpose\n\n"
+           "Purpose:\n"
+           "The sovereign Settings system xanadoc controls global text layout "
+           "metrics, typography parameters, visual themes, and automatic "
+           "persistence intervals.\n\n"
+           "Schema:\n"
+           "fontSize: Base font size in device-independent points (pt). "
+           "Default is 16.\n"
+           "fontFamily: Font family name resolved via Fontconfig. Default is "
+           "Monospace.\n"
+           "lineHeight: Proportional line spacing multiplier relative to font "
+           "height. Default is 1.4.\n"
+           "autoSaveSeconds: Inactivity interval in seconds before changes are "
+           "committed. Default is 5.\n"
+           "theme: Color scheme palette identifier (system, light, dark). "
+           "Default is system.\n";
+  case SystemDocKind::Layout:
+    return "Schema and Purpose\n\n"
+           "Purpose:\n"
+           "The sovereign Layout system xanadoc defines multi-column page "
+           "dimensions, notification toast anchors, pouch dock orientation, "
+           "and optic ribbon rendering flags.\n\n"
+           "Schema:\n"
+           "columns: Number of parallel document columns displayed "
+           "simultaneously. Default is 2.\n"
+           "pageWidthPx: Logical page rendering width in pixels. Default is "
+           "800.\n"
+           "pageHeightPx: Logical page rendering height in pixels. Default is "
+           "1000.\n"
+           "toastAnchor: Notification anchor position (top-right, top-left, "
+           "bottom-right, bottom-left, top-center). Default is top-right.\n"
+           "toastOffsetX: Horizontal offset in pixels for toast notification "
+           "window. Default is 24.\n"
+           "toastOffsetY: Vertical offset in pixels for toast notification "
+           "window. Default is 48.\n"
+           "pouchDock: Edge alignment for span drop pouches (left or right). "
+           "Default is right.\n"
+           "documentSpacingX: Horizontal gap between parallel document columns "
+           "in pixels. Default is 70.\n"
+           "transclusionPrisms: Enable Identity Gold volumetric prisms for "
+           "transcluded spans. Default is true.\n"
+           "xanalinkRibbons: Enable cyan and magenta 3D optical link ribbons. "
+           "Default is true.\n";
+  case SystemDocKind::UI:
+    return "Schema and Purpose\n\n"
+           "Purpose:\n"
+           "The sovereign UI system xanadoc configures visibility of chrome "
+           "bars, status indicators, hypertime navigation overlays, and "
+           "interactive radial action wheels.\n\n"
+           "Schema:\n"
+           "notificationPosition: Screen location for system notifications. "
+           "Default is top-right.\n"
+           "notificationDurationMs: Duration in milliseconds before "
+           "notifications dismiss. Default is 3000.\n"
+           "tabBarVisible: Flag indicating whether top document tab bar is "
+           "visible. Default is true.\n"
+           "statusBarVisible: Flag indicating whether bottom status bar is "
+           "visible. Default is true.\n"
+           "hypertimeMapVisible: Flag indicating whether hypertime graph "
+           "overlay is open. Default is false.\n"
+           "radialMenu: Nested configuration dictionary defining action items, "
+           "icons, and radial radius.\n";
+  case SystemDocKind::Pouches:
+    return "Schema and Purpose\n\n"
+           "Purpose:\n"
+           "The sovereign Pouches system xanadoc specifies persistent staging "
+           "zones for ghost spanables, link targets, and scratchpad passages "
+           "awaiting hyperlinking.\n\n"
+           "Schema:\n"
+           "zone: List of named staging pouches available in the UI for "
+           "dragging and collecting spans. Default zones are To Link, Notes "
+           "for Later, and Scratch.\n";
+  case SystemDocKind::Count:
+    return "";
+  }
+  return "";
+}
+
+std::string defaultSystemDocNotes(const SystemDocKind kind) {
+  switch (kind) {
+  case SystemDocKind::Keymap:
+    return "Notes\n\n"
+           "User Annotations and Customization Record:\n"
+           "This page is reserved for author notes, keybinding rationale, and "
+           "custom shortcut modifications.\n";
+  case SystemDocKind::Settings:
+    return "Notes\n\n"
+           "User Annotations and Customization Record:\n"
+           "This page is reserved for author notes, typographic preferences, "
+           "and display calibration details.\n";
+  case SystemDocKind::Layout:
+    return "Notes\n\n"
+           "User Annotations and Customization Record:\n"
+           "This page is reserved for author notes, screen dimension notes, "
+           "and optical rendering customizations.\n";
+  case SystemDocKind::UI:
+    return "Notes\n\n"
+           "User Annotations and Customization Record:\n"
+           "This page is reserved for author notes, workflow preferences, and "
+           "custom radial action mappings.\n";
+  case SystemDocKind::Pouches:
+    return "Notes\n\n"
+           "User Annotations and Customization Record:\n"
+           "This page is reserved for author notes, research taxonomy, and "
+           "span drop zone organization notes.\n";
+  case SystemDocKind::Count:
+    return "";
+  }
+  return "";
+}
+
+void initializeSystemStore(Store &store, const SystemDocKind kind) {
+  const std::string p1 = defaultSystemDocContent(kind);
+  const std::string p2 = defaultSystemDocSchema(kind);
+  const std::string p3 = defaultSystemDocNotes(kind);
+
+  MicroversionId cur{};
+  cur = store.insert(cur, 0, p1);
+
+  const auto p1Size = static_cast<std::uint32_t>(p1.size());
+  cur               = store.insertBreak(cur, p1Size);
+  cur               = store.insert(cur, p1Size, p2);
+
+  const auto p12Size = static_cast<std::uint32_t>(p1Size + p2.size());
+  cur                = store.insertBreak(cur, p12Size);
+  cur                = store.insert(cur, p12Size, p3);
+
+  const Version doc = store.rebuild(cur);
+
+  // Format links for Page 2 header: "Schema and Purpose" (centered and bold)
+  constexpr std::string_view schemaHeader = "Schema and Purpose";
+  const auto schemaHeaderSpans =
+      doc.spansFor(p1Size, static_cast<std::uint32_t>(schemaHeader.size()));
+  if (!schemaHeaderSpans.empty()) {
+    Link boldLink;
+    boldLink.type  = LinkType::Format;
+    boldLink.tier  = ProminenceTier::Author;
+    boldLink.owner = "system";
+    boldLink.left  = schemaHeaderSpans;
+    boldLink.right = {vocabularySpanFor(FormatAttribute::Bold)};
+    cur            = store.addLink(cur, std::move(boldLink));
+
+    Link centreLink;
+    centreLink.type  = LinkType::Format;
+    centreLink.tier  = ProminenceTier::Author;
+    centreLink.owner = "system";
+    centreLink.left  = schemaHeaderSpans;
+    centreLink.right = {vocabularySpanFor(FormatAttribute::AlignCentre)};
+    cur              = store.addLink(cur, std::move(centreLink));
+  }
+
+  // Format links for Page 3 header: "Notes" (centered and bold)
+  constexpr std::string_view notesHeader = "Notes";
+  const auto notesHeaderSpans =
+      doc.spansFor(p12Size, static_cast<std::uint32_t>(notesHeader.size()));
+  if (!notesHeaderSpans.empty()) {
+    Link boldLink;
+    boldLink.type  = LinkType::Format;
+    boldLink.tier  = ProminenceTier::Author;
+    boldLink.owner = "system";
+    boldLink.left  = notesHeaderSpans;
+    boldLink.right = {vocabularySpanFor(FormatAttribute::Bold)};
+    cur            = store.addLink(cur, std::move(boldLink));
+
+    Link centreLink;
+    centreLink.type  = LinkType::Format;
+    centreLink.tier  = ProminenceTier::Author;
+    centreLink.owner = "system";
+    centreLink.left  = notesHeaderSpans;
+    centreLink.right = {vocabularySpanFor(FormatAttribute::AlignCentre)};
+    cur              = store.addLink(cur, std::move(centreLink));
+  }
+
+  // Butterfly links connecting config (Page 1) to Schema (Page 2) and Notes
+  // (Page 3)
+  const auto p1Spans = doc.spansFor(0, p1Size);
+  const auto p2Spans =
+      doc.spansFor(p1Size, static_cast<std::uint32_t>(p2.size()));
+  const auto p3Spans =
+      doc.spansFor(p12Size, static_cast<std::uint32_t>(p3.size()));
+
+  if (!p1Spans.empty() && !p2Spans.empty()) {
+    Link schemaLink;
+    schemaLink.type  = LinkType::Comment;
+    schemaLink.tier  = ProminenceTier::Author;
+    schemaLink.owner = "system";
+    schemaLink.left  = p1Spans;
+    schemaLink.right = p2Spans;
+    cur              = store.addLink(cur, std::move(schemaLink));
+  }
+
+  if (!p1Spans.empty() && !p3Spans.empty()) {
+    Link notesLink;
+    notesLink.type  = LinkType::Comment;
+    notesLink.tier  = ProminenceTier::Author;
+    notesLink.owner = "system";
+    notesLink.left  = p1Spans;
+    notesLink.right = p3Spans;
+    cur             = store.addLink(cur, std::move(notesLink));
+  }
+
+  store.repointCurrentVersion(cur);
+  store.setVersionAnnotation(
+      cur, {.alias       = "default",
+            .description = "System default " + std::string(systemDocName(kind)),
+            .tag         = "system",
+            .timestamp   = ""});
 }
 
 std::filesystem::path systemDocDirectory(const SystemDocKind kind) {
@@ -262,14 +495,15 @@ gleditor::RadialConfig parseRadialConfig(const std::string_view yamlText) {
       makeAction("info:author", "Author", "@", "info:author"),
   };
 
-  if (yamlText.empty()) {
+  const auto effectiveYaml = extractConfigSection(yamlText);
+  if (effectiveYaml.empty()) {
     return cfg;
   }
 
   const ScopedRadialCallbacks scoped;
   try {
-    const c4::yml::Tree tree =
-        c4::yml::parse_in_arena(c4::csubstr{yamlText.data(), yamlText.size()});
+    const c4::yml::Tree tree = c4::yml::parse_in_arena(
+        c4::csubstr{effectiveYaml.data(), effectiveYaml.size()});
     if (tree.empty()) {
       return cfg;
     }
@@ -380,15 +614,16 @@ gleditor::RadialConfig parseRadialConfig(const std::string_view yamlText) {
 }
 
 KeymapConfig parseKeymapConfig(const std::string_view yamlText) {
+  const auto effectiveYaml = extractConfigSection(yamlText);
   KeymapConfig cfg;
-  if (yamlText.empty()) {
+  if (effectiveYaml.empty()) {
     return cfg;
   }
 
   const ScopedRadialCallbacks scoped;
   try {
-    const c4::yml::Tree tree =
-        c4::yml::parse_in_arena(c4::csubstr{yamlText.data(), yamlText.size()});
+    const c4::yml::Tree tree = c4::yml::parse_in_arena(
+        c4::csubstr{effectiveYaml.data(), effectiveYaml.size()});
     if (!tree.empty()) {
       const auto root = tree.rootref();
       if (root.is_map()) {
@@ -409,13 +644,14 @@ KeymapConfig parseKeymapConfig(const std::string_view yamlText) {
     // Fall back to line-based parsing
   }
 
-  cfg.bindings = parseKeyValueLines(yamlText);
+  cfg.bindings = parseKeyValueLines(effectiveYaml);
   return cfg;
 }
 
 SettingsConfig parseSettingsConfig(const std::string_view yamlText) {
+  const auto effectiveYaml = extractConfigSection(yamlText);
   SettingsConfig cfg;
-  if (yamlText.empty()) {
+  if (effectiveYaml.empty()) {
     return cfg;
   }
 
@@ -435,8 +671,8 @@ SettingsConfig parseSettingsConfig(const std::string_view yamlText) {
 
   const ScopedRadialCallbacks scoped;
   try {
-    const c4::yml::Tree tree =
-        c4::yml::parse_in_arena(c4::csubstr{yamlText.data(), yamlText.size()});
+    const c4::yml::Tree tree = c4::yml::parse_in_arena(
+        c4::csubstr{effectiveYaml.data(), effectiveYaml.size()});
     if (!tree.empty()) {
       const auto root = tree.rootref();
       if (root.is_map()) {
@@ -454,15 +690,16 @@ SettingsConfig parseSettingsConfig(const std::string_view yamlText) {
     // Fall back to line-based parsing
   }
 
-  for (const auto &[k, v] : parseKeyValueLines(yamlText)) {
+  for (const auto &[k, v] : parseKeyValueLines(effectiveYaml)) {
     applyKv(k, v);
   }
   return cfg;
 }
 
 LayoutConfig parseLayoutConfig(const std::string_view yamlText) {
+  const auto effectiveYaml = extractConfigSection(yamlText);
   LayoutConfig cfg;
-  if (yamlText.empty()) {
+  if (effectiveYaml.empty()) {
     return cfg;
   }
 
@@ -508,8 +745,8 @@ LayoutConfig parseLayoutConfig(const std::string_view yamlText) {
 
   const ScopedRadialCallbacks scoped;
   try {
-    const c4::yml::Tree tree =
-        c4::yml::parse_in_arena(c4::csubstr{yamlText.data(), yamlText.size()});
+    const c4::yml::Tree tree = c4::yml::parse_in_arena(
+        c4::csubstr{effectiveYaml.data(), effectiveYaml.size()});
     if (!tree.empty()) {
       const auto root = tree.rootref();
       if (root.is_map()) {
@@ -527,16 +764,17 @@ LayoutConfig parseLayoutConfig(const std::string_view yamlText) {
     // Fall back to line-based parsing
   }
 
-  for (const auto &[k, v] : parseKeyValueLines(yamlText)) {
+  for (const auto &[k, v] : parseKeyValueLines(effectiveYaml)) {
     applyKv(k, v);
   }
   return cfg;
 }
 
 UIConfig parseUIConfig(const std::string_view yamlText) {
+  const auto effectiveYaml = extractConfigSection(yamlText);
   UIConfig cfg;
-  cfg.radialMenu = parseRadialConfig(yamlText);
-  if (yamlText.empty()) {
+  cfg.radialMenu = parseRadialConfig(effectiveYaml);
+  if (effectiveYaml.empty()) {
     return cfg;
   }
 
@@ -552,8 +790,8 @@ UIConfig parseUIConfig(const std::string_view yamlText) {
 
   const ScopedRadialCallbacks scoped;
   try {
-    const c4::yml::Tree tree =
-        c4::yml::parse_in_arena(c4::csubstr{yamlText.data(), yamlText.size()});
+    const c4::yml::Tree tree = c4::yml::parse_in_arena(
+        c4::csubstr{effectiveYaml.data(), effectiveYaml.size()});
     if (!tree.empty()) {
       const auto root = tree.rootref();
       if (root.is_map()) {
@@ -571,7 +809,7 @@ UIConfig parseUIConfig(const std::string_view yamlText) {
     // Fall back to line-based parsing
   }
 
-  for (const auto &[k, v] : parseKeyValueLines(yamlText)) {
+  for (const auto &[k, v] : parseKeyValueLines(effectiveYaml)) {
     applyKv(k, v);
   }
   return cfg;
