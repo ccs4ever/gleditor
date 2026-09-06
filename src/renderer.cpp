@@ -401,10 +401,11 @@ bool Renderer::update(RenderState &state, const bool settled) {
     } else if (this->state->clickPending.exchange(false)) {
       // A click takes priority over the hover query: only one read is issued
       // per frame, and the click is the one somebody is waiting on.
-      const auto clickX = this->state->clickX.load();
-      const auto clickY = this->state->clickY.load();
-      awaitingClick     = std::pair{clickX, clickY};
-      awaitingDrag      = false;
+      const auto clickX   = this->state->clickX.load();
+      const auto clickY   = this->state->clickY.load();
+      awaitingClick       = std::pair{clickX, clickY};
+      awaitingClickButton = this->state->clickButton.load();
+      awaitingDrag        = false;
       device->requestPickingTag(clickX, clickY);
     } else if (!this->state->scriptReportsPicks()) {
       device->requestPickingTag(this->state->mouseX, this->state->mouseY);
@@ -554,7 +555,9 @@ void Renderer::collectPickingResults(RenderState &state) {
     if (awaitingClick && awaitingClick->first == pick->x &&
         awaitingClick->second == pick->y) {
       awaitingClick.reset();
-      placeCaretFromPick(state, *pick);
+      auto pickWithButton   = *pick;
+      pickWithButton.button = awaitingClickButton;
+      placeCaretFromPick(state, pickWithButton);
       if (awaitingStep) {
         // The step that asked for this answer is done; the next one may go.
         awaitingStep = false;
@@ -865,9 +868,10 @@ void Renderer::renderLoop(AutoSDLWindow &window) {
   }
 
   RenderState state(device.get());
-  toasts = std::make_unique<ToastOverlay>(device.get(),
-                                          std::string(defaultFontName()));
-  caret  = std::make_unique<Caret>(device.get());
+  toasts      = std::make_unique<ToastOverlay>(device.get(),
+                                               std::string(defaultFontName()));
+  caret       = std::make_unique<Caret>(device.get());
+  state.caret = caret.get();
 
   // What the library itself has to say about what is on screen. Registered
   // here rather than earlier because the overlay is one of them and it does

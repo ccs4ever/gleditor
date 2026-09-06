@@ -22,6 +22,14 @@ const char *formatAttributeName(const FormatAttribute attribute) {
     return "superscript";
   case FormatAttribute::Subscript:
     return "subscript";
+  case FormatAttribute::AlignLeft:
+    return "align-left";
+  case FormatAttribute::AlignCentre:
+    return "align-centre";
+  case FormatAttribute::AlignRight:
+    return "align-right";
+  case FormatAttribute::AlignJustify:
+    return "align-justify";
   }
   return "italic";
 }
@@ -89,6 +97,59 @@ formatAttributeFromDecoration(const gleditor::Decoration decoration) {
     return FormatAttribute::Subscript;
   }
   return std::nullopt;
+}
+
+std::optional<FormatAttribute>
+formatAttributeFromTextAlign(const gleditor::TextAlign align) {
+  switch (align) {
+  case gleditor::TextAlign::Left:
+    return FormatAttribute::AlignLeft;
+  case gleditor::TextAlign::Centre:
+    return FormatAttribute::AlignCentre;
+  case gleditor::TextAlign::Right:
+    return FormatAttribute::AlignRight;
+  case gleditor::TextAlign::Justify:
+    return FormatAttribute::AlignJustify;
+  }
+  return std::nullopt;
+}
+
+std::optional<gleditor::TextAlign>
+textAlignFromFormatAttribute(const FormatAttribute attribute) {
+  switch (attribute) {
+  case FormatAttribute::AlignLeft:
+    return gleditor::TextAlign::Left;
+  case FormatAttribute::AlignCentre:
+    return gleditor::TextAlign::Centre;
+  case FormatAttribute::AlignRight:
+    return gleditor::TextAlign::Right;
+  case FormatAttribute::AlignJustify:
+    return gleditor::TextAlign::Justify;
+  default:
+    return std::nullopt;
+  }
+}
+
+std::optional<gleditor::Decoration>
+decorationFromFormatAttribute(const FormatAttribute attribute) {
+  switch (attribute) {
+  case FormatAttribute::Bold:
+    return gleditor::Decoration::Bold;
+  case FormatAttribute::Italic:
+    return gleditor::Decoration::Italic;
+  case FormatAttribute::Underline:
+    return gleditor::Decoration::Underline;
+  case FormatAttribute::Overline:
+    return gleditor::Decoration::Overline;
+  case FormatAttribute::Strikethrough:
+    return gleditor::Decoration::Strikethrough;
+  case FormatAttribute::Superscript:
+    return gleditor::Decoration::Superscript;
+  case FormatAttribute::Subscript:
+    return gleditor::Decoration::Subscript;
+  default:
+    return std::nullopt;
+  }
 }
 
 } // namespace xudu

@@ -839,13 +839,21 @@ PageShaping TextLayout::layoutPage(std::string_view text,
           .charCount  = static_cast<uint32_t>(countUtf8Chars(clusterStr)),
       });
 
+      const auto decorations = decorationsAt(byteOff, options.decoratedRanges);
+      float yShift           = 0.0F;
+      if (hasDecoration(decorations, Decoration::Superscript)) {
+        yShift = -ascent * 0.35F;
+      } else if (hasDecoration(decorations, Decoration::Subscript)) {
+        yShift = lineHeight * 0.2F;
+      }
+
       shaping.glyphs.push_back(PageShaping::GlyphEntry{
           .chr          = std::string{clusterStr},
           .clusterLeft  = line.left + penX + g.xOffset,
-          .clusterTop   = line.top,
+          .clusterTop   = line.top + yShift,
           .clusterIndex = clusterBoxIdx,
           .lineIndex    = lineIdx,
-          .decorations  = decorationsAt(byteOff, options.decoratedRanges),
+          .decorations  = decorations,
       });
 
       // A justified line's own inter-word spaces carry the slack that

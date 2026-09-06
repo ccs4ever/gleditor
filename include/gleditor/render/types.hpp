@@ -394,6 +394,7 @@ struct PickingResult {
   int x{};
   int y{};
   PickingTag tag;
+  std::uint8_t button{1};
 };
 
 /**

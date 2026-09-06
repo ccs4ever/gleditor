@@ -11,6 +11,8 @@
 #include <string>
 #include <string_view>
 
+#include <gleditor/radial_menu.hpp>
+
 namespace xudu {
 
 /**
@@ -85,6 +87,9 @@ systemDocKindFromUri(const std::string_view uri) noexcept {
 
 [[nodiscard]] std::string defaultSystemDocContent(SystemDocKind kind);
 [[nodiscard]] std::filesystem::path systemDocDirectory(SystemDocKind kind);
+
+[[nodiscard]] gleditor::RadialConfig
+parseRadialConfig(std::string_view yamlText);
 
 } // namespace xudu
 

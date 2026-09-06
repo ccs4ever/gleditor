@@ -36,6 +36,7 @@
 #include <string>
 
 #include <gleditor/glyphcache/types.hpp>
+#include <gleditor/layout_box.hpp>
 
 #include "spool.hpp"
 
@@ -67,16 +68,22 @@ enum class FormatAttribute : std::uint8_t {
   Strikethrough,
   Superscript,
   Subscript,
+  AlignLeft,
+  AlignCentre,
+  AlignRight,
+  AlignJustify,
 };
 
 /// Every attribute, in the declaration order vocabularySpanFor() lays their
 /// words out in. The one place that order is spelled out, so nothing else
 /// has to repeat it.
-inline constexpr std::array<FormatAttribute, 7> allFormatAttributes{
+inline constexpr std::array<FormatAttribute, 11> allFormatAttributes{
     FormatAttribute::Italic,        FormatAttribute::Bold,
     FormatAttribute::Underline,     FormatAttribute::Overline,
     FormatAttribute::Strikethrough, FormatAttribute::Superscript,
-    FormatAttribute::Subscript,
+    FormatAttribute::Subscript,     FormatAttribute::AlignLeft,
+    FormatAttribute::AlignCentre,   FormatAttribute::AlignRight,
+    FormatAttribute::AlignJustify,
 };
 
 /// The vocabulary text an attribute is named as. See allFormatAttributes and
@@ -119,6 +126,26 @@ readVocabulary(const PrimediaSpan &span);
  */
 [[nodiscard]] std::optional<FormatAttribute>
 formatAttributeFromDecoration(gleditor::Decoration decoration);
+
+/**
+ * @brief The FormatAttribute @p align names, or nullopt if none does.
+ */
+[[nodiscard]] std::optional<FormatAttribute>
+formatAttributeFromTextAlign(gleditor::TextAlign align);
+
+/**
+ * @brief The gleditor::TextAlign @p attribute names, or nullopt if it is not an
+ *        alignment attribute.
+ */
+[[nodiscard]] std::optional<gleditor::TextAlign>
+textAlignFromFormatAttribute(FormatAttribute attribute);
+
+/**
+ * @brief The gleditor::Decoration @p attribute names, or nullopt if it is not a
+ *        character decoration attribute.
+ */
+[[nodiscard]] std::optional<gleditor::Decoration>
+decorationFromFormatAttribute(FormatAttribute attribute);
 
 } // namespace xudu
 

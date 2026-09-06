@@ -988,6 +988,7 @@ int Application::run() {
         // asynchronous.
         state->clickX       = static_cast<int>(evt.button.x);
         state->clickY       = static_cast<int>(evt.button.y);
+        state->clickButton  = static_cast<std::uint8_t>(evt.button.button);
         state->clickPending = true;
         break;
       }

@@ -20,6 +20,7 @@ class RenderDevice;
 }
 
 class Doc;
+class Caret;
 
 /**
  * @struct RenderState
@@ -37,6 +38,7 @@ struct RenderState {
   gleditor::GlyphCache glyphCache;        ///< Shared glyph atlas.
   render::PipelineHandle glyphPipeline{}; ///< Pipeline all documents draw with.
   std::vector<std::shared_ptr<Doc>> docs; ///< Open documents.
+  Caret *caret{nullptr};                  ///< Active caret on render thread.
   /**
    * @brief Scratch the frame's page draws are collected into.
    *

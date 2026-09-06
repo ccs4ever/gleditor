@@ -151,6 +151,7 @@ struct AppState {
   /// resolved supersedes it, which is what a user clicking twice means.
   std::atomic_int clickX{-1};
   std::atomic_int clickY{-1};
+  std::atomic<std::uint8_t> clickButton{1};
   std::atomic_bool clickPending{false};
   /// Pixel a drag has reached with the button still down. Answered like a
   /// click, but it extends the selection instead of replacing it.

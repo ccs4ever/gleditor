@@ -37,6 +37,7 @@
 #include <gleditor/media.hpp>
 #include <gleditor/media_stream.hpp>
 #include <gleditor/media_widget.hpp>
+#include <gleditor/radial_menu.hpp>
 #include <gleditor/render/diagnostics.hpp>
 #include <gleditor/render/types.hpp>
 #include <gleditor/render_state.hpp>
@@ -53,6 +54,7 @@
 #include "xudu/core/publication.hpp"
 #include "xudu/core/resolver.hpp"
 #include "xudu/core/store.hpp"
+#include "xudu/core/system_docs.hpp"
 #include "xudu/session.hpp"
 
 using gleditor::Mod;
@@ -981,7 +983,9 @@ private:
 
 void bindCommands(gleditor::Application &app, const AppStateRef &state,
                   Views &views, HypertimeMap &map, LinkBeams &links,
-                  Session &session, const std::string &publishAs) {
+                  Session &session,
+                  const std::shared_ptr<gleditor::RadialMenu> &radialMenu,
+                  const RendererRef &renderer, const std::string &publishAs) {
   app.bindDefaultViewCommands();
 
   app.commands().bind(SDL_SCANCODE_Q, Mod::Ctrl, "quit", "save and close",
@@ -1010,9 +1014,42 @@ void bindCommands(gleditor::Application &app, const AppStateRef &state,
         [&views, targetIndex] { views.selectDoc(targetIndex); });
   }
 
-  app.commands().bind(SDL_SCANCODE_M, Mod::Ctrl, "map",
+  app.commands().bind(SDL_SCANCODE_H, Mod::Ctrl, "map",
                       "show or hide the hypertime map",
                       [&map] { map.toggle(); });
+  app.commands().bind(SDL_SCANCODE_M, Mod::Ctrl, "radial-menu",
+                      "open radial menu for formatting and alignment",
+                      [state, radialMenu, renderer] {
+                        renderer->runWithState([state, radialMenu,
+                                                renderer](RenderState &rState) {
+                          if (radialMenu->isOpen()) {
+                            radialMenu->close();
+                            return;
+                          }
+                          auto *const caret   = renderer->editCaret();
+                          std::uint32_t doc   = 0;
+                          std::uint32_t start = 0;
+                          std::uint32_t len   = 0;
+                          if (caret && caret->active() &&
+                              caret->documentIndex() < rState.docs.size()) {
+                            doc = caret->documentIndex();
+                            if (caret->hasSelection()) {
+                              start = caret->selectionStart();
+                              len   = caret->selectionEnd() - start;
+                            } else {
+                              start = caret->byteOffset();
+                            }
+                          }
+                          float mx = static_cast<float>(state->mouseX);
+                          float my = static_cast<float>(state->mouseY);
+                          if (mx <= 0.0F && my <= 0.0F && state->clickX >= 0) {
+                            mx = static_cast<float>(state->clickX);
+                            my = static_cast<float>(state->clickY);
+                          }
+                          radialMenu->openAtWindowCoords(mx, my, doc, start,
+                                                         len);
+                        });
+                      });
   app.commands().bind(SDL_SCANCODE_B, Mod::Ctrl, "back",
                       "go to the previous state, losing nothing",
                       [&views] { views.back(); });
@@ -1287,7 +1324,7 @@ int main(const int argc, char **argv) {
       .default_value(false)
       .implicit_value(true);
   parser.add_argument("--map")
-      .help("show the hypertime map on startup; ctrl-m toggles it while "
+      .help("show the hypertime map on startup; ctrl-h toggles it while "
             "running")
       .default_value(false)
       .implicit_value(true);
@@ -2095,10 +2132,75 @@ int main(const int argc, char **argv) {
       });
     });
 
+    auto radialMenu     = std::make_shared<gleditor::RadialMenu>("Sans 10");
+    const auto &uiStore = session->systemStore(xudu::SystemDocKind::UI);
+    const auto uiText   = uiStore.textOf(uiStore.primaryCurrentVersion());
+    if (!uiText.empty()) {
+      radialMenu->setConfig(xudu::parseRadialConfig(uiText));
+    }
+
+    radialMenu->setActionHandler(
+        [&session, &views](const std::string &id, const std::string &action,
+                           const std::uint32_t docIndex,
+                           const std::uint32_t charOffset,
+                           const std::uint32_t charLength) {
+          std::cout << "xudu: radial action: id=" << id << " action=" << action
+                    << " doc=" << docIndex << " offset=" << charOffset
+                    << " len=" << charLength << "\n";
+          if (id == "format:bold") {
+            session->markDecorated(
+                docIndex, charOffset, charLength,
+                gleditor::decorationBit(gleditor::Decoration::Bold));
+          } else if (id == "format:italic") {
+            session->markDecorated(
+                docIndex, charOffset, charLength,
+                gleditor::decorationBit(gleditor::Decoration::Italic));
+          } else if (id == "format:underline") {
+            session->markDecorated(
+                docIndex, charOffset, charLength,
+                gleditor::decorationBit(gleditor::Decoration::Underline));
+          } else if (id == "format:superscript") {
+            session->markDecorated(
+                docIndex, charOffset, charLength,
+                gleditor::decorationBit(gleditor::Decoration::Superscript));
+          } else if (id == "format:subscript") {
+            session->markDecorated(
+                docIndex, charOffset, charLength,
+                gleditor::decorationBit(gleditor::Decoration::Subscript));
+          } else if (id == "align:left") {
+            session->setAlignment(docIndex, charOffset, charLength,
+                                  gleditor::TextAlign::Left);
+          } else if (id == "align:centre" || id == "align:center") {
+            session->setAlignment(docIndex, charOffset, charLength,
+                                  gleditor::TextAlign::Centre);
+          } else if (id == "align:right") {
+            session->setAlignment(docIndex, charOffset, charLength,
+                                  gleditor::TextAlign::Right);
+          } else if (id == "align:justify") {
+            session->setAlignment(docIndex, charOffset, charLength,
+                                  gleditor::TextAlign::Justify);
+          } else if (id == "op:pagebreak") {
+            session->insertBreak(docIndex, charOffset);
+          } else if (id == "op:transclude") {
+            views.transcludeSelection();
+          } else if (id == "info:author") {
+            std::string authorStr = "Local Sovereign Author";
+            if (const auto *ps = session->userPermascroll()) {
+              authorStr = std::format("Author OpenPGP: {}",
+                                      ps->config().masterIdentity.view());
+            }
+            std::cout << "xudu: " << authorStr << "\n";
+          }
+        });
+
     session->setSystemDocChangedCallback(
-        [](const xudu::SystemDocKind kind, const std::string & /*content*/) {
+        [radialMenu](const xudu::SystemDocKind kind,
+                     const std::string &content) {
           std::cout << "xudu: system doc updated (" << xudu::systemDocUri(kind)
                     << ")\n";
+          if (kind == xudu::SystemDocKind::UI) {
+            radialMenu->setConfig(xudu::parseRadialConfig(content));
+          }
         });
 
     LinkBeams links(*session, renderer);
@@ -2137,11 +2239,13 @@ int main(const int argc, char **argv) {
     renderer->addFrameContributor(&links);
     renderer->addFrameContributor(&images);
     renderer->addFrameContributor(&views);
+    renderer->addFrameContributor(radialMenu.get());
 
     state->accessibility->addSource(docSwitcher.get());
     state->accessibility->addSource(&links);
     state->accessibility->addSource(&map);
     state->accessibility->addSource(&publishForm);
+    state->accessibility->addSource(radialMenu.get());
     state->accessibility->setToolkit("gleditor", TOSTRING(GLEDITOR_VERSION));
 
     map.setGoer([&views](const MicroversionId &id) { views.showOnly(id); });
@@ -2149,6 +2253,7 @@ int main(const int argc, char **argv) {
     state->modal = &publishForm;
     renderer->addPickObserver(docSwitcher.get());
     renderer->addPickObserver(&links);
+    renderer->addPickObserver(radialMenu.get());
 
     if (asked.empty() && read.empty() && alongside.empty() &&
         extraImports.empty()) {
@@ -2247,7 +2352,7 @@ int main(const int argc, char **argv) {
     });
 
     gleditor::Application app(state, renderer, backend, "Xudu");
-    bindCommands(app, state, views, map, links, *session,
+    bindCommands(app, state, views, map, links, *session, radialMenu, renderer,
                  publishAs.empty() ? std::string{"document"} : publishAs);
     quiet || std::cout << "commands:\n" << app.commands().helpText();
 

@@ -26,9 +26,9 @@
 #include <gleditor/render/types.hpp>
 #include <gleditor/render_state.hpp>
 #include <gleditor/svg_animator.hpp>
-#include <gleditor/text/font.hpp>
 #include <gleditor/text_source.hpp>
 
+#include "xudu/core/format.hpp"
 #include "xudu/core/link_layout.hpp"
 #include "xudu/core/provenance.hpp"
 
@@ -122,12 +122,12 @@ MicroversionId Session::insertBreak(const std::uint32_t docIndex,
   if (docIndex >= open.size()) {
     return MicroversionId{};
   }
-  const auto sIdx        = open[docIndex].storeIndex;
-  auto &st               = store(sIdx);
-  const auto prod        = st.insertBreak(open[docIndex].version, at);
-  open[docIndex].version = prod;
-  open[docIndex].pieces  = st.rebuild(prod);
-  invalidate();
+  flushUncommitted(docIndex);
+  const auto sIdx = open[docIndex].storeIndex;
+  auto &st        = store(sIdx);
+  const auto prod = st.insertBreak(open[docIndex].version, at);
+  save(sIdx);
+  refresh(docIndex, prod);
   return prod;
 }
 
@@ -1190,6 +1190,45 @@ Session::sourceFor(const MicroversionId &version,
     }
   }
 
+  std::vector<gleditor::DecoratedRange> decoratedRanges;
+
+  // Extract presentation formatting and paragraph alignment from Format links
+  for (const auto &[linkId, link] : st.links()) {
+    if (LinkType::Format != link.type) {
+      continue;
+    }
+    const auto attrOpt = st.formatAttributeOf(link);
+    if (!attrOpt) {
+      continue;
+    }
+    if (const auto decoOpt = decorationFromFormatAttribute(*attrOpt)) {
+      const auto mask = gleditor::decorationBit(*decoOpt);
+      for (const auto &span : link.left) {
+        for (const auto &extent : rebuilt.occurrencesOf(span)) {
+          if (!extent.empty()) {
+            decoratedRanges.push_back(gleditor::DecoratedRange{
+                .start       = extent.start,
+                .end         = extent.end,
+                .decorations = mask,
+            });
+          }
+        }
+      }
+    } else if (const auto alignOpt = textAlignFromFormatAttribute(*attrOpt)) {
+      for (const auto &span : link.left) {
+        for (const auto &extent : rebuilt.occurrencesOf(span)) {
+          if (!extent.empty()) {
+            blockStyles.push_back(gleditor::BlockStyleRange{
+                .start = extent.start,
+                .end   = extent.end,
+                .align = *alignOpt,
+            });
+          }
+        }
+      }
+    }
+  }
+
   std::string title;
   if (st.isSystem()) {
     if (const auto kind = systemDocKindForStoreIndex(storeIndex)) {
@@ -1203,8 +1242,8 @@ Session::sourceFor(const MicroversionId &version,
     }
   }
 
-  return std::make_shared<VersionTextSource>(concatext, version, breaks, boxes,
-                                             blockStyles, title);
+  return std::make_shared<VersionTextSource>(
+      concatext, version, breaks, boxes, blockStyles, title, decoratedRanges);
 }
 
 std::vector<Session::MediaSpanInfo>
@@ -1474,14 +1513,36 @@ void Session::textErased(Doc &doc, const std::uint32_t at,
 void Session::markDecorated(Doc &doc, const std::uint32_t at,
                             const std::uint32_t length,
                             const gleditor::DecorationMask mask) {
-  const auto which = doc.documentIndex();
+  markDecorated(doc.documentIndex(), at, length, mask);
+}
+
+void Session::markDecorated(const std::size_t which, const std::uint32_t at,
+                            const std::uint32_t length,
+                            const gleditor::DecorationMask mask) {
   if (which >= open.size()) {
     return;
   }
   flushUncommitted(which);
-  const auto sIdx    = open[which].storeIndex;
-  auto &st           = store(sIdx);
-  const auto content = st.rebuild(open[which].version).spansFor(at, length);
+  const auto sIdx = open[which].storeIndex;
+  auto &st        = store(sIdx);
+
+  const auto textStr  = sourceFor(open[which].version, sIdx)->text();
+  std::uint32_t start = at;
+  std::uint32_t end   = at + length;
+  if (length == 0 && !textStr.empty() && start < textStr.size()) {
+    while (start > 0 &&
+           !std::isspace(static_cast<unsigned char>(textStr[start - 1]))) {
+      --start;
+    }
+    while (end < textStr.size() &&
+           !std::isspace(static_cast<unsigned char>(textStr[end]))) {
+      ++end;
+    }
+  }
+
+  const auto effLen =
+      (end > start) ? (end - start) : (length > 0 ? length : 1U);
+  const auto content = st.rebuild(open[which].version).spansFor(start, effLen);
   if (content.empty()) {
     return;
   }
@@ -1505,9 +1566,63 @@ void Session::markDecorated(Doc &doc, const std::uint32_t at,
     link.right.push_back(xudu::vocabularySpanFor(*attribute));
     version = st.addLink(version, link);
     std::cout << "xudu: " << version.str() << " format "
-              << xudu::formatAttributeName(*attribute) << " [" << at << ", "
-              << (at + length) << ")\n";
+              << xudu::formatAttributeName(*attribute) << " [" << start << ", "
+              << (start + effLen) << ")\n";
   }
+  save(sIdx);
+  refresh(which, version);
+}
+
+void Session::setAlignment(Doc &doc, const std::uint32_t at,
+                           const std::uint32_t length,
+                           const gleditor::TextAlign align) {
+  setAlignment(doc.documentIndex(), at, length, align);
+}
+
+void Session::setAlignment(const std::size_t which, const std::uint32_t at,
+                           const std::uint32_t length,
+                           const gleditor::TextAlign align) {
+  if (which >= open.size()) {
+    return;
+  }
+  flushUncommitted(which);
+  const auto sIdx = open[which].storeIndex;
+  auto &st        = store(sIdx);
+
+  const auto textStr  = sourceFor(open[which].version, sIdx)->text();
+  std::uint32_t start = at;
+  std::uint32_t end   = at + length;
+  if (length == 0 && !textStr.empty()) {
+    while (start > 0 && textStr[start - 1] != '\n') {
+      --start;
+    }
+    while (end < textStr.size() && textStr[end] != '\n') {
+      ++end;
+    }
+    if (end < textStr.size() && textStr[end] == '\n') {
+      ++end;
+    }
+  }
+
+  const auto effLen =
+      (end > start) ? (end - start) : (length > 0 ? length : 1U);
+  const auto content = st.rebuild(open[which].version).spansFor(start, effLen);
+  if (content.empty()) {
+    return;
+  }
+  const auto attribute = xudu::formatAttributeFromTextAlign(align);
+  if (!attribute) {
+    return;
+  }
+  Link link;
+  link.type  = LinkType::Format;
+  link.owner = "--type";
+  link.left  = content;
+  link.right.push_back(xudu::vocabularySpanFor(*attribute));
+  auto version = st.addLink(open[which].version, link);
+  std::cout << "xudu: " << version.str() << " align "
+            << xudu::formatAttributeName(*attribute) << " [" << start << ", "
+            << (start + effLen) << ")\n";
   save(sIdx);
   refresh(which, version);
 }

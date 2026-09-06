@@ -304,6 +304,7 @@ private:
   /// Pixel of a click whose picking result has not come back yet. Picking is
   /// asynchronous, so the click cannot be answered in the frame that saw it.
   std::optional<std::pair<int, int>> awaitingClick;
+  std::uint8_t awaitingClickButton{1};
   /// Whether that pending answer extends the selection rather than replacing
   /// the caret.
   bool awaitingDrag{};

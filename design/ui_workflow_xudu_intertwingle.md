@@ -557,14 +557,71 @@ ______________________________________________________________________
 
 ### 12.2 Nelsonian First-Class Formatting Links
 
-- In `xudu`, applying **Bold**, **Italic**, or **Justify** does **NOT** modify
-  raw text bytes or inject markdown syntax (`**text**`, `<i>text</i>`).
+- In `xudu`, applying **Bold**, **Italic**, **Underline**, **Superscript**,
+  **Subscript**, or **Justify** does **NOT** modify raw text bytes or inject
+  inline markdown syntax (`**text**`, `<i>text</i>`).
 - Instead, formatting is stored as a first-class `LinkType::Format` link:
-  $$\\text{Link}(\\text{Type}=\\text{Format}, \\text{Left}=\\text{TargetSpan}, \\text{Right}=\\text{VocabSpan}(\\text{Format}::\\text{Bold}))$$
+  $$\text{Link}(\text{Type}=\text{Format}, \text{Left}=\text{TargetSpan}, \text{Right}=\text{VocabSpan}(\text{Format}::\text{Bold}))$$
 - **Transclusion Invariance**: Because formatting is attached to the primedia
   address via links rather than inline markup, a passage transcluded into three
   different xanadocs automatically retains its author formatting without syntax
   parsing errors.
+
+### 12.3 Sovereign System Xanadoc Configuration (`system://ui`)
+
+The radial marking menu is entirely driven and configured by the author's
+`system://ui` sovereign xanadoc. Authors can customize the outer radius,
+inner deadzone, sector count $N$, sector icons/labels, and arbitrary nested
+sub-radial wheels (such as the 4-way alignment sub-menu):
+
+```yaml
+radialMenu:
+  radius: 130.0
+  innerRadius: 42.0
+  actions:
+    - id: "format:bold"
+      label: "Bold"
+      icon: "B"
+    - id: "format:italic"
+      label: "Italic"
+      icon: "I"
+    - id: "format:underline"
+      label: "Underline"
+      icon: "U"
+    - id: "format:superscript"
+      label: "Superscript"
+      icon: "X²"
+    - id: "format:subscript"
+      label: "Subscript"
+      icon: "X₂"
+    - id: "group:align"
+      label: "Align"
+      icon: "="
+      subActions:
+        - id: "align:left"
+          label: "Left"
+          icon: "|<"
+        - id: "align:centre"
+          label: "Centre"
+          icon: "><"
+        - id: "align:right"
+          label: "Right"
+          icon: ">|"
+        - id: "align:justify"
+          label: "Justify"
+          icon: "|="
+    - id: "op:pagebreak"
+      label: "Page Break"
+      icon: "--"
+    - id: "op:transclude"
+      label: "Transclude"
+      icon: "[]"
+    - id: "info:author"
+      label: "Author"
+      icon: "@"
+```
+
+![3D Radial Marking Menu in Xudu](screenshots/radial_menu_open.png)
 
 ______________________________________________________________________
 

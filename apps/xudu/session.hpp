@@ -69,14 +69,15 @@ class Session;
 class VersionTextSource : public gleditor::TextSource {
 public:
   VersionTextSource(std::string aText, MicroversionId aVersion,
-                    std::vector<std::uint32_t> aBreaks                  = {},
-                    std::vector<gleditor::LayoutBox> aBoxes             = {},
-                    std::vector<gleditor::BlockStyleRange> aBlockStyles = {},
-                    std::string aName                                   = {})
+                    std::vector<std::uint32_t> aBreaks                     = {},
+                    std::vector<gleditor::LayoutBox> aBoxes                = {},
+                    std::vector<gleditor::BlockStyleRange> aBlockStyles    = {},
+                    std::string aName                                      = {},
+                    std::vector<gleditor::DecoratedRange> aDecoratedRanges = {})
       : contents(std::move(aText)), id(std::move(aVersion)),
         breaks(std::move(aBreaks)), mediaBoxes(std::move(aBoxes)),
-        mediaBlockStyles(std::move(aBlockStyles)),
-        customName(std::move(aName)) {}
+        mediaBlockStyles(std::move(aBlockStyles)), customName(std::move(aName)),
+        ranges(std::move(aDecoratedRanges)) {}
 
   [[nodiscard]] std::string text() const override { return contents; }
   [[nodiscard]] std::string name() const override {
@@ -93,6 +94,10 @@ public:
   blockStyles() const override {
     return mediaBlockStyles;
   }
+  [[nodiscard]] std::vector<gleditor::DecoratedRange>
+  decoratedRanges() const override {
+    return ranges;
+  }
 
 private:
   std::string contents;
@@ -105,6 +110,7 @@ private:
   std::vector<gleditor::LayoutBox> mediaBoxes;
   std::vector<gleditor::BlockStyleRange> mediaBlockStyles;
   std::string customName;
+  std::vector<gleditor::DecoratedRange> ranges;
 };
 
 /**
@@ -608,6 +614,19 @@ public:
    */
   void markDecorated(Doc &doc, std::uint32_t at, std::uint32_t length,
                      gleditor::DecorationMask mask);
+  void markDecorated(std::size_t docIndex, std::uint32_t at,
+                     std::uint32_t length, gleditor::DecorationMask mask);
+
+  /**
+   * @brief Apply paragraph alignment over [@p at, @p at + @p length).
+   *
+   * Nelsonian format link: one LinkType::Format link with right end
+   * vocabularySpanFor(formatAttributeFromTextAlign(align)).
+   */
+  void setAlignment(Doc &doc, std::uint32_t at, std::uint32_t length,
+                    gleditor::TextAlign align);
+  void setAlignment(std::size_t docIndex, std::uint32_t at,
+                    std::uint32_t length, gleditor::TextAlign align);
 
   // -- Uncommitted Replay Log & Macro-Epoch Flush --------------------------
   static constexpr auto idleFlushTimeout = std::chrono::seconds(5);
