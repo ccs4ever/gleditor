@@ -1,0 +1,101 @@
+zzstructure:
+  meta:
+    name: "ZigZag System Layout Slice"
+    description: "Sovereign runtime parameters for Project Xanadu multi-column layout, page geometry, and optical link rendering."
+    version: "1.0"
+    author: "Project Xanadu ZigZag System"
+    created: "2026-09-06"
+    tags: [system, layout, configuration, zigzag]
+
+  focus: 1
+
+  view:
+    x_dimension: d.config
+    y_dimension: d.schema
+    z_dimension: d.notes
+
+  dimensions:
+    d.config:
+      label: "Configuration"
+      description: "Runtime settings and spatial layout parameters"
+      color: "#4f9de0"
+      spacing: 2.5
+    d.schema:
+      label: "Schema"
+      description: "Specification of configuration cell purpose, schema, and units"
+      color: "#f5a623"
+      spacing: 2.2
+    d.notes:
+      label: "Notes"
+      description: "User annotations and display calibration notes"
+      color: "#9b51e0"
+      spacing: 2.2
+
+  scene:
+    background_color: "#0d0d12"
+    focus_color: "#f4c542"
+    focus_scale: 1.4
+    cell_radius: 0.35
+
+  cells:
+    - id: 1
+      text: "Layout Settings"
+      type: config_group
+      dimensions: { d.config: 2, d.schema: 100, d.notes: 200 }
+
+    - id: 2
+      text: "columns: \"2\""
+      type: setting
+      dimensions: { d.config: 3, d.schema: 101, d.notes: 201 }
+
+    - id: 3
+      text: "pageWidthPx: \"800\""
+      type: setting
+      dimensions: { d.config: 4, d.schema: 102 }
+
+    - id: 4
+      text: "pageHeightPx: \"1000\""
+      type: setting
+      dimensions: { d.config: 5, d.schema: 103 }
+
+    - id: 5
+      text: "transclusionPrisms: \"true\""
+      type: setting
+      dimensions: { d.config: 6, d.schema: 104 }
+
+    - id: 6
+      text: "xanalinkRibbons: \"true\""
+      type: setting
+      dimensions: { d.schema: 105 }
+
+    - id: 100
+      text: "Schema and Purpose\n\nPurpose:\nThe sovereign Layout system xanadoc defines multi-column page dimensions, notification toast anchors, pouch dock orientation, and optic ribbon rendering flags."
+      type: schema_doc
+
+    - id: 101
+      text: "Schema: columns\nNumber of parallel document columns displayed simultaneously. Default is 2."
+      type: schema_field
+
+    - id: 102
+      text: "Schema: pageWidthPx\nLogical page rendering width in pixels. Default is 800."
+      type: schema_field
+
+    - id: 103
+      text: "Schema: pageHeightPx\nLogical page rendering height in pixels. Default is 1000."
+      type: schema_field
+
+    - id: 104
+      text: "Schema: transclusionPrisms\nEnable Identity Gold volumetric prisms for transcluded spans. Default is true."
+      type: schema_field
+
+    - id: 105
+      text: "Schema: xanalinkRibbons\nEnable cyan and magenta 3D optical link ribbons. Default is true."
+      type: schema_field
+
+    - id: 200
+      text: "Notes\n\nUser Annotations and Customization Record:\nThis page is reserved for author notes, screen dimension notes, and optical rendering customizations."
+      type: user_notes
+
+    - id: 201
+      text: "Notes: Multi-column Spacing\nTwo-column layout balances reading throughput with cross-document link visibility."
+      type: user_notes

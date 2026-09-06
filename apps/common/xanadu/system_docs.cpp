@@ -18,6 +18,9 @@
 #include "common/xanadu/ops.hpp"
 #include "common/xanadu/store.hpp"
 #include "common/xanadu/version.hpp"
+#include "common/xanadu/zigzag/zz_system_projector.hpp"
+#include "common/xanadu/zigzag/zzstructure.hpp"
+#include "common/yaml_helpers.hpp"
 
 namespace xanadu {
 
@@ -348,85 +351,14 @@ std::filesystem::path systemDocDirectory(const SystemDocKind kind) {
 
 namespace {
 
-void rymlRadialErrorHandler(const c4::csubstr msg,
-                            const c4::yml::ErrorDataBasic &, void *) {
-  throw std::runtime_error(std::string{msg.str, msg.len});
-}
+using common::yaml::parseBool;
+using common::yaml::parseFloat;
+using common::yaml::parseUint;
+using common::yaml::ScopedCallbacks;
+using common::yaml::stripQuotes;
+using common::yaml::trimStr;
 
-struct ScopedRadialCallbacks {
-  c4::yml::Callbacks prev;
-  ScopedRadialCallbacks() {
-    prev = c4::yml::get_callbacks();
-    c4::yml::Callbacks cb;
-    cb.m_error_basic = rymlRadialErrorHandler;
-    c4::yml::set_callbacks(cb);
-  }
-  ~ScopedRadialCallbacks() { c4::yml::set_callbacks(prev); }
-};
-
-std::string_view trimStr(std::string_view s) {
-  while (!s.empty() && (s.front() == ' ' || s.front() == '\t' ||
-                        s.front() == '\r' || s.front() == '\n')) {
-    s.remove_prefix(1);
-  }
-  while (!s.empty() && (s.back() == ' ' || s.back() == '\t' ||
-                        s.back() == '\r' || s.back() == '\n')) {
-    s.remove_suffix(1);
-  }
-  return s;
-}
-
-std::string stripQuotes(std::string_view s) {
-  s = trimStr(s);
-  if (s.size() >= 2 && ((s.front() == '"' && s.back() == '"') ||
-                        (s.front() == '\'' && s.back() == '\''))) {
-    s = s.substr(1, s.size() - 2);
-  }
-  return std::string{s};
-}
-
-bool parseBool(std::string_view s, const bool fallback) {
-  s = trimStr(s);
-  if (s.size() >= 2 && ((s.front() == '"' && s.back() == '"') ||
-                        (s.front() == '\'' && s.back() == '\''))) {
-    s = s.substr(1, s.size() - 2);
-  }
-  if (s == "true" || s == "True" || s == "1" || s == "yes" || s == "on") {
-    return true;
-  }
-  if (s == "false" || s == "False" || s == "0" || s == "no" || s == "off") {
-    return false;
-  }
-  return fallback;
-}
-
-float parseFloat(std::string_view s, const float fallback) {
-  s = trimStr(s);
-  if (s.size() >= 2 && ((s.front() == '"' && s.back() == '"') ||
-                        (s.front() == '\'' && s.back() == '\''))) {
-    s = s.substr(1, s.size() - 2);
-  }
-  float val      = fallback;
-  const auto res = std::from_chars(s.data(), s.data() + s.size(), val);
-  if (res.ec == std::errc{}) {
-    return val;
-  }
-  return fallback;
-}
-
-std::uint32_t parseUint(std::string_view s, const std::uint32_t fallback) {
-  s = trimStr(s);
-  if (s.size() >= 2 && ((s.front() == '"' && s.back() == '"') ||
-                        (s.front() == '\'' && s.back() == '\''))) {
-    s = s.substr(1, s.size() - 2);
-  }
-  std::uint32_t val = fallback;
-  const auto res    = std::from_chars(s.data(), s.data() + s.size(), val);
-  if (res.ec == std::errc{}) {
-    return val;
-  }
-  return fallback;
-}
+using ScopedRadialCallbacks = common::yaml::ScopedCallbacks;
 
 std::vector<std::pair<std::string, std::string>>
 parseKeyValueLines(const std::string_view text) {
@@ -813,6 +745,48 @@ UIConfig parseUIConfig(const std::string_view yamlText) {
     applyKv(k, v);
   }
   return cfg;
+}
+
+void initializeSystemStoreFromSlice(Store &store, const SystemDocKind kind,
+                                    const zigzag::ZzStructureDocument &slice) {
+  zigzag::projectSystemSliceToStore(slice, store, kind);
+}
+
+KeymapConfig KeymapConfig::fromYaml(const std::string_view yamlText) {
+  return parseKeymapConfig(yamlText);
+}
+
+KeymapConfig KeymapConfig::fromSlice(const zigzag::ZzStructureDocument &slice) {
+  const std::string configText = zigzag::extractSliceConfigText(slice);
+  return parseKeymapConfig(configText);
+}
+
+SettingsConfig SettingsConfig::fromYaml(const std::string_view yamlText) {
+  return parseSettingsConfig(yamlText);
+}
+
+SettingsConfig
+SettingsConfig::fromSlice(const zigzag::ZzStructureDocument &slice) {
+  const std::string configText = zigzag::extractSliceConfigText(slice);
+  return parseSettingsConfig(configText);
+}
+
+LayoutConfig LayoutConfig::fromYaml(const std::string_view yamlText) {
+  return parseLayoutConfig(yamlText);
+}
+
+LayoutConfig LayoutConfig::fromSlice(const zigzag::ZzStructureDocument &slice) {
+  const std::string configText = zigzag::extractSliceConfigText(slice);
+  return parseLayoutConfig(configText);
+}
+
+UIConfig UIConfig::fromYaml(const std::string_view yamlText) {
+  return parseUIConfig(yamlText);
+}
+
+UIConfig UIConfig::fromSlice(const zigzag::ZzStructureDocument &slice) {
+  const std::string configText = zigzag::extractSliceConfigText(slice);
+  return parseUIConfig(configText);
 }
 
 } // namespace xanadu

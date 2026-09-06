@@ -173,6 +173,17 @@ graph LR
   bundles where dimensional links are preserved as `LinkType::Dimension`
   xanalinks.
 
+### 4. System Configuration Slices (`zz_system_projector`)
+- Projects multidimensional system configuration slices (`d.config`, `d.schema`,
+  `d.notes`) into sovereign 3-page System Xanadocs (`xudu::Store`) with format
+  links for bold/centered headers (strictly zero Markdown) and butterfly comment
+  links connecting settings to schema descriptions and notes.
+- Fully bidirectional: edits to Page 1 or Page 3 in Xudu propagate to the Zigzag
+  slice cells in place, and edits to cells in Zigzag propagate to the Store and
+  commit a new microversion.
+- See [`design/system-xanadocs-customization-and-metasystem.md`](system-xanadocs-customization-and-metasystem.md)
+  for complete architectural specifications and diagrams.
+
 ---
 
 ## 6. High-Throughput 120 FPS GPU Staging Pipeline
@@ -194,10 +205,12 @@ To render large multidimensional cell meshes at 120 FPS ($8.33\text{ms}$):
 
 | Component | Source Files | Description |
 | :--- | :--- | :--- |
-| **Compact Cell Layout** | [`apps/zigzag/core/compact_zzcell.hpp`](apps/zigzag/core/compact_zzcell.hpp) | 64-byte aligned multidimensional cell with inlined standard dimensions |
+| **Compact Cell Layout** | [`apps/common/xanadu/zigzag/compact_zzcell.hpp`](apps/common/xanadu/zigzag/compact_zzcell.hpp) | 64-byte aligned multidimensional cell with inlined standard dimensions |
 | **Transclusion Engine** | [`apps/zigzag/core/unified_transclusion_engine.hpp/.cpp`](apps/zigzag/core/unified_transclusion_engine.hpp) | 2-rank manifold validator, neighborhood extractor, and GPU uploader |
-| **Bidirectional Projector** | [`apps/zigzag/core/zz_xudu_projector.hpp/.cpp`](apps/zigzag/core/zz_xudu_projector.hpp) | Xanadoc $\longleftrightarrow$ Zigzag mapping, clone deduplication, and rasterization |
-| **Zigzag Core Data Model** | [`apps/zigzag/core/zzcore.hpp/.cpp`](apps/zigzag/core/zzcore.hpp) | Dimensional navigation, clone master resolution, and rank iterators |
-| **YAML Slice Loader** | [`apps/zigzag/core/zzstructure_loader.cpp`](apps/zigzag/core/zzstructure_loader.cpp) | RapidYAML parser for `.zz` multidimensional slice files |
+| **Document Projector** | [`apps/common/xanadu/zigzag/zz_xudu_projector.hpp/.cpp`](apps/common/xanadu/zigzag/zz_xudu_projector.hpp) | Xanadoc $\longleftrightarrow$ Zigzag mapping, clone deduplication, and rasterization |
+| **System Projector** | [`apps/common/xanadu/zigzag/zz_system_projector.hpp/.cpp`](apps/common/xanadu/zigzag/zz_system_projector.hpp) | 3-page system xanadoc $\longleftrightarrow$ Zigzag configuration slice bidirectional projector |
+| **Zigzag Core Data Model** | [`apps/common/xanadu/zigzag/zzcore.hpp/.cpp`](apps/common/xanadu/zigzag/zzcore.hpp) | Dimensional navigation, clone master resolution, and rank iterators |
+| **YAML Slice Loader** | [`apps/common/xanadu/zigzag/zzstructure_loader.cpp`](apps/common/xanadu/zigzag/zzstructure_loader.cpp) | RapidYAML parser for `.zz` multidimensional slice files |
+| **Canonical Layout Slice** | [`assets/zigzag/system_layout_slice.yaml`](assets/zigzag/system_layout_slice.yaml) | Canonical 3D Zigzag slice specification for `system://layout` |
 | **Visualizer & A11y** | [`apps/zigzag/core/zigzag_visualizer.cpp`](apps/zigzag/core/zigzag_visualizer.cpp) | 3D navigation, mouse picking, and AccessKit accessibility tree |
-| **Unit Tests** | [`tests/zigzag/test_unified_transclusion_engine.cpp`](tests/zigzag/test_unified_transclusion_engine.cpp), [`tests/zigzag/test_xudu_convergence.cpp`](tests/zigzag/test_xudu_convergence.cpp) | Manifold validation, clone syncing, and round-trip tests |
+| **Unit Tests** | [`tests/zigzag/test_unified_transclusion_engine.cpp`](tests/zigzag/test_unified_transclusion_engine.cpp), [`tests/zigzag/test_system_projector.cpp`](tests/zigzag/test_system_projector.cpp) | Manifold validation, clone syncing, and bidirectional system slice propagation tests |

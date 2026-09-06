@@ -13,6 +13,10 @@
 
 #include <gleditor/radial_menu.hpp>
 
+namespace zigzag {
+struct ZzStructureDocument;
+} // namespace zigzag
+
 namespace xanadu {
 
 /**
@@ -101,6 +105,8 @@ extractConfigSection(const std::string_view docText) noexcept {
 
 class Store;
 void initializeSystemStore(Store &store, SystemDocKind kind);
+void initializeSystemStoreFromSlice(Store &store, SystemDocKind kind,
+                                    const zigzag::ZzStructureDocument &slice);
 
 struct KeymapConfig {
   std::vector<std::pair<std::string, std::string>> bindings;
@@ -113,6 +119,10 @@ struct KeymapConfig {
     }
     return std::nullopt;
   }
+
+  [[nodiscard]] static KeymapConfig fromYaml(std::string_view yamlText);
+  [[nodiscard]] static KeymapConfig
+  fromSlice(const zigzag::ZzStructureDocument &slice);
 };
 
 struct SettingsConfig {
@@ -121,6 +131,10 @@ struct SettingsConfig {
   float lineHeight{1.4F};
   std::string theme{"system"};
   std::uint32_t autoSaveSeconds{5};
+
+  [[nodiscard]] static SettingsConfig fromYaml(std::string_view yamlText);
+  [[nodiscard]] static SettingsConfig
+  fromSlice(const zigzag::ZzStructureDocument &slice);
 };
 
 enum class ToastAnchor : std::uint8_t {
@@ -144,6 +158,10 @@ struct LayoutConfig {
   float documentSpacingX{70.0F};
   bool transclusionPrisms{true};
   bool xanalinkRibbons{true};
+
+  [[nodiscard]] static LayoutConfig fromYaml(std::string_view yamlText);
+  [[nodiscard]] static LayoutConfig
+  fromSlice(const zigzag::ZzStructureDocument &slice);
 };
 
 struct UIConfig {
@@ -151,6 +169,10 @@ struct UIConfig {
   bool statusBarVisible{true};
   bool hypertimeMapVisible{false};
   gleditor::RadialConfig radialMenu;
+
+  [[nodiscard]] static UIConfig fromYaml(std::string_view yamlText);
+  [[nodiscard]] static UIConfig
+  fromSlice(const zigzag::ZzStructureDocument &slice);
 };
 
 [[nodiscard]] KeymapConfig parseKeymapConfig(std::string_view yamlText);
