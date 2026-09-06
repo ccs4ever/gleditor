@@ -26,7 +26,6 @@ namespace {
 constexpr std::uint32_t colRadialBg     = 0x0F172AF0U; // Frosted dark plate
 constexpr std::uint32_t colRadialBorder = 0x334155FFU; // Slate border
 constexpr std::uint32_t colRadialAccent = 0x38BDF8FFU; // Sky cyan
-constexpr std::uint32_t colSpoke        = 0x1E293B88U; // Subtle spoke divider
 constexpr std::uint32_t colPodBg        = 0x1E293BE0U; // Pod background
 constexpr std::uint32_t colPodActiveBg  = 0x0C4A6EE8U; // Active pod fill
 constexpr std::uint32_t colPodBorder    = 0x475569FFU; // Pod border
@@ -135,11 +134,16 @@ RadialConfig RadialConfig::createDefault() {
   authorAction.action = "info:author";
 
   cfg.actions = {
-      std::move(bold),             std::move(italic),
-      std::move(underline),        std::move(superAction),
-      std::move(subAction),        std::move(align),
-      std::move(breakAction),      std::move(linkAction),
-      std::move(transcludeAction), std::move(authorAction),
+      std::move(bold),
+      std::move(italic),
+      std::move(underline),
+      std::move(superAction),
+      std::move(subAction),
+      std::move(align),
+      std::move(breakAction),
+      std::move(linkAction),
+      std::move(transcludeAction),
+      std::move(authorAction),
   };
 
   return cfg;
@@ -151,8 +155,8 @@ RadialMenu::RadialMenu(std::string aFontName)
 RadialMenu::~RadialMenu() = default;
 
 void RadialMenu::setConfig(RadialConfig aConfig) {
-  config_       = std::move(aConfig);
-  inSubWheel_   = false;
+  config_     = std::move(aConfig);
+  inSubWheel_ = false;
   revision_++;
 }
 
@@ -237,9 +241,8 @@ int RadialMenu::resolveSector(const float dx, const float dy,
     return -1;
   }
   // dy > 0 is Up in canvas coords, dx > 0 is Right
-  const float phi = std::atan2(dy, dx); // [-pi, pi]
-  constexpr float twoPi =
-      2.0F * std::numbers::pi_v<float>;
+  const float phi        = std::atan2(dy, dx); // [-pi, pi]
+  constexpr float twoPi  = 2.0F * std::numbers::pi_v<float>;
   constexpr float halfPi = 0.5F * std::numbers::pi_v<float>;
 
   // Clockwise angle from North (+Y)
@@ -252,8 +255,8 @@ int RadialMenu::resolveSector(const float dx, const float dy,
   }
 
   const float sectorWidth = twoPi / static_cast<float>(count);
-  const auto idx = static_cast<int>(
-      std::floor((alpha + sectorWidth * 0.5F) / sectorWidth));
+  const auto idx =
+      static_cast<int>(std::floor((alpha + sectorWidth * 0.5F) / sectorWidth));
   return idx % static_cast<int>(count);
 }
 
@@ -263,14 +266,13 @@ void RadialMenu::deviceReady(render::RenderDevice &device,
   canvas_->createPipeline(documentPipeline, false);
 }
 
-bool RadialMenu::busy() const {
-  return false;
-}
+bool RadialMenu::busy() const { return false; }
 
 void RadialMenu::rebuildLayout(const float screenW, const float screenH) {
   currentPods_.clear();
 
-  // Convert SDL coords (0,0 top-left) to Canvas coords (0,0 bottom-left) if needed
+  // Convert SDL coords (0,0 top-left) to Canvas coords (0,0 bottom-left) if
+  // needed
   float cX = centerX_;
   float cY = centerY_;
   if (cY < 0.0F || cY > screenH) {
@@ -282,24 +284,29 @@ void RadialMenu::rebuildLayout(const float screenW, const float screenH) {
 
   // Ensure menu stays within screen viewport
   const float r = config_.radius + kPodWidth * 0.5F + 8.0F;
-  cX = std::clamp(cX, r, std::max(r, screenW - r));
-  cY = std::clamp(cY, r, std::max(r, screenH - r));
+  cX            = std::clamp(cX, r, std::max(r, screenW - r));
+  cY            = std::clamp(cY, r, std::max(r, screenH - r));
 
   hubX_    = cX - kHubSize * 0.5F;
   hubY_    = cY - kHubSize * 0.5F;
   hubSize_ = kHubSize;
 
-  const auto &actionList =
-      inSubRadial() ? config_.actions[activeParentAction_].subActions
-                    : config_.actions;
-  const auto count = actionList.size();
+  const auto &actionList = inSubRadial()
+                               ? config_.actions[activeParentAction_].subActions
+                               : config_.actions;
+  const auto count       = actionList.size();
   if (count == 0) {
     return;
   }
 
-  const float rMid = (config_.innerRadius + config_.radius) * 0.5F;
-  constexpr float twoPi = 2.0F * std::numbers::pi_v<float>;
+  const float rMid       = (config_.innerRadius + config_.radius) * 0.5F;
+  constexpr float twoPi  = 2.0F * std::numbers::pi_v<float>;
   constexpr float halfPi = 0.5F * std::numbers::pi_v<float>;
+
+  const float sectorWidth  = twoPi / static_cast<float>(count);
+  constexpr float gapAngle = 0.035F; // ~2 deg angular gap between wedge buttons
+  const float wedgeRIn     = config_.innerRadius + 4.0F;
+  const float wedgeROut    = config_.radius + 8.0F;
 
   for (std::size_t i = 0; i < count; ++i) {
     const float angle =
@@ -313,13 +320,226 @@ void RadialMenu::rebuildLayout(const float screenW, const float screenH) {
     pod.y           = podCenterY - kPodHeight * 0.5F;
     pod.width       = kPodWidth;
     pod.height      = kPodHeight;
-    pod.angle = angle;
-    pod.tag   = kRadialTagBase + static_cast<std::uint32_t>(i);
+    pod.angle       = angle;
+    pod.startAngle  = angle - sectorWidth * 0.5F + gapAngle * 0.5F;
+    pod.endAngle    = angle + sectorWidth * 0.5F - gapAngle * 0.5F;
+    pod.innerRadius = wedgeRIn;
+    pod.outerRadius = wedgeROut;
+    pod.tag         = kRadialTagBase + static_cast<std::uint32_t>(i);
     pod.label =
         !actionList[i].icon.empty() ? actionList[i].icon : actionList[i].label;
     pod.desc =
         !actionList[i].label.empty() ? actionList[i].label : actionList[i].desc;
     currentPods_.push_back(std::move(pod));
+  }
+}
+
+void RadialMenu::drawDisc(Canvas &canvas, const float cX, const float cY,
+                          const float radius, const std::uint32_t fillCol,
+                          const std::uint32_t borderCol,
+                          const float borderWidth, const std::size_t slices) {
+  if (radius <= 0.0F) {
+    return;
+  }
+  const std::size_t nSlices = std::max<std::size_t>(8, slices);
+  const float step          = (2.0F * radius) / static_cast<float>(nSlices);
+  const float rSq           = radius * radius;
+
+  for (std::size_t i = 0; i < nSlices; ++i) {
+    const float y0    = -radius + static_cast<float>(i) * step;
+    const float yMid  = y0 + 0.5F * step;
+    const float remSq = rSq - yMid * yMid;
+    if (remSq <= 0.0F) {
+      continue;
+    }
+    const float wHalf = std::sqrt(remSq);
+    canvas.addRect(cX - wHalf, cY + y0, 2.0F * wHalf, step + 1.0F, fillCol);
+  }
+
+  if (borderWidth > 0.0F && borderCol != 0) {
+    constexpr std::size_t kSegments = 128;
+    constexpr float twoPi           = 2.0F * std::numbers::pi_v<float>;
+    for (std::size_t i = 0; i < kSegments; ++i) {
+      const float a1 = static_cast<float>(i) * (twoPi / kSegments);
+      const float a2 = static_cast<float>(i + 1) * (twoPi / kSegments);
+      const float x1 = cX + radius * std::cos(a1);
+      const float y1 = cY + radius * std::sin(a1);
+      const float x2 = cX + radius * std::cos(a2);
+      const float y2 = cY + radius * std::sin(a2);
+      canvas.addLine(x1, y1, x2, y2, borderWidth, borderCol);
+    }
+  }
+}
+
+void RadialMenu::drawWedge(Canvas &canvas, const float cX, const float cY,
+                           const float rIn, const float rOut,
+                           const float aStart, const float aEnd,
+                           const std::uint32_t fillCol,
+                           const std::uint32_t borderCol,
+                           const float borderWidth) {
+  if (rOut <= rIn || rIn < 0.0F) {
+    return;
+  }
+  constexpr float twoPi = 2.0F * std::numbers::pi_v<float>;
+
+  float span = aEnd - aStart;
+  while (span < 0.0F) {
+    span += twoPi;
+  }
+  while (span >= twoPi) {
+    span -= twoPi;
+  }
+  if (span <= 0.0F) {
+    return;
+  }
+
+  const float sinStart = std::sin(aStart);
+  const float cosStart = std::cos(aStart);
+  const float sinEnd   = std::sin(aEnd);
+  const float cosEnd   = std::cos(aEnd);
+
+  float yMin =
+      std::min({rIn * sinStart, rOut * sinStart, rIn * sinEnd, rOut * sinEnd});
+  float yMax =
+      std::max({rIn * sinStart, rOut * sinStart, rIn * sinEnd, rOut * sinEnd});
+
+  auto inAngle = [&](const float angle) -> bool {
+    float da = angle - aStart;
+    while (da < 0.0F) {
+      da += twoPi;
+    }
+    while (da >= twoPi) {
+      da -= twoPi;
+    }
+    return da >= -1e-4F && da <= span + 1e-4F;
+  };
+
+  constexpr float halfPi = 0.5F * std::numbers::pi_v<float>;
+  if (inAngle(halfPi)) {
+    yMax = rOut;
+  }
+  if (inAngle(1.5F * std::numbers::pi_v<float>)) {
+    yMin = -rOut;
+  }
+
+  constexpr float step = 1.0F;
+  const auto nSteps =
+      static_cast<std::size_t>(std::max(1.0F, std::ceil((yMax - yMin) / step)));
+
+  for (std::size_t i = 0; i <= nSteps; ++i) {
+    const float y = yMin + static_cast<float>(i) * step;
+    if (y < -rOut || y > rOut) {
+      continue;
+    }
+
+    std::vector<float> xs;
+    xs.reserve(4);
+
+    if (std::abs(y) <= rOut) {
+      const float w = std::sqrt(std::max(0.0F, rOut * rOut - y * y));
+      if (inAngle(std::atan2(y, w))) {
+        xs.push_back(w);
+      }
+      if (w > 0.0F && inAngle(std::atan2(y, -w))) {
+        xs.push_back(-w);
+      }
+    }
+
+    if (std::abs(y) <= rIn) {
+      const float w = std::sqrt(std::max(0.0F, rIn * rIn - y * y));
+      if (inAngle(std::atan2(y, w))) {
+        xs.push_back(w);
+      }
+      if (w > 0.0F && inAngle(std::atan2(y, -w))) {
+        xs.push_back(-w);
+      }
+    }
+
+    if (std::abs(sinStart) > 1e-4F) {
+      const float r = y / sinStart;
+      if (r >= rIn - 0.5F && r <= rOut + 0.5F) {
+        xs.push_back(r * cosStart);
+      }
+    }
+
+    if (std::abs(sinEnd) > 1e-4F) {
+      const float r = y / sinEnd;
+      if (r >= rIn - 0.5F && r <= rOut + 0.5F) {
+        xs.push_back(r * cosEnd);
+      }
+    }
+
+    if (xs.size() < 2) {
+      continue;
+    }
+
+    std::ranges::sort(xs);
+    std::vector<float> uniqueXs;
+    uniqueXs.reserve(xs.size());
+    for (const float x : xs) {
+      if (uniqueXs.empty() || std::abs(x - uniqueXs.back()) > 0.5F) {
+        uniqueXs.push_back(x);
+      }
+    }
+
+    if (uniqueXs.size() == 2) {
+      const float xL = uniqueXs[0];
+      const float xR = uniqueXs[1];
+      if (xR > xL) {
+        canvas.addRect(cX + xL, cY + y - 0.5F * step, xR - xL, step + 1.0F,
+                       fillCol);
+      }
+    } else if (uniqueXs.size() >= 3) {
+      for (std::size_t j = 0; j + 1 < uniqueXs.size(); ++j) {
+        const float xMid = (uniqueXs[j] + uniqueXs[j + 1]) * 0.5F;
+        const float rSq  = xMid * xMid + y * y;
+        if (rSq >= (rIn - 0.5F) * (rIn - 0.5F) &&
+            rSq <= (rOut + 0.5F) * (rOut + 0.5F)) {
+          if (inAngle(std::atan2(y, xMid))) {
+            const float xL = uniqueXs[j];
+            const float xR = uniqueXs[j + 1];
+            if (xR > xL) {
+              canvas.addRect(cX + xL, cY + y - 0.5F * step, xR - xL,
+                             step + 1.0F, fillCol);
+            }
+          }
+        }
+      }
+    }
+  }
+
+  if (borderWidth > 0.0F && borderCol != 0) {
+    const std::size_t nInSteps =
+        static_cast<std::size_t>(std::max(2.0F, std::ceil(rIn * span / 2.0F)));
+    for (std::size_t s = 0; s < nInSteps; ++s) {
+      const float a0 = aStart + span * (static_cast<float>(s) / nInSteps);
+      const float a1 = aStart + span * (static_cast<float>(s + 1) / nInSteps);
+      canvas.addLine(cX + rIn * std::cos(a0), cY + rIn * std::sin(a0),
+                     cX + rIn * std::cos(a1), cY + rIn * std::sin(a1),
+                     borderWidth, borderCol);
+    }
+
+    const std::size_t nOutSteps =
+        static_cast<std::size_t>(std::max(2.0F, std::ceil(rOut * span / 2.0F)));
+    for (std::size_t s = 0; s < nOutSteps; ++s) {
+      const float a0 = aStart + span * (static_cast<float>(s) / nOutSteps);
+      const float a1 = aStart + span * (static_cast<float>(s + 1) / nOutSteps);
+      canvas.addLine(cX + rOut * std::cos(a0), cY + rOut * std::sin(a0),
+                     cX + rOut * std::cos(a1), cY + rOut * std::sin(a1),
+                     borderWidth, borderCol);
+    }
+
+    const std::size_t nRadSteps = static_cast<std::size_t>(
+        std::max(1.0F, std::ceil((rOut - rIn) / 2.0F)));
+    for (std::size_t s = 0; s < nRadSteps; ++s) {
+      const float r0 = rIn + (rOut - rIn) * (static_cast<float>(s) / nRadSteps);
+      const float r1 =
+          rIn + (rOut - rIn) * (static_cast<float>(s + 1) / nRadSteps);
+      canvas.addLine(cX + r0 * cosStart, cY + r0 * sinStart, cX + r1 * cosStart,
+                     cY + r1 * sinStart, borderWidth, borderCol);
+      canvas.addLine(cX + r0 * cosEnd, cY + r0 * sinEnd, cX + r1 * cosEnd,
+                     cY + r1 * sinEnd, borderWidth, borderCol);
+    }
   }
 }
 
@@ -337,37 +557,19 @@ void RadialMenu::drawFrame(FrameContext &ctx) {
   canvas_->clear();
   rebuildLayout(screenW, screenH);
 
-  // 1. Draw frosted plate backdrop and outer circular plate bounds
+  // 1. Draw circular frosted plate backdrop and outer circular plate bounds
   const float cX = hubX_ + hubSize_ * 0.5F;
   const float cY = hubY_ + hubSize_ * 0.5F;
-  canvas_->addRect(cX - config_.radius * 1.05F, cY - config_.radius * 1.05F,
-                   config_.radius * 2.1F, config_.radius * 2.1F, colRadialBg);
+  drawDisc(*canvas_, cX, cY, config_.radius + 12.0F, colRadialBg,
+           colRadialBorder, 1.5F, 128);
 
-  constexpr std::size_t kRingSegments = 32;
-  constexpr float twoPi               = 2.0F * std::numbers::pi_v<float>;
-  for (std::size_t i = 0; i < kRingSegments; ++i) {
-    const float a1 = static_cast<float>(i) * (twoPi / kRingSegments);
-    const float a2 = static_cast<float>(i + 1) * (twoPi / kRingSegments);
-    const float x1 = cX + config_.radius * std::cos(a1);
-    const float y1 = cY + config_.radius * std::sin(a1);
-    const float x2 = cX + config_.radius * std::cos(a2);
-    const float y2 = cY + config_.radius * std::sin(a2);
-    canvas_->addLine(x1, y1, x2, y2, 1.5F, colRadialBorder);
-  }
+  // 2. Draw radial action wedges (true pie wedges of the circle)
+  const auto &actionList = inSubRadial()
+                               ? config_.actions[activeParentAction_].subActions
+                               : config_.actions;
 
-  // 2. Draw radial spokes fanning out to pods
-  for (const auto &pod : currentPods_) {
-    const float pX = pod.x + pod.width * 0.5F;
-    const float pY = pod.y + pod.height * 0.5F;
-    const float inX = cX + config_.innerRadius * std::cos(pod.angle);
-    const float inY = cY + config_.innerRadius * std::sin(pod.angle);
-    canvas_->addLine(inX, inY, pX, pY, 1.0F, colSpoke);
-  }
-
-  // 3. Draw action pods
-  const auto &actionList =
-      inSubRadial() ? config_.actions[activeParentAction_].subActions
-                    : config_.actions;
+  const float rMid =
+      (config_.innerRadius + 4.0F + config_.radius + 8.0F) * 0.5F;
 
   for (std::size_t i = 0; i < currentPods_.size() && i < actionList.size();
        ++i) {
@@ -375,45 +577,31 @@ void RadialMenu::drawFrame(FrameContext &ctx) {
     const auto &act = actionList[i];
 
     canvas_->setTag(render::tagKindOverlay, pod.tag);
-    const std::uint32_t bgCol = act.active ? colPodActiveBg : colPodBg;
-    canvas_->addRect(pod.x, pod.y, pod.width, pod.height, bgCol);
+    const std::uint32_t bgCol     = act.active ? colPodActiveBg : colPodBg;
+    const std::uint32_t borderCol = act.active ? colRadialAccent : colPodBorder;
 
-    // Border
-    canvas_->addLine(pod.x, pod.y, pod.x + pod.width, pod.y, 1.0F,
-                     colPodBorder);
-    canvas_->addLine(pod.x, pod.y + pod.height, pod.x + pod.width,
-                     pod.y + pod.height, 1.0F, colPodBorder);
-    canvas_->addLine(pod.x, pod.y, pod.x, pod.y + pod.height, 1.0F,
-                     colPodBorder);
-    canvas_->addLine(pod.x + pod.width, pod.y, pod.x + pod.width,
-                     pod.y + pod.height, 1.0F, colPodBorder);
+    drawWedge(*canvas_, cX, cY, pod.innerRadius, pod.outerRadius,
+              pod.startAngle, pod.endAngle, bgCol, borderCol, 1.2F);
 
-    // Label text
-    const auto metrics = canvas_->measureText(pod.label);
-    const float tX     = pod.x + (pod.width - metrics.width) * 0.5F;
-    const float tY = pod.y + (pod.height + metrics.height) * 0.5F - 2.0F;
+    // Label text / icon centered inside the wedge
+    const auto metrics         = canvas_->measureText(pod.label);
+    const float podCenterX     = cX + rMid * std::cos(pod.angle);
+    const float podCenterY     = cY + rMid * std::sin(pod.angle);
+    const float tX             = podCenterX - metrics.width * 0.5F;
+    const float tY             = podCenterY + metrics.height * 0.5F - 2.0F;
     const std::uint32_t txtCol = act.active ? colRadialAccent : colPodText;
     canvas_->addText(ctx.state, tX, tY, pod.label, txtCol, bgCol);
   }
 
-  // 4. Central Hub Plate
-  const std::uint32_t hubTag =
-      inSubRadial() ? kRadialTagBack : kRadialTagHub;
+  // 3. Central Circular Hub Button
+  const std::uint32_t hubTag = inSubRadial() ? kRadialTagBack : kRadialTagHub;
   canvas_->setTag(render::tagKindOverlay, hubTag);
-  canvas_->addRect(hubX_, hubY_, hubSize_, hubSize_, colHubBg);
-  canvas_->addLine(hubX_, hubY_, hubX_ + hubSize_, hubY_, 1.5F,
-                   colRadialAccent);
-  canvas_->addLine(hubX_, hubY_ + hubSize_, hubX_ + hubSize_, hubY_ + hubSize_,
-                   1.5F, colRadialAccent);
-  canvas_->addLine(hubX_, hubY_, hubX_, hubY_ + hubSize_, 1.5F,
-                   colRadialAccent);
-  canvas_->addLine(hubX_ + hubSize_, hubY_, hubX_ + hubSize_, hubY_ + hubSize_,
-                   1.5F, colRadialAccent);
+  drawDisc(*canvas_, cX, cY, hubRadius_, colHubBg, colRadialAccent, 1.5F, 32);
 
   const std::string hubText = inSubRadial() ? "BACK" : "XUDU";
   const auto hubMetrics     = canvas_->measureText(hubText);
-  const float htX           = hubX_ + (hubSize_ - hubMetrics.width) * 0.5F;
-  const float htY = hubY_ + (hubSize_ + hubMetrics.height) * 0.5F - 2.0F;
+  const float htX           = cX - hubMetrics.width * 0.5F;
+  const float htY           = cY + hubMetrics.height * 0.5F - 2.0F;
   canvas_->addText(ctx.state, htX, htY, hubText, colHubText, colHubBg);
 
   canvas_->commit();
@@ -493,8 +681,9 @@ bool RadialMenu::picked(const render::PickingResult &pick, RenderState &state) {
   const float cY = hubY_ + hubSize_ * 0.5F;
   // Convert pick.y from SDL coords to Canvas coords
   const float pickCanvasY =
-      (lastScreenHeight_ > 0.0F) ? (lastScreenHeight_ - static_cast<float>(pick.y))
-                                 : static_cast<float>(pick.y);
+      (lastScreenHeight_ > 0.0F)
+          ? (lastScreenHeight_ - static_cast<float>(pick.y))
+          : static_cast<float>(pick.y);
   const float dx   = static_cast<float>(pick.x) - cX;
   const float dy   = pickCanvasY - cY;
   const float dist = std::hypot(dx, dy);
@@ -523,7 +712,7 @@ bool RadialMenu::picked(const render::PickingResult &pick, RenderState &state) {
         return true;
       }
     }
-  } else if (dist < config_.innerRadius) {
+  } else if (dist < config_.innerRadius || dist <= hubRadius_) {
     // Inside center hub
     if (inSubRadial()) {
       exitSubRadial();
@@ -545,12 +734,11 @@ void RadialMenu::describe(a11y::Builder &into) {
 
   constexpr std::uint64_t barId = 0x8000;
   auto &bar                     = into.add(barId, a11y::Role::Group);
-  bar.label                     = inSubRadial() ? "Alignment Sub-Menu"
-                                                : "3D Radial Marking Menu";
+  bar.label = inSubRadial() ? "Alignment Sub-Menu" : "3D Radial Marking Menu";
 
-  const auto &actionList =
-      inSubRadial() ? config_.actions[activeParentAction_].subActions
-                    : config_.actions;
+  const auto &actionList = inSubRadial()
+                               ? config_.actions[activeParentAction_].subActions
+                               : config_.actions;
 
   for (std::size_t i = 0; i < actionList.size(); ++i) {
     const auto &act   = actionList[i];
@@ -563,9 +751,9 @@ void RadialMenu::describe(a11y::Builder &into) {
 
   const auto hubId = 0x8000U + 99U;
   auto &hubNode    = into.add(hubId, a11y::Role::Button);
-  hubNode.label    = inSubRadial() ? "Back to Main Radial Menu"
-                                   : "Close Radial Menu";
-  hubNode.actions  = a11y::bit(a11y::Action::Click);
+  hubNode.label =
+      inSubRadial() ? "Back to Main Radial Menu" : "Close Radial Menu";
+  hubNode.actions = a11y::bit(a11y::Action::Click);
   bar.children.push_back(into.id(hubId));
 
   into.contribute(into.id(barId));

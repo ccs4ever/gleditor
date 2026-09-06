@@ -88,7 +88,7 @@ public:
   void open(float screenX, float screenY, std::uint32_t aDocIndex = 0,
             std::uint32_t aCharOffset = 0, std::uint32_t aCharLength = 0);
   void openAtWindowCoords(float windowX, float windowY,
-                          std::uint32_t aDocIndex = 0,
+                          std::uint32_t aDocIndex   = 0,
                           std::uint32_t aCharOffset = 0,
                           std::uint32_t aCharLength = 0);
   void close();
@@ -161,12 +161,23 @@ private:
     float width{0.0F};
     float height{0.0F};
     float angle{0.0F};
+    float startAngle{0.0F};
+    float endAngle{0.0F};
+    float innerRadius{0.0F};
+    float outerRadius{0.0F};
     std::uint32_t tag{0};
     std::string label;
     std::string desc;
   };
 
   void rebuildLayout(float screenW, float screenH);
+  static void drawDisc(Canvas &canvas, float cX, float cY, float radius,
+                       std::uint32_t fillCol, std::uint32_t borderCol = 0,
+                       float borderWidth = 0.0F, std::size_t slices = 24);
+  static void drawWedge(Canvas &canvas, float cX, float cY, float rIn,
+                        float rOut, float aStart, float aEnd,
+                        std::uint32_t fillCol, std::uint32_t borderCol = 0,
+                        float borderWidth = 0.0F);
 
   std::string fontName_;
   std::unique_ptr<Canvas> canvas_;
@@ -186,6 +197,7 @@ private:
   float hubX_{0.0F};
   float hubY_{0.0F};
   float hubSize_{48.0F};
+  float hubRadius_{24.0F};
   float lastScreenWidth_{0.0F};
   float lastScreenHeight_{0.0F};
 

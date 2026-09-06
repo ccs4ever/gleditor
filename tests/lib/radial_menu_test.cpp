@@ -78,7 +78,7 @@ TEST(RadialMenuTest, ActionDispatchAndHandlers) {
 
   std::string receivedId;
   std::string receivedAction;
-  std::uint32_t receivedDoc   = 0;
+  std::uint32_t receivedDoc    = 0;
   std::uint32_t receivedOffset = 0;
   std::uint32_t receivedLen    = 0;
 
@@ -127,4 +127,52 @@ TEST(RadialMenuTest, AccessibilityMenuTree) {
   menu.describe(builder);
 
   EXPECT_FALSE(tree.empty());
+}
+
+TEST(RadialMenuTest, CircularHubPicking) {
+  RadialMenu menu("Sans 10");
+  menu.open(400.0F, 300.0F);
+  EXPECT_TRUE(menu.isOpen());
+
+  testing::NiceMock<MockRenderDevice> device;
+  RenderState rState(&device);
+
+  // Pick on center hub tag closes menu
+  render::PickingResult pickHub;
+  pickHub.tag.kind         = render::tagKindOverlay;
+  pickHub.tag.clusterIndex = RadialMenu::kRadialTagHub;
+  pickHub.x                = 400;
+  pickHub.y                = 300;
+
+  EXPECT_TRUE(menu.picked(pickHub, rState));
+  EXPECT_FALSE(menu.isOpen());
+
+  // Test inside sub-radial: picking hub exits sub-radial
+  menu.open(400.0F, 300.0F);
+  menu.enterSubRadial(5);
+  EXPECT_TRUE(menu.inSubRadial());
+
+  render::PickingResult pickBack;
+  pickBack.tag.kind         = render::tagKindOverlay;
+  pickBack.tag.clusterIndex = RadialMenu::kRadialTagBack;
+  pickBack.x                = 400;
+  pickBack.y                = 300;
+
+  EXPECT_TRUE(menu.picked(pickBack, rState));
+  EXPECT_FALSE(menu.inSubRadial());
+  EXPECT_TRUE(menu.isOpen()); // Root menu remains open
+}
+
+TEST(RadialMenuTest, WedgeGeometryAndSectorResolution) {
+  // Test 10-way default menu sector resolution
+  // 10 sectors, sector width = 36 degrees = 2*pi/10
+  // Sector 0 is North: angle = pi/2
+  EXPECT_EQ(RadialMenu::resolveSector(0.0F, 50.0F, 10), 0);
+  // Sector 1: 36 deg clockwise from North -> (cos(54 deg), sin(54 deg))
+  EXPECT_EQ(RadialMenu::resolveSector(
+                50.0F * std::cos(0.3F * std::numbers::pi_v<float>),
+                50.0F * std::sin(0.3F * std::numbers::pi_v<float>), 10),
+            1);
+  // South (0, -50) should be Sector 5 (180 deg from North)
+  EXPECT_EQ(RadialMenu::resolveSector(0.0F, -50.0F, 10), 5);
 }
