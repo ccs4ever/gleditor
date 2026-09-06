@@ -459,6 +459,7 @@ ifneq ($(shell pkg-config --exists giflib && echo 1),1)
 LIBS += -lgif
 endif
 endif
+GLEDITOR_LIBS := -lryml
 XUDU_LIBS := $(shell pkg-config $(STATIC) --libs $(XUDU_PKGS)) -lryml
 # Matches XUDU_PKGS because ZIGZAG_SHARED_CORE_OBJS is XUDU_CORE_OBJS: zigzag
 # links the whole xanalogical engine, so it needs whatever that engine needs.
@@ -726,7 +727,7 @@ APP_LDFLAGS = -L$(OBJDIR) -lgleditor $(RPATH_FLAGS)
 
 gleditor: $(OBJDIR)/gleditor
 $(OBJDIR)/gleditor: $(GLEDITOR_OBJS) $(LIBLINK)
-	$(CXX) $(LDFLAGS) -o $@ $(GLEDITOR_OBJS) $(APP_LDFLAGS) $(LIBS)
+	$(CXX) $(LDFLAGS) -o $@ $(GLEDITOR_OBJS) $(APP_LDFLAGS) $(LIBS) $(GLEDITOR_LIBS)
 .PHONY: gleditor
 
 xudu: $(OBJDIR)/xudu
@@ -773,8 +774,8 @@ TEST_LIBS = $(shell pkg-config $(STATIC) --libs $(TEST_PKGS))
 # against: testing a separately compiled copy of the sources would not notice a
 # symbol that failed to be exported.
 gleditor_test: $(OBJDIR)/gleditor_test
-$(OBJDIR)/gleditor_test: $(LIB_TEST_OBJS) $(LIBLINK)
-	$(CXX) $(LDFLAGS) -o $@ $(LIB_TEST_OBJS) $(APP_LDFLAGS) $(LIBS) $(TEST_LIBS)
+$(OBJDIR)/gleditor_test: $(LIB_TEST_OBJS) $(OBJDIR)/apps/gleditor/editor_config.o $(LIBLINK)
+	$(CXX) $(LDFLAGS) -o $@ $(LIB_TEST_OBJS) $(OBJDIR)/apps/gleditor/editor_config.o $(APP_LDFLAGS) $(LIBS) $(GLEDITOR_LIBS) $(TEST_LIBS)
 
 # The xanalogical engine's tests link the engine and not the library, so they
 # run without a graphics device. That is the boundary being checked rather than

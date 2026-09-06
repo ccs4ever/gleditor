@@ -18,6 +18,8 @@
 #include "config.h" // for GLEDITOR_VERSION, TOSTRING
 #include <argparse/argparse.hpp>
 
+#include "editor_config.hpp"
+
 #include <gleditor/android_bootstrap.hpp>
 #include <gleditor/app.hpp>
 #include <gleditor/caret.hpp>
@@ -64,7 +66,8 @@ void updateDocumentSpatialPositions(
     RenderState &rState, const std::uint32_t activeIndex,
     const RendererRef &renderer,
     const std::shared_ptr<gleditor::DocumentSwitcher> &switcher,
-    const std::shared_ptr<gleditor::FloatingToolbar3D> &toolbar) {
+    const std::shared_ptr<gleditor::FloatingToolbar3D> &toolbar,
+    const gleditor::SpatialConfig &spatial) {
   if (rState.docs.empty()) {
     return;
   }
@@ -87,16 +90,17 @@ void updateDocumentSpatialPositions(
       doc->setRestingOpacity(1.0F);
       if (tl) {
         doc->animateMoveTo(*tl, glm::vec3(0.0F, 0.0F, 0.0F),
-                           gleditor::anim::docArrival);
+                           spatial.docArrivalSeconds);
       }
     } else {
-      const float spacingX = 70.0F;
-      const float depthZ   = -45.0F * static_cast<float>(std::abs(offset));
-      const float posX     = static_cast<float>(offset) * spacingX;
-      doc->setRestingOpacity(gleditor::anim::backgroundOpacity);
+      const float spacingX = spatial.documentSpacingX;
+      const float depthZ =
+          spatial.depthZ * static_cast<float>(std::abs(offset));
+      const float posX = static_cast<float>(offset) * spacingX;
+      doc->setRestingOpacity(spatial.backgroundOpacity);
       if (tl) {
         doc->animateMoveTo(*tl, glm::vec3(posX, 0.0F, depthZ),
-                           gleditor::anim::docArrival);
+                           spatial.docArrivalSeconds);
       }
     }
   }
@@ -107,7 +111,8 @@ void updateDocumentSpatialPositions(
 void bindCommands(gleditor::Application &app, const AppStateRef &state,
                   const RendererRef &renderer,
                   const std::shared_ptr<gleditor::DocumentSwitcher> &switcher,
-                  const std::shared_ptr<gleditor::FloatingToolbar3D> &toolbar) {
+                  const std::shared_ptr<gleditor::FloatingToolbar3D> &toolbar,
+                  const gleditor::EditorConfig &config) {
   app.bindDefaultViewCommands();
   app.commands().bind(SDL_SCANCODE_Q, "quit", "close the editor",
                       [state] { state->alive = false; });
@@ -137,27 +142,28 @@ void bindCommands(gleditor::Application &app, const AppStateRef &state,
       [toolbar] { toolbar->setVisible(!toolbar->isVisible()); });
 
   // Document switching keyboard navigation
-  app.commands().bind(SDL_SCANCODE_TAB, Mod::Ctrl, "next-doc",
-                      "switch to next document", [renderer, switcher, toolbar] {
-                        renderer->runWithState([renderer, switcher,
-                                                toolbar](RenderState &rState) {
-                          if (rState.docs.empty()) {
-                            return;
-                          }
-                          const auto cur = switcher->activeDocIndex();
-                          const auto next =
-                              (cur + 1U) %
-                              static_cast<std::uint32_t>(rState.docs.size());
-                          updateDocumentSpatialPositions(rState, next, renderer,
-                                                         switcher, toolbar);
-                        });
-                      });
+  const auto spatial = config.spatial;
+  app.commands().bind(
+      SDL_SCANCODE_TAB, Mod::Ctrl, "next-doc", "switch to next document",
+      [renderer, switcher, toolbar, spatial] {
+        renderer->runWithState(
+            [renderer, switcher, toolbar, spatial](RenderState &rState) {
+              if (rState.docs.empty()) {
+                return;
+              }
+              const auto cur = switcher->activeDocIndex();
+              const auto next =
+                  (cur + 1U) % static_cast<std::uint32_t>(rState.docs.size());
+              updateDocumentSpatialPositions(rState, next, renderer, switcher,
+                                             toolbar, spatial);
+            });
+      });
 
   app.commands().bind(
       SDL_SCANCODE_TAB, Mod::Ctrl | Mod::Shift, "prev-doc",
-      "switch to previous document", [renderer, switcher, toolbar] {
+      "switch to previous document", [renderer, switcher, toolbar, spatial] {
         renderer->runWithState(
-            [renderer, switcher, toolbar](RenderState &rState) {
+            [renderer, switcher, toolbar, spatial](RenderState &rState) {
               if (rState.docs.empty()) {
                 return;
               }
@@ -165,7 +171,7 @@ void bindCommands(gleditor::Application &app, const AppStateRef &state,
               const auto cur   = switcher->activeDocIndex();
               const auto prev  = (cur + total - 1U) % total;
               updateDocumentSpatialPositions(rState, prev, renderer, switcher,
-                                             toolbar);
+                                             toolbar, spatial);
             });
       });
 
@@ -175,15 +181,23 @@ void bindCommands(gleditor::Application &app, const AppStateRef &state,
     app.commands().bind(
         scancode, Mod::Ctrl, "doc-" + std::to_string(i),
         "switch to document " + std::to_string(i),
-        [renderer, switcher, toolbar, targetIndex] {
-          renderer->runWithState(
-              [renderer, switcher, toolbar, targetIndex](RenderState &rState) {
-                if (targetIndex < rState.docs.size()) {
-                  updateDocumentSpatialPositions(rState, targetIndex, renderer,
-                                                 switcher, toolbar);
-                }
-              });
+        [renderer, switcher, toolbar, targetIndex, spatial] {
+          renderer->runWithState([renderer, switcher, toolbar, targetIndex,
+                                  spatial](RenderState &rState) {
+            if (targetIndex < rState.docs.size()) {
+              updateDocumentSpatialPositions(rState, targetIndex, renderer,
+                                             switcher, toolbar, spatial);
+            }
+          });
         });
+  }
+
+  if (!config.keymap.empty()) {
+    std::string keymapText;
+    for (const auto &[name, chord] : config.keymap) {
+      keymapText += name + ": \"" + chord + "\"\n";
+    }
+    app.commands().rebindFromText(keymapText);
   }
 }
 
@@ -200,6 +214,9 @@ int main(const int argc, char **argv) {
 
   argparse::ArgumentParser parser("gleditor", TOSTRING(GLEDITOR_VERSION));
   gleditor::addCommonArguments(parser, detailed);
+  parser.add_argument("--config")
+      .help("path to configuration YAML file")
+      .default_value(std::string{});
   parser.add_argument("files").help("input files").remaining();
 
   // Answered before parse_args, because a request for help is the whole of
@@ -248,6 +265,14 @@ int main(const int argc, char **argv) {
   }
 
   try {
+    const std::string configPath = parser.get<std::string>("--config");
+    const auto editorConfig      = gleditor::loadEditorConfig(configPath);
+    if (!parser.is_used("--font") &&
+        !editorConfig.settings.fontFamily.empty()) {
+      state->defaultFontName =
+          editorConfig.settings.fontFamily + " " +
+          std::to_string(static_cast<int>(editorConfig.settings.fontSize));
+    }
     auto docSwitcher =
         std::make_shared<gleditor::DocumentSwitcher>(state->defaultFontName);
     auto floatingToolbar =
@@ -256,12 +281,13 @@ int main(const int argc, char **argv) {
     docSwitcher->setCloseHandler([&renderer](const std::uint32_t docIndex) {
       renderer->push(RenderItemCloseDoc(docIndex));
     });
-    docSwitcher->setSelectHandler([&renderer, &docSwitcher, &floatingToolbar](
-                                      const std::uint32_t docIndex) {
+    const auto spatialCfg = editorConfig.spatial;
+    docSwitcher->setSelectHandler([&renderer, &docSwitcher, &floatingToolbar,
+                                   spatialCfg](const std::uint32_t docIndex) {
       renderer->runWithState([&renderer, &docSwitcher, &floatingToolbar,
-                              docIndex](RenderState &rState) {
+                              spatialCfg, docIndex](RenderState &rState) {
         updateDocumentSpatialPositions(rState, docIndex, renderer, docSwitcher,
-                                       floatingToolbar);
+                                       floatingToolbar, spatialCfg);
       });
     });
 
@@ -313,7 +339,8 @@ int main(const int argc, char **argv) {
     state->accessibility->addSource(floatingToolbar.get());
 
     gleditor::Application app(state, renderer, backend, "GL Editor");
-    bindCommands(app, state, renderer, docSwitcher, floatingToolbar);
+    bindCommands(app, state, renderer, docSwitcher, floatingToolbar,
+                 editorConfig);
     return app.run();
   } catch (const std::exception &err) {
     std::cerr << "Error: " << err.what() << "\n";

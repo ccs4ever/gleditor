@@ -1,0 +1,39 @@
+# Gleditor Application Configuration
+settings:
+  fontSize: 16
+  fontFamily: "Monospace"
+  lineHeight: 1.4
+  autoSaveSeconds: 5
+  theme: "system"
+
+spatial:
+  documentSpacingX: 70.0
+  depthZ: -45.0
+  docArrivalSeconds: 0.22
+  backgroundOpacity: 0.35
+
+keymap:
+  new: "Ctrl+N"
+  close: "Ctrl+W"
+  save: "Ctrl+S"
+  bold: "Ctrl+B"
+  italic: "Ctrl+I"
+  underline: "Ctrl+U"
+  3d-overview: "F10"
+  next-doc: "Ctrl+Tab"
+  prev-doc: "Ctrl+Shift+Tab"
+
+schema:
+  purpose: "Configuration file for gleditor plain GPU text editor."
+  fields:
+    fontSize: "Base font size in points."
+    fontFamily: "Font family name resolved via fontconfig."
+    lineHeight: "Line height multiplier."
+    autoSaveSeconds: "Auto-save interval in seconds."
+    documentSpacingX: "Horizontal spacing between document columns in 3D space."
+    depthZ: "Depth offset in Z units per background document layer."
+    docArrivalSeconds: "Arrival animation duration in seconds."
+    backgroundOpacity: "Resting opacity for inactive background documents."
+
+user_notes:
+  notes: "User notes and customization preferences for gleditor."
