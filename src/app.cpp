@@ -996,7 +996,6 @@ int Application::run() {
         if (nullptr != state->modal && state->modal->grabbing()) {
           break;
         }
-        const std::lock_guard locker(state->view);
         const auto sdlMods = static_cast<std::uint16_t>(SDL_GetModState());
         float wx           = sdl::wheelX(evt);
         float wy           = sdl::wheelY(evt);
@@ -1005,6 +1004,11 @@ int Application::run() {
           wy = -wy;
         }
 
+        if (state->wheelHandler && state->wheelHandler(wx, wy, sdlMods)) {
+          break;
+        }
+
+        const std::lock_guard locker(state->view);
         const float perPixel          = worldPerPixel(state->view);
         constexpr float pixelsPerTick = 48.0F;
 

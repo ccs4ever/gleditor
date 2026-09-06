@@ -313,7 +313,14 @@ bool Renderer::update(RenderState &state, const bool settled) {
   budget.coarseBelow = this->state->coarseBelow;
   budget.cull        = this->state->cullPages;
   lastDraw           = DrawStats{};
-  for (const std::shared_ptr<Doc> &doc : state.docs) {
+  // Sort documents back-to-front (lowest Z first) so that alpha blending
+  // correctly composites semi-transparent layers in 3D onion-skinning mode.
+  auto sortedDocs = state.docs;
+  std::stable_sort(sortedDocs.begin(), sortedDocs.end(),
+                   [](const auto &a, const auto &b) {
+                     return a->currentPosition().z < b->currentPosition().z;
+                   });
+  for (const std::shared_ptr<Doc> &doc : sortedDocs) {
     doc->collect(state.pageBatches, viewProjection, budget, lastDraw);
   }
   // Closed documents still draw while they fade. They are gone from the open

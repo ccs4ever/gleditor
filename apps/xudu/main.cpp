@@ -27,6 +27,7 @@
 
 #include "config.h" // for GLEDITOR_VERSION, TOSTRING
 #include <argparse/argparse.hpp>
+#include <glm/gtc/matrix_transform.hpp>
 
 #include <gleditor/app.hpp>
 #include <gleditor/audio.hpp>
@@ -958,6 +959,104 @@ public:
     });
   }
 
+  [[nodiscard]] bool onionSkinMode() const noexcept { return onionSkinMode_; }
+
+  void setOnionSkin(const bool enabled) {
+    renderer->runWithState([this, enabled](RenderState &rState) {
+      if (onionSkinMode_ == enabled) {
+        return;
+      }
+      onionSkinMode_ = enabled;
+      if (onionSkinMode_) {
+        auto *const caret = renderer->editCaret();
+        if (caret && caret->active() &&
+            caret->documentIndex() < rState.docs.size()) {
+          activeOnionIdx_ = caret->documentIndex();
+        } else if (switcher) {
+          activeOnionIdx_ = switcher->activeDocIndex();
+        }
+        arrangeOnionSkin(rState);
+        state->showDialog(render::DiagnosticSeverity::Info, "3D Onion Skin",
+                          "Onion skin mode active: scroll wheel cycles " +
+                              std::to_string(rState.docs.size()) +
+                              " documents.");
+      } else {
+        arrangeAlongside(rState);
+      }
+    });
+  }
+
+  void toggleOnionSkin() { setOnionSkin(!onionSkinMode_); }
+
+  void arrangeOnionSkin(RenderState &rState) {
+    if (rState.docs.empty()) {
+      return;
+    }
+    const auto total  = rState.docs.size();
+    const auto active = activeOnionIdx_ % total;
+    for (std::size_t i = 0; i < total; ++i) {
+      if (!rState.docs[i]) {
+        continue;
+      }
+      const auto k   = (i - active + total) % total;
+      const float kF = static_cast<float>(k);
+      const glm::vec3 targetPos(kF * 18.0F, kF * 14.0F, -kF * 10.0F);
+      const float targetOpacity =
+          (k == 0) ? 1.0F : std::max(0.20F, 1.0F - 0.20F * kF);
+
+      auto *const tl = renderer->animTimeline();
+      if (tl) {
+        rState.docs[i]->animateMoveTo(*tl, targetPos,
+                                      gleditor::anim::docArrival);
+        rState.docs[i]->animateOpacity(*tl, targetOpacity,
+                                       gleditor::anim::docArrival);
+      } else {
+        rState.docs[i]->setModel(glm::translate(glm::mat4(1.0F), targetPos));
+        rState.docs[i]->setImmediateOpacity(targetOpacity);
+      }
+    }
+  }
+
+  void arrangeAlongside(RenderState &rState) {
+    for (std::size_t i = 0; i < rState.docs.size(); ++i) {
+      if (!rState.docs[i]) {
+        continue;
+      }
+      const auto slot = AbstractRenderer::documentSlot(i);
+      auto *const tl  = renderer->animTimeline();
+      if (tl) {
+        rState.docs[i]->animateMoveTo(*tl, slot, gleditor::anim::docArrival);
+        rState.docs[i]->animateOpacity(*tl, 1.0F, gleditor::anim::docArrival);
+      } else {
+        rState.docs[i]->setModel(glm::translate(glm::mat4(1.0F), slot));
+        rState.docs[i]->setImmediateOpacity(1.0F);
+      }
+    }
+  }
+
+  void cycleOnionSkin(const int delta) {
+    renderer->runWithState([this, delta](RenderState &rState) {
+      if (rState.docs.empty()) {
+        return;
+      }
+      const int n = static_cast<int>(rState.docs.size());
+      int nextIdx = (static_cast<int>(activeOnionIdx_) + delta) % n;
+      if (nextIdx < 0) {
+        nextIdx += n;
+      }
+      activeOnionIdx_ = static_cast<std::size_t>(nextIdx);
+      arrangeOnionSkin(rState);
+      if (switcher) {
+        switcher->setActiveDocIndex(
+            static_cast<std::uint32_t>(activeOnionIdx_));
+      }
+      auto *const caret = renderer->editCaret();
+      if (caret) {
+        caret->placeAt(static_cast<std::uint32_t>(activeOnionIdx_), 0);
+      }
+    });
+  }
+
 private:
   struct Pending {
     std::uint32_t doc{};
@@ -975,6 +1074,8 @@ private:
   std::shared_ptr<gleditor::DocumentSwitcher> switcher;
   std::optional<Pending> pending;
   std::vector<std::shared_ptr<gleditor::MediaWidget>> mediaWidgets;
+  bool onionSkinMode_{false};
+  std::size_t activeOnionIdx_{0};
 
   /// Set in deviceReady(), so a MediaWidget made later in syncMediaWidgets()
   /// can be handed the same device and pipeline description explicitly.
@@ -1063,6 +1164,9 @@ void bindCommands(gleditor::Application &app, const AppStateRef &state,
   app.commands().bind(SDL_SCANCODE_O, Mod::Ctrl, "open-doc",
                       "open a document or system xanadoc",
                       [&views] { views.openDocumentPalette(); });
+  app.commands().bind(SDL_SCANCODE_O, Mod::Ctrl | Mod::Shift, "onion-skin",
+                      "toggle 3D multi-document onion skinning mode",
+                      [&views] { views.toggleOnionSkin(); });
   app.commands().bind(SDL_SCANCODE_LEFTBRACKET, Mod::Ctrl, "scrub-back",
                       "scrub backward in hypertime history",
                       [&views] { views.scrubHistory(true); });
@@ -1336,6 +1440,11 @@ int main(const int argc, char **argv) {
   parser.add_argument("--alias")
       .help("assign alias to microversion as VERSION:ALIAS; repeatable")
       .append();
+  parser.add_argument("--onion-skin")
+      .help("visualize open documents stacked in 3D depth with opacity decay; "
+            "scroll wheel cycles")
+      .default_value(false)
+      .implicit_value(true);
   parser.add_argument("--author-name")
       .help("name to record on publications made from this machine")
       .default_value(std::string{});
@@ -2149,6 +2258,22 @@ int main(const int argc, char **argv) {
     Views views(*session, renderer, map, images, publishForm, state,
                 docSwitcher);
 
+    state->wheelHandler = [&views](float /*wx*/, float wy,
+                                   std::uint16_t /*mods*/) -> bool {
+      if (!views.onionSkinMode()) {
+        return false;
+      }
+      if (wy > 0.1F) {
+        views.cycleOnionSkin(-1);
+        return true;
+      }
+      if (wy < -0.1F) {
+        views.cycleOnionSkin(1);
+        return true;
+      }
+      return false;
+    };
+
     docSwitcher->setCloseHandler([&views](const std::uint32_t docIndex) {
       views.closeDocument(docIndex);
     });
@@ -2295,6 +2420,19 @@ int main(const int argc, char **argv) {
             views.showAlongside(v, 0.0F, 0);
           }
         });
+    map.setOnionSkinHandler(
+        [&views, &session, &renderer](const std::vector<MicroversionId> &vers) {
+          const auto count = session->views().size();
+          for (std::size_t i = 0; i < count; i++) {
+            renderer->push(RenderItemCloseDoc());
+          }
+          renderer->runWithState(
+              [&session](RenderState &) { session->clearViews(); });
+          for (const auto &v : vers) {
+            views.showAlongside(v, 0.0F, 0);
+          }
+          views.setOnionSkin(true);
+        });
     map.setQuoteHandler([&session, &views](const MicroversionId &srcVer,
                                            const std::uint32_t srcAt,
                                            const std::uint32_t srcLen) {
@@ -2342,6 +2480,9 @@ int main(const int argc, char **argv) {
     }
     for (const auto &behind : background) {
       views.showAlongside(behind, backgroundDepthZ, 0);
+    }
+    if (parser["--onion-skin"] == true) {
+      views.setOnionSkin(true);
     }
 
     std::vector<std::shared_ptr<gleditor::AudioWidget>> audioWidgets;

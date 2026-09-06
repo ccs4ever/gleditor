@@ -199,6 +199,15 @@ struct AppState {
   std::function<bool(const std::string &)> runCommand;
 
   /**
+   * @brief Interceptor for mouse wheel events on the event thread.
+   *
+   * If set and returns true, consumes the mouse wheel event so the default
+   * camera zoom/scroll is bypassed. Used by interactive modes like 3D
+   * onion skinning to cycle documents.
+   */
+  std::function<bool(float wx, float wy, std::uint16_t mods)> wheelHandler;
+
+  /**
    * @brief A --type step named decorations for the text it just inserted.
    *
    * Unset by default: plain gleditor has no concept of formatting a span of

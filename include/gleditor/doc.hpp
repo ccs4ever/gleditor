@@ -857,6 +857,22 @@ public:
                      double seconds = gleditor::anim::docArrival,
                      double delay   = 0.0);
 
+  /**
+   * @brief Ease this document to a new target opacity.
+   *
+   * Used in onion skinning and spatial transitions where layered documents
+   * smoothly shift resting opacities.
+   */
+  void animateOpacity(ch::Timeline &timeline, float target,
+                      double seconds = gleditor::anim::docArrival,
+                      double delay   = 0.0);
+
+  /// Set opacity immediately without animation.
+  void setImmediateOpacity(const float target) {
+    opacity        = target;
+    restingOpacity = target;
+  }
+
   /// True once a departure has been started.
   [[nodiscard]] bool isClosing() const { return closing; }
   /// True when a departing document has finished fading and can be dropped.
@@ -869,6 +885,8 @@ public:
   [[nodiscard]] glm::mat4 modelMatrix() const;
   /// Alpha this document currently draws at.
   [[nodiscard]] float currentOpacity() const { return opacity(); }
+  /// Position this document currently rests at or is moving towards.
+  [[nodiscard]] glm::vec3 currentPosition() const { return position(); }
 
   bool fullyLoaded{false};
 

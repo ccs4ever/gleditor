@@ -582,6 +582,16 @@ void Doc::animateMoveTo(ch::Timeline &timeline, const glm::vec3 &target,
   motion.then<ch::RampTo>(target, seconds, ch::EaseInOutQuad());
 }
 
+void Doc::animateOpacity(ch::Timeline &timeline, const float target,
+                         const double seconds, const double delay) {
+  restingOpacity = target;
+  auto motion    = timeline.apply(&opacity);
+  if (delay > 0.0) {
+    motion.then<ch::Hold>(opacity(), delay);
+  }
+  motion.then<ch::RampTo>(target, seconds, ch::EaseInOutQuad());
+}
+
 std::optional<render::HighlightRange>
 Page::highlightFor(const std::uint32_t selStart, const std::uint32_t selEnd,
                    const std::uint32_t colour) const {

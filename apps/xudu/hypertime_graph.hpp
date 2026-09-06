@@ -1,12 +1,15 @@
 /**
  * @file hypertime_graph.hpp
- * @brief Interactive 2D Hypertime Branching DAG and Unlimited N-Way Visual Diff Engine.
+ * @brief Interactive 2D Hypertime Branching DAG and Unlimited N-Way Visual Diff
+ * Engine.
  *
  * Replaces the 1D hypertime map with a full 2D topological branching graph:
  * - Circular microversion nodes with centered single-letter op indicators
  *   ('I', 'D', 'R', 'T', 'L', 'P', 'G').
- * - Dynamic unobstructed placement of author aliases avoiding connecting branch lines.
- * - Multi-selection for arbitrary N-way primedia address comparison without limits.
+ * - Dynamic unobstructed placement of author aliases avoiding connecting branch
+ * lines.
+ * - Multi-selection for arbitrary N-way primedia address comparison without
+ * limits.
  * - Continuous horizontal time scrubber along the bottom.
  * - Floating comparative diff summary and quick [Quote into Head] transclusion.
  */
@@ -44,12 +47,13 @@ class HypertimeGraph : public gleditor::FrameContributor,
                        public gleditor::PickObserver,
                        public gleditor::a11y::Source {
 public:
-  static constexpr std::uint32_t kTagScrubberThumb = 900U;
-  static constexpr std::uint32_t kTagScrubberTrack = 901U;
-  static constexpr std::uint32_t kTagQuoteButton   = 910U;
-  static constexpr std::uint32_t kTagOpen3DButton  = 911U;
-  static constexpr std::uint32_t kTagClearComp     = 912U;
-  static constexpr std::uint32_t kTagNodeBase      = 1000U;
+  static constexpr std::uint32_t kTagScrubberThumb   = 900U;
+  static constexpr std::uint32_t kTagScrubberTrack   = 901U;
+  static constexpr std::uint32_t kTagQuoteButton     = 910U;
+  static constexpr std::uint32_t kTagOpen3DButton    = 911U;
+  static constexpr std::uint32_t kTagClearComp       = 912U;
+  static constexpr std::uint32_t kTagOnionSkinButton = 913U;
+  static constexpr std::uint32_t kTagNodeBase        = 1000U;
 
   HypertimeGraph(std::string aFontName, const Session &aSession);
   ~HypertimeGraph() override;
@@ -92,15 +96,18 @@ public:
   void setScrubHandler(std::function<void(const MicroversionId &)> aScrubber) {
     scrubHandler_ = std::move(aScrubber);
   }
-  void setQuoteHandler(
-      std::function<void(const MicroversionId &sourceVer, std::uint32_t at,
-                         std::uint32_t len)>
-          aQuoter) {
+  void setQuoteHandler(std::function<void(const MicroversionId &sourceVer,
+                                          std::uint32_t at, std::uint32_t len)>
+                           aQuoter) {
     quoteHandler_ = std::move(aQuoter);
   }
   void setCompareHandler(
       std::function<void(const std::vector<MicroversionId> &)> aComparer) {
     compareHandler_ = std::move(aComparer);
+  }
+  void setOnionSkinHandler(
+      std::function<void(const std::vector<MicroversionId> &)> aOnionHandler) {
+    onionSkinHandler_ = std::move(aOnionHandler);
   }
 
   // -- Multi-Selection for Comparison -----------------------------------------
@@ -111,7 +118,8 @@ public:
     return comparedVersions_;
   }
 
-  /// Single-letter code corresponding to an OpKind ('I', 'D', 'R', 'T', 'L', 'P', 'G').
+  /// Single-letter code corresponding to an OpKind ('I', 'D', 'R', 'T', 'L',
+  /// 'P', 'G').
   [[nodiscard]] static char opKindLetter(std::optional<OpKind> kind) noexcept;
 
   // -- Geometry Helper --------------------------------------------------------
@@ -181,6 +189,7 @@ private:
   std::function<void(const MicroversionId &, std::uint32_t, std::uint32_t)>
       quoteHandler_;
   std::function<void(const std::vector<MicroversionId> &)> compareHandler_;
+  std::function<void(const std::vector<MicroversionId> &)> onionSkinHandler_;
 
   std::uint64_t builtAt{0};
   std::uint64_t revision_{1};
