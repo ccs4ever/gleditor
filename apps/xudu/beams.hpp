@@ -43,9 +43,12 @@
 #include "xudu/core/link_layout.hpp"
 #include "xudu/core/microversion.hpp"
 #include "xudu/core/ops.hpp"
+#include "xudu/core/tension_layout.hpp"
 #include "xudu/session.hpp"
 
 namespace xudu {
+
+class TenuousTetherOverlay;
 
 /**
  * @class LinkBeams
@@ -150,6 +153,21 @@ public:
   [[nodiscard]] std::size_t transclusionStrandCount() const {
     return transclusionStrands.size();
   }
+
+  void setTetherOverlay(TenuousTetherOverlay *overlay) noexcept {
+    tetherOverlay_ = overlay;
+  }
+  [[nodiscard]] TensionLayoutEngine &tensionEngine() noexcept {
+    return tensionEngine_;
+  }
+  [[nodiscard]] const TensionLayoutEngine &tensionEngine() const noexcept {
+    return tensionEngine_;
+  }
+  void setPhysicsEnabled(const bool enabled) noexcept {
+    physicsEnabled_ = enabled;
+  }
+  [[nodiscard]] bool physicsEnabled() const noexcept { return physicsEnabled_; }
+  void togglePhysics() noexcept { physicsEnabled_ = !physicsEnabled_; }
 
 private:
   /**
@@ -380,6 +398,10 @@ private:
   /// Bumped whenever the strands change, so the description is rebuilt then
   /// and not every frame.
   std::uint64_t described{1};
+
+  TensionLayoutEngine tensionEngine_;
+  TenuousTetherOverlay *tetherOverlay_{nullptr};
+  bool physicsEnabled_{false};
 };
 
 } // namespace xudu

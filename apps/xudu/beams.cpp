@@ -23,6 +23,7 @@
 
 #include "xudu/core/anchor_lanes.hpp"
 #include "xudu/core/framing.hpp"
+#include "xudu/tenuous_tether.hpp"
 
 namespace xudu {
 
@@ -620,7 +621,70 @@ void LinkBeams::alignPair(std::size_t fromDocIdx, std::size_t toDocIdx,
     docSlots[d]      = currX;
   }
 
+  // Update physical tension layout bodies and constraints
+  tensionEngine_.clear();
+  for (std::size_t d = 0; d < state.docs.size(); ++d) {
+    if (!state.docs[d]) {
+      continue;
+    }
+    TensionBody body;
+    body.docIndex = d;
+    const glm::vec3 cur(state.docs[d]->getModel()[3]);
+    body.position        = cur;
+    body.restingPosition = cur;
+    float halfW          = fallbackDocHalfWidth;
+    float heightW        = 70.0F;
+    if (const auto *p = state.docs[d]->page(0)) {
+      halfW   = (p->widthPixels() * 0.5F) * Doc::pixelsToWorld;
+      heightW = p->heightPixels() * Doc::pixelsToWorld;
+    }
+    body.width        = halfW * 2.0F;
+    body.height       = heightW;
+    body.isForeground = !isBackground(d);
+    body.isFlying     = (d == farDocIdx && farPos.z < -5.0F);
+    body.pinned       = (d == fromDocIdx);
+    tensionEngine_.setBody(body);
+  }
+
+  TensionConstraint constraint;
+  constraint.fromDoc     = fromDocIdx;
+  constraint.toDoc       = toDocIdx;
+  constraint.nearAnchorY = nearCenterY - nearPos.y;
+  constraint.farAnchorY  = farCenterY - farPos.y;
+  constraint.targetGap   = documentGap;
+  constraint.prominence  = 1.0F;
+  constraint.active      = true;
+  tensionEngine_.addConstraint(constraint);
+
+  if (physicsEnabled_) {
+    constexpr float dt = 0.016F;
+    for (int step = 0; step < 25; ++step) {
+      tensionEngine_.step(dt);
+    }
+    for (std::size_t d = 0; d < state.docs.size(); ++d) {
+      if (const auto *b = tensionEngine_.findBody(d)) {
+        if (!isBackground(d)) {
+          docSlots[d] = b->position.x;
+        }
+      }
+    }
+  }
+
   const glm::vec3 target{docSlots[farDocIdx], farPos.y + deltaY, 0.0F};
+
+  // Register tenuous parent tether if document flew from background plane
+  if (tetherOverlay_ != nullptr && farPos.z < -5.0F) {
+    FlyingTetherAnchor anchor;
+    anchor.docIndex   = farDocIdx;
+    anchor.originPos  = farPos;
+    anchor.currentPos = target;
+    anchor.width      = farHalfWidth * 2.0F;
+    anchor.height =
+        farPage ? (farPage->heightPixels() * Doc::pixelsToWorld) : 70.0F;
+    anchor.colour = 0x38BDF855; // Ethereal cyan with ~33% alpha
+    anchor.active = true;
+    tetherOverlay_->setTether(anchor);
+  }
 
   if (glm::distance(target, farPos) >= alreadyAligned) {
     if (linkId) {

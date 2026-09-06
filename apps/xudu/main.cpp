@@ -65,6 +65,7 @@
 #include "xudu/pouch_drawer.hpp"
 #include "xudu/session.hpp"
 #include "xudu/swarm_telescope_overlay.hpp"
+#include "xudu/tenuous_tether.hpp"
 
 using gleditor::Mod;
 using xudu::Author;
@@ -86,6 +87,7 @@ using xudu::PublicationEntry;
 using xudu::Session;
 using xudu::SwarmCatalog;
 using xudu::SwarmTelescopeOverlay;
+using xudu::TenuousTetherOverlay;
 using xudu::TetherPayload;
 
 namespace {
@@ -1349,6 +1351,9 @@ void bindCommands(gleditor::Application &app, const AppStateRef &state,
   app.commands().bind(SDL_SCANCODE_F3, Mod::None, "telescope-toggle-f3",
                       "toggle decentralized swarm telescope overlay",
                       [&swarmTelescope] { swarmTelescope.toggle(); });
+  app.commands().bind(SDL_SCANCODE_F4, Mod::None, "tension-physics-toggle",
+                      "toggle 3-way tension spring layout simulation",
+                      [&links] { links.togglePhysics(); });
   app.commands().bind(SDL_SCANCODE_LEFTBRACKET, Mod::Ctrl, "scrub-back",
                       "scrub backward in hypertime history",
                       [&views] { views.scrubHistory(true); });
@@ -1669,6 +1674,15 @@ int main(const int argc, char **argv) {
   parser.add_argument("--swarm-sample")
       .help("open decentralized swarm telescope overlay with pre-seeded sample "
             "publications and topics")
+      .default_value(false)
+      .implicit_value(true);
+  parser.add_argument("--physics")
+      .help("enable 3-way tension spring layout simulation for document "
+            "positioning")
+      .default_value(false)
+      .implicit_value(true);
+  parser.add_argument("--tension-layout")
+      .help("alias for --physics")
       .default_value(false)
       .implicit_value(true);
   parser.add_argument("--author-name")
@@ -2821,6 +2835,11 @@ int main(const int argc, char **argv) {
     LinkBeams links(*session, renderer);
     links.setVisible(parser["--no-beams"] != true);
     links.setSworph(parser["--no-sworph"] != true);
+    if (parser["--physics"] == true || parser["--tension-layout"] == true) {
+      links.setPhysicsEnabled(true);
+    }
+    TenuousTetherOverlay tenuousTetherOverlay(renderer, nullptr);
+    links.setTetherOverlay(&tenuousTetherOverlay);
     links.setOpener([&views](const MicroversionId &version) {
       views.showAlongside(version);
     });
@@ -2852,6 +2871,7 @@ int main(const int argc, char **argv) {
     renderer->addFrameContributor(docSwitcher.get());
     renderer->addFrameContributor(&map);
     renderer->addFrameContributor(&links);
+    renderer->addFrameContributor(&tenuousTetherOverlay);
     renderer->addFrameContributor(&images);
     renderer->addFrameContributor(&views);
     renderer->addFrameContributor(radialMenu.get());
