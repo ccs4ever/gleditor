@@ -191,9 +191,39 @@ auto &keymapStore = session.systemStore(SystemDocKind::Keymap);
 auto history = keymapStore.allVersions();
 if (history.size() >= 4) {
   auto targetVersion = history[history.size() - 4];
-  session.revertSystemDoc(SystemDocKind::Keymap, targetVersion);
+  session.repointSystemDoc(SystemDocKind::Keymap, targetVersion);
 }
 ```
+
+### 3.3 Author-Selectable Current Versions & Head Repointing
+
+In classical version control (like Git), "HEAD" is a single pointer, while branches are named refs. In classical Xudu, `Store::latest()` fell back to the chronological tip with the greatest MicroversionId. However, an author often maintains **multiple parallel states considered current** (e.g. English Edition and French Edition, or Draft vs. Published Edition).
+
+To reflect authentic Xanadulogical reality:
+1. **Author-Selectable Set of Current Versions (`currentVersions`)**:
+   - Every `xudu::Store` maintains an explicit, author-designated set of microversions considered active or current:
+     $$\text{currentVersions} = \{v_1, v_2, \dots, v_k\} \subseteq \text{allVersions}$$
+   - When a xanadoc is opened without specifying an exact microversion, all members of `currentVersions` are opened side-by-side as parallel active views.
+   - Persisted beside the operations and primedia spools in `current.yaml`:
+     ```yaml
+     # Current active versions designated by the author
+     current:
+       - "1.4"
+       - "1.2.1"
+     ```
+
+2. **System Xanadocs Constraint ($N = 1$ Active Head)**:
+   - For all System Xanadocs (`system://keymap`, `system://settings`, `system://layout`, `system://ui`), the set of current versions is strictly constrained to **exactly one version**:
+     $$|\text{currentVersions}| = 1$$
+   - This single current version represents the **active live configuration** evaluated by the engine.
+
+3. **Arbitrary Hypertime Repointing**:
+   - The author can repoint a System Xanadoc's current version to **any past or alternate microversion in its history** at will:
+     ```cpp
+     store.repointCurrentVersion(targetMicroversion);
+     ```
+   - **Non-Destructive Time Travel**: Repointing changes the active head pointer without erasing downstream operations. If an author scrubs their keybindings back to state `1.1` to test a legacy profile, operations `1.2`, `1.3`, and branches `1.1.1` remain fully preserved in the operations spool. The author can repoint forward or branch into a new configuration at any time.
+   - **Live Subsystem Notification**: When `repointCurrentVersion` is called on a system store, it triggers the registered `onCurrentVersionChanged` observer, instantly recompiling keybindings, recalculating toast layout vectors, or updating UI font descriptions without restarting the process.
 
 ---
 
@@ -248,7 +278,29 @@ constexpr std::string_view systemDocUri(SystemDocKind kind) {
 - System stores are loaded into `Session::stores` with `isSystem = true` so they do not appear in the normal document row unless explicitly inspected in a "Settings View".
 - Access to active settings is cached in lightweight memory structures (`ParsedKeymap`, `LayoutConfig`, `ThemeConfig`) updated on every system store epoch change.
 
-### 5.3 120 FPS Performance Envelope ($8.33\,\text{ms}$)
+### 5.3 `Store` Current Versions API & Serialization
+
+In `apps/xudu/core/store.hpp`:
+```cpp
+class Store : public SpanReader {
+public:
+  // -- Current Versions (Author-Designated Heads) --------------------------
+  [[nodiscard]] const std::vector<MicroversionId> &currentVersions() const;
+  [[nodiscard]] MicroversionId primaryCurrentVersion() const;
+  void setCurrentVersions(std::vector<MicroversionId> versions);
+  void repointCurrentVersion(const MicroversionId &version);
+  void addCurrentVersion(const MicroversionId &version);
+  void removeCurrentVersion(const MicroversionId &version);
+
+private:
+  std::vector<MicroversionId> currentVersions_;
+};
+```
+- When `store.save(directory)` executes, it saves `current.yaml` listing `current: [v1, v2]`.
+- When `store.load(directory)` executes, it reads `current.yaml`. If empty or unwritten, it falls back to `{latest()}`.
+- For system stores, `repointCurrentVersion` validates that $|currentVersions| = 1$ and notifies `Session` of the active configuration change.
+
+### 5.4 120 FPS Performance Envelope ($8.33\,\text{ms}$)
 
 - Reading active layout offsets or keybindings during a frame is an $O(1)$ memory lookup.
 - Metasystem ops are only parsed when a system store is edited, costing $< 50\,\mu\text{s}$.
