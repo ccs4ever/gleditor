@@ -225,6 +225,27 @@ To reflect authentic Xanadulogical reality:
    - **Non-Destructive Time Travel**: Repointing changes the active head pointer without erasing downstream operations. If an author scrubs their keybindings back to state `1.1` to test a legacy profile, operations `1.2`, `1.3`, and branches `1.1.1` remain fully preserved in the operations spool. The author can repoint forward or branch into a new configuration at any time.
    - **Live Subsystem Notification**: When `repointCurrentVersion` is called on a system store, it triggers the registered `onCurrentVersionChanged` observer, instantly recompiling keybindings, recalculating toast layout vectors, or updating UI font descriptions without restarting the process.
 
+### 3.4 First-Class Introspection: Opening & Editing System Xanadocs Live
+
+While System Xanadocs operate headlessly behind the scenes by default to power the UI, they are **fully openable, inspectable, and editable as standard xanadocs**. In Nelsonian architecture, there are no black boxes.
+
+1. **Zero Special-Cased Dialogs**:
+   - Instead of sequestering configuration behind rigid graphical preference panes, an author can open any system xanadoc (e.g. `system://keymap`, `system://settings`, `system://layout`) directly into the document row via `Ctrl+O` or command line.
+   - The document renders as a normal 3D quad at $Z = 0$, titled with its canonical URI (e.g. `⚙ system://keymap`).
+
+2. **Interactive Live Typing & Hot Reload**:
+   - The user can click anywhere in the system document and edit its text using standard caret movements, deletions, typing, and transclusions.
+   - Every keystroke appends to the author's `UserPermascroll` and records an operation in the system store.
+   - Because it is a System Xanadoc, the current version automatically advances with each edit ($|currentVersions| = 1$), and the engine hot-reloads the updated concatext immediately:
+     - Changing `quit: Ctrl+Q` to `quit: Ctrl+X` in `system://keymap` dynamically updates `CommandTable` live while typing.
+     - Tweaking `ui.font.size: 11` to `14` in `system://settings` instantly updates font faces across the interface.
+     - Moving `notifications.offset_x` in `system://layout` shifts toast placement in real time.
+
+3. **Hypertime Scrubbing as Live Config Time Travel**:
+   - When viewing an open System Xanadoc, pressing `Ctrl+[` (`scrub-back`) or dragging the hypertime scrubber steps the document through past configurations.
+   - Because the system xanadoc's active head is linked to its current view, stepping backward immediately repoints the active configuration to that historical state.
+   - Stepping forward (`Ctrl+]`) returns to newer configurations without data loss.
+
 ---
 
 ## 4. Swarm Distribution & Transclusion of Presets
