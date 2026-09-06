@@ -246,6 +246,40 @@ While System Xanadocs operate headlessly behind the scenes by default to power t
    - Because the system xanadoc's active head is linked to its current view, stepping backward immediately repoints the active configuration to that historical state.
    - Stepping forward (`Ctrl+]`) returns to newer configurations without data loss.
 
+### 3.5 Version Annotations Mapping: Aliases, Descriptions & Semantic Tags (`versions.yaml`)
+
+Raw numerical microversion identifiers (e.g. `1`, `1.4`, `1.2.1`) are precise for content addressing and DAG reconstruction, but human cognition requires semantic tags, descriptions, and aliases. All xanadocs support an explicit version mapping stored in `versions.yaml`:
+
+```yaml
+# Xudu Microversion Annotations & Aliases
+version: "1.0"
+alias: "genesis"
+description: "Initial author seeding from permascroll"
+tag: "milestone"
+
+version: "1.4"
+alias: "release-1.0"
+description: "Final published edition with complete quotations"
+tag: "release"
+
+version: "1.3.1"
+alias: "vim-keys"
+description: "Vim modal editing profile transcluded from community scroll"
+tag: "keymap-preset"
+```
+
+1. **Human-Readable Alias Resolution**:
+   - Calling `store.resolveAlias("release-1.0")` returns `MicroversionId{"1.4"}` in $O(1)$.
+   - Commands, CLI arguments (e.g. `--at vim-keys`), and UI open palettes can reference versions by alias instead of raw microversion numbers.
+2. **Context-Rich Spatial Open Palette (`Ctrl+O`)**:
+   - The palette displays discovered stores with their active alias and description:
+     `"Xudu Keymap [vim-keys] - Vim modal navigation profile (12 versions, 1.8 KB)"`
+     `"Project Alpha [release-1.0] - Official publication edition (42 versions, 15.6 KB)"`
+3. **Tab Bar & Document Titles**:
+   - When an open version carries an alias, `DocumentSwitcher` renders the human-readable alias (e.g. `Doc 1: release-1.0` or `⚙ system://keymap [vim-keys]`).
+4. **Hypertime Map Nodes**:
+   - Nodes in `HypertimeMap` and the Stage 3 branching DAG display their alias chips directly on the visualization canvas, and hover tooltips render the full description string.
+
 ---
 
 ## 4. Swarm Distribution & Transclusion of Presets
@@ -299,10 +333,17 @@ constexpr std::string_view systemDocUri(SystemDocKind kind) {
 - System stores are loaded into `Session::stores` with `isSystem = true` so they do not appear in the normal document row unless explicitly inspected in a "Settings View".
 - Access to active settings is cached in lightweight memory structures (`ParsedKeymap`, `LayoutConfig`, `ThemeConfig`) updated on every system store epoch change.
 
-### 5.3 `Store` Current Versions API & Serialization
+### 5.3 `Store` Current Versions & Version Annotations API
 
 In `apps/xudu/core/store.hpp`:
 ```cpp
+struct VersionAnnotation {
+  std::string alias;
+  std::string description;
+  std::string tag;
+  std::string timestamp;
+};
+
 class Store : public SpanReader {
 public:
   // -- Current Versions (Author-Designated Heads) --------------------------
@@ -313,12 +354,21 @@ public:
   void addCurrentVersion(const MicroversionId &version);
   void removeCurrentVersion(const MicroversionId &version);
 
+  // -- Version Annotations & Aliases --------------------------------------
+  void setVersionAnnotation(const MicroversionId &id, VersionAnnotation annotation);
+  [[nodiscard]] std::optional<VersionAnnotation> versionAnnotation(const MicroversionId &id) const;
+  [[nodiscard]] std::optional<MicroversionId> resolveAlias(std::string_view alias) const;
+  [[nodiscard]] std::string displayName(const MicroversionId &id) const;
+  [[nodiscard]] const std::map<MicroversionId, VersionAnnotation> &allVersionAnnotations() const;
+
 private:
   std::vector<MicroversionId> currentVersions_;
+  std::map<MicroversionId, VersionAnnotation> versionAnnotations_;
+  std::map<std::string, MicroversionId> aliasIndex_;
 };
 ```
-- When `store.save(directory)` executes, it saves `current.yaml` listing `current: [v1, v2]`.
-- When `store.load(directory)` executes, it reads `current.yaml`. If empty or unwritten, it falls back to `{latest()}`.
+- When `store.save(directory)` executes, it writes `current.yaml` and `versions.yaml`.
+- When `store.load(directory)` executes, it reads `current.yaml` and `versions.yaml`. If empty or unwritten, it falls back to `{latest()}` and empty annotations.
 - For system stores, `repointCurrentVersion` validates that $|currentVersions| = 1$ and notifies `Session` of the active configuration change.
 
 ### 5.4 120 FPS Performance Envelope ($8.33\,\text{ms}$)
