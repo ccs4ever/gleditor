@@ -224,15 +224,25 @@ Page::Page(std::shared_ptr<Doc> aDoc, RenderState &state, glm::mat4 &model,
 
   clusters = std::move(aShaping.clusters);
 
-  for (const auto &g : aShaping.glyphs) {
+  for (std::size_t gi = 0; gi < aShaping.glyphs.size(); ++gi) {
+    const auto &g    = aShaping.glyphs[gi];
     const auto glyph = state.glyphCache.put(
         g.chr, font, gleditor::decorationSetFor(g.decorations));
     const auto &coords  = glyph.texCoords;
     const auto &extents = glyph.dims;
 
-    const auto glyphWidth = static_cast<float>(static_cast<int>(extents.width));
+    auto glyphWidth = static_cast<float>(static_cast<int>(extents.width));
     const auto glyphHeight =
         static_cast<float>(static_cast<int>(extents.height));
+
+    if (gi + 1 < aShaping.glyphs.size() &&
+        aShaping.glyphs[gi + 1].lineIndex == g.lineIndex) {
+      const float distanceToNext =
+          aShaping.glyphs[gi + 1].clusterLeft - g.clusterLeft;
+      if (distanceToNext > glyphWidth) {
+        glyphWidth = std::ceil(distanceToNext);
+      }
+    }
 
     if (0.0F < glyphWidth && 0.0F < glyphHeight) {
       if (g.lineIndex < lineInk.size()) {
