@@ -39,6 +39,7 @@
 #include <gleditor/pick_observer.hpp>
 #include <gleditor/renderer.hpp>
 
+#include "common/xanadu/system_docs.hpp"
 #include "xudu/core/anchor_lanes.hpp"
 #include "xudu/core/link_layout.hpp"
 #include "xudu/core/microversion.hpp"
@@ -156,6 +157,12 @@ public:
 
   void setTetherOverlay(TenuousTetherOverlay *overlay) noexcept {
     tetherOverlay_ = overlay;
+  }
+  void setBeamConfig(const xanadu::BeamConfig &cfg) noexcept {
+    beamConfig_ = cfg;
+  }
+  [[nodiscard]] const xanadu::BeamConfig &beamConfig() const noexcept {
+    return beamConfig_;
   }
   [[nodiscard]] TensionLayoutEngine &tensionEngine() noexcept {
     return tensionEngine_;
@@ -289,10 +296,12 @@ private:
   /// collapses a beam whose ends coincide, and the anchor would simply not
   /// appear. Used both to draw the anchor and to decide what it overlaps, so
   /// that two anchors drawn across each other are two the lanes separate.
-  [[nodiscard]] static float drawnHalfExtent(const Edge &edge);
+  [[nodiscard]] static float drawnHalfExtent(const Edge &edge,
+                                             float stubMinOfLine = 0.9F);
   /// The vertical reach @ref drawnHalfExtent gives, as an extent to hand to
   /// xudu::assignAnchorLanes().
-  [[nodiscard]] static AnchorExtent drawnExtent(const Edge &edge);
+  [[nodiscard]] static AnchorExtent drawnExtent(const Edge &edge,
+                                                float stubMinOfLine = 0.9F);
 
   /// Both ends of one link end at its document's margin, or nothing if the
   /// pages holding it are not built yet.
@@ -402,6 +411,7 @@ private:
   TensionLayoutEngine tensionEngine_;
   TenuousTetherOverlay *tetherOverlay_{nullptr};
   bool physicsEnabled_{false};
+  xanadu::BeamConfig beamConfig_{};
 };
 
 } // namespace xudu

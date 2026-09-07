@@ -3507,6 +3507,8 @@ int main(const int argc, char **argv) {
           case xudu::SystemDocKind::Layout: {
             const auto layout = xudu::parseLayoutConfig(content);
             links.setVisible(layout.xanalinkRibbons);
+            links.setBeamConfig(layout.beams);
+            links.tensionEngine().setParams(layout.physics.toTensionParams());
             pouchDrawer.setDockSide(layout.pouchDock == xudu::PouchDock::Left
                                         ? xudu::PouchDrawer::DockSide::Left
                                         : xudu::PouchDrawer::DockSide::Right);
@@ -3548,6 +3550,8 @@ int main(const int argc, char **argv) {
         const auto loCfg = xudu::parseLayoutConfig(
             loStore.textOf(loStore.primaryCurrentVersion()));
         links.setVisible(loCfg.xanalinkRibbons);
+        links.setBeamConfig(loCfg.beams);
+        links.tensionEngine().setParams(loCfg.physics.toTensionParams());
         pouchDrawer.setDockSide(loCfg.pouchDock == xudu::PouchDock::Left
                                     ? xudu::PouchDrawer::DockSide::Left
                                     : xudu::PouchDrawer::DockSide::Right);

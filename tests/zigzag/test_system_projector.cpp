@@ -17,9 +17,10 @@ using namespace zigzag;
 using namespace xanadu;
 
 TEST(ZzSystemProjectorTest, LoadAndExtractSystemLayoutSlice) {
-  const auto loadRes = loadZzStructure("assets/zigzag/system_layout_slice.yaml");
-  ASSERT_TRUE(loadRes.has_value()) << "Failed to load system_layout_slice.yaml: "
-                                   << loadRes.error().message;
+  const auto loadRes =
+      loadZzStructure("assets/zigzag/system_layout_slice.yaml");
+  ASSERT_TRUE(loadRes.has_value())
+      << "Failed to load system_layout_slice.yaml: " << loadRes.error().message;
 
   const auto &slice = *loadRes;
   EXPECT_EQ(slice.meta.name, "ZigZag System Layout Slice");
@@ -46,7 +47,8 @@ TEST(ZzSystemProjectorTest, LoadAndExtractSystemLayoutSlice) {
 }
 
 TEST(ZzSystemProjectorTest, ProjectSliceToStoreAndVerifyInvariants) {
-  const auto loadRes = loadZzStructure("assets/zigzag/system_layout_slice.yaml");
+  const auto loadRes =
+      loadZzStructure("assets/zigzag/system_layout_slice.yaml");
   ASSERT_TRUE(loadRes.has_value());
   const auto &slice = *loadRes;
 
@@ -74,11 +76,11 @@ TEST(ZzSystemProjectorTest, ProjectSliceToStoreAndVerifyInvariants) {
   EXPECT_EQ(ver.forcedBreaks().size(), 2U);
 
   // Verify Format links on Page 2 and Page 3 headers
-  const auto &linkMap = store.links();
-  bool hasSchemaBold   = false;
-  bool hasSchemaCentre = false;
-  bool hasNotesBold    = false;
-  bool hasNotesCentre  = false;
+  const auto &linkMap               = store.links();
+  bool hasSchemaBold                = false;
+  bool hasSchemaCentre              = false;
+  bool hasNotesBold                 = false;
+  bool hasNotesCentre               = false;
   std::size_t butterflyCommentLinks = 0;
 
   for (const auto &[id, l] : linkMap) {
@@ -137,12 +139,14 @@ TEST(ZzSystemProjectorTest, RoundtripStoreToSlice) {
 }
 
 TEST(ZzSystemProjectorTest, DualStackLayoutConfig) {
-  const auto loadRes = loadZzStructure("assets/zigzag/system_layout_slice.yaml");
+  const auto loadRes =
+      loadZzStructure("assets/zigzag/system_layout_slice.yaml");
   ASSERT_TRUE(loadRes.has_value());
   const auto &slice = *loadRes;
 
   const auto cfgSlice = LayoutConfig::fromSlice(slice);
-  const auto cfgYaml  = LayoutConfig::fromYaml(defaultSystemDocContent(SystemDocKind::Layout));
+  const auto cfgYaml =
+      LayoutConfig::fromYaml(defaultSystemDocContent(SystemDocKind::Layout));
 
   EXPECT_EQ(cfgSlice.columns, cfgYaml.columns);
   EXPECT_EQ(cfgSlice.columns, 2U);
@@ -154,10 +158,58 @@ TEST(ZzSystemProjectorTest, DualStackLayoutConfig) {
   EXPECT_TRUE(cfgSlice.transclusionPrisms);
   EXPECT_EQ(cfgSlice.xanalinkRibbons, cfgYaml.xanalinkRibbons);
   EXPECT_TRUE(cfgSlice.xanalinkRibbons);
+
+  // Dynamic physics and beam parameters
+  EXPECT_FLOAT_EQ(cfgSlice.physics.kRepel, cfgYaml.physics.kRepel);
+  EXPECT_FLOAT_EQ(cfgSlice.physics.maxForce, cfgYaml.physics.maxForce);
+  EXPECT_FLOAT_EQ(cfgSlice.physics.maxVelocity, cfgYaml.physics.maxVelocity);
+  EXPECT_FLOAT_EQ(cfgSlice.physics.timeStep, cfgYaml.physics.timeStep);
+  EXPECT_EQ(cfgSlice.beams.bandStrandLimit, cfgYaml.beams.bandStrandLimit);
+  EXPECT_FLOAT_EQ(cfgSlice.beams.bandStrandPitch,
+                  cfgYaml.beams.bandStrandPitch);
+  EXPECT_FLOAT_EQ(cfgSlice.beams.bandFillAlpha, cfgYaml.beams.bandFillAlpha);
+  EXPECT_FLOAT_EQ(cfgSlice.beams.stubWidthOfBeam,
+                  cfgYaml.beams.stubWidthOfBeam);
+  EXPECT_FLOAT_EQ(cfgSlice.beams.stubMinOfLine, cfgYaml.beams.stubMinOfLine);
+}
+
+TEST(ZzSystemProjectorTest, LoadSceneVisualParametersFromSlice) {
+  const auto loadRes =
+      loadZzStructure("assets/zigzag/system_settings_slice.yaml");
+  ASSERT_TRUE(loadRes.has_value())
+      << "Failed to load system_settings_slice.yaml: "
+      << loadRes.error().message;
+  const auto &slice = *loadRes;
+
+  EXPECT_FLOAT_EQ(slice.scene.layout_speed, 12.0F);
+  EXPECT_FLOAT_EQ(slice.scene.alpha_speed, 8.0F);
+  EXPECT_FLOAT_EQ(slice.scene.border_thickness, 2.0F);
+  EXPECT_EQ(slice.scene.neighborhood_radius, 3);
+
+  // Verify custom parameter parsing
+  const std::string customYaml = "zzstructure:\n"
+                                 "  meta:\n"
+                                 "    name: Custom Test\n"
+                                 "  focus: 1\n"
+                                 "  scene:\n"
+                                 "    layout_speed: 15.5\n"
+                                 "    alpha_speed: 11.2\n"
+                                 "    border_thickness: 3.5\n"
+                                 "    neighborhood_radius: 5\n"
+                                 "  cells:\n"
+                                 "    - id: 1\n"
+                                 "      text: root\n";
+  const auto parsed            = parseZzStructure(customYaml);
+  ASSERT_TRUE(parsed.has_value());
+  EXPECT_FLOAT_EQ(parsed->scene.layout_speed, 15.5F);
+  EXPECT_FLOAT_EQ(parsed->scene.alpha_speed, 11.2F);
+  EXPECT_FLOAT_EQ(parsed->scene.border_thickness, 3.5F);
+  EXPECT_EQ(parsed->scene.neighborhood_radius, 5);
 }
 
 TEST(ZzSystemProjectorTest, InitializeSystemStoreFromSlice) {
-  const auto loadRes = loadZzStructure("assets/zigzag/system_layout_slice.yaml");
+  const auto loadRes =
+      loadZzStructure("assets/zigzag/system_layout_slice.yaml");
   ASSERT_TRUE(loadRes.has_value());
   const auto &slice = *loadRes;
 
@@ -174,7 +226,8 @@ TEST(ZzSystemProjectorTest, InitializeSystemStoreFromSlice) {
 
 TEST(ZzSystemProjectorTest, BidirectionalEditPropagation) {
   // 1. Initial State: Start with canonical system layout slice (columns: "2")
-  const auto loadRes = loadZzStructure("assets/zigzag/system_layout_slice.yaml");
+  const auto loadRes =
+      loadZzStructure("assets/zigzag/system_layout_slice.yaml");
   ASSERT_TRUE(loadRes.has_value());
   auto slice = *loadRes;
 
@@ -188,7 +241,7 @@ TEST(ZzSystemProjectorTest, BidirectionalEditPropagation) {
   const auto oldText  = oldVer.materialize(store);
 
   // Replace columns: "2" with columns: "4" and append user note
-  auto newText = oldText;
+  auto newText      = oldText;
   const auto colPos = newText.find("columns: \"2\"");
   ASSERT_NE(colPos, std::string::npos);
   newText.replace(colPos, 12, "columns: \"4\"");
@@ -197,8 +250,9 @@ TEST(ZzSystemProjectorTest, BidirectionalEditPropagation) {
   // Commit edit to Store (new microversion in Xudu)
   const auto editVerId = store.insert(oldVerId, 0, newText);
   // Remove the old text that was shifted
-  const auto finalVerId = store.erase(editVerId, static_cast<std::uint32_t>(newText.size()),
-                                      static_cast<std::uint32_t>(oldText.size()));
+  const auto finalVerId =
+      store.erase(editVerId, static_cast<std::uint32_t>(newText.size()),
+                  static_cast<std::uint32_t>(oldText.size()));
   store.repointCurrentVersion(finalVerId);
 
   // 3. Propagate edits from Xanadoc projection BACK to the Zigzag Slice
@@ -206,7 +260,7 @@ TEST(ZzSystemProjectorTest, BidirectionalEditPropagation) {
 
   // Verify that the slice received the updated value from the Xanadoc edit
   bool foundUpdatedColumns = false;
-  bool foundNewNote = false;
+  bool foundNewNote        = false;
 
   for (const auto &[id, c] : updatedSlice.cells) {
     if (c.text_data.find("columns: \"4\"") != std::string::npos) {
@@ -217,14 +271,18 @@ TEST(ZzSystemProjectorTest, BidirectionalEditPropagation) {
     }
   }
 
-  EXPECT_TRUE(foundUpdatedColumns) << "The Zigzag Slice must receive edits made to Page 1 in the Xanadoc!";
-  EXPECT_TRUE(foundNewNote) << "The Zigzag Slice must receive user notes added to Page 3 in the Xanadoc!";
+  EXPECT_TRUE(foundUpdatedColumns)
+      << "The Zigzag Slice must receive edits made to Page 1 in the Xanadoc!";
+  EXPECT_TRUE(foundNewNote) << "The Zigzag Slice must receive user notes added "
+                               "to Page 3 in the Xanadoc!";
 
-  // 4. Verify that parsing the updated slice reflects the new layout configuration
+  // 4. Verify that parsing the updated slice reflects the new layout
+  // configuration
   const auto updatedCfg = LayoutConfig::fromSlice(updatedSlice);
   EXPECT_EQ(updatedCfg.columns, 4U);
 
-  // 5. Reverse: User now edits a cell directly in Zigzag (pageWidthPx: "800" -> "1200")
+  // 5. Reverse: User now edits a cell directly in Zigzag (pageWidthPx: "800" ->
+  // "1200")
   for (auto &[id, c] : updatedSlice.cells) {
     if (c.text_data.find("pageWidthPx:") != std::string::npos) {
       c.text_data = "pageWidthPx: \"1200\"";
@@ -246,4 +304,3 @@ TEST(ZzSystemProjectorTest, BidirectionalEditPropagation) {
   const auto finalCfg = LayoutConfig::fromSlice(updatedSlice);
   EXPECT_FLOAT_EQ(finalCfg.pageWidthPx, 1200.0F);
 }
-

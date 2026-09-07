@@ -145,6 +145,16 @@ void TensionLayoutEngine::computeForces(const std::vector<TensionBody> &state,
       forces[fromIdx] -= 0.15F * alignForce; // Reaction force
     }
   }
+
+  // Clamp force magnitude if maxForce is configured
+  if (params_.maxForce > 0.0F) {
+    for (auto &f : forces) {
+      const float mag = glm::length(f);
+      if (mag > params_.maxForce) {
+        f = (f / mag) * params_.maxForce;
+      }
+    }
+  }
 }
 
 void TensionLayoutEngine::step(const float dt) {
@@ -244,6 +254,15 @@ void TensionLayoutEngine::step(const float dt) {
         (dt / 6.0F) * (k1_x[i] + 2.0F * k2_x[i] + 2.0F * k3_x[i] + k4_x[i]);
     bodies_[i].velocity +=
         (dt / 6.0F) * (k1_v[i] + 2.0F * k2_v[i] + 2.0F * k3_v[i] + k4_v[i]);
+
+    if (params_.maxVelocity > 0.0F) {
+      const float speed = glm::length(bodies_[i].velocity);
+      if (speed > params_.maxVelocity) {
+        bodies_[i].velocity =
+            (bodies_[i].velocity / speed) * params_.maxVelocity;
+      }
+    }
+
     bodies_[i].force = f4[i];
   }
 }

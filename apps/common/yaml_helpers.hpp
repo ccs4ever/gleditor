@@ -45,8 +45,7 @@ struct ScopedCallbacks {
 /**
  * @brief Strip leading and trailing ASCII whitespace from a string view.
  */
-[[nodiscard]] inline std::string_view
-trimStr(std::string_view s) noexcept {
+[[nodiscard]] inline std::string_view trimStr(std::string_view s) noexcept {
   while (!s.empty() && (s.front() == ' ' || s.front() == '\t' ||
                         s.front() == '\r' || s.front() == '\n')) {
     s.remove_prefix(1);

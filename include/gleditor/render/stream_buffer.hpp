@@ -29,8 +29,8 @@ public:
   virtual ~IStreamBuffer() = default;
 
   /// Allocate a mapped chunk of @p size bytes with alignment @p alignment.
-  [[nodiscard]] virtual MappedChunk
-  allocate(std::size_t size, std::size_t alignment = 64) = 0;
+  [[nodiscard]] virtual MappedChunk allocate(std::size_t size,
+                                             std::size_t alignment = 64) = 0;
 
   /// Explicitly flush the mapped chunk range and insert/prepare fence sync.
   virtual void flushAndUnmap(std::size_t offset, std::size_t size) = 0;

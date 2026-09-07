@@ -22,7 +22,8 @@
 namespace zigzag {
 
 std::string extractSliceConfigText(const ZzStructureDocument &slice) {
-  // Find cells with incoming negative links on d.config (i.e. targets of pos links)
+  // Find cells with incoming negative links on d.config (i.e. targets of pos
+  // links)
   std::unordered_set<CellID> hasIncomingNeg;
   for (const auto &[id, c] : slice.cells) {
     const auto it = c.dimensions.find(std::string(kDimConfig));
@@ -63,7 +64,8 @@ std::string extractSliceConfigText(const ZzStructureDocument &slice) {
         out += '\n';
       }
     } else if (c.text_data.find(':') != std::string::npos &&
-               c.type != "config_group" && !c.text_data.starts_with("Schema:") &&
+               c.type != "config_group" &&
+               !c.text_data.starts_with("Schema:") &&
                !c.text_data.starts_with("Notes:")) {
       out += c.text_data;
       if (!out.ends_with('\n')) {
@@ -72,7 +74,7 @@ std::string extractSliceConfigText(const ZzStructureDocument &slice) {
     }
 
     const auto itDim = c.dimensions.find(std::string(kDimConfig));
-    cur = (itDim != c.dimensions.end()) ? itDim->second.pos : 0;
+    cur              = (itDim != c.dimensions.end()) ? itDim->second.pos : 0;
   }
 
   // Fallback: iterate slice cells directly if traversal yielded nothing
@@ -134,9 +136,9 @@ std::string extractSliceSchemaText(const ZzStructureDocument &slice) {
 std::string extractSliceNotesText(const ZzStructureDocument &slice) {
   const zzCell *rootNote = nullptr;
   for (const auto &[id, c] : slice.cells) {
-    if (c.type == "user_notes" && (c.text_data.starts_with("Notes\n") ||
-                                   c.text_data == "Notes" ||
-                                   rootNote == nullptr)) {
+    if (c.type == "user_notes" &&
+        (c.text_data.starts_with("Notes\n") || c.text_data == "Notes" ||
+         rootNote == nullptr)) {
       rootNote = &c;
       if (c.text_data.starts_with("Notes\n") || c.text_data == "Notes") {
         break;
@@ -279,11 +281,11 @@ projectSystemSliceToStore(const ZzStructureDocument &slice,
 
   store.repointCurrentVersion(cur);
   store.setVersionAnnotation(
-      cur, {.alias       = "default",
-            .description = "System default " +
-                           std::string(xanadu::systemDocName(kind)),
-            .tag         = "system",
-            .timestamp   = ""});
+      cur, {.alias = "default",
+            .description =
+                "System default " + std::string(xanadu::systemDocName(kind)),
+            .tag       = "system",
+            .timestamp = ""});
 
   return cur;
 }
@@ -292,9 +294,10 @@ ZzStructureDocument
 projectSystemStoreToSlice(const xanadu::Store &store,
                           const xanadu::SystemDocKind kind) {
   const auto &curVers = store.currentVersions();
-  const auto curVer   = curVers.empty() ? xanadu::MicroversionId{} : curVers.front();
-  const auto ver      = store.rebuild(curVer);
-  const auto full     = ver.materialize(store);
+  const auto curVer =
+      curVers.empty() ? xanadu::MicroversionId{} : curVers.front();
+  const auto ver  = store.rebuild(curVer);
+  const auto full = ver.materialize(store);
 
   std::string_view fullView = full;
   const auto p1View         = xanadu::extractConfigSection(fullView);
@@ -318,10 +321,10 @@ projectSystemStoreToSlice(const xanadu::Store &store,
       "ZigZag System " + std::string(xanadu::systemDocName(kind)) + " Slice";
   result.meta.description = "Sovereign runtime parameters for system://" +
                             std::string(xanadu::systemDocName(kind));
-  result.meta.version = "1.0";
-  result.meta.author  = "Project Xanadu ZigZag System";
-  result.meta.tags    = {"system", std::string(xanadu::systemDocName(kind)),
-                         "configuration", "zigzag"};
+  result.meta.version     = "1.0";
+  result.meta.author      = "Project Xanadu ZigZag System";
+  result.meta.tags        = {"system", std::string(xanadu::systemDocName(kind)),
+                             "configuration", "zigzag"};
 
   result.focus = 1;
 
@@ -329,16 +332,16 @@ projectSystemStoreToSlice(const xanadu::Store &store,
   result.view.y_dimension = std::string(kDimSchema);
   result.view.z_dimension = std::string(kDimNotes);
 
-  result.dimension_meta[std::string(kDimConfig)] = DimensionMeta{
-      .label       = "Configuration",
-      .description = "Runtime settings and parameters",
-      .color       = RgbColor{0.31F, 0.62F, 0.88F},
-      .spacing     = 2.5F};
-  result.dimension_meta[std::string(kDimSchema)] = DimensionMeta{
-      .label       = "Schema",
-      .description = "Specification of cell purpose and units",
-      .color       = RgbColor{0.96F, 0.65F, 0.14F},
-      .spacing     = 2.2F};
+  result.dimension_meta[std::string(kDimConfig)] =
+      DimensionMeta{.label       = "Configuration",
+                    .description = "Runtime settings and parameters",
+                    .color       = RgbColor{0.31F, 0.62F, 0.88F},
+                    .spacing     = 2.5F};
+  result.dimension_meta[std::string(kDimSchema)] =
+      DimensionMeta{.label       = "Schema",
+                    .description = "Specification of cell purpose and units",
+                    .color       = RgbColor{0.96F, 0.65F, 0.14F},
+                    .spacing     = 2.2F};
   result.dimension_meta[std::string(kDimNotes)] = DimensionMeta{
       .label       = "Notes",
       .description = "User annotations and display calibration notes",
@@ -383,8 +386,8 @@ projectSystemStoreToSlice(const xanadu::Store &store,
       result.cells[lastSettingId].dimensions[std::string(kDimConfig)].pos = cid;
     }
 
-    lastSettingId       = cid;
-    result.cells[cid]   = std::move(settingCell);
+    lastSettingId     = cid;
+    result.cells[cid] = std::move(settingCell);
   }
 
   result.cells[1] = std::move(groupCell);

@@ -1,7 +1,7 @@
 /**
  * @file zz_system_projector.hpp
- * @brief Bidirectional projection between Project Xanadu Zigzag multidimensional
- *        configuration slices and sovereign 3-page system xanadocs.
+ * @brief Bidirectional projection between Project Xanadu Zigzag
+ * multidimensional configuration slices and sovereign 3-page system xanadocs.
  */
 #ifndef XANADU_ZIGZAG_SYSTEM_PROJECTOR_HPP
 #define XANADU_ZIGZAG_SYSTEM_PROJECTOR_HPP
@@ -59,11 +59,12 @@ extractSliceNotesText(const ZzStructureDocument &slice);
  *
  * Strictly adheres to Project Xanadu system document governance:
  * - Page 1: Linearized active configuration text.
- * - Page 2: Schema & Purpose with centered, bold headers via format links (zero markdown).
+ * - Page 2: Schema & Purpose with centered, bold headers via format links (zero
+ * markdown).
  * - Page 3: Notes with centered, bold headers via format links (zero markdown).
  * - Page breaks separating pages.
- * - Butterfly comment links interconnecting Page 1 setting spans to Page 2 schema
- *   spans and Page 3 notes spans.
+ * - Butterfly comment links interconnecting Page 1 setting spans to Page 2
+ * schema spans and Page 3 notes spans.
  *
  * @param slice The input Zigzag slice document.
  * @param store The destination sovereign Store.
@@ -72,8 +73,7 @@ extractSliceNotesText(const ZzStructureDocument &slice);
  */
 xanadu::MicroversionId
 projectSystemSliceToStore(const ZzStructureDocument &slice,
-                          xanadu::Store &store,
-                          xanadu::SystemDocKind kind);
+                          xanadu::Store &store, xanadu::SystemDocKind kind);
 
 /**
  * @brief Reverse projection: constructs a multidimensional Zigzag slice from a
@@ -81,7 +81,8 @@ projectSystemSliceToStore(const ZzStructureDocument &slice,
  *
  * @param store The source sovereign Store.
  * @param kind The system doc kind.
- * @return A ZzStructureDocument representing the multidimensional configuration space.
+ * @return A ZzStructureDocument representing the multidimensional configuration
+ * space.
  */
 [[nodiscard]] ZzStructureDocument
 projectSystemStoreToSlice(const xanadu::Store &store,

@@ -142,8 +142,12 @@ void ZigzagVisualizer::adoptDocument(ZzStructureDocument &&doc,
   scene_.focus_color =
       glm::vec3{doc.scene.focus_color.r, doc.scene.focus_color.g,
                 doc.scene.focus_color.b};
-  scene_.focus_scale = doc.scene.focus_scale;
-  scene_.cell_radius = doc.scene.cell_radius;
+  scene_.focus_scale         = doc.scene.focus_scale;
+  scene_.cell_radius         = doc.scene.cell_radius;
+  scene_.layout_speed        = doc.scene.layout_speed;
+  scene_.alpha_speed         = doc.scene.alpha_speed;
+  scene_.border_thickness    = doc.scene.border_thickness;
+  scene_.neighborhood_radius = doc.scene.neighborhood_radius;
 
   dimension_visuals_.clear();
   for (const auto &[dimName, meta] : doc.dimension_meta) {
@@ -433,10 +437,6 @@ void ZigzagVisualizer::rebuildActiveViewTopology() {
   };
 
   if (focus) {
-    const LinkPairs xLinks = linksOn(focus, current_view_.x_dimension);
-    const LinkPairs yLinks = linksOn(focus, current_view_.y_dimension);
-    const LinkPairs zLinks = linksOn(focus, current_view_.z_dimension);
-
     const DimensionVisual xVisual = dimensionVisual(current_view_.x_dimension);
     const DimensionVisual yVisual = dimensionVisual(current_view_.y_dimension);
     const DimensionVisual zVisual = dimensionVisual(current_view_.z_dimension);
@@ -448,27 +448,53 @@ void ZigzagVisualizer::rebuildActiveViewTopology() {
     const float zSpace =
         (view_mode_ == ViewMode::CellContent) ? 180.0F : zVisual.spacing;
 
-    mapNeighbor(accursed_cell_focus_, xLinks.pos, glm::vec3{xSpace, 0.0F, 0.0F},
-                xVisual.color);
-    mapNeighbor(accursed_cell_focus_, xLinks.neg,
-                glm::vec3{-xSpace, 0.0F, 0.0F}, xVisual.color);
+    const int radius = std::max(1, scene_.neighborhood_radius);
 
-    mapNeighbor(accursed_cell_focus_, yLinks.pos, glm::vec3{0.0F, ySpace, 0.0F},
-                yVisual.color);
-    mapNeighbor(accursed_cell_focus_, yLinks.neg,
-                glm::vec3{0.0F, -ySpace, 0.0F}, yVisual.color);
+    auto mapAxis = [&](const DimID &dim, const glm::vec3 &unitDir,
+                       const DimensionVisual &visual, const float spacing) {
+      // Positive walk
+      CellID parent = accursed_cell_focus_;
+      for (int r = 1; r <= radius; ++r) {
+        const zzCell *const c = findCell(parent);
+        if (!c) {
+          break;
+        }
+        const CellID nextId = linksOn(c, dim).pos;
+        if (nextId == 0) {
+          break;
+        }
+        mapNeighbor(parent, nextId, unitDir * spacing, visual.color);
+        parent = nextId;
+      }
+      // Negative walk
+      parent = accursed_cell_focus_;
+      for (int r = 1; r <= radius; ++r) {
+        const zzCell *const c = findCell(parent);
+        if (!c) {
+          break;
+        }
+        const CellID nextId = linksOn(c, dim).neg;
+        if (nextId == 0) {
+          break;
+        }
+        mapNeighbor(parent, nextId, -unitDir * spacing, visual.color);
+        parent = nextId;
+      }
+    };
 
-    mapNeighbor(accursed_cell_focus_, zLinks.pos, glm::vec3{0.0F, 0.0F, zSpace},
-                zVisual.color);
-    mapNeighbor(accursed_cell_focus_, zLinks.neg,
-                glm::vec3{0.0F, 0.0F, -zSpace}, zVisual.color);
+    mapAxis(current_view_.x_dimension, glm::vec3{1.0F, 0.0F, 0.0F}, xVisual,
+            xSpace);
+    mapAxis(current_view_.y_dimension, glm::vec3{0.0F, 1.0F, 0.0F}, yVisual,
+            ySpace);
+    mapAxis(current_view_.z_dimension, glm::vec3{0.0F, 0.0F, 1.0F}, zVisual,
+            zSpace);
   }
 }
 
 void ZigzagVisualizer::updateCellPositions(const float rawDeltaTime) {
-  const float deltaTime       = std::clamp(rawDeltaTime, 1.0F / 120.0F, 0.1F);
-  constexpr float layoutSpeed = 12.0F;
-  constexpr float alphaSpeed  = 8.0F;
+  const float deltaTime   = std::clamp(rawDeltaTime, 1.0F / 120.0F, 0.1F);
+  const float layoutSpeed = scene_.layout_speed;
+  const float alphaSpeed  = scene_.alpha_speed;
 
   const float spatialFactor = 1.0F - std::exp(-layoutSpeed * deltaTime);
   const float alphaFactor   = 1.0F - std::exp(-alphaSpeed * deltaTime);
@@ -750,7 +776,7 @@ void ZigzagVisualizer::drawFrame(gleditor::FrameContext &ctx) {
     }
 
     // Node Border
-    constexpr float borderThick = 2.0F;
+    const float borderThick = scene_.border_thickness;
     worldCanvas_->addLine(left, bottom, left + nodeWidth, bottom, borderThick,
                           borderCol);
     worldCanvas_->addLine(left + nodeWidth, bottom, left + nodeWidth,

@@ -252,6 +252,34 @@ void readSceneMeta(const ryml::ConstNodeRef &structure,
     } catch (...) {
     }
   }
+  if (sceneNode.has_child("layout_speed") &&
+      sceneNode["layout_speed"].has_val()) {
+    try {
+      sceneNode["layout_speed"] >> doc.scene.layout_speed;
+    } catch (...) {
+    }
+  }
+  if (sceneNode.has_child("alpha_speed") &&
+      sceneNode["alpha_speed"].has_val()) {
+    try {
+      sceneNode["alpha_speed"] >> doc.scene.alpha_speed;
+    } catch (...) {
+    }
+  }
+  if (sceneNode.has_child("border_thickness") &&
+      sceneNode["border_thickness"].has_val()) {
+    try {
+      sceneNode["border_thickness"] >> doc.scene.border_thickness;
+    } catch (...) {
+    }
+  }
+  if (sceneNode.has_child("neighborhood_radius") &&
+      sceneNode["neighborhood_radius"].has_val()) {
+    try {
+      sceneNode["neighborhood_radius"] >> doc.scene.neighborhood_radius;
+    } catch (...) {
+    }
+  }
 }
 
 void reportDiagnostics(const Diagnostics &diagnostics,

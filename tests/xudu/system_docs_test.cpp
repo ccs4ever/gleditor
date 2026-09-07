@@ -195,6 +195,95 @@ TEST(SystemDocsTest, ParseLayoutConfig) {
   EXPECT_EQ(def.pouchDock, PouchDock::Right);
   EXPECT_TRUE(def.transclusionPrisms);
   EXPECT_TRUE(def.xanalinkRibbons);
+  EXPECT_FLOAT_EQ(def.physics.kRepel, 4500.0F);
+  EXPECT_FLOAT_EQ(def.physics.maxForce, 10000.0F);
+  EXPECT_FLOAT_EQ(def.physics.maxVelocity, 1000.0F);
+  EXPECT_FLOAT_EQ(def.physics.timeStep, 0.016F);
+  EXPECT_EQ(def.beams.bandStrandLimit, 7U);
+  EXPECT_FLOAT_EQ(def.beams.bandStrandPitch, 2.2F);
+}
+
+TEST(SystemDocsTest, ParseDynamicPhysicsAndBeamConfig) {
+  const std::string yaml = "columns: 4\n"
+                           "physics:\n"
+                           "  kRepel: 520.0\n"
+                           "  kPlane: 0.012\n"
+                           "  kAlign: 0.006\n"
+                           "  kTier: 0.009\n"
+                           "  kDamping: 0.78\n"
+                           "  backgroundDepthZ: 200.0\n"
+                           "  defaultGap: 55.0\n"
+                           "  settleVelocityThreshold: 0.02\n"
+                           "  maxForce: 600.0\n"
+                           "  maxVelocity: 180.0\n"
+                           "  timeStep: 0.8\n"
+                           "beams:\n"
+                           "  bandStrandLimit: 12\n"
+                           "  bandStrandPitch: 7.5\n"
+                           "  bandFillAlpha: 0.15\n"
+                           "  stubWidthOfBeam: 0.45\n"
+                           "  stubMinOfLine: 0.95\n"
+                           "  marginKerf: 2.0\n"
+                           "  bypassDepthPerDoc: 22.0\n"
+                           "  bypassDepthLimit: 110.0\n"
+                           "  bypassSegments: 18\n";
+
+  const auto cfg = xudu::parseLayoutConfig(yaml);
+  EXPECT_EQ(cfg.columns, 4U);
+  EXPECT_FLOAT_EQ(cfg.physics.kRepel, 520.0F);
+  EXPECT_FLOAT_EQ(cfg.physics.kPlane, 0.012F);
+  EXPECT_FLOAT_EQ(cfg.physics.kAlign, 0.006F);
+  EXPECT_FLOAT_EQ(cfg.physics.kTier, 0.009F);
+  EXPECT_FLOAT_EQ(cfg.physics.kDamping, 0.78F);
+  EXPECT_FLOAT_EQ(cfg.physics.backgroundDepthZ, 200.0F);
+  EXPECT_FLOAT_EQ(cfg.physics.defaultGap, 55.0F);
+  EXPECT_FLOAT_EQ(cfg.physics.settleVelocityThreshold, 0.02F);
+  EXPECT_FLOAT_EQ(cfg.physics.maxForce, 600.0F);
+  EXPECT_FLOAT_EQ(cfg.physics.maxVelocity, 180.0F);
+  EXPECT_FLOAT_EQ(cfg.physics.timeStep, 0.8F);
+
+  EXPECT_EQ(cfg.beams.bandStrandLimit, 12U);
+  EXPECT_FLOAT_EQ(cfg.beams.bandStrandPitch, 7.5F);
+  EXPECT_FLOAT_EQ(cfg.beams.bandFillAlpha, 0.15F);
+  EXPECT_FLOAT_EQ(cfg.beams.stubWidthOfBeam, 0.45F);
+  EXPECT_FLOAT_EQ(cfg.beams.stubMinOfLine, 0.95F);
+  EXPECT_FLOAT_EQ(cfg.beams.marginKerf, 2.0F);
+  EXPECT_FLOAT_EQ(cfg.beams.bypassDepthPerDoc, 22.0F);
+  EXPECT_FLOAT_EQ(cfg.beams.bypassDepthLimit, 110.0F);
+  EXPECT_EQ(cfg.beams.bypassSegments, 18U);
+
+  // Convert to TensionParams and verify mapping
+  const auto tension = cfg.physics.toTensionParams();
+  EXPECT_FLOAT_EQ(tension.kRepel, 520.0F);
+  EXPECT_FLOAT_EQ(tension.kPlane, 0.012F);
+  EXPECT_FLOAT_EQ(tension.kAlign, 0.006F);
+  EXPECT_FLOAT_EQ(tension.kTier, 0.009F);
+  EXPECT_FLOAT_EQ(tension.kDamping, 0.78F);
+  EXPECT_FLOAT_EQ(tension.backgroundDepthZ, 200.0F);
+  EXPECT_FLOAT_EQ(tension.defaultGap, 55.0F);
+  EXPECT_FLOAT_EQ(tension.settleVelocityThreshold, 0.02F);
+  EXPECT_FLOAT_EQ(tension.maxForce, 600.0F);
+  EXPECT_FLOAT_EQ(tension.maxVelocity, 180.0F);
+  EXPECT_FLOAT_EQ(tension.timeStep, 0.8F);
+
+  // Roundtrip back from tension params
+  const auto roundtrip = xudu::PhysicsConfig::fromTensionParams(tension);
+  EXPECT_FLOAT_EQ(roundtrip.kRepel, 520.0F);
+  EXPECT_FLOAT_EQ(roundtrip.maxForce, 600.0F);
+  EXPECT_FLOAT_EQ(roundtrip.maxVelocity, 180.0F);
+  EXPECT_FLOAT_EQ(roundtrip.timeStep, 0.8F);
+}
+
+TEST(SystemDocsTest, ParseFlatPhysicsAndBeamConfigFallback) {
+  const std::string flat = "physics.kRepel: 480.0\n"
+                           "physics.maxForce: 450.0\n"
+                           "beams.bandStrandPitch: 8.0\n"
+                           "beams.bypassSegments: 20\n";
+  const auto cfg         = xudu::parseLayoutConfig(flat);
+  EXPECT_FLOAT_EQ(cfg.physics.kRepel, 480.0F);
+  EXPECT_FLOAT_EQ(cfg.physics.maxForce, 450.0F);
+  EXPECT_FLOAT_EQ(cfg.beams.bandStrandPitch, 8.0F);
+  EXPECT_EQ(cfg.beams.bypassSegments, 20U);
 }
 
 TEST(SystemDocsTest, ParseUIConfig) {

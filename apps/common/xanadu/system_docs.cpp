@@ -46,7 +46,28 @@ std::string defaultSystemDocContent(const SystemDocKind kind) {
            "pageWidthPx: \"800\"\n"
            "pageHeightPx: \"1000\"\n"
            "transclusionPrisms: \"true\"\n"
-           "xanalinkRibbons: \"true\"\n";
+           "xanalinkRibbons: \"true\"\n"
+           "physics:\n"
+           "  kRepel: \"4500.0\"\n"
+           "  kPlane: \"14.0\"\n"
+           "  kAlign: \"28.0\"\n"
+           "  kTier: \"12.0\"\n"
+           "  kDamping: \"7.5\"\n"
+           "  backgroundDepthZ: \"-40.0\"\n"
+           "  defaultGap: \"8.0\"\n"
+           "  maxForce: \"10000.0\"\n"
+           "  maxVelocity: \"1000.0\"\n"
+           "  timeStep: \"0.016\"\n"
+           "beams:\n"
+           "  bandStrandLimit: \"7\"\n"
+           "  bandStrandPitch: \"2.2\"\n"
+           "  bandFillAlpha: \"0.85\"\n"
+           "  stubWidthOfBeam: \"1.35\"\n"
+           "  stubMinOfLine: \"0.9\"\n"
+           "  marginKerf: \"0.04\"\n"
+           "  bypassDepthPerDoc: \"-20.0\"\n"
+           "  bypassDepthLimit: \"-120.0\"\n"
+           "  bypassSegments: \"9\"\n";
   case SystemDocKind::UI:
     return "notificationPosition: \"top-right\"\n"
            "notificationDurationMs: \"3000\"\n"
@@ -177,7 +198,46 @@ std::string defaultSystemDocSchema(const SystemDocKind kind) {
            "transclusionPrisms: Enable Identity Gold volumetric prisms for "
            "transcluded spans. Default is true.\n"
            "xanalinkRibbons: Enable cyan and magenta 3D optical link ribbons. "
-           "Default is true.\n";
+           "Default is true.\n"
+           "physics:\n"
+           "  kRepel: Soft-body Coulomb repulsion constant between documents. "
+           "Default is 4500.0.\n"
+           "  kPlane: Spring constant pulling active documents to Z = 0 "
+           "reading plane. Default is 14.0.\n"
+           "  kAlign: Collinear link alignment spring constant. Default is "
+           "28.0.\n"
+           "  kTier: Depth holding spring constant for background corpora. "
+           "Default is 12.0.\n"
+           "  kDamping: Linear velocity damping coefficient. Default is 7.5.\n"
+           "  backgroundDepthZ: Resting background depth coordinate. Default "
+           "is -40.0.\n"
+           "  defaultGap: Minimum comfortable horizontal reading gap. Default "
+           "is 8.0.\n"
+           "  maxForce: Maximum instantaneous physical force magnitude. "
+           "Default is 10000.0.\n"
+           "  maxVelocity: Maximum linear velocity magnitude for physical "
+           "stability. Default is 1000.0.\n"
+           "  timeStep: Default simulation time step in seconds. Default is "
+           "0.016.\n"
+           "beams:\n"
+           "  bandStrandLimit: Maximum number of ribbon strands per link band. "
+           "Default is 7.\n"
+           "  bandStrandPitch: Spacing between strands in beam widths. Default "
+           "is 2.2.\n"
+           "  bandFillAlpha: Alpha multiplier for inner band fill strands. "
+           "Default is 0.85.\n"
+           "  stubWidthOfBeam: Width multiplier for margin anchor spine "
+           "relative to beam width. Default is 1.35.\n"
+           "  stubMinOfLine: Shortest margin anchor bracket as fraction of "
+           "line height. Default is 0.9.\n"
+           "  marginKerf: Gap between margin anchors sharing a lane. Default "
+           "is 0.04.\n"
+           "  bypassDepthPerDoc: Z offset per document passed when routing "
+           "behind. Default is -20.0.\n"
+           "  bypassDepthLimit: Deepest Z offset for bypass routing. Default "
+           "is -120.0.\n"
+           "  bypassSegments: Curve subdivision segment count for bypass "
+           "routing. Default is 9.\n";
   case SystemDocKind::UI:
     return "Schema and Purpose\n\n"
            "Purpose:\n"
@@ -672,6 +732,51 @@ LayoutConfig parseLayoutConfig(const std::string_view yamlText) {
       cfg.transclusionPrisms = parseBool(v, cfg.transclusionPrisms);
     } else if (k == "xanalinkRibbons") {
       cfg.xanalinkRibbons = parseBool(v, cfg.xanalinkRibbons);
+    } else if (k == "kRepel" || k == "physics.kRepel") {
+      cfg.physics.kRepel = parseFloat(v, cfg.physics.kRepel);
+    } else if (k == "kPlane" || k == "physics.kPlane") {
+      cfg.physics.kPlane = parseFloat(v, cfg.physics.kPlane);
+    } else if (k == "kAlign" || k == "physics.kAlign") {
+      cfg.physics.kAlign = parseFloat(v, cfg.physics.kAlign);
+    } else if (k == "kTier" || k == "physics.kTier") {
+      cfg.physics.kTier = parseFloat(v, cfg.physics.kTier);
+    } else if (k == "kDamping" || k == "physics.kDamping") {
+      cfg.physics.kDamping = parseFloat(v, cfg.physics.kDamping);
+    } else if (k == "backgroundDepthZ" || k == "physics.backgroundDepthZ") {
+      cfg.physics.backgroundDepthZ =
+          parseFloat(v, cfg.physics.backgroundDepthZ);
+    } else if (k == "defaultGap" || k == "physics.defaultGap") {
+      cfg.physics.defaultGap = parseFloat(v, cfg.physics.defaultGap);
+    } else if (k == "settleVelocityThreshold" ||
+               k == "physics.settleVelocityThreshold") {
+      cfg.physics.settleVelocityThreshold =
+          parseFloat(v, cfg.physics.settleVelocityThreshold);
+    } else if (k == "maxForce" || k == "physics.maxForce") {
+      cfg.physics.maxForce = parseFloat(v, cfg.physics.maxForce);
+    } else if (k == "maxVelocity" || k == "physics.maxVelocity") {
+      cfg.physics.maxVelocity = parseFloat(v, cfg.physics.maxVelocity);
+    } else if (k == "timeStep" || k == "physics.timeStep") {
+      cfg.physics.timeStep = parseFloat(v, cfg.physics.timeStep);
+    } else if (k == "bandStrandLimit" || k == "beams.bandStrandLimit") {
+      cfg.beams.bandStrandLimit =
+          parseUint(v, static_cast<std::uint32_t>(cfg.beams.bandStrandLimit));
+    } else if (k == "bandStrandPitch" || k == "beams.bandStrandPitch") {
+      cfg.beams.bandStrandPitch = parseFloat(v, cfg.beams.bandStrandPitch);
+    } else if (k == "bandFillAlpha" || k == "beams.bandFillAlpha") {
+      cfg.beams.bandFillAlpha = parseFloat(v, cfg.beams.bandFillAlpha);
+    } else if (k == "stubWidthOfBeam" || k == "beams.stubWidthOfBeam") {
+      cfg.beams.stubWidthOfBeam = parseFloat(v, cfg.beams.stubWidthOfBeam);
+    } else if (k == "stubMinOfLine" || k == "beams.stubMinOfLine") {
+      cfg.beams.stubMinOfLine = parseFloat(v, cfg.beams.stubMinOfLine);
+    } else if (k == "marginKerf" || k == "beams.marginKerf") {
+      cfg.beams.marginKerf = parseFloat(v, cfg.beams.marginKerf);
+    } else if (k == "bypassDepthPerDoc" || k == "beams.bypassDepthPerDoc") {
+      cfg.beams.bypassDepthPerDoc = parseFloat(v, cfg.beams.bypassDepthPerDoc);
+    } else if (k == "bypassDepthLimit" || k == "beams.bypassDepthLimit") {
+      cfg.beams.bypassDepthLimit = parseFloat(v, cfg.beams.bypassDepthLimit);
+    } else if (k == "bypassSegments" || k == "beams.bypassSegments") {
+      cfg.beams.bypassSegments =
+          parseUint(v, static_cast<std::uint32_t>(cfg.beams.bypassSegments));
     }
   };
 
@@ -687,6 +792,21 @@ LayoutConfig parseLayoutConfig(const std::string_view yamlText) {
             const std::string_view k{child.key().data(), child.key().size()};
             const std::string_view v{child.val().data(), child.val().size()};
             applyKv(k, v);
+          } else if (child.has_key() && child.is_map()) {
+            const std::string_view sectionKey{child.key().data(),
+                                              child.key().size()};
+            for (const auto grandChild : child.children()) {
+              if (grandChild.has_key() && grandChild.has_val()) {
+                const std::string_view gk{grandChild.key().data(),
+                                          grandChild.key().size()};
+                const std::string_view gv{grandChild.val().data(),
+                                          grandChild.val().size()};
+                applyKv(gk, gv);
+                const std::string compositeKey =
+                    std::string(sectionKey) + "." + std::string(gk);
+                applyKv(compositeKey, gv);
+              }
+            }
           }
         }
         return cfg;

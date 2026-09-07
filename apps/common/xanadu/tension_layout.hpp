@@ -104,6 +104,15 @@ struct TensionParams {
 
   /// Velocity threshold below which simulation is considered settled.
   float settleVelocityThreshold{0.02F};
+
+  /// Maximum instantaneous force magnitude to prevent numerical explosion.
+  float maxForce{10000.0F};
+
+  /// Maximum linear velocity magnitude for physical stability.
+  float maxVelocity{1000.0F};
+
+  /// Default simulation time step in seconds.
+  float timeStep{0.016F};
 };
 
 /**

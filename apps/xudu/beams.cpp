@@ -79,55 +79,6 @@ constexpr float framingMarginFraction = 0.10F;
 constexpr float framingMarginFloorX   = 4.0F;
 constexpr float framingMarginFloorY   = 6.0F;
 
-/// Most strands one band is drawn with. A link between two whole pages would
-/// otherwise ask for one strand per line of text at both ends, which is a
-/// hundred ribbons saying what five say just as well.
-constexpr std::size_t bandStrandLimit = 7;
-
-/// Space between a band's strands, in beam widths. Comfortably more than one,
-/// so the strands stay clear of each other where the band is at its tallest:
-/// ribbons that abut only just overlap, and a strip of doubled alpha down
-/// every seam prints as stripes running the length of the band. Separated,
-/// they read as what they are -- a few threads spanning the passage -- and
-/// the only place they gather is the end where the link is attached to less
-/// text, which is where the eye should be going anyway.
-constexpr float bandStrandPitch = 2.2F;
-
-/// Alpha the strands inside a band are drawn at, relative to the two that
-/// bound it. The edges are what say how far the passage reaches; the fill says
-/// the space between them is one relation and not several.
-constexpr float bandFillAlpha = 0.85F;
-
-/// Width of the spine joining one link's separate anchors down a margin,
-/// relative to the beam's own width.
-constexpr float stubWidthOfBeam = 1.35F;
-
-/// Shortest bracket drawn at a link end, as a fraction of the line height
-/// there. An anchor covers the lines its link is attached to, so this is only
-/// reached by one whose page reported no line height at all -- and a bracket
-/// of no length is not drawn at all, since the vertex stage collapses a beam
-/// whose ends coincide.
-constexpr float stubMinOfLine = 0.9F;
-
-/// Gap left between two anchors sharing a margin, in world units. Wide enough
-/// that two colours meeting are two colours, narrow enough that four lanes
-/// still leave something of each to see.
-constexpr float marginKerf = 0.04F;
-
-/// How far behind the page plane a beam dips to pass a document standing
-/// between its two ends, per document passed, and the deepest it may go. Deep
-/// enough to clear the pages, shallow enough that the dip still reads as the
-/// same beam rather than as something disappearing off the back of the scene.
-constexpr float bypassDepthPerDoc = -20.0F;
-constexpr float bypassDepthLimit  = -120.0F;
-
-/// Points the bypass curve is drawn with. Enough that the dip reads as a curve
-/// rather than as a beam broken into three pieces at two corners -- which is
-/// what it was, and what left the middle piece running nearly straight away
-/// from the camera where a ribbon in the page plane has almost no width to be
-/// seen edge-on.
-constexpr std::size_t bypassSegments = 9;
-
 /// How near the camera has to be to where it is being taken before the ease is
 /// treated as arrived, in world units. It is then put exactly there and handed
 /// back; see the snap in drawFrame() for why exactly matters.
@@ -326,15 +277,16 @@ LinkBeams::edgeOf(const Doc &doc, const std::optional<Doc::Anchor> &startAnchor,
   };
 }
 
-float LinkBeams::drawnHalfExtent(const Edge &edge) {
+float LinkBeams::drawnHalfExtent(const Edge &edge, const float stubMinOfLine) {
   const float lineWorld = edge.lineHeight * Doc::pixelsToWorld;
   return std::max(std::abs(edge.top.y - edge.bottom.y) * 0.5F,
                   lineWorld * stubMinOfLine * 0.5F);
 }
 
-AnchorExtent LinkBeams::drawnExtent(const Edge &edge) {
+AnchorExtent LinkBeams::drawnExtent(const Edge &edge,
+                                    const float stubMinOfLine) {
   const float middle = 0.5F * (edge.top.y + edge.bottom.y);
-  const float half   = drawnHalfExtent(edge);
+  const float half   = drawnHalfExtent(edge, stubMinOfLine);
   return AnchorExtent{.top = middle + half, .bottom = middle - half};
 }
 
@@ -364,12 +316,13 @@ void LinkBeams::band(const Edge &nearSide, const Edge &farSide,
   // breaking into stripes.
   const float wide = std::max(nearSpan, farSpan);
   const auto count =
-      bandStrandCount(wide, baseWidth, bandStrandPitch, bandStrandLimit);
+      bandStrandCount(wide, baseWidth, beamConfig_.bandStrandPitch,
+                      beamConfig_.bandStrandLimit);
 
   const float depth = std::max(
-      bypassDepthPerDoc *
+      beamConfig_.bypassDepthPerDoc *
           static_cast<float>(documentsApart > 1 ? documentsApart - 1 : 0),
-      bypassDepthLimit);
+      beamConfig_.bypassDepthLimit);
 
   // The outermost strand is pulled in by half a beam width at each end, so
   // the band fills the passage exactly instead of overhanging it by half a
@@ -395,8 +348,9 @@ void LinkBeams::band(const Edge &nearSide, const Edge &farSide,
     // The two that bound the band keep the link's own colour; the ones filling
     // it are dimmer, so the band reads as one relation with a reach rather
     // than as a fistful of separate ones.
-    const auto strandColour =
-        (0 == k || count - 1 == k) ? colour : fade(colour, bandFillAlpha);
+    const auto strandColour = (0 == k || count - 1 == k)
+                                  ? colour
+                                  : fade(colour, beamConfig_.bandFillAlpha);
 
     if (documentsApart <= 1) {
       beams->add(p1, p2, baseWidth, strandColour, tag, 0.0F - phase,
@@ -405,8 +359,8 @@ void LinkBeams::band(const Edge &nearSide, const Edge &farSide,
     }
     // A document stands between these two, so the beam goes behind it rather
     // than through its text; see bypassRoute().
-    beams->addPath(bypassRoute(p1, p2, depth, bypassSegments), baseWidth,
-                   strandColour, tag);
+    beams->addPath(bypassRoute(p1, p2, depth, beamConfig_.bypassSegments),
+                   baseWidth, strandColour, tag);
   }
 }
 
@@ -415,7 +369,7 @@ void LinkBeams::drawMarginAnchorLane(const Edge &edge,
                                      const std::uint32_t tag, const bool farEnd,
                                      const int laneIndex, const int laneCount,
                                      const bool isActive) {
-  const float half   = drawnHalfExtent(edge);
+  const float half   = drawnHalfExtent(edge, beamConfig_.stubMinOfLine);
   const auto pageMid = 0.5F * (edge.top + edge.bottom);
   const auto textMid = 0.5F * (edge.textTop + edge.textBottom);
   const float at     = farEnd ? 1.0F : 0.0F;
@@ -431,7 +385,8 @@ void LinkBeams::drawMarginAnchorLane(const Edge &edge,
   }
   const glm::vec3 marginDir = marginVec / marginWidth;
 
-  const auto slice = marginLane(marginWidth, laneIndex, laneCount, marginKerf);
+  const auto slice =
+      marginLane(marginWidth, laneIndex, laneCount, beamConfig_.marginKerf);
   const float thickness = slice.toPageEdge - slice.fromPageEdge;
   if (!(thickness > 0.0F)) {
     return;
@@ -1257,7 +1212,8 @@ void LinkBeams::drawFrame(gleditor::FrameContext &ctx) {
         std::vector<AnchorExtent> extents;
         extents.reserve(sideAnchors.size());
         for (const auto which : sideAnchors) {
-          extents.push_back(drawnExtent(allAnchors[which].edge));
+          extents.push_back(
+              drawnExtent(allAnchors[which].edge, beamConfig_.stubMinOfLine));
         }
         const auto lanes = assignAnchorLanes(extents, marginLaneLimit);
 
@@ -1299,9 +1255,10 @@ void LinkBeams::drawFrame(gleditor::FrameContext &ctx) {
             const auto pTop   = upper.edge.bottom;
             const auto pBot   = lower.edge.top;
             if (pTop.y > pBot.y + 0.05F) {
-              const float spineWidth = std::max(
-                  0.12F, upper.edge.lineHeight * Doc::pixelsToWorld *
-                             beamWidthOfLine * stubWidthOfBeam * 0.45F);
+              const float spineWidth =
+                  std::max(0.12F, upper.edge.lineHeight * Doc::pixelsToWorld *
+                                      beamWidthOfLine *
+                                      beamConfig_.stubWidthOfBeam * 0.45F);
               const auto spineColour = upper.isActive
                                            ? (upper.colour | 0xFFU)
                                            : fade(upper.colour, 0.85F);

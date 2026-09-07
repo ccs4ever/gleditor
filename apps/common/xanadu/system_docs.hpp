@@ -11,6 +11,7 @@
 #include <string>
 #include <string_view>
 
+#include "common/xanadu/tension_layout.hpp"
 #include <gleditor/radial_menu.hpp>
 
 namespace zigzag {
@@ -147,6 +148,65 @@ enum class ToastAnchor : std::uint8_t {
 
 enum class PouchDock : std::uint8_t { Left, Right };
 
+struct PhysicsConfig {
+  float kRepel{4500.0F};
+  float kPlane{14.0F};
+  float kAlign{28.0F};
+  float kTier{12.0F};
+  float kDamping{7.5F};
+  float backgroundDepthZ{-40.0F};
+  float defaultGap{8.0F};
+  float settleVelocityThreshold{0.02F};
+  float maxForce{10000.0F};
+  float maxVelocity{1000.0F};
+  float timeStep{0.016F};
+
+  [[nodiscard]] TensionParams toTensionParams() const noexcept {
+    return TensionParams{
+        .kRepel                  = kRepel,
+        .kPlane                  = kPlane,
+        .kAlign                  = kAlign,
+        .kTier                   = kTier,
+        .kDamping                = kDamping,
+        .backgroundDepthZ        = backgroundDepthZ,
+        .defaultGap              = defaultGap,
+        .settleVelocityThreshold = settleVelocityThreshold,
+        .maxForce                = maxForce,
+        .maxVelocity             = maxVelocity,
+        .timeStep                = timeStep,
+    };
+  }
+
+  [[nodiscard]] static PhysicsConfig
+  fromTensionParams(const TensionParams &tp) noexcept {
+    return PhysicsConfig{
+        .kRepel                  = tp.kRepel,
+        .kPlane                  = tp.kPlane,
+        .kAlign                  = tp.kAlign,
+        .kTier                   = tp.kTier,
+        .kDamping                = tp.kDamping,
+        .backgroundDepthZ        = tp.backgroundDepthZ,
+        .defaultGap              = tp.defaultGap,
+        .settleVelocityThreshold = tp.settleVelocityThreshold,
+        .maxForce                = tp.maxForce,
+        .maxVelocity             = tp.maxVelocity,
+        .timeStep                = tp.timeStep,
+    };
+  }
+};
+
+struct BeamConfig {
+  std::size_t bandStrandLimit{7};
+  float bandStrandPitch{2.2F};
+  float bandFillAlpha{0.85F};
+  float stubWidthOfBeam{1.35F};
+  float stubMinOfLine{0.9F};
+  float marginKerf{0.04F};
+  float bypassDepthPerDoc{-20.0F};
+  float bypassDepthLimit{-120.0F};
+  std::size_t bypassSegments{9};
+};
+
 struct LayoutConfig {
   std::uint32_t columns{2};
   float pageWidthPx{800.0F};
@@ -158,6 +218,8 @@ struct LayoutConfig {
   float documentSpacingX{70.0F};
   bool transclusionPrisms{true};
   bool xanalinkRibbons{true};
+  PhysicsConfig physics{};
+  BeamConfig beams{};
 
   [[nodiscard]] static LayoutConfig fromYaml(std::string_view yamlText);
   [[nodiscard]] static LayoutConfig

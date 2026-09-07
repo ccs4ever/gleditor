@@ -97,8 +97,12 @@ struct DimensionMeta {
 struct SceneMeta {
   RgbColor background{0.05F, 0.05F, 0.07F};
   RgbColor focus_color{0.956F, 0.773F, 0.259F};
-  float focus_scale = 1.4F;
-  float cell_radius = 0.35F;
+  float focus_scale       = 1.4F;
+  float cell_radius       = 0.35F;
+  float layout_speed      = 12.0F;
+  float alpha_speed       = 8.0F;
+  float border_thickness  = 2.0F;
+  int neighborhood_radius = 3;
 };
 
 struct StructureMeta {
