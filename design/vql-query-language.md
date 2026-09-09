@@ -368,18 +368,20 @@ discarding the previous context cell's connection — `$context/link(dim, dir, $
 `$context` is not "link every context cell to `$a`," it's "link the last context cell to `$a`, and
 quietly drop the rest."
 
-VQL resolves this the same way §4.6 resolves "one cell, many partners": when the context stream has
-more than one member, an existing-cell `target` is drawn from `entangle_generator(target)` (Vortex
-§2) instead of being reused as-is. Each pull allocates a fresh cell entangled with `target` —
-sharing its value, mutated together (§4.6) — and *that* fresh cell, not `target` itself, becomes the
-structural link partner for one context cell. `target`'s own dimension slot still only ever holds
-the most recently generated partner directly, but every generated cell (and `target`) shares one
-underlying payload, so the group reads as a single logical value no matter which member is
-dereferenced.
+VQL resolves this the same way §4.6 resolves "one cell, many partners": an existing-cell `target` is
+always drawn from `entangle_generator(target)` (Vortex §2) rather than being reused directly — one
+pull per context-stream cell, unconditionally, with no branch on how many cells are in the context.
+The generator's first pull is `target` itself, so a single-cell context gets exactly what writing
+`target` directly would have given it — no synthetic entanglement, no special case. Every pull after
+the first allocates a fresh cell entangled with `target` — sharing its value, mutated together
+(§4.6) — and *that* fresh cell becomes the structural link partner for one more context cell.
+`target`'s own dimension slot still only ever holds the most recently generated partner directly,
+but every generated cell (and `target`) shares one underlying payload, so the group reads as a
+single logical value no matter which member is dereferenced.
 
-This is transparent at the call site: `$context/link(dim, dir, $a)` parses and means the same thing
-whether `$context` has one cell or many — the fan-out only engages once there's more than one `link`
-call contending for `$a`'s slot, and a single-cell context never pays for it.
+This is transparent at the call site: `$context/link(dim, dir, $a)` parses and means the same thing,
+and compiles the same way, whether `$context` has one cell or many — a 1-node and an N-node context
+both draw from the same generator, they just happen to draw a different number of times.
 
 ______________________________________________________________________
 

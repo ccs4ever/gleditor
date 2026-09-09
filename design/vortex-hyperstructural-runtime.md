@@ -344,14 +344,20 @@ std::optional<cell_id> break_link(cell_id cell, cell_id dim, int direction) {
 
 // A dim/dir slot holds exactly one partner (§1), so passing one existing
 // cell as `target` to more than one `link` call silently overwrites its
-// back-link each time. entangle_generator(source) sidesteps that: each call
-// allocates a fresh cell and entangles it with source (source stays the
-// `cell` argument so its value, not the blank new cell's, is authoritative
-// -- §4.6 of vql-query-language.md), then returns that fresh cell rather
-// than source itself, so every caller gets its own structurally distinct
-// but identity-linked partner. See VQL §4.7 for where this gets used.
+// back-link each time. entangle_generator(source) sidesteps that: the first
+// call returns source itself -- so a single caller behaves exactly as if it
+// had used source directly, no special-casing needed -- and every call
+// after that allocates a fresh cell and entangles it with source (source
+// stays the `cell` argument so its value, not the blank new cell's, is
+// authoritative -- §4.6 of vql-query-language.md), returning that fresh
+// cell instead so every additional caller still gets its own structurally
+// distinct but identity-linked partner. See VQL §4.7 for where this is used.
 std::function<cell_id()> entangle_generator(cell_id source) {
-    return [source]() {
+    return [source, used = false]() mutable {
+        if (!used) {
+            used = true;
+            return source;
+        }
         cell_id fresh = internal_alloc_cell();
         link(source, d_entangle, +1, fresh);
         return fresh;
