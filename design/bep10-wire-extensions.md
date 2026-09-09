@@ -1,37 +1,34 @@
 # BEP 10 BitTorrent Wire Protocol Extensions Specification
 
-An architectural specification and reference document for all custom BEP 10
-(BitTorrent Extension Protocol) extensions across the `gleditor`, `xudu`, and
-`zigzag` systems.
+An architectural specification and reference document for all custom BEP 10 (BitTorrent Extension
+Protocol) extensions across the `gleditor`, `xudu`, and `zigzag` systems.
 
----
+______________________________________________________________________
 
 ## 1. Overview: The Swarm as a Sovereign Transport Layer
 
-In traditional decentralized systems, identity, collaborative live editing, and
-micropayments are delegated to separate network sidecars, HTTP servers, or
-blockchain RPC nodes. In the Xanadulogical architecture of `xudu` and `gleditor`,
-**the BitTorrent peer wire is the sole transport layer**.
+In traditional decentralized systems, identity, collaborative live editing, and micropayments are
+delegated to separate network sidecars, HTTP servers, or blockchain RPC nodes. In the Xanadulogical
+architecture of `xudu` and `gleditor`, **the BitTorrent peer wire is the sole transport layer**.
 
 By building on **BEP 10 (Extension Protocol for BitTorrent)**:
-1. **Zero Additional Ports**: All metadata, identity handshakes, live ops, and
-   payment settlement travel over the single established BitTorrent TCP/uTP peer
-   socket.
-2. **Unified NAT Traversal & Encryption**: All traffic inherits libtorrent's
-   built-in hole punching, UPnP, NAT-PMP, and MSE/PE stream encryption.
-3. **Swarm Locality**: Peers collaborating on a specific Xanadoc or quoting the
-   same permascroll interact directly over the swarm carrying that content.
 
----
+1. **Zero Additional Ports**: All metadata, identity handshakes, live ops, and payment settlement
+   travel over the single established BitTorrent TCP/uTP peer socket.
+1. **Unified NAT Traversal & Encryption**: All traffic inherits libtorrent's built-in hole punching,
+   UPnP, NAT-PMP, and MSE/PE stream encryption.
+1. **Swarm Locality**: Peers collaborating on a specific Xanadoc or quoting the same permascroll
+   interact directly over the swarm carrying that content.
+
+______________________________________________________________________
 
 ## 2. BEP 10 Framing, Handshake & Message Multiplexing
 
 ### Handshake Negotiation (`add_handshake` / `on_extension_handshake`)
 
-When two peers connect, they exchange standard BEP 10 extension handshake
-dictionaries. Each client advertises the extensions it supports in the `"m"`
-sub-dictionary, mapping the canonical extension name to its preferred local
-integer message ID:
+When two peers connect, they exchange standard BEP 10 extension handshake dictionaries. Each client
+advertises the extensions it supports in the `"m"` sub-dictionary, mapping the canonical extension
+name to its preferred local integer message ID:
 
 ```
 {
@@ -45,14 +42,13 @@ integer message ID:
 }
 ```
 
-When receiving `on_extension_handshake(node)`, each plugin extracts the
-corresponding remote message ID assigned by the remote peer. Outgoing messages
-are then sent using the remote peer's advertised ID.
+When receiving `on_extension_handshake(node)`, each plugin extracts the corresponding remote message
+ID assigned by the remote peer. Outgoing messages are then sent using the remote peer's advertised
+ID.
 
 ### Packet Framing Format
 
-Every BEP 10 extended packet on the wire adheres to standard BitTorrent
-message framing:
+Every BEP 10 extended packet on the wire adheres to standard BitTorrent message framing:
 
 ```
 ┌───────────────────────────────┬───────────────────────────────┐
@@ -68,10 +64,12 @@ message framing:
 
 ### Universal Extended Envelope (`identity_serialization.hpp`)
 
-For identity, voting, and transcopyright messages, the payload begins with a
-1-byte `MessageType` enum followed by canonical Bencoded payload data:
+For identity, voting, and transcopyright messages, the payload begins with a 1-byte `MessageType`
+enum followed by canonical Bencoded payload data:
 
-$$\text{ExtendedPayload} = \text{MessageType (1 byte)} \parallel \text{BencodeDict}$$
+$$
+\text{ExtendedPayload} = \text{MessageType (1 byte)} \parallel \text{BencodeDict}
+$$
 
 ```cpp
 enum class MessageType : std::uint8_t {
@@ -100,7 +98,7 @@ enum class MessageType : std::uint8_t {
 };
 ```
 
----
+______________________________________________________________________
 
 ## 3. Extension Catalog
 
@@ -116,18 +114,19 @@ enum class MessageType : std::uint8_t {
 └───────────────────────┴──────────┴───────────────────────────────────────┘
 ```
 
----
+______________________________________________________________________
 
 ## 4. Specification: `xudu_live_op` (ID: 1)
 
 ### Purpose
-Enables real-time collaborative multi-user editing on active Xanadocs.
-Crucially, **zero raw text is transmitted in live ops**: all modifications
-reference immutable 48-byte canonical descriptors (`GlobalSpan`) and
-microversion hashes, preventing local spool pollution and guaranteeing
+
+Enables real-time collaborative multi-user editing on active Xanadocs. Crucially, **zero raw text is
+transmitted in live ops**: all modifications reference immutable 48-byte canonical descriptors
+(`GlobalSpan`) and microversion hashes, preventing local spool pollution and guaranteeing
 deterministic OT/CRDT convergence.
 
 ### Bencode Schema
+
 ```
 {
   "t": <int: operation_type (Insert=1, Delete=2, Transclude=3, Link=4)>,
@@ -140,19 +139,21 @@ deterministic OT/CRDT convergence.
 ```
 
 ### Operation Flow
-1. Author types text locally into their sovereign `UserPermascroll` (Slot 0).
-2. The client commits the span to its local spool and generates a `GlobalSpan`.
-3. The client broadcasts `xudu_live_op` containing the descriptor.
-4. Remote peers receive the descriptor and stage the operation into their local
-   `Store` without downloading raw text until rendered.
 
----
+1. Author types text locally into their sovereign `UserPermascroll` (Slot 0).
+1. The client commits the span to its local spool and generates a `GlobalSpan`.
+1. The client broadcasts `xudu_live_op` containing the descriptor.
+1. Remote peers receive the descriptor and stage the operation into their local `Store` without
+   downloading raw text until rendered.
+
+______________________________________________________________________
 
 ## 5. Specification: `xudu_identity_lookup` (ID: 2)
 
 ### Purpose
-Provides two-way cryptographic peer authentication, identity resolution, and
-Merkle inclusion proof delivery.
+
+Provides two-way cryptographic peer authentication, identity resolution, and Merkle inclusion proof
+delivery.
 
 ```mermaid
 sequenceDiagram
@@ -171,13 +172,17 @@ sequenceDiagram
 ### Message Formats
 
 #### 1. `PeerAuthChallenge` (`0x03`)
+
 Sent immediately after extension handshake to gate the connection.
+
 ```
 { "n": <32-byte binary nonce>, "t": <int: timestamp> }
 ```
 
 #### 2. `PeerAuthResponse` (`0x04`)
+
 Proves private key possession for the claimed PGP identity.
+
 ```
 {
   "n": <32-byte binary nonce>,
@@ -187,13 +192,17 @@ Proves private key possession for the claimed PGP identity.
 ```
 
 #### 3. `IdentityQuery` (`0x01`)
+
 Lookup request by fingerprint or email address.
+
 ```
 { "fp": <20-byte binary fingerprint>, "email": <string: normalized_email> }
 ```
 
 #### 4. `IdentityResponse` (`0x02`)
+
 Delivers the identity record, block header, and Merkle audit path.
+
 ```
 {
   "entry": {
@@ -224,17 +233,20 @@ Delivers the identity record, block header, and Merkle audit path.
 }
 ```
 
----
+______________________________________________________________________
 
 ## 6. Specification: `xudu_oracle_vote` (ID: 3)
 
 ### Purpose
+
 Gossip network for weighted community votes electing the active Oracle quorum.
 
 ### Message Formats
 
 #### 1. `OracleVoteBroadcast` (`0x10`)
+
 Broadcasts a new vote endorsing an Oracle candidate.
+
 ```
 {
   "voter": <20-byte voter_fingerprint>,
@@ -246,7 +258,9 @@ Broadcasts a new vote endorsing an Oracle candidate.
 ```
 
 #### 2. `OracleConsensusQuery` (`0x11`) & `OracleConsensusResponse` (`0x12`)
+
 Synchronizes candidate vote tallies and the active quorum root between peers.
+
 ```
 {
   "quorum_size": <int: requested_quorum_size>,
@@ -257,18 +271,21 @@ Synchronizes candidate vote tallies and the active quorum root between peers.
 }
 ```
 
----
+______________________________________________________________________
 
 ## 7. Specification: `xudu_oracle_verify` (ID: 4)
 
 ### Purpose
+
 Out-of-band email attestation protocol between authors and elected Oracles.
 
 ### Message Formats
 
 #### 1. `EmailVerifyRequest` (`0x20`)
-Author requests an email verification challenge from an elected Oracle.
-Gated by Hashcash Proof-of-Work to eliminate spam.
+
+Author requests an email verification challenge from an elected Oracle. Gated by Hashcash
+Proof-of-Work to eliminate spam.
+
 ```
 {
   "req_fp": <20-byte author_fingerprint>,
@@ -286,7 +303,9 @@ Gated by Hashcash Proof-of-Work to eliminate spam.
 ```
 
 #### 2. `EmailVerifyChallengeAck` (`0x21`)
+
 Author returns the secret token received via out-of-band email (SMTP/DKIM).
+
 ```
 {
   "req_fp": <20-byte author_fingerprint>,
@@ -296,7 +315,9 @@ Author returns the secret token received via out-of-band email (SMTP/DKIM).
 ```
 
 #### 3. `EmailVerifyAttestation` (`0x22`)
+
 Oracle delivers the signed attestation token.
+
 ```
 {
   "oracle": <20-byte oracle_fingerprint>,
@@ -308,13 +329,14 @@ Oracle delivers the signed attestation token.
 }
 ```
 
----
+______________________________________________________________________
 
 ## 8. Specification: `xudu_transcopyright` (ID: 5)
 
 ### Purpose
-Decentralized per-byte micropayment invoicing and Content Encryption Key (CEK)
-delivery for Ted Nelson's Transcopyright.
+
+Decentralized per-byte micropayment invoicing and Content Encryption Key (CEK) delivery for Ted
+Nelson's Transcopyright.
 
 ```mermaid
 sequenceDiagram
@@ -334,13 +356,17 @@ sequenceDiagram
 ### Message Formats
 
 #### 1. `TcInvoiceQuery` (`0x30`)
+
 Requests an invoice for an encrypted span.
+
 ```
 { "key_id": <32-byte key_id>, "bytes": <int: requested_byte_count> }
 ```
 
 #### 2. `TcInvoiceResponse` (`0x31`)
+
 Delivers pricing and payment parameters.
+
 ```
 {
   "key_id": <32-byte key_id>,
@@ -355,7 +381,9 @@ Delivers pricing and payment parameters.
 ```
 
 #### 3. `TcSettleRequest` (`0x32`)
+
 Delivers the micropayment settlement proof.
+
 ```
 {
   "key_id": <32-byte key_id>,
@@ -369,7 +397,9 @@ Delivers the micropayment settlement proof.
 ```
 
 #### 4. `TcKeyDelivery` (`0x33`)
+
 Delivers the wrapped Content Encryption Key.
+
 ```
 {
   "key_id": <32-byte key_id>,
@@ -378,28 +408,29 @@ Delivers the wrapped Content Encryption Key.
 }
 ```
 
----
+______________________________________________________________________
 
 ## 9. Security, Peer Gating & Isolation Model
 
 ### Peer Gating (`IdentityPeerPlugin`)
-1. **Challenge Timeout**: A connecting peer has 10 seconds to respond to a
-   `PeerAuthChallenge`. If unanswered, the peer is disconnected.
-2. **Signature Failure**: If an authentication signature or attestation token
-   fails cryptographic verification, `isolateAndDisconnect()` immediately drops
-   the connection and blacklists the remote IP.
-3. **Sybil & Spam Throttle**: Any peer issuing more than 5 failed queries per
-   minute or submitting invalid Hashcash PoW is banned for 1 hour.
 
----
+1. **Challenge Timeout**: A connecting peer has 10 seconds to respond to a `PeerAuthChallenge`. If
+   unanswered, the peer is disconnected.
+1. **Signature Failure**: If an authentication signature or attestation token fails cryptographic
+   verification, `isolateAndDisconnect()` immediately drops the connection and blacklists the remote
+   IP.
+1. **Sybil & Spam Throttle**: Any peer issuing more than 5 failed queries per minute or submitting
+   invalid Hashcash PoW is banned for 1 hour.
+
+______________________________________________________________________
 
 ## 10. Implementation File Reference
 
-| Component | Files | Description |
-| :--- | :--- | :--- |
-| **Live Op Plugin** | [`apps/xudu/core/swarm.cpp`](apps/xudu/core/swarm.cpp) | `XuduPeerPlugin` & `XuduTorrentPlugin` (`xudu_live_op`) |
-| **Identity Controller** | [`apps/xudu/core/identity/identity_network_controller.hpp/.cpp`](apps/xudu/core/identity/identity_network_controller.hpp) | `IdentityPeerPlugin` & `IdentityTorrentPlugin` (Extensions 2, 3, 4, 5) |
-| **Message Layouts** | [`apps/xudu/core/identity/identity_layout.hpp`](apps/xudu/core/identity/identity_layout.hpp) | Struct definitions for all wire messages |
-| **Bencode Serialization** | [`apps/xudu/core/identity/identity_serialization.hpp/.cpp`](apps/xudu/core/identity/identity_serialization.hpp) | Zero-copy encoders and decoders for all wire frames |
-| **PoW Engine** | [`apps/xudu/core/identity/identity_validation.hpp/.cpp`](apps/xudu/core/identity/identity_validation.hpp) | `HashcashEngine` verifier, miner, and anti-replay cache |
-| **Unit Tests** | [`tests/xudu/identity_test.cpp`](tests/xudu/identity_test.cpp), [`tests/xudu/transcopyright_test.cpp`](tests/xudu/transcopyright_test.cpp) | BEP 10 encoding, decoding, and network integration tests |
+| Component                 | Files                                                                                                                                      | Description                                                            |
+| :------------------------ | :----------------------------------------------------------------------------------------------------------------------------------------- | :--------------------------------------------------------------------- |
+| **Live Op Plugin**        | [`apps/xudu/core/swarm.cpp`](apps/xudu/core/swarm.cpp)                                                                                     | `XuduPeerPlugin` & `XuduTorrentPlugin` (`xudu_live_op`)                |
+| **Identity Controller**   | [`apps/xudu/core/identity/identity_network_controller.hpp/.cpp`](apps/xudu/core/identity/identity_network_controller.hpp)                  | `IdentityPeerPlugin` & `IdentityTorrentPlugin` (Extensions 2, 3, 4, 5) |
+| **Message Layouts**       | [`apps/xudu/core/identity/identity_layout.hpp`](apps/xudu/core/identity/identity_layout.hpp)                                               | Struct definitions for all wire messages                               |
+| **Bencode Serialization** | [`apps/xudu/core/identity/identity_serialization.hpp/.cpp`](apps/xudu/core/identity/identity_serialization.hpp)                            | Zero-copy encoders and decoders for all wire frames                    |
+| **PoW Engine**            | [`apps/xudu/core/identity/identity_validation.hpp/.cpp`](apps/xudu/core/identity/identity_validation.hpp)                                  | `HashcashEngine` verifier, miner, and anti-replay cache                |
+| **Unit Tests**            | [`tests/xudu/identity_test.cpp`](tests/xudu/identity_test.cpp), [`tests/xudu/transcopyright_test.cpp`](tests/xudu/transcopyright_test.cpp) | BEP 10 encoding, decoding, and network integration tests               |

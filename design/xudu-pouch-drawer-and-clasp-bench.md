@@ -2,15 +2,14 @@
 
 ## 1. Executive Summary & Nelsonian Conceptual Lineage
 
-This specification establishes the architectural design, interaction model, and
-C++23 implementation for the **Pouch Drawer**, **Partitioned Drop Zones**, and
-the **Clasp Assembly Bench** in `apps/xudu`.
+This specification establishes the architectural design, interaction model, and C++23 implementation
+for the **Pouch Drawer**, **Partitioned Drop Zones**, and the **Clasp Assembly Bench** in
+`apps/xudu`.
 
-Traditional desktop text editors rely on the Xerox PARC "clipboard" — an
-amnesiac, destructive bit-bucket that severs provenance, destroys context, and
-forces raw byte duplication. In Project Xanadu, Theodor Holm Nelson rejected the
-clipboard in favor of persistent, addressable collections of virtual spans
-(`vspans`) that preserve immutable primedia provenance.
+Traditional desktop text editors rely on the Xerox PARC "clipboard" — an amnesiac, destructive
+bit-bucket that severs provenance, destroys context, and forces raw byte duplication. In Project
+Xanadu, Theodor Holm Nelson rejected the clipboard in favor of persistent, addressable collections
+of virtual spans (`vspans`) that preserve immutable primedia provenance.
 
 ```
 +------------------------------------------------------------------------------------+
@@ -38,16 +37,16 @@ clipboard in favor of persistent, addressable collections of virtual spans
 
 ### 1.1 Nelsonian Terminology Reference
 
-The design directly grounds modern spatial GUI interactions in authentic
-Nelsonian hypertext concepts (*Literary Machines*, *Possiplex*, *CosmicBook*):
+The design directly grounds modern spatial GUI interactions in authentic Nelsonian hypertext
+concepts (*Literary Machines*, *Possiplex*, *CosmicBook*):
 
-| Feature Concept | Ted Nelson's Term | Theoretical Definition |
-| :--- | :--- | :--- |
-| **Ghost Spanables** | **Ghostings / Ghost Spans** | Visible representations of invariant primedia characters appearing in multiple views without byte duplication (*Literary Machines*). |
-| **Drop Zone Drawer** | **Pouches** | Open-ended personal collections of addresses, spans, and bookmarks carried across the docuverse (*Literary Machines* Ch. 2, FEBE Protocol). |
-| **Multi-Span Bundles** | **Clutches** | A grasped bundle of pointers or spans held together for a compound operation (*Literary Machines* Glossary). |
-| **3-Part Link Control** | **Clasp Assembly Bench** | A *clasp* binds $N$ homeward spans to $M$ toward spans with explicit typing (*Literary Machines* 87.1). |
-| **Context Recovery** | **Sworph / Collateral Alignment** | Smoothly swinging and morphing documents side by side so related spans align at identical elevations (*Possiplex*). |
+| Feature Concept         | Ted Nelson's Term                 | Theoretical Definition                                                                                                                      |
+| :---------------------- | :-------------------------------- | :------------------------------------------------------------------------------------------------------------------------------------------ |
+| **Ghost Spanables**     | **Ghostings / Ghost Spans**       | Visible representations of invariant primedia characters appearing in multiple views without byte duplication (*Literary Machines*).        |
+| **Drop Zone Drawer**    | **Pouches**                       | Open-ended personal collections of addresses, spans, and bookmarks carried across the docuverse (*Literary Machines* Ch. 2, FEBE Protocol). |
+| **Multi-Span Bundles**  | **Clutches**                      | A grasped bundle of pointers or spans held together for a compound operation (*Literary Machines* Glossary).                                |
+| **3-Part Link Control** | **Clasp Assembly Bench**          | A *clasp* binds $N$ homeward spans to $M$ toward spans with explicit typing (*Literary Machines* 87.1).                                     |
+| **Context Recovery**    | **Sworph / Collateral Alignment** | Smoothly swinging and morphing documents side by side so related spans align at identical elevations (*Possiplex*).                         |
 
 ______________________________________________________________________
 
@@ -94,58 +93,62 @@ ______________________________________________________________________
 
 ### 3.1 Screen Bezel Infinite Depth & Fitts's Law
 
-- **Horizontal Targeting ($W_x \\to \\infty$)**: The physical monitor edge stops
-  the cursor. Users can flick ballistic mouse movements toward the screen
-  boundary with zero deceleration penalty ($MT = a + b \\log_2(2D / W)$).
-- **Vertical Partitioning ($W_y < \\infty$)**: Drop zones partition the vertical
-  edge into functional bands ($H \\approx 90 - 140,\\text{px}$). Corner zones
-  (top and bottom) benefit from 2D infinite boundary stops.
-- **Docking Flexibility**: The drawer can be docked to the Left bezel, Right
-  bezel, or detached into a floating 3D panel. On ultra-wide monitors
-  ($> 2560,\\text{px}$ width), the drawer automatically docks to the bezel
-  closest to the active editing viewport.
+- **Horizontal Targeting ($W_x \to \infty$)**: The physical monitor edge stops the cursor. Users can
+  flick ballistic mouse movements toward the screen boundary with zero deceleration penalty
+  ($MT = a + b \log_2(2D / W)$).
+- **Vertical Partitioning ($W_y < \infty$)**: Drop zones partition the vertical edge into functional
+  bands ($H \approx 90 - 140,\text{px}$). Corner zones (top and bottom) benefit from 2D infinite
+  boundary stops.
+- **Docking Flexibility**: The drawer can be docked to the Left bezel, Right bezel, or detached into
+  a floating 3D panel. On ultra-wide monitors ($> 2560,\text{px}$ width), the drawer automatically
+  docks to the bezel closest to the active editing viewport.
 
 ### 3.2 Dynamic Partitioned Drop Zones with User-Selectable Colors
 
-Rather than restricting the user to a hardcoded enum, drop zones are defined by
-**arbitrary string labels** that the user freely chooses, renames, and
-customizes. The drawer comes pre-populated with intuitive defaults:
+Rather than restricting the user to a hardcoded enum, drop zones are defined by **arbitrary string
+labels** that the user freely chooses, renames, and customizes. The drawer comes pre-populated with
+intuitive defaults:
 
-1. **`"To Link (Left)"`**: Staging source spans for link creation (Cyan aura
-   `#06B6D4`, tinted slate background).
-1. **`"To Link (Right)"`**: Staging target spans for link creation (Magenta
-   aura `#EC4899`, tinted plum background).
-1. **`"Notes"`**: General holding pouch for research quotes and thoughts
-   (Identity Gold aura `#EAB308`, warm amber tint).
-1. **`"Scratch"`**: Temporary workbench for rough drafts and fragments
-   (Emerald aura `#10B981`, mint tint).
+1. **`"To Link (Left)"`**: Staging source spans for link creation (Cyan aura `#06B6D4`, tinted slate
+   background).
+1. **`"To Link (Right)"`**: Staging target spans for link creation (Magenta aura `#EC4899`, tinted
+   plum background).
+1. **`"Notes"`**: General holding pouch for research quotes and thoughts (Identity Gold aura
+   `#EAB308`, warm amber tint).
+1. **`"Scratch"`**: Temporary workbench for rough drafts and fragments (Emerald aura `#10B981`, mint
+   tint).
 
 #### User-Selectable Background Colors & Visual Differentiation
 
 Each drop zone features independent styling controls:
 
-- **Aura & Border Accent**: A luminous 2px border and corner bracket tint
-  highlighting active drops and hovers.
-- **Translucent Background Tint**: A user-selectable frosted acrylic fill (RGBA)
-  that allows visual distinction between zones at a glance across the screen.
-- **Dynamic Partition Management**: Users can tap `[+ New Zone]`, specify a
-  custom string label (e.g. `"Rebuttal Points"`, `"Quotes for Chapter 3"`,
-  `"Bibliography"`), choose a color swatch, and drag partition dividers to
-  adjust relative vertical height weights ($W_y$).
+- **Aura & Border Accent**: A luminous 2px border and corner bracket tint highlighting active drops
+  and hovers.
+- **Translucent Background Tint**: A user-selectable frosted acrylic fill (RGBA) that allows visual
+  distinction between zones at a glance across the screen.
+- **Dynamic Partition Management**: Users can tap `[+ New Zone]`, specify a custom string label
+  (e.g. `"Rebuttal Points"`, `"Quotes for Chapter 3"`, `"Bibliography"`), choose a color swatch, and
+  drag partition dividers to adjust relative vertical height weights ($W_y$).
 
 ### 3.3 Ghost Spanable Drag Interactions
 
-1. **Detachment**: Holding `Alt` while dragging text or pulling the `⎘` handle
-   detaches a semi-transparent ghost quad.
-1. **Elastic Spring Tether**: A Hookean spring tether with damping connects the
-   origin span to the cursor:
-   $$\\mathbf{F}_{\\text{tether}} = -k (\\mathbf{P}_{\\text{cursor}} - \\mathbf{P}\_{\\text{src}}) - c \\mathbf{v}$$
+1. **Detachment**: Holding `Alt` while dragging text or pulling the `⎘` handle detaches a
+   semi-transparent ghost quad.
+
+1. **Elastic Spring Tether**: A Hookean spring tether with damping connects the origin span to the
+   cursor:
+
+   ```math
+   \mathbf{F}_{\text{tether}} = -k (\mathbf{P}_{\text{cursor}} - \mathbf{P}_{\text{src}}) - c \mathbf{v}
+   ```
+
 1. **Drop Routing**:
-   - Dropping on a **Drop Zone** (`tagKindOverlay`): Ingests the span into that
-     zone's persistent collection; the tether snaps into the drawer card.
+
+   - Dropping on a **Drop Zone** (`tagKindOverlay`): Ingests the span into that zone's persistent
+     collection; the tether snaps into the drawer card.
    - Dropping in the **Void** (`tagKindNone`): Spawns a new xanadoc page quad.
-   - Dropping on a **Document Page** (`tagKindGlyph`/`tagKindPage`): Transcludes
-     the span inline into the target concatext.
+   - Dropping on a **Document Page** (`tagKindGlyph`/`tagKindPage`): Transcludes the span inline
+     into the target concatext.
 
 ______________________________________________________________________
 
@@ -153,8 +156,8 @@ ______________________________________________________________________
 
 ### 4.1 Zero Raw Byte Duplication
 
-The Pouch Drawer is **not** an ephemeral GUI array. It is backed by a dedicated
-`xudu::Store` instance sharing the author's primary `UserPermascroll`:
+The Pouch Drawer is **not** an ephemeral GUI array. It is backed by a dedicated `xudu::Store`
+instance sharing the author's primary `UserPermascroll`:
 
 ```cpp
 auto pouchStore = std::make_unique<xudu::Store>(session.userPermascrollPtr());
@@ -163,9 +166,9 @@ auto pouchStore = std::make_unique<xudu::Store>(session.userPermascrollPtr());
 When a span is dropped into the drawer:
 
 - **Zero bytes are written to primedia spools**.
-- The operation appends a 64-byte `CompactOpNode` record (`OpKind::Transclude`
-  or `OpKind::Insert` with pre-existing `PrimediaSpan`).
-- A drawer holding 50 transcluded spans consumes barely $1.2,\\text{KB}$ of RAM.
+- The operation appends a 64-byte `CompactOpNode` record (`OpKind::Transclude` or `OpKind::Insert`
+  with pre-existing `PrimediaSpan`).
+- A drawer holding 50 transcluded spans consumes barely $1.2,\text{KB}$ of RAM.
 
 ### 4.2 Hypertime Microversion Partitioning & Limbo
 
@@ -177,39 +180,34 @@ Each drop zone in the drawer maps to an independent microversion branch:
                └──> (v1.2:notes_later)   [Persistent Notes]
 ```
 
-- **Non-Destructive Limbo**: When the user dismisses an item (`✕`) or clears a
-  zone after link forging, the span is **rearranged to OSMIC limbo**, never
-  deleted. Users can scrub backward in hypertime to recover any previously
-  harvested span.
+- **Non-Destructive Limbo**: When the user dismisses an item (`✕`) or clears a zone after link
+  forging, the span is **rearranged to OSMIC limbo**, never deleted. Users can scrub backward in
+  hypertime to recover any previously harvested span.
 
 ### 4.3 Storage of Zone Definitions, Colors & Layout in the Backing Xanadoc
 
-The backing system xanadoc does not merely hold the transcluded `PrimediaSpan`
-references; it is the **authoritative persistent store for the entire drop-zone
-layout itself**.
+The backing system xanadoc does not merely hold the transcluded `PrimediaSpan` references; it is the
+**authoritative persistent store for the entire drop-zone layout itself**.
 
 In pure Xanadulogical architecture:
 
-- **Zone Manifest as Metadata Links**: Each custom zone's configuration — its
-  user-chosen string label (e.g. `"Notes"`, `"Scratch"`), custom background
-  color tint (RGBA), aura color, and vertical height weight — is stored as a
-  first-class metadata link (`LinkType::Format` / structural attribute) anchored
-  to the pouch document's root microversion.
-- **Single-File Integrity**: No external `.json`, `.ini`, or dotfile settings
-  are required. The entire workspace layout, partitions, colors, and gathered
-  spans reside in the single sovereign EDL directory
-  (`~/.local/share/xudu/pouch/`).
-- **Synchronous Session Restoration**: When `PouchDrawer::load()` executes,
-  `Store::load()` reads the root manifest, instantiates the user's custom drop
-  partitions with their exact colors and labels, and repopulates the transcluded
-  cards across hypertime branches in $< 1,\\text{ms}$.
+- **Zone Manifest as Metadata Links**: Each custom zone's configuration — its user-chosen string
+  label (e.g. `"Notes"`, `"Scratch"`), custom background color tint (RGBA), aura color, and vertical
+  height weight — is stored as a first-class metadata link (`LinkType::Format` / structural
+  attribute) anchored to the pouch document's root microversion.
+- **Single-File Integrity**: No external `.json`, `.ini`, or dotfile settings are required. The
+  entire workspace layout, partitions, colors, and gathered spans reside in the single sovereign EDL
+  directory (`~/.local/share/xudu/pouch/`).
+- **Synchronous Session Restoration**: When `PouchDrawer::load()` executes, `Store::load()` reads
+  the root manifest, instantiates the user's custom drop partitions with their exact colors and
+  labels, and repopulates the transcluded cards across hypertime branches in $< 1,\text{ms}$.
 
 ______________________________________________________________________
 
-## 5. The Clasp Assembly Bench ($N \\times M$ Linking)
+## 5. The Clasp Assembly Bench ($N \times M$ Linking)
 
-The Clasp Assembly Bench sits at the top of the drawer (or can be summoned into
-3D space between two documents):
+The Clasp Assembly Bench sits at the top of the drawer (or can be summoned into 3D space between two
+documents):
 
 ```
 +------------------------------------------------------------------------------------+
@@ -226,13 +224,15 @@ The Clasp Assembly Bench sits at the top of the drawer (or can be summoned into
 ### 5.1 Asymmetric Multi-Span Link Formation
 
 1. The user drags one or more ghost spans into the **Homestead (Left) Drop Zone**.
-1. The user navigates anywhere across the docuverse, dragging counter-spans into
-   the **Toward (Right) Drop Zone**.
-1. In the **Relation Nexus**, the user selects the Nelsonian link type:
-   `Comment`, `Illustration`, `Disagreement`, `Authorship`, `Quotation`,
-   `Dimension`, or `Format`.
-1. Clicking `[ FORGE CLASP ]` commits a compound `xudu::Link` to the active
-   document's store:
+
+1. The user navigates anywhere across the docuverse, dragging counter-spans into the **Toward
+   (Right) Drop Zone**.
+
+1. In the **Relation Nexus**, the user selects the Nelsonian link type: `Comment`, `Illustration`,
+   `Disagreement`, `Authorship`, `Quotation`, `Dimension`, or `Format`.
+
+1. Clicking `[ FORGE CLASP ]` commits a compound `xudu::Link` to the active document's store:
+
    ```cpp
    xudu::Link link;
    link.type = selectedType;
@@ -241,16 +241,17 @@ The Clasp Assembly Bench sits at the top of the drawer (or can be summoned into
    link.right = rightZone.allSpans(); // M spans
    session.addLink(activeDocIndex, std::move(link));
    ```
+
 1. `Session::addLink()` increments the session epoch. On the next frame,
-   `LinkBeams::rebuildStrands()` generates luminous 3D ribbons fanning out
-   between all left and right anchors with instance hue shifts.
+   `LinkBeams::rebuildStrands()` generates luminous 3D ribbons fanning out between all left and
+   right anchors with instance hue shifts.
 
 ______________________________________________________________________
 
 ## 6. Swing-Back Context & Collinear Sworph Navigation
 
-When a user clicks a pouch card to inspect where a snippet came from, the editor
-swings back to the original context without disorienting camera jumps.
+When a user clicks a pouch card to inspect where a snippet came from, the editor swings back to the
+original context without disorienting camera jumps.
 
 ```
 [ Pouch Card Clicked ]
@@ -278,21 +279,21 @@ swings back to the original context without disorienting camera jumps.
 
 ### 6.1 Aperture Expansion
 
-While viewing a pouch card or its swung-back origin, the user can scrub the
-**Aperture Expansion** handle (`◀ [Aperture] ▶`) to dynamically widen the span
-start and end offsets within the author's immutable primedia spool, viewing
-preceding and following paragraphs without losing their staging place.
+While viewing a pouch card or its swung-back origin, the user can scrub the **Aperture Expansion**
+handle (`◀ [Aperture] ▶`) to dynamically widen the span start and end offsets within the author's
+immutable primedia spool, viewing preceding and following paragraphs without losing their staging
+place.
 
 ______________________________________________________________________
 
 ## 7. Systems Realist Performance Invariants (120 FPS Budget)
 
-| Invariant | Systems Risk | Realist Implementation Architecture |
-| :--- | :--- | :--- |
-| **CPU Frame Budget ($< 3.5,\\text{ms}$)** | Re-shaping 50 snippets via HarfBuzz every frame takes $2.5,\\text{ms}$. | **Retained Sliced Canvas**: Drawer owns a `gleditor::Canvas` marked dirty only on item add/remove/scroll. $0.00,\\text{ms}$ CPU cost on steady frames. |
-| **GPU Draw Calls** | Separate draw calls per card and text snippet thrash command buffers. | **1 Instanced Draw Call**: All background quads, aura borders, buttons, and text glyphs pack into `Doc::VBORow`. |
-| **Viewport Virtualization** | Shaping 100+ off-screen snippets exhausts memory. | Only the 6–8 visible snippets in the drawer scissor rectangle are passed to `TextLayout`. |
-| **Zero Disk Stalls** | Synchronous `fsync()` blocks the render thread for $5 - 80,\\text{ms}$. | Drops write to an in-memory `UncommittedOpLog`. Spools use memory-mapped `VirtualMemoryArena` flushed asynchronously. |
+| Invariant                                | Systems Risk                                                           | Realist Implementation Architecture                                                                                                                   |
+| :--------------------------------------- | :--------------------------------------------------------------------- | :---------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **CPU Frame Budget ($< 3.5,\text{ms}$)** | Re-shaping 50 snippets via HarfBuzz every frame takes $2.5,\text{ms}$. | **Retained Sliced Canvas**: Drawer owns a `gleditor::Canvas` marked dirty only on item add/remove/scroll. $0.00,\text{ms}$ CPU cost on steady frames. |
+| **GPU Draw Calls**                       | Separate draw calls per card and text snippet thrash command buffers.  | **1 Instanced Draw Call**: All background quads, aura borders, buttons, and text glyphs pack into `Doc::VBORow`.                                      |
+| **Viewport Virtualization**              | Shaping 100+ off-screen snippets exhausts memory.                      | Only the 6–8 visible snippets in the drawer scissor rectangle are passed to `TextLayout`.                                                             |
+| **Zero Disk Stalls**                     | Synchronous `fsync()` blocks the render thread for $5 - 80,\text{ms}$. | Drops write to an in-memory `UncommittedOpLog`. Spools use memory-mapped `VirtualMemoryArena` flushed asynchronously.                                 |
 
 ______________________________________________________________________
 
@@ -548,12 +549,10 @@ ______________________________________________________________________
 
 ## 9. Cross-Specification References
 
-- [`design/ui_workflow_xudu_intertwingle.md`](ui_workflow_xudu_intertwingle.md):
-  The master specification for 3-way spring layout physics, flying pages, and
-  general spatial UI workflows.
-- [`design/3d-optical-beams-and-spatial-framing.md`](3d-optical-beams-and-spatial-framing.md):
-  The rendering pipeline for volumetric transclusion quads, link ribbons, and
-  `bypassRoute()` obstacle avoidance.
-- [`design/btfs-and-permascrolls.md`](btfs-and-permascrolls.md):
-  The underlying sovereign permascroll storage architecture, 64 KiB piece
-  alignment, and BEP 46 publication model.
+- [`design/ui_workflow_xudu_intertwingle.md`](ui_workflow_xudu_intertwingle.md): The master
+  specification for 3-way spring layout physics, flying pages, and general spatial UI workflows.
+- [`design/3d-optical-beams-and-spatial-framing.md`](3d-optical-beams-and-spatial-framing.md): The
+  rendering pipeline for volumetric transclusion quads, link ribbons, and `bypassRoute()` obstacle
+  avoidance.
+- [`design/btfs-and-permascrolls.md`](btfs-and-permascrolls.md): The underlying sovereign
+  permascroll storage architecture, 64 KiB piece alignment, and BEP 46 publication model.

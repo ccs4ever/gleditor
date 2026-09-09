@@ -25,8 +25,9 @@ WORK=$(mktemp -d)
 PEER_PID=
 
 # Reached only via the trap below, which shellcheck cannot see -- everything
-# in here is live code, not dead.
-# shellcheck disable=SC2317
+# in here is live code, not dead, and the function itself is invoked (just
+# not by name at a call site shellcheck can trace).
+# shellcheck disable=SC2317,SC2329
 cleanup() {
   if [ -n "$PEER_PID" ]; then
     kill "$PEER_PID" 2>/dev/null || true

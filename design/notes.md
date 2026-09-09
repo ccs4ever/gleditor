@@ -1,34 +1,40 @@
-Part 1: LMDB Storage Configuration & Architecture
+# Storage & Streaming Buffer Notes
 
-LMDB (Lightning Memory-Mapped Database) is ideal for Xanadulogical data structures due to its zero-copy read architecture (mmap), MVCC concurrency (lock-free readers never blocking writers), and B+ tree indexing.
+## Part 1: LMDB Storage Configuration & Architecture
 
-1. Architectural Layout & Database Schema
+LMDB (Lightning Memory-Mapped Database) is ideal for Xanadulogical data structures due to its
+zero-copy read architecture (mmap), MVCC concurrency (lock-free readers never blocking writers), and
+B+ tree indexing.
 
-For gleditor and xudu, storage is cleanly split between raw verified piece payloads and lightweight virtual address lookup stores:
+### 1. Architectural Layout & Database Schema
 
-    pieces: Stores raw immutable verified piece payloads indexed by canonical content address (InfoHash, piece_index) with an embedded TextHeader tracking active references (ref_count) and byte length. Reads map directly to const char* without heap allocations.
+For gleditor and xudu, storage is cleanly split between raw verified piece payloads and lightweight
+virtual address lookup stores:
 
-    vspans: Stores virtual Xanadoc primedia scroll lookup records mapping (scroll_id, start, length) to lightweight descriptors VSpanRecord { hash, piece_index, chunk_offset, length }. Sub-spans point into existing piece entries without duplicating text.
+```
+pieces: Stores raw immutable verified piece payloads indexed by canonical content address (InfoHash, piece_index) with an embedded TextHeader tracking active references (ref_count) and byte length. Reads map directly to const char* without heap allocations.
 
-    ext_spans: Stores external content references mapping stream coordinates (InfoHash, stream_offset, length) to VSpanRecord descriptors.
+vspans: Stores virtual Xanadoc primedia scroll lookup records mapping (scroll_id, start, length) to lightweight descriptors VSpanRecord { hash, piece_index, chunk_offset, length }. Sub-spans point into existing piece entries without duplicating text.
 
-    meta: Stores document roots, dimensional metadata, and user workspace states.
+ext_spans: Stores external content references mapping stream coordinates (InfoHash, stream_offset, length) to VSpanRecord descriptors.
 
-       +-------------------------------------------------------------+
-       |                     LMDB Environment                        |
-       |  (Single File / Virtual Memory Map: e.g., 256GB max_size)   |
-       +-------------------------------------------------------------+
-               |                       |                      |
-       +---------------+       +---------------+      +---------------+
-       | DBI: "pieces" |       | DBI: "vspans" |      | DBI: "meta"   |
-       +---------------+       |DBI:"ext_spans"|      +---------------+
-       |Key: (Hash,Idx)|       +---------------+      | Key: DocID    |
-       |Val: TextHeader|       |Key: VirtualPos|      | Val: RootCell |
-       |     + RawText |       |Val: VSpanRec  |      +---------------+
-       +---------------+       +---------------+
+meta: Stores document roots, dimensional metadata, and user workspace states.
 
-C++
+   +-------------------------------------------------------------+
+   |                     LMDB Environment                        |
+   |  (Single File / Virtual Memory Map: e.g., 256GB max_size)   |
+   +-------------------------------------------------------------+
+           |                       |                      |
+   +---------------+       +---------------+      +---------------+
+   | DBI: "pieces" |       | DBI: "vspans" |      | DBI: "meta"   |
+   +---------------+       |DBI:"ext_spans"|      +---------------+
+   |Key: (Hash,Idx)|       +---------------+      | Key: DocID    |
+   |Val: TextHeader|       |Key: VirtualPos|      | Val: RootCell |
+   |     + RawText |       |Val: VSpanRec  |      +---------------+
+   +---------------+       +---------------+
+```
 
+```cpp
 // lmdb_storage.hpp
 #pragma once
 
@@ -194,20 +200,27 @@ private:
     MDB_dbi dbi_zzcells_{ 0 };
     MDB_dbi dbi_meta_{ 0 };
 };
+```
 
-Part 2: OpenGL 3.3 & ES 3.0 Ring Buffer Uploader (StreamBufferGL)
+## Part 2: OpenGL 3.3 & ES 3.0 Ring Buffer Uploader (StreamBufferGL)
 
-1. The Ring Buffer Uploader (include/gleditor/render/gl/stream_buffer.hpp)
+### 1. The Ring Buffer Uploader (include/gleditor/render/gl/stream_buffer.hpp)
 
-This utility provides a lock-free, zero-copy staging area for high-frequency dynamic GPU resources across both OpenGL 3.3 Core and OpenGL ES 3.0:
-- Pixel Unpack Buffers (GL_PIXEL_UNPACK_BUFFER) for non-blocking asynchronous DMA glyph atlas texture streaming.
-- Dynamic Vertex Streams (GL_ARRAY_BUFFER) for inter-document transclusion beams, live text reflow quad staging, and transient UI elements (carets, toasts).
-- Dynamic Uniform Buffers (GL_UNIFORM_BUFFER) for per-frame highlights and selections via glBindBufferRange.
+This utility provides a lock-free, zero-copy staging area for high-frequency dynamic GPU resources
+across both OpenGL 3.3 Core and OpenGL ES 3.0:
 
-By mapping the buffer unsynchronized (GL_MAP_UNSYNCHRONIZED_BIT) and flushing explicit ranges (glFlushMappedBufferRange), driver CPU stalls are completely eliminated. In-flight GPU reads are tracked with sync fences (glFenceSync).
+- Pixel Unpack Buffers (GL_PIXEL_UNPACK_BUFFER) for non-blocking asynchronous DMA glyph atlas
+  texture streaming.
+- Dynamic Vertex Streams (GL_ARRAY_BUFFER) for inter-document transclusion beams, live text reflow
+  quad staging, and transient UI elements (carets, toasts).
+- Dynamic Uniform Buffers (GL_UNIFORM_BUFFER) for per-frame highlights and selections via
+  glBindBufferRange.
 
-C++
+By mapping the buffer unsynchronized (GL_MAP_UNSYNCHRONIZED_BIT) and flushing explicit ranges
+(glFlushMappedBufferRange), driver CPU stalls are completely eliminated. In-flight GPU reads are
+tracked with sync fences (glFenceSync).
 
+```cpp
 // include/gleditor/render/gl/stream_buffer.hpp
 #pragma once
 
@@ -247,25 +260,37 @@ public:
 };
 
 } // namespace render::gl
+```
 
-2. Integration with the OpenGL Backend (src/render/gl/device_gl.cpp)
+### 2. Integration with the OpenGL Backend (src/render/gl/device_gl.cpp)
 
 In DeviceGL, StreamBufferGL is integrated for:
-- PBO Texture Streaming (16MB GL_PIXEL_UNPACK_BUFFER): Asynchronous glyph uploads in DeviceGL::updateTextureLayer.
-- Dynamic Highlights UBO (2MB GL_UNIFORM_BUFFER): Lock-free range streaming in DeviceGL::setHighlights with api.BindBufferRange.
-- Dynamic Vertex & Beam Streaming (GL_ARRAY_BUFFER): Dynamic per-frame geometry streaming for inter-document beams and text reflow instances without reallocating VBOs.
 
-3. The Vulkan Ring Staging Buffer (include/gleditor/render/vulkan/stream_buffer_vk.hpp)
+- PBO Texture Streaming (16MB GL_PIXEL_UNPACK_BUFFER): Asynchronous glyph uploads in
+  DeviceGL::updateTextureLayer.
+- Dynamic Highlights UBO (2MB GL_UNIFORM_BUFFER): Lock-free range streaming in
+  DeviceGL::setHighlights with api.BindBufferRange.
+- Dynamic Vertex & Beam Streaming (GL_ARRAY_BUFFER): Dynamic per-frame geometry streaming for
+  inter-document beams and text reflow instances without reallocating VBOs.
 
-The Vulkan backend implements StreamBufferVK using a persistent HOST_VISIBLE | HOST_COHERENT VkBuffer:
-- Asynchronous DMA Transfers: updateTextureLayer stages glyph rects in the ring buffer without runtime allocateBuffer/destroyBufferRecord churn or vkDeviceWaitIdle stalls.
-- Zero-Stall Highlights UBO: Double-buffered per-frame highlight UBOs (highlightBuffers[framesInFlight]) updated lock-free per frame without vkDeviceWaitIdle.
+### 3. The Vulkan Ring Staging Buffer (include/gleditor/render/vulkan/stream_buffer_vk.hpp)
 
-Since gleditor relies on a single source of truth for shaders across API backends, you can use preprocessor macros to handle the syntax differences between OpenGL 3.3 Core and OpenGL ES 3.0.
+The Vulkan backend implements StreamBufferVK using a persistent HOST_VISIBLE | HOST_COHERENT
+VkBuffer:
 
-Because the CPU is now mapping memory via the stream buffer and providing offsets directly to the vertex attributes, the shader doesn't need SSBOs or complex buffer logic. It simply reads instanced attributes.
-OpenGL Shading Language
+- Asynchronous DMA Transfers: updateTextureLayer stages glyph rects in the ring buffer without
+  runtime allocateBuffer/destroyBufferRecord churn or vkDeviceWaitIdle stalls.
+- Zero-Stall Highlights UBO: Double-buffered per-frame highlight UBOs
+  (highlightBuffers[framesInFlight]) updated lock-free per frame without vkDeviceWaitIdle.
 
+Since gleditor relies on a single source of truth for shaders across API backends, you can use
+preprocessor macros to handle the syntax differences between OpenGL 3.3 Core and OpenGL ES 3.0.
+
+Because the CPU is now mapping memory via the stream buffer and providing offsets directly to the
+vertex attributes, the shader doesn't need SSBOs or complex buffer logic. It simply reads instanced
+attributes.
+
+```glsl
 // assets/shaders/quad.vert.glsl
 #version 330 core
 #ifdef GL_ES
@@ -294,15 +319,15 @@ void main() {
     // 2. Map quad vertices to glyph atlas UVs
     // in_quad_vertex is assumed to be (0,0), (1,0), (0,1), (1,1)
     v_uv = in_glyph_uv_rect.xy + (in_quad_vertex * in_glyph_uv_rect.zw);
-    
+
     // 3. Pass through dynamic alpha / dimension color
     v_color = vec4(in_anim_params.xyz, in_anim_params.w);
 
     gl_Position = u_view_proj * vec4(world_pos, 0.0, 1.0);
 }
+```
 
-OpenGL Shading Language
-
+```glsl
 // assets/shaders/quad.frag.glsl
 #version 330 core
 #ifdef GL_ES
@@ -319,10 +344,9 @@ uniform sampler2D u_glyph_atlas;
 void main() {
     // Single-channel coverage read from the atlas (GL_RED)
     float coverage = texture(u_glyph_atlas, v_uv).r;
-    
+
     if (coverage < 0.01) discard;
 
     out_color = vec4(v_color.rgb, v_color.a * coverage);
 }
-
-
+```

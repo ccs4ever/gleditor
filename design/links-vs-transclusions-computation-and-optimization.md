@@ -1,21 +1,19 @@
 # Links vs. Transclusions: Computation, Visualization, and Scalability Architecture
 
-An architectural specification and design document defining the fundamental
-distinction between explicit xanalinks and emergent transclusions, their
-geometric computation, 3D/2D optical visualization pipelines, and algorithmic
-optimizations for multi-megabyte documents across `gleditor`, `xudu`, and
-`zigzag`.
+An architectural specification and design document defining the fundamental distinction between
+explicit xanalinks and emergent transclusions, their geometric computation, 3D/2D optical
+visualization pipelines, and algorithmic optimizations for multi-megabyte documents across
+`gleditor`, `xudu`, and `zigzag`.
 
----
+______________________________________________________________________
 
 ## 1. Ontological Distinction: Explicit Links vs. Emergent Transclusions
 
-In conventional computing and the World Wide Web, the concept of a "link" is
-conflated with all inter-document relationships, and quotation is achieved
-through lossy, uncredited copy-pasting.
+In conventional computing and the World Wide Web, the concept of a "link" is conflated with all
+inter-document relationships, and quotation is achieved through lossy, uncredited copy-pasting.
 
-In Project Xanadu and the `xudu` architecture, **Links** and **Transclusions**
-are completely distinct mathematical and operational primitives:
+In Project Xanadu and the `xudu` architecture, **Links** and **Transclusions** are completely
+distinct mathematical and operational primitives:
 
 ```
 ┌────────────────────────────────────────────────────────────────────────┐
@@ -37,26 +35,25 @@ are completely distinct mathematical and operational primitives:
 
 ### Comprehensive Comparison Matrix
 
-| Dimension | Xanalink (`Link` / `GlobalLink`) | Transclusion (`PrimediaSpan` / `GlobalSpan`) |
-| :--- | :--- | :--- |
-| **Origin & Authority** | Asserted by human intention (Author, Curator, or Public reader). | Emergent physical fact of shared primedia coordinates. |
-| **Storage Model** | Stored explicitly in `Store::links()` or signed `LinkPackage` bundles. | **Zero stored link objects**. Derived dynamically from Edit Decision Lists (EDLs). |
-| **Coordinate Binding** | Connects Left List spans to Right List spans. | Identical coordinate tuple $(\text{ScrollId}, \text{Offset}, \text{Length})$. |
-| **Cardinality** | Butterfly pair ($1 \to 1$, $1 \to N$, or $N \to M$). | Omnidirectional $N$-way mesh across all documents in the Docuverse. |
-| **Semantics** | Commentary, Illustration, Disagreement, Format, Dimension. | Pure sameness: identical primedia quoted in new contexts. |
-| **Visual Appearance** | Colored ribbons (Cyan `#06B6D4`, Magenta `#D946EF`, Purple `#8B5CF6`). | Solid **Identity Gold** volumetric ribbons & prisms (`#FFD700`). |
-| **Page Margin Indication** | Discrete bracket lanes inside page margins (Lanes 0–3). | Continuous golden highlight bars & volumetric connection bands. |
-| **Hole & Lock Handling** | Points across withheld spans as a relational note. | Transforms into **Obsidian Redaction** (`#1F2937`) or **Transcopyright Gold** (`#F59E0B`). |
-| **Zigzag Dimensionality** | Maps to `d.link` orthogonal dimension. | Maps to `d.transclude` orthogonal dimension. |
-| **Economic Royalty Flow** | Royalty attribution to link curator/author. | Nelsonian Transcopyright settlement direct to original primedia author. |
+| Dimension                  | Xanalink (`Link` / `GlobalLink`)                                       | Transclusion (`PrimediaSpan` / `GlobalSpan`)                                               |
+| :------------------------- | :--------------------------------------------------------------------- | :----------------------------------------------------------------------------------------- |
+| **Origin & Authority**     | Asserted by human intention (Author, Curator, or Public reader).       | Emergent physical fact of shared primedia coordinates.                                     |
+| **Storage Model**          | Stored explicitly in `Store::links()` or signed `LinkPackage` bundles. | **Zero stored link objects**. Derived dynamically from Edit Decision Lists (EDLs).         |
+| **Coordinate Binding**     | Connects Left List spans to Right List spans.                          | Identical coordinate tuple $(\text{ScrollId}, \text{Offset}, \text{Length})$.              |
+| **Cardinality**            | Butterfly pair ($1 \to 1$, $1 \to N$, or $N \to M$).                   | Omnidirectional $N$-way mesh across all documents in the Docuverse.                        |
+| **Semantics**              | Commentary, Illustration, Disagreement, Format, Dimension.             | Pure sameness: identical primedia quoted in new contexts.                                  |
+| **Visual Appearance**      | Colored ribbons (Cyan `#06B6D4`, Magenta `#D946EF`, Purple `#8B5CF6`). | Solid **Identity Gold** volumetric ribbons & prisms (`#FFD700`).                           |
+| **Page Margin Indication** | Discrete bracket lanes inside page margins (Lanes 0–3).                | Continuous golden highlight bars & volumetric connection bands.                            |
+| **Hole & Lock Handling**   | Points across withheld spans as a relational note.                     | Transforms into **Obsidian Redaction** (`#1F2937`) or **Transcopyright Gold** (`#F59E0B`). |
+| **Zigzag Dimensionality**  | Maps to `d.link` orthogonal dimension.                                 | Maps to `d.transclude` orthogonal dimension.                                               |
+| **Economic Royalty Flow**  | Royalty attribution to link curator/author.                            | Nelsonian Transcopyright settlement direct to original primedia author.                    |
 
----
+______________________________________________________________________
 
 ## 2. Mathematical Computation of Transclusions
 
-Transclusion is never recorded as a database entry. When multiple documents are
-opened in `xudu` or projected in `zigzag`, the engine evaluates the geometric
-overlap of their Edit Decision Lists.
+Transclusion is never recorded as a database entry. When multiple documents are opened in `xudu` or
+projected in `zigzag`, the engine evaluates the geometric overlap of their Edit Decision Lists.
 
 ```mermaid
 graph TD
@@ -75,6 +72,7 @@ graph TD
 ```
 
 ### 1. EDL Piece Table Intersection (`placeTransclusions`)
+
 In [`apps/xudu/core/link_layout.cpp`](apps/xudu/core/link_layout.cpp), `placeTransclusions()`
 compares the piece tables of all active document views:
 
@@ -114,24 +112,35 @@ void placeTransclusions(const std::vector<const Version *> &views,
 ```
 
 ### 2. Analytical Span Overlap (`PrimediaSpan::intersect`)
-Two pieces share content if and only if they reference the same `ScrollId` and
-their byte extents overlap:
 
-$$\text{shared}.\text{start} = \max(\text{start}_A, \text{start}_B)$$
-$$\text{shared}.\text{end} = \min(\text{start}_A + \text{len}_A, \text{start}_B + \text{len}_B)$$
-$$\text{shared}.\text{length} = \max(0, \text{shared}.\text{end} - \text{shared}.\text{start})$$
+Two pieces share content if and only if they reference the same `ScrollId` and their byte extents
+overlap:
+
+$$
+\text{shared}.\text{start} = \max(\text{start}_A, \text{start}_B)
+$$
+
+$$
+\text{shared}.\text{end} = \min(\text{start}_A + \text{len}_A, \text{start}_B + \text{len}_B)
+$$
+
+$$
+\text{shared}.\text{length} = \max(0, \text{shared}.\text{end} - \text{shared}.\text{start})
+$$
 
 ### 3. Layout Anchor Resolution (`Doc::anchorFor`)
+
 Once character offsets $(\text{start}, \text{end})$ in concatext are known:
-1. `Doc::anchorFor(offset)` performs a binary search over paginated lines to
-   identify the exact `pageIndex`, line index, vertical $Y$-baseline, and
-   horizontal cluster bounding box.
-2. `Doc::worldPoint()` transforms layout-space coordinates into 3D world-space
-   vertices:
 
-$$\vec{P}_{\text{world}} = \mathbf{M}_{\text{doc}} \cdot \begin{bmatrix} X_{\text{page}} + X_{\text{cluster}} \\ Y_{\text{page}} - Y_{\text{baseline}} \\ 0 \\ 1 \end{bmatrix}$$
+1. `Doc::anchorFor(offset)` performs a binary search over paginated lines to identify the exact
+   `pageIndex`, line index, vertical $Y$-baseline, and horizontal cluster bounding box.
+1. `Doc::worldPoint()` transforms layout-space coordinates into 3D world-space vertices:
 
----
+```math
+\vec{P}_{\text{world}} = \mathbf{M}_{\text{doc}} \cdot \begin{bmatrix} X_{\text{page}} + X_{\text{cluster}} \\ Y_{\text{page}} - Y_{\text{baseline}} \\ 0 \\ 1 \end{bmatrix}
+```
+
+______________________________________________________________________
 
 ## 3. Visualization Pipeline: 3D Optical Beams & 2D Highlights
 
@@ -148,38 +157,41 @@ $$\vec{P}_{\text{world}} = \mathbf{M}_{\text{doc}} \cdot \begin{bmatrix} X_{\tex
 ```
 
 ### 1. Volumetric Transclusion Prisms (`LinkBeams::band`)
-In [`apps/xudu/beams.cpp`](apps/xudu/beams.cpp), transclusions are drawn as
-multi-strand volumetric ribbons:
+
+In [`apps/xudu/beams.cpp`](apps/xudu/beams.cpp), transclusions are drawn as multi-strand volumetric
+ribbons:
+
 - **Default Appearance**: Pure **Identity Gold** (`0xFFD700FF`).
 - **Withheld / Redacted Spans**: **Obsidian Redaction Beams** (`0x1F2937FF`).
-- **Transcopyright Locked Spans**: **Transcopyright Amber Gold** (`0xF59E0BFF`)
-  with active traveling photonic energy pulses.
-- **Dynamic Multi-Strand Spacing (`bandStrandCount`)**: Strands are spaced
-  across the taller span, converging smoothly onto the shorter span to prevent
-  visual pinching or bow-tie artifacts.
+- **Transcopyright Locked Spans**: **Transcopyright Amber Gold** (`0xF59E0BFF`) with active
+  traveling photonic energy pulses.
+- **Dynamic Multi-Strand Spacing (`bandStrandCount`)**: Strands are spaced across the taller span,
+  converging smoothly onto the shorter span to prevent visual pinching or bow-tie artifacts.
 
 ### 2. Non-Planar 3D Bypass Routing (`bypassRoute`)
-When intermediate documents sit between transclusion endpoints, the ribbon
-dips into negative $Z$-depth behind the document plane via a quadratic Bezier
-arc:
 
-$$\vec{P}_{\text{ctrl}} = \frac{\vec{P}_{\text{near}} + \vec{P}_{\text{far}}}{2} - \begin{bmatrix} 0 \\ 0 \\ Z_{\text{depth}} \end{bmatrix}$$
+When intermediate documents sit between transclusion endpoints, the ribbon dips into negative
+$Z$-depth behind the document plane via a quadratic Bezier arc:
+
+```math
+\vec{P}_{\text{ctrl}} = \frac{\vec{P}_{\text{near}} + \vec{P}_{\text{far}}}{2} - \begin{bmatrix} 0 \\ 0 \\ Z_{\text{depth}} \end{bmatrix}
+```
 
 ### 3. In-Page Multi-Banded Highlighting (`glyph.frag.glsl`)
-When a character on a page is simultaneously part of a transclusion and multiple
-xanalinks:
-- The fragment shader partitions the 24-byte glyph quad ([`Doc::VBORow`](include/gleditor/doc.hpp))
-  vertically into up to **4 distinct color bands** without requiring duplicate
-  draw calls or alpha blending artifacts.
 
----
+When a character on a page is simultaneously part of a transclusion and multiple xanalinks:
+
+- The fragment shader partitions the 24-byte glyph quad ([`Doc::VBORow`](include/gleditor/doc.hpp))
+  vertically into up to **4 distinct color bands** without requiring duplicate draw calls or alpha
+  blending artifacts.
+
+______________________________________________________________________
 
 ## 4. Scalability Architecture & Optimizations for Massive Documents
 
-When rendering and computing transclusions across documents with hundreds of
-thousands of pages and multi-megabyte primedia spools, naive algorithms would
-trigger catastrophic $O(N^2)$ stalls. `xudu` and `gleditor` implement a
-multi-tiered optimization pipeline:
+When rendering and computing transclusions across documents with hundreds of thousands of pages and
+multi-megabyte primedia spools, naive algorithms would trigger catastrophic $O(N^2)$ stalls. `xudu`
+and `gleditor` implement a multi-tiered optimization pipeline:
 
 ```
 ┌────────────────────────────────────────────────────────────────────────┐
@@ -206,49 +218,57 @@ multi-tiered optimization pipeline:
 ```
 
 ### 1. $O(1)$ Height-Budgeted Page Slicing (Eliminating $O(N^2)$ Reflow)
-In [`src/text/layout.cpp`](src/text/layout.cpp), when generating a visible page,
-the text engine bounds the shaped slice:
 
-$$\text{maxLinesEst} = \left\lceil \frac{\text{maxHeightPx}}{\text{lineHeight}} \right\rceil + 8$$
-$$\text{sliceBudget} = \max(32768, \text{maxLinesEst} \times 1024)$$
+In [`src/text/layout.cpp`](src/text/layout.cpp), when generating a visible page, the text engine
+bounds the shaped slice:
 
-Instead of shaping 50 MB of text to render Page 1, `TextLayout` shapes only the
-first $32\text{ KiB}$. Keystroke latency remains under $0.5\text{ ms}$ on
-infinitely growing permascrolls.
+$$
+\text{maxLinesEst} = \left\lceil \frac{\text{maxHeightPx}}{\text{lineHeight}} \right\rceil + 8
+$$
+
+$$
+\text{sliceBudget} = \max(32768, \text{maxLinesEst} \times 1024)
+$$
+
+Instead of shaping 50 MB of text to render Page 1, `TextLayout` shapes only the first
+$32\text{ KiB}$. Keystroke latency remains under $0.5\text{ ms}$ on infinitely growing permascrolls.
 
 ### 2. Linear Interval Sweep for Transclusion Detection
+
 Because EDL pieces in a `Version` are ordered along concatext offsets:
+
 - The intersection engine iterates piecewise with early exit conditions.
-- If $\text{pieceA}.\text{end} \le \text{pieceB}.\text{start}$, advancement skips
-  non-overlapping blocks in $O(N + M)$ time rather than $O(N \times M)$.
+- If $\text{pieceA}.\text{end} \le \text{pieceB}.\text{start}$, advancement skips non-overlapping
+  blocks in $O(N + M)$ time rather than $O(N \times M)$.
 
 ### 3. Zero-Copy `mmap(MAP_FIXED)` Memory Arena
+
 In [`apps/xudu/core/virtual_memory_arena.cpp`](apps/xudu/core/virtual_memory_arena.cpp):
+
 - A 512 MB virtual memory window is reserved with `PROT_NONE`.
 - Sealed torrent segments and active spools are mapped with `MAP_FIXED`.
-- Resolving text views ([`resolveLocalView`](apps/zigzag/core/compact_zzcell.hpp))
-  returns zero-copy `std::string_view` pointers directly into kernel page cache
-  without heap allocation.
+- Resolving text views ([`resolveLocalView`](apps/zigzag/core/compact_zzcell.hpp)) returns zero-copy
+  `std::string_view` pointers directly into kernel page cache without heap allocation.
 
 ### 4. GPU Instanced Draw Calls & Persistent Ring Buffers
-- All optical ribbons stream into persistent mapped ring buffers
-  ([`StreamBufferGL`](include/gleditor/render/gl/stream_buffer.hpp)) with
-  explicit range flushes (`glFlushMappedBufferRange`).
-- Rendered in a single `glDrawArraysInstanced` call, completely bypassing CPU-GPU
-  synchronization locks and guaranteeing a stable **120 FPS ($8.33\text{ ms}$)**
-  framerate budget.
 
----
+- All optical ribbons stream into persistent mapped ring buffers
+  ([`StreamBufferGL`](include/gleditor/render/gl/stream_buffer.hpp)) with explicit range flushes
+  (`glFlushMappedBufferRange`).
+- Rendered in a single `glDrawArraysInstanced` call, completely bypassing CPU-GPU synchronization
+  locks and guaranteeing a stable **120 FPS ($8.33\text{ ms}$)** framerate budget.
+
+______________________________________________________________________
 
 ## 5. Implementation File Map
 
-| Component | Source Files | Description |
-| :--- | :--- | :--- |
-| **Transclusion Geometry** | [`apps/xudu/core/link_layout.hpp/.cpp`](apps/xudu/core/link_layout.hpp) | `placeTransclusions()`, `placeLinks()`, and span intersection algebra |
-| **Ribbon Optical Pipeline**| [`apps/xudu/beams.hpp/.cpp`](apps/xudu/beams.hpp) | `LinkBeams`, `band()`, anchor stub brackets, and phase pulses |
-| **GPU Beam Renderer** | [`include/gleditor/beams.hpp`](include/gleditor/beams.hpp), [`src/beams.cpp`](src/beams.cpp) | 48-byte `Beams::Row` instance geometry and optical shaders |
-| **Text Layout & Slicing** | [`src/text/layout.cpp`](src/text/layout.cpp), [`include/gleditor/text/layout.hpp`](include/gleditor/text/layout.hpp) | $O(1)$ height-budgeted pagination and Unicode cluster mapping |
-| **Glyph Atlas & Multiband**| [`src/glyphcache/cache.cpp`](src/glyphcache/cache.cpp), [`include/gleditor/doc.hpp`](include/gleditor/doc.hpp) | Multi-layer texture atlas and 24-byte `Doc::VBORow` instance quads |
-| **Virtual Memory Spools** | [`apps/xudu/core/virtual_memory_arena.hpp/.cpp`](apps/xudu/core/virtual_memory_arena.hpp) | 512 MB virtual memory arena with `MAP_FIXED` zero-copy paging |
-| **Zigzag Projection** | [`apps/zigzag/core/unified_transclusion_engine.hpp/.cpp`](apps/zigzag/core/unified_transclusion_engine.hpp) | `d.transclude` rank construction and zero-copy GPU staging |
-| **Unit Test Suites** | [`tests/xudu/beams.cpp`](tests/xudu/beams.cpp), [`tests/lib/beams.cpp`](tests/lib/beams.cpp), [`tests/zigzag/test_unified_transclusion_engine.cpp`](tests/zigzag/test_unified_transclusion_engine.cpp) | Tests covering span intersection, ribbon framing, and 120 FPS staging |
+| Component                   | Source Files                                                                                                                                                                                           | Description                                                           |
+| :-------------------------- | :----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | :-------------------------------------------------------------------- |
+| **Transclusion Geometry**   | [`apps/xudu/core/link_layout.hpp/.cpp`](apps/xudu/core/link_layout.hpp)                                                                                                                                | `placeTransclusions()`, `placeLinks()`, and span intersection algebra |
+| **Ribbon Optical Pipeline** | [`apps/xudu/beams.hpp/.cpp`](apps/xudu/beams.hpp)                                                                                                                                                      | `LinkBeams`, `band()`, anchor stub brackets, and phase pulses         |
+| **GPU Beam Renderer**       | [`include/gleditor/beams.hpp`](include/gleditor/beams.hpp), [`src/beams.cpp`](src/beams.cpp)                                                                                                           | 48-byte `Beams::Row` instance geometry and optical shaders            |
+| **Text Layout & Slicing**   | [`src/text/layout.cpp`](src/text/layout.cpp), [`include/gleditor/text/layout.hpp`](include/gleditor/text/layout.hpp)                                                                                   | $O(1)$ height-budgeted pagination and Unicode cluster mapping         |
+| **Glyph Atlas & Multiband** | [`src/glyphcache/cache.cpp`](src/glyphcache/cache.cpp), [`include/gleditor/doc.hpp`](include/gleditor/doc.hpp)                                                                                         | Multi-layer texture atlas and 24-byte `Doc::VBORow` instance quads    |
+| **Virtual Memory Spools**   | [`apps/xudu/core/virtual_memory_arena.hpp/.cpp`](apps/xudu/core/virtual_memory_arena.hpp)                                                                                                              | 512 MB virtual memory arena with `MAP_FIXED` zero-copy paging         |
+| **Zigzag Projection**       | [`apps/zigzag/core/unified_transclusion_engine.hpp/.cpp`](apps/zigzag/core/unified_transclusion_engine.hpp)                                                                                            | `d.transclude` rank construction and zero-copy GPU staging            |
+| **Unit Test Suites**        | [`tests/xudu/beams.cpp`](tests/xudu/beams.cpp), [`tests/lib/beams.cpp`](tests/lib/beams.cpp), [`tests/zigzag/test_unified_transclusion_engine.cpp`](tests/zigzag/test_unified_transclusion_engine.cpp) | Tests covering span intersection, ribbon framing, and 120 FPS staging |

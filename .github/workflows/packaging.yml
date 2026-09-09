@@ -720,4 +720,3 @@ jobs:
       with:
         name: gleditor-wasm
         path: dist/wasm/*
-

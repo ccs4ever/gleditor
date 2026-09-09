@@ -27,7 +27,12 @@ jobs:
         # has to be on PATH for the make targets that call it by name.
         go install github.com/google/yamlfmt/cmd/yamlfmt@latest
         echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"
-        pip install --quiet mdformat mdformat-gfm
+        # mdformat-dollarmath treats $...$ / $$...$$ spans as opaque LaTeX
+        # rather than generic CommonMark text, so it doesn't mangle the
+        # backslashes in design/'s math notation; mdformat-frontmatter does
+        # the same for the YAML front matter .agents/skills/*.md open with
+        # (see CLAUDE.md).
+        pip install --quiet mdformat mdformat-gfm mdformat-dollarmath mdformat-frontmatter
     - name: make format-check
       run: make format-check
     - name: make lint

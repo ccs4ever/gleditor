@@ -2,11 +2,20 @@
 
 ## 1. Executive Summary & The Nelsonian Metasystem Principle
 
-In classical computing environments, a rigid boundary separates "documents" (user data) from "configuration" (application preferences, keybindings, window coordinates, themes). Settings are relegated to ad-hoc text files (`.yaml`, `.json`, `.toml`), hidden dotfiles (`~/.config/`), or proprietary system registries. These configuration silos suffer from the exact pathologies Theodor Holm Nelson diagnosed in conventional computing:
-- **No Hypertime History**: A typo or accidental override destroys previous settings. Reverting requires manual backups or deleting corrupted files.
-- **No Character-Level Provenance**: Settings lack cryptographic authorship, timestamps, or commit ancestry.
-- **No Universal Intertwingularity / Transclusion**: Sharing a keybinding profile or theme between machines or teammates requires out-of-band file copying rather than native transclusion.
-- **Artificial Duality**: The artificial split between "data" and "code/preferences" is eliminated in Xanadu.
+In classical computing environments, a rigid boundary separates "documents" (user data) from
+"configuration" (application preferences, keybindings, window coordinates, themes). Settings are
+relegated to ad-hoc text files (`.yaml`, `.json`, `.toml`), hidden dotfiles (`~/.config/`), or
+proprietary system registries. These configuration silos suffer from the exact pathologies Theodor
+Holm Nelson diagnosed in conventional computing:
+
+- **No Hypertime History**: A typo or accidental override destroys previous settings. Reverting
+  requires manual backups or deleting corrupted files.
+- **No Character-Level Provenance**: Settings lack cryptographic authorship, timestamps, or commit
+  ancestry.
+- **No Universal Intertwingularity / Transclusion**: Sharing a keybinding profile or theme between
+  machines or teammates requires out-of-band file copying rather than native transclusion.
+- **Artificial Duality**: The artificial split between "data" and "code/preferences" is eliminated
+  in Xanadu.
 
 ```
        +-------------------------------------------------------------------------+
@@ -27,10 +36,14 @@ In classical computing environments, a rigid boundary separates "documents" (use
              +-------------------------+-------------------------+--> Pouches / Drop Zones
 ```
 
-In `gleditor` and `xudu`, **anything customizable is a System Xanadoc**.
-A **System Xanadoc** is an append-only, content-addressed, microversioned document (`Store`) whose concatext and links encode metasystem state. Changing a keybinding, resizing UI text, repositioning notification toasts, or docking a drawer is not an ephemeral mutation of a struct in memory: it is an OSMIC operation (`OpKind::Insert` / `OpKind::Erase` / `OpKind::Transclude`) producing a new microversion in hypertime.
+In `gleditor` and `xudu`, **anything customizable is a System Xanadoc**. A **System Xanadoc** is an
+append-only, content-addressed, microversioned document (`Store`) whose concatext and links encode
+metasystem state. Changing a keybinding, resizing UI text, repositioning notification toasts, or
+docking a drawer is not an ephemeral mutation of a struct in memory: it is an OSMIC operation
+(`OpKind::Insert` / `OpKind::Erase` / `OpKind::Transclude`) producing a new microversion in
+hypertime.
 
----
+______________________________________________________________________
 
 ## 2. The Core System Xanadocs & Schemas
 
@@ -50,10 +63,13 @@ A **System Xanadoc** is an append-only, content-addressed, microversioned docume
 
 ### 2.1 `system://keymap` (Command & Keyboard Actions)
 
-Traditional keymap tables are statically compiled or read from static JSON. In `xudu`, the keymap is a live xanadoc.
+Traditional keymap tables are statically compiled or read from static JSON. In `xudu`, the keymap is
+a live xanadoc.
 
 #### Canonical Format
+
 The concatext is human-readable, standard OSMIC declarative text:
+
 ```yaml
 # Xudu Sovereign Keymap Specification
 quit: Ctrl+Q # save and close
@@ -77,17 +93,22 @@ pouch-drawer: Ctrl+D # toggle spatial pouch drawer
 ```
 
 #### Dynamic Hot-Reload
-- `gleditor::CommandTable` is initialized from `system://keymap`.
-- When an edit is made (either through a settings UI form or by editing the `system://keymap` document directly), `CommandTable::rebind()` parses the text and updates the event dispatch lookup table in $< 1\,\mu\text{s}$.
-- Because the bindings are in a Xanadoc, a user who accidentally overrides an essential key can simply scrub backward (`Ctrl+[` or historical travel) to restore the previous keymap!
 
----
+- `gleditor::CommandTable` is initialized from `system://keymap`.
+- When an edit is made (either through a settings UI form or by editing the `system://keymap`
+  document directly), `CommandTable::rebind()` parses the text and updates the event dispatch lookup
+  table in $< 1\,\mu\text{s}$.
+- Because the bindings are in a Xanadoc, a user who accidentally overrides an essential key can
+  simply scrub backward (`Ctrl+[` or historical travel) to restore the previous keymap!
+
+______________________________________________________________________
 
 ### 2.2 `system://settings` (Typography, Sizes & Color Themes)
 
 Controls the typographic hierarchy and visual aesthetics across the entire rendering pipeline.
 
 #### Canonical Format
+
 ```yaml
 # Xudu Typographic & Theme Settings
 ui.font.family: Sans
@@ -106,16 +127,20 @@ theme.link_cyan: 0x06B6D4FF
 ```
 
 #### Render Thread Synchronization
-- When `ui.font.size` or `ui.font.family` changes, `FontManager` resolves new `FontFace` instances and updates `DocumentSwitcher`, `FloatingToolbar3D`, `ToastOverlay`, and `HypertimeMap`.
-- Text reflow is handled smoothly through `TextLayout` height-budgeted slicing without dropping frames.
 
----
+- When `ui.font.size` or `ui.font.family` changes, `FontManager` resolves new `FontFace` instances
+  and updates `DocumentSwitcher`, `FloatingToolbar3D`, `ToastOverlay`, and `HypertimeMap`.
+- Text reflow is handled smoothly through `TextLayout` height-budgeted slicing without dropping
+  frames.
+
+______________________________________________________________________
 
 ### 2.3 `system://layout` (Spatial Geometry & Notification Coordinates)
 
 Defines the physical layout of 3D document cosmos, floating overlays, and notification toasts.
 
 #### Canonical Format
+
 ```yaml
 # Spatial Coordinates & Toast Overlay Parameters
 notifications.anchor: top-right # [top-right, top-left, bottom-right, bottom-left, top-center]
@@ -135,19 +160,26 @@ pouch_drawer.depth_z: 12.0
 ```
 
 #### Dynamic Toast Positioning
-In `ToastOverlay::draw()`, instead of hardcoded `marginX = 12.0F` and `marginY = 12.0F`, the overlay queries the active `LayoutConfig` derived from `system://layout`:
-- **`top-right`**: $X = \text{screenWidth} - \text{width} - \text{offset}_X$, $Y = \text{screenHeight} - \text{offset}_Y - \text{stackHeight}$.
-- **`bottom-right`**: $X = \text{screenWidth} - \text{width} - \text{offset}_X$, $Y = \text{offset}_Y$.
-- **`top-left`**: $X = \text{offset}_X$, $Y = \text{screenHeight} - \text{offset}_Y - \text{stackHeight}$.
+
+In `ToastOverlay::draw()`, instead of hardcoded `marginX = 12.0F` and `marginY = 12.0F`, the overlay
+queries the active `LayoutConfig` derived from `system://layout`:
+
+- **`top-right`**: $X = \text{screenWidth} - \text{width} - \text{offset}_X$,
+  $Y = \text{screenHeight} - \text{offset}_Y - \text{stackHeight}$.
+- **`bottom-right`**: $X = \text{screenWidth} - \text{width} - \text{offset}_X$,
+  $Y = \text{offset}_Y$.
+- **`top-left`**: $X = \text{offset}_X$,
+  $Y = \text{screenHeight} - \text{offset}_Y - \text{stackHeight}$.
 - **`bottom-left`**: $X = \text{offset}_X$, $Y = \text{offset}_Y$.
 
----
+______________________________________________________________________
 
 ### 2.4 `system://ui` (Viewport Topology & Overlay Flags)
 
 Maintains the user's active interface state and overlay visibility.
 
 #### Canonical Format
+
 ```yaml
 # Viewport Overlays & State
 overlays.switcher_visible: true
@@ -158,33 +190,35 @@ overlays.pouch_drawer_visible: false
 overlays.radial_menu_enabled: true
 ```
 
----
+______________________________________________________________________
 
 ### 2.5 `system://pouches` (Drop Zones & Transclusion Clasps)
 
 As detailed in `design/xudu-pouch-drawer-and-clasp-bench.md`, backs the Pouch Drawer's drop zones:
+
 - Drop zone labels (e.g. `"To Link"`, `"Notes for Later"`, `"Scratch"`).
 - User-selected background tints for visual grouping.
 - Ghost spanables transcluded into each zone with full Nelsonian character-level provenance.
 
----
+______________________________________________________________________
 
 ## 3. Hypertime Mechanics for Metasystem State
 
 ### 3.1 The OSMIC Advantage for Configuration
 
-| Capability | Classical Config Files (`.json`/`.yaml`) | System Xanadocs (`system://`) |
-| :--- | :--- | :--- |
-| **History & Undo** | None (overwritten in place) | Full OSMIC DAG (every microversion preserved) |
-| **Branching** | Manual Git branch of dotfiles | Native hypertime branching (try experimental keymap) |
-| **Recovery** | Delete file and hope for defaults | Step backward in hypertime (`session.scrubBackward`) |
-| **Multi-Device Sync** | Third-party cloud sync / conflict files | BitTorrent v2 Merkle piece stability via BEP 46 |
-| **Collaboration** | Complex merge conflicts | Zero-copy span transclusions and format links |
-| **Provenance** | File modification timestamp | OpenPGP signature + author fingerprint |
+| Capability            | Classical Config Files (`.json`/`.yaml`) | System Xanadocs (`system://`)                        |
+| :-------------------- | :--------------------------------------- | :--------------------------------------------------- |
+| **History & Undo**    | None (overwritten in place)              | Full OSMIC DAG (every microversion preserved)        |
+| **Branching**         | Manual Git branch of dotfiles            | Native hypertime branching (try experimental keymap) |
+| **Recovery**          | Delete file and hope for defaults        | Step backward in hypertime (`session.scrubBackward`) |
+| **Multi-Device Sync** | Third-party cloud sync / conflict files  | BitTorrent v2 Merkle piece stability via BEP 46      |
+| **Collaboration**     | Complex merge conflicts                  | Zero-copy span transclusions and format links        |
+| **Provenance**        | File modification timestamp              | OpenPGP signature + author fingerprint               |
 
 ### 3.2 Hypertime Scrubbing of Settings
 
 Because a System Xanadoc is an instance of `xudu::Store`:
+
 ```cpp
 // Scrub the keymap back 3 revisions to undo an erroneous binding:
 auto &keymapStore = session.systemStore(SystemDocKind::Keymap);
@@ -197,14 +231,27 @@ if (history.size() >= 4) {
 
 ### 3.3 Author-Selectable Current Versions & Head Repointing
 
-In classical version control (like Git), "HEAD" is a single pointer, while branches are named refs. In classical Xudu, `Store::latest()` fell back to the chronological tip with the greatest MicroversionId. However, an author often maintains **multiple parallel states considered current** (e.g. English Edition and French Edition, or Draft vs. Published Edition).
+In classical version control (like Git), "HEAD" is a single pointer, while branches are named refs.
+In classical Xudu, `Store::latest()` fell back to the chronological tip with the greatest
+MicroversionId. However, an author often maintains **multiple parallel states considered current**
+(e.g. English Edition and French Edition, or Draft vs. Published Edition).
 
 To reflect authentic Xanadulogical reality:
+
 1. **Author-Selectable Set of Current Versions (`currentVersions`)**:
-   - Every `xudu::Store` maintains an explicit, author-designated set of microversions considered active or current:
-     $$\text{currentVersions} = \{v_1, v_2, \dots, v_k\} \subseteq \text{allVersions}$$
-   - When a xanadoc is opened without specifying an exact microversion, all members of `currentVersions` are opened side-by-side as parallel active views.
+
+   - Every `xudu::Store` maintains an explicit, author-designated set of microversions considered
+     active or current:
+
+     $$
+     \text{currentVersions} = \{v_1, v_2, \dots, v_k\} \subseteq \text{allVersions}
+     $$
+
+   - When a xanadoc is opened without specifying an exact microversion, all members of
+     `currentVersions` are opened side-by-side as parallel active views.
+
    - Persisted beside the operations and primedia spools in `current.yaml`:
+
      ```yaml
      # Current active versions designated by the author
      current:
@@ -212,43 +259,79 @@ To reflect authentic Xanadulogical reality:
        - "1.2.1"
      ```
 
-2. **System Xanadocs Constraint ($N = 1$ Active Head)**:
-   - For all System Xanadocs (`system://keymap`, `system://settings`, `system://layout`, `system://ui`), the set of current versions is strictly constrained to **exactly one version**:
-     $$|\text{currentVersions}| = 1$$
-   - This single current version represents the **active live configuration** evaluated by the engine.
+1. **System Xanadocs Constraint ($N = 1$ Active Head)**:
 
-3. **Arbitrary Hypertime Repointing**:
-   - The author can repoint a System Xanadoc's current version to **any past or alternate microversion in its history** at will:
+   - For all System Xanadocs (`system://keymap`, `system://settings`, `system://layout`,
+     `system://ui`), the set of current versions is strictly constrained to **exactly one version**:
+
+     $$
+     |\text{currentVersions}| = 1
+     $$
+
+   - This single current version represents the **active live configuration** evaluated by the
+     engine.
+
+1. **Arbitrary Hypertime Repointing**:
+
+   - The author can repoint a System Xanadoc's current version to **any past or alternate
+     microversion in its history** at will:
+
      ```cpp
      store.repointCurrentVersion(targetMicroversion);
      ```
-   - **Non-Destructive Time Travel**: Repointing changes the active head pointer without erasing downstream operations. If an author scrubs their keybindings back to state `1.1` to test a legacy profile, operations `1.2`, `1.3`, and branches `1.1.1` remain fully preserved in the operations spool. The author can repoint forward or branch into a new configuration at any time.
-   - **Live Subsystem Notification**: When `repointCurrentVersion` is called on a system store, it triggers the registered `onCurrentVersionChanged` observer, instantly recompiling keybindings, recalculating toast layout vectors, or updating UI font descriptions without restarting the process.
+
+   - **Non-Destructive Time Travel**: Repointing changes the active head pointer without erasing
+     downstream operations. If an author scrubs their keybindings back to state `1.1` to test a
+     legacy profile, operations `1.2`, `1.3`, and branches `1.1.1` remain fully preserved in the
+     operations spool. The author can repoint forward or branch into a new configuration at any
+     time.
+
+   - **Live Subsystem Notification**: When `repointCurrentVersion` is called on a system store, it
+     triggers the registered `onCurrentVersionChanged` observer, instantly recompiling keybindings,
+     recalculating toast layout vectors, or updating UI font descriptions without restarting the
+     process.
 
 ### 3.4 First-Class Introspection: Opening & Editing System Xanadocs Live
 
-While System Xanadocs operate headlessly behind the scenes by default to power the UI, they are **fully openable, inspectable, and editable as standard xanadocs**. In Nelsonian architecture, there are no black boxes.
+While System Xanadocs operate headlessly behind the scenes by default to power the UI, they are
+**fully openable, inspectable, and editable as standard xanadocs**. In Nelsonian architecture, there
+are no black boxes.
 
 1. **Zero Special-Cased Dialogs**:
-   - Instead of sequestering configuration behind rigid graphical preference panes, an author can open any system xanadoc (e.g. `system://keymap`, `system://settings`, `system://layout`) directly into the document row via `Ctrl+O` or command line.
-   - The document renders as a normal 3D quad at $Z = 0$, titled with its canonical URI (e.g. `⚙ system://keymap`).
 
-2. **Interactive Live Typing & Hot Reload**:
-   - The user can click anywhere in the system document and edit its text using standard caret movements, deletions, typing, and transclusions.
-   - Every keystroke appends to the author's `UserPermascroll` and records an operation in the system store.
-   - Because it is a System Xanadoc, the current version automatically advances with each edit ($|currentVersions| = 1$), and the engine hot-reloads the updated concatext immediately:
-     - Changing `quit: Ctrl+Q` to `quit: Ctrl+X` in `system://keymap` dynamically updates `CommandTable` live while typing.
-     - Tweaking `ui.font.size: 11` to `14` in `system://settings` instantly updates font faces across the interface.
+   - Instead of sequestering configuration behind rigid graphical preference panes, an author can
+     open any system xanadoc (e.g. `system://keymap`, `system://settings`, `system://layout`)
+     directly into the document row via `Ctrl+O` or command line.
+   - The document renders as a normal 3D quad at $Z = 0$, titled with its canonical URI (e.g.
+     `⚙ system://keymap`).
+
+1. **Interactive Live Typing & Hot Reload**:
+
+   - The user can click anywhere in the system document and edit its text using standard caret
+     movements, deletions, typing, and transclusions.
+   - Every keystroke appends to the author's `UserPermascroll` and records an operation in the
+     system store.
+   - Because it is a System Xanadoc, the current version automatically advances with each edit
+     ($|currentVersions| = 1$), and the engine hot-reloads the updated concatext immediately:
+     - Changing `quit: Ctrl+Q` to `quit: Ctrl+X` in `system://keymap` dynamically updates
+       `CommandTable` live while typing.
+     - Tweaking `ui.font.size: 11` to `14` in `system://settings` instantly updates font faces
+       across the interface.
      - Moving `notifications.offset_x` in `system://layout` shifts toast placement in real time.
 
-3. **Hypertime Scrubbing as Live Config Time Travel**:
-   - When viewing an open System Xanadoc, pressing `Ctrl+[` (`scrub-back`) or dragging the hypertime scrubber steps the document through past configurations.
-   - Because the system xanadoc's active head is linked to its current view, stepping backward immediately repoints the active configuration to that historical state.
+1. **Hypertime Scrubbing as Live Config Time Travel**:
+
+   - When viewing an open System Xanadoc, pressing `Ctrl+[` (`scrub-back`) or dragging the hypertime
+     scrubber steps the document through past configurations.
+   - Because the system xanadoc's active head is linked to its current view, stepping backward
+     immediately repoints the active configuration to that historical state.
    - Stepping forward (`Ctrl+]`) returns to newer configurations without data loss.
 
 ### 3.5 Version Annotations Mapping: Aliases, Descriptions & Semantic Tags (`versions.yaml`)
 
-Raw numerical microversion identifiers (e.g. `1`, `1.4`, `1.2.1`) are precise for content addressing and DAG reconstruction, but human cognition requires semantic tags, descriptions, and aliases. All xanadocs support an explicit version mapping stored in `versions.yaml`:
+Raw numerical microversion identifiers (e.g. `1`, `1.4`, `1.2.1`) are precise for content addressing
+and DAG reconstruction, but human cognition requires semantic tags, descriptions, and aliases. All
+xanadocs support an explicit version mapping stored in `versions.yaml`:
 
 ```yaml
 # Xudu Microversion Annotations & Aliases
@@ -270,36 +353,52 @@ tag: "keymap-preset"
 
 1. **Human-Readable Alias Resolution**:
    - Calling `store.resolveAlias("release-1.0")` returns `MicroversionId{"1.4"}` in $O(1)$.
-   - Commands, CLI arguments (e.g. `--at vim-keys`), and UI open palettes can reference versions by alias instead of raw microversion numbers.
-2. **Context-Rich Spatial Open Palette (`Ctrl+O`)**:
+   - Commands, CLI arguments (e.g. `--at vim-keys`), and UI open palettes can reference versions by
+     alias instead of raw microversion numbers.
+1. **Context-Rich Spatial Open Palette (`Ctrl+O`)**:
    - The palette displays discovered stores with their active alias and description:
      `"Xudu Keymap [vim-keys] - Vim modal navigation profile (12 versions, 1.8 KB)"`
      `"Project Alpha [release-1.0] - Official publication edition (42 versions, 15.6 KB)"`
-3. **Tab Bar & Document Titles**:
-   - When an open version carries an alias, `DocumentSwitcher` renders the human-readable alias (e.g. `Doc 1: release-1.0` or `⚙ system://keymap [vim-keys]`).
-4. **Hypertime Map Nodes**:
-   - Nodes in `HypertimeMap` and the Stage 3 branching DAG display their alias chips directly on the visualization canvas, and hover tooltips render the full description string.
+1. **Tab Bar & Document Titles**:
+   - When an open version carries an alias, `DocumentSwitcher` renders the human-readable alias
+     (e.g. `Doc 1: release-1.0` or `⚙ system://keymap [vim-keys]`).
+1. **Hypertime Map Nodes**:
+   - Nodes in `HypertimeMap` and the Stage 3 branching DAG display their alias chips directly on the
+     visualization canvas, and hover tooltips render the full description string.
 
----
+______________________________________________________________________
 
 ## 4. Swarm Distribution & Transclusion of Presets
 
 ### 4.1 Sharing Keymaps & Presets as First-Class Scrolls
 
-A user or community member can publish a specialized keymap or UI theme as a standard sealed xanadoc:
-- Example: Alice publishes `vim_bindings.xanadoc` (salt: `vim-keys`).
-- Bob wants Vim bindings in `xudu`. In Bob's `system://keymap`, rather than copying and pasting text, Bob **transcludes** the keymap from Alice's scroll:
-  $$\text{transclude}(\text{dest}=\text{Bob's } system://keymap, \text{src}=\text{Alice's } vim\text{-keys})$$
-- If Alice publishes an improvement to `vim-keys`, Bob's `xudu` automatically receives the update via BitTorrent swarm!
-- If Bob wants to override a single key (e.g. keep `Ctrl+Q` for quit instead of `:q`), Bob inserts an override op into his local `system://keymap` branch. The transcluded base remains intact while Bob's local customization sits cleanly atop it.
+A user or community member can publish a specialized keymap or UI theme as a standard sealed
+xanadoc:
 
----
+- Example: Alice publishes `vim_bindings.xanadoc` (salt: `vim-keys`).
+
+- Bob wants Vim bindings in `xudu`. In Bob's `system://keymap`, rather than copying and pasting
+  text, Bob **transcludes** the keymap from Alice's scroll:
+
+  ```math
+  \text{transclude}(\text{dest}=\text{Bob's } system://keymap, \text{src}=\text{Alice's } vim\text{-keys})
+  ```
+
+- If Alice publishes an improvement to `vim-keys`, Bob's `xudu` automatically receives the update
+  via BitTorrent swarm!
+
+- If Bob wants to override a single key (e.g. keep `Ctrl+Q` for quit instead of `:q`), Bob inserts
+  an override op into his local `system://keymap` branch. The transcluded base remains intact while
+  Bob's local customization sits cleanly atop it.
+
+______________________________________________________________________
 
 ## 5. C++23 Architecture & Class Structure
 
 ### 5.1 `SystemDocKind` & `SystemDocRegistry`
 
 In `apps/xudu/session.hpp`:
+
 ```cpp
 namespace xudu {
 
@@ -328,14 +427,19 @@ constexpr std::string_view systemDocUri(SystemDocKind kind) {
 
 ### 5.2 Storage & Memory Model
 
-- System Xanadocs reside on disk in `$XDG_DATA_HOME/xudu/system/<name>.xanadoc/` (e.g. `~/.local/share/xudu/system/keymap.xanadoc/`).
-- If no system store exists on disk, `Session` automatically initializes one using the author's `UserPermascroll` and writes default canonical primedia and initial ops.
-- System stores are loaded into `Session::stores` with `isSystem = true` so they do not appear in the normal document row unless explicitly inspected in a "Settings View".
-- Access to active settings is cached in lightweight memory structures (`ParsedKeymap`, `LayoutConfig`, `ThemeConfig`) updated on every system store epoch change.
+- System Xanadocs reside on disk in `$XDG_DATA_HOME/xudu/system/<name>.xanadoc/` (e.g.
+  `~/.local/share/xudu/system/keymap.xanadoc/`).
+- If no system store exists on disk, `Session` automatically initializes one using the author's
+  `UserPermascroll` and writes default canonical primedia and initial ops.
+- System stores are loaded into `Session::stores` with `isSystem = true` so they do not appear in
+  the normal document row unless explicitly inspected in a "Settings View".
+- Access to active settings is cached in lightweight memory structures (`ParsedKeymap`,
+  `LayoutConfig`, `ThemeConfig`) updated on every system store epoch change.
 
 ### 5.3 `Store` Current Versions & Version Annotations API
 
 In `apps/xudu/core/store.hpp`:
+
 ```cpp
 struct VersionAnnotation {
   std::string alias;
@@ -367,9 +471,12 @@ private:
   std::map<std::string, MicroversionId> aliasIndex_;
 };
 ```
+
 - When `store.save(directory)` executes, it writes `current.yaml` and `versions.yaml`.
-- When `store.load(directory)` executes, it reads `current.yaml` and `versions.yaml`. If empty or unwritten, it falls back to `{latest()}` and empty annotations.
-- For system stores, `repointCurrentVersion` validates that $|currentVersions| = 1$ and notifies `Session` of the active configuration change.
+- When `store.load(directory)` executes, it reads `current.yaml` and `versions.yaml`. If empty or
+  unwritten, it falls back to `{latest()}` and empty annotations.
+- For system stores, `repointCurrentVersion` validates that $|currentVersions| = 1$ and notifies
+  `Session` of the active configuration change.
 
 ### 5.4 120 FPS Performance Envelope ($8.33\,\text{ms}$)
 
@@ -377,7 +484,7 @@ private:
 - Metasystem ops are only parsed when a system store is edited, costing $< 50\,\mu\text{s}$.
 - Zero allocations occur on the render thread during frame submission.
 
----
+______________________________________________________________________
 
 ## 6. The Xudu ⟷ Zigzag Bridge Architecture
 
@@ -385,6 +492,7 @@ private:
 
 In conventional software architectures, configuration is serialized into 1D flat text streams
 (`.yaml`, `.json`, `.toml`). This design suffers from an artificial dimensional compression:
+
 - **Collapsed Dimensions**: Runtime parameters, schema definitions, validation bounds, hardware
   calibration notes, and category groupings are forced into a single linear text buffer.
 - **Syntactic Clutter**: Documentation and metadata are squeezed into comment tokens (`#`) or
@@ -393,8 +501,9 @@ In conventional software architectures, configuration is serialized into 1D flat
   comments, destroy manual formatting, or lose version history.
 
 Project Xanadu resolves this through **Zigzag multidimensional information spaces**. A system
-configuration item is not merely a key and a value: it is a multidimensional cell situated at
-the intersection of orthogonal informational axes:
+configuration item is not merely a key and a value: it is a multidimensional cell situated at the
+intersection of orthogonal informational axes:
+
 - **`d.config` (Configuration Rank)**: The active runtime parameter sequence evaluated by the
   engine.
 - **`d.schema` (Schema Rank)**: The formal specification, unit definitions, valid ranges, and
@@ -414,45 +523,53 @@ the intersection of orthogonal informational axes:
                          ▼ -d.notes (Author Calibration & Display Notes)
 ```
 
-In `gleditor`, **the Zigzag multidimensional slice is the canonical spatial ground truth, while
-the 3-page sovereign System Xanadoc is its linearized, editable document projection.**
+In `gleditor`, **the Zigzag multidimensional slice is the canonical spatial ground truth, while the
+3-page sovereign System Xanadoc is its linearized, editable document projection.**
 
----
+______________________________________________________________________
 
 ### 6.2 The 3-Page System Xanadoc Invariant (Zero Markdown Governance)
 
 When a multidimensional slice is projected into Xudu's document model (`xudu::Store`), it must
 strictly adhere to **Nelsonian System Document Governance**:
 
-1. **Strict 3-Page Layout ($N = 3$)**:
-   The concatext is partitioned into exactly three distinct pages separated by two forced
-   `PageBreak` operations:
-   - **Page 1: Active Configuration**: Pure declarative key-value text lines (e.g.,
-     `columns: "2"`, `pageWidthPx: "800"`). Strictly zero markdown headers, zero intro comments.
-     This is the concise runtime payload parsed by configuration loaders.
-   - **Page 2: Schema and Purpose**: Complete specification of parameter behavior, valid bounds,
-     and system semantics.
+1. **Strict 3-Page Layout ($N = 3$)**: The concatext is partitioned into exactly three distinct
+   pages separated by two forced `PageBreak` operations:
+
+   - **Page 1: Active Configuration**: Pure declarative key-value text lines (e.g., `columns: "2"`,
+     `pageWidthPx: "800"`). Strictly zero markdown headers, zero intro comments. This is the concise
+     runtime payload parsed by configuration loaders.
+   - **Page 2: Schema and Purpose**: Complete specification of parameter behavior, valid bounds, and
+     system semantics.
    - **Page 3: Notes & Calibration**: User annotations, display calibration records, and
      screen-specific tuning logs.
 
-2. **Strictly Zero Markdown Syntax**:
-   Nelsonian architecture strictly rejects embedding markup tokens (`#`, `##`, `**bold**`,
-   `*italic*`) into the concatext. Text in permascroll storage is clean, raw primedia.
-   - **Format Links**: Section headers ("Schema and Purpose" on Page 2, "Notes" on Page 3) are
-     styled exclusively through **authentic Xanadulogical Format Links** (`xanadu::LinkType::Format`,
-     `xanadu::ProminenceTier::Author`, owner `"system"`).
-   - **Target Vocabulary Spans**: The format links target standard vocabulary spans in the
-     system vocabulary store:
-     - `xanadu::FormatAttribute::Bold`: Renders header text with bold font weighting.
-     - `xanadu::FormatAttribute::AlignCentre`: Centered horizontal alignment on the rendered
-       page quad.
+1. **Strictly Zero Markdown Syntax**: Nelsonian architecture strictly rejects embedding markup
+   tokens (`#`, `##`, `**bold**`, `*italic*`) into the concatext. Text in permascroll storage is
+   clean, raw primedia.
 
-3. **Cross-Page Butterfly Comment Ribbons**:
-   To preserve character-level intertwingularity, active setting spans on Page 1 are connected
-   to their corresponding schema descriptions on Page 2 and user notes on Page 3 via
-   `xanadu::LinkType::Comment` xanalinks (`ProminenceTier::Author`, owner `"system"`):
-   $$\text{Link}_{\text{schema}}: \text{Page 1 Setting Span} \longleftrightarrow \text{Page 2 Schema Span}$$
-   $$\text{Link}_{\text{notes}}: \text{Page 1 Setting Span} \longleftrightarrow \text{Page 3 Notes Span}$$
+   - **Format Links**: Section headers ("Schema and Purpose" on Page 2, "Notes" on Page 3) are
+     styled exclusively through **authentic Xanadulogical Format Links**
+     (`xanadu::LinkType::Format`, `xanadu::ProminenceTier::Author`, owner `"system"`).
+   - **Target Vocabulary Spans**: The format links target standard vocabulary spans in the system
+     vocabulary store:
+     - `xanadu::FormatAttribute::Bold`: Renders header text with bold font weighting.
+     - `xanadu::FormatAttribute::AlignCentre`: Centered horizontal alignment on the rendered page
+       quad.
+
+1. **Cross-Page Butterfly Comment Ribbons**: To preserve character-level intertwingularity, active
+   setting spans on Page 1 are connected to their corresponding schema descriptions on Page 2 and
+   user notes on Page 3 via `xanadu::LinkType::Comment` xanalinks (`ProminenceTier::Author`, owner
+   `"system"`):
+
+   ```math
+   \text{Link}_{\text{schema}}: \text{Page 1 Setting Span} \longleftrightarrow \text{Page 2 Schema Span}
+   ```
+
+   ```math
+   \text{Link}_{\text{notes}}: \text{Page 1 Setting Span} \longleftrightarrow \text{Page 3 Notes Span}
+   ```
+
    In Xudu's 3D document row, these links render as sweeping optical link ribbons ("butterfly
    wings") connecting the parallel page quads.
 
@@ -468,7 +585,7 @@ strictly adhere to **Nelsonian System Document Governance**:
                    +--------------+--------------------------------------------+
 ```
 
----
+______________________________________________________________________
 
 ### 6.3 Dimensional Rank Demuxing (`d.config`, `d.schema`, `d.notes`)
 
@@ -502,23 +619,26 @@ The bridge demuxes between the multidimensional cell graph and the 3-page linear
 ```
 
 1. **`extractSliceConfigText(slice)`**:
-   - Walks the `d.config` rank from the root cell (`config_group` or cell with no incoming
-     negative links).
+
+   - Walks the `d.config` rank from the root cell (`config_group` or cell with no incoming negative
+     links).
    - Extracts all cells with `type == "setting"` or containing key-value pairs (`:`).
    - Produces clean, newline-delimited configuration text for Page 1.
 
-2. **`extractSliceSchemaText(slice)`**:
+1. **`extractSliceSchemaText(slice)`**:
+
    - Traverses the `d.schema` rank, beginning with the `schema_doc` header cell ("Schema and
      Purpose").
    - Gathers all linked `schema_field` cells specifying individual parameter definitions.
    - Formats the content for Page 2 with clean paragraph separation.
 
-3. **`extractSliceNotesText(slice)`**:
+1. **`extractSliceNotesText(slice)`**:
+
    - Traverses the `d.notes` rank, starting at `user_notes` ("Notes").
    - Follows note cells documenting calibration history and user rationales.
    - Formats the content for Page 3.
 
----
+______________________________________________________________________
 
 ### 6.4 Bidirectional Projection Mechanics
 
@@ -546,21 +666,29 @@ projectSystemStoreToSlice(const xanadu::Store &store,
 
 1. Extracts Page 1, Page 2, and Page 3 text from the respective slice ranks (falling back to
    canonical defaults if empty).
-2. Performs atomic edit operations on `Store`:
+
+1. Performs atomic edit operations on `Store`:
+
    - `store.insert(cur, 0, p1)`
    - `store.insertBreak(cur, p1Size)` (Page 1 $\to$ Page 2 boundary)
    - `store.insert(cur, p1Size, p2)`
    - `store.insertBreak(cur, p12Size)` (Page 2 $\to$ Page 3 boundary)
    - `store.insert(cur, p12Size, p3)`
-3. Rebuilds the document snapshot (`store.rebuild(cur)`) to resolve exact primedia character spans.
-4. Synthesizes `LinkType::Format` links:
+
+1. Rebuilds the document snapshot (`store.rebuild(cur)`) to resolve exact primedia character spans.
+
+1. Synthesizes `LinkType::Format` links:
+
    - "Schema and Purpose" header: bound to `FormatAttribute::Bold` and
      `FormatAttribute::AlignCentre`.
    - "Notes" header: bound to `FormatAttribute::Bold` and `FormatAttribute::AlignCentre`.
-5. Synthesizes `LinkType::Comment` butterfly ribbons linking Page 1 config spans to Page 2 schema
+
+1. Synthesizes `LinkType::Comment` butterfly ribbons linking Page 1 config spans to Page 2 schema
    spans and Page 3 notes spans.
-6. Commits the microversion, records version annotations (`alias = "default"`, `tag = "system"`),
+
+1. Commits the microversion, records version annotations (`alias = "default"`, `tag = "system"`),
    and advances the single active head pointer:
+
    ```cpp
    store.repointCurrentVersion(cur);
    ```
@@ -569,20 +697,20 @@ projectSystemStoreToSlice(const xanadu::Store &store,
 
 1. Retrieves the active current version from `Store::currentVersions()` and materializes the
    document concatext.
-2. Demuxes the concatext into Page 1 (`xanadu::extractConfigSection`), Page 2, and Page 3 by
+1. Demuxes the concatext into Page 1 (`xanadu::extractConfigSection`), Page 2, and Page 3 by
    locating forced page break offsets and section boundaries.
-3. Initializes a new `ZzStructureDocument` with standard metadata:
+1. Initializes a new `ZzStructureDocument` with standard metadata:
    - Sets focus cell to root (`focus = 1`).
    - Configures default 3D camera projection: $X = \text{d.config}$, $Y = \text{d.schema}$,
      $Z = \text{d.notes}$.
    - Defines dimension color styling (Config: `#4f9de0`, Schema: `#f5a623`, Notes: `#9b51e0`).
-4. Builds the orthogonal cell graph:
+1. Builds the orthogonal cell graph:
    - Creates root `config_group` cell (`id = 1`).
    - Parses Page 1 line by line, generating sequential `setting` cells chained along `+d.config`.
    - Emits `schema_doc` cell (`id = 100`) linked from root along `+d.schema`.
    - Emits `user_notes` cell (`id = 200`) linked from root along `+d.notes`.
 
----
+______________________________________________________________________
 
 ### 6.5 Live Bidirectional Edit Propagation (Active Lens Dynamics)
 
@@ -619,44 +747,46 @@ sequenceDiagram
 #### Direction 1: Xanadoc Edit $\longrightarrow$ Zigzag Slice
 
 1. **Author Typing in Xudu**: The user opens `system://layout` in Xudu and edits line 1, changing
-   `columns: "2"` to `columns: "4"`, or appends a note to Page 3
-   (`"Notes: Tuned on 4K display"`).
-2. **Microversion Commit**: The edit commits new insert/erase operations to the local
+   `columns: "2"` to `columns: "4"`, or appends a note to Page 3 (`"Notes: Tuned on 4K display"`).
+1. **Microversion Commit**: The edit commits new insert/erase operations to the local
    `UserPermascroll` and records a new `MicroversionId` in `Store`.
-3. **Subsystem Notification**: `Session::setSystemDocChangedCallback` triggers
+1. **Subsystem Notification**: `Session::setSystemDocChangedCallback` triggers
    `projectSystemStoreToSlice(store, kind)`.
-4. **Slice Update**: The bridge demuxes the pages and updates the `setting` cells on `d.config`
-   and `user_notes` on `d.notes` in place, preserving manifold link consistency.
-5. **Runtime Hot Reload**: Subsystems ingest the updated slice via
-   `LayoutConfig::fromSlice(slice)`, updating window column layout in $< 1\,\text{ms}$.
+1. **Slice Update**: The bridge demuxes the pages and updates the `setting` cells on `d.config` and
+   `user_notes` on `d.notes` in place, preserving manifold link consistency.
+1. **Runtime Hot Reload**: Subsystems ingest the updated slice via `LayoutConfig::fromSlice(slice)`,
+   updating window column layout in $< 1\,\text{ms}$.
 
 #### Direction 2: Zigzag Slice Edit $\longrightarrow$ Xanadoc Store
 
-1. **Cell Editing in Zigzag**: The user navigates the 3D cell space in `apps/zigzag`, selects a
-   cell on `d.config`, and edits its value (e.g. `pageWidthPx: "1200"`).
-2. **Projection to Store**: The visualizer invokes `projectSystemSliceToStore(slice, store, kind)`.
-3. **Full Governance Enforcement**: The projector serializes the updated ranks into the 3-page
-   layout, generates format links for headers, recreates butterfly comment ribbons, and commits
-   a new `MicroversionId`.
-4. **Active Head Advance**: `store.repointCurrentVersion(newVer)` notifies Xudu.
-5. **Visualizer Synchronization**: Xudu's document quad reflows immediately to display the
-   updated text, bold headers, and optical link ribbons.
+1. **Cell Editing in Zigzag**: The user navigates the 3D cell space in `apps/zigzag`, selects a cell
+   on `d.config`, and edits its value (e.g. `pageWidthPx: "1200"`).
+1. **Projection to Store**: The visualizer invokes `projectSystemSliceToStore(slice, store, kind)`.
+1. **Full Governance Enforcement**: The projector serializes the updated ranks into the 3-page
+   layout, generates format links for headers, recreates butterfly comment ribbons, and commits a
+   new `MicroversionId`.
+1. **Active Head Advance**: `store.repointCurrentVersion(newVer)` notifies Xudu.
+1. **Visualizer Synchronization**: Xudu's document quad reflows immediately to display the updated
+   text, bold headers, and optical link ribbons.
 
 #### Roundtrip Convergence & Mathematical Stability
 
 The roundtrip transformation is idempotent and convergent:
-$$\text{Store}_{t+1} = \text{projectSliceToStore}(\text{projectStoreToSlice}(\text{Store}_t))$$
+
+$$
+\text{Store}_{t+1} = \text{projectSliceToStore}(\text{projectStoreToSlice}(\text{Store}_t))
+$$
+
 Because rank demuxing isolates Page 1 (configuration) from Page 2 (schema) and Page 3 (notes),
 editing an active parameter never alters schema text, and adding a user note never disturbs runtime
 configuration keys.
 
----
+______________________________________________________________________
 
 ### 6.6 Dual-Stack Configuration Loaders & Verification
 
-To ensure zero downtime during the transition from legacy YAML files to sovereign Zigzag slices,
-all configuration structures in `apps/common/xanadu/system_docs.hpp` implement dual-stack
-constructors:
+To ensure zero downtime during the transition from legacy YAML files to sovereign Zigzag slices, all
+configuration structures in `apps/common/xanadu/system_docs.hpp` implement dual-stack constructors:
 
 ```cpp
 namespace xanadu {
@@ -687,21 +817,24 @@ struct LayoutConfig {
 `LayoutConfig::fromSlice(slice)` extracts the `d.config` rank directly from the slice and parses
 key-value pairs. As validated in unit tests, both loaders produce identical runtime configuration
 structs:
-$$\text{LayoutConfig::fromSlice}(\text{slice}) \equiv \text{LayoutConfig::fromYaml}(\text{defaultYaml})$$
 
----
+```math
+\text{LayoutConfig::fromSlice}(\text{slice}) \equiv \text{LayoutConfig::fromYaml}(\text{defaultYaml})
+```
+
+______________________________________________________________________
 
 ### 6.7 Implementation & Test Reference Map
 
-| Component | Source Path | Key Responsibilities |
-| :--- | :--- | :--- |
-| **System Projector Header** | [`apps/common/xanadu/zigzag/zz_system_projector.hpp`](apps/common/xanadu/zigzag/zz_system_projector.hpp) | Dimensional constants (`kDimConfig`, `kDimSchema`, `kDimNotes`), projection declarations |
-| **System Projector Impl** | [`apps/common/xanadu/zigzag/zz_system_projector.cpp`](apps/common/xanadu/zigzag/zz_system_projector.cpp) | Rank extraction, 3-page EDL construction, format link binding, butterfly comment synthesis |
-| **Dual-Stack Config Loaders** | [`apps/common/xanadu/system_docs.hpp/.cpp`](apps/common/xanadu/system_docs.hpp) | `LayoutConfig`, `SettingsConfig`, `KeymapConfig`, `UIConfig` dual `fromYaml`/`fromSlice` loaders |
-| **Canonical Layout Slice** | [`assets/zigzag/system_layout_slice.yaml`](assets/zigzag/system_layout_slice.yaml) | Canonical 3D Zigzag slice specification for `system://layout` |
-| **Comprehensive Tests** | [`tests/zigzag/test_system_projector.cpp`](tests/zigzag/test_system_projector.cpp) | Manifold validation, zero-markdown verification, format links, bidirectional edit propagation |
+| Component                     | Source Path                                                                                              | Key Responsibilities                                                                             |
+| :---------------------------- | :------------------------------------------------------------------------------------------------------- | :----------------------------------------------------------------------------------------------- |
+| **System Projector Header**   | [`apps/common/xanadu/zigzag/zz_system_projector.hpp`](apps/common/xanadu/zigzag/zz_system_projector.hpp) | Dimensional constants (`kDimConfig`, `kDimSchema`, `kDimNotes`), projection declarations         |
+| **System Projector Impl**     | [`apps/common/xanadu/zigzag/zz_system_projector.cpp`](apps/common/xanadu/zigzag/zz_system_projector.cpp) | Rank extraction, 3-page EDL construction, format link binding, butterfly comment synthesis       |
+| **Dual-Stack Config Loaders** | [`apps/common/xanadu/system_docs.hpp/.cpp`](apps/common/xanadu/system_docs.hpp)                          | `LayoutConfig`, `SettingsConfig`, `KeymapConfig`, `UIConfig` dual `fromYaml`/`fromSlice` loaders |
+| **Canonical Layout Slice**    | [`assets/zigzag/system_layout_slice.yaml`](assets/zigzag/system_layout_slice.yaml)                       | Canonical 3D Zigzag slice specification for `system://layout`                                    |
+| **Comprehensive Tests**       | [`tests/zigzag/test_system_projector.cpp`](tests/zigzag/test_system_projector.cpp)                       | Manifold validation, zero-markdown verification, format links, bidirectional edit propagation    |
 
----
+______________________________________________________________________
 
 ## 7. Integration Roadmap & Stage Alignment
 
@@ -711,18 +844,18 @@ The System Xanadoc paradigm seamlessly weaves through all stages of the system o
    - Consolidated YAML parsing helpers (`apps/common/yaml_helpers.hpp`).
    - Spatial quadratic Bezier evaluation template (`gleditor::spatial::evaluateQuadraticBezier`).
    - Unified hex color parsing in `gleditor::color`.
-2. **Stage 2: Buffer Abstraction & Layer Promotion** *(Completed)*:
+1. **Stage 2: Buffer Abstraction & Layer Promotion** *(Completed)*:
    - Introduced persistent mapped streaming buffer interface (`render::IStreamBuffer`).
    - Promoted Zigzag core structures and manifolds to `apps/common/xanadu/zigzag/`.
    - Decoupled `UnifiedTransclusionEngine` from backend-specific OpenGL buffers.
-3. **Stage 3: Multidimensional System Slices & Bidirectional Bridge** *(Completed)*:
-   - Created `zz_system_projector.hpp/.cpp` for bidirectional projection between 3-page stores
-     and Zigzag slices.
+1. **Stage 3: Multidimensional System Slices & Bidirectional Bridge** *(Completed)*:
+   - Created `zz_system_projector.hpp/.cpp` for bidirectional projection between 3-page stores and
+     Zigzag slices.
    - Authored canonical `assets/zigzag/system_layout_slice.yaml`.
    - Added dual-stack loaders (`fromSlice` and `fromYaml`) across `LayoutConfig`, `SettingsConfig`,
      `KeymapConfig`, `UIConfig`.
    - Verified bidirectional live edit propagation in `test_system_projector.cpp`.
-4. **Stage 4: Pouch Drawer & Clasp Bench**:
+1. **Stage 4: Pouch Drawer & Clasp Bench**:
    - Directly backed by `system://pouches` and multidimensional drop-zone slices.
-5. **Stage 5-7: Transclusion, Break Controls & Swarm Telescope**:
+1. **Stage 5-7: Transclusion, Break Controls & Swarm Telescope**:
    - Transcluding community keymap and theme scrolls across the DHT swarm.

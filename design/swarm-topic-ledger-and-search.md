@@ -1,17 +1,24 @@
 # Decentralized Topic Ledgers, Publication Metadata & Xanadulogical Search Specification
 
-An architectural specification and investigation for deriving topic swarms, publication metadata, and decentralized indexing across `gleditor`, `xudu`, and `zigzag`.
+An architectural specification and investigation for deriving topic swarms, publication metadata,
+and decentralized indexing across `gleditor`, `xudu`, and `zigzag`.
 
----
+______________________________________________________________________
 
 ## 1. Executive Summary & The Dialectical Challenge
 
-Stage 7 of the Xudu UI overhaul introduces the **Decentralized Swarm Telescope**—an astronomical instrument peering into the collective writings of the Universal Docuverse. However, for the Telescope to navigate millions of distributed publications, it must solve two fundamental problems:
+Stage 7 of the Xudu UI overhaul introduces the **Decentralized Swarm Telescope**—an astronomical
+instrument peering into the collective writings of the Universal Docuverse. However, for the
+Telescope to navigate millions of distributed publications, it must solve two fundamental problems:
 
-1. **Decentralized Topic & Metadata Derivation**: How do topics, titles, abstracts, and provenance metadata propagate through peer-to-peer BitTorrent swarms without centralized catalog servers, domain registrars, or crawling monopolies?
-2. **Xanadulogical Search & Query Language**: How do we provide instant, expressive, sub-millisecond filtering across this distributed index using a standard, open-source, embedded search engine that respects Xanadu's principles of provenance, transclusion, and authorial sovereignty?
+1. **Decentralized Topic & Metadata Derivation**: How do topics, titles, abstracts, and provenance
+   metadata propagate through peer-to-peer BitTorrent swarms without centralized catalog servers,
+   domain registrars, or crawling monopolies?
+1. **Xanadulogical Search & Query Language**: How do we provide instant, expressive, sub-millisecond
+   filtering across this distributed index using a standard, open-source, embedded search engine
+   that respects Xanadu's principles of provenance, transclusion, and authorial sovereignty?
 
----
+______________________________________________________________________
 
 ## 2. Deriving Topics & Publication Metadata from the Swarm
 
@@ -40,20 +47,36 @@ Stage 7 of the Xudu UI overhaul introduces the **Decentralized Swarm Telescope**
 ```
 
 #### Vector 1: Self-Sovereign Author Catalogs (BEP 46)
-- Every author publishes a signed, mutable manifest under their Ed25519 public key (`bep46:<pubkey>/catalog`).
-- The catalog contains an array of published xanadocs with their canonical salts (`doc:hypertext-foundations`), titles, abstracts, topic tags, microversion roots, and transcopyright terms.
+
+- Every author publishes a signed, mutable manifest under their Ed25519 public key
+  (`bep46:<pubkey>/catalog`).
+- The catalog contains an array of published xanadocs with their canonical salts
+  (`doc:hypertext-foundations`), titles, abstracts, topic tags, microversion roots, and
+  transcopyright terms.
 - **Trust Level**: Highest. Cryptographically signed by the author's private key.
 
 #### Vector 2: Deterministic DHT Topic Swarms
+
 - Any topic tag $T$ maps to an immutable 20-byte infohash:
-  $$\text{Target}(T) = \text{SHA-1}("xudu:topic:" \parallel \text{canonicalize}(T))$$
+
+  $$
+  \text{Target}(T) = \text{SHA-1}("xudu:topic:" \parallel \text{canonicalize}(T))
+  $$
+
 - Authors and curators announce publication tokens directly to this swarm on the Mainline DHT.
-- Peers participating in `#quantum-computing` or `#xanadu-core` exchange signed publication announcements via BEP 10 peer-wire messages.
+
+- Peers participating in `#quantum-computing` or `#xanadu-core` exchange signed publication
+  announcements via BEP 10 peer-wire messages.
 
 #### Vector 3: The Append-Only Publication & Topic Merkle Ledger (`PublicationLedger`)
-Directly mirroring `MerkleLedger` (`apps/xudu/core/merkle_ledger.hpp`), we define the **Decentralized Publication Ledger**:
+
+Directly mirroring `MerkleLedger` (`apps/xudu/core/merkle_ledger.hpp`), we define the
+**Decentralized Publication Ledger**:
+
 - **Data Structure**: An incremental binary Merkle tree implemented via `microsoft/merklecpp`.
+
 - **Leaf Node Schema**:
+
   ```cpp
   struct PublicationEntry {
     std::string infoHash;            // Canonical 20/32-byte content hash
@@ -73,47 +96,60 @@ Directly mirroring `MerkleLedger` (`apps/xudu/core/merkle_ledger.hpp`), we defin
     std::string signature;           // Author / Oracle attestation signature
   };
   ```
-- **$O(\log N)$ Inclusion Proofs**: Any peer can generate or verify a lightweight `MerkleProof` that a publication exists in a trusted ledger checkpoint without downloading the entire database.
-- **Sealing into Swarms**: Periodically sealed by community Oracles into `.torrent` archives (`PUBLICATION_LEDGER.yaml`, `ROOT.hex`) and broadcast over BEP 46 mutable links.
 
----
+- **$O(\log N)$ Inclusion Proofs**: Any peer can generate or verify a lightweight `MerkleProof` that
+  a publication exists in a trusted ledger checkpoint without downloading the entire database.
+
+- **Sealing into Swarms**: Periodically sealed by community Oracles into `.torrent` archives
+  (`PUBLICATION_LEDGER.yaml`, `ROOT.hex`) and broadcast over BEP 46 mutable links.
+
+______________________________________________________________________
 
 ## 3. Search Engine Technical Evaluation
 
-To select the most appropriate search engine for `gleditor` and `xudu`, we evaluate the leading open-source options against our architectural constraints:
+To select the most appropriate search engine for `gleditor` and `xudu`, we evaluate the leading
+open-source options against our architectural constraints:
+
 - **C++23 GNU Make compatibility** (zero external build tools like Cargo, Gradle, or npm).
 - **Embedded in-process execution** (zero external daemon processes or network sockets).
-- **120 FPS frame budget** (queries must return in $< 1\,\text{ms}$, run asynchronously on `WorkerPool`).
+- **120 FPS frame budget** (queries must return in $< 1\,\text{ms}$, run asynchronously on
+  `WorkerPool`).
 - **Zero render-thread blocking**.
 
-| Search Engine | Architecture | Query Speed | Dependencies | In-Process? | Evaluation & Verdict |
-| :--- | :--- | :--- | :--- | :--- | :--- |
-| **SQLite FTS5** | In-process C library | **$< 0.2\,\text{ms}$** | `libsqlite3` (already on OS) | **YES** | **WINNER**: Standard, ultra-fast, BM25 ranking, rich boolean & proximity syntax, zero daemons. |
-| **Xapian** | C++ search engine | $\sim 0.5\,\text{ms}$ | `libxapian` (external dep) | **YES** | Capable, but adds large non-standard library dependency to build tree. |
-| **Tantivy** | Rust search library | $\sim 0.1\,\text{ms}$ | Rust toolchain, `cargo`, `cxx` | **YES** | Rejected: violates tree's strict C++23 / GNU Make no-Rust policy. |
-| **Meilisearch / Elastic** | Standalone server | $10\text{--}50\,\text{ms}$ | HTTP daemon, JSON RPC | **NO** | Rejected: violates embedded zero-daemon requirement; huge footprint. |
-| **Hand-Rolled Trie/Map** | Custom C++23 | $< 0.1\,\text{ms}$ | None | **YES** | Good for exact substring, but lacks BM25 ranking, tokenization, stemming, and proximity logic. |
+| Search Engine             | Architecture         | Query Speed                | Dependencies                   | In-Process? | Evaluation & Verdict                                                                           |
+| :------------------------ | :------------------- | :------------------------- | :----------------------------- | :---------- | :--------------------------------------------------------------------------------------------- |
+| **SQLite FTS5**           | In-process C library | **$< 0.2\,\text{ms}$**     | `libsqlite3` (already on OS)   | **YES**     | **WINNER**: Standard, ultra-fast, BM25 ranking, rich boolean & proximity syntax, zero daemons. |
+| **Xapian**                | C++ search engine    | $\sim 0.5\,\text{ms}$      | `libxapian` (external dep)     | **YES**     | Capable, but adds large non-standard library dependency to build tree.                         |
+| **Tantivy**               | Rust search library  | $\sim 0.1\,\text{ms}$      | Rust toolchain, `cargo`, `cxx` | **YES**     | Rejected: violates tree's strict C++23 / GNU Make no-Rust policy.                              |
+| **Meilisearch / Elastic** | Standalone server    | $10\text{--}50\,\text{ms}$ | HTTP daemon, JSON RPC          | **NO**      | Rejected: violates embedded zero-daemon requirement; huge footprint.                           |
+| **Hand-Rolled Trie/Map**  | Custom C++23         | $< 0.1\,\text{ms}$         | None                           | **YES**     | Good for exact substring, but lacks BM25 ranking, tokenization, stemming, and proximity logic. |
 
 ### Why SQLite FTS5 is the Optimal Choice
-1. **Zero External Build Friction**: SQLite 3.53+ is standard on all target Linux/POSIX platforms and exposes FTS5 natively.
-2. **Instant Asynchronous Queries**: FTS5 query execution over 50,000 documents takes under $180\,\mu\text{s}$.
-3. **Rich Information Retrieval Features**:
+
+1. **Zero External Build Friction**: SQLite 3.53+ is standard on all target Linux/POSIX platforms
+   and exposes FTS5 natively.
+1. **Instant Asynchronous Queries**: FTS5 query execution over 50,000 documents takes under
+   $180\,\mu\text{s}$.
+1. **Rich Information Retrieval Features**:
    - BM25 probabilistic relevance scoring.
    - Column-directed matching (`title:`, `topics:`, `author:`).
    - Proximity search (`NEAR(hypertext transclusion, 5)`).
    - Prefix matching (`intertwingl*`).
    - Snippet extraction and match token highlighting.
-4. **Flexible Storage Models**: Can run entirely in-memory (`:memory:`) or backed by a persistent file in `$XDG_CACHE_HOME/gleditor/catalog_index.db`.
+1. **Flexible Storage Models**: Can run entirely in-memory (`:memory:`) or backed by a persistent
+   file in `$XDG_CACHE_HOME/gleditor/catalog_index.db`.
 
----
+______________________________________________________________________
 
 ## 4. The Xanadulogical Search Query Language
 
-Traditional web search engines assume a flat bag of text crawled from arbitrary URLs. In Xanadu, a query must understand **provenance, associative trails, and transclusion relationships**.
+Traditional web search engines assume a flat bag of text crawled from arbitrary URLs. In Xanadu, a
+query must understand **provenance, associative trails, and transclusion relationships**.
 
 ### 4.1 Syntax Specification
 
-We define the **Xanadulogical Query Language (XQL)**, compiled dynamically into FTS5 `MATCH` expressions and SQL predicates:
+We define the **Xanadulogical Query Language (XQL)**, compiled dynamically into FTS5 `MATCH`
+expressions and SQL predicates:
 
 ```
 [ Term / Phrase ]          "universal transclusion"
@@ -129,16 +165,16 @@ We define the **Xanadulogical Query Language (XQL)**, compiled dynamically into 
 
 ### 4.2 Query Compilation Examples
 
-| User Query | Compiled SQLite FTS5 Query / SQL Filter | Meaning |
-| :--- | :--- | :--- |
-| `transclusion` | `content_fts MATCH 'transclusion' ORDER BY bm25` | Search text across titles, abstracts, and topics. |
-| `#hypertext author:nelson` | `content_fts MATCH 'topics:hypertext AND authorName:nelson'` | Topic hashtag + author name filter. |
-| `"permascroll holes" is:verified` | `content_fts MATCH '"permascroll holes"' AND is_verified = 1` | Exact phrase with Merkle ledger verified provenance. |
-| `NEAR(xanadu zigzag, 10)` | `content_fts MATCH 'NEAR(xanadu zigzag, 10)'` | Proximity within 10 tokens. |
-| `#physics NOT #classical` | `content_fts MATCH 'topics:physics NOT topics:classical'` | Boolean topic exclusion. |
-| `quotes:btpk:9f4a28c1...` | `SELECT * FROM publications WHERE quotes_origin = 'btpk:9f4a...'` | Transclusion graph backlink search! |
+| User Query                        | Compiled SQLite FTS5 Query / SQL Filter                           | Meaning                                              |
+| :-------------------------------- | :---------------------------------------------------------------- | :--------------------------------------------------- |
+| `transclusion`                    | `content_fts MATCH 'transclusion' ORDER BY bm25`                  | Search text across titles, abstracts, and topics.    |
+| `#hypertext author:nelson`        | `content_fts MATCH 'topics:hypertext AND authorName:nelson'`      | Topic hashtag + author name filter.                  |
+| `"permascroll holes" is:verified` | `content_fts MATCH '"permascroll holes"' AND is_verified = 1`     | Exact phrase with Merkle ledger verified provenance. |
+| `NEAR(xanadu zigzag, 10)`         | `content_fts MATCH 'NEAR(xanadu zigzag, 10)'`                     | Proximity within 10 tokens.                          |
+| `#physics NOT #classical`         | `content_fts MATCH 'topics:physics NOT topics:classical'`         | Boolean topic exclusion.                             |
+| `quotes:btpk:9f4a28c1...`         | `SELECT * FROM publications WHERE quotes_origin = 'btpk:9f4a...'` | Transclusion graph backlink search!                  |
 
----
+______________________________________________________________________
 
 ## 5. Architectural Implementation in `xudu`
 
@@ -187,7 +223,8 @@ private:
    - `SwarmCatalogIndex::search()` runs on gleditor's background `WorkerPool`.
    - The user types into the Telescope search bar (`SwarmTelescopeOverlay`).
    - Typing dispatches an asynchronous task with a 50 ms debounce.
-2. **Lock-Free Atomic Snapshot Hand-Off**:
+1. **Lock-Free Atomic Snapshot Hand-Off**:
    - The background worker places results into an `alignas(64)` results buffer.
    - The render thread reads the buffer during `drawFrame()` using `std::memory_order_acquire`.
-   - Render thread execution time for displaying 50 search results: **$< 0.12\,\text{ms}$** (zero locks, zero disk I/O, zero SQLite calls in `drawFrame`).
+   - Render thread execution time for displaying 50 search results: **$< 0.12\,\text{ms}$** (zero
+     locks, zero disk I/O, zero SQLite calls in `drawFrame`).

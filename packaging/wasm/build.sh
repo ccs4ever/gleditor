@@ -55,19 +55,19 @@ EM_FLAGS=(
 )
 
 # Common library source files
-LIB_SRCS=$(find src -name '*.cpp' ! -name 'device_vk*.cpp' ! -name 'platform_accesskit.cpp')
+mapfile -t LIB_SRCS < <(find src -name '*.cpp' ! -name 'device_vk*.cpp' ! -name 'platform_accesskit.cpp')
 
 echo "==> Compiling gleditor WebAssembly target..."
 em++ "${EM_FLAGS[@]}" \
-  $LIB_SRCS \
+  "${LIB_SRCS[@]}" \
   apps/gleditor/main.cpp \
   -o "$OUTPUT_DIR/gleditor.html"
 
 echo "==> Compiling zigzag WebAssembly target..."
-ZIGZAG_SRCS=$(find apps/zigzag/core -name '*.cpp' ! -name 'preflet_fetcher.cpp')
+mapfile -t ZIGZAG_SRCS < <(find apps/zigzag/core -name '*.cpp' ! -name 'preflet_fetcher.cpp')
 em++ "${EM_FLAGS[@]}" \
-  $LIB_SRCS \
-  $ZIGZAG_SRCS \
+  "${LIB_SRCS[@]}" \
+  "${ZIGZAG_SRCS[@]}" \
   apps/zigzag/zigzag_visualizer.cpp \
   apps/zigzag/main.cpp \
   -o "$OUTPUT_DIR/zigzag.html"

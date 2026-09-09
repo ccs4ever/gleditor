@@ -997,7 +997,7 @@ endif
 CXX_FORMAT_FILES = $(shell git ls-files '*.cpp' '*.hpp' '*.h' '*.glsl' | grep -v '^thirdparty/')
 SH_FORMAT_FILES  = $(shell git ls-files '*.sh' | grep -v '^thirdparty/')
 YAML_FORMAT_FILES = .github/workflows/c-cpp.yml .github/workflows/packaging.yml .github/dependabot.yml
-MD_FORMAT_FILES  = README.md CLAUDE.md design/btfs-and-permascrolls.md
+MD_FORMAT_FILES  = $(shell git ls-files '*.md' | grep -v '^thirdparty/')
 
 CLANG_FORMAT := $(shell command -v clang-format 2>/dev/null)
 SHFMT        := $(shell command -v shfmt 2>/dev/null)
@@ -1028,7 +1028,7 @@ else
 	@echo "yamlfmt not found, skipping YAML formatting"
 endif
 ifdef MDFORMAT
-	$(MDFORMAT) --wrap keep $(MD_FORMAT_FILES)
+	$(MDFORMAT) --wrap 100 $(MD_FORMAT_FILES)
 else
 	@echo "mdformat not found, skipping Markdown formatting"
 endif
@@ -1056,7 +1056,7 @@ else
 	@echo "yamlfmt not found, skipping YAML format check"
 endif
 ifdef MDFORMAT
-	$(MDFORMAT) --check --wrap keep $(MD_FORMAT_FILES)
+	$(MDFORMAT) --check --wrap 100 $(MD_FORMAT_FILES)
 else
 	@echo "mdformat not found, skipping Markdown format check"
 endif
@@ -1066,9 +1066,10 @@ endif
 # in the shell scripts, yamllint for the workflow YAML (.yamllint holds the
 # project's exceptions to its defaults, shared with .yamlfmt), mdl for the
 # prose docs (.mdlrc / .mdl_style.rb holds the same, shared with mdformat's
-# --wrap keep). Nix and the packaging manifests (PKGBUILD, the RPM spec, the
-# Homebrew formula) are covered where a linter for them is actually reliable
-# outside their native distribution -- see CLAUDE.md.
+# --wrap 100, matching MD013's line_length). Nix and the packaging manifests
+# (PKGBUILD, the RPM spec, the Homebrew formula) are covered where a linter
+# for them is actually reliable outside their native distribution -- see
+# CLAUDE.md.
 lint:
 	./tools/check-config-harmony.sh
 ifdef SHELLCHECK
@@ -1082,7 +1083,11 @@ else
 	@echo "yamllint not found, skipping YAML lint"
 endif
 ifdef MDL
-	$(MDL) $(MD_FORMAT_FILES)
+	# -i: the .agents/skills/*.md files open with YAML front matter: without
+	# it mdl reads the closing "---" as a second thematic break and flags
+	# MD035 against the "______" mdformat renders for real horizontal rules
+	# in the body.
+	$(MDL) -i $(MD_FORMAT_FILES)
 else
 	@echo "mdl not found, skipping Markdown lint"
 endif
