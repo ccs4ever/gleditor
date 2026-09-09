@@ -97,6 +97,7 @@ ______________________________________________________________________
 #include <string>
 #include <unordered_map>
 #include <memory>
+#include <functional>
 #include <optional>
 #include <variant>
 #include <vector>
@@ -339,6 +340,22 @@ std::optional<cell_id> new_cell(cell_id cell, cell_id dim, int direction,
 }
 std::optional<cell_id> break_link(cell_id cell, cell_id dim, int direction) {
     return link(cell, dim, direction, -2);
+}
+
+// A dim/dir slot holds exactly one partner (§1), so passing one existing
+// cell as `target` to more than one `link` call silently overwrites its
+// back-link each time. entangle_generator(source) sidesteps that: each call
+// allocates a fresh cell and entangles it with source (source stays the
+// `cell` argument so its value, not the blank new cell's, is authoritative
+// -- §4.6 of vql-query-language.md), then returns that fresh cell rather
+// than source itself, so every caller gets its own structurally distinct
+// but identity-linked partner. See VQL §4.7 for where this gets used.
+std::function<cell_id()> entangle_generator(cell_id source) {
+    return [source]() {
+        cell_id fresh = internal_alloc_cell();
+        link(source, d_entangle, +1, fresh);
+        return fresh;
+    };
 }
 ```
 

@@ -354,7 +354,32 @@ underlying `CellValue` pointer (§1), so setting either one's content afterward 
   - Any `VALUE` past the first operand in a longer chain is likewise ignored, for the same reason.
 - **Maps over a rank like any other step.** `$path/d.name><%` takes each cell in `d.name`'s posward
   rank (§4.1) and entangles it with its own freshly created partner — one new cell per rank member,
-  not one new cell shared by the whole rank.
+  not one new cell shared by the whole rank. §4.7 covers the mirror case: an *existing* single cell
+  reused as the target for many context cells.
+
+### 4.7 Existing-Target Fan-Out
+
+A dimension link is a single pos/neg pair (§1) — one cell's `dim`/`dir` slot holds exactly one
+partner. `%` (§4.5) never collides with this, because it allocates a fresh cell per context-stream
+member; but `link(dim, dir, target)` naming an *existing* cell as `target` (§4.5's "existing
+targets" case) has no such escape hatch on its own. Evaluated once per context-stream cell like
+every other step, the second and later calls would each overwrite `target`'s own back-link, silently
+discarding the previous context cell's connection — `$context/link(dim, dir, $a)` over a multi-cell
+`$context` is not "link every context cell to `$a`," it's "link the last context cell to `$a`, and
+quietly drop the rest."
+
+VQL resolves this the same way §4.6 resolves "one cell, many partners": when the context stream has
+more than one member, an existing-cell `target` is drawn from `entangle_generator(target)` (Vortex
+§2) instead of being reused as-is. Each pull allocates a fresh cell entangled with `target` —
+sharing its value, mutated together (§4.6) — and *that* fresh cell, not `target` itself, becomes the
+structural link partner for one context cell. `target`'s own dimension slot still only ever holds
+the most recently generated partner directly, but every generated cell (and `target`) shares one
+underlying payload, so the group reads as a single logical value no matter which member is
+dereferenced.
+
+This is transparent at the call site: `$context/link(dim, dir, $a)` parses and means the same thing
+whether `$context` has one cell or many — the fan-out only engages once there's more than one `link`
+call contending for `$a`'s slot, and a single-cell context never pays for it.
 
 ______________________________________________________________________
 
