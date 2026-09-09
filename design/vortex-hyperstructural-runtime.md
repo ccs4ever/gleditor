@@ -42,12 +42,12 @@ accessors:
      node along the given dimension and direction.
    - **Isolation (`target == 0`)**: Clears the designated directional pointer. When all dimensional
      links of a cell are set to 0, the cell is geometrically isolated.
-   - **Identity Fusion & Unfusion (`dim == d_fuse`)**: Establishes or breaks an identity binding
-     where multiple cells share a single underlying payload pointer pool.
+   - **Identity Entanglement & Unentanglement (`dim == d_entangle`)**: Establishes or breaks an
+     identity binding where multiple cells share a single underlying payload pointer pool.
 1. **`get(cell, [offset], [length])`**: Dereferences the cell's payload
    (`std::variant<std::string, double, bool>`) with optional virtual slicing.
 1. **`set(cell, value, [offset], [length])`**: Writes or in-place patches the variant payload,
-   updating shared instances across `d.fuse` instantly.
+   updating shared instances across `d.entangle` instantly.
 
 ```mermaid
 graph TD
@@ -98,8 +98,8 @@ using cell_id = int64_t;
 constexpr cell_id d_grab    = 1;    // Parameter wings (-d.grab = outputs, +d.grab = inputs)
 constexpr cell_id d_step    = 2;    // Parameter chaining / sequential rank stepping
 constexpr cell_id d_spin    = 3;    // Process instruction stream
-constexpr cell_id d_stack   = 4;    // Call frames, choice points, and backtracking trail
-constexpr cell_id d_fuse    = 999;  // Quantum identity synchronization
+constexpr cell_id d_stack   = 4;    // Call frame stack
+constexpr cell_id d_entangle = 999; // Quantum identity synchronization
 constexpr cell_id d_cursors = 1001; // Process scheduler manifold
 constexpr cell_id d_vars    = 1003; // Scope variable names
 constexpr cell_id d_values  = 1004; // Variable values / ground terms
@@ -110,7 +110,7 @@ struct Cell {
     cell_id id;
     CellValue primitive_value = "";
     std::unordered_map<cell_id, std::pair<cell_id, cell_id>> links; // [dim] -> {pos, neg}
-    std::shared_ptr<CellValue> fused_payload = nullptr;
+    std::shared_ptr<CellValue> entangled_payload = nullptr;
 };
 
 // Global Matrix Storage
@@ -126,15 +126,15 @@ static cell_id internal_alloc_cell() {
     return id;
 }
 
-// Unfuse & Payload Recovery Helper
-static void handle_unfuse_cleanup(cell_id c_id) {
+// Unentangle & Payload Recovery Helper
+static void handle_unentangle_cleanup(cell_id c_id) {
     auto& c = matrix[c_id];
-    if (!c || !c->fused_payload) return;
-    c->primitive_value = *(c->fused_payload);
-    if (c->links[d_fuse].first == 0 && c->links[d_fuse].second == 0) {
-        c->fused_payload = nullptr;
+    if (!c || !c->entangled_payload) return;
+    c->primitive_value = *(c->entangled_payload);
+    if (c->links[d_entangle].first == 0 && c->links[d_entangle].second == 0) {
+        c->entangled_payload = nullptr;
     } else {
-        c->fused_payload =
+        c->entangled_payload =
             std::make_shared<CellValue>(c->primitive_value);
     }
 }
@@ -158,48 +158,48 @@ target) {
     cell_id actual_target = (target == -1) ? internal_alloc_cell() :
 target;
 
-    // Quantum Identity Synchronization along d.fuse
-    if (dim == d_fuse) {
-        cell_id old_target = (direction > 0) ? c->links[d_fuse].first
-: c->links[d_fuse].second;
+    // Quantum Identity Synchronization along d.entangle
+    if (dim == d_entangle) {
+        cell_id old_target = (direction > 0) ? c->links[d_entangle].first
+: c->links[d_entangle].second;
 
-        // Break Fusion
+        // Break Entanglement
         if (actual_target == 0 && old_target != 0) {
-            if (direction > 0) c->links[d_fuse].first = 0;
-            else c->links[d_fuse].second = 0;
+            if (direction > 0) c->links[d_entangle].first = 0;
+            else c->links[d_entangle].second = 0;
 
             auto& partner = matrix[old_target];
             if (partner) {
-                if (direction > 0 && partner->links[d_fuse].second ==
-cell) partner->links[d_fuse].second = 0;
-                else if (direction < 0 && partner->links[d_fuse].first
-== cell) partner->links[d_fuse].first = 0;
-                handle_unfuse_cleanup(old_target);
+                if (direction > 0 && partner->links[d_entangle].second ==
+cell) partner->links[d_entangle].second = 0;
+                else if (direction < 0 && partner->links[d_entangle].first
+== cell) partner->links[d_entangle].first = 0;
+                handle_unentangle_cleanup(old_target);
             }
-            handle_unfuse_cleanup(cell);
+            handle_unentangle_cleanup(cell);
             return 0;
         }
 
-        // Establish Fusion
+        // Establish Entanglement
         if (actual_target != 0) {
             auto& t = matrix[actual_target];
             if (!t) return 0;
-            if (direction > 0) { c->links[d_fuse].first =
-actual_target; t->links[d_fuse].second = cell; }
-            else { c->links[d_fuse].second = actual_target;
-t->links[d_fuse].first = cell; }
+            if (direction > 0) { c->links[d_entangle].first =
+actual_target; t->links[d_entangle].second = cell; }
+            else { c->links[d_entangle].second = actual_target;
+t->links[d_entangle].first = cell; }
 
-            if (!c->fused_payload && !t->fused_payload) {
-                c->fused_payload =
+            if (!c->entangled_payload && !t->entangled_payload) {
+                c->entangled_payload =
 std::make_shared<CellValue>(c->primitive_value);
-                t->fused_payload = c->fused_payload;
-            } else if (c->fused_payload && !t->fused_payload) {
-                t->fused_payload = c->fused_payload;
-            } else if (!c->fused_payload && t->fused_payload) {
-                c->fused_payload = t->fused_payload;
-            } else if (c->fused_payload != t->fused_payload) {
-                *(t->fused_payload) = *(c->fused_payload);
-                t->fused_payload = c->fused_payload;
+                t->entangled_payload = c->entangled_payload;
+            } else if (c->entangled_payload && !t->entangled_payload) {
+                t->entangled_payload = c->entangled_payload;
+            } else if (!c->entangled_payload && t->entangled_payload) {
+                c->entangled_payload = t->entangled_payload;
+            } else if (c->entangled_payload != t->entangled_payload) {
+                *(t->entangled_payload) = *(c->entangled_payload);
+                t->entangled_payload = c->entangled_payload;
             }
             return actual_target;
         }
@@ -244,8 +244,8 @@ length = -1) {
     auto it = matrix.find(c_id);
     if (it == matrix.end() || !it->second) return false;
 
-    const CellValue& val = it->second->fused_payload ?
-*(it->second->fused_payload) : it->second->primitive_value;
+    const CellValue& val = it->second->entangled_payload ?
+*(it->second->entangled_payload) : it->second->primitive_value;
     if (std::holds_alternative<bool>(val)) return std::get<bool>(val);
     if (std::holds_alternative<double>(val)) return
 std::get<double>(val);
@@ -265,8 +265,8 @@ offset = 0, int64_t length = -1) {
     auto it = matrix.find(c_id);
     if (it == matrix.end() || !it->second) return;
 
-    CellValue& target = it->second->fused_payload ?
-*(it->second->fused_payload) : it->second->primitive_value;
+    CellValue& target = it->second->entangled_payload ?
+*(it->second->entangled_payload) : it->second->primitive_value;
 
     if (std::holds_alternative<bool>(new_val) ||
 std::holds_alternative<double>(new_val)) {
@@ -350,195 +350,3 @@ graph TD
 - **Complex Data Containment**: The cell anchored along `+d.values` is not restricted to scalars; it
   may be the entry root of an arbitrarily deep multidimensional zzstructure (such as a tree, cyclic
   graph, or compiler AST).
-
-______________________________________________________________________
-
-## 5. First-Class Topological Logic Programming (Prolog Unification)
-
-Vortex implements Robinson unification natively using zzstructure geometry, eliminating Warren
-Abstract Machine (WAM) registers:
-
-### Variable States in the Matrix
-
-- **Unbound / Free Variable**: A variable cell whose `+d.values` link is 0 (null).
-- **Bound Variable**: A variable cell with a posward link on `+d.values` targeting a ground literal
-  or compound term manifold.
-- **Aliased Variables**: Two or more variable cells unified together via `d.fuse`. Mutating one
-  instantly binds the other.
-
-### Backtracking & Topological Trail
-
-Choice points and mutation logs exist entirely on the cursor's `+d.stack` dimension:
-
-```mermaid
-graph TD
-    Cursor["Spin-Head Cursor"]
-    Choice["Choice Point Metacell"]
-    Warp["Backtrack Alternate Branch Address"]
-    Trail1["Trail Cell 1<br/>Target: Var_X"]
-    Trail2["Trail Cell 2<br/>Target: Var_Y"]
-
-    Cursor -->|"+d.stack"| Choice
-    Choice -->|"+d.warp"| Warp
-    Choice -->|"+d.trail"| Trail1
-    Trail1 -->|"+d.step"| Trail2
-```
-
-When a branch fails (`#FAIL`), the engine:
-
-1. Walks the choice point's `+d.trail` rank.
-1. Clears each recorded binding using `set_link(target, d_values, +1, 0)`.
-1. Pops the frame from `+d.stack`.
-1. Diverts cursor execution along `+d.warp`.
-
-______________________________________________________________________
-
-## 6. Full Verification Example: The `#ANCESTOR` Logic Engine
-
-The following complete assembly track defines the ancestor logic rule over a family tree (Bob
-$\leftarrow$ Charlie $\leftarrow$ Alice), runs an exhaustive search loop, logs every ancestor found,
-and cleanly terminates when the query returns false:
-
-```
-;=============================================================================
-; 1. BOOTSTRAP KNOWLEDGE BASE (Bob -> Charlie -> Alice along d.parent)
-;=============================================================================
-SET_LINK   0             d.parent  +1   -1        -> Cell_Bob
-SET_VAL    Cell_Bob      "Bob"
-
-SET_LINK   Cell_Bob      d.parent  -1   -1        -> Cell_Charlie
-SET_VAL    Cell_Charlie  "Charlie"
-
-SET_LINK   Cell_Charlie  d.parent  -1   -1        -> Cell_Alice
-SET_VAL    Cell_Alice    "Alice"
-
-;=============================================================================
-; 2. LOGIC ROUTINE: #ANCESTOR
-; Inputs:  +d.grab -> Slot_X (Target/Var), +d.step -> Slot_Y (Subject)
-; Outputs: -d.grab -> Out_Result (Bound Node, Payload = true/false)
-;=============================================================================
-LABEL ANCESTOR_ENTRY
-GET_LINK   cursor        d.stack   +1        -> top_choice
-TEST_ZERO  top_choice
-WARP_IF    top_choice    ANCESTOR_BACKTRACK
-
-; --- First Invocation: Seed Traversal ---
-GET_LINK   op_ancestor   d.grab    +1        -> slot_x
-GET_LINK   slot_x        d.step    +1        -> slot_y
-GET_LINK   slot_y        d.parent  +1        -> cur_parent
-SET_LINK   op_ancestor   d.step    +1        cur_parent
-WARP       ANCESTOR_LOOP
-
-; --- Backtrack: Unwind Trail & Advance to Next Parent ---
-LABEL ANCESTOR_BACKTRACK
-GET_LINK   top_choice    d.trail   +1        -> trail_node
-TEST_ZERO  trail_node
-WARP_IF    trail_node    SKIP_TRAIL_UNWIND
-
-GET_LINK   trail_node    d.grab    +1        -> bound_var
-SET_LINK   bound_var     d.values  +1        0              ; Unbind variable
-SET_LINK   top_choice    d.trail   +1        0
-
-LABEL SKIP_TRAIL_UNWIND
-GET_LINK   top_choice    d.grab    +1        -> saved_parent
-GET_LINK   saved_parent  d.parent  +1        -> cur_parent  ; Step posward on d.parent
-
-; Pop choice point frame
-GET_LINK   top_choice    d.stack   +1        -> prev_stack
-SET_LINK   cursor        d.stack   +1        prev_stack
-SET_LINK   top_choice    d.stack   +1        0              ; Reclaim via GC
-
-; --- Main Resolution Loop ---
-LABEL ANCESTOR_LOOP
-TEST_ZERO  cur_parent
-WARP_IF    cur_parent    ANCESTOR_FAIL
-
-; Push fresh choice point frame
-SET_LINK   cursor        d.stack   +1   -1        -> choice_frame
-SET_LINK   choice_frame  d.grab    +1        cur_parent
-
-; Inspect Slot X binding status
-GET_LINK   op_ancestor   d.grab    +1        -> slot_x
-GET_LINK   slot_x        d.values  +1        -> x_val
-TEST_ZERO  x_val
-WARP_IF    x_val         UNIFY_FREE_VAR
-
-; Ground Match: Slot X is already bound
-GET_VAL    slot_x        val_x
-GET_VAL    cur_parent    val_parent
-EQ         val_x         val_parent     -> is_match
-WARP_IF    is_match      ANCESTOR_SUCCEED
-WARP       ANCESTOR_ADVANCE_NO_MATCH
-
-; Unbound Unification: Bind slot_x to cur_parent
-LABEL UNIFY_FREE_VAR
-SET_LINK   slot_x        d.values  +1        cur_parent
-SET_LINK   choice_frame  d.trail   +1   -1        -> trail_cell
-SET_LINK   trail_cell    d.grab    +1        slot_x
-
-; Emit Success
-LABEL ANCESTOR_SUCCEED
-GET_LINK   op_ancestor   d.grab    -1        -> out_slot
-SET_LINK   out_slot      d.values  +1        cur_parent
-SET_VAL    out_slot      true
-WARP       ANCESTOR_RETURN
-
-; Step past non-matching ground ancestor
-LABEL ANCESTOR_ADVANCE_NO_MATCH
-SET_LINK   cursor        d.stack   +1        0
-GET_LINK   cur_parent    d.parent  +1        -> cur_parent
-WARP       ANCESTOR_LOOP
-
-; Exhausted Ancestry
-LABEL ANCESTOR_FAIL
-GET_LINK   op_ancestor   d.grab    -1        -> out_slot
-SET_LINK   out_slot      d.values  +1        0
-SET_VAL    out_slot      false
-
-LABEL ANCESTOR_RETURN
-; Return along cursor +d.spin back to caller
-
-;=============================================================================
-; 3. CALLER LOOP (Exhaustive Solution Logging, Breaks on False)
-;=============================================================================
-LABEL CALLER_ENTRY
-; Allocate Opcode invocation context
-SET_LINK   cursor        d.step    +1   -1        -> op_ancestor
-SET_VAL    op_ancestor   "#ANCESTOR"
-
-; Allocate Out Parameter Slot (-d.grab)
-SET_LINK   op_ancestor   d.grab    -1   -1        -> out_res
-SET_VAL    out_res       false
-
-; Allocate Free Variable X (+d.grab)
-SET_LINK   op_ancestor   d.grab    +1   -1        -> var_x
-SET_VAL    var_x         "Var_X"
-
-; Wire Subject Alice (+d.step from Var_X)
-SET_LINK   var_x         d.step    +1        Cell_Alice
-
-LOG_LITERAL "Querying all ancestors of Alice:"
-
-LABEL CALLER_LOOP_HEAD
-SET_LINK   cursor        d.spin    +1        ANCESTOR_ENTRY ; Invoke routine
-
-; Evaluate result
-GET_VAL    out_res                                -> res_status
-TEST_TRUTHY res_status
-WARP_IF    res_status    PROCESS_RESULT
-WARP       CALLER_LOOP_EXIT
-
-LABEL PROCESS_RESULT
-GET_LINK   out_res       d.values  +1        -> bound_node
-GET_VAL    bound_node                             -> ancestor_name
-
-LOG_TOKEN  "Found Ancestor: "
-LOG_LINE   ancestor_name
-
-; Trigger backtracking on next loop iteration
-WARP       CALLER_LOOP_HEAD
-
-LABEL CALLER_LOOP_EXIT
-LOG_LITERAL "Search complete: #ANCESTOR returned false."
-SET_VAL    cursor        "HALT"
-```

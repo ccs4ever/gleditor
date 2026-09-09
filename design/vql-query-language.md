@@ -49,10 +49,10 @@ mutations driven by the atomic engine:
 - **Associative Cursor Scopes**: Query variables are not stored in stack frames or hash lookups.
   They resolve directly against the active Spin-Head cursor along `+d.vars`, with bound payloads or
   complex subgraphs projecting perpendicularly along `+d.values`.
-- **Quantum Identity Synchronization (`d.fuse`)**: Pipelined assignments using the pipe operator
-  (`|>`) or variable aliases utilize `d.fuse` links. Fused nodes share an underlying pointer to a
-  single `CellValue` variant. Mutations immediately propagate across all viewports and observer
-  ranks.
+- **Quantum Identity Synchronization (`d.entangle`)**: `$a><$b` entangles two cells along
+  `d.entangle` — sugar for `set_link($a, d_entangle, +1, $b)` directly (§4.6). Entangled cells share
+  an underlying pointer to a single `CellValue` variant, so mutating one immediately propagates to
+  every entangled cell, across all viewports and observer ranks.
 - **Zero-Allocation Lazy Rank-Streaming**: A path step (`/dim`) does not materialize an intermediate
   collection. It instantiates an $O(1)$ spatial cursor that lazily yields matching `cell_id`
   coordinates along `dim`'s entire rank until it encounters 0 (null) or a loopback boundary — a
@@ -70,24 +70,25 @@ ______________________________________________________________________
 
 ## 2. Syntactic Token & Structural Shorthand Matrix
 
-| Token / Operator    | Structural Equivalent                | Functional & Spatial Semantic Mapping                                                             |
-| ------------------- | ------------------------------------ | ------------------------------------------------------------------------------------------------- |
-| `##`                | Origin Anchor (`cell_id = 0`)        | Grounds query context to the absolute system environment origin.                                  |
-| `#`                 | Root Metacells                       | Lazily streams all disjoint root manifold entry points across the matrix.                         |
-| `^`                 | Process Manifold (`d.cursors`)       | Streams all active Spin-Head execution cursor threads.                                            |
-| `^NAME`             | `^[. = "NAME"]`                      | Short-circuits the cursor scan, locking directly onto the named thread node.                      |
-| `.`                 | Context Identity                     | The current step's context cell — a valid anchor on its own, or `get(context)` when dereferenced. |
-| `/dim`              | `LazyRankStream(dim, posward)`       | Traverses `dim`'s entire rank posward from the context cell.                                      |
-| `/-dim`             | `LazyRankStream(dim, negward)`       | Traverses `dim`'s entire rank negward — the `-` binds to the dimension name, not the operator.    |
-| `/dim%`             | Create (`set_link(@, dim, dir, -1)`) | Allocates a new cell along `dim` (at the tail of any existing rank); see §4.5.                    |
-| `/dim%VALUE`        | Create + init                        | Allocates and initializes a new cell's content to `VALUE` — bare, quoted, or `$variable`.         |
-| `.[offset, length]` | `get(ctx, off, len)`                 | Zero-copy virtual string slice dereference.                                                       |
-| `@`                 | Context Identity Address             | Evaluates to the numerical `cell_id` coordinate of the context node itself.                       |
-| `\|>`               | Pipe-Forward Operator                | Chains a path result into a function invocation.                                                  |
-| `[...]`             | Predicate / Index Window             | Applies inline boolean filters or relative index clamps to a stream.                              |
-| `(...)`             | Macro Dimension Group                | Groups dimensional sequences into a compound traversal segment.                                   |
-| `*`                 | Kleene Repetition                    | Repeats the preceding macro group zero or more times until termination.                           |
-| `{...}`             | Weave Block                          | Groups a comma-separated list of effect items under `weave`.                                      |
+| Token / Operator    | Structural Equivalent                       | Functional & Spatial Semantic Mapping                                                                       |
+| ------------------- | ------------------------------------------- | ----------------------------------------------------------------------------------------------------------- |
+| `##`                | Origin Anchor (`cell_id = 0`)               | Grounds query context to the absolute system environment origin.                                            |
+| `#`                 | Root Metacells                              | Lazily streams all disjoint root manifold entry points across the matrix.                                   |
+| `^`                 | Process Manifold (`d.cursors`)              | Streams all active Spin-Head execution cursor threads.                                                      |
+| `^NAME`             | `^[. = "NAME"]`                             | Short-circuits the cursor scan, locking directly onto the named thread node.                                |
+| `.`                 | Context Identity                            | The current step's context cell — a valid anchor on its own, or `get(context)` when dereferenced.           |
+| `/dim`              | `LazyRankStream(dim, posward)`              | Traverses `dim`'s entire rank posward from the context cell.                                                |
+| `/-dim`             | `LazyRankStream(dim, negward)`              | Traverses `dim`'s entire rank negward — the `-` binds to the dimension name, not the operator.              |
+| `/dim%`             | Create (`set_link(@, dim, dir, -1)`)        | Allocates a new cell along `dim` (at the tail of any existing rank); see §4.5.                              |
+| `/dim%VALUE`        | Create + init                               | Allocates and initializes a new cell's content to `VALUE` — bare, quoted, or `$variable`.                   |
+| `/dim%%...`         | Batch create                                | Each additional `%` allocates one more cell along `dim`; all of them join the step's result set — see §4.5. |
+| `A><B`              | Entangle (`set_link(A, d_entangle, +1, B)`) | Binds `A` and `B` to one shared payload; chainable (`A><B><C`) and combinable with `%` — see §4.6.          |
+| `.[offset, length]` | `get(ctx, off, len)`                        | Zero-copy virtual string slice dereference.                                                                 |
+| `@`                 | Context Identity Address                    | Evaluates to the numerical `cell_id` coordinate of the context node itself.                                 |
+| `[...]`             | Predicate / Index Window                    | Applies inline boolean filters or relative index clamps to a stream.                                        |
+| `(...)`             | Macro Dimension Group                       | Groups dimensional sequences into a compound traversal segment.                                             |
+| `*`                 | Kleene Repetition                           | Repeats the preceding macro group zero or more times until termination.                                     |
+| `{...}`             | Weave Block                                 | Groups a comma-separated list of effect items under `weave`.                                                |
 
 There is a single traversal operator: `/` already walks a whole rank, so there is no "one hop" form
 to distinguish it from, and direction is a property of the dimension name (an optional leading `-`),
@@ -98,10 +99,9 @@ ______________________________________________________________________
 ## 3. Formal EBNF Grammar
 
 ```
-QueryExpression       ::= ExecutionBlock | PipelineChain
+QueryExpression       ::= ExecutionBlock | PathExpression
 
 ExecutionBlock         ::= ( ForClause | LetClause )+ WhereClause? ActionClause
-PipelineChain          ::= PathExpression ( "|>" FunctionInvocation )*
 
 ForClause              ::= "for" VariableRef "in" PathExpression
 LetClause              ::= "let" VariableRef ":=" ( PathExpression | ValueExpr )
@@ -117,7 +117,7 @@ EffectItem             ::= LetClause | PathExpression | ForClause EffectClause
 
 ConditionalClause      ::= "if" BooleanExpr ActionClause ( "else" ActionClause )?
 
-PathExpression         ::= AnchorNode PathStep*
+PathExpression         ::= AnchorNode PathStep* EntangleTail?
 AnchorNode             ::= "##" | "#" | NamedCursor | VariableRef | LiteralCellId | "."
 NamedCursor            ::= "^" [a-zA-Z_][a-zA-Z0-9_]*
 VariableRef            ::= "$" [a-zA-Z_][a-zA-Z0-9_]*
@@ -126,9 +126,13 @@ LiteralCellId          ::= [0-9]+
 PathStep               ::= "/" StepSelector PredicateClause* RangeClamp?
 StepSelector           ::= SignedDimension CreateSuffix? | MacroDimensionGroup | FunctionInvocation
 SignedDimension        ::= "-"? DimensionIdentifier
-CreateSuffix           ::= "%" CreateValue?
+CreateSuffix           ::= ( "%" CreateValue? )+
 CreateValue            ::= ValueExpr | BareLiteral
-BareLiteral            ::= (run of characters excluding whitespace, ",", "(", ")", "[", "]", "{", "}")
+BareLiteral            ::= (run of characters excluding whitespace, "%", ",", "(", ")", "[", "]", "{", "}")
+
+EntangleTail            ::= ( "><" EntangleOperand )+
+EntangleOperand         ::= PathExpression | BareCreate
+BareCreate              ::= "%" CreateValue?
 
 DimensionIdentifier    ::= [a-zA-Z_][a-zA-Z0-9_]* ( "." [a-zA-Z_][a-zA-Z0-9_]* )*
 MacroDimensionGroup    ::= "(" PathStep+ ")" RepetitionModifier?
@@ -159,21 +163,36 @@ ArgumentList            ::= ValueExpr ( "," ValueExpr )*
 
 A few grammar points worth calling out explicitly:
 
+- **A bare `PathExpression` is a complete query.** `##/d.people[. = "Alice"]` is valid on its own —
+  no `for`/`return` ceremony required for a one-off traversal. Chaining a function onto a path is
+  just another step (`$path/func()`, reachable via `StepSelector`'s `FunctionInvocation`
+  alternative), applied per cell in `$path`'s stream and terminating to an empty set wherever `func`
+  returns nothing — the same map-and-terminate behavior every other `PathStep` already has, so there
+  is no separate pipe-forward operator layered on top of it.
 - **Direction lives on `SignedDimension`'s optional leading `-`.** `/-d.parent` traverses `d.parent`
   negward; there is no second traversal operator for it.
 - **`.` is a valid `AnchorNode`.** This is what lets a predicate step *into* a dimension from its
   own candidate cell — `[./d.inputs[. = $pattern]]` reads as "this candidate's `d.inputs` rank has a
-  member equal to `$pattern`." `unify(...)` reaches `PredicateTest` the same way any other
-  boolean-returning `FunctionInvocation` does, so `where unify($a, $b)` needs nothing beyond that.
-- **`set_link(dim, dir, target)` and `set(value, ...)` are ordinary `FunctionInvocation`s**,
-  reachable from `StepSelector`. `$cell/set_link(d.foo, +1, $target)` parses the same way
-  `$cell/d.foo` does, and — because `set_link` returns the cell it just linked — is just as
-  chainable. Mutation is not a separate "statement" grammar competing with the "expression" grammar
-  for the same syntax; it's the same PathExpression machinery, evaluated for effect under `weave`
-  instead of for value under `return`.
+  member equal to `$pattern`."
+- **A `FunctionInvocation` reached via `StepSelector` takes its context implicitly.** If its
+  `ArgumentList` doesn't already open with an explicit `@` or `.`, the context cell the step is
+  chained from is prepended as the first argument — as `@` (a cell reference) if the function's
+  first parameter expects a cell, or as `.` (the dereferenced value) if it expects a value; which
+  one a given function takes is fixed by its declared signature, not inferred per call. This is why
+  `$cell/set_link(d.foo, +1, $target)` means `set_link(@, d.foo, +1, $target)` with `@` bound to
+  `$cell` — `set_link` returns the cell it just linked, so the chain is just as continuable — and
+  why `$path/substring(1, 8)` and `$path/set("foo")` need no explicit context argument at all:
+  `substring` and `set` both expect a value first, so `.` is prepended instead of `@`. Mutation is
+  not a separate "statement" grammar competing with the "expression" grammar for the same syntax;
+  it's the same PathExpression machinery, evaluated for effect under `weave` instead of for value
+  under `return`.
 - **`NumericLiteral` accepts a leading `+`.** Every example writes directions as `+1`/`-1` for
   visual symmetry, so the grammar accepts the `+` explicitly rather than relying on it being
   optional-and-ignored.
+- **`><` is a suffix on `PathExpression`, not a `PathStep`.** `EntangleTail` binds after all
+  `PathStep`s have run, so `$a><$b` entangles the *results* of `$a` and `$b`'s full paths, not an
+  intermediate cell partway through either one. See §4.6 for the creation-combining forms
+  (`%VALUE><$a`, `$a><%VALUE`).
 
 ______________________________________________________________________
 
@@ -270,14 +289,61 @@ literal that has nothing to do with the cell model it's returning from:
   there, rather than clobbering the context cell's own link slot. Without this, a loop that calls
   `/d.step%$ch` once per character would overwrite the same cell every iteration instead of building
   a chain; with it, `for $ch in EXPLODE($pattern, "") weave $nfa_start/d.step%$ch` builds the chain
-  directly (§7.2), with no separate "insert at end" primitive needed.
+  directly (§6.2), with no separate "insert at end" primitive needed.
 - **Chainable**: whatever `%` lands on (freshly allocated or, on repeat, freshly appended) becomes
   the new context for the rest of the path, same as any other step — `/d.name%/d.results%VALUE`
   creates an empty cell along `d.name`, then from there creates and initializes a cell along
   `d.results`.
+- **Batching (`/dim%%`, `/dim%VALUE1%VALUE2`, ...)**: each `%` after the first allocates *another*
+  new cell along the same dimension — tail-seeking again, so it lands after the one just created —
+  rather than re-describing the same cell. `/d.child%%` creates two empty cells on `d.child`;
+  `/d.child%"Alice"%"Bob"` creates two, each initialized in order. The step's result is the set of
+  every cell it just created, not only the last one, so a later step in the same path fans out over
+  all of them: `/d.child%"Alice"%"Bob"/d.status%"active"` gives *both* new cells their own
+  `d.status` child, the same way a later step already fans out over any other multi-cell result
+  (like a plain `/dim` rank). A `for` loop calling `/dim%$value` once per iteration (§6.2) reaches
+  the same "many new siblings" outcome for a runtime-determined count; `%%` is for a
+  compile-time-known one.
 - **Existing targets don't go through `%`.** Pointing a dimension at a cell that already exists — as
   opposed to allocating a new one — is `set_link(dim, dir, target)` directly, reachable as an
   ordinary `FunctionInvocation` step (§3). `%` is specifically the "make a new cell" case.
+
+### 4.6 Entanglement Sugar (`><`)
+
+`><` is sugar over `set_link(A, d_entangle, +1, B)`: two cells wired along `d.entangle` share a
+single underlying `CellValue` pointer (§1), so setting either one's content afterward sets both.
+
+- **Base form (`A><B`)**: `set_link(A, d_entangle, +1, B)`. `A` and `B` are each a full
+  `PathExpression`'s result — `EntangleTail` (§3) binds after all of a path's own `PathStep`s, not
+  mid-traversal.
+- **Chainable (`A><B><C`)**: each additional operand nests the accumulated expression as the new
+  `target` argument of a fresh `set_link` call rooted at the new operand —
+  `set_link(C, d_entangle, +1, set_link(A, d_entangle, +1, B))`. Since `set_link` returns the
+  `target` it was given whenever that target isn't `-1`/`0`, the inner call returns `B`, so the
+  outer call reduces to `set_link(C, d_entangle, +1, B)`: `A` and `B` entangle directly, and `C`
+  joins the same group through `B`. The group ends up sharing one payload regardless of which pair
+  is directly linked.
+- **Payload authority follows argument order, not chain length.** In
+  `set_link(cell, dim, dir, target)`, a fresh entanglement's shared payload is seeded from `cell`'s
+  (the first argument's) existing content — `target`'s prior content is discarded. Since the
+  leftmost operand in an `EntangleTail` always ends up as `cell` in the first `set_link` call that
+  establishes the group (see the chaining rule above), the leftmost operand's value is what the
+  whole group ends up sharing.
+- **Combines with `%` (`A><%`, `A><%VALUE`, `%VALUE><A`)**: a bare `%` — with no dimension prefix,
+  distinct from `/dim%`'s dimension-attached form — allocates a free cell with no incoming
+  structural link at all; `%VALUE` allocates and immediately `set()`s it to `VALUE`, same as
+  `/dim%VALUE` does for a dimension-attached create. Because payload authority follows argument
+  order (previous bullet), where the `%` sits in the chain determines whether its `VALUE` survives:
+  - **`%VALUE><$a`**: the fresh cell is the leftmost (`cell`) operand, so its `VALUE` is
+    authoritative — after entangling, `$a` holds `VALUE` too.
+  - **`$a><%VALUE`**: `$a` is leftmost, so `$a`'s existing value is authoritative; the fresh cell's
+    `VALUE` is overwritten by the join and never observed. Write `$a><%` instead if the intent is
+    just "give me a new cell entangled with `$a`" — the value is discarded either way, so spelling
+    out a `VALUE` there is misleading.
+  - Any `VALUE` past the first operand in a longer chain is likewise ignored, for the same reason.
+- **Maps over a rank like any other step.** `$path/d.name><%` takes each cell in `d.name`'s posward
+  rank (§4.1) and entangles it with its own freshly created partner — one new cell per rank member,
+  not one new cell shared by the whole rank.
 
 ______________________________________________________________________
 
@@ -307,40 +373,9 @@ graph TD
 
 ______________________________________________________________________
 
-## 6. Logic Programming & Unification Integration
+## 6. Canonical Production Query Examples
 
-VQL seamlessly expresses relational and logic unification queries:
-
-### Syntax
-
-```
-for $ans in ##/d.parent
-where unify($ans, "Bob")
-return $ans
-```
-
-### Unification Compilation Semantics
-
-`unify(TermA, TermB)` is an ordinary boolean-returning built-in (§3's `PredicateTest` reaches it
-directly, the same way it reaches any other `FunctionInvocation`), executing Robinson unification
-directly in the matrix:
-
-1. **Dereferencing**: Follows `+d.values` until a non-forwarding cell is reached.
-1. **Variable Aliasing**: If both terms are unbound variables (`+d.values == 0`), they are fused
-   along `d.fuse` (`set_link(A, d_fuse, +1, B)`) and the binding is logged to the active choice
-   point's trail rank.
-1. **Variable Binding**: If one term is unbound, its `+d.values` is set to the other term's node and
-   recorded on the cursor's `+d.stack`/`+d.trail` rank.
-1. **Ground Comparison**: If both terms are bound, their payloads are compared using `get()`.
-1. **Backtracking**: Query iterations that fail backtrack by popping the choice point from
-   `+d.stack`, unsetting all trail-recorded links via `set_link(target, d_values, +1, 0)`, and
-   resuming the search at the alternate branch address (`+d.warp`).
-
-______________________________________________________________________
-
-## 7. Canonical Production Query Examples
-
-### 7.1 Deep Structural Navigation with Zero-Copy Slice
+### 6.1 Deep Structural Navigation with Zero-Copy Slice
 
 Locates an active worker thread, pulls its buffer variable, slices a token out of the string, and
 weaves the result as a `d.vars`/`d.values` pair off the invocation cell instead of a JSON-shaped
@@ -362,7 +397,7 @@ return
 `where $status_code = "200"` stays a direct comparison because `$status_code` is already a
 dereferenced scalar from `let`, not a rank.
 
-### 7.2 Topological Regex Compilation with Star-Pivot Caching
+### 6.2 Topological Regex Compilation with Star-Pivot Caching
 
 Checks whether a regular expression has already been woven into an NFA manifold. On a cache hit, it
 returns the cached entry root directly. On a cache miss, it weaves a new Thompson NFA graph and
@@ -391,21 +426,25 @@ chain currently ends and appends there, so the loop builds one linked rank inste
 overwriting `$nfa_start`'s own `d.step` link. The final line points `d.results` at the NFA's actual
 entry cell — an existing target, so it's spelled with `set_link`, not `%`.
 
-### 7.3 Kinship Logic Unification (Prolog-Style Query)
+### 6.3 Shared Identity via Entanglement
 
-Finds all common ancestors of "Alice" and "Bob" using logic unification. `/d.parent` already walks
-the whole rank (§1), so no separate recursive-closure operator is needed:
+Seeds a new user's `d.theme` cell from the system default by entangling it with the default cell
+instead of copying the value, so a later change to the default propagates to every user who hasn't
+set their own theme:
 
 ```
-for $alice_ancestor in ##/d.people[. = "Alice"]/d.parent
-for $bob_ancestor in ##/d.people[. = "Bob"]/d.parent
-where unify($alice_ancestor, $bob_ancestor)
-return
-    /d.vars%"ancestor_id"/d.values%$alice_ancestor/@,
-    /d.vars%"ancestor_name"/d.values%$alice_ancestor/.
+for $new_user in ##/d.users%$username
+let $default_theme := ##/d.settings[. = "default_theme"]/d.values
+weave $default_theme><$new_user/d.theme%
 ```
 
-### 7.4 In-Place Graph Rewriting & Edge Re-Targeting
+`$default_theme` is written first so its value is the one the group ends up sharing (§4.6): the
+right-hand operand is an ordinary `/dim%` create with no `VALUE` of its own, so there's nothing for
+the join to discard. A user who later gets their own theme breaks out of the group with
+`set_link($new_user/d.theme, d_entangle, +1, 0)` — an ordinary `set_link` call, not a different
+"unentangle" primitive.
+
+### 6.4 In-Place Graph Rewriting & Edge Re-Targeting
 
 Updates a deprecated microservice node, rewires active event routes to its replacement, and
 disconnects the retired cell for automatic garbage collection:
