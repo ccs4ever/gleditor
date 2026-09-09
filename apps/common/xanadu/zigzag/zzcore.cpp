@@ -42,8 +42,8 @@ bool Diagnostics::mentions(const std::string_view needle) const {
   });
 }
 
-bool isPrefletChainNode(const std::string_view type) {
-  return type.starts_with(prefletTypePrefix);
+bool isPrefletChainNode(const std::string_view role) {
+  return role.starts_with(prefletRolePrefix);
 }
 
 bool looksLikeBitTorrentMagnet(const std::string_view identifier) {
@@ -120,7 +120,7 @@ std::string selectSliceFile(const std::vector<std::string> &paths,
   return {};
 }
 
-void deriveBacklinks(std::unordered_map<CellID, zzCell> &cells,
+void deriveBacklinks(std::unordered_map<CellID, Cell> &cells,
                      const std::vector<ExplicitLink> &explicitLinks,
                      Diagnostics &diagnostics) {
   for (const ExplicitLink &link : explicitLinks) {
@@ -144,7 +144,7 @@ void deriveBacklinks(std::unordered_map<CellID, zzCell> &cells,
   }
 }
 
-void neutralizeDanglingLinks(std::unordered_map<CellID, zzCell> &cells,
+void neutralizeDanglingLinks(std::unordered_map<CellID, Cell> &cells,
                              Diagnostics &diagnostics) {
   for (auto &[id, cell] : cells) {
     for (auto &[dimensionName, links] : cell.dimensions) {
@@ -165,7 +165,7 @@ void neutralizeDanglingLinks(std::unordered_map<CellID, zzCell> &cells,
 
 std::optional<Preflet>
 resolvePreflet(const CellID startId,
-               const std::unordered_map<CellID, zzCell> &cells,
+               const std::unordered_map<CellID, Cell> &cells,
                const CellID hostId, Diagnostics &diagnostics) {
   Preflet result;
   bool haveResource = false;
@@ -182,41 +182,41 @@ resolvePreflet(const CellID startId,
       break;
     }
 
-    const zzCell *cell = findCell(cells, current);
+    const Cell *cell = findCell(cells, current);
     if (!cell) {
       break; // Dangling; neutralized in neutralizeDanglingLinks
     }
 
-    if (cell->type == "preflet_resource") {
-      result.resource_identifier = cell->text_data;
+    if (cell->role == "preflet_resource") {
+      result.resource_identifier = std::string{cell->text()};
       haveResource               = true;
-      if (!looksLikeBitTorrentMagnet(cell->text_data)) {
+      if (!looksLikeBitTorrentMagnet(cell->text())) {
         diagnostics.warn(std::format("cell {}'s preflet resource identifier "
                                      "doesn't look like a magnet:?xt=urn:btih: "
                                      "link -- {}",
-                                     hostId, cell->text_data));
+                                     hostId, cell->text()));
       }
-    } else if (cell->type == "preflet_hash") {
-      result.hash = cell->text_data;
-    } else if (cell->type == "preflet_version") {
-      result.version = cell->text_data;
-    } else if (cell->type == "preflet_cell_id") {
+    } else if (cell->role == "preflet_hash") {
+      result.hash = std::string{cell->text()};
+    } else if (cell->role == "preflet_version") {
+      result.version = std::string{cell->text()};
+    } else if (cell->role == "preflet_cell_id") {
       try {
         result.target_cell_id =
-            static_cast<CellID>(std::stoull(cell->text_data));
+            static_cast<CellID>(std::stoull(std::string{cell->text()}));
       } catch (...) {
         diagnostics.warn(std::format("cell {}'s preflet cell id {} is not a "
                                      "number -- ignoring",
-                                     hostId, cell->text_data));
+                                     hostId, cell->text()));
       }
-    } else if (cell->type == "preflet_meta") {
-      result.metadata.push_back(splitMetadataEntry(cell->text_data));
+    } else if (cell->role == "preflet_meta") {
+      result.metadata.push_back(splitMetadataEntry(cell->text()));
     } else {
       diagnostics.warn(std::format("cell {} is in cell {}'s d.preflet chain "
                                    "but has an unrecognized type {} -- "
                                    "ignoring it",
                                    current, hostId,
-                                   cell->type.empty() ? "(none)" : cell->type));
+                                   cell->role.empty() ? "(none)" : cell->role));
     }
 
     current = linksOn(cell, prefletDimension).pos;
@@ -232,11 +232,11 @@ resolvePreflet(const CellID startId,
   return result;
 }
 
-void resolveAllPreflets(std::unordered_map<CellID, zzCell> &cells,
+void resolveAllPreflets(std::unordered_map<CellID, Cell> &cells,
                         Diagnostics &diagnostics) {
   std::vector<std::pair<CellID, CellID>> hosts; // {hostId, chainStart}
   for (const auto &[id, cell] : cells) {
-    if (isPrefletChainNode(cell.type)) {
+    if (isPrefletChainNode(cell.role)) {
       continue;
     }
     const CellID start = linksOn(&cell, prefletDimension).pos;
@@ -254,7 +254,7 @@ void resolveAllPreflets(std::unordered_map<CellID, zzCell> &cells,
   }
 }
 
-std::array<CellID, 6> axisNeighbours(const zzCell *cell,
+std::array<CellID, 6> axisNeighbours(const Cell *cell,
                                      const ViewAxisBinding &view) {
   std::array<CellID, 6> neighbours{};
   const std::array<const DimID *, 3> dims = {
@@ -268,13 +268,13 @@ std::array<CellID, 6> axisNeighbours(const zzCell *cell,
   return neighbours;
 }
 
-const zzCell *findCell(const std::unordered_map<CellID, zzCell> &cells,
-                       const CellID id) {
+const Cell *findCell(const std::unordered_map<CellID, Cell> &cells,
+                     const CellID id) {
   const auto it = cells.find(id);
   return it != cells.end() ? &it->second : nullptr;
 }
 
-LinkPairs linksOn(const zzCell *cell, const std::string_view dimension) {
+LinkPairs linksOn(const Cell *cell, const std::string_view dimension) {
   if (!cell) {
     return LinkPairs{};
   }
@@ -282,7 +282,7 @@ LinkPairs linksOn(const zzCell *cell, const std::string_view dimension) {
   return it != cell->dimensions.end() ? it->second : LinkPairs{};
 }
 
-CellID findCloneMaster(const std::unordered_map<CellID, zzCell> &cells,
+CellID findCloneMaster(const std::unordered_map<CellID, Cell> &cells,
                        const CellID id) {
   if (0 == id) {
     return 0;
@@ -303,7 +303,7 @@ CellID findCloneMaster(const std::unordered_map<CellID, zzCell> &cells,
   return current != 0 ? current : id;
 }
 
-bool isCloneCell(const std::unordered_map<CellID, zzCell> &cells,
+bool isCloneCell(const std::unordered_map<CellID, Cell> &cells,
                  const CellID id) {
   const auto *cell = findCell(cells, id);
   if (!cell) {
@@ -314,19 +314,19 @@ bool isCloneCell(const std::unordered_map<CellID, zzCell> &cells,
 }
 
 std::string_view
-getEffectiveCellText(const std::unordered_map<CellID, zzCell> &cells,
+getEffectiveCellText(const std::unordered_map<CellID, Cell> &cells,
                      const CellID id) {
   const CellID masterId = findCloneMaster(cells, id);
   const auto *master    = findCell(cells, masterId);
-  if (master && !master->text_data.empty()) {
-    return master->text_data;
+  if (master && !master->text().empty()) {
+    return master->text();
   }
   const auto *cell = findCell(cells, id);
-  return cell ? std::string_view{cell->text_data} : std::string_view{};
+  return cell ? cell->text() : std::string_view{};
 }
 
-std::vector<CellID>
-getCloneRank(const std::unordered_map<CellID, zzCell> &cells, const CellID id) {
+std::vector<CellID> getCloneRank(const std::unordered_map<CellID, Cell> &cells,
+                                 const CellID id) {
   std::vector<CellID> rank;
   const CellID masterId = findCloneMaster(cells, id);
   if (0 == masterId) {
@@ -349,11 +349,11 @@ getCloneRank(const std::unordered_map<CellID, zzCell> &cells, const CellID id) {
   return rank;
 }
 
-void updateMasterText(std::unordered_map<CellID, zzCell> &cells,
-                      const CellID id, std::string newText) {
+void updateMasterText(std::unordered_map<CellID, Cell> &cells, const CellID id,
+                      std::string newText) {
   const CellID masterId = findCloneMaster(cells, id);
   if (auto it = cells.find(masterId); it != cells.end()) {
-    it->second.text_data = std::move(newText);
+    it->second.data = std::move(newText);
   }
 }
 

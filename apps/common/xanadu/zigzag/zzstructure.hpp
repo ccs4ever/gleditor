@@ -17,6 +17,7 @@
 #include <string_view>
 #include <unordered_map>
 #include <utility>
+#include <variant>
 #include <vector>
 
 #include <gleditor/color.hpp>
@@ -47,25 +48,52 @@ struct Preflet {
   bool operator==(const Preflet &) const = default;
 };
 
-struct zzCell {
+/// A cell's content: text, a number, a flag, or an inline binary payload.
+/// Which alternative is live is exactly the information `type`/`mime_type`
+/// used to carry redundantly for the text-vs-blob distinction -- media
+/// *kind* now lives entirely in `mime_type`, resolved via libmagic.
+using CellData =
+    std::variant<std::string, double, bool, std::vector<std::uint8_t>>;
+
+struct Cell {
   CellID id = 0;
-  std::string text_data;
-  std::string type; // Category e.g. "chapter", "detail", "note", "image"
+  CellData data;
+
+  // Structural role within an authored schema (e.g. "preflet_resource",
+  // "schema_field", "config_group") -- distinct from mime_type, which is
+  // strictly the resolved media kind of `data`/`media_path`. Empty for
+  // ordinary content cells.
+  std::string role;
+
   std::string
       mime_type; // MIME type e.g. "image/png", "image/jpeg", "text/plain"
-  std::string media_path;              // Relative or absolute file path or URI
-  std::vector<std::uint8_t> blob_data; // Optional inline binary payload
+  std::string media_path; // Relative or absolute file path or URI
   std::unordered_map<DimID, LinkPairs> dimensions;
   std::optional<Preflet> preflet;
 
+  /// The cell's content as text, or an empty view if `data` holds something
+  /// else. Never throws: use `std::get<std::string>(data)` directly at call
+  /// sites that already know the alternative is live.
+  [[nodiscard]] std::string_view text() const noexcept {
+    if (const auto *s = std::get_if<std::string>(&data)) {
+      return *s;
+    }
+    return {};
+  }
+
+  /// The cell's content as a binary blob, or nullptr if `data` holds
+  /// something else.
+  [[nodiscard]] const std::vector<std::uint8_t> *blob() const noexcept {
+    return std::get_if<std::vector<std::uint8_t>>(&data);
+  }
+
   [[nodiscard]] bool isMedia() const {
     return (!mime_type.empty() && !mime_type.starts_with("text/")) ||
-           !media_path.empty() || !blob_data.empty() || type == "image" ||
-           type == "media";
+           !media_path.empty() || (blob() != nullptr && !blob()->empty());
   }
 
   [[nodiscard]] bool isImage() const {
-    return mime_type.starts_with("image/") || type == "image" ||
+    return mime_type.starts_with("image/") ||
            (!media_path.empty() &&
             (media_path.ends_with(".png") || media_path.ends_with(".jpg") ||
              media_path.ends_with(".jpeg") || media_path.ends_with(".webp") ||
@@ -121,7 +149,7 @@ struct ZzStructureDocument {
   ViewAxisBinding view;
   std::unordered_map<DimID, DimensionMeta> dimension_meta;
   SceneMeta scene;
-  std::unordered_map<CellID, zzCell> cells;
+  std::unordered_map<CellID, Cell> cells;
 };
 
 /// Why a Slice load failed.

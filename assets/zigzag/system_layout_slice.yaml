@@ -40,161 +40,161 @@ zzstructure:
   cells:
     - id: 1
       text: "Layout Settings"
-      type: config_group
+      role: config_group
       dimensions: { d.config: 2, d.schema: 100, d.notes: 200 }
 
     - id: 2
       text: "columns: \"2\""
-      type: setting
+      role: setting
       dimensions: { d.config: 3, d.schema: 101, d.notes: 201 }
 
     - id: 3
       text: "pageWidthPx: \"800\""
-      type: setting
+      role: setting
       dimensions: { d.config: 4, d.schema: 102 }
 
     - id: 4
       text: "pageHeightPx: \"1000\""
-      type: setting
+      role: setting
       dimensions: { d.config: 5, d.schema: 103 }
 
     - id: 5
       text: "transclusionPrisms: \"true\""
-      type: setting
+      role: setting
       dimensions: { d.config: 6, d.schema: 104 }
 
     - id: 6
       text: "xanalinkRibbons: \"true\""
-      type: setting
+      role: setting
       dimensions: { d.config: 7, d.schema: 105 }
 
     - id: 7
       text: "kRepel: \"4500.0\""
-      type: setting
+      role: setting
       dimensions: { d.config: 8, d.schema: 106 }
 
     - id: 8
       text: "kPlane: \"14.0\""
-      type: setting
+      role: setting
       dimensions: { d.config: 9, d.schema: 107 }
 
     - id: 9
       text: "kAlign: \"28.0\""
-      type: setting
+      role: setting
       dimensions: { d.config: 10, d.schema: 108 }
 
     - id: 10
       text: "kTier: \"12.0\""
-      type: setting
+      role: setting
       dimensions: { d.config: 11, d.schema: 109 }
 
     - id: 11
       text: "kDamping: \"7.5\""
-      type: setting
+      role: setting
       dimensions: { d.config: 12, d.schema: 110 }
 
     - id: 12
       text: "backgroundDepthZ: \"-40.0\""
-      type: setting
+      role: setting
       dimensions: { d.config: 13, d.schema: 111 }
 
     - id: 13
       text: "bandStrandLimit: \"7\""
-      type: setting
+      role: setting
       dimensions: { d.config: 14, d.schema: 112 }
 
     - id: 14
       text: "bandStrandPitch: \"2.2\""
-      type: setting
+      role: setting
       dimensions: { d.config: 15, d.schema: 113 }
 
     - id: 15
       text: "marginKerf: \"0.04\""
-      type: setting
+      role: setting
       dimensions: { d.config: 16, d.schema: 114 }
 
     - id: 16
       text: "bypassDepthPerDoc: \"-20.0\""
-      type: setting
+      role: setting
       dimensions: { d.config: 17, d.schema: 115 }
 
     - id: 17
       text: "bypassSegments: \"9\""
-      type: setting
+      role: setting
       dimensions: { d.schema: 116 }
 
     - id: 100
       text: "Schema and Purpose\n\nPurpose:\nThe sovereign Layout system xanadoc defines multi-column page dimensions, notification toast anchors, pouch dock orientation, and optic ribbon rendering flags."
-      type: schema_doc
+      role: schema_doc
 
     - id: 101
       text: "Schema: columns\nNumber of parallel document columns displayed simultaneously. Default is 2."
-      type: schema_field
+      role: schema_field
 
     - id: 102
       text: "Schema: pageWidthPx\nLogical page rendering width in pixels. Default is 800."
-      type: schema_field
+      role: schema_field
 
     - id: 103
       text: "Schema: pageHeightPx\nLogical page rendering height in pixels. Default is 1000."
-      type: schema_field
+      role: schema_field
 
     - id: 104
       text: "Schema: transclusionPrisms\nEnable Identity Gold volumetric prisms for transcluded spans. Default is true."
-      type: schema_field
+      role: schema_field
 
     - id: 105
       text: "Schema: xanalinkRibbons\nEnable cyan and magenta 3D optical link ribbons. Default is true."
-      type: schema_field
+      role: schema_field
 
     - id: 106
       text: "Schema: kRepel\nSoft-body Coulomb repulsion constant between documents. Default is 4500.0."
-      type: schema_field
+      role: schema_field
 
     - id: 107
       text: "Schema: kPlane\nSpring constant pulling active documents to Z = 0 reading plane. Default is 14.0."
-      type: schema_field
+      role: schema_field
 
     - id: 108
       text: "Schema: kAlign\nCollinear link alignment spring constant. Default is 28.0."
-      type: schema_field
+      role: schema_field
 
     - id: 109
       text: "Schema: kTier\nDepth holding spring constant for background corpora. Default is 12.0."
-      type: schema_field
+      role: schema_field
 
     - id: 110
       text: "Schema: kDamping\nLinear velocity damping coefficient. Default is 7.5."
-      type: schema_field
+      role: schema_field
 
     - id: 111
       text: "Schema: backgroundDepthZ\nResting background depth coordinate. Default is -40.0."
-      type: schema_field
+      role: schema_field
 
     - id: 112
       text: "Schema: bandStrandLimit\nMaximum number of ribbon strands per link band. Default is 7."
-      type: schema_field
+      role: schema_field
 
     - id: 113
       text: "Schema: bandStrandPitch\nSpacing between strands in beam widths. Default is 2.2."
-      type: schema_field
+      role: schema_field
 
     - id: 114
       text: "Schema: marginKerf\nGap between margin anchors sharing a lane. Default is 0.04."
-      type: schema_field
+      role: schema_field
 
     - id: 115
       text: "Schema: bypassDepthPerDoc\nZ offset per document passed when routing behind. Default is -20.0."
-      type: schema_field
+      role: schema_field
 
     - id: 116
       text: "Schema: bypassSegments\nCurve subdivision segment count for bypass routing. Default is 9."
-      type: schema_field
+      role: schema_field
 
     - id: 200
       text: "Notes\n\nUser Annotations and Customization Record:\nThis page is reserved for author notes, screen dimension notes, and optical rendering customizations."
-      type: user_notes
+      role: user_notes
 
     - id: 201
       text: "Notes: Multi-column Spacing\nTwo-column layout balances reading throughput with cross-document link visibility."
-      type: user_notes
+      role: user_notes

@@ -17,13 +17,12 @@ using namespace zigzag::zzcore;
 
 namespace {
 
-zzCell
-makeCell(const CellID id, std::string type = {},
-         const std::vector<std::pair<DimID, CellID>> &forwardLinks = {}) {
-  zzCell cell;
-  cell.id        = id;
-  cell.type      = std::move(type);
-  cell.text_data = "cell " + std::to_string(id);
+Cell makeCell(const CellID id, std::string type = {},
+              const std::vector<std::pair<DimID, CellID>> &forwardLinks = {}) {
+  Cell cell;
+  cell.id   = id;
+  cell.role = std::move(type);
+  cell.data = "cell " + std::to_string(id);
   for (const auto &[dimension, target] : forwardLinks) {
     cell.dimensions[dimension] = LinkPairs{target, 0};
   }
@@ -31,7 +30,7 @@ makeCell(const CellID id, std::string type = {},
 }
 
 std::vector<ExplicitLink>
-collectExplicitLinks(const std::unordered_map<CellID, zzCell> &cells) {
+collectExplicitLinks(const std::unordered_map<CellID, Cell> &cells) {
   std::vector<ExplicitLink> links;
   for (const auto &[id, cell] : cells) {
     for (const auto &[dim, pair] : cell.dimensions) {
@@ -55,7 +54,7 @@ collectExplicitLinks(const std::unordered_map<CellID, zzCell> &cells) {
   return links;
 }
 
-LinkPairs linksOf(const std::unordered_map<CellID, zzCell> &cells,
+LinkPairs linksOf(const std::unordered_map<CellID, Cell> &cells,
                   const CellID id, const DimID &dimension) {
   return linksOn(findCell(cells, id), dimension);
 }
@@ -102,7 +101,7 @@ TEST(ZzCoreTest, SplitMetadataEntry) {
 }
 
 TEST(ZzCoreTest, BacklinkDerivation) {
-  std::unordered_map<CellID, zzCell> cells;
+  std::unordered_map<CellID, Cell> cells;
   cells[1] = makeCell(1, "item", {{"d.1", 2}});
   cells[2] = makeCell(2, "item");
 
@@ -116,7 +115,7 @@ TEST(ZzCoreTest, BacklinkDerivation) {
 }
 
 TEST(ZzCoreTest, BacklinkConflictPreservation) {
-  std::unordered_map<CellID, zzCell> cells;
+  std::unordered_map<CellID, Cell> cells;
   cells[1]                   = makeCell(1, "item", {{"d.1", 2}});
   cells[2]                   = makeCell(2, "item");
   cells[2].dimensions["d.1"] = LinkPairs{0, 3}; // Neg already points at 3
@@ -131,7 +130,7 @@ TEST(ZzCoreTest, BacklinkConflictPreservation) {
 }
 
 TEST(ZzCoreTest, NeutralizeDanglingLinks) {
-  std::unordered_map<CellID, zzCell> cells;
+  std::unordered_map<CellID, Cell> cells;
   cells[1] = makeCell(1, "item", {{"d.1", 999}}); // 999 does not exist
 
   Diagnostics diag;
@@ -142,18 +141,18 @@ TEST(ZzCoreTest, NeutralizeDanglingLinks) {
 }
 
 TEST(ZzCoreTest, PrefletChainResolution) {
-  std::unordered_map<CellID, zzCell> cells;
+  std::unordered_map<CellID, Cell> cells;
   cells[1] = makeCell(1, "chapter", {{"d.preflet", 10}});
 
   cells[10] = makeCell(10, "preflet_resource", {{"d.preflet", 11}});
-  cells[10].text_data =
+  cells[10].data =
       "magnet:?xt=urn:btih:0123456789abcdef0123456789abcdef01234567";
 
-  cells[11]           = makeCell(11, "preflet_version", {{"d.preflet", 12}});
-  cells[11].text_data = "1.0";
+  cells[11]      = makeCell(11, "preflet_version", {{"d.preflet", 12}});
+  cells[11].data = "1.0";
 
-  cells[12]           = makeCell(12, "preflet_meta");
-  cells[12].text_data = "file: target.yaml";
+  cells[12]      = makeCell(12, "preflet_meta");
+  cells[12].data = "file: target.yaml";
 
   Diagnostics diag;
   resolveAllPreflets(cells, diag);
@@ -168,11 +167,11 @@ TEST(ZzCoreTest, PrefletChainResolution) {
 }
 
 TEST(ZzCoreTest, PrefletCycleDetection) {
-  std::unordered_map<CellID, zzCell> cells;
+  std::unordered_map<CellID, Cell> cells;
   cells[1] = makeCell(1, "chapter", {{"d.preflet", 10}});
 
   cells[10] = makeCell(10, "preflet_resource", {{"d.preflet", 11}});
-  cells[10].text_data =
+  cells[10].data =
       "magnet:?xt=urn:btih:0123456789abcdef0123456789abcdef01234567";
 
   // Cycle back to 10
@@ -185,7 +184,7 @@ TEST(ZzCoreTest, PrefletCycleDetection) {
 }
 
 TEST(ZzCoreTest, AxisNeighbours) {
-  std::unordered_map<CellID, zzCell> cells;
+  std::unordered_map<CellID, Cell> cells;
   cells[1]                   = makeCell(1, "item");
   cells[1].dimensions["d.1"] = LinkPairs{2, 3};
   cells[1].dimensions["d.2"] = LinkPairs{4, 5};
@@ -203,24 +202,24 @@ TEST(ZzCoreTest, AxisNeighbours) {
 }
 
 TEST(ZzCoreTest, CloneMasterResolutionAlongDClone) {
-  std::unordered_map<CellID, zzCell> cells;
+  std::unordered_map<CellID, Cell> cells;
 
   // Rank: Cell 10 (Master) -> Cell 20 (Clone 1) -> Cell 30 (Clone 2)
   cells[10]                       = makeCell(10, "master");
-  cells[10].text_data             = "Universal Truth";
+  cells[10].data                  = "Universal Truth";
   cells[10].dimensions["d.clone"] = LinkPairs{.pos = 20, .neg = 0};
 
   cells[20]                       = makeCell(20, "xudu_clone");
-  cells[20].text_data             = ""; // Clone stores no text
+  cells[20].data                  = ""; // Clone stores no text
   cells[20].dimensions["d.clone"] = LinkPairs{.pos = 30, .neg = 10};
 
   cells[30]                       = makeCell(30, "xudu_clone");
-  cells[30].text_data             = ""; // Clone stores no text
+  cells[30].data                  = ""; // Clone stores no text
   cells[30].dimensions["d.clone"] = LinkPairs{.pos = 0, .neg = 20};
 
   // Standalone unlinked cell 40
-  cells[40]           = makeCell(40, "standalone");
-  cells[40].text_data = "Independent Content";
+  cells[40]      = makeCell(40, "standalone");
+  cells[40].data = "Independent Content";
 
   EXPECT_EQ(findCloneMaster(cells, 10), 10U);
   EXPECT_EQ(findCloneMaster(cells, 20), 10U);
@@ -248,7 +247,7 @@ TEST(ZzCoreTest, CloneMasterResolutionAlongDClone) {
   // Updating text on clone 20 updates the master cell 10 and reflects across
   // the rank
   updateMasterText(cells, 20, "Updated Universal Truth");
-  EXPECT_EQ(cells[10].text_data, "Updated Universal Truth");
+  EXPECT_EQ(cells[10].text(), "Updated Universal Truth");
   EXPECT_EQ(getEffectiveCellText(cells, 10), "Updated Universal Truth");
   EXPECT_EQ(getEffectiveCellText(cells, 20), "Updated Universal Truth");
   EXPECT_EQ(getEffectiveCellText(cells, 30), "Updated Universal Truth");

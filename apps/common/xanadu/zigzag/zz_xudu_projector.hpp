@@ -51,7 +51,7 @@ struct ZzRasterResult {
  * @brief Project a collection of Xudu documents and their xanalinks into a
  *        multidimensional Zigzag structure.
  *
- * Each document span / paragraph becomes a discrete zzCell.
+ * Each document span / paragraph becomes a discrete Cell.
  * - @p doc_dimension links sequential spans within each document.
  * - @p transclusion_dimension links cells sharing overlapping primedia spans.
  * - @p link_dimension links xanalink endpoints across documents.

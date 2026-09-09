@@ -44,89 +44,89 @@ zzstructure:
   cells:
     - id: 1
       text: "Scene Settings"
-      type: config_group
+      role: config_group
       dimensions: { d.config: 2, d.schema: 100, d.notes: 200 }
 
     - id: 2
       text: "background_color: #0d0d12"
-      type: setting
+      role: setting
       dimensions: { d.config: 3, d.schema: 101, d.notes: 201 }
 
     - id: 3
       text: "focus_color: #f4c542"
-      type: setting
+      role: setting
       dimensions: { d.config: 4, d.schema: 102 }
 
     - id: 4
       text: "focus_scale: 1.4"
-      type: setting
+      role: setting
       dimensions: { d.config: 5, d.schema: 103 }
 
     - id: 5
       text: "cell_radius: 0.35"
-      type: setting
+      role: setting
       dimensions: { d.config: 6, d.schema: 104 }
 
     - id: 6
       text: "layout_speed: 12.0"
-      type: setting
+      role: setting
       dimensions: { d.config: 7, d.schema: 105 }
 
     - id: 7
       text: "alpha_speed: 8.0"
-      type: setting
+      role: setting
       dimensions: { d.config: 8, d.schema: 106 }
 
     - id: 8
       text: "border_thickness: 2.0"
-      type: setting
+      role: setting
       dimensions: { d.config: 9, d.schema: 107 }
 
     - id: 9
       text: "neighborhood_radius: 3"
-      type: setting
+      role: setting
       dimensions: { d.schema: 108 }
 
     - id: 100
       text: "Schema and Purpose\n\nZigZag System Settings Slice\nPurpose:\nManages global viewport rendering, scene background, cursor focus highlighting, and spatial cell geometry in Project Xanadu ZigZag."
-      type: schema_doc
+      role: schema_doc
 
     - id: 101
       text: "Schema: background_color\nHex RGB color string defining the visualizer space clearing color. Default is #0d0d12."
-      type: schema_field
+      role: schema_field
 
     - id: 102
       text: "Schema: focus_color\nHex RGB color string for the active focus cell cursor ring. Default is #f4c542."
-      type: schema_field
+      role: schema_field
 
     - id: 103
       text: "Schema: focus_scale\nMagnification multiplier applied to the focused cell geometry. Default is 1.4."
-      type: schema_field
+      role: schema_field
 
     - id: 104
       text: "Schema: cell_radius\nCorner rounding radius for 3D cell boxes in spatial units. Default is 0.35."
-      type: schema_field
+      role: schema_field
 
     - id: 105
       text: "Schema: layout_speed\nAnimation lerp speed for spatial cell transitions (units: 1/sec). Default is 12.0."
-      type: schema_field
+      role: schema_field
 
     - id: 106
       text: "Schema: alpha_speed\nOpacity fade speed for appearing and disappearing cells. Default is 8.0."
-      type: schema_field
+      role: schema_field
 
     - id: 107
       text: "Schema: border_thickness\nSelected cell accent border thickness in screen pixels. Default is 2.0."
-      type: schema_field
+      role: schema_field
 
     - id: 108
       text: "Schema: neighborhood_radius\nMaximum rank hop distance along active dimensions to stage cells. Default is 3."
-      type: schema_field
+      role: schema_field
 
     - id: 200
       text: "Notes\n\nUser Configuration and Display Calibration Notes:\nReserved for user notes, customized color schemes, and visual preferences."
-      type: user_notes
+      role: user_notes
 
     - id: 201
       text: "Notes: Theme Customization\nDark background reduces visual strain during extended hypergrid navigation."
-      type: user_notes
+      role: user_notes

@@ -97,16 +97,18 @@ void readStructureMeta(const ryml::ConstNodeRef &structure,
   }
 }
 
-zzCell readCell(const ryml::ConstNodeRef &cellNode,
-                std::vector<ExplicitLink> &explicitLinks,
-                Diagnostics &diagnostics) {
-  zzCell cell;
+Cell readCell(const ryml::ConstNodeRef &cellNode,
+              std::vector<ExplicitLink> &explicitLinks,
+              Diagnostics &diagnostics) {
+  Cell cell;
   cellNode["id"] >> cell.id;
   if (cellNode.has_child("text") && cellNode["text"].has_val()) {
-    cellNode["text"] >> cell.text_data;
+    std::string text;
+    cellNode["text"] >> text;
+    cell.data = std::move(text);
   }
-  if (cellNode.has_child("type") && cellNode["type"].has_val()) {
-    cellNode["type"] >> cell.type;
+  if (cellNode.has_child("role") && cellNode["role"].has_val()) {
+    cellNode["role"] >> cell.role;
   }
   if (cellNode.has_child("mime_type") && cellNode["mime_type"].has_val()) {
     cellNode["mime_type"] >> cell.mime_type;
@@ -326,7 +328,7 @@ buildDocument(const ryml::ConstNodeRef &root, const std::string &origin) {
     }
 
     const std::size_t linksBefore = explicitLinks.size();
-    zzCell cell = readCell(cellNode, explicitLinks, diagnostics);
+    Cell cell = readCell(cellNode, explicitLinks, diagnostics);
 
     if (doc.cells.contains(cell.id)) {
       diagnostics.warn(
@@ -469,9 +471,9 @@ std::string serializeZzStructure(const ZzStructureDocument &doc) {
   ss << "  cells:\n";
   for (const auto &[id, cell] : doc.cells) {
     ss << "    - id: " << id << "\n";
-    ss << "      text: \"" << cell.text_data << "\"\n";
-    if (!cell.type.empty() && cell.type != "text") {
-      ss << "      type: " << cell.type << "\n";
+    ss << "      text: \"" << cell.text() << "\"\n";
+    if (!cell.role.empty() && cell.role != "text") {
+      ss << "      role: " << cell.role << "\n";
     }
     if (!cell.dimensions.empty()) {
       ss << "      dimensions: {";

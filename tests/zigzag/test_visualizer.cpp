@@ -217,7 +217,7 @@ zzstructure:
   viz.updateFocusCellText("Mutated Text From Clone");
 
   const auto currentDoc = viz.document();
-  EXPECT_EQ(currentDoc.cells.at(1).text_data, "Mutated Text From Clone");
+  EXPECT_EQ(currentDoc.cells.at(1).text(), "Mutated Text From Clone");
   EXPECT_EQ(zzcore::getEffectiveCellText(currentDoc.cells, 2),
             "Mutated Text From Clone");
 }

@@ -45,7 +45,7 @@ zzstructure:
     # --- Document A: "Foundational Principles of Xanadu" ---
     - id: 1
       text: "Xanadoc Principle: All quotation is virtual inclusion (transclusion) from immutable spools."
-      type: "doc_a_p1"
+      role: "doc_a_p1"
       dimensions:
         d.doc: 2
         d.transclude: 4
@@ -53,44 +53,44 @@ zzstructure:
 
     - id: 2
       text: "Addressing: Primedia spans remain permanently addressable without duplicate storage."
-      type: "doc_a_p2"
+      role: "doc_a_p2"
       dimensions:
         d.doc: 3
         d.link: 9
 
     - id: 3
       text: "Xanalinks: Links are standalone, typed first-class entities independent of documents."
-      type: "doc_a_p3"
+      role: "doc_a_p3"
       dimensions:
         d.link: 6
 
     # --- Document B: "Critical Survey of Hypertext Architectures" ---
     - id: 4
       text: "Transcluded Quote: All quotation is virtual inclusion from immutable spools."
-      type: "doc_b_p1"
+      role: "doc_b_p1"
       dimensions:
         d.doc: 5
 
     - id: 5
       text: "Critique: Unlike the World Wide Web, virtual transclusion eliminates 404 broken links."
-      type: "doc_b_p2"
+      role: "doc_b_p2"
 
     - id: 6
       text: "Annotation: Xanalinks connect across documents without altering the target text."
-      type: "xanalink_target"
+      role: "xanalink_target"
 
     # --- Document C (Microversion 2.0): "Evolved Specification" ---
     - id: 7
       text: "Version 2.0: Transclusions and Xanalinks map directly onto Zigzag 2-rank manifolds."
-      type: "doc_c_v2"
+      role: "doc_c_v2"
       dimensions:
         d.doc: 8
 
     - id: 8
       text: "Manifold Theorem: Each cell possesses at most one posward and negward neighbour per dimension."
-      type: "doc_c_v2"
+      role: "doc_c_v2"
 
     # --- Commentary Link Target ---
     - id: 9
       text: "Comment: Immutable EDL (Edit Decision Lists) guarantee permanent cryptographically verifiable citations."
-      type: "commentary"
+      role: "commentary"

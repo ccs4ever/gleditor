@@ -122,13 +122,13 @@ TEST(ZzSystemProjectorTest, RoundtripStoreToSlice) {
   bool foundNotes   = false;
 
   for (const auto &[id, c] : slice.cells) {
-    if (c.text_data.find("columns:") != std::string::npos) {
+    if (c.text().find("columns:") != std::string::npos) {
       foundColumns = true;
     }
-    if (c.type == "schema_doc") {
+    if (c.role == "schema_doc") {
       foundSchema = true;
     }
-    if (c.type == "user_notes") {
+    if (c.role == "user_notes") {
       foundNotes = true;
     }
   }
@@ -263,10 +263,10 @@ TEST(ZzSystemProjectorTest, BidirectionalEditPropagation) {
   bool foundNewNote        = false;
 
   for (const auto &[id, c] : updatedSlice.cells) {
-    if (c.text_data.find("columns: \"4\"") != std::string::npos) {
+    if (c.text().find("columns: \"4\"") != std::string::npos) {
       foundUpdatedColumns = true;
     }
-    if (c.text_data.find("Tuned on 4K display") != std::string::npos) {
+    if (c.text().find("Tuned on 4K display") != std::string::npos) {
       foundNewNote = true;
     }
   }
@@ -284,8 +284,8 @@ TEST(ZzSystemProjectorTest, BidirectionalEditPropagation) {
   // 5. Reverse: User now edits a cell directly in Zigzag (pageWidthPx: "800" ->
   // "1200")
   for (auto &[id, c] : updatedSlice.cells) {
-    if (c.text_data.find("pageWidthPx:") != std::string::npos) {
-      c.text_data = "pageWidthPx: \"1200\"";
+    if (c.text().find("pageWidthPx:") != std::string::npos) {
+      c.data = "pageWidthPx: \"1200\"";
       break;
     }
   }

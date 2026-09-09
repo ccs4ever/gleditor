@@ -1,17 +1,23 @@
 # Vortex Hyperstructural Runtime & zzstructure System Specification
 
-**Document Version:** 4.0.0 — Definitive Canonical Edition **Target Environment:** Zero-Allocation
+**Document Version:** 5.0.0 — Xanalogical Revision **Target Environment:** Zero-Allocation
 Multidimensional Graph Manifolds & Logic Engine
 
 Vortex is a speculative language and runtime design: a programming model whose entire addressable
 state is a Zigzag `zzstructure` manifold (the same `d.1`/`d.2`/`d.clone`-style cell-and-dimension
 model documented in
 [zigzag-multidimensional-space-and-projection.md](zigzag-multidimensional-space-and-projection.md)
-and implemented by `apps/zigzag`'s `CompactZZCell`), rather than heaps, stack frames, and registers.
-Nothing in this document is wired into the gleditor build; it specifies the language and reference
-engine that a future `apps/vortex` (or an embedding inside `apps/zigzag`) would implement. It is
-recorded here because it is a design consumer of the same manifold invariants `apps/zigzag` and
-`apps/xudu` already enforce, and any future implementation should stay consistent with them.
+and implemented by `apps/zigzag`'s `Cell`), rather than heaps, stack frames, and registers. Nothing
+in this document is wired into the gleditor build; it specifies the language and reference engine
+that a future `apps/vortex` (or an embedding inside `apps/zigzag`) would implement. It is recorded
+here because it is a design consumer of the same manifold invariants `apps/zigzag` and `apps/xudu`
+already enforce, and any future implementation should stay consistent with them.
+
+This revision renames the payload accessors `get_cell_value`/`set_cell_value` to `get`/`set` — VQL
+(the companion query language, see [vql-query-language.md](vql-query-language.md)) spells them that
+way at every call site, and there is no reason for the two documents to disagree about the name of a
+primitive they share. It also replaces every ASCII-art diagram with Mermaid, matching the rest of
+`design/`.
 
 ______________________________________________________________________
 
@@ -38,17 +44,17 @@ accessors:
      links of a cell are set to 0, the cell is geometrically isolated.
    - **Identity Fusion & Unfusion (`dim == d_fuse`)**: Establishes or breaks an identity binding
      where multiple cells share a single underlying payload pointer pool.
-1. **`get_cell_value(cell, [offset], [length])`**: Dereferences the cell's payload
+1. **`get(cell, [offset], [length])`**: Dereferences the cell's payload
    (`std::variant<std::string, double, bool>`) with optional virtual slicing.
-1. **`set_cell_value(cell, value, [offset], [length])`**: Writes or in-place patches the variant
-   payload, updating shared instances across `d.fuse` instantly.
+1. **`set(cell, value, [offset], [length])`**: Writes or in-place patches the variant payload,
+   updating shared instances across `d.fuse` instantly.
 
-```
-                [-d.grab: Output Wing]
-                        |
-[-d.spin: Past] <-- [Cell Node] --> [+d.spin: Future]
-                        |
-                [+d.grab: Input Wing]
+```mermaid
+graph TD
+    Past["-d.spin: Past"] <--> Cell["Cell Node"]
+    Cell <--> Future["+d.spin: Future"]
+    Output["-d.grab: Output Wing"] --- Cell
+    Cell --- Input["+d.grab: Input Wing"]
 ```
 
 ### Topological Garbage Collection
@@ -233,7 +239,7 @@ true;
 }
 
 // Payload Accessor: Slicing-Aware Dereference
-CellValue get_cell_value(cell_id c_id, int64_t offset = 0, int64_t
+CellValue get(cell_id c_id, int64_t offset = 0, int64_t
 length = -1) {
     auto it = matrix.find(c_id);
     if (it == matrix.end() || !it->second) return false;
@@ -254,7 +260,7 @@ static_cast<size_t>(length);
 }
 
 // Payload Accessor: In-Place Mutation & Substring Patching
-void set_cell_value(cell_id c_id, const CellValue& new_val, int64_t
+void set(cell_id c_id, const CellValue& new_val, int64_t
 offset = 0, int64_t length = -1) {
     auto it = matrix.find(c_id);
     if (it == matrix.end() || !it->second) return;
@@ -294,14 +300,15 @@ ______________________________________________________________________
 To eliminate hidden operand accumulators and register pollution, Vortex mandates a **Dual-Wing
 Spatial Calling Topology**:
 
-```
-            [ Primary Out Target ] --- +d.step ---> [ Secondary Out Target ]
-                    |
-                    v -d.grab
-            [ Opcode Node ]
-                    |
-                    v +d.grab
-            [ Primary In Operand ] --- +d.step ---> [ Secondary In Operand ]
+```mermaid
+graph TD
+    Opcode["Opcode Node"]
+
+    Opcode -->|"-d.grab"| OutPrimary["Primary Out Target"]
+    OutPrimary -->|"+d.step"| OutSecondary["Secondary Out Target"]
+
+    Opcode -->|"+d.grab"| InPrimary["Primary In Operand"]
+    InPrimary -->|"+d.step"| InSecondary["Secondary In Operand"]
 ```
 
 - **Outputs Wing (`-d.grab`)**: Output destination cells extend negward. If an operation yields
@@ -320,14 +327,20 @@ ______________________________________________________________________
 Process cursors (Spin-Heads) maintain their own variable lookup environments directly on the spatial
 matrix:
 
-```
-[ Spin-Head Cursor ]
-        |
-        v +d.vars
-  [ Var Identifier: "lineage" ] --- +d.values ---> [ Root Manifold Node ]
-        |                                                  |
-        v +d.vars                                          +--- +d.child --> [ Person: "Isaac" ]
-  [ Var Identifier: "counter" ] --- +d.values ---> [ 42.0 ]
+```mermaid
+graph TD
+    Cursor["Spin-Head Cursor"]
+    Lineage["Var Identifier: 'lineage'"]
+    Counter["Var Identifier: 'counter'"]
+    Root["Root Manifold Node"]
+    Isaac["Person: 'Isaac'"]
+    Value42["42.0"]
+
+    Cursor -->|"+d.vars"| Lineage
+    Lineage -->|"+d.vars"| Counter
+    Lineage -->|"+d.values"| Root
+    Root -->|"+d.child"| Isaac
+    Counter -->|"+d.values"| Value42
 ```
 
 - **Identifier Axis (`d.vars`)**: A linear rank of cells posward from the cursor holding variable
@@ -357,17 +370,18 @@ Abstract Machine (WAM) registers:
 
 Choice points and mutation logs exist entirely on the cursor's `+d.stack` dimension:
 
-```
-[ Spin-Head Cursor ]
-        |
-        v +d.stack
-  [ Choice Point Metacell ]
-        |
-        +-- +d.warp --> [ Backtrack Alternate Branch Address ]
-        |
-        +-- +d.trail --> [ Trail Cell 1 ] --- +d.step ---> [ Trail Cell 2 ]
-                                |                                   |
-                          Target: Var_X                       Target: Var_Y
+```mermaid
+graph TD
+    Cursor["Spin-Head Cursor"]
+    Choice["Choice Point Metacell"]
+    Warp["Backtrack Alternate Branch Address"]
+    Trail1["Trail Cell 1<br/>Target: Var_X"]
+    Trail2["Trail Cell 2<br/>Target: Var_Y"]
+
+    Cursor -->|"+d.stack"| Choice
+    Choice -->|"+d.warp"| Warp
+    Choice -->|"+d.trail"| Trail1
+    Trail1 -->|"+d.step"| Trail2
 ```
 
 When a branch fails (`#FAIL`), the engine:

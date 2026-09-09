@@ -140,7 +140,7 @@ public:
   void toggleViewMode();
 
   // -- In-App Interactive Cell & Dimension Editing --------------------------
-  CellID createCell(std::string text = "", std::string type = "text");
+  CellID createCell(std::string text = "", std::string role = "text");
   bool insertConnectedCell(std::string text, const DimID &dimension,
                            bool positive = true);
   bool linkFocusAlong(const DimID &dimension, CellID targetId,
@@ -164,8 +164,8 @@ private:
   void pollPrefletFetch();
   void invalidateAccessibility() { revision_++; }
 
-  [[nodiscard]] const zzCell *findCell(CellID id) const;
-  [[nodiscard]] static LinkPairs linksOn(const zzCell *cell,
+  [[nodiscard]] const Cell *findCell(CellID id) const;
+  [[nodiscard]] static LinkPairs linksOn(const Cell *cell,
                                          const DimID &dimension);
   [[nodiscard]] DimensionVisual dimensionVisual(const DimID &dimension) const;
   [[nodiscard]] static glm::vec3 tintForPreflet(glm::vec3 base,
@@ -177,7 +177,7 @@ private:
 
   std::string structure_name_;
   std::string current_slice_path_;
-  std::unordered_map<CellID, zzCell> space_;
+  std::unordered_map<CellID, Cell> space_;
   CellID accursed_cell_focus_{0};
   ViewAxisBinding current_view_;
 

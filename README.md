@@ -1194,18 +1194,18 @@ zzstructure:
   cells:
     - id: 1
       text: "Root Topic Node"
-      type: "root"
+      role: "root"
       dimensions:
         d.1: [2, 0]
         d.2: [3, 0]
     - id: 2
       text: "Second Chapter"
-      type: "item"
+      role: "item"
       dimensions:
         d.1: [0, 1]
     - id: 3
       text: "Extended Details"
-      type: "detail"
+      role: "detail"
       preflet: "magnet:?xt=urn:btih:0123456789abcdef0123456789abcdef01234567&dn=subslice.yaml"
       dimensions:
         d.2: [0, 1]

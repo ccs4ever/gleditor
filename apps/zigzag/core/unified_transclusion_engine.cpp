@@ -435,11 +435,11 @@ UnifiedTransclusionEngine::toZzStructureDocument(const CellID focus) const {
   }
 
   for (const auto &[id, cell] : cells_) {
-    zzCell zc;
-    zc.id        = id;
-    zc.type      = cell.type;
-    zc.preflet   = cell.preflet;
-    zc.text_data = resolveCellText(id);
+    Cell zc;
+    zc.id      = id;
+    zc.role    = cell.type;
+    zc.preflet = cell.preflet;
+    zc.data    = resolveCellText(id);
 
     for (std::size_t i = 0; i < StandardDimensionCount; ++i) {
       const auto ord = static_cast<DimOrdinal>(i);
@@ -465,9 +465,9 @@ void UnifiedTransclusionEngine::loadFromZzStructureDocument(
   for (const auto &[id, zc] : doc.cells) {
     CompactZZCell cell;
     cell.id            = id;
-    cell.type          = zc.type;
+    cell.type          = zc.role;
     cell.preflet       = zc.preflet;
-    cell.ephemeralText = zc.text_data;
+    cell.ephemeralText = zc.text();
 
     for (const auto &[dimName, lp] : zc.dimensions) {
       cell.setLinks(dimName, lp);

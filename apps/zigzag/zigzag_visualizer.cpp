@@ -80,26 +80,26 @@ bool ZigzagVisualizer::busy() const {
 
 void ZigzagVisualizer::populateFallbackStructure() {
   space_.clear();
-  space_[1] = zzCell{.id         = 1,
-                     .text_data  = "Root Focus Node",
-                     .type       = "root",
-                     .dimensions = {{"d.1", {2, 0}}, {"d.2", {3, 0}}},
-                     .preflet    = std::nullopt};
-  space_[2] = zzCell{.id         = 2,
-                     .text_data  = "Horizontal Cell",
-                     .type       = "item",
-                     .dimensions = {{"d.1", {0, 1}}},
-                     .preflet    = std::nullopt};
-  space_[3] = zzCell{.id         = 3,
-                     .text_data  = "Vertical Cell",
-                     .type       = "item",
-                     .dimensions = {{"d.2", {0, 1}}, {"d.3", {4, 0}}},
-                     .preflet    = std::nullopt};
-  space_[4] = zzCell{.id         = 4,
-                     .text_data  = "Depth Layer Cell",
-                     .type       = "detail",
-                     .dimensions = {{"d.3", {0, 3}}},
-                     .preflet    = std::nullopt};
+  space_[1] = Cell{.id         = 1,
+                   .data       = std::string{"Root Focus Node"},
+                   .role       = "root",
+                   .dimensions = {{"d.1", {2, 0}}, {"d.2", {3, 0}}},
+                   .preflet    = std::nullopt};
+  space_[2] = Cell{.id         = 2,
+                   .data       = std::string{"Horizontal Cell"},
+                   .role       = "item",
+                   .dimensions = {{"d.1", {0, 1}}},
+                   .preflet    = std::nullopt};
+  space_[3] = Cell{.id         = 3,
+                   .data       = std::string{"Vertical Cell"},
+                   .role       = "item",
+                   .dimensions = {{"d.2", {0, 1}}, {"d.3", {4, 0}}},
+                   .preflet    = std::nullopt};
+  space_[4] = Cell{.id         = 4,
+                   .data       = std::string{"Depth Layer Cell"},
+                   .role       = "detail",
+                   .dimensions = {{"d.3", {0, 3}}},
+                   .preflet    = std::nullopt};
 
   accursed_cell_focus_ = 1;
   current_view_        = ViewAxisBinding{"d.1", "d.2", "d.3"};
@@ -212,17 +212,17 @@ ZzStructureDocument ZigzagVisualizer::document() const {
   return doc;
 }
 
-CellID ZigzagVisualizer::createCell(std::string text, std::string type) {
+CellID ZigzagVisualizer::createCell(std::string text, std::string role) {
   CellID newId = 1;
   for (const auto &[id, _] : space_) {
     if (id >= newId) {
       newId = id + 1;
     }
   }
-  space_[newId] = zzCell{
+  space_[newId] = Cell{
       .id         = newId,
-      .text_data  = std::move(text),
-      .type       = std::move(type),
+      .data       = std::move(text),
+      .role       = std::move(role),
       .dimensions = {},
       .preflet    = std::nullopt,
   };
@@ -332,11 +332,11 @@ bool ZigzagVisualizer::saveStructureYaml(const std::string &filePath) const {
   return saveZzStructure(doc, savePath);
 }
 
-const zzCell *ZigzagVisualizer::findCell(const CellID id) const {
+const Cell *ZigzagVisualizer::findCell(const CellID id) const {
   return zzcore::findCell(space_, id);
 }
 
-LinkPairs ZigzagVisualizer::linksOn(const zzCell *const cell,
+LinkPairs ZigzagVisualizer::linksOn(const Cell *const cell,
                                     const DimID &dimension) {
   return zzcore::linksOn(cell, dimension);
 }
@@ -368,8 +368,8 @@ void ZigzagVisualizer::rebuildActiveViewTopology() {
     render_cell.target_alpha = 0.0F;
   }
 
-  const zzCell *const focus = findCell(accursed_cell_focus_);
-  const bool focusIsClone   = zzcore::isCloneCell(space_, accursed_cell_focus_);
+  const Cell *const focus = findCell(accursed_cell_focus_);
+  const bool focusIsClone = zzcore::isCloneCell(space_, accursed_cell_focus_);
   const CellID focusMaster =
       zzcore::findCloneMaster(space_, accursed_cell_focus_);
   const auto focusText =
@@ -379,7 +379,7 @@ void ZigzagVisualizer::rebuildActiveViewTopology() {
     visible_cells_[accursed_cell_focus_] = RenderStateCell{
         .id              = accursed_cell_focus_,
         .text            = std::string{focusText},
-        .type            = focus ? focus->type : "",
+        .type            = focus ? focus->role : "",
         .mime_type       = focus ? focus->mime_type : "",
         .media_path      = focus ? focus->media_path : "",
         .is_image        = focus && focus->isImage(),
@@ -404,16 +404,16 @@ void ZigzagVisualizer::rebuildActiveViewTopology() {
     if (childId == 0) {
       return;
     }
-    const zzCell *const child = findCell(childId);
-    const bool childIsClone   = zzcore::isCloneCell(space_, childId);
-    const CellID childMaster  = zzcore::findCloneMaster(space_, childId);
-    const auto childText      = zzcore::getEffectiveCellText(space_, childId);
+    const Cell *const child  = findCell(childId);
+    const bool childIsClone  = zzcore::isCloneCell(space_, childId);
+    const CellID childMaster = zzcore::findCloneMaster(space_, childId);
+    const auto childText     = zzcore::getEffectiveCellText(space_, childId);
 
     if (!visible_cells_.contains(childId)) {
       RenderStateCell newCell{
           .id              = childId,
           .text            = std::string{childText},
-          .type            = child ? child->type : "",
+          .type            = child ? child->role : "",
           .mime_type       = child ? child->mime_type : "",
           .media_path      = child ? child->media_path : "",
           .is_image        = child && child->isImage(),
@@ -455,7 +455,7 @@ void ZigzagVisualizer::rebuildActiveViewTopology() {
       // Positive walk
       CellID parent = accursed_cell_focus_;
       for (int r = 1; r <= radius; ++r) {
-        const zzCell *const c = findCell(parent);
+        const Cell *const c = findCell(parent);
         if (!c) {
           break;
         }
@@ -469,7 +469,7 @@ void ZigzagVisualizer::rebuildActiveViewTopology() {
       // Negative walk
       parent = accursed_cell_focus_;
       for (int r = 1; r <= radius; ++r) {
-        const zzCell *const c = findCell(parent);
+        const Cell *const c = findCell(parent);
         if (!c) {
           break;
         }
@@ -542,7 +542,7 @@ void ZigzagVisualizer::pollPrefletFetch() {
 
 void ZigzagVisualizer::navigateFocus(const DimID &dimension,
                                      const bool positive) {
-  const zzCell *const cell = findCell(accursed_cell_focus_);
+  const Cell *const cell = findCell(accursed_cell_focus_);
   if (!cell) {
     return;
   }
@@ -605,7 +605,7 @@ void ZigzagVisualizer::cycleDimensions(const bool forward) {
 }
 
 void ZigzagVisualizer::followPrefletAtFocus() {
-  const zzCell *const cell = findCell(accursed_cell_focus_);
+  const Cell *const cell = findCell(accursed_cell_focus_);
   if (!cell || !cell->preflet) {
     return;
   }
@@ -671,7 +671,7 @@ void ZigzagVisualizer::drawFrame(gleditor::FrameContext &ctx) {
   std::vector<std::pair<CellID, CellID>> drawnEdges;
 
   for (const auto &[id, cell] : visible_cells_) {
-    const zzCell *const spaceCell = findCell(id);
+    const Cell *const spaceCell = findCell(id);
     if (!spaceCell) {
       continue;
     }
@@ -840,7 +840,7 @@ void ZigzagVisualizer::drawFrame(gleditor::FrameContext &ctx) {
 
   // Focus Status
   std::string focusLabel = "Focus: none";
-  if (const zzCell *const cur = findCell(accursed_cell_focus_)) {
+  if (const Cell *const cur = findCell(accursed_cell_focus_)) {
     const auto effText =
         zzcore::getEffectiveCellText(space_, accursed_cell_focus_);
     std::string mediaTag;
@@ -849,7 +849,7 @@ void ZigzagVisualizer::drawFrame(gleditor::FrameContext &ctx) {
     }
     focusLabel =
         std::format("Focus: #{}{} \"{}\" {}", cur->id, mediaTag, effText,
-                    cur->type.empty() ? "" : "[" + cur->type + "]");
+                    cur->role.empty() ? "" : "[" + cur->role + "]");
     if (zzcore::isCloneCell(space_, accursed_cell_focus_)) {
       focusLabel +=
           std::format(" [clone of #{}]",
@@ -930,8 +930,8 @@ void ZigzagVisualizer::describe(gleditor::a11y::Builder &into) {
     const bool isFocus = (id == accursed_cell_focus_);
     const auto effText = zzcore::getEffectiveCellText(space_, id);
     std::string desc   = std::format("Cell #{}: {}", id, effText);
-    if (!cell.type.empty()) {
-      desc += " [" + cell.type + "]";
+    if (!cell.role.empty()) {
+      desc += " [" + cell.role + "]";
     }
     if (zzcore::isCloneCell(space_, id)) {
       desc +=

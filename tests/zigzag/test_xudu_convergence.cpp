@@ -72,18 +72,18 @@ TEST(ZzXuduConvergenceTest, RasterizeZzStructure) {
 
   // Row 1: Cell 1 -> Cell 2
   // Row 2: Cell 3 -> Cell 4 (Cell 1 is -d.2 of Cell 3)
-  zzCell c1{.id = 1, .text_data = "Chapter One.", .type = "cell"};
+  Cell c1{.id = 1, .data = "Chapter One.", .role = "cell"};
   c1.dimensions["d.1"].pos = 2;
   c1.dimensions["d.2"].pos = 3;
 
-  zzCell c2{.id = 2, .text_data = "The Beginning.", .type = "cell"};
+  Cell c2{.id = 2, .data = "The Beginning.", .role = "cell"};
   c2.dimensions["d.1"].neg = 1;
 
-  zzCell c3{.id = 3, .text_data = "Chapter Two.", .type = "cell"};
+  Cell c3{.id = 3, .data = "Chapter Two.", .role = "cell"};
   c3.dimensions["d.2"].neg = 1;
   c3.dimensions["d.1"].pos = 4;
 
-  zzCell c4{.id = 4, .text_data = "The Continuation.", .type = "cell"};
+  Cell c4{.id = 4, .data = "The Continuation.", .role = "cell"};
   c4.dimensions["d.1"].neg = 3;
 
   doc.cells[1] = c1;
@@ -107,10 +107,10 @@ TEST(ZzXuduConvergenceTest, LinkPackageRoundTrip) {
   doc.meta.name = "Test Convergence Slice";
   doc.focus     = 1;
 
-  zzCell c1{.id = 1, .text_data = "Cell Alpha", .type = "cell"};
+  Cell c1{.id = 1, .data = "Cell Alpha", .role = "cell"};
   c1.dimensions["d.1"].pos = 2;
 
-  zzCell c2{.id = 2, .text_data = "Cell Beta", .type = "cell"};
+  Cell c2{.id = 2, .data = "Cell Beta", .role = "cell"};
   c2.dimensions["d.1"].neg = 1;
 
   doc.cells[1] = c1;
@@ -135,10 +135,10 @@ TEST(ZzXuduConvergenceTest, LinkPackageRoundTrip) {
 
 TEST(ZzXuduConvergenceTest, ManifoldValidation) {
   ZzStructureDocument doc;
-  zzCell c1{.id = 1, .text_data = "Cell 1", .type = "cell"};
+  Cell c1{.id = 1, .data = "Cell 1", .role = "cell"};
   c1.dimensions["d.1"].pos = 2;
 
-  zzCell c2{.id = 2, .text_data = "Cell 2", .type = "cell"};
+  Cell c2{.id = 2, .data = "Cell 2", .role = "cell"};
   // Missing backlink from 2 to 1 (asymmetric)
   c2.dimensions["d.1"].neg = 0;
 
@@ -195,13 +195,13 @@ TEST(ZzXuduConvergenceTest, XuduHypertimeUnchangedSpansBecomeCloneCells) {
   const auto &c3 = zzDoc.cells[3];
   const auto &c4 = zzDoc.cells[4];
 
-  EXPECT_EQ(c1.type, "xudu_span");
-  EXPECT_EQ(c1.text_data, "First unchanged text");
+  EXPECT_EQ(c1.role, "xudu_span");
+  EXPECT_EQ(c1.text(), "First unchanged text");
 
   // Cell 3 is an unchanged span across microversions, so it is a clone of Cell
   // 1
-  EXPECT_EQ(c3.type, "xudu_clone");
-  EXPECT_TRUE(c3.text_data.empty()); // Clones do not duplicate text
+  EXPECT_EQ(c3.role, "xudu_clone");
+  EXPECT_TRUE(c3.text().empty()); // Clones do not duplicate text
 
   // d.clone rank links
   EXPECT_EQ(c1.dimensions.at("d.clone").pos, 3U);
@@ -229,31 +229,31 @@ TEST(ZzXuduConvergenceTest, RasterizeZzStructureWithCloneCells) {
   doc.focus = 1;
 
   // Master cell
-  zzCell c1;
+  Cell c1;
   c1.id                        = 1;
-  c1.text_data                 = "Shared Header.";
-  c1.type                      = "master";
+  c1.data                      = "Shared Header.";
+  c1.role                      = "master";
   c1.dimensions["d.doc"].pos   = 2;
   c1.dimensions["d.clone"].pos = 3;
 
-  zzCell c2;
+  Cell c2;
   c2.id                      = 2;
-  c2.text_data               = "Doc 1 Body.";
-  c2.type                    = "cell";
+  c2.data                    = "Doc 1 Body.";
+  c2.role                    = "cell";
   c2.dimensions["d.doc"].neg = 1;
 
-  // Clone cell (empty text_data, pos of c1 on d.clone)
-  zzCell c3;
+  // Clone cell (empty text, pos of c1 on d.clone)
+  Cell c3;
   c3.id                        = 3;
-  c3.text_data                 = "";
-  c3.type                      = "xudu_clone";
+  c3.data                      = "";
+  c3.role                      = "xudu_clone";
   c3.dimensions["d.clone"].neg = 1;
   c3.dimensions["d.doc"].pos   = 4;
 
-  zzCell c4;
+  Cell c4;
   c4.id                      = 4;
-  c4.text_data               = "Doc 2 Body.";
-  c4.type                    = "cell";
+  c4.data                    = "Doc 2 Body.";
+  c4.role                    = "cell";
   c4.dimensions["d.doc"].neg = 3;
 
   doc.cells[1] = c1;

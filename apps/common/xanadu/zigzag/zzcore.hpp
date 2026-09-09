@@ -50,10 +50,10 @@ private:
 };
 
 inline constexpr std::string_view prefletDimension  = "d.preflet";
-inline constexpr std::string_view prefletTypePrefix = "preflet_";
+inline constexpr std::string_view prefletRolePrefix = "preflet_";
 inline constexpr std::string_view cloneDimension    = "d.clone";
 
-[[nodiscard]] bool isPrefletChainNode(std::string_view type);
+[[nodiscard]] bool isPrefletChainNode(std::string_view role);
 [[nodiscard]] bool looksLikeBitTorrentMagnet(std::string_view identifier);
 [[nodiscard]] std::optional<RgbColor> parseHexColor(std::string_view text);
 [[nodiscard]] std::pair<std::string, std::string>
@@ -74,28 +74,28 @@ struct ExplicitLink {
   CellID target = 0;
 };
 
-void deriveBacklinks(std::unordered_map<CellID, zzCell> &cells,
+void deriveBacklinks(std::unordered_map<CellID, Cell> &cells,
                      const std::vector<ExplicitLink> &explicitLinks,
                      Diagnostics &diagnostics);
 
-void neutralizeDanglingLinks(std::unordered_map<CellID, zzCell> &cells,
+void neutralizeDanglingLinks(std::unordered_map<CellID, Cell> &cells,
                              Diagnostics &diagnostics);
 
 [[nodiscard]] std::optional<Preflet>
-resolvePreflet(CellID startId, const std::unordered_map<CellID, zzCell> &cells,
+resolvePreflet(CellID startId, const std::unordered_map<CellID, Cell> &cells,
                CellID hostId, Diagnostics &diagnostics);
 
-void resolveAllPreflets(std::unordered_map<CellID, zzCell> &cells,
+void resolveAllPreflets(std::unordered_map<CellID, Cell> &cells,
                         Diagnostics &diagnostics);
 
 /// Returns the 6 axis neighbours: [x+, x-, y+, y-, z+, z-] (0 for absent).
-[[nodiscard]] std::array<CellID, 6> axisNeighbours(const zzCell *cell,
+[[nodiscard]] std::array<CellID, 6> axisNeighbours(const Cell *cell,
                                                    const ViewAxisBinding &view);
 
-[[nodiscard]] const zzCell *
-findCell(const std::unordered_map<CellID, zzCell> &cells, CellID id);
+[[nodiscard]] const Cell *
+findCell(const std::unordered_map<CellID, Cell> &cells, CellID id);
 
-[[nodiscard]] LinkPairs linksOn(const zzCell *cell, std::string_view dimension);
+[[nodiscard]] LinkPairs linksOn(const Cell *cell, std::string_view dimension);
 
 /**
  * @brief Find the master cell at the head of a cell's d.clone rank.
@@ -105,13 +105,13 @@ findCell(const std::unordered_map<CellID, zzCell> &cells, CellID id);
  * Cell. If the cell has no negward d.clone link, it is its own master.
  */
 [[nodiscard]] CellID
-findCloneMaster(const std::unordered_map<CellID, zzCell> &cells, CellID id);
+findCloneMaster(const std::unordered_map<CellID, Cell> &cells, CellID id);
 
 /**
  * @brief Returns true iff this cell is a clone (i.e. has a negward link on
  * d.clone).
  */
-[[nodiscard]] bool isCloneCell(const std::unordered_map<CellID, zzCell> &cells,
+[[nodiscard]] bool isCloneCell(const std::unordered_map<CellID, Cell> &cells,
                                CellID id);
 
 /**
@@ -119,21 +119,20 @@ findCloneMaster(const std::unordered_map<CellID, zzCell> &cells, CellID id);
  * the head of its d.clone rank.
  */
 [[nodiscard]] std::string_view
-getEffectiveCellText(const std::unordered_map<CellID, zzCell> &cells,
-                     CellID id);
+getEffectiveCellText(const std::unordered_map<CellID, Cell> &cells, CellID id);
 
 /**
  * @brief Returns all cells in the d.clone rank containing @p id, starting from
  * the head master cell and walking posward.
  */
 [[nodiscard]] std::vector<CellID>
-getCloneRank(const std::unordered_map<CellID, zzCell> &cells, CellID id);
+getCloneRank(const std::unordered_map<CellID, Cell> &cells, CellID id);
 
 /**
  * @brief Updates the text on the master cell at the head of @p id's d.clone
  * rank.
  */
-void updateMasterText(std::unordered_map<CellID, zzCell> &cells, CellID id,
+void updateMasterText(std::unordered_map<CellID, Cell> &cells, CellID id,
                       std::string newText);
 
 } // namespace zigzag::zzcore

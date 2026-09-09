@@ -58,16 +58,15 @@ std::string extractSliceConfigText(const ZzStructureDocument &slice) {
       break;
     }
     const auto &c = itCell->second;
-    if (c.type == "setting") {
-      out += c.text_data;
+    if (c.role == "setting") {
+      out += c.text();
       if (!out.ends_with('\n')) {
         out += '\n';
       }
-    } else if (c.text_data.find(':') != std::string::npos &&
-               c.type != "config_group" &&
-               !c.text_data.starts_with("Schema:") &&
-               !c.text_data.starts_with("Notes:")) {
-      out += c.text_data;
+    } else if (c.text().find(':') != std::string::npos &&
+               c.role != "config_group" && !c.text().starts_with("Schema:") &&
+               !c.text().starts_with("Notes:")) {
+      out += c.text();
       if (!out.ends_with('\n')) {
         out += '\n';
       }
@@ -80,12 +79,12 @@ std::string extractSliceConfigText(const ZzStructureDocument &slice) {
   // Fallback: iterate slice cells directly if traversal yielded nothing
   if (out.empty()) {
     for (const auto &[id, c] : slice.cells) {
-      if (c.type == "setting" ||
-          (c.text_data.find(':') != std::string::npos &&
-           c.type != "config_group" && !c.text_data.starts_with("Schema:") &&
-           !c.text_data.starts_with("Notes:") && c.type != "schema_doc" &&
-           c.type != "schema_field" && c.type != "user_notes")) {
-        out += c.text_data;
+      if (c.role == "setting" ||
+          (c.text().find(':') != std::string::npos &&
+           c.role != "config_group" && !c.text().starts_with("Schema:") &&
+           !c.text().starts_with("Notes:") && c.role != "schema_doc" &&
+           c.role != "schema_field" && c.role != "user_notes")) {
+        out += c.text();
         if (!out.ends_with('\n')) {
           out += '\n';
         }
@@ -97,10 +96,9 @@ std::string extractSliceConfigText(const ZzStructureDocument &slice) {
 }
 
 std::string extractSliceSchemaText(const ZzStructureDocument &slice) {
-  const zzCell *schemaDoc = nullptr;
+  const Cell *schemaDoc = nullptr;
   for (const auto &[id, c] : slice.cells) {
-    if (c.type == "schema_doc" ||
-        c.text_data.starts_with("Schema and Purpose")) {
+    if (c.role == "schema_doc" || c.text().starts_with("Schema and Purpose")) {
       schemaDoc = &c;
       break;
     }
@@ -108,7 +106,7 @@ std::string extractSliceSchemaText(const ZzStructureDocument &slice) {
 
   std::string out;
   if (schemaDoc != nullptr) {
-    out += schemaDoc->text_data;
+    out += schemaDoc->text();
     if (!out.ends_with('\n')) {
       out += "\n\n";
     } else if (!out.ends_with("\n\n")) {
@@ -120,9 +118,9 @@ std::string extractSliceSchemaText(const ZzStructureDocument &slice) {
     if (&c == schemaDoc) {
       continue;
     }
-    if (c.type == "schema_field" || c.text_data.starts_with("Schema:")) {
-      if (out.find(c.text_data) == std::string::npos) {
-        out += c.text_data;
+    if (c.role == "schema_field" || c.text().starts_with("Schema:")) {
+      if (out.find(c.text()) == std::string::npos) {
+        out += c.text();
         if (!out.ends_with('\n')) {
           out += '\n';
         }
@@ -134,13 +132,13 @@ std::string extractSliceSchemaText(const ZzStructureDocument &slice) {
 }
 
 std::string extractSliceNotesText(const ZzStructureDocument &slice) {
-  const zzCell *rootNote = nullptr;
+  const Cell *rootNote = nullptr;
   for (const auto &[id, c] : slice.cells) {
-    if (c.type == "user_notes" &&
-        (c.text_data.starts_with("Notes\n") || c.text_data == "Notes" ||
+    if (c.role == "user_notes" &&
+        (c.text().starts_with("Notes\n") || c.text() == "Notes" ||
          rootNote == nullptr)) {
       rootNote = &c;
-      if (c.text_data.starts_with("Notes\n") || c.text_data == "Notes") {
+      if (c.text().starts_with("Notes\n") || c.text() == "Notes") {
         break;
       }
     }
@@ -148,7 +146,7 @@ std::string extractSliceNotesText(const ZzStructureDocument &slice) {
 
   std::string out;
   if (rootNote != nullptr) {
-    out += rootNote->text_data;
+    out += rootNote->text();
     if (!out.ends_with('\n')) {
       out += "\n\n";
     } else if (!out.ends_with("\n\n")) {
@@ -160,9 +158,9 @@ std::string extractSliceNotesText(const ZzStructureDocument &slice) {
     if (&c == rootNote) {
       continue;
     }
-    if (c.type == "user_notes" || c.text_data.starts_with("Notes:")) {
-      if (out.find(c.text_data) == std::string::npos) {
-        out += c.text_data;
+    if (c.role == "user_notes" || c.text().starts_with("Notes:")) {
+      if (out.find(c.text()) == std::string::npos) {
+        out += c.text();
         if (!out.ends_with('\n')) {
           out += '\n';
         }
@@ -349,10 +347,10 @@ projectSystemStoreToSlice(const xanadu::Store &store,
       .spacing     = 2.2F};
 
   // Group cell (id 1)
-  zzCell groupCell;
-  groupCell.id        = 1;
-  groupCell.text_data = std::string(xanadu::systemDocName(kind)) + " Settings";
-  groupCell.type      = "config_group";
+  Cell groupCell;
+  groupCell.id   = 1;
+  groupCell.data = std::string(xanadu::systemDocName(kind)) + " Settings";
+  groupCell.role = "config_group";
   groupCell.dimensions[std::string(kDimSchema)].pos = 100;
   groupCell.dimensions[std::string(kDimNotes)].pos  = 200;
 
@@ -374,10 +372,10 @@ projectSystemStoreToSlice(const xanadu::Store &store,
     }
 
     const CellID cid = nextId++;
-    zzCell settingCell;
-    settingCell.id        = cid;
-    settingCell.text_data = trimmed;
-    settingCell.type      = "setting";
+    Cell settingCell;
+    settingCell.id   = cid;
+    settingCell.data = trimmed;
+    settingCell.role = "setting";
 
     // Link previous setting on d.config
     if (lastSettingId == 1) {
@@ -393,18 +391,18 @@ projectSystemStoreToSlice(const xanadu::Store &store,
   result.cells[1] = std::move(groupCell);
 
   // Schema doc cell (id 100)
-  zzCell schemaCell;
-  schemaCell.id        = 100;
-  schemaCell.text_data = p2.empty() ? xanadu::defaultSystemDocSchema(kind) : p2;
-  schemaCell.type      = "schema_doc";
-  result.cells[100]    = std::move(schemaCell);
+  Cell schemaCell;
+  schemaCell.id     = 100;
+  schemaCell.data   = p2.empty() ? xanadu::defaultSystemDocSchema(kind) : p2;
+  schemaCell.role   = "schema_doc";
+  result.cells[100] = std::move(schemaCell);
 
   // Notes doc cell (id 200)
-  zzCell notesCell;
-  notesCell.id        = 200;
-  notesCell.text_data = p3.empty() ? xanadu::defaultSystemDocNotes(kind) : p3;
-  notesCell.type      = "user_notes";
-  result.cells[200]   = std::move(notesCell);
+  Cell notesCell;
+  notesCell.id      = 200;
+  notesCell.data    = p3.empty() ? xanadu::defaultSystemDocNotes(kind) : p3;
+  notesCell.role    = "user_notes";
+  result.cells[200] = std::move(notesCell);
 
   return result;
 }

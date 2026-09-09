@@ -24,7 +24,7 @@ zzstructure:
   ASSERT_TRUE(doc.has_value());
   EXPECT_EQ(doc->focus, 1U);
   ASSERT_EQ(doc->cells.size(), 1U);
-  EXPECT_EQ(doc->cells.at(1).text_data, "Root");
+  EXPECT_EQ(doc->cells.at(1).text(), "Root");
 }
 
 TEST(ZzLoaderTest, ParseFullSliceMetadataAndLinks) {
@@ -62,16 +62,16 @@ zzstructure:
   cells:
     - id: 1
       text: "Chapter 1"
-      type: chapter
+      role: chapter
       dimensions: { d.1: 2, d.2: { pos: 3, neg: 0 } }
 
     - id: 2
       text: "Chapter 2"
-      type: chapter
+      role: chapter
 
     - id: 3
       text: "Detail 1.1"
-      type: detail
+      role: detail
 )";
 
   const auto doc = parseZzStructure(yaml, "test");
@@ -149,7 +149,7 @@ zzstructure:
   const auto doc = parseZzStructure(dupeYaml, "test");
   ASSERT_TRUE(doc.has_value());
   ASSERT_EQ(doc->cells.size(), 1U);
-  EXPECT_EQ(doc->cells.at(1).text_data, "Replacement");
+  EXPECT_EQ(doc->cells.at(1).text(), "Replacement");
 }
 
 TEST(ZzLoaderTest, ParsePrefletChainFromYaml) {
@@ -162,12 +162,12 @@ zzstructure:
       dimensions: { d.preflet: 10 }
 
     - id: 10
-      type: preflet_resource
+      role: preflet_resource
       text: "magnet:?xt=urn:btih:0123456789abcdef0123456789abcdef01234567"
       dimensions: { d.preflet: 11 }
 
     - id: 11
-      type: preflet_version
+      role: preflet_version
       text: "3.5"
 )";
 
@@ -188,7 +188,6 @@ zzstructure:
 
     - id: 2
       text: "Image Cell"
-      type: image
       mime_type: "image/png"
       media_path: "assets/textures/diagram.png"
 )";

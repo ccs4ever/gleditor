@@ -131,21 +131,21 @@ ZzStructureDocument projectXuduToZigzag(const std::vector<XuduDocInput> &docs,
           const bool isUnchangedClone =
               (span.length > 0 && spanTrackers.contains(span));
           const CellID id = nextCellId++;
-          zzCell cell;
+          Cell cell;
           cell.id = id;
 
           if (isUnchangedClone) {
             // Clones do not store redundant text; content is derived from
             // master
-            cell.text_data      = "";
-            cell.type           = "xudu_clone";
+            cell.data           = "";
+            cell.role           = "xudu_clone";
             const CellID prevId = spanTrackers[span].latestCellId;
             result.cells[prevId].dimensions[opts.clone_dimension].pos = id;
             cell.dimensions[opts.clone_dimension].neg                 = prevId;
             spanTrackers[span].latestCellId                           = id;
           } else {
-            cell.text_data = std::move(paraText);
-            cell.type      = "xudu_span";
+            cell.data = std::move(paraText);
+            cell.role = "xudu_span";
             if (span.length > 0) {
               spanTrackers[span] =
                   SpanTracker{.masterCellId = id, .latestCellId = id};
@@ -168,19 +168,19 @@ ZzStructureDocument projectXuduToZigzag(const std::vector<XuduDocInput> &docs,
       const bool isUnchangedClone =
           (span.length > 0 && spanTrackers.contains(span));
       const CellID id = nextCellId++;
-      zzCell cell;
+      Cell cell;
       cell.id = id;
 
       if (isUnchangedClone) {
-        cell.text_data      = "";
-        cell.type           = "xudu_clone";
+        cell.data           = "";
+        cell.role           = "xudu_clone";
         const CellID prevId = spanTrackers[span].latestCellId;
         result.cells[prevId].dimensions[opts.clone_dimension].pos = id;
         cell.dimensions[opts.clone_dimension].neg                 = prevId;
         spanTrackers[span].latestCellId                           = id;
       } else {
-        cell.text_data = doc.text;
-        cell.type      = "xudu_document";
+        cell.data = doc.text;
+        cell.role = "xudu_document";
         if (span.length > 0) {
           spanTrackers[span] =
               SpanTracker{.masterCellId = id, .latestCellId = id};
@@ -477,22 +477,22 @@ ZzStructureDocument linkPackageToZzStructure(const xanadu::LinkPackage &pkg) {
         if (!spanToCell.contains(span)) {
           const CellID id  = nextCellId++;
           spanToCell[span] = id;
-          zzCell cell;
-          cell.id        = id;
-          cell.type      = "cell";
-          cell.text_data = std::format("Cell #{} [{}]", id, span.scroll);
-          doc.cells[id]  = std::move(cell);
+          Cell cell;
+          cell.id       = id;
+          cell.role     = "cell";
+          cell.data     = std::format("Cell #{} [{}]", id, span.scroll);
+          doc.cells[id] = std::move(cell);
         }
       }
       for (const auto &span : link.right) {
         if (!spanToCell.contains(span)) {
           const CellID id  = nextCellId++;
           spanToCell[span] = id;
-          zzCell cell;
-          cell.id        = id;
-          cell.type      = "cell";
-          cell.text_data = std::format("Cell #{} [{}]", id, span.scroll);
-          doc.cells[id]  = std::move(cell);
+          Cell cell;
+          cell.id       = id;
+          cell.role     = "cell";
+          cell.data     = std::format("Cell #{} [{}]", id, span.scroll);
+          doc.cells[id] = std::move(cell);
         }
       }
 
