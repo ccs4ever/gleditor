@@ -29,21 +29,31 @@ unified spatial manifold based on **zzstructures**. Every entity, execution thre
 binding, lexical scope, instruction stream, and data structure exists as an interconnected node
 within a single multidimensional coordinate matrix.
 
-### The Two-Primitive Invariant
+### The Single-Primitive Invariant
 
-The entire engine core is strictly constrained to two structural primitives and two scalar payload
-accessors:
+The entire engine core is strictly constrained to one structural primitive and two scalar payload
+accessors. `get_link`/`set_link` are not two primitives that happen to share an argument list —
+every combination of their arguments already had a compatible, unambiguous return shape, so they're
+one overloaded primitive, `link`, distinguished by whether a `target` was passed at all:
 
-1. **`get_link(cell, dim, direction)`**: Inspects and traverses adjacent cell coordinates along a
-   specific dimension.
-1. **`set_link(cell, dim, direction, target)`**: Directly establishes, mutates, or breaks
-   dimensional connections:
-   - **Allocation (`target == -1`)**: Instantiates a fresh cell and wires it directly to the source
-     node along the given dimension and direction.
-   - **Isolation (`target == 0`)**: Clears the designated directional pointer. When all dimensional
-     links of a cell are set to 0, the cell is geometrically isolated.
+1. **`link(cell, dim, direction, [target]) -> std::optional<cell_id>`**: Inspects, establishes,
+   mutates, or breaks a dimensional connection, depending on `target`:
+   - **Read (`target` omitted)**: Returns the cell currently linked in that direction, or
+     `std::nullopt` if there isn't one. (Formerly `get_link`.)
+   - **Allocation (`target == -1`)**: Instantiates a fresh cell, wires it directly to the source
+     node along the given dimension and direction, and returns its id.
+   - **Isolation (`target == -2`)**: Clears the designated directional pointer and returns the cell
+     that had been linked there, or `std::nullopt` if there was nothing to clear. When all
+     dimensional links of a cell are cleared, the cell is geometrically isolated. `-2` is used
+     rather than `0` because `0` is Cell 0, the origin/home cell (the Root Set anchor described
+     under "Topological Garbage Collection" below) — an ordinary, addressable target, not a
+     sentinel. A dimension can legitimately link straight at Cell 0; only `-1` and `-2` are
+     reserved.
+   - **Literal target (any other `cell_id`, including `0`)**: Links directly to that cell and
+     returns it.
    - **Identity Entanglement & Unentanglement (`dim == d_entangle`)**: Establishes or breaks an
-     identity binding where multiple cells share a single underlying payload pointer pool.
+     identity binding where multiple cells share a single underlying payload pointer pool, following
+     the same read/allocate/isolate/literal-target branching as any other dimension.
 1. **`get(cell, [offset], [length])`**: Dereferences the cell's payload
    (`std::variant<std::string, double, bool>`) with optional virtual slicing.
 1. **`set(cell, value, [offset], [length])`**: Writes or in-place patches the variant payload,
@@ -68,14 +78,15 @@ purely reachability-based:
 - **Trace Cycle**: A mark-and-sweep or reference manifold crawl marks all cells reachable across any
   link.
 
-- **Eager Eviction**: When `set_link` reduces a cell's total non-zero connections across all axes to
-  zero:
+- **Eager Eviction**: When `link` reduces a cell's total live connections across all axes to zero:
 
   ```math
-  \sum_{\text{dim}} \left( [\text{links}[\text{dim}].\text{pos} \ne 0] + [\text{links}[\text{dim}].\text{neg} \ne 0] \right) = 0
+  \sum_{\text{dim}} \left( [\text{links}[\text{dim}].\text{pos} \ne \text{nolink}] + [\text{links}[\text{dim}].\text{neg} \ne \text{nolink}] \right) = 0
   ```
 
-  the runtime immediately reclaims the cell without waiting for a full sweep cycle.
+  the runtime immediately reclaims the cell without waiting for a full sweep cycle. `nolink` is a
+  reserved out-of-band marker distinct from every real `cell_id` (including `0`) — see §2's
+  `kNoLink` — so a link genuinely pointing at Cell 0 still counts as a live connection here.
 
 ______________________________________________________________________
 
@@ -86,6 +97,7 @@ ______________________________________________________________________
 #include <string>
 #include <unordered_map>
 #include <memory>
+#include <optional>
 #include <variant>
 #include <vector>
 #include <algorithm>
@@ -104,12 +116,23 @@ constexpr cell_id d_cursors = 1001; // Process scheduler manifold
 constexpr cell_id d_vars    = 1003; // Scope variable names
 constexpr cell_id d_values  = 1004; // Variable values / ground terms
 
+// Reserved out-of-band marker for "no link here", distinct from every real
+// cell_id -- including 0, Cell 0's own address. Real cells are allocated
+// starting at 1 (next_cell_id below); Cell 0 is pre-seeded as the origin, so
+// -1 is safe as a sentinel no allocated cell will ever collide with.
+constexpr cell_id kNoLink = -1;
+
+struct LinkSlot {
+    cell_id first  = kNoLink;
+    cell_id second = kNoLink;
+};
+
 using CellValue = std::variant<std::string, double, bool>;
 
 struct Cell {
     cell_id id;
     CellValue primitive_value = "";
-    std::unordered_map<cell_id, std::pair<cell_id, cell_id>> links; // [dim] -> {pos, neg}
+    std::unordered_map<cell_id, LinkSlot> links; // [dim] -> {pos, neg}
     std::shared_ptr<CellValue> entangled_payload = nullptr;
 };
 
@@ -131,7 +154,8 @@ static void handle_unentangle_cleanup(cell_id c_id) {
     auto& c = matrix[c_id];
     if (!c || !c->entangled_payload) return;
     c->primitive_value = *(c->entangled_payload);
-    if (c->links[d_entangle].first == 0 && c->links[d_entangle].second == 0) {
+    if (c->links[d_entangle].first == kNoLink &&
+        c->links[d_entangle].second == kNoLink) {
         c->entangled_payload = nullptr;
     } else {
         c->entangled_payload =
@@ -139,24 +163,32 @@ static void handle_unentangle_cleanup(cell_id c_id) {
     }
 }
 
-// Primitive 1: get_link
-cell_id get_link(cell_id cell, cell_id dim, int direction) {
+// The Structural Primitive: link
+// target omitted        -> read:      the linked cell, or nullopt if unlinked.
+// target == -1           -> allocate:  the newly created cell.
+// target == -2           -> isolate:   the cell that was linked there, or
+//                                       nullopt if there was nothing to break.
+// target == any other id -> literal:   that same target (0 included -- Cell 0
+//                                       is an ordinary target, not a sentinel).
+std::optional<cell_id> link(cell_id cell, cell_id dim, int direction,
+                             std::optional<cell_id> target = std::nullopt) {
     auto it = matrix.find(cell);
-    if (it == matrix.end() || !it->second) return 0;
-    auto link_it = it->second->links.find(dim);
-    if (link_it == it->second->links.end()) return 0;
-    return (direction > 0) ? link_it->second.first :
+    if (it == matrix.end() || !it->second) return std::nullopt;
+    auto& c = it->second;
+
+    // Read form (formerly get_link)
+    if (!target.has_value()) {
+        auto link_it = c->links.find(dim);
+        if (link_it == c->links.end()) return std::nullopt;
+        cell_id existing = (direction > 0) ? link_it->second.first :
 link_it->second.second;
-}
+        return existing == kNoLink ? std::nullopt :
+std::optional<cell_id>(existing);
+    }
 
-// Primitive 2: set_link
-cell_id set_link(cell_id cell, cell_id dim, int direction, cell_id
-target) {
-    auto& c = matrix[cell];
-    if (!c) return 0;
-
-    cell_id actual_target = (target == -1) ? internal_alloc_cell() :
-target;
+    const cell_id raw_target = *target;
+    const cell_id actual_target = (raw_target == -1) ?
+internal_alloc_cell() : raw_target;
 
     // Quantum Identity Synchronization along d.entangle
     if (dim == d_entangle) {
@@ -164,60 +196,63 @@ target;
 : c->links[d_entangle].second;
 
         // Break Entanglement
-        if (actual_target == 0 && old_target != 0) {
-            if (direction > 0) c->links[d_entangle].first = 0;
-            else c->links[d_entangle].second = 0;
+        if (raw_target == -2) {
+            if (old_target == kNoLink) return std::nullopt;
+            if (direction > 0) c->links[d_entangle].first = kNoLink;
+            else c->links[d_entangle].second = kNoLink;
 
             auto& partner = matrix[old_target];
             if (partner) {
                 if (direction > 0 && partner->links[d_entangle].second ==
-cell) partner->links[d_entangle].second = 0;
+cell) partner->links[d_entangle].second = kNoLink;
                 else if (direction < 0 && partner->links[d_entangle].first
-== cell) partner->links[d_entangle].first = 0;
+== cell) partner->links[d_entangle].first = kNoLink;
                 handle_unentangle_cleanup(old_target);
             }
             handle_unentangle_cleanup(cell);
-            return 0;
+            return old_target;
         }
 
         // Establish Entanglement
-        if (actual_target != 0) {
-            auto& t = matrix[actual_target];
-            if (!t) return 0;
-            if (direction > 0) { c->links[d_entangle].first =
+        auto& t = matrix[actual_target];
+        if (!t) return std::nullopt;
+        if (direction > 0) { c->links[d_entangle].first =
 actual_target; t->links[d_entangle].second = cell; }
-            else { c->links[d_entangle].second = actual_target;
+        else { c->links[d_entangle].second = actual_target;
 t->links[d_entangle].first = cell; }
 
-            if (!c->entangled_payload && !t->entangled_payload) {
-                c->entangled_payload =
+        if (!c->entangled_payload && !t->entangled_payload) {
+            c->entangled_payload =
 std::make_shared<CellValue>(c->primitive_value);
-                t->entangled_payload = c->entangled_payload;
-            } else if (c->entangled_payload && !t->entangled_payload) {
-                t->entangled_payload = c->entangled_payload;
-            } else if (!c->entangled_payload && t->entangled_payload) {
-                c->entangled_payload = t->entangled_payload;
-            } else if (c->entangled_payload != t->entangled_payload) {
-                *(t->entangled_payload) = *(c->entangled_payload);
-                t->entangled_payload = c->entangled_payload;
-            }
-            return actual_target;
+            t->entangled_payload = c->entangled_payload;
+        } else if (c->entangled_payload && !t->entangled_payload) {
+            t->entangled_payload = c->entangled_payload;
+        } else if (!c->entangled_payload && t->entangled_payload) {
+            c->entangled_payload = t->entangled_payload;
+        } else if (c->entangled_payload != t->entangled_payload) {
+            *(t->entangled_payload) = *(c->entangled_payload);
+            t->entangled_payload = c->entangled_payload;
         }
+        return actual_target;
     }
 
     // Standard Dimensional Topologies
-    if (actual_target == 0) {
-        if (direction > 0) c->links[dim].first = 0;
-        else c->links[dim].second = 0;
+    if (raw_target == -2) {
+        cell_id old_target = (direction > 0) ? c->links[dim].first :
+c->links[dim].second;
+        if (old_target == kNoLink) return std::nullopt;
+        if (direction > 0) c->links[dim].first = kNoLink;
+        else c->links[dim].second = kNoLink;
+        return old_target;
+    }
+
+    auto& t = matrix[actual_target];
+    if (direction > 0) {
+        c->links[dim].first = actual_target;
+        if (t) t->links[dim].second = cell;
     } else {
-        auto& t = matrix[actual_target];
-        if (direction > 0) {
-            c->links[dim].first = actual_target;
-            if (t) t->links[dim].second = cell;
-        } else {
-            c->links[dim].second = actual_target;
-            if (t) t->links[dim].first = cell;
-        }
+        c->links[dim].second = actual_target;
+        if (t) t->links[dim].first = cell;
     }
     return actual_target;
 }
@@ -291,7 +326,26 @@ static_cast<size_t>(length);
     count = std::min(count, target_str.size() - start);
     target_str.replace(start, count, input_str);
 }
+
+// Convenience Wrappers (named entry points onto link/set, not new primitives)
+std::optional<cell_id> new_cell(cell_id cell, cell_id dim, int direction) {
+    return link(cell, dim, direction, -1);
+}
+std::optional<cell_id> new_cell(cell_id cell, cell_id dim, int direction,
+                                 const CellValue& value) {
+    std::optional<cell_id> created = link(cell, dim, direction, -1);
+    if (created) set(*created, value);
+    return created;
+}
+std::optional<cell_id> break_link(cell_id cell, cell_id dim, int direction) {
+    return link(cell, dim, direction, -2);
+}
 ```
+
+`new_cell` and `break_link` are spelled that way — not `new`/`break` — because both are reserved
+words in C++; VQL's own surface syntax (§4.5/§4.6 of [vql-query-language.md](vql-query-language.md))
+is unconstrained by that and can spell the equivalent sugar `new(...)`/`break(...)` directly, and
+both compile straight to a fixed-`target` call on `link` rather than to a separate primitive.
 
 ______________________________________________________________________
 

@@ -1,13 +1,12 @@
 # Vortex Query Language (VQL) Specification
 
 **Document Version:** 5.0.0 — Xanalogical Revision **Compilation Target:** Vortex Hyperstructural
-Runtime Core (Two-Primitive Matrix Manifold)
+Runtime Core (Single-Primitive Matrix Manifold)
 
 VQL is the declarative, XQuery-like companion language for
 [Vortex](vortex-hyperstructural-runtime.md): every VQL query compiles down to the same
-`get_link`/`set_link`/`get`/`set` primitives that make up Vortex's two-primitive core. As with the
-Vortex spec, this document specifies a language design consuming the Zigzag `zzstructure` manifold
-model (see
+`link`/`get`/`set` primitives that make up Vortex's single-primitive core. As with the Vortex spec,
+this document specifies a language design consuming the Zigzag `zzstructure` manifold model (see
 [zigzag-multidimensional-space-and-projection.md](zigzag-multidimensional-space-and-projection.md));
 nothing here is wired into the gleditor build.
 
@@ -28,17 +27,25 @@ Instead, every query expression compiles down to spatial traversals, generator p
 mutations driven by the atomic engine:
 
 ```math
-\mathcal{M} = \langle \text{get\_link}, \, \text{set\_link}, \, \text{get}, \, \text{set} \rangle
+\mathcal{M} = \langle \text{link}, \, \text{get}, \, \text{set} \rangle
 ```
 
 ### Fundamental Invariants
 
-- **The Two-Primitive Core**: Path traversal compiles strictly to `get_link(cell, dim, dir)`.
-  Mutations, updates, insertions, and allocations compile strictly to
-  `set_link(cell, dim, dir, target)`, with `target == -1` for allocation and `target == 0` for
-  deallocation/isolation. `get(cell, [offset], [length])`/`set(cell, value, [offset], [length])` are
-  the matching content accessors — see Vortex §2's `get_cell_value`/`set_cell_value`, renamed here
-  to match how they're spelled in every VQL surface form.
+- **The Single-Primitive Core**: Path traversal and every mutation, update, insertion, and
+  allocation compile strictly to `link(cell, dim, dir, [target])` — reading if `target` is omitted,
+  and otherwise writing: `target == -1` allocates, `target == -2` deallocates/isolates, and any
+  other value (including a literal `0`) links straight to that cell, since `0` is Cell 0, the
+  origin/home cell — an ordinary addressable target, not a sentinel. `link` returns the
+  linked/allocated/broken cell, or nothing if there wasn't one; VQL treats an empty result the same
+  way any other step that "returns nothing" is treated (§3). `get(cell, [offset], [length])`/
+  `set(cell, value, [offset], [length])` are the matching content accessors — see Vortex §2's
+  `get_cell_value`/`set_cell_value`, renamed here to match how they're spelled in every VQL surface
+  form. Vortex §2 also defines `new(cell, dim, dir, [value])`/`break(cell, dim, dir)` as named entry
+  points fixing `link`'s `target` to `-1`/`-2` respectively (`new`'s optional `value` is a `set()`
+  applied to the freshly allocated cell); VQL reaches all three the same way — as ordinary
+  `FunctionInvocation`s (§3) — so `$cell/break(d.foo, +1)` and `$cell/link(d.foo, +1, -2)` compile
+  to the same call.
 - **Dual-Wing Invocation Topology**: Built-in functions, custom routines, and opcodes adhere to the
   dual-wing interface. Out-parameters project negward along `-d.grab` (chained posward along
   `+d.step` for multiple returns). In-parameters project posward along `+d.grab` and chain along
@@ -50,18 +57,20 @@ mutations driven by the atomic engine:
   They resolve directly against the active Spin-Head cursor along `+d.vars`, with bound payloads or
   complex subgraphs projecting perpendicularly along `+d.values`.
 - **Quantum Identity Synchronization (`d.entangle`)**: `$a><$b` entangles two cells along
-  `d.entangle` — sugar for `set_link($a, d_entangle, +1, $b)` directly (§4.6). Entangled cells share
-  an underlying pointer to a single `CellValue` variant, so mutating one immediately propagates to
+  `d.entangle` — sugar for `link($a, d_entangle, +1, $b)` directly (§4.6). Entangled cells share an
+  underlying pointer to a single `CellValue` variant, so mutating one immediately propagates to
   every entangled cell, across all viewports and observer ranks.
 - **Zero-Allocation Lazy Rank-Streaming**: A path step (`/dim`) does not materialize an intermediate
   collection. It instantiates an $O(1)$ spatial cursor that lazily yields matching `cell_id`
-  coordinates along `dim`'s entire rank until it encounters 0 (null) or a loopback boundary — a
-  single `/` step already walks the whole rank, not one hop of it.
+  coordinates along `dim`'s entire rank until `link`'s read form returns nothing or a loopback
+  boundary is reached — a single `/` step already walks the whole rank, not one hop of it. Absence
+  of a link, not a `cell_id` of `0`, is what ends the stream, so a rank can freely pass through Cell
+  0 without truncating early.
 - **Xanalogical Mutation**: VQL does not have a separate "update" sublanguage. `%` creation sugar
-  and `set_link`/`set` calls are ordinary path steps with side effects; a query that reads and a
-  query that writes are the same grammar, evaluated under `return` or `weave` respectively. This
-  mirrors the rest of the system: an edit is a walk that happens to allocate and link, not a
-  different kind of operation layered on top of the read path.
+  and `link`/`set` calls are ordinary path steps with side effects; a query that reads and a query
+  that writes are the same grammar, evaluated under `return` or `weave` respectively. This mirrors
+  the rest of the system: an edit is a walk that happens to allocate and link, not a different kind
+  of operation layered on top of the read path.
 - **Persistent Star-Pivot Caching**: Expensive generative transformations (e.g., regex compilation
   or macro expansions) memoize their topological results off the root origin (`##` / Cell 0) along
   `+d.cache`, anchoring invocation nodes to input and output manifolds.
@@ -70,25 +79,25 @@ ______________________________________________________________________
 
 ## 2. Syntactic Token & Structural Shorthand Matrix
 
-| Token / Operator    | Structural Equivalent                       | Functional & Spatial Semantic Mapping                                                                       |
-| ------------------- | ------------------------------------------- | ----------------------------------------------------------------------------------------------------------- |
-| `##`                | Origin Anchor (`cell_id = 0`)               | Grounds query context to the absolute system environment origin.                                            |
-| `#`                 | Root Metacells                              | Lazily streams all disjoint root manifold entry points across the matrix.                                   |
-| `^`                 | Process Manifold (`d.cursors`)              | Streams all active Spin-Head execution cursor threads.                                                      |
-| `^NAME`             | `^[. = "NAME"]`                             | Short-circuits the cursor scan, locking directly onto the named thread node.                                |
-| `.`                 | Context Identity                            | The current step's context cell — a valid anchor on its own, or `get(context)` when dereferenced.           |
-| `/dim`              | `LazyRankStream(dim, posward)`              | Traverses `dim`'s entire rank posward from the context cell.                                                |
-| `/-dim`             | `LazyRankStream(dim, negward)`              | Traverses `dim`'s entire rank negward — the `-` binds to the dimension name, not the operator.              |
-| `/dim%`             | Create (`set_link(@, dim, dir, -1)`)        | Allocates a new cell along `dim` (at the tail of any existing rank); see §4.5.                              |
-| `/dim%VALUE`        | Create + init                               | Allocates and initializes a new cell's content to `VALUE` — bare, quoted, or `$variable`.                   |
-| `/dim%%...`         | Batch create                                | Each additional `%` allocates one more cell along `dim`; all of them join the step's result set — see §4.5. |
-| `A><B`              | Entangle (`set_link(A, d_entangle, +1, B)`) | Binds `A` and `B` to one shared payload; chainable (`A><B><C`) and combinable with `%` — see §4.6.          |
-| `.[offset, length]` | `get(ctx, off, len)`                        | Zero-copy virtual string slice dereference.                                                                 |
-| `@`                 | Context Identity Address                    | Evaluates to the numerical `cell_id` coordinate of the context node itself.                                 |
-| `[...]`             | Predicate / Index Window                    | Applies inline boolean filters or relative index clamps to a stream.                                        |
-| `(...)`             | Macro Dimension Group                       | Groups dimensional sequences into a compound traversal segment.                                             |
-| `*`                 | Kleene Repetition                           | Repeats the preceding macro group zero or more times until termination.                                     |
-| `{...}`             | Weave Block                                 | Groups a comma-separated list of effect items under `weave`.                                                |
+| Token / Operator    | Structural Equivalent                   | Functional & Spatial Semantic Mapping                                                                       |
+| ------------------- | --------------------------------------- | ----------------------------------------------------------------------------------------------------------- |
+| `##`                | Origin Anchor (`cell_id = 0`)           | Grounds query context to the absolute system environment origin.                                            |
+| `#`                 | Root Metacells                          | Lazily streams all disjoint root manifold entry points across the matrix.                                   |
+| `^`                 | Process Manifold (`d.cursors`)          | Streams all active Spin-Head execution cursor threads.                                                      |
+| `^NAME`             | `^[. = "NAME"]`                         | Short-circuits the cursor scan, locking directly onto the named thread node.                                |
+| `.`                 | Context Identity                        | The current step's context cell — a valid anchor on its own, or `get(context)` when dereferenced.           |
+| `/dim`              | `LazyRankStream(dim, posward)`          | Traverses `dim`'s entire rank posward from the context cell.                                                |
+| `/-dim`             | `LazyRankStream(dim, negward)`          | Traverses `dim`'s entire rank negward — the `-` binds to the dimension name, not the operator.              |
+| `/dim%`             | Create (`link(@, dim, dir, -1)`)        | Allocates a new cell along `dim` (at the tail of any existing rank); see §4.5.                              |
+| `/dim%VALUE`        | Create + init                           | Allocates and initializes a new cell's content to `VALUE` — bare, quoted, or `$variable`.                   |
+| `/dim%%...`         | Batch create                            | Each additional `%` allocates one more cell along `dim`; all of them join the step's result set — see §4.5. |
+| `A><B`              | Entangle (`link(A, d_entangle, +1, B)`) | Binds `A` and `B` to one shared payload; chainable (`A><B><C`) and combinable with `%` — see §4.6.          |
+| `.[offset, length]` | `get(ctx, off, len)`                    | Zero-copy virtual string slice dereference.                                                                 |
+| `@`                 | Context Identity Address                | Evaluates to the numerical `cell_id` coordinate of the context node itself.                                 |
+| `[...]`             | Predicate / Index Window                | Applies inline boolean filters or relative index clamps to a stream.                                        |
+| `(...)`             | Macro Dimension Group                   | Groups dimensional sequences into a compound traversal segment.                                             |
+| `*`                 | Kleene Repetition                       | Repeats the preceding macro group zero or more times until termination.                                     |
+| `{...}`             | Weave Block                             | Groups a comma-separated list of effect items under `weave`.                                                |
 
 There is a single traversal operator: `/` already walks a whole rank, so there is no "one hop" form
 to distinguish it from, and direction is a property of the dimension name (an optional leading `-`),
@@ -179,9 +188,9 @@ A few grammar points worth calling out explicitly:
   chained from is prepended as the first argument — as `@` (a cell reference) if the function's
   first parameter expects a cell, or as `.` (the dereferenced value) if it expects a value; which
   one a given function takes is fixed by its declared signature, not inferred per call. This is why
-  `$cell/set_link(d.foo, +1, $target)` means `set_link(@, d.foo, +1, $target)` with `@` bound to
-  `$cell` — `set_link` returns the cell it just linked, so the chain is just as continuable — and
-  why `$path/substring(1, 8)` and `$path/set("foo")` need no explicit context argument at all:
+  `$cell/link(d.foo, +1, $target)` means `link(@, d.foo, +1, $target)` with `@` bound to `$cell` —
+  `link` returns the cell it just linked, so the chain is just as continuable — and why
+  `$path/substring(1, 8)` and `$path/set("foo")` need no explicit context argument at all:
   `substring` and `set` both expect a value first, so `.` is prepended instead of `@`. Mutation is
   not a separate "statement" grammar competing with the "expression" grammar for the same syntax;
   it's the same PathExpression machinery, evaluated for effect under `weave` instead of for value
@@ -206,15 +215,18 @@ ______________________________________________________________________
 cell_id current = start_node;
 int direction = signed_dimension.negated ? -1 : +1;
 cell_id target_dim = signed_dimension.dim;
-while (current != 0) {
-    cell_id next = get_link(current, target_dim, direction);
-    if (next == 0 || next == start_node) break; // Terminate on null or loopback
-    if (eval_predicates(next)) {
-        yield next;
+while (true) {
+    std::optional<cell_id> next = link(current, target_dim, direction);
+    if (!next || *next == start_node) break; // Terminate on absence or loopback
+    if (eval_predicates(*next)) {
+        yield *next;
     }
-    current = next;
+    current = *next;
 }
 ```
+
+`start_node` itself may legitimately be Cell 0 (`##`, §2) — the loop terminates purely on `link`'s
+read form returning nothing, never on a `cell_id` value, so nothing here special-cases 0.
 
 - **Index Clamping (`[n]`)**: Evaluated lazily with 1-based indexing.
   - `[1]`: Short-circuits traversal on the first matching cell, avoiding unnecessary traversals over
@@ -279,8 +291,8 @@ literal that has nothing to do with the cell model it's returning from:
 
 `%`, suffixed onto a `SignedDimension` step, is sugar over allocation:
 
-- **Bare (`/dim%`)**: `set_link(@, dim, dir, -1)`. Applied once per cell in the current context
-  stream (like any other step).
+- **Bare (`/dim%`)**: `link(@, dim, dir, -1)`. Applied once per cell in the current context stream
+  (like any other step).
 - **Initialized (`/dim%VALUE`)**: the same allocation, immediately followed by `set(@, VALUE)` on
   the newly allocated cell. `VALUE` may be a bare token (`/d.status%OK`), a quoted string when it
   contains spaces or punctuation (`/d.status%"needs review"`), or a variable (`/d.status%$value`).
@@ -305,30 +317,29 @@ literal that has nothing to do with the cell model it's returning from:
   the same "many new siblings" outcome for a runtime-determined count; `%%` is for a
   compile-time-known one.
 - **Existing targets don't go through `%`.** Pointing a dimension at a cell that already exists — as
-  opposed to allocating a new one — is `set_link(dim, dir, target)` directly, reachable as an
-  ordinary `FunctionInvocation` step (§3). `%` is specifically the "make a new cell" case.
+  opposed to allocating a new one — is `link(dim, dir, target)` directly, reachable as an ordinary
+  `FunctionInvocation` step (§3). `%` is specifically the "make a new cell" case.
 
 ### 4.6 Entanglement Sugar (`><`)
 
-`><` is sugar over `set_link(A, d_entangle, +1, B)`: two cells wired along `d.entangle` share a
-single underlying `CellValue` pointer (§1), so setting either one's content afterward sets both.
+`><` is sugar over `link(A, d_entangle, +1, B)`: two cells wired along `d.entangle` share a single
+underlying `CellValue` pointer (§1), so setting either one's content afterward sets both.
 
-- **Base form (`A><B`)**: `set_link(A, d_entangle, +1, B)`. `A` and `B` are each a full
+- **Base form (`A><B`)**: `link(A, d_entangle, +1, B)`. `A` and `B` are each a full
   `PathExpression`'s result — `EntangleTail` (§3) binds after all of a path's own `PathStep`s, not
   mid-traversal.
 - **Chainable (`A><B><C`)**: each additional operand nests the accumulated expression as the new
-  `target` argument of a fresh `set_link` call rooted at the new operand —
-  `set_link(C, d_entangle, +1, set_link(A, d_entangle, +1, B))`. Since `set_link` returns the
-  `target` it was given whenever that target isn't `-1`/`0`, the inner call returns `B`, so the
-  outer call reduces to `set_link(C, d_entangle, +1, B)`: `A` and `B` entangle directly, and `C`
-  joins the same group through `B`. The group ends up sharing one payload regardless of which pair
-  is directly linked.
-- **Payload authority follows argument order, not chain length.** In
-  `set_link(cell, dim, dir, target)`, a fresh entanglement's shared payload is seeded from `cell`'s
-  (the first argument's) existing content — `target`'s prior content is discarded. Since the
-  leftmost operand in an `EntangleTail` always ends up as `cell` in the first `set_link` call that
-  establishes the group (see the chaining rule above), the leftmost operand's value is what the
-  whole group ends up sharing.
+  `target` argument of a fresh `link` call rooted at the new operand —
+  `link(C, d_entangle, +1, link(A, d_entangle, +1, B))`. Since a literal, already-existing `target`
+  always echoes back out as `link`'s return value, the inner call returns `B`, so the outer call
+  reduces to `link(C, d_entangle, +1, B)`: `A` and `B` entangle directly, and `C` joins the same
+  group through `B`. The group ends up sharing one payload regardless of which pair is directly
+  linked.
+- **Payload authority follows argument order, not chain length.** In `link(cell, dim, dir, target)`,
+  a fresh entanglement's shared payload is seeded from `cell`'s (the first argument's) existing
+  content — `target`'s prior content is discarded. Since the leftmost operand in an `EntangleTail`
+  always ends up as `cell` in the first `link` call that establishes the group (see the chaining
+  rule above), the leftmost operand's value is what the whole group ends up sharing.
 - **Combines with `%` (`A><%`, `A><%VALUE`, `%VALUE><A`)**: a bare `%` — with no dimension prefix,
   distinct from `/dim%`'s dimension-attached form — allocates a free cell with no incoming
   structural link at all; `%VALUE` allocates and immediately `set()`s it to `VALUE`, same as
@@ -358,16 +369,16 @@ graph TD
     Unreach["Unreachable Clusters"]
     GC["Reclaimed by GC"]
 
-    Root -->|get_link traversal| Reach
-    Reach -->|"set_link(..., 0) severs a link"| Unreach
+    Root -->|"link(..., read)" traversal| Reach
+    Reach -->|"link(..., -2) severs a link"| Unreach
     Unreach --> GC
 ```
 
-- **Allocation**: `%` (§4.5) or a direct `set_link(cell, dim, dir, -1)` materializes a new cell
-  directly into the coordinate system.
-- **Disconnection & Re-linking**: `set_link(cell, dim, dir, 0)` severs a pointer. If a cell's
-  aggregate link count reaches zero across all dimensions, the cell is eagerly evicted from the
-  matrix storage map.
+- **Allocation**: `%` (§4.5) or a direct `link(cell, dim, dir, -1)` materializes a new cell directly
+  into the coordinate system.
+- **Disconnection & Re-linking**: `link(cell, dim, dir, -2)` — or `break(cell, dim, dir)` (§1) —
+  severs a pointer. If a cell's aggregate link count reaches zero across all dimensions, the cell is
+  eagerly evicted from the matrix storage map.
 - **Sub-graph Isolation**: If a pipeline or temporary manifold is severed from the root set, it is
   marked as unreachable during the next sweep phase and reclaimed without manual deallocation.
 
@@ -417,14 +428,14 @@ else
     let $nfa_start := $new_inv/d.outputs%"#START",
     for $ch in EXPLODE($pattern, "")
       weave $nfa_start/d.step%$ch,
-    $compiler/set_link(d.results, +1, $nfa_start/@)
+    $compiler/link(d.results, +1, $nfa_start/@)
   }
 ```
 
 The character loop leans on §4.5's tail-seeking: each `$nfa_start/d.step%$ch` walks to wherever the
 chain currently ends and appends there, so the loop builds one linked rank instead of repeatedly
 overwriting `$nfa_start`'s own `d.step` link. The final line points `d.results` at the NFA's actual
-entry cell — an existing target, so it's spelled with `set_link`, not `%`.
+entry cell — an existing target, so it's spelled with `link`, not `%`.
 
 ### 6.3 Shared Identity via Entanglement
 
@@ -441,7 +452,7 @@ weave $default_theme><$new_user/d.theme%
 `$default_theme` is written first so its value is the one the group ends up sharing (§4.6): the
 right-hand operand is an ordinary `/dim%` create with no `VALUE` of its own, so there's nothing for
 the join to discard. A user who later gets their own theme breaks out of the group with
-`set_link($new_user/d.theme, d_entangle, +1, 0)` — an ordinary `set_link` call, not a different
+`$new_user/d.theme/break(d_entangle, +1)` — `link(..., -2)` under the hood (§1), not a different
 "unentangle" primitive.
 
 ### 6.4 In-Place Graph Rewriting & Edge Re-Targeting
@@ -454,11 +465,11 @@ for $old_service in ##/d.services[. = "auth_v1"]
 let $new_service := ##/d.services[. = "auth_v2"]/@
 weave {
     for $caller in $old_service/-d.route
-      weave $caller/set_link(d.route, +1, $new_service),
+      weave $caller/link(d.route, +1, $new_service),
 
     // Clear all incoming and outgoing connections of old service
-    $old_service/set_link(d.services, +1, 0),
-    $old_service/set_link(d.services, -1, 0)
+    $old_service/break(d.services, +1),
+    $old_service/break(d.services, -1)
     // Topological GC automatically reclaims $old_service once isolated
 }
 ```

@@ -1253,8 +1253,9 @@ zzstructure:
   spans, EDL pieces, and hypertime versions into Zigzag cells. Unchanged text spans across hypertime
   branches are automatically projected as **clone cells** linked along the `d.clone` dimension.
 - **Vortex & VQL (design only, not yet implemented)**: A speculative programming language and
-  XQuery-like query language whose entire state is a zzstructure manifold, addressed through the
-  same two-primitive `get_link`/`set_link` model as `CompactZZCell`. See
+  XQuery-like query language whose entire state is a zzstructure manifold, addressed through a
+  single `link` structural primitive (read when no target is given, write otherwise) plus
+  `get`/`set` payload accessors. See
   [design/vortex-hyperstructural-runtime.md](design/vortex-hyperstructural-runtime.md) and
   [design/vql-query-language.md](design/vql-query-language.md).
 
