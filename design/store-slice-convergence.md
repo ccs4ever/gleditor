@@ -125,13 +125,21 @@ filter sites ([`version.cpp`](apps/common/xanadu/version.cpp) `:106,151,176,249`
 [`transcopyright_logic.cpp`](apps/common/xanadu/transcopyright_logic.cpp) `:123`,
 [`session.cpp`](apps/xudu/session.cpp) `:1264,1407,2103`).
 
-**A hard constraint that comes with it.** `binary_ops.cpp`'s `OpBinaryKind` already occupies 0..6
+**The tag space, and why it is not a constraint.** `binary_ops.cpp`'s `OpBinaryKind` occupies 0..6
 (`BinInsert` through `BinPageBreak`, with TRANSCLUDE split into internal and external forms), and
 `FLAG_KIND_MASK = 0x07` sits with `FLAG_SEQUENTIAL = 0x08` directly above it. `BinStructure = 7`
-therefore **exhausts the tag space**. Any eighth kind forces a mask widening, a tag-byte re-layout
-and an `OpsSpoolVersion::CompactBinaryV3`. So `Structure` must be a *family* discriminated by
-`CompactOpNode::flags`, never by further `OpKind` values, and that must be written into
-`binary_ops.hpp` beside the `CompactBinaryV2` comment in the same commit.
+fills the mask exactly.
+
+An earlier draft treated that as a wall and concluded that `Structure` must therefore be a *family*
+discriminated by `flags`, never by further `OpKind` values. **R11 retires that reasoning.** Widening
+the tag to four bits costs an `OpsSpoolVersion::CompactBinaryV3` and nothing else, and a version
+bump is cheap in a format nothing has published yet.
+
+The `flags`-discriminated family survives, but now on its own merits rather than under duress: the
+Structure verbs share every field and differ only in which ones they read, so they would be a
+strictly worse encoding as sibling `OpKind`s that no `switch` outside the manifold fold ever wants
+to tell apart. What changes is that this is a design choice defended in §5.2, not a forced move —
+and an eighth *hyperop*, should OSMIC ever be read to imply one, now has somewhere to go.
 
 ### R2. A dimension is a cell, and it travels in `linkId`
 
@@ -153,13 +161,20 @@ commit.
 
 ### R3. `LinkType::Dimension` is demoted to transport only
 
-The decisive reason is not performance: **a `Link` does not travel in a seal.** `Store::save` writes
-`linkTable` to a separate plaintext file; `applyOpsSegment` replays `putOp` and never touches
-`linkTable`; links cross the swarm only through `LinkPackage`/`adopt()`, which assigns fresh ids. A
-manifold modelled as `Link`s is unpublishable as history.
+The decisive reason is not performance: **a `Link` has no name in hypertime.** A link is not
+produced by a `MicroversionId`, is not on `ancestralPath`, and is assigned a fresh id by `adopt()`
+on arrival, so there is no state you can scrub to at which a given link did or did not exist, and no
+branch you can fork from the moment it changed. A manifold modelled as `Link`s is unversionable, and
+therefore unpublishable *as history* whatever bytes it is stored in.
+
+An earlier draft rested this on a weaker fact — that `Store::save` writes `linkTable` to a separate
+plaintext file while `applyOpsSegment` replays `putOp` and never touches it, so links do not travel
+in a seal. **R11 dissolves that half of the argument**: the file layout is fixable, and under the
+new policy it will in fact be fixed. What survives is the hypertime argument above, which no file
+format can repair, because it is about what a link *is* rather than where it is written.
 
 That `Store::linksTouching()` is an unindexed full `std::map` scan is a real secondary cost, but it
-is a curable implementation defect and is not the argument.
+is a curable implementation defect and is not the argument either.
 
 `LinkType::Dimension` survives so `zzStructureToLinkPackage` keeps compiling, with a doc comment
 stating that it is an export envelope and never the model.
@@ -198,11 +213,17 @@ packages and in `Manifold::externalCells`.
 
 Op index 0 is state zero, the null document, and is definitionally not a cell — so `0 == absent` is
 correct in op-index space. It is also already hardcoded at roughly fifteen sites across
-`unified_transclusion_engine.cpp`, `zzcore.cpp`, `zz_xudu_projector.cpp`, and
-`Preflet::target_cell_id`. Adopting Vortex's `kNoLink = -1` would require making `CellID` signed
-plus a dozen call-site changes for no benefit.
+`unified_transclusion_engine.cpp`, `zzcore.cpp` and `zz_xudu_projector.cpp` (and, until R13 deletes
+it, `Preflet::target_cell_id`). Adopting Vortex's `kNoLink = -1` would require making `CellID`
+signed plus a dozen call-site changes for no benefit.
 
-Vortex's Origin Cell instead gets a real cell, minted as op index 1 at slice genesis.
+Vortex's Origin Cell instead gets a real cell, minted as op index 1 at slice genesis — the same cell
+zzstructure calls *home*, and the one R12 hangs the `d.dims` rank off. Genesis mints exactly two
+cells: `home` at index 1 and the `d.dims` dimension at index 2. Everything else in the slice,
+including every other dimension, is built from those with ordinary verbs.
+
+Op index 0 stays what it already is — state zero, the null document — and gains no cell, which is
+what makes `noCell == 0` sound rather than merely convenient.
 
 **Price.** One design-doc edit to
 [`vortex-hyperstructural-runtime.md`](vortex-hyperstructural-runtime.md): its `kNoLink` and "cell 0
@@ -216,7 +237,7 @@ This is the ruling that answers the non-text payload problem without giving anyt
 
 > **Every persistent cell has a real `PrimediaSpan` in a real scroll. A scalar cell's span holds its
 > shortest-round-trip rendering; the same op additionally carries the canonical IEEE-754 or boolean
-> bits in `sourceAt`/`sourceLength`, with a type tag in `flags`.**
+> bits in `CompactOpNode::value`, with a type tag in `flags`.**
 
 - The span is ordinary spooled permascroll text, so a scalar cell **is** a link endpoint, **is**
   formattable via `LinkType::Format` unchanged, **is** transcludable, diffable, publishable and
@@ -304,11 +325,44 @@ promote(Manifold &into, const ArenaManifold &from, CellRef root,
         PromotionBudget budget = {});
 ```
 
+**The cursor is the case that shows the boundary is drawn correctly.** `d.cursors` being in the Root
+Set looked like a counterexample; it is not, once *identity* and *state* are separated:
+
+- **A cursor cell's identity persists.** It is a real cell with a real `CellRef`, and it is rooted,
+  which is exactly what the Root Set membership asserts.
+- **Its position does not.** Moving a cursor is a *relink*, not an update. It rewrites which cell
+  the cursor's `d.cursors` link names, and a relink of an ephemeral link records no op. The spool
+  does not accumulate one `Structure` node per arrow keypress, which is the `PageBreak`-flood
+  failure mode (§6.1) reappearing in a second guise, and is refused for the same reason.
+- **Vortex-generated cursors keep no resumable state at all.** A generator's internal position is
+  meaningful only relative to the manifold it was walking. Persisting it and restoring it later
+  would resume a traversal against a structure that may have been rewritten underneath it — a cursor
+  pointing confidently at a cell that has since been relinked, deleted, or cloned. There is no
+  correct answer to "where was I" across an edit, so the ruling is not to pretend there is one: **a
+  resumed Vortex cursor re-derives its position or does not exist.**
+
+The general rule, of which all three are instances:
+
+> **Only a user-generated update persists. Navigation never does.** An op records that a person
+> changed the structure. Where anything — a person, a query, a renderer — happens to be *looking* is
+> not a change to the structure and does not earn a name in hypertime.
+
+This is what makes the two-type split in R8 mechanical rather than a matter of taste at each call
+site: a cursor's cell lives in the `Manifold`, its position and its generator state live in the
+`ArenaManifold` scoped to the cursor, and the type system refuses the mistake.
+
 **Price, stated as a loss.** A Vortex program's intermediate execution is **not** reproducible from
 the spool. Hypertime scrubs through a query's adopted outputs and through the query op itself, not
 through the computation. Reachability GC ([`vql-query-language.md`](vql-query-language.md) §5) is
 scoped to `ArenaManifold` only; on the persistent side `link(c, d, dir, -2)` records a Delete and
 reclaims nothing, because DELETE is REARRANGE TO LIMBO.
+
+The second loss is smaller but user-visible: **reopening a document does not restore where you
+were.** Caret position, scroll offset and open cursors come back at their defaults. That is a
+deliberate trade against the alternative — a spool in which the majority of ops record eye movement
+rather than authorship — and if it is ever wanted back, the place for it is a per-workstation
+session file outside the docuverse, which is a different artefact from a document's history and
+should never be confused with one.
 
 ### R9. `Manifold` is an explicitly materialised view with a stated rebuild policy
 
@@ -340,13 +394,154 @@ struct TreeLinks { std::uint32_t firstChild{0}; std::uint32_t nextSibling{0}; };
 std::vector<TreeLinks> tree;   // parallel to the node array, index-aligned
 ```
 
-The two 32-bit slots in the node become `reserved0`/`reserved1`, written zero and ignored on read,
-so existing files on disk still load byte-compatibly and **no format version bump is required**.
-`sizeof(CompactOpNode) == 64` is preserved and its `static_assert` holds.
+An earlier draft parked the two vacated 32-bit slots as `reserved0`/`reserved1`, written zero and
+ignored on read, so that files already on disk would still load byte-compatibly and no version bump
+would be needed — and presented that as a virtue. **R11 rejects it.** The slots are *reclaimed*: the
+eight bytes become a single 8-aligned `std::uint64_t value` at offset 56 (§5.2), which is what gives
+a scalar cell a natural home and hands `sourceAt`/`sourceLength` back to transclusion.
+
+`sizeof(CompactOpNode) == 64` and `alignas(64)` are preserved, and their `static_assert`s hold. That
+invariant is not negotiable and is not what the version bump is spending.
 
 **Price.** Eight bytes per op for the side array — net zero resident, since they were already eight
 bytes per op inside the node — and an $O(n)$ rebuild pass per adopt. In exchange, "an op node is
 immutable" becomes true, which is what publication semantics already assumed.
+
+### R11. Bump the format version. Do not carry compatibility.
+
+Nothing built on this codebase is in production, no third party reads its files, and every store on
+disk can be regenerated from its inputs. Under those conditions a compatibility shim is not caution,
+it is a permanent tax paid to protect data nobody has.
+
+> **Every on-disk format in this tree is free to change shape, and the rule when it does is: bump
+> the version, write the new shape, and delete the old reader.** Preserving a field only so that an
+> old file still parses is forbidden. Preserving a structural *invariant* —
+> `sizeof(CompactOpNode) == 64` and its cache-line alignment, 64 KiB Merkle piece alignment,
+> append-only-ness — is required.
+
+The distinction is the whole ruling: layout is soft, invariants are hard. A version bump buys a
+better layout; it never buys the right to unalign a node or make a spool rewritable.
+
+Three consequences, taken now:
+
+- **`OpsSpoolVersion::CompactBinaryV3`.** Widens the kind tag from three bits to four, moves
+  `FLAG_SEQUENTIAL`, and re-lays the node as §5.2 specifies. The V1 and V2 readers are **deleted**,
+  not kept — `binaryOpsMagicV1`'s "read-only: nothing writes this any more, but files already on
+  disk still open under it" is exactly the tax this ruling refuses. The `CompactBinaryV2` comment
+  citing `OpKind::PageBreak` as "the kind of change that did not need a version bump, for contrast"
+  is rewritten: under R11 it would have taken one.
+- **`scrolls.spool` and the link table stop being plaintext, and stop being two files.** They become
+  sections of one versioned binary container beside `ops.nodes`. There is no reason a scroll
+  registry and a link table are separate artefacts other than that they were written at different
+  times; both are per-store side tables replayed at load.
+- **Debuggability is a tool's job, not a format's.** The one thing plaintext was buying — being able
+  to read a store with `less` — is bought back by `tools/xudu-dump`, which renders any section of
+  any store as text. A format is not obliged to be human-readable; a toolchain is obliged to be able
+  to show it. `ops.nodes` has always been binary and has never been the hard one to debug.
+
+**Price.** Stores written before the bump do not open. That is acceptable *today* and will stop
+being acceptable the first time someone outside this repository has a document they care about, so
+the ruling carries its own expiry: **R11 is void at first external publication**, and the commit
+that ships a public build must amend this section rather than inherit it silently. Until then, the
+dump tool must land in the same commit as the container change — a binary format with no reader is
+how "we will write the tool later" becomes "we cannot debug the loader".
+
+### R12. No privileged dimensions. Links are per-cell runs, keyed by `CellRef`
+
+R2 makes a dimension a cell so that a user can mint one. A fixed inline array of well-known
+dimensions puts the privilege straight back at the storage layer, one level down where it is harder
+to see: a user-minted dimension could never be fast, however hot it actually is. An earlier draft of
+§5.3 did exactly this, with `hotDims = 8`.
+
+The array is removed. A cell's links are a contiguous run of `(dim, pos, neg)` triples, twelve bytes
+each, in one arena shared by the whole manifold, addressed by an offset and count in the cell's
+slot:
+
+```cpp
+struct DimLink { DimRef dim; CellRef pos; CellRef neg; }; // 12 bytes
+static_assert(sizeof(DimLink) == 12);
+```
+
+Every dimension is then reached the same way and costs the same, whether it is `d.1` or something
+VQL minted forty milliseconds ago. `DimOrdinal` survives only as R2 already demoted it: a lookup
+table of twelve well-known names, never a storage layout.
+
+Three things fall out, and the third is the one that makes this pay:
+
+- **`d.dims` is the rank of dimension cells, hanging off the home cell.** Walking posward from
+  `home` on `d.dims` enumerates every dimension in the slice. This is ordinary zzstructure, not a
+  registry bolted to the side, and it means "what dimensions exist here" is a traversal a user can
+  perform with the same keys they use for everything else.
+- **`StructureVerb::MakeDim` disappears.** A dimension is a cell whose content is its name and which
+  appears on the `d.dims` rank, so minting one is `MakeCell` plus `SetLink` and needs no verb of its
+  own. Genesis mints two cells by fiat — `home` and `d.dims` — because linking the first dimension
+  onto the `d.dims` rank requires `d.dims` to already be nameable. That bootstrap is the same shape
+  as `vocabularyScroll`'s compiled-in words, and its price is two cells that cannot be deleted.
+- **`d.meta-dims` is the run, read sideways.** For a cell $c$, walking `d.meta-dims` enumerates the
+  dimensions $c$ actually participates in, as clone cells on `d.clone` of the real dimension cells,
+  so `cloneMaster()` recovers the dimension itself and one dimension needs one identity however many
+  cells link on it. It is **generated at runtime and stored in no op**: it is the CSR run expressed
+  in the manifold's own vocabulary, which is why it costs nothing to maintain and why VQL can
+  traverse it with no new primitive. The inline array answered this query by scanning twelve fixed
+  slots and capping the answer at twelve; the run answers it exactly and without a cap.
+
+Derived cells like the `d.meta-dims` clones have no op, so they cannot have an op-index `CellRef`.
+The top bit of `CellRef` marks them:
+
+```cpp
+inline constexpr CellRef ephemeralBit = 0x8000'0000U;  ///< derived: no op backs this cell
+[[nodiscard]] constexpr bool isEphemeral(CellRef r) { return (r & ephemeralBit) != 0; }
+```
+
+This does double duty. It is also the byte-level enforcement of R8: `Manifold::applyStructure`
+rejects a `SetLink` whose target is ephemeral, so "you cannot persist a link into a derived cell" is
+an invariant the encoding checks rather than a convention the caller is trusted to follow. R8 said
+the boundary is the type; this makes it also a bit.
+
+**Price, and it is a real one.** A hop costs 4.96 ns sequential and 21.02 ns scattered against 1.84
+and 7.94 for the inline array — $2.7\times$, measured (§12.5). Two dependent loads (slot, then run)
+where the array needed one. At the traversal sizes this application performs — a radius-3 BFS
+visiting about sixty cells, so roughly 300 hops per frame — that is 6.3 µs against 2.4 µs, both
+under 0.08% of an 8.33 ms frame, and the same argument `compact_zzcell.hpp`'s own comment already
+makes about its size. The falsifiable threshold: the run design saturates a frame at about 396,000
+hops, the array at about 1,049,000. **If a traversal is ever specified that visits more than ~100k
+cells per frame, revisit this ruling with that workload in hand.** Note also that the run is four
+bytes per cell *smaller* at five dimensions (108 B/cell against 112), because the array wastes three
+of its eight slots — the trade is latency, not memory.
+
+### R13. `Preflet` is deleted
+
+A `Preflet` is a magnet URI, a content hash, a version string, a target cell id, and free-form
+metadata pairs, resolved by walking a `d.preflet` chain of role-tagged cells
+([`zzcore.cpp`](apps/common/xanadu/zigzag/zzcore.cpp), `resolvePreflet`). It is what a cell needed
+in order to refer to something in another slice, back when slices could not refer to each other any
+other way.
+
+Once a slice is a `Store` and cross-slice reference is an ordinary Xanadu link, every field is
+subsumed by something that already exists and does the job better:
+
+| `Preflet` field       | subsumed by                                                                          |
+| --------------------- | ------------------------------------------------------------------------------------ |
+| `resource_identifier` | `PrimediaSpan::scroll` plus the scroll registry — transport is not a cell's business |
+| `hash`                | BitTorrent v2 per-piece Merkle verification, already reported as `ResolutionStatus`  |
+| `version`             | `GlobalOpRef::produces` (R4) — an actual point in hypertime, not a string            |
+| `target_cell_id`      | the link's right endpoint. This field *is* a link, spelled out longhand              |
+| `metadata`            | cells on a dimension, which is what a zzstructure is for                             |
+
+The `resource_identifier` row is the important one: it is a layering violation, and the reason to be
+glad it is going. Every preflet cell carries its own transport locator, so a magnet URI is
+duplicated into the document graph once per referring cell and cannot be corrected in one place when
+a swarm moves. A `ScrollId` is an identity; how to fetch it is the registry's problem.
+
+Deleted with it: `struct Preflet`, `optional<Preflet>` on both cell types, `resolvePreflet`,
+`resolveAllPreflets`, `isPrefletChainNode`, the `preflet_*` role strings, the `d.preflet` dimension,
+and the YAML emitter branch in `zzstructure_loader.cpp`. That is 136 bytes off `CompactZZCell`
+(§12.1) and a resolution pass off the load path.
+
+**Price.** Sample slice YAML using `preflet:` blocks stops loading. Under R11 that is the expected
+cost of a format change rather than a regression, and the fixture files in `assets/zigzag/` are
+regenerated in the same commit. Anything genuinely needing an out-of-band locator gains a scroll
+registry entry, which is where the rest of the system already looks for one.
 
 ______________________________________________________________________
 
@@ -365,9 +560,12 @@ enum class OpKind : std::uint8_t {
    * OpKind::PageBreak for why a break must not travel with a quotation,
    * where a cell boundary must.
    *
-   * Discriminated further by CompactOpNode::flags, never by new OpKind
-   * values: BinStructure = 7 exhausts FLAG_KIND_MASK = 0x07 in
-   * binary_ops.cpp, and 0x08 is already FLAG_SEQUENTIAL.
+   * Discriminated further by CompactOpNode::flags rather than by sibling
+   * OpKind values: the verbs share every field and differ only in which
+   * ones they read, so nothing outside the manifold fold wants to tell
+   * them apart. BinStructure = 7 fills the old 3-bit FLAG_KIND_MASK, which
+   * CompactBinaryV3 widens to 4 bits -- see R11. The tag space is no
+   * longer the reason for this shape.
    */
   Structure,
 };
@@ -387,12 +585,13 @@ case OpKind::Structure: {
 
 ### 5.2 `CompactOpNode` — still exactly 64 bytes
 
+R10 vacates `firstChildIndex` and `nextSiblingIndex` to a side array; R11 says to spend the eight
+bytes rather than reserve them. They become one 8-aligned `value` slot at offset 56:
+
 ```cpp
 struct alignas(64) CompactOpNode {
-  // Tree topology & metadata (16 bytes)
+  // Tree topology & metadata (8 bytes)
   std::uint32_t parentIndex{0};   ///< prior document state (hypertime parent)
-  std::uint32_t reserved0{0};     ///< was firstChildIndex; see SegmentedOpsSpool::tree
-  std::uint32_t reserved1{0};     ///< was nextSiblingIndex; ditto
   OpKind        kind{OpKind::Insert};
   std::uint8_t  flags{0};         ///< see the Structure-family bits below
   std::uint16_t branchOrdinal{0};
@@ -401,18 +600,25 @@ struct alignas(64) CompactOpNode {
   std::uint32_t at{0};            ///< Insert/Delete/Rearrange/PageBreak pos; 0 for Structure
   std::uint32_t length{0};
   std::uint32_t to{0};            ///< Rearrange dest      | Structure: target CellRef
-  std::uint32_t sourceAt{0};      ///< Transclude src off  | Structure: value bits [31:0]
-  std::uint32_t sourceLength{0};  ///< Transclude src len  | Structure: value bits [63:32]
+  std::uint32_t sourceAt{0};      ///< Transclude source offset, all kinds
+  std::uint32_t sourceLength{0};  ///< Transclude source length, all kinds
   std::uint32_t sourceOpIndex{0}; ///< Transclude src ver  | Structure: prev op on this cell
 
-  // Content span & link reference (24 bytes)
+  // Content span, link reference & typed value (32 bytes)
   ScrollId      scrollId{localScroll};
   std::uint32_t linkId{0};        ///< Link id             | Structure: dimension CellRef
   std::uint64_t spanStart{0};
   std::uint64_t spanLength{0};
+  std::uint64_t value{0};         ///< Structure: canonical scalar bits (R6). 0 otherwise.
 };
 static_assert(sizeof(CompactOpNode) == 64);
+static_assert(alignof(CompactOpNode) == 64);
 ```
+
+The gain is not the eight bytes, which were already there. It is that `sourceAt`/`sourceLength` keep
+their transclusion meaning for *every* kind, so a `Structure` op can also name a source — a cell
+whose content is transcluded from another document is now expressible in one op instead of needing
+the scalar and the provenance to fight over the same two fields.
 
 `flags` is currently declared but never read anywhere in the tree, so the Structure family takes it:
 
@@ -423,11 +629,12 @@ enum class StructureVerb : std::uint8_t {
   MakeCell = 0, ///< mint a cell; span = its content; `to`/`linkId` unused
   SetLink  = 1, ///< (this cell, dim = linkId, dir) -> `to`; `to == noCell` clears
   SetValue = 2, ///< retarget this cell's content span and/or typed value
-  MakeDim  = 3, ///< mint a dimension cell; span = its name in the permascroll
+  // No MakeDim: a dimension is a cell on the d.dims rank, so minting one is
+  // MakeCell + SetLink and needs no verb of its own. See R12.
 };
 // bit 3: link direction for SetLink
 inline constexpr std::uint8_t structureNegward = 0x08;
-// bits 4-6: ValueKind, when a typed value accompanies the span
+// bits 4-6: ValueKind, describing `value`
 inline constexpr std::uint8_t valueKindMask  = 0x70;
 inline constexpr std::uint8_t valueKindShift = 4;
 enum class ValueKind : std::uint8_t { None = 0, Double = 1, Bool = 2, Int64 = 3 };
@@ -435,8 +642,8 @@ enum class ValueKind : std::uint8_t { None = 0, Double = 1, Bool = 2, Int64 = 3 
 ```
 
 A `MakeCell` op for the scalar `42.0` is `kind = Structure`, `flags = MakeCell | (Double << 4)`,
-`span = {localScroll, off, 2}` naming the two permascroll bytes `42`, and `sourceAt`/`sourceLength`
-= `bit_cast<std::uint64_t>(42.0)`. **One 64-byte op, zero heap, two permascroll bytes, and a
+`span = {localScroll, off, 2}` naming the two permascroll bytes `42`, and
+`value = bit_cast<std::uint64_t>(42.0)`. **One 64-byte op, zero heap, two permascroll bytes, and a
 first-class Xanadu address.** A cell with five dimensions costs one `MakeCell` plus five `SetLink` =
 six ops = 384 bytes of the memory-mapped arena.
 
@@ -446,25 +653,27 @@ six ops = 384 bytes of the memory-mapped arena.
 // apps/common/xanadu/zigzag/manifold.hpp
 namespace zigzag {
 
-/// The eight dimensions whose links live in the one-cache-line hot array.
-/// Every other dimension -- including any the user mints -- resolves through
-/// `cold`. Chosen so that a BFS hop touches exactly one 64-byte line.
-inline constexpr std::size_t hotDims = 8; // D1 D2 D3 Doc Clone Transclude OpsTime OpsDag
+/// A cell's links along one dimension. No dimension is privileged: `dim` is
+/// an ordinary CellRef, so a dimension VQL minted this frame costs exactly
+/// what d.1 costs. See R12 for why the fixed hot array was removed.
+struct DimLink {
+  DimRef  dim;      ///< the dimension cell
+  CellRef pos{0};   ///< posward neighbour, noCell if none
+  CellRef neg{0};   ///< negward neighbour, noCell if none
+};
+static_assert(sizeof(DimLink) == 12);
 
-struct CellSlot {                   // 48 bytes
-  xanadu::PrimediaSpan span{};      // 24
-  std::uint32_t birthOp{0};         //  4  ops-spool index == CellRef
-  std::uint32_t lastOp{0};          //  4  head of this cell's micro-history chain
-  std::uint32_t coldIndex{0};       //  4  side-table row, 0 == none
-  std::uint8_t  valueKind{0};       //  1
-  std::uint8_t  flags{0};           //  1
-  std::uint16_t dynamicDimCount{0}; //  2
-  std::uint64_t valueBits{0};       //  8
+struct CellSlot {                 // 48 bytes
+  xanadu::PrimediaSpan span{};    // 24
+  std::uint32_t birthOp{0};       //  4  ops-spool index == CellRef
+  std::uint32_t lastOp{0};        //  4  head of this cell's micro-history chain
+  std::uint32_t linkOffset{0};    //  4  first DimLink of this cell's run
+  std::uint16_t linkCount{0};     //  2  length of the run; this cell's d.meta-dims
+  std::uint8_t  valueKind{0};     //  1
+  std::uint8_t  flags{0};         //  1
+  std::uint64_t valueBits{0};     //  8
 };
 static_assert(sizeof(CellSlot) == 48);
-
-using HotLinks = std::array<CellRef, 2 * hotDims>; // 64 bytes, one cache line
-static_assert(sizeof(HotLinks) == 64);
 
 class Manifold {
 public:
@@ -475,23 +684,36 @@ public:
   [[nodiscard]] std::optional<double> asDouble(CellRef) const noexcept;
   /// Follows d.clone negward to the group master, then reads the master's slot.
   [[nodiscard]] CellRef cloneMaster(CellRef) const noexcept;
+  /// The dimensions this cell links on -- d.meta-dims, read directly off the
+  /// run. Exact and uncapped; the fixed array could only ever report its
+  /// first eight. Entries are clones (R12); cloneMaster() recovers the
+  /// dimension cell itself.
+  [[nodiscard]] std::span<const DimLink> dimensionsOf(CellRef) const noexcept;
+  /// Every dimension in the slice: the d.dims rank walked posward from home.
+  [[nodiscard]] std::span<const DimRef> dimensions() const noexcept;
 
   // -- fold path: driven only by Store ---------------------------------------
+  /// Rejects a SetLink whose target isEphemeral(): R8's boundary, enforced
+  /// as an invariant rather than trusted to the caller.
   void applyStructure(std::uint32_t opIndex, const xanadu::CompactOpNode &) noexcept;
 
   // -- honesty ---------------------------------------------------------------
   [[nodiscard]] bool verifyAgainstFullRebuild(const xanadu::Store &) const;
 
 private:
-  std::vector<CellSlot> slots;                       // dense, indexed by dense id
-  std::vector<HotLinks> hot;                         // parallel, 64 B stride
-  std::unordered_map<std::uint64_t, LinkPairs> cold; // (denseId << 32) | dimDenseId
-  std::unordered_map<CellRef, std::uint32_t> byRef;  // ops index -> dense id
-  std::vector<ColdCell> coldCells;                   // Preflet, transcopyright, holes
+  std::vector<CellSlot> slots;                      // dense, indexed by dense id
+  std::vector<DimLink>  links;                      // CSR arena; runs are contiguous
+  std::unordered_map<CellRef, std::uint32_t> byRef; // ops index -> dense id
+  std::vector<ColdCell> coldCells;                  // transcopyright, holes
 };
 
 } // namespace zigzag
 ```
+
+A cell's run is rewritten in place while it has spare capacity and relocated to the end of `links`
+when it outgrows it, which is the usual CSR compromise: appends are amortised $O(1)$, and the arena
+grows monotonically until a compaction pass at load. Fragmentation is bounded by total link edits,
+not by cell count, and a full fold from `ancestralPath` always produces a tight arena.
 
 ### 5.4 `Store` additions
 
@@ -506,11 +728,20 @@ private:
 MicroversionId makeCell(const MicroversionId &parent, const PrimediaSpan &content);
 MicroversionId makeCell(const MicroversionId &parent, double value); // to_chars + bits
 MicroversionId makeCell(const MicroversionId &parent, bool value);
-MicroversionId makeDimension(const MicroversionId &parent, std::string_view name);
 MicroversionId setLink(const MicroversionId &parent, CellRef from, CellRef dim,
                        bool negward, CellRef to); // to == noCell clears
 MicroversionId setValue(const MicroversionId &parent, CellRef cell,
                         const PrimediaSpan &content, ValueKind, std::uint64_t bits);
+
+/// Sugar over makeCell(name) + setLink(dims, ..., newCell): a dimension is a
+/// cell on the d.dims rank and is minted by the same two verbs as anything
+/// else. There is no MakeDim op -- see R12.
+MicroversionId makeDimension(const MicroversionId &parent, std::string_view name);
+
+/// The two cells genesis mints by fiat, because linking the first dimension
+/// onto the d.dims rank needs d.dims to already be nameable.
+[[nodiscard]] CellRef homeCell() const noexcept;   // op index 1
+[[nodiscard]] DimRef  dimsDimension() const noexcept; // op index 2
 
 [[nodiscard]] GlobalOpRef opRefOf(CellRef, const Scroll &sealedAs) const;
 [[nodiscard]] CellRef localiseOpRef(const GlobalOpRef &);
@@ -566,11 +797,20 @@ separate tiny hash tables and every hop pays a cold bucket array behind a cold n
 `Cell`. Warm decomposition puts only about 31 ns of that 279 ns in actual lookup work; the rest is
 cache behaviour that neither dense form pays at all.
 
-**The hurdle is therefore an argument for the convergence rather than against it.** One honest
-caveat: the 2.28 ns figure requires the dense `Manifold` array, not the append-ordered spool — a
-retargeted link appends a new op and leaves the old one in place, so the latest `SetLink` for a
-given `(cell, dim, dir)` is not at a computable offset. That is precisely why R9 rules `Manifold` an
-explicit materialised view. Navigation never touches ops.
+**The hurdle is therefore an argument for the convergence rather than against it.** Two honest
+caveats, and neither rescues the map.
+
+The 2.28 ns figure is what the *ops* cost to walk when they happen to be laid out one link per cell
+per dimension in order. Real navigation does not read ops at all: a retargeted link appends a new op
+and leaves the old one in place, so the latest `SetLink` for a given `(cell, dim, dir)` is not at a
+computable offset. That is precisely why R9 rules `Manifold` an explicit materialised view, and the
+number that governs navigation is `Manifold`'s, not the spool's.
+
+And `Manifold`'s number is **4.96 ns**, not 2.28 — R12 declines the fixed inline array, and a CSR
+run costs one extra dependent load (§12.5). The gap against the map is therefore $56\times$ rather
+than $122\times$. Both restatements make the hurdle smaller than it looked; neither changes the
+verdict, because the failure in the map form is per-cell hash tables, and no variant of the dense
+forms has any.
 
 ### 6.3 Non-text payloads — R6, and it is cheap
 
@@ -664,12 +904,25 @@ Each step is one commit. After each, `make -j$(nproc)` builds all three programs
    prerequisite for §6.2's size argument being true rather than asserted.
 1. **`GlobalOpRef` plus `Store::opRefOf`/`localiseOpRef`** (R4), mirroring
    `GlobalSpan`/`globalise`/`localise` and reusing `writeMicroversionId`. Nothing new is stored.
+1. **`tools/xudu-dump`** (R11). Renders `ops.nodes`, the scroll registry and the link table as text.
+   Lands **before** the format changes below, not after: a binary format whose only reader is the
+   loader you are debugging is how "we will write the tool later" becomes "we cannot debug the
+   loader". Its output on a store written by the current code is the baseline the next two steps
+   diff against.
+1. **`OpsSpoolVersion::CompactBinaryV3`** (R11): four-bit kind tag, `FLAG_SEQUENTIAL` moved, the
+   `reserved0`/`reserved1` slots reclaimed as `value`, and the V1/V2 readers **deleted**. Rewrite
+   the `CompactBinaryV2` comment that cites `PageBreak` as a change that needed no bump. Round-trip
+   test: write, dump, reload, dump, compare.
+1. **One binary store container** (R11). `scrolls.spool` and the link table become sections beside
+   `ops.nodes` under one versioned header. Deletes both plaintext parsers and their per-line error
+   paths in `store.cpp`.
 1. **`OpKind::Structure` plus `BinStructure = 7`** (R1, R2): flag constants and accessors, the
    `replay()` no-op case, `opKindName`, both `binary_ops.cpp` switches, the OSMIC-text string table,
-   and the `Op::link` truncation fix. Document tag-space exhaustion. **No behaviour change: nothing
-   emits `Structure` yet.**
-1. **`Manifold` plus `rebuildManifold()` plus the `makeCell`/`setLink`/`setValue` API** (R7, R9),
-   with `verifyAgainstFullRebuild()` and its test. Nothing consumes it yet.
+   and the `Op::link` truncation fix. **No behaviour change: nothing emits `Structure` yet.**
+1. **`Manifold` plus `rebuildManifold()` plus the `makeCell`/`setLink`/`setValue` API** (R7, R9,
+   R12), with `verifyAgainstFullRebuild()` and its test. CSR link runs, `d.dims` and the two genesis
+   cells, `ephemeralBit` and the `applyStructure` rejection of ephemeral link targets. Nothing
+   consumes it yet.
 1. **Scalars** (R6). Canonicalisation at the API boundary; signalling NaN rejected. Property test:
    `asDouble(makeCell(v))` equals `canonicalise(v)`, and `textOf(cell)` parses back to the same
    double.
@@ -680,11 +933,17 @@ Each step is one commit. After each, `make -j$(nproc)` builds all three programs
    lock-free zero-copy" but take `std::lock_guard` on `appendMutex_`; the underlying arena's
    `base()` never moves and `readView` clamps to `totalBytes`, so the lock serialises the render
    thread against the append path for nothing.
+1. **Delete `Preflet`** (R13). `struct Preflet`, both `optional<Preflet>` members, `resolvePreflet`,
+   `resolveAllPreflets`, `isPrefletChainNode`, the `preflet_*` roles, `d.preflet`, and the YAML
+   emitter branch. Regenerate the `assets/zigzag/` fixtures that use `preflet:` blocks. Independent
+   of everything above and landable at any point after the container change.
 1. **Port `UnifiedTransclusionEngine` onto `Manifold`.** `syncIncremental`/`buildCellFromOp` already
    make exactly one `CompactZZCell` per `CompactOpNode` and already set `spoolOpIndex = opIndex`, so
-   this is mostly deletion. `CompactZZCell` dissolves into `CellSlot` plus `HotLinks` plus
-   `ColdCell`, and `ephemeralText` is deleted outright — it duplicates the primedia that `span`
-   already addresses, as its own comment complains.
+   this is mostly deletion. `CompactZZCell` dissolves into `CellSlot` plus a CSR link run plus
+   `ColdCell` — the `standardDimensions` array and the `dynamicDimensions` vector both go, which is
+   where 192 of its 960 bytes were — and `ephemeralText` is deleted outright, since it duplicates
+   the primedia that `span` already addresses, as its own comment complains. Add the traversal
+   benchmark R12's price depends on, so the $2.7\times$ claim is a test rather than an assertion.
 1. **`sliceToStore()` / `storeToSlice()` against `Manifold`**, replacing `projectXuduToZigzag`'s
    paragraph-splitting heuristic (it pairs paragraph $k$ with `pieces()[k]`, and piece index and
    paragraph index have no relationship) and `zzStructureToLinkPackage`'s synthetic scroll.
@@ -714,8 +973,13 @@ ______________________________________________________________________
    reclaims nothing. [`vql-query-language.md`](vql-query-language.md) §5 gets scoped to
    `ArenaManifold`.
 1. **Not merging `Manifold` into `Version` or widening `Store::replay()`** (§5.4).
-1. **Not changing `CompactOpNode`'s on-disk field layout.** R10 zeroes two words rather than
-   removing them, precisely so that no format version bump is needed and `sizeof == 64` holds.
+1. **Not preserving backwards compatibility with any existing on-disk store** (R11). Stores written
+   before `CompactBinaryV3` do not open, and no shim will be written to make them. What *is*
+   preserved is every structural invariant: `sizeof(CompactOpNode) == 64`, its cache-line alignment,
+   64 KiB Merkle piece alignment, and append-only-ness.
+1. **Not keeping a fixed set of fast dimensions** (R12), even though it measures $2.7\times$ faster
+   per hop. A privileged eight contradicts R2 one layer down, and the absolute cost at this
+   application's traversal sizes is under 0.08% of a frame either way.
 1. **Not touching `src/render/`, the glyph cache, or any backend.** The convergence is entirely
    below the staging boundary; `./tools/compare-backends.sh` output must be byte-identical after
    every step.
@@ -778,6 +1042,24 @@ headers**, not reproductions. Heap figures come from an instrumented global `ope
 `CompactZZCell` is 960 exactly — its header comment's "around 960" is literal. 192 of that is the
 inline standard-dimension array, 136 the `optional<Preflet>`, and 64 the two `std::string`s.
 
+Three of those four rows are things the rulings delete outright, which is where most of the 960
+goes:
+
+| line item                                 | bytes           | removed by                                                           |
+| ----------------------------------------- | --------------- | -------------------------------------------------------------------- |
+| `array<LinkPairs, 12>`                    | 192             | R12 — CSR runs, 12 B per dimension the cell actually uses            |
+| `optional<Preflet>`                       | 136             | R13 — subsumed by scroll ids, Merkle status, `GlobalOpRef` and links |
+| `ephemeralText` (`std::string`)           | 32              | §9 step 15 — a copy of the primedia `span` already addresses         |
+| `type` (`std::string`)                    | 32              | folded into `CellSlot::flags` plus the MIME type on the span         |
+| `vector<DynamicDimensionLink>`            | 24              | R12 — the standard/dynamic split stops existing                      |
+| **remaining, as `CellSlot` plus its run** | **48 + 12/dim** | —                                                                    |
+
+The `LinkPairs` row is worth reading twice. It is 16 bytes for one dimension's two neighbours
+because a `CellID` is 64-bit; `DimLink` is 12 bytes for a dimension *and* its two neighbours,
+because a `CellRef` is an op index and 32 bits is 2.1 billion ops. The dimension name — a
+`std::string`, 32 bytes and a probable allocation in `DynamicDimensionLink` — becomes 4 bytes of
+`CellRef` under R2. Most of what the old layout spent was spent on identifying dimensions by text.
+
 ### 12.2 One tiny cell: content `42.0`, links on three dimensions
 
 | representation                             | sizeof | allocs | heap (usable) | deep total |
@@ -821,14 +1103,63 @@ This is what kills the shared-address idea independently of the transcopyright a
 0.049% of the address space is NaN and none of it compares equal to anything including itself, while
 $\pm 0.0$ is the mirror failure — two addresses for one value.
 
-### 12.5 Caveats
+### 12.5 Does a fixed hot-dimension array earn its bytes? (R12)
 
-- The ops-form rank-walk figure assumes dimensional links laid out grouped per cell, which is a
+Four link-storage designs, 10,000 cells linking on 5 dimensions each. **Every walk is a dependent
+chase** — the next hop needs this hop's result — so the two columns differ only in locality, never
+in how much instruction-level parallelism the loop exposes. The first column walks a rank whose
+order is id order; the second walks a rank that is a random single cycle over all 10,000 cells.
+
+| design                                        | rank == id | rank random | B/cell  | dimension cap |
+| --------------------------------------------- | ---------- | ----------- | ------- | ------------- |
+| (A) inline array, 8 fixed dimensions          | **1.84**   | **7.94**    | 112     | 8, then spill |
+| (E) CSR run of `(dim, pos, neg)`, 12 B each   | 4.96       | 21.02       | **108** | **none**      |
+| (D) open-addressed `(cell, dim)` table        | 16.95      | 17.73       | 467     | none          |
+| (B) `std::unordered_map<(cell,dim), CellRef>` | 16.55      | 57.57       | —       | none          |
+
+ns/hop, 200 repetitions. B/cell includes the 48-byte `CellSlot`.
+
+Reading this honestly: **the inline array is genuinely faster — $2.7\times$ — and R12 removes it
+anyway.** Three things decide it.
+
+- It is faster *only for eight privileged dimensions*. A ninth, user-minted one spills to the flat
+  table at 17.65 ns, worse than the CSR run's uniform 21.02 is by less than the gap between "fast"
+  and "arbitrarily slow" suggests, and it makes performance a function of whether the dimension was
+  in an enum somebody wrote in 2026. That contradicts R2 exactly one layer below where R2 looks.
+- It is not smaller. 112 B/cell against 108, because the array carries eight slots whether or not
+  the cell uses them and this workload uses five.
+- The absolute numbers are noise at the scale this application traverses. A radius-3 BFS visits
+  about sixty cells, so roughly 300 hops per frame: 2.4 µs for (A), 6.3 µs for (E), against an 8.33
+  ms budget. (E) saturates a frame at ≈396,000 hops and (A) at ≈1,049,000, so **the ruling is
+  falsified by any traversal specified to visit more than ~100k cells per frame** and by nothing
+  smaller.
+
+The flat-table designs lose on both axes and are recorded only because they are what "just use a map
+keyed on `(cell, dim)`" means in practice: (D) costs 467 B/cell because a hash table stores a 64-bit
+key beside every 32-bit value and then keeps the load factor under 50%.
+
+Enumerating one cell's dimensions — the `d.meta-dims` query — is 3.68 ns/cell scanning the fixed
+array against 3.52 ns/cell reading the run. The run is marginally faster, exact, and uncapped, where
+the array's answer silently truncates at eight. A flat table cannot answer it at all without a
+separate reverse index.
+
+Source: `probe4.cpp`, same machine and compiler as above.
+
+### 12.6 Caveats
+
+- §12.3's ops-form rank-walk figure assumes dimensional links laid out grouped per cell, which is a
   layout choice `Manifold` makes and the append-ordered spool does not (§6.2).
 - `OpKind::Structure` does not exist, so the probe's dimensional-link ops are `OpKind::Link` nodes
   with the field usage §5.2 proposes. A byte-exact stand-in, but not repo code.
-- No `Store`/`SegmentedOpsSpool` machinery was exercised. These are data-layout numbers, not
-  end-to-end.
+- §12.5's designs are all hypothetical — `Manifold` does not exist either, so unlike §12.1–12.3
+  these are not measurements of repo types. They are measurements of the four layouts as specified
+  here, which is the most that can be said before step 15 of §9 lands the real benchmark.
+- Every §12.5 cell links on exactly five dimensions. A real slice's distribution is skewed, and a
+  CSR run's scan cost is linear in one cell's degree, so a manifold with a few very high-degree
+  cells will not read like this table. That distribution is unknown and is the second thing step
+  15's benchmark should record.
+- No `Store`/`SegmentedOpsSpool` machinery was exercised anywhere in §12. These are data-layout
+  numbers, not end-to-end.
 
 ______________________________________________________________________
 
@@ -839,4 +1170,11 @@ ______________________________________________________________________
 | [`osmic-microversioning-and-dag.md`](osmic-microversioning-and-dag.md)                               | the sixth hyperop, and `PageBreak` as its degenerate one-dimensional case         |
 | [`zigzag-multidimensional-space-and-projection.md`](zigzag-multidimensional-space-and-projection.md) | cell = op; `Manifold` as the second replay product; `CompactZZCell` as a cache    |
 | [`vortex-hyperstructural-runtime.md`](vortex-hyperstructural-runtime.md)                             | `kNoLink` becomes `noCell == 0` (R5); dimensions as genesis-minted cells; op rate |
-| [`vql-query-language.md`](vql-query-language.md)                                                     | §5's reachability GC scoped to `ArenaManifold` (R8)                               |
+| [`vql-query-language.md`](vql-query-language.md)                                                     | §5's reachability GC scoped to `ArenaManifold` (R8); cursor state is never woven  |
+| [`zzstructure.hpp`](apps/common/xanadu/zigzag/zzstructure.hpp) doc comments                          | `Preflet` deleted (R13); `d.dims` and `d.meta-dims` named                         |
+| [`binary_ops.hpp`](apps/common/xanadu/binary_ops.hpp)'s `CompactBinaryV2` comment                    | R11: it cites `PageBreak` as a change needing no bump; under R11 it needed one    |
+| [`CLAUDE.md`](CLAUDE.md)'s `compact_zzcell.hpp` bullet                                               | the 960-byte figure and the hot/cold split it promises (R12, R13, §12.1)          |
+
+An amendment note for whoever writes those: **R11 carries an expiry.** Every "bump the version and
+delete the old reader" instruction above is conditional on nothing outside this repository holding a
+document it cares about. The first public build must revisit R11 before inheriting it.
