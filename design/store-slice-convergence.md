@@ -999,7 +999,7 @@ ______________________________________________________________________
 Each step is one commit. After each, `make -j$(nproc)` builds all three programs and
 `make -j$(nproc) test` passes.
 
-Steps 1–8 have landed. What each actually cost, where it differed from the plan, and what it
+Steps 1–9 have landed. What each actually cost, where it differed from the plan, and what it
 measured is recorded inline below; the rest are unchanged.
 
 1. ~~**Sealed-segment immutability** (R10).~~ **Done.** `firstChildIndex`/`nextSiblingIndex` left
@@ -1165,11 +1165,39 @@ measured is recorded inline below; the rest are unchanged.
    the way round that keeps the operations. And the 64 KiB is genuinely a hole — a freshly saved
    four-operation store measures 65,792 bytes and occupies 8 KiB on disk.
 
-1. **`tools/xudu-dump`** (R11). Renders the header, `ops.nodes`, the scroll registry and the link
-   table as text. Lands **before** the format changes below, not after: a binary format whose only
-   reader is the loader you are debugging is how "we will write the tool later" becomes "we cannot
-   debug the loader". Its output on a store written by the previous step is the baseline the next
-   two steps diff against.
+1. ~~**`tools/xudu-dump`** (R11).~~ **Done.** Renders the header, `ops.nodes`, the scroll registry,
+   the link table, the permascroll and the current-version metadata as text, and is in `all` rather
+   than an optional target: it is reached for exactly when a store will not open, and a debugging
+   tool that stopped building three commits ago is one that is not there when it is finally needed.
+
+   **It does not go through `Store::load()`, and that is the design rather than an oversight.** The
+   case it exists for is a store the loader refuses, so a dump that needed the loader to work first
+   could not be pointed at one. It reads the bytes, reuses the layout *types* — `OpsSegmentHeader`,
+   `CompactOpNode`, `MicroversionId`, which are the description of the bytes rather than the
+   machinery for reading them — reimplements the six-line name derivation rather than borrowing the
+   loader's, reports what it cannot make sense of, and never throws. The test that matters is the
+   second one: a store whose `ops.nodes` has been put back the way it was before headers existed
+   still dumps its permascroll, its links and its versions, says *why* the operations are
+   unreadable, and exits 1.
+
+   **The diff procedure steps 10 and 11 are to use.** `--section=ops` renders what each operation
+   *means*, including the text its span names, so a change that preserves meaning produces
+   byte-identical output and `diff` shows nothing; `--section=header` is where a version bump is
+   supposed to show. Rendering the span's text is what makes this catch the step-1 failure mode
+   specifically — a shifted field puts garbage in `text=` on the line it happened.
+
+   **It links two objects and no libraries**, which is deliberate rather than lucky: wanting only
+   the types that describe the bytes means it needs neither the loader nor libtorrent, OpenSSL, lmdb
+   or libmagic behind it. 850 KB against 26 MB, six shared libraries against twenty-three. A tool
+   for looking at a broken store should not need the whole stack to be healthy before it will build.
+
+   **One bug worth recording, because it is a trap and not a typo.** The excerpt helper was called
+   `quoted()`, and an unqualified `quoted(someStdString)` finds **`std::quoted`** by argument-
+   dependent lookup and *prefers* it — binding a `const std::string &` beats converting to
+   `std::string_view`. So the call sites passing a `std::string_view` got the local one and the call
+   sites passing a `std::string` silently got a stream manipulator that escapes quotes, passes
+   newlines through raw and honours no length limit. The output looked almost right, which is the
+   worst way for it to be wrong. Renamed to `excerpt()`.
 
 1. **`OpsSpoolVersion::CompactBinaryV3`** (R11): four-bit kind tag, `FLAG_SEQUENTIAL` moved, the
    `reserved0`/`reserved1` slots reclaimed as `value`, and the V1/V2 readers **deleted**. Rewrite

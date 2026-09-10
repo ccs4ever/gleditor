@@ -636,7 +636,7 @@ endif
 SPIRV := assets/shaders/vulkan/glyph.vert.spv assets/shaders/vulkan/glyph.frag.spv \
 	assets/shaders/vulkan/beam.vert.spv assets/shaders/vulkan/beam.frag.spv
 
-all: lib gleditor xudu zigzag gleditor_test xudu_test zigzag_test $(OBJDIR)/compile_commands.json
+all: lib gleditor xudu zigzag xudu-dump gleditor_test xudu_test zigzag_test $(OBJDIR)/compile_commands.json
 ifdef GLEDITOR_ENABLE_VULKAN
 all: shaders
 endif
@@ -839,6 +839,24 @@ xudu-swarm-peer: $(OBJDIR)/xudu-swarm-peer
 $(OBJDIR)/xudu-swarm-peer: $(OBJDIR)/tools/xudu-swarm-peer.o $(XUDU_CORE_OBJS) $(OBJDIR)/src/mimetype.o $(OBJDIR)/src/source_grounder.o
 	$(CXX) $(LDFLAGS) -o $@ $^ $(XUDU_LIBS)
 
+# Reads a store as text without going through the loader, which is what lets
+# R11 say a format may stop being human-readable. Part of `all` on purpose,
+# unlike the probes below: it is reached for exactly when a store will not
+# open, and a debugging tool that stopped building three commits ago is one
+# that is not there when it is finally needed.
+#
+# Two objects and no XUDU_LIBS, which is deliberate rather than lucky. It reads
+# the bytes itself and wants only the types that describe them --
+# MicroversionId to spell a name, opKindName() to spell a kind -- so it needs
+# neither the loader nor libtorrent, OpenSSL, lmdb or libmagic behind it.
+# 850 KB against 26 MB, and six shared libraries against twenty-three: a tool
+# for looking at a broken store should not need the whole stack to be healthy
+# before it will build.
+.PHONY: xudu-dump
+xudu-dump: $(OBJDIR)/xudu-dump
+$(OBJDIR)/xudu-dump: $(OBJDIR)/tools/xudu-dump.o $(OBJDIR)/apps/common/xanadu/microversion.o $(OBJDIR)/apps/common/xanadu/ops.o
+	$(CXX) $(LDFLAGS) -o $@ $^
+
 # What the loader pays to lay a page out, against the two ways of asking Pango
 # for it. Not part of `all`, because it measures rather than builds anything the
 # programs use -- but a target, so that it goes on compiling: a measurement tool
@@ -899,7 +917,7 @@ SWARM_NETNS_TESTS := SwarmTest.*:MutableNameTest.*
 TEST_FILTER ?= -$(SWARM_NETNS_TESTS)
 
 .PHONY: test test/all test/integration test/e2e-orchestration
-test: $(OBJDIR)/gleditor $(OBJDIR)/xudu $(OBJDIR)/zigzag $(OBJDIR)/gleditor_test $(OBJDIR)/xudu_test $(OBJDIR)/zigzag_test $(OBJDIR)/xudu-swarm-peer
+test: $(OBJDIR)/gleditor $(OBJDIR)/xudu $(OBJDIR)/zigzag $(OBJDIR)/xudu-dump $(OBJDIR)/gleditor_test $(OBJDIR)/xudu_test $(OBJDIR)/zigzag_test $(OBJDIR)/xudu-swarm-peer
 	$(OBJDIR)/gleditor_test $(if $(TEST_FILTER),--gtest_filter='$(TEST_FILTER)')
 	$(OBJDIR)/xudu_test $(if $(TEST_FILTER),--gtest_filter='$(TEST_FILTER)')
 	$(OBJDIR)/zigzag_test $(if $(TEST_FILTER),--gtest_filter='$(TEST_FILTER)')

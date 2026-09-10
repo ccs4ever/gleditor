@@ -363,6 +363,11 @@ an `OpsSegmentUnreadable` naming what was wrong rather than loading into nonsens
 - **One writer.** `SegmentedOpsSpool::writeSegmentFile()` is the only thing that produces a segment
   file, and `Store::save()` calls it. Do not write `ops.nodes` from anywhere else — a format known
   in two places is what let step 1's change go unnoticed.
+- **`build/xudu-dump` reads a store without the loader**, which is what lets a format here stop
+  being human-readable at all. Point it at a store directory or at a single `ops.nodes`. Before and
+  after any format change, diff `xudu-dump --section=ops <store>`: it renders what each operation
+  *means*, including the text its span names, so a change that preserves meaning shows no diff.
+  `--section=header` is where a version bump is supposed to show.
 
 A *system* xanadoc under `~/.config/xudu/system/` is the one exception to "refused means refused":
 `Session::systemStoreIndex()` moves an unreadable one aside and writes a default in its place,
