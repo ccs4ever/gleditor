@@ -80,7 +80,8 @@ Manual memory deallocation primitives (e.g., `free_cell`) are forbidden. Memory 
 purely reachability-based:
 
 - **Root Set**: Origin Cell (0), the active cursor scheduler rank (`d.cursors`), and global system
-  dimension anchors.
+  dimension anchors. §5.5 and §5.6 give the last of these a concrete shape and add a fourth rank,
+  `d.pinning-cursors`, for subgraphs deliberately held up rather than reached.
 
 - **Trace Cycle**: A mark-and-sweep or reference manifold crawl marks all cells reachable across any
   link.
@@ -514,9 +515,9 @@ Two of §1's own requirements stop needing their own machinery:
 - **Eager eviction** asks for $\sum_{\text{dim}}$ over a cell's link slots. A CSR cell carries
   `linkCount`, which *is* that sum, maintained. The predicate is a field read.
 - **The Root Set** — "Origin Cell (0), the active cursor scheduler rank, and global system dimension
-  anchors" — is exactly `home`, the `d.cursors` rank, and the `d.dims` rank hanging off `home`. The
-  third part had no representation before; convergence R12 gives it one, because a dimension is a
-  cell and the dimensions are a rank like any other.
+  anchors" — is `home`, the `d.cursors` rank, and the `d.dims` rank hanging off `home`. The third
+  part had no representation before; convergence R12 gives it one, because a dimension is a cell and
+  the dimensions are a rank like any other. §5.6 adds a fourth, `d.pinning-cursors`.
 
 ### 5.6 Pinning: a cursor is how a subgraph outlives the query that built it
 
@@ -525,11 +526,18 @@ forever if the origin holds it. Neither suits a memoisation table, which wants t
 and die with the process.
 
 The Root Set supplies the third. A subgraph that nothing links to the origin, held up by **a cursor
-of its own attached to its head cell**, lives as long as that cursor and no longer. It is not a new
-mechanism: it is what the Root Set's cursor entry already means, used deliberately rather than
-incidentally.
+of its own attached to its head cell**, lives as long as that cursor and no longer.
 
-Two properties fall out, and both are why this is worth naming:
+That cursor sits on **`d.pinning-cursors`**, a fourth Root Set rank off `home`, and deliberately not
+on `d.cursors`. The two ranks say different things about the same kind of cell: `d.cursors` is what
+the scheduler runs, `d.pinning-cursors` is what holds memory up. Keeping them apart is what stops a
+pinned cache from appearing in VQL's `^` as an idle thread, and it costs one more entry on `d.dims`
+— a rank being a rank, under convergence R12.
+
+Each pin carries the name of what it holds as its own content, so a pinned structure is found and
+dropped by name rather than by search.
+
+Three properties fall out, and they are why this is worth naming:
 
 - **Release is atomic.** The pin being the only inbound path means severing it makes the entire
   island unreachable in one `link(..., -2)`. Eager eviction then does the rest — no traversal, no
@@ -537,6 +545,15 @@ Two properties fall out, and both are why this is worth naming:
 - **Non-persistence is enforced, not promised.** The island's cells are ephemeral (convergence R8),
   and the fold refuses a link whose target is ephemeral, so a pinned island cannot be written into
   an operations spool even by a caller trying to.
+- **Two lifetimes for one mechanism.** Breaking the pin's link to its head drops the island and
+  keeps the pin, which is a flush. Breaking the pin off `d.pinning-cursors` makes the pin
+  unreachable as well and takes the island with it, which is a retirement. Neither needs machinery
+  the other does not already have.
+
+The cursor shape is not ceremonial: a cursor carries `d.vars`/`d.values` scopes (§4), which is
+exactly where a pinned structure's own configuration belongs — a cache's capacity, eviction policy
+and counters, reachable by name off the pin. A pin that later wanted to do work in the background is
+already the right kind of cell, and would only need linking onto `d.cursors` as well.
 
 VQL §7.5 applies this to `d.cache`, which is the case that motivated it. The mechanism is general:
 any scratch structure wanting session lifetime gets a pin, and dropping it is one break.

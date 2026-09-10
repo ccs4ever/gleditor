@@ -1431,7 +1431,7 @@ scratch value, and a language that hides it would be lying about which one you a
 | `constexpr cell_id d_grab = 1; d_entangle = 999; d_cursors = 1001;`        | A dimension is a cell (R2), so its id is minted, not chosen. The genesis sequence mints the system dimensions off `home` in a fixed order, so they are deterministic without being magic numbers.                                                                             |
 | `std::unordered_map<cell_id, LinkSlot> links` per cell                     | one CSR run; §12.5 measured the per-cell-hash-table form at 467 B/cell against 108, and the map cannot answer "which dimensions does this cell link on" without a second index.                                                                                               |
 | Eager eviction when a cell's total live links reach zero                   | `CellSlot::linkCount` **is** that sum, maintained. R12's `d.meta-dims` hands Vortex's GC its predicate for free rather than needing the $\sum_{\text{dim}}$ scan §1 writes out.                                                                                               |
-| Root Set = "Origin Cell (0), `d.cursors`, global system dimension anchors" | exactly `home`, the `d.cursors` rank, and the `d.dims` rank off `home` (R12). The three-part Root Set was already this shape; R12 just names the third part.                                                                                                                  |
+| Root Set = "Origin Cell (0), `d.cursors`, global system dimension anchors" | `home`, the `d.cursors` rank, and the `d.dims` rank off `home` (R12) — the three-part Root Set was already this shape, R12 just names the third part. V5 adds a fourth, `d.pinning-cursors`.                                                                                  |
 | `CellValue = std::variant<std::string, double, bool>`                      | `valueKind` + `valueBits` + `span` (R6). Zigzag's fourth alternative, an inline `std::vector<std::uint8_t>`, does not come along: a blob is primedia and a span addresses it, which is why step 17 deletes `ephemeralText` and why `cellDataAsText` answers empty for a blob. |
 | "Zero-Allocation Lazy Rank-Streaming"                                      | survives literally: a rank walk is `linkOffset`-relative indexing into `links`, 4.96 ns/hop (§12.5), no allocation on the path.                                                                                                                                               |
 | `entangle_generator` allocating fan-out partners (VQL §4.7)                | unaffected. `DimLink` still holds exactly one `pos` and one `neg` per (cell, dimension), which is the constraint the generator exists to work around. It keeps working for the same reason it was needed.                                                                     |
@@ -1454,8 +1454,8 @@ It gets one by being **deliberately detached**:
   cannot be written into the spool even by mistake.
 - They hang off a **head cell** along `d.cache`, in rank order.
 - Nothing links the head to the origin. The island is reachable from exactly one place: a
-  **dedicated cursor cell** attached to the head, whose only job is to sit in the Root Set and hold
-  the island up.
+  **dedicated cursor cell** attached to the head, sitting on the `d.pinning-cursors` rank off
+  `home`, whose only job is to be in the Root Set and hold the island up.
 
 The pin is what makes this work, and it is also what makes it revocable. Because the cursor is the
 *only* path in, dropping the whole cache is one `break` — sever the pin and the entire island
@@ -1470,13 +1470,42 @@ by the same rule. A cache that has grown too large is trimmed, not traversed.
 separate islands with separate cursors, so "drop the regex cache" stays a single break rather than a
 search through a shared table.
 
-**Price, and one loose end.** The pin is a cursor, so `^` (VQL §2, "streams all active Spin-Head
-execution cursor threads") will stream it, and `for $w in ^` would iterate a cache pin as though it
-were a worker. Two ways out: put pins on their own rank off `home` — also in the Root Set, costing
-nothing under R12, since a rank is a rank — or give `^` a liveness predicate. The first is cleaner
-and is what this note assumes; the second stays available if VQL would rather keep one cursor rank.
-Either way it has to be settled before `^` is implemented, because the wrong answer is silent: a
-cache pin looks exactly like an idle thread.
+**Pins live on `d.pinning-cursors`, a fourth Root Set rank off `home`.** They are *not* on
+`d.cursors`, and that is the whole of the answer to the hazard an earlier draft left open: `^` (VQL
+§2, "streams all active Spin-Head execution cursor threads") walks `d.cursors`, so `for $w in ^`
+cannot iterate a cache pin as though it were an idle worker. The scheduler runs `d.cursors`;
+`d.pinning-cursors` holds memory up. Nothing distinguishes the two kinds of cell — only the rank
+they sit on, which is what R12's "no privileged dimensions" buys: the topology carries the meaning,
+so a fourth Root Set rank costs one more entry on `d.dims` and no new concept.
+
+**Each pin carries the name of its cache as its own content**, which makes both operations an
+ordinary path expression rather than a search:
+
+```
+##/d.pinning-cursors[. = "regex_compile"]/d.cache                       # the entries
+##/d.pinning-cursors[. = "regex_compile"]/break(d.cache, +1)            # flush it
+##/d.pinning-cursors[. = "regex_compile"]/break(d.pinning-cursors, +1)  # retire it
+```
+
+The last two are worth keeping distinct, and naming is what makes both reachable. Breaking the pin's
+`d.cache` link drops the island and keeps the pin: that is *flush*, and the cache can refill without
+being re-created. Breaking the pin out of `d.pinning-cursors` makes the pin itself unreachable, and
+it takes the island with it: that is *retire*. One mechanism, two lifetimes, no extra machinery for
+either.
+
+No new VQL token is needed. `^NAME` exists because `d.cursors` is scanned constantly; a pin lookup
+is a predicate on an ordinary rank, and giving it a sigil would privilege it for no gain. If one is
+wanted later it is a one-line grammar addition.
+
+**The cursor shape is not ceremonial either.** A cursor cell already carries `d.vars`/`d.values`
+scopes (Vortex §4), which is exactly where a cache's own configuration belongs — capacity, eviction
+policy, hit and miss counters — reachable as
+`##/d.pinning-cursors[. = "regex_compile"]/d.vars[. = "capacity"]/d.values/.`. And a pin that later
+needed to refill itself in the background would already be the right kind of cell; it would only
+need linking onto `d.cursors` as well.
+
+**Price.** The Root Set grows from three parts to four, so the collector's trace walks one more
+rank. That is the whole of it.
 
 ______________________________________________________________________
 
