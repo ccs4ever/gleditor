@@ -14,6 +14,7 @@
 #include <xudu/core/compact_op.hpp>
 #include <xudu/core/microversion.hpp>
 #include <xudu/core/segmented_ops_spool.hpp>
+#include <xudu/core/virtual_memory_arena.hpp>
 
 namespace {
 
@@ -60,8 +61,10 @@ TEST(SegmentedOpsSpoolTest, appendAndTraverseLinearChain) {
   const auto *p2 = spool.get(2U);
   ASSERT_NE(p1, nullptr);
   ASSERT_NE(p2, nullptr);
-  EXPECT_EQ(p1->firstChildIndex, 2U);
   EXPECT_EQ(p2->parentIndex, 1U);
+  // The downward edge is not in the node -- it is derived from parentIndex and
+  // held beside it, so that a stored node is never written to again.
+  EXPECT_EQ(spool.childrenOf(1U), (std::vector<std::uint32_t>{2U}));
 }
 
 TEST(SegmentedOpsSpoolTest, branchingTreeTopologyAndSiblings) {
@@ -292,6 +295,113 @@ TEST(SegmentedOpsSpoolTest, branchesSurviveBeingSealedAndReopened) {
   // is the way to get this wrong.
   EXPECT_EQ(spool.idOf(5).str(), "1a2");
   EXPECT_THAT(spool.ancestralPath(5), testing::ElementsAre(1U, 4U, 5U));
+}
+
+#if defined(__linux__)
+/// The permission field /proc/self/maps gives for the mapping covering @p addr,
+/// or an empty string if no mapping covers it. There is no portable way to ask
+/// whether a page is writable without writing to it and finding out.
+std::string mappingPermsFor(const void *addr) {
+  const auto want = reinterpret_cast<std::uintptr_t>(addr);
+  std::ifstream maps("/proc/self/maps");
+  std::string line;
+  while (std::getline(maps, line)) {
+    const auto dash  = line.find('-');
+    const auto space = line.find(' ');
+    if (dash == std::string::npos || space == std::string::npos) {
+      continue;
+    }
+    const auto lo = std::stoull(line.substr(0, dash), nullptr, 16);
+    const auto hi =
+        std::stoull(line.substr(dash + 1, space - dash - 1), nullptr, 16);
+    if (want >= lo && want < hi) {
+      // The three access bits only. The fourth character is the sharing mode,
+      // which is 's' here because the segment is mapped from a file, and says
+      // nothing about whether a write would land.
+      return line.substr(space + 1, 3);
+    }
+  }
+  return {};
+}
+#endif
+
+TEST(SegmentedOpsSpoolTest, appendingUnderASealedParentDoesNotWriteIntoIt) {
+  // A sealed segment that starts and ends on a page boundary is mapped
+  // PROT_READ rather than copied, so anything that writes into one of its
+  // nodes takes SIGSEGV. Appending a child used to do exactly that: the child
+  // and sibling edges lived inside CompactOpNode, so filing a new operation
+  // under a parent wrote to the parent. Every other segment test here seals
+  // four or five nodes, which never lands on a page boundary and so never gets
+  // mapped -- which is why this went unnoticed. See design R10.
+  const auto perPage = static_cast<std::uint32_t>(
+      xudu::VirtualMemoryArena::pageSize() / sizeof(CompactOpNode));
+  ASSERT_GT(perPage, 8U) << "a page must hold enough nodes to branch inside";
+
+  const auto dir = scratchDir("sealed_readonly");
+  // One page of nodes continuing the chain the spool will already hold, so
+  // they occupy indices [perPage, 2 * perPage).
+  {
+    std::vector<CompactOpNode> nodes(perPage);
+    for (std::uint32_t i = 0; i < perPage; i++) {
+      nodes[i].kind        = OpKind::Insert;
+      nodes[i].parentIndex = perPage - 1U + i;
+      nodes[i].at          = perPage + i;
+    }
+    std::ofstream out(dir / "sealed.ops", std::ios::binary);
+    out.write(
+        reinterpret_cast<const char *>(nodes.data()),
+        static_cast<std::streamsize>(nodes.size() * sizeof(CompactOpNode)));
+  }
+
+  SegmentedOpsSpool spool;
+  // Index 0 is the state-zero slot, so holding perPage - 1 operations puts the
+  // next one exactly one page in. This is the whole point of the setup.
+  appendChain(spool, perPage - 1U);
+  ASSERT_EQ(spool.size(), perPage - 1U);
+  ASSERT_TRUE(spool.addSealedSegment(dir / "sealed.ops"));
+  ASSERT_EQ(spool.size(), 2U * perPage - 1U);
+
+  const auto *const sealedBase = spool.rawOps() + perPage;
+#if defined(__linux__)
+  // Without this the test would pass vacuously if the mapping never happened.
+  EXPECT_EQ(mappingPermsFor(sealedBase), "r--")
+      << "the sealed range was not mapped read-only, so this test proves "
+         "nothing about writing into it";
+#endif
+
+  // A continuation of the last sealed node, which has no children yet: the
+  // case that used to write firstChildIndex into the parent.
+  const auto lastSealed = 2U * perPage - 1U;
+  CompactOpNode onward;
+  onward.parentIndex = lastSealed;
+  onward.at          = 9001;
+  const auto onwardIdx =
+      spool.append(onward, MicroversionId::parse(std::to_string(2U * perPage)));
+
+  // A branch off a sealed node that already has a child, which used to walk
+  // into the sealed range and write nextSiblingIndex into the sibling.
+  const auto forkAt = perPage + 5U;
+  CompactOpNode branched;
+  branched.parentIndex   = forkAt;
+  branched.branchOrdinal = 1;
+  branched.at            = 9002;
+  const auto branchIdx   = spool.append(
+      branched, MicroversionId::parse(std::to_string(forkAt) + "a1"));
+
+  EXPECT_EQ(spool.childrenOf(lastSealed),
+            (std::vector<std::uint32_t>{onwardIdx}));
+  EXPECT_EQ(spool.childrenOf(forkAt),
+            (std::vector<std::uint32_t>{forkAt + 1U, branchIdx}));
+  EXPECT_THAT(spool.ancestralPath(branchIdx),
+              testing::Contains(forkAt).Times(1));
+
+  // The sealed nodes still say exactly what the file said.
+  for (std::uint32_t i = 0; i < perPage; i++) {
+    const auto *const node = spool.get(perPage + i);
+    ASSERT_NE(node, nullptr);
+    EXPECT_EQ(node->at, perPage + i);
+    EXPECT_EQ(node->parentIndex, perPage - 1U + i);
+  }
 }
 
 TEST(SegmentedOpsSpoolTest, aSegmentThatDoesNotFitIsRefused) {

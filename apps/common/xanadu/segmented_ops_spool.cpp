@@ -33,6 +33,7 @@ std::size_t hashMicroversionId(const MicroversionId &id) {
 SegmentedOpsSpool::SegmentedOpsSpool() {
   arena.reserve(defaultOpsReservation);
   indexLookup.push_back(MicroversionId{}); // Index 0 represents state zero
+  tree.emplace_back();
 }
 
 SegmentedOpsSpool::~SegmentedOpsSpool() { clear(); }
@@ -40,7 +41,7 @@ SegmentedOpsSpool::~SegmentedOpsSpool() { clear(); }
 SegmentedOpsSpool::SegmentedOpsSpool(SegmentedOpsSpool &&other) noexcept
     : arena(std::move(other.arena)), segmentList(std::move(other.segmentList)),
       opCount(other.opCount), committedBytes(other.committedBytes),
-      indexLookup(std::move(other.indexLookup)),
+      indexLookup(std::move(other.indexLookup)), tree(std::move(other.tree)),
       idHashSlots(std::move(other.idHashSlots)), idHashCount(other.idHashCount),
       activeFd(other.activeFd), activePath(std::move(other.activePath)),
       activeStartIndex(other.activeStartIndex),
@@ -56,6 +57,7 @@ SegmentedOpsSpool::SegmentedOpsSpool(SegmentedOpsSpool &&other) noexcept
   // or the next append() on the moved-from object would misfile everything
   // one slot short of where idOf() expects to find it.
   other.indexLookup.push_back(MicroversionId{});
+  other.tree.emplace_back();
 }
 
 SegmentedOpsSpool &
@@ -67,6 +69,7 @@ SegmentedOpsSpool::operator=(SegmentedOpsSpool &&other) noexcept {
     opCount                = other.opCount;
     committedBytes         = other.committedBytes;
     indexLookup            = std::move(other.indexLookup);
+    tree                   = std::move(other.tree);
     idHashSlots            = std::move(other.idHashSlots);
     idHashCount            = other.idHashCount;
     activeFd               = other.activeFd;
@@ -80,6 +83,7 @@ SegmentedOpsSpool::operator=(SegmentedOpsSpool &&other) noexcept {
     other.activeStartIndex = 1;
     other.activeFlushedOps = 0;
     other.indexLookup.push_back(MicroversionId{});
+    other.tree.emplace_back();
   }
   return *this;
 }
@@ -155,6 +159,29 @@ bool SegmentedOpsSpool::ensureCommitted(const std::size_t requiredBytes) {
   return true;
 }
 
+void SegmentedOpsSpool::linkIntoTree(const std::uint32_t index) {
+  const auto *const node = get(index);
+  if (nullptr == node || index >= tree.size()) {
+    return;
+  }
+  const auto parentIndex = node->parentIndex;
+  if (0 == parentIndex || parentIndex >= index) {
+    return; // a root chain, or not a tree edge this spool can follow
+  }
+  if (0 == tree[parentIndex].firstChild) {
+    tree[parentIndex].firstChild = index;
+    return;
+  }
+  auto sibling = tree[parentIndex].firstChild;
+  while (sibling > 0 && sibling < tree.size()) {
+    if (0 == tree[sibling].nextSibling) {
+      tree[sibling].nextSibling = index;
+      return;
+    }
+    sibling = tree[sibling].nextSibling;
+  }
+}
+
 std::uint32_t SegmentedOpsSpool::append(CompactOpNode node,
                                         const MicroversionId &produces) {
   const auto newIndex = opCount + 1U;
@@ -163,38 +190,16 @@ std::uint32_t SegmentedOpsSpool::append(CompactOpNode node,
     throw std::bad_alloc();
   }
 
-  node.firstChildIndex  = 0;
-  node.nextSiblingIndex = 0;
-
   auto *const opsArray = reinterpret_cast<CompactOpNode *>(arena.base());
   opsArray[newIndex]   = node;
 
-  // Maintain child & sibling tree pointers in contiguous memory
-  if (node.parentIndex > 0 && node.parentIndex <= opCount) {
-    auto *const parent = get(node.parentIndex);
-    if (nullptr != parent) {
-      if (0 == parent->firstChildIndex) {
-        parent->firstChildIndex = newIndex;
-      } else {
-        auto sibling = parent->firstChildIndex;
-        while (sibling > 0 && sibling <= opCount) {
-          auto *const sibNode = get(sibling);
-          if (nullptr == sibNode) {
-            break;
-          }
-          if (0 == sibNode->nextSiblingIndex) {
-            sibNode->nextSiblingIndex = newIndex;
-            break;
-          }
-          sibling = sibNode->nextSiblingIndex;
-        }
-      }
-    }
-  }
-
   indexLookup.push_back(produces);
+  tree.emplace_back();
   idHashInsert(produces, newIndex);
   opCount = newIndex;
+  // After opCount, so the node counts as present -- and after tree grew, so
+  // there is a slot for it. Nothing inside an already-stored node is touched.
+  linkIntoTree(newIndex);
   return newIndex;
 }
 
@@ -245,19 +250,13 @@ SegmentedOpsSpool::childrenOf(const std::uint32_t index) const {
     return children;
   }
 
-  const auto *const parent = get(index);
-  if (nullptr == parent || 0 == parent->firstChildIndex) {
+  if (nullptr == get(index)) {
     return children;
   }
-
-  auto current = parent->firstChildIndex;
+  auto current = treeLinksOf(index).firstChild;
   while (current > 0 && current <= opCount) {
     children.push_back(current);
-    const auto *const node = get(current);
-    if (nullptr == node) {
-      break;
-    }
-    current = node->nextSiblingIndex;
+    current = treeLinksOf(current).nextSibling;
   }
   return children;
 }
@@ -348,9 +347,16 @@ bool SegmentedOpsSpool::adoptSegmentNodes(const int fd,
 
   for (std::uint32_t i = 0; i < nodeCount; i++) {
     indexLookup.push_back(names[i]);
+    tree.emplace_back();
     idHashInsert(names[i], startIndex + i);
   }
   opCount += nodeCount;
+  // The downward edges are not in the file -- only parentIndex is -- so they
+  // are worked back out here, in the order append() would have produced them.
+  // O(n) per adopt, which is the price R10 names.
+  for (std::uint32_t i = 0; i < nodeCount; i++) {
+    linkIntoTree(startIndex + i);
+  }
   return true;
 }
 
@@ -487,6 +493,8 @@ void SegmentedOpsSpool::clear() {
   segmentList.clear();
   indexLookup.clear();
   indexLookup.push_back(MicroversionId{});
+  tree.clear();
+  tree.emplace_back();
   idHashSlots.clear();
   idHashCount = 0;
   arena.release();

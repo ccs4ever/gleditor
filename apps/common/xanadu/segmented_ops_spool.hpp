@@ -146,8 +146,34 @@ public:
     return reinterpret_cast<const CompactOpNode *>(arena.base());
   }
 
+  /// The downward edges of the operation tree, held beside the nodes rather
+  /// than inside them.
+  ///
+  /// An operation node is immutable once written, which is what publication
+  /// semantics already assumed and what mapping a sealed segment PROT_READ
+  /// already enforced at the hardware level. A child edge is not a fact about
+  /// the parent operation, though; it is a fact about the tree the parent
+  /// turned out to be in, and it is only ever learnt after the parent was
+  /// stored. Keeping it here costs the same eight bytes per operation it cost
+  /// inside the node and makes the immutability true. See design R10.
+  struct TreeLinks {
+    std::uint32_t firstChild{0};
+    std::uint32_t nextSibling{0};
+  };
+
+  /// The tree edges for @p index, or a zeroed pair if there is no such node.
+  [[nodiscard]] TreeLinks treeLinksOf(std::uint32_t index) const {
+    return index < tree.size() ? tree[index] : TreeLinks{};
+  }
+
 private:
   bool ensureCommitted(std::size_t requiredBytes);
+
+  /// File the node already stored at @p index under its parent, appending it
+  /// to the end of that parent's child list. Parents always sit at a lower
+  /// index than their children, so calling this in ascending index order
+  /// rebuilds exactly the sibling order append() produced.
+  void linkIntoTree(std::uint32_t index);
 
   VirtualMemoryArena arena;
   std::vector<SegmentInfo> segmentList;
@@ -158,6 +184,12 @@ private:
   /// below is ultimately answered from; a spool index is meaningless on its
   /// own, so this is the one place that names it.
   std::vector<MicroversionId> indexLookup;
+
+  /// index -> that node's downward tree edges, index-aligned with the node
+  /// array and with indexLookup. Element 0 is the state-zero slot, which has
+  /// no edges of its own: top-level chains are found by scanning parentIndex,
+  /// exactly as they were before.
+  std::vector<TreeLinks> tree;
 
   /// microversion -> index, without holding a second copy of the id to
   /// compare against: indexLookup already has one at the index this points
