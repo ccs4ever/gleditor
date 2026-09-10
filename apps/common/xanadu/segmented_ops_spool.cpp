@@ -5,6 +5,7 @@
 #include <fcntl.h>
 #include <limits>
 #include <new>
+#include <optional>
 #include <stdexcept>
 #include <string>
 #include <sys/stat.h>
@@ -29,6 +30,126 @@ std::uint32_t opsFitting(const std::size_t bytes) {
   constexpr std::size_t indexCeiling =
       std::numeric_limits<std::uint32_t>::max();
   return static_cast<std::uint32_t>(std::min(nodes - 1, indexCeiling));
+}
+
+/// A segment file's header and how many operations actually follow it, which
+/// are not the same question -- see the nodeCount checks below.
+struct SegmentShape {
+  OpsSegmentHeader header;
+  std::uint32_t nodes{};
+};
+
+/// Read the header at the start of @p fd and check everything about it that
+/// can be checked.
+///
+/// Returns nothing with @p why set rather than throwing, so that the caller
+/// can close its descriptor before the exception leaves it -- the two callers
+/// own a raw fd at this point and one of them goes on to hand it to a
+/// SegmentInfo.
+std::optional<SegmentShape>
+readSegmentShape(const int fd, const std::uint64_t fileSize, std::string &why) {
+  if (fileSize < sizeof(OpsSegmentHeader)) {
+    why = "only " + std::to_string(fileSize) +
+          " bytes long, which is too short to hold an operations segment "
+          "header";
+    return std::nullopt;
+  }
+
+  OpsSegmentHeader header;
+  if (::lseek(fd, 0, SEEK_SET) < 0 ||
+      ::read(fd, &header, sizeof(header)) !=
+          static_cast<ssize_t>(sizeof(header))) {
+    why = "the header could not be read";
+    return std::nullopt;
+  }
+
+  if (header.signature != opsSegmentSignature) {
+    // Named explicitly, because the file this rejects is one that used to
+    // load: a segment written before headers existed opens with a zero
+    // parentIndex and would otherwise be read as nodes.
+    why = "does not begin with the operations segment signature "
+          "(\\x89XUDUOPS\\r\\n\\x1a\\n), so it is not an operations segment "
+          "written by this program";
+    return std::nullopt;
+  }
+  if (header.formatVersion != opsSegmentFormatVersion) {
+    why = "is operations segment format version " +
+          std::to_string(header.formatVersion) + ", and this build reads " +
+          std::to_string(opsSegmentFormatVersion);
+    return std::nullopt;
+  }
+  if (header.headerBytes != opsSegmentHeaderBytes) {
+    why = "puts its first node " + std::to_string(header.headerBytes) +
+          " bytes in, where this build expects " +
+          std::to_string(opsSegmentHeaderBytes);
+    return std::nullopt;
+  }
+  if (header.nodeSize != sizeof(CompactOpNode)) {
+    why = "says its operations are " + std::to_string(header.nodeSize) +
+          " bytes and this build's are " +
+          std::to_string(sizeof(CompactOpNode));
+    return std::nullopt;
+  }
+  if (0 != header.reservedZero) {
+    why = "has a reserved field that is not zero";
+    return std::nullopt;
+  }
+
+  const auto after = fileSize - header.headerBytes;
+  if (0 != after % header.nodeSize) {
+    why = "ends part-way through an operation: " + std::to_string(after) +
+          " bytes after the header is not a whole number of " +
+          std::to_string(header.nodeSize) + "-byte nodes";
+    return std::nullopt;
+  }
+  const auto present = after / header.nodeSize;
+  if (header.nodeCount > present) {
+    // Short of what it claims means bytes went missing, and the nodes that
+    // are left cannot be trusted to be the ones the writer meant.
+    why = "claims " + std::to_string(header.nodeCount) +
+          " operations but holds " + std::to_string(present);
+    return std::nullopt;
+  }
+  // Longer than it claims is the other way round, and is recoverable: a flush
+  // writes the nodes and then the count, so a crash between the two leaves
+  // whole nodes the header has not caught up with. They are whole -- the
+  // remainder check above says so -- and adoptSegmentNodes() verifies every
+  // one of them against the tree before any of them counts, so reading them
+  // is how the operations survive rather than a guess.
+  if (present > std::numeric_limits<std::uint32_t>::max()) {
+    why = "holds more operations than an index can name";
+    return std::nullopt;
+  }
+  return SegmentShape{header, static_cast<std::uint32_t>(present)};
+}
+
+/// The header a segment starting at @p firstOpIndex and holding @p nodeCount
+/// operations opens with.
+OpsSegmentHeader segmentHeaderFor(const std::uint32_t firstOpIndex,
+                                  const std::uint64_t nodeCount) {
+  OpsSegmentHeader header;
+  header.signature     = opsSegmentSignature;
+  header.formatVersion = opsSegmentFormatVersion;
+  header.headerBytes   = opsSegmentHeaderBytes;
+  header.nodeSize      = sizeof(CompactOpNode);
+  header.flags         = 0;
+  header.firstOpIndex  = firstOpIndex;
+  header.nodeCount     = nodeCount;
+  return header;
+}
+
+/// Write @p header at the start of @p fd and leave the file exactly
+/// opsSegmentHeaderBytes long. The gap between the two is never written, so
+/// it is a hole on any filesystem that has them.
+bool writeSegmentHeader(const int fd, const OpsSegmentHeader &header) {
+  if (::lseek(fd, 0, SEEK_SET) < 0) {
+    return false;
+  }
+  if (::write(fd, &header, sizeof(header)) !=
+      static_cast<ssize_t>(sizeof(header))) {
+    return false;
+  }
+  return 0 == ::ftruncate(fd, static_cast<off_t>(opsSegmentHeaderBytes));
 }
 
 /// FNV-1a over a MicroversionId's segments. Nothing but idHash* uses this, and
@@ -355,10 +476,13 @@ bool SegmentedOpsSpool::adoptSegmentNodes(const int fd,
 
   bool mapped   = false;
   const auto ps = VirtualMemoryArena::pageSize();
+  // The header is why opsSegmentHeaderBytes is 64 KiB rather than as small as
+  // it could be: mmap wants a page-aligned file offset, and this is the one
+  // that is page-aligned on every page size a machine might have.
   if (mayMap && arena.isValid() && (startOffset % ps == 0) &&
       (bytes % ps == 0)) {
-    mapped =
-        arena.mapFileFixed(arena.base() + startOffset, fd, 0, bytes, false);
+    mapped = arena.mapFileFixed(arena.base() + startOffset, fd,
+                                opsSegmentHeaderBytes, bytes, false);
     if (mapped) {
       committedBytes = std::max(committedBytes, startOffset + bytes);
     }
@@ -367,7 +491,7 @@ bool SegmentedOpsSpool::adoptSegmentNodes(const int fd,
     if (!ensureCommitted(startOffset + bytes)) {
       return false;
     }
-    if (::lseek(fd, 0, SEEK_SET) < 0) {
+    if (::lseek(fd, static_cast<off_t>(opsSegmentHeaderBytes), SEEK_SET) < 0) {
       return false;
     }
     if (::read(fd, arena.base() + startOffset, bytes) !=
@@ -436,15 +560,28 @@ bool SegmentedOpsSpool::addSealedSegment(const std::filesystem::path &path) {
     return false;
   }
   struct stat st;
-  if (::fstat(fd, &st) < 0 || st.st_size <= 0 ||
-      static_cast<std::size_t>(st.st_size) % sizeof(CompactOpNode) != 0) {
+  if (::fstat(fd, &st) < 0 || st.st_size < 0) {
     ::close(fd);
     return false;
   }
-  const auto segCount =
-      static_cast<std::uint32_t>(st.st_size / sizeof(CompactOpNode));
+
+  std::string why;
+  const auto shape =
+      readSegmentShape(fd, static_cast<std::uint64_t>(st.st_size), why);
+  if (!shape.has_value()) {
+    ::close(fd);
+    throw OpsSegmentUnreadable(path.string() + " " + why);
+  }
 
   const auto startIndex = opCount + 1U;
+  // Where the file says its operations belong, against where this spool is up
+  // to. A segment offered out of order would otherwise be caught further in
+  // and less clearly, when a parent turned out to be missing.
+  if (shape->header.firstOpIndex != startIndex) {
+    ::close(fd);
+    return false;
+  }
+  const auto segCount = shape->nodes;
   if (!adoptSegmentNodes(fd, segCount, true)) {
     ::close(fd);
     return false;
@@ -470,20 +607,39 @@ bool SegmentedOpsSpool::openActiveSegment(const std::filesystem::path &path) {
     return false;
   }
   struct stat st;
-  if (::fstat(fd, &st) < 0 ||
-      static_cast<std::size_t>(st.st_size) % sizeof(CompactOpNode) != 0) {
+  if (::fstat(fd, &st) < 0 || st.st_size < 0) {
     ::close(fd);
     return false;
   }
-  // Whatever the file already holds is taken in rather than written over --
-  // never mapped, since this range has to stay writable for what comes next.
-  const auto held =
-      static_cast<std::uint32_t>(st.st_size / sizeof(CompactOpNode));
+
   const auto startIndex = opCount + 1U;
-  if (held > 0 && !adoptSegmentNodes(fd, held, false)) {
-    ::close(fd);
-    return false;
+  if (0 == st.st_size) {
+    // Nothing here yet, so this is where the file gets its header. The rest of
+    // the 64 KiB is never written and stays a hole.
+    if (!writeSegmentHeader(fd, segmentHeaderFor(startIndex, 0))) {
+      ::close(fd);
+      return false;
+    }
+  } else {
+    std::string why;
+    const auto shape =
+        readSegmentShape(fd, static_cast<std::uint64_t>(st.st_size), why);
+    if (!shape.has_value()) {
+      ::close(fd);
+      throw OpsSegmentUnreadable(path.string() + " " + why);
+    }
+    if (shape->header.firstOpIndex != startIndex) {
+      ::close(fd);
+      return false;
+    }
+    // Whatever the file already holds is taken in rather than written over --
+    // never mapped, since this range has to stay writable for what comes next.
+    if (shape->nodes > 0 && !adoptSegmentNodes(fd, shape->nodes, false)) {
+      ::close(fd);
+      return false;
+    }
   }
+  const auto held = static_cast<std::uint32_t>(opCount + 1U - startIndex);
 
   activeFd         = fd;
   activePath       = path.string();
@@ -524,8 +680,8 @@ bool SegmentedOpsSpool::flush() {
           reinterpret_cast<const CompactOpNode *>(arena.base());
       const auto from  = activeStartIndex + activeFlushedOps;
       const auto bytes = pending * sizeof(CompactOpNode);
-      const auto at =
-          static_cast<off_t>(activeFlushedOps * sizeof(CompactOpNode));
+      const auto at    = static_cast<off_t>(
+          opsSegmentHeaderBytes + activeFlushedOps * sizeof(CompactOpNode));
       if (::lseek(activeFd, at, SEEK_SET) < 0) {
         return false;
       }
@@ -534,6 +690,18 @@ bool SegmentedOpsSpool::flush() {
         return false;
       }
       activeFlushedOps += pending;
+      // The count last, so that a crash between the two writes leaves a header
+      // that undercounts whole nodes rather than one that promises nodes that
+      // are not there. readSegmentShape() recovers the first and refuses the
+      // second, which is the way round that keeps the operations.
+      const std::uint64_t count = activeFlushedOps;
+      if (::lseek(activeFd,
+                  static_cast<off_t>(offsetof(OpsSegmentHeader, nodeCount)),
+                  SEEK_SET) < 0 ||
+          ::write(activeFd, &count, sizeof(count)) !=
+              static_cast<ssize_t>(sizeof(count))) {
+        return false;
+      }
     }
   }
   if (activeFd >= 0 && !activePath.empty()) {
@@ -545,6 +713,31 @@ bool SegmentedOpsSpool::flush() {
     ::fsync(activeFd);
 #endif
   }
+  return true;
+}
+
+bool SegmentedOpsSpool::writeSegmentFile(
+    const std::filesystem::path &path) const {
+  const int fd =
+      ::open(path.string().c_str(), O_WRONLY | O_CREAT | O_TRUNC, 0644);
+  if (fd < 0) {
+    return false;
+  }
+  // Index 1 because this writes the whole spool, and index 0 is the arena's
+  // state-zero slot rather than an operation anything holds.
+  if (!writeSegmentHeader(fd, segmentHeaderFor(1, opCount))) {
+    ::close(fd);
+    return false;
+  }
+  if (0 != opCount) {
+    const auto bytes = opCount * sizeof(CompactOpNode);
+    if (::lseek(fd, static_cast<off_t>(opsSegmentHeaderBytes), SEEK_SET) < 0 ||
+        ::write(fd, rawOps() + 1, bytes) != static_cast<ssize_t>(bytes)) {
+      ::close(fd);
+      return false;
+    }
+  }
+  ::close(fd);
   return true;
 }
 

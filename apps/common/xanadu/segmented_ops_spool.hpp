@@ -5,6 +5,7 @@
 #ifndef XUDU_SEGMENTED_OPS_SPOOL_HPP
 #define XUDU_SEGMENTED_OPS_SPOOL_HPP
 
+#include <array>
 #include <cstddef>
 #include <cstdint>
 #include <filesystem>
@@ -18,6 +19,144 @@
 #include "virtual_memory_arena.hpp"
 
 namespace xanadu {
+
+/**
+ * @brief The twelve bytes every operations segment file opens with.
+ *
+ * PNG's signature trick, copied rather than shortened, because every byte of
+ * it does a job that a longer random constant would not. 0x89 has its high bit
+ * set, so a transfer that strips to seven bits destroys it. XUDUOPS is what
+ * `file` and `less` show a person. \\r\\n is destroyed by any transport that
+ * translates CRLF to LF and the trailing \\n by one translating the other way.
+ * \\x1a is DOS end-of-file, so TYPE on Windows stops rather than spraying the
+ * terminal with node bytes.
+ *
+ * The file it exists to reject is guaranteed to be rejected: a segment written
+ * before this header existed opens with the root operation's parentIndex,
+ * which is zero, so its first four bytes are 00 00 00 00 and cannot be
+ * mistaken for \\x89XUD.
+ */
+inline constexpr std::array<std::uint8_t, 12> opsSegmentSignature{
+    0x89, 'X', 'U', 'D', 'U', 'O', 'P', 'S', 0x0d, 0x0a, 0x1a, 0x0a};
+
+/// Bumped per R11 whenever the shape of what follows changes. A reader that
+/// does not know a version reads nothing rather than guessing.
+///
+/// This is also what catches a file written on a machine of the other
+/// endianness. The nodes are stored as they sit in memory, so an ops segment
+/// is host-ordered by construction; the signature is a byte array and would
+/// pass, but a version of 1 read the wrong way round is 16,777,216, which is
+/// not a version this reader knows.
+inline constexpr std::uint32_t opsSegmentFormatVersion = 1;
+
+/**
+ * @brief Bytes from the start of the file to the first node. 65,536.
+ *
+ * Forced rather than chosen. adoptSegmentNodes() maps a sealed segment with
+ * mapFileFixed(), and mmap requires a page-aligned file offset -- so this must
+ * be a multiple of the page size of every machine that will ever open the
+ * file: 4 KiB on x86-64, 16 KiB on Apple silicon, 64 KiB on some POWER and ARM
+ * configurations. A 4 KiB header would silently lose zero-copy mapping on a
+ * 16 KiB-page machine and fall back to the read() path, which is correct but
+ * no longer zero-copy, and nothing would say so.
+ *
+ * 64 KiB is the smallest size that is a multiple of all of them, and it is
+ * already this tree's unit: the BitTorrent v2 Merkle piece size the
+ * permascroll's segments are aligned to, which gives 65536 / 64 = 1024
+ * operations per piece. So the header is piece 0 and the nodes are pieces
+ * 1..N, node boundaries still land on piece boundaries, and a peer that
+ * fetches the first piece of a segment learns the format before fetching
+ * anything else.
+ *
+ * The cost is 64 KiB per segment file including a freshly opened one holding
+ * no operations. Everything that writes a header leaves the rest of it a hole,
+ * so on a filesystem with sparse files it is address space rather than disk --
+ * but `ls` will report it, and it is a floor rather than an overhead that
+ * amortises.
+ */
+inline constexpr std::uint32_t opsSegmentHeaderBytes = 65536;
+
+/// OpsSegmentHeader::flags: merkleRoot holds a root rather than zeroes.
+/// Nothing computes one yet, so nothing sets this; it is what stops an unset
+/// root ever being read as a real one.
+inline constexpr std::uint32_t opsSegmentFlagMerkleRoot = 0x1U;
+
+/**
+ * @brief What an operations segment file says about itself before its nodes.
+ *
+ * Migration step 1 moved a field inside CompactOpNode and every sample store
+ * on disk went on loading, meaning something else: an operation read as a
+ * Rearrange of zero bytes, and fifteen tests quietly started asserting on the
+ * empty string. There was nothing to refuse it with, because a segment file
+ * was a bare run of nodes with no header at all -- so R11's "bump the version"
+ * had nothing to bump. This is that header.
+ *
+ * Laid out with no implicit padding anywhere, and every offset asserted below:
+ * this is a file format, and a compiler quietly inserting four bytes between
+ * two fields is the same class of silent change the header exists to catch.
+ */
+struct OpsSegmentHeader {
+  std::array<std::uint8_t, 12> signature{}; ///< opsSegmentSignature
+  std::uint32_t formatVersion{};            ///< opsSegmentFormatVersion
+  std::uint32_t headerBytes{};              ///< opsSegmentHeaderBytes
+  /// sizeof(CompactOpNode). The step-1 failure, caught: this turns "the file
+  /// means something else now" into "this file says its nodes are 64 bytes
+  /// and mine are 72".
+  std::uint32_t nodeSize{};
+  std::uint32_t flags{};
+  /// The spool index the first node in this file held when it was written.
+  /// The loader re-derives this as opCount + 1; recording it is what lets a
+  /// segment loaded out of order say so, rather than failing later and less
+  /// clearly because a parent turned out to be missing.
+  std::uint32_t firstOpIndex{};
+  /// Operations in this file. The file's own length says this too, and the
+  /// two are cross-checked -- see nodesInSegment() for which wins and why.
+  std::uint64_t nodeCount{};
+  /// Over the node pieces, not over the header, so that a segment fetched
+  /// from a swarm can be checked before it is mapped. Zero and meaningless
+  /// unless opsSegmentFlagMerkleRoot is set, which nothing sets yet.
+  std::array<std::uint8_t, 32> merkleRoot{};
+  std::uint64_t reservedZero{}; ///< written zero, read and required to be zero
+};
+
+static_assert(sizeof(OpsSegmentHeader) == 80);
+static_assert(alignof(OpsSegmentHeader) == 8);
+static_assert(sizeof(OpsSegmentHeader) < opsSegmentHeaderBytes);
+// Every field's offset, because a size assertion alone cannot catch two
+// changes that cancel out, and because these are the bytes on disk.
+static_assert(offsetof(OpsSegmentHeader, signature) == 0);
+static_assert(offsetof(OpsSegmentHeader, formatVersion) == 12);
+static_assert(offsetof(OpsSegmentHeader, headerBytes) == 16);
+static_assert(offsetof(OpsSegmentHeader, nodeSize) == 20);
+static_assert(offsetof(OpsSegmentHeader, flags) == 24);
+static_assert(offsetof(OpsSegmentHeader, firstOpIndex) == 28);
+static_assert(offsetof(OpsSegmentHeader, nodeCount) == 32);
+static_assert(offsetof(OpsSegmentHeader, merkleRoot) == 40);
+static_assert(offsetof(OpsSegmentHeader, reservedZero) == 72);
+// The header is one Merkle piece and the nodes are the pieces after it, so a
+// node boundary is never a piece boundary's problem.
+static_assert(opsSegmentHeaderBytes % sizeof(CompactOpNode) == 0);
+
+/**
+ * @class OpsSegmentUnreadable
+ * @brief Thrown when a file is not an operations segment this build can read.
+ *
+ * The loud half of R14. A file whose signature is wrong, whose version is not
+ * known, whose nodes are not the size this build compiles, or which is cut
+ * short is refused with a diagnostic rather than read into nonsense -- and
+ * refusing is a throw rather than a false because "this is not the file you
+ * think it is" is not a question the caller was asking.
+ *
+ * Distinct from a segment being refused by returning false, which means the
+ * file is a perfectly good segment that does not belong where it was offered:
+ * it starts at the wrong operation index, names parents this spool does not
+ * hold, or would file a state twice. That is a fact about the order things
+ * were loaded in, not about the file.
+ */
+class OpsSegmentUnreadable : public std::runtime_error {
+public:
+  using std::runtime_error::runtime_error;
+};
 
 /// Address space the operations arena asks for, which on a 64-bit machine is
 /// not memory: VirtualMemoryArena::reserve maps it PROT_NONE, and a page costs
@@ -177,28 +316,50 @@ public:
    * @brief Add a sealed read-only segment file, mapped in after what is
    *        already held.
    *
-   * The file is a bare run of CompactOpNodes and nothing else -- no header, no
-   * state-zero slot, no names. The names are worked out from the nodes: each
-   * one says which index produced it and by which branch ordinal, so its
-   * microversion follows from its parent's, and a parent always sits at a
-   * lower index than its children. Segments are therefore written and read
-   * back in the same order, and the indices inside them are the ones they had
-   * when they were sealed rather than positions within the file.
+   * An OpsSegmentHeader, then a run of CompactOpNodes. No state-zero slot and
+   * no names: the names are worked out from the nodes, each one saying which
+   * index produced it and by which branch ordinal, so its microversion follows
+   * from its parent's and a parent always sits at a lower index than its
+   * children. Segments are therefore written and read back in the same order,
+   * and the indices inside them are the ones they had when they were sealed
+   * rather than positions within the file.
    *
-   * @return false if the file cannot be read, is not a whole number of nodes,
-   *         or names a parent this spool does not hold -- which is what a
-   *         segment loaded out of order looks like.
+   * @return false if the file cannot be opened, starts at an operation index
+   *         other than the one this spool is at, names a parent this spool
+   *         does not hold, or would file one state twice.
+   * @throws OpsSegmentUnreadable if the file is not an operations segment this
+   *         build can read at all. See that class for why the two are
+   *         different answers.
    */
   bool addSealedSegment(const std::filesystem::path &path);
 
   /**
    * @brief Open the writable segment that new operations are appended to.
    *
-   * A file that already holds nodes is adopted rather than overwritten, so
-   * reopening a spool picks up where it left off. Anything appended after
-   * that is written to this file by flush().
+   * A file that does not exist yet, or exists and is empty, is created with a
+   * header and nothing after it. A file that already holds nodes is adopted
+   * rather than overwritten, so reopening a spool picks up where it left off.
+   * Anything appended after that is written to this file by flush().
+   *
+   * @throws OpsSegmentUnreadable as addSealedSegment() does.
    */
   bool openActiveSegment(const std::filesystem::path &path);
+
+  /**
+   * @brief Write every operation held to @p path as a whole segment file.
+   *
+   * The one place a complete segment file is produced, which is the point:
+   * Store::save() used to write ops.nodes itself with its own ofstream while
+   * this class read it, so the format was agreed between two pieces of code
+   * rather than known by one. That is exactly the arrangement that let a
+   * layout change go unnoticed in migration step 1, and a header only fixes it
+   * if there is one writer to put a header in.
+   *
+   * Does not disturb the active segment's own bookkeeping, so writing the
+   * active segment's path is safe: this writes every node, and a later flush()
+   * would rewrite the tail with the identical bytes at the identical offsets.
+   */
+  [[nodiscard]] bool writeSegmentFile(const std::filesystem::path &path) const;
 
   /**
    * @brief Seal the active segment and start a new one at @p newActivePath.
@@ -308,6 +469,9 @@ private:
   /// held, work out the microversion each produces, and index them. Shared by
   /// addSealedSegment() and openActiveSegment(), which differ only in whether
   /// the range may be mapped read-only and in what is recorded about it.
+  ///
+  /// Reads from opsSegmentHeaderBytes rather than from the start of the file,
+  /// both when mapping and when falling back to read().
   bool adoptSegmentNodes(int fd, std::uint32_t nodeCount, bool mayMap);
 
   int activeFd{-1};

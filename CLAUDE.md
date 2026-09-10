@@ -127,8 +127,10 @@ already in use.
 
 These are real on-disk stores — `ops.nodes`, `primedia.spool`, `scrolls.spool`, `links.spool`,
 `current.yaml` — checked in and loaded by `SampleXanadocsTest`. **A change to `CompactOpNode`'s
-layout invalidates every one of them**, and because `ops.nodes` is a bare run of nodes with no
-header, they do not fail to load: they load and mean something else. Regenerate in the same commit:
+layout invalidates every one of them.** Since migration step 8 they say so: `ops.nodes` opens with
+an `OpsSegmentHeader` recording `sizeof(CompactOpNode)`, so a stale fixture is refused with
+`OpsSegmentUnreadable` naming the two sizes rather than loading and meaning something else.
+Regenerate in the same commit anyway — a refused fixture is a red test, not a working one:
 
 ```sh
 make -j$(nproc) xudu
@@ -350,13 +352,22 @@ nobody has. What is *not* negotiable is the structural invariants — `sizeof(Co
 and its cache-line alignment, 64 KiB Merkle piece alignment, append-only-ness. Layout is soft;
 invariants are hard.
 
-The caveat that makes this bite: **`ops.nodes` has no header yet**, so there is nothing to bump and
-nothing to refuse a stale file with. A store written in the old shape loads and means something
-else. R14 of the convergence note specifies the header that fixes this — a twelve-byte PNG-style
-signature, a format version, and the `nodeSize` field whose silent change caused the problem, in a
-64 KiB block sized so the nodes after it stay `mmap`-able on 4 KiB, 16 KiB and 64 KiB page systems.
-**Until that lands, a layout change means regenerating every fixture in the same commit** (see
-"Tests"), and after it lands a stale file is refused with a diagnostic instead.
+**`ops.nodes` has a header, as of migration step 8** — a twelve-byte PNG-style signature, a format
+version, and the `nodeSize` field whose silent change caused migration step 1's damage, in a 64 KiB
+block sized so the nodes after it stay `mmap`-able on 4 KiB, 16 KiB and 64 KiB page systems. So
+there is something to bump, and a store written in a shape this build does not read is refused with
+an `OpsSegmentUnreadable` naming what was wrong rather than loading into nonsense. Two rules follow:
+
+- **A layout change still means regenerating every fixture in the same commit** (see "Tests"). The
+  header turns silent corruption into a loud failure; it does not make the fixtures correct.
+- **One writer.** `SegmentedOpsSpool::writeSegmentFile()` is the only thing that produces a segment
+  file, and `Store::save()` calls it. Do not write `ops.nodes` from anywhere else — a format known
+  in two places is what let step 1's change go unnoticed.
+
+A *system* xanadoc under `~/.config/xudu/system/` is the one exception to "refused means refused":
+`Session::systemStoreIndex()` moves an unreadable one aside and writes a default in its place,
+because the program generates those itself and would otherwise refuse to start over its own
+scaffolding. A document the user named is never treated that way.
 
 This ruling has an expiry. It is void the first time someone outside this repository has a document
 they care about; see R11 in `design/store-slice-convergence.md`.
@@ -367,7 +378,7 @@ they care about; see R11 in `design/store-slice-convergence.md`.
 
 - [`store-slice-convergence.md`](design/store-slice-convergence.md) — the active plan: a cell is an
   operation, `Slice` becomes a replay product of the ops spool like `Version` is. Fourteen rulings
-  with their prices, a numbered migration (**steps 1–7 are done**), and the measurements behind
+  with their prices, a numbered migration (**steps 1–8 are done**), and the measurements behind
   each. Read this before touching `CompactOpNode`, `Manifold`, `CompactZZCell` or the zigzag
   engine's sync path.
 - [`vortex-hyperstructural-runtime.md`](design/vortex-hyperstructural-runtime.md) and

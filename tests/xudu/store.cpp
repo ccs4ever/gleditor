@@ -5,6 +5,7 @@
 #include <gmock/gmock.h>
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <filesystem>
 #include <fstream>
 #include <stdexcept>
@@ -543,11 +544,25 @@ TEST_F(StoreRoundTripTest, operationsAreWrittenAsTheTreeTheyAreHeldAs) {
   const auto branched = store.insert(MicroversionId::parse("1"), 1, "y");
   store.save(dir.string());
 
-  // One node per operation and nothing else: no header, no names, no
-  // state-zero slot. What is on disk is what the arena holds.
+  // A header, then one node per operation and nothing else: no names and no
+  // state-zero slot. What follows the header is what the arena holds.
   ASSERT_TRUE(std::filesystem::exists(dir / "ops.nodes"));
   EXPECT_EQ(std::filesystem::file_size(dir / "ops.nodes"),
-            store.opCount() * sizeof(xudu::CompactOpNode));
+            xudu::opsSegmentHeaderBytes +
+                store.opCount() * sizeof(xudu::CompactOpNode));
+  // And it says what it is, which is what stops a store written in some other
+  // shape being read as this one. See design R14.
+  {
+    // Unsigned, because a plain char is signed here and 0x89 would compare as
+    // -119 against the signature's 137.
+    std::ifstream in(dir / "ops.nodes", std::ios::binary);
+    std::vector<std::uint8_t> opening(xudu::opsSegmentSignature.size());
+    in.read(reinterpret_cast<char *>(opening.data()),
+            static_cast<std::streamsize>(opening.size()));
+    EXPECT_TRUE(std::equal(opening.begin(), opening.end(),
+                           xudu::opsSegmentSignature.begin()))
+        << "ops.nodes does not open with the operations segment signature";
+  }
   EXPECT_FALSE(std::filesystem::exists(dir / "ops.spool"));
 
   Store reloaded;

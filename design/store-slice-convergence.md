@@ -999,7 +999,7 @@ ______________________________________________________________________
 Each step is one commit. After each, `make -j$(nproc)` builds all three programs and
 `make -j$(nproc) test` passes.
 
-Steps 1–7 have landed. What each actually cost, where it differed from the plan, and what it
+Steps 1–8 have landed. What each actually cost, where it differed from the plan, and what it
 measured is recorded inline below; the rest are unchanged.
 
 1. ~~**Sealed-segment immutability** (R10).~~ **Done.** `firstChildIndex`/`nextSiblingIndex` left
@@ -1012,6 +1012,7 @@ measured is recorded inline below; the rest are unchanged.
    every pre-existing segment test seals four or five nodes and so never lands on a page boundary.
    `alignas(64)` rounds a 56-byte struct back up to 64 on its own, so `sizeof == 64` cannot catch a
    field going missing; an `offsetof(CompactOpNode, value) == 56` assertion holds that line instead.
+
 1. ~~**`publish()` with a page break.**~~ **Done.** A break travels under the reserved scroll name
    `breakMarkerKey` (`"break:"`, which cannot collide: `scrollKey()` only ever produces `"btpk:"` or
    `"file:"`), as a zero-length piece contributing nothing to the manifest's scroll table — there is
@@ -1019,6 +1020,7 @@ measured is recorded inline below; the rest are unchanged.
    dereference. `adopt()` re-records it with `insertBreak()` at the concatext offset it was
    published at. Transclusion still carries no breaks, so
    `PageBreakTest.TranscludedPassageExcludesBreaks` holds unchanged.
+
 1. ~~**The three quadratics.**~~ **Done**, but *not* by the prescribed
    `lower_bound`-plus-predecessor check, which is **wrong**: it misses an older, longer span hidden
    behind a nearer neighbour — `{start 0, len 100}` is invisible behind `{start 5, len 1}` when the
@@ -1036,6 +1038,7 @@ measured is recorded inline below; the rest are unchanged.
    constant. The regression test asserts the shape, not a time: per-op cost at 8,000 operations must
    stay under three times the cost at 2,000. Linear scores about 0.8×, the quadratic version scores
    4.6×.
+
 1. ~~**`getEffectiveCellText()` resolves `CellData` by alternative.**~~ **Done.** It returns
    `std::string` rather than `std::string_view`, because a scalar cell's text does not exist
    anywhere to point at; no caller pays for it, since all six copied the view into a string
@@ -1045,6 +1048,7 @@ measured is recorded inline below; the rest are unchanged.
    the space does not hold. A master holding an *empty string* now reads as empty rather than
    reaching for the clone's text, which was the same bug seen from the other side. This is V2's
    groundwork: it is what makes `d.clone` able to stand in for `d.entangle`.
+
 1. ~~**Spool capacity.**~~ **Done.** `defaultOpsReservation` is 8 GiB of reserved address space on
    64-bit and 512 MiB where a pointer is 32 bits, and it moved into the header, because a ceiling
    worth reporting is a ceiling callers can read. `append()` asks `opCapacityRemaining()` *before*
@@ -1067,6 +1071,7 @@ measured is recorded inline below; the rest are unchanged.
    `std::bad_alloc` standing: it has the same shape and wants the same treatment, but 512 MB of
    primedia is a different question from 134 million operations — bytes a person typed rather than
    edits they made — and answering it here would have been scope this step did not measure.
+
 1. ~~**Small-buffer `MicroversionId`**~~ **Done.** The first two segments live inside the object and
    a longer name spills to an exactly-sized heap block. Two is where the boundary belongs because of
    what a name *means*: a state on a chain is one segment, a branch off it is two, and only a branch
@@ -1086,6 +1091,7 @@ measured is recorded inline below; the rest are unchanged.
    directions, and self-assigned by copy and by move, run under ASAN and UBSAN with leak detection
    as well as in the ordinary suite. Every pre-existing test passed unmodified, which is what the
    step asked for.
+
 1. ~~**`GlobalOpRef` plus `Store::opRefOf`/`localiseOpRef`** (R4).~~ **Done**, and mirroring
    `globalise`/`localise` turned out to mean three things the plan had not said. **They are free
    functions in `publication.hpp` beside `globalise`/`localise`, not `Store` members**, which §5.4
@@ -1113,48 +1119,94 @@ measured is recorded inline below; the rest are unchanged.
    branch is recorded fourth and sorts second, sealed and read back, so the local index provably
    moves — the test asserts that it moved before asserting anything else — while `opRefOf` produces
    the same ref on both sides and `localiseOpRef` hands each store back its own different index.
-1. **`OpsSegmentHeader`** (R14). The 12-byte signature, the fields after it, and a 64 KiB header on
-   every ops segment file. Four call sites gain an offset — `openActiveSegment()` writes it on
-   create and validates it on adopt, `addSealedSegment()` checks the signature before anything else,
-   `flush()` seeks past it, `adoptSegmentNodes()` passes it as the `mmap` file offset. Two tests
-   that must exist afterwards: a store written by the *previous* commit is refused with a diagnostic
-   naming the signature rather than loading into nonsense, and a segment whose header claims a
-   `nodeSize` other than 64 is refused rather than read. Regenerate the fixtures in the same commit;
-   this is the last time that happens silently, which is the point of the step. **Comes before
-   everything below**, because it is what gives R11's "bump the version" something to bump.
+
+1. ~~**`OpsSegmentHeader`** (R14).~~ **Done.** The signature, the fields after it, and a 64 KiB
+   header on every ops segment file; both required tests exist and both fixture scripts were rerun,
+   so all seventeen checked-in stores now open with `\x89XUDUOPS`. The four call sites gained their
+   offset as described. Four things the plan had not accounted for, and the first is the one that
+   mattered.
+
+   **There were two writers, not one.** `Store::save()` wrote `ops.nodes` with an `ofstream` of its
+   own while `SegmentedOpsSpool` read it, so the shape of a segment file was *agreed between two
+   pieces of code rather than known by one* — which is the arrangement that let step 1's layout
+   change go unnoticed in the first place. A header only fixes that if there is one writer to put a
+   header in, so `writeSegmentFile()` was added and `Store::save()` now calls it. This was not in
+   R14 and is the larger half of what the step actually bought.
+
+   **The header struct needed its offsets pinned, not just its size.** R14's field order puts a
+   `std::uint64_t` at offset 28, which no compiler will do — it inserts four bytes of padding and
+   the struct silently becomes 80 bytes with a hole in it. Reordered so every field is naturally
+   aligned and there is no padding anywhere, with an `offsetof` assertion on each: this is a file
+   layout, and a compiler quietly moving a field is the same class of change the header exists to
+   catch. Step 1's lesson, applied to the thing built because of step 1.
+
+   **Refusal is two different answers, and conflating them would have been wrong.** A file that is
+   not an operations segment — bad signature, unknown version, wrong `nodeSize`, cut short, or
+   claiming more operations than it holds — throws `OpsSegmentUnreadable`, because R14 asks for loud
+   and a `false` return is not loud. A file that is a perfectly good segment but does not belong
+   where it was offered — `firstOpIndex` says it starts at operation 41 and this spool is at 1, or
+   its nodes name parents that are missing — still returns `false`, because that is a fact about the
+   order things were loaded in rather than about the file. `firstOpIndex` earns its four bytes by
+   making the first of those checkable at all.
+
+   **And a system xanadoc cannot be allowed to refuse to open.** Every existing
+   `~/.config/xudu/system/*` store is pre-header, so the first run after this commit could not
+   start: seventeen orchestration tests failed on `xudu` exiting 1 before drawing anything. But a
+   system xanadoc is scaffolding the program writes for itself, and `Session::systemStoreIndex()`
+   already knows how to make one from nothing — so "unreadable" means the same thing there as "not
+   there", and it now moves the old one aside (never over it: those hold whatever the user changed
+   through the UI) and writes a default. **A document the user named is untouched by this and still
+   fails loudly**, which is what R11 asks for, because nobody can regenerate that one. The line is
+   between a file this program authored for itself and a file it did not.
+
+   Two details worth keeping. `nodeCount` is maintained by `flush()` *after* the nodes are written,
+   so a crash between the two leaves a header that undercounts whole nodes rather than one that
+   promises nodes that are not there; the reader recovers the first and refuses the second, which is
+   the way round that keeps the operations. And the 64 KiB is genuinely a hole — a freshly saved
+   four-operation store measures 65,792 bytes and occupies 8 KiB on disk.
+
 1. **`tools/xudu-dump`** (R11). Renders the header, `ops.nodes`, the scroll registry and the link
    table as text. Lands **before** the format changes below, not after: a binary format whose only
    reader is the loader you are debugging is how "we will write the tool later" becomes "we cannot
    debug the loader". Its output on a store written by the previous step is the baseline the next
    two steps diff against.
+
 1. **`OpsSpoolVersion::CompactBinaryV3`** (R11): four-bit kind tag, `FLAG_SEQUENTIAL` moved, the
    `reserved0`/`reserved1` slots reclaimed as `value`, and the V1/V2 readers **deleted**. Rewrite
    the `CompactBinaryV2` comment that cites `PageBreak` as a change that needed no bump. Round-trip
    test: write, dump, reload, dump, compare.
+
 1. **One binary store container** (R11). `scrolls.spool` and the link table become sections beside
    `ops.nodes` under one versioned header. Deletes both plaintext parsers and their per-line error
    paths in `store.cpp`.
+
 1. **`OpKind::Structure` plus `BinStructure = 7`** (R1, R2): flag constants and accessors, the
    `replay()` no-op case, `opKindName`, both `binary_ops.cpp` switches, the OSMIC-text string table,
    and the `Op::link` truncation fix. **No behaviour change: nothing emits `Structure` yet.**
+
 1. **`Manifold` plus `rebuildManifold()` plus the `makeCell`/`setLink`/`setValue` API** (R7, R9,
    R12), with `verifyAgainstFullRebuild()` and its test. CSR link runs, `d.dims` and the two genesis
    cells, `ephemeralBit` and the `applyStructure` rejection of ephemeral link targets. Nothing
    consumes it yet.
+
 1. **Scalars** (R6). Canonicalisation at the API boundary; signalling NaN rejected. Property test:
    `asDouble(makeCell(v))` equals `canonicalise(v)`, and `textOf(cell)` parses back to the same
    double.
+
 1. **`Resolver` verified-piece cache**, keyed by info hash and piece index. Blocking for the frame
    budget: `readSegment` verifies whole 64 KiB pieces and the resolved-text cache was removed and
    never replaced, so `stageVisibleCells` re-verifies per visible cell per frame.
+
 1. **Make `UserPermascroll::read`/`readView` genuinely lock-free.** They are documented as "fast
    lock-free zero-copy" but take `std::lock_guard` on `appendMutex_`; the underlying arena's
    `base()` never moves and `readView` clamps to `totalBytes`, so the lock serialises the render
    thread against the append path for nothing.
+
 1. **Delete `Preflet`** (R13). `struct Preflet`, both `optional<Preflet>` members, `resolvePreflet`,
    `resolveAllPreflets`, `isPrefletChainNode`, the `preflet_*` roles, `d.preflet`, and the YAML
    emitter branch. Regenerate the `assets/zigzag/` fixtures that use `preflet:` blocks. Independent
    of everything above and landable at any point after the container change.
+
 1. **Port `UnifiedTransclusionEngine` onto `Manifold`.** `syncIncremental`/`buildCellFromOp` already
    make exactly one `CompactZZCell` per `CompactOpNode` and already set `spoolOpIndex = opIndex`, so
    this is mostly deletion. `CompactZZCell` dissolves into `CellSlot` plus a CSR link run plus
@@ -1162,10 +1214,12 @@ measured is recorded inline below; the rest are unchanged.
    where 192 of its 960 bytes were — and `ephemeralText` is deleted outright, since it duplicates
    the primedia that `span` already addresses, as its own comment complains. Add the traversal
    benchmark R12's price depends on, so the $2.7\times$ claim is a test rather than an assertion.
+
 1. **`sliceToStore()` / `storeToSlice()` against `Manifold`**, replacing `projectXuduToZigzag`'s
    paragraph-splitting heuristic (it pairs paragraph $k$ with `pieces()[k]`, and piece index and
    paragraph index have no relationship) and `zzStructureToLinkPackage`'s synthetic scroll.
    `ZzStructureDocument` and `zigzag::Cell` survive, demoted in their doc comments to the YAML DTO.
+
 1. **`ArenaManifold` plus `promote()`** (R8). Only after step 14, and only once there is a VQL
    interpreter to drive it.
 

@@ -5,6 +5,7 @@
 #include <cmath>
 #include <cstdint>
 #include <filesystem>
+#include <format>
 #include <fstream>
 #include <iostream>
 #include <iterator>
@@ -835,10 +836,44 @@ std::size_t Session::systemStoreIndex(const SystemDocKind kind) {
   auto sysStore = std::make_unique<Store>(perma);
   sysStore->setSystem(true);
 
+  bool opened = false;
   if (std::filesystem::exists(dir / "ops.nodes") ||
       std::filesystem::exists(dir / "ops.spool") ||
       std::filesystem::exists(dir / "current.yaml")) {
-    sysStore->load(dir.string());
+    try {
+      sysStore->load(dir.string());
+      opened = true;
+    } catch (const xanadu::OpsSegmentUnreadable &e) {
+      // A system xanadoc is scaffolding this program writes for itself, and
+      // the branch below already knows how to make one from nothing. So a
+      // system store in a shape this build cannot read means the same thing
+      // as one that is not there, and refusing to start over it would make
+      // every earlier config a reason the program will not open at all.
+      //
+      // A document the *user* named is the opposite case and is left to fail
+      // loudly, which is what R11 asks for: nobody can regenerate that one.
+      //
+      // Moved aside rather than written over. These hold whatever the user
+      // changed through the UI -- their keymap, their settings -- and this
+      // program did not write the bytes it is about to replace.
+      auto aside = dir;
+      aside += ".unreadable";
+      for (int n = 1; std::filesystem::exists(aside); n++) {
+        aside = dir;
+        aside += ".unreadable." + std::to_string(n);
+      }
+      std::error_code moved;
+      std::filesystem::rename(dir, aside, moved);
+      std::cerr << std::format(
+          "xudu [warning]: the system {} xanadoc could not be read ({}). It "
+          "has been moved to {} and a default one written in its place.\n",
+          systemDocName(kind), e.what(), aside.string());
+      std::filesystem::create_directories(dir);
+      sysStore = std::make_unique<Store>(perma);
+      sysStore->setSystem(true);
+    }
+  }
+  if (opened) {
     if (sysStore->currentVersions().empty() && !sysStore->latest().isZero()) {
       sysStore->repointCurrentVersion(sysStore->latest());
     }

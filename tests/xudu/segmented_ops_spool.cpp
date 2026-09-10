@@ -6,8 +6,10 @@
 #include <gmock/gmock.h>
 #include <gtest/gtest.h>
 
+#include <array>
 #include <filesystem>
 #include <fstream>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -217,12 +219,53 @@ TEST(SegmentedOpsSpoolTest, theDefaultReservationIsAddressSpaceNotMemory) {
 
 // -- segments on disk --------------------------------------------------------
 //
-// A segment file is a bare run of CompactOpNodes: no header, no state-zero
-// slot, and no microversion names anywhere in it. The names come back out of
-// the tree, each node saying which index produced it and by which branch
-// ordinal, which is what these cover.
+// A segment file is an OpsSegmentHeader and then a run of CompactOpNodes: no
+// state-zero slot and no microversion names anywhere in it. The names come
+// back out of the tree, each node saying which index produced it and by which
+// branch ordinal, which is what these cover.
 
 namespace {
+
+/// The bytes a segment file of @p nodes starting at @p firstOpIndex is made
+/// of, written out by hand.
+///
+/// Duplicating what SegmentedOpsSpool writes is the point: a test that put its
+/// nodes there through the spool could not put them at an index the spool did
+/// not choose, and could not write a header that is wrong on purpose.
+void writeSegmentFileByHand(
+    const std::filesystem::path &path, const std::vector<CompactOpNode> &nodes,
+    const std::uint32_t firstOpIndex,
+    const std::optional<xudu::OpsSegmentHeader> &deliberatelyWrong = {}) {
+  xudu::OpsSegmentHeader header;
+  if (deliberatelyWrong.has_value()) {
+    header = *deliberatelyWrong;
+  } else {
+    header.signature     = xudu::opsSegmentSignature;
+    header.formatVersion = xudu::opsSegmentFormatVersion;
+    header.headerBytes   = xudu::opsSegmentHeaderBytes;
+    header.nodeSize      = sizeof(CompactOpNode);
+    header.firstOpIndex  = firstOpIndex;
+    header.nodeCount     = nodes.size();
+  }
+  {
+    std::ofstream out(path, std::ios::binary | std::ios::trunc);
+    out.write(reinterpret_cast<const char *>(&header), sizeof(header));
+    // Never written, so the rest of the header block is a hole.
+    out.seekp(xudu::opsSegmentHeaderBytes);
+    if (!nodes.empty()) {
+      out.write(
+          reinterpret_cast<const char *>(nodes.data()),
+          static_cast<std::streamsize>(nodes.size() * sizeof(CompactOpNode)));
+    }
+  }
+  std::filesystem::resize_file(path, xudu::opsSegmentHeaderBytes +
+                                         nodes.size() * sizeof(CompactOpNode));
+}
+
+/// What a segment file holding @p nodeCount operations is on disk.
+std::uintmax_t segmentFileSize(const std::uintmax_t nodeCount) {
+  return xudu::opsSegmentHeaderBytes + nodeCount * sizeof(CompactOpNode);
+}
 
 std::filesystem::path scratchDir(const std::string &name) {
   const auto dir =
@@ -254,18 +297,24 @@ TEST(SegmentedOpsSpoolTest, appendedOpsReachTheActiveSegmentFile) {
 
   SegmentedOpsSpool spool;
   ASSERT_TRUE(spool.openActiveSegment(active));
+  // Opening one writes its header and nothing else, so the file says what it
+  // is from the moment it exists rather than from its first flush.
+  EXPECT_EQ(std::filesystem::file_size(active), segmentFileSize(0));
+
   appendChain(spool, 10);
-  // Nothing is on disk until it is asked for: appending is a write to memory.
+  // No operation is on disk until it is asked for: appending is a write to
+  // memory.
+  EXPECT_EQ(std::filesystem::file_size(active), segmentFileSize(0));
   ASSERT_TRUE(spool.flush());
-  EXPECT_EQ(std::filesystem::file_size(active), 10 * sizeof(CompactOpNode));
+  EXPECT_EQ(std::filesystem::file_size(active), segmentFileSize(10));
 
   // Flushing again writes nothing further -- only the tail is ever written.
   ASSERT_TRUE(spool.flush());
-  EXPECT_EQ(std::filesystem::file_size(active), 10 * sizeof(CompactOpNode));
+  EXPECT_EQ(std::filesystem::file_size(active), segmentFileSize(10));
 
   appendChain(spool, 5);
   ASSERT_TRUE(spool.flush());
-  EXPECT_EQ(std::filesystem::file_size(active), 15 * sizeof(CompactOpNode));
+  EXPECT_EQ(std::filesystem::file_size(active), segmentFileSize(15));
 }
 
 TEST(SegmentedOpsSpoolTest, anActiveSegmentIsPickedUpWhereItWasLeft) {
@@ -338,10 +387,8 @@ TEST(SegmentedOpsSpoolTest, sealingKeepsTheOperationsItAlreadyHas) {
   appendChain(spool, 3);
   EXPECT_EQ(spool.size(), 8U);
   ASSERT_TRUE(spool.flush());
-  EXPECT_EQ(std::filesystem::file_size(dir / "seg0.ops"),
-            5 * sizeof(CompactOpNode));
-  EXPECT_EQ(std::filesystem::file_size(dir / "seg1.ops"),
-            3 * sizeof(CompactOpNode));
+  EXPECT_EQ(std::filesystem::file_size(dir / "seg0.ops"), segmentFileSize(5));
+  EXPECT_EQ(std::filesystem::file_size(dir / "seg1.ops"), segmentFileSize(3));
 
   for (std::uint32_t i = 1; i <= 8; i++) {
     EXPECT_TRUE(spool.contains(MicroversionId::parse(std::to_string(i))))
@@ -435,10 +482,8 @@ TEST(SegmentedOpsSpoolTest, appendingUnderASealedParentDoesNotWriteIntoIt) {
       nodes[i].parentIndex = perPage - 1U + i;
       nodes[i].at          = perPage + i;
     }
-    std::ofstream out(dir / "sealed.ops", std::ios::binary);
-    out.write(
-        reinterpret_cast<const char *>(nodes.data()),
-        static_cast<std::streamsize>(nodes.size() * sizeof(CompactOpNode)));
+    // Starting at perPage, which is where the spool below will be up to.
+    writeSegmentFileByHand(dir / "sealed.ops", nodes, perPage);
   }
 
   SegmentedOpsSpool spool;
@@ -493,32 +538,230 @@ TEST(SegmentedOpsSpoolTest, appendingUnderASealedParentDoesNotWriteIntoIt) {
 }
 
 TEST(SegmentedOpsSpoolTest, aSegmentThatDoesNotFitIsRefused) {
+  // The quiet half of the refusal. These files are perfectly good segments;
+  // they just do not belong where they are being offered, which is a fact
+  // about the order things were loaded in rather than about the file. So they
+  // come back false, where a file that is not a segment at all throws -- see
+  // the tests below.
   const auto dir = scratchDir("refuse");
-
-  // Not a whole number of nodes.
-  {
-    std::ofstream out(dir / "ragged.ops", std::ios::binary);
-    const std::string junk(sizeof(CompactOpNode) + 7, '\0');
-    out.write(junk.data(), static_cast<std::streamsize>(junk.size()));
-  }
-  SegmentedOpsSpool spool;
-  EXPECT_FALSE(spool.addSealedSegment(dir / "ragged.ops"));
-  EXPECT_EQ(spool.size(), 0U);
 
   // Two nodes claiming the same parent and ordinal name one state twice.
   {
     std::vector<CompactOpNode> nodes(2);
     nodes[0].parentIndex = 0;
     nodes[1].parentIndex = 0;
-    std::ofstream out(dir / "twins.ops", std::ios::binary);
+    writeSegmentFileByHand(dir / "twins.ops", nodes, 1);
+  }
+  SegmentedOpsSpool spool;
+  EXPECT_FALSE(spool.addSealedSegment(dir / "twins.ops"));
+  EXPECT_EQ(spool.size(), 0U) << "a refused segment must leave nothing behind";
+
+  // A segment whose operations start further along than this spool has got to.
+  // Loading it here would put its nodes at indices they were not written for,
+  // and every parentIndex in it would then name the wrong operation.
+  {
+    std::vector<CompactOpNode> nodes(2);
+    nodes[0].parentIndex = 40;
+    nodes[1].parentIndex = 41;
+    writeSegmentFileByHand(dir / "later.ops", nodes, 41);
+  }
+  EXPECT_FALSE(spool.addSealedSegment(dir / "later.ops"))
+      << "a segment that begins at operation 41 does not belong at 1";
+  EXPECT_EQ(spool.size(), 0U);
+
+  EXPECT_FALSE(spool.addSealedSegment(dir / "no-such-file.ops"));
+}
+
+// -- the header, and what it refuses -----------------------------------------
+//
+// Migration step 1 changed CompactOpNode's layout and every sample store on
+// disk went on loading, meaning something else -- an operation read as a
+// Rearrange of zero bytes, fifteen tests quietly asserting on the empty
+// string. There was nothing to refuse them with. These are that nothing,
+// filled in: see design R14.
+
+TEST(SegmentedOpsSpoolTest, aSegmentWrittenBeforeHeadersExistedIsRefused) {
+  // Byte for byte what the previous commit wrote: a bare run of nodes,
+  // starting with the root operation whose parentIndex is zero. That leading
+  // 00 00 00 00 is why the signature cannot be mistaken for one -- and why
+  // this file used to load.
+  const auto dir  = scratchDir("headerless");
+  const auto path = dir / "ops.nodes";
+  {
+    std::vector<CompactOpNode> nodes(3);
+    for (std::uint32_t i = 0; i < nodes.size(); i++) {
+      nodes[i].kind        = OpKind::Insert;
+      nodes[i].parentIndex = i;
+      nodes[i].length      = 1075; // what step 1's first sample really carried
+    }
+    std::ofstream out(path, std::ios::binary);
     out.write(
         reinterpret_cast<const char *>(nodes.data()),
         static_cast<std::streamsize>(nodes.size() * sizeof(CompactOpNode)));
   }
-  EXPECT_FALSE(spool.addSealedSegment(dir / "twins.ops"));
-  EXPECT_EQ(spool.size(), 0U) << "a refused segment must leave nothing behind";
 
-  EXPECT_FALSE(spool.addSealedSegment(dir / "no-such-file.ops"));
+  SegmentedOpsSpool spool;
+  try {
+    static_cast<void>(spool.addSealedSegment(path));
+    FAIL() << "a file written before headers existed must not be read as one";
+  } catch (const xudu::OpsSegmentUnreadable &e) {
+    // Naming the signature is the point: the message has to say what kind of
+    // file this is not, or the next person reads it as an I/O error.
+    EXPECT_THAT(std::string{e.what()}, testing::HasSubstr("signature"));
+    EXPECT_THAT(std::string{e.what()}, testing::HasSubstr("XUDUOPS"));
+    EXPECT_THAT(std::string{e.what()}, testing::HasSubstr("ops.nodes"));
+  }
+  EXPECT_EQ(spool.size(), 0U) << "nothing may be read out of a refused file";
+
+  // And the same file offered as an active segment, which is the path
+  // Store::load() actually takes.
+  SegmentedOpsSpool opening;
+  EXPECT_THROW(static_cast<void>(opening.openActiveSegment(path)),
+               xudu::OpsSegmentUnreadable);
+}
+
+TEST(SegmentedOpsSpoolTest, aSegmentWhoseNodesAreADifferentSizeIsRefused) {
+  // The step-1 failure itself, caught. A file whose operations are not the
+  // size this build compiles cannot be read as operations, however well
+  // everything else about it checks out.
+  const auto dir = scratchDir("nodesize");
+
+  std::vector<CompactOpNode> nodes(2);
+  nodes[1].parentIndex = 1;
+
+  xudu::OpsSegmentHeader wrongSize;
+  wrongSize.signature     = xudu::opsSegmentSignature;
+  wrongSize.formatVersion = xudu::opsSegmentFormatVersion;
+  wrongSize.headerBytes   = xudu::opsSegmentHeaderBytes;
+  wrongSize.nodeSize      = sizeof(CompactOpNode) + 8;
+  wrongSize.firstOpIndex  = 1;
+  wrongSize.nodeCount     = nodes.size();
+  writeSegmentFileByHand(dir / "wide.ops", nodes, 1, wrongSize);
+
+  SegmentedOpsSpool spool;
+  try {
+    static_cast<void>(spool.addSealedSegment(dir / "wide.ops"));
+    FAIL() << "operations of another size must not be read as these ones";
+  } catch (const xudu::OpsSegmentUnreadable &e) {
+    // Both numbers, because "this file says 72 and mine are 64" is what makes
+    // it obvious what happened, where "cannot read" does not.
+    EXPECT_THAT(std::string{e.what()},
+                testing::HasSubstr(std::to_string(sizeof(CompactOpNode) + 8)));
+    EXPECT_THAT(std::string{e.what()},
+                testing::HasSubstr(std::to_string(sizeof(CompactOpNode))));
+  }
+  EXPECT_EQ(spool.size(), 0U);
+}
+
+TEST(SegmentedOpsSpoolTest, aHeaderThisBuildDoesNotUnderstandIsRefused) {
+  const auto dir = scratchDir("unknown");
+  std::vector<CompactOpNode> nodes(1);
+
+  // A version from the future. Reading it would be guessing.
+  xudu::OpsSegmentHeader later;
+  later.signature     = xudu::opsSegmentSignature;
+  later.formatVersion = xudu::opsSegmentFormatVersion + 1;
+  later.headerBytes   = xudu::opsSegmentHeaderBytes;
+  later.nodeSize      = sizeof(CompactOpNode);
+  later.firstOpIndex  = 1;
+  later.nodeCount     = nodes.size();
+  writeSegmentFileByHand(dir / "future.ops", nodes, 1, later);
+
+  SegmentedOpsSpool spool;
+  EXPECT_THROW(static_cast<void>(spool.addSealedSegment(dir / "future.ops")),
+               xudu::OpsSegmentUnreadable);
+
+  // A file cut short mid-operation. The nodes that are left cannot be trusted
+  // to be the ones that were written.
+  writeSegmentFileByHand(dir / "ragged.ops", nodes, 1);
+  std::filesystem::resize_file(
+      dir / "ragged.ops", std::filesystem::file_size(dir / "ragged.ops") - 7);
+  EXPECT_THROW(static_cast<void>(spool.addSealedSegment(dir / "ragged.ops")),
+               xudu::OpsSegmentUnreadable);
+
+  // A file whose header promises more operations than are in it: bytes went
+  // missing, rather than a flush that had not caught up.
+  std::vector<CompactOpNode> two(2);
+  two[1].parentIndex = 1;
+  xudu::OpsSegmentHeader overclaiming;
+  overclaiming.signature     = xudu::opsSegmentSignature;
+  overclaiming.formatVersion = xudu::opsSegmentFormatVersion;
+  overclaiming.headerBytes   = xudu::opsSegmentHeaderBytes;
+  overclaiming.nodeSize      = sizeof(CompactOpNode);
+  overclaiming.firstOpIndex  = 1;
+  overclaiming.nodeCount     = 9;
+  writeSegmentFileByHand(dir / "short.ops", two, 1, overclaiming);
+  EXPECT_THROW(static_cast<void>(spool.addSealedSegment(dir / "short.ops")),
+               xudu::OpsSegmentUnreadable);
+
+  // Too short to hold a header at all, which is what an empty file that
+  // somebody touched into existence looks like to a sealed-segment reader.
+  {
+    std::ofstream out(dir / "stub.ops", std::ios::binary);
+    out << "no";
+  }
+  EXPECT_THROW(static_cast<void>(spool.addSealedSegment(dir / "stub.ops")),
+               xudu::OpsSegmentUnreadable);
+
+  EXPECT_EQ(spool.size(), 0U) << "nothing was read out of any of them";
+}
+
+TEST(SegmentedOpsSpoolTest, aSegmentFileSaysWhatItIsAndComesBackTheSame) {
+  const auto dir  = scratchDir("roundtrip");
+  const auto path = dir / "written.ops";
+
+  SegmentedOpsSpool spool;
+  appendChain(spool, 7);
+  CompactOpNode branched;
+  branched.parentIndex   = 3;
+  branched.branchOrdinal = 1;
+  branched.at            = 700;
+  spool.append(branched, MicroversionId::parse("3a1"));
+  ASSERT_TRUE(spool.writeSegmentFile(path));
+
+  // Exactly a header and its operations, with the header's own 64 KiB left as
+  // a hole rather than padded out with anything.
+  EXPECT_EQ(std::filesystem::file_size(path), segmentFileSize(8));
+
+  // What a person running `file` or `less` on it sees first.
+  {
+    std::ifstream in(path, std::ios::binary);
+    std::array<char, 12> opening{};
+    in.read(opening.data(), opening.size());
+    EXPECT_EQ(std::string(opening.data() + 1, 7), "XUDUOPS");
+  }
+
+  SegmentedOpsSpool reopened;
+  ASSERT_TRUE(reopened.openActiveSegment(path));
+  EXPECT_EQ(reopened.size(), spool.size());
+  for (std::uint32_t i = 1; i <= spool.size(); i++) {
+    ASSERT_NE(reopened.get(i), nullptr);
+    EXPECT_EQ(reopened.get(i)->at, spool.get(i)->at);
+    EXPECT_EQ(reopened.idOf(i).str(), spool.idOf(i).str());
+  }
+  // Including the branch, whose name is derived rather than written down.
+  EXPECT_TRUE(reopened.contains(MicroversionId::parse("3a1")));
+
+  // And it keeps growing from there, into the same file, past the header.
+  CompactOpNode onward;
+  onward.parentIndex = 8;
+  onward.at          = 701;
+  reopened.append(onward, MicroversionId::parse("3a2"));
+  CompactOpNode further;
+  further.parentIndex = 9;
+  further.at          = 702;
+  reopened.append(further, MicroversionId::parse("3a3"));
+  ASSERT_TRUE(reopened.flush());
+  EXPECT_EQ(std::filesystem::file_size(path), segmentFileSize(10));
+
+  // Opened a third time, everything that was ever appended is there -- which
+  // is what says the tail landed past the header rather than over it.
+  SegmentedOpsSpool again;
+  ASSERT_TRUE(again.openActiveSegment(path));
+  EXPECT_EQ(again.size(), 10U);
+  EXPECT_TRUE(again.contains(MicroversionId::parse("3a3")));
+  EXPECT_THAT(again.ancestralPath(10),
+              testing::ElementsAre(1U, 2U, 3U, 8U, 9U, 10U));
 }
 
 } // namespace

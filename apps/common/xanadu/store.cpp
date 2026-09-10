@@ -1027,8 +1027,7 @@ void Store::save(const std::string &directory) const {
   {
     // The operations, as the array-backed tree they are held as: the file is
     // what the spool has in memory, so reading it back is a read rather than
-    // a parse and a replay. The state-zero slot at index 0 is the arena's, not
-    // the file's -- see SegmentedOpsSpool::addSealedSegment().
+    // a parse and a replay.
     //
     // Costs about sixteen times what the compact binary encoding did, which
     // for a file that never leaves the machine buys back the whole of the
@@ -1040,11 +1039,14 @@ void Store::save(const std::string &directory) const {
     // one before it, which made the order records were written in worth
     // arguing about. Fixed-size nodes carry no names at all -- they are worked
     // out from the tree -- so there is no ordering left to choose.
-    std::ofstream out(dir / opsNodesFile, std::ios::binary | std::ios::trunc);
-    if (0 != opsSpool.size()) {
-      out.write(reinterpret_cast<const char *>(opsSpool.rawOps() + 1),
-                static_cast<std::streamsize>(opsSpool.size() *
-                                             sizeof(CompactOpNode)));
+    //
+    // Written by the spool rather than here. This used to be an ofstream of
+    // its own, which meant the shape of a segment file was agreed between two
+    // pieces of code instead of known by one -- and that is the arrangement
+    // that let migration step 1 change the shape and go unnoticed.
+    if (!opsSpool.writeSegmentFile(dir / opsNodesFile)) {
+      throw std::runtime_error("cannot write the operations to " +
+                               (dir / opsNodesFile).string());
     }
   }
   // A store written before the node array is superseded once it has been
