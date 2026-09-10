@@ -518,6 +518,29 @@ Two of §1's own requirements stop needing their own machinery:
   third part had no representation before; convergence R12 gives it one, because a dimension is a
   cell and the dimensions are a rank like any other.
 
+### 5.6 Pinning: a cursor is how a subgraph outlives the query that built it
+
+Reachability collection gives a cell exactly two lifetimes — as long as the query holding it, or
+forever if the origin holds it. Neither suits a memoisation table, which wants to outlive a query
+and die with the process.
+
+The Root Set supplies the third. A subgraph that nothing links to the origin, held up by **a cursor
+of its own attached to its head cell**, lives as long as that cursor and no longer. It is not a new
+mechanism: it is what the Root Set's cursor entry already means, used deliberately rather than
+incidentally.
+
+Two properties fall out, and both are why this is worth naming:
+
+- **Release is atomic.** The pin being the only inbound path means severing it makes the entire
+  island unreachable in one `link(..., -2)`. Eager eviction then does the rest — no traversal, no
+  per-cell bookkeeping, and no partial survival.
+- **Non-persistence is enforced, not promised.** The island's cells are ephemeral (convergence R8),
+  and the fold refuses a link whose target is ephemeral, so a pinned island cannot be written into
+  an operations spool even by a caller trying to.
+
+VQL §7.5 applies this to `d.cache`, which is the case that motivated it. The mechanism is general:
+any scratch structure wanting session lifetime gets a pin, and dropping it is one break.
+
 And one thing gets harder: `constexpr cell_id d_grab = 1` and its neighbours cannot survive, because
 a dimension is a minted cell rather than a chosen number. The genesis sequence mints the system
 dimensions off `home` in a fixed order, so their addresses are deterministic without being magic

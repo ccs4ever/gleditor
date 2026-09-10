@@ -196,6 +196,26 @@ managed via a multi-tiered virtual address layout
    allocations, `SegmentedOpsSpool` maintains an open-addressing linear probing hash table
    (`idHashSlots`) indexed by 64-bit FNV-1a hashes of `MicroversionId::Segment` records.
 
+### Segment files, and the header they are getting
+
+A segment file today is a bare run of `CompactOpNode`s: no header, no state-zero slot, and no
+microversion names anywhere in it. The names come back out of the tree, each node saying which index
+produced it and by which branch ordinal, so a segment is written and read back in the same order and
+the indices inside it are the ones they had when it was sealed.
+
+That works, and it has one failure mode that is worse than not working: **a file written under an
+older node layout does not fail to load, it loads and means something else.** With nothing at the
+front of the file to identify it, `st.st_size % sizeof(CompactOpNode) == 0` is the only check
+available, and it stays true across any layout change that keeps the node 64 bytes.
+
+R14 of [`store-slice-convergence.md`](store-slice-convergence.md) fixes this with a header: a
+twelve-byte PNG-style signature that survives being probed and fails loudly when a transport mangles
+it, a format version, and — the field that would have caught the actual incident — the `nodeSize`
+the writer believed in. The header is exactly one 64 KiB Merkle piece, which is forced rather than
+chosen: `mmap` needs a page-aligned file offset for the nodes that follow it, and 64 KiB is the
+smallest size that is a whole number of pages on 4 KiB, 16 KiB and 64 KiB systems alike. It also
+keeps node boundaries on piece boundaries, so the header is piece 0 and the nodes are pieces 1..N.
+
 ______________________________________________________________________
 
 ## 6. Historical Delta Materialization Pipeline

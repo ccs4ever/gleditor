@@ -447,19 +447,21 @@ dump tool must land in the same commit as the container change — a binary form
 how "we will write the tool later" becomes "we cannot debug the loader".
 
 **And a correction, learnt the hard way in migration step 1.** "Stores written before the bump do
-not open" was optimistic. `ops.nodes` is a bare run of nodes with no header at all, so there is no
-version to bump and nothing to refuse a stale file with. What actually happens is worse than not
-opening: the file **opens and means something else**. Moving the tree edges shifted every field past
-`parentIndex`, and the sample store under `tests/samples/xudu/core_hypertext/xanadoc_a` went on
-loading — its first operation reading as a `Rearrange` of zero bytes, with the 1,075-byte length it
-was really carrying landing in the newly added `value` field. Fifteen tests stopped asserting on
-document text and started asserting on the empty string, and not one of them said why.
+not open" was optimistic. `ops.nodes` was a bare run of nodes with no header at all, so there was no
+version to bump and nothing to refuse a stale file with — R14 is the answer, and it exists because
+of what follows. What actually happened is worse than not opening: the file **opened and meant
+something else**. Moving the tree edges shifted every field past `parentIndex`, and the sample store
+under `tests/samples/xudu/core_hypertext/xanadoc_a` went on loading — its first operation reading as
+a `Rearrange` of zero bytes, with the 1,075-byte length it was really carrying landing in the newly
+added `value` field. Fifteen tests stopped asserting on document text and started asserting on the
+empty string, and not one of them said why.
 
-Two things follow. First, **`tools/xudu-dump` and the versioned container (migration steps 8 and 10)
-are worth more than their position in the order suggests**, because until a store can say what shape
-it is, R11's "bump the version" has nothing to bump. Second, a format change is not done when the
-code compiles: every checked-in fixture written in the old shape is part of the format's surface
-area. `tools/create-sample-xanadocs.sh` regenerates them, and step 1's commit had to.
+Two things follow. First, **`ops.nodes` needs a header before anything else in this note touches its
+layout again** — R14 specifies one, and it moves to the front of the format work along with
+`tools/xudu-dump`, because until a store can say what shape it is, R11's "bump the version" has
+nothing to bump. Second, a format change is not done when the code compiles: every checked-in
+fixture written in the old shape is part of the format's surface area.
+`tools/create-sample-xanadocs.sh` regenerates them, and step 1's commit had to.
 
 ### R12. No privileged dimensions. Links are per-cell runs, keyed by `CellRef`
 
@@ -557,6 +559,88 @@ and the YAML emitter branch in `zzstructure_loader.cpp`. That is 136 bytes off `
 cost of a format change rather than a regression, and the fixture files in `assets/zigzag/` are
 regenerated in the same commit. Anything genuinely needing an out-of-band locator gains a scroll
 registry entry, which is where the rest of the system already looks for one.
+
+### R14. `ops.nodes` gains a header, and it is one Merkle piece long
+
+R11 said a format change means bumping the version. Migration step 1 found the hole in that: a
+segment file is a bare run of nodes with no header, so there is no version to bump and nothing to
+refuse a stale file with. The old fixtures did not fail to load — they loaded and meant something
+else, quietly, for fifteen tests.
+
+> **Every ops segment file opens with a header. A loader that does not find one, or finds one it
+> does not understand, fails loudly and reads nothing.**
+
+**The signature is twelve bytes, and every one of them has a job:**
+
+```cpp
+inline constexpr std::array<std::uint8_t, 12> opsNodesSignature{
+    0x89, 'X', 'U', 'D', 'U', 'O', 'P', 'S', 0x0d, 0x0a, 0x1a, 0x0a};
+```
+
+This is PNG's signature trick, and it is worth copying rather than inventing something shorter.
+`0x89` has its high bit set, so a transfer that strips to seven bits destroys it. `XUDUOPS` is what
+`file` and `less` show a human. `\r\n` is destroyed by any transport that translates CRLF to LF, and
+the trailing `\n` by one translating the other way. `\x1a` is DOS end-of-file, so `TYPE` on Windows
+stops rather than spraying the terminal with node bytes. Twelve bytes is $2^{96}$ against accidental
+collision, which is the "long enough to guarantee it isn't misinterpreted" the ruling wants — but
+the structure is what catches the corruptions that actually happen, and those are not random.
+
+The specific file this exists to reject is guaranteed to be rejected: a pre-header `ops.nodes` opens
+with the root operation's `parentIndex`, which is zero, so its first four bytes are `00 00 00 00`
+and cannot be mistaken for `\x89XUD`.
+
+**After the signature, the fields that make a misread impossible rather than merely unlikely:**
+
+```cpp
+struct OpsSegmentHeader {
+  std::uint8_t  signature[12];
+  std::uint32_t formatVersion;   ///< bumped per R11; the loader rejects what it does not know
+  std::uint32_t headerBytes;     ///< 65536; see below
+  std::uint32_t nodeSize;        ///< sizeof(CompactOpNode). The step-1 failure, caught
+  std::uint32_t flags;
+  std::uint64_t nodeCount;
+  std::uint32_t firstOpIndex;    ///< the spool index the first node held when sealed
+  std::uint32_t reservedZero;    ///< written zero, read and required to be zero
+  std::uint8_t  merkleRoot[32];  ///< over the node pieces, not over the header
+};
+```
+
+`nodeSize` earns its four bytes on its own: it is exactly the fact whose silent change caused this
+ruling, and checking it turns "the file means something else now" into "this file says its nodes are
+64 bytes and mine are 72." `firstOpIndex` records something the loader currently re-derives, and
+`merkleRoot` is what lets a segment fetched from a swarm be checked before it is mapped.
+
+**The header is 65,536 bytes, and the size is forced rather than chosen.** `adoptSegmentNodes()`
+maps a sealed segment with `mapFileFixed(..., fd, fileOffset, ...)`, and `mmap` requires a
+page-aligned file offset. Today that offset is 0 and the question does not arise; with a header, the
+nodes begin at `headerBytes`, so **`headerBytes` must be a multiple of the page size of every
+machine that will ever open the file** — 4 KiB on x86-64, 16 KiB on Apple silicon, 64 KiB on some
+POWER and ARM configurations. A 4 KiB header would silently lose zero-copy mapping on a 16 KiB-page
+machine and fall back to the `read()` path, which is correct but no longer zero-copy, and nothing
+would say so.
+
+64 KiB is the smallest size that is a multiple of all of them, and it is not an arbitrary choice
+here: it is already this tree's unit, the BitTorrent v2 Merkle piece size that the permascroll's
+segments are aligned to and that gives $65536 / 64 = 1024$ operations per piece. So the header is
+piece 0 and the nodes are pieces 1..N, node boundaries still land on piece boundaries, and a peer
+that fetches the first piece of a segment learns the format before fetching anything else.
+
+**Price.** Two costs, one real and one only apparently so.
+
+The real one: 64 KiB per segment file, including a freshly opened active segment holding zero
+operations. On any filesystem with sparse files that is 64 KiB of address space and close to nothing
+on disk, but `ls` will report it and it is a floor rather than an overhead that amortises.
+
+The apparent one: four call sites gain an offset. `openActiveSegment()` writes the header when it
+creates a file and validates it when it adopts one; `addSealedSegment()` checks the signature and
+then validates `(size - headerBytes) % nodeSize == 0` instead of `size % nodeSize`; `flush()` seeks
+to `headerBytes + activeFlushedOps * nodeSize`; `adoptSegmentNodes()` passes `headerBytes` as the
+map's file offset and as the `lseek` base. None of these is subtle, and all four are wrong in the
+same direction if one is missed — the round-trip test in migration step 9 catches it.
+
+**This lands before, not after, the format changes it protects.** It is the thing that makes R11's
+"bump the version" mean anything for this file, so it belongs with `tools/xudu-dump` at the front of
+the format work rather than at the end of it.
 
 ______________________________________________________________________
 
@@ -960,11 +1044,20 @@ measured is recorded inline below; the rest are unchanged.
    prerequisite for §6.2's size argument being true rather than asserted.
 1. **`GlobalOpRef` plus `Store::opRefOf`/`localiseOpRef`** (R4), mirroring
    `GlobalSpan`/`globalise`/`localise` and reusing `writeMicroversionId`. Nothing new is stored.
-1. **`tools/xudu-dump`** (R11). Renders `ops.nodes`, the scroll registry and the link table as text.
-   Lands **before** the format changes below, not after: a binary format whose only reader is the
-   loader you are debugging is how "we will write the tool later" becomes "we cannot debug the
-   loader". Its output on a store written by the current code is the baseline the next two steps
-   diff against.
+1. **`OpsSegmentHeader`** (R14). The 12-byte signature, the fields after it, and a 64 KiB header on
+   every ops segment file. Four call sites gain an offset — `openActiveSegment()` writes it on
+   create and validates it on adopt, `addSealedSegment()` checks the signature before anything else,
+   `flush()` seeks past it, `adoptSegmentNodes()` passes it as the `mmap` file offset. Two tests
+   that must exist afterwards: a store written by the *previous* commit is refused with a diagnostic
+   naming the signature rather than loading into nonsense, and a segment whose header claims a
+   `nodeSize` other than 64 is refused rather than read. Regenerate the fixtures in the same commit;
+   this is the last time that happens silently, which is the point of the step. **Comes before
+   everything below**, because it is what gives R11's "bump the version" something to bump.
+1. **`tools/xudu-dump`** (R11). Renders the header, `ops.nodes`, the scroll registry and the link
+   table as text. Lands **before** the format changes below, not after: a binary format whose only
+   reader is the loader you are debugging is how "we will write the tool later" becomes "we cannot
+   debug the loader". Its output on a store written by the previous step is the baseline the next
+   two steps diff against.
 1. **`OpsSpoolVersion::CompactBinaryV3`** (R11): four-bit kind tag, `FLAG_SEQUENTIAL` moved, the
    `reserved0`/`reserved1` slots reclaimed as `value`, and the V1/V2 readers **deleted**. Rewrite
    the `CompactBinaryV2` comment that cites `PageBreak` as a change that needed no bump. Round-trip
@@ -1228,8 +1321,11 @@ links and an `int64_t` id, and this note replaces all three. If the replacement 
 that is worth knowing before the migration reaches step 12 and not after.
 
 The finding is that **it carries them, and two of the mismatches turn out to be places where the two
-designs were describing the same thing twice.** Four need a decision, recorded below as V1–V4; the
-rest resolve in the convergence's favour without argument and are tabulated after.
+designs were describing the same thing twice.** Five need a decision, recorded below as V1–V5; the
+rest resolve in the convergence's favour without argument and are tabulated between V4 and V5.
+
+**All five are accepted, prices included.** V1–V4 were reviewed and the price judged worth paying in
+each case; V5 replaces an earlier draft that left `d.cache`'s lifetime open.
 
 ### V1. Cell 0 cannot be both the origin and the absence of a cell
 
@@ -1341,14 +1437,46 @@ scratch value, and a language that hides it would be lying about which one you a
 | `entangle_generator` allocating fan-out partners (VQL §4.7)                | unaffected. `DimLink` still holds exactly one `pos` and one `neg` per (cell, dimension), which is the constraint the generator exists to work around. It keeps working for the same reason it was needed.                                                                     |
 | `linkCount` is `std::uint16_t`                                             | caps one cell at 65,535 dimensions where Vortex's map had no cap. Recorded rather than defended: nothing in either specification wants a cell on 65,536 dimensions, but the limit is real and a `static_assert` will not catch it.                                            |
 
-### What this does not settle
+### V5. `d.cache` is a pinned island, not a rank off the origin
 
-`d.cache` (VQL §1's star-pivot memoisation) hangs off the origin along `+d.cache` — and the origin
-is in the Root Set, so nothing ever collects it. A memoisation table that is unreachable-by-design
-from the GC is a leak with good manners. It is also, under R8, plainly derived state that should
-never have been persistent. The likely answer is that `d.cache` hangs off the *cursor* rather than
-the origin, so it dies with the query that filled it, but that is a change to VQL's caching model
-rather than to this layout, and it is left to whoever writes that.
+VQL §1's star-pivot memoisation hangs off the origin along `+d.cache`, and the origin is in the Root
+Set — so nothing ever collects it, and a memoisation table that is unreachable-by-design from the
+collector is a leak with good manners. Hanging it off the query cursor instead would fix the leak
+and destroy the cache: a compiled regex that dies with the query that compiled it has memoised
+nothing.
+
+What a cache actually wants is a third lifetime, longer than a query and shorter than the process.
+It gets one by being **deliberately detached**:
+
+- The entries are **ephemeral cells** — `ephemeralBit` set, no operation behind them. That is what
+  makes "does not survive a restart" a property of the encoding rather than a convention:
+  `applyStructure` already refuses a `SetLink` whose target `isEphemeral()` (R8), so the island
+  cannot be written into the spool even by mistake.
+- They hang off a **head cell** along `d.cache`, in rank order.
+- Nothing links the head to the origin. The island is reachable from exactly one place: a
+  **dedicated cursor cell** attached to the head, whose only job is to sit in the Root Set and hold
+  the island up.
+
+The pin is what makes this work, and it is also what makes it revocable. Because the cursor is the
+*only* path in, dropping the whole cache is one `break` — sever the pin and the entire island
+becomes unreachable in a single act, collected wholesale on the next sweep. There is no walk, no
+per-entry bookkeeping, and no way for half a cache to survive.
+
+Bounding it falls out of the rank. Entries are ordered along `d.cache`, so eviction is a `break` at
+the tail, and the evicted entry — along with whatever subgraph only it referenced — becomes garbage
+by the same rule. A cache that has grown too large is trimmed, not traversed.
+
+**One pin per cache, not one pin for all caching.** Regex compilation and macro expansion get
+separate islands with separate cursors, so "drop the regex cache" stays a single break rather than a
+search through a shared table.
+
+**Price, and one loose end.** The pin is a cursor, so `^` (VQL §2, "streams all active Spin-Head
+execution cursor threads") will stream it, and `for $w in ^` would iterate a cache pin as though it
+were a worker. Two ways out: put pins on their own rank off `home` — also in the Root Set, costing
+nothing under R12, since a rank is a rank — or give `^` a liveness predicate. The first is cleaner
+and is what this note assumes; the second stays available if VQL would rather keep one cursor rank.
+Either way it has to be settled before `^` is implemented, because the wrong answer is silent: a
+cache pin looks exactly like an idle thread.
 
 ______________________________________________________________________
 
@@ -1356,10 +1484,10 @@ ______________________________________________________________________
 
 | document                                                                                             | change                                                                         |
 | ---------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------ |
-| [`osmic-microversioning-and-dag.md`](osmic-microversioning-and-dag.md)                               | the sixth hyperop, and `PageBreak` as its degenerate one-dimensional case      |
+| [`osmic-microversioning-and-dag.md`](osmic-microversioning-and-dag.md)                               | **done** — the sixth hyperop, the current node, and R14's segment header       |
 | [`zigzag-multidimensional-space-and-projection.md`](zigzag-multidimensional-space-and-projection.md) | cell = op; `Manifold` as the second replay product; `CompactZZCell` as a cache |
-| [`vortex-hyperstructural-runtime.md`](vortex-hyperstructural-runtime.md)                             | **done** — §5 records V1–V4 and the table under them                           |
-| [`vql-query-language.md`](vql-query-language.md)                                                     | **done** — §7 records the same, from the language side                         |
+| [`vortex-hyperstructural-runtime.md`](vortex-hyperstructural-runtime.md)                             | **done** — §5 records V1–V4, the table under them, and pinning (§5.6)          |
+| [`vql-query-language.md`](vql-query-language.md)                                                     | **done** — §7 records the same, from the language side, including V5           |
 | [`zzstructure.hpp`](apps/common/xanadu/zigzag/zzstructure.hpp) doc comments                          | `Preflet` deleted (R13); `d.dims` and `d.meta-dims` named                      |
 | [`binary_ops.hpp`](apps/common/xanadu/binary_ops.hpp)'s `CompactBinaryV2` comment                    | R11: it cites `PageBreak` as a change needing no bump; under R11 it needed one |
 | [`CLAUDE.md`](CLAUDE.md)'s `compact_zzcell.hpp` bullet                                               | the 960-byte figure and the hot/cold split it promises (R12, R13, §12.1)       |

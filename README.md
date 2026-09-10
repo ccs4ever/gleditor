@@ -1931,8 +1931,11 @@ here; `xvfb-run -s "-screen 0 1024x768x24"` covers the rest. `xudu` and `zigzag`
   `tests/samples/xudu/` holds real on-disk stores, written by `xudu` itself and read back by
   `SampleXanadocsTest`. They are part of the on-disk format's surface area: a change to
   `CompactOpNode`'s layout does not make them fail to load, it makes them load and mean something
-  else, so they have to be regenerated in the same commit that moves the format. The second script
-  exists because the first one begins by deleting the whole `multimedia` directory, and
+  else, so they have to be regenerated in the same commit that moves the format. That last part is a
+  consequence of `ops.nodes` having nothing at the front of it to say what it is, and it is a hole
+  being closed -- see R14 in [design/store-slice-convergence.md](design/store-slice-convergence.md)
+  for the header that turns a stale segment into a refusal with a diagnostic instead. The second
+  script exists because the first one begins by deleting the whole `multimedia` directory, and
   `11_floating_image` is built by hand with its own scroll rather than the shared `000.scroll`.
 
 - Compare the backends against each other:

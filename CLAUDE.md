@@ -350,10 +350,13 @@ nobody has. What is *not* negotiable is the structural invariants — `sizeof(Co
 and its cache-line alignment, 64 KiB Merkle piece alignment, append-only-ness. Layout is soft;
 invariants are hard.
 
-The caveat that makes this bite: **`ops.nodes` has no header**, so there is nothing to bump and
+The caveat that makes this bite: **`ops.nodes` has no header yet**, so there is nothing to bump and
 nothing to refuse a stale file with. A store written in the old shape loads and means something
-else. Until `tools/xudu-dump` and the versioned container land, a layout change means regenerating
-every fixture in the same commit (see "Tests").
+else. R14 of the convergence note specifies the header that fixes this — a twelve-byte PNG-style
+signature, a format version, and the `nodeSize` field whose silent change caused the problem, in a
+64 KiB block sized so the nodes after it stay `mmap`-able on 4 KiB, 16 KiB and 64 KiB page systems.
+**Until that lands, a layout change means regenerating every fixture in the same commit** (see
+"Tests"), and after it lands a stale file is refused with a diagnostic instead.
 
 This ruling has an expiry. It is void the first time someone outside this repository has a document
 they care about; see R11 in `design/store-slice-convergence.md`.
@@ -363,7 +366,7 @@ they care about; see R11 in `design/store-slice-convergence.md`.
 `design/` is the record of *why*, and three notes are load-bearing for current work:
 
 - [`store-slice-convergence.md`](design/store-slice-convergence.md) — the active plan: a cell is an
-  operation, `Slice` becomes a replay product of the ops spool like `Version` is. Thirteen rulings
+  operation, `Slice` becomes a replay product of the ops spool like `Version` is. Fourteen rulings
   with their prices, a numbered migration (**steps 1–4 are done**), and the measurements behind
   each. Read this before touching `CompactOpNode`, `Manifold`, `CompactZZCell` or the zigzag
   engine's sync path.

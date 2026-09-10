@@ -583,14 +583,38 @@ The syntax is unchanged and the semantics are unchanged. What changes is that th
 which is the correct signal — it is the difference between editing a document and editing a scratch
 value.
 
-### 7.5 The one open question: `d.cache` is a leak with good manners
+### 7.5 `d.cache` is a pinned island
 
-§1's star-pivot caching memoises off the origin along `+d.cache`, and the origin is in the Root Set,
-so §5's sweep can never reach a conclusion about it. A memoisation table that is unreachable by
-design from the collector grows without bound.
+§1 memoises off the origin along `+d.cache`. The origin is in the Root Set, so §5's sweep can never
+reach a conclusion about the cache: it is unreachable-by-design from the collector and grows without
+bound. Moving it to the query cursor would fix the leak by destroying the cache — a compiled NFA
+that dies with the query that compiled it has memoised nothing.
 
-It is also, by §7.1's rule, plainly derived state. The likely answer is that `d.cache` hangs off the
-**cursor** rather than the origin, so a compiled-NFA cache dies with the query that filled it and a
-longer-lived cache has to be asked for explicitly. §6.2's example would change shape. This is left
-open rather than decided here, because it is a question about VQL's caching model and not about the
-storage underneath it.
+A cache wants a third lifetime: longer than a query, shorter than the process. It gets one by being
+**deliberately detached from the origin and pinned by a cursor of its own**.
+
+- Cache entries are **ephemeral cells**, so nothing about them reaches the operations spool and the
+  island cannot outlive a restart. That is enforced rather than intended: the fold rejects a link
+  whose target is ephemeral (§7.1), so there is no way to accidentally persist a cache.
+- Entries hang off a **head cell** along `d.cache`, in rank order.
+- Nothing links the head to `##`. The island's only inbound path is a **dedicated cursor** attached
+  to the head, in the Root Set, whose whole job is to hold it up.
+
+Because that cursor is the only way in, **discarding a whole cache is one `break`**. Sever the pin
+and the island becomes unreachable in a single act, to be reclaimed wholesale by the next sweep — no
+walk, no per-entry bookkeeping, and no way for half a cache to survive. Bounding it falls out of the
+rank: entries are ordered, so eviction is a `break` at the tail, and whatever subgraph only that
+entry referenced goes with it.
+
+Give each cache its own island and its own pin. "Drop the regex cache" then stays a single break
+rather than a search through a shared table.
+
+§6.2's example changes shape accordingly: `##/d.cache[. = "regex_compile"]` becomes a lookup through
+the regex cache's pin rather than a rank off the origin — `^REGEX_CACHE/d.cache`, using the same
+`^NAME` short-circuit §2 already defines for reaching a named cursor without scanning.
+
+**The loose end this leaves.** A pin *is* a cursor, so bare `^` streams it, and `for $worker in ^`
+would iterate a cache pin as though it were a worker thread. Either pins get their own Root Set rank
+off `##` — which costs nothing, a rank being a rank — or `^` gains a liveness predicate and pins
+fail it. This has to be settled before `^` is implemented, because the wrong answer is silent: a
+pinned cache looks exactly like an idle thread.
