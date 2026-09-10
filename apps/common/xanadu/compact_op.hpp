@@ -7,6 +7,9 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <limits>
+#include <stdexcept>
+#include <string>
 
 #include "ops.hpp"
 #include "spool.hpp"
@@ -72,6 +75,8 @@ struct alignas(64) CompactOpNode {
     op.sourceAt     = sourceAt;
     op.sourceLength = sourceLength;
     op.link         = linkId;
+    op.flags        = flags;
+    op.value        = value;
     return op;
   }
 
@@ -110,7 +115,18 @@ struct alignas(64) CompactOpNode {
     node.sourceOpIndex = sourceIdx;
     node.sourceAt      = op.sourceAt;
     node.sourceLength  = op.sourceLength;
-    node.linkId        = static_cast<std::uint32_t>(op.link);
+    // Not a cast. The node's field is 32 bits and R2 makes that load-bearing
+    // -- a Structure op's linkId is a dimension's cell reference, which is an
+    // ops-spool index -- so a link id that does not fit is a fact worth
+    // stopping for rather than a silent change of which link is meant.
+    if (op.link > std::numeric_limits<std::uint32_t>::max()) {
+      throw std::invalid_argument(
+          "link id " + std::to_string(op.link) +
+          " does not fit the operation node's 32-bit link field");
+    }
+    node.linkId = static_cast<std::uint32_t>(op.link);
+    node.flags  = op.flags;
+    node.value  = op.value;
     return node;
   }
 

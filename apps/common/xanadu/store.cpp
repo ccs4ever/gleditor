@@ -158,6 +158,14 @@ void Store::replay(const CompactOpNode &node, Version &onto) const {
     onto.insertBreak(node.at);
     break;
   }
+  case OpKind::Structure: {
+    // Changes no text. A slice's structure is a second replay product of this
+    // same spool -- see zigzag::Manifold, when it lands -- so folding it here
+    // would be building the wrong one of the two. Recorded as an operation so
+    // that structural editing is a point in hypertime like any other edit,
+    // exactly as OpKind::Link is.
+    break;
+  }
   }
 }
 

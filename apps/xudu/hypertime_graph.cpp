@@ -68,6 +68,8 @@ char HypertimeGraph::opKindLetter(const std::optional<OpKind> kind) noexcept {
     return 'L';
   case OpKind::PageBreak:
     return 'P';
+  case OpKind::Structure:
+    return 'S';
   default:
     return 'M';
   }

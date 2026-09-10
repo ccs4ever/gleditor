@@ -49,9 +49,100 @@ enum class OpKind : std::uint8_t {
   /// moved by ordinary edits without ever being resolvable back to an
   /// address the way a real piece is.
   PageBreak,
+  /**
+   * OSMIC's sixth hyperop: MAKE/CHANGE STRUCTURE MAP. Establishes the
+   * coordinate frame the other five operate inside.
+   *
+   * Note the shape of the five above. Insert, Delete and Rearrange all name a
+   * position in a document; Transclude names a position in another one; Link
+   * names content addresses. Five of six are edits expressed *through* a
+   * coordinate system. This is the edit *of* one: a document is a map from
+   * virtual document space onto invariant stream addresses, "structure map"
+   * is the literal name of that object in Udanax Green rather than a
+   * metaphor, and this is what creates or alters one.
+   *
+   * A page break is the degenerate one-dimensional case -- a break partitions
+   * a concatext into an ordered sequence of subsequences, which is a
+   * structure map with a fixed name and no content of its own -- and
+   * deliberately is *not* this. See OpKind::PageBreak for why a break must
+   * not travel with a quotation where a cell boundary must.
+   *
+   * Discriminated further by CompactOpNode::flags rather than by sibling
+   * OpKind values: the verbs share every field and differ only in which ones
+   * they read, so nothing outside the manifold fold wants to tell them apart.
+   * That is a design choice defended on its merits and no longer a forced
+   * move -- CompactBinaryV3 widened the wire format's kind field to four bits
+   * (migration step 10), so BinStructure = 7 no longer fills it.
+   *
+   * Nothing emits one yet. Store::replay() treats it as a text no-op, because
+   * a slice's structure is a *second* replay product of the same spool -- see
+   * design/store-slice-convergence.md §3 and R1.
+   */
+  Structure,
 };
 
 const char *opKindName(OpKind kind);
+
+/**
+ * @name The Structure family, in CompactOpNode::flags
+ *
+ * A Structure op's verb, and what its `value` field holds. `flags` is
+ * otherwise unread anywhere in the tree, which is why this family takes it.
+ * @{
+ */
+
+/// bits 0-2: which Structure verb this is.
+inline constexpr std::uint8_t structureVerbMask = 0x07;
+
+enum class StructureVerb : std::uint8_t {
+  /// Mint a cell. The span is its content; `to` and `linkId` are unused.
+  MakeCell = 0,
+  /// (this cell, dimension = linkId, direction) -> `to`. `to == 0` clears it.
+  SetLink = 1,
+  /// Retarget this cell's content span, its typed value, or both.
+  SetValue = 2,
+  // No MakeDim: a dimension is a cell on the d.dims rank, so minting one is
+  // MakeCell plus SetLink and needs no verb of its own. See design R12.
+};
+
+/// bit 3: which way along the dimension a SetLink points.
+inline constexpr std::uint8_t structureNegward = 0x08;
+
+/// bits 4-6: what CompactOpNode::value holds.
+inline constexpr std::uint8_t valueKindMask  = 0x70;
+inline constexpr std::uint8_t valueKindShift = 4;
+
+/// A scalar cell carries both a real primedia span holding its
+/// shortest-round-trip rendering and the canonical bits, so that it is a link
+/// endpoint and a formattable, transcludable Xanadu object while a query
+/// never has to parse its text. See design R6.
+enum class ValueKind : std::uint8_t {
+  None   = 0,
+  Double = 1,
+  Bool   = 2,
+  Int64  = 3,
+};
+
+// bit 7 is unclaimed.
+
+[[nodiscard]] constexpr StructureVerb
+structureVerbOf(const std::uint8_t flags) {
+  return static_cast<StructureVerb>(flags & structureVerbMask);
+}
+[[nodiscard]] constexpr bool structureIsNegward(const std::uint8_t flags) {
+  return (flags & structureNegward) != 0;
+}
+[[nodiscard]] constexpr ValueKind valueKindOf(const std::uint8_t flags) {
+  return static_cast<ValueKind>((flags & valueKindMask) >> valueKindShift);
+}
+[[nodiscard]] constexpr std::uint8_t
+structureFlags(const StructureVerb verb, const bool negward = false,
+               const ValueKind value = ValueKind::None) {
+  return static_cast<std::uint8_t>(
+      static_cast<std::uint8_t>(verb) | (negward ? structureNegward : 0U) |
+      (static_cast<std::uint8_t>(value) << valueKindShift));
+}
+/// @}
 
 /// How two ends of a link relate. Nelson's examples, plus quotation, which is
 /// what a transclusion made deliberately amounts to.
@@ -158,8 +249,16 @@ struct Op {
   MicroversionId source;
   std::uint32_t sourceAt{};
   std::uint32_t sourceLength{};
-  /// Link: which link was made.
+  /// Link: which link was made. Structure: the dimension cell a SetLink is
+  /// along. Held as 64 bits because a link id is, and checked against the
+  /// node's 32-bit field when one is built -- see CompactOpNode::fromOp().
   std::uint64_t link{};
+  /// Structure: which verb, which direction, and what `value` holds. See
+  /// structureVerbOf() and the constants above. Zero for every other kind.
+  std::uint8_t flags{};
+  /// Structure: the canonical scalar bits, when `flags` says there are any.
+  /// Zero for every other kind.
+  std::uint64_t value{};
 };
 
 } // namespace xanadu

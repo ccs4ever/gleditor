@@ -966,9 +966,8 @@ ______________________________________________________________________
 ## 8. Defects on the Critical Path
 
 These were present-tense bugs found while grounding the model. Each is worth fixing on its own
-merits, and each is also load-bearing for the convergence. **The first four are fixed** (migration
-steps 1–4). The fifth is still open: it belongs with migration step 11, which is the first step that
-touches what `linkId` means.
+merits, and each is also load-bearing for the convergence. **All five are fixed** (migration steps
+1–4, and the fifth in step 12, which is where `linkId` stopped meaning only a link).
 
 1. **Latent SIGSEGV on appending into a sealed segment.** `SegmentedOpsSpool::append()` mutates
    `parent->firstChildIndex` and `sibNode->nextSiblingIndex` in already-stored nodes, while
@@ -990,7 +989,9 @@ touches what `linkId` means.
    the clone's own text when `master->text()` is empty, and `Cell::text()` returns `{}` for the
    `double`, `bool` and `std::vector<std::uint8_t>` alternatives of `CellData`. The non-text payload
    hurdle is already biting inside the existing clone implementation.
-1. **`CompactOpNode::fromOp()` truncates `Op::link`** from `std::uint64_t` to `std::uint32_t`.
+1. ~~**`CompactOpNode::fromOp()` truncates `Op::link`** from `std::uint64_t` to `std::uint32_t`.~~
+   Fixed in step 12 by refusing an id that does not fit rather than by widening the field, which R2
+   has spoken for.
 
 ______________________________________________________________________
 
@@ -999,7 +1000,7 @@ ______________________________________________________________________
 Each step is one commit. After each, `make -j$(nproc)` builds all three programs and
 `make -j$(nproc) test` passes.
 
-Steps 1–11 have landed. What each actually cost, where it differed from the plan, and what it
+Steps 1–12 have landed. What each actually cost, where it differed from the plan, and what it
 measured is recorded inline below; the rest are unchanged.
 
 1. ~~**Sealed-segment immutability** (R10).~~ **Done.** `firstChildIndex`/`nextSiblingIndex` left
@@ -1278,9 +1279,31 @@ measured is recorded inline below; the rest are unchanged.
    taking it from 850 KB and six shared libraries to 2.9 MB and fifteen — still far short of the 26
    MB and twenty-three the whole core would cost.
 
-1. **`OpKind::Structure` plus `BinStructure = 7`** (R1, R2): flag constants and accessors, the
-   `replay()` no-op case, `opKindName`, both `binary_ops.cpp` switches, the OSMIC-text string table,
-   and the `Op::link` truncation fix. **No behaviour change: nothing emits `Structure` yet.**
+1. ~~**`OpKind::Structure` plus `BinStructure = 7`** (R1, R2).~~ **Done**, and with no behaviour
+   change: nothing emits one, `replay()` treats it as a text no-op, and `xudu-dump --section=ops` on
+   every checked-in fixture is byte-identical to before. The flag vocabulary is in `ops.hpp` --
+   `StructureVerb`, `structureNegward`, `ValueKind`, and the four `constexpr` accessors that read
+   them out of a byte -- and both `binary_ops.cpp` switches, `opKindName`, the OSMIC text table and
+   the hypertime graph's letter all gained their case.
+
+   **`Op` gained `flags` and `value`.** `CompactOpNode` has had both since step 1, but `Op` is what
+   the wire format and `getOp()` speak, so a Structure op could not have round-tripped through the
+   spool without them. Carrying the node's fields and not the operation's would have been a format
+   that could store a verb it could not read back.
+
+   **The `Op::link` truncation is fixed by refusing rather than by widening.** R2 makes the node's
+   32-bit link field load-bearing -- a Structure op keeps the dimension's `CellRef` there, and a
+   `CellRef` is an ops-spool index -- and the node has no room to grow. So `fromOp()` throws on a
+   link id that does not fit instead of `static_cast`-ing it into a different link. Unreachable in
+   practice, since ids count up from one, and the point is that it is now unreachable *loudly*.
+
+   **And a bug the widening exposed, which had been there all along.** The OSMIC text reader tested
+   for a malformed line *after* trying to read the optional scroll column. A failed extraction
+   leaves the stream in a failure state that every later read inherits, so a line without that
+   column threw "malformed operation" -- and the fallback sitting right beside it, assigning
+   `localScroll`, had never once run. Adding two more optional columns would have made three
+   unreachable fallbacks. The required columns are now checked first and each optional one clears
+   the failure state it leaves behind, with a test for an eleven-column line.
 
 1. **`Manifold` plus `rebuildManifold()` plus the `makeCell`/`setLink`/`setValue` API** (R7, R9,
    R12), with `verifyAgainstFullRebuild()` and its test. CSR link runs, `d.dims` and the two genesis

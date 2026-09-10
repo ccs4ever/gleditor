@@ -19,6 +19,8 @@ const char *opKindName(const OpKind kind) {
     return "link";
   case OpKind::PageBreak:
     return "pagebreak";
+  case OpKind::Structure:
+    return "structure";
   }
   return "insert";
 }

@@ -158,6 +158,62 @@ TEST(StoreTest, nothingStoresAVersion) {
   EXPECT_EQ(store.textOf(at), "xxxxx");
 }
 
+TEST(StoreTest, aLinkIdTooLargeForTheNodeIsRefusedRatherThanTruncated) {
+  // R2 makes the node's 32-bit link field load-bearing: a Structure op keeps
+  // the dimension's cell reference there, and a cell reference is an
+  // ops-spool index. CompactOpNode::fromOp() used to narrow Op::link with a
+  // static_cast, so a link id past four billion would have quietly become a
+  // different link -- and "quietly a different link" is the shape of failure
+  // this whole migration exists to stop.
+  Store store;
+  const auto one = store.insert(MicroversionId{}, 0, "hello");
+  Op op;
+  op.kind   = OpKind::Link;
+  op.parent = one;
+  op.link   = 0x1'0000'0000ULL; // one past what the field holds
+  EXPECT_THROW(store.putOp(one.next(), op), std::invalid_argument);
+
+  // The largest that does fit still goes through untouched.
+  op.link = 0xFFFF'FFFFULL;
+  store.putOp(one.next(), op);
+  const auto back = store.getOp(one.next());
+  ASSERT_TRUE(back.has_value());
+  EXPECT_EQ(back->link, 0xFFFF'FFFFULL);
+}
+
+TEST(StoreTest, aStructureOpChangesNoText) {
+  // Nothing emits one yet, but replay() has to treat it as a text no-op from
+  // the moment the kind exists: a slice's structure is a *second* replay
+  // product of this same spool, so folding it here would be building the
+  // wrong one of the two. Recorded as an operation all the same, so that
+  // structural editing is a point in hypertime like any other edit.
+  Store store;
+  const auto one = store.insert(MicroversionId{}, 0, "hello");
+
+  Op made;
+  made.kind      = OpKind::Structure;
+  made.parent    = one;
+  made.flags     = xudu::structureFlags(xudu::StructureVerb::MakeCell, false,
+                                        xudu::ValueKind::Double);
+  made.span      = PrimediaSpan{localScroll, 0, 2};
+  made.value     = 0x4045000000000000ULL;
+  const auto two = one.next();
+  store.putOp(two, made);
+
+  EXPECT_EQ(store.textOf(two), "hello") << "a structure op is not an edit";
+  EXPECT_EQ(store.opCount(), 2U) << "but it is still an operation";
+  EXPECT_THAT(store.opsFor(two), testing::SizeIs(2));
+
+  // And it comes back saying what it said, through the node and out again.
+  const auto back = store.getOp(two);
+  ASSERT_TRUE(back.has_value());
+  EXPECT_EQ(back->kind, OpKind::Structure);
+  EXPECT_EQ(xudu::structureVerbOf(back->flags), xudu::StructureVerb::MakeCell);
+  EXPECT_EQ(xudu::valueKindOf(back->flags), xudu::ValueKind::Double);
+  EXPECT_EQ(back->value, 0x4045000000000000ULL);
+  EXPECT_EQ(back->span, made.span);
+}
+
 TEST(StoreTest, theOperationsSpoolIsAppendOnly) {
   Store store;
   const auto one = store.insert(MicroversionId{}, 0, "a");

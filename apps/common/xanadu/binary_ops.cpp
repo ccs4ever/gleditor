@@ -16,6 +16,9 @@ enum OpBinaryKind : std::uint8_t {
   BinTranscludeExternal = 4,
   BinLink               = 5,
   BinPageBreak          = 6,
+  /// OSMIC's sixth hyperop. Fits in the field that CompactBinaryV3 widened to
+  /// four bits, with eight values left after it -- see OpsSpoolVersion.
+  BinStructure = 7,
 };
 
 /// The operation tag byte, version 3: four bits of kind and four flags above
@@ -228,6 +231,26 @@ void writeBinaryOpsSpool(std::ostream &out, const std::vector<OpRecord> &ops) {
       }
       writeVarint(out, op.at);
       break;
+
+    case OpKind::Structure:
+      // Every field a Structure verb might read, in one shape rather than one
+      // per verb: which one it is lives in `flags`, and the fields a given
+      // verb does not use are zero, exactly as they are for every other kind
+      // here. `at` is not written -- it is zero for all of these, which is
+      // what makes FLAG_AT_EQUALS_START meaningful across the family.
+      tag |= BinStructure;
+      out.put(static_cast<char>(tag));
+      if (!isSequential) {
+        writeMicroversionId(out, produces);
+      }
+      out.put(static_cast<char>(op.flags));
+      writeVarint(out, op.to);
+      writeVarint(out, op.link);
+      writeVarint(out, op.span.scroll);
+      writeVarint(out, op.span.start);
+      writeVarint(out, op.span.length);
+      writeVarint(out, op.value);
+      break;
     }
 
     lastProduces = produces;
@@ -365,6 +388,29 @@ void readBinaryOpsSpool(std::istream &in, std::vector<OpRecord> &ops) {
       op.at = static_cast<std::uint32_t>(v1);
       break;
 
+    case BinStructure: {
+      op.kind        = OpKind::Structure;
+      const int verb = in.get();
+      if (verb == std::char_traits<char>::eof()) {
+        return;
+      }
+      op.flags        = static_cast<std::uint8_t>(verb);
+      std::uint64_t v = 0;
+      if (!readVarint(in, v)) {
+        return;
+      }
+      op.to = static_cast<std::uint32_t>(v);
+      if (!readVarint(in, op.link) || !readVarint(in, v)) {
+        return;
+      }
+      op.span.scroll = static_cast<ScrollId>(v);
+      if (!readVarint(in, op.span.start) || !readVarint(in, op.span.length) ||
+          !readVarint(in, op.value)) {
+        return;
+      }
+      break;
+    }
+
     default:
       throw std::runtime_error("unknown binary op kind tag: " +
                                std::to_string(tag));
@@ -382,7 +428,8 @@ void writeOsmicTextOpsSpool(std::ostream &out,
         << op.length << ' ' << op.to << ' ' << op.span.start << ' '
         << op.span.length << ' ' << (op.source.isZero() ? "0" : op.source.str())
         << ' ' << op.sourceAt << ' ' << op.sourceLength << ' ' << op.link << ' '
-        << op.span.scroll << '\n';
+        << op.span.scroll << ' ' << static_cast<unsigned>(op.flags) << ' '
+        << op.value << '\n';
   }
 }
 
@@ -399,11 +446,30 @@ void readOsmicTextOpsSpool(std::istream &in, std::vector<OpRecord> &ops) {
     Op op;
     fields >> id >> kind >> op.at >> op.length >> op.to >> op.span.start >>
         op.span.length >> source >> op.sourceAt >> op.sourceLength >> op.link;
-    if (!(fields >> op.span.scroll)) {
-      op.span.scroll = localScroll;
-    }
+    // The required columns, checked before the optional ones rather than
+    // after. A failed extraction leaves the stream in a failure state that
+    // every later read inherits, so asking "was the line malformed?" after an
+    // optional column had already been tried answered yes for any line that
+    // simply did not have it -- which is what the scroll column below was
+    // doing, its fallback unreachable.
     if (!fields) {
       throw std::runtime_error("malformed operation: " + line);
+    }
+    // The columns a line need not have, each clearing the failure state it
+    // leaves when it is absent, because "not there" is an answer here.
+    if (!(fields >> op.span.scroll)) {
+      op.span.scroll = localScroll;
+      fields.clear();
+    }
+    unsigned flags = 0;
+    if (fields >> flags) {
+      op.flags = static_cast<std::uint8_t>(flags);
+    } else {
+      fields.clear();
+    }
+    if (!(fields >> op.value)) {
+      op.value = 0;
+      fields.clear();
     }
     const auto produces = MicroversionId::parse(id);
     op.source           = MicroversionId::parse(source);
@@ -420,6 +486,8 @@ void readOsmicTextOpsSpool(std::istream &in, std::vector<OpRecord> &ops) {
       op.kind = OpKind::Link;
     } else if ("pagebreak" == kind) {
       op.kind = OpKind::PageBreak;
+    } else if ("structure" == kind) {
+      op.kind = OpKind::Structure;
     } else {
       throw std::runtime_error("unknown operation \"" + kind + "\"");
     }

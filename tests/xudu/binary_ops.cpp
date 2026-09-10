@@ -387,4 +387,79 @@ TEST(BinaryOpsTest, versioningAndDetection) {
   }
 }
 
+TEST(BinaryOpsTest, aStructureOpRoundTripsThroughBothEncodings) {
+  // Nothing emits one yet -- migration step 12 adds the kind and leaves the
+  // manifold that will use it for step 13 -- but the encodings have to carry
+  // it before anything can, and a field that is never written down is a field
+  // that will be found missing later. So: every field a Structure verb reads,
+  // through the binary encoding and the OSMIC text one.
+  Op setLink;
+  setLink.kind = OpKind::Structure;
+  // A SetLink pointing negward along dimension cell 9 at cell 41, whose
+  // content span is two permascroll bytes and whose typed value is 42.0.
+  setLink.flags = xudu::structureFlags(xudu::StructureVerb::SetLink, true,
+                                       xudu::ValueKind::Double);
+  setLink.to    = 41;
+  setLink.link  = 9;
+  setLink.span  = PrimediaSpan{localScroll, 100, 2};
+  setLink.value = 0x4045000000000000ULL; // the bits of 42.0
+
+  const std::map<MicroversionId, Op> original{
+      {MicroversionId::parse("1"), setLink}};
+
+  const auto check = [&](const Op &decoded) {
+    EXPECT_EQ(decoded.kind, OpKind::Structure);
+    EXPECT_EQ(decoded.flags, setLink.flags);
+    EXPECT_EQ(xudu::structureVerbOf(decoded.flags),
+              xudu::StructureVerb::SetLink);
+    EXPECT_TRUE(xudu::structureIsNegward(decoded.flags));
+    EXPECT_EQ(xudu::valueKindOf(decoded.flags), xudu::ValueKind::Double);
+    EXPECT_EQ(decoded.to, 41U);
+    EXPECT_EQ(decoded.link, 9U);
+    EXPECT_EQ(decoded.span, setLink.span);
+    EXPECT_EQ(decoded.value, setLink.value);
+  };
+
+  {
+    std::stringstream binary;
+    writeBinaryOpsSpool(binary, asRecords(original));
+    std::vector<xudu::OpRecord> decoded;
+    readOpsSpool(binary, decoded);
+    ASSERT_EQ(decoded.size(), 1U);
+    EXPECT_EQ(decoded.front().produces.str(), "1");
+    check(decoded.front().op);
+  }
+  {
+    std::stringstream text;
+    writeOsmicTextOpsSpool(text, asRecords(original));
+    EXPECT_THAT(text.str(), testing::HasSubstr(" structure "));
+    std::vector<xudu::OpRecord> decoded;
+    readOsmicTextOpsSpool(text, decoded);
+    ASSERT_EQ(decoded.size(), 1U);
+    check(decoded.front().op);
+  }
+}
+
+TEST(BinaryOpsTest, anOsmicTextLineWithoutItsOptionalColumnsStillReads) {
+  // The columns after the link id -- the scroll, and now the Structure flags
+  // and value -- are absent from shorter lines. A failed extraction leaves
+  // the stream in a failure state, so testing for a malformed line *after*
+  // trying an optional column answered yes for every line that simply did not
+  // have one: the scroll fallback beside it had been unreachable.
+  std::stringstream eleven("1 insert 0 5 0 0 5 0 0 0 0\n");
+  std::vector<xudu::OpRecord> decoded;
+  readOsmicTextOpsSpool(eleven, decoded);
+  ASSERT_EQ(decoded.size(), 1U);
+  EXPECT_EQ(decoded.front().op.kind, OpKind::Insert);
+  EXPECT_EQ(decoded.front().op.span.scroll, localScroll)
+      << "a line with no scroll column means the local spool";
+  EXPECT_EQ(decoded.front().op.flags, 0U);
+  EXPECT_EQ(decoded.front().op.value, 0U);
+
+  // A line that really is malformed still says so.
+  std::stringstream ragged("1 insert 0\n");
+  std::vector<xudu::OpRecord> nothing;
+  EXPECT_THROW(readOsmicTextOpsSpool(ragged, nothing), std::runtime_error);
+}
+
 } // namespace
