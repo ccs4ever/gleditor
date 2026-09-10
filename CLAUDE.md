@@ -125,10 +125,10 @@ already in use.
 
 ### Binary fixtures under `tests/samples/xudu/`
 
-These are real on-disk stores — `ops.nodes`, `primedia.spool`, `scrolls.spool`, `links.spool`,
-`current.yaml` — checked in and loaded by `SampleXanadocsTest`. **A change to `CompactOpNode`'s
-layout invalidates every one of them.** Since migration step 8 they say so: `ops.nodes` opens with
-an `OpsSegmentHeader` recording `sizeof(CompactOpNode)`, so a stale fixture is refused with
+These are real on-disk stores — `ops.nodes`, `primedia.spool`, `store.tables`, `current.yaml` —
+checked in and loaded by `SampleXanadocsTest`. **A change to `CompactOpNode`'s layout invalidates
+every one of them.** Since migration step 8 they say so: `ops.nodes` opens with an
+`OpsSegmentHeader` recording `sizeof(CompactOpNode)`, so a stale fixture is refused with
 `OpsSegmentUnreadable` naming the two sizes rather than loading and meaning something else.
 Regenerate in the same commit anyway — a refused fixture is a red test, not a working one:
 
@@ -383,7 +383,7 @@ they care about; see R11 in `design/store-slice-convergence.md`.
 
 - [`store-slice-convergence.md`](design/store-slice-convergence.md) — the active plan: a cell is an
   operation, `Slice` becomes a replay product of the ops spool like `Version` is. Fourteen rulings
-  with their prices, a numbered migration (**steps 1–10 are done**), and the measurements behind
+  with their prices, a numbered migration (**steps 1–11 are done**), and the measurements behind
   each. Read this before touching `CompactOpNode`, `Manifold`, `CompactZZCell` or the zigzag
   engine's sync path.
 - [`vortex-hyperstructural-runtime.md`](design/vortex-hyperstructural-runtime.md) and

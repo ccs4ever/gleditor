@@ -10,6 +10,7 @@
 #include <utility>
 
 #include "bencode.hpp"
+#include "scroll_codec.hpp"
 #include "store.hpp"
 #include "swarm.hpp"
 #include "torrent.hpp"
@@ -85,47 +86,6 @@ decodeSpans(const bencode::Value &value) {
     out.push_back(*span);
   }
   return out;
-}
-
-bencode::Value encodeSegment(const ScrollSegment &segment) {
-  return bencode::Value::dict({
-      {"at", bencode::Value::integer(static_cast<std::int64_t>(segment.at))},
-      {"file", bencode::Value::integer(segment.fileIndex)},
-      {"len",
-       bencode::Value::integer(static_cast<std::int64_t>(segment.length))},
-      {"path", bencode::Value::string(segment.path)},
-      {"stream", bencode::Value::integer(
-                     static_cast<std::int64_t>(segment.streamOffset))},
-      {"torrent",
-       bencode::Value::string(std::string{
-           reinterpret_cast<const char *>(segment.torrent.bytes.data()),
-           segment.torrent.bytes.size()})},
-  });
-}
-
-std::optional<ScrollSegment> decodeSegment(const bencode::Value &value) {
-  const auto *at      = value.find("at");
-  const auto *length  = value.find("len");
-  const auto *torrent = value.find("torrent");
-  const auto *stream  = value.find("stream");
-  const auto *file    = value.find("file");
-  const auto *path    = value.find("path");
-  if (nullptr == at || !at->isInteger() || nullptr == length ||
-      !length->isInteger() || nullptr == torrent || !torrent->isString() ||
-      torrent->asString().size() != 20 || nullptr == stream ||
-      !stream->isInteger() || nullptr == file || !file->isInteger() ||
-      nullptr == path || !path->isString()) {
-    return std::nullopt;
-  }
-  ScrollSegment segment;
-  segment.at           = static_cast<std::uint64_t>(at->asInteger());
-  segment.length       = static_cast<std::uint64_t>(length->asInteger());
-  segment.streamOffset = static_cast<std::uint64_t>(stream->asInteger());
-  segment.fileIndex    = static_cast<std::uint32_t>(file->asInteger());
-  segment.path         = path->asString();
-  std::copy(torrent->asString().begin(), torrent->asString().end(),
-            segment.torrent.bytes.begin());
-  return segment;
 }
 
 bencode::Value encodeScroll(const Scroll &scroll) {

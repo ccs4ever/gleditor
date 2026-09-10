@@ -15,6 +15,7 @@
 #include <vector>
 
 #include "binary_ops.hpp"
+#include "store_tables.hpp"
 #include "windows_quoting.hpp"
 #include "yaml.hpp"
 
@@ -26,9 +27,6 @@ namespace {
 constexpr const char *primediaFile = "primedia.spool";
 constexpr const char *opsFile      = "ops.spool"; // pre-node-array stores
 constexpr const char *opsNodesFile = "ops.nodes";
-constexpr const char *linksFile    = "links.spool";
-constexpr const char *originsFile  = "origins.spool"; // pre-scroll stores
-constexpr const char *scrollsFile  = "scrolls.spool";
 constexpr const char *currentVersionsFile = "current.yaml";
 constexpr const char *versionsFile        = "versions.yaml";
 
@@ -48,30 +46,24 @@ std::string readWholeFile(const std::filesystem::path &path) {
   return {std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>()};
 }
 
-/// Open @p path for writing one of the store's plain-text spools (scrolls,
-/// links, or the OSMIC text ops export), imbued with the classic "C" locale
-/// rather than whatever gleditor::initLocale() has set the process to.
+/// Open @p path for writing the OSMIC text operations export, imbued with the
+/// classic "C" locale rather than whatever gleditor::initLocale() has set the
+/// process to.
 ///
-/// These files are whitespace-delimited plain digits, meant to be read back
-/// by splitting on spaces -- not by a locale-aware parser. Most locales'
-/// numpunct groups large integers with a thousands separator, which a
-/// document long enough to need a four-digit byte offset or length would
-/// put in the middle of a field the reader expects to be one token,
-/// producing a "malformed" error over a store that was never actually
-/// corrupt, only written under the wrong locale.
+/// It is whitespace-delimited plain digits, meant to be read back by splitting
+/// on spaces -- not by a locale-aware parser. Most locales' numpunct groups
+/// large integers with a thousands separator, which a document long enough to
+/// need a four-digit byte offset or length would put in the middle of a field
+/// the reader expects to be one token, producing a "malformed" error over a
+/// store that was never actually corrupt, only written under the wrong locale.
+///
+/// The scroll and link tables used to be written this way too, and are now a
+/// binary container instead -- so this is the last plain-text spool, and the
+/// hazard above now applies only to it.
 std::ofstream openTextSpoolForWrite(const std::filesystem::path &path) {
   std::ofstream out(path, std::ios::trunc);
   out.imbue(std::locale::classic());
   return out;
-}
-
-/// The read side of openTextSpoolForWrite(), imbued the same way so a store
-/// written correctly (in the classic locale) is also read that way,
-/// regardless of what locale the reading process happens to be in.
-std::ifstream openTextSpoolForRead(const std::filesystem::path &path) {
-  std::ifstream in(path);
-  in.imbue(std::locale::classic());
-  return in;
 }
 
 } // namespace
@@ -1057,52 +1049,27 @@ void Store::save(const std::string &directory) const {
     std::filesystem::remove(dir / opsFile, ignored);
   }
   {
-    // The scroll table: what a span's ScrollId means. Without it an id is a
-    // number with no content behind it, so this is as much a part of the store
-    // as the spans that refer to it.
+    // The scroll table and the link table: what a span's ScrollId means, and
+    // what connects one span to another. Without the first an id is a number
+    // with no content behind it, so both are as much a part of the store as
+    // the spans that refer to them.
     //
-    // A scroll line names the scroll; the segment lines after it say which
-    // torrent carries which stretch. They are separate lines because they are
-    // separate kinds of fact with separate lifetimes: the first never changes,
-    // and the second is rewritten every time something is sealed.
-    auto out = openTextSpoolForWrite(dir / scrollsFile);
-    for (std::size_t i = 0; i < externals.size(); i++) {
-      const auto &scroll = externals[i];
-      out << "scroll " << (i + 1) << ' '
-          << (scroll.isNamed() ? scroll.publisher.hex() : "-") << ' '
-          << (scroll.salt.empty() ? "-" : toHex(scroll.salt)) << ' '
-          << scroll.defaultMimeType << '\n';
-      for (const auto &segment : scroll.segments) {
-        out << "segment " << (i + 1) << ' ' << segment.at << ' '
-            << segment.length << ' ' << segment.torrent.hex() << ' '
-            << segment.streamOffset << ' ' << segment.fileIndex << ' '
-            << (segment.path.empty() ? "-" : segment.path) << ' '
-            << segment.mimeType << '\n';
-      }
-    }
-    // The local spool's own segment table: what insertMedia() has recorded
-    // about whole media files typed into scroll zero, which has no entry in
-    // externals to hold it (see the comment on localSegments). No index
-    // field, unlike a "segment" line -- there is only ever the one local
-    // spool for it to refer to.
-    for (const auto &segment : localSegments.segments) {
-      out << "localsegment " << segment.at << ' ' << segment.length << ' '
-          << segment.mimeType << '\n';
-    }
-  }
-  {
-    auto out = openTextSpoolForWrite(dir / linksFile);
-    for (const auto &[id, link] : linkTable) {
-      out << id << ' ' << linkTypeName(link.type) << ' '
-          << (link.owner.empty() ? "-" : link.owner) << ' ' << link.left.size()
-          << ' ' << link.right.size();
-      for (const auto &span : link.left) {
-        out << ' ' << span.scroll << ' ' << span.start << ' ' << span.length;
-      }
-      for (const auto &span : link.right) {
-        out << ' ' << span.scroll << ' ' << span.start << ' ' << span.length;
-      }
-      out << '\n';
+    // One container rather than two plaintext files. There was never a reason
+    // for them to be separate artefacts other than that they were written at
+    // different times -- both are per-store side tables replayed at load --
+    // and being plaintext was buying only that they could be read with `less`,
+    // which tools/xudu-dump buys back. See R11 and store_tables.hpp.
+    writeStoreTables(dir / storeTablesName,
+                     StoreTables{.scrolls       = externals,
+                                 .localSegments = localSegments.segments,
+                                 .links         = linkTable});
+    // The files this container replaced, taken with it. Leaving them would
+    // leave two answers to what the scrolls are, and load() refuses a
+    // directory holding both rather than choosing.
+    std::error_code ignored;
+    for (const auto *const superseded :
+         {"scrolls.spool", "links.spool", "origins.spool"}) {
+      std::filesystem::remove(dir / superseded, ignored);
     }
   }
   saveMetadata(dir);
@@ -1122,45 +1089,16 @@ void Store::saveOsmicText(const std::string &directory) const {
     writeOsmicTextOpsSpool(out, opRecords());
   }
   {
-    auto out = openTextSpoolForWrite(dir / scrollsFile);
-    for (std::size_t i = 0; i < externals.size(); i++) {
-      const auto &scroll = externals[i];
-      out << "scroll " << (i + 1) << ' '
-          << (scroll.isNamed() ? scroll.publisher.hex() : "-") << ' '
-          << (scroll.salt.empty() ? "-" : toHex(scroll.salt)) << ' '
-          << scroll.defaultMimeType << '\n';
-      for (const auto &segment : scroll.segments) {
-        out << "segment " << (i + 1) << ' ' << segment.at << ' '
-            << segment.length << ' ' << segment.torrent.hex() << ' '
-            << segment.streamOffset << ' ' << segment.fileIndex << ' '
-            << (segment.path.empty() ? "-" : segment.path) << ' '
-            << segment.mimeType << '\n';
-      }
-    }
-    // The local spool's own segment table: what insertMedia() has recorded
-    // about whole media files typed into scroll zero, which has no entry in
-    // externals to hold it (see the comment on localSegments). No index
-    // field, unlike a "segment" line -- there is only ever the one local
-    // spool for it to refer to.
-    for (const auto &segment : localSegments.segments) {
-      out << "localsegment " << segment.at << ' ' << segment.length << ' '
-          << segment.mimeType << '\n';
-    }
-  }
-  {
-    auto out = openTextSpoolForWrite(dir / linksFile);
-    for (const auto &[id, link] : linkTable) {
-      out << id << ' ' << linkTypeName(link.type) << ' '
-          << (link.owner.empty() ? "-" : link.owner) << ' ' << link.left.size()
-          << ' ' << link.right.size();
-      for (const auto &span : link.left) {
-        out << ' ' << span.scroll << ' ' << span.start << ' ' << span.length;
-      }
-      for (const auto &span : link.right) {
-        out << ' ' << span.scroll << ' ' << span.start << ' ' << span.length;
-      }
-      out << '\n';
-    }
+    // The side tables in the store's own container, not in text. What this
+    // export exists for is the *operations* in canonical OSMIC text -- that is
+    // what the format is named after and what exportOsmicText() renders. The
+    // scroll and link tables being plaintext alongside them was incidental,
+    // and writing them that way now would produce a directory that load()
+    // reads the operations out of and silently finds no scrolls in.
+    writeStoreTables(dir / storeTablesName,
+                     StoreTables{.scrolls       = externals,
+                                 .localSegments = localSegments.segments,
+                                 .links         = linkTable});
   }
   saveMetadata(dir);
 }
@@ -1208,112 +1146,6 @@ void Store::load(const std::string &directory) {
   versionAnnotations_.clear();
   aliasIndex_.clear();
 
-  if (std::filesystem::exists(dir / scrollsFile)) {
-    auto in = openTextSpoolForRead(dir / scrollsFile);
-    std::string line;
-    while (std::getline(in, line)) {
-      if (line.empty()) {
-        continue;
-      }
-      std::istringstream fields(line);
-      std::string what;
-      fields >> what;
-
-      if ("localsegment" == what) {
-        ScrollSegment segment;
-        fields >> segment.at >> segment.length >> segment.mimeType;
-        if (!fields) {
-          throw std::runtime_error("malformed localsegment in " +
-                                   (dir / scrollsFile).string() + ": " + line);
-        }
-        localSegments.addSegment(segment);
-        continue;
-      }
-
-      std::size_t which{};
-      fields >> which;
-      if (!fields || 0 == which) {
-        throw std::runtime_error("malformed scroll table in " +
-                                 (dir / scrollsFile).string() + ": " + line);
-      }
-      // Appended rather than interned, because the ids already written into
-      // the operations spool are positions in this list.
-      while (externals.size() < which) {
-        externals.emplace_back();
-      }
-      auto &scroll = externals[which - 1];
-
-      if ("scroll" == what) {
-        std::string key;
-        std::string salt;
-        fields >> key >> salt;
-        if (!fields) {
-          throw std::runtime_error("malformed scroll in " +
-                                   (dir / scrollsFile).string() + ": " + line);
-        }
-        if ("-" != key) {
-          scroll.publisher = PublicKey::fromHex(key);
-        }
-        if ("-" != salt) {
-          scroll.salt = fromHex(salt);
-        }
-        // Older stores never wrote a trailing MIME type; leaving the
-        // default in place for one of those is correct, not a parse error.
-        std::string mime;
-        if (fields >> mime && "-" != mime) {
-          scroll.defaultMimeType = mime;
-        }
-      } else if ("segment" == what) {
-        ScrollSegment segment;
-        std::string hash;
-        fields >> segment.at >> segment.length >> hash >>
-            segment.streamOffset >> segment.fileIndex >> segment.path;
-        if (!fields) {
-          throw std::runtime_error("malformed segment in " +
-                                   (dir / scrollsFile).string() + ": " + line);
-        }
-        segment.torrent = InfoHash::fromHex(hash);
-        if ("-" == segment.path) {
-          segment.path.clear();
-        }
-        std::string mime;
-        if (fields >> mime && "-" != mime) {
-          segment.mimeType = mime;
-        }
-        scroll.addSegment(segment);
-      } else {
-        throw std::runtime_error("unknown line in " +
-                                 (dir / scrollsFile).string() + ": " + line);
-      }
-    }
-  } else if (std::filesystem::exists(dir / originsFile)) {
-    // A store written before scrolls existed. Every entry was one file of one
-    // torrent, which is a scroll with a single segment covering all of it --
-    // and because a one-segment scroll's offsets are that file's offsets, the
-    // spans already written keep meaning exactly what they meant.
-    std::ifstream in(dir / originsFile);
-    std::string line;
-    while (std::getline(in, line)) {
-      if (line.empty()) {
-        continue;
-      }
-      std::istringstream fields(line);
-      std::string hash;
-      std::string path;
-      std::uint32_t fileIndex{};
-      std::uint64_t fileOffset{};
-      std::uint64_t fileLength{};
-      fields >> hash >> fileIndex >> fileOffset >> fileLength >> path;
-      if (!fields) {
-        throw std::runtime_error("malformed origin in " +
-                                 (dir / originsFile).string() + ": " + line);
-      }
-      externals.push_back(Scroll::ofTorrentFile(
-          InfoHash::fromHex(hash), fileIndex, "-" == path ? "" : path,
-          fileOffset, fileLength));
-    }
-  }
-
   if (std::filesystem::exists(dir / opsNodesFile)) {
     // Taken in whole: the nodes are already the shape they are held in, and
     // every name is worked out from the tree rather than read from the file.
@@ -1333,39 +1165,40 @@ void Store::load(const std::string &directory) {
     adoptOpRecords(records);
   }
 
-  if (std::filesystem::exists(dir / linksFile)) {
-    auto in = openTextSpoolForRead(dir / linksFile);
-    std::string line;
-    while (std::getline(in, line)) {
-      if (line.empty()) {
-        continue;
+  // A store whose side tables were still two plaintext files. Refused rather
+  // than opened: the operations would load and every span into an external
+  // scroll would resolve to nothing, so the document would come back looking
+  // like it had lost its quotations rather than looking broken. That is the
+  // failure R14 exists to stop, and deleting a reader under R11 does not
+  // license reintroducing it.
+  if (!std::filesystem::exists(dir / storeTablesName)) {
+    for (const auto *const superseded :
+         {"scrolls.spool", "links.spool", "origins.spool"}) {
+      if (std::filesystem::exists(dir / superseded)) {
+        throw StoreTablesUnreadable(
+            (dir / superseded).string() +
+            " is a store's side tables from before they were one container, "
+            "and this build does not read them. See design R11.");
       }
-      std::istringstream fields(line);
-      Link link;
-      std::string type;
-      std::size_t lefts  = 0;
-      std::size_t rights = 0;
-      fields >> link.id >> type >> link.owner >> lefts >> rights;
-      if (!fields) {
-        throw std::runtime_error("malformed link in " +
-                                 (dir / linksFile).string() + ": " + line);
-      }
-      link.type = linkTypeFromName(type);
-      if ("-" == link.owner) {
-        link.owner.clear();
-      }
-      const auto readSpans = [&fields](const std::size_t count,
-                                       std::vector<PrimediaSpan> &into) {
-        for (std::size_t i = 0; i < count; i++) {
-          PrimediaSpan span;
-          fields >> span.scroll >> span.start >> span.length;
-          into.push_back(span);
-        }
-      };
-      readSpans(lefts, link.left);
-      readSpans(rights, link.right);
-      nextLinkId = std::max(nextLinkId, link.id + 1);
-      linkTable.emplace(link.id, std::move(link));
+    }
+  }
+
+  if (std::filesystem::exists(dir / storeTablesName)) {
+    // Both side tables at once, from one container. The plaintext scroll and
+    // link parsers that were here -- a getline loop each, with a throw per
+    // malformed field and a locale-imbued stream apiece so that a thousands
+    // separator could not turn a byte offset into two tokens -- are gone with
+    // the format they were reading. So is the origins.spool reader, which
+    // existed only to open stores written before there was a scroll table at
+    // all: keeping a reader so that an old file still parses is exactly the
+    // tax R11 refuses.
+    auto tables            = readStoreTables(dir / storeTablesName);
+    externals              = std::move(tables.scrolls);
+    localSegments          = Scroll{};
+    localSegments.segments = std::move(tables.localSegments);
+    linkTable              = std::move(tables.links);
+    for (const auto &[id, link] : linkTable) {
+      nextLinkId = std::max(nextLinkId, id + 1);
     }
   }
 

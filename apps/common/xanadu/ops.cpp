@@ -82,6 +82,19 @@ const char *prominenceTierName(const ProminenceTier tier) {
   return "author";
 }
 
+ProminenceTier prominenceTierFromName(const std::string &name) {
+  if ("curated" == name) {
+    return ProminenceTier::Curated;
+  }
+  if ("public" == name) {
+    return ProminenceTier::Public;
+  }
+  // Author is the default a Link is constructed with, so it is also what an
+  // unrecognised tier reads as: a link whose prominence cannot be established
+  // is the reader's own, not somebody else's curation.
+  return ProminenceTier::Author;
+}
+
 bool Link::touches(const PrimediaSpan &span) const {
   const auto meets = [&span](const PrimediaSpan &end) {
     return !end.intersect(span).empty();

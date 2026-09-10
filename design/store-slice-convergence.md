@@ -999,7 +999,7 @@ ______________________________________________________________________
 Each step is one commit. After each, `make -j$(nproc)` builds all three programs and
 `make -j$(nproc) test` passes.
 
-Steps 1–10 have landed. What each actually cost, where it differed from the plan, and what it
+Steps 1–11 have landed. What each actually cost, where it differed from the plan, and what it
 measured is recorded inline below; the rest are unchanged.
 
 1. ~~**Sealed-segment immutability** (R10).~~ **Done.** `firstChildIndex`/`nextSiblingIndex` left
@@ -1234,9 +1234,49 @@ measured is recorded inline below; the rest are unchanged.
    different spool index. Every name and every span survives, and the index does not, which is R4's
    argument for `GlobalOpRef` seen from the other side.
 
-1. **One binary store container** (R11). `scrolls.spool` and the link table become sections beside
-   `ops.nodes` under one versioned header. Deletes both plaintext parsers and their per-line error
-   paths in `store.cpp`.
+1. ~~**One binary store container** (R11).~~ **Done.** `store.tables`: a twelve-byte `\x89XUDUTBL`
+   signature, a format version, and a bencode body holding the scroll registry, the local segment
+   table and the links. Both plaintext parsers are gone, and so is the `origins.spool` reader, which
+   existed only to open stores written before there was a scroll table at all — the same tax R11
+   refuses for a format version, refused for a file name.
+
+   **Bencode rather than the raw structs `ops.nodes` uses, and deliberately.** The operations file
+   is a run of structs copied out of memory because it is large, hot and never leaves the machine.
+   These tables are small and read once, so they are a byte stream with no word order, which costs
+   nothing at this size and removes a question about who wrote the file.
+
+   **The conversion found four fields the plaintext table had been dropping**, and this is the
+   larger half of what the step was worth. A `Link`'s `tier` and `curator` were never written, so a
+   link adopted from a third-party package came back every time as the reader's own author-tier link
+   with no curator. A `ScrollSegment`'s `kind` and `holeRecord` were never written either, so a
+   store that adopted a document with withheld or transcopyright-locked ranges came back with those
+   ranges looking like ordinary content — the manifest carries them, `adopt()` stores them, and
+   `save()` dropped them. All four travel now, and the round-trip test asserts on each by name.
+
+   **A fifth was nearly introduced.** The segment encoding had been written twice — in
+   `publication.cpp` and in `link_package.cpp` — and the copies had already drifted, the first
+   carrying `kind` and `hole` and the second silently dropping both. Needing a third copy is what
+   made anyone look. They are now one `scroll_codec.hpp`, which fixes the link-package side as a
+   side effect. But that shared encoding has no key for a MIME type, because a publication's
+   segments do not need one and a registry's have nowhere else to get it: reusing it wholesale
+   dropped every `mimeType` in the store, and a test caught it. The registry adds that key *around*
+   the shared encoding rather than inside it, so a store's needs do not change the bytes a
+   publication is signed over.
+
+   **Deleting a reader must not turn a refusal into a silence.** A store with a plaintext scroll
+   table and no container would otherwise have loaded its operations perfectly and come back with no
+   scrolls at all — every span into quoted content resolving to nothing, the document looking like
+   it had lost its quotations rather than like it had not opened. `load()` refuses such a directory
+   by name, and `save()` removes the superseded files once the container is written, the way it
+   already removes `ops.spool` once the node array exists.
+
+   Two smaller things. `saveOsmicText()` writes the container too rather than the old plaintext:
+   what that export is *for* is the operations in canonical OSMIC text, and writing side tables no
+   loader reads would have produced a directory that opens with no scrolls. And `xudu-dump` renders
+   the tables in the same shape it rendered the plaintext, which is what makes the conversion a diff
+   rather than a claim; it costs the tool `Scroll` and `InfoHash`, and so libcrypto and libmagic,
+   taking it from 850 KB and six shared libraries to 2.9 MB and fifteen — still far short of the 26
+   MB and twenty-three the whole core would cost.
 
 1. **`OpKind::Structure` plus `BinStructure = 7`** (R1, R2): flag constants and accessors, the
    `replay()` no-op case, `opKindName`, both `binary_ops.cpp` switches, the OSMIC-text string table,

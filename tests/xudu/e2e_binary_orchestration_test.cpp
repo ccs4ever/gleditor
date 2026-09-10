@@ -28,6 +28,7 @@
 #include <xudu/core/publication.hpp>
 #include <xudu/core/scroll.hpp>
 #include <xudu/core/store.hpp>
+#include <xudu/core/store_tables.hpp>
 #include <xudu/core/torrent.hpp>
 #include <xudu/core/version.hpp>
 
@@ -1371,9 +1372,8 @@ TEST(E2EBinaryOrchestrationTest,
 // route a marked piece through Store::insertSpan() -- which records an
 // Insert op referencing the existing span, appending nothing to the
 // primedia spool -- instead of Store::insertMedia(). The one directly
-// observable consequence: exactly one "localsegment ... image/png" line in
-// the saved store's scrolls.spool, not two, despite the figure rendering on
-// both pages.
+// observable consequence: exactly one image/png entry in the saved store's
+// local segment table, not two, despite the figure rendering on both pages.
 TEST(E2EBinaryOrchestrationTest, repeatedPdfFigureIsStoredOnceNotOncePerPage) {
   const auto xuduBin = findXuduBinary();
   ASSERT_TRUE(fs::exists(xuduBin)) << "xudu binary not found at " << xuduBin;
@@ -1391,23 +1391,20 @@ TEST(E2EBinaryOrchestrationTest, repeatedPdfFigureIsStoredOnceNotOncePerPage) {
   EXPECT_EQ(importRes.exitCode, 0)
       << "importing the repeated-figure PDF failed: " << importRes.output;
 
-  const auto scrollsPath = storePath / "scrolls.spool";
-  ASSERT_TRUE(fs::exists(scrollsPath))
-      << "no scrolls.spool written for " << storePath.string();
-  std::ifstream scrollsIn(scrollsPath);
-  ASSERT_TRUE(scrollsIn) << "could not open " << scrollsPath.string();
+  const auto tablesPath = storePath / "store.tables";
+  ASSERT_TRUE(fs::exists(tablesPath))
+      << "no side tables written for " << storePath.string();
+  const auto tables = xudu::readStoreTables(tablesPath);
 
   std::size_t imageSegments = 0;
-  std::string line;
-  while (std::getline(scrollsIn, line)) {
-    if (line.starts_with("localsegment") && line.ends_with("image/png")) {
+  for (const auto &segment : tables.localSegments) {
+    if (segment.mimeType.starts_with("image/png")) {
       ++imageSegments;
     }
   }
   EXPECT_EQ(imageSegments, 1U)
-      << "the figure appears once per page but should only be stored once "
-         "-- scrolls.spool:\n"
-      << scrollsPath.string();
+      << "the figure appears once per page but should only be stored once, in "
+      << tablesPath.string();
 
   // A real render still succeeds after routing the duplicate through
   // insertSpan() rather than insertMedia() -- the fix must not change what

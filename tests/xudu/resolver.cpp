@@ -22,6 +22,7 @@
 #include <xudu/core/resolver.hpp>
 #include <xudu/core/scroll.hpp>
 #include <xudu/core/store.hpp>
+#include <xudu/core/store_tables.hpp>
 #include <xudu/core/torrent.hpp>
 
 #include "torrent_data.hpp"
@@ -276,39 +277,60 @@ TEST_F(TorrentStoreRoundTripTest, aTorrentBackedQuotationSurvivesAReload) {
   EXPECT_EQ(reloaded.textOf(quoted), "Nelson wrote: quick");
 }
 
-TEST_F(TorrentDataTest, aStoreWrittenBeforeScrollsStillReads) {
-  // Stores on disk name their content the old way, as a torrent and a file. A
-  // one-segment scroll's offsets are that file's offsets, so those spans mean
-  // exactly what they always meant -- but only if the old table is still read.
-  const auto storeDir = (dir / "legacy").string();
+TEST_F(TorrentDataTest, aStoreWhoseSideTablesArePlaintextIsRefused) {
+  // This used to read origins.spool -- the table from before scrolls existed
+  // -- and migrate it forward on the next save. Under R11 that reader is
+  // deleted along with the plaintext scroll and link tables it outlived: a
+  // reader kept only so an old file still parses is the permanent tax that
+  // ruling refuses.
+  //
+  // What deleting a reader must not do is turn a refusal into a silence. A
+  // store with a plaintext scroll table and no container would otherwise load
+  // its operations perfectly and come back with no scrolls at all, so every
+  // span into quoted content would resolve to nothing and the document would
+  // look like it had lost its quotations rather than like it had not opened.
+  // That is exactly the failure R14 exists to stop.
+  for (const auto *const superseded :
+       {"origins.spool", "scrolls.spool", "links.spool"}) {
+    const auto storeDir = (dir / superseded).string();
+    std::filesystem::create_directories(storeDir);
+    write(std::filesystem::path(storeDir) / superseded,
+          std::string{xudu_test::singleFileHash} + " 0 0 4 fox.txt\n");
+    write(std::filesystem::path(storeDir) / "ops.spool",
+          "1 transclude 0 0 0 4 5 0 0 0 0 1\n");
+
+    Store loaded;
+    try {
+      loaded.load(storeDir);
+      FAIL() << superseded << " must not be opened as though it were empty";
+    } catch (const xudu::StoreTablesUnreadable &e) {
+      EXPECT_THAT(std::string{e.what()}, testing::HasSubstr(superseded));
+    }
+  }
+}
+
+TEST_F(TorrentDataTest, savingClearsTheTablesTheContainerReplaced) {
+  // Both on disk at once would be two answers to what the scrolls are, and
+  // load() refuses that rather than choosing between them -- so a save has to
+  // take the old files with it, the way it already takes ops.spool once the
+  // node array has been written.
+  const auto storeDir = (dir / "supersede").string();
   std::filesystem::create_directories(storeDir);
-  write(std::filesystem::path(storeDir) / "origins.spool",
-        std::string{xudu_test::singleFileHash} + " 0 0 " +
-            std::to_string(xudu_test::singleFileText.size()) + " fox.txt\n");
-  // One transclude of scroll 1, offsets 4..9, at position 0.
-  write(std::filesystem::path(storeDir) / "ops.spool",
-        "1 transclude 0 0 0 4 5 0 0 0 0 1\n");
+  write(std::filesystem::path(storeDir) / "scrolls.spool", "stale\n");
+  write(std::filesystem::path(storeDir) / "links.spool", "stale\n");
 
-  Store loaded;
-  loaded.load(storeDir);
-  loaded.setContentSource(&source);
+  Store store;
+  static_cast<void>(store.insert(MicroversionId{}, 0, "hello"));
+  store.save(storeDir);
 
-  ASSERT_EQ(loaded.scrolls().size(), 1U);
-  ASSERT_EQ(loaded.scrolls().front().segments.size(), 1U);
-  EXPECT_EQ(loaded.scrolls().front().segments.front().torrent.hex(),
-            xudu_test::singleFileHash);
-  EXPECT_EQ(loaded.textOf(MicroversionId::parse("1")), "quick");
+  const std::filesystem::path where(storeDir);
+  EXPECT_TRUE(std::filesystem::exists(where / "store.tables"));
+  EXPECT_FALSE(std::filesystem::exists(where / "scrolls.spool"));
+  EXPECT_FALSE(std::filesystem::exists(where / "links.spool"));
 
-  // Saved again, it is written in the new shape, and still says the same.
-  const auto again = (dir / "migrated").string();
-  std::filesystem::create_directories(again);
-  loaded.save(again);
-  EXPECT_TRUE(
-      std::filesystem::exists(std::filesystem::path(again) / "scrolls.spool"));
   Store reloaded;
-  reloaded.load(again);
-  reloaded.setContentSource(&source);
-  EXPECT_EQ(reloaded.textOf(MicroversionId::parse("1")), "quick");
+  reloaded.load(storeDir);
+  EXPECT_EQ(reloaded.textOf(MicroversionId::parse("1")), "hello");
 }
 
 // -- scrolls carried by more than one torrent -------------------------------

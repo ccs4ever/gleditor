@@ -96,6 +96,9 @@ enum class ProminenceTier : std::uint8_t {
 };
 
 const char *prominenceTierName(ProminenceTier tier);
+/// The inverse, as linkTypeFromName() is of linkTypeName(). Anything
+/// unrecognised reads as Author, which is what a Link is constructed with.
+ProminenceTier prominenceTierFromName(const std::string &name);
 
 /**
  * @brief A butterfly link: two lists of spans, an identity and a type.

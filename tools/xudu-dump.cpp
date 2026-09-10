@@ -44,6 +44,7 @@
 #include <xudu/core/microversion.hpp>
 #include <xudu/core/ops.hpp>
 #include <xudu/core/segmented_ops_spool.hpp>
+#include <xudu/core/store_tables.hpp>
 
 namespace {
 
@@ -257,86 +258,78 @@ void dumpOps(const OpsFile &file, const std::string &primedia) {
 // same either side of that change and the diff says whether the meaning
 // survived.
 
-void dumpScrolls(const std::filesystem::path &path) {
-  std::ifstream in(path);
-  std::string line;
-  while (std::getline(in, line)) {
-    if (line.empty()) {
-      continue;
-    }
-    std::istringstream fields(line);
-    std::string kind;
-    fields >> kind;
-    if ("scroll" == kind) {
-      std::uint32_t id{};
-      std::string publisher;
-      std::string salt;
-      std::string mime;
-      fields >> id >> publisher >> salt >> mime;
-      std::cout << "scroll " << id << "  publisher=" << publisher
-                << " salt=" << salt << " mime=" << mime << '\n';
-    } else if ("segment" == kind) {
-      std::uint32_t id{};
-      std::uint64_t at{};
-      std::uint64_t length{};
-      std::string torrent;
-      std::uint64_t streamOffset{};
-      std::uint32_t fileIndex{};
-      std::string filePath;
-      std::string mime;
-      fields >> id >> at >> length >> torrent >> streamOffset >> fileIndex >>
-          filePath >> mime;
-      std::cout << "segment " << id << "  at=" << at << " len=" << length
-                << " torrent=" << torrent << " streamOffset=" << streamOffset
-                << " fileIndex=" << fileIndex << " path=" << filePath
-                << " mime=" << mime << '\n';
-    } else if ("localsegment" == kind) {
-      std::uint64_t at{};
-      std::uint64_t length{};
-      std::string mime;
-      fields >> at >> length >> mime;
-      std::cout << "localsegment  at=" << at << " len=" << length
-                << " mime=" << mime << '\n';
-    } else {
-      trouble(path.string() + ": unrecognised line \"" + line + "\"");
+/// One segment's fields, in the order the plaintext table wrote them, plus
+/// the two it silently dropped: whether the stretch is withheld, and what the
+/// record of that says.
+std::string segmentFields(const xudu::ScrollSegment &segment) {
+  std::ostringstream out;
+  out << "at=" << segment.at << " len=" << segment.length
+      << " torrent=" << segment.torrent.hex()
+      << " streamOffset=" << segment.streamOffset
+      << " fileIndex=" << segment.fileIndex
+      << " path=" << (segment.path.empty() ? "-" : segment.path)
+      << " mime=" << segment.mimeType;
+  if (segment.isWithheld()) {
+    out << " withheld=" << static_cast<int>(segment.kind);
+  }
+  if (segment.holeRecord.has_value()) {
+    out << " hole=[" << segment.holeRecord->at << ','
+        << segment.holeRecord->end() << ')';
+    if (segment.holeRecord->transcopyright.has_value()) {
+      out << " transcopyright="
+          << segment.holeRecord->transcopyright->priceAtomicUnits
+          << segment.holeRecord->transcopyright->currencySymbol;
     }
   }
+  return out.str();
 }
 
-void dumpLinks(const std::filesystem::path &path) {
-  std::ifstream in(path);
-  std::string line;
-  while (std::getline(in, line)) {
-    if (line.empty()) {
-      continue;
-    }
-    std::istringstream fields(line);
-    std::uint64_t id{};
-    std::string type;
-    std::string owner;
-    std::size_t leftCount{};
-    std::size_t rightCount{};
-    fields >> id >> type >> owner >> leftCount >> rightCount;
-    if (!fields) {
-      trouble(path.string() + ": unrecognised line \"" + line + "\"");
-      continue;
-    }
-    std::ostringstream out;
-    out << "link " << id << "  type=" << type << " owner=" << owner;
-    for (std::size_t end = 0; end < leftCount + rightCount; end++) {
-      std::uint32_t scroll{};
-      std::uint64_t start{};
-      std::uint64_t length{};
-      fields >> scroll >> start >> length;
-      if (!fields) {
-        trouble(path.string() + ": link " + std::to_string(id) +
-                " names fewer spans than it claims");
-        break;
+/// The side tables, from the one container they live in. Rendered in the same
+/// shape the plaintext files were rendered in, so that migration step 11's
+/// conversion is a diff of this output rather than a claim about it.
+void dumpTables(const std::filesystem::path &path, bool wantScrolls,
+                bool wantLinks) {
+  xudu::StoreTables tables;
+  try {
+    tables = xudu::readStoreTables(path);
+  } catch (const std::exception &e) {
+    trouble(e.what());
+    return;
+  }
+
+  if (wantScrolls) {
+    for (std::size_t i = 0; i < tables.scrolls.size(); i++) {
+      const auto &scroll = tables.scrolls[i];
+      const auto id      = i + 1;
+      std::cout << "scroll " << id << "  publisher="
+                << (scroll.isNamed() ? scroll.publisher.hex() : "-")
+                << " salt=" << (scroll.salt.empty() ? "-" : scroll.salt)
+                << " mime=" << scroll.defaultMimeType << '\n';
+      for (const auto &segment : scroll.segments) {
+        std::cout << "segment " << id << "  " << segmentFields(segment) << '\n';
       }
-      out << (end < leftCount ? " left=" : " right=") << scroll << ':' << start
-          << ',' << start + length;
     }
-    std::cout << out.str() << '\n';
+    for (const auto &segment : tables.localSegments) {
+      std::cout << "localsegment  " << segmentFields(segment) << '\n';
+    }
+  }
+  if (wantLinks) {
+    for (const auto &[id, link] : tables.links) {
+      std::ostringstream out;
+      out << "link " << id << "  type=" << xudu::linkTypeName(link.type)
+          << " tier=" << xudu::prominenceTierName(link.tier)
+          << " owner=" << (link.owner.empty() ? "-" : link.owner)
+          << " curator=" << (link.curator.empty() ? "-" : link.curator);
+      for (const auto &span : link.left) {
+        out << " left=" << span.scroll << ':' << span.start << ','
+            << span.start + span.length;
+      }
+      for (const auto &span : link.right) {
+        out << " right=" << span.scroll << ':' << span.start << ','
+            << span.start + span.length;
+      }
+      std::cout << out.str() << '\n';
+    }
   }
 }
 
@@ -447,14 +440,8 @@ int main(int argc, char **argv) {
     }
     std::cout << '\n';
   }
-  if (wants("scrolls") && exists("scrolls.spool")) {
-    dumpScrolls(target / "scrolls.spool");
-  }
-  if (wants("scrolls") && exists("origins.spool")) {
-    dumpText(target / "origins.spool", "origin");
-  }
-  if (wants("links") && exists("links.spool")) {
-    dumpLinks(target / "links.spool");
+  if ((wants("scrolls") || wants("links")) && exists("store.tables")) {
+    dumpTables(target / "store.tables", wants("scrolls"), wants("links"));
   }
   if (wants("versions")) {
     if (exists("current.yaml")) {

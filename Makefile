@@ -845,17 +845,29 @@ $(OBJDIR)/xudu-swarm-peer: $(OBJDIR)/tools/xudu-swarm-peer.o $(XUDU_CORE_OBJS) $
 # open, and a debugging tool that stopped building three commits ago is one
 # that is not there when it is finally needed.
 #
-# Two objects and no XUDU_LIBS, which is deliberate rather than lucky. It reads
-# the bytes itself and wants only the types that describe them --
-# MicroversionId to spell a name, opKindName() to spell a kind -- so it needs
-# neither the loader nor libtorrent, OpenSSL, lmdb or libmagic behind it.
-# 850 KB against 26 MB, and six shared libraries against twenty-three: a tool
-# for looking at a broken store should not need the whole stack to be healthy
-# before it will build.
+# Named objects rather than XUDU_CORE_OBJS, which is deliberate rather than
+# lucky: it reads the bytes itself and wants only the types that describe them,
+# so it needs none of the loader, libtorrent, lmdb, or the render stack. The
+# side-table container costs it Scroll and InfoHash -- and so libcrypto for a
+# SHA-1 and libmagic for a MIME guess -- which took it from 850 KB and six
+# shared libraries to 2.9 MB and fifteen. Still a long way short of the 26 MB
+# and twenty-three the whole core would cost, and the property that matters is
+# unchanged: a tool for looking at a broken store does not need the whole stack
+# to be healthy before it will build.
 .PHONY: xudu-dump
 xudu-dump: $(OBJDIR)/xudu-dump
-$(OBJDIR)/xudu-dump: $(OBJDIR)/tools/xudu-dump.o $(OBJDIR)/apps/common/xanadu/microversion.o $(OBJDIR)/apps/common/xanadu/ops.o
-	$(CXX) $(LDFLAGS) -o $@ $^
+XUDU_DUMP_OBJS := $(call obj,tools/xudu-dump.cpp) \
+	$(OBJDIR)/apps/common/xanadu/microversion.o \
+	$(OBJDIR)/apps/common/xanadu/ops.o \
+	$(OBJDIR)/apps/common/xanadu/store_tables.o \
+	$(OBJDIR)/apps/common/xanadu/scroll_codec.o \
+	$(OBJDIR)/apps/common/xanadu/scroll.o \
+	$(OBJDIR)/apps/common/xanadu/bencode.o \
+	$(OBJDIR)/apps/common/xanadu/torrent.o \
+	$(OBJDIR)/apps/common/xanadu/mutable_link.o \
+	$(OBJDIR)/src/mimetype.o
+$(OBJDIR)/xudu-dump: $(XUDU_DUMP_OBJS)
+	$(CXX) $(LDFLAGS) -o $@ $^ -lcrypto -lmagic
 
 # What the loader pays to lay a page out, against the two ways of asking Pango
 # for it. Not part of `all`, because it measures rather than builds anything the
