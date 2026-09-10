@@ -887,6 +887,13 @@ std::optional<SealState> decodeSealState(const std::string_view encoded) {
 
 std::string globalKeyOf(const Store &store, const PrimediaSpan &span,
                         const Scroll *const localSealedAs) {
+  // A break is not an address, so asking the store for its scroll gets nullptr
+  // and reads as "content this machine has not published" -- which is how
+  // publishing any document with a page break in it used to throw. It has a
+  // name of its own instead.
+  if (breakMarkerScroll == span.scroll) {
+    return std::string{breakMarkerKey};
+  }
   // A piece of the local spool has a global name exactly when the local spool
   // has been sealed: the offsets are the same bytes, so the sealed scroll's
   // name is the address it always had, said globally.
@@ -1089,6 +1096,13 @@ Adopted adopt(Store &store, const Publication &pub) {
   // finds the two showing the same passage.
   std::uint32_t at = 0;
   for (const auto &piece : pub.pieces) {
+    // A break is a place in the publisher's own text rather than a quotation
+    // of anything, so it is re-recorded as a break here rather than resolved
+    // through the scroll table, and it takes up no room in what follows it.
+    if (breakMarkerKey == piece.scroll) {
+      taken.version = store.insertBreak(taken.version, at);
+      continue;
+    }
     const auto found = pub.scrolls.find(piece.scroll);
     if (pub.scrolls.end() == found) {
       throw std::runtime_error(std::format(
@@ -1182,7 +1196,11 @@ Publication publish(const Store &store, const MicroversionId &version,
           "cannot publish: a scroll with no name and no segments has no "
           "address a reader could resolve");
     }
-    pub.scrolls.insert_or_assign(global->scroll, *scrollFor(piece));
+    // A break carries no scroll to put in the table -- there is no content
+    // behind it to resolve -- and scrollFor() would hand back nullptr.
+    if (breakMarkerScroll != piece.scroll) {
+      pub.scrolls.insert_or_assign(global->scroll, *scrollFor(piece));
+    }
     pub.pieces.push_back(*global);
   }
 

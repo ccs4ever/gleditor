@@ -88,6 +88,42 @@ TEST(PublicationTest, aDocumentIsPublishedAsPointersAndReadsBackTheSame) {
   EXPECT_EQ(read->name(), pub.name());
 }
 
+TEST(PublicationTest, aPageBreakSurvivesBeingPublishedAndRead) {
+  // Publishing any document with a break in it used to throw. A break has no
+  // scroll -- it names a place in the text rather than any content -- so
+  // globalise() read it as "content this machine has not published" and
+  // refused. apps/xudu/session.cpp puts one in on every page of a PDF import,
+  // so this was the ordinary case rather than an exotic one.
+  const auto keys   = xudu::createMutableKeys();
+  const auto scroll = namedScroll(keys.publicKey, "permascroll", 1000);
+  xudu::Store store;
+  auto version = quoting(store, scroll, 0, 60);
+  version      = store.insertBreak(version, 20);
+  ASSERT_THAT(store.rebuild(version).forcedBreaks(), testing::ElementsAre(20U));
+
+  const auto pub =
+      xudu::publish(store, version, keys, "essay", "An Essay", 1, 1700000000);
+  // Text before the break, the break, text after: the break is a piece of the
+  // document like any other, carrying no length.
+  ASSERT_EQ(pub.pieces.size(), 3U);
+  EXPECT_EQ(pub.pieces[1].scroll, xudu::breakMarkerKey);
+  EXPECT_EQ(pub.pieces[1].length, 0U);
+  EXPECT_EQ(pub.length(), 60U) << "a break must not be counted as text";
+  // and contributing nothing to fetch, because there is nothing behind it.
+  EXPECT_FALSE(pub.scrolls.contains(std::string{xudu::breakMarkerKey}));
+
+  const auto read = xudu::decodePublication(xudu::encodePublication(pub));
+  ASSERT_TRUE(read.has_value()) << "the reserved name broke the signature";
+  EXPECT_EQ(read->pieces, pub.pieces);
+
+  // A reader gets the pagination back, at the same place in the same text.
+  xudu::Store reader;
+  const auto taken = xudu::adopt(reader, *read);
+  EXPECT_EQ(reader.rebuild(taken.version).length(), 60U);
+  EXPECT_THAT(reader.rebuild(taken.version).forcedBreaks(),
+              testing::ElementsAre(20U));
+}
+
 TEST(PublicationTest, aManifestThatWasAlteredDoesNotRead) {
   const auto keys   = xudu::createMutableKeys();
   const auto scroll = namedScroll(keys.publicKey, "permascroll", 1000);

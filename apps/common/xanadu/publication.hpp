@@ -350,6 +350,19 @@ publishDocument(Store &store, const MicroversionId &version,
                 const std::vector<PublishedHoleRecord> &holes = {});
 
 /**
+ * @brief The scroll name a page break travels under in a publication.
+ *
+ * A break names no content, so it has no scroll and cannot have a real global
+ * name -- but it does have a place in the document, and a publication that
+ * dropped it would be published at a different pagination than it was written
+ * at. So it is carried as a zero-length piece under a reserved name instead.
+ *
+ * Cannot collide with a real key: scrollKey() only ever produces "btpk:" for a
+ * named scroll and "file:" for a torrent-backed one.
+ */
+inline constexpr std::string_view breakMarkerKey = "break:";
+
+/**
  * @brief The global name of the scroll @p span points into.
  *
  * Empty when it has none, which is the case for content typed here and not yet
