@@ -16,6 +16,12 @@ a path can extend the manifold instead of only reading it, and a Xanalogical mut
 `weave`, ordinary path expressions evaluated for effect — in place of an XQuery-style `update { }`
 block, since a query and an edit are the same kind of walk over the same primitives.
 
+> **§7 reconciles this specification with
+> [`store-slice-convergence.md`](store-slice-convergence.md)**, which makes a zigzag cell an
+> operation in the xudu ops spool. The grammar is unaffected; what moves is which cells a mutation
+> is allowed to persist into, what `##` resolves to, and what `><` is built on. Read it alongside
+> §1's invariants.
+
 ______________________________________________________________________
 
 ## 1. Architectural Foundations & Operational Invariants
@@ -503,3 +509,88 @@ weave {
 
 `/-d.route` walks `d.route` negward from `$old_service` — the same traversal operator as every other
 step in the query, with the direction living on the dimension name rather than the operator.
+
+______________________________________________________________________
+
+## 7. Reconciliation with the Unified Store/Slice
+
+[`store-slice-convergence.md`](store-slice-convergence.md) makes a zigzag cell an operation in the
+xudu ops spool, which changes what the primitives underneath this language are operating on. Its §13
+works the compatibility through from the storage side, and
+[`vortex-hyperstructural-runtime.md`](vortex-hyperstructural-runtime.md) §5 records the engine
+consequences. **The grammar in §3 is unaffected.** What follows is the surface-level fallout, for
+whoever writes the compiler.
+
+### 7.1 Two regimes, and a query can be in either
+
+The convergence splits the manifold in two (its R8). A `Manifold` is a replay of an operations
+spool: durable, addressable, and the thing a document *is*. An `ArenaManifold` is scratch: cells
+that exist because a query made them, backed by no operation and collected when unreachable.
+
+The rule for which one a VQL mutation lands in is **not** "reads are ephemeral, writes are
+persistent". It is:
+
+> **Only a user-generated update persists. Navigation never does.**
+
+So `weave` on behalf of a person editing a document writes operations. A cursor moving, a rank being
+streamed, an intermediate manifold a pipeline built and will discard — none of these earn a name in
+hypertime, however much structure they create along the way. §5's reachability GC below is
+`ArenaManifold`'s garbage collector specifically; the persistent side has no garbage, because an
+append-only spool never drops anything.
+
+This is what `promote()` is for: an arena result a person decides to keep is folded into the
+persistent manifold as operations, at the moment they decide, and not before.
+
+### 7.2 `##` is the origin cell, but the origin is not cell zero
+
+Convergence R5 makes `0` mean *no cell*, because a cell's address is its index in the operations
+spool and index 0 is the state-zero slot — nothing is recorded there. The origin is a genesis cell
+named `home`.
+
+`##` therefore keeps working exactly as §2 describes, because it was always a token rather than a
+number. Two smaller things change: `LiteralCellId` may not be written as `0`, and §4.1's remark that
+"a rank can freely pass through Cell 0 without truncating early" needs no defending any more —
+absence and zero are the same value again, and the loop still terminates on `link`'s read form
+returning nothing rather than on an id.
+
+`link`'s `-1`/`-2` sentinels go the same way (Vortex §5.1): `CellRef` is unsigned, so allocate and
+isolate become verbs. `new(...)`/`break(...)` (§1) were already the spellings this language
+preferred; they stop being sugar over a magic target and become the primary forms, with
+`link(dim, dir, target)` reserved for the literal-target case.
+
+### 7.3 `><` entangles along `d.clone`, and the head is the leftmost operand
+
+§4.6 says payload authority follows argument order — the leftmost operand's value is what the group
+shares. That is a rank with a distinguished head, which is precisely what zigzag's `d.clone` already
+is, and the convergence uses it: `d.entangle` is a `d.clone`-shaped rank, not a shared pointer.
+
+Everything in §4.6 and §4.7 survives, including `entangle_generator`, which is still needed for
+exactly the reason it was introduced — a dimension slot holds one partner per direction, and that is
+as true of a 12-byte `{dim, pos, neg}` triple as it was of a `LinkSlot`.
+
+One thing improves: entangled cells no longer share a mutable box, so a `set()` on the group records
+one operation against the head and **every prior value remains addressable**. §6.3's worked example
+— a user's theme entangled with the system default — now leaves a history of what the default was,
+which under a shared payload it could not.
+
+### 7.4 `set(replacement, offset, length)` is two operations on a persistent cell
+
+§4.2's "Mutation Patching" compiles to a single `set` only in the arena regime. A persistent cell's
+content is a span into an append-only permascroll: splicing inside it is an insert and a delete
+against that cell's own text.
+
+The syntax is unchanged and the semantics are unchanged. What changes is that the cost is visible,
+which is the correct signal — it is the difference between editing a document and editing a scratch
+value.
+
+### 7.5 The one open question: `d.cache` is a leak with good manners
+
+§1's star-pivot caching memoises off the origin along `+d.cache`, and the origin is in the Root Set,
+so §5's sweep can never reach a conclusion about it. A memoisation table that is unreachable by
+design from the collector grows without bound.
+
+It is also, by §7.1's rule, plainly derived state. The likely answer is that `d.cache` hangs off the
+**cursor** rather than the origin, so a compiled-NFA cache dies with the query that filled it and a
+longer-lived cache has to be asked for explicitly. §6.2's example would change shape. This is left
+open rather than decided here, because it is a question about VQL's caching model and not about the
+storage underneath it.

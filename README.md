@@ -603,6 +603,20 @@ $ xudu --version-id 1 xanadoc         # go back to 1
 $ xudu --map xanadoc                  # see all three
 ```
 
+### An operation, once written, is never written to again
+
+Both spools are append-only, and the ops spool means it literally: a `CompactOpNode` is 64 bytes of
+memory-mapped arena that nothing rewrites after it lands. That has to be true rather than merely
+intended, because a sealed segment is mapped read-only -- so an operation that took a write would
+take a SIGSEGV instead.
+
+It very nearly wasn't. Each node used to carry `firstChildIndex` and `nextSiblingIndex` alongside
+its parent, which meant filing a new operation under an existing parent wrote into the parent. Both
+edges are derivable from `parentIndex` -- the one edge that really is a fact about the operation
+rather than about the tree it later turned out to be in -- so they live beside the nodes now, in a
+side array rebuilt from `parentIndex` whenever a segment is adopted. Same eight bytes per operation
+either way, and "an operation node is immutable" stopped being a thing the code hoped for.
+
 ### Deleting keeps the content
 
 Deletion is what OSMIC calls "rearrange to limbo": the version stops pointing at the content, and
@@ -1241,12 +1255,19 @@ zzstructure:
 
 `zigzag` features a high-performance engine for large-scale multidimensional spaces:
 
-- **`CompactZZCell` Layout**: Cells are laid out in a cache-friendly 64-byte aligned POD structure.
-  Static dimensions (`d.1`, `d.2`, `d.3`, `d.clone`, `d.time`) have $O(1)$ direct array slot lookup,
-  while arbitrary dynamic dimensions are stored via an inline overflow link-pair table.
+- **`CompactZZCell` Layout**: A cache-line-aligned POD. Static dimensions (`d.1`, `d.2`, `d.3`,
+  `d.clone`, `d.time`) have $O(1)$ direct array slot lookup, while arbitrary dynamic dimensions are
+  stored via an inline overflow link-pair table. It is around 960 bytes, not the 64 its comments
+  claimed for a while, and a `static_assert` holds that number honest until the layout is redone --
+  most of the size turns out to be spent identifying dimensions by text where four bytes of cell
+  reference would do. See [design/store-slice-convergence.md](design/store-slice-convergence.md).
 - **`UnifiedTransclusionEngine`**: Coordinates live document state from `Store` and stages visible
   cells and link beams directly for the render pipeline at 120 FPS without allocation spikes.
   Validates 2-manifold invariants (ensuring posward/negward link symmetry across all dimensions).
+  Ingesting operations costs the same per operation however many are already ingested, which was
+  worth making true: three separate rescans of already-synced state made it quadratic, and 20,000
+  operations took 775 ms to fold instead of 17. A regression test asserts the shape of the curve
+  rather than a wall-clock number, so it keeps holding on a slower machine.
 - **Merkle Author Verification**: Integrates with the `MerkleLedger` to verify the OpenPGP identity
   of remote slice authors before displaying untrusted zzstructures.
 - **Xanadoc to Zigzag Projection (`zz_xudu_projector`)**: Bidirectionally maps `xudu` document
@@ -1257,7 +1278,11 @@ zzstructure:
   single `link` structural primitive (read when no target is given, write otherwise) plus
   `get`/`set` payload accessors. See
   [design/vortex-hyperstructural-runtime.md](design/vortex-hyperstructural-runtime.md) and
-  [design/vql-query-language.md](design/vql-query-language.md).
+  [design/vql-query-language.md](design/vql-query-language.md). Both now carry a reconciliation
+  section against the store/slice convergence, which replaces the cell they were written against --
+  the interesting result being that two of the apparent conflicts were the two designs describing
+  the same mechanism twice: entanglement is what `d.clone` already does, and promoting a scratch
+  manifold into a durable one is the same pass as compacting its link arena.
 
 ### Integration with gleditor
 
@@ -1863,22 +1888,52 @@ change.
 
 ## Tests
 
+Everything below runs headless, and is meant to. A test that needs a real display is a test that
+cannot run in CI or over SSH, and a window that opens unasked interrupts whoever is at the keyboard.
+`SDL_VIDEODRIVER=offscreen SDL_AUDIODRIVER=dummy LIBGL_ALWAYS_SOFTWARE=1` covers almost everything
+here; `xvfb-run -s "-screen 0 1024x768x24"` covers the rest. `xudu` and `zigzag` also take
+`--headless` directly, which skips window creation rather than redirecting it.
+
 - Build and run tests:
 
-  - `make test` → builds and runs `build/gleditor_test` and `build/xudu_test`, leaving out the
-    suites that need a peer on another network stack. Those skip without one, and a skip in the
-    middle of a run reads as a pass.
-  - `make test/all` → the same two binaries with nothing left out. This is what the pull request
-    checks run.
+  - `make test` → builds and runs `build/gleditor_test`, `build/xudu_test` and `build/zigzag_test`,
+    leaving out the suites that need a peer on another network stack. Those skip without one, and a
+    skip in the middle of a run reads as a pass. It finishes by running the swarm tests for real in
+    a pair of isolated network namespaces (`tools/swarm-netns-test.sh`, rootless via
+    `unshare -Urnm`) — which needs the `veth` kernel module loaded, and reports
+    `Error: Unknown device type.` if it is not. That failure comes *after* all three gtest binaries
+    have already passed.
+  - `make test/all` → the same binaries with nothing left out. This is what the pull request checks
+    run.
   - `make test TEST_FILTER='*'` overrides the exclusion for a one-off, and names a single suite the
     same way: `make test TEST_FILTER='SwarmTest.*'`.
 
-  There are two binaries because there are two things to test. `gleditor_test` covers the library
-  and links the shared library the programs link, so a symbol that failed to be exported fails the
-  test build rather than going unnoticed until something outside this tree tried to link it.
-  `xudu_test` covers the xanalogical engine and links no graphics library at all, which is the
+  There are three binaries because there are three things to test. `gleditor_test` covers the
+  library and links the shared library the programs link, so a symbol that failed to be exported
+  fails the test build rather than going unnoticed until something outside this tree tried to link
+  it. `xudu_test` covers the xanalogical engine and links no graphics library at all, which is the
   boundary being checked rather than merely asserted: if a rule about versions, spans or links ever
-  needed a renderer, that binary would stop linking.
+  needed a renderer, that binary would stop linking. `zigzag_test` covers the slice model, the YAML
+  loader and the transclusion engine.
+
+  A handful of `xudu_test` suites drive the built `xudu` binary as a subprocess rather than calling
+  into it, because what they are checking is the whole program end to end. They report
+  `xudu binary not found` rather than a failed assertion when the app did not link, which is a
+  different problem from a regression.
+
+- Regenerate the checked-in sample stores:
+
+  ```
+  ./tools/create-sample-xanadocs.sh          # core_hypertext, multimedia, beams, 000.scroll
+  ./tools/create-floating-image-sample.sh    # 11_floating_image, which the first one deletes
+  ```
+
+  `tests/samples/xudu/` holds real on-disk stores, written by `xudu` itself and read back by
+  `SampleXanadocsTest`. They are part of the on-disk format's surface area: a change to
+  `CompactOpNode`'s layout does not make them fail to load, it makes them load and mean something
+  else, so they have to be regenerated in the same commit that moves the format. The second script
+  exists because the first one begins by deleting the whole `multimedia` directory, and
+  `11_floating_image` is built by hand with its own scroll rather than the shared `000.scroll`.
 
 - Compare the backends against each other:
 
@@ -1919,15 +1974,24 @@ change.
 - `src/a11y/` the accessibility tree, and the one file that talks to AccessKit
 - `src/` the library: document model, glyph cache, SDL wrappers, render loop
 - `src/render/` the device abstraction and its backends (`gl/`, `vulkan/`)
+- `src/text/` the text stack: `FontManager`, `FontFace`, `TextLayout`
 - `include/` the library's public headers, under `gleditor/`
 - `apps/gleditor/` the plain editor
-- `apps/xudu/` the xanadoc editor; `apps/xudu/core/` is its engine, which needs no graphics device
+- `apps/common/xanadu/` the xanalogical engine, which needs no graphics device — shared by both xudu
+  and zigzag. `apps/xudu/core/` and `apps/zigzag/core/` are forwarding headers into it, so
+  `<xudu/core/store.hpp>` is the spelling and `apps/common/xanadu/store.cpp` is the file
+- `apps/xudu/` the xanadoc editor's own UI: beams, framing, overlays, session
+- `apps/zigzag/` the Zigzag multidimensional visualizer; `apps/zigzag/core/` holds the transclusion
+  engine and the compact cell layout
 - `assets/shaders/` portable GLSL bodies, plus generated SPIR-V under `vulkan/`
 - `tools/` build-time and verification helpers
 - `design/` design notes: investigations and the reasoning behind decisions
 - `tests/lib/` the library's unit tests (GoogleTest/GoogleMock)
 - `tests/xudu/` the xanalogical engine's unit tests
-- `thirdparty/` vendored dependencies (argparse, Choreograph, cosmopolitan, etc.)
+- `tests/zigzag/` the slice model and transclusion engine's unit tests
+- `tests/samples/` material the tests read, including checked-in binary stores under `xudu/`
+- `thirdparty/` vendored dependencies, as git submodules (argparse, Choreograph, merklecpp, SDL,
+  zstd)
 - `assets/` assets like `logo.png`
 - `docs/` Doxygen output directory
 - `Makefile` build orchestration

@@ -1,9 +1,20 @@
 # Zigzag Multidimensional Information Space, 2-Rank Manifolds, and Projection Architecture
 
 An architectural specification and design document for Project Xanadu's Zigzag multidimensional
-information model, 2-rank manifold validation, 64-byte compact cell memory layouts, clone cell
-master headcells, and bidirectional Xanadoc $\longleftrightarrow$ Zigzag projection across
+information model, 2-rank manifold validation, cache-line-aligned compact cell memory layouts, clone
+cell master headcells, and bidirectional Xanadoc $\longleftrightarrow$ Zigzag projection across
 `apps/zigzag` and `apps/xudu`.
+
+> **Where this is going.** [`store-slice-convergence.md`](store-slice-convergence.md) argues that a
+> zigzag cell *is* an operation in the xudu ops spool — its identity that operation's name in
+> hypertime, its content a span the operation carries, its positions a set of structure operations
+> naming it. A slice then stops being a parallel data model and becomes `Manifold`, a second replay
+> product of the same spool that `Version` is the first replay product of, with `CompactZZCell`
+> demoted from the model to a render-side cache and `ZzStructureDocument` demoted to the YAML
+> transfer format. Nothing below is wrong today; it describes the model as built. Read the
+> convergence note before extending it, because several of the structures here are on the way out —
+> `Preflet`, the fixed array of privileged dimensions, and the string-keyed dynamic dimension table
+> among them.
 
 ______________________________________________________________________
 
@@ -216,7 +227,7 @@ ______________________________________________________________________
 
 | Component                  | Source Files                                                                                                                                                                                 | Description                                                                                    |
 | :------------------------- | :------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | :--------------------------------------------------------------------------------------------- |
-| **Compact Cell Layout**    | [`apps/common/xanadu/zigzag/compact_zzcell.hpp`](apps/common/xanadu/zigzag/compact_zzcell.hpp)                                                                                               | 64-byte aligned multidimensional cell with inlined standard dimensions                         |
+| **Compact Cell Layout**    | [`apps/common/xanadu/zigzag/compact_zzcell.hpp`](apps/common/xanadu/zigzag/compact_zzcell.hpp)                                                                                               | Cache-line aligned multidimensional cell with inlined standard dimensions. ~960 bytes, not 64  |
 | **Transclusion Engine**    | [`apps/zigzag/core/unified_transclusion_engine.hpp/.cpp`](apps/zigzag/core/unified_transclusion_engine.hpp)                                                                                  | 2-rank manifold validator, neighborhood extractor, and GPU uploader                            |
 | **Document Projector**     | [`apps/common/xanadu/zigzag/zz_xudu_projector.hpp/.cpp`](apps/common/xanadu/zigzag/zz_xudu_projector.hpp)                                                                                    | Xanadoc $\longleftrightarrow$ Zigzag mapping, clone deduplication, and rasterization           |
 | **System Projector**       | [`apps/common/xanadu/zigzag/zz_system_projector.hpp/.cpp`](apps/common/xanadu/zigzag/zz_system_projector.hpp)                                                                                | 3-page system xanadoc $\longleftrightarrow$ Zigzag configuration slice bidirectional projector |

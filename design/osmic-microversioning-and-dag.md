@@ -44,7 +44,8 @@ ______________________________________________________________________
 
 ## 2. Microversion Nomenclature and Hypertime Branching
 
-In `xudu`, version identity is encapsulated by [`MicroversionId`](apps/xudu/core/microversion.hpp).
+In `xudu`, version identity is encapsulated by
+[`MicroversionId`](apps/common/xanadu/microversion.hpp).
 
 ### Bijective Base-26 Branching
 
@@ -82,14 +83,12 @@ ______________________________________________________________________
 
 To achieve high-throughput graph traversal during live editing and 120 FPS rendering, every node in
 the operation DAG is encoded as a strictly 64-byte POD struct
-([`CompactOpNode`](apps/xudu/core/compact_op.hpp)) aligned to CPU cache lines:
+([`CompactOpNode`](apps/common/xanadu/compact_op.hpp)) aligned to CPU cache lines:
 
 ```cpp
 struct alignas(64) CompactOpNode {
-  // Tree topology & metadata (16 bytes)
+  // Tree topology & metadata (8 bytes)
   std::uint32_t parentIndex{0};      ///< Index of parent node in arena (0 for root)
-  std::uint32_t firstChildIndex{0};  ///< First branch or continuation child
-  std::uint32_t nextSiblingIndex{0}; ///< Sibling branch off the same parent
   OpKind kind{OpKind::Insert};       ///< Operation type enum
   std::uint8_t flags{0};             ///< Reserved bit flags
   std::uint16_t branchOrdinal{0};    ///< Bijective base-26 branch ordinal
@@ -102,13 +101,16 @@ struct alignas(64) CompactOpNode {
   std::uint32_t sourceLength{0};     ///< Transclude source length
   std::uint32_t sourceOpIndex{0};    ///< Transclude source version index
 
-  // Content span & link reference (24 bytes)
+  // Content span, link reference & typed value (32 bytes)
   ScrollId scrollId{localScroll};    ///< Scroll ID (0 = local author spool)
   std::uint32_t linkId{0};           ///< Link ID for OpKind::Link
   std::uint64_t spanStart{0};        ///< Byte start in primedia spool
   std::uint64_t spanLength{0};       ///< Byte length in primedia spool
+  std::uint64_t value{0};            ///< Canonical scalar bits; zero until R6 lands
 };
 static_assert(sizeof(CompactOpNode) == 64);
+static_assert(alignof(CompactOpNode) == 64);
+static_assert(offsetof(CompactOpNode, value) == 56);
 ```
 
 ### Mechanical Sympathy
@@ -116,6 +118,20 @@ static_assert(sizeof(CompactOpNode) == 64);
 - **Zero Cache Line Split**: Single-node reads generate exactly one 64-byte memory fetch.
 - **Pointerless Graph Addressing**: Relationships are expressed as 32-bit array indices into a flat
   virtual memory arena, eliminating 64-bit pointer overhead and heap fragmentation.
+- **Immutable once stored**: only the edge pointing *up* lives in the node. `firstChildIndex` and
+  `nextSiblingIndex` used to sit beside `parentIndex`, which made filing a new operation under an
+  existing parent a write into that parent — and `adoptSegmentNodes()` maps a page-aligned sealed
+  segment `PROT_READ`, so the write was a SIGSEGV waiting for the first segment that happened to
+  land on a page boundary. Both are derivable from `parentIndex`, so they moved to
+  `SegmentedOpsSpool::tree`, a side array index-aligned with the nodes and rebuilt on adopt in
+  ascending index order — which reproduces exactly the sibling order `append()` produced, because a
+  parent always sits at a lower index than its children. Eight bytes per operation either way.
+- **The offset assertion is not redundant**: `alignas(64)` pads a shrunken struct back up to 64 on
+  its own, so `sizeof == 64` cannot notice a field going missing. Pinning `value` to offset 56 can.
+
+The eight bytes the tree edges vacated are `value`, an 8-aligned slot for a cell's canonical scalar
+bits. It is written zero today; see [`store-slice-convergence.md`](store-slice-convergence.md) §5.2
+for what fills it, and R11 there for why the slots were spent rather than reserved.
 
 ______________________________________________________________________
 
@@ -132,14 +148,32 @@ ______________________________________________________________________
 | `OpKind::Link`       | Asserts a butterfly link.                          | Connects Left List and Right List spans.                                                              |
 | `OpKind::PageBreak`  | Inserts a structural page break.                   | Concatext-relative layout marker with no primedia footprint.                                          |
 
+### The sixth hyperop, and what `PageBreak` turns out to be
+
+OSMIC names six. The five above are the five `xudu` implements; the sixth — **MAKE/CHANGE STRUCTURE
+MAP** — has never been implemented anywhere, including in Udanax. It is the operation that says
+where a piece of content *sits* in a structure that is not the document's own reading order: a rank,
+an axis, a dimension.
+
+`OpKind::PageBreak` is that operation, restricted to one dimension. A break says "the text divides
+here" without naming any primedia — it is a fact about arrangement rather than about content, which
+is exactly why it has to be concatext-relative and address-less, and exactly why a transcluded
+passage does not carry the source's breaks with it. Give the same operation a dimension to name and
+a cell to name it about, and it stops being a special case: pagination becomes one rank among many.
+
+That is the argument [`store-slice-convergence.md`](store-slice-convergence.md) makes, and the
+reason it does not retire `PageBreak` afterwards: a break's position must be *rebased* by ordinary
+edits to the text around it, and nothing else in the model needs that, so deleting the special case
+would mean writing a position-rebasing subsystem to replace it.
+
 ______________________________________________________________________
 
 ## 5. Virtual Memory Arena and Segment Management
 
-The operations spool ([`SegmentedOpsSpool`](apps/xudu/core/segmented_ops_spool.hpp)) and primedia
-spool ([`SegmentedPrimediaSpool`](apps/xudu/core/segmented_primedia_spool.hpp)) are managed via a
-multi-tiered virtual address layout
-([`VirtualMemoryArena`](apps/xudu/core/virtual_memory_arena.hpp)):
+The operations spool ([`SegmentedOpsSpool`](apps/common/xanadu/segmented_ops_spool.hpp)) and
+primedia spool ([`SegmentedPrimediaSpool`](apps/common/xanadu/segmented_primedia_spool.hpp)) are
+managed via a multi-tiered virtual address layout
+([`VirtualMemoryArena`](apps/common/xanadu/virtual_memory_arena.hpp)):
 
 ```
 ┌────────────────────────────────────────────────────────────────────────┐
@@ -219,10 +253,10 @@ ______________________________________________________________________
 
 | Component                    | Source Files                                                                                       | Description                                                     |
 | :--------------------------- | :------------------------------------------------------------------------------------------------- | :-------------------------------------------------------------- |
-| **Microversion ID**          | [`apps/xudu/core/microversion.hpp/.cpp`](apps/xudu/core/microversion.hpp)                          | Bijective base-26 branch parser, formatter, and lineage algebra |
-| **Compact Op Node**          | [`apps/xudu/core/compact_op.hpp`](apps/xudu/core/compact_op.hpp)                                   | 64-byte cache-line aligned POD operation struct                 |
-| **Ops Spool**                | [`apps/xudu/core/segmented_ops_spool.hpp/.cpp`](apps/xudu/core/segmented_ops_spool.hpp)            | Virtual memory arena, open-addressing index, and persistence    |
-| **Version Model**            | [`apps/xudu/core/version.hpp/.cpp`](apps/xudu/core/version.hpp)                                    | Edit Decision List (EDL) piece table, splits, and coalescing    |
-| **Store Engine**             | [`apps/xudu/core/store.hpp/.cpp`](apps/xudu/core/store.hpp)                                        | Transactional store, operation replay, and delta forward paths  |
-| **Binary Ops Serialization** | [`apps/xudu/core/binary_ops.hpp/.cpp`](apps/xudu/core/binary_ops.hpp)                              | LEB128 varint binary format for sealed operations               |
+| **Microversion ID**          | [`apps/common/xanadu/microversion.hpp/.cpp`](apps/common/xanadu/microversion.hpp)                  | Bijective base-26 branch parser, formatter, and lineage algebra |
+| **Compact Op Node**          | [`apps/common/xanadu/compact_op.hpp`](apps/common/xanadu/compact_op.hpp)                           | 64-byte cache-line aligned POD operation struct                 |
+| **Ops Spool**                | [`apps/common/xanadu/segmented_ops_spool.hpp/.cpp`](apps/common/xanadu/segmented_ops_spool.hpp)    | Virtual memory arena, open-addressing index, and persistence    |
+| **Version Model**            | [`apps/common/xanadu/version.hpp/.cpp`](apps/common/xanadu/version.hpp)                            | Edit Decision List (EDL) piece table, splits, and coalescing    |
+| **Store Engine**             | [`apps/common/xanadu/store.hpp/.cpp`](apps/common/xanadu/store.hpp)                                | Transactional store, operation replay, and delta forward paths  |
+| **Binary Ops Serialization** | [`apps/common/xanadu/binary_ops.hpp/.cpp`](apps/common/xanadu/binary_ops.hpp)                      | LEB128 varint binary format for sealed operations               |
 | **Unit Tests**               | [`tests/xudu/store.cpp`](tests/xudu/store.cpp), [`tests/xudu/version.cpp`](tests/xudu/version.cpp) | Test suites covering branching, replay, and serialization       |

@@ -14,8 +14,8 @@ read the relevant section there before making non-trivial changes in that area.
 
 ## Setup: submodules
 
-Vendored deps (`thirdparty/argparse`, `thirdparty/Choreograph`, `thirdparty/merklecpp`) are git
-submodules and the tree will not build without them:
+Vendored deps (`thirdparty/argparse`, `thirdparty/Choreograph`, `thirdparty/merklecpp`,
+`thirdparty/SDL`, `thirdparty/zstd`) are git submodules and the tree will not build without them:
 
 ```sh
 git submodule update --init --recursive
@@ -63,6 +63,39 @@ what the toolchain supports.
 
 ## Tests
 
+### Everything runs headless. No exceptions without being asked.
+
+**Any command that could open a window or touch a display, GPU or audio device — `make test`, any
+test binary, `gleditor`, `xudu`, `zigzag`, `tools/compare-backends.sh`, an ad-hoc harness — MUST be
+run headless, unless the user has explicitly asked for visual confirmation.** This is not a
+preference about tidiness: a window stealing focus interrupts whoever is at the keyboard, and a run
+that silently depends on a real display is a run that cannot be reproduced in CI or over SSH.
+
+Use whatever gets there. In rough order of preference:
+
+```sh
+# 1. The environment variables, which are enough for almost everything here.
+SDL_VIDEODRIVER=offscreen SDL_AUDIODRIVER=dummy LIBGL_ALWAYS_SOFTWARE=1 <command>
+
+# 2. A virtual X server, when something insists on a real display connection.
+xvfb-run -s "-screen 0 1024x768x24" <command>
+
+# 3. Both, which is what tools/compare-backends.sh wants.
+xvfb-run -s "-screen 0 1024x768x24" ./tools/compare-backends.sh
+```
+
+`--headless` is also a flag on `xudu` and `zigzag` themselves, and it is what
+`tools/create-sample-xanadocs.sh` uses. Prefer it when driving those programs; it is stronger than
+the environment variables because it skips window creation rather than redirecting it.
+
+"By any means necessary" is meant literally: if none of the above works for some new tool, find a
+way (a dummy driver, a `Xvfb` you start yourself, a `--no-window` flag you add) rather than falling
+back to opening a window. **When visual confirmation genuinely is the point — a screenshot, a
+rendering regression, a layout check — the user will say so.** Then, and only then, run it against a
+real display and look at the result.
+
+### Running them
+
 ```sh
 make -j$(nproc) test        # builds + runs gleditor_test, xudu_test, zigzag_test, and rootless swarm tests
 make test TEST_FILTER='MediaTest.*'   # run/override a specific gtest filter
@@ -71,16 +104,41 @@ make test TEST_FILTER='MediaTest.*'   # run/override a specific gtest filter
 - **Parallelism**: Always run `make -j$(nproc) test` to utilize all available cores.
 - `gleditor_test` links the real shared library (catches export-boundary bugs); `xudu_test` links
   only the xanalogical engine, with no graphics device, on purpose — that's the boundary being
-  tested.
-- `make test` automatically runs the isolated network-namespace swarm tests
-  (`tools/swarm-netns-test.sh`) rootlessly via unprivileged user namespaces (`unshare -Urnm`).
+  tested. `zigzag_test` covers the slice model and the transclusion engine.
+- `make test` finishes by running the isolated network-namespace swarm tests
+  (`tools/swarm-netns-test.sh`) rootlessly via unprivileged user namespaces (`unshare -Urnm`). That
+  step needs the `veth` kernel module loaded; without it the run ends in
+  `Error: Unknown device type.` and a non-zero exit **after all three gtest binaries have passed**.
+  An unprivileged user namespace cannot autoload a module, so `sudo modprobe veth` is the fix and it
+  is the user's to run. Read the three `[  PASSED  ]` lines before concluding anything is broken.
 - `test/all` is aliased directly to `test`.
 - `./tools/compare-backends.sh` renders a sample through every compiled-in backend and diffs the
   output — the real check that a backend still draws correctly, since a backend that draws nothing
   still exits 0.
+- **Some tests shell out to `build/xudu`** (the `E2EBinaryOrchestration` and `AnimationTransclusion`
+  suites). They fail with `xudu binary not found` if the app did not link, which is a different
+  problem from a test regression — check `make -j$(nproc)` succeeded before investigating them.
 
-Tests live in `tests/lib/` (library, GoogleTest/GoogleMock) and `tests/xudu/` (engine). Add new unit
-tests next to the existing files there, matching the GoogleTest style already in use.
+Tests live in `tests/lib/` (library, GoogleTest/GoogleMock), `tests/xudu/` (engine) and
+`tests/zigzag/`. Add new unit tests next to the existing files there, matching the GoogleTest style
+already in use.
+
+### Binary fixtures under `tests/samples/xudu/`
+
+These are real on-disk stores — `ops.nodes`, `primedia.spool`, `scrolls.spool`, `links.spool`,
+`current.yaml` — checked in and loaded by `SampleXanadocsTest`. **A change to `CompactOpNode`'s
+layout invalidates every one of them**, and because `ops.nodes` is a bare run of nodes with no
+header, they do not fail to load: they load and mean something else. Regenerate in the same commit:
+
+```sh
+make -j$(nproc) xudu
+./tools/create-sample-xanadocs.sh          # core_hypertext, multimedia, beams, 000.scroll
+./tools/create-floating-image-sample.sh    # 11_floating_image, which the above deletes
+```
+
+The second script exists because `create-sample-xanadocs.sh` opens by removing the whole
+`multimedia` directory, and `11_floating_image` is built by hand with its own scroll rather than the
+shared `000.scroll`. Run both, or that fixture silently disappears.
 
 ## Code style
 
@@ -138,6 +196,7 @@ formatter never leaves a file the linter still rejects:
   load-bearing but has a known bug with folded (`>`) block scalars that leaks a placeholder into the
   string (google/yamlfmt#84) — this repo has none, on purpose; see the comment in `.yamlfmt` before
   adding one back.
+
 - mdformat's `--wrap 100` matches `.mdl_style.rb`'s `MD013` `line_length`, so the formatter reflows
   every paragraph to fit the same limit the linter enforces — a file `make format` just wrote is a
   file `make lint` already accepts, same as every other language pair in this table. The one failure
@@ -146,6 +205,7 @@ formatter never leaves a file the linter still rejects:
   long token is a code span or an equation can still land over the limit — shorten the surrounding
   prose, or promote a `$$...$$` block equation to a ```` ```math ```` fenced block (still renders on
   GitHub, and fenced code is exempt from `MD013` via `:ignore_code_blocks => true`).
+
 - `design/` narrates a lot of geometry and layout math in `$...$`/`$$...$$` LaTeX (rendered by
   GitHub's own math support). Plain mdformat has no concept of that syntax — it parses `\text{...}`
   as literal backslash-letter text and re-escapes the backslash on write, silently turning `\text`
@@ -155,17 +215,37 @@ formatter never leaves a file the linter still rejects:
   no blank line before/after it will still make mdformat refuse to write the file
   (`Formatted Markdown renders to different HTML than input Markdown`) — give it a blank line on
   both sides, same as a fenced code block would need.
+
+- **The Makefile probes for the `mdformat` *binary*, not for its plugins.** A machine with mdformat
+  installed but without `mdformat-gfm`, `mdformat-dollarmath` and `mdformat-frontmatter` will run
+  `make format` happily and corrupt every `design/` file it touches — tables reflowed into prose,
+  `\times` double-escaped to `\\times` — while `make format-check` reports files as unformatted that
+  CI considers fine. Before running either against Markdown, confirm the plugins are present, or use
+  a throwaway venv that has them:
+
+  ```sh
+  python3 -m venv /tmp/mdenv
+  /tmp/mdenv/bin/pip install --quiet mdformat mdformat-gfm mdformat-dollarmath mdformat-frontmatter
+  /tmp/mdenv/bin/mdformat --wrap 100 design/whatever.md
+  ```
+
+  Verify afterwards that table separator rows survived (`grep -c '^| *-\+'`) and that no `\\text` or
+  `\\times` appeared.
+
 - `.agents/skills/*.md` open with YAML front matter (`name:`/`description:` consumed by the skill
   loader); `mdformat-frontmatter` is what stops mdformat parsing the closing `---` as a second
   thematic break and mangling everything after it into a heading, and `mdl -i` is the matching half
   on the lint side (see the comment above the `mdl` invocation in the Makefile).
+
 - A code sample pasted into `design/` without a fence around it is invisible to both tools: mdl
   can't tell it apart from prose (so `#include <...>` lines get flagged as malformed ATX headers)
   and `--wrap 100` will happily reflow it into unreadable run-on lines. Fence anything that looks
   like C++/GLSL/shell output, even in an informal notes file.
+
 - `tools/check-config-harmony.sh` validates that `.editorconfig`, `.clang-format`, `.yamlfmt`,
   `.yamllint`, and `.mdl_style.rb` remain in strict harmony across all languages so configuration
   rules never drift. It is wired into both `make format-check` and `make lint`.
+
 - nixfmt-rfc-style and nix-linter check disjoint things (whitespace/layout vs. semantic style like
   unused arguments), so there is nothing for them to disagree about.
 
@@ -185,25 +265,46 @@ continuation indents, treats Markdown table cell padding as "wrong" indentation,
 - `include/gleditor/` — the library's public headers
 - `include/gleditor/text/` — text layout and font management public headers
 - `apps/gleditor/` — the plain editor program
-- `apps/xudu/` — the xanadoc editor; `apps/xudu/core/` is its engine:
-  - `user_permascroll.hpp/.cpp`: Sovereign user permascroll stream and registry
-  - `merkle_ledger.hpp/.cpp`: Append-only Merkle ledger for identity consensus
-  - `managed_torrent.hpp/.cpp`: System-managed torrent swarms coordinator
-  - `identity/`: BEP 10 plugins, Hashcash PoW engine, and network controller
+- **`apps/common/xanadu/` — where the xanalogical engine actually lives.** `apps/xudu/core/` and
+  `apps/zigzag/core/` are one-line forwarding headers into it (`#include "common/xanadu/x.hpp"` plus
+  `namespace xudu { using namespace ::xanadu; }`), so `<xudu/core/store.hpp>` and
+  `<zigzag/core/zzcore.hpp>` are the include spellings while `apps/common/xanadu/store.cpp` is the
+  file to edit. Editing a `core/` shim is almost always a mistake:
   - `store.hpp/.cpp`: OSMIC time branches, microversions, and EDL operations
-  - `beams.hpp/.cpp`, `framing.hpp/.cpp`: 3D link ribbons and transclusion prisms
+  - `compact_op.hpp`: the 64-byte `CompactOpNode`. Cache-line aligned, and **immutable once stored**
+    — the child/sibling tree edges live in `SegmentedOpsSpool::tree` beside the nodes, because a
+    sealed segment is mapped `PROT_READ` and writing a parent's child pointer took SIGSEGV. Three
+    `static_assert`s hold the line: size, alignment, and `offsetof(value) == 56` (`alignas(64)`
+    would pad a shrunken struct back to 64 on its own, so the size assertion cannot catch a field
+    going missing)
+  - `segmented_ops_spool.hpp/.cpp`: the memory-mapped ops tree; sealed segments, the id hash, and
+    the `TreeLinks` side array
+  - `user_permascroll.hpp/.cpp`: sovereign user permascroll stream and registry
+  - `merkle_ledger.hpp/.cpp`: append-only Merkle ledger for identity consensus
+  - `managed_torrent.hpp/.cpp`: system-managed torrent swarms coordinator
+  - `publication.hpp/.cpp`: `publish`/`adopt`, `globalise`/`localise`, scroll keys
+  - `identity/`: BEP 10 plugins, Hashcash PoW engine, and network controller
+  - `zigzag/zzcore.{hpp,cpp}`, `zigzag/zzstructure.hpp`: the slice model shared with `apps/zigzag`
+- `apps/xudu/` — the xanadoc editor's own UI: `beams.cpp`, `framing.cpp` (3D link ribbons and
+  transclusion prisms), `session.cpp`, the overlays, `main.cpp`
 - `apps/zigzag/` — the Xanadu Zigzag multidimensional visualizer; `apps/zigzag/core/`:
-  - `zigzag_engine.hpp/.cpp`: Multidimensional slice data model and YAML parser
+  - `unified_transclusion_engine.hpp/.cpp`: 120 FPS render staging and manifold checks. Syncing is
+    linear in the number of ops and there is a regression test asserting it stays that way
+    (`SyncCostPerOperationDoesNotGrowWithSize`) — three separate rescans of already-synced state
+    used to make it quadratic
   - `compact_zzcell.hpp`: cell layout — primedia span, per-dimension links, resolution status.
     Around 960 bytes, not the 64 it claimed for a while; a `static_assert` holds the line until the
-    hot/cold split is done
-  - `unified_transclusion_engine.hpp/.cpp`: 120 FPS render staging and manifold checks
-  - `zz_xudu_projector.hpp/.cpp`: Bidirectional xanadoc-to-zigzag mapping
+    hot/cold split is done. `design/store-slice-convergence.md` R12/R13 account for where the bytes
+    go and remove most of them
+  - `zz_xudu_projector.hpp/.cpp`: bidirectional xanadoc-to-zigzag mapping (in `apps/common/`)
 - `assets/shaders/` — portable GLSL bodies; `vulkan/` holds generated SPIR-V
 - `assets/zigzag/` — sample slice YAML documents
 - `tests/lib/`, `tests/xudu/`, `tests/zigzag/` — unit tests for the library and engines
+- `tests/samples/` — source material for tests; `tests/samples/xudu/` holds checked-in binary stores
+  that must be regenerated whenever the on-disk format moves (see "Tests" above)
 - `tools/` — build-time and verification helpers (`compare-backends.sh`, `benchmark-kjv-load.py`,
-  `layout-latency-probe.cpp`, `shader_assemble.cpp`, `swarm-netns-test.sh`)
+  `layout-latency-probe.cpp`, `shader_assemble.cpp`, `swarm-netns-test.sh`,
+  `create-sample-xanadocs.sh`, `create-floating-image-sample.sh`)
 - `packaging/` — distro packaging (arch, debian, fedora, macos, windows, nix)
 - `design/` — design notes and the reasoning behind non-obvious decisions
 - `thirdparty/` — vendored dependencies (git submodules; see above)
@@ -240,6 +341,39 @@ continuation indents, treats Markdown table cell padding as "wrong" indentation,
   - `zz_xudu_projector` projects xanadocs and hypertime branches into Zigzag cells, mapping
     unchanged spans across revisions to clone cells.
 
+### On-disk formats: bump the version, don't carry a shim
+
+Nothing here is in production and every store can be regenerated from its inputs, so **a format is
+free to change shape: bump the version, write the new shape, and delete the old reader.** Keeping a
+field only so an old file still parses is not caution, it is a permanent tax paid to protect data
+nobody has. What is *not* negotiable is the structural invariants — `sizeof(CompactOpNode) == 64`
+and its cache-line alignment, 64 KiB Merkle piece alignment, append-only-ness. Layout is soft;
+invariants are hard.
+
+The caveat that makes this bite: **`ops.nodes` has no header**, so there is nothing to bump and
+nothing to refuse a stale file with. A store written in the old shape loads and means something
+else. Until `tools/xudu-dump` and the versioned container land, a layout change means regenerating
+every fixture in the same commit (see "Tests").
+
+This ruling has an expiry. It is void the first time someone outside this repository has a document
+they care about; see R11 in `design/store-slice-convergence.md`.
+
+### Where the reasoning lives
+
+`design/` is the record of *why*, and three notes are load-bearing for current work:
+
+- [`store-slice-convergence.md`](design/store-slice-convergence.md) — the active plan: a cell is an
+  operation, `Slice` becomes a replay product of the ops spool like `Version` is. Thirteen rulings
+  with their prices, a numbered migration (**steps 1–4 are done**), and the measurements behind
+  each. Read this before touching `CompactOpNode`, `Manifold`, `CompactZZCell` or the zigzag
+  engine's sync path.
+- [`vortex-hyperstructural-runtime.md`](design/vortex-hyperstructural-runtime.md) and
+  [`vql-query-language.md`](design/vql-query-language.md) — a speculative runtime and query language
+  over the same manifold. Neither is built, but both constrain the cell layout, and each now carries
+  a reconciliation section against the convergence.
+- [`osmic-microversioning-and-dag.md`](design/osmic-microversioning-and-dag.md) — hypertime naming,
+  branches, and what a microversion is.
+
 ## Text Architecture & Shaping Pipeline
 
 - **Zero Cairo / Zero Pango**: The text stack is built directly on **FreeType 2**, **HarfBuzz**,
@@ -269,9 +403,11 @@ continuation indents, treats Markdown table cell padding as "wrong" indentation,
   - `Doc` glyph quads are anchored to `line.top` with height set to the font's logical `lineHeight`.
   - `GlyphCache` cluster textures are sized to `lineHeight` with baseline fixed at
     $Y = \text{ascent}$.
-  - When modifying text shaping or layout, always run `./tools/compare-backends.sh` and visually
-    inspect screenshots with visual tools (`view_file`) to check for flat baselines, correct cluster
-    height, and sharp glyph rendering.
+  - When modifying text shaping or layout, always run `./tools/compare-backends.sh` and inspect the
+    frames it captures — flat baselines, correct cluster height, sharp glyphs. This is the one place
+    the work *is* visual, and it still needs no window: run the script under `xvfb-run` (see
+    "Tests") and read the PNGs it writes. Looking at a captured frame is inspection; opening a live
+    window on the user's desktop to look at the same thing is not.
 
 ## Gotchas worth knowing before editing the Makefile
 

@@ -446,6 +446,21 @@ that ships a public build must amend this section rather than inherit it silentl
 dump tool must land in the same commit as the container change — a binary format with no reader is
 how "we will write the tool later" becomes "we cannot debug the loader".
 
+**And a correction, learnt the hard way in migration step 1.** "Stores written before the bump do
+not open" was optimistic. `ops.nodes` is a bare run of nodes with no header at all, so there is no
+version to bump and nothing to refuse a stale file with. What actually happens is worse than not
+opening: the file **opens and means something else**. Moving the tree edges shifted every field past
+`parentIndex`, and the sample store under `tests/samples/xudu/core_hypertext/xanadoc_a` went on
+loading — its first operation reading as a `Rearrange` of zero bytes, with the 1,075-byte length it
+was really carrying landing in the newly added `value` field. Fifteen tests stopped asserting on
+document text and started asserting on the empty string, and not one of them said why.
+
+Two things follow. First, **`tools/xudu-dump` and the versioned container (migration steps 8 and 10)
+are worth more than their position in the order suggests**, because until a store can say what shape
+it is, R11's "bump the version" has nothing to bump. Second, a format change is not done when the
+code compiles: every checked-in fixture written in the old shape is part of the format's surface
+area. `tools/create-sample-xanadocs.sh` regenerates them, and step 1's commit had to.
+
 ### R12. No privileged dimensions. Links are per-cell runs, keyed by `CellRef`
 
 R2 makes a dimension a cell so that a user can mint one. A fixed inline array of well-known
@@ -586,7 +601,9 @@ case OpKind::Structure: {
 ### 5.2 `CompactOpNode` — still exactly 64 bytes
 
 R10 vacates `firstChildIndex` and `nextSiblingIndex` to a side array; R11 says to spend the eight
-bytes rather than reserve them. They become one 8-aligned `value` slot at offset 56:
+bytes rather than reserve them. They become one 8-aligned `value` slot at offset 56. **The layout
+below has landed** (migration step 1), together with the side array; `value` is written zero until
+R6's scalars give it a meaning, and the `flags` bits below it are still unclaimed until step 11.
 
 ```cpp
 struct alignas(64) CompactOpNode {
@@ -854,8 +871,10 @@ ______________________________________________________________________
 
 ## 8. Defects on the Critical Path
 
-These are present-tense bugs found while grounding the model. Each is worth fixing on its own
-merits, and each is also load-bearing for the convergence.
+These were present-tense bugs found while grounding the model. Each is worth fixing on its own
+merits, and each is also load-bearing for the convergence. **The first four are fixed** (migration
+steps 1–4). The fifth is still open: it belongs with migration step 11, which is the first step that
+touches what `linkId` means.
 
 1. **Latent SIGSEGV on appending into a sealed segment.** `SegmentedOpsSpool::append()` mutates
    `parent->firstChildIndex` and `sibNode->nextSiblingIndex` in already-stored nodes, while
@@ -886,15 +905,52 @@ ______________________________________________________________________
 Each step is one commit. After each, `make -j$(nproc)` builds all three programs and
 `make -j$(nproc) test` passes.
 
-1. **Sealed-segment immutability** (R10). New test: seal a 64-node segment at a page-aligned start
-   offset, then append a child of a node inside it. Currently SIGSEGVs; must pass.
-1. **`publish()` with a page break.** Give `breakMarkerScroll` a reserved `GlobalSpan` scroll name
-   in `globalKeyOf()` and a matching case in `adopt()`, so breaks survive the round trip.
-1. **The three quadratics.** `spanToMasterCell_` is already ordered by `SpanLess`, so the scan
-   becomes a `lower_bound` plus a predecessor check; the tail walk gets a `rankTail_` map; the
-   uncached `rebuild()` gets a bounded LRU `Version` cache keyed by `MicroversionId`. Add the
-   size-scaling regression test that `tests/zigzag/` does not currently have.
-1. **`getEffectiveCellText()` resolves `CellData` by alternative** rather than through `text()`.
+Steps 1–4 have landed. What each actually cost, where it differed from the plan, and what it
+measured is recorded inline below; the rest are unchanged.
+
+1. ~~**Sealed-segment immutability** (R10).~~ **Done.** `firstChildIndex`/`nextSiblingIndex` left
+   `CompactOpNode` for `SegmentedOpsSpool::tree`, and the eight bytes became `value` at offset 56 in
+   the same commit rather than being parked as `reserved0`/`reserved1` and reclaimed later by step 9
+   — one 8-byte hole, one layout change. The new test seals a whole page of nodes and appends
+   underneath; it exits 139 (SIGSEGV) against the previous implementation. It also asserts through
+   `/proc/self/maps` that the range really came back `r--`, without which it would pass vacuously
+   wherever the mapping quietly fell back to a copy — which is close to how this went unnoticed:
+   every pre-existing segment test seals four or five nodes and so never lands on a page boundary.
+   `alignas(64)` rounds a 56-byte struct back up to 64 on its own, so `sizeof == 64` cannot catch a
+   field going missing; an `offsetof(CompactOpNode, value) == 56` assertion holds that line instead.
+1. ~~**`publish()` with a page break.**~~ **Done.** A break travels under the reserved scroll name
+   `breakMarkerKey` (`"break:"`, which cannot collide: `scrollKey()` only ever produces `"btpk:"` or
+   `"file:"`), as a zero-length piece contributing nothing to the manifest's scroll table — there is
+   nothing behind it to fetch, and `scrollFor()` would have handed back a null `Scroll` to
+   dereference. `adopt()` re-records it with `insertBreak()` at the concatext offset it was
+   published at. Transclusion still carries no breaks, so
+   `PageBreakTest.TranscludedPassageExcludesBreaks` holds unchanged.
+1. ~~**The three quadratics.**~~ **Done**, but *not* by the prescribed
+   `lower_bound`-plus-predecessor check, which is **wrong**: it misses an older, longer span hidden
+   behind a nearer neighbour — `{start 0, len 100}` is invisible behind `{start 5, len 1}` when the
+   query is `{start 50, len 10}`. Tracking the longest master span per scroll gives an exact bound
+   on the overlap window instead (nothing starting at or before `start - longest` can reach
+   `start`), so the answer is unchanged rather than approximated. The rank tail is memoised per
+   start cell rather than by rank head, which needs no head bookkeeping: a remembered tail is still
+   on the rank, so walking on from it lands in the same place. The `Version` LRU is keyed by source
+   **op index** rather than `MicroversionId` — a `std::uint32_t`, so no hashing of a variable-length
+   id is needed — bounded at 32 entries because a `Version` holds a piece table for a whole
+   document. Measured, on a store of half inserts and half overlapping transclusions: 8.93 → 2.67 ms
+   at 2,500 ops, 28.64 → 4.11 at 5,000, 203.22 → 8.81 at 10,000, 774.66 → **16.87** at 20,000. Per
+   operation that is 3.57 µs climbing to 38.73, against 1.07 falling to 0.84 — flat, which is the
+   actual claim; the 45.9× at 20k widens with size because the shape changed rather than the
+   constant. The regression test asserts the shape, not a time: per-op cost at 8,000 operations must
+   stay under three times the cost at 2,000. Linear scores about 0.8×, the quadratic version scores
+   4.6×.
+1. ~~**`getEffectiveCellText()` resolves `CellData` by alternative.**~~ **Done.** It returns
+   `std::string` rather than `std::string_view`, because a scalar cell's text does not exist
+   anywhere to point at; no caller pays for it, since all six copied the view into a string
+   immediately. A new `cellDataAsText()` renders a double through `std::to_chars` — R6's
+   canonicalisation choice, so the two agree — a bool as `"true"`/`"false"`, and a blob as nothing.
+   The fallback to the cell's own content now happens only when the `d.clone` rank names a master
+   the space does not hold. A master holding an *empty string* now reads as empty rather than
+   reaching for the clone's text, which was the same bug seen from the other side. This is V2's
+   groundwork: it is what makes `d.clone` able to stand in for `d.entangle`.
 1. **Spool capacity.** Raise `defaultOpsReservation` to 8 GiB of *reserved address space* on 64-bit
    (`VirtualMemoryArena::reserve` reserves without committing), keep 512 MiB elsewhere, and add
    `opCapacityRemaining()` plus a typed `xanadu::SpoolExhausted` thrown before the arena's bare
@@ -1163,17 +1219,150 @@ Source: `probe4.cpp`, same machine and compiler as above.
 
 ______________________________________________________________________
 
-## 13. Documents to Amend
+## 13. Does This Layout Serve Vortex and VQL?
 
-| document                                                                                             | change                                                                            |
-| ---------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------- |
-| [`osmic-microversioning-and-dag.md`](osmic-microversioning-and-dag.md)                               | the sixth hyperop, and `PageBreak` as its degenerate one-dimensional case         |
-| [`zigzag-multidimensional-space-and-projection.md`](zigzag-multidimensional-space-and-projection.md) | cell = op; `Manifold` as the second replay product; `CompactZZCell` as a cache    |
-| [`vortex-hyperstructural-runtime.md`](vortex-hyperstructural-runtime.md)                             | `kNoLink` becomes `noCell == 0` (R5); dimensions as genesis-minted cells; op rate |
-| [`vql-query-language.md`](vql-query-language.md)                                                     | §5's reachability GC scoped to `ArenaManifold` (R8); cursor state is never woven  |
-| [`zzstructure.hpp`](apps/common/xanadu/zigzag/zzstructure.hpp) doc comments                          | `Preflet` deleted (R13); `d.dims` and `d.meta-dims` named                         |
-| [`binary_ops.hpp`](apps/common/xanadu/binary_ops.hpp)'s `CompactBinaryV2` comment                    | R11: it cites `PageBreak` as a change needing no bump; under R11 it needed one    |
-| [`CLAUDE.md`](CLAUDE.md)'s `compact_zzcell.hpp` bullet                                               | the 960-byte figure and the hot/cold split it promises (R12, R13, §12.1)          |
+[Vortex](vortex-hyperstructural-runtime.md) and [VQL](vql-query-language.md) are the only specified
+consumers of a cell layout that this note does not itself design. Neither is built, so neither can
+be broken — but both are written against a `Cell` with a mutable payload, an `unordered_map` of
+links and an `int64_t` id, and this note replaces all three. If the replacement cannot carry them,
+that is worth knowing before the migration reaches step 12 and not after.
+
+The finding is that **it carries them, and two of the mismatches turn out to be places where the two
+designs were describing the same thing twice.** Four need a decision, recorded below as V1–V4; the
+rest resolve in the convergence's favour without argument and are tabulated after.
+
+### V1. Cell 0 cannot be both the origin and the absence of a cell
+
+Vortex §1 is explicit that `0` is the origin/home cell, "an ordinary, addressable target, not a
+sentinel", and reserves `kNoLink = -1` for absence. R5 is equally explicit that `noCell == 0`. Both
+cannot hold.
+
+R5 wins, because its reason is stronger than Vortex's. A `CellRef` **is** an ops-spool index, and
+index 0 is the state-zero slot that `SegmentedOpsSpool` has always reserved — there is no operation
+there to be a cell. Vortex's reason for the opposite convention was only that it wanted a
+one-argument sentinel and `-1` was free in a signed id space.
+
+So: **the origin is `home`, and `home` is not zero.** VQL's `##` already spells the origin as a
+token rather than a number (`AnchorNode ::= "##" | ...`), so nothing in the surface language moves;
+what moves is that `LiteralCellId` may no longer be written as `0`, and Vortex's "a dimension can
+legitimately link straight at Cell 0" becomes "at `home`".
+
+**Price.** `link`'s `target == -1` (allocate) and `-2` (isolate) were also negative sentinels in a
+signed space, and `CellRef` is unsigned. They become a verb rather than a magic value — which the
+ops encoding had already concluded independently, since `StructureVerb` (§5.2) distinguishes
+`MakeCell` from `SetLink` in the flags byte rather than by a sentinel in `to`. The single-primitive
+invariant survives: it says `link` is one primitive with a branch on `target`, not that the branch
+must be encoded as an integer.
+
+### V2. `d.entangle` and `d.clone` are the same mechanism
+
+Vortex gives each `Cell` a `std::shared_ptr<CellValue> entangled_payload` and defines entanglement
+as sharing that pointer, so a `set()` on one member is seen by all. VQL §4.6 builds `><` on top of
+it, and §4.7 builds existing-target fan-out on top of that.
+
+A shared mutable box is exactly what xanalogical addressing exists to avoid. Two cells showing the
+same content should do so because they **address the same span**, not because they hold the same
+pointer — the first is checkable by anyone who can read an address, the second is a fact about one
+process's heap. And R13 deleted `Preflet` for a narrower version of the same offence: a field
+carrying information the topology already held.
+
+Zigzag already has the mechanism. A clone reads its master's content along `d.clone`
+(`findCloneMaster`), and as of migration step 4 it does so for every `CellData` alternative rather
+than only for strings. That is entanglement: mutate the master and every member reads the new value,
+because they never held a value of their own to begin with.
+
+VQL §4.6 has a headcell already and does not know it. "Payload authority follows argument order" and
+"the leftmost operand's value is what the whole group ends up sharing" describe a rank with a
+distinguished head — which is what `d.clone` is. So `d.entangle` is specified as a `d.clone`-shaped
+rank whose head is the leftmost operand of the `EntangleTail` that created it.
+
+**What this buys.** `entangled_payload` leaves `Cell` entirely; `handle_unentangle_cleanup`'s
+copy-back-and-maybe-reshare dance disappears with it. `set()` on any member records one op against
+the head, so the group's history is one chain rather than N, and every prior value stays addressable
+— which a shared `shared_ptr` destroys by construction.
+
+**Price.** Entanglement stops being symmetric. Breaking the head out of its own group is not the
+same operation as breaking a member out, where under a shared pointer it was. `getCloneRank` already
+has the shape needed to say which is which.
+
+### V3. The CSR arena works for Vortex, but its compaction trigger does not
+
+§5.3's runs already relocate to the end of `links` when a cell outgrows its capacity, so arbitrary
+link mutation is supported and not merely appends — VQL's `link`/`break`/`%` all fit. What does not
+fit is the sentence after it: "the arena grows monotonically until a compaction pass at load."
+
+A replay has a bounded number of link edits, because the ops spool is finite and compaction happens
+when it is folded. **A Vortex process has no load, and no bound.** A loop that relinks one cell a
+million times leaves a million dead `DimLink` entries behind with eight live, and nothing ever comes
+along to notice.
+
+The fix is already in the design and merely unattached: VQL §5's reachability GC walks every
+reachable cell on its sweep. That walk is a compaction pass with the marking already done — rebuild
+`links` tight from the surviving `linkOffset`/`linkCount` runs in the same traversal.
+`ArenaManifold` therefore keeps CSR rather than needing the flat `(cell, dim)` table §12.5 measured,
+which is the better outcome by both of §12.5's axes: 4.96 ns/hop against 21.02, and 108 B/cell
+against 467.
+
+This also gives `promote()` (R8) a definition it did not have: **promoting an `ArenaManifold` into
+`Manifold` is a CSR compaction that happens to write ops as it goes.** The two passes are the same
+pass with a different sink.
+
+### V4. `set(cell, value, offset, length)` is not a primitive on a persistent cell
+
+Vortex §2's `set` patches a string in place, and VQL §4.2 exposes that as "Mutation Patching". A
+persistent cell's content is a `PrimediaSpan` into an append-only permascroll; there is nothing to
+patch.
+
+In the ephemeral regime this is unchanged — an `ArenaManifold` cell owns its bytes and can rewrite
+them. In the persistent regime, `set(cell, v)` appends `v` to the permascroll and records a
+`SetValue` op naming the new span, chained through `sourceOpIndex` (R7). The old value remains
+addressable, which is the entire point.
+
+The offset/length form is the one that does not survive as a primitive. Splicing `length` bytes at
+`offset` inside a cell's own concatext is an `Insert` and a `Delete` against that cell — two
+operations over the cell's text, not one operation on a buffer. VQL can keep the surface syntax;
+what it cannot keep is the claim that it compiles to a single `set`.
+
+**Price.** A patch of a persistent cell costs more than a patch of an arena cell, and visibly so.
+That is the correct price signal: it is the difference between editing a document and editing a
+scratch value, and a language that hides it would be lying about which one you are doing.
+
+### The rest, which need no decision
+
+| Vortex/VQL as written                                                      | under this layout                                                                                                                                                                                                                                                             |
+| -------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `cell_id = int64_t`                                                        | `CellRef` is `std::uint32_t` with bit 31 reserved for ephemeral (R12), so $2^{31}$ persistent cells — 137 GB of ops spool at 64 bytes each. Not a limit anything reaches first.                                                                                               |
+| `constexpr cell_id d_grab = 1; d_entangle = 999; d_cursors = 1001;`        | A dimension is a cell (R2), so its id is minted, not chosen. The genesis sequence mints the system dimensions off `home` in a fixed order, so they are deterministic without being magic numbers.                                                                             |
+| `std::unordered_map<cell_id, LinkSlot> links` per cell                     | one CSR run; §12.5 measured the per-cell-hash-table form at 467 B/cell against 108, and the map cannot answer "which dimensions does this cell link on" without a second index.                                                                                               |
+| Eager eviction when a cell's total live links reach zero                   | `CellSlot::linkCount` **is** that sum, maintained. R12's `d.meta-dims` hands Vortex's GC its predicate for free rather than needing the $\sum_{\text{dim}}$ scan §1 writes out.                                                                                               |
+| Root Set = "Origin Cell (0), `d.cursors`, global system dimension anchors" | exactly `home`, the `d.cursors` rank, and the `d.dims` rank off `home` (R12). The three-part Root Set was already this shape; R12 just names the third part.                                                                                                                  |
+| `CellValue = std::variant<std::string, double, bool>`                      | `valueKind` + `valueBits` + `span` (R6). Zigzag's fourth alternative, an inline `std::vector<std::uint8_t>`, does not come along: a blob is primedia and a span addresses it, which is why step 17 deletes `ephemeralText` and why `cellDataAsText` answers empty for a blob. |
+| "Zero-Allocation Lazy Rank-Streaming"                                      | survives literally: a rank walk is `linkOffset`-relative indexing into `links`, 4.96 ns/hop (§12.5), no allocation on the path.                                                                                                                                               |
+| `entangle_generator` allocating fan-out partners (VQL §4.7)                | unaffected. `DimLink` still holds exactly one `pos` and one `neg` per (cell, dimension), which is the constraint the generator exists to work around. It keeps working for the same reason it was needed.                                                                     |
+| `linkCount` is `std::uint16_t`                                             | caps one cell at 65,535 dimensions where Vortex's map had no cap. Recorded rather than defended: nothing in either specification wants a cell on 65,536 dimensions, but the limit is real and a `static_assert` will not catch it.                                            |
+
+### What this does not settle
+
+`d.cache` (VQL §1's star-pivot memoisation) hangs off the origin along `+d.cache` — and the origin
+is in the Root Set, so nothing ever collects it. A memoisation table that is unreachable-by-design
+from the GC is a leak with good manners. It is also, under R8, plainly derived state that should
+never have been persistent. The likely answer is that `d.cache` hangs off the *cursor* rather than
+the origin, so it dies with the query that filled it, but that is a change to VQL's caching model
+rather than to this layout, and it is left to whoever writes that.
+
+______________________________________________________________________
+
+## 14. Documents to Amend
+
+| document                                                                                             | change                                                                         |
+| ---------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------ |
+| [`osmic-microversioning-and-dag.md`](osmic-microversioning-and-dag.md)                               | the sixth hyperop, and `PageBreak` as its degenerate one-dimensional case      |
+| [`zigzag-multidimensional-space-and-projection.md`](zigzag-multidimensional-space-and-projection.md) | cell = op; `Manifold` as the second replay product; `CompactZZCell` as a cache |
+| [`vortex-hyperstructural-runtime.md`](vortex-hyperstructural-runtime.md)                             | **done** — §5 records V1–V4 and the table under them                           |
+| [`vql-query-language.md`](vql-query-language.md)                                                     | **done** — §7 records the same, from the language side                         |
+| [`zzstructure.hpp`](apps/common/xanadu/zigzag/zzstructure.hpp) doc comments                          | `Preflet` deleted (R13); `d.dims` and `d.meta-dims` named                      |
+| [`binary_ops.hpp`](apps/common/xanadu/binary_ops.hpp)'s `CompactBinaryV2` comment                    | R11: it cites `PageBreak` as a change needing no bump; under R11 it needed one |
+| [`CLAUDE.md`](CLAUDE.md)'s `compact_zzcell.hpp` bullet                                               | the 960-byte figure and the hot/cold split it promises (R12, R13, §12.1)       |
 
 An amendment note for whoever writes those: **R11 carries an expiry.** Every "bump the version and
 delete the old reader" instruction above is conditional on nothing outside this repository holding a

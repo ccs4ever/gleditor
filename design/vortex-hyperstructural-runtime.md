@@ -19,6 +19,13 @@ way at every call site, and there is no reason for the two documents to disagree
 primitive they share. It also replaces every ASCII-art diagram with Mermaid, matching the rest of
 `design/`.
 
+> **§2's reference implementation is now out of date on purpose.** It is written against
+> `apps/zigzag`'s `Cell` as it stood when this document was drafted.
+> [`store-slice-convergence.md`](store-slice-convergence.md) replaces that cell's id type, its link
+> storage, its payload and its entanglement mechanism. **§5 below records what changes and what
+> survives**; read it before implementing anything from §2, which is kept as-is because it is still
+> the clearest statement of the *semantics* even where it no longer describes the *encoding*.
+
 ______________________________________________________________________
 
 ## 1. Architectural Foundation & Design Invariants
@@ -427,3 +434,91 @@ graph TD
 - **Complex Data Containment**: The cell anchored along `+d.values` is not restricted to scalars; it
   may be the entry root of an arbitrarily deep multidimensional zzstructure (such as a tree, cyclic
   graph, or compiler AST).
+
+______________________________________________________________________
+
+## 5. Reconciliation with the Unified Store/Slice
+
+§2's `Cell` was written against `apps/zigzag`'s `Cell` as it stood: an `int64_t` id, a
+`std::unordered_map` of links, a `std::variant` payload and a `std::shared_ptr` for entanglement.
+[`store-slice-convergence.md`](store-slice-convergence.md) replaces all four. That note's §13 works
+through what survives; this section records the outcome for whoever implements Vortex, because the
+reference engine above is now describing a cell that will not exist.
+
+**The model survives; the encoding of it does not.** Four changes are load-bearing.
+
+### 5.1 Cell 0 is not the origin, and `kNoLink` is not needed
+
+`noCell == 0` (convergence R5). A `CellRef` **is** an index into the ops spool, and index 0 is the
+state-zero slot — there is no operation there to be a cell, so zero cannot name one. The origin is a
+genesis cell called `home`, at a real address; VQL's `##` resolves to it. The comment above
+`kNoLink` in §2 — "0 is Cell 0's own address" — is the thing that stops being true, and with it the
+whole reason `kNoLink` existed. Absence is `0`.
+
+`target == -1` and `target == -2` also go. `CellRef` is unsigned, and the ops encoding had already
+reached the same conclusion from the other direction: `StructureVerb` distinguishes `MakeCell` from
+`SetLink` in a flags byte rather than by a sentinel in the target field. `link` stays one primitive
+with a branch on what it was asked to do; the branch is a verb rather than a magic integer. The
+single-primitive invariant is about there being one primitive, not about how its argument is
+spelled.
+
+### 5.2 `entangled_payload` is deleted; `d.entangle` is `d.clone`
+
+A `std::shared_ptr<CellValue>` shared between cells is a fact about one process's heap. Two cells
+showing the same content should do so because they address the same span — a claim anyone holding
+the address can check.
+
+Zigzag already has this: a clone reads its master's content along `d.clone`, and since the
+convergence's migration step 4 it does so for every payload alternative rather than only for
+strings. `d.entangle` is therefore specified as a `d.clone`-shaped rank, and VQL §4.6's "payload
+authority follows argument order" is what names its head — the leftmost operand.
+
+`handle_unentangle_cleanup`'s copy-back-and-maybe-reshare goes with the pointer. A `set()` on any
+member records one operation against the head, so the group has one history rather than N, and every
+prior value stays addressable — which a shared payload destroys by construction. The cost is that
+entanglement stops being symmetric: breaking the head out of a group is not the same operation as
+breaking a member out.
+
+### 5.3 `set()`'s offset/length form is not a primitive on a persistent cell
+
+§2's `set` patches a `std::string` in place. A persistent cell's content is a `PrimediaSpan` into an
+append-only permascroll; there is nothing to patch. `set(cell, v)` appends `v` and records an
+operation naming the new span, so the old value stays addressable.
+
+The offset/length form splices inside a cell's own text, which is an insert and a delete against
+that cell — two operations, not one call on a buffer. An `ArenaManifold` cell (convergence R8) owns
+its bytes and keeps the in-place behaviour §2 describes; a persistent cell does not.
+
+### 5.4 The links map becomes a compacting CSR run
+
+`std::unordered_map<cell_id, LinkSlot>` per cell was measured at 467 bytes per cell against 108 for
+a compressed-sparse-row run of `{dim, pos, neg}` triples, and it cannot answer "which dimensions
+does this cell link on" at all without a second index — where the run answers it by being read
+sideways.
+
+CSR supports arbitrary link mutation, not merely appends: a run is rewritten in place while it has
+spare capacity and relocated to the end of the arena when it outgrows one. What it does not support
+unaided is a process that never ends. A replay has a bounded number of link edits; a Vortex program
+has none, so a loop that relinks one cell a million times leaves a million dead entries behind.
+
+**The compaction pass is already specified — it is the GC.** VQL §5's reachability sweep walks every
+live cell; rebuilding the arena tight from the surviving runs in that same traversal costs nothing
+extra, because the marking is the walk. This also gives `promote()` (convergence R8) its definition:
+promoting an `ArenaManifold` into a `Manifold` is that same compaction, writing operations as it
+goes.
+
+### 5.5 What this buys the runtime, unasked
+
+Two of §1's own requirements stop needing their own machinery:
+
+- **Eager eviction** asks for $\sum_{\text{dim}}$ over a cell's link slots. A CSR cell carries
+  `linkCount`, which *is* that sum, maintained. The predicate is a field read.
+- **The Root Set** — "Origin Cell (0), the active cursor scheduler rank, and global system dimension
+  anchors" — is exactly `home`, the `d.cursors` rank, and the `d.dims` rank hanging off `home`. The
+  third part had no representation before; convergence R12 gives it one, because a dimension is a
+  cell and the dimensions are a rank like any other.
+
+And one thing gets harder: `constexpr cell_id d_grab = 1` and its neighbours cannot survive, because
+a dimension is a minted cell rather than a chosen number. The genesis sequence mints the system
+dimensions off `home` in a fixed order, so their addresses are deterministic without being magic
+constants, and code reaches them through named accessors.
