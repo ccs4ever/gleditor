@@ -893,11 +893,14 @@ Measured (§12), 10,000 cells $\times$ 5 dimensions:
 | ops (10k `MakeCell` + 50k `SetLink`)  | 3.84 MB  | 1           | 2.28                |
 
 The ops form is 2.17$\times$ lighter than the map *while carrying six times as many objects*, with
-zero heap allocations per cell. But the decisive number is the 122$\times$ rank-hop gap:
-`zigzag::Cell` embeds a per-cell `unordered_map<DimID, LinkPairs>`, so a 10,000-cell slice is 10,000
-separate tiny hash tables and every hop pays a cold bucket array behind a cold node behind a cold
-`Cell`. Warm decomposition puts only about 31 ns of that 279 ns in actual lookup work; the rest is
-cache behaviour that neither dense form pays at all.
+zero heap allocations per cell. That last clause was true of the ops arena and false of the spool
+that indexes it: `SegmentedOpsSpool::indexLookup` holds one `MicroversionId` per operation, and
+until migration step 6 every one of those was a `std::vector` with a heap block behind it. The row
+is now true as written. But the decisive number is the 122$\times$ rank-hop gap: `zigzag::Cell`
+embeds a per-cell `unordered_map<DimID, LinkPairs>`, so a 10,000-cell slice is 10,000 separate tiny
+hash tables and every hop pays a cold bucket array behind a cold node behind a cold `Cell`. Warm
+decomposition puts only about 31 ns of that 279 ns in actual lookup work; the rest is cache
+behaviour that neither dense form pays at all.
 
 **The hurdle is therefore an argument for the convergence rather than against it.** Two honest
 caveats, and neither rescues the map.
@@ -990,7 +993,7 @@ ______________________________________________________________________
 Each step is one commit. After each, `make -j$(nproc)` builds all three programs and
 `make -j$(nproc) test` passes.
 
-Steps 1–5 have landed. What each actually cost, where it differed from the plan, and what it
+Steps 1–6 have landed. What each actually cost, where it differed from the plan, and what it
 measured is recorded inline below; the rest are unchanged.
 
 1. ~~**Sealed-segment immutability** (R10).~~ **Done.** `firstChildIndex`/`nextSiblingIndex` left
@@ -1058,9 +1061,25 @@ measured is recorded inline below; the rest are unchanged.
    `std::bad_alloc` standing: it has the same shape and wants the same treatment, but 512 MB of
    primedia is a different question from 134 million operations — bytes a person typed rather than
    edits they made — and answering it here would have been scope this step did not measure.
-1. **Small-buffer `MicroversionId`** — inline storage for two segments or fewer. Removes 24 bytes
-   and one malloc per op. Purely internal; every existing test must pass unmodified. This is a
-   prerequisite for §6.2's size argument being true rather than asserted.
+1. ~~**Small-buffer `MicroversionId`**~~ **Done.** The first two segments live inside the object and
+   a longer name spills to an exactly-sized heap block. Two is where the boundary belongs because of
+   what a name *means*: a state on a chain is one segment, a branch off it is two, and only a branch
+   off a branch reaches for the heap. Measured over 10,000 names, counting `malloc_usable_size` from
+   an instrumented `operator new`: a one-segment chain cost 20,000 allocations and 480,000 heap
+   bytes and now costs **none**, and two-segment names likewise. Three-segment names still allocate,
+   but fall from 20,000 allocations and 640,000 bytes to 10,000 and 240,000 — a spilled name is
+   allocated once at the length it ends up rather than copied and then grown, which is what lets it
+   carry no capacity field and stay 24 bytes. `sizeof` is unchanged: the inline buffer is 16 bytes
+   and the count 4, where the `std::vector` was 24 on its own, so `indexLookup` costs the same 24
+   bytes per operation it always did and simply stops pointing anywhere. The prices, both paid in
+   the same commit as the tests that cover them. `segments()` returns `std::span<const Segment>`
+   rather than `const std::vector<Segment> &` — four call sites, every one of which only iterated,
+   indexed, or took `.back()`. And the union means the compiler will no longer write the destructor,
+   copy or move, nor `operator==`, so all four are hand-written and the new tests aim straight at
+   them: every length either side of the boundary copied, moved, assigned across the spill in both
+   directions, and self-assigned by copy and by move, run under ASAN and UBSAN with leak detection
+   as well as in the ordinary suite. Every pre-existing test passed unmodified, which is what the
+   step asked for.
 1. **`GlobalOpRef` plus `Store::opRefOf`/`localiseOpRef`** (R4), mirroring
    `GlobalSpan`/`globalise`/`localise` and reusing `writeMicroversionId`. Nothing new is stored.
 1. **`OpsSegmentHeader`** (R14). The 12-byte signature, the fields after it, and a 64 KiB header on

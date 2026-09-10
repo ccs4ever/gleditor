@@ -110,7 +110,7 @@ bool readMicroversionId(std::istream &in, MicroversionId &id) {
     segs.push_back(
         MicroversionId::Segment{branch, static_cast<std::uint32_t>(num)});
   }
-  id = MicroversionId(std::move(segs));
+  id = MicroversionId(segs);
   return true;
 }
 
@@ -145,7 +145,7 @@ bool readMicroversionIdV1(std::istream &in, MicroversionId &id) {
     segs.push_back(
         MicroversionId::Segment{branch, static_cast<std::uint32_t>(num)});
   }
-  id = MicroversionId(std::move(segs));
+  id = MicroversionId(segs);
   return true;
 }
 

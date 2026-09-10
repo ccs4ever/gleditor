@@ -32,7 +32,9 @@
 #ifndef XUDU_MICROVERSION_H
 #define XUDU_MICROVERSION_H
 
+#include <cstddef>
 #include <cstdint>
+#include <span>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -47,6 +49,15 @@ namespace xanadu {
  * that stepping along the sequence is arithmetic rather than string editing.
  * The empty id is state zero, the null document, which every history starts
  * from and which no edit produced.
+ *
+ * The first two segments live inside the object and a name that needs more
+ * spills to the heap. That is not a micro-optimisation: SegmentedOpsSpool
+ * keeps one of these per operation in indexLookup, so a std::vector here was
+ * an allocation and a pointer chase for every operation a document has ever
+ * had -- for a name that is almost always the eight bytes "2" or "2a4" fit
+ * in. Two is where the boundary belongs because of what a name means: a state
+ * on a chain is one segment, a branch off it is two, and only a branch off a
+ * branch reaches for the heap.
  */
 class MicroversionId {
 public:
@@ -67,9 +78,17 @@ public:
   /// The first segment's absent branch, which no letter run ever names.
   static constexpr std::uint32_t noBranch = 0;
 
+  /// Segments a name holds without touching the heap.
+  static constexpr std::size_t inlineSegments = 2;
+
   MicroversionId() = default;
-  explicit MicroversionId(std::vector<Segment> aSegments)
-      : parts(std::move(aSegments)) {}
+  explicit MicroversionId(std::span<const Segment> aSegments);
+
+  MicroversionId(const MicroversionId &other);
+  MicroversionId(MicroversionId &&other) noexcept;
+  MicroversionId &operator=(const MicroversionId &other);
+  MicroversionId &operator=(MicroversionId &&other) noexcept;
+  ~MicroversionId();
 
   /**
    * @brief Read a name as it is written.
@@ -86,9 +105,14 @@ public:
   [[nodiscard]] std::string str() const;
 
   /// Whether this is state zero, the empty document no edit produced.
-  [[nodiscard]] bool isZero() const { return parts.empty(); }
+  [[nodiscard]] bool isZero() const { return 0 == count; }
 
-  [[nodiscard]] const std::vector<Segment> &segments() const { return parts; }
+  /// The segments, wherever they are being held. A view rather than a
+  /// container: which of the two storages is in use is this class's business
+  /// and nobody else's.
+  [[nodiscard]] std::span<const Segment> segments() const noexcept {
+    return {data(), count};
+  }
 
   /**
    * @brief The state this one was reached from.
@@ -130,14 +154,46 @@ public:
   /// Whether @p other is reached by continuing on from this state.
   [[nodiscard]] bool isAncestorOf(const MicroversionId &other) const;
 
-  bool operator==(const MicroversionId &) const = default;
+  [[nodiscard]] bool operator==(const MicroversionId &other) const noexcept;
   /// Ordering by the sequence names are replayed in, so that a container of
   /// these iterates in an order a person would recognise.
   [[nodiscard]] bool operator<(const MicroversionId &other) const;
 
 private:
-  std::vector<Segment> parts;
+  /// Where the segments are, which is the inline buffer until there are more
+  /// of them than it holds. `count` is the only thing that says which, so
+  /// nothing has to be kept consistent with anything else.
+  [[nodiscard]] Segment *data() noexcept {
+    return count > inlineSegments ? heapParts : inlineParts;
+  }
+  [[nodiscard]] const Segment *data() const noexcept {
+    return count > inlineSegments ? heapParts : inlineParts;
+  }
+
+  /// Point at storage for @p n segments, leaving their values unwritten. The
+  /// id must own nothing when this is called.
+  void takeStorageFor(std::size_t n);
+
+  /// Give back the heap block, if this name was long enough to have one.
+  void release() noexcept;
+
+  /// A spilled name's block is exactly as long as the name, so there is no
+  /// capacity to record: every operation that changes a name's length builds
+  /// a new one at the length it ends up. Names are made by copy-and-step --
+  /// parent(), next(), branch() -- rather than grown in place, so there is no
+  /// repeated append for a capacity to have amortised.
+  union {
+    Segment inlineParts[inlineSegments]{};
+    Segment *heapParts;
+  };
+  std::uint32_t count{0};
 };
+
+/// Three words. The inline buffer is two of them and it replaced a
+/// std::vector that was three, so a name got smaller and stopped allocating
+/// at the same time. SegmentedOpsSpool::indexLookup holds one per operation,
+/// which is where any growth here would be paid.
+static_assert(sizeof(MicroversionId) <= 3 * sizeof(std::uint64_t));
 
 } // namespace xanadu
 

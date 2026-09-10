@@ -4,6 +4,7 @@
 #include <cctype>
 #include <cstdint>
 #include <limits>
+#include <ranges>
 #include <stdexcept>
 #include <string>
 #include <string_view>
@@ -27,6 +28,70 @@ std::uint32_t branchOrdinalFromLetters(const std::string_view letters) {
 }
 
 } // namespace
+
+void MicroversionId::takeStorageFor(const std::size_t n) {
+  if (n > inlineSegments) {
+    heapParts = new Segment[n];
+  }
+  count = static_cast<std::uint32_t>(n);
+}
+
+void MicroversionId::release() noexcept {
+  if (count > inlineSegments) {
+    delete[] heapParts;
+  }
+  count = 0;
+}
+
+MicroversionId::MicroversionId(const std::span<const Segment> aSegments) {
+  takeStorageFor(aSegments.size());
+  std::copy(aSegments.begin(), aSegments.end(), data());
+}
+
+MicroversionId::MicroversionId(const MicroversionId &other)
+    : MicroversionId(other.segments()) {}
+
+MicroversionId::MicroversionId(MicroversionId &&other) noexcept {
+  if (other.count > inlineSegments) {
+    // The block moves as it stands. Its length is the name's length, so
+    // taking the pointer takes the capacity with it.
+    heapParts = other.heapParts;
+  } else {
+    std::copy_n(other.inlineParts, other.count, inlineParts);
+  }
+  count       = other.count;
+  other.count = 0;
+}
+
+MicroversionId &MicroversionId::operator=(const MicroversionId &other) {
+  if (this != &other) {
+    const auto theirs = other.segments();
+    release();
+    takeStorageFor(theirs.size());
+    std::copy(theirs.begin(), theirs.end(), data());
+  }
+  return *this;
+}
+
+MicroversionId &MicroversionId::operator=(MicroversionId &&other) noexcept {
+  if (this != &other) {
+    release();
+    if (other.count > inlineSegments) {
+      heapParts = other.heapParts;
+    } else {
+      std::copy_n(other.inlineParts, other.count, inlineParts);
+    }
+    count       = other.count;
+    other.count = 0;
+  }
+  return *this;
+}
+
+MicroversionId::~MicroversionId() { release(); }
+
+bool MicroversionId::operator==(const MicroversionId &other) const noexcept {
+  return std::ranges::equal(segments(), other.segments());
+}
 
 std::string MicroversionId::branchLetters(std::uint32_t ordinal) {
   std::string letters;
@@ -102,15 +167,15 @@ MicroversionId MicroversionId::parse(const std::string_view text) {
     parsed.push_back(Segment{branch, static_cast<std::uint32_t>(number)});
   }
 
-  return MicroversionId{std::move(parsed)};
+  return MicroversionId{parsed};
 }
 
 std::string MicroversionId::str() const {
-  if (parts.empty()) {
+  if (isZero()) {
     return "0";
   }
   std::string out;
-  for (const auto &segment : parts) {
+  for (const auto &segment : segments()) {
     if (noBranch != segment.branch) {
       out += branchLetters(segment.branch);
     }
@@ -120,42 +185,49 @@ std::string MicroversionId::str() const {
 }
 
 MicroversionId MicroversionId::parent() const {
-  if (parts.empty()) {
+  const auto mine = segments();
+  if (mine.empty()) {
     // Walking backwards from the root terminates here rather than running off
     // the end, so a caller can loop until isZero() without a separate guard.
     return {};
   }
-  auto shorter = parts;
-  if (1 == shorter.back().number) {
+  if (1 == mine.back().number) {
     // The first state of a branch hangs off whatever the branch came from, so
     // the whole segment goes rather than its number going to zero.
-    shorter.pop_back();
-  } else {
-    shorter.back().number--;
+    return MicroversionId{mine.first(mine.size() - 1)};
   }
-  return MicroversionId{std::move(shorter)};
+  MicroversionId shorter{mine};
+  shorter.data()[shorter.count - 1].number--;
+  return shorter;
 }
 
 MicroversionId MicroversionId::next() const {
-  if (parts.empty()) {
-    return MicroversionId{{Segment{noBranch, 1}}};
+  const auto mine = segments();
+  if (mine.empty()) {
+    const Segment first{noBranch, 1};
+    return MicroversionId{std::span{&first, 1}};
   }
-  auto further = parts;
-  further.back().number++;
-  return MicroversionId{std::move(further)};
+  MicroversionId further{mine};
+  further.data()[further.count - 1].number++;
+  return further;
 }
 
 MicroversionId MicroversionId::branch(const std::uint32_t ordinal) const {
-  auto branched = parts;
-  branched.push_back(Segment{ordinal, 1});
-  return MicroversionId{std::move(branched)};
+  const auto mine = segments();
+  MicroversionId branched;
+  // Built at its final length rather than grown into: a name is short, and a
+  // spilled one holds exactly its own segments and no spare capacity.
+  branched.takeStorageFor(mine.size() + 1);
+  std::copy(mine.begin(), mine.end(), branched.data());
+  branched.data()[mine.size()] = Segment{ordinal, 1};
+  return branched;
 }
 
 std::vector<MicroversionId> MicroversionId::path() const {
   std::vector<MicroversionId> steps;
   std::vector<Segment> prefix;
 
-  for (const auto &segment : parts) {
+  for (const auto &segment : segments()) {
     // Every state this segment passes through, from its first to the one the
     // name stops at. A branch restarts the count at one, which is exactly what
     // makes the name enough to replay from.
@@ -169,20 +241,22 @@ std::vector<MicroversionId> MicroversionId::path() const {
 }
 
 bool MicroversionId::isAncestorOf(const MicroversionId &other) const {
-  if (parts.size() > other.parts.size()) {
+  const auto ours   = segments();
+  const auto theirs = other.segments();
+  if (ours.size() > theirs.size()) {
     return false;
   }
-  for (std::size_t i = 0; i + 1 < parts.size(); i++) {
-    if (parts[i] != other.parts[i]) {
+  for (std::size_t i = 0; i + 1 < ours.size(); i++) {
+    if (ours[i] != theirs[i]) {
       return false;
     }
   }
-  if (parts.empty()) {
+  if (ours.empty()) {
     // State zero precedes everything except itself.
-    return !other.parts.empty();
+    return !theirs.empty();
   }
-  const auto &mine  = parts.back();
-  const auto &their = other.parts[parts.size() - 1];
+  const auto &mine  = ours.back();
+  const auto &their = theirs[ours.size() - 1];
   if (mine.branch != their.branch) {
     return false;
   }
@@ -190,25 +264,27 @@ bool MicroversionId::isAncestorOf(const MicroversionId &other) const {
   // it -- which is the case where the names are equal at this segment and
   // `other` carries more.
   return their.number > mine.number ||
-         (their.number == mine.number && other.parts.size() > parts.size());
+         (their.number == mine.number && theirs.size() > ours.size());
 }
 
 bool MicroversionId::operator<(const MicroversionId &other) const {
-  const auto common = std::min(parts.size(), other.parts.size());
+  const auto parts  = segments();
+  const auto theirs = other.segments();
+  const auto common = std::min(parts.size(), theirs.size());
   for (std::size_t i = 0; i < common; i++) {
     // Correct because branch is the ordinal and not the letters: comparing
     // "aa" < "z" as strings gets this backwards (aa is the 27th branch, z
     // the 26th), and getting it right for letters means comparing length
     // first and lexicographically second. Plain integer comparison of the
     // ordinal is that closed form, for free.
-    if (parts[i].branch != other.parts[i].branch) {
-      return parts[i].branch < other.parts[i].branch;
+    if (parts[i].branch != theirs[i].branch) {
+      return parts[i].branch < theirs[i].branch;
     }
-    if (parts[i].number != other.parts[i].number) {
-      return parts[i].number < other.parts[i].number;
+    if (parts[i].number != theirs[i].number) {
+      return parts[i].number < theirs[i].number;
     }
   }
-  return parts.size() < other.parts.size();
+  return parts.size() < theirs.size();
 }
 
 } // namespace xanadu
