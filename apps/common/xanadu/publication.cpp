@@ -932,6 +932,27 @@ localise(Store &store, const GlobalSpan &span,
   return PrimediaSpan{store.addScroll(found->second), span.start, span.length};
 }
 
+GlobalOpRef opRefOf(const Store &store, const std::uint32_t opIndex,
+                    const Scroll &sealedAs) {
+  auto produces = store.segmentedOps().idOf(opIndex);
+  if (produces.isZero()) {
+    // Index zero is state zero and every other index past the end reads as it
+    // too. Neither is an operation, so neither gets a name.
+    return {};
+  }
+  return GlobalOpRef{scrollKey(sealedAs), std::move(produces)};
+}
+
+std::optional<std::uint32_t> localiseOpRef(const Store &store,
+                                           const GlobalOpRef &ref,
+                                           const Scroll &sealedAs) {
+  if (ref.empty() || scrollKey(sealedAs) != ref.scroll) {
+    return std::nullopt;
+  }
+  const auto index = store.segmentedOps().indexOf(ref.produces);
+  return 0 == index ? std::nullopt : std::optional{index};
+}
+
 namespace {
 
 /// Magic and version for the operations file inside a seal. Its own, rather

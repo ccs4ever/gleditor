@@ -844,8 +844,14 @@ MicroversionId makeDimension(const MicroversionId &parent, std::string_view name
 [[nodiscard]] CellRef homeCell() const noexcept;   // op index 1
 [[nodiscard]] DimRef  dimsDimension() const noexcept; // op index 2
 
-[[nodiscard]] GlobalOpRef opRefOf(CellRef, const Scroll &sealedAs) const;
-[[nodiscard]] CellRef localiseOpRef(const GlobalOpRef &);
+/// Landed in migration step 7, but as free functions in publication.hpp
+/// beside globalise()/localise() rather than as members here, and localising
+/// answers std::optional -- an operation this store's history does not hold
+/// has no index to be given. See the step for why.
+[[nodiscard]] GlobalOpRef opRefOf(const Store &, CellRef, const Scroll &sealedAs);
+[[nodiscard]] std::optional<CellRef> localiseOpRef(const Store &,
+                                                   const GlobalOpRef &,
+                                                   const Scroll &sealedAs);
 
 /// Ops remaining before the arena reservation is exhausted. Store::apply
 /// throws xanadu::SpoolExhausted (not std::bad_alloc) once this reaches zero.
@@ -993,7 +999,7 @@ ______________________________________________________________________
 Each step is one commit. After each, `make -j$(nproc)` builds all three programs and
 `make -j$(nproc) test` passes.
 
-Steps 1–6 have landed. What each actually cost, where it differed from the plan, and what it
+Steps 1–7 have landed. What each actually cost, where it differed from the plan, and what it
 measured is recorded inline below; the rest are unchanged.
 
 1. ~~**Sealed-segment immutability** (R10).~~ **Done.** `firstChildIndex`/`nextSiblingIndex` left
@@ -1080,8 +1086,33 @@ measured is recorded inline below; the rest are unchanged.
    directions, and self-assigned by copy and by move, run under ASAN and UBSAN with leak detection
    as well as in the ordinary suite. Every pre-existing test passed unmodified, which is what the
    step asked for.
-1. **`GlobalOpRef` plus `Store::opRefOf`/`localiseOpRef`** (R4), mirroring
-   `GlobalSpan`/`globalise`/`localise` and reusing `writeMicroversionId`. Nothing new is stored.
+1. ~~**`GlobalOpRef` plus `Store::opRefOf`/`localiseOpRef`** (R4).~~ **Done**, and mirroring
+   `globalise`/`localise` turned out to mean three things the plan had not said. **They are free
+   functions in `publication.hpp` beside `globalise`/`localise`, not `Store` members**, which §5.4
+   drew them as: the things being mirrored are free functions there, and making these members would
+   have made `store.hpp` include `publication.hpp` — dragging swarm, provenance and mutable-link
+   vocabulary into the header every translation unit in the tree already includes, to express that a
+   document knows how it was published. It does not, which is exactly why `globalKeyOf()` is *told*
+   the scroll rather than asking; `opRefOf(store, opIndex, sealedAs)` is told for the same reason.
+   **`localiseOpRef` is narrower than `localise`, and deliberately.** R4 said it "localises through
+   the identical `Store::externals`/`scrollKey` path"; the `scrollKey` half holds and the
+   `externals` half does not. `localise()` may record a scroll it has never heard of, because a
+   scroll is a name plus a plan for fetching bytes and addressing content nobody has yet is
+   reasonable. An operation cannot be conjured that way, and `historyFromSeal()` is explicit that a
+   publisher's operations become *a store of their own* rather than being folded into the reader's —
+   so this answers about the history a store already holds, takes a `const Store &`, needs no scroll
+   map, and returns nothing rather than inventing an index. It also takes `sealedAs`, which R4 did
+   not specify and which is load-bearing: every history numbers its first state `1`, so without the
+   scroll every document's `1` matches every other document's. **And the `writeMicroversionId`
+   clause is aimed at the wrong codec, so no codec was written.** A `GlobalOpRef` lives in packages,
+   every package in this tree is bencode, and bencode already carries a microversion as its written
+   name — `Publication::version` is `str()` out and `parse()` back. Reusing the binary-ops varint
+   codec would put a second spelling of a microversion into a format that already has one. Nothing
+   carries a `GlobalOpRef` until step 12, and when something does, that is the convention it should
+   follow. The test is the ruling itself rather than the accessors: a five-operation history whose
+   branch is recorded fourth and sorts second, sealed and read back, so the local index provably
+   moves — the test asserts that it moved before asserting anything else — while `opRefOf` produces
+   the same ref on both sides and `localiseOpRef` hands each store back its own different index.
 1. **`OpsSegmentHeader`** (R14). The 12-byte signature, the fields after it, and a 64 KiB header on
    every ops segment file. Four call sites gain an offset — `openActiveSegment()` writes it on
    create and validates it on adopt, `addSealedSegment()` checks the signature before anything else,

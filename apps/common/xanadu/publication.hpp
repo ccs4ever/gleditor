@@ -98,6 +98,40 @@ struct GlobalSpan {
   [[nodiscard]] bool operator<(const GlobalSpan &other) const;
 };
 
+/**
+ * @brief An operation addressed the way another machine can read it.
+ *
+ * The op-stream counterpart of GlobalSpan, and it exists for the same reason:
+ * a store's own index for an operation means nothing anywhere else. Worse than
+ * nothing, in fact -- Store::opRecords() emits in microversion order and
+ * historyFromSeal() files them back in that order, so a branch sorts into the
+ * middle of the chain it forks from and lands at a *different local index* on
+ * the reader's side than it had on the writer's. A number that survives being
+ * written down and not being read back is the kind that causes quiet damage.
+ *
+ * What does survive is the name. A microversion is produced by the operation
+ * and is derivable from the tree, so the publisher's 2a4 is the reader's 2a4,
+ * which is exactly the property historyFromSeal() already relies on and says
+ * so in its own comment.
+ *
+ * The scroll is what stops two documents' names being confused for each other.
+ * Every store's op spool is one document's history and "2" means something in
+ * each of them, so a name alone is ambiguous the moment a second document is
+ * in the room.
+ */
+struct GlobalOpRef {
+  /// The document's scroll key, spelled as GlobalSpan::scroll is.
+  std::string scroll;
+  /// The state this operation produced, verbatim.
+  MicroversionId produces;
+
+  /// Whether this names nothing, which is what opRefOf() answers for an index
+  /// no operation sits at.
+  [[nodiscard]] bool empty() const { return scroll.empty(); }
+
+  bool operator==(const GlobalOpRef &) const = default;
+};
+
 /// A link with both ends addressed globally. Same shape as Link, which is
 /// addressed for one store.
 struct GlobalLink {
@@ -401,6 +435,43 @@ globalise(const Store &store, const PrimediaSpan &span,
 [[nodiscard]] std::optional<PrimediaSpan>
 localise(Store &store, const GlobalSpan &span,
          const std::map<std::string, Scroll> &scrolls);
+
+/**
+ * @brief The operation at @p opIndex, named so another machine can read it.
+ *
+ * globalise() for the op spool. @p sealedAs is the scroll @p store's own
+ * operations are published under, which the store cannot know for itself --
+ * the same reason globalKeyOf() is told rather than asked.
+ *
+ * @return An empty ref when no operation sits at @p opIndex, including index
+ *         zero, which is state zero and is definitionally not an operation.
+ */
+[[nodiscard]] GlobalOpRef opRefOf(const Store &store, std::uint32_t opIndex,
+                                  const Scroll &sealedAs);
+
+/**
+ * @brief @p ref in @p store's own coordinates.
+ *
+ * The other direction, and it is deliberately narrower than localise(). A
+ * scroll can be recorded on demand, because a scroll is a name plus a plan for
+ * fetching bytes and addressing content nobody has yet is a reasonable thing
+ * to do. An operation cannot: a store's op spool holds one document's history,
+ * and historyFromSeal() is explicit that a publisher's operations become a
+ * store of their own rather than being folded into the reader's. So this
+ * answers about the history @p store already holds and never records anything,
+ * which is why it takes a const Store where localise() takes a mutable one.
+ *
+ * @param sealedAs The scroll @p store's operations are published under, so
+ *        that a ref into some *other* document is refused rather than matched
+ *        against a name that happens to collide. Every history numbers its
+ *        first state "1", so without this every document's "1" is every other
+ *        document's "1".
+ * @return Nothing when @p ref names another document, or names a state this
+ *         store's history does not hold.
+ */
+[[nodiscard]] std::optional<std::uint32_t>
+localiseOpRef(const Store &store, const GlobalOpRef &ref,
+              const Scroll &sealedAs);
 
 /**
  * @brief The operations of a published document, ready to be sealed.

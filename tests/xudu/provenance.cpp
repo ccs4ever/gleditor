@@ -463,6 +463,80 @@ TEST(ProvenanceTest, aSealedHistoryComesBackWithThePublishersOwnNames) {
   }
 }
 
+TEST(ProvenanceTest, anOperationsGlobalNameOutlivesItsLocalIndex) {
+  // Why GlobalOpRef exists, demonstrated rather than asserted. The branch here
+  // is recorded fourth but sorts second by name, and historyFromSeal() files
+  // the operations back in name order -- so the reader's index for it is not
+  // the writer's, and any structure that had referred to operations by index
+  // would come back pointing at the wrong ones.
+  Store publisher;
+  const auto one = publisher.insert(MicroversionId{}, 0, "hello");
+  const auto two = publisher.insert(one, 5, " world");
+  static_cast<void>(publisher.erase(two, 0, 1));
+  const auto branched = publisher.insert(one, 5, " there");
+  static_cast<void>(publisher.insert(branched, 0, "X"));
+
+  Scroll became;
+  became.publisher = xudu::createMutableKeys().publicKey;
+  became.salt      = "essay";
+
+  const auto history =
+      xudu::historyFromSeal(xudu::sealableOps(publisher), became, {});
+  ASSERT_NE(history, nullptr);
+
+  const auto here  = publisher.segmentedOps().indexOf(branched);
+  const auto there = history->segmentedOps().indexOf(branched);
+  ASSERT_NE(here, 0U);
+  ASSERT_NE(there, 0U);
+  EXPECT_NE(here, there) << "this test proves nothing unless the index moved";
+
+  // The name did not move, so both stores say the same thing about the same
+  // operation -- which is the whole of what a GlobalOpRef is for.
+  const auto said = xudu::opRefOf(publisher, here, became);
+  EXPECT_EQ(said.produces, branched);
+  EXPECT_EQ(said, xudu::opRefOf(*history, there, became));
+
+  // And each store reads it back as its own index, not as the other's.
+  EXPECT_EQ(xudu::localiseOpRef(publisher, said, became), here);
+  EXPECT_EQ(xudu::localiseOpRef(*history, said, became), there);
+}
+
+TEST(ProvenanceTest, anOpRefIsRefusedByADocumentItDoesNotName) {
+  // Every history numbers its first state "1", so a name on its own is
+  // ambiguous the moment there is a second document. The scroll is what tells
+  // them apart, and dropping it would let a ref into one document silently
+  // resolve against another.
+  Store mine;
+  const auto first = mine.insert(MicroversionId{}, 0, "mine");
+
+  Scroll became;
+  became.publisher = xudu::createMutableKeys().publicKey;
+  became.salt      = "essay";
+  Scroll somebodyElse;
+  somebodyElse.publisher = xudu::createMutableKeys().publicKey;
+  somebodyElse.salt      = "essay";
+
+  const auto said =
+      xudu::opRefOf(mine, mine.segmentedOps().indexOf(first), became);
+  ASSERT_FALSE(said.empty());
+  EXPECT_EQ(said.produces.str(), "1");
+
+  EXPECT_FALSE(xudu::localiseOpRef(mine, said, somebodyElse).has_value())
+      << "a ref into another document must not match on the name alone";
+
+  // A name this history does not hold, under the right scroll, is equally not
+  // an answer.
+  const xudu::GlobalOpRef unheardOf{said.scroll,
+                                    xudu::MicroversionId::parse("9")};
+  EXPECT_FALSE(xudu::localiseOpRef(mine, unheardOf, became).has_value());
+
+  // State zero is not produced by an operation, so no index names it.
+  EXPECT_TRUE(xudu::opRefOf(mine, 0, became).empty());
+  EXPECT_TRUE(xudu::opRefOf(mine, 9999, became).empty());
+  EXPECT_FALSE(
+      xudu::localiseOpRef(mine, xudu::GlobalOpRef{}, became).has_value());
+}
+
 // The read side of incremental sealing: a segment sealed after an earlier
 // publish may name parents the earlier segment produced, and applying both in
 // seal order has to resolve exactly as if everything had been sealed at once.
