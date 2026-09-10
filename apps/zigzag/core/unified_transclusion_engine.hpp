@@ -8,6 +8,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <list>
 #include <map>
 #include <memory>
 #include <string>
@@ -239,6 +240,39 @@ private:
   std::unordered_map<CellID, CompactZZCell> cells_;
   std::unordered_map<std::uint32_t, CellID> opIndexToCell_;
   std::map<xanadu::PrimediaSpan, CellID, SpanLess> spanToMasterCell_;
+
+  /// The longest master span recorded on each scroll. What makes the search
+  /// for an overlapping master a bounded window rather than a scan: no entry
+  /// starting more than this far before a span can reach into it, so the
+  /// walk can begin at that bound instead of at the scroll's first entry.
+  std::unordered_map<xanadu::ScrollId, std::uint64_t> longestMasterSpan_;
+
+  /// Where a d.transclude rank currently ends, keyed by whichever cell the
+  /// walk started from. A rank is only ever extended at its tail here, so a
+  /// remembered tail is still on the rank and walking on from it reaches the
+  /// same end as walking from the head -- it just skips everything already
+  /// walked. Without it, joining the nth cell to a rank costs n steps.
+  std::unordered_map<CellID, CellID> transcludeRankTail_;
+
+  /// The versions rebuilt to resolve a Transclude op's source span, keyed by
+  /// the source's op index. Every rebuild replays a whole ancestral path, so
+  /// doing one per transclusion is quadratic in the size of the document --
+  /// and consecutive transclusions usually name the same handful of sources.
+  ///
+  /// Least-recently-used, bounded: a Version holds a piece table for the
+  /// whole document, so this trades a fixed amount of memory for the replay,
+  /// and an unbounded cache would hold every intermediate state of the spool.
+  static constexpr std::size_t versionCacheCapacity = 32;
+  mutable std::list<std::pair<std::uint32_t, xanadu::Version>> versionCache_;
+  mutable std::unordered_map<
+      std::uint32_t,
+      std::list<std::pair<std::uint32_t, xanadu::Version>>::iterator>
+      versionCacheIndex_;
+
+  /// The version @p sourceOpIndex produces, rebuilt only if it is not already
+  /// held.
+  [[nodiscard]] const xanadu::Version &
+  versionForOp(std::uint32_t sourceOpIndex) const;
 
   std::unordered_map<ShapingKey, ShapingEntry, ShapingKeyHash> shapingCache_;
   std::uint64_t shapingTick_{0};

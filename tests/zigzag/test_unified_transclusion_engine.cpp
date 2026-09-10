@@ -282,6 +282,65 @@ TEST(UnifiedTransclusionEngineTest, StageWithheldAndTranscopyrightCells) {
 }
 
 // ============================================================================
+namespace {
+
+/// A store of @p ops operations, half plain inserts and half transclusions of
+/// overlapping windows into one seed. The transclusions are what put the three
+/// costs this test is about on the per-operation path: resolving a source
+/// version, finding the master cell for a span, and joining a d.transclude
+/// rank.
+xudu::MicroversionId buildMixedStore(xudu::Store &store, const int ops) {
+  const auto seed =
+      store.insert(xudu::MicroversionId{}, 0,
+                   "Everything is deeply intertwingled. No boundaries.");
+  auto version = seed;
+  for (int i = 1; i < ops; i++) {
+    if (i % 2 == 0) {
+      version = store.insert(version, 0, "x");
+    } else {
+      version = store.transclude(version, 0, seed,
+                                 static_cast<std::uint32_t>(i % 20), 6);
+    }
+  }
+  return version;
+}
+
+/// Microseconds per operation to sync a store of @p ops operations.
+double syncCostPerOp(const int ops) {
+  xudu::Store store;
+  buildMixedStore(store, ops);
+  UnifiedTransclusionEngine engine(store);
+  const auto before = std::chrono::steady_clock::now();
+  engine.syncIncremental();
+  const auto after = std::chrono::steady_clock::now();
+  return std::chrono::duration<double, std::micro>(after - before).count() /
+         ops;
+}
+
+} // namespace
+
+TEST(UnifiedTransclusionEngineTest, SyncCostPerOperationDoesNotGrowWithSize) {
+  // buildCellFromOp() used to carry three costs proportional to how much had
+  // already been synced: a full store rebuild per transclusion, a scan of
+  // every recorded master span, and a walk of a whole d.transclude rank. Each
+  // is invisible in a test with five operations and quadratic in a real
+  // document, which is why this measures the shape of the curve rather than
+  // any single time.
+  const auto small = syncCostPerOp(2000);
+  const auto large = syncCostPerOp(8000);
+
+  // Four times the work per operation should cost the same per operation.
+  // Measured at 1.07 us/op against 0.84 before and after quadrupling; the
+  // quadratic version went from 3.57 to 38.73, so 3x leaves room for a slow
+  // or contended machine without leaving room for the bug to come back.
+  EXPECT_LT(large, small * 3.0)
+      << "per-operation sync cost grew from " << small << " us at 2000 ops to "
+      << large
+      << " us at 8000 -- something in buildCellFromOp() is scanning "
+         "what has already been synced";
+}
+
+// ============================================================================
 // Shaping cache
 // ============================================================================
 

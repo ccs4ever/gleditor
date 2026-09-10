@@ -16,6 +16,23 @@ namespace zigzag {
 UnifiedTransclusionEngine::UnifiedTransclusionEngine(xanadu::Store &store)
     : store_(store) {}
 
+const xanadu::Version &UnifiedTransclusionEngine::versionForOp(
+    const std::uint32_t sourceOpIndex) const {
+  if (const auto found = versionCacheIndex_.find(sourceOpIndex);
+      versionCacheIndex_.end() != found) {
+    versionCache_.splice(versionCache_.begin(), versionCache_, found->second);
+    return versionCache_.front().second;
+  }
+  versionCache_.emplace_front(
+      sourceOpIndex, store_.rebuild(store_.segmentedOps().idOf(sourceOpIndex)));
+  versionCacheIndex_[sourceOpIndex] = versionCache_.begin();
+  if (versionCache_.size() > versionCacheCapacity) {
+    versionCacheIndex_.erase(versionCache_.back().first);
+    versionCache_.pop_back();
+  }
+  return versionCache_.front().second;
+}
+
 void UnifiedTransclusionEngine::syncIncremental() {
   const auto &ops     = store_.segmentedOps();
   const auto totalOps = ops.size();
@@ -46,9 +63,8 @@ void UnifiedTransclusionEngine::buildCellFromOp(
   // If node is a transclusion by document offset, resolve its primedia span
   if (cell.span.empty() && node.kind == xanadu::OpKind::Transclude &&
       node.sourceOpIndex != 0) {
-    const auto sourceVer = store_.segmentedOps().idOf(node.sourceOpIndex);
-    const auto from      = store_.rebuild(sourceVer);
-    const auto spans     = from.spansFor(node.sourceAt, node.sourceLength);
+    const auto spans = versionForOp(node.sourceOpIndex)
+                           .spansFor(node.sourceAt, node.sourceLength);
     if (!spans.empty()) {
       cell.span = spans.front();
     }
@@ -84,10 +100,28 @@ void UnifiedTransclusionEngine::buildCellFromOp(
     if (spanToMasterCell_.contains(cell.span)) {
       targetMasterId = spanToMasterCell_[cell.span];
     } else {
-      for (const auto &[masterSpan, mId] : spanToMasterCell_) {
-        if (masterSpan.scroll == cell.span.scroll &&
-            !masterSpan.intersect(cell.span).empty()) {
-          targetMasterId = mId;
+      // The first master in key order that overlaps this span -- the same
+      // answer the whole-map scan gave, reached without visiting every other
+      // scroll and every span too far away to touch this one.
+      //
+      // SpanLess orders by (scroll, start, length), so the entries that can
+      // overlap [start, end) form one contiguous window. It cannot open
+      // before start - longest, because an entry starting at or before that
+      // ends at or before start; and it closes at end, because entries only
+      // start later from there on.
+      const auto longest = longestMasterSpan_.contains(cell.span.scroll)
+                               ? longestMasterSpan_[cell.span.scroll]
+                               : 0;
+      const auto from =
+          cell.span.start > longest ? cell.span.start - longest : 0;
+      for (auto it = spanToMasterCell_.lower_bound(
+               xanadu::PrimediaSpan{cell.span.scroll, from, 0});
+           it != spanToMasterCell_.end() &&
+           it->first.scroll == cell.span.scroll &&
+           it->first.start < cell.span.end();
+           ++it) {
+        if (!it->first.intersect(cell.span).empty()) {
+          targetMasterId = it->second;
           break;
         }
       }
@@ -100,7 +134,16 @@ void UnifiedTransclusionEngine::buildCellFromOp(
     }
 
     if (targetMasterId.has_value() && *targetMasterId != id) {
+      // Resume from wherever this rank was last seen to end rather than from
+      // its head. A remembered tail is on the rank, so walking on from it
+      // arrives at the same place -- it just does not re-walk what has
+      // already been walked, which is what made joining the nth cell to a
+      // rank cost n steps.
       CellID tailId = *targetMasterId;
+      if (const auto seen = transcludeRankTail_.find(tailId);
+          transcludeRankTail_.end() != seen && cells_.contains(seen->second)) {
+        tailId = seen->second;
+      }
       while (cells_.contains(tailId)) {
         const auto nextPos = cells_[tailId].linksOn(DimOrdinal::Transclude).pos;
         if (nextPos == 0 || !cells_.contains(nextPos) || nextPos == tailId) {
@@ -115,9 +158,13 @@ void UnifiedTransclusionEngine::buildCellFromOp(
           tailLp.pos  = id;
           cells_[tailId].setLinks(DimOrdinal::Transclude, tailLp);
         }
+        transcludeRankTail_[*targetMasterId] = id;
+        transcludeRankTail_[tailId]          = id;
       }
     }
     spanToMasterCell_[cell.span] = id;
+    auto &longest                = longestMasterSpan_[cell.span.scroll];
+    longest                      = std::max(longest, cell.span.length);
   }
 
   opIndexToCell_[opIndex] = id;
