@@ -6,9 +6,13 @@
 #include <gleditor/paths.hpp>
 
 #include <algorithm>
+#include <array>
 #include <cctype>
+#include <charconv>
 #include <format>
+#include <type_traits>
 #include <unordered_set>
+#include <variant>
 
 namespace zigzag {
 
@@ -313,16 +317,45 @@ bool isCloneCell(const std::unordered_map<CellID, Cell> &cells,
   return neg != 0 && cells.contains(neg);
 }
 
-std::string_view
-getEffectiveCellText(const std::unordered_map<CellID, Cell> &cells,
-                     const CellID id) {
-  const CellID masterId = findCloneMaster(cells, id);
-  const auto *master    = findCell(cells, masterId);
-  if (master && !master->text().empty()) {
-    return master->text();
+std::string cellDataAsText(const CellData &data) {
+  return std::visit(
+      [](const auto &held) -> std::string {
+        using Held = std::decay_t<decltype(held)>;
+        if constexpr (std::is_same_v<Held, std::string>) {
+          return held;
+        } else if constexpr (std::is_same_v<Held, double>) {
+          // Shortest form that reads back as the same double, so that a cell
+          // written as a number and read as text and parsed again is the
+          // number it started as.
+          std::array<char, 32> buffer{};
+          const auto [end, ec] =
+              std::to_chars(buffer.data(), buffer.data() + buffer.size(), held);
+          return std::errc{} == ec ? std::string(buffer.data(), end)
+                                   : std::string{};
+        } else if constexpr (std::is_same_v<Held, bool>) {
+          return held ? "true" : "false";
+        } else {
+          return {}; // a blob is not text; ask Cell::blob() for it
+        }
+      },
+      data);
+}
+
+std::string getEffectiveCellText(const std::unordered_map<CellID, Cell> &cells,
+                                 const CellID id) {
+  // A clone shows its master's content, and it shows it whatever alternative
+  // that content is. Asking through text() made a master holding a double
+  // indistinguishable from a master holding an empty string, so a clone of a
+  // number fell back to whatever text the clone itself happened to carry --
+  // which is the one thing a clone must never do.
+  const auto *const master = findCell(cells, findCloneMaster(cells, id));
+  if (nullptr != master) {
+    return cellDataAsText(master->data);
   }
-  const auto *cell = findCell(cells, id);
-  return cell ? cell->text() : std::string_view{};
+  // Only reachable when the d.clone rank names a master this space does not
+  // hold. The cell's own content is the best answer available.
+  const auto *const cell = findCell(cells, id);
+  return nullptr != cell ? cellDataAsText(cell->data) : std::string{};
 }
 
 std::vector<CellID> getCloneRank(const std::unordered_map<CellID, Cell> &cells,

@@ -5,6 +5,10 @@
 #include <gtest/gtest.h>
 
 #include <algorithm>
+#include <bit>
+#include <charconv>
+#include <cstdint>
+#include <limits>
 #include <string>
 #include <unordered_map>
 #include <vector>
@@ -251,6 +255,78 @@ TEST(ZzCoreTest, CloneMasterResolutionAlongDClone) {
   EXPECT_EQ(getEffectiveCellText(cells, 10), "Updated Universal Truth");
   EXPECT_EQ(getEffectiveCellText(cells, 20), "Updated Universal Truth");
   EXPECT_EQ(getEffectiveCellText(cells, 30), "Updated Universal Truth");
+}
+
+TEST(ZzCoreTest, ACloneOfANonStringCellReadsItsMasterAndNotItself) {
+  // A clone shows its master's content. That held for text and quietly failed
+  // for everything else: Cell::text() answers with an empty view for the
+  // double, bool and blob alternatives, so "the master has no text" and "the
+  // master is not a string" were the same condition, and the clone fell back
+  // to whatever it happened to be carrying itself.
+  std::unordered_map<CellID, Cell> cells;
+
+  cells[10]                       = makeCell(10, "master");
+  cells[10].data                  = 42.5;
+  cells[10].dimensions["d.clone"] = LinkPairs{.pos = 20, .neg = 0};
+
+  // Stale text on the clone, which is exactly what the fallback would return.
+  cells[20]                       = makeCell(20, "xudu_clone");
+  cells[20].data                  = std::string{"stale"};
+  cells[20].dimensions["d.clone"] = LinkPairs{.pos = 0, .neg = 10};
+
+  EXPECT_EQ(getEffectiveCellText(cells, 10), "42.5");
+  EXPECT_EQ(getEffectiveCellText(cells, 20), "42.5")
+      << "the clone read its own text instead of its master's value";
+
+  // The other two alternatives, and a master that really is an empty string --
+  // which must read as empty rather than reaching for the clone's own text.
+  std::unordered_map<CellID, Cell> flags;
+  flags[1]                       = makeCell(1, "master");
+  flags[1].data                  = true;
+  flags[1].dimensions["d.clone"] = LinkPairs{.pos = 2, .neg = 0};
+  flags[2]                       = makeCell(2, "xudu_clone");
+  flags[2].data                  = std::string{"stale"};
+  flags[2].dimensions["d.clone"] = LinkPairs{.pos = 0, .neg = 1};
+  EXPECT_EQ(getEffectiveCellText(flags, 2), "true");
+
+  std::unordered_map<CellID, Cell> blank;
+  blank[1]                       = makeCell(1, "master");
+  blank[1].data                  = std::string{};
+  blank[1].dimensions["d.clone"] = LinkPairs{.pos = 2, .neg = 0};
+  blank[2]                       = makeCell(2, "xudu_clone");
+  blank[2].data                  = std::string{"stale"};
+  blank[2].dimensions["d.clone"] = LinkPairs{.pos = 0, .neg = 1};
+  EXPECT_EQ(getEffectiveCellText(blank, 2), "");
+
+  // A blob is not text, and saying so is not the same as saying it is empty:
+  // callers that want the bytes ask Cell::blob().
+  std::unordered_map<CellID, Cell> binary;
+  binary[1]      = makeCell(1, "master");
+  binary[1].data = std::vector<std::uint8_t>{0x89, 0x50, 0x4e, 0x47};
+  EXPECT_EQ(getEffectiveCellText(binary, 1), "");
+  ASSERT_NE(binary[1].blob(), nullptr);
+  EXPECT_EQ(binary[1].blob()->size(), 4U);
+}
+
+TEST(ZzCoreTest, ADoubleRendersShortestAndParsesBackToItself) {
+  // Whatever a cell's number is, reading it as text and parsing it again has
+  // to give the number back -- that is what makes a scalar cell addressable
+  // as primedia at all.
+  for (const double value : {42.5, 0.1, 1.0, -0.0, 1e300, 3.141592653589793,
+                             std::numeric_limits<double>::min()}) {
+    const auto text = cellDataAsText(CellData{value});
+    ASSERT_FALSE(text.empty()) << value;
+    double parsed = 0;
+    const auto [ptr, ec] =
+        std::from_chars(text.data(), text.data() + text.size(), parsed);
+    EXPECT_EQ(ec, std::errc{}) << text;
+    EXPECT_EQ(ptr, text.data() + text.size()) << text;
+    EXPECT_EQ(std::bit_cast<std::uint64_t>(parsed),
+              std::bit_cast<std::uint64_t>(value))
+        << "round trip changed " << text;
+  }
+  EXPECT_EQ(cellDataAsText(CellData{true}), "true");
+  EXPECT_EQ(cellDataAsText(CellData{false}), "false");
 }
 
 TEST(ZzCoreTest, DescribeLoadErrorsAndDiagnosticsCount) {

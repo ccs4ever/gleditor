@@ -115,10 +115,26 @@ findCloneMaster(const std::unordered_map<CellID, Cell> &cells, CellID id);
                                CellID id);
 
 /**
+ * @brief A cell's content rendered as text, whichever alternative is live.
+ *
+ * A double comes out in its shortest form that reads back as the same double,
+ * a bool as "true" or "false", and a binary blob as nothing at all -- a blob
+ * is not text and callers that want one ask Cell::blob() for it. Cell::text()
+ * answers only for the string alternative and hands back an empty view for
+ * the other three, which reads as "this cell is empty" when what it means is
+ * "this cell does not hold a string".
+ */
+[[nodiscard]] std::string cellDataAsText(const CellData &data);
+
+/**
  * @brief Returns the effective text of a cell by looking up its master cell at
  * the head of its d.clone rank.
+ *
+ * By value rather than by view because the answer for a scalar cell does not
+ * exist anywhere to point at. Every caller copied the view into a string
+ * immediately anyway.
  */
-[[nodiscard]] std::string_view
+[[nodiscard]] std::string
 getEffectiveCellText(const std::unordered_map<CellID, Cell> &cells, CellID id);
 
 /**
