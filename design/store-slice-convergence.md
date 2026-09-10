@@ -295,7 +295,15 @@ intact.
 
 **Price.** `sourceOpIndex` is consumed for `Structure`-family ops and cannot also mean "transclude
 source version" there. A `Structure` op is never a `Transclude`, so this is safe — but it must be
-documented, and `CompactOpNode::toOp()` must not map it to `Op::source` for `Structure` kinds.
+documented.
+
+An earlier draft added "and `CompactOpNode::toOp()` must not map it to `Op::source` for `Structure`
+kinds". **Step 14 does the opposite, and the reason is stronger than the caution was.** The chain
+turns out to be how a `SetLink` names its *subject* at all — every other 32-bit field is spoken for
+— so it is not incidental provenance but the operation's most load-bearing reference, and
+suppressing it in the by-name representation would make `getOp()` and `opRecords()` lossy.
+`Op::source` is documented as carrying both meanings instead. The confusion the draft feared cannot
+occur: every reader of `sourceOpIndex` in the tree already guards on `kind == OpKind::Transclude`.
 
 ### R8. Two regimes, and the boundary is the **type**, not the cell, the op, or the keyword
 
@@ -758,6 +766,13 @@ six ops = 384 bytes of the memory-mapped arena.
 
 ### 5.3 `Manifold`
 
+**This landed in migration step 14**, and the sketch below is the plan rather than the result: three
+signatures differ (`textOf` answers `std::string`, `cloneMaster` takes the `d.clone` dimension,
+`dimensions()` is not `noexcept` because a rank walk has to be cached somewhere for a `span` to
+point at), there is no spare-capacity field in the run arena, and `byRef` holds every operation in a
+cell's chain rather than only birth ops — which is what makes a `SetLink`'s subject nameable at all.
+The step records each reason.
+
 ```cpp
 // apps/common/xanadu/zigzag/manifold.hpp
 namespace zigzag {
@@ -819,10 +834,12 @@ private:
 } // namespace zigzag
 ```
 
-A cell's run is rewritten in place while it has spare capacity and relocated to the end of `links`
-when it outgrows it, which is the usual CSR compromise: appends are amortised $O(1)$, and the arena
-grows monotonically until a compaction pass at load. Fragmentation is bounded by total link edits,
-not by cell count, and a full fold from `ancestralPath` always produces a tight arena.
+A cell's run is grown in place while it is the arena's tail and relocated to the end of `links`
+otherwise, so the arena grows monotonically and `compact()` reclaims the dead runs. Fragmentation is
+bounded by total link edits, not by cell count, and a full fold from `ancestralPath` always produces
+a tight arena. (The plan said "while it has spare capacity", which would need a capacity field
+`CellSlot` has no room for — see step 14 for why spending four bytes on one would have cost R12 its
+memory argument.)
 
 ### 5.4 `Store` additions
 
@@ -835,6 +852,7 @@ not by cell count, and a full fold from `ancestralPath` always produces a tight 
 [[nodiscard]] zigzag::Manifold rebuildManifold(const MicroversionId &) const;
 
 MicroversionId makeCell(const MicroversionId &parent, const PrimediaSpan &content);
+MicroversionId makeCell(const MicroversionId &parent, std::string_view text);
 MicroversionId makeCell(const MicroversionId &parent, double value); // to_chars + bits
 MicroversionId makeCell(const MicroversionId &parent, bool value);
 MicroversionId setLink(const MicroversionId &parent, CellRef from, CellRef dim,
@@ -870,6 +888,15 @@ MicroversionId makeDimension(const MicroversionId &parent, std::string_view name
 `rebuildManifold()` is a **second walk** over `ancestralPath`, deliberately not a widened
 `replay()`: `store.cpp` documents `replay(node, Version &)` as the single replay path, and widening
 it would touch `rebuild()`, `rebuildFromIndex()` and `advance()` — the per-keystroke fast path.
+
+**Landed in step 14, with four differences.** `sliceGenesis()` is what mints the two cells (the
+sketch above named the accessors and not the verb, and there has to be one). `makeDimension()`
+answers `MintedDimension{version, dim}`, because the state it returns is the link and not the cell.
+`setLink()`/`setValue()`/`makeDimension()` take an optional `const Manifold *` — the operation has
+to name the previous operation on the cell, a manifold already holds it as `CellSlot::lastOp`, and
+without one the store walks the ancestral path to find it, which turns building a large slice
+quadratic. And the scalar `makeCell` overloads are step 15's, under a different name for the
+overload-resolution reason that step records.
 
 ______________________________________________________________________
 
@@ -1008,7 +1035,7 @@ ______________________________________________________________________
 Each step is one commit. After each, `make -j$(nproc)` builds all three programs and
 `make -j$(nproc) test` passes.
 
-Steps 1–12 have landed. What each actually cost, where it differed from the plan, and what it
+Steps 1–14 have landed. What each actually cost, where it differed from the plan, and what it
 measured is recorded inline below; the rest are unchanged.
 
 **Four things the landed steps have in common, worth knowing before starting the next one.**
@@ -1400,10 +1427,95 @@ came back byte-identical across every regenerated fixture.
    meaningless without the operations they name. `xudu-dump --section=versions` renders them, and
    the tool gained `--permascroll` so that `--section=ops` can still show the text a span names.
 
-1. **`Manifold` plus `rebuildManifold()` plus the `makeCell`/`setLink`/`setValue` API** (R7, R9,
+1. ~~**`Manifold` plus `rebuildManifold()` plus the `makeCell`/`setLink`/`setValue` API** (R7, R9,
    R12), with `verifyAgainstFullRebuild()` and its test. CSR link runs, `d.dims` and the two genesis
-   cells, `ephemeralBit` and the `applyStructure` rejection of ephemeral link targets. Nothing
-   consumes it yet.
+   cells, `ephemeralBit` and the `applyStructure` rejection of ephemeral link targets.~~ **Done.**
+   `apps/common/xanadu/zigzag/manifold.{hpp,cpp}`, `Store::rebuildManifold()` beside `rebuild()`,
+   and twenty-two tests in `tests/xudu/manifold_test.cpp`. Nothing consumes it yet, as planned: no
+   app, overlay or engine changed in this step.
+
+   **The subject of a `SetLink` is not in a field, and that was the design working rather than a gap
+   in it.** Every 32-bit slot in `CompactOpNode` is spoken for — `at` is pinned to zero across the
+   family so `FLAG_AT_EQUALS_START` stays meaningful, `to` is the target, `linkId` is the dimension
+   — which reads like nowhere left to say *whose* link this is. R7 already answered it:
+   `sourceOpIndex` is the previous operation on this same cell, so a chain's far end is the
+   `MakeCell` whose index *is* the `CellRef`. The fold therefore keeps `byRef` mapping **every**
+   operation in a chain to its cell rather than only birth ops, which is what §5.3's "ops index ->
+   dense id" was already describing, and a `SetLink` that chains to nothing is refused for having no
+   subject. One consequence worth stating: `Op::source` now carries a chain link for `Structure`
+   kinds, so `CompactOpNode::toOp()` maps `sourceOpIndex` there for every kind rather than
+   suppressing it for this one as R7's price paragraph proposed. Suppressing it would have made
+   `getOp()` and `opRecords()` lose the chain — a lossy round-trip through the by-name
+   representation, to avoid a confusion no consumer can have, since every reader of `sourceOpIndex`
+   in the tree already guards on `kind == Transclude`.
+
+   **A link is one edge, so the fold maintains both ends.** `setLink(c, d, pos, t)` also writes
+   `t`'s negward side, clears whatever `c` was holding, and displaces whatever was on `t`'s negward
+   side — the invariant being that `linked(a, d, dir) == b` exactly when `linked(b, d, !dir) == a`.
+   `zzcore.cpp`'s `deriveBacklinks()` gets this for free by seeing a whole file at once; an
+   operation arrives alone, so here it is maintained rather than derived. Three tests cover the
+   displacement cases, which are the ones that leave a half-link under any implementation treating
+   the two directions as independent facts.
+
+   **No spare-capacity field, and R12's memory number is why.** §5.3 has a cell's run "rewritten in
+   place while it has spare capacity", but `CellSlot` is 48 bytes by assertion with no room for a
+   capacity, and spending four bytes on one would have made the run design cost exactly what the
+   fixed array it replaced cost — 112 bytes per cell against 112 — retiring the four-bytes-smaller
+   half of R12's trade. So a run grows in place when it is the arena's tail and relocates to the end
+   otherwise, leaving dead runs that `compact()` reclaims when the arena passes twice what is live.
+   A cold fold ends with a compaction, so R12's 108 bytes per cell is what a freshly loaded manifold
+   costs rather than a best case. Total copying is bounded by Σ(dimensions per cell)² rather than
+   amortised O(1) per append, which at the handful of dimensions a cell has is not a distinction
+   that shows up.
+
+   **Three signatures came back different, each for a reason the compiler or the type system
+   insisted on.** `textOf()` answers `std::string` and not `string_view`, because
+   `SpanReader::read()` returns by value — content can come from a torrent rather than from memory
+   this process has mapped. `cloneMaster()` takes the `d.clone` dimension rather than assuming one,
+   since R2 makes a dimension a cell and there is no compiled-in ordinal left to reach for;
+   `dimensionNamed()` is how a caller finds it, by walking the `d.dims` rank and reading names. And
+   `makeDimension()` answers a `MintedDimension{version, dim}` rather than a bare `MicroversionId`,
+   because minting a dimension is two operations and the last is the link onto the rank — so
+   `cellRefOf()` of the returned state answers the *link*, not the cell. That trap cost three
+   failing tests before it was a struct.
+
+   **The scalar overloads are step 15's, and deliberately not overloads.**
+   `makeCell(parent, double)` and `makeCell(parent, bool)` are not here — R6's canonicalisation is
+   the next step — and when they land they want different names, because `makeCell(v, "d.1")`
+   against a `bool` overload resolves to the *bool*: `const char *` to `bool` is a standard
+   conversion and beats `string_view`'s user-defined one. `makeCell(parent, std::string_view)` and a
+   separately named scalar minter is the shape that cannot be got wrong at a call site.
+
+   **What `verifyAgainstFullRebuild()` measures itself against.** A manifold records the highest
+   operation index it has folded, and verification re-folds the store from that index and compares
+   what the two *mean* — cells by birth op, links sorted by dimension, run entries holding nothing
+   on either side ignored — rather than how they are laid out, since dense ids and arena offsets are
+   exactly what a materialised view is allowed to differ in. There is a test that it returns false,
+   too: fold an operation while skipping the one before it and the hook says so, which is the only
+   way to know the honesty mechanism is not vacuous.
+
+   **`homeCell()` is where genesis landed, not the literal index 1.** `sliceGenesis()` mints `home`,
+   then `d.dims`, then the one link putting `d.dims` on its own rank — three operations, two cells,
+   and in a store that was a slice from its first operation they are indices 1 and 2 as R5 and R12
+   describe. But pinning the accessors to the literals would make them wrong for a xanadoc that
+   gains a structure map after its text, which is what step 17 needs, so the two refs are noticed in
+   `putOp()` as the first two `MakeCell`s arrive and re-derived by a scan in `load()` — a segment
+   file is adopted as mapped nodes and never goes through `putOp()`.
+
+   **`xudu-dump` learnt to decode `flags`,** since this is the step that gave the byte a meaning:
+   `--section=ops` renders `[setLink posward dim=2 -> 4 cell@1]` beside the raw `flags=0x1`, and
+   `[makeCell] text="home"` for a cell. The rule this tool works under is that it shows what an
+   operation *means* rather than how it is stored, and `flags=0x1` is not a meaning. Its new test
+   dumps a real saved slice, which is also the end-to-end check that a cell's content resolves
+   through the permascroll the store does not contain.
+
+   **Publishing a `Structure` operation still does not mean anything, and this step did not change
+   that.** `binary_ops.cpp` writes `flags`, `to`, `linkId`, the span and `value`, all of which
+   except the span are local spool indices — and R4 is explicit that a local index is not
+   swarm-stable. The chain is not written at all. So a sealed slice arrives as cells with links into
+   the reader's own unrelated operation indices. Fixing it is `GlobalOpRef` work (R4 landed the type
+   in step 7) and belongs with whatever first publishes a slice; until then the wire format for this
+   family should be read as reserved rather than as working.
 
 1. **Scalars** (R6). Canonicalisation at the API boundary; signalling NaN rejected. Property test:
    `asDouble(makeCell(v))` equals `canonicalise(v)`, and `textOf(cell)` parses back to the same

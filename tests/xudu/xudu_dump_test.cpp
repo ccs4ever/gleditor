@@ -24,6 +24,7 @@
 #include <xudu/core/segmented_ops_spool.hpp>
 #include <xudu/core/store.hpp>
 #include <xudu/core/user_permascroll.hpp>
+#include <zigzag/core/manifold.hpp>
 
 namespace {
 
@@ -125,6 +126,42 @@ TEST_F(XuduDumpTest, aHealthyStoreRendersEveryOperationAndWhatItSays) {
   EXPECT_THAT(run.output, testing::HasSubstr(R"(text="hello")"));
   EXPECT_THAT(run.output, testing::HasSubstr(R"(text=" world")"));
   EXPECT_THAT(run.output, testing::HasSubstr(R"(text=" there")"));
+}
+
+TEST_F(XuduDumpTest, aSlicesStructureOperationsSayWhatTheyDid) {
+  const auto root = scratch("slice");
+  const Sample sample{root / "store", root / "permascroll"};
+  zigzag::DimRef dim{zigzag::noCell};
+  zigzag::CellRef head{zigzag::noCell};
+  {
+    Store store(sample.scroll());
+    auto at           = store.sliceGenesis(MicroversionId{});
+    const auto minted = store.makeDimension(at, "d.doc");
+    at                = minted.version;
+    dim               = minted.dim;
+    at                = store.makeCell(at, "a cell");
+    head              = store.cellRefOf(at);
+    at                = store.makeCell(at, "another");
+    at = store.setLink(at, head, dim, false, store.cellRefOf(at));
+    store.save(sample.store.string());
+  }
+
+  const auto run = runDump("--section=ops " + sample.args());
+  EXPECT_EQ(run.exitCode, 0) << run.output;
+
+  // The verb decoded beside the raw flags byte, because "flags=0x01" is not
+  // what an operation means -- and a cell's content read back through the
+  // permascroll, which is the check that nothing shifted underneath it.
+  EXPECT_THAT(run.output, testing::HasSubstr("[makeCell] text=\"home\""));
+  EXPECT_THAT(run.output, testing::HasSubstr("[makeCell] text=\"d.doc\""));
+  EXPECT_THAT(run.output, testing::HasSubstr("[makeCell] text=\"a cell\""));
+  // A link says which way, along which dimension, to what -- and whose it is,
+  // which is the chain rather than a field.
+  EXPECT_THAT(run.output, testing::HasSubstr("[setLink posward dim=" +
+                                             std::to_string(dim) + " -> "));
+  EXPECT_THAT(run.output,
+              testing::HasSubstr(" cell@" + std::to_string(head) + "]"));
+  EXPECT_THAT(run.output, testing::HasSubstr("kind=structure"));
 }
 
 TEST_F(XuduDumpTest, aStoreTheLoaderRefusesIsStillReadable) {

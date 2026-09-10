@@ -35,18 +35,25 @@ struct alignas(64) CompactOpNode {
   std::uint16_t branchOrdinal{0}; ///< Branch ordinal (0 for continuation).
 
   // Position & geometry coordinates (24 bytes)
-  std::uint32_t at{0};            ///< Position in version.
-  std::uint32_t length{0};        ///< Delete/Rearrange length.
-  std::uint32_t to{0};            ///< Rearrange destination.
-  std::uint32_t sourceAt{0};      ///< Transclude source offset.
-  std::uint32_t sourceLength{0};  ///< Transclude source length.
-  std::uint32_t sourceOpIndex{0}; ///< Transclude source version index.
+  std::uint32_t at{0};           ///< Position in version.
+  std::uint32_t length{0};       ///< Delete/Rearrange length.
+  std::uint32_t to{0};           ///< Rearrange dest | Structure: target cell.
+  std::uint32_t sourceAt{0};     ///< Transclude source offset.
+  std::uint32_t sourceLength{0}; ///< Transclude source length.
+  /// Transclude: the source version's index. Structure: the previous operation
+  /// on this same cell, whose chain ends at the MakeCell that *is* the cell --
+  /// so this is what says whose link or value an operation is changing. See
+  /// design R7.
+  std::uint32_t sourceOpIndex{0};
 
   // Content span, link reference & typed value (32 bytes)
   ScrollId scrollId{localScroll}; ///< Scroll ID of content span.
-  std::uint32_t linkId{0};        ///< Link ID for OpKind::Link.
-  std::uint64_t spanStart{0};     ///< Byte start in primedia scroll.
-  std::uint64_t spanLength{0};    ///< Byte length in primedia scroll.
+  /// Link: which link. Structure: the dimension cell a SetLink is along -- a
+  /// dimension is a cell so that a user can mint one, which is why this field
+  /// is 32 bits of ops-spool index rather than a truncated link id. See R2.
+  std::uint32_t linkId{0};
+  std::uint64_t spanStart{0};  ///< Byte start in primedia scroll.
+  std::uint64_t spanLength{0}; ///< Byte length in primedia scroll.
   /// The eight bytes the tree edges vacated, kept as a named field rather
   /// than left as tail padding so that what reaches disk is defined. Zero
   /// until R6's scalar cells give it a meaning.

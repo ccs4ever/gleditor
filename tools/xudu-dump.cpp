@@ -237,6 +237,27 @@ void dumpOps(const OpsFile &file, const std::string &primedia) {
          << " span=[" << span.start << ',' << span.start + span.length << ')'
          << " link=" << node.linkId << " value=" << node.value;
 
+    // What `flags` means, for the one kind it means anything for. The raw byte
+    // stays above -- this is the decode beside it, so that a dump says
+    // "setLink negward" rather than leaving a reader to know that bit 3 is the
+    // direction. A Structure op's `to` and `link` are cell references and its
+    // `src` is the previous operation on the same cell, which is what tells a
+    // reader whose link it is.
+    if (xudu::OpKind::Structure == node.kind) {
+      const auto verb = xudu::structureVerbOf(node.flags);
+      line << "  [" << xudu::structureVerbName(verb);
+      if (xudu::StructureVerb::SetLink == verb) {
+        line << (xudu::structureIsNegward(node.flags) ? " negward" : " posward")
+             << " dim=" << node.linkId << " -> "
+             << (0 == node.to ? std::string{"nothing"}
+                              : std::to_string(node.to))
+             << " cell@" << node.sourceOpIndex;
+      } else if (xudu::ValueKind::None != xudu::valueKindOf(node.flags)) {
+        line << ' ' << xudu::valueKindName(xudu::valueKindOf(node.flags));
+      }
+      line << ']';
+    }
+
     // The text the span names, which is the whole point of rendering an
     // operation rather than hexdumping it: a change that shifted a field puts
     // garbage here, and a diff of two dumps says so on the line it happened.

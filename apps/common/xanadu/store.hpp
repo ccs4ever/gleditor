@@ -49,6 +49,7 @@
 #include "store_tables.hpp"
 #include "user_permascroll.hpp"
 #include "version.hpp"
+#include "zigzag/manifold.hpp"
 
 namespace xanadu {
 
@@ -313,6 +314,125 @@ public:
    * travel with a passage the way a Link does when it is quoted elsewhere.
    */
   MicroversionId insertBreak(const MicroversionId &parent, std::uint32_t at);
+
+  // -- the structure map ----------------------------------------------------
+  //
+  // OSMIC's sixth hyperop, and the second replay product of the same spool
+  // rebuild() is the first replay product of. A cell is an operation; its
+  // positions are the Structure operations naming it; and a slice is what
+  // folding those operations produces. See design/store-slice-convergence.md
+  // §3 and zigzag::Manifold. Nothing in the tree consumes any of this yet.
+
+  /**
+   * @brief Fold @p version's Structure operations into a manifold.
+   *
+   * A *second* walk of the ancestral path rather than a widened replay():
+   * replay(node, Version &) is documented as the single path everything that
+   * rebuilds a document comes through, and widening it would put a structural
+   * fold in rebuild(), rebuildFromIndex() and advance() -- the per-keystroke
+   * fast path -- to build something no keystroke needs.
+   *
+   * O(history), so this is the once-on-load call. Carry the result forward
+   * with Manifold::advance() afterwards, and check it with
+   * Manifold::verifyAgainstFullRebuild(). See R9.
+   */
+  [[nodiscard]] zigzag::Manifold
+  rebuildManifold(const MicroversionId &version) const;
+
+  /// rebuildManifold(), for a state already known to be at @p index. Public
+  /// where rebuildFromIndex() is private, because verifyAgainstFullRebuild()
+  /// re-folds from the index its own fold reached.
+  [[nodiscard]] zigzag::Manifold
+  rebuildManifoldFromIndex(std::uint32_t index) const;
+
+  /**
+   * @brief Mint the two cells a slice cannot be built without.
+   *
+   * `home` -- what zzstructure calls the origin cell -- and the `d.dims`
+   * dimension, in that order, plus the one link that puts d.dims on its own
+   * rank so that dimensions() enumerates it like any other. Two cells by fiat
+   * and everything else built from them with ordinary verbs, because linking
+   * the first dimension onto the d.dims rank requires d.dims to already be
+   * nameable. The same bootstrap shape as format.hpp's compiled-in vocabulary
+   * words, and the same price: two cells that cannot be deleted. See R5, R12.
+   *
+   * @throws std::invalid_argument if this store already has a home cell.
+   *         Genesis happens once.
+   */
+  MicroversionId sliceGenesis(const MicroversionId &parent);
+
+  /// Mint a cell whose content is @p content, already somewhere in a scroll.
+  MicroversionId makeCell(const MicroversionId &parent,
+                          const PrimediaSpan &content);
+
+  /// Mint a cell whose content is @p text, typed into the author's permascroll
+  /// now. Scalars -- a cell carrying both a rendering and canonical bits --
+  /// are R6's, and are deliberately not an overload of this: `makeCell(v,
+  /// false)` would resolve to this one, since const char* converts to bool
+  /// ahead of string_view.
+  MicroversionId makeCell(const MicroversionId &parent, std::string_view text);
+
+  /**
+   * @brief Point @p from's @p dim-ward neighbour at @p to. noCell clears it.
+   *
+   * A link is one edge shared by two cells, so this breaks whatever either end
+   * was holding along @p dim: after it, linked(from, dim, negward) is @p to and
+   * linked(to, dim, !negward) is @p from.
+   *
+   * @param known A manifold folded at @p parent, if the caller has one. The
+   *        operation has to name the previous operation on @p from -- that is
+   *        what makes a cell's micro-history walkable (R7) -- and a manifold
+   *        already holds it as CellSlot::lastOp. Without one this walks the
+   *        ancestral path to find it, which is O(history) per call and turns
+   *        building a large slice quadratic. Passing a manifold folded at some
+   *        *other* state is a programming error nothing here can detect.
+   * @throws std::invalid_argument if any reference is ephemeral, which is R8's
+   *         boundary refused at the API as well as in the fold.
+   */
+  MicroversionId setLink(const MicroversionId &parent, zigzag::CellRef from,
+                         zigzag::DimRef dim, bool negward, zigzag::CellRef to,
+                         const zigzag::Manifold *known = nullptr);
+
+  /// Restate @p cell's content span and typed value. Both, not either: an
+  /// operation that merged with what was already there would make the fold
+  /// depend on how it got there.
+  MicroversionId setValue(const MicroversionId &parent, zigzag::CellRef cell,
+                          const PrimediaSpan &content, ValueKind kind,
+                          std::uint64_t bits,
+                          const zigzag::Manifold *known = nullptr);
+
+  /// The result of makeDimension(): the state it produced and the dimension it
+  /// minted. Both, because minting one is two operations and the last of them
+  /// is the link onto the rank -- so cellRefOf() of the state answers the
+  /// link, not the cell, which is a trap worth not laying. Same shape as
+  /// InsertedMedia, for the same reason.
+  struct MintedDimension {
+    MicroversionId version;
+    zigzag::DimRef dim{zigzag::noCell};
+  };
+
+  /// Sugar over makeCell(name) plus setLink onto the tail of the d.dims rank:
+  /// a dimension is a cell whose content is its name, so minting one needs no
+  /// verb of its own. See R12, and @ref setLink for @p known.
+  MintedDimension makeDimension(const MicroversionId &parent,
+                                std::string_view name,
+                                const zigzag::Manifold *known = nullptr);
+
+  /// The cell an operation minted: its spool index, which is what a CellRef
+  /// is. noCell for a state this store has not recorded.
+  [[nodiscard]] zigzag::CellRef cellRefOf(const MicroversionId &version) const {
+    return opsSpool.indexOf(version);
+  }
+
+  /// The two cells sliceGenesis() minted, or noCell. Index 1 and index 2 in a
+  /// store that was a slice from its first operation, which is the case the
+  /// design describes; a xanadoc that gains a structure map after its text has
+  /// them wherever they landed, which is why these are recorded as operations
+  /// arrive rather than hardcoded.
+  [[nodiscard]] zigzag::CellRef homeCell() const noexcept { return homeCell_; }
+  [[nodiscard]] zigzag::DimRef dimsDimension() const noexcept {
+    return dimsDimension_;
+  }
 
   // -- links ----------------------------------------------------------------
 
@@ -647,6 +767,30 @@ private:
   [[nodiscard]] std::vector<OpRecord>
   opRecords(std::uint32_t sinceExclusive = 0) const;
 
+  /**
+   * @brief The head of @p cell's micro-history chain as of @p parent.
+   *
+   * Which is @p cell itself until something has touched it: a cell's chain
+   * starts at the MakeCell whose index is its CellRef. Walks the ancestral path
+   * forward, because a chain link always names a lower index than the operation
+   * holding it, so one pass settles it -- and because the answer is
+   * per-branch: the last operation on a cell is a different operation on two
+   * futures of the same state.
+   */
+  [[nodiscard]] std::uint32_t lastOpOnCell(const MicroversionId &parent,
+                                           zigzag::CellRef cell,
+                                           const zigzag::Manifold *known) const;
+
+  /// @throws std::invalid_argument if @p ref does not name a Structure
+  ///         operation, which is what a CellRef is. @p what names the parameter
+  ///         in the message.
+  void requireCellOp(zigzag::CellRef ref, const char *what) const;
+
+  /// Re-derive homeCell()/dimsDimension() by scanning the spool. What load()
+  /// needs: it adopts a segment file as nodes, so putOp() -- where these are
+  /// otherwise kept up to date -- never runs.
+  void indexGenesisCells();
+
   /// Record @p records into the spool, skipping any state already filed --
   /// which is what the std::map these were read into used to do on a
   /// duplicate, and keeps a corrupt file opening rather than throwing.
@@ -673,6 +817,11 @@ private:
   SegmentedOpsSpool opsSpool;
   std::map<std::uint64_t, Link> linkTable;
   std::uint64_t nextLinkId{1};
+  /// The first two cells minted, which is what genesis mints. Derived from the
+  /// operations rather than stored beside them -- kept in step as they arrive,
+  /// and re-derived by indexGenesisCells() on load.
+  zigzag::CellRef homeCell_{zigzag::noCell};
+  zigzag::DimRef dimsDimension_{zigzag::noCell};
 
   mutable std::vector<MicroversionId> currentVersions_;
   std::map<MicroversionId, VersionAnnotation> versionAnnotations_;

@@ -101,7 +101,37 @@ void Store::putOp(const MicroversionId &produces, const Op &op) {
   // how a sealed segment -- a file of nodes and nothing else -- gets indexed.
   const auto node = CompactOpNode::fromOp(
       op, parentIdx, sourceIdx, CompactOpNode::branchOrdinalFor(produces));
-  opsSpool.append(node, produces);
+  const auto index = opsSpool.append(node, produces);
+
+  // The two cells genesis mints are the first two minted, so noticing them
+  // here costs a comparison per operation and saves a scan per question. See
+  // homeCell() for why they are not simply indices 1 and 2.
+  if (OpKind::Structure == op.kind &&
+      StructureVerb::MakeCell == structureVerbOf(op.flags)) {
+    if (zigzag::noCell == homeCell_) {
+      homeCell_ = index;
+    } else if (zigzag::noCell == dimsDimension_) {
+      dimsDimension_ = index;
+    }
+  }
+}
+
+void Store::indexGenesisCells() {
+  homeCell_      = zigzag::noCell;
+  dimsDimension_ = zigzag::noCell;
+  for (std::uint32_t idx = 1; idx <= opsSpool.size(); idx++) {
+    const auto *const node = opsSpool.get(idx);
+    if (nullptr == node || OpKind::Structure != node->kind ||
+        StructureVerb::MakeCell != structureVerbOf(node->flags)) {
+      continue;
+    }
+    if (zigzag::noCell == homeCell_) {
+      homeCell_ = idx;
+      continue;
+    }
+    dimsDimension_ = idx;
+    return;
+  }
 }
 
 std::optional<Op> Store::getOp(const MicroversionId &id) const {
@@ -165,9 +195,9 @@ void Store::replay(const CompactOpNode &node, Version &onto) const {
   }
   case OpKind::Structure: {
     // Changes no text. A slice's structure is a second replay product of this
-    // same spool -- see zigzag::Manifold, when it lands -- so folding it here
-    // would be building the wrong one of the two. Recorded as an operation so
-    // that structural editing is a point in hypertime like any other edit,
+    // same spool -- see rebuildManifold() and zigzag::Manifold -- so folding it
+    // here would be building the wrong one of the two. Recorded as an operation
+    // so that structural editing is a point in hypertime like any other edit,
     // exactly as OpKind::Link is.
     break;
   }
@@ -199,6 +229,195 @@ Version Store::rebuild(const MicroversionId &version) const {
     }
   }
   return built;
+}
+
+zigzag::Manifold
+Store::rebuildManifoldFromIndex(const std::uint32_t index) const {
+  zigzag::Manifold folded;
+  for (const auto idx : opsSpool.ancestralPath(index)) {
+    if (const auto *const node = opsSpool.get(idx); nullptr != node) {
+      // Every node rather than the Structure ones: applyStructure() ignores
+      // the other kinds, and filtering here would be a second place that has
+      // to know which kinds fold.
+      folded.applyStructure(idx, *node);
+    }
+  }
+  // A cold fold ends tight, which is what makes the per-cell cost R12 quotes
+  // the cost of a manifold that was just loaded rather than a best case.
+  folded.compact();
+  return folded;
+}
+
+zigzag::Manifold Store::rebuildManifold(const MicroversionId &version) const {
+  if (const auto targetIdx = opsSpool.indexOf(version); targetIdx > 0) {
+    return rebuildManifoldFromIndex(targetIdx);
+  }
+  // Nothing filed under this name: fold the longest recorded prefix of it, for
+  // the same reason rebuild() replays one.
+  zigzag::Manifold folded;
+  for (const auto &step : version.path()) {
+    if (const auto *const node = opsSpool.get(step); nullptr != node) {
+      folded.applyStructure(opsSpool.indexOf(step), *node);
+    }
+  }
+  folded.compact();
+  return folded;
+}
+
+std::uint32_t Store::lastOpOnCell(const MicroversionId &parent,
+                                  const zigzag::CellRef cell,
+                                  const zigzag::Manifold *const known) const {
+  if (nullptr != known) {
+    if (const auto *const slot = known->slot(cell); nullptr != slot) {
+      return slot->lastOp;
+    }
+  }
+  auto head = cell;
+  for (const auto idx : opsSpool.ancestralPath(opsSpool.indexOf(parent))) {
+    if (idx <= cell) {
+      continue;
+    }
+    const auto *const node = opsSpool.get(idx);
+    if (nullptr != node && OpKind::Structure == node->kind &&
+        node->sourceOpIndex == head) {
+      head = idx;
+    }
+  }
+  return head;
+}
+
+void Store::requireCellOp(const zigzag::CellRef ref, const char *what) const {
+  // Only that the reference names a Structure operation, which is what a
+  // CellRef is: the index of the operation that minted the cell, or of one
+  // that has touched it since. Whether it is on *this* state's ancestral path
+  // is a question only a fold can answer -- the manifold refuses it there --
+  // but naming a text insert or an index no operation sits at is a mistake
+  // cheap enough to catch here, and silently recording an operation the fold
+  // will drop is the failure mode this codebase keeps ruling out.
+  const auto *const node = opsSpool.get(ref);
+  if (nullptr == node || OpKind::Structure != node->kind) {
+    throw std::invalid_argument(
+        std::string(what) + " is operation " + std::to_string(ref) +
+        ", which is not one that touches a cell; a CellRef is the index of a "
+        "Structure operation");
+  }
+}
+
+MicroversionId Store::makeCell(const MicroversionId &parent,
+                               const PrimediaSpan &content) {
+  Op op;
+  op.kind  = OpKind::Structure;
+  op.flags = structureFlags(StructureVerb::MakeCell);
+  op.span  = content;
+  return apply(parent, op);
+}
+
+MicroversionId Store::makeCell(const MicroversionId &parent,
+                               const std::string_view text) {
+  // Into the permascroll first, exactly as insert() does it: a cell's content
+  // is ordinary spooled primedia, which is what makes it a link endpoint and a
+  // transclusion source rather than a payload of its own kind. See R6.
+  return makeCell(parent, userPermascroll_->append(text));
+}
+
+MicroversionId Store::setLink(const MicroversionId &parent,
+                              const zigzag::CellRef from,
+                              const zigzag::DimRef dim, const bool negward,
+                              const zigzag::CellRef to,
+                              const zigzag::Manifold *const known) {
+  if (zigzag::noCell == from) {
+    throw std::invalid_argument("a link has to be from some cell");
+  }
+  if (zigzag::isEphemeral(from) || zigzag::isEphemeral(dim) ||
+      zigzag::isEphemeral(to)) {
+    throw std::invalid_argument(
+        "a derived cell has no operation behind it, so a link naming one "
+        "cannot be recorded -- see design R8 and R12");
+  }
+  requireCellOp(from, "the cell a link is from");
+  requireCellOp(dim, "the dimension a link is along");
+  if (zigzag::noCell != to) {
+    requireCellOp(to, "the cell a link is to");
+  }
+
+  Op op;
+  op.kind  = OpKind::Structure;
+  op.flags = structureFlags(StructureVerb::SetLink, negward);
+  op.to    = to;
+  op.link  = dim;
+  // The chain, which is also how the fold knows whose link this is: there is
+  // no separate subject field, and the chain's far end is the MakeCell whose
+  // index is the cell. See R7.
+  if (const auto previous = lastOpOnCell(parent, from, known);
+      zigzag::noCell != previous) {
+    op.source = opsSpool.idOf(previous);
+  }
+  return apply(parent, op);
+}
+
+MicroversionId Store::setValue(const MicroversionId &parent,
+                               const zigzag::CellRef cell,
+                               const PrimediaSpan &content,
+                               const ValueKind kind, const std::uint64_t bits,
+                               const zigzag::Manifold *const known) {
+  if (zigzag::noCell == cell || zigzag::isEphemeral(cell)) {
+    throw std::invalid_argument("setValue needs a cell an operation minted");
+  }
+  requireCellOp(cell, "the cell a value is set on");
+  Op op;
+  op.kind  = OpKind::Structure;
+  op.flags = structureFlags(StructureVerb::SetValue, false, kind);
+  op.span  = content;
+  op.value = bits;
+  if (const auto previous = lastOpOnCell(parent, cell, known);
+      zigzag::noCell != previous) {
+    op.source = opsSpool.idOf(previous);
+  }
+  return apply(parent, op);
+}
+
+MicroversionId Store::sliceGenesis(const MicroversionId &parent) {
+  if (zigzag::noCell != homeCell_) {
+    throw std::invalid_argument(
+        "this store already has a home cell at operation " +
+        std::to_string(homeCell_) +
+        "; genesis mints the two cells that cannot be deleted, once");
+  }
+  const auto withHome = makeCell(parent, std::string_view{"home"});
+  const auto withDims = makeCell(withHome, std::string_view{"d.dims"});
+  // d.dims is a dimension like any other, so it belongs on its own rank --
+  // which is what makes dimensions() report it alongside everything minted
+  // afterwards instead of it being the one dimension that is invisible.
+  return setLink(withDims, homeCell_, dimsDimension_, false, dimsDimension_);
+}
+
+Store::MintedDimension Store::makeDimension(const MicroversionId &parent,
+                                            const std::string_view name,
+                                            const zigzag::Manifold *known) {
+  if (zigzag::noCell == dimsDimension_) {
+    throw std::invalid_argument(
+        "a dimension goes on the d.dims rank, and this store has no d.dims "
+        "cell yet -- call sliceGenesis() first");
+  }
+  const auto minted = makeCell(parent, name);
+  const auto ref    = cellRefOf(minted);
+
+  std::optional<zigzag::Manifold> folded;
+  if (nullptr == known) {
+    folded = rebuildManifold(minted);
+    known  = &folded.value();
+  }
+  // The rank's tail, so dimensions come back in the order they were minted.
+  auto tail = homeCell_;
+  for (auto step = known->cellCount() + 1; step > 0; step--) {
+    const auto next = known->linked(tail, dimsDimension_, false);
+    if (zigzag::noCell == next || next == ref || next == homeCell_) {
+      break;
+    }
+    tail = next;
+  }
+  return MintedDimension{
+      setLink(minted, tail, dimsDimension_, false, ref, known), ref};
 }
 
 bool Store::advance(Version &document, const MicroversionId &known,
@@ -1160,6 +1379,13 @@ void Store::load(const std::string &directory) {
       setVersionAnnotation(id, std::move(annotation));
     }
   }
+
+  // The nodes above arrived as a mapped segment rather than through putOp(),
+  // so which operations minted the genesis cells has to be read back out of
+  // them. Cheap next to the load itself, and it is the whole reason the two
+  // refs are derived rather than written into the side tables: a store's own
+  // operations already say what they are.
+  indexGenesisCells();
 }
 
 } // namespace xanadu

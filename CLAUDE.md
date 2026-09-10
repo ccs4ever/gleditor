@@ -319,10 +319,12 @@ continuation indents, treats Markdown table cell padding as "wrong" indentation,
   file to edit. Editing a `core/` shim is almost always a mistake:
   - `store.hpp/.cpp`: OSMIC time branches, microversions, and EDL operations
   - `ops.hpp`: the six hyperops. `OpKind::Structure` is OSMIC's sixth, MAKE/CHANGE STRUCTURE MAP,
-    added in migration step 12 — **nothing emits one yet**; `Store::replay()` treats it as a text
-    no-op because a slice's structure is a *second* replay product of the same spool. Its verb, link
-    direction and value type live in `CompactOpNode::flags` (`StructureVerb`, `ValueKind`), not in
-    sibling `OpKind`s
+    added in migration step 12; `Store::replay()` treats it as a text no-op because a slice's
+    structure is a *second* replay product of the same spool — `Store::rebuildManifold()` is the
+    fold that builds it. Its verb, link direction and value type live in `CompactOpNode::flags`
+    (`StructureVerb`, `ValueKind`), not in sibling `OpKind`s. **A `SetLink`'s subject is not in a
+    field of its own**: `sourceOpIndex` names the previous operation on the same cell, and that
+    chain's far end is the `MakeCell` whose index *is* the `CellRef`
   - `compact_op.hpp`: the 64-byte `CompactOpNode`. Cache-line aligned, and **immutable once stored**
     — the child/sibling tree edges live in `SegmentedOpsSpool::tree` beside the nodes, because a
     sealed segment is mapped `PROT_READ` and writing a parent's child pointer took SIGSEGV. Three
@@ -339,6 +341,11 @@ continuation indents, treats Markdown table cell padding as "wrong" indentation,
   - `publication.hpp/.cpp`: `publish`/`adopt`, `globalise`/`localise`, scroll keys
   - `identity/`: BEP 10 plugins, Hashcash PoW engine, and network controller
   - `zigzag/zzcore.{hpp,cpp}`, `zigzag/zzstructure.hpp`: the slice model shared with `apps/zigzag`
+  - `zigzag/manifold.{hpp,cpp}`: the structure-map replay product (migration step 14). A `CellRef`
+    is an ops-spool index, links are per-cell CSR runs keyed by dimension cell, and both ends of a
+    link are maintained by the fold. **Nothing consumes it yet** — `Store::rebuildManifold()` folds
+    one, `Manifold::advance()` carries it forward, and `verifyAgainstFullRebuild()` is what says the
+    two agree. Spelled `<zigzag/core/manifold.hpp>` from an app or a test
 - `apps/xudu/` — the xanadoc editor's own UI: `beams.cpp`, `framing.cpp` (3D link ribbons and
   transclusion prisms), `session.cpp`, the overlays, `main.cpp`
 - `apps/zigzag/` — the Xanadu Zigzag multidimensional visualizer; `apps/zigzag/core/`:
@@ -470,7 +477,7 @@ they care about; see R11 in `design/store-slice-convergence.md`.
 
 - [`store-slice-convergence.md`](design/store-slice-convergence.md) — the active plan: a cell is an
   operation, `Slice` becomes a replay product of the ops spool like `Version` is. Fourteen rulings
-  with their prices, a numbered migration (**steps 1–13 are done**), and the measurements behind
+  with their prices, a numbered migration (**steps 1–14 are done**), and the measurements behind
   each. Read this before touching `CompactOpNode`, `Manifold`, `CompactZZCell` or the zigzag
   engine's sync path.
 - [`vortex-hyperstructural-runtime.md`](design/vortex-hyperstructural-runtime.md) and

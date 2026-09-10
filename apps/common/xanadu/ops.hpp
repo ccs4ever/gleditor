@@ -125,6 +125,12 @@ enum class ValueKind : std::uint8_t {
 
 // bit 7 is unclaimed.
 
+/// For a dump or a diagnostic. An unrecognised verb or value kind is named
+/// "unknown" rather than as one of the real ones, since a build reading a newer
+/// spool is exactly when that matters.
+const char *structureVerbName(StructureVerb verb);
+const char *valueKindName(ValueKind kind);
+
 [[nodiscard]] constexpr StructureVerb
 structureVerbOf(const std::uint8_t flags) {
   return static_cast<StructureVerb>(flags & structureVerbMask);
@@ -246,6 +252,12 @@ struct Op {
   /// Transclude: which version the material is taken from, and where in it.
   /// The spans are resolved against that version when the op is replayed, so
   /// what is transcluded is content rather than a position.
+  ///
+  /// Structure: the state produced by the previous operation on the same cell.
+  /// Not provenance but the operation's subject -- a cell's micro-history is an
+  /// intrusive chain, and its far end is the MakeCell whose index *is* the
+  /// cell, which is how a SetLink says whose link it is without a field of its
+  /// own. See design R7 and zigzag::Manifold::applyStructure().
   MicroversionId source;
   std::uint32_t sourceAt{};
   std::uint32_t sourceLength{};
