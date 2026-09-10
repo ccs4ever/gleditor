@@ -1,0 +1,11 @@
+Figure 1.2: A small figure floats at the column's left edge so the
+paragraph beside it keeps flowing rather than stepping over it the way
+a full-width figure would. Xanadu's own visible-connection principle
+extends naturally to layout: a reader should never lose their place in
+a line of argument just because a diagram happened to land nearby. The
+docuverse is not a stack of isolated pages -- text and figure share the
+same band of the page, each legible without eclipsing the other. Once
+the paragraph runs far enough down the page to clear the figure's own
+height, the column widens back out to its full measure and later lines
+sit exactly where they would have if no figure had ever floated beside
+them at all.
