@@ -8,9 +8,18 @@ xudu \- a xanadoc editor, after Ted Nelson's OSMIC
 .B xudu
 edits a
 .IR xanadoc :
-a document kept as two append-and-read-only spools rather than as a file. Text
-that is typed goes into the primedia spool at an address it keeps forever, and
-each edit is recorded in the operations spool under the state it produced.
+a document kept as an append-and-read-only record of operations rather than as
+a file. Text that is typed goes into the author's permascroll at an address it
+keeps forever, and each edit is recorded in the document's operations spool
+under the state it produced.
+.PP
+The permascroll is the author's, not the document's. Everything typed into
+every xanadoc goes into one of them, so a passage quoted from one document into
+another is the same bytes at the same address rather than a copy \-\- which is
+what makes the two detectably related afterwards. A store directory is
+therefore an edit decision list: it names addresses and does not contain them,
+and it is read against the permascroll it was written against. See
+.B \-\-permascroll .
 .PP
 No version is stored. A state's name spells out the operations that rebuild it,
 in Nelson's numbering where change 2a4 creates state 2a4, so 2a4 is reached by
@@ -18,8 +27,8 @@ replaying 1, 2, 2a1, 2a2, 2a3 and 2a4.
 .PP
 Going back to an earlier state and editing it starts a branch rather than
 destroying what already followed, and deleting stops pointing at content
-without removing it from the spool, so every state the document has ever been
-in stays reachable.
+without removing it from the permascroll, so every state the document has ever
+been in stays reachable.
 .PP
 Quoting a passage from one document into another inserts a pointer to the
 address the original already uses, so there is one copy and two documents
@@ -28,7 +37,7 @@ addresses: it survives editing around the quotation, and two documents that
 merely read the same are correctly not treated as sharing anything.
 .PP
 .I STORE
-is the directory the spools live in. It is created if it is not there, and
+is the directory the document lives in. It is created if it is not there, and
 defaults to
 .IR xanadoc .
 .SH OPTIONS
@@ -106,11 +115,23 @@ Quote that range of the most recently given
 into the document. A length of 0 means the rest of the file. Repeatable.
 .IP
 Nothing is copied: the document ends up holding a pointer to content addressed
-by its own hash, so a store made entirely of quotations has an empty primedia
-spool. Content that cannot be reached, or that does not hash to what the
+by its own hash, so a store made entirely of quotations adds nothing to the
+author's permascroll at all. Content that cannot be reached, or that does not
+hash to what the
 reference named, reads as nothing rather than as something plausible -- and the
 rest of the document is unaffected, because failing to resolve a reference is
 not the same as the document being corrupt.
+.TP
+.BR \-\-permascroll " \fIDIR\fR"
+Bind this directory as the author's permascroll instead of
+.IR $XDG_DATA_HOME/xudu/permascroll/default .
+It is created if it is not there.
+.IP
+Every document opened in this run shares it, and a document records addresses
+into whichever permascroll was bound when it was written. Opening a store
+against a different one resolves its local spans against the wrong content, so
+this is what a xanadoc written elsewhere \-\- a checked-in sample, another
+machine's export \-\- needs alongside it.
 .TP
 .BR \-\-version\-id " \fIID\fR"
 Open this microversion, for example
@@ -163,37 +184,46 @@ Show or hide the hypertime map.
 Print every state to the terminal.
 .TP
 .BR ctrl\-s ", " ctrl\-q
-Write the spools out; save and quit.
+Write the document out; save and quit.
 .TP
 .B backspace
 Stop pointing at the selection.
 .SH FILES
 .TP
-.I STORE/primedia.spool
-Every byte ever typed, at the address it was given.
+.I STORE/ops.nodes
+Every operation, as the fixed-size records the program holds them as, filed
+under the state each produced. Opens with a header naming the format version
+and the record size, so a file written in another shape is refused rather than
+read as this one.
 .TP
-.I STORE/ops.spool
-One line per operation, in replay order.
-.TP
-.I STORE/links.spool
-Links, as their two lists of primedia spans, a type and an owner.
-.TP
-.I STORE/scrolls.spool
-The scrolls this store points at but did not produce. A
-.B scroll
-line names one \-\- a publisher's key, or a dash when it has none \-\- and the
-.B segment
-lines after it say which torrent carries which stretch of it. Without this a
-span's scroll is a number with no content behind it.
+.I STORE/store.tables
+The document's side tables, in one versioned binary container: the scroll
+registry, the local media segments, the links, the author's current versions,
+and the aliases and descriptions given to any of them.
 .IP
-The two kinds of line have two lifetimes, which is why they are separate. A
-scroll's name never changes. Which torrent carries a stretch changes every time
-something is sealed, and changing it moves no address: that is what addressing
-content by scroll rather than by container buys.
+The scroll registry is what gives a span's scroll number something behind it
+\-\- a publisher's key, or nothing when the scroll has none \-\- and which
+torrent carries which stretch of it. Which torrent carries a stretch changes
+every time something is sealed, and changing it moves no address: that is what
+addressing content by scroll rather than by container buys.
 .IP
-A store written before scrolls existed has an
-.I origins.spool
-instead, and is read and then rewritten in this form.
+Binary, and not meant to be read with
+.BR less .
+.BR xudu\-dump (1)
+renders any of it as text; that is the tool's purpose.
+.TP
+.I STORE/ops.export
+Present only when
+.B \-\-export\-osmic
+was given: the same operations in canonical OSMIC text. Read back if
+.I ops.nodes
+is absent.
+.TP
+.I $XDG_DATA_HOME/xudu/permascroll/default/active.primedia
+Every byte the author has ever typed, in any document, at the address it was
+given. Not part of any store: see
+.B \-\-permascroll
+and the description above.
 .TP
 .I @DATADIR@/shaders
 Shader sources loaded at run time.

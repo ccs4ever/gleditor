@@ -18,6 +18,7 @@
 #include <filesystem>
 #include <fstream>
 #include <iostream>
+#include <memory>
 #include <set>
 #include <string>
 #include <tuple>
@@ -30,6 +31,7 @@
 #include <xudu/core/store.hpp>
 #include <xudu/core/store_tables.hpp>
 #include <xudu/core/torrent.hpp>
+#include <xudu/core/user_permascroll.hpp>
 #include <xudu/core/version.hpp>
 
 #include "torrent_data.hpp"
@@ -82,6 +84,27 @@ struct ExecutionResult {
   int exitCode{-1};
   std::string output;
 };
+
+/// A permascroll under @p root, for a test that builds a store in *this*
+/// process and renders it in another.
+///
+/// A store carries no primedia: what was typed lives in the author's
+/// permascroll, and the two processes have to mean the same one. It used to
+/// travel in the store's own primedia.spool -- the per-document copy of the
+/// whole scroll that migration step 13 removed -- so before that, building a
+/// store here and rendering it there worked by accident of duplication.
+/// Per-test rather than the default under $XDG_DATA_HOME, so that one test's
+/// prose cannot show up in another's screenshot.
+std::shared_ptr<xudu::UserPermascroll> permascrollAt(const fs::path &dir) {
+  xudu::UserPermascroll::Config config;
+  config.storageDir = dir;
+  return std::make_shared<xudu::UserPermascroll>(std::move(config));
+}
+
+/// The flag naming that permascroll to the xudu subprocess.
+std::string permascrollFlag(const fs::path &dir) {
+  return " --permascroll " + dir.string();
+}
 
 ExecutionResult executeProcess(const std::string &cmd) {
   std::string fullCmd = cmd + " 2>&1";
@@ -326,11 +349,12 @@ TEST(E2EBinaryOrchestrationTest,
   const auto step1Ppm = screenshotDir / "step1_source_torrents.ppm";
   const auto step1Png = screenshotDir / "step1_source_torrents.png";
 
-  std::string cmd1 = xuduBin.string() + " --backend " + activeBackend() +
-                     " --profile --fov 7.5 --coarse-below 0" + torrentArgs +
-                     " --version-id " + v1.str() + " --alongside " + v2.str() +
-                     " --screenshot " + step1Ppm.string() + " " +
-                     storeStep1.string();
+  std::string cmd1 = xuduBin.string() +
+                     permascrollFlag(testRoot / "permascroll") + " --backend " +
+                     activeBackend() + " --profile --fov 7.5 --coarse-below 0" +
+                     torrentArgs + " --version-id " + v1.str() +
+                     " --alongside " + v2.str() + " --screenshot " +
+                     step1Ppm.string() + " " + storeStep1.string();
 
   const auto res1 = executeProcess(cmd1);
   EXPECT_EQ(res1.exitCode, 0) << "Step 1 process failed: " << res1.output;
@@ -345,7 +369,7 @@ TEST(E2EBinaryOrchestrationTest,
 
   // STEP 2: Loading 2 XanaDoc Publications Side-by-Side
   const auto authorA = createMutableKeys();
-  Store storeA;
+  Store storeA(permascrollAt(testRoot / "permascroll"));
   const auto vA1 =
       storeA.transcludeExternal(MicroversionId{}, 0, s1Scroll, 0, 62);
   auto pubA = publish(storeA, vA1, authorA, "xanadoc_a",
@@ -359,7 +383,7 @@ TEST(E2EBinaryOrchestrationTest,
   }
 
   const auto authorB = createMutableKeys();
-  Store storeB;
+  Store storeB(permascrollAt(testRoot / "permascroll"));
   const auto vB1 =
       storeB.transcludeExternal(MicroversionId{}, 0, s2Scroll, 0, 27);
   auto pubB =
@@ -377,9 +401,10 @@ TEST(E2EBinaryOrchestrationTest,
   const auto step2Ppm    = screenshotDir / "step2_xanadocs_loaded.ppm";
   const auto step2Png    = screenshotDir / "step2_xanadocs_loaded.png";
 
-  std::string cmd2 = xuduBin.string() + " --backend " + activeBackend() +
-                     " --profile --fov 7.5 --coarse-below 0" + torrentArgs +
-                     " --read " + pubAPath.string() + " --read " +
+  std::string cmd2 = xuduBin.string() +
+                     permascrollFlag(testRoot / "permascroll") + " --backend " +
+                     activeBackend() + " --profile --fov 7.5 --coarse-below 0" +
+                     torrentArgs + " --read " + pubAPath.string() + " --read " +
                      pubBPath.string() + " --screenshot " + step2Ppm.string() +
                      " " + storeReader.string();
 
@@ -393,7 +418,7 @@ TEST(E2EBinaryOrchestrationTest,
   exportToPng(step2Ppm, step2Png);
 
   // STEP 3: Bi-directional Linking Between the XanaDocs
-  Store activeReaderStore;
+  Store activeReaderStore(permascrollAt(testRoot / "permascroll"));
   activeReaderStore.load(storeReader.string());
   const auto allReaderVersions = activeReaderStore.allVersions();
   ASSERT_GE(allReaderVersions.size(), 2U);
@@ -413,11 +438,12 @@ TEST(E2EBinaryOrchestrationTest,
   const auto step3Ppm = screenshotDir / "step3_cross_linking.ppm";
   const auto step3Png = screenshotDir / "step3_cross_linking.png";
 
-  std::string cmd3 = xuduBin.string() + " --backend " + activeBackend() +
-                     " --profile --fov 7.5 --coarse-below 0" + torrentArgs +
-                     " --version-id " + verLinked.str() + " --alongside " +
-                     verB.str() + " --screenshot " + step3Ppm.string() + " " +
-                     storeReader.string();
+  std::string cmd3 = xuduBin.string() +
+                     permascrollFlag(testRoot / "permascroll") + " --backend " +
+                     activeBackend() + " --profile --fov 7.5 --coarse-below 0" +
+                     torrentArgs + " --version-id " + verLinked.str() +
+                     " --alongside " + verB.str() + " --screenshot " +
+                     step3Ppm.string() + " " + storeReader.string();
 
   const auto res3 = executeProcess(cmd3);
   EXPECT_EQ(res3.exitCode, 0) << "Step 3 process failed: " << res3.output;
@@ -436,11 +462,12 @@ TEST(E2EBinaryOrchestrationTest,
   const auto step4Ppm = screenshotDir / "step4_transclusion.ppm";
   const auto step4Png = screenshotDir / "step4_transclusion.png";
 
-  std::string cmd4 = xuduBin.string() + " --backend " + activeBackend() +
-                     " --profile --fov 7.5 --coarse-below 0" + torrentArgs +
-                     " --version-id " + verLinked.str() + " --alongside " +
-                     verBTranscluded.str() + " --screenshot " +
-                     step4Ppm.string() + " " + storeReader.string();
+  std::string cmd4 =
+      xuduBin.string() + permascrollFlag(testRoot / "permascroll") +
+      " --backend " + activeBackend() +
+      " --profile --fov 7.5 --coarse-below 0" + torrentArgs + " --version-id " +
+      verLinked.str() + " --alongside " + verBTranscluded.str() +
+      " --screenshot " + step4Ppm.string() + " " + storeReader.string();
 
   const auto res4 = executeProcess(cmd4);
   EXPECT_EQ(res4.exitCode, 0) << "Step 4 process failed: " << res4.output;
@@ -454,7 +481,7 @@ TEST(E2EBinaryOrchestrationTest,
   // STEP 5: Creating & Applying LinkPackages (Materializing 3rd Source)
   const auto curatorKeys = createMutableKeys();
   const auto authorC     = createMutableKeys();
-  Store storeC;
+  Store storeC(permascrollAt(testRoot / "permascroll"));
   const auto s3Hash   = InfoHash::fromHex(source3Hash);
   const auto s3Scroll = Scroll::ofTorrentFile(s3Hash, 0, "epilogue.txt", 0, 84);
   const auto vC1 =
@@ -510,12 +537,12 @@ TEST(E2EBinaryOrchestrationTest,
   const auto step5Ppm = screenshotDir / "full_page_transclusion_lifecycle.ppm";
   const auto step5Png = screenshotDir / "full_page_transclusion_lifecycle.png";
 
-  std::string cmd5 = xuduBin.string() + " --backend " + activeBackend() +
-                     " --profile --fov 15 --coarse-below 0" + torrentArgs +
-                     " --read " + pubAPath.string() + " --read " +
-                     pubBPath.string() + " --read " + pubCPath.string() +
-                     " --screenshot " + step5Ppm.string() + " " +
-                     storeReader.string();
+  std::string cmd5 =
+      xuduBin.string() + permascrollFlag(testRoot / "permascroll") +
+      " --backend " + activeBackend() + " --profile --fov 15 --coarse-below 0" +
+      torrentArgs + " --read " + pubAPath.string() + " --read " +
+      pubBPath.string() + " --read " + pubCPath.string() + " --screenshot " +
+      step5Ppm.string() + " " + storeReader.string();
 
   const auto res5 = executeProcess(cmd5);
   EXPECT_EQ(res5.exitCode, 0) << "Step 5 process failed: " << res5.output;
@@ -545,7 +572,7 @@ TEST(E2EBinaryOrchestrationTest, fullPageManyToManyHypermeshOrchestration) {
                                        "Symmetric Multi-Span Ribbons");
 
   const auto storePath = testRoot / "store_mesh";
-  Store readerStore;
+  Store readerStore(permascrollAt(testRoot / "permascroll"));
   const auto vA = readerStore.insert(MicroversionId{}, 0, textA);
   const auto vB = readerStore.insert(MicroversionId{}, 0, textB);
 
@@ -573,11 +600,11 @@ TEST(E2EBinaryOrchestrationTest, fullPageManyToManyHypermeshOrchestration) {
   const auto ppmPath = screenshotDir / "full_page_many_to_many_hypermesh.ppm";
   const auto pngPath = screenshotDir / "full_page_many_to_many_hypermesh.png";
 
-  std::string cmd = xuduBin.string() + " --backend " + activeBackend() +
-                    " --profile --fov 15 --coarse-below 0" + " --version-id " +
-                    vLinked.str() + " --alongside " + vB.str() +
-                    " --screenshot " + ppmPath.string() + " " +
-                    storePath.string();
+  std::string cmd =
+      xuduBin.string() + permascrollFlag(testRoot / "permascroll") +
+      " --backend " + activeBackend() + " --profile --fov 15 --coarse-below 0" +
+      " --version-id " + vLinked.str() + " --alongside " + vB.str() +
+      " --screenshot " + ppmPath.string() + " " + storePath.string();
 
   const auto res = executeProcess(cmd);
   EXPECT_EQ(res.exitCode, 0) << "Hypermesh test failed: " << res.output;
@@ -608,7 +635,7 @@ TEST(E2EBinaryOrchestrationTest,
                                        "Many-to-One Converging Funnels");
 
   const auto storePath = testRoot / "store_fans";
-  Store readerStore;
+  Store readerStore(permascrollAt(testRoot / "permascroll"));
   const auto vA = readerStore.insert(MicroversionId{}, 0, textA);
   const auto vB = readerStore.insert(MicroversionId{}, 0, textB);
 
@@ -640,11 +667,11 @@ TEST(E2EBinaryOrchestrationTest,
   const auto ppmPath = screenshotDir / "full_page_one_to_many_fan.ppm";
   const auto pngPath = screenshotDir / "full_page_one_to_many_fan.png";
 
-  std::string cmd = xuduBin.string() + " --backend " + activeBackend() +
-                    " --profile --fov 15 --coarse-below 0" + " --version-id " +
-                    vLinked.str() + " --alongside " + vB.str() +
-                    " --screenshot " + ppmPath.string() + " " +
-                    storePath.string();
+  std::string cmd =
+      xuduBin.string() + permascrollFlag(testRoot / "permascroll") +
+      " --backend " + activeBackend() + " --profile --fov 15 --coarse-below 0" +
+      " --version-id " + vLinked.str() + " --alongside " + vB.str() +
+      " --screenshot " + ppmPath.string() + " " + storePath.string();
 
   const auto res = executeProcess(cmd);
   EXPECT_EQ(res.exitCode, 0) << "Fan test failed: " << res.output;
@@ -674,7 +701,7 @@ TEST(E2EBinaryOrchestrationTest, fullPageMultiTypeLinksOrchestration) {
                                        "Distinct Chromatic Hues");
 
   const auto storePath = testRoot / "store_types";
-  Store readerStore;
+  Store readerStore(permascrollAt(testRoot / "permascroll"));
   const auto vA = readerStore.insert(MicroversionId{}, 0, textA);
   const auto vB = readerStore.insert(MicroversionId{}, 0, textB);
 
@@ -700,10 +727,11 @@ TEST(E2EBinaryOrchestrationTest, fullPageMultiTypeLinksOrchestration) {
   const auto ppmPath = screenshotDir / "full_page_multi_type_links.ppm";
   const auto pngPath = screenshotDir / "full_page_multi_type_links.png";
 
-  std::string cmd = xuduBin.string() + " --backend " + activeBackend() +
-                    " --profile --fov 15 --coarse-below 0" + " --version-id " +
-                    vCur.str() + " --alongside " + vB.str() + " --screenshot " +
-                    ppmPath.string() + " " + storePath.string();
+  std::string cmd =
+      xuduBin.string() + permascrollFlag(testRoot / "permascroll") +
+      " --backend " + activeBackend() + " --profile --fov 15 --coarse-below 0" +
+      " --version-id " + vCur.str() + " --alongside " + vB.str() +
+      " --screenshot " + ppmPath.string() + " " + storePath.string();
 
   const auto res = executeProcess(cmd);
   EXPECT_EQ(res.exitCode, 0) << "Multi-type test failed: " << res.output;
@@ -858,7 +886,7 @@ TEST(E2EBinaryOrchestrationTest,
       publishLinkPackage(curator, "pkg_3doc", "3DocRoutingNetwork", 1,
                          1700000010, std::move(links), std::move(pkgScrolls));
 
-  Store readerStore;
+  Store readerStore(permascrollAt(testRoot / "permascroll"));
   adopt(readerStore, pub1);
   adopt(readerStore, pub2);
   adopt(readerStore, pub3);
@@ -868,12 +896,12 @@ TEST(E2EBinaryOrchestrationTest,
   const auto ppmPath = screenshotDir / "full_page_three_doc_depth_routing.ppm";
   const auto pngPath = screenshotDir / "full_page_three_doc_depth_routing.png";
 
-  std::string cmd = xuduBin.string() + " --backend " + activeBackend() +
-                    " --profile --fov 18 --coarse-below 0" + torrentArgs +
-                    " --read " + pub1Path.string() + " --read " +
-                    pub2Path.string() + " --read " + pub3Path.string() +
-                    " --screenshot " + ppmPath.string() + " " +
-                    storePath.string();
+  std::string cmd =
+      xuduBin.string() + permascrollFlag(testRoot / "permascroll") +
+      " --backend " + activeBackend() + " --profile --fov 18 --coarse-below 0" +
+      torrentArgs + " --read " + pub1Path.string() + " --read " +
+      pub2Path.string() + " --read " + pub3Path.string() + " --screenshot " +
+      ppmPath.string() + " " + storePath.string();
 
   const auto res = executeProcess(cmd);
   EXPECT_EQ(res.exitCode, 0) << "3-doc test failed: " << res.output;
@@ -907,7 +935,7 @@ TEST(E2EBinaryOrchestrationTest,
         makeMultiPageText(pages, "Doc_B_" + std::to_string(pages) + "P");
 
     const auto storePath = testRoot / ("store_symm_" + std::to_string(pages));
-    Store readerStore;
+    Store readerStore(permascrollAt(testRoot / "permascroll"));
     const auto vA = readerStore.insert(MicroversionId{}, 0, textA);
     const auto vB = readerStore.insert(MicroversionId{}, 0, textB);
 
@@ -947,11 +975,12 @@ TEST(E2EBinaryOrchestrationTest,
     const auto ppmPath         = screenshotDir / (filename + ".ppm");
     const auto pngPath         = screenshotDir / (filename + ".png");
 
-    std::string cmd = xuduBin.string() + " --backend " + activeBackend() +
-                      " --profile --fov 15 --coarse-below 0" +
-                      " --version-id " + vLinked.str() + " --alongside " +
-                      vB.str() + " --screenshot " + ppmPath.string() + " " +
-                      storePath.string();
+    std::string cmd =
+        xuduBin.string() + permascrollFlag(testRoot / "permascroll") +
+        " --backend " + activeBackend() +
+        " --profile --fov 15 --coarse-below 0" + " --version-id " +
+        vLinked.str() + " --alongside " + vB.str() + " --screenshot " +
+        ppmPath.string() + " " + storePath.string();
 
     const auto res = executeProcess(cmd);
     EXPECT_EQ(res.exitCode, 0)
@@ -991,7 +1020,7 @@ TEST(E2EBinaryOrchestrationTest,
 
     const auto storePath = testRoot / ("store_asymm_" + std::to_string(pagesA) +
                                        "x" + std::to_string(pagesB));
-    Store readerStore;
+    Store readerStore(permascrollAt(testRoot / "permascroll"));
     const auto vA = readerStore.insert(MicroversionId{}, 0, textA);
     const auto vB = readerStore.insert(MicroversionId{}, 0, textB);
 
@@ -1022,11 +1051,12 @@ TEST(E2EBinaryOrchestrationTest,
     const auto ppmPath         = screenshotDir / (filename + ".ppm");
     const auto pngPath         = screenshotDir / (filename + ".png");
 
-    std::string cmd = xuduBin.string() + " --backend " + activeBackend() +
-                      " --profile --fov 15 --coarse-below 0" +
-                      " --version-id " + vLinked.str() + " --alongside " +
-                      vB.str() + " --screenshot " + ppmPath.string() + " " +
-                      storePath.string();
+    std::string cmd =
+        xuduBin.string() + permascrollFlag(testRoot / "permascroll") +
+        " --backend " + activeBackend() +
+        " --profile --fov 15 --coarse-below 0" + " --version-id " +
+        vLinked.str() + " --alongside " + vB.str() + " --screenshot " +
+        ppmPath.string() + " " + storePath.string();
 
     const auto res = executeProcess(cmd);
     std::cout << "ASYMM (" << pagesA << "x" << pagesB << ") OUTPUT:\n"
@@ -1088,7 +1118,7 @@ TEST(E2EBinaryOrchestrationTest,
       openingSentence + "\n\n" + corpusBody + "\n\n" + closingSentence;
 
   const auto storePath = testRoot / "store_flyin";
-  Store readerStore;
+  Store readerStore(permascrollAt(testRoot / "permascroll"));
   const auto vThesis = readerStore.insert(MicroversionId{}, 0, text1);
   const auto vCorpus = readerStore.insert(MicroversionId{}, 0, corpusText);
   const auto vPageTop =
@@ -1147,12 +1177,12 @@ TEST(E2EBinaryOrchestrationTest,
   // opened alongside it at the same depth, so each starts out part of the
   // unread background and sworphs forward into the foreground row only
   // once its link to the thesis comes into view.
-  std::string cmd = xuduBin.string() + " --backend " + activeBackend() +
-                    " --profile --fov 15 --coarse-below 0" + " --version-id " +
-                    vLinked.str() + " --background " + vCorpus.str() +
-                    " --background " + vPageTop.str() + " --background " +
-                    vPageBottom.str() + " --screenshot " + ppmPath.string() +
-                    " " + storePath.string();
+  std::string cmd =
+      xuduBin.string() + permascrollFlag(testRoot / "permascroll") +
+      " --backend " + activeBackend() + " --profile --fov 15 --coarse-below 0" +
+      " --version-id " + vLinked.str() + " --background " + vCorpus.str() +
+      " --background " + vPageTop.str() + " --background " + vPageBottom.str() +
+      " --screenshot " + ppmPath.string() + " " + storePath.string();
 
   const auto res = executeProcess(cmd);
   EXPECT_EQ(res.exitCode, 0) << "Fly-in test failed: " << res.output;
@@ -1186,7 +1216,7 @@ TEST(E2EBinaryOrchestrationTest,
       "Second paragraph, also short and plain.\n";
   const std::string text = firstParagraph + secondParagraph;
 
-  Store store;
+  Store store(permascrollAt(testRoot / "permascroll"));
   const auto whole = store.insert(MicroversionId{}, 0, text);
   // A break exactly between the two paragraphs: nothing about laying out
   // twenty-odd words should ever need a second physical page on its own,
@@ -1198,12 +1228,13 @@ TEST(E2EBinaryOrchestrationTest,
 
   const auto runAndCountPages = [&](const MicroversionId &version,
                                     const std::string &label) {
-    const auto ppmPath    = screenshotDir / (label + ".ppm");
-    const std::string cmd = xuduBin.string() + " --backend " + activeBackend() +
-                            " --profile --version-id " + version.str() +
-                            " --screenshot " + ppmPath.string() + " " +
-                            storePath.string();
-    const auto res        = executeProcess(cmd);
+    const auto ppmPath = screenshotDir / (label + ".ppm");
+    const std::string cmd =
+        xuduBin.string() + permascrollFlag(testRoot / "permascroll") +
+        " --backend " + activeBackend() + " --profile --version-id " +
+        version.str() + " --screenshot " + ppmPath.string() + " " +
+        storePath.string();
+    const auto res = executeProcess(cmd);
     EXPECT_EQ(res.exitCode, 0) << label << " failed: " << res.output;
     const auto marker = std::string("total pages: ");
     const auto at     = res.output.find(marker);
@@ -1232,7 +1263,7 @@ TEST(E2EBinaryOrchestrationTest, typeWithDecorationsRecordsAFormatLink) {
   fs::create_directories(testRoot);
   fs::create_directories(screenshotDir);
 
-  Store store;
+  Store store(permascrollAt(testRoot / "permascroll"));
   const auto whole     = store.insert(MicroversionId{}, 0, "hello world");
   const auto storePath = testRoot / "store";
   store.save(storePath.string());
@@ -1240,8 +1271,10 @@ TEST(E2EBinaryOrchestrationTest, typeWithDecorationsRecordsAFormatLink) {
   const auto ppmPath = screenshotDir / "type_decorated.ppm";
   // Select at offset 0 to position the caret deterministically regardless of
   // window dimensions or display scaling.
-  std::string cmd = xuduBin.string() + " --backend " + activeBackend() +
-                    " --profile --fov 15 --version-id " + whole.str() +
+  std::string cmd = xuduBin.string() +
+                    permascrollFlag(testRoot / "permascroll") + " --backend " +
+                    activeBackend() + " --profile --fov 15 --version-id " +
+                    whole.str() +
                     " --select 0,0 --type '[bold,italic]MARKERWORD' "
                     "--do save --screenshot " +
                     ppmPath.string() + " " + storePath.string();
@@ -1253,7 +1286,7 @@ TEST(E2EBinaryOrchestrationTest, typeWithDecorationsRecordsAFormatLink) {
 
   const std::string marker = "MARKERWORD";
 
-  Store reloaded;
+  Store reloaded(permascrollAt(testRoot / "permascroll"));
   reloaded.load(storePath.string());
   const auto finalVersion = reloaded.latest();
   const auto finalText    = reloaded.textOf(finalVersion);
@@ -1319,7 +1352,7 @@ TEST(E2EBinaryOrchestrationTest,
   // (text) build in the real CLI, and what 09_image_transclusion's own
   // sample generation does with them: transclude a narrow slice of the
   // former into the middle of the latter.
-  Store store;
+  Store store(permascrollAt(testRoot / "permascroll"));
   const auto imageVersion =
       store.insertMedia(MicroversionId{}, 0, pngBytes, "image/png").version;
   const auto textVersion =
@@ -1331,12 +1364,13 @@ TEST(E2EBinaryOrchestrationTest,
   const auto storePath = testRoot / "store";
   store.save(storePath.string());
 
-  const auto ppmPath    = screenshotDir / "media_fragment.ppm";
-  const std::string cmd = xuduBin.string() + " --backend " + activeBackend() +
-                          " --profile --strict-diagnostics --version-id " +
-                          withFragment.str() + " --screenshot " +
-                          ppmPath.string() + " " + storePath.string();
-  const auto res        = executeProcess(cmd);
+  const auto ppmPath = screenshotDir / "media_fragment.ppm";
+  const std::string cmd =
+      xuduBin.string() + permascrollFlag(testRoot / "permascroll") +
+      " --backend " + activeBackend() +
+      " --profile --strict-diagnostics --version-id " + withFragment.str() +
+      " --screenshot " + ppmPath.string() + " " + storePath.string();
+  const auto res = executeProcess(cmd);
   EXPECT_EQ(res.exitCode, 0) << "media fragment test failed: " << res.output;
   EXPECT_EQ(res.output.find("invalid utf-8"), std::string::npos)
       << "a transcluded media fragment reached the concatext as raw bytes -- "
@@ -1345,7 +1379,7 @@ TEST(E2EBinaryOrchestrationTest,
 
   // The storage layer's own half of the guarantee: the fragment resolves to
   // the whole PNG as its container, not to nothing.
-  Store reloaded;
+  Store reloaded(permascrollAt(testRoot / "permascroll"));
   reloaded.load(storePath.string());
   bool foundImageContainer = false;
   for (const auto &piece : reloaded.rebuild(withFragment).pieces()) {
@@ -1385,8 +1419,9 @@ TEST(E2EBinaryOrchestrationTest, repeatedPdfFigureIsStoredOnceNotOncePerPage) {
 
   const auto storePath = testRoot / "store";
   const std::string importCmd =
-      xuduBin.string() + " --headless --import tests/samples/" +
-      "pdf_with_repeated_figure.pdf " + storePath.string();
+      xuduBin.string() + permascrollFlag(testRoot / "permascroll") +
+      " --headless --import tests/samples/" + "pdf_with_repeated_figure.pdf " +
+      storePath.string();
   const auto importRes = executeProcess(importCmd);
   EXPECT_EQ(importRes.exitCode, 0)
       << "importing the repeated-figure PDF failed: " << importRes.output;
@@ -1411,7 +1446,8 @@ TEST(E2EBinaryOrchestrationTest, repeatedPdfFigureIsStoredOnceNotOncePerPage) {
   // gets displayed, only how many times identical bytes are stored.
   const auto ppmPath = getScreenshotDir() / "repeated_pdf_figure_dedup.ppm";
   const std::string screenshotCmd =
-      xuduBin.string() + " --backend " + activeBackend() +
+      xuduBin.string() + permascrollFlag(testRoot / "permascroll") +
+      " --backend " + activeBackend() +
       " --profile --strict-diagnostics --screenshot " + ppmPath.string() + " " +
       storePath.string();
   const auto screenshotRes = executeProcess(screenshotCmd);
@@ -1451,7 +1487,7 @@ TEST(E2EBinaryOrchestrationTest, linkIntoATranscludedImageSpanRendersCleanly) {
                              std::istreambuf_iterator<char>());
   ASSERT_GT(pngBytes.size(), 120U);
 
-  Store store;
+  Store store(permascrollAt(testRoot / "permascroll"));
   const auto insertedImage =
       store.insertMedia(MicroversionId{}, 0, pngBytes, "image/png");
   const auto imageSpan = insertedImage.span;
@@ -1481,13 +1517,14 @@ TEST(E2EBinaryOrchestrationTest, linkIntoATranscludedImageSpanRendersCleanly) {
   const auto storePath = testRoot / "store";
   store.save(storePath.string());
 
-  const auto ppmPath    = screenshotDir / "media_link_target.ppm";
-  const std::string cmd = xuduBin.string() + " --backend " + activeBackend() +
-                          " --profile --strict-diagnostics --version-id " +
-                          textVer.str() + " --alongside " + commentVer.str() +
-                          " --screenshot " + ppmPath.string() + " " +
-                          storePath.string();
-  const auto res        = executeProcess(cmd);
+  const auto ppmPath = screenshotDir / "media_link_target.ppm";
+  const std::string cmd =
+      xuduBin.string() + permascrollFlag(testRoot / "permascroll") +
+      " --backend " + activeBackend() +
+      " --profile --strict-diagnostics --version-id " + textVer.str() +
+      " --alongside " + commentVer.str() + " --screenshot " + ppmPath.string() +
+      " " + storePath.string();
+  const auto res = executeProcess(cmd);
   EXPECT_EQ(res.exitCode, 0)
       << "linking into a transcluded image span crashed or hung: "
       << res.output;
@@ -1535,7 +1572,7 @@ TEST(E2EBinaryOrchestrationTest, severalDistinctImagesRenderTogetherCleanly) {
   ASSERT_GT(jpegBytes.size(), 1000U)
       << "missing tests/samples/sample_image_restart.jpg fixture (Phase 13)";
 
-  Store store;
+  Store store(permascrollAt(testRoot / "permascroll"));
   const auto pngVersion =
       store.insertMedia(MicroversionId{}, 0, pngBytes, "image/png").version;
   const auto jpegVersion =
@@ -1562,12 +1599,13 @@ TEST(E2EBinaryOrchestrationTest, severalDistinctImagesRenderTogetherCleanly) {
   const auto storePath = testRoot / "store";
   store.save(storePath.string());
 
-  const auto ppmPath    = screenshotDir / "several_distinct_images.ppm";
-  const std::string cmd = xuduBin.string() + " --backend " + activeBackend() +
-                          " --profile --strict-diagnostics --version-id " +
-                          textVer.str() + " --screenshot " + ppmPath.string() +
-                          " " + storePath.string();
-  const auto res        = executeProcess(cmd);
+  const auto ppmPath = screenshotDir / "several_distinct_images.ppm";
+  const std::string cmd =
+      xuduBin.string() + permascrollFlag(testRoot / "permascroll") +
+      " --backend " + activeBackend() +
+      " --profile --strict-diagnostics --version-id " + textVer.str() +
+      " --screenshot " + ppmPath.string() + " " + storePath.string();
+  const auto res = executeProcess(cmd);
   EXPECT_EQ(res.exitCode, 0)
       << "rendering several distinct transcluded images crashed or hung: "
       << res.output;

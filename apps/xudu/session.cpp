@@ -838,12 +838,21 @@ std::size_t Session::systemStoreIndex(const SystemDocKind kind) {
 
   bool opened = false;
   if (std::filesystem::exists(dir / "ops.nodes") ||
-      std::filesystem::exists(dir / "ops.spool") ||
-      std::filesystem::exists(dir / "current.yaml")) {
+      std::filesystem::exists(dir / "store.tables")) {
+    // Every typed refusal a store shape can produce, because they all mean the
+    // same thing here. Listed rather than caught as their common base: this
+    // recovers from "the file is not what this build reads", not from a bug in
+    // reading a file that is.
+    std::string refusal;
     try {
       sysStore->load(dir.string());
       opened = true;
     } catch (const xanadu::OpsSegmentUnreadable &e) {
+      refusal = e.what();
+    } catch (const xanadu::StoreTablesUnreadable &e) {
+      refusal = e.what();
+    }
+    if (!refusal.empty()) {
       // A system xanadoc is scaffolding this program writes for itself, and
       // the branch below already knows how to make one from nothing. So a
       // system store in a shape this build cannot read means the same thing
@@ -867,7 +876,7 @@ std::size_t Session::systemStoreIndex(const SystemDocKind kind) {
       std::cerr << std::format(
           "xudu [warning]: the system {} xanadoc could not be read ({}). It "
           "has been moved to {} and a default one written in its place.\n",
-          systemDocName(kind), e.what(), aside.string());
+          systemDocName(kind), refusal, aside.string());
       std::filesystem::create_directories(dir);
       sysStore = std::make_unique<Store>(perma);
       sysStore->setSystem(true);

@@ -573,6 +573,19 @@ Key invariants of this model:
   authorizing device-specific BEP 46 keypairs (`subscroll:laptop`, `subscroll:desktop`), allowing
   concurrent offline typing without split-brain collisions.
 
+This is what is on disk, and not only what the model says. A store directory holds `ops.nodes` and
+`store.tables` and nothing else; the permascroll is a directory of its own, elsewhere, named by
+`--permascroll` or found under `$XDG_DATA_HOME`. Until migration step 13 each store *also* wrote the
+whole permascroll beside itself as `primedia.spool`, so two open documents meant two copies of
+everything the author had ever typed and the addresses only agreed because every save rewrote the
+lot. A store written that way is now refused by name rather than opened against the wrong scroll —
+its addresses were written against that file, and the refusal says so.
+
+The consequence worth stating plainly: **a store directory is not portable on its own.** Copying one
+to another machine copies an edit decision list whose local spans point into a permascroll that
+machine does not have. Sharing a document is `publish`, which seals the spans it needs into a scroll
+anyone can fetch and verify — see [publishing](#publishing-and-reading-somebody-elses-document).
+
 An address says *which* content as well as where in it. The author's permascroll is slot 0; somebody
 else's append-only sequence is another, and two addresses into different scrolls never overlap
 however close their numbers are. A scroll only grows, so an offset into it is settled when the bytes
@@ -589,6 +602,12 @@ A state's name is enough to rebuild it. In Nelson's numbering, "change 2 creates
 is given a letter, after which new integers begin with 1 again; thus change 2a4 creates state 2a4"
 -- so `2a4` is reached by replaying `1`, `2`, `2a1`, `2a2`, `2a3`, `2a4` and nothing else.
 `MicroversionId::path()` is that, and it is why there is no cache of documents to keep in step.
+
+The two files are not both in the document, though the quote reads as though they were. The
+operations are the document's; the content is the author's, in their one permascroll. Rebuilding a
+version replays the first against the second, which is why opening a store means naming the
+permascroll it was written against -- see [the two spools](#the-two-spools-one-permascroll-per-user)
+above.
 
 ### Time branches
 
@@ -653,8 +672,8 @@ separately -- come out plain.
 
 ### Stable references: quoting a torrent
 
-A local address is not a Xanadu address. `primedia.spool` offset 218 means nothing on another
-machine and nothing on this one either once the machine is gone, and a reference that stops
+A local address is not a Xanadu address. An offset into your own permascroll means nothing on
+another machine and nothing on this one either once the machine is gone, and a reference that stops
 resolving is exactly the rot Xanadu was meant to avoid.
 
 A torrent's info hash is the kind of name Xanadu asks for, and it already exists. It is the SHA-1 of
@@ -675,11 +694,12 @@ xudu: 1 quotes 41270f22... file 0 [4,9)
 $ xudu-dump --section=scrolls xanadoc
 scroll 1  publisher=- salt=- mime=text/plain;charset=utf-8
 segment 1  at=0 len=218 torrent=41270f227583fd10ef9c3e3d9aa71fea4117c24e streamOffset=0 fileIndex=0 path=fox.txt mime=text/plain;charset=utf-8
-$ wc -c < xanadoc/primedia.spool
-0
+$ ls xanadoc
+ops.nodes  store.tables
 ```
 
-The local spool is empty. The document holds no content of its own at all -- only a reference into
+Nothing was added to the permascroll: `--quote` types nothing, so there was nothing to append. A
+document never holds content of its own in any case -- what it holds here is one reference into
 content addressed by its own hash, which anyone with the reference can resolve and verify.
 
 Alter one byte of the referenced file and the quotation stops resolving:
@@ -881,7 +901,7 @@ xudu: 1 quotes dc308895... file 0 [4,13)
 
 That reader was never told `dc308895...`. It was given a public key, asked the DHT what the key
 currently means, and got an info hash back -- then fetched and verified the content as usual, ending
-with a document whose `primedia.spool` is zero bytes.
+with a document that added nothing to the reader's permascroll.
 
 The reason a stranger's answer can be believed is that it is signed. A DHT node is somebody asked to
 hold a value, and a stranger holding your address is normally where rot and substitution come from.
@@ -1117,7 +1137,7 @@ typing is an edit, so it has to reach the document.
 | `ctrl-k` / `ctrl-shift-k` | show or hide the beams; stop them moving documents        |
 | `ctrl-m`                  | show or hide the hypertime map                            |
 | `ctrl-p`                  | print every state to the terminal                         |
-| `ctrl-s` / `ctrl-shift-s` | write the spools out; ask what to publish, then publish   |
+| `ctrl-s` / `ctrl-shift-s` | write the document out; ask what to publish, then publish |
 | `ctrl-q`                  | save and quit                                             |
 | `backspace`               | stop pointing at the selection                            |
 

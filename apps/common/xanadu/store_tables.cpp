@@ -23,6 +23,8 @@ namespace {
 constexpr auto keyScrolls       = "scrolls";
 constexpr auto keyLocalSegments = "local";
 constexpr auto keyLinks         = "links";
+constexpr auto keyCurrent       = "current";
+constexpr auto keyVersions      = "versions";
 
 std::string rawBytes(const std::array<std::uint8_t, 32> &bytes) {
   return std::string{reinterpret_cast<const char *>(bytes.data()),
@@ -218,6 +220,51 @@ std::optional<Link> decodeLink(const bencode::Value &value) {
   return link;
 }
 
+/// A microversion, by its printed name rather than by its digits.
+///
+/// The name is the operation sequence -- "2a4" spells out the path that
+/// rebuilds it -- so writing it as text is writing the thing itself, not a
+/// rendering of it. It also survives a change to how a name is held in memory,
+/// which a list of ordinals would not.
+bencode::Value encodeAnnotation(const MicroversionId &id,
+                                const VersionAnnotation &annotation) {
+  return bencode::Value::dict({
+      {"alias", bencode::Value::string(annotation.alias)},
+      {"description", bencode::Value::string(annotation.description)},
+      {"tag", bencode::Value::string(annotation.tag)},
+      {"timestamp", bencode::Value::string(annotation.timestamp)},
+      {"version", bencode::Value::string(id.str())},
+  });
+}
+
+std::optional<std::pair<MicroversionId, VersionAnnotation>>
+decodeAnnotation(const bencode::Value &value) {
+  if (!value.isDict()) {
+    return std::nullopt;
+  }
+  const auto *version = value.find("version");
+  if (nullptr == version || !version->isString()) {
+    return std::nullopt;
+  }
+  MicroversionId id;
+  try {
+    id = MicroversionId::parse(version->asString());
+  } catch (const std::exception &) {
+    return std::nullopt;
+  }
+  VersionAnnotation annotation;
+  const auto text = [&value](const char *const key) -> std::string {
+    const auto *found = value.find(key);
+    return nullptr != found && found->isString() ? found->asString()
+                                                 : std::string{};
+  };
+  annotation.alias       = text("alias");
+  annotation.description = text("description");
+  annotation.tag         = text("tag");
+  annotation.timestamp   = text("timestamp");
+  return std::pair{id, std::move(annotation)};
+}
+
 } // namespace
 
 void writeStoreTables(const std::filesystem::path &path,
@@ -237,13 +284,25 @@ void writeStoreTables(const std::filesystem::path &path,
   for (const auto &[id, link] : tables.links) {
     links.push_back(encodeLink(link));
   }
+  bencode::List current;
+  current.reserve(tables.currentVersions.size());
+  for (const auto &id : tables.currentVersions) {
+    current.push_back(bencode::Value::string(id.str()));
+  }
+  bencode::List versions;
+  versions.reserve(tables.versionAnnotations.size());
+  for (const auto &[id, annotation] : tables.versionAnnotations) {
+    versions.push_back(encodeAnnotation(id, annotation));
+  }
 
   const auto body =
       bencode::Value::dict(
           {
+              {keyCurrent, bencode::Value::list(std::move(current))},
               {keyLinks, bencode::Value::list(std::move(links))},
               {keyLocalSegments, bencode::Value::list(std::move(local))},
               {keyScrolls, bencode::Value::list(std::move(scrolls))},
+              {keyVersions, bencode::Value::list(std::move(versions))},
           })
           .encode();
 
@@ -335,6 +394,40 @@ StoreTables readStoreTables(const std::filesystem::path &path) {
                                     " has a link it cannot read");
       }
       tables.links.emplace(link->id, std::move(*link));
+    }
+  }
+  // A name that will not parse is refused rather than skipped. These say which
+  // state the author is looking at and what they called it, so dropping one
+  // quietly reopens the document somewhere else with no account of why.
+  if (const auto *current = decoded.find(keyCurrent);
+      nullptr != current && current->isList()) {
+    for (const auto &item : current->asList()) {
+      if (!item.isString()) {
+        throw StoreTablesUnreadable(
+            path.string() + " has a current version that is not a name");
+      }
+      try {
+        tables.currentVersions.push_back(
+            MicroversionId::parse(item.asString()));
+      } catch (const std::exception &e) {
+        throw StoreTablesUnreadable(path.string() + " has \"" +
+                                    item.asString() +
+                                    "\" as a current version, which is not a "
+                                    "microversion name: " +
+                                    e.what());
+      }
+    }
+  }
+  if (const auto *versions = decoded.find(keyVersions);
+      nullptr != versions && versions->isList()) {
+    for (const auto &item : versions->asList()) {
+      auto annotation = decodeAnnotation(item);
+      if (!annotation.has_value()) {
+        throw StoreTablesUnreadable(path.string() +
+                                    " has a version annotation it cannot read");
+      }
+      tables.versionAnnotations.emplace(annotation->first,
+                                        std::move(annotation->second));
     }
   }
   return tables;

@@ -13,10 +13,12 @@
 
 #include <filesystem>
 #include <fstream>
+#include <memory>
 #include <string>
 
 #include <xudu/core/store.hpp>
 #include <xudu/core/store_tables.hpp>
+#include <xudu/core/user_permascroll.hpp>
 
 namespace {
 
@@ -223,9 +225,12 @@ TEST(StoreTablesTest, aStoresLinksAndScrollsSurviveBeingSavedAndReopened) {
   link.owner   = "me";
   link.curator = "somebody else";
 
+  // One permascroll across both, because a store holds no primedia of its own
+  // and its local spans are addresses in the author's.
+  const auto perma = std::make_shared<xudu::UserPermascroll>();
   MicroversionId at;
   {
-    Store store;
+    Store store(perma);
     at         = store.insert(MicroversionId{}, 0, "hello world");
     link.left  = store.rebuild(at).spansFor(0, 5);
     link.right = store.rebuild(at).spansFor(6, 5);
@@ -233,7 +238,7 @@ TEST(StoreTablesTest, aStoresLinksAndScrollsSurviveBeingSavedAndReopened) {
     store.save(dir.string());
   }
 
-  Store reopened;
+  Store reopened(perma);
   reopened.load(dir.string());
   EXPECT_EQ(reopened.textOf(at), "hello world");
   const auto &links = reopened.links();

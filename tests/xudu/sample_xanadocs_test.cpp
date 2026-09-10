@@ -10,6 +10,7 @@
 #include <filesystem>
 #include <fstream>
 #include <map>
+#include <memory>
 #include <set>
 #include <string>
 #include <vector>
@@ -38,6 +39,23 @@ namespace {
 
 const fs::path kSampleBaseDir = "tests/samples/xudu";
 
+/// The permascroll these samples were written against.
+///
+/// They are one author's documents, so there is one of these and every store
+/// below is opened against it. That is not a convenience: a store is an edit
+/// decision list holding no primedia, and what makes xanadoc_b's quotation of
+/// xanadoc_a a transclusion rather than a copy is that both name the same
+/// address in this file. Opened once and shared, because nothing here writes
+/// to it -- and because otherwise it would be a megabyte per test.
+const std::shared_ptr<xudu::UserPermascroll> &samplePermascroll() {
+  static const std::shared_ptr<xudu::UserPermascroll> scroll = [] {
+    xudu::UserPermascroll::Config config;
+    config.storageDir = kSampleBaseDir / "permascroll";
+    return std::make_shared<xudu::UserPermascroll>(std::move(config));
+  }();
+  return scroll;
+}
+
 std::vector<const Version *> viewing(const std::vector<Version> &versions) {
   std::vector<const Version *> out;
   out.reserve(versions.size());
@@ -48,15 +66,22 @@ std::vector<const Version *> viewing(const std::vector<Version> &versions) {
 }
 
 // -----------------------------------------------------------------------------
-// Permascroll 000.scroll Verification
+// The shared permascroll
 // -----------------------------------------------------------------------------
-TEST(SampleXanadocsTest, Permascroll000ScrollExistsAndIsNonEmpty) {
-  const auto scrollPath = kSampleBaseDir / "000.scroll";
-  ASSERT_TRUE(fs::exists(scrollPath))
-      << "000.scroll must exist at " << scrollPath;
-  const auto size = fs::file_size(scrollPath);
-  EXPECT_GT(size, 1000U)
-      << "000.scroll should contain generated primedia byte stream";
+TEST(SampleXanadocsTest, TheSharedPermascrollExistsAndIsNonEmpty) {
+  // Every sample store's local spans are offsets into this. Without it they
+  // are numbers with no content behind them, so a missing or truncated
+  // permascroll would make every document below open and render as nothing --
+  // which reads as lost text rather than as a missing file. Checked first, and
+  // by name, so that failure says so.
+  const auto activeSegment = kSampleBaseDir / "permascroll" / "active.primedia";
+  ASSERT_TRUE(fs::exists(activeSegment))
+      << "the samples' permascroll must exist at " << activeSegment
+      << "; regenerate with tools/create-sample-xanadocs.sh";
+  EXPECT_GT(fs::file_size(activeSegment), 1000U)
+      << "the samples' permascroll should hold the generated primedia";
+  EXPECT_GT(samplePermascroll()->size(), 1000U)
+      << "and should still hold it once opened";
 }
 
 // -----------------------------------------------------------------------------
@@ -65,11 +90,11 @@ TEST(SampleXanadocsTest, Permascroll000ScrollExistsAndIsNonEmpty) {
 TEST(SampleXanadocsTest, CoreHypertextLoadsAndDiscoversTransclusion) {
   const auto coreDir = kSampleBaseDir / "core_hypertext";
 
-  Store storeA;
+  Store storeA(samplePermascroll());
   storeA.load((coreDir / "xanadoc_a").string());
   EXPECT_GT(storeA.opCount(), 0U);
 
-  Store storeB;
+  Store storeB(samplePermascroll());
   storeB.load((coreDir / "xanadoc_b").string());
   EXPECT_GT(storeB.opCount(), 0U);
 
@@ -107,9 +132,9 @@ TEST(SampleXanadocsTest, CoreHypertextLoadsAndDiscoversTransclusion) {
 TEST(SampleXanadocsTest, CoreHypertextContainsAll8AuthorLinkTypes) {
   const auto coreDir = kSampleBaseDir / "core_hypertext";
 
-  Store storeA;
+  Store storeA(samplePermascroll());
   storeA.load((coreDir / "xanadoc_a").string());
-  Store storeB;
+  Store storeB(samplePermascroll());
   storeB.load((coreDir / "xanadoc_b").string());
 
   const auto builtA = storeA.rebuild(storeA.latest());
@@ -153,7 +178,7 @@ TEST(SampleXanadocsTest, CoreHypertextContainsAll8AuthorLinkTypes) {
 TEST(SampleXanadocsTest, CoreHypertextUnifiedStoreLoadsBothVersions) {
   const auto unifiedDir = kSampleBaseDir / "core_hypertext" / "unified_store";
 
-  Store unified;
+  Store unified(samplePermascroll());
   unified.load(unifiedDir.string());
   EXPECT_GE(unified.allVersions().size(), 2U);
 
@@ -176,7 +201,7 @@ TEST(SampleXanadocsTest, CoreHypertextUnifiedStoreLoadsBothVersions) {
 // -----------------------------------------------------------------------------
 TEST(SampleXanadocsTest, Multimedia01MultipagePdfHasForcedBreaks) {
   const auto pdfDir = kSampleBaseDir / "multimedia" / "01_multipage_pdf";
-  Store store;
+  Store store(samplePermascroll());
   store.load(pdfDir.string());
 
   const auto ver     = store.latest();
@@ -191,7 +216,7 @@ TEST(SampleXanadocsTest, Multimedia01MultipagePdfHasForcedBreaks) {
 
 TEST(SampleXanadocsTest, Multimedia02PdfLinkedXanadocCrossDocumentLinks) {
   const auto dir = kSampleBaseDir / "multimedia" / "02_pdf_linked_xanadoc";
-  Store store;
+  Store store(samplePermascroll());
   store.load(dir.string());
 
   const auto all = store.allVersions();
@@ -212,7 +237,7 @@ TEST(SampleXanadocsTest, Multimedia02PdfLinkedXanadocCrossDocumentLinks) {
 
 TEST(SampleXanadocsTest, Multimedia03MixedTextImageContainsRasterAndText) {
   const auto dir = kSampleBaseDir / "multimedia" / "03_mixed_text_image";
-  Store store;
+  Store store(samplePermascroll());
   store.load(dir.string());
 
   const auto ver     = store.latest();
@@ -238,7 +263,7 @@ TEST(SampleXanadocsTest, Multimedia03MixedTextImageContainsRasterAndText) {
 TEST(SampleXanadocsTest,
      Multimedia04AudioDocContainsWavHeaderAndWaveformAnalysis) {
   const auto dir = kSampleBaseDir / "multimedia" / "04_audio_doc";
-  Store store;
+  Store store(samplePermascroll());
   store.load(dir.string());
 
   const auto ver     = store.latest();
@@ -258,7 +283,7 @@ TEST(SampleXanadocsTest,
 
 TEST(SampleXanadocsTest, Multimedia05VideoDocContainsMp4ContainerAndKeyframes) {
   const auto dir = kSampleBaseDir / "multimedia" / "05_video_doc";
-  Store store;
+  Store store(samplePermascroll());
   store.load(dir.string());
 
   const auto ver     = store.latest();
@@ -278,7 +303,7 @@ TEST(SampleXanadocsTest, Multimedia05VideoDocContainsMp4ContainerAndKeyframes) {
 
 TEST(SampleXanadocsTest, Multimedia06EmbeddedMediaPageHasPageBreaksAndFlow) {
   const auto dir = kSampleBaseDir / "multimedia" / "06_embedded_media_page";
-  Store store;
+  Store store(samplePermascroll());
   store.load(dir.string());
 
   const auto ver     = store.latest();
@@ -293,7 +318,7 @@ TEST(SampleXanadocsTest, Multimedia06EmbeddedMediaPageHasPageBreaksAndFlow) {
 TEST(SampleXanadocsTest,
      Multimedia07AudioTransclusionVerifiesE5ToneTemporalSubspan) {
   const auto dir = kSampleBaseDir / "multimedia" / "07_audio_transclusion";
-  Store store;
+  Store store(samplePermascroll());
   store.load(dir.string());
 
   const auto all = store.allVersions();
@@ -314,7 +339,7 @@ TEST(SampleXanadocsTest,
 TEST(SampleXanadocsTest,
      Multimedia08VideoTransclusionVerifiesSceneGammaTemporalClip) {
   const auto dir = kSampleBaseDir / "multimedia" / "08_video_transclusion";
-  Store store;
+  Store store(samplePermascroll());
   store.load(dir.string());
 
   const auto all = store.allVersions();
@@ -333,7 +358,7 @@ TEST(SampleXanadocsTest,
 
 TEST(SampleXanadocsTest, Multimedia09ImageTransclusionVerifiesSpatialIdatCrop) {
   const auto dir = kSampleBaseDir / "multimedia" / "09_image_transclusion";
-  Store store;
+  Store store(samplePermascroll());
   store.load(dir.string());
 
   const auto all = store.allVersions();
@@ -355,7 +380,7 @@ TEST(SampleXanadocsTest, Multimedia09ImageTransclusionVerifiesSpatialIdatCrop) {
 // -----------------------------------------------------------------------------
 TEST(SampleXanadocsTest, Beams01OneToManyLinkPlacement) {
   const auto dir = kSampleBaseDir / "beams" / "01_one_to_many";
-  Store store;
+  Store store(samplePermascroll());
   store.load(dir.string());
 
   const auto all = store.allVersions();
@@ -380,7 +405,7 @@ TEST(SampleXanadocsTest, Beams01OneToManyLinkPlacement) {
 
 TEST(SampleXanadocsTest, Beams02ManyToManyLinkPlacement) {
   const auto dir = kSampleBaseDir / "beams" / "02_many_to_many";
-  Store store;
+  Store store(samplePermascroll());
   store.load(dir.string());
 
   const auto all = store.allVersions();
@@ -402,7 +427,7 @@ TEST(SampleXanadocsTest, Beams02ManyToManyLinkPlacement) {
 
 TEST(SampleXanadocsTest, Beams03MultiSpanStackedLinks) {
   const auto dir = kSampleBaseDir / "beams" / "03_multi_span_stacked";
-  Store store;
+  Store store(samplePermascroll());
   store.load(dir.string());
 
   const auto all = store.allVersions();

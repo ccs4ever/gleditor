@@ -8,6 +8,7 @@
 #include <algorithm>
 #include <filesystem>
 #include <fstream>
+#include <memory>
 #include <stdexcept>
 #include <string>
 #include <vector>
@@ -17,6 +18,8 @@
 #include <xudu/core/microversion.hpp>
 #include <xudu/core/ops.hpp>
 #include <xudu/core/store.hpp>
+#include <xudu/core/store_tables.hpp>
+#include <xudu/core/user_permascroll.hpp>
 
 namespace {
 
@@ -439,8 +442,20 @@ TEST(StoreTest, theHypertimeMapReportsEveryFuture) {
 
 struct StoreRoundTripTest : testing::Test {
   std::filesystem::path dir;
+  /// The one permascroll every store in a test shares.
+  ///
+  /// A store is an edit decision list: its local spans are addresses in the
+  /// author's permascroll, and it keeps no copy of the bytes. So reopening a
+  /// document means opening it against the same permascroll it was written
+  /// against -- against a different one, every address would resolve to
+  /// whatever happened to be at that offset, which is the failure mode
+  /// Store::load() refuses a `primedia.spool` to avoid. In the program this is
+  /// the author's single permascroll; here it is one per test, so that tests
+  /// cannot see each other's text.
+  std::shared_ptr<xudu::UserPermascroll> perma;
 
   void SetUp() override {
+    perma = std::make_shared<xudu::UserPermascroll>();
     dir =
         std::filesystem::temp_directory_path() /
         ("xudu-test-" +
@@ -455,7 +470,7 @@ TEST_F(StoreRoundTripTest, aStoreSurvivesBeingWrittenAndReadBack) {
   MicroversionId branched;
   MicroversionId quoted;
   {
-    Store store;
+    Store store(perma);
     const auto one = store.insert(MicroversionId{}, 0, "hello");
     const auto two = store.insert(one, 5, " world");
     branched       = store.insert(one, 5, " there");
@@ -471,7 +486,7 @@ TEST_F(StoreRoundTripTest, aStoreSurvivesBeingWrittenAndReadBack) {
     store.save(dir.string());
   }
 
-  Store reloaded;
+  Store reloaded(perma);
   reloaded.load(dir.string());
 
   EXPECT_EQ(reloaded.textOf(MicroversionId::parse("1")), "hello");
@@ -490,13 +505,13 @@ TEST_F(StoreRoundTripTest, aStoreSurvivesBeingWrittenAndReadBack) {
 TEST_F(StoreRoundTripTest, aForcedBreakSurvivesTheCompactBinaryFormat) {
   MicroversionId broken;
   {
-    Store store;
+    Store store(perma);
     const auto one = store.insert(MicroversionId{}, 0, "abcdef");
     broken         = store.insertBreak(one, 3);
     store.save(dir.string());
   }
 
-  Store reloaded;
+  Store reloaded(perma);
   reloaded.load(dir.string());
 
   EXPECT_EQ(reloaded.textOf(broken), "abcdef");
@@ -513,49 +528,67 @@ TEST_F(StoreRoundTripTest, aStoreThatIsNotThereOpensEmpty) {
 
 TEST_F(StoreRoundTripTest, editingContinuesAfterAReload) {
   {
-    Store store;
+    Store store(perma);
     store.insert(MicroversionId{}, 0, "one");
     store.save(dir.string());
   }
-  Store store;
+  Store store(perma);
   store.load(dir.string());
   const auto next = store.insert(store.latest(), 3, " two");
   EXPECT_EQ(next.str(), "2");
   EXPECT_EQ(store.textOf(next), "one two");
 }
 
-TEST_F(StoreRoundTripTest, savingTwiceOnlyAppendsWhatIsNewToThePrimediaSpool) {
-  // The primedia spool only grows, so a save to the directory the last one
-  // went to appends the new bytes rather than writing the whole document out
-  // again. A round trip alone would not catch a duplicated spool -- stale
-  // bytes past an address already handed out do not change what that address
-  // reads as -- so this checks the file's size directly.
-  Store store;
+TEST_F(StoreRoundTripTest, savingWritesNoPrimediaBesideTheDocument) {
+  // What a store directory holds is the document -- its operations and its
+  // side tables -- and nothing else. This used to also write the whole of the
+  // author's permascroll into every directory a document was saved to, so
+  // opening two documents put two copies of everything ever typed on disk and
+  // saving either rewrote its copy.
+  Store store(perma);
   const auto one = store.insert(MicroversionId{}, 0, "one");
   store.save(dir.string());
-  store.save(dir.string());
 
-  EXPECT_EQ(std::filesystem::file_size(dir / "primedia.spool"), 3U);
+  EXPECT_FALSE(std::filesystem::exists(dir / "primedia.spool"));
+  EXPECT_TRUE(std::filesystem::exists(dir / "ops.nodes"));
+  EXPECT_TRUE(std::filesystem::exists(dir / "store.tables"));
 
-  Store reloaded;
+  Store reloaded(perma);
   reloaded.load(dir.string());
   EXPECT_EQ(reloaded.textOf(one), "one");
 
-  const auto two = store.insert(one, 3, " two");
-  store.save(dir.string());
-  EXPECT_EQ(std::filesystem::file_size(dir / "primedia.spool"), 7U);
-
-  Store again;
-  again.load(dir.string());
-  EXPECT_EQ(again.textOf(two), "one two");
-  EXPECT_EQ(again.primedia().bytes(), "one two");
-
-  // A save to a directory this store has not written to before knows nothing
-  // about what is already there, so it writes the whole spool out.
+  // A second document, saved elsewhere, quoting the first by the address the
+  // content already has. One copy of the content between them, and neither
+  // directory holds it -- which is the whole reason a store stopped carrying
+  // primedia: two open documents used to mean two copies of everything typed.
   const auto elsewhere = dir / "elsewhere";
-  std::filesystem::create_directories(elsewhere);
-  store.save(elsewhere.string());
-  EXPECT_EQ(std::filesystem::file_size(elsewhere / "primedia.spool"), 7U);
+  const auto span      = store.rebuild(one).spansFor(0, 3).front();
+  Store second(perma);
+  const auto quoting = second.insertSpan(MicroversionId{}, 0, span);
+  second.save(elsewhere.string());
+  EXPECT_FALSE(std::filesystem::exists(elsewhere / "primedia.spool"));
+
+  Store secondBack(perma);
+  secondBack.load(elsewhere.string());
+  EXPECT_EQ(secondBack.textOf(quoting), "one");
+}
+
+TEST_F(StoreRoundTripTest, aStoreCarryingItsOwnPrimediaIsRefusedByName) {
+  // Opening one against the caller's permascroll would resolve every local
+  // span at an offset into the wrong scroll and render whatever was there --
+  // a document that looks like it opened and is not the document. The refusal
+  // names the file, because the bytes are not lost: that file *is* the
+  // permascroll those addresses were written against.
+  Store store(perma);
+  store.insert(MicroversionId{}, 0, "hello");
+  store.save(dir.string());
+  {
+    std::ofstream out(dir / "primedia.spool", std::ios::binary);
+    out << "hello";
+  }
+
+  Store reopened(perma);
+  EXPECT_THROW(reopened.load(dir.string()), xudu::StoreTablesUnreadable);
 }
 
 TEST_F(StoreRoundTripTest, aQuotationIntoASecondDocumentSurvivesSaving) {
@@ -572,7 +605,7 @@ TEST_F(StoreRoundTripTest, aQuotationIntoASecondDocumentSurvivesSaving) {
 
   MicroversionId quoted;
   {
-    Store store;
+    Store store(perma);
     const auto one = store.insert(MicroversionId{}, 0, "Hello there");
     quoted         = store.transclude(MicroversionId{}, 0, one, 0, 5);
     ASSERT_EQ(quoted.str(), "a1");
@@ -580,7 +613,7 @@ TEST_F(StoreRoundTripTest, aQuotationIntoASecondDocumentSurvivesSaving) {
     store.save(dir.string());
   }
 
-  Store reloaded;
+  Store reloaded(perma);
   reloaded.load(dir.string());
   EXPECT_EQ(reloaded.opCount(), 2U);
   // The quotation still points at the same content, which is what a virtual
@@ -592,7 +625,7 @@ TEST_F(StoreRoundTripTest, aQuotationIntoASecondDocumentSurvivesSaving) {
 } // namespace
 
 TEST_F(StoreRoundTripTest, operationsAreWrittenAsTheTreeTheyAreHeldAs) {
-  Store store;
+  Store store(perma);
   auto at = MicroversionId{};
   for (int i = 0; i < 4; i++) {
     at = store.insert(at, static_cast<std::uint32_t>(i), "x");
@@ -621,7 +654,7 @@ TEST_F(StoreRoundTripTest, operationsAreWrittenAsTheTreeTheyAreHeldAs) {
   }
   EXPECT_FALSE(std::filesystem::exists(dir / "ops.spool"));
 
-  Store reloaded;
+  Store reloaded(perma);
   reloaded.load(dir.string());
   EXPECT_EQ(reloaded.opCount(), store.opCount());
   EXPECT_EQ(reloaded.textOf(at), store.textOf(at));
@@ -631,24 +664,15 @@ TEST_F(StoreRoundTripTest, operationsAreWrittenAsTheTreeTheyAreHeldAs) {
   EXPECT_EQ(names(reloaded.allVersions()), names(store.allVersions()));
 }
 
-TEST_F(StoreRoundTripTest, aStoreWrittenBeforeTheNodeArrayStillOpens) {
-  // The compact binary encoding is no longer written, but stores are already
-  // on disk in it. They open, and the next save writes them out as nodes.
+TEST_F(StoreRoundTripTest, aStoreWrittenBeforeTheNodeArrayIsRefusedByName) {
+  // `ops.spool` was the binary operations spool, superseded by `ops.nodes`.
+  // R11 says a reader kept only so an old file still parses is a permanent tax
+  // paid to protect data nobody has, so the reader is gone -- and what replaces
+  // it is a refusal that says which file and why, not an empty document.
   std::filesystem::create_directories(dir);
-  MicroversionId tip;
-  std::string expected;
   {
-    Store original;
-    auto at = MicroversionId{};
-    for (int i = 0; i < 6; i++) {
-      at = original.insert(at, static_cast<std::uint32_t>(i), "z");
-    }
-    original.insert(MicroversionId::parse("2"), 1, "w"); // a branch too
-    tip      = at;
-    expected = original.textOf(at);
-
-    // Save normally for the primedia the operations point into, then put the
-    // operations back the way a store written before this change had them.
+    Store original(perma);
+    original.insert(MicroversionId{}, 0, "zzz");
     original.save(dir.string());
     std::vector<xudu::OpRecord> records;
     for (const auto &id : original.allVersions()) {
@@ -658,23 +682,9 @@ TEST_F(StoreRoundTripTest, aStoreWrittenBeforeTheNodeArrayStillOpens) {
     xudu::writeBinaryOpsSpool(out, records);
   }
   std::filesystem::remove(dir / "ops.nodes");
-  ASSERT_TRUE(std::filesystem::exists(dir / "ops.spool"));
 
-  Store opened;
-  opened.load(dir.string());
-  EXPECT_EQ(opened.opCount(), 7U);
-  EXPECT_EQ(opened.textOf(tip), expected);
-
-  // Saving moves it over, and takes the superseded file with it so that
-  // nothing is left holding a second answer.
-  opened.save(dir.string());
-  EXPECT_TRUE(std::filesystem::exists(dir / "ops.nodes"));
-  EXPECT_FALSE(std::filesystem::exists(dir / "ops.spool"));
-
-  Store again;
-  again.load(dir.string());
-  EXPECT_EQ(again.opCount(), 7U);
-  EXPECT_EQ(again.textOf(tip), expected);
+  Store opened(perma);
+  EXPECT_THROW(opened.load(dir.string()), xudu::OpsSegmentUnreadable);
 }
 
 TEST_F(StoreRoundTripTest, osmicTextFormatCanBeGeneratedOnDemand) {
@@ -693,20 +703,24 @@ TEST_F(StoreRoundTripTest, osmicTextFormatCanBeGeneratedOnDemand) {
 TEST_F(StoreRoundTripTest, saveOsmicTextSurvivesBeingLoadedBack) {
   std::filesystem::create_directories(dir);
   {
-    Store store;
+    Store store(perma);
     const auto one = store.insert(MicroversionId{}, 0, "legacy osmic");
     store.insert(one, 12, " test");
     store.saveOsmicText(dir.string());
   }
+  // Under its own name. `ops.spool` meant the binary spool, and using it for
+  // the text form left one name meaning two formats.
+  EXPECT_TRUE(std::filesystem::exists(dir / "ops.export"));
+  EXPECT_FALSE(std::filesystem::exists(dir / "ops.spool"));
 
-  Store reloaded;
+  Store reloaded(perma);
   reloaded.load(dir.string());
   EXPECT_EQ(reloaded.opCount(), 2U);
   EXPECT_EQ(reloaded.textOf(MicroversionId::parse("2")), "legacy osmic test");
 }
 
 TEST_F(StoreRoundTripTest, storeResolveHandlesLocalAndExternalHoles) {
-  Store store;
+  Store store(perma);
   const auto v1 = store.insert(MicroversionId{}, 0, "Local author text");
   EXPECT_EQ(v1.str(), "1");
 
@@ -795,7 +809,7 @@ TEST_F(StoreRoundTripTest,
   MicroversionId v1;
   MicroversionId v2;
   {
-    Store store;
+    Store store(perma);
     v1 = store.insert(MicroversionId{}, 0, "hello");
     v2 = store.insert(v1, 5, " world");
 
@@ -808,10 +822,13 @@ TEST_F(StoreRoundTripTest,
     store.save(dir.string());
   }
 
-  EXPECT_TRUE(std::filesystem::exists(dir / "current.yaml"));
-  EXPECT_TRUE(std::filesystem::exists(dir / "versions.yaml"));
+  // In the side-table container with the scrolls and the links, not in two
+  // YAML files of their own. They are side tables like the others: replayed at
+  // load, meaningless without the operations they name.
+  EXPECT_FALSE(std::filesystem::exists(dir / "current.yaml"));
+  EXPECT_FALSE(std::filesystem::exists(dir / "versions.yaml"));
 
-  Store reloaded;
+  Store reloaded(perma);
   reloaded.load(dir.string());
 
   EXPECT_EQ(reloaded.currentVersions(), (std::vector<MicroversionId>{v1, v2}));

@@ -81,7 +81,12 @@ public:
   bool addSealedSegment(const std::filesystem::path &path);
 
   /**
-   * @brief Set the active writable segment file.
+   * @brief Set the active writable segment file, restoring what it holds.
+   *
+   * The file's bytes are read in at the spool's current end and keep those
+   * addresses, so reopening a permascroll is what makes a span recorded in an
+   * earlier session still resolve. This is the read half of the spool's
+   * persistence; flush() is the write half.
    */
   bool openActiveSegment(const std::filesystem::path &path);
 
@@ -90,7 +95,15 @@ public:
    */
   bool sealActive(const std::filesystem::path &newActivePath);
 
-  /// Synchronize unwritten active bytes to disk.
+  /**
+   * @brief Write everything appended since the last flush to the active
+   *        segment file.
+   *
+   * Appending only ever adds to the end, so this writes the tail rather than
+   * the spool: a flush costs what was typed since the last one. Nothing is
+   * durable until it is called -- append() writes into anonymous memory, which
+   * no msync can reach.
+   */
   bool flush();
 
   /// Reset the spool to empty state.
@@ -110,6 +123,16 @@ private:
 
   int activeFd{-1};
   std::string activePath;
+  /// Where the active segment begins in the spool's address space. The file
+  /// holds [activeStart, totalBytes), so an arena offset's place in the file
+  /// is that offset less this.
+  std::uint64_t activeStart{0};
+  /// How much of the arena the active segment file already holds. Everything
+  /// past it is typed but not yet durable; flush() is what closes the gap.
+  std::uint64_t flushedBytes{0};
+  /// The active segment could be opened for reading but not for writing -- a
+  /// fixture in a read-only checkout, say. flush() writes nothing.
+  bool readOnly{false};
 };
 
 } // namespace xanadu

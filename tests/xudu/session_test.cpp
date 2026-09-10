@@ -93,8 +93,11 @@ TEST_F(StoreMultiStoreTest, independentStoresForMultipleSourceFiles) {
 }
 
 TEST_F(StoreMultiStoreTest, preserveTemporaryStoreToPermanentDirectory) {
+  // One permascroll across both, as a session gives every store it opens: a
+  // document carries operations naming addresses in it, not the bytes.
+  const auto perma    = std::make_shared<xudu::UserPermascroll>();
   const auto tempPath = (testDir / "temp_scratch.xanadoc").string();
-  xudu::Store tempStore;
+  xudu::Store tempStore(perma);
   tempStore.load(tempPath);
 
   const auto ver = tempStore.insert(xudu::MicroversionId{}, 0,
@@ -109,8 +112,11 @@ TEST_F(StoreMultiStoreTest, preserveTemporaryStoreToPermanentDirectory) {
 
   EXPECT_TRUE(fs::exists(permPath));
 
-  // Reload preserved store and verify integrity
-  xudu::Store preservedStore;
+  // Reload preserved store and verify integrity. Preserving a scratch document
+  // moves the document, not the text: the notes were typed into the author's
+  // permascroll and stay there, which is why the copy in the permanent
+  // directory still reads as what was typed.
+  xudu::Store preservedStore(perma);
   preservedStore.load(permPath);
   EXPECT_EQ(preservedStore.opCount(), 1U);
   EXPECT_EQ(preservedStore.rebuild(ver).materialize(preservedStore),

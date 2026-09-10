@@ -287,16 +287,8 @@ std::string segmentFields(const xudu::ScrollSegment &segment) {
 /// The side tables, from the one container they live in. Rendered in the same
 /// shape the plaintext files were rendered in, so that migration step 11's
 /// conversion is a diff of this output rather than a claim about it.
-void dumpTables(const std::filesystem::path &path, bool wantScrolls,
+void dumpTables(const xudu::StoreTables &tables, bool wantScrolls,
                 bool wantLinks) {
-  xudu::StoreTables tables;
-  try {
-    tables = xudu::readStoreTables(path);
-  } catch (const std::exception &e) {
-    trouble(e.what());
-    return;
-  }
-
   if (wantScrolls) {
     for (std::size_t i = 0; i < tables.scrolls.size(); i++) {
       const auto &scroll = tables.scrolls[i];
@@ -333,41 +325,58 @@ void dumpTables(const std::filesystem::path &path, bool wantScrolls,
   }
 }
 
-void dumpText(const std::filesystem::path &path, const char *const label) {
-  std::ifstream in(path);
-  std::string line;
-  while (std::getline(in, line)) {
-    if (!line.empty()) {
-      std::cout << label << "  " << line << '\n';
-    }
+/// The author-facing metadata, from the same container. Was two YAML files
+/// echoed line by line; is now rendered from the tables, so that the move is a
+/// diff of this output rather than a claim about it.
+void dumpVersions(const xudu::StoreTables &tables) {
+  for (const auto &id : tables.currentVersions) {
+    std::cout << "current  " << id.str() << '\n';
+  }
+  for (const auto &[id, annotation] : tables.versionAnnotations) {
+    std::cout << "version " << id.str() << "  alias="
+              << (annotation.alias.empty() ? "-" : annotation.alias)
+              << " tag=" << (annotation.tag.empty() ? "-" : annotation.tag)
+              << " timestamp="
+              << (annotation.timestamp.empty() ? "-" : annotation.timestamp)
+              << " description=" << excerpt(annotation.description) << '\n';
   }
 }
 
 void usage() {
   std::cerr
-      << "usage: xudu-dump [--section=SECTION] <store-directory|ops-file>\n"
+      << "usage: xudu-dump [--section=SECTION] [--permascroll=PATH]\n"
+         "                 <store-directory|ops-file>\n"
          "\n"
          "  Renders a xudu store as text without going through the loader,\n"
          "  so that a store the loader refuses can still be looked at.\n"
          "\n"
          "  SECTION is one of: all (default), header, ops, scrolls, links,\n"
-         "  primedia, versions.\n"
+         "  versions.\n"
          "\n"
          "  --section=ops is the one to diff across a format change: it\n"
          "  renders what each operation means, so a change that preserves\n"
          "  meaning produces identical output. --section=header is where a\n"
-         "  version bump is supposed to show.\n";
+         "  version bump is supposed to show.\n"
+         "\n"
+         "  A store holds no primedia of its own -- what was typed lives in\n"
+         "  the author's permascroll -- so --permascroll is what lets an\n"
+         "  operation render the text its span names. PATH is the permascroll\n"
+         "  directory or its active segment file. Without it every other\n"
+         "  field still renders; only text= is missing.\n";
 }
 
 } // namespace
 
 int main(int argc, char **argv) {
   std::string section = "all";
+  std::filesystem::path permascroll;
   std::filesystem::path target;
   for (int i = 1; i < argc; i++) {
     const std::string arg = argv[i];
     if (arg.starts_with("--section=")) {
       section = arg.substr(std::strlen("--section="));
+    } else if (arg.starts_with("--permascroll=")) {
+      permascroll = arg.substr(std::strlen("--permascroll="));
     } else if ("-h" == arg || "--help" == arg) {
       usage();
       return 0;
@@ -390,10 +399,27 @@ int main(int argc, char **argv) {
     return "all" == section || section == name;
   };
   if (!wants("header") && !wants("ops") && !wants("scrolls") &&
-      !wants("links") && !wants("primedia") && !wants("versions")) {
+      !wants("links") && !wants("versions")) {
     std::cerr << "xudu-dump: no such section \"" << section << "\"\n";
     usage();
     return 2;
+  }
+
+  // The author's permascroll, which is where the content an operation names
+  // actually lives. A directory is taken as a permascroll's own storage
+  // directory; a file is taken as its active segment, which is what
+  // --dump-permascroll writes.
+  std::string primedia;
+  if (!permascroll.empty()) {
+    const auto activeSegment = std::filesystem::is_directory(permascroll)
+                                   ? permascroll / "active.primedia"
+                                   : permascroll;
+    primedia                 = readWhole(activeSegment);
+    if (primedia.empty()) {
+      trouble(activeSegment.string() +
+              ": no primedia here, so operations render without the text "
+              "their spans name");
+    }
   }
 
   // A bare file is taken as an operations segment, which is the common case
@@ -404,7 +430,7 @@ int main(int argc, char **argv) {
       dumpOpsHeader(file);
     }
     if (wants("ops")) {
-      dumpOps(file, {});
+      dumpOps(file, primedia);
     }
     return sawTrouble ? 1 : 0;
   }
@@ -413,9 +439,15 @@ int main(int argc, char **argv) {
     return std::filesystem::exists(target / name);
   };
 
-  std::string primedia;
-  if (exists("primedia.spool")) {
-    primedia = readWhole(target / "primedia.spool");
+  // A store from before primedia stopped being siloed per document. Said
+  // rather than ignored: its operations name addresses in *this* file, so
+  // pointing --permascroll at it is what makes the dump mean anything.
+  if (exists("primedia.spool") && permascroll.empty()) {
+    trouble((target / "primedia.spool").string() +
+            ": a store carrying its own copy of the permascroll. Pass "
+            "--permascroll=" +
+            (target / "primedia.spool").string() +
+            " to render the text its operations name.");
   }
 
   if (exists("ops.nodes") && (wants("header") || wants("ops"))) {
@@ -433,22 +465,23 @@ int main(int argc, char **argv) {
         "it with xudu to bring it forward; this renders nodes only.");
   }
 
-  if (wants("primedia")) {
-    std::cout << "primedia  bytes=" << primedia.size();
-    if (!primedia.empty()) {
-      std::cout << " head=" << excerpt(primedia);
-    }
-    std::cout << '\n';
-  }
-  if ((wants("scrolls") || wants("links")) && exists("store.tables")) {
-    dumpTables(target / "store.tables", wants("scrolls"), wants("links"));
-  }
-  if (wants("versions")) {
-    if (exists("current.yaml")) {
-      dumpText(target / "current.yaml", "current");
-    }
-    if (exists("versions.yaml")) {
-      dumpText(target / "versions.yaml", "versions");
+  if (wants("scrolls") || wants("links") || wants("versions")) {
+    if (exists("store.tables")) {
+      try {
+        const auto tables = xudu::readStoreTables(target / "store.tables");
+        dumpTables(tables, wants("scrolls"), wants("links"));
+        if (wants("versions")) {
+          dumpVersions(tables);
+        }
+      } catch (const std::exception &e) {
+        trouble(e.what());
+      }
+    } else if (wants("versions") &&
+               (exists("current.yaml") || exists("versions.yaml"))) {
+      trouble((target / "current.yaml").string() +
+              ": author-facing metadata from before it moved into "
+              "store.tables. Open and save the store with xudu to bring it "
+              "forward.");
     }
   }
 

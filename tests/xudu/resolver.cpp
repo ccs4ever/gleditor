@@ -255,9 +255,13 @@ struct TorrentStoreRoundTripTest : TorrentDataTest {};
 
 TEST_F(TorrentStoreRoundTripTest, aTorrentBackedQuotationSurvivesAReload) {
   const auto storeDir = (dir / "xanadoc").string();
+  // One permascroll across the reload: the "Nelson wrote: " half is local, and
+  // a store keeps no copy of local primedia. The quoted half is external and
+  // comes from the torrent either way, which is the point of the test.
+  const auto perma = std::make_shared<xudu::UserPermascroll>();
   MicroversionId quoted;
   {
-    Store store;
+    Store store(perma);
     store.setContentSource(&source);
     const auto one = store.insert(MicroversionId{}, 0, "Nelson wrote: ");
     quoted         = store.transcludeExternal(
@@ -265,7 +269,7 @@ TEST_F(TorrentStoreRoundTripTest, aTorrentBackedQuotationSurvivesAReload) {
     store.save(storeDir);
   }
 
-  Store reloaded;
+  Store reloaded(perma);
   reloaded.load(storeDir);
   reloaded.setContentSource(&source);
 
@@ -296,7 +300,10 @@ TEST_F(TorrentDataTest, aStoreWhoseSideTablesArePlaintextIsRefused) {
     std::filesystem::create_directories(storeDir);
     write(std::filesystem::path(storeDir) / superseded,
           std::string{xudu_test::singleFileHash} + " 0 0 4 fox.txt\n");
-    write(std::filesystem::path(storeDir) / "ops.spool",
+    // In the OSMIC text export's own name. Written as `ops.spool` this would
+    // be refused for *that* instead, which would leave the plaintext side
+    // table below untested.
+    write(std::filesystem::path(storeDir) / "ops.export",
           "1 transclude 0 0 0 4 5 0 0 0 0 1\n");
 
     Store loaded;
@@ -319,7 +326,8 @@ TEST_F(TorrentDataTest, savingClearsTheTablesTheContainerReplaced) {
   write(std::filesystem::path(storeDir) / "scrolls.spool", "stale\n");
   write(std::filesystem::path(storeDir) / "links.spool", "stale\n");
 
-  Store store;
+  const auto perma = std::make_shared<xudu::UserPermascroll>();
+  Store store(perma);
   static_cast<void>(store.insert(MicroversionId{}, 0, "hello"));
   store.save(storeDir);
 
@@ -328,7 +336,7 @@ TEST_F(TorrentDataTest, savingClearsTheTablesTheContainerReplaced) {
   EXPECT_FALSE(std::filesystem::exists(where / "scrolls.spool"));
   EXPECT_FALSE(std::filesystem::exists(where / "links.spool"));
 
-  Store reloaded;
+  Store reloaded(perma);
   reloaded.load(storeDir);
   EXPECT_EQ(reloaded.textOf(MicroversionId::parse("1")), "hello");
 }

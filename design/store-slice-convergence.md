@@ -439,6 +439,14 @@ Three consequences, taken now:
   any store as text. A format is not obliged to be human-readable; a toolchain is obliged to be able
   to show it. `ops.nodes` has always been binary and has never been the hard one to debug.
 
+A fourth followed later, in migration step 13, on the same reasoning applied to the last two
+plaintext files: **`current.yaml` and `versions.yaml` become sections of that same container.** They
+were described as "still YAML on purpose", but no purpose was ever recorded for it — the phrase was
+written down long after the files were, and the consequence directly above argues the other way.
+They are per-store side tables replayed at load, exactly like the scroll registry and the link
+table, and being three artefacts instead of one bought only three ways for a save to be half
+written.
+
 **Price.** Stores written before the bump do not open. That is acceptable *today* and will stop
 being acceptable the first time someone outside this repository has a document they care about, so
 the ruling carries its own expiry: **R11 is void at first external publication**, and the commit
@@ -1021,7 +1029,9 @@ third writer and looking at the other two first.
 
 *And the cheapest check on all of it is `xudu-dump --section=ops`, diffed.* It renders what an
 operation means rather than how it is stored, so a step that preserves meaning shows an empty diff —
-which is how step 12 demonstrated "no behaviour change" rather than asserting it.
+which is how step 12 demonstrated "no behaviour change" rather than asserting it, and how step 13
+demonstrated that moving every byte of primedia out of the store changed no operation: `ops.nodes`
+came back byte-identical across every regenerated fixture.
 
 1. ~~**Sealed-segment immutability** (R10).~~ **Done.** `firstChildIndex`/`nextSiblingIndex` left
    `CompactOpNode` for `SegmentedOpsSpool::tree`, and the eight bytes became `value` at offset 56 in
@@ -1187,9 +1197,15 @@ which is how step 12 demonstrated "no behaviour change" rather than asserting it
    four-operation store measures 65,792 bytes and occupies 8 KiB on disk.
 
 1. ~~**`tools/xudu-dump`** (R11).~~ **Done.** Renders the header, `ops.nodes`, the scroll registry,
-   the link table, the permascroll and the current-version metadata as text, and is in `all` rather
-   than an optional target: it is reached for exactly when a store will not open, and a debugging
-   tool that stopped building three commits ago is one that is not there when it is finally needed.
+   the link table and the version metadata as text, and is in `all` rather than an optional target:
+   it is reached for exactly when a store will not open, and a debugging tool that stopped building
+   three commits ago is one that is not there when it is finally needed.
+
+   Since step 13 it takes `--permascroll=<dir>` as well, because the store it is pointed at no
+   longer holds the content its operations name. Without one every other field still renders and
+   only `text=` goes missing, which is the right default for a tool whose job is to show what it
+   can: the permascroll is a separate artefact, and may well not be to hand when the store is the
+   thing that is broken.
 
    **It does not go through `Store::load()`, and that is the design rather than an oversight.** The
    case it exists for is a store the loader refuses, so a dump that needed the loader to work first
@@ -1289,7 +1305,9 @@ which is how step 12 demonstrated "no behaviour change" rather than asserting it
    scrolls at all — every span into quoted content resolving to nothing, the document looking like
    it had lost its quotations rather than like it had not opened. `load()` refuses such a directory
    by name, and `save()` removes the superseded files once the container is written, the way it
-   already removes `ops.spool` once the node array exists.
+   already removed the pre-node-array `ops.spool` once `ops.nodes` existed. (Step 13 stopped
+   *reading* that one at all: silently upgrading it on the next save was itself a shim, and R11 does
+   not make an exception for the convenient ones. It is refused by name now, like the rest.)
 
    Two smaller things. `saveOsmicText()` writes the container too rather than the old plaintext:
    what that export is *for* is the operations in canonical OSMIC text, and writing side tables no
@@ -1324,6 +1342,63 @@ which is how step 12 demonstrated "no behaviour change" rather than asserting it
    `localScroll`, had never once run. Adding two more optional columns would have made three
    unreachable fallbacks. The required columns are now checked first and each optional one clears
    the failure state it leaves behind, with a test for an eleven-column line.
+
+1. ~~**A store stops carrying primedia** (R11).~~ **Done.** `Store::save()` no longer writes
+   `primedia.spool`, `load()` no longer reads one, and `current.yaml`/`versions.yaml` are gone into
+   `store.tables` as two more sections at format version 2. A store directory is now `ops.nodes`,
+   `store.tables`, and — only with `--export-osmic` — `ops.export`.
+
+   **The premise turned out to be half true, which is why this needed doing rather than
+   documenting.** "One permascroll per user" was already the in-memory model: every `Store` in a
+   session shares one `UserPermascroll`. But `save()` still serialised the whole of it into every
+   document's directory, and `load()` read it back with a "the file is a prefix of what we have, so
+   append the tail" rule that only worked because every store rewrote the whole scroll every time.
+   Two open documents meant two copies of everything the author had ever typed.
+
+   **And the permascroll's own persistence did not exist.** `UserPermascroll::Config::storageDir`
+   was dead: `SegmentedPrimediaSpool::append()` writes into anonymous arena pages,
+   `openActiveSegment()` opened an fd without reading the file or setting `totalBytes`, and
+   `flush()` `msync`ed anonymous memory — which writes nowhere — then `fsync`ed a file no byte had
+   ever reached. `active.primedia` was created empty and stayed empty. So `primedia.spool` really
+   was the only durable copy of every byte anyone had typed, including in `xudu` itself, which built
+   its permascroll with the default `Config`. The spool now restores on open and writes its
+   unflushed tail on `flush()`, append-only; and the constructor binds the active segment
+   unconditionally rather than only when the file already exists — that guard meant a *first*
+   session had nowhere to write, and the author's first document reopened empty.
+
+   **The price is that a store directory is no longer portable.** Its local spans are addresses in a
+   permascroll it does not contain, so copying one to another machine copies an edit decision list
+   pointing at content that machine does not have. That is correct rather than regrettable — sharing
+   a document is `publish()`, which seals the spans it needs into a scroll — but it is a real change
+   in what a directory means, and it lands on the fixtures: `tests/samples/xudu/` grew a shared
+   `permascroll/` that `SampleXanadocsTest` opens and hands to every `Store`, and the generator
+   scripts bind it with `--permascroll` instead of writing and re-reading `000.scroll` around every
+   invocation. `make` exports `XDG_DATA_HOME` and `XDG_CONFIG_HOME` into `build/xdg/` for the same
+   reason: a suite that types into the real permascroll of whoever ran it leaves it there.
+
+   **Refusing, not silently opening.** A directory holding `primedia.spool`, `ops.spool`,
+   `current.yaml` or `versions.yaml` is refused by name. The first is the one that matters: opening
+   such a store against the caller's permascroll would resolve every local span at an offset into
+   the wrong scroll and render a document that is not the document — worse than failing, because it
+   looks like it worked. The message says where the bytes are, since that file *is* the permascroll
+   those addresses were written against. `Session::systemStoreIndex()` now catches
+   `StoreTablesUnreadable` alongside `OpsSegmentUnreadable`, or every system xanadoc written by an
+   older build would have become a reason the program will not start.
+
+   **`ops.spool` is retired as a name, not only as a format.** It meant the binary operations spool
+   when the spool was a file; since `ops.nodes` it names the in-memory `SegmentedOpsSpool`, so one
+   name meant two things. The export is `ops.export` and holds either encoding, because
+   `readOpsSpool()` tells them apart by magic. The three store-presence probes in `session.cpp` and
+   `main.cpp` key off `ops.nodes`/`store.tables` instead.
+
+   **On the YAML.** `current.yaml` and `versions.yaml` were described as "still YAML on purpose",
+   but no purpose was ever recorded for it — the phrase entered `CLAUDE.md` in the docs-catchup
+   commit that noticed them, and §3.5 of
+   [`system-xanadocs-customization-and-metasystem.md`](system-xanadocs-customization-and-metasystem.md)
+   documents their *shape* without arguing for the encoding anywhere. R11's third consequence argues
+   the other way, and they are side tables like the scrolls and the links: replayed at load,
+   meaningless without the operations they name. `xudu-dump --section=versions` renders them, and
+   the tool gained `--permascroll` so that `--section=ops` can still show the text a span names.
 
 1. **`Manifold` plus `rebuildManifold()` plus the `makeCell`/`setLink`/`setValue` API** (R7, R9,
    R12), with `verifyAgainstFullRebuild()` and its test. CSR link runs, `d.dims` and the two genesis

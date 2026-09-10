@@ -92,10 +92,22 @@ So BitTorrent cannot *be* a permascroll, and btfs -- read-only -- cannot even be
 one. But it can carry one, in a shape that fits Xanadu comfortably:
 
 - The permascroll is an ordered sequence of **immutable segments**.
+
 - A segment, once sealed, becomes a torrent. Its content is addressed by hash, verifiable forever,
   and servable by anyone who has it.
+
 - The **live tail** -- content appended since the last seal -- is an ordinary append-only file on
   the storage server. It is the one part that cannot be a torrent, because it is still growing.
+
+  This is now what the code does, which it was not when this was written. `SegmentedPrimediaSpool`'s
+  active segment is that file: `openActiveSegment()` reads it back at the addresses its bytes
+  already had, and `flush()` appends what has been typed since the last one, so a flush costs what
+  was typed rather than the length of the scroll. Until migration step 13 of
+  [`store-slice-convergence.md`](store-slice-convergence.md) none of it worked -- appends went to
+  anonymous memory and `flush()` `msync`ed pages backed by nothing -- and what actually persisted a
+  user's text was a copy of the whole permascroll written into every document directory. The shape
+  described here was right; it just was not built yet.
+
 - A stable name for the whole scroll is a **BEP 46 mutable torrent**: a DHT item signed by the
   publisher's key, whose payload is the info hash of the current index. It is written
   `magnet:?xs=urn:btpk:<public key>`, and the publisher updates it by republishing with a higher

@@ -54,7 +54,15 @@ inline constexpr std::array<std::uint8_t, 12> storeTablesSignature{
 
 /// Bumped per R11 when the shape below changes. A reader that does not know a
 /// version reads nothing rather than guessing.
-inline constexpr std::uint32_t storeTablesFormatVersion = 1;
+///
+/// Version 2 folds in what `current.yaml` and `versions.yaml` held. They were
+/// described as "still YAML on purpose", but no purpose was ever recorded for
+/// it, and R11's third consequence argues the other way: a format is not
+/// obliged to be human-readable, a toolchain is obliged to be able to show it.
+/// Two more parse paths, two more files to keep in step with a save, and two
+/// more ways for a store to be half-written bought nothing the dump tool does
+/// not buy back.
+inline constexpr std::uint32_t storeTablesFormatVersion = 2;
 
 /**
  * @class StoreTablesUnreadable
@@ -67,6 +75,23 @@ inline constexpr std::uint32_t storeTablesFormatVersion = 1;
 class StoreTablesUnreadable : public std::runtime_error {
 public:
   using std::runtime_error::runtime_error;
+};
+
+/**
+ * @brief Human-readable annotations, aliases, and semantic tags for a
+ *        microversion.
+ *
+ * Lives here rather than beside Store because it is a side table like the
+ * others: replayed at load, meaning nothing without the operations it names,
+ * and no part of what an operation *is*.
+ */
+struct VersionAnnotation {
+  std::string alias;
+  std::string description;
+  std::string tag;
+  std::string timestamp;
+
+  bool operator==(const VersionAnnotation &) const = default;
 };
 
 /**
@@ -83,6 +108,11 @@ struct StoreTables {
   std::vector<ScrollSegment> localSegments;
   /// Links by id.
   std::map<std::uint64_t, Link> links;
+  /// The author's designated current versions, in the order they were set.
+  /// Empty means unset, which Store reports as {latest()}.
+  std::vector<MicroversionId> currentVersions;
+  /// Aliases, descriptions and tags, by the microversion they annotate.
+  std::map<MicroversionId, VersionAnnotation> versionAnnotations;
 };
 
 /// Write @p tables to @p path, header and all.

@@ -30,6 +30,19 @@ SDL_AUDIODRIVER       ?= dummy
 LIBGL_ALWAYS_SOFTWARE ?= 1
 export SDL_VIDEODRIVER SDL_AUDIODRIVER LIBGL_ALWAYS_SOFTWARE
 
+# And under the build tree, not the developer's home. A store holds no primedia
+# of its own: what was typed lives in the author's permascroll, which xudu
+# resolves to $XDG_DATA_HOME/xudu/permascroll by default. Without this, running
+# the suite writes every byte the tests type into the real permascroll of
+# whoever ran it, and it stays there. $XDG_CONFIG_HOME is the same argument for
+# the system xanadocs -- keymap, settings, layout, ui -- which xudu writes for
+# itself on first run and which a test run would otherwise overwrite with
+# whatever that test was demonstrating. Same `?=` reasoning as above: point
+# either somewhere else and that survives.
+XDG_DATA_HOME   ?= $(CURDIR)/build/xdg/data
+XDG_CONFIG_HOME ?= $(CURDIR)/build/xdg/config
+export XDG_DATA_HOME XDG_CONFIG_HOME
+
 # clang++ is the default, but only when nothing else asked for a compiler. A
 # distribution package is built with the compiler that distribution chose --
 # gcc, almost always -- and the plain `=` that used to be here silently ignored
@@ -1060,6 +1073,22 @@ SHELLCHECK   := $(shell command -v shellcheck 2>/dev/null)
 YAMLLINT     := $(shell command -v yamllint 2>/dev/null)
 MDL          := $(shell command -v mdl 2>/dev/null)
 
+# mdformat is useless to this tree without its plugins, and worse than useless
+# quietly: plain mdformat has no concept of GFM tables (it reflows them into
+# prose), of `$...$` math (it re-escapes the backslash, turning \text into
+# \\text), or of the YAML front matter on .agents/skills/*.md (it reads the
+# closing --- as a thematic break and mangles everything after it). A machine
+# with the binary and none of the plugins therefore ran `make format` happily
+# and corrupted every design/ file it touched.
+#
+# `--extensions` *requires* the plugin rather than merely enabling it, so
+# naming all three turns that silent corruption into a refusal that says which
+# plugin is missing and writes nothing. It is the difference between a
+# formatter that is absent -- which the ifdefs below already handle -- and one
+# that is present but not equipped, which nothing could previously detect.
+MDFORMAT_EXTENSIONS := --extensions gfm --extensions dollarmath --extensions frontmatter
+MDFORMAT_FLAGS      := $(MDFORMAT_EXTENSIONS) --wrap 100
+
 # yamlfmt and mdformat read their settings from .yamlfmt and (via .mdlrc's
 # sibling .mdl_style.rb) the same conventions yamllint and mdl check for, so
 # a file the formatter just wrote is a file the linter already accepts --
@@ -1081,7 +1110,7 @@ else
 	@echo "yamlfmt not found, skipping YAML formatting"
 endif
 ifdef MDFORMAT
-	$(MDFORMAT) --wrap 100 $(MD_FORMAT_FILES)
+	$(MDFORMAT) $(MDFORMAT_FLAGS) $(MD_FORMAT_FILES)
 else
 	@echo "mdformat not found, skipping Markdown formatting"
 endif
@@ -1109,7 +1138,7 @@ else
 	@echo "yamlfmt not found, skipping YAML format check"
 endif
 ifdef MDFORMAT
-	$(MDFORMAT) --check --wrap 100 $(MD_FORMAT_FILES)
+	$(MDFORMAT) --check $(MDFORMAT_FLAGS) $(MD_FORMAT_FILES)
 else
 	@echo "mdformat not found, skipping Markdown format check"
 endif

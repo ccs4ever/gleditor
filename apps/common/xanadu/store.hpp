@@ -1,7 +1,6 @@
 /**
  * @file store.hpp
- * @brief The two spools together, and the three things a server does with
- *        them.
+ * @brief An edit decision list, and the three things a server does with it.
  *
  * "The server does not store versions. Nothing stores versions. Versions
  * themselves are not saved, but regenerated as needed from these two files."
@@ -11,6 +10,16 @@
  * it produced. A version is rebuilt by replaying the operations its name
  * spells out, which is why MicroversionId::path() exists and why nothing here
  * has a cache of documents to keep in step.
+ *
+ * The two files are not both *here*. Primedia is never siloed per document:
+ * everything typed goes into the author's one UserPermascroll, and a store
+ * holds operations naming addresses in it. So a store directory is an edit
+ * decision list -- `ops.nodes` and `store.tables` -- and is not readable
+ * without the permascroll its local spans point into. It used to write a copy
+ * of the whole permascroll beside itself as `primedia.spool`, which made every
+ * open document a second place the author's text lived and a second thing that
+ * could be stale. Sharing a document is publish(), which seals the spans it
+ * needs into a scroll; it has never been copying the directory.
  *
  * The protocol Nelson describes has three functions, and they are the three
  * public methods that name them below: store an op under an ascending number,
@@ -37,21 +46,11 @@
 #include "segmented_ops_spool.hpp"
 #include "segmented_primedia_spool.hpp"
 #include "spool.hpp"
+#include "store_tables.hpp"
 #include "user_permascroll.hpp"
 #include "version.hpp"
 
 namespace xanadu {
-
-/**
- * @brief Human-readable annotations, aliases, and semantic tags for a
- * microversion.
- */
-struct VersionAnnotation {
-  std::string alias;
-  std::string description;
-  std::string tag;
-  std::string timestamp;
-};
 
 /**
  * @brief Classification of text spans during mathematical primedia identity
@@ -104,7 +103,8 @@ struct MultiVersionDiffResult {
 
 /**
  * @class Store
- * @brief A xanadoc: one primedia spool, one operations spool, and its links.
+ * @brief A xanadoc: an operations spool and its side tables, over the author's
+ *        permascroll.
  */
 class Store : public SpanReader {
 public:
@@ -557,16 +557,18 @@ public:
   // -- persistence ----------------------------------------------------------
 
   /**
-   * @brief Write the store to @p directory as its two spools and a link file.
+   * @brief Write the store to @p directory as `ops.nodes` and `store.tables`.
    *
-   * The primedia spool is written as the bytes it is. The operations spool is
-   * written in an ultra-compact binary format.
+   * Also flushes the author's permascroll, which is where the content those
+   * operations name actually lives. Two files rather than one call's worth of
+   * bytes: what a document *is* stays here, and what was typed stays in one
+   * place per author no matter how many documents quote it.
    */
   void save(const std::string &directory) const;
 
   /**
    * @brief Write the store to @p directory using canonical human-readable
-   *        OSMIC text format for the operations spool.
+   *        OSMIC text format for the operations, as `ops.osmic`.
    */
   void saveOsmicText(const std::string &directory) const;
 
@@ -629,8 +631,9 @@ private:
    * be maintained in step was what this replaced.
    *
    * The order is by microversion, which is the order the spool used to be
-   * iterated in when a std::map held it, and so is the order every ops.spool
-   * already on disk was written in. It is not the order that would compress
+   * iterated in when a std::map held it, and so is the order every operations
+   * export already written was written in. It is not the order that would
+   * compress
    * best -- a branch sorts into the middle of the chain it forks from, which
    * breaks the run of names FLAG_SEQUENTIAL depends on and leaves the main
    * chain in pieces -- but changing it changes the bytes written, so it is a
@@ -650,16 +653,6 @@ private:
   void adoptOpRecords(const std::vector<OpRecord> &records);
 
   std::shared_ptr<UserPermascroll> userPermascroll_;
-  /// How many bytes of @ref userPermascroll_ are already on disk, and in which
-  /// directory.
-  /// The primedia spool only ever grows, so a save to the directory the last
-  /// one went to appends what is new rather than rewriting the whole thing --
-  /// which is what made saving cost the length of the document rather than
-  /// the length of what had just been typed. Reset by load(); advanced by
-  /// save(). A save to any other directory rewrites from scratch, since
-  /// nothing is known about what is already there.
-  mutable std::uint64_t primediaFlushed{0};
-  mutable std::string flushedPrimediaDirectory;
   /// Scrolls other than the local spool, in the order they were first
   /// recorded. A span's ScrollId is one more than the index here, so that zero
   /// stays the local spool.
@@ -680,8 +673,6 @@ private:
   SegmentedOpsSpool opsSpool;
   std::map<std::uint64_t, Link> linkTable;
   std::uint64_t nextLinkId{1};
-
-  void saveMetadata(const std::filesystem::path &dir) const;
 
   mutable std::vector<MicroversionId> currentVersions_;
   std::map<MicroversionId, VersionAnnotation> versionAnnotations_;

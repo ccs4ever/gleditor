@@ -208,6 +208,22 @@ managed via a multi-tiered virtual address layout
    allocations, `SegmentedOpsSpool` maintains an open-addressing linear probing hash table
    (`idHashSlots`) indexed by 64-bit FNV-1a hashes of `MicroversionId::Segment` records.
 
+**The two spools' active segments are not durable the same way, and the difference is deliberate.**
+Sealed segments are mapped, identically for both. The *active* one differs: `SegmentedOpsSpool`
+writes its whole node array out on save, while `SegmentedPrimediaSpool` keeps an append-only file
+and, on `flush()`, `pwrite`s only the run appended since the last one — so a flush costs what was
+typed rather than the length of the permascroll, which for one scroll accumulating an author's whole
+writing life is the difference between saving being free and being felt.
+
+It follows that appending to the primedia spool writes into *anonymous* committed pages, not into a
+mapping of the file. `msync` on those reaches nothing, which is worth knowing because it is exactly
+how this went wrong: `flush()` used to `msync` the arena and then `fsync` a file no byte had ever
+been written to, so `active.primedia` was created empty and stayed empty, and the only thing
+actually persisting an author's text was the copy of the whole permascroll that every store wrote
+into its own directory. Migration step 13 of
+[`store-slice-convergence.md`](store-slice-convergence.md) built the real thing and removed the
+copy.
+
 ### Segment files, and the header they got
 
 A segment file is an `OpsSegmentHeader` followed by a run of `CompactOpNode`s: no state-zero slot,

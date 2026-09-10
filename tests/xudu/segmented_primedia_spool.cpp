@@ -157,4 +157,113 @@ TEST(SegmentedPrimediaSpoolTest, appendAndReadBinaryMediaPayload) {
   EXPECT_EQ(std::memcmp(readBack.data(), pngBytes.data(), pngBytes.size()), 0);
 }
 
+// -- the active segment, which is the permascroll's persistence --------------
+//
+// A store is an edit decision list and holds no primedia of its own, so this
+// file is the only copy of what an author typed. It did nothing for a while:
+// append() writes into anonymous pages, flush() msync'd them (which writes
+// nowhere) and then fsync'd a file no byte had reached, and openActiveSegment()
+// created the file without ever reading it back. Every one of these covers a
+// half of that.
+
+struct ActiveSegmentTest : testing::Test {
+  std::filesystem::path dir;
+
+  void SetUp() override {
+    dir =
+        std::filesystem::temp_directory_path() /
+        ("xudu-primedia-" +
+         std::string(
+             ::testing::UnitTest::GetInstance()->current_test_info()->name()));
+    std::filesystem::remove_all(dir);
+    std::filesystem::create_directories(dir);
+  }
+  void TearDown() override { std::filesystem::remove_all(dir); }
+};
+
+TEST_F(ActiveSegmentTest, whatWasAppendedComesBackInANewSpool) {
+  const auto path = dir / "active.primedia";
+  {
+    SegmentedPrimediaSpool spool;
+    ASSERT_TRUE(spool.openActiveSegment(path));
+    spool.append("the quick brown fox");
+    ASSERT_TRUE(spool.flush());
+  }
+
+  SegmentedPrimediaSpool reopened;
+  ASSERT_TRUE(reopened.openActiveSegment(path));
+  EXPECT_EQ(reopened.size(), 19U);
+  EXPECT_EQ(reopened.bytes(), "the quick brown fox");
+}
+
+TEST_F(ActiveSegmentTest, aSpanKeepsItsAddressAcrossASession) {
+  // The whole point of persisting at all: an operation recorded in one session
+  // names a primedia address, and the document is only still readable in the
+  // next one if that address means the same thing.
+  const auto path = dir / "active.primedia";
+  PrimediaSpan quoted;
+  {
+    SegmentedPrimediaSpool spool;
+    ASSERT_TRUE(spool.openActiveSegment(path));
+    spool.append("see: ");
+    quoted = spool.append("quick");
+    ASSERT_TRUE(spool.flush());
+  }
+
+  SegmentedPrimediaSpool reopened;
+  ASSERT_TRUE(reopened.openActiveSegment(path));
+  EXPECT_EQ(reopened.read(quoted), "quick");
+}
+
+TEST_F(ActiveSegmentTest, appendingAfterAReopenContinuesTheSameAddresses) {
+  const auto path = dir / "active.primedia";
+  {
+    SegmentedPrimediaSpool spool;
+    ASSERT_TRUE(spool.openActiveSegment(path));
+    spool.append("one");
+    ASSERT_TRUE(spool.flush());
+  }
+
+  PrimediaSpan second;
+  {
+    SegmentedPrimediaSpool spool;
+    ASSERT_TRUE(spool.openActiveSegment(path));
+    second = spool.append(" two");
+    // Past what the file already held, not over it.
+    EXPECT_EQ(second.start, 3U);
+    ASSERT_TRUE(spool.flush());
+  }
+
+  SegmentedPrimediaSpool reopened;
+  ASSERT_TRUE(reopened.openActiveSegment(path));
+  EXPECT_EQ(reopened.bytes(), "one two");
+  EXPECT_EQ(reopened.read(second), " two");
+}
+
+TEST_F(ActiveSegmentTest, flushingTwiceWritesOnlyTheTail) {
+  // A flush costs what was typed since the last one, not the length of the
+  // document. A whole-spool rewrite would still pass every assertion above,
+  // so this checks the file rather than what it reads as.
+  const auto path = dir / "active.primedia";
+  SegmentedPrimediaSpool spool;
+  ASSERT_TRUE(spool.openActiveSegment(path));
+  spool.append("one");
+  ASSERT_TRUE(spool.flush());
+  EXPECT_EQ(std::filesystem::file_size(path), 3U);
+  ASSERT_TRUE(spool.flush());
+  EXPECT_EQ(std::filesystem::file_size(path), 3U)
+      << "a flush with nothing appended since the last one wrote again";
+  spool.append(" two");
+  ASSERT_TRUE(spool.flush());
+  EXPECT_EQ(std::filesystem::file_size(path), 7U);
+}
+
+TEST_F(ActiveSegmentTest, nothingIsDurableUntilItIsFlushed) {
+  const auto path = dir / "active.primedia";
+  SegmentedPrimediaSpool spool;
+  ASSERT_TRUE(spool.openActiveSegment(path));
+  spool.append("typed but not flushed");
+  EXPECT_EQ(std::filesystem::file_size(path), 0U);
+}
+
 } // namespace

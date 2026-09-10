@@ -149,14 +149,24 @@ UserPermascroll::UserPermascroll(Config config) : config_(std::move(config)) {
     std::error_code ec;
     std::filesystem::create_directories(config_.storageDir / "segments", ec);
 
-    const auto activePath = config_.storageDir / "active.primedia";
-    if (std::filesystem::exists(activePath, ec)) {
-      spool_.openActiveSegment(activePath);
-    }
+    // Unconditionally, not only when the file is already there. This is what
+    // binds the spool to its backing file in *both* directions -- it restores
+    // what the file holds and it is what a later flush() writes through -- so
+    // skipping it for a permascroll that does not exist yet left the first
+    // session with nowhere to write, and the author's first document reopened
+    // empty. openActiveSegment() creates the file.
+    spool_.openActiveSegment(config_.storageDir / "active.primedia");
   }
 }
 
-UserPermascroll::~UserPermascroll() = default;
+UserPermascroll::~UserPermascroll() {
+  // A permascroll is the only copy of what its author typed, and nothing else
+  // holds a reference by the time this runs. Losing the unflushed tail here
+  // would lose the end of the session -- the part most likely to matter.
+  if (!config_.storageDir.empty()) {
+    spool_.flush();
+  }
+}
 
 PrimediaSpan UserPermascroll::append(const std::string_view text) {
   std::lock_guard lock(appendMutex_);

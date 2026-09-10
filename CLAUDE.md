@@ -82,11 +82,21 @@ sites to keep up to date.
 
 `?=`, so an explicit request survives — `SDL_VIDEODRIVER=wayland make test` still means it.
 
+**It exports `XDG_DATA_HOME` and `XDG_CONFIG_HOME` into `build/xdg/` for the same reason.** Since
+step 13 a store holds no primedia: what the tests type goes into the author's permascroll, which
+`xudu` resolves under `$XDG_DATA_HOME` — so without this a test run appends every byte it invents to
+the real permascroll of whoever ran it, and leaves it there. `$XDG_CONFIG_HOME` is the same argument
+for the system xanadocs (keymap, settings, layout, ui), which `xudu` writes for itself on first run
+and a test would otherwise overwrite with whatever it was demonstrating. Both `?=`, both survive
+being pointed elsewhere.
+
 For anything **outside** `make`, it is still yours to set. In rough order of preference:
 
 ```sh
 # 1. The environment variables, which are enough for almost everything here.
-SDL_VIDEODRIVER=offscreen SDL_AUDIODRIVER=dummy LIBGL_ALWAYS_SOFTWARE=1 <command>
+#    The XDG pair keeps a run out of your real permascroll and system xanadocs.
+SDL_VIDEODRIVER=offscreen SDL_AUDIODRIVER=dummy LIBGL_ALWAYS_SOFTWARE=1 \
+  XDG_DATA_HOME=$PWD/build/xdg/data XDG_CONFIG_HOME=$PWD/build/xdg/config <command>
 
 # 2. A virtual X server, when something insists on a real display connection.
 xvfb-run -s "-screen 0 1024x768x24" <command>
@@ -139,18 +149,26 @@ already in use.
 
 ### Binary fixtures under `tests/samples/xudu/`
 
-These are real on-disk stores — `ops.nodes`, `primedia.spool`, `store.tables`, `current.yaml` —
-checked in and loaded by `SampleXanadocsTest`. **A change to `CompactOpNode`'s layout invalidates
-every one of them.** Since migration step 8 they say so: `ops.nodes` opens with an
+These are real on-disk stores — `ops.nodes`, `store.tables`, and `ops.export` where `--export-osmic`
+was used — checked in and loaded by `SampleXanadocsTest`. **A change to `CompactOpNode`'s layout
+invalidates every one of them.** Since migration step 8 they say so: `ops.nodes` opens with an
 `OpsSegmentHeader` recording `sizeof(CompactOpNode)`, so a stale fixture is refused with
 `OpsSegmentUnreadable` naming the two sizes rather than loading and meaning something else.
 Regenerate in the same commit anyway — a refused fixture is a red test, not a working one:
 
 ```sh
 make -j$(nproc) xudu
-./tools/create-sample-xanadocs.sh          # core_hypertext, multimedia, beams, 000.scroll
+./tools/create-sample-xanadocs.sh          # core_hypertext, multimedia, beams, permascroll/
 ./tools/create-floating-image-sample.sh    # 11_floating_image, which the above deletes
 ```
+
+**`tests/samples/xudu/permascroll/` is part of the fixture, not a stray directory.** None of these
+stores holds any primedia: they are edit decision lists whose local spans are addresses in the one
+permascroll all of them were generated against, so opening one without it gives a document whose
+every version renders empty. `SampleXanadocsTest` constructs a `UserPermascroll` pointed at it and
+passes it to every `Store`, and `TheSharedPermascrollExistsAndIsNonEmpty` checks it first so that a
+missing one fails by name instead of as seventeen documents that mysteriously say nothing.
+`11_floating_image` has its own alongside it, for the reason its generator script explains.
 
 The second script exists because `create-sample-xanadocs.sh` opens by removing the whole
 `multimedia` directory, and `11_floating_image` is built by hand with its own scroll rather than the
@@ -187,22 +205,24 @@ shared `000.scroll`. Run both, or that fixture silently disappears.
 
 ### Formatting and linting coverage, by language
 
-| Language                                                 | Formatter                                            | Linter                                                                                                                                   | CI gate                                                                                             |
-| -------------------------------------------------------- | ---------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------- |
-| C++ (`.cpp`/`.hpp`/`.h`)                                 | clang-format (`make format`)                         | clang-tidy (`.clangd`, editor-only)                                                                                                      | blocking                                                                                            |
-| GLSL (`.glsl`)                                           | clang-format, same as C++                            | `glslangValidator` via `make shaders` (compiles every shader)                                                                            | blocking (both)                                                                                     |
-| Shell (`.sh`, `PKGBUILD`)                                | shfmt (`make format`)                                | shellcheck (`make lint`)                                                                                                                 | blocking                                                                                            |
-| YAML (workflows, dependabot)                             | yamlfmt (`make format`), config in `.yamlfmt`        | yamllint (`make lint`), config in `.yamllint`                                                                                            | blocking                                                                                            |
-| Markdown (every `*.md` outside `thirdparty/`)            | mdformat `--wrap 100` (`make format`)                | mdl `-i` (`make lint`), config in `.mdlrc`/`.mdl_style.rb`                                                                               | blocking                                                                                            |
-| Nix (`flake.nix`, `packaging/nix/*.nix`)                 | nixfmt-rfc-style, the flake's own `formatter` output | nix-linter                                                                                                                               | blocking (job `nix`), separate from `format` because it needs Nix installed                         |
-| Ruby (`packaging/macos/gleditor.rb`, a Homebrew formula) | `brew style` (needs Homebrew; not run in CI)         | `ruby -c` (syntax only)                                                                                                                  | non-blocking, see `packaging.yml`'s `macos` job                                                     |
-| RPM spec (`packaging/fedora/gleditor.spec`)              | —                                                    | rpmlint (needs `rpm`'s native Python binding, so only runs inside the `fedora:latest` container the `fedora` packaging job already uses) | non-blocking until its output has been triaged                                                      |
-| Debian (`debian/rules`, `debian/control`, ...)           | —                                                    | —                                                                                                                                        | not covered: `debian/rules` is a `dh`-sequenced Makefile, not a shell script shellcheck understands |
+| Language                                                 | Formatter                                                      | Linter                                                                                                                                   | CI gate                                                                                             |
+| -------------------------------------------------------- | -------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------- |
+| C++ (`.cpp`/`.hpp`/`.h`)                                 | clang-format (`make format`)                                   | clang-tidy (`.clangd`, editor-only)                                                                                                      | blocking                                                                                            |
+| GLSL (`.glsl`)                                           | clang-format, same as C++                                      | `glslangValidator` via `make shaders` (compiles every shader)                                                                            | blocking (both)                                                                                     |
+| Shell (`.sh`, `PKGBUILD`)                                | shfmt (`make format`)                                          | shellcheck (`make lint`)                                                                                                                 | blocking                                                                                            |
+| YAML (workflows, dependabot)                             | yamlfmt (`make format`), config in `.yamlfmt`                  | yamllint (`make lint`), config in `.yamllint`                                                                                            | blocking                                                                                            |
+| Markdown (every `*.md` outside `thirdparty/`)            | mdformat `--wrap 100` + three required plugins (`make format`) | mdl `-i` (`make lint`), config in `.mdlrc`/`.mdl_style.rb`                                                                               | blocking                                                                                            |
+| Nix (`flake.nix`, `packaging/nix/*.nix`)                 | nixfmt-rfc-style, the flake's own `formatter` output           | nix-linter                                                                                                                               | blocking (job `nix`), separate from `format` because it needs Nix installed                         |
+| Ruby (`packaging/macos/gleditor.rb`, a Homebrew formula) | `brew style` (needs Homebrew; not run in CI)                   | `ruby -c` (syntax only)                                                                                                                  | non-blocking, see `packaging.yml`'s `macos` job                                                     |
+| RPM spec (`packaging/fedora/gleditor.spec`)              | —                                                              | rpmlint (needs `rpm`'s native Python binding, so only runs inside the `fedora:latest` container the `fedora` packaging job already uses) | non-blocking until its output has been triaged                                                      |
+| Debian (`debian/rules`, `debian/control`, ...)           | —                                                              | —                                                                                                                                        | not covered: `debian/rules` is a `dh`-sequenced Makefile, not a shell script shellcheck understands |
 
 yamlfmt and mdformat are Go/Python tools rather than apt packages (`go install`/`pip install` in the
 CI `format` job); they were picked over the better-known Node ones (`prettier`,
 `markdownlint-cli2 --fix`) to avoid adding a Node toolchain to an otherwise zero-Node tree, the same
-reasoning `.yamllint`/`.mdl_style.rb` already used for the linters.
+reasoning `.yamllint`/`.mdl_style.rb` already used for the linters. **mdformat needs three plugins
+here and refuses to run without them** — see the `--extensions` note below before running
+`make format` on a machine you have not set up.
 
 **Formatter and linter settings are kept in one place per language on purpose**, so running the
 formatter never leaves a file the linter still rejects:
@@ -226,32 +246,43 @@ formatter never leaves a file the linter still rejects:
   GitHub's own math support). Plain mdformat has no concept of that syntax — it parses `\text{...}`
   as literal backslash-letter text and re-escapes the backslash on write, silently turning `\text`
   into `\\text` and corrupting the math. `mdformat-dollarmath` teaches it to treat `$...$`/`$$...$$`
-  spans as opaque, so it formats around the math instead of through it; installed alongside
-  `mdformat-gfm` in the CI `format` job. A `$$...$$` block sitting directly under a list item with
-  no blank line before/after it will still make mdformat refuse to write the file
+  spans as opaque, so it formats around the math instead of through it; required by name, so an
+  mdformat that could do that damage refuses to start. A `$$...$$` block sitting directly under a
+  list item with no blank line before/after it will still make mdformat refuse to write the file
   (`Formatted Markdown renders to different HTML than input Markdown`) — give it a blank line on
   both sides, same as a fenced code block would need.
 
-- **The Makefile probes for the `mdformat` *binary*, not for its plugins.** A machine with mdformat
-  installed but without `mdformat-gfm`, `mdformat-dollarmath` and `mdformat-frontmatter` will run
-  `make format` happily and corrupt every `design/` file it touches — tables reflowed into prose,
-  `\times` double-escaped to `\\times` — while `make format-check` reports files as unformatted that
-  CI considers fine. Before running either against Markdown, confirm the plugins are present, or use
-  a throwaway venv that has them:
+- **The Makefile *requires* mdformat's plugins rather than hoping for them.** Both `make format` and
+  `make format-check` pass `--extensions gfm --extensions dollarmath --extensions frontmatter`, and
+  `--extensions` requires a plugin rather than merely enabling it, so an mdformat without them
+  refuses:
 
-  ```sh
-  python3 -m venv /tmp/mdenv
-  /tmp/mdenv/bin/pip install --quiet mdformat mdformat-gfm mdformat-dollarmath mdformat-frontmatter
-  /tmp/mdenv/bin/mdformat --wrap 100 design/whatever.md
+  ```text
+  Error: Invalid extension required.
+  The required 'gfm' extension is not available. Please install a plugin that adds
+  the extension, or remove it from required extensions.
   ```
 
-  Verify afterwards that table separator rows survived (`grep -c '^| *-\+'`) and that no `\\text` or
-  `\\times` appeared.
+  Nothing is written and the target fails. Install what it names:
+
+  ```sh
+  pip install --user mdformat-gfm mdformat-dollarmath mdformat-frontmatter
+  ```
+
+  This used to be the sharpest edge in the whole toolchain, because it failed *quietly*. The
+  Makefile probed for the `mdformat` binary alone, so a machine with the binary and none of the
+  plugins ran `make format` happily and corrupted every `design/` file it touched — tables reflowed
+  into prose, `\times` double-escaped to `\\times` — while `make format-check` reported around
+  thirty files as unformatted that CI considered perfectly fine. Both halves of that are gone: the
+  failure is now a refusal that names the missing plugin, and a green `format-check` means the same
+  thing everywhere. If you are wondering whether your markdown is really formatted, the answer is
+  now whatever the target says.
 
 - `.agents/skills/*.md` open with YAML front matter (`name:`/`description:` consumed by the skill
   loader); `mdformat-frontmatter` is what stops mdformat parsing the closing `---` as a second
   thematic break and mangling everything after it into a heading, and `mdl -i` is the matching half
-  on the lint side (see the comment above the `mdl` invocation in the Makefile).
+  on the lint side (see the comment above the `mdl` invocation in the Makefile). Required by name
+  too, for the same reason as the other two.
 
 - A code sample pasted into `design/` without a fence around it is invisible to both tools: mdl
   can't tell it apart from prose (so `#include <...>` lines get flagged as malformed ATX headers)
@@ -300,7 +331,9 @@ continuation indents, treats Markdown table cell padding as "wrong" indentation,
     going missing)
   - `segmented_ops_spool.hpp/.cpp`: the memory-mapped ops tree; sealed segments, the id hash, and
     the `TreeLinks` side array
-  - `user_permascroll.hpp/.cpp`: sovereign user permascroll stream and registry
+  - `user_permascroll.hpp/.cpp`: sovereign user permascroll stream and registry. Since step 13 this
+    is the *only* place primedia is stored — `segmented_primedia_spool.cpp`'s active segment is what
+    makes it durable, and a `Store` is handed one rather than making its own
   - `merkle_ledger.hpp/.cpp`: append-only Merkle ledger for identity consensus
   - `managed_torrent.hpp/.cpp`: system-managed torrent swarms coordinator
   - `publication.hpp/.cpp`: `publish`/`adopt`, `globalise`/`localise`, scroll keys
@@ -322,7 +355,8 @@ continuation indents, treats Markdown table cell padding as "wrong" indentation,
 - `assets/zigzag/` — sample slice YAML documents
 - `tests/lib/`, `tests/xudu/`, `tests/zigzag/` — unit tests for the library and engines
 - `tests/samples/` — source material for tests; `tests/samples/xudu/` holds checked-in binary stores
-  that must be regenerated whenever the on-disk format moves (see "Tests" above)
+  that must be regenerated whenever the on-disk format moves, plus the `permascroll/` their spans
+  address (see "Tests" above)
 - `tools/` — build-time and verification helpers (`compare-backends.sh`, `benchmark-kjv-load.py`,
   `layout-latency-probe.cpp`, `shader_assemble.cpp`, `swarm-netns-test.sh`,
   `create-sample-xanadocs.sh`, `create-floating-image-sample.sh`)
@@ -371,20 +405,32 @@ nobody has. What is *not* negotiable is the structural invariants — `sizeof(Co
 and its cache-line alignment, 64 KiB Merkle piece alignment, append-only-ness. Layout is soft;
 invariants are hard.
 
-**What a store is, on disk, after migration steps 8–11:**
+**What a store is, on disk, after migration steps 8–13:**
 
-| file                            | shape                                                                     |
-| ------------------------------- | ------------------------------------------------------------------------- |
-| `ops.nodes`                     | `OpsSegmentHeader` (64 KiB, sparse) then a run of `CompactOpNode`         |
-| `store.tables`                  | `\x89XUDUTBL` + version + bencode: scroll registry, local segments, links |
-| `primedia.spool`                | raw bytes                                                                 |
-| `current.yaml`, `versions.yaml` | author-facing metadata, still YAML on purpose                             |
-| `ops.spool`                     | only ever *read*: a pre-node-array store, or an `--export-osmic` export   |
+| file           | shape                                                                                                      |
+| -------------- | ---------------------------------------------------------------------------------------------------------- |
+| `ops.nodes`    | `OpsSegmentHeader` (64 KiB, sparse) then a run of `CompactOpNode`                                          |
+| `store.tables` | `\x89XUDUTBL` + version 2 + bencode: scroll registry, local segments, links, current versions, annotations |
+| `ops.export`   | only when `--export-osmic` was given: the operations in OSMIC text, or the compact binary wire format      |
 
-`scrolls.spool`, `links.spool` and `origins.spool` are gone. A directory holding one of them and no
-`store.tables` is **refused**, because loading it would have produced a document with no scrolls —
-every quotation resolving to nothing, which looks like lost content rather than a failed open.
-`Store::save()` deletes them once the container is written.
+**That is the whole list — a store holds no primedia.** Everything typed goes into the author's one
+`UserPermascroll` (`$XDG_DATA_HOME/xudu/permascroll/<key>/active.primedia`, or wherever
+`--permascroll` says), and a store is an edit decision list naming addresses in it. So a store
+directory is **not portable on its own**: opening one needs the permascroll it was written against,
+which is why every checked-in fixture has one beside it and why `Store`'s permascroll is a
+constructor argument rather than something it makes for itself.
+
+`primedia.spool`, `ops.spool`, `current.yaml`, `versions.yaml`, `scrolls.spool`, `links.spool` and
+`origins.spool` are gone, and **a directory holding any of them is refused by name.** Each was the
+only copy of something: loading a `primedia.spool` store against the caller's permascroll would
+resolve every local span into the wrong scroll and render a document that is not the document, which
+is worse than failing because it looks like it worked. `Store::save()` deletes the superseded ones
+once the new shape is written.
+
+The one name worth being careful about is `ops.spool`. It meant the *binary operations spool* back
+when the spool was a file; since `ops.nodes` it names the in-memory `SegmentedOpsSpool` instead, so
+nothing on disk may be called that — `ops.export` is the export's name, and it holds either encoding
+because `readOpsSpool()` tells them apart by magic.
 
 **Three formats, one habit: refuse loudly, by number.** `ops.nodes` checks a signature and its
 `nodeSize`; `store.tables` checks a signature and its version; the compact binary ops spool (now
@@ -404,12 +450,16 @@ Two rules follow:
   being human-readable at all. Point it at a store directory or at a single `ops.nodes`. Before and
   after any format change, diff `xudu-dump --section=ops <store>`: it renders what each operation
   *means*, including the text its span names, so a change that preserves meaning shows no diff.
-  `--section=header` is where a version bump is supposed to show.
+  `--section=header` is where a version bump is supposed to show. Rendering the *text* needs
+  `--permascroll=<dir>` as well, since the store does not have it; without one every other field
+  still renders and only `text=` goes missing.
 
 A *system* xanadoc under `~/.config/xudu/system/` is the one exception to "refused means refused":
 `Session::systemStoreIndex()` moves an unreadable one aside and writes a default in its place,
 because the program generates those itself and would otherwise refuse to start over its own
-scaffolding. A document the user named is never treated that way.
+scaffolding. It catches every typed refusal a store shape can raise, listed rather than caught as a
+common base — add a format and add it there too, or a config written by an older build becomes a
+reason the program will not start. A document the user named is never treated that way.
 
 This ruling has an expiry. It is void the first time someone outside this repository has a document
 they care about; see R11 in `design/store-slice-convergence.md`.
@@ -420,7 +470,7 @@ they care about; see R11 in `design/store-slice-convergence.md`.
 
 - [`store-slice-convergence.md`](design/store-slice-convergence.md) — the active plan: a cell is an
   operation, `Slice` becomes a replay product of the ops spool like `Version` is. Fourteen rulings
-  with their prices, a numbered migration (**steps 1–12 are done**), and the measurements behind
+  with their prices, a numbered migration (**steps 1–13 are done**), and the measurements behind
   each. Read this before touching `CompactOpNode`, `Manifold`, `CompactZZCell` or the zigzag
   engine's sync path.
 - [`vortex-hyperstructural-runtime.md`](design/vortex-hyperstructural-runtime.md) and

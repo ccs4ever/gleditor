@@ -1026,8 +1026,8 @@ public:
       for (const auto &dirEntry : fs::directory_iterator(curPath, ec)) {
         if (dirEntry.is_directory()) {
           const auto p = dirEntry.path();
-          if (fs::exists(p / "ops.nodes") || fs::exists(p / "ops.spool") ||
-              fs::exists(p / "current.yaml") || p.extension() == ".xanadoc") {
+          if (fs::exists(p / "ops.nodes") || fs::exists(p / "store.tables") ||
+              p.extension() == ".xanadoc") {
             const auto dirName = p.filename().string();
             choiceField.options.push_back("[Local] " + dirName);
             choiceField.optionValues.push_back(p.string());
@@ -1089,8 +1089,8 @@ public:
 
     namespace fs = std::filesystem;
     const fs::path p(chosen);
-    if (fs::exists(p / "ops.nodes") || fs::exists(p / "ops.spool") ||
-        fs::exists(p / "current.yaml") || fs::is_directory(p)) {
+    if (fs::exists(p / "ops.nodes") || fs::exists(p / "store.tables") ||
+        fs::is_directory(p)) {
       try {
         const auto sIdx = session.loadAuxiliaryStore(chosen);
         auto &st        = session.store(sIdx);
@@ -1861,7 +1861,8 @@ int main(const int argc, char **argv) {
             "DOC1:START:LEN,DOC2:START:LEN:DIMNAME; repeatable")
       .append();
   parser.add_argument("--permascroll")
-      .help("path to sovereign user permascroll to load or bind")
+      .help("directory holding the sovereign user permascroll to bind; "
+            "defaults to $XDG_DATA_HOME/xudu/permascroll/default")
       .default_value(std::string{});
   parser.add_argument("--dump-permascroll")
       .help("dump sovereign user permascroll bytes to a file upon exit")
@@ -1930,16 +1931,21 @@ int main(const int argc, char **argv) {
         parser["--headless"] == true || parser["--batch"] == true;
     quiet = parser["--print-asset-dir"] == true || headless;
 
+    // A document holds operations naming addresses in the author's
+    // permascroll and no primedia of its own, so a permascroll that does not
+    // outlive the process is a document that reopens empty. It is bound before
+    // the session because every store the session opens shares this one --
+    // that is what makes a passage quoted from one document into another the
+    // same bytes at the same address rather than a copy.
     std::shared_ptr<xudu::UserPermascroll> userPermascroll;
     if (const auto permaPath = parser.get<std::string>("--permascroll");
-        !permaPath.empty() && std::filesystem::exists(permaPath)) {
-      std::ifstream in(permaPath, std::ios::binary);
-      if (in) {
-        std::string bytes((std::istreambuf_iterator<char>(in)),
-                          std::istreambuf_iterator<char>());
-        userPermascroll = std::make_shared<xudu::UserPermascroll>();
-        userPermascroll->append(bytes);
-      }
+        !permaPath.empty()) {
+      xudu::UserPermascroll::Config config;
+      config.storageDir = permaPath;
+      userPermascroll =
+          std::make_shared<xudu::UserPermascroll>(std::move(config));
+    } else {
+      userPermascroll = xudu::PermascrollRegistry::instance().defaultUser();
     }
 
     session = std::make_unique<Session>(parser.get<std::string>("store"),

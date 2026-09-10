@@ -27,10 +27,14 @@ SegmentedPrimediaSpool::SegmentedPrimediaSpool(
     SegmentedPrimediaSpool &&other) noexcept
     : arena(std::move(other.arena)), segmentList(std::move(other.segmentList)),
       totalBytes(other.totalBytes), committedBytes(other.committedBytes),
-      activeFd(other.activeFd), activePath(std::move(other.activePath)) {
+      activeFd(other.activeFd), activePath(std::move(other.activePath)),
+      activeStart(other.activeStart), flushedBytes(other.flushedBytes),
+      readOnly(other.readOnly) {
   other.totalBytes     = 0;
   other.committedBytes = 0;
   other.activeFd       = -1;
+  other.activeStart    = 0;
+  other.flushedBytes   = 0;
 }
 
 SegmentedPrimediaSpool &
@@ -43,9 +47,14 @@ SegmentedPrimediaSpool::operator=(SegmentedPrimediaSpool &&other) noexcept {
     committedBytes       = other.committedBytes;
     activeFd             = other.activeFd;
     activePath           = std::move(other.activePath);
+    activeStart          = other.activeStart;
+    flushedBytes         = other.flushedBytes;
+    readOnly             = other.readOnly;
     other.totalBytes     = 0;
     other.committedBytes = 0;
     other.activeFd       = -1;
+    other.activeStart    = 0;
+    other.flushedBytes   = 0;
   }
   return *this;
 }
@@ -181,7 +190,57 @@ bool SegmentedPrimediaSpool::openActiveSegment(
   }
   activePath = path.string();
   activeFd   = ::open(activePath.c_str(), O_RDWR | O_CREAT, 0644);
-  return activeFd >= 0;
+  if (activeFd < 0) {
+    // A permascroll that can be read but not appended to: a checked-in fixture
+    // in a read-only checkout, or another user's scroll. Reading one is a
+    // reasonable thing to want -- it is what makes the document open at all --
+    // so this opens it rather than refusing, and flush() below writes nothing
+    // because nothing can be appended without a writable arena either.
+    activeFd = ::open(activePath.c_str(), O_RDONLY);
+    readOnly = activeFd >= 0;
+    if (activeFd < 0) {
+      return false;
+    }
+  } else {
+    readOnly = false;
+  }
+
+  // Whatever the file already holds is primedia this spool has recorded
+  // before, and it takes the addresses it had then: the active segment begins
+  // at the spool's current end, so reopening a permascroll puts every byte
+  // back where the spans naming it expect to find it. Read rather than mapped
+  // -- the active segment is the one that grows, and a shared file mapping
+  // cannot be extended in place the way appending needs.
+  activeStart = totalBytes;
+  struct stat st;
+  if (::fstat(activeFd, &st) < 0) {
+    ::close(activeFd);
+    activeFd = -1;
+    return false;
+  }
+  if (st.st_size > 0) {
+    const auto have = static_cast<std::size_t>(st.st_size);
+    if (!ensureCommitted(activeStart + have)) {
+      ::close(activeFd);
+      activeFd = -1;
+      return false;
+    }
+    std::size_t got = 0;
+    while (got < have) {
+      const auto n = ::pread(activeFd, arena.base() + activeStart + got,
+                             have - got, static_cast<off_t>(got));
+      if (n <= 0) {
+        ::close(activeFd);
+        activeFd = -1;
+        return false;
+      }
+      got += static_cast<std::size_t>(n);
+    }
+    totalBytes = activeStart + have;
+  }
+  // Nothing appended since the file was read, so there is no tail to write.
+  flushedBytes = totalBytes;
+  return true;
 }
 
 bool SegmentedPrimediaSpool::sealActive(
@@ -191,25 +250,51 @@ bool SegmentedPrimediaSpool::sealActive(
     ::close(activeFd);
     activeFd = -1;
   }
-  if (!activePath.empty()) {
-    addSealedSegment(activePath);
+  // The sealed range is already in the arena at the addresses it will keep --
+  // openActiveSegment() read it there. Recording it is therefore bookkeeping,
+  // not a second read: addSealedSegment() would map the same bytes in *again*
+  // at the spool's end, giving every one of them a second address and moving
+  // the end past content that does not exist.
+  if (!activePath.empty() && totalBytes > activeStart) {
+    SegmentInfo info;
+    info.startOffset = activeStart;
+    info.length      = totalBytes - activeStart;
+    info.path        = activePath;
+    info.fd          = -1;
+    info.isReadOnly  = true;
+    segmentList.push_back(std::move(info));
   }
   return openActiveSegment(newActivePath);
 }
 
 bool SegmentedPrimediaSpool::flush() {
   if (nullptr != arena.base() && totalBytes > 0) {
+    // Only reaches the disk for ranges backed by a file mapping, which is the
+    // sealed segments. The active segment is written below: appending commits
+    // anonymous pages, and msync on anonymous memory has nowhere to write.
+    // That asymmetry is why this used to persist nothing at all -- the fsync
+    // that followed it synced a file no byte had ever been written to.
     arena.flush(arena.base(), static_cast<std::size_t>(totalBytes));
   }
-  if (activeFd >= 0 && !activePath.empty()) {
-    // MinGW's io.h has no fsync(); _commit() is its file-durability
-    // equivalent.
-#if defined(_WIN32)
-    ::_commit(activeFd);
-#else
-    ::fsync(activeFd);
-#endif
+  if (activeFd < 0 || activePath.empty() || readOnly) {
+    return true;
   }
+  while (flushedBytes < totalBytes) {
+    const auto pending = static_cast<std::size_t>(totalBytes - flushedBytes);
+    const auto n = ::pwrite(activeFd, arena.base() + flushedBytes, pending,
+                            static_cast<off_t>(flushedBytes - activeStart));
+    if (n <= 0) {
+      return false;
+    }
+    flushedBytes += static_cast<std::uint64_t>(n);
+  }
+  // MinGW's io.h has no fsync(); _commit() is its file-durability
+  // equivalent.
+#if defined(_WIN32)
+  ::_commit(activeFd);
+#else
+  ::fsync(activeFd);
+#endif
   return true;
 }
 
@@ -228,6 +313,9 @@ void SegmentedPrimediaSpool::clear() {
   arena.release();
   totalBytes     = 0;
   committedBytes = 0;
+  activeStart    = 0;
+  flushedBytes   = 0;
+  readOnly       = false;
   activePath.clear();
 }
 

@@ -15,6 +15,7 @@
 #include <filesystem>
 #include <fstream>
 #include <iterator>
+#include <memory>
 #include <string>
 #include <vector>
 
@@ -22,6 +23,7 @@
 #include <xudu/core/compact_op.hpp>
 #include <xudu/core/segmented_ops_spool.hpp>
 #include <xudu/core/store.hpp>
+#include <xudu/core/user_permascroll.hpp>
 
 namespace {
 
@@ -58,15 +60,37 @@ fs::path scratch(const std::string &name) {
   return dir;
 }
 
-/// A store with a branch in it, saved.
-fs::path savedStore(const fs::path &dir) {
-  Store store;
+/// A store and the permascroll its operations name.
+///
+/// Two directories, because that is what they are: a store is an edit decision
+/// list holding no primedia, and the content it points into belongs to the
+/// author rather than to any one of their documents. The tool has to be told
+/// both, which is what --permascroll is for -- and which is why every dump
+/// below goes through args() rather than naming the store alone.
+struct Sample {
+  fs::path store;
+  fs::path permascroll;
+
+  [[nodiscard]] std::string args() const {
+    return "--permascroll=" + permascroll.string() + " " + store.string();
+  }
+  [[nodiscard]] std::shared_ptr<xudu::UserPermascroll> scroll() const {
+    xudu::UserPermascroll::Config config;
+    config.storageDir = permascroll;
+    return std::make_shared<xudu::UserPermascroll>(std::move(config));
+  }
+};
+
+/// A store with a branch in it, saved, beside a permascroll holding its text.
+Sample savedStore(const fs::path &root) {
+  const Sample sample{root / "store", root / "permascroll"};
+  Store store(sample.scroll());
   const auto one = store.insert(MicroversionId{}, 0, "hello");
   const auto two = store.insert(one, 5, " world");
   static_cast<void>(store.erase(two, 0, 1));
   static_cast<void>(store.insert(one, 5, " there"));
-  store.save(dir.string());
-  return dir;
+  store.save(sample.store.string());
+  return sample;
 }
 
 class XuduDumpTest : public ::testing::Test {
@@ -79,9 +103,9 @@ protected:
 };
 
 TEST_F(XuduDumpTest, aHealthyStoreRendersEveryOperationAndWhatItSays) {
-  const auto dir = savedStore(scratch("healthy"));
+  const auto sample = savedStore(scratch("healthy"));
 
-  const auto run = runDump(dir.string());
+  const auto run = runDump(sample.args());
   EXPECT_EQ(run.exitCode, 0) << run.output;
 
   // The header, including the field whose silent change caused all of this.
@@ -108,7 +132,8 @@ TEST_F(XuduDumpTest, aStoreTheLoaderRefusesIsStillReadable) {
   // header does not open -- Store::load throws OpsSegmentUnreadable -- and if
   // that were also the end of being able to look at it, the format would have
   // stopped being debuggable rather than stopped being plaintext.
-  const auto dir = savedStore(scratch("refused"));
+  const auto sample = savedStore(scratch("refused"));
+  const auto dir    = sample.store;
 
   // Put the operations back the way a store written before headers had them:
   // a bare run of nodes, no header.
@@ -131,59 +156,60 @@ TEST_F(XuduDumpTest, aStoreTheLoaderRefusesIsStillReadable) {
   }
 
   // The tool does not.
-  const auto run = runDump(dir.string());
+  const auto run = runDump(sample.args());
   EXPECT_EQ(run.exitCode, 1)
       << "a dump with something wrong in it must say so" << run.output;
   EXPECT_THAT(run.output, testing::HasSubstr("no operations segment signature"))
       << "the dump has to say why, not merely decline";
   EXPECT_THAT(run.output, testing::HasSubstr("header    absent"));
 
-  // Everything it *can* read is still rendered, which is what makes it worth
-  // running on a broken store at all.
-  EXPECT_THAT(run.output, testing::HasSubstr("primedia  bytes="));
-  // Everything typed, the branch's text included: a permascroll is append-only
-  // and holds what was written rather than what any one version reads.
-  EXPECT_THAT(run.output, testing::HasSubstr(R"(head="hello world there")"));
+  // The side tables it *can* read are still rendered, which is what makes it
+  // worth running on a broken store at all.
+  EXPECT_THAT(run.output, testing::HasSubstr("current  "));
 }
 
 TEST_F(XuduDumpTest, sectionsAreAddressableSoAFormatChangeCanBeDiffed) {
   // Migration steps 10 and 11 change how a store is written without changing
   // what it says, so --section=ops has to be the part that stays identical
   // across them and --section=header the part where a version bump shows.
-  const auto dir = savedStore(scratch("sections"));
+  const auto sample = savedStore(scratch("sections"));
 
-  const auto ops = runDump("--section=ops " + dir.string());
+  const auto ops = runDump("--section=ops " + sample.args());
   EXPECT_EQ(ops.exitCode, 0) << ops.output;
   EXPECT_THAT(ops.output, testing::HasSubstr("op 1  produces=1 "));
   EXPECT_THAT(ops.output, testing::Not(testing::HasSubstr("header ")));
   EXPECT_THAT(ops.output, testing::Not(testing::HasSubstr("primedia ")));
 
-  const auto header = runDump("--section=header " + dir.string());
+  const auto header = runDump("--section=header " + sample.args());
   EXPECT_EQ(header.exitCode, 0) << header.output;
   EXPECT_THAT(header.output, testing::HasSubstr("signature=ok"));
   EXPECT_THAT(header.output, testing::Not(testing::HasSubstr("op 1")));
 
   // Same store, same bytes out: a baseline nothing can diff against is no
   // baseline.
-  EXPECT_EQ(runDump("--section=ops " + dir.string()).output, ops.output);
+  EXPECT_EQ(runDump("--section=ops " + sample.args()).output, ops.output);
 
-  EXPECT_EQ(runDump("--section=nonsense " + dir.string()).exitCode, 2);
+  EXPECT_EQ(runDump("--section=nonsense " + sample.args()).exitCode, 2);
 }
 
 /// The store's operations written out through the compact binary wire format
 /// and put back as the only copy, so that reopening the directory has to go
 /// through the version 3 decoder.
-void roundTripThroughTheWireFormat(const fs::path &dir) {
-  Store original;
-  original.load(dir.string());
+void roundTripThroughTheWireFormat(const Sample &sample) {
+  Store original(sample.scroll());
+  original.load(sample.store.string());
   std::vector<xudu::OpRecord> records;
   for (const auto &id : original.allVersions()) {
     records.push_back(xudu::OpRecord{id, *original.getOp(id)});
   }
-  std::ofstream out(dir / "ops.spool", std::ios::binary | std::ios::trunc);
+  // Into the operations export, which holds either encoding -- readOpsSpool()
+  // tells them apart by magic. Not `ops.spool`: a directory holding one of
+  // those is a store from before ops.nodes, and load() refuses it as such.
+  std::ofstream out(sample.store / "ops.export",
+                    std::ios::binary | std::ios::trunc);
   xudu::writeBinaryOpsSpool(out, records);
   out.close();
-  fs::remove(dir / "ops.nodes");
+  fs::remove(sample.store / "ops.nodes");
 }
 
 TEST_F(XuduDumpTest, theWireFormatRoundTripsWithoutChangingWhatAnythingMeans) {
@@ -191,31 +217,32 @@ TEST_F(XuduDumpTest, theWireFormatRoundTripsWithoutChangingWhatAnythingMeans) {
   // compact binary encoding is what travels inside a publication seal, so
   // "the same operations came back" is the property that matters about it,
   // and the dump is how that gets asserted on rather than assumed.
-  const auto dir = scratch("wire");
+  const auto root = scratch("wire");
+  const Sample sample{root / "store", root / "permascroll"};
   {
-    Store store;
+    Store store(sample.scroll());
     auto at = MicroversionId{};
     at      = store.insert(at, 0, "hello");
     at      = store.insert(at, 5, " world");
     at      = store.erase(at, 0, 1);
     at      = store.insertBreak(at, 3);
     at      = store.rearrange(at, 0, 2, 4);
-    store.save(dir.string());
+    store.save(sample.store.string());
   }
 
-  const auto before = runDump("--section=ops " + dir.string());
+  const auto before = runDump("--section=ops " + sample.args());
   ASSERT_EQ(before.exitCode, 0) << before.output;
   ASSERT_THAT(before.output, testing::HasSubstr("kind=pagebreak"));
   ASSERT_THAT(before.output, testing::HasSubstr("kind=rearrange"));
 
-  roundTripThroughTheWireFormat(dir);
+  roundTripThroughTheWireFormat(sample);
   {
-    Store reloaded;
-    reloaded.load(dir.string());
-    reloaded.save(dir.string());
+    Store reloaded(sample.scroll());
+    reloaded.load(sample.store.string());
+    reloaded.save(sample.store.string());
   }
 
-  const auto after = runDump("--section=ops " + dir.string());
+  const auto after = runDump("--section=ops " + sample.args());
   EXPECT_EQ(after.exitCode, 0) << after.output;
   EXPECT_EQ(after.output, before.output)
       << "the wire format changed what an operation means";
@@ -228,18 +255,18 @@ TEST_F(XuduDumpTest, aBranchKeepsItsNameThroughTheWireFormat) {
   // chain it forks from and comes back at a different spool index. That is
   // R4's whole argument for GlobalOpRef, seen from the other side -- the
   // *name* survives and the index does not.
-  const auto dir = savedStore(scratch("wirebranch"));
+  const auto sample = savedStore(scratch("wirebranch"));
 
-  const auto before = runDump("--section=ops " + dir.string());
+  const auto before = runDump("--section=ops " + sample.args());
   ASSERT_EQ(before.exitCode, 0) << before.output;
   ASSERT_THAT(before.output, testing::HasSubstr("produces=1a1 "));
 
-  roundTripThroughTheWireFormat(dir);
-  Store reloaded;
-  reloaded.load(dir.string());
-  reloaded.save(dir.string());
+  roundTripThroughTheWireFormat(sample);
+  Store reloaded(sample.scroll());
+  reloaded.load(sample.store.string());
+  reloaded.save(sample.store.string());
 
-  const auto after = runDump("--section=ops " + dir.string());
+  const auto after = runDump("--section=ops " + sample.args());
   EXPECT_EQ(after.exitCode, 0) << after.output;
   // Every name still there, and still saying the same thing.
   for (const auto *const named :
@@ -253,12 +280,12 @@ TEST_F(XuduDumpTest, aBranchKeepsItsNameThroughTheWireFormat) {
 TEST_F(XuduDumpTest, aBareSegmentFileCanBePointedAtDirectly) {
   // The common shape of the problem: one file is suspect and the store around
   // it is beside the point.
-  const auto dir = savedStore(scratch("barefile"));
-  const auto run = runDump((dir / "ops.nodes").string());
+  const auto sample = savedStore(scratch("barefile"));
+  const auto run    = runDump((sample.store / "ops.nodes").string());
   EXPECT_EQ(run.exitCode, 0) << run.output;
   EXPECT_THAT(run.output, testing::HasSubstr("signature=ok"));
   EXPECT_THAT(run.output, testing::HasSubstr("op 1  produces=1 "));
-  // No store around it, so no primedia to quote from and no text= to render.
+  // No permascroll named, so nothing to quote from and no text= to render.
   EXPECT_THAT(run.output, testing::Not(testing::HasSubstr("text=")));
 }
 

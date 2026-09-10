@@ -4,6 +4,7 @@
 
 #include <cstdlib>
 #include <filesystem>
+#include <optional>
 #include <string>
 
 /**
@@ -83,8 +84,40 @@ TEST_F(AssetPathTest, theSourceTreeFallbackNamesRealShaders) {
 }
 
 TEST(XdgPathsTest, respectsEnvironmentAndFallbacks) {
-  const auto *prevConfig = std::getenv("XDG_CONFIG_HOME");
-  const auto *prevHome   = std::getenv("HOME");
+  // Every variable the assertions below depend on, not just the one the first
+  // half sets. This used to save and clear `XDG_CONFIG_HOME` alone while
+  // asserting on cacheDir() and dataDir() as well, so the fallback half only
+  // passed on a machine where `XDG_DATA_HOME` and `XDG_CACHE_HOME` happened to
+  // be unset -- which stopped being true the moment `make` started exporting
+  // `XDG_DATA_HOME` to keep test runs out of the developer's real permascroll.
+  // A test that reads the environment has to own all of it.
+  struct SavedVar {
+    const char *name;
+    std::optional<std::string> value;
+
+    explicit SavedVar(const char *const varName) : name(varName) {
+      if (const auto *const held = std::getenv(varName); nullptr != held) {
+        value = held;
+      }
+      unsetenv(varName);
+    }
+    ~SavedVar() {
+      if (value.has_value()) {
+        setenv(name, value->c_str(), 1);
+      } else {
+        unsetenv(name);
+      }
+    }
+    SavedVar(const SavedVar &)            = delete;
+    SavedVar &operator=(const SavedVar &) = delete;
+    SavedVar(SavedVar &&)                 = delete;
+    SavedVar &operator=(SavedVar &&)      = delete;
+  };
+
+  const SavedVar config("XDG_CONFIG_HOME");
+  const SavedVar data("XDG_DATA_HOME");
+  const SavedVar cache("XDG_CACHE_HOME");
+  const SavedVar home("HOME");
 
   setenv("XDG_CONFIG_HOME", "/custom/config", 1);
   EXPECT_EQ(gleditor::paths::configDir("xudu"), "/custom/config/xudu");
@@ -98,15 +131,4 @@ TEST(XdgPathsTest, respectsEnvironmentAndFallbacks) {
             "/home/testuser/.cache/zigzag/slices");
   EXPECT_EQ(gleditor::paths::dataDir("gleditor"),
             "/home/testuser/.local/share/gleditor");
-
-  if (nullptr != prevConfig) {
-    setenv("XDG_CONFIG_HOME", prevConfig, 1);
-  } else {
-    unsetenv("XDG_CONFIG_HOME");
-  }
-  if (nullptr != prevHome) {
-    setenv("HOME", prevHome, 1);
-  } else {
-    unsetenv("HOME");
-  }
 }

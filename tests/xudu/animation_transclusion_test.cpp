@@ -10,6 +10,7 @@
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
+#include <memory>
 #include <set>
 #include <string>
 #include <tuple>
@@ -17,6 +18,7 @@
 
 #include <xudu/core/microversion.hpp>
 #include <xudu/core/store.hpp>
+#include <xudu/core/user_permascroll.hpp>
 
 namespace {
 
@@ -29,6 +31,27 @@ struct ExecutionResult {
   int exitCode{-1};
   std::string output;
 };
+
+/// A permascroll under @p root, for a test that builds a store in *this*
+/// process and renders it in another.
+///
+/// A store carries no primedia: what was typed lives in the author's
+/// permascroll, and the two processes have to mean the same one. It used to
+/// travel in the store's own primedia.spool -- the per-document copy of the
+/// whole scroll that migration step 13 removed -- so before that, building a
+/// store here and rendering it there worked by accident of duplication.
+/// Per-test rather than the default under $XDG_DATA_HOME, so that one test's
+/// prose cannot show up in another's screenshot.
+std::shared_ptr<xudu::UserPermascroll> permascrollAt(const fs::path &dir) {
+  xudu::UserPermascroll::Config config;
+  config.storageDir = dir;
+  return std::make_shared<xudu::UserPermascroll>(std::move(config));
+}
+
+/// The flag naming that permascroll to the xudu subprocess.
+std::string permascrollFlag(const fs::path &dir) {
+  return " --permascroll " + dir.string();
+}
 
 ExecutionResult executeProcess(const std::string &cmd) {
   std::string fullCmd = cmd + " 2>&1";
@@ -143,7 +166,7 @@ TEST_F(AnimationTransclusionTest, TranscludeAnimatedGifRendersAsMediaCard) {
   const auto gifBytes = readWhole("tests/samples/sample_animated.gif");
   ASSERT_GT(gifBytes.size(), 50U) << "missing animated GIF sample";
 
-  Store store;
+  Store store(permascrollAt(testRoot / "permascroll"));
   const auto animVersion =
       store.insertMedia(MicroversionId{}, 0, gifBytes, "image/gif").version;
 
@@ -160,12 +183,13 @@ TEST_F(AnimationTransclusionTest, TranscludeAnimatedGifRendersAsMediaCard) {
   const auto storePath = testRoot / "store_gif";
   store.save(storePath.string());
 
-  const auto ppmPath    = screenshotDir / "animated_gif.ppm";
-  const std::string cmd = xuduBin.string() + " --backend " + activeBackend() +
-                          " --profile --strict-diagnostics --version-id " +
-                          textVer.str() + " --screenshot " + ppmPath.string() +
-                          " " + storePath.string();
-  const auto res        = executeProcess(cmd);
+  const auto ppmPath = screenshotDir / "animated_gif.ppm";
+  const std::string cmd =
+      xuduBin.string() + permascrollFlag(testRoot / "permascroll") +
+      " --backend " + activeBackend() +
+      " --profile --strict-diagnostics --version-id " + textVer.str() +
+      " --screenshot " + ppmPath.string() + " " + storePath.string();
+  const auto res = executeProcess(cmd);
   EXPECT_EQ(res.exitCode, 0)
       << "rendering transcluded animated GIF failed: " << res.output;
   EXPECT_TRUE(fs::exists(ppmPath))
@@ -183,7 +207,7 @@ TEST_F(AnimationTransclusionTest, TranscludeAnimatedSvgRendersAsMediaCard) {
   const auto svgBytes = readWhole("tests/samples/sample_animated.svg");
   ASSERT_GT(svgBytes.size(), 20U) << "missing animated SVG sample";
 
-  Store store;
+  Store store(permascrollAt(testRoot / "permascroll"));
   const auto animVersion =
       store.insertMedia(MicroversionId{}, 0, svgBytes, "image/svg+xml").version;
 
@@ -200,12 +224,13 @@ TEST_F(AnimationTransclusionTest, TranscludeAnimatedSvgRendersAsMediaCard) {
   const auto storePath = testRoot / "store_svg";
   store.save(storePath.string());
 
-  const auto ppmPath    = screenshotDir / "animated_svg.ppm";
-  const std::string cmd = xuduBin.string() + " --backend " + activeBackend() +
-                          " --profile --strict-diagnostics --version-id " +
-                          textVer.str() + " --screenshot " + ppmPath.string() +
-                          " " + storePath.string();
-  const auto res        = executeProcess(cmd);
+  const auto ppmPath = screenshotDir / "animated_svg.ppm";
+  const std::string cmd =
+      xuduBin.string() + permascrollFlag(testRoot / "permascroll") +
+      " --backend " + activeBackend() +
+      " --profile --strict-diagnostics --version-id " + textVer.str() +
+      " --screenshot " + ppmPath.string() + " " + storePath.string();
+  const auto res = executeProcess(cmd);
   EXPECT_EQ(res.exitCode, 0)
       << "rendering transcluded animated SVG failed: " << res.output;
   EXPECT_TRUE(fs::exists(ppmPath))
@@ -223,7 +248,7 @@ TEST_F(AnimationTransclusionTest, TranscludePartialFragmentOfAnimation) {
   const auto gifBytes = readWhole("tests/samples/sample_animated.gif");
   ASSERT_GT(gifBytes.size(), 50U);
 
-  Store store;
+  Store store(permascrollAt(testRoot / "permascroll"));
   const auto animVersion =
       store.insertMedia(MicroversionId{}, 0, gifBytes, "image/gif").version;
 
@@ -241,12 +266,13 @@ TEST_F(AnimationTransclusionTest, TranscludePartialFragmentOfAnimation) {
   const auto storePath = testRoot / "store_fragment";
   store.save(storePath.string());
 
-  const auto ppmPath    = screenshotDir / "animated_fragment.ppm";
-  const std::string cmd = xuduBin.string() + " --backend " + activeBackend() +
-                          " --profile --strict-diagnostics --version-id " +
-                          textVer.str() + " --screenshot " + ppmPath.string() +
-                          " " + storePath.string();
-  const auto res        = executeProcess(cmd);
+  const auto ppmPath = screenshotDir / "animated_fragment.ppm";
+  const std::string cmd =
+      xuduBin.string() + permascrollFlag(testRoot / "permascroll") +
+      " --backend " + activeBackend() +
+      " --profile --strict-diagnostics --version-id " + textVer.str() +
+      " --screenshot " + ppmPath.string() + " " + storePath.string();
+  const auto res = executeProcess(cmd);
   EXPECT_EQ(res.exitCode, 0)
       << "rendering partial fragment of animation failed: " << res.output;
   EXPECT_TRUE(fs::exists(ppmPath));

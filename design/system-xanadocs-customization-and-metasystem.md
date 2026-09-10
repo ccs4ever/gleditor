@@ -250,7 +250,10 @@ To reflect authentic Xanadulogical reality:
    - When a xanadoc is opened without specifying an exact microversion, all members of
      `currentVersions` are opened side-by-side as parallel active views.
 
-   - Persisted beside the operations and primedia spools in `current.yaml`:
+   - Persisted in the `current` section of the store's side-table container, `store.tables`, beside
+     the scroll registry and the link table. It was a `current.yaml` of its own until migration step
+     13 of [`store-slice-convergence.md`](store-slice-convergence.md); the shape below is what that
+     section encodes, not a file that still exists:
 
      ```yaml
      # Current active versions designated by the author
@@ -327,11 +330,13 @@ are no black boxes.
      immediately repoints the active configuration to that historical state.
    - Stepping forward (`Ctrl+]`) returns to newer configurations without data loss.
 
-### 3.5 Version Annotations Mapping: Aliases, Descriptions & Semantic Tags (`versions.yaml`)
+### 3.5 Version Annotations Mapping: Aliases, Descriptions & Semantic Tags
 
 Raw numerical microversion identifiers (e.g. `1`, `1.4`, `1.2.1`) are precise for content addressing
 and DAG reconstruction, but human cognition requires semantic tags, descriptions, and aliases. All
-xanadocs support an explicit version mapping stored in `versions.yaml`:
+xanadocs support an explicit version mapping, kept in the `versions` section of `store.tables`. It
+was a `versions.yaml` until migration step 13; the YAML below describes the fields that section
+carries rather than a file on disk, and `xudu-dump --section=versions` is what renders them:
 
 ```yaml
 # Xudu Microversion Annotations & Aliases
@@ -472,11 +477,18 @@ private:
 };
 ```
 
-- When `store.save(directory)` executes, it writes `current.yaml` and `versions.yaml`.
-- When `store.load(directory)` executes, it reads `current.yaml` and `versions.yaml`. If empty or
-  unwritten, it falls back to `{latest()}` and empty annotations.
+- When `store.save(directory)` executes, it writes both as sections of `store.tables`, in the same
+  call that writes the scrolls and the links — so a store cannot be half-written with its operations
+  saved and its heads lost.
+- When `store.load(directory)` executes, it reads them back from that container. If empty or
+  unwritten, it falls back to `{latest()}` and empty annotations. A directory still holding a
+  `current.yaml` or `versions.yaml` is refused by name rather than read.
 - For system stores, `repointCurrentVersion` validates that $|currentVersions| = 1$ and notifies
   `Session` of the active configuration change.
+- A system xanadoc this build cannot read is moved aside and regenerated rather than refused —
+  `Session::systemStoreIndex()` catches every typed refusal a store shape can raise, because the
+  program writes these for itself and would otherwise refuse to start over its own scaffolding. A
+  document the *user* named is never treated that way.
 
 ### 5.4 120 FPS Performance Envelope ($8.33\,\text{ms}$)
 

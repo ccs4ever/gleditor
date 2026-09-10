@@ -1,10 +1,18 @@
 # Xudu Sample Xanadocs & Permascroll Dataset
 
-This directory contains reference Xanadoc stores and a master user permascroll (`000.scroll`)
-generated using the project's native C++ Xanadulogical engine (`xudu`).
+This directory contains reference Xanadoc stores and the master user permascroll (`permascroll/`)
+they are written against, generated using the project's native C++ Xanadulogical engine (`xudu`).
 
 All samples are generated directly from the external source assets in `tests/samples/` and
-`tests/samples/xudu/sources/` using `tools/generate_sample_xanadocs.cpp`.
+`tests/samples/xudu/sources/` using `tools/create-sample-xanadocs.sh`.
+
+**The permascroll is not optional.** None of these stores holds any primedia: each is an edit
+decision list whose local spans are addresses in `permascroll/active.primedia`, so a store opened
+without it comes back as a document whose every version renders empty. That is also what makes the
+shared quotation below a transclusion rather than a copy -- `xanadoc_a` and `xanadoc_b` name the
+same offsets in the same scroll. Open one with `--permascroll tests/samples/xudu/permascroll`, or
+construct a `UserPermascroll` pointed at that directory and hand it to the `Store`, as
+`SampleXanadocsTest` does.
 
 ______________________________________________________________________
 
@@ -12,7 +20,8 @@ ______________________________________________________________________
 
 ```
 tests/samples/xudu/
-├── 000.scroll                                  # Sovereign author permascroll byte stream
+├── permascroll/                                # Sovereign author permascroll -- the content itself
+│   └── active.primedia                         # every byte these documents' spans address
 ├── README.md                                   # This documentation file
 │
 ├── core_hypertext/                             # 8 Author Link Types + Emergent Transclusions
@@ -37,6 +46,11 @@ tests/samples/xudu/
     ├── 02_many_to_many/                        # 2 thesis spans -> 2 observation spans with centroid leveling
     └── 03_multi_span_stacked/                  # Multi-span beam above 2 single-span beams
 ```
+
+Each store directory holds `ops.nodes` (the operations), `store.tables` (scrolls, links, current
+versions and annotations) and, where `--export-osmic` was used, `ops.export`. `11_floating_image`
+has its own `11_floating_image.permascroll/` beside it rather than sharing the one above, because
+what it demonstrates is a layout decision about one image and one paragraph.
 
 ______________________________________________________________________
 
@@ -125,18 +139,29 @@ make test TEST_FILTER='SampleXanadocsTest.*'
 ### Open in `xudu` (Interactive 3D Editor)
 
 ```sh
+# --permascroll is required: the stores hold no content of their own.
+PERMA=tests/samples/xudu/permascroll
+
 # View core hypertext documents side by side
-./build/xudu tests/samples/xudu/core_hypertext/unified_store --version-id 1 --alongside 2
+./build/xudu --permascroll $PERMA \\
+  tests/samples/xudu/core_hypertext/unified_store --version-id 1 --alongside 2
 
 # View 1-to-many beams
-./build/xudu tests/samples/xudu/beams/01_one_to_many --version-id 1 --alongside 2
+./build/xudu --permascroll $PERMA \\
+  tests/samples/xudu/beams/01_one_to_many --version-id 1 --alongside 2
 
 # View stacked multi-span beams
-./build/xudu tests/samples/xudu/beams/03_multi_span_stacked --version-id 1 --alongside 2
+./build/xudu --permascroll $PERMA \\
+  tests/samples/xudu/beams/03_multi_span_stacked --version-id 1 --alongside 2
 ```
 
 ### Regenerate Samples
 
 ```sh
-make generate-sample-xanadocs && ./build/generate-sample-xanadocs
+make -j$(nproc) xudu
+./tools/create-sample-xanadocs.sh          # core_hypertext, multimedia, beams, permascroll/
+./tools/create-floating-image-sample.sh    # 11_floating_image, which the above deletes
 ```
+
+Both, in that order: the first script opens by removing the whole `multimedia/` directory, which
+takes `11_floating_image` with it.

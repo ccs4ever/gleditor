@@ -130,16 +130,19 @@ TEST_F(PageBreakTest, TranscludedPassageExcludesBreaks) {
 }
 
 TEST_F(PageBreakTest, StoreSaveAndReloadPreservesBreaks) {
+  // Both stores share one permascroll: a document's local spans are addresses
+  // in the author's, and it keeps no copy of the bytes itself.
+  const auto perma = std::make_shared<xudu::UserPermascroll>();
   MicroversionId savedVer;
   {
-    Store store;
+    Store store(perma);
     const auto v1 = store.insert(MicroversionId{}, 0,
                                  "First page text.\n\nSecond page text.");
     savedVer      = store.insertBreak(v1, 18);
     store.save(testDir.string());
   }
 
-  Store reloaded;
+  Store reloaded(perma);
   reloaded.load(testDir.string());
   EXPECT_EQ(reloaded.textOf(savedVer), "First page text.\n\nSecond page text.");
   EXPECT_THAT(reloaded.rebuild(savedVer).forcedBreaks(), ElementsAre(18U));

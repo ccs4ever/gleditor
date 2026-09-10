@@ -17,16 +17,29 @@
 #include "binary_ops.hpp"
 #include "store_tables.hpp"
 #include "windows_quoting.hpp"
-#include "yaml.hpp"
 
 namespace xanadu {
 
 namespace {
 
 /// Names of the files a store is written as.
-constexpr const char *primediaFile = "primedia.spool";
-constexpr const char *opsFile      = "ops.spool"; // pre-node-array stores
 constexpr const char *opsNodesFile = "ops.nodes";
+/// An export of the operations, in either encoding: canonical OSMIC text as
+/// --export-osmic writes it, or the compact binary wire format. readOpsSpool()
+/// tells them apart by their magic, so one name covers both honestly.
+///
+/// Not `ops.spool`. That name meant the operations spool back when the spool
+/// *was* the file; since ops.nodes it names the in-memory segmented structure
+/// instead, so a file called that is a second meaning for a live name -- and
+/// a directory holding one is a store from before nodes, which load() refuses
+/// by that name rather than reading as this.
+constexpr const char *opsExportFile = "ops.export";
+
+/// Files a store no longer has, refused by name if one is found. Each was the
+/// only copy of something, so opening a directory holding one as though it
+/// were a modern store would lose exactly what it holds.
+constexpr const char *primediaFile        = "primedia.spool";
+constexpr const char *legacyOpsFile       = "ops.spool";
 constexpr const char *currentVersionsFile = "current.yaml";
 constexpr const char *versionsFile        = "versions.yaml";
 
@@ -37,14 +50,6 @@ constexpr const char *versionsFile        = "versions.yaml";
 /// somehow were taken.
 constexpr std::uint32_t branchSearchCeiling =
     std::numeric_limits<std::uint32_t>::max();
-
-std::string readWholeFile(const std::filesystem::path &path) {
-  std::ifstream in(path, std::ios::binary);
-  if (!in) {
-    return {};
-  }
-  return {std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>()};
-}
 
 /// Open @p path for writing the OSMIC text operations export, imbued with the
 /// classic "C" locale rather than whatever gleditor::initLocale() has set the
@@ -919,48 +924,6 @@ std::string Store::displayName(const MicroversionId &id) const {
   return id.str();
 }
 
-void Store::saveMetadata(const std::filesystem::path &dir) const {
-  // Save author-designated current versions
-  {
-    std::string currentYaml;
-    std::vector<std::string> curStrList;
-    const auto &curList = currentVersions();
-    curStrList.reserve(curList.size());
-    for (const auto &v : curList) {
-      curStrList.push_back(v.str());
-    }
-    yaml::writeList(currentYaml, "current", curStrList);
-    if (!currentYaml.empty()) {
-      std::ofstream out(dir / currentVersionsFile, std::ios::trunc);
-      out << currentYaml;
-    }
-  }
-
-  // Save version annotations (aliases, descriptions, tags, timestamps)
-  if (!versionAnnotations_.empty()) {
-    std::string verYaml;
-    for (const auto &[id, ann] : versionAnnotations_) {
-      yaml::write(verYaml, "version", id.str());
-      if (!ann.alias.empty()) {
-        yaml::write(verYaml, "alias", ann.alias);
-      }
-      if (!ann.description.empty()) {
-        yaml::write(verYaml, "description", ann.description);
-      }
-      if (!ann.tag.empty()) {
-        yaml::write(verYaml, "tag", ann.tag);
-      }
-      if (!ann.timestamp.empty()) {
-        yaml::write(verYaml, "timestamp", ann.timestamp);
-      }
-    }
-    if (!verYaml.empty()) {
-      std::ofstream out(dir / versionsFile, std::ios::trunc);
-      out << verYaml;
-    }
-  }
-}
-
 std::vector<OpRecord>
 Store::opRecords(const std::uint32_t sinceExclusive) const {
   std::vector<OpRecord> records;
@@ -998,32 +961,13 @@ void Store::save(const std::string &directory) const {
   const std::filesystem::path dir(directory);
   std::filesystem::create_directories(dir);
 
-  {
-    // Appended to rather than rewritten once the file already holds a prefix
-    // of what is in memory. The primedia spool only ever grows, so what is
-    // already on disk is still correct and only the tail is new -- which
-    // makes a save cost what was typed since the last one instead of the
-    // whole document every time.
-    //
-    // The operations spool below cannot do this, and it is worth saying why
-    // rather than leaving the asymmetry looking like an oversight: its
-    // records are delta-coded against the record before them in name order
-    // (see FLAG_SEQUENTIAL in binary_ops.cpp), and a branch off an early
-    // state sorts into the middle of that order, not the end. There is no
-    // tail to append. SegmentedOpsSpool is what carries the operations
-    // incrementally; ops.spool is a compact whole-file export of them.
-    const auto &bytes = userPermascroll_->bytes();
-    const bool fresh  = flushedPrimediaDirectory != directory;
-    std::ofstream out(dir / primediaFile,
-                      std::ios::binary |
-                          (fresh ? std::ios::trunc : std::ios::app));
-    const auto from =
-        fresh ? std::size_t{0} : static_cast<std::size_t>(primediaFlushed);
-    out.write(bytes.data() + from,
-              static_cast<std::streamsize>(bytes.size() - from));
-    flushedPrimediaDirectory = directory;
-    primediaFlushed          = bytes.size();
-  }
+  // The content the operations below name lives in the author's permascroll,
+  // not here, so saving a document means making sure what was typed into it is
+  // durable -- not copying it. A store that wrote its own copy made every open
+  // document a second place the author's text lived, and the addresses in it
+  // only agreed with the permascroll's because every store rewrote the whole
+  // thing every time.
+  userPermascroll_->flush();
   {
     // The operations, as the array-backed tree they are held as: the file is
     // what the spool has in memory, so reading it back is a read rather than
@@ -1049,13 +993,6 @@ void Store::save(const std::string &directory) const {
                                (dir / opsNodesFile).string());
     }
   }
-  // A store written before the node array is superseded once it has been
-  // written out in the new shape. Leaving it would leave two answers to what
-  // the operations are, and load() would quietly prefer this one.
-  if (std::filesystem::exists(dir / opsNodesFile)) {
-    std::error_code ignored;
-    std::filesystem::remove(dir / opsFile, ignored);
-  }
   {
     // The scroll table and the link table: what a span's ScrollId means, and
     // what connects one span to another. Without the first an id is a number
@@ -1068,32 +1005,31 @@ void Store::save(const std::string &directory) const {
     // and being plaintext was buying only that they could be read with `less`,
     // which tools/xudu-dump buys back. See R11 and store_tables.hpp.
     writeStoreTables(dir / storeTablesName,
-                     StoreTables{.scrolls       = externals,
-                                 .localSegments = localSegments.segments,
-                                 .links         = linkTable});
+                     StoreTables{.scrolls            = externals,
+                                 .localSegments      = localSegments.segments,
+                                 .links              = linkTable,
+                                 .currentVersions    = currentVersions(),
+                                 .versionAnnotations = versionAnnotations_});
     // The files this container replaced, taken with it. Leaving them would
     // leave two answers to what the scrolls are, and load() refuses a
     // directory holding both rather than choosing.
     std::error_code ignored;
     for (const auto *const superseded :
-         {"scrolls.spool", "links.spool", "origins.spool"}) {
+         {"scrolls.spool", "links.spool", "origins.spool", currentVersionsFile,
+          versionsFile}) {
       std::filesystem::remove(dir / superseded, ignored);
     }
   }
-  saveMetadata(dir);
 }
 
 void Store::saveOsmicText(const std::string &directory) const {
   const std::filesystem::path dir(directory);
   std::filesystem::create_directories(dir);
 
-  {
-    std::ofstream out(dir / primediaFile, std::ios::binary | std::ios::trunc);
-    out << userPermascroll_->bytes();
-  }
+  userPermascroll_->flush();
   {
     // Canonical line-by-line OSMIC text format.
-    auto out = openTextSpoolForWrite(dir / opsFile);
+    auto out = openTextSpoolForWrite(dir / opsExportFile);
     writeOsmicTextOpsSpool(out, opRecords());
   }
   {
@@ -1104,11 +1040,12 @@ void Store::saveOsmicText(const std::string &directory) const {
     // and writing them that way now would produce a directory that load()
     // reads the operations out of and silently finds no scrolls in.
     writeStoreTables(dir / storeTablesName,
-                     StoreTables{.scrolls       = externals,
-                                 .localSegments = localSegments.segments,
-                                 .links         = linkTable});
+                     StoreTables{.scrolls            = externals,
+                                 .localSegments      = localSegments.segments,
+                                 .links              = linkTable,
+                                 .currentVersions    = currentVersions(),
+                                 .versionAnnotations = versionAnnotations_});
   }
-  saveMetadata(dir);
 }
 
 std::string Store::exportOsmicText() const {
@@ -1129,22 +1066,32 @@ void Store::writeOsmicText(std::ostream &out) const {
 
 void Store::load(const std::string &directory) {
   const std::filesystem::path dir(directory);
+
+  // A store from when a document carried a copy of the author's whole
+  // permascroll. Refused rather than opened, and refused *before* anything is
+  // read: the operations in it name addresses in that copy, and this build
+  // resolves local spans against the permascroll the caller supplied. Opening
+  // it would rebuild every version against the wrong scroll and show text that
+  // is not the document -- worse than failing, because it looks like it worked.
+  //
+  // The bytes are not lost and this says where they are: point the permascroll
+  // at the file and the addresses line up again, because the copy *was* the
+  // permascroll.
   if (std::filesystem::exists(dir / primediaFile)) {
-    const auto stored = readWholeFile(dir / primediaFile);
-    if (userPermascroll_->size() == 0) {
-      userPermascroll_->adopt(stored);
-    } else if (stored.size() > userPermascroll_->size()) {
-      userPermascroll_->append(
-          std::string_view(stored).substr(userPermascroll_->size()));
-    }
-    // What was just read is already on disk here, so the next save to this
-    // directory can append to it rather than write it out again.
-    flushedPrimediaDirectory = directory;
-    primediaFlushed          = userPermascroll_->size();
-  } else {
-    flushedPrimediaDirectory.clear();
-    primediaFlushed = 0;
+    throw StoreTablesUnreadable(
+        (dir / primediaFile).string() +
+        " is a document's own copy of the author's permascroll, from before "
+        "primedia stopped being siloed per document. This build reads local "
+        "spans from the permascroll the store was opened with; open this one "
+        "with that file as the permascroll instead. See design R11.");
   }
+  if (std::filesystem::exists(dir / legacyOpsFile)) {
+    throw OpsSegmentUnreadable(
+        (dir / legacyOpsFile).string() +
+        " is an operations spool from before operations were kept as nodes, "
+        "and this build does not read one. See design R11.");
+  }
+
   opsSpool.clear();
   linkTable.clear();
   externals.clear();
@@ -1161,13 +1108,10 @@ void Store::load(const std::string &directory) {
       throw std::runtime_error("cannot read the operations in " +
                                (dir / opsNodesFile).string());
     }
-  } else if (std::filesystem::exists(dir / opsFile)) {
-    // Written before the operations were kept as nodes, in the compact binary
-    // encoding or the OSMIC text one. Read, and written back out as nodes by
-    // the next save() -- but only at the binary version this build reads:
-    // under R11 the version 1 and 2 decoders are deleted rather than carried,
-    // so a spool written by either is refused by number. See OpsSpoolVersion.
-    std::ifstream in(dir / opsFile, std::ios::binary);
+  } else if (std::filesystem::exists(dir / opsExportFile)) {
+    // What saveOsmicText() wrote: the operations in canonical OSMIC text.
+    // Read back and written out as nodes by the next save().
+    std::ifstream in(dir / opsExportFile, std::ios::binary);
     std::vector<OpRecord> records;
     readOpsSpool(in, records);
     adoptOpRecords(records);
@@ -1208,55 +1152,12 @@ void Store::load(const std::string &directory) {
     for (const auto &[id, link] : linkTable) {
       nextLinkId = std::max(nextLinkId, id + 1);
     }
-  }
-
-  if (std::filesystem::exists(dir / currentVersionsFile)) {
-    const auto content = readWholeFile(dir / currentVersionsFile);
-    if (const auto entries = yaml::read(content)) {
-      for (const auto &e : *entries) {
-        if (e.key == "current" && !e.value.empty()) {
-          try {
-            currentVersions_.push_back(MicroversionId::parse(e.value));
-          } catch (...) {
-          }
-        }
-      }
-    }
-  }
-
-  if (std::filesystem::exists(dir / versionsFile)) {
-    const auto content = readWholeFile(dir / versionsFile);
-    if (const auto entries = yaml::read(content)) {
-      std::optional<MicroversionId> currentId;
-      VersionAnnotation currentAnn;
-      const auto flushAnnotation = [&]() {
-        if (currentId.has_value()) {
-          setVersionAnnotation(*currentId, std::move(currentAnn));
-          currentId.reset();
-          currentAnn = {};
-        }
-      };
-      for (const auto &e : *entries) {
-        if (e.key == "version") {
-          flushAnnotation();
-          try {
-            currentId = MicroversionId::parse(e.value);
-          } catch (...) {
-            currentId.reset();
-          }
-        } else if (currentId.has_value()) {
-          if (e.key == "alias") {
-            currentAnn.alias = e.value;
-          } else if (e.key == "description") {
-            currentAnn.description = e.value;
-          } else if (e.key == "tag") {
-            currentAnn.tag = e.value;
-          } else if (e.key == "timestamp") {
-            currentAnn.timestamp = e.value;
-          }
-        }
-      }
-      flushAnnotation();
+    currentVersions_ = std::move(tables.currentVersions);
+    // Through setVersionAnnotation() rather than assigned, so that the alias
+    // index is built from the annotations rather than being a third thing that
+    // has to be kept in step with them.
+    for (auto &[id, annotation] : tables.versionAnnotations) {
+      setVersionAnnotation(id, std::move(annotation));
     }
   }
 }
