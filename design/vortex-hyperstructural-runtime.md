@@ -534,8 +534,10 @@ the scheduler runs, `d.pinning-cursors` is what holds memory up. Keeping them ap
 pinned cache from appearing in VQL's `^` as an idle thread, and it costs one more entry on `d.dims`
 — a rank being a rank, under convergence R12.
 
-Each pin carries the name of what it holds as its own content, so a pinned structure is found and
-dropped by name rather than by search.
+A pin is named exactly as a scheduler cursor is: by a cell on its own `d.name` rank rather than by
+its payload. A pinned structure is therefore found and dropped by name rather than by search, using
+the same predicate that finds a named thread, and the pin's own content stays free for whatever it
+wants to say about itself.
 
 Three properties fall out, and they are why this is worth naming:
 
@@ -550,10 +552,11 @@ Three properties fall out, and they are why this is worth naming:
   unreachable as well and takes the island with it, which is a retirement. Neither needs machinery
   the other does not already have.
 
-The cursor shape is not ceremonial: a cursor carries `d.vars`/`d.values` scopes (§4), which is
-exactly where a pinned structure's own configuration belongs — a cache's capacity, eviction policy
-and counters, reachable by name off the pin. A pin that later wanted to do work in the background is
-already the right kind of cell, and would only need linking onto `d.cursors` as well.
+The cursor shape is not ceremonial: a cursor carries `d.name` for identity and `d.vars`/`d.values`
+for scope (§4), and the scope is exactly where a pinned structure's own configuration belongs — a
+cache's capacity, eviction policy and counters, reachable off the pin once its name has found it. A
+pin that later wanted to do work in the background is already the right kind of cell, and would only
+need linking onto `d.cursors` as well.
 
 VQL §7.5 applies this to `d.cache`, which is the case that motivated it. The mechanism is general:
 any scratch structure wanting session lifetime gets a pin, and dropping it is one break.

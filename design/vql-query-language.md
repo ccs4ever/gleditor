@@ -87,25 +87,25 @@ ______________________________________________________________________
 
 ## 2. Syntactic Token & Structural Shorthand Matrix
 
-| Token / Operator    | Structural Equivalent                   | Functional & Spatial Semantic Mapping                                                                                                              |
-| ------------------- | --------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `##`                | Origin Anchor (`home`)                  | Grounds query context to the absolute system environment origin. Not literal cell 0, which means *no cell* -- see §7.2.                            |
-| `#`                 | Root Metacells                          | Lazily streams all disjoint root manifold entry points across the matrix.                                                                          |
-| `^`                 | Process Manifold (`d.cursors`)          | Streams all active Spin-Head execution cursor threads. Never a pinning cursor -- those are on their own Root Set rank, `d.pinning-cursors` (§7.5). |
-| `^NAME`             | `^[. = "NAME"]`                         | Short-circuits the cursor scan, locking directly onto the named thread node.                                                                       |
-| `.`                 | Context Identity                        | The current step's context cell — a valid anchor on its own, or `get(context)` when dereferenced.                                                  |
-| `/dim`              | `LazyRankStream(dim, posward)`          | Traverses `dim`'s entire rank posward from the context cell.                                                                                       |
-| `/-dim`             | `LazyRankStream(dim, negward)`          | Traverses `dim`'s entire rank negward — the `-` binds to the dimension name, not the operator.                                                     |
-| `/dim%`             | Create (`link(@, dim, dir, -1)`)        | Allocates a new cell along `dim` (at the tail of any existing rank); see §4.5.                                                                     |
-| `/dim%VALUE`        | Create + init                           | Allocates and initializes a new cell's content to `VALUE` — bare, quoted, or `$variable`.                                                          |
-| `/dim%%...`         | Batch create                            | Each additional `%` allocates one more cell along `dim`; all of them join the step's result set — see §4.5.                                        |
-| `A><B`              | Entangle (`link(A, d_entangle, +1, B)`) | Binds `A` and `B` to one shared payload; chainable (`A><B><C`) and combinable with `%` — see §4.6.                                                 |
-| `.[offset, length]` | `get(ctx, off, len)`                    | Zero-copy virtual string slice dereference.                                                                                                        |
-| `@`                 | Context Identity Address                | Evaluates to the numerical `cell_id` coordinate of the context node itself.                                                                        |
-| `[...]`             | Predicate / Index Window                | Applies inline boolean filters or relative index clamps to a stream.                                                                               |
-| `(...)`             | Macro Dimension Group                   | Groups dimensional sequences into a compound traversal segment.                                                                                    |
-| `*`                 | Kleene Repetition                       | Repeats the preceding macro group zero or more times until termination.                                                                            |
-| `{...}`             | Weave Block                             | Groups a comma-separated list of effect items under `weave`.                                                                                       |
+| Token / Operator    | Structural Equivalent                   | Functional & Spatial Semantic Mapping                                                                                                                                                          |
+| ------------------- | --------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `##`                | Origin Anchor (`home`)                  | Grounds query context to the absolute system environment origin. Not literal cell 0, which means *no cell* -- see §7.2.                                                                        |
+| `#`                 | Root Metacells                          | Lazily streams all disjoint root manifold entry points across the matrix.                                                                                                                      |
+| `^`                 | Process Manifold (`d.cursors`)          | Streams all active Spin-Head execution cursor threads. Never a pinning cursor -- those are on their own Root Set rank, `d.pinning-cursors` (§7.5).                                             |
+| `^NAME`             | `^[./d.name[. = "NAME"]]`               | Short-circuits the cursor scan, locking directly onto the named thread node. A cursor is named by a cell on its `d.name` rank rather than by its own content -- §6.1 spells the long form out. |
+| `.`                 | Context Identity                        | The current step's context cell — a valid anchor on its own, or `get(context)` when dereferenced.                                                                                              |
+| `/dim`              | `LazyRankStream(dim, posward)`          | Traverses `dim`'s entire rank posward from the context cell.                                                                                                                                   |
+| `/-dim`             | `LazyRankStream(dim, negward)`          | Traverses `dim`'s entire rank negward — the `-` binds to the dimension name, not the operator.                                                                                                 |
+| `/dim%`             | Create (`link(@, dim, dir, -1)`)        | Allocates a new cell along `dim` (at the tail of any existing rank); see §4.5.                                                                                                                 |
+| `/dim%VALUE`        | Create + init                           | Allocates and initializes a new cell's content to `VALUE` — bare, quoted, or `$variable`.                                                                                                      |
+| `/dim%%...`         | Batch create                            | Each additional `%` allocates one more cell along `dim`; all of them join the step's result set — see §4.5.                                                                                    |
+| `A><B`              | Entangle (`link(A, d_entangle, +1, B)`) | Binds `A` and `B` to one shared payload; chainable (`A><B><C`) and combinable with `%` — see §4.6.                                                                                             |
+| `.[offset, length]` | `get(ctx, off, len)`                    | Zero-copy virtual string slice dereference.                                                                                                                                                    |
+| `@`                 | Context Identity Address                | Evaluates to the numerical `cell_id` coordinate of the context node itself.                                                                                                                    |
+| `[...]`             | Predicate / Index Window                | Applies inline boolean filters or relative index clamps to a stream.                                                                                                                           |
+| `(...)`             | Macro Dimension Group                   | Groups dimensional sequences into a compound traversal segment.                                                                                                                                |
+| `*`                 | Kleene Repetition                       | Repeats the preceding macro group zero or more times until termination.                                                                                                                        |
+| `{...}`             | Weave Block                             | Groups a comma-separated list of effect items under `weave`.                                                                                                                                   |
 
 There is a single traversal operator: `/` already walks a whole rank, so there is no "one hop" form
 to distinguish it from, and direction is a property of the dimension name (an optional leading `-`),
@@ -460,7 +460,7 @@ two:
 ```
 for $compiler in ^COMPILER_THREAD
 let $pattern := $compiler/d.vars[. = "regex"]/d.values/.
-let $cache_root := ##/d.pinning-cursors[. = "regex_compile"]/d.cache
+let $cache_root := ##/d.pinning-cursors[./d.name[. = "regex_compile"]]/d.cache
 let $hit := $cache_root/d.invocations[./d.inputs[. = $pattern]][1]
 if $hit
   return $hit/d.outputs/@
@@ -482,9 +482,9 @@ entry cell — an existing target, so it's spelled with `link`, not `%`.
 
 Everything this weaves lands on the regex cache's island, which is held up by one named pin and
 nothing else (§7.5). Discarding every compiled NFA is therefore
-`##/d.pinning-cursors[. = "regex_compile"]/break(d.cache, +1)` — one break, after which the whole
-graph this example built is unreachable and collected, with the pin left in place to be filled
-again.
+`##/d.pinning-cursors[./d.name[. = "regex_compile"]]/break(d.cache, +1)` — one break, after which
+the whole graph this example built is unreachable and collected, with the pin left in place to be
+filled again.
 
 ### 6.3 Shared Identity via Entanglement
 
@@ -623,35 +623,44 @@ walk, no per-entry bookkeeping, and no way for half a cache to survive. Bounding
 rank: entries are ordered, so eviction is a `break` at the tail, and whatever subgraph only that
 entry referenced goes with it.
 
-Give each cache its own island and its own pin, **named after the cache it holds**. That name is the
-pin cell's own content, so finding a cache and dropping one are both ordinary path expressions:
+Give each cache its own island and its own pin, **named the way every other cursor is named**: a
+cell on the pin's `d.name` rank, exactly as §6.1 names a worker with
+`$worker/d.name[. = "HTTP_WORKER"]`. A pinning cursor is a cursor, so it is addressed like one, and
+finding a cache or dropping one is an ordinary path expression:
 
 ```
-##/d.pinning-cursors[. = "regex_compile"]/d.cache                       (: the entries :)
-##/d.pinning-cursors[. = "regex_compile"]/break(d.cache, +1)            (: flush it :)
-##/d.pinning-cursors[. = "regex_compile"]/break(d.pinning-cursors, +1)  (: retire it :)
+##/d.pinning-cursors[./d.name[. = "regex_compile"]]/d.cache                       (: the entries :)
+##/d.pinning-cursors[./d.name[. = "regex_compile"]]/break(d.cache, +1)            (: flush it :)
+##/d.pinning-cursors[./d.name[. = "regex_compile"]]/break(d.pinning-cursors, +1)  (: retire it :)
 ```
 
-The last two are different operations and both are worth having. Breaking the pin's `d.cache` link
-drops the island and keeps the pin, so the cache refills without being re-created. Breaking the pin
-off `d.pinning-cursors` makes the pin unreachable too, and it takes the island with it.
+The predicate steps into `d.name` from its own candidate cell, which is the `[./dim[...]]` idiom §3
+already calls out — the same shape as `[./d.inputs[. = $pattern]]`. Naming through a rank rather
+than through the cell's own content leaves the pin's payload free for whatever a pin wants to say
+about itself, and lets one pin answer to more than one name, since `d.name` is a rank like any
+other.
+
+The last two lines are different operations and both are worth having. Breaking the pin's `d.cache`
+link drops the island and keeps the pin, so the cache refills without being re-created. Breaking the
+pin off `d.pinning-cursors` makes the pin unreachable too, and it takes the island with it.
 
 §6.2's example changes shape accordingly: `##/d.cache[. = "regex_compile"]` becomes
-`##/d.pinning-cursors[. = "regex_compile"]/d.cache`.
+`##/d.pinning-cursors[./d.name[. = "regex_compile"]]/d.cache`.
 
 **Pins are deliberately not on `d.cursors`.** `^` streams the scheduler's rank, so
 `for $worker in ^` never sees a pin — which is the whole reason the rank is separate, since a pinned
 cache would otherwise be indistinguishable from an idle thread. No new token is needed to reach one:
-`^NAME` exists because `d.cursors` is scanned constantly, and a pin lookup is a predicate on an
-ordinary rank. Adding a sigil for it would privilege it for no gain.
+`^NAME` exists because `d.cursors` is scanned constantly, and a pin lookup is the same predicate
+against a different rank. Adding a sigil for it would privilege it for no gain.
 
-**The cursor shape is load-bearing, not ceremonial.** A cursor already carries `d.vars`/`d.values`
-scopes (§4.4, Vortex §4), which is where a cache's own configuration belongs — capacity, eviction
-policy, hit and miss counters:
+**The cursor shape is load-bearing, not ceremonial.** A cursor already carries `d.name` for its
+identity and `d.vars`/`d.values` for its scope (§4.4, Vortex §4) — and the scope is where a cache's
+own configuration belongs, capacity and eviction policy and counters:
 
 ```
-let $cap := ##/d.pinning-cursors[. = "regex_compile"]/d.vars[. = "capacity"]/d.values/.
+let $pin := ##/d.pinning-cursors[./d.name[. = "regex_compile"]]
+let $cap := $pin/d.vars[. = "capacity"]/d.values/.
 ```
 
-And a pin that later wanted to refill itself in the background is already the right kind of cell; it
-would only need linking onto `d.cursors` as well, at which point `^` *should* see it.
+A pin that later wanted to refill itself in the background is therefore already the right kind of
+cell; it would only need linking onto `d.cursors` as well, at which point `^` *should* see it.

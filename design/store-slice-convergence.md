@@ -1478,31 +1478,36 @@ cannot iterate a cache pin as though it were an idle worker. The scheduler runs 
 they sit on, which is what R12's "no privileged dimensions" buys: the topology carries the meaning,
 so a fourth Root Set rank costs one more entry on `d.dims` and no new concept.
 
-**Each pin carries the name of its cache as its own content**, which makes both operations an
-ordinary path expression rather than a search:
+**A pin is named the way every other cursor is named**: by a cell on its own `d.name` rank, not by
+its own content. That is the existing convention — VQL §6.1 finds a worker with
+`$worker/d.name[. = "HTTP_WORKER"]` — and a pinning cursor is a cursor, so it follows it. Both
+operations are then an ordinary path expression rather than a search:
 
 ```
-##/d.pinning-cursors[. = "regex_compile"]/d.cache                       # the entries
-##/d.pinning-cursors[. = "regex_compile"]/break(d.cache, +1)            # flush it
-##/d.pinning-cursors[. = "regex_compile"]/break(d.pinning-cursors, +1)  # retire it
+##/d.pinning-cursors[./d.name[. = "regex_compile"]]/d.cache                       # the entries
+##/d.pinning-cursors[./d.name[. = "regex_compile"]]/break(d.cache, +1)            # flush it
+##/d.pinning-cursors[./d.name[. = "regex_compile"]]/break(d.pinning-cursors, +1)  # retire it
 ```
 
-The last two are worth keeping distinct, and naming is what makes both reachable. Breaking the pin's
-`d.cache` link drops the island and keeps the pin: that is *flush*, and the cache can refill without
-being re-created. Breaking the pin out of `d.pinning-cursors` makes the pin itself unreachable, and
-it takes the island with it: that is *retire*. One mechanism, two lifetimes, no extra machinery for
-either.
+Naming through a rank rather than through the cell's payload leaves the pin's own content free to
+say something else about itself, and lets one pin answer to more than one name, `d.name` being a
+rank like any other.
 
-No new VQL token is needed. `^NAME` exists because `d.cursors` is scanned constantly; a pin lookup
-is a predicate on an ordinary rank, and giving it a sigil would privilege it for no gain. If one is
-wanted later it is a one-line grammar addition.
+The last two lines are worth keeping distinct, and naming is what makes both reachable. Breaking the
+pin's `d.cache` link drops the island and keeps the pin: that is *flush*, and the cache refills
+without being re-created. Breaking the pin out of `d.pinning-cursors` makes the pin itself
+unreachable, and it takes the island with it: that is *retire*. One mechanism, two lifetimes, no
+extra machinery for either.
 
-**The cursor shape is not ceremonial either.** A cursor cell already carries `d.vars`/`d.values`
-scopes (Vortex §4), which is exactly where a cache's own configuration belongs — capacity, eviction
-policy, hit and miss counters — reachable as
-`##/d.pinning-cursors[. = "regex_compile"]/d.vars[. = "capacity"]/d.values/.`. And a pin that later
-needed to refill itself in the background would already be the right kind of cell; it would only
-need linking onto `d.cursors` as well.
+No new VQL token is needed. `^NAME` exists because `d.cursors` is scanned constantly, and it expands
+to this same predicate; a pin lookup is that predicate against a different rank. Giving it a sigil
+would privilege it for no gain.
+
+**The cursor shape is not ceremonial either.** A cursor cell already carries `d.name` for identity
+and `d.vars`/`d.values` for scope (Vortex §4) — and the scope is exactly where a cache's own
+configuration belongs, capacity and eviction policy and counters, reachable as
+`$pin/d.vars[. = "capacity"]/d.values/.`. A pin that later needed to refill itself in the background
+would already be the right kind of cell; it would only need linking onto `d.cursors` as well.
 
 **Price.** The Root Set grows from three parts to four, so the collector's trace walks one more
 rank. That is the whole of it.
