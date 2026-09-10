@@ -5,9 +5,11 @@
 #ifndef XUDU_SEGMENTED_OPS_SPOOL_HPP
 #define XUDU_SEGMENTED_OPS_SPOOL_HPP
 
+#include <cstddef>
 #include <cstdint>
 #include <filesystem>
 #include <map>
+#include <stdexcept>
 #include <string>
 #include <vector>
 
@@ -16,6 +18,59 @@
 #include "virtual_memory_arena.hpp"
 
 namespace xanadu {
+
+/// Address space the operations arena asks for, which on a 64-bit machine is
+/// not memory: VirtualMemoryArena::reserve maps it PROT_NONE, and a page costs
+/// nothing until ensureCommitted() makes it readable. 8 GiB is 134,217,727
+/// operations, which is what the ceiling should be measured in -- a document
+/// that has had a hundred million edits is a real thing to run out of room in,
+/// where 8 GiB of RAM is not a thing to ask for.
+///
+/// Where a pointer is 32 bits there is no address space to be casual with, so
+/// the old 512 MiB stands.
+inline constexpr std::size_t defaultOpsReservation = [] {
+  if constexpr (sizeof(void *) >= 8) {
+    return std::size_t{8} * 1024 * 1024 * 1024;
+  } else {
+    return std::size_t{512} * 1024 * 1024;
+  }
+}();
+
+/// The smallest reservation a spool will settle for before giving up. A
+/// process under an RLIMIT_AS, or one whose address space is already carved
+/// up, can fail to get 8 GiB of it; refusing to open a document at all over
+/// that would be worse than opening one with the ceiling it used to have.
+inline constexpr std::size_t minOpsReservation = std::size_t{512} * 1024 * 1024;
+
+/**
+ * @class SpoolExhausted
+ * @brief Thrown when an operation cannot be recorded because the spool's
+ *        address-space reservation has no room for it.
+ *
+ * Deliberately not std::bad_alloc, which the arena would otherwise raise for
+ * this: the two say different things and want different answers. bad_alloc
+ * means the machine could not give us memory, and nothing the caller does
+ * about this document will change that. This means the document has reached
+ * the end of the range it was given, which is a fact about the document -- it
+ * can be sealed, split, or reopened against a larger reservation. A caller
+ * that wants to see it coming reads opCapacityRemaining() rather than waiting
+ * for the throw.
+ */
+class SpoolExhausted : public std::runtime_error {
+public:
+  SpoolExhausted(std::uint32_t heldOps, std::uint32_t capacityOps);
+
+  /// Operations the spool already holds -- which is its capacity, since that
+  /// is the only condition under which this is thrown.
+  [[nodiscard]] std::uint32_t held() const noexcept { return heldOps_; }
+
+  /// Operations the reservation can hold in total.
+  [[nodiscard]] std::uint32_t capacity() const noexcept { return capacityOps_; }
+
+private:
+  std::uint32_t heldOps_;
+  std::uint32_t capacityOps_;
+};
 
 /**
  * @class SegmentedOpsSpool
@@ -32,7 +87,14 @@ public:
     bool isReadOnly{true};
   };
 
-  SegmentedOpsSpool();
+  SegmentedOpsSpool() : SegmentedOpsSpool(defaultOpsReservation) {}
+
+  /// A spool whose arena reserves @p reservationBytes of address space rather
+  /// than the default. The reservation is the ceiling on how many operations
+  /// this spool can ever hold, so this exists for tests that want to reach
+  /// that ceiling without appending 134 million operations to get there.
+  explicit SegmentedOpsSpool(std::size_t reservationBytes);
+
   ~SegmentedOpsSpool();
 
   SegmentedOpsSpool(const SegmentedOpsSpool &)            = delete;
@@ -45,6 +107,11 @@ public:
    * @param node The operation payload.
    * @param produces The microversion state produced.
    * @return The 1-based index of the new operation.
+   * @throws SpoolExhausted when the reservation is full, which is a fact
+   *         about this document. Nothing is appended and the spool is left
+   *         exactly as it was.
+   * @throws std::bad_alloc when there is room in the reservation but the
+   *         machine will not back it, which is a fact about the machine.
    */
   std::uint32_t append(CompactOpNode node, const MicroversionId &produces);
 
@@ -79,6 +146,19 @@ public:
 
   /// Whether the spool contains zero operations.
   [[nodiscard]] bool empty() const { return 0 == opCount; }
+
+  /// Operations the reservation can hold, which is one short of the nodes
+  /// that fit in it: index 0 is the state-zero slot and holds no operation.
+  ///
+  /// This is what the arena actually got rather than what it asked for, so a
+  /// spool that had to step down to a smaller reservation reports the smaller
+  /// ceiling instead of promising room it does not have.
+  [[nodiscard]] std::uint32_t opCapacity() const noexcept;
+
+  /// Operations that can still be appended before append() throws
+  /// SpoolExhausted. Reading this is how a caller sees the wall coming; the
+  /// throw is what happens to one that did not look.
+  [[nodiscard]] std::uint32_t opCapacityRemaining() const noexcept;
 
   /**
    * @brief Get the direct children indices branching off @p index.
@@ -169,6 +249,12 @@ public:
 private:
   bool ensureCommitted(std::size_t requiredBytes);
 
+  /// Take the arena's address space, stepping the request down by halves to
+  /// minOpsReservation before giving up. Records what was actually obtained
+  /// in reservationBytes, so every ceiling reported afterwards is the real
+  /// one.
+  bool reserveArena();
+
   /// File the node already stored at @p index under its parent, appending it
   /// to the end of that parent's child list. Parents always sit at a lower
   /// index than their children, so calling this in ascending index order
@@ -176,6 +262,13 @@ private:
   void linkIntoTree(std::uint32_t index);
 
   VirtualMemoryArena arena;
+
+  /// Address space the arena holds, or -- before it has been taken, and after
+  /// clear() has given it back -- the amount that will be asked for. Not
+  /// arena.capacity(): the arena is released on clear() and re-taken lazily,
+  /// and the ceiling has to be answerable in between.
+  std::size_t reservationBytes;
+
   std::vector<SegmentInfo> segmentList;
   std::uint32_t opCount{0};
   std::size_t committedBytes{0};

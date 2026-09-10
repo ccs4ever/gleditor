@@ -848,7 +848,8 @@ MicroversionId makeDimension(const MicroversionId &parent, std::string_view name
 [[nodiscard]] CellRef localiseOpRef(const GlobalOpRef &);
 
 /// Ops remaining before the arena reservation is exhausted. Store::apply
-/// throws xanadu::SpoolExhausted (not std::bad_alloc) below the soft limit.
+/// throws xanadu::SpoolExhausted (not std::bad_alloc) once this reaches zero.
+/// Landed in migration step 5, on SegmentedOpsSpool as well as here.
 [[nodiscard]] std::uint32_t opCapacityRemaining() const noexcept;
 ```
 
@@ -989,7 +990,7 @@ ______________________________________________________________________
 Each step is one commit. After each, `make -j$(nproc)` builds all three programs and
 `make -j$(nproc) test` passes.
 
-Steps 1–4 have landed. What each actually cost, where it differed from the plan, and what it
+Steps 1–5 have landed. What each actually cost, where it differed from the plan, and what it
 measured is recorded inline below; the rest are unchanged.
 
 1. ~~**Sealed-segment immutability** (R10).~~ **Done.** `firstChildIndex`/`nextSiblingIndex` left
@@ -1035,10 +1036,28 @@ measured is recorded inline below; the rest are unchanged.
    the space does not hold. A master holding an *empty string* now reads as empty rather than
    reaching for the clone's text, which was the same bug seen from the other side. This is V2's
    groundwork: it is what makes `d.clone` able to stand in for `d.entangle`.
-1. **Spool capacity.** Raise `defaultOpsReservation` to 8 GiB of *reserved address space* on 64-bit
-   (`VirtualMemoryArena::reserve` reserves without committing), keep 512 MiB elsewhere, and add
-   `opCapacityRemaining()` plus a typed `xanadu::SpoolExhausted` thrown before the arena's bare
-   `std::bad_alloc`.
+1. ~~**Spool capacity.**~~ **Done.** `defaultOpsReservation` is 8 GiB of reserved address space on
+   64-bit and 512 MiB where a pointer is 32 bits, and it moved into the header, because a ceiling
+   worth reporting is a ceiling callers can read. `append()` asks `opCapacityRemaining()` *before*
+   committing anything, so `SpoolExhausted` is thrown with the spool exactly as it was, and
+   `std::bad_alloc` keeps a meaning of its own — one is a fact about the document, which can be
+   sealed or split, and the other is the machine declining to back pages there was room for, which
+   nothing done to this document will change. Three things the plan did not say. There is **no
+   separate soft limit**, and the step is better without one: "throws below the soft limit" wanted
+   an early warning, `opCapacityRemaining()` already is one, and a second threshold would only be a
+   number to tune — the counter is the warning and the throw is the wall. The **reservation can
+   fail**, on a process under an `RLIMIT_AS` or one whose address space is already carved up, and
+   refusing to open a document over that is worse than opening it with the ceiling it used to have,
+   so `reserveArena()` steps the request down by halves to a 512 MiB floor and records *what it
+   actually got* — every ceiling reported afterwards is the real one rather than the one that was
+   asked for. And the ceiling **has to be reachable in a test**, so `SegmentedOpsSpool` gained a
+   constructor taking the reservation size: the test fills 64 KiB, which is 1,023 operations, and
+   appends one more. Measured on Linux, four default spools — 32 GiB of address space between them —
+   move resident memory by under 8 MiB, which is the second test and is what stops "reserve" quietly
+   becoming "commit" later. `SegmentedPrimediaSpool` was **left alone**, its 512 MiB and its bare
+   `std::bad_alloc` standing: it has the same shape and wants the same treatment, but 512 MB of
+   primedia is a different question from 134 million operations — bytes a person typed rather than
+   edits they made — and answering it here would have been scope this step did not measure.
 1. **Small-buffer `MicroversionId`** — inline storage for two segments or fewer. Removes 24 bytes
    and one malloc per op. Purely internal; every existing test must pass unmodified. This is a
    prerequisite for §6.2's size argument being true rather than asserted.

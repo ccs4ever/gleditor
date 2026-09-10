@@ -3,7 +3,10 @@
 #include <algorithm>
 #include <cstring>
 #include <fcntl.h>
+#include <limits>
+#include <new>
 #include <stdexcept>
+#include <string>
 #include <sys/stat.h>
 #include <unistd.h>
 
@@ -14,7 +17,19 @@
 namespace xanadu {
 
 namespace {
-constexpr std::size_t defaultOpsReservation = 512 * 1024 * 1024; // 512 MB
+/// Operations that fit in @p bytes of arena, which is one short of the nodes
+/// that fit: index 0 is the state-zero slot. Clamped to what a 32-bit index
+/// can name, since a reservation past 256 GiB would otherwise promise
+/// operations no index could reach.
+std::uint32_t opsFitting(const std::size_t bytes) {
+  const auto nodes = bytes / sizeof(CompactOpNode);
+  if (nodes < 2) {
+    return 0;
+  }
+  constexpr std::size_t indexCeiling =
+      std::numeric_limits<std::uint32_t>::max();
+  return static_cast<std::uint32_t>(std::min(nodes - 1, indexCeiling));
+}
 
 /// FNV-1a over a MicroversionId's segments. Nothing but idHash* uses this, and
 /// they only need two ids with the same segments to land in the same bucket
@@ -30,8 +45,20 @@ std::size_t hashMicroversionId(const MicroversionId &id) {
 }
 } // namespace
 
-SegmentedOpsSpool::SegmentedOpsSpool() {
-  arena.reserve(defaultOpsReservation);
+SpoolExhausted::SpoolExhausted(const std::uint32_t heldOps,
+                               const std::uint32_t capacityOps)
+    : std::runtime_error(
+          "operations spool is full at " + std::to_string(capacityOps) +
+          " operations (" +
+          std::to_string((static_cast<std::uint64_t>(capacityOps) + 1U) *
+                         sizeof(CompactOpNode) / (1024U * 1024U)) +
+          " MiB of reserved address space); it holds " +
+          std::to_string(heldOps)),
+      heldOps_(heldOps), capacityOps_(capacityOps) {}
+
+SegmentedOpsSpool::SegmentedOpsSpool(const std::size_t reservationBytes)
+    : reservationBytes(reservationBytes) {
+  reserveArena();
   indexLookup.push_back(MicroversionId{}); // Index 0 represents state zero
   tree.emplace_back();
 }
@@ -39,8 +66,9 @@ SegmentedOpsSpool::SegmentedOpsSpool() {
 SegmentedOpsSpool::~SegmentedOpsSpool() { clear(); }
 
 SegmentedOpsSpool::SegmentedOpsSpool(SegmentedOpsSpool &&other) noexcept
-    : arena(std::move(other.arena)), segmentList(std::move(other.segmentList)),
-      opCount(other.opCount), committedBytes(other.committedBytes),
+    : arena(std::move(other.arena)), reservationBytes(other.reservationBytes),
+      segmentList(std::move(other.segmentList)), opCount(other.opCount),
+      committedBytes(other.committedBytes),
       indexLookup(std::move(other.indexLookup)), tree(std::move(other.tree)),
       idHashSlots(std::move(other.idHashSlots)), idHashCount(other.idHashCount),
       activeFd(other.activeFd), activePath(std::move(other.activePath)),
@@ -65,6 +93,7 @@ SegmentedOpsSpool::operator=(SegmentedOpsSpool &&other) noexcept {
   if (this != &other) {
     clear();
     arena                  = std::move(other.arena);
+    reservationBytes       = other.reservationBytes;
     segmentList            = std::move(other.segmentList);
     opCount                = other.opCount;
     committedBytes         = other.committedBytes;
@@ -138,9 +167,41 @@ std::uint32_t SegmentedOpsSpool::idHashFind(const MicroversionId &id) const {
   return 0;
 }
 
+bool SegmentedOpsSpool::reserveArena() {
+  if (0 == reservationBytes) {
+    return false;
+  }
+  // Never above what was asked for -- a spool constructed with a deliberately
+  // small reservation is asking for a small ceiling, not for a floor of
+  // minOpsReservation underneath it.
+  const auto floor = std::min(reservationBytes, minOpsReservation);
+  for (auto want = reservationBytes; want >= floor; want /= 2) {
+    if (arena.reserve(want)) {
+      // What the arena rounded the request up to, not the request: the two
+      // differ by up to a page, and every ceiling reported from here on
+      // should be the one that is really there.
+      reservationBytes = arena.capacity();
+      return true;
+    }
+    if (want == floor) {
+      break;
+    }
+  }
+  return false;
+}
+
+std::uint32_t SegmentedOpsSpool::opCapacity() const noexcept {
+  return opsFitting(arena.isValid() ? arena.capacity() : reservationBytes);
+}
+
+std::uint32_t SegmentedOpsSpool::opCapacityRemaining() const noexcept {
+  const auto capacity = opCapacity();
+  return capacity > opCount ? capacity - opCount : 0U;
+}
+
 bool SegmentedOpsSpool::ensureCommitted(const std::size_t requiredBytes) {
   if (!arena.isValid()) {
-    if (!arena.reserve(defaultOpsReservation)) {
+    if (!reserveArena()) {
       return false;
     }
   }
@@ -184,6 +245,14 @@ void SegmentedOpsSpool::linkIntoTree(const std::uint32_t index) {
 
 std::uint32_t SegmentedOpsSpool::append(CompactOpNode node,
                                         const MicroversionId &produces) {
+  // Asked before anything is committed, so running out of reservation is
+  // reported as the document-shaped fact it is rather than reaching the
+  // caller as the arena's bare bad_alloc. Anything ensureCommitted refuses
+  // after this really is the machine declining to back the pages.
+  if (0 == opCapacityRemaining()) {
+    throw SpoolExhausted(opCount, opCapacity());
+  }
+
   const auto newIndex = opCount + 1U;
   const auto required = (newIndex + 1U) * sizeof(CompactOpNode);
   if (!ensureCommitted(required)) {

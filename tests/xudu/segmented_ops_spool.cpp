@@ -127,6 +127,94 @@ TEST(SegmentedOpsSpoolTest, pointerStabilityUnderGrowth) {
   }
 }
 
+// -- the reservation ceiling -------------------------------------------------
+
+TEST(SegmentedOpsSpoolTest, aSpoolCountsDownToItsCeilingAndThenRefuses) {
+  // 64 KiB is 1024 nodes, so the ceiling is reachable in a test. It is the
+  // same arithmetic the 8 GiB default runs, which is why the numbers below
+  // are read off opCapacity() rather than written out.
+  SegmentedOpsSpool spool(64U * 1024U);
+  const auto capacity = spool.opCapacity();
+  ASSERT_GT(capacity, 0U);
+  ASSERT_LT(capacity, 4096U) << "a test must not have to fill 8 GiB to finish";
+  EXPECT_EQ(spool.opCapacityRemaining(), capacity);
+
+  for (std::uint32_t i = 1; i <= capacity; i++) {
+    CompactOpNode node;
+    node.parentIndex = i - 1U;
+    node.at          = i;
+    ASSERT_EQ(spool.append(node, MicroversionId::parse(std::to_string(i))), i);
+    ASSERT_EQ(spool.opCapacityRemaining(), capacity - i);
+  }
+
+  CompactOpNode refused;
+  refused.parentIndex = capacity;
+  const auto name     = MicroversionId::parse(std::to_string(capacity + 1U));
+  try {
+    spool.append(refused, name);
+    FAIL() << "an operation past the reservation must not be recorded";
+  } catch (const xudu::SpoolExhausted &e) {
+    // The numbers a caller needs to say something useful about it, rather
+    // than the bare std::bad_alloc the arena would otherwise have raised.
+    EXPECT_EQ(e.held(), capacity);
+    EXPECT_EQ(e.capacity(), capacity);
+  }
+
+  // Nothing was half-recorded: the refused operation has no name, no index and
+  // no place in the tree, so the document is still exactly the one it was.
+  EXPECT_EQ(spool.size(), capacity);
+  EXPECT_FALSE(spool.contains(name));
+  EXPECT_EQ(spool.indexOf(name), 0U);
+  EXPECT_TRUE(spool.childrenOf(capacity).empty());
+  EXPECT_EQ(spool.opCapacityRemaining(), 0U);
+}
+
+#if defined(__linux__)
+/// Bytes of resident memory this process holds, from the second field of
+/// /proc/self/statm. Reserved-but-uncommitted address space is not counted in
+/// it, which is the whole of what the test below wants to know.
+std::size_t residentBytes() {
+  std::ifstream statm("/proc/self/statm");
+  std::size_t totalPages    = 0;
+  std::size_t residentPages = 0;
+  statm >> totalPages >> residentPages;
+  return residentPages * xudu::VirtualMemoryArena::pageSize();
+}
+#endif
+
+TEST(SegmentedOpsSpoolTest, theDefaultReservationIsAddressSpaceNotMemory) {
+  // The arena maps its reservation PROT_NONE, so a spool holding no
+  // operations costs no pages however large its ceiling is. Four of them is
+  // 32 GiB of address space on a 64-bit machine: an implementation that
+  // committed any of it would be impossible to miss here.
+  constexpr std::size_t spoolCount = 4;
+#if defined(__linux__)
+  const auto before = residentBytes();
+#endif
+  std::vector<SegmentedOpsSpool> spools;
+  spools.reserve(spoolCount);
+  for (std::size_t i = 0; i < spoolCount; i++) {
+    spools.emplace_back();
+  }
+#if defined(__linux__)
+  EXPECT_LT(residentBytes(), before + (8U * 1024U * 1024U))
+      << "reserving the ops arenas committed memory rather than address space";
+#endif
+
+  for (const auto &spool : spools) {
+    EXPECT_EQ(spool.opCapacityRemaining(), spool.opCapacity());
+    // Whatever the reservation ladder settled on, a spool never opens with
+    // less room than the 512 MiB ceiling it used to have.
+    EXPECT_GE(spool.opCapacity(),
+              xudu::minOpsReservation / sizeof(CompactOpNode) - 1U);
+  }
+  if constexpr (sizeof(void *) >= 8) {
+    // The ruling in design step 5, stated as the thing it is for: a document
+    // can be edited a hundred million times before the spool is the limit.
+    EXPECT_GE(spools.front().opCapacity(), 100'000'000U);
+  }
+}
+
 // -- segments on disk --------------------------------------------------------
 //
 // A segment file is a bare run of CompactOpNodes: no header, no state-zero

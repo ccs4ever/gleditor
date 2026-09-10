@@ -120,6 +120,8 @@ public:
    *         is append-only: a state, once produced, is what it is forever, and
    *         quietly replacing one would silently rewrite every version
    *         downstream of it.
+   * @throws SpoolExhausted if the operations spool has no room left; see
+   *         opCapacityRemaining().
    */
   void putOp(const MicroversionId &produces, const Op &op);
 
@@ -239,6 +241,8 @@ public:
    * @throws std::runtime_error on the practically-unreachable case that the
    *         parent already has a successor on every ordinal a branch name
    *         can hold (see MicroversionId::branch()).
+   * @throws SpoolExhausted when the operations spool is full. Nothing is
+   *         recorded, so the document is still the one it was.
    */
   MicroversionId apply(const MicroversionId &parent, Op op);
 
@@ -422,6 +426,14 @@ public:
     return userPermascroll_;
   }
   [[nodiscard]] std::size_t opCount() const { return opsSpool.size(); }
+
+  /// Operations that can still be recorded before the operations spool's
+  /// address-space reservation is exhausted and apply() starts throwing
+  /// SpoolExhausted. Whoever is holding the document open can watch this
+  /// rather than discovering the ceiling by hitting it.
+  [[nodiscard]] std::uint32_t opCapacityRemaining() const noexcept {
+    return opsSpool.opCapacityRemaining();
+  }
 
   // -- content that was not typed here --------------------------------------
 
