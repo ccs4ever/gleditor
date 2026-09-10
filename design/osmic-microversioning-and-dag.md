@@ -150,10 +150,16 @@ ______________________________________________________________________
 
 ### The sixth hyperop, and what `PageBreak` turns out to be
 
-OSMIC names six. The five above are the five `xudu` implements; the sixth — **MAKE/CHANGE STRUCTURE
-MAP** — has never been implemented anywhere, including in Udanax. It is the operation that says
-where a piece of content *sits* in a structure that is not the document's own reading order: a rank,
-an axis, a dimension.
+OSMIC names six. The five above are the five `xudu` has always implemented; the sixth —
+**MAKE/CHANGE STRUCTURE MAP** — had never been implemented anywhere, including in Udanax. It is the
+operation that says where a piece of content *sits* in a structure that is not the document's own
+reading order: a rank, an axis, a dimension.
+
+`OpKind::Structure` exists as of migration step 12. **Nothing emits one yet** — `Store::replay()`
+treats it as a text no-op, because a slice's structure is a *second* replay product of the same
+spool and folding it into the concatext would be building the wrong one of the two. Its verb, its
+link direction and its value type ride in `CompactOpNode::flags` rather than in sibling `OpKind`s,
+since the verbs share every field and differ only in which ones they read.
 
 `OpKind::PageBreak` is that operation, restricted to one dimension. A break says "the text divides
 here" without naming any primedia — it is a fact about arrangement rather than about content, which
@@ -177,17 +183,23 @@ managed via a multi-tiered virtual address layout
 
 ```
 ┌────────────────────────────────────────────────────────────────────────┐
-│               512 MB Reserved Virtual Address Space                   │
+│         8 GiB Reserved Virtual Address Space (512 MiB on 32-bit)      │
 ├──────────────────┬──────────────────┬──────────────────┬───────────────┤
 │ Segment 0 (mmap) │ Segment 1 (mmap) │ Active (mprotect)│ Uncommitted   │
 │ Sealed Torrent 0 │ Sealed Torrent 1 │ Read/Write Spool │ PROT_NONE     │
-│ [0 .. 64 KiB]    │ [64 .. 128 KiB]  │ [128 .. 192 KiB] │ [192 .. 512M] │
+│ [0 .. 64 KiB]    │ [64 .. 128 KiB]  │ [128 .. 192 KiB] │ [192 K .. 8G] │
 └──────────────────┴──────────────────┴──────────────────┴───────────────┘
 ```
 
-1. **512 MB Virtual Reservation**: On startup, `VirtualMemoryArena::reserve()` allocates a 512 MB
-   virtual address window using `mmap(PROT_NONE, MAP_ANONYMOUS)`. Physical RAM is allocated only as
-   pages are committed.
+1. **8 GiB Virtual Reservation**: On startup, `VirtualMemoryArena::reserve()` takes an 8 GiB address
+   window using `mmap(PROT_NONE, MAP_ANONYMOUS)` — 512 MiB where a pointer is 32 bits. Physical RAM
+   is committed only as pages are used, and `PROT_NONE` is not charged against overcommit, so four
+   spools holding nothing move resident memory by under 8 MiB between them. The ceiling that matters
+   is therefore operations rather than bytes: 134,217,727 of them, which is a number of edits a
+   document could conceivably reach, where 8 GiB of RAM is not a thing to ask for. A process that
+   cannot get the window steps down by halves to 512 MiB rather than refusing to open the document,
+   and reports the ceiling it actually got — `opCapacityRemaining()` counts down to it, and
+   `SpoolExhausted` is thrown when it is reached, in place of the arena's bare `std::bad_alloc`.
 1. **Zero-Copy Multi-Segment Slicing (`MAP_FIXED`)**: When historical torrent segments are ingested
    from the network, sealed node files are mapped directly into target page-aligned offsets of the
    contiguous virtual arena using
@@ -196,25 +208,38 @@ managed via a multi-tiered virtual address layout
    allocations, `SegmentedOpsSpool` maintains an open-addressing linear probing hash table
    (`idHashSlots`) indexed by 64-bit FNV-1a hashes of `MicroversionId::Segment` records.
 
-### Segment files, and the header they are getting
+### Segment files, and the header they got
 
-A segment file today is a bare run of `CompactOpNode`s: no header, no state-zero slot, and no
-microversion names anywhere in it. The names come back out of the tree, each node saying which index
-produced it and by which branch ordinal, so a segment is written and read back in the same order and
-the indices inside it are the ones they had when it was sealed.
+A segment file is an `OpsSegmentHeader` followed by a run of `CompactOpNode`s: no state-zero slot,
+and no microversion names anywhere in it. The names come back out of the tree, each node saying
+which index produced it and by which branch ordinal, so a segment is written and read back in the
+same order and the indices inside it are the ones they had when it was sealed.
 
-That works, and it has one failure mode that is worse than not working: **a file written under an
-older node layout does not fail to load, it loads and means something else.** With nothing at the
-front of the file to identify it, `st.st_size % sizeof(CompactOpNode) == 0` is the only check
-available, and it stays true across any layout change that keeps the node 64 bytes.
+It was a bare run of nodes with nothing at the front, and that had one failure mode worse than not
+working: **a file written under an older node layout did not fail to load, it loaded and meant
+something else.** `st.st_size % sizeof(CompactOpNode) == 0` was the only check available, and it
+stays true across any layout change that keeps the node 64 bytes. That is not hypothetical — it
+happened, in migration step 1, and fifteen tests quietly stopped asserting on document text and
+started asserting on the empty string.
 
-R14 of [`store-slice-convergence.md`](store-slice-convergence.md) fixes this with a header: a
-twelve-byte PNG-style signature that survives being probed and fails loudly when a transport mangles
-it, a format version, and — the field that would have caught the actual incident — the `nodeSize`
-the writer believed in. The header is exactly one 64 KiB Merkle piece, which is forced rather than
-chosen: `mmap` needs a page-aligned file offset for the nodes that follow it, and 64 KiB is the
-smallest size that is a whole number of pages on 4 KiB, 16 KiB and 64 KiB systems alike. It also
-keeps node boundaries on piece boundaries, so the header is piece 0 and the nodes are pieces 1..N.
+R14 of [`store-slice-convergence.md`](store-slice-convergence.md) fixed it, and it landed in
+migration step 8: a twelve-byte PNG-style signature that survives being probed and fails loudly when
+a transport mangles it, a format version, and — the field that would have caught the actual incident
+— the `nodeSize` the writer believed in. A file this build cannot read is refused with an
+`OpsSegmentUnreadable` naming what was wrong.
+
+The header is exactly one 64 KiB Merkle piece, which is forced rather than chosen: `mmap` needs a
+page-aligned file offset for the nodes that follow it, and 64 KiB is the smallest size that is a
+whole number of pages on 4 KiB, 16 KiB and 64 KiB systems alike. It also keeps node boundaries on
+piece boundaries, so the header is piece 0 and the nodes are pieces 1..N. It is written sparse: a
+freshly saved four-operation store measures 65,792 bytes and occupies 8 KiB.
+
+Two rules came with it, and both are about the shape of the mistake rather than about this file.
+**One writer**: `SegmentedOpsSpool::writeSegmentFile()` is the only thing that produces a segment,
+because `Store::save()` used to write the format too and a format known in two places is what let
+step 1's change go unnoticed. And **refusing must not become silence**: the header makes a stale
+file loud, so nothing downstream may quietly substitute an empty result for a file it did not
+understand.
 
 ______________________________________________________________________
 

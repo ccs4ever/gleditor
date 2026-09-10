@@ -7,6 +7,29 @@ SHELL = /bin/sh
 #STATIC = --static
 STATIC =
 
+# Everything this Makefile runs, runs headless.
+#
+# `make test` used to launch the three test binaries bare, so on any machine
+# with a DISPLAY or a WAYLAND_DISPLAY -- which is every developer's -- the
+# suites that construct a window got a real one. That steals focus from
+# whoever is at the keyboard, and it means the run depended on a display being
+# there at all, which is not true over SSH and not true in CI.
+#
+# Exported rather than prefixed onto each recipe line, so that the shell
+# scripts the test targets drive (tools/swarm-netns-test.sh,
+# tools/xudu-e2e-orchestration.sh) and every program they in turn start
+# inherit it as well. There is no list of run sites to keep up to date this
+# way, which is what let this go unnoticed in the first place.
+#
+# ?= rather than :=, so an explicit request survives: the one case that wants a
+# real display is looking at what was drawn, and `SDL_VIDEODRIVER=wayland make
+# test` still says so. See CLAUDE.md's "Tests" section, which is the rule this
+# implements.
+SDL_VIDEODRIVER       ?= offscreen
+SDL_AUDIODRIVER       ?= dummy
+LIBGL_ALWAYS_SOFTWARE ?= 1
+export SDL_VIDEODRIVER SDL_AUDIODRIVER LIBGL_ALWAYS_SOFTWARE
+
 # clang++ is the default, but only when nothing else asked for a compiler. A
 # distribution package is built with the compiler that distribution chose --
 # gcc, almost always -- and the plain `=` that used to be here silently ignored

@@ -71,7 +71,18 @@ run headless, unless the user has explicitly asked for visual confirmation.** Th
 preference about tidiness: a window stealing focus interrupts whoever is at the keyboard, and a run
 that silently depends on a real display is a run that cannot be reproduced in CI or over SSH.
 
-Use whatever gets there. In rough order of preference:
+**`make` does this for you now.** The Makefile sets `SDL_VIDEODRIVER=offscreen`,
+`SDL_AUDIODRIVER=dummy` and `LIBGL_ALWAYS_SOFTWARE=1` at the top and `export`s them, so every target
+it runs — the three test binaries, and the shell scripts they drive, and every program *those* start
+— inherits it. `make test` on a machine with no display at all passes. It did not always: the test
+target launched the binaries bare, so on any developer's machine the suites that construct a window
+got a real one, and nobody noticed because a window that opens and closes during a build looks like
+a build. Exported rather than written onto each recipe line precisely so there is no list of run
+sites to keep up to date.
+
+`?=`, so an explicit request survives — `SDL_VIDEODRIVER=wayland make test` still means it.
+
+For anything **outside** `make`, it is still yours to set. In rough order of preference:
 
 ```sh
 # 1. The environment variables, which are enough for almost everything here.
@@ -83,6 +94,9 @@ xvfb-run -s "-screen 0 1024x768x24" <command>
 # 3. Both, which is what tools/compare-backends.sh wants.
 xvfb-run -s "-screen 0 1024x768x24" ./tools/compare-backends.sh
 ```
+
+That covers running a test binary directly (`./build/xudu_test --gtest_filter=...`), which is the
+common case and does **not** go through make.
 
 `--headless` is also a flag on `xudu` and `zigzag` themselves, and it is what
 `tools/create-sample-xanadocs.sh` uses. Prefer it when driving those programs; it is stronger than
@@ -273,6 +287,11 @@ continuation indents, treats Markdown table cell padding as "wrong" indentation,
   `<zigzag/core/zzcore.hpp>` are the include spellings while `apps/common/xanadu/store.cpp` is the
   file to edit. Editing a `core/` shim is almost always a mistake:
   - `store.hpp/.cpp`: OSMIC time branches, microversions, and EDL operations
+  - `ops.hpp`: the six hyperops. `OpKind::Structure` is OSMIC's sixth, MAKE/CHANGE STRUCTURE MAP,
+    added in migration step 12 — **nothing emits one yet**; `Store::replay()` treats it as a text
+    no-op because a slice's structure is a *second* replay product of the same spool. Its verb, link
+    direction and value type live in `CompactOpNode::flags` (`StructureVerb`, `ValueKind`), not in
+    sibling `OpKind`s
   - `compact_op.hpp`: the 64-byte `CompactOpNode`. Cache-line aligned, and **immutable once stored**
     — the child/sibling tree edges live in `SegmentedOpsSpool::tree` beside the nodes, because a
     sealed segment is mapped `PROT_READ` and writing a parent's child pointer took SIGSEGV. Three
@@ -352,11 +371,29 @@ nobody has. What is *not* negotiable is the structural invariants — `sizeof(Co
 and its cache-line alignment, 64 KiB Merkle piece alignment, append-only-ness. Layout is soft;
 invariants are hard.
 
-**`ops.nodes` has a header, as of migration step 8** — a twelve-byte PNG-style signature, a format
-version, and the `nodeSize` field whose silent change caused migration step 1's damage, in a 64 KiB
-block sized so the nodes after it stay `mmap`-able on 4 KiB, 16 KiB and 64 KiB page systems. So
-there is something to bump, and a store written in a shape this build does not read is refused with
-an `OpsSegmentUnreadable` naming what was wrong rather than loading into nonsense. Two rules follow:
+**What a store is, on disk, after migration steps 8–11:**
+
+| file                            | shape                                                                     |
+| ------------------------------- | ------------------------------------------------------------------------- |
+| `ops.nodes`                     | `OpsSegmentHeader` (64 KiB, sparse) then a run of `CompactOpNode`         |
+| `store.tables`                  | `\x89XUDUTBL` + version + bencode: scroll registry, local segments, links |
+| `primedia.spool`                | raw bytes                                                                 |
+| `current.yaml`, `versions.yaml` | author-facing metadata, still YAML on purpose                             |
+| `ops.spool`                     | only ever *read*: a pre-node-array store, or an `--export-osmic` export   |
+
+`scrolls.spool`, `links.spool` and `origins.spool` are gone. A directory holding one of them and no
+`store.tables` is **refused**, because loading it would have produced a document with no scrolls —
+every quotation resolving to nothing, which looks like lost content rather than a failed open.
+`Store::save()` deletes them once the container is written.
+
+**Three formats, one habit: refuse loudly, by number.** `ops.nodes` checks a signature and its
+`nodeSize`; `store.tables` checks a signature and its version; the compact binary ops spool (now
+`CompactBinaryV3`, four-bit kind field) refuses versions 1 and 2 with *"is version 2 and this build
+reads version 3"*. Each throws a typed exception naming what was wrong. If you add a fourth format,
+it does this too — a reader that returns an empty result for a file it did not understand is the
+failure mode all of this exists to prevent.
+
+Two rules follow:
 
 - **A layout change still means regenerating every fixture in the same commit** (see "Tests"). The
   header turns silent corruption into a loud failure; it does not make the fixtures correct.

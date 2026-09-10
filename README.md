@@ -672,9 +672,9 @@ $ xudu --torrent fox.torrent --quote 0,4,5 xanadoc
 xudu: fox.torrent is magnet:?xt=urn:btih:41270f22...&dn=fox.txt (1 file(s), 218 bytes)
 xudu: 1 quotes 41270f22... file 0 [4,9)
 
-$ cat xanadoc/scrolls.spool
-scroll 1 - -
-segment 1 0 218 41270f227583fd10ef9c3e3d9aa71fea4117c24e 0 0 fox.txt
+$ xudu-dump --section=scrolls xanadoc
+scroll 1  publisher=- salt=- mime=text/plain;charset=utf-8
+segment 1  at=0 len=218 torrent=41270f227583fd10ef9c3e3d9aa71fea4117c24e streamOffset=0 fileIndex=0 path=fox.txt mime=text/plain;charset=utf-8
 $ wc -c < xanadoc/primedia.spool
 0
 ```
@@ -820,10 +820,10 @@ sequence, which only ever grows, so an offset is settled the moment the bytes ar
 torrent carries a given stretch is a separate, replaceable fact, kept as a list of segments:
 
 ```
-$ cat xanadoc/scrolls.spool
-scroll 1 4b617dae...9d76 -
-segment 1 0 4096 dc308895c32545a2fb09f050d0be66164b234219 0 0 part-0
-segment 1 4096 1731 8f2a11bd7c04e6539ab8102ff6cd41e0b7a5d382 0 0 part-1
+$ xudu-dump --section=scrolls xanadoc
+scroll 1  publisher=4b617dae...9d76 salt=- mime=text/plain;charset=utf-8
+segment 1  at=0 len=4096 torrent=dc308895c32545a2fb09f050d0be66164b234219 streamOffset=0 fileIndex=0 path=part-0 mime=text/plain;charset=utf-8
+segment 1  at=4096 len=1731 torrent=8f2a11bd7c04e6539ab8102ff6cd41e0b7a5d382 streamOffset=0 fileIndex=0 path=part-1 mime=text/plain;charset=utf-8
 ```
 
 Two things follow, and they are the point:
@@ -851,9 +851,12 @@ it now reads as nothing. Nothing downstream can tell a clamped answer from a com
 matters more once a scroll grows: a quotation reaching past the last sealed segment quotes content
 nobody has published yet, and showing the part that exists would misrepresent it.
 
-Stores written before scrolls are read from `origins.spool` and rewritten in the new shape. A
-one-segment scroll's offsets are its file's offsets, so every span already on disk keeps meaning
-what it meant.
+Stores written before scrolls had their own table were read from `origins.spool` and rewritten in
+the new shape. That reader is gone: keeping one so an old file still parses is the tax the on-disk
+format policy refuses. A directory still holding `origins.spool`, `scrolls.spool` or `links.spool`
+and no `store.tables` is refused by name rather than opened, because opening it would have produced
+a document with no scrolls at all -- every quotation resolving to nothing, which reads as lost
+content rather than as a failed open.
 
 ### Names that outlive what they point at
 
@@ -1890,9 +1893,19 @@ change.
 
 Everything below runs headless, and is meant to. A test that needs a real display is a test that
 cannot run in CI or over SSH, and a window that opens unasked interrupts whoever is at the keyboard.
-`SDL_VIDEODRIVER=offscreen SDL_AUDIODRIVER=dummy LIBGL_ALWAYS_SOFTWARE=1` covers almost everything
-here; `xvfb-run -s "-screen 0 1024x768x24"` covers the rest. `xudu` and `zigzag` also take
-`--headless` directly, which skips window creation rather than redirecting it.
+
+**`make` arranges this itself.** `SDL_VIDEODRIVER=offscreen`, `SDL_AUDIODRIVER=dummy` and
+`LIBGL_ALWAYS_SOFTWARE=1` are set at the top of the Makefile and exported, so the test binaries, the
+shell scripts the test targets drive, and every program those start all inherit it; `make test` on a
+machine with no display passes. It did not always -- the target launched the binaries bare, and on a
+developer's machine the suites that construct a window got a real one. `?=`, so
+`SDL_VIDEODRIVER=wayland make test` still means what it says.
+
+Running a binary directly does not go through make, so set them yourself there:
+`SDL_VIDEODRIVER=offscreen SDL_AUDIODRIVER=dummy LIBGL_ALWAYS_SOFTWARE=1 ./build/xudu_test`.
+`xvfb-run -s "-screen 0 1024x768x24"` covers whatever insists on a real display connection, and
+`xudu` and `zigzag` take `--headless` directly, which skips window creation rather than redirecting
+it.
 
 - Build and run tests:
 
@@ -1929,14 +1942,36 @@ here; `xvfb-run -s "-screen 0 1024x768x24"` covers the rest. `xudu` and `zigzag`
   ```
 
   `tests/samples/xudu/` holds real on-disk stores, written by `xudu` itself and read back by
-  `SampleXanadocsTest`. They are part of the on-disk format's surface area: a change to
-  `CompactOpNode`'s layout does not make them fail to load, it makes them load and mean something
-  else, so they have to be regenerated in the same commit that moves the format. That last part is a
-  consequence of `ops.nodes` having nothing at the front of it to say what it is, and it is a hole
-  being closed -- see R14 in [design/store-slice-convergence.md](design/store-slice-convergence.md)
-  for the header that turns a stale segment into a refusal with a diagnostic instead. The second
-  script exists because the first one begins by deleting the whole `multimedia` directory, and
-  `11_floating_image` is built by hand with its own scroll rather than the shared `000.scroll`.
+  `SampleXanadocsTest`. They are part of the on-disk format's surface area and have to be
+  regenerated in the same commit that moves the format. They used to *load and mean something else*
+  when they went stale -- a change to `CompactOpNode`'s layout shifted every field past
+  `parentIndex` and fifteen tests quietly began asserting on the empty string. `ops.nodes` opens
+  with a header now, recording the node size among other things, so a stale fixture is refused with
+  a diagnostic naming the two sizes; see R14 in
+  [design/store-slice-convergence.md](design/store-slice-convergence.md). Regenerating is still
+  required -- a refused fixture is a red test, not a working one -- but it is no longer the only
+  thing standing between a format change and silent corruption. The second script exists because the
+  first one begins by deleting the whole `multimedia` directory, and `11_floating_image` is built by
+  hand with its own scroll rather than the shared `000.scroll`.
+
+- Look at a store that will not open:
+
+  ```
+  $ xudu-dump xanadoc                       # every section
+  $ xudu-dump --section=ops xanadoc         # just the operations, one line each
+  $ xudu-dump --section=header xanadoc/ops.nodes
+  ```
+
+  `build/xudu-dump` reads a store's files directly and never calls `Store::load()`, which is the
+  whole design rather than an oversight: the case it exists for is a store the loader refuses, and a
+  dump that needed the loader to work first could not be pointed at one. It says what it cannot make
+  sense of, renders everything it still can, and exits non-zero when something was wrong. This is
+  what lets the formats here stop being human-readable at all -- debuggability is a tool's job, not
+  a format's.
+
+  `--section=ops` renders what each operation *means*, including the text its span names, so it is
+  also the thing to diff across a format change: a change that preserves meaning produces identical
+  output, and `--section=header` is where a version bump is supposed to show.
 
 - Compare the backends against each other:
 
@@ -1987,7 +2022,8 @@ here; `xvfb-run -s "-screen 0 1024x768x24"` covers the rest. `xudu` and `zigzag`
 - `apps/zigzag/` the Zigzag multidimensional visualizer; `apps/zigzag/core/` holds the transclusion
   engine and the compact cell layout
 - `assets/shaders/` portable GLSL bodies, plus generated SPIR-V under `vulkan/`
-- `tools/` build-time and verification helpers
+- `tools/` build-time and verification helpers, including `xudu-dump`, which renders a store as text
+  without going through the loader -- see below
 - `design/` design notes: investigations and the reasoning behind decisions
 - `tests/lib/` the library's unit tests (GoogleTest/GoogleMock)
 - `tests/xudu/` the xanalogical engine's unit tests

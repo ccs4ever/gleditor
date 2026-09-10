@@ -15,6 +15,12 @@ cell master headcells, and bidirectional Xanadoc $\longleftrightarrow$ Zigzag pr
 > convergence note before extending it, because several of the structures here are on the way out —
 > `Preflet`, the fixed array of privileged dimensions, and the string-keyed dynamic dimension table
 > among them.
+>
+> **Where the boundary is, as of migration step 12.** The operation exists: `OpKind::Structure`,
+> OSMIC's sixth hyperop, with its verb and value type in `CompactOpNode::flags`. **Nothing emits
+> one**, and `Store::replay()` treats it as a text no-op precisely because the fold that consumes it
+> belongs to the *other* replay product. `Manifold` is step 13 and is not written yet, so everything
+> below is still the model in use — not a description kept for history.
 
 ______________________________________________________________________
 

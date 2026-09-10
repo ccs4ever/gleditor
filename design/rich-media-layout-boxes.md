@@ -160,12 +160,14 @@ With no segment recorded, `classifyRun()`'s fallback — sniff the whole run's b
 has no boundary to split on — is correct only when a run is homogeneously one type.
 `03_mixed_text_image`, `04_audio_doc`, and `05_video_doc` never exercised the failure mode because
 each of their runs *is* homogeneous (a run that is only the media file, or only text, never both);
-`scrolls.spool` for all three is empty of `localsegment` lines, and it never mattered. The instant a
-run mixes a directly-imported media file with plain text immediately after it — a document not
-preceded by a page break, i.e. anything a floating figure with body text below it would naturally
-look like — the whole-buffer sniff sees the image's own leading signature (PNG's magic bytes, in
-this case) and misclassifies the entire run, image and paragraph both, as one media stretch. The
-paragraph never reaches `concatext` at all; it is silently swallowed into a single 3-byte anchor.
+the local segment table for all three is empty, and it never mattered. (That table lived in a
+plaintext `scrolls.spool` when this was written; it is a section of `store.tables` now, and
+`xudu-dump --section=scrolls` is what shows it.) The instant a run mixes a directly-imported media
+file with plain text immediately after it — a document not preceded by a page break, i.e. anything a
+floating figure with body text below it would naturally look like — the whole-buffer sniff sees the
+image's own leading signature (PNG's magic bytes, in this case) and misclassifies the entire run,
+image and paragraph both, as one media stretch. The paragraph never reaches `concatext` at all; it
+is silently swallowed into a single 3-byte anchor.
 
 Fixed at the source: `FileTextSource::ensureLoaded()`'s non-PDF branch now sniffs the whole file's
 own bytes with the same `MagicMimeDetector` used everywhere else in this codebase, and tags the

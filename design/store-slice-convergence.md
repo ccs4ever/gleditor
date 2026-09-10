@@ -1003,6 +1003,26 @@ Each step is one commit. After each, `make -j$(nproc)` builds all three programs
 Steps 1–12 have landed. What each actually cost, where it differed from the plan, and what it
 measured is recorded inline below; the rest are unchanged.
 
+**Four things the landed steps have in common, worth knowing before starting the next one.**
+
+*The format steps kept finding fields that were being dropped.* Step 11's container found four — a
+link's `tier` and `curator`, a segment's `kind` and `holeRecord` — and nearly introduced a fifth by
+reusing an encoding that had no key for a MIME type. A conversion is the moment to check what the
+old shape carried, because a faithful port of a lossy format is a lossy format.
+
+*Deleting a reader is not the same as refusing a file.* R11 says delete the old reader; R14 says
+refuse loudly. Both together mean: after deleting, something must still say no. Step 11's plaintext
+tables and step 8's headerless segments would each otherwise have loaded as *empty*, which reads as
+lost content rather than as a failed open.
+
+*A format known in two places drifts.* `Store::save()` wrote `ops.nodes` while the spool read it;
+the segment codec existed twice and the copies had already diverged. Both were found by needing a
+third writer and looking at the other two first.
+
+*And the cheapest check on all of it is `xudu-dump --section=ops`, diffed.* It renders what an
+operation means rather than how it is stored, so a step that preserves meaning shows an empty diff —
+which is how step 12 demonstrated "no behaviour change" rather than asserting it.
+
 1. ~~**Sealed-segment immutability** (R10).~~ **Done.** `firstChildIndex`/`nextSiblingIndex` left
    `CompactOpNode` for `SegmentedOpsSpool::tree`, and the eight bytes became `value` at offset 56 in
    the same commit rather than being parked as `reserved0`/`reserved1` and reclaimed later by step 9
@@ -1760,15 +1780,16 @@ ______________________________________________________________________
 
 ## 14. Documents to Amend
 
-| document                                                                                             | change                                                                         |
-| ---------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------ |
-| [`osmic-microversioning-and-dag.md`](osmic-microversioning-and-dag.md)                               | **done** — the sixth hyperop, the current node, and R14's segment header       |
-| [`zigzag-multidimensional-space-and-projection.md`](zigzag-multidimensional-space-and-projection.md) | cell = op; `Manifold` as the second replay product; `CompactZZCell` as a cache |
-| [`vortex-hyperstructural-runtime.md`](vortex-hyperstructural-runtime.md)                             | **done** — §5 records V1–V4, the table under them, and pinning (§5.6)          |
-| [`vql-query-language.md`](vql-query-language.md)                                                     | **done** — §7 records the same, from the language side, including V5           |
-| [`zzstructure.hpp`](apps/common/xanadu/zigzag/zzstructure.hpp) doc comments                          | `Preflet` deleted (R13); `d.dims` and `d.meta-dims` named                      |
-| [`binary_ops.hpp`](apps/common/xanadu/binary_ops.hpp)'s `CompactBinaryV2` comment                    | R11: it cites `PageBreak` as a change needing no bump; under R11 it needed one |
-| [`CLAUDE.md`](CLAUDE.md)'s `compact_zzcell.hpp` bullet                                               | the 960-byte figure and the hot/cold split it promises (R12, R13, §12.1)       |
+| document                                                                                             | change                                                                                                                                                                            |
+| ---------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| [`osmic-microversioning-and-dag.md`](osmic-microversioning-and-dag.md)                               | **done** — the sixth hyperop, the current node, and R14's segment header                                                                                                          |
+| [`zigzag-multidimensional-space-and-projection.md`](zigzag-multidimensional-space-and-projection.md) | **partly** — its banner records cell = op and where step 12 left the boundary; the body still describes the model in use, and is rewritten when `Manifold` replaces it in step 13 |
+| [`vortex-hyperstructural-runtime.md`](vortex-hyperstructural-runtime.md)                             | **done** — §5 records V1–V4, the table under them, and pinning (§5.6)                                                                                                             |
+| [`vql-query-language.md`](vql-query-language.md)                                                     | **done** — §7 records the same, from the language side, including V5                                                                                                              |
+| [`zzstructure.hpp`](apps/common/xanadu/zigzag/zzstructure.hpp) doc comments                          | `Preflet` deleted (R13); `d.dims` and `d.meta-dims` named                                                                                                                         |
+| [`binary_ops.hpp`](apps/common/xanadu/binary_ops.hpp)'s `CompactBinaryV2` comment                    | **done** — the enumerator and its comment are deleted with the reader (step 10)                                                                                                   |
+| [`CLAUDE.md`](CLAUDE.md)'s `compact_zzcell.hpp` bullet                                               | the 960-byte figure and the hot/cold split it promises (R12, R13, §12.1)                                                                                                          |
+| [`rich-media-layout-boxes.md`](rich-media-layout-boxes.md)                                           | **done** — `scrolls.spool` is a section of `store.tables` (step 11)                                                                                                               |
 
 An amendment note for whoever writes those: **R11 carries an expiry.** Every "bump the version and
 delete the old reader" instruction above is conditional on nothing outside this repository holding a
