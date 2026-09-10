@@ -999,7 +999,7 @@ ______________________________________________________________________
 Each step is one commit. After each, `make -j$(nproc)` builds all three programs and
 `make -j$(nproc) test` passes.
 
-Steps 1–9 have landed. What each actually cost, where it differed from the plan, and what it
+Steps 1–10 have landed. What each actually cost, where it differed from the plan, and what it
 measured is recorded inline below; the rest are unchanged.
 
 1. ~~**Sealed-segment immutability** (R10).~~ **Done.** `firstChildIndex`/`nextSiblingIndex` left
@@ -1199,10 +1199,40 @@ measured is recorded inline below; the rest are unchanged.
    newlines through raw and honours no length limit. The output looked almost right, which is the
    worst way for it to be wrong. Renamed to `excerpt()`.
 
-1. **`OpsSpoolVersion::CompactBinaryV3`** (R11): four-bit kind tag, `FLAG_SEQUENTIAL` moved, the
-   `reserved0`/`reserved1` slots reclaimed as `value`, and the V1/V2 readers **deleted**. Rewrite
-   the `CompactBinaryV2` comment that cites `PageBreak` as a change that needed no bump. Round-trip
-   test: write, dump, reload, dump, compare.
+1. ~~**`OpsSpoolVersion::CompactBinaryV3`** (R11).~~ **Done.** The kind field in the operation tag
+   byte is four bits wide and every flag above it moved up one place. The `reserved0`/`reserved1`
+   clause was already discharged by step 1, which spent those eight bytes on `value` rather than
+   parking them.
+
+   **What the widening actually buys, since three bits would have fitted `BinStructure = 7`
+   perfectly well.** Eight kinds, seven spoken for: the sixth hyperop would have filled the field
+   exactly and left nothing for whatever comes after it. Widening now costs one version bump, and
+   leaving it would have cost one anyway, later, with a kind already wedged into the last slot. The
+   price is that the tag byte is now entirely spoken for — four bits of kind, four flags — so a
+   further *flag* needs another version or a second byte. Recorded rather than regretted: the three
+   flags that exist are read by Insert and Delete only, and it is kinds this format has run out of,
+   never flags. A `static_assert` says so, by requiring the five constants to cover `0xFF`.
+
+   **The V1 and V2 readers are deleted, and `readBinaryOpsSpoolImpl` went with them.** It took the
+   decoder as a `std::function` because two versions differed in exactly one call; with one version
+   left, the indirection had no purpose and the parameter came out of the per-record decode path.
+   `detectOpsSpoolVersion()` now refuses a version 1 or 2 spool **by number** — "binary ops spool is
+   version 2 and this build reads version 3" — which is the same shape of diagnostic R14 asked for
+   from the segment header, and the test asserts on both numbers rather than merely on the throw.
+
+   **The seal's outer magic deliberately did not move.** A publication seal is `\x7fXSO\x01`, a
+   scroll table, and then one of these spools, so bumping the outer byte as well would have made an
+   older seal fail the `starts_with` check and be reported as "these are not a seal's operations" —
+   which is worse than the truth, because it *is* one. Leaving it lets the inner version speak, and
+   the inner version is the thing that changed.
+
+   The round trip is where step 9's tool earns its keep: a store is saved, dumped, written back out
+   through the wire format as the only copy of its operations, reloaded through the version 3
+   decoder, saved and dumped again — and the two `--section=ops` dumps compare **byte-identical**. A
+   second test covers the branch case, where they deliberately are not: records are emitted in
+   microversion order, so a branch sorts into the middle of the chain it forks from and returns at a
+   different spool index. Every name and every span survives, and the index does not, which is R4's
+   argument for `GlobalOpRef` seen from the other side.
 
 1. **One binary store container** (R11). `scrolls.spool` and the link table become sections beside
    `ops.nodes` under one versioned header. Deletes both plaintext parsers and their per-line error

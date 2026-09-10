@@ -88,8 +88,7 @@ TEST(BinaryOpsTest, microversionIdRoundTrips) {
 
 TEST(BinaryOpsTest, microversionIdRoundTripsPastTheBranchByteEscape) {
   // Ordinals 1-254 fit directly in the branch byte; 255 and up (branches
-  // "ix" onward) take the escape-to-varint path instead -- see
-  // OpsSpoolVersion::CompactBinaryV2.
+  // "ix" onward) take the escape-to-varint path instead.
   const auto direct = MicroversionId{}.branch(254);
   std::stringstream directStream;
   writeMicroversionId(directStream, direct);
@@ -292,32 +291,66 @@ TEST(BinaryOpsTest, autoDetectionHandlesBothBinaryAndText) {
   }
 }
 
-TEST(BinaryOpsTest, version1StreamsStillReadBackWithTheirLiteralBranchByte) {
-  // A hand-built Version 1 stream: its branch byte was always the literal
-  // ASCII letter (never an ordinal), which is why Version 1 could only ever
-  // have single-letter branches. This is what a file already on disk before
-  // CompactBinaryV2 existed looks like, and it must still open.
-  std::string bytes;
-  bytes += "\x7fXOP\x01";
-  bytes.push_back(static_cast<char>(0x70)); // tag: local scroll, at==start,
-                                            // single byte, BinInsert
-  bytes.push_back(static_cast<char>(0x01)); // one segment
-  bytes.push_back('a');                     // literal branch letter
-  bytes.push_back(static_cast<char>(0x01)); // segment number 1 (varint)
-  bytes.push_back(static_cast<char>(0x00)); // op.at (varint)
+TEST(BinaryOpsTest, theVersionsThisBuildNoLongerReadsAreRefusedByNumber) {
+  // R11's ruling, as a test. Version 1 wrote a branch as a literal ASCII
+  // letter and version 2 as an ordinal; both used to open here, and keeping
+  // a reader for either only so that a file already on disk still parses is
+  // the permanent tax that ruling refuses to pay.
+  //
+  // What matters is that they are refused *by number*. A stream this build
+  // cannot read must say which version it is, or the next person reading the
+  // error has to go and find out what "cannot read" meant.
+  for (const char version : {'\x01', '\x02'}) {
+    std::string bytes;
+    bytes += "\x7fXOP";
+    bytes.push_back(version);
+    bytes.push_back(static_cast<char>(0x70));
+    bytes.push_back(static_cast<char>(0x01));
+    bytes.push_back('a');
+    bytes.push_back(static_cast<char>(0x01));
+    bytes.push_back(static_cast<char>(0x00));
 
-  std::stringstream ss(bytes);
-  std::vector<xudu::OpRecord> decodedRecords;
-  readOpsSpool(ss, decodedRecords);
-  const auto decoded = asMap(decodedRecords);
+    std::stringstream ss(bytes);
+    std::vector<xudu::OpRecord> decoded;
+    try {
+      readOpsSpool(ss, decoded);
+      FAIL() << "version " << static_cast<int>(version) << " must not be read";
+    } catch (const std::runtime_error &e) {
+      EXPECT_THAT(std::string{e.what()},
+                  testing::HasSubstr(
+                      "version " + std::to_string(static_cast<int>(version))));
+      EXPECT_THAT(std::string{e.what()}, testing::HasSubstr("version 3"));
+    }
+    EXPECT_TRUE(decoded.empty())
+        << "nothing may be read out of a refused spool";
+  }
+}
 
-  ASSERT_EQ(decoded.size(), 1U);
-  EXPECT_EQ(decoded.begin()->first.str(), "a1");
-  EXPECT_EQ(decoded.begin()->second.kind, OpKind::Insert);
-  EXPECT_EQ(decoded.begin()->second.at, 0U);
-  EXPECT_EQ(decoded.begin()->second.span.start, 0U);
-  EXPECT_EQ(decoded.begin()->second.span.length, 1U);
-  EXPECT_EQ(decoded.begin()->second.span.scroll, localScroll);
+TEST(BinaryOpsTest, theTagByteGivesTheKindFourBitsAndTheFlagsTheRest) {
+  // The whole of what version 3 changes. Three bits held eight kinds with
+  // seven spoken for, so OpKind::Structure would have filled the field
+  // exactly; the kind took the spare bit and every flag moved up one.
+  //
+  // Asserted on the bytes rather than through a round trip, because a round
+  // trip agrees with itself whichever layout both halves happen to use.
+  std::vector<xudu::OpRecord> records;
+  Op insert;
+  insert.kind = OpKind::Insert;
+  insert.at   = 0;
+  insert.span = PrimediaSpan{localScroll, 0, 1};
+  records.push_back(xudu::OpRecord{MicroversionId::parse("1"), insert});
+
+  std::stringstream out;
+  writeBinaryOpsSpool(out, records);
+  const auto bytes = out.str();
+  ASSERT_GT(bytes.size(), xudu::binaryOpsMagic.size());
+
+  // A local single-byte insert at the span's start, sequential off state
+  // zero: every flag set and kind 0. Under version 2 that byte was 0x78.
+  const auto tag =
+      static_cast<unsigned char>(bytes[xudu::binaryOpsMagic.size()]);
+  EXPECT_EQ(tag & 0x0F, 0U) << "BinInsert is kind 0 in the low four bits";
+  EXPECT_EQ(tag, 0xF0U) << "sequential, local scroll, at==start, single byte";
 }
 
 TEST(BinaryOpsTest, versioningAndDetection) {
@@ -327,32 +360,31 @@ TEST(BinaryOpsTest, versioningAndDetection) {
 
   EXPECT_STREQ(opsSpoolVersionName(OpsSpoolVersion::StandardOsmicText),
                "OSMIC text (v0)");
-  EXPECT_STREQ(opsSpoolVersionName(OpsSpoolVersion::CompactBinaryV1),
-               "Compact binary (v1)");
-  EXPECT_STREQ(opsSpoolVersionName(OpsSpoolVersion::CompactBinaryV2),
-               "Compact binary (v2)");
+  EXPECT_STREQ(opsSpoolVersionName(OpsSpoolVersion::CompactBinaryV3),
+               "Compact binary (v3)");
 
   // Standard OSMIC text is Version 0
   std::stringstream textStream("1 insert 0 5 0 0 5 0 0 0 0 0\n");
   EXPECT_EQ(detectOpsSpoolVersion(textStream),
             OpsSpoolVersion::StandardOsmicText);
 
-  // Binary stream is Version 1
-  std::stringstream binStream("\x7fXOP\x01\x00\x00\x00\x00");
-  EXPECT_EQ(detectOpsSpoolVersion(binStream), OpsSpoolVersion::CompactBinaryV1);
-
-  // Binary stream is Version 2 -- what is written now, not a future version.
-  std::stringstream binStreamV2("\x7fXOP\x02\x00\x00\x00\x00");
-  EXPECT_EQ(detectOpsSpoolVersion(binStreamV2),
-            OpsSpoolVersion::CompactBinaryV2);
+  // Binary stream is Version 3 -- what is written now.
+  std::stringstream binStreamV3("\x7fXOP\x03\x00\x00\x00\x00");
+  EXPECT_EQ(detectOpsSpoolVersion(binStreamV3),
+            OpsSpoolVersion::CompactBinaryV3);
 
   // Truncated magic header throws
   std::stringstream truncMagic("\x7fXOP");
   EXPECT_THROW(detectOpsSpoolVersion(truncMagic), std::runtime_error);
 
-  // Unsupported future binary version throws
-  std::stringstream futureVer("\x7fXOP\x03");
-  EXPECT_THROW(detectOpsSpoolVersion(futureVer), std::runtime_error);
+  // Versions that existed and were deleted, and one that never existed: all
+  // refused the same way, because "I do not read this" is the whole of what
+  // this build has to say about any of them.
+  for (const char *const bytes :
+       {"\x7fXOP\x01", "\x7fXOP\x02", "\x7fXOP\x09"}) {
+    std::stringstream stream(bytes);
+    EXPECT_THROW(detectOpsSpoolVersion(stream), std::runtime_error) << bytes;
+  }
 }
 
 } // namespace

@@ -20,62 +20,68 @@ namespace xanadu {
 /// 4-byte magic prefix identifying compact binary operations spools.
 inline constexpr std::string_view binaryOpsMagicPrefix = "\x7fXOP";
 
-/// Operations spool format version.
+/**
+ * @brief Operations spool format version.
+ *
+ * Versions 1 and 2 existed and are gone. Under R11 a format here is free to
+ * change shape on the condition that the version is bumped and **the old
+ * reader is deleted** -- keeping one only so that a file already on disk still
+ * parses is a permanent tax paid to protect data nobody has. Version 1 wrote a
+ * branch as a literal ASCII letter, which is why a branch could only ever have
+ * one; version 2 wrote the ordinal instead. Both are refused now, by number,
+ * rather than read.
+ */
 enum class OpsSpoolVersion : std::uint8_t {
   StandardOsmicText =
       0, ///< Standard human-readable OSMIC text format (version 0).
-  CompactBinaryV1 =
-      1, ///< Compact binary encoding with LEB128 and bitpacking (version 1).
   /**
-   * Version 2: the only difference from version 1 is what a segment's
-   * branch byte means. Version 1 wrote it as the literal branch letter --
-   * 'a'-'z', or ' ' for none -- which is why a branch could only ever be
-   * one letter: there was nowhere to put a second. Version 2 writes the
-   * ordinal that letter run names instead (0 for none, 1-254 directly, 255
-   * as an escape to a following varint for anything past that), which is
-   * what lets MicroversionId::branch() take more than 26 values. Every
-   * other byte in the format -- op tags, varints, everything -- is
-   * unchanged, so this is the smallest version bump that could carry it:
-   * old bytes are not reinterpreted as anything new, but the byte that used
-   * to be exactly one ASCII letter now is not, which is a real
-   * incompatibility and not just an additive one -- see OpKind::PageBreak
-   * for the kind of change that did not need a version bump, for contrast.
+   * Version 3: the operation tag byte's kind field is four bits wide rather
+   * than three, and every flag above it moved up one place to make room.
+   *
+   * Three bits held eight kinds and seven were spoken for, so OSMIC's sixth
+   * hyperop -- OpKind::Structure, which migration step 12 adds as
+   * BinStructure = 7 -- would have filled the field exactly and left nothing
+   * for whatever comes after it. Widening now costs one version bump; leaving
+   * it would have cost one anyway, later, with a kind already wedged into the
+   * last slot.
+   *
+   * The whole byte is now spoken for: four bits of kind and four flags. A
+   * further flag needs another version or a second byte, which is the price
+   * of the room and is recorded rather than regretted -- the three flags that
+   * exist are all read by Insert and Delete only, so it is kinds that this
+   * format has ever run out of, not flags.
+   *
+   * Nothing else about the encoding moves. Varints, the branch-ordinal
+   * escape, the field order after the tag: all unchanged from version 2.
    */
-  CompactBinaryV2 = 2,
+  CompactBinaryV3 = 3,
 };
 
-/// 4-byte magic prefix + 1-byte version for compact binary ops spools (Version
-/// 1). Read-only: nothing writes this any more, but files already on disk
-/// still open under it.
-inline constexpr std::string_view binaryOpsMagicV1 = "\x7fXOP\x01";
-
-/// 4-byte magic prefix + 1-byte version for compact binary ops spools
-/// (Version 2). What is written now.
-inline constexpr std::string_view binaryOpsMagicV2 = "\x7fXOP\x02";
+/// 4-byte magic prefix + 1-byte version for compact binary ops spools. What is
+/// written now, and the only binary version that is read.
+inline constexpr std::string_view binaryOpsMagicV3 = "\x7fXOP\x03";
 
 /// The magic a new store is written with.
-inline constexpr std::string_view binaryOpsMagic = binaryOpsMagicV2;
+inline constexpr std::string_view binaryOpsMagic = binaryOpsMagicV3;
 
 /// Human-readable name for an operations spool version.
 const char *opsSpoolVersionName(OpsSpoolVersion version);
 
-/// Detect the operations spool format version from a stream (Version 0 =
-/// text, Version 1 = binary v1, Version 2 = binary v2).
+/// Detect the operations spool format version from a stream: version 0 is the
+/// OSMIC text format, version 3 the compact binary one.
+/// @throws std::runtime_error naming the version, for a binary spool this
+///         build does not read -- which includes every version 1 and 2 file.
 OpsSpoolVersion detectOpsSpoolVersion(std::istream &in);
 
 /// Variable-length unsigned integer (LEB128) encoding.
 void writeVarint(std::ostream &out, std::uint64_t val);
 bool readVarint(std::istream &in, std::uint64_t &val);
 
-/// Compact MicroversionId serialization, version 2: see
-/// OpsSpoolVersion::CompactBinaryV2 for the branch encoding this uses.
+/// Compact MicroversionId serialization. A branch travels as the ordinal its
+/// letter run names: 0 for none, 1-254 directly, and 255 as an escape to a
+/// varint that follows.
 void writeMicroversionId(std::ostream &out, const MicroversionId &id);
 bool readMicroversionId(std::istream &in, MicroversionId &id);
-
-/// Version 1's MicroversionId decoding: a branch byte is the literal ASCII
-/// letter, or ' ' for none. Read-only, for opening files version 2 was not
-/// written by.
-bool readMicroversionIdV1(std::istream &in, MicroversionId &id);
 
 /**
  * @struct OpRecord
@@ -93,16 +99,13 @@ struct OpRecord {
   Op op;
 };
 
-/// Write operations in compact binary format (version 2).
+/// Write operations in compact binary format (version 3).
 void writeBinaryOpsSpool(std::ostream &out, const std::vector<OpRecord> &ops);
 
-/// Read operations from compact binary format, version 2, in the order the
+/// Read operations from compact binary format, version 3, in the order the
 /// file holds them -- which the caller needs, since a record may name its
 /// state only relative to the one before it.
 void readBinaryOpsSpool(std::istream &in, std::vector<OpRecord> &ops);
-
-/// Read operations from compact binary format, version 1.
-void readBinaryOpsSpoolV1(std::istream &in, std::vector<OpRecord> &ops);
 
 /// Write operations in standard human-readable OSMIC text format.
 void writeOsmicTextOpsSpool(std::ostream &out,

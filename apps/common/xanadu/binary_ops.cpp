@@ -1,6 +1,5 @@
 #include "binary_ops.hpp"
 
-#include <functional>
 #include <iostream>
 #include <sstream>
 #include <stdexcept>
@@ -19,15 +18,23 @@ enum OpBinaryKind : std::uint8_t {
   BinPageBreak          = 6,
 };
 
-constexpr std::uint8_t FLAG_KIND_MASK       = 0x07;
-constexpr std::uint8_t FLAG_SEQUENTIAL      = 0x08;
-constexpr std::uint8_t FLAG_LOCAL_SCROLL    = 0x10;
-constexpr std::uint8_t FLAG_AT_EQUALS_START = 0x20;
-constexpr std::uint8_t FLAG_SINGLE_BYTE     = 0x40;
+/// The operation tag byte, version 3: four bits of kind and four flags above
+/// it, which is the whole byte. Version 2 gave the kind three bits and left
+/// bit 7 spare; OpKind::Structure would have filled that field exactly, so
+/// the spare bit went to the kind instead of to a ninth flag. See
+/// OpsSpoolVersion::CompactBinaryV3.
+constexpr std::uint8_t FLAG_KIND_MASK       = 0x0F;
+constexpr std::uint8_t FLAG_SEQUENTIAL      = 0x10;
+constexpr std::uint8_t FLAG_LOCAL_SCROLL    = 0x20;
+constexpr std::uint8_t FLAG_AT_EQUALS_START = 0x40;
+constexpr std::uint8_t FLAG_SINGLE_BYTE     = 0x80;
+static_assert((FLAG_KIND_MASK | FLAG_SEQUENTIAL | FLAG_LOCAL_SCROLL |
+               FLAG_AT_EQUALS_START | FLAG_SINGLE_BYTE) == 0xFF,
+              "the tag byte is fully spoken for; a further flag needs a "
+              "version bump or a second byte");
 
-/// Version 2's branch byte: 0-254 name that ordinal directly, and 255 means
-/// "the real ordinal is a varint that follows" -- see
-/// OpsSpoolVersion::CompactBinaryV2. 254 direct values covers every branch
+/// The branch byte: 0-254 name that ordinal directly, and 255 means "the real
+/// ordinal is a varint that follows". 254 direct values covers every branch
 /// count a document has ever needed here by a wide margin; the escape exists
 /// for whatever documents this has not seen yet, at the cost of one byte only
 /// when it is actually used.
@@ -106,41 +113,6 @@ bool readMicroversionId(std::istream &in, MicroversionId &id) {
     std::uint64_t num = 0;
     if (!readVarint(in, num)) {
       return false;
-    }
-    segs.push_back(
-        MicroversionId::Segment{branch, static_cast<std::uint32_t>(num)});
-  }
-  id = MicroversionId(segs);
-  return true;
-}
-
-bool readMicroversionIdV1(std::istream &in, MicroversionId &id) {
-  std::uint64_t count = 0;
-  if (!readVarint(in, count)) {
-    return false;
-  }
-  if (count > 4096) {
-    return false;
-  }
-  std::vector<MicroversionId::Segment> segs;
-  segs.reserve(std::min<std::size_t>(static_cast<std::size_t>(count), 64));
-  for (std::uint64_t i = 0; i < count; i++) {
-    const int c = in.get();
-    if (c == std::char_traits<char>::eof()) {
-      return false;
-    }
-    std::uint64_t num = 0;
-    if (!readVarint(in, num)) {
-      return false;
-    }
-    // A version 1 byte is the literal branch letter, or ' ' for none. Only
-    // ever one letter -- version 1 could not write more -- so its ordinal is
-    // the same one-letter arithmetic MicroversionId::parse() uses, inlined
-    // rather than shared: this is the one place bijective base 26 stays a
-    // single letter forever, by construction of the format being read.
-    std::uint32_t branch = MicroversionId::noBranch;
-    if (' ' != c) {
-      branch = static_cast<std::uint32_t>(std::tolower(c) - 'a') + 1;
     }
     segs.push_back(
         MicroversionId::Segment{branch, static_cast<std::uint32_t>(num)});
@@ -262,13 +234,7 @@ void writeBinaryOpsSpool(std::ostream &out, const std::vector<OpRecord> &ops) {
   }
 }
 
-/// Shared by readBinaryOpsSpool() and readBinaryOpsSpoolV1(): everything
-/// about the tag-based op encoding is the same between the two versions,
-/// and @p readId is the one place they differ -- see
-/// OpsSpoolVersion::CompactBinaryV2.
-void readBinaryOpsSpoolImpl(
-    std::istream &in, std::vector<OpRecord> &ops,
-    const std::function<bool(std::istream &, MicroversionId &)> &readId) {
+void readBinaryOpsSpool(std::istream &in, std::vector<OpRecord> &ops) {
   MicroversionId lastProduces{};
   while (true) {
     const int c = in.get();
@@ -283,7 +249,7 @@ void readBinaryOpsSpoolImpl(
     if (isSequential) {
       produces = lastProduces.next();
     } else {
-      if (!readId(in, produces)) {
+      if (!readMicroversionId(in, produces)) {
         throw std::runtime_error("malformed binary op: truncated microversion");
       }
     }
@@ -361,7 +327,7 @@ void readBinaryOpsSpoolImpl(
         throw std::runtime_error("malformed binary transclude op");
       }
       op.at = static_cast<std::uint32_t>(v1);
-      if (!readId(in, op.source)) {
+      if (!readMicroversionId(in, op.source)) {
         throw std::runtime_error("malformed binary transclude source");
       }
       if (!readVarint(in, v2) || !readVarint(in, v3)) {
@@ -407,14 +373,6 @@ void readBinaryOpsSpoolImpl(
     ops.push_back(OpRecord{produces, op});
     lastProduces = produces;
   }
-}
-
-void readBinaryOpsSpool(std::istream &in, std::vector<OpRecord> &ops) {
-  readBinaryOpsSpoolImpl(in, ops, readMicroversionId);
-}
-
-void readBinaryOpsSpoolV1(std::istream &in, std::vector<OpRecord> &ops) {
-  readBinaryOpsSpoolImpl(in, ops, readMicroversionIdV1);
 }
 
 void writeOsmicTextOpsSpool(std::ostream &out,
@@ -473,10 +431,8 @@ const char *opsSpoolVersionName(const OpsSpoolVersion version) {
   switch (version) {
   case OpsSpoolVersion::StandardOsmicText:
     return "OSMIC text (v0)";
-  case OpsSpoolVersion::CompactBinaryV1:
-    return "Compact binary (v1)";
-  case OpsSpoolVersion::CompactBinaryV2:
-    return "Compact binary (v2)";
+  case OpsSpoolVersion::CompactBinaryV3:
+    return "Compact binary (v3)";
   }
   return "unknown";
 }
@@ -493,14 +449,16 @@ OpsSpoolVersion detectOpsSpoolVersion(std::istream &in) {
       throw std::runtime_error(
           "truncated binary ops spool header: missing version");
     }
-    if (ver == static_cast<int>(OpsSpoolVersion::CompactBinaryV1)) {
-      return OpsSpoolVersion::CompactBinaryV1;
+    if (ver == static_cast<int>(OpsSpoolVersion::CompactBinaryV3)) {
+      return OpsSpoolVersion::CompactBinaryV3;
     }
-    if (ver == static_cast<int>(OpsSpoolVersion::CompactBinaryV2)) {
-      return OpsSpoolVersion::CompactBinaryV2;
-    }
-    throw std::runtime_error("unsupported binary ops spool version: " +
-                             std::to_string(ver));
+    // Both numbers, so that a version 1 or 2 file -- which this build
+    // deliberately no longer reads, see OpsSpoolVersion -- says what it is
+    // rather than only that it is not wanted.
+    throw std::runtime_error(
+        "binary ops spool is version " + std::to_string(ver) +
+        " and this build reads version " +
+        std::to_string(static_cast<int>(OpsSpoolVersion::CompactBinaryV3)));
   }
   in.clear();
   in.seekg(0, std::ios::beg);
@@ -510,10 +468,7 @@ OpsSpoolVersion detectOpsSpoolVersion(std::istream &in) {
 void readOpsSpool(std::istream &in, std::vector<OpRecord> &ops) {
   const auto version = detectOpsSpoolVersion(in);
   switch (version) {
-  case OpsSpoolVersion::CompactBinaryV1:
-    readBinaryOpsSpoolV1(in, ops);
-    break;
-  case OpsSpoolVersion::CompactBinaryV2:
+  case OpsSpoolVersion::CompactBinaryV3:
     readBinaryOpsSpool(in, ops);
     break;
   case OpsSpoolVersion::StandardOsmicText:

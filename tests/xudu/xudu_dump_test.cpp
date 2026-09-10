@@ -18,6 +18,7 @@
 #include <string>
 #include <vector>
 
+#include <xudu/core/binary_ops.hpp>
 #include <xudu/core/compact_op.hpp>
 #include <xudu/core/segmented_ops_spool.hpp>
 #include <xudu/core/store.hpp>
@@ -167,6 +168,86 @@ TEST_F(XuduDumpTest, sectionsAreAddressableSoAFormatChangeCanBeDiffed) {
   EXPECT_EQ(runDump("--section=ops " + dir.string()).output, ops.output);
 
   EXPECT_EQ(runDump("--section=nonsense " + dir.string()).exitCode, 2);
+}
+
+/// The store's operations written out through the compact binary wire format
+/// and put back as the only copy, so that reopening the directory has to go
+/// through the version 3 decoder.
+void roundTripThroughTheWireFormat(const fs::path &dir) {
+  Store original;
+  original.load(dir.string());
+  std::vector<xudu::OpRecord> records;
+  for (const auto &id : original.allVersions()) {
+    records.push_back(xudu::OpRecord{id, *original.getOp(id)});
+  }
+  std::ofstream out(dir / "ops.spool", std::ios::binary | std::ios::trunc);
+  xudu::writeBinaryOpsSpool(out, records);
+  out.close();
+  fs::remove(dir / "ops.nodes");
+}
+
+TEST_F(XuduDumpTest, theWireFormatRoundTripsWithoutChangingWhatAnythingMeans) {
+  // Migration step 10's round trip: write, dump, reload, dump, compare. The
+  // compact binary encoding is what travels inside a publication seal, so
+  // "the same operations came back" is the property that matters about it,
+  // and the dump is how that gets asserted on rather than assumed.
+  const auto dir = scratch("wire");
+  {
+    Store store;
+    auto at = MicroversionId{};
+    at      = store.insert(at, 0, "hello");
+    at      = store.insert(at, 5, " world");
+    at      = store.erase(at, 0, 1);
+    at      = store.insertBreak(at, 3);
+    at      = store.rearrange(at, 0, 2, 4);
+    store.save(dir.string());
+  }
+
+  const auto before = runDump("--section=ops " + dir.string());
+  ASSERT_EQ(before.exitCode, 0) << before.output;
+  ASSERT_THAT(before.output, testing::HasSubstr("kind=pagebreak"));
+  ASSERT_THAT(before.output, testing::HasSubstr("kind=rearrange"));
+
+  roundTripThroughTheWireFormat(dir);
+  {
+    Store reloaded;
+    reloaded.load(dir.string());
+    reloaded.save(dir.string());
+  }
+
+  const auto after = runDump("--section=ops " + dir.string());
+  EXPECT_EQ(after.exitCode, 0) << after.output;
+  EXPECT_EQ(after.output, before.output)
+      << "the wire format changed what an operation means";
+}
+
+TEST_F(XuduDumpTest, aBranchKeepsItsNameThroughTheWireFormat) {
+  // A branch is the case the wire format's branch-ordinal byte exists for,
+  // and it is also where a round trip stops being byte-identical: records are
+  // emitted in microversion order, so a branch sorts into the middle of the
+  // chain it forks from and comes back at a different spool index. That is
+  // R4's whole argument for GlobalOpRef, seen from the other side -- the
+  // *name* survives and the index does not.
+  const auto dir = savedStore(scratch("wirebranch"));
+
+  const auto before = runDump("--section=ops " + dir.string());
+  ASSERT_EQ(before.exitCode, 0) << before.output;
+  ASSERT_THAT(before.output, testing::HasSubstr("produces=1a1 "));
+
+  roundTripThroughTheWireFormat(dir);
+  Store reloaded;
+  reloaded.load(dir.string());
+  reloaded.save(dir.string());
+
+  const auto after = runDump("--section=ops " + dir.string());
+  EXPECT_EQ(after.exitCode, 0) << after.output;
+  // Every name still there, and still saying the same thing.
+  for (const auto *const named :
+       {"produces=1 ", "produces=2 ", "produces=3 ", "produces=1a1 "}) {
+    EXPECT_THAT(after.output, testing::HasSubstr(named));
+  }
+  EXPECT_THAT(after.output, testing::HasSubstr(R"(text=" there")"));
+  EXPECT_EQ(reloaded.textOf(MicroversionId::parse("1a1")), "hello there");
 }
 
 TEST_F(XuduDumpTest, aBareSegmentFileCanBePointedAtDirectly) {

@@ -1323,8 +1323,10 @@ void Store::load(const std::string &directory) {
     }
   } else if (std::filesystem::exists(dir / opsFile)) {
     // Written before the operations were kept as nodes, in the compact binary
-    // encoding or the OSMIC text one. Still read, and written back out as
-    // nodes by the next save().
+    // encoding or the OSMIC text one. Read, and written back out as nodes by
+    // the next save() -- but only at the binary version this build reads:
+    // under R11 the version 1 and 2 decoders are deleted rather than carried,
+    // so a spool written by either is refused by number. See OpsSpoolVersion.
     std::ifstream in(dir / opsFile, std::ios::binary);
     std::vector<OpRecord> records;
     readOpsSpool(in, records);

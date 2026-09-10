@@ -383,7 +383,7 @@ they care about; see R11 in `design/store-slice-convergence.md`.
 
 - [`store-slice-convergence.md`](design/store-slice-convergence.md) — the active plan: a cell is an
   operation, `Slice` becomes a replay product of the ops spool like `Version` is. Fourteen rulings
-  with their prices, a numbered migration (**steps 1–8 are done**), and the measurements behind
+  with their prices, a numbered migration (**steps 1–10 are done**), and the measurements behind
   each. Read this before touching `CompactOpNode`, `Manifold`, `CompactZZCell` or the zigzag
   engine's sync path.
 - [`vortex-hyperstructural-runtime.md`](design/vortex-hyperstructural-runtime.md) and
