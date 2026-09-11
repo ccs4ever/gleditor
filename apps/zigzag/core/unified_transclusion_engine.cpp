@@ -155,13 +155,10 @@ UnifiedTransclusionEngine::metaDimensionsOf(const CellRef cell) const {
       }
     }
   }
-  const auto metaDim =
-      const_cast<UnifiedTransclusionEngine *>(this)->dimensionFor(
-          "d.meta-dims");
-  if (metaDim != noCell) {
-    if (std::ranges::find(dims, metaDim) == dims.end()) {
-      dims.push_back(metaDim);
-    }
+  // d.meta-dims enumerates itself too, so that walking it from a cell reaches
+  // every dimension the cell participates in including this one.
+  if (std::ranges::find(dims, metaDimension()) == dims.end()) {
+    dims.push_back(metaDimension());
   }
   return dims;
 }
@@ -191,9 +188,7 @@ CellRef UnifiedTransclusionEngine::linked(const CellRef from, const DimRef dim,
     return noCell;
   }
 
-  const auto metaDim =
-      const_cast<UnifiedTransclusionEngine *>(this)->dimensionFor(
-          "d.meta-dims");
+  const auto metaDim  = metaDimension();
   const auto cloneDim = manifold_.dimensionNamed("d.clone", store_);
 
   if (isEphemeral(from)) {

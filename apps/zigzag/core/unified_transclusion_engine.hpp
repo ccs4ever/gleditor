@@ -91,6 +91,25 @@ public:
    */
   DimRef dimensionFor(std::string_view name);
 
+  /**
+   * @brief The dimension `d.meta-dims` is read along -- a sentinel, not a cell.
+   *
+   * R12 is explicit that `d.meta-dims` is "generated at runtime and stored in
+   * no op": it *is* a cell's CSR run, read sideways. So it cannot be a minted
+   * dimension cell, and this answers a reserved reference with `ephemeralBit`
+   * set instead -- the bit that means "derived: no op backs this".
+   *
+   * That is what keeps every read path const and silent. This used to be
+   * `dimensionFor("d.meta-dims")` reached through a `const_cast` from inside
+   * `linked()`, so asking a cell for its neighbour could append two operations
+   * to the document, from the render loop. `Manifold::applyStructure()` refuses
+   * a link whose dimension is ephemeral, so the sentinel additionally cannot be
+   * persisted by mistake.
+   */
+  [[nodiscard]] static constexpr DimRef metaDimension() noexcept {
+    return ephemeralBit | 1U;
+  }
+
   /// Link @p a to @p b along @p dim (true for negward, false for posward), by
   /// recording one Structure operation. noCell for @p b clears the link. The
   /// reciprocal edge is what the fold means by a link, not a second write.
@@ -325,7 +344,9 @@ private:
   mutable std::unordered_map<CellRef, EphemeralMetaDimSlot> ephemeralSlots_;
   mutable std::map<std::pair<CellRef, std::size_t>, CellRef>
       ephemeralByParentAndIndex_;
-  mutable std::uint32_t nextEphemeralId_{1};
+  /// Above the references metaDimension() reserves, so a derived cell can never
+  /// be mistaken for the derived dimension.
+  mutable std::uint32_t nextEphemeralId_{16};
   mutable CellSlot ephemeralCellSlotDummy_{};
 };
 

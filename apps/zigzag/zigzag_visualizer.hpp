@@ -148,7 +148,22 @@ public:
   bool saveStructureYaml(const std::string &filePath) const;
 
   [[nodiscard]] bool isProtected(CellRef id) const;
+
+  /// The cell that is dimension @p name, or noCell -- **without minting one.**
+  ///
+  /// Not UnifiedTransclusionEngine::dimensionFor(), which mints a dimension it
+  /// cannot find. Reading, navigating and drawing must never record an
+  /// operation: "only a user-generated update persists; navigation never does"
+  /// (design R8), and drawing a frame is less than navigation. Minting belongs
+  /// to the verbs a person invokes -- inserting a cell, making a link.
+  [[nodiscard]] DimRef dimensionRef(const DimID &name) const;
   [[nodiscard]] CellID focusCellId() const { return accursed_cell_focus_; }
+
+  /// How many operations this slice has recorded. The document's size in
+  /// hypertime, and what a test watches to catch an edit that records more
+  /// operations than it changed anything with -- a spool is append-only, so a
+  /// dead operation is permanent.
+  [[nodiscard]] std::size_t operationCount() const;
   [[nodiscard]] const std::string &structureName() const {
     return structure_name_;
   }

@@ -432,3 +432,81 @@ TEST(ZigzagVisualizerTest, HomeAndDimensionCellsAccessibleInTree) {
   EXPECT_TRUE(foundHome);
   EXPECT_TRUE(foundDimension);
 }
+
+// An append-only spool makes a redundant operation permanent, so the cost of an
+// edit is worth pinning. Deleting a cell used to record three operations per
+// dimension -- the splice, then two explicit clears of links the splice had
+// already cleared, because joining a cell's two neighbours displaces it from
+// both sides and linkCells() has no idempotence guard.
+TEST(ZigzagVisualizerTest, DeletingACellCostsOneOperationPerDimension) {
+  ZigzagVisualizer viz("Sans 12");
+  ASSERT_TRUE(viz.insertConnectedCell("A", "d.1", true));
+  ASSERT_TRUE(viz.insertConnectedCell("B", "d.1", true));
+  ASSERT_TRUE(viz.insertConnectedCell("C", "d.1", true));
+
+  const auto victim = viz.focusCellId();
+  ASSERT_FALSE(viz.isProtected(victim));
+
+  // The cell sits at the end of a d.1 chain and carries a d.role attribute, so
+  // it links on two dimensions: one splice plus one clear.
+  const auto before = viz.operationCount();
+  ASSERT_TRUE(viz.deleteFocusCell());
+  const auto spent = viz.operationCount() - before;
+
+  EXPECT_LE(spent, 2U) << "deleting one cell recorded " << spent
+                       << " operations; one per linked dimension carries the "
+                          "change and the rest "
+                          "are dead in an append-only spool";
+  EXPECT_GT(spent, 0U) << "the deletion recorded nothing at all";
+}
+
+// Drawing and navigating must not record anything. dimensionFor() mints a
+// dimension it cannot find, and it used to be called from drawFrame() once per
+// visible cell per axis -- so a render path could append to the document.
+TEST(ZigzagVisualizerTest, NavigatingAnAbsentDimensionRecordsNothing) {
+  ZigzagVisualizer viz("Sans 12");
+  const auto before = viz.operationCount();
+
+  viz.navigateFocus("d.no-such-dimension", true);
+  viz.navigateFocus("d.no-such-dimension", false);
+  viz.navigateFocus("d.also-absent", true);
+  viz.cycleDimensions(true);
+  viz.swapDimensions(0, 1);
+
+  EXPECT_EQ(viz.operationCount(), before)
+      << "reading or navigating minted a dimension; only a user-generated "
+         "update may persist (design R8)";
+}
+
+// The visual path stops drawing a deleted cell, because it walks outward from
+// the focus and the cell has no links left. The accessibility tree enumerates
+// every cell in the manifold, so without a reachability test it went on
+// announcing a cell the sighted user had just watched disappear.
+TEST(ZigzagVisualizerTest, ADeletedCellIsNotAnnounced) {
+  ZigzagVisualizer viz("Sans 12");
+  ASSERT_TRUE(viz.insertConnectedCell("Keep me", "d.1", true));
+  ASSERT_TRUE(viz.insertConnectedCell("Delete me", "d.1", true));
+  const auto victim = viz.focusCellId();
+  ASSERT_FALSE(viz.isProtected(victim));
+  ASSERT_TRUE(viz.deleteFocusCell());
+
+  gleditor::a11y::Publisher publisher("zigzag", "test", "1.0");
+  publisher.addSource(&viz);
+  publisher.rebuild(800, 600);
+  const auto snapshot = publisher.snapshot();
+
+  bool announcedVictim = false;
+  bool announcedKeeper = false;
+  for (const auto &node : snapshot.nodes) {
+    if (node.label.find("Delete me") != std::string::npos) {
+      announcedVictim = true;
+    }
+    if (node.label.find("Keep me") != std::string::npos) {
+      announcedKeeper = true;
+    }
+  }
+  EXPECT_FALSE(announcedVictim)
+      << "a deleted cell is still in the manifold -- DELETE is REARRANGE TO "
+         "LIMBO -- but it is unreachable, so it must not be announced";
+  EXPECT_TRUE(announcedKeeper) << "deletion took a bystander with it";
+}

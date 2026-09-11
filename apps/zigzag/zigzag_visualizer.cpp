@@ -160,6 +160,21 @@ void ZigzagVisualizer::adoptDocument(ZzStructureDocument &&doc,
   const auto sliced = sliceToStore(doc, *store_);
   engine_           = std::make_unique<UnifiedTransclusionEngine>(*store_);
 
+  // The dimensions this slice is navigated along, minted here because adopting
+  // a document is the moment a document is *built* -- the one place a write
+  // belongs. Navigation used to mint them on first use, which meant pressing an
+  // arrow key, or drawing a frame, appended operations to the document; see
+  // dimensionRef() and R8. d.clone is included because clone navigation is a
+  // well-known dimension a slice is expected to have, not something a keypress
+  // should invent.
+  for (const auto &wellKnown :
+       {current_view_.x_dimension, current_view_.y_dimension,
+        current_view_.z_dimension, DimID{"d.clone"}}) {
+    if (!wellKnown.empty()) {
+      static_cast<void>(engine_->dimensionFor(wellKnown));
+    }
+  }
+
   accursed_cell_focus_ = sliced.focus;
   if (accursed_cell_focus_ == 0 ||
       !engine_->findCell(static_cast<CellRef>(accursed_cell_focus_))) {
@@ -352,7 +367,7 @@ bool ZigzagVisualizer::deleteFocusCell() {
                                          current_view_.y_dimension,
                                          current_view_.z_dimension};
   for (const auto &dimId : viewDims) {
-    const auto dimRef = engine_->dimensionFor(dimId);
+    const auto dimRef = dimensionRef(dimId);
     if (dimRef == zigzag::noCell) {
       continue;
     }
@@ -397,15 +412,27 @@ bool ZigzagVisualizer::deleteFocusCell() {
     nextFocus = engine_->manifold().home();
   }
 
-  // Splice around focus and unlink focus from all dimensions
+  // Splice around focus and unlink it, in as few operations as the fold allows.
+  //
+  // One operation per dimension, not three. Joining the two neighbours already
+  // unlinks the cell between them: a link is one edge, so setting neg's posward
+  // to pos displaces this cell from *both* its sides -- the fold clears the
+  // negward side of what neg used to point at and the posward side of what pos
+  // used to point back to, and both of those are this cell. Following that with
+  // an explicit clear restates a link that is already clear, and linkCells()
+  // has no idempotence guard, so each of those was a dead operation in an
+  // append-only spool. Deleting a cell on two dimensions recorded four
+  // operations where two carried the change.
   for (const auto &link : links) {
     if (link.neg != zigzag::noCell && link.pos != zigzag::noCell) {
+      // A rank of exactly two loses one and becomes a cell linked to itself,
+      // which is a degenerate rank rather than a broken one.
       engine_->linkCells(link.neg, link.pos, link.dim, false);
+      continue;
     }
     if (link.pos != zigzag::noCell) {
       engine_->linkCells(focus, zigzag::noCell, link.dim, false);
-    }
-    if (link.neg != zigzag::noCell) {
+    } else if (link.neg != zigzag::noCell) {
       engine_->linkCells(focus, zigzag::noCell, link.dim, true);
     }
   }
@@ -446,6 +473,22 @@ bool ZigzagVisualizer::saveStructureYaml(const std::string &filePath) const {
   }
   const auto doc = document();
   return saveZzStructure(doc, savePath);
+}
+
+std::size_t ZigzagVisualizer::operationCount() const {
+  return engine_ ? engine_->store().opCount() : 0;
+}
+
+DimRef ZigzagVisualizer::dimensionRef(const DimID &name) const {
+  if (!engine_) {
+    return zigzag::noCell;
+  }
+  // d.meta-dims is derived and is stored in no operation (R12), so it is a
+  // sentinel rather than something to look up or mint.
+  if (name == "d.meta-dims") {
+    return UnifiedTransclusionEngine::metaDimension();
+  }
+  return engine_->manifold().dimensionNamed(name, engine_->store());
 }
 
 bool ZigzagVisualizer::isProtected(const CellRef id) const {
@@ -692,7 +735,7 @@ void ZigzagVisualizer::rebuildActiveViewTopology() {
 
   auto mapAxis = [&](const DimID &dim, const glm::vec3 &unitDir,
                      const DimensionVisual &visual, const float spacing) {
-    const auto dimRef = engine_->dimensionFor(dim);
+    const auto dimRef = dimensionRef(dim);
     if (dimRef == zigzag::noCell) {
       return;
     }
@@ -769,7 +812,7 @@ void ZigzagVisualizer::navigateFocus(const DimID &dimension,
     return;
   }
   const auto focus  = static_cast<CellRef>(accursed_cell_focus_);
-  const auto dimRef = engine_->dimensionFor(dimension);
+  const auto dimRef = dimensionRef(dimension);
   if (dimRef == zigzag::noCell) {
     return;
   }
@@ -863,14 +906,26 @@ void ZigzagVisualizer::drawFrame(gleditor::FrameContext &ctx) {
     const auto &manifold = engine_->manifold();
     const auto &store    = engine_->store();
 
+    // Resolved once per frame, not once per cell. Which cell an axis is
+    // asked about does not change which dimension the axis names, and the
+    // lookup is a rank walk that reads each dimension cell's content through
+    // the SpanReader -- a std::string per dimension per call. Sixty visible
+    // cells times three axes times a dozen dimensions was a couple of thousand
+    // allocations a frame, in the one path that exists to stage without them.
+    const std::array<std::pair<DimID, DimRef>, 3> viewAxes{
+        std::pair{current_view_.x_dimension,
+                  dimensionRef(current_view_.x_dimension)},
+        std::pair{current_view_.y_dimension,
+                  dimensionRef(current_view_.y_dimension)},
+        std::pair{current_view_.z_dimension,
+                  dimensionRef(current_view_.z_dimension)},
+    };
+
     for (const auto &[id, cell] : visible_cells_) {
       const auto cellRef = static_cast<CellRef>(id);
 
       // 1) View dimensions (covers ephemeral meta-dims and clones as well)
-      for (const auto &dimName :
-           {current_view_.x_dimension, current_view_.y_dimension,
-            current_view_.z_dimension}) {
-        const auto dimRef = engine_->dimensionFor(dimName);
+      for (const auto &[dimName, dimRef] : viewAxes) {
         if (dimRef == zigzag::noCell) {
           continue;
         }
@@ -1133,6 +1188,27 @@ void ZigzagVisualizer::describe(gleditor::a11y::Builder &into) {
   std::uint64_t nextNodeId = 10;
   if (engine_) {
     for (const auto &slot : engine_->manifold().cells()) {
+      // An unlinked cell is not announced. Deleting a cell unlinks it and
+      // cannot remove it -- DELETE is REARRANGE TO LIMBO, so its MakeCell stays
+      // on the ancestral path and the manifold still holds it. The visual path
+      // is a walk outward from the focus, so it stops drawing the cell; this
+      // tree enumerates every cell, so without this it went on announcing one
+      // the sighted user had just watched disappear. Reachability is the honest
+      // shared test, and it keeps every cell a person can actually get to.
+      //
+      // Reachability is asked as "does any link name a cell", not "is the run
+      // empty": clearing a link leaves the run entry behind holding noCell on
+      // both sides, so an unlinked cell still has as many entries as it ever
+      // had. Having a slot for a dimension is not being linked along it.
+      const auto runOf = engine_->manifold().dimensionsOf(slot.birthOp);
+      const bool reachable =
+          std::ranges::any_of(runOf, [](const DimLink &link) {
+            return link.pos != zigzag::noCell || link.neg != zigzag::noCell;
+          });
+      if (!reachable && slot.birthOp != engine_->manifold().home() &&
+          slot.birthOp != engine_->manifold().dimsDimension()) {
+        continue;
+      }
       const auto cellInfo = inspectCell(slot.birthOp);
       const bool isFocus  = (slot.birthOp == accursed_cell_focus_);
       std::string desc =
