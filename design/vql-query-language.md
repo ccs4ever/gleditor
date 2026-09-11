@@ -146,10 +146,11 @@ NamedCursor            ::= "^" [a-zA-Z_][a-zA-Z0-9_]*
 VariableRef            ::= "$" [a-zA-Z_][a-zA-Z0-9_]*
 LiteralCellId          ::= [0-9]+
 
-PathStep               ::= "/" StepSelector PredicateClause* RangeClamp?
+PathStep               ::= "/" StepSelector PredicateClause* RangeClamp? Retain?
 StepSelector           ::= SignedDimension CreateSuffix? | MacroDimensionGroup | FunctionInvocation
 SignedDimension        ::= "-"? DimensionIdentifier Placement?
-Placement              ::= "::" ( "from" | "rank" | "head" | "tail" | "fixed" )
+Placement              ::= "::" ( "from" | "rank" | "head" | "tail" )
+Retain                 ::= "!"      (* the step yields its context, not its result *)
 CreateSuffix           ::= ( "%" CreateValue? )+
 CreateValue            ::= ValueExpr | BareLiteral
 BareLiteral            ::= (run of characters excluding whitespace, "%", ",", "(", ")", "[", "]", "{", "}")
@@ -371,8 +372,9 @@ literal that has nothing to do with the cell model it's returning from:
   (`/d.status%OK`), a quoted string when it contains spaces or punctuation
   (`/d.status%"needs review"`), or a variable (`/d.status%$value`).
 
-- **Placement (`::from`, `::rank`, `::head`, `::tail`, `::fixed`)**: which cells on the rank the
-  step acts on — and, for a create, whether the path's context follows the new cell.
+- **Placement (`::from`, `::rank`, `::head`, `::tail`)**: which cells on the rank the step acts on.
+  Every one of them means something whether or not a `%` follows, which is what makes them one
+  family; whether the context *follows* a create is a different axis and has its own spelling below.
 
   This is the rule that used to be called *tail-seeking* and was **implied by `%` rather than
   written**: if the context cell already had a link along `dim`, `%` silently walked to the tail of
@@ -382,13 +384,12 @@ literal that has nothing to do with the cell model it's returning from:
   a read, and that rank's tail cell under a `%`. One token, two meanings, chosen by something at the
   other end of the step.
 
-  | placement | selects                                                         | on a create                                             |
-  | --------- | --------------------------------------------------------------- | ------------------------------------------------------- |
-  | `::from`  | the cells from the context outward, in the step's direction     | —                                                       |
-  | `::rank`  | every cell on the rank, head to tail, wherever the context sits | —                                                       |
-  | `::head`  | the rank's negward-most cell                                    | insert there; context follows                           |
-  | `::tail`  | the rank's posward-most cell                                    | append there; context follows                           |
-  | `::fixed` | the context cell itself                                         | insert immediately posward; context **does not** follow |
+  | placement | selects                                                         | on a create  |
+  | --------- | --------------------------------------------------------------- | ------------ |
+  | `::from`  | the cells from the context outward, in the step's direction     | —            |
+  | `::rank`  | every cell on the rank, head to tail, wherever the context sits | —            |
+  | `::head`  | the rank's negward-most cell                                    | insert there |
+  | `::tail`  | the rank's posward-most cell                                    | append there |
 
   **The defaults differ by position, and that asymmetry *is* the old ambiguity — now visible.** A
   read defaults to `::from` and a create to `::tail`, which is exactly what `dim` already meant in
@@ -409,16 +410,39 @@ literal that has nothing to do with the cell model it's returning from:
   shows its content from the next read onward. That is the "change the default for everyone in one
   operation" property of §6.3, spelled as a placement rather than as a special case.
 
-  **`::fixed` is the one that changes what comes after it.** `::tail` and `::head` move the context
-  to the cell they just made, which is what makes `%foo%bar` chain — create `foo`, move to it,
-  create `bar` — and that following behaviour is worth keeping, so it stays the default. `::fixed`
-  does not move: the cells the path was working on are still the cells it is working on, so a step
-  after a `::fixed` create continues from the original context. That is the difference that matters
-  for the rest of the path, not where the byte landed.
-
   **`::from` and `::rank` have no meaning on a create** and are an error there rather than a guess.
   They select a stream, and "insert at a stream" names no position — `::from%` would have to mean
   the end of the walk, which is `::tail` said obscurely.
+
+- **Retention (`!`), which is a different axis from placement.** `::tail` and `::head` move the
+  context to the cell they just made, which is what makes `%foo%bar` chain — create `foo`, move to
+  it, create `bar`. That following behaviour is worth keeping and stays the default. A step suffixed
+  with `!` **yields the context it was given instead of what it produced**, so the path carries on
+  from where it was:
+
+  ```
+  $page/d.children%"Alice"/d.status%"active"     # status lands on Alice
+  $page/d.children%"Alice"!/d.status%"active"    # status lands on $page
+  ```
+
+  **This was first proposed as `::fixed`, and it does not belong in that family.** `::from`,
+  `::rank`, `::head` and `::tail` all answer one question — *which cells on the rank does this step
+  act on?* — and each is meaningful whether or not a `%` follows. "Don't move the cursor" answers a
+  different question, *what does this step yield?*, and is meaningful only where something was
+  produced to yield. Putting it in the placement family would have made `::` mean two kinds of thing
+  chosen by whether a `%` happened to appear later in the step — which is the shape of the very
+  ambiguity placements were introduced to retire, reintroduced one level up.
+
+  So it is a suffix on the **step**, sitting where a `RangeClamp` sits and applying after everything
+  else the step did, because what a step yields is the last question about it. It composes with any
+  placement — `/d.clone::head%"override"!` mints a new master and leaves the path on the cell that
+  had one — and with non-create steps, where it is a no-op that reads as an assertion: a read
+  already yields its result, so `!` on one says "walk here but keep my place", which is either what
+  you meant or a sign the step should not have been written.
+
+  Considered and rejected: `%!VALUE`, which attaches to the create rather than to the step and reads
+  as though it modified the *value*; and `::stay`, which keeps the word but leaves `::` meaning two
+  kinds of thing depending on where it sits.
 
 - **Chainable**: whatever `%` lands on (freshly allocated or, on repeat, freshly appended) becomes
   the new context for the rest of the path, same as any other step — `/d.name%/d.results%VALUE`
