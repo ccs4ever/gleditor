@@ -376,6 +376,46 @@ MicroversionId Store::setScalar(const MicroversionId &parent,
   return applyScalar(parent, cell, scalarValue(value), known);
 }
 
+MicroversionId Store::spliceCellSpan(const MicroversionId &parent,
+                                     const zigzag::CellRef cell,
+                                     const std::uint64_t at,
+                                     const std::uint64_t removing,
+                                     const PrimediaSpan &quoted,
+                                     const zigzag::Manifold *const known) {
+  if (zigzag::noCell == cell || zigzag::isEphemeral(cell)) {
+    throw std::invalid_argument("spliceCell needs a cell an operation minted");
+  }
+  requireCellOp(cell, "the cell being edited");
+
+  Op op;
+  op.kind  = OpKind::Structure;
+  op.flags = structureFlags(StructureVerb::Splice);
+  // The one Structure verb whose `at` is not zero: it is an offset inside the
+  // cell's own content, which is the frame this operation edits within.
+  op.at     = static_cast<std::uint32_t>(at);
+  op.length = static_cast<std::uint32_t>(removing);
+  op.span   = quoted;
+  if (const auto previous = lastOpOnCell(parent, cell, known);
+      zigzag::noCell != previous) {
+    op.source = opsSpool.idOf(previous);
+  }
+  return apply(parent, op);
+}
+
+MicroversionId Store::spliceCell(const MicroversionId &parent,
+                                 const zigzag::CellRef cell,
+                                 const std::uint64_t at,
+                                 const std::uint64_t removing,
+                                 const std::string_view text,
+                                 const zigzag::Manifold *const known) {
+  // Into the permascroll first, and only what was actually typed -- which is
+  // the difference this verb exists to make. setCellText() appends the whole
+  // cell however little of it changed.
+  const auto span =
+      text.empty() ? PrimediaSpan{} : userPermascroll_->append(text);
+  return spliceCellSpan(parent, cell, at, removing, span, known);
+}
+
 MicroversionId Store::setCellText(const MicroversionId &parent,
                                   const zigzag::CellRef cell,
                                   const std::string_view text,

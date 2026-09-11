@@ -810,9 +810,18 @@ storeToLinkPackage(const xanadu::Store &store, const Manifold &manifold,
     if (structural.contains(slot.birthOp)) {
       continue;
     }
-    if (const auto global = xanadu::globalise(store, slot.span, &localScroll)) {
+    // The first span of the cell's content. A cell whose content is several
+    // spans -- because it has been edited, see U3 -- is published under the
+    // address of its first, which is what a package holding one GlobalSpan per
+    // cell can say. Carrying all of them is a change to LinkPackage's shape.
+    const auto contentRun = manifold.contentOf(slot.birthOp);
+    if (contentRun.empty()) {
+      continue;
+    }
+    if (const auto global =
+            xanadu::globalise(store, contentRun.front(), &localScroll)) {
       cellSpans.emplace(slot.birthOp, *global);
-      if (const auto *const s = scrollFor(slot.span)) {
+      if (const auto *const s = scrollFor(contentRun.front())) {
         scrolls.insert_or_assign(global->scroll, *s);
       }
     }

@@ -33,6 +33,8 @@ const char *structureVerbName(const StructureVerb verb) {
     return "setLink";
   case StructureVerb::SetValue:
     return "setValue";
+  case StructureVerb::Splice:
+    return "splice";
   }
   // Not "makeCell": an unknown verb is what a build reading a newer spool sees,
   // and naming it after a real one would make a dump of that spool a lie.

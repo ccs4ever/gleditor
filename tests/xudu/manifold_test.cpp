@@ -638,7 +638,7 @@ TEST(ManifoldTest, aHopCostsWhatR12SaysItCosts) {
   for (std::size_t i = 0; i < cells.size(); i++) {
     const auto *const slot = manifold.slot(cells[i]);
     ASSERT_NE(slot, nullptr);
-    array[i].span      = slot->span;
+    array[i].span      = manifold.contentOf(cells[i]).front();
     array[i].birthOp   = slot->birthOp;
     array[i].lastOp    = slot->lastOp;
     array[i].valueBits = slot->valueBits;
@@ -747,3 +747,132 @@ TEST(ManifoldTest, aSliceSurvivesSavingAndReopening) {
 }
 
 } // namespace
+
+// -- U3: an edit keeps the addresses of the text it did not touch -------------
+//
+// A cell used to hold one span, so setCellText() re-spooled the whole content
+// and moved every byte to a new address. Measured then: editing one byte of a
+// 1000-byte cell appended 1000 permascroll bytes and left zero overlap with the
+// old span, which silently severed every transclusion that shared it. These are
+// the tests for the run of spans that replaced it.
+
+TEST(ManifoldTest, aSpliceKeepsTheAddressesItDidNotTouch) {
+  Slice slice;
+  const auto cell   = slice.cell("the quick brown fox");
+  const auto before = slice.store.rebuildManifold(slice.at).contentOf(cell);
+  ASSERT_EQ(before.size(), 1U);
+  const auto original = before.front();
+
+  const auto spooledBefore = slice.store.userPermascroll().size();
+  // Replace "quick" with "slow": four bytes typed, not nineteen re-spooled.
+  slice.at           = slice.store.spliceCell(slice.at, cell, 4, 5, "slow");
+  const auto spooled = slice.store.userPermascroll().size() - spooledBefore;
+
+  const auto manifold = slice.store.rebuildManifold(slice.at);
+  EXPECT_EQ(manifold.textOf(cell, slice.store), "the slow brown fox");
+  EXPECT_EQ(spooled, 4U) << "an edit spooled more than the text it inserted";
+
+  // Three pieces: the head and tail keep their original addresses, and only the
+  // middle is new. That is the property the whole ruling is about.
+  const auto run = manifold.contentOf(cell);
+  ASSERT_EQ(run.size(), 3U);
+  EXPECT_EQ(run[0].start, original.start);
+  EXPECT_EQ(run[0].length, 4U);
+  EXPECT_EQ(run[2].start, original.start + 9);
+  EXPECT_EQ(run[2].length, 10U);
+  EXPECT_NE(run[1].start, original.start);
+}
+
+TEST(ManifoldTest, aQuotationSurvivesAnEditElsewhereInTheCell) {
+  Slice slice;
+  const auto quoted = slice.cell("the quick brown fox");
+  const auto original =
+      slice.store.rebuildManifold(slice.at).contentOf(quoted).front();
+
+  // A second cell transcluding the last ten bytes -- "brown fox" -- by address.
+  // Sharing the address *is* the transclusion, which is what the gold beams
+  // draw and what diffVersions() classifies as Identity Gold.
+  const auto quoter = slice.cell("");
+  slice.at          = slice.store.spliceCellSpan(
+      slice.at, quoter, 0, 0,
+      PrimediaSpan{original.scroll, original.start + 9, 10});
+
+  // Now edit the *front* of the quoted cell, well away from the quotation.
+  slice.at = slice.store.spliceCell(slice.at, quoted, 0, 3, "one");
+
+  const auto manifold = slice.store.rebuildManifold(slice.at);
+  EXPECT_EQ(manifold.textOf(quoted, slice.store), "one quick brown fox");
+  EXPECT_EQ(manifold.textOf(quoter, slice.store), " brown fox");
+
+  // The quotation still shares an address with the cell it quotes. Under one
+  // span per cell this failed: the edit re-spooled all nineteen bytes and the
+  // overlap went to zero.
+  const auto run       = manifold.contentOf(quoted);
+  std::uint64_t shared = 0;
+  const PrimediaSpan quotation{original.scroll, original.start + 9, 10};
+  for (const auto &piece : run) {
+    shared += piece.intersect(quotation).length;
+  }
+  EXPECT_EQ(shared, 10U)
+      << "editing one end of a cell severed a quotation of the other";
+}
+
+TEST(ManifoldTest, adjacentPiecesCoalesceWithoutLosingAnAddress) {
+  Slice slice;
+  const auto cell = slice.cell("hello world");
+  const auto original =
+      slice.store.rebuildManifold(slice.at).contentOf(cell).front();
+
+  // Cut a hole, then splice back a span naming exactly the bytes removed. The
+  // run should return to one piece: joins() merges only same-scroll contiguous
+  // pieces, so the merged piece covers precisely the addresses the two did.
+  slice.at = slice.store.spliceCell(slice.at, cell, 5, 6, "");
+  ASSERT_EQ(slice.store.rebuildManifold(slice.at).textOf(cell, slice.store),
+            "hello");
+  slice.at = slice.store.spliceCellSpan(
+      slice.at, cell, 5, 0,
+      PrimediaSpan{original.scroll, original.start + 5, 6});
+
+  const auto manifold = slice.store.rebuildManifold(slice.at);
+  EXPECT_EQ(manifold.textOf(cell, slice.store), "hello world");
+  const auto run = manifold.contentOf(cell);
+  EXPECT_EQ(run.size(), 1U)
+      << "two contiguous pieces of one scroll stayed apart";
+  EXPECT_EQ(run.front().start, original.start);
+  EXPECT_EQ(run.front().length, original.length);
+}
+
+TEST(ManifoldTest, splicingFoldsTheSameIncrementallyAsCold) {
+  Slice slice;
+  auto manifold   = slice.store.rebuildManifold(slice.at);
+  const auto cell = slice.cell("abcdefghij");
+  ASSERT_TRUE(manifold.advance(slice.store, slice.at));
+
+  for (int i = 0; i < 12; i++) {
+    slice.at = slice.store.spliceCell(slice.at, cell, (i * 3) % 6, 1,
+                                      "X" + std::to_string(i), &manifold);
+    ASSERT_TRUE(manifold.advance(slice.store, slice.at));
+  }
+
+  EXPECT_EQ(manifold.refusedOps(), 0U);
+  EXPECT_TRUE(manifold.verifyAgainstFullRebuild(slice.store));
+  EXPECT_EQ(manifold.textOf(cell, slice.store),
+            slice.store.rebuildManifold(slice.at).textOf(cell, slice.store));
+}
+
+TEST(ManifoldTest, aSpliceRefusesToBePublishedRatherThanArriveWrong) {
+  Slice slice;
+  const auto cell = slice.cell("the quick brown fox");
+  slice.at        = slice.store.spliceCell(slice.at, cell, 4, 5, "slow");
+
+  // The wire encoding has no field for a splice's offset or length, so it would
+  // arrive as a splice at offset zero removing nothing -- a change of meaning,
+  // not a failure to load. Refused by name until CompactBinaryV4. A store that
+  // has never been spliced still publishes.
+  EXPECT_THROW(static_cast<void>(slice.store.exportBinaryOps()),
+               std::runtime_error);
+
+  Slice plain;
+  static_cast<void>(plain.cell("unspliced"));
+  EXPECT_NO_THROW(static_cast<void>(plain.store.exportBinaryOps()));
+}

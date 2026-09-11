@@ -434,6 +434,36 @@ public:
                          zigzag::DimRef dim, bool negward, zigzag::CellRef to,
                          const zigzag::Manifold *known = nullptr);
 
+  /**
+   * @brief Splice @p text into @p cell's content, replacing @p removing bytes
+   *        at offset @p at within that cell.
+   *
+   * The edit verb. setValue()/setCellText() restate a cell's whole content, so
+   * changing one byte of a thousand re-spools all thousand and severs every
+   * transclusion that shared the old addresses; this touches only the piece the
+   * edit lands in and leaves every other address exactly where it was. See U3
+   * in design/store-slice-convergence.md for the measurement that produced it.
+   *
+   * @p at is an offset within *this cell's* content, not the document's
+   * concatext -- §2's frame, made usable.
+   *
+   * An empty @p text with a nonzero @p removing is a delete; a zero
+   * @p removing with text is an insert; both together is a replacement.
+   */
+  MicroversionId spliceCell(const MicroversionId &parent, zigzag::CellRef cell,
+                            std::uint64_t at, std::uint64_t removing,
+                            std::string_view text,
+                            const zigzag::Manifold *known = nullptr);
+
+  /// Splice an existing address into @p cell rather than newly typed text --
+  /// a transclusion into a cell, which shares the quoted bytes rather than
+  /// copying them.
+  MicroversionId spliceCellSpan(const MicroversionId &parent,
+                                zigzag::CellRef cell, std::uint64_t at,
+                                std::uint64_t removing,
+                                const PrimediaSpan &quoted,
+                                const zigzag::Manifold *known = nullptr);
+
   /// Restate @p cell's content span and typed value. Both, not either: an
   /// operation that merged with what was already there would make the fold
   /// depend on how it got there.

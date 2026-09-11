@@ -101,6 +101,23 @@ enum class StructureVerb : std::uint8_t {
   SetLink = 1,
   /// Retarget this cell's content span, its typed value, or both.
   SetValue = 2,
+  /**
+   * Splice `span` into this cell's content at offset `at`, replacing `length`
+   * bytes of what is there -- an insert when `length` is zero, a delete when
+   * the span is empty, and a replacement otherwise.
+   *
+   * The verb that makes an edit an *edit*. SetValue restates a cell's whole
+   * content, so changing one byte of a thousand moved all thousand to a new
+   * address and severed every transclusion that shared the old one; a splice
+   * touches only the piece it lands in and leaves every other address exactly
+   * where it was. See U3 in design/store-slice-convergence.md.
+   *
+   * `at` is an offset within *this cell's* content rather than the document's
+   * concatext, which is what §2 means by a structure map establishing the
+   * frame the other hyperops' coordinates are meaningful in. It is the one
+   * Structure verb for which `at` is not zero.
+   */
+  Splice = 3,
   // No MakeDim: a dimension is a cell on the d.dims rank, so minting one is
   // MakeCell plus SetLink and needs no verb of its own. See design R12.
 };

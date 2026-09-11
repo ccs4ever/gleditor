@@ -95,6 +95,108 @@ void Manifold::setOneSide(const std::uint32_t dense, const DimRef dim,
   }
 }
 
+std::span<const xanadu::PrimediaSpan>
+Manifold::contentOf(const CellRef ref) const noexcept {
+  const auto dense = denseOf(ref);
+  if (noDense == dense) {
+    return {};
+  }
+  const auto &cell = slots[dense];
+  return std::span<const xanadu::PrimediaSpan>{content.data() + cell.spanOffset,
+                                               cell.spanCount};
+}
+
+void Manifold::setContent(const std::uint32_t dense,
+                          const std::span<const xanadu::PrimediaSpan> spans) {
+  auto &cell = slots[dense];
+  liveContent -= cell.spanCount;
+
+  // Grown in place when this cell's run is the arena's tail, relocated to the
+  // end otherwise -- the same compromise the link arena makes, and compact()
+  // reclaims what relocating leaves behind.
+  const std::size_t offset = cell.spanOffset;
+  const bool atTail        = offset + cell.spanCount == content.size();
+  if (atTail && spans.size() <= cell.spanCount) {
+    content.resize(offset + spans.size());
+  } else if (!atTail || spans.size() > cell.spanCount) {
+    if (content.capacity() < content.size() + spans.size()) {
+      content.reserve(
+          std::max(content.size() * 2, content.size() + spans.size()));
+    }
+    cell.spanOffset = static_cast<std::uint32_t>(content.size());
+    content.resize(content.size() + spans.size());
+  }
+  std::copy(spans.begin(), spans.end(), content.begin() + cell.spanOffset);
+  cell.spanCount = static_cast<std::uint16_t>(spans.size());
+  liveContent += cell.spanCount;
+
+  if (content.size() > 2 * liveContent + compactionSlack) {
+    compact();
+  }
+}
+
+void Manifold::spliceContent(const std::uint32_t dense, const std::uint64_t at,
+                             const std::uint64_t removing,
+                             const xanadu::PrimediaSpan &inserted) {
+  // Version's algorithm, over the arena rather than over a vector per cell.
+  // splitAt() cuts a piece so that a boundary exists where the edit lands, and
+  // the pieces on either side keep the addresses they had -- which is the whole
+  // point: an edit must not move the text it did not touch.
+  const auto existing = contentOf(slots[dense].birthOp);
+  std::vector<xanadu::PrimediaSpan> rebuilt;
+  rebuilt.reserve(existing.size() + 2);
+
+  std::uint64_t seen = 0;
+  for (const auto &piece : existing) {
+    const auto pieceEnd = seen + piece.length;
+    // Everything wholly before the edit, and the head of a piece the edit cuts.
+    if (seen < at) {
+      rebuilt.push_back(piece.slice(0, std::min(piece.length, at - seen)));
+    }
+    // Everything wholly after it, and the tail of a piece the edit cuts.
+    const auto removedEnd = at + removing;
+    if (pieceEnd > removedEnd) {
+      const auto from = removedEnd > seen ? removedEnd - seen : 0;
+      rebuilt.push_back(piece.slice(from, piece.length - from));
+    }
+    seen = pieceEnd;
+  }
+
+  // The inserted span goes where the edit landed, which is after every piece
+  // that ended at or before `at`.
+  if (!inserted.empty()) {
+    std::uint64_t upTo = 0;
+    std::size_t where  = 0;
+    for (; where < rebuilt.size() && upTo < at; where++) {
+      upTo += rebuilt[where].length;
+    }
+    rebuilt.insert(rebuilt.begin() + static_cast<std::ptrdiff_t>(where),
+                   inserted);
+  }
+
+  // Coalescing is safe here and was worth checking rather than assuming.
+  // joins() merges only pieces of the same scroll that are already contiguous,
+  // so the merged piece covers exactly the addresses the two did: every
+  // question a cell is asked -- what it says, which addresses it holds, who
+  // else quotes them -- is answered from addresses and gets the same answer
+  // either way. §1's "a cell must not merge" is about *cells*, which d.clone
+  // keeps distinct however identical their content; it says nothing about the
+  // pieces within one. Merging also gives a canonical form, so a cell edited
+  // and edited back matches one that was never touched.
+  std::erase_if(rebuilt, [](const auto &piece) { return piece.empty(); });
+  for (std::size_t i = 0; i + 1 < rebuilt.size();) {
+    if (rebuilt[i].scroll == rebuilt[i + 1].scroll &&
+        rebuilt[i].end() == rebuilt[i + 1].start) {
+      rebuilt[i].length += rebuilt[i + 1].length;
+      rebuilt.erase(rebuilt.begin() + static_cast<std::ptrdiff_t>(i) + 1);
+      continue;
+    }
+    i++;
+  }
+
+  setContent(dense, rebuilt);
+}
+
 void Manifold::applyStructure(const std::uint32_t opIndex,
                               const xanadu::CompactOpNode &node) noexcept {
   if (xanadu::OpKind::Structure != node.kind) {
@@ -111,10 +213,11 @@ void Manifold::applyStructure(const std::uint32_t opIndex,
       return;
     }
     const auto dense = static_cast<std::uint32_t>(slots.size());
-    // The empty run starts at the arena's tail, so this cell's first link is
-    // an append in place rather than a relocation.
+    // The empty runs start at the arenas' tails, so this cell's first link and
+    // first span are appends in place rather than relocations.
     slots.push_back(CellSlot{
-        .span       = node.span(),
+        .spanOffset = static_cast<std::uint32_t>(content.size()),
+        .spanCount  = 0,
         .birthOp    = opIndex,
         .lastOp     = opIndex,
         .linkOffset = static_cast<std::uint32_t>(links.size()),
@@ -124,6 +227,10 @@ void Manifold::applyStructure(const std::uint32_t opIndex,
         .valueBits = node.value,
     });
     byRef.emplace(opIndex, dense);
+    if (!node.span().empty()) {
+      const auto only = node.span();
+      setContent(dense, std::span<const xanadu::PrimediaSpan>{&only, 1});
+    }
     // Genesis mints home first and d.dims second, by fiat, because linking the
     // first dimension onto the d.dims rank needs d.dims to be nameable
     // already. See R12.
@@ -198,6 +305,18 @@ void Manifold::applyStructure(const std::uint32_t opIndex,
     return;
   }
 
+  case xanadu::StructureVerb::Splice: {
+    const auto dense = denseOf(node.sourceOpIndex);
+    if (noDense == dense) {
+      refusedOps_++;
+      return;
+    }
+    spliceContent(dense, node.at, node.length, node.span());
+    slots[dense].lastOp = opIndex;
+    byRef.emplace(opIndex, dense);
+    return;
+  }
+
   case xanadu::StructureVerb::SetValue: {
     const auto dense = denseOf(node.sourceOpIndex);
     if (noDense == dense) {
@@ -207,8 +326,11 @@ void Manifold::applyStructure(const std::uint32_t opIndex,
     // States the cell's content and value in full rather than merging with
     // what was there: an operation that reads the state it is applied to would
     // make the fold depend on the order two branches were folded in.
+    const auto restated = node.span();
+    setContent(dense, restated.empty() ? std::span<const xanadu::PrimediaSpan>{}
+                                       : std::span<const xanadu::PrimediaSpan>{
+                                             &restated, 1});
     auto &cell     = slots[dense];
-    cell.span      = node.span();
     cell.valueKind = static_cast<std::uint8_t>(xanadu::valueKindOf(node.flags));
     cell.valueBits = node.value;
     cell.lastOp    = opIndex;
@@ -238,6 +360,18 @@ bool Manifold::advance(const xanadu::Store &store,
 }
 
 void Manifold::compact() {
+  std::vector<xanadu::PrimediaSpan> tightContent;
+  tightContent.reserve(liveContent);
+  for (auto &cell : slots) {
+    const std::size_t offset = cell.spanOffset;
+    cell.spanOffset          = static_cast<std::uint32_t>(tightContent.size());
+    for (std::uint16_t i = 0; i < cell.spanCount; i++) {
+      tightContent.push_back(content[offset + i]);
+    }
+  }
+  content.swap(tightContent);
+  liveContent = content.size();
+
   std::vector<DimLink> tight;
   tight.reserve(liveLinks);
   for (auto &cell : slots) {
@@ -313,11 +447,11 @@ DimRef Manifold::dimensionNamed(const std::string_view name,
 
 std::string Manifold::textOf(const CellRef ref,
                              const xanadu::SpanReader &reader) const {
-  const auto *const cell = slot(ref);
-  if (nullptr == cell || cell->span.empty()) {
-    return {};
+  std::string out;
+  for (const auto &span : contentOf(ref)) {
+    out += reader.read(span);
   }
-  return reader.read(cell->span);
+  return out;
 }
 
 xanadu::ValueKind Manifold::valueKindOf(const CellRef ref) const noexcept {
@@ -378,7 +512,9 @@ bool Manifold::equivalentTo(const Manifold &other) const {
   for (const auto &cell : slots) {
     const auto *const theirs = other.slot(cell.birthOp);
     if (nullptr == theirs || theirs->birthOp != cell.birthOp ||
-        theirs->lastOp != cell.lastOp || theirs->span != cell.span ||
+        theirs->lastOp != cell.lastOp ||
+        !std::ranges::equal(contentOf(cell.birthOp),
+                            other.contentOf(cell.birthOp)) ||
         theirs->valueKind != cell.valueKind ||
         theirs->valueBits != cell.valueBits) {
       return false;

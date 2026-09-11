@@ -223,12 +223,12 @@ TEST(ScalarTest, twoCellsHoldingOneNumberAreTwoCellsAtTwoAddresses) {
   // addresses. Sharing one would assert a transclusion that never happened,
   // classify it as DiffKind::Universal and light up Identity Gold for two
   // people who merely both typed 3.14.
-  const auto *const first  = manifold.slot(mine);
-  const auto *const second = manifold.slot(theirs);
-  ASSERT_NE(first, nullptr);
-  ASSERT_NE(second, nullptr);
-  EXPECT_NE(first->span.start, second->span.start);
-  EXPECT_EQ(first->span.length, second->span.length);
+  const auto first  = manifold.contentOf(mine);
+  const auto second = manifold.contentOf(theirs);
+  ASSERT_EQ(first.size(), 1U);
+  ASSERT_EQ(second.size(), 1U);
+  EXPECT_NE(first.front().start, second.front().start);
+  EXPECT_EQ(first.front().length, second.front().length);
 }
 
 TEST(ScalarTest, restatingAScalarSpoolsTheNewRenderingAndKeepsTheCell) {

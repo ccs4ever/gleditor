@@ -233,6 +233,20 @@ void writeBinaryOpsSpool(std::ostream &out, const std::vector<OpRecord> &ops) {
       break;
 
     case OpKind::Structure:
+      // A splice carries `at` and `length` -- an offset inside the cell's own
+      // content and how much of it to replace -- and this encoding has no room
+      // for either: `at` is deliberately not written, because it is zero for
+      // every other verb and that is what makes FLAG_AT_EQUALS_START meaningful
+      // across the family. Published as-is, a splice would arrive as a splice
+      // at offset zero removing nothing, which is not a failure to load but a
+      // change of meaning -- the failure R14 exists to make impossible. So it
+      // is refused by name until CompactBinaryV4 widens the family. See U3.4.
+      if (StructureVerb::Splice == structureVerbOf(op.flags)) {
+        throw std::runtime_error(
+            "a Splice operation cannot be published: this wire format has no "
+            "field for its offset or its length, so it would arrive meaning "
+            "something else. See U3.4 in design/store-slice-convergence.md.");
+      }
       // Every field a Structure verb might read, in one shape rather than one
       // per verb: which one it is lives in `flags`, and the fields a given
       // verb does not use are zero, exactly as they are for every other kind

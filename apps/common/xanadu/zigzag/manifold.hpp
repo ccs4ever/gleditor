@@ -101,30 +101,41 @@ static_assert(sizeof(DimLink) == 12);
  * exactly and without a cap.
  */
 struct CellSlot {
-  /// 24: this cell's content, as **one** span.
-  ///
-  /// One, not a run -- and that is an open question rather than a settled
-  /// design. Because a cell has a single span, editing it cannot keep the
-  /// addresses of the text that did not change: Store::setCellText() re-spools
-  /// the whole content, so an edit costs the size of the cell and moves every
-  /// byte of it to a new address, which silently severs any transclusion that
-  /// shared the old one. See U3 in design/store-slice-convergence.md, which
-  /// records the measurement, the three ways out, and why the apparent
-  /// `sourceOpIndex` collision on a transclusion-into-a-cell dissolves: R7's
-  /// chain exists only because a SetLink has no field to name its subject, so
-  /// an operation that *does* have one needs no chain.
-  xanadu::PrimediaSpan span{};
-  std::uint32_t birthOp{0};    ///<  4: the MakeCell index; == this CellRef
-  std::uint32_t lastOp{0};     ///<  4: head of the micro-history chain (R7)
-  std::uint32_t linkOffset{0}; ///<  4: first DimLink of this cell's run
-  std::uint16_t linkCount{0};  ///<  2: length of the run
-  std::uint8_t valueKind{0};   ///<  1: xanadu::ValueKind of @ref valueBits
-  std::uint8_t flags{0};       ///<  1: unclaimed
-  std::uint64_t valueBits{0};  ///<  8: canonical scalar bits (R6)
+  /**
+   * @brief This cell's content, as a **run** of spans in the manifold's content
+   *        arena -- not one inline span.
+   *
+   * One span could not survive an edit. `setCellText()` had to re-spool the
+   * whole content and repoint the cell, so changing one byte of a thousand
+   * moved all thousand to a new address and severed every transclusion that
+   * shared the old one -- the measurement is in U3. A run keeps the addresses
+   * of the text that did not change, which is what makes an edit an edit rather
+   * than a replacement.
+   *
+   * The run is a piece table with `Version`'s semantics and none of its
+   * storage: `Version` holds a `std::vector` per document, which at one per
+   * cell is the per-cell heap block §6.2 measured a 122x rank-hop penalty for.
+   * The spans live in one arena shared by every cell, addressed here the same
+   * way the links are.
+   */
+  std::uint32_t spanOffset{0}; ///< 4: first span of this cell's content run
+  std::uint16_t spanCount{0};  ///< 2: length of that run
+
+  std::uint32_t birthOp{0};    ///< 4: the MakeCell index; == this CellRef
+  std::uint32_t lastOp{0};     ///< 4: head of the micro-history chain (R7)
+  std::uint32_t linkOffset{0}; ///< 4: first DimLink of this cell's run
+  std::uint16_t linkCount{0};  ///< 2: length of the run
+  std::uint8_t valueKind{0};   ///< 1: xanadu::ValueKind of @ref valueBits
+  std::uint8_t flags{0};       ///< 1: unclaimed
+  std::uint64_t valueBits{0};  ///< 8: canonical scalar bits (R6)
 
   bool operator==(const CellSlot &) const = default;
 };
-static_assert(sizeof(CellSlot) == 48);
+// Thirty-two, down from forty-eight: an inline 24-byte PrimediaSpan became a
+// six-byte reference into an arena. A cell with one span is therefore 32 + 24
+// against the 48 it was, and every span after the first costs 24 rather than
+// being impossible.
+static_assert(sizeof(CellSlot) == 32);
 
 /**
  * @class Manifold
@@ -170,6 +181,13 @@ public:
   [[nodiscard]] std::span<const CellSlot> cells() const noexcept {
     return slots;
   }
+
+  /// The spans @p ref's content is assembled from, in order. Empty for a cell
+  /// with no content. The addresses are what a transclusion shares, so this is
+  /// the honest answer to "what is this cell made of" -- textOf() is the
+  /// convenience over it.
+  [[nodiscard]] std::span<const xanadu::PrimediaSpan>
+  contentOf(CellRef ref) const noexcept;
 
   /// The content of @p ref, read through @p reader.
   ///
@@ -316,6 +334,17 @@ private:
 
   void setOneSide(std::uint32_t dense, DimRef dim, bool negward, CellRef to);
 
+  /// Replace @p dense's content run with @p spans, growing or relocating the
+  /// arena as needed.
+  void setContent(std::uint32_t dense,
+                  std::span<const xanadu::PrimediaSpan> spans);
+
+  /// Replace [@p at, @p at + @p removing) of @p dense's content with
+  /// @p inserted, keeping the addresses of everything either side.
+  void spliceContent(std::uint32_t dense, std::uint64_t at,
+                     std::uint64_t removing,
+                     const xanadu::PrimediaSpan &inserted);
+
   std::vector<CellSlot> slots;
   /// The CSR arena. A cell's run is grown in place when it is the arena's
   /// tail and relocated to the end otherwise, so the arena accumulates dead
@@ -325,6 +354,12 @@ private:
   /// run design cost exactly what the fixed array it replaced cost (R12's
   /// 108 bytes per cell against 112), which is most of why the run won.
   std::vector<DimLink> links;
+  /// The content arena, run per cell, grown and compacted exactly as @ref links
+  /// is. Separate from the links because the two grow independently: a cell
+  /// gains dimensions and gains text at different times, and interleaving them
+  /// in one arena would relocate a run every time the other kind was appended.
+  std::vector<xanadu::PrimediaSpan> content;
+  std::size_t liveContent{0};
   /// Operation index -> dense id, for every operation in a cell's chain and
   /// not only for its birth op -- see slot().
   std::unordered_map<CellRef, std::uint32_t> byRef;

@@ -340,11 +340,15 @@ UnifiedTransclusionEngine::resolveCellText(const CellRef cell) const {
 
 std::string_view UnifiedTransclusionEngine::resolveLocalCellView(
     const CellRef cell) const noexcept {
-  const auto *const slot = manifold_.slot(cell);
-  if (nullptr == slot || slot->span.empty() || !slot->span.isLocal()) {
+  // Zero-copy only for a cell whose content is a single local span. Once a
+  // cell has been edited its content is several spans (U3), and there is no
+  // contiguous memory to hand back a view of -- so this answers nothing rather
+  // than a prefix, and the caller falls back to resolveCellText().
+  const auto run = manifold_.contentOf(cell);
+  if (run.size() != 1 || run.front().empty() || !run.front().isLocal()) {
     return {};
   }
-  return store_.primedia().readView(slot->span);
+  return store_.primedia().readView(run.front());
 }
 
 std::size_t UnifiedTransclusionEngine::ShapingKeyHash::operator()(

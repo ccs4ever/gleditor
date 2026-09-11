@@ -2018,26 +2018,62 @@ cell's history is already holding a folded manifold that maintains `lastOp`. Pay
 to arrive at *two* rules for naming a cell would spend the one cheap moment R11 affords on the worse
 of the two shapes.
 
-### U3.3 What (b) still has to solve
+### U3.3 (b) is implemented, and the split-without-join worry was wrong
 
-Two, neither fatal and both worth costing before starting:
+`CellSlot` holds a run of spans in a second CSR arena rather than one inline `PrimediaSpan`, and
+`StructureVerb::Splice` is the edit verb: it replaces `length` bytes at offset `at` *within the
+cell's own content* with a span, touching only the piece the edit lands in. `Store::spliceCell()`
+types the new text into the permascroll; `spliceCellSpan()` takes an address already there, which is
+a transclusion into a cell.
 
-- **Split without join.** A delete inside a cell splits its run, which is `Version::splitAt`. But
-  `Version::joinFollowing()` coalesces adjacent pieces, and §1's whole argument is that coalescing
-  destroys piece identity — the very identity the run exists to keep. So (b) wants a piece table
-  that splits and *never* joins, which is a fork of `Version`'s behaviour even where it reuses its
-  code. That is the tension §1 warned about, met from the other side.
-- **Fold cost moves.** `applyStructure()` is $O(1)$ per operation today; folding content per cell
-  makes it $O(\text{edits on that cell})$, and `textOf()` becomes "concatenate a run" rather than
-  "read one span". Both are the costs `Version` already pays for a document, so the shape is known;
-  what is unknown is the constant at the cell sizes a slice has.
+**Measured against U3's own numbers.** Replacing `"quick"` with `"slow"` in a nineteen-byte cell now
+spools **four** bytes — the text actually typed — where `setCellText()` spooled all nineteen. The
+run becomes three pieces whose head and tail keep the addresses they had, and a test asserts exactly
+that. A second test quotes the last ten bytes of a cell into another cell, edits the *front* of the
+quoted cell, and checks the quotation still shares ten bytes of address with it: under one span per
+cell that overlap was zero, which was the whole finding.
 
-> **Experiment.** Before choosing, instrument a real editing session: record how often a cell's text
-> is edited after something else has come to share its address, since (a) is only as bad as that
-> number is large. The cheap version is a test that quotes a cell, edits it, and asserts on whether
-> `diffVersions()` still reports the passage as shared — which currently it does not.
+**`CellSlot` got smaller, not bigger: 32 bytes, down from 48.** An inline 24-byte `PrimediaSpan`
+became a 4-byte offset and a 2-byte count. A cell with one span costs 32 + 24 against the 48 it did,
+and every span after the first costs 24 rather than being impossible.
 
-______________________________________________________________________
+**U3.3 previously said (b) needs "a piece table that splits and never joins". That was wrong, and
+reading `joins()` is what settled it.** It merges only pieces of *the same scroll* that are *already
+contiguous* — `first.end() == second.start` — so the merged piece covers precisely the addresses the
+two did. Its own comment says so: every question asked of a version, "what it says, which addresses
+it holds, where a quotation of it appears", is answered from addresses, and the addresses are the
+same either way. §1's "a cell must not merge with its neighbour" is about **cells**, which `d.clone`
+keeps distinct however identical their content; it says nothing about the pieces *within* one. The
+two were conflated — the same conflation U3 opened by noting §1 spoke about cell identity and not
+content addressing.
+
+Coalescing turns out to be positively wanted, because it gives a canonical form: a cell cut and then
+spliced back with a span naming the bytes removed returns to **one** piece, matching a cell that was
+never edited. A third test pins that. What (b) does *not* reuse is `Version`'s storage — a
+`std::vector` per document is a heap block per cell, which is the per-cell allocation §6.2 measured
+a 122× rank-hop penalty for. So: `Version`'s algorithm, the arena's layout.
+
+### U3.4 What is deliberately not done yet
+
+- **The frame for the other four hyperops.** `Splice` is a *Structure* verb, so it names its subject
+  through R7's chain exactly as `SetLink` does, and none of U3.2's encoding question arises. Letting
+  `Insert`/`Delete`/`Rearrange`/ `Transclude` name a cell in `linkId` — option (B) — is still the
+  tidier end state and still needs `CompactBinaryV4`, because `binary_ops.cpp` writes `op.link` for
+  only two kinds and would publish a framed operation with its frame erased. Nothing here is blocked
+  on it: a splice *is* an insert, a delete or a replacement, recorded as the sixth hyperop rather
+  than as one of the five.
+- **`Splice` does not travel.** The wire encoder writes a Structure operation's `flags`, `to`,
+  `link`, span and `value`, and a splice also needs `at` and `length`. Publishing one today drops
+  both, so it would arrive as a splice at offset zero removing nothing. That is the same silent
+  change of meaning U3.2 found for framed operations, and it lands with the same fix: the Structure
+  encoder must carry `at` and `length`, which is `CompactBinaryV4`. **Until then a slice with edited
+  cells must not be published**, and the export path should refuse one rather than corrupt it.
+- **`resolveLocalCellView()` answers nothing for an edited cell.** A zero-copy view needs contiguous
+  memory and an edited cell's content is several spans, so it returns empty and the caller falls
+  back to `resolveCellText()`. Correct, but it means the zero-copy path quietly stops applying to
+  any cell anyone has edited.
+- **`storeToLinkPackage()` publishes a cell under its first span only.** Carrying all of them is a
+  change to `LinkPackage`'s shape.
 
 ## 12. Measurements
 
