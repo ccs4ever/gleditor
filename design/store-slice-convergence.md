@@ -1876,9 +1876,27 @@ came back byte-identical across every regenerated fixture.
    `release()`'s truncation *is* the reclamation, so the dead runs a failed branch left behind are
    reclaimed by the undo that abandons it.
 
-   **What is left: the overlay.** An arena starts empty and its cells are its own, so a clause
-   database or a document's cells cannot be read *through* one in place. Both Vlog's `§6` and VQL's
-   read path want that, and it is the next increment rather than something these tests cover.
+   **The overlay, which completes the step.** An `ArenaManifold` may be given a base `Manifold`:
+   reads of a cell it does not hold fall through, and the first *write* to one **shadows** it — the
+   whole cell, its link run and its content run copied in, keeping the base's `CellRef` as its name,
+   because an overlaid cell is the same cell. The base is never touched, so an evaluation over a
+   document pays one copy per cell it writes and nothing for the cells it merely walks.
+
+   Three consequences worth keeping:
+
+   - **Dropping a shadow is the undo.** `release()` erases the shadows taken under the mark and the
+     reads fall through again — the unmodified state never moved out of the base, so nothing had to
+     be saved to restore it. A cell shadowed *before* a mark is trailed normally.
+   - **A displaced occupant is shadowed too.** Setting a link changes the far end, so a base cell
+     nobody named directly becomes a shadow. This is the same "an eviction is a write" the trail
+     accounting turns on.
+   - **`promote()` mints only what the evaluation invented.** A ref without `ephemeralBit` already
+     has a name in this document, so it maps to itself. Promoting an answer that quotes half a
+     document writes one operation per new cell, not per reachable cell.
+
+   Not covered: promoting a shadow's *content* change back (its links are written, a restatement of
+   its text is not), and an arena whose base is mutated underneath it — a shadow copies a cell, not
+   a promise about one.
 
 ______________________________________________________________________
 

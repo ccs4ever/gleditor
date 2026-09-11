@@ -1,9 +1,9 @@
 # Vlog: Unification and Backtracking in Vortex
 
-**Document Version:** 3.0 — Trailing Is Copy-on-Write **Extension To:** Vortex Hyperstructural
+**Document Version:** 3.1 — Trailing Is Copy-on-Write **Extension To:** Vortex Hyperstructural
 Runtime Core — `link` and `value`, plus §8's bill **Status:** The *machinery* of §5 is built and
-tested — `ArenaManifold`, `mark`/`release`/`discard`, the conditional trail, `scratchScroll`,
-`promote()`. The resolution engine over it is not: no unification, no clause database, no solver.
+tested — `ArenaManifold` and its overlay, `mark`/`release`/`discard`, the conditional trail,
+`scratchScroll`, `promote()`. The resolution engine over it is not: no unification, no solver.
 **Core changes required:** none outstanding; §8 is now a record of what was paid
 
 **Vlog** — the Vortex Logic Extension — is resolution as a program over Vortex's own two primitives.
@@ -751,8 +751,8 @@ ______________________________________________________________________
 - **U3 (a cell's content is a run of spans)**: `Splice` is what lets a term's content be edited
   without severing the addresses a transclusion-binding shares, so §9's third bullet depends on U3
   having been resolved the way it was.
-- **Step 21 (`ArenaManifold` + `promote()`)**: **built**, and §5.2–§5.5 are the record of what it
-  had to be. Its remaining half is the overlay over a persistent `Manifold`, per §10.4.
+- **Step 21 (`ArenaManifold` + `promote()`)**: **done**, overlay included, and §5.2–§5.5 are the
+  record of what it had to be.
 
 ______________________________________________________________________
 
@@ -770,6 +770,7 @@ Editorial changes that alter no normative text bump neither component.
 
 | version | commit    | date       | change                                                                                                                                                                                                                                  |
 | ------- | --------- | ---------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 3.1     | `PENDING` | 2026-09-11 | The overlay: an arena over a base `Manifold` reads through and shadows on write, so §6's clause database can live in a document. Step 21 done.                                                                                          |
 | 3.0     | `c28240c` | 2026-09-11 | `ArenaManifold` implemented, and §5.2/§5.3 corrected by it: a `Mark` is seven lengths, a trail entry is a saved `CellSlot` at 40 bytes, trailing copies a cell's runs above the mark, and compaction is forbidden while a mark is held. |
 | 2.0     | `f519ab9` | 2026-09-11 | §5.5: the arena is neither an in-memory store nor an in-memory permascroll — it holds addresses, not bytes. `scratchScroll` added to §8's bill, correcting 1.0's claim that `Manifold` was untouched.                                   |
 | 1.1     | `88c9336` | 2026-09-11 | Named **Vlog**, and restyled as an extension rather than a front end (intro, §2). The intro's "no trail" reconciled with §5.3; U1's two consumers separated into ordinal and key.                                                       |

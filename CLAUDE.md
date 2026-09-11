@@ -361,8 +361,13 @@ continuation indents, treats Markdown table cell padding as "wrong" indentation,
     road to the persistent side: it maps refs rather than being trusted with them, spools scratch
     bytes for real, and writes only what is reachable from the promoted root. Content bytes an
     evaluation constructs live under `scratchScroll` and are refused everywhere else. The design is
-    `design/vlog-logic-extension.md` §5.2–§5.5; what is **not** built is an overlay over a
-    persistent `Manifold`, so an arena starts empty and its cells are its own
+    `design/vlog-logic-extension.md` §5.2–§5.5. **An arena may be given a base `Manifold`** and is
+    then a copy-on-write view of a document: reads fall through, the first write to a cell *shadows*
+    it (whole slot, links and content copied in, keeping the base's `CellRef` — an overlaid cell is
+    the same cell), and the base is never touched. Dropping a shadow is the undo, so `release()`
+    needs no trail entry for one; `promote()` mints only refs carrying `ephemeralBit`, since
+    anything else already has a name. **Step 21 is done** — what is not built is anything *above*
+    the arena: no unification, no clause selection, no solver
   - `scalar.hpp/.cpp`: a scalar cell's two halves (migration step 15, R6) — the shortest round-trip
     `to_chars` rendering, spooled as ordinary primedia, and the canonical bits in
     `CompactOpNode::value`. Canonicalisation is for value equality only and never for addresses: two

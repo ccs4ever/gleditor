@@ -32,9 +32,18 @@
  * design/vlog-logic-extension.md §5.2-§5.5 for where mark()/release() and the
  * scratch scroll come from.
  *
- * Not yet an overlay over a persistent Manifold: an arena starts empty and its
- * cells are its own. Reading a document's cells through one is the next
- * increment, and is what VQL's read path will need.
+ * **The overlay.** An arena may be given a base Manifold, and then it is a
+ * copy-on-write view of a document rather than a blank space: reads of a cell
+ * the arena does not hold fall through to the base, and the first *write* to
+ * one shadows it -- the whole cell, its link run and its content run copied
+ * into the arena, keeping the base's CellRef as its name. The base is never
+ * touched, so resolving against a clause database living in a document costs
+ * one copy per cell the evaluation actually writes and nothing for the rest.
+ *
+ * A shadow's identity is the base cell's ref, which is why CellSlot::birthOp is
+ * the honest answer to "which cell is this slot" rather than refOf(dense): an
+ * overlaid cell is the same cell, seen from a manifold that is allowed to
+ * change its mind about it.
  */
 #ifndef ZIGZAG_ARENA_MANIFOLD_HPP
 #define ZIGZAG_ARENA_MANIFOLD_HPP
@@ -44,6 +53,7 @@
 #include <span>
 #include <string>
 #include <string_view>
+#include <unordered_map>
 #include <vector>
 
 #include "common/xanadu/microversion.hpp"
@@ -98,6 +108,10 @@ struct Mark {
   std::uint32_t trailSize{0};
   std::uint32_t liveLinks{0};
   std::uint32_t liveContent{0};
+  /// How many base cells had been shadowed. Release drops the shadows taken
+  /// under the mark, so a cell the branch wrote to reverts to reading through
+  /// the base -- which is the undo, for an overlaid cell.
+  std::uint32_t shadowCount{0};
 };
 
 /// What promote() refuses above, so that a runaway evaluation cannot write an
@@ -119,6 +133,20 @@ struct Promoted {
  */
 class ArenaManifold {
 public:
+  ArenaManifold() = default;
+
+  /// An arena over @p base: reads fall through, writes shadow. @p base must
+  /// outlive this, and must not be mutated while it is being read through --
+  /// a shadow copies a cell, not a promise about one.
+  explicit ArenaManifold(const Manifold *base) : base_(base) {}
+
+  [[nodiscard]] const Manifold *base() const noexcept { return base_; }
+
+  /// Whether @p ref is a cell this arena minted or has shadowed, as opposed to
+  /// one it is merely reading through. What promote() uses to decide whether a
+  /// cell needs minting or already has a name.
+  [[nodiscard]] bool holdsOwn(CellRef ref) const noexcept;
+
   // -- read path: the same questions Manifold answers ------------------------
 
   /// The dense id for @p ref, or npos. Arithmetic, not a lookup: an arena ref
@@ -288,6 +316,15 @@ private:
   /// does not deduplicate either.
   void trail(std::uint32_t dense);
 
+  /// The dense slot for @p ref, copying the base's cell into the arena if that
+  /// is where it still lives. noDense if @p ref is a cell of neither.
+  ///
+  /// Copy-on-write at cell granularity: the whole slot, its links and its
+  /// content, so every later read of it is answered from one place and no read
+  /// has to merge an override with what it overrides. An evaluation pays one
+  /// copy per cell it writes to and nothing for the ones it only reads.
+  [[nodiscard]] std::uint32_t shadow(CellRef ref);
+
   CellRef mintSlot(xanadu::ValueKind kind, std::uint64_t bits,
                    std::span<const xanadu::PrimediaSpan> content);
 
@@ -297,6 +334,14 @@ private:
   /// Bytes constructed during evaluation, addressed by scratchScroll spans.
   std::string scratch_;
   std::vector<TrailEntry> trail_;
+
+  /// The document being read through, or null for a standalone arena.
+  const Manifold *base_{nullptr};
+  /// base CellRef -> the dense slot shadowing it.
+  std::unordered_map<CellRef, std::uint32_t> overlay_;
+  /// The same refs in the order they were shadowed, so release() can drop the
+  /// ones a failed branch took. A map cannot be truncated; this can.
+  std::vector<CellRef> shadowOrder_;
 
   std::size_t liveLinks_{0};
   std::size_t liveContent_{0};

@@ -24,15 +24,25 @@ constexpr std::size_t compactionSlack = 64;
 
 std::uint32_t ArenaManifold::denseOf(const CellRef ref) const noexcept {
   if (!isEphemeral(ref)) {
-    return noDense;
+    // A base cell, which this arena holds only once it has been shadowed.
+    // Until then denseOf() says "not mine" and every read falls through.
+    const auto found = overlay_.find(ref);
+    return found == overlay_.end() ? noDense : found->second;
   }
   const auto dense = ref & ~ephemeralBit;
   return dense < slots_.size() ? dense : noDense;
 }
 
+bool ArenaManifold::holdsOwn(const CellRef ref) const noexcept {
+  return noDense != denseOf(ref);
+}
+
 const CellSlot *ArenaManifold::slot(const CellRef ref) const noexcept {
   const auto dense = denseOf(ref);
-  return noDense == dense ? nullptr : &slots_[dense];
+  if (noDense != dense) {
+    return &slots_[dense];
+  }
+  return nullptr == base_ ? nullptr : base_->slot(ref);
 }
 
 DimLink *ArenaManifold::existingLink(const std::uint32_t dense,
@@ -103,7 +113,7 @@ CellRef ArenaManifold::linked(const CellRef from, const DimRef dim,
                               const bool negward) const noexcept {
   const auto dense = denseOf(from);
   if (noDense == dense) {
-    return noCell;
+    return nullptr == base_ ? noCell : base_->linked(from, dim, negward);
   }
   const auto &cell = slots_[dense];
   for (std::uint16_t i = 0; i < cell.linkCount; i++) {
@@ -119,7 +129,8 @@ std::span<const DimLink>
 ArenaManifold::dimensionsOf(const CellRef ref) const noexcept {
   const auto dense = denseOf(ref);
   if (noDense == dense) {
-    return {};
+    return nullptr == base_ ? std::span<const DimLink>{}
+                            : base_->dimensionsOf(ref);
   }
   const auto &cell = slots_[dense];
   return std::span<const DimLink>{links_.data() + cell.linkOffset,
@@ -130,7 +141,8 @@ std::span<const xanadu::PrimediaSpan>
 ArenaManifold::contentOf(const CellRef ref) const noexcept {
   const auto dense = denseOf(ref);
   if (noDense == dense) {
-    return {};
+    return nullptr == base_ ? std::span<const xanadu::PrimediaSpan>{}
+                            : base_->contentOf(ref);
   }
   const auto &cell = slots_[dense];
   return std::span<const xanadu::PrimediaSpan>{
@@ -143,7 +155,9 @@ CellRef ArenaManifold::cloneMaster(const CellRef ref,
   // Bounded by the slot count and answering the start cell on a loop, exactly
   // as Manifold::cloneMaster() does -- Vlog §4.4 needs that guard, since a
   // rational term *is* a rank that closes on itself.
-  for (std::size_t steps = 0; steps <= slots_.size(); steps++) {
+  const auto bound =
+      slots_.size() + (nullptr == base_ ? 0 : base_->cellCount());
+  for (std::size_t steps = 0; steps <= bound; steps++) {
     const CellRef next = linked(walk, cloneDim, true);
     if (noCell == next) {
       return walk;
@@ -308,7 +322,7 @@ void ArenaManifold::setContentAt(
 
 bool ArenaManifold::setContent(
     const CellRef cell, const std::span<const xanadu::PrimediaSpan> spans) {
-  const auto dense = denseOf(cell);
+  const auto dense = shadow(cell);
   if (noDense == dense) {
     return false;
   }
@@ -320,7 +334,7 @@ bool ArenaManifold::setContent(
 bool ArenaManifold::setValueBits(const CellRef cell,
                                  const xanadu::ValueKind kind,
                                  const std::uint64_t bits) {
-  const auto dense = denseOf(cell);
+  const auto dense = shadow(cell);
   if (noDense == dense) {
     return false;
   }
@@ -332,15 +346,14 @@ bool ArenaManifold::setValueBits(const CellRef cell,
 
 bool ArenaManifold::link(const CellRef from, const DimRef dim,
                          const bool negward, const CellRef to) {
-  const auto dense  = denseOf(from);
-  const auto dimAt  = denseOf(dim);
-  const auto target = denseOf(to);
-  if (noDense == dense || noDense == dimAt) {
+  // The dimension and the far end are only *read* here, so they are resolved
+  // rather than shadowed -- a link to a base cell shadows that cell because
+  // its reciprocal end changes, which is what the second shadow() below is.
+  if (!contains(from) || !contains(dim) || (noCell != to && !contains(to))) {
     return false;
   }
-  if (noCell != to && noDense == target) {
-    return false;
-  }
+  const auto dense  = shadow(from);
+  const auto target = noCell == to ? noDense : shadow(to);
 
   // Both sides read out before anything is touched: linkFor() can grow a run,
   // and growing a run can move every DimLink in the arena.
@@ -359,13 +372,15 @@ bool ArenaManifold::link(const CellRef from, const DimRef dim,
   // A link is one edge two cells share, so setting it breaks whatever each end
   // held: the invariant is linked(a, d, dir) == b exactly when
   // linked(b, d, !dir) == a. Maintained rather than derived, same as Manifold.
+  // shadow(), not denseOf(): a displaced occupant may still be living in the
+  // base, and clearing its end of the edge is a write like any other.
   if (noCell != displacedUs && displacedUs != to) {
-    if (const auto other = denseOf(displacedUs); noDense != other) {
+    if (const auto other = shadow(displacedUs); noDense != other) {
       setOneSide(other, dim, !negward, noCell);
     }
   }
   if (noCell != displacedIt && displacedIt != from) {
-    if (const auto other = denseOf(displacedIt); noDense != other) {
+    if (const auto other = shadow(displacedIt); noDense != other) {
       setOneSide(other, dim, negward, noCell);
     }
   }
@@ -374,6 +389,47 @@ bool ArenaManifold::link(const CellRef from, const DimRef dim,
   }
   setOneSide(dense, dim, negward, to);
   return true;
+}
+
+std::uint32_t ArenaManifold::shadow(const CellRef ref) {
+  if (const auto dense = denseOf(ref); noDense != dense) {
+    return dense;
+  }
+  if (nullptr == base_) {
+    return noDense;
+  }
+  const auto *const theirs = base_->slot(ref);
+  if (nullptr == theirs) {
+    return noDense;
+  }
+
+  // Copy the whole cell rather than recording an override. Every later read is
+  // then answered from one place, so no read has to merge an override with
+  // what it overrides -- which is the kind of thing that is correct until the
+  // day two overrides disagree about a run.
+  const auto dense = static_cast<std::uint32_t>(slots_.size());
+  CellSlot copy    = *theirs;
+  copy.spanOffset  = static_cast<std::uint32_t>(content_.size());
+  copy.spanCount   = 0;
+  copy.linkOffset  = static_cast<std::uint32_t>(links_.size());
+  copy.linkCount   = 0;
+  slots_.push_back(copy);
+
+  // birthOp comes across untouched, so the shadow's name is the base cell's
+  // ref and not refOf(dense): an overlaid cell is the *same* cell.
+  const auto spans = base_->contentOf(ref);
+  if (!spans.empty()) {
+    setContentAt(dense, spans);
+  }
+  for (const auto &edge : base_->dimensionsOf(ref)) {
+    links_.push_back(edge);
+    slots_[dense].linkCount++;
+    liveLinks_++;
+  }
+
+  overlay_.emplace(ref, dense);
+  shadowOrder_.push_back(ref);
+  return dense;
 }
 
 void ArenaManifold::trail(const std::uint32_t dense) {
@@ -451,6 +507,7 @@ Mark ArenaManifold::mark() noexcept {
       .trailSize   = static_cast<std::uint32_t>(trail_.size()),
       .liveLinks   = static_cast<std::uint32_t>(liveLinks_),
       .liveContent = static_cast<std::uint32_t>(liveContent_),
+      .shadowCount = static_cast<std::uint32_t>(shadowOrder_.size()),
   };
   floors_.push_back(Floors{.cells   = taken.cellCount,
                            .links   = taken.linkSize,
@@ -481,6 +538,14 @@ void ArenaManifold::release(const Mark &m) noexcept {
     slots_[entry.dense] = entry.saved;
   }
   trail_.resize(m.trailSize);
+
+  // Dropping a shadow is the undo, for an overlaid cell: the slot goes and the
+  // reads fall through to the base again, which is where the cell's unmodified
+  // state has been sitting all along. Nothing had to be saved to make that so.
+  for (std::size_t i = shadowOrder_.size(); i > m.shadowCount; i--) {
+    overlay_.erase(shadowOrder_[i - 1]);
+  }
+  shadowOrder_.resize(m.shadowCount);
 
   slots_.resize(m.cellCount);
   links_.resize(m.linkSize);
@@ -562,6 +627,13 @@ std::optional<Promoted> promote(xanadu::Store &store,
   out.cells.reserve(order.size());
 
   for (const CellRef arena : order) {
+    // A cell the overlay was only reading through already has a name in this
+    // document, so promotion maps it to itself and mints nothing. Only what
+    // the evaluation invented is new.
+    if (!isEphemeral(arena)) {
+      real.emplace(arena, arena);
+      continue;
+    }
     const auto spans = from.contentOf(arena);
     const auto kind  = from.valueKindOf(arena);
 

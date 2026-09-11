@@ -525,4 +525,128 @@ TEST(ArenaManifoldTest, promotionRefusesAboveItsBudgetAndWritesNothing) {
   EXPECT_FALSE(zigzag::promote(store, at, arena.m, noCell).has_value());
 }
 
+// -- the overlay ------------------------------------------------------------
+
+/// A document with two cells on a dimension, to read through.
+struct Document {
+  Store store;
+  MicroversionId at;
+  DimRef dim{noCell};
+  CellRef first{noCell};
+  CellRef second{noCell};
+
+  Document() {
+    at                = store.sliceGenesis(MicroversionId{});
+    const auto minted = store.makeDimension(at, "d.step");
+    at                = minted.version;
+    dim               = minted.dim;
+    at                = store.makeCell(at, "first");
+    first             = store.cellRefOf(at);
+    at                = store.makeCell(at, "second");
+    second            = store.cellRefOf(at);
+    at                = store.setLink(at, first, dim, false, second);
+  }
+
+  [[nodiscard]] Manifold manifold() const { return store.rebuildManifold(at); }
+};
+
+TEST(ArenaManifoldTest, anOverlayReadsThroughToTheDocument) {
+  Document doc;
+  const auto base = doc.manifold();
+  ArenaManifold arena{&base};
+
+  // Nothing copied, and every question answered: an evaluation pays for the
+  // cells it writes to, not for the ones it walks past.
+  EXPECT_EQ(arena.cellCount(), 0U);
+  EXPECT_TRUE(arena.contains(doc.first));
+  EXPECT_FALSE(arena.holdsOwn(doc.first));
+  EXPECT_EQ(arena.linked(doc.first, doc.dim, false), doc.second);
+  EXPECT_EQ(arena.linked(doc.second, doc.dim, true), doc.first);
+  EXPECT_EQ(arena.textOf(doc.first, &doc.store), "first");
+}
+
+TEST(ArenaManifoldTest, writingAnOverlaidCellShadowsItAndLeavesTheBaseAlone) {
+  Document doc;
+  const auto base = doc.manifold();
+  ArenaManifold arena{&base};
+
+  const auto fresh = arena.makeCell("fresh");
+  ASSERT_TRUE(arena.link(doc.first, doc.dim, false, fresh));
+
+  // The arena's answer changed; the document's did not. That is the whole
+  // point -- resolution against a clause database must not edit it.
+  EXPECT_EQ(arena.linked(doc.first, doc.dim, false), fresh);
+  EXPECT_EQ(base.linked(doc.first, doc.dim, false), doc.second);
+
+  // A shadow keeps the base cell's ref as its name: it is the same cell.
+  EXPECT_TRUE(arena.holdsOwn(doc.first));
+  EXPECT_FALSE(zigzag::isEphemeral(doc.first));
+  EXPECT_EQ(arena.textOf(doc.first, &doc.store), "first");
+
+  // And the displaced occupant was shadowed too, since its end of the edge
+  // changed -- a base cell nobody named directly.
+  EXPECT_TRUE(arena.holdsOwn(doc.second));
+  EXPECT_EQ(arena.linked(doc.second, doc.dim, true), noCell);
+  EXPECT_EQ(base.linked(doc.second, doc.dim, true), doc.first);
+}
+
+TEST(ArenaManifoldTest, releasingDropsTheShadowsAFailedBranchTook) {
+  Document doc;
+  const auto base = doc.manifold();
+  ArenaManifold arena{&base};
+
+  const auto mark  = arena.mark();
+  const auto fresh = arena.makeCell("fresh");
+  ASSERT_TRUE(arena.link(doc.first, doc.dim, false, fresh));
+  EXPECT_TRUE(arena.holdsOwn(doc.first));
+
+  arena.release(mark);
+
+  // Dropping the shadow *is* the undo for an overlaid cell: the unmodified
+  // state was never moved out of the base, so nothing had to be saved to
+  // restore it.
+  EXPECT_FALSE(arena.holdsOwn(doc.first));
+  EXPECT_EQ(arena.cellCount(), 0U);
+  EXPECT_EQ(arena.linked(doc.first, doc.dim, false), doc.second);
+}
+
+TEST(ArenaManifoldTest, aShadowedCellIsStillTrailedWhenItIsOlderThanTheMark) {
+  Document doc;
+  const auto base = doc.manifold();
+  ArenaManifold arena{&base};
+
+  // Shadowed before the mark, so the truncation cannot undo the next write and
+  // the conditional trail has to.
+  const auto early = arena.makeCell("early");
+  ASSERT_TRUE(arena.link(doc.first, doc.dim, false, early));
+
+  const auto mark = arena.mark();
+  const auto late = arena.makeCell("late");
+  ASSERT_TRUE(arena.link(doc.first, doc.dim, false, late));
+  EXPECT_GT(arena.trailSize(), 0U);
+
+  arena.release(mark);
+  EXPECT_EQ(arena.linked(doc.first, doc.dim, false), early);
+}
+
+TEST(ArenaManifoldTest, promotingAnOverlayMintsOnlyWhatTheEvaluationInvented) {
+  Document doc;
+  const auto base = doc.manifold();
+  ArenaManifold arena{&base};
+
+  const auto answer = arena.makeCell("answer");
+  ASSERT_TRUE(arena.link(doc.first, doc.dim, false, answer));
+
+  const auto before   = base.cellCount();
+  const auto promoted = zigzag::promote(doc.store, doc.at, arena, doc.first);
+  ASSERT_TRUE(promoted.has_value());
+
+  const auto after = doc.store.rebuildManifold(promoted->version);
+  // One new cell -- the answer. d.step, first and second were already named.
+  EXPECT_EQ(after.cellCount(), before + 1);
+  EXPECT_EQ(after.linked(doc.first, doc.dim, false), promoted->cells.front());
+  EXPECT_EQ(after.textOf(promoted->cells.front(), doc.store), "answer");
+  EXPECT_EQ(after.refusedOps(), 0U);
+}
+
 } // namespace
