@@ -310,4 +310,4 @@ The rule is [VQL](vql-query-language.md)'s and [Vortex](vortex-hyperstructural-r
 
 | version | commit    | date       | change                                                                  |
 | ------- | --------- | ---------- | ----------------------------------------------------------------------- |
-| 1.0     | `PENDING` | 2026-09-11 | Initial proposal: one tree, three Wids, and a replay product not cells. |
+| 1.0     | `ec9633e` | 2026-09-11 | Initial proposal: one tree, three Wids, and a replay product not cells. |
