@@ -1892,6 +1892,60 @@ whether that is acceptable.
 > and promoted ops per query for `vql-query-language.md` §6.2's regex-compile example and §4.4's
 > `+d.results` weave.
 
+**U3. Editing a cell severs its content's address identity, because a cell holds one span.** The
+model has no account of what an *edit* does to a cell, and the implementation answers the question
+by avoiding it: `Store::setCellText()` appends the whole new text to the permascroll and repoints
+the cell at one new contiguous span. A cell therefore never accumulates spans — and never keeps one
+either.
+
+**Measured.** Editing a single byte of a 1,000-byte cell appends **1,000** permascroll bytes, and
+the new span `[1010, 2010)` overlaps the old `[10, 1010)` by **zero**. The old bytes remain
+readable, as an append-only scroll guarantees; what is lost is not the content but the
+*coincidence*.
+
+Two consequences, and the second is the one that matters:
+
+- **Write amplification.** An edit costs the size of the cell, permanently, in a scroll nothing
+  reclaims. Typing into an $N$-byte cell is $O(N)$ per keystroke. A xanadoc does not pay this,
+  because `Version` is a piece table: an insert is one operation naming only the new bytes, and
+  every untouched piece keeps its address.
+- **Transclusion identity is silently severed.** Sharing a primedia address *is* the transclusion
+  relationship — it is what `Version::occurrencesOf()` reports, what `Store::diffVersions()`
+  classifies as `DiffKind::Universal`, and what the Identity Gold beams draw. With zero overlap, the
+  999 unchanged bytes are at a new address, so a cell that quoted the original stops sharing an
+  address with it. The quotation still resolves; the *relationship* disappears from every view that
+  detects it by address. R6 is emphatic that two cells holding `3.14` must not share an address
+  because that would assert a quotation that never happened. This is the same error inverted: an
+  edit retracts a quotation that did.
+
+A cell that is "unchanged prefix + new bit + unchanged suffix" needs several spans, and `CellSlot`
+has exactly one. §1 argues at length that a cell must not *coalesce* the way a `Version` piece does,
+but that is about the identity of the **cell**; it says nothing about the addressing of the cell's
+**content**, and the two were conflated.
+
+Three resolutions, with their prices:
+
+- **(a) Declare a cell's content atomic.** Editing replaces it, and transcluding part of a cell is
+  not supported. Costs nothing to implement and contradicts the criterion Nelson states as the point
+  of the whole system — "a link to any portion is present on all manifestations".
+- **(b) Give a cell a run of spans**, addressed by an offset and count into a span arena, exactly as
+  R12 already does for links. Editing becomes a piece-table edit and untouched text keeps its
+  address. `CellSlot` can stay 48 bytes: the 24-byte inline `PrimediaSpan` becomes an 8-byte
+  offset/count pair, which *gains* sixteen. Price: a second CSR arena, a layout change, therefore
+  regenerated fixtures and a re-run of §12.5.
+- **(c) Make a cell's content a `Version`.** (b) with machinery that already splits, coalesces and
+  rebases spans — and the reason to hesitate is that §1 spent its entire argument on why a cell must
+  not inherit `Version`'s coalescing. Reusing the piece table while suppressing `joinFollowing()` is
+  possible but is a fork of `Version` in all but name.
+
+**(b) is the recommendation**, and it is deliberately not implemented ahead of this ruling, because
+it changes `CellSlot`.
+
+> **Experiment.** Before choosing, instrument a real editing session: record how often a cell's text
+> is edited after something else has come to share its address, since (a) is only as bad as that
+> number is large. The cheap version is a test that quotes a cell, edits it, and asserts on whether
+> `diffVersions()` still reports the passage as shared — which currently it does not.
+
 ______________________________________________________________________
 
 ## 12. Measurements

@@ -101,7 +101,16 @@ static_assert(sizeof(DimLink) == 12);
  * exactly and without a cap.
  */
 struct CellSlot {
-  xanadu::PrimediaSpan span{}; ///< 24: this cell's content
+  /// 24: this cell's content, as **one** span.
+  ///
+  /// One, not a run -- and that is an open question rather than a settled
+  /// design. Because a cell has a single span, editing it cannot keep the
+  /// addresses of the text that did not change: Store::setCellText() re-spools
+  /// the whole content, so an edit costs the size of the cell and moves every
+  /// byte of it to a new address, which silently severs any transclusion that
+  /// shared the old one. See U3 in design/store-slice-convergence.md, which
+  /// records the measurement and the three ways out.
+  xanadu::PrimediaSpan span{};
   std::uint32_t birthOp{0};    ///<  4: the MakeCell index; == this CellRef
   std::uint32_t lastOp{0};     ///<  4: head of the micro-history chain (R7)
   std::uint32_t linkOffset{0}; ///<  4: first DimLink of this cell's run
