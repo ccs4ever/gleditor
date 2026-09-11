@@ -1828,8 +1828,33 @@ came back byte-identical across every regenerated fixture.
    What is left of this step: the synthetic scroll in `zzStructureToLinkPackage`, and the
    doc-comment demotions.
 
-1. **`ArenaManifold` plus `promote()`** (R8). Only after step 14, and only once there is a VQL
-   interpreter to drive it.
+1. **`ArenaManifold` plus `promote()`** (R8). Only after step 14. The "only once there is a VQL
+   interpreter to drive it" condition is **withdrawn**: three specified designs now land
+   requirements on this class — VQL's write path, [VPL](vpl-array-language.md), and
+   [Vlog](vlog-logic-extension.md) §5.2 — and a class three documents are written against is better
+   built and measured than deferred until one of their interpreters exists. The tests are the driver
+   that was missing.
+
+   Its shape, as those three have settled it:
+
+   - **Dense vectors and no ops.** `slots`/`links`/`content` as in `Manifold`, keeping CSR per V3,
+     with compaction folded into the reachability sweep rather than triggered at a load an arena
+     never has.
+   - **`mark()` / `release(Mark)`** (Vlog §5.2). A choice point is the four arena lengths; undo is
+     `resize()`. Cheap enough to take a million times in a query, which is the property no
+     microversion can have.
+   - **A conditional trail** (Vlog §5.3), written only when the overwritten cell is older than the
+     innermost mark, because a younger cell is undone by the truncation that removes it. The WAM's
+     conditional-trailing rule, arrived at as a consequence of the arena's structure.
+   - **A scratch byte buffer and `scratchScroll`** (Vlog §5.5). The arena holds `PrimediaSpan`s —
+     *addresses* — so bytes constructed during evaluation have nowhere to live, and must not be
+     given a permanent address before an answer has earned one.
+     `scratchScroll = breakMarkerScroll - 2` follows the reservation convention already in
+     `spool.hpp`, and `Manifold::applyStructure()` refuses a span naming it beside the
+     `isEphemeral()` check it already performs — the same invariant, enforced on the address side.
+   - **`promote()` is where an ephemeral byte acquires a permanent address**: spool the scratch run,
+     rewrite the span, write the ops. V3 already says this pass is a CSR compaction with a different
+     sink; the scratch rewrite is the part V3 did not know it needed.
 
 ______________________________________________________________________
 

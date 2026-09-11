@@ -1,9 +1,9 @@
 # Vlog: Unification and Backtracking in Vortex
 
-**Document Version:** 1.1 — Binding Is a Clone Link **Extension To:** Vortex Hyperstructural Runtime
-Core — `link` and `value`, plus §8's two methods **Status:** Speculative design; nothing here is
-wired into the gleditor build **Core changes required:** two methods and one vector, on a class that
-does not exist yet (§8)
+**Document Version:** 2.0 — The Arena Holds Addresses, Not Bytes **Extension To:** Vortex
+Hyperstructural Runtime Core — `link` and `value`, plus §8's bill **Status:** Speculative design;
+nothing here is wired into the gleditor build **Core changes required:** two methods, one vector and
+a scratch scroll, almost all of it on a class that does not exist yet (§8)
 
 **Vlog** — the Vortex Logic Extension — is resolution as a program over Vortex's own two primitives.
 The original Vortex draft listed "Prolog-style unification and backtracking" as a deferred idea and
@@ -25,9 +25,10 @@ matters and is the whole reason this is worth writing down: there is no separate
 representation, no heap, and no binding environment. A term is a cell. A variable is a cell. A
 binding is a link. Resolution is a program written in Vortex's two primitives, in the same sense
 that [VQL](vql-query-language.md) and [VPL](vpl-array-language.md) are — and it is held to the same
-acceptance test they are (§2). The one new data structure anywhere in Vlog is §5.3's trail, and it
-is not there to undo destructive assignment; it is there because an arena that truncates can leave a
-dangling reference behind.
+acceptance test they are (§2). Vlog adds two data structures and no more: §5.3's trail, which is not
+there to undo destructive assignment but because an arena that truncates can leave a dangling
+reference behind, and §5.5's scratch buffer, for the one operation in the language that constructs
+bytes nobody has written down before.
 
 **Why "extension" and not "front end".** VQL and VPL are front ends: surface syntaxes over the
 manifold that compile to `link` and `value` and ask the runtime for nothing it does not already do.
@@ -58,6 +59,7 @@ ______________________________________________________________________
   - [5.2 Arena: a choice point is a pair of high-water marks](#52-arena-a-choice-point-is-a-pair-of-high-water-marks)
   - [5.3 The WAM's trail condition falls out of the arena rather than being imposed on it](#53-the-wams-trail-condition-falls-out-of-the-arena-rather-than-being-imposed-on-it)
   - [5.4 Cut is one comparison against a barrier](#54-cut-is-one-comparison-against-a-barrier)
+  - [5.5 What the arena is not: no in-memory store, and no in-memory permascroll](#55-what-the-arena-is-not-no-in-memory-store-and-no-in-memory-permascroll)
 - [6. The database](#6-the-database)
   - [6.1 Clauses are a rank on `d.clause`](#61-clauses-are-a-rank-on-dclause)
   - [6.2 `assertz`, `retract`, and the logical update view for free](#62-assertz-retract-and-the-logical-update-view-for-free)
@@ -73,26 +75,27 @@ ______________________________________________________________________
 
 ## 1. What is being claimed
 
-| Prolog concept               | Vortex mechanism                                       | New machinery |
-| ---------------------------- | ------------------------------------------------------ | ------------- |
-| Compound term `f(A, B)`      | A cell holding `"f"`; arguments on `+d.grab`/`+d.step` | none          |
-| Atom, integer, float         | A cell with content; a scalar cell for numbers (R6)    | none          |
-| Unbound variable             | A cell on a `d.vars` rank whose clone master is bare   | none          |
-| `deref`                      | `Manifold::cloneMaster()`                              | none          |
-| Binding `X = T`              | One `SetLink` joining `X`'s clone rank onto `T`'s      | none          |
-| Variable aliasing `X = Y`    | The same operation, in the same direction              | none          |
-| The binding environment      | The clone ranks themselves; there is no other store    | none          |
-| Choice point (persistent)    | A `MicroversionId`                                     | none          |
-| Choice point (arena)         | Arena high-water marks                                 | `mark()`      |
-| Undo on failure (persistent) | `Store::rebuildManifold(M)`                            | none          |
-| Undo on failure (arena)      | `resize()` plus a conditional trail                    | `release()`   |
-| The trail                    | Only writes to cells older than the mark               | one vector    |
-| Retry as a new branch        | `apply(M, op)` where `M` already has a successor       | none          |
-| Cut                          | A recorded barrier, compared against before undoing    | none          |
-| The clause database          | A rank on `d.clause` off a predicate cell              | none          |
-| `assertz` / `retract`        | Link at the rank tail / rearrange to limbo             | none          |
-| The logical update view      | Resolve against the microversion of call entry         | none          |
-| Tabling, memo tables         | A pinned ephemeral island (§5.6 of the Vortex spec)    | none          |
+| Prolog concept               | Vortex mechanism                                       | New machinery   |
+| ---------------------------- | ------------------------------------------------------ | --------------- |
+| Compound term `f(A, B)`      | A cell holding `"f"`; arguments on `+d.grab`/`+d.step` | none            |
+| Atom, integer, float         | A cell with content; a scalar cell for numbers (R6)    | none            |
+| Unbound variable             | A cell on a `d.vars` rank whose clone master is bare   | none            |
+| `deref`                      | `Manifold::cloneMaster()`                              | none            |
+| Binding `X = T`              | One `SetLink` joining `X`'s clone rank onto `T`'s      | none            |
+| Variable aliasing `X = Y`    | The same operation, in the same direction              | none            |
+| The binding environment      | The clone ranks themselves; there is no other store    | none            |
+| Choice point (persistent)    | A `MicroversionId`                                     | none            |
+| Choice point (arena)         | Arena high-water marks                                 | `mark()`        |
+| Undo on failure (persistent) | `Store::rebuildManifold(M)`                            | none            |
+| Undo on failure (arena)      | `resize()` plus a conditional trail                    | `release()`     |
+| The trail                    | Only writes to cells older than the mark               | one vector      |
+| Constructed text             | A run in the arena's scratch buffer (§5.5)             | `scratchScroll` |
+| Retry as a new branch        | `apply(M, op)` where `M` already has a successor       | none            |
+| Cut                          | A recorded barrier, compared against before undoing    | none            |
+| The clause database          | A rank on `d.clause` off a predicate cell              | none            |
+| `assertz` / `retract`        | Link at the rank tail / rearrange to limbo             | none            |
+| The logical update view      | Resolve against the microversion of call entry         | none            |
+| Tabling, memo tables         | A pinned ephemeral island (§5.6 of the Vortex spec)    | none            |
 
 The right-hand column is the argument. Everything structural is already there; what is missing is a
 way to take a cheap snapshot of an *ephemeral* manifold, because the persistent one's snapshots are
@@ -354,6 +357,9 @@ success costs nothing at all. This is the WAM's cost model reached from the othe
 allocates a choice-point frame and pushes trail entries; the arena's structure means the frame *is*
 the lengths it would have recorded.
 
+What that `contentArenaSize` is — and what the arena is therefore *not* — is §5.5, because two
+plausible readings of it are both wrong and one of them would be an architectural violation.
+
 The symmetry with §5.1 is the point worth keeping: **persistent backtracking scrubs to a state that
 has a name; arena backtracking truncates to one that does not.** The difference between the two
 regimes is precisely whether the intermediate state deserves a name — and a failed branch of a
@@ -400,6 +406,88 @@ refuses to scrub past it. One comparison on a `MicroversionId`.
 
 Both spellings are a change to a stack the engine keeps for itself, so cut — like a choice point —
 writes nothing to the manifold.
+
+### 5.5 What the arena is not: no in-memory store, and no in-memory permascroll
+
+"A cheap snapshot of an ephemeral manifold" invites two readings, and both are wrong in ways worth
+recording, because the second one would break an invariant rather than merely cost too much.
+
+**Not an in-memory `Store`.** The arena's saving is not disk against RAM; it is *one op per
+mutation* against *no ops at all*. R8's ruling is two concrete types:
+
+```cpp
+class Manifold;      // ops-backed. Every mutation appends a CompactOpNode.
+class ArenaManifold; // dense vectors only. No ops. Dies with its owner.
+```
+
+A `Store` held in memory still mints a 64-byte named node per binding and still gives every binding
+a microversion. That is §5.1, and §5.1 is *correct* — it is where the inspectable search tree comes
+from. Moving it into RAM would keep the whole cost and throw away the only thing the cost buys.
+
+**Not an in-memory permascroll**, and here the reason is structural. A manifold holds no content at
+all. Its content arena is
+
+```cpp
+std::vector<xanadu::PrimediaSpan> content;   // manifold.hpp
+```
+
+— *addresses*, not bytes. So §5.2's `contentArenaSize` is a span arena, which `ArenaManifold` has by
+construction and which costs this design nothing. And `PrimediaSpan`'s one-line brief is the whole
+argument against the alternative:
+
+> **A run of content at a permanent address.**
+
+An address a backtrack truncates was never permanent. Worse, one span is structurally
+indistinguishable from another, so a promoted answer could quote a scratch address — a transclusion
+into a scroll that no longer exists. That is not an expensive mistake, it is a silent one, which is
+the failure mode the "refuse loudly, by number" habit exists to prevent.
+
+**So how many new bytes does resolution actually need?** Almost none, and the accounting is the
+useful part:
+
+| What Vlog does                               | Bytes allocated                                                     |
+| -------------------------------------------- | ------------------------------------------------------------------- |
+| Mint a variable cell                         | zero — a variable is *bare*; that is §3.2's second conjunct         |
+| Unify against a clause in the database       | zero — the program's text is already at a real address              |
+| Compare or compute numbers                   | zero — §4.1 compares `scalar_bits`, which live in `CompactOpNode`   |
+| Bind to a substring (§9)                     | zero — `value(cell, offset, length)` quotes an address it was given |
+| `atom_concat/3`, `number_codes/2`, term→text | **the only case that allocates**                                    |
+
+The third row is the one that had to be checked rather than assumed. R6 gives a scalar cell two
+halves — canonical bits in the node, and the shortest round-trip rendering as ordinary spooled
+primedia — and insists that neither is a lossy view of the other. But unification and `is/2` read
+**only the bits**. So in the arena the rendering is simply *deferred*: mint the bits, and spool the
+text at promotion, when the value has earned an address. An arithmetic-heavy Vlog program allocates
+no content bytes whatsoever. R6 was not designed with this in mind; it falls out of the two halves
+being independent.
+
+**For the row that does allocate: a scratch scroll, refused by the encoding.** Constructed text goes
+in a byte buffer belonging to the `ArenaManifold`, and its spans carry a reserved `ScrollId`.
+Reserving from the top of the range is the convention already in use:
+
+```cpp
+inline constexpr ScrollId breakMarkerScroll = std::numeric_limits<ScrollId>::max();
+inline constexpr ScrollId vocabularyScroll  = breakMarkerScroll - 1;
+inline constexpr ScrollId scratchScroll     = breakMarkerScroll - 2;   // new
+```
+
+`Manifold::applyStructure()` then refuses to persist a span naming it, exactly as it already refuses
+an ephemeral cell as a link target:
+
+```cpp
+if (isEphemeral(to) || (noCell != to && noDense == denseOf(to))) {   // manifold.cpp, today
+```
+
+This is the same trick `ephemeralBit` plays for a `CellRef`, applied to the address side: the
+invariant is enforced by the encoding rather than trusted to the caller, which is the only kind of
+enforcement that survives a second call site.
+
+And it gives promotion a job it did not have a name for. **`promote()` is where an ephemeral byte
+acquires a permanent address**: spool the scratch run into the author's permascroll, rewrite the
+span to name it, and the answer leaves the arena addressed like anything else. That is the same pass
+the convergence's V3 already describes — *promoting an `ArenaManifold` into a `Manifold` is a CSR
+compaction that happens to write ops as it goes* — with the deferred renderings of §5.5's third row
+written out along the way.
 
 ______________________________________________________________________
 
@@ -506,23 +594,31 @@ ______________________________________________________________________
 
 The brief for Vlog was "as few changes to the C++ core as possible." The answer is:
 
-**Nothing in `ops.hpp`, `compact_op.hpp`, `binary_ops.cpp`, `Store`, `Manifold`, the wire format, or
-any on-disk format changes at all.** No new `OpKind`, no new `StructureVerb`, no flag bit, no format
-version bump, no fixture regeneration.
+**Nothing in `ops.hpp`, `compact_op.hpp`, `binary_ops.cpp`, `Store`, the wire format, or any on-disk
+format changes at all.** No new `OpKind`, no new `StructureVerb`, no flag bit, no format version
+bump, no fixture regeneration.
 
-What is added, entirely inside `ArenaManifold` — **a class that does not exist yet**, since it is
-convergence step 21:
+What is added, almost entirely inside `ArenaManifold` — **a class that does not exist yet**, since
+it is convergence step 21:
 
 1. `Mark mark() const` — reads four vector lengths.
 1. `void release(Mark)` — resizes four vectors, replaying the trail tail in reverse.
 1. `std::vector<TrailEntry> trail_` — 16 bytes per entry, appended only when the written cell is
    older than the innermost mark.
+1. A scratch byte buffer and `scratchScroll`, for the one thing that allocates content (§5.5).
 
-That is the whole bill, and being able to present it this way is the entire reason the idea was
-worth revisiting now rather than when it was deferred. Adding two methods to a class before it is
-written is free; adding them to `Manifold` after seventeen fixtures depend on its layout is not. **A
-speculative feature that lands its requirements on an unwritten class has found the cheapest moment
-it will ever have.**
+**Version 1.0 of this document claimed the fourth item was not needed, and that nothing in
+`Manifold` changed at all. That was too strong**, and the correction is the whole reason this
+revision is a major one. `scratchScroll` is a constant in `spool.hpp`, which is free; but a scratch
+span must be *refused* on the way into the spool, and the place that refusal belongs is
+`Manifold::applyStructure()`, beside the `isEphemeral()` check it already performs. Three lines in a
+function that already does exactly this for cell refs — but three lines in `Manifold`, not zero, and
+a bill is worth nothing if it is revised downward by leaving things off it.
+
+The rest still holds, and is still the reason the idea was worth revisiting now rather than when it
+was deferred. Adding two methods to a class before it is written is free; adding them to `Manifold`
+after seventeen fixtures depend on its layout is not. **A speculative feature that lands its
+requirements on an unwritten class has found the cheapest moment it will ever have.**
 
 Everything else — unification, term shape, clause selection, cut, negation as failure, the occurs
 check, tabling — is a program over `link` and `value`, per §2.
@@ -582,7 +678,9 @@ ______________________________________________________________________
 - **R5 (`noCell == 0`)**: `link(..., 0)` is `retract`, and "there is no cell zero" is why absence
   needs no sentinel in a clause rank.
 - **R6 (scalar cells)**: numeric unification is a 64-bit comparison, never a parse, because the
-  canonical bits sit in the cell beside the rendering.
+  canonical bits sit in the cell beside the rendering. §5.5 leans harder on the two halves being
+  independent than R6 had reason to: in the arena the *rendering* is deferred to promotion, so
+  arithmetic allocates no content at all.
 - **R7 (micro-history chain)**: a cell's `lastOp` chain means "how did this variable come to be
   bound" is answerable per cell, not only per query.
 - **R8 (only user-generated updates persist)**: the governing constraint of §5.2 and §4.3. It is why
@@ -612,7 +710,8 @@ use:
 
 Editorial changes that alter no normative text bump neither component.
 
-| version | commit    | date       | change                                                                                                                                                                            |
-| ------- | --------- | ---------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| 1.1     | `88c9336` | 2026-09-11 | Named **Vlog**, and restyled as an extension rather than a front end (intro, §2). The intro's "no trail" reconciled with §5.3; U1's two consumers separated into ordinal and key. |
-| 1.0     | `734513a` | 2026-09-11 | Initial specification: binding as a clone link, backtracking as truncation.                                                                                                       |
+| version | commit    | date       | change                                                                                                                                                                                                |
+| ------- | --------- | ---------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 2.0     | `PENDING` | 2026-09-11 | §5.5: the arena is neither an in-memory store nor an in-memory permascroll — it holds addresses, not bytes. `scratchScroll` added to §8's bill, correcting 1.0's claim that `Manifold` was untouched. |
+| 1.1     | `88c9336` | 2026-09-11 | Named **Vlog**, and restyled as an extension rather than a front end (intro, §2). The intro's "no trail" reconciled with §5.3; U1's two consumers separated into ordinal and key.                     |
+| 1.0     | `734513a` | 2026-09-11 | Initial specification: binding as a clone link, backtracking as truncation.                                                                                                                           |
