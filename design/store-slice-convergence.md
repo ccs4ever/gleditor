@@ -228,7 +228,7 @@ what makes `noCell == 0` sound rather than merely convenient.
 **Price.** One design-doc edit to
 [`vortex-hyperstructural-runtime.md`](vortex-hyperstructural-runtime.md): its `kNoLink` and "cell 0
 is an ordinary addressable target" paragraphs are amended, and its well-known dimension constants
-(`d_grab = 1`, `d_entangle = 999`) become genesis-minted `CellRef`s resolved through a name table
+(`d_grab = 1`, `d_clone = 999`) become genesis-minted `CellRef`s resolved through a name table
 rather than literals.
 
 ### R6. A scalar cell carries **both** a real span and canonical bits
@@ -243,9 +243,9 @@ This is the ruling that answers the non-text payload problem without giving anyt
   formattable via `LinkType::Format` unchanged, **is** transcludable, diffable, publishable and
   transcopyright-bearing. `Link::left`/`right` stay `std::vector<PrimediaSpan>` and
   `formatAttributeOf()` is untouched.
-- The bits are the typed value. VQL comparison, arithmetic and `d.entangle` never parse text and
-  never round-trip through a formatter. `PrimediaSpan::intersect()` never sees a bit pattern, so two
-  adjacent doubles can never be mistaken for an overlapping transclusion.
+- The bits are the typed value. VQL comparison, arithmetic and `d.clone` resolution never parse text
+  and never round-trip through a formatter. `PrimediaSpan::intersect()` never sees a bit pattern, so
+  two adjacent doubles can never be mistaken for an overlapping transclusion.
 - The rendering is pinned to `std::to_chars(first, last, value)` with **no precision argument** —
   shortest round-trip, which the standard mandates to be exact. That is a mathematical function of
   the value rather than a formatting choice. `bool` renders `true`/`false`.
@@ -1122,7 +1122,7 @@ came back byte-identical across every regenerated fixture.
    The fallback to the cell's own content now happens only when the `d.clone` rank names a master
    the space does not hold. A master holding an *empty string* now reads as empty rather than
    reaching for the clone's text, which was the same bug seen from the other side. This is V2's
-   groundwork: it is what makes `d.clone` able to stand in for `d.entangle`.
+   groundwork: it is what lets `d.clone` replace entanglement outright.
 
 1. ~~**Spool capacity.**~~ **Done.** `defaultOpsReservation` is 8 GiB of reserved address space on
    64-bit and 512 MiB where a pointer is 32 bits, and it moved into the header, because a ceiling
@@ -2286,7 +2286,11 @@ ops encoding had already concluded independently, since `StructureVerb` (§5.2) 
 invariant survives: it says `link` is one primitive with a branch on `target`, not that the branch
 must be encoded as an integer.
 
-### V2. `d.entangle` and `d.clone` are the same mechanism
+### V2. Entanglement is deleted. `d.clone` is the mechanism
+
+> **Settled and applied.** Both Vortex and VQL have been rewritten against this: there is no
+> `d.entangle` and no `entangled_payload` anywhere in `design/`. What follows is the argument that
+> produced that, kept because it is the reasoning rather than the result.
 
 Vortex gives each `Cell` a `std::shared_ptr<CellValue> entangled_payload` and defines entanglement
 as sharing that pointer, so a `set()` on one member is seen by all. VQL §4.6 builds `><` on top of
@@ -2305,8 +2309,16 @@ because they never held a value of their own to begin with.
 
 VQL §4.6 has a headcell already and does not know it. "Payload authority follows argument order" and
 "the leftmost operand's value is what the whole group ends up sharing" describe a rank with a
-distinguished head — which is what `d.clone` is. So `d.entangle` is specified as a `d.clone`-shaped
-rank whose head is the leftmost operand of the `EntangleTail` that created it.
+distinguished head — which is what `d.clone` is. So there is no separate dimension: `><` links along
+`d.clone`, and the rank's **master** is the leftmost operand of the `CloneTail` that created it.
+
+**The property that makes the replacement better rather than merely cleaner:** because every member
+resolves *through* the master rather than holding a copy, linking a new cell negward of the master
+makes it the master and **changes what every cell on the rank reads, in one operation** — no
+iteration, no invalidation, no notification, because nobody was holding the old value. A shared
+pointer could only change a value by writing through the box, which is a mutation with no name in
+hypertime and no way back. The link is an ordinary operation, so scrubbing behind it restores the
+previous master for every member at once.
 
 **What this buys.** `entangled_payload` leaves `Cell` entirely; `handle_unentangle_cleanup`'s
 copy-back-and-maybe-reshare dance disappears with it. `set()` on any member records one op against
@@ -2364,7 +2376,7 @@ scratch value, and a language that hides it would be lying about which one you a
 | Vortex/VQL as written                                                      | under this layout                                                                                                                                                                                                                                                             |
 | -------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `cell_id = int64_t`                                                        | `CellRef` is `std::uint32_t` with bit 31 reserved for ephemeral (R12), so $2^{31}$ persistent cells — 137 GB of ops spool at 64 bytes each. Not a limit anything reaches first.                                                                                               |
-| `constexpr cell_id d_grab = 1; d_entangle = 999; d_cursors = 1001;`        | A dimension is a cell (R2), so its id is minted, not chosen. The genesis sequence mints the system dimensions off `home` in a fixed order, so they are deterministic without being magic numbers.                                                                             |
+| `constexpr cell_id d_grab = 1; d_clone = 999; d_cursors = 1001;`           | A dimension is a cell (R2), so its id is minted, not chosen. The genesis sequence mints the system dimensions off `home` in a fixed order, so they are deterministic without being magic numbers.                                                                             |
 | `std::unordered_map<cell_id, LinkSlot> links` per cell                     | one CSR run; §12.5 measured the per-cell-hash-table form at 467 B/cell against 108, and the map cannot answer "which dimensions does this cell link on" without a second index.                                                                                               |
 | Eager eviction when a cell's total live links reach zero                   | `CellSlot::linkCount` **is** that sum, maintained. R12's `d.meta-dims` hands Vortex's GC its predicate for free rather than needing the $\sum_{\text{dim}}$ scan §1 writes out.                                                                                               |
 | Root Set = "Origin Cell (0), `d.cursors`, global system dimension anchors" | `home`, the `d.cursors` rank, and the `d.dims` rank off `home` (R12) — the three-part Root Set was already this shape, R12 just names the third part. V5 adds a fourth, `d.pinning-cursors`.                                                                                  |

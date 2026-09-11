@@ -19,12 +19,18 @@ way at every call site, and there is no reason for the two documents to disagree
 primitive they share. It also replaces every ASCII-art diagram with Mermaid, matching the rest of
 `design/`.
 
-> **§2's reference implementation is now out of date on purpose.** It is written against
-> `apps/zigzag`'s `Cell` as it stood when this document was drafted.
-> [`store-slice-convergence.md`](store-slice-convergence.md) replaces that cell's id type, its link
-> storage, its payload and its entanglement mechanism. **§5 below records what changes and what
-> survives**; read it before implementing anything from §2, which is kept as-is because it is still
-> the clearest statement of the *semantics* even where it no longer describes the *encoding*.
+> **§2's reference implementation has been brought onto the built architecture.** It was written
+> against `apps/zigzag`'s `Cell` as it stood when this document was drafted;
+> [`store-slice-convergence.md`](store-slice-convergence.md) has since replaced that cell's id type,
+> its link storage and its payload, and **deleted its entanglement mechanism outright**. §5 records
+> what changed and what survived.
+>
+> **Identity sharing is not a payload mechanism any more.** Entanglement gave several cells one
+> `std::shared_ptr<CellValue>`, so writing through any of them mutated a pool the others read. That
+> model is gone and is not coming back: it has no name in hypertime, nothing to publish, no way to
+> scrub to the state before a write, and aliasing that no version of the manifold could express.
+> What replaces it is **`d.clone` rank traversal** — sharing by *structure* rather than by memory —
+> which is described where the entanglement primitive used to be.
 
 ______________________________________________________________________
 
@@ -58,13 +64,15 @@ one overloaded primitive, `link`, distinguished by whether a `target` was passed
      reserved.
    - **Literal target (any other `cell_id`, including `0`)**: Links directly to that cell and
      returns it.
-   - **Identity Entanglement & Unentanglement (`dim == d_entangle`)**: Establishes or breaks an
-     identity binding where multiple cells share a single underlying payload pointer pool, following
-     the same read/allocate/isolate/literal-target branching as any other dimension.
+   - **Clone ranks (`dim == d_clone`)**: no special case whatsoever. Joining a clone rank is linking
+     and leaving one is unlinking, following exactly the same read/allocate/isolate/literal-target
+     branching as every other dimension. Identity sharing is the *traversal*, not something `link`
+     does on the side — see `get` below.
 1. **`get(cell, [offset], [length])`**: Dereferences the cell's payload
    (`std::variant<std::string, double, bool>`) with optional virtual slicing.
-1. **`set(cell, value, [offset], [length])`**: Writes or in-place patches the variant payload,
-   updating shared instances across `d.entangle` instantly.
+1. **`set(cell, value, [offset], [length])`**: Writes or in-place patches the payload **of the clone
+   rank's master**, which is what every cell on that rank reads — so one write is instantly visible
+   from all of them, with nothing copied and nothing aliased.
 
 ```mermaid
 graph TD
@@ -120,7 +128,7 @@ constexpr cell_id d_grab    = 1;    // Parameter wings (-d.grab = outputs, +d.gr
 constexpr cell_id d_step    = 2;    // Parameter chaining / sequential rank stepping
 constexpr cell_id d_spin    = 3;    // Process instruction stream
 constexpr cell_id d_stack   = 4;    // Call frame stack
-constexpr cell_id d_entangle = 999; // Quantum identity synchronization
+constexpr cell_id d_clone   = 999; // Clone rank: shared identity by structure
 constexpr cell_id d_cursors = 1001; // Process scheduler manifold
 constexpr cell_id d_vars    = 1003; // Scope variable names
 constexpr cell_id d_values  = 1004; // Variable values / ground terms
@@ -140,9 +148,11 @@ using CellValue = std::variant<std::string, double, bool>;
 
 struct Cell {
     cell_id id;
+    // Only the master of a d.clone rank carries content. A clone reads
+    // through find_clone_master(), so there is no second copy to keep in
+    // step and no shared pointer to alias.
     CellValue primitive_value = "";
     std::unordered_map<cell_id, LinkSlot> links; // [dim] -> {pos, neg}
-    std::shared_ptr<CellValue> entangled_payload = nullptr;
 };
 
 // Global Matrix Storage
@@ -158,18 +168,23 @@ static cell_id internal_alloc_cell() {
     return id;
 }
 
-// Unentangle & Payload Recovery Helper
-static void handle_unentangle_cleanup(cell_id c_id) {
-    auto& c = matrix[c_id];
-    if (!c || !c->entangled_payload) return;
-    c->primitive_value = *(c->entangled_payload);
-    if (c->links[d_entangle].first == kNoLink &&
-        c->links[d_entangle].second == kNoLink) {
-        c->entangled_payload = nullptr;
-    } else {
-        c->entangled_payload =
-            std::make_shared<CellValue>(c->primitive_value);
+// The head of a clone rank: walk negward on d.clone until nothing precedes.
+//
+// This is the whole of identity sharing. Every cell on the rank resolves to
+// the same head, so the head's content *is* their content -- and linking a
+// new cell negward of the head makes it the head, which changes what every
+// cell on the rank reads in one operation, without touching any of them.
+static cell_id find_clone_master(cell_id id) {
+    std::unordered_set<cell_id> seen;           // a looped rank must terminate
+    cell_id cursor = id;
+    while (cursor != kNoLink && seen.insert(cursor).second) {
+        auto& c = matrix[cursor];
+        if (!c) break;
+        const cell_id prev = c->links[d_clone].second;   // negward
+        if (prev == kNoLink || !matrix.count(prev)) return cursor;
+        cursor = prev;
     }
+    return cursor == kNoLink ? id : cursor;
 }
 
 // The Structural Primitive: link
@@ -199,51 +214,19 @@ std::optional<cell_id>(existing);
     const cell_id actual_target = (raw_target == -1) ?
 internal_alloc_cell() : raw_target;
 
-    // Quantum Identity Synchronization along d.entangle
-    if (dim == d_entangle) {
-        cell_id old_target = (direction > 0) ? c->links[d_entangle].first
-: c->links[d_entangle].second;
-
-        // Break Entanglement
-        if (raw_target == -2) {
-            if (old_target == kNoLink) return std::nullopt;
-            if (direction > 0) c->links[d_entangle].first = kNoLink;
-            else c->links[d_entangle].second = kNoLink;
-
-            auto& partner = matrix[old_target];
-            if (partner) {
-                if (direction > 0 && partner->links[d_entangle].second ==
-cell) partner->links[d_entangle].second = kNoLink;
-                else if (direction < 0 && partner->links[d_entangle].first
-== cell) partner->links[d_entangle].first = kNoLink;
-                handle_unentangle_cleanup(old_target);
-            }
-            handle_unentangle_cleanup(cell);
-            return old_target;
-        }
-
-        // Establish Entanglement
-        auto& t = matrix[actual_target];
-        if (!t) return std::nullopt;
-        if (direction > 0) { c->links[d_entangle].first =
-actual_target; t->links[d_entangle].second = cell; }
-        else { c->links[d_entangle].second = actual_target;
-t->links[d_entangle].first = cell; }
-
-        if (!c->entangled_payload && !t->entangled_payload) {
-            c->entangled_payload =
-std::make_shared<CellValue>(c->primitive_value);
-            t->entangled_payload = c->entangled_payload;
-        } else if (c->entangled_payload && !t->entangled_payload) {
-            t->entangled_payload = c->entangled_payload;
-        } else if (!c->entangled_payload && t->entangled_payload) {
-            c->entangled_payload = t->entangled_payload;
-        } else if (c->entangled_payload != t->entangled_payload) {
-            *(t->entangled_payload) = *(c->entangled_payload);
-            t->entangled_payload = c->entangled_payload;
-        }
-        return actual_target;
-    }
+    // d.clone is an ordinary rank. It gets no special case here at all, and
+    // that is the point: identity sharing is the *traversal*, not a side
+    // effect of linking. Joining a clone rank is linking; leaving one is
+    // unlinking; and neither copies a payload, because a clone never had one
+    // to copy -- get() resolves through find_clone_master() below.
+    //
+    // What stood here was Quantum Identity Synchronization: establishing a
+    // link fused two std::shared_ptr<CellValue> pools so that a write through
+    // any member mutated what every other member read, and breaking one had to
+    // recover a private copy for each side. All of it is deleted. It could not
+    // be versioned, published, or scrubbed to a point before a write, and two
+    // cells sharing a pointer is not something a manifold folded from
+    // operations can express.
 
     // Standard Dimensional Topologies
     if (raw_target == -2) {
@@ -288,8 +271,11 @@ length = -1) {
     auto it = matrix.find(c_id);
     if (it == matrix.end() || !it->second) return false;
 
-    const CellValue& val = it->second->entangled_payload ?
-*(it->second->entangled_payload) : it->second->primitive_value;
+    // Resolved through the clone rank's head. A clone holds no content of its
+    // own, so this is the only place identity sharing happens -- and it is a
+    // walk, not a dereference of something two cells hold at once.
+    const cell_id master = find_clone_master(c_id);
+    const CellValue& val = matrix[master]->primitive_value;
     if (std::holds_alternative<bool>(val)) return std::get<bool>(val);
     if (std::holds_alternative<double>(val)) return
 std::get<double>(val);
@@ -309,8 +295,9 @@ offset = 0, int64_t length = -1) {
     auto it = matrix.find(c_id);
     if (it == matrix.end() || !it->second) return;
 
-    CellValue& target = it->second->entangled_payload ?
-*(it->second->entangled_payload) : it->second->primitive_value;
+    // Writes land on the head, which is what gives the head its primacy: every
+    // cell on the rank reads through it, so one write changes all of them.
+    CellValue& target = matrix[find_clone_master(c_id)]->primitive_value;
 
     if (std::holds_alternative<bool>(new_val) ||
 std::holds_alternative<double>(new_val)) {
@@ -352,22 +339,22 @@ std::optional<cell_id> break_link(cell_id cell, cell_id dim, int direction) {
 
 // A dim/dir slot holds exactly one partner (§1), so passing one existing
 // cell as `target` to more than one `link` call silently overwrites its
-// back-link each time. entangle_generator(source) sidesteps that: the first
+// back-link each time. clone_generator(source) sidesteps that: the first
 // call returns source itself -- so a single caller behaves exactly as if it
 // had used source directly, no special-casing needed -- and every call
-// after that allocates a fresh cell and entangles it with source (source
-// stays the `cell` argument so its value, not the blank new cell's, is
-// authoritative -- §4.6 of vql-query-language.md), returning that fresh
-// cell instead so every additional caller still gets its own structurally
-// distinct but identity-linked partner. See VQL §4.7 for where this is used.
-std::function<cell_id()> entangle_generator(cell_id source) {
+// after that allocates a fresh cell and links it *posward* of source on
+// d.clone, so source remains the rank's head and stays authoritative
+// (§4.6 of vql-query-language.md). The fresh cell is returned, so every
+// additional caller gets its own structurally distinct cell that reads the
+// head's content. See VQL §4.7 for where this is used.
+std::function<cell_id()> clone_generator(cell_id source) {
     return [source, used = false]() mutable {
         if (!used) {
             used = true;
             return source;
         }
         cell_id fresh = internal_alloc_cell();
-        link(source, d_entangle, +1, fresh);
+        link(source, d_clone, +1, fresh);
         return fresh;
     };
 }
@@ -463,22 +450,40 @@ with a branch on what it was asked to do; the branch is a verb rather than a mag
 single-primitive invariant is about there being one primitive, not about how its argument is
 spelled.
 
-### 5.2 `entangled_payload` is deleted; `d.entangle` is `d.clone`
+### 5.2 Entanglement is deleted. Identity sharing is a `d.clone` rank
 
-A `std::shared_ptr<CellValue>` shared between cells is a fact about one process's heap. Two cells
-showing the same content should do so because they address the same span — a claim anyone holding
-the address can check.
+A `std::shared_ptr<CellValue>` shared between cells is a fact about one process's heap. It has no
+name in hypertime, nothing to publish, and no state to scrub back to — and two cells holding one
+pointer is not something a manifold folded from operations can express at all. Two cells showing the
+same content should do so because they **address the same span**, a claim anyone holding the address
+can check.
 
-Zigzag already has this: a clone reads its master's content along `d.clone`, and since the
-convergence's migration step 4 it does so for every payload alternative rather than only for
-strings. `d.entangle` is therefore specified as a `d.clone`-shaped rank, and VQL §4.6's "payload
-authority follows argument order" is what names its head — the leftmost operand.
+Zigzag already had the mechanism: **a clone holds no content of its own and reads its master's.**
+`Manifold::cloneMaster()` walks `d.clone` *negward* until nothing precedes, and that cell — the
+head, the master — is where content lives. Every other cell on the rank is a view of it.
 
-`handle_unentangle_cleanup`'s copy-back-and-maybe-reshare goes with the pointer. A `set()` on any
-member records one operation against the head, so the group has one history rather than N, and every
-prior value stays addressable — which a shared payload destroys by construction. The cost is that
-entanglement stops being symmetric: breaking the head out of a group is not the same operation as
-breaking a member out.
+**The head's primacy is the whole design, and it is what makes one operation change many cells.**
+Because every member resolves *through* the head rather than holding a copy:
+
+- A `set()` on any member is one operation recorded against the head. The group has one history
+  instead of N, and every prior value stays addressable — which a shared payload destroys by
+  construction, since overwriting a pointee leaves nothing to scrub back to.
+- **Linking a new cell negward of the current head makes it the new head, and every cell on the rank
+  instantly reads the new content.** One link operation, no copying, no traversal of the members, no
+  notification: the members were never holding the old value, they were resolving to whoever was
+  negward-most. Entanglement needed a pointer pool and a fusion rule to approximate this; a rank
+  gets it from the direction of a walk.
+- Because that link is an ordinary `SetLink`, it is a point in hypertime like any other edit. Scrub
+  behind it and the old head is the head again — so "what did this group say last Tuesday" is a
+  question with an answer.
+
+`handle_unentangle_cleanup`'s copy-back-and-maybe-reshare goes with the pointer, and so does the
+fusion logic that had to decide which of two pools won. Leaving a rank is unlinking; the cell keeps
+whatever content it has of its own, which for a clone is none.
+
+The cost is that identity sharing stops being symmetric, and should: taking the head out of a group
+is not the same operation as taking a member out, because the head is not a peer. VQL §4.6's
+"payload authority follows argument order" is what names the head — the leftmost operand.
 
 ### 5.3 `set()`'s offset/length form is not a primitive on a persistent cell
 
