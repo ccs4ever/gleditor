@@ -155,11 +155,19 @@ OSMIC names six. The five above are the five `xudu` has always implemented; the 
 operation that says where a piece of content *sits* in a structure that is not the document's own
 reading order: a rank, an axis, a dimension.
 
-`OpKind::Structure` exists as of migration step 12. **Nothing emits one yet** — `Store::replay()`
-treats it as a text no-op, because a slice's structure is a *second* replay product of the same
-spool and folding it into the concatext would be building the wrong one of the two. Its verb, its
-link direction and its value type ride in `CompactOpNode::flags` rather than in sibling `OpKind`s,
-since the verbs share every field and differ only in which ones they read.
+`OpKind::Structure` exists as of migration step 12, and since steps 14–20 things **emit and
+consume** it: `Store::makeCell`/`setLink`/`setValue`/`makeScalarCell` record one,
+`Store::rebuildManifold()` folds them into a `zigzag::Manifold`, and `sliceToStore()` mints a whole
+YAML slice as a run of them. `Store::replay()` still treats one as a text no-op, and that is the
+point rather than an omission: a slice's structure is a *second* replay product of the same spool,
+so folding it into the concatext would be building the wrong one of the two. Its verb, its link
+direction and its value type ride in `CompactOpNode::flags` rather than in sibling `OpKind`s, since
+the verbs share every field and differ only in which ones they read.
+
+The sixth hyperop therefore has an implementation, and the shape of it is worth recording here
+because it is the part OSMIC does not say: a cell's *subject* is not a field. `sourceOpIndex` names
+the previous operation on the same cell, and that chain's far end is the `MakeCell` whose index *is*
+the cell's name — so a `SetLink` says whose link it is by chaining rather than by pointing.
 
 `OpKind::PageBreak` is that operation, restricted to one dimension. A break says "the text divides
 here" without naming any primedia — it is a fact about arrangement rather than about content, which

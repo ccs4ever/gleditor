@@ -562,6 +562,24 @@ Key invariants of this model:
 - **64 KiB Page Alignment**: Spool segments are aligned to 64 KiB boundaries. This aligns with
   BitTorrent v2 Merkle piece sizes and enables zero-copy `mmap(MAP_FIXED)` address space extension
   in local memory.
+- **Reading takes no lock.** `read()`, `readView()`, `size()` and `bytes()` hold no mutex, which is
+  what they always claimed and for a while did not. What makes it sound is not a short critical
+  section: the arena's base address never moves, content is append-only, and the one thing a reader
+  and an appender must agree on -- how much has been published -- is a single `std::atomic`, stored
+  with release *after* the bytes are copied and loaded with acquire before anything else in a read.
+  A reader clamps to what it loaded, so it never sees a byte mid-write, and a `string_view` taken
+  from `readView()` stays valid for the permascroll's lifetime. Verified both ways under
+  ThreadSanitizer: clean as written, and a data race the moment the atomic is reverted to a plain
+  integer. What still needs the mutex is anything that *re-addresses* the arena rather than
+  extending it -- `clear()`, `adopt()`, opening or sealing a segment.
+- **A scalar is a first-class Xanadu object.** A cell holding `42.5` carries *both* a real
+  `PrimediaSpan` whose bytes are the shortest round-trip `std::to_chars` rendering -- so it is a
+  link endpoint, formattable, transcludable and diffable like any other content -- and the canonical
+  IEEE-754 bits in the operation, so a query never parses text. Canonicalisation applies to the bits
+  and only for value equality: every NaN collapses to one pattern, `-0.0` becomes `+0.0`, and a
+  signalling NaN is refused rather than quieted. It is emphatically *not* an address
+  canonicalisation: two people who typed `3.14` have not quoted each other, so their cells hold
+  equal values at different addresses.
 - **Collaborative Live Editing (Zero Payload)**: Live operations transmitted across peers carry only
   a 48-byte operation descriptor and canonical `GlobalSpan` coordinates. Remote keystrokes never
   inject raw text into the local slot 0 spool, completely preventing spool contamination and offset
@@ -758,6 +776,16 @@ xudu: 1 quotes dc308895... file 0 [4,13)
 Only the pieces a quotation needs are requested, not the whole file: a quotation is usually a
 sentence out of something long, and fetching the rest would make a reference cost what a copy costs.
 Whole *pieces* though, because a piece hash covers a piece and says nothing about a fragment of one.
+
+A verified piece is then **kept**, keyed by `(info hash, piece index)` -- which names the bytes
+exactly, since a piece hash is a commitment, so any bytes that verify against it are the bytes the
+reference meant whatever they were fetched from. Without that, a frame re-hashed 64 KiB once per
+visible cell: measured over sixty short reads scattered across a 1 MiB torrent, 3.4--5.5 ms of SHA-1
+against an 8.33 ms frame, now 0.7--1.4 ms. The cache costs something real and says so: a piece
+already verified keeps answering after the local copy is altered, so tampering stops being noticed
+for as long as it is held. Two things bound that -- it is in memory and per-`Resolver`, so the
+window is one open document and reopening re-verifies everything; and only *verified* pieces are
+ever stored, so a piece nobody has looked at yet is still checked.
 
 With a swarm, a bare magnet link resolves as well -- that is the case it was designed for. The
 metadata it lacks is fetched from a peer (BEP 9), and libtorrent accepts an info dictionary only if
@@ -1279,19 +1307,31 @@ zzstructure:
 
 `zigzag` features a high-performance engine for large-scale multidimensional spaces:
 
-- **`CompactZZCell` Layout**: A cache-line-aligned POD. Static dimensions (`d.1`, `d.2`, `d.3`,
-  `d.clone`, `d.time`) have $O(1)$ direct array slot lookup, while arbitrary dynamic dimensions are
-  stored via an inline overflow link-pair table. It is around 960 bytes, not the 64 its comments
-  claimed for a while, and a `static_assert` holds that number honest until the layout is redone --
-  most of the size turns out to be spent identifying dimensions by text where four bytes of cell
-  reference would do. See [design/store-slice-convergence.md](design/store-slice-convergence.md).
-- **`UnifiedTransclusionEngine`**: Coordinates live document state from `Store` and stages visible
-  cells and link beams directly for the render pipeline at 120 FPS without allocation spikes.
-  Validates 2-manifold invariants (ensuring posward/negward link symmetry across all dimensions).
-  Ingesting operations costs the same per operation however many are already ingested, which was
-  worth making true: three separate rescans of already-synced state made it quadratic, and 20,000
-  operations took 775 ms to fold instead of 17. A regression test asserts the shape of the curve
-  rather than a wall-clock number, so it keeps holding on a slower machine.
+- **`zigzag::Manifold` is the model**: a *second replay product* of the same operations spool a
+  `Version` is the first replay product of. A cell **is** an operation -- `OpKind::Structure`,
+  OSMIC's sixth hyperop -- so a `CellRef` is that operation's index in the spool, its identity is
+  that operation's name in hypertime, and a cell exists only where something minted one. A cell is a
+  48-byte `CellSlot` plus a contiguous run of 12-byte `(dimension, posward, negward)` triples in one
+  shared arena; no dimension is privileged, because a dimension is itself a cell and one a user
+  minted this frame costs what `d.1` costs. Both ends of a link are maintained by the fold, so an
+  asymmetric rank cannot be constructed through the API. See
+  [design/store-slice-convergence.md](design/store-slice-convergence.md).
+- **`CompactZZCell`** was that model, and is not any more: 792 bytes, with $O(1)$ array slots for a
+  fixed set of dimensions and an overflow table for the rest. It survives as the type the YAML
+  loader and DTO still name. Most of its size was spent identifying dimensions by text where four
+  bytes of cell reference would do, which is what the run above replaced.
+- **`UnifiedTransclusionEngine`**: stages visible cells and link beams for the render pipeline at
+  120 FPS without allocation spikes, caching shaped pages, and holds no cell space of its own --
+  `syncIncremental()` folds operations into a `Manifold` rather than projecting them into cells.
+  `validate2RankManifold()` survives as a drift check beside `Manifold::verifyAgainstFullRebuild()`
+  rather than as a guard against careless callers. It has no production caller yet: what `zigzag`
+  draws today is `ZigzagVisualizer` over its own cell map, and moving that onto the manifold is the
+  next step.
+- **A slice is a store**: `sliceToStore()` mints a YAML slice as `Structure` operations and
+  `storeToSlice()` reads a `Manifold` back out, so YAML is a transfer format rather than a second
+  data model. There are no YAML slices to preserve -- the sample and system slices are regenerated
+  as stores -- and a cell's `role`, MIME type and media path live on `d.role`/`d.mime`/`d.media`
+  ranks, which is what a zzstructure is for.
 - **Merkle Author Verification**: Integrates with the `MerkleLedger` to verify the OpenPGP identity
   of remote slice authors before displaying untrusted zzstructures.
 - **Xanadoc to Zigzag Projection (`zz_xudu_projector`)**: Bidirectionally maps `xudu` document

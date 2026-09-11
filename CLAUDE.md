@@ -341,11 +341,15 @@ continuation indents, treats Markdown table cell padding as "wrong" indentation,
   - `publication.hpp/.cpp`: `publish`/`adopt`, `globalise`/`localise`, scroll keys
   - `identity/`: BEP 10 plugins, Hashcash PoW engine, and network controller
   - `zigzag/zzcore.{hpp,cpp}`, `zigzag/zzstructure.hpp`: the slice model shared with `apps/zigzag`
-  - `zigzag/manifold.{hpp,cpp}`: the structure-map replay product (migration step 14). A `CellRef`
-    is an ops-spool index, links are per-cell CSR runs keyed by dimension cell, and both ends of a
-    link are maintained by the fold. **Nothing consumes it yet** — `Store::rebuildManifold()` folds
-    one, `Manifold::advance()` carries it forward, and `verifyAgainstFullRebuild()` is what says the
-    two agree. Spelled `<zigzag/core/manifold.hpp>` from an app or a test
+  - `zigzag/manifold.{hpp,cpp}`: **the slice model** (migration step 14). A second replay product of
+    the ops spool, folded from `OpKind::Structure`: a `CellRef` is an ops-spool index, links are
+    per-cell CSR runs keyed by a dimension *cell*, and both ends of a link are maintained by the
+    fold, so asymmetry is not constructible through the API. `Store::rebuildManifold()` folds one,
+    `Manifold::advance()` carries it forward one operation at a time, and
+    `verifyAgainstFullRebuild()` is what says the two agree. `UnifiedTransclusionEngine` reads it
+    (step 19); `ZigzagVisualizer` does not yet. Spelled `<zigzag/core/manifold.hpp>` from an app or
+    a test. **A cell exists only where an operation minted one** — typing into a xanadoc mints no
+    cells, which is the thing most likely to surprise you
   - `scalar.hpp/.cpp`: a scalar cell's two halves (migration step 15, R6) — the shortest round-trip
     `to_chars` rendering, spooled as ordinary primedia, and the canonical bits in
     `CompactOpNode::value`. Canonicalisation is for value equality only and never for addresses: two
@@ -356,15 +360,22 @@ continuation indents, treats Markdown table cell padding as "wrong" indentation,
 - `apps/xudu/` — the xanadoc editor's own UI: `beams.cpp`, `framing.cpp` (3D link ribbons and
   transclusion prisms), `session.cpp`, the overlays, `main.cpp`
 - `apps/zigzag/` — the Xanadu Zigzag multidimensional visualizer; `apps/zigzag/core/`:
-  - `unified_transclusion_engine.hpp/.cpp`: 120 FPS render staging and manifold checks. Syncing is
-    linear in the number of ops and there is a regression test asserting it stays that way
-    (`SyncCostPerOperationDoesNotGrowWithSize`) — three separate rescans of already-synced state
-    used to make it quadratic
-  - `compact_zzcell.hpp`: cell layout — primedia span, per-dimension links, resolution status.
-    Around 960 bytes, not the 64 it claimed for a while; a `static_assert` holds the line until the
-    hot/cold split is done. `design/store-slice-convergence.md` R12/R13 account for where the bytes
-    go and remove most of them
-  - `zz_xudu_projector.hpp/.cpp`: bidirectional xanadoc-to-zigzag mapping (in `apps/common/`)
+  - `unified_transclusion_engine.hpp/.cpp`: 120 FPS render staging over a `Manifold`, plus the
+    shaping cache. Since step 19 it holds no cell space of its own: `syncIncremental()` *folds*
+    operations rather than projecting them, `addCell()` mints an operation rather than filing a
+    struct, and `cellForOp()` is gone because a `CellRef` already is an operation index. **It still
+    has no production caller** — only its own tests; what zigzag actually draws is
+    `ZigzagVisualizer` over `space_`
+  - `compact_zzcell.hpp`: the cell layout the manifold replaced. Not the model any more, and not a
+    render-side cache yet either — a type the engine no longer stores. 792 bytes, down from 960 now
+    that `ephemeralText` and `Preflet` are deleted (steps 18–19), against 48 for a `CellSlot` plus
+    12 per dimension. Prefer `zigzag::CellSlot`
+  - `zz_xudu_projector.hpp/.cpp`: bidirectional xanadoc-to-zigzag mapping (in `apps/common/`), and
+    since step 20 the YAML conversions: `sliceToStore()` mints a slice as `Structure` operations,
+    `storeToSlice()` reads a `Manifold` back out. **There are no YAML slices to preserve** — sample
+    and system slices are regenerated as stores, so this is a conversion and not a compatibility
+    layer. A cell's `role`/`mime_type`/`media_path` live on `d.role`/`d.mime`/`d.media` ranks, since
+    `CellSlot` has no field for them
 - `assets/shaders/` — portable GLSL bodies; `vulkan/` holds generated SPIR-V
 - `assets/zigzag/` — sample slice YAML documents
 - `tests/lib/`, `tests/xudu/`, `tests/zigzag/` — unit tests for the library and engines
@@ -484,9 +495,9 @@ they care about; see R11 in `design/store-slice-convergence.md`.
 
 - [`store-slice-convergence.md`](design/store-slice-convergence.md) — the active plan: a cell is an
   operation, `Slice` becomes a replay product of the ops spool like `Version` is. Fourteen rulings
-  with their prices, a numbered migration (**steps 1–18 are done**), and the measurements behind
-  each. Read this before touching `CompactOpNode`, `Manifold`, `CompactZZCell` or the zigzag
-  engine's sync path.
+  with their prices, a numbered migration (**steps 1–20 are done bar the visualizer's move onto
+  `Manifold`**), and the measurements behind each. Read this before touching `CompactOpNode`,
+  `Manifold`, `CompactZZCell` or the zigzag engine's sync path.
 - [`vortex-hyperstructural-runtime.md`](design/vortex-hyperstructural-runtime.md) and
   [`vql-query-language.md`](design/vql-query-language.md) — a speculative runtime and query language
   over the same manifold. Neither is built, but both constrain the cell layout, and each now carries

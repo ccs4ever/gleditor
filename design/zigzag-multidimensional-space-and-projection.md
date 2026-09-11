@@ -5,23 +5,39 @@ information model, 2-rank manifold validation, cache-line-aligned compact cell m
 cell master headcells, and bidirectional Xanadoc $\longleftrightarrow$ Zigzag projection across
 `apps/zigzag` and `apps/xudu`.
 
-> **Where this is going.** [`store-slice-convergence.md`](store-slice-convergence.md) argues that a
+> **Where this went.** [`store-slice-convergence.md`](store-slice-convergence.md) argued that a
 > zigzag cell *is* an operation in the xudu ops spool — its identity that operation's name in
 > hypertime, its content a span the operation carries, its positions a set of structure operations
-> naming it. A slice then stops being a parallel data model and becomes `Manifold`, a second replay
-> product of the same spool that `Version` is the first replay product of, with `CompactZZCell`
-> demoted from the model to a render-side cache and `ZzStructureDocument` demoted to the YAML
-> transfer format. Nothing below is wrong today; it describes the model as built. Read the
-> convergence note before extending it, because several of the structures here are on the way out —
-> the fixed array of privileged dimensions and the string-keyed dynamic dimension table among them.
-> `Preflet` is already gone: migration step 18 deleted it, so the `std::optional<Preflet>` in the
-> `CompactZZCell` listing below is a record of what the struct held rather than a field it has.
+> naming it. **That has now been built**, so this note is no longer a description of the model in
+> use. Read the convergence note first; what follows is the model it replaced, kept because the
+> reasoning about density and projection is still the reasoning, and because several sections below
+> describe machinery that is still in the tree.
 >
-> **Where the boundary is, as of migration step 12.** The operation exists: `OpKind::Structure`,
-> OSMIC's sixth hyperop, with its verb and value type in `CompactOpNode::flags`. **Nothing emits
-> one**, and `Store::replay()` treats it as a text no-op precisely because the fold that consumes it
-> belongs to the *other* replay product. `Manifold` is step 13 and is not written yet, so everything
-> below is still the model in use — not a description kept for history.
+> What changed, as of migration steps 14–20:
+>
+> - **`Manifold` exists and is the model** (`apps/common/xanadu/zigzag/manifold.hpp`): a second
+>   replay product of the ops spool, folded from `OpKind::Structure` by `Store::rebuildManifold()`.
+>   A cell is a `CellSlot` plus a run of `(dim, pos, neg)` triples; a `CellRef` is the index of the
+>   operation that minted the cell.
+> - **`UnifiedTransclusionEngine` reads that manifold** rather than a cell space of its own. Its
+>   `cells_`, `opIndexToCell_`, `spanToMasterCell_` and `buildCellFromOp()` are gone — the last of
+>   those used to invent a cell for every operation, an `Insert` included, and hand-build
+>   `d.ops_time`/`d.ops_dag`/`d.transclude` by writing into them. A text insert mints no cell now,
+>   and a rank is an operation rather than something a sync derives.
+> - **`CompactZZCell` is no longer the model**, and is not a render-side cache either yet — it
+>   survives as a type the engine no longer stores. Its `ephemeralText` (a copy of the primedia its
+>   own `span` addressed) and its `std::optional<Preflet>` are both deleted, so the listing in §2
+>   below records what the struct *held*, not what it has.
+> - **`ZzStructureDocument` is the YAML transfer format**, converted both ways by `sliceToStore()`
+>   and `storeToSlice()` in `zz_xudu_projector`. There are no YAML slices to preserve: sample and
+>   system slices are regenerated as stores.
+> - **The fixed array of privileged dimensions lost its argument.** R12 removed it in favour of CSR
+>   runs, and the measurement was re-run against the real `Manifold` in step 19: the array's
+>   advantage is 1.3–1.5×, not the 2.7× the convergence note originally recorded. See §12.5 there.
+>
+> What has *not* happened: `ZigzagVisualizer` still draws from `space_`, its own
+> `unordered_map<CellID, zigzag::Cell>`. Moving it onto the manifold is the next step, and it is the
+> first one that changes what is on screen.
 
 ______________________________________________________________________
 
@@ -67,7 +83,14 @@ ______________________________________________________________________
 
 ## 2. High-Density Memory Architecture: `CompactZZCell`
 
-In `apps/zigzag`, the multidimensional manifold is staged in
+**Superseded — see the banner.** The manifold is `zigzag::Manifold` now: a dense `CellSlot` vector
+plus one CSR arena of `(dim, pos, neg)` triples, which is what the "fixed array plus dynamic
+overflow" below turned into once R12 refused to privilege eight dimensions at the storage layer. The
+listing that follows is the struct as it was, including two fields it no longer has
+(`ephemeralText`, `std::optional<Preflet>`), and is kept because §2's density argument is what
+produced `CellSlot`'s shape.
+
+In `apps/zigzag`, the multidimensional manifold *was* staged in
 [`CompactZZCell`](apps/zigzag/core/compact_zzcell.hpp), designed for cache efficiency and zero-copy
 string views:
 

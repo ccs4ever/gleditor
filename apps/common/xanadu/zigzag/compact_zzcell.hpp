@@ -115,8 +115,13 @@ struct DynamicDimensionLink {
  * @brief A ZigZag cell: its address in the primedia spool, its links along
  *        each dimension, and how its content resolved.
  *
+ * **Superseded by zigzag::Manifold, and no longer the model.** Migration step
+ * 19 moved UnifiedTransclusionEngine onto a CellSlot (48 bytes) plus a CSR run
+ * of DimLink (12 bytes each), so nothing stores one of these any more. It is
+ * kept because the zzstructure_loader path and the YAML DTO still name it.
+ *
  * **Not 64 bytes, and not zero-copy** -- which this comment, the design
- * document and CLAUDE.md all used to claim. It is around 960 bytes, aligned
+ * document and CLAUDE.md all used to claim. It is 792 bytes, aligned
  * to 8, and it heap-allocates: a vector of dynamic dimensions, three
  * optionals and a std::string type tag. It used to hold `ephemeralText` as
  * well -- a copy of the very primedia that `span` already addresses -- which

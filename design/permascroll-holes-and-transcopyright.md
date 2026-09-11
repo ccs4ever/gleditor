@@ -256,8 +256,12 @@ When 3D link ribbons connect transcluded pages:
 
 In the Zigzag visualizer:
 
-- **`CompactZZCell`**: Tracks `resolutionStatus` and `transcopyrightInfo`. Cells containing withheld
-  or locked text format their preview labels as `"[Redacted - Withheld]"` or `"[🔒 100 XU]"`.
+- **`UnifiedTransclusionEngine::ColdCell`**: tracks `resolutionStatus` and `transcopyrightInfo`,
+  keyed by `CellRef` beside the manifold rather than inside a cell -- why a cell is not showing its
+  content is a render-side fact, and a withheld span and a paid-for one are the same address until
+  the reader's keys say otherwise. (This was `CompactZZCell` until migration step 19.) Cells
+  containing withheld or locked text format their preview labels as `"[Redacted - Withheld]"` or
+  `"[🔒 100 XU]"`.
 - **`UnifiedTransclusionEngine`**: Staging sets cell paper background quads to Obsidian
   (`17, 24, 39`) for withheld cells and Amber Gold (`245, 158, 11`) for locked cells.
 - **Manifold Invariance**: 2-rank manifold topology (`d.doc`, `d.version`, `d.clone`) remains

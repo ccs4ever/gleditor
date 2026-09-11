@@ -243,6 +243,12 @@ ______________________________________________________________________
 
 ### 4.1 `CompactZZCell` is 960 bytes, not 64
 
+> **Since resolved, and not by shrinking this struct.** Migration steps 14--19 replaced it as the
+> model with `zigzag::CellSlot` (48 bytes) plus a 12-byte-per-dimension CSR run, and deleted the two
+> fields this section names as waste: `ephemeralText` and the `Preflet` optional. `CompactZZCell`
+> itself is 792 bytes now and nothing stores one. The finding below stands as written for the date
+> it was written.
+
 Measured: `sizeof == 960`, `alignof == 8`. CLAUDE.md ("64-byte aligned compact cell layout"), the
 design doc, and the struct's own comment ("High-density, zero-copy") all state 64.
 
