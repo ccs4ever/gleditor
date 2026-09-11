@@ -1736,9 +1736,34 @@ came back byte-identical across every regenerated fixture.
    with no span now reads as empty, which is correct: content lives at an address, and a cell
    holding a second copy of it is a cell that can disagree with the permascroll.
 
-   Still to do, in order: swap `cells_`/`opIndexToCell_` for a `Manifold` (which is where
-   `addCell()`, `linkCells()` and `validate2RankManifold()` either move or go), then move
-   `ZigzagVisualizer` onto the result.
+   **The model swap has landed too.** `cells_`, `opIndexToCell_`, `spanToMasterCell_`,
+   `longestMasterSpan_`, `transcludeRankTail_`, `nextCellId_` and the bounded `Version` cache are
+   all gone, replaced by one `Manifold manifold_` plus a `ColdCell` side table keyed by `CellRef`.
+   The deletions each have a reason worth keeping:
+
+   - **`cellForOp()` is gone rather than ported, because a `CellRef` *is* an operation index.** The
+     table it looked up is the identity function. That is the single clearest sign the two models
+     were the same model: one of them was carrying a map from a thing to itself.
+   - **`buildCellFromOp()` is deleted outright, and with it the step-3 quadratic fixes.** It
+     synthesised a cell from *every* operation — an `Insert` included — and then hand-built
+     `d.ops_time`, `d.ops_dag` and `d.transclude` by writing into those cells. Neither half
+     survives: a text insert mints no cell, and a rank is structure, which is an operation now
+     rather than something a sync derives and then has to keep in step. The `Version` cache went
+     with it, having existed so that a Transclude operation's source span could be resolved without
+     replaying an ancestral path per transclusion — a real fix to a real quadratic, for work no
+     longer done here. §7's "`d.transclude` maintained as a stored rank **at write time**" is the
+     same point from the other side.
+   - **Asymmetry is no longer constructible**, so the test that checked validation caught it now
+     checks the invariant holds through the operations that used to break it. `CellSlot` exposes no
+     setter and the only way to make a link is an operation whose fold maintains both ends;
+     `validate2RankManifold()` survives as a drift check beside `verifyAgainstFullRebuild()`, not as
+     a guard against careless callers.
+   - **`addCell()` mints instead of filing**, and the tests got *shorter* for it: a staging fixture
+     that was an insert-loop plus `cellForOp()` lookups is now a list of `addCell()` calls.
+
+   Still to do: move `ZigzagVisualizer` onto the result, which is what finally gives the engine a
+   caller — its render path reads `role`/`mime_type`/`media_path` at about ten sites, and those live
+   on the `d.role`/`d.mime`/`d.media` ranks now.
 
 1. **`sliceToStore()` / `storeToSlice()` against `Manifold`**, replacing `projectXuduToZigzag`'s
    paragraph-splitting heuristic (it pairs paragraph $k$ with `pieces()[k]`, and piece index and

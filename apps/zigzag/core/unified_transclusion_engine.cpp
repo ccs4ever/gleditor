@@ -16,351 +16,164 @@ namespace zigzag {
 UnifiedTransclusionEngine::UnifiedTransclusionEngine(xanadu::Store &store)
     : store_(store) {}
 
-const xanadu::Version &UnifiedTransclusionEngine::versionForOp(
-    const std::uint32_t sourceOpIndex) const {
-  if (const auto found = versionCacheIndex_.find(sourceOpIndex);
-      versionCacheIndex_.end() != found) {
-    versionCache_.splice(versionCache_.begin(), versionCache_, found->second);
-    return versionCache_.front().second;
-  }
-  versionCache_.emplace_front(
-      sourceOpIndex, store_.rebuild(store_.segmentedOps().idOf(sourceOpIndex)));
-  versionCacheIndex_[sourceOpIndex] = versionCache_.begin();
-  if (versionCache_.size() > versionCacheCapacity) {
-    versionCacheIndex_.erase(versionCache_.back().first);
-    versionCache_.pop_back();
-  }
-  return versionCache_.front().second;
-}
-
 void UnifiedTransclusionEngine::syncIncremental() {
-  const auto &ops     = store_.segmentedOps();
-  const auto totalOps = ops.size();
-
-  for (std::uint32_t idx = lastSyncedOpIndex_ + 1; idx <= totalOps; ++idx) {
-    const auto *node = ops.get(idx);
-    if (!node) {
-      continue;
+  // A fold, not a projection. buildCellFromOp() used to synthesise a cell from
+  // *every* operation -- an Insert included -- and then hand-build d.ops_time,
+  // d.ops_dag and d.transclude ranks by writing into those cells directly. None
+  // of that can survive a model where a CellRef is the index of the operation
+  // that minted the cell: a text insert mints no cell, and a rank is structure,
+  // which is now an operation rather than a field somebody assigns.
+  //
+  // So a xanadoc's pieces become cells only when something mints them --
+  // sliceToStore() in zz_xudu_projector, or the makeCell/setLink verbs -- and
+  // this walks new operations handing each to the manifold, which ignores the
+  // kinds that are not Structure. §7's "d.transclude maintained as a stored
+  // rank at write time" is the same point from the other side: the rank is
+  // minted where the transclusion is recorded, not invented where it is
+  // displayed.
+  const auto &ops  = store_.segmentedOps();
+  const auto total = static_cast<std::uint32_t>(ops.size());
+  for (auto idx = lastSyncedOpIndex_ + 1; idx <= total; idx++) {
+    if (const auto *const node = ops.get(idx); nullptr != node) {
+      manifold_.applyStructure(idx, *node);
     }
-    buildCellFromOp(idx, *node);
   }
-  lastSyncedOpIndex_ = static_cast<std::uint32_t>(totalOps);
+  lastSyncedOpIndex_ = total;
+  if (total > 0) {
+    head_ = ops.idOf(total);
+  }
 }
 
-void UnifiedTransclusionEngine::buildCellFromOp(
-    const std::uint32_t opIndex, const xanadu::CompactOpNode &node) {
-  if (opIndexToCell_.contains(opIndex)) {
+void UnifiedTransclusionEngine::ensureSliceBegun() {
+  if (zigzag::noCell != store_.homeCell()) {
     return;
   }
-
-  const CellID id = nextCellId_++;
-  CompactZZCell cell;
-  cell.id           = id;
-  cell.spoolOpIndex = opIndex;
-  cell.span         = node.span();
-  cell.type         = "op";
-
-  // If node is a transclusion by document offset, resolve its primedia span
-  if (cell.span.empty() && node.kind == xanadu::OpKind::Transclude &&
-      node.sourceOpIndex != 0) {
-    const auto spans = versionForOp(node.sourceOpIndex)
-                           .spansFor(node.sourceAt, node.sourceLength);
-    if (!spans.empty()) {
-      cell.span = spans.front();
-    }
-  }
-
-  // 1. Link d.ops_time (Sequential spool order)
-  if (opIndex > 1 && opIndexToCell_.contains(opIndex - 1)) {
-    const CellID prevId = opIndexToCell_[opIndex - 1];
-    cell.setLinks(DimOrdinal::OpsTime, {.pos = 0, .neg = prevId});
-    if (cells_.contains(prevId)) {
-      auto lp = cells_[prevId].linksOn(DimOrdinal::OpsTime);
-      lp.pos  = id;
-      cells_[prevId].setLinks(DimOrdinal::OpsTime, lp);
-    }
-  }
-
-  // 2. Link d.ops_dag (Ancestral DAG)
-  if (node.parentIndex != 0 && opIndexToCell_.contains(node.parentIndex)) {
-    const CellID parentCellId = opIndexToCell_[node.parentIndex];
-    cell.setLinks(DimOrdinal::OpsDag, {.pos = 0, .neg = parentCellId});
-    if (cells_.contains(parentCellId)) {
-      auto parentLp = cells_[parentCellId].linksOn(DimOrdinal::OpsDag);
-      if (parentLp.pos == 0) {
-        parentLp.pos = id;
-        cells_[parentCellId].setLinks(DimOrdinal::OpsDag, parentLp);
-      }
-    }
-  }
-
-  // 3. Link d.transclude (Primedia Span Address Equivalence & Sub-Spans)
-  if (!cell.span.empty()) {
-    std::optional<CellID> targetMasterId;
-    if (spanToMasterCell_.contains(cell.span)) {
-      targetMasterId = spanToMasterCell_[cell.span];
-    } else {
-      // The first master in key order that overlaps this span -- the same
-      // answer the whole-map scan gave, reached without visiting every other
-      // scroll and every span too far away to touch this one.
-      //
-      // SpanLess orders by (scroll, start, length), so the entries that can
-      // overlap [start, end) form one contiguous window. It cannot open
-      // before start - longest, because an entry starting at or before that
-      // ends at or before start; and it closes at end, because entries only
-      // start later from there on.
-      const auto longest = longestMasterSpan_.contains(cell.span.scroll)
-                               ? longestMasterSpan_[cell.span.scroll]
-                               : 0;
-      const auto from =
-          cell.span.start > longest ? cell.span.start - longest : 0;
-      for (auto it = spanToMasterCell_.lower_bound(
-               xanadu::PrimediaSpan{cell.span.scroll, from, 0});
-           it != spanToMasterCell_.end() &&
-           it->first.scroll == cell.span.scroll &&
-           it->first.start < cell.span.end();
-           ++it) {
-        if (!it->first.intersect(cell.span).empty()) {
-          targetMasterId = it->second;
-          break;
-        }
-      }
-    }
-
-    if (!targetMasterId.has_value() &&
-        node.kind == xanadu::OpKind::Transclude && node.sourceOpIndex != 0 &&
-        opIndexToCell_.contains(node.sourceOpIndex)) {
-      targetMasterId = opIndexToCell_[node.sourceOpIndex];
-    }
-
-    if (targetMasterId.has_value() && *targetMasterId != id) {
-      // Resume from wherever this rank was last seen to end rather than from
-      // its head. A remembered tail is on the rank, so walking on from it
-      // arrives at the same place -- it just does not re-walk what has
-      // already been walked, which is what made joining the nth cell to a
-      // rank cost n steps.
-      CellID tailId = *targetMasterId;
-      if (const auto seen = transcludeRankTail_.find(tailId);
-          transcludeRankTail_.end() != seen && cells_.contains(seen->second)) {
-        tailId = seen->second;
-      }
-      while (cells_.contains(tailId)) {
-        const auto nextPos = cells_[tailId].linksOn(DimOrdinal::Transclude).pos;
-        if (nextPos == 0 || !cells_.contains(nextPos) || nextPos == tailId) {
-          break;
-        }
-        tailId = nextPos;
-      }
-      if (tailId != id) {
-        cell.setLinks(DimOrdinal::Transclude, {.pos = 0, .neg = tailId});
-        if (cells_.contains(tailId)) {
-          auto tailLp = cells_[tailId].linksOn(DimOrdinal::Transclude);
-          tailLp.pos  = id;
-          cells_[tailId].setLinks(DimOrdinal::Transclude, tailLp);
-        }
-        transcludeRankTail_[*targetMasterId] = id;
-        transcludeRankTail_[tailId]          = id;
-      }
-    }
-    spanToMasterCell_[cell.span] = id;
-    auto &longest                = longestMasterSpan_[cell.span.scroll];
-    longest                      = std::max(longest, cell.span.length);
-  }
-
-  opIndexToCell_[opIndex] = id;
-  cells_[id]              = std::move(cell);
+  head_ = store_.sliceGenesis(head_);
+  syncIncremental();
 }
 
-void UnifiedTransclusionEngine::linkCells(const CellID a, const CellID b,
+DimRef UnifiedTransclusionEngine::dimensionFor(const std::string_view name) {
+  if (const auto found = manifold_.dimensionNamed(name, store_);
+      zigzag::noCell != found) {
+    return found;
+  }
+  ensureSliceBegun();
+  const auto minted = store_.makeDimension(head_, name, &manifold_);
+  head_             = minted.version;
+  syncIncremental();
+  return minted.dim;
+}
+
+CellRef UnifiedTransclusionEngine::addCell(const std::string_view text) {
+  // Minting, where this used to be filing: a cell cannot exist without the
+  // operation that names it, so adding one is recording one.
+  ensureSliceBegun();
+  head_ = store_.makeCell(head_, text);
+  syncIncremental();
+  return store_.cellRefOf(head_);
+}
+
+void UnifiedTransclusionEngine::setCold(const CellRef cell, ColdCell cold) {
+  cold_[cell] = std::move(cold);
+}
+
+const UnifiedTransclusionEngine::ColdCell *
+UnifiedTransclusionEngine::coldOf(const CellRef cell) const noexcept {
+  const auto found = cold_.find(cell);
+  return found == cold_.end() ? nullptr : &found->second;
+}
+
+void UnifiedTransclusionEngine::linkCells(const CellRef a, const CellRef b,
+                                          const DimRef dim) {
+  if (zigzag::noCell == a || zigzag::noCell == dim) {
+    return;
+  }
+  // One operation, not two writes. The reciprocal edge is what the fold means
+  // by a link rather than a second thing to remember to set -- which is what
+  // the four-line pos-then-neg dance this replaces kept getting right by hand.
+  head_ = store_.setLink(head_, a, dim, false, b, &manifold_);
+  syncIncremental();
+}
+
+void UnifiedTransclusionEngine::linkCells(const CellRef a, const CellRef b,
                                           const DimOrdinal dim) {
-  auto *ca = findCell(a);
-  auto *cb = findCell(b);
-  if (!ca || !cb) {
-    return;
-  }
-
-  auto lpa = ca->linksOn(dim);
-  lpa.pos  = b;
-  ca->setLinks(dim, lpa);
-
-  auto lpb = cb->linksOn(dim);
-  lpb.neg  = a;
-  cb->setLinks(dim, lpb);
+  linkCells(a, b, dimensionFor(dimOrdinalToString(dim)));
 }
 
-void UnifiedTransclusionEngine::linkCells(const CellID a, const CellID b,
+void UnifiedTransclusionEngine::linkCells(const CellRef a, const CellRef b,
                                           const DimID &dim) {
-  if (const auto ord = dimOrdinalFromString(dim); ord.has_value()) {
-    linkCells(a, b, *ord);
-    return;
-  }
-
-  auto *ca = findCell(a);
-  auto *cb = findCell(b);
-  if (!ca || !cb) {
-    return;
-  }
-
-  auto lpa = ca->linksOn(dim);
-  lpa.pos  = b;
-  ca->setLinks(dim, lpa);
-
-  auto lpb = cb->linksOn(dim);
-  lpb.neg  = a;
-  cb->setLinks(dim, lpb);
+  linkCells(a, b, dimensionFor(dim));
 }
 
-void UnifiedTransclusionEngine::unlinkPositive(const CellID a,
+void UnifiedTransclusionEngine::unlinkPositive(const CellRef a,
                                                const DimOrdinal dim) {
-  auto *ca = findCell(a);
-  if (!ca) {
-    return;
-  }
-
-  const auto b = ca->linksOn(dim).pos;
-  auto lpa     = ca->linksOn(dim);
-  lpa.pos      = 0;
-  ca->setLinks(dim, lpa);
-
-  if (b != 0) {
-    if (auto *cb = findCell(b); cb != nullptr) {
-      auto lpb = cb->linksOn(dim);
-      if (lpb.neg == a) {
-        lpb.neg = 0;
-        cb->setLinks(dim, lpb);
-      }
-    }
-  }
+  linkCells(a, zigzag::noCell, dim);
 }
 
-CellID UnifiedTransclusionEngine::addCell(CompactZZCell cell) {
-  if (cell.id == 0) {
-    cell.id = nextCellId_++;
-  } else if (cell.id >= nextCellId_) {
-    nextCellId_ = cell.id + 1;
-  }
-
-  const CellID id = cell.id;
-  if (cell.spoolOpIndex != 0) {
-    opIndexToCell_[cell.spoolOpIndex] = id;
-  }
-  if (!cell.span.empty() && !spanToMasterCell_.contains(cell.span)) {
-    spanToMasterCell_[cell.span] = id;
-  }
-
-  cells_[id] = std::move(cell);
-  return id;
-}
-
-const CompactZZCell *
-UnifiedTransclusionEngine::findCell(const CellID id) const noexcept {
-  const auto it = cells_.find(id);
-  return (it != cells_.end()) ? &it->second : nullptr;
-}
-
-CompactZZCell *UnifiedTransclusionEngine::findCell(const CellID id) noexcept {
-  const auto it = cells_.find(id);
-  return (it != cells_.end()) ? &it->second : nullptr;
-}
-
-CellID UnifiedTransclusionEngine::cellForOp(
-    const std::uint32_t opIndex) const noexcept {
-  const auto it = opIndexToCell_.find(opIndex);
-  return (it != opIndexToCell_.end()) ? it->second : 0;
+const CellSlot *
+UnifiedTransclusionEngine::findCell(const CellRef cell) const noexcept {
+  return manifold_.slot(cell);
 }
 
 bool UnifiedTransclusionEngine::validate2RankManifold(
-    std::string *errorOut) const {
-  for (const auto &[id, cell] : cells_) {
-    // 1. Validate standard dimensions
-    for (std::size_t i = 0; i < StandardDimensionCount; ++i) {
-      const auto ord = static_cast<DimOrdinal>(i);
-      const auto lp  = cell.linksOn(ord);
-
-      if (lp.pos != 0) {
-        const auto *target = findCell(lp.pos);
-        if (!target) {
-          if (errorOut) {
-            *errorOut = std::format(
-                "Cell {} pos link on {} points to non-existent cell {}", id,
-                dimOrdinalToString(ord), lp.pos);
-          }
-          return false;
+    std::string *const errorOut) const {
+  // The fold maintains this, so a failure here means the manifold has drifted
+  // from what its operations say rather than that a caller linked carelessly --
+  // which is why it is worth keeping after the hand-written link code went.
+  // Manifold::verifyAgainstFullRebuild() is the other half of the same check.
+  for (const auto &slot : manifold_.cells()) {
+    for (const auto &link : manifold_.dimensionsOf(slot.birthOp)) {
+      if (zigzag::noCell != link.pos &&
+          manifold_.linked(link.pos, link.dim, true) != slot.birthOp) {
+        if (nullptr != errorOut) {
+          *errorOut = std::format(
+              "cell {} posward on dimension {} names {}, whose negward is {}",
+              slot.birthOp, link.dim, link.pos,
+              manifold_.linked(link.pos, link.dim, true));
         }
-        if (target->linksOn(ord).neg != id) {
-          if (errorOut) {
-            *errorOut = std::format(
-                "Cell {} pos link on {} to {} is asymmetric (target neg is {})",
-                id, dimOrdinalToString(ord), lp.pos, target->linksOn(ord).neg);
-          }
-          return false;
-        }
+        return false;
       }
-
-      if (lp.neg != 0) {
-        const auto *target = findCell(lp.neg);
-        if (!target) {
-          if (errorOut) {
-            *errorOut = std::format(
-                "Cell {} neg link on {} points to non-existent cell {}", id,
-                dimOrdinalToString(ord), lp.neg);
-          }
-          return false;
+      if (zigzag::noCell != link.neg &&
+          manifold_.linked(link.neg, link.dim, false) != slot.birthOp) {
+        if (nullptr != errorOut) {
+          *errorOut = std::format(
+              "cell {} negward on dimension {} names {}, whose posward is {}",
+              slot.birthOp, link.dim, link.neg,
+              manifold_.linked(link.neg, link.dim, false));
         }
-        if (target->linksOn(ord).pos != id) {
-          if (errorOut) {
-            *errorOut = std::format(
-                "Cell {} neg link on {} to {} is asymmetric (target pos is {})",
-                id, dimOrdinalToString(ord), lp.neg, target->linksOn(ord).pos);
-          }
-          return false;
-        }
-      }
-    }
-
-    // 2. Validate dynamic dimensions
-    for (const auto &dyn : cell.dynamicDimensions) {
-      if (dyn.links.pos != 0) {
-        const auto *target = findCell(dyn.links.pos);
-        if (!target) {
-          if (errorOut) {
-            *errorOut = std::format(
-                "Cell {} pos link on {} points to non-existent cell {}", id,
-                dyn.name, dyn.links.pos);
-          }
-          return false;
-        }
-        if (target->linksOn(dyn.name).neg != id) {
-          if (errorOut) {
-            *errorOut = std::format(
-                "Cell {} pos link on {} to {} is asymmetric (target neg is {})",
-                id, dyn.name, dyn.links.pos, target->linksOn(dyn.name).neg);
-          }
-          return false;
-        }
-      }
-      if (dyn.links.neg != 0) {
-        const auto *target = findCell(dyn.links.neg);
-        if (!target) {
-          if (errorOut) {
-            *errorOut = std::format(
-                "Cell {} neg link on {} points to non-existent cell {}", id,
-                dyn.name, dyn.links.neg);
-          }
-          return false;
-        }
-        if (target->linksOn(dyn.name).pos != id) {
-          if (errorOut) {
-            *errorOut = std::format(
-                "Cell {} neg link on {} to {} is asymmetric (target pos is {})",
-                id, dyn.name, dyn.links.neg, target->linksOn(dyn.name).pos);
-          }
-          return false;
-        }
+        return false;
       }
     }
   }
   return true;
+}
+
+std::string
+UnifiedTransclusionEngine::resolveCellText(const CellRef cell) const {
+  if (const auto *const cold = coldOf(cell); nullptr != cold) {
+    if (cold->resolutionStatus == xanadu::ResolutionStatus::WithheldRedacted) {
+      return "[Redacted - Withheld]";
+    }
+    if (cold->resolutionStatus ==
+        xanadu::ResolutionStatus::TranscopyrightLocked) {
+      if (cold->transcopyrightInfo) {
+        return "[🔒 " +
+               std::to_string(cold->transcopyrightInfo->priceAtomicUnits) +
+               " " + cold->transcopyrightInfo->currencySymbol + "]";
+      }
+      return "[🔒 Locked]";
+    }
+  }
+  return manifold_.textOf(cell, store_);
+}
+
+std::string_view UnifiedTransclusionEngine::resolveLocalCellView(
+    const CellRef cell) const noexcept {
+  const auto *const slot = manifold_.slot(cell);
+  if (nullptr == slot || slot->span.empty() || !slot->span.isLocal()) {
+    return {};
+  }
+  return store_.primedia().readView(slot->span);
 }
 
 std::size_t UnifiedTransclusionEngine::ShapingKeyHash::operator()(
@@ -442,48 +255,25 @@ const PageShaping &UnifiedTransclusionEngine::shapedPage(
   return it->second.shaping;
 }
 
-UnifiedTransclusionEngine::ShapingCacheStats
-UnifiedTransclusionEngine::shapingCacheStats() const noexcept {
-  return ShapingCacheStats{.entries   = shapingCache_.size(),
-                           .hits      = shapingHits_,
-                           .misses    = shapingMisses_,
-                           .evictions = shapingEvictions_};
-}
-
-void UnifiedTransclusionEngine::clearShapingCache() noexcept {
-  shapingCache_.clear();
-}
-
-std::string UnifiedTransclusionEngine::resolveCellText(const CellID id) const {
-  const auto *cell = findCell(id);
-  if (!cell) {
-    return {};
-  }
-  return cell->readText(store_.primedia(), store_.contentResolver(),
-                        store_.scrolls());
-}
-
-std::string_view UnifiedTransclusionEngine::resolveLocalCellView(
-    const CellID id) const noexcept {
-  const auto *cell = findCell(id);
-  if (!cell) {
-    return {};
-  }
-  return cell->resolveLocalView(store_.primedia());
-}
-
 UnifiedTransclusionEngine::RenderInstanceBatch
 UnifiedTransclusionEngine::stageVisibleCells(
     const RenderSliceRequest &req, const gleditor::text::FontFacePtr &font,
     gleditor::GlyphCache &glyphCache) {
   RenderInstanceBatch batch;
-  if (cells_.empty() || !font) {
+  if (0 == manifold_.cellCount() || !font) {
     return batch;
   }
 
-  const CellID startId = cells_.contains(req.focusCellId)
-                             ? req.focusCellId
-                             : cells_.begin()->first;
+  // The axes are named in the request and are cells here, so each is resolved
+  // once per pass rather than per hop: a dimension is found by walking the
+  // d.dims rank, which is cheap but not free.
+  const auto axisX = manifold_.dimensionNamed(req.axisX, store_);
+  const auto axisY = manifold_.dimensionNamed(req.axisY, store_);
+  const auto axisZ = manifold_.dimensionNamed(req.axisZ, store_);
+
+  const CellRef startId = manifold_.contains(req.focusCellId)
+                              ? req.focusCellId
+                              : manifold_.cells().front().birthOp;
 
   // Breadth-first collection along requested spatial dimensions
   std::set<CellID> visited;
@@ -508,23 +298,19 @@ UnifiedTransclusionEngine::stageVisibleCells(
 
     const auto checkNeighbor = [&](const CellID neighbor) {
       if (neighbor != 0 && !visited.contains(neighbor) &&
-          cells_.contains(neighbor)) {
+          manifold_.contains(neighbor)) {
         visited.insert(neighbor);
         queue.push({neighbor, dist + 1});
       }
     };
 
-    const auto lpX = cell->linksOn(req.axisX);
-    checkNeighbor(lpX.pos);
-    checkNeighbor(lpX.neg);
-
-    const auto lpY = cell->linksOn(req.axisY);
-    checkNeighbor(lpY.pos);
-    checkNeighbor(lpY.neg);
-
-    const auto lpZ = cell->linksOn(req.axisZ);
-    checkNeighbor(lpZ.pos);
-    checkNeighbor(lpZ.neg);
+    for (const auto axis : {axisX, axisY, axisZ}) {
+      if (zigzag::noCell == axis) {
+        continue;
+      }
+      checkNeighbor(manifold_.linked(currId, axis, false));
+      checkNeighbor(manifold_.linked(currId, axis, true));
+    }
   }
 
   // Layout and stage glyph quads for all visited cells
@@ -546,12 +332,16 @@ UnifiedTransclusionEngine::stageVisibleCells(
     // the atlas grows and a cached copy of them would go stale.
     const auto &shaping = shapedPage(text, font, opts);
 
-    const auto *cell       = findCell(cid);
+    // Why a cell is not showing its content is a render-side fact and lives in
+    // the cold table, not in the slot: a withheld span and a paid-for one are
+    // the same address until the reader's keys say otherwise.
     std::uint32_t paperCol = Doc::VBORow::color(25);
-    if (cell != nullptr) {
-      if (cell->isWithheld()) {
+    if (const auto *const cold = coldOf(cid); nullptr != cold) {
+      if (cold->resolutionStatus ==
+          xanadu::ResolutionStatus::WithheldRedacted) {
         paperCol = Doc::VBORow::color3(17, 24, 39);
-      } else if (cell->isTranscopyrightLocked()) {
+      } else if (cold->resolutionStatus ==
+                 xanadu::ResolutionStatus::TranscopyrightLocked) {
         paperCol = Doc::VBORow::color3(245, 158, 11);
       }
     }
@@ -597,6 +387,18 @@ std::size_t UnifiedTransclusionEngine::stageIntoStreamBuffer(
   std::memcpy(chunk.ptr, batch.rows.data(), bytes);
   streamBuffer.flushAndUnmap(chunk.offset, bytes);
   return chunk.offset;
+}
+
+UnifiedTransclusionEngine::ShapingCacheStats
+UnifiedTransclusionEngine::shapingCacheStats() const noexcept {
+  return ShapingCacheStats{.entries   = shapingCache_.size(),
+                           .hits      = shapingHits_,
+                           .misses    = shapingMisses_,
+                           .evictions = shapingEvictions_};
+}
+
+void UnifiedTransclusionEngine::clearShapingCache() noexcept {
+  shapingCache_.clear();
 }
 
 } // namespace zigzag

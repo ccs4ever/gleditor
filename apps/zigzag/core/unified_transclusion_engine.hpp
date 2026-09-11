@@ -20,6 +20,7 @@
 #include "common/xanadu/microversion.hpp"
 #include "common/xanadu/store.hpp"
 #include "common/xanadu/zigzag/compact_zzcell.hpp"
+#include "common/xanadu/zigzag/manifold.hpp"
 #include "common/xanadu/zigzag/zzstructure.hpp"
 #include "gleditor/doc.hpp"
 #include "gleditor/glyphcache/cache.hpp"
@@ -28,23 +29,6 @@
 #include "gleditor/text/layout.hpp"
 
 namespace zigzag {
-
-/**
- * @struct SpanLess
- * @brief Strict weak ordering for PrimediaSpan keys in std::map.
- */
-struct SpanLess {
-  bool operator()(const xanadu::PrimediaSpan &a,
-                  const xanadu::PrimediaSpan &b) const noexcept {
-    if (a.scroll != b.scroll) {
-      return a.scroll < b.scroll;
-    }
-    if (a.start != b.start) {
-      return a.start < b.start;
-    }
-    return a.length < b.length;
-  }
-};
 
 /**
  * @class UnifiedTransclusionEngine
@@ -63,35 +47,69 @@ public:
   UnifiedTransclusionEngine(UnifiedTransclusionEngine &&) noexcept   = default;
   UnifiedTransclusionEngine &operator=(UnifiedTransclusionEngine &&) = delete;
 
+  /// What a cell carries that a CellSlot deliberately does not: how its content
+  /// resolved, and why it might not have. R12's sketch calls this ColdCell and
+  /// puts transcopyright and holes in it; `type` is here too because a cell's
+  /// role is a rank in the stored model (see sliceToStore's d.role) and this is
+  /// the render side's cache of it, not a second home for it.
+  struct ColdCell {
+    std::string type{"cell"};
+    xanadu::ResolutionStatus resolutionStatus{
+        xanadu::ResolutionStatus::VerifiedBytes};
+    std::optional<xanadu::TranscopyrightDescriptor> transcopyrightInfo{};
+    std::optional<xanadu::PublishedHoleRecord> holeRecord{};
+  };
+
   // -- Topological Synchronization ------------------------------------------
 
   /**
-   * @brief Incrementally ingest newly recorded operations from the store's ops
-   *        spool into CompactZZCell nodes.
+   * @brief Fold operations recorded since the last call into the manifold.
+   *
+   * Structure operations make cells and links; every other kind is ignored,
+   * because a cell is an operation that minted one. See the implementation for
+   * what this replaced and why none of it could survive.
    */
   void syncIncremental();
 
-  /**
-   * @brief Link two cells symmetrically along a standard or custom dimension.
-   */
-  void linkCells(CellID a, CellID b, DimOrdinal dim);
-  void linkCells(CellID a, CellID b, const DimID &dim);
+  /// The structure map this engine reads. The model, not a cache of one.
+  [[nodiscard]] const Manifold &manifold() const noexcept { return manifold_; }
+
+  /// The state the engine's own minting appends to, which advances as it does.
+  [[nodiscard]] const xanadu::MicroversionId &head() const noexcept {
+    return head_;
+  }
 
   /**
-   * @brief Unlink a cell's positive direction along a dimension.
+   * @brief The cell that *is* dimension @p name, minting it if the slice has
+   *        none.
+   *
+   * A dimension is a cell (R2), so naming one is a lookup along the d.dims rank
+   * rather than an enum value.
    */
-  void unlinkPositive(CellID a, DimOrdinal dim);
+  DimRef dimensionFor(std::string_view name);
 
-  /**
-   * @brief Add a synthetic or standalone cell not directly generated from an
-   * op.
-   */
-  CellID addCell(CompactZZCell cell);
+  /// Link @p a posward to @p b along @p dim, by recording one Structure
+  /// operation. noCell for @p b clears the link. The reciprocal edge is what
+  /// the fold means by a link, not a second write.
+  void linkCells(CellRef a, CellRef b, DimRef dim);
+  void linkCells(CellRef a, CellRef b, DimOrdinal dim);
+  void linkCells(CellRef a, CellRef b, const DimID &dim);
 
-  [[nodiscard]] const CompactZZCell *findCell(CellID id) const noexcept;
-  [[nodiscard]] CompactZZCell *findCell(CellID id) noexcept;
-  [[nodiscard]] std::size_t cellCount() const noexcept { return cells_.size(); }
-  [[nodiscard]] CellID cellForOp(std::uint32_t opIndex) const noexcept;
+  /// Sugar for linkCells(a, noCell, dim).
+  void unlinkPositive(CellRef a, DimOrdinal dim);
+
+  /// Mint a cell whose content is @p text, and answer the operation index that
+  /// names it. Adding a cell is recording one now: there is nowhere for a cell
+  /// with no operation behind it to live.
+  CellRef addCell(std::string_view text);
+
+  void setCold(CellRef cell, ColdCell cold);
+  [[nodiscard]] const ColdCell *coldOf(CellRef cell) const noexcept;
+
+  [[nodiscard]] const CellSlot *findCell(CellRef cell) const noexcept;
+  [[nodiscard]] std::size_t cellCount() const noexcept {
+    return manifold_.cellCount();
+  }
 
   // -- Invariant Verification -----------------------------------------------
 
@@ -107,13 +125,14 @@ public:
   /**
    * @brief Resolve cell content via the underlying Store.
    */
-  [[nodiscard]] std::string resolveCellText(CellID id) const;
+  [[nodiscard]] std::string resolveCellText(CellRef cell) const;
 
   /**
    * @brief Resolve zero-copy string view if cell is backed by local primedia
    *        spool.
    */
-  [[nodiscard]] std::string_view resolveLocalCellView(CellID id) const noexcept;
+  [[nodiscard]] std::string_view
+  resolveLocalCellView(CellRef cell) const noexcept;
 
   // -- Conversion & Compatibility -------------------------------------------
   //
@@ -129,7 +148,7 @@ public:
   // -- Zero-Copy GPU Render Staging -----------------------------------------
 
   struct RenderSliceRequest {
-    CellID focusCellId{1};
+    CellRef focusCellId{1};
     DimID axisX{"d.1"};
     DimID axisY{"d.2"};
     DimID axisZ{"d.3"};
@@ -185,8 +204,9 @@ public:
   void clearShapingCache() noexcept;
 
 private:
-  void buildCellFromOp(std::uint32_t opIndex,
-                       const xanadu::CompactOpNode &node);
+  /// Mint the two genesis cells if this store has none, so that a dimension has
+  /// a d.dims rank to go on.
+  void ensureSliceBegun();
 
   /**
    * @brief Shaped output for @p text, from cache when it is there.
@@ -233,44 +253,25 @@ private:
 
   xanadu::Store &store_;
   std::uint32_t lastSyncedOpIndex_{0};
-  CellID nextCellId_{1};
+  xanadu::MicroversionId head_;
 
-  std::unordered_map<CellID, CompactZZCell> cells_;
-  std::unordered_map<std::uint32_t, CellID> opIndexToCell_;
-  std::map<xanadu::PrimediaSpan, CellID, SpanLess> spanToMasterCell_;
-
-  /// The longest master span recorded on each scroll. What makes the search
-  /// for an overlapping master a bounded window rather than a scan: no entry
-  /// starting more than this far before a span can reach into it, so the
-  /// walk can begin at that bound instead of at the scroll's first entry.
-  std::unordered_map<xanadu::ScrollId, std::uint64_t> longestMasterSpan_;
-
-  /// Where a d.transclude rank currently ends, keyed by whichever cell the
-  /// walk started from. A rank is only ever extended at its tail here, so a
-  /// remembered tail is still on the rank and walking on from it reaches the
-  /// same end as walking from the head -- it just skips everything already
-  /// walked. Without it, joining the nth cell to a rank costs n steps.
-  std::unordered_map<CellID, CellID> transcludeRankTail_;
-
-  /// The versions rebuilt to resolve a Transclude op's source span, keyed by
-  /// the source's op index. Every rebuild replays a whole ancestral path, so
-  /// doing one per transclusion is quadratic in the size of the document --
-  /// and consecutive transclusions usually name the same handful of sources.
+  /// The model. What used to be here instead: a CellID space of its own with
+  /// `nextCellId_` handing out names, `cells_` holding a CompactZZCell each,
+  /// `opIndexToCell_` mapping an operation to the cell it invented,
+  /// `spanToMasterCell_` plus `longestMasterSpan_` finding a d.transclude
+  /// master by span, and `transcludeRankTail_` remembering where a rank ended.
+  /// All of it is gone: a CellRef *is* an operation index, so the mapping is
+  /// the identity and needs no table, and the ranks are operations rather than
+  /// something this class derives and then has to keep in step.
   ///
-  /// Least-recently-used, bounded: a Version holds a piece table for the
-  /// whole document, so this trades a fixed amount of memory for the replay,
-  /// and an unbounded cache would hold every intermediate state of the spool.
-  static constexpr std::size_t versionCacheCapacity = 32;
-  mutable std::list<std::pair<std::uint32_t, xanadu::Version>> versionCache_;
-  mutable std::unordered_map<
-      std::uint32_t,
-      std::list<std::pair<std::uint32_t, xanadu::Version>>::iterator>
-      versionCacheIndex_;
+  /// The bounded Version cache went with it. It existed so that
+  /// buildCellFromOp() could resolve a Transclude operation's source span
+  /// without replaying an ancestral path per transclusion -- a real fix to a
+  /// real quadratic (migration step 3), for work that is no longer done here.
+  Manifold manifold_;
 
-  /// The version @p sourceOpIndex produces, rebuilt only if it is not already
-  /// held.
-  [[nodiscard]] const xanadu::Version &
-  versionForOp(std::uint32_t sourceOpIndex) const;
+  /// Per-cell facts the manifold does not hold, keyed by CellRef.
+  std::unordered_map<CellRef, ColdCell> cold_;
 
   std::unordered_map<ShapingKey, ShapingEntry, ShapingKeyHash> shapingCache_;
   std::uint64_t shapingTick_{0};
