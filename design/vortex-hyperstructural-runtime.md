@@ -756,4 +756,4 @@ table.
 | 8.0     | `ae4e800` | 2026-09-11 | **Negative offsets count from the end** rather than clamping to zero; `resolve_range` derives both ends.                                      |
 | 9.0     | `69ad10d` | 2026-09-11 | **There is no Cell 0.** Zero is the absence of a cell, so `kNoLink` has nothing to mark and the break sentinel `-2` becomes `0`.              |
 | 10.0    | `a03ddcc` | 2026-09-11 | **`clone_generator` never hands out the master**; every pull is a fresh clone.                                                                |
-| 10.1    | `2e07830` | 2026-09-11 | Unification and backtracking split into their own note; the deferred idea elaborated, asking the core for two methods.                        |
+| 10.1    | `734513a` | 2026-09-11 | Unification and backtracking split into their own note; the deferred idea elaborated, asking the core for two methods.                        |

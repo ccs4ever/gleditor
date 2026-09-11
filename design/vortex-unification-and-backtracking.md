@@ -593,4 +593,4 @@ Editorial changes that alter no normative text bump neither component.
 
 | version | commit    | date       | change                                                                      |
 | ------- | --------- | ---------- | --------------------------------------------------------------------------- |
-| 1.0     | `2e07830` | 2026-09-11 | Initial specification: binding as a clone link, backtracking as truncation. |
+| 1.0     | `734513a` | 2026-09-11 | Initial specification: binding as a clone link, backtracking as truncation. |
