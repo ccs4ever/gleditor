@@ -5,6 +5,7 @@
 #ifndef XUDU_SEGMENTED_PRIMEDIA_SPOOL_HPP
 #define XUDU_SEGMENTED_PRIMEDIA_SPOOL_HPP
 
+#include <atomic>
 #include <cstdint>
 #include <filesystem>
 #include <span>
@@ -65,7 +66,9 @@ public:
   [[nodiscard]] std::string_view readView(const PrimediaSpan &span) const;
 
   /// Total number of bytes recorded across all segments.
-  [[nodiscard]] std::uint64_t size() const { return totalBytes; }
+  [[nodiscard]] std::uint64_t size() const {
+    return totalBytes.load(std::memory_order_acquire);
+  }
 
   /// Full byte view of the entire spool.
   [[nodiscard]] std::string_view bytes() const;
@@ -118,7 +121,29 @@ private:
 
   VirtualMemoryArena arena;
   std::vector<SegmentInfo> segmentList;
-  std::uint64_t totalBytes{0};
+  /**
+   * @brief How much has been published, and the one thing a reader
+   *        synchronises on.
+   *
+   * Atomic because reading a span takes no lock (see readView): one appender
+   * copies bytes into `[totalBytes, next)` and *then* stores the new size with
+   * release, so a reader that acquire-loads a size has a happens-before edge to
+   * every byte below it. The bytes themselves need no atomics -- nothing ever
+   * rewrites a byte once published, which is what append-only means here.
+   *
+   * The arena's base address never moves (it is reserved once and committed in
+   * place with MAP_FIXED), so a reader holds no pointer that an append can
+   * invalidate. That is the other half of what makes the lock unnecessary, and
+   * it is a property of VirtualMemoryArena rather than a convention -- see
+   * ensureCommitted(), which commits at `base() + committedBytes` and never
+   * relocates what is already there.
+   *
+   * What this does *not* make safe is clear(), adopt() or opening a segment
+   * concurrently with a reader: those unmap or re-address the arena, and no
+   * ordering on a size makes that safe. They are construction-time and
+   * test-time operations, and UserPermascroll keeps them behind its mutex.
+   */
+  std::atomic<std::uint64_t> totalBytes{0};
   std::size_t committedBytes{0};
 
   int activeFd{-1};

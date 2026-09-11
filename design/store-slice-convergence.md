@@ -1040,7 +1040,7 @@ ______________________________________________________________________
 Each step is one commit. After each, `make -j$(nproc)` builds all three programs and
 `make -j$(nproc) test` passes.
 
-Steps 1–16 have landed. What each actually cost, where it differed from the plan, and what it
+Steps 1–17 have landed. What each actually cost, where it differed from the plan, and what it
 measured is recorded inline below; the rest are unchanged.
 
 **Four things the landed steps have in common, worth knowing before starting the next one.**
@@ -1600,10 +1600,47 @@ came back byte-identical across every regenerated fixture.
    `shared_ptr` so that `Resolver` stays copyable with a mutex inside. Sharing is right anyway: two
    `Resolver`s cannot disagree about what a content address means.
 
-1. **Make `UserPermascroll::read`/`readView` genuinely lock-free.** They are documented as "fast
+1. ~~**Make `UserPermascroll::read`/`readView` genuinely lock-free.** They are documented as "fast
    lock-free zero-copy" but take `std::lock_guard` on `appendMutex_`; the underlying arena's
    `base()` never moves and `readView` clamps to `totalBytes`, so the lock serialises the render
-   thread against the append path for nothing.
+   thread against the append path for nothing.~~ **Done**, and the step was half right: dropping the
+   lock is correct, but dropping it *alone* would have introduced the data race the lock was
+   accidentally preventing.
+
+   **`totalBytes` had to become a `std::atomic`.** The plan's reasoning — base never moves, readers
+   clamp — establishes that no reader can be handed a stale *pointer*, and that much is true. What
+   it omits is that the clamp reads a `std::uint64_t` the appender writes, which without the mutex
+   is an ordinary data race: undefined behaviour, and on a weakly ordered machine a reader could
+   observe the new size before the bytes it counts. So the field is now
+   `std::atomic<std::uint64_t>`, stored with **release** after the `memcpy` and loaded with
+   **acquire** before anything else in a read — including before `arena.base()`, so that the
+   non-atomic base pointer is ordered by the same edge rather than by hope. `append()` loads it
+   relaxed, being the only writer.
+
+   **Both halves were checked with ThreadSanitizer, and that is what makes the atomic load-bearing
+   rather than decorative.** 20,000 appends with a concurrent reader sweeping every published span:
+   clean. The same harness against a copy of the spool with the atomic reverted to a plain
+   `std::uint64_t` — which is exactly what "just remove the lock" would have shipped — reports
+   `data race` between `append()`'s size store and `bytes()`/`readView()`. Reproduce with a
+   standalone TSan build of `segmented_primedia_spool.cpp` plus `virtual_memory_arena.cpp`; the
+   in-tree test (`readingWhileAnotherThreadAppendsNeverSeesAHalfSpan`) exercises the same path but
+   the ordinary build cannot see an ordering bug, only a wrong answer. Wiring a TSan run for
+   `xudu_test` into CI is worth doing and is not this step.
+
+   **What the lock still covers, stated because it is now a narrower promise.** `clear()`,
+   `adopt()`, `openActiveSegment()` and `sealActive()` re-address the arena rather than extending
+   it, and no ordering on a size makes those safe against a concurrent reader — the bytes themselves
+   move. They keep the mutex, and a reader racing one is a caller's bug. That is acceptable because
+   none of them has a production caller outside construction: `adopt()` and `clear()` are test and
+   text-loading paths. `addSealedSegment()` and `openActiveSegment()` publish with a release store
+   too, for the same reason `append()` does.
+
+   **What the lock was actually costing.** Not correctness — every glyph of every visible span on
+   the render thread went through the same mutex the keystroke path holds, on a permascroll shared
+   by every open document. The three new tests also pin the property that makes the zero-copy claim
+   true: a view taken before 5,000 further appends still points at the same address with the same
+   bytes, which a `std::string` or `std::vector` could not promise and is the whole reason the arena
+   reserves its address space up front.
 
 1. **Delete `Preflet`** (R13). `struct Preflet`, both `optional<Preflet>` members, `resolvePreflet`,
    `resolveAllPreflets`, `isPrefletChainNode`, the `preflet_*` roles, `d.preflet`, and the YAML

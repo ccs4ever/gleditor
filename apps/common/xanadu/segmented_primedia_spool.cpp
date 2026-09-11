@@ -26,11 +26,14 @@ SegmentedPrimediaSpool::~SegmentedPrimediaSpool() { clear(); }
 SegmentedPrimediaSpool::SegmentedPrimediaSpool(
     SegmentedPrimediaSpool &&other) noexcept
     : arena(std::move(other.arena)), segmentList(std::move(other.segmentList)),
-      totalBytes(other.totalBytes), committedBytes(other.committedBytes),
-      activeFd(other.activeFd), activePath(std::move(other.activePath)),
-      activeStart(other.activeStart), flushedBytes(other.flushedBytes),
-      readOnly(other.readOnly) {
-  other.totalBytes     = 0;
+      totalBytes(other.totalBytes.load(std::memory_order_relaxed)),
+      committedBytes(other.committedBytes), activeFd(other.activeFd),
+      activePath(std::move(other.activePath)), activeStart(other.activeStart),
+      flushedBytes(other.flushedBytes), readOnly(other.readOnly) {
+  // Relaxed throughout: moving a spool is not something another thread can be
+  // reading through, and pretending otherwise with an ordering would only
+  // suggest it were.
+  other.totalBytes.store(0, std::memory_order_relaxed);
   other.committedBytes = 0;
   other.activeFd       = -1;
   other.activeStart    = 0;
@@ -41,16 +44,17 @@ SegmentedPrimediaSpool &
 SegmentedPrimediaSpool::operator=(SegmentedPrimediaSpool &&other) noexcept {
   if (this != &other) {
     clear();
-    arena                = std::move(other.arena);
-    segmentList          = std::move(other.segmentList);
-    totalBytes           = other.totalBytes;
-    committedBytes       = other.committedBytes;
-    activeFd             = other.activeFd;
-    activePath           = std::move(other.activePath);
-    activeStart          = other.activeStart;
-    flushedBytes         = other.flushedBytes;
-    readOnly             = other.readOnly;
-    other.totalBytes     = 0;
+    arena       = std::move(other.arena);
+    segmentList = std::move(other.segmentList);
+    totalBytes.store(other.totalBytes.load(std::memory_order_relaxed),
+                     std::memory_order_relaxed);
+    committedBytes = other.committedBytes;
+    activeFd       = other.activeFd;
+    activePath     = std::move(other.activePath);
+    activeStart    = other.activeStart;
+    flushedBytes   = other.flushedBytes;
+    readOnly       = other.readOnly;
+    other.totalBytes.store(0, std::memory_order_relaxed);
     other.committedBytes = 0;
     other.activeFd       = -1;
     other.activeStart    = 0;
@@ -81,16 +85,22 @@ bool SegmentedPrimediaSpool::ensureCommitted(const std::size_t requiredBytes) {
 }
 
 PrimediaSpan SegmentedPrimediaSpool::append(const std::string_view bytes) {
+  // Relaxed: an appender is the only writer, so it is reading back what it
+  // itself published and needs no ordering to see it.
+  const auto start = totalBytes.load(std::memory_order_relaxed);
   if (bytes.empty()) {
-    return PrimediaSpan{localScroll, totalBytes, 0};
+    return PrimediaSpan{localScroll, start, 0};
   }
-  const auto nextTotal = totalBytes + bytes.size();
+  const auto nextTotal = start + bytes.size();
   if (!ensureCommitted(nextTotal)) {
     throw std::bad_alloc();
   }
-  std::memcpy(arena.base() + totalBytes, bytes.data(), bytes.size());
-  const auto start = totalBytes;
-  totalBytes       = nextTotal;
+  std::memcpy(arena.base() + start, bytes.data(), bytes.size());
+  // Release, and after the copy: this store is what publishes the bytes above,
+  // and a reader's acquire load of the size is the other end of that edge. Were
+  // the store first, a reader could see the size and read bytes nobody had
+  // written yet -- which is the whole reason this is not a plain assignment.
+  totalBytes.store(nextTotal, std::memory_order_release);
   return PrimediaSpan{localScroll, start, bytes.size()};
 }
 
@@ -98,31 +108,42 @@ std::string SegmentedPrimediaSpool::read(const PrimediaSpan &span) const {
   if (!span.isLocal()) {
     throw std::runtime_error("primedia spool read: span is not local");
   }
-  if (span.empty() || span.start >= totalBytes || nullptr == arena.base()) {
+  // The size first and the base address second, in that order, deliberately.
+  // An acquire load stops the compiler and the processor hoisting the base()
+  // read above it, so a reader that sees a nonzero size also sees the
+  // reservation that size was measured against -- which is what makes reading
+  // `base` without a lock sound rather than merely usually fine.
+  const auto published = totalBytes.load(std::memory_order_acquire);
+  if (span.empty() || span.start >= published || nullptr == arena.base()) {
     return {};
   }
-  const auto count = std::min(span.length, totalBytes - span.start);
+  const auto count = std::min(span.length, published - span.start);
   return {reinterpret_cast<const char *>(arena.base() + span.start),
           static_cast<std::size_t>(count)};
 }
 
 std::string_view
 SegmentedPrimediaSpool::readView(const PrimediaSpan &span) const {
-  if (!span.isLocal() || span.empty() || span.start >= totalBytes ||
+  const auto published = totalBytes.load(std::memory_order_acquire);
+  if (!span.isLocal() || span.empty() || span.start >= published ||
       nullptr == arena.base()) {
     return {};
   }
-  const auto count = std::min(span.length, totalBytes - span.start);
+  // Clamped to what was published rather than to what was asked for, which is
+  // what makes the view safe to hold while an append runs: the bytes under it
+  // are already written and will never be rewritten.
+  const auto count = std::min(span.length, published - span.start);
   return {reinterpret_cast<const char *>(arena.base() + span.start),
           static_cast<std::size_t>(count)};
 }
 
 std::string_view SegmentedPrimediaSpool::bytes() const {
-  if (0 == totalBytes || nullptr == arena.base()) {
+  const auto published = totalBytes.load(std::memory_order_acquire);
+  if (0 == published || nullptr == arena.base()) {
     return {};
   }
   return {reinterpret_cast<const char *>(arena.base()),
-          static_cast<std::size_t>(totalBytes)};
+          static_cast<std::size_t>(published)};
 }
 
 void SegmentedPrimediaSpool::adopt(const std::string_view data) {
@@ -143,7 +164,7 @@ bool SegmentedPrimediaSpool::addSealedSegment(
     return false;
   }
   const auto segSize = static_cast<std::size_t>(st.st_size);
-  const auto start   = totalBytes;
+  const auto start   = totalBytes.load(std::memory_order_relaxed);
 
   // Try Tier 1 MAP_FIXED only if both start offset and segment size are
   // page-aligned
@@ -178,7 +199,9 @@ bool SegmentedPrimediaSpool::addSealedSegment(
   info.isReadOnly  = true;
   segmentList.push_back(std::move(info));
 
-  totalBytes += segSize;
+  // Release, for the same reason append() uses one: the segment's bytes are
+  // in the arena before its size is published.
+  totalBytes.store(start + segSize, std::memory_order_release);
   return true;
 }
 
@@ -211,7 +234,7 @@ bool SegmentedPrimediaSpool::openActiveSegment(
   // back where the spans naming it expect to find it. Read rather than mapped
   // -- the active segment is the one that grows, and a shared file mapping
   // cannot be extended in place the way appending needs.
-  activeStart = totalBytes;
+  activeStart = totalBytes.load(std::memory_order_relaxed);
   struct stat st;
   if (::fstat(activeFd, &st) < 0) {
     ::close(activeFd);
@@ -236,10 +259,10 @@ bool SegmentedPrimediaSpool::openActiveSegment(
       }
       got += static_cast<std::size_t>(n);
     }
-    totalBytes = activeStart + have;
+    totalBytes.store(activeStart + have, std::memory_order_release);
   }
   // Nothing appended since the file was read, so there is no tail to write.
-  flushedBytes = totalBytes;
+  flushedBytes = totalBytes.load(std::memory_order_relaxed);
   return true;
 }
 
@@ -255,10 +278,11 @@ bool SegmentedPrimediaSpool::sealActive(
   // not a second read: addSealedSegment() would map the same bytes in *again*
   // at the spool's end, giving every one of them a second address and moving
   // the end past content that does not exist.
-  if (!activePath.empty() && totalBytes > activeStart) {
+  const auto held = totalBytes.load(std::memory_order_relaxed);
+  if (!activePath.empty() && held > activeStart) {
     SegmentInfo info;
     info.startOffset = activeStart;
-    info.length      = totalBytes - activeStart;
+    info.length      = held - activeStart;
     info.path        = activePath;
     info.fd          = -1;
     info.isReadOnly  = true;
@@ -268,19 +292,22 @@ bool SegmentedPrimediaSpool::sealActive(
 }
 
 bool SegmentedPrimediaSpool::flush() {
-  if (nullptr != arena.base() && totalBytes > 0) {
+  // Acquire, so that a flush from a thread other than the appender writes out
+  // every byte that appender had published rather than a prefix of them.
+  const auto published = totalBytes.load(std::memory_order_acquire);
+  if (nullptr != arena.base() && published > 0) {
     // Only reaches the disk for ranges backed by a file mapping, which is the
     // sealed segments. The active segment is written below: appending commits
     // anonymous pages, and msync on anonymous memory has nowhere to write.
     // That asymmetry is why this used to persist nothing at all -- the fsync
     // that followed it synced a file no byte had ever been written to.
-    arena.flush(arena.base(), static_cast<std::size_t>(totalBytes));
+    arena.flush(arena.base(), static_cast<std::size_t>(published));
   }
   if (activeFd < 0 || activePath.empty() || readOnly) {
     return true;
   }
-  while (flushedBytes < totalBytes) {
-    const auto pending = static_cast<std::size_t>(totalBytes - flushedBytes);
+  while (flushedBytes < published) {
+    const auto pending = static_cast<std::size_t>(published - flushedBytes);
     const auto n = ::pwrite(activeFd, arena.base() + flushedBytes, pending,
                             static_cast<off_t>(flushedBytes - activeStart));
     if (n <= 0) {
@@ -311,7 +338,7 @@ void SegmentedPrimediaSpool::clear() {
   }
   segmentList.clear();
   arena.release();
-  totalBytes     = 0;
+  totalBytes.store(0, std::memory_order_relaxed);
   committedBytes = 0;
   activeStart    = 0;
   flushedBytes   = 0;

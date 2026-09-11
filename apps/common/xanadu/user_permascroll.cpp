@@ -173,25 +173,39 @@ PrimediaSpan UserPermascroll::append(const std::string_view text) {
   return spool_.append(text);
 }
 
+// -- the lock-free read path --------------------------------------------------
+//
+// These four take no lock, which is what they always claimed to do and for two
+// commits did not. What makes it sound is not optimism about how short the
+// critical section was: it is that a permascroll is append-only over an arena
+// whose base address never moves, so the only thing a reader has to agree with
+// an appender about is *how much* has been published. That agreement is the one
+// atomic in SegmentedPrimediaSpool -- release on the appending side, acquire
+// here -- and a reader clamps to what it loaded, so it never looks at a byte an
+// append has not finished writing.
+//
+// The lock was not protecting a race, it was serialising the render thread
+// against typing: every glyph of every visible span went through the same mutex
+// the keystroke path holds, on a permascroll shared by every open document.
+//
+// What still needs the mutex is anything that *re-addresses* the arena rather
+// than extending it -- clear(), adopt(), opening or sealing a segment. No
+// ordering on a size can make those safe against a concurrent reader, because
+// the bytes themselves move. They are construction-time and test-time
+// operations and they keep the lock below; a reader racing one is a bug in the
+// caller, not something this class can absorb.
+
 std::string UserPermascroll::read(const PrimediaSpan &span) const {
-  std::lock_guard lock(appendMutex_);
   return spool_.read(span);
 }
 
 std::string_view UserPermascroll::readView(const PrimediaSpan &span) const {
-  std::lock_guard lock(appendMutex_);
   return spool_.readView(span);
 }
 
-std::uint64_t UserPermascroll::size() const {
-  std::lock_guard lock(appendMutex_);
-  return spool_.size();
-}
+std::uint64_t UserPermascroll::size() const { return spool_.size(); }
 
-std::string_view UserPermascroll::bytes() const {
-  std::lock_guard lock(appendMutex_);
-  return spool_.bytes();
-}
+std::string_view UserPermascroll::bytes() const { return spool_.bytes(); }
 
 void UserPermascroll::adopt(const std::string_view data) {
   std::lock_guard lock(appendMutex_);

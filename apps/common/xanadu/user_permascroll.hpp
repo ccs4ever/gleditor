@@ -120,11 +120,29 @@ public:
   // layer -- compression within a sealed segment -- where saving space does
   // not change what a span means.
 
+  /**
+   * @name The read path, which takes no lock
+   *
+   * Genuinely lock-free, rather than documented as such while holding
+   * `appendMutex_` -- which is what these did until the mutex was measured
+   * against what it was protecting. Nothing is protecting: content is
+   * append-only at addresses that never move, so a reader and an appender need
+   * only agree on how much has been published, and that agreement is one
+   * acquire/release pair on `SegmentedPrimediaSpool`'s size. A read clamps to
+   * what it loaded and therefore never sees a byte mid-write.
+   *
+   * The view from readView() stays valid for as long as the permascroll lives:
+   * the arena is reserved once and committed in place, so appending cannot
+   * relocate what a view points at. Only clear(), adopt() and sealing can, and
+   * those are not safe to run concurrently with a reader at all -- see the
+   * comment on the read path in the .cpp.
+   * @{
+   */
+
   /// Read a span of local primedia as a string copy.
   [[nodiscard]] std::string read(const PrimediaSpan &span) const override;
 
-  /// Fast lock-free zero-copy view into contiguous virtual memory for 120 FPS
-  /// UI.
+  /// Zero-copy view into contiguous virtual memory, for the 120 FPS path.
   [[nodiscard]] std::string_view readView(const PrimediaSpan &span) const;
 
   /// Total bytes recorded across all historical segments and active buffer.
@@ -132,6 +150,7 @@ public:
 
   /// Full byte view of the entire spool.
   [[nodiscard]] std::string_view bytes() const;
+  /// @}
 
   /// Adopt in-memory bytes (for compatibility / text loading).
   void adopt(std::string_view data);
@@ -174,6 +193,9 @@ public:
 
 private:
   Config config_;
+  /// Serialises appending and everything that re-addresses the spool against
+  /// each other. **Not** held by the read path -- see the doc comment there for
+  /// what makes that sound and what it does not cover.
   mutable std::mutex appendMutex_;
   SegmentedPrimediaSpool spool_;
   Scroll currentScroll_;

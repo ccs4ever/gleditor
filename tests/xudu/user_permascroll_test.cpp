@@ -6,9 +6,12 @@
 #include <gmock/gmock.h>
 #include <gtest/gtest.h>
 
+#include <atomic>
+#include <cstddef>
 #include <filesystem>
 #include <memory>
 #include <string>
+#include <thread>
 #include <vector>
 
 #include <xudu/core/identity/identity_layout.hpp>
@@ -271,6 +274,91 @@ TEST(UserPermascrollTest, PermascrollRegistrySingleton) {
   EXPECT_EQ(def1, def2);
 
   reg.clear();
+}
+
+// -- the lock-free read path --------------------------------------------------
+//
+// Migration step 17. read()/readView()/size()/bytes() take no lock, and what
+// makes that sound is one acquire/release pair on how much has been published
+// plus an arena whose base address never moves. These run under the
+// sanitizers in the DEBUG build, which is where a missed ordering would show
+// up as a TSan report rather than as a wrong answer.
+
+TEST(UserPermascrollTest, readingWhileAnotherThreadAppendsNeverSeesAHalfSpan) {
+  UserPermascroll scroll;
+  // Each record is its own recognisable block, so a reader that saw a
+  // half-written append would come back with something that is not any record.
+  constexpr int records   = 2000;
+  const std::string block = "0123456789abcdef";
+
+  std::vector<PrimediaSpan> spans;
+  spans.reserve(records);
+  std::atomic<int> published{0};
+  std::atomic<bool> reading{true};
+  std::atomic<int> readsChecked{0};
+
+  std::thread reader([&] {
+    while (reading.load(std::memory_order_acquire)) {
+      const auto have = published.load(std::memory_order_acquire);
+      for (int i = 0; i < have; i++) {
+        // Only spans the appender has already published are read, which is the
+        // contract: a span handed out by append() names bytes that are there.
+        const auto view = scroll.readView(spans[static_cast<std::size_t>(i)]);
+        ASSERT_EQ(view.size(), block.size());
+        ASSERT_EQ(std::string(view), block) << "record " << i;
+        readsChecked.fetch_add(1, std::memory_order_relaxed);
+      }
+      // And the size never goes backwards or reports bytes that are not there.
+      ASSERT_LE(static_cast<std::size_t>(have) * block.size(), scroll.size());
+    }
+  });
+
+  for (int i = 0; i < records; i++) {
+    spans.push_back(scroll.append(block));
+    published.store(i + 1, std::memory_order_release);
+  }
+  reading.store(false, std::memory_order_release);
+  reader.join();
+
+  EXPECT_EQ(scroll.size(), static_cast<std::uint64_t>(records) * block.size());
+  EXPECT_GT(readsChecked.load(), 0);
+  for (int i = 0; i < records; i++) {
+    EXPECT_EQ(scroll.read(spans[static_cast<std::size_t>(i)]), block)
+        << "record " << i << " after the fact";
+  }
+}
+
+TEST(UserPermascrollTest, aViewSurvivesEveryLaterAppend) {
+  UserPermascroll scroll;
+  const auto first = scroll.append("the first thing typed");
+  const auto view  = scroll.readView(first);
+  ASSERT_EQ(std::string(view), "the first thing typed");
+
+  // Past the 4 KiB page the first append committed, and past several more, so
+  // the arena has had to commit pages underneath the view's neighbourhood.
+  for (int i = 0; i < 5000; i++) {
+    static_cast<void>(scroll.append("filler filler filler filler "));
+  }
+
+  // Still the same bytes at the same address: an arena that reserved its
+  // address space once and commits in place cannot move what a view points at,
+  // which is the property that lets the render thread hold one across a
+  // keystroke. A std::string or a vector would have reallocated long ago.
+  EXPECT_EQ(std::string(view), "the first thing typed");
+  EXPECT_EQ(view.data(), scroll.readView(first).data());
+}
+
+TEST(UserPermascrollTest, aSpanPastTheEndIsClampedRatherThanRead) {
+  UserPermascroll scroll;
+  const auto span = scroll.append("twelve bytes");
+
+  // What the clamp is for: a reader asking for more than was published gets
+  // what was published, never uninitialised arena. The difference matters
+  // because the reader may be a frame behind the appender rather than wrong.
+  EXPECT_EQ(scroll.readView(PrimediaSpan{span.scroll, 0, 100}), "twelve bytes");
+  EXPECT_EQ(scroll.read(PrimediaSpan{span.scroll, 6, 100}), " bytes");
+  EXPECT_TRUE(scroll.readView(PrimediaSpan{span.scroll, 12, 4}).empty());
+  EXPECT_TRUE(scroll.readView(PrimediaSpan{span.scroll, 9999, 4}).empty());
 }
 
 } // namespace
