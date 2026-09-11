@@ -1051,8 +1051,9 @@ ______________________________________________________________________
 Each step is one commit. After each, `make -j$(nproc)` builds all three programs and
 `make -j$(nproc) test` passes.
 
-Steps 1–18 have landed, and step 19's benchmark half has. What each actually cost, where it differed
-from the plan, and what it measured is recorded inline below; the rest are unchanged.
+Steps 1–18 have landed, plus step 19's benchmark and step 20's two conversions. What each actually
+cost, where it differed from the plan, and what it measured is recorded inline below; the rest are
+unchanged.
 
 **Four things the landed steps have in common, worth knowing before starting the next one.**
 
@@ -1729,6 +1730,48 @@ came back byte-identical across every regenerated fixture.
    paragraph-splitting heuristic (it pairs paragraph $k$ with `pieces()[k]`, and piece index and
    paragraph index have no relationship) and `zzStructureToLinkPackage`'s synthetic scroll.
    `ZzStructureDocument` and `zigzag::Cell` survive, demoted in their doc comments to the YAML DTO.
+
+   **The two conversions have landed**, in `zz_xudu_projector.{hpp,cpp}` with five tests in
+   `tests/zigzag/test_xudu_convergence.cpp`. The heuristic and the synthetic scroll are still there;
+   this is the half that unblocks everything else.
+
+   **The scope ruling that made this straightforward, recorded because it is a project fact and not
+   a deduction: there are no production YAML slices to preserve.** The sample and system slices are
+   regenerated as stores when the time comes. So `sliceToStore()` is a *conversion*, not a
+   compatibility layer — which is what dissolves the step 19/20 entanglement noted above. The YAML
+   ingest path does not need to keep minting cells that have no operations behind them; it mints
+   `Structure` ops like everything else, and `loadFromZzStructureDocument()`'s second cell space can
+   go rather than being ported.
+
+   **Where a cell's `role`, `mime_type` and `media_path` went.** `CellSlot` has no field for them
+   and should not grow one. They become **cells on their own ranks** — `d.role`, `d.mime`, `d.media`
+   — which is exactly what R13's table already said for `Preflet::metadata` ("cells on a dimension,
+   which is what a zzstructure is for"), applied to the fields that outlived it. `storeToSlice()`
+   reads them back off those ranks and treats both the attribute cells and the dimension cells as
+   *structure*, so a round trip does not grow the document by re-emitting them as content — which is
+   the failure mode a naive inverse has, and the reason the round-trip test asserts the cell count
+   rather than only the contents.
+
+   **Three properties the tests pin, each of which would otherwise rot quietly.** The conversion is
+   **deterministic** — cells and dimensions are minted in sorted order, and a test mints the same
+   document into two stores and compares all 60-odd `CompactOpNode`s byte for byte, because a
+   conversion that iterated a hash table would write a different store every run and no fixture
+   could be regenerated or diffed. A **scalar cell stays a scalar**: a YAML cell holding `42.5` is
+   minted through `makeScalarCell`, so it carries canonical bits and comes back as a `double` rather
+   than as the text it renders as. And **the real `assets/zigzag/zigzag_structure.yaml`
+   round-trips**, not just a hand-built document: every cell's text, role, MIME type and posward
+   rank compares equal through the id mapping, with no refused operations and
+   `verifyAgainstFullRebuild()` holding.
+
+   **One behaviour found by a wrong assumption, worth keeping.** The first draft of the last test
+   expected a second slice minted into the same store to be *refused* — one store, one slice. It is
+   not refused, and should not be: a dimension is now looked up **by name** and reused when the
+   store already has it, so two slices share `d.1` instead of ending with two cells of that name and
+   a `dimensionNamed()` that has to choose. Their content cells stay distinct, since identical text
+   is not identity — the same reason R6 refuses to give two cells holding `3.14` one address.
+
+   What is left of this step: the paragraph heuristic in `projectXuduToZigzag`, the synthetic scroll
+   in `zzStructureToLinkPackage`, and the doc-comment demotions.
 
 1. **`ArenaManifold` plus `promote()`** (R8). Only after step 14, and only once there is a VQL
    interpreter to drive it.

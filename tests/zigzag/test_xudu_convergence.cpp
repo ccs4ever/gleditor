@@ -4,15 +4,20 @@
  */
 #include <gtest/gtest.h>
 
+#include <stdexcept>
+#include <variant>
+
 #include "xudu/core/link_package.hpp"
 #include "xudu/core/microversion.hpp"
 #include "xudu/core/ops.hpp"
 #include "xudu/core/scroll.hpp"
 #include "xudu/core/store.hpp"
 #include "xudu/core/swarm.hpp"
+#include "zigzag/core/manifold.hpp"
 #include "zigzag/core/zz_xudu_projector.hpp"
 #include "zigzag/core/zzcore.hpp"
 #include "zigzag/core/zzstructure.hpp"
+#include "zigzag/core/zzstructure_loader.hpp"
 
 using namespace zigzag;
 
@@ -309,4 +314,217 @@ TEST(ZzXuduConvergenceTest, ProjectStoreWithHolesAndTranscopyrightToZigzag) {
 
   std::string error;
   EXPECT_TRUE(validate2RankManifold(zzDoc, &error)) << error;
+}
+
+// -- a slice is a store -------------------------------------------------------
+//
+// Migration step 20. A YAML slice is a transfer format now: sliceToStore()
+// mints it as Structure operations and the Manifold folded out of them is the
+// model. These are the tests that the conversion loses nothing that mattered --
+// and that what it *does* lose (the YAML's own cell ids) is lost on purpose.
+
+namespace {
+
+/// A slice with every shape the conversion has to carry: text, a number, a
+/// flag, ranks in both directions, and per-cell attributes that have no field
+/// to live in any more.
+ZzStructureDocument sampleSlice() {
+  ZzStructureDocument doc;
+  doc.focus = 1;
+
+  Cell first;
+  first.id         = 1;
+  first.data       = std::string{"first cell"};
+  first.role       = "chapter";
+  first.mime_type  = "text/plain";
+  first.dimensions = {{"d.1", {2, 0}}, {"d.2", {4, 0}}};
+  doc.cells[1]     = first;
+
+  Cell second;
+  second.id         = 2;
+  second.data       = std::string{"second cell"};
+  second.role       = "detail";
+  second.media_path = "figures/one.png";
+  second.dimensions = {{"d.1", {3, 1}}};
+  doc.cells[2]      = second;
+
+  Cell third;
+  third.id         = 3;
+  third.data       = 42.5;
+  third.dimensions = {{"d.1", {0, 2}}};
+  doc.cells[3]     = third;
+
+  Cell fourth;
+  fourth.id         = 4;
+  fourth.data       = true;
+  fourth.dimensions = {{"d.2", {0, 1}}};
+  doc.cells[4]      = fourth;
+
+  return doc;
+}
+
+} // namespace
+
+TEST(SliceToStoreTest, aSliceBecomesOperationsAndFoldsBackToItself) {
+  xudu::Store store;
+  const auto doc    = sampleSlice();
+  const auto minted = sliceToStore(doc, store, xudu::MicroversionId{});
+
+  // Genesis plus a cell per YAML cell plus the attribute cells, so the store
+  // holds strictly more cells than the document had -- the metadata became
+  // cells, which is the point.
+  EXPECT_EQ(minted.cells.size(), doc.cells.size());
+  EXPECT_NE(minted.focus, zigzag::noCell);
+  EXPECT_EQ(minted.focus, minted.cells.at(1));
+
+  const auto manifold = store.rebuildManifold(minted.version);
+  EXPECT_EQ(manifold.refusedOps(), 0U);
+  EXPECT_TRUE(manifold.verifyAgainstFullRebuild(store));
+
+  // Content, including the two scalars: the bits survive, not just a rendering.
+  EXPECT_EQ(manifold.textOf(minted.cells.at(1), store), "first cell");
+  EXPECT_EQ(manifold.textOf(minted.cells.at(2), store), "second cell");
+  EXPECT_DOUBLE_EQ(manifold.asDouble(minted.cells.at(3)).value(), 42.5);
+  EXPECT_TRUE(manifold.asBool(minted.cells.at(4)).value());
+  EXPECT_EQ(manifold.textOf(minted.cells.at(3), store), "42.5");
+
+  // Ranks, in both directions, with the reciprocal edge maintained by the fold
+  // rather than emitted twice.
+  const auto d1 = minted.dimensions.at("d.1");
+  const auto d2 = minted.dimensions.at("d.2");
+  EXPECT_EQ(manifold.linked(minted.cells.at(1), d1, false), minted.cells.at(2));
+  EXPECT_EQ(manifold.linked(minted.cells.at(2), d1, false), minted.cells.at(3));
+  EXPECT_EQ(manifold.linked(minted.cells.at(3), d1, true), minted.cells.at(2));
+  EXPECT_EQ(manifold.linked(minted.cells.at(1), d2, false), minted.cells.at(4));
+  EXPECT_EQ(manifold.linked(minted.cells.at(4), d2, true), minted.cells.at(1));
+}
+
+TEST(SliceToStoreTest, theRoundTripKeepsEverythingButTheIds) {
+  xudu::Store store;
+  const auto doc      = sampleSlice();
+  const auto minted   = sliceToStore(doc, store, xudu::MicroversionId{});
+  const auto manifold = store.rebuildManifold(minted.version);
+
+  const auto back = storeToSlice(store, manifold, minted.focus);
+
+  // Same number of cells: the dimension cells and the attribute cells are
+  // structure, so they do not come back as content cells. Without that, a round
+  // trip would grow the document every time it was performed.
+  EXPECT_EQ(back.cells.size(), doc.cells.size());
+  EXPECT_EQ(back.focus, minted.focus);
+
+  // The ids are the operation indices now, which is what R4 says a cell's local
+  // name is. The *original* numbering is gone and is not meant to survive.
+  EXPECT_FALSE(back.cells.contains(1));
+
+  const auto &first = back.cells.at(minted.cells.at(1));
+  EXPECT_EQ(std::get<std::string>(first.data), "first cell");
+  EXPECT_EQ(first.role, "chapter");
+  EXPECT_EQ(first.mime_type, "text/plain");
+  EXPECT_TRUE(first.media_path.empty());
+  EXPECT_EQ(first.dimensions.at("d.1").pos, minted.cells.at(2));
+  EXPECT_EQ(first.dimensions.at("d.2").pos, minted.cells.at(4));
+
+  const auto &second = back.cells.at(minted.cells.at(2));
+  EXPECT_EQ(second.role, "detail");
+  EXPECT_EQ(second.media_path, "figures/one.png");
+  EXPECT_EQ(second.dimensions.at("d.1").neg, minted.cells.at(1));
+
+  // The scalars keep their alternative rather than coming back as their text.
+  EXPECT_DOUBLE_EQ(std::get<double>(back.cells.at(minted.cells.at(3)).data),
+                   42.5);
+  EXPECT_TRUE(std::get<bool>(back.cells.at(minted.cells.at(4)).data));
+
+  // And the attribute ranks are not exposed as dimensions of the cell they
+  // describe: d.role is machinery, not part of the document's shape.
+  EXPECT_FALSE(first.dimensions.contains("d.role"));
+  EXPECT_FALSE(first.dimensions.contains("d.mime"));
+}
+
+TEST(SliceToStoreTest, mintingTheSameSliceTwiceMintsTheSameOperations) {
+  const auto doc = sampleSlice();
+
+  xudu::Store first;
+  const auto mintedFirst = sliceToStore(doc, first, xudu::MicroversionId{});
+  xudu::Store second;
+  const auto mintedSecond = sliceToStore(doc, second, xudu::MicroversionId{});
+
+  // Determinism is what makes a store fixture regenerable and diffable: the
+  // conversion sorts rather than iterating hash tables.
+  ASSERT_EQ(first.opCount(), second.opCount());
+  EXPECT_EQ(mintedFirst.version.str(), mintedSecond.version.str());
+  for (std::uint32_t idx = 1; idx <= first.opCount(); idx++) {
+    const auto *const a = first.getCompactOp(idx);
+    const auto *const b = second.getCompactOp(idx);
+    ASSERT_NE(a, nullptr);
+    ASSERT_NE(b, nullptr);
+    EXPECT_EQ(*a, *b) << "operation " << idx;
+  }
+}
+
+TEST(SliceToStoreTest, aSecondSliceReusesTheDimensionsAlreadyMinted) {
+  xudu::Store store;
+  const auto doc = sampleSlice();
+  const auto one = sliceToStore(doc, store, xudu::MicroversionId{});
+  const auto two = sliceToStore(doc, store, one.version);
+
+  // Genesis happens once, and a dimension is found by name rather than minted
+  // again: two slices in one store share "d.1" instead of ending up with two
+  // cells of that name and a dimensionNamed() that has to choose between them.
+  EXPECT_EQ(two.dimensions.at("d.1"), one.dimensions.at("d.1"));
+  EXPECT_EQ(two.dimensions.at("d.role"), one.dimensions.at("d.role"));
+
+  const auto manifold = store.rebuildManifold(two.version);
+  EXPECT_EQ(manifold.refusedOps(), 0U);
+  EXPECT_TRUE(manifold.verifyAgainstFullRebuild(store));
+  // One d.dims rank, holding each dimension once.
+  EXPECT_EQ(manifold.dimensions().size(), one.dimensions.size() + 1)
+      << "d.dims itself is on the rank too";
+
+  // The two slices' cells are distinct: minting the same document twice is two
+  // sets of cells, not a merge. Identical content is not identity -- the same
+  // reason a scalar cell does not share an address with another holding the
+  // same number (R6).
+  EXPECT_NE(two.cells.at(1), one.cells.at(1));
+  EXPECT_EQ(manifold.textOf(one.cells.at(1), store),
+            manifold.textOf(two.cells.at(1), store));
+}
+
+TEST(SliceToStoreTest, theSampleSliceMintsAsAStore) {
+  // The check that matters for regenerating fixtures: the real
+  // assets/zigzag/zigzag_structure.yaml, not a hand-built document. If this
+  // passes, that file can be converted once and deleted.
+  const auto loaded = loadZzStructure("assets/zigzag/zigzag_structure.yaml");
+  if (!loaded) {
+    GTEST_SKIP() << "run from the repository root; sample slice not found";
+  }
+
+  xudu::Store store;
+  const auto minted = sliceToStore(*loaded, store, xudu::MicroversionId{});
+  EXPECT_EQ(minted.cells.size(), loaded->cells.size());
+
+  const auto manifold = store.rebuildManifold(minted.version);
+  EXPECT_EQ(manifold.refusedOps(), 0U);
+  EXPECT_TRUE(manifold.verifyAgainstFullRebuild(store));
+
+  const auto back = storeToSlice(store, manifold, minted.focus);
+  EXPECT_EQ(back.cells.size(), loaded->cells.size());
+
+  // Every cell's text, role and rank survives the trip -- compared through the
+  // id mapping, since the YAML's numbering does not survive and is not meant
+  // to.
+  for (const auto &[id, before] : loaded->cells) {
+    const auto ref = minted.cells.at(id);
+    ASSERT_TRUE(back.cells.contains(ref)) << "cell " << id;
+    const auto &after = back.cells.at(ref);
+    EXPECT_EQ(after.text(), before.text()) << "cell " << id;
+    EXPECT_EQ(after.role, before.role) << "cell " << id;
+    EXPECT_EQ(after.mime_type, before.mime_type) << "cell " << id;
+    for (const auto &[dim, links] : before.dimensions) {
+      if (0 != links.pos && loaded->cells.contains(links.pos)) {
+        EXPECT_EQ(after.dimensions.at(dim).pos, minted.cells.at(links.pos))
+            << "cell " << id << " " << dim << " posward";
+      }
+    }
+  }
 }

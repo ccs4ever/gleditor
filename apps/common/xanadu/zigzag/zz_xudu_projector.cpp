@@ -9,8 +9,10 @@
 #include <ctime>
 #include <format>
 #include <map>
+#include <set>
 #include <sstream>
 #include <unordered_set>
+#include <variant>
 
 #include "common/xanadu/format.hpp"
 #include "common/xanadu/zigzag/zzcore.hpp"
@@ -510,6 +512,242 @@ ZzStructureDocument linkPackageToZzStructure(const xanadu::LinkPackage &pkg) {
     }
   }
 
+  return doc;
+}
+
+// -- a slice is a store -------------------------------------------------------
+
+namespace {
+
+/// The ranks a cell's non-content attributes live on now that CellSlot has no
+/// field for them. R13's answer for metadata: cells on a dimension.
+constexpr std::string_view roleDimension  = "d.role";
+constexpr std::string_view mimeDimension  = "d.mime";
+constexpr std::string_view mediaDimension = "d.media";
+
+} // namespace
+
+SlicedStore sliceToStore(const ZzStructureDocument &doc, xanadu::Store &store,
+                         const xanadu::MicroversionId &parent) {
+  SlicedStore out;
+  out.version = parent;
+
+  if (zigzag::noCell == store.homeCell()) {
+    out.version = store.sliceGenesis(out.version);
+  }
+
+  // Sorted, so that one document mints one operation sequence however the
+  // hash tables happened to iterate. A fixture that cannot be regenerated
+  // byte-for-byte is a fixture nobody can diff.
+  std::vector<CellID> ids;
+  ids.reserve(doc.cells.size());
+  for (const auto &[id, cell] : doc.cells) {
+    ids.push_back(id);
+  }
+  std::ranges::sort(ids);
+
+  std::set<DimID> dimensionNames;
+  for (const auto &[id, cell] : doc.cells) {
+    for (const auto &[dim, links] : cell.dimensions) {
+      dimensionNames.insert(dim);
+    }
+    if (!cell.role.empty()) {
+      dimensionNames.insert(DimID{roleDimension});
+    }
+    if (!cell.mime_type.empty()) {
+      dimensionNames.insert(DimID{mimeDimension});
+    }
+    if (!cell.media_path.empty()) {
+      dimensionNames.insert(DimID{mediaDimension});
+    }
+  }
+
+  auto manifold = store.rebuildManifold(out.version);
+  for (const auto &name : dimensionNames) {
+    // Reused by name when the store already has it, which is what makes minting
+    // a second slice into one store coherent rather than a way to end up with
+    // two cells both called "d.1" and a dimensionNamed() that has to pick.
+    if (const auto existing = manifold.dimensionNamed(name, store);
+        zigzag::noCell != existing) {
+      out.dimensions.emplace(name, existing);
+      continue;
+    }
+    const auto minted = store.makeDimension(out.version, name, &manifold);
+    out.version       = minted.version;
+    out.dimensions.emplace(name, minted.dim);
+    manifold = store.rebuildManifold(out.version);
+  }
+
+  // One cell per YAML cell, in id order. A number or a flag becomes a scalar
+  // cell, so it carries canonical bits as well as a rendering (R6) rather than
+  // being flattened to the text it renders as.
+  for (const auto id : ids) {
+    const auto &cell = doc.cells.at(id);
+    if (const auto *const number = std::get_if<double>(&cell.data)) {
+      out.version = store.makeScalarCell(out.version, *number);
+    } else if (const auto *const flag = std::get_if<bool>(&cell.data)) {
+      out.version = store.makeScalarCell(out.version, *flag);
+    } else {
+      out.version =
+          store.makeCell(out.version, zzcore::cellDataAsText(cell.data));
+    }
+    out.cells.emplace(id, store.cellRefOf(out.version));
+  }
+  manifold = store.rebuildManifold(out.version);
+
+  const auto linkTo = [&](const CellRef from, const DimRef dim,
+                          const bool negward, const CellRef to) {
+    if (zigzag::noCell == from || zigzag::noCell == dim ||
+        zigzag::noCell == to) {
+      return;
+    }
+    out.version = store.setLink(out.version, from, dim, negward, to, &manifold);
+    static_cast<void>(manifold.advance(store, out.version));
+  };
+
+  // An attribute is a cell of its own on the matching rank, posward of the cell
+  // it describes. Minting it needs the manifold to have caught up, so each is
+  // minted and then folded before its link is recorded.
+  const auto attach = [&](const CellRef owner, const std::string_view dimName,
+                          const std::string &value) {
+    if (value.empty()) {
+      return;
+    }
+    out.version          = store.makeCell(out.version, value);
+    const auto attribute = store.cellRefOf(out.version);
+    static_cast<void>(manifold.advance(store, out.version));
+    linkTo(owner, out.dimensions.at(DimID{dimName}), false, attribute);
+  };
+
+  for (const auto id : ids) {
+    const auto &cell  = doc.cells.at(id);
+    const auto ownRef = out.cells.at(id);
+    attach(ownRef, roleDimension, cell.role);
+    attach(ownRef, mimeDimension, cell.mime_type);
+    attach(ownRef, mediaDimension, cell.media_path);
+  }
+
+  // Posward links only, plus a negward one the document does not state
+  // reciprocally. The fold maintains both ends of an edge, so restating it
+  // would write the same edge twice.
+  for (const auto id : ids) {
+    const auto &cell = doc.cells.at(id);
+    std::vector<DimID> dims;
+    dims.reserve(cell.dimensions.size());
+    for (const auto &[dim, links] : cell.dimensions) {
+      dims.push_back(dim);
+    }
+    std::ranges::sort(dims);
+
+    for (const auto &dim : dims) {
+      const auto links   = cell.dimensions.at(dim);
+      const auto dimCell = out.dimensions.at(dim);
+      if (0 != links.pos && out.cells.contains(links.pos)) {
+        linkTo(out.cells.at(id), dimCell, false, out.cells.at(links.pos));
+      }
+      if (0 != links.neg && out.cells.contains(links.neg)) {
+        const auto &other    = doc.cells.at(links.neg);
+        const auto reachesUs = other.dimensions.contains(dim) &&
+                               other.dimensions.at(dim).pos == id;
+        if (!reachesUs) {
+          linkTo(out.cells.at(id), dimCell, true, out.cells.at(links.neg));
+        }
+      }
+    }
+  }
+
+  if (0 != doc.focus && out.cells.contains(doc.focus)) {
+    out.focus = out.cells.at(doc.focus);
+  }
+  return out;
+}
+
+ZzStructureDocument storeToSlice(const xanadu::Store &store,
+                                 const Manifold &manifold,
+                                 const CellRef focus) {
+  ZzStructureDocument doc;
+  doc.focus = focus;
+
+  // A dimension's name is its cell's content, and the attribute ranks are read
+  // back out rather than emitted as cells of their own -- which is what makes
+  // this the inverse of sliceToStore() rather than a dump of the manifold.
+  std::unordered_map<DimRef, DimID> names;
+  DimRef roleDim  = zigzag::noCell;
+  DimRef mimeDim  = zigzag::noCell;
+  DimRef mediaDim = zigzag::noCell;
+  for (const auto dim : manifold.dimensions()) {
+    const auto name = manifold.textOf(dim, store);
+    names.emplace(dim, name);
+    if (name == roleDimension) {
+      roleDim = dim;
+    } else if (name == mimeDimension) {
+      mimeDim = dim;
+    } else if (name == mediaDimension) {
+      mediaDim = dim;
+    }
+  }
+
+  // Attribute cells and the dimension cells themselves are structure rather
+  // than content: they were minted by the conversion, so emitting them as
+  // cells would grow the document on every round trip.
+  std::set<CellRef> structural;
+  structural.insert(manifold.home());
+  for (const auto &[dim, name] : names) {
+    structural.insert(dim);
+  }
+  for (const auto &slot : manifold.cells()) {
+    for (const auto attribute : {roleDim, mimeDim, mediaDim}) {
+      if (zigzag::noCell == attribute) {
+        continue;
+      }
+      if (const auto held = manifold.linked(slot.birthOp, attribute, false);
+          zigzag::noCell != held) {
+        structural.insert(held);
+      }
+    }
+  }
+
+  for (const auto &slot : manifold.cells()) {
+    if (structural.contains(slot.birthOp)) {
+      continue;
+    }
+    Cell cell;
+    cell.id = slot.birthOp;
+    if (const auto number = manifold.asDouble(slot.birthOp)) {
+      cell.data = *number;
+    } else if (const auto flag = manifold.asBool(slot.birthOp)) {
+      cell.data = *flag;
+    } else {
+      cell.data = manifold.textOf(slot.birthOp, store);
+    }
+
+    const auto attributeOf = [&](const DimRef dim) {
+      if (zigzag::noCell == dim) {
+        return std::string{};
+      }
+      const auto held = manifold.linked(slot.birthOp, dim, false);
+      return zigzag::noCell == held ? std::string{}
+                                    : manifold.textOf(held, store);
+    };
+    cell.role       = attributeOf(roleDim);
+    cell.mime_type  = attributeOf(mimeDim);
+    cell.media_path = attributeOf(mediaDim);
+
+    for (const auto &link : manifold.dimensionsOf(slot.birthOp)) {
+      const auto named = names.find(link.dim);
+      if (named == names.end() || link.dim == roleDim || link.dim == mimeDim ||
+          link.dim == mediaDim) {
+        continue;
+      }
+      LinkPairs pairs;
+      pairs.pos = structural.contains(link.pos) ? 0 : link.pos;
+      pairs.neg = structural.contains(link.neg) ? 0 : link.neg;
+      if (0 != pairs.pos || 0 != pairs.neg) {
+        cell.dimensions[named->second] = pairs;
+      }
+    }
+    doc.cells[cell.id] = std::move(cell);
+  }
   return doc;
 }
 

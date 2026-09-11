@@ -9,6 +9,7 @@
 #include <cstdint>
 #include <string>
 #include <string_view>
+#include <unordered_map>
 #include <vector>
 
 #include "common/xanadu/link_package.hpp"
@@ -17,6 +18,7 @@
 #include "common/xanadu/ops.hpp"
 #include "common/xanadu/scroll.hpp"
 #include "common/xanadu/store.hpp"
+#include "common/xanadu/zigzag/manifold.hpp"
 #include "common/xanadu/zigzag/zzstructure.hpp"
 
 namespace zigzag {
@@ -99,6 +101,68 @@ projectStoreToZigzag(const xanadu::Store &store,
  */
 [[nodiscard]] ZzStructureDocument
 linkPackageToZzStructure(const xanadu::LinkPackage &pkg);
+
+// -- a slice is a store ------------------------------------------------------
+//
+// Migration step 20. A YAML slice stops being a *model* and becomes a transfer
+// format: sliceToStore() mints it as OpKind::Structure operations, and the
+// Manifold folded out of those operations is what anything downstream reads.
+// storeToSlice() is the other direction, for export and for round-trip tests.
+//
+// No slice anywhere has to keep loading as YAML -- the sample and system slices
+// are regenerated as stores -- so this is a conversion rather than a
+// compatibility layer, and nothing here is obliged to preserve a shape the
+// convergence is removing.
+
+/// What a slice became once it was minted: the state its last operation
+/// produced, and the mapping from the YAML's own ids to cell references.
+struct SlicedStore {
+  xanadu::MicroversionId version;
+  /// YAML cell id -> CellRef, which is the index of the operation that minted
+  /// the cell. The YAML's ids do not survive: a cell's identity is now its name
+  /// in hypertime. See R4.
+  std::unordered_map<CellID, CellRef> cells;
+  /// Dimension name -> the cell that *is* that dimension (R2).
+  std::unordered_map<DimID, DimRef> dimensions;
+  CellRef focus{noCell};
+};
+
+/**
+ * @brief Mint @p doc into @p store as Structure operations.
+ *
+ * Calls Store::sliceGenesis() first when the store has no home cell yet, so
+ * that the d.dims rank exists before a dimension is minted onto it.
+ *
+ * A cell holding a number or a flag is minted as a scalar cell (R6), so it
+ * carries canonical bits as well as a rendering. A cell's `role`, `mime_type`
+ * and `media_path` have no field to live in any more and become **cells on
+ * their own ranks** -- `d.role`, `d.mime`, `d.media` -- which is R13's answer
+ * for metadata and what a zzstructure is for. storeToSlice() reads them back
+ * off those ranks, so a round trip keeps them.
+ *
+ * Only posward links are emitted, plus any negward link the document does not
+ * express reciprocally: the fold maintains both ends of an edge, so emitting a
+ * link twice restates the same edge rather than adding anything.
+ *
+ * Deterministic: cells and dimensions are minted in sorted order, so one
+ * document always produces one operation sequence. A conversion that depended
+ * on hash iteration order would write a different store every run, and no
+ * fixture could be regenerated.
+ */
+[[nodiscard]] SlicedStore sliceToStore(const ZzStructureDocument &doc,
+                                       xanadu::Store &store,
+                                       const xanadu::MicroversionId &parent);
+
+/**
+ * @brief The YAML document a manifold describes, for export.
+ *
+ * The inverse of sliceToStore() up to cell ids: a CellRef is an operation index
+ * and is used directly as the YAML id, so a round trip renumbers cells rather
+ * than restoring whatever numbers the original file used.
+ */
+[[nodiscard]] ZzStructureDocument storeToSlice(const xanadu::Store &store,
+                                               const Manifold &manifold,
+                                               CellRef focus = noCell);
 
 /**
  * @brief Validate that a Zigzag structure strictly satisfies the 2-rank
