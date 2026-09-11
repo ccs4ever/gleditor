@@ -1809,8 +1809,24 @@ came back byte-identical across every regenerated fixture.
    a `dimensionNamed()` that has to choose. Their content cells stay distinct, since identical text
    is not identity — the same reason R6 refuses to give two cells holding `3.14` one address.
 
-   What is left of this step: the paragraph heuristic in `projectXuduToZigzag`, the synthetic scroll
-   in `zzStructureToLinkPackage`, and the doc-comment demotions.
+   **The paragraph heuristic is gone**, and it was worse than this step described. By the time it
+   was removed, `projectXuduToZigzag()` already resolved a paragraph's address properly — finding
+   which piece the paragraph's first byte falls in — and the `pieces()[k]` pairing survived only as
+   a *fallback* for paragraphs no piece covered. That fallback was not merely imprecise: the span it
+   invented is what **clone detection compares**, so two paragraphs handed the same borrowed address
+   were declared clones of each other, and the second had its text replaced with `""` and a
+   `d.clone` link to a paragraph it has nothing to do with. A wrong address is a claim, and that is
+   the claim it was making. A paragraph the pieces do not cover now gets no address and reads as
+   empty — the answer `Resolver` gives for content it cannot verify. The test proves it catches the
+   old behaviour: restore the fallback and it fails.
+
+   One honest limit recorded rather than fixed: a paragraph straddling two pieces is addressed by
+   its first part, because a cell holds one span. That is a truncation rather than a misdirection,
+   and carrying all of it needs a cell that can hold several spans, which `CellSlot` deliberately
+   does not.
+
+   What is left of this step: the synthetic scroll in `zzStructureToLinkPackage`, and the
+   doc-comment demotions.
 
 1. **`ArenaManifold` plus `promote()`** (R8). Only after step 14, and only once there is a VQL
    interpreter to drive it.

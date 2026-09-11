@@ -2,6 +2,7 @@
  * @file test_xudu_convergence.cpp
  * @brief Unit tests for bidirectional convergence between Xudu and Zigzag.
  */
+#include <gmock/gmock.h>
 #include <gtest/gtest.h>
 
 #include <stdexcept>
@@ -527,4 +528,51 @@ TEST(SliceToStoreTest, theSampleSliceMintsAsAStore) {
       }
     }
   }
+}
+
+// The heuristic step 20 set out to remove. projectXuduToZigzag() resolves a
+// paragraph's address by finding which piece its first byte falls in; when no
+// piece covered it, it used to fall back to `doc.spans[paragraphIndex]`. A
+// paragraph index and a piece index have no relationship -- a piece is a run of
+// one primedia address, split and coalesced by editing -- so that pairing
+// handed a cell an address naming somebody else's text.
+//
+// And the address is not inert. It is what clone detection compares, so two
+// paragraphs handed the same borrowed span were declared clones of each other:
+// the second lost its text to `cell.data = ""` and gained a d.clone link to a
+// paragraph it has nothing to do with. A wrong address is a claim, and this is
+// the claim being made.
+TEST(XuduProjectionTest, AParagraphNeverBorrowsAnotherParagraphsAddress) {
+  XuduDocInput doc;
+  doc.name = "uncovered";
+  doc.text = "First paragraph.\n\nSecond paragraph.\n\nThird paragraph.";
+  // Pieces covering only the first six bytes, so the second and third
+  // paragraphs have no covering piece -- and three spans, so the old fallback
+  // had an entry to hand each of them. The last two are identical, which is
+  // what turned a borrowed address into a fabricated clone.
+  doc.spans.push_back(xudu::PrimediaSpan{1, 100, 2});
+  doc.spans.push_back(xudu::PrimediaSpan{1, 500, 2});
+  doc.spans.push_back(xudu::PrimediaSpan{1, 500, 2});
+
+  const auto projected = projectXuduToZigzag({doc}, {});
+
+  int clones = 0;
+  std::vector<std::string> texts;
+  for (const auto &[id, cell] : projected.cells) {
+    if (cell.role == "xudu_clone") {
+      clones++;
+    }
+    if (const auto *const text = std::get_if<std::string>(&cell.data);
+        nullptr != text && !text->empty()) {
+      texts.push_back(*text);
+    }
+  }
+
+  EXPECT_EQ(clones, 0)
+      << "a paragraph was declared a clone of another because both were handed "
+         "the same borrowed address";
+  EXPECT_THAT(texts, testing::UnorderedElementsAre("First paragraph.",
+                                                   "Second paragraph.",
+                                                   "Third paragraph."))
+      << "a paragraph lost its text to a clone relationship it never had";
 }

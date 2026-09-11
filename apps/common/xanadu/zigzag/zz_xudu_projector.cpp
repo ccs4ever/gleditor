@@ -157,16 +157,35 @@ ZzStructureDocument projectXuduToZigzag(const std::vector<XuduDocInput> &docs,
                 paraByteStart < piece.byteEnd) {
               const std::size_t inPieceOffset = paraByteStart - piece.byteStart;
               span.scroll                     = piece.span.scroll;
-              span.start                     = piece.span.start + inPieceOffset;
+              span.start = piece.span.start + inPieceOffset;
+              // Clamped to the piece the paragraph starts in, because a cell
+              // holds one span. A paragraph straddling two pieces is addressed
+              // by its first part rather than by all of it -- a truncation, not
+              // a misdirection, and the honest limit of one span per cell.
+              // Carrying all of it needs a cell that can hold several spans,
+              // which CellSlot deliberately does not.
               const std::size_t availInPiece = piece.byteEnd - paraByteStart;
               span.length                    = static_cast<std::uint64_t>(
                   std::min(paraByteLen, availInPiece));
               break;
             }
           }
-          if (span.empty() && paraIdx < doc.spans.size()) {
-            span = doc.spans[paraIdx];
-          }
+          // No fallback to doc.spans[paraIdx]. That paired the *nth paragraph*
+          // with the *nth piece*, and a paragraph index and a piece index have
+          // no relationship whatever: a piece is a run of one primedia address,
+          // split and coalesced by editing, so one paragraph can span three
+          // pieces and one piece can hold five paragraphs.
+          //
+          // The address is not inert either. It is what clone detection
+          // compares, so two paragraphs handed the same borrowed span were
+          // declared clones: the second lost its text and gained a d.clone link
+          // to a paragraph it has nothing to do with. A wrong address is a
+          // claim, and Version::occurrencesOf() would report the quotation it
+          // asserts.
+          //
+          // So a paragraph the pieces do not cover gets no address and reads as
+          // empty, which is the answer Resolver gives for content it cannot
+          // verify: nothing, rather than something plausible.
           ++paraIdx;
 
           const bool isUnchangedClone =
