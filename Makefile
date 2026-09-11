@@ -1060,10 +1060,18 @@ endif
 # enough to C that this reformats correctly rather than leaving the shaders
 # an unformatted exception. format and format-check share one file list so
 # the two can never name a different set of files by accident.
-CXX_FORMAT_FILES = $(shell git ls-files '*.cpp' '*.hpp' '*.h' '*.glsl' | grep -v '^thirdparty/')
-SH_FORMAT_FILES  = $(shell git ls-files '*.sh' | grep -v '^thirdparty/')
+#
+# --others --exclude-standard, so a file that has been written but not yet
+# added is formatted and checked like any other. Plain ls-files sees only the
+# index, which made format-check pass on a new design doc that mdformat would
+# have rewritten, and the file was committed unformatted behind a green check
+# -- CI caught it on the next push, which is the wrong place. Ignored files
+# stay ignored: build/ and thirdparty/ are full of markdown nobody here owns.
+GIT_LS := git ls-files --cached --others --exclude-standard
+CXX_FORMAT_FILES = $(shell $(GIT_LS) '*.cpp' '*.hpp' '*.h' '*.glsl' | grep -v '^thirdparty/')
+SH_FORMAT_FILES  = $(shell $(GIT_LS) '*.sh' | grep -v '^thirdparty/')
 YAML_FORMAT_FILES = .github/workflows/c-cpp.yml .github/workflows/packaging.yml .github/dependabot.yml
-MD_FORMAT_FILES  = $(shell git ls-files '*.md' | grep -v '^thirdparty/')
+MD_FORMAT_FILES  = $(shell $(GIT_LS) '*.md' | grep -v '^thirdparty/')
 
 CLANG_FORMAT := $(shell command -v clang-format 2>/dev/null)
 SHFMT        := $(shell command -v shfmt 2>/dev/null)

@@ -8,10 +8,11 @@ runs and [VQL](vql-query-language.md) queries: an APL, with APL's glyphs, whose 
 of a zzstructure rather than rectangles of memory. **Like VQL, it is a surface syntax and nothing
 more — every glyph compiles to Vortex's `link` and `value` and introduces no primitive of its own.**
 If an expression below cannot be written as a finite sequence of those two calls, it is a defect in
-this document rather than a feature of the language; §3.1 gives the lowerings. Nothing here is wired into the gleditor build,
-and unlike its two siblings this one began as an amusement — *what would APL be if its axes were
-real dimensions you could walk?* It is written down because the answer turned out to be less silly
-than expected, and because it puts pressure on parts of the convergence that VQL never reaches.
+this document rather than a feature of the language; §3.1 gives the lowerings. Nothing here is wired
+into the gleditor build, and unlike its two siblings this one began as an amusement — *what would
+APL be if its axes were real dimensions you could walk?* It is written down because the answer
+turned out to be less silly than expected, and because it puts pressure on parts of the convergence
+that VQL never reaches.
 
 The hook is a pun that happens to be a design. In APL, an array's **rank** is its number of axes. In
 Zigzag, a **rank** is a sequence of cells along one dimension. The two words mean almost opposite
@@ -44,8 +45,8 @@ ______________________________________________________________________
 Both words stay, because both communities would reject the substitute, and they are disambiguated by
 never appearing in the same role:
 
-- **rank** (unqualified) means the Zigzag one: the sequence of cells reached by walking one dimension
-  posward and negward from a cell. This is the meaning the rest of `design/` already uses.
+- **rank** (unqualified) means the Zigzag one: the sequence of cells reached by walking one
+  dimension posward and negward from a cell. This is the meaning the rest of `design/` already uses.
 - **valence** means the APL one: how many dimensions a value is indexed along. `⍴⍴A` in APL gives
   the rank of `A`; in VPL it gives the **valence** of `A`.
 
@@ -80,41 +81,41 @@ ______________________________________________________________________
 
 Structural glyphs first, because they are the ones whose meaning moved:
 
-| glyph | APL                | VPL                                                                     |
-| ----- | ------------------ | ----------------------------------------------------------------------- |
-| `⍳`   | index generator    | mint a rank of `n` cells along the current first axis                   |
-| `⍴`   | shape / reshape    | extents along each axis; dyadic, re-lays cells onto a new axis list     |
-| `⍉`   | transpose          | **rebind which dimensions are which axes** — a viewport change (§4.2)   |
-| `⌽`   | reverse            | walk the first axis negward instead of posward                          |
+| glyph | APL                | VPL                                                                       |
+| ----- | ------------------ | ------------------------------------------------------------------------- |
+| `⍳`   | index generator    | mint a rank of `n` cells along the current first axis                     |
+| `⍴`   | shape / reshape    | extents along each axis; dyadic, re-lays cells onto a new axis list       |
+| `⍉`   | transpose          | **rebind which dimensions are which axes** — a viewport change (§4.2)     |
+| `⌽`   | reverse            | walk the first axis negward instead of posward                            |
 | `⊖`   | reverse first axis | walk the *last* axis negward; `⌽` and `⊖` differ by which axis, as in APL |
-| `↑`   | take               | the first `n` cells of the walk                                         |
-| `↓`   | drop               | skip the first `n`; negative counts from the end, as everywhere else    |
-| `⊂`   | enclose            | a cell whose content is a view — VQL's "complex data containment"       |
-| `⊃`   | disclose / first   | resolve a clone to its **master** (§4.6)                               |
-| `∊`   | membership         | is this cell on that rank                                              |
-| `⍸`   | where              | the cells of a rank satisfying a predicate                             |
-| `≡`   | depth / match      | valence when monadic; address identity when dyadic                     |
+| `↑`   | take               | the first `n` cells of the walk                                           |
+| `↓`   | drop               | skip the first `n`; negative counts from the end, as everywhere else      |
+| `⊂`   | enclose            | a cell whose content is a view — VQL's "complex data containment"         |
+| `⊃`   | disclose / first   | resolve a clone to its **master** (§4.6)                                  |
+| `∊`   | membership         | is this cell on that rank                                                 |
+| `⍸`   | where              | the cells of a rank satisfying a predicate                                |
+| `≡`   | depth / match      | valence when monadic; address identity when dyadic                        |
 
 Operators (higher-order) keep their APL meanings exactly, which is the point of borrowing them:
 
-| glyph | operator           | over a manifold                                                     |
-| ----- | ------------------ | ------------------------------------------------------------------- |
-| `/`   | reduce             | fold along a rank, in walk order                                    |
-| `\`   | scan               | the same, emitting every intermediate — so a scan mints a rank      |
-| `¨`   | each               | apply per cell, fanning out exactly as a VQL step does              |
-| `⌿`   | compress           | filter a rank by a boolean rank of the same extent                  |
-| `∘.`  | outer product      | the cartesian of two ranks, woven as a 2-valence view (§4.5)        |
-| `⍤`   | rank               | restrict a function to the first `k` axes — APL's rank operator, over dimensions that are cells |
-| `⌸`   | key                | group a rank by a key function; each group is a clone rank          |
+| glyph | operator      | over a manifold                                                                                 |
+| ----- | ------------- | ----------------------------------------------------------------------------------------------- |
+| `/`   | reduce        | fold along a rank, in walk order                                                                |
+| `\`   | scan          | the same, emitting every intermediate — so a scan mints a rank                                  |
+| `¨`   | each          | apply per cell, fanning out exactly as a VQL step does                                          |
+| `⌿`   | compress      | filter a rank by a boolean rank of the same extent                                              |
+| `∘.`  | outer product | the cartesian of two ranks, woven as a 2-valence view (§4.5)                                    |
+| `⍤`   | rank          | restrict a function to the first `k` axes — APL's rank operator, over dimensions that are cells |
+| `⌸`   | key           | group a rank by a key function; each group is a clone rank                                      |
 
 And the Xanadu-specific additions, kept to three because a borrowed notation earns nothing by
 growing:
 
 | glyph | VPL                                                                                  |
 | ----- | ------------------------------------------------------------------------------------ |
-| `⍟`   | the microversion a view was read at — its point in hypertime                          |
-| `⍫`   | scrub: the same view as of another microversion (`⍫` is not APL's; nothing is spare)  |
-| `⌺`   | the transclusions of a view: every other cell addressing any of its spans             |
+| `⍟`   | the microversion a view was read at — its point in hypertime                         |
+| `⍫`   | scrub: the same view as of another microversion (`⍫` is not APL's; nothing is spare) |
+| `⌺`   | the transclusions of a view: every other cell addressing any of its spans            |
 
 ### 3.1 Every Glyph Is `link` and `value`
 
@@ -122,23 +123,23 @@ VQL earns its claim to add no primitives by showing the compilation for each con
 VPL is held to the same standard. Every glyph above lowers to `link(cell, ±dim, [target])` and
 `value(cell, [offset], [length], [replacement])` — Vortex §1 — and to nothing else:
 
-| glyph      | lowering                                                                              |
-| ---------- | ------------------------------------------------------------------------------------- |
-| `n⍳d`      | `n` × `link(cursor, +d, -1)`, each allocation becoming the next cursor                  |
-| `A[k]`     | `k` × `link(cursor, +axis)` in read form, following the returned cell each time         |
-| `⍴A`       | `link(cursor, +axis)` in read form until it answers nothing, counting the steps         |
-| `⍉A`       | **no calls at all** — the axis list is a property of the view, not of the cells         |
-| `⌽A` `⊖A`  | likewise none: the sign on the axis flips, and `link`'s read form is already signed     |
-| `↑` `↓`    | bounded and skipped read-form walks; nothing is written                                |
-| `⊂A`       | `value(cell, 0, -1, A)` — a cell whose content is a view                                |
-| `⊃C`       | `link(cursor, -d.clone)` in read form until it answers nothing: the master              |
-| `f/A`      | one read-form walk, `value(c)` per cell for the operand's bits, no writes               |
-| `f\A`      | the same walk, plus one `link(...,-1)` and one `value(...,repl)` per intermediate        |
-| `A∘.f B`   | `⍴A × ⍴B` applications of `f`, each lowering as `f` does                                |
-| `A⌸f`      | one walk, then `link(master, +d.clone, member)` per group member                        |
-| `⍟A`       | none — the microversion is what the read already happened at                            |
-| `A⍫T`      | none of its own: the same lowering, folded from `T` instead of from the head            |
-| `⌺A`       | one read-form walk per span, over the `d.transclude` rank                               |
+| glyph     | lowering                                                                            |
+| --------- | ----------------------------------------------------------------------------------- |
+| `n⍳d`     | `n` × `link(cursor, +d, -1)`, each allocation becoming the next cursor              |
+| `A[k]`    | `k` × `link(cursor, +axis)` in read form, following the returned cell each time     |
+| `⍴A`      | `link(cursor, +axis)` in read form until it answers nothing, counting the steps     |
+| `⍉A`      | **no calls at all** — the axis list is a property of the view, not of the cells     |
+| `⌽A` `⊖A` | likewise none: the sign on the axis flips, and `link`'s read form is already signed |
+| `↑` `↓`   | bounded and skipped read-form walks; nothing is written                             |
+| `⊂A`      | `value(cell, 0, -1, A)` — a cell whose content is a view                            |
+| `⊃C`      | `link(cursor, -d.clone)` in read form until it answers nothing: the master          |
+| `f/A`     | one read-form walk, `value(c)` per cell for the operand's bits, no writes           |
+| `f\A`     | the same walk, plus one `link(...,-1)` and one `value(...,repl)` per intermediate   |
+| `A∘.f B`  | `⍴A × ⍴B` applications of `f`, each lowering as `f` does                            |
+| `A⌸f`     | one walk, then `link(master, +d.clone, member)` per group member                    |
+| `⍟A`      | none — the microversion is what the read already happened at                        |
+| `A⍫T`     | none of its own: the same lowering, folded from `T` instead of from the head        |
+| `⌺A`      | one read-form walk per span, over the `d.transclude` rank                           |
 
 Three things are worth reading off that table, because they are the parts a glyph hides.
 
@@ -299,14 +300,14 @@ This is the section that justifies the document.
 
 APL lost value semantics at `B←A` (§2) and gets something else back: **every assignment is an
 operation, so every intermediate value a program ever held is still addressable.** `⍫` is not a
-debugger feature and not a journal; it is the same read against an earlier microversion, and it costs
-a fold rather than a copy.
+debugger feature and not a journal; it is the same read against an earlier microversion, and it
+costs a fold rather than a copy.
 
 The consequence an APL programmer will feel is that *`⍳` is not referentially transparent* and
 cannot be — and that this is true of `+\`, `∘.`, `⌸` and every other glyph that produces a value,
 because producing a value means minting cells. VPL is therefore not a pure array language with
-effects bolted on; it is an array language whose values are all in one append-only store. Idempotence
-is available, but you ask for it with `⍫` rather than getting it by default.
+effects bolted on; it is an array language whose values are all in one append-only store.
+Idempotence is available, but you ask for it with `⍫` rather than getting it by default.
 
 ```apl
       ⌺A                     ⍝ who else quotes A's spans
@@ -380,6 +381,6 @@ The rule is the one its siblings use:
 
 Editorial changes that alter no normative text bump neither.
 
-| version | commit | date       | change                                                                    |
-| ------- | ------ | ---------- | ------------------------------------------------------------------------- |
+| version | commit | date       | change                                                                                                           |
+| ------- | ------ | ---------- | ---------------------------------------------------------------------------------------------------------------- |
 | 1.0     | *this* | 2026-09-11 | Initial specification: views, the rank/valence collision, the glyph set, and the four places the analogy breaks. |
