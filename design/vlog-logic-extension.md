@@ -1,10 +1,10 @@
 # Vlog: Unification and Backtracking in Vortex
 
-**Document Version:** 3.1 — Trailing Is Copy-on-Write **Extension To:** Vortex Hyperstructural
-Runtime Core — `link` and `value`, plus §8's bill **Status:** The *machinery* of §5 is built and
-tested — `ArenaManifold` and its overlay, `mark`/`release`/`discard`, the conditional trail,
-`scratchScroll`, `promote()`. The resolution engine over it is not: no unification, no solver.
-**Core changes required:** none outstanding; §8 is now a record of what was paid
+**Document Version:** 4.0 — Unification Is Built **Extension To:** Vortex Hyperstructural Runtime
+Core — `link` and `value`, plus §8's bill **Status:** §4 and §5 are built and tested —
+`ArenaManifold` and its overlay, choice points, the conditional trail, `scratchScroll`, `promote()`,
+and `unify()` itself (`zigzag/vlog.hpp`). §6 and §7 are not: no clause selection, no solver. **Core
+changes required:** none outstanding; §8 is now a record of what was paid
 
 **Vlog** — the Vortex Logic Extension — is resolution as a program over Vortex's own two primitives.
 The original Vortex draft listed "Prolog-style unification and backtracking" as a deferred idea and
@@ -214,6 +214,11 @@ mechanism that was designed to let a spreadsheet cell appear in two places.
 combined rank is `T`'s master, so `X` now reads `T`.
 
 ### 4.1 The four cases
+
+**Built**, as `Vlog::unify()` in `apps/common/xanadu/zigzag/vlog.cpp`, and it needed nothing this
+document did not already have: `link`, `value`, `cloneMaster` and a `Mark`. The file is 120 lines,
+which is the argument — a longer one would have meant the primitives were not enough. The pseudocode
+below is what was implemented, essentially unchanged.
 
 ```text
 unify(A, B):
@@ -770,6 +775,7 @@ Editorial changes that alter no normative text bump neither component.
 
 | version | commit    | date       | change                                                                                                                                                                                                                                  |
 | ------- | --------- | ---------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 4.0     | `PENDING` | 2026-09-11 | §4 built: `Vlog::unify()`, binding as a clone splice, rational terms by default, undo by `release()`. No primitive was added, which was §2's bet.                                                                                       |
 | 3.1     | `50b3f0f` | 2026-09-11 | The overlay: an arena over a base `Manifold` reads through and shadows on write, so §6's clause database can live in a document. Step 21 done.                                                                                          |
 | 3.0     | `c28240c` | 2026-09-11 | `ArenaManifold` implemented, and §5.2/§5.3 corrected by it: a `Mark` is seven lengths, a trail entry is a saved `CellSlot` at 40 bytes, trailing copies a cell's runs above the mark, and compaction is forbidden while a mark is held. |
 | 2.0     | `f519ab9` | 2026-09-11 | §5.5: the arena is neither an in-memory store nor an in-memory permascroll — it holds addresses, not bytes. `scratchScroll` added to §8's bill, correcting 1.0's claim that `Manifold` was untouched.                                   |
