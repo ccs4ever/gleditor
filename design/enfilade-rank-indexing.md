@@ -2,7 +2,8 @@
 
 **Document Version:** 1.0 — One Tree, Three Wids **Status:** Proposal. Nothing here is built; U1 is
 still open and this is a candidate answer to it, not a ruling **Answers:**
-[`store-slice-convergence.md`](store-slice-convergence.md) U1 — random access along a rank
+[`store-slice-convergence.md`](store-slice-convergence.md) U1 — random access along a rank\
+**Complemented by:** [`enfilade-discussion.md`](enfilade-discussion.md)
 
 U1 is the convergence's oldest unresolved question, and it is stated there as a limit rather than a
 bug: **a rank answers successor and predecessor, and nothing else.** `linked(c, d, negward)` is 4.96

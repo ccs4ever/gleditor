@@ -541,6 +541,9 @@ they care about; see R11 in `design/store-slice-convergence.md`.
   discovery). Read §3 before reaching for a `d.enfilade` dimension — crums as cells would make
   rebalancing an edit to the document, which R8 forbids for the same reason it forbids path
   compression.
+- [`enfilade-discussion.md`](design/enfilade-discussion.md) — an architectural survey: Grand
+  Enfilade Theory, Udanax Green's Ent, silicon constraints (the 4.96 ns breakeven curve), and five
+  frontiers beyond U1 (Spanfilade, Layoutfilade, Chronofilade, Holefilade, Arrayfilade).
 - [`osmic-microversioning-and-dag.md`](design/osmic-microversioning-and-dag.md) — hypertime naming,
   branches, and what a microversion is.
 
