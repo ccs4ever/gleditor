@@ -539,14 +539,50 @@ quietly drop the rest."
 
 VQL resolves this the same way §4.6 resolves "one cell, many partners": an existing-cell `target` is
 always drawn from `clone_generator(target)` (Vortex §2) rather than being reused directly — one pull
-per context-stream cell, unconditionally, with no branch on how many cells are in the context. The
-generator's first pull is `target` itself, so a single-cell context gets exactly what writing
-`target` directly would have given it — no synthetic clone, no special case. Every pull after the
-first allocates a fresh cell posward of `target` on its clone rank — reading `target`'s content,
-since `target` stays the master (§4.6) — and *that* fresh cell becomes the structural link partner
-for one more context cell. `target`'s own dimension slot still only ever holds the most recently
-generated partner directly, but every generated cell (and `target`) shares one underlying payload,
-so the group reads as a single logical value no matter which member is dereferenced.
+per context-stream cell, unconditionally, with no branch on how many cells are in the context. Every
+pull allocates a fresh cell posward of `target` on its clone rank, reading `target`'s content
+because `target` remains the master (§4.6), and *that* fresh cell becomes the structural link
+partner for one context cell.
+
+#### Which cell the first attachment gets, and why it stopped being obvious
+
+Under entanglement there was one sensible answer, because entangled cells were interchangeable: the
+generator's **first pull returned `target` itself**, so a single-cell context got exactly what
+writing `target` directly would have given it, with no synthetic cell and no special case. Nothing
+distinguished the members, so consuming one of them was free.
+
+Cloning distinguishes them. A rank has a **master** — the negward end, where content lives and
+through which every member resolves — so "which member does the first context cell attach to" is a
+real question with two real answers:
+
+- **Adopt the target.** First pull is `target`; the rest are fresh clones. One cell cheaper, and a
+  one-cell context behaves exactly as if the generator were not there.
+- **Clone for every attachment.** `target` is never handed out; all *N* context cells attach to *N*
+  fresh clones, and the master is left alone.
+
+**VQL takes the second**, and the deciding argument is not cost. A link consumes a slot at *both*
+ends, so adopting the target means the first attachment consumes the **master's** own `dim`/`dir`
+slot — displacing whatever was there, since a link is one edge and setting it breaks what either end
+held (§4.6). That mixes the master's two roles: it is the cell content resolves through *and* now a
+structural participant in somebody else's fan-out. Cloning for every attachment keeps those apart,
+so the master stays purely authoritative and its existing structure is untouched.
+
+Two smaller things follow from the same choice. The attachments become **interchangeable** — under
+"adopt the target" the first context cell's partner is the master and the rest are clones, so
+breaking one out behaves differently depending on which one it was, for no reason the query
+expressed. And it removes an **unearned privilege of position**: nothing about being first in a
+context stream should decide which cell gets the master.
+
+The price is honest and worth stating: one extra cell, and a *single*-attachment case that now goes
+through a clone rather than landing on `target` directly. The reader sees no difference — a clone
+shows the master's content — but the structure has one more cell in it than the query looks like it
+asked for. That is the cost of the master never being consumed by accident.
+
+No spelling is offered for "adopt the target". It is a coherent policy and this section names it so
+the choice is visible, but no query has yet wanted it, and adding a modifier for an unexercised
+preference is how a language accumulates vocabulary nobody can motivate later. If one does, it
+belongs on the `link` step rather than on the dimension — the choice is about the target, not about
+the rank.
 
 This is transparent at the call site: `$context/link(dim, dir, $a)` parses and means the same thing,
 and compiles the same way, whether `$context` has one cell or many — a 1-node and an N-node context

@@ -443,20 +443,22 @@ CellValue get(cell_id cell, int64_t offset = 0, int64_t length = -1) {
 
 // A dim/dir slot holds exactly one partner (§1), so passing one existing
 // cell as `target` to more than one `link` call silently overwrites its
-// back-link each time. clone_generator(source) sidesteps that: the first
-// call returns source itself -- so a single caller behaves exactly as if it
-// had used source directly, no special-casing needed -- and every call
-// after that allocates a fresh cell and links it *posward* of source on
-// d.clone, so source remains the rank's head and stays authoritative
-// (§4.6 of vql-query-language.md). The fresh cell is returned, so every
-// additional caller gets its own structurally distinct cell that reads the
-// head's content. See VQL §4.7 for where this is used.
+// back-link each time. clone_generator(source) sidesteps that: every pull
+// allocates a fresh cell *posward* of source on d.clone, so source remains
+// the rank's head and stays authoritative (§4.6 of vql-query-language.md),
+// and the fresh cell is returned as the structural partner.
+//
+// Every pull, including the first. An earlier version returned `source`
+// itself the first time, so a single caller behaved exactly as if it had
+// used source directly -- which was free while entanglement made all members
+// interchangeable, and is not free now that a rank has a master. A link
+// consumes a slot at both ends, so handing out the master makes the first
+// caller consume the master's own dim/dir slot and displace whatever it held.
+// The master is where content resolves through; it should not also be drafted
+// as somebody else's link partner because it happened to be asked for first.
+// See VQL §4.7, which records the alternative and why it is not taken.
 std::function<cell_id()> clone_generator(cell_id source) {
-    return [source, used = false]() mutable {
-        if (!used) {
-            used = true;
-            return source;
-        }
+    return [source]() {
         cell_id fresh = internal_alloc_cell();
         link(source, d_clone, +1, fresh);
         return fresh;
