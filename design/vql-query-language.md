@@ -8,7 +8,9 @@ VQL is the declarative, XQuery-like companion language for
 `link`/`value` primitives that make up Vortex's two-primitive core. As with the Vortex spec, this
 document specifies a language design consuming the Zigzag `zzstructure` manifold model (see
 [zigzag-multidimensional-space-and-projection.md](zigzag-multidimensional-space-and-projection.md));
-nothing here is wired into the gleditor build.
+nothing here is wired into the gleditor build. A third front end onto the same manifold,
+[VPL](vpl-array-language.md), borrows APL's glyphs instead of XQuery's paths — where VQL asks
+questions of a manifold, VPL does arithmetic over one.
 
 The language rests on three design choices: a single directional traversal operator (`/`, with
 direction carried by a sign on the dimension name rather than a second token), `%` creation sugar so

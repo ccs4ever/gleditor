@@ -501,7 +501,13 @@ they care about; see R11 in `design/store-slice-convergence.md`.
 - [`vortex-hyperstructural-runtime.md`](design/vortex-hyperstructural-runtime.md) and
   [`vql-query-language.md`](design/vql-query-language.md) — a speculative runtime and query language
   over the same manifold. Neither is built, but both constrain the cell layout, and each now carries
-  a reconciliation section against the convergence.
+  a reconciliation section against the convergence. Both are versioned with a change history, and
+  the rule is stated in each: major for a change a conforming implementation could not ignore, minor
+  for anything else that still alters the specification.
+- [`vpl-array-language.md`](design/vpl-array-language.md) — an APL over the same manifold, written
+  for fun and kept because it puts pressure where VQL does not: it is a language built on random
+  access, which is exactly the convergence's open question U1 (a rank answers successor and
+  predecessor, not "the *n*-th thing"). Read §5 before taking any of it seriously.
 - [`osmic-microversioning-and-dag.md`](design/osmic-microversioning-and-dag.md) — hypertime naming,
   branches, and what a microversion is.
 

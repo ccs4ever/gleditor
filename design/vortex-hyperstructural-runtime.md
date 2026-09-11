@@ -9,9 +9,11 @@ model documented in
 [zigzag-multidimensional-space-and-projection.md](zigzag-multidimensional-space-and-projection.md)
 and implemented by `apps/zigzag`'s `Cell`), rather than heaps, stack frames, and registers. Nothing
 in this document is wired into the gleditor build; it specifies the language and reference engine
-that a future `apps/vortex` (or an embedding inside `apps/zigzag`) would implement. It is recorded
-here because it is a design consumer of the same manifold invariants `apps/zigzag` and `apps/xudu`
-already enforce, and any future implementation should stay consistent with them.
+that a future `apps/vortex` (or an embedding inside `apps/zigzag`) would implement. Two front ends
+onto it are specified: [VQL](vql-query-language.md), an XQuery-shaped query language, and
+[VPL](vpl-array-language.md), an APL whose axes are dimensions. It is recorded here because it is a
+design consumer of the same manifold invariants `apps/zigzag` and `apps/xudu` already enforce, and
+any future implementation should stay consistent with them.
 
 This revision renames the payload accessors `get_cell_value`/`set_cell_value` to `get`/`set` — VQL
 (the companion query language, see [vql-query-language.md](vql-query-language.md)) spells them that
