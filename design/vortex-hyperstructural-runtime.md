@@ -15,10 +15,14 @@ onto it are specified: [VQL](vql-query-language.md), an XQuery-shaped query lang
 design consumer of the same manifold invariants `apps/zigzag` and `apps/xudu` already enforce, and
 any future implementation should stay consistent with them.
 
-[unification-and-backtracking.md](vortex-unification-and-backtracking.md) is not a third front end
-but an elaboration of *this* document's own deferred idea: resolution as a program over `link` and
-`value`, where a variable binding is a `d.clone` link and a choice point is a microversion. It is
-kept separate because it asks the C++ core for something (§8 there), which neither front end does.
+[**Vlog**](vlog-logic-extension.md), the Vortex Logic Extension, is not a third front end. It is the
+elaboration of *this* document's own deferred idea — the words "Logic Engine" in the
+`Target Environment:` line above are its fossil — and it makes resolution a program over `link` and
+`value`, where a variable binding is a `d.clone` link and a choice point is a microversion. It is an
+extension rather than a language because it contributes a mechanism and no notation of its own: it
+is written in VQL's paths, VPL's glyphs, or against the primitives directly. It is kept in a
+separate document because it asks the C++ core for something (§8 there), which neither front end
+does.
 
 This revision renames the payload accessors `get_cell_value`/`set_cell_value` to `get`/`set` — VQL
 (the companion query language, see [vql-query-language.md](vql-query-language.md)) spells them that

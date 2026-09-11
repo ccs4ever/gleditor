@@ -508,13 +508,14 @@ they care about; see R11 in `design/store-slice-convergence.md`.
   for fun and kept because it puts pressure where VQL does not: it is a language built on random
   access, which is exactly the convergence's open question U1 (a rank answers successor and
   predecessor, not "the *n*-th thing"). Read §5 before taking any of it seriously.
-- [`vortex-unification-and-backtracking.md`](design/vortex-unification-and-backtracking.md) —
-  Prolog's unification and backtracking *inside* Vortex rather than compiled onto it, because
-  `d.clone` is already a variable binding and a microversion is already a choice point. **The one
-  design note here that asks the C++ core for something**, and it is deliberately small: two methods
-  and a 16-byte-per-entry vector on `ArenaManifold`, a class convergence step 21 has not written
-  yet. Nothing in `ops.hpp`, `Manifold`, `Store` or any on-disk format changes. §10 lists what is
-  gating, and §6.3 is U1 again from the logic side.
+- [`vlog-logic-extension.md`](design/vlog-logic-extension.md) — **Vlog**, the Vortex Logic
+  Extension: Prolog's unification and backtracking *inside* Vortex rather than compiled onto it,
+  because `d.clone` is already a variable binding and a microversion is already a choice point. An
+  extension and not a fourth language — it has no syntax of its own, and unlike VQL and VPL it is
+  **the one design note here that asks the C++ core for something**. That ask is deliberately small:
+  two methods and a 16-byte-per-entry vector on `ArenaManifold`, a class convergence step 21 has not
+  written yet. Nothing in `ops.hpp`, `Manifold`, `Store` or any on-disk format changes. §10 lists
+  what is gating, and §6.3 is U1 again from the logic side.
 - [`osmic-microversioning-and-dag.md`](design/osmic-microversioning-and-dag.md) — hypertime naming,
   branches, and what a microversion is.
 

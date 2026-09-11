@@ -1,11 +1,14 @@
-# Unification and Backtracking in Vortex
+# Vlog: Unification and Backtracking in Vortex
 
-**Document Version:** 1.0 — Binding Is a Clone Link **Status:** Speculative design; nothing here is
+**Document Version:** 1.1 — Binding Is a Clone Link **Extension To:** Vortex Hyperstructural Runtime
+Core — `link` and `value`, plus §8's two methods **Status:** Speculative design; nothing here is
 wired into the gleditor build **Core changes required:** two methods and one vector, on a class that
 does not exist yet (§8)
 
+**Vlog** — the Vortex Logic Extension — is resolution as a program over Vortex's own two primitives.
 The original Vortex draft listed "Prolog-style unification and backtracking" as a deferred idea and
-said nothing more about it. This note is the elaboration, written now because the architecture
+said nothing more about it; the fossil of that decision is the words "Logic Engine" in the spec's
+`Target Environment:` line. This document is the elaboration, written now because the architecture
 changed underneath it in a way that makes the idea much cheaper than it was when it was deferred.
 
 Two things happened. `d.entangle` was deleted and replaced by **`d.clone` rank traversal**, where
@@ -17,12 +20,23 @@ operations naming one parent are two futures that do not destroy each other
 binding. The second is a choice point. Neither was built with logic programming in mind, and both
 are exactly the mechanism a resolution engine needs.
 
-**This is Vortex gaining elements of Prolog, not a Prolog that compiles to Vortex.** The distinction
+**Vlog is Vortex gaining elements of Prolog, not a Prolog that compiles to Vortex.** The distinction
 matters and is the whole reason this is worth writing down: there is no separate term
-representation, no heap, no trail, and no binding environment. A term is a cell. A variable is a
-cell. A binding is a link. Resolution is a program written in Vortex's two primitives, in the same
-sense that [VQL](vql-query-language.md) and [VPL](vpl-array-language.md) are — and it is held to the
-same acceptance test they are (§2).
+representation, no heap, and no binding environment. A term is a cell. A variable is a cell. A
+binding is a link. Resolution is a program written in Vortex's two primitives, in the same sense
+that [VQL](vql-query-language.md) and [VPL](vpl-array-language.md) are — and it is held to the same
+acceptance test they are (§2). The one new data structure anywhere in Vlog is §5.3's trail, and it
+is not there to undo destructive assignment; it is there because an arena that truncates can leave a
+dangling reference behind.
+
+**Why "extension" and not "front end".** VQL and VPL are front ends: surface syntaxes over the
+manifold that compile to `link` and `value` and ask the runtime for nothing it does not already do.
+Vlog is not one of those. It has no syntax of its own — write it in VQL's paths, in VPL's glyphs, or
+against the primitives directly, because what Vlog contributes is a *mechanism*, not a notation. And
+it does ask the runtime for something: a way to snapshot and discard an **ephemeral** manifold
+cheaply enough to do it a million times in a query (§8). That single ask is what makes this an
+extension rather than a third language, and it is the reason the material lives in its own document
+instead of as a section of the Vortex spec.
 
 ______________________________________________________________________
 
@@ -96,10 +110,10 @@ value(cell, [offset], [length], [replacement])  ->  cell_id
 ```
 
 and that an expression which cannot be written that way is a defect in the document rather than a
-feature of the language. The same rule binds this note, and it is a sharper test here than it was
-there, because resolution is the first thing proposed for Vortex that has a *control* structure of
-its own. The temptation is to give the engine a `unify` primitive and a `choice_point` primitive and
-declare victory. The rest of this document is the claim that neither is needed:
+feature of the language. The same rule binds Vlog, and it is a sharper test here than it was there,
+because resolution is the first thing proposed for Vortex that has a *control* structure of its own.
+The temptation is to give the engine a `unify` primitive and a `choice_point` primitive and declare
+victory. The rest of this document is the claim that neither is needed:
 
 - **Unification is a program.** §4's pseudocode calls `link`, `value` and `cloneMaster`, recursing
   over an argument rank. It is longer than a primitive would be and that is all.
@@ -107,8 +121,11 @@ declare victory. The rest of this document is the claim that neither is needed:
   keeps — a microversion id, or two vector lengths. Nothing is written to take one.
 - **Cut writes nothing either.** It compares.
 
-So the logic engine adds no primitive, and the Single-Primitive Invariant survives a feature that
-looks, from the outside, like it ought to break it.
+So Vlog adds no primitive, and the Single-Primitive Invariant survives a feature that looks, from
+the outside, like it ought to break it. §8's two methods are not a counterexample: `mark()` and
+`release()` manage the *lifetime* of an ephemeral manifold and cannot express anything about cells
+or links that `link` and `value` could not already say. An extension that needed a third primitive
+would be a different and much worse document.
 
 ______________________________________________________________________
 
@@ -273,9 +290,9 @@ whose cells carry `ephemeralBit` and which the fold *refuses* to write into an o
 if asked. A memoised `deref` lives there. It is path compression with no name in hypertime, released
 by breaking one link, and it cannot leak into the document by construction.
 
-That is the general shape of the answer whenever a logic engine wants a data structure Prolog would
-put in the heap: it goes in a pinned ephemeral island, and the reason it is allowed to exist is that
-it is provably not part of the document.
+That is the general shape of the answer whenever Vlog wants a data structure Prolog would put in the
+heap: it goes in a pinned ephemeral island, and the reason it is allowed to exist is that it is
+provably not part of the document.
 
 ### 4.4 Rational trees are the default, and the occurs check is the opt-in
 
@@ -365,7 +382,7 @@ binding a variable minted for this clause activation, which is younger than the 
 trailed and the trail stays empty through most of a deterministic call.
 
 Size: a trail entry is `(CellRef cell, DimRef dim, bool negward, CellRef old)` — 12 bytes padded to
-16\. That is the entire new data structure this document asks for.
+16\. That is the entire new data structure Vlog asks for.
 
 ### 5.4 Cut is one comparison against a barrier
 
@@ -391,8 +408,8 @@ ______________________________________________________________________
 ### 6.1 Clauses are a rank on `d.clause`
 
 A predicate is a cell; its clauses are a rank posward from it along **`d.clause`**, the one new
-dimension this design introduces. Introducing it costs no code: R12 made a dimension a cell on the
-`d.dims` rank, so minting one is `MakeCell` plus `SetLink` and nothing in C++ learns its name.
+dimension Vlog introduces. Introducing it costs no code: R12 made a dimension a cell on the `d.dims`
+rank, so minting one is `MakeCell` plus `SetLink` and nothing in C++ learns its name.
 
 A clause cell's content is unread; its head hangs off `+d.grab` and its body off `+d.spin`, which
 means a clause body is an instruction stream in exactly the sense §1 of the Vortex spec already
@@ -430,8 +447,11 @@ selection over a rank of $n$ facts is $O(n)$ per call. VPL hit the same wall fro
 
 The mitigation is §4.3's again — an index is a pinned ephemeral island keyed by the canonical scalar
 bits or the functor's content hash, rebuilt lazily and released by breaking one link — and the
-honest statement is that **two independent surface languages now want the same primitive from U1**,
-which is the strongest argument yet for resolving it rather than deferring it further.
+honest statement is that **two unrelated consumers now want the same missing primitive from U1**,
+approaching it from opposite ends: VPL wants an ordinal and Vlog wants a key. That is the strongest
+argument yet for resolving U1 rather than deferring it further, and it is worth more than either
+document's own case, because a gap two designs reach independently is a gap in the manifold rather
+than a gap in a language.
 
 ______________________________________________________________________
 
@@ -484,7 +504,7 @@ ______________________________________________________________________
 
 ## 8. What the C++ core actually has to gain
 
-The brief for this document was "as few changes to the C++ core as possible." The answer is:
+The brief for Vlog was "as few changes to the C++ core as possible." The answer is:
 
 **Nothing in `ops.hpp`, `compact_op.hpp`, `binary_ops.cpp`, `Store`, `Manifold`, the wire format, or
 any on-disk format changes at all.** No new `OpKind`, no new `StructureVerb`, no flag bit, no format
@@ -545,8 +565,8 @@ Stated in the same spirit as VPL §5 — these are real, and two of them are gat
    so the interesting question is not how to avoid it but how to bound it. A plausible answer is to
    run in the arena and promote only the derivation of a *found* answer, giving a proof term without
    the dead ends; that is not specified here.
-1. **This document is gated on step 21.** `ArenaManifold` and `promote()` do not exist. Everything
-   in §5.2, §5.3, §4.3 and §6.3's mitigation is written against a class that is a design note. So is
+1. **Vlog is gated on step 21.** `ArenaManifold` and `promote()` do not exist. Everything in §5.2,
+   §5.3, §4.3 and §6.3's mitigation is written against a class that is a design note. So is
    [VPL](vpl-array-language.md), for the same reason, and so is VQL's own write path. Step 21 is now
    blocking three documents.
 1. **Rational trees diverge from ISO.** §4.4, deliberately, and it means a program ported from a
@@ -571,7 +591,8 @@ ______________________________________________________________________
   is the strongest thing §8 has to say for itself.
 - **R12 (a dimension is a cell on `d.dims`)**: `d.clause` costs no code, and §3.2 follows the same
   precedent for variablehood.
-- **U1 (random access along a rank)**: §6.3. Now wanted by both VPL and this document.
+- **U1 (random access along a rank)**: §6.3. Now wanted by both VPL and Vlog, for an ordinal and a
+  key respectively.
 - **U3 (a cell's content is a run of spans)**: `Splice` is what lets a term's content be edited
   without severing the addresses a transclusion-binding shares, so §9's third bullet depends on U3
   having been resolved the way it was.
@@ -591,6 +612,7 @@ use:
 
 Editorial changes that alter no normative text bump neither component.
 
-| version | commit    | date       | change                                                                      |
-| ------- | --------- | ---------- | --------------------------------------------------------------------------- |
-| 1.0     | `734513a` | 2026-09-11 | Initial specification: binding as a clone link, backtracking as truncation. |
+| version | commit    | date       | change                                                                                                                                                                            |
+| ------- | --------- | ---------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 1.1     | `PENDING` | 2026-09-11 | Named **Vlog**, and restyled as an extension rather than a front end (intro, §2). The intro's "no trail" reconciled with §5.3; U1's two consumers separated into ordinal and key. |
+| 1.0     | `734513a` | 2026-09-11 | Initial specification: binding as a clone link, backtracking as truncation.                                                                                                       |
