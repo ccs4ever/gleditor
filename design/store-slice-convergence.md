@@ -1051,8 +1051,8 @@ ______________________________________________________________________
 Each step is one commit. After each, `make -j$(nproc)` builds all three programs and
 `make -j$(nproc) test` passes.
 
-Steps 1–18 have landed. What each actually cost, where it differed from the plan, and what it
-measured is recorded inline below; the rest are unchanged.
+Steps 1–18 have landed, and step 19's benchmark half has. What each actually cost, where it differed
+from the plan, and what it measured is recorded inline below; the rest are unchanged.
 
 **Four things the landed steps have in common, worth knowing before starting the next one.**
 
@@ -1699,8 +1699,31 @@ came back byte-identical across every regenerated fixture.
    this is mostly deletion. `CompactZZCell` dissolves into `CellSlot` plus a CSR link run plus
    `ColdCell` — the `standardDimensions` array and the `dynamicDimensions` vector both go, which is
    where 192 of its 960 bytes were — and `ephemeralText` is deleted outright, since it duplicates
-   the primedia that `span` already addresses, as its own comment complains. Add the traversal
-   benchmark R12's price depends on, so the $2.7\times$ claim is a test rather than an assertion.
+   the primedia that `span` already addresses, as its own comment complains. ~~Add the traversal
+   benchmark R12's price depends on, so the $2.7\times$ claim is a test rather than an assertion.~~
+   **The benchmark is done** — `ManifoldTest.aHopCostsWhatR12SaysItCosts`, and §12.5 records what it
+   actually measures, which is not $2.7\times$. **The port itself is not**, and two things found
+   while scoping it change what it means:
+
+   - **`UnifiedTransclusionEngine` and `CompactZZCell` have no production caller.** Their only users
+     are their own tests. What zigzag actually draws is `ZigzagVisualizer` over `space_`, an
+     `unordered_map<CellID, zigzag::Cell>` — the YAML model that step 20 demotes to a DTO.
+     `main.cpp`'s comment claiming "zigzag draws CompactZZCell slices through its own
+     FrameContributor" is simply wrong, and the `usesDocPages = false` reasoning beneath it is right
+     for a different reason than the one it gives. So "port the engine" is really *three* decisions:
+     port the staging half (the radius BFS, the shaping cache, the stream-buffer path) onto
+     `Manifold`, delete the model half, and decide whether the visualizer moves onto the result —
+     without which the port lands a component that still has no caller.
+   - **"Mostly deletion" understates it, because `addCell()` and `loadFromZzStructureDocument()`
+     mint cells and links with no operations behind them.** Under R12 a `CellRef` *is* an operation
+     index, so ingesting a YAML slice means minting `Structure` ops through
+     `Store::makeCell`/`setLink` — which is step 20's `sliceToStore()`. The two steps are entangled
+     at exactly that seam, and doing 19 without 20 means either keeping a second cell space for
+     non-op cells (the thing the convergence exists to remove) or leaving the YAML path broken in
+     between.
+
+   The order that follows: do 19 and 20 as one piece, staging-half-first, with the visualizer's move
+   onto `Manifold` as the step that gives the result a caller.
 
 1. **`sliceToStore()` / `storeToSlice()` against `Manifold`**, replacing `projectXuduToZigzag`'s
    paragraph-splitting heuristic (it pairs paragraph $k$ with `pieces()[k]`, and piece index and
@@ -1877,6 +1900,30 @@ order is id order; the second walks a rank that is a random single cycle over al
 | (B) `std::unordered_map<(cell,dim), CellRef>` | 16.55      | 57.57       | —       | none          |
 
 ns/hop, 200 repetitions. B/cell includes the 48-byte `CellSlot`.
+
+**Re-measured against the real `Manifold` in migration step 19, and the 2.7x does not reproduce.**
+`ManifoldTest.aHopCostsWhatR12SaysItCosts` builds 10,000 cells on 5 dimensions through the actual
+`Store`/`Manifold` API — one rank in id order, one a random single cycle — and fills an inline-array
+baseline from the same links so that both answer identically before either is timed. On this
+machine, repeatably:
+
+| design                         | rank == id | rank random |
+| ------------------------------ | ---------- | ----------- |
+| CSR run, as actually built     | 9.9–11.3   | 9.7         |
+| inline array (+ a hash lookup) | 6.5–8.7    | 6.5–8.0     |
+
+Two things to read off it. The gap is **1.3–1.5x, not 2.7x** — though the array baseline here pays
+an `unordered_map` lookup per hop that the rejected design would not have, its cells being densely
+indexed, so the array's true advantage is somewhat larger than this shows and that row is an upper
+bound rather than a faithful measurement of it. And the CSR run's scattered cost is **9.7 ns against
+the 21.02 claimed above**: locality barely registers, because 10,000 cells is about 1 MB of slots
+plus runs and stays resident in L2. The original figures came from a standalone harness over a model
+of the design; these come from the design.
+
+**R12 is unaffected, and better supported than it was.** Its decision never rested on the ratio but
+on the absolute numbers being noise at the traversal sizes this application performs: 300 hops is
+2.9 µs against an 8.33 ms frame, and the falsifiable threshold moves *in the ruling's favour* — a
+frame saturates at roughly 860,000 hops rather than 396,000.
 
 Reading this honestly: **the inline array is genuinely faster — $2.7\times$ — and R12 removes it
 anyway.** Three things decide it.

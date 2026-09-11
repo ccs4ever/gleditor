@@ -11,10 +11,16 @@
 #include <gmock/gmock.h>
 #include <gtest/gtest.h>
 
+#include <array>
+#include <chrono>
+#include <cstddef>
 #include <filesystem>
+#include <iostream>
 #include <memory>
 #include <stdexcept>
 #include <string>
+#include <unordered_map>
+#include <utility>
 #include <vector>
 
 #include <xudu/core/microversion.hpp>
@@ -502,6 +508,196 @@ TEST(ManifoldTest, aChainIsFollowedPerBranchRatherThanAcrossBranches) {
   EXPECT_EQ(leftManifold.linked(one, dim, false), two);
   EXPECT_EQ(leftManifold.linked(one, dim, true), noCell);
   EXPECT_EQ(leftManifold.refusedOps(), 0U);
+}
+
+// -- what R12's price actually costs, measured -------------------------------
+//
+// §12.5 of the design note records 4.96 ns/hop sequential and 21.02 ns
+// scattered for the CSR run against 1.84 and 7.94 for the fixed array it
+// replaced -- 2.7x, accepted deliberately. Those numbers came from a
+// standalone harness over a model of the design. This measures the *real*
+// Manifold, and the array baseline beside it, so the ruling's price is a test
+// rather than an assertion. See R12, and the falsifiable threshold it states.
+
+namespace {
+
+/// The design R12 rejected, built here only to be measured against: eight
+/// privileged dimensions inline, so a hop is one dependent load instead of two.
+struct ArrayCell {
+  xanadu::PrimediaSpan span{};
+  std::uint32_t birthOp{0};
+  std::uint32_t lastOp{0};
+  std::uint64_t valueBits{0};
+  struct Slot {
+    DimRef dim{noCell};
+    CellRef pos{noCell};
+    CellRef neg{noCell};
+  };
+  std::array<Slot, 8> dims{};
+
+  [[nodiscard]] CellRef linked(const DimRef dim, const bool negward) const {
+    for (const auto &slot : dims) {
+      if (slot.dim == dim) {
+        return negward ? slot.neg : slot.pos;
+      }
+    }
+    return noCell;
+  }
+};
+
+/// ns/hop for a dependent chase of @p hops steps starting at @p from.
+template <typename Hop>
+double nsPerHop(const CellRef from, const std::size_t hops, Hop &&hop) {
+  constexpr int repetitions = 20;
+  const auto start          = std::chrono::steady_clock::now();
+  CellRef sink              = 0;
+  for (int rep = 0; rep < repetitions; rep++) {
+    CellRef cursor = from;
+    for (std::size_t i = 0; i < hops; i++) {
+      const CellRef next = hop(cursor);
+      // The chase is the point: the next hop needs this hop's answer, so the
+      // loop cannot be pipelined into hiding the load.
+      cursor = (noCell == next) ? from : next;
+    }
+    sink ^= cursor;
+  }
+  const auto elapsed = std::chrono::duration<double, std::nano>(
+                           std::chrono::steady_clock::now() - start)
+                           .count();
+  EXPECT_NE(sink, 0xFFFFFFFFU) << "the chase must not be optimised away";
+  return elapsed / static_cast<double>(hops * repetitions);
+}
+
+} // namespace
+
+TEST(ManifoldTest, aHopCostsWhatR12SaysItCosts) {
+  constexpr int cellCount = 10000;
+  constexpr int dimCount  = 5;
+
+  Slice slice;
+  std::vector<DimRef> dims;
+  dims.reserve(dimCount);
+  auto manifold = slice.store.rebuildManifold(slice.at);
+  for (int d = 0; d < dimCount; d++) {
+    slice.at = slice.store.makeCell(slice.at, "d." + std::to_string(d + 1));
+    dims.push_back(slice.store.cellRefOf(slice.at));
+    ASSERT_TRUE(manifold.advance(slice.store, slice.at));
+  }
+
+  std::vector<CellRef> cells;
+  cells.reserve(cellCount);
+  for (int i = 0; i < cellCount; i++) {
+    slice.at = slice.store.makeCell(slice.at, "c");
+    cells.push_back(slice.store.cellRefOf(slice.at));
+    ASSERT_TRUE(manifold.advance(slice.store, slice.at));
+  }
+
+  // A rank in id order on dims[0], and a rank that is one random cycle over
+  // every cell on dims[1]. The two differ only in locality: same number of
+  // hops, same dependent chase, different cache behaviour. dims[2..4] are
+  // linked too so that each cell's run really holds five entries -- a run of
+  // one would measure a shape the application does not have.
+  std::vector<CellRef> shuffled = cells;
+  // A fixed multiplier rather than a random engine, so the permutation is the
+  // same on every machine and run: a benchmark whose input varies is a
+  // benchmark whose output cannot be compared.
+  for (std::size_t i = shuffled.size(); i > 1; i--) {
+    const std::size_t j = (i * 2654435761U) % i;
+    std::swap(shuffled[i - 1], shuffled[j]);
+  }
+
+  for (int i = 0; i + 1 < cellCount; i++) {
+    slice.at = slice.store.setLink(slice.at, cells[i], dims[0], false,
+                                   cells[i + 1], &manifold);
+    ASSERT_TRUE(manifold.advance(slice.store, slice.at));
+    slice.at = slice.store.setLink(slice.at, shuffled[i], dims[1], false,
+                                   shuffled[i + 1], &manifold);
+    ASSERT_TRUE(manifold.advance(slice.store, slice.at));
+    for (int d = 2; d < dimCount; d++) {
+      slice.at =
+          slice.store.setLink(slice.at, cells[i], dims[d], false,
+                              cells[(i + d * 977) % cellCount], &manifold);
+      ASSERT_TRUE(manifold.advance(slice.store, slice.at));
+    }
+  }
+  // Close both ranks into cycles so a chase never runs off the end.
+  slice.at = slice.store.setLink(slice.at, cells.back(), dims[0], false,
+                                 cells.front(), &manifold);
+  ASSERT_TRUE(manifold.advance(slice.store, slice.at));
+  slice.at = slice.store.setLink(slice.at, shuffled.back(), dims[1], false,
+                                 shuffled.front(), &manifold);
+  ASSERT_TRUE(manifold.advance(slice.store, slice.at));
+  manifold.compact();
+
+  // The array baseline, filled from the manifold so both hold identical links.
+  std::unordered_map<CellRef, std::size_t> denseOf;
+  std::vector<ArrayCell> array(static_cast<std::size_t>(cellCount));
+  for (std::size_t i = 0; i < cells.size(); i++) {
+    denseOf[cells[i]] = i;
+  }
+  for (std::size_t i = 0; i < cells.size(); i++) {
+    const auto *const slot = manifold.slot(cells[i]);
+    ASSERT_NE(slot, nullptr);
+    array[i].span      = slot->span;
+    array[i].birthOp   = slot->birthOp;
+    array[i].lastOp    = slot->lastOp;
+    array[i].valueBits = slot->valueBits;
+    std::size_t next   = 0;
+    for (const auto &link : manifold.dimensionsOf(cells[i])) {
+      ASSERT_LT(next, array[i].dims.size());
+      array[i].dims[next++] = {link.dim, link.pos, link.neg};
+    }
+  }
+
+  const auto arrayHop = [&](const DimRef dim) {
+    return [&, dim](const CellRef from) {
+      const auto found = denseOf.find(from);
+      return found == denseOf.end() ? noCell
+                                    : array[found->second].linked(dim, false);
+    };
+  };
+
+  // Both designs must agree before either is timed: a faster wrong answer is
+  // not a data point.
+  for (const auto cell : {cells.front(), cells[cellCount / 2], cells.back()}) {
+    for (int d = 0; d < dimCount; d++) {
+      EXPECT_EQ(manifold.linked(cell, dims[d], false), arrayHop(dims[d])(cell))
+          << "cell " << cell << " dim " << d;
+    }
+  }
+
+  const auto runSeq = nsPerHop(cells.front(), cellCount, [&](const CellRef c) {
+    return manifold.linked(c, dims[0], false);
+  });
+  const auto runRnd =
+      nsPerHop(shuffled.front(), cellCount, [&](const CellRef c) {
+        return manifold.linked(c, dims[1], false);
+      });
+  // The array baseline pays a hash lookup the manifold does not, because its
+  // cells are indexed densely and a CellRef is an op index -- so its numbers
+  // here are an upper bound on the design R12 rejected, not a faithful one.
+  const auto arrSeq = nsPerHop(cells.front(), cellCount, arrayHop(dims[0]));
+  const auto arrRnd = nsPerHop(shuffled.front(), cellCount, arrayHop(dims[1]));
+
+  std::cout << "R12 hop cost, " << cellCount << " cells x " << dimCount
+            << " dims, ns/hop:\n"
+            << "  CSR run (as built):  seq " << runSeq << "  scattered "
+            << runRnd << '\n'
+            << "  inline array + map:  seq " << arrSeq << "  scattered "
+            << arrRnd << '\n'
+            << "  design note claims:  seq 4.96/1.84  scattered 21.02/7.94\n";
+
+  // Asserted as an order of magnitude, not as the figures above: this runs on
+  // whatever CI is. What would falsify R12 is a hop costing microseconds --
+  // the ruling's own threshold is a traversal visiting >100k cells per frame,
+  // which at anything under a hundred nanoseconds a hop is still inside an
+  // 8.33 ms budget.
+  EXPECT_LT(runSeq, 500.0) << "a sequential hop should be nanoseconds";
+  EXPECT_LT(runRnd, 2000.0) << "a scattered hop should be nanoseconds";
+  // And the falsifiable claim R12 actually rests on: 300 hops is a frame's
+  // worth of traversal and must be a rounding error against 8.33 ms.
+  EXPECT_LT(runRnd * 300.0 / 1000.0, 100.0)
+      << "300 scattered hops must be well under a millisecond";
 }
 
 TEST(ManifoldTest, aSliceSurvivesSavingAndReopening) {
