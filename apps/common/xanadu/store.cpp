@@ -92,11 +92,14 @@ std::ofstream openTextSpoolForWrite(const std::filesystem::path &path) {
 
 } // namespace
 
-Store::Store() : userPermascroll_(std::make_shared<UserPermascroll>()) {}
+Store::Store()
+    : userPermascroll_(std::make_shared<UserPermascroll>()),
+      chronofilade_(std::make_unique<enfilade::Chronofilade>()) {}
 
 Store::Store(std::shared_ptr<UserPermascroll> userPermascroll)
     : userPermascroll_(userPermascroll ? std::move(userPermascroll)
-                                       : std::make_shared<UserPermascroll>()) {}
+                                       : std::make_shared<UserPermascroll>()),
+      chronofilade_(std::make_unique<enfilade::Chronofilade>()) {}
 
 void Store::putOp(const MicroversionId &produces, const Op &op) {
   if (produces.isZero()) {
@@ -121,6 +124,10 @@ void Store::putOp(const MicroversionId &produces, const Op &op) {
   const auto node = CompactOpNode::fromOp(
       op, parentIdx, sourceIdx, CompactOpNode::branchOrdinalFor(produces));
   const auto index = opsSpool.append(node, produces);
+
+  if (chronofilade_ && index > 0) {
+    chronofilade_->recordOp(index, node, produces, *this);
+  }
 
   // The two cells genesis mints are the first two minted, so noticing them
   // here costs a comparison per operation and saves a scan per question. See
@@ -224,6 +231,9 @@ void Store::replay(const CompactOpNode &node, Version &onto) const {
 }
 
 Version Store::rebuildFromIndex(const std::uint32_t index) const {
+  if (chronofilade_) {
+    return chronofilade_->rebuildVersion(index, *this);
+  }
   Version built;
   for (const auto idx : opsSpool.ancestralPath(index)) {
     if (const auto *const node = opsSpool.get(idx); nullptr != node) {
@@ -560,6 +570,38 @@ bool Store::advance(Version &document, const MicroversionId &known,
   }
   replay(*node, document);
   return true;
+}
+
+bool Store::advanceTo(Version &document, const MicroversionId &known,
+                      const MicroversionId &version) const {
+  if (known == version) {
+    return true;
+  }
+  const auto fromIdx = opsSpool.indexOf(known);
+  const auto toIdx   = opsSpool.indexOf(version);
+  if (chronofilade_ && toIdx > 0) {
+    return chronofilade_->advance(document, fromIdx, toIdx, *this);
+  }
+  document = rebuild(version);
+  return true;
+}
+
+bool Store::verifyAgainstFullRebuild(const std::uint32_t index) const {
+  Version raw;
+  for (const auto idx : opsSpool.ancestralPath(index)) {
+    if (const auto *const node = opsSpool.get(idx); nullptr != node) {
+      replay(*node, raw);
+    }
+  }
+  if (chronofilade_) {
+    return chronofilade_->verifyAgainstFullRebuild(index, *this, raw);
+  }
+  return true;
+}
+
+bool Store::verifyAgainstFullRebuild(const MicroversionId &version) const {
+  const auto idx = opsSpool.indexOf(version);
+  return verifyAgainstFullRebuild(idx);
 }
 
 std::string Store::textOf(const MicroversionId &version) const {
@@ -1512,6 +1554,10 @@ void Store::load(const std::string &directory) {
   // refs are derived rather than written into the side tables: a store's own
   // operations already say what they are.
   indexGenesisCells();
+  if (chronofilade_) {
+    chronofilade_->clear();
+    chronofilade_->indexSpool(*this);
+  }
 }
 
 } // namespace xanadu

@@ -37,6 +37,7 @@
 #include <vector>
 
 #include "binary_ops.hpp"
+#include "common/xanadu/enfilade/chronofilade.hpp"
 #include "compact_op.hpp"
 #include "format.hpp"
 #include "microversion.hpp"
@@ -199,6 +200,31 @@ public:
    */
   [[nodiscard]] bool advance(Version &document, const MicroversionId &known,
                              const MicroversionId &version) const;
+
+  /**
+   * @brief Fast multi-step and branch-aware version advancement.
+   *
+   * Carries @p document forward (or backward across branches) to @p version
+   * using the Chronofilade in O(1) amortized time.
+   */
+  [[nodiscard]] bool advanceTo(Version &document, const MicroversionId &known,
+                               const MicroversionId &version) const;
+
+  /**
+   * @brief Verify R9 compliance: verify that Chronofilade version rebuilding
+   *        produces a state mathematically identical to a full raw replay
+   *        from State 0.
+   */
+  [[nodiscard]] bool
+  verifyAgainstFullRebuild(const MicroversionId &version) const;
+  [[nodiscard]] bool verifyAgainstFullRebuild(std::uint32_t index) const;
+
+  [[nodiscard]] const enfilade::Chronofilade *chronofilade() const noexcept {
+    return chronofilade_.get();
+  }
+  [[nodiscard]] enfilade::Chronofilade *chronofilade() noexcept {
+    return chronofilade_.get();
+  }
 
   /// The text of @p version, which is rebuild() followed by materialize().
   /// Content quoted from a torrent this machine cannot reach comes out empty,
@@ -799,6 +825,7 @@ public:
   void load(const std::string &directory);
 
 private:
+  friend class enfilade::Chronofilade;
   /// Apply one recorded op to @p onto. The single replay path: everything that
   /// rebuilds a document comes through here, so replaying and recording cannot
   /// drift.
@@ -913,6 +940,7 @@ private:
   };
   mutable std::map<std::string, std::vector<RemoteAuthorChunk>>
       remoteAuthorBuffers_;
+  std::unique_ptr<enfilade::Chronofilade> chronofilade_;
 };
 
 } // namespace xanadu
