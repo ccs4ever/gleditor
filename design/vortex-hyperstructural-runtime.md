@@ -51,6 +51,7 @@ one overloaded primitive, `link`, distinguished by whether a `target` was passed
 
 1. **`link(cell, dim, direction, [target]) -> std::optional<cell_id>`**: Inspects, establishes,
    mutates, or breaks a dimensional connection, depending on `target`:
+
    - **Read (`target` omitted)**: Returns the cell currently linked in that direction, or
      `std::nullopt` if there isn't one. (Formerly `get_link`.)
    - **Allocation (`target == -1`)**: Instantiates a fresh cell, wires it directly to the source
@@ -68,11 +69,36 @@ one overloaded primitive, `link`, distinguished by whether a `target` was passed
      and leaving one is unlinking, following exactly the same read/allocate/isolate/literal-target
      branching as every other dimension. Identity sharing is the *traversal*, not something `link`
      does on the side — see `get` below.
-1. **`get(cell, [offset], [length])`**: Dereferences the cell's payload
-   (`std::variant<std::string, double, bool>`) with optional virtual slicing.
-1. **`set(cell, value, [offset], [length])`**: Writes or in-place patches the payload **of the clone
-   rank's master**, which is what every cell on that rank reads — so one write is instantly visible
-   from all of them, with nothing copied and nothing aliased.
+
+1. **`value(cell, [offset], [length], [replacement])`**: the content primitive, and — like `link` —
+   **one primitive with a branch on what it was asked to do, every branch answering in the same
+   currency: a `cell_id`.**
+
+   - **Read the whole content (`value(cell)`)**: returns `cell` itself. The cell *is* its content's
+     address; there is nothing to dereference at the manifold level.
+   - **Read a slice (`value(cell, offset, length)`)**: returns an **ephemeral cell** whose content
+     is that range of `cell`'s spans. A slice of a cell's content is a virtual copy of a range of
+     addresses, which is precisely what a transclusion is — so reading part of a cell yields a cell
+     that quotes it, rather than a string that has escaped the manifold.
+   - **Write (`value(cell, offset, length, replacement)`)**: splices `replacement` over
+     `[offset, offset + length)` of the clone rank's master and returns **`cell`**, so a path can
+     carry on through a write — `$path/value("foo")/d.bar%`. A write lands on the **clone rank's
+     master**, which is what every cell on that rank reads, so one write is instantly visible from
+     all of them with nothing copied and nothing aliased.
+
+   **Why one primitive rather than `get` and `set`.** `link` earns its single-primitive status
+   because read, allocate, break and literal-target all answer one question — *which cell is on the
+   other end?* — so all four return a `cell_id`. `get` and `set` looked like they could not be
+   joined, because one returned content and the other returned nothing. Making the read answer with
+   a *cell* dissolves that: both branches now answer *which cell holds the content you asked about*,
+   and both compose in a path. Turning a cell into characters is `render` below, which is a
+   projection into the host language rather than an operation on the manifold — the same boundary
+   `materialize()` draws for a `Version`.
+
+   **The ephemeral read has R8's boundary for free.** A slice cell carries `ephemeralBit`, and
+   `Manifold::applyStructure()` refuses a link whose target is ephemeral — so a slice can be read
+   and traversed from, but cannot be woven into persistent structure without being promoted. That is
+   exactly the rule R8 wants, arriving without a special case.
 
 ```mermaid
 graph TD
@@ -265,65 +291,81 @@ true;
     return true;
 }
 
-// Payload Accessor: Slicing-Aware Dereference
-CellValue get(cell_id c_id, int64_t offset = 0, int64_t
-length = -1) {
+// The Content Primitive: value
+//
+// One primitive branching on what it was asked to do, and -- like link --
+// every branch answering in the same currency, a cell_id. That is what lets a
+// write sit in the middle of a path: $path/value("foo")/d.bar%.
+//
+//   value(c)                 -> c          the whole content; a cell is its address
+//   value(c, off, len)       -> ephemeral  a slice, as a cell quoting that range
+//   value(c, off, len, repl) -> c          splice repl over the range
+std::optional<cell_id> value(cell_id c_id, int64_t offset = 0,
+                             int64_t length = -1,
+                             std::optional<CellValue> replacement =
+                                 std::nullopt) {
+    auto it = matrix.find(c_id);
+    if (it == matrix.end() || !it->second) return std::nullopt;
+
+    // Content lives on the clone rank's head and every member reads through
+    // it, so a write through any member is what all of them then show.
+    const cell_id master = find_clone_master(c_id);
+
+    if (replacement) {
+        CellValue& target = matrix[master]->primitive_value;
+        if (!std::holds_alternative<std::string>(*replacement) ||
+            !std::holds_alternative<std::string>(target)) {
+            target = *replacement;              // scalars replace wholesale
+        } else {
+            // A splice. The text outside [offset, offset+length) keeps the
+            // addresses it had, which is U3's whole argument; here that is a
+            // substring patch, and on a persistent cell it is one Splice
+            // operation -- see §5.3.
+            std::string& dst = std::get<std::string>(target);
+            const size_t at = std::min<size_t>(
+                static_cast<size_t>(std::max<int64_t>(0, offset)), dst.size());
+            const size_t n = (length < 0)
+                                 ? dst.size() - at
+                                 : std::min(static_cast<size_t>(length),
+                                            dst.size() - at);
+            dst.replace(at, n, std::get<std::string>(*replacement));
+        }
+        return c_id;   // the cell, so a path carries on through the write
+    }
+
+    if (offset == 0 && length < 0) return c_id;  // the whole content is the cell
+
+    // A slice is a virtual copy of a range of the head's content, which is
+    // what a transclusion is -- so it answers with a cell quoting that range
+    // rather than with characters that have escaped the manifold. The cell is
+    // ephemeral: no operation backs it, and Manifold::applyStructure() refuses
+    // to link anything to it, so R8's boundary arrives with no special case.
+    const CellValue& src = matrix[master]->primitive_value;
+    if (!std::holds_alternative<std::string>(src)) return c_id;
+    const std::string& text = std::get<std::string>(src);
+    const size_t at = std::min<size_t>(
+        static_cast<size_t>(std::max<int64_t>(0, offset)), text.size());
+    const size_t n = (length < 0) ? text.size() - at
+                                  : std::min(static_cast<size_t>(length),
+                                             text.size() - at);
+
+    const cell_id slice = internal_alloc_cell();   // ephemeral in a real arena
+    matrix[slice]->primitive_value = text.substr(at, n);
+    return slice;
+}
+
+// Projection, not a primitive. Turning a cell into characters the host
+// language can hold is a boundary crossing -- the same one
+// Version::materialize() makes for a document -- and nothing inside the
+// manifold needs it. This is what `get` was, minus the pretence of being
+// fundamental.
+CellValue render(cell_id c_id) {
     auto it = matrix.find(c_id);
     if (it == matrix.end() || !it->second) return false;
-
-    // Resolved through the clone rank's head. A clone holds no content of its
-    // own, so this is the only place identity sharing happens -- and it is a
-    // walk, not a dereference of something two cells hold at once.
-    const cell_id master = find_clone_master(c_id);
-    const CellValue& val = matrix[master]->primitive_value;
-    if (std::holds_alternative<bool>(val)) return std::get<bool>(val);
-    if (std::holds_alternative<double>(val)) return
-std::get<double>(val);
-
-    const std::string& src = std::get<std::string>(val);
-    if (offset < 0 || static_cast<size_t>(offset) >= src.size())
-return std::string("");
-    size_t start = static_cast<size_t>(offset);
-    size_t count = (length < 0) ? std::string::npos :
-static_cast<size_t>(length);
-    return src.substr(start, count);
+    return matrix[find_clone_master(c_id)]->primitive_value;
 }
 
-// Payload Accessor: In-Place Mutation & Substring Patching
-void set(cell_id c_id, const CellValue& new_val, int64_t
-offset = 0, int64_t length = -1) {
-    auto it = matrix.find(c_id);
-    if (it == matrix.end() || !it->second) return;
-
-    // Writes land on the head, which is what gives the head its primacy: every
-    // cell on the rank reads through it, so one write changes all of them.
-    CellValue& target = matrix[find_clone_master(c_id)]->primitive_value;
-
-    if (std::holds_alternative<bool>(new_val) ||
-std::holds_alternative<double>(new_val)) {
-        target = new_val;
-        return;
-    }
-
-    const std::string& input_str = std::get<std::string>(new_val);
-    if (!std::holds_alternative<std::string>(target) ||
-        (offset == 0 && (length < 0 || static_cast<size_t>(length) >=
-std::get<std::string>(target).size()))) {
-        target = input_str;
-        return;
-    }
-
-    std::string& target_str = std::get<std::string>(target);
-    size_t start = static_cast<size_t>(std::max<int64_t>(0, offset));
-    if (start > target_str.size()) target_str.resize(start, ' ');
-
-    size_t count = (length < 0) ? (target_str.size() - start) :
-static_cast<size_t>(length);
-    count = std::min(count, target_str.size() - start);
-    target_str.replace(start, count, input_str);
-}
-
-// Convenience Wrappers (named entry points onto link/set, not new primitives)
+// Convenience Wrappers (named entry points onto link/value, not new primitives)
 std::optional<cell_id> new_cell(cell_id cell, cell_id dim, int direction) {
     return link(cell, dim, direction, -1);
 }
@@ -485,15 +527,24 @@ The cost is that identity sharing stops being symmetric, and should: taking the 
 is not the same operation as taking a member out, because the head is not a peer. VQL §4.6's
 "payload authority follows argument order" is what names the head — the leftmost operand.
 
-### 5.3 `set()`'s offset/length form is not a primitive on a persistent cell
+### 5.3 `value()`'s write branch is one operation on a persistent cell
 
-§2's `set` patches a `std::string` in place. A persistent cell's content is a `PrimediaSpan` into an
-append-only permascroll; there is nothing to patch. `set(cell, v)` appends `v` and records an
-operation naming the new span, so the old value stays addressable.
+§2's write patches a `std::string` in place. A persistent cell's content is a run of `PrimediaSpan`s
+into an append-only permascroll; there is nothing to patch. `value(cell, 0, -1, v)` appends `v` and
+records an operation naming the new span, so the old value stays addressable.
 
-The offset/length form splices inside a cell's own text, which is an insert and a delete against
-that cell — two operations, not one call on a buffer. An `ArenaManifold` cell (convergence R8) owns
-its bytes and keeps the in-place behaviour §2 describes; a persistent cell does not.
+The offset/length form is **one** operation, not the two an earlier draft of this section predicted:
+`StructureVerb::Splice` replaces a range of a cell's own content, keeping the addresses of the text
+either side of the edit — which is what U3 in the convergence note is about, and what makes an edit
+an edit rather than a replacement. An `ArenaManifold` cell (convergence R8) owns its bytes and keeps
+the literal in-place behaviour §2 describes; a persistent cell records a splice and gets the same
+result.
+
+**And the read branch is where a persistent cell does better than §2's sketch.** A slice does not
+have to copy characters into an ephemeral cell at all: a cell's content is already a run of spans,
+so a slice is a *sub-run* of those same addresses. The ephemeral cell holds no bytes, only the spans
+— which is why reading part of a cell is a transclusion rather than a copy, and why two readers of
+the same slice hold the same addresses rather than two equal strings.
 
 ### 5.4 The links map becomes a compacting CSR run
 

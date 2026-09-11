@@ -44,20 +44,21 @@ mutations driven by the atomic engine:
   other value (including a literal `0`) links straight to that cell, since `0` is Cell 0, the
   origin/home cell — an ordinary addressable target, not a sentinel. `link` returns the
   linked/allocated/broken cell, or nothing if there wasn't one; VQL treats an empty result the same
-  way any other step that "returns nothing" is treated (§3). `get(cell, [offset], [length])`/
-  `set(cell, value, [offset], [length])` are the matching content accessors — see Vortex §2's
-  `get_cell_value`/`set_cell_value`, renamed here to match how they're spelled in every VQL surface
-  form. Vortex §2 also defines `new(cell, dim, dir, [value])`/`break(cell, dim, dir)` as named entry
-  points fixing `link`'s `target` to `-1`/`-2` respectively (`new`'s optional `value` is a `set()`
-  applied to the freshly allocated cell); VQL reaches all three the same way — as ordinary
-  `FunctionInvocation`s (§3) — so `$cell/break(d.foo, +1)` and `$cell/link(d.foo, +1, -2)` compile
-  to the same call.
+  way any other step that "returns nothing" is treated (§3).
+  `value(cell, [offset], [length], [replacement])` is the matching content primitive — one call for
+  both directions, answering in a `cell_id` either way, so a write composes in a path like anything
+  else — see Vortex §2's `get_cell_value`/`set_cell_value`, renamed here to match how they're
+  spelled in every VQL surface form. Vortex §2 also defines
+  `new(cell, dim, dir, [value])`/`break(cell, dim, dir)` as named entry points fixing `link`'s
+  `target` to `-1`/`-2` respectively (`new`'s optional `value` is a `value()` applied to the freshly
+  allocated cell); VQL reaches all three the same way — as ordinary `FunctionInvocation`s (§3) — so
+  `$cell/break(d.foo, +1)` and `$cell/link(d.foo, +1, -2)` compile to the same call.
 - **Dual-Wing Invocation Topology**: Built-in functions, custom routines, and opcodes adhere to the
   dual-wing interface. Out-parameters project negward along `-d.grab` (chained posward along
   `+d.step` for multiple returns). In-parameters project posward along `+d.grab` and chain along
   `+d.step`.
 - **Snapshot-Before-Write Execution**: When updating nodes in-place or writing query projections,
-  all input operand payloads are fully dereferenced and snapshotted prior to invoking `set()` or
+  all input operand payloads are fully dereferenced and snapshotted prior to invoking `value()` or
   mutating pointers, preventing self-aliasing hazards.
 - **Associative Cursor Scopes**: Query variables are not stored in stack frames or hash lookups.
   They resolve directly against the active Spin-Head cursor along `+d.vars`, with bound payloads or
@@ -96,14 +97,14 @@ ______________________________________________________________________
 | `#`                 | Root Metacells                    | Lazily streams all disjoint root manifold entry points across the matrix.                                                                                                                      |
 | `^`                 | Process Manifold (`d.cursors`)    | Streams all active Spin-Head execution cursor threads. Never a pinning cursor -- those are on their own Root Set rank, `d.pinning-cursors` (§7.5).                                             |
 | `^NAME`             | `^[./d.name[. = "NAME"]]`         | Short-circuits the cursor scan, locking directly onto the named thread node. A cursor is named by a cell on its `d.name` rank rather than by its own content -- §6.1 spells the long form out. |
-| `.`                 | Context Identity                  | The current step's context cell — a valid anchor on its own, or `get(context)` when dereferenced.                                                                                              |
+| `.`                 | Context Identity                  | The current step's context cell — a valid anchor on its own, or `render(context)` when a host value is wanted.                                                                                 |
 | `/dim`              | `LazyRankStream(dim, posward)`    | Traverses `dim`'s entire rank posward from the context cell.                                                                                                                                   |
 | `/-dim`             | `LazyRankStream(dim, negward)`    | Traverses `dim`'s entire rank negward — the `-` binds to the dimension name, not the operator.                                                                                                 |
 | `/dim%`             | Create (`link(@, dim, dir, -1)`)  | Allocates a new cell along `dim` (at the tail of any existing rank); see §4.5.                                                                                                                 |
 | `/dim%VALUE`        | Create + init                     | Allocates and initializes a new cell's content to `VALUE` — bare, quoted, or `$variable`.                                                                                                      |
 | `/dim%%...`         | Batch create                      | Each additional `%` allocates one more cell along `dim`; all of them join the step's result set — see §4.5.                                                                                    |
 | `A><B`              | Clone (`link(A, d_clone, +1, B)`) | Puts `A` and `B` on one clone rank, so both read its master; chainable (`A><B><C`) and combinable with `%` — see §4.6.                                                                         |
-| `.[offset, length]` | `get(ctx, off, len)`              | Zero-copy virtual string slice dereference.                                                                                                                                                    |
+| `.[offset, length]` | `value(ctx, off, len)`            | A slice, answered as an ephemeral cell quoting that range of addresses — a transclusion, not a copy.                                                                                           |
 | `@`                 | Context Identity Address          | Evaluates to the numerical `cell_id` coordinate of the context node itself.                                                                                                                    |
 | `[...]`             | Predicate / Index Window          | Applies inline boolean filters or relative index clamps to a stream.                                                                                                                           |
 | `(...)`             | Macro Dimension Group             | Groups dimensional sequences into a compound traversal segment.                                                                                                                                |
@@ -201,7 +202,7 @@ A few grammar points worth calling out explicitly:
   one a given function takes is fixed by its declared signature, not inferred per call. This is why
   `$cell/link(d.foo, +1, $target)` means `link(@, d.foo, +1, $target)` with `@` bound to `$cell` —
   `link` returns the cell it just linked, so the chain is just as continuable — and why
-  `$path/substring(1, 8)` and `$path/set("foo")` need no explicit context argument at all:
+  `$path/substring(1, 8)` and `$path/value("foo")` need no explicit context argument at all:
   `substring` and `set` both expect a value first, so `.` is prepended instead of `@`. Mutation is
   not a separate "statement" grammar competing with the "expression" grammar for the same syntax;
   it's the same PathExpression machinery, evaluated for effect under `weave` instead of for value
@@ -249,9 +250,11 @@ read form returning nothing, never on a `cell_id` value, so nothing here special
 
 VQL supports zero-copy virtual slicing on text payloads:
 
-- **Direct Path Step**: `$node/.[offset, length]` calls `get($node, offset, length)`.
-- **Mutation Patching**: `$node/set(replacement, offset, length)` calls
-  `set($node, replacement, offset, length)`. Numeric and boolean variants ignore offsets and lengths
+- **Direct Path Step**: `$node/.[offset, length]` calls `value($node, offset, length)`, which
+  answers an ephemeral cell quoting that range rather than a string.
+- **Mutation Patching**: `$node/value(replacement, offset, length)` calls
+  `value($node, offset, length, replacement)` and **returns `$node`**, so a path continues through
+  the write: `$path/value("foo")/d.bar%`. Numeric and boolean variants ignore offsets and lengths
   entirely.
 
 ### 4.3 Extended Truthiness Rules
@@ -304,9 +307,10 @@ literal that has nothing to do with the cell model it's returning from:
 
 - **Bare (`/dim%`)**: `link(@, dim, dir, -1)`. Applied once per cell in the current context stream
   (like any other step).
-- **Initialized (`/dim%VALUE`)**: the same allocation, immediately followed by `set(@, VALUE)` on
-  the newly allocated cell. `VALUE` may be a bare token (`/d.status%OK`), a quoted string when it
-  contains spaces or punctuation (`/d.status%"needs review"`), or a variable (`/d.status%$value`).
+- **Initialized (`/dim%VALUE`)**: the same allocation, immediately followed by
+  `value(@, 0, -1, VALUE)` on the newly allocated cell. `VALUE` may be a bare token
+  (`/d.status%OK`), a quoted string when it contains spaces or punctuation
+  (`/d.status%"needs review"`), or a variable (`/d.status%$value`).
 - **Tail-seeking**: if the context cell already has a link along `dim` in the given direction, `%`
   walks to the tail of that rank first (the same traversal §4.1 already performs) and allocates
   there, rather than clobbering the context cell's own link slot. Without this, a loop that calls
@@ -357,7 +361,7 @@ already reading the same cell.
   simply stops being read while it is a clone, and is there again if it leaves the rank.
 - **Combines with `%` (`A><%`, `A><%VALUE`, `%VALUE><A`)**: a bare `%` — with no dimension prefix,
   distinct from `/dim%`'s dimension-attached form — allocates a free cell with no incoming
-  structural link at all; `%VALUE` allocates and immediately `set()`s it to `VALUE`, same as
+  structural link at all; `%VALUE` allocates and immediately `value()`s it to `VALUE`, same as
   `/dim%VALUE` does for a dimension-attached create. Because payload authority follows argument
   order (previous bullet), where the `%` sits in the chain determines whether its `VALUE` survives:
   - **`%VALUE><$a`**: the fresh cell is the leftmost (`cell`) operand, so its `VALUE` is
@@ -614,15 +618,20 @@ no history and no way back. A rank changes the answer for every member by changi
 ends*, and that change is an ordinary operation in hypertime: scrub behind it and the old master is
 the master again, for all of them at once.
 
-### 7.4 `set(replacement, offset, length)` is two operations on a persistent cell
+### 7.4 `value(replacement, offset, length)` is **one** operation on a persistent cell
 
-§4.2's "Mutation Patching" compiles to a single `set` only in the arena regime. A persistent cell's
-content is a span into an append-only permascroll: splicing inside it is an insert and a delete
-against that cell's own text.
+An earlier draft of this section predicted two — an insert and a delete against the cell's own text
+— because a cell held a single span and splicing inside it meant taking it apart.
+`StructureVerb::Splice` is that operation, singular: it replaces a range of a cell's content and
+keeps the addresses of the text either side, which is U3 in the convergence note.
 
-The syntax is unchanged and the semantics are unchanged. What changes is that the cost is visible,
-which is the correct signal — it is the difference between editing a document and editing a scratch
-value.
+So the syntax, the semantics *and* the cost are unchanged from the arena regime. What a persistent
+cell adds is that the edit has a name in hypertime and the text it did not touch keeps its identity
+— so a quotation of the untouched part survives the edit, which under one-span-per-cell it did not.
+
+`value()` also returns the cell in both directions, so a write is an ordinary path step:
+`$path/value("foo")/d.bar%` walks on from the cell it just wrote. That is the same property `link()`
+has always had, and the reason the two content accessors became one primitive — see Vortex §1.
 
 ### 7.5 `d.cache` is a pinned island
 

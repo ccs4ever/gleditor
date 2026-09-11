@@ -2351,39 +2351,45 @@ This also gives `promote()` (R8) a definition it did not have: **promoting an `A
 `Manifold` is a CSR compaction that happens to write ops as it goes.** The two passes are the same
 pass with a different sink.
 
-### V4. `set(cell, value, offset, length)` is not a primitive on a persistent cell
+### V4. `value()` is one primitive, and its splice is one operation
 
-Vortex §2's `set` patches a string in place, and VQL §4.2 exposes that as "Mutation Patching". A
-persistent cell's content is a `PrimediaSpan` into an append-only permascroll; there is nothing to
-patch.
+> **Superseded in part by U3, which this section's own reasoning helped produce.** What follows is
+> corrected rather than merely annotated, because the prediction it made turned out to be wrong in
+> the direction that mattered.
 
-In the ephemeral regime this is unchanged — an `ArenaManifold` cell owns its bytes and can rewrite
-them. In the persistent regime, `set(cell, v)` appends `v` to the permascroll and records a
-`SetValue` op naming the new span, chained through `sourceOpIndex` (R7). The old value remains
-addressable, which is the entire point.
+Vortex §2 had two content accessors, `get` and `set`, and §2's `set` patched a string in place while
+returning nothing. Two things changed.
 
-The offset/length form is the one that does not survive as a primitive. Splicing `length` bytes at
-`offset` inside a cell's own concatext is an `Insert` and a `Delete` against that cell — two
-operations over the cell's text, not one operation on a buffer. VQL can keep the surface syntax;
-what it cannot keep is the claim that it compiles to a single `set`.
+**They are one primitive now, `value(cell, offset, length, replacement)`,** and the thing that let
+them merge is making the read answer in the same currency as the write. `link` earns its
+single-primitive status because read, allocate, break and literal-target all answer *which cell is
+on the other end*; `get` and `set` could not merge while one returned content and the other returned
+nothing. A read of a slice now answers with an **ephemeral cell quoting that range** — which is what
+a slice of a cell's content *is*, once a cell holds a run of spans — so both branches answer with a
+`cell_id` and both compose in a path. A write returns the cell it wrote, so
+`$path/value("foo")/d.bar%` walks on. Turning a cell into characters is `render()`, a projection
+into the host language rather than an operation on the manifold — the boundary
+`Version::materialize()` already draws for a document.
 
-**Price.** A patch of a persistent cell costs more than a patch of an arena cell, and visibly so.
-That is the correct price signal: it is the difference between editing a document and editing a
-scratch value, and a language that hides it would be lying about which one you are doing.
+That the ephemeral read gets R8's boundary for nothing is a sign the shape is right:
+`applyStructure()` refuses a link whose target is ephemeral, so a slice can be read and traversed
+from but not woven into persistent structure without promotion.
 
-### The rest, which need no decision
+**And the offset/length form *is* a primitive on a persistent cell — this section predicted
+otherwise.** It said splicing inside a cell's own text "is an `Insert` and a `Delete` against that
+cell — two operations over the cell's text, not one operation on a buffer", and that VQL could not
+keep the claim that it compiles to a single call. That was true only while a cell held **one** span.
+U3 replaced that with a run, and `StructureVerb::Splice` replaces a range of a cell's content in one
+operation, keeping the addresses of the text either side.
 
-| Vortex/VQL as written                                                      | under this layout                                                                                                                                                                                                                                                             |
-| -------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `cell_id = int64_t`                                                        | `CellRef` is `std::uint32_t` with bit 31 reserved for ephemeral (R12), so $2^{31}$ persistent cells — 137 GB of ops spool at 64 bytes each. Not a limit anything reaches first.                                                                                               |
-| `constexpr cell_id d_grab = 1; d_clone = 999; d_cursors = 1001;`           | A dimension is a cell (R2), so its id is minted, not chosen. The genesis sequence mints the system dimensions off `home` in a fixed order, so they are deterministic without being magic numbers.                                                                             |
-| `std::unordered_map<cell_id, LinkSlot> links` per cell                     | one CSR run; §12.5 measured the per-cell-hash-table form at 467 B/cell against 108, and the map cannot answer "which dimensions does this cell link on" without a second index.                                                                                               |
-| Eager eviction when a cell's total live links reach zero                   | `CellSlot::linkCount` **is** that sum, maintained. R12's `d.meta-dims` hands Vortex's GC its predicate for free rather than needing the $\sum_{\text{dim}}$ scan §1 writes out.                                                                                               |
-| Root Set = "Origin Cell (0), `d.cursors`, global system dimension anchors" | `home`, the `d.cursors` rank, and the `d.dims` rank off `home` (R12) — the three-part Root Set was already this shape, R12 just names the third part. V5 adds a fourth, `d.pinning-cursors`.                                                                                  |
-| `CellValue = std::variant<std::string, double, bool>`                      | `valueKind` + `valueBits` + `span` (R6). Zigzag's fourth alternative, an inline `std::vector<std::uint8_t>`, does not come along: a blob is primedia and a span addresses it, which is why step 17 deletes `ephemeralText` and why `cellDataAsText` answers empty for a blob. |
-| "Zero-Allocation Lazy Rank-Streaming"                                      | survives literally: a rank walk is `linkOffset`-relative indexing into `links`, 4.96 ns/hop (§12.5), no allocation on the path.                                                                                                                                               |
-| `entangle_generator` allocating fan-out partners (VQL §4.7)                | unaffected. `DimLink` still holds exactly one `pos` and one `neg` per (cell, dimension), which is the constraint the generator exists to work around. It keeps working for the same reason it was needed.                                                                     |
-| `linkCount` is `std::uint16_t`                                             | caps one cell at 65,535 dimensions where Vortex's map had no cap. Recorded rather than defended: nothing in either specification wants a cell on 65,536 dimensions, but the limit is real and a `static_assert` will not catch it.                                            |
+So VQL keeps both the surface syntax and the claim. What a persistent cell adds over an arena cell
+is not cost but *consequence*: the edit has a name in hypertime, and the text it did not touch keeps
+its identity, so a quotation of the untouched part survives the edit. Under one span per cell it did
+not — which is the measurement U3 records.
+
+**Price.** A splice against a persistent cell appends only the bytes it inserts, so the write
+amplification this section worried about is gone; what remains is that a cell with many edits has a
+many-piece run to walk, exactly as a `Version` does for a document.
 
 ### V5. `d.cache` is a pinned island, not a rank off the origin
 
