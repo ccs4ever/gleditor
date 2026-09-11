@@ -271,13 +271,18 @@ the xudu UI. The idea is also arithmetically unsound: $2^{53} - 2$ bit patterns 
 compares equal to anything including itself, and $\pm 0.0$ is two patterns for one value, so "same
 value implies same address" is false regardless of canonicalisation (§12).
 
-**Price.** A persistent scalar costs permascroll bytes: worst case 24 for a `double`
-(`4.9406564584124654e-324`), typically 1–17. Ten thousand scalar cells at 17 B/cell is 170 KB —
-three of the 64 KiB Merkle pieces. The permascroll now also contains bytes a program wrote rather
-than bytes a person typed, which is a genuine widening of its own definition, accepted deliberately
-as the price of a scalar being a first-class Xanadu object. Arena cells (R8) carry bits only and
-spool nothing, so the write-amplification concern lands on the persistence boundary where it belongs
-rather than on the encoding.
+**Price.** A persistent scalar costs permascroll bytes: worst case 24 for a `double`, typically far
+fewer — `0.1` is three, a third is eighteen. (An earlier draft named `4.9406564584124654e-324` as
+the 24-byte case. **That is wrong, and step 15 has the test:** it is `printf`'s `%.17g` of
+`denorm_min` rather than its shortest round-trip rendering, which is `5e-324` because nothing else
+is near enough to need more digits. The bound is real and is reached by any value needing all 17
+significant digits with a three-digit exponent and a sign, such as `-1.7976931348623157e+308`. The
+example being a formatting artefact is precisely what this ruling says the rendering is not.) Ten
+thousand scalar cells at 17 B/cell is 170 KB — three of the 64 KiB Merkle pieces. The permascroll
+now also contains bytes a program wrote rather than bytes a person typed, which is a genuine
+widening of its own definition, accepted deliberately as the price of a scalar being a first-class
+Xanadu object. Arena cells (R8) carry bits only and spool nothing, so the write-amplification
+concern lands on the persistence boundary where it belongs rather than on the encoding.
 
 ### R7. A cell's micro-history is an intrusive chain in `sourceOpIndex`
 
@@ -1035,7 +1040,7 @@ ______________________________________________________________________
 Each step is one commit. After each, `make -j$(nproc)` builds all three programs and
 `make -j$(nproc) test` passes.
 
-Steps 1–14 have landed. What each actually cost, where it differed from the plan, and what it
+Steps 1–15 have landed. What each actually cost, where it differed from the plan, and what it
 measured is recorded inline below; the rest are unchanged.
 
 **Four things the landed steps have in common, worth knowing before starting the next one.**
@@ -1517,9 +1522,44 @@ came back byte-identical across every regenerated fixture.
    in step 7) and belongs with whatever first publishes a slice; until then the wire format for this
    family should be read as reserved rather than as working.
 
-1. **Scalars** (R6). Canonicalisation at the API boundary; signalling NaN rejected. Property test:
+1. ~~**Scalars** (R6). Canonicalisation at the API boundary; signalling NaN rejected. Property test:
    `asDouble(makeCell(v))` equals `canonicalise(v)`, and `textOf(cell)` parses back to the same
-   double.
+   double.~~ **Done.** `apps/common/xanadu/scalar.{hpp,cpp}` holds the canonicalisation and the
+   rendering; `Store::makeScalarCell()`/`setScalar()` mint and restate; `Manifold::asDouble()`,
+   `asBool()`, `asInt64()` and `valueKindOf()` read the bits. Ten tests in
+   `tests/xudu/scalar_test.cpp`, over a list of doubles chosen one failure mode at a time rather
+   than sampled.
+
+   **The verbs are `makeScalarCell`/`setScalar`, not overloads of `makeCell`/`setValue`.** Two
+   resolution traps made that a correctness matter rather than a naming preference.
+   `makeCell(v, "d.1")` against a `bool` overload picks the **bool** — `const char *` to `bool` is a
+   standard conversion and beats `string_view`'s user-defined one — so the sugar for minting a
+   dimension would silently have minted `true`. And an integer literal is ambiguous between the
+   `bool` and `std::int64_t` overloads, which is left as it is: whether `42` is a number or a flag
+   is the author's statement, and a compile error asking for `42.0` or `std::int64_t{42}` is the
+   right way to ask.
+
+   **Canonicalisation is three lines and all three matter.** Every NaN collapses to
+   `0x7ff8000000000000`; `-0.0` becomes `+0.0`, caught as `0.0 == value` rather than by naming the
+   sign bit, since that is exactly the one value with two patterns; a signalling NaN is refused at
+   the API with nothing recorded, because it is a request that every later reader raise an exception
+   and quieting it would discard that intent rather than honour it. `std::int64_t` goes through
+   `bit_cast` rather than a conversion, so a negative integer comes back negative instead of as the
+   huge unsigned number with the same bits.
+
+   **The bit/byte split is what the tests are actually about.** A NaN cell renders `nan`, reads back
+   as a NaN, and compares *unequal to itself* through `asDouble()` — which is the arithmetic R6
+   cites for why "same value implies same address" was never sound. Two cells holding `3.14` have
+   equal values, identical renderings, and **different permascroll addresses**, asserted directly:
+   sharing one would assert a quotation that never happened and light up Identity Gold for two
+   people who both typed the same number. And `asDouble()` on an `Int64` cell answers nothing rather
+   than converting, because a cell holding the integer 1 and a cell holding `true` mean different
+   things.
+
+   **What a rendering actually costs, corrected.** R6's own worst-case example was a `printf`
+   artefact and the ruling now says so; the 24-byte bound survives. Searched over four million
+   random bit patterns, the longest shortest-round-trip rendering is 24 bytes
+   (`-5.2739967172806315e-235`), which is what the 32-byte buffer is sized against.
 
 1. **`Resolver` verified-piece cache**, keyed by info hash and piece index. Blocking for the frame
    budget: `readSegment` verifies whole 64 KiB pieces and the resolved-text cache was removed and

@@ -167,8 +167,21 @@ public:
   [[nodiscard]] std::string textOf(CellRef ref,
                                    const xanadu::SpanReader &reader) const;
 
-  /// The typed value of @p ref, when it carries double bits.
+  /// The typed value of @p ref, when it carries bits of that kind -- and
+  /// nothing when it carries another, rather than converting. A cell holding
+  /// the integer 1 and a cell holding `true` render differently and mean
+  /// different things, so reading one as the other is the caller's decision to
+  /// state rather than this class's to make.
+  ///
+  /// Never parses the cell's text: the whole point of R6 carrying both halves
+  /// is that a query reads the bits. textOf() is the other half.
   [[nodiscard]] std::optional<double> asDouble(CellRef ref) const noexcept;
+  [[nodiscard]] std::optional<bool> asBool(CellRef ref) const noexcept;
+  [[nodiscard]] std::optional<std::int64_t> asInt64(CellRef ref) const noexcept;
+
+  /// Which of the above would answer, or ValueKind::None for a cell whose
+  /// content is just content.
+  [[nodiscard]] xanadu::ValueKind valueKindOf(CellRef ref) const noexcept;
 
   /**
    * @brief The group master of @p ref, following @p cloneDim negward.
@@ -251,7 +264,8 @@ public:
    * @return false when @p version names no operation, which is the caller's
    *         cue to rebuild. The manifold is left untouched.
    */
-  bool advance(const xanadu::Store &store, const xanadu::MicroversionId &version);
+  bool advance(const xanadu::Store &store,
+               const xanadu::MicroversionId &version);
 
   /// Discard the arena's dead runs, leaving every cell's links contiguous in
   /// dense order. A full fold ends with one of these, so a freshly rebuilt
@@ -286,8 +300,7 @@ private:
   [[nodiscard]] DimLink *linkFor(std::uint32_t dense, DimRef dim);
 
   /// @p cell's existing link to @p dim, or nullptr.
-  [[nodiscard]] DimLink *existingLink(std::uint32_t dense,
-                                      DimRef dim) noexcept;
+  [[nodiscard]] DimLink *existingLink(std::uint32_t dense, DimRef dim) noexcept;
 
   void setOneSide(std::uint32_t dense, DimRef dim, bool negward, CellRef to);
 

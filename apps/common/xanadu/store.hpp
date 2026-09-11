@@ -42,6 +42,7 @@
 #include "microversion.hpp"
 #include "ops.hpp"
 #include "resolver.hpp"
+#include "scalar.hpp"
 #include "scroll.hpp"
 #include "segmented_ops_spool.hpp"
 #include "segmented_primedia_spool.hpp"
@@ -371,6 +372,41 @@ public:
   /// false)` would resolve to this one, since const char* converts to bool
   /// ahead of string_view.
   MicroversionId makeCell(const MicroversionId &parent, std::string_view text);
+
+  /**
+   * @brief Mint a cell carrying a number, a flag, or an integer.
+   *
+   * Both halves of R6: the shortest round-trip rendering goes into the
+   * permascroll as ordinary content, so the cell is a link endpoint and a
+   * transclusion source like any other, and the canonical bits go into the
+   * operation, so a query never parses text. See scalar.hpp.
+   *
+   * Not an overload of makeCell(): `makeCell(v, "d.1")` against a `bool`
+   * overload resolves to the *bool*, because const char* to bool is a standard
+   * conversion and beats string_view's user-defined one. An integer literal is
+   * ambiguous between the bool and std::int64_t overloads here, deliberately --
+   * whether 42 is a number or a flag is the author's statement to make, and a
+   * compile error asking for `42.0` or `std::int64_t{42}` is the right way to
+   * ask for it.
+   *
+   * @throws std::invalid_argument if @p value is a signalling NaN.
+   */
+  MicroversionId makeScalarCell(const MicroversionId &parent, double value);
+  MicroversionId makeScalarCell(const MicroversionId &parent, bool value);
+  MicroversionId makeScalarCell(const MicroversionId &parent,
+                                std::int64_t value);
+
+  /// Restate @p cell as carrying @p value: a new rendering into the permascroll
+  /// and new bits in the operation, both together, as setValue() requires.
+  /// See @ref setLink for @p known.
+  MicroversionId setScalar(const MicroversionId &parent, zigzag::CellRef cell,
+                           double value,
+                           const zigzag::Manifold *known = nullptr);
+  MicroversionId setScalar(const MicroversionId &parent, zigzag::CellRef cell,
+                           bool value, const zigzag::Manifold *known = nullptr);
+  MicroversionId setScalar(const MicroversionId &parent, zigzag::CellRef cell,
+                           std::int64_t value,
+                           const zigzag::Manifold *known = nullptr);
 
   /**
    * @brief Point @p from's @p dim-ward neighbour at @p to. noCell clears it.
@@ -780,6 +816,13 @@ private:
   [[nodiscard]] std::uint32_t lastOpOnCell(const MicroversionId &parent,
                                            zigzag::CellRef cell,
                                            const zigzag::Manifold *known) const;
+
+  /// Spool @p value's rendering and mint or restate a cell carrying both
+  /// halves. The one place the scalar overloads above agree on what they mean;
+  /// @p cell is noCell to mint rather than to restate.
+  MicroversionId applyScalar(const MicroversionId &parent, zigzag::CellRef cell,
+                             const ScalarValue &value,
+                             const zigzag::Manifold *known);
 
   /// @throws std::invalid_argument if @p ref does not name a Structure
   ///         operation, which is what a CellRef is. @p what names the parameter

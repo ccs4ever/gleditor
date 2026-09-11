@@ -119,8 +119,7 @@ void Manifold::applyStructure(const std::uint32_t opIndex,
         .lastOp     = opIndex,
         .linkOffset = static_cast<std::uint32_t>(links.size()),
         .linkCount  = 0,
-        .valueKind =
-            static_cast<std::uint8_t>(xanadu::valueKindOf(node.flags)),
+        .valueKind = static_cast<std::uint8_t>(xanadu::valueKindOf(node.flags)),
         .flags     = 0,
         .valueBits = node.value,
     });
@@ -162,8 +161,7 @@ void Manifold::applyStructure(const std::uint32_t opIndex,
     CellRef displacedIt = noCell;
     // Read both sides out before touching anything: setOneSide() can grow a
     // run, and growing a run can move every DimLink in the arena.
-    if (const DimLink *const mine = existingLink(dense, dim);
-        nullptr != mine) {
+    if (const DimLink *const mine = existingLink(dense, dim); nullptr != mine) {
       displacedUs = negward ? mine->neg : mine->pos;
     }
     const auto target = denseOf(to);
@@ -322,6 +320,12 @@ std::string Manifold::textOf(const CellRef ref,
   return reader.read(cell->span);
 }
 
+xanadu::ValueKind Manifold::valueKindOf(const CellRef ref) const noexcept {
+  const auto *const cell = slot(ref);
+  return nullptr == cell ? xanadu::ValueKind::None
+                         : static_cast<xanadu::ValueKind>(cell->valueKind);
+}
+
 std::optional<double> Manifold::asDouble(const CellRef ref) const noexcept {
   const auto *const cell = slot(ref);
   if (nullptr == cell ||
@@ -329,6 +333,25 @@ std::optional<double> Manifold::asDouble(const CellRef ref) const noexcept {
     return std::nullopt;
   }
   return std::bit_cast<double>(cell->valueBits);
+}
+
+std::optional<bool> Manifold::asBool(const CellRef ref) const noexcept {
+  const auto *const cell = slot(ref);
+  if (nullptr == cell ||
+      cell->valueKind != static_cast<std::uint8_t>(xanadu::ValueKind::Bool)) {
+    return std::nullopt;
+  }
+  return 0 != cell->valueBits;
+}
+
+std::optional<std::int64_t>
+Manifold::asInt64(const CellRef ref) const noexcept {
+  const auto *const cell = slot(ref);
+  if (nullptr == cell ||
+      cell->valueKind != static_cast<std::uint8_t>(xanadu::ValueKind::Int64)) {
+    return std::nullopt;
+  }
+  return std::bit_cast<std::int64_t>(cell->valueBits);
 }
 
 CellRef Manifold::cloneMaster(const CellRef ref,

@@ -230,9 +230,9 @@ TEST(ManifoldTest, dimensionsComeBackInTheOrderTheyWereMinted) {
   const auto third  = slice.dimension("d.clone");
 
   const auto manifold = slice.store.rebuildManifold(slice.at);
-  EXPECT_THAT(manifold.dimensions(),
-              testing::ElementsAre(manifold.dimsDimension(), first, second,
-                                   third));
+  EXPECT_THAT(
+      manifold.dimensions(),
+      testing::ElementsAre(manifold.dimsDimension(), first, second, third));
   EXPECT_EQ(manifold.dimensionNamed("d.2", slice.store), second);
   EXPECT_EQ(manifold.dimensionNamed("d.clone", slice.store), third);
   EXPECT_EQ(manifold.dimensionNamed("d.nothing", slice.store), noCell);
@@ -240,9 +240,9 @@ TEST(ManifoldTest, dimensionsComeBackInTheOrderTheyWereMinted) {
 
 TEST(ManifoldTest, cloneMasterFollowsTheCloneDimensionNegward) {
   Slice slice;
-  const auto clone  = slice.dimension("d.clone");
-  const auto master = slice.cell("quoted");
-  const auto copy   = slice.cell("quoted");
+  const auto clone      = slice.dimension("d.clone");
+  const auto master     = slice.cell("quoted");
+  const auto copy       = slice.cell("quoted");
   const auto copyOfCopy = slice.cell("quoted");
   slice.link(master, clone, false, copy);
   slice.link(copy, clone, false, copyOfCopy);
@@ -261,15 +261,15 @@ TEST(ManifoldTest, cloneMasterFollowsTheCloneDimensionNegward) {
 
 TEST(ManifoldTest, aCellsMicroHistoryIsAChainOfOperations) {
   Slice slice;
-  const auto dim  = slice.dimension("d.1");
-  const auto cell = slice.cell("edited");
+  const auto dim   = slice.dimension("d.1");
+  const auto cell  = slice.cell("edited");
   const auto other = slice.cell("elsewhere");
   slice.link(cell, dim, false, other);
   const auto firstLink = slice.store.cellRefOf(slice.at);
   slice.link(cell, dim, false, noCell);
   const auto secondLink = slice.store.cellRefOf(slice.at);
 
-  const auto manifold = slice.store.rebuildManifold(slice.at);
+  const auto manifold    = slice.store.rebuildManifold(slice.at);
   const auto *const slot = manifold.slot(cell);
   ASSERT_NE(slot, nullptr);
   EXPECT_EQ(slot->birthOp, cell);
@@ -279,7 +279,7 @@ TEST(ManifoldTest, aCellsMicroHistoryIsAChainOfOperations) {
   // same cell, and the chain ends at the MakeCell whose index is the cell.
   std::vector<std::uint32_t> chain;
   for (auto step = slot->lastOp; step != 0;
-       step = slice.store.getCompactOp(step)->sourceOpIndex) {
+       step      = slice.store.getCompactOp(step)->sourceOpIndex) {
     chain.push_back(step);
   }
   EXPECT_THAT(chain, testing::ElementsAre(secondLink, firstLink, cell));
@@ -294,8 +294,8 @@ TEST(ManifoldTest, setValueRestatesContentAndBits) {
   Slice slice;
   const auto cell = slice.cell("42");
   const auto span = slice.store.userPermascrollPtr()->append("43");
-  slice.at        = slice.store.setValue(slice.at, cell, span,
-                                         ValueKind::Double, 0x4045800000000000ULL);
+  slice.at = slice.store.setValue(slice.at, cell, span, ValueKind::Double,
+                                  0x4045800000000000ULL);
 
   const auto manifold = slice.store.rebuildManifold(slice.at);
   EXPECT_EQ(manifold.textOf(cell, slice.store), "43");
@@ -376,12 +376,12 @@ TEST(ManifoldTest, anEphemeralReferenceIsRefusedAtTheApiAndInTheFold) {
   const auto cell = slice.cell("real");
 
   // R8's boundary at the API.
-  EXPECT_THROW(slice.store.setLink(slice.at, cell, dim, false,
-                                   ephemeralBit | 3U),
-               std::invalid_argument);
-  EXPECT_THROW(slice.store.setLink(slice.at, cell, ephemeralBit | dim, false,
-                                   noCell),
-               std::invalid_argument);
+  EXPECT_THROW(
+      slice.store.setLink(slice.at, cell, dim, false, ephemeralBit | 3U),
+      std::invalid_argument);
+  EXPECT_THROW(
+      slice.store.setLink(slice.at, cell, ephemeralBit | dim, false, noCell),
+      std::invalid_argument);
 
   // And in the fold, which is what makes it an invariant of the encoding
   // rather than a rule the caller is trusted to follow. Recorded the long way
@@ -404,7 +404,7 @@ TEST(ManifoldTest, aReferenceThatIsNotACellIsRefusedAtTheApi) {
   const auto dim  = slice.dimension("d.1");
   const auto cell = slice.cell("real");
   // A text operation's index is not a cell, however plausible a number it is.
-  slice.at = slice.store.insert(slice.at, 0, "typed");
+  slice.at          = slice.store.insert(slice.at, 0, "typed");
   const auto textOp = slice.store.cellRefOf(slice.at);
 
   EXPECT_THROW(slice.store.setLink(slice.at, textOp, dim, false, cell),
@@ -489,9 +489,8 @@ TEST(ManifoldTest, aChainIsFollowedPerBranchRatherThanAcrossBranches) {
   const auto left = slice.store.setLink(fork, one, dim, false, two);
   // The right branch's operation has to chain to one's *own* history as the
   // fork saw it, not to the operation the left branch appended afterwards.
-  const auto right = slice.store.setLink(fork, one, dim, true, three);
-  const auto onward =
-      slice.store.setLink(right, one, dim, false, three);
+  const auto right  = slice.store.setLink(fork, one, dim, true, three);
+  const auto onward = slice.store.setLink(right, one, dim, false, three);
 
   const auto manifold = slice.store.rebuildManifold(onward);
   EXPECT_EQ(manifold.linked(one, dim, false), three);
@@ -506,8 +505,8 @@ TEST(ManifoldTest, aChainIsFollowedPerBranchRatherThanAcrossBranches) {
 }
 
 TEST(ManifoldTest, aSliceSurvivesSavingAndReopening) {
-  const auto dir = std::filesystem::temp_directory_path() /
-                   "xudu_manifold_reload_test";
+  const auto dir =
+      std::filesystem::temp_directory_path() / "xudu_manifold_reload_test";
   std::filesystem::remove_all(dir);
   std::filesystem::create_directories(dir);
 
@@ -525,10 +524,10 @@ TEST(ManifoldTest, aSliceSurvivesSavingAndReopening) {
     at                = minted.version;
     dim               = minted.dim;
     at                = store.makeCell(at, "first");
-    head    = store.cellRefOf(at);
-    at      = store.makeCell(at, "second");
-    tail    = store.cellRefOf(at);
-    at      = store.setLink(at, head, dim, false, tail);
+    head              = store.cellRefOf(at);
+    at                = store.makeCell(at, "second");
+    tail              = store.cellRefOf(at);
+    at                = store.setLink(at, head, dim, false, tail);
     store.setCurrentVersions({at});
     store.save(dir.string());
   }

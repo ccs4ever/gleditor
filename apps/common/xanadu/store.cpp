@@ -320,6 +320,62 @@ MicroversionId Store::makeCell(const MicroversionId &parent,
   return makeCell(parent, userPermascroll_->append(text));
 }
 
+MicroversionId Store::applyScalar(const MicroversionId &parent,
+                                  const zigzag::CellRef cell,
+                                  const ScalarValue &value,
+                                  const zigzag::Manifold *const known) {
+  // The rendering is spooled whether this mints or restates, because a cell's
+  // content is primedia at an address and an address is what a link, a
+  // transclusion and a diff all attach to. R6 accepts the permascroll now
+  // holding bytes a program wrote rather than bytes a person typed -- worst
+  // case 24 for a double, typically fewer -- as the price of a scalar being a
+  // first-class Xanadu object rather than a payload of its own kind.
+  const auto span = userPermascroll_->append(value.text);
+  if (zigzag::noCell == cell) {
+    Op op;
+    op.kind  = OpKind::Structure;
+    op.flags = structureFlags(StructureVerb::MakeCell, false, value.kind);
+    op.span  = span;
+    op.value = value.bits;
+    return apply(parent, op);
+  }
+  return setValue(parent, cell, span, value.kind, value.bits, known);
+}
+
+MicroversionId Store::makeScalarCell(const MicroversionId &parent,
+                                     const double value) {
+  return applyScalar(parent, zigzag::noCell, scalarValue(value), nullptr);
+}
+
+MicroversionId Store::makeScalarCell(const MicroversionId &parent,
+                                     const bool value) {
+  return applyScalar(parent, zigzag::noCell, scalarValue(value), nullptr);
+}
+
+MicroversionId Store::makeScalarCell(const MicroversionId &parent,
+                                     const std::int64_t value) {
+  return applyScalar(parent, zigzag::noCell, scalarValue(value), nullptr);
+}
+
+MicroversionId Store::setScalar(const MicroversionId &parent,
+                                const zigzag::CellRef cell, const double value,
+                                const zigzag::Manifold *const known) {
+  return applyScalar(parent, cell, scalarValue(value), known);
+}
+
+MicroversionId Store::setScalar(const MicroversionId &parent,
+                                const zigzag::CellRef cell, const bool value,
+                                const zigzag::Manifold *const known) {
+  return applyScalar(parent, cell, scalarValue(value), known);
+}
+
+MicroversionId Store::setScalar(const MicroversionId &parent,
+                                const zigzag::CellRef cell,
+                                const std::int64_t value,
+                                const zigzag::Manifold *const known) {
+  return applyScalar(parent, cell, scalarValue(value), known);
+}
+
 MicroversionId Store::setLink(const MicroversionId &parent,
                               const zigzag::CellRef from,
                               const zigzag::DimRef dim, const bool negward,

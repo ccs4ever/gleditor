@@ -346,6 +346,13 @@ continuation indents, treats Markdown table cell padding as "wrong" indentation,
     link are maintained by the fold. **Nothing consumes it yet** — `Store::rebuildManifold()` folds
     one, `Manifold::advance()` carries it forward, and `verifyAgainstFullRebuild()` is what says the
     two agree. Spelled `<zigzag/core/manifold.hpp>` from an app or a test
+  - `scalar.hpp/.cpp`: a scalar cell's two halves (migration step 15, R6) — the shortest round-trip
+    `to_chars` rendering, spooled as ordinary primedia, and the canonical bits in
+    `CompactOpNode::value`. Canonicalisation is for value equality only and never for addresses: two
+    cells holding `3.14` are two cells at two addresses, because numeric coincidence is not
+    quotation. A signalling NaN is refused rather than quieted. Minted with
+    `Store::makeScalarCell()`, which is deliberately *not* an overload of `makeCell()` — a `bool`
+    overload would capture `makeCell(v, "d.1")`
 - `apps/xudu/` — the xanadoc editor's own UI: `beams.cpp`, `framing.cpp` (3D link ribbons and
   transclusion prisms), `session.cpp`, the overlays, `main.cpp`
 - `apps/zigzag/` — the Xanadu Zigzag multidimensional visualizer; `apps/zigzag/core/`:
@@ -477,7 +484,7 @@ they care about; see R11 in `design/store-slice-convergence.md`.
 
 - [`store-slice-convergence.md`](design/store-slice-convergence.md) — the active plan: a cell is an
   operation, `Slice` becomes a replay product of the ops spool like `Version` is. Fourteen rulings
-  with their prices, a numbered migration (**steps 1–14 are done**), and the measurements behind
+  with their prices, a numbered migration (**steps 1–15 are done**), and the measurements behind
   each. Read this before touching `CompactOpNode`, `Manifold`, `CompactZZCell` or the zigzag
   engine's sync path.
 - [`vortex-hyperstructural-runtime.md`](design/vortex-hyperstructural-runtime.md) and
