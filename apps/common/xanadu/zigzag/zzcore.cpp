@@ -46,35 +46,8 @@ bool Diagnostics::mentions(const std::string_view needle) const {
   });
 }
 
-bool isPrefletChainNode(const std::string_view role) {
-  return role.starts_with(prefletRolePrefix);
-}
-
-bool looksLikeBitTorrentMagnet(const std::string_view identifier) {
-  try {
-    static_cast<void>(xanadu::MagnetLink::parse(identifier));
-    return true;
-  } catch (...) {
-    return false;
-  }
-}
-
 std::optional<RgbColor> parseHexColor(const std::string_view text) {
   return gleditor::color::parseHexColor(text);
-}
-
-std::pair<std::string, std::string>
-splitMetadataEntry(const std::string_view text) {
-  const auto colon = text.find(':');
-  if (colon == std::string_view::npos) {
-    return {std::string{text}, std::string{}};
-  }
-
-  std::string_view value = text.substr(colon + 1);
-  while (!value.empty() && value.front() == ' ') {
-    value.remove_prefix(1);
-  }
-  return {std::string{text.substr(0, colon)}, std::string{value}};
 }
 
 std::string resolveXdgPath(const char *const xdgValue,
@@ -163,97 +136,6 @@ void neutralizeDanglingLinks(std::unordered_map<CellID, Cell> &cells,
       };
       clamp(links.pos, "pos");
       clamp(links.neg, "neg");
-    }
-  }
-}
-
-std::optional<Preflet>
-resolvePreflet(const CellID startId,
-               const std::unordered_map<CellID, Cell> &cells,
-               const CellID hostId, Diagnostics &diagnostics) {
-  Preflet result;
-  bool haveResource = false;
-
-  std::unordered_set<CellID> visited;
-  constexpr int maxChainLength = 32;
-
-  CellID current = startId;
-  for (int hop = 0; hop < maxChainLength && current != 0; ++hop) {
-    if (!visited.insert(current).second) {
-      diagnostics.warn(std::format("cell {}'s d.preflet chain loops back on "
-                                   "cell {} -- stopping there",
-                                   hostId, current));
-      break;
-    }
-
-    const Cell *cell = findCell(cells, current);
-    if (!cell) {
-      break; // Dangling; neutralized in neutralizeDanglingLinks
-    }
-
-    if (cell->role == "preflet_resource") {
-      result.resource_identifier = std::string{cell->text()};
-      haveResource               = true;
-      if (!looksLikeBitTorrentMagnet(cell->text())) {
-        diagnostics.warn(std::format("cell {}'s preflet resource identifier "
-                                     "doesn't look like a magnet:?xt=urn:btih: "
-                                     "link -- {}",
-                                     hostId, cell->text()));
-      }
-    } else if (cell->role == "preflet_hash") {
-      result.hash = std::string{cell->text()};
-    } else if (cell->role == "preflet_version") {
-      result.version = std::string{cell->text()};
-    } else if (cell->role == "preflet_cell_id") {
-      try {
-        result.target_cell_id =
-            static_cast<CellID>(std::stoull(std::string{cell->text()}));
-      } catch (...) {
-        diagnostics.warn(std::format("cell {}'s preflet cell id {} is not a "
-                                     "number -- ignoring",
-                                     hostId, cell->text()));
-      }
-    } else if (cell->role == "preflet_meta") {
-      result.metadata.push_back(splitMetadataEntry(cell->text()));
-    } else {
-      diagnostics.warn(std::format("cell {} is in cell {}'s d.preflet chain "
-                                   "but has an unrecognized type {} -- "
-                                   "ignoring it",
-                                   current, hostId,
-                                   cell->role.empty() ? "(none)" : cell->role));
-    }
-
-    current = linksOn(cell, prefletDimension).pos;
-  }
-
-  if (!haveResource) {
-    diagnostics.warn(std::format("cell {} has a d.preflet link but its chain "
-                                 "has no preflet_resource cell -- ignoring",
-                                 hostId));
-    return std::nullopt;
-  }
-
-  return result;
-}
-
-void resolveAllPreflets(std::unordered_map<CellID, Cell> &cells,
-                        Diagnostics &diagnostics) {
-  std::vector<std::pair<CellID, CellID>> hosts; // {hostId, chainStart}
-  for (const auto &[id, cell] : cells) {
-    if (isPrefletChainNode(cell.role)) {
-      continue;
-    }
-    const CellID start = linksOn(&cell, prefletDimension).pos;
-    if (start != 0) {
-      hosts.emplace_back(id, start);
-    }
-  }
-
-  std::ranges::sort(hosts);
-
-  for (const auto &[hostId, startId] : hosts) {
-    if (auto resolved = resolvePreflet(startId, cells, hostId, diagnostics)) {
-      cells[hostId].preflet = std::move(*resolved);
     }
   }
 }

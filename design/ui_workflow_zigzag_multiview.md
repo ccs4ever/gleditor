@@ -46,7 +46,7 @@ ______________________________________________________________________
   - Every cell is rendered as a uniform geometric tile (e.g. $140 \times 65\,\text{px}$) regardless
     of content length.
   - Cell text is truncated to a compact 18-character summary with category icon badges (`[chapter]`,
-    `[note]`, `[preflet]`, `[clone]`).
+    `[note]`, `[clone]`).
 - **Rigid Lattice Coordinate Grid**:
   - World position $\mathbf{P}(c)$ is strictly determined by dimensional rank indices
     $(r_x, r_y, r_z)$:
@@ -79,8 +79,14 @@ ______________________________________________________________________
   - `Shift+Tab`: Cycle Y/Z dimensions.
   - `Ctrl+D`: Open interactive dimension picker modal.
 
-### 3.3 Preflet & BitTorrent Resolution
+### 3.3 Cross-Slice Reference
 
-- Cells with attached Preflets display a magnet badge (`[🧲]`).
-- Activating a preflet initiates asynchronous BitTorrent fetching via `PrefletFetcher`.
-- When resolved, the target Slice smoothly materializes as an adjacent connected 3D cluster.
+This section described a **Preflet** badge, an `Enter` binding that started a BitTorrent fetch
+through `PrefletFetcher`, and the fetched slice materialising as an adjacent 3D cluster. All of it
+is **deleted** in migration step 18 — see R13 in
+[`store-slice-convergence.md`](store-slice-convergence.md).
+
+What is left in its place, deliberately: nothing yet. Following a cross-slice reference returns as
+an ordinary Xanadu link once a slice is a `Store` and cross-document cell identity is a
+`GlobalOpRef`, which is steps 19–20. The badge, the key binding and the progress banner were removed
+rather than left pointing at a data model that no longer exists.

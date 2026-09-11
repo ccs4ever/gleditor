@@ -65,20 +65,6 @@ LinkPairs linksOf(const std::unordered_map<CellID, Cell> &cells,
 
 } // namespace
 
-TEST(ZzCoreTest, MagnetUriValidation) {
-  EXPECT_TRUE(looksLikeBitTorrentMagnet(
-      "magnet:?xt=urn:btih:0123456789abcdef0123456789abcdef01234567"));
-  EXPECT_TRUE(looksLikeBitTorrentMagnet(
-      "magnet:?xt=urn:btih:0123456789abcdef0123456789abcdef01234567&dn=name"));
-  EXPECT_TRUE(looksLikeBitTorrentMagnet(
-      "magnet:?xt=urn:btih:abcdefghijklmnopqrstuvwxyz234567")); // 32 chars
-                                                                // base32
-
-  EXPECT_FALSE(looksLikeBitTorrentMagnet("http://example.com"));
-  EXPECT_FALSE(looksLikeBitTorrentMagnet("magnet:?xt=urn:sha1:abc"));
-  EXPECT_FALSE(looksLikeBitTorrentMagnet("magnet:?xt=urn:btih:short"));
-}
-
 TEST(ZzCoreTest, HexColorParsing) {
   const auto red = parseHexColor("#ff0000");
   ASSERT_TRUE(red.has_value());
@@ -92,16 +78,6 @@ TEST(ZzCoreTest, HexColorParsing) {
 
   EXPECT_FALSE(parseHexColor("invalid"));
   EXPECT_FALSE(parseHexColor("#fff"));
-}
-
-TEST(ZzCoreTest, SplitMetadataEntry) {
-  const auto [k1, v1] = splitMetadataEntry("file: slice.yaml");
-  EXPECT_EQ(k1, "file");
-  EXPECT_EQ(v1, "slice.yaml");
-
-  const auto [k2, v2] = splitMetadataEntry("no_colon");
-  EXPECT_EQ(k2, "no_colon");
-  EXPECT_EQ(v2, "");
 }
 
 TEST(ZzCoreTest, BacklinkDerivation) {
@@ -142,49 +118,6 @@ TEST(ZzCoreTest, NeutralizeDanglingLinks) {
 
   EXPECT_EQ(linksOf(cells, 1, "d.1").pos, 0U);
   EXPECT_FALSE(diag.empty());
-}
-
-TEST(ZzCoreTest, PrefletChainResolution) {
-  std::unordered_map<CellID, Cell> cells;
-  cells[1] = makeCell(1, "chapter", {{"d.preflet", 10}});
-
-  cells[10] = makeCell(10, "preflet_resource", {{"d.preflet", 11}});
-  cells[10].data =
-      "magnet:?xt=urn:btih:0123456789abcdef0123456789abcdef01234567";
-
-  cells[11]      = makeCell(11, "preflet_version", {{"d.preflet", 12}});
-  cells[11].data = "1.0";
-
-  cells[12]      = makeCell(12, "preflet_meta");
-  cells[12].data = "file: target.yaml";
-
-  Diagnostics diag;
-  resolveAllPreflets(cells, diag);
-
-  ASSERT_TRUE(cells[1].preflet.has_value());
-  EXPECT_EQ(cells[1].preflet->version, "1.0");
-  EXPECT_EQ(cells[1].preflet->resource_identifier,
-            "magnet:?xt=urn:btih:0123456789abcdef0123456789abcdef01234567");
-  ASSERT_EQ(cells[1].preflet->metadata.size(), 1U);
-  EXPECT_EQ(cells[1].preflet->metadata[0].first, "file");
-  EXPECT_EQ(cells[1].preflet->metadata[0].second, "target.yaml");
-}
-
-TEST(ZzCoreTest, PrefletCycleDetection) {
-  std::unordered_map<CellID, Cell> cells;
-  cells[1] = makeCell(1, "chapter", {{"d.preflet", 10}});
-
-  cells[10] = makeCell(10, "preflet_resource", {{"d.preflet", 11}});
-  cells[10].data =
-      "magnet:?xt=urn:btih:0123456789abcdef0123456789abcdef01234567";
-
-  // Cycle back to 10
-  cells[11] = makeCell(11, "preflet_version", {{"d.preflet", 10}});
-
-  Diagnostics diag;
-  const auto preflet = resolvePreflet(10, cells, 1, diag);
-  EXPECT_TRUE(preflet.has_value());
-  EXPECT_TRUE(diag.mentions("loops back"));
 }
 
 TEST(ZzCoreTest, AxisNeighbours) {

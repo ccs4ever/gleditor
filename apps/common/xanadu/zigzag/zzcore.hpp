@@ -1,7 +1,7 @@
 /**
  * @file zzcore.hpp
  * @brief Pure Xanadu ZigZag logic: link derivation, referential integrity,
- *        Preflet chain resolution, and parsing helpers.
+ *        and parsing helpers.
  */
 #ifndef ZIGZAG_ZZCORE_HPP
 #define ZIGZAG_ZZCORE_HPP
@@ -49,16 +49,9 @@ private:
   std::vector<Diagnostic> entries_;
 };
 
-inline constexpr std::string_view prefletDimension  = "d.preflet";
-inline constexpr std::string_view prefletRolePrefix = "preflet_";
-inline constexpr std::string_view cloneDimension    = "d.clone";
+inline constexpr std::string_view cloneDimension = "d.clone";
 
-[[nodiscard]] bool isPrefletChainNode(std::string_view role);
-[[nodiscard]] bool looksLikeBitTorrentMagnet(std::string_view identifier);
 [[nodiscard]] std::optional<RgbColor> parseHexColor(std::string_view text);
-[[nodiscard]] std::pair<std::string, std::string>
-splitMetadataEntry(std::string_view text);
-
 [[nodiscard]] std::string resolveXdgPath(const char *xdgValue,
                                          const char *homeValue,
                                          std::string_view homeRelativeDir,
@@ -80,13 +73,6 @@ void deriveBacklinks(std::unordered_map<CellID, Cell> &cells,
 
 void neutralizeDanglingLinks(std::unordered_map<CellID, Cell> &cells,
                              Diagnostics &diagnostics);
-
-[[nodiscard]] std::optional<Preflet>
-resolvePreflet(CellID startId, const std::unordered_map<CellID, Cell> &cells,
-               CellID hostId, Diagnostics &diagnostics);
-
-void resolveAllPreflets(std::unordered_map<CellID, Cell> &cells,
-                        Diagnostics &diagnostics);
 
 /// Returns the 6 axis neighbours: [x+, x-, y+, y-, z+, z-] (0 for absent).
 [[nodiscard]] std::array<CellID, 6> axisNeighbours(const Cell *cell,

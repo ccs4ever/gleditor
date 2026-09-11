@@ -40,9 +40,8 @@ std::string shortenText(const std::string_view text,
 
 } // namespace
 
-ZigzagVisualizer::ZigzagVisualizer(std::string aFontName,
-                                   const bool enablePrefletFetching)
-    : fontName_(std::move(aFontName)), fetchingEnabled_(enablePrefletFetching),
+ZigzagVisualizer::ZigzagVisualizer(std::string aFontName)
+    : fontName_(std::move(aFontName)),
       last_frame_time_(std::chrono::steady_clock::now()) {
   populateFallbackStructure();
 }
@@ -66,9 +65,6 @@ void ZigzagVisualizer::deviceReady(
 }
 
 bool ZigzagVisualizer::busy() const {
-  if (preflet_fetcher_.busy()) {
-    return true;
-  }
   for (const auto &[id, cell] : visible_cells_) {
     if (std::abs(cell.target_alpha - cell.current_alpha) > 0.05F ||
         glm::length(cell.target_pos - cell.current_pos) > 0.5F) {
@@ -83,23 +79,19 @@ void ZigzagVisualizer::populateFallbackStructure() {
   space_[1] = Cell{.id         = 1,
                    .data       = std::string{"Root Focus Node"},
                    .role       = "root",
-                   .dimensions = {{"d.1", {2, 0}}, {"d.2", {3, 0}}},
-                   .preflet    = std::nullopt};
+                   .dimensions = {{"d.1", {2, 0}}, {"d.2", {3, 0}}}};
   space_[2] = Cell{.id         = 2,
                    .data       = std::string{"Horizontal Cell"},
                    .role       = "item",
-                   .dimensions = {{"d.1", {0, 1}}},
-                   .preflet    = std::nullopt};
+                   .dimensions = {{"d.1", {0, 1}}}};
   space_[3] = Cell{.id         = 3,
                    .data       = std::string{"Vertical Cell"},
                    .role       = "item",
-                   .dimensions = {{"d.2", {0, 1}}, {"d.3", {4, 0}}},
-                   .preflet    = std::nullopt};
+                   .dimensions = {{"d.2", {0, 1}}, {"d.3", {4, 0}}}};
   space_[4] = Cell{.id         = 4,
                    .data       = std::string{"Depth Layer Cell"},
                    .role       = "detail",
-                   .dimensions = {{"d.3", {0, 3}}},
-                   .preflet    = std::nullopt};
+                   .dimensions = {{"d.3", {0, 3}}}};
 
   accursed_cell_focus_ = 1;
   current_view_        = ViewAxisBinding{"d.1", "d.2", "d.3"};
@@ -224,7 +216,6 @@ CellID ZigzagVisualizer::createCell(std::string text, std::string role) {
       .data       = std::move(text),
       .role       = std::move(role),
       .dimensions = {},
-      .preflet    = std::nullopt,
   };
   if (accursed_cell_focus_ == 0) {
     accursed_cell_focus_ = newId;
@@ -354,15 +345,6 @@ ZigzagVisualizer::dimensionVisual(const DimID &dimension) const {
   };
 }
 
-glm::vec3 ZigzagVisualizer::tintForPreflet(const glm::vec3 base,
-                                           const bool hasPreflet) {
-  if (!hasPreflet) {
-    return base;
-  }
-  const glm::vec3 portalColor{0.61F, 0.35F, 0.71F};
-  return base * 0.55F + portalColor * 0.45F;
-}
-
 void ZigzagVisualizer::rebuildActiveViewTopology() {
   for (auto &[id, render_cell] : visible_cells_) {
     render_cell.target_alpha = 0.0F;
@@ -383,7 +365,6 @@ void ZigzagVisualizer::rebuildActiveViewTopology() {
         .mime_type       = focus ? focus->mime_type : "",
         .media_path      = focus ? focus->media_path : "",
         .is_image        = focus && focus->isImage(),
-        .has_preflet     = focus && focus->preflet.has_value(),
         .is_clone        = focusIsClone,
         .clone_master_id = focusMaster,
     };
@@ -396,8 +377,7 @@ void ZigzagVisualizer::rebuildActiveViewTopology() {
   auto &focusRenderState        = visible_cells_[accursed_cell_focus_];
   focusRenderState.target_pos   = glm::vec3{0.0F, 0.0F, 0.0F};
   focusRenderState.target_alpha = 1.0F;
-  focusRenderState.base_color =
-      tintForPreflet(scene_.focus_color, focus && focus->preflet.has_value());
+  focusRenderState.base_color   = scene_.focus_color;
 
   auto mapNeighbor = [&](const CellID parentId, const CellID childId,
                          const glm::vec3 &offset, const glm::vec3 &axisColor) {
@@ -417,7 +397,6 @@ void ZigzagVisualizer::rebuildActiveViewTopology() {
           .mime_type       = child ? child->mime_type : "",
           .media_path      = child ? child->media_path : "",
           .is_image        = child && child->isImage(),
-          .has_preflet     = child && child->preflet.has_value(),
           .is_clone        = childIsClone,
           .clone_master_id = childMaster,
           .current_pos     = visible_cells_[parentId].current_pos,
@@ -432,8 +411,7 @@ void ZigzagVisualizer::rebuildActiveViewTopology() {
     auto &childCell        = visible_cells_[childId];
     childCell.target_pos   = visible_cells_[parentId].target_pos + offset;
     childCell.target_alpha = 1.0F;
-    childCell.base_color =
-        tintForPreflet(axisColor, child && child->preflet.has_value());
+    childCell.base_color   = axisColor;
   };
 
   if (focus) {
@@ -518,28 +496,6 @@ void ZigzagVisualizer::updateCellPositions(const float rawDeltaTime) {
   });
 }
 
-void ZigzagVisualizer::pollPrefletFetch() {
-  if (!fetchingEnabled_) {
-    return;
-  }
-  const auto before = preflet_fetcher_.progress().status;
-  preflet_fetcher_.poll();
-  const auto &progress = preflet_fetcher_.progress();
-
-  if (progress.status == PrefletFetcher::Status::Ready) {
-    const std::string path = progress.slice_path;
-    preflet_fetcher_.acknowledge();
-    if (auto doc = loadZzStructure(path)) {
-      if (!current_slice_path_.empty()) {
-        slice_stack_.push_back(current_slice_path_);
-      }
-      adoptDocument(std::move(*doc), path);
-    }
-  } else if (progress.status != before) {
-    invalidateAccessibility();
-  }
-}
-
 void ZigzagVisualizer::navigateFocus(const DimID &dimension,
                                      const bool positive) {
   const Cell *const cell = findCell(accursed_cell_focus_);
@@ -604,43 +560,6 @@ void ZigzagVisualizer::cycleDimensions(const bool forward) {
   invalidateAccessibility();
 }
 
-void ZigzagVisualizer::followPrefletAtFocus() {
-  const Cell *const cell = findCell(accursed_cell_focus_);
-  if (!cell || !cell->preflet) {
-    return;
-  }
-  if (!fetchingEnabled_) {
-    std::cerr << "preflet: fetching is disabled (--no-fetch)\n";
-    return;
-  }
-  if (preflet_fetcher_.busy()) {
-    return;
-  }
-
-  std::string error;
-  preflet_fetcher_.acknowledge();
-  if (!preflet_fetcher_.begin(*cell->preflet, error)) {
-    std::cerr << std::format("preflet: fetch error -- {}\n", error);
-  }
-}
-
-void ZigzagVisualizer::returnToPreviousSlice() {
-  if (slice_stack_.empty()) {
-    return;
-  }
-  const std::string prev = slice_stack_.back();
-  slice_stack_.pop_back();
-  if (auto doc = loadZzStructure(prev)) {
-    adoptDocument(std::move(*doc), prev);
-  }
-}
-
-void ZigzagVisualizer::cancelPrefletFetch() {
-  if (preflet_fetcher_.busy()) {
-    preflet_fetcher_.cancel();
-  }
-}
-
 bool ZigzagVisualizer::picked(const render::PickingResult &pick,
                               RenderState &) {
   if (pick.tag.kind == render::tagKindOverlay && pick.tag.clusterIndex != 0) {
@@ -659,7 +578,6 @@ void ZigzagVisualizer::drawFrame(gleditor::FrameContext &ctx) {
       std::chrono::duration<float>(now - last_frame_time_).count();
   last_frame_time_ = now;
 
-  pollPrefletFetch();
   updateCellPositions(deltaTime);
 
   if (!beams_ || !worldCanvas_ || !hudCanvas_) {
@@ -799,9 +717,8 @@ void ZigzagVisualizer::drawFrame(gleditor::FrameContext &ctx) {
     worldCanvas_->addText(ctx.state, left + 6.0F, bottom + nodeHeight - 24.0F,
                           textPreview, textCol, bgCol);
 
-    // Badges: type, mime, clone, & preflet
-    if (!cell.type.empty() || !cell.mime_type.empty() || cell.is_clone ||
-        cell.has_preflet) {
+    // Badges: type, mime, clone
+    if (!cell.type.empty() || !cell.mime_type.empty() || cell.is_clone) {
       std::string badge;
       if (!cell.type.empty()) {
         badge += "[" + cell.type + "] ";
@@ -810,9 +727,6 @@ void ZigzagVisualizer::drawFrame(gleditor::FrameContext &ctx) {
       }
       if (cell.is_clone) {
         badge += std::format("[clone #{}] ", cell.clone_master_id);
-      }
-      if (cell.has_preflet) {
-        badge += "-> [preflet]";
       }
       worldCanvas_->addText(ctx.state, left + 6.0F, bottom + 16.0F, badge,
                             borderCol, bgCol);
@@ -855,9 +769,6 @@ void ZigzagVisualizer::drawFrame(gleditor::FrameContext &ctx) {
           std::format(" [clone of #{}]",
                       zzcore::findCloneMaster(space_, accursed_cell_focus_));
     }
-    if (cur->preflet) {
-      focusLabel += " -> (Preflet link attached)";
-    }
   }
   hudCanvas_->addText(ctx.state, 16.0F, height - 34.0F, focusLabel, 0xFFFFFFFFU,
                       0x0D0D12DDU);
@@ -886,29 +797,12 @@ void ZigzagVisualizer::drawFrame(gleditor::FrameContext &ctx) {
                       width - dimsMetrics.width - modeMetrics.width - 32.0F,
                       height - 12.0F, modeLabel, 0xF59E0BFFU, 0x0D0D12DDU);
 
-  // Preflet Fetch Progress Banner
-  const auto &fetch = preflet_fetcher_.progress();
-  if (fetch.status == PrefletFetcher::Status::Fetching) {
-    const std::string fetchMsg =
-        std::format("Fetching Slice: {:.0f}% -- {}", fetch.fraction * 100.0F,
-                    fetch.message);
-    hudCanvas_->addRect(0.0F, height - 90.0F, width, 30.0F, 0x332244EEU);
-    hudCanvas_->addText(ctx.state, 16.0F, height - 68.0F, fetchMsg, 0xE080FFFFU,
-                        0x332244EEU);
-  } else if (fetch.status == PrefletFetcher::Status::Failed) {
-    const std::string failMsg =
-        std::format("Preflet Fetch Failed: {}", fetch.message);
-    hudCanvas_->addRect(0.0F, height - 90.0F, width, 30.0F, 0x551111EEU);
-    hudCanvas_->addText(ctx.state, 16.0F, height - 68.0F, failMsg, 0xFF8888FFU,
-                        0x551111EEU);
-  }
-
   // Bottom Command Key Hints
   hudCanvas_->addRect(0.0F, 0.0F, width, 28.0F, 0x0D0D12DDU);
   hudCanvas_->addLine(0.0F, 28.0F, width, 28.0F, 1.0F, 0x222233FFU);
   const std::string hints =
       "Arrows: Step X/Y | PgUp/PgDn: Step Z | Space: Swap X/Y | Tab: Cycle | "
-      "Enter: Follow Preflet | Bksp: Back | R: Reset View";
+      "R: Reset View";
   hudCanvas_->addText(ctx.state, 16.0F, 22.0F, hints, 0x888899FFU, 0x0D0D12DDU);
 
   hudCanvas_->commit();
@@ -940,10 +834,6 @@ void ZigzagVisualizer::describe(gleditor::a11y::Builder &into) {
     if (isFocus) {
       desc += " (Focused)";
     }
-    if (cell.preflet) {
-      desc += " (Outbound Preflet: " + cell.preflet->resource_identifier + ")";
-    }
-
     auto &cellNode   = into.add(nextNodeId, gleditor::a11y::Role::ListItem);
     cellNode.label   = std::move(desc);
     cellNode.actions = gleditor::a11y::bit(gleditor::a11y::Action::Click) |

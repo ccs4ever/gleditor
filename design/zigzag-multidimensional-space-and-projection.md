@@ -13,8 +13,9 @@ cell master headcells, and bidirectional Xanadoc $\longleftrightarrow$ Zigzag pr
 > demoted from the model to a render-side cache and `ZzStructureDocument` demoted to the YAML
 > transfer format. Nothing below is wrong today; it describes the model as built. Read the
 > convergence note before extending it, because several of the structures here are on the way out —
-> `Preflet`, the fixed array of privileged dimensions, and the string-keyed dynamic dimension table
-> among them.
+> the fixed array of privileged dimensions and the string-keyed dynamic dimension table among them.
+> `Preflet` is already gone: migration step 18 deleted it, so the `std::optional<Preflet>` in the
+> `CompactZZCell` listing below is a record of what the struct held rather than a field it has.
 >
 > **Where the boundary is, as of migration step 12.** The operation exists: `OpKind::Structure`,
 > OSMIC's sixth hyperop, with its verb and value type in `CompactOpNode::flags`. **Nothing emits

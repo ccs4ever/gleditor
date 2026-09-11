@@ -5,7 +5,7 @@
  * Both Xudu and Zigzag manage background swarms for different roles:
  * - Append-only Merkle ledgers (GPG identity and verified email bindings)
  * - Xanadoc primedia and operations spools
- * - Multidimensional Zigzag slice files and preflets
+ * - Multidimensional Zigzag slice files
  *
  * SystemTorrentManager coordinates these swarms in one place: starting seeds,
  * tracking lifecycle states, monitoring transfer progress, publishing BEP 46
@@ -33,7 +33,7 @@ namespace xanadu {
 enum class TorrentRole {
   SystemLedger,  ///< Append-only Merkle identity / key ledger
   DocumentSpool, ///< Xanadoc primedia or operations spool
-  SliceCache,    ///< Zigzag multidimensional slice / preflet
+  SliceCache,    ///< Zigzag multidimensional slice
   GeneralContent ///< User content or general swarm reference
 };
 

@@ -11,7 +11,7 @@
 using namespace zigzag;
 
 TEST(ZigzagVisualizerTest, DefaultStateAndFallback) {
-  ZigzagVisualizer viz("Sans 12", false);
+  ZigzagVisualizer viz("Sans 12");
 
   EXPECT_EQ(viz.focusCellId(), 1U);
   EXPECT_EQ(viz.currentView().x_dimension, "d.1");
@@ -20,7 +20,7 @@ TEST(ZigzagVisualizerTest, DefaultStateAndFallback) {
 }
 
 TEST(ZigzagVisualizerTest, NavigationAlongDimensions) {
-  ZigzagVisualizer viz("Sans 12", false);
+  ZigzagVisualizer viz("Sans 12");
 
   // In default sample: Cell 1 has d.1 pos -> 2, and d.2 pos -> 3
   viz.navigateFocus("d.1", true);
@@ -38,7 +38,7 @@ TEST(ZigzagVisualizerTest, NavigationAlongDimensions) {
 }
 
 TEST(ZigzagVisualizerTest, SwapDimensions) {
-  ZigzagVisualizer viz("Sans 12", false);
+  ZigzagVisualizer viz("Sans 12");
 
   EXPECT_EQ(viz.currentView().x_dimension, "d.1");
   EXPECT_EQ(viz.currentView().y_dimension, "d.2");
@@ -50,7 +50,7 @@ TEST(ZigzagVisualizerTest, SwapDimensions) {
 }
 
 TEST(ZigzagVisualizerTest, CycleDimensions) {
-  ZigzagVisualizer viz("Sans 12", false);
+  ZigzagVisualizer viz("Sans 12");
 
   viz.cycleDimensions(true);
   EXPECT_EQ(viz.currentView().x_dimension, "d.2");
@@ -64,7 +64,7 @@ TEST(ZigzagVisualizerTest, CycleDimensions) {
 }
 
 TEST(ZigzagVisualizerTest, DirectNavigationToCell) {
-  ZigzagVisualizer viz("Sans 12", false);
+  ZigzagVisualizer viz("Sans 12");
 
   viz.navigateFocusTo(4);
   EXPECT_EQ(viz.focusCellId(), 4U);
@@ -75,7 +75,7 @@ TEST(ZigzagVisualizerTest, DirectNavigationToCell) {
 }
 
 TEST(ZigzagVisualizerTest, AdoptDocument) {
-  ZigzagVisualizer viz("Sans 12", false);
+  ZigzagVisualizer viz("Sans 12");
 
   const std::string yaml = R"(
 zzstructure:
@@ -105,7 +105,7 @@ zzstructure:
 #include <gleditor/render_state.hpp>
 
 TEST(ZigzagVisualizerTest, MousePicking) {
-  ZigzagVisualizer viz("Sans 12", false);
+  ZigzagVisualizer viz("Sans 12");
 
   testing::NiceMock<MockRenderDevice> device;
   RenderState state(&device);
@@ -122,7 +122,7 @@ TEST(ZigzagVisualizerTest, MousePicking) {
 }
 
 TEST(ZigzagVisualizerTest, AccessibilityTree) {
-  ZigzagVisualizer viz("Sans 12", false);
+  ZigzagVisualizer viz("Sans 12");
   gleditor::a11y::Publisher publisher("zigzag", "test", "1.0");
 
   publisher.addSource(&viz);
@@ -137,7 +137,7 @@ TEST(ZigzagVisualizerTest, AccessibilityTree) {
 }
 
 TEST(ZigzagVisualizerTest, InAppInteractiveCellAndDimensionEditing) {
-  ZigzagVisualizer viz("Sans 12", false);
+  ZigzagVisualizer viz("Sans 12");
 
   // Focus starts at Cell 1
   EXPECT_EQ(viz.focusCellId(), 1U);
@@ -172,7 +172,7 @@ TEST(ZigzagVisualizerTest, InAppInteractiveCellAndDimensionEditing) {
 }
 
 TEST(ZigzagVisualizerTest, YamlSerializationRoundTrip) {
-  ZigzagVisualizer viz("Sans 12", false);
+  ZigzagVisualizer viz("Sans 12");
   const auto doc = viz.document();
 
   const auto yamlStr = serializeZzStructure(doc);
@@ -185,7 +185,7 @@ TEST(ZigzagVisualizerTest, YamlSerializationRoundTrip) {
 }
 
 TEST(ZigzagVisualizerTest, CloneCellEditingSync) {
-  ZigzagVisualizer viz("Sans 12", false);
+  ZigzagVisualizer viz("Sans 12");
 
   const std::string yaml = R"(
 zzstructure:
@@ -223,7 +223,7 @@ zzstructure:
 }
 
 TEST(ZigzagVisualizerTest, MultiViewModeToggle) {
-  ZigzagVisualizer viz("Sans 12", false);
+  ZigzagVisualizer viz("Sans 12");
 
   // Default is CellContent view
   EXPECT_EQ(viz.viewMode(), ZigzagVisualizer::ViewMode::CellContent);

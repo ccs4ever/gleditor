@@ -85,7 +85,7 @@ zzstructure:
     - id: 6
       text: "1.2 Project Xanadu"
       role: detail
-      dimensions: { d.3: 8, d.preflet: 10 }
+      dimensions: { d.3: 8 }
 
     - id: 7
       text: "2.1 Cells and Links"
@@ -98,26 +98,6 @@ zzstructure:
     - id: 9
       text: "Revision Note"
       role: note
-
-    # --- Preflet chain for cell 6 ---
-    - id: 10
-      role: preflet_resource
-      text: "magnet:?xt=urn:btih:f4a1c9d2e6b73058a1c4f9e2d7b3a68051c2e9f4&dn=xanadu-companion-slice"
-      dimensions: { d.preflet: 11 }
-
-    - id: 11
-      role: preflet_version
-      text: "2.1"
-      dimensions: { d.preflet: 12 }
-
-    - id: 12
-      role: preflet_meta
-      text: "file: companion_slice.yaml"
-      dimensions: { d.preflet: 13 }
-
-    - id: 13
-      role: preflet_meta
-      text: "note: demonstration link"
 
     - id: 100
       role: schema_doc

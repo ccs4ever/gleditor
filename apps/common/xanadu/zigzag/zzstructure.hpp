@@ -4,8 +4,15 @@
  *
  * A "Slice" is one YAML file following this schema -- a self-contained set of
  * zzcells. A user's default Slice (the "Home Slice") lives at a standard
- * per-user config location. Slices can reference cells in other Slices via
- * Preflets.
+ * per-user config location.
+ *
+ * A slice used to reference cells in other slices through a Preflet: a magnet
+ * URI, a hash, a version string and a target cell id, carried by the cell
+ * doing the referring. That is deleted -- see design R13. Every field of it is
+ * subsumed by something that already exists and does the job better, and the
+ * locator was a layering violation besides: a transport address duplicated
+ * into the document graph once per referring cell, correctable in no one
+ * place when a swarm moves.
  */
 #ifndef ZIGZAG_ZZSTRUCTURE_HPP
 #define ZIGZAG_ZZSTRUCTURE_HPP
@@ -34,20 +41,6 @@ struct LinkPairs {
   bool operator==(const LinkPairs &) const = default;
 };
 
-/**
- * @brief A resolved Preflet: a lazy, cross-Slice connection from a cell in this
- *        Slice to a cell in some other (target) Slice.
- */
-struct Preflet {
-  std::string resource_identifier; // Required: BitTorrent magnet URI
-  std::string hash;                // Optional: content hash
-  std::string version;             // Optional: version string
-  CellID target_cell_id = 0;       // Optional: target cell id; 0 = unspecified
-  std::vector<std::pair<std::string, std::string>> metadata; // Free-form pairs
-
-  bool operator==(const Preflet &) const = default;
-};
-
 /// A cell's content: text, a number, a flag, or an inline binary payload.
 /// Which alternative is live is exactly the information `type`/`mime_type`
 /// used to carry redundantly for the text-vs-blob distinction -- media
@@ -59,8 +52,8 @@ struct Cell {
   CellID id = 0;
   CellData data;
 
-  // Structural role within an authored schema (e.g. "preflet_resource",
-  // "schema_field", "config_group") -- distinct from mime_type, which is
+  // Structural role within an authored schema (e.g. "schema_field",
+  // "config_group") -- distinct from mime_type, which is
   // strictly the resolved media kind of `data`/`media_path`. Empty for
   // ordinary content cells.
   std::string role;
@@ -69,7 +62,6 @@ struct Cell {
       mime_type; // MIME type e.g. "image/png", "image/jpeg", "text/plain"
   std::string media_path; // Relative or absolute file path or URI
   std::unordered_map<DimID, LinkPairs> dimensions;
-  std::optional<Preflet> preflet;
 
   /// The cell's content as text, or an empty view if `data` holds something
   /// else. Never throws: use `std::get<std::string>(data)` directly at call

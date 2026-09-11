@@ -5,7 +5,6 @@
 #ifndef ZIGZAG_VISUALIZER_HPP
 #define ZIGZAG_VISUALIZER_HPP
 
-#include "core/preflet_fetcher.hpp"
 #include "core/zz_xudu_projector.hpp"
 #include "core/zzcore.hpp"
 #include "core/zzstructure.hpp"
@@ -41,7 +40,6 @@ struct RenderStateCell {
   std::string mime_type;
   std::string media_path;
   bool is_image{false};
-  bool has_preflet{false};
   bool is_clone{false};
   CellID clone_master_id{0};
 
@@ -75,7 +73,7 @@ class ZigzagVisualizer : public gleditor::FrameContributor,
                          public gleditor::PickObserver,
                          public gleditor::a11y::Source {
 public:
-  ZigzagVisualizer(std::string aFontName, bool enablePrefletFetching = true);
+  explicit ZigzagVisualizer(std::string aFontName);
   ~ZigzagVisualizer() override;
 
   ZigzagVisualizer(const ZigzagVisualizer &)            = delete;
@@ -123,10 +121,6 @@ public:
   void swapDimensions(int axis1, int axis2);
   void cycleDimensions(bool forward = true);
 
-  void followPrefletAtFocus();
-  void returnToPreviousSlice();
-  void cancelPrefletFetch();
-
   // -- Multi-View Modes (Cell Content View vs. Topology View) ---------------
   enum class ViewMode : std::uint8_t {
     CellContent =
@@ -161,18 +155,14 @@ public:
 private:
   void rebuildActiveViewTopology();
   void updateCellPositions(float deltaTime);
-  void pollPrefletFetch();
   void invalidateAccessibility() { revision_++; }
 
   [[nodiscard]] const Cell *findCell(CellID id) const;
   [[nodiscard]] static LinkPairs linksOn(const Cell *cell,
                                          const DimID &dimension);
   [[nodiscard]] DimensionVisual dimensionVisual(const DimID &dimension) const;
-  [[nodiscard]] static glm::vec3 tintForPreflet(glm::vec3 base,
-                                                bool hasPreflet);
 
   std::string fontName_;
-  bool fetchingEnabled_{true};
   std::uint64_t revision_{1};
 
   std::string structure_name_;
@@ -186,9 +176,7 @@ private:
   std::unordered_map<DimID, DimensionVisual> dimension_visuals_;
 
   std::unordered_map<CellID, RenderStateCell> visible_cells_;
-  std::vector<std::string> slice_stack_;
 
-  PrefletFetcher preflet_fetcher_;
   std::chrono::steady_clock::time_point last_frame_time_;
 
   std::unique_ptr<gleditor::Canvas> worldCanvas_;

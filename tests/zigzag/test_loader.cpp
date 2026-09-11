@@ -152,31 +152,6 @@ zzstructure:
   EXPECT_EQ(doc->cells.at(1).text(), "Replacement");
 }
 
-TEST(ZzLoaderTest, ParsePrefletChainFromYaml) {
-  const std::string prefletYaml = R"(
-zzstructure:
-  focus: 1
-  cells:
-    - id: 1
-      text: "Chapter with link"
-      dimensions: { d.preflet: 10 }
-
-    - id: 10
-      role: preflet_resource
-      text: "magnet:?xt=urn:btih:0123456789abcdef0123456789abcdef01234567"
-      dimensions: { d.preflet: 11 }
-
-    - id: 11
-      role: preflet_version
-      text: "3.5"
-)";
-
-  const auto doc = parseZzStructure(prefletYaml, "test");
-  ASSERT_TRUE(doc.has_value());
-  ASSERT_TRUE(doc->cells.at(1).preflet.has_value());
-  EXPECT_EQ(doc->cells.at(1).preflet->version, "3.5");
-}
-
 TEST(ZzLoaderTest, ParseMediaAndImageCells) {
   const std::string mediaYaml = R"(
 zzstructure:

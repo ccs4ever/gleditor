@@ -164,7 +164,6 @@ struct CompactZZCell {
   /// Dynamic overflow for user-defined dimensions
   std::vector<DynamicDimensionLink> dynamicDimensions{};
 
-  std::optional<Preflet> preflet{};
   std::string type{"cell"};
   std::string ephemeralText{};
   xanadu::ResolutionStatus resolutionStatus{

@@ -386,7 +386,6 @@ buildDocument(const ryml::ConstNodeRef &root, const std::string &origin) {
   readSceneMeta(structure, doc, diagnostics);
 
   zzcore::neutralizeDanglingLinks(doc.cells, diagnostics);
-  zzcore::resolveAllPreflets(doc.cells, diagnostics);
 
   reportDiagnostics(diagnostics, origin);
   return doc;
@@ -491,18 +490,6 @@ std::string serializeZzStructure(const ZzStructureDocument &doc) {
         }
       }
       ss << "}\n";
-    }
-    if (cell.preflet) {
-      ss << "      preflet:\n";
-      ss << "        resource_identifier: \""
-         << cell.preflet->resource_identifier << "\"\n";
-      if (cell.preflet->target_cell_id != 0) {
-        ss << "        target_cell_id: " << cell.preflet->target_cell_id
-           << "\n";
-      }
-      if (!cell.preflet->version.empty()) {
-        ss << "        version: \"" << cell.preflet->version << "\"\n";
-      }
     }
     ss << "\n";
   }

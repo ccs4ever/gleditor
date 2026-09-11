@@ -111,20 +111,6 @@ void bindCommands(gleditor::Application &app, const AppStateRef &state,
                       "cycle active dimension bindings backward",
                       [viz] { viz->cycleDimensions(false); });
 
-  // Preflets & History
-  app.commands().bind(SDL_SCANCODE_RETURN, "follow-preflet",
-                      "follow outbound Preflet at focus",
-                      [viz] { viz->followPrefletAtFocus(); });
-  app.commands().bind(SDL_SCANCODE_KP_ENTER, "follow-preflet-kp",
-                      "follow outbound Preflet at focus",
-                      [viz] { viz->followPrefletAtFocus(); });
-  app.commands().bind(SDL_SCANCODE_BACKSPACE, "slice-back",
-                      "return to previous Slice",
-                      [viz] { viz->returnToPreviousSlice(); });
-  app.commands().bind(SDL_SCANCODE_ESCAPE, "cancel-fetch",
-                      "cancel in-flight Preflet download",
-                      [viz] { viz->cancelPrefletFetch(); });
-
   // Xudu convergence operations
   app.commands().bind(SDL_SCANCODE_R, "rasterize-print",
                       "print 2D raster reading text to stdout", [viz] {
@@ -203,9 +189,6 @@ int main(const int argc, char **argv) {
 
   argparse::ArgumentParser parser("zigzag", TOSTRING(GLEDITOR_VERSION));
   gleditor::addCommonArguments(parser, detailed);
-  parser.add_argument("--no-fetch")
-      .flag()
-      .help("disable BitTorrent Preflet fetching");
   parser.add_argument("--raster")
       .flag()
       .help("print 1D/2D raster text of the slice to stdout and exit");
@@ -221,15 +204,10 @@ int main(const int argc, char **argv) {
 
   render::Backend backend = render::Backend::OpenGL;
   RendererRef renderer;
-  bool fetchingEnabled = true;
   std::string slicePath;
 
   try {
     parser.parse_args(argc, argv);
-
-    if (parser["--no-fetch"] == true) {
-      fetchingEnabled = false;
-    }
 
     bool rasterMode = false;
     if (parser["--raster"] == true || parser.is_used("--raster")) {
@@ -302,8 +280,8 @@ int main(const int argc, char **argv) {
   }
 
   try {
-    auto viz = std::make_shared<zigzag::ZigzagVisualizer>(
-        state->defaultFontName, fetchingEnabled);
+    auto viz =
+        std::make_shared<zigzag::ZigzagVisualizer>(state->defaultFontName);
 
     std::string xuduPath = parser.get<std::string>("--xudu");
     bool loaded          = false;

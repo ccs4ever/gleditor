@@ -26,8 +26,8 @@ library with the editor and shares no code with it.
 
 **`zigzag`** is a third program that visualizes and navigates Project Xanadu multidimensional Zigzag
 structures (zzstructures / slices) in interactive 3D, with a 120 FPS unified transclusion engine,
-animated rank transitions, Merkle author verification, customizable dimension bindings, and
-BitTorrent Preflet resolution. It is `apps/zigzag/`.
+animated rank transitions, Merkle author verification, and customizable dimension bindings. It is
+`apps/zigzag/`.
 
 The split is the point. See [Building on the library](#building-on-the-library) for what a program
 gets to hook into, [xudu](#xudu-a-xanadoc-editor) for the xanadoc editor, and
@@ -1198,8 +1198,16 @@ continuous non-crossing sequences called **ranks**.
 
 `zigzag` (`apps/zigzag/`) is a standalone visualizer and navigator built directly on `libgleditor`.
 It renders multidimensional slice spaces in interactive 3D, supports animated rank transitions,
-mouse picking, accessibility tree publishing, and asynchronous BitTorrent-backed **Preflet** slice
-fetching.
+mouse picking and accessibility tree publishing.
+
+Cross-slice reference used to be a **Preflet**: a magnet URI, a hash, a version string and a target
+cell id, carried by the referring cell, with a `PrefletFetcher` that pulled the target slice over
+its own libtorrent session. That is **deleted** -- see R13 in
+[`design/store-slice-convergence.md`](design/store-slice-convergence.md). Every field of it is
+subsumed by something the tree already has, and the locator on the cell was a layering violation: a
+transport address duplicated into the document graph once per referring cell, correctable in no one
+place when a swarm moves. Following a cross-slice reference comes back as an ordinary Xanadu link
+once a slice is a `Store`; until then, zigzag opens the slices it is given.
 
 ### Data Model and Slices
 
@@ -1243,7 +1251,6 @@ zzstructure:
     - id: 3
       text: "Extended Details"
       role: "detail"
-      preflet: "magnet:?xt=urn:btih:0123456789abcdef0123456789abcdef01234567&dn=subslice.yaml"
       dimensions:
         d.2: [0, 1]
 ```
@@ -1255,10 +1262,6 @@ zzstructure:
   (`gleditor::Canvas`).
 - **Backward Link Derivation**: If cell $A$ defines a link to cell $B$ on dimension $D$, the loader
   automatically derives the reciprocal backward link $B \to A$ if not explicitly overridden.
-- **Preflets**: Cells can link to external slices via BitTorrent magnet URIs, SHA-1 infohashes, or
-  local YAML files. The built-in `PrefletFetcher` (`libtorrent-rasterbar`) fetches referenced slices
-  asynchronously into the XDG cache directory (`~/.cache/zigzag/slices/`) and automatically adopts
-  them upon completion.
 
 ### Controls and Navigation
 
@@ -1269,8 +1272,6 @@ zzstructure:
 | `PageUp` / `PageDown` / `Q` / `E` | Step accursed cell focus along primary Z dimension ($d_3$) |
 | `Space`                           | Swap primary X and Y dimensions                            |
 | `Tab` / `Shift-Tab`               | Cycle assigned dimensions across viewport axes             |
-| `Enter`                           | Resolve and navigate into Preflet target slice             |
-| `Backspace`                       | Return to parent slice                                     |
 | `R`                               | Reset camera view to default orientation                   |
 | Left Click                        | Pick cell directly under the mouse pointer to shift focus  |
 

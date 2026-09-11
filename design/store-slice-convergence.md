@@ -581,6 +581,17 @@ cost of a format change rather than a regression, and the fixture files in `asse
 regenerated in the same commit. Anything genuinely needing an out-of-band locator gains a scroll
 registry entry, which is where the rest of the system already looks for one.
 
+**And a second price this ruling did not name, found when step 18 came to do it: the feature goes
+too.** `PrefletFetcher` — a private libtorrent session, 400 lines — and every UI affordance over it:
+the `Enter` binding that followed a reference, `Backspace` that came back, the magnet badge, the
+fetch banner, the `--no-fetch` flag. **zigzag loses the ability to navigate from one slice into
+another, with nothing replacing it until steps 19–20.** That is acceptable only because the
+replacement is named and on the way, and because the alternative — a key binding reading a struct
+that no longer exists — is not a smaller cost, only a quieter one. The fetcher specifically is a
+*deletion* rather than a port because `TorrentRole::SliceCache` already exists on
+`ManagedTorrentDescriptor` with a `magnetUri` beside it: the system-managed coordinator is what a
+future caller reaches for, so the private session was redundancy, not capability.
+
 ### R14. `ops.nodes` gains a header, and it is one Merkle piece long
 
 R11 said a format change means bumping the version. Migration step 1 found the hole in that: a
@@ -1040,7 +1051,7 @@ ______________________________________________________________________
 Each step is one commit. After each, `make -j$(nproc)` builds all three programs and
 `make -j$(nproc) test` passes.
 
-Steps 1–17 have landed. What each actually cost, where it differed from the plan, and what it
+Steps 1–18 have landed. What each actually cost, where it differed from the plan, and what it
 measured is recorded inline below; the rest are unchanged.
 
 **Four things the landed steps have in common, worth knowing before starting the next one.**
@@ -1642,10 +1653,46 @@ came back byte-identical across every regenerated fixture.
    bytes, which a `std::string` or `std::vector` could not promise and is the whole reason the arena
    reserves its address space up front.
 
-1. **Delete `Preflet`** (R13). `struct Preflet`, both `optional<Preflet>` members, `resolvePreflet`,
-   `resolveAllPreflets`, `isPrefletChainNode`, the `preflet_*` roles, `d.preflet`, and the YAML
-   emitter branch. Regenerate the `assets/zigzag/` fixtures that use `preflet:` blocks. Independent
-   of everything above and landable at any point after the container change.
+1. ~~**Delete `Preflet`** (R13). `struct Preflet`, both `optional<Preflet>` members,
+   `resolvePreflet`, `resolveAllPreflets`, `isPrefletChainNode`, the `preflet_*` roles, `d.preflet`,
+   and the YAML emitter branch. Regenerate the `assets/zigzag/` fixtures that use `preflet:` blocks.
+   Independent of everything above and landable at any point after the container change.~~ **Done**,
+   and the list above was the model only. The feature on top of it came out too, which the list did
+   not say and should have.
+
+   **`PrefletFetcher` is deleted, not decoupled, and the reason is that it was duplicate
+   transport.** It was 400 lines running its own libtorrent session to fetch a slice file, keyed off
+   a preflet's magnet URI. The obvious alternative was to keep it and change
+   `begin(const Preflet &)` to take a magnet URI, since those are the only three fields it read
+   (`resource_identifier`, `hash`, and the `preferred_filename` metadata pair). What settles it
+   against that: `ManagedTorrentDescriptor` already has a `magnetUri`, a `dataRoot` and a
+   `TorrentRole::SliceCache` documented as "Zigzag multidimensional slice / preflet". The
+   system-managed swarm coordinator *is* the path a future caller reaches for, so keeping a second
+   private session would have preserved the redundancy instead of the capability.
+
+   **The UI went with it, and that is a real loss stated plainly.** `Enter` to follow a cross-slice
+   reference, `Backspace` to come back, `Escape` to cancel a download, the magnet-tinted cell
+   colour, the `-> [preflet]` badge, the fetch progress banner, the `--no-fetch` flag, and
+   `slice_stack_`/`returnToPreviousSlice()` — which only `pollPrefletFetch()` ever pushed to, so
+   with the fetch gone it could never have done anything. **zigzag can no longer navigate from one
+   slice into another.** Nothing replaces it in this step; cross-slice reference returns as an
+   ordinary Xanadu link once a slice is a `Store` and cell identity crosses documents as a
+   `GlobalOpRef`, which is steps 19–20. Removing the affordance was the alternative to leaving a key
+   binding pointing at a data model that no longer exists.
+
+   **Two helpers went from "used" to "tested only" and were deleted on that basis.**
+   `looksLikeBitTorrentMagnet()` validated a preflet's locator and `splitMetadataEntry()` parsed
+   `preflet_meta` cells' `key: value` text; after the deletion each had exactly one caller, its own
+   test. That is the same standard `virtual_memory_arena.cpp` applied to `mapZeroPagesFixed` and
+   `remapSpanFixed`. Worth noticing during a deletion of this shape: the orphans are not in the grep
+   for the thing being deleted.
+
+   **The fixture, checked rather than assumed.** `assets/zigzag/zigzag_structure.yaml` lost cells
+   10–13 and cell 6's `d.preflet` link. Those four cells were reachable *only* along `d.preflet` —
+   verified against the old file rather than eyeballed — so no rank lost a neighbour, and
+   `zigzag --raster` over the slice still exits 0 with no diagnostics. Seven tests went with the
+   feature (four `PrefletFetcher`, two `zzcore` chain/cycle, one loader-parse), and `zigzag_test` is
+   62 where it was 69.
 
 1. **Port `UnifiedTransclusionEngine` onto `Manifold`.** `syncIncremental`/`buildCellFromOp` already
    make exactly one `CompactZZCell` per `CompactOpNode` and already set `spoolOpIndex = opIndex`, so

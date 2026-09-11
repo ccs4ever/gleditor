@@ -35,7 +35,7 @@ struct AppState {
    * RenderState::docs at all (it draws CompactZZCell slices through its own
    * FrameContributor, not Doc pages), so the default left this permanently
    * true and --profile/--screenshot waited on a condition that could never
-   * become false. zigzag's own loading state (BitTorrent Preflet fetches,
+   * become false. zigzag's own loading state (slice fetches,
    * slice staging) is already reported correctly through its FrameContributor
    * ::busy(), which hasPendingWork() already checks regardless of this flag.
    */
