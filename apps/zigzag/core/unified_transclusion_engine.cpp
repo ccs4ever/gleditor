@@ -472,59 +472,6 @@ std::string_view UnifiedTransclusionEngine::resolveLocalCellView(
   return cell->resolveLocalView(store_.primedia());
 }
 
-ZzStructureDocument
-UnifiedTransclusionEngine::toZzStructureDocument(const CellID focus) const {
-  ZzStructureDocument doc;
-  if (focus != 0 && cells_.contains(focus)) {
-    doc.focus = focus;
-  } else if (!cells_.empty()) {
-    doc.focus = cells_.begin()->first;
-  }
-
-  for (const auto &[id, cell] : cells_) {
-    Cell zc;
-    zc.id   = id;
-    zc.role = cell.type;
-    zc.data = resolveCellText(id);
-
-    for (std::size_t i = 0; i < StandardDimensionCount; ++i) {
-      const auto ord = static_cast<DimOrdinal>(i);
-      const auto lp  = cell.linksOn(ord);
-      if (lp.pos != 0 || lp.neg != 0) {
-        zc.dimensions[std::string(dimOrdinalToString(ord))] = lp;
-      }
-    }
-
-    for (const auto &dyn : cell.dynamicDimensions) {
-      if (dyn.links.pos != 0 || dyn.links.neg != 0) {
-        zc.dimensions[dyn.name] = dyn.links;
-      }
-    }
-
-    doc.cells[id] = std::move(zc);
-  }
-  return doc;
-}
-
-void UnifiedTransclusionEngine::loadFromZzStructureDocument(
-    const ZzStructureDocument &doc) {
-  for (const auto &[id, zc] : doc.cells) {
-    CompactZZCell cell;
-    cell.id            = id;
-    cell.type          = zc.role;
-    cell.ephemeralText = zc.text();
-
-    for (const auto &[dimName, lp] : zc.dimensions) {
-      cell.setLinks(dimName, lp);
-    }
-
-    cells_[id] = std::move(cell);
-    if (id >= nextCellId_) {
-      nextCellId_ = id + 1;
-    }
-  }
-}
-
 UnifiedTransclusionEngine::RenderInstanceBatch
 UnifiedTransclusionEngine::stageVisibleCells(
     const RenderSliceRequest &req, const gleditor::text::FontFacePtr &font,

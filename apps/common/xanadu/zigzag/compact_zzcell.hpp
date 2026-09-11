@@ -118,8 +118,10 @@ struct DynamicDimensionLink {
  * **Not 64 bytes, and not zero-copy** -- which this comment, the design
  * document and CLAUDE.md all used to claim. It is around 960 bytes, aligned
  * to 8, and it heap-allocates: a vector of dynamic dimensions, three
- * optionals, a std::string type tag, and `ephemeralText`, which holds a copy
- * of the very primedia that `span` already addresses.
+ * optionals and a std::string type tag. It used to hold `ephemeralText` as
+ * well -- a copy of the very primedia that `span` already addresses -- which
+ * migration step 19 deleted: content lives at an address, and a cell holding a
+ * second copy of it is a cell that can disagree with the permascroll.
  *
  * The claim survived as long as it did because nothing checked it. The
  * static_assert at the end of this file does now -- not at 64, which would be
@@ -140,8 +142,8 @@ struct DynamicDimensionLink {
  * traversal only becomes expensive at radii nothing asks for.
  *
  * What the size does cost is memory: 30 MiB of resident cells for that
- * lattice against 1.6 MiB for a cache-line-sized one, before `ephemeralText`
- * adds a copy of each cell's text on top. If large lattices matter, that is
+ * lattice against 1.6 MiB for a cache-line-sized one. If large lattices
+ * matter, that is
  * the reason to do this work -- and it is a different reason from the one
  * this comment used to give.
  *
@@ -165,7 +167,6 @@ struct CompactZZCell {
   std::vector<DynamicDimensionLink> dynamicDimensions{};
 
   std::string type{"cell"};
-  std::string ephemeralText{};
   xanadu::ResolutionStatus resolutionStatus{
       xanadu::ResolutionStatus::VerifiedBytes};
   std::optional<xanadu::TranscopyrightDescriptor> transcopyrightInfo{};
@@ -226,9 +227,6 @@ struct CompactZZCell {
   readText(const xanadu::PrimediaSpool &primedia,
            const xanadu::Resolver &resolver,
            const std::vector<xanadu::Scroll> &externals) const {
-    if (!ephemeralText.empty()) {
-      return ephemeralText;
-    }
     if (isWithheld()) {
       return "[Redacted - Withheld]";
     }
@@ -269,9 +267,6 @@ struct CompactZZCell {
   readText(const xanadu::SegmentedPrimediaSpool &primedia,
            const xanadu::Resolver &resolver,
            const std::vector<xanadu::Scroll> &externals) const {
-    if (!ephemeralText.empty()) {
-      return ephemeralText;
-    }
     if (isWithheld()) {
       return "[Redacted - Withheld]";
     }
@@ -313,9 +308,6 @@ struct CompactZZCell {
    */
   [[nodiscard]] std::string_view
   resolveLocalView(const xanadu::PrimediaSpool &primedia) const noexcept {
-    if (!ephemeralText.empty()) {
-      return ephemeralText;
-    }
     if (span.empty() || span.scroll != xanadu::localScroll) {
       return {};
     }
@@ -324,9 +316,6 @@ struct CompactZZCell {
 
   [[nodiscard]] std::string_view resolveLocalView(
       const xanadu::SegmentedPrimediaSpool &primedia) const noexcept {
-    if (!ephemeralText.empty()) {
-      return ephemeralText;
-    }
     if (span.empty() || span.scroll != xanadu::localScroll) {
       return {};
     }

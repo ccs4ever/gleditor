@@ -116,17 +116,15 @@ public:
   [[nodiscard]] std::string_view resolveLocalCellView(CellID id) const noexcept;
 
   // -- Conversion & Compatibility -------------------------------------------
-
-  /**
-   * @brief Convert current engine cell space to a standard ZzStructureDocument.
-   */
-  [[nodiscard]] ZzStructureDocument
-  toZzStructureDocument(CellID focus = 0) const;
-
-  /**
-   * @brief Ingest an existing ZzStructureDocument into CompactZZCell space.
-   */
-  void loadFromZzStructureDocument(const ZzStructureDocument &doc);
+  //
+  // toZzStructureDocument() and loadFromZzStructureDocument() were here, and
+  // migration step 19 deleted them. The YAML document is a transfer format now,
+  // not a second cell space: sliceToStore() in zz_xudu_projector mints one as
+  // Structure operations and storeToSlice() reads a Manifold back out, both
+  // tested against the real sample slice. Ingesting a document by filling in
+  // cells that no operation minted is exactly the arrangement the convergence
+  // exists to remove -- and it was the last thing keeping
+  // CompactZZCell::ephemeralText alive.
 
   // -- Zero-Copy GPU Render Staging -----------------------------------------
 

@@ -1726,6 +1726,20 @@ came back byte-identical across every regenerated fixture.
    The order that follows: do 19 and 20 as one piece, staging-half-first, with the visualizer's move
    onto `Manifold` as the step that gives the result a caller.
 
+   **The second cell space's ingest is gone**, which is the first of those pieces and the one step
+   20 licensed: `toZzStructureDocument()` and `loadFromZzStructureDocument()` are deleted,
+   superseded by `storeToSlice()`/`sliceToStore()` — which are tested against the real sample slice
+   rather than a hand-built document, so this is a replacement and not a removal. **And with the
+   ingest went `CompactZZCell::ephemeralText`**, whose own comment had complained for two commits
+   that it held a copy of the primedia `span` already addresses. It was alive only because
+   `loadFromZzStructureDocument()` needed somewhere to put text that no operation had minted. A cell
+   with no span now reads as empty, which is correct: content lives at an address, and a cell
+   holding a second copy of it is a cell that can disagree with the permascroll.
+
+   Still to do, in order: swap `cells_`/`opIndexToCell_` for a `Manifold` (which is where
+   `addCell()`, `linkCells()` and `validate2RankManifold()` either move or go), then move
+   `ZigzagVisualizer` onto the result.
+
 1. **`sliceToStore()` / `storeToSlice()` against `Manifold`**, replacing `projectXuduToZigzag`'s
    paragraph-splitting heuristic (it pairs paragraph $k$ with `pieces()[k]`, and piece index and
    paragraph index have no relationship) and `zzStructureToLinkPackage`'s synthetic scroll.

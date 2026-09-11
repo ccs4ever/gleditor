@@ -144,28 +144,6 @@ TEST(UnifiedTransclusionEngineTest, ManifoldValidationCatchesAsymmetry) {
   EXPECT_FALSE(err.empty());
 }
 
-TEST(UnifiedTransclusionEngineTest, ToAndFromZzStructureDocument) {
-  xudu::Store store;
-  UnifiedTransclusionEngine engine(store);
-
-  const xudu::MicroversionId v0{};
-  store.insert(v0, 0, "Nelsonian Primordial Stream");
-  engine.syncIncremental();
-
-  const auto zzDoc = engine.toZzStructureDocument();
-  EXPECT_FALSE(zzDoc.cells.empty());
-
-  // Load into fresh engine
-  xudu::Store freshStore;
-  UnifiedTransclusionEngine importedEngine(freshStore);
-  importedEngine.loadFromZzStructureDocument(zzDoc);
-
-  EXPECT_EQ(importedEngine.cellCount(), engine.cellCount());
-  const auto *c = importedEngine.findCell(1);
-  ASSERT_NE(c, nullptr);
-  EXPECT_EQ(c->ephemeralText, "Nelsonian Primordial Stream");
-}
-
 TEST(UnifiedTransclusionEngineTest, StageVisibleCellsForRender) {
   xudu::Store store;
   UnifiedTransclusionEngine engine(store);
