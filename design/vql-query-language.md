@@ -106,7 +106,8 @@ ______________________________________________________________________
 | `A><B`              | Clone (`link(A, d_clone, +1, B)`) | Puts `A` and `B` on one clone rank, so both read its master; chainable (`A><B><C`) and combinable with `%` — see §4.6.                                                                         |
 | `.[offset, length]` | `value(ctx, off, len)`            | A slice, answered as an ephemeral cell quoting that range of addresses — a transclusion, not a copy.                                                                                           |
 | ~~`@`~~             | *retired*                         | Was "the numerical `cell_id` of the context node". A cell reference *is* a `cell_id`, so this was `.` spelled twice — see §7.6.                                                                |
-| `[...]`             | Predicate / Index Window          | Applies inline boolean filters or relative index clamps to a stream.                                                                                                                           |
+| `[...]`             | Predicate / Index Window          | Applies inline boolean filters or relative index clamps to a stream. Negative indices count from the end, `-1` being the last cell, so `[1, -2]` is every cell but the last.                   |
+| `any/all/none(...)` | Predicate Assertion               | Quantifies a stream instead of leaving the quantifier implied by position — see §4.3, and the reason `[. != $x]` is not the negation of `[. = $x]`.                                            |
 | `(...)`             | Macro Dimension Group             | Groups dimensional sequences into a compound traversal segment.                                                                                                                                |
 | `*`                 | Kleene Repetition                 | Repeats the preceding macro group zero or more times until termination.                                                                                                                        |
 | `{...}`             | Weave Block                       | Groups a comma-separated list of effect items under `weave`.                                                                                                                                   |
@@ -179,6 +180,8 @@ NumericLiteral          ::= ("-" | "+")? [0-9]+ ( "." [0-9]+ )?
 BooleanLiteral          ::= "true" | "false"
 
 FunctionInvocation      ::= Identifier "(" ArgumentList? ")"
+                          (* any/all/none are ordinary invocations taking a
+                             PathExpression -- no new grammar, see §4.3 *)
 ArgumentList            ::= ValueExpr ( "," ValueExpr )*
 ```
 
@@ -272,6 +275,45 @@ where it happens to parse: `$inv/d.inputs` is a rank, not a value, and may strea
 cells. The correct form filters the rank with a predicate and lets its non-emptiness stand for the
 condition — `where $inv/d.inputs[. = $pattern]` — or binds a single dereferenced value first with
 `let` before comparing it.
+
+#### The quantifier that form hides, and the three that name it
+
+`where <stream>` is truthy when the stream selects at least one cell, so
+`where $inv/d.inputs[. = $pattern]` is **existential**: *some* input equals the pattern. That is
+usually what is wanted and it reads well, but the quantifier is implied by position rather than
+written, and one consequence of leaving it implied is a trap:
+
+> **`[. != $x]` is not the negation of `[. = $x]`.** The first is "some member differs from `$x`",
+> the second "some member equals `$x`", and a rank holding `"a"` and `"b"` satisfies *both*.
+> Negating a filter negates the comparison, not the quantifier, and the quantifier is the part that
+> was never written down.
+
+So VQL has three predicate assertions, each taking a stream and answering a boolean:
+
+| form             | true when                                                          |
+| ---------------- | ------------------------------------------------------------------ |
+| `any(<stream>)`  | at least one cell is selected — what bare truthiness already means |
+| `all(<stream>)`  | every cell in the *source* rank satisfies the predicate            |
+| `none(<stream>)` | no cell does; exactly `!any(...)`                                  |
+
+`none($inv/d.inputs[. = $x])` is what `[. != $x]` is usually mistaken for, and
+`all($inv/d.inputs[. = $x])` has no spelling in the filtering form at all — which is the real
+argument for having them, rather than mere explicitness.
+
+Two rules worth stating rather than discovering:
+
+- **`all()` over an empty rank is true**, as vacuous truth requires. An invoice with no inputs
+  satisfies "all inputs match the pattern". If that is the wrong answer for a query, the query wants
+  `all(...) and any(...)`, and having to write that is the point — the alternative is an `all()`
+  that quietly means something else for one input size.
+- **`all()` needs the source rank, not just the filtered stream**, since a filter discards exactly
+  the cells that would falsify it. It is therefore defined over a `PathExpression` whose final step
+  is a predicate: `all($path/d.dim[<test>])` compares the count the predicate kept against the count
+  `$path/d.dim` yields. A stream with no predicate on its final step is all-true trivially.
+
+Bare truthiness is left alone and is not deprecated: it *is* `any()`, it reads naturally in `where`,
+and rewriting every existing query to say so would add a word to each without adding a fact. Write
+the quantifier when a reader might otherwise assume a different one.
 
 ### 4.4 Result Materialization: Topological Return Weaving
 

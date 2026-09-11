@@ -291,6 +291,34 @@ true;
     return true;
 }
 
+// Negative indices count from the end, which is the same reading VQL's index
+// windows already use -- $path[1, -2] is every cell but the last. -1 is the
+// last element, -2 the one before it, and the range is inclusive of the element
+// a negative length names.
+//
+// This is a *coordinate*, not a sentinel, and the distinction is the one §5.1
+// is making when it deletes kNoLink and target == -1/-2 from link. Those were
+// arbitrary out-of-band markers: -1 does not mean "allocate" under any reading,
+// it was simply a number nobody else was using. -1 meaning "the last one" is
+// systematic, composes with every other index, and is what a reader already
+// expects here.
+//
+// Note that length == -1 comes out as "to the end" without being special-cased:
+// stopping at the element one from the end, inclusive, *is* stopping at the end.
+static std::pair<size_t, size_t> resolve_range(size_t size, int64_t offset,
+                                               int64_t length) {
+    const int64_t signed_size = static_cast<int64_t>(size);
+    int64_t from = (offset < 0) ? signed_size + offset : offset;
+    from = std::clamp<int64_t>(from, 0, signed_size);
+
+    // A negative length names the last element included, so the exclusive end
+    // is one past it.
+    int64_t to = (length < 0) ? signed_size + length + 1 : from + length;
+    to = std::clamp<int64_t>(to, from, signed_size);
+
+    return {static_cast<size_t>(from), static_cast<size_t>(to - from)};
+}
+
 // The Content Primitive: value
 //
 // One primitive branching on what it was asked to do, and -- like link --
@@ -322,12 +350,7 @@ std::optional<cell_id> value(cell_id c_id, int64_t offset = 0,
             // substring patch, and on a persistent cell it is one Splice
             // operation -- see §5.3.
             std::string& dst = std::get<std::string>(target);
-            const size_t at = std::min<size_t>(
-                static_cast<size_t>(std::max<int64_t>(0, offset)), dst.size());
-            const size_t n = (length < 0)
-                                 ? dst.size() - at
-                                 : std::min(static_cast<size_t>(length),
-                                            dst.size() - at);
+            const auto [at, n] = resolve_range(dst.size(), offset, length);
             dst.replace(at, n, std::get<std::string>(*replacement));
         }
         return c_id;   // the cell, so a path carries on through the write
@@ -343,11 +366,7 @@ std::optional<cell_id> value(cell_id c_id, int64_t offset = 0,
     const CellValue& src = matrix[master]->primitive_value;
     if (!std::holds_alternative<std::string>(src)) return c_id;
     const std::string& text = std::get<std::string>(src);
-    const size_t at = std::min<size_t>(
-        static_cast<size_t>(std::max<int64_t>(0, offset)), text.size());
-    const size_t n = (length < 0) ? text.size() - at
-                                  : std::min(static_cast<size_t>(length),
-                                             text.size() - at);
+    const auto [at, n] = resolve_range(text.size(), offset, length);
 
     const cell_id slice = internal_alloc_cell();   // ephemeral in a real arena
     matrix[slice]->primitive_value = text.substr(at, n);
@@ -365,12 +384,12 @@ CellValue render(cell_id c_id) {
     return matrix[find_clone_master(c_id)]->primitive_value;
 }
 
-// A negative offset clamps to 0 rather than counting from the end, and there
-// is deliberately no sentinel meaning "append": value(c, -1, 0, v) prepends.
-// A magic negative offset is exactly the pattern §5.1 is removing from link --
-// kNoLink, target == -1, target == -2 -- and reintroducing it here to save a
-// wrapper would trade a clear call site for a number you have to remember.
-// append() below computes the offset instead, which is what it is for.
+// There is still no spelling for "append" in value() itself, and the reason is
+// not squeamishness about negative numbers: negative indices name *elements*
+// counting from the end, and appending names the gap *past* the last element,
+// which is not an element. value(c, -1, 0, v) inserts before the last
+// character, which is a real and different thing to want. append() below
+// computes the offset instead.
 
 // Convenience Wrappers (named entry points onto link/value, not new primitives)
 std::optional<cell_id> new_cell(cell_id cell, cell_id dim, int direction) {
