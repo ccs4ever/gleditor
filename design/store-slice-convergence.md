@@ -1938,8 +1938,99 @@ Three resolutions, with their prices:
   not inherit `Version`'s coalescing. Reusing the piece table while suppressing `joinFollowing()` is
   possible but is a fork of `Version` in all but name.
 
-**(b) is the recommendation**, and it is deliberately not implemented ahead of this ruling, because
-it changes `CellSlot`.
+**(b) is the recommendation**, and it is deliberately not implemented ahead of this ruling.
+
+**It is cheaper than the paragraph above first claimed, in two ways worth correcting.** `CellSlot`
+lives only in memory: `StoreTables` holds the scroll registry, the local segments, the links, the
+current versions and the annotations, and **no cells at all**, because a manifold is a replay
+product rebuilt from operations. So changing its layout regenerates no fixture and bumps no format.
+What changes is §12.5's per-cell memory, not anything on disk.
+
+### U3.1 What (b) buys: a cell's edits become its history
+
+The question that produced this section — *"when a cell is edited and then inserted into, deleted
+from, transcluded into, do those tie to the cell and appear in its history?"* — has a better answer
+under (b) than the design currently gives, and the machinery is already here.
+
+§2 says it outright: **"MAKE/CHANGE STRUCTURE MAP is the hyperop that creates or alters a mapping
+under which the other five hyperops' coordinates are meaningful."** Structure establishes a frame;
+Insert, Delete, Rearrange and Transclude operate *inside* one. What has never been built is the
+ability of those four to **name** a frame other than the document's own concatext. Give them one and
+a cell's content stops being a field that gets restated and becomes a replay product of its own
+operations — exactly as `Version::runs` is a replay product of the document's.
+
+The history property falls out rather than being added: each edit is an ordinary operation with its
+own kind and its own `MicroversionId`, so walking a cell's operations yields *what each edit did*,
+and a cell is scrubbable in hypertime like a document. Today's `SetValue` records only "the content
+is now X" and says nothing about how it got there.
+
+**The frame costs no *node* layout change.** `linkId` is unused on Insert, Delete, Rearrange and
+Transclude, and R2 has already made it a `CellRef` for Structure. So: **`linkId` is the frame, and
+zero is the document's own concatext.** Every operation ever recorded has `linkId == 0` and goes on
+meaning exactly what it means now, so `CompactOpNode` is untouched and no store on disk changes.
+
+**It does cost a wire format bump, and missing that would have been the dangerous kind of mistake.**
+`binary_ops.cpp` writes `op.link` for exactly two kinds, `Link` and `Structure`; the Insert, Delete,
+Rearrange and Transclude encoders never emit it. A framed operation published through the existing
+encoder would therefore arrive at a reader **with its frame silently erased** -- an edit meant for a
+cell arriving as an edit to the document's own concatext. That is not a failure to load but a change
+of meaning, which is the precise failure R14 exists to make impossible. So those four encoders must
+learn to write `link`, and that is `CompactBinaryV3` becoming `CompactBinaryV4` whichever option
+below is taken.
+
+### U3.2 The `sourceOpIndex` collision, and why it dissolves
+
+A `Transclude` into a cell appears to need `sourceOpIndex` twice: once for the source version it
+quotes, and once for R7's chain to the previous operation on that cell. That collision is real only
+until one asks **why the chain exists**, and the answer is recorded in migration step 14: a
+`SetLink` has *no field* with which to name its subject, so it names it by chaining to an operation
+that does. The chain is a workaround for a missing subject field.
+
+A framed operation has a subject field — `linkId` — so it does not need the chain to say whose edit
+it is. **`sourceOpIndex` therefore keeps its transclusion meaning untouched, and there is no
+collision.** What the chain additionally bought was R7's $O(\text{edits})$ walk of a cell's history
+without folding; with an explicit frame that walk becomes an $O(\text{history})$ scan, and
+`Manifold::CellSlot::lastOp` — which the fold already maintains — is the index that makes it
+$O(\text{edits})$ again for anyone who has folded, which is anyone rendering the cell.
+
+Three ways to spend that, in increasing order of tidiness and of cost:
+
+- **(A) `linkId` frames the four; Structure keeps its `sourceOpIndex` chain.** No collision, and
+  `Transclude` is untouched. Its apparent advantage -- "no format change" -- **is false**, per the
+  paragraph above: the four encoders must start writing `link` regardless, so (A) pays the version
+  bump too and buys only the smaller re-encode. What it leaves behind is two mechanisms for "which
+  cell is this operation about" -- a chain for Structure, a frame for everything else -- which is
+  the kind of thing that reads as an accident five years later.
+- **(B) `linkId` names the subject uniformly, for every kind.** Structure's dimension moves to
+  `length`, which is free for it, and `sourceOpIndex` is freed *entirely* for Structure as well. One
+  rule everywhere, and the chain becomes derived rather than stored. Price: `CompactBinaryV4` and a
+  re-encode of the Structure family — cheap under R11, which is exactly the kind of change R11
+  exists to make cheap, but it is a bump and a fixture regeneration.
+- **(C) Keep a stored chain for framed operations, in `value`.** Preserves the $O(\text{edits})$
+  walk for everything. Rejected: `value` is R6's scalar slot, so a scalar cell and a framed
+  operation would contend for it, and it puts one concept in two homes for a walk the fold already
+  provides.
+
+**(B) is the recommendation, and the wire discovery is what settles it.** (A) was attractive only
+while it looked free; once both options bump the format, the remaining question is whether a stored
+chain earns its field now that a subject field exists -- and it does not, since every consumer of a
+cell's history is already holding a folded manifold that maintains `lastOp`. Paying a version bump
+to arrive at *two* rules for naming a cell would spend the one cheap moment R11 affords on the worse
+of the two shapes.
+
+### U3.3 What (b) still has to solve
+
+Two, neither fatal and both worth costing before starting:
+
+- **Split without join.** A delete inside a cell splits its run, which is `Version::splitAt`. But
+  `Version::joinFollowing()` coalesces adjacent pieces, and §1's whole argument is that coalescing
+  destroys piece identity — the very identity the run exists to keep. So (b) wants a piece table
+  that splits and *never* joins, which is a fork of `Version`'s behaviour even where it reuses its
+  code. That is the tension §1 warned about, met from the other side.
+- **Fold cost moves.** `applyStructure()` is $O(1)$ per operation today; folding content per cell
+  makes it $O(\text{edits on that cell})$, and `textOf()` becomes "concatenate a run" rather than
+  "read one span". Both are the costs `Version` already pays for a document, so the shape is known;
+  what is unknown is the constant at the cell sizes a slice has.
 
 > **Experiment.** Before choosing, instrument a real editing session: record how often a cell's text
 > is edited after something else has come to share its address, since (a) is only as bad as that

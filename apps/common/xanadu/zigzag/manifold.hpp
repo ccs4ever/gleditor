@@ -109,7 +109,10 @@ struct CellSlot {
   /// the whole content, so an edit costs the size of the cell and moves every
   /// byte of it to a new address, which silently severs any transclusion that
   /// shared the old one. See U3 in design/store-slice-convergence.md, which
-  /// records the measurement and the three ways out.
+  /// records the measurement, the three ways out, and why the apparent
+  /// `sourceOpIndex` collision on a transclusion-into-a-cell dissolves: R7's
+  /// chain exists only because a SetLink has no field to name its subject, so
+  /// an operation that *does* have one needs no chain.
   xanadu::PrimediaSpan span{};
   std::uint32_t birthOp{0};    ///<  4: the MakeCell index; == this CellRef
   std::uint32_t lastOp{0};     ///<  4: head of the micro-history chain (R7)
