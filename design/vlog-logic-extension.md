@@ -1,9 +1,10 @@
 # Vlog: Unification and Backtracking in Vortex
 
-**Document Version:** 2.0 — The Arena Holds Addresses, Not Bytes **Extension To:** Vortex
-Hyperstructural Runtime Core — `link` and `value`, plus §8's bill **Status:** Speculative design;
-nothing here is wired into the gleditor build **Core changes required:** two methods, one vector and
-a scratch scroll, almost all of it on a class that does not exist yet (§8)
+**Document Version:** 3.0 — Trailing Is Copy-on-Write **Extension To:** Vortex Hyperstructural
+Runtime Core — `link` and `value`, plus §8's bill **Status:** The *machinery* of §5 is built and
+tested — `ArenaManifold`, `mark`/`release`/`discard`, the conditional trail, `scratchScroll`,
+`promote()`. The resolution engine over it is not: no unification, no clause database, no solver.
+**Core changes required:** none outstanding; §8 is now a record of what was paid
 
 **Vlog** — the Vortex Logic Extension — is resolution as a program over Vortex's own two primitives.
 The original Vortex draft listed "Prolog-style unification and backtracking" as a deferred idea and
@@ -343,14 +344,24 @@ The persistent regime is semantically perfect and operationally ruinous: a bindi
 author's operations spool, all of it search scaffolding that is not a document. R8's answer applies
 directly — resolution runs in an `ArenaManifold` and only the *answer* is promoted.
 
-An `ArenaManifold` (convergence step 21, not yet written) holds dense vectors and only ever appends.
-So:
+An `ArenaManifold` (convergence step 21, **built**: `apps/common/xanadu/zigzag/arena_manifold.hpp`)
+holds dense vectors and only ever appends. So:
 
-```text
-Mark = (cellCount, linkArenaSize, contentArenaSize, trailSize)
-mark()            ->  read four lengths
-release(Mark m)   ->  resize all four back, replaying m.trailSize.. in reverse
+```cpp
+struct Mark {                    // seven lengths, no allocation
+  std::uint32_t cellCount, linkSize, contentSize, scratchSize, trailSize;
+  std::uint32_t liveLinks, liveContent;
+};
+Mark mark()               ->  read them
+void release(const Mark&) ->  replay the trail tail in reverse, then truncate
+void discard(const Mark&) ->  give up the retry, keep the bindings (§5.4)
 ```
+
+The last two lengths are what this document originally got wrong by omission. `liveLinks` and
+`liveContent` are derived counters, and recomputing them on release would make it $O(cells)$ — which
+would defeat the whole point, since the reason an arena choice point beats a microversion is that it
+is $O(1)$. Carrying them in the mark is exact: every slot above it is discarded and every slot below
+it is restored, so the live counts return to precisely what they were and can be assigned back.
 
 **Undo is truncation.** A choice point is four integers and costs no allocation; discarding one on
 success costs nothing at all. This is the WAM's cost model reached from the other direction: the WAM
@@ -387,8 +398,44 @@ an arena* rather than as an optimisation someone thought of. The common case in 
 binding a variable minted for this clause activation, which is younger than the mark, so it is not
 trailed and the trail stays empty through most of a deterministic call.
 
-Size: a trail entry is `(CellRef cell, DimRef dim, bool negward, CellRef old)` — 12 bytes padded to
-16\. That is the entire new data structure Vlog asks for.
+**A trail entry is a saved `CellSlot`, not a link's previous value.** This document first proposed
+`(CellRef cell, DimRef dim, bool negward, CellRef old)` at 16 bytes, and implementing it showed that
+is not enough — for a reason only the CSR arena makes visible. A cell that gains a dimension may
+have its whole link *run relocated* to the arena's tail, which changes the slot header and no
+`DimLink` at all; replaying link values would restore a `linkOffset` pointing above the mark. Saving
+the slot covers that, and covers content runs, `valueBits` and `lastOp` in one mechanism:
+
+```cpp
+struct TrailEntry {
+  std::uint32_t dense;   ///< which slot
+  CellSlot saved;        ///< what it held before the write
+};
+static_assert(sizeof(TrailEntry) == 40);
+```
+
+**And trailing a cell copies its runs above the mark.** The header alone is still not sufficient,
+which is the second thing the implementation caught: a `DimLink` lives in a shared arena, so
+overwriting one *in place* in a run that sits below the mark survives truncation. `release()` would
+restore an offset pointing at a run whose contents had already been edited. So trailing relocates
+the cell's link and content runs to the arenas' tails — the originals below the mark are left
+pristine, every later write lands in territory truncation reclaims, and restoring the header is
+enough because the header is the only thing pointing at the copy.
+
+That is copy-on-write per cell per choice point, and §5.3's condition is exactly what bounds how
+often it happens: a variable minted for this clause activation is never copied. It also gives a
+precise test for "already copied out under this mark" — both runs sitting above the mark's arena
+lengths — which is what keeps this at one entry per old cell rather than one per write.
+
+**The cost of a binding is one entry per old cell the edit touches, and an eviction touches one.**
+Setting a link displaces whatever the far end held, and the displaced occupant is a cell too. So
+binding an old variable whose previous target is also old costs two entries, not one. Easy to forget
+when counting what an undo must restore, which is why there is a test named for it.
+
+**Compaction is forbidden while a mark is outstanding.** Not caution — compaction moves every run,
+which is precisely what makes an offset recorded in a `Mark` meaningless, so an arena that compacted
+inside a choice point would corrupt undo silently. Nothing is lost by waiting: `release()`'s
+truncation *is* the reclamation, so the dead runs a failed branch left behind cost nothing. Deferred
+compaction and a search that abandons work turn out to want the same thing.
 
 ### 5.4 Cut is one comparison against a barrier
 
@@ -598,27 +645,35 @@ The brief for Vlog was "as few changes to the C++ core as possible." The answer 
 format changes at all.** No new `OpKind`, no new `StructureVerb`, no flag bit, no format version
 bump, no fixture regeneration.
 
-What is added, almost entirely inside `ArenaManifold` — **a class that does not exist yet**, since
-it is convergence step 21:
+What was added, almost entirely inside `ArenaManifold` — convergence step 21, now written:
 
-1. `Mark mark() const` — reads four vector lengths.
-1. `void release(Mark)` — resizes four vectors, replaying the trail tail in reverse.
-1. `std::vector<TrailEntry> trail_` — 16 bytes per entry, appended only when the written cell is
-   older than the innermost mark.
+1. `Mark mark()` — reads seven vector lengths (§5.2).
+1. `void release(const Mark &)` — replays the trail tail in reverse, then truncates.
+1. `void discard(const Mark &)` — cut and success: the retry goes, the bindings stay (§5.4).
+1. `std::vector<TrailEntry> trail_` — 40 bytes per entry, not the 16 this document first claimed,
+   appended only when the written cell is older than the innermost mark (§5.3).
 1. A scratch byte buffer and `scratchScroll`, for the one thing that allocates content (§5.5).
 
-**Version 1.0 of this document claimed the fourth item was not needed, and that nothing in
-`Manifold` changed at all. That was too strong**, and the correction is the whole reason this
-revision is a major one. `scratchScroll` is a constant in `spool.hpp`, which is free; but a scratch
-span must be *refused* on the way into the spool, and the place that refusal belongs is
-`Manifold::applyStructure()`, beside the `isEphemeral()` check it already performs. Three lines in a
-function that already does exactly this for cell refs — but three lines in `Manifold`, not zero, and
-a bill is worth nothing if it is revised downward by leaving things off it.
+**Version 1.0 claimed the last item was not needed, and that nothing in `Manifold` changed at all.
+That was too strong.** `scratchScroll` is a constant in `spool.hpp`, which is free; but a scratch
+span must be *refused* on the way into the spool, and the places that refusal belongs are
+`Manifold::applyStructure()`, beside the `isEphemeral()` check it already performs, and the three
+span-taking entry points on `Store`, beside `setLink()`'s ephemeral throw. Small — a few lines in
+functions that already do exactly this for cell refs — but not zero, and a bill revised downward by
+leaving items off it is worth nothing.
 
-The rest still holds, and is still the reason the idea was worth revisiting now rather than when it
-was deferred. Adding two methods to a class before it is written is free; adding them to `Manifold`
-after seventeen fixtures depend on its layout is not. **A speculative feature that lands its
-requirements on an unwritten class has found the cheapest moment it will ever have.**
+**What the bill did not have to include is the interesting part.** An arena cell's ref carries
+`ephemeralBit`, so `Store::setLink()` throws on one and `applyStructure()` counts one as refused,
+which means an arena ref escaping into a document is stopped by machinery written before this class
+existed and for an unrelated reason (R12's derived cells). `promote()` works by *mapping* refs
+rather than by being trusted with them, and the test for that asserts the refusal comes from a
+`Store` that has never heard of `ArenaManifold`.
+
+And the timing argument held. Adding two methods to a class before it is written is free; adding
+them to `Manifold` after seventeen fixtures depend on its layout is not. **A speculative feature
+that lands its requirements on an unwritten class has found the cheapest moment it will ever have**
+— and in the event, the class was written *because* three documents had landed requirements on it,
+which is the same observation from the other side.
 
 Everything else — unification, term shape, clause selection, cut, negation as failure, the occurs
 check, tabling — is a program over `link` and `value`, per §2.
@@ -661,10 +716,12 @@ Stated in the same spirit as VPL §5 — these are real, and two of them are gat
    so the interesting question is not how to avoid it but how to bound it. A plausible answer is to
    run in the arena and promote only the derivation of a *found* answer, giving a proof term without
    the dead ends; that is not specified here.
-1. **Vlog is gated on step 21.** `ArenaManifold` and `promote()` do not exist. Everything in §5.2,
-   §5.3, §4.3 and §6.3's mitigation is written against a class that is a design note. So is
-   [VPL](vpl-array-language.md), for the same reason, and so is VQL's own write path. Step 21 is now
-   blocking three documents.
+1. **~~Vlog is gated on step 21.~~ No longer: `ArenaManifold`, its choice points and `promote()` are
+   built and tested.** What is *not* built is anything above them — no unification, no clause
+   database, no solver, so every claim in §4, §6 and §7 is still a claim about a program nobody has
+   written. And the arena is not yet an **overlay** over a persistent `Manifold`: it starts empty
+   and its cells are its own, so a clause database living in a document cannot be resolved against
+   in place. That is the next increment, and VQL's read path wants the same thing.
 1. **Rational trees diverge from ISO.** §4.4, deliberately, and it means a program ported from a
    conforming Prolog can loop where it would have failed.
 1. **Nothing here addresses the standard library, exceptions, or arithmetic evaluation.** `is/2`
@@ -694,7 +751,8 @@ ______________________________________________________________________
 - **U3 (a cell's content is a run of spans)**: `Splice` is what lets a term's content be edited
   without severing the addresses a transclusion-binding shares, so §9's third bullet depends on U3
   having been resolved the way it was.
-- **Step 21 (`ArenaManifold` + `promote()`)**: gating, per §10.4.
+- **Step 21 (`ArenaManifold` + `promote()`)**: **built**, and §5.2–§5.5 are the record of what it
+  had to be. Its remaining half is the overlay over a persistent `Manifold`, per §10.4.
 
 ______________________________________________________________________
 
@@ -710,8 +768,9 @@ use:
 
 Editorial changes that alter no normative text bump neither component.
 
-| version | commit    | date       | change                                                                                                                                                                                                |
-| ------- | --------- | ---------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| 2.0     | `f519ab9` | 2026-09-11 | §5.5: the arena is neither an in-memory store nor an in-memory permascroll — it holds addresses, not bytes. `scratchScroll` added to §8's bill, correcting 1.0's claim that `Manifold` was untouched. |
-| 1.1     | `88c9336` | 2026-09-11 | Named **Vlog**, and restyled as an extension rather than a front end (intro, §2). The intro's "no trail" reconciled with §5.3; U1's two consumers separated into ordinal and key.                     |
-| 1.0     | `734513a` | 2026-09-11 | Initial specification: binding as a clone link, backtracking as truncation.                                                                                                                           |
+| version | commit    | date       | change                                                                                                                                                                                                                                  |
+| ------- | --------- | ---------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 3.0     | `PENDING` | 2026-09-11 | `ArenaManifold` implemented, and §5.2/§5.3 corrected by it: a `Mark` is seven lengths, a trail entry is a saved `CellSlot` at 40 bytes, trailing copies a cell's runs above the mark, and compaction is forbidden while a mark is held. |
+| 2.0     | `f519ab9` | 2026-09-11 | §5.5: the arena is neither an in-memory store nor an in-memory permascroll — it holds addresses, not bytes. `scratchScroll` added to §8's bill, correcting 1.0's claim that `Manifold` was untouched.                                   |
+| 1.1     | `88c9336` | 2026-09-11 | Named **Vlog**, and restyled as an extension rather than a front end (intro, §2). The intro's "no trail" reconciled with §5.3; U1's two consumers separated into ordinal and key.                                                       |
+| 1.0     | `734513a` | 2026-09-11 | Initial specification: binding as a clone link, backtracking as truncation.                                                                                                                                                             |

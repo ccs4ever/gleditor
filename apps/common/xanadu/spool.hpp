@@ -23,6 +23,31 @@ inline constexpr ScrollId breakMarkerScroll =
 inline constexpr ScrollId vocabularyScroll = breakMarkerScroll - 1;
 
 /**
+ * @brief Bytes an evaluation constructed that have not earned an address.
+ *
+ * An ArenaManifold holds PrimediaSpans -- *addresses* -- so text built during
+ * evaluation (a concatenation, a number rendered for printing) has nowhere to
+ * live. It cannot go into the author's permascroll: a span there is "a run of
+ * content at a permanent address", and an address a failed branch throws away
+ * was never permanent. So it goes in the arena's own byte buffer under this
+ * scroll, and promote() is what spools it for real and rewrites the span.
+ *
+ * Reserved rather than merely conventional, because a span carrying it is
+ * structurally identical to any other and a promoted cell quoting one would be
+ * a transclusion into a scroll that does not exist. Manifold::applyStructure()
+ * refuses it, beside the isEphemeral() check it already performs on cell refs
+ * -- the same R8 boundary, enforced on the address side. See
+ * design/vlog-logic-extension.md §5.5.
+ */
+inline constexpr ScrollId scratchScroll = breakMarkerScroll - 2;
+
+/// Whether @p scroll is one of the reserved ids rather than a real scroll.
+[[nodiscard]] inline constexpr bool isReservedScroll(const ScrollId scroll) {
+  return breakMarkerScroll == scroll || vocabularyScroll == scroll ||
+         scratchScroll == scroll;
+}
+
+/**
  * @brief A run of content at a permanent address.
  */
 struct PrimediaSpan {

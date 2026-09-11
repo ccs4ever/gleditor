@@ -206,6 +206,19 @@ void Manifold::applyStructure(const std::uint32_t opIndex,
     foldedThrough_ = opIndex;
   }
 
+  // R8's boundary on the *address* side, and the twin of the isEphemeral()
+  // check the SetLink case makes on cell refs. A span in the scratch scroll
+  // names bytes an ArenaManifold constructed and has no permanent address, so a
+  // persisted cell quoting one would be a transclusion into a scroll that does
+  // not exist -- and one span is structurally identical to another, so nothing
+  // downstream could tell. promote() is the only thing that turns scratch bytes
+  // into an address; everything else is refused here. See spool.hpp's
+  // scratchScroll and design/vlog-logic-extension.md §5.5.
+  if (xanadu::scratchScroll == node.span().scroll) {
+    refusedOps_++;
+    return;
+  }
+
   switch (xanadu::structureVerbOf(node.flags)) {
   case xanadu::StructureVerb::MakeCell: {
     if (byRef.contains(opIndex)) {

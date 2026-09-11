@@ -1828,14 +1828,15 @@ came back byte-identical across every regenerated fixture.
    What is left of this step: the synthetic scroll in `zzStructureToLinkPackage`, and the
    doc-comment demotions.
 
-1. **`ArenaManifold` plus `promote()`** (R8). Only after step 14. The "only once there is a VQL
-   interpreter to drive it" condition is **withdrawn**: three specified designs now land
-   requirements on this class — VQL's write path, [VPL](vpl-array-language.md), and
-   [Vlog](vlog-logic-extension.md) §5.2 — and a class three documents are written against is better
-   built and measured than deferred until one of their interpreters exists. The tests are the driver
-   that was missing.
+1. **`ArenaManifold` plus `promote()`** (R8). **Done**, bar the overlay — see the end of this entry.
+   The "only once there is a VQL interpreter to drive it" condition was withdrawn first: three
+   specified designs had landed requirements on this class — VQL's write path,
+   [VPL](vpl-array-language.md), and [Vlog](vlog-logic-extension.md) §5.2 — and a class three
+   documents are written against is better built and measured than deferred until one of their
+   interpreters exists. The tests were the driver that was missing;
+   `tests/xudu/arena_manifold_test.cpp` is it.
 
-   Its shape, as those three have settled it:
+   Its shape, as those three settled it and the implementation corrected it:
 
    - **Dense vectors and no ops.** `slots`/`links`/`content` as in `Manifold`, keeping CSR per V3,
      with compaction folded into the reachability sweep rather than triggered at a load an arena
@@ -1854,7 +1855,30 @@ came back byte-identical across every regenerated fixture.
      `isEphemeral()` check it already performs — the same invariant, enforced on the address side.
    - **`promote()` is where an ephemeral byte acquires a permanent address**: spool the scratch run,
      rewrite the span, write the ops. V3 already says this pass is a CSR compaction with a different
-     sink; the scratch rewrite is the part V3 did not know it needed.
+     sink; the scratch rewrite is the part V3 did not know it needed. Only what is *reachable* from
+     the promoted root is written, which is what makes "promote the answer, not the search" a graph
+     walk rather than a bookkeeping problem.
+
+   Three things the paper had wrong, found by writing it, and corrected in Vlog §5.2–§5.3:
+
+   - **A `Mark` is seven lengths, not four.** `liveLinks`/`liveContent` are derived counters, and
+     recomputing them on release would make it $O(cells)$ — defeating the only reason an arena
+     choice point beats a microversion.
+   - **A trail entry is a saved `CellSlot` (40 bytes), not a link's previous value (16).** A run
+     *relocation* changes the slot header and no `DimLink` at all, so replaying link values would
+     restore an offset pointing above the mark.
+   - **Trailing a cell copies its runs above the mark.** A `DimLink` lives in a shared arena, so
+     overwriting one in place below the mark survives truncation. Copy-on-write per cell per choice
+     point, bounded by the same conditional-trailing rule.
+
+   And one constraint that was not in the paper at all: **compaction is forbidden while a mark is
+   outstanding**, because compaction moves every run a `Mark`'s offsets name. It costs nothing —
+   `release()`'s truncation *is* the reclamation, so the dead runs a failed branch left behind are
+   reclaimed by the undo that abandons it.
+
+   **What is left: the overlay.** An arena starts empty and its cells are its own, so a clause
+   database or a document's cells cannot be read *through* one in place. Both Vlog's `§6` and VQL's
+   read path want that, and it is the next increment rather than something these tests cover.
 
 ______________________________________________________________________
 

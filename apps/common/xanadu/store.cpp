@@ -22,6 +22,25 @@ namespace xanadu {
 
 namespace {
 
+/// Refuse a span that names the arena's scratch scroll.
+///
+/// The address-side twin of setLink()'s isEphemeral() check: scratch bytes are
+/// what an ArenaManifold constructed during an evaluation, and they have no
+/// permanent address, so an operation quoting one would be a transclusion into
+/// a scroll that does not exist. zigzag::promote() is what gives those bytes an
+/// address; every other route in is refused here as well as in the fold, since
+/// one span is structurally identical to another and nothing downstream could
+/// tell. See spool.hpp's scratchScroll.
+void requireAddressable(const PrimediaSpan &span, const std::string_view what) {
+  if (scratchScroll == span.scroll) {
+    throw std::invalid_argument(
+        std::string(what) +
+        " names the arena scratch scroll, which has no permanent address -- "
+        "promote() is what spools those bytes for real; see design R8 and "
+        "design/vlog-logic-extension.md section 5.5");
+  }
+}
+
 /// Names of the files a store is written as.
 constexpr const char *opsNodesFile = "ops.nodes";
 /// An export of the operations, in either encoding: canonical OSMIC text as
@@ -305,6 +324,7 @@ void Store::requireCellOp(const zigzag::CellRef ref, const char *what) const {
 
 MicroversionId Store::makeCell(const MicroversionId &parent,
                                const PrimediaSpan &content) {
+  requireAddressable(content, "a cell's content");
   Op op;
   op.kind  = OpKind::Structure;
   op.flags = structureFlags(StructureVerb::MakeCell);
@@ -386,6 +406,7 @@ MicroversionId Store::spliceCellSpan(const MicroversionId &parent,
     throw std::invalid_argument("spliceCell needs a cell an operation minted");
   }
   requireCellOp(cell, "the cell being edited");
+  requireAddressable(quoted, "the span being spliced in");
 
   Op op;
   op.kind  = OpKind::Structure;
@@ -468,6 +489,7 @@ MicroversionId Store::setValue(const MicroversionId &parent,
     throw std::invalid_argument("setValue needs a cell an operation minted");
   }
   requireCellOp(cell, "the cell a value is set on");
+  requireAddressable(content, "the content a value restates");
   Op op;
   op.kind  = OpKind::Structure;
   op.flags = structureFlags(StructureVerb::SetValue, false, kind);

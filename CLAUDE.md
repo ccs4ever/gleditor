@@ -350,6 +350,19 @@ continuation indents, treats Markdown table cell padding as "wrong" indentation,
     (step 19); `ZigzagVisualizer` does not yet. Spelled `<zigzag/core/manifold.hpp>` from an app or
     a test. **A cell exists only where an operation minted one** — typing into a xanadoc mints no
     cells, which is the thing most likely to surprise you
+  - `zigzag/arena_manifold.{hpp,cpp}`: the *ephemeral* half of R8's two-type split (migration step
+    21\) — the same cells and CSR runs with the operations removed, so an evaluation that mutates
+    structure a million times costs no ops and earns no names in hypertime. **An arena cell's ref
+    carries `ephemeralBit`**, which is why `Store::setLink()` and `Manifold::applyStructure()`
+    already refuse one: leakage is caught by machinery written for R12's derived cells. `mark()` is
+    a choice point (seven arena lengths, no allocation), `release()` is undo-by-truncation plus a
+    conditional trail, `discard()` is cut, and **`compact()` is refused while a mark is
+    outstanding** because compaction moves the runs a mark's offsets name. `promote()` is the one
+    road to the persistent side: it maps refs rather than being trusted with them, spools scratch
+    bytes for real, and writes only what is reachable from the promoted root. Content bytes an
+    evaluation constructs live under `scratchScroll` and are refused everywhere else. The design is
+    `design/vlog-logic-extension.md` §5.2–§5.5; what is **not** built is an overlay over a
+    persistent `Manifold`, so an arena starts empty and its cells are its own
   - `scalar.hpp/.cpp`: a scalar cell's two halves (migration step 15, R6) — the shortest round-trip
     `to_chars` rendering, spooled as ordinary primedia, and the canonical bits in
     `CompactOpNode::value`. Canonicalisation is for value equality only and never for addresses: two
