@@ -149,7 +149,7 @@ LiteralCellId          ::= [0-9]+
 PathStep               ::= "/" StepSelector PredicateClause* RangeClamp?
 StepSelector           ::= SignedDimension CreateSuffix? | MacroDimensionGroup | FunctionInvocation
 SignedDimension        ::= "-"? DimensionIdentifier Placement?
-Placement              ::= "::" ( "tail" | "head" | "fixed" )
+Placement              ::= "::" ( "from" | "rank" | "head" | "tail" | "fixed" )
 CreateSuffix           ::= ( "%" CreateValue? )+
 CreateValue            ::= ValueExpr | BareLiteral
 BareLiteral            ::= (run of characters excluding whitespace, "%", ",", "(", ")", "[", "]", "{", "}")
@@ -255,7 +255,10 @@ value, so nothing here has to special-case anything.
     final matching coordinate", which is the same answer only when nothing filtered the stream.
     `d.name[. = "x"][-1]` is the last cell that *matched*, and if the rank's actual tail did not
     match then `[-1]` must not return it. Wanting the rank's tail regardless of matching is a
-    different question with its own spelling now: `d.name::tail` (§4.5).
+    different question with its own spelling now: `d.name::tail`. Wanting the last cell of the
+    *whole* rank rather than of the walk from the context is `d.name::rank[-1]` — and the fact that
+    those are three distinct questions, all previously spelled `d.name[-1]`, is the reason for
+    §4.5's placements.
   - `[start, end]`: an index-windowed slice over the matching elements, inclusive, with negative
     indices counting from the end — `[1, -2]` is every match but the last.
 
@@ -368,27 +371,38 @@ literal that has nothing to do with the cell model it's returning from:
   (`/d.status%OK`), a quoted string when it contains spaces or punctuation
   (`/d.status%"needs review"`), or a variable (`/d.status%$value`).
 
-- **Placement (`::tail`, `::head`, `::fixed`; `::tail` by default)**: where on the rank the new cell
-  goes, and whether the path's context follows it.
+- **Placement (`::from`, `::rank`, `::head`, `::tail`, `::fixed`)**: which cells on the rank the
+  step acts on — and, for a create, whether the path's context follows the new cell.
 
   This is the rule that used to be called *tail-seeking* and was **implied by `%` rather than
   written**: if the context cell already had a link along `dim`, `%` silently walked to the tail of
   that rank and allocated there. The behaviour was right — without it a loop calling `/d.step%$ch`
-  per character overwrites one cell instead of building a chain — but it meant **`d.name` denoted
-  two different things depending on the operator applied to it**: the rank reachable from the
-  context in a read, and that rank's tail cell under a `%`. One token, two meanings, chosen by
-  something at the other end of the step. That is retired: `dim` always means the rank, and the
-  seeking is now a thing you can see.
+  per character overwrites one cell instead of building a chain — but it meant **`dim` denoted two
+  different things depending on the operator applied to it**: the rank reachable from the context in
+  a read, and that rank's tail cell under a `%`. One token, two meanings, chosen by something at the
+  other end of the step.
 
-  | placement | the new cell goes                       | the context afterwards |
-  | --------- | --------------------------------------- | ---------------------- |
-  | `::tail`  | at the posward end of the rank          | the new cell           |
-  | `::head`  | at the negward end of the rank          | the new cell           |
-  | `::fixed` | immediately posward of the context cell | **unchanged**          |
+  | placement | selects                                                         | on a create                                             |
+  | --------- | --------------------------------------------------------------- | ------------------------------------------------------- |
+  | `::from`  | the cells from the context outward, in the step's direction     | —                                                       |
+  | `::rank`  | every cell on the rank, head to tail, wherever the context sits | —                                                       |
+  | `::head`  | the rank's negward-most cell                                    | insert there; context follows                           |
+  | `::tail`  | the rank's posward-most cell                                    | append there; context follows                           |
+  | `::fixed` | the context cell itself                                         | insert immediately posward; context **does not** follow |
 
-  `::tail` is the default, so every existing query means exactly what it meant — including
-  `for $ch in EXPLODE($pattern, "") weave $nfa_start/d.step%$ch`, which still builds the chain
-  directly with no separate "insert at end" primitive.
+  **The defaults differ by position, and that asymmetry *is* the old ambiguity — now visible.** A
+  read defaults to `::from` and a create to `::tail`, which is exactly what `dim` already meant in
+  each place. Nothing existing changes meaning; what changes is that the two readings have names, so
+  a query that wants the other one can say so.
+
+  **`::from` against `::rank`.** `::from` walks outward from where you are, so a context in the
+  middle of a rank sees only what is ahead of it in the step's direction — which is what you want
+  for "the rest of the document from here". `::rank` is every sibling on that dimension regardless
+  of where the context sits: it seeks to the head first and streams to the tail. The step's sign
+  still applies, but to the *order* rather than the extent — `-d.name::rank` is the whole rank
+  emitted backwards, where `-d.name::from` is the part behind the context. `::head` and `::tail` are
+  absolute and ignore the sign entirely; `-d.name::tail` is still the posward-most cell, because the
+  tail of a rank is not a matter of which way you were walking.
 
   **`::head` matters more than symmetry.** A `d.clone` rank's **master** is its negward end (§4.6),
   so `d.clone::head%` mints a cell that becomes the master — and every existing member of the rank
@@ -399,11 +413,12 @@ literal that has nothing to do with the cell model it's returning from:
   to the cell they just made, which is what makes `%foo%bar` chain — create `foo`, move to it,
   create `bar` — and that following behaviour is worth keeping, so it stays the default. `::fixed`
   does not move: the cells the path was working on are still the cells it is working on, so a step
-  after a `::fixed` create continues from the original context rather than from the new cell. That
-  is the difference that matters for the rest of the path, not where the byte landed.
+  after a `::fixed` create continues from the original context. That is the difference that matters
+  for the rest of the path, not where the byte landed.
 
-  On a read step, `::head` and `::tail` select that end of the rank rather than streaming all of it;
-  `::fixed` is meaningful only with a create, since "the context cell" in a read is just `.`.
+  **`::from` and `::rank` have no meaning on a create** and are an error there rather than a guess.
+  They select a stream, and "insert at a stream" names no position — `::from%` would have to mean
+  the end of the walk, which is `::tail` said obscurely.
 
 - **Chainable**: whatever `%` lands on (freshly allocated or, on repeat, freshly appended) becomes
   the new context for the rest of the path, same as any other step — `/d.name%/d.results%VALUE`
