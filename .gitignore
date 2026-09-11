@@ -64,3 +64,4 @@ assets/shaders/vulkan/*.spv
 /scratch/
 .token-optimizer/
 .worktrees/
+.agents/worktrees/

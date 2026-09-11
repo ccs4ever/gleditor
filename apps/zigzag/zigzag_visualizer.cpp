@@ -75,59 +75,65 @@ bool ZigzagVisualizer::busy() const {
 }
 
 void ZigzagVisualizer::populateFallbackStructure() {
-  space_.clear();
-  space_[1] = Cell{.id         = 1,
-                   .data       = std::string{"Root Focus Node"},
-                   .role       = "root",
-                   .dimensions = {{"d.1", {2, 0}}, {"d.2", {3, 0}}}};
-  space_[2] = Cell{.id         = 2,
-                   .data       = std::string{"Horizontal Cell"},
-                   .role       = "item",
-                   .dimensions = {{"d.1", {0, 1}}}};
-  space_[3] = Cell{.id         = 3,
-                   .data       = std::string{"Vertical Cell"},
-                   .role       = "item",
-                   .dimensions = {{"d.2", {0, 1}}, {"d.3", {4, 0}}}};
-  space_[4] = Cell{.id         = 4,
-                   .data       = std::string{"Depth Layer Cell"},
-                   .role       = "detail",
-                   .dimensions = {{"d.3", {0, 3}}}};
+  ZzStructureDocument doc;
+  doc.meta.name = "Xanadu ZigZag Sample Structure";
+  doc.focus     = 1;
+  doc.view      = ViewAxisBinding{"d.1", "d.2", "d.3"};
 
-  accursed_cell_focus_ = 1;
-  current_view_        = ViewAxisBinding{"d.1", "d.2", "d.3"};
-  structure_name_      = "Xanadu ZigZag Sample Structure";
+  Cell c1;
+  c1.id         = 1;
+  c1.data       = std::string{"Root Focus Node"};
+  c1.role       = "root";
+  c1.dimensions = {{"d.1", {2, 0}}, {"d.2", {3, 0}}};
+  doc.cells[1]  = std::move(c1);
 
-  dimension_visuals_.clear();
-  dimension_visuals_["d.1"] =
-      DimensionVisual{glm::vec3{0.89F, 0.36F, 0.36F}, 240.0F, "Sequence"};
-  dimension_visuals_["d.2"] =
-      DimensionVisual{glm::vec3{0.35F, 0.76F, 0.48F}, 180.0F, "Detail"};
-  dimension_visuals_["d.3"] =
-      DimensionVisual{glm::vec3{0.31F, 0.62F, 0.88F}, 200.0F, "Reference"};
+  Cell c2;
+  c2.id         = 2;
+  c2.data       = std::string{"Horizontal Cell"};
+  c2.role       = "item";
+  c2.dimensions = {{"d.1", {0, 1}}};
+  doc.cells[2]  = std::move(c2);
 
-  scene_ = SceneVisual{
-      .background  = glm::vec3{0.05F, 0.05F, 0.07F},
-      .focus_color = glm::vec3{0.956F, 0.773F, 0.259F},
-      .focus_scale = 1.4F,
-      .cell_radius = 0.35F,
-  };
+  Cell c3;
+  c3.id         = 3;
+  c3.data       = std::string{"Vertical Cell"};
+  c3.role       = "item";
+  c3.dimensions = {{"d.2", {0, 1}}, {"d.3", {4, 0}}};
+  doc.cells[3]  = std::move(c3);
 
-  visible_cells_.clear();
-  rebuildActiveViewTopology();
-  for (auto &[id, cell] : visible_cells_) {
-    cell.current_pos   = cell.target_pos;
-    cell.current_alpha = cell.target_alpha;
-  }
-  invalidateAccessibility();
+  Cell c4;
+  c4.id         = 4;
+  c4.data       = std::string{"Depth Layer Cell"};
+  c4.role       = "detail";
+  c4.dimensions = {{"d.3", {0, 3}}};
+  doc.cells[4]  = std::move(c4);
+
+  DimensionMeta dm1;
+  dm1.label                 = "Sequence";
+  dm1.color                 = RgbColor{0.89F, 0.36F, 0.36F};
+  dm1.spacing               = 2.4F;
+  doc.dimension_meta["d.1"] = std::move(dm1);
+
+  DimensionMeta dm2;
+  dm2.label                 = "Detail";
+  dm2.color                 = RgbColor{0.35F, 0.76F, 0.48F};
+  dm2.spacing               = 1.8F;
+  doc.dimension_meta["d.2"] = std::move(dm2);
+
+  DimensionMeta dm3;
+  dm3.label                 = "Reference";
+  dm3.color                 = RgbColor{0.31F, 0.62F, 0.88F};
+  dm3.spacing               = 2.0F;
+  doc.dimension_meta["d.3"] = std::move(dm3);
+
+  adoptDocument(std::move(doc), "fallback");
 }
 
 void ZigzagVisualizer::adoptDocument(ZzStructureDocument &&doc,
                                      std::string sourcePath) {
-  structure_name_      = doc.meta.name.empty() ? sourcePath : doc.meta.name;
-  current_slice_path_  = std::move(sourcePath);
-  space_               = std::move(doc.cells);
-  accursed_cell_focus_ = doc.focus;
-  current_view_        = doc.view;
+  structure_name_     = doc.meta.name.empty() ? sourcePath : doc.meta.name;
+  current_slice_path_ = std::move(sourcePath);
+  current_view_       = doc.view;
 
   scene_.background = glm::vec3{doc.scene.background.r, doc.scene.background.g,
                                 doc.scene.background.b};
@@ -148,6 +154,19 @@ void ZigzagVisualizer::adoptDocument(ZzStructureDocument &&doc,
         .spacing = meta.spacing * 100.0F,
         .label   = meta.label,
     };
+  }
+
+  store_            = std::make_unique<xanadu::Store>();
+  const auto sliced = sliceToStore(doc, *store_);
+  engine_           = std::make_unique<UnifiedTransclusionEngine>(*store_);
+
+  accursed_cell_focus_ = sliced.focus;
+  if (accursed_cell_focus_ == 0 ||
+      !engine_->findCell(static_cast<CellRef>(accursed_cell_focus_))) {
+    accursed_cell_focus_ = engine_->manifold().home();
+    if (accursed_cell_focus_ == 0 && engine_->manifold().cellCount() > 0) {
+      accursed_cell_focus_ = engine_->manifold().cells().front().birthOp;
+    }
   }
 
   visible_cells_.clear();
@@ -183,16 +202,21 @@ xanadu::LinkPackage
 ZigzagVisualizer::exportAsLinkPackage(const xanadu::MutableKeys &keys,
                                       const std::string &salt,
                                       const std::int64_t sequence) const {
-  const auto doc = document();
-  return zzStructureToLinkPackage(doc, keys, salt, sequence);
+  if (!engine_ || !store_) {
+    return {};
+  }
+  return storeToLinkPackage(*store_, engine_->manifold(), keys, salt, sequence,
+                            structure_name_);
 }
 
 ZzStructureDocument ZigzagVisualizer::document() const {
-  ZzStructureDocument doc;
+  if (!engine_ || !store_) {
+    return {};
+  }
+  auto doc      = storeToSlice(*store_, engine_->manifold(),
+                               static_cast<CellRef>(accursed_cell_focus_));
   doc.meta.name = structure_name_;
-  doc.focus     = accursed_cell_focus_;
   doc.view      = current_view_;
-  doc.cells     = space_;
   for (const auto &[dim, vis] : dimension_visuals_) {
     doc.dimension_meta[dim] = DimensionMeta{
         .label       = vis.label,
@@ -205,18 +229,15 @@ ZzStructureDocument ZigzagVisualizer::document() const {
 }
 
 CellID ZigzagVisualizer::createCell(std::string text, std::string role) {
-  CellID newId = 1;
-  for (const auto &[id, _] : space_) {
-    if (id >= newId) {
-      newId = id + 1;
-    }
+  if (!engine_) {
+    return 0;
   }
-  space_[newId] = Cell{
-      .id         = newId,
-      .data       = std::move(text),
-      .role       = std::move(role),
-      .dimensions = {},
-  };
+  const CellRef newId = engine_->addCell(text);
+  if (!role.empty()) {
+    const auto roleDim = engine_->dimensionFor("d.role");
+    const auto attrRef = engine_->addCell(role);
+    engine_->linkCells(newId, attrRef, roleDim, false);
+  }
   if (accursed_cell_focus_ == 0) {
     accursed_cell_focus_ = newId;
   }
@@ -228,26 +249,31 @@ CellID ZigzagVisualizer::createCell(std::string text, std::string role) {
 bool ZigzagVisualizer::insertConnectedCell(std::string text,
                                            const DimID &dimension,
                                            const bool positive) {
-  if (space_.empty() || accursed_cell_focus_ == 0) {
+  if (!engine_ || accursed_cell_focus_ == 0) {
     createCell(std::move(text));
     return true;
   }
-  const auto newId = createCell(std::move(text));
+  if (dimension == "d.dims") {
+    return false;
+  }
+  const auto focus = static_cast<CellRef>(accursed_cell_focus_);
+  if (isEphemeral(focus)) {
+    return false;
+  }
+  const auto newId  = static_cast<CellRef>(createCell(std::move(text)));
+  const auto dimRef = engine_->dimensionFor(dimension);
+
   if (positive) {
-    const auto oldPos = space_[accursed_cell_focus_].dimensions[dimension].pos;
-    space_[accursed_cell_focus_].dimensions[dimension].pos = newId;
-    space_[newId].dimensions[dimension].neg = accursed_cell_focus_;
-    if (oldPos != 0 && space_.contains(oldPos)) {
-      space_[newId].dimensions[dimension].pos  = oldPos;
-      space_[oldPos].dimensions[dimension].neg = newId;
+    const auto oldPos = engine_->manifold().linked(focus, dimRef, false);
+    engine_->linkCells(focus, newId, dimRef, false);
+    if (oldPos != zigzag::noCell) {
+      engine_->linkCells(newId, oldPos, dimRef, false);
     }
   } else {
-    const auto oldNeg = space_[accursed_cell_focus_].dimensions[dimension].neg;
-    space_[accursed_cell_focus_].dimensions[dimension].neg = newId;
-    space_[newId].dimensions[dimension].pos = accursed_cell_focus_;
-    if (oldNeg != 0 && space_.contains(oldNeg)) {
-      space_[newId].dimensions[dimension].neg  = oldNeg;
-      space_[oldNeg].dimensions[dimension].pos = newId;
+    const auto oldNeg = engine_->manifold().linked(focus, dimRef, true);
+    engine_->linkCells(focus, newId, dimRef, true);
+    if (oldNeg != zigzag::noCell) {
+      engine_->linkCells(newId, oldNeg, dimRef, true);
     }
   }
   accursed_cell_focus_ = newId;
@@ -259,17 +285,22 @@ bool ZigzagVisualizer::insertConnectedCell(std::string text,
 bool ZigzagVisualizer::linkFocusAlong(const DimID &dimension,
                                       const CellID targetId,
                                       const bool positive) {
-  if (targetId == 0 || targetId == accursed_cell_focus_ ||
-      !space_.contains(targetId) || !space_.contains(accursed_cell_focus_)) {
+  if (!engine_ || targetId == 0 || targetId == accursed_cell_focus_) {
     return false;
   }
-  if (positive) {
-    space_[accursed_cell_focus_].dimensions[dimension].pos = targetId;
-    space_[targetId].dimensions[dimension].neg = accursed_cell_focus_;
-  } else {
-    space_[accursed_cell_focus_].dimensions[dimension].neg = targetId;
-    space_[targetId].dimensions[dimension].pos = accursed_cell_focus_;
+  const auto focus  = static_cast<CellRef>(accursed_cell_focus_);
+  const auto target = static_cast<CellRef>(targetId);
+  if (!engine_->findCell(target) || !engine_->findCell(focus) ||
+      isEphemeral(target) || isEphemeral(focus)) {
+    return false;
   }
+  // Protection against system instability: d.dims links cannot be altered
+  // manually
+  if (dimension == "d.dims") {
+    return false;
+  }
+  const auto dimRef = engine_->dimensionFor(dimension);
+  engine_->linkCells(focus, target, dimRef, !positive);
   rebuildActiveViewTopology();
   invalidateAccessibility();
   return true;
@@ -277,41 +308,135 @@ bool ZigzagVisualizer::linkFocusAlong(const DimID &dimension,
 
 bool ZigzagVisualizer::unlinkFocusAlong(const DimID &dimension,
                                         const bool positive) {
-  if (accursed_cell_focus_ == 0 || !space_.contains(accursed_cell_focus_)) {
+  if (!engine_ || accursed_cell_focus_ == 0) {
     return false;
   }
-  if (positive) {
-    const auto targetId =
-        space_[accursed_cell_focus_].dimensions[dimension].pos;
-    if (targetId == 0) {
-      return false;
+  const auto focus = static_cast<CellRef>(accursed_cell_focus_);
+  if (!engine_->findCell(focus) || isEphemeral(focus)) {
+    return false;
+  }
+  const auto dimRef =
+      engine_->manifold().dimensionNamed(dimension, engine_->store());
+  if (dimRef == zigzag::noCell) {
+    return false;
+  }
+  // Protection against system instability: d.dims links cannot be unlinked
+  if (dimRef == engine_->manifold().dimsDimension() || dimension == "d.dims") {
+    return false;
+  }
+  const auto target = engine_->linked(focus, dimRef, !positive);
+  if (target == zigzag::noCell || isEphemeral(target)) {
+    return false;
+  }
+  engine_->linkCells(focus, zigzag::noCell, dimRef, !positive);
+  rebuildActiveViewTopology();
+  invalidateAccessibility();
+  return true;
+}
+
+bool ZigzagVisualizer::deleteFocusCell() {
+  if (!engine_ || accursed_cell_focus_ == 0) {
+    return false;
+  }
+  const auto focus = static_cast<CellRef>(accursed_cell_focus_);
+  if (isProtected(focus)) {
+    return false; // Protected from deletion!
+  }
+  const auto linkSpan = engine_->manifold().dimensionsOf(focus);
+  const std::vector<DimLink> links(linkSpan.begin(), linkSpan.end());
+
+  CellRef nextFocus = zigzag::noCell;
+
+  // 1) Prioritize adjacent cells along active view dimensions (X, Y, Z)
+  const std::array<DimID, 3> viewDims = {current_view_.x_dimension,
+                                         current_view_.y_dimension,
+                                         current_view_.z_dimension};
+  for (const auto &dimId : viewDims) {
+    const auto dimRef = engine_->dimensionFor(dimId);
+    if (dimRef == zigzag::noCell) {
+      continue;
     }
-    space_[accursed_cell_focus_].dimensions[dimension].pos = 0;
-    if (space_.contains(targetId)) {
-      space_[targetId].dimensions[dimension].neg = 0;
+    const auto posNeighbor = engine_->manifold().linked(focus, dimRef, false);
+    if (posNeighbor != zigzag::noCell && posNeighbor != focus &&
+        !isProtected(posNeighbor) && !isEphemeral(posNeighbor)) {
+      nextFocus = posNeighbor;
+      break;
     }
-  } else {
-    const auto targetId =
-        space_[accursed_cell_focus_].dimensions[dimension].neg;
-    if (targetId == 0) {
-      return false;
-    }
-    space_[accursed_cell_focus_].dimensions[dimension].neg = 0;
-    if (space_.contains(targetId)) {
-      space_[targetId].dimensions[dimension].pos = 0;
+    const auto negNeighbor = engine_->manifold().linked(focus, dimRef, true);
+    if (negNeighbor != zigzag::noCell && negNeighbor != focus &&
+        !isProtected(negNeighbor) && !isEphemeral(negNeighbor)) {
+      nextFocus = negNeighbor;
+      break;
     }
   }
+
+  // 2) Fallback to any connected cell on non-metadata dimensions
+  if (nextFocus == zigzag::noCell) {
+    for (const auto &link : links) {
+      const auto dimName =
+          engine_->manifold().textOf(link.dim, engine_->store());
+      if (dimName == "d.role" || dimName == "d.mime" || dimName == "d.media" ||
+          dimName == "d.dims") {
+        continue;
+      }
+      if (link.pos != zigzag::noCell && link.pos != focus &&
+          !isProtected(link.pos) && !isEphemeral(link.pos)) {
+        nextFocus = link.pos;
+        break;
+      }
+      if (link.neg != zigzag::noCell && link.neg != focus &&
+          !isProtected(link.neg) && !isEphemeral(link.neg)) {
+        nextFocus = link.neg;
+        break;
+      }
+    }
+  }
+
+  // 3) Ultimate fallback: home cell
+  if (nextFocus == zigzag::noCell) {
+    nextFocus = engine_->manifold().home();
+  }
+
+  // Splice around focus and unlink focus from all dimensions
+  for (const auto &link : links) {
+    if (link.neg != zigzag::noCell && link.pos != zigzag::noCell) {
+      engine_->linkCells(link.neg, link.pos, link.dim, false);
+    }
+    if (link.pos != zigzag::noCell) {
+      engine_->linkCells(focus, zigzag::noCell, link.dim, false);
+    }
+    if (link.neg != zigzag::noCell) {
+      engine_->linkCells(focus, zigzag::noCell, link.dim, true);
+    }
+  }
+  accursed_cell_focus_ = nextFocus;
   rebuildActiveViewTopology();
   invalidateAccessibility();
   return true;
 }
 
 void ZigzagVisualizer::updateFocusCellText(std::string text) {
-  if (space_.contains(accursed_cell_focus_)) {
-    zzcore::updateMasterText(space_, accursed_cell_focus_, std::move(text));
-    rebuildActiveViewTopology();
-    invalidateAccessibility();
+  if (!engine_ || accursed_cell_focus_ == 0) {
+    return;
   }
+  const auto focus = static_cast<CellRef>(accursed_cell_focus_);
+  if (!engine_->findCell(focus)) {
+    return;
+  }
+  CellRef targetCell = focus;
+  const auto cloneDim =
+      engine_->manifold().dimensionNamed("d.clone", engine_->store());
+  if (cloneDim != zigzag::noCell) {
+    targetCell = engine_->cloneMaster(focus, cloneDim);
+  }
+  if ((targetCell == engine_->manifold().home() ||
+       targetCell == engine_->manifold().dimsDimension()) &&
+      text.empty()) {
+    return;
+  }
+  engine_->updateCellText(targetCell, text);
+  rebuildActiveViewTopology();
+  invalidateAccessibility();
 }
 
 bool ZigzagVisualizer::saveStructureYaml(const std::string &filePath) const {
@@ -323,13 +448,103 @@ bool ZigzagVisualizer::saveStructureYaml(const std::string &filePath) const {
   return saveZzStructure(doc, savePath);
 }
 
-const Cell *ZigzagVisualizer::findCell(const CellID id) const {
-  return zzcore::findCell(space_, id);
+bool ZigzagVisualizer::isProtected(const CellRef id) const {
+  if (!engine_) {
+    return true;
+  }
+  return engine_->isProtected(id);
 }
 
-LinkPairs ZigzagVisualizer::linksOn(const Cell *const cell,
-                                    const DimID &dimension) {
-  return zzcore::linksOn(cell, dimension);
+ZigzagVisualizer::CellInfo
+ZigzagVisualizer::inspectCell(const CellRef id) const {
+  if (!engine_ || zigzag::noCell == id) {
+    return {};
+  }
+  const auto &manifold = engine_->manifold();
+  if (!manifold.contains(id) && !isEphemeral(id)) {
+    return {};
+  }
+  const auto &store = engine_->store();
+
+  CellInfo info;
+  info.id   = id;
+  info.text = engine_->resolveCellText(id);
+
+  if (id == manifold.home()) {
+    info.role = "home";
+  } else if (id == manifold.dimsDimension()) {
+    info.role = "dimension";
+  } else {
+    for (const auto dim : manifold.dimensions()) {
+      if (id == dim) {
+        info.role = "dimension";
+        break;
+      }
+    }
+  }
+
+  if (isEphemeral(id)) {
+    info.role            = "dimension";
+    info.is_clone        = true;
+    const auto cloneDim  = manifold.dimensionNamed("d.clone", store);
+    info.clone_master_id = engine_->cloneMaster(id, cloneDim);
+  }
+
+  const auto roleDim  = manifold.dimensionNamed("d.role", store);
+  const auto mimeDim  = manifold.dimensionNamed("d.mime", store);
+  const auto mediaDim = manifold.dimensionNamed("d.media", store);
+
+  if (info.role.empty() && roleDim != zigzag::noCell && !isEphemeral(id)) {
+    const auto held = manifold.linked(id, roleDim, false);
+    if (held != zigzag::noCell) {
+      info.role = manifold.textOf(held, store);
+    }
+  }
+  if (info.role.empty()) {
+    if (const auto *cold = engine_->coldOf(id)) {
+      info.role = cold->type;
+    }
+  }
+
+  if (!isEphemeral(id)) {
+    if (mimeDim != zigzag::noCell) {
+      const auto held = manifold.linked(id, mimeDim, false);
+      if (held != zigzag::noCell) {
+        info.mime_type = manifold.textOf(held, store);
+      }
+    }
+
+    if (mediaDim != zigzag::noCell) {
+      const auto held = manifold.linked(id, mediaDim, false);
+      if (held != zigzag::noCell) {
+        info.media_path = manifold.textOf(held, store);
+      }
+    }
+  }
+
+  info.is_image =
+      info.mime_type.starts_with("image/") ||
+      (!info.media_path.empty() && (info.media_path.ends_with(".png") ||
+                                    info.media_path.ends_with(".jpg") ||
+                                    info.media_path.ends_with(".jpeg") ||
+                                    info.media_path.ends_with(".webp") ||
+                                    info.media_path.ends_with(".gif") ||
+                                    info.media_path.ends_with(".svg") ||
+                                    info.media_path.ends_with(".bmp")));
+
+  if (!isEphemeral(id)) {
+    info.is_clone        = false;
+    info.clone_master_id = id;
+    const auto cloneDim  = manifold.dimensionNamed("d.clone", store);
+    if (cloneDim != zigzag::noCell) {
+      if (manifold.linked(id, cloneDim, true) != zigzag::noCell) {
+        info.is_clone        = true;
+        info.clone_master_id = manifold.cloneMaster(id, cloneDim);
+      }
+    }
+  }
+
+  return info;
 }
 
 DimensionVisual
@@ -337,6 +552,48 @@ ZigzagVisualizer::dimensionVisual(const DimID &dimension) const {
   const auto it = dimension_visuals_.find(dimension);
   if (it != dimension_visuals_.end()) {
     return it->second;
+  }
+  if (dimension == "d.meta-dims") {
+    return DimensionVisual{
+        .color   = glm::vec3{0.2F, 0.8F, 0.8F},
+        .spacing = 220.0F,
+        .label   = "Meta-Dimensions",
+    };
+  }
+  if (dimension == "d.dims") {
+    return DimensionVisual{
+        .color   = glm::vec3{0.6F, 0.4F, 0.9F},
+        .spacing = 200.0F,
+        .label   = "Dimensions",
+    };
+  }
+  if (dimension == "d.clone") {
+    return DimensionVisual{
+        .color   = glm::vec3{0.95F, 0.75F, 0.2F},
+        .spacing = 180.0F,
+        .label   = "Clones",
+    };
+  }
+  if (dimension == "d.role") {
+    return DimensionVisual{
+        .color   = glm::vec3{0.5F, 0.5F, 0.6F},
+        .spacing = 150.0F,
+        .label   = "Role",
+    };
+  }
+  if (dimension == "d.mime") {
+    return DimensionVisual{
+        .color   = glm::vec3{0.4F, 0.5F, 0.7F},
+        .spacing = 150.0F,
+        .label   = "MIME",
+    };
+  }
+  if (dimension == "d.media") {
+    return DimensionVisual{
+        .color   = glm::vec3{0.3F, 0.7F, 0.5F},
+        .spacing = 150.0F,
+        .label   = "Media",
+    };
   }
   return DimensionVisual{
       .color   = glm::vec3{0.7F, 0.7F, 0.75F},
@@ -350,28 +607,33 @@ void ZigzagVisualizer::rebuildActiveViewTopology() {
     render_cell.target_alpha = 0.0F;
   }
 
-  const Cell *const focus = findCell(accursed_cell_focus_);
-  const bool focusIsClone = zzcore::isCloneCell(space_, accursed_cell_focus_);
-  const CellID focusMaster =
-      zzcore::findCloneMaster(space_, accursed_cell_focus_);
-  const auto focusText =
-      zzcore::getEffectiveCellText(space_, accursed_cell_focus_);
+  if (!engine_ || accursed_cell_focus_ == 0) {
+    return;
+  }
+
+  const auto focusRef  = static_cast<CellRef>(accursed_cell_focus_);
+  const auto focusInfo = inspectCell(focusRef);
 
   if (!visible_cells_.contains(accursed_cell_focus_)) {
     visible_cells_[accursed_cell_focus_] = RenderStateCell{
         .id              = accursed_cell_focus_,
-        .text            = std::string{focusText},
-        .type            = focus ? focus->role : "",
-        .mime_type       = focus ? focus->mime_type : "",
-        .media_path      = focus ? focus->media_path : "",
-        .is_image        = focus && focus->isImage(),
-        .is_clone        = focusIsClone,
-        .clone_master_id = focusMaster,
+        .text            = focusInfo.text,
+        .type            = focusInfo.role,
+        .mime_type       = focusInfo.mime_type,
+        .media_path      = focusInfo.media_path,
+        .is_image        = focusInfo.is_image,
+        .is_clone        = focusInfo.is_clone,
+        .clone_master_id = focusInfo.clone_master_id,
     };
   } else {
-    visible_cells_[accursed_cell_focus_].text     = std::string{focusText};
-    visible_cells_[accursed_cell_focus_].is_clone = focusIsClone;
-    visible_cells_[accursed_cell_focus_].clone_master_id = focusMaster;
+    visible_cells_[accursed_cell_focus_].text       = focusInfo.text;
+    visible_cells_[accursed_cell_focus_].type       = focusInfo.role;
+    visible_cells_[accursed_cell_focus_].mime_type  = focusInfo.mime_type;
+    visible_cells_[accursed_cell_focus_].media_path = focusInfo.media_path;
+    visible_cells_[accursed_cell_focus_].is_image   = focusInfo.is_image;
+    visible_cells_[accursed_cell_focus_].is_clone   = focusInfo.is_clone;
+    visible_cells_[accursed_cell_focus_].clone_master_id =
+        focusInfo.clone_master_id;
   }
 
   auto &focusRenderState        = visible_cells_[accursed_cell_focus_];
@@ -379,33 +641,34 @@ void ZigzagVisualizer::rebuildActiveViewTopology() {
   focusRenderState.target_alpha = 1.0F;
   focusRenderState.base_color   = scene_.focus_color;
 
-  auto mapNeighbor = [&](const CellID parentId, const CellID childId,
+  auto mapNeighbor = [&](const CellRef parentId, const CellRef childId,
                          const glm::vec3 &offset, const glm::vec3 &axisColor) {
     if (childId == 0) {
       return;
     }
-    const Cell *const child  = findCell(childId);
-    const bool childIsClone  = zzcore::isCloneCell(space_, childId);
-    const CellID childMaster = zzcore::findCloneMaster(space_, childId);
-    const auto childText     = zzcore::getEffectiveCellText(space_, childId);
+    const auto childInfo = inspectCell(childId);
 
     if (!visible_cells_.contains(childId)) {
       RenderStateCell newCell{
           .id              = childId,
-          .text            = std::string{childText},
-          .type            = child ? child->role : "",
-          .mime_type       = child ? child->mime_type : "",
-          .media_path      = child ? child->media_path : "",
-          .is_image        = child && child->isImage(),
-          .is_clone        = childIsClone,
-          .clone_master_id = childMaster,
+          .text            = childInfo.text,
+          .type            = childInfo.role,
+          .mime_type       = childInfo.mime_type,
+          .media_path      = childInfo.media_path,
+          .is_image        = childInfo.is_image,
+          .is_clone        = childInfo.is_clone,
+          .clone_master_id = childInfo.clone_master_id,
           .current_pos     = visible_cells_[parentId].current_pos,
       };
       visible_cells_[childId] = newCell;
     } else {
-      visible_cells_[childId].text            = std::string{childText};
-      visible_cells_[childId].is_clone        = childIsClone;
-      visible_cells_[childId].clone_master_id = childMaster;
+      visible_cells_[childId].text            = childInfo.text;
+      visible_cells_[childId].type            = childInfo.role;
+      visible_cells_[childId].mime_type       = childInfo.mime_type;
+      visible_cells_[childId].media_path      = childInfo.media_path;
+      visible_cells_[childId].is_image        = childInfo.is_image;
+      visible_cells_[childId].is_clone        = childInfo.is_clone;
+      visible_cells_[childId].clone_master_id = childInfo.clone_master_id;
     }
 
     auto &childCell        = visible_cells_[childId];
@@ -414,59 +677,63 @@ void ZigzagVisualizer::rebuildActiveViewTopology() {
     childCell.base_color   = axisColor;
   };
 
-  if (focus) {
-    const DimensionVisual xVisual = dimensionVisual(current_view_.x_dimension);
-    const DimensionVisual yVisual = dimensionVisual(current_view_.y_dimension);
-    const DimensionVisual zVisual = dimensionVisual(current_view_.z_dimension);
+  const DimensionVisual xVisual = dimensionVisual(current_view_.x_dimension);
+  const DimensionVisual yVisual = dimensionVisual(current_view_.y_dimension);
+  const DimensionVisual zVisual = dimensionVisual(current_view_.z_dimension);
 
-    const float xSpace =
-        (view_mode_ == ViewMode::CellContent) ? 260.0F : xVisual.spacing;
-    const float ySpace =
-        (view_mode_ == ViewMode::CellContent) ? 140.0F : yVisual.spacing;
-    const float zSpace =
-        (view_mode_ == ViewMode::CellContent) ? 180.0F : zVisual.spacing;
+  const float xSpace =
+      (view_mode_ == ViewMode::CellContent) ? 260.0F : xVisual.spacing;
+  const float ySpace =
+      (view_mode_ == ViewMode::CellContent) ? 140.0F : yVisual.spacing;
+  const float zSpace =
+      (view_mode_ == ViewMode::CellContent) ? 180.0F : zVisual.spacing;
 
-    const int radius = std::max(1, scene_.neighborhood_radius);
+  const int radius = std::max(1, scene_.neighborhood_radius);
 
-    auto mapAxis = [&](const DimID &dim, const glm::vec3 &unitDir,
-                       const DimensionVisual &visual, const float spacing) {
-      // Positive walk
-      CellID parent = accursed_cell_focus_;
-      for (int r = 1; r <= radius; ++r) {
-        const Cell *const c = findCell(parent);
-        if (!c) {
-          break;
-        }
-        const CellID nextId = linksOn(c, dim).pos;
-        if (nextId == 0) {
-          break;
-        }
-        mapNeighbor(parent, nextId, unitDir * spacing, visual.color);
-        parent = nextId;
+  auto mapAxis = [&](const DimID &dim, const glm::vec3 &unitDir,
+                     const DimensionVisual &visual, const float spacing) {
+    const auto dimRef = engine_->dimensionFor(dim);
+    if (dimRef == zigzag::noCell) {
+      return;
+    }
+
+    std::unordered_set<CellRef> visitedPos;
+    visitedPos.insert(focusRef);
+
+    // Positive walk
+    CellRef parent = focusRef;
+    for (int r = 1; r <= radius; ++r) {
+      const CellRef nextId = engine_->linked(parent, dimRef, false);
+      if (nextId == zigzag::noCell || visitedPos.contains(nextId)) {
+        break;
       }
-      // Negative walk
-      parent = accursed_cell_focus_;
-      for (int r = 1; r <= radius; ++r) {
-        const Cell *const c = findCell(parent);
-        if (!c) {
-          break;
-        }
-        const CellID nextId = linksOn(c, dim).neg;
-        if (nextId == 0) {
-          break;
-        }
-        mapNeighbor(parent, nextId, -unitDir * spacing, visual.color);
-        parent = nextId;
-      }
-    };
+      visitedPos.insert(nextId);
+      mapNeighbor(parent, nextId, unitDir * spacing, visual.color);
+      parent = nextId;
+    }
 
-    mapAxis(current_view_.x_dimension, glm::vec3{1.0F, 0.0F, 0.0F}, xVisual,
-            xSpace);
-    mapAxis(current_view_.y_dimension, glm::vec3{0.0F, 1.0F, 0.0F}, yVisual,
-            ySpace);
-    mapAxis(current_view_.z_dimension, glm::vec3{0.0F, 0.0F, 1.0F}, zVisual,
-            zSpace);
-  }
+    std::unordered_set<CellRef> visitedNeg;
+    visitedNeg.insert(focusRef);
+
+    // Negative walk
+    parent = focusRef;
+    for (int r = 1; r <= radius; ++r) {
+      const CellRef nextId = engine_->linked(parent, dimRef, true);
+      if (nextId == zigzag::noCell || visitedNeg.contains(nextId)) {
+        break;
+      }
+      visitedNeg.insert(nextId);
+      mapNeighbor(parent, nextId, -unitDir * spacing, visual.color);
+      parent = nextId;
+    }
+  };
+
+  mapAxis(current_view_.x_dimension, glm::vec3{1.0F, 0.0F, 0.0F}, xVisual,
+          xSpace);
+  mapAxis(current_view_.y_dimension, glm::vec3{0.0F, 1.0F, 0.0F}, yVisual,
+          ySpace);
+  mapAxis(current_view_.z_dimension, glm::vec3{0.0F, 0.0F, 1.0F}, zVisual,
+          zSpace);
 }
 
 void ZigzagVisualizer::updateCellPositions(const float rawDeltaTime) {
@@ -498,13 +765,16 @@ void ZigzagVisualizer::updateCellPositions(const float rawDeltaTime) {
 
 void ZigzagVisualizer::navigateFocus(const DimID &dimension,
                                      const bool positive) {
-  const Cell *const cell = findCell(accursed_cell_focus_);
-  if (!cell) {
+  if (!engine_ || accursed_cell_focus_ == 0) {
     return;
   }
-  const LinkPairs links = linksOn(cell, dimension);
-  const CellID next     = positive ? links.pos : links.neg;
-  if (next == 0) {
+  const auto focus  = static_cast<CellRef>(accursed_cell_focus_);
+  const auto dimRef = engine_->dimensionFor(dimension);
+  if (dimRef == zigzag::noCell) {
+    return;
+  }
+  const CellRef next = engine_->linked(focus, dimRef, !positive);
+  if (next == zigzag::noCell) {
     return;
   }
 
@@ -514,7 +784,8 @@ void ZigzagVisualizer::navigateFocus(const DimID &dimension,
 }
 
 void ZigzagVisualizer::navigateFocusTo(const CellID id) {
-  if (id == 0 || !space_.contains(id)) {
+  const auto ref = static_cast<CellRef>(id);
+  if (!engine_ || id == 0 || !engine_->findCell(ref)) {
     return;
   }
   accursed_cell_focus_ = id;
@@ -563,8 +834,8 @@ void ZigzagVisualizer::cycleDimensions(const bool forward) {
 bool ZigzagVisualizer::picked(const render::PickingResult &pick,
                               RenderState &) {
   if (pick.tag.kind == render::tagKindOverlay && pick.tag.clusterIndex != 0) {
-    const auto targetId = static_cast<CellID>(pick.tag.clusterIndex);
-    if (space_.contains(targetId)) {
+    const auto targetId = static_cast<CellRef>(pick.tag.clusterIndex);
+    if (engine_ && engine_->findCell(targetId)) {
       navigateFocusTo(targetId);
       return true;
     }
@@ -588,37 +859,80 @@ void ZigzagVisualizer::drawFrame(gleditor::FrameContext &ctx) {
   beams_->clear();
   std::vector<std::pair<CellID, CellID>> drawnEdges;
 
-  for (const auto &[id, cell] : visible_cells_) {
-    const Cell *const spaceCell = findCell(id);
-    if (!spaceCell) {
-      continue;
-    }
+  if (engine_) {
+    const auto &manifold = engine_->manifold();
+    const auto &store    = engine_->store();
 
-    for (const auto &[dimName, links] : spaceCell->dimensions) {
-      const DimensionVisual visual = dimensionVisual(dimName);
-      for (const CellID neighborId : {links.pos, links.neg}) {
-        if (neighborId == 0 || neighborId == id) {
+    for (const auto &[id, cell] : visible_cells_) {
+      const auto cellRef = static_cast<CellRef>(id);
+
+      // 1) View dimensions (covers ephemeral meta-dims and clones as well)
+      for (const auto &dimName :
+           {current_view_.x_dimension, current_view_.y_dimension,
+            current_view_.z_dimension}) {
+        const auto dimRef = engine_->dimensionFor(dimName);
+        if (dimRef == zigzag::noCell) {
           continue;
         }
-        if (!visible_cells_.contains(neighborId)) {
-          continue;
+        for (const bool negward : {false, true}) {
+          const auto neighborId = engine_->linked(cellRef, dimRef, negward);
+          if (neighborId == 0 || neighborId == cellRef ||
+              !visible_cells_.contains(neighborId)) {
+            continue;
+          }
+          const auto edge =
+              std::pair{std::min(id, static_cast<CellID>(neighborId)),
+                        std::max(id, static_cast<CellID>(neighborId))};
+          if (std::ranges::find(drawnEdges, edge) != drawnEdges.end()) {
+            continue;
+          }
+          drawnEdges.push_back(edge);
+
+          const auto &neighborCell = visible_cells_.at(neighborId);
+          const auto visual        = dimensionVisual(dimName);
+          const float edgeAlpha =
+              std::min(cell.current_alpha, neighborCell.current_alpha);
+          const std::uint32_t col = packRgba(visual.color.r, visual.color.g,
+                                             visual.color.b, edgeAlpha);
+
+          beams_->add(cell.current_pos, neighborCell.current_pos, 4.0F, col,
+                      static_cast<std::uint32_t>(id));
         }
+      }
 
-        const auto edge =
-            std::pair{std::min(id, neighborId), std::max(id, neighborId)};
-        if (std::ranges::find(drawnEdges, edge) != drawnEdges.end()) {
-          continue;
+      // 2) Stored dimensions of normal cells
+      if (!isEphemeral(cellRef)) {
+        for (const auto &link : manifold.dimensionsOf(cellRef)) {
+          const auto dimName = manifold.textOf(link.dim, store);
+          if (dimName == "d.role" || dimName == "d.mime" ||
+              dimName == "d.media") {
+            continue;
+          }
+          const DimensionVisual visual = dimensionVisual(dimName);
+          for (const CellRef neighborId : {link.pos, link.neg}) {
+            if (neighborId == 0 || neighborId == cellRef ||
+                !visible_cells_.contains(neighborId)) {
+              continue;
+            }
+
+            const auto edge =
+                std::pair{std::min(id, static_cast<CellID>(neighborId)),
+                          std::max(id, static_cast<CellID>(neighborId))};
+            if (std::ranges::find(drawnEdges, edge) != drawnEdges.end()) {
+              continue;
+            }
+            drawnEdges.push_back(edge);
+
+            const auto &neighborCell = visible_cells_.at(neighborId);
+            const float edgeAlpha =
+                std::min(cell.current_alpha, neighborCell.current_alpha);
+            const std::uint32_t col = packRgba(visual.color.r, visual.color.g,
+                                               visual.color.b, edgeAlpha);
+
+            beams_->add(cell.current_pos, neighborCell.current_pos, 4.0F, col,
+                        static_cast<std::uint32_t>(id));
+          }
         }
-        drawnEdges.push_back(edge);
-
-        const auto &neighborCell = visible_cells_.at(neighborId);
-        const float edgeAlpha =
-            std::min(cell.current_alpha, neighborCell.current_alpha);
-        const std::uint32_t col =
-            packRgba(visual.color.r, visual.color.g, visual.color.b, edgeAlpha);
-
-        beams_->add(cell.current_pos, neighborCell.current_pos, 4.0F, col,
-                    static_cast<std::uint32_t>(id));
       }
     }
   }
@@ -754,20 +1068,17 @@ void ZigzagVisualizer::drawFrame(gleditor::FrameContext &ctx) {
 
   // Focus Status
   std::string focusLabel = "Focus: none";
-  if (const Cell *const cur = findCell(accursed_cell_focus_)) {
-    const auto effText =
-        zzcore::getEffectiveCellText(space_, accursed_cell_focus_);
+  if (engine_ && accursed_cell_focus_ != 0) {
+    const auto cur = inspectCell(static_cast<CellRef>(accursed_cell_focus_));
     std::string mediaTag;
-    if (!cur->mime_type.empty()) {
-      mediaTag = std::format(" <{}>", cur->mime_type);
+    if (!cur.mime_type.empty()) {
+      mediaTag = std::format(" <{}>", cur.mime_type);
     }
     focusLabel =
-        std::format("Focus: #{}{} \"{}\" {}", cur->id, mediaTag, effText,
-                    cur->role.empty() ? "" : "[" + cur->role + "]");
-    if (zzcore::isCloneCell(space_, accursed_cell_focus_)) {
-      focusLabel +=
-          std::format(" [clone of #{}]",
-                      zzcore::findCloneMaster(space_, accursed_cell_focus_));
+        std::format("Focus: #{}{} \"{}\" {}", cur.id, mediaTag, cur.text,
+                    cur.role.empty() ? "" : "[" + cur.role + "]");
+    if (cur.is_clone) {
+      focusLabel += std::format(" [clone of #{}]", cur.clone_master_id);
     }
   }
   hudCanvas_->addText(ctx.state, 16.0F, height - 34.0F, focusLabel, 0xFFFFFFFFU,
@@ -802,7 +1113,7 @@ void ZigzagVisualizer::drawFrame(gleditor::FrameContext &ctx) {
   hudCanvas_->addLine(0.0F, 28.0F, width, 28.0F, 1.0F, 0x222233FFU);
   const std::string hints =
       "Arrows: Step X/Y | PgUp/PgDn: Step Z | Space: Swap X/Y | Tab: Cycle | "
-      "R: Reset View";
+      "N/D: Insert | U: Unlink | Del: Delete | R: Reset View";
   hudCanvas_->addText(ctx.state, 16.0F, 22.0F, hints, 0x888899FFU, 0x0D0D12DDU);
 
   hudCanvas_->commit();
@@ -820,31 +1131,51 @@ void ZigzagVisualizer::describe(gleditor::a11y::Builder &into) {
   rootChildren.push_back(into.id(2));
 
   std::uint64_t nextNodeId = 10;
-  for (const auto &[id, cell] : space_) {
-    const bool isFocus = (id == accursed_cell_focus_);
-    const auto effText = zzcore::getEffectiveCellText(space_, id);
-    std::string desc   = std::format("Cell #{}: {}", id, effText);
-    if (!cell.role.empty()) {
-      desc += " [" + cell.role + "]";
-    }
-    if (zzcore::isCloneCell(space_, id)) {
-      desc +=
-          std::format(" [Clone of #{}]", zzcore::findCloneMaster(space_, id));
-    }
-    if (isFocus) {
-      desc += " (Focused)";
-    }
-    auto &cellNode   = into.add(nextNodeId, gleditor::a11y::Role::ListItem);
-    cellNode.label   = std::move(desc);
-    cellNode.actions = gleditor::a11y::bit(gleditor::a11y::Action::Click) |
-                       gleditor::a11y::bit(gleditor::a11y::Action::Focus);
-    rootChildren.push_back(into.id(nextNodeId));
+  if (engine_) {
+    for (const auto &slot : engine_->manifold().cells()) {
+      const auto cellInfo = inspectCell(slot.birthOp);
+      const bool isFocus  = (slot.birthOp == accursed_cell_focus_);
+      std::string desc =
+          std::format("Cell #{}: {}", slot.birthOp, cellInfo.text);
+      if (!cellInfo.role.empty()) {
+        desc += " [" + cellInfo.role + "]";
+      }
+      if (cellInfo.is_clone) {
+        desc += std::format(" [Clone of #{}]", cellInfo.clone_master_id);
+      }
+      if (isFocus) {
+        desc += " (Focused)";
+      }
+      auto &cellNode   = into.add(nextNodeId, gleditor::a11y::Role::ListItem);
+      cellNode.label   = std::move(desc);
+      cellNode.actions = gleditor::a11y::bit(gleditor::a11y::Action::Click) |
+                         gleditor::a11y::bit(gleditor::a11y::Action::Focus);
+      rootChildren.push_back(into.id(nextNodeId));
 
-    if (isFocus) {
+      if (isFocus) {
+        into.takeFocus(into.id(nextNodeId));
+      }
+
+      nextNodeId++;
+    }
+
+    if (isEphemeral(static_cast<CellRef>(accursed_cell_focus_))) {
+      const auto focusRef = static_cast<CellRef>(accursed_cell_focus_);
+      const auto cellInfo = inspectCell(focusRef);
+      std::string desc =
+          std::format("Cell #{}: {} [Clone of #{}] (Focused)", focusRef,
+                      cellInfo.text, cellInfo.clone_master_id);
+      if (!cellInfo.role.empty()) {
+        desc += " [" + cellInfo.role + "]";
+      }
+      auto &cellNode   = into.add(nextNodeId, gleditor::a11y::Role::ListItem);
+      cellNode.label   = std::move(desc);
+      cellNode.actions = gleditor::a11y::bit(gleditor::a11y::Action::Click) |
+                         gleditor::a11y::bit(gleditor::a11y::Action::Focus);
+      rootChildren.push_back(into.id(nextNodeId));
       into.takeFocus(into.id(nextNodeId));
+      nextNodeId++;
     }
-
-    nextNodeId++;
   }
 
   auto &rootNode    = into.add(1, gleditor::a11y::Role::Group);
@@ -859,12 +1190,14 @@ bool ZigzagVisualizer::performAction(const std::uint64_t nodeId,
   if (action == gleditor::a11y::Action::Click ||
       action == gleditor::a11y::Action::Focus) {
     const auto localId = gleditor::a11y::Ids::localOf(nodeId);
-    if (localId >= 10) {
+    if (localId >= 10 && engine_) {
       const auto cellIndex = localId - 10;
-      if (cellIndex < space_.size()) {
-        auto it = space_.begin();
-        std::advance(it, cellIndex);
-        navigateFocusTo(it->first);
+      if (cellIndex < engine_->manifold().cells().size()) {
+        navigateFocusTo(engine_->manifold().cells()[cellIndex].birthOp);
+        return true;
+      }
+      if (cellIndex == engine_->manifold().cells().size() &&
+          isEphemeral(static_cast<CellRef>(accursed_cell_focus_))) {
         return true;
       }
     }

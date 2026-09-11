@@ -79,6 +79,9 @@ public:
     return head_;
   }
 
+  [[nodiscard]] xanadu::Store &store() noexcept { return store_; }
+  [[nodiscard]] const xanadu::Store &store() const noexcept { return store_; }
+
   /**
    * @brief The cell that *is* dimension @p name, minting it if the slice has
    *        none.
@@ -88,20 +91,23 @@ public:
    */
   DimRef dimensionFor(std::string_view name);
 
-  /// Link @p a posward to @p b along @p dim, by recording one Structure
-  /// operation. noCell for @p b clears the link. The reciprocal edge is what
-  /// the fold means by a link, not a second write.
-  void linkCells(CellRef a, CellRef b, DimRef dim);
-  void linkCells(CellRef a, CellRef b, DimOrdinal dim);
-  void linkCells(CellRef a, CellRef b, const DimID &dim);
+  /// Link @p a to @p b along @p dim (true for negward, false for posward), by
+  /// recording one Structure operation. noCell for @p b clears the link. The
+  /// reciprocal edge is what the fold means by a link, not a second write.
+  void linkCells(CellRef a, CellRef b, DimRef dim, bool negward = false);
+  void linkCells(CellRef a, CellRef b, DimOrdinal dim, bool negward = false);
+  void linkCells(CellRef a, CellRef b, const DimID &dim, bool negward = false);
 
-  /// Sugar for linkCells(a, noCell, dim).
+  /// Sugar for linkCells(a, noCell, dim, false).
   void unlinkPositive(CellRef a, DimOrdinal dim);
 
   /// Mint a cell whose content is @p text, and answer the operation index that
   /// names it. Adding a cell is recording one now: there is nowhere for a cell
   /// with no operation behind it to live.
   CellRef addCell(std::string_view text);
+
+  /// Restate @p cell's content as @p text, recording a SetValue operation.
+  void updateCellText(CellRef cell, std::string_view text);
 
   void setCold(CellRef cell, ColdCell cold);
   [[nodiscard]] const ColdCell *coldOf(CellRef cell) const noexcept;
@@ -133,6 +139,33 @@ public:
    */
   [[nodiscard]] std::string_view
   resolveLocalCellView(CellRef cell) const noexcept;
+
+  // -- Topological Traversal & Meta-Dimensions -------------------------------
+
+  /**
+   * @brief Every dimension @p cell has active connections on, including
+   *        d.meta-dims itself.
+   */
+  [[nodiscard]] std::vector<DimRef> metaDimensionsOf(CellRef cell) const;
+
+  /**
+   * @brief Neighbor of @p from along @p dim (true for negward, false for
+   * posward). Seamlessly resolves stored manifold links, ephemeral d.meta-dims
+   *        ranks, and d.clone projections.
+   */
+  [[nodiscard]] CellRef linked(CellRef from, DimRef dim, bool negward) const;
+
+  /**
+   * @brief The clone master of @p cell along @p cloneDim. Resolves ephemeral
+   *        d.meta-dims clone cells to their real dimension cells on d.dims.
+   */
+  [[nodiscard]] CellRef cloneMaster(CellRef cell, DimRef cloneDim) const;
+
+  /**
+   * @brief Whether @p cell is protected from deletion (e.g. home, d.dims,
+   *        dimension cells on d.dims, ephemeral cells).
+   */
+  [[nodiscard]] bool isProtected(CellRef cell) const;
 
   // -- Conversion & Compatibility -------------------------------------------
   //
@@ -278,6 +311,22 @@ private:
   std::uint64_t shapingHits_{0};
   std::uint64_t shapingMisses_{0};
   std::uint64_t shapingEvictions_{0};
+
+  struct EphemeralMetaDimSlot {
+    CellRef parentCell{noCell};
+    DimRef dimension{noCell};
+    std::size_t index{0};
+    std::size_t totalCount{0};
+  };
+
+  CellRef getOrCreateEphemeralCell(CellRef parent, std::size_t index,
+                                   DimRef dim, std::size_t total) const;
+
+  mutable std::unordered_map<CellRef, EphemeralMetaDimSlot> ephemeralSlots_;
+  mutable std::map<std::pair<CellRef, std::size_t>, CellRef>
+      ephemeralByParentAndIndex_;
+  mutable std::uint32_t nextEphemeralId_{1};
+  mutable CellSlot ephemeralCellSlotDummy_{};
 };
 
 } // namespace zigzag

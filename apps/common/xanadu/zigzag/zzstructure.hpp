@@ -48,6 +48,10 @@ struct LinkPairs {
 using CellData =
     std::variant<std::string, double, bool, std::vector<std::uint8_t>>;
 
+/// A cell's representation in an authored YAML Slice document (DTO).
+/// In-memory runtime cell topology is managed by Manifold and backed by
+/// xanadu::Store operations; Cell serves as the serialization interchange
+/// format for YAML loading, dumping, and testing.
 struct Cell {
   CellID id = 0;
   CellData data;
@@ -134,7 +138,10 @@ struct StructureMeta {
   std::vector<std::string> tags;
 };
 
-/// A fully-parsed Slice: cell space, focus/view state, and display metadata.
+/// An authored YAML Slice document (DTO). In-memory runtime state is
+/// managed by xanadu::Store and zigzag::Manifold (via
+/// UnifiedTransclusionEngine), while ZzStructureDocument serves as the
+/// serialization/deserialization interchange schema for YAML slices.
 struct ZzStructureDocument {
   StructureMeta meta;
   CellID focus = 0;

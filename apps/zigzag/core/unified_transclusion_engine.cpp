@@ -14,7 +14,9 @@
 namespace zigzag {
 
 UnifiedTransclusionEngine::UnifiedTransclusionEngine(xanadu::Store &store)
-    : store_(store) {}
+    : store_(store) {
+  syncIncremental();
+}
 
 void UnifiedTransclusionEngine::syncIncremental() {
   // A fold, not a projection. buildCellFromOp() used to synthesise a cell from
@@ -73,6 +75,17 @@ CellRef UnifiedTransclusionEngine::addCell(const std::string_view text) {
   return store_.cellRefOf(head_);
 }
 
+void UnifiedTransclusionEngine::updateCellText(const CellRef cell,
+                                               const std::string_view text) {
+  if (zigzag::noCell == cell) {
+    return;
+  }
+  ensureSliceBegun();
+  head_ = store_.setCellText(head_, cell, text, &manifold_);
+  syncIncremental();
+  clearShapingCache();
+}
+
 void UnifiedTransclusionEngine::setCold(const CellRef cell, ColdCell cold) {
   cold_[cell] = std::move(cold);
 }
@@ -84,35 +97,191 @@ UnifiedTransclusionEngine::coldOf(const CellRef cell) const noexcept {
 }
 
 void UnifiedTransclusionEngine::linkCells(const CellRef a, const CellRef b,
-                                          const DimRef dim) {
+                                          const DimRef dim,
+                                          const bool negward) {
   if (zigzag::noCell == a || zigzag::noCell == dim) {
     return;
   }
   // One operation, not two writes. The reciprocal edge is what the fold means
   // by a link rather than a second thing to remember to set -- which is what
   // the four-line pos-then-neg dance this replaces kept getting right by hand.
-  head_ = store_.setLink(head_, a, dim, false, b, &manifold_);
+  head_ = store_.setLink(head_, a, dim, negward, b, &manifold_);
   syncIncremental();
 }
 
 void UnifiedTransclusionEngine::linkCells(const CellRef a, const CellRef b,
-                                          const DimOrdinal dim) {
-  linkCells(a, b, dimensionFor(dimOrdinalToString(dim)));
+                                          const DimOrdinal dim,
+                                          const bool negward) {
+  linkCells(a, b, dimensionFor(dimOrdinalToString(dim)), negward);
 }
 
 void UnifiedTransclusionEngine::linkCells(const CellRef a, const CellRef b,
-                                          const DimID &dim) {
-  linkCells(a, b, dimensionFor(dim));
+                                          const DimID &dim,
+                                          const bool negward) {
+  linkCells(a, b, dimensionFor(dim), negward);
 }
 
 void UnifiedTransclusionEngine::unlinkPositive(const CellRef a,
                                                const DimOrdinal dim) {
-  linkCells(a, zigzag::noCell, dim);
+  linkCells(a, zigzag::noCell, dim, false);
 }
 
 const CellSlot *
 UnifiedTransclusionEngine::findCell(const CellRef cell) const noexcept {
+  if (isEphemeral(cell)) {
+    const auto it = ephemeralSlots_.find(cell);
+    if (it != ephemeralSlots_.end()) {
+      if (const auto *masterSlot = manifold_.slot(it->second.dimension)) {
+        ephemeralCellSlotDummy_         = *masterSlot;
+        ephemeralCellSlotDummy_.birthOp = cell;
+        return &ephemeralCellSlotDummy_;
+      }
+    }
+    return nullptr;
+  }
   return manifold_.slot(cell);
+}
+
+std::vector<DimRef>
+UnifiedTransclusionEngine::metaDimensionsOf(const CellRef cell) const {
+  std::vector<DimRef> dims;
+  if (cell == noCell) {
+    return dims;
+  }
+  for (const auto &link : manifold_.dimensionsOf(cell)) {
+    if (link.pos != noCell || link.neg != noCell) {
+      if (std::ranges::find(dims, link.dim) == dims.end()) {
+        dims.push_back(link.dim);
+      }
+    }
+  }
+  const auto metaDim =
+      const_cast<UnifiedTransclusionEngine *>(this)->dimensionFor(
+          "d.meta-dims");
+  if (metaDim != noCell) {
+    if (std::ranges::find(dims, metaDim) == dims.end()) {
+      dims.push_back(metaDim);
+    }
+  }
+  return dims;
+}
+
+CellRef UnifiedTransclusionEngine::getOrCreateEphemeralCell(
+    const CellRef parent, const std::size_t index, const DimRef dim,
+    const std::size_t total) const {
+  const auto key = std::pair{parent, index};
+  if (const auto it = ephemeralByParentAndIndex_.find(key);
+      it != ephemeralByParentAndIndex_.end()) {
+    return it->second;
+  }
+  const CellRef ephId    = ephemeralBit | nextEphemeralId_++;
+  ephemeralSlots_[ephId] = EphemeralMetaDimSlot{
+      .parentCell = parent,
+      .dimension  = dim,
+      .index      = index,
+      .totalCount = total,
+  };
+  ephemeralByParentAndIndex_[key] = ephId;
+  return ephId;
+}
+
+CellRef UnifiedTransclusionEngine::linked(const CellRef from, const DimRef dim,
+                                          const bool negward) const {
+  if (from == noCell || dim == noCell) {
+    return noCell;
+  }
+
+  const auto metaDim =
+      const_cast<UnifiedTransclusionEngine *>(this)->dimensionFor(
+          "d.meta-dims");
+  const auto cloneDim = manifold_.dimensionNamed("d.clone", store_);
+
+  if (isEphemeral(from)) {
+    const auto it = ephemeralSlots_.find(from);
+    if (it == ephemeralSlots_.end()) {
+      return noCell;
+    }
+    const auto &slot = it->second;
+
+    if (metaDim != noCell && dim == metaDim) {
+      if (!negward) {
+        if (slot.index + 1 < slot.totalCount) {
+          const auto mDims = metaDimensionsOf(slot.parentCell);
+          if (slot.index + 1 < mDims.size()) {
+            return getOrCreateEphemeralCell(slot.parentCell, slot.index + 1,
+                                            mDims[slot.index + 1],
+                                            slot.totalCount);
+          }
+        }
+        return noCell;
+      } else {
+        if (slot.index > 0) {
+          const auto mDims = metaDimensionsOf(slot.parentCell);
+          if (slot.index - 1 < mDims.size()) {
+            return getOrCreateEphemeralCell(slot.parentCell, slot.index - 1,
+                                            mDims[slot.index - 1],
+                                            slot.totalCount);
+          }
+        }
+        return slot.parentCell;
+      }
+    }
+
+    if (cloneDim != noCell && dim == cloneDim) {
+      if (negward) {
+        return slot.dimension;
+      }
+      return noCell;
+    }
+
+    return noCell;
+  }
+
+  if (metaDim != noCell && dim == metaDim) {
+    if (!negward) {
+      const auto mDims = metaDimensionsOf(from);
+      if (!mDims.empty()) {
+        return getOrCreateEphemeralCell(from, 0, mDims[0], mDims.size());
+      }
+    }
+    return noCell;
+  }
+
+  return manifold_.linked(from, dim, negward);
+}
+
+CellRef UnifiedTransclusionEngine::cloneMaster(const CellRef cell,
+                                               const DimRef cloneDim) const {
+  if (isEphemeral(cell)) {
+    const auto it = ephemeralSlots_.find(cell);
+    if (it != ephemeralSlots_.end()) {
+      return it->second.dimension;
+    }
+    return noCell;
+  }
+  return manifold_.cloneMaster(cell, cloneDim);
+}
+
+bool UnifiedTransclusionEngine::isProtected(const CellRef cell) const {
+  if (cell == noCell || isEphemeral(cell)) {
+    return true;
+  }
+  if (cell == manifold_.home() || cell == manifold_.dimsDimension()) {
+    return true;
+  }
+  for (const auto dim : manifold_.dimensions()) {
+    if (cell == dim) {
+      return true;
+    }
+  }
+  const auto dimsDim = manifold_.dimsDimension();
+  if (dimsDim != noCell) {
+    if (manifold_.linked(cell, dimsDim, true) != noCell ||
+        manifold_.linked(cell, dimsDim, false) != noCell) {
+      return true;
+    }
+  }
+  return false;
 }
 
 bool UnifiedTransclusionEngine::validate2RankManifold(
@@ -150,6 +319,13 @@ bool UnifiedTransclusionEngine::validate2RankManifold(
 
 std::string
 UnifiedTransclusionEngine::resolveCellText(const CellRef cell) const {
+  if (isEphemeral(cell)) {
+    const auto it = ephemeralSlots_.find(cell);
+    if (it != ephemeralSlots_.end()) {
+      return resolveCellText(it->second.dimension);
+    }
+    return "";
+  }
   if (const auto *const cold = coldOf(cell); nullptr != cold) {
     if (cold->resolutionStatus == xanadu::ResolutionStatus::WithheldRedacted) {
       return "[Redacted - Withheld]";
@@ -298,7 +474,7 @@ UnifiedTransclusionEngine::stageVisibleCells(
 
     const auto checkNeighbor = [&](const CellID neighbor) {
       if (neighbor != 0 && !visited.contains(neighbor) &&
-          manifold_.contains(neighbor)) {
+          findCell(static_cast<CellRef>(neighbor))) {
         visited.insert(neighbor);
         queue.push({neighbor, dist + 1});
       }
@@ -308,8 +484,8 @@ UnifiedTransclusionEngine::stageVisibleCells(
       if (zigzag::noCell == axis) {
         continue;
       }
-      checkNeighbor(manifold_.linked(currId, axis, false));
-      checkNeighbor(manifold_.linked(currId, axis, true));
+      checkNeighbor(linked(currId, axis, false));
+      checkNeighbor(linked(currId, axis, true));
     }
   }
 

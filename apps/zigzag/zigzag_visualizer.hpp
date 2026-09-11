@@ -5,6 +5,9 @@
 #ifndef ZIGZAG_VISUALIZER_HPP
 #define ZIGZAG_VISUALIZER_HPP
 
+#include "common/xanadu/store.hpp"
+#include "core/manifold.hpp"
+#include "core/unified_transclusion_engine.hpp"
 #include "core/zz_xudu_projector.hpp"
 #include "core/zzcore.hpp"
 #include "core/zzstructure.hpp"
@@ -140,9 +143,11 @@ public:
   bool linkFocusAlong(const DimID &dimension, CellID targetId,
                       bool positive = true);
   bool unlinkFocusAlong(const DimID &dimension, bool positive = true);
+  bool deleteFocusCell();
   void updateFocusCellText(std::string text);
   bool saveStructureYaml(const std::string &filePath) const;
 
+  [[nodiscard]] bool isProtected(CellRef id) const;
   [[nodiscard]] CellID focusCellId() const { return accursed_cell_focus_; }
   [[nodiscard]] const std::string &structureName() const {
     return structure_name_;
@@ -153,13 +158,22 @@ public:
   [[nodiscard]] ZzStructureDocument document() const;
 
 private:
+  struct CellInfo {
+    CellRef id{0};
+    std::string text;
+    std::string role;
+    std::string mime_type;
+    std::string media_path;
+    bool is_image{false};
+    bool is_clone{false};
+    CellRef clone_master_id{0};
+  };
+
   void rebuildActiveViewTopology();
   void updateCellPositions(float deltaTime);
   void invalidateAccessibility() { revision_++; }
 
-  [[nodiscard]] const Cell *findCell(CellID id) const;
-  [[nodiscard]] static LinkPairs linksOn(const Cell *cell,
-                                         const DimID &dimension);
+  [[nodiscard]] CellInfo inspectCell(CellRef id) const;
   [[nodiscard]] DimensionVisual dimensionVisual(const DimID &dimension) const;
 
   std::string fontName_;
@@ -167,7 +181,8 @@ private:
 
   std::string structure_name_;
   std::string current_slice_path_;
-  std::unordered_map<CellID, Cell> space_;
+  std::unique_ptr<xanadu::Store> store_;
+  std::unique_ptr<UnifiedTransclusionEngine> engine_;
   CellID accursed_cell_focus_{0};
   ViewAxisBinding current_view_;
 

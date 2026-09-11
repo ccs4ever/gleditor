@@ -408,6 +408,11 @@ public:
                            std::int64_t value,
                            const zigzag::Manifold *known = nullptr);
 
+  /// Restate @p cell's content as @p text, typed into the author's permascroll.
+  MicroversionId setCellText(const MicroversionId &parent, zigzag::CellRef cell,
+                             std::string_view text,
+                             const zigzag::Manifold *known = nullptr);
+
   /**
    * @brief Point @p from's @p dim-ward neighbour at @p to. noCell clears it.
    *
@@ -578,6 +583,7 @@ public:
   [[nodiscard]] const UserPermascroll &userPermascroll() const {
     return *userPermascroll_;
   }
+  [[nodiscard]] UserPermascroll &userPermascroll() { return *userPermascroll_; }
   [[nodiscard]] std::shared_ptr<UserPermascroll> userPermascrollPtr() const {
     return userPermascroll_;
   }

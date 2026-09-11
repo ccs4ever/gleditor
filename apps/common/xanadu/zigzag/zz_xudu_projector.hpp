@@ -96,6 +96,16 @@ projectStoreToZigzag(const xanadu::Store &store,
     const std::string &salt = "zigzag_slice", std::int64_t sequence = 1);
 
 /**
+ * @brief Convert a slice Store and its Manifold into a signed, standalone
+ *        xanadu::LinkPackage using real primedia spans from the store.
+ */
+[[nodiscard]] xanadu::LinkPackage
+storeToLinkPackage(const xanadu::Store &store, const Manifold &manifold,
+                   const xanadu::MutableKeys &keys,
+                   const std::string &salt = "zigzag_slice",
+                   std::int64_t sequence = 1, const std::string &title = "");
+
+/**
  * @brief Convert a xanadu::LinkPackage containing dimensional links back into a
  *        ZzStructureDocument.
  */
@@ -149,9 +159,9 @@ struct SlicedStore {
  * on hash iteration order would write a different store every run, and no
  * fixture could be regenerated.
  */
-[[nodiscard]] SlicedStore sliceToStore(const ZzStructureDocument &doc,
-                                       xanadu::Store &store,
-                                       const xanadu::MicroversionId &parent);
+[[nodiscard]] SlicedStore
+sliceToStore(const ZzStructureDocument &doc, xanadu::Store &store,
+             const xanadu::MicroversionId &parent = {});
 
 /**
  * @brief The YAML document a manifold describes, for export.

@@ -29,6 +29,12 @@ bool spansOverlap(const xanadu::PrimediaSpan &a,
   return !a.intersect(b).empty();
 }
 
+/// The ranks a cell's non-content attributes live on now that CellSlot has no
+/// field for them. R13's answer for metadata: cells on a dimension.
+constexpr std::string_view roleDimension  = "d.role";
+constexpr std::string_view mimeDimension  = "d.mime";
+constexpr std::string_view mediaDimension = "d.media";
+
 } // namespace
 
 ZzStructureDocument projectXuduToZigzag(const std::vector<XuduDocInput> &docs,
@@ -107,6 +113,24 @@ ZzStructureDocument projectXuduToZigzag(const std::vector<XuduDocInput> &docs,
     }
 
     if (opts.split_by_paragraphs) {
+      struct PieceRange {
+        std::size_t byteStart{0};
+        std::size_t byteEnd{0};
+        xanadu::PrimediaSpan span;
+      };
+      std::vector<PieceRange> pieceRanges;
+      pieceRanges.reserve(doc.spans.size());
+      std::size_t curOffset = 0;
+      for (const auto &s : doc.spans) {
+        const auto len = static_cast<std::size_t>(s.length);
+        pieceRanges.push_back(PieceRange{
+            .byteStart = curOffset,
+            .byteEnd   = curOffset + len,
+            .span      = s,
+        });
+        curOffset += len;
+      }
+
       // Split text into paragraphs
       std::size_t start   = 0;
       std::size_t paraIdx = 0;
@@ -124,8 +148,23 @@ ZzStructureDocument projectXuduToZigzag(const std::vector<XuduDocInput> &docs,
         }
 
         if (!paraText.empty()) {
+          const std::size_t paraByteStart = start + firstNonWs;
+          const std::size_t paraByteLen   = lastNonWs - firstNonWs + 1;
+
           xanadu::PrimediaSpan span;
-          if (!doc.spans.empty() && paraIdx < doc.spans.size()) {
+          for (const auto &piece : pieceRanges) {
+            if (paraByteStart >= piece.byteStart &&
+                paraByteStart < piece.byteEnd) {
+              const std::size_t inPieceOffset = paraByteStart - piece.byteStart;
+              span.scroll                     = piece.span.scroll;
+              span.start                     = piece.span.start + inPieceOffset;
+              const std::size_t availInPiece = piece.byteEnd - paraByteStart;
+              span.length                    = static_cast<std::uint64_t>(
+                  std::min(paraByteLen, availInPiece));
+              break;
+            }
+          }
+          if (span.empty() && paraIdx < doc.spans.size()) {
             span = doc.spans[paraIdx];
           }
           ++paraIdx;
@@ -425,46 +464,6 @@ ZzRasterResult rasterizeZzStructure(const ZzStructureDocument &doc,
   return result;
 }
 
-xanadu::LinkPackage zzStructureToLinkPackage(const ZzStructureDocument &doc,
-                                             const xanadu::MutableKeys &keys,
-                                             const std::string &salt,
-                                             const std::int64_t sequence) {
-  std::vector<xanadu::GlobalLink> links;
-  std::map<std::string, xanadu::Scroll> scrolls;
-
-  const std::string scrollName =
-      "slice:" + (doc.meta.name.empty() ? "anonymous" : doc.meta.name);
-  std::uint64_t currentOffset = 0;
-  std::unordered_map<CellID, xanadu::GlobalSpan> cellSpans;
-
-  for (const auto &[id, cell] : doc.cells) {
-    const auto effectiveText = zzcore::getEffectiveCellText(doc.cells, id);
-    const auto len           = static_cast<std::uint64_t>(effectiveText.size());
-    const xanadu::GlobalSpan span{scrollName, currentOffset, len};
-    cellSpans[id] = span;
-    currentOffset += len;
-  }
-
-  for (const auto &[id, cell] : doc.cells) {
-    for (const auto &[dim, linkPairs] : cell.dimensions) {
-      if (linkPairs.pos != 0 && cellSpans.contains(linkPairs.pos)) {
-        xanadu::GlobalLink gLink;
-        gLink.type  = xanadu::LinkType::Dimension;
-        gLink.tier  = xanadu::ProminenceTier::Author;
-        gLink.owner = "dim:" + dim;
-        gLink.left.push_back(cellSpans[id]);
-        gLink.right.push_back(cellSpans[linkPairs.pos]);
-        links.push_back(std::move(gLink));
-      }
-    }
-  }
-
-  return xanadu::publishLinkPackage(
-      keys, salt, doc.meta.name, sequence,
-      static_cast<std::uint64_t>(std::time(nullptr)), std::move(links),
-      std::move(scrolls));
-}
-
 ZzStructureDocument linkPackageToZzStructure(const xanadu::LinkPackage &pkg) {
   ZzStructureDocument doc;
   doc.meta.name = pkg.title.empty() ? "Imported Link Package" : pkg.title;
@@ -516,16 +515,6 @@ ZzStructureDocument linkPackageToZzStructure(const xanadu::LinkPackage &pkg) {
 }
 
 // -- a slice is a store -------------------------------------------------------
-
-namespace {
-
-/// The ranks a cell's non-content attributes live on now that CellSlot has no
-/// field for them. R13's answer for metadata: cells on a dimension.
-constexpr std::string_view roleDimension  = "d.role";
-constexpr std::string_view mimeDimension  = "d.mime";
-constexpr std::string_view mediaDimension = "d.media";
-
-} // namespace
 
 SlicedStore sliceToStore(const ZzStructureDocument &doc, xanadu::Store &store,
                          const xanadu::MicroversionId &parent) {
@@ -749,6 +738,114 @@ ZzStructureDocument storeToSlice(const xanadu::Store &store,
     doc.cells[cell.id] = std::move(cell);
   }
   return doc;
+}
+
+xanadu::LinkPackage
+storeToLinkPackage(const xanadu::Store &store, const Manifold &manifold,
+                   const xanadu::MutableKeys &keys, const std::string &salt,
+                   const std::int64_t sequence, const std::string &title) {
+  std::vector<xanadu::GlobalLink> links;
+  std::map<std::string, xanadu::Scroll> scrolls;
+
+  std::unordered_map<DimRef, DimID> names;
+  DimRef roleDim  = zigzag::noCell;
+  DimRef mimeDim  = zigzag::noCell;
+  DimRef mediaDim = zigzag::noCell;
+  for (const auto dim : manifold.dimensions()) {
+    const auto name = manifold.textOf(dim, store);
+    names.emplace(dim, name);
+    if (name == roleDimension) {
+      roleDim = dim;
+    } else if (name == mimeDimension) {
+      mimeDim = dim;
+    } else if (name == mediaDimension) {
+      mediaDim = dim;
+    }
+  }
+
+  std::set<CellRef> structural;
+  structural.insert(manifold.home());
+  for (const auto &[dim, name] : names) {
+    structural.insert(dim);
+  }
+  for (const auto &slot : manifold.cells()) {
+    for (const auto attribute : {roleDim, mimeDim, mediaDim}) {
+      if (zigzag::noCell == attribute) {
+        continue;
+      }
+      if (const auto held = manifold.linked(slot.birthOp, attribute, false);
+          zigzag::noCell != held) {
+        structural.insert(held);
+      }
+    }
+  }
+
+  const auto localScroll = store.userPermascroll().currentScroll();
+  const auto scrollFor   = [&store,
+                            &localScroll](const xanadu::PrimediaSpan &span) {
+    return span.isLocal() ? &localScroll : store.scroll(span.scroll);
+  };
+
+  std::unordered_map<CellRef, xanadu::GlobalSpan> cellSpans;
+  for (const auto &slot : manifold.cells()) {
+    if (structural.contains(slot.birthOp)) {
+      continue;
+    }
+    if (const auto global = xanadu::globalise(store, slot.span, &localScroll)) {
+      cellSpans.emplace(slot.birthOp, *global);
+      if (const auto *const s = scrollFor(slot.span)) {
+        scrolls.insert_or_assign(global->scroll, *s);
+      }
+    }
+  }
+
+  for (const auto &slot : manifold.cells()) {
+    if (structural.contains(slot.birthOp)) {
+      continue;
+    }
+    const auto itFrom = cellSpans.find(slot.birthOp);
+    if (itFrom == cellSpans.end()) {
+      continue;
+    }
+    for (const auto &link : manifold.dimensionsOf(slot.birthOp)) {
+      if (link.dim == roleDim || link.dim == mimeDim || link.dim == mediaDim) {
+        continue;
+      }
+      if (link.pos != 0 && !structural.contains(link.pos)) {
+        const auto itTo = cellSpans.find(link.pos);
+        if (itTo != cellSpans.end()) {
+          const auto dimIt = names.find(link.dim);
+          const std::string dimName =
+              (dimIt != names.end()) ? dimIt->second : "d.1";
+          xanadu::GlobalLink gLink;
+          gLink.type  = xanadu::LinkType::Dimension;
+          gLink.tier  = xanadu::ProminenceTier::Author;
+          gLink.owner = "dim:" + dimName;
+          gLink.left.push_back(itFrom->second);
+          gLink.right.push_back(itTo->second);
+          links.push_back(std::move(gLink));
+        }
+      }
+    }
+  }
+
+  const std::string pkgTitle =
+      title.empty() ? "Zigzag Slice Link Package" : title;
+  return xanadu::publishLinkPackage(
+      keys, salt, pkgTitle, sequence,
+      static_cast<std::uint64_t>(std::time(nullptr)), std::move(links),
+      std::move(scrolls));
+}
+
+xanadu::LinkPackage zzStructureToLinkPackage(const ZzStructureDocument &doc,
+                                             const xanadu::MutableKeys &keys,
+                                             const std::string &salt,
+                                             const std::int64_t sequence) {
+  xanadu::Store store;
+  const auto sliced   = sliceToStore(doc, store);
+  const auto manifold = store.rebuildManifold(sliced.version);
+  return storeToLinkPackage(store, manifold, keys, salt, sequence,
+                            doc.meta.name);
 }
 
 bool validate2RankManifold(const ZzStructureDocument &doc,

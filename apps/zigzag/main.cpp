@@ -162,6 +162,12 @@ void bindCommands(gleditor::Application &app, const AppStateRef &state,
       SDL_SCANCODE_U, Mod::Shift, "unlink-x-neg",
       "unlink focused cell along negative X dimension",
       [viz] { viz->unlinkFocusAlong(viz->currentView().x_dimension, false); });
+  app.commands().bind(SDL_SCANCODE_DELETE, "delete-focus-cell",
+                      "delete currently focused cell",
+                      [viz] { viz->deleteFocusCell(); });
+  app.commands().bind(SDL_SCANCODE_BACKSPACE, "delete-focus-cell-bksp",
+                      "delete currently focused cell",
+                      [viz] { viz->deleteFocusCell(); });
   app.commands().bind(SDL_SCANCODE_S, Mod::Ctrl | Mod::Shift, "save-slice",
                       "save current slice to disk YAML", [viz] {
                         if (viz->saveStructureYaml("")) {

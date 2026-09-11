@@ -376,6 +376,14 @@ MicroversionId Store::setScalar(const MicroversionId &parent,
   return applyScalar(parent, cell, scalarValue(value), known);
 }
 
+MicroversionId Store::setCellText(const MicroversionId &parent,
+                                  const zigzag::CellRef cell,
+                                  const std::string_view text,
+                                  const zigzag::Manifold *const known) {
+  const auto span = userPermascroll_->append(text);
+  return setValue(parent, cell, span, ValueKind::None, 0, known);
+}
+
 MicroversionId Store::setLink(const MicroversionId &parent,
                               const zigzag::CellRef from,
                               const zigzag::DimRef dim, const bool negward,
