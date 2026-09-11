@@ -1957,6 +1957,17 @@ are honest that it is a mitigation. The experiment above measures whether the *e
 order-statistic index; these two say that a *language* over the manifold does, which is a different
 claim and is not settled by instrumenting `apps/zigzag`.
 
+**A candidate answer now exists:** [`enfilade-rank-indexing.md`](enfilade-rank-indexing.md). It
+takes this section's own "which is the enfilade, rebuilt" literally — a third replay product of the
+ops spool, folded beside `Version` and `Manifold`, with the tree's **Wid** swapped per consumer: a
+count for VPL's ordinal, a Bloom summary for Vlog's key, a bounding span set for link discovery. Two
+things in it are worth reading even if the proposal is rejected. The scrollbar wants the
+ordinal→cell map *and its inverse*, which is what rules out both a cached array and an ordinal
+stored per cell. And Vlog cannot sort its clause rank, because clause order is semantic in Prolog —
+so it needs an index over an order that must be *preserved*, which is the same requirement
+append-only-ness already imposes on the permascroll. **The experiment above is still the next thing
+to do**; a proposal does not substitute for it.
+
 **U2. The op rate of a real Vortex program.** Neither
 [`vortex-hyperstructural-runtime.md`](vortex-hyperstructural-runtime.md) nor
 [`vql-query-language.md`](vql-query-language.md) states one, so the arena size, the promotion budget

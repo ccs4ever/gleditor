@@ -586,12 +586,16 @@ selection over a rank of $n$ facts is $O(n)$ per call. VPL hit the same wall fro
 (`A[5000]` walks five thousand cells) and this is the same workload from the logic side.
 
 The mitigation is §4.3's again — an index is a pinned ephemeral island keyed by the canonical scalar
-bits or the functor's content hash, rebuilt lazily and released by breaking one link — and the
-honest statement is that **two unrelated consumers now want the same missing primitive from U1**,
-approaching it from opposite ends: VPL wants an ordinal and Vlog wants a key. That is the strongest
-argument yet for resolving U1 rather than deferring it further, and it is worth more than either
-document's own case, because a gap two designs reach independently is a gap in the manifold rather
-than a gap in a language.
+bits or the functor's content hash, rebuilt lazily and released by breaking one link, and
+[`enfilade-rank-indexing.md`](enfilade-rank-indexing.md) §4.2 proposes what goes *in* that island:
+an enfilade whose Wid is a Bloom summary of the keys beneath each crum, which prunes an **unsorted**
+rank. Unsorted is not negotiable here, since §6.2's logical update view is a statement about clause
+order and sorting the rank would change what the program computes — and the honest statement is that
+**two unrelated consumers now want the same missing primitive from U1**, approaching it from
+opposite ends: VPL wants an ordinal and Vlog wants a key. That is the strongest argument yet for
+resolving U1 rather than deferring it further, and it is worth more than either document's own case,
+because a gap two designs reach independently is a gap in the manifold rather than a gap in a
+language.
 
 ______________________________________________________________________
 
