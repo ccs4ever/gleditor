@@ -91,26 +91,27 @@ ______________________________________________________________________
 
 ## 2. Syntactic Token & Structural Shorthand Matrix
 
-| Token / Operator    | Structural Equivalent             | Functional & Spatial Semantic Mapping                                                                                                                                                          |
-| ------------------- | --------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `##`                | Origin Anchor (`home`)            | Grounds query context to the system origin: a minted genesis cell. Never `0`, which is the absence of a cell -- see §7.2.                                                                      |
-| `#`                 | Root Metacells                    | Lazily streams all disjoint root manifold entry points across the matrix.                                                                                                                      |
-| `^`                 | Process Manifold (`d.cursors`)    | Streams all active Spin-Head execution cursor threads. Never a pinning cursor -- those are on their own Root Set rank, `d.pinning-cursors` (§7.5).                                             |
-| `^NAME`             | `^[./d.name[. = "NAME"]]`         | Short-circuits the cursor scan, locking directly onto the named thread node. A cursor is named by a cell on its `d.name` rank rather than by its own content -- §6.1 spells the long form out. |
-| `.`                 | Context Identity                  | The current step's context cell — a valid anchor on its own, or `render(context)` when a host value is wanted.                                                                                 |
-| `/dim`              | `LazyRankStream(dim, posward)`    | Traverses `dim`'s entire rank posward from the context cell.                                                                                                                                   |
-| `/-dim`             | `LazyRankStream(dim, negward)`    | Traverses `dim`'s entire rank negward — the `-` binds to the dimension name, not the operator.                                                                                                 |
-| `/dim%`             | Create (`link(., dim, dir, -1)`)  | Allocates a new cell along `dim` (at the tail of any existing rank); see §4.5.                                                                                                                 |
-| `/dim%VALUE`        | Create + init                     | Allocates and initializes a new cell's content to `VALUE` — bare, quoted, or `$variable`.                                                                                                      |
-| `/dim%%...`         | Batch create                      | Each additional `%` allocates one more cell along `dim`; all of them join the step's result set — see §4.5.                                                                                    |
-| `A><B`              | Clone (`link(A, d_clone, +1, B)`) | Puts `A` and `B` on one clone rank, so both read its master; chainable (`A><B><C`) and combinable with `%` — see §4.6.                                                                         |
-| `.[offset, length]` | `value(ctx, off, len)`            | A slice, answered as an ephemeral cell quoting that range of addresses — a transclusion, not a copy.                                                                                           |
-| ~~`@`~~             | *retired*                         | Was "the numerical `cell_id` of the context node". A cell reference *is* a `cell_id`, so this was `.` spelled twice — see §7.6.                                                                |
-| `[...]`             | Predicate / Index Window          | Applies inline boolean filters or relative index clamps to a stream. Negative indices count from the end, `-1` being the last cell, so `[1, -2]` is every cell but the last.                   |
-| `any/all/none(...)` | Predicate Assertion               | Quantifies a stream instead of leaving the quantifier implied by position — see §4.3, and the reason `[. != $x]` is not the negation of `[. = $x]`.                                            |
-| `(...)`             | Macro Dimension Group             | Groups dimensional sequences into a compound traversal segment.                                                                                                                                |
-| `*`                 | Kleene Repetition                 | Repeats the preceding macro group zero or more times until termination.                                                                                                                        |
-| `{...}`             | Weave Block                       | Groups a comma-separated list of effect items under `weave`.                                                                                                                                   |
+| Token / Operator       | Structural Equivalent             | Functional & Spatial Semantic Mapping                                                                                                                                                          |
+| ---------------------- | --------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `##`                   | Origin Anchor (`home`)            | Grounds query context to the system origin: a minted genesis cell. Never `0`, which is the absence of a cell -- see §7.2.                                                                      |
+| `#`                    | Root Metacells                    | Lazily streams all disjoint root manifold entry points across the matrix.                                                                                                                      |
+| `^`                    | Process Manifold (`d.cursors`)    | Streams all active Spin-Head execution cursor threads. Never a pinning cursor -- those are on their own Root Set rank, `d.pinning-cursors` (§7.5).                                             |
+| `^NAME`                | `^[./d.name[. = "NAME"]]`         | Short-circuits the cursor scan, locking directly onto the named thread node. A cursor is named by a cell on its `d.name` rank rather than by its own content -- §6.1 spells the long form out. |
+| `.`                    | Context Identity                  | The current step's context cell — a valid anchor on its own, or `render(context)` when a host value is wanted.                                                                                 |
+| `/dim`                 | `LazyRankStream(dim, posward)`    | Traverses `dim`'s entire rank posward from the context cell.                                                                                                                                   |
+| `/-dim`                | `LazyRankStream(dim, negward)`    | Traverses `dim`'s entire rank negward — the `-` binds to the dimension name, not the operator.                                                                                                 |
+| `/dim%`                | Create (`link(., dim, dir, -1)`)  | Allocates a new cell along `dim` (at the tail of any existing rank); see §4.5.                                                                                                                 |
+| `/dim%VALUE`           | Create + init                     | Allocates and initializes a new cell's content to `VALUE` — bare, quoted, or `$variable`.                                                                                                      |
+| `/dim%%...`            | Batch create                      | Each additional `%` allocates one more cell along `dim`; all of them join the step's result set — see §4.5.                                                                                    |
+| `A><B`                 | Clone (`link(A, d_clone, +1, B)`) | Puts `A` and `B` on one clone rank, so both read its master; chainable (`A><B><C`) and combinable with `%` — see §4.6.                                                                         |
+| `.[offset, length]`    | `value(ctx, off, len)`            | A slice, answered as an ephemeral cell quoting that range of addresses — a transclusion, not a copy.                                                                                           |
+| ~~`@`~~                | *retired*                         | Was "the numerical `cell_id` of the context node". A cell reference *is* a `cell_id`, so this was `.` spelled twice — see §7.6.                                                                |
+| `[...]`                | Predicate / Index Window          | Applies inline boolean filters or relative index clamps to a stream. Negative indices count from the end, `-1` being the last cell, so `[1, -2]` is every cell but the last.                   |
+| `dim::tail/head/fixed` | Placement                         | Where on the rank a step acts, and whether the path's context follows. `::tail` is the default and is what `%` used to do silently — see §4.5.                                                 |
+| `any/all/none(...)`    | Predicate Assertion               | Quantifies a stream instead of leaving the quantifier implied by position — see §4.3, and the reason `[. != $x]` is not the negation of `[. = $x]`.                                            |
+| `(...)`                | Macro Dimension Group             | Groups dimensional sequences into a compound traversal segment.                                                                                                                                |
+| `*`                    | Kleene Repetition                 | Repeats the preceding macro group zero or more times until termination.                                                                                                                        |
+| `{...}`                | Weave Block                       | Groups a comma-separated list of effect items under `weave`.                                                                                                                                   |
 
 There is a single traversal operator: `/` already walks a whole rank, so there is no "one hop" form
 to distinguish it from, and direction is a property of the dimension name (an optional leading `-`),
@@ -147,7 +148,8 @@ LiteralCellId          ::= [0-9]+
 
 PathStep               ::= "/" StepSelector PredicateClause* RangeClamp?
 StepSelector           ::= SignedDimension CreateSuffix? | MacroDimensionGroup | FunctionInvocation
-SignedDimension        ::= "-"? DimensionIdentifier
+SignedDimension        ::= "-"? DimensionIdentifier Placement?
+Placement              ::= "::" ( "tail" | "head" | "fixed" )
 CreateSuffix           ::= ( "%" CreateValue? )+
 CreateValue            ::= ValueExpr | BareLiteral
 BareLiteral            ::= (run of characters excluding whitespace, "%", ",", "(", ")", "[", "]", "{", "}")
@@ -243,11 +245,22 @@ while (true) {
 and the loop terminates purely on `link`'s read form returning nothing rather than on a `cell_id`
 value, so nothing here has to special-case anything.
 
-- **Index Clamping (`[n]`)**: Evaluated lazily with 1-based indexing.
-  - `[1]`: Short-circuits traversal on the first matching cell, avoiding unnecessary traversals over
-    dense ranks.
-  - `[-1]`: Scans to the rank tail, returning only the final matching coordinate.
-  - `[start, end]`: Emits an index-windowed slice over the matching elements.
+- **Index Clamping (`[n]`)**: Evaluated lazily with 1-based indexing, **over the stream the step
+  yielded** — which is to say over the cells that matched, after any predicate, not over the rank
+  they were drawn from.
+
+  - `[1]`: the first matching cell. Short-circuits traversal, so a dense rank is not walked further
+    than it has to be.
+  - `[-1]`: **the last match.** An earlier draft said "scans to the rank tail, returning only the
+    final matching coordinate", which is the same answer only when nothing filtered the stream.
+    `d.name[. = "x"][-1]` is the last cell that *matched*, and if the rank's actual tail did not
+    match then `[-1]` must not return it. Wanting the rank's tail regardless of matching is a
+    different question with its own spelling now: `d.name::tail` (§4.5).
+  - `[start, end]`: an index-windowed slice over the matching elements, inclusive, with negative
+    indices counting from the end — `[1, -2]` is every match but the last.
+
+  The two readings were previously the same token doing two jobs, exactly as `dim` was under `%`.
+  Indices belong to the stream; placement belongs to the rank.
 
 ### 4.2 Slicing Semantics
 
@@ -349,30 +362,65 @@ literal that has nothing to do with the cell model it's returning from:
 
 - **Bare (`/dim%`)**: `link(., dim, dir, -1)`. Applied once per cell in the current context stream
   (like any other step).
+
 - **Initialized (`/dim%VALUE`)**: the same allocation, immediately followed by
   `value(., 0, -1, VALUE)` on the newly allocated cell. `VALUE` may be a bare token
   (`/d.status%OK`), a quoted string when it contains spaces or punctuation
   (`/d.status%"needs review"`), or a variable (`/d.status%$value`).
-- **Tail-seeking**: if the context cell already has a link along `dim` in the given direction, `%`
-  walks to the tail of that rank first (the same traversal §4.1 already performs) and allocates
-  there, rather than clobbering the context cell's own link slot. Without this, a loop that calls
-  `/d.step%$ch` once per character would overwrite the same cell every iteration instead of building
-  a chain; with it, `for $ch in EXPLODE($pattern, "") weave $nfa_start/d.step%$ch` builds the chain
-  directly (§6.2), with no separate "insert at end" primitive needed.
+
+- **Placement (`::tail`, `::head`, `::fixed`; `::tail` by default)**: where on the rank the new cell
+  goes, and whether the path's context follows it.
+
+  This is the rule that used to be called *tail-seeking* and was **implied by `%` rather than
+  written**: if the context cell already had a link along `dim`, `%` silently walked to the tail of
+  that rank and allocated there. The behaviour was right — without it a loop calling `/d.step%$ch`
+  per character overwrites one cell instead of building a chain — but it meant **`d.name` denoted
+  two different things depending on the operator applied to it**: the rank reachable from the
+  context in a read, and that rank's tail cell under a `%`. One token, two meanings, chosen by
+  something at the other end of the step. That is retired: `dim` always means the rank, and the
+  seeking is now a thing you can see.
+
+  | placement | the new cell goes                       | the context afterwards |
+  | --------- | --------------------------------------- | ---------------------- |
+  | `::tail`  | at the posward end of the rank          | the new cell           |
+  | `::head`  | at the negward end of the rank          | the new cell           |
+  | `::fixed` | immediately posward of the context cell | **unchanged**          |
+
+  `::tail` is the default, so every existing query means exactly what it meant — including
+  `for $ch in EXPLODE($pattern, "") weave $nfa_start/d.step%$ch`, which still builds the chain
+  directly with no separate "insert at end" primitive.
+
+  **`::head` matters more than symmetry.** A `d.clone` rank's **master** is its negward end (§4.6),
+  so `d.clone::head%` mints a cell that becomes the master — and every existing member of the rank
+  shows its content from the next read onward. That is the "change the default for everyone in one
+  operation" property of §6.3, spelled as a placement rather than as a special case.
+
+  **`::fixed` is the one that changes what comes after it.** `::tail` and `::head` move the context
+  to the cell they just made, which is what makes `%foo%bar` chain — create `foo`, move to it,
+  create `bar` — and that following behaviour is worth keeping, so it stays the default. `::fixed`
+  does not move: the cells the path was working on are still the cells it is working on, so a step
+  after a `::fixed` create continues from the original context rather than from the new cell. That
+  is the difference that matters for the rest of the path, not where the byte landed.
+
+  On a read step, `::head` and `::tail` select that end of the rank rather than streaming all of it;
+  `::fixed` is meaningful only with a create, since "the context cell" in a read is just `.`.
+
 - **Chainable**: whatever `%` lands on (freshly allocated or, on repeat, freshly appended) becomes
   the new context for the rest of the path, same as any other step — `/d.name%/d.results%VALUE`
   creates an empty cell along `d.name`, then from there creates and initializes a cell along
   `d.results`.
+
 - **Batching (`/dim%%`, `/dim%VALUE1%VALUE2`, ...)**: each `%` after the first allocates *another*
-  new cell along the same dimension — tail-seeking again, so it lands after the one just created —
-  rather than re-describing the same cell. `/d.child%%` creates two empty cells on `d.child`;
-  `/d.child%"Alice"%"Bob"` creates two, each initialized in order. The step's result is the set of
-  every cell it just created, not only the last one, so a later step in the same path fans out over
-  all of them: `/d.child%"Alice"%"Bob"/d.status%"active"` gives *both* new cells their own
-  `d.status` child, the same way a later step already fans out over any other multi-cell result
-  (like a plain `/dim` rank). A `for` loop calling `/dim%$value` once per iteration (§6.2) reaches
-  the same "many new siblings" outcome for a runtime-determined count; `%%` is for a
-  compile-time-known one.
+  new cell along the same dimension, at the step's placement, so under the default it lands after
+  the one just created — rather than re-describing the same cell. `/d.child%%` creates two empty
+  cells on `d.child`; `/d.child%"Alice"%"Bob"` creates two, each initialized in order. The step's
+  result is the set of every cell it just created, not only the last one, so a later step in the
+  same path fans out over all of them: `/d.child%"Alice"%"Bob"/d.status%"active"` gives *both* new
+  cells their own `d.status` child, the same way a later step already fans out over any other
+  multi-cell result (like a plain `/dim` rank). A `for` loop calling `/dim%$value` once per
+  iteration (§6.2) reaches the same "many new siblings" outcome for a runtime-determined count; `%%`
+  is for a compile-time-known one.
+
 - **Existing targets don't go through `%`.** Pointing a dimension at a cell that already exists — as
   opposed to allocating a new one — is `link(dim, dir, target)` directly, reachable as an ordinary
   `FunctionInvocation` step (§3). `%` is specifically the "make a new cell" case.
