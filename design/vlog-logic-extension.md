@@ -614,5 +614,5 @@ Editorial changes that alter no normative text bump neither component.
 
 | version | commit    | date       | change                                                                                                                                                                            |
 | ------- | --------- | ---------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| 1.1     | `PENDING` | 2026-09-11 | Named **Vlog**, and restyled as an extension rather than a front end (intro, §2). The intro's "no trail" reconciled with §5.3; U1's two consumers separated into ordinal and key. |
+| 1.1     | `88c9336` | 2026-09-11 | Named **Vlog**, and restyled as an extension rather than a front end (intro, §2). The intro's "no trail" reconciled with §5.3; U1's two consumers separated into ordinal and key. |
 | 1.0     | `734513a` | 2026-09-11 | Initial specification: binding as a clone link, backtracking as truncation.                                                                                                       |
