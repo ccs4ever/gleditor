@@ -25,10 +25,14 @@
 #define XUDU_RESOLVER_H
 
 #include <cstdint>
+#include <list>
 #include <map>
 #include <memory>
+#include <mutex>
 #include <optional>
 #include <string>
+#include <unordered_map>
+#include <utility>
 #include <vector>
 
 #include <gleditor/paths.hpp>
@@ -138,6 +142,90 @@ private:
 };
 
 /**
+ * @brief Verified pieces, kept by content address for one Resolver's lifetime.
+ *
+ * The key is `(info hash, piece index)`, which **names the bytes exactly**: a
+ * piece hash is a cryptographic commitment, so any bytes that verify against it
+ * are the bytes the reference meant, whatever they were fetched from. That is
+ * what makes this cache sound where the resolved-text cache that used to sit in
+ * resolve() was not -- a `PrimediaSpan` names a scroll by its slot in one
+ * Store's externals table, so two documents' "scroll 1" collided in one
+ * process-wide LMDB.
+ *
+ * **It is deliberately in memory and deliberately not the LMDB cache.** The
+ * cost of caching a verified piece is that tampering with the local copy stops
+ * being noticed for as long as the cache holds it:
+ * `alteredContentIsNotReturned` in tests/xudu/resolver.cpp is the property
+ * being traded against, and it is load-bearing rather than incidental. Scoping
+ * the cache to one Resolver -- so one open document -- bounds that window to a
+ * session and makes reopening a re-verification of everything, where a
+ * persistent cache would have made the staleness permanent. A piece not yet
+ * cached is still verified, so tampering is still caught everywhere the reader
+ * has not already looked.
+ *
+ * Held through a shared_ptr so that copying a Resolver shares the cache rather
+ * than being refused by the mutex. Sharing is right anyway: the key is a
+ * content address, so two Resolvers cannot disagree about what a hit means.
+ */
+class VerifiedPieceCache {
+public:
+  /// Bytes to hold before evicting, not pieces: piece length varies per
+  /// torrent, and it is the memory that needs bounding. Four MiB is 64 pieces
+  /// at this tree's 64 KiB Merkle piece size, against the ~60 cells a frame
+  /// visits -- enough that a frame reads no piece twice.
+  static constexpr std::size_t defaultBudgetBytes = 4ULL * 1024ULL * 1024ULL;
+
+  struct Stats {
+    std::uint64_t hits{0};
+    std::uint64_t misses{0};
+    std::uint64_t evictions{0};
+    std::size_t pieces{0};
+    std::size_t bytes{0};
+  };
+
+  /// The piece, or nothing. Answers by value: the caller appends it to a buffer
+  /// and a view would have to outlive an eviction by another thread.
+  [[nodiscard]] std::optional<std::string> get(const InfoHash &torrent,
+                                               std::size_t piece) const;
+
+  /// Remember @p bytes as piece @p piece of @p torrent. Only ever called with
+  /// bytes that have just verified, which is the invariant the whole class
+  /// rests on -- there is no path that stores an unverified piece.
+  void put(const InfoHash &torrent, std::size_t piece,
+           const std::string &bytes);
+
+  /// Forget everything. What a caller that knows the local copy changed
+  /// underneath it does; nothing here can detect that by itself.
+  void clear();
+
+  void setBudgetBytes(std::size_t bytes);
+
+  [[nodiscard]] Stats stats() const;
+
+private:
+  struct Key {
+    InfoHash torrent;
+    std::size_t piece{0};
+    bool operator==(const Key &) const = default;
+  };
+  struct KeyHash {
+    std::size_t operator()(const Key &key) const noexcept;
+  };
+  /// Most recently used at the front. A list so that an entry can be moved to
+  /// the front without invalidating the map's iterators into it.
+  using Entries = std::list<std::pair<Key, std::string>>;
+
+  void evictDownToBudget();
+
+  mutable std::mutex guard;
+  mutable Entries entries;
+  mutable std::unordered_map<Key, Entries::iterator, KeyHash> index;
+  std::size_t budgetBytes{defaultBudgetBytes};
+  mutable std::size_t bytesHeld{0};
+  mutable Stats counters;
+};
+
+/**
  * @class Resolver
  * @brief Reads spans, verifying anything that did not come from here.
  */
@@ -206,6 +294,14 @@ public:
     return cache;
   }
 
+  /// The verified-piece cache. Public so that a caller who knows the content
+  /// under a torrent has changed -- a re-seal, a repaired download -- can
+  /// clear() it, and so that a test can read its Stats and see that a second
+  /// read of one piece did not hash it again.
+  [[nodiscard]] VerifiedPieceCache &pieceCache() const noexcept {
+    return *pieces;
+  }
+
 private:
   /// One segment's worth: [@p from, @p from + @p count) in scroll
   /// coordinates, which this turns into stream coordinates and verifies.
@@ -215,6 +311,10 @@ private:
 
   const ContentSource *source{};
   mutable LMDBContentCache cache;
+  /// Never null. Shared rather than held by value so that a Resolver stays
+  /// copyable with a mutex inside its cache -- see VerifiedPieceCache.
+  std::shared_ptr<VerifiedPieceCache> pieces{
+      std::make_shared<VerifiedPieceCache>()};
 };
 
 } // namespace xanadu

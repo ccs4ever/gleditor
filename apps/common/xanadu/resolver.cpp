@@ -101,6 +101,82 @@ DirectoryContentSource::readStream(const InfoHash &hash,
   return out;
 }
 
+std::size_t
+VerifiedPieceCache::KeyHash::operator()(const Key &key) const noexcept {
+  // The info hash is already a hash, so its first eight bytes are as good a
+  // bucket as anything this could compute, mixed with the piece index.
+  std::uint64_t folded = 0;
+  for (std::size_t i = 0; i < 8; i++) {
+    folded = (folded << 8) | key.torrent.bytes[i];
+  }
+  return std::hash<std::uint64_t>{}(folded ^
+                                    (key.piece * 0x9e3779b97f4a7c15ULL));
+}
+
+std::optional<std::string>
+VerifiedPieceCache::get(const InfoHash &torrent,
+                        const std::size_t piece) const {
+  const std::lock_guard lock(guard);
+  const auto found = index.find(Key{torrent, piece});
+  if (found == index.end()) {
+    counters.misses++;
+    return std::nullopt;
+  }
+  counters.hits++;
+  entries.splice(entries.begin(), entries, found->second);
+  return found->second->second;
+}
+
+void VerifiedPieceCache::put(const InfoHash &torrent, const std::size_t piece,
+                             const std::string &bytes) {
+  const std::lock_guard lock(guard);
+  const Key key{torrent, piece};
+  if (const auto found = index.find(key); found != index.end()) {
+    entries.splice(entries.begin(), entries, found->second);
+    return;
+  }
+  // A piece larger than the whole budget would otherwise be stored and then
+  // immediately evicted, paying the copy for nothing.
+  if (bytes.size() > budgetBytes) {
+    return;
+  }
+  entries.emplace_front(key, bytes);
+  index.emplace(key, entries.begin());
+  bytesHeld += bytes.size();
+  evictDownToBudget();
+}
+
+void VerifiedPieceCache::evictDownToBudget() {
+  while (bytesHeld > budgetBytes && !entries.empty()) {
+    const auto &oldest = entries.back();
+    bytesHeld -= oldest.second.size();
+    index.erase(oldest.first);
+    entries.pop_back();
+    counters.evictions++;
+  }
+}
+
+void VerifiedPieceCache::clear() {
+  const std::lock_guard lock(guard);
+  entries.clear();
+  index.clear();
+  bytesHeld = 0;
+}
+
+void VerifiedPieceCache::setBudgetBytes(const std::size_t bytes) {
+  const std::lock_guard lock(guard);
+  budgetBytes = bytes;
+  evictDownToBudget();
+}
+
+VerifiedPieceCache::Stats VerifiedPieceCache::stats() const {
+  const std::lock_guard lock(guard);
+  auto out   = counters;
+  out.pieces = index.size();
+  out.bytes  = bytesHeld;
+  return out;
+}
+
 bool Resolver::available(const Scroll &scroll) const {
   if (nullptr == source || scroll.segments.empty()) {
     return false;
@@ -137,6 +213,14 @@ std::string Resolver::readSegment(const ScrollSegment &segment,
       static_cast<std::size_t>((endPiece - firstPiece) * meta->pieceLength()));
 
   for (auto piece = firstPiece; piece < endPiece; piece++) {
+    // Already verified once, and the key names the bytes rather than a position
+    // in some document: a piece hash is a commitment, so a cached hit is the
+    // same bytes a fetch-and-verify would have produced. This is what stops
+    // stageVisibleCells re-hashing 64 KiB per visible cell per frame.
+    if (auto held = pieces->get(segment.torrent, piece); held) {
+      verified += *held;
+      continue;
+    }
     const auto at = static_cast<std::uint64_t>(piece) * meta->pieceLength();
     const auto bytes =
         source->readStream(segment.torrent, at, meta->lengthOfPiece(piece));
@@ -144,8 +228,14 @@ std::string Resolver::readSegment(const ScrollSegment &segment,
       // Nothing is returned rather than the pieces that did check out.
       // Downstream cannot tell verified bytes from unverified ones, so a
       // partial answer is a substitution with extra steps.
+      //
+      // Nor is the failure cached. A piece that does not verify today is one
+      // whose download has not finished or whose copy is damaged, and both get
+      // repaired without anything here being told; remembering the refusal
+      // would outlive the repair.
       return {};
     }
+    pieces->put(segment.torrent, piece, bytes);
     verified += bytes;
   }
 
@@ -245,26 +335,17 @@ ResolveResult Resolver::resolve(const Scroll &scroll,
     at += count;
   }
 
-  // Resolved text is deliberately not cached, and the cache.put(span, out)
-  // that used to sit here is gone. Nothing ever read it back, and that hid
-  // two reasons it could not be:
+  // Resolved *text* is still not cached here, and the cache.put(span, out) that
+  // used to sit here is still gone: a PrimediaSpan names a scroll by its slot
+  // index in *this* Store's externals table, so document A's scroll 1 and
+  // document B's scroll 1 were two scrolls under one key in a process-wide LMDB
+  // that outlived them both. That key cannot be repaired, only replaced.
   //
-  // The key is not unique. A PrimediaSpan names a scroll by its slot index in
-  // *this* Store's externals table, so document A's scroll 1 and document B's
-  // scroll 1 are different scrolls with one key, in a process-wide LMDB that
-  // outlives them both.
-  //
-  // The obvious repair -- cache verified pieces by (info hash, piece index),
-  // which does name the bytes -- costs more than it looks. `alteredContent-
-  // IsNotReturned` and its neighbours in tests/xudu/resolver.cpp exist
-  // because a reference whose local copy has been altered must stop
-  // resolving rather than quietly yield something else, and a cache that
-  // outlives the tampering answers from before it. That is a real tradeoff
-  // to weigh, not one to take by accident while removing a dead write.
-  //
-  // The cost this leaves is real: Session::decorate resolves every piece of
-  // every open document on each pass. Somewhere to cache it belongs is above
-  // the resolver, where a document knows when its own content changed.
+  // What replaced it is a layer down, in readSegment: verified pieces keyed by
+  // (info hash, piece index), which does name the bytes. See
+  // VerifiedPieceCache for the property that buys -- tampering with a local
+  // copy stops being noticed for as long as a piece is held -- and for why the
+  // cache is per-Resolver and in memory rather than persistent.
   return ResolveResult{.status = ResolutionStatus::VerifiedBytes,
                        .text   = std::move(out)};
 }

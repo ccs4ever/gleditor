@@ -85,8 +85,9 @@ TEST(ScalarTest, theWorstCaseRenderingIsTwentyFourBytesAndNotWhereR6SaidItWas) {
   EXPECT_EQ(xudu::scalarValue(-1.2345678901234567e-308).text.size(), 24U);
   EXPECT_EQ(xudu::scalarValue(std::numeric_limits<double>::lowest()).text,
             "-1.7976931348623157e+308");
-  EXPECT_EQ(xudu::scalarValue(std::numeric_limits<double>::lowest()).text.size(),
-            24U);
+  EXPECT_EQ(
+      xudu::scalarValue(std::numeric_limits<double>::lowest()).text.size(),
+      24U);
   // And most values are nowhere near it, which is the other half of R6's cost
   // argument: a tenth is three bytes, a third eighteen.
   EXPECT_EQ(xudu::scalarValue(0.1).text, "0.1");
@@ -101,12 +102,12 @@ TEST(ScalarTest, everyNaNIsOneNaNInTheBitsAndNegativeZeroIsZero) {
   const auto quiet = std::numeric_limits<double>::quiet_NaN();
   EXPECT_EQ(xudu::canonicalDoubleBits(quiet), canonicalQuietNaN);
   // A NaN with a payload, and one with the sign bit set: both collapse.
-  EXPECT_EQ(xudu::canonicalDoubleBits(
-                std::bit_cast<double>(0x7ff8000000c0ffeeULL)),
-            canonicalQuietNaN);
-  EXPECT_EQ(xudu::canonicalDoubleBits(
-                std::bit_cast<double>(0xfff8000000000001ULL)),
-            canonicalQuietNaN);
+  EXPECT_EQ(
+      xudu::canonicalDoubleBits(std::bit_cast<double>(0x7ff8000000c0ffeeULL)),
+      canonicalQuietNaN);
+  EXPECT_EQ(
+      xudu::canonicalDoubleBits(std::bit_cast<double>(0xfff8000000000001ULL)),
+      canonicalQuietNaN);
 
   EXPECT_EQ(xudu::canonicalDoubleBits(-0.0), 0U);
   EXPECT_EQ(xudu::canonicalDoubleBits(0.0), 0U);
@@ -141,8 +142,8 @@ TEST(ScalarTest, aCellCarriesTheBitsAndTheBytesAtOnce) {
   auto at = store.sliceGenesis(MicroversionId{});
 
   for (const auto value : interestingDoubles()) {
-    at              = store.makeScalarCell(at, value);
-    const auto cell = store.cellRefOf(at);
+    at                  = store.makeScalarCell(at, value);
+    const auto cell     = store.cellRefOf(at);
     const auto manifold = store.rebuildManifold(at);
 
     // The property step 15 asks for, both halves of it.
@@ -164,8 +165,8 @@ TEST(ScalarTest, aCellCarriesTheBitsAndTheBytesAtOnce) {
 
 TEST(ScalarTest, aNaNCellRendersAsANaNAndComparesEqualByBitsOnly) {
   Store store;
-  auto at         = store.sliceGenesis(MicroversionId{});
-  at              = store.makeScalarCell(at, std::numeric_limits<double>::quiet_NaN());
+  auto at = store.sliceGenesis(MicroversionId{});
+  at      = store.makeScalarCell(at, std::numeric_limits<double>::quiet_NaN());
   const auto cell = store.cellRefOf(at);
 
   const auto manifold = store.rebuildManifold(at);
@@ -181,12 +182,12 @@ TEST(ScalarTest, aNaNCellRendersAsANaNAndComparesEqualByBitsOnly) {
 
 TEST(ScalarTest, boolsAndIntegersCarryTheirOwnKind) {
   Store store;
-  auto at            = store.sliceGenesis(MicroversionId{});
-  at                 = store.makeScalarCell(at, true);
-  const auto yes     = store.cellRefOf(at);
-  at                 = store.makeScalarCell(at, false);
-  const auto no      = store.cellRefOf(at);
-  at                 = store.makeScalarCell(at, std::int64_t{-9007199254740993});
+  auto at        = store.sliceGenesis(MicroversionId{});
+  at             = store.makeScalarCell(at, true);
+  const auto yes = store.cellRefOf(at);
+  at             = store.makeScalarCell(at, false);
+  const auto no  = store.cellRefOf(at);
+  at             = store.makeScalarCell(at, std::int64_t{-9007199254740993});
   const auto integer = store.cellRefOf(at);
 
   const auto manifold = store.rebuildManifold(at);
@@ -232,13 +233,13 @@ TEST(ScalarTest, twoCellsHoldingOneNumberAreTwoCellsAtTwoAddresses) {
 
 TEST(ScalarTest, restatingAScalarSpoolsTheNewRenderingAndKeepsTheCell) {
   Store store;
-  auto at         = store.sliceGenesis(MicroversionId{});
-  at              = store.makeScalarCell(at, 1.5);
-  const auto cell = store.cellRefOf(at);
+  auto at           = store.sliceGenesis(MicroversionId{});
+  at                = store.makeScalarCell(at, 1.5);
+  const auto cell   = store.cellRefOf(at);
   const auto before = store.rebuildManifold(at);
   ASSERT_THAT(before.asDouble(cell), testing::Optional(1.5));
 
-  at = store.setScalar(at, cell, std::int64_t{7});
+  at               = store.setScalar(at, cell, std::int64_t{7});
   const auto after = store.rebuildManifold(at);
   // Same cell -- identity is the birth op and a restatement does not mint one.
   EXPECT_EQ(after.cellCount(), before.cellCount());
@@ -253,14 +254,14 @@ TEST(ScalarTest, restatingAScalarSpoolsTheNewRenderingAndKeepsTheCell) {
 
 TEST(ScalarTest, aScalarCellIsAnOrdinaryCellInEveryOtherWay) {
   Store store;
-  auto at            = store.sliceGenesis(MicroversionId{});
-  const auto minted  = store.makeDimension(at, "d.1");
-  at                 = minted.version;
-  at                 = store.makeScalarCell(at, 2.5);
-  const auto number  = store.cellRefOf(at);
-  at                 = store.makeCell(at, "a label");
-  const auto label   = store.cellRefOf(at);
-  at                 = store.setLink(at, label, minted.dim, false, number);
+  auto at           = store.sliceGenesis(MicroversionId{});
+  const auto minted = store.makeDimension(at, "d.1");
+  at                = minted.version;
+  at                = store.makeScalarCell(at, 2.5);
+  const auto number = store.cellRefOf(at);
+  at                = store.makeCell(at, "a label");
+  const auto label  = store.cellRefOf(at);
+  at                = store.setLink(at, label, minted.dim, false, number);
 
   const auto manifold = store.rebuildManifold(at);
   // Linked, ranked and read like anything else -- which is the entire argument

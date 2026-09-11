@@ -12,9 +12,11 @@
 #include <gtest/gtest.h>
 
 #include <array>
+#include <chrono>
 #include <cstdint>
 #include <filesystem>
 #include <fstream>
+#include <iostream>
 #include <string>
 #include <string_view>
 
@@ -192,6 +194,199 @@ TEST_F(TorrentDataTest, withNoSourceNothingResolves) {
   const auto fox = scrollFor(xudu_test::singleFileHash, 0);
   EXPECT_FALSE(resolver.available(fox));
   EXPECT_EQ(resolver.read(fox, PrimediaSpan{1, 0, 3}), "");
+}
+
+// -- the verified-piece cache -------------------------------------------------
+//
+// Migration step 16. The key is (info hash, piece index), which names the bytes
+// exactly, so a hit is the same answer a fetch-and-verify would have given.
+// What it costs is the property the tampering tests above assert, and the last
+// two here are the honest statement of where that property now ends.
+
+TEST_F(TorrentDataTest, aSecondReadOfOnePieceComesFromTheCache) {
+  const Resolver resolver(&source);
+  const auto fox = scrollFor(xudu_test::singleFileHash, 0);
+
+  EXPECT_EQ(resolver.read(fox, PrimediaSpan{1, 4, 5}), "quick");
+  auto stats = resolver.pieceCache().stats();
+  EXPECT_EQ(stats.hits, 0U);
+  EXPECT_EQ(stats.misses, 1U);
+  EXPECT_EQ(stats.pieces, 1U);
+
+  // A different range of the same piece, which is the frame-budget case this
+  // exists for: every visible cell landing in one 64 KiB piece used to re-hash
+  // the whole piece, once per cell, once per frame.
+  EXPECT_EQ(resolver.read(fox, PrimediaSpan{1, 10, 5}), "brown");
+  stats = resolver.pieceCache().stats();
+  EXPECT_EQ(stats.hits, 1U);
+  EXPECT_EQ(stats.misses, 1U);
+  EXPECT_EQ(stats.pieces, 1U);
+}
+
+TEST_F(TorrentDataTest, aRangeSpanningTwoPiecesCachesBoth) {
+  const Resolver resolver(&source);
+  const auto fox = scrollFor(xudu_test::singleFileHash, 0);
+
+  EXPECT_EQ(resolver.read(fox, PrimediaSpan{1, 0, 62}),
+            xudu_test::singleFileText);
+  // 32 + 30: whole pieces, because a piece hash covers a piece and says
+  // nothing about a fragment of one.
+  EXPECT_EQ(resolver.pieceCache().stats().pieces, 2U);
+  EXPECT_EQ(resolver.pieceCache().stats().bytes, 62U);
+
+  // Straddling the boundary at 32, so both cached pieces answer it.
+  EXPECT_EQ(resolver.read(fox, PrimediaSpan{1, 30, 6}), "r the ");
+  EXPECT_EQ(resolver.pieceCache().stats().hits, 2U);
+}
+
+TEST_F(TorrentDataTest, theCacheIsBoundedByBytesAndEvictsTheOldest) {
+  const Resolver resolver(&source);
+  resolver.pieceCache().setBudgetBytes(32);
+  const auto fox = scrollFor(xudu_test::singleFileHash, 0);
+
+  EXPECT_EQ(resolver.read(fox, PrimediaSpan{1, 0, 3}), "The");
+  ASSERT_EQ(resolver.pieceCache().stats().pieces, 1U);
+  // The second piece does not fit beside the first, so the first goes.
+  EXPECT_EQ(resolver.read(fox, PrimediaSpan{1, 50, 4}), "many");
+  const auto stats = resolver.pieceCache().stats();
+  EXPECT_EQ(stats.pieces, 1U);
+  EXPECT_LE(stats.bytes, 32U);
+  EXPECT_EQ(stats.evictions, 1U);
+
+  // Evicted, not lost: it is verified again rather than answered wrongly.
+  EXPECT_EQ(resolver.read(fox, PrimediaSpan{1, 0, 3}), "The");
+  EXPECT_EQ(resolver.pieceCache().stats().misses, 3U);
+}
+
+TEST_F(TorrentDataTest, aPieceLargerThanTheBudgetIsNotHeld) {
+  const Resolver resolver(&source);
+  resolver.pieceCache().setBudgetBytes(8);
+  const auto fox = scrollFor(xudu_test::singleFileHash, 0);
+
+  // Still resolves, just never from a cache: storing a piece only to evict it
+  // before the same call returns would pay for a copy that answers nothing.
+  EXPECT_EQ(resolver.read(fox, PrimediaSpan{1, 4, 5}), "quick");
+  EXPECT_EQ(resolver.read(fox, PrimediaSpan{1, 4, 5}), "quick");
+  const auto stats = resolver.pieceCache().stats();
+  EXPECT_EQ(stats.pieces, 0U);
+  EXPECT_EQ(stats.hits, 0U);
+  EXPECT_EQ(stats.evictions, 0U);
+}
+
+TEST_F(TorrentDataTest, tamperingWithAPieceNotYetReadIsStillCaught) {
+  const Resolver resolver(&source);
+  const auto fox = scrollFor(xudu_test::singleFileHash, 0);
+  ASSERT_EQ(resolver.read(fox, PrimediaSpan{1, 4, 5}), "quick");
+
+  // The second piece, which nothing has looked at yet. Holding the first must
+  // not make the reader credulous about the rest of the file.
+  auto tampered = xudu_test::singleFileText;
+  tampered[50]  = '!';
+  write(dir / "fox.txt", tampered);
+  EXPECT_EQ(resolver.read(fox, PrimediaSpan{1, 50, 4}), "");
+  // And the piece already verified still answers, from the cache.
+  EXPECT_EQ(resolver.read(fox, PrimediaSpan{1, 4, 5}), "quick");
+}
+
+TEST_F(TorrentDataTest, aHeldPieceOutlivesTamperingUntilTheCacheIsCleared) {
+  // The price of the cache, written as a test rather than as a comment. A piece
+  // already verified keeps answering after the local copy is altered: those
+  // bytes are still the bytes the reference named -- that is what a piece hash
+  // commits to -- but the reader is no longer being told the copy on disk has
+  // changed. Bounded to one Resolver's lifetime, which is what makes this a
+  // session-long window instead of a permanent one.
+  const Resolver resolver(&source);
+  const auto fox = scrollFor(xudu_test::singleFileHash, 0);
+  ASSERT_EQ(resolver.read(fox, PrimediaSpan{1, 4, 5}), "quick");
+
+  write(dir / "fox.txt", "Xhe quick brown fox jumped over the lazy dog. And "
+                         "many more...");
+  EXPECT_EQ(resolver.read(fox, PrimediaSpan{1, 4, 5}), "quick");
+
+  // Which is what clear() is for, and what reopening a document does for free.
+  resolver.pieceCache().clear();
+  EXPECT_EQ(resolver.read(fox, PrimediaSpan{1, 4, 5}), "");
+  EXPECT_EQ(resolver.pieceCache().stats().pieces, 0U);
+}
+
+/// A 1 MiB torrent at this tree's 64 KiB Merkle piece size, which the 32-byte
+/// vectors above are too small to say anything about: what the cache is for is
+/// not hashing sixteen pieces of that size once per visible cell per frame.
+struct PieceCachePerfTest : testing::Test {
+  std::filesystem::path dir;
+  DirectoryContentSource source;
+  InfoHash hash;
+  Scroll scroll;
+  std::string content;
+
+  void SetUp() override {
+    dir = std::filesystem::temp_directory_path() / "xudu-piece-cache-perf";
+    std::filesystem::remove_all(dir);
+    std::filesystem::create_directories(dir);
+
+    content.resize(1024ULL * 1024ULL);
+    for (std::size_t i = 0; i < content.size(); i++) {
+      content[i] = static_cast<char>('a' + (i % 26));
+    }
+    const auto made = xudu::makeTorrent(content, "big.dat", 64ULL * 1024ULL);
+    std::ofstream out(dir / "big.dat", std::ios::binary | std::ios::trunc);
+    out << content;
+    out.close();
+
+    hash             = source.add(made.file, dir.string());
+    const auto *meta = source.metainfo(hash);
+    scroll =
+        Scroll::ofTorrentFile(hash, 0, meta->files()[0].path,
+                              meta->files()[0].offset, meta->files()[0].length);
+  }
+  void TearDown() override { std::filesystem::remove_all(dir); }
+
+  /// Microseconds to read @p reads short spans scattered over the file, which
+  /// is the shape of a frame: many small cells, few distinct pieces.
+  [[nodiscard]] static double timeReads(const Resolver &resolver,
+                                        const Scroll &sc, const int reads) {
+    const auto start = std::chrono::steady_clock::now();
+    std::size_t got  = 0;
+    for (int i = 0; i < reads; i++) {
+      const std::uint64_t at =
+          (static_cast<std::uint64_t>(i) * 7919ULL) % (1024ULL * 1024ULL - 64);
+      got += resolver.read(sc, PrimediaSpan{1, at, 32}).size();
+    }
+    EXPECT_EQ(got, static_cast<std::size_t>(reads) * 32U);
+    return std::chrono::duration<double, std::micro>(
+               std::chrono::steady_clock::now() - start)
+        .count();
+  }
+};
+
+TEST_F(PieceCachePerfTest, sixtyCellsInAFrameStopReHashingTheSamePieces) {
+  // Sixty reads is the radius-3 BFS stageVisibleCells performs, and a budget of
+  // zero is how a piece never gets held -- so this is the same code path twice,
+  // differing only in whether verification has to happen again.
+  const Resolver uncached(&source);
+  uncached.pieceCache().setBudgetBytes(0);
+  const auto without = timeReads(uncached, scroll, 60);
+
+  const Resolver cached(&source);
+  const auto with = timeReads(cached, scroll, 60);
+
+  const auto stats = cached.pieceCache().stats();
+  // Stated as the invariant rather than as arithmetic over the stride: each
+  // distinct piece is verified exactly once and every other read of it is a
+  // hit. Sixty reads land in eight of the sixteen pieces here, so fifty-two of
+  // them were the same piece over again.
+  EXPECT_EQ(stats.misses, stats.pieces);
+  EXPECT_EQ(stats.hits + stats.misses, 60U);
+  EXPECT_GT(stats.hits, stats.misses);
+  EXPECT_EQ(stats.evictions, 0U);
+
+  // Not asserted as a ratio: this runs on whatever CI is, and a timing
+  // assertion that fails on a loaded machine teaches nobody anything. What is
+  // asserted is the hit count above, which is the mechanism; the timing is
+  // printed so a regression is visible to someone reading the log.
+  std::cout << "60 reads over 16 pieces of 64 KiB: " << without
+            << " us uncached, " << with << " us cached ("
+            << (without / std::max(with, 0.001)) << "x)\n";
 }
 
 // -- quoting a torrent into a document ----------------------------------------

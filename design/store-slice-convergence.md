@@ -1040,7 +1040,7 @@ ______________________________________________________________________
 Each step is one commit. After each, `make -j$(nproc)` builds all three programs and
 `make -j$(nproc) test` passes.
 
-Steps 1–15 have landed. What each actually cost, where it differed from the plan, and what it
+Steps 1–16 have landed. What each actually cost, where it differed from the plan, and what it
 measured is recorded inline below; the rest are unchanged.
 
 **Four things the landed steps have in common, worth knowing before starting the next one.**
@@ -1561,9 +1561,44 @@ came back byte-identical across every regenerated fixture.
    random bit patterns, the longest shortest-round-trip rendering is 24 bytes
    (`-5.2739967172806315e-235`), which is what the 32-byte buffer is sized against.
 
-1. **`Resolver` verified-piece cache**, keyed by info hash and piece index. Blocking for the frame
+1. ~~**`Resolver` verified-piece cache**, keyed by info hash and piece index. Blocking for the frame
    budget: `readSegment` verifies whole 64 KiB pieces and the resolved-text cache was removed and
-   never replaced, so `stageVisibleCells` re-verifies per visible cell per frame.
+   never replaced, so `stageVisibleCells` re-verifies per visible cell per frame.~~ **Done.**
+   `VerifiedPieceCache` in `resolver.hpp`, consulted and filled by `readSegment()`, with eight tests
+   in `tests/xudu/resolver.cpp`.
+
+   **Measured: 4–5x on the shape of a frame.** Sixty short reads scattered over a 1 MiB torrent at
+   this tree's 64 KiB piece size — the radius-3 BFS `stageVisibleCells` performs — land in eight
+   distinct pieces. Uncached that is 4.6–5.5 ms of SHA-1, which is most of an 8.33 ms frame on its
+   own; cached it is 0.9–1.4 ms, and what remains is reading each piece once rather than hashing it
+   sixty times. The test asserts the mechanism — each distinct piece verified exactly once, every
+   other read a hit — and prints the timing rather than asserting a ratio, because a timing
+   assertion that fails on a loaded CI machine teaches nobody anything.
+
+   **The key is sound where the one it replaced could not be.** `(info hash, piece index)` names the
+   bytes: a piece hash is a cryptographic commitment, so any bytes that verify against it *are* the
+   bytes the reference meant. The `cache.put(span, out)` this replaces was keyed by `PrimediaSpan`,
+   whose `ScrollId` is a slot index in one `Store`'s externals table — so document A's scroll 1 and
+   document B's scroll 1 collided in a process-wide LMDB that outlived them both. That key could
+   only be replaced, never repaired.
+
+   **The price is exactly the one the old comment refused to take by accident, and it is now a
+   test.** `alteredContentIsNotReturned` asserts that a reference whose local copy changed stops
+   resolving, and a cache that outlives the tampering answers from before it —
+   `aHeldPieceOutlivesTamperingUntilTheCacheIsCleared` says so out loud rather than leaving it to be
+   discovered. Two things bound it: the cache is **in memory and per-`Resolver`** rather than
+   persistent, so the window is one open document and reopening re-verifies everything; and only
+   *verified* pieces are ever stored, so a piece the reader has not already looked at is still
+   checked, which is `tamperingWithAPieceNotYetReadIsStillCaught`. A failure is deliberately not
+   cached either: a piece that does not verify today is one whose download has not finished or whose
+   copy is damaged, and both get repaired without anything here being told.
+
+   **Two details worth knowing before touching it.** The cache is bounded by *bytes* — 4 MiB, which
+   is 64 pieces at 64 KiB — rather than by piece count, because piece length varies per torrent and
+   it is the memory that needs bounding; a piece larger than the whole budget is not stored at all,
+   rather than stored and evicted before the call that stored it returns. And it is held through a
+   `shared_ptr` so that `Resolver` stays copyable with a mutex inside. Sharing is right anyway: two
+   `Resolver`s cannot disagree about what a content address means.
 
 1. **Make `UserPermascroll::read`/`readView` genuinely lock-free.** They are documented as "fast
    lock-free zero-copy" but take `std::lock_guard` on `appendMutex_`; the underlying arena's

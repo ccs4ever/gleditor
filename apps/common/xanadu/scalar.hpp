@@ -69,7 +69,7 @@ inline constexpr std::uint64_t canonicalQuietNaN = 0x7ff8000000000000ULL;
 /// A scalar ready to become a cell: what to spool, what `flags` should say, and
 /// what goes in CompactOpNode::value.
 struct ScalarValue {
-  std::string text;      ///< the shortest round-trip rendering
+  std::string text; ///< the shortest round-trip rendering
   ValueKind kind{ValueKind::None};
   std::uint64_t bits{0}; ///< canonical, per canonicalDoubleBits()
 
