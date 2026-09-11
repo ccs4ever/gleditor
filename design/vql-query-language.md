@@ -100,12 +100,12 @@ ______________________________________________________________________
 | `.`                 | Context Identity                  | The current step's context cell — a valid anchor on its own, or `render(context)` when a host value is wanted.                                                                                 |
 | `/dim`              | `LazyRankStream(dim, posward)`    | Traverses `dim`'s entire rank posward from the context cell.                                                                                                                                   |
 | `/-dim`             | `LazyRankStream(dim, negward)`    | Traverses `dim`'s entire rank negward — the `-` binds to the dimension name, not the operator.                                                                                                 |
-| `/dim%`             | Create (`link(@, dim, dir, -1)`)  | Allocates a new cell along `dim` (at the tail of any existing rank); see §4.5.                                                                                                                 |
+| `/dim%`             | Create (`link(., dim, dir, -1)`)  | Allocates a new cell along `dim` (at the tail of any existing rank); see §4.5.                                                                                                                 |
 | `/dim%VALUE`        | Create + init                     | Allocates and initializes a new cell's content to `VALUE` — bare, quoted, or `$variable`.                                                                                                      |
 | `/dim%%...`         | Batch create                      | Each additional `%` allocates one more cell along `dim`; all of them join the step's result set — see §4.5.                                                                                    |
 | `A><B`              | Clone (`link(A, d_clone, +1, B)`) | Puts `A` and `B` on one clone rank, so both read its master; chainable (`A><B><C`) and combinable with `%` — see §4.6.                                                                         |
 | `.[offset, length]` | `value(ctx, off, len)`            | A slice, answered as an ephemeral cell quoting that range of addresses — a transclusion, not a copy.                                                                                           |
-| `@`                 | Context Identity Address          | Evaluates to the numerical `cell_id` coordinate of the context node itself.                                                                                                                    |
+| ~~`@`~~             | *retired*                         | Was "the numerical `cell_id` of the context node". A cell reference *is* a `cell_id`, so this was `.` spelled twice — see §7.6.                                                                |
 | `[...]`             | Predicate / Index Window          | Applies inline boolean filters or relative index clamps to a stream.                                                                                                                           |
 | `(...)`             | Macro Dimension Group             | Groups dimensional sequences into a compound traversal segment.                                                                                                                                |
 | `*`                 | Kleene Repetition                 | Repeats the preceding macro group zero or more times until termination.                                                                                                                        |
@@ -172,7 +172,7 @@ PredicateTest          ::= PathExpression | "." | ExtendedTruthinessCheck | Func
 
 ExtendedTruthinessCheck ::= "?" ( PathExpression | ValueExpr )
 
-ValueExpr              ::= PathExpression | ScalarLiteral | VariableRef | FunctionInvocation | "@"
+ValueExpr              ::= PathExpression | ScalarLiteral | VariableRef | FunctionInvocation
 ScalarLiteral           ::= StringLiteral | NumericLiteral | BooleanLiteral
 StringLiteral           ::= '"' [^"\\]* '"'
 NumericLiteral          ::= ("-" | "+")? [0-9]+ ( "." [0-9]+ )?
@@ -195,18 +195,17 @@ A few grammar points worth calling out explicitly:
 - **`.` is a valid `AnchorNode`.** This is what lets a predicate step *into* a dimension from its
   own candidate cell — `[./d.inputs[. = $pattern]]` reads as "this candidate's `d.inputs` rank has a
   member equal to `$pattern`."
-- **A `FunctionInvocation` reached via `StepSelector` takes its context implicitly.** If its
-  `ArgumentList` doesn't already open with an explicit `@` or `.`, the context cell the step is
-  chained from is prepended as the first argument — as `@` (a cell reference) if the function's
-  first parameter expects a cell, or as `.` (the dereferenced value) if it expects a value; which
-  one a given function takes is fixed by its declared signature, not inferred per call. This is why
-  `$cell/link(d.foo, +1, $target)` means `link(@, d.foo, +1, $target)` with `@` bound to `$cell` —
-  `link` returns the cell it just linked, so the chain is just as continuable — and why
-  `$path/substring(1, 8)` and `$path/value("foo")` need no explicit context argument at all:
-  `substring` and `set` both expect a value first, so `.` is prepended instead of `@`. Mutation is
-  not a separate "statement" grammar competing with the "expression" grammar for the same syntax;
-  it's the same PathExpression machinery, evaluated for effect under `weave` instead of for value
-  under `return`.
+- **A `FunctionInvocation` reached via `StepSelector` takes its context implicitly, and there is
+  nothing left to choose.** If its `ArgumentList` does not already open with an explicit `.`, the
+  context cell is prepended as the first argument. That rule used to have a branch — prepend `@` for
+  a function whose first parameter expects a cell, `.` for one expecting a value, fixed by the
+  declared signature — and the branch is gone, because **every function's first parameter is a cell
+  now.** `value()` is cell-in and cell-out (Vortex §1), and the content wrappers over it are too. So
+  `$cell/link(d.foo, +1, $target)` means `link(., d.foo, +1, $target)`, and `$path/value("foo")` and
+  `$path/append("bar")` need no explicit context argument for the same reason rather than for a
+  different one. Mutation is not a separate "statement" grammar competing with the "expression"
+  grammar; it's the same PathExpression machinery, evaluated for effect under `weave` instead of for
+  value under `return`.
 - **`NumericLiteral` accepts a leading `+`.** Every example writes directions as `+1`/`-1` for
   visual symmetry, so the grammar accepts the `+` explicitly rather than relying on it being
   optional-and-ignored.
@@ -292,7 +291,7 @@ literal that has nothing to do with the cell model it's returning from:
 
    ```
    return
-       /d.vars%"worker_id"/d.values%$worker/@,
+       /d.vars%"worker_id"/d.values%$worker,
        /d.vars%"status"/d.values%$status_code
    ```
 
@@ -305,10 +304,10 @@ literal that has nothing to do with the cell model it's returning from:
 
 `%`, suffixed onto a `SignedDimension` step, is sugar over allocation:
 
-- **Bare (`/dim%`)**: `link(@, dim, dir, -1)`. Applied once per cell in the current context stream
+- **Bare (`/dim%`)**: `link(., dim, dir, -1)`. Applied once per cell in the current context stream
   (like any other step).
 - **Initialized (`/dim%VALUE`)**: the same allocation, immediately followed by
-  `value(@, 0, -1, VALUE)` on the newly allocated cell. `VALUE` may be a bare token
+  `value(., 0, -1, VALUE)` on the newly allocated cell. `VALUE` may be a bare token
   (`/d.status%OK`), a quoted string when it contains spaces or punctuation
   (`/d.status%"needs review"`), or a variable (`/d.status%$value`).
 - **Tail-seeking**: if the context cell already has a link along `dim` in the given direction, `%`
@@ -452,7 +451,7 @@ let $raw_header := $worker/d.vars[. = "buffer"]/d.values/.
 let $status_code := $raw_header.[9, 3]
 where $status_code = "200"
 return
-    /d.vars%"worker_id"/d.values%$worker/@,
+    /d.vars%"worker_id"/d.values%$worker,
     /d.vars%"status"/d.values%$status_code
 ```
 
@@ -474,7 +473,7 @@ let $pattern := $compiler/d.vars[. = "regex"]/d.values/.
 let $cache_root := ##/d.pinning-cursors[./d.name[. = "regex_compile"]]/d.cache
 let $hit := $cache_root/d.invocations[./d.inputs[. = $pattern]][1]
 if $hit
-  return $hit/d.outputs/@
+  return $hit/d.outputs
 else
   weave {
     let $new_inv := $cache_root/d.invocations%,
@@ -482,7 +481,7 @@ else
     let $nfa_start := $new_inv/d.outputs%"#START",
     for $ch in EXPLODE($pattern, "")
       weave $nfa_start/d.step%$ch,
-    $compiler/link(d.results, +1, $nfa_start/@)
+    $compiler/link(d.results, +1, $nfa_start)
   }
 ```
 
@@ -530,7 +529,7 @@ disconnects the retired cell for automatic garbage collection:
 
 ```
 for $old_service in ##/d.services[. = "auth_v1"]
-let $new_service := ##/d.services[. = "auth_v2"]/@
+let $new_service := ##/d.services[. = "auth_v2"]
 weave {
     for $caller in $old_service/-d.route
       weave $caller/link(d.route, +1, $new_service),
@@ -698,3 +697,29 @@ let $cap := $pin/d.vars[. = "capacity"]/d.values/.
 
 A pin that later wanted to refill itself in the background is therefore already the right kind of
 cell; it would only need linking onto `d.cursors` as well, at which point `^` *should* see it.
+
+### 7.6 `.` is the context cell, and `@` is retired
+
+`@` was "the numerical `cell_id` coordinate of the context node" and `.` was the context node
+dereferenced. That split made sense while content and structure were reached by different primitives
+returning different kinds of thing. They are not any more: `value()` is cell-in and cell-out, so a
+path step, a link, a read and a write all answer in a cell.
+
+**A cell reference *is* a `cell_id`.** So `@` and `.` denote the same thing, and `$path/@` yields
+exactly what `$path` does. It is deleted rather than kept as a synonym: two spellings for one value
+is a thing to explain forever, and the explanation would be a piece of history.
+
+**`[. = "Alice"]` still works, unchanged, and the rule moved rather than vanished.** Comparison
+between a cell and a scalar renders the cell — `=`, `!=` and the ordering operators all do this,
+once, in the operator. Previously the rendering was smuggled into `.` itself, which made `.` mean a
+cell in `[./d.inputs]` and a value in `[. = "x"]`, two things in one token depending on where it
+sat. Now `.` means a cell everywhere and **comparison is the only place a cell becomes characters**,
+which is the same boundary `render()` draws in Vortex and `materialize()` draws for a `Version`.
+
+Two consequences worth stating:
+
+- `[. = .]` compares two cells by rendered content, not by identity. Identity is `[. == .]` — or
+  simply not a question a predicate usually wants, since a path already yields the cells it matched.
+- A cell compared against a scalar is rendered through its **clone rank's master** (§4.6), so a
+  predicate over a rank of clones matches on what the members show rather than on what each
+  separately holds, which is nothing.

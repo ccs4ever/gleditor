@@ -365,6 +365,13 @@ CellValue render(cell_id c_id) {
     return matrix[find_clone_master(c_id)]->primitive_value;
 }
 
+// A negative offset clamps to 0 rather than counting from the end, and there
+// is deliberately no sentinel meaning "append": value(c, -1, 0, v) prepends.
+// A magic negative offset is exactly the pattern §5.1 is removing from link --
+// kNoLink, target == -1, target == -2 -- and reintroducing it here to save a
+// wrapper would trade a clear call site for a number you have to remember.
+// append() below computes the offset instead, which is what it is for.
+
 // Convenience Wrappers (named entry points onto link/value, not new primitives)
 std::optional<cell_id> new_cell(cell_id cell, cell_id dim, int direction) {
     return link(cell, dim, direction, -1);
@@ -377,6 +384,43 @@ std::optional<cell_id> new_cell(cell_id cell, cell_id dim, int direction,
 }
 std::optional<cell_id> break_link(cell_id cell, cell_id dim, int direction) {
     return link(cell, dim, direction, -2);
+}
+
+// Content wrappers. Each is one call onto value(), named for what it does, and
+// each returns the cell so a path carries on through it. Vortex has two
+// primitives; these are vocabulary.
+std::optional<cell_id> splice(cell_id cell, int64_t offset, int64_t length,
+                              const CellValue& v) {
+    return value(cell, offset, length, v);
+}
+
+std::optional<cell_id> insert(cell_id cell, int64_t offset,
+                              const CellValue& v) {
+    return value(cell, offset, 0, v);          // replace nothing, add v
+}
+
+std::optional<cell_id> append(cell_id cell, const CellValue& v) {
+    // The offset is computed rather than signalled. This is the wrapper that
+    // exists so value() needs no "past the end" sentinel.
+    const CellValue current = render(cell);
+    const int64_t end = std::holds_alternative<std::string>(current)
+                            ? static_cast<int64_t>(
+                                  std::get<std::string>(current).size())
+                            : 0;
+    return value(cell, end, 0, v);
+}
+
+std::optional<cell_id> erase(cell_id cell, int64_t offset, int64_t length) {
+    return value(cell, offset, length, CellValue(std::string("")));
+}
+
+// get() is not value() under another name: value(cell) is the identity, since
+// the whole content of a cell *is* the cell. get() is the projection -- it
+// leaves the manifold and hands the host language characters.
+CellValue get(cell_id cell, int64_t offset = 0, int64_t length = -1) {
+    if (offset == 0 && length < 0) return render(cell);
+    const auto slice = value(cell, offset, length);
+    return slice ? render(*slice) : CellValue(false);
 }
 
 // A dim/dir slot holds exactly one partner (§1), so passing one existing
