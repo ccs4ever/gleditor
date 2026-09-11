@@ -712,6 +712,6 @@ Editorial changes that alter no normative text bump neither component.
 
 | version | commit    | date       | change                                                                                                                                                                                                |
 | ------- | --------- | ---------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| 2.0     | `PENDING` | 2026-09-11 | §5.5: the arena is neither an in-memory store nor an in-memory permascroll — it holds addresses, not bytes. `scratchScroll` added to §8's bill, correcting 1.0's claim that `Manifold` was untouched. |
+| 2.0     | `f519ab9` | 2026-09-11 | §5.5: the arena is neither an in-memory store nor an in-memory permascroll — it holds addresses, not bytes. `scratchScroll` added to §8's bill, correcting 1.0's claim that `Manifold` was untouched. |
 | 1.1     | `88c9336` | 2026-09-11 | Named **Vlog**, and restyled as an extension rather than a front end (intro, §2). The intro's "no trail" reconciled with §5.3; U1's two consumers separated into ordinal and key.                     |
 | 1.0     | `734513a` | 2026-09-11 | Initial specification: binding as a clone link, backtracking as truncation.                                                                                                                           |
