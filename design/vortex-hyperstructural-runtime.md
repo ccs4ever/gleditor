@@ -56,15 +56,15 @@ one overloaded primitive, `link`, distinguished by whether a `target` was passed
      `std::nullopt` if there isn't one. (Formerly `get_link`.)
    - **Allocation (`target == -1`)**: Instantiates a fresh cell, wires it directly to the source
      node along the given dimension and direction, and returns its id.
-   - **Isolation (`target == -2`)**: Clears the designated directional pointer and returns the cell
+   - **Isolation (`target == 0`)**: Clears the designated directional pointer and returns the cell
      that had been linked there, or `std::nullopt` if there was nothing to clear. When all
-     dimensional links of a cell are cleared, the cell is geometrically isolated. `-2` is used
-     rather than `0` because `0` is Cell 0, the origin/home cell (the Root Set anchor described
-     under "Topological Garbage Collection" below) — an ordinary, addressable target, not a
-     sentinel. A dimension can legitimately link straight at Cell 0; only `-1` and `-2` are
-     reserved.
-   - **Literal target (any other `cell_id`, including `0`)**: Links directly to that cell and
-     returns it.
+     dimensional links of a cell are cleared, the cell is geometrically isolated. **`0` is not a
+     sentinel here; it is the absence of a cell.** Convergence R5 makes `noCell == 0` because
+     operation index 0 is state zero, the null document, and there is no operation there to be a
+     cell — so "link this at nothing" and "link this at cell zero" are the same instruction, and
+     spelling it `0` says what it means. This is what the built `Store::setLink(..., noCell)`
+     already does.
+   - **Literal target (any other `cell_id`)**: Links directly to that cell and returns it.
    - **Clone ranks (`dim == d_clone`)**: no special case whatsoever. Joining a clone rank is linking
      and leaving one is unlinking, following exactly the same read/allocate/isolate/literal-target
      branching as every other dimension. Identity sharing is the *traversal*, not something `link`
@@ -126,9 +126,8 @@ purely reachability-based:
   \sum_{\text{dim}} \left( [\text{links}[\text{dim}].\text{pos} \ne \text{nolink}] + [\text{links}[\text{dim}].\text{neg} \ne \text{nolink}] \right) = 0
   ```
 
-  the runtime immediately reclaims the cell without waiting for a full sweep cycle. `nolink` is a
-  reserved out-of-band marker distinct from every real `cell_id` (including `0`) — see §2's
-  `kNoLink` — so a link genuinely pointing at Cell 0 still counts as a live connection here.
+  the runtime immediately reclaims the cell without waiting for a full sweep cycle. `nolink` **is**
+  `0`: no cell is ever allocated there, so absence needs no marker of its own.
 
 ______________________________________________________________________
 
@@ -159,11 +158,10 @@ constexpr cell_id d_cursors = 1001; // Process scheduler manifold
 constexpr cell_id d_vars    = 1003; // Scope variable names
 constexpr cell_id d_values  = 1004; // Variable values / ground terms
 
-// Reserved out-of-band marker for "no link here", distinct from every real
-// cell_id -- including 0, Cell 0's own address. Real cells are allocated
-// starting at 1 (next_cell_id below); Cell 0 is pre-seeded as the origin, so
-// -1 is safe as a sentinel no allocated cell will ever collide with.
-constexpr cell_id kNoLink = -1;
+// Absence is zero. No cell is allocated at 0 -- real cells start at 1, and the
+// origin is a minted cell like any other (§5.1) -- so "nothing is linked here"
+// needs no out-of-band marker at all. This is convergence R5's noCell.
+constexpr cell_id kNoLink = 0;
 
 struct LinkSlot {
     cell_id first  = kNoLink;
@@ -216,10 +214,11 @@ static cell_id find_clone_master(cell_id id) {
 // The Structural Primitive: link
 // target omitted        -> read:      the linked cell, or nullopt if unlinked.
 // target == -1           -> allocate:  the newly created cell.
-// target == -2           -> isolate:   the cell that was linked there, or
+// target == 0            -> isolate:   the cell that was linked there, or
 //                                       nullopt if there was nothing to break.
-// target == any other id -> literal:   that same target (0 included -- Cell 0
-//                                       is an ordinary target, not a sentinel).
+//                                       Zero is the absence of a cell (R5), not
+//                                       a sentinel standing in for one.
+// target == any other id -> literal:   that same target.
 std::optional<cell_id> link(cell_id cell, cell_id dim, int direction,
                              std::optional<cell_id> target = std::nullopt) {
     auto it = matrix.find(cell);
@@ -255,7 +254,7 @@ internal_alloc_cell() : raw_target;
     // operations can express.
 
     // Standard Dimensional Topologies
-    if (raw_target == -2) {
+    if (raw_target == 0) {   // 0 is the absence of a cell, so this unlinks
         cell_id old_target = (direction > 0) ? c->links[dim].first :
 c->links[dim].second;
         if (old_target == kNoLink) return std::nullopt;
@@ -297,9 +296,9 @@ true;
 // a negative length names.
 //
 // This is a *coordinate*, not a sentinel, and the distinction is the one §5.1
-// is making when it deletes kNoLink and target == -1/-2 from link. Those were
-// arbitrary out-of-band markers: -1 does not mean "allocate" under any reading,
-// it was simply a number nobody else was using. -1 meaning "the last one" is
+// is making when it deletes link's remaining -1. That is an arbitrary
+// out-of-band marker: -1 does not mean "allocate" under any reading, it is
+// simply a number nobody else is using. -1 meaning "the last one" is
 // systematic, composes with every other index, and is what a reader already
 // expects here.
 //
@@ -402,7 +401,7 @@ std::optional<cell_id> new_cell(cell_id cell, cell_id dim, int direction,
     return created;
 }
 std::optional<cell_id> break_link(cell_id cell, cell_id dim, int direction) {
-    return link(cell, dim, direction, -2);
+    return link(cell, dim, direction, 0);   // link it at nothing
 }
 
 // Content wrappers. Each is one call onto value(), named for what it does, and
@@ -540,20 +539,29 @@ reference engine above is now describing a cell that will not exist.
 
 **The model survives; the encoding of it does not.** Four changes are load-bearing.
 
-### 5.1 Cell 0 is not the origin, and `kNoLink` is not needed
+### 5.1 There is no Cell 0: zero is absence, and the origin is minted
 
 `noCell == 0` (convergence R5). A `CellRef` **is** an index into the ops spool, and index 0 is the
 state-zero slot — there is no operation there to be a cell, so zero cannot name one. The origin is a
-genesis cell called `home`, at a real address; VQL's `##` resolves to it. The comment above
-`kNoLink` in §2 — "0 is Cell 0's own address" — is the thing that stops being true, and with it the
-whole reason `kNoLink` existed. Absence is `0`.
+genesis cell called `home`, at a real address; VQL's `##` resolves to it. **§2 has been corrected
+throughout: there is no Cell 0, nothing is pre-seeded at zero, and no dimension can link at it.**
 
-`target == -1` and `target == -2` also go. `CellRef` is unsigned, and the ops encoding had already
-reached the same conclusion from the other direction: `StructureVerb` distinguishes `MakeCell` from
-`SetLink` in a flags byte rather than by a sentinel in the target field. `link` stays one primitive
-with a branch on what it was asked to do; the branch is a verb rather than a magic integer. The
-single-primitive invariant is about there being one primitive, not about how its argument is
-spelled.
+`kNoLink` goes with that, and not by being renamed. Absence *is* `0`, so the marker has nothing to
+mark — `constexpr cell_id kNoLink = 0` is kept only as a name for the reader, and a link comparison
+against it is a comparison against zero.
+
+**`target == -2` goes the same way and becomes `0`.** Isolation used to need a sentinel precisely
+because zero was an addressable cell; now that it is the absence of one, "link this at nothing" and
+"link this at cell zero" are the same instruction and `link(cell, dim, dir, 0)` says so. That is
+exactly what the built `Store::setLink(..., noCell)` does, so the reference implementation and the
+implementation agree rather than being two spellings of one idea.
+
+`target == -1` is the one sentinel left, and it is still on the way out for the reason the ops
+encoding already found from the other direction: `StructureVerb` distinguishes `MakeCell` from
+`SetLink` in a flags byte rather than by a magic value in the target field. `link` stays one
+primitive with a branch on what it was asked to do; the branch wants to be a verb rather than an
+integer. The single-primitive invariant is about there being one primitive, not about how its
+argument is spelled.
 
 ### 5.2 Entanglement is deleted. Identity sharing is a `d.clone` rank
 
@@ -661,7 +669,7 @@ wants to say about itself.
 Three properties fall out, and they are why this is worth naming:
 
 - **Release is atomic.** The pin being the only inbound path means severing it makes the entire
-  island unreachable in one `link(..., -2)`. Eager eviction then does the rest — no traversal, no
+  island unreachable in one `link(..., 0)`. Eager eviction then does the rest — no traversal, no
   per-cell bookkeeping, and no partial survival.
 - **Non-persistence is enforced, not promised.** The island's cells are ephemeral (convergence R8),
   and the fold refuses a link whose target is ephemeral, so a pinned island cannot be written into

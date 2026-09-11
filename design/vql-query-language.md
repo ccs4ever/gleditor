@@ -40,19 +40,19 @@ mutations driven by the atomic engine:
 
 - **The Single-Primitive Core**: Path traversal and every mutation, update, insertion, and
   allocation compile strictly to `link(cell, dim, dir, [target])` — reading if `target` is omitted,
-  and otherwise writing: `target == -1` allocates, `target == -2` deallocates/isolates, and any
-  other value (including a literal `0`) links straight to that cell, since `0` is Cell 0, the
-  origin/home cell — an ordinary addressable target, not a sentinel. `link` returns the
-  linked/allocated/broken cell, or nothing if there wasn't one; VQL treats an empty result the same
-  way any other step that "returns nothing" is treated (§3).
+  and otherwise writing: `target == -1` allocates, `target == 0` isolates — **`0` is the absence of
+  a cell, not a sentinel standing in for one (R5), so "link this at nothing" and "link this at cell
+  zero" are the same instruction** — and any other value links straight to that cell. `link` returns
+  the linked/allocated/broken cell, or nothing if there wasn't one; VQL treats an empty result the
+  same way any other step that "returns nothing" is treated (§3).
   `value(cell, [offset], [length], [replacement])` is the matching content primitive — one call for
   both directions, answering in a `cell_id` either way, so a write composes in a path like anything
   else — see Vortex §2's `get_cell_value`/`set_cell_value`, renamed here to match how they're
   spelled in every VQL surface form. Vortex §2 also defines
   `new(cell, dim, dir, [value])`/`break(cell, dim, dir)` as named entry points fixing `link`'s
-  `target` to `-1`/`-2` respectively (`new`'s optional `value` is a `value()` applied to the freshly
+  `target` to `-1`/`0` respectively (`new`'s optional `value` is a `value()` applied to the freshly
   allocated cell); VQL reaches all three the same way — as ordinary `FunctionInvocation`s (§3) — so
-  `$cell/break(d.foo, +1)` and `$cell/link(d.foo, +1, -2)` compile to the same call.
+  `$cell/break(d.foo, +1)` and `$cell/link(d.foo, +1, 0)` compile to the same call.
 - **Dual-Wing Invocation Topology**: Built-in functions, custom routines, and opcodes adhere to the
   dual-wing interface. Out-parameters project negward along `-d.grab` (chained posward along
   `+d.step` for multiple returns). In-parameters project posward along `+d.grab` and chain along
@@ -93,7 +93,7 @@ ______________________________________________________________________
 
 | Token / Operator    | Structural Equivalent             | Functional & Spatial Semantic Mapping                                                                                                                                                          |
 | ------------------- | --------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `##`                | Origin Anchor (`home`)            | Grounds query context to the absolute system environment origin. Not literal cell 0, which means *no cell* -- see §7.2.                                                                        |
+| `##`                | Origin Anchor (`home`)            | Grounds query context to the system origin: a minted genesis cell. Never `0`, which is the absence of a cell -- see §7.2.                                                                      |
 | `#`                 | Root Metacells                    | Lazily streams all disjoint root manifold entry points across the matrix.                                                                                                                      |
 | `^`                 | Process Manifold (`d.cursors`)    | Streams all active Spin-Head execution cursor threads. Never a pinning cursor -- those are on their own Root Set rank, `d.pinning-cursors` (§7.5).                                             |
 | `^NAME`             | `^[./d.name[. = "NAME"]]`         | Short-circuits the cursor scan, locking directly onto the named thread node. A cursor is named by a cell on its `d.name` rank rather than by its own content -- §6.1 spells the long form out. |
@@ -239,8 +239,9 @@ while (true) {
 }
 ```
 
-`start_node` itself may legitimately be Cell 0 (`##`, §2) — the loop terminates purely on `link`'s
-read form returning nothing, never on a `cell_id` value, so nothing here special-cases 0.
+`start_node` is an ordinary cell — `##` resolves to the minted `home` cell, never to zero (§7.2) —
+and the loop terminates purely on `link`'s read form returning nothing rather than on a `cell_id`
+value, so nothing here has to special-case anything.
 
 - **Index Clamping (`[n]`)**: Evaluated lazily with 1-based indexing.
   - `[1]`: Short-circuits traversal on the first matching cell, avoiding unnecessary traversals over
@@ -459,7 +460,7 @@ graph TD
 
     Root -->|"link(..., read)" traversal| Reach
     Root -->|"d.pinning-cursors"| Pinned
-    Reach -->|"link(..., -2) severs a link"| Unreach
+    Reach -->|"link(..., 0) severs a link"| Unreach
     Pinned -->|"break the pin"| Unreach
     Unreach --> GC
 ```
@@ -561,8 +562,8 @@ ever held the old value. And because that link is an ordinary operation in hyper
 behind it restores the previous default for the whole population at once.
 
 A user who later sets their own theme leaves the rank with `$new_user/d.theme/break(d_clone, +1)` —
-`link(..., -2)` under the hood (§1), not a different "unclone" primitive — and keeps whatever
-content is its own.
+`link(..., 0)` under the hood (§1), not a different "unclone" primitive — and keeps whatever content
+is its own.
 
 ### 6.4 In-Place Graph Rewriting & Edge Re-Targeting
 
@@ -625,12 +626,14 @@ named `home`.
 
 `##` therefore keeps working exactly as §2 describes, because it was always a token rather than a
 number. Two smaller things change: `LiteralCellId` may not be written as `0`, and §4.1's remark that
-"a rank can freely pass through Cell 0 without truncating early" needs no defending any more —
+"a rank can freely pass through cell zero without truncating early" needs no defending any more —
 absence and zero are the same value again, and the loop still terminates on `link`'s read form
 returning nothing rather than on an id.
 
-`link`'s `-1`/`-2` sentinels go the same way (Vortex §5.1): `CellRef` is unsigned, so allocate and
-isolate become verbs. `new(...)`/`break(...)` (§1) were already the spellings this language
+**`link`'s isolate sentinel is now simply `0`.** It needed a sentinel only because zero was an
+addressable cell; it is not one, so `break(...)` compiles to `link(., dim, dir, 0)` and means what
+it reads as. `link`'s remaining `-1` goes the same way (Vortex §5.1): `CellRef` is unsigned, so
+allocate becomes a verb. `new(...)`/`break(...)` (§1) were already the spellings this language
 preferred; they stop being sugar over a magic target and become the primary forms, with
 `link(dim, dir, target)` reserved for the literal-target case.
 
