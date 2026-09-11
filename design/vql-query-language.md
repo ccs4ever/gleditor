@@ -1,6 +1,6 @@
 # Vortex Query Language (VQL) Specification
 
-**Document Version:** 12.0 — Placement, Yield and Clone Ranks **Compilation Target:** Vortex
+**Document Version:** 12.1 — Placement, Yield and Clone Ranks **Compilation Target:** Vortex
 Hyperstructural Runtime Core (Single-Primitive Matrix Manifold)
 
 VQL is the declarative, XQuery-like companion language for
@@ -23,6 +23,37 @@ block, since a query and an edit are the same kind of walk over the same primiti
 > §1's invariants.
 
 ______________________________________________________________________
+
+## Contents
+
+- [1. Architectural Foundations & Operational Invariants](#1-architectural-foundations--operational-invariants)
+  - [Fundamental Invariants](#fundamental-invariants)
+- [2. Syntactic Token & Structural Shorthand Matrix](#2-syntactic-token--structural-shorthand-matrix)
+- [3. Formal EBNF Grammar](#3-formal-ebnf-grammar)
+- [4. Evaluation Semantics & Compilation Rules](#4-evaluation-semantics--compilation-rules)
+  - [4.1 Lazy Rank-Streaming Engine](#41-lazy-rank-streaming-engine)
+  - [4.2 Slicing Semantics](#42-slicing-semantics)
+  - [4.3 Extended Truthiness Rules](#43-extended-truthiness-rules)
+    - [The quantifier that form hides, and the three that name it](#the-quantifier-that-form-hides-and-the-three-that-name-it)
+  - [4.4 Result Materialization: Topological Return Weaving](#44-result-materialization-topological-return-weaving)
+  - [4.5 Cell Creation Sugar (`%`)](#45-cell-creation-sugar-)
+  - [4.6 Clone Sugar (`><`)](#46-clone-sugar-)
+  - [4.7 Existing-Target Fan-Out](#47-existing-target-fan-out)
+    - [Which cell the first attachment gets, and why it stopped being obvious](#which-cell-the-first-attachment-gets-and-why-it-stopped-being-obvious)
+- [5. Memory Management & Topological Garbage Collection](#5-memory-management--topological-garbage-collection)
+- [6. Canonical Production Query Examples](#6-canonical-production-query-examples)
+  - [6.1 Deep Structural Navigation with Zero-Copy Slice](#61-deep-structural-navigation-with-zero-copy-slice)
+  - [6.2 Topological Regex Compilation with Star-Pivot Caching](#62-topological-regex-compilation-with-star-pivot-caching)
+  - [6.3 Shared Identity via a Clone Rank](#63-shared-identity-via-a-clone-rank)
+  - [6.4 In-Place Graph Rewriting & Edge Re-Targeting](#64-in-place-graph-rewriting--edge-re-targeting)
+- [7. Reconciliation with the Unified Store/Slice](#7-reconciliation-with-the-unified-storeslice)
+  - [7.1 Two regimes, and a query can be in either](#71-two-regimes-and-a-query-can-be-in-either)
+  - [7.2 `##` is the origin cell, but the origin is not cell zero](#72--is-the-origin-cell-but-the-origin-is-not-cell-zero)
+  - [7.3 `><` links along `d.clone`, and the master is the leftmost operand](#73--links-along-dclone-and-the-master-is-the-leftmost-operand)
+  - [7.4 `value(replacement, offset, length)` is one operation on a persistent cell](#74-valuereplacement-offset-length-is-one-operation-on-a-persistent-cell)
+  - [7.5 `d.cache` is a pinned island](#75-dcache-is-a-pinned-island)
+  - [7.6 `.` is the context cell, and `@` is retired](#76--is-the-context-cell-and--is-retired)
+- [Appendix: Versioning and Change History](#appendix-versioning-and-change-history)
 
 ## 1. Architectural Foundations & Operational Invariants
 
@@ -148,7 +179,7 @@ LiteralCellId          ::= [0-9]+
 
 PathStep               ::= "/" StepSelector PredicateClause* RangeClamp? Yield?
 StepSelector           ::= SignedDimension CreateSuffix? | MacroDimensionGroup | FunctionInvocation
-SignedDimension        ::= "-"? DimensionIdentifier Placement?
+SignedDimension        ::= ( "+" | "-" )? DimensionIdentifier Placement?
 Placement              ::= "::" ( "from" | "rank" | "head" | "tail" )
 Yield                  ::= "!" ( "new" | "last" | "both" | "keep" )?
                                    (* what the step hands on; bare "!" is "!keep" *)
@@ -197,11 +228,14 @@ A few grammar points worth calling out explicitly:
   alternative), applied per cell in `$path`'s stream and terminating to an empty set wherever `func`
   returns nothing — the same map-and-terminate behavior every other `PathStep` already has, so there
   is no separate pipe-forward operator layered on top of it.
+
 - **Direction lives on `SignedDimension`'s optional leading `-`.** `/-d.parent` traverses `d.parent`
   negward; there is no second traversal operator for it.
+
 - **`.` is a valid `AnchorNode`.** This is what lets a predicate step *into* a dimension from its
   own candidate cell — `[./d.inputs[. = $pattern]]` reads as "this candidate's `d.inputs` rank has a
   member equal to `$pattern`."
+
 - **A `FunctionInvocation` reached via `StepSelector` takes its context implicitly, and there is
   nothing left to choose.** If its `ArgumentList` does not already open with an explicit `.`, the
   context cell is prepended as the first argument. That rule used to have a branch — prepend `@` for
@@ -213,9 +247,19 @@ A few grammar points worth calling out explicitly:
   different one. Mutation is not a separate "statement" grammar competing with the "expression"
   grammar; it's the same PathExpression machinery, evaluated for effect under `weave` instead of for
   value under `return`.
-- **`NumericLiteral` accepts a leading `+`.** Every example writes directions as `+1`/`-1` for
-  visual symmetry, so the grammar accepts the `+` explicitly rather than relying on it being
-  optional-and-ignored.
+
+- **A leading `+` is accepted wherever a direction is written, and means what its absence means.**
+  `NumericLiteral` takes one, because every example writes directions as `+1`/`-1` for visual
+  symmetry and the grammar should accept what the examples show rather than rely on it being
+  optional-and-ignored. `SignedDimension` takes one for the same reason: `+d.name` is `d.name`, and
+  writing it says *posward* out loud where a bare `d.name` leaves the reader to remember that the
+  unmarked direction is the positive one.
+
+  This matters most where a path mixes directions — `$c/+d.doc/-d.clone::head` reads as two moves
+  with two directions, where `$c/d.doc/-d.clone::head` reads as one move and one direction, and the
+  asymmetry is in the notation rather than in the query. The `+` is never required, and nothing that
+  omits it changes meaning.
+
 - **`><` is a suffix on `PathExpression`, not a `PathStep`.** `CloneTail` binds after all
   `PathStep`s have run, so `$a><$b` clones the *results* of `$a` and `$b`'s full paths, not an
   intermediate cell partway through either one. See §4.6 for the creation-combining forms

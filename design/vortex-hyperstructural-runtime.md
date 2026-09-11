@@ -34,6 +34,23 @@ primitive they share. It also replaces every ASCII-art diagram with Mermaid, mat
 
 ______________________________________________________________________
 
+## Contents
+
+- [1. Architectural Foundation & Design Invariants](#1-architectural-foundation--design-invariants)
+  - [The Single-Primitive Invariant](#the-single-primitive-invariant)
+  - [Topological Garbage Collection](#topological-garbage-collection)
+- [2. Core C++ Runtime Engine Reference Implementation](#2-core-c-runtime-engine-reference-implementation)
+- [3. The Dual-Wing Calling Convention & Spatial Parameter Binding](#3-the-dual-wing-calling-convention--spatial-parameter-binding)
+- [4. Cursor Associative Scopes: `d.vars` and `d.values`](#4-cursor-associative-scopes-dvars-and-dvalues)
+- [5. Reconciliation with the Unified Store/Slice](#5-reconciliation-with-the-unified-storeslice)
+  - [5.1 There is no Cell 0: zero is absence, and the origin is minted](#51-there-is-no-cell-0-zero-is-absence-and-the-origin-is-minted)
+  - [5.2 Entanglement is deleted. Identity sharing is a `d.clone` rank](#52-entanglement-is-deleted-identity-sharing-is-a-dclone-rank)
+  - [5.3 `value()`'s write branch is one operation on a persistent cell](#53-values-write-branch-is-one-operation-on-a-persistent-cell)
+  - [5.4 The links map becomes a compacting CSR run](#54-the-links-map-becomes-a-compacting-csr-run)
+  - [5.5 What this buys the runtime, unasked](#55-what-this-buys-the-runtime-unasked)
+  - [5.6 Pinning: a cursor is how a subgraph outlives the query that built it](#56-pinning-a-cursor-is-how-a-subgraph-outlives-the-query-that-built-it)
+- [Appendix: Versioning and Change History](#appendix-versioning-and-change-history)
+
 ## 1. Architectural Foundation & Design Invariants
 
 The Vortex architecture eliminates traditional runtime constructs — linear memory heaps,
