@@ -1880,6 +1880,17 @@ genuinely regresses against the enfilade.
 > the flat-array-on-`d.doc`-only concession holds. If any query is not, every rank needs an
 > order-statistic index — which is the enfilade, rebuilt, and a real cost the convergence must own.
 
+**Two specified languages now want this, from opposite directions, and neither is a scrollbar.**
+[VPL](vpl-array-language.md) §5 is an array language, where `A[5000]` is not a gesture a user makes
+but an ordinary subexpression, and `A[⍋A]` — index-of-sorted — is a permutation applied by
+subscript. [unification-and-backtracking.md](vortex-unification-and-backtracking.md) §6.3 is
+first-argument clause indexing, which wants a key rather than an ordinal but breaks on the same
+fact: a rank answers successor and predecessor and nothing else. Both propose the same mitigation,
+an index in a pinned ephemeral island (R8), and both are honest that it is a mitigation. The
+experiment above measures whether the *editor* needs an order-statistic index; these two say that a
+*language* over the manifold does, which is a different claim and is not settled by instrumenting
+`apps/zigzag`.
+
 **U2. The op rate of a real Vortex program.** Neither
 [`vortex-hyperstructural-runtime.md`](vortex-hyperstructural-runtime.md) nor
 [`vql-query-language.md`](vql-query-language.md) states one, so the arena size, the promotion budget

@@ -1,6 +1,6 @@
 # Vortex Hyperstructural Runtime & zzstructure System Specification
 
-**Document Version:** 10.0 — Clone Ranks and the `value` Primitive **Target Environment:**
+**Document Version:** 10.1 — Clone Ranks and the `value` Primitive **Target Environment:**
 Zero-Allocation Multidimensional Graph Manifolds & Logic Engine
 
 Vortex is a speculative language and runtime design: a programming model whose entire addressable
@@ -14,6 +14,11 @@ onto it are specified: [VQL](vql-query-language.md), an XQuery-shaped query lang
 [VPL](vpl-array-language.md), an APL whose axes are dimensions. It is recorded here because it is a
 design consumer of the same manifold invariants `apps/zigzag` and `apps/xudu` already enforce, and
 any future implementation should stay consistent with them.
+
+[unification-and-backtracking.md](vortex-unification-and-backtracking.md) is not a third front end
+but an elaboration of *this* document's own deferred idea: resolution as a program over `link` and
+`value`, where a variable binding is a `d.clone` link and a choice point is a microversion. It is
+kept separate because it asks the C++ core for something (§8 there), which neither front end does.
 
 This revision renames the payload accessors `get_cell_value`/`set_cell_value` to `get`/`set` — VQL
 (the companion query language, see [vql-query-language.md](vql-query-language.md)) spells them that
@@ -751,3 +756,4 @@ table.
 | 8.0     | `ae4e800` | 2026-09-11 | **Negative offsets count from the end** rather than clamping to zero; `resolve_range` derives both ends.                                      |
 | 9.0     | `69ad10d` | 2026-09-11 | **There is no Cell 0.** Zero is the absence of a cell, so `kNoLink` has nothing to mark and the break sentinel `-2` becomes `0`.              |
 | 10.0    | `a03ddcc` | 2026-09-11 | **`clone_generator` never hands out the master**; every pull is a fresh clone.                                                                |
+| 10.1    | `2e07830` | 2026-09-11 | Unification and backtracking split into their own note; the deferred idea elaborated, asking the core for two methods.                        |
