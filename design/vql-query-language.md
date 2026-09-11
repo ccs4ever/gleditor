@@ -146,11 +146,12 @@ NamedCursor            ::= "^" [a-zA-Z_][a-zA-Z0-9_]*
 VariableRef            ::= "$" [a-zA-Z_][a-zA-Z0-9_]*
 LiteralCellId          ::= [0-9]+
 
-PathStep               ::= "/" StepSelector PredicateClause* RangeClamp? Retain?
+PathStep               ::= "/" StepSelector PredicateClause* RangeClamp? Yield?
 StepSelector           ::= SignedDimension CreateSuffix? | MacroDimensionGroup | FunctionInvocation
 SignedDimension        ::= "-"? DimensionIdentifier Placement?
 Placement              ::= "::" ( "from" | "rank" | "head" | "tail" )
-Retain                 ::= "!"      (* the step yields its context, not its result *)
+Yield                  ::= "!" ( "new" | "last" | "both" | "keep" )?
+                                   (* what the step hands on; bare "!" is "!keep" *)
 CreateSuffix           ::= ( "%" CreateValue? )+
 CreateValue            ::= ValueExpr | BareLiteral
 BareLiteral            ::= (run of characters excluding whitespace, "%", ",", "(", ")", "[", "]", "{", "}")
@@ -414,31 +415,50 @@ literal that has nothing to do with the cell model it's returning from:
   They select a stream, and "insert at a stream" names no position — `::from%` would have to mean
   the end of the walk, which is `::tail` said obscurely.
 
-- **Retention (`!`), which is a different axis from placement.** `::tail` and `::head` move the
-  context to the cell they just made, which is what makes `%foo%bar` chain — create `foo`, move to
-  it, create `bar`. That following behaviour is worth keeping and stays the default. A step suffixed
-  with `!` **yields the context it was given instead of what it produced**, so the path carries on
-  from where it was:
+- **Yield (`!new`, `!last`, `!both`, `!keep`), which is a different axis from placement.** Placement
+  asks *which cells on the rank does this step act on*; yield asks *what does the step hand to the
+  step after it*. A create has four useful answers and they are all reachable:
+
+  | yield            | the step yields                                 |
+  | ---------------- | ----------------------------------------------- |
+  | `!new` (default) | every cell this step created                    |
+  | `!last`          | only the most recently created cell             |
+  | `!both`          | the context cells **and** the created cells     |
+  | `!keep` (`!`)    | the context cells only — the path does not move |
 
   ```
-  $page/d.children%"Alice"/d.status%"active"     # status lands on Alice
-  $page/d.children%"Alice"!/d.status%"active"    # status lands on $page
+  $page/d.children%"Alice"/d.status%"active"       # status lands on Alice
+  $page/d.children%"Alice"!/d.status%"active"      # status lands on $page
+  $page/d.children%"A"%"B"!both/d.tag%"x"          # $page, A and B all get a d.tag
+  $page/d.children%"A"%"B"!last/d.next%"C"         # only B gets d.next
   ```
 
-  **This was first proposed as `::fixed`, and it does not belong in that family.** `::from`,
-  `::rank`, `::head` and `::tail` all answer one question — *which cells on the rank does this step
-  act on?* — and each is meaningful whether or not a `%` follows. "Don't move the cursor" answers a
-  different question, *what does this step yield?*, and is meaningful only where something was
-  produced to yield. Putting it in the placement family would have made `::` mean two kinds of thing
-  chosen by whether a `%` happened to appear later in the step — which is the shape of the very
-  ambiguity placements were introduced to retire, reintroduced one level up.
+  **`!new` and `!last` differ only when a step creates more than one cell** — through batching
+  (`%"A"%"B"`) or through fanning out over a multi-cell context — which is why they are easy to
+  conflate. For the single-create case every query writes, they are the same thing.
 
-  So it is a suffix on the **step**, sitting where a `RangeClamp` sits and applying after everything
-  else the step did, because what a step yields is the last question about it. It composes with any
-  placement — `/d.clone::head%"override"!` mints a new master and leaves the path on the cell that
-  had one — and with non-create steps, where it is a no-op that reads as an assertion: a read
-  already yields its result, so `!` on one says "walk here but keep my place", which is either what
-  you meant or a sign the step should not have been written.
+  **`!new` is the default because it is what the language already does**, and that is worth stating
+  precisely rather than assumed: §4.5's batching rule says the step's result is "the set of every
+  cell it just created, **not only the last one**", so `/d.child%"Alice"%"Bob"/d.status%"active"`
+  gives *both* new cells a status. Making `!last` the default would silently change what every
+  existing batching query means.
+
+  **This axis was first proposed as `::fixed`, a fifth placement, and it does not belong there.**
+  `::from`, `::rank`, `::head` and `::tail` all answer the placement question, and each means
+  something whether or not a `%` follows. Yield means nothing without something produced to yield.
+  Putting it under `::` would have made that operator mean two kinds of thing chosen by whether a
+  `%` appeared later in the step — the shape of the ambiguity placements were introduced to retire,
+  reintroduced one level up. And it would have hidden that there are *four* answers, not two: a
+  single `::fixed` flag can only say "don't follow", leaving `!both` and `!last` unspellable.
+
+  The suffix sits on the **step**, where a `RangeClamp` sits, applying after everything else the
+  step did — because what a step yields is the last question about it. It composes with any
+  placement: `/d.clone::head%"override"!` mints a new master and leaves the path on the cell that
+  had one.
+
+  On a read step only `!keep` means anything, since nothing was created: it reads as "walk here but
+  keep my place", which is either what was meant or a sign the step should not have been written.
+  Bare `!` is sugar for `!keep` because that is the one worth having a short spelling for.
 
   Considered and rejected: `%!VALUE`, which attaches to the create rather than to the step and reads
   as though it modified the *value*; and `::stay`, which keeps the word but leaves `::` meaning two
@@ -453,12 +473,13 @@ literal that has nothing to do with the cell model it's returning from:
   new cell along the same dimension, at the step's placement, so under the default it lands after
   the one just created — rather than re-describing the same cell. `/d.child%%` creates two empty
   cells on `d.child`; `/d.child%"Alice"%"Bob"` creates two, each initialized in order. The step's
-  result is the set of every cell it just created, not only the last one, so a later step in the
-  same path fans out over all of them: `/d.child%"Alice"%"Bob"/d.status%"active"` gives *both* new
-  cells their own `d.status` child, the same way a later step already fans out over any other
-  multi-cell result (like a plain `/dim` rank). A `for` loop calling `/dim%$value` once per
-  iteration (§6.2) reaches the same "many new siblings" outcome for a runtime-determined count; `%%`
-  is for a compile-time-known one.
+  result is the set of every cell it just created, not only the last one — that is `!new`, the
+  default yield above — so a later step fans out over all of them:
+  `/d.child%"Alice"%"Bob"/d.status%"active"` gives *both* new cells their own `d.status` child, the
+  same way a later step already fans out over any other multi-cell result (like a plain `/dim`
+  rank). This is the one place `!new` and `!last` come apart. A `for` loop calling `/dim%$value`
+  once per iteration (§6.2) reaches the same "many new siblings" outcome for a runtime-determined
+  count; `%%` is for a compile-time-known one.
 
 - **Existing targets don't go through `%`.** Pointing a dimension at a cell that already exists — as
   opposed to allocating a new one — is `link(dim, dir, target)` directly, reachable as an ordinary
