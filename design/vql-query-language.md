@@ -1,12 +1,12 @@
 # Vortex Query Language (VQL) Specification
 
-**Document Version:** 5.0.0 — Xanalogical Revision **Compilation Target:** Vortex Hyperstructural
-Runtime Core (Single-Primitive Matrix Manifold)
+**Document Version:** 12.0 — Placement, Yield and Clone Ranks **Compilation Target:** Vortex
+Hyperstructural Runtime Core (Single-Primitive Matrix Manifold)
 
 VQL is the declarative, XQuery-like companion language for
 [Vortex](vortex-hyperstructural-runtime.md): every VQL query compiles down to the same
-`link`/`get`/`set` primitives that make up Vortex's single-primitive core. As with the Vortex spec,
-this document specifies a language design consuming the Zigzag `zzstructure` manifold model (see
+`link`/`value` primitives that make up Vortex's two-primitive core. As with the Vortex spec, this
+document specifies a language design consuming the Zigzag `zzstructure` manifold model (see
 [zigzag-multidimensional-space-and-projection.md](zigzag-multidimensional-space-and-projection.md));
 nothing here is wired into the gleditor build.
 
@@ -912,3 +912,45 @@ Two consequences worth stating:
 - A cell compared against a scalar is rendered through its **clone rank's master** (§4.6), so a
   predicate over a rank of clones matches on what the members show rather than on what each
   separately holds, which is nothing.
+
+______________________________________________________________________
+
+## Appendix: Versioning and Change History
+
+**The version means something from here on.** It had not: both this document and its companion sat
+at "5.0.0 — Xanalogical Revision" through a dozen changes that moved primitives and retired
+operators, because nobody was bumping it. The history below is reconstituted from the commits that
+actually changed this file, so the numbering is a record rather than a decoration.
+
+The rule, two components:
+
+- **Major** — a change a conforming implementation could not ignore: a primitive gains, loses or
+  changes meaning; an operator is retired; a default changes what an existing program does.
+- **Minor** — everything else that is still a change to the specification: an addition that breaks
+  nothing, a refinement, a clarification, a correction to prose in a normative section, punctuation.
+
+Editorial changes that alter no normative text do not bump either component; they are not in the
+table.
+
+| version | commit    | date       | change                                                                                                                        |
+| ------- | --------- | ---------- | ----------------------------------------------------------------------------------------------------------------------------- |
+| 1.0     | `846c0ed` | 2026-09-09 | Initial specification: paths, predicates, and the compilation target.                                                         |
+| 2.0     | `bd9b58b` | 2026-09-09 | Reworked around `%`, `weave`, and a real zzstructure `Cell`.                                                                  |
+| 3.0     | `a7d36d8` | 2026-09-09 | `\\` traversal replaced; `%` batches; `fuse` renamed `entangle`.                                                              |
+| 4.0     | `bca523d` | 2026-09-09 | Compilation retargeted onto the single `link` primitive.                                                                      |
+| 4.1     | `a6fffe4` | 2026-09-09 | §4.7 existing-target fan-out, drawing partners from a generator.                                                              |
+| 4.2     | `22b4aec` | 2026-09-09 | The generator's first pull returns the target itself.                                                                         |
+| 4.3     | `c8864ee` | 2026-09-10 | Checked against the convergence's measured cell layout.                                                                       |
+| 5.0     | `88524a9` | 2026-09-10 | V1–V4 accepted; `d.cache` pinned to a cursor rather than hung off the origin.                                                 |
+| 5.1     | `3d1cb53` | 2026-09-10 | `d.pinning-cursors` given its own Root Set rank.                                                                              |
+| 5.2     | `05c79d9` | 2026-09-10 | A pin is named on `d.name`.                                                                                                   |
+| 6.0     | `563c93a` | 2026-09-11 | **`d.entangle` deleted.** `><` links along `d.clone`; `EntangleTail` becomes `CloneTail`; the master is the leftmost operand. |
+| 7.0     | `4720419` | 2026-09-11 | **Compilation retargeted onto `value()`**; §7.4 corrected — a splice is one operation, not two.                               |
+| 8.0     | `8f7d4bd` | 2026-09-11 | **`@` retired.** `.` is the context cell everywhere; comparison renders it; the implicit-context rule loses its branch.       |
+| 8.1     | `ae4e800` | 2026-09-11 | `any()`/`all()`/`none()` added; negative index windows stated as counting from the end.                                       |
+| 9.0     | `69ad10d` | 2026-09-11 | **The break sentinel is `0`**, and `LiteralCellId` may not be written as `0`.                                                 |
+| 10.0    | `072b394` | 2026-09-11 | **`::` placement added**, retiring `dim`'s two meanings; `[-1]` is the last *match*, not the rank's tail.                     |
+| 10.1    | `b92bbe3` | 2026-09-11 | `::from` and `::rank` added; the read and create defaults named.                                                              |
+| 11.0    | `715c525` | 2026-09-11 | **`::fixed` removed from the placement family**, becoming a step suffix.                                                      |
+| 11.1    | `ae9362f` | 2026-09-11 | The yield axis given four values — `!new`, `!last`, `!both`, `!keep` — with bare `!` as `!keep`.                              |
+| 12.0    | `a03ddcc` | 2026-09-11 | **The fan-out generator never hands out the master**; every attachment is a fresh clone.                                      |

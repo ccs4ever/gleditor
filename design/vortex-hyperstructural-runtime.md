@@ -1,7 +1,7 @@
 # Vortex Hyperstructural Runtime & zzstructure System Specification
 
-**Document Version:** 5.0.0 — Xanalogical Revision **Target Environment:** Zero-Allocation
-Multidimensional Graph Manifolds & Logic Engine
+**Document Version:** 10.0 — Clone Ranks and the `value` Primitive **Target Environment:**
+Zero-Allocation Multidimensional Graph Manifolds & Logic Engine
 
 Vortex is a speculative language and runtime design: a programming model whose entire addressable
 state is a Zigzag `zzstructure` manifold (the same `d.1`/`d.2`/`d.clone`-style cell-and-dimension
@@ -694,3 +694,41 @@ And one thing gets harder: `constexpr cell_id d_grab = 1` and its neighbours can
 a dimension is a minted cell rather than a chosen number. The genesis sequence mints the system
 dimensions off `home` in a fixed order, so their addresses are deterministic without being magic
 constants, and code reaches them through named accessors.
+
+______________________________________________________________________
+
+## Appendix: Versioning and Change History
+
+**The version means something from here on.** It had not: both this document and its companion sat
+at "5.0.0 — Xanalogical Revision" through a dozen changes that moved primitives and retired
+operators, because nobody was bumping it. The history below is reconstituted from the commits that
+actually changed this file, so the numbering is a record rather than a decoration.
+
+The rule, two components:
+
+- **Major** — a change a conforming implementation could not ignore: a primitive gains, loses or
+  changes meaning; an operator is retired; a default changes what an existing program does.
+- **Minor** — everything else that is still a change to the specification: an addition that breaks
+  nothing, a refinement, a clarification, a correction to prose in a normative section, punctuation.
+
+Editorial changes that alter no normative text do not bump either component; they are not in the
+table.
+
+| version | commit    | date       | change                                                                                                                                        |
+| ------- | --------- | ---------- | --------------------------------------------------------------------------------------------------------------------------------------------- |
+| 1.0     | `846c0ed` | 2026-09-09 | Initial specification: the manifold-as-state model, the reference engine, and the dimension set.                                              |
+| 2.0     | `bd9b58b` | 2026-09-09 | Reworked around a real zzstructure `Cell`; `%` and `weave` become the creation vocabulary.                                                    |
+| 3.0     | `a7d36d8` | 2026-09-09 | `\\` traversal replaced; `%` batches; `fuse` renamed `entangle`.                                                                              |
+| 4.0     | `bca523d` | 2026-09-09 | `get_link`/`set_link` consolidated into the single `link` primitive branching on its target.                                                  |
+| 4.1     | `a6fffe4` | 2026-09-09 | `entangle_generator` added, for fanning one existing target out over a multi-cell context.                                                    |
+| 4.2     | `22b4aec` | 2026-09-09 | The generator's first pull returns the source itself, so a one-cell context needs no special case.                                            |
+| 4.3     | `c8864ee` | 2026-09-10 | §2's cell layout checked against the convergence's measured one; reconciliation material added.                                               |
+| 5.0     | `88524a9` | 2026-09-10 | V1–V4 accepted: `noCell == 0`, the CSR arena, `set`'s persistence; `d.cache` pinned to a cursor.                                              |
+| 5.1     | `3d1cb53` | 2026-09-10 | Pins get their own Root Set rank, `d.pinning-cursors`.                                                                                        |
+| 5.2     | `05c79d9` | 2026-09-10 | A pin is named on `d.name`, like every other cursor.                                                                                          |
+| 6.0     | `563c93a` | 2026-09-11 | **Entanglement deleted.** `entangled_payload` and the shared-pointer model go; identity sharing is `d.clone` rank traversal through a master. |
+| 7.0     | `4720419` | 2026-09-11 | **`get`/`set` become one `value()` primitive**, cell-in and cell-out, so a write composes in a path; `render()` is the projection.            |
+| 7.1     | `8f7d4bd` | 2026-09-11 | Content wrappers over `value()`: `splice`, `insert`, `append`, `erase`, `get`.                                                                |
+| 8.0     | `ae4e800` | 2026-09-11 | **Negative offsets count from the end** rather than clamping to zero; `resolve_range` derives both ends.                                      |
+| 9.0     | `69ad10d` | 2026-09-11 | **There is no Cell 0.** Zero is the absence of a cell, so `kNoLink` has nothing to mark and the break sentinel `-2` becomes `0`.              |
+| 10.0    | `a03ddcc` | 2026-09-11 | **`clone_generator` never hands out the master**; every pull is a fresh clone.                                                                |
