@@ -148,6 +148,112 @@ CellRef freshenTerm(VortexStdLib &stdlib, VortexCore &core, CellRef term,
   return freshTerm;
 }
 
+bool evalArithmetic(const VortexStdLib &stdlib, const VortexCore &core,
+                    CellRef term, double &outVal, bool &outIsInt) {
+  CellRef cur = stdlib.deref(term);
+  if (cur == noCell || stdlib.isVar(cur)) {
+    return false;
+  }
+  const auto kind = core.arena().valueKindOf(cur);
+  if (kind == xanadu::ValueKind::Int64) {
+    if (auto v = core.arena().asInt64(cur)) {
+      outVal   = static_cast<double>(*v);
+      outIsInt = true;
+      return true;
+    }
+  } else if (kind == xanadu::ValueKind::Double) {
+    if (auto v = core.arena().asDouble(cur)) {
+      outVal   = *v;
+      outIsInt = false;
+      return true;
+    }
+  }
+
+  std::string fn = stdlib.functorOf(cur);
+  auto args      = stdlib.argumentsOf(cur);
+
+  if (fn == "-" && args.size() == 1) {
+    double v = 0.0;
+    bool isI = false;
+    if (evalArithmetic(stdlib, core, args[0], v, isI)) {
+      outVal   = -v;
+      outIsInt = isI;
+      return true;
+    }
+    return false;
+  }
+
+  if (fn == "+" && args.size() == 1) {
+    return evalArithmetic(stdlib, core, args[0], outVal, outIsInt);
+  }
+
+  if (args.size() == 2) {
+    double v1 = 0.0;
+    double v2 = 0.0;
+    bool isI1 = false;
+    bool isI2 = false;
+    if (!evalArithmetic(stdlib, core, args[0], v1, isI1) ||
+        !evalArithmetic(stdlib, core, args[1], v2, isI2)) {
+      return false;
+    }
+    if (fn == "+") {
+      outVal   = v1 + v2;
+      outIsInt = isI1 && isI2;
+      return true;
+    }
+    if (fn == "-") {
+      outVal   = v1 - v2;
+      outIsInt = isI1 && isI2;
+      return true;
+    }
+    if (fn == "*") {
+      outVal   = v1 * v2;
+      outIsInt = isI1 && isI2;
+      return true;
+    }
+    if (fn == "/") {
+      if (v2 == 0.0) return false;
+      outVal   = v1 / v2;
+      outIsInt = false;
+      return true;
+    }
+    if (fn == "//") {
+      if (static_cast<std::int64_t>(v2) == 0) return false;
+      outVal   = static_cast<double>(static_cast<std::int64_t>(v1) /
+                                     static_cast<std::int64_t>(v2));
+      outIsInt = true;
+      return true;
+    }
+    if (fn == "mod") {
+      if (static_cast<std::int64_t>(v2) == 0) return false;
+      outVal   = static_cast<double>(static_cast<std::int64_t>(v1) %
+                                     static_cast<std::int64_t>(v2));
+      outIsInt = true;
+      return true;
+    }
+  }
+
+  std::string txt = core.arena().textOf(cur);
+  if (!txt.empty() &&
+      (std::isdigit(txt[0]) ||
+       (txt.size() > 1 && txt[0] == '-' && std::isdigit(txt[1])))) {
+    try {
+      if (txt.find('.') != std::string::npos) {
+        outVal   = std::stod(txt);
+        outIsInt = false;
+      } else {
+        outVal   = static_cast<double>(std::stoll(txt));
+        outIsInt = true;
+      }
+      return true;
+    } catch (...) {
+      return false;
+    }
+  }
+
+  return false;
+}
+
 bool solveQueryHelper(VortexStdLib &stdlib, VortexCore &core,
                       std::vector<CellRef> goals,
                       std::span<const CellRef> candidatePreds,
@@ -218,6 +324,109 @@ bool solveQueryHelper(VortexStdLib &stdlib, VortexCore &core,
         return false;
       }
     }
+  }
+
+  // Built-in predicates: true/0, fail/0, !/0
+  if (goalFunctor == "true" && goalArgs.empty()) {
+    return solveQueryHelper(stdlib, core, restGoals, candidatePreds, queryVars,
+                            onSolution, solutionsCount, maxSolutions,
+                            depth + 1);
+  }
+  if (goalFunctor == "fail" && goalArgs.empty()) {
+    return true;
+  }
+  if (goalFunctor == "!" && goalArgs.empty()) {
+    return solveQueryHelper(stdlib, core, restGoals, candidatePreds, queryVars,
+                            onSolution, solutionsCount, maxSolutions,
+                            depth + 1);
+  }
+
+  // Arithmetic evaluation: is/2
+  if (goalFunctor == "is" && goalArgs.size() == 2) {
+    double evalResult = 0.0;
+    bool isInt        = false;
+    if (evalArithmetic(stdlib, core, goalArgs[1], evalResult, isInt)) {
+      auto mark       = core.arena().mark();
+      CellRef valCell = isInt ? core.arena().makeScalarCell(
+                                    static_cast<std::int64_t>(evalResult))
+                              : core.arena().makeScalarCell(evalResult);
+      if (stdlib.unify(goalArgs[0], valCell)) {
+        bool keepGoing = solveQueryHelper(
+            stdlib, core, restGoals, candidatePreds, queryVars, onSolution,
+            solutionsCount, maxSolutions, depth + 1);
+        core.arena().release(mark);
+        return keepGoing;
+      }
+      core.arena().release(mark);
+    }
+    return true;
+  }
+
+  // Arithmetic comparisons: <, >, =<, >=, =:=, =\=
+  if ((goalFunctor == "<" || goalFunctor == ">" || goalFunctor == "=<" ||
+       goalFunctor == ">=" || goalFunctor == "=:=" || goalFunctor == "=\\=") &&
+      goalArgs.size() == 2) {
+    double v1 = 0.0;
+    double v2 = 0.0;
+    bool isI1 = false;
+    bool isI2 = false;
+    if (evalArithmetic(stdlib, core, goalArgs[0], v1, isI1) &&
+        evalArithmetic(stdlib, core, goalArgs[1], v2, isI2)) {
+      bool cond = false;
+      if (goalFunctor == "<")
+        cond = (v1 < v2);
+      else if (goalFunctor == ">")
+        cond = (v1 > v2);
+      else if (goalFunctor == "=<")
+        cond = (v1 <= v2);
+      else if (goalFunctor == ">=")
+        cond = (v1 >= v2);
+      else if (goalFunctor == "=:=")
+        cond = (v1 == v2);
+      else if (goalFunctor == "=\\=")
+        cond = (v1 != v2);
+
+      if (cond) {
+        return solveQueryHelper(stdlib, core, restGoals, candidatePreds,
+                                queryVars, onSolution, solutionsCount,
+                                maxSolutions, depth + 1);
+      }
+    }
+    return true;
+  }
+
+  // Negation as failure: \+ Goal
+  if (goalFunctor == "\\+" && goalArgs.size() == 1) {
+    auto mark            = core.arena().mark();
+    std::size_t subCount = 0;
+    bool hasSubSolution  = false;
+    solveQueryHelper(
+        stdlib, core, {goalArgs[0]}, candidatePreds, {},
+        [&](const LogicSolution &) {
+          hasSubSolution = true;
+          return false;
+        },
+        subCount, 1, depth + 1);
+    core.arena().release(mark);
+    if (!hasSubSolution) {
+      return solveQueryHelper(stdlib, core, restGoals, candidatePreds,
+                              queryVars, onSolution, solutionsCount,
+                              maxSolutions, depth + 1);
+    }
+    return true;
+  }
+
+  // Non-unifiable: \=(A, B)
+  if (goalFunctor == "\\=" && goalArgs.size() == 2) {
+    auto mark    = core.arena().mark();
+    bool unifies = stdlib.unify(goalArgs[0], goalArgs[1]);
+    core.arena().release(mark);
+    if (!unifies) {
+      return solveQueryHelper(stdlib, core, restGoals, candidatePreds,
+                              queryVars, onSolution, solutionsCount,
+                              maxSolutions, depth + 1);
+    }
+    return true;
   }
 
   // Iterate over matching predicates
@@ -1262,6 +1471,16 @@ void VortexStdLib::buildLogicModule(CellRef mod) {
     exportSymbol(mod, "equal", predEqual_);
   }
 
+  // Predicate: =/2
+  // =(X, X).
+  {
+    predUnify_   = createPredicate("=");
+    CellRef x    = makeVar();
+    CellRef head = makeTerm("=", {x, x});
+    addClause(predUnify_, head);
+    exportSymbol(mod, "=", predUnify_);
+  }
+
   // Predicate: member/2
   // member(X, [X | _]).
   // member(X, [_ | T]) :- member(X, T).
@@ -1515,67 +1734,37 @@ CellRef VortexStdLib::addClause(CellRef predCell, CellRef headTerm,
 
 bool VortexStdLib::solveOnce(CellRef goal,
                              std::span<const CellRef> customPredicates) {
-  std::vector<CellRef> candidatePreds;
-  if (predEqual_ != noCell) candidatePreds.push_back(predEqual_);
-  if (predMember_ != noCell) candidatePreds.push_back(predMember_);
-  if (predAppend_ != noCell) candidatePreds.push_back(predAppend_);
-  if (predLength_ != noCell) candidatePreds.push_back(predLength_);
-  for (CellRef cp : customPredicates) {
-    candidatePreds.push_back(cp);
-  }
+  return solveOnce(std::span<const CellRef>{&goal, 1}, customPredicates);
+}
 
-  std::vector<CellRef> queryVars;
-  std::unordered_set<CellRef> seen;
-  collectVariables(*this, goal, queryVars, seen);
-
-  std::string goalFunctor = functorOf(goal);
-  for (CellRef pred : candidatePreds) {
-    if (pred == noCell || core_.arena().textOf(pred) != goalFunctor) continue;
-    CellRef clause    = core_.arena().linked(pred, core_.dims().clause, false);
-    std::size_t limit = core_.arena().cellCount() + 1;
-    while (clause != noCell && limit-- > 0) {
-      auto mark = core_.arena().mark();
-      std::unordered_map<CellRef, CellRef> varMap;
-      std::unordered_map<CellRef, CellRef> visited;
-      CellRef rawHead = core_.arena().linked(clause, core_.dims().grab, false);
-      CellRef head    = freshenTerm(*this, core_, rawHead, varMap, visited);
-      if (unify(goal, head)) {
-        std::vector<CellRef> nextGoals;
-        CellRef curBody =
-            core_.arena().linked(clause, core_.dims().spin, false);
-        std::size_t bodyLimit = core_.arena().cellCount() + 1;
-        while (curBody != noCell && bodyLimit-- > 0) {
-          std::unordered_map<CellRef, CellRef> bodyVisited;
-          nextGoals.push_back(
-              freshenTerm(*this, core_, curBody, varMap, bodyVisited));
-          curBody = core_.arena().linked(curBody, core_.dims().spin, false);
-        }
-        if (nextGoals.empty()) {
-          core_.arena().discard(mark);
-          return true;
-        }
-        std::size_t solCount = 0;
-        bool ok = solveQueryHelper(*this, core_, nextGoals, candidatePreds,
-                                   queryVars, nullptr, solCount, 1, 0);
-        if (ok && solCount > 0) {
-          core_.arena().discard(mark);
-          return true;
-        }
-      }
-      core_.arena().release(mark);
-      clause = core_.arena().linked(clause, core_.dims().clause, false);
-    }
-  }
-  return false;
+bool VortexStdLib::solveOnce(std::span<const CellRef> goals,
+                             std::span<const CellRef> customPredicates) {
+  bool found = false;
+  solve(
+      goals,
+      [&](const LogicSolution &) {
+        found = true;
+        return false;
+      },
+      customPredicates, 1);
+  return found;
 }
 
 std::vector<LogicSolution>
 VortexStdLib::solveQuery(CellRef goal,
                          std::span<const CellRef> customPredicates,
                          std::size_t maxSolutions) {
+  return solveQuery(std::span<const CellRef>{&goal, 1}, customPredicates,
+                    maxSolutions);
+}
+
+std::vector<LogicSolution>
+VortexStdLib::solveQuery(std::span<const CellRef> goals,
+                         std::span<const CellRef> customPredicates,
+                         std::size_t maxSolutions) {
   std::vector<LogicSolution> solutions;
   solve(
-      goal,
+      goals,
       [&](const LogicSolution &sol) {
         solutions.push_back(sol);
         return true;
@@ -1588,8 +1777,19 @@ bool VortexStdLib::solve(CellRef goal,
                          std::function<bool(const LogicSolution &)> onSolution,
                          std::span<const CellRef> customPredicates,
                          std::size_t maxSolutions) {
+  return solve(std::span<const CellRef>{&goal, 1}, onSolution, customPredicates,
+               maxSolutions);
+}
+
+bool VortexStdLib::solve(std::span<const CellRef> goals,
+                         std::function<bool(const LogicSolution &)> onSolution,
+                         std::span<const CellRef> customPredicates,
+                         std::size_t maxSolutions) {
+  if (goals.empty()) return true;
+
   std::vector<CellRef> candidatePreds;
   if (predEqual_ != noCell) candidatePreds.push_back(predEqual_);
+  if (predUnify_ != noCell) candidatePreds.push_back(predUnify_);
   if (predMember_ != noCell) candidatePreds.push_back(predMember_);
   if (predAppend_ != noCell) candidatePreds.push_back(predAppend_);
   if (predLength_ != noCell) candidatePreds.push_back(predLength_);
@@ -1599,11 +1799,14 @@ bool VortexStdLib::solve(CellRef goal,
 
   std::vector<CellRef> queryVars;
   std::unordered_set<CellRef> seen;
-  collectVariables(*this, goal, queryVars, seen);
+  for (CellRef g : goals) {
+    collectVariables(*this, g, queryVars, seen);
+  }
 
   std::size_t solCount = 0;
-  return solveQueryHelper(*this, core_, {goal}, candidatePreds, queryVars,
-                          onSolution, solCount, maxSolutions, 0);
+  std::vector<CellRef> goalVec(goals.begin(), goals.end());
+  return solveQueryHelper(*this, core_, std::move(goalVec), candidatePreds,
+                          queryVars, onSolution, solCount, maxSolutions, 0);
 }
 
 } // namespace zigzag::vortex

@@ -179,17 +179,28 @@ public:
                     std::span<const CellRef> bodyGoals = {});
 
   [[nodiscard]] CellRef predicateEqual() const noexcept { return predEqual_; }
+  [[nodiscard]] CellRef predicateUnify() const noexcept { return predUnify_; }
   [[nodiscard]] CellRef predicateMember() const noexcept { return predMember_; }
   [[nodiscard]] CellRef predicateAppend() const noexcept { return predAppend_; }
   [[nodiscard]] CellRef predicateLength() const noexcept { return predLength_; }
 
   bool solveOnce(CellRef goal, std::span<const CellRef> customPredicates = {});
+  bool solveOnce(std::span<const CellRef> goals,
+                 std::span<const CellRef> customPredicates = {});
 
   std::vector<LogicSolution>
   solveQuery(CellRef goal, std::span<const CellRef> customPredicates = {},
              std::size_t maxSolutions = 100);
+  std::vector<LogicSolution>
+  solveQuery(std::span<const CellRef> goals,
+             std::span<const CellRef> customPredicates = {},
+             std::size_t maxSolutions                  = 100);
 
   bool solve(CellRef goal,
+             std::function<bool(const LogicSolution &)> onSolution,
+             std::span<const CellRef> customPredicates = {},
+             std::size_t maxSolutions                  = 100);
+  bool solve(std::span<const CellRef> goals,
              std::function<bool(const LogicSolution &)> onSolution,
              std::span<const CellRef> customPredicates = {},
              std::size_t maxSolutions                  = 100);
@@ -218,6 +229,7 @@ private:
   std::unordered_map<CellRef, RoutineBinding> routineBindings_;
 
   CellRef predEqual_{noCell};
+  CellRef predUnify_{noCell};
   CellRef predMember_{noCell};
   CellRef predAppend_{noCell};
   CellRef predLength_{noCell};
