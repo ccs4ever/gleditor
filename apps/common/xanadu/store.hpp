@@ -826,6 +826,7 @@ public:
 
 private:
   friend class enfilade::Chronofilade;
+  friend class OsmicWalker;
   /// Apply one recorded op to @p onto. The single replay path: everything that
   /// rebuilds a document comes through here, so replaying and recording cannot
   /// drift.
