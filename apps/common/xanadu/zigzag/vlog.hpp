@@ -22,6 +22,7 @@
 #ifndef ZIGZAG_VLOG_HPP
 #define ZIGZAG_VLOG_HPP
 
+#include <span>
 #include <string_view>
 
 #include "common/xanadu/zigzag/arena_manifold.hpp"
@@ -54,6 +55,7 @@ struct Vlog {
   /// chained on the Inputs Wing.
   CellRef makeTerm(std::string_view functor,
                    std::initializer_list<CellRef> args);
+  CellRef makeTerm(std::string_view functor, std::span<const CellRef> args);
 
   /// @p ref's arguments, in order. Empty for an atom or a number.
   [[nodiscard]] std::vector<CellRef> argumentsOf(CellRef ref) const;
@@ -94,7 +96,6 @@ struct Vlog {
   /// posward tail of t's, so the combined rank's master is t's master.
   void bind(CellRef v, CellRef t);
 
-private:
   /// The far end of @p from's rank along @p dim, cycle-bounded.
   [[nodiscard]] CellRef endOfRank(CellRef from, DimRef dim,
                                   bool negward) const noexcept;

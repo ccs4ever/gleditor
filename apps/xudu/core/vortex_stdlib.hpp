@@ -9,6 +9,7 @@
 
 namespace xudu {
 namespace vortex = ::zigzag::vortex;
+using vortex::LogicSolution;
 using vortex::VortexStdLib;
 } // namespace xudu
 

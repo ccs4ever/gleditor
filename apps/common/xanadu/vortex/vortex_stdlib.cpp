@@ -9,6 +9,9 @@
 #include <cmath>
 #include <numeric>
 #include <sstream>
+#include <unordered_set>
+
+#include "common/xanadu/zigzag/vlog.hpp"
 
 namespace zigzag::vortex {
 
@@ -46,6 +49,219 @@ double toDoubleVal(const CellValue &v) {
   } catch (...) {
     return 0.0;
   }
+}
+
+void collectVariablesHelper(const VortexStdLib &stdlib, CellRef term,
+                            std::vector<CellRef> &vars,
+                            std::unordered_set<CellRef> &seenVars,
+                            std::unordered_set<CellRef> &visitedTerms) {
+  CellRef actual = stdlib.deref(term);
+  if (actual == noCell) {
+    return;
+  }
+  if (stdlib.isVar(actual)) {
+    if (seenVars.insert(actual).second) {
+      vars.push_back(term);
+    }
+    return;
+  }
+  if (!visitedTerms.insert(actual).second) {
+    return;
+  }
+  auto args = stdlib.argumentsOf(actual);
+  for (CellRef arg : args) {
+    collectVariablesHelper(stdlib, arg, vars, seenVars, visitedTerms);
+  }
+}
+
+void collectVariables(const VortexStdLib &stdlib, CellRef term,
+                      std::vector<CellRef> &vars,
+                      std::unordered_set<CellRef> &seen) {
+  std::unordered_set<CellRef> visitedTerms;
+  collectVariablesHelper(stdlib, term, vars, seen, visitedTerms);
+}
+
+CellRef freshenTerm(VortexStdLib &stdlib, VortexCore &core, CellRef term,
+                    std::unordered_map<CellRef, CellRef> &varMap,
+                    std::unordered_map<CellRef, CellRef> &visiting) {
+  CellRef actual = stdlib.deref(term);
+  if (actual == noCell) {
+    return noCell;
+  }
+  if (stdlib.isVar(actual)) {
+    auto it = varMap.find(actual);
+    if (it != varMap.end()) {
+      CellRef master    = it->second;
+      CellRef cloneCell = core.arena().makeCell();
+      zigzag::Vlog vlog{.m     = core.arena(),
+                        .clone = core.dims().clone,
+                        .grab  = core.dims().grab,
+                        .step  = core.dims().step,
+                        .vars  = core.dims().vars};
+      core.arena().link(vlog.endOfRank(master, core.dims().clone, false),
+                        core.dims().clone, false, cloneCell);
+      return cloneCell;
+    }
+    CellRef fresh    = stdlib.makeVar();
+    CellRef nameCell = core.arena().linked(actual, core.dims().name, false);
+    if (nameCell != noCell && core.arena().contains(nameCell)) {
+      core.arena().link(fresh, core.dims().name, false, nameCell);
+    }
+    varMap[actual] = fresh;
+    return fresh;
+  }
+
+  auto args = stdlib.argumentsOf(actual);
+  if (args.empty()) {
+    CellRef cloneCell = core.arena().makeCell();
+    zigzag::Vlog vlog{.m     = core.arena(),
+                      .clone = core.dims().clone,
+                      .grab  = core.dims().grab,
+                      .step  = core.dims().step,
+                      .vars  = core.dims().vars};
+    core.arena().link(vlog.endOfRank(actual, core.dims().clone, false),
+                      core.dims().clone, false, cloneCell);
+    return cloneCell;
+  }
+
+  auto vit = visiting.find(actual);
+  if (vit != visiting.end()) {
+    return vit->second;
+  }
+
+  std::string fn    = core.arena().textOf(actual);
+  CellRef freshTerm = core.arena().makeCell(fn);
+  visiting[actual]  = freshTerm;
+
+  CellRef prev = noCell;
+  for (CellRef arg : args) {
+    CellRef freshArg = freshenTerm(stdlib, core, arg, varMap, visiting);
+    if (prev == noCell) {
+      core.arena().link(freshTerm, core.dims().grab, false, freshArg);
+    } else {
+      core.arena().link(prev, core.dims().step, false, freshArg);
+    }
+    prev = freshArg;
+  }
+
+  visiting.erase(actual);
+  return freshTerm;
+}
+
+bool solveQueryHelper(VortexStdLib &stdlib, VortexCore &core,
+                      std::vector<CellRef> goals,
+                      std::span<const CellRef> candidatePreds,
+                      const std::vector<CellRef> &queryVars,
+                      std::function<bool(const LogicSolution &)> onSolution,
+                      std::size_t &solutionsCount, std::size_t maxSolutions,
+                      std::size_t depth) {
+  if (solutionsCount >= maxSolutions || depth > 1000) {
+    return false;
+  }
+  if (goals.empty()) {
+    LogicSolution sol;
+    for (CellRef v : queryVars) {
+      CellRef val = stdlib.deref(v);
+      sol.bindings.push_back({v, val});
+      sol.varMap[v] = val;
+      std::string varName;
+      CellRef nameCell = core.arena().linked(v, core.dims().name, false);
+      if (nameCell != noCell && core.arena().contains(nameCell)) {
+        varName = core.arena().textOf(nameCell);
+      } else {
+        varName = "_G" + std::to_string(v);
+      }
+      sol.formatted[varName] = stdlib.renderTerm(v);
+    }
+    solutionsCount++;
+    if (onSolution) {
+      return onSolution(sol);
+    }
+    return true;
+  }
+
+  CellRef curGoal = goals[0];
+  std::vector<CellRef> restGoals(goals.begin() + 1, goals.end());
+
+  std::string goalFunctor       = stdlib.functorOf(curGoal);
+  std::vector<CellRef> goalArgs = stdlib.argumentsOf(curGoal);
+
+  // Optimization for length/2 when list is known
+  if (goalFunctor == "length" && goalArgs.size() == 2) {
+    CellRef listArg = stdlib.deref(goalArgs[0]);
+    CellRef lenArg  = stdlib.deref(goalArgs[1]);
+    if (!stdlib.isVar(listArg)) {
+      std::int64_t count = 0;
+      CellRef cur        = listArg;
+      std::size_t limit  = core.arena().cellCount() + 1;
+      while (cur != noCell && !stdlib.isVar(cur) && limit-- > 0) {
+        cur       = stdlib.deref(cur);
+        auto args = stdlib.argumentsOf(cur);
+        if (stdlib.functorOf(cur) == "." && args.size() >= 2) {
+          count++;
+          cur = stdlib.deref(args[1]);
+        } else {
+          break;
+        }
+      }
+      if (cur != noCell && stdlib.functorOf(cur) == "[]") {
+        auto mark       = core.arena().mark();
+        CellRef numCell = core.arena().makeScalarCell(count);
+        if (stdlib.unify(lenArg, numCell)) {
+          bool keepGoing = solveQueryHelper(
+              stdlib, core, restGoals, candidatePreds, queryVars, onSolution,
+              solutionsCount, maxSolutions, depth + 1);
+          core.arena().release(mark);
+          return keepGoing;
+        }
+        core.arena().release(mark);
+        return false;
+      }
+    }
+  }
+
+  // Iterate over matching predicates
+  for (CellRef pred : candidatePreds) {
+    if (pred == noCell) continue;
+    if (core.arena().textOf(pred) != goalFunctor) continue;
+
+    CellRef clause    = core.arena().linked(pred, core.dims().clause, false);
+    std::size_t limit = core.arena().cellCount() + 1;
+    while (clause != noCell && solutionsCount < maxSolutions && limit-- > 0) {
+      auto mark = core.arena().mark();
+
+      std::unordered_map<CellRef, CellRef> varMap;
+      std::unordered_map<CellRef, CellRef> visited;
+      CellRef rawHead = core.arena().linked(clause, core.dims().grab, false);
+      CellRef head    = freshenTerm(stdlib, core, rawHead, varMap, visited);
+
+      if (stdlib.unify(curGoal, head)) {
+        std::vector<CellRef> nextGoals;
+        CellRef curBody = core.arena().linked(clause, core.dims().spin, false);
+        std::size_t bodyLimit = core.arena().cellCount() + 1;
+        while (curBody != noCell && bodyLimit-- > 0) {
+          std::unordered_map<CellRef, CellRef> bodyVisited;
+          nextGoals.push_back(
+              freshenTerm(stdlib, core, curBody, varMap, bodyVisited));
+          curBody = core.arena().linked(curBody, core.dims().spin, false);
+        }
+        nextGoals.insert(nextGoals.end(), restGoals.begin(), restGoals.end());
+
+        bool keepGoing = solveQueryHelper(
+            stdlib, core, nextGoals, candidatePreds, queryVars, onSolution,
+            solutionsCount, maxSolutions, depth + 1);
+        core.arena().release(mark);
+        if (!keepGoing && onSolution != nullptr) {
+          return false;
+        }
+      } else {
+        core.arena().release(mark);
+      }
+
+      clause = core.arena().linked(clause, core.dims().clause, false);
+    }
+  }
+  return true;
 }
 
 } // namespace
@@ -107,6 +323,7 @@ void VortexStdLib::bootstrap() {
   CellRef modCollections = getOrCreateModule("std:collections");
   CellRef modMath        = getOrCreateModule("std:math");
   CellRef modString      = getOrCreateModule("std:string");
+  CellRef modLogic       = getOrCreateModule("std:logic");
 
   buildMathModule(modMath);
   buildStringModule(modString);
@@ -115,6 +332,7 @@ void VortexStdLib::bootstrap() {
   buildMemoizeModule(modMemoize);
   buildFunctionalModule(modFunctional);
   buildCollectionsModule(modCollections);
+  buildLogicModule(modLogic);
 }
 
 void VortexStdLib::buildMathModule(CellRef mod) {
@@ -947,6 +1165,445 @@ std::string VortexStdLib::strTrim(std::string_view s) {
   if (start == std::string_view::npos) return "";
   auto end = s.find_last_not_of(" \t\n\r");
   return std::string(s.substr(start, end - start + 1));
+}
+
+void VortexStdLib::buildLogicModule(CellRef mod) {
+  // unify: #UNIFY in0 in1 out
+  {
+    CellRef in0 = core_.arena().makeCell();
+    CellRef in1 = core_.arena().makeCell();
+    CellRef out = core_.arena().makeCell();
+    CellRef op  = vm_.mintOpcode(OpcodeKind::Unify, "#LOGIC_UNIFY");
+    core_.bindInput(op, in0);
+    core_.bindInput(op, in1);
+    core_.bindOutput(op, out);
+    routineBindings_[op] = {{in0, in1}, {out}};
+    exportSymbol(mod, "unify", op);
+  }
+
+  // var: #MAKE_VAR out
+  {
+    CellRef out = core_.arena().makeCell();
+    CellRef op  = vm_.mintOpcode(OpcodeKind::MakeVar, "#LOGIC_MAKE_VAR");
+    core_.bindOutput(op, out);
+    routineBindings_[op] = {{}, {out}};
+    exportSymbol(mod, "var", op);
+  }
+
+  // is_var: #IS_VAR in out
+  {
+    CellRef in  = core_.arena().makeCell();
+    CellRef out = core_.arena().makeCell();
+    CellRef op  = vm_.mintOpcode(OpcodeKind::IsVar, "#LOGIC_IS_VAR");
+    core_.bindInput(op, in);
+    core_.bindOutput(op, out);
+    routineBindings_[op] = {{in}, {out}};
+    exportSymbol(mod, "is_var", op);
+  }
+
+  // term: #MAKE_TERM in out
+  {
+    CellRef in  = core_.arena().makeCell();
+    CellRef out = core_.arena().makeCell();
+    CellRef op  = vm_.mintOpcode(OpcodeKind::MakeTerm, "#LOGIC_MAKE_TERM");
+    core_.bindInput(op, in);
+    core_.bindOutput(op, out);
+    routineBindings_[op] = {{in}, {out}};
+    exportSymbol(mod, "term", op);
+  }
+
+  // deref: #DEREF in out
+  {
+    CellRef in  = core_.arena().makeCell();
+    CellRef out = core_.arena().makeCell();
+    CellRef op  = vm_.mintOpcode(OpcodeKind::Deref, "#LOGIC_DEREF");
+    core_.bindInput(op, in);
+    core_.bindOutput(op, out);
+    routineBindings_[op] = {{in}, {out}};
+    exportSymbol(mod, "deref", op);
+  }
+
+  // choice: #CHOICE in out
+  {
+    CellRef in  = core_.arena().makeCell();
+    CellRef out = core_.arena().makeCell();
+    CellRef op  = vm_.mintOpcode(OpcodeKind::Choice, "#LOGIC_CHOICE");
+    core_.bindInput(op, in);
+    core_.bindOutput(op, out);
+    routineBindings_[op] = {{in}, {out}};
+    exportSymbol(mod, "choice", op);
+  }
+
+  // fail: #FAIL
+  {
+    CellRef op           = vm_.mintOpcode(OpcodeKind::Fail, "#LOGIC_FAIL");
+    routineBindings_[op] = {{}, {}};
+    exportSymbol(mod, "fail", op);
+  }
+
+  // cut: #CUT in out
+  {
+    CellRef in  = core_.arena().makeCell();
+    CellRef out = core_.arena().makeCell();
+    CellRef op  = vm_.mintOpcode(OpcodeKind::Cut, "#LOGIC_CUT");
+    core_.bindInput(op, in);
+    core_.bindOutput(op, out);
+    routineBindings_[op] = {{in}, {out}};
+    exportSymbol(mod, "cut", op);
+  }
+
+  // Predicate: equal/2
+  // equal(X, X).
+  {
+    predEqual_   = createPredicate("equal");
+    CellRef x    = makeVar();
+    CellRef head = makeTerm("equal", {x, x});
+    addClause(predEqual_, head);
+    exportSymbol(mod, "equal", predEqual_);
+  }
+
+  // Predicate: member/2
+  // member(X, [X | _]).
+  // member(X, [_ | T]) :- member(X, T).
+  {
+    predMember_   = createPredicate("member");
+    CellRef x1    = makeVar();
+    CellRef wild1 = makeVar();
+    CellRef head1 = makeTerm("member", {x1, makeCons(x1, wild1)});
+    addClause(predMember_, head1);
+
+    CellRef x2    = makeVar();
+    CellRef wild2 = makeVar();
+    CellRef t2    = makeVar();
+    CellRef head2 = makeTerm("member", {x2, makeCons(wild2, t2)});
+    CellRef body2 = makeTerm("member", {x2, t2});
+    addClause(predMember_, head2, std::span<const CellRef>{&body2, 1});
+
+    exportSymbol(mod, "member", predMember_);
+  }
+
+  // Predicate: append/3
+  // append([], L, L).
+  // append([H | T], L, [H | R]) :- append(T, L, R).
+  {
+    predAppend_       = createPredicate("append");
+    CellRef emptyList = core_.arena().makeCell("[]");
+    CellRef l1        = makeVar();
+    CellRef head1     = makeTerm("append", {emptyList, l1, l1});
+    addClause(predAppend_, head1);
+
+    CellRef h     = makeVar();
+    CellRef t     = makeVar();
+    CellRef l2    = makeVar();
+    CellRef r     = makeVar();
+    CellRef head2 = makeTerm("append", {makeCons(h, t), l2, makeCons(h, r)});
+    CellRef body2 = makeTerm("append", {t, l2, r});
+    addClause(predAppend_, head2, std::span<const CellRef>{&body2, 1});
+
+    exportSymbol(mod, "append", predAppend_);
+  }
+
+  // Predicate: length/2
+  // length([], 0).
+  {
+    predLength_       = createPredicate("length");
+    CellRef emptyList = core_.arena().makeCell("[]");
+    CellRef zero  = core_.arena().makeScalarCell(static_cast<std::int64_t>(0));
+    CellRef head1 = makeTerm("length", {emptyList, zero});
+    addClause(predLength_, head1);
+
+    exportSymbol(mod, "length", predLength_);
+  }
+}
+
+CellRef VortexStdLib::makeVar(std::string_view name) {
+  zigzag::Vlog v{.m     = core_.arena(),
+                 .clone = core_.dims().clone,
+                 .grab  = core_.dims().grab,
+                 .step  = core_.dims().step,
+                 .vars  = core_.dims().vars};
+  CellRef var = v.makeVar();
+  if (!name.empty()) {
+    CellRef nameCell = core_.arena().makeCell(name);
+    core_.arena().link(var, core_.dims().name, false, nameCell);
+  }
+  return var;
+}
+
+CellRef VortexStdLib::makeTerm(std::string_view functor,
+                               std::initializer_list<CellRef> args) {
+  zigzag::Vlog v{.m     = core_.arena(),
+                 .clone = core_.dims().clone,
+                 .grab  = core_.dims().grab,
+                 .step  = core_.dims().step,
+                 .vars  = core_.dims().vars};
+  return v.makeTerm(functor, args);
+}
+
+CellRef VortexStdLib::makeTerm(std::string_view functor,
+                               std::span<const CellRef> args) {
+  zigzag::Vlog v{.m     = core_.arena(),
+                 .clone = core_.dims().clone,
+                 .grab  = core_.dims().grab,
+                 .step  = core_.dims().step,
+                 .vars  = core_.dims().vars};
+  return v.makeTerm(functor, args);
+}
+
+CellRef VortexStdLib::makeCons(CellRef head, CellRef tail) {
+  return makeTerm(".", {head, tail});
+}
+
+CellRef VortexStdLib::makeList(std::initializer_list<CellRef> elements) {
+  return makeList(std::span<const CellRef>{elements.begin(), elements.end()});
+}
+
+CellRef VortexStdLib::makeList(std::span<const CellRef> elements) {
+  CellRef tail = core_.arena().makeCell("[]");
+  for (auto it = elements.rbegin(); it != elements.rend(); ++it) {
+    tail = makeCons(*it, tail);
+  }
+  return tail;
+}
+
+bool VortexStdLib::isVar(CellRef cell) const {
+  zigzag::Vlog v{.m     = core_.arena(),
+                 .clone = core_.dims().clone,
+                 .grab  = core_.dims().grab,
+                 .step  = core_.dims().step,
+                 .vars  = core_.dims().vars};
+  return v.isUnbound(cell);
+}
+
+CellRef VortexStdLib::deref(CellRef cell) const {
+  zigzag::Vlog v{.m     = core_.arena(),
+                 .clone = core_.dims().clone,
+                 .grab  = core_.dims().grab,
+                 .step  = core_.dims().step,
+                 .vars  = core_.dims().vars};
+  return v.deref(cell);
+}
+
+bool VortexStdLib::unify(CellRef a, CellRef b) {
+  zigzag::Vlog v{.m     = core_.arena(),
+                 .clone = core_.dims().clone,
+                 .grab  = core_.dims().grab,
+                 .step  = core_.dims().step,
+                 .vars  = core_.dims().vars};
+  return v.unify(a, b);
+}
+
+std::vector<CellRef> VortexStdLib::argumentsOf(CellRef term) const {
+  zigzag::Vlog v{.m     = core_.arena(),
+                 .clone = core_.dims().clone,
+                 .grab  = core_.dims().grab,
+                 .step  = core_.dims().step,
+                 .vars  = core_.dims().vars};
+  return v.argumentsOf(term);
+}
+
+std::string VortexStdLib::functorOf(CellRef term) const {
+  CellRef actual = deref(term);
+  return core_.arena().textOf(actual);
+}
+
+std::string VortexStdLib::renderTerm(CellRef term) const {
+  CellRef actual = deref(term);
+  if (isVar(actual)) {
+    CellRef nameCell = core_.arena().linked(actual, core_.dims().name, false);
+    if (nameCell != noCell && core_.arena().contains(nameCell)) {
+      std::string n = core_.arena().textOf(nameCell);
+      if (!n.empty()) return n;
+    }
+    return "_G" + std::to_string(actual);
+  }
+
+  const auto kind = core_.arena().valueKindOf(actual);
+  if (kind == xanadu::ValueKind::Int64) {
+    auto val = core_.arena().asInt64(actual);
+    if (val) return std::to_string(*val);
+  } else if (kind == xanadu::ValueKind::Double) {
+    auto val = core_.arena().asDouble(actual);
+    if (val) return std::to_string(*val);
+  } else if (kind == xanadu::ValueKind::Bool) {
+    auto val = core_.arena().asBool(actual);
+    if (val) return *val ? "true" : "false";
+  }
+
+  std::string fn = core_.arena().textOf(actual);
+  auto args      = argumentsOf(actual);
+  if (args.empty()) {
+    return fn;
+  }
+
+  if (fn == "." && args.size() >= 2) {
+    std::string s     = "[";
+    CellRef cur       = actual;
+    bool first        = true;
+    std::size_t limit = core_.arena().cellCount() + 1;
+    while (cur != noCell && limit-- > 0) {
+      cur = deref(cur);
+      if (isVar(cur)) {
+        s += "|" + renderTerm(cur);
+        break;
+      }
+      std::string cfn = functorOf(cur);
+      if (cfn == "[]") {
+        break;
+      }
+      if (cfn == ".") {
+        auto cArgs = argumentsOf(cur);
+        if (!first) s += ", ";
+        first = false;
+        if (!cArgs.empty()) {
+          s += renderTerm(cArgs[0]);
+        }
+        cur = (cArgs.size() >= 2) ? cArgs[1] : noCell;
+      } else {
+        s += "|" + renderTerm(cur);
+        break;
+      }
+    }
+    s += "]";
+    return s;
+  }
+
+  std::string s = fn + "(";
+  for (std::size_t i = 0; i < args.size(); ++i) {
+    if (i > 0) s += ", ";
+    s += renderTerm(args[i]);
+  }
+  s += ")";
+  return s;
+}
+
+CellRef VortexStdLib::createPredicate(std::string_view name) {
+  return core_.arena().makeCell(name);
+}
+
+CellRef VortexStdLib::addClause(CellRef predCell, CellRef headTerm,
+                                std::span<const CellRef> bodyGoals) {
+  CellRef clauseCell = core_.arena().makeCell();
+  core_.arena().link(clauseCell, core_.dims().grab, false, headTerm);
+
+  CellRef prevGoal = noCell;
+  for (CellRef goal : bodyGoals) {
+    if (prevGoal == noCell) {
+      core_.arena().link(clauseCell, core_.dims().spin, false, goal);
+    } else {
+      core_.arena().link(prevGoal, core_.dims().spin, false, goal);
+    }
+    prevGoal = goal;
+  }
+
+  CellRef cur = core_.arena().linked(predCell, core_.dims().clause, false);
+  if (cur == noCell) {
+    core_.arena().link(predCell, core_.dims().clause, false, clauseCell);
+  } else {
+    std::size_t limit = core_.arena().cellCount() + 1;
+    while (limit-- > 0) {
+      CellRef next = core_.arena().linked(cur, core_.dims().clause, false);
+      if (next == noCell) {
+        core_.arena().link(cur, core_.dims().clause, false, clauseCell);
+        break;
+      }
+      cur = next;
+    }
+  }
+  return clauseCell;
+}
+
+bool VortexStdLib::solveOnce(CellRef goal,
+                             std::span<const CellRef> customPredicates) {
+  std::vector<CellRef> candidatePreds;
+  if (predEqual_ != noCell) candidatePreds.push_back(predEqual_);
+  if (predMember_ != noCell) candidatePreds.push_back(predMember_);
+  if (predAppend_ != noCell) candidatePreds.push_back(predAppend_);
+  if (predLength_ != noCell) candidatePreds.push_back(predLength_);
+  for (CellRef cp : customPredicates) {
+    candidatePreds.push_back(cp);
+  }
+
+  std::vector<CellRef> queryVars;
+  std::unordered_set<CellRef> seen;
+  collectVariables(*this, goal, queryVars, seen);
+
+  std::string goalFunctor = functorOf(goal);
+  for (CellRef pred : candidatePreds) {
+    if (pred == noCell || core_.arena().textOf(pred) != goalFunctor) continue;
+    CellRef clause    = core_.arena().linked(pred, core_.dims().clause, false);
+    std::size_t limit = core_.arena().cellCount() + 1;
+    while (clause != noCell && limit-- > 0) {
+      auto mark = core_.arena().mark();
+      std::unordered_map<CellRef, CellRef> varMap;
+      std::unordered_map<CellRef, CellRef> visited;
+      CellRef rawHead = core_.arena().linked(clause, core_.dims().grab, false);
+      CellRef head    = freshenTerm(*this, core_, rawHead, varMap, visited);
+      if (unify(goal, head)) {
+        std::vector<CellRef> nextGoals;
+        CellRef curBody =
+            core_.arena().linked(clause, core_.dims().spin, false);
+        std::size_t bodyLimit = core_.arena().cellCount() + 1;
+        while (curBody != noCell && bodyLimit-- > 0) {
+          std::unordered_map<CellRef, CellRef> bodyVisited;
+          nextGoals.push_back(
+              freshenTerm(*this, core_, curBody, varMap, bodyVisited));
+          curBody = core_.arena().linked(curBody, core_.dims().spin, false);
+        }
+        if (nextGoals.empty()) {
+          core_.arena().discard(mark);
+          return true;
+        }
+        std::size_t solCount = 0;
+        bool ok = solveQueryHelper(*this, core_, nextGoals, candidatePreds,
+                                   queryVars, nullptr, solCount, 1, 0);
+        if (ok && solCount > 0) {
+          core_.arena().discard(mark);
+          return true;
+        }
+      }
+      core_.arena().release(mark);
+      clause = core_.arena().linked(clause, core_.dims().clause, false);
+    }
+  }
+  return false;
+}
+
+std::vector<LogicSolution>
+VortexStdLib::solveQuery(CellRef goal,
+                         std::span<const CellRef> customPredicates,
+                         std::size_t maxSolutions) {
+  std::vector<LogicSolution> solutions;
+  solve(
+      goal,
+      [&](const LogicSolution &sol) {
+        solutions.push_back(sol);
+        return true;
+      },
+      customPredicates, maxSolutions);
+  return solutions;
+}
+
+bool VortexStdLib::solve(CellRef goal,
+                         std::function<bool(const LogicSolution &)> onSolution,
+                         std::span<const CellRef> customPredicates,
+                         std::size_t maxSolutions) {
+  std::vector<CellRef> candidatePreds;
+  if (predEqual_ != noCell) candidatePreds.push_back(predEqual_);
+  if (predMember_ != noCell) candidatePreds.push_back(predMember_);
+  if (predAppend_ != noCell) candidatePreds.push_back(predAppend_);
+  if (predLength_ != noCell) candidatePreds.push_back(predLength_);
+  for (CellRef cp : customPredicates) {
+    candidatePreds.push_back(cp);
+  }
+
+  std::vector<CellRef> queryVars;
+  std::unordered_set<CellRef> seen;
+  collectVariables(*this, goal, queryVars, seen);
+
+  std::size_t solCount = 0;
+  return solveQueryHelper(*this, core_, {goal}, candidatePreds, queryVars,
+                          onSolution, solCount, maxSolutions, 0);
 }
 
 } // namespace zigzag::vortex

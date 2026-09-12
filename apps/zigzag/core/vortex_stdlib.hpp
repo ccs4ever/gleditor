@@ -8,6 +8,7 @@
 #include "common/xanadu/vortex/vortex_stdlib.hpp"
 
 namespace zigzag {
+using vortex::LogicSolution;
 using vortex::VortexStdLib;
 } // namespace zigzag
 

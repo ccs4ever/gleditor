@@ -48,6 +48,7 @@ struct SystemDimensions {
   DimRef name{noCell};           ///< Thread and pin naming rank
   DimRef dims{noCell};           ///< Dimension directory rank off home
   DimRef stdlib{noCell}; ///< Standard library module directory rank off home
+  DimRef clause{noCell}; ///< Clause database rank off predicate cells (Vlog)
 };
 
 enum class ContractViolationKind : std::uint8_t {

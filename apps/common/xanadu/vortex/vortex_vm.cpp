@@ -8,6 +8,8 @@
 #include <string>
 #include <unordered_set>
 
+#include "common/xanadu/zigzag/vlog.hpp"
+
 namespace zigzag::vortex {
 
 namespace {
@@ -35,6 +37,28 @@ std::int64_t toInt(const CellValue &val) {
   } catch (...) {
     return 0;
   }
+}
+
+CellRef resolveCell(const std::vector<CellRef> &inCells,
+                    const std::vector<CellValue> &inputs, std::size_t idx,
+                    const ArenaManifold &arena) {
+  if (idx < inCells.size()) {
+    CellRef c = inCells[idx];
+    if (arena.contains(c)) {
+      auto intVal = arena.asInt64(c);
+      if (intVal && arena.contains(static_cast<CellRef>(*intVal))) {
+        return static_cast<CellRef>(*intVal);
+      }
+      return c;
+    }
+  }
+  if (idx < inputs.size()) {
+    CellRef c = static_cast<CellRef>(toInt(inputs[idx]));
+    if (arena.contains(c)) {
+      return c;
+    }
+  }
+  return noCell;
 }
 
 } // namespace
@@ -154,6 +178,52 @@ std::string VortexVM::getMemoKey(CellRef opcode) const {
   }
   return "";
 }
+
+void VortexVM::pushChoicePoint(CellRef cursor, CellRef altOp) {
+  CellRef stackFrame = noCell;
+  if (cursor != noCell && core_.arena().contains(cursor)) {
+    stackFrame = core_.arena().linked(cursor, core_.dims().stack, false);
+  }
+  choiceStack_.push_back(ChoicePoint{
+      .cursor     = cursor,
+      .altOp      = altOp,
+      .mark       = core_.arena().mark(),
+      .stackFrame = stackFrame,
+      .cutBarrier = choiceStack_.size(),
+  });
+}
+
+bool VortexVM::backtrack(CellRef cursor) {
+  while (!choiceStack_.empty()) {
+    ChoicePoint cp = choiceStack_.back();
+    choiceStack_.pop_back();
+    if (cursor == noCell || cp.cursor == cursor || cp.cursor == noCell) {
+      core_.arena().release(cp.mark);
+      if (cursor != noCell) {
+        setCursorOpcode(cursor, cp.altOp);
+        if (cp.stackFrame != noCell && core_.arena().contains(cursor)) {
+          core_.arena().link(cursor, core_.dims().stack, false, cp.stackFrame);
+        }
+      }
+      return true;
+    }
+  }
+  return false;
+}
+
+void VortexVM::cut(std::size_t cutBarrier) {
+  while (choiceStack_.size() > cutBarrier) {
+    ChoicePoint cp = choiceStack_.back();
+    choiceStack_.pop_back();
+    core_.arena().discard(cp.mark);
+  }
+}
+
+std::size_t VortexVM::choiceDepth() const noexcept {
+  return choiceStack_.size();
+}
+
+void VortexVM::clearChoicePoints() { choiceStack_.clear(); }
 
 void VortexVM::runPipeline(CellRef paramCell) {
   CellRef pipeOp    = core_.getPipelineHead(paramCell);
@@ -661,6 +731,121 @@ ExecutionResult VortexVM::executeOpcodeBody(
       }
       outputs.push_back(s);
     }
+    break;
+  }
+  case OpcodeKind::Unify: {
+    std::vector<CellRef> inCells = core_.inputsOf(opcode);
+    CellRef a = resolveCell(inCells, inputs, 0, core_.arena());
+    CellRef b = resolveCell(inCells, inputs, 1, core_.arena());
+    if (a != noCell && b != noCell) {
+      zigzag::Vlog vlog{.m     = core_.arena(),
+                        .clone = core_.dims().clone,
+                        .grab  = core_.dims().grab,
+                        .step  = core_.dims().step,
+                        .vars  = core_.dims().vars};
+      outputs.push_back(vlog.unify(a, b));
+    } else {
+      outputs.push_back(false);
+    }
+    break;
+  }
+  case OpcodeKind::IsVar: {
+    std::vector<CellRef> inCells = core_.inputsOf(opcode);
+    CellRef c = resolveCell(inCells, inputs, 0, core_.arena());
+    if (c != noCell) {
+      zigzag::Vlog vlog{.m     = core_.arena(),
+                        .clone = core_.dims().clone,
+                        .grab  = core_.dims().grab,
+                        .step  = core_.dims().step,
+                        .vars  = core_.dims().vars};
+      outputs.push_back(vlog.isUnbound(c));
+    } else {
+      outputs.push_back(false);
+    }
+    break;
+  }
+  case OpcodeKind::MakeVar: {
+    zigzag::Vlog vlog{.m     = core_.arena(),
+                      .clone = core_.dims().clone,
+                      .grab  = core_.dims().grab,
+                      .step  = core_.dims().step,
+                      .vars  = core_.dims().vars};
+    CellRef var = vlog.makeVar();
+    outputs.push_back(static_cast<std::int64_t>(var));
+    break;
+  }
+  case OpcodeKind::MakeTerm: {
+    std::string functor;
+    if (!inputs.empty()) {
+      if (std::holds_alternative<std::string>(inputs[0])) {
+        functor = std::get<std::string>(inputs[0]);
+      } else {
+        functor = std::to_string(toInt(inputs[0]));
+      }
+    }
+    std::vector<CellRef> inCells = core_.inputsOf(opcode);
+    std::vector<CellRef> args;
+    std::size_t maxArgs = std::max(inCells.size(), inputs.size());
+    for (std::size_t i = 1; i < maxArgs; ++i) {
+      CellRef argCell = resolveCell(inCells, inputs, i, core_.arena());
+      if (argCell != noCell) {
+        args.push_back(argCell);
+      }
+    }
+    CellRef term = core_.arena().makeCell(functor);
+    CellRef prev = noCell;
+    for (CellRef arg : args) {
+      if (prev == noCell) {
+        core_.arena().link(term, core_.dims().grab, false, arg);
+      } else {
+        core_.arena().link(prev, core_.dims().step, false, arg);
+      }
+      prev = arg;
+    }
+    outputs.push_back(static_cast<std::int64_t>(term));
+    break;
+  }
+  case OpcodeKind::Deref: {
+    std::vector<CellRef> inCells = core_.inputsOf(opcode);
+    CellRef c = resolveCell(inCells, inputs, 0, core_.arena());
+    if (c != noCell) {
+      zigzag::Vlog vlog{.m     = core_.arena(),
+                        .clone = core_.dims().clone,
+                        .grab  = core_.dims().grab,
+                        .step  = core_.dims().step,
+                        .vars  = core_.dims().vars};
+      outputs.push_back(static_cast<std::int64_t>(vlog.deref(c)));
+    } else {
+      outputs.push_back(static_cast<std::int64_t>(noCell));
+    }
+    break;
+  }
+  case OpcodeKind::Choice: {
+    CellRef altOp = noCell;
+    if (!inputs.empty()) {
+      altOp = static_cast<CellRef>(toInt(inputs[0]));
+    }
+    pushChoicePoint(cursor, altOp);
+    outputs.push_back(true);
+    break;
+  }
+  case OpcodeKind::Fail: {
+    if (backtrack(cursor)) {
+      jumped = true;
+    } else {
+      return ExecutionResult{false, ContractViolationKind::None, opcode,
+                             "Logic failure: no remaining choice points"};
+    }
+    break;
+  }
+  case OpcodeKind::Cut: {
+    std::size_t barrier = 0;
+    if (!inputs.empty()) {
+      barrier =
+          static_cast<std::size_t>(std::max<std::int64_t>(0, toInt(inputs[0])));
+    }
+    cut(barrier);
+    outputs.push_back(true);
     break;
   }
   case OpcodeKind::Halt:

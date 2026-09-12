@@ -72,6 +72,24 @@ enum class OpcodeKind : std::uint8_t {
   Trim,
   ToLower,
   ToUpper,
+
+  // Vlog Logic Programming Extensions
+  Unify,
+  IsVar,
+  MakeVar,
+  MakeTerm,
+  Deref,
+  Choice,
+  Fail,
+  Cut,
+};
+
+struct ChoicePoint {
+  CellRef cursor{noCell};
+  CellRef altOp{noCell};
+  zigzag::Mark mark{};
+  CellRef stackFrame{noCell};
+  std::size_t cutBarrier{0};
 };
 
 class VortexVM {
@@ -95,6 +113,13 @@ public:
   void enableMemoization(CellRef opcode, std::string_view memoKey);
   [[nodiscard]] bool isMemoized(CellRef opcode) const;
   [[nodiscard]] std::string getMemoKey(CellRef opcode) const;
+
+  // -- Vlog Logic Programming & Choice Points ---------------------------------
+  void pushChoicePoint(CellRef cursor, CellRef altOp);
+  bool backtrack(CellRef cursor);
+  void cut(std::size_t cutBarrier = 0);
+  [[nodiscard]] std::size_t choiceDepth() const noexcept;
+  void clearChoicePoints();
 
   // -- Execution Lifecycle ----------------------------------------------------
   ExecutionResult step(CellRef cursor);
@@ -123,6 +148,7 @@ private:
   std::unordered_map<CellRef, OpcodeKind> opcodeMap_;
   std::unordered_map<CellRef, std::string> memoizedOps_;
   std::unordered_map<CellRef, CellRef> cursorPC_;
+  std::vector<ChoicePoint> choiceStack_;
 };
 
 } // namespace zigzag::vortex

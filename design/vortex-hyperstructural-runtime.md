@@ -1,6 +1,6 @@
 # Vortex Hyperstructural Runtime & zzstructure System Specification
 
-**Document Version:** 11.1 — Vortex Standard Library Architecture **Target Environment:**
+**Document Version:** 12.0 — Vlog Vortex Extension & std:logic Module **Target Environment:**
 Zero-Allocation Multidimensional Graph Manifolds & Logic Engine
 
 Vortex is a speculative language and runtime design: a programming model whose entire addressable
@@ -68,6 +68,10 @@ ______________________________________________________________________
   - [7.1 Spatial Module Topology: `d.stdlib` and Symbol Resolution](#71-spatial-module-topology-dstdlib-and-symbol-resolution)
   - [7.2 Standard Library Modules](#72-standard-library-modules)
   - [7.3 Metacircular Execution & Compilation into the Manifold](#73-metacircular-execution--compilation-into-the-manifold)
+- [8. Vlog Vortex Extension & `std:logic` Module](#8-vlog-vortex-extension--stdlogic-module)
+  - [8.1 System Dimension: `d.clause`](#81-system-dimension-dclause)
+  - [8.2 Logic VM Opcodes](#82-logic-vm-opcodes)
+  - [8.3 `std:logic` Standard Library Module](#83-stdlogic-standard-library-module)
 - [Appendix: Versioning and Change History](#appendix-versioning-and-change-history)
 
 ## 1. Architectural Foundation & Design Invariants
@@ -1044,6 +1048,80 @@ into user programs, or persisted to an operations spool via `promote()`.
 
 ______________________________________________________________________
 
+## 8. Vlog Vortex Extension & `std:logic` Module
+
+Vlog (§1, [vlog-logic-extension.md](vlog-logic-extension.md)) provides full first-order logic
+programming — unification, rational trees, choice points, backtracking, cut, and SLD resolution — as
+a pure program over Vortex's single-primitive invariant (`link` and `value`). It introduces zero new
+heaps, trails, or binding environments: variable bindings are `d.clone` rank splices, choice points
+are `ArenaManifold::Mark` high-water marks, and backtracking is an $O(1)$ `arena.release(mark)`
+truncation and trail replay.
+
+### 8.1 System Dimension: `d.clause`
+
+During system genesis (`VortexCore::initGenesis()`), the runtime mints **`d.clause`** on the
+`d.dims` rank. Predicates are cells along a module or workspace rank; each predicate's clauses
+extend posward along `+d.clause`:
+
+```mermaid
+graph TD
+    Pred["Predicate: 'append/3'"]
+    C1["Clause 1: append([], L, L)"]
+    C2["Clause 2: append([H|T], L, [H|R]) :- append(T, L, R)"]
+    Pred -->|"+d.clause"| C1
+    C1 -->|"+d.clause"| C2
+    C1 -->|"+d.grab"| H1["Head: append([], L, L)"]
+    C2 -->|"+d.grab"| H2["Head: append([H|T], L, [H|R])"]
+    C2 -->|"+d.spin"| B2["Body: append(T, L, R)"]
+```
+
+- **Head**: The clause head hangs posward on `+d.grab` from the clause cell.
+- **Body**: Body goals form an instruction stream posward along `+d.spin` (Vortex's standard process
+  axis).
+- **Logical Update View**: Clause traversal walks `+d.clause`. Since operations are append-only,
+  asserting or retracting clauses leaves prior microversions undisturbed.
+
+### 8.2 Logic VM Opcodes
+
+VortexVM incorporates eight dedicated logic opcodes implementing the Vlog instruction set:
+
+1. **`#UNIFY` (`OpcodeKind::Unify`)**: Unifies two cells or terms bound to its input wing. Numbers
+   compare by canonical 64-bit bits (R6); atoms compare by content; unbound variables bind via one
+   `d.clone` link (`splice`); compound terms unify recursively over `+d.grab` and `+d.step`. Writes
+   a boolean (`true`/`false`) to its output wing.
+1. **`#MAKE_VAR` (`OpcodeKind::MakeVar`)**: Mints a fresh unbound variable cell onto the `d.vars`
+   rank.
+1. **`#IS_VAR` (`OpcodeKind::IsVar`)**: Answers whether the input cell is an unbound variable
+   (membership on `d.vars` and empty content/value).
+1. **`#MAKE_TERM` (`OpcodeKind::MakeTerm`)**: Constructs a compound term cell with functor and
+   arguments chained along `+d.grab` and `+d.step`. Clones repeated or pre-linked variables along
+   `d.clone` to prevent spatial link collisions.
+1. **`#DEREF` (`OpcodeKind::Deref`)**: Resolves the clone master along `-d.clone`.
+1. **`#CHOICE` (`OpcodeKind::Choice`)**: Takes an arena snapshot (`mark()`) and pushes a choice
+   point frame recording the alternative target opcode.
+1. **`#FAIL` (`OpcodeKind::Fail`)**: Triggers immediate backtracking to the most recent choice
+   point, restoring the arena via `release(mark)`.
+1. **`#CUT` (`OpcodeKind::Cut`)**: Prunes choice points down to the recorded barrier depth without
+   undoing bindings made under them.
+
+### 8.3 `std:logic` Standard Library Module
+
+The standard library exports the `std:logic` module off `d.stdlib`:
+
+- **Primitives**: `std:logic/unify`, `std:logic/var`, `std:logic/is_var`, `std:logic/term`,
+  `std:logic/deref`, `std:logic/choice`, `std:logic/fail`, `std:logic/cut`.
+- **Built-in Predicates**:
+  - `std:logic/equal`: `equal(X, X)`.
+  - `std:logic/member`: `member(X, [X | _])`, `member(X, [_ | T]) :- member(X, T)`.
+  - `std:logic/append`: `append([], L, L)`, `append([H|T], L, [H|R]) :- append(T, L, R)`. Fully
+    reversible (concatenation and splitting).
+  - `std:logic/length`: Computes and verifies list lengths.
+- **SLD Resolution Engine**: `solveQuery` and `solveOnce` execute recursive depth-first search with
+  chronological backtracking, rational tree support ($X = f(X)$), and variable freshening via
+  `d.clone` ranks.
+
+______________________________________________________________________
+
 ## Appendix: Versioning and Change History
 
 **The version means something from here on.** It had not: both this document and its companion sat
@@ -1081,4 +1159,5 @@ table.
 | 10.0    | `a03ddcc` | 2026-09-11 | **`clone_generator` never hands out the master**; every pull is a fresh clone.                                                                |
 | 10.1    | `734513a` | 2026-09-11 | Unification and backtracking split into their own note; the deferred idea elaborated, asking the core for two methods.                        |
 | 11.0    | `db39d1a` | 2026-09-12 | Parameter pre/postprocessing along `d.spin`, Design by Contract (`d.contract`), and Vortex-native memoization library (`d.cache`).            |
-| 11.1    | HEAD      | 2026-09-12 | Vortex Standard Library architecture (written in Vortex): `d.stdlib` module rank, spatial symbol resolution, and core standard modules.       |
+| 11.1    | `19c985a` | 2026-09-12 | Vortex Standard Library architecture (written in Vortex): `d.stdlib` module rank, spatial symbol resolution, and core standard modules.       |
+| 12.0    | `1271d20` | 2026-09-12 | **Vlog Vortex Extension & `std:logic` Module**: `d.clause` dimension, logic opcodes, and SLD resolution over `ArenaManifold`.                 |

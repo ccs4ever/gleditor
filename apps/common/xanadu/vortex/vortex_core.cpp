@@ -40,6 +40,7 @@ void VortexCore::initGenesis() {
   dims_.pinningCursors = mintNamedDimension("d.pinning-cursors", lastDim);
   dims_.name           = mintNamedDimension("d.name", lastDim);
   dims_.stdlib         = mintNamedDimension("d.stdlib", lastDim);
+  dims_.clause         = mintNamedDimension("d.clause", lastDim);
 }
 
 std::optional<CellRef> VortexCore::link(CellRef cell, DimRef dim, bool negward,

@@ -15,6 +15,7 @@
  * 6. std:math       (abs, min, max, clamp, gcd, lcm, pow, sqrt)
  * 7. std:string     (split, join, starts_with, ends_with, to_upper, to_lower,
  * trim)
+ * 8. std:logic      (unification, terms, variables, choice points, resolution)
  */
 #ifndef COMMON_XANADU_VORTEX_STDLIB_HPP
 #define COMMON_XANADU_VORTEX_STDLIB_HPP
@@ -22,14 +23,23 @@
 #include <cstdint>
 #include <functional>
 #include <optional>
+#include <span>
 #include <string>
 #include <string_view>
+#include <unordered_map>
+#include <utility>
 #include <vector>
 
 #include "common/xanadu/vortex/vortex_core.hpp"
 #include "common/xanadu/vortex/vortex_vm.hpp"
 
 namespace zigzag::vortex {
+
+struct LogicSolution {
+  std::vector<std::pair<CellRef, CellRef>> bindings;
+  std::unordered_map<CellRef, CellRef> varMap;
+  std::unordered_map<std::string, std::string> formatted;
+};
 
 class VortexStdLib {
 public:
@@ -149,6 +159,41 @@ public:
                              std::string_view delim);
   static std::string strTrim(std::string_view s);
 
+  // -- Module 8: std:logic ----------------------------------------------------
+  CellRef makeVar(std::string_view name = {});
+  CellRef makeTerm(std::string_view functor,
+                   std::initializer_list<CellRef> args);
+  CellRef makeTerm(std::string_view functor, std::span<const CellRef> args);
+  CellRef makeCons(CellRef head, CellRef tail);
+  CellRef makeList(std::initializer_list<CellRef> elements);
+  CellRef makeList(std::span<const CellRef> elements);
+  [[nodiscard]] bool isVar(CellRef cell) const;
+  [[nodiscard]] CellRef deref(CellRef cell) const;
+  bool unify(CellRef a, CellRef b);
+  [[nodiscard]] std::vector<CellRef> argumentsOf(CellRef term) const;
+  [[nodiscard]] std::string functorOf(CellRef term) const;
+  [[nodiscard]] std::string renderTerm(CellRef term) const;
+
+  CellRef createPredicate(std::string_view name);
+  CellRef addClause(CellRef predCell, CellRef headTerm,
+                    std::span<const CellRef> bodyGoals = {});
+
+  [[nodiscard]] CellRef predicateEqual() const noexcept { return predEqual_; }
+  [[nodiscard]] CellRef predicateMember() const noexcept { return predMember_; }
+  [[nodiscard]] CellRef predicateAppend() const noexcept { return predAppend_; }
+  [[nodiscard]] CellRef predicateLength() const noexcept { return predLength_; }
+
+  bool solveOnce(CellRef goal, std::span<const CellRef> customPredicates = {});
+
+  std::vector<LogicSolution>
+  solveQuery(CellRef goal, std::span<const CellRef> customPredicates = {},
+             std::size_t maxSolutions = 100);
+
+  bool solve(CellRef goal,
+             std::function<bool(const LogicSolution &)> onSolution,
+             std::span<const CellRef> customPredicates = {},
+             std::size_t maxSolutions                  = 100);
+
 private:
   CellRef getOrCreateModule(std::string_view modulePath);
   void exportSymbol(CellRef moduleCell, std::string_view symbolName,
@@ -161,6 +206,7 @@ private:
   void buildMemoizeModule(CellRef mod);
   void buildFunctionalModule(CellRef mod);
   void buildCollectionsModule(CellRef mod);
+  void buildLogicModule(CellRef mod);
 
   VortexCore &core_;
   VortexVM &vm_;
@@ -170,6 +216,11 @@ private:
     std::vector<CellRef> outputParams;
   };
   std::unordered_map<CellRef, RoutineBinding> routineBindings_;
+
+  CellRef predEqual_{noCell};
+  CellRef predMember_{noCell};
+  CellRef predAppend_{noCell};
+  CellRef predLength_{noCell};
 };
 
 } // namespace zigzag::vortex

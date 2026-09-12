@@ -1,5 +1,8 @@
 #include "common/xanadu/zigzag/vlog.hpp"
 
+#include <algorithm>
+#include <vector>
+
 namespace zigzag {
 
 Vlog Vlog::over(ArenaManifold &arena) {
@@ -33,25 +36,45 @@ CellRef Vlog::makeVar() {
 }
 
 CellRef Vlog::makeTerm(const std::string_view functor,
-                       const std::initializer_list<CellRef> args) {
+                       const std::span<const CellRef> args) {
   const auto term  = m.makeCell(functor);
   CellRef previous = noCell;
+  std::vector<CellRef> seen;
   for (const CellRef arg : args) {
-    if (noCell == previous) {
-      m.link(term, grab, false, arg);
-    } else {
-      m.link(previous, step, false, arg);
+    CellRef actualArg = arg;
+    if (noCell != arg &&
+        (std::find(seen.begin(), seen.end(), arg) != seen.end() ||
+         noCell != m.linked(arg, grab, true) ||
+         noCell != m.linked(arg, step, true) ||
+         noCell != m.linked(arg, step, false))) {
+      actualArg = m.makeCell();
+      m.link(endOfRank(arg, clone, false), clone, false, actualArg);
     }
-    previous = arg;
+    seen.push_back(actualArg);
+    if (noCell == previous) {
+      m.link(term, grab, false, actualArg);
+    } else {
+      m.link(previous, step, false, actualArg);
+    }
+    previous = actualArg;
   }
   return term;
 }
 
+CellRef Vlog::makeTerm(const std::string_view functor,
+                       const std::initializer_list<CellRef> args) {
+  return makeTerm(functor, std::span<const CellRef>{args.begin(), args.end()});
+}
+
 std::vector<CellRef> Vlog::argumentsOf(const CellRef ref) const {
   std::vector<CellRef> args;
-  CellRef arg = m.linked(ref, grab, false);
+  const CellRef actual = deref(ref);
+  CellRef arg          = m.linked(actual, grab, false);
   for (std::size_t steps = 0; noCell != arg && steps <= m.cellCount();
        steps++) {
+    if (std::find(args.begin(), args.end(), arg) != args.end()) {
+      break;
+    }
     args.push_back(arg);
     arg = m.linked(arg, step, false);
   }
