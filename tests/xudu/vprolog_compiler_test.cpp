@@ -297,4 +297,60 @@ TEST(VPrologCompilerTest, IntrospectVortexStdLib) {
   EXPECT_TRUE(foundTrim);
 }
 
+TEST(VPrologCompilerTest, IntrospectVortexInstructionsAndPipelines) {
+  CompilerTestHarness h;
+
+  // std:math/clamp is composed of a 2-instruction pipeline:
+  // #CLAMP_MAX -> #CLAMP_MIN
+  CompiledQuery qClamp = h.compiler.compileQuery(
+      "vortex_instruction('std:math/clamp', Step, Label)");
+  auto clampSols = h.compiler.solve(qClamp);
+  ASSERT_EQ(clampSols.size(), 2u);
+  EXPECT_EQ(clampSols[0].formatted.at("Step"), "0");
+  EXPECT_EQ(clampSols[0].formatted.at("Label"), "#CLAMP_MAX");
+  EXPECT_EQ(clampSols[1].formatted.at("Step"), "1");
+  EXPECT_EQ(clampSols[1].formatted.at("Label"), "#CLAMP_MIN");
+
+  // std:string/clean is composed of #STR_TRIM -> #STR_TO_LOWER
+  CompiledQuery qClean = h.compiler.compileQuery(
+      "vortex_instruction('std:string/clean', Step, Label)");
+  auto cleanSols = h.compiler.solve(qClean);
+  ASSERT_EQ(cleanSols.size(), 2u);
+  EXPECT_EQ(cleanSols[0].formatted.at("Label"), "#STR_TRIM");
+  EXPECT_EQ(cleanSols[1].formatted.at("Label"), "#STR_TO_LOWER");
+}
+
+TEST(VPrologCompilerTest, IntrospectVortexContractsAndParams) {
+  CompilerTestHarness h;
+
+  // std:math/div has a precondition: #REQUIRE_NON_ZERO
+  CompiledQuery qDiv =
+      h.compiler.compileQuery("vortex_contract('std:math/div', Type, Label)");
+  auto divSols = h.compiler.solve(qDiv);
+  ASSERT_GE(divSols.size(), 1u);
+  EXPECT_EQ(divSols[0].formatted.at("Type"), "precondition");
+  EXPECT_EQ(divSols[0].formatted.at("Label"), "#REQUIRE_NON_ZERO");
+
+  // std:math/abs has a postcondition: #REQUIRE_NON_NEGATIVE
+  CompiledQuery qAbs =
+      h.compiler.compileQuery("vortex_contract('std:math/abs', Type, Label)");
+  auto absSols = h.compiler.solve(qAbs);
+  ASSERT_GE(absSols.size(), 1u);
+  EXPECT_EQ(absSols[0].formatted.at("Type"), "postcondition");
+  EXPECT_EQ(absSols[0].formatted.at("Label"), "#REQUIRE_NON_NEGATIVE");
+
+  // std:math/max has input and output wings introspectable via vortex_param/4
+  CompiledQuery qParams = h.compiler.compileQuery(
+      "vortex_param('std:math/max', Wing, Slot, Target)");
+  auto paramSols = h.compiler.solve(qParams);
+  // max has 2 inputs and 1 output
+  ASSERT_EQ(paramSols.size(), 3u);
+  EXPECT_EQ(paramSols[0].formatted.at("Wing"), "input");
+  EXPECT_EQ(paramSols[0].formatted.at("Slot"), "0");
+  EXPECT_EQ(paramSols[1].formatted.at("Wing"), "input");
+  EXPECT_EQ(paramSols[1].formatted.at("Slot"), "1");
+  EXPECT_EQ(paramSols[2].formatted.at("Wing"), "output");
+  EXPECT_EQ(paramSols[2].formatted.at("Slot"), "0");
+}
+
 } // namespace

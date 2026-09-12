@@ -82,6 +82,34 @@ TEST(VortexStdLibTest, SpatialSymbolResolutionAndInvocation) {
                                                static_cast<std::int64_t>(17)});
   ASSERT_EQ(addRes.size(), 1u);
   EXPECT_EQ(addRes[0], CellValue(static_cast<std::int64_t>(42)));
+
+  // Call std:math/sub
+  auto subRes = h.stdlib.call("std:math/sub", {static_cast<std::int64_t>(50),
+                                               static_cast<std::int64_t>(8)});
+  ASSERT_EQ(subRes.size(), 1u);
+  EXPECT_EQ(subRes[0], CellValue(static_cast<std::int64_t>(42)));
+
+  // Call std:math/div
+  auto divRes = h.stdlib.call("std:math/div", {static_cast<std::int64_t>(84),
+                                               static_cast<std::int64_t>(2)});
+  ASSERT_EQ(divRes.size(), 1u);
+  EXPECT_EQ(divRes[0], CellValue(static_cast<std::int64_t>(42)));
+
+  // Call std:math/div by zero fails precondition contract -> empty result
+  auto divZero = h.stdlib.call("std:math/div", {static_cast<std::int64_t>(42),
+                                                static_cast<std::int64_t>(0)});
+  EXPECT_TRUE(divZero.empty());
+
+  // Call std:math/mod
+  auto modRes = h.stdlib.call("std:math/mod", {static_cast<std::int64_t>(47),
+                                               static_cast<std::int64_t>(5)});
+  ASSERT_EQ(modRes.size(), 1u);
+  EXPECT_EQ(modRes[0], CellValue(static_cast<std::int64_t>(2)));
+
+  // Call std:math/neg
+  auto negRes = h.stdlib.call("std:math/neg", {static_cast<std::int64_t>(42)});
+  ASSERT_EQ(negRes.size(), 1u);
+  EXPECT_EQ(negRes[0], CellValue(static_cast<std::int64_t>(-42)));
 }
 
 TEST(VortexStdLibTest, StringModuleOperations) {
@@ -104,6 +132,11 @@ TEST(VortexStdLibTest, StringModuleOperations) {
       h.stdlib.call("std:string/trim", {std::string("   padded text   ")});
   ASSERT_EQ(trimRes.size(), 1u);
   EXPECT_EQ(trimRes[0], CellValue(std::string("padded text")));
+
+  auto cleanRes =
+      h.stdlib.call("std:string/clean", {std::string("   HeLLo WoRLd   ")});
+  ASSERT_EQ(cleanRes.size(), 1u);
+  EXPECT_EQ(cleanRes[0], CellValue(std::string("hello world")));
 
   // Static string helpers
   EXPECT_TRUE(VortexStdLib::strStartsWith("hyperstructure", "hyper"));

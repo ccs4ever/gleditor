@@ -446,6 +446,177 @@ bool solveQueryHelper(VortexStdLib &stdlib, VortexCore &core,
     return true;
   }
 
+  // Manifold stdlib introspection: vortex_instruction(Path, StepIndex,
+  // OpcodeLabel)
+  if (goalFunctor == "vortex_instruction" && goalArgs.size() == 3) {
+    for (const auto &modName : stdlib.modules()) {
+      for (const auto &symName : stdlib.symbolsInModule(modName)) {
+        if (solutionsCount >= maxSolutions) break;
+        std::string fullPath = modName + "/" + symName;
+        CellRef entryOp      = stdlib.resolve(fullPath);
+        if (entryOp == noCell) continue;
+
+        CellRef curOp        = entryOp;
+        std::int64_t stepIdx = 0;
+        std::size_t limit    = core.arena().cellCount() + 1;
+        while (curOp != noCell && limit-- > 0) {
+          if (solutionsCount >= maxSolutions) break;
+          auto mark         = core.arena().mark();
+          CellRef pCell     = core.arena().makeCell(fullPath);
+          CellRef idxCell   = core.arena().makeScalarCell(stepIdx);
+          std::string label = core.arena().textOf(curOp);
+          CellRef lblCell   = core.arena().makeCell(label);
+
+          if (stdlib.unify(goalArgs[0], pCell) &&
+              stdlib.unify(goalArgs[1], idxCell) &&
+              stdlib.unify(goalArgs[2], lblCell)) {
+            bool keepGoing = solveQueryHelper(
+                stdlib, core, restGoals, candidatePreds, queryVars, onSolution,
+                solutionsCount, maxSolutions, depth + 1);
+            core.arena().release(mark);
+            if (!keepGoing && onSolution != nullptr) {
+              return false;
+            }
+          } else {
+            core.arena().release(mark);
+          }
+          curOp = core.arena().linked(curOp, core.dims().spin, false);
+          stepIdx++;
+        }
+      }
+      if (solutionsCount >= maxSolutions) break;
+    }
+    return true;
+  }
+
+  // Manifold stdlib introspection: vortex_contract(Path, Type, ContractLabel)
+  if (goalFunctor == "vortex_contract" && goalArgs.size() == 3) {
+    for (const auto &modName : stdlib.modules()) {
+      for (const auto &symName : stdlib.symbolsInModule(modName)) {
+        if (solutionsCount >= maxSolutions) break;
+        std::string fullPath = modName + "/" + symName;
+        CellRef entryOp      = stdlib.resolve(fullPath);
+        if (entryOp == noCell) continue;
+
+        CellRef curOp     = entryOp;
+        std::size_t limit = core.arena().cellCount() + 1;
+        while (curOp != noCell && limit-- > 0) {
+          // Preconditions along -d.contract
+          std::vector<CellRef> preconds = core.preconditionsOf(curOp);
+          for (CellRef p : preconds) {
+            if (solutionsCount >= maxSolutions) break;
+            auto mark         = core.arena().mark();
+            CellRef pCell     = core.arena().makeCell(fullPath);
+            CellRef typeCell  = core.arena().makeCell("precondition");
+            std::string label = core.arena().textOf(p);
+            CellRef lblCell   = core.arena().makeCell(label);
+            if (stdlib.unify(goalArgs[0], pCell) &&
+                stdlib.unify(goalArgs[1], typeCell) &&
+                stdlib.unify(goalArgs[2], lblCell)) {
+              bool keepGoing = solveQueryHelper(
+                  stdlib, core, restGoals, candidatePreds, queryVars,
+                  onSolution, solutionsCount, maxSolutions, depth + 1);
+              core.arena().release(mark);
+              if (!keepGoing && onSolution != nullptr) return false;
+            } else {
+              core.arena().release(mark);
+            }
+          }
+
+          // Postconditions along +d.contract
+          std::vector<CellRef> postconds = core.postconditionsOf(curOp);
+          for (CellRef p : postconds) {
+            if (solutionsCount >= maxSolutions) break;
+            auto mark         = core.arena().mark();
+            CellRef pCell     = core.arena().makeCell(fullPath);
+            CellRef typeCell  = core.arena().makeCell("postcondition");
+            std::string label = core.arena().textOf(p);
+            CellRef lblCell   = core.arena().makeCell(label);
+            if (stdlib.unify(goalArgs[0], pCell) &&
+                stdlib.unify(goalArgs[1], typeCell) &&
+                stdlib.unify(goalArgs[2], lblCell)) {
+              bool keepGoing = solveQueryHelper(
+                  stdlib, core, restGoals, candidatePreds, queryVars,
+                  onSolution, solutionsCount, maxSolutions, depth + 1);
+              core.arena().release(mark);
+              if (!keepGoing && onSolution != nullptr) return false;
+            } else {
+              core.arena().release(mark);
+            }
+          }
+
+          curOp = core.arena().linked(curOp, core.dims().spin, false);
+        }
+      }
+      if (solutionsCount >= maxSolutions) break;
+    }
+    return true;
+  }
+
+  // Manifold stdlib introspection: vortex_param(Path, Wing, SlotIndex, Target)
+  if (goalFunctor == "vortex_param" && goalArgs.size() == 4) {
+    for (const auto &modName : stdlib.modules()) {
+      for (const auto &symName : stdlib.symbolsInModule(modName)) {
+        if (solutionsCount >= maxSolutions) break;
+        std::string fullPath = modName + "/" + symName;
+        CellRef entryOp      = stdlib.resolve(fullPath);
+        if (entryOp == noCell) continue;
+
+        // Input wing
+        std::vector<CellRef> inCells = core.inputsOf(entryOp);
+        for (std::size_t i = 0; i < inCells.size(); ++i) {
+          if (solutionsCount >= maxSolutions) break;
+          auto mark     = core.arena().mark();
+          CellRef pCell = core.arena().makeCell(fullPath);
+          CellRef wCell = core.arena().makeCell("input");
+          CellRef idxCell =
+              core.arena().makeScalarCell(static_cast<std::int64_t>(i));
+          CellRef slotCell = core.arena().makeScalarCell(
+              static_cast<std::int64_t>(inCells[i]));
+          if (stdlib.unify(goalArgs[0], pCell) &&
+              stdlib.unify(goalArgs[1], wCell) &&
+              stdlib.unify(goalArgs[2], idxCell) &&
+              stdlib.unify(goalArgs[3], slotCell)) {
+            bool keepGoing = solveQueryHelper(
+                stdlib, core, restGoals, candidatePreds, queryVars, onSolution,
+                solutionsCount, maxSolutions, depth + 1);
+            core.arena().release(mark);
+            if (!keepGoing && onSolution != nullptr) return false;
+          } else {
+            core.arena().release(mark);
+          }
+        }
+
+        // Output wing
+        std::vector<CellRef> outCells = core.outputsOf(entryOp);
+        for (std::size_t i = 0; i < outCells.size(); ++i) {
+          if (solutionsCount >= maxSolutions) break;
+          auto mark     = core.arena().mark();
+          CellRef pCell = core.arena().makeCell(fullPath);
+          CellRef wCell = core.arena().makeCell("output");
+          CellRef idxCell =
+              core.arena().makeScalarCell(static_cast<std::int64_t>(i));
+          CellRef slotCell = core.arena().makeScalarCell(
+              static_cast<std::int64_t>(outCells[i]));
+          if (stdlib.unify(goalArgs[0], pCell) &&
+              stdlib.unify(goalArgs[1], wCell) &&
+              stdlib.unify(goalArgs[2], idxCell) &&
+              stdlib.unify(goalArgs[3], slotCell)) {
+            bool keepGoing = solveQueryHelper(
+                stdlib, core, restGoals, candidatePreds, queryVars, onSolution,
+                solutionsCount, maxSolutions, depth + 1);
+            core.arena().release(mark);
+            if (!keepGoing && onSolution != nullptr) return false;
+          } else {
+            core.arena().release(mark);
+          }
+        }
+      }
+      if (solutionsCount >= maxSolutions) break;
+    }
+    return true;
+  }
+
   // Arithmetic evaluation: is/2
   if (goalFunctor == "is" && goalArgs.size() == 2) {
     double evalResult = 0.0;
@@ -650,18 +821,26 @@ void VortexStdLib::bootstrap() {
 }
 
 void VortexStdLib::buildMathModule(CellRef mod) {
-  // abs: #ABS in out
+  // abs: #MATH_ABS in out (postcondition: out >= 0)
   {
     CellRef in  = core_.arena().makeCell();
     CellRef out = core_.arena().makeCell();
     CellRef op  = vm_.mintOpcode(OpcodeKind::Abs, "#MATH_ABS");
     core_.bindInput(op, in);
     core_.bindOutput(op, out);
+
+    CellRef zero = core_.arena().makeScalarCell(static_cast<std::int64_t>(0));
+    CellRef reqNonNeg =
+        vm_.mintOpcode(OpcodeKind::Gte, "#REQUIRE_NON_NEGATIVE");
+    core_.bindInput(reqNonNeg, out);
+    core_.bindInput(reqNonNeg, zero);
+    core_.attachPostcondition(op, reqNonNeg);
+
     routineBindings_[op] = {{in}, {out}};
     exportSymbol(mod, "abs", op);
   }
 
-  // min: #MIN in0 in1 out
+  // min: #MATH_MIN in0 in1 out
   {
     CellRef in0 = core_.arena().makeCell();
     CellRef in1 = core_.arena().makeCell();
@@ -674,7 +853,7 @@ void VortexStdLib::buildMathModule(CellRef mod) {
     exportSymbol(mod, "min", op);
   }
 
-  // max: #MAX in0 in1 out
+  // max: #MATH_MAX in0 in1 out
   {
     CellRef in0 = core_.arena().makeCell();
     CellRef in1 = core_.arena().makeCell();
@@ -687,22 +866,37 @@ void VortexStdLib::buildMathModule(CellRef mod) {
     exportSymbol(mod, "max", op);
   }
 
-  // clamp: #CLAMP in lo hi out
+  // clamp: #CLAMP_MAX in lo -> temp; #CLAMP_MIN temp hi -> out (contract: lo <=
+  // hi)
   {
-    CellRef in  = core_.arena().makeCell();
-    CellRef lo  = core_.arena().makeCell();
-    CellRef hi  = core_.arena().makeCell();
-    CellRef out = core_.arena().makeCell();
-    CellRef op  = vm_.mintOpcode(OpcodeKind::Clamp, "#MATH_CLAMP");
-    core_.bindInput(op, in);
-    core_.bindInput(op, lo);
-    core_.bindInput(op, hi);
-    core_.bindOutput(op, out);
-    routineBindings_[op] = {{in, lo, hi}, {out}};
-    exportSymbol(mod, "clamp", op);
+    CellRef in   = core_.arena().makeCell();
+    CellRef lo   = core_.arena().makeCell();
+    CellRef hi   = core_.arena().makeCell();
+    CellRef temp = core_.arena().makeCell();
+    CellRef out  = core_.arena().makeCell();
+
+    CellRef opMax = vm_.mintOpcode(OpcodeKind::Max, "#CLAMP_MAX");
+    core_.bindInput(opMax, in);
+    core_.bindInput(opMax, lo);
+    core_.bindOutput(opMax, temp);
+
+    CellRef reqRange = vm_.mintOpcode(OpcodeKind::Lte, "#REQUIRE_RANGE_VALID");
+    core_.bindInput(reqRange, lo);
+    core_.bindInput(reqRange, hi);
+    core_.attachPrecondition(opMax, reqRange);
+
+    CellRef opMin = vm_.mintOpcode(OpcodeKind::Min, "#CLAMP_MIN");
+    core_.bindInput(opMin, temp);
+    core_.bindInput(opMin, hi);
+    core_.bindOutput(opMin, out);
+
+    core_.arena().link(opMax, core_.dims().spin, false, opMin);
+
+    routineBindings_[opMax] = {{in, lo, hi}, {out}};
+    exportSymbol(mod, "clamp", opMax);
   }
 
-  // add: #ADD in0 in1 out
+  // add: #MATH_ADD in0 in1 out
   {
     CellRef in0 = core_.arena().makeCell();
     CellRef in1 = core_.arena().makeCell();
@@ -715,7 +909,20 @@ void VortexStdLib::buildMathModule(CellRef mod) {
     exportSymbol(mod, "add", op);
   }
 
-  // mul: #MUL in0 in1 out
+  // sub: #MATH_SUB in0 in1 out
+  {
+    CellRef in0 = core_.arena().makeCell();
+    CellRef in1 = core_.arena().makeCell();
+    CellRef out = core_.arena().makeCell();
+    CellRef op  = vm_.mintOpcode(OpcodeKind::Sub, "#MATH_SUB");
+    core_.bindInput(op, in0);
+    core_.bindInput(op, in1);
+    core_.bindOutput(op, out);
+    routineBindings_[op] = {{in0, in1}, {out}};
+    exportSymbol(mod, "sub", op);
+  }
+
+  // mul: #MATH_MUL in0 in1 out
   {
     CellRef in0 = core_.arena().makeCell();
     CellRef in1 = core_.arena().makeCell();
@@ -727,10 +934,61 @@ void VortexStdLib::buildMathModule(CellRef mod) {
     routineBindings_[op] = {{in0, in1}, {out}};
     exportSymbol(mod, "mul", op);
   }
+
+  // div: #MATH_DIV in0 in1 out (precondition: in1 != 0)
+  {
+    CellRef in0 = core_.arena().makeCell();
+    CellRef in1 = core_.arena().makeCell();
+    CellRef out = core_.arena().makeCell();
+    CellRef op  = vm_.mintOpcode(OpcodeKind::Div, "#MATH_DIV");
+    core_.bindInput(op, in0);
+    core_.bindInput(op, in1);
+    core_.bindOutput(op, out);
+
+    CellRef zero = core_.arena().makeScalarCell(static_cast<std::int64_t>(0));
+    CellRef reqDiff = vm_.mintOpcode(OpcodeKind::Neq, "#REQUIRE_NON_ZERO");
+    core_.bindInput(reqDiff, in1);
+    core_.bindInput(reqDiff, zero);
+    core_.attachPrecondition(op, reqDiff);
+
+    routineBindings_[op] = {{in0, in1}, {out}};
+    exportSymbol(mod, "div", op);
+  }
+
+  // mod: #MATH_MOD in0 in1 out (precondition: in1 != 0)
+  {
+    CellRef in0 = core_.arena().makeCell();
+    CellRef in1 = core_.arena().makeCell();
+    CellRef out = core_.arena().makeCell();
+    CellRef op  = vm_.mintOpcode(OpcodeKind::Mod, "#MATH_MOD");
+    core_.bindInput(op, in0);
+    core_.bindInput(op, in1);
+    core_.bindOutput(op, out);
+
+    CellRef zero = core_.arena().makeScalarCell(static_cast<std::int64_t>(0));
+    CellRef reqDiff = vm_.mintOpcode(OpcodeKind::Neq, "#REQUIRE_NON_ZERO");
+    core_.bindInput(reqDiff, in1);
+    core_.bindInput(reqDiff, zero);
+    core_.attachPrecondition(op, reqDiff);
+
+    routineBindings_[op] = {{in0, in1}, {out}};
+    exportSymbol(mod, "mod", op);
+  }
+
+  // neg: #MATH_NEG in out
+  {
+    CellRef in  = core_.arena().makeCell();
+    CellRef out = core_.arena().makeCell();
+    CellRef op  = vm_.mintOpcode(OpcodeKind::Neg, "#MATH_NEG");
+    core_.bindInput(op, in);
+    core_.bindOutput(op, out);
+    routineBindings_[op] = {{in}, {out}};
+    exportSymbol(mod, "neg", op);
+  }
 }
 
 void VortexStdLib::buildStringModule(CellRef mod) {
-  // to_lower: #TO_LOWER in out
+  // to_lower: #STR_TO_LOWER in out
   {
     CellRef in  = core_.arena().makeCell();
     CellRef out = core_.arena().makeCell();
@@ -741,7 +999,7 @@ void VortexStdLib::buildStringModule(CellRef mod) {
     exportSymbol(mod, "to_lower", op);
   }
 
-  // to_upper: #TO_UPPER in out
+  // to_upper: #STR_TO_UPPER in out
   {
     CellRef in  = core_.arena().makeCell();
     CellRef out = core_.arena().makeCell();
@@ -752,7 +1010,7 @@ void VortexStdLib::buildStringModule(CellRef mod) {
     exportSymbol(mod, "to_upper", op);
   }
 
-  // trim: #TRIM in out
+  // trim: #STR_TRIM in out
   {
     CellRef in  = core_.arena().makeCell();
     CellRef out = core_.arena().makeCell();
@@ -761,6 +1019,26 @@ void VortexStdLib::buildStringModule(CellRef mod) {
     core_.bindOutput(op, out);
     routineBindings_[op] = {{in}, {out}};
     exportSymbol(mod, "trim", op);
+  }
+
+  // clean: #STR_TRIM in -> temp; #STR_TO_LOWER temp -> out
+  {
+    CellRef in   = core_.arena().makeCell();
+    CellRef temp = core_.arena().makeCell();
+    CellRef out  = core_.arena().makeCell();
+
+    CellRef opTrim = vm_.mintOpcode(OpcodeKind::Trim, "#STR_TRIM");
+    core_.bindInput(opTrim, in);
+    core_.bindOutput(opTrim, temp);
+
+    CellRef opLower = vm_.mintOpcode(OpcodeKind::ToLower, "#STR_TO_LOWER");
+    core_.bindInput(opLower, temp);
+    core_.bindOutput(opLower, out);
+
+    core_.arena().link(opTrim, core_.dims().spin, false, opLower);
+
+    routineBindings_[opTrim] = {{in}, {out}};
+    exportSymbol(mod, "clean", opTrim);
   }
 }
 
@@ -779,28 +1057,192 @@ void VortexStdLib::buildPipelineModule(CellRef mod) {
 }
 
 void VortexStdLib::buildMemoizeModule(CellRef mod) {
-  CellRef stubOp = vm_.mintOpcode(OpcodeKind::Nop, "#MEMO_DISPATCH");
-  exportSymbol(mod, "memoize", stubOp);
+  // memoize: targetOp, cacheKey, capacity
+  {
+    CellRef targetOp = core_.arena().makeCell();
+    CellRef cacheKey = core_.arena().makeCell();
+    CellRef capacity = core_.arena().makeCell();
+    CellRef op       = vm_.mintOpcode(OpcodeKind::Nop, "#MEMO_WRAPPER");
+    core_.bindInput(op, targetOp);
+    core_.bindInput(op, cacheKey);
+    core_.bindInput(op, capacity);
+    routineBindings_[op] = {{targetOp, cacheKey, capacity}, {}};
+    exportSymbol(mod, "memoize", op);
+  }
+
+  // flush: cacheKey -> status
+  {
+    CellRef cacheKey = core_.arena().makeCell();
+    CellRef status   = core_.arena().makeCell();
+    CellRef op       = vm_.mintOpcode(OpcodeKind::Nop, "#MEMO_FLUSH");
+    core_.bindInput(op, cacheKey);
+    core_.bindOutput(op, status);
+    routineBindings_[op] = {{cacheKey}, {status}};
+    exportSymbol(mod, "flush", op);
+  }
+
+  // retire: cacheKey -> status
+  {
+    CellRef cacheKey = core_.arena().makeCell();
+    CellRef status   = core_.arena().makeCell();
+    CellRef op       = vm_.mintOpcode(OpcodeKind::Nop, "#MEMO_RETIRE");
+    core_.bindInput(op, cacheKey);
+    core_.bindOutput(op, status);
+    routineBindings_[op] = {{cacheKey}, {status}};
+    exportSymbol(mod, "retire", op);
+  }
 }
 
 void VortexStdLib::buildFunctionalModule(CellRef mod) {
-  CellRef stubMap = vm_.mintOpcode(OpcodeKind::Nop, "#FUNC_MAP");
-  exportSymbol(mod, "map", stubMap);
-  CellRef stubFilter = vm_.mintOpcode(OpcodeKind::Nop, "#FUNC_FILTER");
-  exportSymbol(mod, "filter", stubFilter);
-  CellRef stubFold = vm_.mintOpcode(OpcodeKind::Nop, "#FUNC_FOLD");
-  exportSymbol(mod, "fold", stubFold);
-  CellRef stubZip = vm_.mintOpcode(OpcodeKind::Nop, "#FUNC_ZIP");
-  exportSymbol(mod, "zip", stubZip);
+  // map: inHead, inDim, outDim, fnOp -> outHead
+  {
+    CellRef inHead = core_.arena().makeCell();
+    CellRef inDim  = core_.arena().makeCell();
+    CellRef outDim = core_.arena().makeCell();
+    CellRef fnOp   = core_.arena().makeCell();
+    CellRef out    = core_.arena().makeCell();
+    CellRef op     = vm_.mintOpcode(OpcodeKind::Nop, "#FUNC_MAP");
+    core_.bindInput(op, inHead);
+    core_.bindInput(op, inDim);
+    core_.bindInput(op, outDim);
+    core_.bindInput(op, fnOp);
+    core_.bindOutput(op, out);
+    routineBindings_[op] = {{inHead, inDim, outDim, fnOp}, {out}};
+    exportSymbol(mod, "map", op);
+  }
+
+  // filter: inHead, inDim, outDim, predOp -> outHead
+  {
+    CellRef inHead = core_.arena().makeCell();
+    CellRef inDim  = core_.arena().makeCell();
+    CellRef outDim = core_.arena().makeCell();
+    CellRef predOp = core_.arena().makeCell();
+    CellRef out    = core_.arena().makeCell();
+    CellRef op     = vm_.mintOpcode(OpcodeKind::Nop, "#FUNC_FILTER");
+    core_.bindInput(op, inHead);
+    core_.bindInput(op, inDim);
+    core_.bindInput(op, outDim);
+    core_.bindInput(op, predOp);
+    core_.bindOutput(op, out);
+    routineBindings_[op] = {{inHead, inDim, outDim, predOp}, {out}};
+    exportSymbol(mod, "filter", op);
+  }
+
+  // fold: inHead, inDim, initial, fnOp -> acc
+  {
+    CellRef inHead  = core_.arena().makeCell();
+    CellRef inDim   = core_.arena().makeCell();
+    CellRef initial = core_.arena().makeCell();
+    CellRef fnOp    = core_.arena().makeCell();
+    CellRef out     = core_.arena().makeCell();
+    CellRef op      = vm_.mintOpcode(OpcodeKind::Nop, "#FUNC_FOLD");
+    core_.bindInput(op, inHead);
+    core_.bindInput(op, inDim);
+    core_.bindInput(op, initial);
+    core_.bindInput(op, fnOp);
+    core_.bindOutput(op, out);
+    routineBindings_[op] = {{inHead, inDim, initial, fnOp}, {out}};
+    exportSymbol(mod, "fold", op);
+  }
+
+  // zip: headA, headB, dimA, dimB, outDim -> outHead
+  {
+    CellRef headA  = core_.arena().makeCell();
+    CellRef headB  = core_.arena().makeCell();
+    CellRef dimA   = core_.arena().makeCell();
+    CellRef dimB   = core_.arena().makeCell();
+    CellRef outDim = core_.arena().makeCell();
+    CellRef out    = core_.arena().makeCell();
+    CellRef op     = vm_.mintOpcode(OpcodeKind::Nop, "#FUNC_ZIP");
+    core_.bindInput(op, headA);
+    core_.bindInput(op, headB);
+    core_.bindInput(op, dimA);
+    core_.bindInput(op, dimB);
+    core_.bindInput(op, outDim);
+    core_.bindOutput(op, out);
+    routineBindings_[op] = {{headA, headB, dimA, dimB, outDim}, {out}};
+    exportSymbol(mod, "zip", op);
+  }
 }
 
 void VortexStdLib::buildCollectionsModule(CellRef mod) {
-  CellRef stubList = vm_.mintOpcode(OpcodeKind::Nop, "#COLL_LIST");
-  exportSymbol(mod, "list", stubList);
-  CellRef stubMap = vm_.mintOpcode(OpcodeKind::Nop, "#COLL_MAP");
-  exportSymbol(mod, "map", stubMap);
-  CellRef stubGrid = vm_.mintOpcode(OpcodeKind::Nop, "#COLL_GRID");
-  exportSymbol(mod, "grid", stubGrid);
+  // list: items, dim -> head
+  {
+    CellRef inItems = core_.arena().makeCell();
+    CellRef inDim   = core_.arena().makeCell();
+    CellRef outHead = core_.arena().makeCell();
+    CellRef op      = vm_.mintOpcode(OpcodeKind::Nop, "#COLL_LIST");
+    core_.bindInput(op, inItems);
+    core_.bindInput(op, inDim);
+    core_.bindOutput(op, outHead);
+    routineBindings_[op] = {{inItems, inDim}, {outHead}};
+    exportSymbol(mod, "list", op);
+  }
+
+  // map: entries -> head
+  {
+    CellRef inEntries = core_.arena().makeCell();
+    CellRef outHead   = core_.arena().makeCell();
+    CellRef op        = vm_.mintOpcode(OpcodeKind::Nop, "#COLL_MAP");
+    core_.bindInput(op, inEntries);
+    core_.bindOutput(op, outHead);
+    routineBindings_[op] = {{inEntries}, {outHead}};
+    exportSymbol(mod, "map", op);
+  }
+
+  // grid: rows, cols -> head
+  {
+    CellRef inRows  = core_.arena().makeCell();
+    CellRef inCols  = core_.arena().makeCell();
+    CellRef outHead = core_.arena().makeCell();
+    CellRef op      = vm_.mintOpcode(OpcodeKind::Nop, "#COLL_GRID");
+    core_.bindInput(op, inRows);
+    core_.bindInput(op, inCols);
+    core_.bindOutput(op, outHead);
+    routineBindings_[op] = {{inRows, inCols}, {outHead}};
+    exportSymbol(mod, "grid", op);
+  }
+
+  // push_back: head, val, dim
+  {
+    CellRef inHead = core_.arena().makeCell();
+    CellRef inVal  = core_.arena().makeCell();
+    CellRef inDim  = core_.arena().makeCell();
+    CellRef op     = vm_.mintOpcode(OpcodeKind::Nop, "#COLL_PUSH_BACK");
+    core_.bindInput(op, inHead);
+    core_.bindInput(op, inVal);
+    core_.bindInput(op, inDim);
+    routineBindings_[op] = {{inHead, inVal, inDim}, {}};
+    exportSymbol(mod, "push_back", op);
+  }
+
+  // push_front: head, val, dim -> outHead
+  {
+    CellRef inHead  = core_.arena().makeCell();
+    CellRef inVal   = core_.arena().makeCell();
+    CellRef inDim   = core_.arena().makeCell();
+    CellRef outHead = core_.arena().makeCell();
+    CellRef op      = vm_.mintOpcode(OpcodeKind::Nop, "#COLL_PUSH_FRONT");
+    core_.bindInput(op, inHead);
+    core_.bindInput(op, inVal);
+    core_.bindInput(op, inDim);
+    core_.bindOutput(op, outHead);
+    routineBindings_[op] = {{inHead, inVal, inDim}, {outHead}};
+    exportSymbol(mod, "push_front", op);
+  }
+
+  // pop_back: head, dim -> outVal
+  {
+    CellRef inHead = core_.arena().makeCell();
+    CellRef inDim  = core_.arena().makeCell();
+    CellRef outVal = core_.arena().makeCell();
+    CellRef op     = vm_.mintOpcode(OpcodeKind::Nop, "#COLL_POP_BACK");
+    core_.bindInput(op, inHead);
+    core_.bindInput(op, inDim);
+    core_.bindOutput(op, outVal);
+    routineBindings_[op] = {{inHead, inDim}, {outVal}};
+    exportSymbol(mod, "pop_back", op);
+  }
 }
 
 CellRef VortexStdLib::resolve(std::string_view path) const {
@@ -889,7 +1331,10 @@ std::vector<CellValue> VortexStdLib::call(CellRef fnOp,
       core_.value(bindings.inputParams[i], 0, -1, args[i]);
     }
     CellRef cursor = vm_.spawnCursor(fnOp, "call");
-    vm_.run(cursor, 100);
+    auto execRes   = vm_.run(cursor, 100);
+    if (!execRes.success) {
+      return {};
+    }
     std::vector<CellValue> results;
     results.reserve(bindings.outputParams.size());
     for (CellRef outCell : bindings.outputParams) {
@@ -904,7 +1349,10 @@ std::vector<CellValue> VortexStdLib::call(CellRef fnOp,
     core_.value(inCells[i], 0, -1, args[i]);
   }
   CellRef cursor = vm_.spawnCursor(fnOp, "call");
-  vm_.run(cursor, 100);
+  auto execRes   = vm_.run(cursor, 100);
+  if (!execRes.success) {
+    return {};
+  }
   std::vector<CellRef> outCells = core_.outputsOf(fnOp);
   std::vector<CellValue> results;
   results.reserve(outCells.size());
@@ -1646,6 +2094,15 @@ void VortexStdLib::buildLogicModule(CellRef mod) {
 
     predVortexModule_ = createPredicate("vortex_module");
     exportSymbol(mod, "vortex_module", predVortexModule_);
+
+    predVortexInstruction_ = createPredicate("vortex_instruction");
+    exportSymbol(mod, "vortex_instruction", predVortexInstruction_);
+
+    predVortexContract_ = createPredicate("vortex_contract");
+    exportSymbol(mod, "vortex_contract", predVortexContract_);
+
+    predVortexParam_ = createPredicate("vortex_param");
+    exportSymbol(mod, "vortex_param", predVortexParam_);
   }
 }
 
@@ -1910,6 +2367,11 @@ bool VortexStdLib::solve(std::span<const CellRef> goals,
   if (predVortexFunction_ != noCell)
     candidatePreds.push_back(predVortexFunction_);
   if (predVortexModule_ != noCell) candidatePreds.push_back(predVortexModule_);
+  if (predVortexInstruction_ != noCell)
+    candidatePreds.push_back(predVortexInstruction_);
+  if (predVortexContract_ != noCell)
+    candidatePreds.push_back(predVortexContract_);
+  if (predVortexParam_ != noCell) candidatePreds.push_back(predVortexParam_);
   for (CellRef cp : customPredicates) {
     candidatePreds.push_back(cp);
   }

@@ -160,4 +160,30 @@ TEST(VPrologE2ETest, IntrospectVortexStdLibE2E) {
   EXPECT_NE(res.output.find("M = std:logic, F = unify"), std::string::npos);
 }
 
+TEST(VPrologE2ETest, IntrospectVortexHyperstructureE2E) {
+  std::string bin = vprologBin();
+
+  // Instructions along +d.spin
+  auto resInst = runProcess(
+      bin + " --headless -e \"vortex_instruction('std:math/clamp', S, L).\"");
+  EXPECT_EQ(resInst.exitCode, 0);
+  EXPECT_NE(resInst.output.find("S = 0, L = #CLAMP_MAX"), std::string::npos);
+  EXPECT_NE(resInst.output.find("S = 1, L = #CLAMP_MIN"), std::string::npos);
+
+  // Contracts along +/-d.contract
+  auto resCont = runProcess(
+      bin + " --headless -e \"vortex_contract('std:math/div', T, L).\"");
+  EXPECT_EQ(resCont.exitCode, 0);
+  EXPECT_NE(resCont.output.find("T = precondition, L = #REQUIRE_NON_ZERO"),
+            std::string::npos);
+
+  // Parameter wings
+  auto resParam = runProcess(
+      bin + " --headless -e \"vortex_param('std:math/max', W, S, T).\"");
+  EXPECT_EQ(resParam.exitCode, 0);
+  EXPECT_NE(resParam.output.find("W = input, S = 0"), std::string::npos);
+  EXPECT_NE(resParam.output.find("W = input, S = 1"), std::string::npos);
+  EXPECT_NE(resParam.output.find("W = output, S = 0"), std::string::npos);
+}
+
 } // namespace
