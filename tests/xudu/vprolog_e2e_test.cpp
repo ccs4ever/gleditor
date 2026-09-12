@@ -186,4 +186,74 @@ TEST(VPrologE2ETest, IntrospectVortexHyperstructureE2E) {
   EXPECT_NE(resParam.output.find("W = output, S = 0"), std::string::npos);
 }
 
+TEST(VPrologE2ETest, CutPruningAlternatives) {
+  std::string bin = vprologBin();
+
+  fs::path tempPl = fs::temp_directory_path() / "vprolog_cut_test.pl";
+  {
+    std::ofstream ofs(tempPl);
+    ofs << "max(X, Y, X) :- X >= Y, !.\n"
+        << "max(X, Y, Y).\n"
+        << "classify(X, negative) :- X < 0, !.\n"
+        << "classify(X, zero) :- X =:= 0, !.\n"
+        << "classify(X, positive).\n"
+        << "different(X, X) :- !, fail.\n"
+        << "different(X, Y).\n"
+        << "p(X, Y) :- q(X), !, r(Y).\n"
+        << "q(1).\n"
+        << "q(2).\n"
+        << "r(a).\n"
+        << "r(b).\n";
+  }
+
+  // 1. max/3 - green cut
+  auto resMax1 = runProcess(bin + " --headless " + tempPl.string() +
+                            " -m 10 -e 'max(10, 5, M).'");
+  EXPECT_EQ(resMax1.exitCode, 0);
+  EXPECT_NE(resMax1.output.find("M = 10."), std::string::npos);
+  EXPECT_EQ(resMax1.output.find("M = 5"), std::string::npos);
+
+  auto resMax2 = runProcess(bin + " --headless " + tempPl.string() +
+                            " -m 10 -e 'max(3, 5, M).'");
+  EXPECT_EQ(resMax2.exitCode, 0);
+  EXPECT_NE(resMax2.output.find("M = 5."), std::string::npos);
+
+  // 2. classify/2 - red cut
+  auto resNeg = runProcess(bin + " --headless " + tempPl.string() +
+                           " -e 'classify(-42, C).'");
+  EXPECT_EQ(resNeg.exitCode, 0);
+  EXPECT_NE(resNeg.output.find("C = negative."), std::string::npos);
+
+  auto resZero = runProcess(bin + " --headless " + tempPl.string() +
+                            " -e 'classify(0, C).'");
+  EXPECT_EQ(resZero.exitCode, 0);
+  EXPECT_NE(resZero.output.find("C = zero."), std::string::npos);
+
+  auto resPos = runProcess(bin + " --headless " + tempPl.string() +
+                           " -e 'classify(100, C).'");
+  EXPECT_EQ(resPos.exitCode, 0);
+  EXPECT_NE(resPos.output.find("C = positive."), std::string::npos);
+
+  // 3. different/2 - cut-fail
+  auto resDiff1 = runProcess(bin + " --headless " + tempPl.string() +
+                             " -e 'different(apple, orange).'");
+  EXPECT_EQ(resDiff1.exitCode, 0);
+  EXPECT_NE(resDiff1.output.find("true."), std::string::npos);
+
+  auto resDiff2 = runProcess(bin + " --headless " + tempPl.string() +
+                             " -e 'different(apple, apple).'");
+  EXPECT_NE(resDiff2.exitCode, 0);
+  EXPECT_NE(resDiff2.output.find("false."), std::string::npos);
+
+  // 4. Backtracking choices after cut
+  auto resChoices = runProcess(bin + " --headless " + tempPl.string() +
+                               " -m 10 -e 'p(X, Y).'");
+  EXPECT_EQ(resChoices.exitCode, 0);
+  EXPECT_NE(resChoices.output.find("X = 1, Y = a"), std::string::npos);
+  EXPECT_NE(resChoices.output.find("X = 1, Y = b"), std::string::npos);
+  EXPECT_EQ(resChoices.output.find("X = 2"), std::string::npos);
+
+  fs::remove(tempPl);
+}
+
 } // namespace

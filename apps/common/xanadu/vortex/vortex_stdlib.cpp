@@ -254,13 +254,19 @@ bool evalArithmetic(const VortexStdLib &stdlib, const VortexCore &core,
   return false;
 }
 
+struct ActiveGoal {
+  CellRef term{noCell};
+  std::size_t cutFrame{0};
+};
+
 bool solveQueryHelper(VortexStdLib &stdlib, VortexCore &core,
-                      std::vector<CellRef> goals,
+                      std::vector<ActiveGoal> goals,
                       std::span<const CellRef> candidatePreds,
                       const std::vector<CellRef> &queryVars,
                       std::function<bool(const LogicSolution &)> onSolution,
                       std::size_t &solutionsCount, std::size_t maxSolutions,
-                      std::size_t depth) {
+                      std::size_t depth, std::size_t &nextFrameId,
+                      std::size_t &cutToFrame) {
   if (solutionsCount >= maxSolutions || depth > 1000) {
     return false;
   }
@@ -271,7 +277,8 @@ bool solveQueryHelper(VortexStdLib &stdlib, VortexCore &core,
       sol.bindings.push_back({v, val});
       sol.varMap[v] = val;
       std::string varName;
-      CellRef nameCell = core.arena().linked(v, core.dims().name, false);
+      CellRef nameCell =
+          core.arena().linked(v, core.dims().name, DimVector::POS);
       if (nameCell != noCell && core.arena().contains(nameCell)) {
         varName = core.arena().textOf(nameCell);
       } else {
@@ -286,11 +293,11 @@ bool solveQueryHelper(VortexStdLib &stdlib, VortexCore &core,
     return true;
   }
 
-  CellRef curGoal = goals[0];
-  std::vector<CellRef> restGoals(goals.begin() + 1, goals.end());
+  ActiveGoal curGoal = goals[0];
+  std::vector<ActiveGoal> restGoals(goals.begin() + 1, goals.end());
 
-  std::string goalFunctor       = stdlib.functorOf(curGoal);
-  std::vector<CellRef> goalArgs = stdlib.argumentsOf(curGoal);
+  std::string goalFunctor       = stdlib.functorOf(curGoal.term);
+  std::vector<CellRef> goalArgs = stdlib.argumentsOf(curGoal.term);
 
   // Optimization for length/2 when list is known
   if (goalFunctor == "length" && goalArgs.size() == 2) {
@@ -316,7 +323,7 @@ bool solveQueryHelper(VortexStdLib &stdlib, VortexCore &core,
         if (stdlib.unify(lenArg, numCell)) {
           bool keepGoing = solveQueryHelper(
               stdlib, core, restGoals, candidatePreds, queryVars, onSolution,
-              solutionsCount, maxSolutions, depth + 1);
+              solutionsCount, maxSolutions, depth + 1, nextFrameId, cutToFrame);
           core.arena().release(mark);
           return keepGoing;
         }
@@ -329,30 +336,35 @@ bool solveQueryHelper(VortexStdLib &stdlib, VortexCore &core,
   // Built-in predicates: true/0, fail/0, !/0
   if (goalFunctor == "true" && goalArgs.empty()) {
     return solveQueryHelper(stdlib, core, restGoals, candidatePreds, queryVars,
-                            onSolution, solutionsCount, maxSolutions,
-                            depth + 1);
+                            onSolution, solutionsCount, maxSolutions, depth + 1,
+                            nextFrameId, cutToFrame);
   }
   if (goalFunctor == "fail" && goalArgs.empty()) {
     return true;
   }
   if (goalFunctor == "!" && goalArgs.empty()) {
-    return solveQueryHelper(stdlib, core, restGoals, candidatePreds, queryVars,
-                            onSolution, solutionsCount, maxSolutions,
-                            depth + 1);
+    bool keepGoing = solveQueryHelper(
+        stdlib, core, restGoals, candidatePreds, queryVars, onSolution,
+        solutionsCount, maxSolutions, depth + 1, nextFrameId, cutToFrame);
+    if (curGoal.cutFrame > 0) {
+      cutToFrame = curGoal.cutFrame;
+    }
+    return keepGoing;
   }
 
   // Manifold stdlib introspection: vortex_module/1 or stdlib_module/1
   if ((goalFunctor == "vortex_module" || goalFunctor == "stdlib_module") &&
       goalArgs.size() == 1) {
     for (const auto &modName : stdlib.modules()) {
-      if (solutionsCount >= maxSolutions) break;
+      if (solutionsCount >= maxSolutions || cutToFrame > 0) break;
       auto mark     = core.arena().mark();
       CellRef mCell = core.arena().makeCell(modName);
       if (stdlib.unify(goalArgs[0], mCell)) {
         bool keepGoing = solveQueryHelper(
             stdlib, core, restGoals, candidatePreds, queryVars, onSolution,
-            solutionsCount, maxSolutions, depth + 1);
+            solutionsCount, maxSolutions, depth + 1, nextFrameId, cutToFrame);
         core.arena().release(mark);
+        if (cutToFrame > 0) return false;
         if (!keepGoing && onSolution != nullptr) {
           return false;
         }
@@ -368,7 +380,7 @@ bool solveQueryHelper(VortexStdLib &stdlib, VortexCore &core,
       goalArgs.size() == 2) {
     for (const auto &modName : stdlib.modules()) {
       for (const auto &symName : stdlib.symbolsInModule(modName)) {
-        if (solutionsCount >= maxSolutions) break;
+        if (solutionsCount >= maxSolutions || cutToFrame > 0) break;
         auto mark     = core.arena().mark();
         CellRef mCell = core.arena().makeCell(modName);
         CellRef fCell = core.arena().makeCell(symName);
@@ -376,8 +388,9 @@ bool solveQueryHelper(VortexStdLib &stdlib, VortexCore &core,
             stdlib.unify(goalArgs[1], fCell)) {
           bool keepGoing = solveQueryHelper(
               stdlib, core, restGoals, candidatePreds, queryVars, onSolution,
-              solutionsCount, maxSolutions, depth + 1);
+              solutionsCount, maxSolutions, depth + 1, nextFrameId, cutToFrame);
           core.arena().release(mark);
+          if (cutToFrame > 0) return false;
           if (!keepGoing && onSolution != nullptr) {
             return false;
           }
@@ -385,7 +398,7 @@ bool solveQueryHelper(VortexStdLib &stdlib, VortexCore &core,
           core.arena().release(mark);
         }
       }
-      if (solutionsCount >= maxSolutions) break;
+      if (solutionsCount >= maxSolutions || cutToFrame > 0) break;
     }
     return true;
   }
@@ -396,7 +409,7 @@ bool solveQueryHelper(VortexStdLib &stdlib, VortexCore &core,
       goalArgs.size() == 3) {
     for (const auto &modName : stdlib.modules()) {
       for (const auto &symName : stdlib.symbolsInModule(modName)) {
-        if (solutionsCount >= maxSolutions) break;
+        if (solutionsCount >= maxSolutions || cutToFrame > 0) break;
         auto mark            = core.arena().mark();
         CellRef mCell        = core.arena().makeCell(modName);
         CellRef fCell        = core.arena().makeCell(symName);
@@ -407,8 +420,9 @@ bool solveQueryHelper(VortexStdLib &stdlib, VortexCore &core,
             stdlib.unify(goalArgs[2], pCell)) {
           bool keepGoing = solveQueryHelper(
               stdlib, core, restGoals, candidatePreds, queryVars, onSolution,
-              solutionsCount, maxSolutions, depth + 1);
+              solutionsCount, maxSolutions, depth + 1, nextFrameId, cutToFrame);
           core.arena().release(mark);
+          if (cutToFrame > 0) return false;
           if (!keepGoing && onSolution != nullptr) {
             return false;
           }
@@ -416,7 +430,7 @@ bool solveQueryHelper(VortexStdLib &stdlib, VortexCore &core,
           core.arena().release(mark);
         }
       }
-      if (solutionsCount >= maxSolutions) break;
+      if (solutionsCount >= maxSolutions || cutToFrame > 0) break;
     }
     return true;
   }
@@ -426,14 +440,15 @@ bool solveQueryHelper(VortexStdLib &stdlib, VortexCore &core,
       goalArgs.size() == 1) {
     for (const auto &modName : stdlib.modules()) {
       for (const auto &symName : stdlib.symbolsInModule(modName)) {
-        if (solutionsCount >= maxSolutions) break;
+        if (solutionsCount >= maxSolutions || cutToFrame > 0) break;
         auto mark     = core.arena().mark();
         CellRef fCell = core.arena().makeCell(symName);
         if (stdlib.unify(goalArgs[0], fCell)) {
           bool keepGoing = solveQueryHelper(
               stdlib, core, restGoals, candidatePreds, queryVars, onSolution,
-              solutionsCount, maxSolutions, depth + 1);
+              solutionsCount, maxSolutions, depth + 1, nextFrameId, cutToFrame);
           core.arena().release(mark);
+          if (cutToFrame > 0) return false;
           if (!keepGoing && onSolution != nullptr) {
             return false;
           }
@@ -441,7 +456,7 @@ bool solveQueryHelper(VortexStdLib &stdlib, VortexCore &core,
           core.arena().release(mark);
         }
       }
-      if (solutionsCount >= maxSolutions) break;
+      if (solutionsCount >= maxSolutions || cutToFrame > 0) break;
     }
     return true;
   }
@@ -451,7 +466,7 @@ bool solveQueryHelper(VortexStdLib &stdlib, VortexCore &core,
   if (goalFunctor == "vortex_instruction" && goalArgs.size() == 3) {
     for (const auto &modName : stdlib.modules()) {
       for (const auto &symName : stdlib.symbolsInModule(modName)) {
-        if (solutionsCount >= maxSolutions) break;
+        if (solutionsCount >= maxSolutions || cutToFrame > 0) break;
         std::string fullPath = modName + "/" + symName;
         CellRef entryOp      = stdlib.resolve(fullPath);
         if (entryOp == noCell) continue;
@@ -460,7 +475,7 @@ bool solveQueryHelper(VortexStdLib &stdlib, VortexCore &core,
         std::int64_t stepIdx = 0;
         std::size_t limit    = core.arena().cellCount() + 1;
         while (curOp != noCell && limit-- > 0) {
-          if (solutionsCount >= maxSolutions) break;
+          if (solutionsCount >= maxSolutions || cutToFrame > 0) break;
           auto mark         = core.arena().mark();
           CellRef pCell     = core.arena().makeCell(fullPath);
           CellRef idxCell   = core.arena().makeScalarCell(stepIdx);
@@ -472,19 +487,21 @@ bool solveQueryHelper(VortexStdLib &stdlib, VortexCore &core,
               stdlib.unify(goalArgs[2], lblCell)) {
             bool keepGoing = solveQueryHelper(
                 stdlib, core, restGoals, candidatePreds, queryVars, onSolution,
-                solutionsCount, maxSolutions, depth + 1);
+                solutionsCount, maxSolutions, depth + 1, nextFrameId,
+                cutToFrame);
             core.arena().release(mark);
+            if (cutToFrame > 0) return false;
             if (!keepGoing && onSolution != nullptr) {
               return false;
             }
           } else {
             core.arena().release(mark);
           }
-          curOp = core.arena().linked(curOp, core.dims().spin, false);
+          curOp = core.arena().linked(curOp, core.dims().spin, DimVector::POS);
           stepIdx++;
         }
       }
-      if (solutionsCount >= maxSolutions) break;
+      if (solutionsCount >= maxSolutions || cutToFrame > 0) break;
     }
     return true;
   }
@@ -493,7 +510,7 @@ bool solveQueryHelper(VortexStdLib &stdlib, VortexCore &core,
   if (goalFunctor == "vortex_contract" && goalArgs.size() == 3) {
     for (const auto &modName : stdlib.modules()) {
       for (const auto &symName : stdlib.symbolsInModule(modName)) {
-        if (solutionsCount >= maxSolutions) break;
+        if (solutionsCount >= maxSolutions || cutToFrame > 0) break;
         std::string fullPath = modName + "/" + symName;
         CellRef entryOp      = stdlib.resolve(fullPath);
         if (entryOp == noCell) continue;
@@ -501,10 +518,11 @@ bool solveQueryHelper(VortexStdLib &stdlib, VortexCore &core,
         CellRef curOp     = entryOp;
         std::size_t limit = core.arena().cellCount() + 1;
         while (curOp != noCell && limit-- > 0) {
+          if (solutionsCount >= maxSolutions || cutToFrame > 0) break;
           // Preconditions along -d.contract
           std::vector<CellRef> preconds = core.preconditionsOf(curOp);
           for (CellRef p : preconds) {
-            if (solutionsCount >= maxSolutions) break;
+            if (solutionsCount >= maxSolutions || cutToFrame > 0) break;
             auto mark         = core.arena().mark();
             CellRef pCell     = core.arena().makeCell(fullPath);
             CellRef typeCell  = core.arena().makeCell("precondition");
@@ -515,8 +533,10 @@ bool solveQueryHelper(VortexStdLib &stdlib, VortexCore &core,
                 stdlib.unify(goalArgs[2], lblCell)) {
               bool keepGoing = solveQueryHelper(
                   stdlib, core, restGoals, candidatePreds, queryVars,
-                  onSolution, solutionsCount, maxSolutions, depth + 1);
+                  onSolution, solutionsCount, maxSolutions, depth + 1,
+                  nextFrameId, cutToFrame);
               core.arena().release(mark);
+              if (cutToFrame > 0) return false;
               if (!keepGoing && onSolution != nullptr) return false;
             } else {
               core.arena().release(mark);
@@ -526,7 +546,7 @@ bool solveQueryHelper(VortexStdLib &stdlib, VortexCore &core,
           // Postconditions along +d.contract
           std::vector<CellRef> postconds = core.postconditionsOf(curOp);
           for (CellRef p : postconds) {
-            if (solutionsCount >= maxSolutions) break;
+            if (solutionsCount >= maxSolutions || cutToFrame > 0) break;
             auto mark         = core.arena().mark();
             CellRef pCell     = core.arena().makeCell(fullPath);
             CellRef typeCell  = core.arena().makeCell("postcondition");
@@ -537,18 +557,20 @@ bool solveQueryHelper(VortexStdLib &stdlib, VortexCore &core,
                 stdlib.unify(goalArgs[2], lblCell)) {
               bool keepGoing = solveQueryHelper(
                   stdlib, core, restGoals, candidatePreds, queryVars,
-                  onSolution, solutionsCount, maxSolutions, depth + 1);
+                  onSolution, solutionsCount, maxSolutions, depth + 1,
+                  nextFrameId, cutToFrame);
               core.arena().release(mark);
+              if (cutToFrame > 0) return false;
               if (!keepGoing && onSolution != nullptr) return false;
             } else {
               core.arena().release(mark);
             }
           }
 
-          curOp = core.arena().linked(curOp, core.dims().spin, false);
+          curOp = core.arena().linked(curOp, core.dims().spin, DimVector::POS);
         }
       }
-      if (solutionsCount >= maxSolutions) break;
+      if (solutionsCount >= maxSolutions || cutToFrame > 0) break;
     }
     return true;
   }
@@ -557,7 +579,7 @@ bool solveQueryHelper(VortexStdLib &stdlib, VortexCore &core,
   if (goalFunctor == "vortex_param" && goalArgs.size() == 4) {
     for (const auto &modName : stdlib.modules()) {
       for (const auto &symName : stdlib.symbolsInModule(modName)) {
-        if (solutionsCount >= maxSolutions) break;
+        if (solutionsCount >= maxSolutions || cutToFrame > 0) break;
         std::string fullPath = modName + "/" + symName;
         CellRef entryOp      = stdlib.resolve(fullPath);
         if (entryOp == noCell) continue;
@@ -565,7 +587,7 @@ bool solveQueryHelper(VortexStdLib &stdlib, VortexCore &core,
         // Input wing
         std::vector<CellRef> inCells = core.inputsOf(entryOp);
         for (std::size_t i = 0; i < inCells.size(); ++i) {
-          if (solutionsCount >= maxSolutions) break;
+          if (solutionsCount >= maxSolutions || cutToFrame > 0) break;
           auto mark     = core.arena().mark();
           CellRef pCell = core.arena().makeCell(fullPath);
           CellRef wCell = core.arena().makeCell("input");
@@ -579,8 +601,10 @@ bool solveQueryHelper(VortexStdLib &stdlib, VortexCore &core,
               stdlib.unify(goalArgs[3], slotCell)) {
             bool keepGoing = solveQueryHelper(
                 stdlib, core, restGoals, candidatePreds, queryVars, onSolution,
-                solutionsCount, maxSolutions, depth + 1);
+                solutionsCount, maxSolutions, depth + 1, nextFrameId,
+                cutToFrame);
             core.arena().release(mark);
+            if (cutToFrame > 0) return false;
             if (!keepGoing && onSolution != nullptr) return false;
           } else {
             core.arena().release(mark);
@@ -590,7 +614,7 @@ bool solveQueryHelper(VortexStdLib &stdlib, VortexCore &core,
         // Output wing
         std::vector<CellRef> outCells = core.outputsOf(entryOp);
         for (std::size_t i = 0; i < outCells.size(); ++i) {
-          if (solutionsCount >= maxSolutions) break;
+          if (solutionsCount >= maxSolutions || cutToFrame > 0) break;
           auto mark     = core.arena().mark();
           CellRef pCell = core.arena().makeCell(fullPath);
           CellRef wCell = core.arena().makeCell("output");
@@ -604,15 +628,17 @@ bool solveQueryHelper(VortexStdLib &stdlib, VortexCore &core,
               stdlib.unify(goalArgs[3], slotCell)) {
             bool keepGoing = solveQueryHelper(
                 stdlib, core, restGoals, candidatePreds, queryVars, onSolution,
-                solutionsCount, maxSolutions, depth + 1);
+                solutionsCount, maxSolutions, depth + 1, nextFrameId,
+                cutToFrame);
             core.arena().release(mark);
+            if (cutToFrame > 0) return false;
             if (!keepGoing && onSolution != nullptr) return false;
           } else {
             core.arena().release(mark);
           }
         }
       }
-      if (solutionsCount >= maxSolutions) break;
+      if (solutionsCount >= maxSolutions || cutToFrame > 0) break;
     }
     return true;
   }
@@ -629,7 +655,7 @@ bool solveQueryHelper(VortexStdLib &stdlib, VortexCore &core,
       if (stdlib.unify(goalArgs[0], valCell)) {
         bool keepGoing = solveQueryHelper(
             stdlib, core, restGoals, candidatePreds, queryVars, onSolution,
-            solutionsCount, maxSolutions, depth + 1);
+            solutionsCount, maxSolutions, depth + 1, nextFrameId, cutToFrame);
         core.arena().release(mark);
         return keepGoing;
       }
@@ -663,9 +689,9 @@ bool solveQueryHelper(VortexStdLib &stdlib, VortexCore &core,
         cond = (v1 != v2);
 
       if (cond) {
-        return solveQueryHelper(stdlib, core, restGoals, candidatePreds,
-                                queryVars, onSolution, solutionsCount,
-                                maxSolutions, depth + 1);
+        return solveQueryHelper(
+            stdlib, core, restGoals, candidatePreds, queryVars, onSolution,
+            solutionsCount, maxSolutions, depth + 1, nextFrameId, cutToFrame);
       }
     }
     return true;
@@ -673,21 +699,24 @@ bool solveQueryHelper(VortexStdLib &stdlib, VortexCore &core,
 
   // Negation as failure: \+ Goal
   if (goalFunctor == "\\+" && goalArgs.size() == 1) {
-    auto mark            = core.arena().mark();
-    std::size_t subCount = 0;
-    bool hasSubSolution  = false;
+    auto mark                  = core.arena().mark();
+    std::size_t subCount       = 0;
+    bool hasSubSolution        = false;
+    std::size_t subNextFrameId = nextFrameId;
+    std::size_t subCutToFrame  = 0;
+    ActiveGoal subGoal{.term = goalArgs[0], .cutFrame = subNextFrameId};
     solveQueryHelper(
-        stdlib, core, {goalArgs[0]}, candidatePreds, {},
+        stdlib, core, {subGoal}, candidatePreds, {},
         [&](const LogicSolution &) {
           hasSubSolution = true;
           return false;
         },
-        subCount, 1, depth + 1);
+        subCount, 1, depth + 1, subNextFrameId, subCutToFrame);
     core.arena().release(mark);
     if (!hasSubSolution) {
       return solveQueryHelper(stdlib, core, restGoals, candidatePreds,
                               queryVars, onSolution, solutionsCount,
-                              maxSolutions, depth + 1);
+                              maxSolutions, depth + 1, nextFrameId, cutToFrame);
     }
     return true;
   }
@@ -700,7 +729,7 @@ bool solveQueryHelper(VortexStdLib &stdlib, VortexCore &core,
     if (!unifies) {
       return solveQueryHelper(stdlib, core, restGoals, candidatePreds,
                               queryVars, onSolution, solutionsCount,
-                              maxSolutions, depth + 1);
+                              maxSolutions, depth + 1, nextFrameId, cutToFrame);
     }
     return true;
   }
@@ -710,32 +739,40 @@ bool solveQueryHelper(VortexStdLib &stdlib, VortexCore &core,
     if (pred == noCell) continue;
     if (core.arena().textOf(pred) != goalFunctor) continue;
 
-    CellRef clause    = core.arena().linked(pred, core.dims().clause, false);
+    const std::size_t frameId = nextFrameId++;
+    CellRef clause =
+        core.arena().linked(pred, core.dims().clause, DimVector::POS);
     std::size_t limit = core.arena().cellCount() + 1;
     while (clause != noCell && solutionsCount < maxSolutions && limit-- > 0) {
+      if (cutToFrame > 0 && cutToFrame <= frameId) break;
       auto mark = core.arena().mark();
 
       std::unordered_map<CellRef, CellRef> varMap;
       std::unordered_map<CellRef, CellRef> visited;
-      CellRef rawHead = core.arena().linked(clause, core.dims().grab, false);
-      CellRef head    = freshenTerm(stdlib, core, rawHead, varMap, visited);
+      CellRef rawHead =
+          core.arena().linked(clause, core.dims().grab, DimVector::POS);
+      CellRef head = freshenTerm(stdlib, core, rawHead, varMap, visited);
 
-      if (stdlib.unify(curGoal, head)) {
-        std::vector<CellRef> nextGoals;
-        CellRef curBody = core.arena().linked(clause, core.dims().spin, false);
+      if (stdlib.unify(curGoal.term, head)) {
+        std::vector<ActiveGoal> nextGoals;
+        CellRef curBody =
+            core.arena().linked(clause, core.dims().spin, DimVector::POS);
         std::size_t bodyLimit = core.arena().cellCount() + 1;
         while (curBody != noCell && bodyLimit-- > 0) {
           std::unordered_map<CellRef, CellRef> bodyVisited;
-          nextGoals.push_back(
-              freshenTerm(stdlib, core, curBody, varMap, bodyVisited));
-          curBody = core.arena().linked(curBody, core.dims().spin, false);
+          CellRef bTerm =
+              freshenTerm(stdlib, core, curBody, varMap, bodyVisited);
+          nextGoals.push_back(ActiveGoal{.term = bTerm, .cutFrame = frameId});
+          curBody =
+              core.arena().linked(curBody, core.dims().spin, DimVector::POS);
         }
         nextGoals.insert(nextGoals.end(), restGoals.begin(), restGoals.end());
 
         bool keepGoing = solveQueryHelper(
             stdlib, core, nextGoals, candidatePreds, queryVars, onSolution,
-            solutionsCount, maxSolutions, depth + 1);
+            solutionsCount, maxSolutions, depth + 1, nextFrameId, cutToFrame);
         core.arena().release(mark);
+        if (cutToFrame > 0 && cutToFrame <= frameId) break;
         if (!keepGoing && onSolution != nullptr) {
           return false;
         }
@@ -743,7 +780,13 @@ bool solveQueryHelper(VortexStdLib &stdlib, VortexCore &core,
         core.arena().release(mark);
       }
 
-      clause = core.arena().linked(clause, core.dims().clause, false);
+      clause = core.arena().linked(clause, core.dims().clause, DimVector::POS);
+    }
+    if (cutToFrame == frameId) {
+      cutToFrame = 0;
+      break;
+    } else if (cutToFrame > 0 && cutToFrame < frameId) {
+      break;
     }
   }
   return true;
@@ -2382,10 +2425,18 @@ bool VortexStdLib::solve(std::span<const CellRef> goals,
     collectVariables(*this, g, queryVars, seen);
   }
 
-  std::size_t solCount = 0;
-  std::vector<CellRef> goalVec(goals.begin(), goals.end());
-  return solveQueryHelper(*this, core_, std::move(goalVec), candidatePreds,
-                          queryVars, onSolution, solCount, maxSolutions, 0);
+  std::size_t solCount            = 0;
+  const std::size_t topLevelFrame = 1;
+  std::size_t nextFrameId         = 2;
+  std::size_t cutToFrame          = 0;
+  std::vector<ActiveGoal> activeGoals;
+  activeGoals.reserve(goals.size());
+  for (CellRef g : goals) {
+    activeGoals.push_back(ActiveGoal{.term = g, .cutFrame = topLevelFrame});
+  }
+  return solveQueryHelper(*this, core_, std::move(activeGoals), candidatePreds,
+                          queryVars, onSolution, solCount, maxSolutions, 0,
+                          nextFrameId, cutToFrame);
 }
 
 } // namespace zigzag::vortex
