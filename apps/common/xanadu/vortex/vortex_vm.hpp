@@ -63,6 +63,15 @@ enum class OpcodeKind : std::uint8_t {
   Bind,
   Resolve,
   Assert,
+
+  // Math & String Extensions
+  Abs,
+  Min,
+  Max,
+  Clamp,
+  Trim,
+  ToLower,
+  ToUpper,
 };
 
 class VortexVM {

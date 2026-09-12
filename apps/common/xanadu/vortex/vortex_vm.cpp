@@ -573,6 +573,96 @@ ExecutionResult VortexVM::executeOpcodeBody(
     }
     break;
   }
+  case OpcodeKind::Abs: {
+    if (!inputs.empty()) {
+      if (std::holds_alternative<double>(inputs[0])) {
+        outputs.push_back(std::abs(std::get<double>(inputs[0])));
+      } else {
+        std::int64_t v = toInt(inputs[0]);
+        outputs.push_back(v < 0 ? -v : v);
+      }
+    }
+    break;
+  }
+  case OpcodeKind::Min: {
+    if (inputs.size() >= 2) {
+      if (std::holds_alternative<double>(inputs[0]) ||
+          std::holds_alternative<double>(inputs[1])) {
+        outputs.push_back(std::min(toDouble(inputs[0]), toDouble(inputs[1])));
+      } else {
+        outputs.push_back(std::min(toInt(inputs[0]), toInt(inputs[1])));
+      }
+    }
+    break;
+  }
+  case OpcodeKind::Max: {
+    if (inputs.size() >= 2) {
+      if (std::holds_alternative<double>(inputs[0]) ||
+          std::holds_alternative<double>(inputs[1])) {
+        outputs.push_back(std::max(toDouble(inputs[0]), toDouble(inputs[1])));
+      } else {
+        outputs.push_back(std::max(toInt(inputs[0]), toInt(inputs[1])));
+      }
+    }
+    break;
+  }
+  case OpcodeKind::Clamp: {
+    if (inputs.size() >= 3) {
+      if (std::holds_alternative<double>(inputs[0]) ||
+          std::holds_alternative<double>(inputs[1]) ||
+          std::holds_alternative<double>(inputs[2])) {
+        double v  = toDouble(inputs[0]);
+        double lo = toDouble(inputs[1]);
+        double hi = toDouble(inputs[2]);
+        outputs.push_back(std::clamp(v, lo, hi));
+      } else {
+        std::int64_t v  = toInt(inputs[0]);
+        std::int64_t lo = toInt(inputs[1]);
+        std::int64_t hi = toInt(inputs[2]);
+        outputs.push_back(std::clamp(v, lo, hi));
+      }
+    }
+    break;
+  }
+  case OpcodeKind::Trim: {
+    if (!inputs.empty()) {
+      std::string s     = std::holds_alternative<std::string>(inputs[0])
+                              ? std::get<std::string>(inputs[0])
+                              : std::to_string(toInt(inputs[0]));
+      std::size_t start = s.find_first_not_of(" \t\n\r");
+      if (start == std::string::npos) {
+        outputs.push_back(std::string{});
+      } else {
+        std::size_t end = s.find_last_not_of(" \t\n\r");
+        outputs.push_back(s.substr(start, end - start + 1));
+      }
+    }
+    break;
+  }
+  case OpcodeKind::ToLower: {
+    if (!inputs.empty()) {
+      std::string s = std::holds_alternative<std::string>(inputs[0])
+                          ? std::get<std::string>(inputs[0])
+                          : std::to_string(toInt(inputs[0]));
+      for (char &c : s) {
+        c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+      }
+      outputs.push_back(s);
+    }
+    break;
+  }
+  case OpcodeKind::ToUpper: {
+    if (!inputs.empty()) {
+      std::string s = std::holds_alternative<std::string>(inputs[0])
+                          ? std::get<std::string>(inputs[0])
+                          : std::to_string(toInt(inputs[0]));
+      for (char &c : s) {
+        c = static_cast<char>(std::toupper(static_cast<unsigned char>(c)));
+      }
+      outputs.push_back(s);
+    }
+    break;
+  }
   case OpcodeKind::Halt:
   case OpcodeKind::Nop:
   default:
