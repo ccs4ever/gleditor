@@ -1490,10 +1490,10 @@ CellRef VortexStdLib::map(CellRef head, DimRef inDim, DimRef outDim,
       resHead = newC;
       resTail = newC;
     } else {
-      core_.arena().link(resTail, outDim, false, newC);
+      core_.arena().link(resTail, outDim, DimVector::POS, newC);
       resTail = newC;
     }
-    cur = core_.arena().linked(cur, inDim, false);
+    cur = core_.arena().linked(cur, inDim, DimVector::POS);
   }
   return resHead;
 }
@@ -1523,11 +1523,11 @@ CellRef VortexStdLib::filter(CellRef head, DimRef inDim, DimRef outDim,
         resHead = newC;
         resTail = newC;
       } else {
-        core_.arena().link(resTail, outDim, false, newC);
+        core_.arena().link(resTail, outDim, DimVector::POS, newC);
         resTail = newC;
       }
     }
-    cur = core_.arena().linked(cur, inDim, false);
+    cur = core_.arena().linked(cur, inDim, DimVector::POS);
   }
   return resHead;
 }
@@ -1549,7 +1549,7 @@ CellValue VortexStdLib::fold(
   std::size_t limit = core_.arena().cellCount() + 1;
   while (cur != noCell && limit-- > 0) {
     acc = fn(acc, core_.render(cur));
-    cur = core_.arena().linked(cur, inDim, false);
+    cur = core_.arena().linked(cur, inDim, DimVector::POS);
   }
   return acc;
 }
@@ -1575,18 +1575,18 @@ CellRef VortexStdLib::zip(CellRef headA, CellRef headB, DimRef dimA,
     CellRef pairCell = core_.arena().makeCell();
     // In zzstructures, a pair cell can link curA negward on dimA, and curB
     // posward on dimB
-    core_.arena().link(pairCell, dimA, true, curA);
-    core_.arena().link(pairCell, dimB, false, curB);
+    core_.arena().link(pairCell, dimA, DimVector::NEG, curA);
+    core_.arena().link(pairCell, dimB, DimVector::POS, curB);
 
     if (resHead == noCell) {
       resHead = pairCell;
       resTail = pairCell;
     } else {
-      core_.arena().link(resTail, outDim, false, pairCell);
+      core_.arena().link(resTail, outDim, DimVector::POS, pairCell);
       resTail = pairCell;
     }
-    curA = core_.arena().linked(curA, dimA, false);
-    curB = core_.arena().linked(curB, dimB, false);
+    curA = core_.arena().linked(curA, dimA, DimVector::POS);
+    curB = core_.arena().linked(curB, dimB, DimVector::POS);
   }
   return resHead;
 }
@@ -1604,7 +1604,7 @@ CellRef VortexStdLib::createList(const std::vector<CellValue> &items,
       head = c;
       tail = c;
     } else {
-      core_.arena().link(tail, linkDim, false, c);
+      core_.arena().link(tail, linkDim, DimVector::POS, c);
       tail = c;
     }
   }
@@ -1619,7 +1619,7 @@ std::vector<CellValue> VortexStdLib::listToVector(CellRef head,
   std::size_t limit = core_.arena().cellCount() + 1;
   while (cur != noCell && limit-- > 0) {
     result.push_back(core_.render(cur));
-    cur = core_.arena().linked(cur, linkDim, false);
+    cur = core_.arena().linked(cur, linkDim, DimVector::POS);
   }
   return result;
 }
@@ -1630,11 +1630,11 @@ void VortexStdLib::pushBack(CellRef head, const CellValue &val, DimRef dim) {
   CellRef cur       = head;
   std::size_t limit = core_.arena().cellCount() + 1;
   while (limit-- > 0) {
-    CellRef next = core_.arena().linked(cur, linkDim, false);
+    CellRef next = core_.arena().linked(cur, linkDim, DimVector::POS);
     if (next == noCell) {
       CellRef c = core_.arena().makeCell();
       core_.value(c, 0, -1, val);
-      core_.arena().link(cur, linkDim, false, c);
+      core_.arena().link(cur, linkDim, DimVector::POS, c);
       return;
     }
     cur = next;
@@ -1647,7 +1647,7 @@ CellRef VortexStdLib::pushFront(CellRef head, const CellValue &val,
   CellRef c      = core_.arena().makeCell();
   core_.value(c, 0, -1, val);
   if (head != noCell) {
-    core_.arena().link(c, linkDim, false, head);
+    core_.arena().link(c, linkDim, DimVector::POS, head);
   }
   return c;
 }
@@ -1659,11 +1659,11 @@ std::optional<CellValue> VortexStdLib::popBack(CellRef head, DimRef dim) {
   CellRef prev      = noCell;
   std::size_t limit = core_.arena().cellCount() + 1;
   while (limit-- > 0) {
-    CellRef next = core_.arena().linked(cur, linkDim, false);
+    CellRef next = core_.arena().linked(cur, linkDim, DimVector::POS);
     if (next == noCell) {
       CellValue val = core_.render(cur);
       if (prev != noCell) {
-        core_.breakLink(prev, linkDim, false);
+        core_.breakLink(prev, linkDim, DimVector::POS);
       }
       return val;
     }
@@ -1676,8 +1676,8 @@ std::optional<CellValue> VortexStdLib::popBack(CellRef head, DimRef dim) {
 CellRef VortexStdLib::popFront(CellRef head, DimRef dim) {
   if (head == noCell) return noCell;
   DimRef linkDim = dim == noCell ? core_.dims().step : dim;
-  CellRef next   = core_.arena().linked(head, linkDim, false);
-  core_.breakLink(head, linkDim, false);
+  CellRef next   = core_.arena().linked(head, linkDim, DimVector::POS);
+  core_.breakLink(head, linkDim, DimVector::POS);
   return next;
 }
 
@@ -1688,7 +1688,7 @@ std::size_t VortexStdLib::listLength(CellRef head, DimRef dim) const {
   std::size_t limit = core_.arena().cellCount() + 1;
   while (cur != noCell && limit-- > 0) {
     len++;
-    cur = core_.arena().linked(cur, linkDim, false);
+    cur = core_.arena().linked(cur, linkDim, DimVector::POS);
   }
   return len;
 }
@@ -1780,14 +1780,14 @@ CellRef VortexStdLib::createGrid(std::size_t rows, std::size_t cols,
   // Link horizontally on dCol
   for (std::size_t r = 0; r < rows; ++r) {
     for (std::size_t c = 0; c + 1 < cols; ++c) {
-      core_.arena().link(grid[r][c], dCol, false, grid[r][c + 1]);
+      core_.arena().link(grid[r][c], dCol, DimVector::POS, grid[r][c + 1]);
     }
   }
 
   // Link vertically on dRow
   for (std::size_t r = 0; r + 1 < rows; ++r) {
     for (std::size_t c = 0; c < cols; ++c) {
-      core_.arena().link(grid[r][c], dRow, false, grid[r + 1][c]);
+      core_.arena().link(grid[r][c], dRow, DimVector::POS, grid[r + 1][c]);
     }
   }
 
@@ -1798,10 +1798,10 @@ CellValue VortexStdLib::getGrid(CellRef gridRoot, std::size_t r, std::size_t c,
                                 DimRef dRow, DimRef dCol) const {
   CellRef cur = gridRoot;
   for (std::size_t i = 0; i < r && cur != noCell; ++i) {
-    cur = core_.arena().linked(cur, dRow, false);
+    cur = core_.arena().linked(cur, dRow, DimVector::POS);
   }
   for (std::size_t j = 0; j < c && cur != noCell; ++j) {
-    cur = core_.arena().linked(cur, dCol, false);
+    cur = core_.arena().linked(cur, dCol, DimVector::POS);
   }
   if (cur == noCell) return false;
   return core_.render(cur);
@@ -1811,10 +1811,10 @@ void VortexStdLib::setGrid(CellRef gridRoot, std::size_t r, std::size_t c,
                            DimRef dRow, DimRef dCol, const CellValue &val) {
   CellRef cur = gridRoot;
   for (std::size_t i = 0; i < r && cur != noCell; ++i) {
-    cur = core_.arena().linked(cur, dRow, false);
+    cur = core_.arena().linked(cur, dRow, DimVector::POS);
   }
   for (std::size_t j = 0; j < c && cur != noCell; ++j) {
-    cur = core_.arena().linked(cur, dCol, false);
+    cur = core_.arena().linked(cur, dCol, DimVector::POS);
   }
   if (cur != noCell) {
     core_.value(cur, 0, -1, val);

@@ -113,8 +113,8 @@ TEST(UnifiedTransclusionEngineTest, IncrementalSyncFoldsMintedCells) {
 
   engine.linkCells(first, second, DimOrdinal::OpsTime);
   const auto opsTime = engine.dimensionFor("d.ops_time");
-  EXPECT_EQ(engine.manifold().linked(first, opsTime, false), second);
-  EXPECT_EQ(engine.manifold().linked(second, opsTime, true), first);
+  EXPECT_EQ(engine.manifold().linked(first, opsTime, DimVector::POS), second);
+  EXPECT_EQ(engine.manifold().linked(second, opsTime, DimVector::NEG), first);
 
   std::string err;
   EXPECT_TRUE(engine.validate2RankManifold(&err)) << err;
@@ -140,13 +140,14 @@ TEST(UnifiedTransclusionEngineTest, AsymmetryCanNoLongerBeConstructed) {
   EXPECT_TRUE(engine.validate2RankManifold(&err)) << err;
 
   const auto d1 = engine.dimensionFor("d.1");
-  EXPECT_EQ(engine.manifold().linked(one, d1, false), three);
-  EXPECT_EQ(engine.manifold().linked(two, d1, true), zigzag::noCell)
+  EXPECT_EQ(engine.manifold().linked(one, d1, DimVector::POS), three);
+  EXPECT_EQ(engine.manifold().linked(two, d1, DimVector::NEG), zigzag::noCell)
       << "the displaced cell kept a backlink to a cell that no longer names it";
 
   engine.unlinkPositive(one, DimOrdinal::D1);
-  EXPECT_EQ(engine.manifold().linked(one, d1, false), zigzag::noCell);
-  EXPECT_EQ(engine.manifold().linked(three, d1, true), zigzag::noCell);
+  EXPECT_EQ(engine.manifold().linked(one, d1, DimVector::POS), zigzag::noCell);
+  EXPECT_EQ(engine.manifold().linked(three, d1, DimVector::NEG),
+            zigzag::noCell);
   EXPECT_TRUE(engine.validate2RankManifold(&err)) << err;
 }
 

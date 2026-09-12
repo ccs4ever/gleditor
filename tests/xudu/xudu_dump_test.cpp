@@ -32,6 +32,7 @@ namespace fs = std::filesystem;
 using xudu::CompactOpNode;
 using xudu::MicroversionId;
 using xudu::Store;
+using zigzag::DimVector;
 
 struct Run {
   int exitCode{-1};
@@ -142,7 +143,7 @@ TEST_F(XuduDumpTest, aSlicesStructureOperationsSayWhatTheyDid) {
     at                = store.makeCell(at, "a cell");
     head              = store.cellRefOf(at);
     at                = store.makeCell(at, "another");
-    at = store.setLink(at, head, dim, false, store.cellRefOf(at));
+    at = store.setLink(at, head, dim, DimVector::POS, store.cellRefOf(at));
     store.save(sample.store.string());
   }
 

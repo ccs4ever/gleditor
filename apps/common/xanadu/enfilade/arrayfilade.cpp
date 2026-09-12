@@ -10,6 +10,8 @@
 
 namespace xanadu::enfilade {
 
+using zigzag::DimVector;
+
 // -- ArrayCellEntry Helper Methods -------------------------------------------
 
 ArrayCellEntry
@@ -109,7 +111,7 @@ Arrayfilade Arrayfilade::fromRank(const zigzag::Manifold &m,
     entries.push_back(
         ArrayCellEntry::fromCell(cur, coords, kind, slot->valueBits, text));
 
-    const auto next = m.linked(cur, dim, false);
+    const auto next = m.linked(cur, dim, DimVector::POS);
     if (next == cur) {
       break;
     }
@@ -141,7 +143,7 @@ Arrayfilade Arrayfilade::fromArenaRank(const zigzag::ArenaManifold &am,
     entries.push_back(
         ArrayCellEntry::fromCell(cur, coords, kind, slot->valueBits, text));
 
-    const auto next = am.linked(cur, dim, false);
+    const auto next = am.linked(cur, dim, DimVector::POS);
     if (next == cur) {
       break;
     }
@@ -182,7 +184,7 @@ Arrayfilade Arrayfilade::fromMatrix(const zigzag::Manifold &m,
                                                    slot->valueBits, text));
       }
 
-      const auto nextCol = m.linked(colCur, colDim, false);
+      const auto nextCol = m.linked(colCur, colDim, DimVector::POS);
       if (nextCol == colCur || zigzag::noCell == nextCol) {
         break;
       }
@@ -190,7 +192,7 @@ Arrayfilade Arrayfilade::fromMatrix(const zigzag::Manifold &m,
       ++c;
     }
 
-    const auto nextRow = m.linked(rowCur, rowDim, false);
+    const auto nextRow = m.linked(rowCur, rowDim, DimVector::POS);
     if (nextRow == rowCur || zigzag::noCell == nextRow) {
       break;
     }

@@ -97,8 +97,17 @@ struct Vlog {
   void bind(CellRef v, CellRef t);
 
   /// The far end of @p from's rank along @p dim, cycle-bounded.
+  [[nodiscard]] CellRef
+  endOfRank(CellRef from, DimRef dim,
+            DimVector dir = DimVector::POS) const noexcept;
+  [[nodiscard]] CellRef endOfRank(CellRef from,
+                                  DirectedDim target) const noexcept {
+    return endOfRank(from, target.dim, target.dir);
+  }
   [[nodiscard]] CellRef endOfRank(CellRef from, DimRef dim,
-                                  bool negward) const noexcept;
+                                  bool negward) const noexcept {
+    return endOfRank(from, dim, fromNegward(negward));
+  }
 };
 
 } // namespace zigzag

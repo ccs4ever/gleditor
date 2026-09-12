@@ -604,12 +604,12 @@ SlicedStore sliceToStore(const ZzStructureDocument &doc, xanadu::Store &store,
   manifold = store.rebuildManifold(out.version);
 
   const auto linkTo = [&](const CellRef from, const DimRef dim,
-                          const bool negward, const CellRef to) {
+                          const DimVector dir, const CellRef to) {
     if (zigzag::noCell == from || zigzag::noCell == dim ||
         zigzag::noCell == to) {
       return;
     }
-    out.version = store.setLink(out.version, from, dim, negward, to, &manifold);
+    out.version = store.setLink(out.version, from, dim, dir, to, &manifold);
     static_cast<void>(manifold.advance(store, out.version));
   };
 
@@ -624,7 +624,7 @@ SlicedStore sliceToStore(const ZzStructureDocument &doc, xanadu::Store &store,
     out.version          = store.makeCell(out.version, value);
     const auto attribute = store.cellRefOf(out.version);
     static_cast<void>(manifold.advance(store, out.version));
-    linkTo(owner, out.dimensions.at(DimID{dimName}), false, attribute);
+    linkTo(owner, out.dimensions.at(DimID{dimName}), DimVector::POS, attribute);
   };
 
   for (const auto id : ids) {
@@ -651,14 +651,16 @@ SlicedStore sliceToStore(const ZzStructureDocument &doc, xanadu::Store &store,
       const auto links   = cell.dimensions.at(dim);
       const auto dimCell = out.dimensions.at(dim);
       if (0 != links.pos && out.cells.contains(links.pos)) {
-        linkTo(out.cells.at(id), dimCell, false, out.cells.at(links.pos));
+        linkTo(out.cells.at(id), dimCell, DimVector::POS,
+               out.cells.at(links.pos));
       }
       if (0 != links.neg && out.cells.contains(links.neg)) {
         const auto &other    = doc.cells.at(links.neg);
         const auto reachesUs = other.dimensions.contains(dim) &&
                                other.dimensions.at(dim).pos == id;
         if (!reachesUs) {
-          linkTo(out.cells.at(id), dimCell, true, out.cells.at(links.neg));
+          linkTo(out.cells.at(id), dimCell, DimVector::NEG,
+                 out.cells.at(links.neg));
         }
       }
     }
@@ -708,7 +710,8 @@ ZzStructureDocument storeToSlice(const xanadu::Store &store,
       if (zigzag::noCell == attribute) {
         continue;
       }
-      if (const auto held = manifold.linked(slot.birthOp, attribute, false);
+      if (const auto held =
+              manifold.linked(slot.birthOp, attribute, DimVector::POS);
           zigzag::noCell != held) {
         structural.insert(held);
       }
@@ -733,7 +736,7 @@ ZzStructureDocument storeToSlice(const xanadu::Store &store,
       if (zigzag::noCell == dim) {
         return std::string{};
       }
-      const auto held = manifold.linked(slot.birthOp, dim, false);
+      const auto held = manifold.linked(slot.birthOp, dim, DimVector::POS);
       return zigzag::noCell == held ? std::string{}
                                     : manifold.textOf(held, store);
     };
@@ -792,7 +795,8 @@ storeToLinkPackage(const xanadu::Store &store, const Manifold &manifold,
       if (zigzag::noCell == attribute) {
         continue;
       }
-      if (const auto held = manifold.linked(slot.birthOp, attribute, false);
+      if (const auto held =
+              manifold.linked(slot.birthOp, attribute, DimVector::POS);
           zigzag::noCell != held) {
         structural.insert(held);
       }

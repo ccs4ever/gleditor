@@ -26,20 +26,20 @@ TEST(ZigzagVisualizerTest, NavigationAlongDimensions) {
   EXPECT_NE(root, 0U);
 
   // In default sample: root has d.1 pos, and d.2 pos
-  viz.navigateFocus("d.1", true);
+  viz.navigateFocus("d.1", DimVector::POS);
   const auto c2 = viz.focusCellId();
   EXPECT_NE(c2, root);
 
-  viz.navigateFocus("d.1", false);
+  viz.navigateFocus("d.1", DimVector::NEG);
   EXPECT_EQ(viz.focusCellId(), root);
 
-  viz.navigateFocus("d.2", true);
+  viz.navigateFocus("d.2", DimVector::POS);
   const auto c3 = viz.focusCellId();
   EXPECT_NE(c3, root);
   EXPECT_NE(c3, c2);
 
   // Cell c3 has d.3 pos
-  viz.navigateFocus("d.3", true);
+  viz.navigateFocus("d.3", DimVector::POS);
   const auto c4 = viz.focusCellId();
   EXPECT_NE(c4, root);
   EXPECT_NE(c4, c2);
@@ -76,8 +76,8 @@ TEST(ZigzagVisualizerTest, DirectNavigationToCell) {
   ZigzagVisualizer viz("Sans 12");
 
   const auto root = viz.focusCellId();
-  viz.navigateFocus("d.2", true);
-  viz.navigateFocus("d.3", true);
+  viz.navigateFocus("d.2", DimVector::POS);
+  viz.navigateFocus("d.3", DimVector::POS);
   const auto target = viz.focusCellId();
   EXPECT_NE(target, root);
 
@@ -126,9 +126,9 @@ TEST(ZigzagVisualizerTest, MousePicking) {
   ZigzagVisualizer viz("Sans 12");
 
   const auto root = viz.focusCellId();
-  viz.navigateFocus("d.1", true);
+  viz.navigateFocus("d.1", DimVector::POS);
   const auto neighbor = viz.focusCellId();
-  viz.navigateFocus("d.1", false);
+  viz.navigateFocus("d.1", DimVector::NEG);
   EXPECT_EQ(viz.focusCellId(), root);
 
   testing::NiceMock<MockRenderDevice> device;
@@ -168,7 +168,8 @@ TEST(ZigzagVisualizerTest, InAppInteractiveCellAndDimensionEditing) {
   EXPECT_NE(rootId, 0U);
 
   // Insert connected cell along positive X ("d.1")
-  EXPECT_TRUE(viz.insertConnectedCell("Newly Inserted Topic", "d.1", true));
+  EXPECT_TRUE(
+      viz.insertConnectedCell("Newly Inserted Topic", "d.1", DimVector::POS));
   const auto newCellId = viz.focusCellId();
   EXPECT_NE(newCellId, rootId);
 
@@ -176,23 +177,23 @@ TEST(ZigzagVisualizerTest, InAppInteractiveCellAndDimensionEditing) {
   viz.updateFocusCellText("Edited Topic Name");
 
   // Step back along negative X to root cell
-  viz.navigateFocus("d.1", false);
+  viz.navigateFocus("d.1", DimVector::NEG);
   EXPECT_EQ(viz.focusCellId(), rootId);
 
   // Step forward to our edited cell
-  viz.navigateFocus("d.1", true);
+  viz.navigateFocus("d.1", DimVector::POS);
   EXPECT_EQ(viz.focusCellId(), newCellId);
 
   // Unlink along negative X
-  EXPECT_TRUE(viz.unlinkFocusAlong("d.1", false));
+  EXPECT_TRUE(viz.unlinkFocusAlong("d.1", DimVector::NEG));
 
   // Stepping back should now stay at newCellId since link was broken
-  viz.navigateFocus("d.1", false);
+  viz.navigateFocus("d.1", DimVector::NEG);
   EXPECT_EQ(viz.focusCellId(), newCellId);
 
   // Re-link manually
-  EXPECT_TRUE(viz.linkFocusAlong("d.1", rootId, false));
-  viz.navigateFocus("d.1", false);
+  EXPECT_TRUE(viz.linkFocusAlong("d.1", rootId, DimVector::NEG));
+  viz.navigateFocus("d.1", DimVector::NEG);
   EXPECT_EQ(viz.focusCellId(), rootId);
 }
 
@@ -243,7 +244,7 @@ zzstructure:
   viz.updateFocusCellText("Mutated Text From Clone");
 
   const auto currentDoc = viz.document();
-  viz.navigateFocus("d.clone", false);
+  viz.navigateFocus("d.clone", DimVector::NEG);
   const auto masterId = viz.focusCellId();
   EXPECT_NE(masterId, cloneFocus);
 
@@ -305,14 +306,14 @@ TEST(ZigzagVisualizerTest, MetaDimensionsDynamicTraversal) {
 
   // Stepping posward on d.meta-dims navigates to an ephemeral dimension clone
   // cell
-  viz.navigateFocus("d.meta-dims", true);
+  viz.navigateFocus("d.meta-dims", DimVector::POS);
   const auto eph1 = viz.focusCellId();
   EXPECT_NE(eph1, root);
   EXPECT_TRUE(isEphemeral(eph1));
 
   // Stepping negward along d.clone from ephemeral cell navigates to master
   // dimension cell on d.dims
-  viz.navigateFocus("d.clone", false);
+  viz.navigateFocus("d.clone", DimVector::NEG);
   const auto masterDim = viz.focusCellId();
   EXPECT_NE(masterDim, eph1);
   EXPECT_FALSE(isEphemeral(masterDim));
@@ -321,7 +322,7 @@ TEST(ZigzagVisualizerTest, MetaDimensionsDynamicTraversal) {
 
   // Stepping negward along d.clone from master dimension cell doesn't navigate
   // away
-  viz.navigateFocus("d.clone", false);
+  viz.navigateFocus("d.clone", DimVector::NEG);
   EXPECT_EQ(viz.focusCellId(), masterDim);
 
   // Step back to ephemeral cell by navigating to it
@@ -329,28 +330,28 @@ TEST(ZigzagVisualizerTest, MetaDimensionsDynamicTraversal) {
   EXPECT_EQ(viz.focusCellId(), eph1);
 
   // Stepping negward along d.meta-dims returns to the parent cell
-  viz.navigateFocus("d.meta-dims", false);
+  viz.navigateFocus("d.meta-dims", DimVector::NEG);
   EXPECT_EQ(viz.focusCellId(), root);
 
   // Walking along d.meta-dims posward enumerates all dimensions root links on,
   // plus d.meta-dims itself
-  viz.navigateFocus("d.meta-dims", true);
+  viz.navigateFocus("d.meta-dims", DimVector::POS);
   const auto dimCell1 = viz.focusCellId();
   EXPECT_TRUE(isEphemeral(dimCell1));
 
-  viz.navigateFocus("d.meta-dims", true);
+  viz.navigateFocus("d.meta-dims", DimVector::POS);
   const auto dimCell2 = viz.focusCellId();
   EXPECT_TRUE(isEphemeral(dimCell2));
   EXPECT_NE(dimCell2, dimCell1);
 
-  viz.navigateFocus("d.meta-dims", true);
+  viz.navigateFocus("d.meta-dims", DimVector::POS);
   const auto dimCell3 = viz.focusCellId();
   EXPECT_TRUE(isEphemeral(dimCell3));
   EXPECT_NE(dimCell3, dimCell2);
 
   // Navigating negward on d.clone from the last ephemeral cell resolves to
   // d.meta-dims
-  viz.navigateFocus("d.clone", false);
+  viz.navigateFocus("d.clone", DimVector::NEG);
   EXPECT_TRUE(viz.isProtected(viz.focusCellId()));
 }
 
@@ -359,37 +360,38 @@ TEST(ZigzagVisualizerTest, DeletionProtection) {
 
   // Protection checks
   // 1) d.dims links cannot be unlinked or altered
-  EXPECT_FALSE(viz.unlinkFocusAlong("d.dims", true));
-  EXPECT_FALSE(viz.unlinkFocusAlong("d.dims", false));
-  EXPECT_FALSE(viz.linkFocusAlong("d.dims", 1U, true));
+  EXPECT_FALSE(viz.unlinkFocusAlong("d.dims", DimVector::POS));
+  EXPECT_FALSE(viz.unlinkFocusAlong("d.dims", DimVector::NEG));
+  EXPECT_FALSE(viz.linkFocusAlong("d.dims", 1U, DimVector::POS));
 
   // 2) Cannot insert connected cell along d.dims
-  EXPECT_FALSE(viz.insertConnectedCell("Illegal Dim Child", "d.dims", true));
+  EXPECT_FALSE(
+      viz.insertConnectedCell("Illegal Dim Child", "d.dims", DimVector::POS));
 
   // 3) Protected cells (home, dimension cells) cannot be deleted
   // Navigate to an ephemeral cell via d.meta-dims and then to master dimension
   // on d.dims
-  viz.navigateFocus("d.meta-dims", true);
+  viz.navigateFocus("d.meta-dims", DimVector::POS);
   const auto eph = viz.focusCellId();
   EXPECT_TRUE(isEphemeral(eph));
   EXPECT_TRUE(viz.isProtected(eph));
   EXPECT_FALSE(viz.deleteFocusCell()); // Cannot delete ephemeral cell
 
-  viz.navigateFocus("d.clone", false);
+  viz.navigateFocus("d.clone", DimVector::NEG);
   const auto dimCell = viz.focusCellId();
   EXPECT_TRUE(viz.isProtected(dimCell));
   EXPECT_FALSE(viz.deleteFocusCell()); // Cannot delete dimension cell
 
   // 4) Unprotected content cells CAN be deleted, preserving rank continuity
-  EXPECT_TRUE(viz.insertConnectedCell("Chain Cell A", "d.1", true));
+  EXPECT_TRUE(viz.insertConnectedCell("Chain Cell A", "d.1", DimVector::POS));
   const auto cellA = viz.focusCellId();
-  EXPECT_TRUE(viz.insertConnectedCell("Chain Cell B", "d.1", true));
+  EXPECT_TRUE(viz.insertConnectedCell("Chain Cell B", "d.1", DimVector::POS));
   const auto cellB = viz.focusCellId();
-  EXPECT_TRUE(viz.insertConnectedCell("Chain Cell C", "d.1", true));
+  EXPECT_TRUE(viz.insertConnectedCell("Chain Cell C", "d.1", DimVector::POS));
   const auto cellC = viz.focusCellId();
 
   // Focus on cell B
-  viz.navigateFocus("d.1", false);
+  viz.navigateFocus("d.1", DimVector::NEG);
   EXPECT_EQ(viz.focusCellId(), cellB);
   EXPECT_FALSE(viz.isProtected(cellB));
 
@@ -404,10 +406,10 @@ TEST(ZigzagVisualizerTest, DeletionProtection) {
   // d.1
   viz.navigateFocusTo(cellA);
   EXPECT_EQ(viz.focusCellId(), cellA);
-  viz.navigateFocus("d.1", true);
+  viz.navigateFocus("d.1", DimVector::POS);
   EXPECT_EQ(viz.focusCellId(), cellC);
 
-  viz.navigateFocus("d.1", false);
+  viz.navigateFocus("d.1", DimVector::NEG);
   EXPECT_EQ(viz.focusCellId(), cellA);
 }
 
@@ -440,9 +442,9 @@ TEST(ZigzagVisualizerTest, HomeAndDimensionCellsAccessibleInTree) {
 // both sides and linkCells() has no idempotence guard.
 TEST(ZigzagVisualizerTest, DeletingACellCostsOneOperationPerDimension) {
   ZigzagVisualizer viz("Sans 12");
-  ASSERT_TRUE(viz.insertConnectedCell("A", "d.1", true));
-  ASSERT_TRUE(viz.insertConnectedCell("B", "d.1", true));
-  ASSERT_TRUE(viz.insertConnectedCell("C", "d.1", true));
+  ASSERT_TRUE(viz.insertConnectedCell("A", "d.1", DimVector::POS));
+  ASSERT_TRUE(viz.insertConnectedCell("B", "d.1", DimVector::POS));
+  ASSERT_TRUE(viz.insertConnectedCell("C", "d.1", DimVector::POS));
 
   const auto victim = viz.focusCellId();
   ASSERT_FALSE(viz.isProtected(victim));
@@ -467,9 +469,9 @@ TEST(ZigzagVisualizerTest, NavigatingAnAbsentDimensionRecordsNothing) {
   ZigzagVisualizer viz("Sans 12");
   const auto before = viz.operationCount();
 
-  viz.navigateFocus("d.no-such-dimension", true);
-  viz.navigateFocus("d.no-such-dimension", false);
-  viz.navigateFocus("d.also-absent", true);
+  viz.navigateFocus("d.no-such-dimension", DimVector::POS);
+  viz.navigateFocus("d.no-such-dimension", DimVector::NEG);
+  viz.navigateFocus("d.also-absent", DimVector::POS);
   viz.cycleDimensions(true);
   viz.swapDimensions(0, 1);
 
@@ -484,8 +486,8 @@ TEST(ZigzagVisualizerTest, NavigatingAnAbsentDimensionRecordsNothing) {
 // announcing a cell the sighted user had just watched disappear.
 TEST(ZigzagVisualizerTest, ADeletedCellIsNotAnnounced) {
   ZigzagVisualizer viz("Sans 12");
-  ASSERT_TRUE(viz.insertConnectedCell("Keep me", "d.1", true));
-  ASSERT_TRUE(viz.insertConnectedCell("Delete me", "d.1", true));
+  ASSERT_TRUE(viz.insertConnectedCell("Keep me", "d.1", DimVector::POS));
+  ASSERT_TRUE(viz.insertConnectedCell("Delete me", "d.1", DimVector::POS));
   const auto victim = viz.focusCellId();
   ASSERT_FALSE(viz.isProtected(victim));
   ASSERT_TRUE(viz.deleteFocusCell());

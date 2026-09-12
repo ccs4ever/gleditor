@@ -6,6 +6,7 @@
 #ifndef ZIGZAG_ZZCORE_HPP
 #define ZIGZAG_ZZCORE_HPP
 
+#include "common/xanadu/zigzag/dim_vector.hpp"
 #include "common/xanadu/zigzag/zzstructure.hpp"
 
 #include <array>
@@ -63,7 +64,7 @@ inline constexpr std::string_view cloneDimension = "d.clone";
 struct ExplicitLink {
   CellID from = 0;
   DimID dimension;
-  bool isPos = true; // true: from's pos is target; false: from's neg is target
+  DimVector dir = DimVector::POS;
   CellID target = 0;
 };
 

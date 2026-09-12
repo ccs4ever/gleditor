@@ -10,6 +10,7 @@
 #include <unordered_set>
 
 namespace xanadu::vql {
+using zigzag::DimVector;
 
 MultiStoreCoordinator::MultiStoreCoordinator() {
   ownedArena_ = std::make_unique<zigzag::ArenaManifold>();
@@ -48,24 +49,24 @@ CellRef MultiStoreCoordinator::linkNewStoreOnRank(CellRef homeCell,
 
   // 2. Append storeCell posward along d.stores off coordinatorHome_
   if (storesTail_ == noCell) {
-    arena.link(coordinatorHome_, dimStores_, false /*posward*/, storeCell);
+    arena.link(coordinatorHome_, dimStores_, DimVector::POS, storeCell);
   } else {
-    arena.link(storesTail_, dimStores_, false /*posward*/, storeCell);
+    arena.link(storesTail_, dimStores_, DimVector::POS, storeCell);
   }
   storesTail_ = storeCell;
 
   // 3. Link representative cell to homeCell via d.clone such that homeCell
   // is the clone master (homeCell is leftmost / negward).
   // storeCell links negward to homeCell; homeCell links posward to storeCell.
-  arena.link(storeCell, dimClone_, true /*negward*/, homeCell);
-  arena.link(homeCell, dimClone_, false /*posward*/, storeCell);
+  arena.link(storeCell, dimClone_, DimVector::NEG, homeCell);
+  arena.link(homeCell, dimClone_, DimVector::POS, storeCell);
 
   // 4. Metadata ranks hang directly off slice homeCell (the clone master)
   CellRef nameCell = arena.makeCell(label);
-  arena.link(homeCell, dimName_, false /*posward*/, nameCell);
+  arena.link(homeCell, dimName_, DimVector::POS, nameCell);
 
   CellRef roleCell = arena.makeCell(role);
-  arena.link(homeCell, dimRole_, false /*posward*/, roleCell);
+  arena.link(homeCell, dimRole_, DimVector::POS, roleCell);
 
   return storeCell;
 }
@@ -131,13 +132,13 @@ CellRef MultiStoreCoordinator::importManifold(const zigzag::Manifold &source,
       if (dimLink.pos != noCell) {
         auto itPos = sourceToDest.find(dimLink.pos);
         if (itPos != sourceToDest.end()) {
-          dest.link(dstRef, dstDim, false /*posward*/, itPos->second);
+          dest.link(dstRef, dstDim, DimVector::POS, itPos->second);
         }
       }
       if (dimLink.neg != noCell) {
         auto itNeg = sourceToDest.find(dimLink.neg);
         if (itNeg != sourceToDest.end()) {
-          dest.link(dstRef, dstDim, true /*negward*/, itNeg->second);
+          dest.link(dstRef, dstDim, DimVector::NEG, itNeg->second);
         }
       }
     }

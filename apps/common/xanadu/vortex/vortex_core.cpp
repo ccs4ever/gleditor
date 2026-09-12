@@ -14,7 +14,7 @@ CellRef VortexCore::mintNamedDimension(std::string_view name,
                                        CellRef &lastDimCell) {
   CellRef dimCell = arena_.makeCell(name);
   if (lastDimCell != noCell && dims_.dims != noCell) {
-    arena_.link(lastDimCell, dims_.dims, false, dimCell);
+    arena_.link(lastDimCell, dims_.dims, DimVector::POS, dimCell);
   }
   lastDimCell = dimCell;
   return dimCell;
@@ -26,7 +26,7 @@ void VortexCore::initGenesis() {
 
   // System Dimension Genesis off home_
   dims_.dims = mintNamedDimension("d.dims", lastDim);
-  arena_.link(home_, dims_.dims, false, dims_.dims);
+  arena_.link(home_, dims_.dims, DimVector::POS, dims_.dims);
 
   dims_.grab           = mintNamedDimension("d.grab", lastDim);
   dims_.step           = mintNamedDimension("d.step", lastDim);
@@ -49,7 +49,7 @@ void VortexCore::initGenesis() {
 CellRef VortexCore::mintDimension(std::string_view name) {
   CellRef tail = home_;
   while (true) {
-    CellRef next = arena_.linked(tail, dims_.dims, false);
+    CellRef next = arena_.linked(tail, dims_.dims, DimVector::POS);
     if (next == noCell || next == tail) {
       break;
     }
@@ -58,7 +58,7 @@ CellRef VortexCore::mintDimension(std::string_view name) {
   return mintNamedDimension(name, tail);
 }
 
-std::optional<CellRef> VortexCore::link(CellRef cell, DimRef dim, bool negward,
+std::optional<CellRef> VortexCore::link(CellRef cell, DimRef dim, DimVector dir,
                                         std::optional<CellRef> target) {
   if (!arena_.contains(cell)) {
     return std::nullopt;
@@ -66,7 +66,7 @@ std::optional<CellRef> VortexCore::link(CellRef cell, DimRef dim, bool negward,
 
   // 1. Read form (target omitted)
   if (!target.has_value()) {
-    CellRef existing = arena_.linked(cell, dim, negward);
+    CellRef existing = arena_.linked(cell, dim, dir);
     if (existing == noCell) {
       return std::nullopt;
     }
@@ -78,22 +78,22 @@ std::optional<CellRef> VortexCore::link(CellRef cell, DimRef dim, bool negward,
   // 2. Allocation form (target == -1)
   if (raw_target == static_cast<CellRef>(-1)) {
     CellRef created = arena_.makeCell();
-    arena_.link(cell, dim, negward, created);
+    arena_.link(cell, dim, dir, created);
     return created;
   }
 
   // 3. Isolation form (target == 0 / noCell)
   if (raw_target == 0 || raw_target == noCell) {
-    CellRef old = arena_.linked(cell, dim, negward);
+    CellRef old = arena_.linked(cell, dim, dir);
     if (old == noCell) {
       return std::nullopt;
     }
-    arena_.link(cell, dim, negward, noCell);
+    arena_.link(cell, dim, dir, noCell);
     return old;
   }
 
   // 4. Literal target
-  arena_.link(cell, dim, negward, raw_target);
+  arena_.link(cell, dim, dir, raw_target);
   return raw_target;
 }
 
@@ -151,13 +151,14 @@ std::optional<CellRef> VortexCore::value(CellRef cell, std::int64_t offset,
 }
 
 std::optional<CellRef> VortexCore::newCell(CellRef cell, DimRef dim,
-                                           bool negward) {
-  return link(cell, dim, negward, static_cast<CellRef>(-1));
+                                           DimVector dir) {
+  return link(cell, dim, dir, static_cast<CellRef>(-1));
 }
 
 std::optional<CellRef> VortexCore::newCell(CellRef cell, DimRef dim,
-                                           bool negward, const CellValue &val) {
-  auto created = newCell(cell, dim, negward);
+                                           DimVector dir,
+                                           const CellValue &val) {
+  auto created = newCell(cell, dim, dir);
   if (created) {
     value(*created, 0, -1, val);
   }
@@ -165,8 +166,8 @@ std::optional<CellRef> VortexCore::newCell(CellRef cell, DimRef dim,
 }
 
 std::optional<CellRef> VortexCore::breakLink(CellRef cell, DimRef dim,
-                                             bool negward) {
-  return link(cell, dim, negward, noCell);
+                                             DimVector dir) {
+  return link(cell, dim, dir, noCell);
 }
 
 std::optional<CellRef> VortexCore::splice(CellRef cell, std::int64_t offset,
@@ -260,9 +261,9 @@ std::function<CellRef()> VortexCore::cloneGenerator(CellRef source) {
     CellRef cloneTail  = source;
     std::size_t cLimit = arena_.cellCount() + 1;
     while (cLimit-- > 0) {
-      CellRef next = arena_.linked(cloneTail, dims_.clone, false);
+      CellRef next = arena_.linked(cloneTail, dims_.clone, DimVector::POS);
       if (next == noCell) {
-        arena_.link(cloneTail, dims_.clone, false, fresh);
+        arena_.link(cloneTail, dims_.clone, DimVector::POS, fresh);
         break;
       }
       cloneTail = next;
@@ -273,7 +274,7 @@ std::function<CellRef()> VortexCore::cloneGenerator(CellRef source) {
 
 std::vector<CellRef> VortexCore::inputsOf(CellRef opcode) const {
   std::vector<CellRef> result;
-  CellRef cur       = arena_.linked(opcode, dims_.grab, false); // +d.grab
+  CellRef cur       = arena_.linked(opcode, dims_.grab, DimVector::POS);
   std::size_t limit = arena_.cellCount() + 1;
   while (cur != noCell && limit-- > 0) {
     auto val = arena_.asInt64(cur);
@@ -282,14 +283,14 @@ std::vector<CellRef> VortexCore::inputsOf(CellRef opcode) const {
     } else {
       result.push_back(arena_.cloneMaster(cur, dims_.clone));
     }
-    cur = arena_.linked(cur, dims_.step, false); // +d.step
+    cur = arena_.linked(cur, dims_.step, DimVector::POS);
   }
   return result;
 }
 
 std::vector<CellRef> VortexCore::outputsOf(CellRef opcode) const {
   std::vector<CellRef> result;
-  CellRef cur       = arena_.linked(opcode, dims_.grab, true); // -d.grab
+  CellRef cur       = arena_.linked(opcode, dims_.grab, DimVector::NEG);
   std::size_t limit = arena_.cellCount() + 1;
   while (cur != noCell && limit-- > 0) {
     auto val = arena_.asInt64(cur);
@@ -298,7 +299,7 @@ std::vector<CellRef> VortexCore::outputsOf(CellRef opcode) const {
     } else {
       result.push_back(arena_.cloneMaster(cur, dims_.clone));
     }
-    cur = arena_.linked(cur, dims_.step, false); // +d.step
+    cur = arena_.linked(cur, dims_.step, DimVector::POS);
   }
   return result;
 }
@@ -310,17 +311,17 @@ void VortexCore::bindInput(CellRef opcode, CellRef operand) {
   CellRef slot = arena_.makeScalarCell(static_cast<std::int64_t>(operand));
 
   // Link slot into opcode's input wing (+d.grab, then chain on +d.step)
-  CellRef first = arena_.linked(opcode, dims_.grab, false);
+  CellRef first = arena_.linked(opcode, dims_.grab, DimVector::POS);
   if (first == noCell) {
-    arena_.link(opcode, dims_.grab, false, slot);
+    arena_.link(opcode, dims_.grab, DimVector::POS, slot);
     return;
   }
   CellRef cur       = first;
   std::size_t limit = arena_.cellCount() + 1;
   while (limit-- > 0) {
-    CellRef next = arena_.linked(cur, dims_.step, false);
+    CellRef next = arena_.linked(cur, dims_.step, DimVector::POS);
     if (next == noCell) {
-      arena_.link(cur, dims_.step, false, slot);
+      arena_.link(cur, dims_.step, DimVector::POS, slot);
       return;
     }
     cur = next;
@@ -334,17 +335,17 @@ void VortexCore::bindOutput(CellRef opcode, CellRef target) {
   CellRef slot = arena_.makeScalarCell(static_cast<std::int64_t>(target));
 
   // Link slot into opcode's output wing (-d.grab, then chain on +d.step)
-  CellRef first = arena_.linked(opcode, dims_.grab, true);
+  CellRef first = arena_.linked(opcode, dims_.grab, DimVector::NEG);
   if (first == noCell) {
-    arena_.link(opcode, dims_.grab, true, slot);
+    arena_.link(opcode, dims_.grab, DimVector::NEG, slot);
     return;
   }
   CellRef cur       = first;
   std::size_t limit = arena_.cellCount() + 1;
   while (limit-- > 0) {
-    CellRef next = arena_.linked(cur, dims_.step, false);
+    CellRef next = arena_.linked(cur, dims_.step, DimVector::POS);
     if (next == noCell) {
-      arena_.link(cur, dims_.step, false, slot);
+      arena_.link(cur, dims_.step, DimVector::POS, slot);
       return;
     }
     cur = next;
@@ -357,60 +358,60 @@ bool VortexCore::hasPipeline(CellRef paramCell) const {
   }
   // A cell inside an instruction stream has a predecessor along -d.spin;
   // a parameter cell heading a pipeline has only an outgoing +d.spin.
-  if (arena_.linked(paramCell, dims_.spin, true) != noCell) {
+  if (arena_.linked(paramCell, dims_.spin, DimVector::NEG) != noCell) {
     return false;
   }
-  return arena_.linked(paramCell, dims_.spin, false) != noCell;
+  return arena_.linked(paramCell, dims_.spin, DimVector::POS) != noCell;
 }
 
 CellRef VortexCore::getPipelineHead(CellRef paramCell) const {
   if (paramCell == home_ || paramCell == noCell) {
     return noCell;
   }
-  if (arena_.linked(paramCell, dims_.spin, true) != noCell) {
+  if (arena_.linked(paramCell, dims_.spin, DimVector::NEG) != noCell) {
     return noCell;
   }
-  return arena_.linked(paramCell, dims_.spin, false);
+  return arena_.linked(paramCell, dims_.spin, DimVector::POS);
 }
 
 void VortexCore::attachPipeline(CellRef paramCell, CellRef firstOp) {
-  arena_.link(paramCell, dims_.spin, false, firstOp);
+  arena_.link(paramCell, dims_.spin, DimVector::POS, firstOp);
 }
 
 std::vector<CellRef> VortexCore::preconditionsOf(CellRef opcode) const {
   std::vector<CellRef> result;
-  CellRef cur = arena_.linked(opcode, dims_.contract, true); // -d.contract
+  CellRef cur       = arena_.linked(opcode, dims_.contract, DimVector::NEG);
   std::size_t limit = arena_.cellCount() + 1;
   while (cur != noCell && limit-- > 0) {
     result.push_back(cur);
-    cur = arena_.linked(cur, dims_.step, false);
+    cur = arena_.linked(cur, dims_.step, DimVector::POS);
   }
   return result;
 }
 
 std::vector<CellRef> VortexCore::postconditionsOf(CellRef opcode) const {
   std::vector<CellRef> result;
-  CellRef cur = arena_.linked(opcode, dims_.contract, false); // +d.contract
+  CellRef cur       = arena_.linked(opcode, dims_.contract, DimVector::POS);
   std::size_t limit = arena_.cellCount() + 1;
   while (cur != noCell && limit-- > 0) {
     result.push_back(cur);
-    cur = arena_.linked(cur, dims_.step, false);
+    cur = arena_.linked(cur, dims_.step, DimVector::POS);
   }
   return result;
 }
 
 void VortexCore::attachPrecondition(CellRef opcode, CellRef conditionOp) {
-  CellRef first = arena_.linked(opcode, dims_.contract, true);
+  CellRef first = arena_.linked(opcode, dims_.contract, DimVector::NEG);
   if (first == noCell) {
-    arena_.link(opcode, dims_.contract, true, conditionOp);
+    arena_.link(opcode, dims_.contract, DimVector::NEG, conditionOp);
     return;
   }
   CellRef cur       = first;
   std::size_t limit = arena_.cellCount() + 1;
   while (limit-- > 0) {
-    CellRef next = arena_.linked(cur, dims_.step, false);
+    CellRef next = arena_.linked(cur, dims_.step, DimVector::POS);
     if (next == noCell) {
-      arena_.link(cur, dims_.step, false, conditionOp);
+      arena_.link(cur, dims_.step, DimVector::POS, conditionOp);
       return;
     }
     cur = next;
@@ -418,17 +419,17 @@ void VortexCore::attachPrecondition(CellRef opcode, CellRef conditionOp) {
 }
 
 void VortexCore::attachPostcondition(CellRef opcode, CellRef conditionOp) {
-  CellRef first = arena_.linked(opcode, dims_.contract, false);
+  CellRef first = arena_.linked(opcode, dims_.contract, DimVector::POS);
   if (first == noCell) {
-    arena_.link(opcode, dims_.contract, false, conditionOp);
+    arena_.link(opcode, dims_.contract, DimVector::POS, conditionOp);
     return;
   }
   CellRef cur       = first;
   std::size_t limit = arena_.cellCount() + 1;
   while (limit-- > 0) {
-    CellRef next = arena_.linked(cur, dims_.step, false);
+    CellRef next = arena_.linked(cur, dims_.step, DimVector::POS);
     if (next == noCell) {
-      arena_.link(cur, dims_.step, false, conditionOp);
+      arena_.link(cur, dims_.step, DimVector::POS, conditionOp);
       return;
     }
     cur = next;
@@ -438,22 +439,22 @@ void VortexCore::attachPostcondition(CellRef opcode, CellRef conditionOp) {
 CellRef VortexCore::pin(std::string_view name, CellRef targetNode) {
   CellRef pinCursor = arena_.makeCell();
   CellRef nameCell  = arena_.makeCell(name);
-  arena_.link(pinCursor, dims_.name, false, nameCell);
+  arena_.link(pinCursor, dims_.name, DimVector::POS, nameCell);
   if (targetNode != noCell) {
-    arena_.link(pinCursor, dims_.cache, false, targetNode);
+    arena_.link(pinCursor, dims_.cache, DimVector::POS, targetNode);
   }
 
   // Link into home_ +d.pinning-cursors rank
-  CellRef first = arena_.linked(home_, dims_.pinningCursors, false);
+  CellRef first = arena_.linked(home_, dims_.pinningCursors, DimVector::POS);
   if (first == noCell) {
-    arena_.link(home_, dims_.pinningCursors, false, pinCursor);
+    arena_.link(home_, dims_.pinningCursors, DimVector::POS, pinCursor);
   } else {
     CellRef cur       = first;
     std::size_t limit = arena_.cellCount() + 1;
     while (limit-- > 0) {
-      CellRef next = arena_.linked(cur, dims_.pinningCursors, false);
+      CellRef next = arena_.linked(cur, dims_.pinningCursors, DimVector::POS);
       if (next == noCell) {
-        arena_.link(cur, dims_.pinningCursors, false, pinCursor);
+        arena_.link(cur, dims_.pinningCursors, DimVector::POS, pinCursor);
         break;
       }
       cur = next;
@@ -463,14 +464,14 @@ CellRef VortexCore::pin(std::string_view name, CellRef targetNode) {
 }
 
 std::optional<CellRef> VortexCore::findPin(std::string_view name) const {
-  CellRef cur       = arena_.linked(home_, dims_.pinningCursors, false);
+  CellRef cur = arena_.linked(home_, dims_.pinningCursors, DimVector::POS);
   std::size_t limit = arena_.cellCount() + 1;
   while (cur != noCell && limit-- > 0) {
-    CellRef nameCell = arena_.linked(cur, dims_.name, false);
+    CellRef nameCell = arena_.linked(cur, dims_.name, DimVector::POS);
     if (nameCell != noCell && arena_.textOf(nameCell) == name) {
       return cur;
     }
-    cur = arena_.linked(cur, dims_.pinningCursors, false);
+    cur = arena_.linked(cur, dims_.pinningCursors, DimVector::POS);
   }
   return std::nullopt;
 }
@@ -480,29 +481,29 @@ bool VortexCore::flushPin(std::string_view name) {
   if (!pinOpt) {
     return false;
   }
-  arena_.link(*pinOpt, dims_.cache, false, noCell);
+  arena_.link(*pinOpt, dims_.cache, DimVector::POS, noCell);
   return true;
 }
 
 bool VortexCore::retirePin(std::string_view name) {
-  CellRef prev      = home_;
-  CellRef cur       = arena_.linked(home_, dims_.pinningCursors, false);
+  CellRef prev = home_;
+  CellRef cur  = arena_.linked(home_, dims_.pinningCursors, DimVector::POS);
   std::size_t limit = arena_.cellCount() + 1;
   while (cur != noCell && limit-- > 0) {
-    CellRef nameCell = arena_.linked(cur, dims_.name, false);
+    CellRef nameCell = arena_.linked(cur, dims_.name, DimVector::POS);
     if (nameCell != noCell && arena_.textOf(nameCell) == name) {
-      CellRef next = arena_.linked(cur, dims_.pinningCursors, false);
+      CellRef next = arena_.linked(cur, dims_.pinningCursors, DimVector::POS);
       if (prev == home_) {
-        arena_.link(home_, dims_.pinningCursors, false, next);
+        arena_.link(home_, dims_.pinningCursors, DimVector::POS, next);
       } else {
-        arena_.link(prev, dims_.pinningCursors, false, next);
+        arena_.link(prev, dims_.pinningCursors, DimVector::POS, next);
       }
-      arena_.link(cur, dims_.pinningCursors, false, noCell);
-      arena_.link(cur, dims_.cache, false, noCell);
+      arena_.link(cur, dims_.pinningCursors, DimVector::POS, noCell);
+      arena_.link(cur, dims_.cache, DimVector::POS, noCell);
       return true;
     }
     prev = cur;
-    cur  = arena_.linked(cur, dims_.pinningCursors, false);
+    cur  = arena_.linked(cur, dims_.pinningCursors, DimVector::POS);
   }
   return false;
 }
@@ -523,7 +524,7 @@ CellRef VortexCore::getOrCreateMemoPin(std::string_view opName) {
 
 std::optional<std::vector<CellValue>>
 VortexCore::lookupMemo(CellRef memoPin, const std::vector<CellValue> &inputs) {
-  CellRef entry     = arena_.linked(memoPin, dims_.cache, false);
+  CellRef entry     = arena_.linked(memoPin, dims_.cache, DimVector::POS);
   std::size_t limit = arena_.cellCount() + 1;
   while (entry != noCell && limit-- > 0) {
     std::vector<CellRef> entryInputs = inputsOf(entry);
@@ -545,7 +546,7 @@ VortexCore::lookupMemo(CellRef memoPin, const std::vector<CellValue> &inputs) {
         return results;
       }
     }
-    entry = arena_.linked(entry, dims_.cache, false);
+    entry = arena_.linked(entry, dims_.cache, DimVector::POS);
   }
   return std::nullopt;
 }
@@ -566,10 +567,10 @@ void VortexCore::recordMemo(CellRef memoPin,
   }
 
   // Insert entry at head of memoPin's +d.cache rank
-  CellRef oldHead = arena_.linked(memoPin, dims_.cache, false);
-  arena_.link(memoPin, dims_.cache, false, entry);
+  CellRef oldHead = arena_.linked(memoPin, dims_.cache, DimVector::POS);
+  arena_.link(memoPin, dims_.cache, DimVector::POS, entry);
   if (oldHead != noCell) {
-    arena_.link(entry, dims_.cache, false, oldHead);
+    arena_.link(entry, dims_.cache, DimVector::POS, oldHead);
   }
 }
 

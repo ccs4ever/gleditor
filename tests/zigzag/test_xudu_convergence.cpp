@@ -393,11 +393,16 @@ TEST(SliceToStoreTest, aSliceBecomesOperationsAndFoldsBackToItself) {
   // rather than emitted twice.
   const auto d1 = minted.dimensions.at("d.1");
   const auto d2 = minted.dimensions.at("d.2");
-  EXPECT_EQ(manifold.linked(minted.cells.at(1), d1, false), minted.cells.at(2));
-  EXPECT_EQ(manifold.linked(minted.cells.at(2), d1, false), minted.cells.at(3));
-  EXPECT_EQ(manifold.linked(minted.cells.at(3), d1, true), minted.cells.at(2));
-  EXPECT_EQ(manifold.linked(minted.cells.at(1), d2, false), minted.cells.at(4));
-  EXPECT_EQ(manifold.linked(minted.cells.at(4), d2, true), minted.cells.at(1));
+  EXPECT_EQ(manifold.linked(minted.cells.at(1), d1, DimVector::POS),
+            minted.cells.at(2));
+  EXPECT_EQ(manifold.linked(minted.cells.at(2), d1, DimVector::POS),
+            minted.cells.at(3));
+  EXPECT_EQ(manifold.linked(minted.cells.at(3), d1, DimVector::NEG),
+            minted.cells.at(2));
+  EXPECT_EQ(manifold.linked(minted.cells.at(1), d2, DimVector::POS),
+            minted.cells.at(4));
+  EXPECT_EQ(manifold.linked(minted.cells.at(4), d2, DimVector::NEG),
+            minted.cells.at(1));
 }
 
 TEST(SliceToStoreTest, theRoundTripKeepsEverythingButTheIds) {

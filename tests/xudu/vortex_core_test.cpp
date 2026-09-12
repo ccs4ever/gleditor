@@ -16,6 +16,7 @@ namespace {
 using zigzag::ArenaManifold;
 using zigzag::CellRef;
 using zigzag::DimRef;
+using zigzag::DimVector;
 using zigzag::noCell;
 using namespace zigzag::vortex;
 
@@ -47,7 +48,8 @@ TEST(VortexCoreTest, SystemGenesisMintsAllDimensionsOffHome) {
   EXPECT_NE(d.stdlib, noCell);
 
   // Each dimension is linked along d.dims
-  EXPECT_EQ(h.core.arena().linked(h.core.home(), d.dims, false), d.dims);
+  EXPECT_EQ(h.core.arena().linked(h.core.home(), d.dims, DimVector::POS),
+            d.dims);
 }
 
 TEST(VortexCoreTest, LinkPrimitiveLifecycle) {
@@ -56,38 +58,39 @@ TEST(VortexCoreTest, LinkPrimitiveLifecycle) {
   DimRef customDim = h.core.dims().step;
 
   // 1. Read unlinked -> nullopt
-  EXPECT_EQ(h.core.link(a, customDim, false), std::nullopt);
+  EXPECT_EQ(h.core.link(a, customDim, DimVector::POS), std::nullopt);
 
   // 2. Allocate (target == -1)
-  auto created = h.core.link(a, customDim, false, static_cast<CellRef>(-1));
+  auto created =
+      h.core.link(a, customDim, DimVector::POS, static_cast<CellRef>(-1));
   ASSERT_TRUE(created.has_value());
   EXPECT_NE(*created, noCell);
   EXPECT_NE(*created, a);
 
   // 3. Read linked
-  auto readRes = h.core.link(a, customDim, false);
+  auto readRes = h.core.link(a, customDim, DimVector::POS);
   ASSERT_TRUE(readRes.has_value());
   EXPECT_EQ(*readRes, *created);
 
   // Bidirectional link check
-  EXPECT_EQ(h.arena.linked(*created, customDim, true), a);
+  EXPECT_EQ(h.arena.linked(*created, customDim, DimVector::NEG), a);
 
   // 4. Isolate (target == 0)
-  auto isolated = h.core.link(a, customDim, false, 0);
+  auto isolated = h.core.link(a, customDim, DimVector::POS, 0);
   ASSERT_TRUE(isolated.has_value());
   EXPECT_EQ(*isolated, *created);
 
   // Now unlinked
-  EXPECT_EQ(h.core.link(a, customDim, false), std::nullopt);
-  EXPECT_EQ(h.arena.linked(*created, customDim, true), noCell);
+  EXPECT_EQ(h.core.link(a, customDim, DimVector::POS), std::nullopt);
+  EXPECT_EQ(h.arena.linked(*created, customDim, DimVector::NEG), noCell);
 
   // 5. Literal target
   CellRef b    = h.arena.makeCell("nodeB");
-  auto literal = h.core.link(a, customDim, false, b);
+  auto literal = h.core.link(a, customDim, DimVector::POS, b);
   ASSERT_TRUE(literal.has_value());
   EXPECT_EQ(*literal, b);
-  EXPECT_EQ(h.core.link(a, customDim, false), b);
-  EXPECT_EQ(h.arena.linked(b, customDim, true), a);
+  EXPECT_EQ(h.core.link(a, customDim, DimVector::POS), b);
+  EXPECT_EQ(h.arena.linked(b, customDim, DimVector::NEG), a);
 }
 
 TEST(VortexCoreTest, ValuePrimitiveReadWholeSliceAndSplice) {
@@ -124,10 +127,10 @@ TEST(VortexCoreTest, StructuralIdentitySharingViaDClone) {
 
   // Mint clone posward
   CellRef cloneA = h.arena.makeCell();
-  h.core.link(master, h.core.dims().clone, false, cloneA);
+  h.core.link(master, h.core.dims().clone, DimVector::POS, cloneA);
 
   CellRef cloneB = h.arena.makeCell();
-  h.core.link(cloneA, h.core.dims().clone, false, cloneB);
+  h.core.link(cloneA, h.core.dims().clone, DimVector::POS, cloneB);
 
   // All resolve to master's content
   EXPECT_EQ(h.core.render(master), CellValue(std::string("original text")));
@@ -142,7 +145,7 @@ TEST(VortexCoreTest, StructuralIdentitySharingViaDClone) {
 
   // Linking a new cell negward of master makes it the new head
   CellRef newHead = h.arena.makeCell("overriding authority");
-  h.core.link(master, h.core.dims().clone, true, newHead);
+  h.core.link(master, h.core.dims().clone, DimVector::NEG, newHead);
 
   // Instantly all cells resolve through the new head
   EXPECT_EQ(h.core.render(newHead),
@@ -362,7 +365,7 @@ TEST(VortexCoreTest, ControlFlowCallAndReturnOnDStack) {
   h.core.bindOutput(subOp, outCell);
 
   CellRef retOp = h.vm.mintOpcode(OpcodeKind::Return, "#RETURN");
-  h.core.arena().link(subOp, h.core.dims().spin, false, retOp);
+  h.core.arena().link(subOp, h.core.dims().spin, DimVector::POS, retOp);
 
   // Caller: #CALL subOp, then #MUL outCell * 2
   CellRef callOp    = h.vm.mintOpcode(OpcodeKind::Call, "#CALL");
@@ -375,7 +378,7 @@ TEST(VortexCoreTest, ControlFlowCallAndReturnOnDStack) {
   h.core.bindInput(afterCall, two);
   h.core.bindOutput(afterCall, outCell);
 
-  h.core.arena().link(callOp, h.core.dims().spin, false, afterCall);
+  h.core.arena().link(callOp, h.core.dims().spin, DimVector::POS, afterCall);
 
   CellRef cursor = h.vm.spawnCursor(callOp, "main_thread");
   auto res       = h.vm.run(cursor, 10);
@@ -399,7 +402,7 @@ TEST(VortexCoreTest, CursorAssociativeScopes) {
   CellRef outCell = h.arena.makeCell();
   h.core.bindOutput(resolveOp, outCell);
 
-  h.core.arena().link(bindOp, h.core.dims().spin, false, resolveOp);
+  h.core.arena().link(bindOp, h.core.dims().spin, DimVector::POS, resolveOp);
 
   CellRef cursor = h.vm.spawnCursor(bindOp, "scope_test");
   auto res       = h.vm.run(cursor, 5);

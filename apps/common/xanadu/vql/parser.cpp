@@ -335,11 +335,11 @@ StepSelector Parser::parseStepSelector() {
   }
 
   // SignedDimension
-  int direction = +1;
+  zigzag::DimVector direction = zigzag::DimVector::POS;
   if (match(TokenKind::Plus)) {
-    direction = +1;
+    direction = zigzag::DimVector::POS;
   } else if (match(TokenKind::Minus)) {
-    direction = -1;
+    direction = zigzag::DimVector::NEG;
   }
 
   Token dimTok =

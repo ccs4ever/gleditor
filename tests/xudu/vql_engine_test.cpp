@@ -12,6 +12,7 @@
 namespace {
 
 using namespace xanadu::vql;
+using zigzag::DimVector;
 
 TEST(VQLEngineTest, BarePathNavigation) {
   zigzag::ArenaManifold arena;
@@ -22,8 +23,8 @@ TEST(VQLEngineTest, BarePathNavigation) {
   zigzag::CellRef alice  = arena.makeCell("Alice");
   zigzag::CellRef bob    = arena.makeCell("Bob");
 
-  arena.link(core.home(), dPeople, false /*posward*/, alice);
-  arena.link(alice, dPeople, false /*posward*/, bob);
+  arena.link(core.home(), dPeople, DimVector::POS, alice);
+  arena.link(alice, dPeople, DimVector::POS, bob);
 
   auto results = engine.execute("##/d.people");
   ASSERT_EQ(results.size(), 2u);
@@ -39,13 +40,13 @@ TEST(VQLEngineTest, MultiStoreAndNamedStoreSugar) {
   zigzag::CellRef usersHome = arena.makeCell("users_home");
   zigzag::CellRef uAlice    = arena.makeCell("Alice");
   zigzag::DimRef dUsers     = coordinator.core().mintDimension("d.users");
-  arena.link(usersHome, dUsers, false, uAlice);
+  arena.link(usersHome, dUsers, DimVector::POS, uAlice);
 
   // Mint slice 2: products
   zigzag::CellRef prodHome = arena.makeCell("prod_home");
   zigzag::CellRef pBook    = arena.makeCell("HypertextBook");
   zigzag::DimRef dProds    = coordinator.core().mintDimension("d.items");
-  arena.link(prodHome, dProds, false, pBook);
+  arena.link(prodHome, dProds, DimVector::POS, pBook);
 
   coordinator.addSlice("users", "data", usersHome);
   coordinator.addSlice("products", "catalog", prodHome);
@@ -73,11 +74,11 @@ TEST(VQLEngineTest, UniversalDerefMaster) {
   zigzag::CellRef clone1 = arena.makeCell("Clone1");
   zigzag::CellRef clone2 = arena.makeCell("Clone2");
 
-  arena.link(master, dClone, false, clone1);
-  arena.link(clone1, dClone, true, master);
+  arena.link(master, dClone, DimVector::POS, clone1);
+  arena.link(clone1, dClone, DimVector::NEG, master);
 
-  arena.link(clone1, dClone, false, clone2);
-  arena.link(clone2, dClone, true, clone1);
+  arena.link(clone1, dClone, DimVector::POS, clone2);
+  arena.link(clone2, dClone, DimVector::NEG, clone1);
 
   engine.setVariable("c2", clone2);
 
@@ -100,9 +101,9 @@ TEST(VQLEngineTest, CreationSugarAndYieldModes) {
 
   // Verify they are linked on d.fruits off home
   zigzag::DimRef dFruits = engine.resolveDimension("d.fruits");
-  zigzag::CellRef first  = arena.linked(core.home(), dFruits, false);
+  zigzag::CellRef first  = arena.linked(core.home(), dFruits, DimVector::POS);
   EXPECT_EQ(first, res1[0]);
-  zigzag::CellRef second = arena.linked(first, dFruits, false);
+  zigzag::CellRef second = arena.linked(first, dFruits, DimVector::POS);
   EXPECT_EQ(second, res1[1]);
 
   // 2. Create with !keep
@@ -128,10 +129,10 @@ TEST(VQLEngineTest, PredicatesAndQuantifiers) {
   zigzag::CellRef c40 = arena.makeScalarCell(static_cast<std::int64_t>(40));
   zigzag::CellRef c50 = arena.makeScalarCell(static_cast<std::int64_t>(50));
 
-  arena.link(core.home(), dNums, false, c10);
-  arena.link(c10, dNums, false, c25);
-  arena.link(c25, dNums, false, c40);
-  arena.link(c40, dNums, false, c50);
+  arena.link(core.home(), dNums, DimVector::POS, c10);
+  arena.link(c10, dNums, DimVector::POS, c25);
+  arena.link(c25, dNums, DimVector::POS, c40);
+  arena.link(c40, dNums, DimVector::POS, c50);
 
   // Filter: [. > 20 and . < 45]
   auto results = engine.execute("##/d.numbers[. > 20 and . < 45]");
@@ -156,10 +157,10 @@ TEST(VQLEngineTest, RangeClamps) {
   zigzag::CellRef c     = arena.makeCell("C");
   zigzag::CellRef d     = arena.makeCell("D");
 
-  arena.link(core.home(), dItems, false, a);
-  arena.link(a, dItems, false, b);
-  arena.link(b, dItems, false, c);
-  arena.link(c, dItems, false, d);
+  arena.link(core.home(), dItems, DimVector::POS, a);
+  arena.link(a, dItems, DimVector::POS, b);
+  arena.link(b, dItems, DimVector::POS, c);
+  arena.link(c, dItems, DimVector::POS, d);
 
   // [1]: First
   auto rFirst = engine.execute("##/d.items[1]");
@@ -191,26 +192,26 @@ TEST(VQLEngineTest, FLWORQueryExecution) {
   zigzag::CellRef p1  = arena.makeCell("person1");
   zigzag::CellRef p1a = arena.makeScalarCell(static_cast<std::int64_t>(30));
   zigzag::CellRef p1n = arena.makeCell("Alice");
-  arena.link(p1, dAge, false, p1a);
-  arena.link(p1, dName, false, p1n);
+  arena.link(p1, dAge, DimVector::POS, p1a);
+  arena.link(p1, dName, DimVector::POS, p1n);
 
   // Person 2: Bob, 17
   zigzag::CellRef p2  = arena.makeCell("person2");
   zigzag::CellRef p2a = arena.makeScalarCell(static_cast<std::int64_t>(17));
   zigzag::CellRef p2n = arena.makeCell("Bob");
-  arena.link(p2, dAge, false, p2a);
-  arena.link(p2, dName, false, p2n);
+  arena.link(p2, dAge, DimVector::POS, p2a);
+  arena.link(p2, dName, DimVector::POS, p2n);
 
   // Person 3: Charlie, 45
   zigzag::CellRef p3  = arena.makeCell("person3");
   zigzag::CellRef p3a = arena.makeScalarCell(static_cast<std::int64_t>(45));
   zigzag::CellRef p3n = arena.makeCell("Charlie");
-  arena.link(p3, dAge, false, p3a);
-  arena.link(p3, dName, false, p3n);
+  arena.link(p3, dAge, DimVector::POS, p3a);
+  arena.link(p3, dName, DimVector::POS, p3n);
 
-  arena.link(core.home(), dPeople, false, p1);
-  arena.link(p1, dPeople, false, p2);
-  arena.link(p2, dPeople, false, p3);
+  arena.link(core.home(), dPeople, DimVector::POS, p1);
+  arena.link(p1, dPeople, DimVector::POS, p2);
+  arena.link(p2, dPeople, DimVector::POS, p3);
 
   // for $p in ##/d.people where $p/d.age >= 18 return $p/d.name
   auto results = engine.execute(
@@ -228,11 +229,11 @@ TEST(VQLEngineTest, WeaveEffectBlock) {
   engine.execute("weave { ##/d.tasks%\"Task1\"%\"Task2\" }");
 
   zigzag::DimRef dTasks = engine.resolveDimension("d.tasks");
-  zigzag::CellRef t1    = arena.linked(core.home(), dTasks, false);
+  zigzag::CellRef t1    = arena.linked(core.home(), dTasks, DimVector::POS);
   ASSERT_NE(t1, zigzag::noCell);
   EXPECT_EQ(arena.textOf(t1), "Task1");
 
-  zigzag::CellRef t2 = arena.linked(t1, dTasks, false);
+  zigzag::CellRef t2 = arena.linked(t1, dTasks, DimVector::POS);
   ASSERT_NE(t2, zigzag::noCell);
   EXPECT_EQ(arena.textOf(t2), "Task2");
 }

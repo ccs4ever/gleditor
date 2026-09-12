@@ -39,6 +39,8 @@ using xudu::ValueKind;
 using zigzag::ArenaManifold;
 using zigzag::CellRef;
 using zigzag::DimRef;
+using zigzag::DimVector;
+using zigzag::DirectedDim;
 using zigzag::isEphemeral;
 using zigzag::Manifold;
 using zigzag::noCell;
@@ -94,12 +96,12 @@ TEST(ArenaManifoldTest, aLinkIsOneEdgeWithTwoEnds) {
   const auto a = arena.m.makeCell("a");
   const auto b = arena.m.makeCell("b");
 
-  ASSERT_TRUE(arena.m.link(a, arena.step, false, b));
+  ASSERT_TRUE(arena.m.link(a, arena.step, DimVector::POS, b));
 
   // One call, both ends -- which is what makes Vlog's "unification is one
   // link" literally true rather than three links and a repair.
-  EXPECT_EQ(arena.m.linked(a, arena.step, false), b);
-  EXPECT_EQ(arena.m.linked(b, arena.step, true), a);
+  EXPECT_EQ(arena.m.linked(a, arena.step, DimVector::POS), b);
+  EXPECT_EQ(arena.m.linked(b, arena.step, DimVector::NEG), a);
 }
 
 TEST(ArenaManifoldTest, aLinkEvictsWhateverEitherEndHeld) {
@@ -108,21 +110,22 @@ TEST(ArenaManifoldTest, aLinkEvictsWhateverEitherEndHeld) {
   const auto b = arena.m.makeCell("b");
   const auto c = arena.m.makeCell("c");
 
-  ASSERT_TRUE(arena.m.link(a, arena.step, false, b));
-  ASSERT_TRUE(arena.m.link(a, arena.step, false, c));
+  ASSERT_TRUE(arena.m.link(a, arena.step, DimVector::POS, b));
+  ASSERT_TRUE(arena.m.link(a, arena.step, DimVector::POS, c));
 
-  EXPECT_EQ(arena.m.linked(a, arena.step, false), c);
-  EXPECT_EQ(arena.m.linked(c, arena.step, true), a);
+  EXPECT_EQ(arena.m.linked(a, arena.step, DimVector::POS), c);
+  EXPECT_EQ(arena.m.linked(c, arena.step, DimVector::NEG), a);
   // b kept nothing: the edge it shared with a is the edge that moved.
-  EXPECT_EQ(arena.m.linked(b, arena.step, true), noCell);
+  EXPECT_EQ(arena.m.linked(b, arena.step, DimVector::NEG), noCell);
 }
 
 TEST(ArenaManifoldTest, aLinkNeedsCellsThisArenaHolds) {
   Arena arena;
   const auto a = arena.m.makeCell("a");
-  EXPECT_FALSE(arena.m.link(a, arena.step, false, ArenaManifold::refOf(99U)));
-  EXPECT_FALSE(arena.m.link(a, 7U, false, a));
-  EXPECT_EQ(arena.m.linked(a, arena.step, false), noCell);
+  EXPECT_FALSE(
+      arena.m.link(a, arena.step, DimVector::POS, ArenaManifold::refOf(99U)));
+  EXPECT_FALSE(arena.m.link(a, 7U, DimVector::POS, a));
+  EXPECT_EQ(arena.m.linked(a, arena.step, DimVector::POS), noCell);
 }
 
 // -- deref, which is cloneMaster --------------------------------------------
@@ -133,8 +136,8 @@ TEST(ArenaManifoldTest, cloneMasterIsDerefAndWalksNegward) {
   const auto mid    = arena.m.makeCell();
   const auto tail   = arena.m.makeCell();
 
-  ASSERT_TRUE(arena.m.link(master, arena.clone, false, mid));
-  ASSERT_TRUE(arena.m.link(mid, arena.clone, false, tail));
+  ASSERT_TRUE(arena.m.link(master, arena.clone, DimVector::POS, mid));
+  ASSERT_TRUE(arena.m.link(mid, arena.clone, DimVector::POS, tail));
 
   EXPECT_EQ(arena.m.cloneMaster(tail, arena.clone), master);
   EXPECT_EQ(arena.m.cloneMaster(mid, arena.clone), master);
@@ -145,8 +148,8 @@ TEST(ArenaManifoldTest, aRankThatLoopsAnswersTheCellItStartedFrom) {
   Arena arena;
   const auto one = arena.m.makeCell("f");
   const auto two = arena.m.makeCell();
-  ASSERT_TRUE(arena.m.link(one, arena.clone, false, two));
-  ASSERT_TRUE(arena.m.link(two, arena.clone, false, one));
+  ASSERT_TRUE(arena.m.link(one, arena.clone, DimVector::POS, two));
+  ASSERT_TRUE(arena.m.link(two, arena.clone, DimVector::POS, one));
 
   // X = f(X) builds a rational term rather than being refused, so the guard is
   // exercised in ordinary operation and not only by a pathological program.
@@ -163,14 +166,14 @@ TEST(ArenaManifoldTest, bindingAVariableToAVariableThenToATermPropagates) {
   const auto y = arena.m.makeCell();
 
   // X = Y: splice X's rank onto the posward tail of Y's. One link.
-  ASSERT_TRUE(arena.m.link(y, arena.clone, false, x));
+  ASSERT_TRUE(arena.m.link(y, arena.clone, DimVector::POS, x));
   EXPECT_EQ(arena.m.cloneMaster(x, arena.clone), y);
   EXPECT_TRUE(arena.m.contentOf(y).empty()); // still unbound
 
   // Y = foo: the master gains content, and X reads it because X reads through
   // the master. No step of this overwrote a pointer.
   const auto foo = arena.m.makeCell("foo");
-  ASSERT_TRUE(arena.m.link(foo, arena.clone, false, y));
+  ASSERT_TRUE(arena.m.link(foo, arena.clone, DimVector::POS, y));
 
   EXPECT_EQ(arena.m.cloneMaster(x, arena.clone), foo);
   EXPECT_EQ(arena.m.textOf(arena.m.cloneMaster(x, arena.clone)), "foo");
@@ -185,7 +188,7 @@ TEST(ArenaManifoldTest, releaseTruncatesCellsMintedUnderTheMark) {
 
   const auto a = arena.m.makeCell("a");
   const auto b = arena.m.makeCell("b");
-  ASSERT_TRUE(arena.m.link(a, arena.step, false, b));
+  ASSERT_TRUE(arena.m.link(a, arena.step, DimVector::POS, b));
   EXPECT_EQ(arena.m.cellCount(), before + 2);
 
   arena.m.release(mark);
@@ -202,8 +205,8 @@ TEST(ArenaManifoldTest, theTrailStaysEmptyWhileOnlyYoungCellsAreWritten) {
 
   const auto a = arena.m.makeCell();
   const auto b = arena.m.makeCell();
-  ASSERT_TRUE(arena.m.link(a, arena.step, false, b));
-  ASSERT_TRUE(arena.m.link(b, arena.clone, false, a));
+  ASSERT_TRUE(arena.m.link(a, arena.step, DimVector::POS, b));
+  ASSERT_TRUE(arena.m.link(b, arena.clone, DimVector::POS, a));
 
   // §5.3's claim, measured: binding a variable minted for this activation
   // writes no trail entry, because the truncation that removes the cell is
@@ -216,15 +219,15 @@ TEST(ArenaManifoldTest, writingAnOlderCellTrailsItOnceAndReleaseRestoresIt) {
   Arena arena;
   const auto old   = arena.m.makeCell("old");
   const auto first = arena.m.makeCell("first");
-  ASSERT_TRUE(arena.m.link(old, arena.step, false, first));
+  ASSERT_TRUE(arena.m.link(old, arena.step, DimVector::POS, first));
 
   const auto mark = arena.m.mark();
   const auto next = arena.m.makeCell("next");
 
   // Head unification binds a caller's variable on every call, so this is the
   // common case rather than an edge one.
-  ASSERT_TRUE(arena.m.link(old, arena.step, false, next));
-  EXPECT_EQ(arena.m.linked(old, arena.step, false), next);
+  ASSERT_TRUE(arena.m.link(old, arena.step, DimVector::POS, next));
+  EXPECT_EQ(arena.m.linked(old, arena.step, DimVector::POS), next);
 
   // *Two* entries, not one, and the second is the interesting one: setting a
   // link evicts whatever the far end held, and `first` is an older cell too.
@@ -236,7 +239,7 @@ TEST(ArenaManifoldTest, writingAnOlderCellTrailsItOnceAndReleaseRestoresIt) {
   // Written twice under one mark, and still two entries: both cells' runs were
   // copied above the mark by the first write, so the second needs no undo of
   // its own.
-  ASSERT_TRUE(arena.m.link(old, arena.clone, false, next));
+  ASSERT_TRUE(arena.m.link(old, arena.clone, DimVector::POS, next));
   EXPECT_EQ(arena.m.trailSize(), 2U);
 
   arena.m.release(mark);
@@ -244,9 +247,10 @@ TEST(ArenaManifoldTest, writingAnOlderCellTrailsItOnceAndReleaseRestoresIt) {
   // The link *inside a run below the mark* is what a header-only trail entry
   // would have got wrong: truncating the arena cannot unwrite a DimLink that
   // was overwritten in place.
-  EXPECT_EQ(arena.m.linked(old, arena.step, false), first);
-  EXPECT_EQ(arena.m.linked(first, arena.step, true), old);
-  EXPECT_EQ(arena.m.linked(old, arena.clone, false), noCell);
+  EXPECT_EQ(arena.m.linked(old, arena.step, DimVector::POS), first);
+  EXPECT_EQ(arena.m.linked(first, arena.step, DimVector::NEG), old);
+  EXPECT_EQ(arena.m.linked(old, arena.clone, DimVector::POS), noCell);
+  EXPECT_EQ(arena.m.trailSize(), 0U);
   EXPECT_EQ(arena.m.trailSize(), 0U);
 }
 
@@ -269,19 +273,19 @@ TEST(ArenaManifoldTest, marksNestAndReleaseInReverse) {
 
   const auto outer = arena.m.mark();
   const auto one   = arena.m.makeCell("one");
-  ASSERT_TRUE(arena.m.link(base, arena.step, false, one));
+  ASSERT_TRUE(arena.m.link(base, arena.step, DimVector::POS, one));
 
   const auto inner = arena.m.mark();
   const auto two   = arena.m.makeCell("two");
-  ASSERT_TRUE(arena.m.link(base, arena.step, false, two));
+  ASSERT_TRUE(arena.m.link(base, arena.step, DimVector::POS, two));
   EXPECT_EQ(arena.m.outstandingMarks(), 2U);
 
   arena.m.release(inner);
-  EXPECT_EQ(arena.m.linked(base, arena.step, false), one);
+  EXPECT_EQ(arena.m.linked(base, arena.step, DimVector::POS), one);
   EXPECT_TRUE(arena.m.contains(one));
 
   arena.m.release(outer);
-  EXPECT_EQ(arena.m.linked(base, arena.step, false), noCell);
+  EXPECT_EQ(arena.m.linked(base, arena.step, DimVector::POS), noCell);
   EXPECT_FALSE(arena.m.contains(one));
 }
 
@@ -291,13 +295,13 @@ TEST(ArenaManifoldTest, discardKeepsTheBindingsMadeUnderTheChoicePoint) {
 
   const auto mark  = arena.m.mark();
   const auto bound = arena.m.makeCell("bound");
-  ASSERT_TRUE(arena.m.link(base, arena.step, false, bound));
+  ASSERT_TRUE(arena.m.link(base, arena.step, DimVector::POS, bound));
 
   // Cut, and success: §5.4's distinction. What is thrown away is the ability
   // to retry, not the work.
   arena.m.discard(mark);
   EXPECT_EQ(arena.m.outstandingMarks(), 0U);
-  EXPECT_EQ(arena.m.linked(base, arena.step, false), bound);
+  EXPECT_EQ(arena.m.linked(base, arena.step, DimVector::POS), bound);
   EXPECT_TRUE(arena.m.contains(bound));
 }
 
@@ -316,14 +320,14 @@ TEST(ArenaManifoldTest, compactionIsRefusedWhileAChoicePointIsOutstanding) {
 TEST(ArenaManifoldTest, releaseReclaimsTheDeadRunsAFailedBranchLeft) {
   Arena arena;
   const auto old = arena.m.makeCell("old");
-  ASSERT_TRUE(arena.m.link(old, arena.step, false, old));
+  ASSERT_TRUE(arena.m.link(old, arena.step, DimVector::POS, old));
   ASSERT_TRUE(arena.m.compact());
   const auto tightBefore = arena.m.deadLinks();
 
   const auto mark = arena.m.mark();
   for (int i = 0; i < 8; i++) {
     const auto fresh = arena.m.makeCell();
-    ASSERT_TRUE(arena.m.link(old, arena.clone, false, fresh));
+    ASSERT_TRUE(arena.m.link(old, arena.clone, DimVector::POS, fresh));
   }
   EXPECT_GT(arena.m.deadLinks(), tightBefore);
 
@@ -419,14 +423,14 @@ TEST(ArenaManifoldTest, promoteWritesTheReachableAnswerAndNothingElse) {
   Arena arena;
   const auto answer = arena.m.makeCell("answer");
   const auto tail   = arena.m.makeCell("tail");
-  ASSERT_TRUE(arena.m.link(answer, arena.step, false, tail));
+  ASSERT_TRUE(arena.m.link(answer, arena.step, DimVector::POS, tail));
 
   // A failed branch's cells: minted, linked to each other, and not reachable
   // from the answer. Reachability is what makes "promote the answer, not the
   // search" a graph walk rather than bookkeeping.
   const auto deadOne = arena.m.makeCell("dead");
   const auto deadTwo = arena.m.makeCell("also dead");
-  ASSERT_TRUE(arena.m.link(deadOne, arena.step, false, deadTwo));
+  ASSERT_TRUE(arena.m.link(deadOne, arena.step, DimVector::POS, deadTwo));
 
   const auto promoted = zigzag::promote(store, at, arena.m, answer);
   ASSERT_TRUE(promoted.has_value());
@@ -459,7 +463,7 @@ TEST(ArenaManifoldTest, promotionCarriesTheLinksWithBothEndsIntact) {
   Arena arena;
   const auto head = arena.m.makeCell("head");
   const auto next = arena.m.makeCell("next");
-  ASSERT_TRUE(arena.m.link(head, arena.step, false, next));
+  ASSERT_TRUE(arena.m.link(head, arena.step, DimVector::POS, next));
 
   const auto promoted = zigzag::promote(store, at, arena.m, head);
   ASSERT_TRUE(promoted.has_value());
@@ -472,7 +476,8 @@ TEST(ArenaManifoldTest, promotionCarriesTheLinksWithBothEndsIntact) {
 
   CellRef found = noCell;
   for (const auto dim : others) {
-    if (const auto to = manifold.linked(realHead, dim, false); noCell != to) {
+    if (const auto to = manifold.linked(realHead, dim, DimVector::POS);
+        noCell != to) {
       found = to;
     }
   }
@@ -509,7 +514,7 @@ TEST(ArenaManifoldTest, promotionRefusesAboveItsBudgetAndWritesNothing) {
   auto previous   = root;
   for (int i = 0; i < 12; i++) {
     const auto fresh = arena.m.makeCell("link in a chain");
-    ASSERT_TRUE(arena.m.link(previous, arena.step, false, fresh));
+    ASSERT_TRUE(arena.m.link(previous, arena.step, DimVector::POS, fresh));
     previous = fresh;
   }
 
@@ -544,7 +549,7 @@ struct Document {
     first             = store.cellRefOf(at);
     at                = store.makeCell(at, "second");
     second            = store.cellRefOf(at);
-    at                = store.setLink(at, first, dim, false, second);
+    at                = store.setLink(at, first, dim, DimVector::POS, second);
   }
 
   [[nodiscard]] Manifold manifold() const { return store.rebuildManifold(at); }
@@ -560,8 +565,8 @@ TEST(ArenaManifoldTest, anOverlayReadsThroughToTheDocument) {
   EXPECT_EQ(arena.cellCount(), 0U);
   EXPECT_TRUE(arena.contains(doc.first));
   EXPECT_FALSE(arena.holdsOwn(doc.first));
-  EXPECT_EQ(arena.linked(doc.first, doc.dim, false), doc.second);
-  EXPECT_EQ(arena.linked(doc.second, doc.dim, true), doc.first);
+  EXPECT_EQ(arena.linked(doc.first, doc.dim, DimVector::POS), doc.second);
+  EXPECT_EQ(arena.linked(doc.second, doc.dim, DimVector::NEG), doc.first);
   EXPECT_EQ(arena.textOf(doc.first, &doc.store), "first");
 }
 
@@ -571,12 +576,12 @@ TEST(ArenaManifoldTest, writingAnOverlaidCellShadowsItAndLeavesTheBaseAlone) {
   ArenaManifold arena{&base};
 
   const auto fresh = arena.makeCell("fresh");
-  ASSERT_TRUE(arena.link(doc.first, doc.dim, false, fresh));
+  ASSERT_TRUE(arena.link(doc.first, doc.dim, DimVector::POS, fresh));
 
   // The arena's answer changed; the document's did not. That is the whole
   // point -- resolution against a clause database must not edit it.
-  EXPECT_EQ(arena.linked(doc.first, doc.dim, false), fresh);
-  EXPECT_EQ(base.linked(doc.first, doc.dim, false), doc.second);
+  EXPECT_EQ(arena.linked(doc.first, doc.dim, DimVector::POS), fresh);
+  EXPECT_EQ(base.linked(doc.first, doc.dim, DimVector::POS), doc.second);
 
   // A shadow keeps the base cell's ref as its name: it is the same cell.
   EXPECT_TRUE(arena.holdsOwn(doc.first));
@@ -586,8 +591,8 @@ TEST(ArenaManifoldTest, writingAnOverlaidCellShadowsItAndLeavesTheBaseAlone) {
   // And the displaced occupant was shadowed too, since its end of the edge
   // changed -- a base cell nobody named directly.
   EXPECT_TRUE(arena.holdsOwn(doc.second));
-  EXPECT_EQ(arena.linked(doc.second, doc.dim, true), noCell);
-  EXPECT_EQ(base.linked(doc.second, doc.dim, true), doc.first);
+  EXPECT_EQ(arena.linked(doc.second, doc.dim, DimVector::NEG), noCell);
+  EXPECT_EQ(base.linked(doc.second, doc.dim, DimVector::NEG), doc.first);
 }
 
 TEST(ArenaManifoldTest, releasingDropsTheShadowsAFailedBranchTook) {
@@ -597,7 +602,7 @@ TEST(ArenaManifoldTest, releasingDropsTheShadowsAFailedBranchTook) {
 
   const auto mark  = arena.mark();
   const auto fresh = arena.makeCell("fresh");
-  ASSERT_TRUE(arena.link(doc.first, doc.dim, false, fresh));
+  ASSERT_TRUE(arena.link(doc.first, doc.dim, DimVector::POS, fresh));
   EXPECT_TRUE(arena.holdsOwn(doc.first));
 
   arena.release(mark);
@@ -607,7 +612,7 @@ TEST(ArenaManifoldTest, releasingDropsTheShadowsAFailedBranchTook) {
   // restore it.
   EXPECT_FALSE(arena.holdsOwn(doc.first));
   EXPECT_EQ(arena.cellCount(), 0U);
-  EXPECT_EQ(arena.linked(doc.first, doc.dim, false), doc.second);
+  EXPECT_EQ(arena.linked(doc.first, doc.dim, DimVector::POS), doc.second);
 }
 
 TEST(ArenaManifoldTest, aShadowedCellIsStillTrailedWhenItIsOlderThanTheMark) {
@@ -618,15 +623,15 @@ TEST(ArenaManifoldTest, aShadowedCellIsStillTrailedWhenItIsOlderThanTheMark) {
   // Shadowed before the mark, so the truncation cannot undo the next write and
   // the conditional trail has to.
   const auto early = arena.makeCell("early");
-  ASSERT_TRUE(arena.link(doc.first, doc.dim, false, early));
+  ASSERT_TRUE(arena.link(doc.first, doc.dim, DimVector::POS, early));
 
   const auto mark = arena.mark();
   const auto late = arena.makeCell("late");
-  ASSERT_TRUE(arena.link(doc.first, doc.dim, false, late));
+  ASSERT_TRUE(arena.link(doc.first, doc.dim, DimVector::POS, late));
   EXPECT_GT(arena.trailSize(), 0U);
 
   arena.release(mark);
-  EXPECT_EQ(arena.linked(doc.first, doc.dim, false), early);
+  EXPECT_EQ(arena.linked(doc.first, doc.dim, DimVector::POS), early);
 }
 
 TEST(ArenaManifoldTest, promotingAnOverlayMintsOnlyWhatTheEvaluationInvented) {
@@ -635,7 +640,7 @@ TEST(ArenaManifoldTest, promotingAnOverlayMintsOnlyWhatTheEvaluationInvented) {
   ArenaManifold arena{&base};
 
   const auto answer = arena.makeCell("answer");
-  ASSERT_TRUE(arena.link(doc.first, doc.dim, false, answer));
+  ASSERT_TRUE(arena.link(doc.first, doc.dim, DimVector::POS, answer));
 
   const auto before   = base.cellCount();
   const auto promoted = zigzag::promote(doc.store, doc.at, arena, doc.first);
@@ -644,7 +649,8 @@ TEST(ArenaManifoldTest, promotingAnOverlayMintsOnlyWhatTheEvaluationInvented) {
   const auto after = doc.store.rebuildManifold(promoted->version);
   // One new cell -- the answer. d.step, first and second were already named.
   EXPECT_EQ(after.cellCount(), before + 1);
-  EXPECT_EQ(after.linked(doc.first, doc.dim, false), promoted->cells.front());
+  EXPECT_EQ(after.linked(doc.first, doc.dim, DimVector::POS),
+            promoted->cells.front());
   EXPECT_EQ(after.textOf(promoted->cells.front(), doc.store), "answer");
   EXPECT_EQ(after.refusedOps(), 0U);
 }

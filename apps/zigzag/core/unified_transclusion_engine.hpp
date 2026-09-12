@@ -110,14 +110,30 @@ public:
     return ephemeralBit | 1U;
   }
 
-  /// Link @p a to @p b along @p dim (true for negward, false for posward), by
+  /// Link @p a to @p b along @p dim, by
   /// recording one Structure operation. noCell for @p b clears the link. The
   /// reciprocal edge is what the fold means by a link, not a second write.
-  void linkCells(CellRef a, CellRef b, DimRef dim, bool negward = false);
-  void linkCells(CellRef a, CellRef b, DimOrdinal dim, bool negward = false);
-  void linkCells(CellRef a, CellRef b, const DimID &dim, bool negward = false);
+  void linkCells(CellRef a, CellRef b, DimRef dim,
+                 DimVector dir = DimVector::POS);
+  void linkCells(CellRef a, CellRef b, DirectedDim target) {
+    linkCells(a, b, target.dim, target.dir);
+  }
+  void linkCells(CellRef a, CellRef b, DimOrdinal dim,
+                 DimVector dir = DimVector::POS);
+  void linkCells(CellRef a, CellRef b, const DimID &dim,
+                 DimVector dir = DimVector::POS);
 
-  /// Sugar for linkCells(a, noCell, dim, false).
+  void linkCells(CellRef a, CellRef b, DimRef dim, bool negward) {
+    linkCells(a, b, dim, fromNegward(negward));
+  }
+  void linkCells(CellRef a, CellRef b, DimOrdinal dim, bool negward) {
+    linkCells(a, b, dim, fromNegward(negward));
+  }
+  void linkCells(CellRef a, CellRef b, const DimID &dim, bool negward) {
+    linkCells(a, b, dim, fromNegward(negward));
+  }
+
+  /// Sugar for linkCells(a, noCell, dim, DimVector::POS).
   void unlinkPositive(CellRef a, DimOrdinal dim);
 
   /// Mint a cell whose content is @p text, and answer the operation index that
@@ -168,11 +184,18 @@ public:
   [[nodiscard]] std::vector<DimRef> metaDimensionsOf(CellRef cell) const;
 
   /**
-   * @brief Neighbor of @p from along @p dim (true for negward, false for
-   * posward). Seamlessly resolves stored manifold links, ephemeral d.meta-dims
-   *        ranks, and d.clone projections.
+   * @brief Neighbor of @p from along @p dim. Seamlessly resolves stored
+   *        manifold links, ephemeral d.meta-dims ranks, and d.clone
+   * projections.
    */
-  [[nodiscard]] CellRef linked(CellRef from, DimRef dim, bool negward) const;
+  [[nodiscard]] CellRef linked(CellRef from, DimRef dim,
+                               DimVector dir = DimVector::POS) const;
+  [[nodiscard]] CellRef linked(CellRef from, DirectedDim target) const {
+    return linked(from, target.dim, target.dir);
+  }
+  [[nodiscard]] CellRef linked(CellRef from, DimRef dim, bool negward) const {
+    return linked(from, dim, fromNegward(negward));
+  }
 
   /**
    * @brief The clone master of @p cell along @p cloneDim. Resolves ephemeral

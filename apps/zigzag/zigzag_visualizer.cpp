@@ -251,7 +251,7 @@ CellID ZigzagVisualizer::createCell(std::string text, std::string role) {
   if (!role.empty()) {
     const auto roleDim = engine_->dimensionFor("d.role");
     const auto attrRef = engine_->addCell(role);
-    engine_->linkCells(newId, attrRef, roleDim, false);
+    engine_->linkCells(newId, attrRef, roleDim, DimVector::POS);
   }
   if (accursed_cell_focus_ == 0) {
     accursed_cell_focus_ = newId;
@@ -263,7 +263,7 @@ CellID ZigzagVisualizer::createCell(std::string text, std::string role) {
 
 bool ZigzagVisualizer::insertConnectedCell(std::string text,
                                            const DimID &dimension,
-                                           const bool positive) {
+                                           const DimVector dir) {
   if (!engine_ || accursed_cell_focus_ == 0) {
     createCell(std::move(text));
     return true;
@@ -278,18 +278,10 @@ bool ZigzagVisualizer::insertConnectedCell(std::string text,
   const auto newId  = static_cast<CellRef>(createCell(std::move(text)));
   const auto dimRef = engine_->dimensionFor(dimension);
 
-  if (positive) {
-    const auto oldPos = engine_->manifold().linked(focus, dimRef, false);
-    engine_->linkCells(focus, newId, dimRef, false);
-    if (oldPos != zigzag::noCell) {
-      engine_->linkCells(newId, oldPos, dimRef, false);
-    }
-  } else {
-    const auto oldNeg = engine_->manifold().linked(focus, dimRef, true);
-    engine_->linkCells(focus, newId, dimRef, true);
-    if (oldNeg != zigzag::noCell) {
-      engine_->linkCells(newId, oldNeg, dimRef, true);
-    }
+  const auto oldNeighbor = engine_->manifold().linked(focus, dimRef, dir);
+  engine_->linkCells(focus, newId, dimRef, dir);
+  if (oldNeighbor != zigzag::noCell) {
+    engine_->linkCells(newId, oldNeighbor, dimRef, dir);
   }
   accursed_cell_focus_ = newId;
   rebuildActiveViewTopology();
@@ -299,7 +291,7 @@ bool ZigzagVisualizer::insertConnectedCell(std::string text,
 
 bool ZigzagVisualizer::linkFocusAlong(const DimID &dimension,
                                       const CellID targetId,
-                                      const bool positive) {
+                                      const DimVector dir) {
   if (!engine_ || targetId == 0 || targetId == accursed_cell_focus_) {
     return false;
   }
@@ -315,14 +307,14 @@ bool ZigzagVisualizer::linkFocusAlong(const DimID &dimension,
     return false;
   }
   const auto dimRef = engine_->dimensionFor(dimension);
-  engine_->linkCells(focus, target, dimRef, !positive);
+  engine_->linkCells(focus, target, dimRef, dir);
   rebuildActiveViewTopology();
   invalidateAccessibility();
   return true;
 }
 
 bool ZigzagVisualizer::unlinkFocusAlong(const DimID &dimension,
-                                        const bool positive) {
+                                        const DimVector dir) {
   if (!engine_ || accursed_cell_focus_ == 0) {
     return false;
   }
@@ -339,11 +331,11 @@ bool ZigzagVisualizer::unlinkFocusAlong(const DimID &dimension,
   if (dimRef == engine_->manifold().dimsDimension() || dimension == "d.dims") {
     return false;
   }
-  const auto target = engine_->linked(focus, dimRef, !positive);
+  const auto target = engine_->linked(focus, dimRef, dir);
   if (target == zigzag::noCell || isEphemeral(target)) {
     return false;
   }
-  engine_->linkCells(focus, zigzag::noCell, dimRef, !positive);
+  engine_->linkCells(focus, zigzag::noCell, dimRef, dir);
   rebuildActiveViewTopology();
   invalidateAccessibility();
   return true;
@@ -371,13 +363,15 @@ bool ZigzagVisualizer::deleteFocusCell() {
     if (dimRef == zigzag::noCell) {
       continue;
     }
-    const auto posNeighbor = engine_->manifold().linked(focus, dimRef, false);
+    const auto posNeighbor =
+        engine_->manifold().linked(focus, dimRef, DimVector::POS);
     if (posNeighbor != zigzag::noCell && posNeighbor != focus &&
         !isProtected(posNeighbor) && !isEphemeral(posNeighbor)) {
       nextFocus = posNeighbor;
       break;
     }
-    const auto negNeighbor = engine_->manifold().linked(focus, dimRef, true);
+    const auto negNeighbor =
+        engine_->manifold().linked(focus, dimRef, DimVector::NEG);
     if (negNeighbor != zigzag::noCell && negNeighbor != focus &&
         !isProtected(negNeighbor) && !isEphemeral(negNeighbor)) {
       nextFocus = negNeighbor;
@@ -427,13 +421,13 @@ bool ZigzagVisualizer::deleteFocusCell() {
     if (link.neg != zigzag::noCell && link.pos != zigzag::noCell) {
       // A rank of exactly two loses one and becomes a cell linked to itself,
       // which is a degenerate rank rather than a broken one.
-      engine_->linkCells(link.neg, link.pos, link.dim, false);
+      engine_->linkCells(link.neg, link.pos, link.dim, DimVector::POS);
       continue;
     }
     if (link.pos != zigzag::noCell) {
-      engine_->linkCells(focus, zigzag::noCell, link.dim, false);
+      engine_->linkCells(focus, zigzag::noCell, link.dim, DimVector::POS);
     } else if (link.neg != zigzag::noCell) {
-      engine_->linkCells(focus, zigzag::noCell, link.dim, true);
+      engine_->linkCells(focus, zigzag::noCell, link.dim, DimVector::NEG);
     }
   }
   accursed_cell_focus_ = nextFocus;
@@ -538,7 +532,7 @@ ZigzagVisualizer::inspectCell(const CellRef id) const {
   const auto mediaDim = manifold.dimensionNamed("d.media", store);
 
   if (info.role.empty() && roleDim != zigzag::noCell && !isEphemeral(id)) {
-    const auto held = manifold.linked(id, roleDim, false);
+    const auto held = manifold.linked(id, roleDim, DimVector::POS);
     if (held != zigzag::noCell) {
       info.role = manifold.textOf(held, store);
     }
@@ -551,14 +545,14 @@ ZigzagVisualizer::inspectCell(const CellRef id) const {
 
   if (!isEphemeral(id)) {
     if (mimeDim != zigzag::noCell) {
-      const auto held = manifold.linked(id, mimeDim, false);
+      const auto held = manifold.linked(id, mimeDim, DimVector::POS);
       if (held != zigzag::noCell) {
         info.mime_type = manifold.textOf(held, store);
       }
     }
 
     if (mediaDim != zigzag::noCell) {
-      const auto held = manifold.linked(id, mediaDim, false);
+      const auto held = manifold.linked(id, mediaDim, DimVector::POS);
       if (held != zigzag::noCell) {
         info.media_path = manifold.textOf(held, store);
       }
@@ -580,7 +574,7 @@ ZigzagVisualizer::inspectCell(const CellRef id) const {
     info.clone_master_id = id;
     const auto cloneDim  = manifold.dimensionNamed("d.clone", store);
     if (cloneDim != zigzag::noCell) {
-      if (manifold.linked(id, cloneDim, true) != zigzag::noCell) {
+      if (manifold.linked(id, cloneDim, DimVector::NEG) != zigzag::noCell) {
         info.is_clone        = true;
         info.clone_master_id = manifold.cloneMaster(id, cloneDim);
       }
@@ -746,7 +740,7 @@ void ZigzagVisualizer::rebuildActiveViewTopology() {
     // Positive walk
     CellRef parent = focusRef;
     for (int r = 1; r <= radius; ++r) {
-      const CellRef nextId = engine_->linked(parent, dimRef, false);
+      const CellRef nextId = engine_->linked(parent, dimRef, DimVector::POS);
       if (nextId == zigzag::noCell || visitedPos.contains(nextId)) {
         break;
       }
@@ -761,7 +755,7 @@ void ZigzagVisualizer::rebuildActiveViewTopology() {
     // Negative walk
     parent = focusRef;
     for (int r = 1; r <= radius; ++r) {
-      const CellRef nextId = engine_->linked(parent, dimRef, true);
+      const CellRef nextId = engine_->linked(parent, dimRef, DimVector::NEG);
       if (nextId == zigzag::noCell || visitedNeg.contains(nextId)) {
         break;
       }
@@ -807,7 +801,7 @@ void ZigzagVisualizer::updateCellPositions(const float rawDeltaTime) {
 }
 
 void ZigzagVisualizer::navigateFocus(const DimID &dimension,
-                                     const bool positive) {
+                                     const DimVector dir) {
   if (!engine_ || accursed_cell_focus_ == 0) {
     return;
   }
@@ -816,7 +810,7 @@ void ZigzagVisualizer::navigateFocus(const DimID &dimension,
   if (dimRef == zigzag::noCell) {
     return;
   }
-  const CellRef next = engine_->linked(focus, dimRef, !positive);
+  const CellRef next = engine_->linked(focus, dimRef, dir);
   if (next == zigzag::noCell) {
     return;
   }
@@ -929,8 +923,8 @@ void ZigzagVisualizer::drawFrame(gleditor::FrameContext &ctx) {
         if (dimRef == zigzag::noCell) {
           continue;
         }
-        for (const bool negward : {false, true}) {
-          const auto neighborId = engine_->linked(cellRef, dimRef, negward);
+        for (const auto dir : {DimVector::POS, DimVector::NEG}) {
+          const auto neighborId = engine_->linked(cellRef, dimRef, dir);
           if (neighborId == 0 || neighborId == cellRef ||
               !visible_cells_.contains(neighborId)) {
             continue;

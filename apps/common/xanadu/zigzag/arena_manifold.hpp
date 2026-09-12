@@ -173,7 +173,15 @@ public:
 
   /// The cell @p from's neighbour along @p dim, or noCell.
   [[nodiscard]] CellRef linked(CellRef from, DimRef dim,
-                               bool negward) const noexcept;
+                               DimVector dir = DimVector::POS) const noexcept;
+  [[nodiscard]] CellRef linked(CellRef from,
+                               DirectedDim target) const noexcept {
+    return linked(from, target.dim, target.dir);
+  }
+  [[nodiscard]] CellRef linked(CellRef from, DimRef dim,
+                               bool negward) const noexcept {
+    return linked(from, dim, fromNegward(negward));
+  }
 
   /// The dimensions @p ref links on -- d.meta-dims, read off the run.
   [[nodiscard]] std::span<const DimLink>
@@ -255,7 +263,13 @@ public:
    *
    * @return false, changing nothing, if a ref is not a cell this arena holds.
    */
-  bool link(CellRef from, DimRef dim, bool negward, CellRef to);
+  bool link(CellRef from, DimRef dim, DimVector dir, CellRef to);
+  bool link(CellRef from, DirectedDim target, CellRef to) {
+    return link(from, target.dim, target.dir, to);
+  }
+  bool link(CellRef from, DimRef dim, bool negward, CellRef to) {
+    return link(from, dim, fromNegward(negward), to);
+  }
 
   // -- choice points ---------------------------------------------------------
 
@@ -301,7 +315,7 @@ public:
 private:
   [[nodiscard]] DimLink *existingLink(std::uint32_t dense, DimRef dim) noexcept;
   [[nodiscard]] DimLink *linkFor(std::uint32_t dense, DimRef dim);
-  void setOneSide(std::uint32_t dense, DimRef dim, bool negward, CellRef to);
+  void setOneSide(std::uint32_t dense, DimRef dim, DimVector dir, CellRef to);
   void setContentAt(std::uint32_t dense,
                     std::span<const xanadu::PrimediaSpan> spans);
 

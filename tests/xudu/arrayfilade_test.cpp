@@ -28,6 +28,7 @@ using xanadu::enfilade::PredicateOp;
 using xanadu::enfilade::QueryPlanStats;
 using xanadu::enfilade::WidthMonoid;
 using zigzag::ArenaManifold;
+using zigzag::DimVector;
 
 // 1. Concept Verification
 static_assert(DisplacementMonoid<ArrayDsp>);
@@ -276,7 +277,7 @@ TEST(ArrayfiladeTest, ManifoldRankAndMatrixIndexing) {
       head = cell;
     }
     if (zigzag::noCell != prev) {
-      arena.link(prev, dim1, false, cell);
+      arena.link(prev, dim1, DimVector::POS, cell);
     }
     prev = cell;
   }

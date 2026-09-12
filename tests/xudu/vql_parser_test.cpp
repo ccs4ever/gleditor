@@ -27,7 +27,7 @@ TEST(VQLParserTest, BarePathExpressions) {
       std::holds_alternative<SignedDimensionStep>(path.steps[0].selector));
   const auto &step0 = std::get<SignedDimensionStep>(path.steps[0].selector);
   EXPECT_EQ(step0.dimName, "d.people");
-  EXPECT_EQ(step0.direction, +1);
+  EXPECT_EQ(step0.direction, zigzag::DimVector::POS);
   EXPECT_EQ(step0.placement, Placement::Default);
   EXPECT_FALSE(path.steps[0].derefMaster);
 
@@ -80,7 +80,7 @@ TEST(VQLParserTest, PlacementsAndYields) {
   EXPECT_EQ(std::get<SignedDimensionStep>(path1.steps[1].selector).placement,
             Placement::Rank);
   EXPECT_EQ(std::get<SignedDimensionStep>(path1.steps[1].selector).direction,
-            -1);
+            zigzag::DimVector::NEG);
   EXPECT_EQ(std::get<SignedDimensionStep>(path1.steps[2].selector).placement,
             Placement::Head);
   EXPECT_EQ(std::get<SignedDimensionStep>(path1.steps[3].selector).placement,

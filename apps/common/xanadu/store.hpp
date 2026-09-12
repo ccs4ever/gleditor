@@ -457,8 +457,23 @@ public:
    *         boundary refused at the API as well as in the fold.
    */
   MicroversionId setLink(const MicroversionId &parent, zigzag::CellRef from,
-                         zigzag::DimRef dim, bool negward, zigzag::CellRef to,
+                         zigzag::DimRef dim,
+                         zigzag::DimVector dir         = zigzag::DimVector::POS,
+                         zigzag::CellRef to            = zigzag::noCell,
                          const zigzag::Manifold *known = nullptr);
+
+  MicroversionId setLink(const MicroversionId &parent, zigzag::CellRef from,
+                         zigzag::DirectedDim target,
+                         zigzag::CellRef to            = zigzag::noCell,
+                         const zigzag::Manifold *known = nullptr) {
+    return setLink(parent, from, target.dim, target.dir, to, known);
+  }
+
+  MicroversionId setLink(const MicroversionId &parent, zigzag::CellRef from,
+                         zigzag::DimRef dim, bool negward, zigzag::CellRef to,
+                         const zigzag::Manifold *known = nullptr) {
+    return setLink(parent, from, dim, zigzag::fromNegward(negward), to, known);
+  }
 
   /**
    * @brief Splice @p text into @p cell's content, replacing @p removing bytes

@@ -14,10 +14,10 @@ Vlog Vlog::over(ArenaManifold &arena) {
 }
 
 CellRef Vlog::endOfRank(const CellRef from, const DimRef dim,
-                        const bool negward) const noexcept {
+                        const DimVector dir) const noexcept {
   CellRef walk = from;
   for (std::size_t steps = 0; steps <= m.cellCount(); steps++) {
-    const CellRef next = m.linked(walk, dim, negward);
+    const CellRef next = m.linked(walk, dim, dir);
     if (noCell == next || next == from) {
       return walk;
     }
@@ -31,7 +31,7 @@ CellRef Vlog::makeVar() {
   // Onto the tail of the d.vars rank: variablehood is membership of a rank,
   // not a flag bit, following R12's precedent for dimensions. A rank is
   // already something the manifold can answer questions about; a bit is not.
-  m.link(endOfRank(vars, vars, false), vars, false, var);
+  m.link(endOfRank(vars, vars, DimVector::POS), vars, DimVector::POS, var);
   return var;
 }
 
@@ -44,17 +44,18 @@ CellRef Vlog::makeTerm(const std::string_view functor,
     CellRef actualArg = arg;
     if (noCell != arg &&
         (std::find(seen.begin(), seen.end(), arg) != seen.end() ||
-         noCell != m.linked(arg, grab, true) ||
-         noCell != m.linked(arg, step, true) ||
-         noCell != m.linked(arg, step, false))) {
+         noCell != m.linked(arg, grab, DimVector::NEG) ||
+         noCell != m.linked(arg, step, DimVector::NEG) ||
+         noCell != m.linked(arg, step, DimVector::POS))) {
       actualArg = m.makeCell();
-      m.link(endOfRank(arg, clone, false), clone, false, actualArg);
+      m.link(endOfRank(arg, clone, DimVector::POS), clone, DimVector::POS,
+             actualArg);
     }
     seen.push_back(actualArg);
     if (noCell == previous) {
-      m.link(term, grab, false, actualArg);
+      m.link(term, grab, DimVector::POS, actualArg);
     } else {
-      m.link(previous, step, false, actualArg);
+      m.link(previous, step, DimVector::POS, actualArg);
     }
     previous = actualArg;
   }
@@ -69,22 +70,22 @@ CellRef Vlog::makeTerm(const std::string_view functor,
 std::vector<CellRef> Vlog::argumentsOf(const CellRef ref) const {
   std::vector<CellRef> args;
   const CellRef actual = deref(ref);
-  CellRef arg          = m.linked(actual, grab, false);
+  CellRef arg          = m.linked(actual, grab, DimVector::POS);
   for (std::size_t steps = 0; noCell != arg && steps <= m.cellCount();
        steps++) {
     if (std::find(args.begin(), args.end(), arg) != args.end()) {
       break;
     }
     args.push_back(arg);
-    arg = m.linked(arg, step, false);
+    arg = m.linked(arg, step, DimVector::POS);
   }
   return args;
 }
 
 bool Vlog::isUnbound(const CellRef ref) const noexcept {
   const auto cell       = deref(ref);
-  const bool onVarsRank = noCell != m.linked(cell, vars, true) ||
-                          noCell != m.linked(cell, vars, false);
+  const bool onVarsRank = noCell != m.linked(cell, vars, DimVector::NEG) ||
+                          noCell != m.linked(cell, vars, DimVector::POS);
   return onVarsRank && m.contentOf(cell).empty() &&
          xanadu::ValueKind::None == m.valueKindOf(cell);
 }
@@ -94,7 +95,8 @@ void Vlog::bind(const CellRef v, const CellRef t) {
   // setting it maintains both -- is what makes this the whole edit rather than
   // three edits and a repair, and a rank tail has no posward neighbour to
   // evict, so there is nothing else to fix up.
-  m.link(endOfRank(t, clone, false), clone, false, endOfRank(v, clone, true));
+  m.link(endOfRank(t, clone, DimVector::POS), clone, DimVector::POS,
+         endOfRank(v, clone, DimVector::NEG));
 }
 
 bool Vlog::unify(const CellRef a, const CellRef b) {

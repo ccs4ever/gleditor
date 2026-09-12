@@ -16,6 +16,7 @@
 #include "common/xanadu/vql/parser.hpp"
 
 namespace xanadu::vql {
+using zigzag::DimVector;
 
 namespace {
 
@@ -257,8 +258,8 @@ std::vector<zigzag::CellRef>
 VQLEngine::traverseDimension(const SignedDimensionStep &dimStep,
                              const std::vector<zigzag::CellRef> &inputs) {
   std::vector<zigzag::CellRef> results;
-  zigzag::DimRef dim = resolveDimension(dimStep.dimName);
-  bool negward       = (dimStep.direction < 0);
+  zigzag::DimRef dim    = resolveDimension(dimStep.dimName);
+  zigzag::DimVector dir = dimStep.direction;
 
   for (zigzag::CellRef in : inputs) {
     if (!core_->arena().contains(in)) {
@@ -269,12 +270,12 @@ VQLEngine::traverseDimension(const SignedDimensionStep &dimStep,
     case Placement::Default:
     case Placement::From: {
       // Walk outward from context in step's direction
-      zigzag::CellRef curr = core_->arena().linked(in, dim, negward);
+      zigzag::CellRef curr = core_->arena().linked(in, dim, dir);
       std::unordered_set<zigzag::CellRef> visited{in};
       while (curr != zigzag::noCell && !visited.contains(curr)) {
         visited.insert(curr);
         results.push_back(curr);
-        curr = core_->arena().linked(curr, dim, negward);
+        curr = core_->arena().linked(curr, dim, dir);
       }
       break;
     }
@@ -285,7 +286,7 @@ VQLEngine::traverseDimension(const SignedDimensionStep &dimStep,
       std::unordered_set<zigzag::CellRef> visitedNeg{in};
       while (true) {
         zigzag::CellRef prev =
-            core_->arena().linked(head, dim, true /*negward*/);
+            core_->arena().linked(head, dim, zigzag::DimVector::NEG);
         if (prev == zigzag::noCell || visitedNeg.contains(prev)) {
           break;
         }
@@ -299,10 +300,10 @@ VQLEngine::traverseDimension(const SignedDimensionStep &dimStep,
       while (curr != zigzag::noCell && !visitedPos.contains(curr)) {
         visitedPos.insert(curr);
         rankCells.push_back(curr);
-        curr = core_->arena().linked(curr, dim, false /*posward*/);
+        curr = core_->arena().linked(curr, dim, zigzag::DimVector::POS);
       }
 
-      if (negward) {
+      if (dir == zigzag::DimVector::NEG) {
         std::reverse(rankCells.begin(), rankCells.end());
       }
       results.insert(results.end(), rankCells.begin(), rankCells.end());
@@ -315,7 +316,7 @@ VQLEngine::traverseDimension(const SignedDimensionStep &dimStep,
       std::unordered_set<zigzag::CellRef> visited{in};
       while (true) {
         zigzag::CellRef prev =
-            core_->arena().linked(head, dim, true /*negward*/);
+            core_->arena().linked(head, dim, zigzag::DimVector::NEG);
         if (prev == zigzag::noCell || visited.contains(prev)) {
           break;
         }
@@ -332,7 +333,7 @@ VQLEngine::traverseDimension(const SignedDimensionStep &dimStep,
       std::unordered_set<zigzag::CellRef> visited{in};
       while (true) {
         zigzag::CellRef next =
-            core_->arena().linked(tail, dim, false /*posward*/);
+            core_->arena().linked(tail, dim, zigzag::DimVector::POS);
         if (next == zigzag::noCell || visited.contains(next)) {
           break;
         }
@@ -373,7 +374,7 @@ VQLEngine::performCreates(const SignedDimensionStep &dimStep,
       std::unordered_set<zigzag::CellRef> visited{in};
       while (true) {
         zigzag::CellRef prev =
-            core_->arena().linked(attachPoint, dim, true /*negward*/);
+            core_->arena().linked(attachPoint, dim, zigzag::DimVector::NEG);
         if (prev == zigzag::noCell || visited.contains(prev)) {
           break;
         }
@@ -385,7 +386,7 @@ VQLEngine::performCreates(const SignedDimensionStep &dimStep,
       std::unordered_set<zigzag::CellRef> visited{in};
       while (true) {
         zigzag::CellRef next =
-            core_->arena().linked(attachPoint, dim, false /*posward*/);
+            core_->arena().linked(attachPoint, dim, zigzag::DimVector::POS);
         if (next == zigzag::noCell || visited.contains(next)) {
           break;
         }
@@ -407,12 +408,12 @@ VQLEngine::performCreates(const SignedDimensionStep &dimStep,
       }
 
       if (insertAtHead) {
-        core_->arena().link(newC, dim, false /*posward*/, attachPoint);
-        core_->arena().link(attachPoint, dim, true /*negward*/, newC);
+        core_->arena().link(newC, dim, zigzag::DimVector::POS, attachPoint);
+        core_->arena().link(attachPoint, dim, zigzag::DimVector::NEG, newC);
         attachPoint = newC;
       } else {
-        core_->arena().link(attachPoint, dim, false /*posward*/, newC);
-        core_->arena().link(newC, dim, true /*negward*/, attachPoint);
+        core_->arena().link(attachPoint, dim, zigzag::DimVector::POS, newC);
+        core_->arena().link(newC, dim, zigzag::DimVector::NEG, attachPoint);
         attachPoint = newC;
       }
       created.push_back(newC);
@@ -523,16 +524,16 @@ VQLEngine::evaluateStep(const PathStep &step,
       // Existing-Target Fan-Out (§4.7)
       // Resolve dimension and direction from arg 0
       std::string dimName;
-      int direction = 1;
+      DimVector direction = DimVector::POS;
       if (std::holds_alternative<ScalarLiteral>(fn.args[0].kind)) {
         const auto &lit = std::get<ScalarLiteral>(fn.args[0].kind);
         if (std::holds_alternative<std::string>(lit.value)) {
           std::string str = std::get<std::string>(lit.value);
           if (!str.empty() && str[0] == '-') {
-            direction = -1;
+            direction = DimVector::NEG;
             dimName   = str.substr(1);
           } else if (!str.empty() && str[0] == '+') {
-            direction = 1;
+            direction = DimVector::POS;
             dimName   = str.substr(1);
           } else {
             dimName = str;
@@ -575,10 +576,9 @@ VQLEngine::evaluateStep(const PathStep &step,
       if (targetCell != zigzag::noCell) {
         auto gen = core_->cloneGenerator(targetCell);
         std::vector<zigzag::CellRef> attachedClones;
-        bool negward = (direction < 0);
         for (zigzag::CellRef c : currentCells) {
           zigzag::CellRef cloneCell = gen();
-          core_->link(c, dim, negward, cloneCell);
+          core_->link(c, dim, direction, cloneCell);
           attachedClones.push_back(cloneCell);
         }
 

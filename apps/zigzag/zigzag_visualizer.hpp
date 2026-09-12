@@ -118,7 +118,10 @@ public:
                       const std::string &salt = "zigzag_slice",
                       std::int64_t sequence   = 1) const;
 
-  void navigateFocus(const DimID &dimension, bool positive);
+  void navigateFocus(const DimID &dimension, DimVector dir = DimVector::POS);
+  void navigateFocus(const DimID &dimension, bool positive) {
+    navigateFocus(dimension, positive ? DimVector::POS : DimVector::NEG);
+  }
   void navigateFocusTo(CellID id);
 
   void swapDimensions(int axis1, int axis2);
@@ -139,10 +142,23 @@ public:
   // -- In-App Interactive Cell & Dimension Editing --------------------------
   CellID createCell(std::string text = "", std::string role = "text");
   bool insertConnectedCell(std::string text, const DimID &dimension,
-                           bool positive = true);
+                           DimVector dir = DimVector::POS);
+  bool insertConnectedCell(std::string text, const DimID &dimension,
+                           bool positive) {
+    return insertConnectedCell(std::move(text), dimension,
+                               positive ? DimVector::POS : DimVector::NEG);
+  }
   bool linkFocusAlong(const DimID &dimension, CellID targetId,
-                      bool positive = true);
-  bool unlinkFocusAlong(const DimID &dimension, bool positive = true);
+                      DimVector dir = DimVector::POS);
+  bool linkFocusAlong(const DimID &dimension, CellID targetId, bool positive) {
+    return linkFocusAlong(dimension, targetId,
+                          positive ? DimVector::POS : DimVector::NEG);
+  }
+  bool unlinkFocusAlong(const DimID &dimension, DimVector dir = DimVector::POS);
+  bool unlinkFocusAlong(const DimID &dimension, bool positive) {
+    return unlinkFocusAlong(dimension,
+                            positive ? DimVector::POS : DimVector::NEG);
+  }
   bool deleteFocusCell();
   void updateFocusCellText(std::string text);
   bool saveStructureYaml(const std::string &filePath) const;

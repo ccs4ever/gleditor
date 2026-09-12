@@ -22,6 +22,7 @@ using xanadu::UserPermascroll;
 using xanadu::vql::MultiStoreCoordinator;
 using zigzag::CellRef;
 using zigzag::DimRef;
+using zigzag::DimVector;
 using zigzag::noCell;
 
 fs::path tempStoreDir(const std::string &name) {
@@ -126,12 +127,12 @@ TEST(VQLMultiStoreTest, UniversalCloneMasterDereferenceChain) {
   CellRef cellC = arena.makeCell();
 
   // Link B to A along d.clone: A pos to B, B neg to A
-  arena.link(cellA, coord.dimClone(), false /*posward*/, cellB);
-  arena.link(cellB, coord.dimClone(), true /*negward*/, cellA);
+  arena.link(cellA, coord.dimClone(), DimVector::POS, cellB);
+  arena.link(cellB, coord.dimClone(), DimVector::NEG, cellA);
 
   // Link C to B along d.clone: B pos to C, C neg to B
-  arena.link(cellB, coord.dimClone(), false /*posward*/, cellC);
-  arena.link(cellC, coord.dimClone(), true /*negward*/, cellB);
+  arena.link(cellB, coord.dimClone(), DimVector::POS, cellC);
+  arena.link(cellC, coord.dimClone(), DimVector::NEG, cellB);
 
   // Dereferencing any cell in the chain via '>' lands on Master A
   EXPECT_EQ(coord.derefCloneMaster(cellA), cellA);

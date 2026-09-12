@@ -107,7 +107,8 @@ void deriveBacklinks(std::unordered_map<CellID, Cell> &cells,
     }
 
     LinkPairs &neighborLinks = neighbor->second.dimensions[link.dimension];
-    CellID &backReference = link.isPos ? neighborLinks.neg : neighborLinks.pos;
+    CellID &backReference =
+        (link.dir == DimVector::POS) ? neighborLinks.neg : neighborLinks.pos;
 
     if (backReference == 0) {
       backReference = link.from;
@@ -115,8 +116,10 @@ void deriveBacklinks(std::unordered_map<CellID, Cell> &cells,
       diagnostics.warn(std::format(
           "cell {} dimension {} {} -> {}, but {}'s {} already points at {} -- "
           "leaving both as declared",
-          link.from, link.dimension, link.isPos ? "pos" : "neg", link.target,
-          link.target, link.isPos ? "neg" : "pos", backReference));
+          link.from, link.dimension,
+          (link.dir == DimVector::POS) ? "pos" : "neg", link.target,
+          link.target, (link.dir == DimVector::POS) ? "neg" : "pos",
+          backReference));
     }
   }
 }

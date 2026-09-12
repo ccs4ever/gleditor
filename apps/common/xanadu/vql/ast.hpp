@@ -13,6 +13,8 @@
 #include <variant>
 #include <vector>
 
+#include "common/xanadu/zigzag/dim_vector.hpp"
+
 namespace xanadu::vql {
 
 // -- Enums -------------------------------------------------------------------
@@ -139,7 +141,7 @@ struct RangeClamp {
 
 struct SignedDimensionStep {
   std::string dimName{};
-  int direction{+1}; ///< +1 for posward, -1 for negward
+  zigzag::DimVector direction{zigzag::DimVector::POS};
   Placement placement{Placement::Default};
   std::vector<CreateValue> creates{};
 };

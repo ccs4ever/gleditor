@@ -16,6 +16,7 @@ namespace xanadu::vql {
 
 using zigzag::CellRef;
 using zigzag::DimRef;
+using zigzag::DimVector;
 using zigzag::noCell;
 using zigzag::vortex::CellValue;
 using zigzag::vortex::OpcodeKind;
@@ -222,7 +223,7 @@ DimRef VQLCompiler::resolveDimension(std::string_view name) {
     if (core_.arena().textOf(curr) == name) {
       return curr;
     }
-    curr = core_.arena().linked(curr, dims.dims, false);
+    curr = core_.arena().linked(curr, dims.dims, DimVector::POS);
   }
 
   return core_.mintDimension(name);
@@ -372,7 +373,8 @@ CellRef VQLCompiler::compilePathExpression(const PathExpression &path,
               emitOp(OpcodeKind::Link, std::string("#TRAVERSE ") + sd.dimName);
           emitInput(linkOp, current);
           emitInputConstant(linkOp, static_cast<std::int64_t>(dim));
-          emitInputConstant(linkOp, static_cast<std::int64_t>(sd.direction));
+          emitInputConstant(linkOp,
+                            static_cast<std::int64_t>(toSign(sd.direction)));
 
           CellRef nextCell = core_.arena().makeCell();
           emitOutput(linkOp, nextCell);
@@ -441,16 +443,16 @@ CellRef VQLCompiler::compilePathExpression(const PathExpression &path,
       } else if (fn.name == "link" && fn.args.size() >= 2) {
         // Existing-Target Fan-Out (§4.7)
         std::string dimName;
-        int direction = 1;
+        zigzag::DimVector direction = zigzag::DimVector::POS;
         if (std::holds_alternative<ScalarLiteral>(fn.args[0].kind)) {
           const auto &lit = std::get<ScalarLiteral>(fn.args[0].kind);
           if (std::holds_alternative<std::string>(lit.value)) {
             std::string str = std::get<std::string>(lit.value);
             if (!str.empty() && str[0] == '-') {
-              direction = -1;
+              direction = zigzag::DimVector::NEG;
               dimName   = str.substr(1);
             } else if (!str.empty() && str[0] == '+') {
-              direction = 1;
+              direction = zigzag::DimVector::POS;
               dimName   = str.substr(1);
             } else {
               dimName = str;
@@ -481,7 +483,8 @@ CellRef VQLCompiler::compilePathExpression(const PathExpression &path,
           CellRef linkOp = emitOp(OpcodeKind::Link, "#LINK_ATTACH " + dimName);
           emitInput(linkOp, current);
           emitInputConstant(linkOp, static_cast<std::int64_t>(dim));
-          emitInputConstant(linkOp, static_cast<std::int64_t>(direction));
+          emitInputConstant(linkOp,
+                            static_cast<std::int64_t>(toSign(direction)));
           emitInput(linkOp, cloneCell);
           attachedClones.push_back(cloneCell);
         }
@@ -1014,10 +1017,11 @@ VQLCompiler::exportToStore(xanadu::Store &store,
     CellRef from = cellMap.at(c);
 
     for (const auto &[dimRef, mappedDim] : dimMap) {
-      CellRef target = arena.linked(c, dimRef, false /*posward*/);
+      CellRef target = arena.linked(c, dimRef, DimVector::POS);
       if (target != zigzag::noCell && cellMap.count(target)) {
         CellRef to = cellMap.at(target);
-        ver        = store.setLink(ver, from, mappedDim, false, to, &manifold);
+        ver =
+            store.setLink(ver, from, mappedDim, DimVector::POS, to, &manifold);
         static_cast<void>(manifold.advance(store, ver));
       }
     }

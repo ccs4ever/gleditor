@@ -98,32 +98,32 @@ UnifiedTransclusionEngine::coldOf(const CellRef cell) const noexcept {
 
 void UnifiedTransclusionEngine::linkCells(const CellRef a, const CellRef b,
                                           const DimRef dim,
-                                          const bool negward) {
+                                          const DimVector dir) {
   if (zigzag::noCell == a || zigzag::noCell == dim) {
     return;
   }
   // One operation, not two writes. The reciprocal edge is what the fold means
   // by a link rather than a second thing to remember to set -- which is what
   // the four-line pos-then-neg dance this replaces kept getting right by hand.
-  head_ = store_.setLink(head_, a, dim, negward, b, &manifold_);
+  head_ = store_.setLink(head_, a, dim, dir, b, &manifold_);
   syncIncremental();
 }
 
 void UnifiedTransclusionEngine::linkCells(const CellRef a, const CellRef b,
                                           const DimOrdinal dim,
-                                          const bool negward) {
-  linkCells(a, b, dimensionFor(dimOrdinalToString(dim)), negward);
+                                          const DimVector dir) {
+  linkCells(a, b, dimensionFor(dimOrdinalToString(dim)), dir);
 }
 
 void UnifiedTransclusionEngine::linkCells(const CellRef a, const CellRef b,
                                           const DimID &dim,
-                                          const bool negward) {
-  linkCells(a, b, dimensionFor(dim), negward);
+                                          const DimVector dir) {
+  linkCells(a, b, dimensionFor(dim), dir);
 }
 
 void UnifiedTransclusionEngine::unlinkPositive(const CellRef a,
                                                const DimOrdinal dim) {
-  linkCells(a, zigzag::noCell, dim, false);
+  linkCells(a, zigzag::noCell, dim, DimVector::POS);
 }
 
 const CellSlot *
@@ -183,7 +183,7 @@ CellRef UnifiedTransclusionEngine::getOrCreateEphemeralCell(
 }
 
 CellRef UnifiedTransclusionEngine::linked(const CellRef from, const DimRef dim,
-                                          const bool negward) const {
+                                          const DimVector dir) const {
   if (from == noCell || dim == noCell) {
     return noCell;
   }
@@ -199,7 +199,7 @@ CellRef UnifiedTransclusionEngine::linked(const CellRef from, const DimRef dim,
     const auto &slot = it->second;
 
     if (metaDim != noCell && dim == metaDim) {
-      if (!negward) {
+      if (dir == DimVector::POS) {
         if (slot.index + 1 < slot.totalCount) {
           const auto mDims = metaDimensionsOf(slot.parentCell);
           if (slot.index + 1 < mDims.size()) {
@@ -223,7 +223,7 @@ CellRef UnifiedTransclusionEngine::linked(const CellRef from, const DimRef dim,
     }
 
     if (cloneDim != noCell && dim == cloneDim) {
-      if (negward) {
+      if (dir == DimVector::NEG) {
         return slot.dimension;
       }
       return noCell;
@@ -233,7 +233,7 @@ CellRef UnifiedTransclusionEngine::linked(const CellRef from, const DimRef dim,
   }
 
   if (metaDim != noCell && dim == metaDim) {
-    if (!negward) {
+    if (dir == DimVector::POS) {
       const auto mDims = metaDimensionsOf(from);
       if (!mDims.empty()) {
         return getOrCreateEphemeralCell(from, 0, mDims[0], mDims.size());
@@ -242,7 +242,7 @@ CellRef UnifiedTransclusionEngine::linked(const CellRef from, const DimRef dim,
     return noCell;
   }
 
-  return manifold_.linked(from, dim, negward);
+  return manifold_.linked(from, dim, dir);
 }
 
 CellRef UnifiedTransclusionEngine::cloneMaster(const CellRef cell,
@@ -271,8 +271,8 @@ bool UnifiedTransclusionEngine::isProtected(const CellRef cell) const {
   }
   const auto dimsDim = manifold_.dimsDimension();
   if (dimsDim != noCell) {
-    if (manifold_.linked(cell, dimsDim, true) != noCell ||
-        manifold_.linked(cell, dimsDim, false) != noCell) {
+    if (manifold_.linked(cell, dimsDim, DimVector::NEG) != noCell ||
+        manifold_.linked(cell, dimsDim, DimVector::POS) != noCell) {
       return true;
     }
   }
@@ -288,22 +288,24 @@ bool UnifiedTransclusionEngine::validate2RankManifold(
   for (const auto &slot : manifold_.cells()) {
     for (const auto &link : manifold_.dimensionsOf(slot.birthOp)) {
       if (zigzag::noCell != link.pos &&
-          manifold_.linked(link.pos, link.dim, true) != slot.birthOp) {
+          manifold_.linked(link.pos, link.dim, DimVector::NEG) !=
+              slot.birthOp) {
         if (nullptr != errorOut) {
           *errorOut = std::format(
               "cell {} posward on dimension {} names {}, whose negward is {}",
               slot.birthOp, link.dim, link.pos,
-              manifold_.linked(link.pos, link.dim, true));
+              manifold_.linked(link.pos, link.dim, DimVector::NEG));
         }
         return false;
       }
       if (zigzag::noCell != link.neg &&
-          manifold_.linked(link.neg, link.dim, false) != slot.birthOp) {
+          manifold_.linked(link.neg, link.dim, DimVector::POS) !=
+              slot.birthOp) {
         if (nullptr != errorOut) {
           *errorOut = std::format(
               "cell {} negward on dimension {} names {}, whose posward is {}",
               slot.birthOp, link.dim, link.neg,
-              manifold_.linked(link.neg, link.dim, false));
+              manifold_.linked(link.neg, link.dim, DimVector::POS));
         }
         return false;
       }
@@ -483,8 +485,8 @@ UnifiedTransclusionEngine::stageVisibleCells(
       if (zigzag::noCell == axis) {
         continue;
       }
-      checkNeighbor(linked(currId, axis, false));
-      checkNeighbor(linked(currId, axis, true));
+      checkNeighbor(linked(currId, axis, DimVector::POS));
+      checkNeighbor(linked(currId, axis, DimVector::NEG));
     }
   }
 

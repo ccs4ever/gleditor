@@ -106,8 +106,17 @@ public:
    * target == 0           -> isolate: severs link, returns previously linked
    * cell. target == literal ref -> establishes link to target.
    */
-  std::optional<CellRef> link(CellRef cell, DimRef dim, bool negward,
+  std::optional<CellRef> link(CellRef cell, DimRef dim, DimVector dir,
                               std::optional<CellRef> target = std::nullopt);
+  std::optional<CellRef>
+  link(CellRef cell, DirectedDim target,
+       std::optional<CellRef> linkTarget = std::nullopt) {
+    return link(cell, target.dim, target.dir, linkTarget);
+  }
+  std::optional<CellRef> link(CellRef cell, DimRef dim, bool negward,
+                              std::optional<CellRef> target = std::nullopt) {
+    return link(cell, dim, fromNegward(negward), target);
+  }
 
   /**
    * @brief Reads, slices, or splices cell content in the universal currency of
@@ -123,10 +132,34 @@ public:
         std::optional<CellValue> replacement = std::nullopt);
 
   // -- Named Vocabulary Helpers -----------------------------------------------
-  std::optional<CellRef> newCell(CellRef cell, DimRef dim, bool negward);
-  std::optional<CellRef> newCell(CellRef cell, DimRef dim, bool negward,
+  std::optional<CellRef> newCell(CellRef cell, DimRef dim,
+                                 DimVector dir = DimVector::POS);
+  std::optional<CellRef> newCell(CellRef cell, DirectedDim target) {
+    return newCell(cell, target.dim, target.dir);
+  }
+  std::optional<CellRef> newCell(CellRef cell, DimRef dim, bool negward) {
+    return newCell(cell, dim, fromNegward(negward));
+  }
+
+  std::optional<CellRef> newCell(CellRef cell, DimRef dim, DimVector dir,
                                  const CellValue &val);
-  std::optional<CellRef> breakLink(CellRef cell, DimRef dim, bool negward);
+  std::optional<CellRef> newCell(CellRef cell, DirectedDim target,
+                                 const CellValue &val) {
+    return newCell(cell, target.dim, target.dir, val);
+  }
+  std::optional<CellRef> newCell(CellRef cell, DimRef dim, bool negward,
+                                 const CellValue &val) {
+    return newCell(cell, dim, fromNegward(negward), val);
+  }
+
+  std::optional<CellRef> breakLink(CellRef cell, DimRef dim,
+                                   DimVector dir = DimVector::POS);
+  std::optional<CellRef> breakLink(CellRef cell, DirectedDim target) {
+    return breakLink(cell, target.dim, target.dir);
+  }
+  std::optional<CellRef> breakLink(CellRef cell, DimRef dim, bool negward) {
+    return breakLink(cell, dim, fromNegward(negward));
+  }
 
   std::optional<CellRef> splice(CellRef cell, std::int64_t offset,
                                 std::int64_t length, const CellValue &val);

@@ -32,6 +32,7 @@ using xudu::ScalarValue;
 using xudu::Store;
 using xudu::ValueKind;
 using zigzag::CellRef;
+using zigzag::DimVector;
 
 /// Doubles worth asserting about individually, rather than a random sample:
 /// each one is a case the encoding could get wrong on its own.
@@ -261,13 +262,13 @@ TEST(ScalarTest, aScalarCellIsAnOrdinaryCellInEveryOtherWay) {
   const auto number = store.cellRefOf(at);
   at                = store.makeCell(at, "a label");
   const auto label  = store.cellRefOf(at);
-  at                = store.setLink(at, label, minted.dim, false, number);
+  at = store.setLink(at, label, minted.dim, DimVector::POS, number);
 
   const auto manifold = store.rebuildManifold(at);
   // Linked, ranked and read like anything else -- which is the entire argument
   // for spooling the rendering rather than inventing a payload type.
-  EXPECT_EQ(manifold.linked(label, minted.dim, false), number);
-  EXPECT_EQ(manifold.linked(number, minted.dim, true), label);
+  EXPECT_EQ(manifold.linked(label, minted.dim, DimVector::POS), number);
+  EXPECT_EQ(manifold.linked(number, minted.dim, DimVector::NEG), label);
   EXPECT_EQ(manifold.textOf(number, store), "2.5");
   EXPECT_THAT(manifold.asDouble(number), testing::Optional(2.5));
   EXPECT_TRUE(manifold.verifyAgainstFullRebuild(store));

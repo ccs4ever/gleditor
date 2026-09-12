@@ -172,10 +172,10 @@ Cell readCell(const ryml::ConstNodeRef &cellNode,
 
     cell.dimensions[dimName] = links;
     if (links.pos != 0) {
-      explicitLinks.push_back({cell.id, dimName, true, links.pos});
+      explicitLinks.push_back({cell.id, dimName, DimVector::POS, links.pos});
     }
     if (links.neg != 0) {
-      explicitLinks.push_back({cell.id, dimName, false, links.neg});
+      explicitLinks.push_back({cell.id, dimName, DimVector::NEG, links.neg});
     }
   }
 

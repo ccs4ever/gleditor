@@ -28,6 +28,7 @@
 #include "common/xanadu/compact_op.hpp"
 #include "common/xanadu/ops.hpp"
 #include "common/xanadu/spool.hpp"
+#include "common/xanadu/zigzag/dim_vector.hpp"
 
 namespace xanadu {
 class Store;
@@ -35,25 +36,7 @@ class Store;
 
 namespace zigzag {
 
-/**
- * @brief A cell, named by the index of the operation that minted it.
- *
- * Local to one spool and deliberately not swarm-stable: opRecords() sorts by
- * MicroversionId, so a branch off an early state lands at a different index in
- * a store that adopted it. Crossing a document boundary is GlobalOpRef's job
- * (publication.hpp), which names an operation by the state it produced. See
- * design R4.
- */
-using CellRef = std::uint32_t;
-
-/// A dimension is an ordinary cell -- so that a user can mint one -- and is
-/// spelled differently only to say which of the two a parameter wants. See R2.
-using DimRef = CellRef;
-
-/// Operation index 0 is state zero, the null document, which is definitionally
-/// not a cell. That is what makes "absent" and "zero" the same value here
-/// rather than merely a convenient choice. See R5.
-inline constexpr CellRef noCell = 0;
+// CellRef, DimRef, and noCell are defined in dim_vector.hpp
 
 /**
  * @brief The top bit: this cell is derived and no operation backs it.
@@ -88,6 +71,13 @@ struct DimLink {
   DimRef dim{noCell};  ///< the dimension cell
   CellRef pos{noCell}; ///< posward neighbour, noCell if none
   CellRef neg{noCell}; ///< negward neighbour, noCell if none
+
+  [[nodiscard]] constexpr CellRef neighbor(const DimVector dir) const noexcept {
+    return dir == DimVector::POS ? pos : neg;
+  }
+  [[nodiscard]] constexpr CellRef &neighbor(const DimVector dir) noexcept {
+    return dir == DimVector::POS ? pos : neg;
+  }
 
   bool operator==(const DimLink &) const = default;
 };
@@ -157,7 +147,15 @@ public:
 
   /// The cell @p from's neighbour along @p dim, or noCell.
   [[nodiscard]] CellRef linked(CellRef from, DimRef dim,
-                               bool negward) const noexcept;
+                               DimVector dir = DimVector::POS) const noexcept;
+  [[nodiscard]] CellRef linked(CellRef from,
+                               DirectedDim target) const noexcept {
+    return linked(from, target.dim, target.dir);
+  }
+  [[nodiscard]] CellRef linked(CellRef from, DimRef dim,
+                               bool negward) const noexcept {
+    return linked(from, dim, fromNegward(negward));
+  }
 
   /**
    * @brief The slot for @p ref, or nullptr.
@@ -332,7 +330,7 @@ private:
   /// @p cell's existing link to @p dim, or nullptr.
   [[nodiscard]] DimLink *existingLink(std::uint32_t dense, DimRef dim) noexcept;
 
-  void setOneSide(std::uint32_t dense, DimRef dim, bool negward, CellRef to);
+  void setOneSide(std::uint32_t dense, DimRef dim, DimVector dir, CellRef to);
 
   /// Replace @p dense's content run with @p spans, growing or relocating the
   /// arena as needed.

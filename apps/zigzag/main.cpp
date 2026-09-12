@@ -32,6 +32,7 @@
 #endif
 
 using gleditor::Mod;
+using zigzag::DimVector;
 namespace fs = std::filesystem;
 
 namespace {
@@ -79,26 +80,36 @@ void bindCommands(gleditor::Application &app, const AppStateRef &state,
       });
 
   // Navigation along active dimensions
-  app.commands().bind(
-      SDL_SCANCODE_RIGHT, "step-x-pos", "step focus positive along X dimension",
-      [viz] { viz->navigateFocus(viz->currentView().x_dimension, true); });
-  app.commands().bind(
-      SDL_SCANCODE_LEFT, "step-x-neg", "step focus negative along X dimension",
-      [viz] { viz->navigateFocus(viz->currentView().x_dimension, false); });
-  app.commands().bind(
-      SDL_SCANCODE_UP, "step-y-pos", "step focus positive along Y dimension",
-      [viz] { viz->navigateFocus(viz->currentView().y_dimension, true); });
-  app.commands().bind(
-      SDL_SCANCODE_DOWN, "step-y-neg", "step focus negative along Y dimension",
-      [viz] { viz->navigateFocus(viz->currentView().y_dimension, false); });
-  app.commands().bind(
-      SDL_SCANCODE_PAGEUP, "step-z-pos",
-      "step focus positive along Z dimension",
-      [viz] { viz->navigateFocus(viz->currentView().z_dimension, true); });
-  app.commands().bind(
-      SDL_SCANCODE_PAGEDOWN, "step-z-neg",
-      "step focus negative along Z dimension",
-      [viz] { viz->navigateFocus(viz->currentView().z_dimension, false); });
+  app.commands().bind(SDL_SCANCODE_RIGHT, "step-x-pos",
+                      "step focus positive along X dimension", [viz] {
+                        viz->navigateFocus(viz->currentView().x_dimension,
+                                           DimVector::POS);
+                      });
+  app.commands().bind(SDL_SCANCODE_LEFT, "step-x-neg",
+                      "step focus negative along X dimension", [viz] {
+                        viz->navigateFocus(viz->currentView().x_dimension,
+                                           DimVector::NEG);
+                      });
+  app.commands().bind(SDL_SCANCODE_UP, "step-y-pos",
+                      "step focus positive along Y dimension", [viz] {
+                        viz->navigateFocus(viz->currentView().y_dimension,
+                                           DimVector::POS);
+                      });
+  app.commands().bind(SDL_SCANCODE_DOWN, "step-y-neg",
+                      "step focus negative along Y dimension", [viz] {
+                        viz->navigateFocus(viz->currentView().y_dimension,
+                                           DimVector::NEG);
+                      });
+  app.commands().bind(SDL_SCANCODE_PAGEUP, "step-z-pos",
+                      "step focus positive along Z dimension", [viz] {
+                        viz->navigateFocus(viz->currentView().z_dimension,
+                                           DimVector::POS);
+                      });
+  app.commands().bind(SDL_SCANCODE_PAGEDOWN, "step-z-neg",
+                      "step focus negative along Z dimension", [viz] {
+                        viz->navigateFocus(viz->currentView().z_dimension,
+                                           DimVector::NEG);
+                      });
 
   // Dimension swapping and cycling
   app.commands().bind(SDL_SCANCODE_SPACE, "swap-xy",
@@ -130,38 +141,40 @@ void bindCommands(gleditor::Application &app, const AppStateRef &state,
                       });
 
   // Interactive In-App Cell & Dimension Editing
-  app.commands().bind(SDL_SCANCODE_N, "insert-cell-x-pos",
-                      "insert connected cell positive along active X dimension",
-                      [viz] {
-                        viz->insertConnectedCell(
-                            "New Cell", viz->currentView().x_dimension, true);
-                      });
-  app.commands().bind(SDL_SCANCODE_N, Mod::Shift, "insert-cell-x-neg",
-                      "insert connected cell negative along active X dimension",
-                      [viz] {
-                        viz->insertConnectedCell(
-                            "New Cell", viz->currentView().x_dimension, false);
-                      });
-  app.commands().bind(SDL_SCANCODE_D, "insert-cell-y-pos",
-                      "insert connected cell positive along active Y dimension",
-                      [viz] {
-                        viz->insertConnectedCell(
-                            "New Cell", viz->currentView().y_dimension, true);
-                      });
-  app.commands().bind(SDL_SCANCODE_D, Mod::Shift, "insert-cell-y-neg",
-                      "insert connected cell negative along active Y dimension",
-                      [viz] {
-                        viz->insertConnectedCell(
-                            "New Cell", viz->currentView().y_dimension, false);
-                      });
   app.commands().bind(
-      SDL_SCANCODE_U, "unlink-x-pos",
-      "unlink focused cell along positive X dimension",
-      [viz] { viz->unlinkFocusAlong(viz->currentView().x_dimension, true); });
+      SDL_SCANCODE_N, "insert-cell-x-pos",
+      "insert connected cell positive along active X dimension", [viz] {
+        viz->insertConnectedCell("New Cell", viz->currentView().x_dimension,
+                                 DimVector::POS);
+      });
   app.commands().bind(
-      SDL_SCANCODE_U, Mod::Shift, "unlink-x-neg",
-      "unlink focused cell along negative X dimension",
-      [viz] { viz->unlinkFocusAlong(viz->currentView().x_dimension, false); });
+      SDL_SCANCODE_N, Mod::Shift, "insert-cell-x-neg",
+      "insert connected cell negative along active X dimension", [viz] {
+        viz->insertConnectedCell("New Cell", viz->currentView().x_dimension,
+                                 DimVector::NEG);
+      });
+  app.commands().bind(
+      SDL_SCANCODE_D, "insert-cell-y-pos",
+      "insert connected cell positive along active Y dimension", [viz] {
+        viz->insertConnectedCell("New Cell", viz->currentView().y_dimension,
+                                 DimVector::POS);
+      });
+  app.commands().bind(
+      SDL_SCANCODE_D, Mod::Shift, "insert-cell-y-neg",
+      "insert connected cell negative along active Y dimension", [viz] {
+        viz->insertConnectedCell("New Cell", viz->currentView().y_dimension,
+                                 DimVector::NEG);
+      });
+  app.commands().bind(SDL_SCANCODE_U, "unlink-x-pos",
+                      "unlink focused cell along positive X dimension", [viz] {
+                        viz->unlinkFocusAlong(viz->currentView().x_dimension,
+                                              DimVector::POS);
+                      });
+  app.commands().bind(SDL_SCANCODE_U, Mod::Shift, "unlink-x-neg",
+                      "unlink focused cell along negative X dimension", [viz] {
+                        viz->unlinkFocusAlong(viz->currentView().x_dimension,
+                                              DimVector::NEG);
+                      });
   app.commands().bind(SDL_SCANCODE_DELETE, "delete-focus-cell",
                       "delete currently focused cell",
                       [viz] { viz->deleteFocusCell(); });

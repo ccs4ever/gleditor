@@ -83,16 +83,12 @@ DimLink *Manifold::linkFor(const std::uint32_t dense, const DimRef dim) {
 }
 
 void Manifold::setOneSide(const std::uint32_t dense, const DimRef dim,
-                          const bool negward, const CellRef to) {
+                          const DimVector dir, const CellRef to) {
   DimLink *const link = linkFor(dense, dim);
   if (nullptr == link) {
     return;
   }
-  if (negward) {
-    link->neg = to;
-  } else {
-    link->pos = to;
-  }
+  link->neighbor(dir) = to;
 }
 
 std::span<const xanadu::PrimediaSpan>
@@ -276,41 +272,41 @@ void Manifold::applyStructure(const std::uint32_t opIndex,
     }
 
     const CellRef self  = slots[dense].birthOp;
-    const bool negward  = xanadu::structureIsNegward(node.flags);
+    const DimVector dir = xanadu::structureDirectionOf(node.flags);
     CellRef displacedUs = noCell;
     CellRef displacedIt = noCell;
     // Read both sides out before touching anything: setOneSide() can grow a
     // run, and growing a run can move every DimLink in the arena.
     if (const DimLink *const mine = existingLink(dense, dim); nullptr != mine) {
-      displacedUs = negward ? mine->neg : mine->pos;
+      displacedUs = mine->neighbor(dir);
     }
     const auto target = denseOf(to);
     if (noDense != target) {
       if (const DimLink *const theirs = existingLink(target, dim);
           nullptr != theirs) {
-        displacedIt = negward ? theirs->pos : theirs->neg;
+        displacedIt = theirs->neighbor(-dir);
       }
     }
 
     // A link is one edge shared by two cells, so setting it breaks whatever
     // each end was holding: the invariant this maintains is that
-    // linked(a, d, dir) == b exactly when linked(b, d, !dir) == a. zzcore's
+    // linked(a, d, dir) == b exactly when linked(b, d, -dir) == a. zzcore's
     // loader derives the same backlinks; here it has to be maintained rather
     // than derived, because an op arrives one at a time.
     if (noCell != displacedUs && displacedUs != to) {
       if (const auto other = denseOf(displacedUs); noDense != other) {
-        setOneSide(other, dim, !negward, noCell);
+        setOneSide(other, dim, -dir, noCell);
       }
     }
     if (noCell != displacedIt && displacedIt != self) {
       if (const auto other = denseOf(displacedIt); noDense != other) {
-        setOneSide(other, dim, negward, noCell);
+        setOneSide(other, dim, dir, noCell);
       }
     }
     if (noDense != target) {
-      setOneSide(target, dim, !negward, self);
+      setOneSide(target, dim, -dir, self);
     }
-    setOneSide(dense, dim, negward, to);
+    setOneSide(dense, dim, dir, to);
 
     slots[dense].lastOp = opIndex;
     byRef.emplace(opIndex, dense);
@@ -399,7 +395,7 @@ void Manifold::compact() {
 }
 
 CellRef Manifold::linked(const CellRef from, const DimRef dim,
-                         const bool negward) const noexcept {
+                         const DimVector dir) const noexcept {
   const auto dense = denseOf(from);
   if (noDense == dense) {
     return noCell;
@@ -408,7 +404,7 @@ CellRef Manifold::linked(const CellRef from, const DimRef dim,
   for (std::uint16_t i = 0; i < cell.linkCount; i++) {
     const auto &link = links[static_cast<std::size_t>(cell.linkOffset) + i];
     if (link.dim == dim) {
-      return negward ? link.neg : link.pos;
+      return link.neighbor(dir);
     }
   }
   return noCell;
@@ -434,11 +430,11 @@ std::span<const DimRef> Manifold::dimensions() const {
     // A rank that loops -- which zzstructure allows -- would otherwise be
     // walked forever. Bounded by the cell count rather than by a visited set
     // so that the walk allocates nothing beyond the answer.
-    CellRef cursor = linked(home_, dimsDim_, false);
+    CellRef cursor = linked(home_, dimsDim_, DimVector::POS);
     for (std::size_t step = 0; noCell != cursor && step <= slots.size();
          step++) {
       dimsCache.push_back(cursor);
-      cursor = linked(cursor, dimsDim_, false);
+      cursor = linked(cursor, dimsDim_, DimVector::POS);
       if (cursor == home_) {
         break;
       }
@@ -508,7 +504,7 @@ CellRef Manifold::cloneMaster(const CellRef ref,
   }
   CellRef cursor = ref;
   for (std::size_t step = 0; step <= slots.size(); step++) {
-    const CellRef master = linked(cursor, cloneDim, true);
+    const CellRef master = linked(cursor, cloneDim, DimVector::NEG);
     if (noCell == master || master == cursor) {
       return cursor;
     }

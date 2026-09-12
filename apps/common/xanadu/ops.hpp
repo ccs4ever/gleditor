@@ -21,6 +21,7 @@
 #include <string>
 #include <vector>
 
+#include "common/xanadu/zigzag/dim_vector.hpp"
 #include "microversion.hpp"
 #include "spool.hpp"
 
@@ -152,6 +153,11 @@ const char *valueKindName(ValueKind kind);
 structureVerbOf(const std::uint8_t flags) {
   return static_cast<StructureVerb>(flags & structureVerbMask);
 }
+[[nodiscard]] constexpr zigzag::DimVector
+structureDirectionOf(const std::uint8_t flags) {
+  return (flags & structureNegward) != 0 ? zigzag::DimVector::NEG
+                                         : zigzag::DimVector::POS;
+}
 [[nodiscard]] constexpr bool structureIsNegward(const std::uint8_t flags) {
   return (flags & structureNegward) != 0;
 }
@@ -159,11 +165,18 @@ structureVerbOf(const std::uint8_t flags) {
   return static_cast<ValueKind>((flags & valueKindMask) >> valueKindShift);
 }
 [[nodiscard]] constexpr std::uint8_t
-structureFlags(const StructureVerb verb, const bool negward = false,
+structureFlags(const StructureVerb verb, const zigzag::DimVector dir,
                const ValueKind value = ValueKind::None) {
   return static_cast<std::uint8_t>(
-      static_cast<std::uint8_t>(verb) | (negward ? structureNegward : 0U) |
+      static_cast<std::uint8_t>(verb) |
+      (dir == zigzag::DimVector::NEG ? structureNegward : 0U) |
       (static_cast<std::uint8_t>(value) << valueKindShift));
+}
+[[nodiscard]] constexpr std::uint8_t
+structureFlags(const StructureVerb verb, const bool negward = false,
+               const ValueKind value = ValueKind::None) {
+  return structureFlags(
+      verb, negward ? zigzag::DimVector::NEG : zigzag::DimVector::POS, value);
 }
 /// @}
 

@@ -40,6 +40,8 @@ using xudu::StructureVerb;
 using xudu::ValueKind;
 using zigzag::CellRef;
 using zigzag::DimRef;
+using zigzag::DimVector;
+using zigzag::DirectedDim;
 using zigzag::ephemeralBit;
 using zigzag::Manifold;
 using zigzag::noCell;
@@ -63,6 +65,11 @@ struct Slice {
     const auto minted = store.makeDimension(at, name);
     at                = minted.version;
     return minted.dim;
+  }
+
+  void link(const CellRef from, const DimRef dim, const DimVector dir,
+            const CellRef to) {
+    at = store.setLink(at, from, dim, dir, to);
   }
 
   void link(const CellRef from, const DimRef dim, const bool negward,
@@ -114,7 +121,7 @@ TEST(ManifoldTest, structureOperationsChangeNoText) {
   const auto one  = slice.cell("a");
   const auto dim  = slice.dimension("d.1");
   const auto two  = slice.cell("b");
-  slice.link(one, dim, false, two);
+  slice.link(one, dim, DimVector::POS, two);
 
   // Six more operations, and the concatext is exactly what it was: a slice's
   // structure is the *other* replay product of this spool.
@@ -127,15 +134,15 @@ TEST(ManifoldTest, aLinkIsOneEdgeSharedByTwoCells) {
   const auto dim = slice.dimension("d.1");
   const auto one = slice.cell("one");
   const auto two = slice.cell("two");
-  slice.link(one, dim, false, two);
+  slice.link(one, dim, DimVector::POS, two);
 
   const auto manifold = slice.store.rebuildManifold(slice.at);
-  EXPECT_EQ(manifold.linked(one, dim, false), two);
+  EXPECT_EQ(manifold.linked(one, dim, DimVector::POS), two);
   // The backlink is not a second operation. It is what the one operation
   // means, maintained by the fold the way zzcore's loader derives it.
-  EXPECT_EQ(manifold.linked(two, dim, true), one);
-  EXPECT_EQ(manifold.linked(one, dim, true), noCell);
-  EXPECT_EQ(manifold.linked(two, dim, false), noCell);
+  EXPECT_EQ(manifold.linked(two, dim, DimVector::NEG), one);
+  EXPECT_EQ(manifold.linked(one, dim, DimVector::NEG), noCell);
+  EXPECT_EQ(manifold.linked(two, dim, DimVector::POS), noCell);
 }
 
 TEST(ManifoldTest, relinkingBreaksWhatEitherEndWasHolding) {
@@ -144,15 +151,15 @@ TEST(ManifoldTest, relinkingBreaksWhatEitherEndWasHolding) {
   const auto one   = slice.cell("one");
   const auto two   = slice.cell("two");
   const auto three = slice.cell("three");
-  slice.link(one, dim, false, two);
-  slice.link(one, dim, false, three);
+  slice.link(one, dim, DimVector::POS, two);
+  slice.link(one, dim, DimVector::POS, three);
 
   const auto manifold = slice.store.rebuildManifold(slice.at);
-  EXPECT_EQ(manifold.linked(one, dim, false), three);
-  EXPECT_EQ(manifold.linked(three, dim, true), one);
+  EXPECT_EQ(manifold.linked(one, dim, DimVector::POS), three);
+  EXPECT_EQ(manifold.linked(three, dim, DimVector::NEG), one);
   // two kept a dangling backlink under any implementation that treats the two
   // directions as independent facts.
-  EXPECT_EQ(manifold.linked(two, dim, true), noCell);
+  EXPECT_EQ(manifold.linked(two, dim, DimVector::NEG), noCell);
 }
 
 TEST(ManifoldTest, displacingACellFromARankLeavesNoHalfLink) {
@@ -161,14 +168,14 @@ TEST(ManifoldTest, displacingACellFromARankLeavesNoHalfLink) {
   const auto one   = slice.cell("one");
   const auto two   = slice.cell("two");
   const auto three = slice.cell("three");
-  slice.link(one, dim, false, three);
+  slice.link(one, dim, DimVector::POS, three);
   // three's negward side is taken; giving it to two has to cost one its link.
-  slice.link(two, dim, false, three);
+  slice.link(two, dim, DimVector::POS, three);
 
   const auto manifold = slice.store.rebuildManifold(slice.at);
-  EXPECT_EQ(manifold.linked(three, dim, true), two);
-  EXPECT_EQ(manifold.linked(two, dim, false), three);
-  EXPECT_EQ(manifold.linked(one, dim, false), noCell);
+  EXPECT_EQ(manifold.linked(three, dim, DimVector::NEG), two);
+  EXPECT_EQ(manifold.linked(two, dim, DimVector::POS), three);
+  EXPECT_EQ(manifold.linked(one, dim, DimVector::POS), noCell);
 }
 
 TEST(ManifoldTest, linkingToNoCellClearsBothEnds) {
@@ -176,12 +183,12 @@ TEST(ManifoldTest, linkingToNoCellClearsBothEnds) {
   const auto dim = slice.dimension("d.1");
   const auto one = slice.cell("one");
   const auto two = slice.cell("two");
-  slice.link(one, dim, false, two);
-  slice.link(one, dim, false, noCell);
+  slice.link(one, dim, DimVector::POS, two);
+  slice.link(one, dim, DimVector::POS, noCell);
 
   const auto manifold = slice.store.rebuildManifold(slice.at);
-  EXPECT_EQ(manifold.linked(one, dim, false), noCell);
-  EXPECT_EQ(manifold.linked(two, dim, true), noCell);
+  EXPECT_EQ(manifold.linked(one, dim, DimVector::POS), noCell);
+  EXPECT_EQ(manifold.linked(two, dim, DimVector::NEG), noCell);
 }
 
 TEST(ManifoldTest, aRankWalksBothWays) {
@@ -191,18 +198,18 @@ TEST(ManifoldTest, aRankWalksBothWays) {
   for (int i = 0; i < 12; i++) {
     rank.push_back(slice.cell("cell " + std::to_string(i)));
     if (rank.size() > 1) {
-      slice.link(rank[rank.size() - 2], dim, false, rank.back());
+      slice.link(rank[rank.size() - 2], dim, DimVector::POS, rank.back());
     }
   }
 
   const auto manifold = slice.store.rebuildManifold(slice.at);
   auto cursor         = rank.front();
   for (std::size_t i = 1; i < rank.size(); i++) {
-    cursor = manifold.linked(cursor, dim, false);
+    cursor = manifold.linked(cursor, dim, DimVector::POS);
     EXPECT_EQ(cursor, rank[i]) << "posward, step " << i;
   }
   for (std::size_t i = rank.size() - 1; i > 0; i--) {
-    cursor = manifold.linked(cursor, dim, true);
+    cursor = manifold.linked(cursor, dim, DimVector::NEG);
     EXPECT_EQ(cursor, rank[i - 1]) << "negward, step " << i;
   }
   EXPECT_EQ(manifold.textOf(rank[5], slice.store), "cell 5");
@@ -215,8 +222,8 @@ TEST(ManifoldTest, aCellsRunIsExactlyTheDimensionsItLinksOn) {
   const auto third  = slice.dimension("d.3");
   const auto middle = slice.cell("middle");
   const auto other  = slice.cell("other");
-  slice.link(middle, first, false, other);
-  slice.link(middle, third, true, other);
+  slice.link(middle, first, DimVector::POS, other);
+  slice.link(middle, third, DimVector::NEG, other);
 
   const auto manifold = slice.store.rebuildManifold(slice.at);
   std::vector<DimRef> on;
@@ -250,8 +257,8 @@ TEST(ManifoldTest, cloneMasterFollowsTheCloneDimensionNegward) {
   const auto master     = slice.cell("quoted");
   const auto copy       = slice.cell("quoted");
   const auto copyOfCopy = slice.cell("quoted");
-  slice.link(master, clone, false, copy);
-  slice.link(copy, clone, false, copyOfCopy);
+  slice.link(master, clone, DimVector::POS, copy);
+  slice.link(copy, clone, DimVector::POS, copyOfCopy);
 
   const auto manifold = slice.store.rebuildManifold(slice.at);
   EXPECT_EQ(manifold.cloneMaster(copyOfCopy, clone), master);
@@ -270,9 +277,9 @@ TEST(ManifoldTest, aCellsMicroHistoryIsAChainOfOperations) {
   const auto dim   = slice.dimension("d.1");
   const auto cell  = slice.cell("edited");
   const auto other = slice.cell("elsewhere");
-  slice.link(cell, dim, false, other);
+  slice.link(cell, dim, DimVector::POS, other);
   const auto firstLink = slice.store.cellRefOf(slice.at);
-  slice.link(cell, dim, false, noCell);
+  slice.link(cell, dim, DimVector::POS, noCell);
   const auto secondLink = slice.store.cellRefOf(slice.at);
 
   const auto manifold    = slice.store.rebuildManifold(slice.at);
@@ -326,7 +333,7 @@ TEST(ManifoldTest, incrementalFoldingEqualsAColdFold) {
     dims.push_back(slice.store.cellRefOf(slice.at));
     ASSERT_TRUE(manifold.advance(slice.store, slice.at));
     slice.at = slice.store.setLink(slice.at, slice.store.homeCell(),
-                                   slice.store.dimsDimension(), false,
+                                   slice.store.dimsDimension(), DimVector::POS,
                                    dims.back(), &manifold);
     ASSERT_TRUE(manifold.advance(slice.store, slice.at));
   }
@@ -342,10 +349,10 @@ TEST(ManifoldTest, incrementalFoldingEqualsAColdFold) {
       // the arena and have to be relocated, which is the part of the CSR
       // arrangement a cold fold would never exercise.
       slice.at = slice.store.setLink(slice.at, rank[rank.size() - 2], dim,
-                                     false, rank.back(), &manifold);
+                                     DimVector::POS, rank.back(), &manifold);
       ASSERT_TRUE(manifold.advance(slice.store, slice.at));
-      slice.at = slice.store.setLink(slice.at, rank.back(), meta, true,
-                                     rank.front(), &manifold);
+      slice.at = slice.store.setLink(slice.at, rank.back(), meta,
+                                     DimVector::NEG, rank.front(), &manifold);
       ASSERT_TRUE(manifold.advance(slice.store, slice.at));
     }
   }
@@ -368,7 +375,7 @@ TEST(ManifoldTest, verifyAgainstFullRebuildNoticesAMissedOperation) {
   auto manifold  = slice.store.rebuildManifold(slice.at);
 
   const auto two = slice.cell("two");
-  slice.link(one, dim, false, two);
+  slice.link(one, dim, DimVector::POS, two);
   // The drift R9 exists to catch: the caller folded the last operation and
   // never folded the one before it, so the view is a state the spool does not
   // hold. It is the hook that says so, not a crash.
@@ -382,12 +389,12 @@ TEST(ManifoldTest, anEphemeralReferenceIsRefusedAtTheApiAndInTheFold) {
   const auto cell = slice.cell("real");
 
   // R8's boundary at the API.
-  EXPECT_THROW(
-      slice.store.setLink(slice.at, cell, dim, false, ephemeralBit | 3U),
-      std::invalid_argument);
-  EXPECT_THROW(
-      slice.store.setLink(slice.at, cell, ephemeralBit | dim, false, noCell),
-      std::invalid_argument);
+  EXPECT_THROW(slice.store.setLink(slice.at, cell, dim, DimVector::POS,
+                                   ephemeralBit | 3U),
+               std::invalid_argument);
+  EXPECT_THROW(slice.store.setLink(slice.at, cell, ephemeralBit | dim,
+                                   DimVector::POS, noCell),
+               std::invalid_argument);
 
   // And in the fold, which is what makes it an invariant of the encoding
   // rather than a rule the caller is trusted to follow. Recorded the long way
@@ -413,13 +420,14 @@ TEST(ManifoldTest, aReferenceThatIsNotACellIsRefusedAtTheApi) {
   slice.at          = slice.store.insert(slice.at, 0, "typed");
   const auto textOp = slice.store.cellRefOf(slice.at);
 
-  EXPECT_THROW(slice.store.setLink(slice.at, textOp, dim, false, cell),
+  EXPECT_THROW(slice.store.setLink(slice.at, textOp, dim, DimVector::POS, cell),
                std::invalid_argument);
-  EXPECT_THROW(slice.store.setLink(slice.at, cell, textOp, false, cell),
+  EXPECT_THROW(
+      slice.store.setLink(slice.at, cell, textOp, DimVector::POS, cell),
+      std::invalid_argument);
+  EXPECT_THROW(slice.store.setLink(slice.at, cell, dim, DimVector::POS, textOp),
                std::invalid_argument);
-  EXPECT_THROW(slice.store.setLink(slice.at, cell, dim, false, textOp),
-               std::invalid_argument);
-  EXPECT_THROW(slice.store.setLink(slice.at, cell, dim, false, 9999),
+  EXPECT_THROW(slice.store.setLink(slice.at, cell, dim, DimVector::POS, 9999),
                std::invalid_argument);
   EXPECT_THROW(slice.store.setValue(slice.at, textOp, PrimediaSpan{},
                                     ValueKind::None, 0),
@@ -446,19 +454,21 @@ TEST(ManifoldTest, aLinkNamingACellTheFoldDoesNotHoldIsRefused) {
 
   const auto manifold = slice.store.rebuildManifold(slice.at);
   EXPECT_EQ(manifold.refusedOps(), 1U);
-  EXPECT_EQ(manifold.linked(cell, dim, false), noCell);
+  EXPECT_EQ(manifold.linked(cell, dim, DimVector::POS), noCell);
 }
 
 TEST(ManifoldTest, aSetLinkWithNoChainHasNoSubjectAndIsRefused) {
   Slice slice;
   const auto dim = slice.dimension("d.1");
+  const auto one = slice.cell("one");
+  const auto two = slice.cell("two");
 
   Op op;
   op.kind  = OpKind::Structure;
   op.flags = xudu::structureFlags(StructureVerb::SetLink);
+  op.to    = two;
   op.link  = dim;
-  op.to    = slice.store.homeCell();
-  // No source, so nothing says whose link this is.
+  // op.source is empty, so it names no subject
   slice.at = slice.store.apply(slice.at, op);
 
   const auto manifold = slice.store.rebuildManifold(slice.at);
@@ -473,15 +483,18 @@ TEST(ManifoldTest, twoFuturesOfOneStateAreTwoManifolds) {
   const auto three = slice.cell("three");
   const auto fork  = slice.at;
 
-  const auto left  = slice.store.setLink(fork, one, dim, false, two);
-  const auto right = slice.store.setLink(fork, one, dim, false, three);
+  const auto left  = slice.store.setLink(fork, one, dim, DimVector::POS, two);
+  const auto right = slice.store.setLink(fork, one, dim, DimVector::POS, three);
   ASSERT_NE(left, right);
 
-  EXPECT_EQ(slice.store.rebuildManifold(left).linked(one, dim, false), two);
-  EXPECT_EQ(slice.store.rebuildManifold(right).linked(one, dim, false), three);
+  EXPECT_EQ(slice.store.rebuildManifold(left).linked(one, dim, DimVector::POS),
+            two);
+  EXPECT_EQ(slice.store.rebuildManifold(right).linked(one, dim, DimVector::POS),
+            three);
   // Neither branch's link exists at the state they forked from, which is what
   // makes structural editing scrubbable in hypertime.
-  EXPECT_EQ(slice.store.rebuildManifold(fork).linked(one, dim, false), noCell);
+  EXPECT_EQ(slice.store.rebuildManifold(fork).linked(one, dim, DimVector::POS),
+            noCell);
 }
 
 TEST(ManifoldTest, aChainIsFollowedPerBranchRatherThanAcrossBranches) {
@@ -492,21 +505,22 @@ TEST(ManifoldTest, aChainIsFollowedPerBranchRatherThanAcrossBranches) {
   const auto three = slice.cell("three");
   const auto fork  = slice.at;
 
-  const auto left = slice.store.setLink(fork, one, dim, false, two);
+  const auto left = slice.store.setLink(fork, one, dim, DimVector::POS, two);
   // The right branch's operation has to chain to one's *own* history as the
   // fork saw it, not to the operation the left branch appended afterwards.
-  const auto right  = slice.store.setLink(fork, one, dim, true, three);
-  const auto onward = slice.store.setLink(right, one, dim, false, three);
+  const auto right = slice.store.setLink(fork, one, dim, DimVector::NEG, three);
+  const auto onward =
+      slice.store.setLink(right, one, dim, DimVector::POS, three);
 
   const auto manifold = slice.store.rebuildManifold(onward);
-  EXPECT_EQ(manifold.linked(one, dim, false), three);
-  EXPECT_EQ(manifold.linked(one, dim, true), three);
+  EXPECT_EQ(manifold.linked(one, dim, DimVector::POS), three);
+  EXPECT_EQ(manifold.linked(one, dim, DimVector::NEG), three);
   EXPECT_EQ(manifold.refusedOps(), 0U);
   EXPECT_TRUE(manifold.verifyAgainstFullRebuild(slice.store));
 
   const auto leftManifold = slice.store.rebuildManifold(left);
-  EXPECT_EQ(leftManifold.linked(one, dim, false), two);
-  EXPECT_EQ(leftManifold.linked(one, dim, true), noCell);
+  EXPECT_EQ(leftManifold.linked(one, dim, DimVector::POS), two);
+  EXPECT_EQ(leftManifold.linked(one, dim, DimVector::NEG), noCell);
   EXPECT_EQ(leftManifold.refusedOps(), 0U);
 }
 
@@ -535,10 +549,11 @@ struct ArrayCell {
   };
   std::array<Slot, 8> dims{};
 
-  [[nodiscard]] CellRef linked(const DimRef dim, const bool negward) const {
+  [[nodiscard]] CellRef linked(const DimRef dim,
+                               const DimVector dir = DimVector::POS) const {
     for (const auto &slot : dims) {
       if (slot.dim == dim) {
-        return negward ? slot.neg : slot.pos;
+        return dir == DimVector::POS ? slot.pos : slot.neg;
       }
     }
     return noCell;
@@ -607,25 +622,25 @@ TEST(ManifoldTest, aHopCostsWhatR12SaysItCosts) {
   }
 
   for (int i = 0; i + 1 < cellCount; i++) {
-    slice.at = slice.store.setLink(slice.at, cells[i], dims[0], false,
+    slice.at = slice.store.setLink(slice.at, cells[i], dims[0], DimVector::POS,
                                    cells[i + 1], &manifold);
     ASSERT_TRUE(manifold.advance(slice.store, slice.at));
-    slice.at = slice.store.setLink(slice.at, shuffled[i], dims[1], false,
-                                   shuffled[i + 1], &manifold);
+    slice.at = slice.store.setLink(slice.at, shuffled[i], dims[1],
+                                   DimVector::POS, shuffled[i + 1], &manifold);
     ASSERT_TRUE(manifold.advance(slice.store, slice.at));
     for (int d = 2; d < dimCount; d++) {
       slice.at =
-          slice.store.setLink(slice.at, cells[i], dims[d], false,
+          slice.store.setLink(slice.at, cells[i], dims[d], DimVector::POS,
                               cells[(i + d * 977) % cellCount], &manifold);
       ASSERT_TRUE(manifold.advance(slice.store, slice.at));
     }
   }
   // Close both ranks into cycles so a chase never runs off the end.
-  slice.at = slice.store.setLink(slice.at, cells.back(), dims[0], false,
-                                 cells.front(), &manifold);
+  slice.at = slice.store.setLink(slice.at, cells.back(), dims[0],
+                                 DimVector::POS, cells.front(), &manifold);
   ASSERT_TRUE(manifold.advance(slice.store, slice.at));
-  slice.at = slice.store.setLink(slice.at, shuffled.back(), dims[1], false,
-                                 shuffled.front(), &manifold);
+  slice.at = slice.store.setLink(slice.at, shuffled.back(), dims[1],
+                                 DimVector::POS, shuffled.front(), &manifold);
   ASSERT_TRUE(manifold.advance(slice.store, slice.at));
   manifold.compact();
 
@@ -652,8 +667,9 @@ TEST(ManifoldTest, aHopCostsWhatR12SaysItCosts) {
   const auto arrayHop = [&](const DimRef dim) {
     return [&, dim](const CellRef from) {
       const auto found = denseOf.find(from);
-      return found == denseOf.end() ? noCell
-                                    : array[found->second].linked(dim, false);
+      return found == denseOf.end()
+                 ? noCell
+                 : array[found->second].linked(dim, DimVector::POS);
     };
   };
 
@@ -661,17 +677,18 @@ TEST(ManifoldTest, aHopCostsWhatR12SaysItCosts) {
   // not a data point.
   for (const auto cell : {cells.front(), cells[cellCount / 2], cells.back()}) {
     for (int d = 0; d < dimCount; d++) {
-      EXPECT_EQ(manifold.linked(cell, dims[d], false), arrayHop(dims[d])(cell))
+      EXPECT_EQ(manifold.linked(cell, dims[d], DimVector::POS),
+                arrayHop(dims[d])(cell))
           << "cell " << cell << " dim " << d;
     }
   }
 
   const auto runSeq = nsPerHop(cells.front(), cellCount, [&](const CellRef c) {
-    return manifold.linked(c, dims[0], false);
+    return manifold.linked(c, dims[0], DimVector::POS);
   });
   const auto runRnd =
       nsPerHop(shuffled.front(), cellCount, [&](const CellRef c) {
-        return manifold.linked(c, dims[1], false);
+        return manifold.linked(c, dims[1], DimVector::POS);
       });
   // The array baseline pays a hash lookup the manifold does not, because its
   // cells are indexed densely and a CellRef is an op index -- so its numbers
@@ -723,7 +740,7 @@ TEST(ManifoldTest, aSliceSurvivesSavingAndReopening) {
     head              = store.cellRefOf(at);
     at                = store.makeCell(at, "second");
     tail              = store.cellRefOf(at);
-    at                = store.setLink(at, head, dim, false, tail);
+    at                = store.setLink(at, head, dim, DimVector::POS, tail);
     store.setCurrentVersions({at});
     store.save(dir.string());
   }
@@ -735,8 +752,8 @@ TEST(ManifoldTest, aSliceSurvivesSavingAndReopening) {
 
   const auto manifold =
       reopened.rebuildManifold(reopened.primaryCurrentVersion());
-  EXPECT_EQ(manifold.linked(head, dim, false), tail);
-  EXPECT_EQ(manifold.linked(tail, dim, true), head);
+  EXPECT_EQ(manifold.linked(head, dim, DimVector::POS), tail);
+  EXPECT_EQ(manifold.linked(tail, dim, DimVector::NEG), head);
   EXPECT_EQ(manifold.textOf(head, reopened), "first");
   EXPECT_EQ(manifold.textOf(tail, reopened), "second");
   EXPECT_THAT(manifold.dimensions(),

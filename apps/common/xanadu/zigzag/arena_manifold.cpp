@@ -94,7 +94,7 @@ DimLink *ArenaManifold::linkFor(const std::uint32_t dense, const DimRef dim) {
 }
 
 void ArenaManifold::setOneSide(const std::uint32_t dense, const DimRef dim,
-                               const bool negward, const CellRef to) {
+                               const DimVector dir, const CellRef to) {
   // The one funnel every link write goes through, so the one place the trail
   // has to be consulted.
   trail(dense);
@@ -102,24 +102,20 @@ void ArenaManifold::setOneSide(const std::uint32_t dense, const DimRef dim,
   if (nullptr == edge) {
     return;
   }
-  if (negward) {
-    edge->neg = to;
-  } else {
-    edge->pos = to;
-  }
+  edge->neighbor(dir) = to;
 }
 
 CellRef ArenaManifold::linked(const CellRef from, const DimRef dim,
-                              const bool negward) const noexcept {
+                              const DimVector dir) const noexcept {
   const auto dense = denseOf(from);
   if (noDense == dense) {
-    return nullptr == base_ ? noCell : base_->linked(from, dim, negward);
+    return nullptr == base_ ? noCell : base_->linked(from, dim, dir);
   }
   const auto &cell = slots_[dense];
   for (std::uint16_t i = 0; i < cell.linkCount; i++) {
     const auto &edge = links_[static_cast<std::size_t>(cell.linkOffset) + i];
     if (edge.dim == dim) {
-      return negward ? edge.neg : edge.pos;
+      return edge.neighbor(dir);
     }
   }
   return noCell;
@@ -158,7 +154,7 @@ CellRef ArenaManifold::cloneMaster(const CellRef ref,
   const auto bound =
       slots_.size() + (nullptr == base_ ? 0 : base_->cellCount());
   for (std::size_t steps = 0; steps <= bound; steps++) {
-    const CellRef next = linked(walk, cloneDim, true);
+    const CellRef next = linked(walk, cloneDim, DimVector::NEG);
     if (noCell == next) {
       return walk;
     }
@@ -345,7 +341,7 @@ bool ArenaManifold::setValueBits(const CellRef cell,
 }
 
 bool ArenaManifold::link(const CellRef from, const DimRef dim,
-                         const bool negward, const CellRef to) {
+                         const DimVector dir, const CellRef to) {
   // The dimension and the far end are only *read* here, so they are resolved
   // rather than shadowed -- a link to a base cell shadows that cell because
   // its reciprocal end changes, which is what the second shadow() below is.
@@ -360,34 +356,34 @@ bool ArenaManifold::link(const CellRef from, const DimRef dim,
   CellRef displacedUs = noCell;
   CellRef displacedIt = noCell;
   if (const DimLink *const mine = existingLink(dense, dim); nullptr != mine) {
-    displacedUs = negward ? mine->neg : mine->pos;
+    displacedUs = mine->neighbor(dir);
   }
   if (noDense != target) {
     if (const DimLink *const theirs = existingLink(target, dim);
         nullptr != theirs) {
-      displacedIt = negward ? theirs->pos : theirs->neg;
+      displacedIt = theirs->neighbor(-dir);
     }
   }
 
   // A link is one edge two cells share, so setting it breaks whatever each end
   // held: the invariant is linked(a, d, dir) == b exactly when
-  // linked(b, d, !dir) == a. Maintained rather than derived, same as Manifold.
+  // linked(b, d, -dir) == a. Maintained rather than derived, same as Manifold.
   // shadow(), not denseOf(): a displaced occupant may still be living in the
   // base, and clearing its end of the edge is a write like any other.
   if (noCell != displacedUs && displacedUs != to) {
     if (const auto other = shadow(displacedUs); noDense != other) {
-      setOneSide(other, dim, !negward, noCell);
+      setOneSide(other, dim, -dir, noCell);
     }
   }
   if (noCell != displacedIt && displacedIt != from) {
     if (const auto other = shadow(displacedIt); noDense != other) {
-      setOneSide(other, dim, negward, noCell);
+      setOneSide(other, dim, dir, noCell);
     }
   }
   if (noDense != target) {
-    setOneSide(target, dim, !negward, from);
+    setOneSide(target, dim, -dir, from);
   }
-  setOneSide(dense, dim, negward, to);
+  setOneSide(dense, dim, dir, to);
   return true;
 }
 

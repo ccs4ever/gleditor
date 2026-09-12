@@ -39,10 +39,10 @@ collectExplicitLinks(const std::unordered_map<CellID, Cell> &cells) {
   for (const auto &[id, cell] : cells) {
     for (const auto &[dim, pair] : cell.dimensions) {
       if (pair.pos != 0) {
-        links.push_back({id, dim, true, pair.pos});
+        links.push_back({id, dim, DimVector::POS, pair.pos});
       }
       if (pair.neg != 0) {
-        links.push_back({id, dim, false, pair.neg});
+        links.push_back({id, dim, DimVector::NEG, pair.neg});
       }
     }
   }
@@ -53,7 +53,7 @@ collectExplicitLinks(const std::unordered_map<CellID, Cell> &cells) {
     if (a.dimension != b.dimension) {
       return a.dimension < b.dimension;
     }
-    return a.isPos > b.isPos;
+    return a.dir > b.dir;
   });
   return links;
 }

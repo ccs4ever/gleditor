@@ -450,11 +450,10 @@ MicroversionId Store::setCellText(const MicroversionId &parent,
   return setValue(parent, cell, span, ValueKind::None, 0, known);
 }
 
-MicroversionId Store::setLink(const MicroversionId &parent,
-                              const zigzag::CellRef from,
-                              const zigzag::DimRef dim, const bool negward,
-                              const zigzag::CellRef to,
-                              const zigzag::Manifold *const known) {
+MicroversionId
+Store::setLink(const MicroversionId &parent, const zigzag::CellRef from,
+               const zigzag::DimRef dim, const zigzag::DimVector dir,
+               const zigzag::CellRef to, const zigzag::Manifold *const known) {
   if (zigzag::noCell == from) {
     throw std::invalid_argument("a link has to be from some cell");
   }
@@ -472,7 +471,7 @@ MicroversionId Store::setLink(const MicroversionId &parent,
 
   Op op;
   op.kind  = OpKind::Structure;
-  op.flags = structureFlags(StructureVerb::SetLink, negward);
+  op.flags = structureFlags(StructureVerb::SetLink, dir);
   op.to    = to;
   op.link  = dim;
   // The chain, which is also how the fold knows whose link this is: there is
@@ -519,7 +518,8 @@ MicroversionId Store::sliceGenesis(const MicroversionId &parent) {
   // d.dims is a dimension like any other, so it belongs on its own rank --
   // which is what makes dimensions() report it alongside everything minted
   // afterwards instead of it being the one dimension that is invisible.
-  return setLink(withDims, homeCell_, dimsDimension_, false, dimsDimension_);
+  return setLink(withDims, homeCell_, dimsDimension_, zigzag::DimVector::POS,
+                 dimsDimension_);
 }
 
 Store::MintedDimension Store::makeDimension(const MicroversionId &parent,
@@ -541,14 +541,16 @@ Store::MintedDimension Store::makeDimension(const MicroversionId &parent,
   // The rank's tail, so dimensions come back in the order they were minted.
   auto tail = homeCell_;
   for (auto step = known->cellCount() + 1; step > 0; step--) {
-    const auto next = known->linked(tail, dimsDimension_, false);
+    const auto next =
+        known->linked(tail, dimsDimension_, zigzag::DimVector::POS);
     if (zigzag::noCell == next || next == ref || next == homeCell_) {
       break;
     }
     tail = next;
   }
   return MintedDimension{
-      setLink(minted, tail, dimsDimension_, false, ref, known), ref};
+      setLink(minted, tail, dimsDimension_, zigzag::DimVector::POS, ref, known),
+      ref};
 }
 
 bool Store::advance(Version &document, const MicroversionId &known,

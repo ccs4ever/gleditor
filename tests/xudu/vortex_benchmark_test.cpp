@@ -18,6 +18,7 @@ namespace {
 using zigzag::ArenaManifold;
 using zigzag::CellRef;
 using zigzag::DimRef;
+using zigzag::DimVector;
 using namespace zigzag::vortex;
 
 TEST(VortexBenchmarkTest, LinkPrimitiveThroughput) {
@@ -31,8 +32,9 @@ TEST(VortexBenchmarkTest, LinkPrimitiveThroughput) {
   const auto t0 = std::chrono::steady_clock::now();
   CellRef cur   = root;
   for (std::size_t i = 0; i < OpsCount; ++i) {
-    auto next = core.link(cur, testDim, false, static_cast<CellRef>(-1));
-    cur       = *next;
+    auto next =
+        core.link(cur, testDim, DimVector::POS, static_cast<CellRef>(-1));
+    cur = *next;
   }
   const auto t1 = std::chrono::steady_clock::now();
   const auto durationUs =
