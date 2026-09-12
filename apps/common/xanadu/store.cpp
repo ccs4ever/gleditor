@@ -15,6 +15,7 @@
 #include <vector>
 
 #include "binary_ops.hpp"
+#include "common/xanadu/osmic_walker.hpp"
 #include "store_tables.hpp"
 #include "windows_quoting.hpp"
 
@@ -235,11 +236,11 @@ Version Store::rebuildFromIndex(const std::uint32_t index) const {
     return chronofilade_->rebuildVersion(index, *this);
   }
   Version built;
-  for (const auto idx : opsSpool.ancestralPath(index)) {
-    if (const auto *const node = opsSpool.get(idx); nullptr != node) {
-      replay(*node, built);
-    }
-  }
+  OsmicWalker::walkAncestral(
+      opsSpool, index,
+      [this, &built](std::uint32_t, const CompactOpNode &node) {
+        replay(node, built);
+      });
   return built;
 }
 
@@ -263,14 +264,10 @@ Version Store::rebuild(const MicroversionId &version) const {
 zigzag::Manifold
 Store::rebuildManifoldFromIndex(const std::uint32_t index) const {
   zigzag::Manifold folded;
-  for (const auto idx : opsSpool.ancestralPath(index)) {
-    if (const auto *const node = opsSpool.get(idx); nullptr != node) {
-      // Every node rather than the Structure ones: applyStructure() ignores
-      // the other kinds, and filtering here would be a second place that has
-      // to know which kinds fold.
-      folded.applyStructure(idx, *node);
-    }
-  }
+  OsmicWalker::walkAncestral(
+      opsSpool, index, [&folded](std::uint32_t idx, const CompactOpNode &node) {
+        folded.applyStructure(idx, node);
+      });
   // A cold fold ends tight, which is what makes the per-cell cost R12 quotes
   // the cost of a manifold that was just loaded rather than a best case.
   folded.compact();
@@ -302,16 +299,14 @@ std::uint32_t Store::lastOpOnCell(const MicroversionId &parent,
     }
   }
   auto head = cell;
-  for (const auto idx : opsSpool.ancestralPath(opsSpool.indexOf(parent))) {
-    if (idx <= cell) {
-      continue;
-    }
-    const auto *const node = opsSpool.get(idx);
-    if (nullptr != node && OpKind::Structure == node->kind &&
-        node->sourceOpIndex == head) {
-      head = idx;
-    }
-  }
+  OsmicWalker::walkAncestral(
+      opsSpool, opsSpool.indexOf(parent),
+      [&head, cell](std::uint32_t idx, const CompactOpNode &node) {
+        if (idx > cell && OpKind::Structure == node.kind &&
+            node.sourceOpIndex == head) {
+          head = idx;
+        }
+      });
   return head;
 }
 
@@ -588,11 +583,10 @@ bool Store::advanceTo(Version &document, const MicroversionId &known,
 
 bool Store::verifyAgainstFullRebuild(const std::uint32_t index) const {
   Version raw;
-  for (const auto idx : opsSpool.ancestralPath(index)) {
-    if (const auto *const node = opsSpool.get(idx); nullptr != node) {
-      replay(*node, raw);
-    }
-  }
+  OsmicWalker::walkAncestral(
+      opsSpool, index, [this, &raw](std::uint32_t, const CompactOpNode &node) {
+        replay(node, raw);
+      });
   if (chronofilade_) {
     return chronofilade_->verifyAgainstFullRebuild(index, *this, raw);
   }

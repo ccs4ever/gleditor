@@ -9,6 +9,7 @@
 #include <utility>
 #include <vector>
 
+#include "common/xanadu/osmic_walker.hpp"
 #include "common/xanadu/store.hpp"
 
 namespace xanadu::enfilade {
@@ -118,20 +119,11 @@ void Chronofilade::recordOp(const std::uint32_t opIndex,
       }
     }
 
-    std::vector<std::uint32_t> path;
-    path.reserve(CheckpointInterval);
-    auto curr = opIndex;
-    while (curr != prevCP && curr > 0) {
-      path.push_back(curr);
-      curr = (curr < up_.size()) ? up_[curr][0] : 0;
-    }
-    std::reverse(path.begin(), path.end());
-
-    for (const auto idx : path) {
-      if (const auto *const n = store.getCompactOp(idx); nullptr != n) {
-        store.replay(*n, base);
-      }
-    }
+    OsmicWalker::walkPath(
+        store.segmentedOps(), prevCP, opIndex,
+        [&store, &base](std::uint32_t, const CompactOpNode &n) {
+          store.replay(n, base);
+        });
 
     checkpoints_[opIndex] = base;
   }
@@ -175,20 +167,10 @@ Version Chronofilade::rebuildVersion(const std::uint32_t opIndex,
     return doc;
   }
 
-  std::vector<std::uint32_t> path;
-  path.reserve(distToCP);
-  auto curr = opIndex;
-  while (curr != cp && curr > 0) {
-    path.push_back(curr);
-    curr = (curr < up_.size()) ? up_[curr][0] : 0;
-  }
-  std::reverse(path.begin(), path.end());
-
-  for (const auto idx : path) {
-    if (const auto *const n = store.getCompactOp(idx); nullptr != n) {
-      store.replay(*n, doc);
-    }
-  }
+  OsmicWalker::walkPath(store.segmentedOps(), cp, opIndex,
+                        [&store, &doc](std::uint32_t, const CompactOpNode &n) {
+                          store.replay(n, doc);
+                        });
 
   return doc;
 }
@@ -201,19 +183,11 @@ bool Chronofilade::advance(Version &document, const std::uint32_t fromIndex,
   }
   const auto lca = lowestCommonAncestor(fromIndex, toIndex);
   if (lca == fromIndex) {
-    std::vector<std::uint32_t> path;
-    auto curr = toIndex;
-    while (curr != fromIndex && curr > 0) {
-      path.push_back(curr);
-      curr = (curr < up_.size()) ? up_[curr][0] : 0;
-    }
-    std::reverse(path.begin(), path.end());
-    for (const auto idx : path) {
-      if (const auto *const n = store.getCompactOp(idx); nullptr != n) {
-        store.replay(*n, document);
-      }
-    }
-    return true;
+    return OsmicWalker::walkPath(
+        store.segmentedOps(), fromIndex, toIndex,
+        [&store, &document](std::uint32_t, const CompactOpNode &n) {
+          store.replay(n, document);
+        });
   }
 
   document = rebuildVersion(toIndex, store);
@@ -227,33 +201,27 @@ EdlTransform Chronofilade::composePath(const std::uint32_t fromAncestor,
     return EdlTransform::identity(0);
   }
 
-  std::vector<std::uint32_t> path;
-  auto curr = toDescendant;
-  while (curr != fromAncestor && curr > 0) {
-    path.push_back(curr);
-    curr = (curr < up_.size()) ? up_[curr][0] : 0;
-  }
-  if (curr != fromAncestor) {
-    return EdlTransform::identity(0);
-  }
-  std::reverse(path.begin(), path.end());
-
   const auto startDoc = rebuildVersion(fromAncestor, store);
   auto transform      = EdlTransform::identity(startDoc.length());
 
-  for (const auto idx : path) {
-    if (const auto *const n = store.getCompactOp(idx); nullptr != n) {
-      std::vector<PrimediaSpan> resolved;
-      if (n->kind == OpKind::Transclude && n->span().empty() &&
-          n->sourceOpIndex > 0) {
-        const auto srcDoc = rebuildVersion(n->sourceOpIndex, store);
-        resolved          = srcDoc.spansFor(n->sourceAt, n->sourceLength);
-      }
-      const auto stepTransform =
-          EdlTransform::fromOp(*n, transform.outputLength(), resolved);
-      transform = EdlTransform::compose(transform, stepTransform);
-    }
+  const bool walked = OsmicWalker::walkPath(
+      store.segmentedOps(), fromAncestor, toDescendant,
+      [&](std::uint32_t, const CompactOpNode &n) {
+        std::vector<PrimediaSpan> resolved;
+        if (n.kind == OpKind::Transclude && n.span().empty() &&
+            n.sourceOpIndex > 0) {
+          const auto srcDoc = rebuildVersion(n.sourceOpIndex, store);
+          resolved          = srcDoc.spansFor(n.sourceAt, n.sourceLength);
+        }
+        const auto stepTransform =
+            EdlTransform::fromOp(n, transform.outputLength(), resolved);
+        transform = EdlTransform::compose(transform, stepTransform);
+      });
+
+  if (!walked) {
+    return EdlTransform::identity(0);
   }
+
   return transform;
 }
 
