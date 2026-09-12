@@ -5,6 +5,7 @@
 #include "common/xanadu/vortex/vortex_vm.hpp"
 
 #include <cmath>
+#include <iostream>
 #include <string>
 #include <unordered_set>
 
@@ -45,10 +46,6 @@ CellRef resolveCell(const std::vector<CellRef> &inCells,
   if (idx < inCells.size()) {
     CellRef c = inCells[idx];
     if (arena.contains(c)) {
-      auto intVal = arena.asInt64(c);
-      if (intVal && arena.contains(static_cast<CellRef>(*intVal))) {
-        return static_cast<CellRef>(*intVal);
-      }
       return c;
     }
   }
@@ -255,9 +252,12 @@ void VortexVM::runPipeline(CellRef paramCell) {
         core_.value(paramCell, 0, -1, outVals[0]);
       }
     } else {
-      for (std::size_t i = 0; i < std::min(outCells.size(), outVals.size());
-           ++i) {
-        core_.value(outCells[i], 0, -1, outVals[i]);
+      if (kind != OpcodeKind::New && kind != OpcodeKind::Clone &&
+          kind != OpcodeKind::Link && kind != OpcodeKind::Break) {
+        for (std::size_t i = 0; i < std::min(outCells.size(), outVals.size());
+             ++i) {
+          core_.value(outCells[i], 0, -1, outVals[i]);
+        }
       }
     }
 
@@ -471,66 +471,123 @@ ExecutionResult VortexVM::executeOpcodeBody(
     break;
   }
   case OpcodeKind::Link: {
-    if (inputs.size() >= 3) {
-      CellRef c = toInt(inputs[0]);
-      DimRef d  = toInt(inputs[1]);
-      bool neg  = toInt(inputs[2]) < 0;
-      std::optional<CellRef> tgt =
-          inputs.size() >= 4 ? std::optional<CellRef>(toInt(inputs[3]))
-                             : std::nullopt;
-      auto res = core_.link(c, d, neg, tgt);
-      outputs.push_back(res ? *res : noCell);
+    std::vector<CellRef> inCells = core_.inputsOf(opcode);
+    if (inCells.size() >= 3 || inputs.size() >= 3) {
+      CellRef c = resolveCell(inCells, inputs, 0, core_.arena());
+      DimRef d  = inputs.size() >= 2 ? toInt(inputs[1]) : 0;
+      bool neg  = inputs.size() >= 3 && toInt(inputs[2]) < 0;
+      std::optional<CellRef> tgt = std::nullopt;
+      if (inCells.size() >= 4 || inputs.size() >= 4) {
+        CellRef t = resolveCell(inCells, inputs, 3, core_.arena());
+        if (t != noCell) {
+          tgt = t;
+        }
+      }
+      if (c != noCell) {
+        auto res = core_.link(c, d, neg, tgt);
+        outputs.push_back(res ? *res : noCell);
+      } else {
+        outputs.push_back(noCell);
+      }
     }
     break;
   }
   case OpcodeKind::Break: {
-    if (inputs.size() >= 3) {
-      CellRef c = toInt(inputs[0]);
-      DimRef d  = toInt(inputs[1]);
-      bool neg  = toInt(inputs[2]) < 0;
-      auto res  = core_.breakLink(c, d, neg);
-      outputs.push_back(res ? *res : noCell);
+    std::vector<CellRef> inCells = core_.inputsOf(opcode);
+    if (inCells.size() >= 3 || inputs.size() >= 3) {
+      CellRef c = resolveCell(inCells, inputs, 0, core_.arena());
+      DimRef d  = inputs.size() >= 2 ? toInt(inputs[1]) : 0;
+      bool neg  = inputs.size() >= 3 && toInt(inputs[2]) < 0;
+      if (c != noCell) {
+        auto res = core_.breakLink(c, d, neg);
+        outputs.push_back(res ? *res : noCell);
+      } else {
+        outputs.push_back(noCell);
+      }
     }
     break;
   }
   case OpcodeKind::New: {
-    if (inputs.size() >= 3) {
-      CellRef c = toInt(inputs[0]);
-      DimRef d  = toInt(inputs[1]);
-      bool neg  = toInt(inputs[2]) < 0;
-      auto res  = core_.newCell(c, d, neg);
-      outputs.push_back(res ? *res : noCell);
+    std::vector<CellRef> inCells  = core_.inputsOf(opcode);
+    std::vector<CellRef> outCells = core_.outputsOf(opcode);
+    if (inCells.size() >= 3 || inputs.size() >= 3) {
+      CellRef c = resolveCell(inCells, inputs, 0, core_.arena());
+      DimRef d  = inputs.size() >= 2 ? toInt(inputs[1]) : 0;
+      bool neg  = inputs.size() >= 3 && toInt(inputs[2]) < 0;
+      if (c != noCell) {
+        if (!outCells.empty()) {
+          CellRef fresh = outCells[0];
+          core_.link(c, d, neg, fresh);
+          outputs.push_back(fresh);
+        } else {
+          auto res = core_.newCell(c, d, neg);
+          outputs.push_back(res ? *res : noCell);
+        }
+      } else {
+        outputs.push_back(noCell);
+      }
     }
     break;
   }
   case OpcodeKind::Value: {
-    if (!inputs.empty()) {
-      CellRef c        = toInt(inputs[0]);
+    std::vector<CellRef> inCells = core_.inputsOf(opcode);
+    if (!inCells.empty() || !inputs.empty()) {
+      CellRef c        = resolveCell(inCells, inputs, 0, core_.arena());
       std::int64_t off = inputs.size() >= 2 ? toInt(inputs[1]) : 0;
       std::int64_t len = inputs.size() >= 3 ? toInt(inputs[2]) : -1;
       std::optional<CellValue> repl = inputs.size() >= 4
                                           ? std::optional<CellValue>(inputs[3])
                                           : std::nullopt;
-      auto res                      = core_.value(c, off, len, repl);
-      outputs.push_back(res ? *res : noCell);
+      if (c != noCell) {
+        auto res = core_.value(c, off, len, repl);
+        outputs.push_back(res ? *res : noCell);
+      } else {
+        outputs.push_back(noCell);
+      }
     }
     break;
   }
   case OpcodeKind::Splice: {
-    if (inputs.size() >= 4) {
-      CellRef c        = toInt(inputs[0]);
+    std::vector<CellRef> inCells = core_.inputsOf(opcode);
+    if (inCells.size() >= 4 || inputs.size() >= 4) {
+      CellRef c        = resolveCell(inCells, inputs, 0, core_.arena());
       std::int64_t off = toInt(inputs[1]);
       std::int64_t len = toInt(inputs[2]);
-      auto res         = core_.splice(c, off, len, inputs[3]);
-      outputs.push_back(res ? *res : noCell);
+      if (c != noCell) {
+        auto res = core_.splice(c, off, len, inputs[3]);
+        outputs.push_back(res ? *res : noCell);
+      } else {
+        outputs.push_back(noCell);
+      }
     }
     break;
   }
   case OpcodeKind::Clone: {
-    if (!inputs.empty()) {
-      CellRef c = toInt(inputs[0]);
-      auto res  = core_.newCell(c, core_.dims().clone, false);
-      outputs.push_back(res ? *res : noCell);
+    std::vector<CellRef> inCells  = core_.inputsOf(opcode);
+    std::vector<CellRef> outCells = core_.outputsOf(opcode);
+    if (!inCells.empty() || !inputs.empty()) {
+      CellRef c = resolveCell(inCells, inputs, 0, core_.arena());
+      if (c != noCell) {
+        CellRef cloneCell =
+            !outCells.empty() ? outCells[0] : core_.arena().makeCell();
+        CellRef cloneTail  = c;
+        std::size_t cLimit = core_.arena().cellCount() + 1;
+        while (cLimit-- > 0) {
+          CellRef next =
+              core_.arena().linked(cloneTail, core_.dims().clone, false);
+          if (next == noCell) {
+            core_.arena().link(cloneTail, core_.dims().clone, false, cloneCell);
+            break;
+          }
+          if (next == cloneCell) {
+            break;
+          }
+          cloneTail = next;
+        }
+        outputs.push_back(cloneCell);
+      } else {
+        outputs.push_back(noCell);
+      }
     }
     break;
   }
@@ -922,10 +979,13 @@ ExecutionResult VortexVM::step(CellRef cursor) {
       return execRes;
     }
 
-    // Write outputs
-    for (std::size_t i = 0; i < std::min(outCells.size(), newOutputs.size());
-         ++i) {
-      core_.value(outCells[i], 0, -1, newOutputs[i]);
+    // Write outputs for non-structural opcodes
+    if (kind != OpcodeKind::New && kind != OpcodeKind::Clone &&
+        kind != OpcodeKind::Link && kind != OpcodeKind::Break) {
+      for (std::size_t i = 0; i < std::min(outCells.size(), newOutputs.size());
+           ++i) {
+        core_.value(outCells[i], 0, -1, newOutputs[i]);
+      }
     }
 
     // 6. Output Parameter Postprocessing (-d.grab -> +d.spin)

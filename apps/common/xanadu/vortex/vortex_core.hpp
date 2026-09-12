@@ -45,10 +45,12 @@ struct SystemDimensions {
   DimRef vars{noCell};           ///< Scope variable names
   DimRef values{noCell};         ///< Scope bound values
   DimRef pinningCursors{noCell}; ///< Pinned subgraph root set rank
-  DimRef name{noCell};           ///< Thread and pin naming rank
+  DimRef name{noCell};           ///< Thread, pin, and store naming rank
+  DimRef role{noCell};           ///< Store and cell role classification rank
   DimRef dims{noCell};           ///< Dimension directory rank off home
   DimRef stdlib{noCell}; ///< Standard library module directory rank off home
   DimRef clause{noCell}; ///< Clause database rank off predicate cells (Vlog)
+  DimRef stores{noCell}; ///< Multi-store connection rank off home
 };
 
 enum class ContractViolationKind : std::uint8_t {
@@ -133,6 +135,9 @@ public:
   std::optional<CellRef> append(CellRef cell, const CellValue &val);
   std::optional<CellRef> erase(CellRef cell, std::int64_t offset,
                                std::int64_t length);
+
+  /// Mints a new named dimension and links it to the d.dims rank tail.
+  CellRef mintDimension(std::string_view name);
 
   [[nodiscard]] CellValue get(CellRef cell, std::int64_t offset = 0,
                               std::int64_t length = -1);

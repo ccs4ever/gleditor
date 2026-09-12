@@ -2,6 +2,7 @@
 
 #include <bit>
 #include <cctype>
+#include <iostream>
 
 #include "common/xanadu/scalar.hpp"
 
@@ -41,6 +42,20 @@ void VortexCore::initGenesis() {
   dims_.name           = mintNamedDimension("d.name", lastDim);
   dims_.stdlib         = mintNamedDimension("d.stdlib", lastDim);
   dims_.clause         = mintNamedDimension("d.clause", lastDim);
+  dims_.stores         = mintNamedDimension("d.stores", lastDim);
+  dims_.role           = mintNamedDimension("d.role", lastDim);
+}
+
+CellRef VortexCore::mintDimension(std::string_view name) {
+  CellRef tail = home_;
+  while (true) {
+    CellRef next = arena_.linked(tail, dims_.dims, false);
+    if (next == noCell || next == tail) {
+      break;
+    }
+    tail = next;
+  }
+  return mintNamedDimension(name, tail);
 }
 
 std::optional<CellRef> VortexCore::link(CellRef cell, DimRef dim, bool negward,
@@ -241,8 +256,17 @@ bool VortexCore::evaluateTruthiness(const CellValue &val) {
 
 std::function<CellRef()> VortexCore::cloneGenerator(CellRef source) {
   return [this, source]() -> CellRef {
-    CellRef fresh = arena_.makeCell();
-    link(source, dims_.clone, false, fresh);
+    CellRef fresh      = arena_.makeCell();
+    CellRef cloneTail  = source;
+    std::size_t cLimit = arena_.cellCount() + 1;
+    while (cLimit-- > 0) {
+      CellRef next = arena_.linked(cloneTail, dims_.clone, false);
+      if (next == noCell) {
+        arena_.link(cloneTail, dims_.clone, false, fresh);
+        break;
+      }
+      cloneTail = next;
+    }
     return fresh;
   };
 }
@@ -252,7 +276,12 @@ std::vector<CellRef> VortexCore::inputsOf(CellRef opcode) const {
   CellRef cur       = arena_.linked(opcode, dims_.grab, false); // +d.grab
   std::size_t limit = arena_.cellCount() + 1;
   while (cur != noCell && limit-- > 0) {
-    result.push_back(arena_.cloneMaster(cur, dims_.clone));
+    auto val = arena_.asInt64(cur);
+    if (val && arena_.contains(static_cast<CellRef>(*val))) {
+      result.push_back(static_cast<CellRef>(*val));
+    } else {
+      result.push_back(arena_.cloneMaster(cur, dims_.clone));
+    }
     cur = arena_.linked(cur, dims_.step, false); // +d.step
   }
   return result;
@@ -263,7 +292,12 @@ std::vector<CellRef> VortexCore::outputsOf(CellRef opcode) const {
   CellRef cur       = arena_.linked(opcode, dims_.grab, true); // -d.grab
   std::size_t limit = arena_.cellCount() + 1;
   while (cur != noCell && limit-- > 0) {
-    result.push_back(arena_.cloneMaster(cur, dims_.clone));
+    auto val = arena_.asInt64(cur);
+    if (val && arena_.contains(static_cast<CellRef>(*val))) {
+      result.push_back(static_cast<CellRef>(*val));
+    } else {
+      result.push_back(arena_.cloneMaster(cur, dims_.clone));
+    }
     cur = arena_.linked(cur, dims_.step, false); // +d.step
   }
   return result;
@@ -273,19 +307,7 @@ void VortexCore::bindInput(CellRef opcode, CellRef operand) {
   if (!arena_.contains(opcode) || !arena_.contains(operand)) {
     return;
   }
-  CellRef slot = arena_.makeCell();
-
-  // Append slot to operand's d.clone rank
-  CellRef cloneTail  = operand;
-  std::size_t cLimit = arena_.cellCount() + 1;
-  while (cLimit-- > 0) {
-    CellRef next = arena_.linked(cloneTail, dims_.clone, false);
-    if (next == noCell) {
-      arena_.link(cloneTail, dims_.clone, false, slot);
-      break;
-    }
-    cloneTail = next;
-  }
+  CellRef slot = arena_.makeScalarCell(static_cast<std::int64_t>(operand));
 
   // Link slot into opcode's input wing (+d.grab, then chain on +d.step)
   CellRef first = arena_.linked(opcode, dims_.grab, false);
@@ -309,19 +331,7 @@ void VortexCore::bindOutput(CellRef opcode, CellRef target) {
   if (!arena_.contains(opcode) || !arena_.contains(target)) {
     return;
   }
-  CellRef slot = arena_.makeCell();
-
-  // Append slot to target's d.clone rank
-  CellRef cloneTail  = target;
-  std::size_t cLimit = arena_.cellCount() + 1;
-  while (cLimit-- > 0) {
-    CellRef next = arena_.linked(cloneTail, dims_.clone, false);
-    if (next == noCell) {
-      arena_.link(cloneTail, dims_.clone, false, slot);
-      break;
-    }
-    cloneTail = next;
-  }
+  CellRef slot = arena_.makeScalarCell(static_cast<std::int64_t>(target));
 
   // Link slot into opcode's output wing (-d.grab, then chain on +d.step)
   CellRef first = arena_.linked(opcode, dims_.grab, true);
@@ -342,27 +352,25 @@ void VortexCore::bindOutput(CellRef opcode, CellRef target) {
 }
 
 bool VortexCore::hasPipeline(CellRef paramCell) const {
-  if (arena_.linked(paramCell, dims_.spin, false) != noCell) {
-    return true;
+  if (paramCell == home_ || paramCell == noCell) {
+    return false;
   }
-  CellRef master = arena_.cloneMaster(paramCell, dims_.clone);
-  if (master != paramCell &&
-      arena_.linked(master, dims_.spin, false) != noCell) {
-    return true;
+  // A cell inside an instruction stream has a predecessor along -d.spin;
+  // a parameter cell heading a pipeline has only an outgoing +d.spin.
+  if (arena_.linked(paramCell, dims_.spin, true) != noCell) {
+    return false;
   }
-  return false;
+  return arena_.linked(paramCell, dims_.spin, false) != noCell;
 }
 
 CellRef VortexCore::getPipelineHead(CellRef paramCell) const {
-  CellRef head = arena_.linked(paramCell, dims_.spin, false);
-  if (head != noCell) {
-    return head;
+  if (paramCell == home_ || paramCell == noCell) {
+    return noCell;
   }
-  CellRef master = arena_.cloneMaster(paramCell, dims_.clone);
-  if (master != paramCell) {
-    return arena_.linked(master, dims_.spin, false);
+  if (arena_.linked(paramCell, dims_.spin, true) != noCell) {
+    return noCell;
   }
-  return noCell;
+  return arena_.linked(paramCell, dims_.spin, false);
 }
 
 void VortexCore::attachPipeline(CellRef paramCell, CellRef firstOp) {

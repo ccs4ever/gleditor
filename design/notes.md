@@ -350,3 +350,48 @@ void main() {
     out_color = vec4(v_color.rgb, v_color.a * coverage);
 }
 ```
+
+## Part 3: Language Grammars & Parsing Architecture (Future Enhancement: `tao::pegtl`)
+
+### 1. Domain Languages in the Docuverse
+
+The system architecture encompasses multiple specialized domain-specific languages:
+
+- **VQL (Vortex Query Language)**: XQuery-style path and pattern matching for multidimensional
+  zzstructures, with `%` creation sugar and `><` clone joins (`design/vql-query-language.md`).
+- **VPL (Vortex Array Language)**: APL/J-style array operations over rank projections and
+  dimensional hyper-matrices (`design/vpl-array-language.md`).
+- **Vlog (Vortex Logic Engine)**: Prolog/Datalog Horn clauses, unification, and choice-point
+  backtracking over the graph (`design/vlog-logic-extension.md`).
+
+### 2. Evaluation of Grammar Frameworks
+
+When evaluating parser generators for future grammar expansions:
+
+- **ANTLR4 is rejected**:
+  - Requires a Java Runtime (JRE/JDK) at build time to generate C++ parser code, violating the
+    tree's strict minimal build toolchain principles (GNU Make + pkg-config, zero-Node).
+  - Heavy `antlr4-runtime` dependency with high RTTI, exception handling, and ABI instability across
+    platforms (especially WebAssembly via Emscripten and Android NDK).
+  - Materializes thousands of heap-allocated `std::shared_ptr<ParseTree>` nodes, conflicting with
+    the spatial zero-allocation philosophy.
+- **Handwritten Recursive Descent / Pratt Parsing**:
+  - The default across the codebase (e.g., `apps/common/xanadu/vql/parser.cpp`). Zero external
+    dependencies, zero-copy `std::string_view` scanning, single-pass desugaring, and instant compile
+    times.
+
+### 3. Future Enhancement Candidate: `tao::pegtl`
+
+If declarative grammar specifications are desired for future language additions without the
+maintenance overhead of handwritten parsers, **`tao::pegtl`** (Parsing Expression Grammar Template
+Library) is the designated architectural candidate:
+
+- **Header-Only C++20/C++23**: Pure template library requiring no pre-compilation step, no Java, and
+  no foreign tools. Can be vendored as a git submodule under `thirdparty/pegtl`, matching
+  `thirdparty/argparse`.
+- **Zero Heap Overhead**: Rules are composed entirely at compile time via C++ type templates.
+- **Direct AST / Manifold Construction**: Actions fire directly during parsing, binding inputs and
+  linking cells into `ArenaManifold` or domain AST structures in a single pass without intermediate
+  generic parse trees.
+- **Clean Cross-Platform Support**: Seamlessly compiles under `clang++`, `g++`, Emscripten (WASM),
+  and Android NDK without external runtime link libraries.
