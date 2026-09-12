@@ -233,6 +233,8 @@ private:
   CellRef predMember_{noCell};
   CellRef predAppend_{noCell};
   CellRef predLength_{noCell};
+  CellRef predVortexFunction_{noCell};
+  CellRef predVortexModule_{noCell};
 };
 
 } // namespace zigzag::vortex

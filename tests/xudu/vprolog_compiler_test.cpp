@@ -263,4 +263,38 @@ TEST(VPrologCompilerTest, SolveConjunctionAndBuiltins) {
   EXPECT_FALSE(h.compiler.solveOnce(q5));
 }
 
+TEST(VPrologCompilerTest, IntrospectVortexStdLib) {
+  CompilerTestHarness h;
+
+  // Query all modules
+  CompiledQuery qMods = h.compiler.compileQuery("vortex_module(Mod)");
+  auto modSols        = h.compiler.solve(qMods);
+  EXPECT_GE(modSols.size(), 7u);
+
+  // Query math functions
+  CompiledQuery qMath =
+      h.compiler.compileQuery("vortex_function('std:math', Fn)");
+  auto mathSols = h.compiler.solve(qMath);
+  EXPECT_GE(mathSols.size(), 6u);
+  bool foundAbs = false;
+  for (const auto &s : mathSols) {
+    if (s.formatted.at("Fn") == "abs") foundAbs = true;
+  }
+  EXPECT_TRUE(foundAbs);
+
+  // Query 3-arity function path
+  CompiledQuery qPath =
+      h.compiler.compileQuery("vortex_function('std:string', Fn, Path)");
+  auto pathSols = h.compiler.solve(qPath);
+  EXPECT_GE(pathSols.size(), 3u);
+  bool foundTrim = false;
+  for (const auto &s : pathSols) {
+    if (s.formatted.at("Fn") == "trim" &&
+        s.formatted.at("Path") == "std:string/trim") {
+      foundTrim = true;
+    }
+  }
+  EXPECT_TRUE(foundTrim);
+}
+
 } // namespace

@@ -151,4 +151,13 @@ TEST(VPrologE2ETest, ListingFlag) {
   EXPECT_NE(res.output.find("likes(mary, sushi)."), std::string::npos);
 }
 
+TEST(VPrologE2ETest, IntrospectVortexStdLibE2E) {
+  std::string bin = vprologBin();
+  auto res        = runProcess(bin + " --headless -e 'vortex_function(M, F).'");
+  EXPECT_EQ(res.exitCode, 0);
+  EXPECT_NE(res.output.find("M = std:math, F = abs"), std::string::npos);
+  EXPECT_NE(res.output.find("M = std:string, F = trim"), std::string::npos);
+  EXPECT_NE(res.output.find("M = std:logic, F = unify"), std::string::npos);
+}
+
 } // namespace

@@ -341,6 +341,111 @@ bool solveQueryHelper(VortexStdLib &stdlib, VortexCore &core,
                             depth + 1);
   }
 
+  // Manifold stdlib introspection: vortex_module/1 or stdlib_module/1
+  if ((goalFunctor == "vortex_module" || goalFunctor == "stdlib_module") &&
+      goalArgs.size() == 1) {
+    for (const auto &modName : stdlib.modules()) {
+      if (solutionsCount >= maxSolutions) break;
+      auto mark     = core.arena().mark();
+      CellRef mCell = core.arena().makeCell(modName);
+      if (stdlib.unify(goalArgs[0], mCell)) {
+        bool keepGoing = solveQueryHelper(
+            stdlib, core, restGoals, candidatePreds, queryVars, onSolution,
+            solutionsCount, maxSolutions, depth + 1);
+        core.arena().release(mark);
+        if (!keepGoing && onSolution != nullptr) {
+          return false;
+        }
+      } else {
+        core.arena().release(mark);
+      }
+    }
+    return true;
+  }
+
+  // Manifold stdlib introspection: vortex_function/2 or stdlib_function/2
+  if ((goalFunctor == "vortex_function" || goalFunctor == "stdlib_function") &&
+      goalArgs.size() == 2) {
+    for (const auto &modName : stdlib.modules()) {
+      for (const auto &symName : stdlib.symbolsInModule(modName)) {
+        if (solutionsCount >= maxSolutions) break;
+        auto mark     = core.arena().mark();
+        CellRef mCell = core.arena().makeCell(modName);
+        CellRef fCell = core.arena().makeCell(symName);
+        if (stdlib.unify(goalArgs[0], mCell) &&
+            stdlib.unify(goalArgs[1], fCell)) {
+          bool keepGoing = solveQueryHelper(
+              stdlib, core, restGoals, candidatePreds, queryVars, onSolution,
+              solutionsCount, maxSolutions, depth + 1);
+          core.arena().release(mark);
+          if (!keepGoing && onSolution != nullptr) {
+            return false;
+          }
+        } else {
+          core.arena().release(mark);
+        }
+      }
+      if (solutionsCount >= maxSolutions) break;
+    }
+    return true;
+  }
+
+  // Manifold stdlib introspection: vortex_function/3 or stdlib_function/3 (Mod,
+  // Fn, Path)
+  if ((goalFunctor == "vortex_function" || goalFunctor == "stdlib_function") &&
+      goalArgs.size() == 3) {
+    for (const auto &modName : stdlib.modules()) {
+      for (const auto &symName : stdlib.symbolsInModule(modName)) {
+        if (solutionsCount >= maxSolutions) break;
+        auto mark            = core.arena().mark();
+        CellRef mCell        = core.arena().makeCell(modName);
+        CellRef fCell        = core.arena().makeCell(symName);
+        std::string fullPath = modName + "/" + symName;
+        CellRef pCell        = core.arena().makeCell(fullPath);
+        if (stdlib.unify(goalArgs[0], mCell) &&
+            stdlib.unify(goalArgs[1], fCell) &&
+            stdlib.unify(goalArgs[2], pCell)) {
+          bool keepGoing = solveQueryHelper(
+              stdlib, core, restGoals, candidatePreds, queryVars, onSolution,
+              solutionsCount, maxSolutions, depth + 1);
+          core.arena().release(mark);
+          if (!keepGoing && onSolution != nullptr) {
+            return false;
+          }
+        } else {
+          core.arena().release(mark);
+        }
+      }
+      if (solutionsCount >= maxSolutions) break;
+    }
+    return true;
+  }
+
+  // Manifold stdlib introspection: vortex_function/1 or stdlib_function/1
+  if ((goalFunctor == "vortex_function" || goalFunctor == "stdlib_function") &&
+      goalArgs.size() == 1) {
+    for (const auto &modName : stdlib.modules()) {
+      for (const auto &symName : stdlib.symbolsInModule(modName)) {
+        if (solutionsCount >= maxSolutions) break;
+        auto mark     = core.arena().mark();
+        CellRef fCell = core.arena().makeCell(symName);
+        if (stdlib.unify(goalArgs[0], fCell)) {
+          bool keepGoing = solveQueryHelper(
+              stdlib, core, restGoals, candidatePreds, queryVars, onSolution,
+              solutionsCount, maxSolutions, depth + 1);
+          core.arena().release(mark);
+          if (!keepGoing && onSolution != nullptr) {
+            return false;
+          }
+        } else {
+          core.arena().release(mark);
+        }
+      }
+      if (solutionsCount >= maxSolutions) break;
+    }
+    return true;
+  }
+
   // Arithmetic evaluation: is/2
   if (goalFunctor == "is" && goalArgs.size() == 2) {
     double evalResult = 0.0;
@@ -1533,6 +1638,15 @@ void VortexStdLib::buildLogicModule(CellRef mod) {
 
     exportSymbol(mod, "length", predLength_);
   }
+
+  // Predicate: vortex_function/2 and vortex_module/1 introspection
+  {
+    predVortexFunction_ = createPredicate("vortex_function");
+    exportSymbol(mod, "vortex_function", predVortexFunction_);
+
+    predVortexModule_ = createPredicate("vortex_module");
+    exportSymbol(mod, "vortex_module", predVortexModule_);
+  }
 }
 
 CellRef VortexStdLib::makeVar(std::string_view name) {
@@ -1793,6 +1907,9 @@ bool VortexStdLib::solve(std::span<const CellRef> goals,
   if (predMember_ != noCell) candidatePreds.push_back(predMember_);
   if (predAppend_ != noCell) candidatePreds.push_back(predAppend_);
   if (predLength_ != noCell) candidatePreds.push_back(predLength_);
+  if (predVortexFunction_ != noCell)
+    candidatePreds.push_back(predVortexFunction_);
+  if (predVortexModule_ != noCell) candidatePreds.push_back(predVortexModule_);
   for (CellRef cp : customPredicates) {
     candidatePreds.push_back(cp);
   }
