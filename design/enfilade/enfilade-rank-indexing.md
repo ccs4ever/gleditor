@@ -2,8 +2,9 @@
 
 **Document Version:** 1.0 — One Tree, Three Wids **Status:** Proposal. Nothing here is built; U1 is
 still open and this is a candidate answer to it, not a ruling **Answers:**
-[`store-slice-convergence.md`](store-slice-convergence.md) U1 — random access along a rank\
-**Complemented by:** [`enfilade-discussion.md`](enfilade-discussion.md)
+[`../store-slice-convergence.md`](../store-slice-convergence.md) U1 — random access along a rank\
+**Complemented by:** [`enfilade-discussion.md`](enfilade-discussion.md) and
+[`chronofilade-example.md`](chronofilade-example.md)
 
 U1 is the convergence's oldest unresolved question, and it is stated there as a limit rather than a
 bug: **a rank answers successor and predecessor, and nothing else.** `linked(c, d, negward)` is 4.96
@@ -43,8 +44,8 @@ Two designs reached U1 independently, from opposite ends:
 
 | Consumer                                    | Asks for                        | Query                            |
 | ------------------------------------------- | ------------------------------- | -------------------------------- |
-| [VPL](vpl-array-language.md) §5             | an **ordinal**                  | `A[5000]`, `A[⍋A]`               |
-| [Vlog](vlog-logic-extension.md) §6.3        | a **key**                       | clauses whose first arg is `foo` |
+| [VPL](../vpl-array-language.md) §5          | an **ordinal**                  | `A[5000]`, `A[⍋A]`               |
+| [Vlog](../vlog-logic-extension.md) §6.3     | a **key**                       | clauses whose first arg is `foo` |
 | `apps/zigzag`'s scrollbar (U1's experiment) | an ordinal, **and its inverse** | "where am I on this rank?"       |
 
 The third row is the one that settles the design, and it was already in U1 without being read this
@@ -303,7 +304,7 @@ ______________________________________________________________________
 
 ## Appendix: Versioning and Change History
 
-The rule is [VQL](vql-query-language.md)'s and [Vortex](vortex-hyperstructural-runtime.md)'s:
+The rule is [VQL](../vql-query-language.md)'s and [Vortex](../vortex-hyperstructural-runtime.md)'s:
 
 - **Major** — a change a conforming implementation could not ignore.
 - **Minor** — an addition that breaks nothing, a refinement, a clarification, a correction to prose

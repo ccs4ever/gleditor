@@ -2,8 +2,9 @@
 
 **Document Version:** 1.0 — The Universal Pattern and Mechanical Sympathy\
 **Status:** Discussion and Architectural Survey\
-**Complements:** [`enfilade-rank-indexing.md`](enfilade-rank-indexing.md) (U1 Candidate Answer) and
-[`store-slice-convergence.md`](store-slice-convergence.md)
+**Complements:** [`enfilade-rank-indexing.md`](enfilade-rank-indexing.md) (U1 Candidate Answer),
+[`chronofilade-example.md`](chronofilade-example.md), and
+[`../store-slice-convergence.md`](../store-slice-convergence.md)
 
 ______________________________________________________________________
 

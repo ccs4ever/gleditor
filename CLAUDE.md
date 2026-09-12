@@ -534,16 +534,18 @@ they care about; see R11 in `design/store-slice-convergence.md`.
   two methods and a 16-byte-per-entry vector on `ArenaManifold`, a class convergence step 21 has not
   written yet. Nothing in `ops.hpp`, `Manifold`, `Store` or any on-disk format changes. §10 lists
   what is gating, and §6.3 is U1 again from the logic side.
-- [`enfilade-rank-indexing.md`](design/enfilade-rank-indexing.md) — a **proposal**, not a ruling:
-  the candidate answer to open question U1, which is that a rank answers successor and predecessor
-  and nothing else. One enfilade folded as a third replay product of the ops spool, with the tree's
-  Wid swapped per consumer (count for an ordinal, Bloom summary for a key, span set for link
-  discovery). Read §3 before reaching for a `d.enfilade` dimension — crums as cells would make
+- [`enfilade-rank-indexing.md`](design/enfilade/enfilade-rank-indexing.md) — a **proposal**, not a
+  ruling: the candidate answer to open question U1, which is that a rank answers successor and
+  predecessor and nothing else. One enfilade folded as a third replay product of the ops spool, with
+  the tree's Wid swapped per consumer (count for an ordinal, Bloom summary for a key, span set for
+  link discovery). Read §3 before reaching for a `d.enfilade` dimension — crums as cells would make
   rebalancing an edit to the document, which R8 forbids for the same reason it forbids path
   compression.
-- [`enfilade-discussion.md`](design/enfilade-discussion.md) — an architectural survey: Grand
-  Enfilade Theory, Udanax Green's Ent, silicon constraints (the 4.96 ns breakeven curve), and five
-  frontiers beyond U1 (Spanfilade, Layoutfilade, Chronofilade, Holefilade, Arrayfilade).
+- [`enfilade-discussion.md`](design/enfilade/enfilade-discussion.md) — an architectural survey:
+  Grand Enfilade Theory, Udanax Green's Ent, silicon constraints (the 4.96 ns breakeven curve), and
+  five frontiers beyond U1 (Spanfilade, Layoutfilade, Chronofilade, Holefilade, Arrayfilade).
+- [`chronofilade-example.md`](design/enfilade/chronofilade-example.md) — architecture, worked
+  example, and benchmarks for the Osmic Chronofilade and EDL transformation monoid.
 - [`osmic-microversioning-and-dag.md`](design/osmic-microversioning-and-dag.md) — hypertime naming,
   branches, and what a microversion is.
 
