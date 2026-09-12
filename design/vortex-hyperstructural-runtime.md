@@ -1,6 +1,6 @@
 # Vortex Hyperstructural Runtime & zzstructure System Specification
 
-**Document Version:** 10.1 — Clone Ranks and the `value` Primitive **Target Environment:**
+**Document Version:** 11.1 — Vortex Standard Library Architecture **Target Environment:**
 Zero-Allocation Multidimensional Graph Manifolds & Logic Engine
 
 Vortex is a speculative language and runtime design: a programming model whose entire addressable
@@ -52,6 +52,9 @@ ______________________________________________________________________
   - [Topological Garbage Collection](#topological-garbage-collection)
 - [2. Core C++ Runtime Engine Reference Implementation](#2-core-c-runtime-engine-reference-implementation)
 - [3. The Dual-Wing Calling Convention & Spatial Parameter Binding](#3-the-dual-wing-calling-convention--spatial-parameter-binding)
+  - [3.1 Dual-Wing Parameter Topology](#31-dual-wing-parameter-topology)
+  - [3.2 Parameter Preprocessing & Postprocessing Pipelines along `d.spin`](#32-parameter-preprocessing--postprocessing-pipelines-along-dspin)
+  - [3.3 Design by Contract along `d.contract`](#33-design-by-contract-along-dcontract)
 - [4. Cursor Associative Scopes: `d.vars` and `d.values`](#4-cursor-associative-scopes-dvars-and-dvalues)
 - [5. Reconciliation with the Unified Store/Slice](#5-reconciliation-with-the-unified-storeslice)
   - [5.1 There is no Cell 0: zero is absence, and the origin is minted](#51-there-is-no-cell-0-zero-is-absence-and-the-origin-is-minted)
@@ -60,6 +63,11 @@ ______________________________________________________________________
   - [5.4 The links map becomes a compacting CSR run](#54-the-links-map-becomes-a-compacting-csr-run)
   - [5.5 What this buys the runtime, unasked](#55-what-this-buys-the-runtime-unasked)
   - [5.6 Pinning: a cursor is how a subgraph outlives the query that built it](#56-pinning-a-cursor-is-how-a-subgraph-outlives-the-query-that-built-it)
+- [6. Vortex-Native Memoization Library: Pinned Islands along `d.cache`](#6-vortex-native-memoization-library-pinned-islands-along-dcache)
+- [7. Vortex Standard Library Architecture (Written in Vortex)](#7-vortex-standard-library-architecture-written-in-vortex)
+  - [7.1 Spatial Module Topology: `d.stdlib` and Symbol Resolution](#71-spatial-module-topology-dstdlib-and-symbol-resolution)
+  - [7.2 Standard Library Modules](#72-standard-library-modules)
+  - [7.3 Metacircular Execution & Compilation into the Manifold](#73-metacircular-execution--compilation-into-the-manifold)
 - [Appendix: Versioning and Change History](#appendix-versioning-and-change-history)
 
 ## 1. Architectural Foundation & Design Invariants
@@ -177,14 +185,19 @@ ______________________________________________________________________
 using cell_id = int64_t;
 
 // Standard System Dimension Coordinates
-constexpr cell_id d_grab    = 1;    // Parameter wings (-d.grab = outputs, +d.grab = inputs)
-constexpr cell_id d_step    = 2;    // Parameter chaining / sequential rank stepping
-constexpr cell_id d_spin    = 3;    // Process instruction stream
-constexpr cell_id d_stack   = 4;    // Call frame stack
-constexpr cell_id d_clone   = 999; // Clone rank: shared identity by structure
-constexpr cell_id d_cursors = 1001; // Process scheduler manifold
-constexpr cell_id d_vars    = 1003; // Scope variable names
-constexpr cell_id d_values  = 1004; // Variable values / ground terms
+constexpr cell_id d_grab            = 1;    // Parameter wings (-d.grab = outputs, +d.grab = inputs)
+constexpr cell_id d_step            = 2;    // Parameter chaining / sequential rank stepping
+constexpr cell_id d_spin            = 3;    // Process instruction stream
+constexpr cell_id d_stack           = 4;    // Call frame stack
+constexpr cell_id d_contract        = 5;    // Design by Contract (-d.contract = require, +d.contract = ensure)
+constexpr cell_id d_clone           = 999;  // Clone rank: shared identity by structure
+constexpr cell_id d_cursors         = 1001; // Process scheduler manifold
+constexpr cell_id d_cache           = 1002; // Memoization cache rank on pinned islands
+constexpr cell_id d_vars            = 1003; // Scope variable names
+constexpr cell_id d_values          = 1004; // Variable values / ground terms
+constexpr cell_id d_pinning_cursors = 1005; // Pinned subgraph root set rank
+constexpr cell_id d_name            = 1006; // Thread and pin naming rank
+constexpr cell_id d_stdlib          = 1007; // Standard library module directory rank off home
 
 // Absence is zero. No cell is allocated at 0 -- real cells start at 1, and the
 // origin is a minted cell like any other (§5.1) -- so "nothing is linked here"
@@ -504,7 +517,11 @@ ______________________________________________________________________
 ## 3. The Dual-Wing Calling Convention & Spatial Parameter Binding
 
 To eliminate hidden operand accumulators and register pollution, Vortex mandates a **Dual-Wing
-Spatial Calling Topology**:
+Spatial Calling Topology**. In this architecture, an opcode does not execute against an abstract
+stack or register bank; its operands and destinations exist as structural nodes in the zzstructure
+manifold.
+
+### 3.1 Dual-Wing Parameter Topology
 
 ```mermaid
 graph TD
@@ -517,14 +534,133 @@ graph TD
     InPrimary -->|"+d.step"| InSecondary["Secondary In Operand"]
 ```
 
-- **Outputs Wing (`-d.grab`)**: Output destination cells extend negward. If an operation yields
-  multiple results (e.g., `#DIVMOD`), targets chain posward along `+d.step` from the primary out
-  cell.
+- **Outputs Wing (`-d.grab`)**: Output destination cells extend negward along `-d.grab`. If an
+  operation yields multiple results (e.g., `#DIVMOD`), destinations chain posward along `+d.step`
+  from the primary output cell.
 - **Inputs Wing (`+d.grab`)**: Positional parameters extend posward along `+d.grab` and chain
   sequentially posward along `+d.step`.
 - **Snapshot-Before-Write Invariant**: The runtime snapshots all input payloads prior to writing to
   output cells, ensuring in-place operations (`#ADD out out out`) execute deterministically without
   memory aliasing corruption.
+
+### 3.2 Parameter Preprocessing & Postprocessing Pipelines along `d.spin`
+
+Traditional register or stack machines require callers or callees to generate ad-hoc
+prologue/epilogue code or allocate temporary locations to transform function arguments and return
+values. In Vortex, every parameter cell is an addressable node within the spatial manifold, and
+`d.spin` is the native instruction stream dimension. Consequently, **parameter cells can themselves
+head execution pipelines posward along `+d.spin`**.
+
+```mermaid
+graph TD
+    Opcode["Opcode Node"]
+
+    %% Inputs Wing
+    Opcode -->|"+d.grab"| In1["In Param 1"]
+    In1 -->|"+d.step"| In2["In Param 2"]
+    In1 -.->|"+d.spin (preprocess)"| Pre1["#TRIM"]
+    Pre1 -.->|"+d.spin"| Pre2["#PARSE_FLOAT"]
+
+    %% Outputs Wing
+    Opcode -->|"-d.grab"| Out1["Out Target 1"]
+    Out1 -->|"+d.step"| Out2["Out Target 2"]
+    Out1 -.->|"+d.spin (postprocess)"| Post1["#ROUND"]
+    Post1 -.->|"+d.spin"| Post2["#FORMAT_CURRENCY"]
+```
+
+- **Input Preprocessing (`+d.grab` $\to$ `+d.spin`)**: When an opcode resolves its input operands
+  along `+d.grab` and `+d.step`, the runtime checks each parameter cell $P$ for an attached
+  instruction pipeline posward along `d.spin`:
+
+  ```text
+  link(P, d.spin, +1) != noCell
+  ```
+
+  If a posward link exists, the parameter cell acts as the entry point of a preprocessing
+  subroutine. The VM executes the instructions along `+d.spin` originating at that cell. The
+  pipeline transforms, normalizes, or validates the parameter in-place. Once the preprocessing
+  pipeline halts, the final evaluated payload of $P$ is snapshotted as the input operand for the
+  primary opcode.
+
+- **Output Postprocessing (`-d.grab` $\to$ `+d.spin`)**: Analogously, each destination cell $O$
+  along `-d.grab` and `+d.step` may head an output postprocessing pipeline posward along `d.spin`.
+  After the main opcode executes and writes its raw result into $O$, the runtime checks:
+
+  ```text
+  link(O, d.spin, +1) != noCell
+  ```
+
+  If present, the postprocessing instruction stream along `+d.spin` is executed immediately on $O$.
+  This provides native formatting, clamping, range checking, or structural fan-out without polluting
+  the opcode's core arithmetic or relational logic.
+
+- **Topological Symmetry**: Parameter preprocessing and postprocessing require no special ad-hoc
+  bytecode modifiers or temporary frames; they reuse the universal `+d.spin` process dimension
+  directly on the parameter nodes.
+
+### 3.3 Design by Contract along `d.contract`
+
+To enforce robust invariants and support contract-based design (as pioneered by Eiffel and Ada),
+Vortex reserves the system dimension **`d.contract`** for formal preconditions and postconditions.
+Contracts are first-class structural constraints attached directly to the opcode node.
+
+```mermaid
+graph TD
+    Opcode["Opcode Node"]
+    Pre1["Precondition: '#GT in 0' (Require)"]
+    Pre2["Precondition: '#LTE in 1000'"]
+    Post1["Postcondition: '#GTE out in' (Ensure)"]
+
+    Opcode -->|"-d.contract"| Pre1
+    Pre1 -->|"+d.step"| Pre2
+
+    Opcode -->|"+d.contract"| Post1
+
+    Opcode -->|"+d.grab"| In["Input Wing"]
+    Opcode -->|"-d.grab"| Out["Output Wing"]
+```
+
+- **Preconditions (`-d.contract`, Negward / "Require")**:
+
+  - Preconditions are anchored negward along `-d.contract` from the opcode node.
+
+  - Multiple precondition assertions chain posward along `+d.step`.
+
+  - The runtime evaluates all precondition assertions **prior** to input snapshotting and opcode
+    execution.
+
+  - Each precondition clause is executed as a predicate expression. If any clause evaluates to
+    non-truthy (`!evaluate_truthiness(val)`), execution immediately aborts with a contract
+    violation:
+
+    ```text
+    ContractViolation::Precondition
+    ```
+
+  - When a precondition fails, opcode execution is bypassed, and output destination cells remain
+    completely untouched, ensuring strict fault containment.
+
+- **Postconditions (`+d.contract`, Posward / "Ensure")**:
+
+  - Postconditions are anchored posward along `+d.contract` from the opcode node.
+
+  - Multiple postcondition assertions chain posward along `+d.step`.
+
+  - Evaluated **after** opcode body execution and output postprocessing pipelines have completed.
+
+  - Postconditions have simultaneous spatial access to both the newly produced output values on
+    `-d.grab` and the pre-execution input snapshots (`old` values, equivalent to Eiffel's `old` or
+    Ada's `'Old`).
+
+  - If any postcondition evaluates to non-truthy, execution halts with:
+
+    ```text
+    ContractViolation::Postcondition
+    ```
+
+- **Zero Overhead on Uncontracted Ops**: If an opcode node has no links on `d.contract`
+  (`link(op, d.contract, dir) == noCell`), the contract verification step is an immediate $O(1)$
+  pointer check that costs virtually nothing.
 
 ______________________________________________________________________
 
@@ -725,6 +861,189 @@ constants, and code reaches them through named accessors.
 
 ______________________________________________________________________
 
+## 6. Vortex-Native Memoization Library: Pinned Islands along `d.cache`
+
+Memoization in Vortex is neither an ad-hoc C++ hash map nor a hardcoded compiler optimization.
+Consistent with the hyperstructural runtime model, **memoization is implemented as a Vortex library
+written in Vortex**, composed entirely from the fundamental zzstructure primitives: `link`, `value`,
+the `d.pinning-cursors` root rank, and the cache dimension `d.cache`.
+
+### 6.1 Pinned Island Topology
+
+A memoized operation maintains its state on an **ephemeral island** detached from the primary
+document tree and anchored to the Root Set solely via a dedicated cursor:
+
+```mermaid
+graph TD
+    Home["home (Origin)"]
+    Home -->|"+d.pinning-cursors"| PinCursor["Pin Cursor: 'memoize:fib'"]
+    PinCursor -->|"+d.name"| NameCell["'memoize:fib'"]
+
+    PinCursor -->|"+d.cache"| Entry1["Cache Entry 1"]
+    Entry1 -->|"+d.cache"| Entry2["Cache Entry 2"]
+
+    Entry1 -->|"+d.grab"| InArg1["In Arg: 10"]
+    Entry1 -->|"-d.grab"| OutRes1["Out Result: 55"]
+
+    Entry2 -->|"+d.grab"| InArg2["In Arg: 9"]
+    Entry2 -->|"-d.grab"| OutRes2["Out Result: 34"]
+```
+
+- **Root Set Anchoring (`d.pinning-cursors`)**: The cache island's root is a pinning cursor linked
+  to `home` along `+d.pinning-cursors`. It is named along `+d.name` (e.g. `"memoize:<op_name>"`).
+  Because it sits on `d.pinning-cursors` rather than `d.cursors`, the process scheduler never
+  schedules it as an execution thread, yet the reachability GC preserves the island.
+- **Cache Ranks (`d.cache`)**: Cache entries form a sequential rank extending posward along
+  `+d.cache` from the pinning cursor.
+- **Dual-Wing Entry Keys & Values**: Each entry node mirrors the dual-wing calling convention:
+  - Posward along `+d.grab`: points to the input argument tuple (chained on `+d.step`).
+  - Negward along `-d.grab`: points to the memoized output result(s) (chained on `+d.step`).
+
+### 6.2 Opt-In Memoization Protocol
+
+Operations opt in to memoization through a standardized Vortex wrapper:
+
+1. **Cache Lookup**: When the operation is invoked with input operands $I_1, I_2, \dots$:
+   - The wrapper resolves the pin cursor via its name on `d.pinning-cursors`.
+   - It iterates posward along `+d.cache` from the pin cursor.
+   - For each entry, it compares the incoming inputs against the entry's `+d.grab` operands.
+1. **Cache Hit**:
+   - If an entry matches, its memoized outputs on `-d.grab` are linked directly to the caller's
+     destination targets.
+   - If LRU ordering is active, the matched entry is spliced to the head of `+d.cache` directly
+     adjacent to the pin cursor.
+   - Opcode execution, parameter preprocessing, and postprocessing are completely bypassed.
+1. **Cache Miss**:
+   - If no entry matches, the operation executes normally (preconditions $\to$ preprocessing $\to$
+     opcode $\to$ postprocessing $\to$ postconditions).
+   - A fresh ephemeral cell is minted as the new cache entry.
+   - The input arguments are linked along `+d.grab` and the resulting outputs along `-d.grab`.
+   - The entry is linked posward of the pin cursor on `+d.cache` (`link(pin, d.cache, +1, entry)`).
+
+### 6.3 Lifecycle: Eviction, Atomic Flush, and Retirement
+
+Because the entire memoization island is governed by the single-primitive invariant, cache lifecycle
+operations are remarkably compact:
+
+- **Atomic Flush**: Breaking the link between the pin cursor and the cache head:
+
+  ```text
+  link(pin_cursor, d.cache, +1, 0)
+  ```
+
+  severs the only path connecting the cache entries to the Root Set. The entire entry rank becomes
+  immediately unreachable and is reclaimed by topological GC in a single sweep. The pin cursor
+  itself remains alive on `d.pinning-cursors`, ready to accept new entries.
+
+- **Retirement**: To destroy the cache and its cursor permanently:
+
+  ```text
+  link(home, d.pinning-cursors, +1, 0)  // or isolating the specific pin
+  ```
+
+  reclaims both the cursor and the island.
+
+- **Bounded Capacity (LRU Trimming)**: When the rank length on `+d.cache` exceeds the configured
+  capacity, the tail entry is unlinked:
+
+  ```text
+  link(tail_prev, d.cache, +1, 0)
+  ```
+
+  The unlinked tail and all cells anchored solely to it are reclaimed automatically.
+
+______________________________________________________________________
+
+## 7. Vortex Standard Library Architecture (Written in Vortex)
+
+Vortex does not treat the standard library as an external binary blob or runtime foreign-function
+interface (FFI). True to Ted Nelson's vision of universal spatial representation, **the Vortex
+Standard Library is written entirely in Vortex and exists as living zzstructures within the
+manifold**. Standard functions, combinators, and modules are ordinary cells linked along system
+dimensions.
+
+### 7.1 Spatial Module Topology: `d.stdlib` and Symbol Resolution
+
+At manifold bootstrap (system genesis), the runtime mints a system dimension **`d.stdlib`** anchored
+to `home`. The standard library lives as a rank of module cells branching posward along `+d.stdlib`:
+
+```mermaid
+graph TD
+    Home["home (Origin)"]
+    Home -->|"+d.stdlib"| ModMemoize["Module: 'std:memoize'"]
+    ModMemoize -->|"+d.stdlib"| ModContract["Module: 'std:contract'"]
+    ModContract -->|"+d.stdlib"| ModPipeline["Module: 'std:pipeline'"]
+    ModPipeline -->|"+d.stdlib"| ModFunctional["Module: 'std:functional'"]
+    ModFunctional -->|"+d.stdlib"| ModCollections["Module: 'std:collections'"]
+    ModCollections -->|"+d.stdlib"| ModMath["Module: 'std:math'"]
+    ModMath -->|"+d.stdlib"| ModString["Module: 'std:string'"]
+
+    ModMath -->|"+d.vars"| FnAbs["Symbol: 'abs'"]
+    FnAbs -->|"+d.vars"| FnMax["Symbol: 'max'"]
+    FnAbs -->|"+d.values"| OpAbs["Opcode Stream: #ABS"]
+```
+
+- **Module Anchoring**: Each module is a cell along the `d.stdlib` rank identified by its module
+  path string (`"std:memoize"`, `"std:contract"`, `"std:math"`).
+- **Symbol Export**: Within a module, exported symbols extend posward along `+d.vars`, with their
+  entry opcodes or function pipelines anchored along `+d.values` (conforming to §4's associative
+  scope topology).
+- **Spatial Resolution (`import`)**: Resolving an imported symbol (`import("std:math/abs")`) walks
+  `home/d.stdlib[./d.name = "std:math"]/d.vars[./d.name = "abs"]/d.values`. The returned cell is the
+  entry opcode of that routine, ready to be linked into any caller's instruction rank (`+d.spin`) or
+  call target.
+
+### 7.2 Standard Library Modules
+
+The standard library provides seven fundamental modules:
+
+1. **`std:memoize`**: Implements the opt-in memoization protocol described in §6. Provides
+   higher-order wrapper combinators that attach pinning cursors on `d.pinning-cursors`, maintain LRU
+   entry ranks along `+d.cache`, intercept argument wings on `+d.grab`, and expose `flush(op)` and
+   `retire(op)` routines.
+
+1. **`std:contract`**: Supplies reusable assertion and invariant templates for `-d.contract`
+   (preconditions) and `+d.contract` (postconditions). Includes routines such as `require_positive`,
+   `require_range(min, max)`, `require_non_empty`, `ensure_monotonic_growth`, and structural
+   predicates verifying acyclic manifold paths.
+
+1. **`std:pipeline`**: Standard parameter preprocessors and postprocessors for `+d.spin` pipelines.
+   Includes `#TRIM`, `#CLAMP`, `#TO_LOWER`, `#PARSE_NUM`, and `#FORMAT_CURRENCY`.
+
+1. **`std:functional`**: Higher-order spatial combinators operating across arbitrary manifold
+   dimensions:
+
+   - `map(dim, fn)`: walks a rank along `dim`, applying `fn` to each cell's value or sub-manifold.
+   - `filter(dim, pred)`: links cells satisfying `pred` into a new result rank.
+   - `fold(dim, initial, fn)`: reduces a dimensional rank to an accumulated result.
+   - `zip(dim_a, dim_b)`: traverses two parallel ranks simultaneously, producing paired tuples on
+     orthogonal wings.
+
+1. **`std:collections`**: Spatial data structures built on zzstructures:
+
+   - **Sequences / Lists**: Ranks along `+d.step` or `+d.1` (push, pop, head, tail, slice).
+   - **Associative Maps**: 2D structures over `d.vars` and `d.values`.
+   - **Matrices / 2D Grids**: Orthogonal grids over `d.1` (rows) and `d.2` (columns) supporting
+     spatial transposition (swapping dimension references without moving data).
+   - **Deques & Queues**: Double-ended ranks with $O(1)$ push/pop at both heads via directional
+     links.
+
+1. **`std:math`**: Pure mathematical functions: `abs`, `min`, `max`, `clamp`, `gcd`, `lcm`, `pow`,
+   `sqrt`, and vector dot product across dimensional ranks.
+
+1. **`std:string`**: Text processing utilities leveraging `value()` splices and regex caching:
+   `split`, `join`, `starts_with`, `ends_with`, `to_upper`, `to_lower`, and `regex_match`.
+
+### 7.3 Metacircular Execution & Compilation into the Manifold
+
+Because all Vortex instructions, call wings, contracts, and parameter pipelines are ordinary cells,
+the standard library requires no separate bytecode interpreter or binary loader. A standard library
+module is constructed directly via the single-primitive invariant (`link` and `value`) inside an
+`ArenaManifold`. Once assembled, it can be executed immediately by the Spin-Head VM, transcluded
+into user programs, or persisted to an operations spool via `promote()`.
+
+______________________________________________________________________
+
 ## Appendix: Versioning and Change History
 
 **The version means something from here on.** It had not: both this document and its companion sat
@@ -761,3 +1080,5 @@ table.
 | 9.0     | `69ad10d` | 2026-09-11 | **There is no Cell 0.** Zero is the absence of a cell, so `kNoLink` has nothing to mark and the break sentinel `-2` becomes `0`.              |
 | 10.0    | `a03ddcc` | 2026-09-11 | **`clone_generator` never hands out the master**; every pull is a fresh clone.                                                                |
 | 10.1    | `734513a` | 2026-09-11 | Unification and backtracking split into their own note; the deferred idea elaborated, asking the core for two methods.                        |
+| 11.0    | `db39d1a` | 2026-09-12 | Parameter pre/postprocessing along `d.spin`, Design by Contract (`d.contract`), and Vortex-native memoization library (`d.cache`).            |
+| 11.1    | HEAD      | 2026-09-12 | Vortex Standard Library architecture (written in Vortex): `d.stdlib` module rank, spatial symbol resolution, and core standard modules.       |
