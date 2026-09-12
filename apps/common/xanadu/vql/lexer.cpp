@@ -118,40 +118,7 @@ std::string_view tokenKindName(TokenKind kind) noexcept {
   return "Unknown";
 }
 
-Lexer::Lexer(std::string_view source) : source_(source) {}
-
-SourceLocation Lexer::currentLocation() const noexcept {
-  return SourceLocation{.line = line_, .column = column_, .offset = pos_};
-}
-
-char Lexer::peekChar(std::size_t offset) const noexcept {
-  if (pos_ + offset >= source_.size()) {
-    return '\0';
-  }
-  return source_[pos_ + offset];
-}
-
-char Lexer::advanceChar() noexcept {
-  if (pos_ >= source_.size()) {
-    return '\0';
-  }
-  char c = source_[pos_++];
-  if (c == '\n') {
-    line_++;
-    column_ = 1;
-  } else {
-    column_++;
-  }
-  return c;
-}
-
-bool Lexer::match(char expected) noexcept {
-  if (peekChar() == expected) {
-    advanceChar();
-    return true;
-  }
-  return false;
-}
+Lexer::Lexer(std::string_view source) : ScannerBase(source) {}
 
 void Lexer::skipWhitespaceAndComments() {
   while (pos_ < source_.size()) {
@@ -464,100 +431,32 @@ Token Lexer::nextToken() {
 
 Token Lexer::scanString(char quoteChar) {
   const SourceLocation startLoc = currentLocation();
-  const std::size_t startPos    = pos_ - 1; // include opening quote
-  std::string value;
-
-  while (pos_ < source_.size()) {
-    char c = advanceChar();
-    if (c == quoteChar) {
-      return Token{.kind        = TokenKind::StringLiteral,
-                   .text        = source_.substr(startPos, pos_ - startPos),
-                   .loc         = startLoc,
-                   .stringValue = std::move(value)};
-    }
-    if (c == '\\') {
-      if (pos_ >= source_.size()) {
-        break;
-      }
-      char esc = advanceChar();
-      switch (esc) {
-      case '"':
-        value += '"';
-        break;
-      case '\'':
-        value += '\'';
-        break;
-      case '\\':
-        value += '\\';
-        break;
-      case 'n':
-        value += '\n';
-        break;
-      case 't':
-        value += '\t';
-        break;
-      case 'r':
-        value += '\r';
-        break;
-      default:
-        value += esc;
-        break;
-      }
-    } else {
-      value += c;
-    }
+  auto res                      = scanQuotedString(quoteChar);
+  if (!res.success) {
+    return Token{.kind        = TokenKind::Error,
+                 .text        = res.text,
+                 .loc         = startLoc,
+                 .stringValue = res.errorMessage};
   }
-
-  return Token{.kind        = TokenKind::Error,
-               .text        = source_.substr(startPos, pos_ - startPos),
+  return Token{.kind        = TokenKind::StringLiteral,
+               .text        = res.text,
                .loc         = startLoc,
-               .stringValue = "Unterminated string literal"};
+               .stringValue = std::move(res.value)};
 }
 
 Token Lexer::scanNumber(bool leadingMinus, bool leadingPlus) {
   const SourceLocation startLoc = currentLocation();
-  std::size_t startPos          = pos_;
-  if (leadingMinus || leadingPlus) {
-    startPos = pos_ - 1;
-  }
-
-  bool isFloat = false;
-  while (pos_ < source_.size() &&
-         std::isdigit(static_cast<unsigned char>(peekChar()))) {
-    advanceChar();
-  }
-
-  if (peekChar() == '.' &&
-      std::isdigit(static_cast<unsigned char>(peekChar(1)))) {
-    isFloat = true;
-    advanceChar(); // consume '.'
-    while (pos_ < source_.size() &&
-           std::isdigit(static_cast<unsigned char>(peekChar()))) {
-      advanceChar();
-    }
-  }
-
-  std::string_view numText = source_.substr(startPos, pos_ - startPos);
-
-  if (isFloat) {
-    double val = 0.0;
-    try {
-      val = std::stod(std::string(numText));
-    } catch (...) {
-      val = 0.0;
-    }
+  auto res                      = scanNumberLiteral(leadingMinus, leadingPlus);
+  if (res.isFloat) {
     return Token{.kind       = TokenKind::FloatLiteral,
-                 .text       = numText,
+                 .text       = res.text,
                  .loc        = startLoc,
-                 .floatValue = val};
+                 .floatValue = res.floatValue};
   }
-
-  std::int64_t intVal = 0;
-  std::from_chars(numText.data(), numText.data() + numText.size(), intVal);
   return Token{.kind     = TokenKind::IntegerLiteral,
-               .text     = numText,
+               .text     = res.text,
                .loc      = startLoc,
-               .intValue = intVal};
+               .intValue = res.intValue};
 }
 
 Token Lexer::scanIdentifierOrKeyword() {

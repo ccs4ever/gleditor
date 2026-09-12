@@ -9,7 +9,11 @@
 #include <string>
 #include <string_view>
 
+#include "common/xanadu/scanner_base.hpp"
+
 namespace xanadu::vql {
+
+using SourceLocation = ::xanadu::SourceLocation;
 
 enum class TokenKind : std::uint8_t {
   EndOfFile,
@@ -73,12 +77,6 @@ enum class TokenKind : std::uint8_t {
   IntegerLiteral,
   FloatLiteral,
   BareLiteral,
-};
-
-struct SourceLocation {
-  std::size_t line{1};
-  std::size_t column{1};
-  std::size_t offset{0};
 };
 
 struct Token {
