@@ -22,6 +22,7 @@
 #include <span>
 #include <string>
 #include <string_view>
+#include <type_traits>
 #include <unordered_map>
 #include <unordered_set>
 #include <vector>
@@ -83,6 +84,61 @@ struct DimLink {
   bool operator==(const DimLink &) const = default;
 };
 static_assert(sizeof(DimLink) == 12);
+
+/**
+ * @brief Traverse a rank of cells along @p dim starting from @p start.
+ *
+ * Invokes @p fn for each cell in the rank until:
+ * - A dead end is reached (linked cell is noCell or links back to itself),
+ * - A cycle is detected (linked cell equals start or step exceeds @p maxSteps /
+ * cellCount),
+ * - Or @p fn returns false (if @p fn returns a bool).
+ *
+ * Supports callbacks with signature:
+ * - `void(CellRef)` or `bool(CellRef)`
+ * - `void(CellRef, std::size_t step)` or `bool(CellRef, std::size_t step)`
+ */
+template <typename ManifoldT, typename Fn>
+void walkRank(const ManifoldT &m, const CellRef start, const DimRef dim,
+              const DimVector dir, Fn &&fn,
+              const std::size_t maxSteps = static_cast<std::size_t>(-1)) {
+  if (start == noCell || dim == noCell) {
+    return;
+  }
+  CellRef cur             = start;
+  const std::size_t limit = (maxSteps == static_cast<std::size_t>(-1))
+                                ? (m.cellCount() + 1)
+                                : maxSteps;
+
+  for (std::size_t step = 0; step < limit && cur != noCell; ++step) {
+    if constexpr (std::is_invocable_r_v<bool, Fn, CellRef, std::size_t>) {
+      if (!fn(cur, step)) {
+        break;
+      }
+    } else if constexpr (std::is_invocable_r_v<bool, Fn, CellRef>) {
+      if (!fn(cur)) {
+        break;
+      }
+    } else if constexpr (std::is_invocable_v<Fn, CellRef, std::size_t>) {
+      fn(cur, step);
+    } else {
+      fn(cur);
+    }
+
+    const auto next = m.linked(cur, dim, dir);
+    if (next == cur || next == noCell || next == start) {
+      break;
+    }
+    cur = next;
+  }
+}
+
+template <typename ManifoldT, typename Fn>
+void walkRank(const ManifoldT &m, const CellRef start, const DimRef dim,
+              Fn &&fn,
+              const std::size_t maxSteps = static_cast<std::size_t>(-1)) {
+  walkRank(m, start, dim, DimVector::POS, std::forward<Fn>(fn), maxSteps);
+}
 
 /**
  * @brief What is known about one cell, without its links.
@@ -261,6 +317,21 @@ public:
 
   /// Set presentation formatting flags on @p ref.
   void setFormatFlags(CellRef ref, std::uint16_t flags) noexcept;
+
+  template <typename Fn>
+  void
+  walkRank(const CellRef start, const DimRef dim, const DimVector dir, Fn &&fn,
+           const std::size_t maxSteps = static_cast<std::size_t>(-1)) const {
+    zigzag::walkRank(*this, start, dim, dir, std::forward<Fn>(fn), maxSteps);
+  }
+
+  template <typename Fn>
+  void
+  walkRank(const CellRef start, const DimRef dim, Fn &&fn,
+           const std::size_t maxSteps = static_cast<std::size_t>(-1)) const {
+    zigzag::walkRank(*this, start, dim, DimVector::POS, std::forward<Fn>(fn),
+                     maxSteps);
+  }
 
   /// The two cells genesis mints by fiat: the first two cells folded, in the
   /// order Store::sliceGenesis() mints them. noCell in a store that never

@@ -286,6 +286,26 @@ TEST(SystemDocsTest, ParseFlatPhysicsAndBeamConfigFallback) {
   EXPECT_EQ(cfg.beams.bypassSegments, 20U);
 }
 
+TEST(SystemDocsTest, ParseLoomConfig) {
+  const std::string yaml = "transclusionLoom: false\n"
+                           "beams:\n"
+                           "  loomBundlingEnabled: false\n"
+                           "  loomAlpha: 0.45\n"
+                           "  loomHoverAlpha: 0.95\n";
+  const auto cfg         = xudu::parseLayoutConfig(yaml);
+  EXPECT_FALSE(cfg.transclusionLoom);
+  EXPECT_FALSE(cfg.beams.loomBundlingEnabled);
+  EXPECT_FLOAT_EQ(cfg.beams.loomAlpha, 0.45F);
+  EXPECT_FLOAT_EQ(cfg.beams.loomHoverAlpha, 0.95F);
+
+  // Defaults test
+  const auto def = xudu::parseLayoutConfig("");
+  EXPECT_TRUE(def.transclusionLoom);
+  EXPECT_TRUE(def.beams.loomBundlingEnabled);
+  EXPECT_FLOAT_EQ(def.beams.loomAlpha, 0.35F);
+  EXPECT_FLOAT_EQ(def.beams.loomHoverAlpha, 1.0F);
+}
+
 TEST(SystemDocsTest, ParseUIConfig) {
   const std::string yaml = "tabBarVisible: false\n"
                            "statusBarVisible: true\n"

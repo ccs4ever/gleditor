@@ -143,6 +143,13 @@ public:
   [[nodiscard]] ViewMode viewMode() const { return view_mode_; }
   void toggleViewMode();
 
+  // -- Dual-Continuum Harmonic Depth Tiering --------------------------------
+  void setDepthTier(float baseDepthZ, float opacityMultiplier = 1.0F);
+  [[nodiscard]] float depthTier() const noexcept { return depth_tier_; }
+  [[nodiscard]] float depthTierOpacity() const noexcept {
+    return depth_tier_opacity_;
+  }
+
   // -- In-App Interactive Cell & Dimension Editing --------------------------
   CellID createCell(std::string text = "", std::string role = "text");
   bool insertConnectedCell(std::string text, const DimID &dimension,
@@ -234,6 +241,8 @@ private:
 
   SceneVisual scene_;
   ViewMode view_mode_{ViewMode::CellContent};
+  float depth_tier_{0.0F};
+  float depth_tier_opacity_{1.0F};
   std::unordered_map<DimID, DimensionVisual> dimension_visuals_;
 
   std::unordered_map<CellID, RenderStateCell> visible_cells_;

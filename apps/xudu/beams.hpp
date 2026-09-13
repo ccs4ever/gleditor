@@ -169,6 +169,17 @@ public:
   [[nodiscard]] std::size_t transclusionStrandCount() const {
     return transclusionStrands.size();
   }
+  [[nodiscard]] const std::vector<TransclusionLoom> &looms() const noexcept {
+    return looms_;
+  }
+  void setHoveredTransclusion(std::optional<std::size_t> idx) noexcept {
+    hoveredTransclusion_ = idx;
+  }
+  [[nodiscard]] std::optional<std::size_t>
+  hoveredTransclusion() const noexcept {
+    return hoveredTransclusion_;
+  }
+  void sworphCameraTo(const glm::vec3 &targetPos, ch::Timeline &timeline);
 
   void setTetherOverlay(TenuousTetherOverlay *overlay) noexcept {
     tetherOverlay_ = overlay;
@@ -444,6 +455,8 @@ private:
   SatelloidOverlay *satelloidOverlay_{nullptr};
   bool physicsEnabled_{false};
   xanadu::BeamConfig beamConfig_{};
+  std::vector<TransclusionLoom> looms_;
+  std::optional<std::size_t> hoveredTransclusion_;
 };
 
 } // namespace xudu

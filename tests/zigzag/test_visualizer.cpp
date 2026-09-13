@@ -561,3 +561,27 @@ TEST(ZigzagVisualizerTest, VisualizerCellAnchorGeneration) {
   // Non-existent cell returns nullopt
   EXPECT_FALSE(viz.cellAnchor(static_cast<CellRef>(999999U)).has_value());
 }
+
+TEST(ZigzagVisualizerTest, DualContinuumDepthTiering) {
+  ZigzagVisualizer viz("Sans 12");
+  const auto root = viz.focusCellId();
+  ASSERT_NE(root, 0U);
+
+  EXPECT_FLOAT_EQ(viz.depthTier(), 0.0F);
+  EXPECT_FLOAT_EQ(viz.depthTierOpacity(), 1.0F);
+
+  // Set associative lattice tier
+  viz.setDepthTier(-40.0F, 0.42F);
+  EXPECT_FLOAT_EQ(viz.depthTier(), -40.0F);
+  EXPECT_FLOAT_EQ(viz.depthTierOpacity(), 0.42F);
+
+  const auto anchor = viz.cellAnchor(static_cast<CellRef>(root));
+  ASSERT_TRUE(anchor.has_value());
+  EXPECT_FLOAT_EQ(anchor->position.z, -40.0F);
+
+  const auto &visible = viz.visibleCells();
+  const auto it       = visible.find(root);
+  ASSERT_NE(it, visible.end());
+  EXPECT_FLOAT_EQ(it->second.target_pos.z, -40.0F);
+  EXPECT_FLOAT_EQ(it->second.target_alpha, 0.42F);
+}

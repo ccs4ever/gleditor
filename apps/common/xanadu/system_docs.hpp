@@ -205,6 +205,9 @@ struct BeamConfig {
   float bypassDepthPerDoc{-20.0F};
   float bypassDepthLimit{-120.0F};
   std::size_t bypassSegments{9};
+  bool loomBundlingEnabled{true};
+  float loomAlpha{0.35F};
+  float loomHoverAlpha{1.0F};
 };
 
 struct LayoutConfig {
@@ -217,6 +220,7 @@ struct LayoutConfig {
   PouchDock pouchDock{PouchDock::Right};
   float documentSpacingX{70.0F};
   bool transclusionPrisms{true};
+  bool transclusionLoom{true};
   bool xanalinkRibbons{true};
   PhysicsConfig physics{};
   BeamConfig beams{};

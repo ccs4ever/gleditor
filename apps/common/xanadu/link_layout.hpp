@@ -18,6 +18,7 @@
 
 #include <cstdint>
 #include <map>
+#include <span>
 #include <vector>
 
 #include <glm/vec3.hpp>
@@ -79,11 +80,40 @@ struct UniversalViewContext {
 };
 
 /**
+ * @struct TransclusionLoom
+ * @brief Bundled laminar stream of adjacent transclusions along a Zigzag
+ * dimension.
+ *
+ * When consecutive spans of a Xanadoc are transcluded into cells along a single
+ * Zigzag dimension rank (e.g. an outline along d.sequence), they form a
+ * continuous golden loom rather than criss-crossing separate ribbons.
+ */
+struct TransclusionLoom {
+  std::uint32_t docIndex{0};
+  zigzag::DimRef dimension{zigzag::noCell};
+  bool posward{true};
+  std::vector<std::size_t>
+      strandIndices; ///< indices into transclusion pair/strand array
+  std::uint32_t docStartOffset{0};
+  std::uint32_t docEndOffset{0};
+  zigzag::CellRef headCell{zigzag::noCell};
+  zigzag::CellRef tailCell{zigzag::noCell};
+};
+
+/**
  * @brief Discover emergent transclusions across open documents and cells in
  *        @p ctx.
  */
 void placeTransclusions(const UniversalViewContext &ctx,
                         std::vector<TransclusionPair> &pairs);
+
+/**
+ * @brief Detect and cluster contiguous transclusions between document passages
+ *        and cells along a single manifold dimension rank.
+ */
+[[nodiscard]] std::vector<TransclusionLoom>
+detectTransclusionLooms(const UniversalViewContext &ctx,
+                        std::span<const TransclusionPair> pairs);
 
 /**
  * @brief Discover emergent transclusions (shared primedia spans) between open

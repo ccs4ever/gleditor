@@ -147,23 +147,18 @@ ArenaManifold::contentOf(const CellRef ref) const noexcept {
 
 CellRef ArenaManifold::cloneMaster(const CellRef ref,
                                    const DimRef cloneDim) const noexcept {
-  CellRef walk = ref;
-  // Bounded by the slot count and answering the start cell on a loop, exactly
-  // as Manifold::cloneMaster() does -- Vlog §4.4 needs that guard, since a
-  // rational term *is* a rank that closes on itself.
-  const auto bound =
-      slots_.size() + (nullptr == base_ ? 0 : base_->cellCount());
-  for (std::size_t steps = 0; steps <= bound; steps++) {
-    const CellRef next = linked(walk, cloneDim, DimVector::NEG);
-    if (noCell == next) {
-      return walk;
-    }
+  CellRef result = ref;
+  bool looped    = false;
+  walkRank(ref, cloneDim, DimVector::NEG, [&](const CellRef cursor) {
+    const auto next = linked(cursor, cloneDim, DimVector::NEG);
     if (next == ref) {
-      return ref;
+      looped = true;
+      return false;
     }
-    walk = next;
-  }
-  return ref;
+    result = cursor;
+    return true;
+  });
+  return looped ? ref : result;
 }
 
 xanadu::ValueKind ArenaManifold::valueKindOf(const CellRef ref) const noexcept {

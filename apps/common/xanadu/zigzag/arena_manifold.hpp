@@ -216,6 +216,21 @@ public:
   [[nodiscard]] std::string_view
   scratchTextOf(const xanadu::PrimediaSpan &span) const noexcept;
 
+  template <typename Fn>
+  void
+  walkRank(const CellRef start, const DimRef dim, const DimVector dir, Fn &&fn,
+           const std::size_t maxSteps = static_cast<std::size_t>(-1)) const {
+    zigzag::walkRank(*this, start, dim, dir, std::forward<Fn>(fn), maxSteps);
+  }
+
+  template <typename Fn>
+  void
+  walkRank(const CellRef start, const DimRef dim, Fn &&fn,
+           const std::size_t maxSteps = static_cast<std::size_t>(-1)) const {
+    zigzag::walkRank(*this, start, dim, DimVector::POS, std::forward<Fn>(fn),
+                     maxSteps);
+  }
+
   // -- write path: no operations, no names -----------------------------------
 
   /// Mint a bare cell -- no content, no value. A Vlog variable is one of these

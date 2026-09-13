@@ -5,6 +5,7 @@
 #include <limits>
 #include <map>
 #include <optional>
+#include <unordered_map>
 #include <utility>
 
 #include "common/xanadu/zigzag/manifold.hpp"
@@ -333,6 +334,134 @@ void placeTransclusions(const UniversalViewContext &ctx,
 void placeTransclusions(const std::vector<const Version *> &views,
                         std::vector<TransclusionPair> &pairs) {
   placeTransclusions(UniversalViewContext{.docViews = views}, pairs);
+}
+
+std::vector<TransclusionLoom>
+detectTransclusionLooms(const UniversalViewContext &ctx,
+                        const std::span<const TransclusionPair> pairs) {
+  if (pairs.size() < 2 || ctx.manifoldViews.empty()) {
+    return {};
+  }
+
+  struct Candidate {
+    std::size_t pairIdx{0};
+    std::uint32_t docIndex{0};
+    std::uint32_t docStart{0};
+    std::uint32_t docEnd{0};
+    zigzag::CellRef cell{zigzag::noCell};
+  };
+
+  std::unordered_map<std::uint32_t, std::vector<Candidate>> byDoc;
+  for (std::size_t i = 0; i < pairs.size(); ++i) {
+    const auto &p = pairs[i];
+    if (p.from.isDocument() && p.to.isCell()) {
+      byDoc[p.from.doc].push_back(Candidate{
+          .pairIdx  = i,
+          .docIndex = p.from.doc,
+          .docStart = p.from.start,
+          .docEnd   = p.from.end,
+          .cell     = p.to.cell(),
+      });
+    } else if (p.from.isCell() && p.to.isDocument()) {
+      byDoc[p.to.doc].push_back(Candidate{
+          .pairIdx  = i,
+          .docIndex = p.to.doc,
+          .docStart = p.to.start,
+          .docEnd   = p.to.end,
+          .cell     = p.from.cell(),
+      });
+    }
+  }
+
+  std::vector<TransclusionLoom> result;
+
+  for (auto &[docIdx, candidates] : byDoc) {
+    if (candidates.size() < 2) {
+      continue;
+    }
+
+    std::ranges::sort(candidates, [](const Candidate &a, const Candidate &b) {
+      if (a.docStart != b.docStart) {
+        return a.docStart < b.docStart;
+      }
+      if (a.docEnd != b.docEnd) {
+        return a.docEnd < b.docEnd;
+      }
+      return a.pairIdx < b.pairIdx;
+    });
+
+    std::vector<bool> used(candidates.size(), false);
+
+    for (std::size_t i = 0; i < candidates.size(); ++i) {
+      if (used[i]) {
+        continue;
+      }
+
+      for (const auto *m : ctx.manifoldViews) {
+        if (nullptr == m) {
+          continue;
+        }
+
+        for (const auto dir :
+             {zigzag::DimVector::POS, zigzag::DimVector::NEG}) {
+          for (const auto &dimLink : m->dimensionsOf(candidates[i].cell)) {
+            const auto dim = dimLink.dim;
+            if (dim == zigzag::noCell) {
+              continue;
+            }
+
+            std::vector<std::size_t> chainCandidateIndices;
+            chainCandidateIndices.push_back(i);
+            auto curCell = candidates[i].cell;
+
+            for (std::size_t j = i + 1; j < candidates.size(); ++j) {
+              if (used[j]) {
+                continue;
+              }
+              const auto expectedNext = m->linked(curCell, dim, dir);
+              if (expectedNext == zigzag::noCell || expectedNext == curCell) {
+                break;
+              }
+              if (candidates[j].cell == expectedNext) {
+                if (candidates[j].docStart >=
+                    candidates[chainCandidateIndices.back()].docStart) {
+                  chainCandidateIndices.push_back(j);
+                  curCell = expectedNext;
+                }
+              }
+            }
+
+            if (chainCandidateIndices.size() >= 2) {
+              TransclusionLoom loom;
+              loom.docIndex  = docIdx;
+              loom.dimension = dim;
+              loom.posward   = (dir == zigzag::DimVector::POS);
+              loom.docStartOffset =
+                  candidates[chainCandidateIndices.front()].docStart;
+              loom.docEndOffset =
+                  candidates[chainCandidateIndices.back()].docEnd;
+              loom.headCell = candidates[chainCandidateIndices.front()].cell;
+              loom.tailCell = candidates[chainCandidateIndices.back()].cell;
+              for (const auto cIdx : chainCandidateIndices) {
+                loom.strandIndices.push_back(candidates[cIdx].pairIdx);
+                used[cIdx] = true;
+              }
+              result.push_back(std::move(loom));
+              break;
+            }
+          }
+          if (used[i]) {
+            break;
+          }
+        }
+        if (used[i]) {
+          break;
+        }
+      }
+    }
+  }
+
+  return result;
 }
 
 std::uint32_t linkColour(const LinkType type, const ProminenceTier tier) {

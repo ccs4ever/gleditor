@@ -695,8 +695,8 @@ void ZigzagVisualizer::rebuildActiveViewTopology() {
   };
 
   auto &focusRenderState        = visible_cells_[accursed_cell_focus_];
-  focusRenderState.target_pos   = glm::vec3{0.0F, 0.0F, 0.0F};
-  focusRenderState.target_alpha = 1.0F;
+  focusRenderState.target_pos   = glm::vec3{0.0F, 0.0F, depth_tier_};
+  focusRenderState.target_alpha = depth_tier_opacity_;
   focusRenderState.base_color   = scene_.focus_color;
   updateCellFormatting(focusRenderState, focusRef);
 
@@ -720,7 +720,7 @@ void ZigzagVisualizer::rebuildActiveViewTopology() {
           .current_pos      = visible_cells_[parentId].current_pos,
           .target_pos       = {},
           .current_alpha    = 0.0F,
-          .target_alpha     = 1.0F,
+          .target_alpha     = depth_tier_opacity_,
           .base_color       = {},
           .decorated_ranges = {},
           .block_styles     = {},
@@ -738,7 +738,7 @@ void ZigzagVisualizer::rebuildActiveViewTopology() {
 
     auto &childCell        = visible_cells_[childId];
     childCell.target_pos   = visible_cells_[parentId].target_pos + offset;
-    childCell.target_alpha = 1.0F;
+    childCell.target_alpha = depth_tier_opacity_;
     childCell.base_color   = axisColor;
     updateCellFormatting(childCell, childId);
   };
@@ -868,6 +868,18 @@ void ZigzagVisualizer::setViewMode(const ViewMode mode) {
 void ZigzagVisualizer::toggleViewMode() {
   setViewMode(view_mode_ == ViewMode::CellContent ? ViewMode::Topology
                                                   : ViewMode::CellContent);
+}
+
+void ZigzagVisualizer::setDepthTier(const float baseDepthZ,
+                                    const float opacityMultiplier) {
+  const float deltaZ  = baseDepthZ - depth_tier_;
+  depth_tier_         = baseDepthZ;
+  depth_tier_opacity_ = std::clamp(opacityMultiplier, 0.0F, 1.0F);
+  for (auto &[id, cell] : visible_cells_) {
+    cell.current_pos.z += deltaZ;
+  }
+  rebuildActiveViewTopology();
+  invalidateAccessibility();
 }
 
 void ZigzagVisualizer::swapDimensions(const int axis1, const int axis2) {

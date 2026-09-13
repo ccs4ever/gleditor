@@ -428,18 +428,14 @@ std::span<const DimRef> Manifold::dimensions() const {
   }
   dimsCache.clear();
   if (noCell != home_ && noCell != dimsDim_) {
-    // A rank that loops -- which zzstructure allows -- would otherwise be
-    // walked forever. Bounded by the cell count rather than by a visited set
-    // so that the walk allocates nothing beyond the answer.
-    CellRef cursor = linked(home_, dimsDim_, DimVector::POS);
-    for (std::size_t step = 0; noCell != cursor && step <= slots.size();
-         step++) {
-      dimsCache.push_back(cursor);
-      cursor = linked(cursor, dimsDim_, DimVector::POS);
+    const CellRef first = linked(home_, dimsDim_, DimVector::POS);
+    walkRank(first, dimsDim_, DimVector::POS, [&](const CellRef cursor) {
       if (cursor == home_) {
-        break;
+        return false;
       }
-    }
+      dimsCache.push_back(cursor);
+      return true;
+    });
   }
   dimsCacheStale = false;
   return dimsCache;
@@ -503,15 +499,18 @@ CellRef Manifold::cloneMaster(const CellRef ref,
   if (noDense == denseOf(ref)) {
     return noCell;
   }
-  CellRef cursor = ref;
-  for (std::size_t step = 0; step <= slots.size(); step++) {
-    const CellRef master = linked(cursor, cloneDim, DimVector::NEG);
-    if (noCell == master || master == cursor) {
-      return cursor;
+  CellRef result = ref;
+  bool looped    = false;
+  walkRank(ref, cloneDim, DimVector::NEG, [&](const CellRef cursor) {
+    const auto next = linked(cursor, cloneDim, DimVector::NEG);
+    if (next == ref) {
+      looped = true;
+      return false;
     }
-    cursor = master;
-  }
-  return cursor;
+    result = cursor;
+    return true;
+  });
+  return looped ? ref : result;
 }
 
 bool Manifold::equivalentTo(const Manifold &other) const {

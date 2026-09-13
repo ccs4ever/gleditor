@@ -146,7 +146,13 @@ void LinkBeams::rebuildStrands(RenderState &state) {
           .span = tp.span,
       });
     }
+    if (beamConfig_.loomBundlingEnabled) {
+      looms_ = detectTransclusionLooms(uctx, tPairs);
+    } else {
+      looms_.clear();
+    }
   } else {
+    looms_.clear();
     placeLinks(session.store().links(), versions, placed, unplaced);
     strands.clear();
     strands.reserve(placed.size());
@@ -874,6 +880,24 @@ void LinkBeams::alignPair(std::size_t fromDocIdx, std::size_t toDocIdx,
   }
 }
 
+void LinkBeams::sworphCameraTo(const glm::vec3 &targetPos,
+                               ch::Timeline &timeline) {
+  if (!renderer || !renderer->appState()) {
+    return;
+  }
+  {
+    std::scoped_lock locker(renderer->appState()->view);
+    if (!cameraDriving) {
+      cameraTarget  = renderer->appState()->view.pos;
+      cameraDriving = true;
+    }
+  }
+  cameraGoal = targetPos;
+  timeline.apply(&cameraTarget)
+      .then<ch::RampTo>(targetPos, gleditor::anim::cameraSettle,
+                        ch::EaseInOutQuad());
+}
+
 void LinkBeams::alignCellSatelloid(const Strand &strand, RenderState &state) {
   const bool docAtFrom = strand.from.isDocument();
   const auto docIdx    = docAtFrom ? strand.from.doc : strand.to.doc;
@@ -1082,6 +1106,11 @@ bool LinkBeams::picked(const render::PickingResult &pick, RenderState &state) {
   // Ours whatever happens next: a beam was clicked, and the click must not
   // fall through to the page behind it.
   if (pick.tag.clusterIndex >= strands.size()) {
+    const auto tIndex = pick.tag.clusterIndex - strands.size();
+    if (tIndex < transclusionStrands.size()) {
+      hoveredTransclusion_                = tIndex;
+      transclusionStrands[tIndex].aligned = false;
+    }
     return true;
   }
   const auto &strand = strands[pick.tag.clusterIndex];
@@ -1431,7 +1460,26 @@ void LinkBeams::drawFrame(gleditor::FrameContext &ctx) {
         }
       }
 
-      const auto colour = fade(baseBeamColour, docAlpha);
+      bool inLoom = false;
+      if (beamConfig_.loomBundlingEnabled) {
+        for (const auto &loom : looms_) {
+          if (std::find(loom.strandIndices.begin(), loom.strandIndices.end(),
+                        i) != loom.strandIndices.end()) {
+            inLoom = true;
+            break;
+          }
+        }
+      }
+
+      float alphaFactor = docAlpha;
+      if (inLoom) {
+        const bool isHovered =
+            (hoveredTransclusion_ && *hoveredTransclusion_ == i);
+        alphaFactor *=
+            (isHovered ? beamConfig_.loomHoverAlpha : beamConfig_.loomAlpha);
+      }
+
+      const auto colour = fade(baseBeamColour, alphaFactor);
       const auto tagId  = static_cast<std::uint32_t>(strands.size() + i);
 
       // Transclusion beams are solid, continuous volumetric identity bands

@@ -46,6 +46,7 @@ std::string defaultSystemDocContent(const SystemDocKind kind) {
            "pageWidthPx: \"800\"\n"
            "pageHeightPx: \"1000\"\n"
            "transclusionPrisms: \"true\"\n"
+           "transclusionLoom: \"true\"\n"
            "xanalinkRibbons: \"true\"\n"
            "physics:\n"
            "  kRepel: \"4500.0\"\n"
@@ -67,7 +68,10 @@ std::string defaultSystemDocContent(const SystemDocKind kind) {
            "  marginKerf: \"0.04\"\n"
            "  bypassDepthPerDoc: \"-20.0\"\n"
            "  bypassDepthLimit: \"-120.0\"\n"
-           "  bypassSegments: \"9\"\n";
+           "  bypassSegments: \"9\"\n"
+           "  loomBundlingEnabled: \"true\"\n"
+           "  loomAlpha: \"0.35\"\n"
+           "  loomHoverAlpha: \"1.0\"\n";
   case SystemDocKind::UI:
     return "notificationPosition: \"top-right\"\n"
            "notificationDurationMs: \"3000\"\n"
@@ -197,6 +201,9 @@ std::string defaultSystemDocSchema(const SystemDocKind kind) {
            "in pixels. Default is 70.\n"
            "transclusionPrisms: Enable Identity Gold volumetric prisms for "
            "transcluded spans. Default is true.\n"
+           "transclusionLoom: Bundle adjacent rank transclusions into "
+           "continuous "
+           "golden looms. Default is true.\n"
            "xanalinkRibbons: Enable cyan and magenta 3D optical link ribbons. "
            "Default is true.\n"
            "physics:\n"
@@ -237,7 +244,15 @@ std::string defaultSystemDocSchema(const SystemDocKind kind) {
            "  bypassDepthLimit: Deepest Z offset for bypass routing. Default "
            "is -120.0.\n"
            "  bypassSegments: Curve subdivision segment count for bypass "
-           "routing. Default is 9.\n";
+           "routing. Default is 9.\n"
+           "  loomBundlingEnabled: Group contiguous rank transclusion strands "
+           "into unified laminar looms. Default is true.\n"
+           "  loomAlpha: Semi-transparent resting alpha for golden "
+           "transclusion "
+           "looms. Default is 0.35.\n"
+           "  loomHoverAlpha: Active or hovered alpha for brightened "
+           "transclusion "
+           "strands. Default is 1.0.\n";
   case SystemDocKind::UI:
     return "Schema and Purpose\n\n"
            "Purpose:\n"
@@ -730,6 +745,8 @@ LayoutConfig parseLayoutConfig(const std::string_view yamlText) {
       cfg.documentSpacingX = parseFloat(v, cfg.documentSpacingX);
     } else if (k == "transclusionPrisms") {
       cfg.transclusionPrisms = parseBool(v, cfg.transclusionPrisms);
+    } else if (k == "transclusionLoom") {
+      cfg.transclusionLoom = parseBool(v, cfg.transclusionLoom);
     } else if (k == "xanalinkRibbons") {
       cfg.xanalinkRibbons = parseBool(v, cfg.xanalinkRibbons);
     } else if (k == "kRepel" || k == "physics.kRepel") {
@@ -777,6 +794,13 @@ LayoutConfig parseLayoutConfig(const std::string_view yamlText) {
     } else if (k == "bypassSegments" || k == "beams.bypassSegments") {
       cfg.beams.bypassSegments =
           parseUint(v, static_cast<std::uint32_t>(cfg.beams.bypassSegments));
+    } else if (k == "loomBundlingEnabled" || k == "beams.loomBundlingEnabled") {
+      cfg.beams.loomBundlingEnabled =
+          parseBool(v, cfg.beams.loomBundlingEnabled);
+    } else if (k == "loomAlpha" || k == "beams.loomAlpha") {
+      cfg.beams.loomAlpha = parseFloat(v, cfg.beams.loomAlpha);
+    } else if (k == "loomHoverAlpha" || k == "beams.loomHoverAlpha") {
+      cfg.beams.loomHoverAlpha = parseFloat(v, cfg.beams.loomHoverAlpha);
     }
   };
 
