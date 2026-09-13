@@ -20,50 +20,29 @@
 #include <map>
 #include <vector>
 
+#include "common/xanadu/universal_link_endpoint.hpp"
 #include "ops.hpp"
 #include "spool.hpp"
 #include "version.hpp"
 
 namespace xanadu {
 
-/// One end of a link, found in a document that is open.
-struct LinkEnd {
-  std::uint32_t doc{};   ///< Index among the open documents.
-  std::uint32_t start{}; ///< Byte range of the content within that document.
-  std::uint32_t end{};
-  bool operator==(const LinkEnd &) const = default;
-};
+/// One end of a link (re-exported UniversalLinkEnd).
+using LinkEnd = UniversalLinkEnd;
 
-/// A link whose two ends both landed in open documents: one connection to
-/// draw.
-struct LinkedPair {
-  std::uint64_t link{};
-  LinkType type{LinkType::Comment};
-  ProminenceTier tier{ProminenceTier::Author};
-  LinkEnd from; ///< The left list, which is the end the link was attached at.
-  LinkEnd to;   ///< The right list, which is what it points at.
-};
+/// A link whose two ends both landed in open views (re-exported
+/// UniversalLinkedPair).
+using LinkedPair = UniversalLinkedPair;
 
-/// A link with one end in an open document and the other in none -- the
-/// ordinary case, since a link is made to content and not to whatever happens
-/// to be open.
-struct HalfLink {
-  std::uint64_t link{};
-  LinkType type{LinkType::Comment};
-  ProminenceTier tier{ProminenceTier::Author};
-  LinkEnd here;
-  /// The spans of the end that is nowhere, for finding a version showing it.
-  std::vector<PrimediaSpan> elsewhere;
-};
+/// A link with one end in an open view and the other in none (re-exported
+/// UniversalHalfLink).
+using HalfLink = UniversalHalfLink;
 
-/// A transclusion where identical primedia spans appear across distinct open
-/// documents.
-struct TransclusionPair {
-  LinkEnd from;
-  LinkEnd to;
-  PrimediaSpan span;
-  bool operator==(const TransclusionPair &) const = default;
-};
+/// An emergent transclusion pair (re-exported UniversalTransclusionPair).
+using TransclusionPair = UniversalTransclusionPair;
+
+/// High-density 32-byte transclusion pair.
+using CompactTransclusion = CompactTransclusionPair;
 
 /**
  * @brief Discover emergent transclusions (shared primedia spans) between open
