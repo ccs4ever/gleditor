@@ -23,6 +23,7 @@
 
 #include "xudu/core/anchor_lanes.hpp"
 #include "xudu/core/framing.hpp"
+#include "xudu/satelloid.hpp"
 #include "xudu/tenuous_tether.hpp"
 
 namespace xudu {
@@ -873,6 +874,130 @@ void LinkBeams::alignPair(std::size_t fromDocIdx, std::size_t toDocIdx,
   }
 }
 
+void LinkBeams::alignCellSatelloid(const Strand &strand, RenderState &state) {
+  const bool docAtFrom = strand.from.isDocument();
+  const auto docIdx    = docAtFrom ? strand.from.doc : strand.to.doc;
+  const auto cellRef   = docAtFrom ? strand.to.cell() : strand.from.cell();
+  const auto &cellAnch =
+      docAtFrom ? strand.toCellAnchor : strand.fromCellAnchor;
+  const auto &docAnch = docAtFrom ? strand.fromAnchor : strand.toAnchor;
+
+  if (docIdx >= state.docs.size() || !cellAnch || !docAnch) {
+    return;
+  }
+
+  const auto &doc = state.docs[docIdx];
+  if (!doc) {
+    return;
+  }
+
+  const auto anchorWorld =
+      doc->worldPoint(docAnch->pageIndex, docAnch->x, docAnch->y);
+  if (!anchorWorld) {
+    return;
+  }
+
+  const glm::vec3 docPos(doc->getModel()[3]);
+  const float docHalfW = (doc->page(0) ? (doc->page(0)->widthPixels() * 0.5F)
+                                       : fallbackDocHalfWidth) *
+                         Doc::pixelsToWorld;
+
+  // 1. Setup / update TensionBody for cell in tension layout engine
+  TensionBody cellBody;
+  cellBody.targetId        = static_cast<std::size_t>(cellRef);
+  cellBody.targetKind      = LinkTargetKind::ZigzagCell;
+  cellBody.restingPosition = cellAnch->position;
+  cellBody.position        = cellAnch->position;
+  cellBody.width           = 24.0F;
+  cellBody.height          = 14.0F;
+  cellBody.isForeground    = true;
+  cellBody.isFlying        = true;
+  cellBody.mass            = tensionEngine_.params().satelloidMass;
+  cellBody.pinned          = false;
+
+  if (const auto *existing = tensionEngine_.findCellBody(cellRef)) {
+    cellBody.position = existing->position;
+    cellBody.velocity = existing->velocity;
+  }
+
+  tensionEngine_.setBody(cellBody);
+
+  // Document body (pinned as reference)
+  TensionBody docBody;
+  docBody.docIndex        = docIdx;
+  docBody.targetKind      = LinkTargetKind::Document;
+  docBody.position        = docPos;
+  docBody.restingPosition = docPos;
+  docBody.width           = docHalfW * 2.0F;
+  docBody.height = doc->page(0)
+                       ? (doc->page(0)->heightPixels() * Doc::pixelsToWorld)
+                       : 70.0F;
+  docBody.isForeground = true;
+  docBody.pinned       = true;
+  tensionEngine_.setBody(docBody);
+
+  // 2. Add collinear alignment constraint
+  TensionConstraint constraint;
+  constraint.fromDoc     = docIdx;
+  constraint.fromKind    = LinkTargetKind::Document;
+  constraint.toTarget    = static_cast<std::size_t>(cellRef);
+  constraint.toKind      = LinkTargetKind::ZigzagCell;
+  constraint.nearAnchorY = anchorWorld->y - docPos.y;
+  constraint.farAnchorY  = 0.0F;
+  constraint.targetGap   = tensionEngine_.params().satelloidGap;
+  constraint.prominence  = 1.0F;
+  constraint.active      = true;
+  tensionEngine_.addConstraint(constraint);
+
+  // 3. Step physics simulation if enabled
+  if (physicsEnabled_) {
+    constexpr float dt = 0.016F;
+    for (int step = 0; step < 20; ++step) {
+      tensionEngine_.step(dt);
+    }
+  }
+
+  const auto *solved = tensionEngine_.findCellBody(cellRef);
+  const glm::vec3 solvedPos =
+      solved ? solved->position
+             : glm::vec3(docPos.x + docHalfW +
+                             tensionEngine_.params().satelloidGap,
+                         anchorWorld->y, 0.0F);
+
+  // 4. Update SatelloidOverlay
+  if (satelloidOverlay_ != nullptr) {
+    CellSatelloid sat;
+    sat.cellRef    = cellRef;
+    sat.originPos  = cellAnch->position;
+    sat.currentPos = solvedPos;
+    sat.targetPos =
+        glm::vec3(docPos.x + docHalfW + tensionEngine_.params().satelloidGap,
+                  anchorWorld->y, 0.0F);
+    sat.width       = 24.0F;
+    sat.height      = 14.0F;
+    sat.dimName     = "d.sequence";
+    sat.accentColor = 0x38BDF8FF; // Cyan
+    sat.alpha       = 1.0F;
+    sat.active      = true;
+    satelloidOverlay_->setSatelloid(sat);
+  }
+
+  // 5. Register tenuous parent tether in TenuousTetherOverlay
+  if (tetherOverlay_ != nullptr && cellAnch->position.z < -5.0F) {
+    FlyingTetherAnchor tether;
+    tether.targetId   = static_cast<std::size_t>(cellRef);
+    tether.targetKind = LinkTargetKind::ZigzagCell;
+    tether.cellRef    = cellRef;
+    tether.originPos  = cellAnch->position;
+    tether.currentPos = solvedPos;
+    tether.width      = 24.0F;
+    tether.height     = 14.0F;
+    tether.colour     = 0x38BDF844;
+    tether.active     = true;
+    tetherOverlay_->setTether(tether);
+  }
+}
+
 bool LinkBeams::danglingOutstanding(const RenderState &state) const {
   // Exactly the ones openDangling() will act on -- the same test it makes. A
   // half-link it would skip on every frame is not work outstanding, and
@@ -936,6 +1061,10 @@ void LinkBeams::traverse(const Strand &strand, RenderState &state) {
   if (there.isCell()) {
     std::cout << "xudu: follow link " << strand.link << " to cell #"
               << there.cell() << "\n";
+    if (satelloidOverlay_ != nullptr) {
+      satelloidOverlay_->triggerPulse(there.cell());
+    }
+    alignCellSatelloid(strand, state);
     return;
   }
   if (there.doc >= state.docs.size()) {
@@ -1161,9 +1290,11 @@ void LinkBeams::drawFrame(gleditor::FrameContext &ctx) {
       band(*nearEdge, *farEdge, docSpan, colour, tagId, linkPhase);
 
       if (strand.from.isDocument()) {
+        const std::uint32_t marginCol =
+            strand.to.isCell() ? 0x38BDF8FF : colour;
         allAnchors.push_back(MarginAnchor{
             .edge         = *nearEdge,
-            .colour       = colour,
+            .colour       = marginCol,
             .tagId        = tagId,
             .farEnd       = false,
             .isActive     = isAct,
@@ -1176,9 +1307,11 @@ void LinkBeams::drawFrame(gleditor::FrameContext &ctx) {
       }
 
       if (strand.to.isDocument()) {
+        const std::uint32_t marginCol =
+            strand.from.isCell() ? 0x38BDF8FF : colour;
         allAnchors.push_back(MarginAnchor{
             .edge         = *farEdge,
-            .colour       = colour,
+            .colour       = marginCol,
             .tagId        = tagId,
             .farEnd       = true,
             .isActive     = isAct,
@@ -1203,14 +1336,18 @@ void LinkBeams::drawFrame(gleditor::FrameContext &ctx) {
         }
       }
 
-      if (sworph && !strand.aligned && strand.from.isDocument() &&
-          strand.to.isDocument()) {
-        if (moved) {
-          stillToAlign = true;
-        } else {
+      if (sworph && !strand.aligned) {
+        if (strand.from.isDocument() && strand.to.isDocument()) {
+          if (moved) {
+            stillToAlign = true;
+          } else {
+            strand.aligned = true;
+            align(strand, state, ctx.timeline);
+            moved = true;
+          }
+        } else if (strand.from.isCell() || strand.to.isCell()) {
           strand.aligned = true;
-          align(strand, state, ctx.timeline);
-          moved = true;
+          alignCellSatelloid(strand, state);
         }
       }
     }

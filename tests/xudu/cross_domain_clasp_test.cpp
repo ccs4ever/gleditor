@@ -67,13 +67,13 @@ TEST(CrossDomainClaspTest, LinkForgeCrossDomainAssemblyInStore) {
   Store store;
   const auto v0 =
       store.insert(MicroversionId{}, 0, "Doc span: Literary Machines");
-  const auto v1 = store.insert(v0, 100, "Cell span: Parallel Dimension");
+  const auto v1 = store.insert(v0, 27, "Cell span: Parallel Dimension");
 
   const auto docText  = store.rebuild(v0);
   const auto cellText = store.rebuild(v1);
 
-  const auto leftSpans  = docText.spansFor(0, 8);    // "Doc span"
-  const auto rightSpans = cellText.spansFor(100, 9); // "Cell span"
+  const auto leftSpans  = docText.spansFor(0, 8);   // "Doc span"
+  const auto rightSpans = cellText.spansFor(27, 9); // "Cell span"
 
   Link claspLink;
   claspLink.type  = LinkType::Quotation;

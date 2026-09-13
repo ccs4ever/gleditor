@@ -50,6 +50,7 @@
 namespace xudu {
 
 class TenuousTetherOverlay;
+class SatelloidOverlay;
 
 /**
  * @class LinkBeams
@@ -172,6 +173,9 @@ public:
   void setTetherOverlay(TenuousTetherOverlay *overlay) noexcept {
     tetherOverlay_ = overlay;
   }
+  void setSatelloidOverlay(SatelloidOverlay *overlay) noexcept {
+    satelloidOverlay_ = overlay;
+  }
   void setBeamConfig(const xanadu::BeamConfig &cfg) noexcept {
     beamConfig_ = cfg;
   }
@@ -264,6 +268,9 @@ private:
                  const std::optional<Doc::Anchor> &toEndAnchor,
                  std::optional<std::uint64_t> linkId, RenderState &state,
                  ch::Timeline &timeline);
+  /// Bring a flying Cell Satelloid into collinear reading alignment beside the
+  /// active document text line.
+  void alignCellSatelloid(const Strand &strand, RenderState &state);
   /// Whether any half-link is still waiting to be looked for; see busy().
   [[nodiscard]] bool danglingOutstanding(const RenderState &state) const;
   /**
@@ -434,6 +441,7 @@ private:
 
   TensionLayoutEngine tensionEngine_;
   TenuousTetherOverlay *tetherOverlay_{nullptr};
+  SatelloidOverlay *satelloidOverlay_{nullptr};
   bool physicsEnabled_{false};
   xanadu::BeamConfig beamConfig_{};
 };

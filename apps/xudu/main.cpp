@@ -66,6 +66,7 @@
 #include "xudu/kinetic_tether_overlay.hpp"
 #include "xudu/page_break_overlay.hpp"
 #include "xudu/pouch_drawer.hpp"
+#include "xudu/satelloid.hpp"
 #include "xudu/session.hpp"
 #include "xudu/swarm_telescope_overlay.hpp"
 #include "xudu/tenuous_tether.hpp"
@@ -99,6 +100,7 @@ namespace crypto = xudu::crypto;
 using xudu::PrimediaSpan;
 using xudu::Provenance;
 using xudu::PublicationEntry;
+using xudu::SatelloidOverlay;
 using xudu::Session;
 using xudu::SwarmCatalog;
 using xudu::SwarmTelescopeOverlay;
@@ -3030,6 +3032,8 @@ int main(const int argc, char **argv) {
     }
     TenuousTetherOverlay tenuousTetherOverlay(renderer, nullptr);
     links.setTetherOverlay(&tenuousTetherOverlay);
+    SatelloidOverlay satelloidOverlay(renderer);
+    links.setSatelloidOverlay(&satelloidOverlay);
     links.setOpener([&views](const MicroversionId &version) {
       views.showAlongside(version);
     });
@@ -3062,6 +3066,8 @@ int main(const int argc, char **argv) {
     renderer->addFrameContributor(&map);
     renderer->addFrameContributor(&links);
     renderer->addFrameContributor(&tenuousTetherOverlay);
+    renderer->addFrameContributor(&satelloidOverlay);
+    renderer->addPickObserver(&satelloidOverlay);
     renderer->addFrameContributor(&images);
     renderer->addFrameContributor(&views);
     renderer->addFrameContributor(radialMenu.get());
