@@ -1,7 +1,7 @@
 # Xudu-Zigzag Unified Hypermedia Bridge: Universal Links, Transclusions, and Formatting
 
-**Document Version:** 1.2\
-**Status:** Approved with Dialectical Refinements & Intertwingled UI Specification\
+**Document Version:** 1.3\
+**Status:** Architecturally Synthesized & Sized\
 **Related Documents:**
 
 - [`store-slice-convergence.md`](store-slice-convergence.md) — Unified storage, microversion DAG,
@@ -16,6 +16,8 @@
   tension physics, and intertwingle layout
 - [`ui_workflow_zigzag_multiview.md`](ui_workflow_zigzag_multiview.md) — Multidimensional cell
   projections, Cell Content View, and Topology View
+- [`system-xanadocs-customization-and-metasystem.md`](system-xanadocs-customization-and-metasystem.md)
+  — Dynamic runtime configuration and system doc schemas
 
 ______________________________________________________________________
 
@@ -43,8 +45,8 @@ However, architectural friction points and seams persist across the higher-level
    lattices causes disorientation ("teleportation shock"), violating Ted Nelson's foundational
    hypermedia rule: *"The whole point is to see both ends."*
 
-This document formalizes the architectural and UI blueprint to bridge these seams into a single,
-seamless, content-addressed continuum.
+This document formalizes the architectural, algorithmic, and UI blueprint to bridge these seams into
+a single, seamless, content-addressed continuum.
 
 ______________________________________________________________________
 
@@ -87,6 +89,26 @@ Cross-domain link navigation must never execute abrupt camera jump-cuts. When a 
 Xanadoc and a Zigzag cell is selected or hovered, the far end is brought into side-by-side reading
 alignment via the **3-Way Tension Solver** ($F_{\text{align}}$) while maintaining a tenuous
 background tether ($\alpha \approx 0.25$) to its native topological context.
+
+### 2.6 Modular Layer Inversion Protection
+
+- `src/` and `include/gleditor/` must never include headers from `apps/`.
+- `apps/common/xanadu/` is an independent domain core and must never include `apps/xudu/` or
+  `apps/zigzag/`.
+- Cross-domain interactions (such as `LinkBeams` querying Zigzag cell coordinates) must be decoupled
+  via abstract functional delegates (`CellAnchorResolver`), maintaining strict compilation
+  boundaries.
+
+### 2.7 Dynamic Configuration & Magic Number Elimination
+
+Zero hardcoded magic parameters in application logic. Physical spring constants ($k_{\text{align}},
+k_{\text{tether}}, k_{\text{repel}}$) and visual layout metrics (gap distances, background depth,
+tether offsets) must provide typed `constexpr` fallback defaults in headers, while reading live
+dynamic overrides from:
+
+- In `xudu`: live system xanadocs (`system://layout`, `system://ui`) with Schema & Purpose Page and
+  User Notes Page, styled with native format links (`LinkType::Format`, no markdown).
+- In `zigzag`: system slices (`d.schema`, `d.notes` ranks).
 
 ______________________________________________________________________
 
@@ -434,11 +456,26 @@ an outline along `d.sequence`):
   - In Zigzag: Pressing `Enter` or clicking `[📖]` smoothly scrolls the active Xanadoc to the
     passage, framing it with a soft golden focal bracket.
 
+#### 3.4.7 Decoupled Cross-Domain Anchor Resolution Protocol
+
+To preserve Rule 2.6 (no circular dependencies between `apps/xudu` and `apps/zigzag`), `LinkBeams`
+resolves cell coordinates through an abstract functional callback rather than direct header
+coupling:
+
+```cpp
+using CellAnchorResolver = std::function<std::optional<Doc::Anchor>(zigzag::CellRef cell)>;
+```
+
+This mirrors the proven `MediaRectResolver` architecture in
+[`apps/xudu/beams.hpp`](../apps/xudu/beams.hpp). `LinkBeams` manages 3D beam vertices solely through
+`Doc::Anchor` coordinates, while the application shell (`main.cpp`) injects the resolver connecting
+to the active `ZigzagVisualizer`.
+
 ______________________________________________________________________
 
-## 4. Tripartite Dialectic Analysis & Recommendations
+## 4. Tripartite & Architectural Swarm Analysis
 
-This specification was subjected to the tripartite deep reasoning protocol:
+This specification was subjected to the multi-agent system architecture and deep reasoning protocol:
 
 ### 4.1 Ideological Purist Evaluation (`xanadu_purist`)
 
@@ -486,9 +523,24 @@ This specification was subjected to the tripartite deep reasoning protocol:
   - *Laminar Transclusion Looms*: Ribbon bundling eliminates visual entanglement across parallel
     rank walks.
 
+### 4.5 System Architect Synthesis (`system_architect`)
+
+- **Verdict**: Approved with structural stage decoupling and configuration governance.
+- **Architectural Guardrails Enforced**:
+  - *Stage Decoupling*: Decomposed the massive Stage 4 into two distinct, atomic, verifiable phases
+    (Stage 4 for linking and morphic GPU beams; Stage 5 for 3-way tension physics and Satelloids).
+  - *Decoupled Anchor Protocol*: Mandated `CellAnchorResolver` callback in `LinkBeams` to prevent
+    circular header coupling between `apps/xudu` and `apps/zigzag`.
+  - *Configuration Governance*: Replaced hardcoded physics/geometry literals with dynamic system
+    xanadoc (`system://layout`, `system://ui`) and system slice bindings, providing typed
+    `constexpr` fallback defaults in core headers.
+
 ______________________________________________________________________
 
 ## 5. Phased Implementation Stages
+
+The implementation roadmap is balanced into **six atomic, verifiable stages** to minimize cognitive
+overhead and enable continuous integration verification:
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────────┐
@@ -515,21 +567,27 @@ ______________________________________________________________________
 └──────────────────────────────────────┬──────────────────────────────────────┘
                                        │
 ┌──────────────────────────────────────▼──────────────────────────────────────┐
-│  STAGE 4: Cross-Domain Forging, Morphic Beams, & Flying Cell Satelloids     │
+│  STAGE 4: Cross-Domain Clasp Forging & Morphic Optical Beams                │
 │  - Extend PouchItem & LinkForgeWidget with dual-card UI & laser guides      │
+│  - Implement decoupled CellAnchorResolver callback in LinkBeams             │
 │  - Morphic butterfly ribbons (page baseline -> cell face, Catmull-Rom twist)│
-│  - Integrate Cell Satelloids & tenuous Bezier tethers into 3-Way Tension    │
 │  - Two-tier anchor resolution in LinkBeams (2D Doc page <-> 3D cell center) │
+└──────────────────────────────────────┬──────────────────────────────────────┘
+                                       │
+┌──────────────────────────────────────▼──────────────────────────────────────┐
+│  STAGE 5: Intertwingled 3-Way Tension Solver & Flying Cell Satelloids       │
+│  - Generalize TensionBody & TensionConstraint for TargetKind::ZigzagCell    │
+│  - Implement flying Cell Satelloids with collinear Y-alignment physics      │
+│  - Implement tenuous quadratic Bezier parent tethers (depth Z = -40px)      │
 │  - Bidirectional navigation: Alt+Click pulse & Enter autoscroll focus rings │
 └──────────────────────────────────────┬──────────────────────────────────────┘
                                        │
 ┌──────────────────────────────────────▼──────────────────────────────────────┐
-│  STAGE 5: Braided Transclusion Looms, Dual-Continuum, & DRY Consolidation   │
+│  STAGE 6: Braided Transclusion Looms, Dual-Continuum, & Architecture Polish │
 │  - Implement Braided Transclusion Loom bundling in GPU beam pipeline        │
 │  - Dual-Continuum depth tiering (Z = 0 foreground vs Z = -40px background)  │
-│  - Unify 3D Beams rendering pipeline across Xudu and Zigzag                 │
 │  - Consolidate redundant rank-walk implementations (5 places -> 1 helper)   │
-│  - Consolidate text resolution routines and reconcile visualizer units      │
+│  - Bind layout metrics to dynamic system xanadocs & system slices           │
 └─────────────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -544,9 +602,11 @@ ______________________________________________________________________
 | **Cache Alignment**       | `static_assert(sizeof(...) == 32)`              | Exactly 32 bytes, 2 pairs per 64-byte cache line                                             |
 | **Transclusion Stabbing** | Unit test with mixed `Version` and `Manifold`   | Discovers Doc-Doc, Doc-Cell, and Cell-Cell transclusions in $O(\log_8 N + K)$                |
 | **Cell Formatting**       | Unit test on `FormatResolver` + Visualizer test | `LinkType::Format` renders bold/italic text quads in Zigzag cells                            |
+| **Anchor Decoupling**     | Static dependency audit (`make -n`)             | `LinkBeams` compiles without including `zigzag_visualizer.hpp`                               |
+| **Morphic Ribbon Twist**  | Visual test in `./tools/compare-backends.sh`    | Normal vector rotates smoothly from page to cell face without artifacts                      |
 | **Satelloid Physics**     | Tension solver convergence unit test            | Satelloids settle collinear to text line within $\pm 0.5\,\text{px}$ in $\le 300\,\text{ms}$ |
 | **Tether Bezier Math**    | Continuity evaluation test                      | Quadratic Bezier tether renders continuously without GPU pipeline breaks                     |
-| **Morphic Ribbon Twist**  | Visual test in `./tools/compare-backends.sh`    | Normal vector rotates smoothly from page to cell face without artifacts                      |
+| **Transclusion Loom**     | GPU draw call profiling                         | Bundles $K$ adjacent rank transclusions into 1 instanced strip call                          |
 | **Cross-Domain Linking**  | End-to-end clasp forging test                   | Xanadoc $\leftrightarrow$ Cell links write valid `OpKind::Link` without disk format changes  |
 | **Render-path latency** | Latency probe on dual-view render loop | Anchor transforms and ribbon staging avoid per-frame line searches |
 | **Headless Build & Lint** | `make test && make format-check && make lint`   | Zero test regressions; clean exit code 0                                                     |
