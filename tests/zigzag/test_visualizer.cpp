@@ -543,3 +543,21 @@ TEST(ZigzagVisualizerTest, FormattedCellDecoratedRangesInTopology) {
       gleditor::hasDecoration(it->second.decorated_ranges[0].decorations,
                               gleditor::Decoration::Italic));
 }
+
+TEST(ZigzagVisualizerTest, VisualizerCellAnchorGeneration) {
+  ZigzagVisualizer viz("Sans 12");
+  const auto root = viz.focusCellId();
+  ASSERT_NE(root, 0U);
+
+  const auto anchor = viz.cellAnchor(static_cast<CellRef>(root));
+  ASSERT_TRUE(anchor.has_value());
+  EXPECT_GT(anchor->width, 0.0F);
+  EXPECT_GT(anchor->height, 0.0F);
+  EXPECT_GT(anchor->lineHeight, 0.0F);
+  EXPECT_FLOAT_EQ(anchor->normal.x, 0.0F);
+  EXPECT_FLOAT_EQ(anchor->normal.y, 0.0F);
+  EXPECT_FLOAT_EQ(anchor->normal.z, 1.0F);
+
+  // Non-existent cell returns nullopt
+  EXPECT_FALSE(viz.cellAnchor(static_cast<CellRef>(999999U)).has_value());
+}

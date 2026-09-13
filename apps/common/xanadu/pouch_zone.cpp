@@ -199,6 +199,59 @@ PouchItem PouchManager::dropSpan(const std::string_view zoneId,
   return item;
 }
 
+PouchItem PouchManager::dropCell(const std::string_view zoneId,
+                                 const PrimediaSpan &span,
+                                 std::string previewText,
+                                 const std::uint32_t cellRef,
+                                 const std::string_view rankCoord,
+                                 const std::uint32_t sliceIndex) {
+  DropZone *zone = zoneById(zoneId);
+  if (!zone) {
+    if (!zones_.empty()) {
+      zone = zones_.front().get();
+    } else {
+      initDefaultZones();
+      zone = zones_.front().get();
+    }
+  }
+
+  // Record transclusion into the system store
+  currentVersion_ = store_->insertSpan(currentVersion_, 0, span);
+
+  store_->setVersionAnnotation(
+      currentVersion_,
+      VersionAnnotation{
+          .alias       = std::string(zone->id()),
+          .description = previewText,
+          .tag         = "pouch-cell-drop",
+          .timestamp   = std::to_string(
+              std::chrono::duration_cast<std::chrono::seconds>(
+                  std::chrono::system_clock::now().time_since_epoch())
+                  .count()),
+      });
+
+  PouchItem item{
+      .itemId          = nextItemId_++,
+      .span            = span,
+      .previewText     = std::move(previewText),
+      .originVersion   = currentVersion_,
+      .originDocIndex  = 0,
+      .originCharStart = 0,
+      .originCharEnd   = static_cast<std::uint32_t>(span.length),
+      .timestampUtc    = static_cast<std::uint64_t>(
+          std::chrono::duration_cast<std::chrono::seconds>(
+              std::chrono::system_clock::now().time_since_epoch())
+              .count()),
+      .originKind       = PouchOriginKind::ZigzagCell,
+      .originCell       = cellRef,
+      .originSliceIndex = sliceIndex,
+      .originRankCoord  = std::string(rankCoord),
+  };
+
+  zone->addItem(item);
+  return item;
+}
+
 bool PouchManager::dismissItem(const std::uint64_t itemId) {
   for (const auto &zone : zones_) {
     const auto &items = zone->items();

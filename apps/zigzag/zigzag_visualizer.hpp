@@ -5,6 +5,7 @@
 #ifndef ZIGZAG_VISUALIZER_HPP
 #define ZIGZAG_VISUALIZER_HPP
 
+#include "common/xanadu/link_layout.hpp"
 #include "common/xanadu/store.hpp"
 #include "core/manifold.hpp"
 #include "core/unified_transclusion_engine.hpp"
@@ -177,6 +178,8 @@ public:
   /// to the verbs a person invokes -- inserting a cell, making a link.
   [[nodiscard]] DimRef dimensionRef(const DimID &name) const;
   [[nodiscard]] CellID focusCellId() const { return accursed_cell_focus_; }
+  [[nodiscard]] std::optional<xanadu::CellAnchor>
+  cellAnchor(CellRef cell) const;
 
   /// How many operations this slice has recorded. The document's size in
   /// hypertime, and what a test watches to catch an edit that records more

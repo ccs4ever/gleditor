@@ -20,6 +20,8 @@
 #include <map>
 #include <vector>
 
+#include <glm/vec3.hpp>
+
 #include "common/xanadu/universal_link_endpoint.hpp"
 #include "ops.hpp"
 #include "spool.hpp"
@@ -47,6 +49,21 @@ using TransclusionPair = UniversalTransclusionPair;
 
 /// High-density 32-byte transclusion pair.
 using CompactTransclusion = CompactTransclusionPair;
+
+/**
+ * @struct CellAnchor
+ * @brief World-space anchor and geometry for a multidimensional Zigzag cell.
+ *
+ * Provides decoupled geometric resolution for LinkBeams and morphic butterfly
+ * ribbons without requiring direct dependencies on ZigzagVisualizer.
+ */
+struct CellAnchor {
+  glm::vec3 position{0.0F, 0.0F, 0.0F}; ///< 3D center in world space
+  float width{180.0F};                  ///< Visual quad width
+  float height{60.0F};                  ///< Visual quad height
+  float lineHeight{14.0F};              ///< Line height within cell
+  glm::vec3 normal{0.0F, 0.0F, 1.0F};   ///< Surface normal vector
+};
 
 /**
  * @struct UniversalViewContext

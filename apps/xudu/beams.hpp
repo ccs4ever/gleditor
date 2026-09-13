@@ -94,11 +94,25 @@ public:
       const Doc &doc, std::size_t storeIndex, const MicroversionId &version,
       std::uint32_t docOffset)>;
 
+  using CellAnchorResolver =
+      std::function<std::optional<CellAnchor>(zigzag::CellRef cell)>;
+
   LinkBeams(Session &aSession, RendererRef aRenderer);
   ~LinkBeams() override;
 
   void setMediaRectResolver(MediaRectResolver resolver) {
     mediaRectResolver = std::move(resolver);
+  }
+
+  void setCellAnchorResolver(CellAnchorResolver resolver) {
+    cellAnchorResolver = std::move(resolver);
+  }
+
+  void setManifoldViews(std::vector<const zigzag::Manifold *> views,
+                        std::vector<zigzag::CellRef> foci = {}) {
+    manifoldViews_ = std::move(views);
+    manifoldFoci_  = std::move(foci);
+    strandsRebuilt = true;
   }
 
   void deviceReady(render::RenderDevice &device,
@@ -199,6 +213,8 @@ private:
     std::optional<Doc::Anchor> toAnchor;
     std::optional<Doc::Anchor> fromEndAnchor;
     std::optional<Doc::Anchor> toEndAnchor;
+    std::optional<CellAnchor> fromCellAnchor;
+    std::optional<CellAnchor> toCellAnchor;
     /// Whether the far document has already been brought alongside for this
     /// link. Once per link per generation: a document the reader has since
     /// moved should stay moved.
@@ -217,6 +233,8 @@ private:
     std::optional<Doc::Anchor> toAnchor;
     std::optional<Doc::Anchor> fromEndAnchor;
     std::optional<Doc::Anchor> toEndAnchor;
+    std::optional<CellAnchor> fromCellAnchor;
+    std::optional<CellAnchor> toCellAnchor;
     bool aligned{};
   };
 
@@ -309,6 +327,9 @@ private:
   edgeOf(const Doc &doc, const std::optional<Doc::Anchor> &startAnchor,
          const std::optional<Doc::Anchor> &endAnchor, bool towardsRight);
 
+  [[nodiscard]] static std::optional<Edge> edgeOf(const CellAnchor &anchor,
+                                                  bool towardsRight);
+
   /**
    * @brief Draw the connection between two link ends as a band of strands.
    *
@@ -356,6 +377,9 @@ private:
   RendererRef renderer;
   Opener opener;
   MediaRectResolver mediaRectResolver;
+  CellAnchorResolver cellAnchorResolver;
+  std::vector<const zigzag::Manifold *> manifoldViews_;
+  std::vector<zigzag::CellRef> manifoldFoci_;
   std::unique_ptr<gleditor::Beams> beams;
   std::vector<Strand> strands;
   std::vector<Dangling> dangling;

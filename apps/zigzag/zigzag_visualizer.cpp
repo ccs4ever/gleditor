@@ -1321,4 +1321,33 @@ bool ZigzagVisualizer::performAction(const std::uint64_t nodeId,
   return false;
 }
 
+std::optional<xanadu::CellAnchor>
+ZigzagVisualizer::cellAnchor(const CellRef cell) const {
+  const auto it = visible_cells_.find(static_cast<CellID>(cell));
+  if (it == visible_cells_.end()) {
+    return std::nullopt;
+  }
+  const auto &c = it->second;
+  if (c.current_alpha < 0.02F && c.target_alpha < 0.02F) {
+    return std::nullopt;
+  }
+  const bool isFocus     = (static_cast<CellID>(cell) == accursed_cell_focus_);
+  const float nodeWidth  = (view_mode_ == ViewMode::CellContent)
+                               ? (isFocus ? 260.0F : 200.0F)
+                               : (isFocus ? 140.0F : 110.0F);
+  const float imageBonus = c.is_image ? (isFocus ? 50.0F : 40.0F) : 0.0F;
+  const float nodeHeight =
+      ((view_mode_ == ViewMode::CellContent) ? (isFocus ? 95.0F : 70.0F)
+                                             : (isFocus ? 54.0F : 45.0F)) +
+      imageBonus;
+
+  return xanadu::CellAnchor{
+      .position   = c.current_pos,
+      .width      = nodeWidth,
+      .height     = nodeHeight,
+      .lineHeight = 16.0F,
+      .normal     = glm::vec3(0.0F, 0.0F, 1.0F),
+  };
+}
+
 } // namespace zigzag
