@@ -86,6 +86,13 @@ public:
   }
   std::vector<zigzag::DirectedDim> &axes() noexcept { return axes_; }
 
+  [[nodiscard]] const std::vector<std::size_t> &extents() const noexcept {
+    return extents_;
+  }
+  void setExtents(std::vector<std::size_t> extents) noexcept {
+    extents_ = std::move(extents);
+  }
+
   /// Valence: number of dimensions indexed along (APL rank).
   [[nodiscard]] std::size_t valence() const noexcept { return axes_.size(); }
 
@@ -95,8 +102,25 @@ public:
   [[nodiscard]] bool isRagged() const noexcept { return isRagged_; }
   void setRagged(bool ragged) noexcept { isRagged_ = ragged; }
 
+  [[nodiscard]] bool isEnclosed() const noexcept { return isEnclosed_; }
+  [[nodiscard]] const std::shared_ptr<VplView> &enclosedView() const noexcept {
+    return enclosedView_;
+  }
+  void enclose(std::shared_ptr<VplView> inner) noexcept {
+    isEnclosed_   = true;
+    enclosedView_ = std::move(inner);
+  }
+
   [[nodiscard]] double scalarFloat() const noexcept { return scalarFloat_; }
   [[nodiscard]] std::int64_t scalarInt() const noexcept { return scalarInt_; }
+  void setScalarPayload(std::int64_t val) noexcept {
+    scalarInt_   = val;
+    scalarFloat_ = static_cast<double>(val);
+  }
+  void setScalarPayload(double val) noexcept {
+    scalarFloat_ = val;
+    scalarInt_   = static_cast<std::int64_t>(val);
+  }
   [[nodiscard]] const std::string &scalarString() const noexcept {
     return scalarString_;
   }
@@ -105,7 +129,12 @@ public:
    * @brief Transpose (⍉ / |:): permutes the axis list. O(1), no cell
    * allocations. Monadic transpose reverses the axis list.
    */
-  void transpose() { std::reverse(axes_.begin(), axes_.end()); }
+  void transpose() {
+    std::reverse(axes_.begin(), axes_.end());
+    if (!extents_.empty()) {
+      std::reverse(extents_.begin(), extents_.end());
+    }
+  }
 
   /**
    * @brief Dyadic transpose: reorders axes according to given permutation
@@ -117,11 +146,21 @@ public:
     }
     std::vector<zigzag::DirectedDim> newAxes;
     newAxes.reserve(axes_.size());
+    std::vector<std::size_t> newExtents;
+    if (!extents_.empty() && extents_.size() == axes_.size()) {
+      newExtents.reserve(extents_.size());
+    }
     for (std::size_t p : permutation) {
       if (p >= axes_.size()) return false;
       newAxes.push_back(axes_[p]);
+      if (!newExtents.empty()) {
+        newExtents.push_back(extents_[p]);
+      }
     }
     axes_ = std::move(newAxes);
+    if (!newExtents.empty()) {
+      extents_ = std::move(newExtents);
+    }
     return true;
   }
 
@@ -152,6 +191,9 @@ public:
   shape(const zigzag::ArenaManifold &arena) const {
     if (isScalar_) {
       return {};
+    }
+    if (!extents_.empty()) {
+      return extents_;
     }
     if (axes_.empty() || origin_ == zigzag::noCell) {
       return {0};
@@ -245,8 +287,10 @@ public:
     }
 
     if (axes_.size() == 1) {
+      auto sh             = shape(arena);
       zigzag::CellRef cur = origin_;
-      std::size_t limit   = arena.cellCount() + 1;
+      std::size_t limit   = sh.empty() ? arena.cellCount() + 1
+                                       : std::min(sh[0], arena.cellCount() + 1);
       while (cur != zigzag::noCell && limit-- > 0) {
         cells.push_back(cur);
         cur = arena.linked(cur, axes_[0].dim, axes_[0].dir);
@@ -279,7 +323,11 @@ public:
 private:
   zigzag::CellRef origin_{zigzag::noCell};
   std::vector<zigzag::DirectedDim> axes_{};
+  std::vector<std::size_t> extents_{};
   bool isRagged_{false};
+
+  bool isEnclosed_{false};
+  std::shared_ptr<VplView> enclosedView_{nullptr};
 
   // Scalar payload (for valence 0 numbers / strings)
   double scalarFloat_{0.0};
