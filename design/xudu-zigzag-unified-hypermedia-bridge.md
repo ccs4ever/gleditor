@@ -1,6 +1,7 @@
 # Xudu-Zigzag Unified Hypermedia Bridge: Universal Links, Transclusions, and Formatting
 
-**Document Version:** 1.0\
+**Document Version:** 1.1\
+**Status:** Approved with Dialectical Refinements\
 **Related Documents:**
 
 - [`store-slice-convergence.md`](store-slice-convergence.md) — Unified storage, microversion DAG,
@@ -63,18 +64,19 @@ aggregate of $\le 16$ bytes consisting of integer fields is classified as `INTEG
 enabling endpoints to be passed across hot loops in two 64-bit general-purpose registers
 (`%rsi, %rdx`) with **zero stack spills**.
 
-### 2.3 Sublinear $O(\log_8 N + K)$ Transclusion Discovery
+### 2.3 Sublinear $O(\log_8 N + K)$ Transclusion Discovery with Viewport Bounding
 
 The legacy pairwise $O(N^2)$ nested iteration over open views is replaced with sublinear range
-stabbing over the interval B-enfilade (`ScrollSpanfilade`), eliminating quadratic degradation across
-large collections of documents and cells.
+stabbing over the interval B-enfilade (`ScrollSpanfilade`). To prevent combinatorial ribbon blowup
+across large manifolds ($O(C^2)$ pairs when thousands of cells share common tokens), transclusion
+stabbing against cells is bounded by the active manifold's view radius ($r_x, r_y, r_z$).
 
 ### 2.4 Lock-Free, Zero-Allocation Format Resolution
 
 Format link attributes are resolved from compile-time `vocabularyScroll` addresses and compressed
 into a 16-bit format bitmask (`uint16_t`). This bitmask is stored directly in `CellSlot`'s existing
-2 unused padding bytes, incurring **zero cache line bloat** (`sizeof(CellSlot) == 32`) and zero
-allocation overhead during interactive text shaping.
+2 unused padding bytes (bytes 6–7), incurring **zero cache line bloat** (`sizeof(CellSlot) == 32`)
+and permitting single-instruction fast-path bypass (`testw %ax, %ax`) during interactive text shaping.
 
 ______________________________________________________________________
 
@@ -94,35 +96,83 @@ enum class LinkTargetKind : std::uint8_t {
 struct alignas(4) UniversalLinkEnd {
   std::uint32_t targetId{0};   ///< docIndex if Document, or CellRef if ZigzagCell
   std::uint32_t start{0};      ///< byte offset in doc concatext or cell text
-  std::uint32_t length{0};     ///< span byte length
+  std::uint32_t end{0};        ///< end offset (start + length)
   std::uint16_t spanIndex{0};  ///< index in cell's content run (0 for doc)
-  std::uint8_t  kind{0};       ///< LinkTargetKind
+  std::uint8_t  kind{0};       ///< LinkTargetKind (0: Document, 1: Cell)
   std::uint8_t  flags{0};      ///< bit 0: isWithheld, bit 1: isEphemeral
 
+  [[nodiscard]] constexpr std::uint32_t length() const noexcept {
+    return end >= start ? (end - start) : 0U;
+  }
   [[nodiscard]] constexpr bool isDocument() const noexcept { return kind == 0; }
   [[nodiscard]] constexpr bool isCell() const noexcept { return kind == 1; }
-  [[nodiscard]] constexpr std::uint32_t end() const noexcept { return start + length; }
 
   // Backward-compatibility accessors matching legacy LinkEnd
   [[nodiscard]] constexpr std::uint32_t doc() const noexcept { return targetId; }
   [[nodiscard]] constexpr zigzag::CellRef cell() const noexcept {
     return isCell() ? targetId : zigzag::noCell;
   }
+  bool operator==(const UniversalLinkEnd &) const = default;
 };
 static_assert(sizeof(UniversalLinkEnd) == 16);
 static_assert(alignof(UniversalLinkEnd) == 4);
 ```
 
-#### Compact Transclusion & Link Pairs:
+#### Aggregate Initialization & Field Access Safety:
 
-- `UniversalTransclusionPair` (24 bytes, 8-byte aligned): `fromId`, `fromOffset`, `toId`,
-  `toOffset`, `length`, `scrollId`. Exactly 8 pairs pack cleanly into three 64-byte cache lines (192
-  bytes), cutting memory bandwidth by 50% over legacy 48-byte structs.
-- `UniversalLinkedPair`: connects `from` and `to` `UniversalLinkEnd`s with `linkId`, `type`, and
-  `tier`.
-- Legacy aliases (`LinkEnd = UniversalLinkEnd`, `TransclusionPair = UniversalTransclusionPair`)
-  ensure that existing call sites in `link_layout.hpp` and `beams.cpp` compile without
-  modifications.
+Legacy code across [`link_layout.cpp`](../apps/common/xanadu/link_layout.cpp) and
+[`beams.cpp`](../apps/xudu/beams.cpp) initializes and accesses `LinkEnd` as:
+
+```cpp
+lefts.push_back(LinkEnd{doc, extent->first, extent->second}); // 3rd argument is 'end'
+const auto endOff = (strand.from.end > strand.from.start) ? (strand.from.end - 1) : strand.from.start;
+```
+
+By placing `end` as the third member field, `UniversalLinkEnd` preserves:
+
+1. **Aggregate Initialization Correctness**: `LinkEnd{doc, start, end}` initializes `targetId=doc`,
+   `start=start`, `end=end`, `spanIndex=0`, `kind=0 (Document)`, and `flags=0` with zero silent
+   length-offset swapping.
+1. **Direct Member Field Access**: `strand.from.end` remains valid without converting hundreds of
+   call sites into function calls.
+1. **Register Calling Convention**: Exactly 16 bytes of integer types, passed in `%rsi, %rdx`.
+
+#### Cache-Aligned Transclusion Pairs (`UniversalTransclusionPair`):
+
+A naive 24-byte struct straddles 64-byte cache line boundaries (every other pair requires two cache
+line loads) and drops the essential `span.start` primedia scroll coordinate.
+
+`UniversalTransclusionPair` is sized at **32 bytes** (alignas(8)), exactly packing two pairs per
+64-byte cache line with zero straddling:
+
+```cpp
+struct alignas(8) UniversalTransclusionPair {
+  std::uint32_t fromTargetId{0}; ///< docIndex or CellRef
+  std::uint32_t fromOffset{0};   ///< byte offset in doc concatext or cell
+  std::uint32_t toTargetId{0};   ///< docIndex or CellRef
+  std::uint32_t toOffset{0};     ///< byte offset in doc concatext or cell
+  std::uint32_t length{0};       ///< transcluded span byte length
+  ScrollId      scrollId{0};     ///< primedia scroll ID
+  std::uint64_t spanStart{0};    ///< primedia scroll start coordinate
+
+  [[nodiscard]] UniversalLinkEnd from() const noexcept {
+    return UniversalLinkEnd{fromTargetId, fromOffset, fromOffset + length};
+  }
+  [[nodiscard]] UniversalLinkEnd to() const noexcept {
+    return UniversalLinkEnd{toTargetId, toOffset, toOffset + length};
+  }
+  [[nodiscard]] PrimediaSpan span() const noexcept {
+    return PrimediaSpan{scrollId, spanStart, length};
+  }
+  bool operator==(const UniversalTransclusionPair &) const = default;
+};
+static_assert(sizeof(UniversalTransclusionPair) == 32);
+static_assert(alignof(UniversalTransclusionPair) == 8);
+```
+
+For legacy subsystems requiring inline `UniversalLinkEnd` members directly,
+`UniversalTransclusionPair64` pads to 64 bytes (`alignas(64)`), guaranteeing exactly one pair per
+cache line and eliminating false sharing across worker threads.
 
 ______________________________________________________________________
 
@@ -134,15 +184,19 @@ Transclusion discovery in `Spanfilade` is expanded to operate across a unified c
 struct UniversalViewContext {
   std::vector<const Version *> docViews;
   std::vector<const zigzag::Manifold *> manifoldViews;
+  int cellRadius{3}; ///< Active spatial bounding radius for manifold cells
 };
 ```
 
 #### The Universal Stabbing Algorithm:
 
-1. `Spanfilade::indexManifold()` indexes all cell spans into the `ScrollSpanfilade` interval B-tree
-   with `.flags = 1U` (`isCell()`) and stores `(cellDense, spanIndex)`.
+1. `Spanfilade::indexManifold()` indexes cell spans into the `ScrollSpanfilade` interval B-tree with
+   `.flags = 1U` (`isCell()`) and stores `(cellDense, spanIndex)`.
 1. The legacy `if (pI.isCell()) continue;` filter is removed.
 1. For each active view, overlapping intervals are stabbed in $O(\log_8 N + K)$ time.
+1. **Viewport Bounding**: For cell-to-cell or doc-to-cell queries, pairs are only materialized if
+   the target cell resides within the active view's radius (`dist <= cellRadius`), eliminating
+   combinatorial $O(C^2)$ ribbon blowup on large slices.
 1. Transclusion pairs are emitted across all permutations:
    - **Xanadoc $\leftrightarrow$ Xanadoc** (Linear $\leftrightarrow$ Linear)
    - **Xanadoc $\leftrightarrow$ Zigzag Cell** (Linear $\leftrightarrow$ Multidimensional)
@@ -174,17 +228,42 @@ public:
       const Version &version) const;
   [[nodiscard]] FormattingResult resolveCell(
       const zigzag::Manifold &manifold, zigzag::CellRef cell) const;
+  [[nodiscard]] std::uint16_t computeCellFormatFlags(
+      const zigzag::Manifold &manifold, zigzag::CellRef cell) const;
 };
 ```
 
 #### Fast-Path Cell Layout Integration:
 
-- In `CellSlot`, the 2 unused padding bytes store `std::uint16_t formatFlags{0}` (mapping the 11
-  `FormatAttribute`s: Bold, Italic, Underline, AlignCentre, etc.).
-- In `UnifiedTransclusionEngine::layoutCellShaped()`, formatting is extracted via `FormatResolver`
-  and passed into `gleditor::text::LayoutOptions::decoratedRanges`.
-- `stageVisibleCells()` renders cell quads with bold/italic font variants and underline decorations,
-  honoring native format links across both application frontends.
+`CellSlot` in [`manifold.hpp`](../apps/common/xanadu/zigzag/manifold.hpp) has the following 32-byte
+memory layout:
+
+- Bytes 0–3: `spanOffset` (uint32_t)
+- Bytes 4–5: `spanCount` (uint16_t)
+- **Bytes 6–7: `formatFlags` (uint16_t)** — occupies the exact 2 padding bytes
+- Bytes 8–11: `birthOp` (uint32_t)
+- Bytes 12–15: `lastOp` (uint32_t)
+- Bytes 16–19: `linkOffset` (uint32_t)
+- Bytes 20–21: `linkCount` (uint16_t)
+- Byte 22: `valueKind` (uint8_t)
+- Byte 23: `flags` (uint8_t)
+- Bytes 24–31: `valueBits` (uint64_t)
+
+`static_assert(sizeof(CellSlot) == 32)` is preserved.
+
+In `UnifiedTransclusionEngine::stageVisibleCells()`:
+
+```cpp
+if (__builtin_expect(cell->formatFlags == 0, 1)) {
+  // Fast path: standard font, no formatting lookups, zero allocations
+} else {
+  // Slow path: resolve exact DecoratedRange via FormatResolver
+  opts.decoratedRanges = formatResolver.resolveCell(manifold_, cellRef).decoratedRanges;
+}
+```
+
+This single-instruction branch check (`testw %ax, %ax; jz .Lfast_path`) protects the 120 FPS
+framerate budget.
 
 ______________________________________________________________________
 
@@ -239,13 +318,54 @@ ______________________________________________________________________
 
 ______________________________________________________________________
 
-## 4. Phased Implementation Stages
+## 4. Tripartite Dialectic Analysis & Recommendations
+
+This specification was subjected to the tripartite deep reasoning protocol:
+
+### 4.1 Ideological Purist Evaluation (`xanadu_purist`)
+
+- **Verdict**: Fully approved.
+- **Nelsonian Principles Upheld**:
+  - *No Duplication*: Cross-domain transclusions reference the exact same permascroll bytes.
+  - *Universal Intertwingularity*: Documents and cell spaces are unified as projections over
+    primedia.
+  - *Markup-Free Styling*: Formatting remains pure links into `vocabularyScroll`.
+  - *Zero Storage Format Bumps*: No disk opcodes minted; all cross-domain relationships use native
+    `OpKind::Link`.
+
+### 4.2 Systems Realist Evaluation (`systems_realist`)
+
+- **Verdict**: Approved with critical mechanical refinements.
+- **Hardware Realities Enforced**:
+  - *Register Passing*: `UniversalLinkEnd` restricted to 16 bytes (`INTEGER, INTEGER` classification
+    under System V AMD64 ABI), passing in `%rsi, %rdx`.
+  - *Cache Line Sympathy*: Replaced the 24-byte draft pair with a 32-byte layout, guaranteeing 2
+    pairs per 64-byte line without cache boundary straddling or split loads.
+  - *Combinatorial Pruning*: Viewport radius bounding ($r_x, r_y, r_z$) prevents $O(C^2)$ ribbon
+    explosions.
+  - *Render Budget Protection*: Pre-cached `formatFlags` in `CellSlot` enables single-cycle
+    fast-path bypass in `stageVisibleCells()`.
+
+### 4.3 Codebase Expert Evaluation (`codebase_expert`)
+
+- **Verdict**: Approved with API safety corrections.
+- **Codebase Safety Rules**:
+  - *Aggregate Initialization Safety*: Field order `{targetId, start, end, spanIndex, kind, flags}`
+    prevents silent length-offset swapping in `LinkEnd{doc, start, end}`.
+  - *Field Compatibility*: Preserves member access `strand.from.end` across `beams.cpp` and unit
+    tests.
+  - *Primedia Fidelity*: Preserves `spanStart` in `UniversalTransclusionPair` so
+    `st.resolve(tStrand.span)` and accessibility trees operate without degradation.
+
+______________________________________________________________________
+
+## 5. Phased Implementation Stages
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────────┐
 │  STAGE 1: Universal Link Endpoints & Layout Structures                      │
-│  - Define UniversalLinkEnd (16 bytes, SysV ABI register passing)            │
-│  - Define UniversalTransclusionPair (24 bytes) & UniversalLinkedPair        │
+│  - Define UniversalLinkEnd (16 bytes, SysV ABI register passing, safe init) │
+│  - Define UniversalTransclusionPair (32 bytes, cache-aligned) & LinkedPair  │
 │  - Maintain full backward compatibility for existing LinkEnd call sites     │
 └──────────────────────────────────────┬──────────────────────────────────────┘
                                        │
@@ -253,14 +373,15 @@ ______________________________________________________________________
 │  STAGE 2: Universal Transclusion Discovery Across Docs & Cells              │
 │  - Uncap Spanfilade transclusion discovery (Doc-Doc, Doc-Cell, Cell-Cell)   │
 │  - Replace O(N^2) pairwise scans with sublinear O(log8 N + K) B-enfilade    │
+│  - Add viewport radius bounding for manifold cells to avoid O(C^2) blowup   │
 │  - Generalize link_layout.hpp (placeLinks, placeTransclusions)              │
 └──────────────────────────────────────┬──────────────────────────────────────┘
                                        │
 ┌──────────────────────────────────────▼──────────────────────────────────────┐
 │  STAGE 3: Universal Content-Addressed Formatting Engine                     │
 │  - Create FormatResolver (PrimediaSpan -> FormatAttribute -> DecoratedRange)│
-│  - Cache 16-bit formatFlags in CellSlot padding (zero cache line bloat)     │
-│  - Integrate into UnifiedTransclusionEngine::layoutCellShaped()             │
+│  - Cache 16-bit formatFlags in CellSlot padding bytes 6..7 (zero bloat)     │
+│  - Integrate fast-path into UnifiedTransclusionEngine::stageVisibleCells()   │
 │  - Render rich typography (bold, italic, alignment) in ZigzagVisualizer     │
 └──────────────────────────────────────┬──────────────────────────────────────┘
                                        │
@@ -281,11 +402,13 @@ ______________________________________________________________________
 
 ______________________________________________________________________
 
-## 5. Verification Matrix
+## 6. Verification Matrix
 
 | Area                      | Verification Method                             | Pass Criteria                                                                               |
 | :------------------------ | :---------------------------------------------- | :------------------------------------------------------------------------------------------ |
 | **Endpoint ABI**          | `static_assert(sizeof(UniversalLinkEnd) == 16)` | Exactly 16 bytes, passed in `%rsi, %rdx`                                                    |
+| **Aggregate Safety**      | Static initialization unit tests                | `LinkEnd{doc, start, end}` initializes without length corruption                            |
+| **Cache Alignment**       | `static_assert(sizeof(...) == 32)`              | Exactly 32 bytes, 2 pairs per 64-byte cache line                                            |
 | **Transclusion Stabbing** | Unit test with mixed `Version` and `Manifold`   | Discovers Doc-Doc, Doc-Cell, and Cell-Cell transclusions in $O(\log_8 N + K)$               |
 | **Cell Formatting**       | Unit test on `FormatResolver` + Visualizer test | `LinkType::Format` renders bold/italic text quads in Zigzag cells                           |
 | **Cross-Domain Linking**  | End-to-end clasp forging test                   | Xanadoc $\leftrightarrow$ Cell links write valid `OpKind::Link` without disk format changes |
