@@ -13,7 +13,6 @@
 #include <memory>
 #include <string>
 #include <utility>
-#include <variant>
 #include <vector>
 
 #include "common/xanadu/scanner_base.hpp"
@@ -109,13 +108,36 @@ private:
   std::string name_;
 };
 
+class VerbExpr final : public AstNode {
+public:
+  VerbExpr(SourceLocation loc, TokenKind verb) : AstNode(loc), verb_(verb) {}
+
+  [[nodiscard]] TokenKind verb() const noexcept { return verb_; }
+
+  void accept(AstVisitor &visitor) const override;
+
+private:
+  TokenKind verb_;
+};
+
 class MonadicExpr final : public AstNode {
 public:
   MonadicExpr(SourceLocation loc, TokenKind verb,
               std::shared_ptr<AstNode> right)
       : AstNode(loc), verb_(verb), right_(std::move(right)) {}
 
+  MonadicExpr(SourceLocation loc, std::shared_ptr<AstNode> customVerb,
+              std::shared_ptr<AstNode> right)
+      : AstNode(loc), customVerb_(std::move(customVerb)),
+        right_(std::move(right)) {}
+
   [[nodiscard]] TokenKind verb() const noexcept { return verb_; }
+  [[nodiscard]] const std::shared_ptr<AstNode> &customVerb() const noexcept {
+    return customVerb_;
+  }
+  [[nodiscard]] bool hasCustomVerb() const noexcept {
+    return customVerb_ != nullptr;
+  }
   [[nodiscard]] const std::shared_ptr<AstNode> &right() const noexcept {
     return right_;
   }
@@ -123,7 +145,8 @@ public:
   void accept(AstVisitor &visitor) const override;
 
 private:
-  TokenKind verb_;
+  TokenKind verb_{TokenKind::Error};
+  std::shared_ptr<AstNode> customVerb_{nullptr};
   std::shared_ptr<AstNode> right_;
 };
 
@@ -134,7 +157,18 @@ public:
       : AstNode(loc), verb_(verb), left_(std::move(left)),
         right_(std::move(right)) {}
 
+  DyadicExpr(SourceLocation loc, std::shared_ptr<AstNode> customVerb,
+             std::shared_ptr<AstNode> left, std::shared_ptr<AstNode> right)
+      : AstNode(loc), customVerb_(std::move(customVerb)),
+        left_(std::move(left)), right_(std::move(right)) {}
+
   [[nodiscard]] TokenKind verb() const noexcept { return verb_; }
+  [[nodiscard]] const std::shared_ptr<AstNode> &customVerb() const noexcept {
+    return customVerb_;
+  }
+  [[nodiscard]] bool hasCustomVerb() const noexcept {
+    return customVerb_ != nullptr;
+  }
   [[nodiscard]] const std::shared_ptr<AstNode> &left() const noexcept {
     return left_;
   }
@@ -145,7 +179,8 @@ public:
   void accept(AstVisitor &visitor) const override;
 
 private:
-  TokenKind verb_;
+  TokenKind verb_{TokenKind::Error};
+  std::shared_ptr<AstNode> customVerb_{nullptr};
   std::shared_ptr<AstNode> left_;
   std::shared_ptr<AstNode> right_;
 };
@@ -272,6 +307,7 @@ public:
   virtual void visit(const VectorExpr &node)      = 0;
   virtual void visit(const DimensionExpr &node)   = 0;
   virtual void visit(const IdentifierExpr &node)  = 0;
+  virtual void visit(const VerbExpr &node)        = 0;
   virtual void visit(const MonadicExpr &node)     = 0;
   virtual void visit(const DyadicExpr &node)      = 0;
   virtual void visit(const AdverbExpr &node)      = 0;
@@ -292,6 +328,9 @@ inline void DimensionExpr::accept(AstVisitor &visitor) const {
   visitor.visit(*this);
 }
 inline void IdentifierExpr::accept(AstVisitor &visitor) const {
+  visitor.visit(*this);
+}
+inline void VerbExpr::accept(AstVisitor &visitor) const {
   visitor.visit(*this);
 }
 inline void MonadicExpr::accept(AstVisitor &visitor) const {
