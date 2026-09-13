@@ -225,12 +225,13 @@ void Manifold::applyStructure(const std::uint32_t opIndex,
     // The empty runs start at the arenas' tails, so this cell's first link and
     // first span are appends in place rather than relocations.
     slots.push_back(CellSlot{
-        .spanOffset = static_cast<std::uint32_t>(content.size()),
-        .spanCount  = 0,
-        .birthOp    = opIndex,
-        .lastOp     = opIndex,
-        .linkOffset = static_cast<std::uint32_t>(links.size()),
-        .linkCount  = 0,
+        .spanOffset  = static_cast<std::uint32_t>(content.size()),
+        .spanCount   = 0,
+        .formatFlags = 0,
+        .birthOp     = opIndex,
+        .lastOp      = opIndex,
+        .linkOffset  = static_cast<std::uint32_t>(links.size()),
+        .linkCount   = 0,
         .valueKind = static_cast<std::uint8_t>(xanadu::valueKindOf(node.flags)),
         .flags     = 0,
         .valueBits = node.value,
@@ -610,6 +611,14 @@ std::unordered_set<CellRef>
 Manifold::cellsWithinRadiusSet(CellRef start, const int radius) const {
   const auto list = cellsWithinRadius(start, radius);
   return std::unordered_set<CellRef>{list.begin(), list.end()};
+}
+
+void Manifold::setFormatFlags(const CellRef ref,
+                              const std::uint16_t flags) noexcept {
+  const auto dense = denseOf(ref);
+  if (dense < slots.size()) {
+    slots[dense].formatFlags = flags;
+  }
 }
 
 bool Manifold::verifyAgainstFullRebuild(const xanadu::Store &store) const {

@@ -31,6 +31,7 @@
 #include <gleditor/canvas.hpp>
 #include <gleditor/frame_contributor.hpp>
 #include <gleditor/image_cache.hpp>
+#include <gleditor/layout_box.hpp>
 #include <gleditor/pick_observer.hpp>
 #include <gleditor/renderer.hpp>
 
@@ -53,6 +54,8 @@ struct RenderStateCell {
   float target_alpha{1.0F};
 
   glm::vec3 base_color{0.7F, 0.7F, 0.75F};
+  std::vector<gleditor::DecoratedRange> decorated_ranges;
+  std::vector<gleditor::BlockStyleRange> block_styles;
 };
 
 struct DimensionVisual {
@@ -187,6 +190,15 @@ public:
     return current_view_;
   }
   [[nodiscard]] ZzStructureDocument document() const;
+
+  [[nodiscard]] UnifiedTransclusionEngine *engine() const noexcept {
+    return engine_.get();
+  }
+  [[nodiscard]] xanadu::Store *store() const noexcept { return store_.get(); }
+  [[nodiscard]] const std::unordered_map<CellID, RenderStateCell> &
+  visibleCells() const noexcept {
+    return visible_cells_;
+  }
 
 private:
   struct CellInfo {

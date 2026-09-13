@@ -109,8 +109,9 @@ struct CellSlot {
    * The spans live in one arena shared by every cell, addressed here the same
    * way the links are.
    */
-  std::uint32_t spanOffset{0}; ///< 4: first span of this cell's content run
-  std::uint16_t spanCount{0};  ///< 2: length of that run
+  std::uint32_t spanOffset{0};  ///< 4: first span of this cell's content run
+  std::uint16_t spanCount{0};   ///< 2: length of that run
+  std::uint16_t formatFlags{0}; ///< 2: cached presentation format flags
 
   std::uint32_t birthOp{0};    ///< 4: the MakeCell index; == this CellRef
   std::uint32_t lastOp{0};     ///< 4: head of the micro-history chain (R7)
@@ -257,6 +258,9 @@ public:
 
   [[nodiscard]] std::unordered_set<CellRef>
   cellsWithinRadiusSet(CellRef start = noCell, int radius = 3) const;
+
+  /// Set presentation formatting flags on @p ref.
+  void setFormatFlags(CellRef ref, std::uint16_t flags) noexcept;
 
   /// The two cells genesis mints by fiat: the first two cells folded, in the
   /// order Store::sliceGenesis() mints them. noCell in a store that never

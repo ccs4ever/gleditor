@@ -31,6 +31,7 @@
 #include <gleditor/text_source.hpp>
 
 #include "xudu/core/format.hpp"
+#include "xudu/core/format_resolver.hpp"
 #include "xudu/core/link_layout.hpp"
 #include "xudu/core/provenance.hpp"
 
@@ -1378,44 +1379,15 @@ Session::sourceFor(const MicroversionId &version,
     }
   }
 
-  std::vector<gleditor::DecoratedRange> decoratedRanges;
-
   // Extract presentation formatting and paragraph alignment from Format links
-  for (const auto &[linkId, link] : st.links()) {
-    if (LinkType::Format != link.type) {
-      continue;
-    }
-    const auto attrOpt = st.formatAttributeOf(link);
-    if (!attrOpt) {
-      continue;
-    }
-    if (const auto decoOpt = decorationFromFormatAttribute(*attrOpt)) {
-      const auto mask = gleditor::decorationBit(*decoOpt);
-      for (const auto &span : link.left) {
-        for (const auto &extent : rebuilt.occurrencesOf(span)) {
-          if (!extent.empty()) {
-            decoratedRanges.push_back(gleditor::DecoratedRange{
-                .start       = extent.start,
-                .end         = extent.end,
-                .decorations = mask,
-            });
-          }
-        }
-      }
-    } else if (const auto alignOpt = textAlignFromFormatAttribute(*attrOpt)) {
-      for (const auto &span : link.left) {
-        for (const auto &extent : rebuilt.occurrencesOf(span)) {
-          if (!extent.empty()) {
-            blockStyles.push_back(gleditor::BlockStyleRange{
-                .start = extent.start,
-                .end   = extent.end,
-                .align = *alignOpt,
-            });
-          }
-        }
-      }
-    }
-  }
+  const FormatResolver formatResolver(st);
+  auto formattingResult = formatResolver.resolveVersion(rebuilt);
+  std::vector<gleditor::DecoratedRange> decoratedRanges =
+      std::move(formattingResult.decoratedRanges);
+  blockStyles.insert(
+      blockStyles.end(),
+      std::make_move_iterator(formattingResult.blockStyles.begin()),
+      std::make_move_iterator(formattingResult.blockStyles.end()));
 
   std::string title;
   if (st.isSystem()) {

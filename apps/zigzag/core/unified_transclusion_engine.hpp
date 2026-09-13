@@ -17,6 +17,7 @@
 #include <vector>
 
 #include "common/xanadu/compact_op.hpp"
+#include "common/xanadu/format_resolver.hpp"
 #include "common/xanadu/microversion.hpp"
 #include "common/xanadu/store.hpp"
 #include "common/xanadu/zigzag/compact_zzcell.hpp"
@@ -277,6 +278,9 @@ public:
   /// address can be reused after a font is released and another loaded, so
   /// anything swapping fonts under the engine has to say so.
   void clearShapingCache() noexcept;
+
+  /// Synchronize cached formatFlags across manifold cells from store links.
+  void updateFormatFlags();
 
 private:
   /// Mint the two genesis cells if this store has none, so that a dimension has

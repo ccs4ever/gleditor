@@ -4,6 +4,7 @@
  */
 #include <gtest/gtest.h>
 
+#include "xudu/core/format.hpp"
 #include "zigzag/core/zzstructure.hpp"
 #include "zigzag/core/zzstructure_loader.hpp"
 #include "zigzag/zigzag_visualizer.hpp"
@@ -511,4 +512,34 @@ TEST(ZigzagVisualizerTest, ADeletedCellIsNotAnnounced) {
       << "a deleted cell is still in the manifold -- DELETE is REARRANGE TO "
          "LIMBO -- but it is unreachable, so it must not be announced";
   EXPECT_TRUE(announcedKeeper) << "deletion took a bystander with it";
+}
+
+TEST(ZigzagVisualizerTest, FormattedCellDecoratedRangesInTopology) {
+  ZigzagVisualizer viz("Sans 12");
+  const auto root = viz.focusCellId();
+  ASSERT_NE(root, 0U);
+  ASSERT_NE(viz.engine(), nullptr);
+  ASSERT_NE(viz.store(), nullptr);
+
+  const auto spans = viz.engine()->manifold().contentOf(root);
+  ASSERT_FALSE(spans.empty());
+
+  // Attach an Italic format link to root's spans
+  xudu::Link italicLink;
+  italicLink.type = xudu::LinkType::Format;
+  italicLink.left = std::vector<xudu::PrimediaSpan>(spans.begin(), spans.end());
+  italicLink.right.push_back(
+      xudu::vocabularySpanFor(xudu::FormatAttribute::Italic));
+  viz.store()->addLink(xudu::MicroversionId{}, italicLink);
+
+  viz.engine()->updateFormatFlags();
+  viz.cycleDimensions(true);
+
+  const auto &visible = viz.visibleCells();
+  const auto it       = visible.find(root);
+  ASSERT_NE(it, visible.end());
+  EXPECT_FALSE(it->second.decorated_ranges.empty());
+  EXPECT_TRUE(
+      gleditor::hasDecoration(it->second.decorated_ranges[0].decorations,
+                              gleditor::Decoration::Italic));
 }

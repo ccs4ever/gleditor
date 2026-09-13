@@ -3,6 +3,7 @@
  * @brief Implementation of the Xanadu ZigZag visualizer on gleditor.
  */
 #include "zigzag_visualizer.hpp"
+#include "core/format_resolver.hpp"
 #include "core/zzcore.hpp"
 #include "core/zzstructure_loader.hpp"
 
@@ -653,14 +654,21 @@ void ZigzagVisualizer::rebuildActiveViewTopology() {
 
   if (!visible_cells_.contains(accursed_cell_focus_)) {
     visible_cells_[accursed_cell_focus_] = RenderStateCell{
-        .id              = accursed_cell_focus_,
-        .text            = focusInfo.text,
-        .type            = focusInfo.role,
-        .mime_type       = focusInfo.mime_type,
-        .media_path      = focusInfo.media_path,
-        .is_image        = focusInfo.is_image,
-        .is_clone        = focusInfo.is_clone,
-        .clone_master_id = focusInfo.clone_master_id,
+        .id               = accursed_cell_focus_,
+        .text             = focusInfo.text,
+        .type             = focusInfo.role,
+        .mime_type        = focusInfo.mime_type,
+        .media_path       = focusInfo.media_path,
+        .is_image         = focusInfo.is_image,
+        .is_clone         = focusInfo.is_clone,
+        .clone_master_id  = focusInfo.clone_master_id,
+        .current_pos      = {},
+        .target_pos       = {},
+        .current_alpha    = 0.0F,
+        .target_alpha     = 1.0F,
+        .base_color       = {},
+        .decorated_ranges = {},
+        .block_styles     = {},
     };
   } else {
     visible_cells_[accursed_cell_focus_].text       = focusInfo.text;
@@ -673,10 +681,24 @@ void ZigzagVisualizer::rebuildActiveViewTopology() {
         focusInfo.clone_master_id;
   }
 
+  const xanadu::FormatResolver formatResolver(engine_->store());
+  auto updateCellFormatting = [&](RenderStateCell &rc, const CellRef cr) {
+    const auto *slot = engine_->manifold().slot(cr);
+    if (__builtin_expect(slot && slot->formatFlags != 0, 0)) {
+      auto res            = formatResolver.resolveCell(engine_->manifold(), cr);
+      rc.decorated_ranges = std::move(res.decoratedRanges);
+      rc.block_styles     = std::move(res.blockStyles);
+    } else {
+      rc.decorated_ranges.clear();
+      rc.block_styles.clear();
+    }
+  };
+
   auto &focusRenderState        = visible_cells_[accursed_cell_focus_];
   focusRenderState.target_pos   = glm::vec3{0.0F, 0.0F, 0.0F};
   focusRenderState.target_alpha = 1.0F;
   focusRenderState.base_color   = scene_.focus_color;
+  updateCellFormatting(focusRenderState, focusRef);
 
   auto mapNeighbor = [&](const CellRef parentId, const CellRef childId,
                          const glm::vec3 &offset, const glm::vec3 &axisColor) {
@@ -687,15 +709,21 @@ void ZigzagVisualizer::rebuildActiveViewTopology() {
 
     if (!visible_cells_.contains(childId)) {
       RenderStateCell newCell{
-          .id              = childId,
-          .text            = childInfo.text,
-          .type            = childInfo.role,
-          .mime_type       = childInfo.mime_type,
-          .media_path      = childInfo.media_path,
-          .is_image        = childInfo.is_image,
-          .is_clone        = childInfo.is_clone,
-          .clone_master_id = childInfo.clone_master_id,
-          .current_pos     = visible_cells_[parentId].current_pos,
+          .id               = childId,
+          .text             = childInfo.text,
+          .type             = childInfo.role,
+          .mime_type        = childInfo.mime_type,
+          .media_path       = childInfo.media_path,
+          .is_image         = childInfo.is_image,
+          .is_clone         = childInfo.is_clone,
+          .clone_master_id  = childInfo.clone_master_id,
+          .current_pos      = visible_cells_[parentId].current_pos,
+          .target_pos       = {},
+          .current_alpha    = 0.0F,
+          .target_alpha     = 1.0F,
+          .base_color       = {},
+          .decorated_ranges = {},
+          .block_styles     = {},
       };
       visible_cells_[childId] = newCell;
     } else {
@@ -712,6 +740,7 @@ void ZigzagVisualizer::rebuildActiveViewTopology() {
     childCell.target_pos   = visible_cells_[parentId].target_pos + offset;
     childCell.target_alpha = 1.0F;
     childCell.base_color   = axisColor;
+    updateCellFormatting(childCell, childId);
   };
 
   const DimensionVisual xVisual = dimensionVisual(current_view_.x_dimension);
@@ -1077,8 +1106,25 @@ void ZigzagVisualizer::drawFrame(gleditor::FrameContext &ctx) {
                                         ? (isFocus ? 48 : 32)
                                         : (isFocus ? 16 : 10);
     const std::string textPreview = shortenText(cell.text, maxTextLen);
-    worldCanvas_->addText(ctx.state, left + 6.0F, bottom + nodeHeight - 24.0F,
-                          textPreview, textCol, bgCol);
+    if (!cell.decorated_ranges.empty() &&
+        textPreview.size() < cell.text.size()) {
+      std::vector<gleditor::DecoratedRange> clamped;
+      for (const auto &r : cell.decorated_ranges) {
+        if (r.start < textPreview.size()) {
+          clamped.push_back({
+              .start = r.start,
+              .end   = std::min(r.end,
+                                static_cast<std::uint32_t>(textPreview.size())),
+              .decorations = r.decorations,
+          });
+        }
+      }
+      worldCanvas_->addText(ctx.state, left + 6.0F, bottom + nodeHeight - 24.0F,
+                            textPreview, textCol, bgCol, clamped);
+    } else {
+      worldCanvas_->addText(ctx.state, left + 6.0F, bottom + nodeHeight - 24.0F,
+                            textPreview, textCol, bgCol, cell.decorated_ranges);
+    }
 
     // Badges: type, mime, clone
     if (!cell.type.empty() || !cell.mime_type.empty() || cell.is_clone) {

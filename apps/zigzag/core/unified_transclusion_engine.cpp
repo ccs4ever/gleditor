@@ -44,6 +44,7 @@ void UnifiedTransclusionEngine::syncIncremental() {
   if (total > 0) {
     head_ = ops.idOf(total);
   }
+  updateFormatFlags();
 }
 
 void UnifiedTransclusionEngine::ensureSliceBegun() {
@@ -491,17 +492,31 @@ UnifiedTransclusionEngine::stageVisibleCells(
   }
 
   // Layout and stage glyph quads for all visited cells
+  const xanadu::FormatResolver formatResolver(store_);
+
   for (const CellID cid : visited) {
     const std::string text = resolveCellText(cid);
     if (text.empty()) {
       continue;
     }
 
-    const gleditor::text::LayoutOptions opts{.maxWidthPx      = 380.0F,
-                                             .maxHeightPx     = 240.0F,
-                                             .singleParagraph = false,
-                                             .ellipsize       = true,
-                                             .decoratedRanges = {}};
+    const auto *cell = findCell(static_cast<CellRef>(cid));
+
+    gleditor::text::LayoutOptions opts{.maxWidthPx      = 380.0F,
+                                       .maxHeightPx     = 240.0F,
+                                       .singleParagraph = false,
+                                       .ellipsize       = true,
+                                       .decoratedRanges = {}};
+
+    if (__builtin_expect(cell && cell->formatFlags == 0, 1)) {
+      // Fast path: standard font, no formatting lookups, zero allocations
+    } else {
+      // Slow path: resolve exact DecoratedRange via FormatResolver
+      auto formatRes =
+          formatResolver.resolveCell(manifold_, static_cast<CellRef>(cid));
+      opts.decoratedRanges = std::move(formatRes.decoratedRanges);
+      opts.blockStyles     = std::move(formatRes.blockStyles);
+    }
 
     // Shaping the same unchanged text again every frame is what a staging
     // pass used to spend nearly all of its time on. The glyph cache lookups
@@ -524,7 +539,8 @@ UnifiedTransclusionEngine::stageVisibleCells(
     }
 
     for (const auto &glyph : shaping.glyphs) {
-      const auto sizes = glyphCache.put(glyph.chr, font);
+      const auto sizes = glyphCache.put(
+          glyph.chr, font, gleditor::decorationSetFor(glyph.decorations));
       Doc::VBORow row{};
       row.pos = {glyph.clusterLeft, glyph.clusterTop};
       row.foreground =
@@ -576,6 +592,11 @@ UnifiedTransclusionEngine::shapingCacheStats() const noexcept {
 
 void UnifiedTransclusionEngine::clearShapingCache() noexcept {
   shapingCache_.clear();
+}
+
+void UnifiedTransclusionEngine::updateFormatFlags() {
+  const xanadu::FormatResolver resolver(store_);
+  resolver.updateManifoldFormatFlags(manifold_);
 }
 
 } // namespace zigzag
