@@ -589,6 +589,8 @@ VPROLOG_SRCS    := $(shell find apps/vprolog -name '*.cpp' 2>/dev/null)
 VPROLOG_OBJS    := $(call obj,$(VPROLOG_SRCS))
 VPLC_SRCS       := $(shell find apps/vplc -name '*.cpp' 2>/dev/null)
 VPLC_OBJS       := $(call obj,$(VPLC_SRCS))
+VPL_SRCS        := $(shell find apps/vpl -name '*.cpp' 2>/dev/null)
+VPL_OBJS        := $(call obj,$(VPL_SRCS))
 
 # What a shared library is called, and how a program finds it, differ enough
 # between the two targets that both are spelled out rather than guessed at.
@@ -652,7 +654,7 @@ endif
 ALL_OBJS := $(sort $(LIB_OBJS) $(GLEDITOR_OBJS) $(XUDU_CORE_OBJS) $(XUDU_OBJS) \
 	$(ZIGZAG_CORE_OBJS) $(ZIGZAG_OBJS) $(ZIGZAG_TEST_OBJS) \
 	$(LIB_TEST_OBJS) $(XUDU_TEST_OBJS) $(SWARM_PEER_OBJS) \
-	$(GENERATE_SAMPLE_XANADOCS_OBJS) $(VQUERYC_OBJS) $(VQUERY_OBJS) $(VPROLOG_OBJS) $(VPLC_OBJS))
+	$(GENERATE_SAMPLE_XANADOCS_OBJS) $(VQUERYC_OBJS) $(VQUERY_OBJS) $(VPROLOG_OBJS) $(VPLC_OBJS) $(VPL_OBJS))
 ALL_OBJ_DIRS := $(sort $(OBJDIR)/ $(OBJDIR)/tmp/ $(dir $(ALL_OBJS)))
 DEPS := $(sort $(patsubst %.o,%.dep,$(ALL_OBJS)))
 JFILES := $(sort $(patsubst %.o,%.j,$(ALL_OBJS)))
@@ -680,7 +682,7 @@ endif
 SPIRV := assets/shaders/vulkan/glyph.vert.spv assets/shaders/vulkan/glyph.frag.spv \
 	assets/shaders/vulkan/beam.vert.spv assets/shaders/vulkan/beam.frag.spv
 
-all: lib gleditor xudu zigzag xudu-dump vqueryc vquery vprolog vplc gleditor_test xudu_test zigzag_test $(OBJDIR)/compile_commands.json
+all: lib gleditor xudu zigzag xudu-dump vqueryc vquery vprolog vplc vpl gleditor_test xudu_test zigzag_test $(OBJDIR)/compile_commands.json
 ifdef GLEDITOR_ENABLE_VULKAN
 all: shaders
 endif
@@ -901,6 +903,11 @@ $(OBJDIR)/vprolog: $(VPROLOG_OBJS) $(XUDU_CORE_OBJS) $(OBJDIR)/src/mimetype.o $(
 .PHONY: vplc
 vplc: $(OBJDIR)/vplc
 $(OBJDIR)/vplc: $(VPLC_OBJS) $(XUDU_CORE_OBJS) $(OBJDIR)/src/mimetype.o $(OBJDIR)/src/source_grounder.o
+	$(CXX) $(LDFLAGS) -o $@ $^ $(XUDU_LIBS)
+
+.PHONY: vpl
+vpl: $(OBJDIR)/vpl
+$(OBJDIR)/vpl: $(VPL_OBJS) $(XUDU_CORE_OBJS) $(OBJDIR)/src/mimetype.o $(OBJDIR)/src/source_grounder.o
 	$(CXX) $(LDFLAGS) -o $@ $^ $(XUDU_LIBS)
 
 # Reads a store as text without going through the loader, which is what lets
