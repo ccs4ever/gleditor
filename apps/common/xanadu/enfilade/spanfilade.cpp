@@ -6,6 +6,7 @@
 
 #include <algorithm>
 #include <cstdint>
+#include <map>
 #include <utility>
 #include <vector>
 
@@ -205,24 +206,54 @@ void Spanfilade::indexViews(const std::vector<const Version *> &views) {
 }
 
 void Spanfilade::indexManifold(const zigzag::Manifold &manifold) {
+  indexManifold(0, manifold, nullptr);
+  build();
+}
+
+void Spanfilade::indexManifold(
+    const uint32_t manifoldIdx, const zigzag::Manifold &manifold,
+    const std::unordered_set<zigzag::CellRef> *allowedCells) {
   for (std::size_t dense = 0; dense < manifold.cells().size(); ++dense) {
-    const auto &slot   = manifold.cells()[dense];
-    const auto ref     = slot.birthOp;
+    const auto &slot = manifold.cells()[dense];
+    const auto ref   = slot.birthOp;
+    if (allowedCells && !allowedCells->contains(ref)) {
+      continue;
+    }
     const auto content = manifold.contentOf(ref);
+    std::uint32_t seen = 0;
     for (std::size_t sIdx = 0; sIdx < content.size(); ++sIdx) {
       const auto &span = content[sIdx];
       if (!span.empty() && !isReservedScroll(span.scroll)) {
         SpanEntry entry{
             .start     = span.start,
             .length    = span.length,
-            .docId     = 0,
-            .docOffset = 0,
+            .docId     = manifoldIdx,
+            .docOffset = seen,
             .cellDense = static_cast<uint32_t>(dense),
             .spanIndex = static_cast<uint16_t>(sIdx),
             .flags     = 1U, // isCell
         };
         scrolls_[span.scroll].insert(entry);
       }
+      seen += static_cast<std::uint32_t>(span.length);
+    }
+  }
+}
+
+void Spanfilade::indexContext(const UniversalViewContext &ctx) {
+  for (std::size_t i = 0; i < ctx.docViews.size(); ++i) {
+    if (nullptr != ctx.docViews[i]) {
+      indexVersion(static_cast<uint32_t>(i), *ctx.docViews[i]);
+    }
+  }
+  for (std::size_t mIdx = 0; mIdx < ctx.manifoldViews.size(); ++mIdx) {
+    if (nullptr != ctx.manifoldViews[mIdx]) {
+      const auto &manifold = *ctx.manifoldViews[mIdx];
+      const auto focus     = (mIdx < ctx.manifoldFoci.size())
+                                 ? ctx.manifoldFoci[mIdx]
+                                 : zigzag::noCell;
+      const auto allowed = manifold.cellsWithinRadiusSet(focus, ctx.cellRadius);
+      indexManifold(static_cast<uint32_t>(mIdx), manifold, &allowed);
     }
   }
   build();
@@ -298,39 +329,56 @@ std::vector<Extent> Spanfilade::occurrencesOf(const PrimediaSpan &span,
 }
 
 void Spanfilade::placeTransclusions(
-    const std::vector<const Version *> &views,
+    const UniversalViewContext &ctx,
     std::vector<TransclusionPair> &pairs) const {
   pairs.clear();
-  if (views.size() < 2) {
-    return;
-  }
 
-  const auto viewCount = views.size();
-  std::vector<std::vector<TransclusionPair>> pairBuckets(viewCount * viewCount);
+  std::map<std::pair<std::pair<std::uint8_t, std::uint32_t>,
+                     std::pair<std::uint8_t, std::uint32_t>>,
+           std::vector<TransclusionPair>>
+      pairBuckets;
 
   for (const auto &[scrollId, enfilade] : scrolls_) {
     const auto &pieces = enfilade.entries();
     for (std::size_t i = 0; i < pieces.size(); ++i) {
       const auto &pI = pieces[i];
-      if (pI.isCell()) {
-        continue;
-      }
       for (std::size_t j = i + 1; j < pieces.size(); ++j) {
         const auto &pJ = pieces[j];
-        if (pJ.isCell()) {
-          continue;
-        }
         if (pJ.start >= pI.end()) {
           break;
         }
-        if (pI.docId == pJ.docId) {
-          continue;
+        if (pI.isCell() == pJ.isCell()) {
+          if (!pI.isCell() && pI.docId == pJ.docId) {
+            continue;
+          }
+          if (pI.isCell() && pI.docId == pJ.docId &&
+              pI.cellDense == pJ.cellDense) {
+            continue;
+          }
         }
 
-        const auto u   = std::min(pI.docId, pJ.docId);
-        const auto v   = std::max(pI.docId, pJ.docId);
-        const auto &pU = (pI.docId == u) ? pI : pJ;
-        const auto &pV = (pI.docId == v) ? pI : pJ;
+        bool iIsFrom = true;
+        if (pI.isCell() != pJ.isCell()) {
+          iIsFrom = !pI.isCell();
+        } else if (!pI.isCell()) {
+          iIsFrom = (pI.docId < pJ.docId);
+        } else {
+          const auto refI =
+              (pI.docId < ctx.manifoldViews.size() &&
+               ctx.manifoldViews[pI.docId])
+                  ? ctx.manifoldViews[pI.docId]->cells()[pI.cellDense].birthOp
+                  : pI.cellDense;
+          const auto refJ =
+              (pJ.docId < ctx.manifoldViews.size() &&
+               ctx.manifoldViews[pJ.docId])
+                  ? ctx.manifoldViews[pJ.docId]->cells()[pJ.cellDense].birthOp
+                  : pJ.cellDense;
+          iIsFrom =
+              (pI.docId != pJ.docId) ? (pI.docId < pJ.docId) : (refI < refJ);
+        }
+
+        const auto &pU = iIsFrom ? pI : pJ;
+        const auto &pV = iIsFrom ? pJ : pI;
 
         const auto sharedStart = std::max(pU.start, pV.start);
         const auto sharedEnd   = std::min(pU.end(), pV.end());
@@ -347,8 +395,35 @@ void Spanfilade::placeTransclusions(
             pV.docOffset + static_cast<std::uint32_t>(sharedStart - pV.start);
         const auto endV = startV + static_cast<std::uint32_t>(sharedLen);
 
+        UniversalLinkEnd endPtU;
+        if (!pU.isCell()) {
+          endPtU = UniversalLinkEnd::forDocument(pU.docId, startU, endU);
+        } else {
+          const auto refU =
+              (pU.docId < ctx.manifoldViews.size() &&
+               ctx.manifoldViews[pU.docId])
+                  ? ctx.manifoldViews[pU.docId]->cells()[pU.cellDense].birthOp
+                  : pU.cellDense;
+          endPtU = UniversalLinkEnd::forCell(refU, startU, endU, pU.spanIndex);
+        }
+
+        UniversalLinkEnd endPtV;
+        if (!pV.isCell()) {
+          endPtV = UniversalLinkEnd::forDocument(pV.docId, startV, endV);
+        } else {
+          const auto refV =
+              (pV.docId < ctx.manifoldViews.size() &&
+               ctx.manifoldViews[pV.docId])
+                  ? ctx.manifoldViews[pV.docId]->cells()[pV.cellDense].birthOp
+                  : pV.cellDense;
+          endPtV = UniversalLinkEnd::forCell(refV, startV, endV, pV.spanIndex);
+        }
+
         const PrimediaSpan sharedSpan{scrollId, sharedStart, sharedLen};
-        auto &bucket = pairBuckets[u * viewCount + v];
+        const auto bucketKey =
+            std::make_pair(std::make_pair(endPtU.kind, endPtU.targetId),
+                           std::make_pair(endPtV.kind, endPtV.targetId));
+        auto &bucket = pairBuckets[bucketKey];
 
         if (!bucket.empty() && bucket.back().from.end == startU &&
             bucket.back().to.end == startV &&
@@ -359,8 +434,8 @@ void Spanfilade::placeTransclusions(
           bucket.back().span.length += sharedSpan.length;
         } else {
           TransclusionPair tp{
-              .from = LinkEnd{u, startU, endU},
-              .to   = LinkEnd{v, startV, endV},
+              .from = endPtU,
+              .to   = endPtV,
               .span = sharedSpan,
           };
           if (bucket.empty() || !(bucket.back() == tp)) {
@@ -371,11 +446,17 @@ void Spanfilade::placeTransclusions(
     }
   }
 
-  for (auto &bucket : pairBuckets) {
+  for (auto &[key, bucket] : pairBuckets) {
     for (auto &tp : bucket) {
       pairs.push_back(std::move(tp));
     }
   }
+}
+
+void Spanfilade::placeTransclusions(
+    const std::vector<const Version *> &views,
+    std::vector<TransclusionPair> &pairs) const {
+  placeTransclusions(UniversalViewContext{.docViews = views}, pairs);
 }
 
 bool Spanfilade::verifyAgainstLinearScan(const PrimediaSpan &query,
@@ -402,6 +483,12 @@ Spanfilade Spanfilade::fromViews(const std::vector<const Version *> &views) {
 Spanfilade Spanfilade::fromManifold(const zigzag::Manifold &manifold) {
   Spanfilade filade;
   filade.indexManifold(manifold);
+  return filade;
+}
+
+Spanfilade Spanfilade::fromContext(const UniversalViewContext &ctx) {
+  Spanfilade filade;
+  filade.indexContext(ctx);
   return filade;
 }
 

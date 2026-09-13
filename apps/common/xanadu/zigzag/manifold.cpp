@@ -554,6 +554,64 @@ bool Manifold::equivalentTo(const Manifold &other) const {
   return true;
 }
 
+std::vector<CellRef> Manifold::cellsWithinRadius(CellRef start,
+                                                 const int radius) const {
+  if (slots.empty()) {
+    return {};
+  }
+  if (radius < 0) {
+    std::vector<CellRef> allCells;
+    allCells.reserve(slots.size());
+    for (const auto &cell : slots) {
+      allCells.push_back(cell.birthOp);
+    }
+    return allCells;
+  }
+
+  CellRef root = start;
+  if (noCell == root || !contains(root)) {
+    root = (home_ != noCell && contains(home_)) ? home_ : slots.front().birthOp;
+  }
+
+  std::vector<CellRef> ordered;
+  std::unordered_set<CellRef> visited;
+  std::vector<std::pair<CellRef, int>> queue;
+  queue.reserve(64);
+
+  visited.insert(root);
+  queue.push_back({root, 0});
+  ordered.push_back(root);
+
+  std::size_t head = 0;
+  while (head < queue.size()) {
+    const auto [curr, dist] = queue[head++];
+    if (dist >= radius) {
+      continue;
+    }
+
+    for (const auto &dimLink : dimensionsOf(curr)) {
+      if (dimLink.pos != noCell && contains(dimLink.pos) &&
+          visited.insert(dimLink.pos).second) {
+        ordered.push_back(dimLink.pos);
+        queue.push_back({dimLink.pos, dist + 1});
+      }
+      if (dimLink.neg != noCell && contains(dimLink.neg) &&
+          visited.insert(dimLink.neg).second) {
+        ordered.push_back(dimLink.neg);
+        queue.push_back({dimLink.neg, dist + 1});
+      }
+    }
+  }
+
+  return ordered;
+}
+
+std::unordered_set<CellRef>
+Manifold::cellsWithinRadiusSet(CellRef start, const int radius) const {
+  const auto list = cellsWithinRadius(start, radius);
+  return std::unordered_set<CellRef>{list.begin(), list.end()};
+}
+
 bool Manifold::verifyAgainstFullRebuild(const xanadu::Store &store) const {
   return equivalentTo(store.rebuildManifoldFromIndex(foldedThrough_));
 }

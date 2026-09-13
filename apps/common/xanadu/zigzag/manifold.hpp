@@ -23,6 +23,7 @@
 #include <string>
 #include <string_view>
 #include <unordered_map>
+#include <unordered_set>
 #include <vector>
 
 #include "common/xanadu/compact_op.hpp"
@@ -243,6 +244,19 @@ public:
   /// worth indexing.
   [[nodiscard]] DimRef dimensionNamed(std::string_view name,
                                       const xanadu::SpanReader &reader) const;
+
+  /**
+   * @brief Collect all cells within @p radius hops from @p start along any
+   *        dimension link.
+   *
+   * If @p start is noCell, defaults to home() if valid, or the first cell.
+   * If @p radius < 0, returns all cells in the manifold.
+   */
+  [[nodiscard]] std::vector<CellRef> cellsWithinRadius(CellRef start = noCell,
+                                                       int radius    = 3) const;
+
+  [[nodiscard]] std::unordered_set<CellRef>
+  cellsWithinRadiusSet(CellRef start = noCell, int radius = 3) const;
 
   /// The two cells genesis mints by fiat: the first two cells folded, in the
   /// order Store::sliceGenesis() mints them. noCell in a store that never

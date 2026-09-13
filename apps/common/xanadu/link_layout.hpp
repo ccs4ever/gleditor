@@ -25,6 +25,10 @@
 #include "spool.hpp"
 #include "version.hpp"
 
+namespace zigzag {
+class Manifold;
+} // namespace zigzag
+
 namespace xanadu {
 
 /// One end of a link (re-exported UniversalLinkEnd).
@@ -45,11 +49,40 @@ using TransclusionPair = UniversalTransclusionPair;
 using CompactTransclusion = CompactTransclusionPair;
 
 /**
+ * @struct UniversalViewContext
+ * @brief Unified cross-domain viewing context encompassing 2D Xanadocs and
+ *        multidimensional Zigzag manifolds.
+ */
+struct UniversalViewContext {
+  std::vector<const Version *> docViews;
+  std::vector<const zigzag::Manifold *> manifoldViews;
+  std::vector<zigzag::CellRef>
+      manifoldFoci;  ///< Optional focus cell per manifold view (0 = home)
+  int cellRadius{3}; ///< Active spatial bounding radius (-1 for unbounded)
+};
+
+/**
+ * @brief Discover emergent transclusions across open documents and cells in
+ *        @p ctx.
+ */
+void placeTransclusions(const UniversalViewContext &ctx,
+                        std::vector<TransclusionPair> &pairs);
+
+/**
  * @brief Discover emergent transclusions (shared primedia spans) between open
  *        @p views.
  */
 void placeTransclusions(const std::vector<const Version *> &views,
                         std::vector<TransclusionPair> &pairs);
+
+/**
+ * @brief Sort @p links into the ones that run between open views in @p ctx
+ *        and the ones that run off them.
+ */
+void placeLinks(const std::map<std::uint64_t, Link> &links,
+                const UniversalViewContext &ctx,
+                std::vector<LinkedPair> &between,
+                std::vector<HalfLink> &leaving);
 
 /**
  * @brief Sort @p links into the ones that run between @p views and the ones
