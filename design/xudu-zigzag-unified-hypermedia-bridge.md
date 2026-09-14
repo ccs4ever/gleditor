@@ -40,7 +40,7 @@ However, architectural friction points and seams persist across the higher-level
    and `LinkBeams` only anchors to 2D paged document coordinates rather than 3D cell positions.
 
 This document formalizes the architectural blueprint to bridge these seams into a single, seamless,
-content-addressed continuum operating at 120 FPS.
+content-addressed continuum.
 
 ______________________________________________________________________
 
@@ -74,7 +74,7 @@ large collections of documents and cells.
 Format link attributes are resolved from compile-time `vocabularyScroll` addresses and compressed
 into a 16-bit format bitmask (`uint16_t`). This bitmask is stored directly in `CellSlot`'s existing
 2 unused padding bytes, incurring **zero cache line bloat** (`sizeof(CellSlot) == 32`) and zero
-allocation overhead during 120 FPS text shaping.
+allocation overhead during interactive text shaping.
 
 ______________________________________________________________________
 
@@ -225,9 +225,9 @@ ______________________________________________________________________
   - Document anchors via `Doc::anchorFor(offset)` projected into 3D world space.
   - Cell anchors via `ZigzagVisualizer::findRenderCell(cell)` extracting cell center coordinates.
   - Caches local anchors keyed by monotonic `doc.layoutGeneration()`.
-- **Tier 2 (Transform Pipeline @ 120 FPS)**: On camera motion, SIMD matrix-vector multiplication
-  transforms cached anchors into world points ($\approx 15\,\mu\text{s}$ for 300 active links),
-  eliminating the legacy $1.8\,\text{ms}$ line-search bottleneck.
+- **Tier 2 (Transform Pipeline)**: On camera motion, SIMD matrix-vector multiplication transforms
+  cached anchors into world points ($\approx 15\,\mu\text{s}$ for 300 active links), eliminating the
+  legacy $1.8\,\text{ms}$ line-search bottleneck.
 
 #### 3. Bidirectional Navigation Flow:
 
@@ -289,5 +289,5 @@ ______________________________________________________________________
 | **Transclusion Stabbing** | Unit test with mixed `Version` and `Manifold`   | Discovers Doc-Doc, Doc-Cell, and Cell-Cell transclusions in $O(\log_8 N + K)$               |
 | **Cell Formatting**       | Unit test on `FormatResolver` + Visualizer test | `LinkType::Format` renders bold/italic text quads in Zigzag cells                           |
 | **Cross-Domain Linking**  | End-to-end clasp forging test                   | Xanadoc $\leftrightarrow$ Cell links write valid `OpKind::Link` without disk format changes |
-| **120 FPS Framerate**     | Latency probe on dual-view render loop          | Anchor transform + ribbon vertex staging $\le 0.5\,\text{ms}$ CPU budget                    |
+| **Render-path latency**   | Latency probe on dual-view render loop          | Anchor transforms and ribbon staging avoid per-frame line searches                          |
 | **Headless Build & Lint** | `make test && make format-check && make lint`   | Zero test regressions; clean exit code 0                                                    |
