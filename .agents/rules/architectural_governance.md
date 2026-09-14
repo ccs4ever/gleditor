@@ -34,8 +34,12 @@ application algorithms, layout routines, physics, and networking.
     1. A dedicated **User Notes Page** headed with `Notes` (formatted with bold, centered, larger
        format links) for user overrides and thoughts.
 - **In `apps/zigzag`**:
+  - **Zigzag Store Invariant**: Zigzag documents and multidimensional spaces must always be backed
+    by a sovereign `xudu::Store` (with `CompactOpNode`, `OpKind::Structure`, and
+    `Store::rebuildManifold()`), never legacy YAML slice files (`.yaml`). The legacy YAML slice
+    format is deprecated in favor of stores.
   - Configurable parameters (cell spacing, camera projections, cycler speeds) must be resolved
-    dynamically from **system zigzag slices**.
+    dynamically from **system zigzag slices** backed by sovereign stores.
   - No markdown syntax in cells; metadata must link along orthogonal dimensions: `d.schema` (purpose
     and schema) and `d.notes` (user notes).
 - **In `apps/gleditor`**:

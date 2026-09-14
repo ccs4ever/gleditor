@@ -21,6 +21,7 @@
 #include "common/xanadu/zigzag/zz_system_projector.hpp"
 #include "common/xanadu/zigzag/zzstructure.hpp"
 #include "common/yaml_helpers.hpp"
+#include <gleditor/color.hpp>
 
 namespace xanadu {
 
@@ -124,9 +125,22 @@ std::string defaultSystemDocContent(const SystemDocKind kind) {
            "      icon: \"@\"\n";
   case SystemDocKind::Pouches:
     return "zone:\n"
-           "  - \"To Link\"\n"
-           "  - \"Notes for Later\"\n"
-           "  - \"Scratch\"\n";
+           "  - id: \"to_link_left\"\n"
+           "    label: \"To Link (Left)\"\n"
+           "    aura: \"#06B6D4\"\n"
+           "    weight: 1.0\n"
+           "  - id: \"to_link_right\"\n"
+           "    label: \"To Link (Right)\"\n"
+           "    aura: \"#EC4899\"\n"
+           "    weight: 1.0\n"
+           "  - id: \"notes\"\n"
+           "    label: \"Notes\"\n"
+           "    aura: \"#EAB308\"\n"
+           "    weight: 1.0\n"
+           "  - id: \"scratch\"\n"
+           "    label: \"Scratch\"\n"
+           "    aura: \"#10B981\"\n"
+           "    weight: 1.0\n";
   case SystemDocKind::Count:
     return "";
   }
@@ -931,6 +945,177 @@ UIConfig UIConfig::fromYaml(const std::string_view yamlText) {
 UIConfig UIConfig::fromSlice(const zigzag::ZzStructureDocument &slice) {
   const std::string configText = zigzag::extractSliceConfigText(slice);
   return parseUIConfig(configText);
+}
+
+namespace {
+[[nodiscard]] std::optional<std::uint32_t>
+parseHexRgbaColor(const std::string_view hexStr) {
+  std::string_view hex = hexStr;
+  if (!hex.empty() && hex.front() == '#') {
+    hex.remove_prefix(1);
+  }
+  if (hex.size() == 6) {
+    if (const auto c = gleditor::color::parseHexColor(hex)) {
+      return gleditor::color::packRgb(*c, 1.0F);
+    }
+  } else if (hex.size() == 8) {
+    if (const auto c = gleditor::color::parseHexColor(hex.substr(0, 6))) {
+      const auto nibble = [](const char ch) -> unsigned {
+        if (ch >= '0' && ch <= '9') {
+          return static_cast<unsigned>(ch - '0');
+        }
+        if (ch >= 'a' && ch <= 'f') {
+          return static_cast<unsigned>(ch - 'a' + 10);
+        }
+        if (ch >= 'A' && ch <= 'F') {
+          return static_cast<unsigned>(ch - 'A' + 10);
+        }
+        return 0;
+      };
+      const float alpha =
+          static_cast<float>(nibble(hex[6]) * 16U + nibble(hex[7])) / 255.0F;
+      return gleditor::color::packRgb(*c, alpha);
+    }
+  }
+  return std::nullopt;
+}
+} // namespace
+
+PouchConfig parsePouchConfig(const std::string_view yamlText) {
+  PouchConfig cfg;
+  const auto effectiveYaml = extractConfigSection(yamlText);
+  if (effectiveYaml.empty()) {
+    cfg.zones = {
+        DropZoneSpec{.id           = "to_link_left",
+                     .label        = "To Link (Left)",
+                     .auraColor    = 0x06B6D4FFU,
+                     .heightWeight = 1.0F},
+        DropZoneSpec{.id           = "to_link_right",
+                     .label        = "To Link (Right)",
+                     .auraColor    = 0xEC4899FFU,
+                     .heightWeight = 1.0F},
+        DropZoneSpec{.id           = "notes",
+                     .label        = "Notes",
+                     .auraColor    = 0xEAB308FFU,
+                     .heightWeight = 1.0F},
+        DropZoneSpec{.id           = "scratch",
+                     .label        = "Scratch",
+                     .auraColor    = 0x10B981FFU,
+                     .heightWeight = 1.0F},
+    };
+    return cfg;
+  }
+
+  const ScopedCallbacks scoped;
+  try {
+    const c4::yml::Tree tree = c4::yml::parse_in_arena(
+        c4::csubstr{effectiveYaml.data(), effectiveYaml.size()});
+    if (!tree.empty()) {
+      const auto root = tree.rootref();
+      auto zoneNode = root.is_map() && root.has_child("zone")    ? root["zone"]
+                      : root.is_map() && root.has_child("zones") ? root["zones"]
+                      : root.is_seq() ? root
+                                      : c4::yml::ConstNodeRef{};
+      if (!zoneNode.invalid() && zoneNode.is_seq()) {
+        for (const auto child : zoneNode.children()) {
+          DropZoneSpec spec;
+          if (child.is_map()) {
+            if (child.has_child("id") && child["id"].has_val()) {
+              spec.id = std::string(child["id"].val().data(),
+                                    child["id"].val().size());
+            }
+            if (child.has_child("label") && child["label"].has_val()) {
+              spec.label = std::string(child["label"].val().data(),
+                                       child["label"].val().size());
+            }
+            if (child.has_child("aura") && child["aura"].has_val()) {
+              const std::string auraStr(child["aura"].val().data(),
+                                        child["aura"].val().size());
+              const auto parsedAura = parseHexRgbaColor(auraStr);
+              if (parsedAura) {
+                spec.auraColor = *parsedAura;
+              }
+            } else if (child.has_child("auraColor") &&
+                       child["auraColor"].has_val()) {
+              const std::string auraStr(child["auraColor"].val().data(),
+                                        child["auraColor"].val().size());
+              const auto parsedAura = parseHexRgbaColor(auraStr);
+              if (parsedAura) {
+                spec.auraColor = *parsedAura;
+              }
+            }
+            if (child.has_child("weight") && child["weight"].has_val()) {
+              spec.heightWeight =
+                  parseFloat(std::string_view(child["weight"].val().data(),
+                                              child["weight"].val().size()),
+                             1.0F);
+            } else if (child.has_child("heightWeight") &&
+                       child["heightWeight"].has_val()) {
+              spec.heightWeight = parseFloat(
+                  std::string_view(child["heightWeight"].val().data(),
+                                   child["heightWeight"].val().size()),
+                  1.0F);
+            }
+            if (spec.id.empty() && !spec.label.empty()) {
+              spec.id = spec.label;
+              std::ranges::replace(spec.id, ' ', '_');
+              std::ranges::transform(
+                  spec.id, spec.id.begin(),
+                  [](const unsigned char c) { return std::tolower(c); });
+            }
+            if (!spec.id.empty()) {
+              cfg.zones.push_back(std::move(spec));
+            }
+          } else if (child.has_val()) {
+            spec.label = std::string(child.val().data(), child.val().size());
+            spec.id    = spec.label;
+            std::ranges::replace(spec.id, ' ', '_');
+            std::ranges::transform(
+                spec.id, spec.id.begin(),
+                [](const unsigned char c) { return std::tolower(c); });
+            cfg.zones.push_back(std::move(spec));
+          }
+        }
+      }
+    }
+  } catch (const std::exception &) {
+    // Fall back to default zones
+  }
+
+  if (cfg.zones.empty()) {
+    cfg.zones = {
+        DropZoneSpec{.id           = "to_link_left",
+                     .label        = "To Link (Left)",
+                     .auraColor    = 0x06B6D4FFU,
+                     .heightWeight = 1.0F},
+        DropZoneSpec{.id           = "to_link_right",
+                     .label        = "To Link (Right)",
+                     .auraColor    = 0xEC4899FFU,
+                     .heightWeight = 1.0F},
+        DropZoneSpec{.id           = "notes",
+                     .label        = "Notes",
+                     .auraColor    = 0xEAB308FFU,
+                     .heightWeight = 1.0F},
+        DropZoneSpec{.id           = "scratch",
+                     .label        = "Scratch",
+                     .auraColor    = 0x10B981FFU,
+                     .heightWeight = 1.0F},
+    };
+  }
+  return cfg;
+}
+
+PouchConfig PouchConfig::fromStore(const Store &store) {
+  if (store.opCount() == 0) {
+    return parsePouchConfig("");
+  }
+  const auto latestVer = store.latest();
+  const auto docText   = store.textOf(latestVer);
+  return parsePouchConfig(docText);
+}
+
+PouchConfig PouchConfig::fromYaml(const std::string_view yamlText) {
+  return parsePouchConfig(yamlText);
 }
 
 } // namespace xanadu

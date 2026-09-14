@@ -110,6 +110,12 @@ TEST(SystemDocsTest, MetadataAndUriRoundTrips) {
   const auto uiCfg = xudu::parseUIConfig(uiDefault);
   EXPECT_TRUE(uiCfg.tabBarVisible);
 
+  const auto pouchesDefault =
+      xudu::defaultSystemDocContent(SystemDocKind::Pouches);
+  EXPECT_FALSE(pouchesDefault.empty());
+  const auto pouchesCfg = xudu::parsePouchConfig(pouchesDefault);
+  EXPECT_EQ(pouchesCfg.zones.size(), 4U);
+
   // Check directory helper returns valid path
   const auto keymapDir = xudu::systemDocDirectory(SystemDocKind::Keymap);
   EXPECT_EQ(keymapDir.filename(), "keymap");
@@ -328,6 +334,31 @@ TEST(SystemDocsTest, ParseUIConfig) {
   EXPECT_FALSE(def.hypertimeMapVisible);
   EXPECT_FLOAT_EQ(def.radialMenu.radius, 130.0F);
   EXPECT_FLOAT_EQ(def.radialMenu.innerRadius, 42.0F);
+}
+
+TEST(SystemDocsTest, ParsePouchConfig) {
+  const std::string yaml = "zones:\n"
+                           "  - id: custom_left\n"
+                           "    label: Custom Left\n"
+                           "    aura: \"#123456\"\n"
+                           "    weight: 1.5\n"
+                           "  - id: custom_right\n"
+                           "    label: Custom Right\n"
+                           "    auraColor: \"#abcdef88\"\n"
+                           "    heightWeight: 2.0\n";
+
+  const auto cfg = xudu::parsePouchConfig(yaml);
+  ASSERT_EQ(cfg.zones.size(), 2U);
+  EXPECT_EQ(cfg.zones[0].id, "custom_left");
+  EXPECT_EQ(cfg.zones[0].label, "Custom Left");
+  EXPECT_FLOAT_EQ(cfg.zones[0].heightWeight, 1.5F);
+  EXPECT_EQ(cfg.zones[1].id, "custom_right");
+  EXPECT_EQ(cfg.zones[1].label, "Custom Right");
+  EXPECT_FLOAT_EQ(cfg.zones[1].heightWeight, 2.0F);
+
+  // Fallback defaults
+  const auto def = xudu::parsePouchConfig("");
+  EXPECT_EQ(def.zones.size(), 4U);
 }
 
 TEST(SystemDocsTest, SchemaAndNotesNonEmptyAndNoMarkdown) {

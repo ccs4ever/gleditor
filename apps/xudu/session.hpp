@@ -201,7 +201,8 @@ public:
   /// this -- it would coalesce with adjacent locally-typed text into one
   /// piece libmagic cannot identify.
   MicroversionId insertMedia(std::uint32_t docIndex, std::uint32_t at,
-                             std::string_view bytes, std::string mimeType);
+                             std::string_view bytes, std::string mimeType,
+                             std::string filePath = "");
   MicroversionId insertBreak(std::uint32_t docIndex, std::uint32_t at);
   MicroversionId insertSpan(std::uint32_t docIndex, std::uint32_t at,
                             const PrimediaSpan &span);
@@ -253,6 +254,8 @@ public:
 
   InfoHash addTorrent(const std::string &torrentPath,
                       const std::string &dataRoot);
+  InfoHash addTorrentMemory(std::string_view torrentData,
+                            const std::string &dataRoot = ".");
 
   /**
    * @brief Name content by a magnet link.

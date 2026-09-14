@@ -144,6 +144,7 @@ private:
 class PouchManager {
 public:
   explicit PouchManager(std::shared_ptr<UserPermascroll> permascroll = nullptr);
+  explicit PouchManager(Store &systemStore);
 
   DropZone &addZone(DropZoneConfig config);
   bool removeZone(std::string_view id);
@@ -174,8 +175,12 @@ public:
   /// Dismiss an item, moving it to non-destructive limbo in the backing store.
   bool dismissItem(std::uint64_t itemId);
 
-  [[nodiscard]] Store &store() noexcept { return *store_; }
-  [[nodiscard]] const Store &store() const noexcept { return *store_; }
+  [[nodiscard]] Store &store() noexcept {
+    return systemStore_ ? *systemStore_ : *store_;
+  }
+  [[nodiscard]] const Store &store() const noexcept {
+    return systemStore_ ? *systemStore_ : *store_;
+  }
   [[nodiscard]] const MicroversionId &currentVersion() const noexcept {
     return currentVersion_;
   }
@@ -185,6 +190,7 @@ public:
   void loadManifest();
 
 private:
+  Store *systemStore_{nullptr};
   std::unique_ptr<Store> store_;
   MicroversionId currentVersion_;
   std::vector<std::unique_ptr<DropZone>> zones_;

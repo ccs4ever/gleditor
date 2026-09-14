@@ -97,9 +97,19 @@ systemDocKindFromUri(const std::string_view uri) noexcept {
 
 [[nodiscard]] inline std::string_view
 extractConfigSection(const std::string_view docText) noexcept {
-  const auto pos = docText.find("Schema and Purpose");
-  if (pos != std::string_view::npos) {
-    return docText.substr(0, pos);
+  const auto ffPos     = docText.find('\f');
+  const auto schemaPos = docText.find("Schema and Purpose");
+  auto end             = ffPos;
+  if (end == std::string_view::npos ||
+      (schemaPos != std::string_view::npos && schemaPos < end)) {
+    end = schemaPos;
+  }
+  if (end != std::string_view::npos) {
+    auto res = docText.substr(0, end);
+    if (!res.empty() && res.back() == '\f') {
+      res.remove_suffix(1);
+    }
+    return res;
   }
   return docText;
 }
@@ -241,10 +251,25 @@ struct UIConfig {
   fromSlice(const zigzag::ZzStructureDocument &slice);
 };
 
+struct DropZoneSpec {
+  std::string id;
+  std::string label{"Notes"};
+  std::uint32_t auraColor{0x06B6D4FFU};
+  float heightWeight{1.0F};
+};
+
+struct PouchConfig {
+  std::vector<DropZoneSpec> zones;
+
+  [[nodiscard]] static PouchConfig fromStore(const Store &store);
+  [[nodiscard]] static PouchConfig fromYaml(std::string_view yamlText);
+};
+
 [[nodiscard]] KeymapConfig parseKeymapConfig(std::string_view yamlText);
 [[nodiscard]] SettingsConfig parseSettingsConfig(std::string_view yamlText);
 [[nodiscard]] LayoutConfig parseLayoutConfig(std::string_view yamlText);
 [[nodiscard]] UIConfig parseUIConfig(std::string_view yamlText);
+[[nodiscard]] PouchConfig parsePouchConfig(std::string_view yamlText);
 
 [[nodiscard]] gleditor::RadialConfig
 parseRadialConfig(std::string_view yamlText);

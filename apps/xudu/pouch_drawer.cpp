@@ -13,12 +13,17 @@
 
 #include <gleditor/render/types.hpp>
 
+#include "xudu/core/system_docs.hpp"
+
 namespace xudu {
 
 PouchDrawer::PouchDrawer(Session &session, RendererRef renderer,
                          std::string fontName, const DockSide side)
     : session_(session), renderer_(std::move(renderer)),
-      fontName_(std::move(fontName)), side_(side) {}
+      fontName_(std::move(fontName)), side_(side),
+      pouchManager_(session.systemStore(SystemDocKind::Pouches)) {
+  pouchManager_.loadManifest();
+}
 
 PouchDrawer::~PouchDrawer() = default;
 
