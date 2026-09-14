@@ -6,6 +6,7 @@
 # Generated/Runtime files
 config.h
 .cache
+/.codex/
 
 # Compile Commands file (used by clangd)
 compile_commands.json
