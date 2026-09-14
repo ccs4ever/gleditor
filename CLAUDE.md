@@ -378,7 +378,7 @@ continuation indents, treats Markdown table cell padding as "wrong" indentation,
 - `apps/xudu/` — the xanadoc editor's own UI: `beams.cpp`, `framing.cpp` (3D link ribbons and
   transclusion prisms), `session.cpp`, the overlays, `main.cpp`
 - `apps/zigzag/` — the Xanadu Zigzag multidimensional visualizer; `apps/zigzag/core/`:
-  - `unified_transclusion_engine.hpp/.cpp`: 120 FPS render staging over a `Manifold`, plus the
+  - `unified_transclusion_engine.hpp/.cpp`: interactive render staging over a `Manifold`, plus the
     shaping cache. Since step 19 it holds no cell space of its own: `syncIncremental()` *folds*
     operations rather than projecting them, `addCell()` mints an operation rather than filing a
     struct, and `cellForOp()` is gone because a `CellRef` already is an operation index. **It still
@@ -434,7 +434,7 @@ continuation indents, treats Markdown table cell padding as "wrong" indentation,
   - Document margin anchor brackets sit flush inside page boundaries, supporting up to 4 distinct
     overlapping link anchor colors.
 - **Zigzag Transclusion & Manifold Engine**:
-  - `CompactZZCell` and `UnifiedTransclusionEngine` stage cells and link beams for 120 FPS
+  - `CompactZZCell` and `UnifiedTransclusionEngine` stage cells and link beams for interactive
     high-throughput rendering.
   - `zz_xudu_projector` projects xanadocs and hypertime branches into Zigzag cells, mapping
     unchanged spans across revisions to clone cells.

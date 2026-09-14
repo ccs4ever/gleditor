@@ -142,7 +142,7 @@ public:
   /// Read a span of local primedia as a string copy.
   [[nodiscard]] std::string read(const PrimediaSpan &span) const override;
 
-  /// Zero-copy view into contiguous virtual memory, for the 120 FPS path.
+  /// Zero-copy view into contiguous virtual memory, for the render hot path.
   [[nodiscard]] std::string_view readView(const PrimediaSpan &span) const;
 
   /// Total bytes recorded across all historical segments and active buffer.

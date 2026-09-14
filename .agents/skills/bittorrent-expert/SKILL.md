@@ -195,9 +195,9 @@ collapse**:
 
 ______________________________________________________________________
 
-## 6. Systems & 120 FPS Realist Implementation Rules
+## 6. Systems Realist Implementation Rules
 
-To maintain an 8.33 ms frame budget at 120 FPS:
+To keep render-thread work predictable and responsive:
 
 1. **Zero Libtorrent Calls on Render Thread**:
    - `libtorrent::session`, `handle.status()`, and alert processing MUST live exclusively on a

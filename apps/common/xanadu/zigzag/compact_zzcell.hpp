@@ -141,7 +141,7 @@ struct DynamicDimensionLink {
  *
  * **It would not buy frame time either.** Measured on a 32,768-cell lattice
  * at the default radius of 3, which visits about sixty cells: the BFS in
- * stageVisibleCells costs 1.1 microseconds, or 0.013% of a 8.33 ms frame.
+ * stageVisibleCells costs 1.1 microseconds.
  * Shrinking the cell to 52 bytes and swapping the std::set and std::queue for
  * flat containers takes that to 0.2 microseconds. Both are noise. The
  * traversal only becomes expensive at radii nothing asks for.
