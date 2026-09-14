@@ -256,7 +256,7 @@ In [`apps/xudu/core/virtual_memory_arena.cpp`](apps/xudu/core/virtual_memory_are
   ([`StreamBufferGL`](include/gleditor/render/gl/stream_buffer.hpp)) with explicit range flushes
   (`glFlushMappedBufferRange`).
 - Rendered in a single `glDrawArraysInstanced` call, completely bypassing CPU-GPU synchronization
-  locks and guaranteeing a stable **120 FPS ($8.33\text{ ms}$)** framerate budget.
+  locks and guaranteeing a stable **interactive ($8.33\text{ ms}$)** framerate budget.
 
 ______________________________________________________________________
 
@@ -271,4 +271,4 @@ ______________________________________________________________________
 | **Glyph Atlas & Multiband** | [`src/glyphcache/cache.cpp`](src/glyphcache/cache.cpp), [`include/gleditor/doc.hpp`](include/gleditor/doc.hpp)                                                                                         | Multi-layer texture atlas and 24-byte `Doc::VBORow` instance quads    |
 | **Virtual Memory Spools**   | [`apps/xudu/core/virtual_memory_arena.hpp/.cpp`](apps/xudu/core/virtual_memory_arena.hpp)                                                                                                              | 512 MB virtual memory arena with `MAP_FIXED` zero-copy paging         |
 | **Zigzag Projection**       | [`apps/zigzag/core/unified_transclusion_engine.hpp/.cpp`](apps/zigzag/core/unified_transclusion_engine.hpp)                                                                                            | `d.transclude` rank construction and zero-copy GPU staging            |
-| **Unit Test Suites**        | [`tests/xudu/beams.cpp`](tests/xudu/beams.cpp), [`tests/lib/beams.cpp`](tests/lib/beams.cpp), [`tests/zigzag/test_unified_transclusion_engine.cpp`](tests/zigzag/test_unified_transclusion_engine.cpp) | Tests covering span intersection, ribbon framing, and 120 FPS staging |
+| **Unit Test Suites**        | [`tests/xudu/beams.cpp`](tests/xudu/beams.cpp), [`tests/lib/beams.cpp`](tests/lib/beams.cpp), [`tests/zigzag/test_unified_transclusion_engine.cpp`](tests/zigzag/test_unified_transclusion_engine.cpp) | Tests covering span intersection, ribbon framing, and interactive staging |

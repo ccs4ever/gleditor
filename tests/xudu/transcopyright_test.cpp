@@ -169,7 +169,7 @@ TEST(TranscopyrightStorageTest, virtualMemoryArenaCommitsAndReadsBack) {
   EXPECT_EQ(arena.base()[size - 1], 0);
 
   const std::string plaintext =
-      "Decrypted Transcopyright Plaintext at 120 FPS!";
+      "Decrypted Transcopyright Plaintext in real time!";
   std::memcpy(arena.base() + 1024, plaintext.data(), plaintext.size());
 
   const std::string_view view{

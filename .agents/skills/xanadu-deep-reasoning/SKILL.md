@@ -28,7 +28,7 @@ theoretical, and implementation challenges across the **gleditor**, **xudu** (xa
                                    │   ▼
        +-------------------------------------------------------------+
        |                    Systems Realist                          |
-       |  - 120 FPS / 8.33ms GPU Render Budgets                      |
+       |  - Interactive GPU render latency and throughput                      |
        |  - Cache Lines, Memory Bandwidth & Zero-Copy mmap           |
        |  - BitTorrent Swarm Latency & Non-blocking Timeouts         |
        |  - Lock-Free MVCC & Crash-Resilient Segmented Spools        |
@@ -70,7 +70,7 @@ ______________________________________________________________________
 
 - **Philosophy**: Hard mechanical sympathy, hardware limits, and distributed systems constraints.
 - **Invariants**:
-  - **Framerate Budget**: Interactive rendering at 60–120 FPS ($8.33\text{ms} - 16.6\text{ms}$).
+  - **Framerate Budget**: Interactive rendering at 60–interactive ($8.33\text{ms} - 16.6\text{ms}$).
   - **Zero Blocking on Render/UI Threads**: FUSE-style blocking calls or synchronous DHT/swarm
     lookups are forbidden.
   - **Memory Hierarchy**: Cache-friendly data layout ($64\text{-byte}$ alignment), zero-copy pointer
@@ -124,7 +124,7 @@ follows a 4-phase cycle:
 
 - **Leader**: Orchestrator (Antigravity)
 - **Goal**: Formulate the final engineering specification that maximizes Xanadulogical fidelity
-  while guaranteeing 120 FPS performance and rock-solid system stability.
+  while maintaining responsive, empirically verified performance and rock-solid system stability.
 
 ______________________________________________________________________
 

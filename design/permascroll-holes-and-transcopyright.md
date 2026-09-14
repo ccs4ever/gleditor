@@ -230,7 +230,7 @@ reads of the same span resolve instantaneously without network round-trips.
 
 ______________________________________________________________________
 
-## 5. 120 FPS Rendering and Spatial Integration
+## 5. interactive Rendering and Spatial Integration
 
 ### 2D Document Model (`Doc` / `Page` / `Session`)
 

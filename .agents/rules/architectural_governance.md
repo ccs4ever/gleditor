@@ -48,7 +48,7 @@ application algorithms, layout routines, physics, and networking.
 
 ## 3. Systems Realism & Empirical Verification
 
-- Hot rendering loops (120 FPS target / 8.33ms budget) must have **zero dynamic memory
+- Hot rendering loops (interactive target / render-path latency) must have **zero dynamic memory
   allocations**.
 - Critical hot structs must be 64-byte aligned and cache-friendly (e.g. `CompactOpNode`,
   `CompactZZCell`).

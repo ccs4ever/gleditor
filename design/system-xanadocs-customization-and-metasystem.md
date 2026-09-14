@@ -490,7 +490,7 @@ private:
   program writes these for itself and would otherwise refuse to start over its own scaffolding. A
   document the *user* named is never treated that way.
 
-### 5.4 120 FPS Performance Envelope ($8.33\,\text{ms}$)
+### 5.4 Interactive Performance Envelope
 
 - Reading active layout offsets or keybindings during a frame is an $O(1)$ memory lookup.
 - Metasystem ops are only parsed when a system store is edited, costing $< 50\,\mu\text{s}$.

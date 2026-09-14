@@ -50,7 +50,7 @@ snapshots on disk or minting on-disk operations (**Ruling R8**):
                                      │
                                      ▼
                      O(1) Amortized Rebuild (< 0.3 µs)
-                     120 FPS Real-Time Timeline Scrubbing
+                     Real-Time Timeline Scrubbing
 ```
 
 ### Pillar 1: Composable EDL Transform Monoid ($T_2 \circ T_1$)
@@ -217,4 +217,4 @@ From `tests/xudu/chronofilade_benchmark_test.cpp`:
   nanoseconds), strictly bounded by at most 31 operations regardless of total history depth ($O(1)$
   amortized).
 - **Asymptotic Speedup**: At $K = 100,000$, Chronofilade delivers a **$> 50,000\times$ speedup**,
-  easily fitting within the 120 FPS ($8.33\ \text{ms}$) frame budget.
+  easily fitting within the interactive ($8.33\ \text{ms}$) frame budget.
