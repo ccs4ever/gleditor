@@ -294,8 +294,8 @@ if (__builtin_expect(cell->formatFlags == 0, 1)) {
 }
 ```
 
-This single-instruction branch check (`testw %ax, %ax; jz .Lfast_path`) protects the 120 FPS
-framerate budget.
+This branch check (`testw %ax, %ax; jz .Lfast_path`) bypasses formatting resolution for
+unformatted cells.
 
 ______________________________________________________________________
 
