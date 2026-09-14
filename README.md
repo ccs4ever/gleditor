@@ -781,7 +781,7 @@ A verified piece is then **kept**, keyed by `(info hash, piece index)` -- which 
 exactly, since a piece hash is a commitment, so any bytes that verify against it are the bytes the
 reference meant whatever they were fetched from. Without that, a frame re-hashed 64 KiB once per
 visible cell: measured over sixty short reads scattered across a 1 MiB torrent, 3.4--5.5 ms of SHA-1
-against an frame time frame, now 0.7--1.4 ms. The cache costs something real and says so: a piece
+before caching, now 0.7--1.4 ms. The cache costs something real and says so: a piece
 already verified keeps answering after the local copy is altered, so tampering stops being noticed
 for as long as it is held. Two things bound that -- it is in memory and per-`Resolver`, so the
 window is one open document and reopening re-verifies everything; and only *verified* pieces are
@@ -1303,7 +1303,7 @@ zzstructure:
 | `R`                               | Reset camera view to default orientation                   |
 | Left Click                        | Pick cell directly under the mouse pointer to shift focus  |
 
-### Unified Transclusion Engine & interactive Rendering
+### Unified Transclusion Engine & Interactive Rendering
 
 `zigzag` features a high-performance engine for large-scale multidimensional spaces:
 

@@ -191,7 +191,7 @@ concurrently:
     {
       "TypeName": "systems_profiler",
       "Role": "Systems & Performance Profiler",
-      "Prompt": "Evaluate the memory layout (64B cache lines), allocation profile, and interactive performance budget for <target_module_or_feature> with empirical data.",
+      "Prompt": "Evaluate the memory layout (64B cache lines), allocation profile, and interactive performance characteristics for <target_module_or_feature> with empirical data.",
       "Model": "inherit"
     }
   ]

@@ -70,7 +70,7 @@ ______________________________________________________________________
 
 - **Philosophy**: Hard mechanical sympathy, hardware limits, and distributed systems constraints.
 - **Invariants**:
-  - **Framerate Budget**: Interactive rendering at 60–interactive ($8.33\text{ms} - 16.6\text{ms}$).
+  - **Interactive Rendering**: Keep render-path latency responsive and verify it empirically.
   - **Zero Blocking on Render/UI Threads**: FUSE-style blocking calls or synchronous DHT/swarm
     lookups are forbidden.
   - **Memory Hierarchy**: Cache-friendly data layout ($64\text{-byte}$ alignment), zero-copy pointer

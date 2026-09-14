@@ -712,7 +712,7 @@ TEST(ManifoldTest, aHopCostsWhatR12SaysItCosts) {
   EXPECT_LT(runSeq, 500.0) << "a sequential hop should be nanoseconds";
   EXPECT_LT(runRnd, 2000.0) << "a scattered hop should be nanoseconds";
   // And the falsifiable claim R12 actually rests on: 300 hops is a frame's
-  // worth of traversal and must be a rounding error against frame time.
+  // worth of traversal and must be a rounding error in absolute terms.
   EXPECT_LT(runRnd * 300.0 / 1000.0, 100.0)
       << "300 scattered hops must be well under a millisecond";
 }

@@ -498,7 +498,7 @@ TEST(ShapingCacheTest, ReportsTheCostOfAStagingPass) {
 
   const auto stats = rig.engine.shapingCacheStats();
   std::printf("  staging 60 cells: shaping every pass %.3f ms | cached %.3f ms "
-              "| %.1fx | budget in real time frame time\n",
+              "| %.1fx\n",
               cold, warm, cold / std::max(warm, 1e-9));
   std::printf("  cache: %zu entries, %llu hits, %llu misses, %llu evictions\n",
               stats.entries, static_cast<unsigned long long>(stats.hits),
