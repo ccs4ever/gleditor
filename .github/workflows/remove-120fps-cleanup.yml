@@ -1,9 +1,8 @@
-name: One-shot 120 FPS cleanup
+name: One-shot cleanup
 
 on:
   push:
-    branches:
-      - remove-120fps-target
+    branches: [remove-120fps-target]
 
 permissions:
   contents: write
@@ -17,137 +16,73 @@ jobs:
         with:
           ref: remove-120fps-target
           fetch-depth: 0
-
-      - name: Remove obsolete framerate target language
+      - name: Clean obsolete target language
         shell: bash
         run: |
           python3 - <<'PY'
           from pathlib import Path
-          import re
-          import subprocess
+          import re, subprocess
 
-          files = subprocess.check_output(["git", "ls-files", "-z"]).decode().split("\0")
-          files = [f for f in files if f]
-
-          literal_replacements = {
-              "120 FPS / 8.33ms GPU Render Budgets": "Interactive GPU render latency and throughput",
-              "120 FPS / 8.33ms GPU Frame Budget": "Interactive GPU render latency and throughput",
-              "120 FPS / 8.33ms Budget: Retained Sliced Canvas.": "Retained sliced-canvas render path.",
-              "120 FPS / allocs": "render path / allocs",
-              "120 FPS Real-Time Timeline Scrubbing": "Real-Time Timeline Scrubbing",
-              "Swarm Telescope 120 FPS Search UI": "Swarm Telescope Real-Time Search UI",
-              "Systems & 120 FPS Realist Implementation Rules": "Systems Realist Implementation Rules",
-              "To maintain an 8.33 ms frame budget at 120 FPS:": "To keep render-thread work predictable and responsive:",
-              "while guaranteeing 120 FPS performance and rock-solid system stability.": "while maintaining responsive, empirically verified performance and rock-solid system stability.",
-              "operating at 120 FPS.": "operating responsively.",
-              "during 120 FPS text shaping": "during interactive text shaping",
-              "Transform Pipeline @ 120 FPS": "Transform Pipeline",
-              "120 FPS render staging": "interactive render staging",
-              "with a 120 FPS unified transclusion engine": "with a unified transclusion engine",
-              "High-Throughput 120 FPS GPU Staging Pipeline": "High-Throughput GPU Staging Pipeline",
-              "live editing and 120 FPS rendering": "live editing and interactive rendering",
-              "fluid 120 FPS": "fluid interactive rendering",
-              "for the 120 FPS path": "for the render hot path",
-              "The 120 FPS / 8.33 ms Render Budget and Text Shapers": "Render-Path Latency and Text Shapers",
-              "the 120 FPS / 8.33 ms Render Budget and Text Shapers": "Render-Path Latency and Text Shapers",
-              "120 FPS Performance Envelope ($8.33\\,\\text{ms}$)": "Interactive Performance Envelope",
+          workflow = '.github/workflows/remove-120fps-cleanup.yml'
+          files = [f for f in subprocess.check_output(['git','ls-files','-z']).decode().split('\0') if f and f != workflow]
+          replacements = {
+            '120 FPS / 8.33ms GPU Render Budgets': 'Interactive GPU render latency and throughput',
+            '120 FPS / 8.33ms GPU Frame Budget': 'Interactive GPU render latency and throughput',
+            '120 FPS / 8.33ms Budget: Retained Sliced Canvas.': 'Retained sliced-canvas render path.',
+            '120 FPS / allocs': 'render path / allocs',
+            '120 FPS Real-Time Timeline Scrubbing': 'Real-Time Timeline Scrubbing',
+            'Swarm Telescope 120 FPS Search UI': 'Swarm Telescope Real-Time Search UI',
+            'Systems & 120 FPS Realist Implementation Rules': 'Systems Realist Implementation Rules',
+            'To maintain an 8.33 ms frame budget at 120 FPS:': 'To keep render-thread work predictable and responsive:',
+            'while guaranteeing 120 FPS performance and rock-solid system stability.': 'while maintaining responsive, empirically verified performance and rock-solid system stability.',
+            'operating at 120 FPS.': 'operating responsively.',
+            'during 120 FPS text shaping': 'during interactive text shaping',
+            'Transform Pipeline @ 120 FPS': 'Transform Pipeline',
+            '120 FPS render staging': 'interactive render staging',
+            'with a 120 FPS unified transclusion engine': 'with a unified transclusion engine',
+            'High-Throughput 120 FPS GPU Staging Pipeline': 'High-Throughput GPU Staging Pipeline',
+            'live editing and 120 FPS rendering': 'live editing and interactive rendering',
+            'fluid 120 FPS': 'fluid interactive rendering',
+            'for the 120 FPS path': 'for the render hot path',
+            'The 120 FPS / 8.33 ms Render Budget and Text Shapers': 'Render-Path Latency and Text Shapers',
+            '120 FPS Performance Envelope ($8.33\\,\\text{ms}$)': 'Interactive Performance Envelope',
           }
-
-          changed = []
+          changed=[]
           for name in files:
-              p = Path(name)
-              try:
-                  raw = p.read_bytes()
-                  text = raw.decode("utf-8")
-              except (UnicodeDecodeError, OSError):
-                  continue
-
-              original = text
-              for old, new in literal_replacements.items():
-                  text = text.replace(old, new)
-
-              # Common prose forms. The specific replacements above handle headings and
-              # diagrams; these catch remaining target language without touching unrelated
-              # numeric 120 values.
-              text = re.sub(r"\bat\s+120\s*FPS\b", "in real time", text, flags=re.I)
-              text = re.sub(r"\b120\s*FPS\b", "interactive", text, flags=re.I)
-              text = re.sub(r"\b120fps\b", "interactive", text, flags=re.I)
-
-              # Remove comparisons whose only purpose was to justify the former 8.33 ms
-              # frame target while preserving the absolute benchmark measurements.
-              text = re.sub(
-                  r",\s*(?:or\s+)?\d+(?:\.\d+)?%\s+of\s+an?\s+8\.33\s*ms\s+frame",
-                  "",
-                  text,
-                  flags=re.I,
-              )
-              text = re.sub(
-                  r",\s*both\s+under\s+\d+(?:\.\d+)?%\s+of\s+an?\s+8\.33\s*ms\s+frame",
-                  ", both small at the measured traversal size",
-                  text,
-                  flags=re.I,
-              )
-              text = re.sub(r"8\.33\s*ms\s+frame\s+budget", "render-path latency", text, flags=re.I)
-              text = re.sub(r"8\.33\s*ms\s+budget", "render-path latency", text, flags=re.I)
-              text = re.sub(r"8\.33\\,?\\text\{ms\}", "frame time", text)
-              text = re.sub(r"8\.33\s*ms", "frame time", text, flags=re.I)
-
-              # A 60–120 FPS range in the systems-realist guidance encoded the same
-              # accidental target. Keep the invariant qualitative instead.
-              text = re.sub(
-                  r"Interactive rendering at 60[–-]interactive\s*\([^\n]*frame time[^\n]*\)\.?",
-                  "Responsive interactive rendering backed by measurement.",
-                  text,
-                  flags=re.I,
-              )
-              text = re.sub(
-                  r"Interactive rendering at 60[–-]120\s*FPS\s*\([^\n]*\)\.?",
-                  "Responsive interactive rendering backed by measurement.",
-                  text,
-                  flags=re.I,
-              )
-
-              # Clean a few grammar artifacts left when the numeric target occurred inside
-              # parentheticals or emphasis.
-              text = text.replace("($frame time$)", "")
-              text = text.replace("(frame time)", "")
-              text = text.replace("**interactive (frame time)**", "interactive rendering")
-              text = text.replace("**interactive**", "interactive")
-
-              if text != original:
-                  p.write_text(text, encoding="utf-8")
-                  changed.append(name)
-
-          # The one-shot workflow must leave no direct target/budget references behind.
-          offenders = []
-          fps_re = re.compile(r"120\s*FPS|120fps", re.I)
-          ms_re = re.compile(r"8\.33\s*ms|8\.33\\,?\\text\{ms\}", re.I)
+            p=Path(name)
+            try: text=p.read_text(encoding='utf-8')
+            except (UnicodeDecodeError,OSError): continue
+            old=text
+            for a,b in replacements.items(): text=text.replace(a,b)
+            text=re.sub(r'\bat\s+120\s*FPS\b','in real time',text,flags=re.I)
+            text=re.sub(r'\b120\s*FPS\b','interactive',text,flags=re.I)
+            text=re.sub(r'\b120fps\b','interactive',text,flags=re.I)
+            text=re.sub(r',\s*(?:or\s+)?\d+(?:\.\d+)?%\s+of\s+an?\s+8\.33\s*ms\s+frame','',text,flags=re.I)
+            text=re.sub(r'8\.33\s*ms\s+frame\s+budget','render-path latency',text,flags=re.I)
+            text=re.sub(r'8\.33\s*ms\s+budget','render-path latency',text,flags=re.I)
+            text=re.sub(r'8\.33\\,?\\text\{ms\}','frame time',text)
+            text=re.sub(r'8\.33\s*ms','frame time',text,flags=re.I)
+            text=re.sub(r'Interactive rendering at 60[–-]interactive\s*\([^\n]*frame time[^\n]*\)\.?','Responsive interactive rendering backed by measurement.',text,flags=re.I)
+            text=re.sub(r'Interactive rendering at 60[–-]120\s*FPS\s*\([^\n]*\)\.?','Responsive interactive rendering backed by measurement.',text,flags=re.I)
+            if text!=old:
+              p.write_text(text,encoding='utf-8'); changed.append(name)
+          offenders=[]
+          fps=re.compile(r'120\s*FPS|120fps',re.I); ms=re.compile(r'8\.33\s*ms|8\.33\\,?\\text\{ms\}',re.I)
           for name in files:
-              p = Path(name)
-              try:
-                  text = p.read_text(encoding="utf-8")
-              except (UnicodeDecodeError, OSError):
-                  continue
-              if fps_re.search(text) or ms_re.search(text):
-                  offenders.append(name)
-          if offenders:
-              raise SystemExit("remaining target references: " + ", ".join(offenders))
-
-          print(f"updated {len(changed)} files")
-          for name in changed:
-              print(name)
+            p=Path(name)
+            try: text=p.read_text(encoding='utf-8')
+            except (UnicodeDecodeError,OSError): continue
+            if fps.search(text) or ms.search(text): offenders.append(name)
+          if offenders: raise SystemExit('remaining target references: '+', '.join(offenders))
+          print('updated',len(changed),'files')
+          print('\n'.join(changed))
           PY
-
-      - name: Commit cleanup and remove one-shot workflow
+      - name: Commit cleanup and remove workflow
         shell: bash
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git rm .github/workflows/remove-120fps-cleanup.yml
           git add -A
-          if git diff --cached --quiet; then
-            echo "No cleanup changes to commit"
-            exit 0
-          fi
           git commit -m "Remove obsolete 120 FPS target references repo-wide"
           git push origin HEAD:remove-120fps-target
