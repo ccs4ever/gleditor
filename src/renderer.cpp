@@ -237,8 +237,7 @@ void Renderer::openDoc(RenderState &state, const gleditor::TextSource &source,
     for (std::size_t i = state.docs.size(); i-- > 0;) {
       if (state.docs[i] && state.docs[i]->getModel()[3].z >= 0.0F) {
         const float centerX = state.docs[i]->getModel()[3].x;
-        float halfW = 0.5F * (Doc::textWidthPx + (2.0F * Page::marginPixels)) *
-                      Doc::pixelsToWorld;
+        float halfW         = Doc::defaultPageWidthWorld() / 2.0F;
         if (const auto *p = state.docs[i]->page(0)) {
           halfW = (p->widthPixels() * 0.5F) * Doc::pixelsToWorld;
         }
@@ -248,9 +247,7 @@ void Renderer::openDoc(RenderState &state, const gleditor::TextSource &source,
       }
     }
     if (foundForeground) {
-      const float newHalfW = 0.5F *
-                             (Doc::textWidthPx + (2.0F * Page::marginPixels)) *
-                             Doc::pixelsToWorld;
+      const float newHalfW = Doc::defaultPageWidthWorld() / 2.0F;
       slot.x               = lastRight + render::kDefaultDocumentGap + newHalfW;
     }
   }

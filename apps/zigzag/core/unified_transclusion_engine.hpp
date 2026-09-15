@@ -40,6 +40,8 @@ namespace zigzag {
 class UnifiedTransclusionEngine {
 public:
   explicit UnifiedTransclusionEngine(xanadu::Store &store);
+  UnifiedTransclusionEngine(xanadu::Store &store,
+                            const xanadu::MicroversionId &version);
   ~UnifiedTransclusionEngine() = default;
 
   UnifiedTransclusionEngine(const UnifiedTransclusionEngine &) = delete;
@@ -71,6 +73,8 @@ public:
    * what this replaced and why none of it could survive.
    */
   void syncIncremental();
+  /// Rebuild the derived manifold at an exact branch head.
+  void syncTo(const xanadu::MicroversionId &version);
 
   /// The structure map this engine reads. The model, not a cache of one.
   [[nodiscard]] const Manifold &manifold() const noexcept { return manifold_; }

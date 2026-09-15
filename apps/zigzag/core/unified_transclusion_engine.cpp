@@ -18,6 +18,20 @@ UnifiedTransclusionEngine::UnifiedTransclusionEngine(xanadu::Store &store)
   syncIncremental();
 }
 
+UnifiedTransclusionEngine::UnifiedTransclusionEngine(
+    xanadu::Store &store, const xanadu::MicroversionId &version)
+    : store_(store) {
+  syncTo(version);
+}
+
+void UnifiedTransclusionEngine::syncTo(const xanadu::MicroversionId &version) {
+  manifold_          = store_.rebuildManifold(version);
+  head_              = version;
+  lastSyncedOpIndex_ = store_.segmentedOps().indexOf(version);
+  clearShapingCache();
+  updateFormatFlags();
+}
+
 void UnifiedTransclusionEngine::syncIncremental() {
   // A fold, not a projection. buildCellFromOp() used to synthesise a cell from
   // *every* operation -- an Insert included -- and then hand-build d.ops_time,
@@ -51,8 +65,7 @@ void UnifiedTransclusionEngine::ensureSliceBegun() {
   if (zigzag::noCell != store_.homeCell()) {
     return;
   }
-  head_ = store_.sliceGenesis(head_);
-  syncIncremental();
+  syncTo(store_.sliceGenesis(head_));
 }
 
 DimRef UnifiedTransclusionEngine::dimensionFor(const std::string_view name) {
@@ -71,8 +84,7 @@ CellRef UnifiedTransclusionEngine::addCell(const std::string_view text) {
   // Minting, where this used to be filing: a cell cannot exist without the
   // operation that names it, so adding one is recording one.
   ensureSliceBegun();
-  head_ = store_.makeCell(head_, text);
-  syncIncremental();
+  syncTo(store_.makeCell(head_, text));
   return store_.cellRefOf(head_);
 }
 
@@ -82,9 +94,7 @@ void UnifiedTransclusionEngine::updateCellText(const CellRef cell,
     return;
   }
   ensureSliceBegun();
-  head_ = store_.setCellText(head_, cell, text, &manifold_);
-  syncIncremental();
-  clearShapingCache();
+  syncTo(store_.setCellText(head_, cell, text, &manifold_));
 }
 
 void UnifiedTransclusionEngine::setCold(const CellRef cell, ColdCell cold) {
@@ -106,8 +116,7 @@ void UnifiedTransclusionEngine::linkCells(const CellRef a, const CellRef b,
   // One operation, not two writes. The reciprocal edge is what the fold means
   // by a link rather than a second thing to remember to set -- which is what
   // the four-line pos-then-neg dance this replaces kept getting right by hand.
-  head_ = store_.setLink(head_, a, dim, dir, b, &manifold_);
-  syncIncremental();
+  syncTo(store_.setLink(head_, a, dim, dir, b, &manifold_));
 }
 
 void UnifiedTransclusionEngine::linkCells(const CellRef a, const CellRef b,

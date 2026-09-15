@@ -37,11 +37,15 @@ export SDL_VIDEODRIVER SDL_AUDIODRIVER LIBGL_ALWAYS_SOFTWARE
 # whoever ran it, and it stays there. $XDG_CONFIG_HOME is the same argument for
 # the system xanadocs -- keymap, settings, layout, ui -- which xudu writes for
 # itself on first run and which a test run would otherwise overwrite with
-# whatever that test was demonstrating. Same `?=` reasoning as above: point
-# either somewhere else and that survives.
+# whatever that test was demonstrating. $XDG_CACHE_HOME keeps the LMDB content
+# cache under the build tree as well; without it, Resolver falls back to the
+# user's cache directory and a sandboxed or read-only home makes mdb_env_open
+# fail. Same `?=` reasoning as above: point either somewhere else and that
+# survives.
 XDG_DATA_HOME   ?= $(CURDIR)/build/xdg/data
 XDG_CONFIG_HOME ?= $(CURDIR)/build/xdg/config
-export XDG_DATA_HOME XDG_CONFIG_HOME
+XDG_CACHE_HOME  ?= $(CURDIR)/build/xdg/cache
+export XDG_DATA_HOME XDG_CONFIG_HOME XDG_CACHE_HOME
 
 # clang++ is the default, but only when nothing else asked for a compiler. A
 # distribution package is built with the compiler that distribution chose --
@@ -563,9 +567,12 @@ XUDU_CORE_SRCS := $(COMMON_XANADU_SRCS)
 XUDU_SRCS      := $(shell find apps/xudu -maxdepth 1 -name '*.cpp' 2>/dev/null)
 ZIGZAG_CORE_SRCS := $(shell find apps/zigzag/core -name '*.cpp' 2>/dev/null)
 ZIGZAG_SRCS      := $(filter-out $(ZIGZAG_CORE_SRCS),$(shell find apps/zigzag -name '*.cpp' 2>/dev/null))
+XUZZ_SRCS        := $(shell find apps/xuzz -name '*.cpp' 2>/dev/null) \
+                    apps/zigzag/zigzag_visualizer.cpp
 LIB_TEST_SRCS  := $(shell find tests/lib -name '*.cpp' 2>/dev/null)
 XUDU_TEST_SRCS := $(shell find tests/xudu -name '*.cpp' 2>/dev/null)
 ZIGZAG_TEST_SRCS := $(shell find tests/zigzag -name '*.cpp' 2>/dev/null)
+XUZZ_TEST_SRCS := $(shell find tests/xuzz -name '*.cpp' 2>/dev/null)
 
 OBJDIR := build/
 obj = $(addprefix $(OBJDIR)/,$(patsubst %.cpp,%.o,$(1)))
@@ -577,9 +584,12 @@ XUDU_CORE_OBJS  := $(COMMON_XANADU_OBJS)
 XUDU_OBJS       := $(call obj,$(XUDU_SRCS))
 ZIGZAG_CORE_OBJS := $(call obj,$(ZIGZAG_CORE_SRCS))
 ZIGZAG_OBJS      := $(call obj,$(ZIGZAG_SRCS))
+XUZZ_OBJS        := $(call obj,$(XUZZ_SRCS))
+XUZZ_XUDU_OBJS   := $(filter-out $(OBJDIR)/apps/xudu/main.o,$(XUDU_OBJS))
 LIB_TEST_OBJS   := $(call obj,$(LIB_TEST_SRCS))
 XUDU_TEST_OBJS  := $(call obj,$(XUDU_TEST_SRCS))
 ZIGZAG_TEST_OBJS := $(call obj,$(ZIGZAG_TEST_SRCS))
+XUZZ_TEST_OBJS  := $(call obj,$(XUZZ_TEST_SRCS))
 SWARM_PEER_OBJS := $(call obj,tools/xudu-swarm-peer.cpp)
 VQUERYC_SRCS    := $(shell find apps/vqueryc -name '*.cpp' 2>/dev/null)
 VQUERYC_OBJS    := $(call obj,$(VQUERYC_SRCS))
@@ -651,9 +661,9 @@ RPATH_FLAGS += -Wl,-rpath,$(libdir)
 endif
 endif
 
-ALL_OBJS := $(sort $(LIB_OBJS) $(GLEDITOR_OBJS) $(XUDU_CORE_OBJS) $(XUDU_OBJS) \
+ALL_OBJS := $(sort $(LIB_OBJS) $(GLEDITOR_OBJS) $(XUDU_CORE_OBJS) $(XUDU_OBJS) $(XUZZ_OBJS) \
 	$(ZIGZAG_CORE_OBJS) $(ZIGZAG_OBJS) $(ZIGZAG_TEST_OBJS) \
-	$(LIB_TEST_OBJS) $(XUDU_TEST_OBJS) $(SWARM_PEER_OBJS) \
+	$(LIB_TEST_OBJS) $(XUDU_TEST_OBJS) $(XUZZ_TEST_OBJS) $(SWARM_PEER_OBJS) \
 	$(GENERATE_SAMPLE_XANADOCS_OBJS) $(VQUERYC_OBJS) $(VQUERY_OBJS) $(VPROLOG_OBJS) $(VPLC_OBJS) $(VPL_OBJS))
 ALL_OBJ_DIRS := $(sort $(OBJDIR)/ $(OBJDIR)/tmp/ $(dir $(ALL_OBJS)))
 DEPS := $(sort $(patsubst %.o,%.dep,$(ALL_OBJS)))
@@ -682,7 +692,7 @@ endif
 SPIRV := assets/shaders/vulkan/glyph.vert.spv assets/shaders/vulkan/glyph.frag.spv \
 	assets/shaders/vulkan/beam.vert.spv assets/shaders/vulkan/beam.frag.spv
 
-all: lib gleditor xudu zigzag xudu-dump vqueryc vquery vprolog vplc vpl gleditor_test xudu_test zigzag_test $(OBJDIR)/compile_commands.json
+all: lib gleditor xudu xuzz zigzag xudu-dump vqueryc vquery vprolog vplc vpl gleditor_test xudu_test xuzz_test zigzag_test $(OBJDIR)/compile_commands.json
 ifdef GLEDITOR_ENABLE_VULKAN
 all: shaders
 endif
@@ -695,7 +705,7 @@ $(ALL_OBJ_DIRS):
 
 $(ALL_OBJS): | $(ALL_OBJ_DIRS)
 $(DEPS) $(JFILES) $(OBJDIR)/src/config.h: | $(ALL_OBJ_DIRS)
-$(LIB_TEST_OBJS) $(XUDU_TEST_OBJS) $(ZIGZAG_TEST_OBJS): CXXFLAGS += $(shell pkg-config $(STATIC) --cflags $(TEST_PKGS))
+$(LIB_TEST_OBJS) $(XUDU_TEST_OBJS) $(ZIGZAG_TEST_OBJS) $(XUZZ_TEST_OBJS): CXXFLAGS += $(shell pkg-config $(STATIC) --cflags $(TEST_PKGS))
 
 ifeq (,$(filter clean,$(MAKECMDGOALS)))
 MKCFG = $(SED) 's/\@\@VERS\@\@/$(VERS)/'
@@ -781,6 +791,13 @@ $(OBJDIR)/xudu: $(XUDU_OBJS) $(XUDU_CORE_OBJS) $(LIBLINK)
 	$(CXX) $(LDFLAGS) -o $@ $(XUDU_OBJS) $(XUDU_CORE_OBJS) $(APP_LDFLAGS) $(LIBS) $(XUDU_LIBS)
 .PHONY: xudu
 
+xuzz: $(OBJDIR)/xuzz
+$(OBJDIR)/xuzz: $(XUZZ_OBJS) $(XUZZ_XUDU_OBJS) $(XUDU_CORE_OBJS) \
+                $(ZIGZAG_CORE_OBJS) $(LIBLINK)
+	$(CXX) $(LDFLAGS) -o $@ $(XUZZ_OBJS) $(XUZZ_XUDU_OBJS) $(XUDU_CORE_OBJS) \
+	  $(ZIGZAG_CORE_OBJS) $(APP_LDFLAGS) $(LIBS) $(XUDU_LIBS)
+.PHONY: xuzz
+
 ZIGZAG_SHARED_CORE_OBJS := $(COMMON_XANADU_OBJS)
 
 
@@ -813,7 +830,7 @@ sanitize/memory/run: sanitize/memory
 	MSAN_OPTIONS=check_initialization_order=1:detect_leaks=1:strict_string_checks=1 $(OBJDIR)/gleditor
 
 
-.PHONY: gleditor_test xudu_test zigzag_test
+.PHONY: gleditor_test xudu_test xuzz_test zigzag_test
 TEST_LIBS = $(shell pkg-config $(STATIC) --libs $(TEST_PKGS))
 
 # The library's own tests, linked against the library the programs link
@@ -829,6 +846,10 @@ $(OBJDIR)/gleditor_test: $(LIB_TEST_OBJS) $(OBJDIR)/apps/gleditor/editor_config.
 # needed a renderer, this would stop linking.
 xudu_test: $(OBJDIR)/xudu_test
 $(OBJDIR)/xudu_test: $(XUDU_TEST_OBJS) $(XUDU_CORE_OBJS) $(OBJDIR)/src/mimetype.o $(OBJDIR)/src/source_grounder.o
+	$(CXX) $(LDFLAGS) -o $@ $^ $(XUDU_LIBS) $(TEST_LIBS)
+
+xuzz_test: $(OBJDIR)/xuzz_test
+$(OBJDIR)/xuzz_test: $(XUZZ_TEST_OBJS) $(XUDU_CORE_OBJS) $(OBJDIR)/src/mimetype.o $(OBJDIR)/src/source_grounder.o
 	$(CXX) $(LDFLAGS) -o $@ $^ $(XUDU_LIBS) $(TEST_LIBS)
 
 zigzag_test: $(OBJDIR)/zigzag_test
@@ -1000,9 +1021,10 @@ SWARM_NETNS_TESTS := SwarmTest.*:MutableNameTest.*
 TEST_FILTER ?= -$(SWARM_NETNS_TESTS)
 
 .PHONY: test test/all test/integration test/e2e-orchestration
-test: $(OBJDIR)/gleditor $(OBJDIR)/xudu $(OBJDIR)/zigzag $(OBJDIR)/xudu-dump $(OBJDIR)/gleditor_test $(OBJDIR)/xudu_test $(OBJDIR)/zigzag_test $(OBJDIR)/xudu-swarm-peer
+test: $(OBJDIR)/gleditor $(OBJDIR)/xudu $(OBJDIR)/xuzz $(OBJDIR)/zigzag $(OBJDIR)/xudu-dump $(OBJDIR)/gleditor_test $(OBJDIR)/xudu_test $(OBJDIR)/xuzz_test $(OBJDIR)/zigzag_test $(OBJDIR)/xudu-swarm-peer
 	$(OBJDIR)/gleditor_test $(if $(TEST_FILTER),--gtest_filter='$(TEST_FILTER)')
 	$(OBJDIR)/xudu_test $(if $(TEST_FILTER),--gtest_filter='$(TEST_FILTER)')
+	$(OBJDIR)/xuzz_test $(if $(TEST_FILTER),--gtest_filter='$(TEST_FILTER)')
 	$(OBJDIR)/zigzag_test $(if $(TEST_FILTER),--gtest_filter='$(TEST_FILTER)')
 	@if [ -z "$(TEST_FILTER)" ] || [ "$(TEST_FILTER)" = "-$(SWARM_NETNS_TESTS)" ] || echo "$(TEST_FILTER)" | grep -qE 'Swarm|MutableName|\*'; then \
 		tools/swarm-netns-test.sh; \

@@ -604,6 +604,16 @@ public:
    */
   static constexpr float pixelsToWorld = 1.0F / 18.0F;
 
+  /// Default source-page extents in world units. These are used only before a
+  /// document has built its first page; once it has, callers use pageFrame()
+  /// or Page's measured dimensions instead.
+  static constexpr float defaultPageWidthWorld() {
+    return gleditor::letterPage.widthPx * pixelsToWorld;
+  }
+  static constexpr float defaultPageHeightWorld() {
+    return gleditor::letterPage.heightPx * pixelsToWorld;
+  }
+
   /**
    * @brief The page geometry layoutFrom() wraps and paginates to.
    *
@@ -718,6 +728,38 @@ public:
     return index < pages.size() ? &pages[index] : nullptr;
   }
 
+  /// The measured coordinate frame of one built page.
+  ///
+  /// A page has its own pixel-to-world transform because reflow stacks pages
+  /// beneath one another. Consumers that place adjacent content must use this
+  /// rather than reconstructing a page edge from a document translation and a
+  /// presumed Letter size.
+  struct PageFrame {
+    glm::mat4 localToWorld{1.0F};
+    float leftPx{};
+    float rightPx{};
+    float topPx{};
+    float bottomPx{};
+    float marginPx{};
+  };
+
+  /// The frame of a built page, or nothing while it is still being shaped.
+  [[nodiscard]] std::optional<PageFrame>
+  pageFrame(const std::size_t index) const {
+    const auto *const built = page(index);
+    if (built == nullptr) {
+      return std::nullopt;
+    }
+    return PageFrame{.localToWorld = modelMatrix() * built->getModel(),
+                     .leftPx       = built->leftPixels(),
+                     .rightPx      = built->rightPixels(),
+                     .topPx        = built->topPixels(),
+                     .bottomPx     = built->topPixels() - built->heightPixels(),
+                     .marginPx     = pageGeometry.marginPx > 0.0F
+                                         ? pageGeometry.marginPx
+                                         : Page::marginPixels};
+  }
+
   /**
    * @brief Where a byte offset is, as a place on a page rather than a point.
    *
@@ -800,6 +842,10 @@ public:
                      std::uint32_t colour,
                      std::vector<render::HighlightRange> &out) const;
   [[nodiscard]] size_t numPages() const { return pages.size(); }
+  /// Width of this document's page in world units.
+  [[nodiscard]] float pageWidthWorld() const {
+    return pageGeometry.widthPx * pixelsToWorld;
+  }
   [[nodiscard]] bool isFullyLoaded() const { return fullyLoaded; }
 
   /**

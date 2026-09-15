@@ -4,6 +4,8 @@
  */
 #include <gtest/gtest.h>
 
+#include <gleditor/doc.hpp>
+
 #include "xudu/core/format.hpp"
 #include "zigzag/core/zzstructure.hpp"
 #include "zigzag/core/zzstructure_loader.hpp"
@@ -18,6 +20,30 @@ TEST(ZigzagVisualizerTest, DefaultStateAndFallback) {
   EXPECT_EQ(viz.currentView().x_dimension, "d.1");
   EXPECT_EQ(viz.currentView().y_dimension, "d.2");
   EXPECT_EQ(viz.currentView().z_dimension, "d.3");
+}
+
+TEST(ZigzagVisualizerTest, EmbeddedPresentationSurfaceExposesLiveState) {
+  ZigzagVisualizer viz("Sans 12");
+  xanadu::ZigzagPresentationSurface &surface = viz;
+
+  EXPECT_EQ(&surface.manifold(), &viz.engine()->manifold());
+  EXPECT_EQ(surface.focusCell(), viz.focusCellId());
+  EXPECT_EQ(surface.cellRadius(), 3);
+  EXPECT_EQ(surface.frameContributor(), &viz);
+  EXPECT_EQ(surface.pickObserver(), &viz);
+  EXPECT_EQ(surface.accessibilitySource(), &viz);
+
+  std::uint64_t callbackRevision = 0;
+  surface.setBridgeInvalidationCallback(
+      [&](const std::uint64_t revision) { callbackRevision = revision; });
+  const auto before = surface.bridgeRevision();
+  surface.setCellRadius(5);
+  EXPECT_EQ(surface.cellRadius(), 5);
+  EXPECT_GT(surface.bridgeRevision(), before);
+  EXPECT_EQ(callbackRevision, surface.bridgeRevision());
+
+  surface.setCellRadius(0);
+  EXPECT_EQ(surface.cellRadius(), 1);
 }
 
 TEST(ZigzagVisualizerTest, NavigationAlongDimensions) {
@@ -601,11 +627,24 @@ TEST(ZigzagVisualizerTest, DualContinuumDepthTiering) {
 
   const auto anchor = viz.cellAnchor(static_cast<CellRef>(root));
   ASSERT_TRUE(anchor.has_value());
-  EXPECT_FLOAT_EQ(anchor->position.z, -40.0F);
+  EXPECT_FLOAT_EQ(anchor->position.z, -40.0F * Doc::pixelsToWorld);
 
   const auto &visible = viz.visibleCells();
   const auto it       = visible.find(root);
   ASSERT_NE(it, visible.end());
   EXPECT_FLOAT_EQ(it->second.target_pos.z, -40.0F);
   EXPECT_FLOAT_EQ(it->second.target_alpha, 0.42F);
+}
+
+TEST(ZigzagVisualizerTest, PresentationOriginKeepsTheHostDocumentClear) {
+  ZigzagVisualizer viz("Sans 12");
+  const auto root = viz.focusCellId();
+  ASSERT_NE(root, 0U);
+
+  viz.setPresentationOrigin({420.0F, 0.0F, 0.0F});
+  EXPECT_FLOAT_EQ(viz.presentationOrigin().x, 420.0F);
+
+  const auto anchor = viz.cellAnchor(static_cast<CellRef>(root));
+  ASSERT_TRUE(anchor.has_value());
+  EXPECT_FLOAT_EQ(anchor->position.x, 420.0F);
 }
