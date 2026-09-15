@@ -107,7 +107,9 @@ public:
                      std::string_view value) override;
 
   // -- ZigZag Actions -------------------------------------------------------
-  void adoptDocument(ZzStructureDocument &&doc, std::string sourcePath);
+  void adoptDocument(ZzStructureDocument &&doc, std::string sourcePath,
+                     const std::unordered_map<CellID, XuduProjectionProvenance>
+                         *origins = nullptr);
   void populateFallbackStructure();
 
   void adoptXuduStore(const xanadu::Store &store,
@@ -130,6 +132,10 @@ public:
 
   void swapDimensions(int axis1, int axis2);
   void cycleDimensions(bool forward = true);
+
+  /// Identity of the persistent store whose cells this view is drawing.
+  [[nodiscard]] std::string documentId() const;
+  [[nodiscard]] std::string documentVersion() const;
 
   // -- Multi-View Modes (Cell Content View vs. Topology View) ---------------
   enum class ViewMode : std::uint8_t {
@@ -253,6 +259,10 @@ private:
   std::unique_ptr<gleditor::Canvas> hudCanvas_;
   std::unique_ptr<gleditor::Beams> beams_;
   std::unique_ptr<gleditor::ImageCache> imageCache_;
+  std::unordered_map<CellRef, std::shared_ptr<const render::PickSemanticTarget>>
+      pickTargets_;
+  std::string pickTargetVersion_;
+  std::unordered_map<CellRef, XuduProjectionProvenance> sourceOrigins_;
 };
 
 } // namespace zigzag

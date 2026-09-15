@@ -7,6 +7,7 @@
 #define ZIGZAG_XUDU_PROJECTOR_HPP
 
 #include <cstdint>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <unordered_map>
@@ -26,9 +27,26 @@ namespace zigzag {
 /// Input document description for Xudu -> Zigzag projection.
 struct XuduDocInput {
   std::string name;
+  std::string documentId;
   std::string text;
   xanadu::MicroversionId version;
   std::vector<xanadu::PrimediaSpan> spans;
+  std::optional<CellRef> sourceCell;
+};
+
+/// The source addressed by one projected ZigZag cell.
+struct XuduProjectionProvenance {
+  std::string documentId;
+  xanadu::MicroversionId version;
+  xanadu::PrimediaSpan span;
+  /// Present only when the input actually named a persistent structure cell.
+  std::optional<CellRef> sourceCell;
+};
+
+/// A store projection together with its provenance by pre-mint ZigZag cell id.
+struct ProjectedXuduStore {
+  ZzStructureDocument document;
+  std::unordered_map<CellID, XuduProjectionProvenance> sourceByProjectedCell;
 };
 
 /// Configuration options for projecting Xudu documents into Zigzag space.
@@ -58,10 +76,11 @@ struct ZzRasterResult {
  * - @p transclusion_dimension links cells sharing overlapping primedia spans.
  * - @p link_dimension links xanalink endpoints across documents.
  */
-[[nodiscard]] ZzStructureDocument
-projectXuduToZigzag(const std::vector<XuduDocInput> &docs,
-                    const std::vector<xanadu::Link> &links,
-                    const XuduProjectorOptions &opts = {});
+[[nodiscard]] ZzStructureDocument projectXuduToZigzag(
+    const std::vector<XuduDocInput> &docs,
+    const std::vector<xanadu::Link> &links,
+    const XuduProjectorOptions &opts                                 = {},
+    std::unordered_map<CellID, XuduProjectionProvenance> *provenance = nullptr);
 
 /**
  * @brief Project a Xudu Store and its active microversions into a Zigzag
@@ -71,6 +90,12 @@ projectXuduToZigzag(const std::vector<XuduDocInput> &docs,
 projectStoreToZigzag(const xanadu::Store &store,
                      const std::vector<xanadu::MicroversionId> &versions,
                      const XuduProjectorOptions &opts = {});
+
+/// Store projection retaining the source document/version/span for every cell.
+[[nodiscard]] ProjectedXuduStore
+projectStoreWithProvenance(const xanadu::Store &store,
+                           const std::vector<xanadu::MicroversionId> &versions,
+                           const XuduProjectorOptions &opts = {});
 
 /**
  * @brief Linearize / rasterize a Zigzag manifold into a continuous text stream

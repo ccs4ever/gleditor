@@ -20,6 +20,7 @@
 #include <cstdint>
 #include <gleditor/glyphcache/types.hpp>
 #include <gleditor/layout_box.hpp>
+#include <gleditor/render/types.hpp>
 #include <optional>
 #include <string>
 #include <utility>
@@ -123,6 +124,12 @@ public:
   /// What to call this document in diagnostics and in the window. Need not be
   /// a path, and need not be unique.
   [[nodiscard]] virtual std::string name() const = 0;
+
+  /// Stable application identity for picks on this source, if it has one.
+  [[nodiscard]] virtual std::shared_ptr<const render::PickSemanticTarget>
+  pickSemanticTarget() const {
+    return {};
+  }
 
   /**
    * @brief Byte offsets into text() where a page must end, whatever room is

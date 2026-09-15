@@ -12,6 +12,7 @@
 #include <string>
 #include <string_view>
 #include <thread>
+#include <unordered_map>
 #include <utility>
 #include <vector>
 
@@ -353,6 +354,8 @@ private:
   /// Most recent completed picking result, kept so that interactive callers can
   /// consult it without polling the device themselves.
   std::optional<render::PickingResult> lastPick;
+  std::uint64_t nextPickRequestId{1};
+  std::unordered_map<std::uint64_t, render::PickScene> pickScenes;
   /// Last tag reported to the log, so that hovering over one object does not
   /// print a line per frame.
   render::PickingTag reportedPick{};
@@ -395,6 +398,7 @@ private:
   void dispatch(RenderState &state, RenderItem &item);
   /// Drain picking reads that have completed since the last frame.
   void collectPickingResults(RenderState &state);
+  void requestPick(RenderState &state, int x, int y);
   /// Carry out the next automation step once the one before it has finished.
   void advanceScript(RenderState &state);
   /// Finish the step just carried out, or wait for the work it scheduled.

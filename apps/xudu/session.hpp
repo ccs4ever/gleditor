@@ -84,22 +84,28 @@ struct RemoteCollaborator {
  */
 class VersionTextSource : public gleditor::TextSource {
 public:
-  VersionTextSource(std::string aText, MicroversionId aVersion,
-                    std::vector<std::uint32_t> aBreaks                     = {},
-                    std::vector<gleditor::LayoutBox> aBoxes                = {},
-                    std::vector<gleditor::BlockStyleRange> aBlockStyles    = {},
-                    std::string aName                                      = {},
-                    std::vector<gleditor::DecoratedRange> aDecoratedRanges = {})
+  VersionTextSource(
+      std::string aText, MicroversionId aVersion,
+      std::vector<std::uint32_t> aBreaks                        = {},
+      std::vector<gleditor::LayoutBox> aBoxes                   = {},
+      std::vector<gleditor::BlockStyleRange> aBlockStyles       = {},
+      std::string aName                                         = {},
+      std::vector<gleditor::DecoratedRange> aDecoratedRanges    = {},
+      std::shared_ptr<const render::PickSemanticTarget> aTarget = {})
       : contents(std::move(aText)), id(std::move(aVersion)),
         breaks(std::move(aBreaks)), mediaBoxes(std::move(aBoxes)),
         mediaBlockStyles(std::move(aBlockStyles)), customName(std::move(aName)),
-        ranges(std::move(aDecoratedRanges)) {}
+        ranges(std::move(aDecoratedRanges)), target(std::move(aTarget)) {}
 
   [[nodiscard]] std::string text() const override { return contents; }
   [[nodiscard]] std::string name() const override {
     return customName.empty() ? id.str() : customName;
   }
   [[nodiscard]] const MicroversionId &version() const { return id; }
+  [[nodiscard]] std::shared_ptr<const render::PickSemanticTarget>
+  pickSemanticTarget() const override {
+    return target;
+  }
   [[nodiscard]] std::vector<std::uint32_t> forcedBreaks() const override {
     return breaks;
   }
@@ -118,6 +124,7 @@ public:
 private:
   std::string contents;
   MicroversionId id;
+  std::shared_ptr<const render::PickSemanticTarget> target;
   std::vector<std::uint32_t> breaks;
   /// Each embedded media anchor's LayoutBox, and the BlockStyleRange
   /// centring it -- see Session::sourceFor(), which builds these alongside

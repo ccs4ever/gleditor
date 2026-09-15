@@ -118,6 +118,7 @@ TEST(StoreTablesTest, everyFieldSurvivesTheRoundTrip) {
   xudu::writeStoreTables(path, sent);
   const auto back = xudu::readStoreTables(path);
 
+  EXPECT_EQ(back.documentId, sent.documentId);
   ASSERT_EQ(back.scrolls.size(), sent.scrolls.size());
   EXPECT_EQ(back.scrolls[0].publisher.hex(), sent.scrolls[0].publisher.hex());
   EXPECT_EQ(back.scrolls[0].salt, "essay");

@@ -443,29 +443,32 @@ void DeviceVK::drawGlyphBatches(const std::span<const GlyphBatch> batches) {
   }
 }
 
-void DeviceVK::requestPickingTag(const int coordX, const int coordY) {
+bool DeviceVK::requestPickingTag(const int coordX, const int coordY,
+                                 const std::uint64_t requestId) {
   if (!frameActive) {
-    return;
+    return false;
   }
   if (coordX < 0 || coordY < 0 ||
       coordX >= static_cast<int>(swapchainExtent.width) ||
       coordY >= static_cast<int>(swapchainExtent.height)) {
-    return;
+    return false;
   }
 
   auto &frame = frames[frameIndex];
   if (frame.pickPending) {
     // This slot's previous result has not been collected. Dropping the request
     // keeps the frame moving; the caller asks again next frame.
-    return;
+    return false;
   }
 
   // The copy itself cannot be recorded here: the render pass is still open and
   // the tag image only reaches TRANSFER_SRC layout when the pass ends. Note the
   // pixel now and emit the copy in endFrame().
-  frame.pickX       = coordX;
-  frame.pickY       = coordY;
-  frame.pickPending = true;
+  frame.pickX         = coordX;
+  frame.pickY         = coordY;
+  frame.pickRequestId = requestId;
+  frame.pickPending   = true;
+  return true;
 }
 
 std::optional<PickingResult> DeviceVK::takePickingTag() {
@@ -492,8 +495,11 @@ std::optional<PickingResult> DeviceVK::takePickingTag() {
     }
     const auto *values =
         static_cast<const std::uint32_t *>(bufferIt->second.mapped);
-    return PickingResult{frame.pickX, frame.pickY,
-                         unpackPickingTag(values[0], values[1], values[2])};
+    return PickingResult{.x         = frame.pickX,
+                         .y         = frame.pickY,
+                         .requestId = frame.pickRequestId,
+                         .tag =
+                             unpackPickingTag(values[0], values[1], values[2])};
   }
   return std::nullopt;
 }

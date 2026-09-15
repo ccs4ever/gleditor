@@ -93,6 +93,7 @@ void Renderer::newDoc(RenderState &state) {
   const auto docPtr = Doc::create(getPtr(), device.get(), glm::mat4(1.0));
   docPtr->setDocIndex(static_cast<std::uint32_t>(state.docs.size()));
   state.docs.push_back(docPtr->getPtr());
+  state.pickTargets.push_back({});
 }
 
 void Renderer::reapFinishedDocLoads() {
@@ -144,6 +145,8 @@ void Renderer::closeDoc(RenderState &state, const std::uint32_t index) {
   // fade cannot land on a document that is on its way out.
   auto departing = state.docs[which];
   state.docs.erase(state.docs.begin() + static_cast<std::ptrdiff_t>(which));
+  state.pickTargets.erase(state.pickTargets.begin() +
+                          static_cast<std::ptrdiff_t>(which));
   departing->animateDeparture(timeline);
   fadingDocs.push_back(std::move(departing));
 
@@ -269,6 +272,7 @@ void Renderer::openDoc(RenderState &state, const gleditor::TextSource &source,
   pendingDocLoads.push_back(
       std::async(std::launch::async, [docPtr] { docPtr->makePages(); }));
   state.docs.push_back(docPtr->getPtr());
+  state.pickTargets.push_back(source.pickSemanticTarget());
 }
 
 bool Renderer::update(RenderState &state, const bool settled) {
@@ -370,6 +374,7 @@ bool Renderer::update(RenderState &state, const bool settled) {
   // Whatever the program draws for itself: after the documents, so it can sit
   // over them, and before the notifications, which must be over everything.
   if (!frameContributors.empty()) {
+    state.beginPickScene();
     gleditor::FrameContext ctx{state, viewProjection, screenWidth, screenHeight,
                                timeline};
     for (auto *const contributor : frameContributors) {
@@ -428,7 +433,7 @@ bool Renderer::update(RenderState &state, const bool settled) {
       const auto dragY = this->state->dragY.load();
       awaitingClick    = std::pair{dragX, dragY};
       awaitingDrag     = true;
-      device->requestPickingTag(dragX, dragY);
+      requestPick(state, dragX, dragY);
     } else if (this->state->clickPending.exchange(false)) {
       // A click takes priority over the hover query: only one read is issued
       // per frame, and the click is the one somebody is waiting on.
@@ -437,9 +442,9 @@ bool Renderer::update(RenderState &state, const bool settled) {
       awaitingClick       = std::pair{clickX, clickY};
       awaitingClickButton = this->state->clickButton.load();
       awaitingDrag        = false;
-      device->requestPickingTag(clickX, clickY);
+      requestPick(state, clickX, clickY);
     } else if (!this->state->scriptReportsPicks()) {
-      device->requestPickingTag(this->state->mouseX, this->state->mouseY);
+      requestPick(state, this->state->mouseX, this->state->mouseY);
     }
   }
 
@@ -582,11 +587,30 @@ void Renderer::placeCaretFromPick(RenderState &state,
 
 void Renderer::collectPickingResults(RenderState &state) {
   while (const auto pick = device->takePickingTag()) {
-    lastPick = pick;
+    const auto scene = pickScenes.extract(pick->requestId);
+    if (scene.empty()) {
+      continue;
+    }
+    auto resolvedPick = *pick;
+    if (render::tagKindOverlay == resolvedPick.tag.kind) {
+      const std::uint64_t key =
+          (static_cast<std::uint64_t>(resolvedPick.tag.kind) << 60U) |
+          (static_cast<std::uint64_t>(resolvedPick.tag.docIndex) << 46U) |
+          (static_cast<std::uint64_t>(resolvedPick.tag.pageIndex) << 32U) |
+          resolvedPick.tag.clusterIndex;
+      if (const auto found = scene.mapped().overlays.find(key);
+          found != scene.mapped().overlays.end()) {
+        resolvedPick.semanticTarget = found->second;
+      }
+    } else if (resolvedPick.tag.docIndex < scene.mapped().documents.size()) {
+      resolvedPick.semanticTarget =
+          scene.mapped().documents[resolvedPick.tag.docIndex];
+    }
+    lastPick = resolvedPick;
     if (awaitingClick && awaitingClick->first == pick->x &&
         awaitingClick->second == pick->y) {
       awaitingClick.reset();
-      auto pickWithButton   = *pick;
+      auto pickWithButton   = resolvedPick;
       pickWithButton.button = awaitingClickButton;
       placeCaretFromPick(state, pickWithButton);
       if (awaitingStep) {
@@ -625,6 +649,16 @@ void Renderer::collectPickingResults(RenderState &state) {
   }
 }
 
+void Renderer::requestPick(RenderState &state, const int x, const int y) {
+  const auto requestId = nextPickRequestId++;
+  if (!device->requestPickingTag(x, y, requestId)) {
+    return;
+  }
+  render::PickScene scene = state.overlayPickScene;
+  scene.documents         = state.pickTargets;
+  pickScenes.emplace(requestId, std::move(scene));
+}
+
 /// Carry out the next step of the automation script, if the one before it has
 /// finished. One step per settled frame at most: a step that queues a picking
 /// read is not finished until the answer arrives, and a step that edits is not
@@ -643,13 +677,13 @@ void Renderer::advanceScript(RenderState &state) {
     // the script on.
     awaitingPick = std::pair{step.x, step.y};
     awaitingStep = true;
-    device->requestPickingTag(step.x, step.y);
+    requestPick(state, step.x, step.y);
     return;
   case Kind::Click:
     awaitingClick = std::pair{step.x, step.y};
     awaitingDrag  = false;
     awaitingStep  = true;
-    device->requestPickingTag(step.x, step.y);
+    requestPick(state, step.x, step.y);
     return;
   case Kind::Command:
     // By name, so a script says what it means. The command queues its own

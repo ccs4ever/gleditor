@@ -555,6 +555,7 @@ TEST_F(StoreRoundTripTest, savingWritesNoPrimediaBesideTheDocument) {
 
   Store reloaded(perma);
   reloaded.load(dir.string());
+  EXPECT_EQ(reloaded.documentId(), store.documentId());
   EXPECT_EQ(reloaded.textOf(one), "one");
 
   // A second document, saved elsewhere, quoting the first by the address the

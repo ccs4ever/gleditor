@@ -33,6 +33,7 @@
 #include <string_view>
 #include <vector>
 
+#include "document_id.hpp"
 #include "ops.hpp"
 #include "scroll.hpp"
 
@@ -62,7 +63,7 @@ inline constexpr std::array<std::uint8_t, 12> storeTablesSignature{
 /// Two more parse paths, two more files to keep in step with a save, and two
 /// more ways for a store to be half-written bought nothing the dump tool does
 /// not buy back.
-inline constexpr std::uint32_t storeTablesFormatVersion = 2;
+inline constexpr std::uint32_t storeTablesFormatVersion = 3;
 
 /**
  * @class StoreTablesUnreadable
@@ -101,6 +102,8 @@ struct VersionAnnotation {
  * disagree about which tables exist.
  */
 struct StoreTables {
+  /// Stable local name of this store, unrelated to its current microversion.
+  DocumentId documentId;
   /// The scroll registry, indexed from one: entry i is ScrollId i + 1.
   std::vector<Scroll> scrolls;
   /// The local spool's own segments. Not a Scroll: scroll zero is this

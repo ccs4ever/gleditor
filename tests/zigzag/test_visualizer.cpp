@@ -138,8 +138,32 @@ TEST(ZigzagVisualizerTest, MousePicking) {
   pick.tag.kind         = render::tagKindOverlay;
   pick.tag.clusterIndex = neighbor;
 
+  // Raw overlay numbers are only GPU-local handles and must not navigate.
+  EXPECT_FALSE(viz.picked(pick, state));
+  pick.semanticTarget = std::make_shared<render::PickSemanticTarget>(
+      render::PickSemanticTarget{.documentId   = viz.documentId(),
+                                 .microversion = viz.documentVersion(),
+                                 .cellRef = static_cast<CellRef>(neighbor)});
+  const auto scope  = state.allocateOverlayPickScope();
+  pick.tag.docIndex = scope;
+  state.bindOverlayPick(pick.tag, pick.semanticTarget);
+  const auto scene = state.overlayPickScene;
+  const std::uint64_t key =
+      (static_cast<std::uint64_t>(pick.tag.kind) << 60U) |
+      (static_cast<std::uint64_t>(pick.tag.docIndex) << 46U) |
+      (static_cast<std::uint64_t>(pick.tag.pageIndex) << 32U) |
+      pick.tag.clusterIndex;
+  ASSERT_TRUE(scene.overlays.contains(key));
+  EXPECT_EQ(scene.overlays.at(key)->documentId, viz.documentId());
+  ASSERT_TRUE(scene.overlays.at(key)->cellRef);
+  EXPECT_EQ(*scene.overlays.at(key)->cellRef, static_cast<CellRef>(neighbor));
   EXPECT_TRUE(viz.picked(pick, state));
   EXPECT_EQ(viz.focusCellId(), neighbor);
+
+  pick.semanticTarget = std::make_shared<render::PickSemanticTarget>(
+      render::PickSemanticTarget{.documentId   = viz.documentId(),
+                                 .microversion = viz.documentVersion()});
+  EXPECT_FALSE(viz.picked(pick, state));
 
   // Irrelevant tag kind
   pick.tag.kind = render::tagKindGlyph;

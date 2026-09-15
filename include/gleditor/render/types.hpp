@@ -14,10 +14,42 @@
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
+#include <memory>
+#include <optional>
 #include <string>
+#include <unordered_map>
 #include <vector>
 
 namespace render {
+
+/**
+ * @brief Stable application meaning attached to a picked rendered object.
+ *
+ * GPU tags deliberately remain compact, frame-local coordinates. Applications
+ * resolve those coordinates through this object instead of treating docIndex
+ * as a durable document name. cellRef is present for ZigZag structure picks;
+ * ordinary xanadoc text and media picks deliberately leave it absent.
+ */
+struct PickSemanticTarget {
+  std::string documentId;
+  std::string microversion;
+  std::optional<std::uint32_t> cellRef;
+  struct SourceProvenance {
+    std::string documentId;
+    std::string microversion;
+    std::optional<std::uint32_t> cellRef;
+    std::uint32_t scroll{};
+    std::uint64_t start{};
+    std::uint64_t length{};
+  };
+  std::optional<SourceProvenance> source;
+};
+
+struct PickScene {
+  std::vector<std::shared_ptr<const PickSemanticTarget>> documents;
+  std::unordered_map<std::uint64_t, std::shared_ptr<const PickSemanticTarget>>
+      overlays;
+};
 
 /**
  * @brief Which rendering API a device talks to.
@@ -393,7 +425,9 @@ inline PickingTag unpackPickingTag(const std::uint32_t identity,
 struct PickingResult {
   int x{};
   int y{};
+  std::uint64_t requestId{};
   PickingTag tag;
+  std::shared_ptr<const PickSemanticTarget> semanticTarget;
   std::uint8_t button{1};
 };
 

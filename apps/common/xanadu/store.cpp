@@ -1388,7 +1388,8 @@ void Store::save(const std::string &directory) const {
     // and being plaintext was buying only that they could be read with `less`,
     // which tools/xudu-dump buys back. See R11 and store_tables.hpp.
     writeStoreTables(dir / storeTablesName,
-                     StoreTables{.scrolls            = externals,
+                     StoreTables{.documentId         = documentId_,
+                                 .scrolls            = externals,
                                  .localSegments      = localSegments.segments,
                                  .links              = linkTable,
                                  .currentVersions    = currentVersions(),
@@ -1423,7 +1424,8 @@ void Store::saveOsmicText(const std::string &directory) const {
     // and writing them that way now would produce a directory that load()
     // reads the operations out of and silently finds no scrolls in.
     writeStoreTables(dir / storeTablesName,
-                     StoreTables{.scrolls            = externals,
+                     StoreTables{.documentId         = documentId_,
+                                 .scrolls            = externals,
                                  .localSegments      = localSegments.segments,
                                  .links              = linkTable,
                                  .currentVersions    = currentVersions(),
@@ -1528,6 +1530,7 @@ void Store::load(const std::string &directory) {
     // all: keeping a reader so that an old file still parses is exactly the
     // tax R11 refuses.
     auto tables            = readStoreTables(dir / storeTablesName);
+    documentId_            = tables.documentId;
     externals              = std::move(tables.scrolls);
     localSegments          = Scroll{};
     localSegments.segments = std::move(tables.localSegments);

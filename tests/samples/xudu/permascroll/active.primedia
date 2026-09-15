@@ -78,7 +78,7 @@ Status: Active Playback Stream
 2. Mid-Page Commentary and Flow
 As the audio lecture plays above, typographic text flows continuously into mathematical models of 3D spatial coordinate projection.
 
-[EMBEDDED_VIDEO_WIDGET: tests/samples/sample_video.mp4 (00:02.00 - 00:06.00)]
+[EMBEDDED_VIDEO_WIDGET: tests/samples/sample_video_seekable.mp4 (00:02.00 - 00:03.00)]
 Title: 'Zigzag 3D Visualizer'
 Status: Video Surface Rendered with Hardware Acceleration
 3. Experimental Conclusions

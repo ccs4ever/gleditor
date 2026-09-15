@@ -10,6 +10,7 @@
 #define GLEDITOR_RENDER_STATE_H
 
 #include <memory>
+#include <unordered_map>
 #include <vector>
 
 #include <gleditor/glyphcache/cache.hpp>
@@ -38,7 +39,27 @@ struct RenderState {
   gleditor::GlyphCache glyphCache;        ///< Shared glyph atlas.
   render::PipelineHandle glyphPipeline{}; ///< Pipeline all documents draw with.
   std::vector<std::shared_ptr<Doc>> docs; ///< Open documents.
-  Caret *caret{nullptr};                  ///< Active caret on render thread.
+  /// Stable meanings aligned with docs; raw GPU tags retain only their index.
+  std::vector<std::shared_ptr<const render::PickSemanticTarget>> pickTargets;
+  render::PickScene overlayPickScene;
+  std::uint32_t nextOverlayPickScope{1};
+
+  void beginPickScene() { overlayPickScene.overlays.clear(); }
+  [[nodiscard]] std::uint32_t allocateOverlayPickScope() {
+    constexpr auto scopeCount = (1U << render::tagDocBits) - 1U;
+    const auto scope          = nextOverlayPickScope++;
+    return ((scope - 1U) % scopeCount) + 1U;
+  }
+  void
+  bindOverlayPick(const render::PickingTag &tag,
+                  std::shared_ptr<const render::PickSemanticTarget> target) {
+    const std::uint64_t key =
+        (static_cast<std::uint64_t>(tag.kind) << 60U) |
+        (static_cast<std::uint64_t>(tag.docIndex) << 46U) |
+        (static_cast<std::uint64_t>(tag.pageIndex) << 32U) | tag.clusterIndex;
+    overlayPickScene.overlays.insert_or_assign(key, std::move(target));
+  }
+  Caret *caret{nullptr}; ///< Active caret on render thread.
   /**
    * @brief Scratch the frame's page draws are collected into.
    *

@@ -75,6 +75,14 @@ bool ZigzagVisualizer::busy() const {
   return false;
 }
 
+std::string ZigzagVisualizer::documentId() const {
+  return engine_ ? engine_->store().documentId().str() : std::string{};
+}
+
+std::string ZigzagVisualizer::documentVersion() const {
+  return engine_ ? engine_->head().str() : std::string{};
+}
+
 void ZigzagVisualizer::populateFallbackStructure() {
   ZzStructureDocument doc;
   doc.meta.name = "Xanadu ZigZag Sample Structure";
@@ -130,8 +138,9 @@ void ZigzagVisualizer::populateFallbackStructure() {
   adoptDocument(std::move(doc), "fallback");
 }
 
-void ZigzagVisualizer::adoptDocument(ZzStructureDocument &&doc,
-                                     std::string sourcePath) {
+void ZigzagVisualizer::adoptDocument(
+    ZzStructureDocument &&doc, std::string sourcePath,
+    const std::unordered_map<CellID, XuduProjectionProvenance> *const origins) {
   structure_name_     = doc.meta.name.empty() ? sourcePath : doc.meta.name;
   current_slice_path_ = std::move(sourcePath);
   current_view_       = doc.view;
@@ -159,7 +168,19 @@ void ZigzagVisualizer::adoptDocument(ZzStructureDocument &&doc,
 
   store_            = std::make_unique<xanadu::Store>();
   const auto sliced = sliceToStore(doc, *store_);
-  engine_           = std::make_unique<UnifiedTransclusionEngine>(*store_);
+  sourceOrigins_.clear();
+  pickTargets_.clear();
+  pickTargetVersion_.clear();
+  if (nullptr != origins) {
+    sourceOrigins_.reserve(origins->size());
+    for (const auto &[projectedCell, source] : *origins) {
+      if (const auto minted = sliced.cells.find(projectedCell);
+          minted != sliced.cells.end()) {
+        sourceOrigins_.emplace(minted->second, source);
+      }
+    }
+  }
+  engine_ = std::make_unique<UnifiedTransclusionEngine>(*store_);
 
   // The dimensions this slice is navigated along, minted here because adopting
   // a document is the moment a document is *built* -- the one place a write
@@ -197,8 +218,9 @@ void ZigzagVisualizer::adoptDocument(ZzStructureDocument &&doc,
 void ZigzagVisualizer::adoptXuduStore(
     const xanadu::Store &store,
     const std::vector<xanadu::MicroversionId> &versions) {
-  auto doc = projectStoreToZigzag(store, versions);
-  adoptDocument(std::move(doc), "xudu_store");
+  auto projected = projectStoreWithProvenance(store, versions);
+  adoptDocument(std::move(projected.document), "xudu_store",
+                &projected.sourceByProjectedCell);
 }
 
 void ZigzagVisualizer::adoptXuduDocs(const std::vector<XuduDocInput> &docs,
@@ -911,12 +933,16 @@ void ZigzagVisualizer::cycleDimensions(const bool forward) {
 
 bool ZigzagVisualizer::picked(const render::PickingResult &pick,
                               RenderState &) {
-  if (pick.tag.kind == render::tagKindOverlay && pick.tag.clusterIndex != 0) {
-    const auto targetId = static_cast<CellRef>(pick.tag.clusterIndex);
-    if (engine_ && engine_->findCell(targetId)) {
-      navigateFocusTo(targetId);
-      return true;
-    }
+  if (pick.tag.kind != render::tagKindOverlay || !engine_ ||
+      !pick.semanticTarget || !pick.semanticTarget->cellRef ||
+      pick.semanticTarget->documentId != engine_->store().documentId().str() ||
+      pick.semanticTarget->microversion != engine_->head().str()) {
+    return false;
+  }
+  const auto targetId = static_cast<CellRef>(*pick.semanticTarget->cellRef);
+  if (!isEphemeral(targetId) && engine_->findCell(targetId)) {
+    navigateFocusTo(targetId);
+    return true;
   }
   return false;
 }
@@ -1034,12 +1060,48 @@ void ZigzagVisualizer::drawFrame(gleditor::FrameContext &ctx) {
 
   // --- 2. Draw 3D Cell Nodes & Text ---
   worldCanvas_->clear();
+  const auto pickScope = ctx.state.allocateOverlayPickScope();
+  worldCanvas_->setIdentity(pickScope, 0);
+  const auto &pickStore  = engine_->store();
+  const auto pickVersion = engine_->head().str();
+  if (pickTargetVersion_ != pickVersion) {
+    pickTargets_.clear();
+    pickTargetVersion_ = pickVersion;
+  }
 
   for (const auto &[id, cell] : visible_cells_) {
     if (cell.current_alpha < 0.02F) {
       continue;
     }
 
+    const auto cellRef = static_cast<CellRef>(id);
+    auto &target       = pickTargets_[cellRef];
+    if (!target) {
+      render::PickSemanticTarget targetValue{
+          .documentId   = pickStore.documentId().str(),
+          .microversion = pickVersion,
+          .cellRef =
+              isEphemeral(cellRef) ? std::nullopt : std::optional{cellRef}};
+      if (const auto source = sourceOrigins_.find(cellRef);
+          source != sourceOrigins_.end()) {
+        const auto &origin = source->second;
+        targetValue.source = render::PickSemanticTarget::SourceProvenance{
+            .documentId   = origin.documentId,
+            .microversion = origin.version.str(),
+            .cellRef      = origin.sourceCell,
+            .scroll       = origin.span.scroll,
+            .start        = origin.span.start,
+            .length       = origin.span.length};
+      }
+      target =
+          std::make_shared<render::PickSemanticTarget>(std::move(targetValue));
+    }
+    const render::PickingTag pickTag{.kind      = render::tagKindOverlay,
+                                     .docIndex  = pickScope,
+                                     .pageIndex = 0,
+                                     .clusterIndex =
+                                         static_cast<std::uint32_t>(id)};
+    ctx.state.bindOverlayPick(pickTag, target);
     worldCanvas_->setTag(render::tagKindOverlay,
                          static_cast<std::uint32_t>(id));
 

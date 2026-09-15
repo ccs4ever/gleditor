@@ -116,7 +116,7 @@ ${XUDU} "${BASE_DIR}/multimedia/04_audio_doc" \
 # 05_video_doc
 ${XUDU} "${BASE_DIR}/multimedia/05_video_doc" \
   --permascroll "${PERMA}" \
-  --import "tests/samples/sample_video.mp4" \
+  --import "tests/samples/sample_video_seekable.mp4" \
   --export-osmic --headless
 
 # 06_embedded_media_page
@@ -125,7 +125,7 @@ ${XUDU} "${BASE_DIR}/multimedia/06_embedded_media_page" \
   --import "${SOURCES_DIR}/embedded_media_page_p1.txt" \
   --insert-text "0:append:tests/samples/sample_audio.wav" \
   --import-break "${SOURCES_DIR}/embedded_media_page_p2.txt" \
-  --insert-text "0:append:tests/samples/sample_video.mp4" \
+  --insert-text "0:append:tests/samples/sample_video_seekable.mp4" \
   --import-break "${SOURCES_DIR}/embedded_media_page_p3.txt" \
   --insert-text "0:append:tests/samples/sample_image.png" \
   --export-osmic --headless
@@ -142,7 +142,7 @@ ${XUDU} "${BASE_DIR}/multimedia/07_audio_transclusion" \
 # 08_video_transclusion
 ${XUDU} "${BASE_DIR}/multimedia/08_video_transclusion" \
   --permascroll "${PERMA}" \
-  --import "tests/samples/sample_video.mp4" \
+  --import "tests/samples/sample_video_seekable.mp4" \
   --import-branch "${SOURCES_DIR}/video_transclusion_b_prefix.txt" \
   --transclude "0:50:200,1:append" \
   --insert-text "1:append:${SOURCES_DIR}/video_transclusion_b_suffix.txt" \

@@ -1464,8 +1464,12 @@ Session::sourceFor(const MicroversionId &version,
     }
   }
 
+  auto target =
+      std::make_shared<render::PickSemanticTarget>(render::PickSemanticTarget{
+          .documentId = st.documentId().str(), .microversion = version.str()});
   return std::make_shared<VersionTextSource>(
-      concatext, version, breaks, boxes, blockStyles, title, decoratedRanges);
+      concatext, version, breaks, boxes, blockStyles, title, decoratedRanges,
+      std::move(target));
 }
 
 std::vector<Session::MediaSpanInfo>
