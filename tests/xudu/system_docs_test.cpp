@@ -431,6 +431,37 @@ TEST(SystemDocsTest, InitializeSystemStoreStructureAndFormatLinks) {
   }
 }
 
+TEST(SystemDocsTest, LayoutRuntimeSnapshotReadsVarsAndScalarValues) {
+  Store store;
+  store.setSystem(true);
+  xudu::initializeSystemStore(store, SystemDocKind::Layout);
+
+  const auto manifold = store.rebuildManifold(store.primaryCurrentVersion());
+  const auto vars = manifold.dimensionNamed("d.vars", store);
+  const auto values = manifold.dimensionNamed("d.values", store);
+  ASSERT_NE(vars, 0U);
+  ASSERT_NE(values, 0U);
+
+  const auto config = LayoutConfig::fromStore(store);
+  EXPECT_FLOAT_EQ(config.zigzag.cellHorizontalPaddingPx, 8.0F);
+  EXPECT_FLOAT_EQ(config.zigzag.contentMaxWidthPx, 260.0F);
+  EXPECT_FLOAT_EQ(config.zigzag.connectionBeamWidthPx, 4.0F);
+
+  auto variable = manifold.linked(manifold.home(), vars);
+  while (variable != 0U && manifold.textOf(variable, store) !=
+                                "zigzag.connectionBeamWidthPx") {
+    variable = manifold.linked(variable, vars);
+  }
+  ASSERT_NE(variable, 0U);
+  const auto value = manifold.linked(variable, values);
+  const auto revised = store.setScalar(store.primaryCurrentVersion(), value,
+                                       9.5, &manifold);
+  store.repointCurrentVersion(revised);
+  EXPECT_FLOAT_EQ(LayoutConfig::fromStore(store)
+                      .zigzag.connectionBeamWidthPx,
+                  9.5F);
+}
+
 TEST(SystemDocsTest, ParseFullInitializedSystemDocs) {
   Store kmStore;
   xudu::initializeSystemStore(kmStore, SystemDocKind::Keymap);

@@ -70,6 +70,10 @@
 #include "xudu/page_break_overlay.hpp"
 #include "xudu/pouch_drawer.hpp"
 #include "xudu/satelloid.hpp"
+#ifdef XUZZ_BUILD
+#include "../zigzag/zigzag_visualizer.hpp"
+#include "xudu/bridge_coordinator.hpp"
+#endif
 #include "xudu/session.hpp"
 #include "xudu/swarm_telescope_overlay.hpp"
 #include "xudu/tenuous_tether.hpp"
@@ -122,6 +126,18 @@ namespace {
  * a background document to roughly half its normal size on screen.
  */
 constexpr float backgroundDepthZ = -500.0F;
+
+/// Onion-skin offsets and fading express a historical-context policy: page
+/// measurements tell us a page's extent, but cannot choose how much older
+/// versions should recede. Keep the fallback explicit until system://layout
+/// supplies the live Xudu override.
+struct OnionSkinPolicy {
+  glm::vec3 offsetPerVersion{18.0F, 14.0F, -10.0F};
+  float minimumOpacity{0.20F};
+  float opacityStep{0.20F};
+};
+
+constexpr OnionSkinPolicy onionSkinPolicy{};
 
 /**
  * @brief Report who signed the authorship record at @p where.
@@ -375,11 +391,30 @@ public:
       if (rState.docs.empty()) {
         return;
       }
+      primaryDocument_ = rState.docs.front();
       rState.docs.back()->addObserver(&session);
       session.viewOpened(version, storeIndex);
       map.setCurrent(session.views().front().version);
       syncMediaWidgets(rState);
     });
+  }
+
+  [[nodiscard]] std::optional<glm::mat4> presentationTransform() const {
+    const auto document = primaryDocument_.lock();
+    if (!document) {
+      return std::nullopt;
+    }
+    const auto frame = document->pageFrame(0);
+    if (!frame) {
+      return std::nullopt;
+    }
+    // The document's measured margin is the smallest readable gap for an
+    // adjacent presentation. It follows custom page geometry and reflow
+    // instead of inventing a second, fixed Xuzz gutter.
+    return frame->localToWorld *
+           glm::translate(
+               glm::mat4{1.0F},
+               glm::vec3{frame->rightPx + frame->marginPx, 0.0F, 0.0F});
   }
 
   /// Where the caret is, and what it has selected, on the render thread.
@@ -1302,11 +1337,13 @@ public:
       if (!rState.docs[i]) {
         continue;
       }
-      const auto k   = (i - active + total) % total;
-      const float kF = static_cast<float>(k);
-      const glm::vec3 targetPos(kF * 18.0F, kF * 14.0F, -kF * 10.0F);
+      const auto k              = (i - active + total) % total;
+      const float kF            = static_cast<float>(k);
+      const glm::vec3 targetPos = kF * onionSkinPolicy.offsetPerVersion;
       const float targetOpacity =
-          (k == 0) ? 1.0F : std::max(0.20F, 1.0F - 0.20F * kF);
+          (k == 0) ? 1.0F
+                   : std::max(onionSkinPolicy.minimumOpacity,
+                              1.0F - onionSkinPolicy.opacityStep * kF);
 
       auto *const tl = renderer->animTimeline();
       if (tl) {
@@ -1376,6 +1413,7 @@ private:
   gleditor::Form &form;
   AppStateRef state;
   std::shared_ptr<gleditor::DocumentSwitcher> switcher;
+  std::weak_ptr<Doc> primaryDocument_;
   std::optional<Pending> pending;
   std::vector<std::shared_ptr<gleditor::MediaWidget>> mediaWidgets;
   bool onionSkinMode_{false};
@@ -1898,6 +1936,11 @@ int main(const int argc, char **argv) {
   hiddenUnlessDetailed(parser.add_argument("--insert-text"))
       .help("insert text into document as DOC:POS:FILE_OR_TEXT; repeatable")
       .append();
+  hiddenUnlessDetailed(parser.add_argument("--structure-script"))
+      .help("apply a sequential combined Xanadu/Zigzag store script; each "
+            "line is genesis, dimension NAME, cell NAME TEXT, cell-text NAME "
+            "TEXT, text TEXT, or text-append TEXT")
+      .default_value(std::string{});
   hiddenUnlessDetailed(parser.add_argument("--transclude"))
       .help("transclude span from one doc into another as "
             "SRCDOC:START:LEN,DESTDOC:POS; repeatable")
@@ -2611,6 +2654,25 @@ int main(const int argc, char **argv) {
     links.setTetherOverlay(&tenuousTetherOverlay);
     SatelloidOverlay satelloidOverlay(renderer);
     links.setSatelloidOverlay(&satelloidOverlay);
+#ifdef XUZZ_BUILD
+    auto zigzagPresentation =
+        std::make_shared<zigzag::ZigzagVisualizer>(state->defaultFontName);
+    auto &bridgeStore = session->store(0);
+    zigzagPresentation->bindXuduStore(bridgeStore,
+                                      bridgeStore.primaryCurrentVersion());
+    zigzagPresentation->setPresentationConfig(
+        xudu::LayoutConfig::fromStore(
+            session->systemStore(xudu::SystemDocKind::Layout))
+            .zigzag);
+    // Derive the structural presentation's placement from the live Xanadoc
+    // page, so edits, reflow, and document motion keep the two together.
+    zigzagPresentation->setPresentationTransformResolver(
+        [&views] { return views.presentationTransform(); });
+    xudu::BridgeCoordinator bridgeCoordinator(links, renderer,
+                                              *state->accessibility);
+    bridgeCoordinator.connectSatelloidNavigation(satelloidOverlay);
+    bridgeCoordinator.attach(*zigzagPresentation);
+#endif
     links.setOpener([&views](const MicroversionId &version) {
       views.showAlongside(version);
     });
@@ -2711,7 +2773,13 @@ int main(const int argc, char **argv) {
     if (asked.empty() && read.empty() && alongside.empty() &&
         extraImports.empty()) {
       const auto &primaryStore = session->store(0);
-      const auto allVers       = primaryStore.allVersions();
+#ifdef XUZZ_BUILD
+      // Xuzz composes the current Xanadoc beside the current manifold. Its
+      // historical operations are navigation material, not nine overlapping
+      // document planes at startup.
+      views.showAlongside(primaryStore.primaryCurrentVersion(), 0.0F, 0);
+#else
+      const auto allVers = primaryStore.allVersions();
       if (allVers.size() > 1) {
         for (std::size_t vIdx = 0; vIdx < allVers.size(); ++vIdx) {
           views.showAlongside(allVers[vIdx], 0.0F, 0);
@@ -2719,6 +2787,7 @@ int main(const int argc, char **argv) {
       } else {
         views.showAlongside(opening, 0.0F, 0);
       }
+#endif
     } else {
       views.showAlongside(opening, 0.0F, 0);
     }
@@ -2815,29 +2884,38 @@ int main(const int argc, char **argv) {
 
     session->setSystemDocChangedCallback(
         [&app, radialMenu, docSwitcher, &pouchDrawer, &links,
-         &map](const xudu::SystemDocKind kind, const std::string &content) {
+         &map
+#ifdef XUZZ_BUILD
+         , &zigzagPresentation
+#endif
+        ](const xudu::SystemDocKind kind, const xudu::Store &store) {
           std::cout << "xudu: system doc updated (" << xudu::systemDocUri(kind)
                     << ")\n";
           switch (kind) {
           case xudu::SystemDocKind::Keymap: {
-            app.commands().rebindFromText(xudu::extractConfigSection(content));
+            app.commands().rebindFromText(xudu::extractConfigSection(
+                store.textOf(store.primaryCurrentVersion())));
             break;
           }
           case xudu::SystemDocKind::Settings: {
             break;
           }
           case xudu::SystemDocKind::Layout: {
-            const auto layout = xudu::parseLayoutConfig(content);
+            const auto layout = xudu::LayoutConfig::fromStore(store);
             links.setVisible(layout.xanalinkRibbons);
             links.setBeamConfig(layout.beams);
             links.tensionEngine().setParams(layout.physics.toTensionParams());
             pouchDrawer.setDockSide(layout.pouchDock == xudu::PouchDock::Left
                                         ? xudu::PouchDrawer::DockSide::Left
                                         : xudu::PouchDrawer::DockSide::Right);
+#ifdef XUZZ_BUILD
+            zigzagPresentation->setPresentationConfig(layout.zigzag);
+#endif
             break;
           }
           case xudu::SystemDocKind::UI: {
-            const auto uiCfg = xudu::parseUIConfig(content);
+            const auto uiCfg = xudu::parseUIConfig(
+                store.textOf(store.primaryCurrentVersion()));
             radialMenu->setConfig(uiCfg.radialMenu);
             docSwitcher->setVisible(uiCfg.tabBarVisible);
             map.setVisible(uiCfg.hypertimeMapVisible);
@@ -2869,14 +2947,16 @@ int main(const int argc, char **argv) {
       const auto loIdx = session->systemStoreIndex(xudu::SystemDocKind::Layout);
       const auto &loStore = session->store(loIdx);
       if (loStore.opCount() > 0) {
-        const auto loCfg = xudu::parseLayoutConfig(
-            loStore.textOf(loStore.primaryCurrentVersion()));
+        const auto loCfg = xudu::LayoutConfig::fromStore(loStore);
         links.setVisible(loCfg.xanalinkRibbons);
         links.setBeamConfig(loCfg.beams);
         links.tensionEngine().setParams(loCfg.physics.toTensionParams());
         pouchDrawer.setDockSide(loCfg.pouchDock == xudu::PouchDock::Left
                                     ? xudu::PouchDrawer::DockSide::Left
                                     : xudu::PouchDrawer::DockSide::Right);
+#ifdef XUZZ_BUILD
+        zigzagPresentation->setPresentationConfig(loCfg.zigzag);
+#endif
       }
     }
 

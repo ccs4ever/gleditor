@@ -18,9 +18,11 @@
 #include <gleditor/animation.hpp>
 #include <gleditor/caret.hpp>
 #include <gleditor/paths.hpp>
+#include <gleditor/render/constants.hpp>
 #include <gleditor/render_state.hpp>
 #include <gleditor/spatial.hpp>
 
+#include "common/xanadu/enfilade/spanfilade.hpp"
 #include "xudu/core/anchor_lanes.hpp"
 #include "xudu/core/framing.hpp"
 #include "xudu/satelloid.hpp"
@@ -39,14 +41,13 @@ constexpr float beamWidthOfLine = 1.25F;
 /// is not worth the animation, in world units.
 constexpr float alreadyAligned = 1.0F;
 
-/// Space left between two documents brought alongside each other, in world
-/// units. Enough for the beam to be a beam and not a join.
-constexpr float documentGap = 24.0F;
-
 /// Half-width assumed for a document whose first page has not built yet, in
-/// world units -- just enough that layout math has something to work with
-/// before the real width is known.
-constexpr float fallbackDocHalfWidth = 10.0F;
+/// world units. It is the declared default page geometry, not an unrelated
+/// guessed width; real Page measurements replace it as soon as they exist.
+constexpr float fallbackDocHalfWidth = Doc::defaultPageWidthWorld() / 2.0F;
+
+/// Height used during the same asynchronous first-page interval.
+constexpr float fallbackDocHeight = Doc::defaultPageHeightWorld();
 
 /// Aspect ratio assumed when the view has not reported a screen size yet.
 constexpr float fallbackAspect = 4.0F / 3.0F;
@@ -136,7 +137,11 @@ void LinkBeams::rebuildStrands(RenderState &state) {
     }
 
     std::vector<TransclusionPair> tPairs;
-    placeTransclusions(uctx, tPairs);
+    // Spanfilade is the canonical interval index for shared primedia. Keep
+    // discovery in the same path for document/cell contexts so beam staging
+    // cannot diverge from the reference implementation.
+    const auto spanfilade = xanadu::enfilade::Spanfilade::fromContext(uctx);
+    spanfilade.placeTransclusions(uctx, tPairs);
     transclusionStrands.clear();
     transclusionStrands.reserve(tPairs.size());
     for (const auto &tp : tPairs) {
@@ -172,7 +177,8 @@ void LinkBeams::rebuildStrands(RenderState &state) {
     }
 
     std::vector<TransclusionPair> tPairs;
-    placeTransclusions(versions, tPairs);
+    const auto spanfilade = xanadu::enfilade::Spanfilade::fromViews(versions);
+    spanfilade.placeTransclusions(versions, tPairs);
     transclusionStrands.clear();
     transclusionStrands.reserve(tPairs.size());
     for (const auto &tp : tPairs) {
@@ -673,7 +679,7 @@ void LinkBeams::alignPair(std::size_t fromDocIdx, std::size_t toDocIdx,
         }
         break;
       }
-      currX += prevHalfW + halfW + documentGap;
+      currX += prevHalfW + halfW + render::kDefaultDocumentGap;
     }
     anyForegroundYet = true;
     docSlots[d]      = currX;
@@ -691,7 +697,7 @@ void LinkBeams::alignPair(std::size_t fromDocIdx, std::size_t toDocIdx,
     body.position        = cur;
     body.restingPosition = cur;
     float halfW          = fallbackDocHalfWidth;
-    float heightW        = 70.0F;
+    float heightW        = fallbackDocHeight;
     if (const auto *p = state.docs[d]->page(0)) {
       halfW   = (p->widthPixels() * 0.5F) * Doc::pixelsToWorld;
       heightW = p->heightPixels() * Doc::pixelsToWorld;
@@ -709,7 +715,7 @@ void LinkBeams::alignPair(std::size_t fromDocIdx, std::size_t toDocIdx,
   constraint.toDoc       = toDocIdx;
   constraint.nearAnchorY = nearCenterY - nearPos.y;
   constraint.farAnchorY  = farCenterY - farPos.y;
-  constraint.targetGap   = documentGap;
+  constraint.targetGap   = render::kDefaultDocumentGap;
   constraint.prominence  = 1.0F;
   constraint.active      = true;
   tensionEngine_.addConstraint(constraint);
@@ -737,10 +743,10 @@ void LinkBeams::alignPair(std::size_t fromDocIdx, std::size_t toDocIdx,
     anchor.originPos  = farPos;
     anchor.currentPos = target;
     anchor.width      = farHalfWidth * 2.0F;
-    anchor.height =
-        farPage ? (farPage->heightPixels() * Doc::pixelsToWorld) : 70.0F;
-    anchor.colour = 0x38BDF855; // Ethereal cyan with ~33% alpha
-    anchor.active = true;
+    anchor.height     = farPage ? (farPage->heightPixels() * Doc::pixelsToWorld)
+                                : fallbackDocHeight;
+    anchor.colour     = 0x38BDF855; // Ethereal cyan with ~33% alpha
+    anchor.active     = true;
     tetherOverlay_->setTether(anchor);
   }
 
@@ -955,7 +961,7 @@ void LinkBeams::alignCellSatelloid(const Strand &strand, RenderState &state) {
   docBody.width           = docHalfW * 2.0F;
   docBody.height = doc->page(0)
                        ? (doc->page(0)->heightPixels() * Doc::pixelsToWorld)
-                       : 70.0F;
+                       : fallbackDocHeight;
   docBody.isForeground = true;
   docBody.pinned       = true;
   tensionEngine_.setBody(docBody);

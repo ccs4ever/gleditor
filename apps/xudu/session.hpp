@@ -517,7 +517,7 @@ public:
 
   // -- System Xanadocs & Subsystem Hot-Reload --------------------------------
   using SystemDocChangedCallback =
-      std::function<void(SystemDocKind kind, const std::string &content)>;
+      std::function<void(SystemDocKind kind, const Store &store)>;
 
   void setSystemDocChangedCallback(SystemDocChangedCallback cb) {
     systemDocChangedCallback_ = std::move(cb);
@@ -756,6 +756,8 @@ public:
 private:
   /// Rebuild the cached version for @p docIndex after an edit moved it.
   void refresh(std::uint32_t docIndex, const MicroversionId &version);
+  /// Persist the versions currently represented by views in each store.
+  void syncCurrentVersions(std::size_t storeIndex) const;
   /// Note that something a decoration depends on has changed.
   void invalidate() { epoch++; }
 

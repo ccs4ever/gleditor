@@ -220,6 +220,22 @@ struct BeamConfig {
   float loomHoverAlpha{1.0F};
 };
 
+/// Presentation policy for Zigzag's content and topology projections. These
+/// are intentionally values, not renderer state: a system store edit creates
+/// one new snapshot which the visualizer applies between frames.
+struct ZigzagPresentationConfig {
+  float cellHorizontalPaddingPx{8.0F};
+  float cellVerticalPaddingPx{6.0F};
+  float cellBandGapPx{4.0F};
+  float contentMaxWidthPx{260.0F};
+  float topologyMaxWidthPx{140.0F};
+  float rankClearancePx{24.0F};
+  float hudHorizontalPaddingPx{16.0F};
+  float hudVerticalPaddingPx{8.0F};
+  float hudColumnGapPx{8.0F};
+  float connectionBeamWidthPx{4.0F};
+};
+
 struct LayoutConfig {
   std::uint32_t columns{2};
   float pageWidthPx{800.0F};
@@ -234,8 +250,10 @@ struct LayoutConfig {
   bool xanalinkRibbons{true};
   PhysicsConfig physics{};
   BeamConfig beams{};
+  ZigzagPresentationConfig zigzag{};
 
-  [[nodiscard]] static LayoutConfig fromYaml(std::string_view yamlText);
+  [[nodiscard]] static LayoutConfig fromSystemText(std::string_view text);
+  [[nodiscard]] static LayoutConfig fromStore(const Store &store);
   [[nodiscard]] static LayoutConfig
   fromSlice(const zigzag::ZzStructureDocument &slice);
 };
@@ -265,11 +283,11 @@ struct PouchConfig {
   [[nodiscard]] static PouchConfig fromYaml(std::string_view yamlText);
 };
 
-[[nodiscard]] KeymapConfig parseKeymapConfig(std::string_view yamlText);
-[[nodiscard]] SettingsConfig parseSettingsConfig(std::string_view yamlText);
-[[nodiscard]] LayoutConfig parseLayoutConfig(std::string_view yamlText);
-[[nodiscard]] UIConfig parseUIConfig(std::string_view yamlText);
-[[nodiscard]] PouchConfig parsePouchConfig(std::string_view yamlText);
+[[nodiscard]] KeymapConfig parseKeymapConfig(std::string_view text);
+[[nodiscard]] SettingsConfig parseSettingsConfig(std::string_view text);
+[[nodiscard]] LayoutConfig parseLayoutConfig(std::string_view text);
+[[nodiscard]] UIConfig parseUIConfig(std::string_view text);
+[[nodiscard]] PouchConfig parsePouchConfig(std::string_view text);
 
 [[nodiscard]] gleditor::RadialConfig
 parseRadialConfig(std::string_view yamlText);

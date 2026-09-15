@@ -117,7 +117,7 @@ MicroversionId Session::insertText(const std::uint32_t docIndex,
     save(sIdx);
     if (systemDocChangedCallback_) {
       if (const auto kind = systemDocKindForStoreIndex(sIdx)) {
-        systemDocChangedCallback_(*kind, st.textOf(prod));
+        systemDocChangedCallback_(*kind, st);
       }
     }
   } else if (swarmSource) {
@@ -820,7 +820,33 @@ void Session::save(const std::size_t index) const {
   const_cast<Session *>(this)->flushUncommitted();
   if (index < stores.size() && stores[index].store &&
       !stores[index].path.empty()) {
+    syncCurrentVersions(index);
     stores[index].store->save(stores[index].path);
+  }
+}
+
+void Session::syncCurrentVersions(const std::size_t storeIndex) const {
+  if (storeIndex >= stores.size() || !stores[storeIndex].store) {
+    return;
+  }
+
+  std::vector<MicroversionId> visible;
+  for (const auto &view : open) {
+    if (view.storeIndex != storeIndex || view.version.isZero()) {
+      continue;
+    }
+    if (std::ranges::find(visible, view.version) == visible.end()) {
+      visible.push_back(view.version);
+    }
+  }
+  if (visible.empty()) {
+    const auto latest = stores[storeIndex].store->latest();
+    if (!latest.isZero()) {
+      visible.push_back(latest);
+    }
+  }
+  if (!visible.empty()) {
+    stores[storeIndex].store->setCurrentVersions(std::move(visible));
   }
 }
 
@@ -1007,7 +1033,7 @@ void Session::repointSystemDoc(const SystemDocKind kind,
     }
   }
   if (systemDocChangedCallback_) {
-    systemDocChangedCallback_(kind, st.textOf(version));
+    systemDocChangedCallback_(kind, st);
   }
 }
 
@@ -1642,7 +1668,7 @@ void Session::scrubToVersion(const std::uint32_t docIndex,
     st.save(stores[sIdx].path);
     if (systemDocChangedCallback_) {
       if (const auto kind = systemDocKindForStoreIndex(sIdx)) {
-        systemDocChangedCallback_(*kind, st.textOf(version));
+        systemDocChangedCallback_(*kind, st);
       }
     }
   }
@@ -1760,7 +1786,7 @@ void Session::flushUncommitted(const std::optional<std::uint32_t> docIndex) {
       st.repointCurrentVersion(curVersion);
       if (systemDocChangedCallback_) {
         if (const auto kind = systemDocKindForStoreIndex(sIdx)) {
-          systemDocChangedCallback_(*kind, st.textOf(curVersion));
+          systemDocChangedCallback_(*kind, st);
         }
       }
     }

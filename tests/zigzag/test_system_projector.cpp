@@ -146,7 +146,8 @@ TEST(ZzSystemProjectorTest, DualStackLayoutConfig) {
 
   const auto cfgSlice = LayoutConfig::fromSlice(slice);
   const auto cfgYaml =
-      LayoutConfig::fromYaml(defaultSystemDocContent(SystemDocKind::Layout));
+      LayoutConfig::fromSystemText(
+          defaultSystemDocContent(SystemDocKind::Layout));
 
   EXPECT_EQ(cfgSlice.columns, cfgYaml.columns);
   EXPECT_EQ(cfgSlice.columns, 2U);
