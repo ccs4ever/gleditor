@@ -16,6 +16,8 @@ XUDU="./build/xudu"
 BASE_DIR="tests/samples/xudu"
 SOURCES_DIR="${BASE_DIR}/sources"
 PERMA="${BASE_DIR}/permascroll"
+XUZZ_BASE_DIR="tests/samples/xuzz"
+XUZZ_PERMA="${XUZZ_BASE_DIR}/slice_then_xanadoc/permascroll"
 
 if [[ ! -x "${XUDU}" ]]; then
   echo "Error: ${XUDU} not found or not executable. Build it first with: make -j\$(nproc) xudu" >&2
@@ -25,7 +27,8 @@ fi
 echo "==> Creating sample Xanadocs using ${XUDU}..."
 
 # Clean target directories and old scroll
-rm -rf "${BASE_DIR}/core_hypertext" "${BASE_DIR}/multimedia" "${BASE_DIR}/beams" "${PERMA}"
+rm -rf "${BASE_DIR}/core_hypertext" "${BASE_DIR}/multimedia" "${BASE_DIR}/beams" "${PERMA}" \
+  "${XUZZ_BASE_DIR}/slice_then_xanadoc"
 mkdir -p "${BASE_DIR}/core_hypertext" "${BASE_DIR}/multimedia" "${BASE_DIR}/beams"
 
 # -----------------------------------------------------------------------------
@@ -194,6 +197,16 @@ ${XUDU} "${BASE_DIR}/beams/03_multi_span_stacked" \
   --link "0@Thesis 1:35+0@Thesis 2:35,1@Observation Alpha:35+1@Observation Gamma:35:comment:author:multi_envelope" \
   --link "0@Thesis 1:35,1@Observation Alpha:35:comment:author:upper_focus" \
   --link "0@Thesis 2:35,1@Observation Gamma:35:comment:author:lower_focus" \
+  --export-osmic --headless
+
+# -----------------------------------------------------------------------------
+# 4. Xuzz convergence
+# -----------------------------------------------------------------------------
+echo "--> Creating Xuzz convergence sample store..."
+
+${XUDU} "${XUZZ_BASE_DIR}/slice_then_xanadoc" \
+  --permascroll "${XUZZ_PERMA}" \
+  --structure-script "${XUZZ_BASE_DIR}/sources/slice_then_xanadoc.xuzz" \
   --export-osmic --headless
 
 echo "==> All sample Xanadocs successfully created by xudu application!"

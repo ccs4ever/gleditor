@@ -11,6 +11,7 @@
 #include <iostream>
 #include <sstream>
 #include <string>
+#include <unordered_map>
 #include <utility>
 #include <vector>
 
@@ -348,6 +349,90 @@ BatchOrchestrator::execute(Session &session,
     }
   }
 
+  if (const auto scriptPath = parser.get<std::string>("--structure-script");
+      !scriptPath.empty()) {
+    std::ifstream script(scriptPath);
+    if (!script) {
+      throw std::runtime_error("cannot open structure script: " + scriptPath);
+    }
+
+    auto &store  = session.store(0);
+    auto version = store.latest();
+    std::unordered_map<std::string, zigzag::CellRef> cells;
+    std::unordered_map<std::string, zigzag::DimRef> dimensions;
+    std::string line;
+    std::size_t lineNumber = 0;
+    while (std::getline(script, line)) {
+      ++lineNumber;
+      const auto first = line.find_first_not_of(" \t");
+      if (first == std::string::npos || line[first] == '#') {
+        continue;
+      }
+      line.erase(0, first);
+      const auto space   = line.find_first_of(" \t");
+      const auto command = line.substr(0, space);
+      const auto argument =
+          space == std::string::npos ? std::string{} : line.substr(space + 1);
+      const auto fail = [&](const std::string &reason) {
+        throw std::runtime_error("structure script " + scriptPath + ":" +
+                                 std::to_string(lineNumber) + ": " + reason);
+      };
+
+      if (command == "genesis") {
+        if (!version.isZero()) {
+          fail("genesis requires an empty store");
+        }
+        version = store.sliceGenesis({});
+      } else if (command == "dimension") {
+        if (argument.empty()) {
+          fail("dimension requires a name");
+        }
+        const auto made = store.makeDimension(version, argument);
+        version         = made.version;
+        dimensions.emplace(argument, made.dim);
+      } else if (command == "cell") {
+        const auto nameEnd = argument.find_first_of(" \t");
+        if (nameEnd == std::string::npos) {
+          fail("cell requires a name and text");
+        }
+        const auto name = argument.substr(0, nameEnd);
+        const auto text =
+            argument.substr(argument.find_first_not_of(" \t", nameEnd));
+        version = store.makeCell(version, text);
+        cells.emplace(name, store.cellRefOf(version));
+      } else if (command == "cell-text") {
+        const auto nameEnd = argument.find_first_of(" \t");
+        if (nameEnd == std::string::npos) {
+          fail("cell-text requires a cell name and text");
+        }
+        const auto name  = argument.substr(0, nameEnd);
+        const auto found = cells.find(name);
+        if (found == cells.end()) {
+          fail("unknown cell: " + name);
+        }
+        const auto text =
+            argument.substr(argument.find_first_not_of(" \t", nameEnd));
+        version = store.setCellText(version, found->second, text);
+      } else if (command == "text" || command == "text-append") {
+        if (argument.empty()) {
+          fail(command + " requires text");
+        }
+        const auto length = store.rebuild(version).length();
+        const auto at =
+            command == "text" ? 0U : static_cast<std::uint32_t>(length);
+        version = store.insert(version, at, argument);
+      } else {
+        fail("unknown command: " + command);
+      }
+    }
+    if (version.isZero()) {
+      throw std::runtime_error("structure script made no operations: " +
+                               scriptPath);
+    }
+    session.viewOpened(version, 0);
+    opening = version;
+  }
+
   if (parser.present<std::vector<std::string>>("--import-branch")) {
     for (const auto &f :
          parser.get<std::vector<std::string>>("--import-branch")) {
@@ -671,6 +756,22 @@ BatchOrchestrator::execute(Session &session,
        parser.is_used("--click") || parser.is_used("--pick"));
 
   if (headless && !hasScript) {
+    // Headless export temporarily opens every historical version so span
+    // tokens can resolve against them. Those helper views are not a request
+    // for a side-by-side presentation: persist one current head for each
+    // exported store, while interactive multi-view sessions retain all heads.
+    if (parser["--export-osmic"] == true) {
+      for (std::size_t i = 0; i < session.storeCount(); ++i) {
+        const auto latest = session.store(i).latest();
+        if (!latest.isZero()) {
+          session.store(i).repointCurrentVersion(latest);
+        }
+      }
+      // Span resolution may have opened every historical state. Those views
+      // are batch-only scaffolding, not a request to persist a gallery of
+      // current heads; saveAll() otherwise serialises each one.
+      session.views().clear();
+    }
     session.saveAll();
     if (parser["--export-osmic"] == true) {
       session.saveOsmicTextAll();
