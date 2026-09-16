@@ -13,12 +13,18 @@ pre-existing, unrelated failures -- `MediaWidgetTest.DeviceReadyAndDrawFrame`,
 `MediaWidgetSpeedTest.AccessibilityPerformActionOnSpeedButton` -- reproduce identically on unpatched
 `HEAD` and are unrelated to page building). `tests/lib/doc_page_budget_test.cpp` is the regression
 test Step 3 called for; it was confirmed to actually fail against the unpatched logic before the fix
-was restored (see Step 3, below). **Tier 2 (viewport-driven virtualized loading) is not
-implemented**, but its prerequisite is: the Layoutfilade has been promoted from
-`apps/common/xanadu/enfilade/` into the core library as `gleditor::enfilade::Layoutfilade`
-(`include/gleditor/enfilade/layoutfilade.hpp`, `src/enfilade/layoutfilade.cpp`), with every
-incidental Xanadu/zigzag reference removed, so `gleditor::Doc` can now depend on it without
-violating Application Isolation. Nothing yet calls it from `Doc`.
+was restored (see Step 3, below).
+
+**Tier 2 is implemented as viewport-aware catch-up, not as true lazy/sparse virtualization** — see
+"Tier 2: viewport-aware catch-up (implemented)" below for why, and what the road not taken would
+have cost. Its prerequisite, promoting the Layoutfilade from `apps/common/xanadu/enfilade/` into the
+core library as `gleditor::enfilade::Layoutfilade` (`include/gleditor/enfilade/layoutfilade.hpp`,
+`src/enfilade/layoutfilade.cpp`) with every incidental Xanadu/zigzag reference removed, is done and
+is what `Doc` now actually depends on. `Doc::buildBudgetForThisCall()` (`src/doc.cpp`) and
+`render::kPageBuildCatchUpMultiplier` (`include/gleditor/render/constants.hpp`) are the feature
+itself, covered by `DocPageBudgetTest.CatchesUpFasterWhenTheCameraIsAheadOfBuildProgress`
+(`tests/lib/doc_page_budget_test.cpp`), confirmed to fail with the multiplier neutralized to 1
+before being restored to its real value.
 
 ## Summary
 
@@ -159,41 +165,102 @@ into the core library as `include/gleditor/enfilade/layoutfilade.hpp` /
 `xanadu`/`xudu`/`zigzag` removed from the code itself (it always only operated on generic text lines
 and `gleditor::LayoutBox`, so nothing about its actual logic needed to change) —
 `apps/xudu/core/layoutfilade.hpp` is now a one-line forwarding header into the promoted library
-location, the same pattern this repo already uses for `xudu`/`zigzag`'s other core shims.
-**Promotion is not the same as wiring it up**: `gleditor::Doc` is now free to depend on
-`gleditor::enfilade::Layoutfilade` without violating Application Isolation, but nothing in
-`src/doc.cpp` calls it yet — that remaining step (Tier 2 below) is still not started.
-
-**So, concretely: plain `gleditor` still eagerly shapes and GPU-uploads the entire document up
-front, regardless of viewport, every time.** For `kjv.txt`'s ~1200 pages, that means building all
-~1200 pages is *always* the amount of work `buildPendingPages()` eventually has to do, whether or
-not the burst is capped per-frame. Culling only ever hid this by not drawing the results.
+location, the same pattern this repo already uses for `xudu`/`zigzag`'s other core shims. **So,
+concretely: plain `gleditor` still eagerly shapes and GPU-uploads the entire document up front,
+regardless of viewport, every time.** For `kjv.txt`'s ~1200 pages, that means building all ~1200
+pages is *always* the amount of work `buildPendingPages()` eventually has to do. Culling only ever
+hid this by not drawing the results, and the "viewport-aware catch-up" section below only changes
+the *order* that work happens in, not the total amount of it — see that section for why.
 
 This changes what "the fix" should mean, and splits it into two tiers worth keeping distinct:
 
-- **Tier 1 (this report's plan, below): stop the block.** Cap `buildPendingPages()`'s per-call work
-  so the eager, whole-document build can never again freeze the main thread for seconds at a time.
-  This is small, safe, bounded in scope, and fixes the reported symptom (UI responsiveness)
-  regardless of whether the underlying eagerness is ever addressed. It does **not** reduce total
-  work done or make the document actually load faster in aggregate — a 1200-page document will still
-  eventually build all 1200 pages even if the user never scrolls past page one.
-- **Tier 2 (a real fix, out of scope here): make `gleditor`'s page building viewport-driven.** Only
-  shape and build pages near the current scroll position/viewport (plus a margin), and grow outward
-  incrementally as the user scrolls, using `gleditor::enfilade::Layoutfilade` (now a core library
-  component, see above) to answer "which lines/pages are near Y" in O(log N) instead of walking the
-  whole document. The prerequisite promotion is done; what remains is materially bigger on its own —
-  it touches `Doc`'s page lifecycle, scroll/viewport tracking, and what "loaded" even means for a
-  document that may never build most of its pages — and is not something to fold into the
-  blocking-bug fix below. If it's wanted, it likely starts from reading
-  `design/enfilade/layoutfilade-virtualized-scrolling.md` for the 2D coordinate/height B-enfilade's
-  own mechanics, then designing how `Doc::buildPendingPages()` (or its successor) queries a
-  `Layoutfilade` built from the document's lines/boxes instead of eagerly walking `layoutFrom()` to
-  the end of the text in `Doc::makePages()`.
+- **Tier 1 (this report's original plan, below): stop the block.** Cap `buildPendingPages()`'s
+  per-call work so the eager, whole-document build can never again freeze the main thread for
+  seconds at a time. Small, safe, bounded in scope, fixes the reported symptom (UI responsiveness)
+  regardless of whether the underlying eagerness is ever addressed.
+- **Tier 2: make `buildPendingPages()` aware of where the camera actually is**, so a document loads
+  toward wherever the user scrolled rather than strictly top-to-bottom. Two designs were on the
+  table for this — see "Tier 2: viewport-aware catch-up (implemented)" below for both and why the
+  smaller one was built.
 
-The plan below is Tier 1 only. It is worth doing regardless of whether Tier 2 ever happens — a
-viewport-driven loader would still want *some* per-call budget as a safety margin for whatever
-"nearby" batch it decides to build at once — but it should not be mistaken for making `kjv.txt` load
-faster in aggregate, only for keeping the UI alive while it does.
+Both are implemented; see the status note at the top of this report.
+
+## Tier 2: viewport-aware catch-up (implemented)
+
+Two designs were considered for making `buildPendingPages()` aware of where the camera is, and only
+the smaller one was built. Both start from the same finding, which is worth stating precisely
+because it is what ruled the bigger one out for now.
+
+**The finding**: `Doc::pages` is a strictly ordered, append-only `std::vector<Page>`. A page's
+build-order, its index into that vector, and its true position in the document are always identical
+today. Two other things depend on that being true:
+
+- **Picking** (`src/renderer.cpp`, `Doc::offsetForPick()`) bakes a page's index into its GPU picking
+  tag at construction time and resolves clicks back through it — click-to-caret-position is wrong
+  the moment a page's baked-in index stops matching its true document position.
+- **Reflow** (`Doc::reflowFrom()`, `src/doc.cpp`) walks forward from the edited page and assumes
+  every page before it already exists, re-stacking `pages[firstPage..]` in place.
+
+Both are fine as long as pages arrive in order, which is exactly what makes them fragile to a design
+that does not.
+
+**Option A — true lazy/sparse virtualization.** Never build pages outside the viewport (plus a
+margin); jump-build wherever the camera looks regardless of document position; evict and rebuild as
+the user scrolls elsewhere. This is what "viewport-driven" suggested at first read, and it is a
+materially bigger undertaking than it sounds: `pages` has to become gap-tolerant (a
+`std::map<std::uint32_t, Page>` rather than a vector, since the total page count of a document isn't
+known without walking all of it — see `design/enfilade/layoutfilade-virtualized-scrolling.md`'s own
+"Heuristic Byte Windows" problem statement), a page's picking tag has to carry its *true* index
+rather than its build-order position, `reflowFrom()` needs a story for editing a page that has not
+been built yet (force-build the pages before it, most plausibly, since there is no way to click into
+an unbuilt page to begin editing it in the first place — but that is a real design decision, not a
+detail), and accessibility's page walk (`src/a11y/documents.cpp`), which already tolerates trailing
+pages not existing yet, would need to keep tolerating *interior* gaps too. None of this is
+impossible, but it is a genuinely separate feature with real correctness surface area in
+accessibility and click-to-place behavior, not a variation on the fix above.
+
+**Option B — viewport-aware catch-up (what was built).** Pages still build strictly in document
+order — `pages` is untouched, picking and reflow are untouched, nothing above applies — but
+`Doc::buildPendingPages()` (`src/doc.cpp`) can now tell when the camera is looking at a page well
+past what has been built so far, and spends more of its per-call time budget catching up toward it
+when that's true, via `render::kPageBuildCatchUpMultiplier`
+(`include/gleditor/render/constants.hpp`). Concretely:
+
+- `Doc::makePages()` now also appends each page's height to `pageHeightsPx` as it shapes it
+  (`src/doc.cpp`) — independent of `pendingShapings`, which `buildPendingPages()` drains, so this
+  keeps growing regardless of GPU-build progress.
+- `Doc::buildBudgetForThisCall()` (`src/doc.cpp`) rebuilds a `gleditor::enfilade::Layoutfilade`
+  (`pageIndexFilade`) from `pageHeightsPx` whenever it has grown, giving an O(log N) "which page
+  index is at this Y" query over every page shaped so far — this is the actual use of the promoted
+  Layoutfilade the rest of this report set up.
+- It reads the camera's world position (`AppState::view.pos`, the one shared free-moving 3D camera —
+  there is no per-document scroll offset in this renderer) and projects it into this document's own
+  stacking coordinate (relative to `Doc::currentPosition()`, in the same `pixelsToWorld`-scaled
+  units `buildPendingPages()` already stacks pages in). Camera x/z and view direction are
+  deliberately not considered — a document the camera isn't actually looking at just catches up for
+  no visual benefit, which costs nothing else this function's own per-call budget doesn't already
+  bound.
+- If the resulting target page index is past `pages.size()`, the call gets
+  `render::kPageBuildFrameBudget * render::kPageBuildCatchUpMultiplier` instead of the plain budget
+  — still one bounded, yielding call per frame, just a bigger one while there is somewhere specific
+  to catch up to.
+
+This does not reduce total work (every page still gets built eventually, same as Tier 1 alone) and
+it does not skip building pages nobody will ever scroll to — both real limitations relative to
+Option A. What it does fix, without touching picking, reflow, or accessibility at all: a document
+that is still loading top-to-bottom no longer makes the user wait behind every page before the one
+they actually scrolled to.
+
+**Test**: `DocPageBudgetTest.CatchesUpFasterWhenTheCameraIsAheadOfBuildProgress`
+(`tests/lib/doc_page_budget_test.cpp`) establishes a plain-budget baseline on one call, moves the
+camera deep into the document's stacking direction, and asserts the very next call on the *same*
+document builds noticeably more pages than that baseline — same document, same warmed-up glyph cache
+and font lookups both times, isolating the catch-up multiplier as the only variable between the two
+counts (an earlier version of this test compared two *separate* documents and passed even with the
+multiplier neutralized to 1, because the second document's build was benefiting from the first one's
+already-warm shared glyph cache rather than from catch-up at all — worth knowing if this test is
+ever touched again). Confirmed to fail with `kPageBuildCatchUpMultiplier` temporarily set to `1`
+before being restored to its real value.
 
 ## Why the fix must not just revert `ae924c0`
 

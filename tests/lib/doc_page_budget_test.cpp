@@ -3,7 +3,8 @@
  * @brief Doc::buildPendingPages() stays within its per-call time budget even
  * when the background shaping thread has produced a large backlog before the
  * render thread ever asks for pages -- the regression covered by
- * design/kjv-load-blocking-regression.md.
+ * design/kjv-load-blocking-regression.md -- and widens that budget when the
+ * camera is looking at a page well past what has been built so far.
  */
 #include <gmock/gmock.h>
 #include <gtest/gtest.h>
@@ -49,6 +50,7 @@ class DocPageBudgetTest : public testing::Test {
 protected:
   std::unique_ptr<NiceMock<MockRenderDevice>> device;
   std::unique_ptr<RenderState> state;
+  AppStateRef appState;
   RendererRef renderer;
   std::shared_ptr<Doc> doc;
 
@@ -66,7 +68,7 @@ protected:
 
     state = std::make_unique<RenderState>(device.get());
 
-    auto appState             = std::make_shared<AppState>();
+    appState                  = std::make_shared<AppState>();
     appState->defaultFontName = "Monospace 10";
     renderer = Renderer::create(appState, render::Backend::OpenGL);
 
@@ -115,6 +117,44 @@ TEST_F(DocPageBudgetTest,
                           "per-call budget";
   EXPECT_GT(doc->numPages(), firstCallPages)
       << "later calls made no further progress";
+}
+
+TEST_F(DocPageBudgetTest, CatchesUpFasterWhenTheCameraIsAheadOfBuildProgress) {
+  doc->makePages();
+
+  // First call: camera at its default position, which resolves near the
+  // start of a document positioned at the world origin (as this fixture's
+  // is), so this establishes the plain per-call rate -- including whatever
+  // one-time warm-up cost (font/glyph-cache misses) the very first call
+  // pays, so that cost lands in the baseline rather than skewing the
+  // comparison below.
+  doc->buildPendingPages(*state);
+  const auto normalPacePages = doc->numPages();
+  ASSERT_GT(normalPacePages, 0U);
+
+  // Move the camera deep into this document's own stacking direction
+  // (increasingly negative local Y is further into the document -- see
+  // Doc::buildBudgetForThisCall()), simulating having scrolled far ahead of
+  // load progress before the page there has actually been built, then make
+  // the very next call on the *same* document -- so it benefits from
+  // exactly the same warmed-up glyph cache and font lookups the first call
+  // already paid for, isolating the catch-up budget as the only remaining
+  // variable between the two page counts.
+  {
+    const std::lock_guard<std::mutex> lock(appState->view);
+    appState->view.pos.y = -1'000'000.0F;
+  }
+
+  doc->buildPendingPages(*state);
+  const auto catchUpCallPages = doc->numPages() - normalPacePages;
+
+  // A conservative fraction of render::kPageBuildCatchUpMultiplier: comfortably
+  // more than a warm cache alone would explain, comfortably less than the
+  // full configured multiplier, so this does not have to track that
+  // constant's exact value.
+  EXPECT_GT(catchUpCallPages, normalPacePages * 2)
+      << "camera looking far past build progress should let one call build "
+         "noticeably more pages than the established plain-budget rate";
 }
 
 } // namespace

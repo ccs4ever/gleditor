@@ -5,6 +5,7 @@
 #include <atomic>
 #include <cassert>
 #include <choreograph/Choreograph.h>
+#include <chrono>
 #include <cstdint>
 #include <deque>
 #include <gleditor/animation.hpp>
@@ -22,6 +23,7 @@
 #include <vector>
 
 #include <gleditor/draw_budget.hpp>
+#include <gleditor/enfilade/layoutfilade.hpp>
 #include <gleditor/glyphcache/types.hpp>
 #include <gleditor/layout_box.hpp>
 #include <gleditor/render/types.hpp>
@@ -421,6 +423,12 @@ private:
   /// The line breaks of the page an edit at @p at lands on, as they are before
   /// it is made. Must be called before the text is changed.
   [[nodiscard]] std::vector<int> lineBreaksAround(std::uint32_t at) const;
+  /// How much of render::kPageBuildFrameBudget this buildPendingPages() call
+  /// gets: the plain budget, or render::kPageBuildCatchUpMultiplier times it
+  /// when the camera is looking at a page index well past pages.size() (see
+  /// pageIndexFilade). Rebuilds pageIndexFilade first if pageHeightsPx has
+  /// grown since the last call.
+  [[nodiscard]] std::chrono::milliseconds buildBudgetForThisCall();
   // token to keep anything other than Doc::create from using our constructor
   struct Private {
     explicit Private() = default;
@@ -604,6 +612,12 @@ public:
    */
   static constexpr float pixelsToWorld = 1.0F / 18.0F;
 
+  /// Vertical gap between stacked pages, in layout pixels. Every place that
+  /// positions a page along Y -- buildPendingPages(), reflowFrom(), and
+  /// pageIndexFilade's entries -- has to agree on this, or a page built one
+  /// way and stacked another either overlaps its neighbour or leaves a gap.
+  static constexpr float pageGapPx = 32.0F;
+
   /// Default source-page extents in world units. These are used only before a
   /// document has built its first page; once it has, callers use pageFrame()
   /// or Page's measured dimensions instead.
@@ -658,9 +672,12 @@ public:
   void makePages();
   void makePages(RenderState &state);
   /// Build any pending shaped pages on the render thread in page order, up to
-  /// render::kPageBuildFrameBudget worth of wall-clock time; whatever is left
-  /// stays queued in document order for the next call. Returns true when all
-  /// pages have been built and shaping is complete.
+  /// render::kPageBuildFrameBudget worth of wall-clock time -- or
+  /// render::kPageBuildCatchUpMultiplier times that, when the camera is
+  /// looking at a page index well past what has been built so far (see
+  /// pageIndexFilade). Whatever is left stays queued in document order for
+  /// the next call. Returns true when all pages have been built and shaping
+  /// is complete.
   bool buildPendingPages(RenderState &state);
   /// Append every visible page's draw to @p batches.
   /// @param viewProjection projection * view; the document's own model matrix
@@ -945,6 +962,25 @@ public:
   std::mutex shapingMutex;
   std::vector<PendingShaping> pendingShapings;
   std::atomic<bool> shapingComplete{false};
+
+  /// One entry per page whose shaping has completed, appended by makePages()
+  /// under shapingMutex -- independent of pendingShapings, which
+  /// buildPendingPages() drains and so cannot be used to answer "how many
+  /// pages exist so far" once some have already been built. Heights only
+  /// (layout pixels, page height without the inter-page gap); a page's text
+  /// content and byte offset are not needed to answer "which page index is
+  /// at this Y", only its height is.
+  std::vector<float> pageHeightsPx;
+  /// A page-granularity index over pageHeightsPx, rebuilt lazily in
+  /// buildPendingPages() whenever pageHeightsPx has grown since the last
+  /// rebuild. Lets a viewport Y coordinate be turned into a page index in
+  /// O(log N) without walking pages built so far, which is the whole point:
+  /// unlike pages itself, this reflects every page that has been *shaped*,
+  /// including ones not yet built into GPU resources.
+  gleditor::enfilade::Layoutfilade pageIndexFilade;
+  /// How many entries pageIndexFilade was last built from, so a call that
+  /// finds nothing new shaped since the last one can skip the rebuild.
+  std::size_t pageIndexFiladeBuiltFor{0};
 
   friend class Page;
 };

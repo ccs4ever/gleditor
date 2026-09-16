@@ -55,6 +55,24 @@ inline constexpr std::chrono::milliseconds kNoPresentYieldDuration{2};
  */
 inline constexpr std::chrono::milliseconds kPageBuildFrameBudget{8};
 
+/**
+ * @brief How much more of kPageBuildFrameBudget a Doc::buildPendingPages()
+ * call may spend when the camera is looking at a page index well past what
+ * has been built so far.
+ *
+ * kPageBuildFrameBudget keeps loading a huge document from ever blocking the
+ * main thread, but on its own it also means a document loads strictly
+ * top-to-bottom: scrolling ahead of that progress leaves the page the camera
+ * is looking at waiting behind every page before it, one small budget slice
+ * per frame. This multiplier lets a document catch up toward wherever the
+ * camera actually is once it is confirmed to be meaningfully ahead (see
+ * Doc::pageIndexFilade), without removing the per-call ceiling that
+ * kPageBuildFrameBudget exists for -- it is still one bounded, yielding call
+ * per frame, just a bigger one while there is somewhere specific to catch up
+ * to.
+ */
+inline constexpr int kPageBuildCatchUpMultiplier = 6;
+
 } // namespace render
 
 #endif // GLEDITOR_RENDER_CONSTANTS_HPP
