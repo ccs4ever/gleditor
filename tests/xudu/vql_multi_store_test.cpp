@@ -10,16 +10,16 @@
 #include <memory>
 #include <string>
 
+#include "common/xanadu/multi_store.hpp"
 #include "common/xanadu/store.hpp"
 #include "common/xanadu/user_permascroll.hpp"
-#include "common/xanadu/vql/multi_store.hpp"
 
 namespace {
 
 namespace fs = std::filesystem;
+using xanadu::MultiStoreCoordinator;
 using xanadu::Store;
 using xanadu::UserPermascroll;
-using xanadu::vql::MultiStoreCoordinator;
 using zigzag::CellRef;
 using zigzag::DimRef;
 using zigzag::DimVector;

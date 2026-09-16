@@ -12,9 +12,9 @@
 #include <unordered_map>
 #include <vector>
 
+#include "common/xanadu/multi_store.hpp"
 #include "common/xanadu/vortex/vortex_core.hpp"
 #include "common/xanadu/vql/ast.hpp"
-#include "common/xanadu/vql/multi_store.hpp"
 #include "common/xanadu/zigzag/arena_manifold.hpp"
 
 namespace xanadu::vql {

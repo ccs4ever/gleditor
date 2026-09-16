@@ -11,8 +11,8 @@
  * - Universal `>` clone master dereference (sugar for /d.clone::head).
  * - Direct resolution of `##NAME` shorthand (##/d.stores>[d.name = "NAME"]).
  */
-#ifndef COMMON_XANADU_VQL_MULTI_STORE_HPP
-#define COMMON_XANADU_VQL_MULTI_STORE_HPP
+#ifndef COMMON_XANADU_MULTI_STORE_HPP
+#define COMMON_XANADU_MULTI_STORE_HPP
 
 #include <cstdint>
 #include <memory>
@@ -28,7 +28,7 @@
 #include "common/xanadu/zigzag/arena_manifold.hpp"
 #include "common/xanadu/zigzag/manifold.hpp"
 
-namespace xanadu::vql {
+namespace xanadu {
 
 using zigzag::CellRef;
 using zigzag::DimRef;
@@ -167,10 +167,16 @@ private:
   std::vector<StoreInfo> stores_;
 };
 
+} // namespace xanadu
+
+namespace xanadu::vql {
+using MultiStoreCoordinator = ::xanadu::MultiStoreCoordinator;
+using StoreInfo             = ::xanadu::StoreInfo;
 } // namespace xanadu::vql
 
 namespace zigzag::vql {
-using namespace ::xanadu::vql;
+using MultiStoreCoordinator = ::xanadu::MultiStoreCoordinator;
+using StoreInfo             = ::xanadu::StoreInfo;
 } // namespace zigzag::vql
 
-#endif // COMMON_XANADU_VQL_MULTI_STORE_HPP
+#endif // COMMON_XANADU_MULTI_STORE_HPP

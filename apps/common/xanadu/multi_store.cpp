@@ -2,14 +2,14 @@
  * @file multi_store.cpp
  * @brief Multi-store connection topology and coordinate manager for VQL.
  */
-#include "common/xanadu/vql/multi_store.hpp"
+#include "common/xanadu/multi_store.hpp"
 
 #include <algorithm>
 #include <cstdint>
 #include <stdexcept>
 #include <unordered_set>
 
-namespace xanadu::vql {
+namespace xanadu {
 using zigzag::DimVector;
 
 MultiStoreCoordinator::MultiStoreCoordinator() {
@@ -290,4 +290,4 @@ DimRef MultiStoreCoordinator::resolveDimension(std::string_view name) {
   return core_->mintDimension(name);
 }
 
-} // namespace xanadu::vql
+} // namespace xanadu

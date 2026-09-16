@@ -18,13 +18,13 @@
 #include <unistd.h>
 #include <vector>
 
+#include "common/xanadu/multi_store.hpp"
 #include "common/xanadu/store.hpp"
 #include "common/xanadu/user_permascroll.hpp"
 #include "common/xanadu/vortex/vortex_core.hpp"
 #include "common/xanadu/vortex/vortex_vm.hpp"
 #include "common/xanadu/vql/ascii_visualizer.hpp"
 #include "common/xanadu/vql/compiler.hpp"
-#include "common/xanadu/vql/multi_store.hpp"
 #include "common/xanadu/vql/parser.hpp"
 #include "common/xanadu/vql/vql_engine.hpp"
 
@@ -276,7 +276,7 @@ int main(int argc, char *argv[]) {
 
   auto permascroll =
       std::make_shared<xanadu::UserPermascroll>(std::move(permaConfig));
-  xanadu::vql::MultiStoreCoordinator coordinator;
+  xanadu::MultiStoreCoordinator coordinator;
 
   std::string primaryPath;
   if (!storePaths.empty()) {
