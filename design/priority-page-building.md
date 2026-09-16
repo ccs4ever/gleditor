@@ -1,10 +1,13 @@
 # Priority page building: viewport first, then what beams reach
 
-Implementation plan. Nothing here is built yet; the groundwork it stands on (a per-page coordinate
-index, and a per-call build budget) landed with the Tier 1/Tier 2 work in
+Implementation plan. The groundwork it stands on (a per-page coordinate index, and a per-call build
+budget) landed with the Tier 1/Tier 2 work in
 [`kjv-load-blocking-regression.md`](kjv-load-blocking-regression.md), which is worth reading first —
 this note assumes its vocabulary (`Doc::buildPendingPages()`, `pageIndexFilade`,
 `render::kPageBuildFrameBudget`).
+
+**Status: Stage 0 is done** — see "Stage 0 — let beams draw before the document finishes (done)"
+below. Stages 1-5 are not started.
 
 ## Goal
 
@@ -188,27 +191,40 @@ condition in the Stage 0 design, not an error path.
 
 Each stage builds, tests, and ships on its own.
 
-### Stage 0 — let beams draw before the document finishes
+### Stage 0 — let beams draw before the document finishes (done)
 
-The highest value-per-risk change here, and independent of everything else. Replace the
-all-documents `isFullyLoaded()` gate in `LinkBeams::drawFrame()` (`apps/xudu/beams.cpp:1169`) with a
-per-strand condition: a strand draws once *its own* endpoints resolve, and strands whose endpoints
-do not resolve yet are skipped this frame and retried the next. `resolveAnchors()` already caches
-per-strand (`if (!strand.fromAnchor)`), so it is close to this shape already.
+Replaced the all-documents `isFullyLoaded()` gate in `LinkBeams::drawFrame()`
+(`apps/xudu/beams.cpp`) with a per-strand condition. The gate itself is gone — `rebuildStrands()`
+and `resolveAnchors()` now run unconditionally (as they already did once any strand existed), and
+the existing per-strand `fromValid`/`toValid` checks (unchanged) already skip drawing and aligning a
+strand until its own two ends resolve. What changed is what feeds `unsettled`: a new
+`anyStrandStillLoading` flag, set only for a strand whose document endpoint is missing its anchor
+*and* that document is not yet `isFullyLoaded()` — the same "don't count what will never resolve"
+reasoning `danglingOutstanding()`'s own comment already states for half-links, extended here to
+avoid the opposite failure (a run that never settles because it is waiting on a strand that resolved
+and was simply skipped, or on a cell that will never place). Cell endpoints and endpoints whose
+document is already fully loaded never count, matching what the *old* code already tolerated (it
+never gated settling on cell readiness either — only on document page-build completion).
 
-Both ends have to be treated the same way, whichever kind they are: `resolveAnchors()` already
-branches on `isCell()` per end (`apps/xudu/beams.cpp:213-249`), so a cross-domain strand — one
-document end, one cell end — is just the case where the two branches differ. "Unresolved" must be an
-ordinary per-frame outcome for either kind (a cell mid-fade resolves to nothing; see "Cell
-endpoints" above), not a document-only condition.
+Both ends are treated the same way regardless of kind: `resolveAnchors()` already branched on
+`isCell()` per end, so a cross-domain strand — one document end, one cell end — was already the case
+where the two branches differ, unaffected by this change.
 
-**Care**: that gate also sets `unsettled = true`, which is what keeps `--screenshot` and `--profile`
-from capturing a half-drawn frame. Keep setting it while *any* strand is still unresolved, or
-captures start racing.
-
-**Test**: a xudu test that opens a document with a link, drives a few frames before full load, and
-asserts a resolved strand draws while an unresolved one does not — and that `busy()`/`unsettled`
-stays true until all of them resolve.
+**Verified**: built a scenario with two small documents linked to each other (settle in well under a
+second) alongside a third, 3 MB unrelated document (settles after several seconds of real page
+building), driven through the real `xudu` binary. Confirmed, by rebuilding with the old gate
+temporarily restored and comparing against the fix: with the old gate, the beam drew for a handful
+of frames (an artifact of the background document not yet being in `state.docs` when the first
+couple of frames ran) and then stopped completely until the whole 8-9 second run settled; with the
+fix, the beam drew on every sampled frame continuously from ~250ms through to settling.
+`tests/xudu/beam_progressive_loading_test.cpp` is the permanent regression test for this scenario:
+since asserting the *timing* of when a beam first appears needs instrumentation `--profile` does not
+currently report (Stage 4 is where adding that is planned), the test instead locks down what is
+unit-testable today — the whole scene, camera alignment included, still settles correctly and within
+a generous bound rather than hanging, which is exactly what a wrong `anyStrandStillLoading` could
+break. Full `xudu_test`/`gleditor_test`/`zigzag_test` suites pass with no new failures (three
+pre-existing, unrelated `AnimationTransclusionTest` failures reproduce identically on unpatched
+`HEAD`).
 
 ### Stage 1 — the oracle and the channel, without reordering anything
 

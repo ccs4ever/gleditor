@@ -1164,19 +1164,13 @@ void LinkBeams::drawFrame(gleditor::FrameContext &ctx) {
     cameraDriving = !arrived;
   }
 
-  // Wait until all open documents have completed building their pages before
-  // resolving anchors and performing centroid alignment and auto-framing.
-  for (const auto &doc : state.docs) {
-    if (!doc || !doc->isFullyLoaded()) {
-      // Still building, so nothing has been placed yet and every link is still
-      // owed a look. Saying so is what reserves the frame on which the last
-      // page lands: that frame is the first on which a sworph can be decided
-      // and, with nothing else left pending by then, the one the render loop
-      // would otherwise have called settled and quit on.
-      unsettled = true;
-      return;
-    }
-  }
+  // A strand no longer waits for every open document to finish before it may
+  // draw -- resolveAnchors() below already tolerates an anchor whose page is
+  // not built yet (Doc::anchorFor() answers nullopt for one), and the
+  // per-strand fromValid/toValid checks that follow already skip drawing and
+  // aligning a strand until its own two ends are ready. What still needs
+  // deciding here is only whether *settling* should wait -- see
+  // anyStrandStillLoading below.
 
   bool docTransformsChanged = false;
   if (lastDocTransforms.size() != state.docs.size() ||
@@ -1234,6 +1228,22 @@ void LinkBeams::drawFrame(gleditor::FrameContext &ctx) {
     bool moved        = false;
     bool stillToAlign = false;
 
+    // A strand's document endpoint may still be waiting on a page its
+    // document has not built yet -- worth reserving a frame for, since it
+    // will resolve once that page lands. An endpoint whose document *is*
+    // fully loaded and still has no anchor, or a cell endpoint (whose
+    // readiness this class cannot observe the way page-build completion is
+    // observed -- see design/priority-page-building.md's "Cell endpoints"
+    // section), never holds up settling: counting one would leave the render
+    // loop waiting for a frame that has nothing left to do, the same hazard
+    // danglingOutstanding()'s own comment describes for half-links.
+    bool anyStrandStillLoading      = false;
+    const auto endpointStillLoading = [&state](const LinkEnd &end) {
+      return end.isDocument() && end.doc < state.docs.size() &&
+             nullptr != state.docs[end.doc] &&
+             !state.docs[end.doc]->isFullyLoaded();
+    };
+
     struct MarginAnchor {
       Edge edge;
       std::uint32_t colour{};
@@ -1273,6 +1283,10 @@ void LinkBeams::drawFrame(gleditor::FrameContext &ctx) {
                  state.docs[strand.to.doc]->currentOpacity() > 0.001F);
 
       if (!fromValid || !toValid) {
+        if ((!strand.fromAnchor && endpointStillLoading(strand.from)) ||
+            (!strand.toAnchor && endpointStillLoading(strand.to))) {
+          anyStrandStillLoading = true;
+        }
         continue;
       }
 
@@ -1406,6 +1420,10 @@ void LinkBeams::drawFrame(gleditor::FrameContext &ctx) {
                  state.docs[tStrand.to.doc]->currentOpacity() > 0.001F);
 
       if (!fromValid || !toValid) {
+        if ((!tStrand.fromAnchor && endpointStillLoading(tStrand.from)) ||
+            (!tStrand.toAnchor && endpointStillLoading(tStrand.to))) {
+          anyStrandStillLoading = true;
+        }
         continue;
       }
 
@@ -1638,7 +1656,7 @@ void LinkBeams::drawFrame(gleditor::FrameContext &ctx) {
       }
     }
 
-    unsettled = stillToAlign;
+    unsettled = stillToAlign || anyStrandStillLoading;
 
     beams->commit();
     strandsRebuilt = false;
