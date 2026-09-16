@@ -1,8 +1,9 @@
-// The combined frontend reuses Xudu's application composition while enabling
-// its Zigzag presentation boundary at compile time.
-#define XUZZ_BUILD 1
-#define main xuzz_xudu_main
-#include "../xudu/main.cpp"
-#undef main
+/**
+ * @file main.cpp
+ * @brief Combined xanadoc editor and Zigzag visualizer (xuzz).
+ */
+#include "xudu/xudu_app.hpp"
 
-int main(const int argc, char **argv) { return xuzz_xudu_main(argc, argv); }
+int main(const int argc, char **argv) {
+  return xudu::runXuduApp(argc, argv, true);
+}

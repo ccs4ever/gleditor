@@ -10,31 +10,31 @@
 #include <string>
 #include <vector>
 
-#include <xudu/core/bencode.hpp>
-#include <xudu/core/binary_ops.hpp>
-#include <xudu/core/blessing.hpp>
-#include <xudu/core/link_package.hpp>
-#include <xudu/core/microversion.hpp>
-#include <xudu/core/mutable_link.hpp>
-#include <xudu/core/publication.hpp>
-#include <xudu/core/yaml.hpp>
+#include "common/xanadu/bencode.hpp"
+#include "common/xanadu/binary_ops.hpp"
+#include "common/xanadu/blessing.hpp"
+#include "common/xanadu/link_package.hpp"
+#include "common/xanadu/microversion.hpp"
+#include "common/xanadu/mutable_link.hpp"
+#include "common/xanadu/publication.hpp"
+#include "common/xanadu/yaml.hpp"
 
 namespace {
 
-using xudu::decodeBlessing;
-using xudu::decodeLinkPackage;
-using xudu::decodeMutablePointer;
-using xudu::decodePublication;
-using xudu::MicroversionId;
-using xudu::MutableLink;
-using xudu::Op;
-using xudu::PublicKey;
-using xudu::readBinaryOpsSpool;
-using xudu::readMicroversionId;
-using xudu::readOpsSpool;
-using xudu::readVarint;
-using xudu::SecretKey;
-using xudu::Signature;
+using xanadu::decodeBlessing;
+using xanadu::decodeLinkPackage;
+using xanadu::decodeMutablePointer;
+using xanadu::decodePublication;
+using xanadu::MicroversionId;
+using xanadu::MutableLink;
+using xanadu::Op;
+using xanadu::PublicKey;
+using xanadu::readBinaryOpsSpool;
+using xanadu::readMicroversionId;
+using xanadu::readOpsSpool;
+using xanadu::readVarint;
+using xanadu::SecretKey;
+using xanadu::Signature;
 
 std::vector<std::uint8_t> generateRandomBytes(std::mt19937 &rng,
                                               std::size_t maxLen) {
@@ -63,7 +63,7 @@ TEST(FuzzTest, binaryOpsParserNeverCrashesOnRandomBytes) {
 
     // 1. readOpsSpool (auto-detecting binary vs text)
     std::istringstream in1(data);
-    std::vector<xudu::OpRecord> ops1;
+    std::vector<xanadu::OpRecord> ops1;
     try {
       readOpsSpool(in1, ops1);
     } catch (const std::exception &) {
@@ -72,7 +72,7 @@ TEST(FuzzTest, binaryOpsParserNeverCrashesOnRandomBytes) {
 
     // 2. readBinaryOpsSpool directly
     std::istringstream in2(data);
-    std::vector<xudu::OpRecord> ops2;
+    std::vector<xanadu::OpRecord> ops2;
     try {
       readBinaryOpsSpool(in2, ops2);
     } catch (const std::exception &) {
@@ -106,7 +106,7 @@ TEST(FuzzTest, bencodeAndManifestParsersNeverCrashOnRandomBytes) {
 
     // 1. Raw Bencode decode
     try {
-      static_cast<void>(xudu::bencode::decode(str));
+      static_cast<void>(xanadu::bencode::decode(str));
     } catch (const std::exception &) {
       // Graceful error
     }
@@ -172,8 +172,8 @@ TEST(FuzzTest, microversionAndYamlParsersNeverCrashOnRandomStrings) {
       // Graceful exception expected
     }
 
-    // 2. xudu::yaml::read
-    static_cast<void>(xudu::yaml::read(str));
+    // 2. xanadu::yaml::read
+    static_cast<void>(xanadu::yaml::read(str));
   }
 }
 

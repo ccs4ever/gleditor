@@ -15,17 +15,17 @@
 #include <stdexcept>
 #include <string>
 
-#include <xudu/core/mutable_link.hpp>
-#include <xudu/core/swarm.hpp>
-#include <xudu/core/torrent.hpp>
+#include "common/xanadu/mutable_link.hpp"
+#include "common/xanadu/swarm.hpp"
+#include "common/xanadu/torrent.hpp"
 
 namespace {
 
-using xudu::DhtTarget;
-using xudu::InfoHash;
-using xudu::MutableLink;
-using xudu::PublicKey;
-using xudu::Signature;
+using xanadu::DhtTarget;
+using xanadu::InfoHash;
+using xanadu::MutableLink;
+using xanadu::PublicKey;
+using xanadu::Signature;
 
 /// BEP 44's test vectors, which carry a real key pair and real signatures.
 constexpr std::string_view bep44Key =
@@ -75,14 +75,14 @@ TEST(MutableLinkTest, theTargetMatchesBep44Too) {
   // six bytes rather than one.
   EXPECT_EQ(linkFor(bep44Key).target().hex(),
             "4a533d47ec9c7d95b1ad75f576cffc641853b750");
-  EXPECT_EQ(linkFor(bep44Key, xudu::toHex("foobar")).target().hex(),
+  EXPECT_EQ(linkFor(bep44Key, xanadu::toHex("foobar")).target().hex(),
             "411eba73b6f087ca51a3795d9c8c938d365e32c1");
 }
 
 TEST(MutableLinkTest, theSaltIsHexInTheLinkAndBytesEverywhereElse) {
   // It is hashed and signed as bytes, so a link that wrote it literally would
   // give a different target for the same name.
-  EXPECT_EQ(linkFor(bep44Key, xudu::toHex("foobar")).salt, "foobar");
+  EXPECT_EQ(linkFor(bep44Key, xanadu::toHex("foobar")).salt, "foobar");
   EXPECT_EQ(linkFor(bep46Key, "6e").salt, "n");
 }
 
@@ -136,9 +136,9 @@ TEST(MutableLinkTest, anInfoHashInTheLinkIsAHintAndNotTheName) {
 
 TEST(MutableSigningTest, theBufferMatchesBep44) {
   // "Sequence number 1 of value "Hello World!" would be converted to".
-  EXPECT_EQ(xudu::mutableSigningBuffer("", 1, bep44Value),
+  EXPECT_EQ(xanadu::mutableSigningBuffer("", 1, bep44Value),
             "3:seqi1e1:v12:Hello World!");
-  EXPECT_EQ(xudu::mutableSigningBuffer("foobar", 1, bep44Value),
+  EXPECT_EQ(xanadu::mutableSigningBuffer("foobar", 1, bep44Value),
             "4:salt6:foobar3:seqi1e1:v12:Hello World!");
 }
 
@@ -147,7 +147,7 @@ TEST(MutableSigningTest, itIsNotADictionary) {
   // produce it: there is no surrounding `d` and `e`, and the keys are not in
   // sorted order -- salt comes before seq, which comes before v, but only
   // because the specification says so.
-  const auto buffer = xudu::mutableSigningBuffer("x", 7, "i0e");
+  const auto buffer = xanadu::mutableSigningBuffer("x", 7, "i0e");
   EXPECT_EQ(buffer, "4:salt1:x3:seqi7e1:vi0e");
   EXPECT_FALSE(buffer.starts_with("d"));
 }
@@ -155,38 +155,38 @@ TEST(MutableSigningTest, itIsNotADictionary) {
 TEST(MutableSigningTest, theSequenceNumberIsPartOfWhatIsSigned) {
   // Which is what stops an old, genuinely signed answer being replayed as the
   // current one.
-  EXPECT_NE(xudu::mutableSigningBuffer("", 1, bep44Value),
-            xudu::mutableSigningBuffer("", 2, bep44Value));
+  EXPECT_NE(xanadu::mutableSigningBuffer("", 1, bep44Value),
+            xanadu::mutableSigningBuffer("", 2, bep44Value));
 }
 
 // -- what a name points at --------------------------------------------------
 
 TEST(MutablePointerTest, itIsADictionaryOfOneEntry) {
   const auto hash    = InfoHash::fromHex(std::string(40, 'a'));
-  const auto encoded = xudu::encodeMutablePointer(hash);
+  const auto encoded = xanadu::encodeMutablePointer(hash);
   EXPECT_EQ(encoded.substr(0, 8), "d2:ih20:");
   EXPECT_EQ(encoded.size(), 8U + 20U + 1U);
-  EXPECT_EQ(xudu::decodeMutablePointer(encoded), hash);
+  EXPECT_EQ(xanadu::decodeMutablePointer(encoded), hash);
 }
 
 TEST(MutablePointerTest, theHashIsRawBytesAndNotHex) {
   // Forty hex digits would fit "ih" perfectly well and would name nothing:
   // every other client reads twenty bytes.
   const auto encoded =
-      xudu::encodeMutablePointer(InfoHash::fromHex(std::string(40, 'a')));
+      xanadu::encodeMutablePointer(InfoHash::fromHex(std::string(40, 'a')));
   EXPECT_EQ(encoded.find("aaaa"), std::string::npos);
 }
 
 TEST(MutablePointerTest, anythingElseUnderTheNameIsNotAnAnswer) {
   // A key may hold any bencoded value at all. One holding something else is
   // not a corrupt pointer, it is somebody else's use of the DHT.
-  EXPECT_FALSE(xudu::decodeMutablePointer("not bencode").has_value());
-  EXPECT_FALSE(xudu::decodeMutablePointer("i42e").has_value());
-  EXPECT_FALSE(xudu::decodeMutablePointer("de").has_value());
-  EXPECT_FALSE(xudu::decodeMutablePointer("d2:ihi7ee").has_value());
+  EXPECT_FALSE(xanadu::decodeMutablePointer("not bencode").has_value());
+  EXPECT_FALSE(xanadu::decodeMutablePointer("i42e").has_value());
+  EXPECT_FALSE(xanadu::decodeMutablePointer("de").has_value());
+  EXPECT_FALSE(xanadu::decodeMutablePointer("d2:ihi7ee").has_value());
   // Nineteen bytes is not an info hash, and padding it out would invent one.
   EXPECT_FALSE(
-      xudu::decodeMutablePointer("d2:ih19:" + std::string(19, 'a') + "e")
+      xanadu::decodeMutablePointer("d2:ih19:" + std::string(19, 'a') + "e")
           .has_value());
 }
 
@@ -200,27 +200,27 @@ class MutableCryptoTest : public testing::Test {
 protected:
   void SetUp() override {
     keys.publicKey    = PublicKey::fromHex(bep44Key);
-    const auto secret = xudu::fromHex(bep44Secret);
+    const auto secret = xanadu::fromHex(bep44Secret);
     std::copy(secret.begin(), secret.end(), keys.secretKey.bytes.begin());
   }
 
-  xudu::MutableKeys keys;
+  xanadu::MutableKeys keys;
 };
 
 TEST_F(MutableCryptoTest, signingReproducesThePublishedSignature) {
   EXPECT_EQ(
-      xudu::signMutableItem(xudu::mutableSigningBuffer("", 1, bep44Value), keys)
+      xanadu::signMutableItem(xanadu::mutableSigningBuffer("", 1, bep44Value), keys)
           .hex(),
       bep44Signature);
-  EXPECT_EQ(xudu::signMutableItem(
-                xudu::mutableSigningBuffer("foobar", 1, bep44Value), keys)
+  EXPECT_EQ(xanadu::signMutableItem(
+                xanadu::mutableSigningBuffer("foobar", 1, bep44Value), keys)
                 .hex(),
             bep44SaltedSignature);
 }
 
 TEST_F(MutableCryptoTest, thePublishedSignatureVerifies) {
-  EXPECT_TRUE(xudu::verifyMutableItem(
-      xudu::mutableSigningBuffer("", 1, bep44Value),
+  EXPECT_TRUE(xanadu::verifyMutableItem(
+      xanadu::mutableSigningBuffer("", 1, bep44Value),
       Signature::fromHex(bep44Signature), keys.publicKey));
 }
 
@@ -228,35 +228,35 @@ TEST_F(MutableCryptoTest, aTamperedAnswerDoesNotVerify) {
   const auto signature = Signature::fromHex(bep44Signature);
 
   // Somebody else's content under this name.
-  EXPECT_FALSE(xudu::verifyMutableItem(
-      xudu::mutableSigningBuffer("", 1, "12:Goodbye All!"), signature,
+  EXPECT_FALSE(xanadu::verifyMutableItem(
+      xanadu::mutableSigningBuffer("", 1, "12:Goodbye All!"), signature,
       keys.publicKey));
   // The same content, claimed to be newer than it is.
   EXPECT_FALSE(
-      xudu::verifyMutableItem(xudu::mutableSigningBuffer("", 2, bep44Value),
+      xanadu::verifyMutableItem(xanadu::mutableSigningBuffer("", 2, bep44Value),
                               signature, keys.publicKey));
   // The right answer, attributed to a name that did not give it.
   EXPECT_FALSE(
-      xudu::verifyMutableItem(xudu::mutableSigningBuffer("", 1, bep44Value),
+      xanadu::verifyMutableItem(xanadu::mutableSigningBuffer("", 1, bep44Value),
                               signature, PublicKey::fromHex(bep46Key)));
   // The salted answer offered as the unsalted one, which is a different name.
-  EXPECT_FALSE(xudu::verifyMutableItem(
-      xudu::mutableSigningBuffer("", 1, bep44Value),
+  EXPECT_FALSE(xanadu::verifyMutableItem(
+      xanadu::mutableSigningBuffer("", 1, bep44Value),
       Signature::fromHex(bep44SaltedSignature), keys.publicKey));
 }
 
 TEST_F(MutableCryptoTest, aFreshNameIsNobodyElsesAndSignsItsOwnPointer) {
-  const auto mine = xudu::createMutableKeys();
+  const auto mine = xanadu::createMutableKeys();
   EXPECT_FALSE(mine.publicKey.isZero());
   EXPECT_NE(mine.publicKey, keys.publicKey);
 
   const auto hash = InfoHash::fromHex(std::string(40, 'b'));
   const auto buffer =
-      xudu::mutableSigningBuffer("", 4, xudu::encodeMutablePointer(hash));
-  const auto signature = xudu::signMutableItem(buffer, mine);
-  EXPECT_TRUE(xudu::verifyMutableItem(buffer, signature, mine.publicKey));
+      xanadu::mutableSigningBuffer("", 4, xanadu::encodeMutablePointer(hash));
+  const auto signature = xanadu::signMutableItem(buffer, mine);
+  EXPECT_TRUE(xanadu::verifyMutableItem(buffer, signature, mine.publicKey));
   // And says nothing about anyone else's name.
-  EXPECT_FALSE(xudu::verifyMutableItem(buffer, signature, keys.publicKey));
+  EXPECT_FALSE(xanadu::verifyMutableItem(buffer, signature, keys.publicKey));
 }
 
 } // namespace

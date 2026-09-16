@@ -20,10 +20,12 @@
 #include <gleditor/renderer.hpp>
 
 #include "clasp_link_forge.hpp"
-#include "core/pouch_zone.hpp"
+#include "common/xanadu/pouch_zone.hpp"
 #include "session.hpp"
 
+namespace xanadu {}
 namespace xudu {
+using namespace ::xanadu;
 
 /**
  * @class PouchDrawer

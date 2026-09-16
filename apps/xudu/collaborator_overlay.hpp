@@ -18,7 +18,9 @@
 #include <gleditor/frame_contributor.hpp>
 #include <gleditor/renderer.hpp>
 
+namespace xanadu {}
 namespace xudu {
+using namespace ::xanadu;
 
 class Session;
 

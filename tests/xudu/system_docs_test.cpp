@@ -13,35 +13,35 @@
 #include <string>
 #include <vector>
 
-#include <xudu/core/format.hpp>
-#include <xudu/core/ops.hpp>
-#include <xudu/core/provenance.hpp>
-#include <xudu/core/publication.hpp>
-#include <xudu/core/scroll.hpp>
-#include <xudu/core/store.hpp>
-#include <xudu/core/system_docs.hpp>
-#include <xudu/core/torrent.hpp>
-#include <xudu/core/user_permascroll.hpp>
+#include "common/xanadu/format.hpp"
+#include "common/xanadu/ops.hpp"
+#include "common/xanadu/provenance.hpp"
+#include "common/xanadu/publication.hpp"
+#include "common/xanadu/scroll.hpp"
+#include "common/xanadu/store.hpp"
+#include "common/xanadu/system_docs.hpp"
+#include "common/xanadu/torrent.hpp"
+#include "common/xanadu/user_permascroll.hpp"
 
 namespace {
 
-using xudu::FormatAttribute;
-using xudu::HoleReason;
-using xudu::InfoHash;
-using xudu::KeymapConfig;
-using xudu::LayoutConfig;
-using xudu::LinkType;
-using xudu::PouchDock;
-using xudu::PublishedHoleRecord;
-using xudu::Scroll;
-using xudu::ScrollSegment;
-using xudu::SettingsConfig;
-using xudu::SignedProvenance;
-using xudu::Store;
-using xudu::SystemDocKind;
-using xudu::ToastAnchor;
-using xudu::UIConfig;
-using xudu::UserPermascroll;
+using xanadu::FormatAttribute;
+using xanadu::HoleReason;
+using xanadu::InfoHash;
+using xanadu::KeymapConfig;
+using xanadu::LayoutConfig;
+using xanadu::LinkType;
+using xanadu::PouchDock;
+using xanadu::PublishedHoleRecord;
+using xanadu::Scroll;
+using xanadu::ScrollSegment;
+using xanadu::SettingsConfig;
+using xanadu::SignedProvenance;
+using xanadu::Store;
+using xanadu::SystemDocKind;
+using xanadu::ToastAnchor;
+using xanadu::UIConfig;
+using xanadu::UserPermascroll;
 
 SignedProvenance makeTestProvenance() {
   SignedProvenance prov;
@@ -61,63 +61,63 @@ std::string readFileContent(const std::filesystem::path &filePath) {
 }
 
 TEST(SystemDocsTest, MetadataAndUriRoundTrips) {
-  EXPECT_EQ(xudu::systemDocName(SystemDocKind::Keymap), "keymap");
-  EXPECT_EQ(xudu::systemDocName(SystemDocKind::Settings), "settings");
-  EXPECT_EQ(xudu::systemDocName(SystemDocKind::Layout), "layout");
-  EXPECT_EQ(xudu::systemDocName(SystemDocKind::UI), "ui");
-  EXPECT_EQ(xudu::systemDocName(SystemDocKind::Pouches), "pouches");
+  EXPECT_EQ(xanadu::systemDocName(SystemDocKind::Keymap), "keymap");
+  EXPECT_EQ(xanadu::systemDocName(SystemDocKind::Settings), "settings");
+  EXPECT_EQ(xanadu::systemDocName(SystemDocKind::Layout), "layout");
+  EXPECT_EQ(xanadu::systemDocName(SystemDocKind::UI), "ui");
+  EXPECT_EQ(xanadu::systemDocName(SystemDocKind::Pouches), "pouches");
 
-  EXPECT_EQ(xudu::systemDocUri(SystemDocKind::Keymap), "system://keymap");
-  EXPECT_EQ(xudu::systemDocUri(SystemDocKind::Settings), "system://settings");
-  EXPECT_EQ(xudu::systemDocUri(SystemDocKind::Layout), "system://layout");
-  EXPECT_EQ(xudu::systemDocUri(SystemDocKind::UI), "system://ui");
-  EXPECT_EQ(xudu::systemDocUri(SystemDocKind::Pouches), "system://pouches");
+  EXPECT_EQ(xanadu::systemDocUri(SystemDocKind::Keymap), "system://keymap");
+  EXPECT_EQ(xanadu::systemDocUri(SystemDocKind::Settings), "system://settings");
+  EXPECT_EQ(xanadu::systemDocUri(SystemDocKind::Layout), "system://layout");
+  EXPECT_EQ(xanadu::systemDocUri(SystemDocKind::UI), "system://ui");
+  EXPECT_EQ(xanadu::systemDocUri(SystemDocKind::Pouches), "system://pouches");
 
-  EXPECT_EQ(xudu::systemDocKindFromUri("system://keymap"),
+  EXPECT_EQ(xanadu::systemDocKindFromUri("system://keymap"),
             SystemDocKind::Keymap);
-  EXPECT_EQ(xudu::systemDocKindFromUri("system://settings"),
+  EXPECT_EQ(xanadu::systemDocKindFromUri("system://settings"),
             SystemDocKind::Settings);
-  EXPECT_EQ(xudu::systemDocKindFromUri("system://layout"),
+  EXPECT_EQ(xanadu::systemDocKindFromUri("system://layout"),
             SystemDocKind::Layout);
-  EXPECT_EQ(xudu::systemDocKindFromUri("system://ui"), SystemDocKind::UI);
-  EXPECT_EQ(xudu::systemDocKindFromUri("system://pouches"),
+  EXPECT_EQ(xanadu::systemDocKindFromUri("system://ui"), SystemDocKind::UI);
+  EXPECT_EQ(xanadu::systemDocKindFromUri("system://pouches"),
             SystemDocKind::Pouches);
 
-  EXPECT_FALSE(xudu::systemDocKindFromUri("system://invalid").has_value());
-  EXPECT_FALSE(xudu::systemDocKindFromUri("file:///path/to/doc").has_value());
+  EXPECT_FALSE(xanadu::systemDocKindFromUri("system://invalid").has_value());
+  EXPECT_FALSE(xanadu::systemDocKindFromUri("file:///path/to/doc").has_value());
 
   // Check that default content is non-empty and parsable
   const auto keymapDefault =
-      xudu::defaultSystemDocContent(SystemDocKind::Keymap);
+      xanadu::defaultSystemDocContent(SystemDocKind::Keymap);
   EXPECT_FALSE(keymapDefault.empty());
-  const auto keymapCfg = xudu::parseKeymapConfig(keymapDefault);
+  const auto keymapCfg = xanadu::parseKeymapConfig(keymapDefault);
   EXPECT_FALSE(keymapCfg.bindings.empty());
 
   const auto settingsDefault =
-      xudu::defaultSystemDocContent(SystemDocKind::Settings);
+      xanadu::defaultSystemDocContent(SystemDocKind::Settings);
   EXPECT_FALSE(settingsDefault.empty());
-  const auto settingsCfg = xudu::parseSettingsConfig(settingsDefault);
+  const auto settingsCfg = xanadu::parseSettingsConfig(settingsDefault);
   EXPECT_GT(settingsCfg.fontSize, 0.0F);
 
   const auto layoutDefault =
-      xudu::defaultSystemDocContent(SystemDocKind::Layout);
+      xanadu::defaultSystemDocContent(SystemDocKind::Layout);
   EXPECT_FALSE(layoutDefault.empty());
-  const auto layoutCfg = xudu::parseLayoutConfig(layoutDefault);
+  const auto layoutCfg = xanadu::parseLayoutConfig(layoutDefault);
   EXPECT_GT(layoutCfg.columns, 0U);
 
-  const auto uiDefault = xudu::defaultSystemDocContent(SystemDocKind::UI);
+  const auto uiDefault = xanadu::defaultSystemDocContent(SystemDocKind::UI);
   EXPECT_FALSE(uiDefault.empty());
-  const auto uiCfg = xudu::parseUIConfig(uiDefault);
+  const auto uiCfg = xanadu::parseUIConfig(uiDefault);
   EXPECT_TRUE(uiCfg.tabBarVisible);
 
   const auto pouchesDefault =
-      xudu::defaultSystemDocContent(SystemDocKind::Pouches);
+      xanadu::defaultSystemDocContent(SystemDocKind::Pouches);
   EXPECT_FALSE(pouchesDefault.empty());
-  const auto pouchesCfg = xudu::parsePouchConfig(pouchesDefault);
+  const auto pouchesCfg = xanadu::parsePouchConfig(pouchesDefault);
   EXPECT_EQ(pouchesCfg.zones.size(), 4U);
 
   // Check directory helper returns valid path
-  const auto keymapDir = xudu::systemDocDirectory(SystemDocKind::Keymap);
+  const auto keymapDir = xanadu::systemDocDirectory(SystemDocKind::Keymap);
   EXPECT_EQ(keymapDir.filename(), "keymap");
 }
 
@@ -126,7 +126,7 @@ TEST(SystemDocsTest, ParseKeymapConfigYamlAndFallback) {
                            "open-doc: \"Ctrl+Alt+O\"\n"
                            "save-doc: \"Ctrl+S\"\n";
 
-  const auto cfg = xudu::parseKeymapConfig(yaml);
+  const auto cfg = xanadu::parseKeymapConfig(yaml);
   EXPECT_EQ(cfg.bindingFor("new-doc"), "Ctrl+Shift+N");
   EXPECT_EQ(cfg.bindingFor("open-doc"), "Ctrl+Alt+O");
   EXPECT_EQ(cfg.bindingFor("save-doc"), "Ctrl+S");
@@ -136,12 +136,12 @@ TEST(SystemDocsTest, ParseKeymapConfigYamlAndFallback) {
   const std::string fallback = "# Custom keymap fallback\n"
                                "quit: Ctrl+Q\n"
                                "undo: Ctrl+Z\n";
-  const auto fallbackCfg     = xudu::parseKeymapConfig(fallback);
+  const auto fallbackCfg     = xanadu::parseKeymapConfig(fallback);
   EXPECT_EQ(fallbackCfg.bindingFor("quit"), "Ctrl+Q");
   EXPECT_EQ(fallbackCfg.bindingFor("undo"), "Ctrl+Z");
 
   // Empty string
-  const auto emptyCfg = xudu::parseKeymapConfig("");
+  const auto emptyCfg = xanadu::parseKeymapConfig("");
   EXPECT_TRUE(emptyCfg.bindings.empty());
 }
 
@@ -152,7 +152,7 @@ TEST(SystemDocsTest, ParseSettingsConfig) {
                            "theme: \"dark\"\n"
                            "autoSaveSeconds: 15\n";
 
-  const auto cfg = xudu::parseSettingsConfig(yaml);
+  const auto cfg = xanadu::parseSettingsConfig(yaml);
   EXPECT_FLOAT_EQ(cfg.fontSize, 18.5F);
   EXPECT_EQ(cfg.fontFamily, "Fira Code");
   EXPECT_FLOAT_EQ(cfg.lineHeight, 1.6F);
@@ -160,7 +160,7 @@ TEST(SystemDocsTest, ParseSettingsConfig) {
   EXPECT_EQ(cfg.autoSaveSeconds, 15U);
 
   // Empty returns defaults
-  const auto def = xudu::parseSettingsConfig("");
+  const auto def = xanadu::parseSettingsConfig("");
   EXPECT_FLOAT_EQ(def.fontSize, 16.0F);
   EXPECT_EQ(def.fontFamily, "Monospace");
   EXPECT_FLOAT_EQ(def.lineHeight, 1.4F);
@@ -180,7 +180,7 @@ TEST(SystemDocsTest, ParseLayoutConfig) {
                            "transclusionPrisms: false\n"
                            "xanalinkRibbons: true\n";
 
-  const auto cfg = xudu::parseLayoutConfig(yaml);
+  const auto cfg = xanadu::parseLayoutConfig(yaml);
   EXPECT_EQ(cfg.columns, 3U);
   EXPECT_FLOAT_EQ(cfg.pageWidthPx, 920.0F);
   EXPECT_FLOAT_EQ(cfg.pageHeightPx, 1250.0F);
@@ -193,7 +193,7 @@ TEST(SystemDocsTest, ParseLayoutConfig) {
   EXPECT_TRUE(cfg.xanalinkRibbons);
 
   // Empty returns defaults
-  const auto def = xudu::parseLayoutConfig("");
+  const auto def = xanadu::parseLayoutConfig("");
   EXPECT_EQ(def.columns, 2U);
   EXPECT_FLOAT_EQ(def.pageWidthPx, 800.0F);
   EXPECT_FLOAT_EQ(def.pageHeightPx, 1000.0F);
@@ -234,7 +234,7 @@ TEST(SystemDocsTest, ParseDynamicPhysicsAndBeamConfig) {
                            "  bypassDepthLimit: 110.0\n"
                            "  bypassSegments: 18\n";
 
-  const auto cfg = xudu::parseLayoutConfig(yaml);
+  const auto cfg = xanadu::parseLayoutConfig(yaml);
   EXPECT_EQ(cfg.columns, 4U);
   EXPECT_FLOAT_EQ(cfg.physics.kRepel, 520.0F);
   EXPECT_FLOAT_EQ(cfg.physics.kPlane, 0.012F);
@@ -273,7 +273,7 @@ TEST(SystemDocsTest, ParseDynamicPhysicsAndBeamConfig) {
   EXPECT_FLOAT_EQ(tension.timeStep, 0.8F);
 
   // Roundtrip back from tension params
-  const auto roundtrip = xudu::PhysicsConfig::fromTensionParams(tension);
+  const auto roundtrip = xanadu::PhysicsConfig::fromTensionParams(tension);
   EXPECT_FLOAT_EQ(roundtrip.kRepel, 520.0F);
   EXPECT_FLOAT_EQ(roundtrip.maxForce, 600.0F);
   EXPECT_FLOAT_EQ(roundtrip.maxVelocity, 180.0F);
@@ -285,7 +285,7 @@ TEST(SystemDocsTest, ParseFlatPhysicsAndBeamConfigFallback) {
                            "physics.maxForce: 450.0\n"
                            "beams.bandStrandPitch: 8.0\n"
                            "beams.bypassSegments: 20\n";
-  const auto cfg         = xudu::parseLayoutConfig(flat);
+  const auto cfg         = xanadu::parseLayoutConfig(flat);
   EXPECT_FLOAT_EQ(cfg.physics.kRepel, 480.0F);
   EXPECT_FLOAT_EQ(cfg.physics.maxForce, 450.0F);
   EXPECT_FLOAT_EQ(cfg.beams.bandStrandPitch, 8.0F);
@@ -298,14 +298,14 @@ TEST(SystemDocsTest, ParseLoomConfig) {
                            "  loomBundlingEnabled: false\n"
                            "  loomAlpha: 0.45\n"
                            "  loomHoverAlpha: 0.95\n";
-  const auto cfg         = xudu::parseLayoutConfig(yaml);
+  const auto cfg         = xanadu::parseLayoutConfig(yaml);
   EXPECT_FALSE(cfg.transclusionLoom);
   EXPECT_FALSE(cfg.beams.loomBundlingEnabled);
   EXPECT_FLOAT_EQ(cfg.beams.loomAlpha, 0.45F);
   EXPECT_FLOAT_EQ(cfg.beams.loomHoverAlpha, 0.95F);
 
   // Defaults test
-  const auto def = xudu::parseLayoutConfig("");
+  const auto def = xanadu::parseLayoutConfig("");
   EXPECT_TRUE(def.transclusionLoom);
   EXPECT_TRUE(def.beams.loomBundlingEnabled);
   EXPECT_FLOAT_EQ(def.beams.loomAlpha, 0.35F);
@@ -320,7 +320,7 @@ TEST(SystemDocsTest, ParseUIConfig) {
                            "  radius: 110.0\n"
                            "  innerRadius: 35.0\n";
 
-  const auto cfg = xudu::parseUIConfig(yaml);
+  const auto cfg = xanadu::parseUIConfig(yaml);
   EXPECT_FALSE(cfg.tabBarVisible);
   EXPECT_TRUE(cfg.statusBarVisible);
   EXPECT_TRUE(cfg.hypertimeMapVisible);
@@ -328,7 +328,7 @@ TEST(SystemDocsTest, ParseUIConfig) {
   EXPECT_FLOAT_EQ(cfg.radialMenu.innerRadius, 35.0F);
 
   // Empty returns defaults
-  const auto def = xudu::parseUIConfig("");
+  const auto def = xanadu::parseUIConfig("");
   EXPECT_TRUE(def.tabBarVisible);
   EXPECT_TRUE(def.statusBarVisible);
   EXPECT_FALSE(def.hypertimeMapVisible);
@@ -347,7 +347,7 @@ TEST(SystemDocsTest, ParsePouchConfig) {
                            "    auraColor: \"#abcdef88\"\n"
                            "    heightWeight: 2.0\n";
 
-  const auto cfg = xudu::parsePouchConfig(yaml);
+  const auto cfg = xanadu::parsePouchConfig(yaml);
   ASSERT_EQ(cfg.zones.size(), 2U);
   EXPECT_EQ(cfg.zones[0].id, "custom_left");
   EXPECT_EQ(cfg.zones[0].label, "Custom Left");
@@ -357,7 +357,7 @@ TEST(SystemDocsTest, ParsePouchConfig) {
   EXPECT_FLOAT_EQ(cfg.zones[1].heightWeight, 2.0F);
 
   // Fallback defaults
-  const auto def = xudu::parsePouchConfig("");
+  const auto def = xanadu::parsePouchConfig("");
   EXPECT_EQ(def.zones.size(), 4U);
 }
 
@@ -365,13 +365,13 @@ TEST(SystemDocsTest, SchemaAndNotesNonEmptyAndNoMarkdown) {
   for (const auto kind :
        {SystemDocKind::Keymap, SystemDocKind::Settings, SystemDocKind::Layout,
         SystemDocKind::UI, SystemDocKind::Pouches}) {
-    const std::string schema = xudu::defaultSystemDocSchema(kind);
+    const std::string schema = xanadu::defaultSystemDocSchema(kind);
     EXPECT_FALSE(schema.empty());
     EXPECT_TRUE(schema.starts_with("Schema and Purpose"));
     EXPECT_EQ(schema.find('#'), std::string::npos);
     EXPECT_EQ(schema.find("**"), std::string::npos);
 
-    const std::string notes = xudu::defaultSystemDocNotes(kind);
+    const std::string notes = xanadu::defaultSystemDocNotes(kind);
     EXPECT_FALSE(notes.empty());
     EXPECT_TRUE(notes.starts_with("Notes"));
     EXPECT_EQ(notes.find('#'), std::string::npos);
@@ -385,7 +385,7 @@ TEST(SystemDocsTest, InitializeSystemStoreStructureAndFormatLinks) {
         SystemDocKind::UI, SystemDocKind::Pouches}) {
     Store store;
     store.setSystem(true);
-    xudu::initializeSystemStore(store, kind);
+    xanadu::initializeSystemStore(store, kind);
 
     // Single author-designated head
     EXPECT_EQ(store.currentVersions().size(), 1U);
@@ -424,17 +424,17 @@ TEST(SystemDocsTest, InitializeSystemStoreStructureAndFormatLinks) {
     EXPECT_NE(fullText.find("Notes"), std::string::npos);
 
     // ExtractConfigSection isolates Page 1
-    const auto configPart = xudu::extractConfigSection(fullText);
+    const auto configPart = xanadu::extractConfigSection(fullText);
     EXPECT_EQ(configPart.find("Schema and Purpose"), std::string_view::npos);
     EXPECT_EQ(configPart.find("Notes\n\n"), std::string_view::npos);
-    EXPECT_EQ(configPart, xudu::defaultSystemDocContent(kind));
+    EXPECT_EQ(configPart, xanadu::defaultSystemDocContent(kind));
   }
 }
 
 TEST(SystemDocsTest, LayoutRuntimeSnapshotReadsVarsAndScalarValues) {
   Store store;
   store.setSystem(true);
-  xudu::initializeSystemStore(store, SystemDocKind::Layout);
+  xanadu::initializeSystemStore(store, SystemDocKind::Layout);
 
   const auto manifold = store.rebuildManifold(store.primaryCurrentVersion());
   const auto vars = manifold.dimensionNamed("d.vars", store);
@@ -464,26 +464,26 @@ TEST(SystemDocsTest, LayoutRuntimeSnapshotReadsVarsAndScalarValues) {
 
 TEST(SystemDocsTest, ParseFullInitializedSystemDocs) {
   Store kmStore;
-  xudu::initializeSystemStore(kmStore, SystemDocKind::Keymap);
-  const auto kmCfg = xudu::parseKeymapConfig(kmStore.textOf(kmStore.latest()));
+  xanadu::initializeSystemStore(kmStore, SystemDocKind::Keymap);
+  const auto kmCfg = xanadu::parseKeymapConfig(kmStore.textOf(kmStore.latest()));
   EXPECT_FALSE(kmCfg.bindings.empty());
   EXPECT_EQ(kmCfg.bindingFor("new-doc"), "Ctrl+N");
 
   Store setStore;
-  xudu::initializeSystemStore(setStore, SystemDocKind::Settings);
+  xanadu::initializeSystemStore(setStore, SystemDocKind::Settings);
   const auto setCfg =
-      xudu::parseSettingsConfig(setStore.textOf(setStore.latest()));
+      xanadu::parseSettingsConfig(setStore.textOf(setStore.latest()));
   EXPECT_FLOAT_EQ(setCfg.fontSize, 16.0F);
 
   Store loStore;
-  xudu::initializeSystemStore(loStore, SystemDocKind::Layout);
-  const auto loCfg = xudu::parseLayoutConfig(loStore.textOf(loStore.latest()));
+  xanadu::initializeSystemStore(loStore, SystemDocKind::Layout);
+  const auto loCfg = xanadu::parseLayoutConfig(loStore.textOf(loStore.latest()));
   EXPECT_EQ(loCfg.columns, 2U);
   EXPECT_FLOAT_EQ(loCfg.pageWidthPx, 800.0F);
 
   Store uiStore;
-  xudu::initializeSystemStore(uiStore, SystemDocKind::UI);
-  const auto uiCfg = xudu::parseUIConfig(uiStore.textOf(uiStore.latest()));
+  xanadu::initializeSystemStore(uiStore, SystemDocKind::UI);
+  const auto uiCfg = xanadu::parseUIConfig(uiStore.textOf(uiStore.latest()));
   EXPECT_TRUE(uiCfg.tabBarVisible);
   EXPECT_FLOAT_EQ(uiCfg.radialMenu.radius, 130.0F);
 }
@@ -533,7 +533,7 @@ TEST(SystemDocsTest, SealLocalSpoolWithheldSpanZeroFilledOnWire) {
 
   // Insert public text into store
   const std::string publicText = "Chapter 1: The Open Docuverse. ";
-  const auto v1 = store.insert(xudu::MicroversionId{}, 0, publicText);
+  const auto v1 = store.insert(xanadu::MicroversionId{}, 0, publicText);
 
   // Insert private system configuration into store (e.g. keymap edits)
   const std::string privateText = "PRIVATE_KEYMAP_SETTINGS_TOKEN_9999";
@@ -555,12 +555,12 @@ TEST(SystemDocsTest, SealLocalSpoolWithheldSpanZeroFilledOnWire) {
   hole.length = sysLength;
   hole.reason = HoleReason::Withheld;
 
-  const auto keys = xudu::createMutableKeys();
+  const auto keys = xanadu::createMutableKeys();
   const auto prov = makeTestProvenance();
 
   // 1. Seal with WITHHELD hole
   const auto outDirWithheld         = tempDir / "sealed_withheld";
-  [[maybe_unused]] const auto seal1 = xudu::sealLocalSpool(
+  [[maybe_unused]] const auto seal1 = xanadu::sealLocalSpool(
       store, keys, "essay", outDirWithheld.string(), prov, {}, 0, {hole});
 
   const auto primediaWithheldPath = outDirWithheld / "essay" / "primedia";
@@ -582,7 +582,7 @@ TEST(SystemDocsTest, SealLocalSpoolWithheldSpanZeroFilledOnWire) {
   // 2. Seal with PUBLISHED status (empty holes -> user explicitly chose to
   // export/publish)
   const auto outDirPublished        = tempDir / "sealed_published";
-  [[maybe_unused]] const auto seal2 = xudu::sealLocalSpool(
+  [[maybe_unused]] const auto seal2 = xanadu::sealLocalSpool(
       store, keys, "essay", outDirPublished.string(), prov, {}, 0, {});
 
   const auto primediaPublishedPath = outDirPublished / "essay" / "primedia";

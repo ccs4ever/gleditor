@@ -10,9 +10,9 @@
 #include <string>
 #include <vector>
 
-#include "xudu/core/publication_ledger.hpp"
+#include "common/xanadu/publication_ledger.hpp"
 
-namespace xudu {
+namespace xanadu {
 namespace {
 
 using ::testing::Eq;
@@ -164,4 +164,4 @@ TEST(PublicationLedgerTest, YamlSerializationRoundTrip) {
 }
 
 } // namespace
-} // namespace xudu
+} // namespace xanadu

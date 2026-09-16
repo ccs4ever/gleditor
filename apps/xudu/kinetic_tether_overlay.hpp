@@ -15,9 +15,11 @@
 #include <gleditor/frame_contributor.hpp>
 #include <gleditor/renderer.hpp>
 
-#include "core/kinetic_tether.hpp"
+#include "common/xanadu/kinetic_tether.hpp"
 
+namespace xanadu {}
 namespace xudu {
+using namespace ::xanadu;
 
 /**
  * @class KineticTetherOverlay

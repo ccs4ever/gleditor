@@ -8,12 +8,12 @@
 #include "common/xanadu/link_layout.hpp"
 #include "common/xanadu/store.hpp"
 #include "common/xanadu/system_docs.hpp"
+#include "common/xanadu/zigzag/manifold.hpp"
 #include "common/xanadu/zigzag/presentation_surface.hpp"
-#include "core/manifold.hpp"
-#include "core/unified_transclusion_engine.hpp"
-#include "core/zz_xudu_projector.hpp"
-#include "core/zzcore.hpp"
-#include "core/zzstructure.hpp"
+#include "common/xanadu/zigzag/zz_xudu_projector.hpp"
+#include "common/xanadu/zigzag/zzcore.hpp"
+#include "common/xanadu/zigzag/zzstructure.hpp"
+#include "zigzag/unified_transclusion_engine.hpp"
 
 #include <array>
 #include <chrono>

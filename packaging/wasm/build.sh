@@ -64,7 +64,7 @@ em++ "${EM_FLAGS[@]}" \
   -o "$OUTPUT_DIR/gleditor.html"
 
 echo "==> Compiling zigzag WebAssembly target..."
-mapfile -t ZIGZAG_SRCS < <(find apps/zigzag/core -name '*.cpp' ! -name 'preflet_fetcher.cpp')
+mapfile -t ZIGZAG_SRCS < <(find apps/zigzag -maxdepth 1 -name '*.cpp' ! -name 'preflet_fetcher.cpp' ! -name 'zigzag_visualizer.cpp' ! -name 'main.cpp')
 em++ "${EM_FLAGS[@]}" \
   "${LIB_SRCS[@]}" \
   "${ZIGZAG_SRCS[@]}" \

@@ -24,15 +24,15 @@
 #include <tuple>
 #include <vector>
 
-#include <xudu/core/link_package.hpp>
-#include <xudu/core/ops.hpp>
-#include <xudu/core/publication.hpp>
-#include <xudu/core/scroll.hpp>
-#include <xudu/core/store.hpp>
-#include <xudu/core/store_tables.hpp>
-#include <xudu/core/torrent.hpp>
-#include <xudu/core/user_permascroll.hpp>
-#include <xudu/core/version.hpp>
+#include "common/xanadu/link_package.hpp"
+#include "common/xanadu/ops.hpp"
+#include "common/xanadu/publication.hpp"
+#include "common/xanadu/scroll.hpp"
+#include "common/xanadu/store.hpp"
+#include "common/xanadu/store_tables.hpp"
+#include "common/xanadu/torrent.hpp"
+#include "common/xanadu/user_permascroll.hpp"
+#include "common/xanadu/version.hpp"
 
 #include "torrent_data.hpp"
 
@@ -40,31 +40,31 @@ namespace {
 
 namespace fs = std::filesystem;
 
-using xudu::adopt;
-using xudu::adoptLinkPackage;
-using xudu::createMutableKeys;
-using xudu::decodePublication;
-using xudu::encodeLinkPackage;
-using xudu::encodePublication;
-using xudu::GlobalLink;
-using xudu::GlobalSpan;
-using xudu::InfoHash;
-using xudu::Link;
-using xudu::LinkPackage;
-using xudu::LinkType;
-using xudu::MicroversionId;
-using xudu::MutableKeys;
-using xudu::PrimediaSpan;
-using xudu::ProminenceTier;
-using xudu::Publication;
-using xudu::publicationSigningBuffer;
-using xudu::publish;
-using xudu::publishLinkPackage;
-using xudu::Scroll;
-using xudu::scrollKey;
-using xudu::ScrollSegment;
-using xudu::signMutableItem;
-using xudu::Store;
+using xanadu::adopt;
+using xanadu::adoptLinkPackage;
+using xanadu::createMutableKeys;
+using xanadu::decodePublication;
+using xanadu::encodeLinkPackage;
+using xanadu::encodePublication;
+using xanadu::GlobalLink;
+using xanadu::GlobalSpan;
+using xanadu::InfoHash;
+using xanadu::Link;
+using xanadu::LinkPackage;
+using xanadu::LinkType;
+using xanadu::MicroversionId;
+using xanadu::MutableKeys;
+using xanadu::PrimediaSpan;
+using xanadu::ProminenceTier;
+using xanadu::Publication;
+using xanadu::publicationSigningBuffer;
+using xanadu::publish;
+using xanadu::publishLinkPackage;
+using xanadu::Scroll;
+using xanadu::scrollKey;
+using xanadu::ScrollSegment;
+using xanadu::signMutableItem;
+using xanadu::Store;
 
 // Source 3 vector: 84 bytes "Epilogue..."
 inline const std::string source3Torrent = xudu_test::fromHex(
@@ -95,10 +95,10 @@ struct ExecutionResult {
 /// store here and rendering it there worked by accident of duplication.
 /// Per-test rather than the default under $XDG_DATA_HOME, so that one test's
 /// prose cannot show up in another's screenshot.
-std::shared_ptr<xudu::UserPermascroll> permascrollAt(const fs::path &dir) {
-  xudu::UserPermascroll::Config config;
+std::shared_ptr<xanadu::UserPermascroll> permascrollAt(const fs::path &dir) {
+  xanadu::UserPermascroll::Config config;
   config.storageDir = dir;
-  return std::make_shared<xudu::UserPermascroll>(std::move(config));
+  return std::make_shared<xanadu::UserPermascroll>(std::move(config));
 }
 
 /// The flag naming that permascroll to the xudu subprocess.
@@ -1297,7 +1297,7 @@ TEST(E2EBinaryOrchestrationTest, typeWithDecorationsRecordsAFormatLink) {
       reloaded.rebuild(finalVersion).spansFor(insertedAt, marker.size());
   ASSERT_FALSE(typedSpans.empty());
 
-  std::set<xudu::FormatAttribute> found;
+  std::set<xanadu::FormatAttribute> found;
   for (const auto &span : typedSpans) {
     for (const auto *const link : reloaded.linksTouching(span)) {
       if (const auto attribute = reloaded.formatAttributeOf(*link)) {
@@ -1306,8 +1306,8 @@ TEST(E2EBinaryOrchestrationTest, typeWithDecorationsRecordsAFormatLink) {
     }
   }
   EXPECT_THAT(found,
-              testing::UnorderedElementsAre(xudu::FormatAttribute::Bold,
-                                            xudu::FormatAttribute::Italic))
+              testing::UnorderedElementsAre(xanadu::FormatAttribute::Bold,
+                                            xanadu::FormatAttribute::Italic))
       << "--type '[bold,italic]...' should have recorded both as Format "
          "links over the typed text";
 }
@@ -1480,7 +1480,7 @@ TEST(E2EBinaryOrchestrationTest, repeatedPdfFigureIsStoredOnceNotOncePerPage) {
   const auto tablesPath = storePath / "store.tables";
   ASSERT_TRUE(fs::exists(tablesPath))
       << "no side tables written for " << storePath.string();
-  const auto tables = xudu::readStoreTables(tablesPath);
+  const auto tables = xanadu::readStoreTables(tablesPath);
 
   std::size_t imageSegments = 0;
   for (const auto &segment : tables.localSegments) {
@@ -1567,7 +1567,7 @@ TEST(E2EBinaryOrchestrationTest, linkIntoATranscludedImageSpanRendersCleanly) {
   ASSERT_FALSE(commentPieces.empty());
   const auto commentSpan = commentPieces.front();
 
-  store.addLink(commentVer, xudu::Link{.type  = LinkType::Comment,
+  store.addLink(commentVer, xanadu::Link{.type  = LinkType::Comment,
                                        .owner = "author",
                                        .left  = {commentSpan},
                                        .right = {imageSpan}});

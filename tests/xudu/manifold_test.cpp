@@ -23,21 +23,21 @@
 #include <utility>
 #include <vector>
 
-#include <xudu/core/microversion.hpp>
-#include <xudu/core/ops.hpp>
-#include <xudu/core/store.hpp>
-#include <xudu/core/user_permascroll.hpp>
-#include <zigzag/core/manifold.hpp>
+#include "common/xanadu/microversion.hpp"
+#include "common/xanadu/ops.hpp"
+#include "common/xanadu/store.hpp"
+#include "common/xanadu/user_permascroll.hpp"
+#include "common/xanadu/zigzag/manifold.hpp"
 
 namespace {
 
-using xudu::MicroversionId;
-using xudu::Op;
-using xudu::OpKind;
-using xudu::PrimediaSpan;
-using xudu::Store;
-using xudu::StructureVerb;
-using xudu::ValueKind;
+using xanadu::MicroversionId;
+using xanadu::Op;
+using xanadu::OpKind;
+using xanadu::PrimediaSpan;
+using xanadu::Store;
+using xanadu::StructureVerb;
+using xanadu::ValueKind;
 using zigzag::CellRef;
 using zigzag::DimRef;
 using zigzag::DimVector;
@@ -401,7 +401,7 @@ TEST(ManifoldTest, anEphemeralReferenceIsRefusedAtTheApiAndInTheFold) {
   // round, because the API above will not write one.
   Op op;
   op.kind   = OpKind::Structure;
-  op.flags  = xudu::structureFlags(StructureVerb::SetLink);
+  op.flags  = xanadu::structureFlags(StructureVerb::SetLink);
   op.to     = ephemeralBit | 3U;
   op.link   = dim;
   op.source = slice.store.segmentedOps().idOf(cell);
@@ -446,7 +446,7 @@ TEST(ManifoldTest, aLinkNamingACellTheFoldDoesNotHoldIsRefused) {
 
   Op op;
   op.kind   = OpKind::Structure;
-  op.flags  = xudu::structureFlags(StructureVerb::SetLink);
+  op.flags  = xanadu::structureFlags(StructureVerb::SetLink);
   op.to     = 9999; // no operation, let alone a cell
   op.link   = dim;
   op.source = slice.store.segmentedOps().idOf(cell);
@@ -465,7 +465,7 @@ TEST(ManifoldTest, aSetLinkWithNoChainHasNoSubjectAndIsRefused) {
 
   Op op;
   op.kind  = OpKind::Structure;
-  op.flags = xudu::structureFlags(StructureVerb::SetLink);
+  op.flags = xanadu::structureFlags(StructureVerb::SetLink);
   op.to    = two;
   op.link  = dim;
   // op.source is empty, so it names no subject
@@ -725,7 +725,7 @@ TEST(ManifoldTest, aSliceSurvivesSavingAndReopening) {
 
   // One permascroll, shared: a store holds no primedia, so a reloaded slice
   // reads its cell names out of the scroll the first one typed them into.
-  const auto permascroll = std::make_shared<xudu::UserPermascroll>();
+  const auto permascroll = std::make_shared<xanadu::UserPermascroll>();
 
   CellRef dim{noCell};
   CellRef head{noCell};

@@ -8,9 +8,9 @@
 #include <string>
 #include <vector>
 
-#include "xudu/core/swarm_catalog_index.hpp"
+#include "common/xanadu/swarm_catalog_index.hpp"
 
-namespace xudu {
+namespace xanadu {
 namespace {
 
 using ::testing::Eq;
@@ -160,4 +160,4 @@ TEST(SwarmCatalogIndexTest, SwarmHealthUpdate) {
 }
 
 } // namespace
-} // namespace xudu
+} // namespace xanadu

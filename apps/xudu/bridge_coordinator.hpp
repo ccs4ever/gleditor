@@ -16,7 +16,9 @@
 #include "common/xanadu/zigzag/presentation_surface.hpp"
 #include "satelloid.hpp"
 
+namespace xanadu {}
 namespace xudu {
+using namespace ::xanadu;
 
 /**
  * @brief Connects a presentation surface to Xudu's renderer and LinkBeams.

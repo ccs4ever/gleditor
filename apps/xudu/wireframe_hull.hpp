@@ -15,9 +15,11 @@
 #include <gleditor/frame_contributor.hpp>
 #include <gleditor/renderer.hpp>
 
-#include "core/transcopyright_logic.hpp"
+#include "common/xanadu/transcopyright_logic.hpp"
 
+namespace xanadu {}
 namespace xudu {
+using namespace ::xanadu;
 
 /**
  * @class WireframeHullOverlay

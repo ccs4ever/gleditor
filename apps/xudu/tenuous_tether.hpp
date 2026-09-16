@@ -27,7 +27,9 @@
 
 #include "common/xanadu/universal_link_endpoint.hpp"
 
+namespace xanadu {}
 namespace xudu {
+using namespace ::xanadu;
 
 using xanadu::LinkTargetKind;
 

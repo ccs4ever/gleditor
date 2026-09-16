@@ -38,10 +38,10 @@
 #include <gleditor/text_source.hpp>
 
 #include "xudu/beams.hpp"
-#include "xudu/core/link_layout.hpp"
-#include "xudu/core/ops.hpp"
-#include "xudu/core/provenance.hpp"
-#include "xudu/core/store.hpp"
+#include "common/xanadu/link_layout.hpp"
+#include "common/xanadu/ops.hpp"
+#include "common/xanadu/provenance.hpp"
+#include "common/xanadu/store.hpp"
 #include "xudu/session.hpp"
 
 namespace fs = std::filesystem;
@@ -53,13 +53,13 @@ using gleditor::MediaWidget;
 using gleditor::MemoryMediaStream;
 using gleditor::PlaybackState;
 using gleditor::VideoFrame;
-using xudu::Author;
-using xudu::HalfLink;
-using xudu::Link;
-using xudu::LinkBeams;
-using xudu::LinkType;
-using xudu::MicroversionId;
-using xudu::Session;
+using xanadu::Author;
+using xanadu::HalfLink;
+using xanadu::Link;
+using xanadu::LinkBeams;
+using xanadu::LinkType;
+using xanadu::MicroversionId;
+using xanadu::Session;
 
 namespace {
 

@@ -1,9 +1,9 @@
-#include "../../apps/xudu/core/lmdb_cache.hpp"
+#include "common/xanadu/lmdb_cache.hpp"
 #include <filesystem>
 #include <gtest/gtest.h>
 #include <string>
 
-namespace xudu {
+namespace xanadu {
 
 class LMDBContentCacheTest : public ::testing::Test {
 protected:
@@ -173,4 +173,4 @@ TEST_F(LMDBContentCacheTest, GetNonExistentAndEmpty) {
   EXPECT_FALSE(cache.get(span, cached_text));
 }
 
-} // namespace xudu
+} // namespace xanadu

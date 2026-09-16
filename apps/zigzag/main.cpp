@@ -23,8 +23,8 @@
 #include <gleditor/sdl_compat.hpp>
 #include <gleditor/state.hpp>
 
-#include "core/zzcore.hpp"
-#include "core/zzstructure_loader.hpp"
+#include "common/xanadu/zigzag/zzcore.hpp"
+#include "common/xanadu/zigzag/zzstructure_loader.hpp"
 #include "zigzag_visualizer.hpp"
 
 #ifdef __ANDROID__

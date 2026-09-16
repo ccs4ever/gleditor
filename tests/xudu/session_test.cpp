@@ -6,11 +6,11 @@
 #include <memory>
 #include <string>
 
-#include "xudu/core/microversion.hpp"
-#include "xudu/core/scroll.hpp"
-#include "xudu/core/store.hpp"
-#include "xudu/core/system_docs.hpp"
-#include "xudu/core/yaml.hpp"
+#include "common/xanadu/microversion.hpp"
+#include "common/xanadu/scroll.hpp"
+#include "common/xanadu/store.hpp"
+#include "common/xanadu/system_docs.hpp"
+#include "common/xanadu/yaml.hpp"
 
 namespace fs = std::filesystem;
 
@@ -43,30 +43,30 @@ protected:
 
 TEST_F(StoreMultiStoreTest, primaryStoreCreationAndAccess) {
   const auto mainStorePath = (testDir / "main.xanadoc").string();
-  xudu::Store store;
+  xanadu::Store store;
   store.load(mainStorePath);
 
   EXPECT_EQ(store.opCount(), 0U);
-  EXPECT_EQ(store.latest(), xudu::MicroversionId{});
+  EXPECT_EQ(store.latest(), xanadu::MicroversionId{});
 }
 
 TEST_F(StoreMultiStoreTest, independentStoresForMultipleSourceFiles) {
   // Primary store
   const auto mainStorePath = (testDir / "main.xanadoc").string();
-  xudu::Store store1;
+  xanadu::Store store1;
   store1.load(mainStorePath);
 
   const auto ver1 =
-      store1.insert(xudu::MicroversionId{}, 0, "First document content.");
+      store1.insert(xanadu::MicroversionId{}, 0, "First document content.");
   EXPECT_EQ(ver1.str(), "1");
   EXPECT_EQ(store1.opCount(), 1U);
   store1.save(mainStorePath);
 
   // Temporary auxiliary store 1
   const auto temp1Path = (testDir / "temp1.xanadoc").string();
-  xudu::Store store2;
+  xanadu::Store store2;
   store2.load(temp1Path);
-  const auto ver2 = store2.insert(xudu::MicroversionId{}, 0,
+  const auto ver2 = store2.insert(xanadu::MicroversionId{}, 0,
                                   "Second document content from file 2.");
   EXPECT_EQ(ver2.str(),
             "1"); // Starts cleanly at state 1 in its own ops scroll!
@@ -75,9 +75,9 @@ TEST_F(StoreMultiStoreTest, independentStoresForMultipleSourceFiles) {
 
   // Temporary auxiliary store 2
   const auto temp2Path = (testDir / "temp2.xanadoc").string();
-  xudu::Store store3;
+  xanadu::Store store3;
   store3.load(temp2Path);
-  const auto ver3 = store3.insert(xudu::MicroversionId{}, 0,
+  const auto ver3 = store3.insert(xanadu::MicroversionId{}, 0,
                                   "Third document content from file 3.");
   EXPECT_EQ(ver3.str(), "1"); // Also starts at state 1 in its own ops scroll!
   EXPECT_EQ(store3.opCount(), 1U);
@@ -95,12 +95,12 @@ TEST_F(StoreMultiStoreTest, independentStoresForMultipleSourceFiles) {
 TEST_F(StoreMultiStoreTest, preserveTemporaryStoreToPermanentDirectory) {
   // One permascroll across both, as a session gives every store it opens: a
   // document carries operations naming addresses in it, not the bytes.
-  const auto perma    = std::make_shared<xudu::UserPermascroll>();
+  const auto perma    = std::make_shared<xanadu::UserPermascroll>();
   const auto tempPath = (testDir / "temp_scratch.xanadoc").string();
-  xudu::Store tempStore(perma);
+  xanadu::Store tempStore(perma);
   tempStore.load(tempPath);
 
-  const auto ver = tempStore.insert(xudu::MicroversionId{}, 0,
+  const auto ver = tempStore.insert(xanadu::MicroversionId{}, 0,
                                     "Notes typed in temporary store.");
   tempStore.save(tempPath);
   EXPECT_TRUE(fs::exists(tempPath));
@@ -116,7 +116,7 @@ TEST_F(StoreMultiStoreTest, preserveTemporaryStoreToPermanentDirectory) {
   // moves the document, not the text: the notes were typed into the author's
   // permascroll and stay there, which is why the copy in the permanent
   // directory still reads as what was typed.
-  xudu::Store preservedStore(perma);
+  xanadu::Store preservedStore(perma);
   preservedStore.load(permPath);
   EXPECT_EQ(preservedStore.opCount(), 1U);
   EXPECT_EQ(preservedStore.rebuild(ver).materialize(preservedStore),
@@ -125,11 +125,11 @@ TEST_F(StoreMultiStoreTest, preserveTemporaryStoreToPermanentDirectory) {
 
 TEST_F(StoreMultiStoreTest, storeHypertimeHistoryAndTraversal) {
   const auto storePath = (testDir / "scrub_test.xanadoc").string();
-  xudu::Store store;
+  xanadu::Store store;
   store.load(storePath);
 
   // Setup sequential microversions in store
-  const auto v1 = store.insert(xudu::MicroversionId{}, 0, "Initial");
+  const auto v1 = store.insert(xanadu::MicroversionId{}, 0, "Initial");
   const auto v2 = store.insert(v1, 7, " Version");
   const auto v3 = store.insert(v2, 15, " Three");
 
@@ -150,74 +150,74 @@ TEST_F(StoreMultiStoreTest, storeHypertimeHistoryAndTraversal) {
 // been sealed yet. The reason was carried all the way through in holeRecord
 // and then discarded at the last step.
 TEST(HoleRenderingTest, EachHoleReasonHasItsOwnColour) {
-  const auto colourFor = &xudu::colourForHole;
+  const auto colourFor = &xanadu::colourForHole;
 
-  const auto withheld = colourFor(xudu::HoleReason::Withheld);
-  const auto revoked  = colourFor(xudu::HoleReason::Revoked);
-  const auto takedown = colourFor(xudu::HoleReason::Takedown);
-  const auto unsealed = colourFor(xudu::HoleReason::Unsealed);
+  const auto withheld = colourFor(xanadu::HoleReason::Withheld);
+  const auto revoked  = colourFor(xanadu::HoleReason::Revoked);
+  const auto takedown = colourFor(xanadu::HoleReason::Takedown);
+  const auto unsealed = colourFor(xanadu::HoleReason::Unsealed);
 
-  EXPECT_EQ(withheld, xudu::kWithheldColour);
+  EXPECT_EQ(withheld, xanadu::kWithheldColour);
   EXPECT_NE(revoked, withheld);
   EXPECT_NE(takedown, withheld);
   EXPECT_NE(unsealed, withheld);
   EXPECT_NE(revoked, takedown) << "withdrawn and taken down are not the same";
 
   // Transcopyright is its own case, not folded into withheld.
-  EXPECT_NE(colourFor(xudu::HoleReason::TranscopyrightLock), withheld);
+  EXPECT_NE(colourFor(xanadu::HoleReason::TranscopyrightLock), withheld);
 }
 
 TEST(SystemDocsTest, enumAndUriMappingRoundTrip) {
-  using xudu::SystemDocKind;
-  EXPECT_EQ(xudu::systemDocName(SystemDocKind::Keymap), "keymap");
-  EXPECT_EQ(xudu::systemDocName(SystemDocKind::Settings), "settings");
-  EXPECT_EQ(xudu::systemDocName(SystemDocKind::Layout), "layout");
-  EXPECT_EQ(xudu::systemDocName(SystemDocKind::UI), "ui");
-  EXPECT_EQ(xudu::systemDocName(SystemDocKind::Pouches), "pouches");
+  using xanadu::SystemDocKind;
+  EXPECT_EQ(xanadu::systemDocName(SystemDocKind::Keymap), "keymap");
+  EXPECT_EQ(xanadu::systemDocName(SystemDocKind::Settings), "settings");
+  EXPECT_EQ(xanadu::systemDocName(SystemDocKind::Layout), "layout");
+  EXPECT_EQ(xanadu::systemDocName(SystemDocKind::UI), "ui");
+  EXPECT_EQ(xanadu::systemDocName(SystemDocKind::Pouches), "pouches");
 
-  EXPECT_EQ(xudu::systemDocUri(SystemDocKind::Keymap), "system://keymap");
-  EXPECT_EQ(xudu::systemDocUri(SystemDocKind::Settings), "system://settings");
-  EXPECT_EQ(xudu::systemDocUri(SystemDocKind::Layout), "system://layout");
-  EXPECT_EQ(xudu::systemDocUri(SystemDocKind::UI), "system://ui");
-  EXPECT_EQ(xudu::systemDocUri(SystemDocKind::Pouches), "system://pouches");
+  EXPECT_EQ(xanadu::systemDocUri(SystemDocKind::Keymap), "system://keymap");
+  EXPECT_EQ(xanadu::systemDocUri(SystemDocKind::Settings), "system://settings");
+  EXPECT_EQ(xanadu::systemDocUri(SystemDocKind::Layout), "system://layout");
+  EXPECT_EQ(xanadu::systemDocUri(SystemDocKind::UI), "system://ui");
+  EXPECT_EQ(xanadu::systemDocUri(SystemDocKind::Pouches), "system://pouches");
 
-  EXPECT_EQ(xudu::systemDocKindFromUri("system://keymap"),
+  EXPECT_EQ(xanadu::systemDocKindFromUri("system://keymap"),
             SystemDocKind::Keymap);
-  EXPECT_EQ(xudu::systemDocKindFromUri("system://settings"),
+  EXPECT_EQ(xanadu::systemDocKindFromUri("system://settings"),
             SystemDocKind::Settings);
-  EXPECT_EQ(xudu::systemDocKindFromUri("system://layout"),
+  EXPECT_EQ(xanadu::systemDocKindFromUri("system://layout"),
             SystemDocKind::Layout);
-  EXPECT_EQ(xudu::systemDocKindFromUri("system://ui"), SystemDocKind::UI);
-  EXPECT_EQ(xudu::systemDocKindFromUri("system://pouches"),
+  EXPECT_EQ(xanadu::systemDocKindFromUri("system://ui"), SystemDocKind::UI);
+  EXPECT_EQ(xanadu::systemDocKindFromUri("system://pouches"),
             SystemDocKind::Pouches);
-  EXPECT_FALSE(xudu::systemDocKindFromUri("system://unknown").has_value());
-  EXPECT_FALSE(xudu::systemDocKindFromUri("file:///path").has_value());
+  EXPECT_FALSE(xanadu::systemDocKindFromUri("system://unknown").has_value());
+  EXPECT_FALSE(xanadu::systemDocKindFromUri("file:///path").has_value());
 }
 
 TEST(SystemDocsTest, defaultContentIsValidYaml) {
-  using xudu::SystemDocKind;
+  using xanadu::SystemDocKind;
   for (const auto kind :
        {SystemDocKind::Keymap, SystemDocKind::Settings, SystemDocKind::Layout,
         SystemDocKind::UI, SystemDocKind::Pouches}) {
-    const std::string content = xudu::defaultSystemDocContent(kind);
+    const std::string content = xanadu::defaultSystemDocContent(kind);
     EXPECT_FALSE(content.empty());
-    const auto parsed = xudu::yaml::read(content);
+    const auto parsed = xanadu::yaml::read(content);
     ASSERT_TRUE(parsed.has_value())
-        << "Failed to parse default YAML for " << xudu::systemDocName(kind);
+        << "Failed to parse default YAML for " << xanadu::systemDocName(kind);
     EXPECT_FALSE(parsed->empty())
-        << "Parsed empty entries for " << xudu::systemDocName(kind);
+        << "Parsed empty entries for " << xanadu::systemDocName(kind);
   }
 }
 
 TEST_F(StoreMultiStoreTest, systemStoreCreationAndHeadRestriction) {
   const auto sysPath = (testDir / "system_keymap").string();
-  xudu::Store store;
+  xanadu::Store store;
   store.setSystem(true);
   EXPECT_TRUE(store.isSystem());
 
   const auto defaultContent =
-      xudu::defaultSystemDocContent(xudu::SystemDocKind::Keymap);
-  const auto v1 = store.insert(xudu::MicroversionId{}, 0, defaultContent);
+      xanadu::defaultSystemDocContent(xanadu::SystemDocKind::Keymap);
+  const auto v1 = store.insert(xanadu::MicroversionId{}, 0, defaultContent);
   store.repointCurrentVersion(v1);
   store.setVersionAnnotation(v1, {.alias       = "default",
                                   .description = "System default keymap",
@@ -244,7 +244,7 @@ TEST_F(StoreMultiStoreTest, systemStoreCreationAndHeadRestriction) {
   store.save(sysPath);
 
   // Reload and verify persistence of single head and annotations
-  xudu::Store reloaded;
+  xanadu::Store reloaded;
   reloaded.load(sysPath);
   reloaded.setSystem(true);
 

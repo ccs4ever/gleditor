@@ -15,25 +15,25 @@
 #include <string>
 #include <vector>
 
-#include <xudu/core/format.hpp>
-#include <xudu/core/link_layout.hpp>
-#include <xudu/core/magic_mime.hpp>
-#include <xudu/core/microversion.hpp>
-#include <xudu/core/ops.hpp>
-#include <xudu/core/store.hpp>
-#include <xudu/core/user_permascroll.hpp>
+#include "common/xanadu/format.hpp"
+#include "common/xanadu/link_layout.hpp"
+#include "common/xanadu/magic_mime.hpp"
+#include "common/xanadu/microversion.hpp"
+#include "common/xanadu/ops.hpp"
+#include "common/xanadu/store.hpp"
+#include "common/xanadu/user_permascroll.hpp"
 
 namespace fs = std::filesystem;
-using xudu::FormatAttribute;
-using xudu::HalfLink;
-using xudu::Link;
-using xudu::LinkedPair;
-using xudu::LinkType;
-using xudu::MicroversionId;
-using xudu::ProminenceTier;
-using xudu::Store;
-using xudu::TransclusionPair;
-using xudu::Version;
+using xanadu::FormatAttribute;
+using xanadu::HalfLink;
+using xanadu::Link;
+using xanadu::LinkedPair;
+using xanadu::LinkType;
+using xanadu::MicroversionId;
+using xanadu::ProminenceTier;
+using xanadu::Store;
+using xanadu::TransclusionPair;
+using xanadu::Version;
 
 namespace {
 
@@ -47,11 +47,11 @@ const fs::path kSampleBaseDir = "tests/samples/xudu";
 /// xanadoc_a a transclusion rather than a copy is that both name the same
 /// address in this file. Opened once and shared, because nothing here writes
 /// to it -- and because otherwise it would be a megabyte per test.
-const std::shared_ptr<xudu::UserPermascroll> &samplePermascroll() {
-  static const std::shared_ptr<xudu::UserPermascroll> scroll = [] {
-    xudu::UserPermascroll::Config config;
+const std::shared_ptr<xanadu::UserPermascroll> &samplePermascroll() {
+  static const std::shared_ptr<xanadu::UserPermascroll> scroll = [] {
+    xanadu::UserPermascroll::Config config;
     config.storageDir = kSampleBaseDir / "permascroll";
-    return std::make_shared<xudu::UserPermascroll>(std::move(config));
+    return std::make_shared<xanadu::UserPermascroll>(std::move(config));
   }();
   return scroll;
 }
@@ -95,9 +95,9 @@ TEST(SampleXanadocsTest, PermascrollPurityHasNoBinaryMediaBlobs) {
   std::ifstream in(activeSegment, std::ios::binary);
   const std::string bytes{std::istreambuf_iterator<char>(in),
                           std::istreambuf_iterator<char>()};
-  xudu::MagicMimeDetector magic;
+  xanadu::MagicMimeDetector magic;
   const auto mime = magic.identifyBuffer(bytes.data(), bytes.size());
-  EXPECT_FALSE(xudu::MagicMimeDetector::isMediaMime(mime));
+  EXPECT_FALSE(xanadu::MagicMimeDetector::isMediaMime(mime));
   // Ensure no PNG, RIFF (WAV), or ftyp (MP4) signatures exist anywhere in the
   // author permascroll
   EXPECT_EQ(bytes.find("\x89PNG\r\n\x1a\n"), std::string::npos);
@@ -132,7 +132,7 @@ TEST(SampleXanadocsTest, CoreHypertextLoadsAndDiscoversTransclusion) {
 
   // Check emergent transclusion
   std::vector<TransclusionPair> tPairs;
-  xudu::placeTransclusions(viewing({builtA, builtB}), tPairs);
+  xanadu::placeTransclusions(viewing({builtA, builtB}), tPairs);
 
   ASSERT_FALSE(tPairs.empty())
       << "Expected emergent transclusion between Doc A and Doc B";
@@ -163,7 +163,7 @@ TEST(SampleXanadocsTest, CoreHypertextContainsAll8AuthorLinkTypes) {
 
   std::vector<LinkedPair> placed;
   std::vector<HalfLink> unplaced;
-  xudu::placeLinks(storeA.links(), viewing({builtA, builtB}), placed, unplaced);
+  xanadu::placeLinks(storeA.links(), viewing({builtA, builtB}), placed, unplaced);
 
   std::set<LinkType> foundTypes;
   for (const auto &pair : placed) {
@@ -213,7 +213,7 @@ TEST(SampleXanadocsTest, CoreHypertextUnifiedStoreLoadsBothVersions) {
               testing::HasSubstr("Commentary on Xanadulogical Systems"));
 
   std::vector<TransclusionPair> tPairs;
-  xudu::placeTransclusions(viewing({built1, built2}), tPairs);
+  xanadu::placeTransclusions(viewing({built1, built2}), tPairs);
   EXPECT_FALSE(tPairs.empty());
 }
 
@@ -248,7 +248,7 @@ TEST(SampleXanadocsTest, Multimedia02PdfLinkedXanadocCrossDocumentLinks) {
 
   std::vector<LinkedPair> placed;
   std::vector<HalfLink> unplaced;
-  xudu::placeLinks(store.links(), viewing({pdfBuilt, comBuilt}), placed,
+  xanadu::placeLinks(store.links(), viewing({pdfBuilt, comBuilt}), placed,
                    unplaced);
 
   ASSERT_GE(placed.size(), 2U);
@@ -263,14 +263,14 @@ TEST(SampleXanadocsTest, Multimedia03MixedTextImageContainsRasterAndText) {
 
   const auto ver     = store.latest();
   const auto rebuilt = store.rebuild(ver);
-  xudu::MagicMimeDetector magic;
+  xanadu::MagicMimeDetector magic;
 
   bool hasImage = false;
   bool hasText  = false;
   for (const auto &p : rebuilt.pieces()) {
     const auto bytes = store.read(p);
     const auto mime  = magic.identifyBuffer(bytes.data(), bytes.size());
-    if (xudu::MagicMimeDetector::isImageMime(mime)) {
+    if (xanadu::MagicMimeDetector::isImageMime(mime)) {
       hasImage = true;
     } else if (!bytes.empty()) {
       hasText = true;
@@ -289,13 +289,13 @@ TEST(SampleXanadocsTest,
 
   const auto ver     = store.latest();
   const auto rebuilt = store.rebuild(ver);
-  xudu::MagicMimeDetector magic;
+  xanadu::MagicMimeDetector magic;
 
   bool hasAudio = false;
   for (const auto &p : rebuilt.pieces()) {
     const auto bytes = store.read(p);
     const auto mime  = magic.identifyBuffer(bytes.data(), bytes.size());
-    if (xudu::MagicMimeDetector::isAudioMime(mime)) {
+    if (xanadu::MagicMimeDetector::isAudioMime(mime)) {
       hasAudio = true;
     }
   }
@@ -309,13 +309,13 @@ TEST(SampleXanadocsTest, Multimedia05VideoDocContainsMp4ContainerAndKeyframes) {
 
   const auto ver     = store.latest();
   const auto rebuilt = store.rebuild(ver);
-  xudu::MagicMimeDetector magic;
+  xanadu::MagicMimeDetector magic;
 
   bool hasVideo = false;
   for (const auto &p : rebuilt.pieces()) {
     const auto bytes = store.read(p);
     const auto mime  = magic.identifyBuffer(bytes.data(), bytes.size());
-    if (xudu::MagicMimeDetector::isVideoMime(mime)) {
+    if (xanadu::MagicMimeDetector::isVideoMime(mime)) {
       hasVideo = true;
     }
   }
@@ -348,7 +348,7 @@ TEST(SampleXanadocsTest,
   const auto v2Built = store.rebuild(all.back());
 
   std::vector<TransclusionPair> tPairs;
-  xudu::placeTransclusions(viewing({v1Built, v2Built}), tPairs);
+  xanadu::placeTransclusions(viewing({v1Built, v2Built}), tPairs);
 
   ASSERT_FALSE(tPairs.empty())
       << "Expected audio subspan transclusion between Page 1 and Page 2";
@@ -369,7 +369,7 @@ TEST(SampleXanadocsTest,
   const auto v2Built = store.rebuild(all.back());
 
   std::vector<TransclusionPair> tPairs;
-  xudu::placeTransclusions(viewing({v1Built, v2Built}), tPairs);
+  xanadu::placeTransclusions(viewing({v1Built, v2Built}), tPairs);
 
   ASSERT_FALSE(tPairs.empty())
       << "Expected video clip transclusion between Page 1 and Page 2";
@@ -388,7 +388,7 @@ TEST(SampleXanadocsTest, Multimedia09ImageTransclusionVerifiesSpatialIdatCrop) {
   const auto v2Built = store.rebuild(all.back());
 
   std::vector<TransclusionPair> tPairs;
-  xudu::placeTransclusions(viewing({v1Built, v2Built}), tPairs);
+  xanadu::placeTransclusions(viewing({v1Built, v2Built}), tPairs);
 
   ASSERT_FALSE(tPairs.empty())
       << "Expected image crop transclusion between Page 1 and Page 2";
@@ -412,7 +412,7 @@ TEST(SampleXanadocsTest, Beams01OneToManyLinkPlacement) {
 
   std::vector<LinkedPair> placed;
   std::vector<HalfLink> unplaced;
-  xudu::placeLinks(store.links(), viewing({builtA, builtB}), placed, unplaced);
+  xanadu::placeLinks(store.links(), viewing({builtA, builtB}), placed, unplaced);
 
   ASSERT_EQ(placed.size(), 1U);
   EXPECT_EQ(placed[0].from.doc, 0U);
@@ -437,7 +437,7 @@ TEST(SampleXanadocsTest, Beams02ManyToManyLinkPlacement) {
 
   std::vector<LinkedPair> placed;
   std::vector<HalfLink> unplaced;
-  xudu::placeLinks(store.links(), viewing({builtA, builtB}), placed, unplaced);
+  xanadu::placeLinks(store.links(), viewing({builtA, builtB}), placed, unplaced);
 
   ASSERT_EQ(placed.size(), 1U);
   const auto &link = store.links().begin()->second;
@@ -459,7 +459,7 @@ TEST(SampleXanadocsTest, Beams03MultiSpanStackedLinks) {
 
   std::vector<LinkedPair> placed;
   std::vector<HalfLink> unplaced;
-  xudu::placeLinks(store.links(), viewing({builtA, builtB}), placed, unplaced);
+  xanadu::placeLinks(store.links(), viewing({builtA, builtB}), placed, unplaced);
 
   ASSERT_EQ(placed.size(), 3U);
 

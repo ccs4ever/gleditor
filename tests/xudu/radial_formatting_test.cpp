@@ -7,25 +7,25 @@
 #include <filesystem>
 #include <string>
 
-#include <xudu/core/format.hpp>
-#include <xudu/core/microversion.hpp>
-#include <xudu/core/ops.hpp>
-#include <xudu/core/store.hpp>
-#include <xudu/core/system_docs.hpp>
+#include "common/xanadu/format.hpp"
+#include "common/xanadu/microversion.hpp"
+#include "common/xanadu/ops.hpp"
+#include "common/xanadu/store.hpp"
+#include "common/xanadu/system_docs.hpp"
 
 namespace {
 
-using xudu::FormatAttribute;
-using xudu::formatAttributeFromDecoration;
-using xudu::formatAttributeFromTextAlign;
-using xudu::formatAttributeName;
-using xudu::Link;
-using xudu::LinkType;
-using xudu::MicroversionId;
-using xudu::parseRadialConfig;
-using xudu::Store;
-using xudu::textAlignFromFormatAttribute;
-using xudu::vocabularySpanFor;
+using xanadu::FormatAttribute;
+using xanadu::formatAttributeFromDecoration;
+using xanadu::formatAttributeFromTextAlign;
+using xanadu::formatAttributeName;
+using xanadu::Link;
+using xanadu::LinkType;
+using xanadu::MicroversionId;
+using xanadu::parseRadialConfig;
+using xanadu::Store;
+using xanadu::textAlignFromFormatAttribute;
+using xanadu::vocabularySpanFor;
 
 TEST(RadialFormattingTest, ParseRadialConfigFromYaml) {
   constexpr std::string_view kYaml = R"(

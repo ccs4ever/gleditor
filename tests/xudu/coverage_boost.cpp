@@ -9,78 +9,78 @@
 #include <string>
 #include <vector>
 
-#include <xudu/core/bencode.hpp>
-#include <xudu/core/binary_ops.hpp>
-#include <xudu/core/blessing.hpp>
-#include <xudu/core/config.hpp>
-#include <xudu/core/link_discovery.hpp>
-#include <xudu/core/link_layout.hpp>
-#include <xudu/core/link_package.hpp>
-#include <xudu/core/microversion.hpp>
-#include <xudu/core/mutable_link.hpp>
-#include <xudu/core/ops.hpp>
-#include <xudu/core/provenance.hpp>
-#include <xudu/core/publication.hpp>
-#include <xudu/core/resolver.hpp>
-#include <xudu/core/scroll.hpp>
-#include <xudu/core/store.hpp>
-#include <xudu/core/swarm.hpp>
-#include <xudu/core/torrent.hpp>
-#include <xudu/core/version.hpp>
-#include <xudu/core/windows_quoting.hpp>
-#include <xudu/core/yaml.hpp>
+#include "common/xanadu/bencode.hpp"
+#include "common/xanadu/binary_ops.hpp"
+#include "common/xanadu/blessing.hpp"
+#include "common/xanadu/config.hpp"
+#include "common/xanadu/link_discovery.hpp"
+#include "common/xanadu/link_layout.hpp"
+#include "common/xanadu/link_package.hpp"
+#include "common/xanadu/microversion.hpp"
+#include "common/xanadu/mutable_link.hpp"
+#include "common/xanadu/ops.hpp"
+#include "common/xanadu/provenance.hpp"
+#include "common/xanadu/publication.hpp"
+#include "common/xanadu/resolver.hpp"
+#include "common/xanadu/scroll.hpp"
+#include "common/xanadu/store.hpp"
+#include "common/xanadu/swarm.hpp"
+#include "common/xanadu/torrent.hpp"
+#include "common/xanadu/version.hpp"
+#include "common/xanadu/windows_quoting.hpp"
+#include "common/xanadu/yaml.hpp"
 
 namespace {
 
-using xudu::Blessing;
-using xudu::Config;
-using xudu::createBlessing;
-using xudu::createMutableKeys;
-using xudu::decodeBlessing;
-using xudu::decodeLinkPackage;
-using xudu::decodeMutablePointer;
-using xudu::decodePublication;
-using xudu::DhtTarget;
-using xudu::encodeBlessing;
-using xudu::encodeLinkPackage;
-using xudu::GlobalLink;
-using xudu::GlobalSpan;
-using xudu::InfoHash;
-using xudu::Library;
-using xudu::linkColour;
-using xudu::LinkDiscoveryEngine;
-using xudu::LinkPackage;
-using xudu::LinkType;
-using xudu::linkTypeFromName;
-using xudu::linkTypeName;
-using xudu::MicroversionId;
-using xudu::MutableKeys;
-using xudu::MutableLink;
-using xudu::Op;
-using xudu::OpKind;
-using xudu::opKindName;
-using xudu::PrimediaSpan;
-using xudu::ProminenceTier;
-using xudu::prominenceTierName;
-using xudu::Publication;
-using xudu::PublicKey;
-using xudu::publish;
-using xudu::publishLinkPackage;
-using xudu::readBinaryOpsSpool;
-using xudu::readMicroversionId;
-using xudu::readOpsSpool;
-using xudu::readOsmicTextOpsSpool;
-using xudu::readVarint;
-using xudu::Scroll;
-using xudu::ScrollSegment;
-using xudu::SecretKey;
-using xudu::Signature;
-using xudu::Store;
-using xudu::Version;
-using xudu::writeBinaryOpsSpool;
-using xudu::writeMicroversionId;
-using xudu::writeOsmicTextOpsSpool;
-using xudu::writeVarint;
+using xanadu::Blessing;
+using xanadu::Config;
+using xanadu::createBlessing;
+using xanadu::createMutableKeys;
+using xanadu::decodeBlessing;
+using xanadu::decodeLinkPackage;
+using xanadu::decodeMutablePointer;
+using xanadu::decodePublication;
+using xanadu::DhtTarget;
+using xanadu::encodeBlessing;
+using xanadu::encodeLinkPackage;
+using xanadu::GlobalLink;
+using xanadu::GlobalSpan;
+using xanadu::InfoHash;
+using xanadu::Library;
+using xanadu::linkColour;
+using xanadu::LinkDiscoveryEngine;
+using xanadu::LinkPackage;
+using xanadu::LinkType;
+using xanadu::linkTypeFromName;
+using xanadu::linkTypeName;
+using xanadu::MicroversionId;
+using xanadu::MutableKeys;
+using xanadu::MutableLink;
+using xanadu::Op;
+using xanadu::OpKind;
+using xanadu::opKindName;
+using xanadu::PrimediaSpan;
+using xanadu::ProminenceTier;
+using xanadu::prominenceTierName;
+using xanadu::Publication;
+using xanadu::PublicKey;
+using xanadu::publish;
+using xanadu::publishLinkPackage;
+using xanadu::readBinaryOpsSpool;
+using xanadu::readMicroversionId;
+using xanadu::readOpsSpool;
+using xanadu::readOsmicTextOpsSpool;
+using xanadu::readVarint;
+using xanadu::Scroll;
+using xanadu::ScrollSegment;
+using xanadu::SecretKey;
+using xanadu::Signature;
+using xanadu::Store;
+using xanadu::Version;
+using xanadu::writeBinaryOpsSpool;
+using xanadu::writeMicroversionId;
+using xanadu::writeOsmicTextOpsSpool;
+using xanadu::writeVarint;
 
 Scroll makeNamedScroll(const PublicKey &key, std::string salt,
                        const std::uint64_t length) {
@@ -168,22 +168,22 @@ TEST(CoverageBoostTest, binaryOpsCodecErrorHandling) {
 
   // Invalid binary op kind throws
   std::istringstream badBinary("\x07"); // 7 is invalid kindCode
-  std::vector<xudu::OpRecord> ops1;
+  std::vector<xanadu::OpRecord> ops1;
   EXPECT_THROW(readBinaryOpsSpool(badBinary, ops1), std::runtime_error);
 
   // Empty stream to readBinaryOpsSpool returns empty map
   std::istringstream emptyStream("");
-  std::vector<xudu::OpRecord> ops2;
+  std::vector<xanadu::OpRecord> ops2;
   readBinaryOpsSpool(emptyStream, ops2);
   EXPECT_TRUE(ops2.empty());
 
   // Text ops reader error cases
   std::istringstream malformedText("1 invalid_kind 0 0\n");
-  std::vector<xudu::OpRecord> ops3;
+  std::vector<xanadu::OpRecord> ops3;
   EXPECT_THROW(readOsmicTextOpsSpool(malformedText, ops3), std::runtime_error);
 
   std::istringstream shortText("1 insert 0\n");
-  std::vector<xudu::OpRecord> ops4;
+  std::vector<xanadu::OpRecord> ops4;
   EXPECT_THROW(readOsmicTextOpsSpool(shortText, ops4), std::runtime_error);
 
   // Rearrange Op in both binary and text formats
@@ -194,13 +194,13 @@ TEST(CoverageBoostTest, binaryOpsCodecErrorHandling) {
   rearrangeOp.length = 10;
   rearrangeOp.to     = 20;
 
-  const std::vector<xudu::OpRecord> opsMap = {
-      xudu::OpRecord{MicroversionId::parse("2"), rearrangeOp}};
+  const std::vector<xanadu::OpRecord> opsMap = {
+      xanadu::OpRecord{MicroversionId::parse("2"), rearrangeOp}};
 
   // Binary round-trip
   std::stringstream binOut;
   writeBinaryOpsSpool(binOut, opsMap);
-  std::vector<xudu::OpRecord> binRead;
+  std::vector<xanadu::OpRecord> binRead;
   readOpsSpool(binOut, binRead);
   ASSERT_EQ(binRead.size(), 1U);
   EXPECT_EQ(binRead.front().op.kind, OpKind::Rearrange);
@@ -211,7 +211,7 @@ TEST(CoverageBoostTest, binaryOpsCodecErrorHandling) {
   // Text round-trip
   std::stringstream textOut;
   writeOsmicTextOpsSpool(textOut, opsMap);
-  std::vector<xudu::OpRecord> textRead;
+  std::vector<xanadu::OpRecord> textRead;
   readOpsSpool(textOut, textRead);
   ASSERT_EQ(textRead.size(), 1U);
   EXPECT_EQ(textRead.front().op.kind, OpKind::Rearrange);

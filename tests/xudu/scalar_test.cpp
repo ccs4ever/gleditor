@@ -19,18 +19,18 @@
 #include <string>
 #include <vector>
 
-#include <xudu/core/microversion.hpp>
-#include <xudu/core/scalar.hpp>
-#include <xudu/core/store.hpp>
-#include <zigzag/core/manifold.hpp>
+#include "common/xanadu/microversion.hpp"
+#include "common/xanadu/scalar.hpp"
+#include "common/xanadu/store.hpp"
+#include "common/xanadu/zigzag/manifold.hpp"
 
 namespace {
 
-using xudu::canonicalQuietNaN;
-using xudu::MicroversionId;
-using xudu::ScalarValue;
-using xudu::Store;
-using xudu::ValueKind;
+using xanadu::canonicalQuietNaN;
+using xanadu::MicroversionId;
+using xanadu::ScalarValue;
+using xanadu::Store;
+using xanadu::ValueKind;
 using zigzag::CellRef;
 using zigzag::DimVector;
 
@@ -61,9 +61,9 @@ const std::vector<double> &interestingDoubles() {
 
 TEST(ScalarTest, aRenderingRoundTripsToTheSameDouble) {
   for (const auto value : interestingDoubles()) {
-    const auto scalar = xudu::scalarValue(value);
+    const auto scalar = xanadu::scalarValue(value);
     double parsed{};
-    ASSERT_TRUE(xudu::parseDouble(scalar.text, parsed))
+    ASSERT_TRUE(xanadu::parseDouble(scalar.text, parsed))
         << value << " rendered as " << scalar.text;
     EXPECT_EQ(std::bit_cast<std::uint64_t>(parsed),
               std::bit_cast<std::uint64_t>(value))
@@ -78,44 +78,44 @@ TEST(ScalarTest, theWorstCaseRenderingIsTwentyFourBytesAndNotWhereR6SaidItWas) {
   // to_chars says this instead. Worth a test rather than a correction alone:
   // the example being a formatting choice is exactly what R6 says the
   // rendering is not.
-  EXPECT_EQ(xudu::scalarValue(-std::numeric_limits<double>::denorm_min()).text,
+  EXPECT_EQ(xanadu::scalarValue(-std::numeric_limits<double>::denorm_min()).text,
             "-5e-324");
 
   // 24 bytes is still the real bound, reached by any value needing all 17
   // significant digits with a three-digit exponent and a sign.
-  EXPECT_EQ(xudu::scalarValue(-1.2345678901234567e-308).text.size(), 24U);
-  EXPECT_EQ(xudu::scalarValue(std::numeric_limits<double>::lowest()).text,
+  EXPECT_EQ(xanadu::scalarValue(-1.2345678901234567e-308).text.size(), 24U);
+  EXPECT_EQ(xanadu::scalarValue(std::numeric_limits<double>::lowest()).text,
             "-1.7976931348623157e+308");
   EXPECT_EQ(
-      xudu::scalarValue(std::numeric_limits<double>::lowest()).text.size(),
+      xanadu::scalarValue(std::numeric_limits<double>::lowest()).text.size(),
       24U);
   // And most values are nowhere near it, which is the other half of R6's cost
   // argument: a tenth is three bytes, a third eighteen.
-  EXPECT_EQ(xudu::scalarValue(0.1).text, "0.1");
-  EXPECT_EQ(xudu::scalarValue(1.0 / 3.0).text, "0.3333333333333333");
+  EXPECT_EQ(xanadu::scalarValue(0.1).text, "0.1");
+  EXPECT_EQ(xanadu::scalarValue(1.0 / 3.0).text, "0.3333333333333333");
 
   for (const auto value : interestingDoubles()) {
-    EXPECT_LE(xudu::scalarValue(value).text.size(), 24U) << value;
+    EXPECT_LE(xanadu::scalarValue(value).text.size(), 24U) << value;
   }
 }
 
 TEST(ScalarTest, everyNaNIsOneNaNInTheBitsAndNegativeZeroIsZero) {
   const auto quiet = std::numeric_limits<double>::quiet_NaN();
-  EXPECT_EQ(xudu::canonicalDoubleBits(quiet), canonicalQuietNaN);
+  EXPECT_EQ(xanadu::canonicalDoubleBits(quiet), canonicalQuietNaN);
   // A NaN with a payload, and one with the sign bit set: both collapse.
   EXPECT_EQ(
-      xudu::canonicalDoubleBits(std::bit_cast<double>(0x7ff8000000c0ffeeULL)),
+      xanadu::canonicalDoubleBits(std::bit_cast<double>(0x7ff8000000c0ffeeULL)),
       canonicalQuietNaN);
   EXPECT_EQ(
-      xudu::canonicalDoubleBits(std::bit_cast<double>(0xfff8000000000001ULL)),
+      xanadu::canonicalDoubleBits(std::bit_cast<double>(0xfff8000000000001ULL)),
       canonicalQuietNaN);
 
-  EXPECT_EQ(xudu::canonicalDoubleBits(-0.0), 0U);
-  EXPECT_EQ(xudu::canonicalDoubleBits(0.0), 0U);
+  EXPECT_EQ(xanadu::canonicalDoubleBits(-0.0), 0U);
+  EXPECT_EQ(xanadu::canonicalDoubleBits(0.0), 0U);
   // Canonicalisation is for value equality and nothing else: it does not touch
   // anything that already compares equal to itself.
   for (const auto value : interestingDoubles()) {
-    EXPECT_EQ(xudu::canonicalDoubleBits(value),
+    EXPECT_EQ(xanadu::canonicalDoubleBits(value),
               std::bit_cast<std::uint64_t>(value == 0.0 ? 0.0 : value))
         << value;
   }
@@ -124,12 +124,12 @@ TEST(ScalarTest, everyNaNIsOneNaNInTheBitsAndNegativeZeroIsZero) {
 TEST(ScalarTest, aSignallingNaNIsRefusedRatherThanQuieted) {
   const auto signalling = std::bit_cast<double>(0x7ff0000000000001ULL);
   ASSERT_TRUE(std::isnan(signalling));
-  ASSERT_TRUE(xudu::isSignallingNaN(signalling));
-  EXPECT_FALSE(xudu::isSignallingNaN(std::numeric_limits<double>::quiet_NaN()));
-  EXPECT_FALSE(xudu::isSignallingNaN(std::numeric_limits<double>::infinity()));
-  EXPECT_FALSE(xudu::isSignallingNaN(1.0));
+  ASSERT_TRUE(xanadu::isSignallingNaN(signalling));
+  EXPECT_FALSE(xanadu::isSignallingNaN(std::numeric_limits<double>::quiet_NaN()));
+  EXPECT_FALSE(xanadu::isSignallingNaN(std::numeric_limits<double>::infinity()));
+  EXPECT_FALSE(xanadu::isSignallingNaN(1.0));
 
-  EXPECT_THROW(xudu::scalarValue(signalling), std::invalid_argument);
+  EXPECT_THROW(xanadu::scalarValue(signalling), std::invalid_argument);
 
   Store store;
   const auto at = store.sliceGenesis(MicroversionId{});
@@ -150,10 +150,10 @@ TEST(ScalarTest, aCellCarriesTheBitsAndTheBytesAtOnce) {
     // The property step 15 asks for, both halves of it.
     ASSERT_TRUE(manifold.asDouble(cell).has_value()) << value;
     EXPECT_EQ(std::bit_cast<std::uint64_t>(*manifold.asDouble(cell)),
-              xudu::canonicalDoubleBits(value))
+              xanadu::canonicalDoubleBits(value))
         << value;
     double parsed{};
-    ASSERT_TRUE(xudu::parseDouble(manifold.textOf(cell, store), parsed))
+    ASSERT_TRUE(xanadu::parseDouble(manifold.textOf(cell, store), parsed))
         << value;
     EXPECT_EQ(std::bit_cast<std::uint64_t>(parsed),
               std::bit_cast<std::uint64_t>(value))

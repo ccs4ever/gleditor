@@ -13,24 +13,24 @@
 #include <string>
 #include <vector>
 
-#include <xudu/core/binary_ops.hpp>
-#include <xudu/core/compact_op.hpp>
-#include <xudu/core/microversion.hpp>
-#include <xudu/core/ops.hpp>
-#include <xudu/core/store.hpp>
-#include <xudu/core/store_tables.hpp>
-#include <xudu/core/user_permascroll.hpp>
+#include "common/xanadu/binary_ops.hpp"
+#include "common/xanadu/compact_op.hpp"
+#include "common/xanadu/microversion.hpp"
+#include "common/xanadu/ops.hpp"
+#include "common/xanadu/store.hpp"
+#include "common/xanadu/store_tables.hpp"
+#include "common/xanadu/user_permascroll.hpp"
 
 namespace {
 
-using xudu::Link;
-using xudu::LinkType;
-using xudu::localScroll;
-using xudu::MicroversionId;
-using xudu::Op;
-using xudu::OpKind;
-using xudu::PrimediaSpan;
-using xudu::Store;
+using xanadu::Link;
+using xanadu::LinkType;
+using xanadu::localScroll;
+using xanadu::MicroversionId;
+using xanadu::Op;
+using xanadu::OpKind;
+using xanadu::PrimediaSpan;
+using xanadu::Store;
 
 std::vector<std::string> names(const std::vector<MicroversionId> &ids) {
   std::vector<std::string> out;
@@ -196,8 +196,8 @@ TEST(StoreTest, aStructureOpChangesNoText) {
   Op made;
   made.kind      = OpKind::Structure;
   made.parent    = one;
-  made.flags     = xudu::structureFlags(xudu::StructureVerb::MakeCell, false,
-                                        xudu::ValueKind::Double);
+  made.flags     = xanadu::structureFlags(xanadu::StructureVerb::MakeCell, false,
+                                        xanadu::ValueKind::Double);
   made.span      = PrimediaSpan{localScroll, 0, 2};
   made.value     = 0x4045000000000000ULL;
   const auto two = one.next();
@@ -211,8 +211,8 @@ TEST(StoreTest, aStructureOpChangesNoText) {
   const auto back = store.getOp(two);
   ASSERT_TRUE(back.has_value());
   EXPECT_EQ(back->kind, OpKind::Structure);
-  EXPECT_EQ(xudu::structureVerbOf(back->flags), xudu::StructureVerb::MakeCell);
-  EXPECT_EQ(xudu::valueKindOf(back->flags), xudu::ValueKind::Double);
+  EXPECT_EQ(xanadu::structureVerbOf(back->flags), xanadu::StructureVerb::MakeCell);
+  EXPECT_EQ(xanadu::valueKindOf(back->flags), xanadu::ValueKind::Double);
   EXPECT_EQ(back->value, 0x4045000000000000ULL);
   EXPECT_EQ(back->span, made.span);
 }
@@ -363,7 +363,7 @@ TEST(StoreTest, transcludedContentIsRecognisedInBothDocuments) {
 
   // The same content, found by address in the document it was taken from.
   EXPECT_THAT(sourceVersion.occurrencesOf(shared),
-              testing::ElementsAre(xudu::Extent{4, 9}));
+              testing::ElementsAre(xanadu::Extent{4, 9}));
   EXPECT_EQ(store.primedia().read(shared), "quick");
 }
 
@@ -378,7 +378,7 @@ TEST(StoreTest, aTransclusionSurvivesEditingAroundIt) {
   const auto edited = store.insert(source, 0, "I saw ");
   EXPECT_EQ(store.textOf(edited), "I saw the quick brown fox");
   EXPECT_THAT(store.rebuild(edited).occurrencesOf(shared),
-              testing::ElementsAre(xudu::Extent{10, 15}));
+              testing::ElementsAre(xanadu::Extent{10, 15}));
 }
 
 TEST(StoreTest, linksAttachToContentRatherThanToPositions) {
@@ -452,10 +452,10 @@ struct StoreRoundTripTest : testing::Test {
   /// Store::load() refuses a `primedia.spool` to avoid. In the program this is
   /// the author's single permascroll; here it is one per test, so that tests
   /// cannot see each other's text.
-  std::shared_ptr<xudu::UserPermascroll> perma;
+  std::shared_ptr<xanadu::UserPermascroll> perma;
 
   void SetUp() override {
-    perma = std::make_shared<xudu::UserPermascroll>();
+    perma = std::make_shared<xanadu::UserPermascroll>();
     dir =
         std::filesystem::temp_directory_path() /
         ("xudu-test-" +
@@ -589,7 +589,7 @@ TEST_F(StoreRoundTripTest, aStoreCarryingItsOwnPrimediaIsRefusedByName) {
   }
 
   Store reopened(perma);
-  EXPECT_THROW(reopened.load(dir.string()), xudu::StoreTablesUnreadable);
+  EXPECT_THROW(reopened.load(dir.string()), xanadu::StoreTablesUnreadable);
 }
 
 TEST_F(StoreRoundTripTest, aQuotationIntoASecondDocumentSurvivesSaving) {
@@ -638,19 +638,19 @@ TEST_F(StoreRoundTripTest, operationsAreWrittenAsTheTreeTheyAreHeldAs) {
   // state-zero slot. What follows the header is what the arena holds.
   ASSERT_TRUE(std::filesystem::exists(dir / "ops.nodes"));
   EXPECT_EQ(std::filesystem::file_size(dir / "ops.nodes"),
-            xudu::opsSegmentHeaderBytes +
-                store.opCount() * sizeof(xudu::CompactOpNode));
+            xanadu::opsSegmentHeaderBytes +
+                store.opCount() * sizeof(xanadu::CompactOpNode));
   // And it says what it is, which is what stops a store written in some other
   // shape being read as this one. See design R14.
   {
     // Unsigned, because a plain char is signed here and 0x89 would compare as
     // -119 against the signature's 137.
     std::ifstream in(dir / "ops.nodes", std::ios::binary);
-    std::vector<std::uint8_t> opening(xudu::opsSegmentSignature.size());
+    std::vector<std::uint8_t> opening(xanadu::opsSegmentSignature.size());
     in.read(reinterpret_cast<char *>(opening.data()),
             static_cast<std::streamsize>(opening.size()));
     EXPECT_TRUE(std::equal(opening.begin(), opening.end(),
-                           xudu::opsSegmentSignature.begin()))
+                           xanadu::opsSegmentSignature.begin()))
         << "ops.nodes does not open with the operations segment signature";
   }
   EXPECT_FALSE(std::filesystem::exists(dir / "ops.spool"));
@@ -675,17 +675,17 @@ TEST_F(StoreRoundTripTest, aStoreWrittenBeforeTheNodeArrayIsRefusedByName) {
     Store original(perma);
     original.insert(MicroversionId{}, 0, "zzz");
     original.save(dir.string());
-    std::vector<xudu::OpRecord> records;
+    std::vector<xanadu::OpRecord> records;
     for (const auto &id : original.allVersions()) {
-      records.push_back(xudu::OpRecord{id, *original.getOp(id)});
+      records.push_back(xanadu::OpRecord{id, *original.getOp(id)});
     }
     std::ofstream out(dir / "ops.spool", std::ios::binary | std::ios::trunc);
-    xudu::writeBinaryOpsSpool(out, records);
+    xanadu::writeBinaryOpsSpool(out, records);
   }
   std::filesystem::remove(dir / "ops.nodes");
 
   Store opened(perma);
-  EXPECT_THROW(opened.load(dir.string()), xudu::OpsSegmentUnreadable);
+  EXPECT_THROW(opened.load(dir.string()), xanadu::OpsSegmentUnreadable);
 }
 
 TEST_F(StoreRoundTripTest, osmicTextFormatCanBeGeneratedOnDemand) {
@@ -727,25 +727,25 @@ TEST_F(StoreRoundTripTest, storeResolveHandlesLocalAndExternalHoles) {
 
   // Local span resolution
   const auto resLocal = store.resolve(PrimediaSpan{localScroll, 0, 5});
-  EXPECT_EQ(resLocal.status, xudu::ResolutionStatus::VerifiedBytes);
+  EXPECT_EQ(resLocal.status, xanadu::ResolutionStatus::VerifiedBytes);
   EXPECT_EQ(resLocal.text, "Local");
 
   // External scroll with withheld redaction segment
-  xudu::Scroll external;
-  xudu::ScrollSegment seg;
+  xanadu::Scroll external;
+  xanadu::ScrollSegment seg;
   seg.at     = 0;
   seg.length = 50;
-  seg.kind   = xudu::SegmentKind::Withheld;
-  xudu::PublishedHoleRecord hole;
+  seg.kind   = xanadu::SegmentKind::Withheld;
+  xanadu::PublishedHoleRecord hole;
   hole.at        = 0;
   hole.length    = 50;
-  hole.reason    = xudu::HoleReason::Withheld;
+  hole.reason    = xanadu::HoleReason::Withheld;
   seg.holeRecord = hole;
   external.segments.push_back(seg);
 
   const auto scrollId    = store.addScroll(external);
   const auto resWithheld = store.resolve(PrimediaSpan{scrollId, 0, 50});
-  EXPECT_EQ(resWithheld.status, xudu::ResolutionStatus::WithheldRedacted);
+  EXPECT_EQ(resWithheld.status, xanadu::ResolutionStatus::WithheldRedacted);
   EXPECT_TRUE(resWithheld.isWithheld());
 }
 

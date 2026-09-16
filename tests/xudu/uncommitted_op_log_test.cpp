@@ -3,9 +3,9 @@
 #include <string>
 #include <vector>
 
-#include "xudu/core/uncommitted_op_log.hpp"
+#include "common/xanadu/uncommitted_op_log.hpp"
 
-namespace xudu {
+namespace xanadu {
 namespace {
 
 TEST(UncommittedOpLogTest, EmptyLogReturnsEmptyCompactedList) {
@@ -119,14 +119,14 @@ TEST(UncommittedOpLogTest, HandlesDisjointInserts) {
 }
 
 } // namespace
-} // namespace xudu
+} // namespace xanadu
 
 // Offsets in the log are byte offsets, so coalescing a backspace into a
 // preceding insert can cut a multi-byte character in half. It used to: resize
 // took the byte count and asked no questions. Splitting is refused now, and
 // the ops stay separate -- which is slower and always correct.
 TEST(UncommittedOpLogTest, DoesNotCoalesceThroughAMultiByteCharacter) {
-  xudu::UncommittedOpLog log;
+  xanadu::UncommittedOpLog log;
   // "caf\u00e9" -- five bytes, four characters, the last two bytes are one
   // character.
   const std::string cafe = "caf\xc3\xa9";
@@ -140,7 +140,7 @@ TEST(UncommittedOpLogTest, DoesNotCoalesceThroughAMultiByteCharacter) {
 
   const auto compacted = log.compact();
   for (const auto &op : compacted) {
-    if (op.kind == xudu::OpKind::Insert) {
+    if (op.kind == xanadu::OpKind::Insert) {
       // Whatever survived must still be decodable.
       for (std::size_t i = 0; i < op.text.size();) {
         const auto lead   = static_cast<unsigned char>(op.text[i]);
@@ -162,12 +162,12 @@ TEST(UncommittedOpLogTest, DoesNotCoalesceThroughAMultiByteCharacter) {
 // The ordinary case still coalesces: a backspace over an ASCII tail folds
 // into the insert, because that cut is on a character boundary.
 TEST(UncommittedOpLogTest, StillCoalescesOnACharacterBoundary) {
-  xudu::UncommittedOpLog log;
+  xanadu::UncommittedOpLog log;
   log.recordInsert(0, "hello");
   log.recordErase(4, "o");
 
   const auto compacted = log.compact();
   ASSERT_EQ(compacted.size(), 1U);
-  EXPECT_EQ(compacted[0].kind, xudu::OpKind::Insert);
+  EXPECT_EQ(compacted[0].kind, xanadu::OpKind::Insert);
   EXPECT_EQ(compacted[0].text, "hell");
 }

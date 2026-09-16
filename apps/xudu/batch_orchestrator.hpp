@@ -13,13 +13,15 @@
 
 #include <argparse/argparse.hpp>
 
-#include "xudu/core/format.hpp"
-#include "xudu/core/microversion.hpp"
-#include "xudu/core/mutable_link.hpp"
-#include "xudu/core/spool.hpp"
+#include "common/xanadu/format.hpp"
+#include "common/xanadu/microversion.hpp"
+#include "common/xanadu/mutable_link.hpp"
+#include "common/xanadu/spool.hpp"
 #include "xudu/session.hpp"
 
+namespace xanadu {}
 namespace xudu {
+using namespace ::xanadu;
 
 class BatchOrchestrator {
 public:

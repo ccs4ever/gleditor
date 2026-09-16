@@ -22,23 +22,23 @@
 #include <map>
 #include <string>
 
-#include <xudu/core/publication.hpp>
-#include <xudu/core/store.hpp>
-#include <xudu/core/swarm.hpp>
-#include <xudu/core/torrent.hpp>
+#include "common/xanadu/publication.hpp"
+#include "common/xanadu/store.hpp"
+#include "common/xanadu/swarm.hpp"
+#include "common/xanadu/torrent.hpp"
 
 namespace {
 
-using xudu::GlobalSpan;
-using xudu::Library;
-using xudu::MicroversionId;
-using xudu::Publication;
-using xudu::Scroll;
-using xudu::ScrollSegment;
+using xanadu::GlobalSpan;
+using xanadu::Library;
+using xanadu::MicroversionId;
+using xanadu::Publication;
+using xanadu::Scroll;
+using xanadu::ScrollSegment;
 
 /// A scroll standing for somebody's published permascroll, named by a key so
 /// that it is the same scroll on every machine.
-Scroll namedScroll(const xudu::PublicKey &key, std::string salt,
+Scroll namedScroll(const xanadu::PublicKey &key, std::string salt,
                    const std::uint64_t length) {
   Scroll scroll;
   scroll.publisher = key;
@@ -47,7 +47,7 @@ Scroll namedScroll(const xudu::PublicKey &key, std::string salt,
   segment.at      = 0;
   segment.length  = length;
   segment.path    = "permascroll";
-  segment.torrent = xudu::InfoHash{};
+  segment.torrent = xanadu::InfoHash{};
   scroll.segments.push_back(segment);
   return scroll;
 }
@@ -55,19 +55,19 @@ Scroll namedScroll(const xudu::PublicKey &key, std::string salt,
 /// A document that quotes @p length bytes of a published scroll, starting at
 /// @p from. Transclusion rather than typing: what is published has to point at
 /// content that already has an address.
-MicroversionId quoting(xudu::Store &store, const Scroll &scroll,
+MicroversionId quoting(xanadu::Store &store, const Scroll &scroll,
                        const std::uint64_t from, const std::uint64_t length) {
   return store.transcludeExternal(MicroversionId{}, 0, scroll, from, length);
 }
 
 TEST(PublicationTest, aDocumentIsPublishedAsPointersAndReadsBackTheSame) {
-  const auto keys   = xudu::createMutableKeys();
+  const auto keys   = xanadu::createMutableKeys();
   const auto scroll = namedScroll(keys.publicKey, "permascroll", 1000);
-  xudu::Store store;
+  xanadu::Store store;
   const auto version = quoting(store, scroll, 100, 50);
 
   const auto pub =
-      xudu::publish(store, version, keys, "essay", "An Essay", 1, 1700000000);
+      xanadu::publish(store, version, keys, "essay", "An Essay", 1, 1700000000);
   EXPECT_EQ(pub.title, "An Essay");
   EXPECT_EQ(pub.length(), 50U);
   ASSERT_EQ(pub.pieces.size(), 1U);
@@ -75,12 +75,12 @@ TEST(PublicationTest, aDocumentIsPublishedAsPointersAndReadsBackTheSame) {
   EXPECT_EQ(pub.pieces[0].start, 100U);
   EXPECT_EQ(pub.pieces[0].length, 50U);
   EXPECT_EQ(pub.pieces[0].scroll,
-            xudu::scrollKeyFor(keys.publicKey, "permascroll"));
+            xanadu::scrollKeyFor(keys.publicKey, "permascroll"));
   // And where to fetch them, or the addresses would be unresolvable.
   ASSERT_TRUE(pub.scrolls.contains(pub.pieces[0].scroll));
 
-  const auto encoded = xudu::encodePublication(pub);
-  const auto read    = xudu::decodePublication(encoded);
+  const auto encoded = xanadu::encodePublication(pub);
+  const auto read    = xanadu::decodePublication(encoded);
   ASSERT_TRUE(read.has_value());
   EXPECT_EQ(read->title, pub.title);
   EXPECT_EQ(read->pieces, pub.pieces);
@@ -94,74 +94,74 @@ TEST(PublicationTest, aPageBreakSurvivesBeingPublishedAndRead) {
   // globalise() read it as "content this machine has not published" and
   // refused. apps/xudu/session.cpp puts one in on every page of a PDF import,
   // so this was the ordinary case rather than an exotic one.
-  const auto keys   = xudu::createMutableKeys();
+  const auto keys   = xanadu::createMutableKeys();
   const auto scroll = namedScroll(keys.publicKey, "permascroll", 1000);
-  xudu::Store store;
+  xanadu::Store store;
   auto version = quoting(store, scroll, 0, 60);
   version      = store.insertBreak(version, 20);
   ASSERT_THAT(store.rebuild(version).forcedBreaks(), testing::ElementsAre(20U));
 
   const auto pub =
-      xudu::publish(store, version, keys, "essay", "An Essay", 1, 1700000000);
+      xanadu::publish(store, version, keys, "essay", "An Essay", 1, 1700000000);
   // Text before the break, the break, text after: the break is a piece of the
   // document like any other, carrying no length.
   ASSERT_EQ(pub.pieces.size(), 3U);
-  EXPECT_EQ(pub.pieces[1].scroll, xudu::breakMarkerKey);
+  EXPECT_EQ(pub.pieces[1].scroll, xanadu::breakMarkerKey);
   EXPECT_EQ(pub.pieces[1].length, 0U);
   EXPECT_EQ(pub.length(), 60U) << "a break must not be counted as text";
   // and contributing nothing to fetch, because there is nothing behind it.
-  EXPECT_FALSE(pub.scrolls.contains(std::string{xudu::breakMarkerKey}));
+  EXPECT_FALSE(pub.scrolls.contains(std::string{xanadu::breakMarkerKey}));
 
-  const auto read = xudu::decodePublication(xudu::encodePublication(pub));
+  const auto read = xanadu::decodePublication(xanadu::encodePublication(pub));
   ASSERT_TRUE(read.has_value()) << "the reserved name broke the signature";
   EXPECT_EQ(read->pieces, pub.pieces);
 
   // A reader gets the pagination back, at the same place in the same text.
-  xudu::Store reader;
-  const auto taken = xudu::adopt(reader, *read);
+  xanadu::Store reader;
+  const auto taken = xanadu::adopt(reader, *read);
   EXPECT_EQ(reader.rebuild(taken.version).length(), 60U);
   EXPECT_THAT(reader.rebuild(taken.version).forcedBreaks(),
               testing::ElementsAre(20U));
 }
 
 TEST(PublicationTest, aManifestThatWasAlteredDoesNotRead) {
-  const auto keys   = xudu::createMutableKeys();
+  const auto keys   = xanadu::createMutableKeys();
   const auto scroll = namedScroll(keys.publicKey, "permascroll", 1000);
-  xudu::Store store;
+  xanadu::Store store;
   const auto version = quoting(store, scroll, 0, 40);
   const auto pub =
-      xudu::publish(store, version, keys, "essay", "An Essay", 1, 1700000000);
+      xanadu::publish(store, version, keys, "essay", "An Essay", 1, 1700000000);
 
   // The title is the mildest thing anyone would think to change.
   auto altered  = pub;
   altered.title = "Somebody Else's Essay";
-  EXPECT_FALSE(xudu::verifyPublication(altered));
+  EXPECT_FALSE(xanadu::verifyPublication(altered));
   EXPECT_FALSE(
-      xudu::decodePublication(xudu::encodePublication(altered)).has_value());
+      xanadu::decodePublication(xanadu::encodePublication(altered)).has_value());
 
   // And the part that would matter: what the document points at.
   auto moved = pub;
   moved.pieces[0].start += 1;
-  EXPECT_FALSE(xudu::verifyPublication(moved));
+  EXPECT_FALSE(xanadu::verifyPublication(moved));
   EXPECT_FALSE(
-      xudu::decodePublication(xudu::encodePublication(moved)).has_value());
+      xanadu::decodePublication(xanadu::encodePublication(moved)).has_value());
 
   // Claiming somebody else's name over one's own content fails the same way,
   // which is the property that makes authorship a fact rather than a field.
-  const auto other = xudu::createMutableKeys();
+  const auto other = xanadu::createMutableKeys();
   auto forged      = pub;
   forged.publisher = other.publicKey;
-  EXPECT_FALSE(xudu::verifyPublication(forged));
+  EXPECT_FALSE(xanadu::verifyPublication(forged));
 }
 
 TEST(PublicationTest, refusesToPublishContentThisMachineHasNotPublished) {
   // Typed here and never sealed: the pieces point at the local spool, which
   // has no address anyone else could resolve. Publishing that would produce a
   // document that arrives and cannot be read.
-  xudu::Store store;
+  xanadu::Store store;
   const auto version = store.insert(MicroversionId{}, 0, "written just now");
-  const auto keys    = xudu::createMutableKeys();
-  EXPECT_THROW(static_cast<void>(xudu::publish(store, version, keys, "essay",
+  const auto keys    = xanadu::createMutableKeys();
+  EXPECT_THROW(static_cast<void>(xanadu::publish(store, version, keys, "essay",
                                                "An Essay", 1, 1700000000)),
                std::runtime_error);
 }
@@ -170,27 +170,27 @@ TEST(PublicationTest, refusesToPublishContentThisMachineHasNotPublished) {
 // spool the name it was missing; the offsets it already had become global
 // addresses, so nothing written before the seal has to be rewritten.
 TEST(PublicationTest, whatWasWrittenHereCanBeSealedAndThenPublished) {
-  xudu::Store store;
+  xanadu::Store store;
   const auto version = store.insert(MicroversionId{}, 0, "Written here first.");
-  const auto keys    = xudu::createMutableKeys();
+  const auto keys    = xanadu::createMutableKeys();
 
   // Before sealing there is nothing a reader could resolve.
-  EXPECT_THROW(static_cast<void>(xudu::publish(store, version, keys, "essay",
+  EXPECT_THROW(static_cast<void>(xanadu::publish(store, version, keys, "essay",
                                                "An Essay", 1, 1700000000)),
                std::runtime_error);
 
   // Sealing insists on a signed record of who is doing it; whether gpg made
   // that signature is provenance.cpp's business.
-  xudu::Provenance who;
+  xanadu::Provenance who;
   who.author.name   = "Ada Lovelace";
   who.author.email  = "ada@example.org";
-  const auto sealed = xudu::sealLocalSpool(
+  const auto sealed = xanadu::sealLocalSpool(
       store, keys, "permascroll", "",
       {who.toYaml(), "-----BEGIN PGP SIGNATURE-----\n(for the test)\n"});
   EXPECT_EQ(sealed.scroll.length(), store.primedia().bytes().size());
   EXPECT_TRUE(sealed.scroll.isNamed());
   // A real torrent: it parses, and its info hash is the one sealing reported.
-  const auto meta = xudu::Metainfo::parse(sealed.torrentFile);
+  const auto meta = xanadu::Metainfo::parse(sealed.torrentFile);
   EXPECT_EQ(meta.hash(), sealed.hash);
   // The content is the first file and the whole of the scroll; the authorship
   // record and its signature ride along, which is why the torrent holds more
@@ -199,35 +199,35 @@ TEST(PublicationTest, whatWasWrittenHereCanBeSealedAndThenPublished) {
   EXPECT_EQ(meta.files()[0].length, store.primedia().bytes().size());
   EXPECT_GT(meta.totalLength(), store.primedia().bytes().size());
 
-  const auto pub = xudu::publish(store, version, keys, "essay", "An Essay", 1,
+  const auto pub = xanadu::publish(store, version, keys, "essay", "An Essay", 1,
                                  1700000000, &sealed.scroll);
   ASSERT_FALSE(pub.pieces.empty());
   EXPECT_EQ(pub.pieces[0].scroll,
-            xudu::scrollKeyFor(keys.publicKey, "permascroll"));
+            xanadu::scrollKeyFor(keys.publicKey, "permascroll"));
   EXPECT_EQ(pub.length(), std::string("Written here first.").size());
   // And the address is the offset it always had, which is why sealing does not
   // rewrite anything.
   EXPECT_EQ(pub.pieces[0].start, 0U);
 
   ASSERT_TRUE(
-      xudu::decodePublication(xudu::encodePublication(pub)).has_value());
+      xanadu::decodePublication(xanadu::encodePublication(pub)).has_value());
 }
 
 TEST(PublicationTest, twoDocumentsQuotingOnePassageAreFoundToShareIt) {
   // Two publishers who have never met, quoting one published permascroll.
-  const auto author = xudu::createMutableKeys();
+  const auto author = xanadu::createMutableKeys();
   const auto scroll = namedScroll(author.publicKey, "permascroll", 1000);
-  const auto quoter = xudu::createMutableKeys();
+  const auto quoter = xanadu::createMutableKeys();
 
-  xudu::Store originalStore;
-  xudu::Store quotingStore;
+  xanadu::Store originalStore;
+  xanadu::Store quotingStore;
   const auto originalVersion = quoting(originalStore, scroll, 100, 200);
   // The middle of it, written by somebody who only has the address.
   const auto quotingVersion = quoting(quotingStore, scroll, 150, 50);
 
-  const auto first  = xudu::publish(originalStore, originalVersion, author,
+  const auto first  = xanadu::publish(originalStore, originalVersion, author,
                                     "original", "The Original", 1, 1700000000);
-  const auto second = xudu::publish(quotingStore, quotingVersion, quoter,
+  const auto second = xanadu::publish(quotingStore, quotingVersion, quoter,
                                     "quoting", "A Quotation", 1, 1700000100);
 
   Library library;
@@ -254,24 +254,24 @@ TEST(PublicationTest, twoDocumentsQuotingOnePassageAreFoundToShareIt) {
 }
 
 TEST(PublicationTest, aLinkMadeHereReachesAPassageThere) {
-  const auto author = xudu::createMutableKeys();
-  const auto critic = xudu::createMutableKeys();
+  const auto author = xanadu::createMutableKeys();
+  const auto critic = xanadu::createMutableKeys();
   const auto scroll = namedScroll(author.publicKey, "permascroll", 1000);
 
   // The critic writes a comment of their own, and links it to a passage of
   // somebody else's document -- without that publisher's involvement, which is
   // the point of links being separate from what they are about.
-  xudu::Store store;
+  xanadu::Store store;
   const auto scrollId = store.addScroll(scroll);
   auto version        = quoting(store, scroll, 500, 30);
-  xudu::Link link;
-  link.type  = xudu::LinkType::Comment;
+  xanadu::Link link;
+  link.type  = xanadu::LinkType::Comment;
   link.owner = "critic";
-  link.left.push_back(xudu::PrimediaSpan{scrollId, 500, 30});
-  link.right.push_back(xudu::PrimediaSpan{scrollId, 100, 200});
+  link.left.push_back(xanadu::PrimediaSpan{scrollId, 500, 30});
+  link.right.push_back(xanadu::PrimediaSpan{scrollId, 100, 200});
   version = store.addLink(version, link);
 
-  const auto published = xudu::publish(store, version, critic, "comment",
+  const auto published = xanadu::publish(store, version, critic, "comment",
                                        "A Comment", 1, 1700000000);
   ASSERT_EQ(published.links.size(), 1U);
   EXPECT_EQ(published.links[0].owner, "critic");
@@ -280,7 +280,7 @@ TEST(PublicationTest, aLinkMadeHereReachesAPassageThere) {
   ASSERT_TRUE(library.add(published));
 
   // The far end, addressed globally, is what a reader would follow.
-  const auto key   = xudu::scrollKeyFor(author.publicKey, "permascroll");
+  const auto key   = xanadu::scrollKeyFor(author.publicKey, "permascroll");
   const auto found = library.linksTouching(GlobalSpan{key, 100, 200});
   ASSERT_EQ(found.size(), 1U);
   EXPECT_FALSE(found[0].onLeft) << "the passage is the link's right end";
@@ -288,21 +288,21 @@ TEST(PublicationTest, aLinkMadeHereReachesAPassageThere) {
   // And it survived the journey: the link came back off a manifest that was
   // encoded, signed and decoded.
   const auto reread =
-      xudu::decodePublication(xudu::encodePublication(published));
+      xanadu::decodePublication(xanadu::encodePublication(published));
   ASSERT_TRUE(reread.has_value());
   ASSERT_EQ(reread->links.size(), 1U);
   EXPECT_EQ(reread->links[0].right, published.links[0].right);
 }
 
 TEST(PublicationTest, aNameMovesForwardAndNotBack) {
-  const auto keys   = xudu::createMutableKeys();
+  const auto keys   = xanadu::createMutableKeys();
   const auto scroll = namedScroll(keys.publicKey, "permascroll", 1000);
-  xudu::Store store;
+  xanadu::Store store;
   const auto version = quoting(store, scroll, 0, 10);
 
-  const auto first  = xudu::publish(store, version, keys, "essay",
+  const auto first  = xanadu::publish(store, version, keys, "essay",
                                     "First Thoughts", 1, 1700000000);
-  const auto second = xudu::publish(store, version, keys, "essay",
+  const auto second = xanadu::publish(store, version, keys, "essay",
                                     "Second Thoughts", 2, 1700000100);
 
   Library library;
@@ -314,15 +314,15 @@ TEST(PublicationTest, aNameMovesForwardAndNotBack) {
 }
 
 TEST(PublicationTest, twoNamesUnderOneKeyAreTwoDocuments) {
-  const auto keys   = xudu::createMutableKeys();
+  const auto keys   = xanadu::createMutableKeys();
   const auto scroll = namedScroll(keys.publicKey, "permascroll", 1000);
-  xudu::Store store;
+  xanadu::Store store;
   const auto version = quoting(store, scroll, 0, 10);
 
   const auto essay =
-      xudu::publish(store, version, keys, "essay", "An Essay", 1, 1700000000);
+      xanadu::publish(store, version, keys, "essay", "An Essay", 1, 1700000000);
   const auto notes =
-      xudu::publish(store, version, keys, "notes", "Some Notes", 1, 1700000000);
+      xanadu::publish(store, version, keys, "notes", "Some Notes", 1, 1700000000);
   EXPECT_NE(essay.name(), notes.name());
 
   Library library;
@@ -334,96 +334,96 @@ TEST(PublicationTest, twoNamesUnderOneKeyAreTwoDocuments) {
 TEST(PublicationTest, theSameDocumentEncodesToTheSameBytes) {
   // Which is what makes a signature checkable rather than a coincidence: two
   // machines holding the same manifest must produce the same bytes to sign.
-  const auto keys   = xudu::createMutableKeys();
+  const auto keys   = xanadu::createMutableKeys();
   const auto scroll = namedScroll(keys.publicKey, "permascroll", 1000);
-  xudu::Store store;
+  xanadu::Store store;
   const auto version = quoting(store, scroll, 7, 21);
   const auto pub =
-      xudu::publish(store, version, keys, "essay", "An Essay", 3, 1700000000);
+      xanadu::publish(store, version, keys, "essay", "An Essay", 3, 1700000000);
 
-  const auto once  = xudu::encodePublication(pub);
-  const auto twice = xudu::encodePublication(*xudu::decodePublication(once));
+  const auto once  = xanadu::encodePublication(pub);
+  const auto twice = xanadu::encodePublication(*xanadu::decodePublication(once));
   EXPECT_EQ(once, twice);
 }
 
 TEST(PublicationTest, publicationWithWithheldHolesRoundTripsAndVerifies) {
-  const auto keys   = xudu::createMutableKeys();
+  const auto keys   = xanadu::createMutableKeys();
   const auto scroll = namedScroll(keys.publicKey, "permascroll", 5000);
-  xudu::Store store;
+  xanadu::Store store;
   const auto version = quoting(store, scroll, 0, 1000);
-  auto pub = xudu::publish(store, version, keys, "essay", "Withheld Essay", 1,
+  auto pub = xanadu::publish(store, version, keys, "essay", "Withheld Essay", 1,
                            1700000000);
 
-  xudu::PublishedHoleRecord hole;
+  xanadu::PublishedHoleRecord hole;
   hole.at     = 200;
   hole.length = 300;
-  hole.reason = xudu::HoleReason::Withheld;
+  hole.reason = xanadu::HoleReason::Withheld;
   hole.contentCommitment.fill(0xAB);
   pub.holes.push_back(hole);
 
   // Re-sign with the new hole included
   pub.signature =
-      xudu::signMutableItem(xudu::publicationSigningBuffer(pub), keys);
-  EXPECT_TRUE(xudu::verifyPublication(pub));
+      xanadu::signMutableItem(xanadu::publicationSigningBuffer(pub), keys);
+  EXPECT_TRUE(xanadu::verifyPublication(pub));
 
-  const auto encoded = xudu::encodePublication(pub);
-  const auto decoded = xudu::decodePublication(encoded);
+  const auto encoded = xanadu::encodePublication(pub);
+  const auto decoded = xanadu::decodePublication(encoded);
   ASSERT_TRUE(decoded.has_value());
   ASSERT_EQ(decoded->holes.size(), 1U);
   EXPECT_EQ(decoded->holes[0].at, 200U);
   EXPECT_EQ(decoded->holes[0].length, 300U);
-  EXPECT_EQ(decoded->holes[0].reason, xudu::HoleReason::Withheld);
+  EXPECT_EQ(decoded->holes[0].reason, xanadu::HoleReason::Withheld);
   EXPECT_EQ(decoded->holes[0].contentCommitment, hole.contentCommitment);
   EXPECT_FALSE(decoded->holes[0].transcopyright.has_value());
 
   // Tampering with the hole record invalidates the signature
   auto tampered = pub;
   tampered.holes[0].length += 1;
-  EXPECT_FALSE(xudu::verifyPublication(tampered));
+  EXPECT_FALSE(xanadu::verifyPublication(tampered));
   EXPECT_FALSE(
-      xudu::decodePublication(xudu::encodePublication(tampered)).has_value());
+      xanadu::decodePublication(xanadu::encodePublication(tampered)).has_value());
 }
 
 TEST(PublicationTest,
      publicationWithTranscopyrightPaywallRoundTripsAndVerifies) {
-  const auto keys   = xudu::createMutableKeys();
+  const auto keys   = xanadu::createMutableKeys();
   const auto scroll = namedScroll(keys.publicKey, "permascroll", 5000);
-  xudu::Store store;
+  xanadu::Store store;
   const auto version = quoting(store, scroll, 0, 1000);
-  auto pub = xudu::publish(store, version, keys, "essay", "Commercial Essay", 1,
+  auto pub = xanadu::publish(store, version, keys, "essay", "Commercial Essay", 1,
                            1700000000);
 
-  xudu::TranscopyrightDescriptor tc;
+  xanadu::TranscopyrightDescriptor tc;
   tc.priceAtomicUnits = 25000000; // 0.025 XU (25 million nano-xu)
   tc.flatFee          = false;
   tc.currencySymbol   = "XU";
   tc.licenseMemo      = "Nelson-Transcopyright-v1";
-  tc.authorWallet     = *xudu::identity::Fingerprint::fromString(
+  tc.authorWallet     = *xanadu::identity::Fingerprint::fromString(
       "4A7F1234567890ABCDEF1234567890ABCDEF1234");
   tc.authorPubKey.bytes.fill(0x33);
   tc.keyId.fill(0x44);
   tc.nonce.fill(0x55);
 
-  xudu::PublishedHoleRecord hole;
+  xanadu::PublishedHoleRecord hole;
   hole.at     = 500;
   hole.length = 250;
-  hole.reason = xudu::HoleReason::TranscopyrightLock;
+  hole.reason = xanadu::HoleReason::TranscopyrightLock;
   hole.contentCommitment.fill(0x66);
   hole.transcopyright = tc;
   pub.holes.push_back(hole);
 
   // Re-sign with transcopyright paywall included
   pub.signature =
-      xudu::signMutableItem(xudu::publicationSigningBuffer(pub), keys);
-  EXPECT_TRUE(xudu::verifyPublication(pub));
+      xanadu::signMutableItem(xanadu::publicationSigningBuffer(pub), keys);
+  EXPECT_TRUE(xanadu::verifyPublication(pub));
 
-  const auto encoded = xudu::encodePublication(pub);
-  const auto decoded = xudu::decodePublication(encoded);
+  const auto encoded = xanadu::encodePublication(pub);
+  const auto decoded = xanadu::decodePublication(encoded);
   ASSERT_TRUE(decoded.has_value());
   ASSERT_EQ(decoded->holes.size(), 1U);
   EXPECT_EQ(decoded->holes[0].at, 500U);
   EXPECT_EQ(decoded->holes[0].length, 250U);
-  EXPECT_EQ(decoded->holes[0].reason, xudu::HoleReason::TranscopyrightLock);
+  EXPECT_EQ(decoded->holes[0].reason, xanadu::HoleReason::TranscopyrightLock);
   ASSERT_TRUE(decoded->holes[0].transcopyright.has_value());
 
   const auto &decodedTc = *decoded->holes[0].transcopyright;
@@ -440,51 +440,51 @@ TEST(PublicationTest,
   // Tampering with the price invalidates signature
   auto tampered                                      = pub;
   tampered.holes[0].transcopyright->priceAtomicUnits = 1;
-  EXPECT_FALSE(xudu::verifyPublication(tampered));
+  EXPECT_FALSE(xanadu::verifyPublication(tampered));
   EXPECT_FALSE(
-      xudu::decodePublication(xudu::encodePublication(tampered)).has_value());
+      xanadu::decodePublication(xanadu::encodePublication(tampered)).has_value());
 }
 
 TEST(PublicationTest, scrollSegmentWithHoleRecordEncodesAndDecodesInScroll) {
-  const auto keys = xudu::createMutableKeys();
-  xudu::Scroll scroll;
+  const auto keys = xanadu::createMutableKeys();
+  xanadu::Scroll scroll;
   scroll.publisher = keys.publicKey;
   scroll.salt      = "permascroll";
 
-  xudu::ScrollSegment seg0;
+  xanadu::ScrollSegment seg0;
   seg0.at     = 0;
   seg0.length = 1000;
   seg0.path   = "permascroll";
   scroll.segments.push_back(seg0);
 
-  xudu::PublishedHoleRecord hole;
+  xanadu::PublishedHoleRecord hole;
   hole.at     = 1000;
   hole.length = 500;
-  hole.reason = xudu::HoleReason::Withheld;
+  hole.reason = xanadu::HoleReason::Withheld;
 
-  xudu::ScrollSegment seg1;
+  xanadu::ScrollSegment seg1;
   seg1.at         = 1000;
   seg1.length     = 500;
-  seg1.kind       = xudu::SegmentKind::Withheld;
+  seg1.kind       = xanadu::SegmentKind::Withheld;
   seg1.holeRecord = hole;
   scroll.segments.push_back(seg1);
 
-  xudu::ScrollSegment seg2;
+  xanadu::ScrollSegment seg2;
   seg2.at     = 1500;
   seg2.length = 3500;
   seg2.path   = "permascroll";
   scroll.segments.push_back(seg2);
 
-  xudu::Store store;
+  xanadu::Store store;
   const auto version = quoting(store, scroll, 0, 1000);
-  const auto pub     = xudu::publish(store, version, keys, "essay",
+  const auto pub     = xanadu::publish(store, version, keys, "essay",
                                      "Segmented Essay", 1, 1700000000);
 
-  const auto encoded = xudu::encodePublication(pub);
-  const auto decoded = xudu::decodePublication(encoded);
+  const auto encoded = xanadu::encodePublication(pub);
+  const auto decoded = xanadu::decodePublication(encoded);
   ASSERT_TRUE(decoded.has_value());
 
-  const auto scrollKey = xudu::scrollKeyFor(keys.publicKey, "permascroll");
+  const auto scrollKey = xanadu::scrollKeyFor(keys.publicKey, "permascroll");
   ASSERT_TRUE(decoded->scrolls.contains(scrollKey));
   const auto &decodedScroll = decoded->scrolls.at(scrollKey);
   ASSERT_EQ(decodedScroll.segments.size(), 3U);
@@ -492,9 +492,9 @@ TEST(PublicationTest, scrollSegmentWithHoleRecordEncodesAndDecodesInScroll) {
   const auto *withheldSeg = decodedScroll.segmentAt(1200);
   ASSERT_NE(withheldSeg, nullptr);
   EXPECT_TRUE(withheldSeg->isWithheld());
-  EXPECT_EQ(withheldSeg->kind, xudu::SegmentKind::Withheld);
+  EXPECT_EQ(withheldSeg->kind, xanadu::SegmentKind::Withheld);
   ASSERT_TRUE(withheldSeg->holeRecord.has_value());
-  EXPECT_EQ(withheldSeg->holeRecord->reason, xudu::HoleReason::Withheld);
+  EXPECT_EQ(withheldSeg->holeRecord->reason, xanadu::HoleReason::Withheld);
 }
 
 } // namespace

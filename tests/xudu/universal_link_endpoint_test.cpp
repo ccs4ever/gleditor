@@ -10,7 +10,7 @@
 #include <vector>
 
 #include "common/xanadu/universal_link_endpoint.hpp"
-#include "xudu/core/link_layout.hpp"
+#include "common/xanadu/link_layout.hpp"
 
 namespace {
 

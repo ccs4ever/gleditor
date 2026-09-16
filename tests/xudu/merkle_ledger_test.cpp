@@ -5,11 +5,11 @@
 #include <gmock/gmock.h>
 #include <gtest/gtest.h>
 
-#include <xudu/core/merkle_ledger.hpp>
-#include <xudu/core/provenance.hpp>
-#include <xudu/core/torrent.hpp>
+#include "common/xanadu/merkle_ledger.hpp"
+#include "common/xanadu/provenance.hpp"
+#include "common/xanadu/torrent.hpp"
 
-namespace xudu {
+namespace xanadu {
 namespace {
 
 using ::testing::Eq;
@@ -278,4 +278,4 @@ TEST(MerkleLedgerTest, LeafAndInteriorHashingAreDomainSeparated) {
 }
 
 } // namespace
-} // namespace xudu
+} // namespace xanadu

@@ -11,10 +11,10 @@
 
 #include <glm/geometric.hpp>
 
-#include "xudu/core/tension_layout.hpp"
+#include "common/xanadu/tension_layout.hpp"
 #include "xudu/tenuous_tether.hpp"
 
-namespace xudu {
+namespace xanadu {
 namespace {
 
 using ::testing::Eq;
@@ -22,6 +22,7 @@ using ::testing::Ge;
 using ::testing::Gt;
 using ::testing::IsTrue;
 using ::testing::Lt;
+using xudu::TenuousTetherOverlay;
 
 TEST(TensionLayoutTest, RK4DampedConvergence) {
   TensionParams params;
@@ -246,4 +247,4 @@ TEST(TensionLayoutTest, TenuousTetherBezierProperties) {
 }
 
 } // namespace
-} // namespace xudu
+} // namespace xanadu

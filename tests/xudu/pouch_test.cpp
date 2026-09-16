@@ -8,13 +8,13 @@
 #include <string>
 
 #include "common/xanadu/system_docs.hpp"
-#include "xudu/core/ops.hpp"
-#include "xudu/core/pouch_zone.hpp"
-#include "xudu/core/spool.hpp"
-#include "xudu/core/store.hpp"
-#include "xudu/core/user_permascroll.hpp"
+#include "common/xanadu/ops.hpp"
+#include "common/xanadu/pouch_zone.hpp"
+#include "common/xanadu/spool.hpp"
+#include "common/xanadu/store.hpp"
+#include "common/xanadu/user_permascroll.hpp"
 
-using namespace xudu;
+using namespace xanadu;
 
 TEST(PouchTest, DefaultPartitionsAreInitialized) {
   PouchManager pm;

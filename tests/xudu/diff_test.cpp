@@ -8,17 +8,17 @@
 #include <string>
 #include <vector>
 
-#include "xudu/core/microversion.hpp"
-#include "xudu/core/ops.hpp"
-#include "xudu/core/store.hpp"
+#include "common/xanadu/microversion.hpp"
+#include "common/xanadu/ops.hpp"
+#include "common/xanadu/store.hpp"
 
 namespace {
 
-using xudu::DiffKind;
-using xudu::MicroversionId;
-using xudu::MultiVersionDiffResult;
-using xudu::OpKind;
-using xudu::Store;
+using xanadu::DiffKind;
+using xanadu::MicroversionId;
+using xanadu::MultiVersionDiffResult;
+using xanadu::OpKind;
+using xanadu::Store;
 
 TEST(DiffTest, EmptyAndGenesisDiff) {
   Store st;

@@ -6,8 +6,8 @@
 
 #include <string>
 
-#include "zigzag/core/zzstructure.hpp"
-#include "zigzag/core/zzstructure_loader.hpp"
+#include "common/xanadu/zigzag/zzstructure.hpp"
+#include "common/xanadu/zigzag/zzstructure_loader.hpp"
 
 using namespace zigzag;
 

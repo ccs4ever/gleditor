@@ -438,7 +438,7 @@ endif
 # requires it; a program does not, but compiling the two trees differently
 # would mean two object directories and two sets of rules for one flag whose
 # cost here is not measurable.
-override CXXFLAGS += $(DEBUG_OPTS) $(STD_FLAG) -fPIC -Ibuild/src -Iinclude -Iapps -Ithirdparty/Choreograph/src -Ithirdparty/argparse/include -isystem thirdparty/merklecpp -Wall -Wextra $(shell pkg-config $(STATIC) --cflags $(PKGS)) $(GL_CFLAGS)
+override CXXFLAGS += $(DEBUG_OPTS) $(STD_FLAG) -fPIC -Ibuild/src -Iinclude -Iapps -Iapps/common -Ithirdparty/Choreograph/src -Ithirdparty/argparse/include -isystem thirdparty/merklecpp -Wall -Wextra $(shell pkg-config $(STATIC) --cflags $(PKGS)) $(GL_CFLAGS)
 ifdef GLEDITOR_DATADIR
 override CXXFLAGS += -DGLEDITOR_DATADIR='"$(GLEDITOR_DATADIR)"'
 endif
@@ -566,9 +566,10 @@ COMMON_XANADU_SRCS := $(shell find apps/common/xanadu -name '*.cpp' 2>/dev/null)
 XUDU_CORE_SRCS := $(COMMON_XANADU_SRCS)
 XUDU_SRCS      := $(shell find apps/xudu -maxdepth 1 -name '*.cpp' 2>/dev/null)
 ZIGZAG_CORE_SRCS := $(shell find apps/zigzag/core -name '*.cpp' 2>/dev/null)
-ZIGZAG_SRCS      := $(filter-out $(ZIGZAG_CORE_SRCS),$(shell find apps/zigzag -name '*.cpp' 2>/dev/null))
+ZIGZAG_SRCS      := $(shell find apps/zigzag -name '*.cpp' 2>/dev/null)
 XUZZ_SRCS        := $(shell find apps/xuzz -name '*.cpp' 2>/dev/null) \
-                    apps/zigzag/zigzag_visualizer.cpp
+                    apps/zigzag/zigzag_visualizer.cpp \
+                    apps/zigzag/unified_transclusion_engine.cpp
 LIB_TEST_SRCS  := $(shell find tests/lib -name '*.cpp' 2>/dev/null)
 XUDU_TEST_SRCS := $(shell find tests/xudu -name '*.cpp' 2>/dev/null)
 ZIGZAG_TEST_SRCS := $(shell find tests/zigzag -name '*.cpp' 2>/dev/null)
@@ -582,8 +583,8 @@ GLEDITOR_OBJS   := $(call obj,$(GLEDITOR_SRCS))
 COMMON_XANADU_OBJS := $(call obj,$(COMMON_XANADU_SRCS))
 XUDU_CORE_OBJS  := $(COMMON_XANADU_OBJS)
 XUDU_OBJS       := $(call obj,$(XUDU_SRCS))
-ZIGZAG_CORE_OBJS := $(call obj,$(ZIGZAG_CORE_SRCS))
 ZIGZAG_OBJS      := $(call obj,$(ZIGZAG_SRCS))
+ZIGZAG_VISUALIZER_OBJS := $(call obj,apps/zigzag/zigzag_visualizer.cpp apps/zigzag/unified_transclusion_engine.cpp)
 XUZZ_OBJS        := $(call obj,$(XUZZ_SRCS))
 XUZZ_XUDU_OBJS   := $(filter-out $(OBJDIR)/apps/xudu/main.o,$(XUDU_OBJS))
 LIB_TEST_OBJS   := $(call obj,$(LIB_TEST_SRCS))
@@ -787,23 +788,22 @@ $(OBJDIR)/gleditor: $(GLEDITOR_OBJS) $(LIBLINK)
 .PHONY: gleditor
 
 xudu: $(OBJDIR)/xudu
-$(OBJDIR)/xudu: $(XUDU_OBJS) $(XUDU_CORE_OBJS) $(LIBLINK)
-	$(CXX) $(LDFLAGS) -o $@ $(XUDU_OBJS) $(XUDU_CORE_OBJS) $(APP_LDFLAGS) $(LIBS) $(XUDU_LIBS)
+$(OBJDIR)/xudu: $(XUDU_OBJS) $(XUDU_CORE_OBJS) $(ZIGZAG_VISUALIZER_OBJS) $(LIBLINK)
+	$(CXX) $(LDFLAGS) -o $@ $(XUDU_OBJS) $(XUDU_CORE_OBJS) $(ZIGZAG_VISUALIZER_OBJS) $(APP_LDFLAGS) $(LIBS) $(XUDU_LIBS)
 .PHONY: xudu
 
 xuzz: $(OBJDIR)/xuzz
-$(OBJDIR)/xuzz: $(XUZZ_OBJS) $(XUZZ_XUDU_OBJS) $(XUDU_CORE_OBJS) \
-                $(ZIGZAG_CORE_OBJS) $(LIBLINK)
+$(OBJDIR)/xuzz: $(XUZZ_OBJS) $(XUZZ_XUDU_OBJS) $(XUDU_CORE_OBJS) $(LIBLINK)
 	$(CXX) $(LDFLAGS) -o $@ $(XUZZ_OBJS) $(XUZZ_XUDU_OBJS) $(XUDU_CORE_OBJS) \
-	  $(ZIGZAG_CORE_OBJS) $(APP_LDFLAGS) $(LIBS) $(XUDU_LIBS)
+	  $(APP_LDFLAGS) $(LIBS) $(XUDU_LIBS)
 .PHONY: xuzz
 
 ZIGZAG_SHARED_CORE_OBJS := $(COMMON_XANADU_OBJS)
 
 
 zigzag: $(OBJDIR)/zigzag
-$(OBJDIR)/zigzag: $(ZIGZAG_OBJS) $(ZIGZAG_CORE_OBJS) $(ZIGZAG_SHARED_CORE_OBJS) $(LIBLINK)
-	$(CXX) $(LDFLAGS) -o $@ $(ZIGZAG_OBJS) $(ZIGZAG_CORE_OBJS) $(ZIGZAG_SHARED_CORE_OBJS) $(APP_LDFLAGS) $(LIBS) $(ZIGZAG_LIBS)
+$(OBJDIR)/zigzag: $(ZIGZAG_OBJS) $(ZIGZAG_SHARED_CORE_OBJS) $(LIBLINK)
+	$(CXX) $(LDFLAGS) -o $@ $(ZIGZAG_OBJS) $(ZIGZAG_SHARED_CORE_OBJS) $(APP_LDFLAGS) $(LIBS) $(ZIGZAG_LIBS)
 .PHONY: zigzag
 
 sanitize/address: CXXFLAGS += $(SANITIZE_ADDR_OPTS)

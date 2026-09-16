@@ -8,9 +8,10 @@
 #include <string>
 #include <vector>
 
-#include "xudu/core/vortex.hpp"
-#include "xudu/core/vortex_stdlib.hpp"
-#include "zigzag/core/arena_manifold.hpp"
+#include "common/xanadu/vortex/vortex_core.hpp"
+#include "common/xanadu/vortex/vortex_vm.hpp"
+#include "common/xanadu/vortex/vortex_stdlib.hpp"
+#include "common/xanadu/zigzag/arena_manifold.hpp"
 
 namespace {
 

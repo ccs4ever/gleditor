@@ -3,21 +3,21 @@
 #include <fstream>
 #include <gtest/gtest.h>
 
-#include <xudu/core/identity/identity_layout.hpp>
-#include <xudu/core/identity/identity_serialization.hpp>
-#include <xudu/core/lmdb_cache.hpp>
-#include <xudu/core/publication.hpp>
-#include <xudu/core/resolver.hpp>
-#include <xudu/core/scroll.hpp>
-#include <xudu/core/store.hpp>
-#include <xudu/core/torrent.hpp>
-#include <xudu/core/transcopyright_crypto.hpp>
-#include <xudu/core/user_permascroll.hpp>
-#include <xudu/core/virtual_memory_arena.hpp>
+#include "common/xanadu/identity/identity_layout.hpp"
+#include "common/xanadu/identity/identity_serialization.hpp"
+#include "common/xanadu/lmdb_cache.hpp"
+#include "common/xanadu/publication.hpp"
+#include "common/xanadu/resolver.hpp"
+#include "common/xanadu/scroll.hpp"
+#include "common/xanadu/store.hpp"
+#include "common/xanadu/torrent.hpp"
+#include "common/xanadu/transcopyright_crypto.hpp"
+#include "common/xanadu/user_permascroll.hpp"
+#include "common/xanadu/virtual_memory_arena.hpp"
 
 namespace {
 
-using namespace xudu;
+using namespace xanadu;
 
 TEST(TranscopyrightCryptoTest, generatesUniqueKeysAndNonces) {
   const auto k1 = crypto::generateKey();
@@ -319,9 +319,9 @@ TEST(TranscopyrightResolverTest,
 
   // Write files for DirectoryContentSource
   const auto &cipherStr = cipherBytes;
-  const std::array<xudu::TorrentContent, 1> files{
-      xudu::TorrentContent{"spool", cipherStr}};
-  const auto torrent = xudu::makeTorrent(files, "tc_torrent");
+  const std::array<xanadu::TorrentContent, 1> files{
+      xanadu::TorrentContent{"spool", cipherStr}};
+  const auto torrent = xanadu::makeTorrent(files, "tc_torrent");
 
   std::ofstream out(tempDir / "spool", std::ios::binary);
   out.write(cipherStr.data(), static_cast<std::streamsize>(cipherStr.size()));
@@ -435,9 +435,9 @@ TEST(TranscopyrightEndToEndTest,
   torrentPayload += tcCipher;
   torrentPayload += publicOutro;
 
-  const std::array<xudu::TorrentContent, 1> files{
-      xudu::TorrentContent{"spool", torrentPayload}};
-  const auto torrent = xudu::makeTorrent(files, "e2e_permascroll");
+  const std::array<xanadu::TorrentContent, 1> files{
+      xanadu::TorrentContent{"spool", torrentPayload}};
+  const auto torrent = xanadu::makeTorrent(files, "e2e_permascroll");
 
   std::ofstream out(authorDir / "spool", std::ios::binary);
   out.write(torrentPayload.data(),

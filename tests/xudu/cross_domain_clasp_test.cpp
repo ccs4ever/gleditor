@@ -5,12 +5,12 @@
  */
 #include <gtest/gtest.h>
 
-#include "xudu/core/link_layout.hpp"
-#include "xudu/core/ops.hpp"
-#include "xudu/core/pouch_zone.hpp"
-#include "xudu/core/store.hpp"
+#include "common/xanadu/link_layout.hpp"
+#include "common/xanadu/ops.hpp"
+#include "common/xanadu/pouch_zone.hpp"
+#include "common/xanadu/store.hpp"
 
-using namespace xudu;
+using namespace xanadu;
 
 TEST(CrossDomainClaspTest, PouchItemDualCardRepresentation) {
   // 1. Document card defaults

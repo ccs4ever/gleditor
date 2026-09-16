@@ -27,20 +27,20 @@
 #include <string_view>
 #include <vector>
 
-#include <xudu/core/binary_ops.hpp>
-#include <xudu/core/provenance.hpp>
-#include <xudu/core/publication.hpp>
-#include <xudu/core/store.hpp>
-#include <xudu/core/torrent.hpp>
+#include "common/xanadu/binary_ops.hpp"
+#include "common/xanadu/provenance.hpp"
+#include "common/xanadu/publication.hpp"
+#include "common/xanadu/store.hpp"
+#include "common/xanadu/torrent.hpp"
 
 namespace {
 
-using xudu::Author;
-using xudu::MicroversionId;
-using xudu::Provenance;
-using xudu::Scroll;
-using xudu::SignedProvenance;
-using xudu::Store;
+using xanadu::Author;
+using xanadu::MicroversionId;
+using xanadu::Provenance;
+using xanadu::Scroll;
+using xanadu::SignedProvenance;
+using xanadu::Store;
 
 /// A record with every field filled in, including the awkward ones.
 Provenance sample() {
@@ -135,7 +135,7 @@ TEST(ProvenanceTest, theRecordExplainsItselfAndNamesTheAuthor) {
 
 TEST(ProvenanceTest, everyFieldComesBackOutAgain) {
   const auto record = sample();
-  const auto read   = xudu::parseProvenance(record.toYaml());
+  const auto read   = xanadu::parseProvenance(record.toYaml());
   ASSERT_TRUE(read.has_value());
   EXPECT_EQ(read->author, record.author);
   // A title with a colon in it is ordinary and would end a plain YAML scalar
@@ -154,26 +154,26 @@ TEST(ProvenanceTest, aNameWithQuotesAndNewlinesInItSurvives) {
   Provenance record   = sample();
   record.author.name  = "A \"quoted\" name\nwith a line break";
   record.author.email = "odd@example.org";
-  const auto read     = xudu::parseProvenance(record.toYaml());
+  const auto read     = xanadu::parseProvenance(record.toYaml());
   ASSERT_TRUE(read.has_value());
   EXPECT_EQ(read->author.name, record.author.name);
 }
 
 TEST(ProvenanceTest, textThatIsNotARecordIsNotReadAsOne) {
-  EXPECT_FALSE(xudu::parseProvenance("").has_value());
-  EXPECT_FALSE(xudu::parseProvenance("# only a comment\n").has_value());
+  EXPECT_FALSE(xanadu::parseProvenance("").has_value());
+  EXPECT_FALSE(xanadu::parseProvenance("# only a comment\n").has_value());
   // A record with no author names nobody, whatever else it says.
-  EXPECT_FALSE(xudu::parseProvenance("title: \"Something\"\n").has_value());
+  EXPECT_FALSE(xanadu::parseProvenance("title: \"Something\"\n").has_value());
 }
 
 TEST(ProvenanceTest, signingRefusesForAnAuthorWithNoNameOrEmail) {
   Provenance record;
   record.title = "Anonymous";
-  EXPECT_THROW(static_cast<void>(xudu::signProvenance(record)),
+  EXPECT_THROW(static_cast<void>(xanadu::signProvenance(record)),
                std::runtime_error);
 
   record.author.name = "Only a name";
-  EXPECT_THROW(static_cast<void>(xudu::signProvenance(record)),
+  EXPECT_THROW(static_cast<void>(xanadu::signProvenance(record)),
                std::runtime_error);
 }
 
@@ -187,11 +187,11 @@ TEST(ProvenanceTest, gpgSignsTheRecordAndAcceptsItAgain) {
   }
 
   const auto record  = signable();
-  const auto signed_ = xudu::signProvenance(record);
+  const auto signed_ = xanadu::signProvenance(record);
   EXPECT_EQ(signed_.yaml, record.toYaml());
   EXPECT_TRUE(signed_.signature.starts_with("-----BEGIN PGP SIGNATURE-----"));
 
-  const auto check = xudu::verifyProvenance(signed_);
+  const auto check = xanadu::verifyProvenance(signed_);
   EXPECT_TRUE(check.signatureValid) << check.detail;
   EXPECT_TRUE(check.keyTrusted) << "the key was made here, so it is ours";
   EXPECT_TRUE(check.signer.contains("Ada Lovelace")) << check.signer;
@@ -207,21 +207,21 @@ TEST(ProvenanceTest, anAlteredRecordDoesNotVerify) {
     GTEST_SKIP() << "no gpg keyring could be made here";
   }
 
-  auto signed_ = xudu::signProvenance(signable());
-  ASSERT_TRUE(xudu::verifyProvenance(signed_).signatureValid);
+  auto signed_ = xanadu::signProvenance(signable());
+  ASSERT_TRUE(xanadu::verifyProvenance(signed_).signatureValid);
 
   auto forged = signed_;
   forged.yaml = std::string{forged.yaml}.replace(
       forged.yaml.find("Ada Lovelace"), std::string("Ada Lovelace").size(),
       "Someone Else");
-  const auto check = xudu::verifyProvenance(forged);
+  const auto check = xanadu::verifyProvenance(forged);
   EXPECT_FALSE(check.signatureValid);
 
   // And a record with the signature stripped is not a weaker record, it is an
   // unsigned claim.
   auto unsigned_      = signed_;
   unsigned_.signature = "";
-  EXPECT_FALSE(xudu::verifyProvenance(unsigned_).signatureValid);
+  EXPECT_FALSE(xanadu::verifyProvenance(unsigned_).signatureValid);
 }
 
 // The ordering the whole design turns on: the record is signed first, and the
@@ -238,14 +238,14 @@ TEST(ProvenanceTest, theSealCarriesTheContentAndTheRecordUnderOneHash) {
 
   auto record          = signable();
   record.contentLength = bytes.size();
-  record.contentDigest = xudu::sha256Hex(bytes);
-  const auto signed_   = xudu::signProvenance(record);
+  record.contentDigest = xanadu::sha256Hex(bytes);
+  const auto signed_   = xanadu::signProvenance(record);
 
-  const auto mine = xudu::createMutableKeys();
+  const auto mine = xanadu::createMutableKeys();
   const auto sealed =
-      xudu::sealLocalSpool(store, mine, "primedia", "", signed_);
+      xanadu::sealLocalSpool(store, mine, "primedia", "", signed_);
 
-  const auto meta = xudu::Metainfo::parse(sealed.torrentFile);
+  const auto meta = xanadu::Metainfo::parse(sealed.torrentFile);
   EXPECT_EQ(meta.hash(), sealed.hash);
   ASSERT_EQ(meta.files().size(), 4U);
 
@@ -262,15 +262,15 @@ TEST(ProvenanceTest, theSealCarriesTheContentAndTheRecordUnderOneHash) {
   // the whole tree and not the state it reached. In the compact encoding,
   // which is what crosses machines -- the array of nodes a store keeps is
   // native-endian and means nothing on the other end.
-  const auto ops = xudu::sealableOps(store);
-  EXPECT_EQ(meta.files()[1].path, xudu::sealedOpsName);
+  const auto ops = xanadu::sealableOps(store);
+  EXPECT_EQ(meta.files()[1].path, xanadu::sealedOpsName);
   EXPECT_EQ(meta.files()[1].length, ops.size());
   EXPECT_EQ(meta.files()[1].offset, bytes.size());
 
   // And the record travels with it, under the same hash.
-  EXPECT_EQ(meta.files()[2].path, xudu::provenanceFileName);
+  EXPECT_EQ(meta.files()[2].path, xanadu::provenanceFileName);
   EXPECT_EQ(meta.files()[2].length, signed_.yaml.size());
-  EXPECT_EQ(meta.files()[3].path, xudu::provenanceSigName);
+  EXPECT_EQ(meta.files()[3].path, xanadu::provenanceSigName);
   EXPECT_EQ(meta.files()[3].length, signed_.signature.size());
   EXPECT_EQ(meta.totalLength(), bytes.size() + ops.size() +
                                     signed_.yaml.size() +
@@ -281,8 +281,8 @@ TEST(ProvenanceTest, theSealCarriesTheContentAndTheRecordUnderOneHash) {
   auto other          = record;
   other.author.name   = "Someone Else";
   other.author.email  = "else@example.org";
-  const auto elsewise = xudu::sealLocalSpool(store, mine, "primedia", "",
-                                             xudu::signProvenance(other));
+  const auto elsewise = xanadu::sealLocalSpool(store, mine, "primedia", "",
+                                             xanadu::signProvenance(other));
   EXPECT_NE(elsewise.hash, sealed.hash);
 }
 
@@ -299,9 +299,9 @@ TEST(ProvenanceTest, republishingSealsOnlyWhatIsNewSinceTheLastSeal) {
   const auto one = store.insert(MicroversionId{}, 0, "First.");
   static_cast<void>(one);
 
-  const auto signed1 = xudu::signProvenance(signable());
-  const auto mine    = xudu::createMutableKeys();
-  const auto first = xudu::sealLocalSpool(store, mine, "primedia", "", signed1);
+  const auto signed1 = xanadu::signProvenance(signable());
+  const auto mine    = xanadu::createMutableKeys();
+  const auto first = xanadu::sealLocalSpool(store, mine, "primedia", "", signed1);
 
   const auto firstPrimediaLength = store.primedia().bytes().size();
   const auto firstOpCount        = store.opCount();
@@ -315,9 +315,9 @@ TEST(ProvenanceTest, republishingSealsOnlyWhatIsNewSinceTheLastSeal) {
   // Write more after the first seal, then seal again knowing what that seal
   // already covered.
   static_cast<void>(store.insert(one, 6, " And more."));
-  const auto signed2 = xudu::signProvenance(signable());
+  const auto signed2 = xanadu::signProvenance(signable());
   const auto second =
-      xudu::sealLocalSpool(store, mine, "primedia", "", signed2, first.scroll,
+      xanadu::sealLocalSpool(store, mine, "primedia", "", signed2, first.scroll,
                            static_cast<std::uint32_t>(firstOpCount));
 
   // The first segment is carried forward untouched -- its bytes are not read
@@ -339,7 +339,7 @@ TEST(ProvenanceTest, republishingSealsOnlyWhatIsNewSinceTheLastSeal) {
   // And the second torrent itself is small: only the new content, the new
   // operations, and the (re-signed) authorship record -- not the whole
   // spool sealed over again.
-  const auto meta = xudu::Metainfo::parse(second.torrentFile);
+  const auto meta = xanadu::Metainfo::parse(second.torrentFile);
   EXPECT_EQ(meta.files()[0].length,
             store.primedia().bytes().size() - firstPrimediaLength);
 }
@@ -356,22 +356,22 @@ TEST(ProvenanceTest, resealingWithNothingNewAddsNoNewSegments) {
   Store store;
   static_cast<void>(store.insert(MicroversionId{}, 0, "Unchanging."));
 
-  const auto signed1 = xudu::signProvenance(signable());
-  const auto mine    = xudu::createMutableKeys();
-  const auto first = xudu::sealLocalSpool(store, mine, "primedia", "", signed1);
+  const auto signed1 = xanadu::signProvenance(signable());
+  const auto mine    = xanadu::createMutableKeys();
+  const auto first = xanadu::sealLocalSpool(store, mine, "primedia", "", signed1);
 
-  const auto signed2 = xudu::signProvenance(signable());
+  const auto signed2 = xanadu::signProvenance(signable());
   const auto second =
-      xudu::sealLocalSpool(store, mine, "primedia", "", signed2, first.scroll,
+      xanadu::sealLocalSpool(store, mine, "primedia", "", signed2, first.scroll,
                            static_cast<std::uint32_t>(store.opCount()));
 
   EXPECT_EQ(second.scroll.segments, first.scroll.segments);
   EXPECT_FALSE(second.opsSegment.has_value());
 
-  const auto meta = xudu::Metainfo::parse(second.torrentFile);
+  const auto meta = xanadu::Metainfo::parse(second.torrentFile);
   for (const auto &file : meta.files()) {
-    EXPECT_NE(file.path, xudu::sealedContentName);
-    EXPECT_NE(file.path, xudu::sealedOpsName);
+    EXPECT_NE(file.path, xanadu::sealedContentName);
+    EXPECT_NE(file.path, xanadu::sealedOpsName);
   }
 }
 
@@ -391,8 +391,8 @@ TEST(ProvenanceTest, theSealedOperationsAreTheWholeTreeAndDecodeBack) {
   ASSERT_FALSE(encoded.empty());
 
   std::istringstream in(encoded, std::ios::binary);
-  std::vector<xudu::OpRecord> records;
-  xudu::readOpsSpool(in, records);
+  std::vector<xanadu::OpRecord> records;
+  xanadu::readOpsSpool(in, records);
   EXPECT_EQ(records.size(), store.opCount())
       << "the seal carried a version rather than a history";
 
@@ -429,16 +429,16 @@ TEST(ProvenanceTest, aSealedHistoryComesBackWithThePublishersOwnNames) {
   const auto other = publisher.insert(one, 5, " there");
   static_cast<void>(publisher.insert(other, 0, "X"));
 
-  const auto sealed = xudu::sealableOps(publisher);
+  const auto sealed = xanadu::sealableOps(publisher);
   ASSERT_FALSE(sealed.empty());
 
   // The scroll the publisher's local spool became, which is what their
   // ScrollId zero meant.
   Scroll became;
-  became.publisher = xudu::createMutableKeys().publicKey;
+  became.publisher = xanadu::createMutableKeys().publicKey;
   became.salt      = "essay";
 
-  const auto history = xudu::historyFromSeal(sealed, became, {});
+  const auto history = xanadu::historyFromSeal(sealed, became, {});
   ASSERT_NE(history, nullptr);
 
   // Their names, not renamed into this store's numbering: "2a4" is a name
@@ -477,11 +477,11 @@ TEST(ProvenanceTest, anOperationsGlobalNameOutlivesItsLocalIndex) {
   static_cast<void>(publisher.insert(branched, 0, "X"));
 
   Scroll became;
-  became.publisher = xudu::createMutableKeys().publicKey;
+  became.publisher = xanadu::createMutableKeys().publicKey;
   became.salt      = "essay";
 
   const auto history =
-      xudu::historyFromSeal(xudu::sealableOps(publisher), became, {});
+      xanadu::historyFromSeal(xanadu::sealableOps(publisher), became, {});
   ASSERT_NE(history, nullptr);
 
   const auto here  = publisher.segmentedOps().indexOf(branched);
@@ -492,13 +492,13 @@ TEST(ProvenanceTest, anOperationsGlobalNameOutlivesItsLocalIndex) {
 
   // The name did not move, so both stores say the same thing about the same
   // operation -- which is the whole of what a GlobalOpRef is for.
-  const auto said = xudu::opRefOf(publisher, here, became);
+  const auto said = xanadu::opRefOf(publisher, here, became);
   EXPECT_EQ(said.produces, branched);
-  EXPECT_EQ(said, xudu::opRefOf(*history, there, became));
+  EXPECT_EQ(said, xanadu::opRefOf(*history, there, became));
 
   // And each store reads it back as its own index, not as the other's.
-  EXPECT_EQ(xudu::localiseOpRef(publisher, said, became), here);
-  EXPECT_EQ(xudu::localiseOpRef(*history, said, became), there);
+  EXPECT_EQ(xanadu::localiseOpRef(publisher, said, became), here);
+  EXPECT_EQ(xanadu::localiseOpRef(*history, said, became), there);
 }
 
 TEST(ProvenanceTest, anOpRefIsRefusedByADocumentItDoesNotName) {
@@ -510,31 +510,31 @@ TEST(ProvenanceTest, anOpRefIsRefusedByADocumentItDoesNotName) {
   const auto first = mine.insert(MicroversionId{}, 0, "mine");
 
   Scroll became;
-  became.publisher = xudu::createMutableKeys().publicKey;
+  became.publisher = xanadu::createMutableKeys().publicKey;
   became.salt      = "essay";
   Scroll somebodyElse;
-  somebodyElse.publisher = xudu::createMutableKeys().publicKey;
+  somebodyElse.publisher = xanadu::createMutableKeys().publicKey;
   somebodyElse.salt      = "essay";
 
   const auto said =
-      xudu::opRefOf(mine, mine.segmentedOps().indexOf(first), became);
+      xanadu::opRefOf(mine, mine.segmentedOps().indexOf(first), became);
   ASSERT_FALSE(said.empty());
   EXPECT_EQ(said.produces.str(), "1");
 
-  EXPECT_FALSE(xudu::localiseOpRef(mine, said, somebodyElse).has_value())
+  EXPECT_FALSE(xanadu::localiseOpRef(mine, said, somebodyElse).has_value())
       << "a ref into another document must not match on the name alone";
 
   // A name this history does not hold, under the right scroll, is equally not
   // an answer.
-  const xudu::GlobalOpRef unheardOf{said.scroll,
-                                    xudu::MicroversionId::parse("9")};
-  EXPECT_FALSE(xudu::localiseOpRef(mine, unheardOf, became).has_value());
+  const xanadu::GlobalOpRef unheardOf{said.scroll,
+                                    xanadu::MicroversionId::parse("9")};
+  EXPECT_FALSE(xanadu::localiseOpRef(mine, unheardOf, became).has_value());
 
   // State zero is not produced by an operation, so no index names it.
-  EXPECT_TRUE(xudu::opRefOf(mine, 0, became).empty());
-  EXPECT_TRUE(xudu::opRefOf(mine, 9999, became).empty());
+  EXPECT_TRUE(xanadu::opRefOf(mine, 0, became).empty());
+  EXPECT_TRUE(xanadu::opRefOf(mine, 9999, became).empty());
   EXPECT_FALSE(
-      xudu::localiseOpRef(mine, xudu::GlobalOpRef{}, became).has_value());
+      xanadu::localiseOpRef(mine, xanadu::GlobalOpRef{}, became).has_value());
 }
 
 // The read side of incremental sealing: a segment sealed after an earlier
@@ -546,19 +546,19 @@ TEST(ProvenanceTest, historyFromSealAssemblesSegmentsSealedAcrossTwoPublishes) {
   const auto two = publisher.insert(one, 5, " world");
 
   const auto firstOpCount = publisher.opCount();
-  const auto firstSegment = xudu::sealableOps(publisher);
+  const auto firstSegment = xanadu::sealableOps(publisher);
 
   const auto three = publisher.erase(two, 0, 1);
   static_cast<void>(publisher.insert(one, 5, " again"));
   const auto secondSegment =
-      xudu::sealableOps(publisher, static_cast<std::uint32_t>(firstOpCount));
+      xanadu::sealableOps(publisher, static_cast<std::uint32_t>(firstOpCount));
 
   Scroll became;
-  became.publisher = xudu::createMutableKeys().publicKey;
+  became.publisher = xanadu::createMutableKeys().publicKey;
   became.salt      = "essay";
 
   const std::array<std::string_view, 2> segments{firstSegment, secondSegment};
-  const auto history = xudu::historyFromSeal(segments, became, {});
+  const auto history = xanadu::historyFromSeal(segments, became, {});
   ASSERT_NE(history, nullptr);
 
   EXPECT_EQ(history->opCount(), publisher.opCount());
@@ -572,7 +572,7 @@ TEST(ProvenanceTest, historyFromSealAssemblesSegmentsSealedAcrossTwoPublishes) {
   // first non-local slot) once it was sealed and taken into this history --
   // the same renumbering aSealedHistoryComesBackWithThePublishersOwnNames
   // checks for a single-segment seal.
-  const auto byOffset = [](const std::vector<xudu::PrimediaSpan> &pieces) {
+  const auto byOffset = [](const std::vector<xanadu::PrimediaSpan> &pieces) {
     std::vector<std::pair<std::uint64_t, std::uint64_t>> out;
     out.reserve(pieces.size());
     for (const auto &piece : pieces) {
@@ -589,7 +589,7 @@ TEST(ProvenanceTest, historyFromSealAssemblesSegmentsSealedAcrossTwoPublishes) {
 
   // The first segment alone gives only the history it actually carried: the
   // second is genuinely additional operations, not a re-seal of everything.
-  const auto partial = xudu::historyFromSeal(firstSegment, became, {});
+  const auto partial = xanadu::historyFromSeal(firstSegment, became, {});
   ASSERT_NE(partial, nullptr);
   EXPECT_EQ(partial->opCount(), firstOpCount);
 }
@@ -599,45 +599,45 @@ TEST(ProvenanceTest, aSealWhoseScrollsAreMissingIsRefused) {
   const auto typed = publisher.insert(MicroversionId{}, 0, "mine");
   // Quote somebody else's scroll, so the seal has a table entry to resolve.
   Scroll theirs;
-  theirs.publisher = xudu::createMutableKeys().publicKey;
+  theirs.publisher = xanadu::createMutableKeys().publicKey;
   theirs.salt      = "theirs";
   static_cast<void>(publisher.transcludeExternal(typed, 0, theirs, 0, 4));
 
-  const auto sealed = xudu::sealableOps(publisher);
+  const auto sealed = xanadu::sealableOps(publisher);
   Scroll became;
-  became.publisher = xudu::createMutableKeys().publicKey;
+  became.publisher = xanadu::createMutableKeys().publicKey;
 
   // Handed no scrolls, the entry cannot be resolved and the whole thing is
   // refused rather than read with a hole in it.
-  EXPECT_THROW(static_cast<void>(xudu::historyFromSeal(sealed, became, {})),
+  EXPECT_THROW(static_cast<void>(xanadu::historyFromSeal(sealed, became, {})),
                std::runtime_error);
 
   // Handed the scroll it names, it reads.
   std::map<std::string, Scroll> carried;
-  carried.emplace(xudu::scrollKey(theirs), theirs);
-  const auto history = xudu::historyFromSeal(sealed, became, carried);
+  carried.emplace(xanadu::scrollKey(theirs), theirs);
+  const auto history = xanadu::historyFromSeal(sealed, became, carried);
   ASSERT_NE(history, nullptr);
   EXPECT_EQ(history->opCount(), publisher.opCount());
 
   // Bytes that are not a seal's operations are not read as one.
   EXPECT_THROW(
-      static_cast<void>(xudu::historyFromSeal("not a seal", became, carried)),
+      static_cast<void>(xanadu::historyFromSeal("not a seal", became, carried)),
       std::runtime_error);
 }
 
 TEST(ProvenanceTest, sealingWithoutASignedRecordIsRefused) {
   Store store;
   static_cast<void>(store.insert(MicroversionId{}, 0, "Written here first."));
-  const auto mine = xudu::createMutableKeys();
+  const auto mine = xanadu::createMutableKeys();
 
   EXPECT_THROW(
-      static_cast<void>(xudu::sealLocalSpool(store, mine, "primedia", "", {})),
+      static_cast<void>(xanadu::sealLocalSpool(store, mine, "primedia", "", {})),
       std::runtime_error);
   // Half of one is no better: a record with no signature over it is a claim
   // anybody could have written.
   SignedProvenance halfway;
   halfway.yaml = sample().toYaml();
   EXPECT_THROW(static_cast<void>(
-                   xudu::sealLocalSpool(store, mine, "primedia", "", halfway)),
+                   xanadu::sealLocalSpool(store, mine, "primedia", "", halfway)),
                std::runtime_error);
 }
