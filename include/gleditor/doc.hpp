@@ -657,8 +657,10 @@ public:
   void load(const gleditor::TextSource &source);
   void makePages();
   void makePages(RenderState &state);
-  /// Build any pending shaped pages on the render thread in page order.
-  /// Returns true when all pages have been built and shaping is complete.
+  /// Build any pending shaped pages on the render thread in page order, up to
+  /// render::kPageBuildFrameBudget worth of wall-clock time; whatever is left
+  /// stays queued in document order for the next call. Returns true when all
+  /// pages have been built and shaping is complete.
   bool buildPendingPages(RenderState &state);
   /// Append every visible page's draw to @p batches.
   /// @param viewProjection projection * view; the document's own model matrix

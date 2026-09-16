@@ -1,4 +1,5 @@
 #include <algorithm>                      // for min, max
+#include <chrono>                         // for steady_clock, milliseconds
 #include <cmath>                          // for ceil, lround
 #include <cstddef>                        // for byte
 #include <cstdint>                        // for uint32_t
@@ -6,6 +7,7 @@
 #include <gleditor/animation.hpp>         // for docArrival, docArrivalDepth
 #include <gleditor/doc.hpp>               // IWYU pragma: associated
 #include <gleditor/document_observer.hpp> // for DocumentObserver
+#include <gleditor/render/constants.hpp>  // for kPageBuildFrameBudget
 #include <gleditor/render/device.hpp>     // for RenderDevice
 #include <gleditor/render_state.hpp>      // for RenderState
 #include <gleditor/renderer.hpp>          // for Renderer, RendererRef
@@ -1208,6 +1210,12 @@ bool Doc::buildPendingPages(RenderState &state) {
     currentTopY                 = lastBottomY - (pageGapPx * pixelsToWorld);
   }
 
+  // Bounded so that a backlog the background shaping thread got ahead on --
+  // whether from a slow render-thread startup or simply outpacing this loop
+  // -- gets spread back out over several frames instead of built in one
+  // blocking call. See render::kPageBuildFrameBudget's own comment.
+  const auto buildStart = std::chrono::steady_clock::now();
+  std::size_t built     = 0;
   for (auto &[shaping, textOffset] : toBuild) {
     const auto numPages         = pages.size();
     const float pageHeightPx    = pageBoxFor(shaping).height;
@@ -1219,10 +1227,33 @@ bool Doc::buildPendingPages(RenderState &state) {
     trans = glm::scale(trans, glm::vec3(pixelsToWorld, pixelsToWorld, 1.0F));
     pages.emplace_back(getPtr(), state, trans, std::move(shaping), textOffset,
                        static_cast<std::uint32_t>(numPages));
+    ++built;
 
     currentTopY =
         (centerY - (pageHeightWorld / 2.0F)) - (pageGapPx * pixelsToWorld);
+
+    // Always build at least one page per call even if it alone exceeds the
+    // budget, so a single expensive page (e.g. one that grows the glyph
+    // atlas) cannot stall progress -- checked after building rather than
+    // before, since the cost being budgeted is the build that just ran.
+    if (std::chrono::steady_clock::now() - buildStart >=
+        render::kPageBuildFrameBudget) {
+      break;
+    }
   }
+
+  if (built < toBuild.size()) {
+    // Whatever this call didn't get to goes back in front of anything the
+    // background thread has appended since the swap above, preserving the
+    // document order buildPendingPages()'s own stacking math (currentTopY)
+    // and the glyph-atlas insertion order both depend on.
+    std::lock_guard lock(shapingMutex);
+    pendingShapings.insert(pendingShapings.begin(),
+                           std::make_move_iterator(toBuild.begin()) + built,
+                           std::make_move_iterator(toBuild.end()));
+    return false;
+  }
+
   if (shapingComplete.load(std::memory_order_acquire)) {
     std::lock_guard lock(shapingMutex);
     if (pendingShapings.empty()) {

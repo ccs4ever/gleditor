@@ -1,13 +1,13 @@
 /**
  * @file layoutfilade.cpp
- * @brief Implementation of the True Layoutfilade 2D B-enfilade.
+ * @brief Implementation of the Layoutfilade 2D B-enfilade.
  */
-#include "common/xanadu/enfilade/layoutfilade.hpp"
+#include <gleditor/enfilade/layoutfilade.hpp>
 
 #include <cmath>
 #include <iostream>
 
-namespace xanadu::enfilade {
+namespace gleditor::enfilade {
 
 namespace {
 
@@ -495,4 +495,4 @@ bool Layoutfilade::verifyAgainstLinearScan(
   return true;
 }
 
-} // namespace xanadu::enfilade
+} // namespace gleditor::enfilade

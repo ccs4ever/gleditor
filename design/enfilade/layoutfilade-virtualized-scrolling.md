@@ -1,7 +1,12 @@
 # The True Layoutfilade: 2D Coordinate & Height B-Enfilade for Virtualized Scrolling
 
 This document specifies the architecture, 2D monoid algebra, and runtime mechanics of the
-**Layoutfilade** in `apps/common/xanadu/enfilade/layoutfilade.hpp` and `.cpp`.
+**Layoutfilade** in `include/gleditor/enfilade/layoutfilade.hpp` and
+`src/enfilade/layoutfilade.cpp`. It is a core library component (namespace `gleditor::enfilade`)
+with no dependency on the xanadu, xudu, or zigzag engines: it indexes generic text lines and
+`gleditor::LayoutBox` rich-media boxes, nothing document- or app-specific.
+`apps/xudu/core/layoutfilade.hpp` is a one-line forwarding header into it, matching this repo's
+convention for xudu/zigzag's own core shims.
 
 The Layoutfilade provides true (O(\\log N)) virtualized scrolling, screen coordinate (Y
 \\leftrightarrow (\\text{line}, \\text{byte})) mapping, native non-text rich-media layout, and
