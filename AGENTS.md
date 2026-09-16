@@ -1,8 +1,5 @@
 # gleditor
 
-> Refer to [`CLAUDE.md`](CLAUDE.md) for full developer guidance, build/test workflows, coding style,
-> and architecture references.
-
 GPU-rendered text editor library (`gleditor`) plus three programs built on it: `apps/gleditor`
 (plain editor), `apps/xudu` (a xanadoc/xanalogical editor), and `apps/zigzag` (a Project Xanadu
 Zigzag multidimensional slice visualizer). Backends: OpenGL, OpenGL ES, and optionally Vulkan, all
