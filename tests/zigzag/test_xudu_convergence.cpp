@@ -317,6 +317,24 @@ TEST(ZzXuduConvergenceTest, ProjectStoreWithHolesAndTranscopyrightToZigzag) {
   EXPECT_TRUE(validate2RankManifold(zzDoc, &error)) << error;
 }
 
+TEST(ZzXuduConvergenceTest, StoreProjectionRetainsSourceDocumentAndSpan) {
+  xudu::Store store;
+  const auto version =
+      store.insert(xudu::MicroversionId{}, 0, "First paragraph.\n\nSecond.");
+
+  const auto projected = projectStoreWithProvenance(store, {version});
+  ASSERT_FALSE(projected.document.cells.empty());
+  ASSERT_EQ(projected.sourceByProjectedCell.size(),
+            projected.document.cells.size());
+  for (const auto &[id, origin] : projected.sourceByProjectedCell) {
+    EXPECT_TRUE(projected.document.cells.contains(id));
+    EXPECT_EQ(origin.documentId, store.documentId().str());
+    EXPECT_EQ(origin.version, version);
+    EXPECT_GT(origin.span.length, 0U);
+    EXPECT_FALSE(origin.sourceCell);
+  }
+}
+
 // -- a slice is a store -------------------------------------------------------
 //
 // Migration step 20. A YAML slice is a transfer format now: sliceToStore()

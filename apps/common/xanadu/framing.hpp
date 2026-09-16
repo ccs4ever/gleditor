@@ -136,6 +136,30 @@ pageStackExtent(const std::vector<float> &pageHeightsWorld, float pageGapWorld);
                                                  float depth,
                                                  std::size_t segments);
 
+/**
+ * @brief Morphic 3D butterfly ribbon route connecting 2D document text lines
+ *        to 3D Zigzag cell boundaries.
+ *
+ * Uses a cubic Hermite spline in 3D space with boundary tangent matching:
+ * - Start tangent aligns coplanar with the document page plane.
+ * - End tangent aligns with the cell's surface normal / docking orientation.
+ *
+ * Prevents ribbon collapse and singularities when endpoints span disparate
+ * depth planes (e.g. Z = 0 to Z = -40).
+ *
+ * @param from Document anchor or start point in world space.
+ * @param to Cell anchor or target point in world space.
+ * @param fromTangent Departure direction vector.
+ * @param toTangent Arrival direction vector.
+ * @param segments Number of linear subdivision segments (default 16).
+ * @return segments + 1 points forming the 3D spline.
+ */
+[[nodiscard]] std::vector<glm::vec3> morphicRoute(const glm::vec3 &from,
+                                                  const glm::vec3 &to,
+                                                  const glm::vec3 &fromTangent,
+                                                  const glm::vec3 &toTangent,
+                                                  std::size_t segments = 16);
+
 } // namespace xanadu
 
 #endif // XUDU_FRAMING_H

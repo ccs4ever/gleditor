@@ -15,7 +15,7 @@ TensionLayoutEngine::TensionLayoutEngine(TensionParams params)
 
 void TensionLayoutEngine::setBody(TensionBody body) {
   for (auto &b : bodies_) {
-    if (b.docIndex == body.docIndex) {
+    if (b.targetKind == body.targetKind && b.targetId == body.targetId) {
       b = body;
       return;
     }
@@ -24,18 +24,20 @@ void TensionLayoutEngine::setBody(TensionBody body) {
 }
 
 const TensionBody *
-TensionLayoutEngine::findBody(const std::size_t docIndex) const {
+TensionLayoutEngine::findBody(const std::size_t targetId,
+                              const LinkTargetKind kind) const {
   for (const auto &b : bodies_) {
-    if (b.docIndex == docIndex) {
+    if (b.targetKind == kind && b.targetId == targetId) {
       return &b;
     }
   }
   return nullptr;
 }
 
-TensionBody *TensionLayoutEngine::findBody(const std::size_t docIndex) {
+TensionBody *TensionLayoutEngine::findBody(const std::size_t targetId,
+                                           const LinkTargetKind kind) {
   for (auto &b : bodies_) {
-    if (b.docIndex == docIndex) {
+    if (b.targetKind == kind && b.targetId == targetId) {
       return &b;
     }
   }
@@ -58,7 +60,8 @@ void TensionLayoutEngine::computeForces(const std::vector<TensionBody> &state,
   const std::size_t n = state.size();
   forces.assign(n, glm::vec3(0.0F));
 
-  // 1. Damping and depth plane restoring forces (F_aest & F_read)
+  // 1. Damping and depth plane / tether restoring forces (F_aest, F_read,
+  // E_tether)
   for (std::size_t i = 0; i < n; ++i) {
     if (state[i].pinned) {
       continue;
@@ -67,22 +70,68 @@ void TensionLayoutEngine::computeForces(const std::vector<TensionBody> &state,
     // Velocity damping: F_damp = -c * v
     forces[i] -= params_.kDamping * state[i].velocity;
 
-    // Depth tier spring
-    if (state[i].isForeground) {
-      // Pull to Z = 0 reading plane
-      forces[i].z += -params_.kPlane * state[i].position.z;
+    if (state[i].isCell()) {
+      bool hasActiveConstraint = false;
+      for (const auto &c : constraints_) {
+        if (c.active && ((c.fromTarget == state[i].targetId &&
+                          c.fromKind == state[i].targetKind) ||
+                         (c.toTarget == state[i].targetId &&
+                          c.toKind == state[i].targetKind))) {
+          hasActiveConstraint = true;
+          break;
+        }
+      }
+
+      if (!hasActiveConstraint && !state[i].isFlying) {
+        // Tether restoring force pulling toward native coordinate in
+        // background: F_tether = -k_tether * (P_c - P_native(c))
+        const glm::vec3 tetherDelta =
+            state[i].position - state[i].restingPosition;
+        forces[i] -= params_.kTether * tetherDelta;
+
+        const float deltaZ = state[i].position.z - params_.backgroundDepthZ;
+        forces[i].z += -params_.kTier * deltaZ;
+      }
     } else {
-      // Pull to backgroundDepthZ
-      const float deltaZ = state[i].position.z - params_.backgroundDepthZ;
-      forces[i].z += -params_.kTier * deltaZ;
+      // Depth tier spring for documents
+      if (state[i].isForeground) {
+        // Pull to Z = 0 reading plane
+        forces[i].z += -params_.kPlane * state[i].position.z;
+      } else {
+        // Pull to backgroundDepthZ
+        const float deltaZ = state[i].position.z - params_.backgroundDepthZ;
+        forces[i].z += -params_.kTier * deltaZ;
+      }
     }
   }
 
-  // 2. Soft-body Coulomb repulsion between overlapping documents (F_read)
+  // 2. Soft-body Coulomb repulsion between non-constrained bodies (F_read)
   for (std::size_t i = 0; i < n; ++i) {
     for (std::size_t j = i + 1; j < n; ++j) {
       // Only repel if in similar depth tiers
       if (std::abs(state[i].position.z - state[j].position.z) > 15.0F) {
+        continue;
+      }
+
+      // Do not repel if the pair is connected by an active constraint
+      bool areConstrained = false;
+      for (const auto &c : constraints_) {
+        if (!c.active) {
+          continue;
+        }
+        if ((c.fromTarget == state[i].targetId &&
+             c.fromKind == state[i].targetKind &&
+             c.toTarget == state[j].targetId &&
+             c.toKind == state[j].targetKind) ||
+            (c.fromTarget == state[j].targetId &&
+             c.fromKind == state[j].targetKind &&
+             c.toTarget == state[i].targetId &&
+             c.toKind == state[i].targetKind)) {
+          areConstrained = true;
+          break;
+        }
+      }
+      if (areConstrained) {
         continue;
       }
 
@@ -105,16 +154,20 @@ void TensionLayoutEngine::computeForces(const std::vector<TensionBody> &state,
     }
   }
 
-  // 3. Collinear link alignment attraction springs (F_align)
+  // 3. Collinear link alignment attraction springs (F_align & E_satelloid)
   for (const auto &c : constraints_) {
+    if (!c.active) {
+      continue;
+    }
     std::size_t fromIdx = n;
     std::size_t toIdx   = n;
 
     for (std::size_t i = 0; i < n; ++i) {
-      if (state[i].docIndex == c.fromDoc) {
+      if (state[i].targetId == c.fromTarget &&
+          state[i].targetKind == c.fromKind) {
         fromIdx = i;
       }
-      if (state[i].docIndex == c.toDoc) {
+      if (state[i].targetId == c.toTarget && state[i].targetKind == c.toKind) {
         toIdx = i;
       }
     }
@@ -126,9 +179,15 @@ void TensionLayoutEngine::computeForces(const std::vector<TensionBody> &state,
     const auto &near = state[fromIdx];
     const auto &far  = state[toIdx];
 
-    // Collinear target position for far document
+    const float kSpring =
+        far.isCell() ? params_.kSatelloidAlign : params_.kAlign;
+    const float gap = c.targetGap > 0.0F ? c.targetGap
+                                         : (far.isCell() ? params_.satelloidGap
+                                                         : params_.defaultGap);
+
+    // Collinear target position for far body
     const float targetX =
-        near.position.x + 0.5F * (near.width + far.width) + c.targetGap;
+        near.position.x + 0.5F * (near.width + far.width) + gap;
     const float deltaAnchorY = c.nearAnchorY - c.farAnchorY;
     const float targetY      = near.position.y + deltaAnchorY;
     const float targetZ      = near.position.z;
@@ -136,13 +195,14 @@ void TensionLayoutEngine::computeForces(const std::vector<TensionBody> &state,
     const glm::vec3 targetPos(targetX, targetY, targetZ);
     const glm::vec3 error = targetPos - far.position;
 
-    const glm::vec3 alignForce = params_.kAlign * c.prominence * error;
+    const glm::vec3 alignForce = kSpring * c.prominence * error;
 
     if (!far.pinned) {
       forces[toIdx] += alignForce;
     }
     if (!near.pinned) {
-      forces[fromIdx] -= 0.15F * alignForce; // Reaction force
+      const float reactionRatio = far.isCell() ? 0.02F : 0.15F;
+      forces[fromIdx] -= reactionRatio * alignForce; // Reaction force
     }
   }
 
@@ -282,11 +342,14 @@ void TensionLayoutEngine::solveEquilibrium() {
     return;
   }
 
-  // 1. Separate foreground and background
+  // 1. Separate foreground and background documents
   float currX  = 0.0F;
   bool firstFg = true;
 
   for (auto &b : bodies_) {
+    if (b.isCell()) {
+      continue; // Handled via constraints below
+    }
     if (!b.isForeground) {
       b.position.z = params_.backgroundDepthZ;
       b.velocity   = glm::vec3(0.0F);
@@ -306,13 +369,30 @@ void TensionLayoutEngine::solveEquilibrium() {
     b.velocity = glm::vec3(0.0F);
   }
 
-  // 2. Align constrained pairs vertically
+  // 2. Position satelloid cells and align constrained pairs
   for (const auto &c : constraints_) {
-    auto *const near = findBody(c.fromDoc);
-    auto *const far  = findBody(c.toDoc);
-    if (near != nullptr && far != nullptr) {
-      const float deltaY = c.nearAnchorY - c.farAnchorY;
-      far->position.y    = near->position.y + deltaY;
+    auto *const near = findBody(c.fromTarget, c.fromKind);
+    auto *const far  = findBody(c.toTarget, c.toKind);
+    if (near == nullptr || far == nullptr) {
+      continue;
+    }
+    const float deltaY = c.nearAnchorY - c.farAnchorY;
+    far->position.y    = near->position.y + deltaY;
+
+    if (far->isCell()) {
+      const float gap = c.targetGap > 0.0F ? c.targetGap : params_.satelloidGap;
+      far->position.x =
+          near->position.x + 0.5F * (near->width + far->width) + gap;
+      far->position.z = near->position.z;
+      far->velocity   = glm::vec3(0.0F);
+    }
+  }
+
+  // Inactive cells return to resting position
+  for (auto &b : bodies_) {
+    if (b.isCell() && !b.isFlying) {
+      b.position = b.restingPosition;
+      b.velocity = glm::vec3(0.0F);
     }
   }
 }

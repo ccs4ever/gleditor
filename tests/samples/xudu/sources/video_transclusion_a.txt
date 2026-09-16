@@ -1,6 +1,6 @@
 Page 1: Full Conference Keynote Video (4 Scenes: Alpha, Beta, Gamma, Delta)
 
-[VIDEO_STREAM_CONTAINER: tests/samples/sample_video.mp4]
+[VIDEO_STREAM_CONTAINER: tests/samples/sample_video_seekable.mp4]
 Full Keyframe Index:
   - Scene 01 [00:00 - 02:00]: KEYFRAME_ALPHA_RED (Introductory Overview)
   - Scene 02 [02:00 - 04:00]: KEYFRAME_BETA_GREEN (Address Space Mapping)

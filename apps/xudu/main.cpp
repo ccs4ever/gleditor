@@ -39,6 +39,7 @@
 #include <gleditor/media.hpp>
 #include <gleditor/media_stream.hpp>
 #include <gleditor/media_widget.hpp>
+#include <gleditor/mimetype.hpp>
 #include <gleditor/radial_menu.hpp>
 #include <gleditor/render/diagnostics.hpp>
 #include <gleditor/render/types.hpp>
@@ -48,6 +49,7 @@
 #include <gleditor/state.hpp>
 #include <gleditor/text_source.hpp>
 
+#include "xudu/batch_orchestrator.hpp"
 #include "xudu/beams.hpp"
 #include "xudu/collaborator_overlay.hpp"
 #include "xudu/core/config.hpp"
@@ -61,11 +63,17 @@
 #include "xudu/core/store.hpp"
 #include "xudu/core/swarm_catalog.hpp"
 #include "xudu/core/system_docs.hpp"
+#include "xudu/core/torrent.hpp"
 #include "xudu/core/transcopyright_crypto.hpp"
 #include "xudu/core/transcopyright_logic.hpp"
 #include "xudu/kinetic_tether_overlay.hpp"
 #include "xudu/page_break_overlay.hpp"
 #include "xudu/pouch_drawer.hpp"
+#include "xudu/satelloid.hpp"
+#ifdef XUZZ_BUILD
+#include "../zigzag/zigzag_visualizer.hpp"
+#include "xudu/bridge_coordinator.hpp"
+#endif
 #include "xudu/session.hpp"
 #include "xudu/swarm_telescope_overlay.hpp"
 #include "xudu/tenuous_tether.hpp"
@@ -99,6 +107,7 @@ namespace crypto = xudu::crypto;
 using xudu::PrimediaSpan;
 using xudu::Provenance;
 using xudu::PublicationEntry;
+using xudu::SatelloidOverlay;
 using xudu::Session;
 using xudu::SwarmCatalog;
 using xudu::SwarmTelescopeOverlay;
@@ -117,6 +126,18 @@ namespace {
  * a background document to roughly half its normal size on screen.
  */
 constexpr float backgroundDepthZ = -500.0F;
+
+/// Onion-skin offsets and fading express a historical-context policy: page
+/// measurements tell us a page's extent, but cannot choose how much older
+/// versions should recede. Keep the fallback explicit until system://layout
+/// supplies the live Xudu override.
+struct OnionSkinPolicy {
+  glm::vec3 offsetPerVersion{18.0F, 14.0F, -10.0F};
+  float minimumOpacity{0.20F};
+  float opacityStep{0.20F};
+};
+
+constexpr OnionSkinPolicy onionSkinPolicy{};
 
 /**
  * @brief Report who signed the authorship record at @p where.
@@ -370,11 +391,30 @@ public:
       if (rState.docs.empty()) {
         return;
       }
+      primaryDocument_ = rState.docs.front();
       rState.docs.back()->addObserver(&session);
       session.viewOpened(version, storeIndex);
       map.setCurrent(session.views().front().version);
       syncMediaWidgets(rState);
     });
+  }
+
+  [[nodiscard]] std::optional<glm::mat4> presentationTransform() const {
+    const auto document = primaryDocument_.lock();
+    if (!document) {
+      return std::nullopt;
+    }
+    const auto frame = document->pageFrame(0);
+    if (!frame) {
+      return std::nullopt;
+    }
+    // The document's measured margin is the smallest readable gap for an
+    // adjacent presentation. It follows custom page geometry and reflow
+    // instead of inventing a second, fixed Xuzz gutter.
+    return frame->localToWorld *
+           glm::translate(
+               glm::mat4{1.0F},
+               glm::vec3{frame->rightPx + frame->marginPx, 0.0F, 0.0F});
   }
 
   /// Where the caret is, and what it has selected, on the render thread.
@@ -926,6 +966,61 @@ public:
     });
   }
 
+  void exportOsmic() {
+    renderer->runWithState([this](RenderState &) {
+      if (session.views().empty()) {
+        session.saveOsmicTextAll();
+        return;
+      }
+      auto *const caret   = renderer->editCaret();
+      const auto which    = (nullptr != caret && caret->active() &&
+                             caret->documentIndex() < session.views().size())
+                                ? caret->documentIndex()
+                                : 0U;
+      const auto storeIdx = session.storeIndexOf(which);
+      session.store(storeIdx).saveOsmicText(session.path(storeIdx));
+      std::cout << "xudu: exported osmic text for doc " << which << " ("
+                << session.path(storeIdx) << ")\n";
+    });
+  }
+
+  void importFile(const std::string &filePath) {
+    renderer->runWithState([this, filePath](RenderState &rState) {
+      if (session.views().empty()) {
+        return;
+      }
+      std::ifstream file(filePath, std::ios::binary);
+      if (!file) {
+        std::cout << "xudu: cannot read import file: " << filePath << "\n";
+        return;
+      }
+      const std::string bytes((std::istreambuf_iterator<char>(file)),
+                              std::istreambuf_iterator<char>());
+      auto *const caret   = renderer->editCaret();
+      const auto docIdx   = (nullptr != caret && caret->active() &&
+                             caret->documentIndex() < session.views().size())
+                                ? caret->documentIndex()
+                                : 0U;
+      const auto at       = (nullptr != caret && caret->active() &&
+                             caret->documentIndex() == docIdx)
+                                ? caret->byteOffset()
+                                : 0U;
+      const auto detected = gleditor::MimeDetector::detectFile(filePath);
+      const auto mime =
+          detected.empty() ? "text/plain;charset=utf-8" : detected.essence();
+      const auto prod = session.insertMedia(docIdx, at, bytes, mime, filePath);
+      if (docIdx < rState.docs.size()) {
+        if (const auto src =
+                session.sourceFor(prod, session.storeIndexOf(docIdx))) {
+          rState.docs[docIdx]->load(*src);
+          syncMediaWidgets(rState);
+        }
+      }
+      std::cout << "xudu: imported file " << filePath << " into doc " << docIdx
+                << " at offset " << at << " -> version " << prod.str() << "\n";
+    });
+  }
+
   void setWireframeOverlay(WireframeHullOverlay *overlay) noexcept {
     wireframeOverlay_ = overlay;
   }
@@ -1242,11 +1337,13 @@ public:
       if (!rState.docs[i]) {
         continue;
       }
-      const auto k   = (i - active + total) % total;
-      const float kF = static_cast<float>(k);
-      const glm::vec3 targetPos(kF * 18.0F, kF * 14.0F, -kF * 10.0F);
+      const auto k              = (i - active + total) % total;
+      const float kF            = static_cast<float>(k);
+      const glm::vec3 targetPos = kF * onionSkinPolicy.offsetPerVersion;
       const float targetOpacity =
-          (k == 0) ? 1.0F : std::max(0.20F, 1.0F - 0.20F * kF);
+          (k == 0) ? 1.0F
+                   : std::max(onionSkinPolicy.minimumOpacity,
+                              1.0F - onionSkinPolicy.opacityStep * kF);
 
       auto *const tl = renderer->animTimeline();
       if (tl) {
@@ -1316,6 +1413,7 @@ private:
   gleditor::Form &form;
   AppStateRef state;
   std::shared_ptr<gleditor::DocumentSwitcher> switcher;
+  std::weak_ptr<Doc> primaryDocument_;
   std::optional<Pending> pending;
   std::vector<std::shared_ptr<gleditor::MediaWidget>> mediaWidgets;
   bool onionSkinMode_{false};
@@ -1472,165 +1570,170 @@ void bindCommands(gleditor::Application &app, const AppStateRef &state,
   app.commands().bind(SDL_SCANCODE_RETURN, Mod::Ctrl, "page-break",
                       "insert a page break at the caret position",
                       [&views] { views.insertPageBreakAtCaret(); });
-}
 
-xudu::LinkType parseLinkType(const std::string_view str) {
-  if (str == "comment" || str == "Comment") {
-    return xudu::LinkType::Comment;
-  }
-  if (str == "illustration" || str == "Illustration") {
-    return xudu::LinkType::Illustration;
-  }
-  if (str == "disagreement" || str == "Disagreement") {
-    return xudu::LinkType::Disagreement;
-  }
-  if (str == "authorship" || str == "Authorship") {
-    return xudu::LinkType::Authorship;
-  }
-  if (str == "quotation" || str == "Quotation") {
-    return xudu::LinkType::Quotation;
-  }
-  if (str == "format" || str == "Format") {
-    return xudu::LinkType::Format;
-  }
-  if (str == "dimension" || str == "Dimension") {
-    return xudu::LinkType::Dimension;
-  }
-  return xudu::LinkType::Other;
-}
-
-xudu::ProminenceTier parseProminenceTier(const std::string_view str) {
-  if (str == "curator" || str == "Curator" || str == "curated" ||
-      str == "Curated") {
-    return xudu::ProminenceTier::Curated;
-  }
-  if (str == "public" || str == "Public" || str == "reader" ||
-      str == "Reader") {
-    return xudu::ProminenceTier::Public;
-  }
-  return xudu::ProminenceTier::Author;
-}
-
-xudu::FormatAttribute parseFormatAttribute(const std::string_view str) {
-  if (str == "italic" || str == "Italic") {
-    return xudu::FormatAttribute::Italic;
-  }
-  if (str == "underline" || str == "Underline") {
-    return xudu::FormatAttribute::Underline;
-  }
-  if (str == "overline" || str == "Overline") {
-    return xudu::FormatAttribute::Overline;
-  }
-  if (str == "strikethrough" || str == "Strikethrough") {
-    return xudu::FormatAttribute::Strikethrough;
-  }
-  if (str == "superscript" || str == "Superscript") {
-    return xudu::FormatAttribute::Superscript;
-  }
-  if (str == "subscript" || str == "Subscript") {
-    return xudu::FormatAttribute::Subscript;
-  }
-  return xudu::FormatAttribute::Bold;
-}
-
-std::vector<xudu::PrimediaSpan>
-resolveSingleSpanToken(const xudu::Session &session, const std::string &token,
-                       const std::optional<std::uint32_t> defaultDocIdx) {
-  if (token.starts_with("vocab:") || token.starts_with("VOCAB:")) {
-    const auto attrName = token.substr(6);
-    return {xudu::vocabularySpanFor(parseFormatAttribute(attrName))};
-  }
-
-  const auto atPos = token.find('@');
-  if (atPos != std::string::npos) {
-    const auto docIdx =
-        static_cast<std::uint32_t>(std::stoul(token.substr(0, atPos)));
-    auto rem = token.substr(atPos + 1);
-    std::string query;
-    std::optional<std::uint32_t> customLen;
-    const auto colon = rem.rfind(':');
-    if (colon != std::string::npos && colon > 0 &&
-        std::isdigit(static_cast<unsigned char>(rem[colon + 1]))) {
-      query     = rem.substr(0, colon);
-      customLen = static_cast<std::uint32_t>(std::stoul(rem.substr(colon + 1)));
-    } else {
-      query = rem;
-    }
-    if (query.size() >= 2 && query.front() == '"' && query.back() == '"') {
-      query = query.substr(1, query.size() - 2);
-    }
-    const auto vList = session.views();
-    if (docIdx >= vList.size()) {
-      throw std::runtime_error("document index out of range: " + token);
-    }
-    const auto sIdx     = vList[docIdx].storeIndex;
-    const auto docText  = session.store(sIdx).textOf(vList[docIdx].version);
-    const auto matchPos = docText.find(query);
-    if (matchPos == std::string::npos) {
-      throw std::runtime_error("query substring not found in document " +
-                               std::to_string(docIdx) + ": " + query);
-    }
-    const auto ver = session.store(sIdx).rebuild(vList[docIdx].version);
-    const auto spanLen =
-        customLen ? *customLen : static_cast<std::uint32_t>(query.size());
-    return ver.spansFor(static_cast<std::uint32_t>(matchPos), spanLen);
-  }
-
-  const auto firstColon = token.find(':');
-  if (firstColon == std::string::npos) {
-    throw std::runtime_error("invalid span specifier: " + token);
-  }
-  const auto secondColon = token.find(':', firstColon + 1);
-  std::uint32_t docIdx   = 0;
-  std::uint32_t start    = 0;
-  std::uint32_t len      = 0;
-  if (secondColon != std::string::npos) {
-    docIdx =
-        static_cast<std::uint32_t>(std::stoul(token.substr(0, firstColon)));
-    start = static_cast<std::uint32_t>(
-        std::stoul(token.substr(firstColon + 1, secondColon - firstColon - 1)));
-    len = static_cast<std::uint32_t>(std::stoul(token.substr(secondColon + 1)));
-  } else {
-    if (!defaultDocIdx) {
-      throw std::runtime_error("span specifier missing document index: " +
-                               token);
-    }
-    docIdx = *defaultDocIdx;
-    start = static_cast<std::uint32_t>(std::stoul(token.substr(0, firstColon)));
-    len = static_cast<std::uint32_t>(std::stoul(token.substr(firstColon + 1)));
-  }
-  const auto vList = session.views();
-  if (docIdx >= vList.size()) {
-    throw std::runtime_error("document index out of range: " + token);
-  }
-  const auto sIdx = vList[docIdx].storeIndex;
-  const auto ver  = session.store(sIdx).rebuild(vList[docIdx].version);
-  return ver.spansFor(start, len);
-}
-
-std::vector<xudu::PrimediaSpan> resolveSpans(const xudu::Session &session,
-                                             const std::string &spec) {
-  std::vector<xudu::PrimediaSpan> result;
-  std::stringstream ss(spec);
-  std::string token;
-  std::optional<std::uint32_t> leadingDocIdx;
-
-  while (std::getline(ss, token, '+')) {
-    if (token.empty()) {
-      continue;
-    }
-    auto sp = resolveSingleSpanToken(session, token, leadingDocIdx);
-    if (!token.empty() && token.find(':') != std::string::npos &&
-        !leadingDocIdx) {
-      const auto c = token.find(':');
-      if (token.find(':', c + 1) != std::string::npos) {
-        leadingDocIdx =
-            static_cast<std::uint32_t>(std::stoul(token.substr(0, c)));
+  const auto applyDecoration = [&session,
+                                renderer](const gleditor::Decoration deco) {
+    renderer->runWithState([&session, renderer, deco](RenderState &rState) {
+      auto *const caret = renderer->editCaret();
+      if (caret && caret->active() &&
+          caret->documentIndex() < rState.docs.size() &&
+          caret->hasSelection()) {
+        const auto doc   = caret->documentIndex();
+        const auto start = caret->selectionStart();
+        const auto len   = caret->selectionEnd() - start;
+        session.markDecorated(doc, start, len, gleditor::decorationBit(deco));
       }
-    }
-    result.insert(result.end(), sp.begin(), sp.end());
-  }
-  return result;
+    });
+  };
+
+  app.commands().bind(
+      0, "format-bold", "toggle bold on selected text",
+      [applyDecoration] { applyDecoration(gleditor::Decoration::Bold); });
+  app.commands().bind(
+      0, "format-italic", "toggle italic on selected text",
+      [applyDecoration] { applyDecoration(gleditor::Decoration::Italic); });
+  app.commands().bind(
+      0, "format-underline", "toggle underline on selected text",
+      [applyDecoration] { applyDecoration(gleditor::Decoration::Underline); });
+  app.commands().bind(0, "format-strikethrough",
+                      "toggle strikethrough on selected text",
+                      [applyDecoration] {
+                        applyDecoration(gleditor::Decoration::Strikethrough);
+                      });
+  app.commands().bind(0, "format-superscript",
+                      "toggle superscript on selected text", [applyDecoration] {
+                        applyDecoration(gleditor::Decoration::Superscript);
+                      });
+  app.commands().bind(
+      0, "format-subscript", "toggle subscript on selected text",
+      [applyDecoration] { applyDecoration(gleditor::Decoration::Subscript); });
+
+  app.commands().bind(0, "save-document", "save or preserve active document",
+                      [&views] { views.saveCurrent(); });
+  app.commands().bind(0, "export-osmic",
+                      "export OSMIC text spool representation",
+                      [&views] { views.exportOsmic(); });
+  app.commands().bind(0, "insert-break",
+                      "insert a page break at the caret position",
+                      [&views] { views.insertPageBreakAtCaret(); });
+
+  const auto dropSelectionToBench = [&views, &pouchDrawer,
+                                     &session](const bool isLeft) {
+    views.withCaret([&pouchDrawer, &session, isLeft](
+                        RenderState &, const Views::Where &where, Caret *) {
+      if (!where.hasRange) {
+        std::cout << "xudu: select text to drop onto bench first\n";
+        return;
+      }
+      const auto docIdx   = where.doc;
+      const auto storeIdx = session.storeIndexOf(docIdx);
+      const auto ver      = session.versionOf(docIdx);
+      const auto spans    = session.store(storeIdx).rebuild(ver).spansFor(
+          where.start, where.end - where.start);
+      if (spans.empty()) {
+        return;
+      }
+      const auto text    = session.store(storeIdx).textOf(ver);
+      const auto preview = text.substr(
+          where.start, std::min<std::size_t>(where.end - where.start, 64));
+      PouchItem item;
+      item.itemId          = 0;
+      item.span            = spans.front();
+      item.previewText     = preview;
+      item.originVersion   = ver;
+      item.originDocIndex  = docIdx;
+      item.originCharStart = where.start;
+      item.originCharEnd   = where.end;
+      if (isLeft) {
+        pouchDrawer.forge().dropLeft(std::move(item));
+        std::cout << "xudu: dropped span onto clasp left bench: '" << preview
+                  << "'\n";
+      } else {
+        pouchDrawer.forge().dropRight(std::move(item));
+        std::cout << "xudu: dropped span onto clasp right bench: '" << preview
+                  << "'\n";
+      }
+    });
+  };
+
+  const auto dropSelectionToZone = [&views, &pouchDrawer,
+                                    &session](const std::string_view zoneId) {
+    views.withCaret([&pouchDrawer, &session, zoneId](
+                        RenderState &, const Views::Where &where, Caret *) {
+      if (!where.hasRange) {
+        std::cout << "xudu: select text to drop into pouch first\n";
+        return;
+      }
+      const auto docIdx   = where.doc;
+      const auto storeIdx = session.storeIndexOf(docIdx);
+      const auto ver      = session.versionOf(docIdx);
+      const auto spans    = session.store(storeIdx).rebuild(ver).spansFor(
+          where.start, where.end - where.start);
+      if (spans.empty()) {
+        return;
+      }
+      const auto text    = session.store(storeIdx).textOf(ver);
+      const auto preview = text.substr(
+          where.start, std::min<std::size_t>(where.end - where.start, 64));
+      const auto item = pouchDrawer.manager().dropSpan(
+          zoneId, spans.front(), preview, ver, docIdx, where.start, where.end);
+      std::cout << "xudu: dropped span into pouch zone '" << zoneId
+                << "' (item " << item.itemId << ")\n";
+    });
+  };
+
+  app.commands().bind(0, "pouch-drop-left",
+                      "drop selection onto clasp homestead bench (left)",
+                      [dropSelectionToBench] { dropSelectionToBench(true); });
+  app.commands().bind(0, "pouch-drop-right",
+                      "drop selection onto clasp toward bench (right)",
+                      [dropSelectionToBench] { dropSelectionToBench(false); });
+  app.commands().bind(0, "pouch-drop", "drop selection into active pouch zone",
+                      [dropSelectionToZone] { dropSelectionToZone("notes"); });
+  app.commands().bind(0, "pouch-drop-notes",
+                      "drop selection into notes pouch zone",
+                      [dropSelectionToZone] { dropSelectionToZone("notes"); });
+  app.commands().bind(
+      0, "pouch-drop-scratch", "drop selection into scratch pouch zone",
+      [dropSelectionToZone] { dropSelectionToZone("scratch"); });
+  app.commands().bind(
+      0, "pouch-drop-to-link-left",
+      "drop selection into to-link-left pouch zone",
+      [dropSelectionToZone] { dropSelectionToZone("to_link_left"); });
+  app.commands().bind(
+      0, "pouch-drop-to-link-right",
+      "drop selection into to-link-right pouch zone",
+      [dropSelectionToZone] { dropSelectionToZone("to_link_right"); });
+
+  app.commands().bind(
+      0, "forge-clasp", "forge bilateral clasp link from items on bench",
+      [&pouchDrawer, &session, renderer] {
+        renderer->runWithState([&pouchDrawer, &session,
+                                renderer](RenderState &) {
+          if (!pouchDrawer.forge().canForge()) {
+            std::cout << "xudu: clasp forge requires items on "
+                         "both left and right benches\n";
+            return;
+          }
+          auto *const caret = renderer->editCaret();
+          const auto docIdx = (nullptr != caret && caret->active() &&
+                               caret->documentIndex() < session.views().size())
+                                  ? caret->documentIndex()
+                                  : 0U;
+          if (pouchDrawer.forge().forge(session, docIdx)) {
+            std::cout << "xudu: forged clasp link on active "
+                         "document "
+                      << docIdx << "\n";
+          }
+        });
+      });
+
+  app.commands().bind(0, "clear-bench", "clear items from clasp forge bench",
+                      [&pouchDrawer] {
+                        pouchDrawer.forge().clearLeft();
+                        pouchDrawer.forge().clearRight();
+                        std::cout << "xudu: cleared clasp forge bench\n";
+                      });
 }
 
 } // namespace
@@ -1650,38 +1753,6 @@ int main(const int argc, char **argv) {
       .help("microversion to open, for example 2a4; the default is the most "
             "recent state in the store")
       .default_value(std::string{});
-  parser.add_argument("--torrent")
-      .help("a .torrent file, a magnet link naming one already given, or a "
-            "name (magnet:?xs=urn:btpk:KEY); repeatable. Content referenced "
-            "by the document is resolved from these")
-      .append();
-  parser.add_argument("--torrent-data")
-      .help("directory where files described by --torrent are; empty means "
-            "beside each .torrent file")
-      .default_value(std::string{});
-  parser.add_argument("--swarm")
-      .help("fetch quoted content from the BitTorrent network rather than from "
-            "a disk here")
-      .default_value(false)
-      .implicit_value(true);
-  parser.add_argument("--private-dht")
-      .help("allow more than one DHT node on the same /8 network. Used for "
-            "automated tests where several nodes run on 127.0.0.1")
-      .default_value(false)
-      .implicit_value(true);
-  parser.add_argument("--peer")
-      .help("introduce a peer as HOST:PORT; repeatable. Useful when two "
-            "machines are testing together and have not found each other "
-            "through the DHT")
-      .append();
-  parser.add_argument("--dht-node")
-      .help("bootstrap the DHT from a known node as HOST:PORT; repeatable")
-      .append();
-  parser.add_argument("--quote")
-      .help("quote a byte range of a torrent-backed file, as "
-            "FILE_INDEX,OFFSET,LENGTH; repeatable. Appended to the store's "
-            "latest state")
-      .append();
   parser.add_argument("--alongside")
       .help(
           "a second microversion to show beside the opening one, for instance "
@@ -1722,54 +1793,10 @@ int main(const int argc, char **argv) {
             "toggles it")
       .default_value(false)
       .implicit_value(true);
-  parser.add_argument("--pouch-sample")
-      .help("open pouch drawer with pre-seeded sample spans across drop zones "
-            "and clasp bench")
-      .default_value(false)
-      .implicit_value(true);
-  parser.add_argument("--tether-sample")
-      .help("seed an active Hookean spring tether and floating blueprint quad "
-            "for visual verification")
-      .default_value(false)
-      .implicit_value(true);
-  parser.add_argument("--tether-spawn-sample")
-      .help("spawn a collinear transcluded document quad from the opening "
-            "text into the 3D void")
-      .default_value(false)
-      .implicit_value(true);
-  parser.add_argument("--page-break-sample")
-      .help("force inter-paragraph hover gap affordance to render on the first "
-            "paragraph gap")
-      .default_value(false)
-      .implicit_value(true);
-  parser.add_argument("--page-break-split-sample")
-      .help("insert a page break between first and second paragraphs to "
-            "demonstrate multipage layout")
-      .default_value(false)
-      .implicit_value(true);
   parser.add_argument("--telescope")
       .help(
           "open decentralized swarm telescope overlay on startup; ctrl-shift-T "
           "or F3 toggles it")
-      .default_value(false)
-      .implicit_value(true);
-  parser.add_argument("--swarm-sample")
-      .help("open decentralized swarm telescope overlay with pre-seeded sample "
-            "publications and topics")
-      .default_value(false)
-      .implicit_value(true);
-  parser.add_argument("--tc-sample")
-      .help("open sample document demonstrating withheld holes and "
-            "transcopyright paywalls")
-      .default_value(false)
-      .implicit_value(true);
-  parser.add_argument("--auto-unlock")
-      .help("automatically unlock transcopyright spans on launch")
-      .default_value(false)
-      .implicit_value(true);
-  parser.add_argument("--wireframe-sample")
-      .help("demonstrate progressive 3D streaming wireframe hull and swarm "
-            "materialization progress")
       .default_value(false)
       .implicit_value(true);
   parser.add_argument("--physics")
@@ -1781,104 +1808,6 @@ int main(const int argc, char **argv) {
       .help("alias for --physics")
       .default_value(false)
       .implicit_value(true);
-  parser.add_argument("--collab-room")
-      .help("collaborative room name for real-time swarm editing")
-      .default_value(std::string{});
-  parser.add_argument("--collab-host")
-      .help("collaborative room host fingerprint")
-      .default_value(std::string{});
-  parser.add_argument("--collab-name")
-      .help("local author display name for collaborative carets")
-      .default_value(std::string{});
-  parser.add_argument("--author-name")
-      .help("name to record on publications made from this machine")
-      .default_value(std::string{});
-  parser.add_argument("--author-email")
-      .help("email to record alongside the author name")
-      .default_value(std::string{});
-  parser.add_argument("--gpg-key")
-      .help("fingerprint of the secret key to sign authorship records with")
-      .default_value(std::string{});
-  parser.add_argument("--author-here")
-      .help("keep the --author-* settings in this store (author.yaml) rather "
-            "than in the per-user configuration (~/.config/xudu/config.yaml)")
-      .default_value(false)
-      .implicit_value(true);
-  parser.add_argument("--show-config")
-      .help("print the current configuration and quit")
-      .default_value(false)
-      .implicit_value(true);
-  parser.add_argument("--check-authorship")
-      .help("verify the signature on this publication, report who signed it, "
-            "and quit. Answers 'who is this from?' without importing it into "
-            "a store -- the two are different questions")
-      .default_value(std::string{});
-  parser.add_argument("--read")
-      .help("open a published document from a manifest file; repeatable. It is "
-            "taken into this store, so it can then be read, quoted and linked "
-            "to by documents here -- including ones that have never been "
-            "published themselves. Refused if the manifest is not signed by "
-            "whoever it claims to be from")
-      .append();
-  parser.add_argument("--publish")
-      .help("publish the opening document under this name, writing a signed "
-            "manifest and the torrent carrying what was typed here into "
-            "<store>/published. The name is a salt under this machine's key: "
-            "publishing again under the same name is a further state of the "
-            "same document. Ctrl-shift-s does the same while running")
-      .default_value(std::string{});
-  parser.add_argument("--import")
-      .help(
-          "read files into stores as initial operations; repeatable. The "
-          "first file goes into the primary store (if empty), while additional "
-          "files receive independent temporary stores")
-      .append();
-  parser.add_argument("--import-branch")
-      .help("import a file as a new root microversion branch in the primary "
-            "store; repeatable")
-      .append();
-  parser.add_argument("--import-break")
-      .help("insert a page break and append text from file into the opening "
-            "document; repeatable")
-      .append();
-  parser.add_argument("--insert-text")
-      .help("insert text into document as DOC:POS:FILE_OR_TEXT; repeatable")
-      .append();
-  parser.add_argument("--transclude")
-      .help("transclude span from one doc into another as "
-            "SRCDOC:START:LEN,DESTDOC:POS; repeatable")
-      .append();
-  parser.add_argument("--transclude-text")
-      .help("transclude text matching query from one doc into another as "
-            "SRCDOC:QUERY,DESTDOC:POS; repeatable")
-      .append();
-  parser.add_argument("--format-link")
-      .help("create formatting link as DOC:START:LEN:ATTR[:TIER[:OWNER]]; "
-            "repeatable")
-      .append();
-  parser.add_argument("--dimension-link")
-      .help("create dimension link as "
-            "DOC1:START:LEN,DOC2:START:LEN:DIMNAME; repeatable")
-      .append();
-  parser.add_argument("--permascroll")
-      .help("directory holding the sovereign user permascroll to bind; "
-            "defaults to $XDG_DATA_HOME/xudu/permascroll/default")
-      .default_value(std::string{});
-  parser.add_argument("--dump-permascroll")
-      .help("dump sovereign user permascroll bytes to a file upon exit")
-      .default_value(std::string{});
-  parser.add_argument("--open-store")
-      .help("open an existing xanadoc store as an auxiliary document; "
-            "repeatable")
-      .append();
-  parser.add_argument("--export-osmic")
-      .help("export human-readable OSMIC text spools alongside binary stores")
-      .default_value(false)
-      .implicit_value(true);
-  parser.add_argument("--headless", "--batch")
-      .help("run batch commands non-interactively and exit without GUI")
-      .default_value(false)
-      .implicit_value(true);
   parser.add_argument("--audio")
       .help(
           "open an audio stream or file as an embedded AudioWidget; repeatable")
@@ -1887,17 +1816,174 @@ int main(const int argc, char **argv) {
       .help(
           "open a video stream or file as an embedded MediaWidget; repeatable")
       .append();
-  parser.add_argument("--link")
-      .help("create a link between open document spans as "
-            "DOC1:START:LEN,DOC2:START:LEN[:TYPE[:TIER[:OWNER]]]; repeatable")
-      .append();
-  parser.add_argument("--system-doc")
-      .help("open a sovereign system xanadoc (keymap, settings, layout, ui, "
-            "pouches); repeatable")
-      .append();
   parser.add_argument("files")
       .help("source files to import or open")
       .remaining();
+
+  const auto hiddenUnlessDetailed =
+      [detailed](argparse::Argument &arg) -> argparse::Argument & {
+    if (!detailed) {
+      arg.hidden();
+    }
+    return arg;
+  };
+
+  if (detailed) {
+    parser.add_group("Networking and Swarm options");
+  }
+
+  hiddenUnlessDetailed(parser.add_argument("--torrent"))
+      .help("a .torrent file, a magnet link naming one already given, or a "
+            "name (magnet:?xs=urn:btpk:KEY); repeatable. Content referenced "
+            "by the document is resolved from these")
+      .append();
+  hiddenUnlessDetailed(parser.add_argument("--torrent-data"))
+      .help("directory where files described by --torrent are; empty means "
+            "beside each .torrent file")
+      .default_value(std::string{});
+  hiddenUnlessDetailed(parser.add_argument("--swarm"))
+      .help("fetch quoted content from the BitTorrent network rather than from "
+            "a disk here")
+      .default_value(false)
+      .implicit_value(true);
+  hiddenUnlessDetailed(parser.add_argument("--private-dht"))
+      .help("allow more than one DHT node on the same /8 network. Used for "
+            "automated tests where several nodes run on 127.0.0.1")
+      .default_value(false)
+      .implicit_value(true);
+  hiddenUnlessDetailed(parser.add_argument("--peer"))
+      .help("introduce a peer as HOST:PORT; repeatable. Useful when two "
+            "machines are testing together and have not found each other "
+            "through the DHT")
+      .append();
+  hiddenUnlessDetailed(parser.add_argument("--dht-node"))
+      .help("bootstrap the DHT from a known node as HOST:PORT; repeatable")
+      .append();
+  hiddenUnlessDetailed(parser.add_argument("--collab-room"))
+      .help("collaborative room name for real-time swarm editing")
+      .default_value(std::string{});
+  hiddenUnlessDetailed(parser.add_argument("--collab-host"))
+      .help("collaborative room host fingerprint")
+      .default_value(std::string{});
+  hiddenUnlessDetailed(parser.add_argument("--collab-name"))
+      .help("local author display name for collaborative carets")
+      .default_value(std::string{});
+  hiddenUnlessDetailed(parser.add_argument("--auto-unlock"))
+      .help("automatically unlock transcopyright spans on launch")
+      .default_value(false)
+      .implicit_value(true);
+
+  if (detailed) {
+    parser.add_group("Batch import and orchestration options");
+  }
+
+  hiddenUnlessDetailed(parser.add_argument("--author-name"))
+      .help("name to record on publications made from this machine")
+      .default_value(std::string{});
+  hiddenUnlessDetailed(parser.add_argument("--author-email"))
+      .help("email to record alongside the author name")
+      .default_value(std::string{});
+  hiddenUnlessDetailed(parser.add_argument("--gpg-key"))
+      .help("fingerprint of the secret key to sign authorship records with")
+      .default_value(std::string{});
+  hiddenUnlessDetailed(parser.add_argument("--author-here"))
+      .help("keep the --author-* settings in this store (author.yaml) rather "
+            "than in the per-user configuration (~/.config/xudu/config.yaml)")
+      .default_value(false)
+      .implicit_value(true);
+  hiddenUnlessDetailed(parser.add_argument("--show-config"))
+      .help("print the current configuration and quit")
+      .default_value(false)
+      .implicit_value(true);
+  hiddenUnlessDetailed(parser.add_argument("--check-authorship"))
+      .help("verify the signature on this publication, report who signed it, "
+            "and quit. Answers 'who is this from?' without importing it into "
+            "a store -- the two are different questions")
+      .default_value(std::string{});
+  hiddenUnlessDetailed(parser.add_argument("--read"))
+      .help("open a published document from a manifest file; repeatable. It is "
+            "taken into this store, so it can then be read, quoted and linked "
+            "to by documents here -- including ones that have never been "
+            "published themselves. Refused if the manifest is not signed by "
+            "whoever it claims to be from")
+      .append();
+  hiddenUnlessDetailed(parser.add_argument("--publish"))
+      .help("publish the opening document under this name, writing a signed "
+            "manifest and the torrent carrying what was typed here into "
+            "<store>/published. The name is a salt under this machine's key: "
+            "publishing again under the same name is a further state of the "
+            "same document. Ctrl-shift-s does the same while running")
+      .default_value(std::string{});
+  hiddenUnlessDetailed(parser.add_argument("--quote"))
+      .help("quote a byte range of a torrent-backed file, as "
+            "FILE_INDEX,OFFSET,LENGTH; repeatable. Appended to the store's "
+            "latest state")
+      .append();
+  hiddenUnlessDetailed(parser.add_argument("--import"))
+      .help(
+          "read files into stores as initial operations; repeatable. The "
+          "first file goes into the primary store (if empty), while additional "
+          "files receive independent temporary stores")
+      .append();
+  hiddenUnlessDetailed(parser.add_argument("--import-branch"))
+      .help("import a file as a new root microversion branch in the primary "
+            "store; repeatable")
+      .append();
+  hiddenUnlessDetailed(parser.add_argument("--import-break"))
+      .help("insert a page break and append text from file into the opening "
+            "document; repeatable")
+      .append();
+  hiddenUnlessDetailed(parser.add_argument("--insert-text"))
+      .help("insert text into document as DOC:POS:FILE_OR_TEXT; repeatable")
+      .append();
+  hiddenUnlessDetailed(parser.add_argument("--structure-script"))
+      .help("apply a sequential combined Xanadu/Zigzag store script; each "
+            "line is genesis, dimension NAME, cell NAME TEXT, cell-text NAME "
+            "TEXT, text TEXT, or text-append TEXT")
+      .default_value(std::string{});
+  hiddenUnlessDetailed(parser.add_argument("--transclude"))
+      .help("transclude span from one doc into another as "
+            "SRCDOC:START:LEN,DESTDOC:POS; repeatable")
+      .append();
+  hiddenUnlessDetailed(parser.add_argument("--transclude-text"))
+      .help("transclude text matching query from one doc into another as "
+            "SRCDOC:QUERY,DESTDOC:POS; repeatable")
+      .append();
+  hiddenUnlessDetailed(parser.add_argument("--format-link"))
+      .help("create formatting link as DOC:START:LEN:ATTR[:TIER[:OWNER]]; "
+            "repeatable")
+      .append();
+  hiddenUnlessDetailed(parser.add_argument("--dimension-link"))
+      .help("create dimension link as "
+            "DOC1:START:LEN,DOC2:START:LEN:DIMNAME; repeatable")
+      .append();
+  hiddenUnlessDetailed(parser.add_argument("--permascroll"))
+      .help("directory holding the sovereign user permascroll to bind; "
+            "defaults to $XDG_DATA_HOME/xudu/permascroll/default")
+      .default_value(std::string{});
+  hiddenUnlessDetailed(parser.add_argument("--dump-permascroll"))
+      .help("dump sovereign user permascroll bytes to a file upon exit")
+      .default_value(std::string{});
+  hiddenUnlessDetailed(parser.add_argument("--open-store"))
+      .help("open an existing xanadoc store as an auxiliary document; "
+            "repeatable")
+      .append();
+  hiddenUnlessDetailed(parser.add_argument("--export-osmic"))
+      .help("export human-readable OSMIC text spools alongside binary stores")
+      .default_value(false)
+      .implicit_value(true);
+  hiddenUnlessDetailed(parser.add_argument("--headless", "--batch"))
+      .help("run batch commands non-interactively and exit without GUI")
+      .default_value(false)
+      .implicit_value(true);
+  hiddenUnlessDetailed(parser.add_argument("--link"))
+      .help("create a link between open document spans as "
+            "DOC1:START:LEN,DOC2:START:LEN[:TYPE[:TIER[:OWNER]]]; repeatable")
+      .append();
+  hiddenUnlessDetailed(parser.add_argument("--system-doc"))
+      .help("open a sovereign system xanadoc (keymap, settings, layout, ui, "
+            "pouches); repeatable")
+      .append();
 
   if (detailed) {
     std::cout << parser << "\n";
@@ -1956,478 +2042,18 @@ int main(const int argc, char **argv) {
       session->markDecorated(doc, at, length, mask);
     };
 
-    // If in headless/batch mode, register existing versions for span resolution
-    if (headless && session->views().empty() &&
-        session->store(0).opCount() > 0) {
-      for (const auto &v : session->store(0).allVersions()) {
-        session->viewOpened(v, 0);
-      }
+    const auto batchRes =
+        xudu::BatchOrchestrator::execute(*session, parser, quiet);
+    if (batchRes.shouldExit) {
+      return batchRes.exitCode;
     }
+    opening      = batchRes.opening;
+    extraImports = std::move(batchRes.extraImports);
 
-    // Collect import files from --import and positional files
-    std::vector<std::string> importFiles;
-    if (parser.present<std::vector<std::string>>("--import")) {
-      for (const auto &f : parser.get<std::vector<std::string>>("--import")) {
-        if (!f.empty()) {
-          importFiles.push_back(f);
-        }
-      }
+    backend = gleditor::applyCommonArguments(parser, state, argc, argv);
+    if (parser["--headless"] == true && !state->script.empty()) {
+      state->profiling = true;
     }
-    if (parser.present<std::vector<std::string>>("files")) {
-      for (const auto &f : parser.get<std::vector<std::string>>("files")) {
-        if (!f.empty()) {
-          importFiles.push_back(f);
-        }
-      }
-    }
-
-    if (!importFiles.empty()) {
-      std::size_t startIdx  = 0;
-      const auto &firstFile = importFiles[0];
-      if (const auto kind = xudu::systemDocKindFromUri(firstFile)) {
-        const auto openedVer = session->openSystemDoc(*kind);
-        opening              = openedVer;
-        startIdx             = 1;
-        if (!quiet) {
-          std::cout << "xudu: opened system doc " << firstFile << " as "
-                    << openedVer.str() << "\n";
-        }
-      } else if (0 == session->store(0).opCount()) {
-        const gleditor::FileTextSource source(firstFile);
-        // Piece by piece rather than one whole-file insert(): a plain file
-        // is exactly one plain-text piece (pieces()' own default), so this
-        // changes nothing for it, but a PDF with an embedded figure is
-        // several -- that page's text, then that figure tagged "image/png"
-        // -- and inserting each through the call insertMedia() vs insert()
-        // that its own mimeType calls for is what makes the figure a real,
-        // classifiable primedia span instead of bytes pieces() never had a
-        // way to hand the caller before this loop existed.
-        MicroversionId imported;
-        std::uint32_t at = 0;
-        // Indexed by piece position: the span each piece landed at, so a
-        // later piece naming an earlier one via duplicateOfPieceIndex (a PDF
-        // figure repeated across pages) can be inserted via insertSpan()
-        // against the bytes already stored, instead of appending its own
-        // copy through insertMedia().
-        std::vector<xudu::PrimediaSpan> insertedSpans;
-        const auto pieces = source.pieces();
-        insertedSpans.reserve(pieces.size());
-        for (const auto &piece : pieces) {
-          xudu::PrimediaSpan span;
-          if (piece.duplicateOfPieceIndex.has_value() &&
-              *piece.duplicateOfPieceIndex < insertedSpans.size()) {
-            span     = insertedSpans[*piece.duplicateOfPieceIndex];
-            imported = session->store(0).insertSpan(imported, at, span);
-          } else if (piece.mimeType.empty()) {
-            imported = session->store(0).insert(imported, at, piece.bytes);
-          } else {
-            auto inserted = session->store(0).insertMedia(
-                imported, at, piece.bytes, piece.mimeType);
-            imported = inserted.version;
-            span     = inserted.span;
-          }
-          insertedSpans.push_back(span);
-          at += static_cast<std::uint32_t>(piece.bytes.size());
-          if (piece.pageBreakAfter) {
-            imported = session->store(0).insertBreak(imported, at);
-          }
-        }
-        session->save(0);
-        opening = imported;
-        session->viewOpened(imported, 0);
-        if (!quiet) {
-          std::cout << "xudu: imported " << firstFile << " as "
-                    << imported.str() << "\n";
-        }
-        startIdx = 1;
-      }
-      for (std::size_t i = startIdx; i < importFiles.size(); ++i) {
-        const auto &f = importFiles[i];
-        if (const auto kind = xudu::systemDocKindFromUri(f)) {
-          const auto sIdx      = session->systemStoreIndex(*kind);
-          const auto openedVer = session->openSystemDoc(*kind);
-          extraImports.emplace_back(openedVer, sIdx);
-          if (!quiet) {
-            std::cout << "xudu: opened " << f << " in system store " << sIdx
-                      << " as " << openedVer.str() << "\n";
-          }
-        } else {
-          const auto [sIdx, imported] = session->importFileToTemporaryStore(f);
-          session->viewOpened(imported, sIdx);
-          extraImports.emplace_back(imported, sIdx);
-          if (!quiet) {
-            std::cout << "xudu: imported " << f << " to temp store " << sIdx
-                      << " as " << imported.str() << "\n";
-          }
-        }
-      }
-    }
-
-    if (parser.present<std::vector<std::string>>("--system-doc")) {
-      for (const auto &name :
-           parser.get<std::vector<std::string>>("--system-doc")) {
-        const std::string uri =
-            name.starts_with("system://") ? name : "system://" + name;
-        if (const auto kind = xudu::systemDocKindFromUri(uri)) {
-          const auto sIdx      = session->systemStoreIndex(*kind);
-          const auto openedVer = session->openSystemDoc(*kind);
-          extraImports.emplace_back(openedVer, sIdx);
-          if (!quiet) {
-            std::cout << "xudu: opened system doc " << uri << " in store "
-                      << sIdx << " as " << openedVer.str() << "\n";
-          }
-        }
-      }
-    }
-
-    if (parser.present<std::vector<std::string>>("--open-store")) {
-      for (const auto &p :
-           parser.get<std::vector<std::string>>("--open-store")) {
-        if (!p.empty() && std::filesystem::exists(p)) {
-          const auto sIdx = session->loadAuxiliaryStore(p);
-          if (session->store(sIdx).opCount() > 0) {
-            const auto latestVer = session->store(sIdx).latest();
-            session->viewOpened(latestVer, sIdx);
-          }
-        }
-      }
-    }
-
-    if (parser.present<std::vector<std::string>>("--import-branch")) {
-      for (const auto &f :
-           parser.get<std::vector<std::string>>("--import-branch")) {
-        if (!f.empty()) {
-          const auto imported = session->importBranch(0, f);
-          session->viewOpened(imported, 0);
-          quiet || std::cout << "xudu: imported branch " << f << " as "
-                             << imported.str() << "\n";
-        }
-      }
-    }
-
-    if (parser.present<std::vector<std::string>>("--import-break")) {
-      for (const auto &f :
-           parser.get<std::vector<std::string>>("--import-break")) {
-        if (!f.empty()) {
-          const gleditor::FileTextSource source(f);
-          const auto curVer = !session->views().empty()
-                                  ? session->views()[0].version
-                                  : session->store(0).latest();
-          const auto len    = session->store(0).rebuild(curVer).length();
-          auto nextVer      = session->store(0).insertBreak(
-              curVer, static_cast<std::uint32_t>(len));
-          nextVer = session->store(0).insert(
-              nextVer, static_cast<std::uint32_t>(len), source.text());
-          for (const auto brk : source.forcedBreaks()) {
-            nextVer = session->store(0).insertBreak(
-                nextVer, static_cast<std::uint32_t>(len + brk));
-          }
-          session->save(0);
-          if (!session->views().empty()) {
-            session->views()[0].version = nextVer;
-            session->views()[0].pieces  = session->store(0).rebuild(nextVer);
-          } else {
-            session->viewOpened(nextVer, 0);
-          }
-          opening = nextVer;
-        }
-      }
-    }
-
-    if (parser.present<std::vector<std::string>>("--transclude")) {
-      for (const auto &spec :
-           parser.get<std::vector<std::string>>("--transclude")) {
-        // SRCDOC:START:LEN,DESTDOC:POS
-        const auto comma = spec.find(',');
-        if (comma != std::string::npos) {
-          const auto leftStr  = spec.substr(0, comma);
-          const auto rightStr = spec.substr(comma + 1);
-          const auto c1       = leftStr.find(':');
-          const auto c2       = leftStr.rfind(':');
-          const auto c3       = rightStr.find(':');
-          if (c1 != std::string::npos && c2 != std::string::npos &&
-              c3 != std::string::npos) {
-            const auto srcDoc =
-                static_cast<std::uint32_t>(std::stoul(leftStr.substr(0, c1)));
-            const auto srcStart = static_cast<std::uint32_t>(
-                std::stoul(leftStr.substr(c1 + 1, c2 - c1 - 1)));
-            const auto srcLen =
-                static_cast<std::uint32_t>(std::stoul(leftStr.substr(c2 + 1)));
-
-            const auto destDoc =
-                static_cast<std::uint32_t>(std::stoul(rightStr.substr(0, c3)));
-            const auto destPosStr = rightStr.substr(c3 + 1);
-            const auto vList      = session->views();
-            if (srcDoc < vList.size() && destDoc < vList.size()) {
-              const auto &destSt = session->store(vList[destDoc].storeIndex);
-              const auto destLen =
-                  destSt.rebuild(vList[destDoc].version).length();
-              const auto destPos =
-                  (destPosStr == "append" || destPosStr == "end")
-                      ? static_cast<std::uint32_t>(destLen)
-                      : static_cast<std::uint32_t>(std::stoul(destPosStr));
-              session->transclude(destDoc, destPos, srcDoc, srcStart, srcLen);
-            }
-          }
-        }
-      }
-    }
-
-    if (parser.present<std::vector<std::string>>("--transclude-text")) {
-      for (const auto &spec :
-           parser.get<std::vector<std::string>>("--transclude-text")) {
-        // SRCDOC:QUERY,DESTDOC:DESTPOS
-        const auto comma = spec.rfind(',');
-        if (comma != std::string::npos) {
-          const auto leftStr   = spec.substr(0, comma);
-          const auto rightStr  = spec.substr(comma + 1);
-          const auto atOrColon = leftStr.find('@');
-          const auto c1 =
-              (atOrColon != std::string::npos) ? atOrColon : leftStr.find(':');
-          const auto c2 = rightStr.find(':');
-          if (c1 != std::string::npos && c2 != std::string::npos) {
-            const auto srcDoc =
-                static_cast<std::uint32_t>(std::stoul(leftStr.substr(0, c1)));
-            const auto query = leftStr.substr(c1 + 1);
-            const auto destDoc =
-                static_cast<std::uint32_t>(std::stoul(rightStr.substr(0, c2)));
-            const auto destPosStr = rightStr.substr(c2 + 1);
-            const auto vList      = session->views();
-            if (srcDoc < vList.size() && destDoc < vList.size()) {
-              const auto &destSt = session->store(vList[destDoc].storeIndex);
-              const auto destLen =
-                  destSt.rebuild(vList[destDoc].version).length();
-              const auto destPos =
-                  (destPosStr == "append" || destPosStr == "end")
-                      ? static_cast<std::uint32_t>(destLen)
-                      : static_cast<std::uint32_t>(std::stoul(destPosStr));
-              session->transcludeText(destDoc, destPos, srcDoc, query);
-            }
-          }
-        }
-      }
-    }
-
-    if (parser.present<std::vector<std::string>>("--insert-text")) {
-      for (const auto &spec :
-           parser.get<std::vector<std::string>>("--insert-text")) {
-        const auto c1 = spec.find(':');
-        if (c1 != std::string::npos) {
-          const auto c2 = spec.find(':', c1 + 1);
-          if (c2 != std::string::npos) {
-            const auto docIdx =
-                static_cast<std::uint32_t>(std::stoul(spec.substr(0, c1)));
-            const auto posStr     = spec.substr(c1 + 1, c2 - c1 - 1);
-            const auto textOrFile = spec.substr(c2 + 1);
-            std::string content;
-            bool isFile = false;
-            if (std::filesystem::exists(textOrFile)) {
-              isFile = true;
-              std::ifstream in(textOrFile, std::ios::binary);
-              content.assign(std::istreambuf_iterator<char>(in),
-                             std::istreambuf_iterator<char>());
-            } else {
-              content = textOrFile;
-            }
-            const auto vList = session->views();
-            if (docIdx < vList.size()) {
-              const auto &st    = session->store(vList[docIdx].storeIndex);
-              const auto curLen = st.rebuild(vList[docIdx].version).length();
-              const auto pos =
-                  (posStr == "append" || posStr == "end")
-                      ? static_cast<std::uint32_t>(curLen)
-                      : static_cast<std::uint32_t>(std::stoul(posStr));
-              // A file's bytes are tagged with their MIME type when they are
-              // media, the same way --import does, so this can no longer
-              // silently coalesce with adjacent locally-typed text into one
-              // piece libmagic cannot identify (see Store::insertMedia()).
-              const gleditor::MagicMimeDetector magic;
-              const auto mime =
-                  isFile ? magic.identifyFile(textOrFile) : std::string{};
-              if (isFile && gleditor::MagicMimeDetector::isMediaMime(mime)) {
-                session->insertMedia(docIdx, pos, content, mime);
-              } else {
-                session->insertText(docIdx, pos, content);
-              }
-            }
-          }
-        }
-      }
-    }
-
-    if (parser.present<std::vector<std::string>>("--link")) {
-      for (const auto &spec : parser.get<std::vector<std::string>>("--link")) {
-        const auto comma = spec.find(',');
-        if (comma != std::string::npos) {
-          const auto leftSpec = spec.substr(0, comma);
-          const auto rem      = spec.substr(comma + 1);
-
-          static const std::vector<std::string> knownTypes = {
-              "comment",   "illustration", "disagreement", "authorship",
-              "quotation", "format",       "dimension",    "other"};
-
-          std::size_t foundTypePos = std::string::npos;
-          for (const auto &kt : knownTypes) {
-            auto pos = rem.find(":" + kt);
-            while (pos != std::string::npos) {
-              const auto after = pos + 1 + kt.size();
-              if (after == rem.size() || rem[after] == ':') {
-                if (foundTypePos == std::string::npos || pos > foundTypePos) {
-                  foundTypePos = pos;
-                }
-              }
-              pos = rem.find(":" + kt, pos + 1);
-            }
-          }
-
-          std::string rightSpec;
-          std::string typeStr  = "quotation";
-          std::string tierStr  = "author";
-          std::string ownerStr = "Theodor_Holm_Nelson";
-
-          if (foundTypePos != std::string::npos) {
-            rightSpec          = rem.substr(0, foundTypePos);
-            const auto attrStr = rem.substr(foundTypePos + 1);
-            const auto c1      = attrStr.find(':');
-            if (c1 != std::string::npos) {
-              typeStr       = attrStr.substr(0, c1);
-              const auto c2 = attrStr.find(':', c1 + 1);
-              if (c2 != std::string::npos) {
-                tierStr  = attrStr.substr(c1 + 1, c2 - c1 - 1);
-                ownerStr = attrStr.substr(c2 + 1);
-              } else {
-                tierStr = attrStr.substr(c1 + 1);
-              }
-            } else {
-              typeStr = attrStr;
-            }
-          } else {
-            rightSpec = rem;
-          }
-
-          auto leftSpans  = resolveSpans(*session, leftSpec);
-          auto rightSpans = resolveSpans(*session, rightSpec);
-
-          xudu::Link l;
-          l.type  = parseLinkType(typeStr);
-          l.tier  = parseProminenceTier(tierStr);
-          l.owner = ownerStr;
-          l.left  = std::move(leftSpans);
-          l.right = std::move(rightSpans);
-
-          session->addLink(0, std::move(l));
-        }
-      }
-    }
-
-    if (parser.present<std::vector<std::string>>("--format-link")) {
-      for (const auto &spec :
-           parser.get<std::vector<std::string>>("--format-link")) {
-        static const std::vector<std::string> knownAttrs = {
-            "bold",          "italic",      "underline", "overline",
-            "strikethrough", "superscript", "subscript",
-        };
-
-        std::size_t foundAttrPos = std::string::npos;
-        for (const auto &ka : knownAttrs) {
-          auto pos = spec.find(":" + ka);
-          while (pos != std::string::npos) {
-            const auto after = pos + 1 + ka.size();
-            if (after == spec.size() || spec[after] == ':') {
-              if (foundAttrPos == std::string::npos || pos > foundAttrPos) {
-                foundAttrPos = pos;
-              }
-            }
-            pos = spec.find(":" + ka, pos + 1);
-          }
-        }
-
-        std::string spanSpec;
-        std::string attrStr  = "bold";
-        std::string tierStr  = "author";
-        std::string ownerStr = "Theodor_Holm_Nelson";
-
-        if (foundAttrPos != std::string::npos) {
-          spanSpec           = spec.substr(0, foundAttrPos);
-          const auto attrRem = spec.substr(foundAttrPos + 1);
-          const auto c1      = attrRem.find(':');
-          if (c1 != std::string::npos) {
-            attrStr       = attrRem.substr(0, c1);
-            const auto c2 = attrRem.find(':', c1 + 1);
-            if (c2 != std::string::npos) {
-              tierStr  = attrRem.substr(c1 + 1, c2 - c1 - 1);
-              ownerStr = attrRem.substr(c2 + 1);
-            } else {
-              tierStr = attrRem.substr(c1 + 1);
-            }
-          } else {
-            attrStr = attrRem;
-          }
-        } else {
-          spanSpec = spec;
-        }
-
-        auto targetSpans = resolveSpans(*session, spanSpec);
-        xudu::Link l;
-        l.type  = xudu::LinkType::Format;
-        l.tier  = parseProminenceTier(tierStr);
-        l.owner = ownerStr;
-        l.left  = std::move(targetSpans);
-        l.right = {xudu::vocabularySpanFor(parseFormatAttribute(attrStr))};
-        session->addLink(0, std::move(l));
-      }
-    }
-
-    if (parser.present<std::vector<std::string>>("--dimension-link")) {
-      for (const auto &spec :
-           parser.get<std::vector<std::string>>("--dimension-link")) {
-        const auto comma = spec.find(',');
-        if (comma != std::string::npos) {
-          const auto leftSpec = spec.substr(0, comma);
-          const auto rem      = spec.substr(comma + 1);
-          std::string rightSpec;
-          std::string dimName = "dimension:d.concept";
-          const auto dimPos   = rem.find(":dimension:");
-          const auto dDotPos  = rem.find(":d.");
-          if (dimPos != std::string::npos) {
-            rightSpec = rem.substr(0, dimPos);
-            dimName   = rem.substr(dimPos + 1);
-          } else if (dDotPos != std::string::npos) {
-            rightSpec = rem.substr(0, dDotPos);
-            dimName   = "dimension:" + rem.substr(dDotPos + 1);
-          } else {
-            const auto colon = rem.rfind(':');
-            rightSpec =
-                (colon != std::string::npos) ? rem.substr(0, colon) : rem;
-            dimName = (colon != std::string::npos) ? rem.substr(colon + 1)
-                                                   : "dimension:d.concept";
-          }
-          auto leftSpans  = resolveSpans(*session, leftSpec);
-          auto rightSpans = resolveSpans(*session, rightSpec);
-          xudu::Link l;
-          l.type  = xudu::LinkType::Dimension;
-          l.tier  = xudu::ProminenceTier::Author;
-          l.owner = dimName;
-          l.left  = std::move(leftSpans);
-          l.right = std::move(rightSpans);
-          session->addLink(0, std::move(l));
-        }
-      }
-    }
-
-    if (headless) {
-      session->saveAll();
-      if (parser["--export-osmic"] == true) {
-        session->saveOsmicTextAll();
-      }
-      if (const auto outPerma = parser.get<std::string>("--dump-permascroll");
-          !outPerma.empty()) {
-        session->dumpPermascroll(outPerma);
-      }
-      return 0;
-    }
-
-    backend  = gleditor::applyCommonArguments(parser, state, argc, argv);
     renderer = Renderer::create(state, backend);
 
     const auto collabRoom = parser.get<std::string>("--collab-room");
@@ -2645,8 +2271,7 @@ int main(const int argc, char **argv) {
     map.setVisible(parser["--map"] == true);
 
     PouchDrawer pouchDrawer(*session, renderer, "Sans 10");
-    pouchDrawer.setOpen(
-        parser["--pouch"] == true || parser["--pouch-sample"] == true, false);
+    pouchDrawer.setOpen(parser["--pouch"] == true, false);
 
     if (parser.present<std::vector<std::string>>("--alias")) {
       for (const auto &spec : parser.get<std::vector<std::string>>("--alias")) {
@@ -2687,11 +2312,8 @@ int main(const int argc, char **argv) {
     swarmTelescope.setOnSummon([&views](const PublicationEntry &entry) {
       views.summonPublication(entry);
     });
-    if (parser["--telescope"] == true || parser["--swarm-sample"] == true) {
+    if (parser["--telescope"] == true) {
       swarmTelescope.setVisible(true);
-    }
-    if (parser["--swarm-sample"] == true) {
-      swarmTelescope.setSampleForceVisible(true);
     }
 
     state->wheelHandler = [&views](float /*wx*/, float wy,
@@ -3030,6 +2652,27 @@ int main(const int argc, char **argv) {
     }
     TenuousTetherOverlay tenuousTetherOverlay(renderer, nullptr);
     links.setTetherOverlay(&tenuousTetherOverlay);
+    SatelloidOverlay satelloidOverlay(renderer);
+    links.setSatelloidOverlay(&satelloidOverlay);
+#ifdef XUZZ_BUILD
+    auto zigzagPresentation =
+        std::make_shared<zigzag::ZigzagVisualizer>(state->defaultFontName);
+    auto &bridgeStore = session->store(0);
+    zigzagPresentation->bindXuduStore(bridgeStore,
+                                      bridgeStore.primaryCurrentVersion());
+    zigzagPresentation->setPresentationConfig(
+        xudu::LayoutConfig::fromStore(
+            session->systemStore(xudu::SystemDocKind::Layout))
+            .zigzag);
+    // Derive the structural presentation's placement from the live Xanadoc
+    // page, so edits, reflow, and document motion keep the two together.
+    zigzagPresentation->setPresentationTransformResolver(
+        [&views] { return views.presentationTransform(); });
+    xudu::BridgeCoordinator bridgeCoordinator(links, renderer,
+                                              *state->accessibility);
+    bridgeCoordinator.connectSatelloidNavigation(satelloidOverlay);
+    bridgeCoordinator.attach(*zigzagPresentation);
+#endif
     links.setOpener([&views](const MicroversionId &version) {
       views.showAlongside(version);
     });
@@ -3062,6 +2705,8 @@ int main(const int argc, char **argv) {
     renderer->addFrameContributor(&map);
     renderer->addFrameContributor(&links);
     renderer->addFrameContributor(&tenuousTetherOverlay);
+    renderer->addFrameContributor(&satelloidOverlay);
+    renderer->addPickObserver(&satelloidOverlay);
     renderer->addFrameContributor(&images);
     renderer->addFrameContributor(&views);
     renderer->addFrameContributor(radialMenu.get());
@@ -3125,137 +2770,16 @@ int main(const int argc, char **argv) {
     renderer->addPickObserver(&map);
     renderer->addPickObserver(&pouchDrawer);
     renderer->addPickObserver(&swarmTelescope);
-
-    if (parser["--tc-sample"] == true) {
-      namespace fs = std::filesystem;
-      const auto tempDir =
-          fs::temp_directory_path() /
-          ("xudu_tc_sample_" +
-           std::to_string(
-               std::chrono::steady_clock::now().time_since_epoch().count()));
-      std::error_code ec;
-      fs::create_directories(tempDir, ec);
-
-      const std::string public1 =
-          "Ted Nelson's Project Xanadu (1960): Universal Hypertext & "
-          "Transpublishing.\n\n";
-      const std::string withheldSecret =
-          "CONFIDENTIAL SYSTEM SPECIFICATION: [EMBARGOED]\n\n";
-      const std::string tcPlain =
-          "Nelsonian Deep Hypertext: Autonomous transcopyright micropayments "
-          "guarantee author royalty settlement across the universal "
-          "docuverse.\n\n";
-      const std::string public2 =
-          "All hypertime branches and transclusions remain perpetually "
-          "connected.\n";
-
-      const auto tcKeyId = TranscopyrightLogic::testKeyId("sample-tc-span-1");
-      const auto tcCek =
-          TranscopyrightLogic::deriveDeterministicTestCek(tcKeyId);
-      const auto tcNonce  = crypto::nonceForKeyId(tcKeyId);
-      const auto tcCipher = crypto::encryptAead(tcPlain, tcCek, tcNonce, {});
-
-      std::string torrentPayload;
-      torrentPayload += public1;
-      torrentPayload.append(withheldSecret.size(), '\0');
-      torrentPayload += tcCipher;
-      torrentPayload += public2;
-
-      const std::array<xudu::TorrentContent, 1> files{
-          xudu::TorrentContent{"spool", torrentPayload}};
-      const auto torrent = xudu::makeTorrent(files, "tc_sample_torrent", 16384);
-
-      std::ofstream spoolOut(tempDir / "spool", std::ios::binary);
-      spoolOut.write(torrentPayload.data(),
-                     static_cast<std::streamsize>(torrentPayload.size()));
-      spoolOut.close();
-
-      std::ofstream torrentOut(tempDir / "sample.torrent", std::ios::binary);
-      torrentOut.write(torrent.file.data(),
-                       static_cast<std::streamsize>(torrent.file.size()));
-      torrentOut.close();
-
-      session->addTorrent((tempDir / "sample.torrent").string(),
-                          tempDir.string());
-
-      Scroll sampleScroll;
-      // Seg 0: Plain text intro
-      ScrollSegment seg0;
-      seg0.at           = 0;
-      seg0.length       = public1.size();
-      seg0.torrent      = torrent.hash;
-      seg0.streamOffset = 0;
-      seg0.kind         = SegmentKind::Plain;
-      sampleScroll.segments.push_back(seg0);
-
-      // Seg 1: Withheld embargoed redaction
-      ScrollSegment seg1;
-      seg1.at           = seg0.end();
-      seg1.length       = withheldSecret.size();
-      seg1.torrent      = torrent.hash;
-      seg1.streamOffset = seg0.end();
-      seg1.kind         = SegmentKind::Withheld;
-      PublishedHoleRecord hole1;
-      hole1.at        = seg1.at;
-      hole1.length    = seg1.length;
-      hole1.reason    = HoleReason::Withheld;
-      seg1.holeRecord = hole1;
-      sampleScroll.segments.push_back(seg1);
-
-      // Seg 2: Transcopyright paywall
-      ScrollSegment seg2;
-      seg2.at           = seg1.end();
-      seg2.length       = tcPlain.size();
-      seg2.torrent      = torrent.hash;
-      seg2.streamOffset = seg1.streamOffset + seg1.length;
-      seg2.kind         = SegmentKind::Withheld;
-      PublishedHoleRecord hole2;
-      hole2.at     = seg2.at;
-      hole2.length = seg2.length;
-      hole2.reason = HoleReason::TranscopyrightLock;
-      TranscopyrightDescriptor tc;
-      tc.priceAtomicUnits  = 250;
-      tc.flatFee           = true;
-      tc.currencySymbol    = "nano-XU";
-      tc.keyId             = tcKeyId;
-      tc.nonce             = tcNonce;
-      tc.licenseMemo       = "Nelson-Transcopyright-v1";
-      hole2.transcopyright = tc;
-      seg2.holeRecord      = hole2;
-      sampleScroll.segments.push_back(seg2);
-
-      // Seg 3: Plain text outro
-      ScrollSegment seg3;
-      seg3.at           = seg2.end();
-      seg3.length       = public2.size();
-      seg3.torrent      = torrent.hash;
-      seg3.streamOffset = seg2.streamOffset + tcCipher.size();
-      seg3.kind         = SegmentKind::Plain;
-      sampleScroll.segments.push_back(seg3);
-
-      auto &st        = session->store(0);
-      const auto vNew = st.transcludeExternal(opening, 0, sampleScroll, 0,
-                                              sampleScroll.length());
-      opening         = vNew;
-
-      if (parser["--auto-unlock"] == true) {
-        const auto ver   = st.rebuild(vNew);
-        const auto holes = TranscopyrightLogic::inspectHoles(st, ver);
-        for (const auto &h : holes) {
-          if (h.isLocked()) {
-            session->unlockTranscopyright(0, h.span);
-            break;
-          }
-        }
-      }
-    }
-
-    if (parser["--tc-sample"] == true) {
-      views.showAlongside(opening, 0.0F, 0);
-    } else if (asked.empty() && read.empty() && alongside.empty() &&
-               extraImports.empty()) {
+    if (asked.empty() && read.empty() && alongside.empty() &&
+        extraImports.empty()) {
       const auto &primaryStore = session->store(0);
-      const auto allVers       = primaryStore.allVersions();
+#ifdef XUZZ_BUILD
+      // Xuzz composes the current Xanadoc beside the current manifold. Its
+      // historical operations are navigation material, not nine overlapping
+      // document planes at startup.
+      views.showAlongside(primaryStore.primaryCurrentVersion(), 0.0F, 0);
+#else
+      const auto allVers = primaryStore.allVersions();
       if (allVers.size() > 1) {
         for (std::size_t vIdx = 0; vIdx < allVers.size(); ++vIdx) {
           views.showAlongside(allVers[vIdx], 0.0F, 0);
@@ -3263,6 +2787,7 @@ int main(const int argc, char **argv) {
       } else {
         views.showAlongside(opening, 0.0F, 0);
       }
+#endif
     } else {
       views.showAlongside(opening, 0.0F, 0);
     }
@@ -3282,146 +2807,6 @@ int main(const int argc, char **argv) {
     }
     if (parser["--onion-skin"] == true) {
       views.setOnionSkin(true);
-    }
-
-    if (parser["--pouch-sample"] == true) {
-      pouchDrawer.setOpen(true, false);
-      const auto &st = session->store(0);
-      const auto ver = st.rebuild(opening);
-      const auto txt = st.textOf(opening);
-      if (!txt.empty()) {
-        const auto len = static_cast<std::uint32_t>(txt.size());
-        const auto p1  = std::min(len, 14U);
-        const auto p2  = std::min(len, 28U);
-
-        auto spans1 = ver.spansFor(0, p1);
-        if (!spans1.empty()) {
-          const PouchItem it1{
-              .itemId          = 1,
-              .span            = spans1.front(),
-              .previewText     = txt.substr(0, p1),
-              .originVersion   = opening,
-              .originDocIndex  = 0,
-              .originCharStart = 0,
-              .originCharEnd   = p1,
-              .timestampUtc    = 0,
-          };
-          if (auto *z = pouchDrawer.zoneById("to_link_left")) {
-            z->addItem(it1);
-          }
-          pouchDrawer.forge().dropLeft(it1);
-        }
-
-        if (p2 > p1) {
-          auto spans2 = ver.spansFor(p1, p2 - p1);
-          if (!spans2.empty()) {
-            const PouchItem it2{
-                .itemId          = 2,
-                .span            = spans2.front(),
-                .previewText     = txt.substr(p1, p2 - p1),
-                .originVersion   = opening,
-                .originDocIndex  = 0,
-                .originCharStart = p1,
-                .originCharEnd   = p2,
-                .timestampUtc    = 0,
-            };
-            if (auto *z = pouchDrawer.zoneById("to_link_right")) {
-              z->addItem(it2);
-            }
-            pouchDrawer.forge().dropRight(it2);
-          }
-        }
-
-        if (len > p2) {
-          const auto p3Len = std::min(len - p2, 30U);
-          auto spans3      = ver.spansFor(p2, p3Len);
-          if (!spans3.empty()) {
-            const PouchItem it3{
-                .itemId          = 3,
-                .span            = spans3.front(),
-                .previewText     = txt.substr(p2, p3Len),
-                .originVersion   = opening,
-                .originDocIndex  = 0,
-                .originCharStart = p2,
-                .originCharEnd   = p2 + p3Len,
-                .timestampUtc    = 0,
-            };
-            if (auto *z = pouchDrawer.zoneById("notes")) {
-              z->addItem(it3);
-            }
-          }
-        }
-      }
-    }
-
-    if (parser["--tether-sample"] == true) {
-      const auto &st   = session->store(0);
-      const auto ver   = st.rebuild(opening);
-      const auto txt   = st.textOf(opening);
-      const auto spans = ver.spansFor(
-          0, std::min(static_cast<std::uint32_t>(txt.size()), 28U));
-      PrimediaSpan span{0, 0, 28};
-      if (!spans.empty()) {
-        span = spans.front();
-      }
-      TetherPayload payload{
-          .span            = span,
-          .previewText     = txt.empty()
-                                 ? "Project Xanadu Literary Machines"
-                                 : txt.substr(0, std::min(txt.size(), 28UL)),
-          .originVersion   = opening,
-          .originDocIndex  = 0,
-          .originCharStart = 0,
-          .originCharEnd   = static_cast<std::uint32_t>(
-              std::min(txt.size(), static_cast<std::size_t>(28U))),
-          .originScreenPos = glm::vec2(280.0F, 500.0F),
-      };
-      kineticTetherEngine.startDrag(payload, 280.0F, 500.0F);
-      kineticTetherEngine.updateDrag(660.0F, 320.0F);
-    }
-
-    if (parser["--tether-spawn-sample"] == true) {
-      const auto &st   = session->store(0);
-      const auto ver   = st.rebuild(opening);
-      const auto txt   = st.textOf(opening);
-      const auto spans = ver.spansFor(
-          0, std::min(static_cast<std::uint32_t>(txt.size()), 28U));
-      PrimediaSpan span{0, 0, 28};
-      if (!spans.empty()) {
-        span = spans.front();
-      }
-      TetherPayload payload{
-          .span            = span,
-          .previewText     = txt.empty()
-                                 ? "Project Xanadu Literary Machines"
-                                 : txt.substr(0, std::min(txt.size(), 28UL)),
-          .originVersion   = opening,
-          .originDocIndex  = 0,
-          .originCharStart = 0,
-          .originCharEnd   = static_cast<std::uint32_t>(
-              std::min(txt.size(), static_cast<std::size_t>(28U))),
-          .originScreenPos = glm::vec2(280.0F, 500.0F),
-      };
-      views.spawnTranscludedDocument(payload, 660.0F, 320.0F);
-    }
-
-    if (parser["--page-break-sample"] == true) {
-      pageBreakOverlay.setSampleForceVisible(true, 0, 0);
-    }
-
-    if (parser["--page-break-split-sample"] == true) {
-      const auto &st   = session->store(0);
-      const auto txt   = st.textOf(opening);
-      const auto nlPos = txt.find('\n');
-      if (nlPos != std::string::npos) {
-        views.insertPageBreak(0, static_cast<std::uint32_t>(nlPos + 1));
-      }
-    }
-
-    if (parser["--wireframe-sample"] == true) {
-      wireframeHullOverlay.startLoading(0, "Xanadu Docuverse Materialization",
-                                        "e2e8f1920ac34b7911", 20);
-      wireframeHullOverlay.updateProgress(0, 13);
     }
 
     std::vector<std::shared_ptr<gleditor::AudioWidget>> audioWidgets;
@@ -3499,29 +2884,38 @@ int main(const int argc, char **argv) {
 
     session->setSystemDocChangedCallback(
         [&app, radialMenu, docSwitcher, &pouchDrawer, &links,
-         &map](const xudu::SystemDocKind kind, const std::string &content) {
+         &map
+#ifdef XUZZ_BUILD
+         , &zigzagPresentation
+#endif
+        ](const xudu::SystemDocKind kind, const xudu::Store &store) {
           std::cout << "xudu: system doc updated (" << xudu::systemDocUri(kind)
                     << ")\n";
           switch (kind) {
           case xudu::SystemDocKind::Keymap: {
-            app.commands().rebindFromText(xudu::extractConfigSection(content));
+            app.commands().rebindFromText(xudu::extractConfigSection(
+                store.textOf(store.primaryCurrentVersion())));
             break;
           }
           case xudu::SystemDocKind::Settings: {
             break;
           }
           case xudu::SystemDocKind::Layout: {
-            const auto layout = xudu::parseLayoutConfig(content);
+            const auto layout = xudu::LayoutConfig::fromStore(store);
             links.setVisible(layout.xanalinkRibbons);
             links.setBeamConfig(layout.beams);
             links.tensionEngine().setParams(layout.physics.toTensionParams());
             pouchDrawer.setDockSide(layout.pouchDock == xudu::PouchDock::Left
                                         ? xudu::PouchDrawer::DockSide::Left
                                         : xudu::PouchDrawer::DockSide::Right);
+#ifdef XUZZ_BUILD
+            zigzagPresentation->setPresentationConfig(layout.zigzag);
+#endif
             break;
           }
           case xudu::SystemDocKind::UI: {
-            const auto uiCfg = xudu::parseUIConfig(content);
+            const auto uiCfg = xudu::parseUIConfig(
+                store.textOf(store.primaryCurrentVersion()));
             radialMenu->setConfig(uiCfg.radialMenu);
             docSwitcher->setVisible(uiCfg.tabBarVisible);
             map.setVisible(uiCfg.hypertimeMapVisible);
@@ -3553,19 +2947,28 @@ int main(const int argc, char **argv) {
       const auto loIdx = session->systemStoreIndex(xudu::SystemDocKind::Layout);
       const auto &loStore = session->store(loIdx);
       if (loStore.opCount() > 0) {
-        const auto loCfg = xudu::parseLayoutConfig(
-            loStore.textOf(loStore.primaryCurrentVersion()));
+        const auto loCfg = xudu::LayoutConfig::fromStore(loStore);
         links.setVisible(loCfg.xanalinkRibbons);
         links.setBeamConfig(loCfg.beams);
         links.tensionEngine().setParams(loCfg.physics.toTensionParams());
         pouchDrawer.setDockSide(loCfg.pouchDock == xudu::PouchDock::Left
                                     ? xudu::PouchDrawer::DockSide::Left
                                     : xudu::PouchDrawer::DockSide::Right);
+#ifdef XUZZ_BUILD
+        zigzagPresentation->setPresentationConfig(loCfg.zigzag);
+#endif
       }
     }
 
     const auto status = app.run();
     session->saveAll();
+    if (parser["--export-osmic"] == true) {
+      session->saveOsmicTextAll();
+    }
+    if (const auto outPerma = parser.get<std::string>("--dump-permascroll");
+        !outPerma.empty()) {
+      session->dumpPermascroll(outPerma);
+    }
     return status;
   } catch (const std::exception &err) {
     std::cerr << "Error: " << err.what() << "\n";

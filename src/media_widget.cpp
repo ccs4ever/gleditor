@@ -6,6 +6,7 @@
 #include <gleditor/media_widget.hpp>
 
 #include <algorithm>
+#include <atomic>
 #include <cmath>
 #include <cstddef>
 #include <format>
@@ -43,6 +44,12 @@ constexpr std::uint32_t progressBg   = 0x2A313FFFU; // Progress bar track
 constexpr std::uint32_t progressBar  = 0x5C8DFFFFU; // Elapsed progress
 constexpr std::uint32_t videoAreaBg  = 0x0E1116FFU; // Video frame background
 
+// The low twelve picking bits are fixed media-control IDs. Starting widget
+// identity at 0x100 keeps its packed high-bit namespace clear of the radial
+// menu's legacy 0x8000 tags.
+constexpr std::uint32_t firstMediaWidgetId = 0x100U;
+std::atomic<std::uint32_t> nextMediaWidgetId{firstMediaWidgetId};
+
 std::string formatTime(const float totalSeconds) {
   if (totalSeconds < 0.0F || std::isnan(totalSeconds) ||
       std::isinf(totalSeconds)) {
@@ -61,7 +68,9 @@ std::string formatTime(const float totalSeconds) {
 
 MediaWidget::MediaWidget(std::string aFontName,
                          std::shared_ptr<MediaPlayer> aPlayer)
-    : fontName_(std::move(aFontName)), player_(std::move(aPlayer)) {
+    : fontName_(std::move(aFontName)), player_(std::move(aPlayer)),
+      widgetId_(nextMediaWidgetId.fetch_add(1U, std::memory_order_relaxed)),
+      tagBase_(widgetId_ << tagSubElementBits) {
   if (nullptr == player_) {
     player_ = std::make_shared<MediaPlayer>();
   }

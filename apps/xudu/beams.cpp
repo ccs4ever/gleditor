@@ -18,11 +18,14 @@
 #include <gleditor/animation.hpp>
 #include <gleditor/caret.hpp>
 #include <gleditor/paths.hpp>
+#include <gleditor/render/constants.hpp>
 #include <gleditor/render_state.hpp>
 #include <gleditor/spatial.hpp>
 
+#include "common/xanadu/enfilade/spanfilade.hpp"
 #include "xudu/core/anchor_lanes.hpp"
 #include "xudu/core/framing.hpp"
+#include "xudu/satelloid.hpp"
 #include "xudu/tenuous_tether.hpp"
 
 namespace xudu {
@@ -38,14 +41,13 @@ constexpr float beamWidthOfLine = 1.25F;
 /// is not worth the animation, in world units.
 constexpr float alreadyAligned = 1.0F;
 
-/// Space left between two documents brought alongside each other, in world
-/// units. Enough for the beam to be a beam and not a join.
-constexpr float documentGap = 24.0F;
-
 /// Half-width assumed for a document whose first page has not built yet, in
-/// world units -- just enough that layout math has something to work with
-/// before the real width is known.
-constexpr float fallbackDocHalfWidth = 10.0F;
+/// world units. It is the declared default page geometry, not an unrelated
+/// guessed width; real Page measurements replace it as soon as they exist.
+constexpr float fallbackDocHalfWidth = Doc::defaultPageWidthWorld() / 2.0F;
+
+/// Height used during the same asynchronous first-page interval.
+constexpr float fallbackDocHeight = Doc::defaultPageHeightWorld();
 
 /// Aspect ratio assumed when the view has not reported a screen size yet.
 constexpr float fallbackAspect = 4.0F / 3.0F;
@@ -111,27 +113,81 @@ void LinkBeams::rebuildStrands(RenderState &state) {
 
   std::vector<LinkedPair> placed;
   std::vector<HalfLink> unplaced;
-  placeLinks(session.store().links(), versions, placed, unplaced);
+  if (!manifoldViews_.empty()) {
+    UniversalViewContext uctx;
+    uctx.docViews      = versions;
+    uctx.manifoldViews = manifoldViews_;
+    uctx.manifoldFoci  = manifoldFoci_;
+    placeLinks(session.store().links(), uctx, placed, unplaced);
+    strands.clear();
+    strands.reserve(placed.size());
+    for (const auto &one : placed) {
+      strands.push_back(Strand{
+          .link = one.link,
+          .type = one.type,
+          .tier = one.tier,
+          .from = one.from,
+          .to   = one.to,
+      });
+    }
+    dangling.clear();
+    dangling.reserve(unplaced.size());
+    for (auto &one : unplaced) {
+      dangling.push_back(Dangling{std::move(one), false});
+    }
 
-  strands.clear();
-  strands.reserve(placed.size());
-  for (const auto &one : placed) {
-    strands.push_back(Strand{
-        one.link, one.type, one.tier, one.from, one.to, {}, {}, {}, {}, false});
-  }
-  dangling.clear();
-  dangling.reserve(unplaced.size());
-  for (auto &one : unplaced) {
-    dangling.push_back(Dangling{std::move(one), false});
-  }
+    std::vector<TransclusionPair> tPairs;
+    // Spanfilade is the canonical interval index for shared primedia. Keep
+    // discovery in the same path for document/cell contexts so beam staging
+    // cannot diverge from the reference implementation.
+    const auto spanfilade = xanadu::enfilade::Spanfilade::fromContext(uctx);
+    spanfilade.placeTransclusions(uctx, tPairs);
+    transclusionStrands.clear();
+    transclusionStrands.reserve(tPairs.size());
+    for (const auto &tp : tPairs) {
+      transclusionStrands.push_back(TransclusionStrand{
+          .from = tp.from,
+          .to   = tp.to,
+          .span = tp.span,
+      });
+    }
+    if (beamConfig_.loomBundlingEnabled) {
+      looms_ = detectTransclusionLooms(uctx, tPairs);
+    } else {
+      looms_.clear();
+    }
+  } else {
+    looms_.clear();
+    placeLinks(session.store().links(), versions, placed, unplaced);
+    strands.clear();
+    strands.reserve(placed.size());
+    for (const auto &one : placed) {
+      strands.push_back(Strand{
+          .link = one.link,
+          .type = one.type,
+          .tier = one.tier,
+          .from = one.from,
+          .to   = one.to,
+      });
+    }
+    dangling.clear();
+    dangling.reserve(unplaced.size());
+    for (auto &one : unplaced) {
+      dangling.push_back(Dangling{std::move(one), false});
+    }
 
-  std::vector<TransclusionPair> tPairs;
-  placeTransclusions(versions, tPairs);
-  transclusionStrands.clear();
-  transclusionStrands.reserve(tPairs.size());
-  for (const auto &tp : tPairs) {
-    transclusionStrands.push_back(
-        TransclusionStrand{tp.from, tp.to, tp.span, {}, {}, {}, {}});
+    std::vector<TransclusionPair> tPairs;
+    const auto spanfilade = xanadu::enfilade::Spanfilade::fromViews(versions);
+    spanfilade.placeTransclusions(versions, tPairs);
+    transclusionStrands.clear();
+    transclusionStrands.reserve(tPairs.size());
+    for (const auto &tp : tPairs) {
+      transclusionStrands.push_back(TransclusionStrand{
+          .from = tp.from,
+          .to   = tp.to,
+          .span = tp.span,
+      });
+    }
   }
 }
 
@@ -139,7 +195,7 @@ void LinkBeams::resolveAnchors(RenderState &state) {
   const auto anchorIn =
       [&state, this](const LinkEnd &end,
                      std::uint32_t offset) -> std::optional<Doc::Anchor> {
-    if (end.doc >= state.docs.size()) {
+    if (end.isCell() || end.doc >= state.docs.size()) {
       return std::nullopt;
     }
     // A link landing inside a media span's reserved placeholder range
@@ -159,46 +215,70 @@ void LinkBeams::resolveAnchors(RenderState &state) {
   };
 
   for (auto &strand : strands) {
-    // Retried until it answers rather than given up on: a document opened this
-    // frame has no pages yet, and the link is no less real for that.
-    if (!strand.fromAnchor) {
-      strand.fromAnchor = anchorIn(strand.from, strand.from.start);
+    if (strand.from.isCell()) {
+      if (!strand.fromCellAnchor && cellAnchorResolver) {
+        strand.fromCellAnchor = cellAnchorResolver(strand.from.cell());
+      }
+    } else {
+      if (!strand.fromAnchor) {
+        strand.fromAnchor = anchorIn(strand.from, strand.from.start);
+      }
+      if (!strand.fromEndAnchor) {
+        const auto endOff    = (strand.from.end > strand.from.start)
+                                   ? (strand.from.end - 1)
+                                   : strand.from.start;
+        strand.fromEndAnchor = anchorIn(strand.from, endOff);
+      }
     }
-    if (!strand.toAnchor) {
-      strand.toAnchor = anchorIn(strand.to, strand.to.start);
-    }
-    if (!strand.fromEndAnchor) {
-      const auto endOff    = (strand.from.end > strand.from.start)
-                                 ? (strand.from.end - 1)
-                                 : strand.from.start;
-      strand.fromEndAnchor = anchorIn(strand.from, endOff);
-    }
-    if (!strand.toEndAnchor) {
-      const auto endOff  = (strand.to.end > strand.to.start)
-                               ? (strand.to.end - 1)
-                               : strand.to.start;
-      strand.toEndAnchor = anchorIn(strand.to, endOff);
+
+    if (strand.to.isCell()) {
+      if (!strand.toCellAnchor && cellAnchorResolver) {
+        strand.toCellAnchor = cellAnchorResolver(strand.to.cell());
+      }
+    } else {
+      if (!strand.toAnchor) {
+        strand.toAnchor = anchorIn(strand.to, strand.to.start);
+      }
+      if (!strand.toEndAnchor) {
+        const auto endOff  = (strand.to.end > strand.to.start)
+                                 ? (strand.to.end - 1)
+                                 : strand.to.start;
+        strand.toEndAnchor = anchorIn(strand.to, endOff);
+      }
     }
   }
 
   for (auto &tStrand : transclusionStrands) {
-    if (!tStrand.fromAnchor) {
-      tStrand.fromAnchor = anchorIn(tStrand.from, tStrand.from.start);
+    if (tStrand.from.isCell()) {
+      if (!tStrand.fromCellAnchor && cellAnchorResolver) {
+        tStrand.fromCellAnchor = cellAnchorResolver(tStrand.from.cell());
+      }
+    } else {
+      if (!tStrand.fromAnchor) {
+        tStrand.fromAnchor = anchorIn(tStrand.from, tStrand.from.start);
+      }
+      if (!tStrand.fromEndAnchor) {
+        const auto endOff     = (tStrand.from.end > tStrand.from.start)
+                                    ? (tStrand.from.end - 1)
+                                    : tStrand.from.start;
+        tStrand.fromEndAnchor = anchorIn(tStrand.from, endOff);
+      }
     }
-    if (!tStrand.toAnchor) {
-      tStrand.toAnchor = anchorIn(tStrand.to, tStrand.to.start);
-    }
-    if (!tStrand.fromEndAnchor) {
-      const auto endOff     = (tStrand.from.end > tStrand.from.start)
-                                  ? (tStrand.from.end - 1)
-                                  : tStrand.from.start;
-      tStrand.fromEndAnchor = anchorIn(tStrand.from, endOff);
-    }
-    if (!tStrand.toEndAnchor) {
-      const auto endOff   = (tStrand.to.end > tStrand.to.start)
-                                ? (tStrand.to.end - 1)
-                                : tStrand.to.start;
-      tStrand.toEndAnchor = anchorIn(tStrand.to, endOff);
+
+    if (tStrand.to.isCell()) {
+      if (!tStrand.toCellAnchor && cellAnchorResolver) {
+        tStrand.toCellAnchor = cellAnchorResolver(tStrand.to.cell());
+      }
+    } else {
+      if (!tStrand.toAnchor) {
+        tStrand.toAnchor = anchorIn(tStrand.to, tStrand.to.start);
+      }
+      if (!tStrand.toEndAnchor) {
+        const auto endOff   = (tStrand.to.end > tStrand.to.start)
+                                  ? (tStrand.to.end - 1)
+                                  : tStrand.to.start;
+        tStrand.toEndAnchor = anchorIn(tStrand.to, endOff);
+      }
     }
   }
 }
@@ -277,6 +357,23 @@ LinkBeams::edgeOf(const Doc &doc, const std::optional<Doc::Anchor> &startAnchor,
   };
 }
 
+std::optional<LinkBeams::Edge> LinkBeams::edgeOf(const CellAnchor &anchor,
+                                                 const bool towardsRight) {
+  const float halfW = anchor.width * 0.5F;
+  const float halfH = anchor.height * 0.5F;
+  const float x =
+      towardsRight ? (anchor.position.x + halfW) : (anchor.position.x - halfW);
+  const glm::vec3 top(x, anchor.position.y + halfH, anchor.position.z);
+  const glm::vec3 bottom(x, anchor.position.y - halfH, anchor.position.z);
+  return Edge{
+      .top        = top,
+      .bottom     = bottom,
+      .textTop    = top,
+      .textBottom = bottom,
+      .lineHeight = anchor.lineHeight > 0.0F ? anchor.lineHeight : 16.0F,
+  };
+}
+
 float LinkBeams::drawnHalfExtent(const Edge &edge, const float stubMinOfLine) {
   const float lineWorld = edge.lineHeight * Doc::pixelsToWorld;
   return std::max(std::abs(edge.top.y - edge.bottom.y) * 0.5F,
@@ -339,6 +436,9 @@ void LinkBeams::band(const Edge &nearSide, const Edge &farSide,
   const auto [nearTop, nearBottom] = within(nearSide);
   const auto [farTop, farBottom]   = within(farSide);
 
+  const float zDiff     = std::abs(nearSide.top.z - farSide.top.z);
+  const bool useMorphic = (zDiff >= 2.0F);
+
   for (std::size_t k = 0; k < count; k++) {
     const float where =
         count > 1 ? static_cast<float>(k) / static_cast<float>(count - 1)
@@ -351,6 +451,15 @@ void LinkBeams::band(const Edge &nearSide, const Edge &farSide,
     const auto strandColour = (0 == k || count - 1 == k)
                                   ? colour
                                   : fade(colour, beamConfig_.bandFillAlpha);
+
+    if (useMorphic) {
+      const glm::vec3 fromTan(p2.x >= p1.x ? 1.0F : -1.0F, 0.0F, 0.0F);
+      const glm::vec3 toTan(p2.x >= p1.x ? 1.0F : -1.0F, 0.0F, 0.0F);
+      const auto path =
+          morphicRoute(p1, p2, fromTan, toTan, beamConfig_.bypassSegments);
+      beams->addPath(path, baseWidth, strandColour, tag);
+      continue;
+    }
 
     if (documentsApart <= 1) {
       beams->add(p1, p2, baseWidth, strandColour, tag, 0.0F - phase,
@@ -570,7 +679,7 @@ void LinkBeams::alignPair(std::size_t fromDocIdx, std::size_t toDocIdx,
         }
         break;
       }
-      currX += prevHalfW + halfW + documentGap;
+      currX += prevHalfW + halfW + render::kDefaultDocumentGap;
     }
     anyForegroundYet = true;
     docSlots[d]      = currX;
@@ -588,7 +697,7 @@ void LinkBeams::alignPair(std::size_t fromDocIdx, std::size_t toDocIdx,
     body.position        = cur;
     body.restingPosition = cur;
     float halfW          = fallbackDocHalfWidth;
-    float heightW        = 70.0F;
+    float heightW        = fallbackDocHeight;
     if (const auto *p = state.docs[d]->page(0)) {
       halfW   = (p->widthPixels() * 0.5F) * Doc::pixelsToWorld;
       heightW = p->heightPixels() * Doc::pixelsToWorld;
@@ -606,7 +715,7 @@ void LinkBeams::alignPair(std::size_t fromDocIdx, std::size_t toDocIdx,
   constraint.toDoc       = toDocIdx;
   constraint.nearAnchorY = nearCenterY - nearPos.y;
   constraint.farAnchorY  = farCenterY - farPos.y;
-  constraint.targetGap   = documentGap;
+  constraint.targetGap   = render::kDefaultDocumentGap;
   constraint.prominence  = 1.0F;
   constraint.active      = true;
   tensionEngine_.addConstraint(constraint);
@@ -634,10 +743,10 @@ void LinkBeams::alignPair(std::size_t fromDocIdx, std::size_t toDocIdx,
     anchor.originPos  = farPos;
     anchor.currentPos = target;
     anchor.width      = farHalfWidth * 2.0F;
-    anchor.height =
-        farPage ? (farPage->heightPixels() * Doc::pixelsToWorld) : 70.0F;
-    anchor.colour = 0x38BDF855; // Ethereal cyan with ~33% alpha
-    anchor.active = true;
+    anchor.height     = farPage ? (farPage->heightPixels() * Doc::pixelsToWorld)
+                                : fallbackDocHeight;
+    anchor.colour     = 0x38BDF855; // Ethereal cyan with ~33% alpha
+    anchor.active     = true;
     tetherOverlay_->setTether(anchor);
   }
 
@@ -777,6 +886,148 @@ void LinkBeams::alignPair(std::size_t fromDocIdx, std::size_t toDocIdx,
   }
 }
 
+void LinkBeams::sworphCameraTo(const glm::vec3 &targetPos,
+                               ch::Timeline &timeline) {
+  if (!renderer || !renderer->appState()) {
+    return;
+  }
+  {
+    std::scoped_lock locker(renderer->appState()->view);
+    if (!cameraDriving) {
+      cameraTarget  = renderer->appState()->view.pos;
+      cameraDriving = true;
+    }
+  }
+  cameraGoal = targetPos;
+  timeline.apply(&cameraTarget)
+      .then<ch::RampTo>(targetPos, gleditor::anim::cameraSettle,
+                        ch::EaseInOutQuad());
+}
+
+void LinkBeams::alignCellSatelloid(const Strand &strand, RenderState &state) {
+  const bool docAtFrom = strand.from.isDocument();
+  const auto docIdx    = docAtFrom ? strand.from.doc : strand.to.doc;
+  const auto cellRef   = docAtFrom ? strand.to.cell() : strand.from.cell();
+  const auto &cellAnch =
+      docAtFrom ? strand.toCellAnchor : strand.fromCellAnchor;
+  const auto &docAnch = docAtFrom ? strand.fromAnchor : strand.toAnchor;
+
+  if (docIdx >= state.docs.size() || !cellAnch || !docAnch) {
+    return;
+  }
+
+  const auto &doc = state.docs[docIdx];
+  if (!doc) {
+    return;
+  }
+
+  const auto anchorWorld =
+      doc->worldPoint(docAnch->pageIndex, docAnch->x, docAnch->y);
+  if (!anchorWorld) {
+    return;
+  }
+
+  const glm::vec3 docPos(doc->getModel()[3]);
+  const float docHalfW = (doc->page(0) ? (doc->page(0)->widthPixels() * 0.5F)
+                                       : fallbackDocHalfWidth) *
+                         Doc::pixelsToWorld;
+
+  // 1. Setup / update TensionBody for cell in tension layout engine
+  TensionBody cellBody;
+  cellBody.targetId        = static_cast<std::size_t>(cellRef);
+  cellBody.targetKind      = LinkTargetKind::ZigzagCell;
+  cellBody.restingPosition = cellAnch->position;
+  cellBody.position        = cellAnch->position;
+  cellBody.width           = 24.0F;
+  cellBody.height          = 14.0F;
+  cellBody.isForeground    = true;
+  cellBody.isFlying        = true;
+  cellBody.mass            = tensionEngine_.params().satelloidMass;
+  cellBody.pinned          = false;
+
+  if (const auto *existing = tensionEngine_.findCellBody(cellRef)) {
+    cellBody.position = existing->position;
+    cellBody.velocity = existing->velocity;
+  }
+
+  tensionEngine_.setBody(cellBody);
+
+  // Document body (pinned as reference)
+  TensionBody docBody;
+  docBody.docIndex        = docIdx;
+  docBody.targetKind      = LinkTargetKind::Document;
+  docBody.position        = docPos;
+  docBody.restingPosition = docPos;
+  docBody.width           = docHalfW * 2.0F;
+  docBody.height = doc->page(0)
+                       ? (doc->page(0)->heightPixels() * Doc::pixelsToWorld)
+                       : fallbackDocHeight;
+  docBody.isForeground = true;
+  docBody.pinned       = true;
+  tensionEngine_.setBody(docBody);
+
+  // 2. Add collinear alignment constraint
+  TensionConstraint constraint;
+  constraint.fromDoc     = docIdx;
+  constraint.fromKind    = LinkTargetKind::Document;
+  constraint.toTarget    = static_cast<std::size_t>(cellRef);
+  constraint.toKind      = LinkTargetKind::ZigzagCell;
+  constraint.nearAnchorY = anchorWorld->y - docPos.y;
+  constraint.farAnchorY  = 0.0F;
+  constraint.targetGap   = tensionEngine_.params().satelloidGap;
+  constraint.prominence  = 1.0F;
+  constraint.active      = true;
+  tensionEngine_.addConstraint(constraint);
+
+  // 3. Step physics simulation if enabled
+  if (physicsEnabled_) {
+    constexpr float dt = 0.016F;
+    for (int step = 0; step < 20; ++step) {
+      tensionEngine_.step(dt);
+    }
+  }
+
+  const auto *solved = tensionEngine_.findCellBody(cellRef);
+  const glm::vec3 solvedPos =
+      solved ? solved->position
+             : glm::vec3(docPos.x + docHalfW +
+                             tensionEngine_.params().satelloidGap,
+                         anchorWorld->y, 0.0F);
+
+  // 4. Update SatelloidOverlay
+  if (satelloidOverlay_ != nullptr) {
+    CellSatelloid sat;
+    sat.cellRef    = cellRef;
+    sat.originPos  = cellAnch->position;
+    sat.currentPos = solvedPos;
+    sat.targetPos =
+        glm::vec3(docPos.x + docHalfW + tensionEngine_.params().satelloidGap,
+                  anchorWorld->y, 0.0F);
+    sat.width       = 24.0F;
+    sat.height      = 14.0F;
+    sat.dimName     = "d.sequence";
+    sat.accentColor = 0x38BDF8FF; // Cyan
+    sat.alpha       = 1.0F;
+    sat.active      = true;
+    satelloidOverlay_->setSatelloid(sat);
+  }
+
+  // 5. Register tenuous parent tether in TenuousTetherOverlay
+  if (tetherOverlay_ != nullptr && cellAnch->position.z < -5.0F) {
+    FlyingTetherAnchor tether;
+    tether.targetId   = static_cast<std::size_t>(cellRef);
+    tether.targetKind = LinkTargetKind::ZigzagCell;
+    tether.cellRef    = cellRef;
+    tether.originPos  = cellAnch->position;
+    tether.currentPos = solvedPos;
+    tether.width      = 24.0F;
+    tether.height     = 14.0F;
+    tether.colour     = 0x38BDF844;
+    tether.active     = true;
+    tetherOverlay_->setTether(tether);
+  }
+}
+
 bool LinkBeams::danglingOutstanding(const RenderState &state) const {
   // Exactly the ones openDangling() will act on -- the same test it makes. A
   // half-link it would skip on every frame is not work outstanding, and
@@ -784,7 +1035,8 @@ bool LinkBeams::danglingOutstanding(const RenderState &state) const {
   // nothing left to do: a run that never settles and never quits.
   return nullptr != opener &&
          std::ranges::any_of(dangling, [&state](const Dangling &one) {
-           return !one.looked && one.link.here.doc < state.docs.size();
+           return !one.looked && one.link.here.isDocument() &&
+                  one.link.here.doc < state.docs.size();
          });
 }
 
@@ -802,7 +1054,8 @@ bool LinkBeams::openDangling(RenderState &state) {
   }
 
   for (auto &waiting : dangling) {
-    if (waiting.looked || waiting.link.here.doc >= state.docs.size()) {
+    if (waiting.looked || !waiting.link.here.isDocument() ||
+        waiting.link.here.doc >= state.docs.size()) {
       continue;
     }
     // Once per link: the search rebuilds states until one matches, which is
@@ -832,9 +1085,18 @@ void LinkBeams::traverse(const Strand &strand, RenderState &state) {
   // The far end is whichever one the caret is not already in. Following a link
   // from the end you are at is the useful direction, and it is the only one
   // the reader can have meant.
-  const bool atFrom =
-      caret->active() && caret->documentIndex() == strand.from.doc;
+  const bool atFrom = caret->active() && strand.from.isDocument() &&
+                      caret->documentIndex() == strand.from.doc;
   const auto &there = atFrom ? strand.to : strand.from;
+  if (there.isCell()) {
+    std::cout << "xudu: follow link " << strand.link << " to cell #"
+              << there.cell() << "\n";
+    if (satelloidOverlay_ != nullptr) {
+      satelloidOverlay_->triggerPulse(there.cell());
+    }
+    alignCellSatelloid(strand, state);
+    return;
+  }
   if (there.doc >= state.docs.size()) {
     return;
   }
@@ -850,6 +1112,11 @@ bool LinkBeams::picked(const render::PickingResult &pick, RenderState &state) {
   // Ours whatever happens next: a beam was clicked, and the click must not
   // fall through to the page behind it.
   if (pick.tag.clusterIndex >= strands.size()) {
+    const auto tIndex = pick.tag.clusterIndex - strands.size();
+    if (tIndex < transclusionStrands.size()) {
+      hoveredTransclusion_                = tIndex;
+      transclusionStrands[tIndex].aligned = false;
+    }
     return true;
   }
   const auto &strand = strands[pick.tag.clusterIndex];
@@ -991,34 +1258,63 @@ void LinkBeams::drawFrame(gleditor::FrameContext &ctx) {
 
     for (std::size_t i = 0; i < strands.size(); i++) {
       auto &strand = strands[i];
-      if (!strand.fromAnchor || !strand.toAnchor ||
-          strand.from.doc >= state.docs.size() ||
-          strand.to.doc >= state.docs.size()) {
-        continue;
-      }
-      const auto &from = state.docs[strand.from.doc];
-      const auto &to   = state.docs[strand.to.doc];
-      if (from->currentOpacity() <= 0.001F || to->currentOpacity() <= 0.001F) {
+
+      const bool fromValid =
+          strand.from.isCell()
+              ? strand.fromCellAnchor.has_value()
+              : (strand.fromAnchor.has_value() &&
+                 strand.from.doc < state.docs.size() &&
+                 state.docs[strand.from.doc]->currentOpacity() > 0.001F);
+      const bool toValid =
+          strand.to.isCell()
+              ? strand.toCellAnchor.has_value()
+              : (strand.toAnchor.has_value() &&
+                 strand.to.doc < state.docs.size() &&
+                 state.docs[strand.to.doc]->currentOpacity() > 0.001F);
+
+      if (!fromValid || !toValid) {
         continue;
       }
 
-      const auto rightwards =
-          glm::vec3(to->getModel()[3]).x >= glm::vec3(from->getModel()[3]).x;
+      const glm::vec3 fromPos =
+          strand.from.isCell()
+              ? strand.fromCellAnchor->position
+              : glm::vec3(state.docs[strand.from.doc]->getModel()[3]);
+      const glm::vec3 toPos =
+          strand.to.isCell()
+              ? strand.toCellAnchor->position
+              : glm::vec3(state.docs[strand.to.doc]->getModel()[3]);
+
+      const bool rightwards = toPos.x >= fromPos.x;
       const auto nearEdge =
-          edgeOf(*from, strand.fromAnchor, strand.fromEndAnchor, rightwards);
+          strand.from.isCell()
+              ? edgeOf(*strand.fromCellAnchor, rightwards)
+              : edgeOf(*state.docs[strand.from.doc], strand.fromAnchor,
+                       strand.fromEndAnchor, rightwards);
       const auto farEdge =
-          edgeOf(*to, strand.toAnchor, strand.toEndAnchor, !rightwards);
+          strand.to.isCell()
+              ? edgeOf(*strand.toCellAnchor, !rightwards)
+              : edgeOf(*state.docs[strand.to.doc], strand.toAnchor,
+                       strand.toEndAnchor, !rightwards);
       if (!nearEdge || !farEdge) {
         continue;
       }
 
-      const std::size_t docSpan = strand.from.doc > strand.to.doc
-                                      ? (strand.from.doc - strand.to.doc)
-                                      : (strand.to.doc - strand.from.doc);
+      const std::size_t docSpan =
+          (strand.from.isDocument() && strand.to.isDocument())
+              ? (strand.from.doc > strand.to.doc
+                     ? (strand.from.doc - strand.to.doc)
+                     : (strand.to.doc - strand.from.doc))
+              : 1;
 
-      const auto docAlpha =
-          std::min(from->currentOpacity(), to->currentOpacity());
-      const auto colour = fade(
+      const float fromOpacity =
+          strand.from.isCell() ? 1.0F
+                               : state.docs[strand.from.doc]->currentOpacity();
+      const float toOpacity = strand.to.isCell()
+                                  ? 1.0F
+                                  : state.docs[strand.to.doc]->currentOpacity();
+      const auto docAlpha   = std::min(fromOpacity, toOpacity);
+      const auto colour     = fade(
           linkColourWithInstanceShift(strand.link, strand.type, strand.tier),
           docAlpha);
       const auto tagId = static_cast<std::uint32_t>(i);
@@ -1028,49 +1324,65 @@ void LinkBeams::drawFrame(gleditor::FrameContext &ctx) {
 
       band(*nearEdge, *farEdge, docSpan, colour, tagId, linkPhase);
 
-      allAnchors.push_back(MarginAnchor{
-          .edge         = *nearEdge,
-          .colour       = colour,
-          .tagId        = tagId,
-          .farEnd       = false,
-          .isActive     = isAct,
-          .docIndex     = strand.from.doc,
-          .towardsRight = rightwards,
-          .linkId       = strand.link,
-          .tier         = strand.tier,
-          .type         = strand.type,
-      });
+      if (strand.from.isDocument()) {
+        const std::uint32_t marginCol =
+            strand.to.isCell() ? 0x38BDF8FF : colour;
+        allAnchors.push_back(MarginAnchor{
+            .edge         = *nearEdge,
+            .colour       = marginCol,
+            .tagId        = tagId,
+            .farEnd       = false,
+            .isActive     = isAct,
+            .docIndex     = strand.from.doc,
+            .towardsRight = rightwards,
+            .linkId       = strand.link,
+            .tier         = strand.tier,
+            .type         = strand.type,
+        });
+      }
 
-      allAnchors.push_back(MarginAnchor{
-          .edge         = *farEdge,
-          .colour       = colour,
-          .tagId        = tagId,
-          .farEnd       = true,
-          .isActive     = isAct,
-          .docIndex     = strand.to.doc,
-          .towardsRight = !rightwards,
-          .linkId       = strand.link,
-          .tier         = strand.tier,
-          .type         = strand.type,
-      });
+      if (strand.to.isDocument()) {
+        const std::uint32_t marginCol =
+            strand.from.isCell() ? 0x38BDF8FF : colour;
+        allAnchors.push_back(MarginAnchor{
+            .edge         = *farEdge,
+            .colour       = marginCol,
+            .tagId        = tagId,
+            .farEnd       = true,
+            .isActive     = isAct,
+            .docIndex     = strand.to.doc,
+            .towardsRight = !rightwards,
+            .linkId       = strand.link,
+            .tier         = strand.tier,
+            .type         = strand.type,
+        });
 
-      // Tenuous connection: subtle elastic tether ribbon connecting flying page
-      // to background origin
-      if (to && glm::vec3(to->getModel()[3]).z < 0.0F) {
-        const glm::vec3 originPos(0.0F, glm::vec3(to->getModel()[3]).y, -60.0F);
-        const glm::vec3 currentPos(to->getModel()[3]);
-        const auto tetherCol = fade(
-            linkColour(strand.type, ProminenceTier::Public), 0.22F * docAlpha);
-        beams->add(originPos, currentPos, 1.6F, tetherCol, tagId, 0.0F, 1.0F);
+        // Tenuous connection: subtle elastic tether ribbon connecting flying
+        // page to background origin
+        const auto &toDoc = state.docs[strand.to.doc];
+        if (toDoc && glm::vec3(toDoc->getModel()[3]).z < 0.0F) {
+          const glm::vec3 originPos(0.0F, glm::vec3(toDoc->getModel()[3]).y,
+                                    -60.0F);
+          const glm::vec3 currentPos(toDoc->getModel()[3]);
+          const auto tetherCol =
+              fade(linkColour(strand.type, ProminenceTier::Public),
+                   0.22F * docAlpha);
+          beams->add(originPos, currentPos, 1.6F, tetherCol, tagId, 0.0F, 1.0F);
+        }
       }
 
       if (sworph && !strand.aligned) {
-        if (moved) {
-          stillToAlign = true;
-        } else {
+        if (strand.from.isDocument() && strand.to.isDocument()) {
+          if (moved) {
+            stillToAlign = true;
+          } else {
+            strand.aligned = true;
+            align(strand, state, ctx.timeline);
+            moved = true;
+          }
+        } else if (strand.from.isCell() || strand.to.isCell()) {
           strand.aligned = true;
-          align(strand, state, ctx.timeline);
-          moved = true;
+          alignCellSatelloid(strand, state);
         }
       }
     }
@@ -1079,39 +1391,70 @@ void LinkBeams::drawFrame(gleditor::FrameContext &ctx) {
     // identical primedia spans across documents)
     for (std::size_t i = 0; i < transclusionStrands.size(); i++) {
       auto &tStrand = transclusionStrands[i];
-      if (!tStrand.fromAnchor || !tStrand.toAnchor ||
-          tStrand.from.doc >= state.docs.size() ||
-          tStrand.to.doc >= state.docs.size()) {
-        continue;
-      }
-      const auto &from = state.docs[tStrand.from.doc];
-      const auto &to   = state.docs[tStrand.to.doc];
-      if (from->currentOpacity() <= 0.001F || to->currentOpacity() <= 0.001F) {
+
+      const bool fromValid =
+          tStrand.from.isCell()
+              ? tStrand.fromCellAnchor.has_value()
+              : (tStrand.fromAnchor.has_value() &&
+                 tStrand.from.doc < state.docs.size() &&
+                 state.docs[tStrand.from.doc]->currentOpacity() > 0.001F);
+      const bool toValid =
+          tStrand.to.isCell()
+              ? tStrand.toCellAnchor.has_value()
+              : (tStrand.toAnchor.has_value() &&
+                 tStrand.to.doc < state.docs.size() &&
+                 state.docs[tStrand.to.doc]->currentOpacity() > 0.001F);
+
+      if (!fromValid || !toValid) {
         continue;
       }
 
-      const auto rightwards =
-          glm::vec3(to->getModel()[3]).x >= glm::vec3(from->getModel()[3]).x;
+      const glm::vec3 fromPos =
+          tStrand.from.isCell()
+              ? tStrand.fromCellAnchor->position
+              : glm::vec3(state.docs[tStrand.from.doc]->getModel()[3]);
+      const glm::vec3 toPos =
+          tStrand.to.isCell()
+              ? tStrand.toCellAnchor->position
+              : glm::vec3(state.docs[tStrand.to.doc]->getModel()[3]);
+
+      const bool rightwards = toPos.x >= fromPos.x;
       const auto nearEdge =
-          edgeOf(*from, tStrand.fromAnchor, tStrand.fromEndAnchor, rightwards);
+          tStrand.from.isCell()
+              ? edgeOf(*tStrand.fromCellAnchor, rightwards)
+              : edgeOf(*state.docs[tStrand.from.doc], tStrand.fromAnchor,
+                       tStrand.fromEndAnchor, rightwards);
       const auto farEdge =
-          edgeOf(*to, tStrand.toAnchor, tStrand.toEndAnchor, !rightwards);
+          tStrand.to.isCell()
+              ? edgeOf(*tStrand.toCellAnchor, !rightwards)
+              : edgeOf(*state.docs[tStrand.to.doc], tStrand.toAnchor,
+                       tStrand.toEndAnchor, !rightwards);
       if (!nearEdge || !farEdge) {
         continue;
       }
 
-      const std::size_t docSpan = tStrand.from.doc > tStrand.to.doc
-                                      ? (tStrand.from.doc - tStrand.to.doc)
-                                      : (tStrand.to.doc - tStrand.from.doc);
+      const std::size_t docSpan =
+          (tStrand.from.isDocument() && tStrand.to.isDocument())
+              ? (tStrand.from.doc > tStrand.to.doc
+                     ? (tStrand.from.doc - tStrand.to.doc)
+                     : (tStrand.to.doc - tStrand.from.doc))
+              : 1;
 
-      const auto docAlpha =
-          std::min(from->currentOpacity(), to->currentOpacity());
+      const float fromOpacity =
+          tStrand.from.isCell()
+              ? 1.0F
+              : state.docs[tStrand.from.doc]->currentOpacity();
+      const float toOpacity =
+          tStrand.to.isCell() ? 1.0F
+                              : state.docs[tStrand.to.doc]->currentOpacity();
+      const auto docAlpha = std::min(fromOpacity, toOpacity);
 
       // Check if transcluded span is withheld or transcopyright-locked
       std::uint32_t baseBeamColour = 0xFFD700FFU; // Default Identity Gold
       float phase                  = 0.0F;
 
-      if (tStrand.from.doc < session.views().size()) {
+      if (tStrand.from.isDocument() &&
+          tStrand.from.doc < session.views().size()) {
         const auto sIdx = session.storeIndexOf(tStrand.from.doc);
         const auto &st  = session.store(sIdx);
         const auto res  = st.resolve(tStrand.span);
@@ -1123,41 +1466,65 @@ void LinkBeams::drawFrame(gleditor::FrameContext &ctx) {
         }
       }
 
-      const auto colour = fade(baseBeamColour, docAlpha);
+      bool inLoom = false;
+      if (beamConfig_.loomBundlingEnabled) {
+        for (const auto &loom : looms_) {
+          if (std::find(loom.strandIndices.begin(), loom.strandIndices.end(),
+                        i) != loom.strandIndices.end()) {
+            inLoom = true;
+            break;
+          }
+        }
+      }
+
+      float alphaFactor = docAlpha;
+      if (inLoom) {
+        const bool isHovered =
+            (hoveredTransclusion_ && *hoveredTransclusion_ == i);
+        alphaFactor *=
+            (isHovered ? beamConfig_.loomHoverAlpha : beamConfig_.loomAlpha);
+      }
+
+      const auto colour = fade(baseBeamColour, alphaFactor);
       const auto tagId  = static_cast<std::uint32_t>(strands.size() + i);
 
       // Transclusion beams are solid, continuous volumetric identity bands
       band(*nearEdge, *farEdge, docSpan, colour, tagId, phase);
 
-      allAnchors.push_back(MarginAnchor{
-          .edge         = *nearEdge,
-          .colour       = colour,
-          .tagId        = tagId,
-          .farEnd       = false,
-          .isActive     = false,
-          .docIndex     = tStrand.from.doc,
-          .towardsRight = rightwards,
-          .linkId       = 0,
-          .tier         = ProminenceTier::Author,
-          .type         = LinkType::Other,
-          .transclusion = true,
-      });
+      if (tStrand.from.isDocument()) {
+        allAnchors.push_back(MarginAnchor{
+            .edge         = *nearEdge,
+            .colour       = colour,
+            .tagId        = tagId,
+            .farEnd       = false,
+            .isActive     = false,
+            .docIndex     = tStrand.from.doc,
+            .towardsRight = rightwards,
+            .linkId       = 0,
+            .tier         = ProminenceTier::Author,
+            .type         = LinkType::Other,
+            .transclusion = true,
+        });
+      }
 
-      allAnchors.push_back(MarginAnchor{
-          .edge         = *farEdge,
-          .colour       = colour,
-          .tagId        = tagId,
-          .farEnd       = true,
-          .isActive     = false,
-          .docIndex     = tStrand.to.doc,
-          .towardsRight = !rightwards,
-          .linkId       = 0,
-          .tier         = ProminenceTier::Author,
-          .type         = LinkType::Other,
-          .transclusion = true,
-      });
+      if (tStrand.to.isDocument()) {
+        allAnchors.push_back(MarginAnchor{
+            .edge         = *farEdge,
+            .colour       = colour,
+            .tagId        = tagId,
+            .farEnd       = true,
+            .isActive     = false,
+            .docIndex     = tStrand.to.doc,
+            .towardsRight = !rightwards,
+            .linkId       = 0,
+            .tier         = ProminenceTier::Author,
+            .type         = LinkType::Other,
+            .transclusion = true,
+        });
+      }
 
-      if (sworph && !tStrand.aligned) {
+      if (sworph && !tStrand.aligned && tStrand.from.isDocument() &&
+          tStrand.to.isDocument()) {
         if (moved) {
           stillToAlign = true;
         } else {

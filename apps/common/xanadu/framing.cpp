@@ -77,4 +77,56 @@ std::vector<glm::vec3> bypassRoute(const glm::vec3 &from, const glm::vec3 &to,
   return route;
 }
 
+std::vector<glm::vec3> morphicRoute(const glm::vec3 &from, const glm::vec3 &to,
+                                    const glm::vec3 &fromTangent,
+                                    const glm::vec3 &toTangent,
+                                    const std::size_t segments) {
+  if (segments < 1) {
+    return {from, to};
+  }
+
+  const float dist = glm::distance(from, to);
+  if (dist <= 0.0F) {
+    return {from, to};
+  }
+
+  // Scale tangents proportionally to arc distance (standard Hermite
+  // parameterization)
+  const float scale = 0.5F * dist;
+
+  glm::vec3 m0 = fromTangent;
+  if (glm::dot(m0, m0) > 0.0F) {
+    m0 = glm::normalize(m0) * scale;
+  } else {
+    m0 = glm::vec3(to.x >= from.x ? 1.0F : -1.0F, 0.0F, 0.0F) * scale;
+  }
+
+  glm::vec3 m1 = toTangent;
+  if (glm::dot(m1, m1) > 0.0F) {
+    m1 = glm::normalize(m1) * scale;
+  } else {
+    m1 = glm::vec3(to.x >= from.x ? 1.0F : -1.0F, 0.0F, 0.0F) * scale;
+  }
+
+  std::vector<glm::vec3> route;
+  route.reserve(segments + 1);
+
+  for (std::size_t i = 0; i <= segments; ++i) {
+    const float t  = static_cast<float>(i) / static_cast<float>(segments);
+    const float t2 = t * t;
+    const float t3 = t2 * t;
+
+    // Cubic Hermite basis functions
+    const float h00 = 2.0F * t3 - 3.0F * t2 + 1.0F;
+    const float h10 = t3 - 2.0F * t2 + t;
+    const float h01 = -2.0F * t3 + 3.0F * t2;
+    const float h11 = t3 - t2;
+
+    const glm::vec3 pt = h00 * from + h10 * m0 + h01 * to + h11 * m1;
+    route.push_back(pt);
+  }
+
+  return route;
+}
+
 } // namespace xanadu

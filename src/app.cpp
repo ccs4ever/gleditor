@@ -1229,7 +1229,8 @@ int Application::run() {
 
         const std::lock_guard locker(state->view);
         const float perPixel          = worldPerPixel(state->view);
-        constexpr float pixelsPerTick = 48.0F;
+        //constexpr float pixelsPerTick = 48.0F;
+        constexpr float pixelsPerTick = 180.0F;
 
         if (0 != (sdlMods & SDL_KMOD_CTRL)) {
           // Ctrl: Zoom in / out

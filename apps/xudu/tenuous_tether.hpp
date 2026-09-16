@@ -25,15 +25,25 @@
 #include <gleditor/renderer.hpp>
 #include <gleditor/spatial.hpp>
 
+#include "common/xanadu/universal_link_endpoint.hpp"
+
 namespace xudu {
+
+using xanadu::LinkTargetKind;
 
 /**
  * @struct FlyingTetherAnchor
- * @brief Record of a document currently displaced from its background resting
- * position.
+ * @brief Record of a document or cell currently displaced from its background
+ * resting position.
  */
 struct FlyingTetherAnchor {
-  std::size_t docIndex{0};
+  union {
+    std::size_t docIndex{0};
+    std::size_t targetId;
+  };
+  LinkTargetKind targetKind{LinkTargetKind::Document};
+  zigzag::CellRef cellRef{zigzag::noCell};
+
   glm::vec3 originPos{
       0.0F}; ///< Resting home coordinate in background (Z ~ -40)
   glm::vec3 currentPos{0.0F}; ///< Current physical coordinate (Z ~ 0)
@@ -41,6 +51,13 @@ struct FlyingTetherAnchor {
   float height{70.0F};
   std::uint32_t colour{0x38BDF844}; ///< Faint ethereal cyan (alpha ~ 0.25)
   bool active{true};
+
+  [[nodiscard]] constexpr bool isDocument() const noexcept {
+    return targetKind == LinkTargetKind::Document;
+  }
+  [[nodiscard]] constexpr bool isCell() const noexcept {
+    return targetKind == LinkTargetKind::ZigzagCell;
+  }
 };
 
 /**
@@ -59,8 +76,14 @@ public:
   /// Register or update a flying tether anchor.
   void setTether(FlyingTetherAnchor anchor);
 
-  /// Remove tether for a specific document.
-  void removeTether(std::size_t docIndex);
+  /// Remove tether for a specific document or cell.
+  void removeTether(std::size_t targetId,
+                    LinkTargetKind kind = LinkTargetKind::Document);
+
+  /// Remove tether for a specific cell.
+  void removeCellTether(zigzag::CellRef cell) {
+    removeTether(static_cast<std::size_t>(cell), LinkTargetKind::ZigzagCell);
+  }
 
   /// Clear all registered tethers.
   void clear();

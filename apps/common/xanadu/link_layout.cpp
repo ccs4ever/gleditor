@@ -3,8 +3,12 @@
 #include <algorithm>
 #include <cmath>
 #include <limits>
+#include <map>
 #include <optional>
+#include <unordered_map>
 #include <utility>
+
+#include "common/xanadu/zigzag/manifold.hpp"
 
 namespace xanadu {
 
@@ -30,50 +34,126 @@ coveringExtent(const Version &pieces, const std::vector<PrimediaSpan> &ends) {
   return std::make_pair(first, last);
 }
 
+/// The extent covering every occurrence of an endset in one Zigzag cell, or
+/// nothing when none of it is there.
+std::optional<UniversalLinkEnd>
+cellCoveringExtent(const zigzag::Manifold &manifold, const zigzag::CellRef cell,
+                   const std::vector<PrimediaSpan> &ends) {
+  const auto content = manifold.contentOf(cell);
+  if (content.empty()) {
+    return std::nullopt;
+  }
+  auto first                 = std::numeric_limits<std::uint32_t>::max();
+  std::uint32_t last         = 0;
+  std::uint16_t firstSpanIdx = 0;
+  bool any                   = false;
+
+  for (const auto &endSpan : ends) {
+    if (endSpan.empty() || isReservedScroll(endSpan.scroll)) {
+      continue;
+    }
+    std::uint32_t seen = 0;
+    for (std::size_t sIdx = 0; sIdx < content.size(); ++sIdx) {
+      const auto &cellSpan = content[sIdx];
+      if (cellSpan.scroll == endSpan.scroll) {
+        const auto sharedStart = std::max(cellSpan.start, endSpan.start);
+        const auto sharedEnd   = std::min(cellSpan.end(), endSpan.end());
+        if (sharedEnd > sharedStart) {
+          const auto off =
+              seen + static_cast<std::uint32_t>(sharedStart - cellSpan.start);
+          const auto len = static_cast<std::uint32_t>(sharedEnd - sharedStart);
+          if (!any) {
+            firstSpanIdx = static_cast<std::uint16_t>(sIdx);
+          }
+          any   = true;
+          first = std::min(first, off);
+          last  = std::max(last, off + len);
+        }
+      }
+      seen += static_cast<std::uint32_t>(cellSpan.length);
+    }
+  }
+
+  if (!any) {
+    return std::nullopt;
+  }
+  return UniversalLinkEnd::forCell(cell, first, last, firstSpanIdx);
+}
+
+struct ViewPiece {
+  PrimediaSpan span;
+  std::uint32_t targetId{0};   ///< docIndex or CellRef
+  std::uint32_t textOffset{0}; ///< offset in doc concatext or cell text
+  std::uint16_t spanIndex{0};  ///< index in cell content run (0 for doc)
+  LinkTargetKind kind{LinkTargetKind::Document};
+};
+
 } // namespace
 
 void placeLinks(const std::map<std::uint64_t, Link> &links,
-                const std::vector<const Version *> &views,
+                const UniversalViewContext &ctx,
                 std::vector<LinkedPair> &between,
                 std::vector<HalfLink> &leaving) {
   between.clear();
   leaving.clear();
 
   for (const auto &[id, link] : links) {
-    // A format link's right end names an attribute, not a passage anywhere a
-    // document is open -- see format.hpp -- so it would never find a right
-    // side and would misreport as a HalfLink reaching off-screen for every
-    // document showing the formatted text. Not a beam-placement concern at
-    // all.
     if (LinkType::Format == link.type) {
       continue;
     }
-    std::vector<LinkEnd> lefts;
-    std::vector<LinkEnd> rights;
-    for (std::uint32_t doc = 0; doc < views.size(); doc++) {
-      if (nullptr == views[doc]) {
+    std::vector<UniversalLinkEnd> lefts;
+    std::vector<UniversalLinkEnd> rights;
+
+    // Document views
+    for (std::uint32_t doc = 0; doc < ctx.docViews.size(); ++doc) {
+      if (nullptr == ctx.docViews[doc]) {
         continue;
       }
-      if (const auto extent = coveringExtent(*views[doc], link.left)) {
-        lefts.push_back(LinkEnd{doc, extent->first, extent->second});
+      if (const auto extent = coveringExtent(*ctx.docViews[doc], link.left)) {
+        lefts.push_back(
+            UniversalLinkEnd::forDocument(doc, extent->first, extent->second));
       }
-      if (const auto extent = coveringExtent(*views[doc], link.right)) {
-        rights.push_back(LinkEnd{doc, extent->first, extent->second});
+      if (const auto extent = coveringExtent(*ctx.docViews[doc], link.right)) {
+        rights.push_back(
+            UniversalLinkEnd::forDocument(doc, extent->first, extent->second));
+      }
+    }
+
+    // Manifold views
+    for (std::size_t mIdx = 0; mIdx < ctx.manifoldViews.size(); ++mIdx) {
+      if (nullptr == ctx.manifoldViews[mIdx]) {
+        continue;
+      }
+      const auto &manifold = *ctx.manifoldViews[mIdx];
+      const auto focus     = (mIdx < ctx.manifoldFoci.size())
+                                 ? ctx.manifoldFoci[mIdx]
+                                 : zigzag::noCell;
+      const auto allowed   = manifold.cellsWithinRadius(focus, ctx.cellRadius);
+      for (const auto cell : allowed) {
+        if (const auto endPt = cellCoveringExtent(manifold, cell, link.left)) {
+          lefts.push_back(*endPt);
+        }
+        if (const auto endPt = cellCoveringExtent(manifold, cell, link.right)) {
+          rights.push_back(*endPt);
+        }
       }
     }
 
     for (const auto &left : lefts) {
       for (const auto &right : rights) {
-        if (left.doc == right.doc) {
+        if (left == right) {
+          continue;
+        }
+        if (left.isDocument() && right.isDocument() && left.doc == right.doc) {
+          continue;
+        }
+        if (left.isCell() && right.isCell() && left.cell() == right.cell()) {
           continue;
         }
         between.push_back(LinkedPair{id, link.type, link.tier, left, right});
       }
     }
 
-    // Exactly one side present is a link reaching out of what is on screen.
-    // Both sides absent is a link about something else entirely, and both
-    // present has already been dealt with above.
     if (lefts.empty() != rights.empty()) {
       leaving.push_back(HalfLink{id, link.type, link.tier,
                                  lefts.empty() ? rights.front() : lefts.front(),
@@ -82,42 +162,65 @@ void placeLinks(const std::map<std::uint64_t, Link> &links,
   }
 }
 
-namespace {
+void placeLinks(const std::map<std::uint64_t, Link> &links,
+                const std::vector<const Version *> &views,
+                std::vector<LinkedPair> &between,
+                std::vector<HalfLink> &leaving) {
+  placeLinks(links, UniversalViewContext{.docViews = views}, between, leaving);
+}
 
-struct DocPiece {
-  PrimediaSpan span;
-  std::uint32_t docIdx{0};
-  std::uint32_t docStart{0};
-};
-
-} // namespace
-
-void placeTransclusions(const std::vector<const Version *> &views,
+void placeTransclusions(const UniversalViewContext &ctx,
                         std::vector<TransclusionPair> &pairs) {
   pairs.clear();
-  if (views.size() < 2) {
-    return;
-  }
 
-  // 1. Collect all non-empty primedia pieces from open document views with
-  // their concatext offsets. This is an O(total_pieces) single pass over each
-  // document.
-  std::vector<DocPiece> pieces;
-  for (std::uint32_t i = 0; i < views.size(); ++i) {
-    if (nullptr == views[i]) {
+  std::vector<ViewPiece> pieces;
+
+  // 1. Collect pieces from document views
+  for (std::uint32_t i = 0; i < ctx.docViews.size(); ++i) {
+    if (nullptr == ctx.docViews[i]) {
       continue;
     }
-    const auto &doc    = *views[i];
+    const auto &doc    = *ctx.docViews[i];
     std::uint32_t seen = 0;
     for (const auto &run : doc.pieces()) {
       if (!run.empty() && breakMarkerScroll != run.scroll) {
-        pieces.push_back(DocPiece{
-            .span     = run,
-            .docIdx   = i,
-            .docStart = seen,
+        pieces.push_back(ViewPiece{
+            .span       = run,
+            .targetId   = i,
+            .textOffset = seen,
+            .spanIndex  = 0,
+            .kind       = LinkTargetKind::Document,
         });
       }
       seen += static_cast<std::uint32_t>(run.length);
+    }
+  }
+
+  // 2. Collect pieces from manifold cells within radius
+  for (std::size_t mIdx = 0; mIdx < ctx.manifoldViews.size(); ++mIdx) {
+    if (nullptr == ctx.manifoldViews[mIdx]) {
+      continue;
+    }
+    const auto &manifold = *ctx.manifoldViews[mIdx];
+    const auto focus = (mIdx < ctx.manifoldFoci.size()) ? ctx.manifoldFoci[mIdx]
+                                                        : zigzag::noCell;
+    const auto allowed = manifold.cellsWithinRadius(focus, ctx.cellRadius);
+    for (const auto cell : allowed) {
+      const auto content = manifold.contentOf(cell);
+      std::uint32_t seen = 0;
+      for (std::size_t sIdx = 0; sIdx < content.size(); ++sIdx) {
+        const auto &span = content[sIdx];
+        if (!span.empty() && !isReservedScroll(span.scroll)) {
+          pieces.push_back(ViewPiece{
+              .span       = span,
+              .targetId   = static_cast<std::uint32_t>(cell),
+              .textOffset = seen,
+              .spanIndex  = static_cast<std::uint16_t>(sIdx),
+              .kind       = LinkTargetKind::ZigzagCell,
+          });
+        }
+        seen += static_cast<std::uint32_t>(span.length);
+      }
     }
   }
 
@@ -125,40 +228,46 @@ void placeTransclusions(const std::vector<const Version *> &views,
     return;
   }
 
-  // 2. Sort pieces by (scroll, start, docIdx) to enable linear dual-pointer
-  // sweeping.
-  std::ranges::sort(pieces, [](const DocPiece &a, const DocPiece &b) {
+  // 3. Sort pieces by (scroll, start, kind, targetId)
+  std::ranges::sort(pieces, [](const ViewPiece &a, const ViewPiece &b) {
     if (a.span.scroll != b.span.scroll) {
       return a.span.scroll < b.span.scroll;
     }
     if (a.span.start != b.span.start) {
       return a.span.start < b.span.start;
     }
-    return a.docIdx < b.docIdx;
+    if (a.kind != b.kind) {
+      return static_cast<std::uint8_t>(a.kind) <
+             static_cast<std::uint8_t>(b.kind);
+    }
+    return a.targetId < b.targetId;
   });
 
-  // 3. Bucket transclusion pairs per (u, v) view pair (u < v) so contiguous
-  // adjacent runs merge seamlessly without O(pairs) lookups.
-  const auto viewCount = views.size();
-  std::vector<std::vector<TransclusionPair>> pairBuckets(viewCount * viewCount);
+  // 4. Pair sweeping with bucketed adjacent run merging
+  std::map<std::pair<std::pair<std::uint8_t, std::uint32_t>,
+                     std::pair<std::uint8_t, std::uint32_t>>,
+           std::vector<TransclusionPair>>
+      pairBuckets;
 
   for (std::size_t i = 0; i < pieces.size(); ++i) {
     const auto &pI = pieces[i];
     for (std::size_t j = i + 1; j < pieces.size(); ++j) {
       const auto &pJ = pieces[j];
-      // If scroll changes or pJ starts at or after pI ends, no subsequent
-      // pieces can overlap pI.
       if (pJ.span.scroll != pI.span.scroll || pJ.span.start >= pI.span.end()) {
         break;
       }
-      if (pI.docIdx == pJ.docIdx) {
+      if (pI.kind == pJ.kind && pI.targetId == pJ.targetId) {
         continue;
       }
 
-      const auto u   = std::min(pI.docIdx, pJ.docIdx);
-      const auto v   = std::max(pI.docIdx, pJ.docIdx);
-      const auto &pU = (pI.docIdx == u) ? pI : pJ;
-      const auto &pV = (pI.docIdx == v) ? pI : pJ;
+      bool iIsFrom = true;
+      if (pI.kind != pJ.kind) {
+        iIsFrom = (pI.kind == LinkTargetKind::Document);
+      } else {
+        iIsFrom = (pI.targetId < pJ.targetId);
+      }
+      const auto &pU = iIsFrom ? pI : pJ;
+      const auto &pV = iIsFrom ? pJ : pI;
 
       const auto sharedStart = std::max(pU.span.start, pV.span.start);
       const auto sharedEnd   = std::min(pU.span.end(), pV.span.end());
@@ -167,19 +276,34 @@ void placeTransclusions(const std::vector<const Version *> &views,
       }
       const auto sharedLen = sharedEnd - sharedStart;
 
-      const auto startU =
-          pU.docStart + static_cast<std::uint32_t>(sharedStart - pU.span.start);
-      const auto endU = startU + static_cast<std::uint32_t>(sharedLen);
+      const auto startU = pU.textOffset + static_cast<std::uint32_t>(
+                                              sharedStart - pU.span.start);
+      const auto endU   = startU + static_cast<std::uint32_t>(sharedLen);
 
-      const auto startV =
-          pV.docStart + static_cast<std::uint32_t>(sharedStart - pV.span.start);
-      const auto endV = startV + static_cast<std::uint32_t>(sharedLen);
+      const auto startV = pV.textOffset + static_cast<std::uint32_t>(
+                                              sharedStart - pV.span.start);
+      const auto endV   = startV + static_cast<std::uint32_t>(sharedLen);
+
+      const auto endPtU =
+          (pU.kind == LinkTargetKind::Document)
+              ? UniversalLinkEnd::forDocument(pU.targetId, startU, endU)
+              : UniversalLinkEnd::forCell(
+                    static_cast<zigzag::CellRef>(pU.targetId), startU, endU,
+                    pU.spanIndex);
+
+      const auto endPtV =
+          (pV.kind == LinkTargetKind::Document)
+              ? UniversalLinkEnd::forDocument(pV.targetId, startV, endV)
+              : UniversalLinkEnd::forCell(
+                    static_cast<zigzag::CellRef>(pV.targetId), startV, endV,
+                    pV.spanIndex);
 
       const PrimediaSpan sharedSpan{pU.span.scroll, sharedStart, sharedLen};
-      auto &bucket = pairBuckets[u * viewCount + v];
+      const auto bucketKey = std::make_pair(
+          std::make_pair(static_cast<std::uint8_t>(pU.kind), pU.targetId),
+          std::make_pair(static_cast<std::uint8_t>(pV.kind), pV.targetId));
+      auto &bucket = pairBuckets[bucketKey];
 
-      // Merge with previous contiguous span if adjacent in both documents and
-      // primedia.
       if (!bucket.empty() && bucket.back().from.end == startU &&
           bucket.back().to.end == startV &&
           bucket.back().span.scroll == sharedSpan.scroll &&
@@ -189,8 +313,8 @@ void placeTransclusions(const std::vector<const Version *> &views,
         bucket.back().span.length += sharedSpan.length;
       } else {
         TransclusionPair tp{
-            .from = LinkEnd{u, startU, endU},
-            .to   = LinkEnd{v, startV, endV},
+            .from = endPtU,
+            .to   = endPtV,
             .span = sharedSpan,
         };
         if (bucket.empty() || !(bucket.back() == tp)) {
@@ -200,11 +324,144 @@ void placeTransclusions(const std::vector<const Version *> &views,
     }
   }
 
-  for (auto &bucket : pairBuckets) {
+  for (auto &[key, bucket] : pairBuckets) {
     for (auto &tp : bucket) {
       pairs.push_back(std::move(tp));
     }
   }
+}
+
+void placeTransclusions(const std::vector<const Version *> &views,
+                        std::vector<TransclusionPair> &pairs) {
+  placeTransclusions(UniversalViewContext{.docViews = views}, pairs);
+}
+
+std::vector<TransclusionLoom>
+detectTransclusionLooms(const UniversalViewContext &ctx,
+                        const std::span<const TransclusionPair> pairs) {
+  if (pairs.size() < 2 || ctx.manifoldViews.empty()) {
+    return {};
+  }
+
+  struct Candidate {
+    std::size_t pairIdx{0};
+    std::uint32_t docIndex{0};
+    std::uint32_t docStart{0};
+    std::uint32_t docEnd{0};
+    zigzag::CellRef cell{zigzag::noCell};
+  };
+
+  std::unordered_map<std::uint32_t, std::vector<Candidate>> byDoc;
+  for (std::size_t i = 0; i < pairs.size(); ++i) {
+    const auto &p = pairs[i];
+    if (p.from.isDocument() && p.to.isCell()) {
+      byDoc[p.from.doc].push_back(Candidate{
+          .pairIdx  = i,
+          .docIndex = p.from.doc,
+          .docStart = p.from.start,
+          .docEnd   = p.from.end,
+          .cell     = p.to.cell(),
+      });
+    } else if (p.from.isCell() && p.to.isDocument()) {
+      byDoc[p.to.doc].push_back(Candidate{
+          .pairIdx  = i,
+          .docIndex = p.to.doc,
+          .docStart = p.to.start,
+          .docEnd   = p.to.end,
+          .cell     = p.from.cell(),
+      });
+    }
+  }
+
+  std::vector<TransclusionLoom> result;
+
+  for (auto &[docIdx, candidates] : byDoc) {
+    if (candidates.size() < 2) {
+      continue;
+    }
+
+    std::ranges::sort(candidates, [](const Candidate &a, const Candidate &b) {
+      if (a.docStart != b.docStart) {
+        return a.docStart < b.docStart;
+      }
+      if (a.docEnd != b.docEnd) {
+        return a.docEnd < b.docEnd;
+      }
+      return a.pairIdx < b.pairIdx;
+    });
+
+    std::vector<bool> used(candidates.size(), false);
+
+    for (std::size_t i = 0; i < candidates.size(); ++i) {
+      if (used[i]) {
+        continue;
+      }
+
+      for (const auto *m : ctx.manifoldViews) {
+        if (nullptr == m) {
+          continue;
+        }
+
+        for (const auto dir :
+             {zigzag::DimVector::POS, zigzag::DimVector::NEG}) {
+          for (const auto &dimLink : m->dimensionsOf(candidates[i].cell)) {
+            const auto dim = dimLink.dim;
+            if (dim == zigzag::noCell) {
+              continue;
+            }
+
+            std::vector<std::size_t> chainCandidateIndices;
+            chainCandidateIndices.push_back(i);
+            auto curCell = candidates[i].cell;
+
+            for (std::size_t j = i + 1; j < candidates.size(); ++j) {
+              if (used[j]) {
+                continue;
+              }
+              const auto expectedNext = m->linked(curCell, dim, dir);
+              if (expectedNext == zigzag::noCell || expectedNext == curCell) {
+                break;
+              }
+              if (candidates[j].cell == expectedNext) {
+                if (candidates[j].docStart >=
+                    candidates[chainCandidateIndices.back()].docStart) {
+                  chainCandidateIndices.push_back(j);
+                  curCell = expectedNext;
+                }
+              }
+            }
+
+            if (chainCandidateIndices.size() >= 2) {
+              TransclusionLoom loom;
+              loom.docIndex  = docIdx;
+              loom.dimension = dim;
+              loom.posward   = (dir == zigzag::DimVector::POS);
+              loom.docStartOffset =
+                  candidates[chainCandidateIndices.front()].docStart;
+              loom.docEndOffset =
+                  candidates[chainCandidateIndices.back()].docEnd;
+              loom.headCell = candidates[chainCandidateIndices.front()].cell;
+              loom.tailCell = candidates[chainCandidateIndices.back()].cell;
+              for (const auto cIdx : chainCandidateIndices) {
+                loom.strandIndices.push_back(candidates[cIdx].pairIdx);
+                used[cIdx] = true;
+              }
+              result.push_back(std::move(loom));
+              break;
+            }
+          }
+          if (used[i]) {
+            break;
+          }
+        }
+        if (used[i]) {
+          break;
+        }
+      }
+    }
+  }
+
+  return result;
 }
 
 std::uint32_t linkColour(const LinkType type, const ProminenceTier tier) {

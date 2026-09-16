@@ -22,6 +22,16 @@ inline void rymlErrorHandler(const c4::csubstr msg,
   throw std::runtime_error(std::string{msg.str, msg.len});
 }
 
+inline void rymlParseErrorHandler(const c4::csubstr msg,
+                                  const c4::yml::ErrorDataParse &, void *) {
+  throw std::runtime_error(std::string{msg.str, msg.len});
+}
+
+inline void rymlVisitErrorHandler(const c4::csubstr msg,
+                                  const c4::yml::ErrorDataVisit &, void *) {
+  throw std::runtime_error(std::string{msg.str, msg.len});
+}
+
 /**
  * @brief RAII guard installing a non-aborting RapidYAML error handler that
  * throws std::runtime_error. Restores previous callbacks on destruction.
@@ -32,6 +42,8 @@ struct ScopedCallbacks {
     prev = c4::yml::get_callbacks();
     c4::yml::Callbacks cb;
     cb.m_error_basic = rymlErrorHandler;
+    cb.m_error_parse = rymlParseErrorHandler;
+    cb.m_error_visit = rymlVisitErrorHandler;
     c4::yml::set_callbacks(cb);
   }
   ~ScopedCallbacks() { c4::yml::set_callbacks(prev); }

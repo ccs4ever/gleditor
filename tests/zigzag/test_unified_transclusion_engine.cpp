@@ -12,6 +12,7 @@
 #include "../lib/mocks/device.hpp"
 #include "gleditor/glyphcache/cache.hpp"
 #include "gleditor/text/font.hpp"
+#include "xudu/core/format.hpp"
 #include "xudu/core/microversion.hpp"
 #include "xudu/core/ops.hpp"
 #include "xudu/core/store.hpp"
@@ -498,7 +499,7 @@ TEST(ShapingCacheTest, ReportsTheCostOfAStagingPass) {
 
   const auto stats = rig.engine.shapingCacheStats();
   std::printf("  staging 60 cells: shaping every pass %.3f ms | cached %.3f ms "
-              "| %.1fx | budget at 120 FPS 8.33 ms\n",
+              "| %.1fx\n",
               cold, warm, cold / std::max(warm, 1e-9));
   std::printf("  cache: %zu entries, %llu hits, %llu misses, %llu evictions\n",
               stats.entries, static_cast<unsigned long long>(stats.hits),
@@ -507,6 +508,45 @@ TEST(ShapingCacheTest, ReportsTheCostOfAStagingPass) {
 
   // The one thing worth asserting: caching did not make it slower.
   EXPECT_LT(warm, cold * 1.5);
+}
+
+TEST(UnifiedTransclusionEngineTest, FormatFlagsFastPathAndDecoratedStaging) {
+  StagingRig rig;
+  ASSERT_NE(rig.font, nullptr);
+
+  // 1) Add an unformatted cell
+  const auto plainCell = rig.engine.addCell("Unformatted plain cell");
+  const auto *slot1    = rig.engine.manifold().slot(plainCell);
+  ASSERT_NE(slot1, nullptr);
+  EXPECT_EQ(slot1->formatFlags, 0U);
+
+  // 2) Add a formatted cell with Bold
+  const auto boldCell = rig.engine.addCell("Formatted bold cell");
+  const auto spans    = rig.engine.manifold().contentOf(boldCell);
+  ASSERT_FALSE(spans.empty());
+
+  xudu::Link boldLink;
+  boldLink.type = xudu::LinkType::Format;
+  boldLink.left = std::vector<xudu::PrimediaSpan>(spans.begin(), spans.end());
+  boldLink.right.push_back(
+      xudu::vocabularySpanFor(xudu::FormatAttribute::Bold));
+  rig.store.addLink(xudu::MicroversionId{}, boldLink);
+
+  // Update format flags
+  rig.engine.updateFormatFlags();
+
+  const auto *slot2 = rig.engine.manifold().slot(boldCell);
+  ASSERT_NE(slot2, nullptr);
+  const auto boldBit =
+      1U << static_cast<std::uint8_t>(xudu::FormatAttribute::Bold);
+  EXPECT_EQ(slot2->formatFlags, boldBit);
+
+  // 3) Stage visible cells and verify glyph staging
+  const auto req = UnifiedTransclusionEngine::RenderSliceRequest{
+      .focusCellId = boldCell, .radiusX = 1, .radiusY = 1, .radiusZ = 1};
+  const auto batch =
+      rig.engine.stageVisibleCells(req, rig.font, *rig.glyphCache);
+  EXPECT_GT(batch.instanceCount, 0U);
 }
 
 // SubSpanTransclusionLinksOnDimTransclude was here. It asserted that syncing a

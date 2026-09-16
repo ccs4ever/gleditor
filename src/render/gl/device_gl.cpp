@@ -826,17 +826,18 @@ void DeviceGL::destroyPickingSlots() {
   nextPickingSlot = 0;
 }
 
-void DeviceGL::requestPickingTag(const int coordX, const int coordY) {
+bool DeviceGL::requestPickingTag(const int coordX, const int coordY,
+                                 const std::uint64_t requestId) {
   if (coordX < 0 || coordY < 0 || coordX >= targetWidth ||
       coordY >= targetHeight) {
-    return;
+    return false;
   }
 
   auto &slot = picking[nextPickingSlot];
   if (slot.pending) {
     // Every slot is already waiting on the GPU. Dropping the request keeps the
     // frame moving; the caller asks again next frame anyway.
-    return;
+    return false;
   }
 
   api.BindFramebuffer(GL_READ_FRAMEBUFFER, offscreenFbo);
@@ -859,8 +860,10 @@ void DeviceGL::requestPickingTag(const int coordX, const int coordY) {
   slot.fence      = api.FenceSync(GL_SYNC_GPU_COMMANDS_COMPLETE, 0);
   slot.x          = coordX;
   slot.y          = coordY;
+  slot.requestId  = requestId;
   slot.pending    = true;
   nextPickingSlot = (nextPickingSlot + 1) % picking.size();
+  return true;
 }
 
 std::optional<PickingResult> DeviceGL::takePickingTag() {
@@ -890,7 +893,7 @@ std::optional<PickingResult> DeviceGL::takePickingTag() {
     api.BindBuffer(GL_PIXEL_PACK_BUFFER, slot.pbo);
     const auto *mapped = static_cast<const GLuint *>(api.MapBufferRange(
         GL_PIXEL_PACK_BUFFER, 0, pickingReadBytes, GL_MAP_READ_BIT));
-    PickingResult result{slot.x, slot.y, {}};
+    PickingResult result{.x = slot.x, .y = slot.y, .requestId = slot.requestId};
     if (nullptr != mapped) {
       result.tag = unpackPickingTag(mapped[0], mapped[1], mapped[2]);
       api.UnmapBuffer(GL_PIXEL_PACK_BUFFER);

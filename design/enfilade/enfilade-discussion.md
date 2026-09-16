@@ -19,7 +19,7 @@ ______________________________________________________________________
 - [3. Silicon & Network Stress-Testing: The Mechanical Critique](#3-silicon--network-stress-testing-the-mechanical-critique)
   - [3.1 The Pointer-Chasing Penalty vs. Contiguous Cache Lines](#31-the-pointer-chasing-penalty-vs-contiguous-cache-lines)
   - [3.2 The 4.96 ns Adjacency Walk vs. O(log N) Breakeven](#32-the-496-ns-adjacency-walk-vs-olog-n-breakeven)
-  - [3.3 The 120 FPS / 8.33 ms Render Budget and Text Shapers](#33-the-120-fps--833-ms-render-budget-and-text-shapers)
+  - [3.3 Render-Path Latency and Text Shapers](#33-the-120-fps--833-ms-render-budget-and-text-shapers)
   - [3.4 Swarm Transport: Merkle Trees vs. Relative Ents](#34-swarm-transport-merkle-trees-vs-relative-ents)
 - [4. Five High-Value Enfilade Frontiers Beyond U1](#4-five-high-value-enfilade-frontiers-beyond-u1)
   - [4.1 Frontier 1: The True Spanfilade (Transclusion & Beam Discovery)](#41-frontier-1-the-true-spanfilade-transclusion--beam-discovery)
@@ -201,9 +201,9 @@ Traversal Latency: CSR Adjacency Walk vs. O(log N) Enfilade Tree
 **$6\times\text{--}30\times$ faster** than enfilades. The enfilade is an asymptotic win **only**
 when jumping massive distances on large ranks ($\Delta > 1,000$, $N > 100,000$).
 
-### 3.3 The 120 FPS / 8.33 ms Render Budget and Text Shapers
+### 3.3 Render-Path Latency and Text Shapers
 
-At 120 FPS, the CPU frame budget is strictly $\le 4.33\text{ ms}$. Text layout
+in real time, the CPU frame budget is strictly $\le 4.33\text{ ms}$. Text layout
 (`src/text/layout.cpp`) using HarfBuzz, libunibreak, and FriBidi requires **contiguous UTF-8
 buffers** to resolve cursive joining, Indic conjuncts, and kerning pairs. Fragmenting text into
 enfilade leaf crums forces dynamic string stitching and allocation spikes inside the render loop,
@@ -233,7 +233,7 @@ ______________________________________________________________________
   - **Leaves**: Inverted index pointing to `(DocumentId, VersionOffset)` in xanadocs, or
     `(CellRef, SpanIndex)` in zzstructures (U3).
   - **Result**: Transclusion discovery drops from $O(N)$ to **$O(\log N + K)$ range stabbing**,
-    enabling 120 FPS kinetic beam rendering across hundreds of open documents.
+    enabling interactive kinetic beam rendering across hundreds of open documents.
 
 ### 4.2 Frontier 2: The Layoutfilade (Virtualized Scrolling & Coordinate Mapping)
 
@@ -408,7 +408,7 @@ ______________________________________________________________________
    parameterizing the entire enfilade family (Poomfilade, Spanfilade, Grandfilade, Linkfilade).
 1. **Silicon Reality** dictates that enfilades must **never** be used for primary on-disk storage
    (where flat 64B `CompactOpNode` and contiguous mmap win), nor for local navigation ($\Delta < 30$
-   hops, where $4.96\text{ ns}$ CSR walks beat trees by $30\times$), nor inside the tight 120 FPS
+   hops, where $4.96\text{ ns}$ CSR walks beat trees by $30\times$), nor inside the tight interactive
    text shaping loop.
 1. **Beyond U1**, enfilades are mechanically and theoretically justified in **five major areas**:
    - **Spanfilade**: Eliminating $O(N)$ scans in `Version::occurrencesOf()` and pairwise beam

@@ -22,7 +22,9 @@
 #include <span>
 #include <string>
 #include <string_view>
+#include <type_traits>
 #include <unordered_map>
+#include <unordered_set>
 #include <vector>
 
 #include "common/xanadu/compact_op.hpp"
@@ -84,6 +86,61 @@ struct DimLink {
 static_assert(sizeof(DimLink) == 12);
 
 /**
+ * @brief Traverse a rank of cells along @p dim starting from @p start.
+ *
+ * Invokes @p fn for each cell in the rank until:
+ * - A dead end is reached (linked cell is noCell or links back to itself),
+ * - A cycle is detected (linked cell equals start or step exceeds @p maxSteps /
+ * cellCount),
+ * - Or @p fn returns false (if @p fn returns a bool).
+ *
+ * Supports callbacks with signature:
+ * - `void(CellRef)` or `bool(CellRef)`
+ * - `void(CellRef, std::size_t step)` or `bool(CellRef, std::size_t step)`
+ */
+template <typename ManifoldT, typename Fn>
+void walkRank(const ManifoldT &m, const CellRef start, const DimRef dim,
+              const DimVector dir, Fn &&fn,
+              const std::size_t maxSteps = static_cast<std::size_t>(-1)) {
+  if (start == noCell || dim == noCell) {
+    return;
+  }
+  CellRef cur             = start;
+  const std::size_t limit = (maxSteps == static_cast<std::size_t>(-1))
+                                ? (m.cellCount() + 1)
+                                : maxSteps;
+
+  for (std::size_t step = 0; step < limit && cur != noCell; ++step) {
+    if constexpr (std::is_invocable_r_v<bool, Fn, CellRef, std::size_t>) {
+      if (!fn(cur, step)) {
+        break;
+      }
+    } else if constexpr (std::is_invocable_r_v<bool, Fn, CellRef>) {
+      if (!fn(cur)) {
+        break;
+      }
+    } else if constexpr (std::is_invocable_v<Fn, CellRef, std::size_t>) {
+      fn(cur, step);
+    } else {
+      fn(cur);
+    }
+
+    const auto next = m.linked(cur, dim, dir);
+    if (next == cur || next == noCell || next == start) {
+      break;
+    }
+    cur = next;
+  }
+}
+
+template <typename ManifoldT, typename Fn>
+void walkRank(const ManifoldT &m, const CellRef start, const DimRef dim,
+              Fn &&fn,
+              const std::size_t maxSteps = static_cast<std::size_t>(-1)) {
+  walkRank(m, start, dim, DimVector::POS, std::forward<Fn>(fn), maxSteps);
+}
+
+/**
  * @brief What is known about one cell, without its links.
  *
  * The links are a contiguous run in the manifold's one arena, addressed by
@@ -108,8 +165,9 @@ struct CellSlot {
    * The spans live in one arena shared by every cell, addressed here the same
    * way the links are.
    */
-  std::uint32_t spanOffset{0}; ///< 4: first span of this cell's content run
-  std::uint16_t spanCount{0};  ///< 2: length of that run
+  std::uint32_t spanOffset{0};  ///< 4: first span of this cell's content run
+  std::uint16_t spanCount{0};   ///< 2: length of that run
+  std::uint16_t formatFlags{0}; ///< 2: cached presentation format flags
 
   std::uint32_t birthOp{0};    ///< 4: the MakeCell index; == this CellRef
   std::uint32_t lastOp{0};     ///< 4: head of the micro-history chain (R7)
@@ -243,6 +301,37 @@ public:
   /// worth indexing.
   [[nodiscard]] DimRef dimensionNamed(std::string_view name,
                                       const xanadu::SpanReader &reader) const;
+
+  /**
+   * @brief Collect all cells within @p radius hops from @p start along any
+   *        dimension link.
+   *
+   * If @p start is noCell, defaults to home() if valid, or the first cell.
+   * If @p radius < 0, returns all cells in the manifold.
+   */
+  [[nodiscard]] std::vector<CellRef> cellsWithinRadius(CellRef start = noCell,
+                                                       int radius    = 3) const;
+
+  [[nodiscard]] std::unordered_set<CellRef>
+  cellsWithinRadiusSet(CellRef start = noCell, int radius = 3) const;
+
+  /// Set presentation formatting flags on @p ref.
+  void setFormatFlags(CellRef ref, std::uint16_t flags) noexcept;
+
+  template <typename Fn>
+  void
+  walkRank(const CellRef start, const DimRef dim, const DimVector dir, Fn &&fn,
+           const std::size_t maxSteps = static_cast<std::size_t>(-1)) const {
+    zigzag::walkRank(*this, start, dim, dir, std::forward<Fn>(fn), maxSteps);
+  }
+
+  template <typename Fn>
+  void
+  walkRank(const CellRef start, const DimRef dim, Fn &&fn,
+           const std::size_t maxSteps = static_cast<std::size_t>(-1)) const {
+    zigzag::walkRank(*this, start, dim, DimVector::POS, std::forward<Fn>(fn),
+                     maxSteps);
+  }
 
   /// The two cells genesis mints by fiat: the first two cells folded, in the
   /// order Store::sliceGenesis() mints them. noCell in a store that never

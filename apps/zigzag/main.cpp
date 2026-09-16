@@ -50,6 +50,59 @@ std::string resolveHomeSlicePath() {
   return gleditor::paths::configPath("zigzag", "home_slice.yaml");
 }
 
+struct LoadedDocument {
+  std::optional<zigzag::ZzStructureDocument> doc;
+  std::string sourcePath;
+  std::string description;
+};
+
+LoadedDocument loadDocument(const std::string &slicePath,
+                            const std::string &xuduPath) {
+  if (!xuduPath.empty() && fs::exists(xuduPath)) {
+    try {
+      xanadu::Store store;
+      store.load(xuduPath);
+      auto versions = store.allVersions();
+      if (versions.empty()) {
+        versions.push_back(xanadu::MicroversionId::parse("1"));
+      }
+      auto doc = zigzag::projectStoreToZigzag(store, versions);
+      return {.doc        = std::move(doc),
+              .sourcePath = xuduPath,
+              .description =
+                  "Loaded Xudu Store into ZigZag Hypermesh from: " + xuduPath +
+                  " (" + std::to_string(versions.size()) + " versions)"};
+    } catch (const std::exception &err) {
+      std::cerr << "Warning: could not load Xudu store: " << err.what() << "\n";
+    }
+  }
+
+  std::vector<std::string> candidates;
+  if (!slicePath.empty()) {
+    candidates.push_back(slicePath);
+  } else {
+    const std::string homeSlice = resolveHomeSlicePath();
+    if (!homeSlice.empty()) {
+      candidates.push_back(homeSlice);
+    }
+    candidates.push_back(gleditor::assetPath("zigzag/zigzag_structure.yaml"));
+    candidates.push_back("assets/zigzag/zigzag_structure.yaml");
+    candidates.push_back("zigzag_structure.yaml");
+  }
+
+  for (const auto &candidate : candidates) {
+    if (fs::exists(candidate)) {
+      if (auto loaded = zigzag::loadZzStructure(candidate)) {
+        return {.doc         = std::move(*loaded),
+                .sourcePath  = candidate,
+                .description = "Loaded ZigZag Slice from: " + candidate};
+      }
+    }
+  }
+
+  return {.doc = std::nullopt, .sourcePath = {}, .description = {}};
+}
+
 void bindCommands(gleditor::Application &app, const AppStateRef &state,
                   const std::shared_ptr<zigzag::ZigzagVisualizer> &viz) {
   app.bindDefaultViewCommands();
@@ -208,13 +261,22 @@ int main(const int argc, char **argv) {
 
   argparse::ArgumentParser parser("zigzag", TOSTRING(GLEDITOR_VERSION));
   gleditor::addCommonArguments(parser, detailed);
-  parser.add_argument("--raster")
-      .flag()
-      .help("print 1D/2D raster text of the slice to stdout and exit");
   parser.add_argument("--xudu")
       .default_value(std::string{})
       .help("load a Xudu store path or document");
   parser.add_argument("slice").help("Slice YAML file to load").remaining();
+
+  if (detailed) {
+    parser.add_group("Batch and export options");
+  }
+
+  auto &rasterArg =
+      parser.add_argument("--raster")
+          .flag()
+          .help("print 1D/2D raster text of the slice to stdout and exit");
+  if (!detailed) {
+    rasterArg.hidden();
+  }
 
   if (detailed) {
     std::cout << parser << "\n";
@@ -244,48 +306,12 @@ int main(const int argc, char **argv) {
       }
     }
 
+    const std::string xuduPath = parser.get<std::string>("--xudu");
+
     if (rasterMode) {
-      const std::string xuduPath = parser.get<std::string>("--xudu");
-      zigzag::ZzStructureDocument doc;
-      bool loaded = false;
-
-      if (!xuduPath.empty() && fs::exists(xuduPath)) {
-        xanadu::Store store;
-        store.load(xuduPath);
-        auto versions = store.allVersions();
-        if (versions.empty()) {
-          versions.push_back(xanadu::MicroversionId::parse("1"));
-        }
-        doc    = zigzag::projectStoreToZigzag(store, versions);
-        loaded = true;
-      }
-
-      if (!loaded) {
-        std::vector<std::string> candidates;
-        if (!slicePath.empty()) {
-          candidates.push_back(slicePath);
-        } else {
-          const std::string homeSlice = resolveHomeSlicePath();
-          if (!homeSlice.empty()) {
-            candidates.push_back(homeSlice);
-          }
-          candidates.push_back(
-              gleditor::assetPath("zigzag/zigzag_structure.yaml"));
-          candidates.push_back("assets/zigzag/zigzag_structure.yaml");
-          candidates.push_back("zigzag_structure.yaml");
-        }
-
-        for (const auto &candidate : candidates) {
-          if (fs::exists(candidate)) {
-            if (auto loadedDoc = zigzag::loadZzStructure(candidate)) {
-              doc    = std::move(*loadedDoc);
-              loaded = true;
-              break;
-            }
-          }
-        }
-      }
-
+      auto loaded = loadDocument(slicePath, xuduPath);
+      zigzag::ZzStructureDocument doc =
+          loaded.doc ? std::move(*loaded.doc) : zigzag::ZzStructureDocument{};
       const auto res = zigzag::rasterizeZzStructure(doc);
       std::cout << res.text << "\n";
       return 0;
@@ -302,63 +328,15 @@ int main(const int argc, char **argv) {
     auto viz =
         std::make_shared<zigzag::ZigzagVisualizer>(state->defaultFontName);
 
-    std::string xuduPath = parser.get<std::string>("--xudu");
-    bool loaded          = false;
-
-    if (!xuduPath.empty() && fs::exists(xuduPath)) {
-      try {
-        xanadu::Store store;
-        store.load(xuduPath);
-        auto versions = store.allVersions();
-        if (versions.empty()) {
-          versions.push_back(xanadu::MicroversionId::parse("1"));
-        }
-        viz->adoptXuduStore(store, versions);
-        loaded = true;
-        std::cout << "Loaded Xudu Store into ZigZag Hypermesh from: "
-                  << xuduPath << " (" << versions.size() << " versions)\n";
-      } catch (const std::exception &err) {
-        std::cerr << "Warning: could not load Xudu store: " << err.what()
-                  << "\n";
+    const std::string xuduPath = parser.get<std::string>("--xudu");
+    auto loaded                = loadDocument(slicePath, xuduPath);
+    if (loaded.doc) {
+      viz->adoptDocument(std::move(*loaded.doc), loaded.sourcePath);
+      if (!loaded.description.empty()) {
+        std::cout << loaded.description << "\n";
       }
-    }
-
-    if (!loaded) {
-      // Resolve Slice file cascade: CLI -> Home Slice -> Bundled -> Fallback
-      std::vector<std::string> candidates;
-      if (!slicePath.empty()) {
-        candidates.push_back(slicePath);
-      } else {
-        const std::string homeSlice = resolveHomeSlicePath();
-        if (!homeSlice.empty()) {
-          candidates.push_back(homeSlice);
-        }
-        candidates.push_back(
-            gleditor::assetPath("zigzag/zigzag_structure.yaml"));
-        candidates.push_back("assets/zigzag/zigzag_structure.yaml");
-        candidates.push_back("zigzag_structure.yaml");
-      }
-
-      for (const auto &candidate : candidates) {
-        if (fs::exists(candidate)) {
-          if (auto doc = zigzag::loadZzStructure(candidate)) {
-            viz->adoptDocument(std::move(*doc), candidate);
-            loaded = true;
-            std::cout << "Loaded ZigZag Slice from: " << candidate << "\n";
-            break;
-          }
-        }
-      }
-    }
-
-    if (!loaded) {
+    } else {
       std::cout << "Using built-in sample ZigZag structure\n";
-    }
-
-    if (parser["--raster"] == true) {
-      const auto res = viz->rasterize();
-      std::cout << res.text << "\n";
-      return 0;
     }
 
     renderer->addFrameContributor(viz.get());

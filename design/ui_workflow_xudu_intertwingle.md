@@ -141,7 +141,7 @@ balancing three essential forces:
                                    │   ▼
        +-------------------------------------------------------------+
        |                    Systems Realist                          |
-       |  - 120 FPS / 8.33ms GPU Frame Budget                        |
+       |  - Interactive GPU render latency and throughput                        |
        |  - Zero Render-Thread Blocking (FUSE/DHT asynchronous)      |
        |  - Cache Lines, Memory Bandwidth & Zero-Copy mmap           |
        |  - BitTorrent v2 BEP 52 Merkle Trees & BEP 46 Mutable DHT   |
@@ -184,7 +184,7 @@ balancing three essential forces:
   without centralized web servers or siloed walled gardens.
 - **Realist Constraint**: Decentralized BitTorrent DHT lookups and BEP 46 key resolutions take
   hundreds of milliseconds to several seconds. Synchronous network lookups on the rendering thread
-  immediately destroy the 120 FPS frame budget ($8.33,\text{ms}$).
+  immediately destroy the interactive frame budget ($8.33,\text{ms}$).
 - **Codebase Synthesis**: `ManagedTorrent` and swarm coordinators operate on background worker
   threads via non-blocking channels. When an external xanadoc is summoned via the Docuverse
   Telescope (`Ctrl+O`), a placeholder blueprint quad materializes in 3D space with an ambient
@@ -380,7 +380,7 @@ zones are backed by a persistent **system xanadoc** referencing the author's sov
 Bench** to weave $N \times M$ links, or clicked to execute a non-disorienting **collinear sworph**
 back to the origin text.
 
-For the full architectural specification, 120 FPS retained canvas slicing, Fitts's law screen bezel
+For the full architectural specification, interactive retained canvas slicing, Fitts's law screen bezel
 dynamics, and C++23 class design (`PouchDrawer`, `DropZone`, `LinkForgeWidget`), see:
 [`design/xudu-pouch-drawer-and-clasp-bench.md`](xudu-pouch-drawer-and-clasp-bench.md).
 
@@ -670,7 +670,7 @@ reference rendering pipeline shown in `assets/xudu-spatial-ui.jpg`:
 |   |                    |                         |   (S: Page)        |            |
 |   +--------------------+                         +--------------------+            |
 |                                                                                    |
-|   [Scrub Slider: 18:32:04 UTC]                                [120 FPS / Vulkan]  |
+|   [Scrub Slider: 18:32:04 UTC]                                [interactive / Vulkan]  |
 +------------------------------------------------------------------------------------+
 ```
 

@@ -4,6 +4,9 @@
  */
 #include <gtest/gtest.h>
 
+#include <gleditor/doc.hpp>
+
+#include "xudu/core/format.hpp"
 #include "zigzag/core/zzstructure.hpp"
 #include "zigzag/core/zzstructure_loader.hpp"
 #include "zigzag/zigzag_visualizer.hpp"
@@ -17,6 +20,30 @@ TEST(ZigzagVisualizerTest, DefaultStateAndFallback) {
   EXPECT_EQ(viz.currentView().x_dimension, "d.1");
   EXPECT_EQ(viz.currentView().y_dimension, "d.2");
   EXPECT_EQ(viz.currentView().z_dimension, "d.3");
+}
+
+TEST(ZigzagVisualizerTest, EmbeddedPresentationSurfaceExposesLiveState) {
+  ZigzagVisualizer viz("Sans 12");
+  xanadu::ZigzagPresentationSurface &surface = viz;
+
+  EXPECT_EQ(&surface.manifold(), &viz.engine()->manifold());
+  EXPECT_EQ(surface.focusCell(), viz.focusCellId());
+  EXPECT_EQ(surface.cellRadius(), 3);
+  EXPECT_EQ(surface.frameContributor(), &viz);
+  EXPECT_EQ(surface.pickObserver(), &viz);
+  EXPECT_EQ(surface.accessibilitySource(), &viz);
+
+  std::uint64_t callbackRevision = 0;
+  surface.setBridgeInvalidationCallback(
+      [&](const std::uint64_t revision) { callbackRevision = revision; });
+  const auto before = surface.bridgeRevision();
+  surface.setCellRadius(5);
+  EXPECT_EQ(surface.cellRadius(), 5);
+  EXPECT_GT(surface.bridgeRevision(), before);
+  EXPECT_EQ(callbackRevision, surface.bridgeRevision());
+
+  surface.setCellRadius(0);
+  EXPECT_EQ(surface.cellRadius(), 1);
 }
 
 TEST(ZigzagVisualizerTest, NavigationAlongDimensions) {
@@ -137,8 +164,32 @@ TEST(ZigzagVisualizerTest, MousePicking) {
   pick.tag.kind         = render::tagKindOverlay;
   pick.tag.clusterIndex = neighbor;
 
+  // Raw overlay numbers are only GPU-local handles and must not navigate.
+  EXPECT_FALSE(viz.picked(pick, state));
+  pick.semanticTarget = std::make_shared<render::PickSemanticTarget>(
+      render::PickSemanticTarget{.documentId   = viz.documentId(),
+                                 .microversion = viz.documentVersion(),
+                                 .cellRef = static_cast<CellRef>(neighbor)});
+  const auto scope  = state.allocateOverlayPickScope();
+  pick.tag.docIndex = scope;
+  state.bindOverlayPick(pick.tag, pick.semanticTarget);
+  const auto scene = state.overlayPickScene;
+  const std::uint64_t key =
+      (static_cast<std::uint64_t>(pick.tag.kind) << 60U) |
+      (static_cast<std::uint64_t>(pick.tag.docIndex) << 46U) |
+      (static_cast<std::uint64_t>(pick.tag.pageIndex) << 32U) |
+      pick.tag.clusterIndex;
+  ASSERT_TRUE(scene.overlays.contains(key));
+  EXPECT_EQ(scene.overlays.at(key)->documentId, viz.documentId());
+  ASSERT_TRUE(scene.overlays.at(key)->cellRef);
+  EXPECT_EQ(*scene.overlays.at(key)->cellRef, static_cast<CellRef>(neighbor));
   EXPECT_TRUE(viz.picked(pick, state));
   EXPECT_EQ(viz.focusCellId(), neighbor);
+
+  pick.semanticTarget = std::make_shared<render::PickSemanticTarget>(
+      render::PickSemanticTarget{.documentId   = viz.documentId(),
+                                 .microversion = viz.documentVersion()});
+  EXPECT_FALSE(viz.picked(pick, state));
 
   // Irrelevant tag kind
   pick.tag.kind = render::tagKindGlyph;
@@ -511,4 +562,89 @@ TEST(ZigzagVisualizerTest, ADeletedCellIsNotAnnounced) {
       << "a deleted cell is still in the manifold -- DELETE is REARRANGE TO "
          "LIMBO -- but it is unreachable, so it must not be announced";
   EXPECT_TRUE(announcedKeeper) << "deletion took a bystander with it";
+}
+
+TEST(ZigzagVisualizerTest, FormattedCellDecoratedRangesInTopology) {
+  ZigzagVisualizer viz("Sans 12");
+  const auto root = viz.focusCellId();
+  ASSERT_NE(root, 0U);
+  ASSERT_NE(viz.engine(), nullptr);
+  ASSERT_NE(viz.store(), nullptr);
+
+  const auto spans = viz.engine()->manifold().contentOf(root);
+  ASSERT_FALSE(spans.empty());
+
+  // Attach an Italic format link to root's spans
+  xudu::Link italicLink;
+  italicLink.type = xudu::LinkType::Format;
+  italicLink.left = std::vector<xudu::PrimediaSpan>(spans.begin(), spans.end());
+  italicLink.right.push_back(
+      xudu::vocabularySpanFor(xudu::FormatAttribute::Italic));
+  viz.store()->addLink(xudu::MicroversionId{}, italicLink);
+
+  viz.engine()->updateFormatFlags();
+  viz.cycleDimensions(true);
+
+  const auto &visible = viz.visibleCells();
+  const auto it       = visible.find(root);
+  ASSERT_NE(it, visible.end());
+  EXPECT_FALSE(it->second.decorated_ranges.empty());
+  EXPECT_TRUE(
+      gleditor::hasDecoration(it->second.decorated_ranges[0].decorations,
+                              gleditor::Decoration::Italic));
+}
+
+TEST(ZigzagVisualizerTest, VisualizerCellAnchorGeneration) {
+  ZigzagVisualizer viz("Sans 12");
+  const auto root = viz.focusCellId();
+  ASSERT_NE(root, 0U);
+
+  const auto anchor = viz.cellAnchor(static_cast<CellRef>(root));
+  ASSERT_TRUE(anchor.has_value());
+  EXPECT_GT(anchor->width, 0.0F);
+  EXPECT_GT(anchor->height, 0.0F);
+  EXPECT_GT(anchor->lineHeight, 0.0F);
+  EXPECT_FLOAT_EQ(anchor->normal.x, 0.0F);
+  EXPECT_FLOAT_EQ(anchor->normal.y, 0.0F);
+  EXPECT_FLOAT_EQ(anchor->normal.z, 1.0F);
+
+  // Non-existent cell returns nullopt
+  EXPECT_FALSE(viz.cellAnchor(static_cast<CellRef>(999999U)).has_value());
+}
+
+TEST(ZigzagVisualizerTest, DualContinuumDepthTiering) {
+  ZigzagVisualizer viz("Sans 12");
+  const auto root = viz.focusCellId();
+  ASSERT_NE(root, 0U);
+
+  EXPECT_FLOAT_EQ(viz.depthTier(), 0.0F);
+  EXPECT_FLOAT_EQ(viz.depthTierOpacity(), 1.0F);
+
+  // Set associative lattice tier
+  viz.setDepthTier(-40.0F, 0.42F);
+  EXPECT_FLOAT_EQ(viz.depthTier(), -40.0F);
+  EXPECT_FLOAT_EQ(viz.depthTierOpacity(), 0.42F);
+
+  const auto anchor = viz.cellAnchor(static_cast<CellRef>(root));
+  ASSERT_TRUE(anchor.has_value());
+  EXPECT_FLOAT_EQ(anchor->position.z, -40.0F * Doc::pixelsToWorld);
+
+  const auto &visible = viz.visibleCells();
+  const auto it       = visible.find(root);
+  ASSERT_NE(it, visible.end());
+  EXPECT_FLOAT_EQ(it->second.target_pos.z, -40.0F);
+  EXPECT_FLOAT_EQ(it->second.target_alpha, 0.42F);
+}
+
+TEST(ZigzagVisualizerTest, PresentationOriginKeepsTheHostDocumentClear) {
+  ZigzagVisualizer viz("Sans 12");
+  const auto root = viz.focusCellId();
+  ASSERT_NE(root, 0U);
+
+  viz.setPresentationOrigin({420.0F, 0.0F, 0.0F});
+  EXPECT_FLOAT_EQ(viz.presentationOrigin().x, 420.0F);
+
+  const auto anchor = viz.cellAnchor(static_cast<CellRef>(root));
+  ASSERT_TRUE(anchor.has_value());
+  EXPECT_FLOAT_EQ(anchor->position.x, 420.0F);
 }

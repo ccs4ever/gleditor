@@ -23,6 +23,11 @@
 
 namespace xanadu {
 
+enum class PouchOriginKind : std::uint8_t {
+  Document   = 0,
+  ZigzagCell = 1,
+};
+
 /**
  * @struct PouchItem
  * @brief An individual transcluded card stored within a drop zone.
@@ -36,6 +41,12 @@ struct PouchItem {
   std::uint32_t originCharStart{0};
   std::uint32_t originCharEnd{0};
   std::uint64_t timestampUtc{0};
+
+  // Cross-Domain metadata (Stage 4)
+  PouchOriginKind originKind{PouchOriginKind::Document};
+  std::uint32_t originCell{0};       ///< zigzag::CellRef if from Zigzag
+  std::uint32_t originSliceIndex{0}; ///< Manifold or slice index
+  std::string originRankCoord;       ///< e.g. "d.sequence: #4"
 };
 
 /**
@@ -133,6 +144,7 @@ private:
 class PouchManager {
 public:
   explicit PouchManager(std::shared_ptr<UserPermascroll> permascroll = nullptr);
+  explicit PouchManager(Store &systemStore);
 
   DropZone &addZone(DropZoneConfig config);
   bool removeZone(std::string_view id);
@@ -154,11 +166,21 @@ public:
                      std::uint32_t docIndex = 0, std::uint32_t charStart = 0,
                      std::uint32_t charEnd = 0);
 
+  /// Drop a cell's span into a zone, recording OpKind::Transclude in the
+  /// backing store with cell origin metadata.
+  PouchItem dropCell(std::string_view zoneId, const PrimediaSpan &span,
+                     std::string previewText, std::uint32_t cellRef,
+                     std::string_view rankCoord, std::uint32_t sliceIndex = 0);
+
   /// Dismiss an item, moving it to non-destructive limbo in the backing store.
   bool dismissItem(std::uint64_t itemId);
 
-  [[nodiscard]] Store &store() noexcept { return *store_; }
-  [[nodiscard]] const Store &store() const noexcept { return *store_; }
+  [[nodiscard]] Store &store() noexcept {
+    return systemStore_ ? *systemStore_ : *store_;
+  }
+  [[nodiscard]] const Store &store() const noexcept {
+    return systemStore_ ? *systemStore_ : *store_;
+  }
   [[nodiscard]] const MicroversionId &currentVersion() const noexcept {
     return currentVersion_;
   }
@@ -168,6 +190,7 @@ public:
   void loadManifest();
 
 private:
+  Store *systemStore_{nullptr};
   std::unique_ptr<Store> store_;
   MicroversionId currentVersion_;
   std::vector<std::unique_ptr<DropZone>> zones_;

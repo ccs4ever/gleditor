@@ -400,4 +400,57 @@ TEST(VortexStdLibTest, FunctionalModuleMapFilterFoldZip) {
   EXPECT_NE(zipped, noCell);
 }
 
+TEST(VortexStdLibTest, ArrayModuleOperations) {
+  TestHarness h;
+  EXPECT_TRUE(h.stdlib.has("sys:array"));
+  EXPECT_TRUE(h.stdlib.has("sys:array/iota"));
+  EXPECT_TRUE(h.stdlib.has("sys:array/shape"));
+  EXPECT_TRUE(h.stdlib.has("sys:array/take"));
+  EXPECT_TRUE(h.stdlib.has("sys:array/drop"));
+  EXPECT_TRUE(h.stdlib.has("sys:array/reverse"));
+  EXPECT_TRUE(h.stdlib.has("sys:array/tally"));
+
+  DimRef d1 = h.arena.makeCell("d.1");
+
+  // arrayIota: mint 5 cells on d1
+  CellRef head5 = h.stdlib.arrayIota(5, d1);
+  EXPECT_NE(head5, noCell);
+  EXPECT_EQ(h.stdlib.arrayTally(head5, d1), 5u);
+
+  auto shape5 = h.stdlib.arrayShape(head5, std::span<const DimRef>{&d1, 1});
+  ASSERT_EQ(shape5.size(), 1u);
+  EXPECT_EQ(shape5[0], 5u);
+
+  // arrayTake: first 3 cells
+  CellRef take3 = h.stdlib.arrayTake(head5, d1, 3);
+  EXPECT_NE(take3, noCell);
+  EXPECT_EQ(h.stdlib.arrayTally(take3, d1), 3u);
+
+  // arrayDrop: drop 2 cells -> 3 left
+  CellRef drop2 = h.stdlib.arrayDrop(head5, d1, 2);
+  EXPECT_NE(drop2, noCell);
+  EXPECT_EQ(h.stdlib.arrayTally(drop2, d1), 3u);
+
+  // arrayReverse: reverse 5 cells
+  CellRef rev5 = h.stdlib.arrayReverse(head5, d1);
+  EXPECT_NE(rev5, noCell);
+  EXPECT_EQ(h.stdlib.arrayTally(rev5, d1), 5u);
+
+  // Check invocation via call()
+  auto callIotaRes =
+      h.stdlib.call("sys:array/iota", {static_cast<std::int64_t>(4),
+                                       static_cast<std::int64_t>(d1)});
+  ASSERT_EQ(callIotaRes.size(), 1u);
+  CellRef callHead =
+      static_cast<CellRef>(std::get<std::int64_t>(callIotaRes[0]));
+  EXPECT_NE(callHead, noCell);
+  EXPECT_EQ(h.stdlib.arrayTally(callHead, d1), 4u);
+
+  auto callTallyRes =
+      h.stdlib.call("sys:array/tally", {static_cast<std::int64_t>(callHead),
+                                        static_cast<std::int64_t>(d1)});
+  ASSERT_EQ(callTallyRes.size(), 1u);
+  EXPECT_EQ(callTallyRes[0], CellValue(static_cast<std::int64_t>(4)));
+}
+
 } // namespace

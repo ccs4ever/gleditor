@@ -178,12 +178,16 @@ VerifiedPieceCache::Stats VerifiedPieceCache::stats() const {
 }
 
 bool Resolver::available(const Scroll &scroll) const {
-  if (nullptr == source || scroll.segments.empty()) {
+  if (scroll.segments.empty()) {
     return false;
   }
   return std::ranges::all_of(
       scroll.segments, [this](const ScrollSegment &segment) {
-        return nullptr != source->metainfo(segment.torrent);
+        if (nullptr != source && nullptr != source->metainfo(segment.torrent)) {
+          return true;
+        }
+        return !segment.path.empty() &&
+               std::filesystem::is_regular_file(segment.path);
       });
 }
 
@@ -323,11 +327,17 @@ ResolveResult Resolver::resolve(const Scroll &scroll,
                            .holeRecord = segment->holeRecord};
     }
 
-    if (nullptr == source) {
-      return ResolveResult{.status = ResolutionStatus::MissingPieces};
+    std::string bytes;
+    if (source != nullptr && source->metainfo(segment->torrent) != nullptr) {
+      bytes = readSegment(*segment, at, count);
+    } else if (!segment->path.empty()) {
+      const std::filesystem::path localPath(segment->path);
+      if (std::filesystem::is_regular_file(localPath)) {
+        const auto streamAt = segment->streamOffset + (at - segment->at);
+        bytes               = readFileRange(localPath, streamAt, count);
+      }
     }
 
-    auto bytes = readSegment(*segment, at, count);
     if (bytes.size() != count) {
       return ResolveResult{.status = ResolutionStatus::MissingPieces};
     }

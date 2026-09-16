@@ -7,6 +7,7 @@
 #include <memory>
 #include <string>
 
+#include "common/xanadu/system_docs.hpp"
 #include "xudu/core/ops.hpp"
 #include "xudu/core/pouch_zone.hpp"
 #include "xudu/core/spool.hpp"
@@ -218,4 +219,22 @@ TEST(PouchTest, SwingBackResolvesExactByteSpan) {
   EXPECT_GT(shiftedOccurrences.front().start, 13U);
   EXPECT_EQ(shiftedOccurrences.front().end - shiftedOccurrences.front().start,
             23U);
+}
+
+TEST(PouchTest, BackedBySystemStore) {
+  Store store;
+  const auto content = defaultSystemDocContent(SystemDocKind::Pouches);
+  const auto v0      = store.insert(MicroversionId{}, 0, content);
+  (void)v0;
+
+  PouchManager pm(store);
+  pm.loadManifest();
+  EXPECT_EQ(pm.zones().size(), 4U);
+  EXPECT_EQ(pm.zones()[0]->id(), "to_link_left");
+
+  // Drop a span into system-backed manager
+  const PrimediaSpan span{.scroll = 0, .start = 10, .length = 5};
+  const auto item = pm.dropSpan("notes", span, "Notes excerpt", store.latest());
+  EXPECT_EQ(item.previewText, "Notes excerpt");
+  EXPECT_EQ(pm.zoneById("notes")->items().size(), 1U);
 }

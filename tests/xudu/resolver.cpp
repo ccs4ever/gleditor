@@ -756,4 +756,24 @@ TEST_F(TorrentDataTest, aTorrentNamedAfterItsOwnFirstFileStillResolves) {
             record);
 }
 
+TEST_F(TorrentDataTest, resolverFallsBackToLocalFileWhenSourceUnset) {
+  const std::string content =
+      "Sample local file content for resolver fallback.";
+  const auto samplePath = dir / "fallback_sample.txt";
+  write(samplePath, content);
+
+  const auto made   = xudu::makeTorrent(content, "fallback_sample.txt");
+  const auto scroll = xudu::Scroll::ofTorrentFile(
+      made.hash, 0, samplePath.string(), 0, content.size());
+
+  xudu::Resolver resolver; // No source attached!
+  EXPECT_TRUE(resolver.available(scroll));
+
+  const xudu::PrimediaSpan span{1, 7, 10}; // "local file"
+  const auto res = resolver.resolve(scroll, span);
+  EXPECT_EQ(res.status, xudu::ResolutionStatus::VerifiedBytes);
+  EXPECT_EQ(res.text, "local file");
+  EXPECT_EQ(resolver.read(scroll, span), "local file");
+}
+
 } // namespace

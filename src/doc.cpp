@@ -1,4 +1,5 @@
 #include <algorithm>                      // for min, max
+#include <chrono>                         // for steady_clock, milliseconds
 #include <cmath>                          // for ceil, lround
 #include <cstddef>                        // for byte
 #include <cstdint>                        // for uint32_t
@@ -6,6 +7,7 @@
 #include <gleditor/animation.hpp>         // for docArrival, docArrivalDepth
 #include <gleditor/doc.hpp>               // IWYU pragma: associated
 #include <gleditor/document_observer.hpp> // for DocumentObserver
+#include <gleditor/render/constants.hpp>  // for kPageBuildFrameBudget
 #include <gleditor/render/device.hpp>     // for RenderDevice
 #include <gleditor/render_state.hpp>      // for RenderState
 #include <gleditor/renderer.hpp>          // for Renderer, RendererRef
@@ -1045,8 +1047,7 @@ void Doc::reflowFrom(RenderState &state, const std::size_t firstPage,
   pages.erase(pages.begin() + static_cast<std::ptrdiff_t>(firstPage),
               pages.end());
 
-  constexpr float pageGapPx = 32.0F;
-  float currentTopY         = 0.0F;
+  float currentTopY = 0.0F;
   if (firstPage > 0 && firstPage <= pages.size()) {
     const auto &prevPage        = pages[firstPage - 1];
     const float prevCenterY     = prevPage.getModel()[3][1];
@@ -1156,7 +1157,10 @@ void Doc::load(const gleditor::TextSource &source) {
   {
     std::lock_guard lock(shapingMutex);
     pendingShapings.clear();
+    pageHeightsPx.clear();
   }
+  pageIndexFilade         = gleditor::enfilade::Layoutfilade{};
+  pageIndexFiladeBuiltFor = 0;
   // A load replaces the document wholesale, so whatever the previous content
   // had already finished laying out says nothing about this one: without
   // resetting these, isFullyLoaded() would keep answering as of the old text,
@@ -1179,14 +1183,71 @@ void Doc::makePages() {
     if (consumed == 0) {
       break;
     }
+    const auto heightPx = pageBoxFor(shaping).height;
     {
       std::lock_guard lock(shapingMutex);
       pendingShapings.push_back(PendingShaping{
           std::move(shaping), static_cast<std::uint32_t>(tSize)});
+      pageHeightsPx.push_back(heightPx);
     }
     tSize += consumed;
   }
   shapingComplete.store(true, std::memory_order_release);
+}
+
+std::chrono::milliseconds Doc::buildBudgetForThisCall() {
+  // pageHeightsPx accumulates independently of pendingShapings (which
+  // buildPendingPages() below drains), so it reflects every page shaped so
+  // far regardless of GPU-build progress -- rebuilding the filade from it is
+  // how "which page is the camera near" can stay current even while most of
+  // that backlog is still waiting to become a Page.
+  std::vector<float> heightsSnapshot;
+  {
+    std::lock_guard lock(shapingMutex);
+    if (pageHeightsPx.size() > pageIndexFiladeBuiltFor) {
+      heightsSnapshot = pageHeightsPx;
+    }
+  }
+  if (!heightsSnapshot.empty()) {
+    std::vector<gleditor::enfilade::LayoutEntry> entries;
+    entries.reserve(heightsSnapshot.size());
+    for (const auto heightPx : heightsSnapshot) {
+      entries.push_back(gleditor::enfilade::LayoutEntry{
+          .heightPx = heightPx + pageGapPx,
+      });
+    }
+    pageIndexFilade =
+        gleditor::enfilade::Layoutfilade::buildFromEntries(std::move(entries));
+    pageIndexFiladeBuiltFor = heightsSnapshot.size();
+  }
+
+  if (pageIndexFilade.empty() || nullptr == renderer) {
+    return render::kPageBuildFrameBudget;
+  }
+  const auto appState = renderer->appState();
+  if (nullptr == appState) {
+    return render::kPageBuildFrameBudget;
+  }
+
+  // The camera is one shared, global, free-moving 3D point (AppState::view),
+  // not a per-document scroll offset -- projected into this document's own
+  // stacking coordinate the same way page Y positions already are: relative
+  // to this Doc's own world position, in the same pixelsToWorld-scaled units
+  // buildPendingPages() below stacks pages in. x/z and view direction are not
+  // considered; a document positioned well outside the camera's actual view
+  // frustum simply "catches up" for no visual benefit, which costs nothing
+  // else this function's own per-call budget already bounds.
+  float cameraWorldY = 0.0F;
+  {
+    std::lock_guard viewLock(appState->view);
+    cameraWorldY = appState->view.pos.y;
+  }
+  const float distancePx = (currentPosition().y - cameraWorldY) / pixelsToWorld;
+  const auto hit         = pageIndexFilade.findEntryAtY(distancePx);
+  if (!hit || hit->entryIndex <= pages.size()) {
+    return render::kPageBuildFrameBudget;
+  }
+  return render::kPageBuildFrameBudget * render::kPageBuildCatchUpMultiplier;
 }
 
 bool Doc::buildPendingPages(RenderState &state) {
@@ -1198,8 +1259,7 @@ bool Doc::buildPendingPages(RenderState &state) {
     std::lock_guard lock(shapingMutex);
     toBuild.swap(pendingShapings);
   }
-  constexpr float pageGapPx = 32.0F;
-  float currentTopY         = 0.0F;
+  float currentTopY = 0.0F;
   if (!pages.empty()) {
     const auto &lastPage        = pages.back();
     const float lastCenterY     = lastPage.getModel()[3][1];
@@ -1208,6 +1268,17 @@ bool Doc::buildPendingPages(RenderState &state) {
     currentTopY                 = lastBottomY - (pageGapPx * pixelsToWorld);
   }
 
+  // Bounded so that a backlog the background shaping thread got ahead on --
+  // whether from a slow render-thread startup or simply outpacing this loop
+  // -- gets spread back out over several frames instead of built in one
+  // blocking call. See render::kPageBuildFrameBudget's own comment. Widened
+  // to render::kPageBuildCatchUpMultiplier times that when the camera is
+  // looking well past what has been built so far -- see
+  // buildBudgetForThisCall() -- so scrolling ahead of load progress closes
+  // that gap faster instead of waiting behind every page before it.
+  const auto buildBudget = buildBudgetForThisCall();
+  const auto buildStart  = std::chrono::steady_clock::now();
+  std::size_t built      = 0;
   for (auto &[shaping, textOffset] : toBuild) {
     const auto numPages         = pages.size();
     const float pageHeightPx    = pageBoxFor(shaping).height;
@@ -1219,10 +1290,32 @@ bool Doc::buildPendingPages(RenderState &state) {
     trans = glm::scale(trans, glm::vec3(pixelsToWorld, pixelsToWorld, 1.0F));
     pages.emplace_back(getPtr(), state, trans, std::move(shaping), textOffset,
                        static_cast<std::uint32_t>(numPages));
+    ++built;
 
     currentTopY =
         (centerY - (pageHeightWorld / 2.0F)) - (pageGapPx * pixelsToWorld);
+
+    // Always build at least one page per call even if it alone exceeds the
+    // budget, so a single expensive page (e.g. one that grows the glyph
+    // atlas) cannot stall progress -- checked after building rather than
+    // before, since the cost being budgeted is the build that just ran.
+    if (std::chrono::steady_clock::now() - buildStart >= buildBudget) {
+      break;
+    }
   }
+
+  if (built < toBuild.size()) {
+    // Whatever this call didn't get to goes back in front of anything the
+    // background thread has appended since the swap above, preserving the
+    // document order buildPendingPages()'s own stacking math (currentTopY)
+    // and the glyph-atlas insertion order both depend on.
+    std::lock_guard lock(shapingMutex);
+    pendingShapings.insert(pendingShapings.begin(),
+                           std::make_move_iterator(toBuild.begin()) + built,
+                           std::make_move_iterator(toBuild.end()));
+    return false;
+  }
+
   if (shapingComplete.load(std::memory_order_acquire)) {
     std::lock_guard lock(shapingMutex);
     if (pendingShapings.empty()) {
@@ -1236,9 +1329,8 @@ bool Doc::buildPendingPages(RenderState &state) {
 
 void Doc::newPage(RenderState &state, PageShaping aShaping,
                   const std::uint32_t textOffset) {
-  const auto numPages       = this->pages.size();
-  constexpr float pageGapPx = 32.0F;
-  float currentTopY         = 0.0F;
+  const auto numPages = this->pages.size();
+  float currentTopY   = 0.0F;
   if (!pages.empty()) {
     const auto &prevPage        = pages.back();
     const float prevCenterY     = prevPage.getModel()[3][1];

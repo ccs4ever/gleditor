@@ -160,7 +160,9 @@ rather than a constant hardcoded after watching one decoder's behaviour — is a
 1. **`avDecodeIndexSpike()`** — over a new fixture, `tests/samples/sample_video_seekable.mp4` (3
    seconds of guaranteed-motion H.264 at 10 fps, `-bf 0 -g 10`, generated via
    `ffmpeg -f lavfi -i "testsrc=size=320x240:rate=10:duration=3"` — a real fixture gap, since
-   `sample_video.mp4` has no actual stream inside it, per the multimedia plan's own Phase 3
+   `sample_video.mp4` has no actual stream inside it and is retained only as a
+   container-parsing fixture; rich-media documents use the decodable
+   `sample_video_seekable.mp4` fixture instead.
    finding). Three keyframes land at t=0.0/1.0/2.0s. Decodes linearly from the start to frame 15
    (t=1.5s, a P-frame, reached from the keyframe at t=1.0s), then independently seeks with
    `av_seek_frame(..., AVSEEK_FLAG_BACKWARD)` to the same target and decodes forward from wherever

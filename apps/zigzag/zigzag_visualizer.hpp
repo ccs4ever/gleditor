@@ -5,7 +5,10 @@
 #ifndef ZIGZAG_VISUALIZER_HPP
 #define ZIGZAG_VISUALIZER_HPP
 
+#include "common/xanadu/link_layout.hpp"
 #include "common/xanadu/store.hpp"
+#include "common/xanadu/system_docs.hpp"
+#include "common/xanadu/zigzag/presentation_surface.hpp"
 #include "core/manifold.hpp"
 #include "core/unified_transclusion_engine.hpp"
 #include "core/zz_xudu_projector.hpp"
@@ -31,6 +34,7 @@
 #include <gleditor/canvas.hpp>
 #include <gleditor/frame_contributor.hpp>
 #include <gleditor/image_cache.hpp>
+#include <gleditor/layout_box.hpp>
 #include <gleditor/pick_observer.hpp>
 #include <gleditor/renderer.hpp>
 
@@ -53,6 +57,23 @@ struct RenderStateCell {
   float target_alpha{1.0F};
 
   glm::vec3 base_color{0.7F, 0.7F, 0.75F};
+  std::vector<gleditor::DecoratedRange> decorated_ranges;
+  std::vector<gleditor::BlockStyleRange> block_styles;
+};
+
+/// Measured presentation geometry shared by drawing, rank layout, and bridge
+/// anchors. It is cached per visible cell and refreshed only when presentation
+/// content or mode changes, never once per frame.
+struct CellLayoutMetrics {
+  float width{};
+  float height{};
+  float labelWidthLimit{};
+  float titleTop{};
+  float labelTop{};
+  float badgeTop{};
+  float labelLineHeight{};
+  std::string idText;
+  std::string badgeText;
 };
 
 struct DimensionVisual {
@@ -74,7 +95,8 @@ struct SceneVisual {
 
 class ZigzagVisualizer : public gleditor::FrameContributor,
                          public gleditor::PickObserver,
-                         public gleditor::a11y::Source {
+                         public gleditor::a11y::Source,
+                         public xanadu::ZigzagPresentationSurface {
 public:
   explicit ZigzagVisualizer(std::string aFontName);
   ~ZigzagVisualizer() override;
@@ -103,11 +125,15 @@ public:
                      std::string_view value) override;
 
   // -- ZigZag Actions -------------------------------------------------------
-  void adoptDocument(ZzStructureDocument &&doc, std::string sourcePath);
+  void adoptDocument(ZzStructureDocument &&doc, std::string sourcePath,
+                     const std::unordered_map<CellID, XuduProjectionProvenance>
+                         *origins = nullptr);
   void populateFallbackStructure();
 
   void adoptXuduStore(const xanadu::Store &store,
                       const std::vector<xanadu::MicroversionId> &versions);
+  void bindXuduStore(xanadu::Store &store,
+                     const xanadu::MicroversionId &version);
   void adoptXuduDocs(const std::vector<XuduDocInput> &docs,
                      const std::vector<xanadu::Link> &links = {});
   [[nodiscard]] ZzRasterResult
@@ -127,6 +153,10 @@ public:
   void swapDimensions(int axis1, int axis2);
   void cycleDimensions(bool forward = true);
 
+  /// Identity of the persistent store whose cells this view is drawing.
+  [[nodiscard]] std::string documentId() const;
+  [[nodiscard]] std::string documentVersion() const;
+
   // -- Multi-View Modes (Cell Content View vs. Topology View) ---------------
   enum class ViewMode : std::uint8_t {
     CellContent =
@@ -138,6 +168,40 @@ public:
   void setViewMode(ViewMode mode);
   [[nodiscard]] ViewMode viewMode() const { return view_mode_; }
   void toggleViewMode();
+
+  /// Apply one validated system-slice snapshot between frames. The store is
+  /// never consulted while drawing.
+  void setPresentationConfig(xanadu::ZigzagPresentationConfig config);
+  [[nodiscard]] const xanadu::ZigzagPresentationConfig &
+  presentationConfig() const noexcept {
+    return presentation_config_;
+  }
+
+  // -- Dual-Continuum Harmonic Depth Tiering --------------------------------
+  void setDepthTier(float baseDepthZ, float opacityMultiplier = 1.0F);
+  [[nodiscard]] float depthTier() const noexcept { return depth_tier_; }
+  [[nodiscard]] float depthTierOpacity() const noexcept {
+    return depth_tier_opacity_;
+  }
+
+  /// Place this presentation beside its host document without changing the
+  /// manifold's intrinsic neighbourhood coordinates.
+  void setPresentationOrigin(glm::vec3 origin);
+  /// Resolve the exact host-page transform once per frame. A null result keeps
+  /// the surface hidden while its host page has not been built yet.
+  using PresentationTransformResolver =
+      std::function<std::optional<glm::mat4>()>;
+  void
+  setPresentationTransformResolver(PresentationTransformResolver resolver) {
+    presentationTransformResolver_ = std::move(resolver);
+  }
+  using PresentationOriginResolver = std::function<std::optional<glm::vec3>()>;
+  void setPresentationOriginResolver(PresentationOriginResolver resolver) {
+    presentationOriginResolver_ = std::move(resolver);
+  }
+  [[nodiscard]] glm::vec3 presentationOrigin() const noexcept {
+    return presentation_origin_;
+  }
 
   // -- In-App Interactive Cell & Dimension Editing --------------------------
   CellID createCell(std::string text = "", std::string role = "text");
@@ -174,6 +238,42 @@ public:
   /// to the verbs a person invokes -- inserting a cell, making a link.
   [[nodiscard]] DimRef dimensionRef(const DimID &name) const;
   [[nodiscard]] CellID focusCellId() const { return accursed_cell_focus_; }
+  [[nodiscard]] std::optional<xanadu::CellAnchor>
+  cellAnchor(CellRef cell) const override;
+
+  // -- Embedded presentation surface ---------------------------------------
+  [[nodiscard]] const Manifold &manifold() const noexcept override {
+    return engine_->manifold();
+  }
+  [[nodiscard]] CellRef focusCell() const noexcept override {
+    return static_cast<CellRef>(accursed_cell_focus_);
+  }
+  void focusCell(const CellRef cell) override {
+    navigateFocusTo(static_cast<CellID>(cell));
+  }
+  [[nodiscard]] int cellRadius() const noexcept override {
+    return scene_.neighborhood_radius;
+  }
+  void setCellRadius(int radius) noexcept override;
+  [[nodiscard]] std::uint64_t bridgeRevision() const noexcept override {
+    return revision_;
+  }
+  void setBridgeInvalidationCallback(
+      xanadu::ZigzagPresentationSurface::InvalidationCallback callback)
+      override {
+    bridgeInvalidationCallback_ = std::move(callback);
+  }
+  [[nodiscard]] gleditor::FrameContributor *
+  frameContributor() noexcept override {
+    return this;
+  }
+  [[nodiscard]] gleditor::PickObserver *pickObserver() noexcept override {
+    return this;
+  }
+  [[nodiscard]] gleditor::a11y::Source *
+  accessibilitySource() noexcept override {
+    return this;
+  }
 
   /// How many operations this slice has recorded. The document's size in
   /// hypertime, and what a test watches to catch an edit that records more
@@ -187,6 +287,15 @@ public:
     return current_view_;
   }
   [[nodiscard]] ZzStructureDocument document() const;
+
+  [[nodiscard]] UnifiedTransclusionEngine *engine() const noexcept {
+    return engine_.get();
+  }
+  [[nodiscard]] xanadu::Store *store() const noexcept { return store_; }
+  [[nodiscard]] const std::unordered_map<CellID, RenderStateCell> &
+  visibleCells() const noexcept {
+    return visible_cells_;
+  }
 
 private:
   struct CellInfo {
@@ -202,26 +311,48 @@ private:
 
   void rebuildActiveViewTopology();
   void updateCellPositions(float deltaTime);
-  void invalidateAccessibility() { revision_++; }
+  void invalidateAccessibility() {
+    ++revision_;
+    if (bridgeInvalidationCallback_) {
+      bridgeInvalidationCallback_(revision_);
+    }
+  }
 
   [[nodiscard]] CellInfo inspectCell(CellRef id) const;
   [[nodiscard]] DimensionVisual dimensionVisual(const DimID &dimension) const;
+  [[nodiscard]] CellLayoutMetrics measureCellLayout(const RenderStateCell &cell,
+                                                    bool isFocus) const;
+  [[nodiscard]] const CellLayoutMetrics &
+  cellLayout(CellID id, const RenderStateCell &cell, bool isFocus) const;
+  void refreshCellLayouts();
 
   std::string fontName_;
   std::uint64_t revision_{1};
+  xanadu::ZigzagPresentationSurface::InvalidationCallback
+      bridgeInvalidationCallback_;
 
   std::string structure_name_;
   std::string current_slice_path_;
-  std::unique_ptr<xanadu::Store> store_;
+  std::unique_ptr<xanadu::Store> ownedStore_;
+  xanadu::Store *store_{nullptr};
   std::unique_ptr<UnifiedTransclusionEngine> engine_;
   CellID accursed_cell_focus_{0};
   ViewAxisBinding current_view_;
 
   SceneVisual scene_;
   ViewMode view_mode_{ViewMode::CellContent};
+  glm::vec3 presentation_origin_{0.0F, 0.0F, 0.0F};
+  glm::mat4 presentation_transform_{1.0F};
+  PresentationTransformResolver presentationTransformResolver_;
+  PresentationOriginResolver presentationOriginResolver_;
+  float depth_tier_{0.0F};
+  float depth_tier_opacity_{1.0F};
+  xanadu::ZigzagPresentationConfig presentation_config_{};
   std::unordered_map<DimID, DimensionVisual> dimension_visuals_;
 
   std::unordered_map<CellID, RenderStateCell> visible_cells_;
+  mutable std::unordered_map<CellID, CellLayoutMetrics> cell_layouts_;
+  bool cell_layouts_dirty_{true};
 
   std::chrono::steady_clock::time_point last_frame_time_;
 
@@ -229,6 +360,10 @@ private:
   std::unique_ptr<gleditor::Canvas> hudCanvas_;
   std::unique_ptr<gleditor::Beams> beams_;
   std::unique_ptr<gleditor::ImageCache> imageCache_;
+  std::unordered_map<CellRef, std::shared_ptr<const render::PickSemanticTarget>>
+      pickTargets_;
+  std::string pickTargetVersion_;
+  std::unordered_map<CellRef, XuduProjectionProvenance> sourceOrigins_;
 };
 
 } // namespace zigzag

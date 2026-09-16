@@ -274,33 +274,29 @@ std::function<CellRef()> VortexCore::cloneGenerator(CellRef source) {
 
 std::vector<CellRef> VortexCore::inputsOf(CellRef opcode) const {
   std::vector<CellRef> result;
-  CellRef cur       = arena_.linked(opcode, dims_.grab, DimVector::POS);
-  std::size_t limit = arena_.cellCount() + 1;
-  while (cur != noCell && limit-- > 0) {
+  const CellRef first = arena_.linked(opcode, dims_.grab, DimVector::POS);
+  arena_.walkRank(first, dims_.step, DimVector::POS, [&](CellRef cur) {
     auto val = arena_.asInt64(cur);
     if (val && arena_.contains(static_cast<CellRef>(*val))) {
       result.push_back(static_cast<CellRef>(*val));
     } else {
       result.push_back(arena_.cloneMaster(cur, dims_.clone));
     }
-    cur = arena_.linked(cur, dims_.step, DimVector::POS);
-  }
+  });
   return result;
 }
 
 std::vector<CellRef> VortexCore::outputsOf(CellRef opcode) const {
   std::vector<CellRef> result;
-  CellRef cur       = arena_.linked(opcode, dims_.grab, DimVector::NEG);
-  std::size_t limit = arena_.cellCount() + 1;
-  while (cur != noCell && limit-- > 0) {
+  const CellRef first = arena_.linked(opcode, dims_.grab, DimVector::NEG);
+  arena_.walkRank(first, dims_.step, DimVector::POS, [&](CellRef cur) {
     auto val = arena_.asInt64(cur);
     if (val && arena_.contains(static_cast<CellRef>(*val))) {
       result.push_back(static_cast<CellRef>(*val));
     } else {
       result.push_back(arena_.cloneMaster(cur, dims_.clone));
     }
-    cur = arena_.linked(cur, dims_.step, DimVector::POS);
-  }
+  });
   return result;
 }
 
@@ -316,16 +312,10 @@ void VortexCore::bindInput(CellRef opcode, CellRef operand) {
     arena_.link(opcode, dims_.grab, DimVector::POS, slot);
     return;
   }
-  CellRef cur       = first;
-  std::size_t limit = arena_.cellCount() + 1;
-  while (limit-- > 0) {
-    CellRef next = arena_.linked(cur, dims_.step, DimVector::POS);
-    if (next == noCell) {
-      arena_.link(cur, dims_.step, DimVector::POS, slot);
-      return;
-    }
-    cur = next;
-  }
+  CellRef tail = first;
+  arena_.walkRank(first, dims_.step, DimVector::POS,
+                  [&](CellRef cur) { tail = cur; });
+  arena_.link(tail, dims_.step, DimVector::POS, slot);
 }
 
 void VortexCore::bindOutput(CellRef opcode, CellRef target) {
@@ -340,16 +330,10 @@ void VortexCore::bindOutput(CellRef opcode, CellRef target) {
     arena_.link(opcode, dims_.grab, DimVector::NEG, slot);
     return;
   }
-  CellRef cur       = first;
-  std::size_t limit = arena_.cellCount() + 1;
-  while (limit-- > 0) {
-    CellRef next = arena_.linked(cur, dims_.step, DimVector::POS);
-    if (next == noCell) {
-      arena_.link(cur, dims_.step, DimVector::POS, slot);
-      return;
-    }
-    cur = next;
-  }
+  CellRef tail = first;
+  arena_.walkRank(first, dims_.step, DimVector::POS,
+                  [&](CellRef cur) { tail = cur; });
+  arena_.link(tail, dims_.step, DimVector::POS, slot);
 }
 
 bool VortexCore::hasPipeline(CellRef paramCell) const {

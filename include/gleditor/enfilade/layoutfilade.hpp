@@ -1,14 +1,16 @@
 /**
  * @file layoutfilade.hpp
- * @brief The True Layoutfilade: 2D Coordinate & Height B-Enfilade.
+ * @brief The Layoutfilade: a 2D Coordinate & Height B-Enfilade.
  *
- * Implements Frontier 2 of the Grand Enfilade architecture:
- * An in-memory, cache-conscious 2D coordinate enfilade providing O(log N)
- * virtualized scrolling, screen Y <-> byte coordinate mapping, rich-media box
- * layout, and localized incremental reflow without touching downstream nodes.
+ * An in-memory, cache-conscious 2D coordinate index over a sequence of text
+ * lines and rich-media boxes, providing O(log N) virtualized scrolling,
+ * screen Y <-> byte coordinate mapping, and localized incremental reflow
+ * without touching downstream entries. See
+ * design/enfilade/layoutfilade-virtualized-scrolling.md for the full monoid
+ * algebra and runtime mechanics this implements.
  */
-#ifndef XANADU_ENFILADE_LAYOUTFILADE_HPP
-#define XANADU_ENFILADE_LAYOUTFILADE_HPP
+#ifndef GLEDITOR_ENFILADE_LAYOUTFILADE_HPP
+#define GLEDITOR_ENFILADE_LAYOUTFILADE_HPP
 
 #include <algorithm>
 #include <array>
@@ -20,10 +22,10 @@
 #include <string_view>
 #include <vector>
 
-#include "common/xanadu/enfilade/crum_node.hpp"
+#include <gleditor/enfilade/crum_node.hpp>
 #include <gleditor/layout_box.hpp>
 
-namespace xanadu::enfilade {
+namespace gleditor::enfilade {
 
 struct LayoutWid;
 
@@ -248,8 +250,7 @@ public:
   bool updateEntry(std::size_t entryIndex, const LayoutEntry &newEntry);
 
   /**
-   * @brief Ruling R9 verification: ensures enfilade queries exactly match
-   * linear scans.
+   * @brief Verifies enfilade queries exactly match linear scans.
    */
   [[nodiscard]] bool
   verifyAgainstLinearScan(const std::vector<LayoutEntry> &groundTruth) const;
@@ -265,6 +266,6 @@ private:
   void buildTree();
 };
 
-} // namespace xanadu::enfilade
+} // namespace gleditor::enfilade
 
-#endif // XANADU_ENFILADE_LAYOUTFILADE_HPP
+#endif // GLEDITOR_ENFILADE_LAYOUTFILADE_HPP

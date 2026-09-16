@@ -205,6 +205,16 @@ public:
              std::span<const CellRef> customPredicates = {},
              std::size_t maxSolutions                  = 100);
 
+  // -- Module 9: sys:array ----------------------------------------------------
+  CellRef arrayIota(std::size_t n, DimRef dim = noCell,
+                    CellRef origin = noCell);
+  [[nodiscard]] std::vector<std::size_t>
+  arrayShape(CellRef origin, std::span<const DimRef> dims) const;
+  CellRef arrayTake(CellRef origin, DimRef dim, std::size_t count);
+  CellRef arrayDrop(CellRef origin, DimRef dim, std::size_t count);
+  CellRef arrayReverse(CellRef origin, DimRef dim);
+  [[nodiscard]] std::size_t arrayTally(CellRef origin, DimRef dim) const;
+
 private:
   CellRef getOrCreateModule(std::string_view modulePath);
   void exportSymbol(CellRef moduleCell, std::string_view symbolName,
@@ -218,6 +228,7 @@ private:
   void buildFunctionalModule(CellRef mod);
   void buildCollectionsModule(CellRef mod);
   void buildLogicModule(CellRef mod);
+  void buildArrayModule(CellRef mod);
 
   VortexCore &core_;
   VortexVM &vm_;

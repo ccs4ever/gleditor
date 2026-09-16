@@ -18,14 +18,20 @@
 
 #include <glm/ext/vector_float3.hpp>
 
+#include "common/xanadu/universal_link_endpoint.hpp"
+
 namespace xanadu {
 
 /**
  * @struct TensionBody
- * @brief Dynamic physical state of a document in 3D coordinate space.
+ * @brief Dynamic physical state of a document or cell in 3D coordinate space.
  */
 struct TensionBody {
-  std::size_t docIndex{0};
+  union {
+    std::size_t docIndex{0};
+    std::size_t targetId;
+  };
+  LinkTargetKind targetKind{LinkTargetKind::Document};
 
   glm::vec3 position{0.0F};
   glm::vec3 velocity{0.0F};
@@ -34,7 +40,7 @@ struct TensionBody {
   /// Preferred or origin resting coordinate (e.g. background plane Z = -40).
   glm::vec3 restingPosition{0.0F};
 
-  /// World-space dimensions of the document's page stack.
+  /// World-space dimensions of the document's page stack or cell quad.
   float width{50.0F};
   float height{70.0F};
 
@@ -50,22 +56,39 @@ struct TensionBody {
 
   /// Fixed or pinned in space (immune to simulation forces).
   bool pinned{false};
+
+  [[nodiscard]] constexpr bool isDocument() const noexcept {
+    return targetKind == LinkTargetKind::Document;
+  }
+  [[nodiscard]] constexpr bool isCell() const noexcept {
+    return targetKind == LinkTargetKind::ZigzagCell;
+  }
+  [[nodiscard]] constexpr zigzag::CellRef cellRef() const noexcept {
+    return isCell() ? static_cast<zigzag::CellRef>(targetId) : zigzag::noCell;
+  }
 };
 
 /**
  * @struct TensionConstraint
- * @brief Relational spring constraint connecting two documents (link or
- * transclusion).
+ * @brief Relational spring constraint connecting two bodies (document or cell).
  */
 struct TensionConstraint {
-  std::size_t fromDoc{0};
-  std::size_t toDoc{0};
+  union {
+    std::size_t fromDoc{0};
+    std::size_t fromTarget;
+  };
+  union {
+    std::size_t toDoc{0};
+    std::size_t toTarget;
+  };
+  LinkTargetKind fromKind{LinkTargetKind::Document};
+  LinkTargetKind toKind{LinkTargetKind::Document};
 
   /// World Y coordinate offsets of the connection anchors.
   float nearAnchorY{0.0F};
   float farAnchorY{0.0F};
 
-  /// Desired horizontal gap between documents.
+  /// Desired horizontal gap between documents or document and cell.
   float targetGap{8.0F};
 
   /// Strength multiplier based on link tier / prominence.
@@ -89,6 +112,21 @@ struct TensionParams {
   /// Collinear alignment spring constant pulling linked pages side-by-side
   /// (F_align).
   float kAlign{28.0F};
+
+  /// Collinear alignment spring constant pulling flying satelloids side-by-side
+  /// (E_satelloid).
+  float kSatelloidAlign{200.0F};
+
+  /// Tether restoration spring constant pulling satelloid back toward native
+  /// coordinate (E_tether).
+  float kTether{10.0F};
+
+  /// Physical mass for flying satelloids (lighter than documents for rapid
+  /// responsive gliding).
+  float satelloidMass{0.5F};
+
+  /// Desired gap between active text line and flying satelloid.
+  float satelloidGap{10.0F};
 
   /// Tier depth holding spring constant for background corpora (F_aest).
   float kTier{12.0F};
@@ -129,7 +167,7 @@ public:
   void setParams(const TensionParams &params) { params_ = params; }
   [[nodiscard]] const TensionParams &params() const noexcept { return params_; }
 
-  /// Add or update a physical document body.
+  /// Add or update a physical document or cell body.
   void setBody(TensionBody body);
 
   /// Retrieve all current bodies.
@@ -138,9 +176,24 @@ public:
   }
   [[nodiscard]] std::vector<TensionBody> &bodies() noexcept { return bodies_; }
 
-  /// Retrieve specific body by doc index.
-  [[nodiscard]] const TensionBody *findBody(std::size_t docIndex) const;
-  [[nodiscard]] TensionBody *findBody(std::size_t docIndex);
+  /// Retrieve specific body by target ID and kind (defaults to Document for
+  /// backward compatibility).
+  [[nodiscard]] const TensionBody *
+  findBody(std::size_t targetId,
+           LinkTargetKind kind = LinkTargetKind::Document) const;
+  [[nodiscard]] TensionBody *
+  findBody(std::size_t targetId,
+           LinkTargetKind kind = LinkTargetKind::Document);
+
+  /// Retrieve specific body by cell reference.
+  [[nodiscard]] const TensionBody *findCellBody(zigzag::CellRef cellRef) const {
+    return findBody(static_cast<std::size_t>(cellRef),
+                    LinkTargetKind::ZigzagCell);
+  }
+  [[nodiscard]] TensionBody *findCellBody(zigzag::CellRef cellRef) {
+    return findBody(static_cast<std::size_t>(cellRef),
+                    LinkTargetKind::ZigzagCell);
+  }
 
   /// Clear all bodies and constraints.
   void clear();

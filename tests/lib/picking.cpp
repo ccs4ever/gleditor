@@ -33,7 +33,8 @@ TEST(Picking, tagsCompareByBothFields) {
 TEST(Picking, resultCarriesTheQueriedPixel) {
   NiceMock<MockRenderDevice> device;
   ON_CALL(device, takePickingTag)
-      .WillByDefault(Return(std::optional{PickingResult{12, 34, {3, 27}}}));
+      .WillByDefault(Return(std::optional{
+          PickingResult{.x = 12, .y = 34, .tag = PickingTag{3, 27}}}));
 
   const auto result = device.takePickingTag();
   ASSERT_TRUE(result.has_value());

@@ -67,7 +67,7 @@ ______________________________________________________________________
                                    │   ▼
        +-------------------------------------------------------------+
        |                    Systems Realist                          |
-       |  - 120 FPS / 8.33ms Budget: Retained Sliced Canvas.         |
+       |  - Retained sliced-canvas render path.         |
        |  - 1 GPU Draw Call: Quads and glyphs pack into Doc::VBORow. |
        |  - Fitts's Law Target: Screen bezel infinite depth (Wx->inf)|
        |  - Ultra-Wide Display: Proximity docking & radial shortcut. |
@@ -286,7 +286,7 @@ place.
 
 ______________________________________________________________________
 
-## 7. Systems Realist Performance Invariants (120 FPS Budget)
+## 7. Systems Realist Performance Invariants (interactive Budget)
 
 | Invariant                                | Systems Risk                                                           | Realist Implementation Architecture                                                                                                                   |
 | :--------------------------------------- | :--------------------------------------------------------------------- | :---------------------------------------------------------------------------------------------------------------------------------------------------- |

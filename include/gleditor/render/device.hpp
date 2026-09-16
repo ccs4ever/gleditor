@@ -206,7 +206,9 @@ public:
    * beyond the number the device can have outstanding are dropped rather than
    * queued, since a stale pick is worth less than a live frame.
    */
-  virtual void requestPickingTag(int coordX, int coordY) = 0;
+  /// @return false if the device had no free asynchronous readback slot.
+  virtual bool requestPickingTag(int coordX, int coordY,
+                                 std::uint64_t requestId) = 0;
 
   /**
    * @brief Collect a picking result whose readback has completed.

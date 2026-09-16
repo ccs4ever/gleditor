@@ -225,12 +225,13 @@ void Manifold::applyStructure(const std::uint32_t opIndex,
     // The empty runs start at the arenas' tails, so this cell's first link and
     // first span are appends in place rather than relocations.
     slots.push_back(CellSlot{
-        .spanOffset = static_cast<std::uint32_t>(content.size()),
-        .spanCount  = 0,
-        .birthOp    = opIndex,
-        .lastOp     = opIndex,
-        .linkOffset = static_cast<std::uint32_t>(links.size()),
-        .linkCount  = 0,
+        .spanOffset  = static_cast<std::uint32_t>(content.size()),
+        .spanCount   = 0,
+        .formatFlags = 0,
+        .birthOp     = opIndex,
+        .lastOp      = opIndex,
+        .linkOffset  = static_cast<std::uint32_t>(links.size()),
+        .linkCount   = 0,
         .valueKind = static_cast<std::uint8_t>(xanadu::valueKindOf(node.flags)),
         .flags     = 0,
         .valueBits = node.value,
@@ -427,18 +428,14 @@ std::span<const DimRef> Manifold::dimensions() const {
   }
   dimsCache.clear();
   if (noCell != home_ && noCell != dimsDim_) {
-    // A rank that loops -- which zzstructure allows -- would otherwise be
-    // walked forever. Bounded by the cell count rather than by a visited set
-    // so that the walk allocates nothing beyond the answer.
-    CellRef cursor = linked(home_, dimsDim_, DimVector::POS);
-    for (std::size_t step = 0; noCell != cursor && step <= slots.size();
-         step++) {
-      dimsCache.push_back(cursor);
-      cursor = linked(cursor, dimsDim_, DimVector::POS);
+    const CellRef first = linked(home_, dimsDim_, DimVector::POS);
+    walkRank(first, dimsDim_, DimVector::POS, [&](const CellRef cursor) {
       if (cursor == home_) {
-        break;
+        return false;
       }
-    }
+      dimsCache.push_back(cursor);
+      return true;
+    });
   }
   dimsCacheStale = false;
   return dimsCache;
@@ -502,15 +499,18 @@ CellRef Manifold::cloneMaster(const CellRef ref,
   if (noDense == denseOf(ref)) {
     return noCell;
   }
-  CellRef cursor = ref;
-  for (std::size_t step = 0; step <= slots.size(); step++) {
-    const CellRef master = linked(cursor, cloneDim, DimVector::NEG);
-    if (noCell == master || master == cursor) {
-      return cursor;
+  CellRef result = ref;
+  bool looped    = false;
+  walkRank(ref, cloneDim, DimVector::NEG, [&](const CellRef cursor) {
+    const auto next = linked(cursor, cloneDim, DimVector::NEG);
+    if (next == ref) {
+      looped = true;
+      return false;
     }
-    cursor = master;
-  }
-  return cursor;
+    result = cursor;
+    return true;
+  });
+  return looped ? ref : result;
 }
 
 bool Manifold::equivalentTo(const Manifold &other) const {
@@ -552,6 +552,72 @@ bool Manifold::equivalentTo(const Manifold &other) const {
     }
   }
   return true;
+}
+
+std::vector<CellRef> Manifold::cellsWithinRadius(CellRef start,
+                                                 const int radius) const {
+  if (slots.empty()) {
+    return {};
+  }
+  if (radius < 0) {
+    std::vector<CellRef> allCells;
+    allCells.reserve(slots.size());
+    for (const auto &cell : slots) {
+      allCells.push_back(cell.birthOp);
+    }
+    return allCells;
+  }
+
+  CellRef root = start;
+  if (noCell == root || !contains(root)) {
+    root = (home_ != noCell && contains(home_)) ? home_ : slots.front().birthOp;
+  }
+
+  std::vector<CellRef> ordered;
+  std::unordered_set<CellRef> visited;
+  std::vector<std::pair<CellRef, int>> queue;
+  queue.reserve(64);
+
+  visited.insert(root);
+  queue.push_back({root, 0});
+  ordered.push_back(root);
+
+  std::size_t head = 0;
+  while (head < queue.size()) {
+    const auto [curr, dist] = queue[head++];
+    if (dist >= radius) {
+      continue;
+    }
+
+    for (const auto &dimLink : dimensionsOf(curr)) {
+      if (dimLink.pos != noCell && contains(dimLink.pos) &&
+          visited.insert(dimLink.pos).second) {
+        ordered.push_back(dimLink.pos);
+        queue.push_back({dimLink.pos, dist + 1});
+      }
+      if (dimLink.neg != noCell && contains(dimLink.neg) &&
+          visited.insert(dimLink.neg).second) {
+        ordered.push_back(dimLink.neg);
+        queue.push_back({dimLink.neg, dist + 1});
+      }
+    }
+  }
+
+  return ordered;
+}
+
+std::unordered_set<CellRef>
+Manifold::cellsWithinRadiusSet(CellRef start, const int radius) const {
+  const auto list = cellsWithinRadius(start, radius);
+  return std::unordered_set<CellRef>{list.begin(), list.end()};
+}
+
+void Manifold::setFormatFlags(const CellRef ref,
+                              const std::uint16_t flags) noexcept {
+  const auto dense = denseOf(ref);
+  if (dense < slots.size()) {
+    slots[dense].formatFlags = flags;
+  }
 }
 
 bool Manifold::verifyAgainstFullRebuild(const xanadu::Store &store) const {

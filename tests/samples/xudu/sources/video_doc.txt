@@ -1,6 +1,6 @@
 Video Document: Xanadu Space 3D Interactive Media Container
 
-[EMBEDDED_VIDEO_STREAM: tests/samples/sample_video.mp4]
+[EMBEDDED_VIDEO_STREAM: tests/samples/sample_video_seekable.mp4]
 Container: ISO Base Media File Format (MP4 / H.264)
 Resolution: 1920x1080 @ 60 FPS
 Duration: 00:08.00

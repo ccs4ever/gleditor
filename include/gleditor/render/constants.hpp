@@ -39,6 +39,40 @@ inline constexpr float kDefaultDocumentGap = 24.0F;
  */
 inline constexpr std::chrono::milliseconds kNoPresentYieldDuration{2};
 
+/**
+ * @brief Wall-clock ceiling on how much of one Doc::buildPendingPages() call
+ * (per document, per frame) is spent turning already-shaped pages into GPU
+ * resources, before the remainder is deferred to a later frame.
+ *
+ * A page's worth of glyph-atlas insertion and VBO construction is cheap in
+ * isolation, but the background shaping thread can accumulate an unbounded
+ * backlog of already-shaped pages whenever the render thread's own startup
+ * or a slow frame falls behind it (see design/kjv-load-blocking-regression.md)
+ * -- and with no cap, building that whole backlog in one call is what turns a
+ * multi-thousand-page document into a multi-second frame that never polls
+ * input or presents. Sized to leave the bulk of a 60Hz frame (~16.7ms) free
+ * for everything else the render loop does the same frame.
+ */
+inline constexpr std::chrono::milliseconds kPageBuildFrameBudget{8};
+
+/**
+ * @brief How much more of kPageBuildFrameBudget a Doc::buildPendingPages()
+ * call may spend when the camera is looking at a page index well past what
+ * has been built so far.
+ *
+ * kPageBuildFrameBudget keeps loading a huge document from ever blocking the
+ * main thread, but on its own it also means a document loads strictly
+ * top-to-bottom: scrolling ahead of that progress leaves the page the camera
+ * is looking at waiting behind every page before it, one small budget slice
+ * per frame. This multiplier lets a document catch up toward wherever the
+ * camera actually is once it is confirmed to be meaningfully ahead (see
+ * Doc::pageIndexFilade), without removing the per-call ceiling that
+ * kPageBuildFrameBudget exists for -- it is still one bounded, yielding call
+ * per frame, just a bigger one while there is somewhere specific to catch up
+ * to.
+ */
+inline constexpr int kPageBuildCatchUpMultiplier = 6;
+
 } // namespace render
 
 #endif // GLEDITOR_RENDER_CONSTANTS_HPP

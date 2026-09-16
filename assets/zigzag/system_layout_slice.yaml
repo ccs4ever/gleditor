@@ -121,7 +121,27 @@ zzstructure:
     - id: 17
       text: "bypassSegments: \"9\""
       role: setting
-      dimensions: { d.schema: 116 }
+      dimensions: { d.config: 18, d.schema: 116 }
+
+    - id: 18
+      text: "transclusionLoom: \"true\""
+      role: setting
+      dimensions: { d.config: 19, d.schema: 117 }
+
+    - id: 19
+      text: "loomBundlingEnabled: \"true\""
+      role: setting
+      dimensions: { d.config: 20, d.schema: 118 }
+
+    - id: 20
+      text: "loomAlpha: \"0.35\""
+      role: setting
+      dimensions: { d.config: 21, d.schema: 119 }
+
+    - id: 21
+      text: "loomHoverAlpha: \"1.0\""
+      role: setting
+      dimensions: { d.schema: 120 }
 
     - id: 100
       text: "Schema and Purpose\n\nPurpose:\nThe sovereign Layout system xanadoc defines multi-column page dimensions, notification toast anchors, pouch dock orientation, and optic ribbon rendering flags."
@@ -189,6 +209,22 @@ zzstructure:
 
     - id: 116
       text: "Schema: bypassSegments\nCurve subdivision segment count for bypass routing. Default is 9."
+      role: schema_field
+
+    - id: 117
+      text: "Schema: transclusionLoom\nBundle adjacent rank transclusions into continuous golden looms. Default is true."
+      role: schema_field
+
+    - id: 118
+      text: "Schema: loomBundlingEnabled\nGroup contiguous rank transclusion strands into unified laminar looms. Default is true."
+      role: schema_field
+
+    - id: 119
+      text: "Schema: loomAlpha\nSemi-transparent resting alpha for golden transclusion looms. Default is 0.35."
+      role: schema_field
+
+    - id: 120
+      text: "Schema: loomHoverAlpha\nActive or hovered alpha for brightened transclusion strands. Default is 1.0."
       role: schema_field
 
     - id: 200

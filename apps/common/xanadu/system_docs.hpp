@@ -97,9 +97,19 @@ systemDocKindFromUri(const std::string_view uri) noexcept {
 
 [[nodiscard]] inline std::string_view
 extractConfigSection(const std::string_view docText) noexcept {
-  const auto pos = docText.find("Schema and Purpose");
-  if (pos != std::string_view::npos) {
-    return docText.substr(0, pos);
+  const auto ffPos     = docText.find('\f');
+  const auto schemaPos = docText.find("Schema and Purpose");
+  auto end             = ffPos;
+  if (end == std::string_view::npos ||
+      (schemaPos != std::string_view::npos && schemaPos < end)) {
+    end = schemaPos;
+  }
+  if (end != std::string_view::npos) {
+    auto res = docText.substr(0, end);
+    if (!res.empty() && res.back() == '\f') {
+      res.remove_suffix(1);
+    }
+    return res;
   }
   return docText;
 }
@@ -205,6 +215,25 @@ struct BeamConfig {
   float bypassDepthPerDoc{-20.0F};
   float bypassDepthLimit{-120.0F};
   std::size_t bypassSegments{9};
+  bool loomBundlingEnabled{true};
+  float loomAlpha{0.35F};
+  float loomHoverAlpha{1.0F};
+};
+
+/// Presentation policy for Zigzag's content and topology projections. These
+/// are intentionally values, not renderer state: a system store edit creates
+/// one new snapshot which the visualizer applies between frames.
+struct ZigzagPresentationConfig {
+  float cellHorizontalPaddingPx{8.0F};
+  float cellVerticalPaddingPx{6.0F};
+  float cellBandGapPx{4.0F};
+  float contentMaxWidthPx{260.0F};
+  float topologyMaxWidthPx{140.0F};
+  float rankClearancePx{24.0F};
+  float hudHorizontalPaddingPx{16.0F};
+  float hudVerticalPaddingPx{8.0F};
+  float hudColumnGapPx{8.0F};
+  float connectionBeamWidthPx{4.0F};
 };
 
 struct LayoutConfig {
@@ -217,11 +246,14 @@ struct LayoutConfig {
   PouchDock pouchDock{PouchDock::Right};
   float documentSpacingX{70.0F};
   bool transclusionPrisms{true};
+  bool transclusionLoom{true};
   bool xanalinkRibbons{true};
   PhysicsConfig physics{};
   BeamConfig beams{};
+  ZigzagPresentationConfig zigzag{};
 
-  [[nodiscard]] static LayoutConfig fromYaml(std::string_view yamlText);
+  [[nodiscard]] static LayoutConfig fromSystemText(std::string_view text);
+  [[nodiscard]] static LayoutConfig fromStore(const Store &store);
   [[nodiscard]] static LayoutConfig
   fromSlice(const zigzag::ZzStructureDocument &slice);
 };
@@ -237,10 +269,25 @@ struct UIConfig {
   fromSlice(const zigzag::ZzStructureDocument &slice);
 };
 
-[[nodiscard]] KeymapConfig parseKeymapConfig(std::string_view yamlText);
-[[nodiscard]] SettingsConfig parseSettingsConfig(std::string_view yamlText);
-[[nodiscard]] LayoutConfig parseLayoutConfig(std::string_view yamlText);
-[[nodiscard]] UIConfig parseUIConfig(std::string_view yamlText);
+struct DropZoneSpec {
+  std::string id;
+  std::string label{"Notes"};
+  std::uint32_t auraColor{0x06B6D4FFU};
+  float heightWeight{1.0F};
+};
+
+struct PouchConfig {
+  std::vector<DropZoneSpec> zones;
+
+  [[nodiscard]] static PouchConfig fromStore(const Store &store);
+  [[nodiscard]] static PouchConfig fromYaml(std::string_view yamlText);
+};
+
+[[nodiscard]] KeymapConfig parseKeymapConfig(std::string_view text);
+[[nodiscard]] SettingsConfig parseSettingsConfig(std::string_view text);
+[[nodiscard]] LayoutConfig parseLayoutConfig(std::string_view text);
+[[nodiscard]] UIConfig parseUIConfig(std::string_view text);
+[[nodiscard]] PouchConfig parsePouchConfig(std::string_view text);
 
 [[nodiscard]] gleditor::RadialConfig
 parseRadialConfig(std::string_view yamlText);

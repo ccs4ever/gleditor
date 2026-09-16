@@ -9,6 +9,8 @@
 #include <chrono>
 #include <sstream>
 
+#include "common/xanadu/system_docs.hpp"
+
 namespace xanadu {
 
 DropZone::DropZone(DropZoneConfig config) : config_(std::move(config)) {}
@@ -65,6 +67,14 @@ PouchManager::PouchManager(std::shared_ptr<UserPermascroll> permascroll) {
     store_ = std::make_unique<Store>();
   }
   currentVersion_ = MicroversionId{};
+  initDefaultZones();
+}
+
+PouchManager::PouchManager(Store &systemStore) : systemStore_(&systemStore) {
+  if (systemStore_->opCount() == 0) {
+    initializeSystemStore(*systemStore_, SystemDocKind::Pouches);
+  }
+  currentVersion_ = systemStore_->latest();
   initDefaultZones();
 }
 
@@ -166,10 +176,10 @@ PouchItem PouchManager::dropSpan(const std::string_view zoneId,
   }
 
   // Record transclusion into the system store: zero raw byte copying!
-  currentVersion_ = store_->insertSpan(currentVersion_, 0, span);
+  currentVersion_ = store().insertSpan(currentVersion_, 0, span);
 
   // Annotate microversion with zone and preview
-  store_->setVersionAnnotation(
+  store().setVersionAnnotation(
       currentVersion_,
       VersionAnnotation{
           .alias       = std::string(zone->id()),
@@ -199,6 +209,59 @@ PouchItem PouchManager::dropSpan(const std::string_view zoneId,
   return item;
 }
 
+PouchItem PouchManager::dropCell(const std::string_view zoneId,
+                                 const PrimediaSpan &span,
+                                 std::string previewText,
+                                 const std::uint32_t cellRef,
+                                 const std::string_view rankCoord,
+                                 const std::uint32_t sliceIndex) {
+  DropZone *zone = zoneById(zoneId);
+  if (!zone) {
+    if (!zones_.empty()) {
+      zone = zones_.front().get();
+    } else {
+      initDefaultZones();
+      zone = zones_.front().get();
+    }
+  }
+
+  // Record transclusion into the system store
+  currentVersion_ = store().insertSpan(currentVersion_, 0, span);
+
+  store().setVersionAnnotation(
+      currentVersion_,
+      VersionAnnotation{
+          .alias       = std::string(zone->id()),
+          .description = previewText,
+          .tag         = "pouch-cell-drop",
+          .timestamp   = std::to_string(
+              std::chrono::duration_cast<std::chrono::seconds>(
+                  std::chrono::system_clock::now().time_since_epoch())
+                  .count()),
+      });
+
+  PouchItem item{
+      .itemId          = nextItemId_++,
+      .span            = span,
+      .previewText     = std::move(previewText),
+      .originVersion   = currentVersion_,
+      .originDocIndex  = 0,
+      .originCharStart = 0,
+      .originCharEnd   = static_cast<std::uint32_t>(span.length),
+      .timestampUtc    = static_cast<std::uint64_t>(
+          std::chrono::duration_cast<std::chrono::seconds>(
+              std::chrono::system_clock::now().time_since_epoch())
+              .count()),
+      .originKind       = PouchOriginKind::ZigzagCell,
+      .originCell       = cellRef,
+      .originSliceIndex = sliceIndex,
+      .originRankCoord  = std::string(rankCoord),
+  };
+
+  zone->addItem(item);
+  return item;
+}
+
 bool PouchManager::dismissItem(const std::uint64_t itemId) {
   for (const auto &zone : zones_) {
     const auto &items = zone->items();
@@ -210,7 +273,7 @@ bool PouchManager::dismissItem(const std::uint64_t itemId) {
       zone->removeItem(itemId);
       // Non-destructive limbo: record erase in backing store
       if (span.length > 0) {
-        currentVersion_ = store_->erase(currentVersion_, 0, span.length);
+        currentVersion_ = store().erase(currentVersion_, 0, span.length);
       }
       return true;
     }
@@ -229,7 +292,7 @@ void PouchManager::saveManifest() {
       ss << ";";
     }
   }
-  store_->setVersionAnnotation(
+  store().setVersionAnnotation(
       MicroversionId{},
       VersionAnnotation{
           .alias       = "pouch-manifest",
@@ -243,7 +306,24 @@ void PouchManager::saveManifest() {
 }
 
 void PouchManager::loadManifest() {
-  const auto ann = store_->versionAnnotation(MicroversionId{});
+  if (store().opCount() > 0) {
+    const auto pouchCfg = PouchConfig::fromStore(store());
+    if (!pouchCfg.zones.empty()) {
+      zones_.clear();
+      for (const auto &spec : pouchCfg.zones) {
+        addZone(DropZoneConfig{
+            .id              = spec.id,
+            .label           = spec.label,
+            .backgroundColor = glm::vec4(0.12F, 0.15F, 0.20F, 0.85F),
+            .auraColor       = spec.auraColor,
+            .heightWeight    = spec.heightWeight,
+        });
+      }
+      return;
+    }
+  }
+
+  const auto ann = store().versionAnnotation(MicroversionId{});
   if (!ann || ann->alias != "pouch-manifest" || ann->description.empty()) {
     return;
   }

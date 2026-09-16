@@ -37,9 +37,10 @@ constexpr std::string_view mediaDimension = "d.media";
 
 } // namespace
 
-ZzStructureDocument projectXuduToZigzag(const std::vector<XuduDocInput> &docs,
-                                        const std::vector<xanadu::Link> &links,
-                                        const XuduProjectorOptions &opts) {
+ZzStructureDocument projectXuduToZigzag(
+    const std::vector<XuduDocInput> &docs,
+    const std::vector<xanadu::Link> &links, const XuduProjectorOptions &opts,
+    std::unordered_map<CellID, XuduProjectionProvenance> *const provenance) {
   ZzStructureDocument result;
   result.meta.name = "Xudu Xanadoc Space";
   result.focus     = 1;
@@ -213,6 +214,13 @@ ZzStructureDocument projectXuduToZigzag(const std::vector<XuduDocInput> &docs,
           }
 
           result.cells[id] = std::move(cell);
+          if (nullptr != provenance) {
+            provenance->insert_or_assign(
+                id, XuduProjectionProvenance{.documentId = doc.documentId,
+                                             .version    = doc.version,
+                                             .span       = span,
+                                             .sourceCell = doc.sourceCell});
+          }
           docCellChains[docIdx].push_back(id);
           cellMappings.push_back(CellMapping{id, docIdx, span});
         }
@@ -248,6 +256,13 @@ ZzStructureDocument projectXuduToZigzag(const std::vector<XuduDocInput> &docs,
       }
 
       result.cells[id] = std::move(cell);
+      if (nullptr != provenance) {
+        provenance->insert_or_assign(
+            id, XuduProjectionProvenance{.documentId = doc.documentId,
+                                         .version    = doc.version,
+                                         .span       = span,
+                                         .sourceCell = doc.sourceCell});
+      }
       docCellChains[docIdx].push_back(id);
       cellMappings.push_back(CellMapping{id, docIdx, span});
     }
@@ -334,6 +349,13 @@ ZzStructureDocument
 projectStoreToZigzag(const xanadu::Store &store,
                      const std::vector<xanadu::MicroversionId> &versions,
                      const XuduProjectorOptions &opts) {
+  return projectStoreWithProvenance(store, versions, opts).document;
+}
+
+ProjectedXuduStore
+projectStoreWithProvenance(const xanadu::Store &store,
+                           const std::vector<xanadu::MicroversionId> &versions,
+                           const XuduProjectorOptions &opts) {
   std::vector<XuduDocInput> docInputs;
   for (const auto &verId : versions) {
     const auto ver = store.rebuild(verId);
@@ -362,10 +384,11 @@ projectStoreToZigzag(const xanadu::Store &store,
     }
 
     docInputs.push_back(XuduDocInput{
-        .name    = verId.str(),
-        .text    = std::move(assembledText),
-        .version = verId,
-        .spans   = std::move(spans),
+        .name       = verId.str(),
+        .documentId = store.documentId().str(),
+        .text       = std::move(assembledText),
+        .version    = verId,
+        .spans      = std::move(spans),
     });
   }
 
@@ -374,7 +397,10 @@ projectStoreToZigzag(const xanadu::Store &store,
     allLinks.push_back(link);
   }
 
-  return projectXuduToZigzag(docInputs, allLinks, opts);
+  ProjectedXuduStore result;
+  result.document = projectXuduToZigzag(docInputs, allLinks, opts,
+                                        &result.sourceByProjectedCell);
+  return result;
 }
 
 ZzRasterResult rasterizeZzStructure(const ZzStructureDocument &doc,

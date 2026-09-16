@@ -102,7 +102,8 @@ public:
   void drawGlyphs(const DrawUniforms &uniforms, BufferHandle vertices,
                   std::size_t vertexByteOffset,
                   std::uint32_t instanceCount) override;
-  void requestPickingTag(int coordX, int coordY) override;
+  bool requestPickingTag(int coordX, int coordY,
+                         std::uint64_t requestId) override;
   std::optional<PickingResult> takePickingTag() override;
   FrameImage captureColorTarget() override;
   void waitIdle() override;
@@ -137,6 +138,7 @@ private:
     GLsync fence{};
     int x{};
     int y{};
+    std::uint64_t requestId{};
     bool pending{};
   };
   /// A buffer object plus the metadata resizeBuffer() needs to copy it forward.

@@ -13,12 +13,17 @@
 
 #include <gleditor/render/types.hpp>
 
+#include "xudu/core/system_docs.hpp"
+
 namespace xudu {
 
 PouchDrawer::PouchDrawer(Session &session, RendererRef renderer,
                          std::string fontName, const DockSide side)
     : session_(session), renderer_(std::move(renderer)),
-      fontName_(std::move(fontName)), side_(side) {}
+      fontName_(std::move(fontName)), side_(side),
+      pouchManager_(session.systemStore(SystemDocKind::Pouches)) {
+  pouchManager_.loadManifest();
+}
 
 PouchDrawer::~PouchDrawer() = default;
 
@@ -124,6 +129,50 @@ bool PouchDrawer::handleGhostDrop(const PrimediaSpan &span,
   if (zone) {
     pouchManager_.dropSpan(zone->id(), span, preview, sourceVer, docIndex,
                            charStart, charEnd);
+    return true;
+  }
+
+  return false;
+}
+
+bool PouchDrawer::handleCellDrop(const PrimediaSpan &span,
+                                 const std::string &preview,
+                                 const std::uint32_t cellRef,
+                                 const std::string_view rankCoord,
+                                 const float screenX, const float screenY,
+                                 const std::uint32_t sliceIndex) {
+  PouchItem item{
+      .itemId           = 0,
+      .span             = span,
+      .previewText      = preview,
+      .originVersion    = MicroversionId{},
+      .originDocIndex   = 0,
+      .originCharStart  = 0,
+      .originCharEnd    = static_cast<std::uint32_t>(span.length),
+      .timestampUtc     = 0,
+      .originKind       = PouchOriginKind::ZigzagCell,
+      .originCell       = cellRef,
+      .originSliceIndex = sliceIndex,
+      .originRankCoord  = std::string(rankCoord),
+  };
+
+  // 1. Check Clasp Forge Homestead (Left) Slot
+  if (forgeWidget_.containsLeft(screenX, screenY)) {
+    forgeWidget_.dropLeft(std::move(item));
+    return true;
+  }
+
+  // 2. Check Clasp Forge Toward (Right) Slot
+  if (forgeWidget_.containsRight(screenX, screenY)) {
+    forgeWidget_.dropRight(std::move(item));
+    return true;
+  }
+
+  // 3. Check Partitioned Drop Zones
+  DropZone *zone = zoneAt(screenX, screenY);
+  if (zone) {
+    pouchManager_.dropCell(zone->id(), span, preview, cellRef, rankCoord,
+                           sliceIndex);
     return true;
   }
 

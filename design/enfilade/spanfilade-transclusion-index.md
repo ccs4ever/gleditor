@@ -170,5 +170,5 @@ decisive improvements over legacy linear scans:
 
 As document size grows from (10^2) to (10^5) pieces, legacy scans scale at (O(N)), requiring full
 linear sweeps for every cursor step and transclusion beam layout. The Spanfilade scales at
-(O(\\log\_{16} N + K)), ensuring fluid 120 FPS rendering even in heavily edited,
+(O(\\log\_{16} N + K)), ensuring fluid interactive rendering rendering even in heavily edited,
 multi-thousand-piece xanadocs.
