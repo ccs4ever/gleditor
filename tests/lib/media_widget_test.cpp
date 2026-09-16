@@ -101,29 +101,27 @@ TEST_F(MediaWidgetTest, DocumentAttachmentAndPositioning) {
 }
 
 TEST_F(MediaWidgetTest, PickPlayPauseStopButtons) {
-  constexpr std::uint32_t tagBase = 0x8000U;
-
   render::PickingResult pick;
   pick.tag.kind         = render::tagKindOverlay;
-  pick.tag.clusterIndex = tagBase + MediaWidget::tagPlay;
+  pick.tag.clusterIndex = widget->tagBase() + MediaWidget::tagPlay;
 
   // 1. Pick Play Button
   EXPECT_TRUE(widget->picked(pick, *state));
   EXPECT_EQ(player->state(), PlaybackState::Playing);
 
   // 2. Pick Pause Button
-  pick.tag.clusterIndex = tagBase + MediaWidget::tagPause;
+  pick.tag.clusterIndex = widget->tagBase() + MediaWidget::tagPause;
   EXPECT_TRUE(widget->picked(pick, *state));
   EXPECT_EQ(player->state(), PlaybackState::Paused);
 
   // 3. Pick Stop Button
-  pick.tag.clusterIndex = tagBase + MediaWidget::tagStop;
+  pick.tag.clusterIndex = widget->tagBase() + MediaWidget::tagStop;
   EXPECT_TRUE(widget->picked(pick, *state));
   EXPECT_EQ(player->state(), PlaybackState::Stopped);
 
   // 4. Pick Volume Button
   EXPECT_FALSE(player->isMuted());
-  pick.tag.clusterIndex = tagBase + MediaWidget::tagVolume;
+  pick.tag.clusterIndex = widget->tagBase() + MediaWidget::tagVolume;
   EXPECT_TRUE(widget->picked(pick, *state));
   EXPECT_TRUE(player->isMuted());
 
@@ -133,18 +131,16 @@ TEST_F(MediaWidgetTest, PickPlayPauseStopButtons) {
 }
 
 TEST_F(MediaWidgetTest, PickSeekBarCalculatesFractionAndSeeks) {
-  constexpr std::uint32_t tagBase = 0x8000U;
-
   render::PickingResult pick;
   pick.tag.kind = render::tagKindOverlay;
   // Tag corresponding to 50% seek: tagSeekBase + 500
-  pick.tag.clusterIndex = tagBase + MediaWidget::tagSeekBase + 500U;
+  pick.tag.clusterIndex = widget->tagBase() + MediaWidget::tagSeekBase + 500U;
 
   EXPECT_TRUE(widget->picked(pick, *state));
   EXPECT_FLOAT_EQ(player->progressFraction(), 0.5F);
 
   // Tag corresponding to 25% seek: tagSeekBase + 250
-  pick.tag.clusterIndex = tagBase + MediaWidget::tagSeekBase + 250U;
+  pick.tag.clusterIndex = widget->tagBase() + MediaWidget::tagSeekBase + 250U;
   EXPECT_TRUE(widget->picked(pick, *state));
   EXPECT_FLOAT_EQ(player->progressFraction(), 0.25F);
 }
@@ -153,7 +149,7 @@ TEST_F(MediaWidgetTest, IgnoresUnrelatedPicks) {
   render::PickingResult pick;
   // Non-overlay
   pick.tag.kind         = render::tagKindGlyph;
-  pick.tag.clusterIndex = 0x8000U + MediaWidget::tagPlay;
+  pick.tag.clusterIndex = widget->tagBase() + 0x800U;
   EXPECT_FALSE(widget->picked(pick, *state));
 
   // Unrelated overlay tag
@@ -168,7 +164,7 @@ TEST_F(MediaWidgetTest, AccessibilityTreeAndActions) {
   widget->setTitle("Audio Sample");
   widget->describe(builder);
 
-  constexpr std::uint64_t rootId = 0x8000U;
+  const auto rootId = static_cast<std::uint64_t>(widget->tagBase());
   // Perform Action: Click on Play
   EXPECT_TRUE(widget->performAction(rootId + MediaWidget::tagPlay,
                                     gleditor::a11y::Action::Click, ""));
@@ -183,6 +179,33 @@ TEST_F(MediaWidgetTest, AccessibilityTreeAndActions) {
   EXPECT_TRUE(widget->performAction(rootId + MediaWidget::tagStop,
                                     gleditor::a11y::Action::Click, ""));
   EXPECT_EQ(player->state(), PlaybackState::Stopped);
+}
+
+TEST_F(MediaWidgetTest, EachCardOwnsItsPickingAndAccessibilityRange) {
+  auto secondPlayer = std::make_shared<MediaPlayer>(true);
+  auto stream       = std::make_shared<MemoryMediaStream>("SECOND_AUDIO_DATA");
+  ASSERT_TRUE(secondPlayer->load(MediaResource::fromStream(stream, "Second")));
+  MediaWidget second("Monospace 10", secondPlayer);
+
+  EXPECT_NE(widget->widgetId(), second.widgetId());
+  EXPECT_NE(widget->tagBase(), second.tagBase());
+  EXPECT_EQ(widget->tagBase() & 0xFFFU, 0U);
+  EXPECT_EQ(second.tagBase() & 0xFFFU, 0U);
+
+  render::PickingResult pick;
+  pick.tag.kind         = render::tagKindOverlay;
+  pick.tag.clusterIndex = second.tagBase() + MediaWidget::tagPlay;
+
+  EXPECT_FALSE(widget->picked(pick, *state));
+  EXPECT_TRUE(second.picked(pick, *state));
+  EXPECT_EQ(player->state(), PlaybackState::Stopped);
+  EXPECT_EQ(secondPlayer->state(), PlaybackState::Playing);
+
+  gleditor::a11y::Tree tree;
+  gleditor::a11y::Builder builder(tree, 1);
+  widget->describe(builder);
+  second.describe(builder);
+  EXPECT_NE(widget->tagBase(), second.tagBase());
 }
 
 TEST_F(MediaWidgetTest, AudioWidgetAliasCompatibility) {

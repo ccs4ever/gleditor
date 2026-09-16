@@ -25,6 +25,7 @@ constexpr auto keyLocalSegments = "local";
 constexpr auto keyLinks         = "links";
 constexpr auto keyCurrent       = "current";
 constexpr auto keyVersions      = "versions";
+constexpr auto keyDocumentId    = "document";
 
 std::string rawBytes(const std::array<std::uint8_t, 32> &bytes) {
   return std::string{reinterpret_cast<const char *>(bytes.data()),
@@ -299,6 +300,10 @@ void writeStoreTables(const std::filesystem::path &path,
       bencode::Value::dict(
           {
               {keyCurrent, bencode::Value::list(std::move(current))},
+              {keyDocumentId, bencode::Value::string(std::string{
+                                  reinterpret_cast<const char *>(
+                                      tables.documentId.bytes().data()),
+                                  tables.documentId.bytes().size()})},
               {keyLinks, bencode::Value::list(std::move(links))},
               {keyLocalSegments, bencode::Value::list(std::move(local))},
               {keyScrolls, bencode::Value::list(std::move(scrolls))},
@@ -342,7 +347,7 @@ StoreTables readStoreTables(const std::filesystem::path &path) {
   std::uint32_t version = 0;
   std::memcpy(&version, bytes.data() + storeTablesSignature.size(),
               sizeof(version));
-  if (version != storeTablesFormatVersion) {
+  if (version != 2 && version != storeTablesFormatVersion) {
     throw StoreTablesUnreadable(
         path.string() + " is store table format version " +
         std::to_string(version) + " and this build reads version " +
@@ -363,6 +368,13 @@ StoreTables readStoreTables(const std::filesystem::path &path) {
   }
 
   StoreTables tables;
+  if (const auto *document = decoded.find(keyDocumentId); nullptr != document) {
+    if (!document->isString() ||
+        !DocumentId::fromBytes(document->asString(), tables.documentId)) {
+      throw StoreTablesUnreadable(path.string() +
+                                  " has a document identity it cannot read");
+    }
+  }
   if (const auto *scrolls = decoded.find(keyScrolls);
       nullptr != scrolls && scrolls->isList()) {
     for (const auto &item : scrolls->asList()) {

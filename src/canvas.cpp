@@ -220,10 +220,11 @@ TextMetrics Canvas::measureText(const std::string_view utf8) const {
           static_cast<float>(shaping.textHeightPx)};
 }
 
-TextMetrics Canvas::addText(RenderState &state, const float left,
-                            const float top, const std::string_view utf8,
-                            const std::uint32_t colour,
-                            const std::uint32_t background) {
+TextMetrics
+Canvas::addText(RenderState &state, const float left, const float top,
+                const std::string_view utf8, const std::uint32_t colour,
+                const std::uint32_t background,
+                const std::span<const DecoratedRange> decoratedRanges) {
   auto font = text::FontManager::instance().getFont(fontName);
   if (!font) {
     return {};
@@ -235,6 +236,8 @@ TextMetrics Canvas::addText(RenderState &state, const float left,
       .maxHeightPx     = 0.0F,
       .singleParagraph = true,
       .ellipsize       = textWidthLimit > 0,
+      .decoratedRanges = std::vector<DecoratedRange>(decoratedRanges.begin(),
+                                                     decoratedRanges.end()),
   };
   auto shaping = text::TextLayout::layoutSingleLine(utf8, font, opts);
   if (shaping.textWidthPx <= 0 || shaping.textHeightPx <= 0) {
@@ -242,7 +245,8 @@ TextMetrics Canvas::addText(RenderState &state, const float left,
   }
 
   for (const auto &g : shaping.glyphs) {
-    const auto glyph  = state.glyphCache.put(g.chr, font);
+    const auto glyph = state.glyphCache.put(
+        g.chr, font, gleditor::decorationSetFor(g.decorations));
     const auto width  = static_cast<float>(static_cast<int>(glyph.dims.width));
     const auto height = static_cast<float>(static_cast<int>(glyph.dims.height));
     if (0.0F == width || 0.0F == height) {

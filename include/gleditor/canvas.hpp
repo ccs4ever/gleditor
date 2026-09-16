@@ -24,6 +24,7 @@
 
 #include <cstdint>
 #include <memory>
+#include <span>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -31,6 +32,7 @@
 #include <glm/ext/matrix_float4x4.hpp>
 
 #include <gleditor/buffer_pool.hpp>
+#include <gleditor/glyphcache/types.hpp>
 #include <gleditor/render/types.hpp>
 
 struct RenderState;
@@ -155,12 +157,15 @@ public:
    * @param background Colour behind the glyphs. Should match whatever the text
    *        is drawn over: the fragment stage blends the two by atlas coverage,
    *        so a mismatched background shows as a halo around every glyph.
+   * @param decoratedRanges Text formatting ranges (bold, italic, etc.) applied
+   *        to the text.
    * @return The size of the block, so a caller can lay the next thing out
    *         against it.
    */
   TextMetrics addText(RenderState &state, float left, float top,
                       std::string_view utf8, std::uint32_t colour,
-                      std::uint32_t background);
+                      std::uint32_t background,
+                      std::span<const DecoratedRange> decoratedRanges = {});
 
   /// Size @p utf8 would take, without drawing it or touching the glyph cache.
   [[nodiscard]] TextMetrics measureText(std::string_view utf8) const;

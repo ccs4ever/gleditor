@@ -110,6 +110,12 @@ TEST(SystemDocsTest, MetadataAndUriRoundTrips) {
   const auto uiCfg = xudu::parseUIConfig(uiDefault);
   EXPECT_TRUE(uiCfg.tabBarVisible);
 
+  const auto pouchesDefault =
+      xudu::defaultSystemDocContent(SystemDocKind::Pouches);
+  EXPECT_FALSE(pouchesDefault.empty());
+  const auto pouchesCfg = xudu::parsePouchConfig(pouchesDefault);
+  EXPECT_EQ(pouchesCfg.zones.size(), 4U);
+
   // Check directory helper returns valid path
   const auto keymapDir = xudu::systemDocDirectory(SystemDocKind::Keymap);
   EXPECT_EQ(keymapDir.filename(), "keymap");
@@ -286,6 +292,26 @@ TEST(SystemDocsTest, ParseFlatPhysicsAndBeamConfigFallback) {
   EXPECT_EQ(cfg.beams.bypassSegments, 20U);
 }
 
+TEST(SystemDocsTest, ParseLoomConfig) {
+  const std::string yaml = "transclusionLoom: false\n"
+                           "beams:\n"
+                           "  loomBundlingEnabled: false\n"
+                           "  loomAlpha: 0.45\n"
+                           "  loomHoverAlpha: 0.95\n";
+  const auto cfg         = xudu::parseLayoutConfig(yaml);
+  EXPECT_FALSE(cfg.transclusionLoom);
+  EXPECT_FALSE(cfg.beams.loomBundlingEnabled);
+  EXPECT_FLOAT_EQ(cfg.beams.loomAlpha, 0.45F);
+  EXPECT_FLOAT_EQ(cfg.beams.loomHoverAlpha, 0.95F);
+
+  // Defaults test
+  const auto def = xudu::parseLayoutConfig("");
+  EXPECT_TRUE(def.transclusionLoom);
+  EXPECT_TRUE(def.beams.loomBundlingEnabled);
+  EXPECT_FLOAT_EQ(def.beams.loomAlpha, 0.35F);
+  EXPECT_FLOAT_EQ(def.beams.loomHoverAlpha, 1.0F);
+}
+
 TEST(SystemDocsTest, ParseUIConfig) {
   const std::string yaml = "tabBarVisible: false\n"
                            "statusBarVisible: true\n"
@@ -308,6 +334,31 @@ TEST(SystemDocsTest, ParseUIConfig) {
   EXPECT_FALSE(def.hypertimeMapVisible);
   EXPECT_FLOAT_EQ(def.radialMenu.radius, 130.0F);
   EXPECT_FLOAT_EQ(def.radialMenu.innerRadius, 42.0F);
+}
+
+TEST(SystemDocsTest, ParsePouchConfig) {
+  const std::string yaml = "zones:\n"
+                           "  - id: custom_left\n"
+                           "    label: Custom Left\n"
+                           "    aura: \"#123456\"\n"
+                           "    weight: 1.5\n"
+                           "  - id: custom_right\n"
+                           "    label: Custom Right\n"
+                           "    auraColor: \"#abcdef88\"\n"
+                           "    heightWeight: 2.0\n";
+
+  const auto cfg = xudu::parsePouchConfig(yaml);
+  ASSERT_EQ(cfg.zones.size(), 2U);
+  EXPECT_EQ(cfg.zones[0].id, "custom_left");
+  EXPECT_EQ(cfg.zones[0].label, "Custom Left");
+  EXPECT_FLOAT_EQ(cfg.zones[0].heightWeight, 1.5F);
+  EXPECT_EQ(cfg.zones[1].id, "custom_right");
+  EXPECT_EQ(cfg.zones[1].label, "Custom Right");
+  EXPECT_FLOAT_EQ(cfg.zones[1].heightWeight, 2.0F);
+
+  // Fallback defaults
+  const auto def = xudu::parsePouchConfig("");
+  EXPECT_EQ(def.zones.size(), 4U);
 }
 
 TEST(SystemDocsTest, SchemaAndNotesNonEmptyAndNoMarkdown) {
@@ -378,6 +429,37 @@ TEST(SystemDocsTest, InitializeSystemStoreStructureAndFormatLinks) {
     EXPECT_EQ(configPart.find("Notes\n\n"), std::string_view::npos);
     EXPECT_EQ(configPart, xudu::defaultSystemDocContent(kind));
   }
+}
+
+TEST(SystemDocsTest, LayoutRuntimeSnapshotReadsVarsAndScalarValues) {
+  Store store;
+  store.setSystem(true);
+  xudu::initializeSystemStore(store, SystemDocKind::Layout);
+
+  const auto manifold = store.rebuildManifold(store.primaryCurrentVersion());
+  const auto vars = manifold.dimensionNamed("d.vars", store);
+  const auto values = manifold.dimensionNamed("d.values", store);
+  ASSERT_NE(vars, 0U);
+  ASSERT_NE(values, 0U);
+
+  const auto config = LayoutConfig::fromStore(store);
+  EXPECT_FLOAT_EQ(config.zigzag.cellHorizontalPaddingPx, 8.0F);
+  EXPECT_FLOAT_EQ(config.zigzag.contentMaxWidthPx, 260.0F);
+  EXPECT_FLOAT_EQ(config.zigzag.connectionBeamWidthPx, 4.0F);
+
+  auto variable = manifold.linked(manifold.home(), vars);
+  while (variable != 0U && manifold.textOf(variable, store) !=
+                                "zigzag.connectionBeamWidthPx") {
+    variable = manifold.linked(variable, vars);
+  }
+  ASSERT_NE(variable, 0U);
+  const auto value = manifold.linked(variable, values);
+  const auto revised = store.setScalar(store.primaryCurrentVersion(), value,
+                                       9.5, &manifold);
+  store.repointCurrentVersion(revised);
+  EXPECT_FLOAT_EQ(LayoutConfig::fromStore(store)
+                      .zigzag.connectionBeamWidthPx,
+                  9.5F);
 }
 
 TEST(SystemDocsTest, ParseFullInitializedSystemDocs) {

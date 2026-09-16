@@ -10,13 +10,13 @@
 #include <iostream>
 #include <vector>
 
-#include "common/xanadu/enfilade/layoutfilade.hpp"
+#include <gleditor/enfilade/layoutfilade.hpp>
 
 namespace {
 
-using xanadu::enfilade::LayoutEntry;
-using xanadu::enfilade::LayoutEntryKind;
-using xanadu::enfilade::Layoutfilade;
+using gleditor::enfilade::LayoutEntry;
+using gleditor::enfilade::LayoutEntryKind;
+using gleditor::enfilade::Layoutfilade;
 
 TEST(LayoutfiladeBenchmarkTest, ScaledCoordinateDescentSpeedup) {
   constexpr std::size_t kNumLines = 10000;

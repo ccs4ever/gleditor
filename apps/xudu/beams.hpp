@@ -50,6 +50,7 @@
 namespace xudu {
 
 class TenuousTetherOverlay;
+class SatelloidOverlay;
 
 /**
  * @class LinkBeams
@@ -94,11 +95,25 @@ public:
       const Doc &doc, std::size_t storeIndex, const MicroversionId &version,
       std::uint32_t docOffset)>;
 
+  using CellAnchorResolver =
+      std::function<std::optional<CellAnchor>(zigzag::CellRef cell)>;
+
   LinkBeams(Session &aSession, RendererRef aRenderer);
   ~LinkBeams() override;
 
   void setMediaRectResolver(MediaRectResolver resolver) {
     mediaRectResolver = std::move(resolver);
+  }
+
+  void setCellAnchorResolver(CellAnchorResolver resolver) {
+    cellAnchorResolver = std::move(resolver);
+  }
+
+  void setManifoldViews(std::vector<const zigzag::Manifold *> views,
+                        std::vector<zigzag::CellRef> foci = {}) {
+    manifoldViews_ = std::move(views);
+    manifoldFoci_  = std::move(foci);
+    strandsRebuilt = true;
   }
 
   void deviceReady(render::RenderDevice &device,
@@ -154,9 +169,23 @@ public:
   [[nodiscard]] std::size_t transclusionStrandCount() const {
     return transclusionStrands.size();
   }
+  [[nodiscard]] const std::vector<TransclusionLoom> &looms() const noexcept {
+    return looms_;
+  }
+  void setHoveredTransclusion(std::optional<std::size_t> idx) noexcept {
+    hoveredTransclusion_ = idx;
+  }
+  [[nodiscard]] std::optional<std::size_t>
+  hoveredTransclusion() const noexcept {
+    return hoveredTransclusion_;
+  }
+  void sworphCameraTo(const glm::vec3 &targetPos, ch::Timeline &timeline);
 
   void setTetherOverlay(TenuousTetherOverlay *overlay) noexcept {
     tetherOverlay_ = overlay;
+  }
+  void setSatelloidOverlay(SatelloidOverlay *overlay) noexcept {
+    satelloidOverlay_ = overlay;
   }
   void setBeamConfig(const xanadu::BeamConfig &cfg) noexcept {
     beamConfig_ = cfg;
@@ -199,6 +228,8 @@ private:
     std::optional<Doc::Anchor> toAnchor;
     std::optional<Doc::Anchor> fromEndAnchor;
     std::optional<Doc::Anchor> toEndAnchor;
+    std::optional<CellAnchor> fromCellAnchor;
+    std::optional<CellAnchor> toCellAnchor;
     /// Whether the far document has already been brought alongside for this
     /// link. Once per link per generation: a document the reader has since
     /// moved should stay moved.
@@ -217,6 +248,8 @@ private:
     std::optional<Doc::Anchor> toAnchor;
     std::optional<Doc::Anchor> fromEndAnchor;
     std::optional<Doc::Anchor> toEndAnchor;
+    std::optional<CellAnchor> fromCellAnchor;
+    std::optional<CellAnchor> toCellAnchor;
     bool aligned{};
   };
 
@@ -246,6 +279,9 @@ private:
                  const std::optional<Doc::Anchor> &toEndAnchor,
                  std::optional<std::uint64_t> linkId, RenderState &state,
                  ch::Timeline &timeline);
+  /// Bring a flying Cell Satelloid into collinear reading alignment beside the
+  /// active document text line.
+  void alignCellSatelloid(const Strand &strand, RenderState &state);
   /// Whether any half-link is still waiting to be looked for; see busy().
   [[nodiscard]] bool danglingOutstanding(const RenderState &state) const;
   /**
@@ -309,6 +345,9 @@ private:
   edgeOf(const Doc &doc, const std::optional<Doc::Anchor> &startAnchor,
          const std::optional<Doc::Anchor> &endAnchor, bool towardsRight);
 
+  [[nodiscard]] static std::optional<Edge> edgeOf(const CellAnchor &anchor,
+                                                  bool towardsRight);
+
   /**
    * @brief Draw the connection between two link ends as a band of strands.
    *
@@ -356,6 +395,9 @@ private:
   RendererRef renderer;
   Opener opener;
   MediaRectResolver mediaRectResolver;
+  CellAnchorResolver cellAnchorResolver;
+  std::vector<const zigzag::Manifold *> manifoldViews_;
+  std::vector<zigzag::CellRef> manifoldFoci_;
   std::unique_ptr<gleditor::Beams> beams;
   std::vector<Strand> strands;
   std::vector<Dangling> dangling;
@@ -410,8 +452,11 @@ private:
 
   TensionLayoutEngine tensionEngine_;
   TenuousTetherOverlay *tetherOverlay_{nullptr};
+  SatelloidOverlay *satelloidOverlay_{nullptr};
   bool physicsEnabled_{false};
   xanadu::BeamConfig beamConfig_{};
+  std::vector<TransclusionLoom> looms_;
+  std::optional<std::size_t> hoveredTransclusion_;
 };
 
 } // namespace xudu

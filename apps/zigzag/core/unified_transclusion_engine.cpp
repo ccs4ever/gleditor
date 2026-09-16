@@ -18,6 +18,20 @@ UnifiedTransclusionEngine::UnifiedTransclusionEngine(xanadu::Store &store)
   syncIncremental();
 }
 
+UnifiedTransclusionEngine::UnifiedTransclusionEngine(
+    xanadu::Store &store, const xanadu::MicroversionId &version)
+    : store_(store) {
+  syncTo(version);
+}
+
+void UnifiedTransclusionEngine::syncTo(const xanadu::MicroversionId &version) {
+  manifold_          = store_.rebuildManifold(version);
+  head_              = version;
+  lastSyncedOpIndex_ = store_.segmentedOps().indexOf(version);
+  clearShapingCache();
+  updateFormatFlags();
+}
+
 void UnifiedTransclusionEngine::syncIncremental() {
   // A fold, not a projection. buildCellFromOp() used to synthesise a cell from
   // *every* operation -- an Insert included -- and then hand-build d.ops_time,
@@ -44,14 +58,14 @@ void UnifiedTransclusionEngine::syncIncremental() {
   if (total > 0) {
     head_ = ops.idOf(total);
   }
+  updateFormatFlags();
 }
 
 void UnifiedTransclusionEngine::ensureSliceBegun() {
   if (zigzag::noCell != store_.homeCell()) {
     return;
   }
-  head_ = store_.sliceGenesis(head_);
-  syncIncremental();
+  syncTo(store_.sliceGenesis(head_));
 }
 
 DimRef UnifiedTransclusionEngine::dimensionFor(const std::string_view name) {
@@ -70,8 +84,7 @@ CellRef UnifiedTransclusionEngine::addCell(const std::string_view text) {
   // Minting, where this used to be filing: a cell cannot exist without the
   // operation that names it, so adding one is recording one.
   ensureSliceBegun();
-  head_ = store_.makeCell(head_, text);
-  syncIncremental();
+  syncTo(store_.makeCell(head_, text));
   return store_.cellRefOf(head_);
 }
 
@@ -81,9 +94,7 @@ void UnifiedTransclusionEngine::updateCellText(const CellRef cell,
     return;
   }
   ensureSliceBegun();
-  head_ = store_.setCellText(head_, cell, text, &manifold_);
-  syncIncremental();
-  clearShapingCache();
+  syncTo(store_.setCellText(head_, cell, text, &manifold_));
 }
 
 void UnifiedTransclusionEngine::setCold(const CellRef cell, ColdCell cold) {
@@ -105,8 +116,7 @@ void UnifiedTransclusionEngine::linkCells(const CellRef a, const CellRef b,
   // One operation, not two writes. The reciprocal edge is what the fold means
   // by a link rather than a second thing to remember to set -- which is what
   // the four-line pos-then-neg dance this replaces kept getting right by hand.
-  head_ = store_.setLink(head_, a, dim, dir, b, &manifold_);
-  syncIncremental();
+  syncTo(store_.setLink(head_, a, dim, dir, b, &manifold_));
 }
 
 void UnifiedTransclusionEngine::linkCells(const CellRef a, const CellRef b,
@@ -491,17 +501,31 @@ UnifiedTransclusionEngine::stageVisibleCells(
   }
 
   // Layout and stage glyph quads for all visited cells
+  const xanadu::FormatResolver formatResolver(store_);
+
   for (const CellID cid : visited) {
     const std::string text = resolveCellText(cid);
     if (text.empty()) {
       continue;
     }
 
-    const gleditor::text::LayoutOptions opts{.maxWidthPx      = 380.0F,
-                                             .maxHeightPx     = 240.0F,
-                                             .singleParagraph = false,
-                                             .ellipsize       = true,
-                                             .decoratedRanges = {}};
+    const auto *cell = findCell(static_cast<CellRef>(cid));
+
+    gleditor::text::LayoutOptions opts{.maxWidthPx      = 380.0F,
+                                       .maxHeightPx     = 240.0F,
+                                       .singleParagraph = false,
+                                       .ellipsize       = true,
+                                       .decoratedRanges = {}};
+
+    if (__builtin_expect(cell && cell->formatFlags == 0, 1)) {
+      // Fast path: standard font, no formatting lookups, zero allocations
+    } else {
+      // Slow path: resolve exact DecoratedRange via FormatResolver
+      auto formatRes =
+          formatResolver.resolveCell(manifold_, static_cast<CellRef>(cid));
+      opts.decoratedRanges = std::move(formatRes.decoratedRanges);
+      opts.blockStyles     = std::move(formatRes.blockStyles);
+    }
 
     // Shaping the same unchanged text again every frame is what a staging
     // pass used to spend nearly all of its time on. The glyph cache lookups
@@ -524,7 +548,8 @@ UnifiedTransclusionEngine::stageVisibleCells(
     }
 
     for (const auto &glyph : shaping.glyphs) {
-      const auto sizes = glyphCache.put(glyph.chr, font);
+      const auto sizes = glyphCache.put(
+          glyph.chr, font, gleditor::decorationSetFor(glyph.decorations));
       Doc::VBORow row{};
       row.pos = {glyph.clusterLeft, glyph.clusterTop};
       row.foreground =
@@ -576,6 +601,11 @@ UnifiedTransclusionEngine::shapingCacheStats() const noexcept {
 
 void UnifiedTransclusionEngine::clearShapingCache() noexcept {
   shapingCache_.clear();
+}
+
+void UnifiedTransclusionEngine::updateFormatFlags() {
+  const xanadu::FormatResolver resolver(store_);
+  resolver.updateManifoldFormatFlags(manifold_);
 }
 
 } // namespace zigzag

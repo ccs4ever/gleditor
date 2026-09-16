@@ -91,14 +91,12 @@ Arrayfilade Arrayfilade::fromRank(const zigzag::Manifold &m,
                                   const zigzag::DimRef dim,
                                   const xanadu::SpanReader *reader) {
   std::vector<ArrayCellEntry> entries{};
-  zigzag::CellRef cur = head;
-  std::int64_t idx    = 0;
+  std::int64_t idx = 0;
 
-  for (std::size_t steps = 0; steps < m.cellCount() && zigzag::noCell != cur;
-       ++steps) {
+  m.walkRank(head, dim, [&](const zigzag::CellRef cur) {
     const auto *slot = m.slot(cur);
     if (nullptr == slot) {
-      break;
+      return false;
     }
     const auto kind = static_cast<xanadu::ValueKind>(slot->valueKind);
     std::string text{};
@@ -110,13 +108,8 @@ Arrayfilade Arrayfilade::fromRank(const zigzag::Manifold &m,
 
     entries.push_back(
         ArrayCellEntry::fromCell(cur, coords, kind, slot->valueBits, text));
-
-    const auto next = m.linked(cur, dim, DimVector::POS);
-    if (next == cur) {
-      break;
-    }
-    cur = next;
-  }
+    return true;
+  });
 
   return fromEntries(entries, 1);
 }
@@ -126,14 +119,12 @@ Arrayfilade Arrayfilade::fromArenaRank(const zigzag::ArenaManifold &am,
                                        const zigzag::DimRef dim,
                                        const xanadu::SpanReader *reader) {
   std::vector<ArrayCellEntry> entries{};
-  zigzag::CellRef cur = head;
-  std::int64_t idx    = 0;
+  std::int64_t idx = 0;
 
-  for (std::size_t steps = 0; steps < am.cellCount() && zigzag::noCell != cur;
-       ++steps) {
+  am.walkRank(head, dim, [&](const zigzag::CellRef cur) {
     const auto *slot = am.slot(cur);
     if (nullptr == slot) {
-      break;
+      return false;
     }
     const auto kind        = static_cast<xanadu::ValueKind>(slot->valueKind);
     const std::string text = am.textOf(cur, reader);
@@ -142,13 +133,8 @@ Arrayfilade Arrayfilade::fromArenaRank(const zigzag::ArenaManifold &am,
 
     entries.push_back(
         ArrayCellEntry::fromCell(cur, coords, kind, slot->valueBits, text));
-
-    const auto next = am.linked(cur, dim, DimVector::POS);
-    if (next == cur) {
-      break;
-    }
-    cur = next;
-  }
+    return true;
+  });
 
   return fromEntries(entries, 1);
 }
@@ -159,16 +145,11 @@ Arrayfilade Arrayfilade::fromMatrix(const zigzag::Manifold &m,
                                     const zigzag::DimRef colDim,
                                     const xanadu::SpanReader *reader) {
   std::vector<ArrayCellEntry> entries{};
-  zigzag::CellRef rowCur = origin;
-  std::int64_t r         = 0;
+  std::int64_t r = 0;
 
-  for (std::size_t rowSteps = 0;
-       rowSteps < m.cellCount() && zigzag::noCell != rowCur; ++rowSteps) {
-    zigzag::CellRef colCur = rowCur;
-    std::int64_t c         = 0;
-
-    for (std::size_t colSteps = 0;
-         colSteps < m.cellCount() && zigzag::noCell != colCur; ++colSteps) {
+  m.walkRank(origin, rowDim, [&](const zigzag::CellRef rowCur) {
+    std::int64_t c = 0;
+    m.walkRank(rowCur, colDim, [&](const zigzag::CellRef colCur) {
       const auto *slot = m.slot(colCur);
       if (nullptr != slot) {
         const auto kind = static_cast<xanadu::ValueKind>(slot->valueKind);
@@ -178,27 +159,14 @@ Arrayfilade Arrayfilade::fromMatrix(const zigzag::Manifold &m,
         }
         std::array<std::int64_t, MaxValence> coords{};
         coords[0] = r;
-        coords[1] = c;
+        coords[1] = c++;
 
         entries.push_back(ArrayCellEntry::fromCell(colCur, coords, kind,
                                                    slot->valueBits, text));
       }
-
-      const auto nextCol = m.linked(colCur, colDim, DimVector::POS);
-      if (nextCol == colCur || zigzag::noCell == nextCol) {
-        break;
-      }
-      colCur = nextCol;
-      ++c;
-    }
-
-    const auto nextRow = m.linked(rowCur, rowDim, DimVector::POS);
-    if (nextRow == rowCur || zigzag::noCell == nextRow) {
-      break;
-    }
-    rowCur = nextRow;
+    });
     ++r;
-  }
+  });
 
   return fromEntries(entries, 2);
 }

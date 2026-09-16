@@ -19,8 +19,10 @@
 #include "common/xanadu/store.hpp"
 #include "common/xanadu/version.hpp"
 #include "common/xanadu/zigzag/zz_system_projector.hpp"
+#include "common/xanadu/zigzag/zz_xudu_projector.hpp"
 #include "common/xanadu/zigzag/zzstructure.hpp"
 #include "common/yaml_helpers.hpp"
+#include <gleditor/color.hpp>
 
 namespace xanadu {
 
@@ -46,6 +48,7 @@ std::string defaultSystemDocContent(const SystemDocKind kind) {
            "pageWidthPx: \"800\"\n"
            "pageHeightPx: \"1000\"\n"
            "transclusionPrisms: \"true\"\n"
+           "transclusionLoom: \"true\"\n"
            "xanalinkRibbons: \"true\"\n"
            "physics:\n"
            "  kRepel: \"4500.0\"\n"
@@ -67,7 +70,10 @@ std::string defaultSystemDocContent(const SystemDocKind kind) {
            "  marginKerf: \"0.04\"\n"
            "  bypassDepthPerDoc: \"-20.0\"\n"
            "  bypassDepthLimit: \"-120.0\"\n"
-           "  bypassSegments: \"9\"\n";
+           "  bypassSegments: \"9\"\n"
+           "  loomBundlingEnabled: \"true\"\n"
+           "  loomAlpha: \"0.35\"\n"
+           "  loomHoverAlpha: \"1.0\"\n";
   case SystemDocKind::UI:
     return "notificationPosition: \"top-right\"\n"
            "notificationDurationMs: \"3000\"\n"
@@ -120,9 +126,22 @@ std::string defaultSystemDocContent(const SystemDocKind kind) {
            "      icon: \"@\"\n";
   case SystemDocKind::Pouches:
     return "zone:\n"
-           "  - \"To Link\"\n"
-           "  - \"Notes for Later\"\n"
-           "  - \"Scratch\"\n";
+           "  - id: \"to_link_left\"\n"
+           "    label: \"To Link (Left)\"\n"
+           "    aura: \"#06B6D4\"\n"
+           "    weight: 1.0\n"
+           "  - id: \"to_link_right\"\n"
+           "    label: \"To Link (Right)\"\n"
+           "    aura: \"#EC4899\"\n"
+           "    weight: 1.0\n"
+           "  - id: \"notes\"\n"
+           "    label: \"Notes\"\n"
+           "    aura: \"#EAB308\"\n"
+           "    weight: 1.0\n"
+           "  - id: \"scratch\"\n"
+           "    label: \"Scratch\"\n"
+           "    aura: \"#10B981\"\n"
+           "    weight: 1.0\n";
   case SystemDocKind::Count:
     return "";
   }
@@ -197,6 +216,9 @@ std::string defaultSystemDocSchema(const SystemDocKind kind) {
            "in pixels. Default is 70.\n"
            "transclusionPrisms: Enable Identity Gold volumetric prisms for "
            "transcluded spans. Default is true.\n"
+           "transclusionLoom: Bundle adjacent rank transclusions into "
+           "continuous "
+           "golden looms. Default is true.\n"
            "xanalinkRibbons: Enable cyan and magenta 3D optical link ribbons. "
            "Default is true.\n"
            "physics:\n"
@@ -237,7 +259,18 @@ std::string defaultSystemDocSchema(const SystemDocKind kind) {
            "  bypassDepthLimit: Deepest Z offset for bypass routing. Default "
            "is -120.0.\n"
            "  bypassSegments: Curve subdivision segment count for bypass "
-           "routing. Default is 9.\n";
+           "routing. Default is 9.\n"
+           "  loomBundlingEnabled: Group contiguous rank transclusion strands "
+           "into unified laminar looms. Default is true.\n"
+           "  loomAlpha: Semi-transparent resting alpha for golden "
+           "transclusion "
+           "looms. Default is 0.35.\n"
+           "  loomHoverAlpha: Active or hovered alpha for brightened "
+           "transclusion "
+           "strands. Default is 1.0.\n"
+           "zigzag: System-slice presentation policy for cell card padding, "
+           "content width limits, rank clearance, HUD spacing, and "
+           "connection beam width. All lengths are logical pixels.\n";
   case SystemDocKind::UI:
     return "Schema and Purpose\n\n"
            "Purpose:\n"
@@ -396,6 +429,75 @@ void initializeSystemStore(Store &store, const SystemDocKind kind) {
     cur             = store.addLink(cur, std::move(notesLink));
   }
 
+  // The document pages are the human projection. Runtime configuration lives
+  // in the same store's d.vars -> d.values slice, never in those text pages.
+  // Start every system store as a slice so its values are independently named,
+  // typed scalar cells that can be changed or repointed without parsing text.
+  cur = store.sliceGenesis(cur);
+  auto manifold = store.rebuildManifold(cur);
+  const auto vars = store.makeDimension(cur, "d.vars", &manifold);
+  cur             = vars.version;
+  manifold        = store.rebuildManifold(cur);
+  const auto values = store.makeDimension(cur, "d.values", &manifold);
+  cur               = values.version;
+  manifold          = store.rebuildManifold(cur);
+
+  if (kind == SystemDocKind::Layout) {
+    struct Default {
+      std::string_view key;
+      double value;
+    };
+    constexpr Default defaults[] = {
+        {"physics.kRepel", 4500.0},
+        {"physics.kPlane", 14.0},
+        {"physics.kAlign", 28.0},
+        {"physics.kTier", 12.0},
+        {"physics.kDamping", 7.5},
+        {"physics.backgroundDepthZ", -40.0},
+        {"physics.defaultGap", 8.0},
+        {"physics.settleVelocityThreshold", 0.02},
+        {"physics.maxForce", 10000.0},
+        {"physics.maxVelocity", 1000.0},
+        {"physics.timeStep", 0.016},
+        {"beams.bandStrandLimit", 7.0},
+        {"beams.bandStrandPitch", 2.2},
+        {"beams.bandFillAlpha", 0.85},
+        {"beams.stubWidthOfBeam", 1.35},
+        {"beams.stubMinOfLine", 0.9},
+        {"beams.marginKerf", 0.04},
+        {"beams.bypassDepthPerDoc", -20.0},
+        {"beams.bypassDepthLimit", -120.0},
+        {"beams.bypassSegments", 9.0},
+        {"beams.loomAlpha", 0.35},
+        {"beams.loomHoverAlpha", 1.0},
+        {"zigzag.cellHorizontalPaddingPx", 8.0},
+        {"zigzag.cellVerticalPaddingPx", 6.0},
+        {"zigzag.cellBandGapPx", 4.0},
+        {"zigzag.contentMaxWidthPx", 260.0},
+        {"zigzag.topologyMaxWidthPx", 140.0},
+        {"zigzag.rankClearancePx", 24.0},
+        {"zigzag.hudHorizontalPaddingPx", 16.0},
+        {"zigzag.hudVerticalPaddingPx", 8.0},
+        {"zigzag.hudColumnGapPx", 8.0},
+        {"zigzag.connectionBeamWidthPx", 4.0},
+    };
+    auto previous = store.homeCell();
+    for (const auto &[key, value] : defaults) {
+      cur = store.makeCell(cur, key);
+      const auto variable = store.cellRefOf(cur);
+      manifold            = store.rebuildManifold(cur);
+      cur = store.setLink(cur, previous, vars.dim, zigzag::DimVector::POS,
+                          variable, &manifold);
+      manifold = store.rebuildManifold(cur);
+      cur      = store.makeScalarCell(cur, value);
+      const auto scalar = store.cellRefOf(cur);
+      manifold          = store.rebuildManifold(cur);
+      cur = store.setLink(cur, variable, values.dim, zigzag::DimVector::POS,
+                          scalar, &manifold);
+      manifold = store.rebuildManifold(cur);
+      previous = variable;
+    }
+  }
   store.repointCurrentVersion(cur);
   store.setVersionAnnotation(
       cur, {.alias       = "default",
@@ -730,6 +832,8 @@ LayoutConfig parseLayoutConfig(const std::string_view yamlText) {
       cfg.documentSpacingX = parseFloat(v, cfg.documentSpacingX);
     } else if (k == "transclusionPrisms") {
       cfg.transclusionPrisms = parseBool(v, cfg.transclusionPrisms);
+    } else if (k == "transclusionLoom") {
+      cfg.transclusionLoom = parseBool(v, cfg.transclusionLoom);
     } else if (k == "xanalinkRibbons") {
       cfg.xanalinkRibbons = parseBool(v, cfg.xanalinkRibbons);
     } else if (k == "kRepel" || k == "physics.kRepel") {
@@ -777,6 +881,40 @@ LayoutConfig parseLayoutConfig(const std::string_view yamlText) {
     } else if (k == "bypassSegments" || k == "beams.bypassSegments") {
       cfg.beams.bypassSegments =
           parseUint(v, static_cast<std::uint32_t>(cfg.beams.bypassSegments));
+    } else if (k == "loomBundlingEnabled" || k == "beams.loomBundlingEnabled") {
+      cfg.beams.loomBundlingEnabled =
+          parseBool(v, cfg.beams.loomBundlingEnabled);
+    } else if (k == "loomAlpha" || k == "beams.loomAlpha") {
+      cfg.beams.loomAlpha = parseFloat(v, cfg.beams.loomAlpha);
+    } else if (k == "loomHoverAlpha" || k == "beams.loomHoverAlpha") {
+      cfg.beams.loomHoverAlpha = parseFloat(v, cfg.beams.loomHoverAlpha);
+    } else if (k == "zigzag.cellHorizontalPaddingPx") {
+      cfg.zigzag.cellHorizontalPaddingPx =
+          parseFloat(v, cfg.zigzag.cellHorizontalPaddingPx);
+    } else if (k == "zigzag.cellVerticalPaddingPx") {
+      cfg.zigzag.cellVerticalPaddingPx =
+          parseFloat(v, cfg.zigzag.cellVerticalPaddingPx);
+    } else if (k == "zigzag.cellBandGapPx") {
+      cfg.zigzag.cellBandGapPx = parseFloat(v, cfg.zigzag.cellBandGapPx);
+    } else if (k == "zigzag.contentMaxWidthPx") {
+      cfg.zigzag.contentMaxWidthPx =
+          parseFloat(v, cfg.zigzag.contentMaxWidthPx);
+    } else if (k == "zigzag.topologyMaxWidthPx") {
+      cfg.zigzag.topologyMaxWidthPx =
+          parseFloat(v, cfg.zigzag.topologyMaxWidthPx);
+    } else if (k == "zigzag.rankClearancePx") {
+      cfg.zigzag.rankClearancePx = parseFloat(v, cfg.zigzag.rankClearancePx);
+    } else if (k == "zigzag.hudHorizontalPaddingPx") {
+      cfg.zigzag.hudHorizontalPaddingPx =
+          parseFloat(v, cfg.zigzag.hudHorizontalPaddingPx);
+    } else if (k == "zigzag.hudVerticalPaddingPx") {
+      cfg.zigzag.hudVerticalPaddingPx =
+          parseFloat(v, cfg.zigzag.hudVerticalPaddingPx);
+    } else if (k == "zigzag.hudColumnGapPx") {
+      cfg.zigzag.hudColumnGapPx = parseFloat(v, cfg.zigzag.hudColumnGapPx);
+    } else if (k == "zigzag.connectionBeamWidthPx") {
+      cfg.zigzag.connectionBeamWidthPx =
+          parseFloat(v, cfg.zigzag.connectionBeamWidthPx);
     }
   };
 
@@ -891,8 +1029,101 @@ SettingsConfig::fromSlice(const zigzag::ZzStructureDocument &slice) {
   return parseSettingsConfig(configText);
 }
 
-LayoutConfig LayoutConfig::fromYaml(const std::string_view yamlText) {
-  return parseLayoutConfig(yamlText);
+LayoutConfig LayoutConfig::fromSystemText(const std::string_view text) {
+  return parseLayoutConfig(text);
+}
+
+LayoutConfig LayoutConfig::fromStore(const Store &store) {
+  if (store.opCount() == 0) {
+    return {};
+  }
+  LayoutConfig config;
+  const auto manifold = store.rebuildManifold(store.primaryCurrentVersion());
+  const auto vars = manifold.dimensionNamed("d.vars", store);
+  const auto values = manifold.dimensionNamed("d.values", store);
+  if (vars == zigzag::noCell || values == zigzag::noCell) {
+    return config;
+  }
+
+  auto variable = manifold.linked(manifold.home(), vars);
+  for (std::size_t step = 0;
+       variable != zigzag::noCell && step < manifold.cellCount(); ++step) {
+    const auto value = manifold.linked(variable, values);
+    if (const auto number = manifold.asDouble(value)) {
+      const std::string key = manifold.textOf(variable, store);
+      if (key == "physics.kRepel") {
+        config.physics.kRepel = static_cast<float>(*number);
+      } else if (key == "physics.kPlane") {
+        config.physics.kPlane = static_cast<float>(*number);
+      } else if (key == "physics.kAlign") {
+        config.physics.kAlign = static_cast<float>(*number);
+      } else if (key == "physics.kTier") {
+        config.physics.kTier = static_cast<float>(*number);
+      } else if (key == "physics.kDamping") {
+        config.physics.kDamping = static_cast<float>(*number);
+      } else if (key == "physics.backgroundDepthZ") {
+        config.physics.backgroundDepthZ = static_cast<float>(*number);
+      } else if (key == "physics.defaultGap") {
+        config.physics.defaultGap = static_cast<float>(*number);
+      } else if (key == "physics.settleVelocityThreshold") {
+        config.physics.settleVelocityThreshold = static_cast<float>(*number);
+      } else if (key == "physics.maxForce") {
+        config.physics.maxForce = static_cast<float>(*number);
+      } else if (key == "physics.maxVelocity") {
+        config.physics.maxVelocity = static_cast<float>(*number);
+      } else if (key == "physics.timeStep") {
+        config.physics.timeStep = static_cast<float>(*number);
+      } else if (key == "beams.bandStrandLimit") {
+        config.beams.bandStrandLimit = static_cast<std::size_t>(*number);
+      } else if (key == "beams.bandStrandPitch") {
+        config.beams.bandStrandPitch = static_cast<float>(*number);
+      } else if (key == "beams.bandFillAlpha") {
+        config.beams.bandFillAlpha = static_cast<float>(*number);
+      } else if (key == "beams.stubWidthOfBeam") {
+        config.beams.stubWidthOfBeam = static_cast<float>(*number);
+      } else if (key == "beams.stubMinOfLine") {
+        config.beams.stubMinOfLine = static_cast<float>(*number);
+      } else if (key == "beams.marginKerf") {
+        config.beams.marginKerf = static_cast<float>(*number);
+      } else if (key == "beams.bypassDepthPerDoc") {
+        config.beams.bypassDepthPerDoc = static_cast<float>(*number);
+      } else if (key == "beams.bypassDepthLimit") {
+        config.beams.bypassDepthLimit = static_cast<float>(*number);
+      } else if (key == "beams.bypassSegments") {
+        config.beams.bypassSegments = static_cast<std::size_t>(*number);
+      } else if (key == "beams.loomAlpha") {
+        config.beams.loomAlpha = static_cast<float>(*number);
+      } else if (key == "beams.loomHoverAlpha") {
+        config.beams.loomHoverAlpha = static_cast<float>(*number);
+      } else if (key == "zigzag.cellHorizontalPaddingPx") {
+        config.zigzag.cellHorizontalPaddingPx = static_cast<float>(*number);
+      } else if (key == "zigzag.cellVerticalPaddingPx") {
+        config.zigzag.cellVerticalPaddingPx = static_cast<float>(*number);
+      } else if (key == "zigzag.cellBandGapPx") {
+        config.zigzag.cellBandGapPx = static_cast<float>(*number);
+      } else if (key == "zigzag.contentMaxWidthPx") {
+        config.zigzag.contentMaxWidthPx = static_cast<float>(*number);
+      } else if (key == "zigzag.topologyMaxWidthPx") {
+        config.zigzag.topologyMaxWidthPx = static_cast<float>(*number);
+      } else if (key == "zigzag.rankClearancePx") {
+        config.zigzag.rankClearancePx = static_cast<float>(*number);
+      } else if (key == "zigzag.hudHorizontalPaddingPx") {
+        config.zigzag.hudHorizontalPaddingPx = static_cast<float>(*number);
+      } else if (key == "zigzag.hudVerticalPaddingPx") {
+        config.zigzag.hudVerticalPaddingPx = static_cast<float>(*number);
+      } else if (key == "zigzag.hudColumnGapPx") {
+        config.zigzag.hudColumnGapPx = static_cast<float>(*number);
+      } else if (key == "zigzag.connectionBeamWidthPx") {
+        config.zigzag.connectionBeamWidthPx = static_cast<float>(*number);
+      }
+    }
+    const auto next = manifold.linked(variable, vars);
+    if (next == variable || next == manifold.home()) {
+      break;
+    }
+    variable = next;
+  }
+  return config;
 }
 
 LayoutConfig LayoutConfig::fromSlice(const zigzag::ZzStructureDocument &slice) {
@@ -907,6 +1138,177 @@ UIConfig UIConfig::fromYaml(const std::string_view yamlText) {
 UIConfig UIConfig::fromSlice(const zigzag::ZzStructureDocument &slice) {
   const std::string configText = zigzag::extractSliceConfigText(slice);
   return parseUIConfig(configText);
+}
+
+namespace {
+[[nodiscard]] std::optional<std::uint32_t>
+parseHexRgbaColor(const std::string_view hexStr) {
+  std::string_view hex = hexStr;
+  if (!hex.empty() && hex.front() == '#') {
+    hex.remove_prefix(1);
+  }
+  if (hex.size() == 6) {
+    if (const auto c = gleditor::color::parseHexColor(hex)) {
+      return gleditor::color::packRgb(*c, 1.0F);
+    }
+  } else if (hex.size() == 8) {
+    if (const auto c = gleditor::color::parseHexColor(hex.substr(0, 6))) {
+      const auto nibble = [](const char ch) -> unsigned {
+        if (ch >= '0' && ch <= '9') {
+          return static_cast<unsigned>(ch - '0');
+        }
+        if (ch >= 'a' && ch <= 'f') {
+          return static_cast<unsigned>(ch - 'a' + 10);
+        }
+        if (ch >= 'A' && ch <= 'F') {
+          return static_cast<unsigned>(ch - 'A' + 10);
+        }
+        return 0;
+      };
+      const float alpha =
+          static_cast<float>(nibble(hex[6]) * 16U + nibble(hex[7])) / 255.0F;
+      return gleditor::color::packRgb(*c, alpha);
+    }
+  }
+  return std::nullopt;
+}
+} // namespace
+
+PouchConfig parsePouchConfig(const std::string_view yamlText) {
+  PouchConfig cfg;
+  const auto effectiveYaml = extractConfigSection(yamlText);
+  if (effectiveYaml.empty()) {
+    cfg.zones = {
+        DropZoneSpec{.id           = "to_link_left",
+                     .label        = "To Link (Left)",
+                     .auraColor    = 0x06B6D4FFU,
+                     .heightWeight = 1.0F},
+        DropZoneSpec{.id           = "to_link_right",
+                     .label        = "To Link (Right)",
+                     .auraColor    = 0xEC4899FFU,
+                     .heightWeight = 1.0F},
+        DropZoneSpec{.id           = "notes",
+                     .label        = "Notes",
+                     .auraColor    = 0xEAB308FFU,
+                     .heightWeight = 1.0F},
+        DropZoneSpec{.id           = "scratch",
+                     .label        = "Scratch",
+                     .auraColor    = 0x10B981FFU,
+                     .heightWeight = 1.0F},
+    };
+    return cfg;
+  }
+
+  const ScopedCallbacks scoped;
+  try {
+    const c4::yml::Tree tree = c4::yml::parse_in_arena(
+        c4::csubstr{effectiveYaml.data(), effectiveYaml.size()});
+    if (!tree.empty()) {
+      const auto root = tree.rootref();
+      auto zoneNode = root.is_map() && root.has_child("zone")    ? root["zone"]
+                      : root.is_map() && root.has_child("zones") ? root["zones"]
+                      : root.is_seq() ? root
+                                      : c4::yml::ConstNodeRef{};
+      if (!zoneNode.invalid() && zoneNode.is_seq()) {
+        for (const auto child : zoneNode.children()) {
+          DropZoneSpec spec;
+          if (child.is_map()) {
+            if (child.has_child("id") && child["id"].has_val()) {
+              spec.id = std::string(child["id"].val().data(),
+                                    child["id"].val().size());
+            }
+            if (child.has_child("label") && child["label"].has_val()) {
+              spec.label = std::string(child["label"].val().data(),
+                                       child["label"].val().size());
+            }
+            if (child.has_child("aura") && child["aura"].has_val()) {
+              const std::string auraStr(child["aura"].val().data(),
+                                        child["aura"].val().size());
+              const auto parsedAura = parseHexRgbaColor(auraStr);
+              if (parsedAura) {
+                spec.auraColor = *parsedAura;
+              }
+            } else if (child.has_child("auraColor") &&
+                       child["auraColor"].has_val()) {
+              const std::string auraStr(child["auraColor"].val().data(),
+                                        child["auraColor"].val().size());
+              const auto parsedAura = parseHexRgbaColor(auraStr);
+              if (parsedAura) {
+                spec.auraColor = *parsedAura;
+              }
+            }
+            if (child.has_child("weight") && child["weight"].has_val()) {
+              spec.heightWeight =
+                  parseFloat(std::string_view(child["weight"].val().data(),
+                                              child["weight"].val().size()),
+                             1.0F);
+            } else if (child.has_child("heightWeight") &&
+                       child["heightWeight"].has_val()) {
+              spec.heightWeight = parseFloat(
+                  std::string_view(child["heightWeight"].val().data(),
+                                   child["heightWeight"].val().size()),
+                  1.0F);
+            }
+            if (spec.id.empty() && !spec.label.empty()) {
+              spec.id = spec.label;
+              std::ranges::replace(spec.id, ' ', '_');
+              std::ranges::transform(
+                  spec.id, spec.id.begin(),
+                  [](const unsigned char c) { return std::tolower(c); });
+            }
+            if (!spec.id.empty()) {
+              cfg.zones.push_back(std::move(spec));
+            }
+          } else if (child.has_val()) {
+            spec.label = std::string(child.val().data(), child.val().size());
+            spec.id    = spec.label;
+            std::ranges::replace(spec.id, ' ', '_');
+            std::ranges::transform(
+                spec.id, spec.id.begin(),
+                [](const unsigned char c) { return std::tolower(c); });
+            cfg.zones.push_back(std::move(spec));
+          }
+        }
+      }
+    }
+  } catch (const std::exception &) {
+    // Fall back to default zones
+  }
+
+  if (cfg.zones.empty()) {
+    cfg.zones = {
+        DropZoneSpec{.id           = "to_link_left",
+                     .label        = "To Link (Left)",
+                     .auraColor    = 0x06B6D4FFU,
+                     .heightWeight = 1.0F},
+        DropZoneSpec{.id           = "to_link_right",
+                     .label        = "To Link (Right)",
+                     .auraColor    = 0xEC4899FFU,
+                     .heightWeight = 1.0F},
+        DropZoneSpec{.id           = "notes",
+                     .label        = "Notes",
+                     .auraColor    = 0xEAB308FFU,
+                     .heightWeight = 1.0F},
+        DropZoneSpec{.id           = "scratch",
+                     .label        = "Scratch",
+                     .auraColor    = 0x10B981FFU,
+                     .heightWeight = 1.0F},
+    };
+  }
+  return cfg;
+}
+
+PouchConfig PouchConfig::fromStore(const Store &store) {
+  if (store.opCount() == 0) {
+    return parsePouchConfig("");
+  }
+  const auto latestVer = store.latest();
+  const auto docText   = store.textOf(latestVer);
+  return parsePouchConfig(docText);
+}
+
+PouchConfig PouchConfig::fromYaml(const std::string_view yamlText) {
+  return parsePouchConfig(yamlText);
 }
 
 } // namespace xanadu

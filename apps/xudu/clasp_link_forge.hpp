@@ -81,6 +81,26 @@ public:
   [[nodiscard]] float width() const noexcept { return width_; }
   [[nodiscard]] float height() const noexcept { return height_; }
 
+  void setDragGuide(float originX, float originY, float targetX, float targetY,
+                    bool active) noexcept {
+    guideActive_  = active;
+    guideOriginX_ = originX;
+    guideOriginY_ = originY;
+    guideTargetX_ = targetX;
+    guideTargetY_ = targetY;
+  }
+  [[nodiscard]] bool isDragGuideActive() const noexcept { return guideActive_; }
+
+  void triggerBurst() noexcept { burstTimer_ = 0.6F; }
+  void update(float deltaTime) noexcept {
+    if (burstTimer_ > 0.0F) {
+      burstTimer_ = std::max(0.0F, burstTimer_ - deltaTime);
+    }
+  }
+  [[nodiscard]] float burstProgress() const noexcept {
+    return burstTimer_ > 0.0F ? (1.0F - burstTimer_ / 0.6F) : 0.0F;
+  }
+
 private:
   float x_{0.0F};
   float y_{0.0F};
@@ -102,6 +122,13 @@ private:
 
   std::vector<PouchItem> leftSpans_;
   std::vector<PouchItem> rightSpans_;
+
+  bool guideActive_{false};
+  float guideOriginX_{0.0F};
+  float guideOriginY_{0.0F};
+  float guideTargetX_{0.0F};
+  float guideTargetY_{0.0F};
+  float burstTimer_{0.0F};
 };
 
 } // namespace xudu

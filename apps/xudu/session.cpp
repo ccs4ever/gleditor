@@ -31,6 +31,7 @@
 #include <gleditor/text_source.hpp>
 
 #include "xudu/core/format.hpp"
+#include "xudu/core/format_resolver.hpp"
 #include "xudu/core/link_layout.hpp"
 #include "xudu/core/provenance.hpp"
 
@@ -116,7 +117,7 @@ MicroversionId Session::insertText(const std::uint32_t docIndex,
     save(sIdx);
     if (systemDocChangedCallback_) {
       if (const auto kind = systemDocKindForStoreIndex(sIdx)) {
-        systemDocChangedCallback_(*kind, st.textOf(prod));
+        systemDocChangedCallback_(*kind, st);
       }
     }
   } else if (swarmSource) {
@@ -131,15 +132,45 @@ MicroversionId Session::insertText(const std::uint32_t docIndex,
 MicroversionId Session::insertMedia(const std::uint32_t docIndex,
                                     const std::uint32_t at,
                                     std::string_view bytes,
-                                    std::string mimeType) {
+                                    std::string mimeType,
+                                    std::string filePath) {
   if (docIndex >= open.size()) {
     return MicroversionId{};
   }
   const auto sIdx = open[docIndex].storeIndex;
   auto &st        = store(sIdx);
-  const auto prod =
-      st.insertMedia(open[docIndex].version, at, bytes, std::move(mimeType))
-          .version;
+
+  std::filesystem::path p(filePath);
+  std::string fileName = filePath.empty() ? "media.dat" : p.filename().string();
+  const auto made      = makeTorrent(bytes, fileName);
+  if (filePath.empty()) {
+    const auto &stPath  = path(sIdx);
+    const auto mediaDir = stPath.empty()
+                              ? std::filesystem::temp_directory_path()
+                              : std::filesystem::path(stPath);
+    if (!std::filesystem::exists(mediaDir)) {
+      std::filesystem::create_directories(mediaDir);
+    }
+    fileName = "media_" + made.hash.hex().substr(0, 8) + ".dat";
+    p        = mediaDir / fileName;
+    filePath = p.string();
+    std::ofstream out(filePath, std::ios::binary);
+    out.write(bytes.data(), static_cast<std::streamsize>(bytes.size()));
+  }
+  const auto dataRoot =
+      p.parent_path().empty() ? "." : p.parent_path().string();
+  addTorrentMemory(made.file, dataRoot);
+
+  auto scroll = Scroll::ofTorrentFile(made.hash, 0, filePath, 0, bytes.size());
+  if (!mimeType.empty()) {
+    scroll.defaultMimeType = mimeType;
+    if (!scroll.segments.empty()) {
+      scroll.segments[0].mimeType = mimeType;
+    }
+  }
+
+  const auto prod = st.transcludeExternal(open[docIndex].version, at, scroll, 0,
+                                          bytes.size());
   open[docIndex].version = prod;
   open[docIndex].pieces  = st.rebuild(prod);
   invalidate();
@@ -293,6 +324,15 @@ InfoHash Session::addName(const std::string &uri) {
   return addMagnet("magnet:?xt=urn:btih:" + pointer->hash.hex());
 }
 
+InfoHash Session::addTorrentMemory(const std::string_view torrentData,
+                                   const std::string &dataRoot) {
+  const auto root = dataRoot.empty() ? "." : dataRoot;
+  if (nullptr != swarmSource) {
+    return swarmSource->addTorrent(torrentData, root, false);
+  }
+  return contentSource.add(torrentData, root);
+}
+
 InfoHash Session::addTorrent(const std::string &torrentPath,
                              const std::string &dataRoot) {
   std::ifstream in(torrentPath, std::ios::binary);
@@ -305,10 +345,7 @@ InfoHash Session::addTorrent(const std::string &torrentPath,
       dataRoot.empty()
           ? std::filesystem::path(torrentPath).parent_path().string()
           : dataRoot;
-  if (nullptr != swarmSource) {
-    return swarmSource->addTorrent(contents, root.empty() ? "." : root, false);
-  }
-  return contentSource.add(contents, root.empty() ? "." : root);
+  return addTorrentMemory(contents, root);
 }
 
 InfoHash Session::addMagnet(const std::string &uri) {
@@ -702,10 +739,36 @@ Session::importFileToTemporaryStore(const std::string &filePath) {
     } else if (piece.mimeType.empty()) {
       imported = newStore->insert(imported, at, piece.bytes);
     } else {
-      auto inserted =
-          newStore->insertMedia(imported, at, piece.bytes, piece.mimeType);
-      imported = inserted.version;
-      span     = inserted.span;
+      std::filesystem::path p(filePath);
+      std::string pieceFilePath = filePath;
+      std::string fileName      = p.filename().string();
+      if (!std::filesystem::is_regular_file(p) ||
+          std::filesystem::file_size(p) != piece.bytes.size()) {
+        fileName      = "fig_" + std::to_string(insertedSpans.size()) + ".dat";
+        p             = tempDir / fileName;
+        pieceFilePath = p.string();
+        std::ofstream out(pieceFilePath, std::ios::binary);
+        out.write(piece.bytes.data(),
+                  static_cast<std::streamsize>(piece.bytes.size()));
+      }
+      const auto made = makeTorrent(piece.bytes, fileName);
+      const auto dataRoot =
+          p.parent_path().empty() ? "." : p.parent_path().string();
+      addTorrentMemory(made.file, dataRoot);
+
+      auto scroll = Scroll::ofTorrentFile(made.hash, 0, pieceFilePath, 0,
+                                          piece.bytes.size());
+      scroll.defaultMimeType = piece.mimeType;
+      if (!scroll.segments.empty()) {
+        scroll.segments[0].mimeType = piece.mimeType;
+      }
+      const auto sId = newStore->addScroll(scroll);
+      span           = PrimediaSpan{sId, 0, piece.bytes.size()};
+      Op op;
+      op.kind  = OpKind::Transclude;
+      op.at    = at;
+      op.span  = span;
+      imported = newStore->apply(imported, op);
     }
     insertedSpans.push_back(span);
     at += static_cast<std::uint32_t>(piece.bytes.size());
@@ -757,7 +820,33 @@ void Session::save(const std::size_t index) const {
   const_cast<Session *>(this)->flushUncommitted();
   if (index < stores.size() && stores[index].store &&
       !stores[index].path.empty()) {
+    syncCurrentVersions(index);
     stores[index].store->save(stores[index].path);
+  }
+}
+
+void Session::syncCurrentVersions(const std::size_t storeIndex) const {
+  if (storeIndex >= stores.size() || !stores[storeIndex].store) {
+    return;
+  }
+
+  std::vector<MicroversionId> visible;
+  for (const auto &view : open) {
+    if (view.storeIndex != storeIndex || view.version.isZero()) {
+      continue;
+    }
+    if (std::ranges::find(visible, view.version) == visible.end()) {
+      visible.push_back(view.version);
+    }
+  }
+  if (visible.empty()) {
+    const auto latest = stores[storeIndex].store->latest();
+    if (!latest.isZero()) {
+      visible.push_back(latest);
+    }
+  }
+  if (!visible.empty()) {
+    stores[storeIndex].store->setCurrentVersions(std::move(visible));
   }
 }
 
@@ -944,7 +1033,7 @@ void Session::repointSystemDoc(const SystemDocKind kind,
     }
   }
   if (systemDocChangedCallback_) {
-    systemDocChangedCallback_(kind, st.textOf(version));
+    systemDocChangedCallback_(kind, st);
   }
 }
 
@@ -1378,44 +1467,15 @@ Session::sourceFor(const MicroversionId &version,
     }
   }
 
-  std::vector<gleditor::DecoratedRange> decoratedRanges;
-
   // Extract presentation formatting and paragraph alignment from Format links
-  for (const auto &[linkId, link] : st.links()) {
-    if (LinkType::Format != link.type) {
-      continue;
-    }
-    const auto attrOpt = st.formatAttributeOf(link);
-    if (!attrOpt) {
-      continue;
-    }
-    if (const auto decoOpt = decorationFromFormatAttribute(*attrOpt)) {
-      const auto mask = gleditor::decorationBit(*decoOpt);
-      for (const auto &span : link.left) {
-        for (const auto &extent : rebuilt.occurrencesOf(span)) {
-          if (!extent.empty()) {
-            decoratedRanges.push_back(gleditor::DecoratedRange{
-                .start       = extent.start,
-                .end         = extent.end,
-                .decorations = mask,
-            });
-          }
-        }
-      }
-    } else if (const auto alignOpt = textAlignFromFormatAttribute(*attrOpt)) {
-      for (const auto &span : link.left) {
-        for (const auto &extent : rebuilt.occurrencesOf(span)) {
-          if (!extent.empty()) {
-            blockStyles.push_back(gleditor::BlockStyleRange{
-                .start = extent.start,
-                .end   = extent.end,
-                .align = *alignOpt,
-            });
-          }
-        }
-      }
-    }
-  }
+  const FormatResolver formatResolver(st);
+  auto formattingResult = formatResolver.resolveVersion(rebuilt);
+  std::vector<gleditor::DecoratedRange> decoratedRanges =
+      std::move(formattingResult.decoratedRanges);
+  blockStyles.insert(
+      blockStyles.end(),
+      std::make_move_iterator(formattingResult.blockStyles.begin()),
+      std::make_move_iterator(formattingResult.blockStyles.end()));
 
   std::string title;
   if (st.isSystem()) {
@@ -1430,8 +1490,12 @@ Session::sourceFor(const MicroversionId &version,
     }
   }
 
+  auto target =
+      std::make_shared<render::PickSemanticTarget>(render::PickSemanticTarget{
+          .documentId = st.documentId().str(), .microversion = version.str()});
   return std::make_shared<VersionTextSource>(
-      concatext, version, breaks, boxes, blockStyles, title, decoratedRanges);
+      concatext, version, breaks, boxes, blockStyles, title, decoratedRanges,
+      std::move(target));
 }
 
 std::vector<Session::MediaSpanInfo>
@@ -1604,7 +1668,7 @@ void Session::scrubToVersion(const std::uint32_t docIndex,
     st.save(stores[sIdx].path);
     if (systemDocChangedCallback_) {
       if (const auto kind = systemDocKindForStoreIndex(sIdx)) {
-        systemDocChangedCallback_(*kind, st.textOf(version));
+        systemDocChangedCallback_(*kind, st);
       }
     }
   }
@@ -1722,7 +1786,7 @@ void Session::flushUncommitted(const std::optional<std::uint32_t> docIndex) {
       st.repointCurrentVersion(curVersion);
       if (systemDocChangedCallback_) {
         if (const auto kind = systemDocKindForStoreIndex(sIdx)) {
-          systemDocChangedCallback_(*kind, st.textOf(curVersion));
+          systemDocChangedCallback_(*kind, st);
         }
       }
     }

@@ -106,7 +106,8 @@ public:
                   std::size_t vertexByteOffset,
                   std::uint32_t instanceCount) override;
   void drawGlyphBatches(std::span<const GlyphBatch> batches) override;
-  void requestPickingTag(int coordX, int coordY) override;
+  bool requestPickingTag(int coordX, int coordY,
+                         std::uint64_t requestId) override;
   std::optional<PickingResult> takePickingTag() override;
   FrameImage captureColorTarget() override;
   void waitIdle() override;
@@ -299,6 +300,7 @@ private:
     /// Pixel this frame's picking read was aimed at.
     int pickX{};
     int pickY{};
+    std::uint64_t pickRequestId{};
     /// A picking copy was recorded into this frame and its result has not been
     /// collected yet.
     bool pickPending{};

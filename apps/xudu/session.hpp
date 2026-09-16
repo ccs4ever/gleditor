@@ -84,22 +84,28 @@ struct RemoteCollaborator {
  */
 class VersionTextSource : public gleditor::TextSource {
 public:
-  VersionTextSource(std::string aText, MicroversionId aVersion,
-                    std::vector<std::uint32_t> aBreaks                     = {},
-                    std::vector<gleditor::LayoutBox> aBoxes                = {},
-                    std::vector<gleditor::BlockStyleRange> aBlockStyles    = {},
-                    std::string aName                                      = {},
-                    std::vector<gleditor::DecoratedRange> aDecoratedRanges = {})
+  VersionTextSource(
+      std::string aText, MicroversionId aVersion,
+      std::vector<std::uint32_t> aBreaks                        = {},
+      std::vector<gleditor::LayoutBox> aBoxes                   = {},
+      std::vector<gleditor::BlockStyleRange> aBlockStyles       = {},
+      std::string aName                                         = {},
+      std::vector<gleditor::DecoratedRange> aDecoratedRanges    = {},
+      std::shared_ptr<const render::PickSemanticTarget> aTarget = {})
       : contents(std::move(aText)), id(std::move(aVersion)),
         breaks(std::move(aBreaks)), mediaBoxes(std::move(aBoxes)),
         mediaBlockStyles(std::move(aBlockStyles)), customName(std::move(aName)),
-        ranges(std::move(aDecoratedRanges)) {}
+        ranges(std::move(aDecoratedRanges)), target(std::move(aTarget)) {}
 
   [[nodiscard]] std::string text() const override { return contents; }
   [[nodiscard]] std::string name() const override {
     return customName.empty() ? id.str() : customName;
   }
   [[nodiscard]] const MicroversionId &version() const { return id; }
+  [[nodiscard]] std::shared_ptr<const render::PickSemanticTarget>
+  pickSemanticTarget() const override {
+    return target;
+  }
   [[nodiscard]] std::vector<std::uint32_t> forcedBreaks() const override {
     return breaks;
   }
@@ -118,6 +124,7 @@ public:
 private:
   std::string contents;
   MicroversionId id;
+  std::shared_ptr<const render::PickSemanticTarget> target;
   std::vector<std::uint32_t> breaks;
   /// Each embedded media anchor's LayoutBox, and the BlockStyleRange
   /// centring it -- see Session::sourceFor(), which builds these alongside
@@ -201,7 +208,8 @@ public:
   /// this -- it would coalesce with adjacent locally-typed text into one
   /// piece libmagic cannot identify.
   MicroversionId insertMedia(std::uint32_t docIndex, std::uint32_t at,
-                             std::string_view bytes, std::string mimeType);
+                             std::string_view bytes, std::string mimeType,
+                             std::string filePath = "");
   MicroversionId insertBreak(std::uint32_t docIndex, std::uint32_t at);
   MicroversionId insertSpan(std::uint32_t docIndex, std::uint32_t at,
                             const PrimediaSpan &span);
@@ -253,6 +261,8 @@ public:
 
   InfoHash addTorrent(const std::string &torrentPath,
                       const std::string &dataRoot);
+  InfoHash addTorrentMemory(std::string_view torrentData,
+                            const std::string &dataRoot = ".");
 
   /**
    * @brief Name content by a magnet link.
@@ -507,7 +517,7 @@ public:
 
   // -- System Xanadocs & Subsystem Hot-Reload --------------------------------
   using SystemDocChangedCallback =
-      std::function<void(SystemDocKind kind, const std::string &content)>;
+      std::function<void(SystemDocKind kind, const Store &store)>;
 
   void setSystemDocChangedCallback(SystemDocChangedCallback cb) {
     systemDocChangedCallback_ = std::move(cb);
@@ -746,6 +756,8 @@ public:
 private:
   /// Rebuild the cached version for @p docIndex after an edit moved it.
   void refresh(std::uint32_t docIndex, const MicroversionId &version);
+  /// Persist the versions currently represented by views in each store.
+  void syncCurrentVersions(std::size_t storeIndex) const;
   /// Note that something a decoration depends on has changed.
   void invalidate() { epoch++; }
 

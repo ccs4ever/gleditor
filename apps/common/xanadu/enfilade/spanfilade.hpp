@@ -28,6 +28,7 @@
 #include <limits>
 #include <memory>
 #include <unordered_map>
+#include <unordered_set>
 #include <vector>
 
 #include "common/xanadu/enfilade/crum_node.hpp"
@@ -209,6 +210,15 @@ public:
   /// Index all cell content runs in @p manifold (Ruling U3).
   void indexManifold(const zigzag::Manifold &manifold);
 
+  /// Index cell content runs from @p manifold at view index @p manifoldIdx,
+  /// optionally restricted to @p allowedCells (Ruling U3).
+  void indexManifold(
+      uint32_t manifoldIdx, const zigzag::Manifold &manifold,
+      const std::unordered_set<zigzag::CellRef> *allowedCells = nullptr);
+
+  /// Bulk-index a universal viewing context.
+  void indexContext(const UniversalViewContext &ctx);
+
   /// Rebuild/balance all per-scroll interval enfilades.
   void build();
 
@@ -225,6 +235,13 @@ public:
    */
   [[nodiscard]] std::vector<Extent> occurrencesOf(const PrimediaSpan &span,
                                                   uint32_t docId = 0) const;
+
+  /**
+   * @brief Compute pairwise transclusion bands across open documents and cells
+   *        in @p ctx.
+   */
+  void placeTransclusions(const UniversalViewContext &ctx,
+                          std::vector<TransclusionPair> &pairs) const;
 
   /**
    * @brief Compute pairwise transclusion bands across open views.
@@ -246,6 +263,7 @@ public:
   static Spanfilade fromVersion(const Version &ver, uint32_t docId = 0);
   static Spanfilade fromViews(const std::vector<const Version *> &views);
   static Spanfilade fromManifold(const zigzag::Manifold &manifold);
+  static Spanfilade fromContext(const UniversalViewContext &ctx);
 
 private:
   std::unordered_map<ScrollId, ScrollSpanfilade> scrolls_;

@@ -25,7 +25,7 @@ class Session;
 /**
  * @class CollaboratorCaretOverlay
  * @brief Renders glowing multi-author remote carets, author nameplates, and
- *        selection highlights in 3D world space at 120 FPS.
+ *        selection highlights in 3D world space.
  */
 class CollaboratorCaretOverlay : public gleditor::FrameContributor {
 public:

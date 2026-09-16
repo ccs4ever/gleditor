@@ -540,7 +540,7 @@ the boundary is the type; this makes it also a bit.
 and 7.94 for the inline array — $2.7\times$, measured (§12.5). Two dependent loads (slot, then run)
 where the array needed one. At the traversal sizes this application performs — a radius-3 BFS
 visiting about sixty cells, so roughly 300 hops per frame — that is 6.3 µs against 2.4 µs, both
-under 0.08% of an 8.33 ms frame, and the same argument `compact_zzcell.hpp`'s own comment already
+both negligible at this traversal size, and the same argument `compact_zzcell.hpp`'s own comment already
 makes about its size. The falsifiable threshold: the run design saturates a frame at about 396,000
 hops, the array at about 1,049,000. **If a traversal is ever specified that visits more than ~100k
 cells per frame, revisit this ruling with that workload in hand.** Note also that the run is four
@@ -1581,7 +1581,7 @@ came back byte-identical across every regenerated fixture.
 
    **Measured: 4–5x on the shape of a frame.** Sixty short reads scattered over a 1 MiB torrent at
    this tree's 64 KiB piece size — the radius-3 BFS `stageVisibleCells` performs — land in eight
-   distinct pieces. Uncached that is 4.6–5.5 ms of SHA-1, which is most of an 8.33 ms frame on its
+   distinct pieces. Uncached that is 4.6–5.5 ms of SHA-1, which is substantial per-frame CPU work on its
    own; cached it is 0.9–1.4 ms, and what remains is reading each piece once rather than hashing it
    sixty times. The test asserts the mechanism — each distinct piece verified exactly once, every
    other read a hit — and prints the timing rather than asserting a ratio, because a timing
@@ -2290,7 +2290,7 @@ of the design; these come from the design.
 
 **R12 is unaffected, and better supported than it was.** Its decision never rested on the ratio but
 on the absolute numbers being noise at the traversal sizes this application performs: 300 hops is
-2.9 µs against an 8.33 ms frame, and the falsifiable threshold moves *in the ruling's favour* — a
+2.9 µs at the measured traversal size, and the falsifiable threshold moves *in the ruling's favour* — a
 frame saturates at roughly 860,000 hops rather than 396,000.
 
 Reading this honestly: **the inline array is genuinely faster — $2.7\times$ — and R12 removes it
@@ -2303,8 +2303,7 @@ anyway.** Three things decide it.
 - It is not smaller. 112 B/cell against 108, because the array carries eight slots whether or not
   the cell uses them and this workload uses five.
 - The absolute numbers are noise at the scale this application traverses. A radius-3 BFS visits
-  about sixty cells, so roughly 300 hops per frame: 2.4 µs for (A), 6.3 µs for (E), against an 8.33
-  ms budget. (E) saturates a frame at ≈396,000 hops and (A) at ≈1,049,000, so **the ruling is
+  about sixty cells, so roughly 300 hops per frame: 2.4 µs for (A), 6.3 µs for (E), against an render-path latency. (E) saturates a frame at ≈396,000 hops and (A) at ≈1,049,000, so **the ruling is
   falsified by any traversal specified to visit more than ~100k cells per frame** and by nothing
   smaller.
 

@@ -25,7 +25,7 @@ TenuousTetherOverlay::~TenuousTetherOverlay() = default;
 
 void TenuousTetherOverlay::setTether(FlyingTetherAnchor anchor) {
   for (auto &t : tethers_) {
-    if (t.docIndex == anchor.docIndex) {
+    if (t.targetKind == anchor.targetKind && t.targetId == anchor.targetId) {
       t = anchor;
       return;
     }
@@ -33,9 +33,10 @@ void TenuousTetherOverlay::setTether(FlyingTetherAnchor anchor) {
   tethers_.push_back(anchor);
 }
 
-void TenuousTetherOverlay::removeTether(const std::size_t docIndex) {
-  std::erase_if(tethers_, [docIndex](const FlyingTetherAnchor &t) {
-    return t.docIndex == docIndex;
+void TenuousTetherOverlay::removeTether(const std::size_t targetId,
+                                        const LinkTargetKind kind) {
+  std::erase_if(tethers_, [targetId, kind](const FlyingTetherAnchor &t) {
+    return t.targetKind == kind && t.targetId == targetId;
   });
 }
 

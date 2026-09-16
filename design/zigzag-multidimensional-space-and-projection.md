@@ -235,9 +235,9 @@ graph LR
 
 ______________________________________________________________________
 
-## 6. High-Throughput 120 FPS GPU Staging Pipeline
+## 6. High-Throughput GPU Staging Pipeline
 
-To render large multidimensional cell meshes at 120 FPS ($8.33\text{ms}$):
+To render large multidimensional cell meshes in real time ($8.33\text{ms}$):
 
 1. **Radial Neighborhood Extraction**:
    [`stageVisibleCells()`](apps/zigzag/core/unified_transclusion_engine.cpp) extracts visible cells

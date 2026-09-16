@@ -84,6 +84,27 @@ TEST(SampleXanadocsTest, TheSharedPermascrollExistsAndIsNonEmpty) {
       << "and should still hold it once opened";
 }
 
+TEST(SampleXanadocsTest, PermascrollPurityHasNoBinaryMediaBlobs) {
+  const auto activeSegment = kSampleBaseDir / "permascroll" / "active.primedia";
+  ASSERT_TRUE(fs::exists(activeSegment));
+  // Purity constraint: The entire author permascroll for all sample documents
+  // should hold purely text primedia (< 50 KB), with zero embedded raw media
+  // binaries.
+  EXPECT_LT(fs::file_size(activeSegment), 50000U);
+
+  std::ifstream in(activeSegment, std::ios::binary);
+  const std::string bytes{std::istreambuf_iterator<char>(in),
+                          std::istreambuf_iterator<char>()};
+  xudu::MagicMimeDetector magic;
+  const auto mime = magic.identifyBuffer(bytes.data(), bytes.size());
+  EXPECT_FALSE(xudu::MagicMimeDetector::isMediaMime(mime));
+  // Ensure no PNG, RIFF (WAV), or ftyp (MP4) signatures exist anywhere in the
+  // author permascroll
+  EXPECT_EQ(bytes.find("\x89PNG\r\n\x1a\n"), std::string::npos);
+  EXPECT_EQ(bytes.find("RIFF"), std::string::npos);
+  EXPECT_EQ(bytes.find("ftyp"), std::string::npos);
+}
+
 // -----------------------------------------------------------------------------
 // Core Hypertext: 8 Link Types & Emergent Transclusions
 // -----------------------------------------------------------------------------

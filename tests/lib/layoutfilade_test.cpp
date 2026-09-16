@@ -9,17 +9,17 @@
 #include <string>
 #include <vector>
 
-#include "common/xanadu/enfilade/layoutfilade.hpp"
+#include <gleditor/enfilade/layoutfilade.hpp>
 #include <gleditor/layout_box.hpp>
 
 namespace {
 
-using xanadu::enfilade::LayoutCrum;
-using xanadu::enfilade::LayoutDsp;
-using xanadu::enfilade::LayoutEntry;
-using xanadu::enfilade::LayoutEntryKind;
-using xanadu::enfilade::Layoutfilade;
-using xanadu::enfilade::LayoutWid;
+using gleditor::enfilade::LayoutCrum;
+using gleditor::enfilade::LayoutDsp;
+using gleditor::enfilade::LayoutEntry;
+using gleditor::enfilade::LayoutEntryKind;
+using gleditor::enfilade::Layoutfilade;
+using gleditor::enfilade::LayoutWid;
 
 TEST(LayoutfiladeTest, MonoidAxiomsAndAction) {
   // 1. LayoutDsp Monoid

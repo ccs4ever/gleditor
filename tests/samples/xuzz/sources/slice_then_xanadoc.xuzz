@@ -1,0 +1,8 @@
+# A slice can exist before its Xanadoc. The final two operations change the
+# two replay products independently, while both resolve from one latest head.
+genesis
+dimension d.1
+cell passage A slice cell
+text Xanadoc text added later
+cell-text passage A slice cell edited
+text-append	 and edited

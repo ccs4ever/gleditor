@@ -18,52 +18,102 @@
 
 #include <cstdint>
 #include <map>
+#include <span>
 #include <vector>
 
+#include <glm/vec3.hpp>
+
+#include "common/xanadu/universal_link_endpoint.hpp"
 #include "ops.hpp"
 #include "spool.hpp"
 #include "version.hpp"
 
+namespace zigzag {
+class Manifold;
+} // namespace zigzag
+
 namespace xanadu {
 
-/// One end of a link, found in a document that is open.
-struct LinkEnd {
-  std::uint32_t doc{};   ///< Index among the open documents.
-  std::uint32_t start{}; ///< Byte range of the content within that document.
-  std::uint32_t end{};
-  bool operator==(const LinkEnd &) const = default;
+/// One end of a link (re-exported UniversalLinkEnd).
+using LinkEnd = UniversalLinkEnd;
+
+/// A link whose two ends both landed in open views (re-exported
+/// UniversalLinkedPair).
+using LinkedPair = UniversalLinkedPair;
+
+/// A link with one end in an open view and the other in none (re-exported
+/// UniversalHalfLink).
+using HalfLink = UniversalHalfLink;
+
+/// An emergent transclusion pair (re-exported UniversalTransclusionPair).
+using TransclusionPair = UniversalTransclusionPair;
+
+/// High-density 32-byte transclusion pair.
+using CompactTransclusion = CompactTransclusionPair;
+
+/**
+ * @struct CellAnchor
+ * @brief World-space anchor and geometry for a multidimensional Zigzag cell.
+ *
+ * Provides decoupled geometric resolution for LinkBeams and morphic butterfly
+ * ribbons without requiring direct dependencies on ZigzagVisualizer.
+ */
+struct CellAnchor {
+  glm::vec3 position{0.0F, 0.0F, 0.0F}; ///< 3D center in world space
+  float width{180.0F};                  ///< Visual quad width
+  float height{60.0F};                  ///< Visual quad height
+  float lineHeight{14.0F};              ///< Line height within cell
+  glm::vec3 normal{0.0F, 0.0F, 1.0F};   ///< Surface normal vector
 };
 
-/// A link whose two ends both landed in open documents: one connection to
-/// draw.
-struct LinkedPair {
-  std::uint64_t link{};
-  LinkType type{LinkType::Comment};
-  ProminenceTier tier{ProminenceTier::Author};
-  LinkEnd from; ///< The left list, which is the end the link was attached at.
-  LinkEnd to;   ///< The right list, which is what it points at.
+/**
+ * @struct UniversalViewContext
+ * @brief Unified cross-domain viewing context encompassing 2D Xanadocs and
+ *        multidimensional Zigzag manifolds.
+ */
+struct UniversalViewContext {
+  std::vector<const Version *> docViews;
+  std::vector<const zigzag::Manifold *> manifoldViews;
+  std::vector<zigzag::CellRef>
+      manifoldFoci;  ///< Optional focus cell per manifold view (0 = home)
+  int cellRadius{3}; ///< Active spatial bounding radius (-1 for unbounded)
 };
 
-/// A link with one end in an open document and the other in none -- the
-/// ordinary case, since a link is made to content and not to whatever happens
-/// to be open.
-struct HalfLink {
-  std::uint64_t link{};
-  LinkType type{LinkType::Comment};
-  ProminenceTier tier{ProminenceTier::Author};
-  LinkEnd here;
-  /// The spans of the end that is nowhere, for finding a version showing it.
-  std::vector<PrimediaSpan> elsewhere;
+/**
+ * @struct TransclusionLoom
+ * @brief Bundled laminar stream of adjacent transclusions along a Zigzag
+ * dimension.
+ *
+ * When consecutive spans of a Xanadoc are transcluded into cells along a single
+ * Zigzag dimension rank (e.g. an outline along d.sequence), they form a
+ * continuous golden loom rather than criss-crossing separate ribbons.
+ */
+struct TransclusionLoom {
+  std::uint32_t docIndex{0};
+  zigzag::DimRef dimension{zigzag::noCell};
+  bool posward{true};
+  std::vector<std::size_t>
+      strandIndices; ///< indices into transclusion pair/strand array
+  std::uint32_t docStartOffset{0};
+  std::uint32_t docEndOffset{0};
+  zigzag::CellRef headCell{zigzag::noCell};
+  zigzag::CellRef tailCell{zigzag::noCell};
 };
 
-/// A transclusion where identical primedia spans appear across distinct open
-/// documents.
-struct TransclusionPair {
-  LinkEnd from;
-  LinkEnd to;
-  PrimediaSpan span;
-  bool operator==(const TransclusionPair &) const = default;
-};
+/**
+ * @brief Discover emergent transclusions across open documents and cells in
+ *        @p ctx.
+ */
+void placeTransclusions(const UniversalViewContext &ctx,
+                        std::vector<TransclusionPair> &pairs);
+
+/**
+ * @brief Detect and cluster contiguous transclusions between document passages
+ *        and cells along a single manifold dimension rank.
+ */
+[[nodiscard]] std::vector<TransclusionLoom>
+detectTransclusionLooms(const UniversalViewContext &ctx,
+                        std::span<const TransclusionPair> pairs);
 
 /**
  * @brief Discover emergent transclusions (shared primedia spans) between open
@@ -71,6 +121,15 @@ struct TransclusionPair {
  */
 void placeTransclusions(const std::vector<const Version *> &views,
                         std::vector<TransclusionPair> &pairs);
+
+/**
+ * @brief Sort @p links into the ones that run between open views in @p ctx
+ *        and the ones that run off them.
+ */
+void placeLinks(const std::map<std::uint64_t, Link> &links,
+                const UniversalViewContext &ctx,
+                std::vector<LinkedPair> &between,
+                std::vector<HalfLink> &leaving);
 
 /**
  * @brief Sort @p links into the ones that run between @p views and the ones

@@ -113,6 +113,11 @@ class Store : public SpanReader {
 public:
   Store();
   explicit Store(std::shared_ptr<UserPermascroll> userPermascroll);
+
+  /// Stable persisted identity of this document, not of one revision of it.
+  [[nodiscard]] const DocumentId &documentId() const noexcept {
+    return documentId_;
+  }
   // -- OSMIC's three server functions ---------------------------------------
 
   /**
@@ -919,6 +924,7 @@ private:
   void adoptOpRecords(const std::vector<OpRecord> &records);
 
   std::shared_ptr<UserPermascroll> userPermascroll_;
+  DocumentId documentId_;
   /// Scrolls other than the local spool, in the order they were first
   /// recorded. A span's ScrollId is one more than the index here, so that zero
   /// stays the local spool.

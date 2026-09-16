@@ -128,6 +128,7 @@ bool LinkForgeWidget::forge(Session &session,
   session.addLink(activeDocIndex, std::move(link));
   clearLeft();
   clearRight();
+  triggerBurst();
   return true;
 }
 
@@ -182,18 +183,35 @@ void LinkForgeWidget::draw(gleditor::Canvas &canvas, RenderState &state) {
 
   canvas.addText(state, leftX_ + 4.0F, leftY_ + leftH_ - 14.0F, "HOMESTEAD",
                  0x06B6D4FF, 0);
-  const std::string leftCountStr =
-      std::to_string(leftSpans_.size()) +
-      (leftSpans_.size() == 1 ? " Span" : " Spans");
-  canvas.addText(state, leftX_ + 4.0F, leftY_ + 14.0F, leftCountStr, 0xE2E8F0FF,
-                 0);
 
   if (!leftSpans_.empty()) {
+    const auto &item = leftSpans_.back();
+    if (item.originKind == PouchOriginKind::ZigzagCell) {
+      const std::string cellHdr =
+          "[Cell #" + std::to_string(item.originCell) + "]";
+      canvas.addText(state, leftX_ + 4.0F, leftY_ + leftH_ - 30.0F, cellHdr,
+                     0x10B981FF, 0);
+      const std::string coord =
+          item.originRankCoord.empty() ? "d.1" : item.originRankCoord;
+      canvas.addText(state, leftX_ + 4.0F, leftY_ + leftH_ - 44.0F, coord,
+                     0x94A3B8FF, 0);
+    } else {
+      canvas.addText(state, leftX_ + 4.0F, leftY_ + leftH_ - 30.0F,
+                     "[Doc Card]", 0x38BDF8FF, 0);
+      const std::string info =
+          "OSMIC: " + std::to_string(item.span.length) + "B";
+      canvas.addText(state, leftX_ + 4.0F, leftY_ + leftH_ - 44.0F, info,
+                     0x94A3B8FF, 0);
+    }
+
     canvas.setTag(render::tagKindOverlay, kTagClaspClearLeft);
     canvas.addRect(leftX_ + leftW_ - 16.0F, leftY_ + leftH_ - 16.0F, 14.0F,
                    14.0F, 0xDC2626CC);
     canvas.addText(state, leftX_ + leftW_ - 13.0F, leftY_ + leftH_ - 4.0F, "x",
                    0xFFFFFFFF, 0);
+  } else {
+    canvas.addText(state, leftX_ + 4.0F, leftY_ + 14.0F, "Empty Slot",
+                   0x64748BFF, 0);
   }
 
   // 3. Right Toward Drop Slot (Magenta aura)
@@ -210,18 +228,35 @@ void LinkForgeWidget::draw(gleditor::Canvas &canvas, RenderState &state) {
 
   canvas.addText(state, rightX_ + 4.0F, rightY_ + rightH_ - 14.0F, "TOWARD",
                  0xEC4899FF, 0);
-  const std::string rightCountStr =
-      std::to_string(rightSpans_.size()) +
-      (rightSpans_.size() == 1 ? " Span" : " Spans");
-  canvas.addText(state, rightX_ + 4.0F, rightY_ + 14.0F, rightCountStr,
-                 0xE2E8F0FF, 0);
 
   if (!rightSpans_.empty()) {
+    const auto &item = rightSpans_.back();
+    if (item.originKind == PouchOriginKind::ZigzagCell) {
+      const std::string cellHdr =
+          "[Cell #" + std::to_string(item.originCell) + "]";
+      canvas.addText(state, rightX_ + 4.0F, rightY_ + rightH_ - 30.0F, cellHdr,
+                     0x10B981FF, 0);
+      const std::string coord =
+          item.originRankCoord.empty() ? "d.1" : item.originRankCoord;
+      canvas.addText(state, rightX_ + 4.0F, rightY_ + rightH_ - 44.0F, coord,
+                     0x94A3B8FF, 0);
+    } else {
+      canvas.addText(state, rightX_ + 4.0F, rightY_ + rightH_ - 30.0F,
+                     "[Doc Card]", 0xEC4899FF, 0);
+      const std::string info =
+          "OSMIC: " + std::to_string(item.span.length) + "B";
+      canvas.addText(state, rightX_ + 4.0F, rightY_ + rightH_ - 44.0F, info,
+                     0x94A3B8FF, 0);
+    }
+
     canvas.setTag(render::tagKindOverlay, kTagClaspClearRight);
     canvas.addRect(rightX_ + rightW_ - 16.0F, rightY_ + rightH_ - 16.0F, 14.0F,
                    14.0F, 0xDC2626CC);
     canvas.addText(state, rightX_ + rightW_ - 13.0F, rightY_ + rightH_ - 4.0F,
                    "x", 0xFFFFFFFF, 0);
+  } else {
+    canvas.addText(state, rightX_ + 4.0F, rightY_ + 14.0F, "Empty Slot",
+                   0x64748BFF, 0);
   }
 
   // 4. Center Relation Nexus
@@ -254,6 +289,29 @@ void LinkForgeWidget::draw(gleditor::Canvas &canvas, RenderState &state) {
   const std::string forgeText = canForge() ? "FORGE CLASP !" : "EMPTY SLOTS";
   canvas.addText(state, nexusX + 6.0F, forgeBtnY + 15.0F, forgeText,
                  canForge() ? 0xFFFFFFFF : 0x94A3B8FF, 0);
+
+  // 5. Interactive Laser Tether
+  if (guideActive_) {
+    canvas.setTag(render::tagKindOverlay, 0);
+    canvas.addLine(guideOriginX_, guideOriginY_, guideTargetX_, guideTargetY_,
+                   2.0F, 0x38BDF8DD);
+  }
+
+  // 6. Photon Burst Forging Animation
+  if (burstTimer_ > 0.0F) {
+    canvas.setTag(render::tagKindOverlay, 0);
+    const float prog   = burstProgress();
+    const float radius = prog * (width_ * 0.5F);
+    const auto alpha =
+        static_cast<std::uint32_t>((1.0F - prog) * 255.0F) & 0xFFU;
+    const std::uint32_t burstColor = 0xFDE04700U | alpha;
+    const float centerX            = x_ + width_ * 0.5F;
+    const float centerY            = y_ + height_ * 0.5F;
+    canvas.addLine(centerX - radius, centerY, centerX + radius, centerY, 2.5F,
+                   burstColor);
+    canvas.addLine(centerX, centerY - radius, centerX, centerY + radius, 2.5F,
+                   burstColor);
+  }
 }
 
 } // namespace xudu

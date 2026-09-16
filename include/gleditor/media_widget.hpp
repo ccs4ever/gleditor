@@ -128,6 +128,16 @@ public:
   void setTitle(std::string title);
   [[nodiscard]] const std::string &title() const { return title_; }
 
+  /// Identity of this card in the picking and accessibility namespaces.
+  [[nodiscard]] std::uint32_t widgetId() const { return widgetId_; }
+
+  /// The packed picking/accessibility root for this card.
+  ///
+  /// Its high bits are @ref widgetId(); its low 12 bits are fixed child IDs
+  /// such as @ref tagPlay and @ref tagSeekBase. This keeps every control's
+  /// local identity stable while preserving a distinct namespace per card.
+  [[nodiscard]] std::uint32_t tagBase() const { return tagBase_; }
+
   // -- FrameContributor -------------------------------------------------------
   void deviceReady(render::RenderDevice &device,
                    const render::PipelineDesc &documentPipeline) override;
@@ -184,6 +194,11 @@ public:
   static constexpr float anchorGapPx = 20.0F;
 
 private:
+  static constexpr std::uint32_t tagSubElementBits = 12U;
+  static constexpr std::uint32_t tagSubElementMask =
+      (1U << tagSubElementBits) - 1U;
+  static_assert(tagSeekMax <= tagSubElementMask);
+
   /// This widget's bottom-left corner in its own page's pixel space, and
   /// which page -- the one formula drawFrame() (to build a world transform)
   /// and rectFor() (to build a beam anchor) both derive from, so the two
@@ -271,7 +286,8 @@ private:
   bool visible_{true};
   std::string title_;
   std::uint64_t revision_{1};
-  std::uint32_t tagBase_{0x8000U};
+  std::uint32_t widgetId_{0};
+  std::uint32_t tagBase_{0};
 };
 
 using MediaWidgetPtr = std::shared_ptr<MediaWidget>;

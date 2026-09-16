@@ -3,11 +3,13 @@
  * @brief Implementation of the Xanadu ZigZag visualizer on gleditor.
  */
 #include "zigzag_visualizer.hpp"
+#include "core/format_resolver.hpp"
 #include "core/zzcore.hpp"
 #include "core/zzstructure_loader.hpp"
 
 #include <algorithm>
 #include <cmath>
+#include <cstring>
 #include <filesystem>
 #include <format>
 #include <iostream>
@@ -29,24 +31,38 @@ namespace {
 
 using gleditor::color::packRgba;
 
-std::string shortenText(const std::string_view text,
-                        const std::size_t maxLen = 32) {
-
-  if (text.size() <= maxLen) {
-    return std::string{text};
-  }
-  return std::string{text.substr(0, maxLen)} + "...";
-}
-
 } // namespace
 
 ZigzagVisualizer::ZigzagVisualizer(std::string aFontName)
     : fontName_(std::move(aFontName)),
       last_frame_time_(std::chrono::steady_clock::now()) {
+  presentation_transform_ =
+      glm::scale(glm::mat4{1.0F}, glm::vec3{Doc::pixelsToWorld});
   populateFallbackStructure();
 }
 
 ZigzagVisualizer::~ZigzagVisualizer() = default;
+
+void ZigzagVisualizer::setCellRadius(const int radius) noexcept {
+  const int clamped = std::max(1, radius);
+  if (scene_.neighborhood_radius == clamped) {
+    return;
+  }
+  scene_.neighborhood_radius = clamped;
+  rebuildActiveViewTopology();
+  invalidateAccessibility();
+}
+
+void ZigzagVisualizer::setPresentationConfig(
+    xanadu::ZigzagPresentationConfig config) {
+  if (std::memcmp(&presentation_config_, &config, sizeof(config)) == 0) {
+    return;
+  }
+  presentation_config_ = config;
+  cell_layouts_dirty_  = true;
+  rebuildActiveViewTopology();
+  invalidateAccessibility();
+}
 
 void ZigzagVisualizer::deviceReady(
     render::RenderDevice &device,
@@ -72,6 +88,14 @@ bool ZigzagVisualizer::busy() const {
     }
   }
   return false;
+}
+
+std::string ZigzagVisualizer::documentId() const {
+  return engine_ ? engine_->store().documentId().str() : std::string{};
+}
+
+std::string ZigzagVisualizer::documentVersion() const {
+  return engine_ ? engine_->head().str() : std::string{};
 }
 
 void ZigzagVisualizer::populateFallbackStructure() {
@@ -129,8 +153,9 @@ void ZigzagVisualizer::populateFallbackStructure() {
   adoptDocument(std::move(doc), "fallback");
 }
 
-void ZigzagVisualizer::adoptDocument(ZzStructureDocument &&doc,
-                                     std::string sourcePath) {
+void ZigzagVisualizer::adoptDocument(
+    ZzStructureDocument &&doc, std::string sourcePath,
+    const std::unordered_map<CellID, XuduProjectionProvenance> *const origins) {
   structure_name_     = doc.meta.name.empty() ? sourcePath : doc.meta.name;
   current_slice_path_ = std::move(sourcePath);
   current_view_       = doc.view;
@@ -156,9 +181,22 @@ void ZigzagVisualizer::adoptDocument(ZzStructureDocument &&doc,
     };
   }
 
-  store_            = std::make_unique<xanadu::Store>();
+  ownedStore_       = std::make_unique<xanadu::Store>();
+  store_            = ownedStore_.get();
   const auto sliced = sliceToStore(doc, *store_);
-  engine_           = std::make_unique<UnifiedTransclusionEngine>(*store_);
+  sourceOrigins_.clear();
+  pickTargets_.clear();
+  pickTargetVersion_.clear();
+  if (nullptr != origins) {
+    sourceOrigins_.reserve(origins->size());
+    for (const auto &[projectedCell, source] : *origins) {
+      if (const auto minted = sliced.cells.find(projectedCell);
+          minted != sliced.cells.end()) {
+        sourceOrigins_.emplace(minted->second, source);
+      }
+    }
+  }
+  engine_ = std::make_unique<UnifiedTransclusionEngine>(*store_);
 
   // The dimensions this slice is navigated along, minted here because adopting
   // a document is the moment a document is *built* -- the one place a write
@@ -196,8 +234,31 @@ void ZigzagVisualizer::adoptDocument(ZzStructureDocument &&doc,
 void ZigzagVisualizer::adoptXuduStore(
     const xanadu::Store &store,
     const std::vector<xanadu::MicroversionId> &versions) {
-  auto doc = projectStoreToZigzag(store, versions);
-  adoptDocument(std::move(doc), "xudu_store");
+  auto projected = projectStoreWithProvenance(store, versions);
+  adoptDocument(std::move(projected.document), "xudu_store",
+                &projected.sourceByProjectedCell);
+}
+
+void ZigzagVisualizer::bindXuduStore(xanadu::Store &store,
+                                     const xanadu::MicroversionId &version) {
+  engine_.reset();
+  ownedStore_.reset();
+  store_          = &store;
+  engine_         = std::make_unique<UnifiedTransclusionEngine>(store, version);
+  structure_name_ = "Xudu/Zigzag unified store";
+  current_slice_path_.clear();
+
+  accursed_cell_focus_ = engine_->manifold().home();
+  if (accursed_cell_focus_ == 0 && engine_->manifold().cellCount() > 0) {
+    accursed_cell_focus_ = engine_->manifold().cells().front().birthOp;
+  }
+  visible_cells_.clear();
+  rebuildActiveViewTopology();
+  for (auto &[id, cell] : visible_cells_) {
+    cell.current_pos   = cell.target_pos;
+    cell.current_alpha = cell.target_alpha;
+  }
+  invalidateAccessibility();
 }
 
 void ZigzagVisualizer::adoptXuduDocs(const std::vector<XuduDocInput> &docs,
@@ -639,7 +700,95 @@ ZigzagVisualizer::dimensionVisual(const DimID &dimension) const {
   };
 }
 
+CellLayoutMetrics
+ZigzagVisualizer::measureCellLayout(const RenderStateCell &cell,
+                                    const bool isFocus) const {
+  static_cast<void>(isFocus);
+  const float widthLimit = view_mode_ == ViewMode::CellContent
+                               ? presentation_config_.contentMaxWidthPx
+                               : presentation_config_.topologyMaxWidthPx;
+
+  CellLayoutMetrics metrics;
+  metrics.idText = std::format("#{}", cell.id);
+  if (!cell.type.empty()) {
+    metrics.badgeText = "[" + cell.type + "]";
+  } else if (!cell.mime_type.empty()) {
+    metrics.badgeText = "<" + cell.mime_type + ">";
+  }
+  if (cell.is_clone) {
+    if (!metrics.badgeText.empty()) {
+      metrics.badgeText += " ";
+    }
+    metrics.badgeText += std::format("[clone #{}]", cell.clone_master_id);
+  }
+
+  if (!worldCanvas_) {
+    // Before deviceReady() no font has been selected, so only the explicitly
+    // configured breathing room is knowable. The real measurement replaces
+    // this before the first rendered frame.
+    metrics.width = 2.0F * presentation_config_.cellHorizontalPaddingPx;
+    metrics.height = 2.0F * presentation_config_.cellVerticalPaddingPx;
+    metrics.labelWidthLimit = widthLimit;
+    metrics.labelLineHeight = 2.0F * presentation_config_.cellVerticalPaddingPx;
+    return metrics;
+  }
+
+  const auto titleMetrics = worldCanvas_->measureText(metrics.idText);
+  worldCanvas_->setTextWidthLimit(static_cast<int>(widthLimit));
+  const auto labelMetrics = worldCanvas_->measureText(cell.text);
+  worldCanvas_->setTextWidthLimit(0);
+  const auto badgeMetrics = metrics.badgeText.empty()
+                                ? gleditor::TextMetrics{}
+                                : worldCanvas_->measureText(metrics.badgeText);
+
+  metrics.labelWidthLimit = widthLimit;
+  metrics.labelLineHeight = labelMetrics.height;
+  metrics.width =
+      std::max({titleMetrics.width, labelMetrics.width, badgeMetrics.width}) +
+      (2.0F * presentation_config_.cellHorizontalPaddingPx);
+
+  const bool hasBadge = !metrics.badgeText.empty();
+  const float gaps =
+      presentation_config_.cellBandGapPx * (hasBadge ? 2.0F : 1.0F);
+  metrics.height = (2.0F * presentation_config_.cellVerticalPaddingPx) +
+                   titleMetrics.height + labelMetrics.height +
+                   badgeMetrics.height + gaps;
+
+  metrics.titleTop = metrics.height - presentation_config_.cellVerticalPaddingPx;
+  const float titleBottom = metrics.titleTop - titleMetrics.height;
+  const float labelBottom =
+      hasBadge ? presentation_config_.cellVerticalPaddingPx +
+                     badgeMetrics.height + presentation_config_.cellBandGapPx
+               : presentation_config_.cellVerticalPaddingPx;
+  const float labelCeiling = titleBottom - presentation_config_.cellBandGapPx;
+  metrics.labelTop =
+      labelBottom + ((labelCeiling - labelBottom + labelMetrics.height) / 2.0F);
+  metrics.badgeTop =
+      presentation_config_.cellVerticalPaddingPx + badgeMetrics.height;
+  return metrics;
+}
+
+const CellLayoutMetrics &
+ZigzagVisualizer::cellLayout(const CellID id, const RenderStateCell &cell,
+                             const bool isFocus) const {
+  if (const auto found = cell_layouts_.find(id); found != cell_layouts_.end()) {
+    return found->second;
+  }
+  return cell_layouts_.emplace(id, measureCellLayout(cell, isFocus))
+      .first->second;
+}
+
+void ZigzagVisualizer::refreshCellLayouts() {
+  cell_layouts_.clear();
+  cell_layouts_.reserve(visible_cells_.size());
+  for (const auto &[id, cell] : visible_cells_) {
+    cell_layouts_.emplace(id,
+                          measureCellLayout(cell, id == accursed_cell_focus_));
+  }
+}
+
 void ZigzagVisualizer::rebuildActiveViewTopology() {
+  cell_layouts_dirty_ = true;
   for (auto &[id, render_cell] : visible_cells_) {
     render_cell.target_alpha = 0.0F;
   }
@@ -653,14 +802,21 @@ void ZigzagVisualizer::rebuildActiveViewTopology() {
 
   if (!visible_cells_.contains(accursed_cell_focus_)) {
     visible_cells_[accursed_cell_focus_] = RenderStateCell{
-        .id              = accursed_cell_focus_,
-        .text            = focusInfo.text,
-        .type            = focusInfo.role,
-        .mime_type       = focusInfo.mime_type,
-        .media_path      = focusInfo.media_path,
-        .is_image        = focusInfo.is_image,
-        .is_clone        = focusInfo.is_clone,
-        .clone_master_id = focusInfo.clone_master_id,
+        .id               = accursed_cell_focus_,
+        .text             = focusInfo.text,
+        .type             = focusInfo.role,
+        .mime_type        = focusInfo.mime_type,
+        .media_path       = focusInfo.media_path,
+        .is_image         = focusInfo.is_image,
+        .is_clone         = focusInfo.is_clone,
+        .clone_master_id  = focusInfo.clone_master_id,
+        .current_pos      = {},
+        .target_pos       = {},
+        .current_alpha    = 0.0F,
+        .target_alpha     = 1.0F,
+        .base_color       = {},
+        .decorated_ranges = {},
+        .block_styles     = {},
     };
   } else {
     visible_cells_[accursed_cell_focus_].text       = focusInfo.text;
@@ -673,10 +829,24 @@ void ZigzagVisualizer::rebuildActiveViewTopology() {
         focusInfo.clone_master_id;
   }
 
+  const xanadu::FormatResolver formatResolver(engine_->store());
+  auto updateCellFormatting = [&](RenderStateCell &rc, const CellRef cr) {
+    const auto *slot = engine_->manifold().slot(cr);
+    if (__builtin_expect(slot && slot->formatFlags != 0, 0)) {
+      auto res            = formatResolver.resolveCell(engine_->manifold(), cr);
+      rc.decorated_ranges = std::move(res.decoratedRanges);
+      rc.block_styles     = std::move(res.blockStyles);
+    } else {
+      rc.decorated_ranges.clear();
+      rc.block_styles.clear();
+    }
+  };
+
   auto &focusRenderState        = visible_cells_[accursed_cell_focus_];
-  focusRenderState.target_pos   = glm::vec3{0.0F, 0.0F, 0.0F};
-  focusRenderState.target_alpha = 1.0F;
+  focusRenderState.target_pos   = glm::vec3{0.0F, 0.0F, depth_tier_};
+  focusRenderState.target_alpha = depth_tier_opacity_;
   focusRenderState.base_color   = scene_.focus_color;
+  updateCellFormatting(focusRenderState, focusRef);
 
   auto mapNeighbor = [&](const CellRef parentId, const CellRef childId,
                          const glm::vec3 &offset, const glm::vec3 &axisColor) {
@@ -687,15 +857,21 @@ void ZigzagVisualizer::rebuildActiveViewTopology() {
 
     if (!visible_cells_.contains(childId)) {
       RenderStateCell newCell{
-          .id              = childId,
-          .text            = childInfo.text,
-          .type            = childInfo.role,
-          .mime_type       = childInfo.mime_type,
-          .media_path      = childInfo.media_path,
-          .is_image        = childInfo.is_image,
-          .is_clone        = childInfo.is_clone,
-          .clone_master_id = childInfo.clone_master_id,
-          .current_pos     = visible_cells_[parentId].current_pos,
+          .id               = childId,
+          .text             = childInfo.text,
+          .type             = childInfo.role,
+          .mime_type        = childInfo.mime_type,
+          .media_path       = childInfo.media_path,
+          .is_image         = childInfo.is_image,
+          .is_clone         = childInfo.is_clone,
+          .clone_master_id  = childInfo.clone_master_id,
+          .current_pos      = visible_cells_[parentId].current_pos,
+          .target_pos       = {},
+          .current_alpha    = 0.0F,
+          .target_alpha     = depth_tier_opacity_,
+          .base_color       = {},
+          .decorated_ranges = {},
+          .block_styles     = {},
       };
       visible_cells_[childId] = newCell;
     } else {
@@ -710,20 +886,38 @@ void ZigzagVisualizer::rebuildActiveViewTopology() {
 
     auto &childCell        = visible_cells_[childId];
     childCell.target_pos   = visible_cells_[parentId].target_pos + offset;
-    childCell.target_alpha = 1.0F;
+    childCell.target_alpha = depth_tier_opacity_;
     childCell.base_color   = axisColor;
+    updateCellFormatting(childCell, childId);
   };
 
   const DimensionVisual xVisual = dimensionVisual(current_view_.x_dimension);
   const DimensionVisual yVisual = dimensionVisual(current_view_.y_dimension);
   const DimensionVisual zVisual = dimensionVisual(current_view_.z_dimension);
 
-  const float xSpace =
-      (view_mode_ == ViewMode::CellContent) ? 260.0F : xVisual.spacing;
-  const float ySpace =
-      (view_mode_ == ViewMode::CellContent) ? 140.0F : yVisual.spacing;
-  const float zSpace =
-      (view_mode_ == ViewMode::CellContent) ? 180.0F : zVisual.spacing;
+  float widestCell  = 0.0F;
+  float tallestCell = 0.0F;
+  for (const auto &[id, visible] : visible_cells_) {
+    const auto &layout = cellLayout(id, visible, id == accursed_cell_focus_);
+    widestCell         = std::max(widestCell, layout.width);
+    tallestCell        = std::max(tallestCell, layout.height);
+  }
+  const auto &focusLayout =
+      cellLayout(accursed_cell_focus_, focusRenderState, true);
+  // A content-view rank is spaced from the measured extents of the cards it
+  // contains. The clearance is a reading policy; the extents are not.
+  const float xSpace = view_mode_ == ViewMode::CellContent
+                           ? ((focusLayout.width + widestCell) / 2.0F) +
+                                 presentation_config_.rankClearancePx
+                           : xVisual.spacing;
+  const float ySpace = view_mode_ == ViewMode::CellContent
+                           ? ((focusLayout.height + tallestCell) / 2.0F) +
+                                 presentation_config_.rankClearancePx
+                           : yVisual.spacing;
+  const float zSpace = view_mode_ == ViewMode::CellContent
+                           ? (std::max(focusLayout.width, widestCell) / 2.0F) +
+                                 presentation_config_.rankClearancePx
+                           : zVisual.spacing;
 
   const int radius = std::max(1, scene_.neighborhood_radius);
 
@@ -841,6 +1035,26 @@ void ZigzagVisualizer::toggleViewMode() {
                                                   : ViewMode::CellContent);
 }
 
+void ZigzagVisualizer::setDepthTier(const float baseDepthZ,
+                                    const float opacityMultiplier) {
+  const float deltaZ  = baseDepthZ - depth_tier_;
+  depth_tier_         = baseDepthZ;
+  depth_tier_opacity_ = std::clamp(opacityMultiplier, 0.0F, 1.0F);
+  for (auto &[id, cell] : visible_cells_) {
+    cell.current_pos.z += deltaZ;
+  }
+  rebuildActiveViewTopology();
+  invalidateAccessibility();
+}
+
+void ZigzagVisualizer::setPresentationOrigin(const glm::vec3 origin) {
+  presentation_origin_ = origin;
+  presentation_transform_ =
+      glm::translate(glm::mat4{1.0F}, origin) *
+      glm::scale(glm::mat4{1.0F}, glm::vec3{Doc::pixelsToWorld});
+  invalidateAccessibility();
+}
+
 void ZigzagVisualizer::swapDimensions(const int axis1, const int axis2) {
   std::array<DimID *, 3> dims = {&current_view_.x_dimension,
                                  &current_view_.y_dimension,
@@ -870,17 +1084,37 @@ void ZigzagVisualizer::cycleDimensions(const bool forward) {
 
 bool ZigzagVisualizer::picked(const render::PickingResult &pick,
                               RenderState &) {
-  if (pick.tag.kind == render::tagKindOverlay && pick.tag.clusterIndex != 0) {
-    const auto targetId = static_cast<CellRef>(pick.tag.clusterIndex);
-    if (engine_ && engine_->findCell(targetId)) {
-      navigateFocusTo(targetId);
-      return true;
-    }
+  if (pick.tag.kind != render::tagKindOverlay || !engine_ ||
+      !pick.semanticTarget || !pick.semanticTarget->cellRef ||
+      pick.semanticTarget->documentId != engine_->store().documentId().str() ||
+      pick.semanticTarget->microversion != engine_->head().str()) {
+    return false;
+  }
+  const auto targetId = static_cast<CellRef>(*pick.semanticTarget->cellRef);
+  if (!isEphemeral(targetId) && engine_->findCell(targetId)) {
+    navigateFocusTo(targetId);
+    return true;
   }
   return false;
 }
 
 void ZigzagVisualizer::drawFrame(gleditor::FrameContext &ctx) {
+  if (presentationTransformResolver_) {
+    const auto transform = presentationTransformResolver_();
+    if (!transform) {
+      return;
+    }
+    presentation_transform_ = *transform;
+    presentation_origin_    = glm::vec3(presentation_transform_[3]);
+  }
+  if (presentationOriginResolver_) {
+    if (const auto origin = presentationOriginResolver_();
+        origin.has_value() && *origin != presentation_origin_) {
+      presentation_origin_ = *origin;
+      invalidateAccessibility();
+    }
+  }
+
   const auto now = std::chrono::steady_clock::now();
   const float deltaTime =
       std::chrono::duration<float>(now - last_frame_time_).count();
@@ -890,6 +1124,16 @@ void ZigzagVisualizer::drawFrame(gleditor::FrameContext &ctx) {
 
   if (!beams_ || !worldCanvas_ || !hudCanvas_) {
     return;
+  }
+
+  if (cell_layouts_dirty_) {
+    // The first pass measures the existing neighborhood; rebuilding can add a
+    // newly discovered neighbour, so measure once more before publishing this
+    // stable geometry to drawing, anchors, and the next rank walk.
+    refreshCellLayouts();
+    rebuildActiveViewTopology();
+    refreshCellLayouts();
+    cell_layouts_dirty_ = false;
   }
 
   // --- 1. Draw 3D Connection Beams ---
@@ -944,7 +1188,8 @@ void ZigzagVisualizer::drawFrame(gleditor::FrameContext &ctx) {
           const std::uint32_t col = packRgba(visual.color.r, visual.color.g,
                                              visual.color.b, edgeAlpha);
 
-          beams_->add(cell.current_pos, neighborCell.current_pos, 4.0F, col,
+          beams_->add(cell.current_pos, neighborCell.current_pos,
+                      presentation_config_.connectionBeamWidthPx, col,
                       static_cast<std::uint32_t>(id));
         }
       }
@@ -978,7 +1223,8 @@ void ZigzagVisualizer::drawFrame(gleditor::FrameContext &ctx) {
             const std::uint32_t col = packRgba(visual.color.r, visual.color.g,
                                                visual.color.b, edgeAlpha);
 
-            beams_->add(cell.current_pos, neighborCell.current_pos, 4.0F, col,
+            beams_->add(cell.current_pos, neighborCell.current_pos,
+                        presentation_config_.connectionBeamWidthPx, col,
                         static_cast<std::uint32_t>(id));
           }
         }
@@ -988,33 +1234,61 @@ void ZigzagVisualizer::drawFrame(gleditor::FrameContext &ctx) {
 
   if (beams_->pending() > 0) {
     beams_->commit();
-    beams_->draw(ctx.state, ctx.viewProjection, 1.0F, 0);
+    beams_->draw(ctx.state, ctx.viewProjection * presentation_transform_, 1.0F,
+                 0);
   }
 
   // --- 2. Draw 3D Cell Nodes & Text ---
   worldCanvas_->clear();
+  const auto pickScope = ctx.state.allocateOverlayPickScope();
+  worldCanvas_->setIdentity(pickScope, 0);
+  const auto &pickStore  = engine_->store();
+  const auto pickVersion = engine_->head().str();
+  if (pickTargetVersion_ != pickVersion) {
+    pickTargets_.clear();
+    pickTargetVersion_ = pickVersion;
+  }
 
   for (const auto &[id, cell] : visible_cells_) {
     if (cell.current_alpha < 0.02F) {
       continue;
     }
 
+    const auto cellRef = static_cast<CellRef>(id);
+    auto &target       = pickTargets_[cellRef];
+    if (!target) {
+      render::PickSemanticTarget targetValue{
+          .documentId   = pickStore.documentId().str(),
+          .microversion = pickVersion,
+          .cellRef =
+              isEphemeral(cellRef) ? std::nullopt : std::optional{cellRef}};
+      if (const auto source = sourceOrigins_.find(cellRef);
+          source != sourceOrigins_.end()) {
+        const auto &origin = source->second;
+        targetValue.source = render::PickSemanticTarget::SourceProvenance{
+            .documentId   = origin.documentId,
+            .microversion = origin.version.str(),
+            .cellRef      = origin.sourceCell,
+            .scroll       = origin.span.scroll,
+            .start        = origin.span.start,
+            .length       = origin.span.length};
+      }
+      target =
+          std::make_shared<render::PickSemanticTarget>(std::move(targetValue));
+    }
+    const render::PickingTag pickTag{.kind      = render::tagKindOverlay,
+                                     .docIndex  = pickScope,
+                                     .pageIndex = 0,
+                                     .clusterIndex =
+                                         static_cast<std::uint32_t>(id)};
+    ctx.state.bindOverlayPick(pickTag, target);
     worldCanvas_->setTag(render::tagKindOverlay,
                          static_cast<std::uint32_t>(id));
 
-    const bool isFocus    = (id == accursed_cell_focus_);
-    const float nodeWidth = (view_mode_ == ViewMode::CellContent)
-                                ? (isFocus ? 260.0F : 200.0F)
-                                : (isFocus ? 140.0F : 110.0F);
-    // Extra vertical room for the inline image preview below, on top of
-    // whichever view mode's height already applies -- the same +50/+40px an
-    // image cell got before CellContent mode existed, carried forward rather
-    // than only honoured in Topology mode.
-    const float imageBonus = cell.is_image ? (isFocus ? 50.0F : 40.0F) : 0.0F;
-    const float nodeHeight =
-        ((view_mode_ == ViewMode::CellContent) ? (isFocus ? 95.0F : 70.0F)
-                                               : (isFocus ? 54.0F : 45.0F)) +
-        imageBonus;
+    const bool isFocus     = (id == accursed_cell_focus_);
+    const auto &layout     = cellLayout(id, cell, isFocus);
+    const float nodeWidth  = layout.width;
+    const float nodeHeight = layout.height;
 
     const float left   = cell.current_pos.x - (nodeWidth / 2.0F);
     const float bottom = cell.current_pos.y - (nodeHeight / 2.0F);
@@ -1046,11 +1320,15 @@ void ZigzagVisualizer::drawFrame(gleditor::FrameContext &ctx) {
         imgRes = imageCache_->loadFile(resolvedPath);
       }
       if (imgRes && imgRes->valid()) {
-        const float imgMargin = 6.0F;
+        const float imgMargin = presentation_config_.cellHorizontalPaddingPx;
         const float imgW      = nodeWidth - (imgMargin * 2.0F);
-        const float imgH      = isFocus ? 60.0F : 40.0F;
-        const float imgLeft   = left + imgMargin;
-        const float imgBottom = bottom + 24.0F;
+        const float imgH      = std::min(
+            imgW * (static_cast<float>(imgRes->height) /
+                    static_cast<float>(imgRes->width)),
+            nodeHeight - (2.0F * presentation_config_.cellVerticalPaddingPx));
+        const float imgLeft = left + imgMargin;
+        const float imgBottom =
+            bottom + presentation_config_.cellVerticalPaddingPx;
         worldCanvas_->addImage(imgLeft, imgBottom, imgW, imgH, *imgRes,
                                packRgba(1.0F, 1.0F, 1.0F, cell.current_alpha));
       }
@@ -1068,36 +1346,32 @@ void ZigzagVisualizer::drawFrame(gleditor::FrameContext &ctx) {
                           borderCol);
 
     // Title / ID
-    const std::string idText = std::format("#{}", id);
-    worldCanvas_->addText(ctx.state, left + 6.0F, bottom + nodeHeight - 6.0F,
-                          idText, borderCol, bgCol);
+    worldCanvas_->addText(
+        ctx.state, left + presentation_config_.cellHorizontalPaddingPx,
+        bottom + layout.titleTop, layout.idText, borderCol, bgCol);
 
     // Label Text
-    const std::size_t maxTextLen  = (view_mode_ == ViewMode::CellContent)
-                                        ? (isFocus ? 48 : 32)
-                                        : (isFocus ? 16 : 10);
-    const std::string textPreview = shortenText(cell.text, maxTextLen);
-    worldCanvas_->addText(ctx.state, left + 6.0F, bottom + nodeHeight - 24.0F,
-                          textPreview, textCol, bgCol);
+    worldCanvas_->setTextWidthLimit(static_cast<int>(layout.labelWidthLimit));
+    const auto textMetrics = worldCanvas_->measureText(cell.text);
+    const float textLeft =
+        left + std::max(presentation_config_.cellHorizontalPaddingPx,
+                        (nodeWidth - textMetrics.width) / 2.0F);
+    const float textTop = bottom + layout.labelTop;
+    worldCanvas_->addText(ctx.state, textLeft, textTop, cell.text, textCol,
+                          bgCol, cell.decorated_ranges);
+    worldCanvas_->setTextWidthLimit(0);
 
     // Badges: type, mime, clone
-    if (!cell.type.empty() || !cell.mime_type.empty() || cell.is_clone) {
-      std::string badge;
-      if (!cell.type.empty()) {
-        badge += "[" + cell.type + "] ";
-      } else if (!cell.mime_type.empty()) {
-        badge += "<" + cell.mime_type + "> ";
-      }
-      if (cell.is_clone) {
-        badge += std::format("[clone #{}] ", cell.clone_master_id);
-      }
-      worldCanvas_->addText(ctx.state, left + 6.0F, bottom + 16.0F, badge,
-                            borderCol, bgCol);
+    if (!layout.badgeText.empty()) {
+      worldCanvas_->addText(
+          ctx.state, left + presentation_config_.cellHorizontalPaddingPx,
+          bottom + layout.badgeTop, layout.badgeText, borderCol, bgCol);
     }
   }
 
   worldCanvas_->commit();
-  worldCanvas_->draw(ctx.state, ctx.viewProjection, 1.0F);
+  worldCanvas_->draw(ctx.state, ctx.viewProjection * presentation_transform_,
+                     1.0F);
 
   // --- 3. Draw 2D Screen Overlay HUD ---
   hudCanvas_->clear();
@@ -1106,16 +1380,6 @@ void ZigzagVisualizer::drawFrame(gleditor::FrameContext &ctx) {
   const auto width  = static_cast<float>(ctx.screenWidth);
   const auto height = static_cast<float>(ctx.screenHeight);
 
-  // Top Bar Background
-  hudCanvas_->addRect(0.0F, height - 60.0F, width, 60.0F, 0x0D0D12DDU);
-  hudCanvas_->addLine(0.0F, height - 60.0F, width, height - 60.0F, 1.0F,
-                      0x333344FFU);
-
-  // Structure Name
-  hudCanvas_->addText(ctx.state, 16.0F, height - 12.0F, structure_name_,
-                      0xF4C542FFU, 0x0D0D12DDU);
-
-  // Focus Status
   std::string focusLabel = "Focus: none";
   if (engine_ && accursed_cell_focus_ != 0) {
     const auto cur = inspectCell(static_cast<CellRef>(accursed_cell_focus_));
@@ -1130,8 +1394,26 @@ void ZigzagVisualizer::drawFrame(gleditor::FrameContext &ctx) {
       focusLabel += std::format(" [clone of #{}]", cur.clone_master_id);
     }
   }
-  hudCanvas_->addText(ctx.state, 16.0F, height - 34.0F, focusLabel, 0xFFFFFFFFU,
-                      0x0D0D12DDU);
+
+  const auto structureMetrics = hudCanvas_->measureText(structure_name_);
+  const auto focusMetrics     = hudCanvas_->measureText(focusLabel);
+  const float topBarHeight =
+      (3.0F * presentation_config_.hudVerticalPaddingPx) +
+                             structureMetrics.height + focusMetrics.height;
+  const float topBarBottom = height - topBarHeight;
+
+  // Top Bar Background
+  hudCanvas_->addRect(0.0F, topBarBottom, width, topBarHeight, 0x0D0D12DDU);
+  hudCanvas_->addLine(0.0F, topBarBottom, width, topBarBottom, 1.0F,
+                      0x333344FFU);
+
+  const float structureTop = height - presentation_config_.hudVerticalPaddingPx;
+  const float focusTop     = structureTop - structureMetrics.height -
+                             presentation_config_.hudVerticalPaddingPx;
+  hudCanvas_->addText(ctx.state, presentation_config_.hudHorizontalPaddingPx,
+                      structureTop, structure_name_, 0xF4C542FFU, 0x0D0D12DDU);
+  hudCanvas_->addText(ctx.state, presentation_config_.hudHorizontalPaddingPx,
+                      focusTop, focusLabel, 0xFFFFFFFFU, 0x0D0D12DDU);
 
   // Dimension Bindings on Top Right
   const DimensionVisual xVis = dimensionVisual(current_view_.x_dimension);
@@ -1145,8 +1427,10 @@ void ZigzagVisualizer::drawFrame(gleditor::FrameContext &ctx) {
                   zVis.label.empty() ? current_view_.z_dimension : zVis.label);
 
   const auto dimsMetrics = hudCanvas_->measureText(dimsInfo);
-  hudCanvas_->addText(ctx.state, width - dimsMetrics.width - 16.0F,
-                      height - 12.0F, dimsInfo, 0x70B0FFFFU, 0x0D0D12DDU);
+  hudCanvas_->addText(ctx.state,
+                      width - dimsMetrics.width -
+                          presentation_config_.hudHorizontalPaddingPx,
+                      structureTop, dimsInfo, 0x70B0FFFFU, 0x0D0D12DDU);
 
   // View Mode Status Indicator
   const std::string modeLabel = (view_mode_ == ViewMode::CellContent)
@@ -1154,16 +1438,24 @@ void ZigzagVisualizer::drawFrame(gleditor::FrameContext &ctx) {
                                     : "[ View: 🌐 Topology (2/T) ]";
   const auto modeMetrics      = hudCanvas_->measureText(modeLabel);
   hudCanvas_->addText(ctx.state,
-                      width - dimsMetrics.width - modeMetrics.width - 32.0F,
-                      height - 12.0F, modeLabel, 0xF59E0BFFU, 0x0D0D12DDU);
+                      width - dimsMetrics.width - modeMetrics.width -
+                          presentation_config_.hudHorizontalPaddingPx -
+                          presentation_config_.hudColumnGapPx,
+                      structureTop, modeLabel, 0xF59E0BFFU, 0x0D0D12DDU);
 
   // Bottom Command Key Hints
-  hudCanvas_->addRect(0.0F, 0.0F, width, 28.0F, 0x0D0D12DDU);
-  hudCanvas_->addLine(0.0F, 28.0F, width, 28.0F, 1.0F, 0x222233FFU);
   const std::string hints =
       "Arrows: Step X/Y | PgUp/PgDn: Step Z | Space: Swap X/Y | Tab: Cycle | "
       "N/D: Insert | U: Unlink | Del: Delete | R: Reset View";
-  hudCanvas_->addText(ctx.state, 16.0F, 22.0F, hints, 0x888899FFU, 0x0D0D12DDU);
+  const auto hintsMetrics = hudCanvas_->measureText(hints);
+  const float bottomBarHeight =
+      hintsMetrics.height + (2.0F * presentation_config_.hudVerticalPaddingPx);
+  hudCanvas_->addRect(0.0F, 0.0F, width, bottomBarHeight, 0x0D0D12DDU);
+  hudCanvas_->addLine(0.0F, bottomBarHeight, width, bottomBarHeight, 1.0F,
+                      0x222233FFU);
+  hudCanvas_->addText(ctx.state, presentation_config_.hudHorizontalPaddingPx,
+                      bottomBarHeight - presentation_config_.hudVerticalPaddingPx,
+                      hints, 0x888899FFU, 0x0D0D12DDU);
 
   hudCanvas_->commit();
   const glm::mat4 ortho = glm::ortho(0.0F, width, 0.0F, height, -1.0F, 1.0F);
@@ -1273,6 +1565,32 @@ bool ZigzagVisualizer::performAction(const std::uint64_t nodeId,
     }
   }
   return false;
+}
+
+std::optional<xanadu::CellAnchor>
+ZigzagVisualizer::cellAnchor(const CellRef cell) const {
+  const auto it = visible_cells_.find(static_cast<CellID>(cell));
+  if (it == visible_cells_.end()) {
+    return std::nullopt;
+  }
+  const auto &c = it->second;
+  if (c.current_alpha < 0.02F && c.target_alpha < 0.02F) {
+    return std::nullopt;
+  }
+  const auto &layout =
+      cellLayout(static_cast<CellID>(cell), c,
+                 static_cast<CellID>(cell) == accursed_cell_focus_);
+
+  const float xScale = glm::length(glm::vec3(presentation_transform_[0]));
+  const float yScale = glm::length(glm::vec3(presentation_transform_[1]));
+  return xanadu::CellAnchor{
+      .position =
+          glm::vec3(presentation_transform_ * glm::vec4(c.current_pos, 1.0F)),
+      .width      = layout.width * xScale,
+      .height     = layout.height * yScale,
+      .lineHeight = layout.labelLineHeight * yScale,
+      .normal     = glm::vec3(0.0F, 0.0F, 1.0F),
+  };
 }
 
 } // namespace zigzag

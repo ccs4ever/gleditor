@@ -1312,6 +1312,57 @@ TEST(E2EBinaryOrchestrationTest, typeWithDecorationsRecordsAFormatLink) {
          "links over the typed text";
 }
 
+TEST(E2EBinaryOrchestrationTest,
+     scriptedPouchClaspAutomationForgesBilateralLink) {
+  const auto xuduBin = findXuduBinary();
+  ASSERT_TRUE(fs::exists(xuduBin)) << "xudu binary not found at " << xuduBin;
+
+  const auto testRoot =
+      fs::current_path() / "build" / "integration_workspace_scripted_clasp";
+  fs::remove_all(testRoot);
+  fs::create_directories(testRoot);
+
+  Store store(permascrollAt(testRoot / "permascroll"));
+  const std::string text =
+      "Homestead sentence for left anchor. Toward sentence for right anchor.";
+  const auto v0        = store.insert(MicroversionId{}, 0, text);
+  const auto storePath = testRoot / "store";
+  store.save(storePath.string());
+
+  // Use user-model scripted commands: --select, --do pouch-drop-left, --select,
+  // --do pouch-drop-right, --do forge-clasp, --do save-document
+  std::string cmd =
+      xuduBin.string() + permascrollFlag(testRoot / "permascroll") +
+      " --backend " + activeBackend() + " --profile --version-id " + v0.str() +
+      " --select 0,18 --do pouch-drop-left" +
+      " --select 36,54 --do pouch-drop-right" +
+      " --do forge-clasp --do save-document " + storePath.string();
+
+  const auto res = executeProcess(cmd);
+  EXPECT_EQ(res.exitCode, 0) << "scripted clasp test failed: " << res.output;
+
+  Store reloaded(permascrollAt(testRoot / "permascroll"));
+  reloaded.load(storePath.string());
+  const auto finalVer = reloaded.latest();
+  EXPECT_NE(finalVer, v0);
+
+  const auto verRebuilt = reloaded.rebuild(finalVer);
+  const auto leftSpans  = verRebuilt.spansFor(0, 18);
+  const auto rightSpans = verRebuilt.spansFor(36, 18);
+  ASSERT_FALSE(leftSpans.empty());
+  ASSERT_FALSE(rightSpans.empty());
+
+  const auto touchingLeft = reloaded.linksTouching(leftSpans.front());
+  ASSERT_FALSE(touchingLeft.empty())
+      << "forge-clasp should have forged a link touching the homestead span";
+  EXPECT_EQ(touchingLeft.front()->type, LinkType::Comment);
+
+  const auto touchingRight = reloaded.linksTouching(rightSpans.front());
+  ASSERT_FALSE(touchingRight.empty())
+      << "forge-clasp should have forged a link touching the toward span";
+  EXPECT_EQ(touchingRight.front()->type, LinkType::Comment);
+}
+
 // Gap E, named in the multimedia pipeline plan: a media fragment transcluded
 // out of the middle of a larger file carries no header of its own for
 // libmagic to identify (a PNG's IDAT bytes have no PNG signature), so
@@ -1435,6 +1486,13 @@ TEST(E2EBinaryOrchestrationTest, repeatedPdfFigureIsStoredOnceNotOncePerPage) {
   for (const auto &segment : tables.localSegments) {
     if (segment.mimeType.starts_with("image/png")) {
       ++imageSegments;
+    }
+  }
+  for (const auto &scroll : tables.scrolls) {
+    for (const auto &segment : scroll.segments) {
+      if (segment.mimeType.starts_with("image/png")) {
+        ++imageSegments;
+      }
     }
   }
   EXPECT_EQ(imageSegments, 1U)

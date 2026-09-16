@@ -43,7 +43,7 @@ ______________________________________________________________________
                      [ SQLite FTS5 Xanadulogical Index ]
                                       │
                                       v
-                 [ Swarm Telescope 120 FPS Search UI ]
+                 [ Swarm Telescope Real-Time Search UI ]
 ```
 
 #### Vector 1: Self-Sovereign Author Catalogs (BEP 46)
@@ -112,7 +112,7 @@ open-source options against our architectural constraints:
 
 - **C++23 GNU Make compatibility** (zero external build tools like Cargo, Gradle, or npm).
 - **Embedded in-process execution** (zero external daemon processes or network sockets).
-- **120 FPS frame budget** (queries must return in $< 1\,\text{ms}$, run asynchronously on
+- **interactive frame budget** (queries must return in $< 1\,\text{ms}$, run asynchronously on
   `WorkerPool`).
 - **Zero render-thread blocking**.
 
@@ -217,7 +217,7 @@ private:
 } // namespace xudu
 ```
 
-### 5.2 120 FPS Frame Budget Guarantee
+### 5.2 interactive Frame Budget Guarantee
 
 1. **Dedicated Worker Execution**:
    - `SwarmCatalogIndex::search()` runs on gleditor's background `WorkerPool`.

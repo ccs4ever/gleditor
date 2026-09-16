@@ -852,6 +852,7 @@ void VortexStdLib::bootstrap() {
   CellRef modMath        = getOrCreateModule("std:math");
   CellRef modString      = getOrCreateModule("std:string");
   CellRef modLogic       = getOrCreateModule("std:logic");
+  CellRef modArray       = getOrCreateModule("sys:array");
 
   buildMathModule(modMath);
   buildStringModule(modString);
@@ -861,6 +862,7 @@ void VortexStdLib::bootstrap() {
   buildFunctionalModule(modFunctional);
   buildCollectionsModule(modCollections);
   buildLogicModule(modLogic);
+  buildArrayModule(modArray);
 }
 
 void VortexStdLib::buildMathModule(CellRef mod) {
@@ -1365,6 +1367,52 @@ std::vector<CellValue> VortexStdLib::call(CellRef fnOp,
                                           const std::vector<CellValue> &args) {
   if (fnOp == noCell) {
     return {};
+  }
+  std::string opName = core_.arena().textOf(fnOp);
+  if (opName.starts_with("#ARRAY_")) {
+    if (opName == "#ARRAY_IOTA") {
+      std::size_t n =
+          args.empty() ? 0 : static_cast<std::size_t>(toInt64(args[0]));
+      DimRef dim =
+          args.size() > 1 ? static_cast<DimRef>(toInt64(args[1])) : noCell;
+      CellRef res = arrayIota(n, dim);
+      return {static_cast<std::int64_t>(res)};
+    }
+    if (opName == "#ARRAY_TALLY") {
+      CellRef origin =
+          args.empty() ? noCell : static_cast<CellRef>(toInt64(args[0]));
+      DimRef dim = args.size() > 1 ? static_cast<DimRef>(toInt64(args[1]))
+                                   : core_.dims().step;
+      return {static_cast<std::int64_t>(arrayTally(origin, dim))};
+    }
+    if (opName == "#ARRAY_TAKE") {
+      CellRef origin =
+          args.empty() ? noCell : static_cast<CellRef>(toInt64(args[0]));
+      DimRef dim = args.size() > 1 ? static_cast<DimRef>(toInt64(args[1]))
+                                   : core_.dims().step;
+      std::size_t count =
+          args.size() > 2 ? static_cast<std::size_t>(toInt64(args[2])) : 0;
+      CellRef res = arrayTake(origin, dim, count);
+      return {static_cast<std::int64_t>(res)};
+    }
+    if (opName == "#ARRAY_DROP") {
+      CellRef origin =
+          args.empty() ? noCell : static_cast<CellRef>(toInt64(args[0]));
+      DimRef dim = args.size() > 1 ? static_cast<DimRef>(toInt64(args[1]))
+                                   : core_.dims().step;
+      std::size_t count =
+          args.size() > 2 ? static_cast<std::size_t>(toInt64(args[2])) : 0;
+      CellRef res = arrayDrop(origin, dim, count);
+      return {static_cast<std::int64_t>(res)};
+    }
+    if (opName == "#ARRAY_REVERSE") {
+      CellRef origin =
+          args.empty() ? noCell : static_cast<CellRef>(toInt64(args[0]));
+      DimRef dim  = args.size() > 1 ? static_cast<DimRef>(toInt64(args[1]))
+                                    : core_.dims().step;
+      CellRef res = arrayReverse(origin, dim);
+      return {static_cast<std::int64_t>(res)};
+    }
   }
   auto it = routineBindings_.find(fnOp);
   if (it != routineBindings_.end()) {
@@ -2149,6 +2197,90 @@ void VortexStdLib::buildLogicModule(CellRef mod) {
   }
 }
 
+void VortexStdLib::buildArrayModule(CellRef mod) {
+  // iota: n, dim -> head
+  {
+    CellRef inN     = core_.arena().makeCell();
+    CellRef inDim   = core_.arena().makeCell();
+    CellRef outHead = core_.arena().makeCell();
+    CellRef op      = vm_.mintOpcode(OpcodeKind::Nop, "#ARRAY_IOTA");
+    core_.bindInput(op, inN);
+    core_.bindInput(op, inDim);
+    core_.bindOutput(op, outHead);
+    routineBindings_[op] = {{inN, inDim}, {outHead}};
+    exportSymbol(mod, "iota", op);
+  }
+
+  // shape: origin, dim -> shape
+  {
+    CellRef inOrigin = core_.arena().makeCell();
+    CellRef inDim    = core_.arena().makeCell();
+    CellRef outShape = core_.arena().makeCell();
+    CellRef op       = vm_.mintOpcode(OpcodeKind::Nop, "#ARRAY_SHAPE");
+    core_.bindInput(op, inOrigin);
+    core_.bindInput(op, inDim);
+    core_.bindOutput(op, outShape);
+    routineBindings_[op] = {{inOrigin, inDim}, {outShape}};
+    exportSymbol(mod, "shape", op);
+  }
+
+  // take: origin, dim, count -> head
+  {
+    CellRef inOrigin = core_.arena().makeCell();
+    CellRef inDim    = core_.arena().makeCell();
+    CellRef inCount  = core_.arena().makeCell();
+    CellRef outHead  = core_.arena().makeCell();
+    CellRef op       = vm_.mintOpcode(OpcodeKind::Nop, "#ARRAY_TAKE");
+    core_.bindInput(op, inOrigin);
+    core_.bindInput(op, inDim);
+    core_.bindInput(op, inCount);
+    core_.bindOutput(op, outHead);
+    routineBindings_[op] = {{inOrigin, inDim, inCount}, {outHead}};
+    exportSymbol(mod, "take", op);
+  }
+
+  // drop: origin, dim, count -> head
+  {
+    CellRef inOrigin = core_.arena().makeCell();
+    CellRef inDim    = core_.arena().makeCell();
+    CellRef inCount  = core_.arena().makeCell();
+    CellRef outHead  = core_.arena().makeCell();
+    CellRef op       = vm_.mintOpcode(OpcodeKind::Nop, "#ARRAY_DROP");
+    core_.bindInput(op, inOrigin);
+    core_.bindInput(op, inDim);
+    core_.bindInput(op, inCount);
+    core_.bindOutput(op, outHead);
+    routineBindings_[op] = {{inOrigin, inDim, inCount}, {outHead}};
+    exportSymbol(mod, "drop", op);
+  }
+
+  // reverse: origin, dim -> head
+  {
+    CellRef inOrigin = core_.arena().makeCell();
+    CellRef inDim    = core_.arena().makeCell();
+    CellRef outHead  = core_.arena().makeCell();
+    CellRef op       = vm_.mintOpcode(OpcodeKind::Nop, "#ARRAY_REVERSE");
+    core_.bindInput(op, inOrigin);
+    core_.bindInput(op, inDim);
+    core_.bindOutput(op, outHead);
+    routineBindings_[op] = {{inOrigin, inDim}, {outHead}};
+    exportSymbol(mod, "reverse", op);
+  }
+
+  // tally: origin, dim -> count
+  {
+    CellRef inOrigin = core_.arena().makeCell();
+    CellRef inDim    = core_.arena().makeCell();
+    CellRef outCount = core_.arena().makeCell();
+    CellRef op       = vm_.mintOpcode(OpcodeKind::Nop, "#ARRAY_TALLY");
+    core_.bindInput(op, inOrigin);
+    core_.bindInput(op, inDim);
+    core_.bindOutput(op, outCount);
+    routineBindings_[op] = {{inOrigin, inDim}, {outCount}};
+    exportSymbol(mod, "tally", op);
+  }
+}
+
 CellRef VortexStdLib::makeVar(std::string_view name) {
   zigzag::Vlog v{.m     = core_.arena(),
                  .clone = core_.dims().clone,
@@ -2437,6 +2569,149 @@ bool VortexStdLib::solve(std::span<const CellRef> goals,
   return solveQueryHelper(*this, core_, std::move(activeGoals), candidatePreds,
                           queryVars, onSolution, solCount, maxSolutions, 0,
                           nextFrameId, cutToFrame);
+}
+
+// -- Module 9: sys:array ----------------------------------------------------
+CellRef VortexStdLib::arrayIota(std::size_t n, DimRef dim, CellRef origin) {
+  if (n == 0) {
+    return noCell;
+  }
+  DimRef linkDim = dim == noCell ? core_.dims().step : dim;
+  CellRef head   = origin;
+  if (head == noCell) {
+    head = core_.arena().makeScalarCell(static_cast<std::int64_t>(1));
+  }
+  CellRef prev = head;
+  for (std::size_t i = 1; i < n; ++i) {
+    CellRef next =
+        core_.arena().makeScalarCell(static_cast<std::int64_t>(i + 1));
+    core_.arena().link(prev, linkDim, DimVector::POS, next);
+    prev = next;
+  }
+  return head;
+}
+
+std::vector<std::size_t>
+VortexStdLib::arrayShape(CellRef origin, std::span<const DimRef> dims) const {
+  if (origin == noCell || !core_.arena().contains(origin)) {
+    return {};
+  }
+  if (dims.empty()) {
+    return {arrayTally(origin, core_.dims().step)};
+  }
+  std::vector<std::size_t> shape;
+  shape.reserve(dims.size());
+  for (DimRef d : dims) {
+    std::size_t len   = 0;
+    CellRef cur       = origin;
+    std::size_t limit = core_.arena().cellCount() + 1;
+    while (cur != noCell && core_.arena().contains(cur) && limit-- > 0) {
+      ++len;
+      cur = core_.arena().linked(cur, d, DimVector::POS);
+    }
+    shape.push_back(len);
+  }
+  return shape;
+}
+
+CellRef VortexStdLib::arrayTake(CellRef origin, DimRef dim, std::size_t count) {
+  if (origin == noCell || count == 0 || !core_.arena().contains(origin)) {
+    return noCell;
+  }
+  DimRef linkDim    = dim == noCell ? core_.dims().step : dim;
+  CellRef cur       = origin;
+  CellRef head      = noCell;
+  CellRef prev      = noCell;
+  std::size_t limit = core_.arena().cellCount() + 1;
+  for (std::size_t i = 0; i < count && cur != noCell && limit-- > 0; ++i) {
+    CellRef copy = core_.arena().makeCell();
+    if (auto d = core_.arena().asDouble(cur); d.has_value()) {
+      core_.arena().makeScalarCell(*d);
+      // copy scalar value
+      copy = core_.arena().makeScalarCell(*d);
+    } else if (auto n = core_.arena().asInt64(cur); n.has_value()) {
+      copy = core_.arena().makeScalarCell(*n);
+    } else if (auto b = core_.arena().asBool(cur); b.has_value()) {
+      copy = core_.arena().makeScalarCell(*b);
+    } else {
+      core_.value(copy, 0, -1, core_.render(cur));
+    }
+    if (head == noCell) {
+      head = copy;
+    } else {
+      core_.arena().link(prev, linkDim, DimVector::POS, copy);
+    }
+    prev = copy;
+    cur  = core_.arena().linked(cur, linkDim, DimVector::POS);
+  }
+  return head;
+}
+
+CellRef VortexStdLib::arrayDrop(CellRef origin, DimRef dim, std::size_t count) {
+  if (origin == noCell || !core_.arena().contains(origin)) {
+    return noCell;
+  }
+  DimRef linkDim    = dim == noCell ? core_.dims().step : dim;
+  CellRef cur       = origin;
+  std::size_t limit = core_.arena().cellCount() + 1;
+  for (std::size_t i = 0; i < count && cur != noCell && limit-- > 0; ++i) {
+    cur = core_.arena().linked(cur, linkDim, DimVector::POS);
+  }
+  return cur;
+}
+
+CellRef VortexStdLib::arrayReverse(CellRef origin, DimRef dim) {
+  if (origin == noCell || !core_.arena().contains(origin)) {
+    return noCell;
+  }
+  DimRef linkDim = dim == noCell ? core_.dims().step : dim;
+  std::vector<CellRef> cells;
+  CellRef cur       = origin;
+  std::size_t limit = core_.arena().cellCount() + 1;
+  while (cur != noCell && limit-- > 0) {
+    cells.push_back(cur);
+    cur = core_.arena().linked(cur, linkDim, DimVector::POS);
+  }
+  if (cells.empty()) {
+    return noCell;
+  }
+  std::reverse(cells.begin(), cells.end());
+  CellRef head = noCell;
+  CellRef prev = noCell;
+  for (CellRef c : cells) {
+    CellRef copy = core_.arena().makeCell();
+    if (auto d = core_.arena().asDouble(c); d.has_value()) {
+      copy = core_.arena().makeScalarCell(*d);
+    } else if (auto n = core_.arena().asInt64(c); n.has_value()) {
+      copy = core_.arena().makeScalarCell(*n);
+    } else if (auto b = core_.arena().asBool(c); b.has_value()) {
+      copy = core_.arena().makeScalarCell(*b);
+    } else {
+      core_.value(copy, 0, -1, core_.render(c));
+    }
+    if (head == noCell) {
+      head = copy;
+    } else {
+      core_.arena().link(prev, linkDim, DimVector::POS, copy);
+    }
+    prev = copy;
+  }
+  return head;
+}
+
+std::size_t VortexStdLib::arrayTally(CellRef origin, DimRef dim) const {
+  if (origin == noCell || !core_.arena().contains(origin)) {
+    return 0;
+  }
+  DimRef linkDim    = dim == noCell ? core_.dims().step : dim;
+  std::size_t count = 0;
+  CellRef cur       = origin;
+  std::size_t limit = core_.arena().cellCount() + 1;
+  while (cur != noCell && limit-- > 0) {
+    ++count;
+    cur = core_.arena().linked(cur, linkDim, DimVector::POS);
+  }
+  return count;
 }
 
 } // namespace zigzag::vortex

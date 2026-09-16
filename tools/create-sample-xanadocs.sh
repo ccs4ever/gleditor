@@ -16,6 +16,8 @@ XUDU="./build/xudu"
 BASE_DIR="tests/samples/xudu"
 SOURCES_DIR="${BASE_DIR}/sources"
 PERMA="${BASE_DIR}/permascroll"
+XUZZ_BASE_DIR="tests/samples/xuzz"
+XUZZ_PERMA="${XUZZ_BASE_DIR}/slice_then_xanadoc/permascroll"
 
 if [[ ! -x "${XUDU}" ]]; then
   echo "Error: ${XUDU} not found or not executable. Build it first with: make -j\$(nproc) xudu" >&2
@@ -25,7 +27,8 @@ fi
 echo "==> Creating sample Xanadocs using ${XUDU}..."
 
 # Clean target directories and old scroll
-rm -rf "${BASE_DIR}/core_hypertext" "${BASE_DIR}/multimedia" "${BASE_DIR}/beams" "${PERMA}"
+rm -rf "${BASE_DIR}/core_hypertext" "${BASE_DIR}/multimedia" "${BASE_DIR}/beams" "${PERMA}" \
+  "${XUZZ_BASE_DIR}/slice_then_xanadoc"
 mkdir -p "${BASE_DIR}/core_hypertext" "${BASE_DIR}/multimedia" "${BASE_DIR}/beams"
 
 # -----------------------------------------------------------------------------
@@ -116,7 +119,7 @@ ${XUDU} "${BASE_DIR}/multimedia/04_audio_doc" \
 # 05_video_doc
 ${XUDU} "${BASE_DIR}/multimedia/05_video_doc" \
   --permascroll "${PERMA}" \
-  --import "tests/samples/sample_video.mp4" \
+  --import "tests/samples/sample_video_seekable.mp4" \
   --export-osmic --headless
 
 # 06_embedded_media_page
@@ -125,7 +128,7 @@ ${XUDU} "${BASE_DIR}/multimedia/06_embedded_media_page" \
   --import "${SOURCES_DIR}/embedded_media_page_p1.txt" \
   --insert-text "0:append:tests/samples/sample_audio.wav" \
   --import-break "${SOURCES_DIR}/embedded_media_page_p2.txt" \
-  --insert-text "0:append:tests/samples/sample_video.mp4" \
+  --insert-text "0:append:tests/samples/sample_video_seekable.mp4" \
   --import-break "${SOURCES_DIR}/embedded_media_page_p3.txt" \
   --insert-text "0:append:tests/samples/sample_image.png" \
   --export-osmic --headless
@@ -142,7 +145,7 @@ ${XUDU} "${BASE_DIR}/multimedia/07_audio_transclusion" \
 # 08_video_transclusion
 ${XUDU} "${BASE_DIR}/multimedia/08_video_transclusion" \
   --permascroll "${PERMA}" \
-  --import "tests/samples/sample_video.mp4" \
+  --import "tests/samples/sample_video_seekable.mp4" \
   --import-branch "${SOURCES_DIR}/video_transclusion_b_prefix.txt" \
   --transclude "0:50:200,1:append" \
   --insert-text "1:append:${SOURCES_DIR}/video_transclusion_b_suffix.txt" \
@@ -194,6 +197,16 @@ ${XUDU} "${BASE_DIR}/beams/03_multi_span_stacked" \
   --link "0@Thesis 1:35+0@Thesis 2:35,1@Observation Alpha:35+1@Observation Gamma:35:comment:author:multi_envelope" \
   --link "0@Thesis 1:35,1@Observation Alpha:35:comment:author:upper_focus" \
   --link "0@Thesis 2:35,1@Observation Gamma:35:comment:author:lower_focus" \
+  --export-osmic --headless
+
+# -----------------------------------------------------------------------------
+# 4. Xuzz convergence
+# -----------------------------------------------------------------------------
+echo "--> Creating Xuzz convergence sample store..."
+
+${XUDU} "${XUZZ_BASE_DIR}/slice_then_xanadoc" \
+  --permascroll "${XUZZ_PERMA}" \
+  --structure-script "${XUZZ_BASE_DIR}/sources/slice_then_xanadoc.xuzz" \
   --export-osmic --headless
 
 echo "==> All sample Xanadocs successfully created by xudu application!"
