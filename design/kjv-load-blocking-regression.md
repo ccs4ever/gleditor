@@ -1,16 +1,19 @@
 # `kjv.txt` load regression: unbounded page-build batches block the main thread
 
-**Status: Tier 1 (the capped-batch fix below) is implemented** in `Doc::buildPendingPages()`
-(`src/doc.cpp`), `render::kPageBuildFrameBudget` (`include/gleditor/render/constants.hpp`), and the
-updated contract comment on `Doc::buildPendingPages()` (`include/gleditor/doc.hpp`). Verified
-against the exact reproduction below, including the worst case (the entire 1261-page document
-already shaped before the first call): every `buildPendingPages()` call now stays capped at roughly
-the configured budget regardless of backlog size, `./tools/compare-backends.sh`'s determinism check
-still passes (`opengles` vs `opengl` stays byte-identical), and the full `gleditor_test` suite shows
-no new failures (three pre-existing, unrelated failures --
-`MediaWidgetTest.DeviceReadyAndDrawFrame`, `MediaWidgetSpeedTest.CyclePlaybackRatesByPicking`,
+**Status: Tier 1 (the plan below) is fully implemented, including its regression test.** The fix is
+in `Doc::buildPendingPages()` (`src/doc.cpp`), `render::kPageBuildFrameBudget`
+(`include/gleditor/render/constants.hpp`), and the updated contract comment on
+`Doc::buildPendingPages()` (`include/gleditor/doc.hpp`). Verified against the exact reproduction
+below, including the worst case (the entire 1261-page document already shaped before the first
+call): every `buildPendingPages()` call now stays capped at roughly the configured budget regardless
+of backlog size, `./tools/compare-backends.sh`'s determinism check still passes (`opengles` vs
+`opengl` stays byte-identical), and the full `gleditor_test` suite shows no new failures (three
+pre-existing, unrelated failures -- `MediaWidgetTest.DeviceReadyAndDrawFrame`,
+`MediaWidgetSpeedTest.CyclePlaybackRatesByPicking`,
 `MediaWidgetSpeedTest.AccessibilityPerformActionOnSpeedButton` -- reproduce identically on unpatched
-`HEAD` and are unrelated to page building). **Tier 2 (viewport-driven virtualized loading) is not
+`HEAD` and are unrelated to page building). `tests/lib/doc_page_budget_test.cpp` is the regression
+test Step 3 called for; it was confirmed to actually fail against the unpatched logic before the fix
+was restored (see Step 3, below). **Tier 2 (viewport-driven virtualized loading) is not
 implemented**, but its prerequisite is: the Layoutfilade has been promoted from
 `apps/common/xanadu/enfilade/` into the core library as `gleditor::enfilade::Layoutfilade`
 (`include/gleditor/enfilade/layoutfilade.hpp`, `src/enfilade/layoutfilade.cpp`), with every
@@ -315,30 +318,32 @@ a large artificial head start, then remove it before committing). Confirm:
   regression test for the thing `ae924c0` fixed, and the leftover-goes-back-to-the-front reinsertion
   above must not reintroduce out-of-order glyph insertion.
 
-### Step 3 — add a regression test
+### Step 3 — add a regression test (done)
 
-`tests/lib/` (GoogleTest, per `AGENTS.md`'s "Tests" section) is where this belongs, next to whatever
-existing tests cover `Doc`/page-building. The property worth locking down is exactly what the
-reproduction above demonstrated by hand:
+`tests/lib/doc_page_budget_test.cpp` covers exactly the property the reproduction above demonstrated
+by hand. `DocPageBudgetTest` builds a `Doc` (over a `MemoryTextSource`, mocked `RenderDevice`, and a
+real but window-less `Renderer`/`RenderState` — the same mocking pattern `tests/lib/glyph_cache.cpp`
+and `tests/lib/media_widget_test.cpp` already use for `GlyphCache`/`BufferPool`-touching code) large
+enough to paginate into several hundred pages, then calls `makePages()` straight through
+synchronously *before* ever calling `buildPendingPages()` once — deterministically reproducing the
+race the bug depends on, rather than depending on real thread timing. It then asserts:
 
-- Construct a `Doc` (or use whatever the existing page-building tests already use as a fixture) over
-  text sized to produce many pages (a few hundred is enough to make the point without needing the
-  full 4.4 MB fixture).
-- Directly seed `pendingShapings` with a large batch (or, more realistically, let `makePages()` run
-  to completion *before* ever calling `buildPendingPages()` once, which is exactly the race this bug
-  depends on and is easy to force deterministically in a test by not calling `buildPendingPages()`
-  until after the background future has finished).
-- Call `buildPendingPages()` once and assert:
-  - It returns `false` (not fully loaded in one call) once the backlog is large enough to exceed the
-    budget.
-  - `pages.size()` after that one call is small — bounded by the budget, not equal to the full
-    backlog.
-  - Calling it repeatedly eventually reaches `fullyLoaded == true` with all pages present, in the
-    correct order (`textOffset` strictly increasing).
-- A second test can assert the *timing* property directly: that a single `buildPendingPages()` call
-  never takes longer than, say, 2-3x the configured budget, using a large synthetic backlog. This is
-  the test that would have caught this class of bug before it reached users, independent of which
-  commit introduces the next regression in this area.
+- The first `buildPendingPages()` call returns `false` (not fully loaded in one call) and takes
+  nowhere near what building the whole backlog in one call would cost (a generous 20x-budget
+  ceiling, since real per-page cost varies and the call always builds at least one page even if it
+  alone exceeds the budget).
+- Repeated calls make forward progress and eventually reach `isFullyLoaded() == true`, taking more
+  than one call to get there — proving the backlog was genuinely spread across frames, not just fast
+  enough by coincidence.
+
+Verified the test actually catches the regression it's named for: temporarily disabling the budget
+check in `buildPendingPages()` (`if (false && ...)`) makes it fail exactly as expected (whole
+100-page backlog built in the first call, zero further progress after) before restoring the real
+fix, which makes it pass again. `pages` is a private member with no accessor for external order
+verification, so this test doesn't re-check per-page ordering directly — that property is covered
+end-to-end by `tools/compare-backends.sh`'s existing `opengles` vs `opengl` byte-identical
+comparison, which is sensitive to exactly this (see "Why the fix must not just revert `ae924c0`"
+above).
 
 ### Out of scope for this fix
 
