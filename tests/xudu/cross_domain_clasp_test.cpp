@@ -6,6 +6,9 @@
 #include <gtest/gtest.h>
 
 #include "common/xanadu/kinetic_tether.hpp"
+#include "common/xanadu/scroll.hpp"
+#include "common/xanadu/transcopyright_crypto.hpp"
+#include "common/xanadu/transcopyright_logic.hpp"
 #include "xudu/core/link_layout.hpp"
 #include "xudu/core/ops.hpp"
 #include "xudu/core/pouch_zone.hpp"
@@ -209,4 +212,59 @@ TEST(CrossDomainClaspTest, PouchManagerCrossDomainCellSpanPreservation) {
   EXPECT_EQ(allSpans[1].scroll, 3U);
   EXPECT_EQ(allSpans[1].start, 2000U);
   EXPECT_EQ(allSpans[1].length, 80U);
+}
+
+TEST(CrossDomainClaspTest, TranscopyrightCellResolutionAndAttribution) {
+  PouchManager pm;
+  const PrimediaSpan lockedSpan{.scroll = 1, .start = 100, .length = 24};
+
+  // Drop a cell that carries a transcopyright span
+  const auto item = pm.dropCell("to_link_right", lockedSpan, "[🔒 250 XU]", 42,
+                                "d.clone: #1", 0);
+  EXPECT_EQ(item.originKind, PouchOriginKind::ZigzagCell);
+  EXPECT_EQ(item.originCell, 42U);
+  EXPECT_EQ(item.previewText, "[🔒 250 XU]");
+  EXPECT_EQ(item.span.start, 100U);
+  EXPECT_EQ(item.span.length, 24U);
+
+  // Setup scroll with transcopyright hole
+  Scroll scroll;
+  ScrollSegment seg;
+  seg.at     = 100;
+  seg.length = 24;
+  seg.kind   = SegmentKind::Withheld;
+
+  PublishedHoleRecord hole;
+  hole.at     = seg.at;
+  hole.length = seg.length;
+  hole.reason = HoleReason::TranscopyrightLock;
+
+  const auto keyId = crypto::generateKey();
+  const auto cek =
+      xanadu::TranscopyrightLogic::deriveDeterministicTestCek(keyId);
+
+  TranscopyrightDescriptor tc;
+  tc.priceAtomicUnits = 250;
+  tc.currencySymbol   = "XU";
+  tc.keyId            = keyId;
+  hole.transcopyright = tc;
+  seg.holeRecord      = hole;
+  scroll.segments.push_back(seg);
+
+  Store store;
+  const auto v = store.transcludeExternal(MicroversionId{}, 0, scroll, 100, 24);
+  const auto spans = store.rebuild(v).spansFor(0, 24);
+  ASSERT_FALSE(spans.empty());
+  const auto span = spans.front();
+
+  // Resolve through store
+  const auto resBefore = store.resolve(span);
+  EXPECT_TRUE(resBefore.isLocked());
+  ASSERT_TRUE(resBefore.lockInfo.has_value());
+  EXPECT_EQ(resBefore.lockInfo->priceAtomicUnits, 250U);
+  EXPECT_EQ(resBefore.lockInfo->currencySymbol, "XU");
+
+  // Unlock through content resolver
+  EXPECT_TRUE(
+      store.contentResolver().unlockTranscopyright(keyId, cek, 250, "XU"));
 }

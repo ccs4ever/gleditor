@@ -56,6 +56,11 @@ public:
   /// Notify that a document link to a Zigzag cell was activated.
   void onDocumentLinkActivated(zigzag::CellRef cell);
 
+  [[nodiscard]] bool isCellLocked(zigzag::CellRef cell) const noexcept;
+  [[nodiscard]] std::optional<xanadu::TranscopyrightDescriptor>
+  cellRoyalty(zigzag::CellRef cell) const noexcept;
+  bool unlockCell(zigzag::CellRef cell);
+
   /// Remove registrations and clear LinkBeams' cross-domain state.
   void detach() noexcept;
   /// Apply a changed surface revision at a host state-update boundary.

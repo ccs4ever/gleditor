@@ -32,6 +32,7 @@
 
 #include "common/xanadu/vortex/vortex_core.hpp"
 #include "common/xanadu/vortex/vortex_vm.hpp"
+#include "common/xanadu/zigzag/presentation_surface.hpp"
 #include "common/xanadu/zigzag/zzstructure.hpp"
 
 namespace xanadu {
@@ -257,6 +258,14 @@ public:
   /// Transcludes a document span into a new Zigzag cell.
   CellRef bridgeDocToCell(xanadu::Store &store, std::uint32_t docOffset,
                           std::uint32_t length);
+  /// Queries transcopyright royalty for a Zigzag cell.
+  std::optional<xanadu::TranscopyrightDescriptor>
+  bridgeCellRoyalty(const xanadu::ZigzagPresentationSurface &surface,
+                    CellRef cell);
+  /// Unlocks a transcopyright-locked Zigzag cell, paying royalty via state
+  /// channel.
+  bool bridgeCellUnlock(xanadu::ZigzagPresentationSurface &surface,
+                        CellRef cell);
 
   // -- Sovereign Store Library Packaging (Zero YAML) --------------------------
   bool exportModuleToStore(std::string_view modulePath,

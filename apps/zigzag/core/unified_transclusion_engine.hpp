@@ -152,6 +152,11 @@ public:
   void setCold(CellRef cell, ColdCell cold);
   [[nodiscard]] const ColdCell *coldOf(CellRef cell) const noexcept;
 
+  [[nodiscard]] bool isCellLocked(CellRef cell) const noexcept;
+  [[nodiscard]] std::optional<xanadu::TranscopyrightDescriptor>
+  cellRoyalty(CellRef cell) const noexcept;
+  bool unlockTranscopyright(CellRef cell);
+
   [[nodiscard]] const CellSlot *findCell(CellRef cell) const noexcept;
   [[nodiscard]] std::size_t cellCount() const noexcept {
     return manifold_.cellCount();

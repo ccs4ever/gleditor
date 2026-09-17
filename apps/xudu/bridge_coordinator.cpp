@@ -72,6 +72,27 @@ void BridgeCoordinator::activateCell(const zigzag::CellRef cell) {
   }
 }
 
+bool BridgeCoordinator::isCellLocked(
+    const zigzag::CellRef cell) const noexcept {
+  return surface_ != nullptr && surface_->isCellLocked(cell);
+}
+
+std::optional<xanadu::TranscopyrightDescriptor>
+BridgeCoordinator::cellRoyalty(const zigzag::CellRef cell) const noexcept {
+  return surface_ != nullptr ? surface_->cellRoyalty(cell) : std::nullopt;
+}
+
+bool BridgeCoordinator::unlockCell(const zigzag::CellRef cell) {
+  if (surface_ == nullptr) {
+    return false;
+  }
+  const bool ok = surface_->unlockCell(cell);
+  if (ok) {
+    synchronize();
+  }
+  return ok;
+}
+
 void BridgeCoordinator::detach() noexcept {
   if (surface_ == nullptr) {
     return;

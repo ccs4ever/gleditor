@@ -1910,7 +1910,11 @@ bool ZigzagVisualizer::keyPressed(const gleditor::Key key,
     }
   }
   if (key == gleditor::Key::Return) {
-    activateCell(static_cast<CellRef>(accursed_cell_focus_));
+    const auto focus = static_cast<CellRef>(accursed_cell_focus_);
+    if (isCellLocked(focus)) {
+      unlockCell(focus);
+    }
+    activateCell(focus);
     return true;
   }
   return false;
@@ -1942,6 +1946,22 @@ std::optional<gleditor::InputArea> ZigzagVisualizer::textArea() const {
     };
   }
   return std::nullopt;
+}
+
+bool ZigzagVisualizer::unlockCell(const CellRef cell) {
+  if (!engine_) {
+    return false;
+  }
+  if (!engine_->unlockTranscopyright(cell)) {
+    return false;
+  }
+  ++revision_;
+  rebuildActiveViewTopology();
+  invalidateAccessibility();
+  if (bridgeInvalidationCallback_) {
+    bridgeInvalidationCallback_(revision_);
+  }
+  return true;
 }
 
 void ZigzagVisualizer::activateCell(const CellRef cell) {

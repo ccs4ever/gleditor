@@ -373,6 +373,16 @@ public:
     return scene_.neighborhood_radius;
   }
   void setCellRadius(int radius) noexcept override;
+
+  [[nodiscard]] bool isCellLocked(CellRef cell) const noexcept override {
+    return engine_ ? engine_->isCellLocked(cell) : false;
+  }
+  [[nodiscard]] std::optional<xanadu::TranscopyrightDescriptor>
+  cellRoyalty(CellRef cell) const noexcept override {
+    return engine_ ? engine_->cellRoyalty(cell) : std::nullopt;
+  }
+  bool unlockCell(CellRef cell) override;
+
   [[nodiscard]] std::uint64_t bridgeRevision() const noexcept override {
     return revision_;
   }

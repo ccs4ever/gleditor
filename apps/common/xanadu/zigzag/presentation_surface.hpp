@@ -14,6 +14,7 @@
 #include <gleditor/pick_observer.hpp>
 
 #include "common/xanadu/link_layout.hpp"
+#include "common/xanadu/scroll.hpp"
 #include "common/xanadu/zigzag/manifold.hpp"
 
 namespace xanadu {
@@ -40,6 +41,12 @@ public:
   virtual void setCellActivationCallback(CellActivationCallback callback) = 0;
   [[nodiscard]] virtual int cellRadius() const noexcept                   = 0;
   virtual void setCellRadius(int radius) noexcept                         = 0;
+
+  [[nodiscard]] virtual bool
+  isCellLocked(zigzag::CellRef cell) const noexcept = 0;
+  [[nodiscard]] virtual std::optional<TranscopyrightDescriptor>
+  cellRoyalty(zigzag::CellRef cell) const noexcept = 0;
+  virtual bool unlockCell(zigzag::CellRef cell)    = 0;
 
   [[nodiscard]] virtual std::optional<CellAnchor>
   cellAnchor(zigzag::CellRef cell) const = 0;

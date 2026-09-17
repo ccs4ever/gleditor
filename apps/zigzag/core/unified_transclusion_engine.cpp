@@ -11,6 +11,7 @@
 #include <set>
 #include <utility>
 
+#include "common/xanadu/transcopyright_logic.hpp"
 #include "common/xanadu/zigzag/dimension_registry.hpp"
 
 namespace zigzag {
@@ -104,6 +105,73 @@ const UnifiedTransclusionEngine::ColdCell *
 UnifiedTransclusionEngine::coldOf(const CellRef cell) const noexcept {
   const auto found = cold_.find(cell);
   return found == cold_.end() ? nullptr : &found->second;
+}
+
+bool UnifiedTransclusionEngine::isCellLocked(
+    const CellRef cell) const noexcept {
+  if (const auto *const cold = coldOf(cell); nullptr != cold) {
+    if (cold->resolutionStatus ==
+        xanadu::ResolutionStatus::TranscopyrightLocked) {
+      return true;
+    }
+  }
+  const auto spans = manifold_.contentOf(cell);
+  if (!spans.empty()) {
+    const auto res = store_.resolve(spans.front());
+    if (res.status == xanadu::ResolutionStatus::TranscopyrightLocked) {
+      return true;
+    }
+  }
+  return false;
+}
+
+std::optional<xanadu::TranscopyrightDescriptor>
+UnifiedTransclusionEngine::cellRoyalty(const CellRef cell) const noexcept {
+  if (const auto *const cold = coldOf(cell); nullptr != cold) {
+    if (cold->transcopyrightInfo.has_value()) {
+      return cold->transcopyrightInfo;
+    }
+  }
+  const auto spans = manifold_.contentOf(cell);
+  if (!spans.empty()) {
+    const auto res = store_.resolve(spans.front());
+    if (res.lockInfo.has_value()) {
+      return res.lockInfo;
+    }
+  }
+  return std::nullopt;
+}
+
+bool UnifiedTransclusionEngine::unlockTranscopyright(const CellRef cell) {
+  const auto spans = manifold_.contentOf(cell);
+  if (spans.empty()) {
+    return false;
+  }
+  const auto &span = spans.front();
+  const auto res   = store_.resolve(span);
+  if (res.status != xanadu::ResolutionStatus::TranscopyrightLocked ||
+      !res.lockInfo.has_value()) {
+    const auto *const cold = coldOf(cell);
+    if (!cold || !cold->transcopyrightInfo.has_value() ||
+        cold->resolutionStatus !=
+            xanadu::ResolutionStatus::TranscopyrightLocked) {
+      return false;
+    }
+  }
+  const auto &tc = res.lockInfo.has_value() ? *res.lockInfo
+                                            : *coldOf(cell)->transcopyrightInfo;
+  const auto cek =
+      xanadu::TranscopyrightLogic::deriveDeterministicTestCek(tc.keyId);
+  const auto count = span.length > 0 ? span.length : 1U;
+  const auto cost  = tc.computeCost(count);
+  if (!store_.contentResolver().unlockTranscopyright(tc.keyId, cek, cost,
+                                                     tc.currencySymbol)) {
+    return false;
+  }
+  auto &cold            = cold_[cell];
+  cold.resolutionStatus = xanadu::ResolutionStatus::VerifiedBytes;
+  shapingCache_.clear();
+  return true;
 }
 
 void UnifiedTransclusionEngine::linkCells(const CellRef a, const CellRef b,
@@ -345,6 +413,21 @@ UnifiedTransclusionEngine::resolveCellText(const CellRef cell) const {
       }
       return "[🔒 Locked]";
     }
+  } else {
+    const auto spans = manifold_.contentOf(cell);
+    if (!spans.empty()) {
+      const auto res = store_.resolve(spans.front());
+      if (res.status == xanadu::ResolutionStatus::WithheldRedacted) {
+        return "[Redacted - Withheld]";
+      }
+      if (res.status == xanadu::ResolutionStatus::TranscopyrightLocked) {
+        if (res.lockInfo) {
+          return "[🔒 " + std::to_string(res.lockInfo->priceAtomicUnits) + " " +
+                 res.lockInfo->currencySymbol + "]";
+        }
+        return "[🔒 Locked]";
+      }
+    }
   }
   return manifold_.textOf(cell, store_);
 }
@@ -544,6 +627,8 @@ UnifiedTransclusionEngine::stageVisibleCells(
                  xanadu::ResolutionStatus::TranscopyrightLocked) {
         paperCol = Doc::VBORow::color3(245, 158, 11);
       }
+    } else if (isCellLocked(cid)) {
+      paperCol = Doc::VBORow::color3(245, 158, 11);
     }
 
     for (const auto &glyph : shaping.glyphs) {

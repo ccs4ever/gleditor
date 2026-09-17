@@ -82,6 +82,29 @@ public:
   }
   [[nodiscard]] int cellRadius() const noexcept override { return radius_; }
   void setCellRadius(const int radius) noexcept override { radius_ = radius; }
+  bool locked_{false};
+  std::optional<xanadu::TranscopyrightDescriptor> royalty_{};
+
+  [[nodiscard]] bool
+  isCellLocked(zigzag::CellRef /*cell*/) const noexcept override {
+    return locked_;
+  }
+  [[nodiscard]] std::optional<xanadu::TranscopyrightDescriptor>
+  cellRoyalty(zigzag::CellRef /*cell*/) const noexcept override {
+    return royalty_;
+  }
+  bool unlockCell(zigzag::CellRef /*cell*/) override {
+    if (locked_) {
+      locked_ = false;
+      ++rev_;
+      if (invalidationCb_) {
+        invalidationCb_(rev_);
+      }
+      return true;
+    }
+    return false;
+  }
+
   [[nodiscard]] std::optional<xanadu::CellAnchor>
   cellAnchor(zigzag::CellRef) const override {
     return std::nullopt;
@@ -274,4 +297,43 @@ TEST(XuzzBridgeTest,
   };
   onDocumentLinkActivated(c2);
   EXPECT_EQ(surface.focusCell(), c2);
+}
+
+TEST(XuzzBridgeTest, VortexBridgeTranscopyrightSettlement) {
+  zigzag::ArenaManifold arena;
+  zigzag::vortex::VortexCore core(arena);
+  zigzag::vortex::VortexVM vm(core);
+  zigzag::vortex::VortexStdLib stdlib(core, vm);
+  stdlib.bootstrap();
+
+  MockSurface surface;
+  const zigzag::CellRef cell = 77;
+
+  // Unlocked by default
+  EXPECT_FALSE(stdlib.bridgeCellRoyalty(surface, cell).has_value());
+  EXPECT_FALSE(stdlib.bridgeCellUnlock(surface, cell));
+
+  // Lock the cell with royalty descriptor
+  surface.locked_ = true;
+  std::array<std::uint8_t, 32> keyId{};
+  keyId.fill(0xEF);
+  xanadu::TranscopyrightDescriptor tc{
+      .priceAtomicUnits = 100,
+      .keyId            = keyId,
+      .currencySymbol   = "XU",
+  };
+  surface.royalty_ = tc;
+
+  EXPECT_TRUE(surface.isCellLocked(cell));
+  const auto roy = stdlib.bridgeCellRoyalty(surface, cell);
+  ASSERT_TRUE(roy.has_value());
+  EXPECT_EQ(roy->priceAtomicUnits, 100U);
+  EXPECT_EQ(roy->currencySymbol, "XU");
+  EXPECT_EQ(roy->keyId, keyId);
+
+  // Unlock cell via stdlib
+  const auto revBefore = surface.bridgeRevision();
+  EXPECT_TRUE(stdlib.bridgeCellUnlock(surface, cell));
+  EXPECT_FALSE(surface.isCellLocked(cell));
+  EXPECT_GT(surface.bridgeRevision(), revBefore);
 }

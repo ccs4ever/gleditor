@@ -1602,14 +1602,23 @@ void LinkBeams::drawFrame(gleditor::FrameContext &ctx) {
       std::uint32_t baseBeamColour = 0xFFD700FFU; // Default Identity Gold
       float phase                  = 0.0F;
 
+      std::optional<ResolveResult> res;
       if (tStrand.from.isDocument() &&
           tStrand.from.doc < session.views().size()) {
         const auto sIdx = session.storeIndexOf(tStrand.from.doc);
-        const auto &st  = session.store(sIdx);
-        const auto res  = st.resolve(tStrand.span);
-        if (res.status == ResolutionStatus::WithheldRedacted) {
+        res             = session.store(sIdx).resolve(tStrand.span);
+      } else if (tStrand.to.isDocument() &&
+                 tStrand.to.doc < session.views().size()) {
+        const auto sIdx = session.storeIndexOf(tStrand.to.doc);
+        res             = session.store(sIdx).resolve(tStrand.span);
+      } else if (session.storeCount() > 0) {
+        res = session.store().resolve(tStrand.span);
+      }
+
+      if (res.has_value()) {
+        if (res->isWithheld()) {
           baseBeamColour = 0x1F2937FFU; // Obsidian Redaction Beam
-        } else if (res.status == ResolutionStatus::TranscopyrightLocked) {
+        } else if (res->isLocked()) {
           baseBeamColour = 0xF59E0BFFU; // Transcopyright Amber Gold Beam
           phase          = pulsePhase;  // Active photonic energy pulse
         }

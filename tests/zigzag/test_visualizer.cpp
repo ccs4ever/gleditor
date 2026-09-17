@@ -1027,3 +1027,51 @@ TEST(ZigzagVisualizerTest, CellActivationCallbackAndReturnKeyDispatch) {
   EXPECT_TRUE(viz.keyPressed(gleditor::Key::Return, gleditor::KeyMods::None));
   EXPECT_EQ(activatedCell, 0U);
 }
+
+TEST(ZigzagVisualizerTest, ZigzagVisualizerTranscopyrightSettlement) {
+  ZigzagVisualizer viz("Sans 12");
+  ASSERT_NE(viz.engine(), nullptr);
+
+  const auto focus = viz.focusCellId();
+  ASSERT_NE(focus, 0U);
+
+  // Mark the cell as transcopyright-locked in cold cache
+  std::array<std::uint8_t, 32> keyId{};
+  keyId.fill(0x42);
+  viz.engine()->setCold(
+      static_cast<CellRef>(focus),
+      {.resolutionStatus   = xanadu::ResolutionStatus::TranscopyrightLocked,
+       .transcopyrightInfo = xanadu::TranscopyrightDescriptor{
+           .priceAtomicUnits = 50,
+           .keyId            = keyId,
+           .currencySymbol   = "XU",
+       }});
+
+  // Verify presentation surface state
+  EXPECT_TRUE(viz.isCellLocked(static_cast<CellRef>(focus)));
+  const auto royalty = viz.cellRoyalty(static_cast<CellRef>(focus));
+  ASSERT_TRUE(royalty.has_value());
+  EXPECT_EQ(royalty->priceAtomicUnits, 50U);
+  EXPECT_EQ(royalty->currencySymbol, "XU");
+  EXPECT_EQ(royalty->keyId, keyId);
+
+  EXPECT_EQ(viz.engine()->resolveCellText(static_cast<CellRef>(focus)),
+            "[🔒 50 XU]");
+
+  // Invalidation tracking
+  std::uint64_t invalidatedRev = 0;
+  viz.setBridgeInvalidationCallback(
+      [&](const std::uint64_t rev) { invalidatedRev = rev; });
+
+  // Key::Return when cell is locked should unlock it before activating
+  zigzag::CellRef activatedCell = 0;
+  viz.setCellActivationCallback(
+      [&](const zigzag::CellRef cell) { activatedCell = cell; });
+
+  const auto revBefore = viz.bridgeRevision();
+  EXPECT_TRUE(viz.keyPressed(gleditor::Key::Return, gleditor::KeyMods::None));
+  EXPECT_EQ(activatedCell, focus);
+  EXPECT_GT(viz.bridgeRevision(), revBefore);
+  EXPECT_EQ(invalidatedRev, viz.bridgeRevision());
+  EXPECT_FALSE(viz.isCellLocked(static_cast<CellRef>(focus)));
+}

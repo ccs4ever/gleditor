@@ -3101,6 +3101,28 @@ void VortexStdLib::buildBridgeModule(CellRef mod) {
     routineBindings_[op] = {{inOff, inLen}, {out}};
     exportSymbol(mod, "doc_to_cell", op);
   }
+
+  // cell_royalty: cell -> price (#BRIDGE_CELL_ROYALTY)
+  {
+    CellRef inCell = core_.arena().makeCell();
+    CellRef out    = core_.arena().makeCell();
+    CellRef op     = vm_.mintOpcode(OpcodeKind::Nop, "#BRIDGE_CELL_ROYALTY");
+    core_.bindInput(op, inCell);
+    core_.bindOutput(op, out);
+    routineBindings_[op] = {{inCell}, {out}};
+    exportSymbol(mod, "cell_royalty", op);
+  }
+
+  // cell_unlock: cell -> status (#BRIDGE_CELL_UNLOCK)
+  {
+    CellRef inCell = core_.arena().makeCell();
+    CellRef out    = core_.arena().makeCell();
+    CellRef op     = vm_.mintOpcode(OpcodeKind::Nop, "#BRIDGE_CELL_UNLOCK");
+    core_.bindInput(op, inCell);
+    core_.bindOutput(op, out);
+    routineBindings_[op] = {{inCell}, {out}};
+    exportSymbol(mod, "cell_unlock", op);
+  }
 }
 
 CellRef VortexStdLib::zzStep(CellRef cursor, DimRef dim, DimVector dir) {
@@ -3405,6 +3427,16 @@ CellRef VortexStdLib::bridgeDocToCell(xanadu::Store &store,
   }
   std::string sub = docText.substr(docOffset, length);
   return core_.arena().makeCell(sub);
+}
+
+std::optional<xanadu::TranscopyrightDescriptor> VortexStdLib::bridgeCellRoyalty(
+    const xanadu::ZigzagPresentationSurface &surface, const CellRef cell) {
+  return surface.cellRoyalty(cell);
+}
+
+bool VortexStdLib::bridgeCellUnlock(xanadu::ZigzagPresentationSurface &surface,
+                                    const CellRef cell) {
+  return surface.unlockCell(cell);
 }
 
 } // namespace zigzag::vortex
