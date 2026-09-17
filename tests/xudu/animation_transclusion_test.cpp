@@ -115,6 +115,36 @@ PpmImageInfo inspectPpm(const fs::path &path) {
   return info;
 }
 
+std::size_t changedPixels(const fs::path &before, const fs::path &after) {
+  std::ifstream left(before, std::ios::binary);
+  std::ifstream right(after, std::ios::binary);
+  std::string leftHeader;
+  std::string rightHeader;
+  std::getline(left, leftHeader);
+  std::getline(right, rightHeader);
+  std::getline(left, leftHeader);
+  std::getline(right, rightHeader);
+  std::getline(left, leftHeader);
+  std::getline(right, rightHeader);
+  if (leftHeader != rightHeader) {
+    return 1;
+  }
+  std::vector<char> leftPixels((std::istreambuf_iterator<char>(left)), {});
+  std::vector<char> rightPixels((std::istreambuf_iterator<char>(right)), {});
+  if (leftPixels.size() != rightPixels.size()) {
+    return 1;
+  }
+  std::size_t changed = 0;
+  for (std::size_t i = 0; i + 2 < leftPixels.size(); i += 3) {
+    if (leftPixels[i] != rightPixels[i] ||
+        leftPixels[i + 1] != rightPixels[i + 1] ||
+        leftPixels[i + 2] != rightPixels[i + 2]) {
+      changed++;
+    }
+  }
+  return changed;
+}
+
 fs::path findXuduBinary() {
   const std::vector<fs::path> candidates = {
       fs::current_path() / "build" / "xudu",
@@ -158,6 +188,43 @@ protected:
     fs::remove_all(testRoot, ec);
   }
 };
+
+TEST_F(AnimationTransclusionTest,
+       VideoCardScreenshotChangesAfterClickingItsPlayButton) {
+  const auto xuduBin = findXuduBinary();
+  ASSERT_TRUE(fs::exists(xuduBin)) << "xudu binary not found at " << xuduBin;
+
+  const auto before = screenshotDir / "video_stopped.ppm";
+  const auto after  = screenshotDir / "video_playing.ppm";
+  const auto store  = testRoot / "video_card_store";
+
+  // --video makes a screen-space card at (30,80). The play control's centre
+  // is (60,105) in bottom-left canvas coordinates; automation input is
+  // top-left, hence 600 - 105 = 495 for the default 800x600 test surface.
+  const std::string cmd =
+      xuduBin.string() + permascrollFlag(testRoot / "permascroll") +
+      " --backend " + activeBackend() +
+      " --profile --no-present --strict-diagnostics --video " +
+      "tests/samples/sample_video_seekable.mp4 --capture " + before.string() +
+      " --click 60,495 --capture " + after.string() + " " + store.string();
+  const auto result = executeProcess(cmd);
+  ASSERT_EQ(result.exitCode, 0)
+      << "video-card capture failed: " << result.output;
+  ASSERT_TRUE(fs::exists(before)) << "stopped video-card screenshot missing";
+  ASSERT_TRUE(fs::exists(after)) << "playing video-card screenshot missing";
+
+  const auto stopped = inspectPpm(before);
+  const auto playing = inspectPpm(after);
+  ASSERT_TRUE(stopped.valid) << stopped.errorMessage;
+  ASSERT_TRUE(playing.valid) << playing.errorMessage;
+  ASSERT_EQ(stopped.width, playing.width);
+  ASSERT_EQ(stopped.height, playing.height);
+  // The status badge must switch from Stopped to Playing; a decoded frame
+  // normally changes much more of the viewport, but the badge makes this
+  // check reliable while LibVLC is still delivering its first frame.
+  EXPECT_GT(changedPixels(before, after), 20U)
+      << "the play click did not change the rendered video card";
+}
 
 TEST_F(AnimationTransclusionTest, TranscludeAnimatedGifRendersAsMediaCard) {
   const auto xuduBin = findXuduBinary();

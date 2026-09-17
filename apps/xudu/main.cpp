@@ -2864,13 +2864,12 @@ int main(const int argc, char **argv) {
           }
         }
         for (std::size_t i = 0; i < videoWidgets.size(); ++i) {
-          const auto dIdx = (rState.docs.size() > 1) ? 1 : 0;
-          if (rState.docs[dIdx]) {
-            videoWidgets[i]->attachToPage(rState.docs[dIdx], 0, 30.0F,
-                                          240.0F +
-                                              static_cast<float>(i) * 200.0F);
-            videoWidgets[i]->setSize(340.0F, 180.0F);
-          }
+          // Command-line video is an operational card, not a document span:
+          // keep it in screen space so it remains reachable while the first
+          // document is loading and automation has stable click coordinates.
+          videoWidgets[i]->setScreenPosition(
+              30.0F, 80.0F + static_cast<float>(i) * 200.0F);
+          videoWidgets[i]->setSize(340.0F, 180.0F);
         }
       }
     });
