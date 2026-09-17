@@ -11,6 +11,7 @@
 
 #include "common/xanadu/vpl/lexer.hpp"
 #include "common/xanadu/vpl/parser.hpp"
+#include "common/xanadu/zigzag/dimension_registry.hpp"
 
 namespace xanadu::vpl {
 
@@ -1335,16 +1336,10 @@ VPLCompiler::exportToStore(xanadu::Store &store,
     if (!arena.contains(c)) continue;
     std::string name = arena.textOf(c);
     if (!name.empty() && name.starts_with("d.")) {
-      DimRef existing = manifold.dimensionNamed(name, store);
-      if (existing != zigzag::noCell) {
-        dimMap[c] = existing;
-      } else {
-        auto minted = store.makeDimension(ver, name, &manifold);
-        ver         = minted.version;
-        dimMap[c]   = minted.dim;
-        manifold    = store.rebuildManifold(ver);
-      }
-      cellMap[c] = dimMap[c];
+      const DimRef dim = zigzag::DimensionRegistry::instance().getOrCreate(
+          store, ver, manifold, name);
+      dimMap[c]  = dim;
+      cellMap[c] = dim;
     }
   }
 

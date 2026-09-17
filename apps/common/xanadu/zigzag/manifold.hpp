@@ -302,6 +302,13 @@ public:
   [[nodiscard]] DimRef dimensionNamed(std::string_view name,
                                       const xanadu::SpanReader &reader) const;
 
+  /// Find a dimension by name using the associated Store as the reader.
+  [[nodiscard]] DimRef dimensionNamed(std::string_view name) const;
+
+  /// The backing Store for this manifold view, or nullptr if unattached.
+  [[nodiscard]] xanadu::Store *store() const noexcept { return store_; }
+  void setStore(xanadu::Store *s) noexcept { store_ = s; }
+
   /**
    * @brief Collect all cells within @p radius hops from @p start along any
    *        dimension link.
@@ -462,6 +469,8 @@ private:
   /// dimensions() is a rank walk, and a span has to point at something.
   mutable std::vector<DimRef> dimsCache;
   mutable bool dimsCacheStale{true};
+
+  xanadu::Store *store_{nullptr};
 };
 
 } // namespace zigzag

@@ -20,6 +20,7 @@
 #include "common/xanadu/ops.hpp"
 #include "common/xanadu/store.hpp"
 #include "common/xanadu/version.hpp"
+#include "common/xanadu/zigzag/dimension_registry.hpp"
 #include "common/xanadu/zigzag/manifold.hpp"
 #include "common/xanadu/zigzag/zz_system_projector.hpp"
 #include "common/xanadu/zigzag/zzstructure.hpp"
@@ -365,14 +366,8 @@ std::vector<std::string> splitTokens(const std::string_view str,
 zigzag::DimRef getOrMakeDim(Store &store, MicroversionId &cur,
                             zigzag::Manifold &manifold,
                             const std::string_view name) {
-  auto dim = manifold.dimensionNamed(name, store);
-  if (dim == zigzag::noCell) {
-    const auto minted = store.makeDimension(cur, name, &manifold);
-    cur               = minted.version;
-    manifold          = store.rebuildManifold(cur);
-    dim               = minted.dim;
-  }
-  return dim;
+  return zigzag::DimensionRegistry::instance().getOrCreate(store, cur, manifold,
+                                                           name);
 }
 
 zigzag::CellRef findPrototypeCell(const zigzag::Manifold &manifold,

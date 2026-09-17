@@ -6,6 +6,7 @@
 #include <limits>
 
 #include "common/xanadu/store.hpp"
+#include "common/xanadu/zigzag/dimension_registry.hpp"
 
 namespace zigzag {
 
@@ -357,6 +358,7 @@ void Manifold::applyStructure(const std::uint32_t opIndex,
 
 bool Manifold::advance(const xanadu::Store &store,
                        const xanadu::MicroversionId &version) {
+  store_           = const_cast<xanadu::Store *>(&store);
   const auto index = store.segmentedOps().indexOf(version);
   if (0 == index) {
     return false;
@@ -443,12 +445,28 @@ std::span<const DimRef> Manifold::dimensions() const {
 
 DimRef Manifold::dimensionNamed(const std::string_view name,
                                 const xanadu::SpanReader &reader) const {
+  if (nullptr != store_) {
+    const auto fast = DimensionRegistry::instance().get(*store_, name);
+    if (noCell != fast && contains(fast)) {
+      return fast;
+    }
+  }
   for (const auto dim : dimensions()) {
     if (textOf(dim, reader) == name) {
+      if (nullptr != store_) {
+        DimensionRegistry::instance().registerDim(*store_, name, dim);
+      }
       return dim;
     }
   }
   return noCell;
+}
+
+DimRef Manifold::dimensionNamed(const std::string_view name) const {
+  if (nullptr == store_) {
+    return noCell;
+  }
+  return dimensionNamed(name, *store_);
 }
 
 std::string Manifold::textOf(const CellRef ref,

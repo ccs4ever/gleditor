@@ -113,6 +113,7 @@ class Store : public SpanReader {
 public:
   Store();
   explicit Store(std::shared_ptr<UserPermascroll> userPermascroll);
+  ~Store() override;
 
   /// Stable persisted identity of this document, not of one revision of it.
   [[nodiscard]] const DocumentId &documentId() const noexcept {

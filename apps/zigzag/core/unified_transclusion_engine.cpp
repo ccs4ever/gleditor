@@ -11,16 +11,20 @@
 #include <set>
 #include <utility>
 
+#include "common/xanadu/zigzag/dimension_registry.hpp"
+
 namespace zigzag {
 
 UnifiedTransclusionEngine::UnifiedTransclusionEngine(xanadu::Store &store)
     : store_(store) {
+  manifold_.setStore(&store_);
   syncIncremental();
 }
 
 UnifiedTransclusionEngine::UnifiedTransclusionEngine(
     xanadu::Store &store, const xanadu::MicroversionId &version)
     : store_(store) {
+  manifold_.setStore(&store_);
   syncTo(version);
 }
 
@@ -69,15 +73,10 @@ void UnifiedTransclusionEngine::ensureSliceBegun() {
 }
 
 DimRef UnifiedTransclusionEngine::dimensionFor(const std::string_view name) {
-  if (const auto found = manifold_.dimensionNamed(name, store_);
-      zigzag::noCell != found) {
-    return found;
-  }
-  ensureSliceBegun();
-  const auto minted = store_.makeDimension(head_, name, &manifold_);
-  head_             = minted.version;
+  const auto dim =
+      DimensionRegistry::instance().getOrCreate(store_, head_, manifold_, name);
   syncIncremental();
-  return minted.dim;
+  return dim;
 }
 
 CellRef UnifiedTransclusionEngine::addCell(const std::string_view text) {
@@ -199,7 +198,7 @@ CellRef UnifiedTransclusionEngine::linked(const CellRef from, const DimRef dim,
   }
 
   const auto metaDim  = metaDimension();
-  const auto cloneDim = manifold_.dimensionNamed("d.clone", store_);
+  const auto cloneDim = DimensionRegistry::instance().get(manifold_, "d.clone");
 
   if (isEphemeral(from)) {
     const auto it = ephemeralSlots_.find(from);
@@ -454,9 +453,9 @@ UnifiedTransclusionEngine::stageVisibleCells(
   // The axes are named in the request and are cells here, so each is resolved
   // once per pass rather than per hop: a dimension is found by walking the
   // d.dims rank, which is cheap but not free.
-  const auto axisX = manifold_.dimensionNamed(req.axisX, store_);
-  const auto axisY = manifold_.dimensionNamed(req.axisY, store_);
-  const auto axisZ = manifold_.dimensionNamed(req.axisZ, store_);
+  const auto axisX = DimensionRegistry::instance().get(manifold_, req.axisX);
+  const auto axisY = DimensionRegistry::instance().get(manifold_, req.axisY);
+  const auto axisZ = DimensionRegistry::instance().get(manifold_, req.axisZ);
 
   const CellRef startId = manifold_.contains(req.focusCellId)
                               ? req.focusCellId

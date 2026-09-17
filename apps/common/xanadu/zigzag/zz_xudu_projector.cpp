@@ -15,6 +15,7 @@
 #include <variant>
 
 #include "common/xanadu/format.hpp"
+#include "common/xanadu/zigzag/dimension_registry.hpp"
 #include "common/xanadu/zigzag/zzcore.hpp"
 
 namespace zigzag {
@@ -598,18 +599,9 @@ SlicedStore sliceToStore(const ZzStructureDocument &doc, xanadu::Store &store,
 
   auto manifold = store.rebuildManifold(out.version);
   for (const auto &name : dimensionNames) {
-    // Reused by name when the store already has it, which is what makes minting
-    // a second slice into one store coherent rather than a way to end up with
-    // two cells both called "d.1" and a dimensionNamed() that has to pick.
-    if (const auto existing = manifold.dimensionNamed(name, store);
-        zigzag::noCell != existing) {
-      out.dimensions.emplace(name, existing);
-      continue;
-    }
-    const auto minted = store.makeDimension(out.version, name, &manifold);
-    out.version       = minted.version;
-    out.dimensions.emplace(name, minted.dim);
-    manifold = store.rebuildManifold(out.version);
+    const auto dim = DimensionRegistry::instance().getOrCreate(
+        store, out.version, manifold, name);
+    out.dimensions.emplace(name, dim);
   }
 
   // One cell per YAML cell, in id order. A number or a flag becomes a scalar

@@ -16,6 +16,7 @@
 
 #include "binary_ops.hpp"
 #include "common/xanadu/osmic_walker.hpp"
+#include "common/xanadu/zigzag/dimension_registry.hpp"
 #include "store_tables.hpp"
 #include "windows_quoting.hpp"
 
@@ -101,6 +102,8 @@ Store::Store(std::shared_ptr<UserPermascroll> userPermascroll)
     : userPermascroll_(userPermascroll ? std::move(userPermascroll)
                                        : std::make_shared<UserPermascroll>()),
       chronofilade_(std::make_unique<enfilade::Chronofilade>()) {}
+
+Store::~Store() { zigzag::DimensionRegistry::instance().unregisterStore(this); }
 
 void Store::putOp(const MicroversionId &produces, const Op &op) {
   if (produces.isZero()) {
@@ -264,6 +267,7 @@ Version Store::rebuild(const MicroversionId &version) const {
 zigzag::Manifold
 Store::rebuildManifoldFromIndex(const std::uint32_t index) const {
   zigzag::Manifold folded;
+  folded.setStore(const_cast<Store *>(this));
   OsmicWalker::walkAncestral(
       opsSpool, index, [&folded](std::uint32_t idx, const CompactOpNode &node) {
         folded.applyStructure(idx, node);
@@ -281,6 +285,7 @@ zigzag::Manifold Store::rebuildManifold(const MicroversionId &version) const {
   // Nothing filed under this name: fold the longest recorded prefix of it, for
   // the same reason rebuild() replays one.
   zigzag::Manifold folded;
+  folded.setStore(const_cast<Store *>(this));
   for (const auto &step : version.path()) {
     if (const auto *const node = opsSpool.get(step); nullptr != node) {
       folded.applyStructure(opsSpool.indexOf(step), *node);
@@ -518,8 +523,11 @@ MicroversionId Store::sliceGenesis(const MicroversionId &parent) {
   // d.dims is a dimension like any other, so it belongs on its own rank --
   // which is what makes dimensions() report it alongside everything minted
   // afterwards instead of it being the one dimension that is invisible.
-  return setLink(withDims, homeCell_, dimsDimension_, zigzag::DimVector::POS,
-                 dimsDimension_);
+  const auto res = setLink(withDims, homeCell_, dimsDimension_,
+                           zigzag::DimVector::POS, dimsDimension_);
+  zigzag::DimensionRegistry::instance().registerDim(*this, "d.dims",
+                                                    dimsDimension_);
+  return res;
 }
 
 Store::MintedDimension Store::makeDimension(const MicroversionId &parent,
@@ -548,9 +556,10 @@ Store::MintedDimension Store::makeDimension(const MicroversionId &parent,
     }
     tail = next;
   }
-  return MintedDimension{
-      setLink(minted, tail, dimsDimension_, zigzag::DimVector::POS, ref, known),
-      ref};
+  const auto version =
+      setLink(minted, tail, dimsDimension_, zigzag::DimVector::POS, ref, known);
+  zigzag::DimensionRegistry::instance().registerDim(*this, name, ref);
+  return MintedDimension{version, ref};
 }
 
 bool Store::advance(Version &document, const MicroversionId &known,
