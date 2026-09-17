@@ -18,12 +18,15 @@ BIN="${BIN:-build/gleditor}"
 OUT="${OUT:-$(mktemp -d)}"
 export SDL_VIDEODRIVER="${SDL_VIDEODRIVER:-offscreen}"
 
-# Percentage of differing bytes tolerated against the OpenGL reference. OpenGL
+# Percentage of differing pixels tolerated against the OpenGL reference. OpenGL
 # ES runs the same pipeline through the same driver, so it is held to exact
 # equality; Vulkan rasterises through a different one and is allowed a margin
-# tight enough that anything beyond edge rounding still fails.
+# tight enough that anything beyond edge rounding still fails. A one-level
+# channel difference is treated as rounding noise for Vulkan; counting bytes
+# made one antialiased pixel count up to three times.
 GL_TOLERANCE_PCT=0
 VK_TOLERANCE_PCT=1
+VK_CHANNEL_TOLERANCE="${VK_CHANNEL_TOLERANCE:-1}"
 
 # Driver errors are notifications by default, which is right for an editor and
 # wrong for a comparison: a frame produced while the driver was objecting has
@@ -155,6 +158,7 @@ sed 's/^/  /' "$OUT/opengl.picks"
 
 OUT="$OUT" GL_TOLERANCE_PCT="$GL_TOLERANCE_PCT" \
   VK_TOLERANCE_PCT="$VK_TOLERANCE_PCT" \
+  VK_CHANNEL_TOLERANCE="$VK_CHANNEL_TOLERANCE" \
   BACKENDS="$backends" python3 - <<'PYEOF'
 import os, sys
 
@@ -162,10 +166,22 @@ out = os.environ["OUT"]
 backends = os.environ["BACKENDS"].split()
 vk_tol = float(os.environ["VK_TOLERANCE_PCT"]) / 100.0
 gl_tol = float(os.environ["GL_TOLERANCE_PCT"]) / 100.0
+vk_channel_tol = int(os.environ["VK_CHANNEL_TOLERANCE"])
 
 def load(path):
     data = open(path, "rb").read()
     return data[data.index(b"255\n") + 4:]
+
+def compare(ref, other, channel_tolerance):
+    if len(ref) % 3 != 0:
+        raise ValueError("RGB frame has a partial pixel")
+    deltas = [
+        max(abs(a - b) for a, b in zip(ref[i:i + 3], other[i:i + 3]))
+        for i in range(0, len(ref), 3)
+    ]
+    differing = [d for d in deltas if d > channel_tolerance]
+    return len(differing), len(deltas), max(deltas, default=0), \
+        sum(deltas) / len(deltas) if deltas else 0.0
 
 ref = load(f"{out}/opengl.ppm")
 
@@ -182,13 +198,16 @@ for backend in backends:
         print(f"FAIL: {backend} frame is a different size")
         failed = True
         continue
-    diffs = [abs(a - b) for a, b in zip(ref, other)]
-    differing = sum(1 for d in diffs if d)
-    fraction = differing / len(ref)
+    channel_tolerance = vk_channel_tol if backend == "vulkan" else 0
+    differing, pixels, max_delta, mean_delta = compare(
+        ref, other, channel_tolerance)
+    fraction = differing / pixels
     limit = vk_tol if backend == "vulkan" else gl_tol
     status = "ok" if fraction <= limit else "FAIL"
-    print(f"{status}: {backend} vs opengl: {differing}/{len(ref)} bytes differ "
-          f"({fraction*100:.4f}%), max delta {max(diffs)}, limit {limit*100:.2f}%")
+    print(f"{status}: {backend} vs opengl: {differing}/{pixels} pixels differ "
+          f"({fraction*100:.4f}%), max delta {max_delta}, "
+          f"mean delta {mean_delta:.3f}, channel tolerance {channel_tolerance}, "
+          f"limit {limit*100:.2f}%")
     if fraction > limit:
         failed = True
 
@@ -196,7 +215,9 @@ for backend in backends:
 # frames without an overlay -- otherwise every backend agreeing would only mean
 # every backend drew nothing.
 toastRef = load(f"{out}/opengl.toast.ppm")
-overlaid = sum(1 for a, b in zip(ref, toastRef) if a != b)
+overlaid = sum(
+    1 for i in range(0, len(ref), 3) if ref[i:i + 3] != toastRef[i:i + 3]
+)
 if overlaid == 0:
     print("FAIL: the notification overlay changed no pixels")
     failed = True
@@ -211,14 +232,16 @@ for backend in backends:
         print(f"FAIL: {backend} overlay frame is a different size")
         failed = True
         continue
-    diffs = [abs(a - b) for a, b in zip(toastRef, other)]
-    differing = sum(1 for d in diffs if d)
-    fraction = differing / len(toastRef)
+    channel_tolerance = vk_channel_tol if backend == "vulkan" else 0
+    differing, pixels, max_delta, mean_delta = compare(
+        toastRef, other, channel_tolerance)
+    fraction = differing / pixels
     limit = vk_tol if backend == "vulkan" else gl_tol
     status = "ok" if fraction <= limit else "FAIL"
     print(f"{status}: {backend} vs opengl with overlay: "
-          f"{differing}/{len(toastRef)} bytes differ ({fraction*100:.4f}%), "
-          f"max delta {max(diffs)}, limit {limit*100:.2f}%")
+          f"{differing}/{pixels} pixels differ ({fraction*100:.4f}%), "
+          f"max delta {max_delta}, mean delta {mean_delta:.3f}, "
+          f"channel tolerance {channel_tolerance}, limit {limit*100:.2f}%")
     if fraction > limit:
         failed = True
 
@@ -526,6 +549,7 @@ if [ -x "$XUDU_TEST_BIN" ]; then
   OUT="$OUT" BACKENDS="$backends" XUDU_STEPS="$XUDU_STEPS" \
     XUDU_GL_TOLERANCE_PCT="$XUDU_GL_TOLERANCE_PCT" \
     XUDU_VK_TOLERANCE_PCT="$XUDU_VK_TOLERANCE_PCT" \
+    VK_CHANNEL_TOLERANCE="$VK_CHANNEL_TOLERANCE" \
     python3 - <<'PYEOF'
 import os, sys
 
@@ -534,10 +558,22 @@ backends = os.environ["BACKENDS"].split()
 steps    = os.environ["XUDU_STEPS"].split()
 vk_tol   = float(os.environ["XUDU_VK_TOLERANCE_PCT"]) / 100.0
 gl_tol   = float(os.environ["XUDU_GL_TOLERANCE_PCT"]) / 100.0
+vk_channel_tol = int(os.environ["VK_CHANNEL_TOLERANCE"])
 
 def load(path):
     data = open(path, "rb").read()
     return data[data.index(b"255\n") + 4:]
+
+def compare(ref, other, channel_tolerance):
+    if len(ref) % 3 != 0:
+        raise ValueError("RGB frame has a partial pixel")
+    deltas = [
+        max(abs(a - b) for a, b in zip(ref[i:i + 3], other[i:i + 3]))
+        for i in range(0, len(ref), 3)
+    ]
+    differing = [d for d in deltas if d > channel_tolerance]
+    return len(differing), len(deltas), max(deltas, default=0), \
+        sum(deltas) / len(deltas) if deltas else 0.0
 
 failed = False
 for step in steps:
@@ -565,13 +601,16 @@ for step in steps:
             print(f"FAIL: {backend} {step} frame is a different size ({len(other)} vs {len(ref)})")
             failed = True
             continue
-        diffs = [abs(a - b) for a, b in zip(ref, other)]
-        differing = sum(1 for d in diffs if d)
-        fraction = differing / len(ref)
+        channel_tolerance = vk_channel_tol if backend == "vulkan" else 0
+        differing, pixels, max_delta, mean_delta = compare(
+            ref, other, channel_tolerance)
+        fraction = differing / pixels
         limit = vk_tol if backend == "vulkan" else gl_tol
         status = "ok" if fraction <= limit else "FAIL"
-        print(f"{status}: {backend} vs opengl for {step}: {differing}/{len(ref)} bytes differ "
-              f"({fraction*100:.4f}%), max delta {max(diffs) if differing else 0}, limit {limit*100:.2f}%")
+        print(f"{status}: {backend} vs opengl for {step}: "
+              f"{differing}/{pixels} pixels differ ({fraction*100:.4f}%), "
+              f"max delta {max_delta}, mean delta {mean_delta:.3f}, "
+              f"channel tolerance {channel_tolerance}, limit {limit*100:.2f}%")
         if fraction > limit:
             failed = True
 
