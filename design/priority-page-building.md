@@ -6,8 +6,8 @@ budget) landed with the Tier 1/Tier 2 work in
 this note assumes its vocabulary (`Doc::buildPendingPages()`, `pageIndexFilade`,
 `render::kPageBuildFrameBudget`).
 
-**Status: Stages 0 and 1 are done** — see their sections below, both marked "(done)". Stages 2-5 are
-not started.
+**Status: Stages 0-2 are done** — see their sections below, each marked "(done)". Stages 3-5 are not
+started.
 
 ## Goal
 
@@ -287,21 +287,50 @@ building still happens strictly in document order, so the saving is fewer, large
 rather than the target page arriving early. The bigger win — the target page appearing out of turn —
 is Stage 2's to make possible and Stage 3's to turn on.
 
-### Stage 2 — make the machinery gap-tolerant, without using it
+### Stage 2 — make the machinery gap-tolerant, without using it (done)
 
-All four blocker answers above: `pages` becomes a map, Y comes from the filade, the true index is
-passed through, `numPages()` splits, `reflowFrom()` gets its guard, `pendingShapings` becomes a
-pool. **Build order stays document order** — this stage should be behaviour-preserving and provable
-as such: the whole existing suite, plus `compare-backends.sh` byte-identical, plus the kjv profile
-timings unchanged.
+`Doc::pages` is `std::vector<std::optional<Page>>` rather than `std::vector<Page>` — addressable by
+true page index, and able to hold a gap, rather than only appendable. `pendingShapings` is a
+`std::map<std::uint32_t, PendingShaping>` keyed by true page index rather than a FIFO vector drained
+in insertion order, though `std::map`'s ascending iteration means Stage 2 still drains it in exactly
+the same order as before. A single `Doc::placePageAt()` is now the one place a page is actually
+built — shared by `buildPendingPages()`, `newPage()`, `reflowFrom()`, and the new
+`ensurePagesBuiltThrough()` guard — so all four agree on how a slot is filled rather than each
+growing the old vector its own way.
 
-Ship it and let it soak before Stage 3. The risk here is concentrated in picking and reflow, and
-both are far easier to trust when the only variable is the container rather than the container *and*
-the order.
+The Y-position blocker (`pages.back()` meant nothing once a page can be built out of order) is fixed
+in `buildPendingPages()` and `newPage()`: both now take a page's Y from
+`pageIndexFilade.findEntryByIndex(n)->startYPx` instead of chaining off whatever was built most
+recently. `reflowFrom()` keeps its own chain (from `pages[firstPage - 1]`, a specific known page
+rather than "the back of the vector"), which stays valid regardless of gaps elsewhere. The baked
+picking index was already the true index at every call site (`pages.size()` was always the next true
+index in the old sequential-only world); `placePageAt()` makes that explicit by taking the index as
+a parameter rather than inferring it from a push. `numPages()` now answers "how many pages are known
+so far" (`pageEntries.size()`, independent of build progress) rather than "how many are built";
+`builtPageCount()` is the new name for the old meaning, and is what the existing `DocPageBudgetTest`
+progress assertions moved to, since that is what they were actually testing. `reflowFrom()` gained
+`ensurePagesBuiltThrough()`, a synchronous guard run at its own entry that fills any gap up to and
+including the page it is about to read from — unreachable by clicking (which requires the page
+drawn) but reachable by automation typing at an arbitrary offset once out-of-order building exists.
 
-**Tests**: picking resolves to the correct offset for a page built out of order (construct the gap
-directly in a test, since nothing produces one yet); `reflowFrom()`'s guard fills a preceding gap;
-a11y's tree still enumerates correctly across a gap.
+**Build order stays document order** — behaviour-preserving and proven as such: the full
+`gleditor_test`/`xudu_test`/`zigzag_test` suites pass unchanged (one pre-existing, load-sensitive
+`ArrayfiladeBenchmarkTest` timing threshold aside, confirmed flaky independent of this work), and
+`compare-backends.sh`'s `opengl`/`opengles` frames stay byte-identical (0 of 1,440,000 bytes differ,
+before and after this stage).
+
+**Tests** (`tests/lib/doc_gap_test.cpp`): a `DocGapTest` fixture, declared a friend of `Doc`
+expressly for this file since no public API can construct a gap yet, builds page 5 directly while
+leaving 0-4 unbuilt. Four cases: the gap holds and `builtPageCount()` counts only the one placed
+page; picking a background click on the out-of-order page resolves against *its* text rather than
+page 0's; `reflowFrom()`'s guard fills the one page it is about to read from before using it; and
+`DocumentsSource::observe()`/`describe()` (the accessibility tree) still describe the document
+without incident, exercising `boundsOf()`'s existing per-page null check now that a gap is a real,
+reachable state rather than merely an unbuilt tail.
+
+Shipped and soaking before Stage 3. The risk here was concentrated in picking and reflow, and both
+are far easier to trust when the only variable was the container rather than the container *and* the
+order.
 
 ### Stage 3 — turn on priority ordering
 

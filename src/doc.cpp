@@ -1197,7 +1197,7 @@ void Doc::reflowFrom(RenderState &state, const std::size_t firstPage,
         glm::translate(glm::mat4(1.0F), glm::vec3(0.0F, centerY, 0.0F));
     trans = glm::scale(trans, glm::vec3(pixelsToWorld, pixelsToWorld, 1.0F));
     placePageAt(state, index, std::move(shaping), base, trans,
-               i < inherited.size() ? inherited[i] : BufferPool::Allocation{});
+                i < inherited.size() ? inherited[i] : BufferPool::Allocation{});
 
     currentTopY =
         (centerY - (pageHeightWorld / 2.0F)) - (pageGapPx * pixelsToWorld);
@@ -1331,8 +1331,7 @@ void Doc::makePages() {
       // makePages() always shapes strictly in document order, and this
       // entry and its pendingShapings counterpart are recorded together
       // under the same lock, so the two never drift apart.
-      const auto pageIndex =
-          static_cast<std::uint32_t>(pageEntries.size());
+      const auto pageIndex = static_cast<std::uint32_t>(pageEntries.size());
       pendingShapings.emplace(
           pageIndex, PendingShaping{std::move(shaping),
                                     static_cast<std::uint32_t>(tSize)});
@@ -1447,7 +1446,7 @@ bool Doc::buildPendingPages(RenderState &state) {
         glm::translate(glm::mat4(1.0F), glm::vec3(0.0F, centerY, 0.0F));
     trans = glm::scale(trans, glm::vec3(pixelsToWorld, pixelsToWorld, 1.0F));
     placePageAt(state, trueIndex, std::move(entry.shaping), entry.textOffset,
-               trans);
+                trans);
 
     // Always build at least one page per call even if it alone exceeds the
     // budget, so a single expensive page (e.g. one that grows the glyph
@@ -1483,8 +1482,8 @@ bool Doc::buildPendingPages(RenderState &state) {
 
 void Doc::newPage(RenderState &state, PageShaping aShaping,
                   const std::uint32_t textOffset) {
-  const auto index   = pages.size();
-  float currentTopY  = 0.0F;
+  const auto index  = pages.size();
+  float currentTopY = 0.0F;
   if (!pages.empty() && pages.back()) {
     const auto &prevPage        = *pages.back();
     const float prevCenterY     = prevPage.getModel()[3][1];

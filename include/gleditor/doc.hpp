@@ -814,9 +814,8 @@ public:
   void setDocIndex(const std::uint32_t index) { docIndex = index; }
   [[nodiscard]] std::uint32_t documentIndex() const { return docIndex; }
   [[nodiscard]] const Page *page(const std::size_t index) const {
-    return (index < pages.size() && pages[index].has_value())
-               ? &*pages[index]
-               : nullptr;
+    return (index < pages.size() && pages[index].has_value()) ? &*pages[index]
+                                                              : nullptr;
   }
 
   /// The measured coordinate frame of one built page.
@@ -966,12 +965,12 @@ public:
    * into GPU resources yet -- grows as the background shaping thread makes
    * progress, final once isFullyLoaded(). "How many exist" and "how many
    * are built" stop being the same number once building can fall behind
-   * shaping (which it always could -- see design/kjv-load-blocking-regression.md)
-   * or, once Stage 3 turns on priority ordering, build ahead of it; this
-   * answers the former, which is what every production caller (picking's
-   * loop bound in src/a11y/documents.cpp, and the "has this document
-   * produced anything at all" checks in src/renderer.cpp) actually wants.
-   * For "how many are built", see builtPageCount().
+   * shaping (which it always could -- see
+   * design/kjv-load-blocking-regression.md) or, once Stage 3 turns on priority
+   * ordering, build ahead of it; this answers the former, which is what every
+   * production caller (picking's loop bound in src/a11y/documents.cpp, and the
+   * "has this document produced anything at all" checks in src/renderer.cpp)
+   * actually wants. For "how many are built", see builtPageCount().
    */
   [[nodiscard]] std::size_t numPages() const {
     const std::lock_guard lock(shapingMutex);

@@ -159,7 +159,7 @@ TEST_F(DocGapTest, ReflowFromsGuardFillsThePageItNeeds) {
   const auto page2Hit = doc->pageIndexFilade.findEntryByIndex(2);
   ASSERT_TRUE(page2Hit.has_value());
   callReflowFrom(2, page2Hit->startByte, 0, std::vector<int>{},
-                page2Hit->entry.byteLength);
+                 page2Hit->entry.byteLength);
 
   EXPECT_NE(doc->page(2), nullptr)
       << "reflowFrom()'s guard should have filled page 2 before using it";
