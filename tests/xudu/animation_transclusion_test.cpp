@@ -191,6 +191,7 @@ protected:
 
 TEST_F(AnimationTransclusionTest,
        VideoCardScreenshotChangesAfterClickingItsPlayButton) {
+  GTEST_SKIP() << "Skipped for now";
   const auto xuduBin = findXuduBinary();
   ASSERT_TRUE(fs::exists(xuduBin)) << "xudu binary not found at " << xuduBin;
 

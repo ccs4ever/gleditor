@@ -464,6 +464,9 @@ protected:
    */
   bool update(RenderState &state, bool settled);
 
+  /// Whether document pages are still being loaded or laid out.
+  [[nodiscard]] bool docsLoading(const RenderState &state) const;
+
   /// Build the glyph pipeline from the portable shader sources, and the
   /// overlay pipeline that shares them.
   void createPipeline(RenderState &state) const;

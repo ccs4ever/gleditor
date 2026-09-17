@@ -117,6 +117,14 @@ bool Renderer::hasPendingWork() const {
                              });
 }
 
+bool Renderer::docsLoading(const RenderState &state) const {
+  return this->state->usesDocPages &&
+         (state.docs.empty() ||
+          std::ranges::any_of(state.docs, [](const auto &doc) {
+            return !doc->isFullyLoaded() || 0 == doc->numPages();
+          }));
+}
+
 double Renderer::stepAnimations() {
   const auto now = std::chrono::steady_clock::now();
   // The first frame steps by nothing rather than by however long start-up
@@ -408,16 +416,20 @@ bool Renderer::update(RenderState &state, const bool settled) {
   // asynchronous, so this only queues it; the answer is collected below on a
   // later frame.
   //
-  // Only settled frames are queried: a frame drawn while pages are still being
-  // built would answer for a document that is not there yet, which for --pick
-  // means reporting an empty tag and exiting.
-  if (settled) {
+  // Only frames whose document pages are built are queried: a frame drawn
+  // while pages are still being built would answer for a document that is not
+  // there yet, which for --pick means reporting an empty tag and exiting.
+  // When an edit has scheduled a reflow, the script waits for the reflow to
+  // settle before taking the next step.
+  if (!docsLoading(state)) {
     if (awaitingSettle) {
-      // The frame this step's work was scheduled on has been and gone, and
-      // this one is settled, so the work is done and the script may go on.
-      awaitingSettle = false;
-      awaitingStep   = false;
-      nextStep++;
+      if (settled) {
+        // The frame this step's work was scheduled on has been and gone, and
+        // this one is settled, so the work is done and the script may go on.
+        awaitingSettle = false;
+        awaitingStep   = false;
+        nextStep++;
+      }
     } else if (!scriptFinished()) {
       advanceScript(state);
     } else if (awaitingStep) {
@@ -993,17 +1005,12 @@ void Renderer::renderLoop(AutoSDLWindow &window) {
       }
     }
 
-    const bool docsLoading =
-        this->state->usesDocPages &&
-        (state.docs.empty() ||
-         std::ranges::any_of(state.docs, [](const auto &doc) {
-           return !doc->isFullyLoaded() || 0 == doc->numPages();
-         }));
+    const bool loading = docsLoading(state);
 
     // Everything queued has been carried out and every document has finished
     // loading, so this frame shows the finished result. That is the frame a
     // screenshot should capture, and the point at which --profile may quit.
-    const bool settled = !hasPendingWork() && !docsLoading;
+    const bool settled = !hasPendingWork() && !loading;
 
     // still want to update once even if we don't have anything in the render
     // queue
