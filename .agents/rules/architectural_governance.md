@@ -57,3 +57,5 @@ application algorithms, layout routines, physics, and networking.
   `CompactZZCell`).
 - Performance claims and optimizations must be supported by empirical data using probe tools
   (`tools/layout-latency-probe.cpp`, `tools/benchmark-kjv-load.py`).
+- This system is not in production yet, no need to preserve backwards compatibility of any format
+  except when other constraints are involved such as alignment and cache line sizing.

@@ -81,7 +81,8 @@ stabbing against cells is bounded by the active manifold's view radius ($r_x, r_
 Format link attributes are resolved from compile-time `vocabularyScroll` addresses and compressed
 into a 16-bit format bitmask (`uint16_t`). This bitmask is stored directly in `CellSlot`'s existing
 2 unused padding bytes (bytes 6–7), incurring **zero cache line bloat** (`sizeof(CellSlot) == 32`)
-and permitting single-instruction fast-path bypass (`testw %ax, %ax`) during interactive text shaping.
+and permitting single-instruction fast-path bypass (`testw %ax, %ax`) during interactive text
+shaping.
 
 ### 2.5 Intertwingled Spatial Invariant: Seeing Both Ends Without Teleportation
 
@@ -294,8 +295,8 @@ if (__builtin_expect(cell->formatFlags == 0, 1)) {
 }
 ```
 
-This branch check (`testw %ax, %ax; jz .Lfast_path`) bypasses formatting resolution for
-unformatted cells.
+This branch check (`testw %ax, %ax; jz .Lfast_path`) bypasses formatting resolution for unformatted
+cells.
 
 ______________________________________________________________________
 
@@ -608,5 +609,5 @@ ______________________________________________________________________
 | **Tether Bezier Math**    | Continuity evaluation test                      | Quadratic Bezier tether renders continuously without GPU pipeline breaks                     |
 | **Transclusion Loom**     | GPU draw call profiling                         | Bundles $K$ adjacent rank transclusions into 1 instanced strip call                          |
 | **Cross-Domain Linking**  | End-to-end clasp forging test                   | Xanadoc $\leftrightarrow$ Cell links write valid `OpKind::Link` without disk format changes  |
-| **Render-path latency** | Latency probe on dual-view render loop | Anchor transforms and ribbon staging avoid per-frame line searches |
+| **Render-path latency**   | Latency probe on dual-view render loop          | Anchor transforms and ribbon staging avoid per-frame line searches                           |
 | **Headless Build & Lint** | `make test && make format-check && make lint`   | Zero test regressions; clean exit code 0                                                     |

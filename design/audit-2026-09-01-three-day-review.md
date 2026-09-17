@@ -256,8 +256,8 @@ It contains a `std::vector`, three `std::optional`s, and two `std::string`s — 
 `std::string type{"cell"}` as a type tag (should be an enum) and `ephemeralText`, which duplicates
 the primedia its own `span` field addresses, contradicting "zero-copy … linking directly into Xudu
 primedia spools" in the same comment. There is **no `static_assert` on the size** anywhere in
-`apps/zigzag/core/` — the central invariant of the "interactive staging" design is unenforced, which is
-why it drifted 15×.
+`apps/zigzag/core/` — the central invariant of the "interactive staging" design is unenforced, which
+is why it drifted 15×.
 
 #### Follow-up: the refactor this implies is not the one to do
 
@@ -267,7 +267,7 @@ performance benefit without measuring one. Same failure mode as the code being a
 
 | what                                               | cost                                  |
 | :------------------------------------------------- | :------------------------------------ |
-| BFS at the default radius of 3 (≈60 cells)         | **1.1 µs** |
+| BFS at the default radius of 3 (≈60 cells)         | **1.1 µs**                            |
 | Same BFS with a 52-byte cell and flat containers   | 0.2 µs                                |
 | BFS at radius 20 (≈32k cells)                      | 392 µs → 20 µs                        |
 | `TextLayout::layoutPage` per cell                  | **14.3 µs**                           |

@@ -81,8 +81,8 @@ ______________________________________________________________________
 
 ## 3. The 64-Byte Cache-Aligned Operation DAG: `CompactOpNode`
 
-To achieve high-throughput graph traversal during live editing and interactive rendering, every node in
-the operation DAG is encoded as a strictly 64-byte POD struct
+To achieve high-throughput graph traversal during live editing and interactive rendering, every node
+in the operation DAG is encoded as a strictly 64-byte POD struct
 ([`CompactOpNode`](apps/common/xanadu/compact_op.hpp)) aligned to CPU cache lines:
 
 ```cpp

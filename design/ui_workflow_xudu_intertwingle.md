@@ -380,8 +380,8 @@ zones are backed by a persistent **system xanadoc** referencing the author's sov
 Bench** to weave $N \times M$ links, or clicked to execute a non-disorienting **collinear sworph**
 back to the origin text.
 
-For the full architectural specification, interactive retained canvas slicing, Fitts's law screen bezel
-dynamics, and C++23 class design (`PouchDrawer`, `DropZone`, `LinkForgeWidget`), see:
+For the full architectural specification, interactive retained canvas slicing, Fitts's law screen
+bezel dynamics, and C++23 class design (`PouchDrawer`, `DropZone`, `LinkForgeWidget`), see:
 [`design/xudu-pouch-drawer-and-clasp-bench.md`](xudu-pouch-drawer-and-clasp-bench.md).
 
 ______________________________________________________________________

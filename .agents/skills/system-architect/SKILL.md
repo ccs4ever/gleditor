@@ -79,8 +79,8 @@ ______________________________________________________________________
     efficiently (e.g. `CompactOpNode`, `CompactZZCell`).
   - Measure layout latency and memory allocations using dedicated probe tools (e.g.
     `tools/layout-latency-probe.cpp`, `tools/benchmark-kjv-load.py`).
-  - Enforce zero-copy principles: zero dynamic allocations on hot interactive render loops and zero UI
-    thread blocking for network/DHT lookups.
+  - Enforce zero-copy principles: zero dynamic allocations on hot interactive render loops and zero
+    UI thread blocking for network/DHT lookups.
   - Reject purely speculative optimizations that add cognitive complexity without measurable
     throughput or latency improvements.
 
@@ -180,19 +180,19 @@ concurrently:
       "TypeName": "code_quality_auditor",
       "Role": "Code Quality & Configuration Auditor",
       "Prompt": "Audit <target_module_or_feature> for magic numbers, DRY duplication, layer inversions, and compliance with system xanadoc/slice configuration rules.",
-      "Model": "inherit"
+      "Model": "tier-fast"
     },
     {
       "TypeName": "arch_synthesizer",
       "Role": "Architectural Synthesizer",
       "Prompt": "Design the clean refactoring or layer-promotion interface for <target_module_or_feature>, ensuring proper format links and zero-copy data flow.",
-      "Model": "inherit"
+      "Model": "tier-smart"
     },
     {
       "TypeName": "systems_profiler",
       "Role": "Systems & Performance Profiler",
       "Prompt": "Evaluate the memory layout (64B cache lines), allocation profile, and interactive performance characteristics for <target_module_or_feature> with empirical data.",
-      "Model": "inherit"
+      "Model": "tier-fast"
     }
   ]
 }

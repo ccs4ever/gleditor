@@ -726,7 +726,7 @@ ZigzagVisualizer::measureCellLayout(const RenderStateCell &cell,
     // Before deviceReady() no font has been selected, so only the explicitly
     // configured breathing room is knowable. The real measurement replaces
     // this before the first rendered frame.
-    metrics.width = 2.0F * presentation_config_.cellHorizontalPaddingPx;
+    metrics.width  = 2.0F * presentation_config_.cellHorizontalPaddingPx;
     metrics.height = 2.0F * presentation_config_.cellVerticalPaddingPx;
     metrics.labelWidthLimit = widthLimit;
     metrics.labelLineHeight = 2.0F * presentation_config_.cellVerticalPaddingPx;
@@ -754,7 +754,8 @@ ZigzagVisualizer::measureCellLayout(const RenderStateCell &cell,
                    titleMetrics.height + labelMetrics.height +
                    badgeMetrics.height + gaps;
 
-  metrics.titleTop = metrics.height - presentation_config_.cellVerticalPaddingPx;
+  metrics.titleTop =
+      metrics.height - presentation_config_.cellVerticalPaddingPx;
   const float titleBottom = metrics.titleTop - titleMetrics.height;
   const float labelBottom =
       hasBadge ? presentation_config_.cellVerticalPaddingPx +
@@ -1399,7 +1400,7 @@ void ZigzagVisualizer::drawFrame(gleditor::FrameContext &ctx) {
   const auto focusMetrics     = hudCanvas_->measureText(focusLabel);
   const float topBarHeight =
       (3.0F * presentation_config_.hudVerticalPaddingPx) +
-                             structureMetrics.height + focusMetrics.height;
+      structureMetrics.height + focusMetrics.height;
   const float topBarBottom = height - topBarHeight;
 
   // Top Bar Background
@@ -1454,7 +1455,8 @@ void ZigzagVisualizer::drawFrame(gleditor::FrameContext &ctx) {
   hudCanvas_->addLine(0.0F, bottomBarHeight, width, bottomBarHeight, 1.0F,
                       0x222233FFU);
   hudCanvas_->addText(ctx.state, presentation_config_.hudHorizontalPaddingPx,
-                      bottomBarHeight - presentation_config_.hudVerticalPaddingPx,
+                      bottomBarHeight -
+                          presentation_config_.hudVerticalPaddingPx,
                       hints, 0x888899FFU, 0x0D0D12DDU);
 
   hudCanvas_->commit();

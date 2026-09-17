@@ -66,3 +66,4 @@ assets/shaders/vulkan/*.spv
 .token-optimizer/
 .worktrees/
 .agents/worktrees/
+.agents/*.lock

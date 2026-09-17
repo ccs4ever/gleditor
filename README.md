@@ -25,8 +25,8 @@ Merkle identity consensus, multi-author live editing, and 3D transclusion beam o
 library with the editor and shares no code with it.
 
 **`zigzag`** is a third program that visualizes and navigates Project Xanadu multidimensional Zigzag
-structures (zzstructures / slices) in interactive 3D, with a unified transclusion engine,
-animated rank transitions, Merkle author verification, and customizable dimension bindings. It is
+structures (zzstructures / slices) in interactive 3D, with a unified transclusion engine, animated
+rank transitions, Merkle author verification, and customizable dimension bindings. It is
 `apps/zigzag/`.
 
 The split is the point. See [Building on the library](#building-on-the-library) for what a program
@@ -781,11 +781,11 @@ A verified piece is then **kept**, keyed by `(info hash, piece index)` -- which 
 exactly, since a piece hash is a commitment, so any bytes that verify against it are the bytes the
 reference meant whatever they were fetched from. Without that, a frame re-hashed 64 KiB once per
 visible cell: measured over sixty short reads scattered across a 1 MiB torrent, 3.4--5.5 ms of SHA-1
-before caching, now 0.7--1.4 ms. The cache costs something real and says so: a piece
-already verified keeps answering after the local copy is altered, so tampering stops being noticed
-for as long as it is held. Two things bound that -- it is in memory and per-`Resolver`, so the
-window is one open document and reopening re-verifies everything; and only *verified* pieces are
-ever stored, so a piece nobody has looked at yet is still checked.
+before caching, now 0.7--1.4 ms. The cache costs something real and says so: a piece already
+verified keeps answering after the local copy is altered, so tampering stops being noticed for as
+long as it is held. Two things bound that -- it is in memory and per-`Resolver`, so the window is
+one open document and reopening re-verifies everything; and only *verified* pieces are ever stored,
+so a piece nobody has looked at yet is still checked.
 
 With a swarm, a bare magnet link resolves as well -- that is the case it was designed for. The
 metadata it lacks is fetched from a peer (BEP 9), and libtorrent accepts an info dictionary only if
@@ -1320,7 +1320,8 @@ zzstructure:
   fixed set of dimensions and an overflow table for the rest. It survives as the type the YAML
   loader and DTO still name. Most of its size was spent identifying dimensions by text where four
   bytes of cell reference would do, which is what the run above replaced.
-- **`UnifiedTransclusionEngine`**: stages visible cells and link beams for the render pipeline in real time without allocation spikes, caching shaped pages, and holds no cell space of its own --
+- **`UnifiedTransclusionEngine`**: stages visible cells and link beams for the render pipeline in
+  real time without allocation spikes, caching shaped pages, and holds no cell space of its own --
   `syncIncremental()` folds operations into a `Manifold` rather than projecting them into cells.
   `validate2RankManifold()` survives as a drift check beside `Manifold::verifyAgainstFullRebuild()`
   rather than as a guard against careless callers. It has no production caller yet: what `zigzag`

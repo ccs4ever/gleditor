@@ -12,13 +12,15 @@ This stage must make the existing bridge real before expanding its visual vocabu
 
 ## Current-State Reconciliation
 
-- Preserve the two transclusion representations, but name them consistently: `UniversalTransclusionPair`
-  is the 64-byte compatibility/render object and `CompactTransclusionPair` is the 32-byte streaming
-  object. Update the original bridge design and tests to say this explicitly. Do not use the current
-  compact conversion for cell results until it carries endpoint kind, flags, and span index losslessly.
+- Preserve the two transclusion representations, but name them consistently:
+  `UniversalTransclusionPair` is the 64-byte compatibility/render object and
+  `CompactTransclusionPair` is the 32-byte streaming object. Update the original bridge design and
+  tests to say this explicitly. Do not use the current compact conversion for cell results until it
+  carries endpoint kind, flags, and span index losslessly.
 - Make `Spanfilade` the canonical discovery implementation. `link_layout.cpp` and
   `enfilade/spanfilade.cpp` currently duplicate pair assembly, and the production beam path calls
-  the former. Retain a bounded linear reference implementation only in tests for differential checks.
+  the former. Retain a bounded linear reference implementation only in tests for differential
+  checks.
 - Keep `LinkBeams` decoupled from Zigzag. The Xudu shell may compose a bridge surface, but
   `LinkBeams` continues to receive only `Manifold` views and `CellAnchorResolver` callbacks.
 
@@ -49,11 +51,11 @@ Create an Xudu-owned `BridgeCoordinator` that selects the active bridge store, s
 presentation surface, and owns its lifecycle. It must:
 
 1. register the surface as a frame, pick, and accessibility contributor;
-2. install its manifold/focus in `LinkBeams::setManifoldViews()`;
-3. install `cellAnchor()` through `CellAnchorResolver`;
-4. update the coordinator only at store, focus, layout-config, or viewport-radius invalidation
+1. install its manifold/focus in `LinkBeams::setManifoldViews()`;
+1. install `cellAnchor()` through `CellAnchorResolver`;
+1. update the coordinator only at store, focus, layout-config, or viewport-radius invalidation
    boundaries, never by reconstructing the surface per frame; and
-5. place the surface on the configured associative depth tier.
+1. place the surface on the configured associative depth tier.
 
 No Xudu source may include the standalone `apps/zigzag` application header. Both executables consume
 the extracted common surface.
@@ -70,8 +72,8 @@ Add bidirectional callbacks:
   native tether; and
 - cell badge/Enter resolves the document range and asks Xudu to focus it.
 
-The coordinator owns these callbacks, preventing either presentation component from depending on
-the other.
+The coordinator owns these callbacks, preventing either presentation component from depending on the
+other.
 
 ### 4. Make discovery and staging production-grade
 
@@ -86,9 +88,9 @@ complete. Expand to the compatibility object at rendering boundaries when legacy
 requires it.
 
 Cache formatting by format-link revision and dirty cells. `syncIncremental()` must not rescan every
-cell and every format link after an unrelated operation. Reuse visible-cell traversal/staging buffers
-and the resolver index so the `formatFlags == 0` path avoids resolver construction and transient
-containers.
+cell and every format link after an unrelated operation. Reuse visible-cell traversal/staging
+buffers and the resolver index so the `formatFlags == 0` path avoids resolver construction and
+transient containers.
 
 ### 5. Turn looms and configuration into actual runtime policies
 
@@ -104,25 +106,25 @@ remaining bridge literals to typed fallback defaults.
 
 ## Verification and Gates
 
-1. Unit: lossless compact-pair round trip for document and cell endpoints; ABI assertions distinguish
-   the 64-byte compatibility type from the 32-byte streaming type.
-2. Differential: mixed document/cell transclusion results from the canonical Spanfilade match the
+1. Unit: lossless compact-pair round trip for document and cell endpoints; ABI assertions
+   distinguish the 64-byte compatibility type from the 32-byte streaming type.
+1. Differential: mixed document/cell transclusion results from the canonical Spanfilade match the
    retained reference scanner, including merged adjacent spans and radius pruning.
-3. Headless integration: create a structure-bearing store and document, drag a real cell span into
+1. Headless integration: create a structure-bearing store and document, drag a real cell span into
    the pouch, forge a doc-to-cell link, and assert resolved strand, cell anchor, satelloid request,
    and reverse-focus callback.
-4. Performance: benchmark high-overlap mixed contexts; repeated no-op and one-op formatting sync at
+1. Performance: benchmark high-overlap mixed contexts; repeated no-op and one-op formatting sync at
    2k/8k cells and 0/10/100 format links; assert no full-cell recomputation on the no-op path.
-5. Rendering: assert `K` contiguous loom members stage as one bundle draw unit while each member
+1. Rendering: assert `K` contiguous loom members stage as one bundle draw unit while each member
    remains pickable; record draw count and allocations in the dual-continuum path.
-6. Configuration: mutate live Xudu layout values and Zigzag slice values, then assert the same
+1. Configuration: mutate live Xudu layout values and Zigzag slice values, then assert the same
    snapshot changes discovery radius, surface depth, solver parameters, and loom behavior.
-7. Run `make -j$(nproc) test`, `make format-check`, and `make lint` headlessly after initializing
+1. Run `make -j$(nproc) test`, `make format-check`, and `make lint` headlessly after initializing
    the required submodules.
 
 ## Exit Criteria
 
-The bridge is complete for this stage when a normal Xudu session visibly hosts a synchronized
-Zigzag continuum, can forge and navigate a real document-to-cell link without copying primedia,
-uses Spanfilade rather than the duplicate scanner in its beam path, and demonstrates bundled looms
-and configuration changes through automated headless tests.
+The bridge is complete for this stage when a normal Xudu session visibly hosts a synchronized Zigzag
+continuum, can forge and navigate a real document-to-cell link without copying primedia, uses
+Spanfilade rather than the duplicate scanner in its beam path, and demonstrates bundled looms and
+configuration changes through automated headless tests.

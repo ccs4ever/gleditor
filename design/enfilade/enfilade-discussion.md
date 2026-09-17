@@ -408,8 +408,8 @@ ______________________________________________________________________
    parameterizing the entire enfilade family (Poomfilade, Spanfilade, Grandfilade, Linkfilade).
 1. **Silicon Reality** dictates that enfilades must **never** be used for primary on-disk storage
    (where flat 64B `CompactOpNode` and contiguous mmap win), nor for local navigation ($\Delta < 30$
-   hops, where $4.96\text{ ns}$ CSR walks beat trees by $30\times$), nor inside the tight interactive
-   text shaping loop.
+   hops, where $4.96\text{ ns}$ CSR walks beat trees by $30\times$), nor inside the tight
+   interactive text shaping loop.
 1. **Beyond U1**, enfilades are mechanically and theoretically justified in **five major areas**:
    - **Spanfilade**: Eliminating $O(N)$ scans in `Version::occurrencesOf()` and pairwise beam
      checks.
