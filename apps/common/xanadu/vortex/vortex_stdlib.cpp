@@ -5,12 +5,14 @@
 #include "common/xanadu/vortex/vortex_stdlib.hpp"
 
 #include <algorithm>
+#include <bit>
 #include <cctype>
 #include <cmath>
 #include <numeric>
 #include <sstream>
 #include <unordered_set>
 
+#include "common/xanadu/store.hpp"
 #include "common/xanadu/zigzag/vlog.hpp"
 
 namespace zigzag::vortex {
@@ -855,6 +857,8 @@ void VortexStdLib::bootstrap() {
   CellRef modArray       = getOrCreateModule("sys:array");
   CellRef modZigzag      = getOrCreateModule("std:zigzag");
   CellRef modGC          = getOrCreateModule("std:gc");
+  CellRef modUI          = getOrCreateModule("std:ui");
+  CellRef modNav         = getOrCreateModule("std:nav");
 
   buildMathModule(modMath);
   buildStringModule(modString);
@@ -867,6 +871,8 @@ void VortexStdLib::bootstrap() {
   buildArrayModule(modArray);
   buildZigzagModule(modZigzag);
   buildGCModule(modGC);
+  buildUiModule(modUI);
+  buildNavModule(modNav);
 }
 
 void VortexStdLib::buildMathModule(CellRef mod) {
@@ -1477,6 +1483,33 @@ std::vector<CellValue> VortexStdLib::call(CellRef fnOp,
           args.size() > 1 ? static_cast<CellRef>(toInt64(args[1])) : noCell;
       return {static_cast<std::int64_t>(zzCloneToChain(sym, tgt))};
     }
+    if (opName == "#ZZ_DUPLICATE") {
+      CellRef cell =
+          args.empty() ? noCell : static_cast<CellRef>(toInt64(args[0]));
+      return {static_cast<std::int64_t>(zzDuplicate(cell))};
+    }
+  }
+  if (opName.starts_with("#NAV_")) {
+    if (opName == "#NAV_HOP_HEAD") {
+      CellRef cell =
+          args.empty() ? noCell : static_cast<CellRef>(toInt64(args[0]));
+      DimRef dim =
+          args.size() > 1 ? static_cast<DimRef>(toInt64(args[1])) : noCell;
+      return {static_cast<std::int64_t>(hopHead(cell, dim))};
+    }
+    if (opName == "#NAV_HOP_TAIL") {
+      CellRef cell =
+          args.empty() ? noCell : static_cast<CellRef>(toInt64(args[0]));
+      DimRef dim =
+          args.size() > 1 ? static_cast<DimRef>(toInt64(args[1])) : noCell;
+      return {static_cast<std::int64_t>(hopTail(cell, dim))};
+    }
+    if (opName == "#NAV_JUMP_HOME") {
+      return {static_cast<std::int64_t>(jumpHome())};
+    }
+  }
+  if (opName.starts_with("#UI_")) {
+    return {static_cast<std::int64_t>(1)};
   }
   if (opName == "#GC_SWEEP") {
     return {static_cast<std::int64_t>(gcSweep())};
@@ -2869,6 +2902,17 @@ void VortexStdLib::buildZigzagModule(CellRef mod) {
     routineBindings_[op] = {{sym, tgt}, {out}};
     exportSymbol(mod, "clone_to_chain", op);
   }
+
+  // duplicate: cell -> clone (#ZZ_DUPLICATE)
+  {
+    CellRef cell = core_.arena().makeCell();
+    CellRef out  = core_.arena().makeCell();
+    CellRef op   = vm_.mintOpcode(OpcodeKind::Nop, "#ZZ_DUPLICATE");
+    core_.bindInput(op, cell);
+    core_.bindOutput(op, out);
+    routineBindings_[op] = {{cell}, {out}};
+    exportSymbol(mod, "duplicate", op);
+  }
 }
 
 void VortexStdLib::buildGCModule(CellRef mod) {
@@ -2879,6 +2923,132 @@ void VortexStdLib::buildGCModule(CellRef mod) {
     core_.bindOutput(op, out);
     routineBindings_[op] = {{}, {out}};
     exportSymbol(mod, "sweep", op);
+  }
+}
+
+void VortexStdLib::buildUiModule(CellRef mod) {
+  // view: dimX, dimY, dimZ -> res (#UI_VIEW)
+  {
+    CellRef dimX = core_.arena().makeCell();
+    CellRef dimY = core_.arena().makeCell();
+    CellRef dimZ = core_.arena().makeCell();
+    CellRef out  = core_.arena().makeCell();
+    CellRef op   = vm_.mintOpcode(OpcodeKind::Nop, "#UI_VIEW");
+    core_.bindInput(op, dimX);
+    core_.bindInput(op, dimY);
+    core_.bindInput(op, dimZ);
+    core_.bindOutput(op, out);
+    routineBindings_[op] = {{dimX, dimY, dimZ}, {out}};
+    exportSymbol(mod, "view", op);
+  }
+
+  // swap_axes: #UI_SWAP_AXES
+  {
+    CellRef out = core_.arena().makeCell();
+    CellRef op  = vm_.mintOpcode(OpcodeKind::Nop, "#UI_SWAP_AXES");
+    core_.bindOutput(op, out);
+    routineBindings_[op] = {{}, {out}};
+    exportSymbol(mod, "swap_axes", op);
+  }
+
+  // cycle_dims_forward: #UI_CYCLE_DIMS_FORWARD
+  {
+    CellRef out = core_.arena().makeCell();
+    CellRef op  = vm_.mintOpcode(OpcodeKind::Nop, "#UI_CYCLE_DIMS_FORWARD");
+    core_.bindOutput(op, out);
+    routineBindings_[op] = {{}, {out}};
+    exportSymbol(mod, "cycle_dims_forward", op);
+  }
+
+  // cycle_dims_backward: #UI_CYCLE_DIMS_BACKWARD
+  {
+    CellRef out = core_.arena().makeCell();
+    CellRef op  = vm_.mintOpcode(OpcodeKind::Nop, "#UI_CYCLE_DIMS_BACKWARD");
+    core_.bindOutput(op, out);
+    routineBindings_[op] = {{}, {out}};
+    exportSymbol(mod, "cycle_dims_backward", op);
+  }
+
+  // bundle_execution: #UI_BUNDLE_EXECUTION
+  {
+    CellRef out = core_.arena().makeCell();
+    CellRef op  = vm_.mintOpcode(OpcodeKind::Nop, "#UI_BUNDLE_EXECUTION");
+    core_.bindOutput(op, out);
+    routineBindings_[op] = {{}, {out}};
+    exportSymbol(mod, "bundle_execution", op);
+  }
+
+  // bundle_scope: #UI_BUNDLE_SCOPE
+  {
+    CellRef out = core_.arena().makeCell();
+    CellRef op  = vm_.mintOpcode(OpcodeKind::Nop, "#UI_BUNDLE_SCOPE");
+    core_.bindOutput(op, out);
+    routineBindings_[op] = {{}, {out}};
+    exportSymbol(mod, "bundle_scope", op);
+  }
+
+  // bundle_contract: #UI_BUNDLE_CONTRACT
+  {
+    CellRef out = core_.arena().makeCell();
+    CellRef op  = vm_.mintOpcode(OpcodeKind::Nop, "#UI_BUNDLE_CONTRACT");
+    core_.bindOutput(op, out);
+    routineBindings_[op] = {{}, {out}};
+    exportSymbol(mod, "bundle_contract", op);
+  }
+
+  // bundle_logic: #UI_BUNDLE_LOGIC
+  {
+    CellRef out = core_.arena().makeCell();
+    CellRef op  = vm_.mintOpcode(OpcodeKind::Nop, "#UI_BUNDLE_LOGIC");
+    core_.bindOutput(op, out);
+    routineBindings_[op] = {{}, {out}};
+    exportSymbol(mod, "bundle_logic", op);
+  }
+
+  // bundle_stdlib: #UI_BUNDLE_STDLIB
+  {
+    CellRef out = core_.arena().makeCell();
+    CellRef op  = vm_.mintOpcode(OpcodeKind::Nop, "#UI_BUNDLE_STDLIB");
+    core_.bindOutput(op, out);
+    routineBindings_[op] = {{}, {out}};
+    exportSymbol(mod, "bundle_stdlib", op);
+  }
+}
+
+void VortexStdLib::buildNavModule(CellRef mod) {
+  // hop_head: cursor, dim -> head (#NAV_HOP_HEAD)
+  {
+    CellRef cursor = core_.arena().makeCell();
+    CellRef dim    = core_.arena().makeCell();
+    CellRef out    = core_.arena().makeCell();
+    CellRef op     = vm_.mintOpcode(OpcodeKind::Nop, "#NAV_HOP_HEAD");
+    core_.bindInput(op, cursor);
+    core_.bindInput(op, dim);
+    core_.bindOutput(op, out);
+    routineBindings_[op] = {{cursor, dim}, {out}};
+    exportSymbol(mod, "hop_head", op);
+  }
+
+  // hop_tail: cursor, dim -> tail (#NAV_HOP_TAIL)
+  {
+    CellRef cursor = core_.arena().makeCell();
+    CellRef dim    = core_.arena().makeCell();
+    CellRef out    = core_.arena().makeCell();
+    CellRef op     = vm_.mintOpcode(OpcodeKind::Nop, "#NAV_HOP_TAIL");
+    core_.bindInput(op, cursor);
+    core_.bindInput(op, dim);
+    core_.bindOutput(op, out);
+    routineBindings_[op] = {{cursor, dim}, {out}};
+    exportSymbol(mod, "hop_tail", op);
+  }
+
+  // jump_home: -> home (#NAV_JUMP_HOME)
+  {
+    CellRef out = core_.arena().makeCell();
+    CellRef op  = vm_.mintOpcode(OpcodeKind::Nop, "#NAV_JUMP_HOME");
+    core_.bindOutput(op, out);
+    routineBindings_[op] = {{}, {out}};
+    exportSymbol(mod, "jump_home", op);
   }
 }
 
@@ -2945,5 +3115,206 @@ CellRef VortexStdLib::zzCloneToChain(CellRef symbolOp, CellRef targetCell) {
 }
 
 std::size_t VortexStdLib::gcSweep() { return core_.collectGarbage(); }
+
+CellRef VortexStdLib::zzDuplicate(CellRef cell) {
+  if (cell == noCell || !core_.arena().contains(cell)) {
+    return noCell;
+  }
+  std::string text = core_.arena().textOf(cell);
+  CellRef dup      = core_.arena().makeCell(text);
+  auto vk          = core_.arena().valueKindOf(cell);
+  if (vk != xanadu::ValueKind::None) {
+    if (auto d = core_.arena().asDouble(cell)) {
+      core_.arena().setValueBits(dup, vk, std::bit_cast<std::uint64_t>(*d));
+    } else if (auto i = core_.arena().asInt64(cell)) {
+      core_.arena().setValueBits(dup, vk, static_cast<std::uint64_t>(*i));
+    } else if (auto b = core_.arena().asBool(cell)) {
+      core_.arena().setValueBits(dup, vk, *b ? 1ULL : 0ULL);
+    }
+  }
+  core_.link(cell, core_.dims().clone, DimVector::POS, dup);
+  return dup;
+}
+
+void VortexStdLib::swapAxes(ViewAxisBinding &axes) {
+  std::swap(axes.x_dimension, axes.y_dimension);
+}
+
+void VortexStdLib::cycleDims(ViewAxisBinding &axes, const bool forward) {
+  if (forward) {
+    const auto tmp   = axes.x_dimension;
+    axes.x_dimension = axes.y_dimension;
+    axes.y_dimension = axes.z_dimension;
+    axes.z_dimension = tmp;
+  } else {
+    const auto tmp   = axes.z_dimension;
+    axes.z_dimension = axes.y_dimension;
+    axes.y_dimension = axes.x_dimension;
+    axes.x_dimension = tmp;
+  }
+}
+
+void VortexStdLib::applyBundle(ViewAxisBinding &axes, DimensionBundle bundle) {
+  if (bundle != DimensionBundle::Custom) {
+    axes = dimensionBundleAxes(bundle);
+  }
+}
+
+void VortexStdLib::setView(ViewAxisBinding &axes, std::string_view dimX,
+                           std::string_view dimY, std::string_view dimZ) {
+  if (!dimX.empty()) {
+    axes.x_dimension = std::string(dimX);
+  }
+  if (!dimY.empty()) {
+    axes.y_dimension = std::string(dimY);
+  }
+  if (!dimZ.empty()) {
+    axes.z_dimension = std::string(dimZ);
+  }
+}
+
+CellRef VortexStdLib::hopHead(CellRef cursor, DimRef dim) {
+  if (cursor == noCell || !core_.arena().contains(cursor) || dim == noCell) {
+    return cursor;
+  }
+  CellRef cur       = cursor;
+  std::size_t limit = core_.arena().cellCount() + 10;
+  while (limit-- > 0) {
+    CellRef prev = core_.arena().linked(cur, dim, DimVector::NEG);
+    if (prev == noCell || prev == cur || prev == cursor) {
+      break;
+    }
+    cur = prev;
+  }
+  return cur;
+}
+
+CellRef VortexStdLib::hopTail(CellRef cursor, DimRef dim) {
+  if (cursor == noCell || !core_.arena().contains(cursor) || dim == noCell) {
+    return cursor;
+  }
+  CellRef cur       = cursor;
+  std::size_t limit = core_.arena().cellCount() + 10;
+  while (limit-- > 0) {
+    CellRef next = core_.arena().linked(cur, dim, DimVector::POS);
+    if (next == noCell || next == cur || next == cursor) {
+      break;
+    }
+    cur = next;
+  }
+  return cur;
+}
+
+CellRef VortexStdLib::jumpHome() const noexcept { return core_.home(); }
+
+bool VortexStdLib::exportModuleToStore(std::string_view modulePath,
+                                       xanadu::Store &destStore) const {
+  CellRef mod = resolve(modulePath);
+  if (mod == noCell) {
+    return false;
+  }
+  auto parent = destStore.allVersions().empty()
+                    ? xanadu::MicroversionId::parse("1")
+                    : destStore.primaryCurrentVersion();
+  zigzag::PromotionBudget budget{.maxOps = 100000};
+  auto promoted =
+      zigzag::promote(destStore, parent, core_.arena(), mod, budget);
+  if (!promoted) {
+    return false;
+  }
+  destStore.repointCurrentVersion(promoted->version);
+  return true;
+}
+
+bool VortexStdLib::exportStandardLibraryToStore(
+    xanadu::Store &destStore) const {
+  CellRef stdlibRoot =
+      core_.arena().linked(core_.home(), core_.dims().stdlib, DimVector::POS);
+  if (stdlibRoot == noCell) {
+    stdlibRoot = core_.home();
+  }
+  auto parent = destStore.allVersions().empty()
+                    ? xanadu::MicroversionId::parse("1")
+                    : destStore.primaryCurrentVersion();
+  zigzag::PromotionBudget budget{.maxOps = 200000};
+  auto promoted =
+      zigzag::promote(destStore, parent, core_.arena(), stdlibRoot, budget);
+  if (!promoted) {
+    return false;
+  }
+  destStore.repointCurrentVersion(promoted->version);
+  return true;
+}
+
+CellRef VortexStdLib::importModuleFromStore(const xanadu::Store &srcStore) {
+  auto ver = srcStore.allVersions().empty() ? xanadu::MicroversionId::parse("1")
+                                            : srcStore.primaryCurrentVersion();
+  auto srcManifold = srcStore.rebuildManifold(ver);
+  if (srcManifold.cellCount() == 0) {
+    return noCell;
+  }
+
+  std::unordered_map<CellRef, CellRef> cellMapping;
+  for (const auto &slot : srcManifold.cells()) {
+    CellRef srcRef = slot.birthOp;
+    if (srcRef == noCell) {
+      continue;
+    }
+    std::string text = srcManifold.textOf(srcRef, srcStore);
+    CellRef dstRef   = core_.arena().makeCell(text);
+    if (slot.valueKind != 0) {
+      core_.arena().setValueBits(dstRef,
+                                 static_cast<xanadu::ValueKind>(slot.valueKind),
+                                 slot.valueBits);
+    }
+    cellMapping[srcRef] = dstRef;
+  }
+
+  for (const auto &slot : srcManifold.cells()) {
+    CellRef srcRef = slot.birthOp;
+    if (!cellMapping.contains(srcRef)) {
+      continue;
+    }
+    CellRef dstRef = cellMapping[srcRef];
+    for (const auto &link : srcManifold.dimensionsOf(srcRef)) {
+      if (!cellMapping.contains(link.dim)) {
+        continue;
+      }
+      DimRef dstDim = cellMapping[link.dim];
+      if (link.pos != noCell && cellMapping.contains(link.pos)) {
+        core_.arena().link(dstRef, dstDim, DimVector::POS,
+                           cellMapping[link.pos]);
+      }
+      if (link.neg != noCell && cellMapping.contains(link.neg)) {
+        core_.arena().link(dstRef, dstDim, DimVector::NEG,
+                           cellMapping[link.neg]);
+      }
+    }
+  }
+
+  CellRef firstModuleCell = noCell;
+  for (const auto &[srcRef, dstRef] : cellMapping) {
+    std::string text = core_.arena().textOf(dstRef);
+    if (text.starts_with("std:") && text.find('/') == std::string::npos) {
+      if (firstModuleCell == noCell) {
+        firstModuleCell = dstRef;
+      }
+      CellRef tail = core_.home();
+      while (core_.arena().linked(tail, core_.dims().stdlib, DimVector::POS) !=
+             noCell) {
+        tail = core_.arena().linked(tail, core_.dims().stdlib, DimVector::POS);
+        if (tail == dstRef) {
+          break;
+        }
+      }
+      if (tail != dstRef) {
+        core_.arena().link(tail, core_.dims().stdlib, DimVector::POS, dstRef);
+      }
+    }
+  }
+  return firstModuleCell != noCell
+             ? firstModuleCell
+             : (cellMapping.empty() ? noCell : cellMapping.begin()->second);
+}
 
 } // namespace zigzag::vortex

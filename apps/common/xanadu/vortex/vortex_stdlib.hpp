@@ -32,6 +32,11 @@
 
 #include "common/xanadu/vortex/vortex_core.hpp"
 #include "common/xanadu/vortex/vortex_vm.hpp"
+#include "common/xanadu/zigzag/zzstructure.hpp"
+
+namespace xanadu {
+class Store;
+}
 
 namespace zigzag::vortex {
 
@@ -224,9 +229,28 @@ public:
                  DimVector dir = DimVector::POS);
   CellRef zzDelete(CellRef cell);
   CellRef zzCloneToChain(CellRef symbolOp, CellRef targetCell);
+  CellRef zzDuplicate(CellRef cell);
 
   // -- Module 11: std:gc ------------------------------------------------------
   std::size_t gcSweep();
+
+  // -- Module 12: std:ui ------------------------------------------------------
+  void swapAxes(ViewAxisBinding &axes);
+  void cycleDims(ViewAxisBinding &axes, bool forward = true);
+  void applyBundle(ViewAxisBinding &axes, DimensionBundle bundle);
+  void setView(ViewAxisBinding &axes, std::string_view dimX,
+               std::string_view dimY, std::string_view dimZ);
+
+  // -- Module 13: std:nav -----------------------------------------------------
+  CellRef hopHead(CellRef cursor, DimRef dim);
+  CellRef hopTail(CellRef cursor, DimRef dim);
+  [[nodiscard]] CellRef jumpHome() const noexcept;
+
+  // -- Sovereign Store Library Packaging (Zero YAML) --------------------------
+  bool exportModuleToStore(std::string_view modulePath,
+                           xanadu::Store &destStore) const;
+  bool exportStandardLibraryToStore(xanadu::Store &destStore) const;
+  CellRef importModuleFromStore(const xanadu::Store &srcStore);
 
 private:
   CellRef getOrCreateModule(std::string_view modulePath);
@@ -244,6 +268,8 @@ private:
   void buildArrayModule(CellRef mod);
   void buildZigzagModule(CellRef mod);
   void buildGCModule(CellRef mod);
+  void buildUiModule(CellRef mod);
+  void buildNavModule(CellRef mod);
 
   VortexCore &core_;
   VortexVM &vm_;

@@ -67,6 +67,26 @@ void VortexHost::initHostServices() {
   if (sweepOp != noCell) {
     gcCursor_ = vm_.spawnCursor(sweepOp, "sys:gc");
   }
+
+  // Register native Vortex routines for keymap actions
+  registerActionRoutine("swap-xy", stdlib_.resolve("std:ui/swap_axes"));
+  registerActionRoutine("cycle-dims-forward",
+                        stdlib_.resolve("std:ui/cycle_dims_forward"));
+  registerActionRoutine("cycle-dims-backward",
+                        stdlib_.resolve("std:ui/cycle_dims_backward"));
+  registerActionRoutine("bundle-execution",
+                        stdlib_.resolve("std:ui/bundle_execution"));
+  registerActionRoutine("bundle-scope", stdlib_.resolve("std:ui/bundle_scope"));
+  registerActionRoutine("bundle-contract",
+                        stdlib_.resolve("std:ui/bundle_contract"));
+  registerActionRoutine("bundle-logic", stdlib_.resolve("std:ui/bundle_logic"));
+  registerActionRoutine("bundle-stdlib",
+                        stdlib_.resolve("std:ui/bundle_stdlib"));
+  registerActionRoutine("hop-head", stdlib_.resolve("std:nav/hop_head"));
+  registerActionRoutine("hop-tail", stdlib_.resolve("std:nav/hop_tail"));
+  registerActionRoutine("jump-home", stdlib_.resolve("std:nav/jump_home"));
+  registerActionRoutine("duplicate-focus-cell",
+                        stdlib_.resolve("std:zigzag/duplicate"));
 }
 
 void VortexHost::bindManifold(const Manifold *baseManifold) {
@@ -128,6 +148,12 @@ DimRef VortexHost::resolveDimRef(std::string_view dimName) {
 bool VortexHost::dispatchAction(std::string_view actionName, CellRef focusCell,
                                 const ViewAxisBinding &axes,
                                 CellRef &newFocusOut) {
+  ViewAxisBinding mutableAxes = axes;
+  return dispatchAction(actionName, focusCell, mutableAxes, newFocusOut);
+}
+
+bool VortexHost::dispatchAction(std::string_view actionName, CellRef focusCell,
+                                ViewAxisBinding &axes, CellRef &newFocusOut) {
   newFocusOut = focusCell;
 
   auto macroIt = macroRegistry_.find(std::string(actionName));
@@ -145,12 +171,12 @@ bool VortexHost::dispatchAction(std::string_view actionName, CellRef focusCell,
   }
 
   auto customIt = customActionRoutines_.find(std::string(actionName));
-  if (customIt != customActionRoutines_.end()) {
+  if (customIt != customActionRoutines_.end() && customIt->second != noCell) {
     CellRef cursor = vm_.spawnCursor(customIt->second, actionName);
-    auto res       = vm_.run(cursor, 1000);
-    return res.success;
+    static_cast<void>(vm_.run(cursor, 1000));
   }
 
+  // Navigation actions
   if (actionName == "step-x-pos") {
     newFocusOut = stdlib_.zzStep(focusCell, resolveDimRef(axes.x_dimension),
                                  DimVector::POS);
@@ -181,7 +207,20 @@ bool VortexHost::dispatchAction(std::string_view actionName, CellRef focusCell,
                                  DimVector::NEG);
     return true;
   }
+  if (actionName == "hop-head" || actionName == "std:nav/hop_head") {
+    newFocusOut = stdlib_.hopHead(focusCell, resolveDimRef(axes.x_dimension));
+    return true;
+  }
+  if (actionName == "hop-tail" || actionName == "std:nav/hop_tail") {
+    newFocusOut = stdlib_.hopTail(focusCell, resolveDimRef(axes.x_dimension));
+    return true;
+  }
+  if (actionName == "jump-home" || actionName == "std:nav/jump_home") {
+    newFocusOut = stdlib_.jumpHome();
+    return true;
+  }
 
+  // Editing actions
   if (actionName == "insert-cell-x-pos") {
     newFocusOut = stdlib_.zzInsert(focusCell, resolveDimRef(axes.x_dimension),
                                    DimVector::POS, "New Cell");
@@ -202,7 +241,6 @@ bool VortexHost::dispatchAction(std::string_view actionName, CellRef focusCell,
                                    DimVector::NEG, "New Cell");
     return true;
   }
-
   if (actionName == "unlink-x-pos") {
     stdlib_.zzUnlink(focusCell, resolveDimRef(axes.x_dimension),
                      DimVector::POS);
@@ -217,8 +255,119 @@ bool VortexHost::dispatchAction(std::string_view actionName, CellRef focusCell,
     stdlib_.zzDelete(focusCell);
     return true;
   }
+  if (actionName == "duplicate-focus-cell" ||
+      actionName == "std:zigzag/duplicate") {
+    newFocusOut = stdlib_.zzDuplicate(focusCell);
+    if (boundStore_ && newFocusOut != noCell &&
+        zigzag::isEphemeral(newFocusOut)) {
+      zigzag::PromotionBudget budget{.maxOps = 1000};
+      auto promoted =
+          zigzag::promote(*boundStore_, boundStore_->primaryCurrentVersion(),
+                          arena_, newFocusOut, budget);
+      if (promoted && !promoted->cells.empty()) {
+        boundStore_->repointCurrentVersion(promoted->version);
+        newFocusOut = promoted->cells.back();
+      }
+    }
+    return true;
+  }
+
+  // UI actions
+  if (actionName.starts_with("view ") ||
+      actionName.starts_with("std:ui/view ")) {
+    std::string_view rest = actionName.substr(actionName.find(' ') + 1);
+    std::istringstream iss{std::string(rest)};
+    std::string dx, dy, dz;
+    iss >> dx >> dy >> dz;
+    setView(axes, dx, dy, dz);
+    return true;
+  }
+  if (actionName == "swap-xy" || actionName == "std:ui/swap_axes") {
+    stdlib_.swapAxes(axes);
+    return true;
+  }
+  if (actionName == "cycle-dims-forward" ||
+      actionName == "std:ui/cycle_dims_forward") {
+    stdlib_.cycleDims(axes, true);
+    return true;
+  }
+  if (actionName == "cycle-dims-backward" ||
+      actionName == "std:ui/cycle_dims_backward") {
+    stdlib_.cycleDims(axes, false);
+    return true;
+  }
+  if (actionName == "bundle-execution" ||
+      actionName == "std:ui/bundle_execution") {
+    stdlib_.applyBundle(axes, DimensionBundle::Execution);
+    return true;
+  }
+  if (actionName == "bundle-scope" || actionName == "std:ui/bundle_scope") {
+    stdlib_.applyBundle(axes, DimensionBundle::Scope);
+    return true;
+  }
+  if (actionName == "bundle-contract" ||
+      actionName == "std:ui/bundle_contract") {
+    stdlib_.applyBundle(axes, DimensionBundle::Contract);
+    return true;
+  }
+  if (actionName == "bundle-logic" || actionName == "std:ui/bundle_logic") {
+    stdlib_.applyBundle(axes, DimensionBundle::Logic);
+    return true;
+  }
+  if (actionName == "bundle-stdlib" || actionName == "std:ui/bundle_stdlib") {
+    stdlib_.applyBundle(axes, DimensionBundle::Stdlib);
+    return true;
+  }
 
   return false;
+}
+
+void VortexHost::setView(ViewAxisBinding &axes, std::string_view dimX,
+                         std::string_view dimY, std::string_view dimZ) {
+  stdlib_.setView(axes, dimX, dimY, dimZ);
+}
+
+bool VortexHost::exportLibrary(std::string_view moduleName,
+                               const std::string &destinationPath) const {
+  xanadu::Store store;
+  if (!stdlib_.exportModuleToStore(moduleName, store)) {
+    return false;
+  }
+  try {
+    store.save(destinationPath);
+    return true;
+  } catch (...) {
+    return false;
+  }
+}
+
+bool VortexHost::exportStandardLibrary(
+    const std::string &destinationPath) const {
+  xanadu::Store store;
+  if (!stdlib_.exportStandardLibraryToStore(store)) {
+    return false;
+  }
+  try {
+    store.save(destinationPath);
+    return true;
+  } catch (...) {
+    return false;
+  }
+}
+
+bool VortexHost::importLibrary(const std::string &sourcePath) {
+  try {
+    xanadu::Store store;
+    store.load(sourcePath);
+    return importLibrary(store);
+  } catch (...) {
+    return false;
+  }
+}
+
+bool VortexHost::importLibrary(const xanadu::Store &store) {
+  CellRef res = stdlib_.importModuleFromStore(store);
+  return res != noCell;
 }
 
 bool VortexHost::hasCustomAction(std::string_view actionName) const {

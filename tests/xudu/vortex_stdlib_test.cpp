@@ -8,9 +8,11 @@
 #include <string>
 #include <vector>
 
+#include "xudu/core/store.hpp"
 #include "xudu/core/vortex.hpp"
 #include "xudu/core/vortex_stdlib.hpp"
 #include "zigzag/core/arena_manifold.hpp"
+#include "zigzag/core/zzstructure.hpp"
 
 namespace {
 
@@ -451,6 +453,93 @@ TEST(VortexStdLibTest, ArrayModuleOperations) {
                                         static_cast<std::int64_t>(d1)});
   ASSERT_EQ(callTallyRes.size(), 1u);
   EXPECT_EQ(callTallyRes[0], CellValue(static_cast<std::int64_t>(4)));
+}
+
+TEST(VortexStdLibTest, UiModuleActions) {
+  TestHarness h;
+  EXPECT_TRUE(h.stdlib.has("std:ui"));
+  EXPECT_TRUE(h.stdlib.has("std:ui/view"));
+  EXPECT_TRUE(h.stdlib.has("std:ui/swap_axes"));
+  EXPECT_TRUE(h.stdlib.has("std:ui/cycle_dims_forward"));
+  EXPECT_TRUE(h.stdlib.has("std:ui/cycle_dims_backward"));
+  EXPECT_TRUE(h.stdlib.has("std:ui/bundle_execution"));
+
+  zigzag::ViewAxisBinding axes{
+      .x_dimension = "d.1", .y_dimension = "d.2", .z_dimension = "d.3"};
+  h.stdlib.swapAxes(axes);
+  EXPECT_EQ(axes.x_dimension, "d.2");
+  EXPECT_EQ(axes.y_dimension, "d.1");
+
+  h.stdlib.cycleDims(axes, true);
+  EXPECT_EQ(axes.x_dimension, "d.1");
+  EXPECT_EQ(axes.y_dimension, "d.3");
+  EXPECT_EQ(axes.z_dimension, "d.2");
+
+  h.stdlib.cycleDims(axes, false);
+  EXPECT_EQ(axes.x_dimension, "d.2");
+  EXPECT_EQ(axes.y_dimension, "d.1");
+  EXPECT_EQ(axes.z_dimension, "d.3");
+
+  h.stdlib.setView(axes, "d.spin", "d.step", "d.branch");
+  EXPECT_EQ(axes.x_dimension, "d.spin");
+  EXPECT_EQ(axes.y_dimension, "d.step");
+  EXPECT_EQ(axes.z_dimension, "d.branch");
+
+  h.stdlib.applyBundle(axes, zigzag::DimensionBundle::Execution);
+  EXPECT_EQ(axes.x_dimension, "d.spin");
+  EXPECT_EQ(axes.y_dimension, "d.step");
+  EXPECT_EQ(axes.z_dimension, "d.branch");
+
+  auto viewRes = h.stdlib.call("std:ui/view", {"d.x", "d.y", "d.z"});
+  EXPECT_FALSE(viewRes.empty());
+}
+
+TEST(VortexStdLibTest, NavModuleActions) {
+  TestHarness h;
+  EXPECT_TRUE(h.stdlib.has("std:nav"));
+  EXPECT_TRUE(h.stdlib.has("std:nav/hop_head"));
+  EXPECT_TRUE(h.stdlib.has("std:nav/hop_tail"));
+  EXPECT_TRUE(h.stdlib.has("std:nav/jump_home"));
+
+  DimRef d1  = h.arena.makeCell("d.1");
+  CellRef c1 = h.arena.makeCell("Node 1");
+  CellRef c2 = h.arena.makeCell("Node 2");
+  CellRef c3 = h.arena.makeCell("Node 3");
+  h.arena.link(c1, d1, zigzag::DimVector::POS, c2);
+  h.arena.link(c2, d1, zigzag::DimVector::POS, c3);
+
+  EXPECT_EQ(h.stdlib.hopHead(c2, d1), c1);
+  EXPECT_EQ(h.stdlib.hopHead(c3, d1), c1);
+  EXPECT_EQ(h.stdlib.hopTail(c1, d1), c3);
+  EXPECT_EQ(h.stdlib.hopTail(c2, d1), c3);
+  EXPECT_EQ(h.stdlib.jumpHome(), h.core.home());
+}
+
+TEST(VortexStdLibTest, ZzDuplicate) {
+  TestHarness h;
+  CellRef original = h.arena.makeCell("Original Content");
+  h.arena.setValueBits(original, xanadu::ValueKind::Int64, 42);
+
+  CellRef dup = h.stdlib.zzDuplicate(original);
+  EXPECT_NE(dup, noCell);
+  EXPECT_NE(dup, original);
+  EXPECT_EQ(h.arena.textOf(dup), "Original Content");
+  EXPECT_EQ(h.arena.asInt64(dup), 42);
+  EXPECT_EQ(
+      h.arena.linked(original, h.core.dims().clone, zigzag::DimVector::POS),
+      dup);
+}
+
+TEST(VortexStdLibTest, SovereignStoreLibraryRoundtrip) {
+  TestHarness h;
+  xanadu::Store store;
+  bool expOk = h.stdlib.exportStandardLibraryToStore(store);
+  EXPECT_TRUE(expOk);
+  EXPECT_GT(store.opCount(), 0u);
+
+  TestHarness h2;
+  CellRef imported = h2.stdlib.importModuleFromStore(store);
+  EXPECT_NE(imported, noCell);
 }
 
 } // namespace

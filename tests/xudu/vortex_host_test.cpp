@@ -2,6 +2,7 @@
  * @file vortex_host_test.cpp
  * @brief Unit tests for VortexHost runtime integration and stdlib modules.
  */
+#include <filesystem>
 #include <gmock/gmock.h>
 #include <gtest/gtest.h>
 
@@ -289,4 +290,78 @@ TEST(VortexHostTest, VQLMacroRegistrationAndSystemStorePersistence) {
   bool handled     = host2.dispatchAction("hop-child", root, axes, newFocus);
   EXPECT_TRUE(handled);
   EXPECT_EQ(newFocus, child);
+}
+
+TEST(VortexHostTest, KeymapActionDispatching) {
+  VortexHost host;
+  auto &arena  = host.arena();
+  CellRef home = host.core().home();
+  DimRef d1    = host.core().mintDimension("d.1");
+  CellRef c1   = arena.makeCell("C1");
+  CellRef c2   = arena.makeCell("C2");
+  arena.link(c1, d1, DimVector::POS, c2);
+
+  ViewAxisBinding axes{
+      .x_dimension = "d.1", .y_dimension = "d.2", .z_dimension = "d.3"};
+  CellRef newFocus = noCell;
+
+  // UI action: swap-xy
+  EXPECT_TRUE(host.dispatchAction("swap-xy", c1, axes, newFocus));
+  EXPECT_EQ(axes.x_dimension, "d.2");
+  EXPECT_EQ(axes.y_dimension, "d.1");
+
+  // UI action: cycle-dims-forward
+  EXPECT_TRUE(host.dispatchAction("cycle-dims-forward", c1, axes, newFocus));
+  EXPECT_EQ(axes.x_dimension, "d.1");
+  EXPECT_EQ(axes.y_dimension, "d.3");
+  EXPECT_EQ(axes.z_dimension, "d.2");
+
+  // UI action: bundle-execution
+  EXPECT_TRUE(host.dispatchAction("bundle-execution", c1, axes, newFocus));
+  EXPECT_EQ(axes.x_dimension, "d.spin");
+  EXPECT_EQ(axes.y_dimension, "d.step");
+  EXPECT_EQ(axes.z_dimension, "d.branch");
+
+  // UI action: view
+  EXPECT_TRUE(
+      host.dispatchAction("view d.foo d.bar d.baz", c1, axes, newFocus));
+  EXPECT_EQ(axes.x_dimension, "d.foo");
+  EXPECT_EQ(axes.y_dimension, "d.bar");
+  EXPECT_EQ(axes.z_dimension, "d.baz");
+
+  // Navigation: jump-home
+  EXPECT_TRUE(host.dispatchAction("jump-home", c1, axes, newFocus));
+  EXPECT_EQ(newFocus, home);
+
+  // Navigation: hop-tail & hop-head
+  axes.x_dimension = "d.1";
+  EXPECT_TRUE(host.dispatchAction("hop-tail", c1, axes, newFocus));
+  EXPECT_EQ(newFocus, c2);
+  EXPECT_TRUE(host.dispatchAction("hop-head", c2, axes, newFocus));
+  EXPECT_EQ(newFocus, c1);
+
+  // Duplication: duplicate-focus-cell
+  EXPECT_TRUE(host.dispatchAction("duplicate-focus-cell", c1, axes, newFocus));
+  EXPECT_NE(newFocus, c1);
+  EXPECT_EQ(arena.textOf(newFocus), "C1");
+}
+
+TEST(VortexHostTest, SovereignLibraryPackaging) {
+  VortexHost host;
+  namespace fs = std::filesystem;
+  auto tmpDir  = fs::temp_directory_path() / "vortex_host_lib_test";
+  fs::create_directories(tmpDir);
+  auto stdlibPath = (tmpDir / "stdlib.store").string();
+  auto uiPath     = (tmpDir / "ui.store").string();
+
+  EXPECT_TRUE(host.exportStandardLibrary(stdlibPath));
+  EXPECT_TRUE(fs::exists(stdlibPath));
+
+  EXPECT_TRUE(host.exportLibrary("std:ui", uiPath));
+  EXPECT_TRUE(fs::exists(uiPath));
+
+  VortexHost host2;
+  EXPECT_TRUE(host2.importLibrary(stdlibPath));
+
+  fs::remove_all(tmpDir);
 }

@@ -113,7 +113,18 @@ public:
    * @return true if the action was handled by a Vortex routine or macro.
    */
   bool dispatchAction(std::string_view actionName, CellRef focusCell,
+                      ViewAxisBinding &axes, CellRef &newFocusOut);
+  bool dispatchAction(std::string_view actionName, CellRef focusCell,
                       const ViewAxisBinding &axes, CellRef &newFocusOut);
+  void setView(ViewAxisBinding &axes, std::string_view dimX,
+               std::string_view dimY, std::string_view dimZ);
+
+  // -- Sovereign Store Library Packaging (Zero YAML) --------------------------
+  bool exportLibrary(std::string_view moduleName,
+                     const std::string &destinationPath) const;
+  bool exportStandardLibrary(const std::string &destinationPath) const;
+  bool importLibrary(const std::string &sourcePath);
+  bool importLibrary(const xanadu::Store &store);
 
   [[nodiscard]] bool hasCustomAction(std::string_view actionName) const;
 

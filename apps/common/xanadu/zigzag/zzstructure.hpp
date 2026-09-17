@@ -106,6 +106,62 @@ struct ViewAxisBinding {
   bool operator==(const ViewAxisBinding &) const = default;
 };
 
+enum class DimensionBundle : std::uint8_t {
+  Custom    = 0, ///< Manual / unbundled dimensions
+  Execution = 1, ///< X: d.spin, Y: d.step, Z: d.branch
+  Scope     = 2, ///< X: d.lexical, Y: d.dynamic, Z: d.env
+  Contract  = 3, ///< X: d.require, Y: d.ensure, Z: d.invariant
+  Logic     = 4, ///< X: d.clause, Y: d.predicate, Z: d.var
+  Stdlib    = 5, ///< X: d.stdlib, Y: d.symbol, Z: d.version
+};
+
+[[nodiscard]] inline std::string dimensionBundleName(DimensionBundle bundle) {
+  switch (bundle) {
+  case DimensionBundle::Custom:
+    return "Custom";
+  case DimensionBundle::Execution:
+    return "Execution (d.spin, d.step, d.branch)";
+  case DimensionBundle::Scope:
+    return "Scope (d.lexical, d.dynamic, d.env)";
+  case DimensionBundle::Contract:
+    return "Contract (d.require, d.ensure, d.invariant)";
+  case DimensionBundle::Logic:
+    return "Logic (d.clause, d.predicate, d.var)";
+  case DimensionBundle::Stdlib:
+    return "Stdlib (d.stdlib, d.symbol, d.version)";
+  }
+  return "Unknown";
+}
+
+[[nodiscard]] inline ViewAxisBinding
+dimensionBundleAxes(DimensionBundle bundle) {
+  switch (bundle) {
+  case DimensionBundle::Execution:
+    return ViewAxisBinding{.x_dimension = "d.spin",
+                           .y_dimension = "d.step",
+                           .z_dimension = "d.branch"};
+  case DimensionBundle::Scope:
+    return ViewAxisBinding{.x_dimension = "d.lexical",
+                           .y_dimension = "d.dynamic",
+                           .z_dimension = "d.env"};
+  case DimensionBundle::Contract:
+    return ViewAxisBinding{.x_dimension = "d.require",
+                           .y_dimension = "d.ensure",
+                           .z_dimension = "d.invariant"};
+  case DimensionBundle::Logic:
+    return ViewAxisBinding{.x_dimension = "d.clause",
+                           .y_dimension = "d.predicate",
+                           .z_dimension = "d.var"};
+  case DimensionBundle::Stdlib:
+    return ViewAxisBinding{.x_dimension = "d.stdlib",
+                           .y_dimension = "d.symbol",
+                           .z_dimension = "d.version"};
+  case DimensionBundle::Custom:
+    return ViewAxisBinding{};
+  }
+  return ViewAxisBinding{};
+}
+
 /// Plain RGB colour in [0, 1].
 using RgbColor = gleditor::color::Color3;
 
