@@ -442,6 +442,56 @@ Page::offsetForCluster(const std::uint32_t clusterIndex,
   return textOffset + static_cast<std::uint32_t>(offset);
 }
 
+std::uint32_t Page::offsetForPagePoint(const float xFraction,
+                                       const float yFraction) const {
+  const auto shaped = ensureShaping();
+  if (shaped.lines.empty()) {
+    return textOffset;
+  }
+
+  // Layout coordinates exclude the page border and grow down from the top;
+  // the picking quad coordinates cover the complete page and grow up from
+  // the bottom.
+  const float x =
+      (std::clamp(xFraction, 0.0F, 1.0F) * pageWidth) - Page::marginPixels;
+  const float y = ((1.0F - std::clamp(yFraction, 0.0F, 1.0F)) * pageHeight) -
+                  Page::marginPixels;
+
+  const auto lineIt = std::ranges::min_element(
+      shaped.lines, [y](const auto &left, const auto &right) {
+        const auto leftCentre  = left.top + (left.barHeight * 0.5F);
+        const auto rightCentre = right.top + (right.barHeight * 0.5F);
+        return std::abs(leftCentre - y) < std::abs(rightCentre - y);
+      });
+  const auto &line = *lineIt;
+
+  const auto lineEnd = line.byteStart + line.byteLength;
+  for (std::size_t i = 0; i < shaped.glyphs.size(); ++i) {
+    const auto &glyph = shaped.glyphs[i];
+    if (glyph.lineIndex != line.lineIndex ||
+        glyph.clusterIndex >= shaped.clusters.size()) {
+      continue;
+    }
+    const auto &cluster = shaped.clusters[glyph.clusterIndex];
+    float right         = line.left + line.barWidth;
+    for (const auto &next : shaped.glyphs) {
+      if (next.lineIndex == line.lineIndex &&
+          next.clusterLeft > glyph.clusterLeft) {
+        right = next.clusterLeft;
+        break;
+      }
+    }
+    if (x < (glyph.clusterLeft + right) * 0.5F) {
+      return textOffset + cluster.byteStart;
+    }
+    if (i + 1 == shaped.glyphs.size() ||
+        shaped.glyphs[i + 1].lineIndex != line.lineIndex) {
+      return textOffset + cluster.byteStart + cluster.byteLength;
+    }
+  }
+  return textOffset + lineEnd;
+}
+
 // Always called from the render thread
 void Page::collect(std::vector<render::GlyphBatch> &batches,
                    const glm::mat4 &docTransform, const float opacity,
@@ -720,7 +770,10 @@ Doc::offsetForPick(const render::PickingTag &tag) const {
   // A glyph resolves through its cluster; anything else a page draws is its
   // background, which has no character beneath it.
   if (render::tagKindGlyph != tag.kind) {
-    return target->baseOffset();
+    return target->offsetForPagePoint(
+        static_cast<float>(tag.clusterIndex) /
+            static_cast<float>(render::tagFractionScale),
+        tag.fraction);
   }
   return target->offsetForCluster(tag.clusterIndex, tag.fraction);
 }

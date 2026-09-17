@@ -104,5 +104,14 @@ void main() {
   }
   // Fixed point: the attachment holds unsigned integers. The scale must
   // match render::tagFractionScale.
-  outTag = uvec4(vTag, uint(clamp(vQuadU, 0.0, 1.0) * 65535.0), 0u);
+  // Page backgrounds have no cluster. Reuse the two 16-bit picking fields as
+  // normalized x/y coordinates so blank-page picks can resolve to the nearest
+  // caret instead of unconditionally snapping to the page start.
+  uint kind = vTag.x >> GLEDITOR_TAG_KIND_SHIFT;
+  if (0u != vSolid && kind == GLEDITOR_TAG_KIND_PAGE) {
+    outTag = uvec4(vTag.x, uint(clamp(vQuadU, 0.0, 1.0) * 65535.0),
+                   uint(clamp(vQuadV, 0.0, 1.0) * 65535.0), 0u);
+  } else {
+    outTag = uvec4(vTag, uint(clamp(vQuadU, 0.0, 1.0) * 65535.0), 0u);
+  }
 }

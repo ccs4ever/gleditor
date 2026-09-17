@@ -291,6 +291,12 @@ public:
   [[nodiscard]] std::optional<std::uint32_t>
   offsetForCluster(std::uint32_t clusterIndex, float fraction) const;
 
+  /// Resolve a page-background pick. The two fractions are normalized page
+  /// coordinates; unlike a glyph pick they carry x and y rather than a
+  /// cluster and an intra-cluster position.
+  [[nodiscard]] std::uint32_t offsetForPagePoint(float xFraction,
+                                                 float yFraction) const;
+
   /**
    * @brief The highlight span covering a byte range on this page.
    *

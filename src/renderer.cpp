@@ -423,14 +423,6 @@ bool Renderer::update(RenderState &state, const bool settled) {
     } else if (awaitingStep) {
       // Waiting on a readback: nothing else may issue one, or the answer this
       // step is waiting for would be lost among the others.
-    } else if (this->state->dragPending.exchange(false)) {
-      // A drag reuses the click machinery; only what happens with the answer
-      // differs, so the pending pixel is remembered as a drag.
-      const auto dragX = this->state->dragX.load();
-      const auto dragY = this->state->dragY.load();
-      awaitingClick    = std::pair{dragX, dragY};
-      awaitingDrag     = true;
-      requestPick(state, dragX, dragY);
     } else if (this->state->clickPending.exchange(false)) {
       // A click takes priority over the hover query: only one read is issued
       // per frame, and the click is the one somebody is waiting on.
@@ -440,6 +432,16 @@ bool Renderer::update(RenderState &state, const bool settled) {
       awaitingClickButton = this->state->clickButton.load();
       awaitingDrag        = false;
       requestPick(state, clickX, clickY);
+    } else if (this->state->dragPending.exchange(false)) {
+      // A drag reuses the click machinery; only what happens with the answer
+      // differs, so the pending pixel is remembered as a drag. The initial
+      // click is deliberately serviced first so extendTo() always has the
+      // press location as its anchor.
+      const auto dragX = this->state->dragX.load();
+      const auto dragY = this->state->dragY.load();
+      awaitingClick    = std::pair{dragX, dragY};
+      awaitingDrag     = true;
+      requestPick(state, dragX, dragY);
     } else if (!this->state->scriptReportsPicks()) {
       requestPick(state, this->state->mouseX, this->state->mouseY);
     }
