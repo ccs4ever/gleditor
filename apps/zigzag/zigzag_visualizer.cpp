@@ -1600,8 +1600,8 @@ void ZigzagVisualizer::drawFrame(gleditor::FrameContext &ctx) {
   // Bottom Command Key Hints
   const std::string hints =
       "Arrows: Step X/Y | PgUp/PgDn: Step Z | Space: Swap X/Y | Tab: Cycle | "
-      "N/D: Insert | U: Unlink | Del: Delete | F4: Palette | Ctrl+1..5: "
-      "Bundles";
+      "N/D: Insert | U: Unlink | Del: Delete | F4: Palette | / or : or F2: "
+      "Omnibar";
   const auto hintsMetrics = hudCanvas_->measureText(hints);
   const float bottomBarHeight =
       hintsMetrics.height + (2.0F * presentation_config_.hudVerticalPaddingPx);
@@ -1681,6 +1681,71 @@ void ZigzagVisualizer::drawFrame(gleditor::FrameContext &ctx) {
         "Esc: Close";
     hudCanvas_->addText(ctx.state, palX + 16.0F, palY + 24.0F, palHelp,
                         0x94A3B8FFU, 0x141624F0U);
+  }
+
+  // Command Omnibar HUD Overlay
+  if (commandBarVisible_) {
+    const float barWidth  = std::min(700.0F, width - 40.0F);
+    const float barHeight = 76.0F;
+    const float barX      = (width - barWidth) * 0.5F;
+    const float barY      = height - topBarBottom - barHeight - 20.0F;
+
+    // Background & borders
+    hudCanvas_->addRect(barX, barY, barWidth, barHeight, 0x0F172AF0U);
+    hudCanvas_->addLine(barX, barY, barX + barWidth, barY, 1.5F, 0x38BDF8FFU);
+    hudCanvas_->addLine(barX, barY + barHeight, barX + barWidth,
+                        barY + barHeight, 1.5F, 0x38BDF8FFU);
+    hudCanvas_->addLine(barX, barY, barX, barY + barHeight, 1.5F, 0x38BDF8FFU);
+    hudCanvas_->addLine(barX + barWidth, barY, barX + barWidth,
+                        barY + barHeight, 1.5F, 0x38BDF8FFU);
+
+    // Mode badge
+    std::string badge;
+    std::uint32_t badgeColor = 0x38BDF8FFU; // Sky blue
+    if (commandBarText_.starts_with(":macro")) {
+      badge      = "[MACRO DEF]";
+      badgeColor = 0xF59E0BFFU; // Amber
+    } else if (commandBarText_.starts_with(":")) {
+      badge      = "[COMMAND]";
+      badgeColor = 0x818CF8FFU; // Indigo
+    } else if (commandBarText_.starts_with("/") ||
+               commandBarText_.starts_with("##")) {
+      badge      = "[VQL NAV]";
+      badgeColor = 0x34D399FFU; // Emerald
+    } else if (commandBarText_.starts_with("weave") ||
+               commandBarText_.starts_with("let") ||
+               commandBarText_.starts_with("for")) {
+      badge      = "[VQL SCRIPT]";
+      badgeColor = 0xC084FCFFU; // Purple
+    } else {
+      badge      = "[VQL OMNIBAR]";
+      badgeColor = 0x38BDF8FFU; // Sky blue
+    }
+
+    const float badgeY = barY + barHeight - 16.0F;
+    hudCanvas_->addText(ctx.state, barX + 16.0F, badgeY, badge, badgeColor,
+                        0x0F172AF0U);
+
+    // Input prompt line
+    const std::string prompt = "> " + commandBarText_ + "_";
+    const float inputY       = barY + 36.0F;
+    hudCanvas_->addText(ctx.state, barX + 16.0F, inputY, prompt, 0xFFFFFFFFU,
+                        0x00000000U);
+
+    // Feedback or helper line
+    const float helpY = barY + 14.0F;
+    if (!commandBarFeedback_.empty()) {
+      const std::uint32_t fbCol =
+          commandBarFeedbackIsError_ ? 0xEF4444FFU : 0x34D399FFU;
+      hudCanvas_->addText(ctx.state, barX + 16.0F, helpY, commandBarFeedback_,
+                          fbCol, 0x00000000U);
+    } else {
+      hudCanvas_->addText(
+          ctx.state, barX + 16.0F, helpY,
+          "Enter: Execute | /: Path Nav | weave {...}: Script | :macro <name> "
+          "<vql> [key] | Esc: Close",
+          0x64748BFFU, 0x00000000U);
+    }
   }
 
   hudCanvas_->commit();
@@ -2308,6 +2373,171 @@ std::vector<std::string> ZigzagVisualizer::paletteItems() const {
     filtered.push_back("VQL: " + paletteFilter_);
   }
   return filtered;
+}
+
+void ZigzagVisualizer::toggleCommandBar() {
+  setCommandBarVisible(!commandBarVisible_);
+}
+
+void ZigzagVisualizer::setCommandBarVisible(const bool visible) {
+  commandBarVisible_ = visible;
+  if (commandBarVisible_) {
+    commandBarFeedback_.clear();
+    commandBarFeedbackIsError_ = false;
+  }
+}
+
+void ZigzagVisualizer::commandBarInputChar(const char ch) {
+  commandBarText_.push_back(ch);
+}
+
+void ZigzagVisualizer::commandBarInputText(const std::string_view text) {
+  commandBarText_.append(text);
+}
+
+void ZigzagVisualizer::commandBarBackspace() {
+  if (!commandBarText_.empty()) {
+    commandBarText_.pop_back();
+  }
+}
+
+void ZigzagVisualizer::commandBarClear() {
+  commandBarText_.clear();
+  commandBarFeedback_.clear();
+  commandBarFeedbackIsError_ = false;
+}
+
+void ZigzagVisualizer::setCommandBarText(std::string text) {
+  commandBarText_ = std::move(text);
+}
+
+bool ZigzagVisualizer::navigateVQL(const std::string_view pathExpr) {
+  ensureVortexHost();
+  if (!vortex_host_) {
+    commandBarFeedback_        = "VortexHost unavailable";
+    commandBarFeedbackIsError_ = true;
+    return false;
+  }
+  const auto focusRef = static_cast<CellRef>(accursed_cell_focus_);
+  auto target         = vortex_host_->navigatePath(pathExpr, focusRef);
+  if (target.has_value() && *target != zigzag::noCell) {
+    navigateFocusTo(static_cast<CellID>(*target));
+    commandBarFeedback_        = std::format("Navigated to cell {}", *target);
+    commandBarFeedbackIsError_ = false;
+    return true;
+  }
+  commandBarFeedback_ = std::format("Path '{}' did not resolve", pathExpr);
+  commandBarFeedbackIsError_ = true;
+  return false;
+}
+
+vortex::VortexHost::ScriptResult
+ZigzagVisualizer::executeVQLScript(const std::string_view script) {
+  ensureVortexHost();
+  if (!vortex_host_) {
+    return {.success = false, .message = "VortexHost unavailable"};
+  }
+  const auto focusRef = static_cast<CellRef>(accursed_cell_focus_);
+  auto res            = vortex_host_->executeScript(script, focusRef, store_);
+  commandBarFeedback_ = res.message;
+  commandBarFeedbackIsError_ = !res.success;
+  if (res.success) {
+    if (!res.affectedCells.empty()) {
+      navigateFocusTo(static_cast<CellID>(res.affectedCells.back()));
+    } else {
+      refreshCellLayouts();
+      rebuildActiveViewTopology();
+      invalidateAccessibility();
+    }
+  }
+  return res;
+}
+
+bool ZigzagVisualizer::defineMacro(const std::string_view name,
+                                   const std::string_view vqlExpr,
+                                   const std::string_view keyBinding) {
+  ensureVortexHost();
+  if (!vortex_host_) {
+    commandBarFeedback_        = "VortexHost unavailable";
+    commandBarFeedbackIsError_ = true;
+    return false;
+  }
+  if (store_) {
+    static_cast<void>(
+        vortex_host_->saveMacroToStore(name, vqlExpr, keyBinding, *store_));
+  } else {
+    vortex_host_->defineMacro(name, vqlExpr, nullptr);
+  }
+  commandBarFeedback_ =
+      std::format("Macro '{}' defined -> '{}'", name, vqlExpr);
+  commandBarFeedbackIsError_ = false;
+  return true;
+}
+
+bool ZigzagVisualizer::executeCommandBar() {
+  std::string_view text = commandBarText_;
+  while (!text.empty() &&
+         std::isspace(static_cast<unsigned char>(text.front()))) {
+    text.remove_prefix(1);
+  }
+  while (!text.empty() &&
+         std::isspace(static_cast<unsigned char>(text.back()))) {
+    text.remove_suffix(1);
+  }
+  if (text.empty()) {
+    commandBarFeedback_        = "Empty command";
+    commandBarFeedbackIsError_ = true;
+    return false;
+  }
+
+  // 1. Command mode (:macro ...)
+  if (text.starts_with(":macro ") || text.starts_with(":macro\t")) {
+    std::string_view rest = text.substr(7);
+    while (!rest.empty() &&
+           std::isspace(static_cast<unsigned char>(rest.front()))) {
+      rest.remove_prefix(1);
+    }
+    auto nameEnd = rest.find_first_of(" \t");
+    if (nameEnd == std::string_view::npos) {
+      commandBarFeedback_        = "Usage: :macro <name> <vql> [binding]";
+      commandBarFeedbackIsError_ = true;
+      return false;
+    }
+    std::string_view macroName = rest.substr(0, nameEnd);
+    rest                       = rest.substr(nameEnd + 1);
+    while (!rest.empty() &&
+           std::isspace(static_cast<unsigned char>(rest.front()))) {
+      rest.remove_prefix(1);
+    }
+    if (rest.empty()) {
+      commandBarFeedback_        = "Usage: :macro <name> <vql> [binding]";
+      commandBarFeedbackIsError_ = true;
+      return false;
+    }
+
+    std::string_view vqlExpr    = rest;
+    std::string_view keyBinding = {};
+    auto lastSpace              = rest.rfind(' ');
+    if (lastSpace != std::string_view::npos) {
+      std::string_view potentialKey = rest.substr(lastSpace + 1);
+      if (potentialKey.starts_with("Ctrl+") ||
+          potentialKey.starts_with("Alt+") ||
+          potentialKey.starts_with("Shift+") || potentialKey.starts_with("F")) {
+        vqlExpr    = rest.substr(0, lastSpace);
+        keyBinding = potentialKey;
+      }
+    }
+    return defineMacro(macroName, vqlExpr, keyBinding);
+  }
+
+  // 2. Navigation mode (starts with '/' or '##')
+  if (text.starts_with("/") || text.starts_with("##")) {
+    return navigateVQL(text);
+  }
+
+  // 3. Script / Weave mode
+  auto res = executeVQLScript(text);
+  return res.success;
 }
 
 } // namespace zigzag

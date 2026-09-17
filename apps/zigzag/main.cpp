@@ -173,13 +173,6 @@ void bindCommands(gleditor::Application &app, const AppStateRef &state,
   app.commands().bind(SDL_SCANCODE_F4, "toggle-palette",
                       "toggle Vortex opcode and library palette HUD",
                       [viz] { viz->togglePalette(); });
-  app.commands().bind(SDL_SCANCODE_RETURN, "palette-confirm",
-                      "clone selected palette symbol into active chain", [viz] {
-                        if (viz->isPaletteVisible()) {
-                          viz->paletteCloneSelectedToFocus();
-                          viz->setPaletteVisible(false);
-                        }
-                      });
   app.commands().bind(SDL_SCANCODE_F5, "vql-translate-attach",
                       "translate VQL filter text and attach to active chain",
                       [viz] {
@@ -188,9 +181,43 @@ void bindCommands(gleditor::Application &app, const AppStateRef &state,
                           viz->setPaletteVisible(false);
                         }
                       });
-  app.commands().bind(SDL_SCANCODE_ESCAPE, "palette-dismiss",
-                      "dismiss Vortex opcode and library palette HUD", [viz] {
-                        if (viz->isPaletteVisible()) {
+
+  // Interactive VQL Command Omnibar
+  app.commands().bind(SDL_SCANCODE_F2, "toggle-command-bar",
+                      "toggle interactive VQL Command Omnibar",
+                      [viz] { viz->toggleCommandBar(); });
+  app.commands().bind(SDL_SCANCODE_SLASH, "open-command-bar-slash",
+                      "open VQL Command Omnibar with '/' navigation prefix",
+                      [viz] {
+                        viz->setCommandBarVisible(true);
+                        if (viz->commandBarText().empty()) {
+                          viz->commandBarInputChar('/');
+                        }
+                      });
+  app.commands().bind(
+      SDL_SCANCODE_SEMICOLON, Mod::Shift, "open-command-bar-colon",
+      "open VQL Command Omnibar with ':' command prefix", [viz] {
+        viz->setCommandBarVisible(true);
+        if (viz->commandBarText().empty()) {
+          viz->commandBarInputChar(':');
+        }
+      });
+
+  app.commands().bind(
+      SDL_SCANCODE_RETURN, "confirm-action",
+      "execute Command Omnibar or clone selected palette symbol", [viz] {
+        if (viz->isCommandBarVisible()) {
+          viz->executeCommandBar();
+        } else if (viz->isPaletteVisible()) {
+          viz->paletteCloneSelectedToFocus();
+          viz->setPaletteVisible(false);
+        }
+      });
+  app.commands().bind(SDL_SCANCODE_ESCAPE, "dismiss-overlay",
+                      "dismiss Command Omnibar or palette HUD", [viz] {
+                        if (viz->isCommandBarVisible()) {
+                          viz->setCommandBarVisible(false);
+                        } else if (viz->isPaletteVisible()) {
                           viz->setPaletteVisible(false);
                         }
                       });

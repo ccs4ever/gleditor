@@ -236,6 +236,43 @@ public:
   [[nodiscard]] xanadu::vql::CompilationResult
   compileVQL(std::string_view vqlQuery) const;
 
+  // -- VQL Command Omnibar --------------------------------------------------
+  void toggleCommandBar();
+  void setCommandBarVisible(bool visible);
+  [[nodiscard]] bool isCommandBarVisible() const noexcept {
+    return commandBarVisible_;
+  }
+  void commandBarInputChar(char ch);
+  void commandBarInputText(std::string_view text);
+  void commandBarBackspace();
+  void commandBarClear();
+  void setCommandBarText(std::string text);
+  [[nodiscard]] const std::string &commandBarText() const noexcept {
+    return commandBarText_;
+  }
+  [[nodiscard]] const std::string &commandBarFeedback() const noexcept {
+    return commandBarFeedback_;
+  }
+  [[nodiscard]] bool commandBarFeedbackIsError() const noexcept {
+    return commandBarFeedbackIsError_;
+  }
+
+  /// Evaluates the contents of the Command Omnibar according to parsed intent:
+  /// - starts with '/' or '##' -> quick path navigation
+  /// - starts with ':macro'    -> macro definition & persistence
+  /// - script/weave expression -> execute and promote/navigate
+  bool executeCommandBar();
+
+  /// Quick path navigation relative to focus (e.g. "/d.1/d.2", "/-d.2[0]")
+  bool navigateVQL(std::string_view pathExpr);
+
+  /// One-time script execution
+  vortex::VortexHost::ScriptResult executeVQLScript(std::string_view script);
+
+  /// Define and persist a named macro into the sovereign keymap store
+  bool defineMacro(std::string_view name, std::string_view vqlExpr,
+                   std::string_view keyBinding = {});
+
   /// Apply one validated system-slice snapshot between frames. The store is
   /// never consulted while drawing.
   void setPresentationConfig(xanadu::ZigzagPresentationConfig config);
@@ -438,6 +475,11 @@ private:
   bool paletteVisible_{false};
   std::size_t paletteSelectedIndex_{0};
   std::string paletteFilter_{};
+
+  bool commandBarVisible_{false};
+  std::string commandBarText_{};
+  std::string commandBarFeedback_{};
+  bool commandBarFeedbackIsError_{false};
 };
 
 } // namespace zigzag

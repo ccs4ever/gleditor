@@ -788,3 +788,80 @@ TEST(ZigzagVisualizerTest, PaletteVQLTranslationMode) {
   EXPECT_TRUE(translated);
   EXPECT_GT(viz.operationCount(), beforeOps);
 }
+
+TEST(ZigzagVisualizerTest, CommandOmnibarTogglingAndTextInput) {
+  ZigzagVisualizer viz("Sans 12");
+  EXPECT_FALSE(viz.isCommandBarVisible());
+
+  viz.toggleCommandBar();
+  EXPECT_TRUE(viz.isCommandBarVisible());
+
+  viz.commandBarInputChar('/');
+  viz.commandBarInputChar('d');
+  viz.commandBarInputChar('.');
+  viz.commandBarInputChar('1');
+  EXPECT_EQ(viz.commandBarText(), "/d.1");
+
+  viz.commandBarBackspace();
+  EXPECT_EQ(viz.commandBarText(), "/d.");
+
+  viz.commandBarClear();
+  EXPECT_TRUE(viz.commandBarText().empty());
+
+  viz.setCommandBarText("/d.1/d.2");
+  EXPECT_EQ(viz.commandBarText(), "/d.1/d.2");
+
+  viz.setCommandBarVisible(false);
+  EXPECT_FALSE(viz.isCommandBarVisible());
+}
+
+TEST(ZigzagVisualizerTest, CommandOmnibarQuickPathNavigation) {
+  ZigzagVisualizer viz("Sans 12");
+  const auto initialFocus = viz.focusCellId();
+  ASSERT_NE(initialFocus, 0U);
+
+  viz.setCommandBarVisible(true);
+  viz.setCommandBarText("/d.1");
+  const bool success = viz.executeCommandBar();
+  EXPECT_TRUE(success);
+  EXPECT_NE(viz.focusCellId(), initialFocus);
+  EXPECT_FALSE(viz.commandBarFeedback().empty());
+  EXPECT_FALSE(viz.commandBarFeedbackIsError());
+
+  // Non-existent path navigation error
+  viz.setCommandBarText("/d.nonexistent_dimension");
+  const bool fail = viz.executeCommandBar();
+  EXPECT_FALSE(fail);
+  EXPECT_TRUE(viz.commandBarFeedbackIsError());
+}
+
+TEST(ZigzagVisualizerTest, CommandOmnibarScriptExecution) {
+  ZigzagVisualizer viz("Sans 12");
+  const auto initialFocus   = viz.focusCellId();
+  const auto initialOpCount = viz.operationCount();
+
+  viz.setCommandBarVisible(true);
+  viz.setCommandBarText("weave { /d.step%ScriptNode }");
+  const bool success = viz.executeCommandBar();
+  EXPECT_TRUE(success);
+  EXPECT_FALSE(viz.commandBarFeedback().empty());
+  EXPECT_FALSE(viz.commandBarFeedbackIsError());
+}
+
+TEST(ZigzagVisualizerTest, CommandOmnibarMacroDefinitionAndDispatch) {
+  ZigzagVisualizer viz("Sans 12");
+  const auto root = viz.focusCellId();
+  ASSERT_NE(root, 0U);
+
+  // Define a macro via Omnibar: :macro hop-first /d.1[0]
+  viz.setCommandBarVisible(true);
+  viz.setCommandBarText(":macro hop-first /d.1[0]");
+  const bool defSuccess = viz.executeCommandBar();
+  EXPECT_TRUE(defSuccess);
+  EXPECT_FALSE(viz.commandBarFeedbackIsError());
+
+  // Dispatch the macro as a visualizer action
+  const bool handled = viz.dispatchAction("hop-first");
+  EXPECT_TRUE(handled);
+  EXPECT_NE(viz.focusCellId(), root);
+}

@@ -2666,6 +2666,8 @@ int main(const int argc, char **argv) {
     if (auto vHost = zigzagPresentation->vortexHost()) {
       vHost->loadConfigFromStore(
           session->systemStore(xudu::SystemDocKind::Settings));
+      vHost->loadMacrosFromStore(
+          session->systemStore(xudu::SystemDocKind::Keymap));
     }
     // Derive the structural presentation's placement from the live Xanadoc
     // page, so edits, reflow, and document motion keep the two together.
@@ -2955,6 +2957,11 @@ int main(const int argc, char **argv) {
             app.commands().rebind(act, combo->first, combo->second);
           }
         }
+#ifdef XUZZ_BUILD
+        if (auto vHost = zigzagPresentation->vortexHost()) {
+          vHost->loadMacrosFromStore(store);
+        }
+#endif
         break;
       }
       case xudu::SystemDocKind::Settings: {
