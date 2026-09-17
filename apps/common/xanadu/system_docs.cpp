@@ -2147,8 +2147,164 @@ MicroversionId resetSettingToDefault(Store &store, const MicroversionId &parent,
 }
 
 // -----------------------------------------------------------------------------
-// Config Struct fromStore Loaders
+// Config Struct fromStore Loaders & Keymap Resolution
 // -----------------------------------------------------------------------------
+
+namespace {
+struct ActionAlias {
+  std::string_view legacy;
+  std::string_view canonical;
+};
+
+constexpr ActionAlias kActionAliases[] = {
+    // Xudu Core Actions
+    {"quit", "std:xudu/quit"},
+    {"save", "std:xudu/save"},
+    {"close", "std:xudu/close"},
+    {"next-doc", "std:xudu/next_doc"},
+    {"prev-doc", "std:xudu/prev_doc"},
+    {"doc-1", "std:xudu/doc_1"},
+    {"doc-2", "std:xudu/doc_2"},
+    {"doc-3", "std:xudu/doc_3"},
+    {"doc-4", "std:xudu/doc_4"},
+    {"doc-5", "std:xudu/doc_5"},
+    {"doc-6", "std:xudu/doc_6"},
+    {"doc-7", "std:xudu/doc_7"},
+    {"doc-8", "std:xudu/doc_8"},
+    {"doc-9", "std:xudu/doc_9"},
+    {"back", "std:xudu/back"},
+    {"new-doc", "std:xudu/new_doc"},
+    {"forward", "std:xudu/forward"},
+    {"open-doc", "std:xudu/open_doc"},
+    {"close-doc", "std:xudu/close_doc"},
+    {"onion-skin", "std:xudu/onion_skin"},
+    {"pouch-toggle", "std:xudu/pouch_toggle"},
+    {"pouch-toggle-f2", "std:xudu/pouch_toggle_f2"},
+    {"telescope-toggle", "std:xudu/telescope_toggle"},
+    {"telescope-toggle-f3", "std:xudu/telescope_toggle_f3"},
+    {"tension-physics-toggle", "std:xudu/tension_physics_toggle"},
+    {"unlock-transcopyright", "std:xudu/unlock_transcopyright"},
+    {"unlock-transcopyright-f5", "std:xudu/unlock_transcopyright_f5"},
+    {"unlock-transcopyright-ctrl-u", "std:xudu/unlock_transcopyright_ctrl_u"},
+    {"scrub-forward", "std:xudu/scrub_forward"},
+    {"scrub-backward", "std:xudu/scrub_backward"},
+    {"transclude", "std:xudu/transclude"},
+    {"xanalink", "std:xudu/xanalink"},
+    {"cancel-link", "std:xudu/cancel_link"},
+    {"beams", "std:xudu/beams"},
+    {"sworph", "std:xudu/sworph"},
+    {"publish", "std:xudu/publish"},
+    {"history", "std:xudu/history"},
+    {"delete", "std:xudu/delete"},
+    {"page-break", "std:xudu/page_break"},
+    {"hypertime-map", "std:xudu/hypertime_map"},
+    {"map", "std:xudu/map"},
+    {"scrub-back", "std:xudu/scrub_back"},
+    {"radial-menu", "std:xudu/radial_menu"},
+
+    // Zigzag Visualizer & Pure Vortex Actions
+    {"view-mode-content-1", "std:ui/view_mode_content_1"},
+    {"view-mode-content-v", "std:ui/view_mode_content_v"},
+    {"view-mode-topology", "std:ui/view_mode_topology"},
+    {"view-mode-topology-t", "std:ui/view_mode_topology_t"},
+    {"bundle-execution", "std:ui/bundle_execution"},
+    {"bundle-scope", "std:ui/bundle_scope"},
+    {"bundle-contract", "std:ui/bundle_contract"},
+    {"bundle-logic", "std:ui/bundle_logic"},
+    {"bundle-stdlib", "std:ui/bundle_stdlib"},
+    {"bundle-cycle", "std:ui/bundle_cycle"},
+    {"toggle-palette", "std:ui/toggle_palette"},
+    {"vql-translate-attach", "std:ui/vql_translate_attach"},
+    {"toggle-command-bar", "std:ui/toggle_command_bar"},
+    {"open-command-bar-slash", "std:ui/open_command_bar_slash"},
+    {"open-command-bar-colon", "std:ui/open_command_bar_colon"},
+    {"confirm-action", "std:ui/confirm_action"},
+    {"dismiss-overlay", "std:ui/dismiss_overlay"},
+    {"step-x-pos", "std:nav/step_x_pos"},
+    {"step-x-neg", "std:nav/step_x_neg"},
+    {"step-y-pos", "std:nav/step_y_pos"},
+    {"step-y-neg", "std:nav/step_y_neg"},
+    {"step-z-pos", "std:nav/step_z_pos"},
+    {"step-z-neg", "std:nav/step_z_neg"},
+    {"swap-xy", "std:ui/swap_axes"},
+    {"cycle-dims-forward", "std:ui/cycle_dims_forward"},
+    {"cycle-dims-backward", "std:ui/cycle_dims_backward"},
+    {"jump-home", "std:nav/jump_home"},
+    {"hop-head", "std:nav/hop_head"},
+    {"hop-tail", "std:nav/hop_tail"},
+    {"duplicate-focus-cell", "std:zigzag/duplicate"},
+    {"rasterize-print", "std:zigzag/rasterize_print"},
+    {"export-link-package", "std:zigzag/export_link_package"},
+    {"insert-cell-x-pos", "std:zigzag/insert_cell_x_pos"},
+    {"insert-cell-x-neg", "std:zigzag/insert_cell_x_neg"},
+    {"insert-cell-y-pos", "std:zigzag/insert_cell_y_pos"},
+    {"insert-cell-y-neg", "std:zigzag/insert_cell_y_neg"},
+    {"unlink-x-pos", "std:zigzag/unlink_x_pos"},
+    {"unlink-x-neg", "std:zigzag/unlink_x_neg"},
+    {"delete-focus-cell", "std:zigzag/delete_focus_cell"},
+    {"delete-focus-cell-bksp", "std:zigzag/delete_focus_cell_bksp"},
+    {"save-store", "std:zigzag/save_store"},
+
+    // Xuzz Zigzag Presentation Actions
+    {"zigzag-toggle-palette", "std:ui/zigzag_toggle_palette"},
+    {"zigzag-vql-translate-attach", "std:ui/zigzag_vql_translate_attach"},
+    {"zigzag-toggle-command-bar", "std:ui/zigzag_toggle_command_bar"},
+    {"zigzag-open-command-bar-slash", "std:ui/zigzag_open_command_bar_slash"},
+    {"zigzag-open-command-bar-colon", "std:ui/zigzag_open_command_bar_colon"},
+    {"zigzag-view-mode-content", "std:ui/zigzag_view_mode_content"},
+    {"zigzag-view-mode-topology", "std:ui/zigzag_view_mode_topology"},
+    {"zigzag-bundle-execution", "std:ui/zigzag_bundle_execution"},
+    {"zigzag-bundle-scope", "std:ui/zigzag_bundle_scope"},
+    {"zigzag-bundle-contract", "std:ui/zigzag_bundle_contract"},
+    {"zigzag-bundle-logic", "std:ui/zigzag_bundle_logic"},
+    {"zigzag-bundle-stdlib", "std:ui/zigzag_bundle_stdlib"},
+    {"zigzag-bundle-cycle", "std:ui/zigzag_bundle_cycle"},
+    {"zigzag-swap-xy", "std:ui/zigzag_swap_xy"},
+    {"zigzag-cycle-dims-forward", "std:ui/zigzag_cycle_dims_forward"},
+    {"zigzag-cycle-dims-backward", "std:ui/zigzag_cycle_dims_backward"},
+    {"zigzag-jump-home", "std:nav/zigzag_jump_home"},
+    {"zigzag-hop-head", "std:nav/zigzag_hop_head"},
+    {"zigzag-hop-tail", "std:nav/zigzag_hop_tail"},
+    {"zigzag-duplicate-cell", "std:zigzag/zigzag_duplicate_cell"},
+    {"zigzag-save-store", "std:zigzag/zigzag_save_store"},
+    {"zigzag-step-x-pos", "std:nav/zigzag_step_x_pos"},
+    {"zigzag-step-x-neg", "std:nav/zigzag_step_x_neg"},
+    {"zigzag-step-y-pos", "std:nav/zigzag_step_y_pos"},
+    {"zigzag-step-y-neg", "std:nav/zigzag_step_y_neg"},
+    {"zigzag-step-z-pos", "std:nav/zigzag_step_z_pos"},
+    {"zigzag-step-z-neg", "std:nav/zigzag_step_z_neg"},
+};
+} // namespace
+
+std::string_view canonicalKeymapAction(const std::string_view action) {
+  for (const auto &alias : kActionAliases) {
+    if (alias.legacy == action) {
+      return alias.canonical;
+    }
+  }
+  return action;
+}
+
+std::string_view legacyKeymapAction(const std::string_view action) {
+  for (const auto &alias : kActionAliases) {
+    if (alias.canonical == action) {
+      return alias.legacy;
+    }
+  }
+  return action;
+}
+
+std::optional<std::string>
+KeymapConfig::bindingFor(const std::string_view action) const {
+  const auto canon  = canonicalKeymapAction(action);
+  const auto legacy = legacyKeymapAction(action);
+  for (const auto &[act, key] : bindings) {
+    if (act == action || act == canon || act == legacy) {
+      return key;
+    }
+  }
+  return std::nullopt;
+}
 
 KeymapConfig KeymapConfig::fromStore(const Store &store) {
   KeymapConfig cfg;

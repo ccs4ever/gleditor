@@ -519,6 +519,13 @@ TEST(SystemDocsTest, StoreExclusiveConfigLoaders) {
   const auto kmCfg = KeymapConfig::fromStore(kmStore);
   EXPECT_FALSE(kmCfg.bindings.empty());
   EXPECT_EQ(kmCfg.bindingFor("new-doc"), "Ctrl+N");
+  EXPECT_EQ(kmCfg.bindingFor(xudu::settings::kKeymapNewDoc), "Ctrl+N");
+  EXPECT_EQ(kmCfg.bindingFor("std:xudu/new_doc"), "Ctrl+N");
+  EXPECT_EQ(xudu::canonicalKeymapAction("new-doc"), "std:xudu/new_doc");
+  EXPECT_EQ(xudu::legacyKeymapAction("std:xudu/new_doc"), "new-doc");
+  EXPECT_EQ(xudu::canonicalKeymapAction("std:xudu/new_doc"),
+            "std:xudu/new_doc");
+  EXPECT_EQ(xudu::legacyKeymapAction("new-doc"), "new-doc");
 
   Store setStore;
   xudu::initializeSystemStore(setStore, SystemDocKind::Settings);
