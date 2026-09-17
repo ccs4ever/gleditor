@@ -167,10 +167,39 @@ void Canvas::addRect(const float left, const float bottom, const float width,
 void Canvas::addLine(const float fromX, const float fromY, const float toX,
                      const float toY, const float thickness,
                      const std::uint32_t colour) {
-  const auto minX  = std::min(fromX, toX);
-  const auto minY  = std::min(fromY, toY);
-  const auto spanX = std::abs(toX - fromX);
-  const auto spanY = std::abs(toY - fromY);
+  // A horizontal or vertical line's shared coordinate is meant to land as a
+  // crisp band of `thickness` device pixels, both of whose edges (centre +/-
+  // thickness/2) fall on exact pixel boundaries. Left as given, a
+  // caller-computed value that happens to put one edge on a boundary but not
+  // the other (as height - barHeight and similar UI layout arithmetic
+  // routinely produce -- an exact-integer centre with odd/whole thickness is
+  // the common case) makes the band straddle an extra row/column half in
+  // each -- an ambiguous split that different rasterisers (or even the same
+  // one under different multisample settings) are free to resolve
+  // differently, which is what made compare-backends.sh's opengl-vs-vulkan
+  // frames disagree on UI chrome despite drawing pixel-identical document
+  // content. Snapping the low edge to the nearest integer removes the
+  // ambiguity at the source, for any whole or half-integer thickness (1px,
+  // 1.5px, 2px, ...): the band then lands unambiguously on every backend,
+  // nudged by less than a pixel from what the caller asked for. Only
+  // axis-aligned segments are snapped -- radial_menu's angled borders have
+  // extent on both axes and are left exactly as given, since "nearest pixel
+  // boundary" has no well-defined meaning for a diagonal line.
+  auto snappedFromX = fromX;
+  auto snappedFromY = fromY;
+  auto snappedToX   = toX;
+  auto snappedToY   = toY;
+  const float halfThickness = thickness * 0.5F;
+  if (fromY == toY) {
+    snappedFromY = snappedToY = std::round(fromY - halfThickness) + halfThickness;
+  } else if (fromX == toX) {
+    snappedFromX = snappedToX = std::round(fromX - halfThickness) + halfThickness;
+  }
+
+  const auto minX  = std::min(snappedFromX, snappedToX);
+  const auto minY  = std::min(snappedFromY, snappedToY);
+  const auto spanX = std::abs(snappedToX - snappedFromX);
+  const auto spanY = std::abs(snappedToY - snappedFromY);
   // A segment with no extent in one axis is exactly a thin rectangle; one with
   // extent in both is covered by its bounding box, which is the closest an
   // axis-aligned quad gets.

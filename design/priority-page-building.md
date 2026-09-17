@@ -515,18 +515,32 @@ it.
 **Verified**: the full `gleditor_test` (514/514, the two new tests above included)/`xudu_test`
 (944/944, excluding the pre-existing unrelated `AnimationTransclusionTest` hang)/`zigzag_test`
 (90/90) suites pass, and `compare-backends.sh`'s `opengl`/`opengles` frames stay byte-identical --
-the hard requirement per "Determinism is a hard constraint" above. Vulkan still shows the same
-pre-existing ~1.4% mismatch against `opengl` this plan has seen at every prior stage; earlier notes
-in this repo attributed that to stale `image.vert/frag.spv` (now fixed in the Makefile -- `SPIRV` is
-derived from `$(wildcard assets/shaders/*.glsl)` rather than a hand-maintained list that had silently
-stopped including them), but rebuilding fresh SPIR-V and rerunning left the exact same byte counts:
-`quick_brown_fox.txt` (the default `compare-backends.sh` sample) draws no images at all, so that bug,
-real as it was, was never this one. Diffing the two frames pixel-by-pixel instead shows the mismatch
-concentrated in a handful of thin, edge-aligned horizontal bars landing on a different scanline
-between the two rasterisers by exactly one pixel row (not a uniform shift -- most of the frame is
-byte-identical) -- a genuine small Vulkan/OpenGL rasterisation rounding difference, still
-undiagnosed and unrelated to this plan's Stage 5 work. A manual `kjv.txt` run (4.4 MB, 1261 pages)
-with `--profile`:
+the hard requirement per "Determinism is a hard constraint" above.
+
+`compare-backends.sh`'s Vulkan-vs-OpenGL comparison, unrelated to Stage 5 but chased down and fixed
+in the same pass since it had been failing (~1.4% against a 1% tolerance) at every prior stage: not
+stale `image.vert/frag.spv` (a real bug, since fixed -- the Makefile's `SPIRV` is now derived from
+`$(wildcard assets/shaders/*.glsl)` rather than a hand-maintained list that had silently stopped
+including them -- but `quick_brown_fox.txt`, the default sample, draws no images, so rebuilding fresh
+SPIR-V left the mismatch unchanged). Diffing the frames pixel-by-pixel and viewing the results showed
+UI chrome -- `DocumentSwitcher`'s tab-bar border, not document text -- rendering a pixel taller/shorter
+between backends. `Canvas::addLine()` (`src/canvas.cpp`) built a thin line's quad directly from its
+caller's coordinates; layout arithmetic like `height - barHeight` routinely lands exactly on an
+integer, which puts a 1px line's edges at `N-0.5`/`N+0.5` -- straddling two pixel rows/columns evenly,
+an ambiguous split llvmpipe (GL/GLES here, forced software by this project's own headless convention)
+and RADV (Vulkan, the only ICD available in this environment, real/virtual AMD hardware -- an entirely
+different rasteriser, not just a different API over the same one) are free to resolve differently.
+`addLine()` now snaps an axis-aligned segment's shared coordinate so both edges land on exact pixel
+boundaries (`round(centre - thickness/2) + thickness/2`, which fixes 1px and 2px UI lines alike and
+leaves radial_menu's angled borders, which are never axis-aligned, untouched). Dropped the mismatch
+from 1.4852% (max delta 172) to 0.5756% (max delta 69) -- comfortably under the 1% limit, and the
+residual is the ordinary antialiasing variance the tolerance exists for. Getting past that first
+failure for the first time also reached a stage of `compare-backends.sh` this plan had never actually
+exercised before: growing the Vulkan glyph atlas past 256x256 crashes deterministically with a RADV
+`context is lost` GPU error on this machine, reproduced on every retry. Genuine and unrelated to
+Stage 5 or to the fixes above -- filed as its own issue rather than chased down here.
+
+A manual `kjv.txt` run (4.4 MB, 1261 pages) with `--profile`:
 
 ```text
 [TIMING] First page rendered: 353.78 ms (docs in render: 1)
