@@ -648,3 +648,143 @@ TEST(ZigzagVisualizerTest, PresentationOriginKeepsTheHostDocumentClear) {
   ASSERT_TRUE(anchor.has_value());
   EXPECT_FLOAT_EQ(anchor->position.x, 420.0F);
 }
+
+TEST(ZigzagVisualizerTest, DimensionBundleSwitchingAndCycling) {
+  ZigzagVisualizer viz("Sans 12");
+  EXPECT_EQ(viz.dimensionBundle(), ZigzagVisualizer::DimensionBundle::Custom);
+
+  // Switch to Execution bundle
+  viz.setDimensionBundle(ZigzagVisualizer::DimensionBundle::Execution);
+  EXPECT_EQ(viz.dimensionBundle(),
+            ZigzagVisualizer::DimensionBundle::Execution);
+  EXPECT_EQ(viz.currentView().x_dimension, "d.spin");
+  EXPECT_EQ(viz.currentView().y_dimension, "d.step");
+  EXPECT_EQ(viz.currentView().z_dimension, "d.branch");
+
+  // Cycle forward to Scope
+  viz.cycleDimensionBundle(true);
+  EXPECT_EQ(viz.dimensionBundle(), ZigzagVisualizer::DimensionBundle::Scope);
+  EXPECT_EQ(viz.currentView().x_dimension, "d.lexical");
+  EXPECT_EQ(viz.currentView().y_dimension, "d.dynamic");
+  EXPECT_EQ(viz.currentView().z_dimension, "d.env");
+
+  // Cycle forward to Contract
+  viz.cycleDimensionBundle(true);
+  EXPECT_EQ(viz.dimensionBundle(), ZigzagVisualizer::DimensionBundle::Contract);
+  EXPECT_EQ(viz.currentView().x_dimension, "d.require");
+  EXPECT_EQ(viz.currentView().y_dimension, "d.ensure");
+  EXPECT_EQ(viz.currentView().z_dimension, "d.invariant");
+
+  // Cycle forward to Logic
+  viz.cycleDimensionBundle(true);
+  EXPECT_EQ(viz.dimensionBundle(), ZigzagVisualizer::DimensionBundle::Logic);
+  EXPECT_EQ(viz.currentView().x_dimension, "d.clause");
+  EXPECT_EQ(viz.currentView().y_dimension, "d.predicate");
+  EXPECT_EQ(viz.currentView().z_dimension, "d.var");
+
+  // Cycle forward to Stdlib
+  viz.cycleDimensionBundle(true);
+  EXPECT_EQ(viz.dimensionBundle(), ZigzagVisualizer::DimensionBundle::Stdlib);
+  EXPECT_EQ(viz.currentView().x_dimension, "d.stdlib");
+  EXPECT_EQ(viz.currentView().y_dimension, "d.symbol");
+  EXPECT_EQ(viz.currentView().z_dimension, "d.version");
+
+  // Manual swap sets bundle back to Custom
+  viz.swapDimensions(0, 1);
+  EXPECT_EQ(viz.dimensionBundle(), ZigzagVisualizer::DimensionBundle::Custom);
+  EXPECT_EQ(viz.currentView().x_dimension, "d.symbol");
+  EXPECT_EQ(viz.currentView().y_dimension, "d.stdlib");
+}
+
+TEST(ZigzagVisualizerTest, OpcodeAndLibraryPaletteHUD) {
+  ZigzagVisualizer viz("Sans 12");
+  EXPECT_FALSE(viz.isPaletteVisible());
+
+  // Toggle palette visibility
+  viz.togglePalette();
+  EXPECT_TRUE(viz.isPaletteVisible());
+  EXPECT_EQ(viz.paletteSelectedIndex(), 0U);
+
+  // Palette contains Vortex opcodes and stdlib items
+  const auto items = viz.paletteItems();
+  EXPECT_FALSE(items.empty());
+  EXPECT_EQ(items[0], "#LINK");
+
+  // Navigation
+  viz.paletteNext();
+  EXPECT_EQ(viz.paletteSelectedIndex(), 1U);
+  viz.palettePrev();
+  EXPECT_EQ(viz.paletteSelectedIndex(), 0U);
+
+  // Clone selected opcode into chain
+  const auto beforeOpCount = viz.operationCount();
+  const bool cloned        = viz.paletteCloneSelectedToFocus();
+  EXPECT_TRUE(cloned);
+  EXPECT_GT(viz.operationCount(), beforeOpCount);
+
+  // Close palette
+  viz.setPaletteVisible(false);
+  EXPECT_FALSE(viz.isPaletteVisible());
+}
+
+TEST(ZigzagVisualizerTest, ActionDispatchingRoutesCorrectly) {
+  ZigzagVisualizer viz("Sans 12");
+  const auto root = viz.focusCellId();
+  ASSERT_NE(root, 0U);
+
+  // Step action
+  bool handled = viz.dispatchAction("step-x-pos");
+  EXPECT_TRUE(handled);
+
+  // Insert connected cell
+  const auto beforeCount = viz.operationCount();
+  handled                = viz.dispatchAction("insert-cell-x-pos");
+  EXPECT_TRUE(handled);
+  EXPECT_GT(viz.operationCount(), beforeCount);
+}
+
+TEST(ZigzagVisualizerTest, TranslateVQLAndAttachToFocus) {
+  ZigzagVisualizer viz("Sans 12");
+  const auto originalFocus = viz.focusCellId();
+  ASSERT_NE(originalFocus, 0U);
+
+  const auto beforeOpCount = viz.operationCount();
+  const bool attached =
+      viz.translateVQLAndAttachToFocus("/d.1/d.2", "d.spin", false);
+  EXPECT_TRUE(attached);
+  EXPECT_GT(viz.operationCount(), beforeOpCount);
+
+  // Focus should have moved to the entry opcode of the compiled query
+  const auto newFocus = viz.focusCellId();
+  EXPECT_NE(newFocus, originalFocus);
+
+  // The entry opcode cell text should be an opcode mnemonic (e.g. #RESOLVE,
+  // #LINK, etc.)
+  ASSERT_NE(viz.engine(), nullptr);
+  const auto text =
+      viz.engine()->resolveCellText(static_cast<CellRef>(newFocus));
+  EXPECT_FALSE(text.empty());
+
+  // Non-mutating compilation should also work
+  const auto check = viz.compileVQL("/d.1/d.2");
+  EXPECT_TRUE(check.success);
+  EXPECT_FALSE(check.disassembly.empty());
+}
+
+TEST(ZigzagVisualizerTest, PaletteVQLTranslationMode) {
+  ZigzagVisualizer viz("Sans 12");
+  viz.togglePalette();
+  EXPECT_TRUE(viz.isPaletteVisible());
+
+  // Set filter to a VQL expression
+  viz.setPaletteFilter("/d.1/d.2");
+  const auto items = viz.paletteItems();
+  ASSERT_FALSE(items.empty());
+  EXPECT_EQ(items[0], "VQL: /d.1/d.2");
+
+  // Clones / compiles the VQL expression to focus
+  const auto beforeOps  = viz.operationCount();
+  const bool translated = viz.paletteCloneSelectedToFocus();
+  EXPECT_TRUE(translated);
+  EXPECT_GT(viz.operationCount(), beforeOps);
+}

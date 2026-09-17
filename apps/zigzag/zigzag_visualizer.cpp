@@ -228,6 +228,7 @@ void ZigzagVisualizer::adoptDocument(
     cell.current_pos   = cell.target_pos;
     cell.current_alpha = cell.target_alpha;
   }
+  ensureVortexHost();
   invalidateAccessibility();
 }
 
@@ -258,6 +259,7 @@ void ZigzagVisualizer::bindXuduStore(xanadu::Store &store,
     cell.current_pos   = cell.target_pos;
     cell.current_alpha = cell.target_alpha;
   }
+  ensureVortexHost();
   invalidateAccessibility();
 }
 
@@ -693,6 +695,140 @@ ZigzagVisualizer::dimensionVisual(const DimID &dimension) const {
         .label   = "Media",
     };
   }
+  // Standard Vortex Dimensions
+  if (dimension == "d.spin") {
+    return DimensionVisual{
+        .color   = glm::vec3{0.2F, 0.85F, 0.85F},
+        .spacing = 180.0F,
+        .label   = "Spin",
+    };
+  }
+  if (dimension == "d.step") {
+    return DimensionVisual{
+        .color   = glm::vec3{0.3F, 0.6F, 0.95F},
+        .spacing = 180.0F,
+        .label   = "Step",
+    };
+  }
+  if (dimension == "d.branch") {
+    return DimensionVisual{
+        .color   = glm::vec3{0.7F, 0.4F, 0.9F},
+        .spacing = 180.0F,
+        .label   = "Branch",
+    };
+  }
+  if (dimension == "d.lexical") {
+    return DimensionVisual{
+        .color   = glm::vec3{0.95F, 0.55F, 0.2F},
+        .spacing = 180.0F,
+        .label   = "Lexical",
+    };
+  }
+  if (dimension == "d.dynamic") {
+    return DimensionVisual{
+        .color   = glm::vec3{0.9F, 0.7F, 0.2F},
+        .spacing = 180.0F,
+        .label   = "Dynamic",
+    };
+  }
+  if (dimension == "d.env") {
+    return DimensionVisual{
+        .color   = glm::vec3{0.85F, 0.85F, 0.2F},
+        .spacing = 180.0F,
+        .label   = "Env",
+    };
+  }
+  if (dimension == "d.require") {
+    return DimensionVisual{
+        .color   = glm::vec3{0.2F, 0.85F, 0.4F},
+        .spacing = 180.0F,
+        .label   = "Require",
+    };
+  }
+  if (dimension == "d.ensure") {
+    return DimensionVisual{
+        .color   = glm::vec3{0.1F, 0.75F, 0.5F},
+        .spacing = 180.0F,
+        .label   = "Ensure",
+    };
+  }
+  if (dimension == "d.invariant") {
+    return DimensionVisual{
+        .color   = glm::vec3{0.3F, 0.9F, 0.6F},
+        .spacing = 180.0F,
+        .label   = "Invariant",
+    };
+  }
+  if (dimension == "d.clause") {
+    return DimensionVisual{
+        .color   = glm::vec3{0.9F, 0.3F, 0.6F},
+        .spacing = 180.0F,
+        .label   = "Clause",
+    };
+  }
+  if (dimension == "d.predicate") {
+    return DimensionVisual{
+        .color   = glm::vec3{0.95F, 0.4F, 0.5F},
+        .spacing = 180.0F,
+        .label   = "Predicate",
+    };
+  }
+  if (dimension == "d.var") {
+    return DimensionVisual{
+        .color   = glm::vec3{0.75F, 0.4F, 0.85F},
+        .spacing = 180.0F,
+        .label   = "Var",
+    };
+  }
+  if (dimension == "d.stdlib") {
+    return DimensionVisual{
+        .color   = glm::vec3{0.4F, 0.5F, 0.95F},
+        .spacing = 180.0F,
+        .label   = "Stdlib",
+    };
+  }
+  if (dimension == "d.symbol") {
+    return DimensionVisual{
+        .color   = glm::vec3{0.3F, 0.75F, 0.95F},
+        .spacing = 180.0F,
+        .label   = "Symbol",
+    };
+  }
+  if (dimension == "d.version") {
+    return DimensionVisual{
+        .color   = glm::vec3{0.6F, 0.6F, 0.7F},
+        .spacing = 180.0F,
+        .label   = "Version",
+    };
+  }
+  if (dimension == "d.grab") {
+    return DimensionVisual{
+        .color   = glm::vec3{0.92F, 0.40F, 0.70F},
+        .spacing = 180.0F,
+        .label   = "Grab (Wings)",
+    };
+  }
+  if (dimension == "d.vars") {
+    return DimensionVisual{
+        .color   = glm::vec3{0.25F, 0.75F, 0.85F},
+        .spacing = 180.0F,
+        .label   = "Vars (Scope)",
+    };
+  }
+  if (dimension == "d.values") {
+    return DimensionVisual{
+        .color   = glm::vec3{0.95F, 0.78F, 0.25F},
+        .spacing = 180.0F,
+        .label   = "Values (Payload)",
+    };
+  }
+  if (dimension == "d.cache") {
+    return DimensionVisual{
+        .color   = glm::vec3{0.70F, 0.80F, 0.88F},
+        .spacing = 180.0F,
+        .label   = "Cache (Memo)",
+    };
+  }
   return DimensionVisual{
       .color   = glm::vec3{0.7F, 0.7F, 0.75F},
       .spacing = 200.0F,
@@ -1062,6 +1198,7 @@ void ZigzagVisualizer::swapDimensions(const int axis1, const int axis2) {
                                  &current_view_.z_dimension};
   if (axis1 >= 0 && axis1 < 3 && axis2 >= 0 && axis2 < 3 && axis1 != axis2) {
     std::swap(*dims[axis1], *dims[axis2]);
+    dimension_bundle_ = DimensionBundle::Custom;
     rebuildActiveViewTopology();
     invalidateAccessibility();
   }
@@ -1079,6 +1216,7 @@ void ZigzagVisualizer::cycleDimensions(const bool forward) {
     current_view_.y_dimension = current_view_.x_dimension;
     current_view_.x_dimension = tmp;
   }
+  dimension_bundle_ = DimensionBundle::Custom;
   rebuildActiveViewTopology();
   invalidateAccessibility();
 }
@@ -1114,6 +1252,10 @@ void ZigzagVisualizer::drawFrame(gleditor::FrameContext &ctx) {
       presentation_origin_ = *origin;
       invalidateAccessibility();
     }
+  }
+
+  if (vortex_host_) {
+    vortex_host_->stepScheduler(100);
   }
 
   const auto now = std::chrono::steady_clock::now();
@@ -1444,10 +1586,22 @@ void ZigzagVisualizer::drawFrame(gleditor::FrameContext &ctx) {
                           presentation_config_.hudColumnGapPx,
                       structureTop, modeLabel, 0xF59E0BFFU, 0x0D0D12DDU);
 
+  // Dimension Bundle Indicator
+  const std::string bundleLabel = std::format(
+      "[ Bundle: {} (Ctrl+1..5) ]", dimensionBundleName(dimension_bundle_));
+  const auto bundleMetrics = hudCanvas_->measureText(bundleLabel);
+  hudCanvas_->addText(ctx.state,
+                      width - dimsMetrics.width - modeMetrics.width -
+                          bundleMetrics.width -
+                          presentation_config_.hudHorizontalPaddingPx -
+                          (2.0F * presentation_config_.hudColumnGapPx),
+                      structureTop, bundleLabel, 0x38BDF8FFU, 0x0D0D12DDU);
+
   // Bottom Command Key Hints
   const std::string hints =
       "Arrows: Step X/Y | PgUp/PgDn: Step Z | Space: Swap X/Y | Tab: Cycle | "
-      "N/D: Insert | U: Unlink | Del: Delete | R: Reset View";
+      "N/D: Insert | U: Unlink | Del: Delete | F4: Palette | Ctrl+1..5: "
+      "Bundles";
   const auto hintsMetrics = hudCanvas_->measureText(hints);
   const float bottomBarHeight =
       hintsMetrics.height + (2.0F * presentation_config_.hudVerticalPaddingPx);
@@ -1458,6 +1612,76 @@ void ZigzagVisualizer::drawFrame(gleditor::FrameContext &ctx) {
                       bottomBarHeight -
                           presentation_config_.hudVerticalPaddingPx,
                       hints, 0x888899FFU, 0x0D0D12DDU);
+
+  // Palette HUD Overlay
+  if (paletteVisible_) {
+    const auto items      = paletteItems();
+    const float palWidth  = std::min(520.0F, width - 40.0F);
+    const float palHeight = std::min(360.0F, height - 120.0F);
+    const float palX      = (width - palWidth) * 0.5F;
+    const float palY      = (height - palHeight) * 0.5F;
+
+    // Palette background & border
+    hudCanvas_->addRect(palX, palY, palWidth, palHeight, 0x141624F0U);
+    hudCanvas_->addLine(palX, palY, palX + palWidth, palY, 1.5F, 0x475569FFU);
+    hudCanvas_->addLine(palX, palY + palHeight, palX + palWidth,
+                        palY + palHeight, 1.5F, 0x475569FFU);
+    hudCanvas_->addLine(palX, palY, palX, palY + palHeight, 1.5F, 0x475569FFU);
+    hudCanvas_->addLine(palX + palWidth, palY, palX + palWidth,
+                        palY + palHeight, 1.5F, 0x475569FFU);
+
+    // Title bar
+    const std::string palTitle = "Vortex Opcode & Library Palette [F4 / Esc]";
+    const float titleTop       = palY + palHeight - 14.0F;
+    hudCanvas_->addText(ctx.state, palX + 16.0F, titleTop, palTitle,
+                        0xF59E0BFFU, 0x141624F0U);
+    hudCanvas_->addLine(palX, palY + palHeight - 32.0F, palX + palWidth,
+                        palY + palHeight - 32.0F, 1.0F, 0x334155FFU);
+
+    // Items list
+    const int maxVisible = 8;
+    const int total      = static_cast<int>(items.size());
+    int startIdx         = 0;
+    if (total > maxVisible) {
+      startIdx =
+          std::clamp(static_cast<int>(paletteSelectedIndex_) - (maxVisible / 2),
+                     0, total - maxVisible);
+    }
+    const int endIdx = std::min(total, startIdx + maxVisible);
+
+    const float itemLineHeight = 28.0F;
+    float currentY             = palY + palHeight - 64.0F;
+    for (int i = startIdx; i < endIdx; ++i) {
+      const bool isSelected =
+          (static_cast<std::size_t>(i) == paletteSelectedIndex_);
+      if (isSelected) {
+        hudCanvas_->addRect(palX + 8.0F, currentY - 6.0F, palWidth - 16.0F,
+                            itemLineHeight, 0x1E3A8ABBU);
+      }
+      const auto &item = items[static_cast<std::size_t>(i)];
+      std::uint32_t fg = 0xE2E8F0FFU;
+      if (item.starts_with("#")) {
+        fg = 0xFBBF24FFU; // gold for opcodes
+      } else if (item.starts_with("std:zigzag")) {
+        fg = 0x38BDF8FFU; // sky blue for zigzag stdlib
+      } else if (item.starts_with("std:gc")) {
+        fg = 0x34D399FFU; // emerald for gc stdlib
+      } else if (item.starts_with("VQL: ")) {
+        fg = 0xC084FCFFU; // lavender for VQL compilation
+      }
+      const std::string label = (isSelected ? " > " : "   ") + item;
+      hudCanvas_->addText(ctx.state, palX + 12.0F, currentY + 14.0F, label, fg,
+                          0x00000000U);
+      currentY -= itemLineHeight;
+    }
+
+    // Bottom prompt
+    const std::string palHelp =
+        "Up/Down: Navigate | Enter: Clone / Compile VQL | F5: Translate VQL | "
+        "Esc: Close";
+    hudCanvas_->addText(ctx.state, palX + 16.0F, palY + 24.0F, palHelp,
+                        0x94A3B8FFU, 0x141624F0U);
+  }
 
   hudCanvas_->commit();
   const glm::mat4 ortho = glm::ortho(0.0F, width, 0.0F, height, -1.0F, 1.0F);
@@ -1593,6 +1817,497 @@ ZigzagVisualizer::cellAnchor(const CellRef cell) const {
       .lineHeight = layout.labelLineHeight * yScale,
       .normal     = glm::vec3(0.0F, 0.0F, 1.0F),
   };
+}
+
+void ZigzagVisualizer::setDimensionBundle(DimensionBundle bundle) {
+  dimension_bundle_ = bundle;
+  if (bundle != DimensionBundle::Custom) {
+    current_view_ = dimensionBundleAxes(bundle);
+    if (engine_) {
+      for (const auto &dName :
+           {current_view_.x_dimension, current_view_.y_dimension,
+            current_view_.z_dimension}) {
+        if (!dName.empty()) {
+          static_cast<void>(engine_->dimensionFor(dName));
+        }
+      }
+    }
+    refreshCellLayouts();
+    rebuildActiveViewTopology();
+    invalidateAccessibility();
+  }
+}
+
+void ZigzagVisualizer::cycleDimensionBundle(const bool forward) {
+  auto current = static_cast<int>(dimension_bundle_);
+  if (forward) {
+    current = (current >= 5) ? 1 : current + 1;
+  } else {
+    current = (current <= 1) ? 5 : current - 1;
+  }
+  setDimensionBundle(static_cast<DimensionBundle>(current));
+}
+
+std::string ZigzagVisualizer::dimensionBundleName(DimensionBundle bundle) {
+  switch (bundle) {
+  case DimensionBundle::Custom:
+    return "Custom";
+  case DimensionBundle::Execution:
+    return "Execution";
+  case DimensionBundle::Scope:
+    return "Scope";
+  case DimensionBundle::Contract:
+    return "Contract";
+  case DimensionBundle::Logic:
+    return "Logic";
+  case DimensionBundle::Stdlib:
+    return "Stdlib";
+  }
+  return "Custom";
+}
+
+ViewAxisBinding ZigzagVisualizer::dimensionBundleAxes(DimensionBundle bundle) {
+  switch (bundle) {
+  case DimensionBundle::Execution:
+    return ViewAxisBinding{
+        .x_dimension = "d.spin",
+        .y_dimension = "d.step",
+        .z_dimension = "d.branch",
+    };
+  case DimensionBundle::Scope:
+    return ViewAxisBinding{
+        .x_dimension = "d.lexical",
+        .y_dimension = "d.dynamic",
+        .z_dimension = "d.env",
+    };
+  case DimensionBundle::Contract:
+    return ViewAxisBinding{
+        .x_dimension = "d.require",
+        .y_dimension = "d.ensure",
+        .z_dimension = "d.invariant",
+    };
+  case DimensionBundle::Logic:
+    return ViewAxisBinding{
+        .x_dimension = "d.clause",
+        .y_dimension = "d.predicate",
+        .z_dimension = "d.var",
+    };
+  case DimensionBundle::Stdlib:
+    return ViewAxisBinding{
+        .x_dimension = "d.stdlib",
+        .y_dimension = "d.symbol",
+        .z_dimension = "d.version",
+    };
+  case DimensionBundle::Custom:
+  default:
+    return {};
+  }
+}
+
+void ZigzagVisualizer::attachVortexHost(
+    std::shared_ptr<vortex::VortexHost> host) {
+  vortex_host_ = std::move(host);
+}
+
+std::shared_ptr<vortex::VortexHost> ZigzagVisualizer::vortexHost() noexcept {
+  if (!vortex_host_) {
+    ensureVortexHost();
+  }
+  return vortex_host_;
+}
+
+void ZigzagVisualizer::ensureVortexHost() {
+  if (engine_) {
+    vortex_host_ = std::make_shared<vortex::VortexHost>(&engine_->manifold());
+    if (store_) {
+      vortex_host_->bindStore(store_);
+    }
+  }
+}
+
+bool ZigzagVisualizer::dispatchAction(std::string_view actionName) {
+  if (vortex_host_ && accursed_cell_focus_ != 0) {
+    if (vortex_host_->hasCustomAction(actionName)) {
+      CellRef newFocus = zigzag::noCell;
+      if (vortex_host_->dispatchAction(
+              actionName, static_cast<CellRef>(accursed_cell_focus_),
+              current_view_, newFocus)) {
+        if (newFocus != zigzag::noCell &&
+            newFocus != static_cast<CellRef>(accursed_cell_focus_)) {
+          navigateFocusTo(static_cast<CellID>(newFocus));
+        } else {
+          rebuildActiveViewTopology();
+          invalidateAccessibility();
+        }
+        return true;
+      }
+    }
+  }
+
+  // Navigation actions (leverage vortex stdlib when host is attached)
+  if (actionName == "step-x-pos") {
+    if (vortex_host_ && accursed_cell_focus_ != 0) {
+      CellRef newFocus = zigzag::noCell;
+      if (vortex_host_->dispatchAction(
+              actionName, static_cast<CellRef>(accursed_cell_focus_),
+              current_view_, newFocus)) {
+        if (newFocus != zigzag::noCell) {
+          navigateFocusTo(static_cast<CellID>(newFocus));
+          return true;
+        }
+      }
+    }
+    navigateFocus(current_view_.x_dimension, DimVector::POS);
+    return true;
+  }
+  if (actionName == "step-x-neg") {
+    if (vortex_host_ && accursed_cell_focus_ != 0) {
+      CellRef newFocus = zigzag::noCell;
+      if (vortex_host_->dispatchAction(
+              actionName, static_cast<CellRef>(accursed_cell_focus_),
+              current_view_, newFocus)) {
+        if (newFocus != zigzag::noCell) {
+          navigateFocusTo(static_cast<CellID>(newFocus));
+          return true;
+        }
+      }
+    }
+    navigateFocus(current_view_.x_dimension, DimVector::NEG);
+    return true;
+  }
+  if (actionName == "step-y-pos") {
+    if (vortex_host_ && accursed_cell_focus_ != 0) {
+      CellRef newFocus = zigzag::noCell;
+      if (vortex_host_->dispatchAction(
+              actionName, static_cast<CellRef>(accursed_cell_focus_),
+              current_view_, newFocus)) {
+        if (newFocus != zigzag::noCell) {
+          navigateFocusTo(static_cast<CellID>(newFocus));
+          return true;
+        }
+      }
+    }
+    navigateFocus(current_view_.y_dimension, DimVector::POS);
+    return true;
+  }
+  if (actionName == "step-y-neg") {
+    if (vortex_host_ && accursed_cell_focus_ != 0) {
+      CellRef newFocus = zigzag::noCell;
+      if (vortex_host_->dispatchAction(
+              actionName, static_cast<CellRef>(accursed_cell_focus_),
+              current_view_, newFocus)) {
+        if (newFocus != zigzag::noCell) {
+          navigateFocusTo(static_cast<CellID>(newFocus));
+          return true;
+        }
+      }
+    }
+    navigateFocus(current_view_.y_dimension, DimVector::NEG);
+    return true;
+  }
+  if (actionName == "step-z-pos") {
+    if (vortex_host_ && accursed_cell_focus_ != 0) {
+      CellRef newFocus = zigzag::noCell;
+      if (vortex_host_->dispatchAction(
+              actionName, static_cast<CellRef>(accursed_cell_focus_),
+              current_view_, newFocus)) {
+        if (newFocus != zigzag::noCell) {
+          navigateFocusTo(static_cast<CellID>(newFocus));
+          return true;
+        }
+      }
+    }
+    navigateFocus(current_view_.z_dimension, DimVector::POS);
+    return true;
+  }
+  if (actionName == "step-z-neg") {
+    if (vortex_host_ && accursed_cell_focus_ != 0) {
+      CellRef newFocus = zigzag::noCell;
+      if (vortex_host_->dispatchAction(
+              actionName, static_cast<CellRef>(accursed_cell_focus_),
+              current_view_, newFocus)) {
+        if (newFocus != zigzag::noCell) {
+          navigateFocusTo(static_cast<CellID>(newFocus));
+          return true;
+        }
+      }
+    }
+    navigateFocus(current_view_.z_dimension, DimVector::NEG);
+    return true;
+  }
+
+  // Visualizer document editing actions
+  if (actionName == "insert-cell-x-pos") {
+    const bool ok = insertConnectedCell("New Cell", current_view_.x_dimension,
+                                        DimVector::POS);
+    if (ok && vortex_host_) {
+      CellRef dummy = zigzag::noCell;
+      vortex_host_->dispatchAction(actionName,
+                                   static_cast<CellRef>(accursed_cell_focus_),
+                                   current_view_, dummy);
+    }
+    return ok;
+  }
+  if (actionName == "insert-cell-x-neg") {
+    const bool ok = insertConnectedCell("New Cell", current_view_.x_dimension,
+                                        DimVector::NEG);
+    if (ok && vortex_host_) {
+      CellRef dummy = zigzag::noCell;
+      vortex_host_->dispatchAction(actionName,
+                                   static_cast<CellRef>(accursed_cell_focus_),
+                                   current_view_, dummy);
+    }
+    return ok;
+  }
+  if (actionName == "insert-cell-y-pos") {
+    const bool ok = insertConnectedCell("New Cell", current_view_.y_dimension,
+                                        DimVector::POS);
+    if (ok && vortex_host_) {
+      CellRef dummy = zigzag::noCell;
+      vortex_host_->dispatchAction(actionName,
+                                   static_cast<CellRef>(accursed_cell_focus_),
+                                   current_view_, dummy);
+    }
+    return ok;
+  }
+  if (actionName == "insert-cell-y-neg") {
+    const bool ok = insertConnectedCell("New Cell", current_view_.y_dimension,
+                                        DimVector::NEG);
+    if (ok && vortex_host_) {
+      CellRef dummy = zigzag::noCell;
+      vortex_host_->dispatchAction(actionName,
+                                   static_cast<CellRef>(accursed_cell_focus_),
+                                   current_view_, dummy);
+    }
+    return ok;
+  }
+  if (actionName == "unlink-x-pos") {
+    const bool ok = unlinkFocusAlong(current_view_.x_dimension, DimVector::POS);
+    if (ok && vortex_host_) {
+      CellRef dummy = zigzag::noCell;
+      vortex_host_->dispatchAction(actionName,
+                                   static_cast<CellRef>(accursed_cell_focus_),
+                                   current_view_, dummy);
+    }
+    return ok;
+  }
+  if (actionName == "unlink-x-neg") {
+    const bool ok = unlinkFocusAlong(current_view_.x_dimension, DimVector::NEG);
+    if (ok && vortex_host_) {
+      CellRef dummy = zigzag::noCell;
+      vortex_host_->dispatchAction(actionName,
+                                   static_cast<CellRef>(accursed_cell_focus_),
+                                   current_view_, dummy);
+    }
+    return ok;
+  }
+  if (actionName == "delete-focus-cell") {
+    const bool ok = deleteFocusCell();
+    if (ok && vortex_host_) {
+      CellRef dummy = zigzag::noCell;
+      vortex_host_->dispatchAction(actionName,
+                                   static_cast<CellRef>(accursed_cell_focus_),
+                                   current_view_, dummy);
+    }
+    return ok;
+  }
+  return false;
+}
+
+void ZigzagVisualizer::togglePalette() { setPaletteVisible(!paletteVisible_); }
+
+void ZigzagVisualizer::setPaletteVisible(const bool visible) {
+  paletteVisible_ = visible;
+  if (visible) {
+    paletteSelectedIndex_ = 0;
+  }
+}
+
+void ZigzagVisualizer::paletteNext() {
+  const auto items = paletteItems();
+  if (items.empty()) {
+    paletteSelectedIndex_ = 0;
+    return;
+  }
+  paletteSelectedIndex_ = (paletteSelectedIndex_ + 1) % items.size();
+}
+
+void ZigzagVisualizer::palettePrev() {
+  const auto items = paletteItems();
+  if (items.empty()) {
+    paletteSelectedIndex_ = 0;
+    return;
+  }
+  if (paletteSelectedIndex_ == 0) {
+    paletteSelectedIndex_ = items.size() - 1;
+  } else {
+    --paletteSelectedIndex_;
+  }
+}
+
+bool ZigzagVisualizer::paletteCloneSelectedToFocus() {
+  const auto items = paletteItems();
+  if (items.empty() || paletteSelectedIndex_ >= items.size()) {
+    return false;
+  }
+  const auto &selectedItem = items[paletteSelectedIndex_];
+  if (selectedItem.starts_with("VQL: ")) {
+    return paletteTranslateVQL(selectedItem.substr(5));
+  }
+  if (vortex_host_ && accursed_cell_focus_ != 0) {
+    vortex_host_->cloneSymbolToChain(
+        selectedItem, static_cast<CellRef>(accursed_cell_focus_));
+  }
+  return insertConnectedCell(selectedItem, "d.step", DimVector::POS);
+}
+
+bool ZigzagVisualizer::paletteTranslateVQL(std::string_view query) {
+  std::string_view vql = query;
+  if (vql.empty()) {
+    vql = paletteFilter_;
+  }
+  if (vql.starts_with("vql:") || vql.starts_with("VQL:")) {
+    vql.remove_prefix(4);
+    while (!vql.empty() && std::isspace(vql.front())) {
+      vql.remove_prefix(1);
+    }
+  }
+  if (vql.empty()) {
+    return false;
+  }
+  return translateVQLAndAttachToFocus(vql, "d.spin", false);
+}
+
+bool ZigzagVisualizer::translateVQLAndAttachToFocus(std::string_view vqlQuery,
+                                                    std::string_view attachDim,
+                                                    bool spawnCursor) {
+  if (vqlQuery.empty() || accursed_cell_focus_ == 0) {
+    return false;
+  }
+  ensureVortexHost();
+  if (!vortex_host_) {
+    return false;
+  }
+
+  // Ensure standard Vortex dimensions exist in engine and store
+  if (engine_) {
+    for (const auto &dim :
+         {std::string(attachDim), std::string("d.spin"), std::string("d.step"),
+          std::string("d.grab"), std::string("d.vars"), std::string("d.values"),
+          std::string("d.branch")}) {
+      static_cast<void>(engine_->dimensionFor(dim));
+    }
+  }
+
+  const auto focusRef = static_cast<CellRef>(accursed_cell_focus_);
+  auto result = vortex_host_->compileAndAttachVQL(vqlQuery, focusRef, attachDim,
+                                                  DimVector::POS, spawnCursor);
+  if (!result.success || result.entryOpcode == zigzag::noCell) {
+    return false;
+  }
+
+  // If visualizing a persistent document backed by store and engine, promote
+  if (store_ && engine_) {
+    auto promoted = vortex_host_->promoteAndAttachToStore(
+        result.entryOpcode, focusRef, attachDim, DimVector::POS, *store_,
+        engine_->head());
+    if (promoted && !promoted->cells.empty()) {
+      engine_->syncTo(promoted->version);
+      accursed_cell_focus_ = promoted->cells.front();
+      refreshCellLayouts();
+      rebuildActiveViewTopology();
+      invalidateAccessibility();
+      return true;
+    }
+  }
+
+  // Pure in-memory / arena mode
+  accursed_cell_focus_ = result.entryOpcode;
+  refreshCellLayouts();
+  rebuildActiveViewTopology();
+  invalidateAccessibility();
+  return true;
+}
+
+xanadu::vql::CompilationResult
+ZigzagVisualizer::compileVQL(std::string_view vqlQuery) const {
+  if (!vortex_host_) {
+    const_cast<ZigzagVisualizer *>(this)->ensureVortexHost();
+  }
+  if (!vortex_host_) {
+    return xanadu::vql::CompilationResult{
+        .success          = false,
+        .entryOpcode      = zigzag::noCell,
+        .errorMessage     = "VortexHost unavailable",
+        .generatedOpcodes = {},
+        .disassembly      = {},
+    };
+  }
+  xanadu::vql::CompilationOptions options;
+  options.targetLibrary = false;
+  return vortex_host_->vqlCompiler().compile(vqlQuery, options);
+}
+
+void ZigzagVisualizer::setPaletteFilter(std::string filter) {
+  paletteFilter_        = std::move(filter);
+  paletteSelectedIndex_ = 0;
+}
+
+std::vector<std::string> ZigzagVisualizer::paletteItems() const {
+  std::vector<std::string> items = {
+      "#LINK",
+      "#VALUE",
+      "#BIND",
+      "#RESOLVE",
+      "#CALL",
+      "#RETURN",
+      "#BRANCH",
+      "std:zigzag/step",
+      "std:zigzag/insert",
+      "std:zigzag/unlink",
+      "std:zigzag/link",
+      "std:zigzag/delete",
+      "std:zigzag/clone_to_chain",
+      "std:gc/sweep",
+  };
+  if (vortex_host_) {
+    for (const auto &mod : vortex_host_->availableModules()) {
+      for (const auto &sym : vortex_host_->symbolsInModule(mod)) {
+        std::string full = mod + "/" + sym;
+        if (std::find(items.begin(), items.end(), full) == items.end()) {
+          items.push_back(full);
+        }
+      }
+    }
+  }
+  if (paletteFilter_.empty()) {
+    return items;
+  }
+
+  if (paletteFilter_.starts_with("/") || paletteFilter_.starts_with("let ") ||
+      paletteFilter_.starts_with("weave ") ||
+      paletteFilter_.starts_with("vql:") ||
+      paletteFilter_.starts_with("VQL:") || paletteFilter_.starts_with("##")) {
+    std::string vqlQuery = paletteFilter_;
+    if (vqlQuery.starts_with("vql:") || vqlQuery.starts_with("VQL:")) {
+      vqlQuery = vqlQuery.substr(4);
+      while (!vqlQuery.empty() && std::isspace(vqlQuery.front())) {
+        vqlQuery.erase(vqlQuery.begin());
+      }
+    }
+    return {"VQL: " + vqlQuery};
+  }
+
+  std::vector<std::string> filtered;
+  for (const auto &item : items) {
+    if (item.find(paletteFilter_) != std::string::npos) {
+      filtered.push_back(item);
+    }
+  }
+  if (filtered.empty() && !paletteFilter_.empty()) {
+    filtered.push_back("VQL: " + paletteFilter_);
+  }
+  return filtered;
 }
 
 } // namespace zigzag

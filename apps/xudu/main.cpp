@@ -2663,6 +2663,10 @@ int main(const int argc, char **argv) {
         xudu::LayoutConfig::fromStore(
             session->systemStore(xudu::SystemDocKind::Layout))
             .zigzag);
+    if (auto vHost = zigzagPresentation->vortexHost()) {
+      vHost->loadConfigFromStore(
+          session->systemStore(xudu::SystemDocKind::Settings));
+    }
     // Derive the structural presentation's placement from the live Xanadoc
     // page, so edits, reflow, and document motion keep the two together.
     zigzagPresentation->setPresentationTransformResolver(
@@ -2878,6 +2882,53 @@ int main(const int argc, char **argv) {
     bindCommands(app, state, views, map, links, *session, radialMenu, renderer,
                  pouchDrawer, swarmTelescope,
                  publishAs.empty() ? std::string{"document"} : publishAs);
+#ifdef XUZZ_BUILD
+    app.commands().bind(
+        SDL_SCANCODE_F6, Mod::None, "zigzag-toggle-palette",
+        "toggle Vortex opcode and library palette HUD",
+        [zigzagPresentation] { zigzagPresentation->togglePalette(); });
+    app.commands().bind(
+        SDL_SCANCODE_1, Mod::Alt, "zigzag-bundle-execution",
+        "switch to Execution dimension bundle (d.spin, d.step, d.branch)",
+        [zigzagPresentation] {
+          zigzagPresentation->setDimensionBundle(
+              zigzag::ZigzagVisualizer::DimensionBundle::Execution);
+        });
+    app.commands().bind(
+        SDL_SCANCODE_2, Mod::Alt, "zigzag-bundle-scope",
+        "switch to Scope dimension bundle (d.lexical, d.dynamic, d.env)",
+        [zigzagPresentation] {
+          zigzagPresentation->setDimensionBundle(
+              zigzag::ZigzagVisualizer::DimensionBundle::Scope);
+        });
+    app.commands().bind(
+        SDL_SCANCODE_3, Mod::Alt, "zigzag-bundle-contract",
+        "switch to Contract dimension bundle (d.require, d.ensure, "
+        "d.invariant)",
+        [zigzagPresentation] {
+          zigzagPresentation->setDimensionBundle(
+              zigzag::ZigzagVisualizer::DimensionBundle::Contract);
+        });
+    app.commands().bind(
+        SDL_SCANCODE_4, Mod::Alt, "zigzag-bundle-logic",
+        "switch to Logic dimension bundle (d.clause, d.predicate, d.var)",
+        [zigzagPresentation] {
+          zigzagPresentation->setDimensionBundle(
+              zigzag::ZigzagVisualizer::DimensionBundle::Logic);
+        });
+    app.commands().bind(
+        SDL_SCANCODE_5, Mod::Alt, "zigzag-bundle-stdlib",
+        "switch to Stdlib dimension bundle (d.stdlib, d.symbol, d.version)",
+        [zigzagPresentation] {
+          zigzagPresentation->setDimensionBundle(
+              zigzag::ZigzagVisualizer::DimensionBundle::Stdlib);
+        });
+    app.commands().bind(SDL_SCANCODE_B, Mod::Alt, "zigzag-bundle-cycle",
+                        "cycle active dimension bundle forward",
+                        [zigzagPresentation] {
+                          zigzagPresentation->cycleDimensionBundle(true);
+                        });
+#endif
     quiet || std::cout << "commands:\n" << app.commands().helpText();
 
     session->setSystemDocChangedCallback([&app, radialMenu, docSwitcher,
@@ -2907,6 +2958,11 @@ int main(const int argc, char **argv) {
         break;
       }
       case xudu::SystemDocKind::Settings: {
+#ifdef XUZZ_BUILD
+        if (auto vHost = zigzagPresentation->vortexHost()) {
+          vHost->loadConfigFromStore(store);
+        }
+#endif
         break;
       }
       case xudu::SystemDocKind::Layout: {

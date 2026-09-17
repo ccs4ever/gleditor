@@ -8,6 +8,7 @@
 #include "common/xanadu/link_layout.hpp"
 #include "common/xanadu/store.hpp"
 #include "common/xanadu/system_docs.hpp"
+#include "common/xanadu/vortex/vortex_host.hpp"
 #include "common/xanadu/zigzag/presentation_surface.hpp"
 #include "core/manifold.hpp"
 #include "core/unified_transclusion_engine.hpp"
@@ -168,6 +169,72 @@ public:
   void setViewMode(ViewMode mode);
   [[nodiscard]] ViewMode viewMode() const { return view_mode_; }
   void toggleViewMode();
+
+  // -- Dimension Bundles ---------------------------------------------------
+  enum class DimensionBundle : std::uint8_t {
+    Custom    = 0, ///< Manual / unbundled dimensions
+    Execution = 1, ///< X: d.spin, Y: d.step, Z: d.branch
+    Scope     = 2, ///< X: d.lexical, Y: d.dynamic, Z: d.env
+    Contract  = 3, ///< X: d.require, Y: d.ensure, Z: d.invariant
+    Logic     = 4, ///< X: d.clause, Y: d.predicate, Z: d.var
+    Stdlib    = 5, ///< X: d.stdlib, Y: d.symbol, Z: d.version
+  };
+
+  void setDimensionBundle(DimensionBundle bundle);
+  void cycleDimensionBundle(bool forward = true);
+  [[nodiscard]] DimensionBundle dimensionBundle() const noexcept {
+    return dimension_bundle_;
+  }
+  static std::string dimensionBundleName(DimensionBundle bundle);
+  static ViewAxisBinding dimensionBundleAxes(DimensionBundle bundle);
+
+  // -- Vortex Runtime & UI Integration --------------------------------------
+  void attachVortexHost(std::shared_ptr<vortex::VortexHost> host);
+  [[nodiscard]] std::shared_ptr<vortex::VortexHost> vortexHost() noexcept;
+  void ensureVortexHost();
+  bool dispatchAction(std::string_view actionName);
+
+  // -- Opcode & Library Palette HUD -----------------------------------------
+  void togglePalette();
+  void setPaletteVisible(bool visible);
+  [[nodiscard]] bool isPaletteVisible() const noexcept {
+    return paletteVisible_;
+  }
+  void paletteNext();
+  void palettePrev();
+  bool paletteCloneSelectedToFocus();
+  bool paletteTranslateVQL(std::string_view query = {});
+  void setPaletteFilter(std::string filter);
+  [[nodiscard]] const std::string &paletteFilter() const noexcept {
+    return paletteFilter_;
+  }
+  [[nodiscard]] std::size_t paletteSelectedIndex() const noexcept {
+    return paletteSelectedIndex_;
+  }
+  [[nodiscard]] std::vector<std::string> paletteItems() const;
+
+  // -- VQL Translation & Active Chain Attachment ----------------------------
+  /**
+   * @brief Translates a VQL query into Vortex opcodes (using VQLCompiler) and
+   *        attaches the resulting opcode graph to the current focus cell along
+   *        the designated dimension.
+   *
+   * @param vqlQuery The VQL query text (e.g. "/d.1/d.2" or "let $x := /d.1
+   * return $x").
+   * @param attachDim The dimension along which to link the entry opcode
+   * (defaults to "d.spin").
+   * @param spawnCursor Whether to spawn an execution cursor on the entry
+   * opcode.
+   * @return true if compilation, promotion, and attachment succeeded.
+   */
+  bool translateVQLAndAttachToFocus(std::string_view vqlQuery,
+                                    std::string_view attachDim = "d.spin",
+                                    bool spawnCursor           = false);
+
+  /// Validates and compiles a VQL query string, returning compilation metadata
+  /// and disassembly.
+  [[nodiscard]] xanadu::vql::CompilationResult
+  compileVQL(std::string_view vqlQuery) const;
 
   /// Apply one validated system-slice snapshot between frames. The store is
   /// never consulted while drawing.
@@ -364,6 +431,13 @@ private:
       pickTargets_;
   std::string pickTargetVersion_;
   std::unordered_map<CellRef, XuduProjectionProvenance> sourceOrigins_;
+
+  DimensionBundle dimension_bundle_{DimensionBundle::Custom};
+  std::shared_ptr<vortex::VortexHost> vortex_host_{nullptr};
+
+  bool paletteVisible_{false};
+  std::size_t paletteSelectedIndex_{0};
+  std::string paletteFilter_{};
 };
 
 } // namespace zigzag

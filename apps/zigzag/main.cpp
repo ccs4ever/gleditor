@@ -132,37 +132,98 @@ void bindCommands(gleditor::Application &app, const AppStateRef &state,
         viz->setViewMode(zigzag::ZigzagVisualizer::ViewMode::Topology);
       });
 
+  // Dimension Bundle switching
+  app.commands().bind(
+      SDL_SCANCODE_1, Mod::Ctrl, "bundle-execution",
+      "switch to Execution dimension bundle (d.spin, d.step, d.branch)", [viz] {
+        viz->setDimensionBundle(
+            zigzag::ZigzagVisualizer::DimensionBundle::Execution);
+      });
+  app.commands().bind(
+      SDL_SCANCODE_2, Mod::Ctrl, "bundle-scope",
+      "switch to Scope dimension bundle (d.lexical, d.dynamic, d.env)", [viz] {
+        viz->setDimensionBundle(
+            zigzag::ZigzagVisualizer::DimensionBundle::Scope);
+      });
+  app.commands().bind(
+      SDL_SCANCODE_3, Mod::Ctrl, "bundle-contract",
+      "switch to Contract dimension bundle (d.require, d.ensure, d.invariant)",
+      [viz] {
+        viz->setDimensionBundle(
+            zigzag::ZigzagVisualizer::DimensionBundle::Contract);
+      });
+  app.commands().bind(
+      SDL_SCANCODE_4, Mod::Ctrl, "bundle-logic",
+      "switch to Logic dimension bundle (d.clause, d.predicate, d.var)", [viz] {
+        viz->setDimensionBundle(
+            zigzag::ZigzagVisualizer::DimensionBundle::Logic);
+      });
+  app.commands().bind(
+      SDL_SCANCODE_5, Mod::Ctrl, "bundle-stdlib",
+      "switch to Stdlib dimension bundle (d.stdlib, d.symbol, d.version)",
+      [viz] {
+        viz->setDimensionBundle(
+            zigzag::ZigzagVisualizer::DimensionBundle::Stdlib);
+      });
+  app.commands().bind(SDL_SCANCODE_B, Mod::Ctrl, "bundle-cycle",
+                      "cycle active dimension bundle forward",
+                      [viz] { viz->cycleDimensionBundle(true); });
+
+  // Vortex Opcode & Library Palette HUD
+  app.commands().bind(SDL_SCANCODE_F4, "toggle-palette",
+                      "toggle Vortex opcode and library palette HUD",
+                      [viz] { viz->togglePalette(); });
+  app.commands().bind(SDL_SCANCODE_RETURN, "palette-confirm",
+                      "clone selected palette symbol into active chain", [viz] {
+                        if (viz->isPaletteVisible()) {
+                          viz->paletteCloneSelectedToFocus();
+                          viz->setPaletteVisible(false);
+                        }
+                      });
+  app.commands().bind(SDL_SCANCODE_F5, "vql-translate-attach",
+                      "translate VQL filter text and attach to active chain",
+                      [viz] {
+                        if (viz->isPaletteVisible()) {
+                          viz->paletteTranslateVQL();
+                          viz->setPaletteVisible(false);
+                        }
+                      });
+  app.commands().bind(SDL_SCANCODE_ESCAPE, "palette-dismiss",
+                      "dismiss Vortex opcode and library palette HUD", [viz] {
+                        if (viz->isPaletteVisible()) {
+                          viz->setPaletteVisible(false);
+                        }
+                      });
+
   // Navigation along active dimensions
   app.commands().bind(SDL_SCANCODE_RIGHT, "step-x-pos",
-                      "step focus positive along X dimension", [viz] {
-                        viz->navigateFocus(viz->currentView().x_dimension,
-                                           DimVector::POS);
-                      });
+                      "step focus positive along X dimension",
+                      [viz] { viz->dispatchAction("step-x-pos"); });
   app.commands().bind(SDL_SCANCODE_LEFT, "step-x-neg",
-                      "step focus negative along X dimension", [viz] {
-                        viz->navigateFocus(viz->currentView().x_dimension,
-                                           DimVector::NEG);
-                      });
+                      "step focus negative along X dimension",
+                      [viz] { viz->dispatchAction("step-x-neg"); });
   app.commands().bind(SDL_SCANCODE_UP, "step-y-pos",
                       "step focus positive along Y dimension", [viz] {
-                        viz->navigateFocus(viz->currentView().y_dimension,
-                                           DimVector::POS);
+                        if (viz->isPaletteVisible()) {
+                          viz->palettePrev();
+                        } else {
+                          viz->dispatchAction("step-y-pos");
+                        }
                       });
   app.commands().bind(SDL_SCANCODE_DOWN, "step-y-neg",
                       "step focus negative along Y dimension", [viz] {
-                        viz->navigateFocus(viz->currentView().y_dimension,
-                                           DimVector::NEG);
+                        if (viz->isPaletteVisible()) {
+                          viz->paletteNext();
+                        } else {
+                          viz->dispatchAction("step-y-neg");
+                        }
                       });
   app.commands().bind(SDL_SCANCODE_PAGEUP, "step-z-pos",
-                      "step focus positive along Z dimension", [viz] {
-                        viz->navigateFocus(viz->currentView().z_dimension,
-                                           DimVector::POS);
-                      });
+                      "step focus positive along Z dimension",
+                      [viz] { viz->dispatchAction("step-z-pos"); });
   app.commands().bind(SDL_SCANCODE_PAGEDOWN, "step-z-neg",
-                      "step focus negative along Z dimension", [viz] {
-                        viz->navigateFocus(viz->currentView().z_dimension,
-                                           DimVector::NEG);
-                      });
+                      "step focus negative along Z dimension",
+                      [viz] { viz->dispatchAction("step-z-neg"); });
 
   // Dimension swapping and cycling
   app.commands().bind(SDL_SCANCODE_SPACE, "swap-xy",
@@ -194,46 +255,30 @@ void bindCommands(gleditor::Application &app, const AppStateRef &state,
                       });
 
   // Interactive In-App Cell & Dimension Editing
-  app.commands().bind(
-      SDL_SCANCODE_N, "insert-cell-x-pos",
-      "insert connected cell positive along active X dimension", [viz] {
-        viz->insertConnectedCell("New Cell", viz->currentView().x_dimension,
-                                 DimVector::POS);
-      });
-  app.commands().bind(
-      SDL_SCANCODE_N, Mod::Shift, "insert-cell-x-neg",
-      "insert connected cell negative along active X dimension", [viz] {
-        viz->insertConnectedCell("New Cell", viz->currentView().x_dimension,
-                                 DimVector::NEG);
-      });
-  app.commands().bind(
-      SDL_SCANCODE_D, "insert-cell-y-pos",
-      "insert connected cell positive along active Y dimension", [viz] {
-        viz->insertConnectedCell("New Cell", viz->currentView().y_dimension,
-                                 DimVector::POS);
-      });
-  app.commands().bind(
-      SDL_SCANCODE_D, Mod::Shift, "insert-cell-y-neg",
-      "insert connected cell negative along active Y dimension", [viz] {
-        viz->insertConnectedCell("New Cell", viz->currentView().y_dimension,
-                                 DimVector::NEG);
-      });
+  app.commands().bind(SDL_SCANCODE_N, "insert-cell-x-pos",
+                      "insert connected cell positive along active X dimension",
+                      [viz] { viz->dispatchAction("insert-cell-x-pos"); });
+  app.commands().bind(SDL_SCANCODE_N, Mod::Shift, "insert-cell-x-neg",
+                      "insert connected cell negative along active X dimension",
+                      [viz] { viz->dispatchAction("insert-cell-x-neg"); });
+  app.commands().bind(SDL_SCANCODE_D, "insert-cell-y-pos",
+                      "insert connected cell positive along active Y dimension",
+                      [viz] { viz->dispatchAction("insert-cell-y-pos"); });
+  app.commands().bind(SDL_SCANCODE_D, Mod::Shift, "insert-cell-y-neg",
+                      "insert connected cell negative along active Y dimension",
+                      [viz] { viz->dispatchAction("insert-cell-y-neg"); });
   app.commands().bind(SDL_SCANCODE_U, "unlink-x-pos",
-                      "unlink focused cell along positive X dimension", [viz] {
-                        viz->unlinkFocusAlong(viz->currentView().x_dimension,
-                                              DimVector::POS);
-                      });
+                      "unlink focused cell along positive X dimension",
+                      [viz] { viz->dispatchAction("unlink-x-pos"); });
   app.commands().bind(SDL_SCANCODE_U, Mod::Shift, "unlink-x-neg",
-                      "unlink focused cell along negative X dimension", [viz] {
-                        viz->unlinkFocusAlong(viz->currentView().x_dimension,
-                                              DimVector::NEG);
-                      });
+                      "unlink focused cell along negative X dimension",
+                      [viz] { viz->dispatchAction("unlink-x-neg"); });
   app.commands().bind(SDL_SCANCODE_DELETE, "delete-focus-cell",
                       "delete currently focused cell",
-                      [viz] { viz->deleteFocusCell(); });
+                      [viz] { viz->dispatchAction("delete-focus-cell"); });
   app.commands().bind(SDL_SCANCODE_BACKSPACE, "delete-focus-cell-bksp",
                       "delete currently focused cell",
-                      [viz] { viz->deleteFocusCell(); });
+                      [viz] { viz->dispatchAction("delete-focus-cell"); });
   app.commands().bind(SDL_SCANCODE_S, Mod::Ctrl | Mod::Shift, "save-slice",
                       "save current slice to disk YAML", [viz] {
                         if (viz->saveStructureYaml("")) {
