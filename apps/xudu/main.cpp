@@ -2571,10 +2571,9 @@ int main(const int argc, char **argv) {
     auto &bridgeStore = session->store(0);
     zigzagPresentation->bindXuduStore(bridgeStore,
                                       bridgeStore.primaryCurrentVersion());
-    zigzagPresentation->setPresentationConfig(
-        xudu::LayoutConfig::fromStore(
-            session->systemStore(xudu::SystemDocKind::Layout))
-            .zigzag);
+    const auto initialLayout = xudu::LayoutConfig::fromStore(
+        session->systemStore(xudu::SystemDocKind::Layout));
+    zigzagPresentation->setPresentationConfig(initialLayout.zigzag);
     if (auto vHost = zigzagPresentation->vortexHost()) {
       vHost->loadConfigFromStore(
           session->systemStore(xudu::SystemDocKind::Settings));
@@ -2593,6 +2592,7 @@ int main(const int argc, char **argv) {
           views.focusSpan(cell, span);
         });
     bridgeCoordinator.attach(*zigzagPresentation);
+    bridgeCoordinator.applyConfig(initialLayout.bridge);
 #endif
     links.setOpener([&views](const MicroversionId &version) {
       views.showAlongside(version);
@@ -3082,70 +3082,71 @@ int main(const int argc, char **argv) {
 #endif
     quiet || std::cout << "commands:\n" << app.commands().helpText();
 
-    session->setSystemDocChangedCallback([&app, radialMenu, docSwitcher,
-                                          &pouchDrawer, &links, &map
+    session->setSystemDocChangedCallback(
+        [&app, radialMenu, docSwitcher, &pouchDrawer, &links, &map
 #ifdef XUZZ_BUILD
-                                          ,
-                                          &zigzagPresentation
+         ,
+         &zigzagPresentation, &bridgeCoordinator
 #endif
     ](const xudu::SystemDocKind kind, const xudu::Store &store) {
-      std::cout << "xudu: system doc updated (" << xudu::systemDocUri(kind)
-                << ")\n";
-      const auto model = xudu::SystemStoreModel::fromStore(store);
-      if (!model.isValid()) {
-        std::cerr << "xudu: rejecting invalid system store "
-                  << xudu::systemDocUri(kind) << ": " << model.validationError()
-                  << "\n";
-        return;
-      }
-      switch (kind) {
-      case xudu::SystemDocKind::Keymap: {
-        const auto kmCfg = xudu::KeymapConfig::fromStore(store);
-        for (const auto &[act, comboStr] : kmCfg.bindings) {
-          if (const auto combo = gleditor::parseKeyCombo(comboStr)) {
-            app.commands().rebind(act, combo->first, combo->second);
+          std::cout << "xudu: system doc updated (" << xudu::systemDocUri(kind)
+                    << ")\n";
+          const auto model = xudu::SystemStoreModel::fromStore(store);
+          if (!model.isValid()) {
+            std::cerr << "xudu: rejecting invalid system store "
+                      << xudu::systemDocUri(kind) << ": "
+                      << model.validationError() << "\n";
+            return;
           }
-        }
+          switch (kind) {
+          case xudu::SystemDocKind::Keymap: {
+            const auto kmCfg = xudu::KeymapConfig::fromStore(store);
+            for (const auto &[act, comboStr] : kmCfg.bindings) {
+              if (const auto combo = gleditor::parseKeyCombo(comboStr)) {
+                app.commands().rebind(act, combo->first, combo->second);
+              }
+            }
 #ifdef XUZZ_BUILD
-        if (auto vHost = zigzagPresentation->vortexHost()) {
-          vHost->loadMacrosFromStore(store);
-        }
+            if (auto vHost = zigzagPresentation->vortexHost()) {
+              vHost->loadMacrosFromStore(store);
+            }
 #endif
-        break;
-      }
-      case xudu::SystemDocKind::Settings: {
+            break;
+          }
+          case xudu::SystemDocKind::Settings: {
 #ifdef XUZZ_BUILD
-        if (auto vHost = zigzagPresentation->vortexHost()) {
-          vHost->loadConfigFromStore(store);
-        }
+            if (auto vHost = zigzagPresentation->vortexHost()) {
+              vHost->loadConfigFromStore(store);
+            }
 #endif
-        break;
-      }
-      case xudu::SystemDocKind::Layout: {
-        const auto layout = xudu::LayoutConfig::fromStore(store);
-        links.setVisible(layout.xanalinkRibbons);
-        links.setBeamConfig(layout.beams);
-        links.tensionEngine().setParams(layout.physics.toTensionParams());
-        pouchDrawer.setDockSide(layout.pouchDock == xudu::PouchDock::Left
-                                    ? xudu::PouchDrawer::DockSide::Left
-                                    : xudu::PouchDrawer::DockSide::Right);
+            break;
+          }
+          case xudu::SystemDocKind::Layout: {
+            const auto layout = xudu::LayoutConfig::fromStore(store);
+            links.setVisible(layout.xanalinkRibbons);
+            links.setBeamConfig(layout.beams);
+            links.tensionEngine().setParams(layout.physics.toTensionParams());
+            pouchDrawer.setDockSide(layout.pouchDock == xudu::PouchDock::Left
+                                        ? xudu::PouchDrawer::DockSide::Left
+                                        : xudu::PouchDrawer::DockSide::Right);
 #ifdef XUZZ_BUILD
-        zigzagPresentation->setPresentationConfig(layout.zigzag);
+            zigzagPresentation->setPresentationConfig(layout.zigzag);
+            bridgeCoordinator.applyConfig(layout.bridge);
 #endif
-        break;
-      }
-      case xudu::SystemDocKind::UI: {
-        const auto uiCfg = xudu::UIConfig::fromStore(store);
-        radialMenu->setConfig(uiCfg.radialMenu);
-        docSwitcher->setVisible(uiCfg.tabBarVisible);
-        map.setVisible(uiCfg.hypertimeMapVisible);
-        break;
-      }
-      case xudu::SystemDocKind::Pouches:
-      case xudu::SystemDocKind::Count:
-        break;
-      }
-    });
+            break;
+          }
+          case xudu::SystemDocKind::UI: {
+            const auto uiCfg = xudu::UIConfig::fromStore(store);
+            radialMenu->setConfig(uiCfg.radialMenu);
+            docSwitcher->setVisible(uiCfg.tabBarVisible);
+            map.setVisible(uiCfg.hypertimeMapVisible);
+            break;
+          }
+          case xudu::SystemDocKind::Pouches:
+          case xudu::SystemDocKind::Count:
+            break;
+          }
+        });
 
     // Apply active system doc configurations at launch
     {
@@ -3179,6 +3180,7 @@ int main(const int argc, char **argv) {
                                     : xudu::PouchDrawer::DockSide::Right);
 #ifdef XUZZ_BUILD
         zigzagPresentation->setPresentationConfig(loCfg.zigzag);
+        bridgeCoordinator.applyConfig(loCfg.bridge);
 #endif
       }
     }
