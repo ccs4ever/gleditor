@@ -455,11 +455,31 @@ void DeviceVK::destroyTexture(const TextureHandle texture) {
   if (textures.end() == it) {
     return;
   }
+  if (frameActive) {
+    // A command buffer opened earlier this frame (Canvas::addText() for UI
+    // chrome can trigger glyph atlas growth after beginFrame(), not only
+    // Doc::buildPendingPages() before it) may already have this texture's
+    // view bound into its descriptor set. Destroying the Vulkan objects now
+    // would invalidate that still-recording buffer; see
+    // pendingTextureDestroys' own comment for where they actually get freed.
+    pendingTextureDestroys.push_back(it->second);
+    textures.erase(it);
+    return;
+  }
   ensureIdleForMutation();
   vkDestroyImageView(device, it->second.view, nullptr);
   vkDestroyImage(device, it->second.image, nullptr);
   vkFreeMemory(device, it->second.memory, nullptr);
   textures.erase(it);
+}
+
+void DeviceVK::drainPendingTextureDestroys() {
+  for (auto &record : pendingTextureDestroys) {
+    vkDestroyImageView(device, record.view, nullptr);
+    vkDestroyImage(device, record.image, nullptr);
+    vkFreeMemory(device, record.memory, nullptr);
+  }
+  pendingTextureDestroys.clear();
 }
 
 void DeviceVK::updateTextureLayer(const TextureHandle texture, const int layer,

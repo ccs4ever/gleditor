@@ -48,6 +48,8 @@ get_yaml_top_val() {
 
 [ -f .editorconfig ] || fail ".editorconfig not found"
 [ -f .clang-format ] || fail ".clang-format not found"
+[ -f .clangd ] || fail ".clangd not found"
+[ -f .clang-tidy ] || fail ".clang-tidy not found"
 [ -f .yamlfmt ] || fail ".yamlfmt not found"
 [ -f .yamllint ] || fail ".yamllint not found"
 [ -f .mdl_style.rb ] || fail ".mdl_style.rb not found"
@@ -127,4 +129,46 @@ if [ "$ec_sh_indent" != "2" ]; then
   fail "Shell script indent_size in .editorconfig must be 2 (matching shfmt -i 2)"
 fi
 
-echo "config-harmony: .editorconfig, .clang-format, .yamlfmt, .yamllint, and .mdl_style.rb are in harmony"
+# 6. Check ClangTidy settings between .clangd and .clang-tidy
+clangd_adds=$(awk '
+  /^[[:space:]]*Diagnostics:/ { in_diag=1; next }
+  in_diag && /^[[:space:]]*ClangTidy:/ { in_tidy=1; next }
+  in_tidy && /^[[:space:]]*Add:/ { mode="add"; next }
+  in_tidy && /^[[:space:]]*Remove:/ { mode="remove"; next }
+  in_tidy && /^[[:space:]]*[A-Za-z]/ && !/^[[:space:]]*(Add|Remove):/ { mode=""; in_tidy=0; next }
+  mode=="add" && /^[[:space:]]*- / {
+    sub(/^[[:space:]]*- /, ""); sub(/[[:space:]]*#.*/, ""); sub(/[[:space:]]+$/, "");
+    if (length) print $0
+  }
+' .clangd)
+
+clangd_removes=$(awk '
+  /^[[:space:]]*Diagnostics:/ { in_diag=1; next }
+  in_diag && /^[[:space:]]*ClangTidy:/ { in_tidy=1; next }
+  in_tidy && /^[[:space:]]*Add:/ { mode="add"; next }
+  in_tidy && /^[[:space:]]*Remove:/ { mode="remove"; next }
+  in_tidy && /^[[:space:]]*[A-Za-z]/ && !/^[[:space:]]*(Add|Remove):/ { mode=""; in_tidy=0; next }
+  mode=="remove" && /^[[:space:]]*- / {
+    sub(/^[[:space:]]*- /, ""); sub(/[[:space:]]*#.*/, ""); sub(/[[:space:]]+$/, "");
+    if (length) print $0
+  }
+' .clangd)
+
+for check in $clangd_adds; do
+  if ! grep -F -q "$check" .clang-tidy; then
+    fail "ClangTidy check '$check' enabled in .clangd Add is missing from .clang-tidy"
+  fi
+done
+
+for check in $clangd_removes; do
+  if ! grep -F -q -- "-$check" .clang-tidy; then
+    fail "ClangTidy check '$check' disabled in .clangd Remove is missing or not disabled with '-' in .clang-tidy"
+  fi
+done
+
+tidy_hdr_filter=$(awk -F':' '/^[[:space:]]*HeaderFilterRegex:[[:space:]]*/ { gsub(/^[[:space:]'\''"]+|[[:space:]'\''"]+$/, "", $2); print $2; exit }' .clang-tidy)
+if [ -z "$tidy_hdr_filter" ]; then
+  fail "HeaderFilterRegex is missing or empty in .clang-tidy"
+fi
+
+echo "config-harmony: .editorconfig, .clang-format, .yamlfmt, .yamllint, .mdl_style.rb, .clangd, and .clang-tidy are in harmony"

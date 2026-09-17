@@ -792,6 +792,9 @@ void DeviceVK::shutdown() {
     vkFreeMemory(device, record.memory, nullptr);
   }
   textures.clear();
+  // Safe unconditionally: the vkDeviceWaitIdle() above already confirmed
+  // nothing on the device is still executing, regardless of frameActive.
+  drainPendingTextureDestroys();
 
   for (auto &[id, record] : buffers) {
     destroyBufferRecord(record);
@@ -882,6 +885,17 @@ void DeviceVK::waitIdle() {
   if (VK_NULL_HANDLE != device) {
     vkDeviceWaitIdle(device);
     framesSubmitted = false;
+    // Only once this call is not itself running inside a still-open frame:
+    // vkDeviceWaitIdle() only waits for work already submitted to a queue,
+    // and a frame's own command buffers are not submitted until endFrame()
+    // runs. Draining here while frameActive were true would free a texture
+    // the still-recording frame might reference -- exactly what queuing it
+    // in destroyTexture() was for. The next waitIdle() after that frame ends
+    // -- reallocate() calls one unconditionally on every growth -- drains it
+    // once it is actually safe to.
+    if (!frameActive) {
+      drainPendingTextureDestroys();
+    }
   }
 }
 

@@ -219,6 +219,18 @@ void DeviceVK::bindAtlasTexture(const TextureHandle texture) {
     return;
   }
 
+  // This frame's descriptor set already points at this texture -- e.g. two
+  // image placements drawn back to back through the same shared atlas.
+  // Rewriting it anyway would be a no-op in content but not in effect: any
+  // secondary command buffer already recorded (and possibly already closed)
+  // earlier this frame has this set bound, and Vulkan requires such a set
+  // stay unchanged until that buffer is submitted and finishes -- an
+  // identical vkUpdateDescriptorSets call still retroactively invalidates
+  // it. Skipping the redundant write is what keeps the earlier draw valid.
+  if (pipelineIt->second.boundTextures[frameIndex] == texture) {
+    return;
+  }
+
   const auto highlightIt = buffers.find(highlightBuffers[frameIndex].id);
   if (buffers.end() == highlightIt) {
     return;
@@ -246,6 +258,7 @@ void DeviceVK::bindAtlasTexture(const TextureHandle texture) {
   writes[1].pImageInfo      = &imageInfo;
 
   vkUpdateDescriptorSets(device, writes.size(), writes.data(), 0, nullptr);
+  pipelineIt->second.boundTextures[frameIndex] = texture;
 
   // As with bindPipeline: remembered, not recorded. The descriptor set is
   // bound by whichever secondary buffers are begun after this point, including

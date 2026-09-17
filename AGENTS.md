@@ -38,6 +38,11 @@ make clean
 make format                       # clang-format + shfmt, in place; no build deps needed
 make format-check                 # same, --dry-run; what CI runs
 make lint                         # shellcheck + yamllint + mdl; what CI runs
+make check                        # all quality gates: format-check + lint + analyze
+make analyze                      # standardized static analyzers: tidy + scan-build
+make tidy                         # clang-tidy via compile_commands.json (TIDY_FILES=..., TIDY_CHECKS=...)
+make scan-build                   # Clang Static Analyzer build interception
+make cppcheck                     # backup static analyzer
 ```
 
 Key variables and guidelines:
@@ -190,11 +195,13 @@ shared `000.scroll`. Run both, or that fixture silently disappears.
 - Indentation and coding style are defined in `.editorconfig` at the root of the project and
   strictly aligned with `.clang-format` (`IndentWidth: 2`, `UseTab: Never`, `ColumnLimit: 80`). Vim
   modelines have been removed across the codebase in favor of `.editorconfig`.
-- `.clangd` enables `modernize-*`, `bugprone-*`, `cppcoreguidelines-*`, `performance-*`,
-  `readability-*`, and `portability-*` clang-tidy checks (minus a few disabled ones — see `.clangd`)
-  and builds with `-Wall -Wextra -std=c++2c`. Treat clangd/clang-tidy warnings on lines you touch as
-  worth fixing, not noise. Not yet wired into CI: doing that meaningfully means triaging the
-  existing warning backlog first, which is future work rather than something this pass attempted.
+- `.clangd` and `.clang-tidy` enable `modernize-*`, `bugprone-*`, `cppcoreguidelines-*`,
+  `performance-*`, `readability-*`, `portability-*`, and `clang-analyzer-*` checks (minus a few
+  disabled ones — see `.clangd`). `tools/check-config-harmony.sh` ensures that `.clangd` and
+  `.clang-tidy` stay in strict harmony. Treat clangd/clang-tidy warnings on lines you touch as worth
+  fixing, not noise. `make tidy` runs clang-tidy over translation units in parallel via
+  `compile_commands.json`; `make scan-build` runs Clang Static Analyzer via build interception;
+  `make analyze` runs both; `make check` executes all gates (`format-check` + `lint` + `analyze`).
 - Match the prevailing comment style in this codebase: comments explain *why* a non-obvious choice
   was made (a constraint, a workaround, a tradeoff), not what the code does. Don't add narrating
   comments.
@@ -204,7 +211,7 @@ shared `000.scroll`. Run both, or that fixture silently disappears.
 
 | Language                                                 | Formatter                                                      | Linter                                                                                                                                   | CI gate                                                                                             |
 | -------------------------------------------------------- | -------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------- |
-| C++ (`.cpp`/`.hpp`/`.h`)                                 | clang-format (`make format`)                                   | clang-tidy (`.clangd`, editor-only)                                                                                                      | blocking                                                                                            |
+| C++ (`.cpp`/`.hpp`/`.h`)                                 | clang-format (`make format`)                                   | clang-tidy (`make tidy`, `.clangd`), scan-build (`make scan-build`)                                                                      | blocking (`format-check`); `make check` runs all gates                                              |
 | GLSL (`.glsl`)                                           | clang-format, same as C++                                      | `glslangValidator` via `make shaders` (compiles every shader)                                                                            | blocking (both)                                                                                     |
 | Shell (`.sh`, `PKGBUILD`)                                | shfmt (`make format`)                                          | shellcheck (`make lint`)                                                                                                                 | blocking                                                                                            |
 | YAML (workflows, dependabot)                             | yamlfmt (`make format`), config in `.yamlfmt`                  | yamllint (`make lint`), config in `.yamllint`                                                                                            | blocking                                                                                            |
