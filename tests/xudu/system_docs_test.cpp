@@ -348,6 +348,9 @@ TEST(SystemDocsTest, DynamicPhysicsAndBeamConfigFromStore) {
       xudu::setSetting(store, head, xudu::settings::kBeamsStubMinOfLine, 0.95);
   head = xudu::setSetting(store, head, xudu::settings::kBeamsBypassSegments,
                           static_cast<std::int64_t>(18));
+  head = xudu::setSetting(store, head,
+                          xudu::settings::kBeamsZFightJitterAmplitude, 1.2);
+  head = xudu::setSetting(store, head, xudu::settings::kBeamsActiveZBoost, 9.0);
   store.repointCurrentVersion(head);
 
   const auto cfg = xudu::LayoutConfig::fromStore(store);
@@ -361,6 +364,8 @@ TEST(SystemDocsTest, DynamicPhysicsAndBeamConfigFromStore) {
   EXPECT_FLOAT_EQ(cfg.beams.stubWidthOfBeam, 0.45F);
   EXPECT_FLOAT_EQ(cfg.beams.stubMinOfLine, 0.95F);
   EXPECT_EQ(cfg.beams.bypassSegments, 18U);
+  EXPECT_FLOAT_EQ(cfg.beams.zFightJitterAmplitude, 1.2F);
+  EXPECT_FLOAT_EQ(cfg.beams.activeZBoost, 9.0F);
 
   // Convert to TensionParams and verify mapping
   const auto tension = cfg.physics.toTensionParams();

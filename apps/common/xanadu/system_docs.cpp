@@ -612,6 +612,13 @@ std::vector<SettingSpec> defaultSettingSpecs(const SystemDocKind kind) {
         {std::string(settings::kBeamsLoomHoverAlpha),
          "Hovered opacity for loom cables",
          {{{"float"}, {1.0}}}},
+        {std::string(settings::kBeamsZFightJitterAmplitude),
+         "Deterministic per-beam Z nudge amplitude to reduce z-fighting "
+         "between crossing beams",
+         {{{"float"}, {0.6}}}},
+        {std::string(settings::kBeamsActiveZBoost),
+         "Z boost for the active/selected link's beam",
+         {{{"float"}, {4.0}}}},
         {std::string(settings::kZigzagCellHorizontalPaddingPx),
          "Horizontal cell padding in px",
          {{{"float"}, {8.0}}}},
