@@ -109,7 +109,27 @@ TEST_F(DocPageBudgetTest,
   // pages. Calling makePages() straight through, synchronously, before the
   // first buildPendingPages() call reproduces exactly that ordering
   // deterministically, rather than depending on real thread timing.
+  //
+  // Since Stage 5 of design/priority-page-building.md, buildPendingPages()
+  // only ever builds what is currently wanted -- a parked default camera's
+  // own P0 range is far too small on its own to need more than one budgeted
+  // call. manyManyPagesOfText() (the same larger fixture the Stage 3
+  // priority-order tests below need, for the same reason: a warm
+  // glyph/font cache lets a single budgeted call get through far more
+  // already-shaped pages than the original 512 KB fixture) plus priority
+  // offsets spanning most of it stand in for the old "whole backlog": a
+  // large P1 wanted set that still has to be built in budgeted batches,
+  // which is what this test exists to check.
+  doc = Doc::create(renderer, device.get(), glm::mat4(1.0F),
+                    MemoryTextSource(manyManyPagesOfText(), "budget-test"));
   doc->makePages();
+
+  const auto textSize = static_cast<std::uint32_t>(doc->contents().size());
+  std::vector<std::uint32_t> spreadOffsets;
+  for (std::uint32_t offset = 0; offset < textSize; offset += 2000U) {
+    spreadOffsets.push_back(offset);
+  }
+  doc->setPriorityOffsets(spreadOffsets);
 
   const auto t0                 = std::chrono::steady_clock::now();
   const bool doneAfterFirstCall = doc->buildPendingPages(*state);
@@ -265,7 +285,11 @@ TEST_F(DocPageBudgetTest, PageIndexForOffsetAnswersBeforeAnyPageIsBuilt) {
 
   // Cross-checked against the same offsets once building actually catches
   // up, so a wrong pageIndexFilade entry (rather than a coincidentally
-  // plausible-looking one) would still be caught.
+  // plausible-looking one) would still be caught. Since Stage 5 of
+  // design/priority-page-building.md, isFullyLoaded() no longer implies
+  // every page got built -- the late page needs to be named as wanted, the
+  // same way a beam's far endpoint would, or it stays banked.
+  doc->setPriorityOffsets(std::vector<std::uint32_t>{lateOffset});
   while (!doc->isFullyLoaded()) {
     doc->buildPendingPages(*state);
   }
@@ -279,14 +303,18 @@ TEST_F(DocPageBudgetTest, PageIndexForOffsetAnswersBeforeAnyPageIsBuilt) {
 
 TEST_F(DocPageBudgetTest, ApproximateAnchorAgreesWithAnchorOncePageIsBuilt) {
   doc->makePages();
+
+  // Comfortably past the first page, so this is not trivially "both name
+  // page 0". Named as a priority offset before waiting: since Stage 5 of
+  // design/priority-page-building.md, isFullyLoaded() only guarantees
+  // currently-wanted pages are built, and the viewport's own P0 range (a
+  // parked default camera) would not otherwise reach this far in.
+  const auto offset = std::min<std::uint32_t>(
+      20000U, static_cast<std::uint32_t>(doc->contents().size() / 2));
+  doc->setPriorityOffsets(std::vector<std::uint32_t>{offset});
   while (!doc->isFullyLoaded()) {
     doc->buildPendingPages(*state);
   }
-
-  // Comfortably past the first page, so this is not trivially "both name
-  // page 0".
-  const auto offset = std::min<std::uint32_t>(
-      20000U, static_cast<std::uint32_t>(doc->contents().size() / 2));
 
   const auto exact  = doc->anchorFor(offset);
   const auto approx = doc->approximateAnchorFor(offset);
@@ -309,6 +337,91 @@ TEST_F(DocPageBudgetTest, ApproximateAnchorAgreesWithAnchorOncePageIsBuilt) {
   EXPECT_LT(glm::distance(*exactWorld, *approxWorld), onePageHeightWorld * 1.5F)
       << "approximateAnchorFor()'s point should land within about one page "
          "height of anchorFor()'s exact one";
+}
+
+// Stage 5 of design/priority-page-building.md: a page outside every current
+// tier is banked -- shaped, addressable, never turned into GPU resources --
+// rather than eventually built the way P2 used to guarantee.
+
+TEST_F(DocPageBudgetTest, SettlesWithABoundedBuiltPageCountWellBelowTotal) {
+  doc = Doc::create(renderer, device.get(), glm::mat4(1.0F),
+                    MemoryTextSource(manyManyPagesOfText(), "banking-test"));
+  doc->makePages();
+
+  // Default camera, no priority offsets: nothing pulls in anything past the
+  // viewport's own small P0 range.
+  std::size_t calls = 0;
+  while (!doc->isFullyLoaded()) {
+    ASSERT_LT(calls, 10000U) << "buildPendingPages() never finished";
+    doc->buildPendingPages(*state);
+    ++calls;
+  }
+
+  ASSERT_GT(doc->numPages(), 100U)
+      << "fixture not large enough to make the bound below meaningful";
+  // Loose on purpose -- the viewport's own P0 range depends on frustum
+  // geometry this test does not need to pin down -- but a document this
+  // much larger than one screen should settle having built only a small
+  // fraction of itself, not most or all of it.
+  EXPECT_LT(doc->builtPageCount(), doc->numPages() / 4)
+      << "settling built far more of the document than the viewport wanted "
+         "-- banking did not take effect";
+}
+
+TEST_F(DocPageBudgetTest, ABankedPageBuildsIdenticallyToOneNeverBanked) {
+  doc = Doc::create(renderer, device.get(), glm::mat4(1.0F),
+                    MemoryTextSource(manyManyPagesOfText(), "banked-page"));
+  doc->makePages();
+
+  const auto lateOffset =
+      static_cast<std::uint32_t>(doc->contents().size() - 1);
+  const auto lateIndex = doc->pageIndexForOffset(lateOffset);
+  ASSERT_TRUE(lateIndex.has_value());
+
+  // Default camera, no priority offsets: the late page is shaped
+  // (makePages() already did the whole document) but not wanted, so this
+  // call banks it rather than building it.
+  doc->buildPendingPages(*state);
+  ASSERT_EQ(doc->page(*lateIndex), nullptr)
+      << "the late page should still be banked with no priority signal "
+         "pointing at it -- this test needs it banked to exercise the "
+         "re-shape-on-demand path";
+
+  // Now want it, the same way scrolling to it or a beam anchored on it
+  // would, and let it build via layoutFrom() re-derivation rather than a
+  // shaping already in hand.
+  doc->setPriorityOffsets(std::vector<std::uint32_t>{lateOffset});
+  while (!doc->isFullyLoaded()) {
+    doc->buildPendingPages(*state);
+  }
+  ASSERT_NE(doc->page(*lateIndex), nullptr)
+      << "a banked page should build once it becomes wanted";
+
+  // Compare against the same page in a fresh document that wants it from
+  // the very first call, so it is built straight from makePages()'s own
+  // shaping and never banked at all.
+  auto eagerDoc =
+      Doc::create(renderer, device.get(), glm::mat4(1.0F),
+                  MemoryTextSource(manyManyPagesOfText(), "banked-page-eager"));
+  eagerDoc->makePages();
+  eagerDoc->setPriorityOffsets(std::vector<std::uint32_t>{lateOffset});
+  while (!eagerDoc->isFullyLoaded()) {
+    eagerDoc->buildPendingPages(*state);
+  }
+  ASSERT_NE(eagerDoc->page(*lateIndex), nullptr);
+
+  const auto bankedAnchor = doc->anchorFor(lateOffset);
+  const auto eagerAnchor  = eagerDoc->anchorFor(lateOffset);
+  ASSERT_TRUE(bankedAnchor.has_value());
+  ASSERT_TRUE(eagerAnchor.has_value());
+  EXPECT_EQ(bankedAnchor->pageIndex, eagerAnchor->pageIndex);
+  EXPECT_FLOAT_EQ(bankedAnchor->x, eagerAnchor->x);
+  EXPECT_FLOAT_EQ(bankedAnchor->y, eagerAnchor->y);
+
+  EXPECT_EQ(doc->page(*lateIndex)->textLength(),
+            eagerDoc->page(*lateIndex)->textLength());
+  EXPECT_EQ(doc->page(*lateIndex)->baseOffset(),
+            eagerDoc->page(*lateIndex)->baseOffset());
 }
 
 } // namespace

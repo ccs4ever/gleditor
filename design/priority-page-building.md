@@ -6,8 +6,7 @@ budget) landed with the Tier 1/Tier 2 work in
 this note assumes its vocabulary (`Doc::buildPendingPages()`, `pageIndexFilade`,
 `render::kPageBuildFrameBudget`).
 
-**Status: Stages 0-4 are done** — see their sections below, each marked "(done)". Stage 5 is not
-started.
+**Status: Stages 0-5 are all done** — see their sections below, each marked "(done)".
 
 ## Goal
 
@@ -400,9 +399,9 @@ beam crossing the viewport being drawn — and recorded it here, per
 data".
 
 **Instrumentation**: `RenderState` gained `loopStart`, a `std::chrono::steady_clock::time_point` set
-once at the top of `Renderer::renderLoop()` — the same reference point its own `[TIMING] First page
-rendered` / `[TIMING] Complete render settled` lines already measured from, now shared rather than a
-local the render loop kept to itself. `LinkBeams::recordFirstBeamCrossing()`
+once at the top of `Renderer::renderLoop()` — the same reference point its own
+`[TIMING] First page rendered` / `[TIMING] Complete render settled` lines already measured from, now
+shared rather than a local the render loop kept to itself. `LinkBeams::recordFirstBeamCrossing()`
 (`apps/xudu/beams.cpp`) is called right after every `band()` draw call (both plain strands and
 transclusion strands) and, the first time a strand's ribbon centreline actually tests on-screen (via
 the same `ribbonMaybeOnScreen()` `outsideFrustum()`-based test `updatePriorityOffsets()` uses for
@@ -412,39 +411,40 @@ Library code still knows nothing about beams; the instrumentation lives entirely
 reading only the shared clock the library now exposes.
 
 **Measurement**: a small foreground document ("alpha beta gamma") linked to a 100 KB, 49-page
-document opened alongside it (`--alongside`, so both are foreground and eligible for sworph — see the
-note below on why `--background` cannot be used for this specific measurement), averaged over two
-runs each on an otherwise-idle machine:
+document opened alongside it (`--alongside`, so both are foreground and eligible for sworph — see
+the note below on why `--background` cannot be used for this specific measurement), averaged over
+two runs each on an otherwise-idle machine:
 
-| Link target                          | First beam crossing viewport | Complete render settled |
-| ------------------------------------- | ----------------------------: | ------------------------: |
-| Near the **start** of the big document (page ~0, builds first regardless of priority) | ~0.8-1.2 s | ~8.9-12.2 s |
-| Near the **end** of the big document (page ~48 of 49, needs the priority push)        | ~4.4 s     | ~11.2-11.8 s |
+| Link target                                                                           | First beam crossing viewport | Complete render settled |
+| ------------------------------------------------------------------------------------- | ---------------------------: | ----------------------: |
+| Near the **start** of the big document (page ~0, builds first regardless of priority) |                   ~0.8-1.2 s |             ~8.9-12.2 s |
+| Near the **end** of the big document (page ~48 of 49, needs the priority push)        |                       ~4.4 s |            ~11.2-11.8 s |
 
-The number that matters is the second row against what the *old* gate (pre-Stage-0) would have given:
-`LinkBeams::drawFrame()` returned before drawing anything — including every strand already resolved —
-unless *every* open document reported `isFullyLoaded()`. A beam whose far end sits on the last page of
-a document could not appear before that document's own full settle time, full stop: in this scenario,
-not before ~11-12 s. Stages 0-3 bring that down to ~4.4 s for the same link — the beam is visible while
-the document is still two-thirds of the way from finishing, rather than only at the very end. The
-first row is the ceiling on how good Stage 3's reordering alone can make the second row: a link to the
-very first page needs no priority push to begin with, so ~0.8-1.2 s is roughly what "already there when
-requested" looks like for this document size — the gap between it and 4.4 s is what document order
-still costs a page 48 pages deep even with priority ordering pushing it as hard as one link can.
+The number that matters is the second row against what the *old* gate (pre-Stage-0) would have
+given: `LinkBeams::drawFrame()` returned before drawing anything — including every strand already
+resolved — unless *every* open document reported `isFullyLoaded()`. A beam whose far end sits on the
+last page of a document could not appear before that document's own full settle time, full stop: in
+this scenario, not before ~11-12 s. Stages 0-3 bring that down to ~4.4 s for the same link — the
+beam is visible while the document is still two-thirds of the way from finishing, rather than only
+at the very end. The first row is the ceiling on how good Stage 3's reordering alone can make the
+second row: a link to the very first page needs no priority push to begin with, so ~0.8-1.2 s is
+roughly what "already there when requested" looks like for this document size — the gap between it
+and 4.4 s is what document order still costs a page 48 pages deep even with priority ordering
+pushing it as hard as one link can.
 
-**Why `--alongside` rather than `--background` here, unlike Stages 0-1's own verification**: a beam's
-ribbon has to be geometrically on-screen for `recordFirstBeamCrossing()` to fire at all, which needs
-its far document positioned somewhere the camera can plausibly reach — `--background` deliberately
-excludes a document from camera auto-framing and parks it deep in Z exactly so a large corpus does not
-drag the reader's attention, which is correct for that document but means its pages, however quickly
-built, are never "crossing the viewport" for this specific metric to observe. `--alongside` reintroduces
-the camera auto-framing cost the earlier stages' own verification notes worked around with
-`--background`, which is why this measurement deliberately stayed at 100 KB / 49 pages rather than the
-1000+-page documents Stages 1-3's own tests use: at that scale the framing cost (an existing,
-orthogonal issue, not this plan's to fix) dominates the number being measured rather than the priority
-mechanism.
+**Why `--alongside` rather than `--background` here, unlike Stages 0-1's own verification**: a
+beam's ribbon has to be geometrically on-screen for `recordFirstBeamCrossing()` to fire at all,
+which needs its far document positioned somewhere the camera can plausibly reach — `--background`
+deliberately excludes a document from camera auto-framing and parks it deep in Z exactly so a large
+corpus does not drag the reader's attention, which is correct for that document but means its pages,
+however quickly built, are never "crossing the viewport" for this specific metric to observe.
+`--alongside` reintroduces the camera auto-framing cost the earlier stages' own verification notes
+worked around with `--background`, which is why this measurement deliberately stayed at 100 KB / 49
+pages rather than the 1000+-page documents Stages 1-3's own tests use: at that scale the framing
+cost (an existing, orthogonal issue, not this plan's to fix) dominates the number being measured
+rather than the priority mechanism.
 
-### Stage 5 — bank what is not wanted, so it never reaches the GPU
+### Stage 5 — bank what is not wanted, so it never reaches the GPU (done)
 
 Independent of Stages 0-4 in motivation, but only cheap *because* of them. Stages 1-3 decide what to
 build **first**; this decides what not to build **at all**. A page that is neither near the viewport
@@ -457,32 +457,80 @@ Once Stage 3 is in, this is a policy change rather than another rewrite: stop dr
 than its predecessor (Stage 2), and priority selection already knows what P0 and P1 are (Stage 3).
 Banking is what is left when you simply never get to P2.
 
-Three things do need deciding, and they are what makes it a stage rather than a flag:
+Three things needed deciding, and they are what made this a stage rather than a flag:
 
-- **A bank must be cheap, or it defeats itself.** Do *not* keep the `PageShaping` — `Page`'s own
-  header explains why (`include/gleditor/doc.hpp:150`): on a megabyte of text the layouts of every
-  page came to ninety megabytes, "more than the vertex buffer they produced". Bank only a page's
-  start offset and byte length, both of which the filade already holds after Stage 1, and re-shape
-  on demand through `layoutFrom()`. That path is established, not new: `Page::ensureShaping()`
-  (`src/doc.cpp:322`) already discards and re-derives shaping for exactly this reason. The bank is
-  then the filade plus the text, which costs effectively nothing per page.
-- **"Fully loaded" stops being reachable.** A banked document may never build every page, so
-  `isFullyLoaded()` can no longer mean "all pages built" — it has to mean "everything currently
-  wanted is built". That is load-bearing beyond `Doc`: `src/renderer.cpp:984` computes `docsLoading`
-  from it, which gates `settled`, which is what `--profile` and `--screenshot` wait for. Get this
-  wrong and captures either race or hang. (Stage 0 has already removed the *other* consumer of the
-  all-or-nothing reading, `LinkBeams`' gate — which is part of why banking is tractable by now.)
+- **A bank must be cheap, or it defeats itself.** `Doc` does *not* keep the `PageShaping` for a page
+  it decides not to build — `Page`'s own header explains why (`include/gleditor/doc.hpp:150`): on a
+  megabyte of text the layouts of every page came to ninety megabytes, "more than the vertex buffer
+  they produced". `pendingShapings` held every not-yet-built page's full `PageShaping` regardless of
+  tier before this stage, which meant the background loader's eager, whole-document `makePages()`
+  (see "Non-goals" below — shaping itself stays sequential and eager; only building is reordered)
+  could still leave the entire document's shaping resident in memory the moment it raced ahead of
+  building, independent of priority. `Doc::buildPendingPages()` (`src/doc.cpp`) now resolves the
+  wanted set (`Doc::wantedPageIndices()`: P0 then P1, ascending, deduplicated, falling back to page
+  0 when there is no camera signal yet so a document never reports done having built nothing) once
+  per call, and anything left in that call's `toBuild` map that is *not* in the wanted set is
+  dropped — `std::erase_if` — rather than merged back into `pendingShapings`. Only a still-wanted
+  leftover the budget did not reach goes back. A banked page keeps only its
+  `pageEntries`/`pageIndexFilade` record (offset and length, from Stage 1) and is re-shaped on
+  demand through `layoutFrom()` if it becomes wanted later — exactly the path
+  `ensurePagesBuiltThrough()` already established for reflow (`src/doc.cpp`), reused rather than
+  duplicated.
+- **"Fully loaded" stops being reachable in the old sense.** `Doc::isFullyLoaded()` is no longer a
+  cached `bool` set once and read back — it is
+  `shapingComplete && every page in wantedPageIndices() is built`, recomputed live on every call
+  (`src/doc.cpp`). That is what lets it answer correctly after the camera moves to reveal a banked
+  page *without* `buildPendingPages()` having run in between: `src/renderer.cpp`'s loop gates
+  calling `buildPendingPages()` on `!isFullyLoaded()` in the first place, so a stale cached flag
+  would have frozen a document "done" forever the first time it settled. `pool->trim()` moved with
+  it — called at the end of `buildPendingPages()` whenever the live check comes back true, rather
+  than once ever, since `BufferPool::trim()` is already a cheap no-op when there is nothing to trim
+  (`src/buffer_pool.cpp:328`).
 - **The kjv benchmark changes meaning, on purpose.** `tools/benchmark-kjv-load.py` and the
-  `[TIMING] Complete render settled` line currently measure "time to build 1261 pages". Under
-  banking the honest measurement is time-to-first-page and steady-state page count, and "total
-  pages" becomes a number that legitimately never reaches the document's length. Update the
-  benchmark in the same change rather than leaving a number that silently means something else —
-  `design/kjv-load-blocking-regression.md`'s figures are the before, and should be cited as such.
+  `[TIMING] Complete render settled` line used to measure "time to build every page". The settled
+  line now reports `built pages` alongside the unchanged `total pages` (`src/renderer.cpp`), and the
+  benchmark's summary table shows `Built/Total Pages` instead of the old MB/s throughput column,
+  which assumed settle time scaled with document size — under banking it does not, on purpose. See
+  the measurement below; `design/kjv-load-blocking-regression.md`'s figures remain the before.
 
-**Tests**: a document larger than the viewport settles with a bounded number of built pages while
-`isFullyLoaded()` reports true; scrolling to a banked page builds it and it renders identically to
-the same page built eagerly; a beam that becomes visible pulls its banked endpoint page in; the
-`--profile` settle path still terminates.
+**Tests** (`tests/lib/doc_page_budget_test.cpp`): `SettlesWithABoundedBuiltPageCountWellBelowTotal`
+builds a many-hundred-page document with a parked default camera and no priority offsets, and checks
+that `builtPageCount()` stays under a quarter of `numPages()` once `isFullyLoaded()` is true.
+`ABankedPageBuildsIdenticallyToOneNeverBanked` bank a late page on purpose (one
+`buildPendingPages()` call with nothing pointed at it), confirms it is still unbuilt, then names it
+via `setPriorityOffsets()` and waits for it to build — comparing its `anchorFor()` result, text
+length and base offset against the same page in a second document that wanted it from the very first
+call and so was never banked at all. The existing Stage 1/3 tests that waited on `isFullyLoaded()`
+expecting the *whole* document to finish
+(`ABacklogShapedBeforeTheFirstCallStillBuildsInBoundedBatches`,
+`PageIndexForOffsetAnswersBeforeAnyPageIsBuilt`, `ApproximateAnchorAgreesWithAnchorOncePageIsBuilt`)
+needed updating to name what they actually wanted via `setPriorityOffsets()` first, since a bare
+`isFullyLoaded()` wait no longer implies "everything got built" — see those tests' own comments. "A
+beam that becomes visible pulls its banked endpoint page in" needed no new production code or test:
+`LinkBeams` already pushes a strand's endpoint offsets through the same `setPriorityOffsets()`
+channel (Stage 0/3), and Stage 5 changes nothing about what that channel does with them — a beam's
+target page is simply banked, rather than eventually-built-via-P2, until the moment a strand names
+it.
+
+**Verified**: the full `gleditor_test` (514/514, the two new tests above included)/`xudu_test`
+(944/944, excluding the pre-existing unrelated `AnimationTransclusionTest` hang)/`zigzag_test`
+(90/90) suites pass, and `compare-backends.sh`'s `opengl`/`opengles` frames stay byte-identical (the
+same pre-existing, unrelated ~1.4% Vulkan/stale-SPIR-V mismatch as every prior stage). A manual
+`kjv.txt` run (4.4 MB, 1261 pages) with `--profile`:
+
+```text
+[TIMING] First page rendered: 353.78 ms (docs in render: 1)
+[TIMING] Complete render settled: 10017.46 ms (docs: 1, total pages: 1261, built pages: 1)
+```
+
+**1 page built, not 1261** — the number banking exists to shrink. `--profile` still terminates
+cleanly (no hang, no race between the live `isFullyLoaded()` check and `settled`). The remaining ~10
+s is not page building: it is `makePages()`'s own whole-document shaping, run once on a background
+thread and unthrottled by design (see "Non-goals" below — shaping order was never in this stage's
+scope, only what gets *built*), which `Renderer::hasPendingWork()` already waited on before this
+stage existed. Before Stage 0, settling this same document meant that shaping cost *plus* building
+all 1261 pages; Stage 5 removes the second term for a document whose viewport does not need it,
+which is the whole point — it does not, and was never meant to, touch the first.
 
 ## Non-goals
 

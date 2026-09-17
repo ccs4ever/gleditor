@@ -1307,10 +1307,10 @@ void Doc::load(const gleditor::TextSource &source) {
   priorityOffsets.clear();
   // A load replaces the document wholesale, so whatever the previous content
   // had already finished laying out says nothing about this one: without
-  // resetting these, isFullyLoaded() would keep answering as of the old text,
-  // and anything (LinkBeams::drawFrame among them) waiting on the new content
-  // to finish paginating would never see it become pending.
-  fullyLoaded = false;
+  // resetting this, isFullyLoaded() (which requires shapingComplete before
+  // it will even look at wantedPageIndices()) would keep answering as of the
+  // old text, and anything (LinkBeams::drawFrame among them) waiting on the
+  // new content to finish paginating would never see it become pending.
   shapingComplete.store(false, std::memory_order_release);
   pool->reserveCapacity(rowsFor(text.size()));
   makePages();
@@ -1409,6 +1409,48 @@ Doc::viewportPriorityRange() const {
       cam->pagePixelY + halfViewportPx + marginPx);
 }
 
+std::vector<std::uint32_t> Doc::wantedPageIndices() const {
+  refreshPageIndexFilade();
+
+  std::vector<std::uint32_t> ordered;
+  std::unordered_set<std::uint32_t> seen;
+  const auto want = [&](const std::uint32_t index) {
+    if (seen.insert(index).second) {
+      ordered.push_back(index);
+    }
+  };
+
+  if (const auto viewport = viewportPriorityRange()) {
+    for (auto index = viewport->firstEntryIndex;
+         index <= viewport->lastEntryIndex; ++index) {
+      want(static_cast<std::uint32_t>(index));
+    }
+  } else if (!pageIndexFilade.empty()) {
+    // No usable camera signal (see cameraInfo()'s own comment) but something
+    // has been shaped -- want page 0 rather than nothing, so a document
+    // opened before its camera settles still shows something and
+    // isFullyLoaded() cannot report done having built no pages.
+    want(0);
+  }
+
+  for (const auto offset : priorityOffsets) {
+    if (const auto hit = pageIndexFilade.findEntryAtByte(offset)) {
+      want(static_cast<std::uint32_t>(hit->entryIndex));
+    }
+  }
+
+  return ordered;
+}
+
+bool Doc::isFullyLoaded() const {
+  if (!shapingComplete.load(std::memory_order_acquire)) {
+    return false;
+  }
+  return std::ranges::all_of(wantedPageIndices(), [this](const auto index) {
+    return nullptr != page(index);
+  });
+}
+
 std::chrono::milliseconds Doc::buildBudgetForThisCall() {
   // pageEntries accumulates independently of pendingShapings (which
   // buildPendingPages() below drains), so it reflects every page shaped so
@@ -1465,9 +1507,10 @@ std::chrono::milliseconds Doc::buildBudgetForThisCall() {
 }
 
 bool Doc::buildPendingPages(RenderState &state) {
-  if (fullyLoaded) {
+  if (isFullyLoaded()) {
     return true;
   }
+
   std::map<std::uint32_t, PendingShaping> toBuild;
   {
     std::lock_guard lock(shapingMutex);
@@ -1480,43 +1523,13 @@ bool Doc::buildPendingPages(RenderState &state) {
   // anything to chain from once a page can be built out of order (Stage 3).
   refreshPageIndexFilade();
 
-  // Priority order (Stage 3 of design/priority-page-building.md): P0 (the
-  // viewport range) ascending, then P1 (priorityOffsets' pages) ascending,
-  // then P2 (everything else) ascending. Degenerates to exactly document
-  // order whenever P0 and P1 have nothing left in toBuild to add -- a parked
-  // default camera and no priority offsets builds top to bottom, same as
-  // before Stage 3.
-  std::vector<std::uint32_t> orderedKeys;
-  orderedKeys.reserve(toBuild.size());
-  std::unordered_set<std::uint32_t> queued;
-  const auto queueKey = [&](const std::uint32_t key) {
-    if (queued.insert(key).second) {
-      orderedKeys.push_back(key);
-    }
-  };
-  const auto queueRange = [&](const std::size_t lo, const std::size_t hi) {
-    // toBuild is ordered by key, so walking from lower_bound(lo) costs
-    // nothing beyond the pages actually in range plus one past it.
-    for (auto rangeIt = toBuild.lower_bound(static_cast<std::uint32_t>(lo));
-         rangeIt != toBuild.end() && rangeIt->first <= hi; ++rangeIt) {
-      queueKey(rangeIt->first);
-    }
-  };
-
-  if (const auto viewport = viewportPriorityRange()) {
-    queueRange(viewport->firstEntryIndex, viewport->lastEntryIndex);
-  }
-  for (const auto offset : priorityOffsets) {
-    if (const auto hit = pageIndexFilade.findEntryAtByte(offset)) {
-      const auto key = static_cast<std::uint32_t>(hit->entryIndex);
-      if (toBuild.contains(key)) {
-        queueKey(key);
-      }
-    }
-  }
-  for (const auto &[key, unused] : toBuild) {
-    queueKey(key);
-  }
+  // What this call wants (Stage 5 of design/priority-page-building.md): P0
+  // (the viewport range) then P1 (priorityOffsets' pages), ascending,
+  // deduplicated. A page not in this list is not built this call, whether
+  // or not toBuild happens to already hold its shaping.
+  const auto wanted = wantedPageIndices();
+  const std::unordered_set<std::uint32_t> wantedSet(wanted.begin(),
+                                                    wanted.end());
 
   // Bounded so that a backlog the background shaping thread got ahead on --
   // whether from a slow render-thread startup or simply outpacing this loop
@@ -1528,27 +1541,37 @@ bool Doc::buildPendingPages(RenderState &state) {
   // that gap faster instead of waiting behind every page before it.
   const auto buildBudget = buildBudgetForThisCall();
   const auto buildStart  = std::chrono::steady_clock::now();
-  for (const auto trueIndex : orderedKeys) {
-    const auto found = toBuild.find(trueIndex);
-    if (found == toBuild.end()) {
-      continue; // Queued twice across tiers; already built below.
+  for (const auto trueIndex : wanted) {
+    if (nullptr != page(trueIndex)) {
+      continue; // Already built.
     }
-    auto &entry = found->second;
-    // Always present: see the comment above the refreshPageIndexFilade()
-    // call.
-    const auto hit              = pageIndexFilade.findEntryByIndex(trueIndex);
-    const float startYPx        = hit ? hit->startYPx : 0.0F;
-    const float pageHeightPx    = pageBoxFor(entry.shaping).height;
+    const auto hit = pageIndexFilade.findEntryByIndex(trueIndex);
+    if (!hit) {
+      continue; // Background loader has not shaped this page yet.
+    }
+
+    PageShaping shaping;
+    if (const auto found = toBuild.find(trueIndex); found != toBuild.end()) {
+      shaping = std::move(found->second.shaping);
+      toBuild.erase(found);
+    } else {
+      // Banked earlier, or wanted for the first time without ever having
+      // passed through toBuild -- re-derive its shaping the same way
+      // ensurePagesBuiltThrough() does for reflow. pageIndexFilade already
+      // knows its start offset permanently, so this needs nothing
+      // pendingShapings held onto.
+      shaping = layoutFrom(hit->startByte);
+    }
+
+    const float pageHeightPx    = pageBoxFor(shaping).height;
     const float pageHeightWorld = pageHeightPx * pixelsToWorld;
-    const float topYWorld       = -startYPx * pixelsToWorld;
+    const float topYWorld       = -hit->startYPx * pixelsToWorld;
     const float centerY         = topYWorld - (pageHeightWorld / 2.0F);
 
     glm::mat4 trans =
         glm::translate(glm::mat4(1.0F), glm::vec3(0.0F, centerY, 0.0F));
     trans = glm::scale(trans, glm::vec3(pixelsToWorld, pixelsToWorld, 1.0F));
-    placePageAt(state, trueIndex, std::move(entry.shaping), entry.textOffset,
-                trans);
-    toBuild.erase(found);
+    placePageAt(state, trueIndex, std::move(shaping), hit->startByte, trans);
 
     // Always build at least one page per call even if it alone exceeds the
     // budget, so a single expensive page (e.g. one that grows the glyph
@@ -1559,26 +1582,30 @@ bool Doc::buildPendingPages(RenderState &state) {
     }
   }
 
+  // Bank what is left: a still-wanted page the budget did not reach goes
+  // back to pendingShapings, same as before Stage 5. Everything else -- P2
+  // in the old tiering, now simply "not currently wanted" -- is dropped
+  // here instead: its heavy PageShaping goes with it, and
+  // pageEntries/pageIndexFilade already remember its offset and length
+  // permanently, which is all the re-shape path above needs if it becomes
+  // wanted again.
+  std::erase_if(toBuild, [&](const auto &entry) {
+    return !wantedSet.contains(entry.first);
+  });
   if (!toBuild.empty()) {
-    // Whatever this call didn't get to goes back, merged with anything the
-    // background thread has appended since the swap above -- keys never
-    // collide, since every one names a page index this call either built or
-    // never reached, and merge() splices nodes rather than copying each
+    // Keys never collide with what the background thread has appended since
+    // the swap above -- every one names a page index this call either built
+    // or never reached -- and merge() splices nodes rather than copying each
     // still-large PageShaping.
     std::lock_guard lock(shapingMutex);
     pendingShapings.merge(toBuild);
-    return false;
   }
 
-  if (shapingComplete.load(std::memory_order_acquire)) {
-    std::lock_guard lock(shapingMutex);
-    if (pendingShapings.empty()) {
-      pool->trim();
-      fullyLoaded = true;
-      return true;
-    }
+  const bool done = isFullyLoaded();
+  if (done) {
+    pool->trim();
   }
-  return false;
+  return done;
 }
 
 void Doc::newPage(RenderState &state, PageShaping aShaping,
