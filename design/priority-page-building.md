@@ -6,8 +6,8 @@ budget) landed with the Tier 1/Tier 2 work in
 this note assumes its vocabulary (`Doc::buildPendingPages()`, `pageIndexFilade`,
 `render::kPageBuildFrameBudget`).
 
-**Status: Stage 0 is done** — see "Stage 0 — let beams draw before the document finishes (done)"
-below. Stages 1-5 are not started.
+**Status: Stages 0 and 1 are done** — see their sections below, both marked "(done)". Stages 2-5 are
+not started.
 
 ## Goal
 
@@ -226,32 +226,66 @@ break. Full `xudu_test`/`gleditor_test`/`zigzag_test` suites pass with no new fa
 pre-existing, unrelated `AnimationTransclusionTest` failures reproduce identically on unpatched
 `HEAD`).
 
-### Stage 1 — the oracle and the channel, without reordering anything
+### Stage 1 — the oracle and the channel, without reordering anything (done)
 
-- Populate `LayoutEntry::byteLength` from `shaping.limit` when filling `pageHeightsPx` in
-  `Doc::makePages()` (`src/doc.cpp:1175`); rename the member to match its widened job.
-- Add `Doc::pageIndexForOffset()` and `Doc::approximateAnchorFor()`.
+- Populate `LayoutEntry::byteLength` from `shaping.limit` when filling `pageEntries` (renamed from
+  `pageHeightsPx`) in `Doc::makePages()` (`src/doc.cpp`).
+- Add `Doc::pageIndexForOffset()` and `Doc::approximateAnchorFor()`, both answered from
+  `pageIndexFilade` via a shared, self-refreshing `Doc::refreshPageIndexFilade() const` (needed
+  `shapingMutex`/`pageIndexFilade`/`pageIndexFiladeBuiltFor` to become `mutable`, since these are
+  meant to be callable before any page is built and so cannot wait for `buildBudgetForThisCall()` to
+  have triggered the refresh as a side effect).
 - Add `Doc::setPriorityOffsets()` and store the resulting page indices.
 - Extend `Doc::buildBudgetForThisCall()` to take the furthest-behind of {camera target page,
   priority target pages} rather than the camera alone — so the existing catch-up multiplier hurries
   toward whatever a beam needs, still building in document order.
-- Wire `LinkBeams` to push its ribbon-crossing offsets.
+- Wire `LinkBeams` to push its ribbon-crossing offsets: `LinkBeams::updatePriorityOffsets()`
+  (`apps/xudu/beams.cpp`), called from `drawFrame()` right after `resolveAnchors()`. For each strand
+  and transclusion strand with at least one still-unresolved document endpoint, it resolves both
+  ends to approximate world points (`approximateAnchorFor()` + `Doc::worldPoint()` for a document
+  end still waiting on its page, the exact anchor's `worldPoint()` for one that has resolved,
+  `CellAnchor::position` for a cell end), and calls the new static
+  `LinkBeams::ribbonMaybeOnScreen()` — a box test built on `outsideFrustum()`
+  (`include/gleditor/draw_budget.hpp`), centred on the segment's midpoint and inflated by one page
+  height (`approximateAnchorFor()`'s own accuracy contract) in every direction to absorb the
+  approximation. Offsets from strands whose ribbon survives are pushed via
+  `Doc::setPriorityOffsets()`, one call per document per frame (an empty span clears a document with
+  no surviving strand, so a beam that scrolls away does not leave a stale priority behind).
 
 For a **cross-domain** strand the ribbon test has one endpoint from the filade (the document end,
 approximate) and one from `cellAnchorResolver` (the cell end, exact but only if the cell is
 currently placed). When the cell end does not resolve, there is no ribbon to test — treat the strand
 as *possibly* crossing and push its document end anyway. Being conservative costs one page built
 early; being clever costs a beam that stays missing because the page it needed was never
-prioritised.
+prioritised. `updatePriorityOffsets()` implements this as an explicit third case alongside "both
+ends resolved, test the ribbon" and "neither resolved, nothing to say yet".
 
 Real value on its own: a beam whose far end is page 900 makes the loader hurry to 900, rather than
 ambling there at the plain per-call budget. No invariant changes, nothing can arrive out of order.
 
-**Tests**: filade byte→page round-trip against a linear scan (extends the existing
-`verifyAgainstLinearScan()` habit); `approximateAnchorFor()` agrees with `anchorFor()` to within a
-page height once the page *is* built; a `DocPageBudgetTest` case that pushes a priority offset far
-ahead with the camera left at the start and asserts catch-up engages, mirroring the existing camera
-case.
+**Tests**: `DocPageBudgetTest` gained three cases (`tests/lib/doc_page_budget_test.cpp`) —
+`PriorityOffsetFarAheadEngagesCatchUpToo` (mirrors the existing camera case, but with a pushed
+offset instead of a moved camera), `PageIndexForOffsetAnswersBeforeAnyPageIsBuilt` (the oracle
+answers before `buildPendingPages()` has ever run, cross-checked against `anchorFor()` once building
+catches up), and `ApproximateAnchorAgreesWithAnchorOncePageIsBuilt` (the approximate and exact
+anchors name the same page and land within about one page height of each other in world space).
+`tests/xudu/beam_priority_offset_test.cpp` is the Stage 1 analogue of Stage 0's own binary-driven
+regression test: a beam whose far end is five bytes from the end of a 1000+-page document, driven
+through the real `xudu` binary, asserted to settle correctly and within a generous bound — the same
+"does not hang" property Stage 0 guards, now for the priority channel rather than the settling
+condition.
+
+**Verified by hand**, the same way Stage 0 was: two documents (a small foreground one and a
+1000+-page background one, `--background`, so camera auto-framing — an unrelated cost that does not
+scale with page count, found while building this scenario and ruled out as out of scope — never
+engages), linked at either the very start or five bytes from the very end of the large document, run
+through the real `xudu --profile` binary with `--no-sworph` (isolating the priority channel from the
+sworph/alignment machinery), repeated three times each with the system otherwise idle. Linking to
+the end settled consistently faster than linking to the start (roughly 8.8-9.2s vs 9.2-9.5s to build
+the same 1465 pages) — modest rather than dramatic, exactly as the stage's own subtitle predicts:
+building still happens strictly in document order, so the saving is fewer, larger per-call budgets
+rather than the target page arriving early. The bigger win — the target page appearing out of turn —
+is Stage 2's to make possible and Stage 3's to turn on.
 
 ### Stage 2 — make the machinery gap-tolerant, without using it
 

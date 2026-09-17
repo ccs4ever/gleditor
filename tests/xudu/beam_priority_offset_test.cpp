@@ -129,9 +129,9 @@ TEST_F(BeamPriorityOffsetTest,
   // document -- as far as an offset can be from where plain in-order building
   // starts, which is exactly the case a priority push exists to help.
   Link link;
-  link.type  = LinkType::Comment;
-  link.owner = "someone";
-  link.left  = store.rebuild(small).spansFor(0, 5); // "alpha"
+  link.type               = LinkType::Comment;
+  link.owner              = "someone";
+  link.left               = store.rebuild(small).spansFor(0, 5); // "alpha"
   const auto targetOffset = static_cast<std::uint32_t>(big.size() - 6);
   link.right              = store.rebuild(bigVer).spansFor(targetOffset, 5);
   const auto linked       = store.addLink(small, link);
@@ -139,11 +139,10 @@ TEST_F(BeamPriorityOffsetTest,
   const auto storePath = testRoot / "store";
   store.save(storePath.string());
 
-  const std::string cmd = xuduBin.string() + " --permascroll " +
-                          permascroll.string() +
-                          " --backend opengl --version-id " + linked.str() +
-                          " --background " + bigVer.str() +
-                          " --no-sworph --profile " + storePath.string();
+  const std::string cmd =
+      xuduBin.string() + " --permascroll " + permascroll.string() +
+      " --backend opengl --version-id " + linked.str() + " --background " +
+      bigVer.str() + " --no-sworph --profile " + storePath.string();
 
   const auto start = std::chrono::steady_clock::now();
   const auto res   = executeProcess(cmd);
