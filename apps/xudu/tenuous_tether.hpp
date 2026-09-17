@@ -121,12 +121,23 @@ public:
     return mid;
   }
 
+  void setTessellationSegments(const std::size_t segs) noexcept {
+    segments_ = segs;
+  }
+  [[nodiscard]] std::size_t tessellationSegments() const noexcept {
+    return segments_;
+  }
+  void setControlDepth(const float depth) noexcept { controlDepth_ = depth; }
+  [[nodiscard]] float controlDepth() const noexcept { return controlDepth_; }
+
 private:
   RendererRef renderer_;
   render::RenderDevice *device_{nullptr};
   std::unique_ptr<gleditor::Beams> beams_;
   std::vector<FlyingTetherAnchor> tethers_;
   bool visible_{true};
+  std::size_t segments_{16};
+  float controlDepth_{18.0F};
 };
 
 } // namespace xudu

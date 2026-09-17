@@ -170,4 +170,95 @@ TEST(TransclusionLoomTest, DetectsNegativeRankLooms) {
   EXPECT_EQ(looms.front().strandIndices.size(), 2U);
 }
 
+TEST(TransclusionLoomTest, MultiLoomPartitioningAndStrandMapping) {
+  Store store;
+  auto at = store.sliceGenesis(MicroversionId{});
+
+  const std::string docText = "SecA: First passage of section A.\n"
+                              "SecB: Second passage of section A.\n"
+                              "SecC: Third passage of section A.\n"
+                              "SecD: Passage for dimension two D.\n"
+                              "SecE: Passage for dimension two E.\n";
+  const auto vDoc           = store.insert(at, 0, docText);
+  const auto doc            = store.rebuild(vDoc);
+  const auto p0             = doc.pieces().front();
+
+  const PrimediaSpan sA{p0.scroll, p0.start + 0, 34};
+  const PrimediaSpan sB{p0.scroll, p0.start + 34, 35};
+  const PrimediaSpan sC{p0.scroll, p0.start + 69, 34};
+  const PrimediaSpan sD{p0.scroll, p0.start + 103, 35};
+  const PrimediaSpan sE{p0.scroll, p0.start + 138, 35};
+
+  // Rank 1: cA -> cB -> cC along dSeq
+  at            = store.makeCell(vDoc, "cA");
+  const auto cA = store.cellRefOf(at);
+  at            = store.spliceCellSpan(at, cA, 0, 3, sA);
+
+  at            = store.makeCell(at, "cB");
+  const auto cB = store.cellRefOf(at);
+  at            = store.spliceCellSpan(at, cB, 0, 3, sB);
+
+  at            = store.makeCell(at, "cC");
+  const auto cC = store.cellRefOf(at);
+  at            = store.spliceCellSpan(at, cC, 0, 3, sC);
+
+  const auto dSeq = store.rebuildManifold(at).dimensions().front();
+  at              = store.setLink(at, cA, dSeq, DimVector::POS, cB);
+  at              = store.setLink(at, cB, dSeq, DimVector::POS, cC);
+
+  // Rank 2: cD -> cE along a new dimension dAlt
+  at            = store.makeCell(at, "cD");
+  const auto cD = store.cellRefOf(at);
+  at            = store.spliceCellSpan(at, cD, 0, 3, sD);
+
+  at            = store.makeCell(at, "cE");
+  const auto cE = store.cellRefOf(at);
+  at            = store.spliceCellSpan(at, cE, 0, 3, sE);
+
+  const auto minted = store.makeDimension(at, "d.alt");
+  at                = minted.version;
+  const auto dAlt   = minted.dim;
+  ASSERT_NE(dAlt, noCell);
+  at = store.setLink(at, cD, dAlt, DimVector::POS, cE);
+
+  const auto manifold = store.rebuildManifold(at);
+
+  const UniversalViewContext ctx{
+      .docViews      = {&doc},
+      .manifoldViews = {&manifold},
+      .manifoldFoci  = {cA},
+      .cellRadius    = -1,
+  };
+
+  std::vector<TransclusionPair> pairs;
+  placeTransclusions(ctx, pairs);
+  ASSERT_EQ(pairs.size(), 5U);
+
+  const auto looms = detectTransclusionLooms(ctx, pairs);
+  ASSERT_EQ(looms.size(), 2U);
+
+  // Precompute strandToLoom lookup mapping (identical to LinkBeams logic)
+  std::vector<std::int32_t> strandToLoom(pairs.size(), -1);
+  for (std::size_t lIdx = 0; lIdx < looms.size(); ++lIdx) {
+    for (const auto sIdx : looms[lIdx].strandIndices) {
+      if (sIdx < strandToLoom.size()) {
+        strandToLoom[sIdx] = static_cast<std::int32_t>(lIdx);
+      }
+    }
+  }
+
+  // Loom 0: cA, cB, cC (strands 0, 1, 2)
+  EXPECT_EQ(looms[0].dimension, dSeq);
+  EXPECT_EQ(looms[0].strandIndices.size(), 3U);
+  EXPECT_EQ(strandToLoom[0], 0);
+  EXPECT_EQ(strandToLoom[1], 0);
+  EXPECT_EQ(strandToLoom[2], 0);
+
+  // Loom 1: cD, cE (strands 3, 4)
+  EXPECT_EQ(looms[1].dimension, dAlt);
+  EXPECT_EQ(looms[1].strandIndices.size(), 2U);
+  EXPECT_EQ(strandToLoom[3], 1);
+  EXPECT_EQ(strandToLoom[4], 1);
+}
+
 } // namespace

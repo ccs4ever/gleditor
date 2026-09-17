@@ -96,6 +96,23 @@ LinkBeams::LinkBeams(Session &aSession, RendererRef aRenderer)
 
 LinkBeams::~LinkBeams() = default;
 
+void LinkBeams::setBridgeRuntimeConfig(
+    xanadu::BridgeRuntimeConfig config) noexcept {
+  bridgeConfig_                   = std::move(config);
+  beamConfig_.loomBundlingEnabled = bridgeConfig_.loom.bundlingEnabled;
+  beamConfig_.loomAlpha           = bridgeConfig_.loom.alpha;
+  beamConfig_.loomHoverAlpha      = bridgeConfig_.loom.hoverAlpha;
+  cellRadius_                     = bridgeConfig_.cellRadius;
+  if (tetherOverlay_ != nullptr) {
+    tetherOverlay_->setTessellationSegments(
+        bridgeConfig_.tether.tessellationSegments);
+    tetherOverlay_->setControlDepth(
+        std::abs(bridgeConfig_.tether.controlDepth));
+  }
+  strandsRebuilt   = true;
+  spanfiladeClean_ = false;
+}
+
 void LinkBeams::deviceReady(render::RenderDevice &device,
                             const render::PipelineDesc &documentPipeline) {
   beams = std::make_unique<gleditor::Beams>(&device);
@@ -186,8 +203,17 @@ void LinkBeams::rebuildStrands(RenderState &state) {
     } else {
       looms_.clear();
     }
+    strandToLoom_.assign(transclusionStrands.size(), -1);
+    for (std::size_t lIdx = 0; lIdx < looms_.size(); ++lIdx) {
+      for (const auto sIdx : looms_[lIdx].strandIndices) {
+        if (sIdx < strandToLoom_.size()) {
+          strandToLoom_[sIdx] = static_cast<std::int32_t>(lIdx);
+        }
+      }
+    }
   } else {
     looms_.clear();
+    strandToLoom_.clear();
     placeLinks(session.store().links(), versions, placed, unplaced);
     strands.clear();
     strands.reserve(placed.size());
@@ -222,6 +248,7 @@ void LinkBeams::rebuildStrands(RenderState &state) {
           .span = tp.span,
       });
     }
+    strandToLoom_.assign(transclusionStrands.size(), -1);
   }
 }
 
@@ -1098,11 +1125,11 @@ void LinkBeams::alignCellSatelloid(const Strand &strand, RenderState &state) {
   cellBody.targetKind      = LinkTargetKind::ZigzagCell;
   cellBody.restingPosition = cellAnch->position;
   cellBody.position        = cellAnch->position;
-  cellBody.width           = 24.0F;
-  cellBody.height          = 14.0F;
+  cellBody.width           = bridgeConfig_.satelloid.defaultWidth;
+  cellBody.height          = bridgeConfig_.satelloid.defaultHeight;
   cellBody.isForeground    = true;
   cellBody.isFlying        = true;
-  cellBody.mass            = tensionEngine_.params().satelloidMass;
+  cellBody.mass            = bridgeConfig_.satelloid.mass;
   cellBody.pinned          = false;
 
   if (const auto *existing = tensionEngine_.findCellBody(cellRef)) {
@@ -1134,7 +1161,7 @@ void LinkBeams::alignCellSatelloid(const Strand &strand, RenderState &state) {
   constraint.toKind      = LinkTargetKind::ZigzagCell;
   constraint.nearAnchorY = anchorWorld->y - docPos.y;
   constraint.farAnchorY  = 0.0F;
-  constraint.targetGap   = tensionEngine_.params().satelloidGap;
+  constraint.targetGap   = bridgeConfig_.satelloid.gap;
   constraint.prominence  = 1.0F;
   constraint.active      = true;
   tensionEngine_.addConstraint(constraint);
@@ -1150,22 +1177,21 @@ void LinkBeams::alignCellSatelloid(const Strand &strand, RenderState &state) {
   const auto *solved = tensionEngine_.findCellBody(cellRef);
   const glm::vec3 solvedPos =
       solved ? solved->position
-             : glm::vec3(docPos.x + docHalfW +
-                             tensionEngine_.params().satelloidGap,
+             : glm::vec3(docPos.x + docHalfW + bridgeConfig_.satelloid.gap,
                          anchorWorld->y, 0.0F);
 
   // 4. Update SatelloidOverlay
-  if (satelloidOverlay_ != nullptr) {
+  if (satelloidOverlay_ != nullptr &&
+      bridgeConfig_.satelloid.alignmentEnabled) {
     CellSatelloid sat;
     sat.cellRef    = cellRef;
     sat.originPos  = cellAnch->position;
     sat.currentPos = solvedPos;
-    sat.targetPos =
-        glm::vec3(docPos.x + docHalfW + tensionEngine_.params().satelloidGap,
-                  anchorWorld->y, 0.0F);
-    sat.width       = 24.0F;
-    sat.height      = 14.0F;
-    sat.dimName     = "d.sequence";
+    sat.targetPos = glm::vec3(docPos.x + docHalfW + bridgeConfig_.satelloid.gap,
+                              anchorWorld->y, 0.0F);
+    sat.width     = bridgeConfig_.satelloid.defaultWidth;
+    sat.height    = bridgeConfig_.satelloid.defaultHeight;
+    sat.dimName   = "d.sequence";
     sat.accentColor = 0x38BDF8FF; // Cyan
     sat.alpha       = 1.0F;
     sat.active      = true;
@@ -1173,16 +1199,17 @@ void LinkBeams::alignCellSatelloid(const Strand &strand, RenderState &state) {
   }
 
   // 5. Register tenuous parent tether in TenuousTetherOverlay
-  if (tetherOverlay_ != nullptr && cellAnch->position.z < -5.0F) {
+  if (tetherOverlay_ != nullptr && bridgeConfig_.satelloid.tetherEnabled &&
+      cellAnch->position.z < bridgeConfig_.tether.activationDepthThreshold) {
     FlyingTetherAnchor tether;
     tether.targetId   = static_cast<std::size_t>(cellRef);
     tether.targetKind = LinkTargetKind::ZigzagCell;
     tether.cellRef    = cellRef;
     tether.originPos  = cellAnch->position;
     tether.currentPos = solvedPos;
-    tether.width      = 24.0F;
-    tether.height     = 14.0F;
-    tether.colour     = 0x38BDF844;
+    tether.width      = bridgeConfig_.satelloid.defaultWidth;
+    tether.height     = bridgeConfig_.satelloid.defaultHeight;
+    tether.colour     = bridgeConfig_.tether.colour;
     tether.active     = true;
     tetherOverlay_->setTether(tether);
   }
@@ -1271,6 +1298,17 @@ bool LinkBeams::picked(const render::PickingResult &pick, RenderState &state) {
   }
   // Ours whatever happens next: a beam was clicked, and the click must not
   // fall through to the page behind it.
+  if (pick.tag.clusterIndex >= kTagLoomBase) {
+    const auto loomIdx = pick.tag.clusterIndex - kTagLoomBase;
+    if (loomIdx < looms_.size() && !looms_[loomIdx].strandIndices.empty()) {
+      const auto firstStrand = looms_[loomIdx].strandIndices.front();
+      hoveredTransclusion_   = firstStrand;
+      if (firstStrand < transclusionStrands.size()) {
+        transclusionStrands[firstStrand].aligned = false;
+      }
+    }
+    return true;
+  }
   if (pick.tag.clusterIndex >= strands.size()) {
     const auto tIndex = pick.tag.clusterIndex - strands.size();
     if (tIndex < transclusionStrands.size()) {
@@ -1563,6 +1601,17 @@ void LinkBeams::drawFrame(gleditor::FrameContext &ctx) {
       }
     }
 
+    struct LoomRenderState {
+      bool hasEdges{false};
+      Edge nearEdge{};
+      Edge farEdge{};
+      std::size_t docSpan{1};
+      std::uint32_t baseColour{0xFFD700FFU};
+      float alphaFactor{1.0F};
+      float phase{0.0F};
+    };
+    std::vector<LoomRenderState> loomStates(looms_.size());
+
     // Render pure transclusion beams (solid continuous identity prisms between
     // identical primedia spans across documents)
     for (std::size_t i = 0; i < transclusionStrands.size(); i++) {
@@ -1655,36 +1704,75 @@ void LinkBeams::drawFrame(gleditor::FrameContext &ctx) {
         }
       }
 
-      bool inLoom = false;
-      if (beamConfig_.loomBundlingEnabled) {
-        for (const auto &loom : looms_) {
-          if (std::find(loom.strandIndices.begin(), loom.strandIndices.end(),
-                        i) != loom.strandIndices.end()) {
-            inLoom = true;
-            break;
-          }
+      const std::int32_t loomIdx =
+          (beamConfig_.loomBundlingEnabled && i < strandToLoom_.size())
+              ? strandToLoom_[i]
+              : -1;
+      const bool inLoom = (loomIdx >= 0 && static_cast<std::size_t>(loomIdx) <
+                                               loomStates.size());
+
+      if (inLoom) {
+        auto &ls = loomStates[static_cast<std::size_t>(loomIdx)];
+        if (!ls.hasEdges) {
+          ls.hasEdges    = true;
+          ls.nearEdge    = *nearEdge;
+          ls.farEdge     = *farEdge;
+          ls.docSpan     = docSpan;
+          ls.baseColour  = baseBeamColour;
+          ls.alphaFactor = docAlpha;
+          ls.phase       = phase;
+        } else {
+          ls.nearEdge.top.y = std::max(ls.nearEdge.top.y, nearEdge->top.y);
+          ls.nearEdge.bottom.y =
+              std::min(ls.nearEdge.bottom.y, nearEdge->bottom.y);
+          ls.nearEdge.textTop.y =
+              std::max(ls.nearEdge.textTop.y, nearEdge->textTop.y);
+          ls.nearEdge.textBottom.y =
+              std::min(ls.nearEdge.textBottom.y, nearEdge->textBottom.y);
+          ls.nearEdge.lineHeight =
+              std::max(ls.nearEdge.lineHeight, nearEdge->lineHeight);
+
+          ls.farEdge.top.y = std::max(ls.farEdge.top.y, farEdge->top.y);
+          ls.farEdge.bottom.y =
+              std::min(ls.farEdge.bottom.y, farEdge->bottom.y);
+          ls.farEdge.textTop.y =
+              std::max(ls.farEdge.textTop.y, farEdge->textTop.y);
+          ls.farEdge.textBottom.y =
+              std::min(ls.farEdge.textBottom.y, farEdge->textBottom.y);
+          ls.farEdge.lineHeight =
+              std::max(ls.farEdge.lineHeight, farEdge->lineHeight);
+
+          ls.docSpan     = std::max(ls.docSpan, docSpan);
+          ls.alphaFactor = std::min(ls.alphaFactor, docAlpha);
+          ls.phase       = std::max(ls.phase, phase);
         }
       }
 
-      float alphaFactor = docAlpha;
-      if (inLoom) {
-        const bool isHovered =
-            (hoveredTransclusion_ && *hoveredTransclusion_ == i);
-        alphaFactor *=
-            (isHovered ? beamConfig_.loomHoverAlpha : beamConfig_.loomAlpha);
+      const bool isHovered =
+          (hoveredTransclusion_ && *hoveredTransclusion_ == i);
+      const auto tagId = static_cast<std::uint32_t>(strands.size() + i);
+
+      if (!inLoom) {
+        const auto colour = fade(baseBeamColour, docAlpha);
+        band(*nearEdge, *farEdge, docSpan, colour, tagId, phase);
+        recordFirstBeamCrossing(ctx, *nearEdge, *farEdge);
+      } else if (isHovered) {
+        const auto colour =
+            fade(baseBeamColour, docAlpha * beamConfig_.loomHoverAlpha);
+        band(*nearEdge, *farEdge, docSpan, colour, tagId, phase);
+        recordFirstBeamCrossing(ctx, *nearEdge, *farEdge);
       }
 
-      const auto colour = fade(baseBeamColour, alphaFactor);
-      const auto tagId  = static_cast<std::uint32_t>(strands.size() + i);
-
-      // Transclusion beams are solid, continuous volumetric identity bands
-      band(*nearEdge, *farEdge, docSpan, colour, tagId, phase);
-      recordFirstBeamCrossing(ctx, *nearEdge, *farEdge);
+      const auto anchorColour =
+          inLoom ? fade(baseBeamColour,
+                        docAlpha * (isHovered ? beamConfig_.loomHoverAlpha
+                                              : beamConfig_.loomAlpha))
+                 : fade(baseBeamColour, docAlpha);
 
       if (tStrand.from.isDocument()) {
         allAnchors.push_back(MarginAnchor{
             .edge         = *nearEdge,
-            .colour       = colour,
+            .colour       = anchorColour,
             .tagId        = tagId,
             .farEnd       = false,
             .isActive     = false,
@@ -1700,7 +1788,7 @@ void LinkBeams::drawFrame(gleditor::FrameContext &ctx) {
       if (tStrand.to.isDocument()) {
         allAnchors.push_back(MarginAnchor{
             .edge         = *farEdge,
-            .colour       = colour,
+            .colour       = anchorColour,
             .tagId        = tagId,
             .farEnd       = true,
             .isActive     = false,
@@ -1722,6 +1810,19 @@ void LinkBeams::drawFrame(gleditor::FrameContext &ctx) {
           alignTransclusion(tStrand, state, ctx.timeline);
           moved = true;
         }
+      }
+    }
+
+    // Submit bundled loom bands
+    for (std::size_t lIdx = 0; lIdx < loomStates.size(); ++lIdx) {
+      const auto &ls = loomStates[lIdx];
+      if (ls.hasEdges) {
+        const auto loomColour =
+            fade(ls.baseColour, ls.alphaFactor * beamConfig_.loomAlpha);
+        const auto loomTag = static_cast<std::uint32_t>(kTagLoomBase + lIdx);
+        band(ls.nearEdge, ls.farEdge, ls.docSpan, loomColour, loomTag,
+             ls.phase);
+        recordFirstBeamCrossing(ctx, ls.nearEdge, ls.farEdge);
       }
     }
 

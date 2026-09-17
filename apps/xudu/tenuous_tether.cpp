@@ -61,7 +61,7 @@ void TenuousTetherOverlay::drawFrame(gleditor::FrameContext &ctx) {
 
   beams_->clear();
 
-  constexpr int kSegments = 16;
+  const std::size_t kSegments = segments_ > 0 ? segments_ : 16;
   std::vector<glm::vec3> curve(kSegments + 1);
 
   for (const auto &t : tethers_) {
@@ -70,7 +70,7 @@ void TenuousTetherOverlay::drawFrame(gleditor::FrameContext &ctx) {
     }
 
     const glm::vec3 ctrl =
-        computeControlPoint(t.originPos, t.currentPos, 18.0F);
+        computeControlPoint(t.originPos, t.currentPos, controlDepth_);
 
     for (int i = 0; i <= kSegments; ++i) {
       const float param = static_cast<float>(i) / static_cast<float>(kSegments);

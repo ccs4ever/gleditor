@@ -22,6 +22,7 @@ bool BridgeCoordinator::attach(xanadu::ZigzagPresentationSurface &surface) {
   }
 
   surface_ = &surface;
+  surface_->setCellRadius(config_.cellRadius);
   surface_->setBridgeInvalidationCallback(
       [this](const std::uint64_t) { dirty_ = true; });
   surface_->setCellActivationCallback(
@@ -134,6 +135,16 @@ void BridgeCoordinator::synchronize() {
       });
   synchronizedRevision_ = revision;
   dirty_                = false;
+}
+
+void BridgeCoordinator::applyConfig(xanadu::BridgeRuntimeConfig config) {
+  config_ = std::move(config);
+  links_.setCellRadius(config_.cellRadius);
+  links_.setBridgeRuntimeConfig(config_);
+  if (surface_ != nullptr) {
+    surface_->setCellRadius(config_.cellRadius);
+  }
+  dirty_ = true;
 }
 
 } // namespace xudu

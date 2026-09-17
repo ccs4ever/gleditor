@@ -13,6 +13,7 @@
 #include <gleditor/renderer.hpp>
 
 #include "beams.hpp"
+#include "common/xanadu/bridge_config.hpp"
 #include "common/xanadu/zigzag/presentation_surface.hpp"
 #include "satelloid.hpp"
 
@@ -66,6 +67,13 @@ public:
   /// Apply a changed surface revision at a host state-update boundary.
   void synchronize();
 
+  /// Atomically apply bridge runtime configuration across LinkBeams and
+  /// surface.
+  void applyConfig(xanadu::BridgeRuntimeConfig config);
+  [[nodiscard]] const xanadu::BridgeRuntimeConfig &config() const noexcept {
+    return config_;
+  }
+
   [[nodiscard]] bool attached() const noexcept { return surface_ != nullptr; }
   [[nodiscard]] bool dirty() const noexcept { return dirty_; }
   [[nodiscard]] std::uint64_t synchronizedRevision() const noexcept {
@@ -79,6 +87,7 @@ private:
   xanadu::ZigzagPresentationSurface *surface_{nullptr};
   std::uint64_t synchronizedRevision_{0};
   bool dirty_{false};
+  xanadu::BridgeRuntimeConfig config_{};
   SatelloidOverlay *satelloidOverlay_{nullptr};
   CellActivationHandler cellActivationHandler_;
   DocumentFocusHandler documentFocusHandler_;

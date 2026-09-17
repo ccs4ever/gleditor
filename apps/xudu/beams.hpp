@@ -224,6 +224,14 @@ public:
   [[nodiscard]] bool physicsEnabled() const noexcept { return physicsEnabled_; }
   void togglePhysics() noexcept { physicsEnabled_ = !physicsEnabled_; }
 
+  static constexpr std::uint32_t kTagLoomBase = 25000U;
+
+  void setBridgeRuntimeConfig(xanadu::BridgeRuntimeConfig config) noexcept;
+  [[nodiscard]] const xanadu::BridgeRuntimeConfig &
+  bridgeRuntimeConfig() const noexcept {
+    return bridgeConfig_;
+  }
+
 private:
   /**
    * @brief One link with both ends placed: one beam.
@@ -501,7 +509,9 @@ private:
   bool physicsEnabled_{false};
   xanadu::BeamConfig beamConfig_{};
   std::vector<TransclusionLoom> looms_;
+  std::vector<std::int32_t> strandToLoom_;
   std::optional<std::size_t> hoveredTransclusion_;
+  xanadu::BridgeRuntimeConfig bridgeConfig_{};
 
   /// Whether the first-beam-crossing-the-viewport timing line has already
   /// been printed -- see recordFirstBeamCrossing() and
