@@ -1064,12 +1064,20 @@ void Renderer::renderLoop(AutoSDLWindow &window) {
               std::chrono::steady_clock::now() - state.loopStart)
               .count();
       std::size_t totalPages = 0;
+      std::size_t builtPages = 0;
       for (const auto &doc : state.docs) {
         totalPages += doc->numPages();
+        builtPages += doc->builtPageCount();
       }
+      // "Total pages" is a document's length -- unaffected by banking (Stage
+      // 5 of design/priority-page-building.md), since shaping stays eager
+      // for the whole document. "Built pages" is what actually reached the
+      // GPU before settling, which is the number banking exists to shrink;
+      // the two are no longer expected to match.
       std::cout << std::format("[TIMING] Complete render settled: {:.2f} ms "
-                               "(docs: {}, total pages: {})\n",
-                               completeRender, state.docs.size(), totalPages);
+                               "(docs: {}, total pages: {}, built pages: {})\n",
+                               completeRender, state.docs.size(), totalPages,
+                               builtPages);
       this->state->alive = false;
       break;
     }

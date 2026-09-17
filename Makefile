@@ -689,8 +689,14 @@ endif
 .FEATURES = output-sync
 
 
-SPIRV := assets/shaders/vulkan/glyph.vert.spv assets/shaders/vulkan/glyph.frag.spv \
-	assets/shaders/vulkan/beam.vert.spv assets/shaders/vulkan/beam.frag.spv
+# Every portable shader body gets a compiled SPIR-V counterpart -- derived from
+# the .glsl sources on disk rather than hand-listed, so a new shader (or one
+# that quietly stopped being listed, as image.vert/frag.glsl once did here)
+# cannot go stale by being absent from this variable. See the comment above
+# the assets/shaders/vulkan/%.spv pattern rule below for how a single file
+# gets compiled.
+GLSL_SOURCES := $(wildcard assets/shaders/*.glsl)
+SPIRV := $(patsubst assets/shaders/%.glsl,assets/shaders/vulkan/%.spv,$(GLSL_SOURCES))
 
 all: lib gleditor xudu xuzz zigzag xudu-dump vqueryc vquery vprolog vplc vpl gleditor_test xudu_test xuzz_test zigzag_test $(OBJDIR)/compile_commands.json
 ifdef GLEDITOR_ENABLE_VULKAN

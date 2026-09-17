@@ -523,6 +523,22 @@ private:
    */
   [[nodiscard]] std::optional<gleditor::enfilade::VisibleRange>
   viewportPriorityRange() const;
+
+  /**
+   * @brief Which page indices are currently "wanted": P0
+   * (viewportPriorityRange()) then P1 (priorityOffsets), ascending,
+   * deduplicated. What Stage 5 of design/priority-page-building.md banks
+   * against -- a page not in this list is never built, and one already built is
+   * left alone by every caller of this (buildPendingPages() skips it;
+   *        isFullyLoaded() only cares that it exists).
+   *
+   * Falls back to page 0 when viewportPriorityRange() cannot resolve (no
+   * camera wired up yet, or this document coincident with/behind it) and
+   * something has been shaped -- otherwise a document opened before its
+   * camera settles would want nothing at all, and isFullyLoaded() would
+   * report done having built no pages.
+   */
+  [[nodiscard]] std::vector<std::uint32_t> wantedPageIndices() const;
   // token to keep anything other than Doc::create from using our constructor
   struct Private {
     explicit Private() = default;
@@ -765,18 +781,19 @@ public:
   void load(const gleditor::TextSource &source);
   void makePages();
   void makePages(RenderState &state);
-  /// Build any pending shaped pages on the render thread, up to
+  /// Build wanted pages (see wantedPageIndices()) on the render thread, up to
   /// render::kPageBuildFrameBudget worth of wall-clock time -- or
   /// render::kPageBuildCatchUpMultiplier times that, when the camera or a
   /// page named by setPriorityOffsets() is well past what has been built so
-  /// far (see buildBudgetForThisCall()). Picked in priority order (Stage 3 of
-  /// design/priority-page-building.md): pages in viewportPriorityRange()
-  /// first, then priorityOffsets' pages, then the lowest remaining index --
-  /// which is exactly document order whenever the first two tiers have
-  /// nothing left to add, so a document with a parked default camera and no
-  /// priority offsets still loads top to bottom. Whatever the budget did not
-  /// reach stays queued for the next call. Returns true when all pages have
-  /// been built and shaping is complete.
+  /// far (see buildBudgetForThisCall()). Since Stage 5 of
+  /// design/priority-page-building.md, a page that is not wanted is never
+  /// built at all: it is banked, holding only its pageEntries/pageIndexFilade
+  /// record (offset and length), and re-shaped from that on demand -- via
+  /// layoutFrom() -- if it later becomes wanted. Whatever the budget did not
+  /// reach of the currently-wanted set stays queued for the next call.
+  /// Returns true when shaping is complete and every currently-wanted page is
+  /// built -- see isFullyLoaded(), which answers the same question live
+  /// without building anything.
   bool buildPendingPages(RenderState &state);
   /// Byte offsets this document should build the pages for ahead of the
   /// rest, after the viewport's own pages -- see buildBudgetForThisCall() and
@@ -1025,7 +1042,18 @@ public:
   [[nodiscard]] float pageWidthWorld() const {
     return pageGeometry.widthPx * pixelsToWorld;
   }
-  [[nodiscard]] bool isFullyLoaded() const { return fullyLoaded; }
+  /**
+   * @brief Whether this document is "settled": shaping complete and every
+   *        currently-wanted page (see wantedPageIndices()) built.
+   *
+   * Since Stage 5 of design/priority-page-building.md this is no longer "all
+   * pages built" -- a document larger than the viewport can settle having
+   * built only a handful of pages, with the rest banked. It is recomputed
+   * live rather than cached, so scrolling to reveal a banked page makes this
+   * answer false again without anything else having to notice the camera
+   * moved: buildPendingPages() need not have run since.
+   */
+  [[nodiscard]] bool isFullyLoaded() const;
 
   /**
    * @brief Ease this document into place and fade it in.
@@ -1113,8 +1141,6 @@ public:
   /// Position this document currently rests at or is moving towards.
   [[nodiscard]] glm::vec3 currentPosition() const { return position(); }
 
-  bool fullyLoaded{false};
-
   struct PendingShaping {
     PageShaping shaping;
     std::uint32_t textOffset{};
@@ -1123,11 +1149,14 @@ public:
   /// read-only queries that only happen to need to refresh the mutable cache
   /// below on demand.
   mutable std::mutex shapingMutex;
-  /// Shaped pages not yet built, keyed by true page index rather than kept
-  /// as a FIFO -- a std::map keeps ascending key order for free, which is
-  /// exactly the order buildPendingPages() still drains in (Stage 2 does
-  /// not reorder anything), and is what lets Stage 3 later pull a
-  /// out-of-order key without the container itself needing to change again.
+  /// Shaped pages not yet built, keyed by true page index. Holds only pages
+  /// buildPendingPages() currently wants (see wantedPageIndices()) but has
+  /// not reached yet, plus whatever the background loader has appended since
+  /// the last call and not yet triaged -- a page found not wanted at triage
+  /// is dropped here rather than kept (Stage 5 of
+  /// design/priority-page-building.md), since pageEntries/pageIndexFilade
+  /// already remember its offset and length permanently and layoutFrom() can
+  /// re-derive the rest if it becomes wanted later.
   std::map<std::uint32_t, PendingShaping> pendingShapings;
   std::atomic<bool> shapingComplete{false};
 
