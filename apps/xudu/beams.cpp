@@ -549,10 +549,10 @@ void LinkBeams::recordFirstBeamCrossing(const gleditor::FrameContext &ctx,
   }
   // The ribbon's own centreline -- midway between each edge's top and
   // bottom -- rather than a corner, since that is what a reader actually
-  // sees sweep across the screen. No inflation: unlike updatePriorityOffsets()'s
-  // use of this same test, both edges are exact here (this strand already
-  // resolved and is about to be drawn), so there is no approximation to
-  // absorb.
+  // sees sweep across the screen. No inflation: unlike
+  // updatePriorityOffsets()'s use of this same test, both edges are exact here
+  // (this strand already resolved and is about to be drawn), so there is no
+  // approximation to absorb.
   const glm::vec3 nearMid = (nearEdge.top + nearEdge.bottom) * 0.5F;
   const glm::vec3 farMid  = (farEdge.top + farEdge.bottom) * 0.5F;
   if (!ribbonMaybeOnScreen(ctx.viewProjection, nearMid, farMid, 0.0F)) {

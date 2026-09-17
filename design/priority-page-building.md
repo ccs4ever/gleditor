@@ -400,9 +400,9 @@ beam crossing the viewport being drawn — and recorded it here, per
 data".
 
 **Instrumentation**: `RenderState` gained `loopStart`, a `std::chrono::steady_clock::time_point` set
-once at the top of `Renderer::renderLoop()` — the same reference point its own `[TIMING] First page
-rendered` / `[TIMING] Complete render settled` lines already measured from, now shared rather than a
-local the render loop kept to itself. `LinkBeams::recordFirstBeamCrossing()`
+once at the top of `Renderer::renderLoop()` — the same reference point its own
+`[TIMING] First page rendered` / `[TIMING] Complete render settled` lines already measured from, now
+shared rather than a local the render loop kept to itself. `LinkBeams::recordFirstBeamCrossing()`
 (`apps/xudu/beams.cpp`) is called right after every `band()` draw call (both plain strands and
 transclusion strands) and, the first time a strand's ribbon centreline actually tests on-screen (via
 the same `ribbonMaybeOnScreen()` `outsideFrustum()`-based test `updatePriorityOffsets()` uses for
@@ -412,37 +412,38 @@ Library code still knows nothing about beams; the instrumentation lives entirely
 reading only the shared clock the library now exposes.
 
 **Measurement**: a small foreground document ("alpha beta gamma") linked to a 100 KB, 49-page
-document opened alongside it (`--alongside`, so both are foreground and eligible for sworph — see the
-note below on why `--background` cannot be used for this specific measurement), averaged over two
-runs each on an otherwise-idle machine:
+document opened alongside it (`--alongside`, so both are foreground and eligible for sworph — see
+the note below on why `--background` cannot be used for this specific measurement), averaged over
+two runs each on an otherwise-idle machine:
 
-| Link target                          | First beam crossing viewport | Complete render settled |
-| ------------------------------------- | ----------------------------: | ------------------------: |
-| Near the **start** of the big document (page ~0, builds first regardless of priority) | ~0.8-1.2 s | ~8.9-12.2 s |
-| Near the **end** of the big document (page ~48 of 49, needs the priority push)        | ~4.4 s     | ~11.2-11.8 s |
+| Link target                                                                           | First beam crossing viewport | Complete render settled |
+| ------------------------------------------------------------------------------------- | ---------------------------: | ----------------------: |
+| Near the **start** of the big document (page ~0, builds first regardless of priority) |                   ~0.8-1.2 s |             ~8.9-12.2 s |
+| Near the **end** of the big document (page ~48 of 49, needs the priority push)        |                       ~4.4 s |            ~11.2-11.8 s |
 
-The number that matters is the second row against what the *old* gate (pre-Stage-0) would have given:
-`LinkBeams::drawFrame()` returned before drawing anything — including every strand already resolved —
-unless *every* open document reported `isFullyLoaded()`. A beam whose far end sits on the last page of
-a document could not appear before that document's own full settle time, full stop: in this scenario,
-not before ~11-12 s. Stages 0-3 bring that down to ~4.4 s for the same link — the beam is visible while
-the document is still two-thirds of the way from finishing, rather than only at the very end. The
-first row is the ceiling on how good Stage 3's reordering alone can make the second row: a link to the
-very first page needs no priority push to begin with, so ~0.8-1.2 s is roughly what "already there when
-requested" looks like for this document size — the gap between it and 4.4 s is what document order
-still costs a page 48 pages deep even with priority ordering pushing it as hard as one link can.
+The number that matters is the second row against what the *old* gate (pre-Stage-0) would have
+given: `LinkBeams::drawFrame()` returned before drawing anything — including every strand already
+resolved — unless *every* open document reported `isFullyLoaded()`. A beam whose far end sits on the
+last page of a document could not appear before that document's own full settle time, full stop: in
+this scenario, not before ~11-12 s. Stages 0-3 bring that down to ~4.4 s for the same link — the
+beam is visible while the document is still two-thirds of the way from finishing, rather than only
+at the very end. The first row is the ceiling on how good Stage 3's reordering alone can make the
+second row: a link to the very first page needs no priority push to begin with, so ~0.8-1.2 s is
+roughly what "already there when requested" looks like for this document size — the gap between it
+and 4.4 s is what document order still costs a page 48 pages deep even with priority ordering
+pushing it as hard as one link can.
 
-**Why `--alongside` rather than `--background` here, unlike Stages 0-1's own verification**: a beam's
-ribbon has to be geometrically on-screen for `recordFirstBeamCrossing()` to fire at all, which needs
-its far document positioned somewhere the camera can plausibly reach — `--background` deliberately
-excludes a document from camera auto-framing and parks it deep in Z exactly so a large corpus does not
-drag the reader's attention, which is correct for that document but means its pages, however quickly
-built, are never "crossing the viewport" for this specific metric to observe. `--alongside` reintroduces
-the camera auto-framing cost the earlier stages' own verification notes worked around with
-`--background`, which is why this measurement deliberately stayed at 100 KB / 49 pages rather than the
-1000+-page documents Stages 1-3's own tests use: at that scale the framing cost (an existing,
-orthogonal issue, not this plan's to fix) dominates the number being measured rather than the priority
-mechanism.
+**Why `--alongside` rather than `--background` here, unlike Stages 0-1's own verification**: a
+beam's ribbon has to be geometrically on-screen for `recordFirstBeamCrossing()` to fire at all,
+which needs its far document positioned somewhere the camera can plausibly reach — `--background`
+deliberately excludes a document from camera auto-framing and parks it deep in Z exactly so a large
+corpus does not drag the reader's attention, which is correct for that document but means its pages,
+however quickly built, are never "crossing the viewport" for this specific metric to observe.
+`--alongside` reintroduces the camera auto-framing cost the earlier stages' own verification notes
+worked around with `--background`, which is why this measurement deliberately stayed at 100 KB / 49
+pages rather than the 1000+-page documents Stages 1-3's own tests use: at that scale the framing
+cost (an existing, orthogonal issue, not this plan's to fix) dominates the number being measured
+rather than the priority mechanism.
 
 ### Stage 5 — bank what is not wanted, so it never reaches the GPU
 
