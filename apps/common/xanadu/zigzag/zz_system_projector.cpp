@@ -277,6 +277,77 @@ projectSystemSliceToStore(const ZzStructureDocument &slice,
     cur             = store.addLink(cur, std::move(notesLink));
   }
 
+  // Synchronize 10-dimension system store cell layout
+  if (store.homeCell() == noCell) {
+    cur = xanadu::initializeSystemStoreGenesis(store, kind, cur);
+    cur = xanadu::ensureAllSettings(store, cur, kind);
+  }
+
+  std::istringstream stream(p1);
+  std::string line;
+  while (std::getline(stream, line)) {
+    const auto colon = line.find(':');
+    if (colon == std::string::npos) {
+      continue;
+    }
+    auto key = line.substr(0, colon);
+    while (!key.empty() && (key.front() == ' ' || key.front() == '\t')) {
+      key.erase(key.begin());
+    }
+    while (!key.empty() &&
+           (key.back() == ' ' || key.back() == '\t' || key.back() == '\r')) {
+      key.pop_back();
+    }
+
+    auto valStr = line.substr(colon + 1);
+    while (!valStr.empty() &&
+           (valStr.front() == ' ' || valStr.front() == '\t')) {
+      valStr.erase(valStr.begin());
+    }
+    while (!valStr.empty() && (valStr.back() == ' ' || valStr.back() == '\t' ||
+                               valStr.back() == '\r')) {
+      valStr.pop_back();
+    }
+    if (valStr.size() >= 2 &&
+        ((valStr.front() == '"' && valStr.back() == '"') ||
+         (valStr.front() == '\'' && valStr.back() == '\''))) {
+      valStr = valStr.substr(1, valStr.size() - 2);
+    }
+
+    auto model        = xanadu::SystemStoreModel::fromStore(store, cur);
+    const auto *entry = model.find(key);
+    if (entry != nullptr && !entry->schema.alternatives.empty()) {
+      const auto &shape = entry->schema.alternatives.front();
+      std::vector<xanadu::CellValue> parsedVals;
+      if (!shape.expectedTypes.empty()) {
+        const auto &expectedType = shape.expectedTypes.front();
+        if (expectedType == "bool" || expectedType == "boolean") {
+          parsedVals.push_back(valStr == "true" || valStr == "1");
+        } else if (expectedType == "integer" || expectedType == "int" ||
+                   expectedType == "int64") {
+          try {
+            parsedVals.push_back(static_cast<std::int64_t>(std::stoll(valStr)));
+          } catch (...) {
+          }
+        } else if (expectedType == "float" || expectedType == "double") {
+          try {
+            parsedVals.push_back(std::stod(valStr));
+          } catch (...) {
+          }
+        } else {
+          parsedVals.push_back(valStr);
+        }
+      }
+      if (!parsedVals.empty()) {
+        try {
+          cur = xanadu::SystemStoreModel::updateSetting(store, cur, key,
+                                                        parsedVals);
+        } catch (...) {
+        }
+      }
+    }
+  }
+
   store.repointCurrentVersion(cur);
   store.setVersionAnnotation(
       cur, {.alias = "default",

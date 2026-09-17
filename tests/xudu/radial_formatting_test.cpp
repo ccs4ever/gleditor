@@ -22,74 +22,27 @@ using xudu::formatAttributeName;
 using xudu::Link;
 using xudu::LinkType;
 using xudu::MicroversionId;
-using xudu::parseRadialConfig;
 using xudu::Store;
 using xudu::textAlignFromFormatAttribute;
+using xudu::UIConfig;
 using xudu::vocabularySpanFor;
 
-TEST(RadialFormattingTest, ParseRadialConfigFromYaml) {
-  constexpr std::string_view kYaml = R"(
-radialMenu:
-  radius: 145.0
-  innerRadius: 50.0
-  actions:
-    - id: "format:bold"
-      label: "Bold"
-      icon: "B"
-    - id: "format:superscript"
-      label: "Superscript"
-      icon: "X²"
-    - id: "format:subscript"
-      label: "Subscript"
-      icon: "X₂"
-    - id: "group:align"
-      label: "Align"
-      icon: "="
-      subActions:
-        - id: "align:left"
-          label: "Left"
-          icon: "⇤"
-        - id: "align:centre"
-          label: "Centre"
-          icon: "↔"
-        - id: "align:right"
-          label: "Right"
-          icon: "⇥"
-        - id: "align:justify"
-          label: "Justify"
-          icon: "☰"
-)";
+TEST(RadialFormattingTest, LoadRadialConfigFromStore) {
+  Store store;
+  xudu::initializeSystemStore(store, xudu::SystemDocKind::UI);
 
-  const auto cfg = parseRadialConfig(kYaml);
-  EXPECT_FLOAT_EQ(cfg.radius, 145.0F);
-  EXPECT_FLOAT_EQ(cfg.innerRadius, 50.0F);
-  ASSERT_EQ(cfg.actions.size(), 4U);
-
-  EXPECT_EQ(cfg.actions[0].id, "format:bold");
-  EXPECT_EQ(cfg.actions[0].label, "Bold");
-  EXPECT_EQ(cfg.actions[0].icon, "B");
-
-  EXPECT_EQ(cfg.actions[1].id, "format:superscript");
-  EXPECT_EQ(cfg.actions[1].label, "Superscript");
-  EXPECT_EQ(cfg.actions[1].icon, "X²");
-
-  EXPECT_EQ(cfg.actions[2].id, "format:subscript");
-  EXPECT_EQ(cfg.actions[2].label, "Subscript");
-  EXPECT_EQ(cfg.actions[2].icon, "X₂");
-
-  EXPECT_EQ(cfg.actions[3].id, "group:align");
-  ASSERT_EQ(cfg.actions[3].subActions.size(), 4U);
-  EXPECT_EQ(cfg.actions[3].subActions[0].id, "align:left");
-  EXPECT_EQ(cfg.actions[3].subActions[1].id, "align:centre");
-  EXPECT_EQ(cfg.actions[3].subActions[2].id, "align:right");
-  EXPECT_EQ(cfg.actions[3].subActions[3].id, "align:justify");
+  const auto cfg = UIConfig::fromStore(store);
+  EXPECT_FLOAT_EQ(cfg.radialMenu.radius, 130.0F);
+  EXPECT_FLOAT_EQ(cfg.radialMenu.innerRadius, 42.0F);
+  EXPECT_FALSE(cfg.radialMenu.actions.empty());
 }
 
-TEST(RadialFormattingTest, ParseRadialConfigFallbackOnEmpty) {
-  const auto cfg = parseRadialConfig("");
-  EXPECT_GT(cfg.radius, 0.0F);
-  EXPECT_GT(cfg.innerRadius, 0.0F);
-  EXPECT_FALSE(cfg.actions.empty());
+TEST(RadialFormattingTest, LoadRadialConfigFallbackOnEmptyStore) {
+  Store store;
+  const auto cfg = UIConfig::fromStore(store);
+  EXPECT_GT(cfg.radialMenu.radius, 0.0F);
+  EXPECT_GT(cfg.radialMenu.innerRadius, 0.0F);
+  EXPECT_FALSE(cfg.radialMenu.actions.empty());
 }
 
 TEST(RadialFormattingTest, FormatAttributesAndAlignments) {

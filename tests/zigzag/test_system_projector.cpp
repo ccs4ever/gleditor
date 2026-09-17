@@ -144,34 +144,37 @@ TEST(ZzSystemProjectorTest, DualStackLayoutConfig) {
   ASSERT_TRUE(loadRes.has_value());
   const auto &slice = *loadRes;
 
-  const auto cfgSlice = LayoutConfig::fromSlice(slice);
-  const auto cfgYaml =
-      LayoutConfig::fromSystemText(
-          defaultSystemDocContent(SystemDocKind::Layout));
+  Store storeSlice;
+  projectSystemSliceToStore(slice, storeSlice, SystemDocKind::Layout);
+  const auto cfgSlice = LayoutConfig::fromStore(storeSlice);
 
-  EXPECT_EQ(cfgSlice.columns, cfgYaml.columns);
+  Store storeDefault;
+  initializeSystemStore(storeDefault, SystemDocKind::Layout);
+  const auto cfgDefault = LayoutConfig::fromStore(storeDefault);
+
+  EXPECT_EQ(cfgSlice.columns, cfgDefault.columns);
   EXPECT_EQ(cfgSlice.columns, 2U);
-  EXPECT_FLOAT_EQ(cfgSlice.pageWidthPx, cfgYaml.pageWidthPx);
+  EXPECT_FLOAT_EQ(cfgSlice.pageWidthPx, cfgDefault.pageWidthPx);
   EXPECT_FLOAT_EQ(cfgSlice.pageWidthPx, 800.0F);
-  EXPECT_FLOAT_EQ(cfgSlice.pageHeightPx, cfgYaml.pageHeightPx);
+  EXPECT_FLOAT_EQ(cfgSlice.pageHeightPx, cfgDefault.pageHeightPx);
   EXPECT_FLOAT_EQ(cfgSlice.pageHeightPx, 1000.0F);
-  EXPECT_EQ(cfgSlice.transclusionPrisms, cfgYaml.transclusionPrisms);
+  EXPECT_EQ(cfgSlice.transclusionPrisms, cfgDefault.transclusionPrisms);
   EXPECT_TRUE(cfgSlice.transclusionPrisms);
-  EXPECT_EQ(cfgSlice.xanalinkRibbons, cfgYaml.xanalinkRibbons);
+  EXPECT_EQ(cfgSlice.xanalinkRibbons, cfgDefault.xanalinkRibbons);
   EXPECT_TRUE(cfgSlice.xanalinkRibbons);
 
   // Dynamic physics and beam parameters
-  EXPECT_FLOAT_EQ(cfgSlice.physics.kRepel, cfgYaml.physics.kRepel);
-  EXPECT_FLOAT_EQ(cfgSlice.physics.maxForce, cfgYaml.physics.maxForce);
-  EXPECT_FLOAT_EQ(cfgSlice.physics.maxVelocity, cfgYaml.physics.maxVelocity);
-  EXPECT_FLOAT_EQ(cfgSlice.physics.timeStep, cfgYaml.physics.timeStep);
-  EXPECT_EQ(cfgSlice.beams.bandStrandLimit, cfgYaml.beams.bandStrandLimit);
+  EXPECT_FLOAT_EQ(cfgSlice.physics.kRepel, cfgDefault.physics.kRepel);
+  EXPECT_FLOAT_EQ(cfgSlice.physics.maxForce, cfgDefault.physics.maxForce);
+  EXPECT_FLOAT_EQ(cfgSlice.physics.maxVelocity, cfgDefault.physics.maxVelocity);
+  EXPECT_FLOAT_EQ(cfgSlice.physics.timeStep, cfgDefault.physics.timeStep);
+  EXPECT_EQ(cfgSlice.beams.bandStrandLimit, cfgDefault.beams.bandStrandLimit);
   EXPECT_FLOAT_EQ(cfgSlice.beams.bandStrandPitch,
-                  cfgYaml.beams.bandStrandPitch);
-  EXPECT_FLOAT_EQ(cfgSlice.beams.bandFillAlpha, cfgYaml.beams.bandFillAlpha);
+                  cfgDefault.beams.bandStrandPitch);
+  EXPECT_FLOAT_EQ(cfgSlice.beams.bandFillAlpha, cfgDefault.beams.bandFillAlpha);
   EXPECT_FLOAT_EQ(cfgSlice.beams.stubWidthOfBeam,
-                  cfgYaml.beams.stubWidthOfBeam);
-  EXPECT_FLOAT_EQ(cfgSlice.beams.stubMinOfLine, cfgYaml.beams.stubMinOfLine);
+                  cfgDefault.beams.stubWidthOfBeam);
+  EXPECT_FLOAT_EQ(cfgSlice.beams.stubMinOfLine, cfgDefault.beams.stubMinOfLine);
 }
 
 TEST(ZzSystemProjectorTest, LoadSceneVisualParametersFromSlice) {
@@ -279,7 +282,9 @@ TEST(ZzSystemProjectorTest, BidirectionalEditPropagation) {
 
   // 4. Verify that parsing the updated slice reflects the new layout
   // configuration
-  const auto updatedCfg = LayoutConfig::fromSlice(updatedSlice);
+  Store storeUpdated;
+  projectSystemSliceToStore(updatedSlice, storeUpdated, SystemDocKind::Layout);
+  const auto updatedCfg = LayoutConfig::fromStore(storeUpdated);
   EXPECT_EQ(updatedCfg.columns, 4U);
 
   // 5. Reverse: User now edits a cell directly in Zigzag (pageWidthPx: "800" ->
@@ -302,6 +307,6 @@ TEST(ZzSystemProjectorTest, BidirectionalEditPropagation) {
   EXPECT_NE(text2.find("pageWidthPx: \"1200\""), std::string::npos);
   EXPECT_NE(text2.find("Tuned on 4K display"), std::string::npos);
 
-  const auto finalCfg = LayoutConfig::fromSlice(updatedSlice);
+  const auto finalCfg = LayoutConfig::fromStore(store2);
   EXPECT_FLOAT_EQ(finalCfg.pageWidthPx, 1200.0F);
 }

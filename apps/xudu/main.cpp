@@ -2585,9 +2585,8 @@ int main(const int argc, char **argv) {
 
     auto radialMenu     = std::make_shared<gleditor::RadialMenu>("Sans 10");
     const auto &uiStore = session->systemStore(xudu::SystemDocKind::UI);
-    const auto uiText   = uiStore.textOf(uiStore.primaryCurrentVersion());
-    if (!uiText.empty()) {
-      radialMenu->setConfig(xudu::parseRadialConfig(uiText));
+    if (uiStore.opCount() > 0) {
+      radialMenu->setConfig(xudu::UIConfig::fromStore(uiStore).radialMenu);
     }
 
     radialMenu->setActionHandler(
@@ -2882,64 +2881,77 @@ int main(const int argc, char **argv) {
                  publishAs.empty() ? std::string{"document"} : publishAs);
     quiet || std::cout << "commands:\n" << app.commands().helpText();
 
-    session->setSystemDocChangedCallback(
-        [&app, radialMenu, docSwitcher, &pouchDrawer, &links,
-         &map
+    session->setSystemDocChangedCallback([&app, radialMenu, docSwitcher,
+                                          &pouchDrawer, &links, &map
 #ifdef XUZZ_BUILD
-         , &zigzagPresentation
+                                          ,
+                                          &zigzagPresentation
 #endif
-        ](const xudu::SystemDocKind kind, const xudu::Store &store) {
-          std::cout << "xudu: system doc updated (" << xudu::systemDocUri(kind)
-                    << ")\n";
-          switch (kind) {
-          case xudu::SystemDocKind::Keymap: {
-            app.commands().rebindFromText(xudu::extractConfigSection(
-                store.textOf(store.primaryCurrentVersion())));
-            break;
+    ](const xudu::SystemDocKind kind, const xudu::Store &store) {
+      std::cout << "xudu: system doc updated (" << xudu::systemDocUri(kind)
+                << ")\n";
+      const auto model = xudu::SystemStoreModel::fromStore(store);
+      if (!model.isValid()) {
+        std::cerr << "xudu: rejecting invalid system store "
+                  << xudu::systemDocUri(kind) << ": " << model.validationError()
+                  << "\n";
+        return;
+      }
+      switch (kind) {
+      case xudu::SystemDocKind::Keymap: {
+        const auto kmCfg = xudu::KeymapConfig::fromStore(store);
+        for (const auto &[act, comboStr] : kmCfg.bindings) {
+          if (const auto combo = gleditor::parseKeyCombo(comboStr)) {
+            app.commands().rebind(act, combo->first, combo->second);
           }
-          case xudu::SystemDocKind::Settings: {
-            break;
-          }
-          case xudu::SystemDocKind::Layout: {
-            const auto layout = xudu::LayoutConfig::fromStore(store);
-            links.setVisible(layout.xanalinkRibbons);
-            links.setBeamConfig(layout.beams);
-            links.tensionEngine().setParams(layout.physics.toTensionParams());
-            pouchDrawer.setDockSide(layout.pouchDock == xudu::PouchDock::Left
-                                        ? xudu::PouchDrawer::DockSide::Left
-                                        : xudu::PouchDrawer::DockSide::Right);
+        }
+        break;
+      }
+      case xudu::SystemDocKind::Settings: {
+        break;
+      }
+      case xudu::SystemDocKind::Layout: {
+        const auto layout = xudu::LayoutConfig::fromStore(store);
+        links.setVisible(layout.xanalinkRibbons);
+        links.setBeamConfig(layout.beams);
+        links.tensionEngine().setParams(layout.physics.toTensionParams());
+        pouchDrawer.setDockSide(layout.pouchDock == xudu::PouchDock::Left
+                                    ? xudu::PouchDrawer::DockSide::Left
+                                    : xudu::PouchDrawer::DockSide::Right);
 #ifdef XUZZ_BUILD
-            zigzagPresentation->setPresentationConfig(layout.zigzag);
+        zigzagPresentation->setPresentationConfig(layout.zigzag);
 #endif
-            break;
-          }
-          case xudu::SystemDocKind::UI: {
-            const auto uiCfg = xudu::parseUIConfig(
-                store.textOf(store.primaryCurrentVersion()));
-            radialMenu->setConfig(uiCfg.radialMenu);
-            docSwitcher->setVisible(uiCfg.tabBarVisible);
-            map.setVisible(uiCfg.hypertimeMapVisible);
-            break;
-          }
-          case xudu::SystemDocKind::Pouches:
-          case xudu::SystemDocKind::Count:
-            break;
-          }
-        });
+        break;
+      }
+      case xudu::SystemDocKind::UI: {
+        const auto uiCfg = xudu::UIConfig::fromStore(store);
+        radialMenu->setConfig(uiCfg.radialMenu);
+        docSwitcher->setVisible(uiCfg.tabBarVisible);
+        map.setVisible(uiCfg.hypertimeMapVisible);
+        break;
+      }
+      case xudu::SystemDocKind::Pouches:
+      case xudu::SystemDocKind::Count:
+        break;
+      }
+    });
 
     // Apply active system doc configurations at launch
     {
       const auto kmIdx = session->systemStoreIndex(xudu::SystemDocKind::Keymap);
       const auto &kmStore = session->store(kmIdx);
       if (kmStore.opCount() > 0) {
-        app.commands().rebindFromText(xudu::extractConfigSection(
-            kmStore.textOf(kmStore.primaryCurrentVersion())));
+        const auto kmCfg = xudu::KeymapConfig::fromStore(kmStore);
+        for (const auto &[act, comboStr] : kmCfg.bindings) {
+          if (const auto combo = gleditor::parseKeyCombo(comboStr)) {
+            app.commands().rebind(act, combo->first, combo->second);
+          }
+        }
       }
       const auto uiIdx    = session->systemStoreIndex(xudu::SystemDocKind::UI);
       const auto &uiStore = session->store(uiIdx);
       if (uiStore.opCount() > 0) {
-        const auto uiCfg = xudu::parseUIConfig(
-            uiStore.textOf(uiStore.primaryCurrentVersion()));
+        const auto uiCfg = xudu::UIConfig::fromStore(uiStore);
         radialMenu->setConfig(uiCfg.radialMenu);
         docSwitcher->setVisible(uiCfg.tabBarVisible);
         map.setVisible(uiCfg.hypertimeMapVisible);

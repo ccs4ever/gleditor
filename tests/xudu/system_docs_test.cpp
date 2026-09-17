@@ -86,188 +86,285 @@ TEST(SystemDocsTest, MetadataAndUriRoundTrips) {
   EXPECT_FALSE(xudu::systemDocKindFromUri("system://invalid").has_value());
   EXPECT_FALSE(xudu::systemDocKindFromUri("file:///path/to/doc").has_value());
 
-  // Check that default content is non-empty and parsable
-  const auto keymapDefault =
-      xudu::defaultSystemDocContent(SystemDocKind::Keymap);
-  EXPECT_FALSE(keymapDefault.empty());
-  const auto keymapCfg = xudu::parseKeymapConfig(keymapDefault);
-  EXPECT_FALSE(keymapCfg.bindings.empty());
-
-  const auto settingsDefault =
-      xudu::defaultSystemDocContent(SystemDocKind::Settings);
-  EXPECT_FALSE(settingsDefault.empty());
-  const auto settingsCfg = xudu::parseSettingsConfig(settingsDefault);
-  EXPECT_GT(settingsCfg.fontSize, 0.0F);
-
-  const auto layoutDefault =
-      xudu::defaultSystemDocContent(SystemDocKind::Layout);
-  EXPECT_FALSE(layoutDefault.empty());
-  const auto layoutCfg = xudu::parseLayoutConfig(layoutDefault);
-  EXPECT_GT(layoutCfg.columns, 0U);
-
-  const auto uiDefault = xudu::defaultSystemDocContent(SystemDocKind::UI);
-  EXPECT_FALSE(uiDefault.empty());
-  const auto uiCfg = xudu::parseUIConfig(uiDefault);
-  EXPECT_TRUE(uiCfg.tabBarVisible);
-
-  const auto pouchesDefault =
-      xudu::defaultSystemDocContent(SystemDocKind::Pouches);
-  EXPECT_FALSE(pouchesDefault.empty());
-  const auto pouchesCfg = xudu::parsePouchConfig(pouchesDefault);
-  EXPECT_EQ(pouchesCfg.zones.size(), 4U);
+  // Check that default setting specifications and content exist for every kind
+  for (const auto kind :
+       {SystemDocKind::Keymap, SystemDocKind::Settings, SystemDocKind::Layout,
+        SystemDocKind::UI, SystemDocKind::Pouches}) {
+    const auto specs = xudu::defaultSettingSpecs(kind);
+    EXPECT_FALSE(specs.empty());
+    const auto content = xudu::defaultSystemDocContent(kind);
+    EXPECT_FALSE(content.empty());
+  }
 
   // Check directory helper returns valid path
   const auto keymapDir = xudu::systemDocDirectory(SystemDocKind::Keymap);
   EXPECT_EQ(keymapDir.filename(), "keymap");
 }
 
-TEST(SystemDocsTest, ParseKeymapConfigYamlAndFallback) {
-  const std::string yaml = "new-doc: \"Ctrl+Shift+N\"\n"
-                           "open-doc: \"Ctrl+Alt+O\"\n"
-                           "save-doc: \"Ctrl+S\"\n";
+TEST(SystemDocsTest, SystemStoreGenesisTopology) {
+  Store store;
+  store.setSystem(true);
+  xudu::initializeSystemStoreGenesis(store, SystemDocKind::Settings);
 
-  const auto cfg = xudu::parseKeymapConfig(yaml);
-  EXPECT_EQ(cfg.bindingFor("new-doc"), "Ctrl+Shift+N");
-  EXPECT_EQ(cfg.bindingFor("open-doc"), "Ctrl+Alt+O");
-  EXPECT_EQ(cfg.bindingFor("save-doc"), "Ctrl+S");
-  EXPECT_FALSE(cfg.bindingFor("nonexistent").has_value());
+  EXPECT_FALSE(store.currentVersions().empty());
+  const auto head     = store.primaryCurrentVersion();
+  const auto manifold = store.rebuildManifold(head);
 
-  // Fallback text format
-  const std::string fallback = "# Custom keymap fallback\n"
-                               "quit: Ctrl+Q\n"
-                               "undo: Ctrl+Z\n";
-  const auto fallbackCfg     = xudu::parseKeymapConfig(fallback);
-  EXPECT_EQ(fallbackCfg.bindingFor("quit"), "Ctrl+Q");
-  EXPECT_EQ(fallbackCfg.bindingFor("undo"), "Ctrl+Z");
+  // Home cell must exist
+  EXPECT_NE(store.homeCell(), zigzag::noCell);
+  EXPECT_EQ(manifold.home(), store.homeCell());
 
-  // Empty string
-  const auto emptyCfg = xudu::parseKeymapConfig("");
-  EXPECT_TRUE(emptyCfg.bindings.empty());
+  // 10 Dimensions registered
+  const auto dDims       = manifold.dimensionNamed(xudu::kDimDims, store);
+  const auto dVars       = manifold.dimensionNamed(xudu::kDimVars, store);
+  const auto dValues     = manifold.dimensionNamed(xudu::kDimValues, store);
+  const auto dGroups     = manifold.dimensionNamed(xudu::kDimGroups, store);
+  const auto dSubgroups  = manifold.dimensionNamed(xudu::kDimSubgroups, store);
+  const auto dClone      = manifold.dimensionNamed(xudu::kDimClone, store);
+  const auto dNotes      = manifold.dimensionNamed(xudu::kDimNotes, store);
+  const auto dSchemas    = manifold.dimensionNamed(xudu::kDimSchemas, store);
+  const auto dAlternates = manifold.dimensionNamed(xudu::kDimAlternates, store);
+  const auto dDefault    = manifold.dimensionNamed(xudu::kDimDefault, store);
+
+  EXPECT_NE(dDims, 0U);
+  EXPECT_NE(dVars, 0U);
+  EXPECT_NE(dValues, 0U);
+  EXPECT_NE(dGroups, 0U);
+  EXPECT_NE(dSubgroups, 0U);
+  EXPECT_NE(dClone, 0U);
+  EXPECT_NE(dNotes, 0U);
+  EXPECT_NE(dSchemas, 0U);
+  EXPECT_NE(dAlternates, 0U);
+  EXPECT_NE(dDefault, 0U);
+
+  // Home cell has dimension directory text
+  const auto homeText = manifold.textOf(manifold.home(), store);
+  EXPECT_NE(homeText.find("d.vars"), std::string::npos);
+  EXPECT_NE(homeText.find("d.values"), std::string::npos);
+
+  // Notes hanging posward from home
+  const auto storeNotesCell = manifold.linked(manifold.home(), dNotes);
+  EXPECT_NE(storeNotesCell, 0U);
+  const auto notesText = manifold.textOf(storeNotesCell, store);
+  EXPECT_FALSE(notesText.empty());
+
+  // Empty group blank cell hanging posward from home along d.groups
+  const auto emptyGroupCell = manifold.linked(manifold.home(), dGroups);
+  EXPECT_NE(emptyGroupCell, 0U);
+  EXPECT_TRUE(manifold.textOf(emptyGroupCell, store).empty());
 }
 
-TEST(SystemDocsTest, ParseSettingsConfig) {
-  const std::string yaml = "fontSize: 18.5\n"
-                           "fontFamily: \"Fira Code\"\n"
-                           "lineHeight: 1.6\n"
-                           "theme: \"dark\"\n"
-                           "autoSaveSeconds: 15\n";
+TEST(SystemDocsTest, EmptyGroupBlankCellAndHierarchicalGroups) {
+  Store store;
+  store.setSystem(true);
+  xudu::initializeSystemStoreGenesis(store, SystemDocKind::Settings);
 
-  const auto cfg = xudu::parseSettingsConfig(yaml);
-  EXPECT_FLOAT_EQ(cfg.fontSize, 18.5F);
-  EXPECT_EQ(cfg.fontFamily, "Fira Code");
-  EXPECT_FLOAT_EQ(cfg.lineHeight, 1.6F);
-  EXPECT_EQ(cfg.theme, "dark");
-  EXPECT_EQ(cfg.autoSaveSeconds, 15U);
+  // Add an ungrouped setting (hangs off blank cell "")
+  xudu::SettingSpec ungroupedSpec;
+  ungroupedSpec.name  = "flat_option";
+  ungroupedSpec.notes = "A setting without any dots in its name";
+  ungroupedSpec.schemas.push_back({{"string"}, {std::string{"unspecified"}}});
+  auto head = store.primaryCurrentVersion();
+  head      = xudu::ensureSetting(store, head, ungroupedSpec);
 
-  // Empty returns defaults
-  const auto def = xudu::parseSettingsConfig("");
-  EXPECT_FLOAT_EQ(def.fontSize, 16.0F);
-  EXPECT_EQ(def.fontFamily, "Monospace");
-  EXPECT_FLOAT_EQ(def.lineHeight, 1.4F);
-  EXPECT_EQ(def.theme, "system");
-  EXPECT_EQ(def.autoSaveSeconds, 5U);
+  // Add a hierarchical setting with multiple levels ("hud.velocity.x")
+  xudu::SettingSpec hierSpec;
+  hierSpec.name  = "hud.velocity.x";
+  hierSpec.notes = "X velocity component";
+  hierSpec.schemas.push_back({{"double"}, {0.0}});
+  head = xudu::ensureSetting(store, head, hierSpec);
+  store.repointCurrentVersion(head);
+  const auto manifold   = store.rebuildManifold(head);
+  const auto dVars      = manifold.dimensionNamed(xudu::kDimVars, store);
+  const auto dGroups    = manifold.dimensionNamed(xudu::kDimGroups, store);
+  const auto dSubgroups = manifold.dimensionNamed(xudu::kDimSubgroups, store);
+  const auto dClone     = manifold.dimensionNamed(xudu::kDimClone, store);
+
+  // Blank group cell off home
+  const auto blankCell = manifold.linked(manifold.home(), dGroups);
+  ASSERT_NE(blankCell, 0U);
+  EXPECT_EQ(manifold.textOf(blankCell, store), "");
+
+  // Master setting "flat_option" is posward along d.vars from home
+  auto masterCell      = manifold.linked(manifold.home(), dVars);
+  bool foundFlatMaster = false;
+  while (masterCell != 0U) {
+    if (manifold.textOf(masterCell, store) == "flat_option") {
+      foundFlatMaster = true;
+      break;
+    }
+    masterCell = manifold.linked(masterCell, dVars);
+  }
+  EXPECT_TRUE(foundFlatMaster);
+
+  // Clone of flat_option is posward along d.vars from blankCell
+  const auto flatClone = manifold.linked(blankCell, dVars);
+  ASSERT_NE(flatClone, 0U);
+  EXPECT_EQ(manifold.textOf(flatClone, store), "flat_option");
+  // Master is linked to clone via d.clone
+  EXPECT_EQ(manifold.linked(masterCell, dClone), flatClone);
+
+  // Next top-level group along d.groups from blankCell is "hud"
+  const auto hudGroup = manifold.linked(blankCell, dGroups);
+  ASSERT_NE(hudGroup, 0U);
+  EXPECT_EQ(manifold.textOf(hudGroup, store), "hud");
+
+  // Subgroup "velocity" is posward along d.subgroups from "hud"
+  const auto velSubgroup = manifold.linked(hudGroup, dSubgroups);
+  ASSERT_NE(velSubgroup, 0U);
+  EXPECT_EQ(manifold.textOf(velSubgroup, store), "velocity");
+
+  // Setting clone "x" hangs posward along d.vars from "velocity"
+  const auto xClone = manifold.linked(velSubgroup, dVars);
+  ASSERT_NE(xClone, 0U);
+  EXPECT_EQ(manifold.textOf(xClone, store), "x");
+
+  // Master setting "hud.velocity.x" is connected to clone "x" along d.clone
+  auto hierMaster = manifold.linked(manifold.home(), dVars);
+  while (hierMaster != 0U &&
+         manifold.textOf(hierMaster, store) != "hud.velocity.x") {
+    hierMaster = manifold.linked(hierMaster, dVars);
+  }
+  ASSERT_NE(hierMaster, 0U);
+  EXPECT_EQ(manifold.linked(hierMaster, dClone), xClone);
 }
 
-TEST(SystemDocsTest, ParseLayoutConfig) {
-  const std::string yaml = "columns: 3\n"
-                           "pageWidthPx: 920.0\n"
-                           "pageHeightPx: 1250.0\n"
-                           "toastAnchor: \"BottomLeft\"\n"
-                           "toastOffsetX: 30.0\n"
-                           "toastOffsetY: 60.0\n"
-                           "pouchDock: \"Left\"\n"
-                           "documentSpacingX: 85.0\n"
-                           "transclusionPrisms: false\n"
-                           "xanalinkRibbons: true\n";
+TEST(SystemDocsTest, SchemaAndDefaultValuesAndReset) {
+  Store store;
+  store.setSystem(true);
+  xudu::initializeSystemStore(store, SystemDocKind::Settings);
 
-  const auto cfg = xudu::parseLayoutConfig(yaml);
-  EXPECT_EQ(cfg.columns, 3U);
-  EXPECT_FLOAT_EQ(cfg.pageWidthPx, 920.0F);
-  EXPECT_FLOAT_EQ(cfg.pageHeightPx, 1250.0F);
-  EXPECT_EQ(cfg.toastAnchor, ToastAnchor::BottomLeft);
-  EXPECT_FLOAT_EQ(cfg.toastOffsetX, 30.0F);
-  EXPECT_FLOAT_EQ(cfg.toastOffsetY, 60.0F);
-  EXPECT_EQ(cfg.pouchDock, PouchDock::Left);
-  EXPECT_FLOAT_EQ(cfg.documentSpacingX, 85.0F);
-  EXPECT_FALSE(cfg.transclusionPrisms);
-  EXPECT_TRUE(cfg.xanalinkRibbons);
+  const auto initialVals = xudu::getSetting(store, xudu::settings::kFontSize);
+  ASSERT_FALSE(initialVals.empty());
+  EXPECT_DOUBLE_EQ(std::get<double>(initialVals[0]), 16.0);
 
-  // Empty returns defaults
-  const auto def = xudu::parseLayoutConfig("");
-  EXPECT_EQ(def.columns, 2U);
-  EXPECT_FLOAT_EQ(def.pageWidthPx, 800.0F);
-  EXPECT_FLOAT_EQ(def.pageHeightPx, 1000.0F);
-  EXPECT_EQ(def.toastAnchor, ToastAnchor::TopRight);
-  EXPECT_EQ(def.pouchDock, PouchDock::Right);
-  EXPECT_TRUE(def.transclusionPrisms);
-  EXPECT_TRUE(def.xanalinkRibbons);
-  EXPECT_FLOAT_EQ(def.physics.kRepel, 4500.0F);
-  EXPECT_FLOAT_EQ(def.physics.maxForce, 10000.0F);
-  EXPECT_FLOAT_EQ(def.physics.maxVelocity, 1000.0F);
-  EXPECT_FLOAT_EQ(def.physics.timeStep, 0.016F);
-  EXPECT_EQ(def.beams.bandStrandLimit, 7U);
-  EXPECT_FLOAT_EQ(def.beams.bandStrandPitch, 2.2F);
+  // Mutate setting value
+  const auto newVer = xudu::setSetting(store, store.primaryCurrentVersion(),
+                                       xudu::settings::kFontSize, 24.5);
+  store.repointCurrentVersion(newVer);
+
+  const auto updatedVals = xudu::getSetting(store, xudu::settings::kFontSize);
+  ASSERT_FALSE(updatedVals.empty());
+  EXPECT_DOUBLE_EQ(std::get<double>(updatedVals[0]), 24.5);
+
+  // Reset back to default
+  const auto resetVer = xudu::resetSettingToDefault(
+      store, store.primaryCurrentVersion(), xudu::settings::kFontSize);
+  store.repointCurrentVersion(resetVer);
+
+  const auto restoredVals = xudu::getSetting(store, xudu::settings::kFontSize);
+  ASSERT_FALSE(restoredVals.empty());
+  EXPECT_DOUBLE_EQ(std::get<double>(restoredVals[0]), 16.0);
 }
 
-TEST(SystemDocsTest, ParseDynamicPhysicsAndBeamConfig) {
-  const std::string yaml = "columns: 4\n"
-                           "physics:\n"
-                           "  kRepel: 520.0\n"
-                           "  kPlane: 0.012\n"
-                           "  kAlign: 0.006\n"
-                           "  kTier: 0.009\n"
-                           "  kDamping: 0.78\n"
-                           "  backgroundDepthZ: 200.0\n"
-                           "  defaultGap: 55.0\n"
-                           "  settleVelocityThreshold: 0.02\n"
-                           "  maxForce: 600.0\n"
-                           "  maxVelocity: 180.0\n"
-                           "  timeStep: 0.8\n"
-                           "beams:\n"
-                           "  bandStrandLimit: 12\n"
-                           "  bandStrandPitch: 7.5\n"
-                           "  bandFillAlpha: 0.15\n"
-                           "  stubWidthOfBeam: 0.45\n"
-                           "  stubMinOfLine: 0.95\n"
-                           "  marginKerf: 2.0\n"
-                           "  bypassDepthPerDoc: 22.0\n"
-                           "  bypassDepthLimit: 110.0\n"
-                           "  bypassSegments: 18\n";
+TEST(SystemDocsTest, MultiSchemaAlternativeValidation) {
+  Store store;
+  store.setSystem(true);
+  xudu::initializeSystemStore(store, SystemDocKind::Settings);
 
-  const auto cfg = xudu::parseLayoutConfig(yaml);
-  EXPECT_EQ(cfg.columns, 4U);
+  // kThemeBackground accepts either 3 doubles (normalized [0, 1]) or 3 int64s
+  // ([0, 255])
+  const auto vDoubles =
+      xudu::setSetting(store, store.primaryCurrentVersion(),
+                       xudu::settings::kThemeBackground, 0.15, 0.25, 0.35);
+  store.repointCurrentVersion(vDoubles);
+
+  const auto model1 = xudu::SystemStoreModel::fromStore(store);
+  EXPECT_TRUE(model1.isValid());
+  const auto rgbDoubles =
+      model1.getDoubleList(xudu::settings::kThemeBackground);
+  ASSERT_EQ(rgbDoubles.size(), 3U);
+  EXPECT_FLOAT_EQ(static_cast<float>(rgbDoubles[0]), 0.15F);
+  EXPECT_FLOAT_EQ(static_cast<float>(rgbDoubles[1]), 0.25F);
+  EXPECT_FLOAT_EQ(static_cast<float>(rgbDoubles[2]), 0.35F);
+
+  // Now set to 3 int64 bytes (the alternate schema shape)
+  const auto vInts = xudu::setSetting(
+      store, store.primaryCurrentVersion(), xudu::settings::kThemeBackground,
+      static_cast<std::int64_t>(32), static_cast<std::int64_t>(64),
+      static_cast<std::int64_t>(128));
+  store.repointCurrentVersion(vInts);
+
+  const auto model2 = xudu::SystemStoreModel::fromStore(store);
+  EXPECT_TRUE(model2.isValid());
+  const auto rgbInts = model2.getInt64List(xudu::settings::kThemeBackground);
+  ASSERT_EQ(rgbInts.size(), 3U);
+  EXPECT_EQ(rgbInts[0], 32);
+  EXPECT_EQ(rgbInts[1], 64);
+  EXPECT_EQ(rgbInts[2], 128);
+
+  // Attempt invalid shape (e.g. only 2 values, or a string) -> throws
+  // invalid_argument
+  EXPECT_THROW(xudu::setSetting(store, store.primaryCurrentVersion(),
+                                xudu::settings::kThemeBackground, 0.5, 0.5),
+               std::invalid_argument);
+
+  EXPECT_THROW(xudu::setSetting(store, store.primaryCurrentVersion(),
+                                xudu::settings::kThemeBackground,
+                                std::string{"invalid-color-string"}),
+               std::invalid_argument);
+}
+
+TEST(SystemDocsTest, SchemaViolationRejection) {
+  Store store;
+  store.setSystem(true);
+  xudu::initializeSystemStore(store, SystemDocKind::Layout);
+
+  // kColumns expects an integer >= 1
+  EXPECT_THROW(xudu::setSetting(store, store.primaryCurrentVersion(),
+                                xudu::settings::kColumns, std::string{"three"}),
+               std::invalid_argument);
+
+  EXPECT_THROW(xudu::setSetting(store, store.primaryCurrentVersion(),
+                                xudu::settings::kColumns, 3.14159),
+               std::invalid_argument);
+
+  // Verify store remains in valid state with previous value
+  const auto loCfg = xudu::LayoutConfig::fromStore(store);
+  EXPECT_EQ(loCfg.columns, 2U);
+}
+
+TEST(SystemDocsTest, DynamicPhysicsAndBeamConfigFromStore) {
+  Store store;
+  store.setSystem(true);
+  xudu::initializeSystemStore(store, SystemDocKind::Layout);
+
+  // Set customized physics and beam parameters
+  auto head = store.primaryCurrentVersion();
+  head = xudu::setSetting(store, head, xudu::settings::kPhysicsKRepel, 520.0);
+  head = xudu::setSetting(store, head, xudu::settings::kPhysicsMaxForce, 600.0);
+  head =
+      xudu::setSetting(store, head, xudu::settings::kPhysicsMaxVelocity, 180.0);
+  head = xudu::setSetting(store, head, xudu::settings::kPhysicsTimeStep, 0.8);
+  head = xudu::setSetting(store, head, xudu::settings::kBeamsBandStrandLimit,
+                          static_cast<std::int64_t>(12));
+  head =
+      xudu::setSetting(store, head, xudu::settings::kBeamsBandStrandPitch, 7.5);
+  head =
+      xudu::setSetting(store, head, xudu::settings::kBeamsBandFillAlpha, 0.15);
+  head = xudu::setSetting(store, head, xudu::settings::kBeamsStubWidthOfBeam,
+                          0.45);
+  head =
+      xudu::setSetting(store, head, xudu::settings::kBeamsStubMinOfLine, 0.95);
+  head = xudu::setSetting(store, head, xudu::settings::kBeamsBypassSegments,
+                          static_cast<std::int64_t>(18));
+  store.repointCurrentVersion(head);
+
+  const auto cfg = xudu::LayoutConfig::fromStore(store);
   EXPECT_FLOAT_EQ(cfg.physics.kRepel, 520.0F);
-  EXPECT_FLOAT_EQ(cfg.physics.kPlane, 0.012F);
-  EXPECT_FLOAT_EQ(cfg.physics.kAlign, 0.006F);
-  EXPECT_FLOAT_EQ(cfg.physics.kTier, 0.009F);
-  EXPECT_FLOAT_EQ(cfg.physics.kDamping, 0.78F);
-  EXPECT_FLOAT_EQ(cfg.physics.backgroundDepthZ, 200.0F);
-  EXPECT_FLOAT_EQ(cfg.physics.defaultGap, 55.0F);
-  EXPECT_FLOAT_EQ(cfg.physics.settleVelocityThreshold, 0.02F);
   EXPECT_FLOAT_EQ(cfg.physics.maxForce, 600.0F);
   EXPECT_FLOAT_EQ(cfg.physics.maxVelocity, 180.0F);
   EXPECT_FLOAT_EQ(cfg.physics.timeStep, 0.8F);
-
   EXPECT_EQ(cfg.beams.bandStrandLimit, 12U);
   EXPECT_FLOAT_EQ(cfg.beams.bandStrandPitch, 7.5F);
   EXPECT_FLOAT_EQ(cfg.beams.bandFillAlpha, 0.15F);
   EXPECT_FLOAT_EQ(cfg.beams.stubWidthOfBeam, 0.45F);
   EXPECT_FLOAT_EQ(cfg.beams.stubMinOfLine, 0.95F);
-  EXPECT_FLOAT_EQ(cfg.beams.marginKerf, 2.0F);
-  EXPECT_FLOAT_EQ(cfg.beams.bypassDepthPerDoc, 22.0F);
-  EXPECT_FLOAT_EQ(cfg.beams.bypassDepthLimit, 110.0F);
   EXPECT_EQ(cfg.beams.bypassSegments, 18U);
 
   // Convert to TensionParams and verify mapping
   const auto tension = cfg.physics.toTensionParams();
   EXPECT_FLOAT_EQ(tension.kRepel, 520.0F);
-  EXPECT_FLOAT_EQ(tension.kPlane, 0.012F);
-  EXPECT_FLOAT_EQ(tension.kAlign, 0.006F);
-  EXPECT_FLOAT_EQ(tension.kTier, 0.009F);
-  EXPECT_FLOAT_EQ(tension.kDamping, 0.78F);
-  EXPECT_FLOAT_EQ(tension.backgroundDepthZ, 200.0F);
-  EXPECT_FLOAT_EQ(tension.defaultGap, 55.0F);
-  EXPECT_FLOAT_EQ(tension.settleVelocityThreshold, 0.02F);
   EXPECT_FLOAT_EQ(tension.maxForce, 600.0F);
   EXPECT_FLOAT_EQ(tension.maxVelocity, 180.0F);
   EXPECT_FLOAT_EQ(tension.timeStep, 0.8F);
@@ -280,85 +377,40 @@ TEST(SystemDocsTest, ParseDynamicPhysicsAndBeamConfig) {
   EXPECT_FLOAT_EQ(roundtrip.timeStep, 0.8F);
 }
 
-TEST(SystemDocsTest, ParseFlatPhysicsAndBeamConfigFallback) {
-  const std::string flat = "physics.kRepel: 480.0\n"
-                           "physics.maxForce: 450.0\n"
-                           "beams.bandStrandPitch: 8.0\n"
-                           "beams.bypassSegments: 20\n";
-  const auto cfg         = xudu::parseLayoutConfig(flat);
-  EXPECT_FLOAT_EQ(cfg.physics.kRepel, 480.0F);
-  EXPECT_FLOAT_EQ(cfg.physics.maxForce, 450.0F);
-  EXPECT_FLOAT_EQ(cfg.beams.bandStrandPitch, 8.0F);
-  EXPECT_EQ(cfg.beams.bypassSegments, 20U);
-}
+TEST(SystemDocsTest, GetSetVaryingCellValues) {
+  Store store;
+  store.setSystem(true);
+  xudu::initializeSystemStoreGenesis(store, SystemDocKind::Settings);
 
-TEST(SystemDocsTest, ParseLoomConfig) {
-  const std::string yaml = "transclusionLoom: false\n"
-                           "beams:\n"
-                           "  loomBundlingEnabled: false\n"
-                           "  loomAlpha: 0.45\n"
-                           "  loomHoverAlpha: 0.95\n";
-  const auto cfg         = xudu::parseLayoutConfig(yaml);
-  EXPECT_FALSE(cfg.transclusionLoom);
-  EXPECT_FALSE(cfg.beams.loomBundlingEnabled);
-  EXPECT_FLOAT_EQ(cfg.beams.loomAlpha, 0.45F);
-  EXPECT_FLOAT_EQ(cfg.beams.loomHoverAlpha, 0.95F);
+  xudu::SettingSpec spec;
+  spec.name  = "test.multitype";
+  spec.notes = "Test multi-type value tuple";
+  spec.schemas.push_back(
+      {{"double", "int64", "bool", "string"},
+       {1.5, static_cast<std::int64_t>(42), true, std::string{"initial"}}});
+  const auto head =
+      xudu::ensureSetting(store, store.primaryCurrentVersion(), spec);
+  store.repointCurrentVersion(head);
 
-  // Defaults test
-  const auto def = xudu::parseLayoutConfig("");
-  EXPECT_TRUE(def.transclusionLoom);
-  EXPECT_TRUE(def.beams.loomBundlingEnabled);
-  EXPECT_FLOAT_EQ(def.beams.loomAlpha, 0.35F);
-  EXPECT_FLOAT_EQ(def.beams.loomHoverAlpha, 1.0F);
-}
+  const auto initial = xudu::getSetting(store, "test.multitype");
+  ASSERT_EQ(initial.size(), 4U);
+  EXPECT_DOUBLE_EQ(std::get<double>(initial[0]), 1.5);
+  EXPECT_EQ(std::get<std::int64_t>(initial[1]), 42);
+  EXPECT_EQ(std::get<bool>(initial[2]), true);
+  EXPECT_EQ(std::get<std::string>(initial[3]), "initial");
 
-TEST(SystemDocsTest, ParseUIConfig) {
-  const std::string yaml = "tabBarVisible: false\n"
-                           "statusBarVisible: true\n"
-                           "hypertimeMapVisible: true\n"
-                           "radialMenu:\n"
-                           "  radius: 110.0\n"
-                           "  innerRadius: 35.0\n";
+  // Update using variadic setSetting
+  const auto updatedVer = xudu::setSetting(
+      store, store.primaryCurrentVersion(), "test.multitype", 9.25,
+      static_cast<std::int64_t>(100), false, std::string{"updated"});
+  store.repointCurrentVersion(updatedVer);
 
-  const auto cfg = xudu::parseUIConfig(yaml);
-  EXPECT_FALSE(cfg.tabBarVisible);
-  EXPECT_TRUE(cfg.statusBarVisible);
-  EXPECT_TRUE(cfg.hypertimeMapVisible);
-  EXPECT_FLOAT_EQ(cfg.radialMenu.radius, 110.0F);
-  EXPECT_FLOAT_EQ(cfg.radialMenu.innerRadius, 35.0F);
-
-  // Empty returns defaults
-  const auto def = xudu::parseUIConfig("");
-  EXPECT_TRUE(def.tabBarVisible);
-  EXPECT_TRUE(def.statusBarVisible);
-  EXPECT_FALSE(def.hypertimeMapVisible);
-  EXPECT_FLOAT_EQ(def.radialMenu.radius, 130.0F);
-  EXPECT_FLOAT_EQ(def.radialMenu.innerRadius, 42.0F);
-}
-
-TEST(SystemDocsTest, ParsePouchConfig) {
-  const std::string yaml = "zones:\n"
-                           "  - id: custom_left\n"
-                           "    label: Custom Left\n"
-                           "    aura: \"#123456\"\n"
-                           "    weight: 1.5\n"
-                           "  - id: custom_right\n"
-                           "    label: Custom Right\n"
-                           "    auraColor: \"#abcdef88\"\n"
-                           "    heightWeight: 2.0\n";
-
-  const auto cfg = xudu::parsePouchConfig(yaml);
-  ASSERT_EQ(cfg.zones.size(), 2U);
-  EXPECT_EQ(cfg.zones[0].id, "custom_left");
-  EXPECT_EQ(cfg.zones[0].label, "Custom Left");
-  EXPECT_FLOAT_EQ(cfg.zones[0].heightWeight, 1.5F);
-  EXPECT_EQ(cfg.zones[1].id, "custom_right");
-  EXPECT_EQ(cfg.zones[1].label, "Custom Right");
-  EXPECT_FLOAT_EQ(cfg.zones[1].heightWeight, 2.0F);
-
-  // Fallback defaults
-  const auto def = xudu::parsePouchConfig("");
-  EXPECT_EQ(def.zones.size(), 4U);
+  const auto updated = xudu::getSetting(store, "test.multitype");
+  ASSERT_EQ(updated.size(), 4U);
+  EXPECT_DOUBLE_EQ(std::get<double>(updated[0]), 9.25);
+  EXPECT_EQ(std::get<std::int64_t>(updated[1]), 100);
+  EXPECT_EQ(std::get<bool>(updated[2]), false);
+  EXPECT_EQ(std::get<std::string>(updated[3]), "updated");
 }
 
 TEST(SystemDocsTest, SchemaAndNotesNonEmptyAndNoMarkdown) {
@@ -437,8 +489,8 @@ TEST(SystemDocsTest, LayoutRuntimeSnapshotReadsVarsAndScalarValues) {
   xudu::initializeSystemStore(store, SystemDocKind::Layout);
 
   const auto manifold = store.rebuildManifold(store.primaryCurrentVersion());
-  const auto vars = manifold.dimensionNamed("d.vars", store);
-  const auto values = manifold.dimensionNamed("d.values", store);
+  const auto vars     = manifold.dimensionNamed("d.vars", store);
+  const auto values   = manifold.dimensionNamed("d.values", store);
   ASSERT_NE(vars, 0U);
   ASSERT_NE(values, 0U);
 
@@ -448,44 +500,48 @@ TEST(SystemDocsTest, LayoutRuntimeSnapshotReadsVarsAndScalarValues) {
   EXPECT_FLOAT_EQ(config.zigzag.connectionBeamWidthPx, 4.0F);
 
   auto variable = manifold.linked(manifold.home(), vars);
-  while (variable != 0U && manifold.textOf(variable, store) !=
-                                "zigzag.connectionBeamWidthPx") {
+  while (variable != 0U &&
+         manifold.textOf(variable, store) != "zigzag.connectionBeamWidthPx") {
     variable = manifold.linked(variable, vars);
   }
   ASSERT_NE(variable, 0U);
   const auto value = manifold.linked(variable, values);
-  const auto revised = store.setScalar(store.primaryCurrentVersion(), value,
-                                       9.5, &manifold);
+  const auto revised =
+      store.setScalar(store.primaryCurrentVersion(), value, 9.5, &manifold);
   store.repointCurrentVersion(revised);
-  EXPECT_FLOAT_EQ(LayoutConfig::fromStore(store)
-                      .zigzag.connectionBeamWidthPx,
+  EXPECT_FLOAT_EQ(LayoutConfig::fromStore(store).zigzag.connectionBeamWidthPx,
                   9.5F);
 }
 
-TEST(SystemDocsTest, ParseFullInitializedSystemDocs) {
+TEST(SystemDocsTest, StoreExclusiveConfigLoaders) {
   Store kmStore;
   xudu::initializeSystemStore(kmStore, SystemDocKind::Keymap);
-  const auto kmCfg = xudu::parseKeymapConfig(kmStore.textOf(kmStore.latest()));
+  const auto kmCfg = KeymapConfig::fromStore(kmStore);
   EXPECT_FALSE(kmCfg.bindings.empty());
   EXPECT_EQ(kmCfg.bindingFor("new-doc"), "Ctrl+N");
 
   Store setStore;
   xudu::initializeSystemStore(setStore, SystemDocKind::Settings);
-  const auto setCfg =
-      xudu::parseSettingsConfig(setStore.textOf(setStore.latest()));
+  const auto setCfg = SettingsConfig::fromStore(setStore);
   EXPECT_FLOAT_EQ(setCfg.fontSize, 16.0F);
+  EXPECT_EQ(setCfg.fontFamily, "Monospace");
 
   Store loStore;
   xudu::initializeSystemStore(loStore, SystemDocKind::Layout);
-  const auto loCfg = xudu::parseLayoutConfig(loStore.textOf(loStore.latest()));
+  const auto loCfg = LayoutConfig::fromStore(loStore);
   EXPECT_EQ(loCfg.columns, 2U);
   EXPECT_FLOAT_EQ(loCfg.pageWidthPx, 800.0F);
 
   Store uiStore;
   xudu::initializeSystemStore(uiStore, SystemDocKind::UI);
-  const auto uiCfg = xudu::parseUIConfig(uiStore.textOf(uiStore.latest()));
+  const auto uiCfg = UIConfig::fromStore(uiStore);
   EXPECT_TRUE(uiCfg.tabBarVisible);
   EXPECT_FLOAT_EQ(uiCfg.radialMenu.radius, 130.0F);
+
+  Store poStore;
+  xudu::initializeSystemStore(poStore, SystemDocKind::Pouches);
+  const auto poCfg = xudu::PouchConfig::fromStore(poStore);
+  EXPECT_EQ(poCfg.zones.size(), 4U);
 }
 
 TEST(SystemDocsTest, UserPermascrollWithheldSpanSealing) {

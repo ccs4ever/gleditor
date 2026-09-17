@@ -795,10 +795,35 @@ configuration keys.
 
 ______________________________________________________________________
 
-### 6.6 Dual-Stack Configuration Loaders & Verification
+### 6.6 Standardized 10-Dimension Cell Geometry & Store-Exclusive Loaders
 
-To ensure zero downtime during the transition from legacy YAML files to sovereign Zigzag slices, all
-configuration structures in `apps/common/xanadu/system_docs.hpp` implement dual-stack constructors:
+All sovereign system stores (`system://keymap`, `system://settings`, `system://layout`,
+`system://ui`, `system://pouches`) use a standardized 10-dimension Zigzag cell layout:
+
+1. **`d.dims`**: Dimension registry minted by `sliceGenesis` posward from `homeCell`.
+1. **`d.vars`**: Master setting names posward from `homeCell`, and member clones posward from
+   group/subgroup cells.
+1. **`d.values`**: Active typed setting values posward from master setting name cells.
+1. **`d.groups`**: Posward from `homeCell`. The first cell is the blank empty group (`""`) for
+   ungrouped settings; subsequent cells represent top-level dot-separated groups (`hud`, `physics`,
+   etc.) and connect sibling groups.
+1. **`d.subgroups`**: Hierarchical nested subgroup ranks posward from parent group cells (e.g. `hud`
+   $\to$ `velocity`).
+1. **`d.clone`**: Clones master setting names to group/subgroup member cells, and connects prototype
+   type cells to expected schema type clones.
+1. **`d.notes`**: Store-level description and dimension directory posward from `homeCell`, and
+   human-readable setting descriptions posward from master setting cells.
+1. **`d.schemas`**: Posward from setting name to a blank schema cell, and posward from the blank
+   cell to the sequence of expected type clones.
+1. **`d.alternates`**: Posward between blank schema cells for alternative accepted shapes (e.g. 3
+   floats vs 3 ints).
+1. **`d.default`**: Posward from each schema type clone to its default value cell.
+
+#### Store-Exclusive Configuration Loaders
+
+All legacy YAML parsers (`fromYaml`, `fromSlice`, `fromSystemText`, `parse*Config`) and non-store
+representations have been permanently eliminated. All configuration structs in
+`apps/common/xanadu/system_docs.hpp` load exclusively from sovereign `Store` instances:
 
 ```cpp
 namespace xanadu {
@@ -813,38 +838,59 @@ struct LayoutConfig {
   PouchDock pouchDock{PouchDock::Right};
   float documentSpacingX{70.0F};
   bool transclusionPrisms{true};
+  bool transclusionLoom{true};
   bool xanalinkRibbons{true};
+  PhysicsConfig physics{};
+  BeamConfig beams{};
+  ZigzagPresentationConfig zigzag{};
 
-  /// Legacy loader: parses flat YAML text stream
-  [[nodiscard]] static LayoutConfig fromYaml(std::string_view yamlText);
-
-  /// Modern loader: parses multidimensional Zigzag slice
-  [[nodiscard]] static LayoutConfig fromSlice(const zigzag::ZzStructureDocument &slice);
+  /// Store-exclusive loader: reads directly from 10-dimension sovereign cells
+  [[nodiscard]] static LayoutConfig fromStore(const Store &store);
 };
 
-// SettingsConfig, KeymapConfig, and UIConfig implement identical dual-stack methods
+// SettingsConfig, KeymapConfig, UIConfig, and PouchConfig implement identical fromStore loaders
 } // namespace xanadu
 ```
 
-`LayoutConfig::fromSlice(slice)` extracts the `d.config` rank directly from the slice and parses
-key-value pairs. As validated in unit tests, both loaders produce identical runtime configuration
-structs:
+#### Dynamic Schema Validation & Live Reload
 
-```math
-\text{LayoutConfig::fromSlice}(\text{slice}) \equiv \text{LayoutConfig::fromYaml}(\text{defaultYaml})
+`SystemStoreModel::fromStore(store)` constructs an active snapshot of all settings, groups, values,
+and schemas. When a user edits cells:
+
+- Edits are validated dynamically against `entry->schema.alternatives`.
+- If a schema violation occurs (e.g. string supplied where a float is expected, or missing
+  elements), `updateSetting` rejects the mutation with `std::invalid_argument`.
+- Subsystem hot-reload callbacks verify `SystemStoreModel::fromStore(store).isValid()` before
+  applying changes, preventing invalid states from disrupting the runtime.
+
+#### Unified C++ Setting API
+
+The system provides type-safe, variadic, and span-based APIs for querying and mutating settings:
+
+```cpp
+using CellValue = std::variant<double, std::int64_t, bool, std::string>;
+
+// Get active setting values
+std::vector<CellValue> vals = store.getSetting("physics.kRepel");
+
+// Update setting with dynamic schema validation
+store.setSetting("physics.kRepel", 450.0);
+
+// Reset setting to its schema default
+store.resetSettingToDefault("physics.kRepel");
 ```
 
 ______________________________________________________________________
 
 ### 6.7 Implementation & Test Reference Map
 
-| Component                     | Source Path                                                                                              | Key Responsibilities                                                                             |
-| :---------------------------- | :------------------------------------------------------------------------------------------------------- | :----------------------------------------------------------------------------------------------- |
-| **System Projector Header**   | [`apps/common/xanadu/zigzag/zz_system_projector.hpp`](apps/common/xanadu/zigzag/zz_system_projector.hpp) | Dimensional constants (`kDimConfig`, `kDimSchema`, `kDimNotes`), projection declarations         |
-| **System Projector Impl**     | [`apps/common/xanadu/zigzag/zz_system_projector.cpp`](apps/common/xanadu/zigzag/zz_system_projector.cpp) | Rank extraction, 3-page EDL construction, format link binding, butterfly comment synthesis       |
-| **Dual-Stack Config Loaders** | [`apps/common/xanadu/system_docs.hpp/.cpp`](apps/common/xanadu/system_docs.hpp)                          | `LayoutConfig`, `SettingsConfig`, `KeymapConfig`, `UIConfig` dual `fromYaml`/`fromSlice` loaders |
-| **Canonical Layout Slice**    | [`assets/zigzag/system_layout_slice.yaml`](assets/zigzag/system_layout_slice.yaml)                       | Canonical 3D Zigzag slice specification for `system://layout`                                    |
-| **Comprehensive Tests**       | [`tests/zigzag/test_system_projector.cpp`](tests/zigzag/test_system_projector.cpp)                       | Manifold validation, zero-markdown verification, format links, bidirectional edit propagation    |
+| Component                  | Source Path                                                                                              | Key Responsibilities                                                                                |
+| :------------------------- | :------------------------------------------------------------------------------------------------------- | :-------------------------------------------------------------------------------------------------- |
+| **System Docs Header**     | [`apps/common/xanadu/system_docs.hpp`](apps/common/xanadu/system_docs.hpp)                               | 10-dimension constants, `namespace settings`, `SettingSpec`, `SystemStoreModel`, store-only configs |
+| **System Docs Impl**       | [`apps/common/xanadu/system_docs.cpp`](apps/common/xanadu/system_docs.cpp)                               | Genesis topology, setting population, schema validation, `fromStore` loaders, C++ API               |
+| **System Projector Impl**  | [`apps/common/xanadu/zigzag/zz_system_projector.cpp`](apps/common/xanadu/zigzag/zz_system_projector.cpp) | Rank extraction, 3-page EDL construction, bidirectional cell-to-text synchronization                |
+| **Canonical Layout Slice** | [`assets/zigzag/system_layout_slice.yaml`](assets/zigzag/system_layout_slice.yaml)                       | Canonical 3D Zigzag slice specification for `system://layout`                                       |
+| **Comprehensive Tests**    | [`tests/xudu/system_docs_test.cpp`](tests/xudu/system_docs_test.cpp)                                     | 10-dimension geometry, genesis topology, schema validation, store-exclusive loaders                 |
 
 ______________________________________________________________________
 
