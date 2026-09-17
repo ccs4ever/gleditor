@@ -19,9 +19,12 @@
 #ifndef GLEDITOR_MODAL_INPUT_H
 #define GLEDITOR_MODAL_INPUT_H
 
+#include <algorithm>
 #include <cstdint>
 #include <optional>
 #include <string>
+#include <utility>
+#include <vector>
 
 namespace gleditor {
 
@@ -118,6 +121,69 @@ public:
   [[nodiscard]] virtual std::optional<InputArea> textArea() const {
     return std::nullopt;
   }
+};
+
+/**
+ * @brief Composite modal input dispatcher that checks registered modals in
+ * reverse order.
+ *
+ * Allows multiple distinct modals (e.g. publication form and presentation
+ * overlay) to coexist within the application state without conflict. The
+ * topmost active modal that returns grabbing() == true receives keyboard and
+ * text events.
+ */
+class CompositeModalInput : public ModalInput {
+public:
+  CompositeModalInput() = default;
+  explicit CompositeModalInput(std::vector<ModalInput *> modals)
+      : modals_(std::move(modals)) {}
+
+  void add(ModalInput *modal) {
+    if (modal != nullptr) {
+      modals_.push_back(modal);
+    }
+  }
+
+  void remove(ModalInput *modal) { std::erase(modals_, modal); }
+
+  [[nodiscard]] bool grabbing() const override {
+    for (auto it = modals_.rbegin(); it != modals_.rend(); ++it) {
+      if (*it != nullptr && (*it)->grabbing()) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  bool keyPressed(const Key key, const KeyMods mods) override {
+    for (auto it = modals_.rbegin(); it != modals_.rend(); ++it) {
+      if (*it != nullptr && (*it)->grabbing()) {
+        return (*it)->keyPressed(key, mods);
+      }
+    }
+    return false;
+  }
+
+  void textTyped(const std::string &utf8) override {
+    for (auto it = modals_.rbegin(); it != modals_.rend(); ++it) {
+      if (*it != nullptr && (*it)->grabbing()) {
+        (*it)->textTyped(utf8);
+        return;
+      }
+    }
+  }
+
+  [[nodiscard]] std::optional<InputArea> textArea() const override {
+    for (auto it = modals_.rbegin(); it != modals_.rend(); ++it) {
+      if (*it != nullptr && (*it)->grabbing()) {
+        return (*it)->textArea();
+      }
+    }
+    return std::nullopt;
+  }
+
+private:
+  std::vector<ModalInput *> modals_;
 };
 
 } // namespace gleditor

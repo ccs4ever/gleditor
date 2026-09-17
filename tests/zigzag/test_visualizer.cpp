@@ -936,3 +936,63 @@ TEST(ZigzagVisualizerTest, CommandOmnibarViewAndLibraryCommands) {
 
   fs::remove_all(tmpDir);
 }
+
+TEST(ZigzagVisualizerTest, ModalInputInterceptionAndTextEntry) {
+  ZigzagVisualizer viz("Sans 12");
+
+  // When neither is active, grabbing is false and textArea has no value
+  EXPECT_FALSE(viz.grabbing());
+  EXPECT_FALSE(viz.textArea().has_value());
+
+  // Command bar activation
+  viz.setCommandBarVisible(true);
+  EXPECT_TRUE(viz.grabbing());
+  EXPECT_TRUE(viz.textArea().has_value());
+
+  // Text entry via modal input
+  viz.textTyped(":view ");
+  viz.textTyped("d.1 d.2 d.3");
+  EXPECT_EQ(viz.commandBarText(), ":view d.1 d.2 d.3");
+
+  // Backspace via modal input
+  EXPECT_TRUE(
+      viz.keyPressed(gleditor::Key::Backspace, gleditor::KeyMods::None));
+  EXPECT_EQ(viz.commandBarText(), ":view d.1 d.2 d.");
+
+  // Type 3 back
+  viz.textTyped("3");
+  EXPECT_EQ(viz.commandBarText(), ":view d.1 d.2 d.3");
+
+  // Return key executes the command bar
+  EXPECT_TRUE(viz.keyPressed(gleditor::Key::Return, gleditor::KeyMods::None));
+  EXPECT_EQ(viz.currentView().x_dimension, "d.1");
+  EXPECT_EQ(viz.currentView().y_dimension, "d.2");
+  EXPECT_EQ(viz.currentView().z_dimension, "d.3");
+
+  // Escape closes command bar
+  viz.setCommandBarVisible(true);
+  EXPECT_TRUE(viz.grabbing());
+  EXPECT_TRUE(viz.keyPressed(gleditor::Key::Escape, gleditor::KeyMods::None));
+  EXPECT_FALSE(viz.isCommandBarVisible());
+  EXPECT_FALSE(viz.grabbing());
+
+  // Palette activation
+  viz.togglePalette();
+  EXPECT_TRUE(viz.isPaletteVisible());
+  EXPECT_TRUE(viz.grabbing());
+  EXPECT_TRUE(viz.textArea().has_value());
+
+  // Typing into palette filters
+  viz.textTyped("ADD");
+  EXPECT_EQ(viz.paletteFilter(), "ADD");
+
+  // Backspace in palette
+  EXPECT_TRUE(
+      viz.keyPressed(gleditor::Key::Backspace, gleditor::KeyMods::None));
+  EXPECT_EQ(viz.paletteFilter(), "AD");
+
+  // Escape closes palette
+  EXPECT_TRUE(viz.keyPressed(gleditor::Key::Escape, gleditor::KeyMods::None));
+  EXPECT_FALSE(viz.isPaletteVisible());
+  EXPECT_FALSE(viz.grabbing());
+}

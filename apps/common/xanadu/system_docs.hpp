@@ -215,15 +215,156 @@ inline constexpr std::string_view kRadialMenuRadius = "radialMenu.radius";
 inline constexpr std::string_view kRadialMenuInnerRadius =
     "radialMenu.innerRadius";
 
-// Keymap
-inline constexpr std::string_view kKeymapNewDoc        = "new-doc";
-inline constexpr std::string_view kKeymapOpenDoc       = "open-doc";
-inline constexpr std::string_view kKeymapCloseDoc      = "close-doc";
-inline constexpr std::string_view kKeymapForward       = "forward";
+// Keymap - Xudu Core Actions
+inline constexpr std::string_view kKeymapQuit            = "quit";
+inline constexpr std::string_view kKeymapSave            = "save";
+inline constexpr std::string_view kKeymapClose           = "close";
+inline constexpr std::string_view kKeymapNextDoc         = "next-doc";
+inline constexpr std::string_view kKeymapPrevDoc         = "prev-doc";
+inline constexpr std::string_view kKeymapDoc1            = "doc-1";
+inline constexpr std::string_view kKeymapDoc2            = "doc-2";
+inline constexpr std::string_view kKeymapDoc3            = "doc-3";
+inline constexpr std::string_view kKeymapDoc4            = "doc-4";
+inline constexpr std::string_view kKeymapDoc5            = "doc-5";
+inline constexpr std::string_view kKeymapDoc6            = "doc-6";
+inline constexpr std::string_view kKeymapDoc7            = "doc-7";
+inline constexpr std::string_view kKeymapDoc8            = "doc-8";
+inline constexpr std::string_view kKeymapDoc9            = "doc-9";
+inline constexpr std::string_view kKeymapBack            = "back";
+inline constexpr std::string_view kKeymapNewDoc          = "new-doc";
+inline constexpr std::string_view kKeymapForward         = "forward";
+inline constexpr std::string_view kKeymapOpenDoc         = "open-doc";
+inline constexpr std::string_view kKeymapCloseDoc        = "close-doc";
+inline constexpr std::string_view kKeymapOnionSkin       = "onion-skin";
+inline constexpr std::string_view kKeymapPouchToggle     = "pouch-toggle";
+inline constexpr std::string_view kKeymapPouchToggleF2   = "pouch-toggle-f2";
+inline constexpr std::string_view kKeymapTelescopeToggle = "telescope-toggle";
+inline constexpr std::string_view kKeymapTelescopeToggleF3 =
+    "telescope-toggle-f3";
+inline constexpr std::string_view kKeymapTensionPhysicsToggle =
+    "tension-physics-toggle";
+inline constexpr std::string_view kKeymapUnlockTranscopyright =
+    "unlock-transcopyright";
+inline constexpr std::string_view kKeymapUnlockTranscopyrightF5 =
+    "unlock-transcopyright-f5";
+inline constexpr std::string_view kKeymapUnlockTranscopyrightCtrlU =
+    "unlock-transcopyright-ctrl-u";
 inline constexpr std::string_view kKeymapScrubForward  = "scrub-forward";
 inline constexpr std::string_view kKeymapScrubBackward = "scrub-backward";
+inline constexpr std::string_view kKeymapTransclude    = "transclude";
+inline constexpr std::string_view kKeymapXanalink      = "xanalink";
+inline constexpr std::string_view kKeymapCancelLink    = "cancel link";
+inline constexpr std::string_view kKeymapBeams         = "beams";
+inline constexpr std::string_view kKeymapSworph        = "sworph";
+inline constexpr std::string_view kKeymapPublish       = "publish";
+inline constexpr std::string_view kKeymapHistory       = "history";
+inline constexpr std::string_view kKeymapDelete        = "delete";
+inline constexpr std::string_view kKeymapPageBreak     = "page-break";
 inline constexpr std::string_view kKeymapHypertimeMap  = "hypertime-map";
+inline constexpr std::string_view kKeymapMap           = "map";
+inline constexpr std::string_view kKeymapScrubBack     = "scrub-back";
 inline constexpr std::string_view kKeymapRadialMenu    = "radial-menu";
+
+// Keymap - Zigzag Visualizer & Pure Vortex Actions
+inline constexpr std::string_view kKeymapViewModeContent1 =
+    "view-mode-content-1";
+inline constexpr std::string_view kKeymapViewModeContentV =
+    "view-mode-content-v";
+inline constexpr std::string_view kKeymapViewModeTopology =
+    "view-mode-topology";
+inline constexpr std::string_view kKeymapViewModeTopologyT =
+    "view-mode-topology-t";
+inline constexpr std::string_view kKeymapBundleExecution = "bundle-execution";
+inline constexpr std::string_view kKeymapBundleScope     = "bundle-scope";
+inline constexpr std::string_view kKeymapBundleContract  = "bundle-contract";
+inline constexpr std::string_view kKeymapBundleLogic     = "bundle-logic";
+inline constexpr std::string_view kKeymapBundleStdlib    = "bundle-stdlib";
+inline constexpr std::string_view kKeymapBundleCycle     = "bundle-cycle";
+inline constexpr std::string_view kKeymapTogglePalette   = "toggle-palette";
+inline constexpr std::string_view kKeymapVqlTranslateAttach =
+    "vql-translate-attach";
+inline constexpr std::string_view kKeymapToggleCommandBar =
+    "toggle-command-bar";
+inline constexpr std::string_view kKeymapOpenCommandBarSlash =
+    "open-command-bar-slash";
+inline constexpr std::string_view kKeymapOpenCommandBarColon =
+    "open-command-bar-colon";
+inline constexpr std::string_view kKeymapConfirmAction  = "confirm-action";
+inline constexpr std::string_view kKeymapDismissOverlay = "dismiss-overlay";
+inline constexpr std::string_view kKeymapStepXPos       = "step-x-pos";
+inline constexpr std::string_view kKeymapStepXNeg       = "step-x-neg";
+inline constexpr std::string_view kKeymapStepYPos       = "step-y-pos";
+inline constexpr std::string_view kKeymapStepYNeg       = "step-y-neg";
+inline constexpr std::string_view kKeymapStepZPos       = "step-z-pos";
+inline constexpr std::string_view kKeymapStepZNeg       = "step-z-neg";
+inline constexpr std::string_view kKeymapSwapXY         = "swap-xy";
+inline constexpr std::string_view kKeymapCycleDimsForward =
+    "cycle-dims-forward";
+inline constexpr std::string_view kKeymapCycleDimsBackward =
+    "cycle-dims-backward";
+inline constexpr std::string_view kKeymapJumpHome = "jump-home";
+inline constexpr std::string_view kKeymapHopHead  = "hop-head";
+inline constexpr std::string_view kKeymapHopTail  = "hop-tail";
+inline constexpr std::string_view kKeymapDuplicateFocusCell =
+    "duplicate-focus-cell";
+inline constexpr std::string_view kKeymapRasterizePrint = "rasterize-print";
+inline constexpr std::string_view kKeymapExportLinkPackage =
+    "export-link-package";
+inline constexpr std::string_view kKeymapInsertCellXPos  = "insert-cell-x-pos";
+inline constexpr std::string_view kKeymapInsertCellXNeg  = "insert-cell-x-neg";
+inline constexpr std::string_view kKeymapInsertCellYPos  = "insert-cell-y-pos";
+inline constexpr std::string_view kKeymapInsertCellYNeg  = "insert-cell-y-neg";
+inline constexpr std::string_view kKeymapUnlinkXPos      = "unlink-x-pos";
+inline constexpr std::string_view kKeymapUnlinkXNeg      = "unlink-x-neg";
+inline constexpr std::string_view kKeymapDeleteFocusCell = "delete-focus-cell";
+inline constexpr std::string_view kKeymapDeleteFocusCellBksp =
+    "delete-focus-cell-bksp";
+inline constexpr std::string_view kKeymapSaveStore = "save-store";
+
+// Keymap - Xuzz Zigzag Presentation Actions
+inline constexpr std::string_view kKeymapZigzagTogglePalette =
+    "zigzag-toggle-palette";
+inline constexpr std::string_view kKeymapZigzagVqlTranslateAttach =
+    "zigzag-vql-translate-attach";
+inline constexpr std::string_view kKeymapZigzagToggleCommandBar =
+    "zigzag-toggle-command-bar";
+inline constexpr std::string_view kKeymapZigzagOpenCommandBarSlash =
+    "zigzag-open-command-bar-slash";
+inline constexpr std::string_view kKeymapZigzagOpenCommandBarColon =
+    "zigzag-open-command-bar-colon";
+inline constexpr std::string_view kKeymapZigzagViewModeContent =
+    "zigzag-view-mode-content";
+inline constexpr std::string_view kKeymapZigzagViewModeTopology =
+    "zigzag-view-mode-topology";
+inline constexpr std::string_view kKeymapZigzagBundleExecution =
+    "zigzag-bundle-execution";
+inline constexpr std::string_view kKeymapZigzagBundleScope =
+    "zigzag-bundle-scope";
+inline constexpr std::string_view kKeymapZigzagBundleContract =
+    "zigzag-bundle-contract";
+inline constexpr std::string_view kKeymapZigzagBundleLogic =
+    "zigzag-bundle-logic";
+inline constexpr std::string_view kKeymapZigzagBundleStdlib =
+    "zigzag-bundle-stdlib";
+inline constexpr std::string_view kKeymapZigzagBundleCycle =
+    "zigzag-bundle-cycle";
+inline constexpr std::string_view kKeymapZigzagSwapXY = "zigzag-swap-xy";
+inline constexpr std::string_view kKeymapZigzagCycleDimsForward =
+    "zigzag-cycle-dims-forward";
+inline constexpr std::string_view kKeymapZigzagCycleDimsBackward =
+    "zigzag-cycle-dims-backward";
+inline constexpr std::string_view kKeymapZigzagJumpHome = "zigzag-jump-home";
+inline constexpr std::string_view kKeymapZigzagHopHead  = "zigzag-hop-head";
+inline constexpr std::string_view kKeymapZigzagHopTail  = "zigzag-hop-tail";
+inline constexpr std::string_view kKeymapZigzagDuplicateCell =
+    "zigzag-duplicate-cell";
+inline constexpr std::string_view kKeymapZigzagSaveStore = "zigzag-save-store";
+inline constexpr std::string_view kKeymapZigzagStepXPos  = "zigzag-step-x-pos";
+inline constexpr std::string_view kKeymapZigzagStepXNeg  = "zigzag-step-x-neg";
+inline constexpr std::string_view kKeymapZigzagStepYPos  = "zigzag-step-y-pos";
+inline constexpr std::string_view kKeymapZigzagStepYNeg  = "zigzag-step-y-neg";
+inline constexpr std::string_view kKeymapZigzagStepZPos  = "zigzag-step-z-pos";
+inline constexpr std::string_view kKeymapZigzagStepZNeg  = "zigzag-step-z-neg";
 
 // Pouches
 inline constexpr std::string_view kPouchZoneToLinkLeft  = "zone.to_link_left";

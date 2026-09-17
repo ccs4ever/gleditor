@@ -246,6 +246,18 @@ public:
   CellRef hopTail(CellRef cursor, DimRef dim);
   [[nodiscard]] CellRef jumpHome() const noexcept;
 
+  // -- Module 14: std:bridge --------------------------------------------------
+  /// Returns primary document text from the store as an ephemeral cell.
+  CellRef bridgeDocText(const xanadu::Store &store);
+  /// Returns primary version string of the store as an ephemeral cell.
+  CellRef bridgeStoreVersion(const xanadu::Store &store);
+  /// Links or transcludes a Zigzag cell into a Xanadoc document span.
+  bool bridgeCellToDoc(xanadu::Store &store, CellRef cell,
+                       std::uint32_t docOffset);
+  /// Transcludes a document span into a new Zigzag cell.
+  CellRef bridgeDocToCell(xanadu::Store &store, std::uint32_t docOffset,
+                          std::uint32_t length);
+
   // -- Sovereign Store Library Packaging (Zero YAML) --------------------------
   bool exportModuleToStore(std::string_view modulePath,
                            xanadu::Store &destStore) const;
@@ -270,6 +282,7 @@ private:
   void buildGCModule(CellRef mod);
   void buildUiModule(CellRef mod);
   void buildNavModule(CellRef mod);
+  void buildBridgeModule(CellRef mod);
 
   VortexCore &core_;
   VortexVM &vm_;

@@ -23,6 +23,7 @@
 #include <gleditor/sdl_compat.hpp>
 #include <gleditor/state.hpp>
 
+#include "common/xanadu/system_docs.hpp"
 #include "core/zzcore.hpp"
 #include "core/zzstructure_loader.hpp"
 #include "zigzag_visualizer.hpp"
@@ -123,99 +124,129 @@ LoadedDocument loadDocument(const std::string &slicePath,
   return {.doc = std::nullopt, .sourcePath = {}, .description = {}};
 }
 
+std::unique_ptr<xanadu::Store> loadOrCreateKeymapStore() {
+  const auto dir = xanadu::systemDocDirectory(xanadu::SystemDocKind::Keymap);
+  std::filesystem::create_directories(dir);
+
+  auto sysStore = std::make_unique<xanadu::Store>();
+  sysStore->setSystem(true);
+
+  bool opened = false;
+  if (std::filesystem::exists(dir / "ops.nodes") ||
+      std::filesystem::exists(dir / "store.tables")) {
+    try {
+      sysStore->load(dir.string());
+      opened = true;
+    } catch (...) {
+      // Recreate if unreadable
+    }
+  }
+  if (opened) {
+    if (sysStore->currentVersions().empty() && !sysStore->latest().isZero()) {
+      sysStore->repointCurrentVersion(sysStore->latest());
+    }
+  } else {
+    xanadu::initializeSystemStore(*sysStore, xanadu::SystemDocKind::Keymap);
+    sysStore->save(dir.string());
+  }
+  return sysStore;
+}
+
 void bindCommands(gleditor::Application &app, const AppStateRef &state,
                   const std::shared_ptr<zigzag::ZigzagVisualizer> &viz) {
-  app.bindDefaultViewCommands();
-
-  app.commands().bind(SDL_SCANCODE_Q, "quit", "close the visualizer",
-                      [state] { state->alive = false; });
+  app.commands().registerAction(std::string(xanadu::settings::kKeymapQuit),
+                                "close the visualizer",
+                                [state] { state->alive = false; });
 
   // Multi-View Modes (Cell Content View vs. Topology View)
-  app.commands().bind(
-      SDL_SCANCODE_1, "view-mode-content",
+  app.commands().registerAction(
+      std::string(xanadu::settings::kKeymapViewModeContent1),
       "switch to Cell Content View (full content & XYZ alignment)", [viz] {
         viz->setViewMode(zigzag::ZigzagVisualizer::ViewMode::CellContent);
       });
-  app.commands().bind(
-      SDL_SCANCODE_V, "view-mode-content-v",
+  app.commands().registerAction(
+      std::string(xanadu::settings::kKeymapViewModeContentV),
       "switch to Cell Content View (full content & XYZ alignment)", [viz] {
         viz->setViewMode(zigzag::ZigzagVisualizer::ViewMode::CellContent);
       });
-  app.commands().bind(
-      SDL_SCANCODE_2, "view-mode-topology",
+  app.commands().registerAction(
+      std::string(xanadu::settings::kKeymapViewModeTopology),
       "switch to Topology View (fixed-size cells & lattice geometry)", [viz] {
         viz->setViewMode(zigzag::ZigzagVisualizer::ViewMode::Topology);
       });
-  app.commands().bind(
-      SDL_SCANCODE_T, "view-mode-topology-t",
+  app.commands().registerAction(
+      std::string(xanadu::settings::kKeymapViewModeTopologyT),
       "switch to Topology View (fixed-size cells & lattice geometry)", [viz] {
         viz->setViewMode(zigzag::ZigzagVisualizer::ViewMode::Topology);
       });
 
   // Dimension Bundle switching
-  app.commands().bind(
-      SDL_SCANCODE_1, Mod::Ctrl, "bundle-execution",
+  app.commands().registerAction(
+      std::string(xanadu::settings::kKeymapBundleExecution),
       "switch to Execution dimension bundle (d.spin, d.step, d.branch)", [viz] {
         viz->setDimensionBundle(
             zigzag::ZigzagVisualizer::DimensionBundle::Execution);
       });
-  app.commands().bind(
-      SDL_SCANCODE_2, Mod::Ctrl, "bundle-scope",
+  app.commands().registerAction(
+      std::string(xanadu::settings::kKeymapBundleScope),
       "switch to Scope dimension bundle (d.lexical, d.dynamic, d.env)", [viz] {
         viz->setDimensionBundle(
             zigzag::ZigzagVisualizer::DimensionBundle::Scope);
       });
-  app.commands().bind(
-      SDL_SCANCODE_3, Mod::Ctrl, "bundle-contract",
+  app.commands().registerAction(
+      std::string(xanadu::settings::kKeymapBundleContract),
       "switch to Contract dimension bundle (d.require, d.ensure, d.invariant)",
       [viz] {
         viz->setDimensionBundle(
             zigzag::ZigzagVisualizer::DimensionBundle::Contract);
       });
-  app.commands().bind(
-      SDL_SCANCODE_4, Mod::Ctrl, "bundle-logic",
+  app.commands().registerAction(
+      std::string(xanadu::settings::kKeymapBundleLogic),
       "switch to Logic dimension bundle (d.clause, d.predicate, d.var)", [viz] {
         viz->setDimensionBundle(
             zigzag::ZigzagVisualizer::DimensionBundle::Logic);
       });
-  app.commands().bind(
-      SDL_SCANCODE_5, Mod::Ctrl, "bundle-stdlib",
+  app.commands().registerAction(
+      std::string(xanadu::settings::kKeymapBundleStdlib),
       "switch to Stdlib dimension bundle (d.stdlib, d.symbol, d.version)",
       [viz] {
         viz->setDimensionBundle(
             zigzag::ZigzagVisualizer::DimensionBundle::Stdlib);
       });
-  app.commands().bind(SDL_SCANCODE_B, Mod::Ctrl, "bundle-cycle",
-                      "cycle active dimension bundle forward",
-                      [viz] { viz->cycleDimensionBundle(true); });
+  app.commands().registerAction(
+      std::string(xanadu::settings::kKeymapBundleCycle),
+      "cycle active dimension bundle forward",
+      [viz] { viz->cycleDimensionBundle(true); });
 
   // Vortex Opcode & Library Palette HUD
-  app.commands().bind(SDL_SCANCODE_F4, "toggle-palette",
-                      "toggle Vortex opcode and library palette HUD",
-                      [viz] { viz->togglePalette(); });
-  app.commands().bind(SDL_SCANCODE_F5, "vql-translate-attach",
-                      "translate VQL filter text and attach to active chain",
-                      [viz] {
-                        if (viz->isPaletteVisible()) {
-                          viz->paletteTranslateVQL();
-                          viz->setPaletteVisible(false);
-                        }
-                      });
+  app.commands().registerAction(
+      std::string(xanadu::settings::kKeymapTogglePalette),
+      "toggle Vortex opcode and library palette HUD",
+      [viz] { viz->togglePalette(); });
+  app.commands().registerAction(
+      std::string(xanadu::settings::kKeymapVqlTranslateAttach),
+      "translate VQL filter text and attach to active chain", [viz] {
+        if (viz->isPaletteVisible()) {
+          viz->paletteTranslateVQL();
+          viz->setPaletteVisible(false);
+        }
+      });
 
   // Interactive VQL Command Omnibar
-  app.commands().bind(SDL_SCANCODE_F2, "toggle-command-bar",
-                      "toggle interactive VQL Command Omnibar",
-                      [viz] { viz->toggleCommandBar(); });
-  app.commands().bind(SDL_SCANCODE_SLASH, "open-command-bar-slash",
-                      "open VQL Command Omnibar with '/' navigation prefix",
-                      [viz] {
-                        viz->setCommandBarVisible(true);
-                        if (viz->commandBarText().empty()) {
-                          viz->commandBarInputChar('/');
-                        }
-                      });
-  app.commands().bind(
-      SDL_SCANCODE_SEMICOLON, Mod::Shift, "open-command-bar-colon",
+  app.commands().registerAction(
+      std::string(xanadu::settings::kKeymapToggleCommandBar),
+      "toggle interactive VQL Command Omnibar",
+      [viz] { viz->toggleCommandBar(); });
+  app.commands().registerAction(
+      std::string(xanadu::settings::kKeymapOpenCommandBarSlash),
+      "open VQL Command Omnibar with '/' navigation prefix", [viz] {
+        viz->setCommandBarVisible(true);
+        if (viz->commandBarText().empty()) {
+          viz->commandBarInputChar('/');
+        }
+      });
+  app.commands().registerAction(
+      std::string(xanadu::settings::kKeymapOpenCommandBarColon),
       "open VQL Command Omnibar with ':' command prefix", [viz] {
         viz->setCommandBarVisible(true);
         if (viz->commandBarText().empty()) {
@@ -223,8 +254,8 @@ void bindCommands(gleditor::Application &app, const AppStateRef &state,
         }
       });
 
-  app.commands().bind(
-      SDL_SCANCODE_RETURN, "confirm-action",
+  app.commands().registerAction(
+      std::string(xanadu::settings::kKeymapConfirmAction),
       "execute Command Omnibar or clone selected palette symbol", [viz] {
         if (viz->isCommandBarVisible()) {
           viz->executeCommandBar();
@@ -233,121 +264,133 @@ void bindCommands(gleditor::Application &app, const AppStateRef &state,
           viz->setPaletteVisible(false);
         }
       });
-  app.commands().bind(SDL_SCANCODE_ESCAPE, "dismiss-overlay",
-                      "dismiss Command Omnibar or palette HUD", [viz] {
-                        if (viz->isCommandBarVisible()) {
-                          viz->setCommandBarVisible(false);
-                        } else if (viz->isPaletteVisible()) {
-                          viz->setPaletteVisible(false);
-                        }
-                      });
+  app.commands().registerAction(
+      std::string(xanadu::settings::kKeymapDismissOverlay),
+      "dismiss Command Omnibar or palette HUD", [viz] {
+        if (viz->isCommandBarVisible()) {
+          viz->setCommandBarVisible(false);
+        } else if (viz->isPaletteVisible()) {
+          viz->setPaletteVisible(false);
+        }
+      });
 
   // Navigation along active dimensions
-  app.commands().bind(SDL_SCANCODE_RIGHT, "step-x-pos",
-                      "step focus positive along X dimension",
-                      [viz] { viz->dispatchAction("step-x-pos"); });
-  app.commands().bind(SDL_SCANCODE_LEFT, "step-x-neg",
-                      "step focus negative along X dimension",
-                      [viz] { viz->dispatchAction("step-x-neg"); });
-  app.commands().bind(SDL_SCANCODE_UP, "step-y-pos",
-                      "step focus positive along Y dimension", [viz] {
-                        if (viz->isPaletteVisible()) {
-                          viz->palettePrev();
-                        } else {
-                          viz->dispatchAction("step-y-pos");
-                        }
-                      });
-  app.commands().bind(SDL_SCANCODE_DOWN, "step-y-neg",
-                      "step focus negative along Y dimension", [viz] {
-                        if (viz->isPaletteVisible()) {
-                          viz->paletteNext();
-                        } else {
-                          viz->dispatchAction("step-y-neg");
-                        }
-                      });
-  app.commands().bind(SDL_SCANCODE_PAGEUP, "step-z-pos",
-                      "step focus positive along Z dimension",
-                      [viz] { viz->dispatchAction("step-z-pos"); });
-  app.commands().bind(SDL_SCANCODE_PAGEDOWN, "step-z-neg",
-                      "step focus negative along Z dimension",
-                      [viz] { viz->dispatchAction("step-z-neg"); });
+  app.commands().registerAction(std::string(xanadu::settings::kKeymapStepXPos),
+                                "step focus positive along X dimension",
+                                [viz] { viz->dispatchAction("step-x-pos"); });
+  app.commands().registerAction(std::string(xanadu::settings::kKeymapStepXNeg),
+                                "step focus negative along X dimension",
+                                [viz] { viz->dispatchAction("step-x-neg"); });
+  app.commands().registerAction(std::string(xanadu::settings::kKeymapStepYPos),
+                                "step focus positive along Y dimension", [viz] {
+                                  if (viz->isPaletteVisible()) {
+                                    viz->palettePrev();
+                                  } else {
+                                    viz->dispatchAction("step-y-pos");
+                                  }
+                                });
+  app.commands().registerAction(std::string(xanadu::settings::kKeymapStepYNeg),
+                                "step focus negative along Y dimension", [viz] {
+                                  if (viz->isPaletteVisible()) {
+                                    viz->paletteNext();
+                                  } else {
+                                    viz->dispatchAction("step-y-neg");
+                                  }
+                                });
+  app.commands().registerAction(std::string(xanadu::settings::kKeymapStepZPos),
+                                "step focus positive along Z dimension",
+                                [viz] { viz->dispatchAction("step-z-pos"); });
+  app.commands().registerAction(std::string(xanadu::settings::kKeymapStepZNeg),
+                                "step focus negative along Z dimension",
+                                [viz] { viz->dispatchAction("step-z-neg"); });
 
   // Dimension swapping and cycling
-  app.commands().bind(SDL_SCANCODE_SPACE, "swap-xy",
-                      "swap X and Y dimension bindings",
-                      [viz] { viz->dispatchAction("swap-xy"); });
-  app.commands().bind(SDL_SCANCODE_TAB, "cycle-dims-forward",
-                      "cycle active dimension bindings forward",
-                      [viz] { viz->dispatchAction("cycle-dims-forward"); });
-  app.commands().bind(SDL_SCANCODE_TAB, Mod::Shift, "cycle-dims-backward",
-                      "cycle active dimension bindings backward",
-                      [viz] { viz->dispatchAction("cycle-dims-backward"); });
+  app.commands().registerAction(std::string(xanadu::settings::kKeymapSwapXY),
+                                "swap X and Y dimension bindings",
+                                [viz] { viz->dispatchAction("swap-xy"); });
+  app.commands().registerAction(
+      std::string(xanadu::settings::kKeymapCycleDimsForward),
+      "cycle active dimension bindings forward",
+      [viz] { viz->dispatchAction("cycle-dims-forward"); });
+  app.commands().registerAction(
+      std::string(xanadu::settings::kKeymapCycleDimsBackward),
+      "cycle active dimension bindings backward",
+      [viz] { viz->dispatchAction("cycle-dims-backward"); });
 
   // Navigation jumping
-  app.commands().bind(SDL_SCANCODE_HOME, "jump-home", "jump focus to home cell",
-                      [viz] { viz->dispatchAction("jump-home"); });
-  app.commands().bind(SDL_SCANCODE_HOME, Mod::Ctrl, "hop-head",
-                      "hop to head of current rank along X dimension",
-                      [viz] { viz->dispatchAction("hop-head"); });
-  app.commands().bind(SDL_SCANCODE_END, Mod::Ctrl, "hop-tail",
-                      "hop to tail of current rank along X dimension",
-                      [viz] { viz->dispatchAction("hop-tail"); });
+  app.commands().registerAction(std::string(xanadu::settings::kKeymapJumpHome),
+                                "jump focus to home cell",
+                                [viz] { viz->dispatchAction("jump-home"); });
+  app.commands().registerAction(std::string(xanadu::settings::kKeymapHopHead),
+                                "hop to head of current rank along X dimension",
+                                [viz] { viz->dispatchAction("hop-head"); });
+  app.commands().registerAction(std::string(xanadu::settings::kKeymapHopTail),
+                                "hop to tail of current rank along X dimension",
+                                [viz] { viz->dispatchAction("hop-tail"); });
 
   // Duplication
-  app.commands().bind(SDL_SCANCODE_C, Mod::Ctrl | Mod::Shift,
-                      "duplicate-focus-cell",
-                      "duplicate focused cell along d.clone",
-                      [viz] { viz->dispatchAction("duplicate-focus-cell"); });
+  app.commands().registerAction(
+      std::string(xanadu::settings::kKeymapDuplicateFocusCell),
+      "duplicate focused cell along d.clone",
+      [viz] { viz->dispatchAction("duplicate-focus-cell"); });
 
   // Xudu convergence operations
-  app.commands().bind(SDL_SCANCODE_R, "rasterize-print",
-                      "print 2D raster reading text to stdout", [viz] {
-                        const auto res = viz->rasterize();
-                        std::cout
-                            << "\n=== ZigZag 2D Raster Reading Stream ===\n"
-                            << res.text
-                            << "\n=======================================\n";
-                      });
-  app.commands().bind(SDL_SCANCODE_S, Mod::Ctrl, "export-link-package",
-                      "export current slice as Xudu LinkPackage", [viz] {
-                        xanadu::MutableKeys keys{};
-                        const auto pkg = viz->exportAsLinkPackage(keys);
-                        std::cout
-                            << "Exported Xudu LinkPackage: " << pkg.describe()
-                            << " (" << pkg.links.size() << " links)\n";
-                      });
+  app.commands().registerAction(
+      std::string(xanadu::settings::kKeymapRasterizePrint),
+      "print 2D raster reading text to stdout", [viz] {
+        const auto res = viz->rasterize();
+        std::cout << "\n=== ZigZag 2D Raster Reading Stream ===\n"
+                  << res.text << "\n=======================================\n";
+      });
+  app.commands().registerAction(
+      std::string(xanadu::settings::kKeymapExportLinkPackage),
+      "export current slice as Xudu LinkPackage", [viz] {
+        xanadu::MutableKeys keys{};
+        const auto pkg = viz->exportAsLinkPackage(keys);
+        std::cout << "Exported Xudu LinkPackage: " << pkg.describe() << " ("
+                  << pkg.links.size() << " links)\n";
+      });
 
   // Interactive In-App Cell & Dimension Editing
-  app.commands().bind(SDL_SCANCODE_N, "insert-cell-x-pos",
-                      "insert connected cell positive along active X dimension",
-                      [viz] { viz->dispatchAction("insert-cell-x-pos"); });
-  app.commands().bind(SDL_SCANCODE_N, Mod::Shift, "insert-cell-x-neg",
-                      "insert connected cell negative along active X dimension",
-                      [viz] { viz->dispatchAction("insert-cell-x-neg"); });
-  app.commands().bind(SDL_SCANCODE_D, "insert-cell-y-pos",
-                      "insert connected cell positive along active Y dimension",
-                      [viz] { viz->dispatchAction("insert-cell-y-pos"); });
-  app.commands().bind(SDL_SCANCODE_D, Mod::Shift, "insert-cell-y-neg",
-                      "insert connected cell negative along active Y dimension",
-                      [viz] { viz->dispatchAction("insert-cell-y-neg"); });
-  app.commands().bind(SDL_SCANCODE_U, "unlink-x-pos",
-                      "unlink focused cell along positive X dimension",
-                      [viz] { viz->dispatchAction("unlink-x-pos"); });
-  app.commands().bind(SDL_SCANCODE_U, Mod::Shift, "unlink-x-neg",
-                      "unlink focused cell along negative X dimension",
-                      [viz] { viz->dispatchAction("unlink-x-neg"); });
-  app.commands().bind(SDL_SCANCODE_DELETE, "delete-focus-cell",
-                      "delete currently focused cell",
-                      [viz] { viz->dispatchAction("delete-focus-cell"); });
-  app.commands().bind(SDL_SCANCODE_BACKSPACE, "delete-focus-cell-bksp",
-                      "delete currently focused cell",
-                      [viz] { viz->dispatchAction("delete-focus-cell"); });
-  app.commands().bind(SDL_SCANCODE_S, Mod::Ctrl | Mod::Shift, "save-store",
-                      "save current slice to sovereign store", [viz] {
-                        if (viz->saveStore("")) {
-                          std::cout << "Successfully saved ZigZag store.\n";
-                        }
-                      });
+  app.commands().registerAction(
+      std::string(xanadu::settings::kKeymapInsertCellXPos),
+      "insert connected cell positive along active X dimension",
+      [viz] { viz->dispatchAction("insert-cell-x-pos"); });
+  app.commands().registerAction(
+      std::string(xanadu::settings::kKeymapInsertCellXNeg),
+      "insert connected cell negative along active X dimension",
+      [viz] { viz->dispatchAction("insert-cell-x-neg"); });
+  app.commands().registerAction(
+      std::string(xanadu::settings::kKeymapInsertCellYPos),
+      "insert connected cell positive along active Y dimension",
+      [viz] { viz->dispatchAction("insert-cell-y-pos"); });
+  app.commands().registerAction(
+      std::string(xanadu::settings::kKeymapInsertCellYNeg),
+      "insert connected cell negative along active Y dimension",
+      [viz] { viz->dispatchAction("insert-cell-y-neg"); });
+  app.commands().registerAction(
+      std::string(xanadu::settings::kKeymapUnlinkXPos),
+      "unlink focused cell along positive X dimension",
+      [viz] { viz->dispatchAction("unlink-x-pos"); });
+  app.commands().registerAction(
+      std::string(xanadu::settings::kKeymapUnlinkXNeg),
+      "unlink focused cell along negative X dimension",
+      [viz] { viz->dispatchAction("unlink-x-neg"); });
+  app.commands().registerAction(
+      std::string(xanadu::settings::kKeymapDeleteFocusCell),
+      "delete currently focused cell",
+      [viz] { viz->dispatchAction("delete-focus-cell"); });
+  app.commands().registerAction(
+      std::string(xanadu::settings::kKeymapDeleteFocusCellBksp),
+      "delete currently focused cell",
+      [viz] { viz->dispatchAction("delete-focus-cell"); });
+  app.commands().registerAction(std::string(xanadu::settings::kKeymapSaveStore),
+                                "save current slice to sovereign store", [viz] {
+                                  if (viz->saveStore("")) {
+                                    std::cout
+                                        << "Successfully saved ZigZag store.\n";
+                                  }
+                                });
 }
 
 } // namespace
@@ -449,11 +492,22 @@ int main(const int argc, char **argv) {
     renderer->addFrameContributor(viz.get());
     renderer->addPickObserver(viz.get());
     state->accessibility->addSource(viz.get());
+    state->modal = viz.get();
 
     gleditor::Application app(state, renderer, backend,
                               "Project Xanadu ZigZag Visualizer");
     app.setTextInputEnabled(false); // Keystrokes map to navigation commands
     bindCommands(app, state, viz);
+
+    auto keymapStore = loadOrCreateKeymapStore();
+    if (keymapStore && keymapStore->opCount() > 0) {
+      const auto kmCfg = xanadu::KeymapConfig::fromStore(*keymapStore);
+      for (const auto &[act, comboStr] : kmCfg.bindings) {
+        if (const auto combo = gleditor::parseKeyCombo(comboStr)) {
+          app.commands().rebind(act, combo->first, combo->second);
+        }
+      }
+    }
     return app.run();
   } catch (const std::exception &err) {
     std::cerr << "Error: " << err.what() << "\n";

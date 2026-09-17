@@ -89,6 +89,13 @@ public:
     bind(scancode, Mod::None, std::move(name), std::move(help), std::move(run));
   }
 
+  /// Register an action with no hardcoded key binding (to be bound from keymap
+  /// store).
+  void registerAction(std::string name, std::string help,
+                      std::function<void()> run) {
+    bind(0, Mod::None, std::move(name), std::move(help), std::move(run));
+  }
+
   /**
    * @brief Run the command bound to @p scancode with @p mods.
    *

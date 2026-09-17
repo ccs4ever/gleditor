@@ -1866,6 +1866,80 @@ bool ZigzagVisualizer::performAction(const std::uint64_t nodeId,
   return false;
 }
 
+bool ZigzagVisualizer::grabbing() const {
+  return commandBarVisible_ || paletteVisible_;
+}
+
+bool ZigzagVisualizer::keyPressed(const gleditor::Key key,
+                                  const gleditor::KeyMods /*mods*/) {
+  if (commandBarVisible_) {
+    switch (key) {
+    case gleditor::Key::Return:
+      executeCommandBar();
+      return true;
+    case gleditor::Key::Escape:
+      setCommandBarVisible(false);
+      return true;
+    case gleditor::Key::Backspace:
+      commandBarBackspace();
+      return true;
+    default:
+      return false;
+    }
+  }
+  if (paletteVisible_) {
+    switch (key) {
+    case gleditor::Key::Return:
+      paletteCloneSelectedToFocus();
+      setPaletteVisible(false);
+      return true;
+    case gleditor::Key::Escape:
+      setPaletteVisible(false);
+      return true;
+    case gleditor::Key::Up:
+      palettePrev();
+      return true;
+    case gleditor::Key::Down:
+      paletteNext();
+      return true;
+    case gleditor::Key::Backspace:
+      paletteBackspace();
+      return true;
+    default:
+      return false;
+    }
+  }
+  return false;
+}
+
+void ZigzagVisualizer::textTyped(const std::string &utf8) {
+  if (commandBarVisible_) {
+    commandBarInputText(utf8);
+  } else if (paletteVisible_) {
+    paletteInputText(utf8);
+  }
+}
+
+std::optional<gleditor::InputArea> ZigzagVisualizer::textArea() const {
+  if (commandBarVisible_) {
+    return gleditor::InputArea{
+        .x      = 20,
+        .y      = 100,
+        .width  = 700,
+        .height = 76,
+    };
+  }
+  if (paletteVisible_) {
+    return gleditor::InputArea{
+        .x      = 100,
+        .y      = 100,
+        .width  = 520,
+        .height = 360,
+    };
+  }
+  return std::nullopt;
+}
+
 std::optional<xanadu::CellAnchor>
 ZigzagVisualizer::cellAnchor(const CellRef cell) const {
   const auto it = visible_cells_.find(static_cast<CellID>(cell));
@@ -2384,6 +2458,18 @@ ZigzagVisualizer::compileVQL(std::string_view vqlQuery) const {
 void ZigzagVisualizer::setPaletteFilter(std::string filter) {
   paletteFilter_        = std::move(filter);
   paletteSelectedIndex_ = 0;
+}
+
+void ZigzagVisualizer::paletteInputText(const std::string_view text) {
+  paletteFilter_.append(text);
+  paletteSelectedIndex_ = 0;
+}
+
+void ZigzagVisualizer::paletteBackspace() {
+  if (!paletteFilter_.empty()) {
+    paletteFilter_.pop_back();
+    paletteSelectedIndex_ = 0;
+  }
 }
 
 std::vector<std::string> ZigzagVisualizer::paletteItems() const {

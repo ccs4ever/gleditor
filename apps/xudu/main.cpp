@@ -1433,143 +1433,159 @@ void bindCommands(gleditor::Application &app, const AppStateRef &state,
                   const RendererRef &renderer, PouchDrawer &pouchDrawer,
                   SwarmTelescopeOverlay &swarmTelescope,
                   const std::string &publishAs) {
-  app.bindDefaultViewCommands();
-
-  app.commands().bind(SDL_SCANCODE_Q, Mod::Ctrl, "quit", "save and close",
-                      [state, &session] {
-                        session.saveAll();
-                        state->alive = false;
-                      });
-  app.commands().bind(SDL_SCANCODE_S, Mod::Ctrl, "save",
-                      "save or preserve active document",
-                      [&views] { views.saveCurrent(); });
-  app.commands().bind(SDL_SCANCODE_W, Mod::Ctrl, "close",
-                      "close the active document",
-                      [&views] { views.closeActive(); });
-  app.commands().bind(SDL_SCANCODE_TAB, Mod::Ctrl, "next-doc",
-                      "switch to next document", [&views] { views.nextDoc(); });
-  app.commands().bind(SDL_SCANCODE_TAB, Mod::Ctrl | Mod::Shift, "prev-doc",
-                      "switch to previous document",
-                      [&views] { views.prevDoc(); });
+  app.commands().registerAction(std::string(xanadu::settings::kKeymapQuit),
+                                "save and close", [state, &session] {
+                                  session.saveAll();
+                                  state->alive = false;
+                                });
+  app.commands().registerAction(std::string(xanadu::settings::kKeymapSave),
+                                "save or preserve active document",
+                                [&views] { views.saveCurrent(); });
+  app.commands().registerAction(std::string(xanadu::settings::kKeymapClose),
+                                "close the active document",
+                                [&views] { views.closeActive(); });
+  app.commands().registerAction(std::string(xanadu::settings::kKeymapNextDoc),
+                                "switch to next document",
+                                [&views] { views.nextDoc(); });
+  app.commands().registerAction(std::string(xanadu::settings::kKeymapPrevDoc),
+                                "switch to previous document",
+                                [&views] { views.prevDoc(); });
 
   for (int i = 1; i <= 9; ++i) {
-    const auto scancode = static_cast<SDL_Scancode>(SDL_SCANCODE_1 + (i - 1));
     const auto targetIndex = static_cast<std::uint32_t>(i - 1);
-    app.commands().bind(
-        scancode, Mod::Ctrl, "doc-" + std::to_string(i),
-        "switch to document " + std::to_string(i),
+    app.commands().registerAction(
+        "doc-" + std::to_string(i), "switch to document " + std::to_string(i),
         [&views, targetIndex] { views.selectDoc(targetIndex); });
   }
 
-  app.commands().bind(SDL_SCANCODE_H, Mod::Ctrl, "map",
-                      "show or hide the hypertime map",
-                      [&map] { map.toggle(); });
-  app.commands().bind(SDL_SCANCODE_M, Mod::Ctrl, "radial-menu",
-                      "open radial menu for formatting and alignment",
-                      [state, radialMenu, renderer] {
-                        renderer->runWithState([state, radialMenu,
-                                                renderer](RenderState &rState) {
-                          if (radialMenu->isOpen()) {
-                            radialMenu->close();
-                            return;
-                          }
-                          auto *const caret   = renderer->editCaret();
-                          std::uint32_t doc   = 0;
-                          std::uint32_t start = 0;
-                          std::uint32_t len   = 0;
-                          if (caret && caret->active() &&
-                              caret->documentIndex() < rState.docs.size()) {
-                            doc = caret->documentIndex();
-                            if (caret->hasSelection()) {
-                              start = caret->selectionStart();
-                              len   = caret->selectionEnd() - start;
-                            } else {
-                              start = caret->byteOffset();
-                            }
-                          }
-                          float mx = static_cast<float>(state->mouseX);
-                          float my = static_cast<float>(state->mouseY);
-                          if (mx <= 0.0F && my <= 0.0F && state->clickX >= 0) {
-                            mx = static_cast<float>(state->clickX);
-                            my = static_cast<float>(state->clickY);
-                          }
-                          radialMenu->openAtWindowCoords(mx, my, doc, start,
-                                                         len);
-                        });
-                      });
-  app.commands().bind(SDL_SCANCODE_B, Mod::Ctrl, "back",
-                      "go to the previous state, losing nothing",
-                      [&views] { views.back(); });
-  app.commands().bind(SDL_SCANCODE_N, Mod::Ctrl, "new-doc",
-                      "create a new sovereign document quad",
-                      [&views] { views.newDocument(); });
-  app.commands().bind(SDL_SCANCODE_N, Mod::Ctrl | Mod::Shift, "forward",
-                      "go to the next state in hypertime",
-                      [&views] { views.forward(); });
-  app.commands().bind(SDL_SCANCODE_O, Mod::Ctrl, "open-doc",
-                      "open a document or system xanadoc",
-                      [&views] { views.openDocumentPalette(); });
-  app.commands().bind(SDL_SCANCODE_O, Mod::Ctrl | Mod::Shift, "onion-skin",
-                      "toggle 3D multi-document onion skinning mode",
-                      [&views] { views.toggleOnionSkin(); });
-  app.commands().bind(SDL_SCANCODE_BACKSLASH, Mod::Ctrl, "pouch-toggle",
-                      "toggle screen-edge pouch drawer and clasp bench",
-                      [&pouchDrawer] { pouchDrawer.toggle(); });
-  app.commands().bind(SDL_SCANCODE_F2, Mod::None, "pouch-toggle-f2",
-                      "toggle screen-edge pouch drawer and clasp bench",
-                      [&pouchDrawer] { pouchDrawer.toggle(); });
-  app.commands().bind(SDL_SCANCODE_T, Mod::Ctrl | Mod::Shift,
-                      "telescope-toggle",
-                      "toggle decentralized swarm telescope overlay",
-                      [&swarmTelescope] { swarmTelescope.toggle(); });
-  app.commands().bind(SDL_SCANCODE_F3, Mod::None, "telescope-toggle-f3",
-                      "toggle decentralized swarm telescope overlay",
-                      [&swarmTelescope] { swarmTelescope.toggle(); });
-  app.commands().bind(SDL_SCANCODE_F4, Mod::None, "tension-physics-toggle",
-                      "toggle 3-way tension spring layout simulation",
-                      [&links] { links.togglePhysics(); });
-  app.commands().bind(SDL_SCANCODE_F5, Mod::None, "unlock-transcopyright-f5",
-                      "unlock transcopyright span at caret or selection",
-                      [&views] { views.unlockTranscopyrightAtCaret(); });
-  app.commands().bind(SDL_SCANCODE_U, Mod::Ctrl, "unlock-transcopyright-ctrl-u",
-                      "unlock transcopyright span at caret or selection",
-                      [&views] { views.unlockTranscopyrightAtCaret(); });
-  app.commands().bind(SDL_SCANCODE_LEFTBRACKET, Mod::Ctrl, "scrub-back",
-                      "scrub backward in hypertime history",
-                      [&views] { views.scrubHistory(true); });
-  app.commands().bind(SDL_SCANCODE_RIGHTBRACKET, Mod::Ctrl, "scrub-forward",
-                      "scrub forward in hypertime history",
-                      [&views] { views.scrubHistory(false); });
-  app.commands().bind(SDL_SCANCODE_T, Mod::Ctrl, "transclude",
-                      "transclude the selection into a second document",
-                      [&views] { views.transcludeSelection(); });
-  app.commands().bind(SDL_SCANCODE_L, Mod::Ctrl, "xanalink",
-                      "mark one end of a xanalink, then join it to another "
-                      "selection -- in this document or any other open one",
-                      [&views] { views.linkSelection(); });
-  app.commands().bind(SDL_SCANCODE_L, Mod::Ctrl | Mod::Shift, "cancel link",
-                      "forget a xanalink that was begun and not finished",
-                      [&views] { views.cancelLink(); });
-  app.commands().bind(
-      SDL_SCANCODE_K, Mod::Ctrl, "beams",
+  app.commands().registerAction(std::string(xanadu::settings::kKeymapMap),
+                                "show or hide the hypertime map",
+                                [&map] { map.toggle(); });
+  app.commands().registerAction(
+      std::string(xanadu::settings::kKeymapHypertimeMap),
+      "show or hide the hypertime map", [&map] { map.toggle(); });
+  app.commands().registerAction(
+      std::string(xanadu::settings::kKeymapRadialMenu),
+      "open radial menu for formatting and alignment",
+      [state, radialMenu, renderer] {
+        renderer->runWithState(
+            [state, radialMenu, renderer](RenderState &rState) {
+              if (radialMenu->isOpen()) {
+                radialMenu->close();
+                return;
+              }
+              auto *const caret   = renderer->editCaret();
+              std::uint32_t doc   = 0;
+              std::uint32_t start = 0;
+              std::uint32_t len   = 0;
+              if (caret && caret->active() &&
+                  caret->documentIndex() < rState.docs.size()) {
+                doc = caret->documentIndex();
+                if (caret->hasSelection()) {
+                  start = caret->selectionStart();
+                  len   = caret->selectionEnd() - start;
+                } else {
+                  start = caret->byteOffset();
+                }
+              }
+              float mx = static_cast<float>(state->mouseX);
+              float my = static_cast<float>(state->mouseY);
+              if (mx <= 0.0F && my <= 0.0F && state->clickX >= 0) {
+                mx = static_cast<float>(state->clickX);
+                my = static_cast<float>(state->clickY);
+              }
+              radialMenu->openAtWindowCoords(mx, my, doc, start, len);
+            });
+      });
+  app.commands().registerAction(std::string(xanadu::settings::kKeymapBack),
+                                "go to the previous state, losing nothing",
+                                [&views] { views.back(); });
+  app.commands().registerAction(std::string(xanadu::settings::kKeymapNewDoc),
+                                "create a new sovereign document quad",
+                                [&views] { views.newDocument(); });
+  app.commands().registerAction(std::string(xanadu::settings::kKeymapForward),
+                                "go to the next state in hypertime",
+                                [&views] { views.forward(); });
+  app.commands().registerAction(std::string(xanadu::settings::kKeymapOpenDoc),
+                                "open a document or system xanadoc",
+                                [&views] { views.openDocumentPalette(); });
+  app.commands().registerAction(std::string(xanadu::settings::kKeymapOnionSkin),
+                                "toggle 3D multi-document onion skinning mode",
+                                [&views] { views.toggleOnionSkin(); });
+  app.commands().registerAction(
+      std::string(xanadu::settings::kKeymapPouchToggle),
+      "toggle screen-edge pouch drawer and clasp bench",
+      [&pouchDrawer] { pouchDrawer.toggle(); });
+  app.commands().registerAction(
+      std::string(xanadu::settings::kKeymapPouchToggleF2),
+      "toggle screen-edge pouch drawer and clasp bench",
+      [&pouchDrawer] { pouchDrawer.toggle(); });
+  app.commands().registerAction(
+      std::string(xanadu::settings::kKeymapTelescopeToggle),
+      "toggle decentralized swarm telescope overlay",
+      [&swarmTelescope] { swarmTelescope.toggle(); });
+  app.commands().registerAction(
+      std::string(xanadu::settings::kKeymapTelescopeToggleF3),
+      "toggle decentralized swarm telescope overlay",
+      [&swarmTelescope] { swarmTelescope.toggle(); });
+  app.commands().registerAction(
+      std::string(xanadu::settings::kKeymapTensionPhysicsToggle),
+      "toggle 3-way tension spring layout simulation",
+      [&links] { links.togglePhysics(); });
+  app.commands().registerAction(
+      std::string(xanadu::settings::kKeymapUnlockTranscopyrightF5),
+      "unlock transcopyright span at caret or selection",
+      [&views] { views.unlockTranscopyrightAtCaret(); });
+  app.commands().registerAction(
+      std::string(xanadu::settings::kKeymapUnlockTranscopyrightCtrlU),
+      "unlock transcopyright span at caret or selection",
+      [&views] { views.unlockTranscopyrightAtCaret(); });
+  app.commands().registerAction(std::string(xanadu::settings::kKeymapScrubBack),
+                                "scrub backward in hypertime history",
+                                [&views] { views.scrubHistory(true); });
+  app.commands().registerAction(
+      std::string(xanadu::settings::kKeymapScrubBackward),
+      "scrub backward in hypertime history",
+      [&views] { views.scrubHistory(true); });
+  app.commands().registerAction(
+      std::string(xanadu::settings::kKeymapScrubForward),
+      "scrub forward in hypertime history",
+      [&views] { views.scrubHistory(false); });
+  app.commands().registerAction(
+      std::string(xanadu::settings::kKeymapTransclude),
+      "transclude the selection into a second document",
+      [&views] { views.transcludeSelection(); });
+  app.commands().registerAction(
+      std::string(xanadu::settings::kKeymapXanalink),
+      "mark one end of a xanalink, then join it to another "
+      "selection -- in this document or any other open one",
+      [&views] { views.linkSelection(); });
+  app.commands().registerAction(
+      std::string(xanadu::settings::kKeymapCancelLink),
+      "forget a xanalink that was begun and not finished",
+      [&views] { views.cancelLink(); });
+  app.commands().registerAction(
+      std::string(xanadu::settings::kKeymapBeams),
       "show or hide the links and transclusions between documents",
       [&links] { links.toggle(); });
-  app.commands().bind(SDL_SCANCODE_K, Mod::Ctrl | Mod::Shift, "sworph",
-                      "let a link coming into view bring its far document over",
-                      [&links] { links.setSworph(!links.sworphing()); });
-  app.commands().bind(SDL_SCANCODE_S, Mod::Ctrl | Mod::Shift, "publish",
-                      "publish the document the caret is in, so it can be read "
-                      "off this machine",
-                      [&views, publishAs] { views.publishCurrent(publishAs); });
-  app.commands().bind(SDL_SCANCODE_P, Mod::Ctrl, "history",
-                      "print every state to the terminal",
-                      [&views] { views.printHistory(); });
-  app.commands().bind(SDL_SCANCODE_BACKSPACE, "delete",
-                      "stop pointing at the selection",
-                      [&views] { views.deleteSelection(); });
-  app.commands().bind(SDL_SCANCODE_RETURN, Mod::Ctrl, "page-break",
-                      "insert a page break at the caret position",
-                      [&views] { views.insertPageBreakAtCaret(); });
+  app.commands().registerAction(
+      std::string(xanadu::settings::kKeymapSworph),
+      "let a link coming into view bring its far document over",
+      [&links] { links.setSworph(!links.sworphing()); });
+  app.commands().registerAction(
+      std::string(xanadu::settings::kKeymapPublish),
+      "publish the document the caret is in, so it can be read "
+      "off this machine",
+      [&views, publishAs] { views.publishCurrent(publishAs); });
+  app.commands().registerAction(std::string(xanadu::settings::kKeymapHistory),
+                                "print every state to the terminal",
+                                [&views] { views.printHistory(); });
+  app.commands().registerAction(std::string(xanadu::settings::kKeymapDelete),
+                                "stop pointing at the selection",
+                                [&views] { views.deleteSelection(); });
+  app.commands().registerAction(std::string(xanadu::settings::kKeymapPageBreak),
+                                "insert a page break at the caret position",
+                                [&views] { views.insertPageBreakAtCaret(); });
 
   const auto applyDecoration = [&session,
                                 renderer](const gleditor::Decoration deco) {
@@ -1586,36 +1602,38 @@ void bindCommands(gleditor::Application &app, const AppStateRef &state,
     });
   };
 
-  app.commands().bind(
-      0, "format-bold", "toggle bold on selected text",
+  app.commands().registerAction(
+      "format-bold", "toggle bold on selected text",
       [applyDecoration] { applyDecoration(gleditor::Decoration::Bold); });
-  app.commands().bind(
-      0, "format-italic", "toggle italic on selected text",
+  app.commands().registerAction(
+      "format-italic", "toggle italic on selected text",
       [applyDecoration] { applyDecoration(gleditor::Decoration::Italic); });
-  app.commands().bind(
-      0, "format-underline", "toggle underline on selected text",
+  app.commands().registerAction(
+      "format-underline", "toggle underline on selected text",
       [applyDecoration] { applyDecoration(gleditor::Decoration::Underline); });
-  app.commands().bind(0, "format-strikethrough",
-                      "toggle strikethrough on selected text",
-                      [applyDecoration] {
-                        applyDecoration(gleditor::Decoration::Strikethrough);
-                      });
-  app.commands().bind(0, "format-superscript",
-                      "toggle superscript on selected text", [applyDecoration] {
-                        applyDecoration(gleditor::Decoration::Superscript);
-                      });
-  app.commands().bind(
-      0, "format-subscript", "toggle subscript on selected text",
+  app.commands().registerAction(
+      "format-strikethrough", "toggle strikethrough on selected text",
+      [applyDecoration] {
+        applyDecoration(gleditor::Decoration::Strikethrough);
+      });
+  app.commands().registerAction(
+      "format-superscript", "toggle superscript on selected text",
+      [applyDecoration] {
+        applyDecoration(gleditor::Decoration::Superscript);
+      });
+  app.commands().registerAction(
+      "format-subscript", "toggle subscript on selected text",
       [applyDecoration] { applyDecoration(gleditor::Decoration::Subscript); });
 
-  app.commands().bind(0, "save-document", "save or preserve active document",
-                      [&views] { views.saveCurrent(); });
-  app.commands().bind(0, "export-osmic",
-                      "export OSMIC text spool representation",
-                      [&views] { views.exportOsmic(); });
-  app.commands().bind(0, "insert-break",
-                      "insert a page break at the caret position",
-                      [&views] { views.insertPageBreakAtCaret(); });
+  app.commands().registerAction("save-document",
+                                "save or preserve active document",
+                                [&views] { views.saveCurrent(); });
+  app.commands().registerAction("export-osmic",
+                                "export OSMIC text spool representation",
+                                [&views] { views.exportOsmic(); });
+  app.commands().registerAction("insert-break",
+                                "insert a page break at the caret position",
+                                [&views] { views.insertPageBreakAtCaret(); });
 
   const auto dropSelectionToBench = [&views, &pouchDrawer,
                                      &session](const bool isLeft) {
@@ -1682,31 +1700,31 @@ void bindCommands(gleditor::Application &app, const AppStateRef &state,
     });
   };
 
-  app.commands().bind(0, "pouch-drop-left",
-                      "drop selection onto clasp homestead bench (left)",
-                      [dropSelectionToBench] { dropSelectionToBench(true); });
-  app.commands().bind(0, "pouch-drop-right",
-                      "drop selection onto clasp toward bench (right)",
-                      [dropSelectionToBench] { dropSelectionToBench(false); });
-  app.commands().bind(0, "pouch-drop", "drop selection into active pouch zone",
-                      [dropSelectionToZone] { dropSelectionToZone("notes"); });
-  app.commands().bind(0, "pouch-drop-notes",
-                      "drop selection into notes pouch zone",
-                      [dropSelectionToZone] { dropSelectionToZone("notes"); });
-  app.commands().bind(
-      0, "pouch-drop-scratch", "drop selection into scratch pouch zone",
+  app.commands().registerAction(
+      "pouch-drop-left", "drop selection onto clasp homestead bench (left)",
+      [dropSelectionToBench] { dropSelectionToBench(true); });
+  app.commands().registerAction(
+      "pouch-drop-right", "drop selection onto clasp toward bench (right)",
+      [dropSelectionToBench] { dropSelectionToBench(false); });
+  app.commands().registerAction(
+      "pouch-drop", "drop selection into active pouch zone",
+      [dropSelectionToZone] { dropSelectionToZone("notes"); });
+  app.commands().registerAction(
+      "pouch-drop-notes", "drop selection into notes pouch zone",
+      [dropSelectionToZone] { dropSelectionToZone("notes"); });
+  app.commands().registerAction(
+      "pouch-drop-scratch", "drop selection into scratch pouch zone",
       [dropSelectionToZone] { dropSelectionToZone("scratch"); });
-  app.commands().bind(
-      0, "pouch-drop-to-link-left",
-      "drop selection into to-link-left pouch zone",
+  app.commands().registerAction(
+      "pouch-drop-to-link-left", "drop selection into to-link-left pouch zone",
       [dropSelectionToZone] { dropSelectionToZone("to_link_left"); });
-  app.commands().bind(
-      0, "pouch-drop-to-link-right",
+  app.commands().registerAction(
+      "pouch-drop-to-link-right",
       "drop selection into to-link-right pouch zone",
       [dropSelectionToZone] { dropSelectionToZone("to_link_right"); });
 
-  app.commands().bind(
-      0, "forge-clasp", "forge bilateral clasp link from items on bench",
+  app.commands().registerAction(
+      "forge-clasp", "forge bilateral clasp link from items on bench",
       [&pouchDrawer, &session, renderer] {
         renderer->runWithState([&pouchDrawer, &session,
                                 renderer](RenderState &) {
@@ -1728,12 +1746,12 @@ void bindCommands(gleditor::Application &app, const AppStateRef &state,
         });
       });
 
-  app.commands().bind(0, "clear-bench", "clear items from clasp forge bench",
-                      [&pouchDrawer] {
-                        pouchDrawer.forge().clearLeft();
-                        pouchDrawer.forge().clearRight();
-                        std::cout << "xudu: cleared clasp forge bench\n";
-                      });
+  app.commands().registerAction(
+      "clear-bench", "clear items from clasp forge bench", [&pouchDrawer] {
+        pouchDrawer.forge().clearLeft();
+        pouchDrawer.forge().clearRight();
+        std::cout << "xudu: cleared clasp forge bench\n";
+      });
 }
 
 } // namespace
@@ -2768,7 +2786,13 @@ int main(const int argc, char **argv) {
     renderer->addFrameContributor(&publishForm);
     renderer->addFrameContributor(&pouchDrawer);
     renderer->addFrameContributor(&swarmTelescope);
+#ifdef XUZZ_BUILD
+    gleditor::CompositeModalInput compositeModal(
+        {&publishForm, zigzagPresentation.get()});
+    state->modal = &compositeModal;
+#else
     state->modal = &publishForm;
+#endif
     renderer->addPickObserver(docSwitcher.get());
     renderer->addPickObserver(&links);
     renderer->addPickObserver(radialMenu.get());
@@ -2885,51 +2909,51 @@ int main(const int argc, char **argv) {
                  pouchDrawer, swarmTelescope,
                  publishAs.empty() ? std::string{"document"} : publishAs);
 #ifdef XUZZ_BUILD
-    app.commands().bind(
-        SDL_SCANCODE_F6, Mod::None, "zigzag-toggle-palette",
+    app.commands().registerAction(
+        std::string(xanadu::settings::kKeymapZigzagTogglePalette),
         "toggle Vortex opcode and library palette HUD",
         [zigzagPresentation] { zigzagPresentation->togglePalette(); });
-    app.commands().bind(
-        SDL_SCANCODE_1, Mod::Alt, "zigzag-bundle-execution",
+    app.commands().registerAction(
+        std::string(xanadu::settings::kKeymapZigzagBundleExecution),
         "switch to Execution dimension bundle (d.spin, d.step, d.branch)",
         [zigzagPresentation] {
           zigzagPresentation->setDimensionBundle(
               zigzag::ZigzagVisualizer::DimensionBundle::Execution);
         });
-    app.commands().bind(
-        SDL_SCANCODE_2, Mod::Alt, "zigzag-bundle-scope",
+    app.commands().registerAction(
+        std::string(xanadu::settings::kKeymapZigzagBundleScope),
         "switch to Scope dimension bundle (d.lexical, d.dynamic, d.env)",
         [zigzagPresentation] {
           zigzagPresentation->setDimensionBundle(
               zigzag::ZigzagVisualizer::DimensionBundle::Scope);
         });
-    app.commands().bind(
-        SDL_SCANCODE_3, Mod::Alt, "zigzag-bundle-contract",
+    app.commands().registerAction(
+        std::string(xanadu::settings::kKeymapZigzagBundleContract),
         "switch to Contract dimension bundle (d.require, d.ensure, "
         "d.invariant)",
         [zigzagPresentation] {
           zigzagPresentation->setDimensionBundle(
               zigzag::ZigzagVisualizer::DimensionBundle::Contract);
         });
-    app.commands().bind(
-        SDL_SCANCODE_4, Mod::Alt, "zigzag-bundle-logic",
+    app.commands().registerAction(
+        std::string(xanadu::settings::kKeymapZigzagBundleLogic),
         "switch to Logic dimension bundle (d.clause, d.predicate, d.var)",
         [zigzagPresentation] {
           zigzagPresentation->setDimensionBundle(
               zigzag::ZigzagVisualizer::DimensionBundle::Logic);
         });
-    app.commands().bind(
-        SDL_SCANCODE_5, Mod::Alt, "zigzag-bundle-stdlib",
+    app.commands().registerAction(
+        std::string(xanadu::settings::kKeymapZigzagBundleStdlib),
         "switch to Stdlib dimension bundle (d.stdlib, d.symbol, d.version)",
         [zigzagPresentation] {
           zigzagPresentation->setDimensionBundle(
               zigzag::ZigzagVisualizer::DimensionBundle::Stdlib);
         });
-    app.commands().bind(SDL_SCANCODE_B, Mod::Alt, "zigzag-bundle-cycle",
-                        "cycle active dimension bundle forward",
-                        [zigzagPresentation] {
-                          zigzagPresentation->cycleDimensionBundle(true);
-                        });
+    app.commands().registerAction(
+        std::string(xanadu::settings::kKeymapZigzagBundleCycle),
+        "cycle active dimension bundle forward", [zigzagPresentation] {
+          zigzagPresentation->cycleDimensionBundle(true);
+        });
 #endif
     quiet || std::cout << "commands:\n" << app.commands().helpText();
 

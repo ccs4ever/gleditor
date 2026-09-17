@@ -859,6 +859,7 @@ void VortexStdLib::bootstrap() {
   CellRef modGC          = getOrCreateModule("std:gc");
   CellRef modUI          = getOrCreateModule("std:ui");
   CellRef modNav         = getOrCreateModule("std:nav");
+  CellRef modBridge      = getOrCreateModule("std:bridge");
 
   buildMathModule(modMath);
   buildStringModule(modString);
@@ -873,6 +874,7 @@ void VortexStdLib::bootstrap() {
   buildGCModule(modGC);
   buildUiModule(modUI);
   buildNavModule(modNav);
+  buildBridgeModule(modBridge);
 }
 
 void VortexStdLib::buildMathModule(CellRef mod) {
@@ -1509,6 +1511,9 @@ std::vector<CellValue> VortexStdLib::call(CellRef fnOp,
     }
   }
   if (opName.starts_with("#UI_")) {
+    return {static_cast<std::int64_t>(1)};
+  }
+  if (opName.starts_with("#BRIDGE_")) {
     return {static_cast<std::int64_t>(1)};
   }
   if (opName == "#GC_SWEEP") {
@@ -3052,6 +3057,52 @@ void VortexStdLib::buildNavModule(CellRef mod) {
   }
 }
 
+void VortexStdLib::buildBridgeModule(CellRef mod) {
+  // doc_text: -> text (#BRIDGE_DOC_TEXT)
+  {
+    CellRef out = core_.arena().makeCell();
+    CellRef op  = vm_.mintOpcode(OpcodeKind::Nop, "#BRIDGE_DOC_TEXT");
+    core_.bindOutput(op, out);
+    routineBindings_[op] = {{}, {out}};
+    exportSymbol(mod, "doc_text", op);
+  }
+
+  // store_version: -> ver (#BRIDGE_STORE_VERSION)
+  {
+    CellRef out = core_.arena().makeCell();
+    CellRef op  = vm_.mintOpcode(OpcodeKind::Nop, "#BRIDGE_STORE_VERSION");
+    core_.bindOutput(op, out);
+    routineBindings_[op] = {{}, {out}};
+    exportSymbol(mod, "store_version", op);
+  }
+
+  // cell_to_doc: cell, offset -> status (#BRIDGE_CELL_TO_DOC)
+  {
+    CellRef inCell = core_.arena().makeCell();
+    CellRef inOff  = core_.arena().makeCell();
+    CellRef out    = core_.arena().makeCell();
+    CellRef op     = vm_.mintOpcode(OpcodeKind::Nop, "#BRIDGE_CELL_TO_DOC");
+    core_.bindInput(op, inCell);
+    core_.bindInput(op, inOff);
+    core_.bindOutput(op, out);
+    routineBindings_[op] = {{inCell, inOff}, {out}};
+    exportSymbol(mod, "cell_to_doc", op);
+  }
+
+  // doc_to_cell: offset, length -> cell (#BRIDGE_DOC_TO_CELL)
+  {
+    CellRef inOff = core_.arena().makeCell();
+    CellRef inLen = core_.arena().makeCell();
+    CellRef out   = core_.arena().makeCell();
+    CellRef op    = vm_.mintOpcode(OpcodeKind::Nop, "#BRIDGE_DOC_TO_CELL");
+    core_.bindInput(op, inOff);
+    core_.bindInput(op, inLen);
+    core_.bindOutput(op, out);
+    routineBindings_[op] = {{inOff, inLen}, {out}};
+    exportSymbol(mod, "doc_to_cell", op);
+  }
+}
+
 CellRef VortexStdLib::zzStep(CellRef cursor, DimRef dim, DimVector dir) {
   if (cursor == noCell || !core_.arena().contains(cursor)) {
     return noCell;
@@ -3315,6 +3366,45 @@ CellRef VortexStdLib::importModuleFromStore(const xanadu::Store &srcStore) {
   return firstModuleCell != noCell
              ? firstModuleCell
              : (cellMapping.empty() ? noCell : cellMapping.begin()->second);
+}
+
+CellRef VortexStdLib::bridgeDocText(const xanadu::Store &store) {
+  auto ver = store.allVersions().empty() ? xanadu::MicroversionId::parse("1")
+                                         : store.primaryCurrentVersion();
+  std::string txt = store.textOf(ver);
+  return core_.arena().makeCell(txt);
+}
+
+CellRef VortexStdLib::bridgeStoreVersion(const xanadu::Store &store) {
+  auto ver = store.allVersions().empty() ? xanadu::MicroversionId::parse("1")
+                                         : store.primaryCurrentVersion();
+  return core_.arena().makeCell(ver.str());
+}
+
+bool VortexStdLib::bridgeCellToDoc(xanadu::Store &store, CellRef cell,
+                                   std::uint32_t docOffset) {
+  if (cell == noCell || !core_.arena().contains(cell)) {
+    return false;
+  }
+  std::string text = core_.arena().textOf(cell);
+  auto parent = store.allVersions().empty() ? xanadu::MicroversionId::parse("1")
+                                            : store.primaryCurrentVersion();
+  auto newVer = store.insert(parent, docOffset, text);
+  store.repointCurrentVersion(newVer);
+  return true;
+}
+
+CellRef VortexStdLib::bridgeDocToCell(xanadu::Store &store,
+                                      std::uint32_t docOffset,
+                                      std::uint32_t length) {
+  auto ver = store.allVersions().empty() ? xanadu::MicroversionId::parse("1")
+                                         : store.primaryCurrentVersion();
+  std::string docText = store.textOf(ver);
+  if (docOffset >= docText.size()) {
+    return core_.arena().makeCell("");
+  }
+  std::string sub = docText.substr(docOffset, length);
+  return core_.arena().makeCell(sub);
 }
 
 } // namespace zigzag::vortex

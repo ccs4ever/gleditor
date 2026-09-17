@@ -36,6 +36,7 @@
 #include <gleditor/frame_contributor.hpp>
 #include <gleditor/image_cache.hpp>
 #include <gleditor/layout_box.hpp>
+#include <gleditor/modal_input.hpp>
 #include <gleditor/pick_observer.hpp>
 #include <gleditor/renderer.hpp>
 
@@ -97,6 +98,7 @@ struct SceneVisual {
 class ZigzagVisualizer : public gleditor::FrameContributor,
                          public gleditor::PickObserver,
                          public gleditor::a11y::Source,
+                         public gleditor::ModalInput,
                          public xanadu::ZigzagPresentationSurface {
 public:
   explicit ZigzagVisualizer(std::string aFontName);
@@ -124,6 +126,12 @@ public:
   }
   bool performAction(std::uint64_t nodeId, gleditor::a11y::Action action,
                      std::string_view value) override;
+
+  // -- gleditor::ModalInput -------------------------------------------------
+  [[nodiscard]] bool grabbing() const override;
+  bool keyPressed(gleditor::Key key, gleditor::KeyMods mods) override;
+  void textTyped(const std::string &utf8) override;
+  [[nodiscard]] std::optional<gleditor::InputArea> textArea() const override;
 
   // -- ZigZag Actions -------------------------------------------------------
   void adoptDocument(ZzStructureDocument &&doc, std::string sourcePath,
@@ -202,6 +210,8 @@ public:
   bool paletteCloneSelectedToFocus();
   bool paletteTranslateVQL(std::string_view query = {});
   void setPaletteFilter(std::string filter);
+  void paletteInputText(std::string_view text);
+  void paletteBackspace();
   [[nodiscard]] const std::string &paletteFilter() const noexcept {
     return paletteFilter_;
   }
