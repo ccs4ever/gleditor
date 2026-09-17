@@ -521,32 +521,32 @@ the hard requirement per "Determinism is a hard constraint" above.
 in the same pass since it had been failing (~1.4% against a 1% tolerance) at every prior stage: not
 stale `image.vert/frag.spv` (a real bug, since fixed -- the Makefile's `SPIRV` is now derived from
 `$(wildcard assets/shaders/*.glsl)` rather than a hand-maintained list that had silently stopped
-including them -- but `quick_brown_fox.txt`, the default sample, draws no images, so rebuilding fresh
-SPIR-V left the mismatch unchanged). Diffing the frames pixel-by-pixel and viewing the results showed
-UI chrome -- `DocumentSwitcher`'s tab-bar border, not document text -- rendering a pixel taller/shorter
-between backends. `Canvas::addLine()` (`src/canvas.cpp`) built a thin line's quad directly from its
-caller's coordinates; layout arithmetic like `height - barHeight` routinely lands exactly on an
-integer, which puts a 1px line's edges at `N-0.5`/`N+0.5` -- straddling two pixel rows/columns evenly,
-an ambiguous split llvmpipe (GL/GLES here, forced software by this project's own headless convention)
-and RADV (Vulkan, the only ICD available in this environment, real/virtual AMD hardware -- an entirely
-different rasteriser, not just a different API over the same one) are free to resolve differently.
-`addLine()` now snaps an axis-aligned segment's shared coordinate so both edges land on exact pixel
-boundaries (`round(centre - thickness/2) + thickness/2`, which fixes 1px and 2px UI lines alike and
-leaves radial_menu's angled borders, which are never axis-aligned, untouched). Dropped the mismatch
-from 1.4852% (max delta 172) to 0.5756% (max delta 69) -- comfortably under the 1% limit, and the
-residual is the ordinary antialiasing variance the tolerance exists for. Getting past that first
-failure for the first time also reached a stage of `compare-backends.sh` this plan had never actually
-exercised before: growing the Vulkan glyph atlas past 256x256 crashed deterministically with a RADV
-`context is lost` GPU error on this machine, on every retry. Genuine and unrelated to Stage 5, but
-fixed in the same pass once Vulkan validation layers (installed separately, not part of this repo's
-own tooling) pinned it down precisely: `GlyphCache::reallocate()` destroyed the old atlas texture
-immediately, but glyph placement is reachable both before a frame begins
-(`Doc::buildPendingPages()`) and mid-frame (`Canvas::addText()` for UI chrome -- the doc-switcher tab
-bar, the floating toolbar -- which runs after `beginFrame()`); growing mid-frame destroyed a texture
-already bound into that frame's descriptor set and referenced by an open secondary command buffer.
-`DeviceVK::destroyTexture()` now defers the actual destruction to a pending queue, drained by
-`waitIdle()` once no frame is open -- see `src/render/vulkan/device_vk*.cpp` and its own commit for
-the full account.
+including them -- but `quick_brown_fox.txt`, the default sample, draws no images, so rebuilding
+fresh SPIR-V left the mismatch unchanged). Diffing the frames pixel-by-pixel and viewing the results
+showed UI chrome -- `DocumentSwitcher`'s tab-bar border, not document text -- rendering a pixel
+taller/shorter between backends. `Canvas::addLine()` (`src/canvas.cpp`) built a thin line's quad
+directly from its caller's coordinates; layout arithmetic like `height - barHeight` routinely lands
+exactly on an integer, which puts a 1px line's edges at `N-0.5`/`N+0.5` -- straddling two pixel
+rows/columns evenly, an ambiguous split llvmpipe (GL/GLES here, forced software by this project's
+own headless convention) and RADV (Vulkan, the only ICD available in this environment, real/virtual
+AMD hardware -- an entirely different rasteriser, not just a different API over the same one) are
+free to resolve differently. `addLine()` now snaps an axis-aligned segment's shared coordinate so
+both edges land on exact pixel boundaries (`round(centre - thickness/2) + thickness/2`, which fixes
+1px and 2px UI lines alike and leaves radial_menu's angled borders, which are never axis-aligned,
+untouched). Dropped the mismatch from 1.4852% (max delta 172) to 0.5756% (max delta 69) --
+comfortably under the 1% limit, and the residual is the ordinary antialiasing variance the tolerance
+exists for. Getting past that first failure for the first time also reached a stage of
+`compare-backends.sh` this plan had never actually exercised before: growing the Vulkan glyph atlas
+past 256x256 crashed deterministically with a RADV `context is lost` GPU error on this machine, on
+every retry. Genuine and unrelated to Stage 5, but fixed in the same pass once Vulkan validation
+layers (installed separately, not part of this repo's own tooling) pinned it down precisely:
+`GlyphCache::reallocate()` destroyed the old atlas texture immediately, but glyph placement is
+reachable both before a frame begins (`Doc::buildPendingPages()`) and mid-frame (`Canvas::addText()`
+for UI chrome -- the doc-switcher tab bar, the floating toolbar -- which runs after `beginFrame()`);
+growing mid-frame destroyed a texture already bound into that frame's descriptor set and referenced
+by an open secondary command buffer. `DeviceVK::destroyTexture()` now defers the actual destruction
+to a pending queue, drained by `waitIdle()` once no frame is open -- see
+`src/render/vulkan/device_vk*.cpp` and its own commit for the full account.
 
 A manual `kjv.txt` run (4.4 MB, 1261 pages) with `--profile`:
 

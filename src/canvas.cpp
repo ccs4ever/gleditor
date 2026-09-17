@@ -185,15 +185,17 @@ void Canvas::addLine(const float fromX, const float fromY, const float toX,
   // axis-aligned segments are snapped -- radial_menu's angled borders have
   // extent on both axes and are left exactly as given, since "nearest pixel
   // boundary" has no well-defined meaning for a diagonal line.
-  auto snappedFromX = fromX;
-  auto snappedFromY = fromY;
-  auto snappedToX   = toX;
-  auto snappedToY   = toY;
+  auto snappedFromX         = fromX;
+  auto snappedFromY         = fromY;
+  auto snappedToX           = toX;
+  auto snappedToY           = toY;
   const float halfThickness = thickness * 0.5F;
   if (fromY == toY) {
-    snappedFromY = snappedToY = std::round(fromY - halfThickness) + halfThickness;
+    snappedFromY = snappedToY =
+        std::round(fromY - halfThickness) + halfThickness;
   } else if (fromX == toX) {
-    snappedFromX = snappedToX = std::round(fromX - halfThickness) + halfThickness;
+    snappedFromX = snappedToX =
+        std::round(fromX - halfThickness) + halfThickness;
   }
 
   const auto minX  = std::min(snappedFromX, snappedToX);
