@@ -215,6 +215,19 @@ public:
   CellRef arrayReverse(CellRef origin, DimRef dim);
   [[nodiscard]] std::size_t arrayTally(CellRef origin, DimRef dim) const;
 
+  // -- Module 10: std:zigzag --------------------------------------------------
+  CellRef zzStep(CellRef cursor, DimRef dim, DimVector dir = DimVector::POS);
+  CellRef zzInsert(CellRef cursor, DimRef dim, DimVector dir,
+                   std::string_view text);
+  CellRef zzUnlink(CellRef cursor, DimRef dim, DimVector dir = DimVector::POS);
+  CellRef zzLink(CellRef cellA, CellRef cellB, DimRef dim,
+                 DimVector dir = DimVector::POS);
+  CellRef zzDelete(CellRef cell);
+  CellRef zzCloneToChain(CellRef symbolOp, CellRef targetCell);
+
+  // -- Module 11: std:gc ------------------------------------------------------
+  std::size_t gcSweep();
+
 private:
   CellRef getOrCreateModule(std::string_view modulePath);
   void exportSymbol(CellRef moduleCell, std::string_view symbolName,
@@ -229,6 +242,8 @@ private:
   void buildCollectionsModule(CellRef mod);
   void buildLogicModule(CellRef mod);
   void buildArrayModule(CellRef mod);
+  void buildZigzagModule(CellRef mod);
+  void buildGCModule(CellRef mod);
 
   VortexCore &core_;
   VortexVM &vm_;

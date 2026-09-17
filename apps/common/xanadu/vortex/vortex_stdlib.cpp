@@ -853,6 +853,8 @@ void VortexStdLib::bootstrap() {
   CellRef modString      = getOrCreateModule("std:string");
   CellRef modLogic       = getOrCreateModule("std:logic");
   CellRef modArray       = getOrCreateModule("sys:array");
+  CellRef modZigzag      = getOrCreateModule("std:zigzag");
+  CellRef modGC          = getOrCreateModule("std:gc");
 
   buildMathModule(modMath);
   buildStringModule(modString);
@@ -863,6 +865,8 @@ void VortexStdLib::bootstrap() {
   buildCollectionsModule(modCollections);
   buildLogicModule(modLogic);
   buildArrayModule(modArray);
+  buildZigzagModule(modZigzag);
+  buildGCModule(modGC);
 }
 
 void VortexStdLib::buildMathModule(CellRef mod) {
@@ -1413,6 +1417,69 @@ std::vector<CellValue> VortexStdLib::call(CellRef fnOp,
       CellRef res = arrayReverse(origin, dim);
       return {static_cast<std::int64_t>(res)};
     }
+  }
+  if (opName.starts_with("#ZZ_")) {
+    if (opName == "#ZZ_STEP") {
+      CellRef cursor =
+          args.empty() ? noCell : static_cast<CellRef>(toInt64(args[0]));
+      DimRef dim =
+          args.size() > 1 ? static_cast<DimRef>(toInt64(args[1])) : noCell;
+      DimVector dir = args.size() > 2 ? (toInt64(args[2]) < 0 ? DimVector::NEG
+                                                              : DimVector::POS)
+                                      : DimVector::POS;
+      return {static_cast<std::int64_t>(zzStep(cursor, dim, dir))};
+    }
+    if (opName == "#ZZ_INSERT") {
+      CellRef cursor =
+          args.empty() ? noCell : static_cast<CellRef>(toInt64(args[0]));
+      DimRef dim =
+          args.size() > 1 ? static_cast<DimRef>(toInt64(args[1])) : noCell;
+      DimVector dir = args.size() > 2 ? (toInt64(args[2]) < 0 ? DimVector::NEG
+                                                              : DimVector::POS)
+                                      : DimVector::POS;
+      std::string text =
+          args.size() > 3 && std::holds_alternative<std::string>(args[3])
+              ? std::get<std::string>(args[3])
+              : "";
+      return {static_cast<std::int64_t>(zzInsert(cursor, dim, dir, text))};
+    }
+    if (opName == "#ZZ_UNLINK") {
+      CellRef cursor =
+          args.empty() ? noCell : static_cast<CellRef>(toInt64(args[0]));
+      DimRef dim =
+          args.size() > 1 ? static_cast<DimRef>(toInt64(args[1])) : noCell;
+      DimVector dir = args.size() > 2 ? (toInt64(args[2]) < 0 ? DimVector::NEG
+                                                              : DimVector::POS)
+                                      : DimVector::POS;
+      return {static_cast<std::int64_t>(zzUnlink(cursor, dim, dir))};
+    }
+    if (opName == "#ZZ_LINK") {
+      CellRef cellA =
+          args.empty() ? noCell : static_cast<CellRef>(toInt64(args[0]));
+      CellRef cellB =
+          args.size() > 1 ? static_cast<CellRef>(toInt64(args[1])) : noCell;
+      DimRef dim =
+          args.size() > 2 ? static_cast<DimRef>(toInt64(args[2])) : noCell;
+      DimVector dir = args.size() > 3 ? (toInt64(args[3]) < 0 ? DimVector::NEG
+                                                              : DimVector::POS)
+                                      : DimVector::POS;
+      return {static_cast<std::int64_t>(zzLink(cellA, cellB, dim, dir))};
+    }
+    if (opName == "#ZZ_DELETE") {
+      CellRef cell =
+          args.empty() ? noCell : static_cast<CellRef>(toInt64(args[0]));
+      return {static_cast<std::int64_t>(zzDelete(cell))};
+    }
+    if (opName == "#ZZ_CLONE_CHAIN") {
+      CellRef sym =
+          args.empty() ? noCell : static_cast<CellRef>(toInt64(args[0]));
+      CellRef tgt =
+          args.size() > 1 ? static_cast<CellRef>(toInt64(args[1])) : noCell;
+      return {static_cast<std::int64_t>(zzCloneToChain(sym, tgt))};
+    }
+  }
+  if (opName == "#GC_SWEEP") {
+    return {static_cast<std::int64_t>(gcSweep())};
   }
   auto it = routineBindings_.find(fnOp);
   if (it != routineBindings_.end()) {
@@ -2713,5 +2780,170 @@ std::size_t VortexStdLib::arrayTally(CellRef origin, DimRef dim) const {
   }
   return count;
 }
+
+void VortexStdLib::buildZigzagModule(CellRef mod) {
+  // step: cursor, dim, dir -> next
+  {
+    CellRef cursor = core_.arena().makeCell();
+    CellRef dim    = core_.arena().makeCell();
+    CellRef dir    = core_.arena().makeCell();
+    CellRef out    = core_.arena().makeCell();
+    CellRef op     = vm_.mintOpcode(OpcodeKind::Nop, "#ZZ_STEP");
+    core_.bindInput(op, cursor);
+    core_.bindInput(op, dim);
+    core_.bindInput(op, dir);
+    core_.bindOutput(op, out);
+    routineBindings_[op] = {{cursor, dim, dir}, {out}};
+    exportSymbol(mod, "step", op);
+  }
+
+  // insert: cursor, dim, dir, text -> fresh
+  {
+    CellRef cursor = core_.arena().makeCell();
+    CellRef dim    = core_.arena().makeCell();
+    CellRef dir    = core_.arena().makeCell();
+    CellRef text   = core_.arena().makeCell();
+    CellRef out    = core_.arena().makeCell();
+    CellRef op     = vm_.mintOpcode(OpcodeKind::Nop, "#ZZ_INSERT");
+    core_.bindInput(op, cursor);
+    core_.bindInput(op, dim);
+    core_.bindInput(op, dir);
+    core_.bindInput(op, text);
+    core_.bindOutput(op, out);
+    routineBindings_[op] = {{cursor, dim, dir, text}, {out}};
+    exportSymbol(mod, "insert", op);
+  }
+
+  // unlink: cursor, dim, dir -> old
+  {
+    CellRef cursor = core_.arena().makeCell();
+    CellRef dim    = core_.arena().makeCell();
+    CellRef dir    = core_.arena().makeCell();
+    CellRef out    = core_.arena().makeCell();
+    CellRef op     = vm_.mintOpcode(OpcodeKind::Nop, "#ZZ_UNLINK");
+    core_.bindInput(op, cursor);
+    core_.bindInput(op, dim);
+    core_.bindInput(op, dir);
+    core_.bindOutput(op, out);
+    routineBindings_[op] = {{cursor, dim, dir}, {out}};
+    exportSymbol(mod, "unlink", op);
+  }
+
+  // link: cellA, cellB, dim, dir -> cellB
+  {
+    CellRef cellA = core_.arena().makeCell();
+    CellRef cellB = core_.arena().makeCell();
+    CellRef dim   = core_.arena().makeCell();
+    CellRef dir   = core_.arena().makeCell();
+    CellRef out   = core_.arena().makeCell();
+    CellRef op    = vm_.mintOpcode(OpcodeKind::Nop, "#ZZ_LINK");
+    core_.bindInput(op, cellA);
+    core_.bindInput(op, cellB);
+    core_.bindInput(op, dim);
+    core_.bindInput(op, dir);
+    core_.bindOutput(op, out);
+    routineBindings_[op] = {{cellA, cellB, dim, dir}, {out}};
+    exportSymbol(mod, "link", op);
+  }
+
+  // delete: cell -> cell
+  {
+    CellRef cell = core_.arena().makeCell();
+    CellRef out  = core_.arena().makeCell();
+    CellRef op   = vm_.mintOpcode(OpcodeKind::Nop, "#ZZ_DELETE");
+    core_.bindInput(op, cell);
+    core_.bindOutput(op, out);
+    routineBindings_[op] = {{cell}, {out}};
+    exportSymbol(mod, "delete", op);
+  }
+
+  // clone_to_chain: symbolOp, targetCell -> clone
+  {
+    CellRef sym = core_.arena().makeCell();
+    CellRef tgt = core_.arena().makeCell();
+    CellRef out = core_.arena().makeCell();
+    CellRef op  = vm_.mintOpcode(OpcodeKind::Nop, "#ZZ_CLONE_CHAIN");
+    core_.bindInput(op, sym);
+    core_.bindInput(op, tgt);
+    core_.bindOutput(op, out);
+    routineBindings_[op] = {{sym, tgt}, {out}};
+    exportSymbol(mod, "clone_to_chain", op);
+  }
+}
+
+void VortexStdLib::buildGCModule(CellRef mod) {
+  // sweep: -> reclaimedCount
+  {
+    CellRef out = core_.arena().makeCell();
+    CellRef op  = vm_.mintOpcode(OpcodeKind::Nop, "#GC_SWEEP");
+    core_.bindOutput(op, out);
+    routineBindings_[op] = {{}, {out}};
+    exportSymbol(mod, "sweep", op);
+  }
+}
+
+CellRef VortexStdLib::zzStep(CellRef cursor, DimRef dim, DimVector dir) {
+  if (cursor == noCell || !core_.arena().contains(cursor)) {
+    return noCell;
+  }
+  auto res = core_.link(cursor, dim, dir);
+  return res ? *res : noCell;
+}
+
+CellRef VortexStdLib::zzInsert(CellRef cursor, DimRef dim, DimVector dir,
+                               std::string_view text) {
+  if (cursor == noCell || !core_.arena().contains(cursor)) {
+    return noCell;
+  }
+  auto res = core_.newCell(cursor, dim, dir, std::string(text));
+  return res ? *res : noCell;
+}
+
+CellRef VortexStdLib::zzUnlink(CellRef cursor, DimRef dim, DimVector dir) {
+  if (cursor == noCell || !core_.arena().contains(cursor)) {
+    return noCell;
+  }
+  auto res = core_.breakLink(cursor, dim, dir);
+  return res ? *res : noCell;
+}
+
+CellRef VortexStdLib::zzLink(CellRef cellA, CellRef cellB, DimRef dim,
+                             DimVector dir) {
+  if (cellA == noCell || !core_.arena().contains(cellA) || cellB == noCell ||
+      !core_.arena().contains(cellB)) {
+    return noCell;
+  }
+  auto res = core_.link(cellA, dim, dir, cellB);
+  return res ? *res : noCell;
+}
+
+CellRef VortexStdLib::zzDelete(CellRef cell) {
+  if (cell == noCell || !core_.arena().contains(cell)) {
+    return noCell;
+  }
+  auto dims = core_.arena().dimensionsOf(cell);
+  for (const auto &dLink : dims) {
+    if (dLink.pos != noCell) {
+      core_.breakLink(cell, dLink.dim, DimVector::POS);
+    }
+    if (dLink.neg != noCell) {
+      core_.breakLink(cell, dLink.dim, DimVector::NEG);
+    }
+  }
+  return cell;
+}
+
+CellRef VortexStdLib::zzCloneToChain(CellRef symbolOp, CellRef targetCell) {
+  if (symbolOp == noCell || !core_.arena().contains(symbolOp) ||
+      targetCell == noCell || !core_.arena().contains(targetCell)) {
+    return noCell;
+  }
+  CellRef clone = core_.arena().makeCell();
+  core_.arena().link(symbolOp, core_.dims().clone, DimVector::POS, clone);
+  core_.arena().link(targetCell, core_.dims().spin, DimVector::POS, clone);
+  return clone;
+}
+
+std::size_t VortexStdLib::gcSweep() { return core_.collectGarbage(); }
 
 } // namespace zigzag::vortex

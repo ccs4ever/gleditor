@@ -12,6 +12,13 @@ VortexCore::VortexCore(ArenaManifold &arena) : arena_(arena) { initGenesis(); }
 
 CellRef VortexCore::mintNamedDimension(std::string_view name,
                                        CellRef &lastDimCell) {
+  if (arena_.base()) {
+    const DimRef existing = arena_.base()->dimensionNamed(name);
+    if (existing != noCell) {
+      lastDimCell = existing;
+      return existing;
+    }
+  }
   CellRef dimCell = arena_.makeCell(name);
   if (lastDimCell != noCell && dims_.dims != noCell) {
     arena_.link(lastDimCell, dims_.dims, DimVector::POS, dimCell);
@@ -21,12 +28,21 @@ CellRef VortexCore::mintNamedDimension(std::string_view name,
 }
 
 void VortexCore::initGenesis() {
-  home_           = arena_.makeCell("home");
+  if (arena_.base() && arena_.base()->home() != noCell) {
+    home_ = arena_.base()->home();
+  } else {
+    home_ = arena_.makeCell("home");
+  }
   CellRef lastDim = noCell;
 
   // System Dimension Genesis off home_
-  dims_.dims = mintNamedDimension("d.dims", lastDim);
-  arena_.link(home_, dims_.dims, DimVector::POS, dims_.dims);
+  if (arena_.base() && arena_.base()->dimsDimension() != noCell) {
+    dims_.dims = arena_.base()->dimsDimension();
+    lastDim    = dims_.dims;
+  } else {
+    dims_.dims = mintNamedDimension("d.dims", lastDim);
+    arena_.link(home_, dims_.dims, DimVector::POS, dims_.dims);
+  }
 
   dims_.grab           = mintNamedDimension("d.grab", lastDim);
   dims_.step           = mintNamedDimension("d.step", lastDim);
@@ -47,13 +63,24 @@ void VortexCore::initGenesis() {
 }
 
 CellRef VortexCore::mintDimension(std::string_view name) {
+  if (arena_.base()) {
+    const DimRef existing = arena_.base()->dimensionNamed(name);
+    if (existing != noCell) {
+      return existing;
+    }
+  }
+  CellRef cur  = home_;
   CellRef tail = home_;
   while (true) {
-    CellRef next = arena_.linked(tail, dims_.dims, DimVector::POS);
-    if (next == noCell || next == tail) {
+    CellRef next = arena_.linked(cur, dims_.dims, DimVector::POS);
+    if (next == noCell || next == cur) {
       break;
     }
+    if (arena_.textOf(next) == name) {
+      return next;
+    }
     tail = next;
+    cur  = next;
   }
   return mintNamedDimension(name, tail);
 }

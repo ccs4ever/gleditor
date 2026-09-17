@@ -1,0 +1,229 @@
+/**
+ * @file vortex_host_test.cpp
+ * @brief Unit tests for VortexHost runtime integration and stdlib modules.
+ */
+#include <gmock/gmock.h>
+#include <gtest/gtest.h>
+
+#include "common/xanadu/store.hpp"
+#include "common/xanadu/system_docs.hpp"
+#include "common/xanadu/vortex/vortex_host.hpp"
+#include "common/xanadu/zigzag/arena_manifold.hpp"
+#include "common/xanadu/zigzag/manifold.hpp"
+#include "common/xanadu/zigzag/zzstructure.hpp"
+
+using namespace zigzag;
+using namespace zigzag::vortex;
+using namespace xanadu;
+
+TEST(VortexHostTest, InitializationAndStdLibRegistration) {
+  VortexHost host;
+
+  EXPECT_NE(host.core().home(), noCell);
+  EXPECT_NE(host.gcCursor(), noCell);
+
+  const auto modules = host.availableModules();
+  EXPECT_THAT(modules, testing::Contains("std:zigzag"));
+  EXPECT_THAT(modules, testing::Contains("std:gc"));
+
+  const auto zzSymbols = host.symbolsInModule("std:zigzag");
+  EXPECT_THAT(zzSymbols, testing::Contains("step"));
+  EXPECT_THAT(zzSymbols, testing::Contains("insert"));
+  EXPECT_THAT(zzSymbols, testing::Contains("unlink"));
+  EXPECT_THAT(zzSymbols, testing::Contains("link"));
+  EXPECT_THAT(zzSymbols, testing::Contains("delete"));
+  EXPECT_THAT(zzSymbols, testing::Contains("clone_to_chain"));
+
+  const auto gcSymbols = host.symbolsInModule("std:gc");
+  EXPECT_THAT(gcSymbols, testing::Contains("sweep"));
+}
+
+TEST(VortexHostTest, ZigzagStdLibOperations) {
+  VortexHost host;
+  auto &core   = host.core();
+  auto &stdlib = host.stdlib();
+  auto &arena  = host.arena();
+
+  DimRef dimX = arena.makeCell("d.1");
+  CellRef c1  = arena.makeCell("Node 1");
+
+  // Test zzInsert posward
+  CellRef c2 = stdlib.zzInsert(c1, dimX, DimVector::POS, "Node 2");
+  EXPECT_NE(c2, noCell);
+  EXPECT_NE(c2, c1);
+  EXPECT_EQ(stdlib.zzStep(c1, dimX, DimVector::POS), c2);
+  EXPECT_EQ(stdlib.zzStep(c2, dimX, DimVector::NEG), c1);
+
+  // Test zzInsert negward
+  CellRef c0 = stdlib.zzInsert(c1, dimX, DimVector::NEG, "Node 0");
+  EXPECT_NE(c0, noCell);
+  EXPECT_EQ(stdlib.zzStep(c1, dimX, DimVector::NEG), c0);
+  EXPECT_EQ(stdlib.zzStep(c0, dimX, DimVector::POS), c1);
+
+  // Test zzUnlink
+  CellRef unlinked = stdlib.zzUnlink(c1, dimX, DimVector::POS);
+  EXPECT_EQ(unlinked, c2);
+  EXPECT_EQ(stdlib.zzStep(c1, dimX, DimVector::POS), noCell);
+
+  // Test zzLink
+  CellRef linked = stdlib.zzLink(c1, c2, dimX, DimVector::POS);
+  EXPECT_EQ(linked, c2);
+  EXPECT_EQ(stdlib.zzStep(c1, dimX, DimVector::POS), c2);
+
+  // Test zzDelete
+  CellRef del = stdlib.zzDelete(c2);
+  EXPECT_EQ(del, c2);
+  EXPECT_EQ(stdlib.zzStep(c1, dimX, DimVector::POS), noCell);
+
+  // Test zzCloneToChain
+  CellRef c3    = arena.makeCell("Original");
+  CellRef clone = stdlib.zzCloneToChain(c3, c1);
+  EXPECT_NE(clone, noCell);
+  auto cloneLink = core.link(c3, core.dims().clone, DimVector::POS);
+  EXPECT_TRUE(cloneLink.has_value());
+  EXPECT_EQ(*cloneLink, clone);
+}
+
+TEST(VortexHostTest, GarbageCollectorSweepAndDaemon) {
+  VortexHost host;
+  auto &arena = host.arena();
+
+  // Create isolated garbage cells
+  CellRef junk1 = arena.makeCell("junk1");
+  CellRef junk2 = arena.makeCell("junk2");
+  static_cast<void>(junk1);
+  static_cast<void>(junk2);
+
+  // Immediate sweep
+  std::size_t swept = host.triggerGarbageCollection();
+  EXPECT_GE(swept, 2U);
+
+  // Daemon scheduler tick
+  std::size_t executed = host.stepScheduler(50);
+  EXPECT_GT(executed, 0U);
+}
+
+TEST(VortexHostTest, ActionDispatching) {
+  VortexHost host;
+  auto &arena = host.arena();
+
+  ViewAxisBinding axes{
+      .x_dimension = "d.1",
+      .y_dimension = "d.2",
+      .z_dimension = "d.3",
+  };
+
+  CellRef focus    = arena.makeCell("Focus Node");
+  CellRef newFocus = noCell;
+
+  // Insert posward along X
+  bool handled =
+      host.dispatchAction("insert-cell-x-pos", focus, axes, newFocus);
+  EXPECT_TRUE(handled);
+  EXPECT_NE(newFocus, noCell);
+  EXPECT_NE(newFocus, focus);
+
+  // Step negative along X back to focus
+  CellRef backFocus = noCell;
+  handled = host.dispatchAction("step-x-neg", newFocus, axes, backFocus);
+  EXPECT_TRUE(handled);
+  EXPECT_EQ(backFocus, focus);
+
+  // Delete cell
+  handled = host.dispatchAction("delete-focus-cell", newFocus, axes, backFocus);
+  EXPECT_TRUE(handled);
+}
+
+TEST(VortexHostTest, OpcodeAndSymbolCloning) {
+  VortexHost host;
+  auto &arena = host.arena();
+
+  CellRef root = arena.makeCell("Root");
+
+  // Clone opcode
+  CellRef opCell = host.cloneSymbolToChain("#LINK", root);
+  EXPECT_NE(opCell, noCell);
+  EXPECT_EQ(arena.textOf(opCell), "#LINK");
+
+  // Clone stdlib symbol
+  CellRef symClone = host.cloneSymbolToChain("std:zigzag/step", root);
+  EXPECT_NE(symClone, noCell);
+  EXPECT_NE(symClone, opCell);
+}
+
+TEST(VortexHostTest, ConfigurationFromStore) {
+  Store store;
+  store.setSystem(true);
+  auto head = initializeSystemStoreGenesis(store, SystemDocKind::Settings, {});
+
+  SettingSpec budgetSpec;
+  budgetSpec.name  = "vortex.cycle_budget";
+  budgetSpec.notes = "Scheduler cycle budget";
+  budgetSpec.schemas.push_back({{"integer"}, {std::int64_t{500}}});
+  head = ensureSetting(store, head, budgetSpec);
+
+  SettingSpec gcSpec;
+  gcSpec.name  = "vortex.gc_interval_frames";
+  gcSpec.notes = "GC frame interval";
+  gcSpec.schemas.push_back({{"integer"}, {std::int64_t{20}}});
+  head = ensureSetting(store, head, gcSpec);
+
+  SettingSpec bundleSpec;
+  bundleSpec.name  = "vortex.default_bundle";
+  bundleSpec.notes = "Default dimension bundle";
+  bundleSpec.schemas.push_back({{"string"}, {std::string{"Scope"}}});
+  head = ensureSetting(store, head, bundleSpec);
+
+  store.repointCurrentVersion(head);
+
+  VortexHost host;
+  host.loadConfigFromStore(store);
+
+  EXPECT_EQ(host.config().schedulerCycleBudget, 500U);
+  EXPECT_EQ(host.config().gcIntervalFrames, 20U);
+  EXPECT_EQ(host.config().defaultBundle, "Scope");
+}
+
+TEST(VortexHostTest, VQLCompilationAndAttachmentToArena) {
+  VortexHost host;
+  auto &arena = host.arena();
+
+  CellRef root = arena.makeCell("Target Node");
+  auto result  = host.compileAndAttachVQL("/d.1/d.2", root, "d.spin",
+                                          DimVector::POS, false);
+  ASSERT_TRUE(result.success) << result.errorMessage;
+  ASSERT_NE(result.entryOpcode, noCell);
+
+  DimRef spinDim   = host.core().dims().spin;
+  CellRef attached = arena.linked(root, spinDim, DimVector::POS);
+  EXPECT_EQ(attached, result.entryOpcode);
+}
+
+TEST(VortexHostTest, VQLCompilationPromotionToStore) {
+  Store store;
+  auto parent        = store.sliceGenesis({});
+  parent             = store.makeCell(parent, "Persistent Target");
+  CellRef targetCell = store.cellRefOf(parent);
+
+  auto manifold = store.rebuildManifold(parent);
+  VortexHost host(&manifold);
+
+  auto result = host.compileAndAttachVQL("/d.1/d.2", targetCell, "d.spin",
+                                         DimVector::POS, false);
+  ASSERT_TRUE(result.success) << result.errorMessage;
+  ASSERT_NE(result.entryOpcode, noCell);
+
+  const auto beforeOps = store.opCount();
+  auto promoted        = host.promoteAndAttachToStore(
+      result.entryOpcode, targetCell, "d.spin", DimVector::POS, store, parent);
+  ASSERT_TRUE(promoted.has_value());
+  EXPECT_FALSE(promoted->cells.empty());
+  EXPECT_GT(store.opCount(), beforeOps);
+
+  auto updatedManifold = store.rebuildManifold(promoted->version);
+  DimRef spinDim       = updatedManifold.dimensionNamed("d.spin", store);
+  ASSERT_NE(spinDim, noCell);
+  CellRef linkedToTarget =
+      updatedManifold.linked(targetCell, spinDim, DimVector::POS);
+  EXPECT_EQ(linkedToTarget, promoted->cells.front());
+}
