@@ -803,6 +803,24 @@ public:
   [[nodiscard]] std::optional<Anchor>
   anchorFor(std::uint32_t globalOffset) const;
 
+  /// Which page index holds @p globalOffset, among pages *shaped* so far --
+  /// not necessarily built into GPU resources yet. O(log N) via
+  /// pageIndexFilade, so this answers well before anchorFor() could (that
+  /// needs the page's Page object, i.e. built). nullopt only once nothing at
+  /// all has been shaped yet.
+  [[nodiscard]] std::optional<std::uint32_t>
+  pageIndexForOffset(std::uint32_t globalOffset) const;
+
+  /// Where @p globalOffset approximately is: an Anchor naming the page and
+  /// its own top-left corner, not the offset's actual position within it --
+  /// finding that needs the page's shaping, same as anchorFor(). Good to
+  /// about one page height, which is what deciding whether a page is worth
+  /// building sooner needs; not a substitute for anchorFor() once precision
+  /// matters. Valid for any *shaped* page, built or not -- see
+  /// pageIndexForOffset().
+  [[nodiscard]] std::optional<Anchor>
+  approximateAnchorFor(std::uint32_t globalOffset) const;
+
   /**
    * @brief Where a LayoutBox anchored at a byte offset actually landed.
    *
