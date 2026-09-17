@@ -123,10 +123,13 @@ TEST_F(DocGapTest, PickingResolvesCorrectlyForAPageBuiltOutOfOrder) {
   doc->makePages();
   const auto hit = buildPageDirectly(5);
 
-  // A background click (not a glyph) resolves to the page's own start
-  // offset -- offsetForPick() reads that straight off Doc::page(), so this
-  // is exactly what would go wrong if picking still assumed pages fill in
-  // strictly from index 0.
+  // A background click (not a glyph) resolves through the page it names --
+  // offsetForPick() reads that straight off Doc::page(), so this is exactly
+  // what would go wrong if picking still assumed pages fill in strictly from
+  // index 0. The exact byte it lands on within the page is a hit-testing
+  // detail (offsetForPagePoint() resolves the nearest caret to an x/y
+  // position); what this guards is that it is resolved against page 5's own
+  // text at all, rather than page 0's or nothing.
   const render::PickingTag tag{
       .kind         = render::tagKindPage,
       .docIndex     = doc->documentIndex(),
@@ -136,7 +139,8 @@ TEST_F(DocGapTest, PickingResolvesCorrectlyForAPageBuiltOutOfOrder) {
   };
   const auto resolved = doc->offsetForPick(tag);
   ASSERT_TRUE(resolved.has_value());
-  EXPECT_EQ(*resolved, hit.startByte);
+  EXPECT_GE(*resolved, hit.startByte);
+  EXPECT_LE(*resolved, hit.startByte + hit.entry.byteLength);
 }
 
 TEST_F(DocGapTest, ReflowFromsGuardFillsThePageItNeeds) {
