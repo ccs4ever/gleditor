@@ -581,6 +581,20 @@ they care about; see R11 in `design/store-slice-convergence.md`.
     "Tests") and read the PNGs it writes. Looking at a captured frame is inspection; opening a live
     window on the user's desktop to look at the same thing is not.
 
+## Sovereign keymap and Vortex hyperstructural governance
+
+- **Key bindings in system store**: All key bindings across `xudu`, `zigzag`, and `xuzz` must be
+  defined in the `system://keymap` system store, never hardcoded in C++ application code. Key
+  binding actions must use Vortex function calls (or registered Vortex routines/macros) for their
+  actions. The `gleditor` application is explicitly exempt: `apps/gleditor` is the plain editor that
+  must not share any code or dependency with Zigzag, Xanadu, or Xuzz, and retains its own
+  independent YAML configuration.
+- **C++ justification requirement**: New C++ code must justify why it isn't being written in Vortex
+  (e.g., hardware/driver interfacing, low-level rendering intrinsics, memory allocator primitives,
+  or raw OS event handling).
+- **Vortex standard library reuse**: New Vortex standard library code written in Vortex must
+  leverage existing Vortex standard library functions unless absolutely necessary.
+
 ## Gotchas worth knowing before editing the Makefile
 
 - Toggling `GLEDITOR_DISABLE_VULKAN` or `DEBUG` changes flags for *every* object; the build records

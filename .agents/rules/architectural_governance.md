@@ -59,3 +59,17 @@ application algorithms, layout routines, physics, and networking.
   (`tools/layout-latency-probe.cpp`, `tools/benchmark-kjv-load.py`).
 - This system is not in production yet, no need to preserve backwards compatibility of any format
   except when other constraints are involved such as alignment and cache line sizing.
+
+## 4. Sovereign Keymap & Vortex Hyperstructural Governance
+
+- **Sovereign Keymap Storage**: All key bindings across `xudu`, `zigzag`, and `xuzz` must be defined
+  in the `system://keymap` system store, never hardcoded in C++ application code. Key binding
+  actions must use Vortex function calls (or registered Vortex routines/macros) for their actions.
+  The `gleditor` application is explicitly exempt: `apps/gleditor` is the plain editor that must not
+  share any code or dependency with Zigzag, Xanadu, or Xuzz, and retains its own independent YAML
+  configuration.
+- **C++ Implementation Justification**: New C++ code must justify why it isn't being written in
+  Vortex (e.g., hardware/driver interfacing, low-level rendering intrinsics, memory allocator
+  primitives, or raw OS event handling).
+- **Vortex Standard Library Reuse**: New Vortex standard library code written in Vortex must
+  leverage existing Vortex standard library functions unless absolutely necessary.
