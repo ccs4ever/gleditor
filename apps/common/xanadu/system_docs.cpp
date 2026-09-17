@@ -632,6 +632,54 @@ std::vector<SettingSpec> defaultSettingSpecs(const SystemDocKind kind) {
         {std::string(settings::kZigzagConnectionBeamWidthPx),
          "Connection beam line width",
          {{{"float"}, {4.0}}}},
+        {std::string(settings::kBridgeCellRadius),
+         "Discovery and visual neighborhood cell radius",
+         {{{"integer"}, {std::int64_t{3}}}}},
+        {std::string(settings::kBridgeBackgroundDepthZ),
+         "Background continuum depth Z",
+         {{{"float"}, {-40.0}}}},
+        {std::string(settings::kBridgeBackgroundOpacity),
+         "Background continuum opacity",
+         {{{"float"}, {0.85}}}},
+        {std::string(settings::kBridgeSatelloidAlignment),
+         "Collinear satelloid alignment enabled",
+         {{{"bool"}, {true}}}},
+        {std::string(settings::kBridgeSatelloidTether),
+         "Tenuous parent tether enabled",
+         {{{"bool"}, {true}}}},
+        {std::string(settings::kBridgeSatelloidMass),
+         "Satelloid physical mass",
+         {{{"float"}, {1.0}}}},
+        {std::string(settings::kBridgeSatelloidGap),
+         "Satelloid clearance gap in px",
+         {{{"float"}, {12.0}}}},
+        {std::string(settings::kBridgeSatelloidWidth),
+         "Satelloid default cell width in px",
+         {{{"float"}, {24.0}}}},
+        {std::string(settings::kBridgeSatelloidHeight),
+         "Satelloid default cell height in px",
+         {{{"float"}, {14.0}}}},
+        {std::string(settings::kBridgeTetherControlDepth),
+         "Tether curve control depth Z",
+         {{{"float"}, {-20.0}}}},
+        {std::string(settings::kBridgeTetherSegments),
+         "Tether curve tessellation segments",
+         {{{"integer"}, {std::int64_t{16}}}}},
+        {std::string(settings::kBridgeTetherDepthThreshold),
+         "Tether depth activation threshold",
+         {{{"float"}, {-5.0}}}},
+        {std::string(settings::kBridgeTetherColour),
+         "Tether RGBA hexadecimal colour",
+         {{{"integer"}, {static_cast<std::int64_t>(0x38BDF844U)}}}},
+        {std::string(settings::kBridgeLoomBundling),
+         "Transclusion loom volumetric ribbon bundling enabled",
+         {{{"bool"}, {true}}}},
+        {std::string(settings::kBridgeLoomAlpha),
+         "Transclusion loom ribbon base alpha",
+         {{{"float"}, {0.35}}}},
+        {std::string(settings::kBridgeLoomHoverAlpha),
+         "Transclusion loom ribbon hover alpha",
+         {{{"float"}, {1.0}}}},
     };
     break;
 
@@ -1540,8 +1588,8 @@ void initializeSystemStoreFromSlice(Store &store, const SystemDocKind kind,
 
 SystemStoreModel SystemStoreModel::fromStore(const Store &store,
                                              const MicroversionId &version) {
-  SystemStoreModel model;
   if (store.opCount() == 0 || store.homeCell() == zigzag::noCell) {
+    SystemStoreModel model;
     model.isValid_ = false;
     model.error_   = "Store has no operations or home cell";
     return model;
@@ -1549,23 +1597,73 @@ SystemStoreModel SystemStoreModel::fromStore(const Store &store,
   const auto ver = version.isZero() ? store.primaryCurrentVersion() : version;
   const auto manifold = store.rebuildManifold(ver);
   const auto &reader  = static_cast<const SpanReader &>(store);
+  return fromManifold(manifold, store.homeCell(), &reader);
+}
 
-  model.storeDesc_ = manifold.textOf(store.homeCell(), reader);
+namespace {
+struct NullSpanReader final : public SpanReader {
+  [[nodiscard]] std::string read(const PrimediaSpan &) const override {
+    return {};
+  }
+};
+} // namespace
 
-  const auto varsDim      = manifold.dimensionNamed(kDimVars, reader);
-  const auto valuesDim    = manifold.dimensionNamed(kDimValues, reader);
-  const auto groupsDim    = manifold.dimensionNamed(kDimGroups, reader);
-  const auto subgroupsDim = manifold.dimensionNamed(kDimSubgroups, reader);
-  const auto notesDim     = manifold.dimensionNamed(kDimNotes, reader);
-  const auto schemasDim   = manifold.dimensionNamed(kDimSchemas, reader);
-  const auto altsDim      = manifold.dimensionNamed(kDimAlternates, reader);
-  const auto defaultDim   = manifold.dimensionNamed(kDimDefault, reader);
+SystemStoreModel
+SystemStoreModel::fromManifold(const zigzag::Manifold &manifold,
+                               zigzag::CellRef homeCell,
+                               const SpanReader *reader) {
+  SystemStoreModel model;
+  if (reader == nullptr && manifold.store() != nullptr) {
+    reader = manifold.store();
+  }
+  static const NullSpanReader kNullReader;
+  if (reader == nullptr) {
+    reader = &kNullReader;
+  }
+
+  if (homeCell == zigzag::noCell) {
+    if (manifold.contains(1)) {
+      homeCell = 1;
+    } else if (!manifold.cells().empty()) {
+      homeCell = manifold.cells().front().birthOp;
+    } else {
+      model.isValid_ = false;
+      model.error_   = "Manifold has no cells";
+      return model;
+    }
+  } else if (!manifold.contains(homeCell)) {
+    model.isValid_ = false;
+    model.error_   = "Manifold does not contain specified home cell";
+    return model;
+  }
+
+  const auto varsDim      = manifold.dimensionNamed(kDimVars, *reader);
+  const auto valuesDim    = manifold.dimensionNamed(kDimValues, *reader);
+  const auto groupsDim    = manifold.dimensionNamed(kDimGroups, *reader);
+  const auto subgroupsDim = manifold.dimensionNamed(kDimSubgroups, *reader);
+  const auto notesDim     = manifold.dimensionNamed(kDimNotes, *reader);
+  const auto schemasDim   = manifold.dimensionNamed(kDimSchemas, *reader);
+  const auto altsDim      = manifold.dimensionNamed(kDimAlternates, *reader);
+  const auto defaultDim   = manifold.dimensionNamed(kDimDefault, *reader);
+
+  if (varsDim != zigzag::noCell) {
+    while (true) {
+      const auto prev =
+          manifold.linked(homeCell, varsDim, zigzag::DimVector::NEG);
+      if (prev == zigzag::noCell || prev == homeCell) {
+        break;
+      }
+      homeCell = prev;
+    }
+  }
+
+  model.storeDesc_ = manifold.textOf(homeCell, *reader);
 
   if (notesDim != zigzag::noCell) {
     const auto noteCell =
-        manifold.linked(store.homeCell(), notesDim, zigzag::DimVector::POS);
+        manifold.linked(homeCell, notesDim, zigzag::DimVector::POS);
     if (noteCell != zigzag::noCell) {
-      model.storeDesc_ = manifold.textOf(noteCell, reader);
+      model.storeDesc_ = manifold.textOf(noteCell, *reader);
     }
   }
 
@@ -1574,14 +1672,14 @@ SystemStoreModel SystemStoreModel::fromStore(const Store &store,
       [&](const zigzag::CellRef gCell) -> SettingGroup {
     SettingGroup grp;
     grp.groupCell = gCell;
-    grp.name      = manifold.textOf(gCell, reader);
+    grp.name      = manifold.textOf(gCell, *reader);
 
     if (varsDim != zigzag::noCell) {
       manifold.walkRank(gCell, varsDim, zigzag::DimVector::POS,
                         [&](const zigzag::CellRef cloneCell) {
                           if (cloneCell != gCell) {
                             grp.memberSettingNames.push_back(
-                                manifold.textOf(cloneCell, reader));
+                                manifold.textOf(cloneCell, *reader));
                           }
                         });
     }
@@ -1601,9 +1699,9 @@ SystemStoreModel SystemStoreModel::fromStore(const Store &store,
   };
 
   if (groupsDim != zigzag::noCell) {
-    manifold.walkRank(store.homeCell(), groupsDim, zigzag::DimVector::POS,
+    manifold.walkRank(homeCell, groupsDim, zigzag::DimVector::POS,
                       [&](const zigzag::CellRef gCell) {
-                        if (gCell != store.homeCell()) {
+                        if (gCell != homeCell) {
                           model.groups_.push_back(readGroupNode(gCell));
                         }
                       });
@@ -1612,14 +1710,14 @@ SystemStoreModel SystemStoreModel::fromStore(const Store &store,
   // Read master settings along d.vars
   if (varsDim != zigzag::noCell) {
     manifold.walkRank(
-        store.homeCell(), varsDim, zigzag::DimVector::POS,
+        homeCell, varsDim, zigzag::DimVector::POS,
         [&](const zigzag::CellRef setCell) {
-          if (setCell == store.homeCell()) {
+          if (setCell == homeCell) {
             return;
           }
           SettingEntry entry;
           entry.nameCell  = setCell;
-          entry.name      = manifold.textOf(setCell, reader);
+          entry.name      = manifold.textOf(setCell, *reader);
           entry.groupPath = splitTokens(entry.name, '.');
           if (!entry.groupPath.empty()) {
             entry.groupPath.pop_back();
@@ -1630,7 +1728,7 @@ SystemStoreModel SystemStoreModel::fromStore(const Store &store,
             const auto noteCell =
                 manifold.linked(setCell, notesDim, zigzag::DimVector::POS);
             if (noteCell != zigzag::noCell) {
-              entry.notes = manifold.textOf(noteCell, reader);
+              entry.notes = manifold.textOf(noteCell, *reader);
             }
           }
 
@@ -1646,7 +1744,7 @@ SystemStoreModel SystemStoreModel::fromStore(const Store &store,
                   [&](const zigzag::CellRef typeClone) {
                     if (typeClone != curBlank) {
                       shape.expectedTypes.push_back(
-                          manifold.textOf(typeClone, reader));
+                          manifold.textOf(typeClone, *reader));
                       if (defaultDim != zigzag::noCell) {
                         const auto defCell = manifold.linked(
                             typeClone, defaultDim, zigzag::DimVector::POS);
@@ -1668,7 +1766,7 @@ SystemStoreModel SystemStoreModel::fromStore(const Store &store,
                                 *manifold.asBool(defCell));
                           } else {
                             shape.defaultValues.emplace_back(
-                                manifold.textOf(defCell, reader));
+                                manifold.textOf(defCell, *reader));
                           }
                         }
                       }
@@ -1707,7 +1805,7 @@ SystemStoreModel SystemStoreModel::fromStore(const Store &store,
                                         *manifold.asBool(valCell));
                                   } else {
                                     entry.value.elements.emplace_back(
-                                        manifold.textOf(valCell, reader));
+                                        manifold.textOf(valCell, *reader));
                                   }
                                 }
                               });
@@ -1741,29 +1839,144 @@ SystemStoreModel::find(const std::string_view name) const noexcept {
   return nullptr;
 }
 
+namespace {
+const CellValue *findDefaultSettingValue(const std::string_view name) {
+  static const auto defaultsMap = []() {
+    std::unordered_map<std::string, CellValue> m;
+    for (int k = 0; k < static_cast<int>(SystemDocKind::Count); ++k) {
+      for (const auto &spec :
+           defaultSettingSpecs(static_cast<SystemDocKind>(k))) {
+        if (!spec.schemas.empty() &&
+            !spec.schemas.front().defaultValues.empty()) {
+          m.emplace(spec.name, spec.schemas.front().defaultValues.front());
+        }
+      }
+    }
+    return m;
+  }();
+  const auto it = defaultsMap.find(std::string(name));
+  return it != defaultsMap.end() ? &it->second : nullptr;
+}
+} // namespace
+
 double SystemStoreModel::getDouble(const std::string_view name,
                                    const double fallback) const {
   const auto *const entry = find(name);
-  return entry != nullptr ? entry->value.asDouble(0, fallback) : fallback;
+  if (entry != nullptr && !entry->value.elements.empty()) {
+    return entry->value.asDouble(0, fallback);
+  }
+  if (entry != nullptr && !entry->schema.alternatives.empty() &&
+      !entry->schema.alternatives.front().defaultValues.empty()) {
+    const auto &el = entry->schema.alternatives.front().defaultValues.front();
+    if (std::holds_alternative<double>(el)) {
+      return std::get<double>(el);
+    }
+    if (std::holds_alternative<std::int64_t>(el)) {
+      return static_cast<double>(std::get<std::int64_t>(el));
+    }
+    if (std::holds_alternative<bool>(el)) {
+      return std::get<bool>(el) ? 1.0 : 0.0;
+    }
+  }
+  if (const auto *def = findDefaultSettingValue(name)) {
+    if (std::holds_alternative<double>(*def)) {
+      return std::get<double>(*def);
+    }
+    if (std::holds_alternative<std::int64_t>(*def)) {
+      return static_cast<double>(std::get<std::int64_t>(*def));
+    }
+    if (std::holds_alternative<bool>(*def)) {
+      return std::get<bool>(*def) ? 1.0 : 0.0;
+    }
+  }
+  return fallback;
 }
 
 std::int64_t SystemStoreModel::getInt64(const std::string_view name,
                                         const std::int64_t fallback) const {
   const auto *const entry = find(name);
-  return entry != nullptr ? entry->value.asInt64(0, fallback) : fallback;
+  if (entry != nullptr && !entry->value.elements.empty()) {
+    return entry->value.asInt64(0, fallback);
+  }
+  if (entry != nullptr && !entry->schema.alternatives.empty() &&
+      !entry->schema.alternatives.front().defaultValues.empty()) {
+    const auto &el = entry->schema.alternatives.front().defaultValues.front();
+    if (std::holds_alternative<std::int64_t>(el)) {
+      return std::get<std::int64_t>(el);
+    }
+    if (std::holds_alternative<double>(el)) {
+      return static_cast<std::int64_t>(std::get<double>(el));
+    }
+    if (std::holds_alternative<bool>(el)) {
+      return std::get<bool>(el) ? 1 : 0;
+    }
+  }
+  if (const auto *def = findDefaultSettingValue(name)) {
+    if (std::holds_alternative<std::int64_t>(*def)) {
+      return std::get<std::int64_t>(*def);
+    }
+    if (std::holds_alternative<double>(*def)) {
+      return static_cast<std::int64_t>(std::get<double>(*def));
+    }
+    if (std::holds_alternative<bool>(*def)) {
+      return std::get<bool>(*def) ? 1 : 0;
+    }
+  }
+  return fallback;
 }
 
 bool SystemStoreModel::getBool(const std::string_view name,
                                const bool fallback) const {
   const auto *const entry = find(name);
-  return entry != nullptr ? entry->value.asBool(0, fallback) : fallback;
+  if (entry != nullptr && !entry->value.elements.empty()) {
+    return entry->value.asBool(0, fallback);
+  }
+  if (entry != nullptr && !entry->schema.alternatives.empty() &&
+      !entry->schema.alternatives.front().defaultValues.empty()) {
+    const auto &el = entry->schema.alternatives.front().defaultValues.front();
+    if (std::holds_alternative<bool>(el)) {
+      return std::get<bool>(el);
+    }
+    if (std::holds_alternative<std::int64_t>(el)) {
+      return std::get<std::int64_t>(el) != 0;
+    }
+    if (std::holds_alternative<double>(el)) {
+      return std::get<double>(el) != 0.0;
+    }
+  }
+  if (const auto *def = findDefaultSettingValue(name)) {
+    if (std::holds_alternative<bool>(*def)) {
+      return std::get<bool>(*def);
+    }
+    if (std::holds_alternative<std::int64_t>(*def)) {
+      return std::get<std::int64_t>(*def) != 0;
+    }
+    if (std::holds_alternative<double>(*def)) {
+      return std::get<double>(*def) != 0.0;
+    }
+  }
+  return fallback;
 }
 
 std::string SystemStoreModel::getString(const std::string_view name,
                                         const std::string_view fallback) const {
   const auto *const entry = find(name);
-  return entry != nullptr ? entry->value.asString(0, fallback)
-                          : std::string{fallback};
+  if (entry != nullptr && !entry->value.elements.empty()) {
+    return entry->value.asString(0, fallback);
+  }
+  if (entry != nullptr && !entry->schema.alternatives.empty() &&
+      !entry->schema.alternatives.front().defaultValues.empty()) {
+    const auto &el = entry->schema.alternatives.front().defaultValues.front();
+    if (std::holds_alternative<std::string>(el)) {
+      return std::get<std::string>(el);
+    }
+  }
+  if (const auto *def = findDefaultSettingValue(name)) {
+    if (std::holds_alternative<std::string>(*def)) {
+      return std::get<std::string>(*def);
+    }
+  }
+  return std::string{fallback};
 }
 
 std::vector<CellValue>
@@ -2085,6 +2298,8 @@ LayoutConfig LayoutConfig::fromStore(const Store &store) {
   cfg.zigzag.connectionBeamWidthPx = static_cast<float>(
       model.getDouble(settings::kZigzagConnectionBeamWidthPx,
                       static_cast<double>(cfg.zigzag.connectionBeamWidthPx)));
+
+  cfg.bridge = BridgeRuntimeConfig::fromSystemDocs(store);
 
   return cfg;
 }

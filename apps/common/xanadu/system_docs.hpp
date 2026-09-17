@@ -14,6 +14,7 @@
 #include <variant>
 #include <vector>
 
+#include "common/xanadu/bridge_config.hpp"
 #include "common/xanadu/microversion.hpp"
 #include "common/xanadu/tension_layout.hpp"
 #include "common/xanadu/zigzag/dim_vector.hpp"
@@ -25,6 +26,8 @@ struct ZzStructureDocument;
 } // namespace zigzag
 
 namespace xanadu {
+
+class SpanReader;
 
 /**
  * @brief The kinds of sovereign system xanadocs managing runtime parameters.
@@ -194,6 +197,35 @@ inline constexpr std::string_view kZigzagHudColumnGapPx =
     "zigzag.hudColumnGapPx";
 inline constexpr std::string_view kZigzagConnectionBeamWidthPx =
     "zigzag.connectionBeamWidthPx";
+
+// Bridge Runtime Configuration
+inline constexpr std::string_view kBridgeCellRadius = "bridge.cellRadius";
+inline constexpr std::string_view kBridgeBackgroundDepthZ =
+    "bridge.backgroundDepthZ";
+inline constexpr std::string_view kBridgeBackgroundOpacity =
+    "bridge.backgroundOpacity";
+inline constexpr std::string_view kBridgeSatelloidAlignment =
+    "bridge.satelloid.alignment";
+inline constexpr std::string_view kBridgeSatelloidTether =
+    "bridge.satelloid.tether";
+inline constexpr std::string_view kBridgeSatelloidMass =
+    "bridge.satelloid.mass";
+inline constexpr std::string_view kBridgeSatelloidGap = "bridge.satelloid.gap";
+inline constexpr std::string_view kBridgeSatelloidWidth =
+    "bridge.satelloid.width";
+inline constexpr std::string_view kBridgeSatelloidHeight =
+    "bridge.satelloid.height";
+inline constexpr std::string_view kBridgeTetherControlDepth =
+    "bridge.tether.controlDepth";
+inline constexpr std::string_view kBridgeTetherSegments =
+    "bridge.tether.segments";
+inline constexpr std::string_view kBridgeTetherDepthThreshold =
+    "bridge.tether.depthThreshold";
+inline constexpr std::string_view kBridgeTetherColour = "bridge.tether.colour";
+inline constexpr std::string_view kBridgeLoomBundling = "bridge.loom.bundling";
+inline constexpr std::string_view kBridgeLoomAlpha    = "bridge.loom.alpha";
+inline constexpr std::string_view kBridgeLoomHoverAlpha =
+    "bridge.loom.hoverAlpha";
 
 // Settings
 inline constexpr std::string_view kFontSize        = "fontSize";
@@ -518,6 +550,11 @@ public:
   [[nodiscard]] static SystemStoreModel
   fromStore(const Store &store, const MicroversionId &version = {});
 
+  [[nodiscard]] static SystemStoreModel
+  fromManifold(const zigzag::Manifold &manifold,
+               zigzag::CellRef homeCell = zigzag::noCell,
+               const SpanReader *reader = nullptr);
+
   [[nodiscard]] bool isValid() const noexcept { return isValid_; }
   [[nodiscard]] const std::string &validationError() const noexcept {
     return error_;
@@ -743,6 +780,7 @@ struct LayoutConfig {
   PhysicsConfig physics{};
   BeamConfig beams{};
   ZigzagPresentationConfig zigzag{};
+  BridgeRuntimeConfig bridge{};
 
   [[nodiscard]] static LayoutConfig fromStore(const Store &store);
 };
