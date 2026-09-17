@@ -22,7 +22,6 @@
 
 namespace zigzag {
 class Manifold;
-struct ZzStructureDocument;
 } // namespace zigzag
 
 namespace xanadu {
@@ -99,29 +98,9 @@ systemDocKindFromUri(const std::string_view uri) noexcept {
   return std::nullopt;
 }
 
-[[nodiscard]] std::string defaultSystemDocContent(SystemDocKind kind);
 [[nodiscard]] std::string defaultSystemDocSchema(SystemDocKind kind);
 [[nodiscard]] std::string defaultSystemDocNotes(SystemDocKind kind);
 [[nodiscard]] std::filesystem::path systemDocDirectory(SystemDocKind kind);
-
-[[nodiscard]] inline std::string_view
-extractConfigSection(const std::string_view docText) noexcept {
-  const auto ffPos     = docText.find('\f');
-  const auto schemaPos = docText.find("Schema and Purpose");
-  auto end             = ffPos;
-  if (end == std::string_view::npos ||
-      (schemaPos != std::string_view::npos && schemaPos < end)) {
-    end = schemaPos;
-  }
-  if (end != std::string_view::npos) {
-    auto res = docText.substr(0, end);
-    if (!res.empty() && res.back() == '\f') {
-      res.remove_suffix(1);
-    }
-    return res;
-  }
-  return docText;
-}
 
 class Store;
 
@@ -678,9 +657,6 @@ MicroversionId ensureAllSettings(Store &store, SystemDocKind kind);
 void initializeSystemStore(Store &store, SystemDocKind kind);
 
 [[nodiscard]] std::vector<SettingSpec> defaultSettingSpecs(SystemDocKind kind);
-
-void initializeSystemStoreFromSlice(Store &store, SystemDocKind kind,
-                                    const zigzag::ZzStructureDocument &slice);
 
 [[nodiscard]] std::string_view canonicalKeymapAction(std::string_view action);
 [[nodiscard]] std::string_view legacyKeymapAction(std::string_view action);

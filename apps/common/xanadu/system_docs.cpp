@@ -22,135 +22,9 @@
 #include "common/xanadu/version.hpp"
 #include "common/xanadu/zigzag/dimension_registry.hpp"
 #include "common/xanadu/zigzag/manifold.hpp"
-#include "common/xanadu/zigzag/zz_system_projector.hpp"
-#include "common/xanadu/zigzag/zzstructure.hpp"
 #include <gleditor/color.hpp>
 
 namespace xanadu {
-
-std::string defaultSystemDocContent(const SystemDocKind kind) {
-  switch (kind) {
-  case SystemDocKind::Keymap:
-    return "new-doc: \"Ctrl+N\"\n"
-           "open-doc: \"Ctrl+O\"\n"
-           "close-doc: \"Ctrl+W\"\n"
-           "forward: \"Ctrl+Shift+N\"\n"
-           "scrub-forward: \"Ctrl+]\"\n"
-           "scrub-backward: \"Ctrl+[\"\n"
-           "hypertime-map: \"Ctrl+H\"\n"
-           "radial-menu: \"Ctrl+M\"\n";
-  case SystemDocKind::Settings:
-    return "fontSize: \"16\"\n"
-           "fontFamily: \"Monospace\"\n"
-           "lineHeight: \"1.4\"\n"
-           "autoSaveSeconds: \"5\"\n"
-           "theme: \"system\"\n";
-  case SystemDocKind::Layout:
-    return "columns: \"2\"\n"
-           "pageWidthPx: \"800\"\n"
-           "pageHeightPx: \"1000\"\n"
-           "transclusionPrisms: \"true\"\n"
-           "transclusionLoom: \"true\"\n"
-           "xanalinkRibbons: \"true\"\n"
-           "physics:\n"
-           "  kRepel: \"4500.0\"\n"
-           "  kPlane: \"14.0\"\n"
-           "  kAlign: \"28.0\"\n"
-           "  kTier: \"12.0\"\n"
-           "  kDamping: \"7.5\"\n"
-           "  backgroundDepthZ: \"-40.0\"\n"
-           "  defaultGap: \"8.0\"\n"
-           "  maxForce: \"10000.0\"\n"
-           "  maxVelocity: \"1000.0\"\n"
-           "  timeStep: \"0.016\"\n"
-           "beams:\n"
-           "  bandStrandLimit: \"7\"\n"
-           "  bandStrandPitch: \"2.2\"\n"
-           "  bandFillAlpha: \"0.85\"\n"
-           "  stubWidthOfBeam: \"1.35\"\n"
-           "  stubMinOfLine: \"0.9\"\n"
-           "  marginKerf: \"0.04\"\n"
-           "  bypassDepthPerDoc: \"-20.0\"\n"
-           "  bypassDepthLimit: \"-120.0\"\n"
-           "  bypassSegments: \"9\"\n"
-           "  loomBundlingEnabled: \"true\"\n"
-           "  loomAlpha: \"0.35\"\n"
-           "  loomHoverAlpha: \"1.0\"\n"
-           "  zFightJitterAmplitude: \"0.6\"\n"
-           "  activeZBoost: \"4.0\"\n";
-  case SystemDocKind::UI:
-    return "notificationPosition: \"top-right\"\n"
-           "notificationDurationMs: \"3000\"\n"
-           "tabBarVisible: \"true\"\n"
-           "statusBarVisible: \"true\"\n"
-           "hypertimeMapVisible: \"false\"\n"
-           "radialMenu:\n"
-           "  radius: 130.0\n"
-           "  innerRadius: 42.0\n"
-           "  actions:\n"
-           "    - id: \"format:bold\"\n"
-           "      label: \"Bold\"\n"
-           "      icon: \"B\"\n"
-           "    - id: \"format:italic\"\n"
-           "      label: \"Italic\"\n"
-           "      icon: \"I\"\n"
-           "    - id: \"format:underline\"\n"
-           "      label: \"Underline\"\n"
-           "      icon: \"U\"\n"
-           "    - id: \"format:superscript\"\n"
-           "      label: \"Superscript\"\n"
-           "      icon: \"X²\"\n"
-           "    - id: \"format:subscript\"\n"
-           "      label: \"Subscript\"\n"
-           "      icon: \"X₂\"\n"
-           "    - id: \"group:align\"\n"
-           "      label: \"Align\"\n"
-           "      icon: \"=\"\n"
-           "      subActions:\n"
-           "        - id: \"align:left\"\n"
-           "          label: \"Left\"\n"
-           "          icon: \"|<\"\n"
-           "        - id: \"align:centre\"\n"
-           "          label: \"Centre\"\n"
-           "          icon: \"><\"\n"
-           "        - id: \"align:right\"\n"
-           "          label: \"Right\"\n"
-           "          icon: \">|\"\n"
-           "        - id: \"align:justify\"\n"
-           "          label: \"Justify\"\n"
-           "          icon: \"|=\"\n"
-           "    - id: \"op:pagebreak\"\n"
-           "      label: \"Page Break\"\n"
-           "      icon: \"--\"\n"
-           "    - id: \"op:transclude\"\n"
-           "      label: \"Transclude\"\n"
-           "      icon: \"[]\"\n"
-           "    - id: \"info:author\"\n"
-           "      label: \"Author\"\n"
-           "      icon: \"@\"\n";
-  case SystemDocKind::Pouches:
-    return "zone:\n"
-           "  - id: \"to_link_left\"\n"
-           "    label: \"To Link (Left)\"\n"
-           "    aura: \"#06B6D4\"\n"
-           "    weight: 1.0\n"
-           "  - id: \"to_link_right\"\n"
-           "    label: \"To Link (Right)\"\n"
-           "    aura: \"#EC4899\"\n"
-           "    weight: 1.0\n"
-           "  - id: \"notes\"\n"
-           "    label: \"Notes\"\n"
-           "    aura: \"#EAB308\"\n"
-           "    weight: 1.0\n"
-           "  - id: \"scratch\"\n"
-           "    label: \"Scratch\"\n"
-           "    aura: \"#10B981\"\n"
-           "    weight: 1.0\n";
-  case SystemDocKind::Count:
-    return "";
-  }
-  return "";
-}
 
 std::string defaultSystemDocSchema(const SystemDocKind kind) {
   switch (kind) {
@@ -1494,9 +1368,8 @@ MicroversionId ensureAllSettings(Store &store, const SystemDocKind kind) {
 }
 
 void initializeSystemStore(Store &store, const SystemDocKind kind) {
-  const std::string p1 = defaultSystemDocContent(kind);
-  const std::string p2 = defaultSystemDocSchema(kind);
-  const std::string p3 = defaultSystemDocNotes(kind);
+  const std::string p1 = defaultSystemDocSchema(kind);
+  const std::string p2 = defaultSystemDocNotes(kind);
 
   MicroversionId cur{};
   cur = store.insert(cur, 0, p1);
@@ -1505,16 +1378,12 @@ void initializeSystemStore(Store &store, const SystemDocKind kind) {
   cur               = store.insertBreak(cur, p1Size);
   cur               = store.insert(cur, p1Size, p2);
 
-  const auto p12Size = static_cast<std::uint32_t>(p1Size + p2.size());
-  cur                = store.insertBreak(cur, p12Size);
-  cur                = store.insert(cur, p12Size, p3);
-
   const Version doc = store.rebuild(cur);
 
-  // Format links for Page 2 header
+  // Format links for Page 1 header
   constexpr std::string_view schemaHeader = "Schema and Purpose";
   const auto schemaHeaderSpans =
-      doc.spansFor(p1Size, static_cast<std::uint32_t>(schemaHeader.size()));
+      doc.spansFor(0, static_cast<std::uint32_t>(schemaHeader.size()));
   if (!schemaHeaderSpans.empty()) {
     Link boldLink;
     boldLink.type  = LinkType::Format;
@@ -1533,10 +1402,10 @@ void initializeSystemStore(Store &store, const SystemDocKind kind) {
     cur              = store.addLink(cur, std::move(centreLink));
   }
 
-  // Format links for Page 3 header
+  // Format links for Page 2 header
   constexpr std::string_view notesHeader = "Notes";
   const auto notesHeaderSpans =
-      doc.spansFor(p12Size, static_cast<std::uint32_t>(notesHeader.size()));
+      doc.spansFor(p1Size, static_cast<std::uint32_t>(notesHeader.size()));
   if (!notesHeaderSpans.empty()) {
     Link boldLink;
     boldLink.type  = LinkType::Format;
@@ -1555,31 +1424,21 @@ void initializeSystemStore(Store &store, const SystemDocKind kind) {
     cur              = store.addLink(cur, std::move(centreLink));
   }
 
-  // Butterfly links
+  // Bidirectional xanalink between the schema and notes pages, per this
+  // repo's system-xanadoc governance: every system xanadoc is xanalinked to
+  // both its schema/purpose page and its notes page.
   const auto p1Spans = doc.spansFor(0, p1Size);
   const auto p2Spans =
       doc.spansFor(p1Size, static_cast<std::uint32_t>(p2.size()));
-  const auto p3Spans =
-      doc.spansFor(p12Size, static_cast<std::uint32_t>(p3.size()));
 
   if (!p1Spans.empty() && !p2Spans.empty()) {
-    Link schemaLink;
-    schemaLink.type  = LinkType::Comment;
-    schemaLink.tier  = ProminenceTier::Author;
-    schemaLink.owner = "system";
-    schemaLink.left  = p1Spans;
-    schemaLink.right = p2Spans;
-    cur              = store.addLink(cur, std::move(schemaLink));
-  }
-
-  if (!p1Spans.empty() && !p3Spans.empty()) {
-    Link notesLink;
-    notesLink.type  = LinkType::Comment;
-    notesLink.tier  = ProminenceTier::Author;
-    notesLink.owner = "system";
-    notesLink.left  = p1Spans;
-    notesLink.right = p3Spans;
-    cur             = store.addLink(cur, std::move(notesLink));
+    Link schemaNotesLink;
+    schemaNotesLink.type  = LinkType::Comment;
+    schemaNotesLink.tier  = ProminenceTier::Author;
+    schemaNotesLink.owner = "system";
+    schemaNotesLink.left  = p1Spans;
+    schemaNotesLink.right = p2Spans;
+    cur                   = store.addLink(cur, std::move(schemaNotesLink));
   }
 
   // Slice genesis and populate standardized settings
@@ -1592,11 +1451,6 @@ void initializeSystemStore(Store &store, const SystemDocKind kind) {
             .description = "System default " + std::string(systemDocName(kind)),
             .tag         = "system",
             .timestamp   = ""});
-}
-
-void initializeSystemStoreFromSlice(Store &store, const SystemDocKind kind,
-                                    const zigzag::ZzStructureDocument &slice) {
-  zigzag::projectSystemSliceToStore(slice, store, kind);
 }
 
 // -----------------------------------------------------------------------------

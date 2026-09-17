@@ -10,7 +10,6 @@
 #include "xudu/core/scroll.hpp"
 #include "xudu/core/store.hpp"
 #include "xudu/core/system_docs.hpp"
-#include "xudu/core/yaml.hpp"
 
 namespace fs = std::filesystem;
 
@@ -194,30 +193,13 @@ TEST(SystemDocsTest, enumAndUriMappingRoundTrip) {
   EXPECT_FALSE(xudu::systemDocKindFromUri("file:///path").has_value());
 }
 
-TEST(SystemDocsTest, defaultContentIsValidYaml) {
-  using xudu::SystemDocKind;
-  for (const auto kind :
-       {SystemDocKind::Keymap, SystemDocKind::Settings, SystemDocKind::Layout,
-        SystemDocKind::UI, SystemDocKind::Pouches}) {
-    const std::string content = xudu::defaultSystemDocContent(kind);
-    EXPECT_FALSE(content.empty());
-    const auto parsed = xudu::yaml::read(content);
-    ASSERT_TRUE(parsed.has_value())
-        << "Failed to parse default YAML for " << xudu::systemDocName(kind);
-    EXPECT_FALSE(parsed->empty())
-        << "Parsed empty entries for " << xudu::systemDocName(kind);
-  }
-}
-
 TEST_F(StoreMultiStoreTest, systemStoreCreationAndHeadRestriction) {
   const auto sysPath = (testDir / "system_keymap").string();
   xudu::Store store;
   store.setSystem(true);
   EXPECT_TRUE(store.isSystem());
 
-  const auto defaultContent =
-      xudu::defaultSystemDocContent(xudu::SystemDocKind::Keymap);
-  const auto v1 = store.insert(xudu::MicroversionId{}, 0, defaultContent);
+  const auto v1 = store.insert(xudu::MicroversionId{}, 0, "# Default keymap\n");
   store.repointCurrentVersion(v1);
   store.setVersionAnnotation(v1, {.alias       = "default",
                                   .description = "System default keymap",

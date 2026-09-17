@@ -86,14 +86,12 @@ TEST(SystemDocsTest, MetadataAndUriRoundTrips) {
   EXPECT_FALSE(xudu::systemDocKindFromUri("system://invalid").has_value());
   EXPECT_FALSE(xudu::systemDocKindFromUri("file:///path/to/doc").has_value());
 
-  // Check that default setting specifications and content exist for every kind
+  // Check that default setting specifications exist for every kind
   for (const auto kind :
        {SystemDocKind::Keymap, SystemDocKind::Settings, SystemDocKind::Layout,
         SystemDocKind::UI, SystemDocKind::Pouches}) {
     const auto specs = xudu::defaultSettingSpecs(kind);
     EXPECT_FALSE(specs.empty());
-    const auto content = xudu::defaultSystemDocContent(kind);
-    EXPECT_FALSE(content.empty());
   }
 
   // Check directory helper returns valid path
@@ -449,9 +447,9 @@ TEST(SystemDocsTest, InitializeSystemStoreStructureAndFormatLinks) {
     EXPECT_EQ(store.primaryCurrentVersion(), store.latest());
     EXPECT_EQ(store.displayName(store.latest()), "default");
 
-    // 3 pages => exactly 2 forced page breaks
+    // 2 pages (schema, notes) => exactly 1 forced page break
     const auto doc = store.rebuild(store.latest());
-    EXPECT_EQ(doc.forcedBreaks().size(), 2U);
+    EXPECT_EQ(doc.forcedBreaks().size(), 1U);
 
     // Format links on headers
     bool foundBold           = false;
@@ -472,19 +470,13 @@ TEST(SystemDocsTest, InitializeSystemStoreStructureAndFormatLinks) {
     }
     EXPECT_TRUE(foundBold);
     EXPECT_TRUE(foundCentre);
-    // Two butterfly links: config->schema and config->notes
-    EXPECT_EQ(commentCount, 2U);
+    // One bidirectional link: schema<->notes
+    EXPECT_EQ(commentCount, 1U);
 
     // Full doc text contains schema and notes headers
     const std::string fullText = store.textOf(store.latest());
     EXPECT_NE(fullText.find("Schema and Purpose"), std::string::npos);
     EXPECT_NE(fullText.find("Notes"), std::string::npos);
-
-    // ExtractConfigSection isolates Page 1
-    const auto configPart = xudu::extractConfigSection(fullText);
-    EXPECT_EQ(configPart.find("Schema and Purpose"), std::string_view::npos);
-    EXPECT_EQ(configPart.find("Notes\n\n"), std::string_view::npos);
-    EXPECT_EQ(configPart, xudu::defaultSystemDocContent(kind));
   }
 }
 

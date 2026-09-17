@@ -223,8 +223,7 @@ TEST(PouchTest, SwingBackResolvesExactByteSpan) {
 
 TEST(PouchTest, BackedBySystemStore) {
   Store store;
-  const auto content = defaultSystemDocContent(SystemDocKind::Pouches);
-  const auto v0      = store.insert(MicroversionId{}, 0, content);
+  const auto v0 = store.insert(MicroversionId{}, 0, "placeholder content\n");
   (void)v0;
 
   PouchManager pm(store);

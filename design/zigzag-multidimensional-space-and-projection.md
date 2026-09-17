@@ -221,17 +221,15 @@ graph LR
 - Multidimensional Zigzag structures are serialized into signed `LinkPackage` bundles where
   dimensional links are preserved as `LinkType::Dimension` xanalinks.
 
-### 4. System Configuration Slices (`zz_system_projector`)
+### 4. System Configuration: Retired Slice Projector
 
-- Projects multidimensional system configuration slices (`d.config`, `d.schema`, `d.notes`) into
-  sovereign 3-page System Xanadocs (`xudu::Store`) with format links for bold/centered headers
-  (strictly zero Markdown) and butterfly comment links connecting settings to schema descriptions
-  and notes.
-- Fully bidirectional: edits to Page 1 or Page 3 in Xudu propagate to the Zigzag slice cells in
-  place, and edits to cells in Zigzag propagate to the Store and commit a new microversion.
-- See
-  [`design/system-xanadocs-customization-and-metasystem.md`](system-xanadocs-customization-and-metasystem.md)
-  for complete architectural specifications and diagrams.
+`zz_system_projector` (a bidirectional bridge between multidimensional YAML configuration slices and
+sovereign System Xanadocs) was removed 2026-09-17: it had no caller anywhere in the running
+application, existing only to be exercised by its own dedicated test. System settings are read and
+written directly through `xanadu::SystemStoreModel` (`apps/common/xanadu/system_docs.hpp`), which
+reads a `Store`'s structured settings cells with no YAML involved at any point -- see
+[`design/system-xanadocs-customization-and-metasystem.md`](system-xanadocs-customization-and-metasystem.md)
+§6 for what replaced it.
 
 ______________________________________________________________________
 
@@ -255,14 +253,12 @@ ______________________________________________________________________
 
 ## 7. Implementation File Map
 
-| Component                  | Source Files                                                                                                                                                                                 | Description                                                                                    |
-| :------------------------- | :------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | :--------------------------------------------------------------------------------------------- |
-| **Compact Cell Layout**    | [`apps/common/xanadu/zigzag/compact_zzcell.hpp`](apps/common/xanadu/zigzag/compact_zzcell.hpp)                                                                                               | Cache-line aligned multidimensional cell with inlined standard dimensions. ~960 bytes, not 64  |
-| **Transclusion Engine**    | [`apps/zigzag/core/unified_transclusion_engine.hpp/.cpp`](apps/zigzag/core/unified_transclusion_engine.hpp)                                                                                  | 2-rank manifold validator, neighborhood extractor, and GPU uploader                            |
-| **Document Projector**     | [`apps/common/xanadu/zigzag/zz_xudu_projector.hpp/.cpp`](apps/common/xanadu/zigzag/zz_xudu_projector.hpp)                                                                                    | Xanadoc $\longleftrightarrow$ Zigzag mapping, clone deduplication, and rasterization           |
-| **System Projector**       | [`apps/common/xanadu/zigzag/zz_system_projector.hpp/.cpp`](apps/common/xanadu/zigzag/zz_system_projector.hpp)                                                                                | 3-page system xanadoc $\longleftrightarrow$ Zigzag configuration slice bidirectional projector |
-| **Zigzag Core Data Model** | [`apps/common/xanadu/zigzag/zzcore.hpp/.cpp`](apps/common/xanadu/zigzag/zzcore.hpp)                                                                                                          | Dimensional navigation, clone master resolution, and rank iterators                            |
-| **YAML Slice Loader**      | [`apps/common/xanadu/zigzag/zzstructure_loader.cpp`](apps/common/xanadu/zigzag/zzstructure_loader.cpp)                                                                                       | RapidYAML parser for `.zz` multidimensional slice files                                        |
-| **Canonical Layout Slice** | [`assets/zigzag/system_layout_slice.yaml`](assets/zigzag/system_layout_slice.yaml)                                                                                                           | Canonical 3D Zigzag slice specification for `system://layout`                                  |
-| **Visualizer & A11y**      | [`apps/zigzag/core/zigzag_visualizer.cpp`](apps/zigzag/core/zigzag_visualizer.cpp)                                                                                                           | 3D navigation, mouse picking, and AccessKit accessibility tree                                 |
-| **Unit Tests**             | [`tests/zigzag/test_unified_transclusion_engine.cpp`](tests/zigzag/test_unified_transclusion_engine.cpp), [`tests/zigzag/test_system_projector.cpp`](tests/zigzag/test_system_projector.cpp) | Manifold validation, clone syncing, and bidirectional system slice propagation tests           |
+| Component                  | Source Files                                                                                                | Description                                                                                   |
+| :------------------------- | :---------------------------------------------------------------------------------------------------------- | :-------------------------------------------------------------------------------------------- |
+| **Compact Cell Layout**    | [`apps/common/xanadu/zigzag/compact_zzcell.hpp`](apps/common/xanadu/zigzag/compact_zzcell.hpp)              | Cache-line aligned multidimensional cell with inlined standard dimensions. ~960 bytes, not 64 |
+| **Transclusion Engine**    | [`apps/zigzag/core/unified_transclusion_engine.hpp/.cpp`](apps/zigzag/core/unified_transclusion_engine.hpp) | 2-rank manifold validator, neighborhood extractor, and GPU uploader                           |
+| **Document Projector**     | [`apps/common/xanadu/zigzag/zz_xudu_projector.hpp/.cpp`](apps/common/xanadu/zigzag/zz_xudu_projector.hpp)   | Xanadoc $\longleftrightarrow$ Zigzag mapping, clone deduplication, and rasterization          |
+| **Zigzag Core Data Model** | [`apps/common/xanadu/zigzag/zzcore.hpp/.cpp`](apps/common/xanadu/zigzag/zzcore.hpp)                         | Dimensional navigation, clone master resolution, and rank iterators                           |
+| **YAML Slice Loader**      | [`apps/common/xanadu/zigzag/zzstructure_loader.cpp`](apps/common/xanadu/zigzag/zzstructure_loader.cpp)      | RapidYAML parser for `.zz` multidimensional slice files                                       |
+| **Visualizer & A11y**      | [`apps/zigzag/core/zigzag_visualizer.cpp`](apps/zigzag/core/zigzag_visualizer.cpp)                          | 3D navigation, mouse picking, and AccessKit accessibility tree                                |
+| **Unit Tests**             | [`tests/zigzag/test_unified_transclusion_engine.cpp`](tests/zigzag/test_unified_transclusion_engine.cpp)    | Manifold validation and clone syncing tests                                                   |
