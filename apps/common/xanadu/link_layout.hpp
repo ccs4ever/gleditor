@@ -177,6 +177,21 @@ linkColourWithInstanceShift(std::uint64_t linkId, LinkType type,
  */
 [[nodiscard]] float linkPhaseOffset(std::uint64_t linkId);
 
+/**
+ * @brief Deterministic bipolar nudge in [-1, 1] for breaking depth ties
+ *        between beams that happen to cross in screen space.
+ *
+ * Two beams routed between the same pair of documents share almost the same
+ * Z, which a depth test resolves as a near-tie that antialiasing noise can
+ * flip either way, differing between runs and between renderer backends. A
+ * per-beam nudge derived from @p seed (typically a link id, or a tag id for
+ * beams with no link of their own) spreads crossing beams a little apart in
+ * Z without needing to know how many of them cross, or where: the same seed
+ * always nudges the same way, so a beam's depth is stable frame to frame and
+ * backend to backend, while different seeds are unlikely to collide.
+ */
+[[nodiscard]] float linkZJitter(std::uint64_t seed);
+
 } // namespace xanadu
 
 #endif // XUDU_LINK_LAYOUT_H

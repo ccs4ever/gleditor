@@ -178,6 +178,9 @@ inline constexpr std::string_view kBeamsLoomBundlingEnabled =
     "beams.loomBundlingEnabled";
 inline constexpr std::string_view kBeamsLoomAlpha      = "beams.loomAlpha";
 inline constexpr std::string_view kBeamsLoomHoverAlpha = "beams.loomHoverAlpha";
+inline constexpr std::string_view kBeamsZFightJitterAmplitude =
+    "beams.zFightJitterAmplitude";
+inline constexpr std::string_view kBeamsActiveZBoost = "beams.activeZBoost";
 inline constexpr std::string_view kZigzagCellHorizontalPaddingPx =
     "zigzag.cellHorizontalPaddingPx";
 inline constexpr std::string_view kZigzagCellVerticalPaddingPx =
@@ -771,6 +774,12 @@ struct BeamConfig {
   bool loomBundlingEnabled{true};
   float loomAlpha{0.35F};
   float loomHoverAlpha{1.0F};
+  /// Deterministic per-beam Z nudge amplitude, so beams that cross in screen
+  /// space rarely land at exactly the same depth. See xanadu::linkZJitter().
+  float zFightJitterAmplitude{0.6F};
+  /// Z boost for the active/selected link's beam, kept well clear of
+  /// zFightJitterAmplitude so the selected beam always renders in front.
+  float activeZBoost{4.0F};
 };
 
 /// Presentation policy for Zigzag's content and topology projections.

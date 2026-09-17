@@ -6,6 +6,7 @@
 #include <gmock/gmock.h>
 #include <gtest/gtest.h>
 
+#include <set>
 #include <string>
 #include <vector>
 
@@ -649,6 +650,26 @@ TEST(LinkLayoutTest, linkColourAppliesTierAlpha) {
   EXPECT_EQ(authorColor & 0xFFU, 0xE0U);
   EXPECT_EQ(curatedColor & 0xFFU, 0xB0U);
   EXPECT_EQ(publicColor & 0xFFU, 0x60U);
+}
+
+TEST(LinkLayoutTest, linkZJitterIsDeterministicBoundedAndVaries) {
+  // Same seed, same nudge every time -- a beam's depth must not drift frame
+  // to frame or the jitter it is meant to apply would itself look like
+  // flicker.
+  EXPECT_FLOAT_EQ(xanadu::linkZJitter(42), xanadu::linkZJitter(42));
+
+  const auto value = xanadu::linkZJitter(42);
+  EXPECT_GE(value, -1.0F);
+  EXPECT_LE(value, 1.0F);
+
+  // Different seeds land at different offsets, so beams crossing between the
+  // same pair of documents actually get spread apart rather than staying
+  // exactly tied.
+  std::set<float> values;
+  for (std::uint64_t seed = 0; seed < 20; seed++) {
+    values.insert(xanadu::linkZJitter(seed));
+  }
+  EXPECT_GT(values.size(), 15U);
 }
 
 } // namespace

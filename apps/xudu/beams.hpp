@@ -415,10 +415,16 @@ private:
    * stay clear of each other there, and converging on the shorter one. Equal
    * ends give parallel strands; unequal ones give a spread that gathers into
    * the end attached to less text.
+   *
+   * @param zNudge Added to every point's Z, so a whole band can be nudged
+   *        toward or away from the camera without disturbing the routing
+   *        decisions (useMorphic, the bypass depth) that are made from the
+   *        unmodified edges. See xanadu::linkZJitter() and
+   *        BeamConfig::activeZBoost for why a caller would want this.
    */
   void band(const Edge &nearSide, const Edge &farSide,
             std::size_t documentsApart, std::uint32_t colour, std::uint32_t tag,
-            float phase = 0.0F);
+            float phase = 0.0F, float zNudge = 0.0F);
 
   /**
    * @brief Mark one end of a link down its document's margin.

@@ -458,7 +458,7 @@ std::uint32_t LinkBeams::fade(const std::uint32_t colour, const float factor) {
 void LinkBeams::band(const Edge &nearSide, const Edge &farSide,
                      const std::size_t documentsApart,
                      const std::uint32_t colour, const std::uint32_t tag,
-                     const float phase) {
+                     const float phase, const float zNudge) {
   const float baseWidth = std::max(nearSide.lineHeight, farSide.lineHeight) *
                           Doc::pixelsToWorld * beamWidthOfLine;
   const float nearSpan  = std::abs(nearSide.top.y - nearSide.bottom.y);
@@ -504,8 +504,9 @@ void LinkBeams::band(const Edge &nearSide, const Edge &farSide,
     const float where =
         count > 1 ? static_cast<float>(k) / static_cast<float>(count - 1)
                   : 0.5F;
-    const auto p1 = glm::mix(nearTop, nearBottom, where);
-    const auto p2 = glm::mix(farTop, farBottom, where);
+    const glm::vec3 zOffset(0.0F, 0.0F, zNudge);
+    const auto p1 = glm::mix(nearTop, nearBottom, where) + zOffset;
+    const auto p2 = glm::mix(farTop, farBottom, where) + zOffset;
     // The two that bound the band keep the link's own colour; the ones filling
     // it are dimmer, so the band reads as one relation with a reach rather
     // than as a fistful of separate ones.
@@ -1534,8 +1535,16 @@ void LinkBeams::drawFrame(gleditor::FrameContext &ctx) {
       const bool isAct = (activeLink && *activeLink == strand.link);
       const float linkPhase =
           std::fmod(pulsePhase + linkPhaseOffset(strand.link), 1.0F);
+      // The active/selected link's beam always wins any depth tie against a
+      // crossing one rather than joining the jitter that resolves everyone
+      // else's, and its opacity is boosted the same way the margin anchor
+      // below already boosts isActive's.
+      const float zNudge =
+          isAct ? beamConfig_.activeZBoost
+                : linkZJitter(strand.link) * beamConfig_.zFightJitterAmplitude;
+      const auto beamColour = isAct ? (colour | 0xFFU) : colour;
 
-      band(*nearEdge, *farEdge, docSpan, colour, tagId, linkPhase);
+      band(*nearEdge, *farEdge, docSpan, beamColour, tagId, linkPhase, zNudge);
       recordFirstBeamCrossing(ctx, *nearEdge, *farEdge);
 
       if (strand.from.isDocument()) {
@@ -1754,12 +1763,17 @@ void LinkBeams::drawFrame(gleditor::FrameContext &ctx) {
 
       if (!inLoom) {
         const auto colour = fade(baseBeamColour, docAlpha);
-        band(*nearEdge, *farEdge, docSpan, colour, tagId, phase);
+        const float zNudge =
+            linkZJitter(tagId) * beamConfig_.zFightJitterAmplitude;
+        band(*nearEdge, *farEdge, docSpan, colour, tagId, phase, zNudge);
         recordFirstBeamCrossing(ctx, *nearEdge, *farEdge);
       } else if (isHovered) {
         const auto colour =
             fade(baseBeamColour, docAlpha * beamConfig_.loomHoverAlpha);
-        band(*nearEdge, *farEdge, docSpan, colour, tagId, phase);
+        // Hovered is this loom's stand-in for "selected": most prominent in
+        // both Z and opacity, same as an active link's beam above.
+        band(*nearEdge, *farEdge, docSpan, colour, tagId, phase,
+             beamConfig_.activeZBoost);
         recordFirstBeamCrossing(ctx, *nearEdge, *farEdge);
       }
 
@@ -1820,8 +1834,10 @@ void LinkBeams::drawFrame(gleditor::FrameContext &ctx) {
         const auto loomColour =
             fade(ls.baseColour, ls.alphaFactor * beamConfig_.loomAlpha);
         const auto loomTag = static_cast<std::uint32_t>(kTagLoomBase + lIdx);
-        band(ls.nearEdge, ls.farEdge, ls.docSpan, loomColour, loomTag,
-             ls.phase);
+        const float zNudge =
+            linkZJitter(loomTag) * beamConfig_.zFightJitterAmplitude;
+        band(ls.nearEdge, ls.farEdge, ls.docSpan, loomColour, loomTag, ls.phase,
+             zNudge);
         recordFirstBeamCrossing(ctx, ls.nearEdge, ls.farEdge);
       }
     }

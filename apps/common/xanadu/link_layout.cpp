@@ -607,4 +607,12 @@ float linkPhaseOffset(const std::uint64_t linkId) {
          10000.0F;
 }
 
+float linkZJitter(const std::uint64_t seed) {
+  // A third multiplicative constant, distinct from the hue-shift and
+  // phase-offset hashes above, so the three derived values don't correlate.
+  const float hashFrac =
+      static_cast<float>((seed * 0xBF58476D1CE4E5B9ULL) % 10000ULL) / 10000.0F;
+  return (hashFrac * 2.0F) - 1.0F;
+}
+
 } // namespace xanadu

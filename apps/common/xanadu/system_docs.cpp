@@ -75,7 +75,9 @@ std::string defaultSystemDocContent(const SystemDocKind kind) {
            "  bypassSegments: \"9\"\n"
            "  loomBundlingEnabled: \"true\"\n"
            "  loomAlpha: \"0.35\"\n"
-           "  loomHoverAlpha: \"1.0\"\n";
+           "  loomHoverAlpha: \"1.0\"\n"
+           "  zFightJitterAmplitude: \"0.6\"\n"
+           "  activeZBoost: \"4.0\"\n";
   case SystemDocKind::UI:
     return "notificationPosition: \"top-right\"\n"
            "notificationDurationMs: \"3000\"\n"
@@ -270,6 +272,14 @@ std::string defaultSystemDocSchema(const SystemDocKind kind) {
            "  loomHoverAlpha: Active or hovered alpha for brightened "
            "transclusion "
            "strands. Default is 1.0.\n"
+           "  zFightJitterAmplitude: Deterministic small Z nudge (+/-), "
+           "derived from each beam's own link or tag id, so beams that "
+           "cross in screen space rarely land at exactly the same depth. "
+           "Default is 0.6.\n"
+           "  activeZBoost: Z boost added to the active or selected link's "
+           "beam, kept well clear of zFightJitterAmplitude so the selected "
+           "beam always renders in front of a crossing one. Default is "
+           "4.0.\n"
            "zigzag: System-slice presentation policy for cell card padding, "
            "content width limits, rank clearance, HUD spacing, and "
            "connection beam width. All lengths are logical pixels.\n";
@@ -2423,6 +2433,12 @@ LayoutConfig LayoutConfig::fromStore(const Store &store) {
   cfg.beams.loomHoverAlpha = static_cast<float>(
       model.getDouble(settings::kBeamsLoomHoverAlpha,
                       static_cast<double>(cfg.beams.loomHoverAlpha)));
+  cfg.beams.zFightJitterAmplitude = static_cast<float>(
+      model.getDouble(settings::kBeamsZFightJitterAmplitude,
+                      static_cast<double>(cfg.beams.zFightJitterAmplitude)));
+  cfg.beams.activeZBoost = static_cast<float>(
+      model.getDouble(settings::kBeamsActiveZBoost,
+                      static_cast<double>(cfg.beams.activeZBoost)));
 
   cfg.zigzag.cellHorizontalPaddingPx = static_cast<float>(
       model.getDouble(settings::kZigzagCellHorizontalPaddingPx,
