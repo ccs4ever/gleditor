@@ -483,6 +483,25 @@ private:
   xanadu::BeamConfig beamConfig_{};
   std::vector<TransclusionLoom> looms_;
   std::optional<std::size_t> hoveredTransclusion_;
+
+  /// Whether the first-beam-crossing-the-viewport timing line has already
+  /// been printed -- see recordFirstBeamCrossing() and
+  /// design/priority-page-building.md's Stage 4. Once per process, the same
+  /// way RenderState::loopStart's own "[TIMING] First page rendered" is.
+  bool firstBeamCrossingRecorded_{false};
+  /**
+   * @brief Report how long it took a beam's ribbon to first cross the
+   *        viewport, the first time one does.
+   *
+   * The measurement Stage 4 exists to close the loop on: with Stages 0-3 in,
+   * the pages a beam's own ribbon spans are the ones the loader prioritises,
+   * so this is the number that should have gotten smaller. Printed once,
+   * matching RenderState's own "[TIMING]" lines in style and reference
+   * point (RenderState::loopStart) so a --profile run's output stays
+   * directly comparable to them.
+   */
+  void recordFirstBeamCrossing(const gleditor::FrameContext &ctx,
+                               const Edge &nearEdge, const Edge &farEdge);
 };
 
 } // namespace xudu

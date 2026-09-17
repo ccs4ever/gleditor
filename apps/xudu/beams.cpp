@@ -5,8 +5,10 @@
 #include "beams.hpp"
 
 #include <algorithm>
+#include <chrono>
 #include <cmath>
 #include <cstdint>
+#include <format>
 #include <iostream>
 #include <map>
 #include <utility>
@@ -537,6 +539,32 @@ bool LinkBeams::ribbonMaybeOnScreen(const glm::mat4 &viewProjection,
   model[3] = glm::vec4(mid.x, mid.y, mid.z - halfExtent.z, 1.0F);
   return !outsideFrustum(viewProjection * model, halfExtent.x, halfExtent.y,
                          halfExtent.z * 2.0F);
+}
+
+void LinkBeams::recordFirstBeamCrossing(const gleditor::FrameContext &ctx,
+                                        const Edge &nearEdge,
+                                        const Edge &farEdge) {
+  if (firstBeamCrossingRecorded_) {
+    return;
+  }
+  // The ribbon's own centreline -- midway between each edge's top and
+  // bottom -- rather than a corner, since that is what a reader actually
+  // sees sweep across the screen. No inflation: unlike updatePriorityOffsets()'s
+  // use of this same test, both edges are exact here (this strand already
+  // resolved and is about to be drawn), so there is no approximation to
+  // absorb.
+  const glm::vec3 nearMid = (nearEdge.top + nearEdge.bottom) * 0.5F;
+  const glm::vec3 farMid  = (farEdge.top + farEdge.bottom) * 0.5F;
+  if (!ribbonMaybeOnScreen(ctx.viewProjection, nearMid, farMid, 0.0F)) {
+    return;
+  }
+  firstBeamCrossingRecorded_ = true;
+  const auto elapsed =
+      std::chrono::duration<double, std::milli>(
+          std::chrono::steady_clock::now() - ctx.state.loopStart)
+          .count();
+  std::cout << std::format(
+      "[TIMING] First beam crossing viewport drawn: {:.2f} ms\n", elapsed);
 }
 
 void LinkBeams::updatePriorityOffsets(RenderState &state,
@@ -1439,6 +1467,7 @@ void LinkBeams::drawFrame(gleditor::FrameContext &ctx) {
           std::fmod(pulsePhase + linkPhaseOffset(strand.link), 1.0F);
 
       band(*nearEdge, *farEdge, docSpan, colour, tagId, linkPhase);
+      recordFirstBeamCrossing(ctx, *nearEdge, *farEdge);
 
       if (strand.from.isDocument()) {
         const std::uint32_t marginCol =
@@ -1610,6 +1639,7 @@ void LinkBeams::drawFrame(gleditor::FrameContext &ctx) {
 
       // Transclusion beams are solid, continuous volumetric identity bands
       band(*nearEdge, *farEdge, docSpan, colour, tagId, phase);
+      recordFirstBeamCrossing(ctx, *nearEdge, *farEdge);
 
       if (tStrand.from.isDocument()) {
         allAnchors.push_back(MarginAnchor{

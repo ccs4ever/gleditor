@@ -969,7 +969,7 @@ void Renderer::renderLoop(AutoSDLWindow &window) {
     toasts->post(severity, message, state);
   }
 
-  const auto loopStart   = std::chrono::steady_clock::now();
+  state.loopStart         = std::chrono::steady_clock::now();
   double timeToFirstPage = 0.0;
   bool firstPageRecorded = false;
 
@@ -1013,7 +1013,7 @@ void Renderer::renderLoop(AutoSDLWindow &window) {
 
     if (!firstPageRecorded && !state.pageBatches.empty()) {
       timeToFirstPage   = std::chrono::duration<double, std::milli>(
-                              std::chrono::steady_clock::now() - loopStart)
+                              std::chrono::steady_clock::now() - state.loopStart)
                               .count();
       firstPageRecorded = true;
       std::cout << std::format(
@@ -1054,7 +1054,7 @@ void Renderer::renderLoop(AutoSDLWindow &window) {
       }
       const auto completeRender =
           std::chrono::duration<double, std::milli>(
-              std::chrono::steady_clock::now() - loopStart)
+              std::chrono::steady_clock::now() - state.loopStart)
               .count();
       std::size_t totalPages = 0;
       for (const auto &doc : state.docs) {

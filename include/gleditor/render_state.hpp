@@ -9,6 +9,7 @@
 #ifndef GLEDITOR_RENDER_STATE_H
 #define GLEDITOR_RENDER_STATE_H
 
+#include <chrono>
 #include <memory>
 #include <unordered_map>
 #include <vector>
@@ -70,6 +71,23 @@ struct RenderState {
    * between frames so that collecting it costs no allocation.
    */
   std::vector<render::GlyphBatch> pageBatches;
+
+  /**
+   * @brief When this render loop began.
+   *
+   * Renderer::renderLoop() sets this at the same point it used to define a
+   * local of the same name, right before the first frame -- the reference
+   * point its own "[TIMING] First page rendered" / "[TIMING] Complete
+   * render settled" lines measure from. Exposed here so a FrameContributor
+   * (LinkBeams, reporting how long a beam took to cross the viewport, is
+   * the one that exists for) can report elapsed time on the same clock
+   * without the renderer having to know what it is timing -- see
+   * design/priority-page-building.md's Stage 4. Defaulted to "now" so a
+   * RenderState built outside the normal render loop (every test that
+   * constructs one directly) still has a real value rather than the epoch.
+   */
+  std::chrono::steady_clock::time_point loopStart{
+      std::chrono::steady_clock::now()};
 };
 
 #endif // GLEDITOR_RENDER_STATE_H

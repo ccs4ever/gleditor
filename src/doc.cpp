@@ -1446,11 +1446,19 @@ std::chrono::milliseconds Doc::buildBudgetForThisCall() {
     }
   }
 
-  // Whether the target itself is already built -- not merely a lower index
-  // than pages.size(), since a page far out of order (a viewport-priority
-  // build while the camera was elsewhere, say) can grow pages well past any
-  // particular unbuilt index once Stage 3 lets building skip ahead.
-  if (!targetIndex || nullptr != page(*targetIndex)) {
+  // Whether the target is already at or behind build progress -- measured
+  // against builtPageCount() rather than pages.size() (Stage 2's container
+  // can grow pages past any particular unbuilt index once something builds
+  // out of order) and rather than "is the target itself built" (Stage 3's
+  // own selection already reaches a P0/P1 target within its own call
+  // regardless of budget size, since it is picked first either way; asking
+  // "is it built yet" would answer no for the very next page about to be
+  // built anyway -- exactly as far "ahead" as no page ever is -- and
+  // trigger catch-up on every ordinary call). builtPageCount() is the
+  // degenerate-case equivalent of the old pages.size() check when nothing
+  // has built out of order, and a meaningful "how much real progress has
+  // been made so far" once something has.
+  if (!targetIndex || *targetIndex <= builtPageCount()) {
     return render::kPageBuildFrameBudget;
   }
   return render::kPageBuildFrameBudget * render::kPageBuildCatchUpMultiplier;
