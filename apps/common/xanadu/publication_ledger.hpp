@@ -123,10 +123,10 @@ public:
   [[nodiscard]] std::vector<const PublicationEntry *>
   findByAuthor(std::string_view authorFingerprint) const;
 
-  /// Serialize to canonical YAML format.
+  /// Serialize to canonical deterministic TSV (legacy method name retained).
   [[nodiscard]] std::string toYaml() const;
 
-  /// Parse from YAML text.
+  /// Parse deterministic TSV, with a legacy YAML fallback.
   [[nodiscard]] static PublicationLedger fromYaml(std::string_view yaml);
 
   /// Save to file.

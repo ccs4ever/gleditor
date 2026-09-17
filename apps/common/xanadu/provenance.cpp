@@ -352,40 +352,41 @@ private:
 } // namespace
 
 std::string Provenance::toYaml() const {
-  // A comment first, because the audience for this file is a person deciding
-  // whether to believe it, and they may never have seen one before.
-  std::string out =
-      "# Authorship of a xanadoc, signed with OpenPGP before the content was\n"
-      "# sealed into a torrent, and sealed into it alongside the content. The\n"
-      "# signature is in " +
-      std::string{provenanceSigName} +
-      "; check it with:\n"
-      "#   gpg --verify " +
-      std::string{provenanceSigName} + " " + std::string{provenanceFileName} +
-      "\n";
-
-  yaml::write(out, "author", author.name);
-  yaml::write(out, "email", author.email);
-  yaml::write(out, "gpg_key", author.gpgKey);
-  yaml::write(out, "title", title);
-  yaml::write(out, "salt", salt);
-  yaml::write(out, "publisher", publisher);
-  yaml::write(out, "version", version);
-  if (0 != published) {
-    out += std::format("published: {}\n", published);
+  auto esc = [](std::string_view value) {
+    std::string out;
+    for (char c : value) {
+      if (c == '\\' || c == '\t' || c == '\n' || c == '\r') out.push_back('\\');
+      if (c == '\t')
+        out.push_back('t');
+      else if (c == '\n')
+        out.push_back('n');
+      else if (c == '\r')
+        out.push_back('r');
+      else
+        out.push_back(c);
+    }
+    return out;
+  };
+  std::string out;
+  auto put = [&](std::string_view key, std::string_view value) {
+    out += std::string(key) + "\t" + esc(value) + "\n";
+  };
+  put("author", author.name);
+  put("email", author.email);
+  put("gpg_key", author.gpgKey);
+  put("title", title);
+  put("salt", salt);
+  put("publisher", publisher);
+  put("version", version);
+  if (published) put("published", std::to_string(published));
+  put("content_length", std::to_string(contentLength));
+  put("content_sha256", contentDigest);
+  if (opsLength || !opsDigest.empty()) {
+    put("ops_length", std::to_string(opsLength));
+    put("ops_sha256", opsDigest);
   }
-  out += std::format("content_length: {}\n", contentLength);
-  yaml::write(out, "content_sha256", contentDigest);
-  // Written only when there is a history to vouch for, so a record about
-  // content alone still reads exactly as it did before these existed.
-  if (0 != opsLength || !opsDigest.empty()) {
-    out += std::format("ops_length: {}\n", opsLength);
-    yaml::write(out, "ops_sha256", opsDigest);
-  }
-  for (const auto &[key, value] : extra) {
-    yaml::write(out, key, value);
-  }
-  yaml::writeList(out, "quotes", quotes);
+  for (const auto &[key, value] : extra) put(key, value);
+  for (const auto &quote : quotes) put("quotes", quote);
   return out;
 }
 
@@ -552,8 +553,8 @@ SignedProvenance signProvenance(const Provenance &record,
   SignedProvenance out;
   out.yaml = record.toYaml();
 
-  const Scratch document(".yaml", out.yaml);
-  const Scratch signature(".yaml.asc", "");
+  const Scratch document(".tsv", out.yaml);
+  const Scratch signature(".tsv.asc", "");
 
   std::vector<std::string> argv{"gpg", "--batch", "--yes", "--armor"};
   addHome(argv, where.gpgHome);
@@ -601,8 +602,8 @@ ProvenanceCheck verifyProvenance(const SignedProvenance &signed_,
     return check;
   }
 
-  const Scratch document(".yaml", signed_.yaml);
-  const Scratch signature(".yaml.asc", signed_.signature);
+  const Scratch document(".tsv", signed_.yaml);
+  const Scratch signature(".tsv.asc", signed_.signature);
 
   // --status-fd is the machine-readable channel; the human text on stderr says
   // different things in different locales and versions, and is kept only to be
@@ -658,6 +659,69 @@ ProvenanceCheck verifyProvenance(const SignedProvenance &signed_,
 }
 
 std::optional<Provenance> parseProvenance(const std::string_view text) {
+  // Published records are deterministic TSV. Decode escapes before mapping
+  // fields; retaining the legacy YAML fallback keeps old stores readable.
+  if (text.find('\t') != std::string_view::npos) {
+    Provenance out;
+    bool sawAuthor = false;
+    auto unescape  = [](std::string value) {
+      std::string out;
+      out.reserve(value.size());
+      bool slash = false;
+      for (char c : value) {
+        if (slash) {
+          out.push_back(c == 't'   ? '\t'
+                        : c == 'n' ? '\n'
+                        : c == 'r' ? '\r'
+                                   : c);
+          slash = false;
+        } else if (c == '\\')
+          slash = true;
+        else
+          out.push_back(c);
+      }
+      if (slash) out.push_back('\\');
+      return out;
+    };
+    std::istringstream lines{std::string(text)};
+    std::string line;
+    while (std::getline(lines, line)) {
+      const auto tab = line.find('\t');
+      if (tab == std::string::npos) continue;
+      const auto key   = line.substr(0, tab);
+      const auto value = unescape(line.substr(tab + 1));
+      if (key == "author") {
+        out.author.name = value;
+        sawAuthor       = true;
+      } else if (key == "email")
+        out.author.email = value;
+      else if (key == "gpg_key")
+        out.author.gpgKey = value;
+      else if (key == "title")
+        out.title = value;
+      else if (key == "salt")
+        out.salt = value;
+      else if (key == "publisher")
+        out.publisher = value;
+      else if (key == "version")
+        out.version = value;
+      else if (key == "published")
+        out.published = std::strtoull(value.c_str(), nullptr, 10);
+      else if (key == "content_length")
+        out.contentLength = std::strtoull(value.c_str(), nullptr, 10);
+      else if (key == "content_sha256")
+        out.contentDigest = value;
+      else if (key == "ops_length")
+        out.opsLength = std::strtoull(value.c_str(), nullptr, 10);
+      else if (key == "ops_sha256")
+        out.opsDigest = value;
+      else if (key == "quotes")
+        out.quotes.push_back(value);
+      else
+        out.extra.emplace_back(key, value);
+    }
+    if (sawAuthor) return out;
+  }
   const auto entries = yaml::read(text);
   if (!entries) {
     return std::nullopt;

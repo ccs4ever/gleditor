@@ -120,17 +120,15 @@ private:
 
 } // namespace
 
-// The record is meant to be read by a person deciding whether to believe it,
-// so it says what it is and how to check it before it says anything else.
+// The record is deterministic TSV so it can be signed and compared bytewise.
 TEST(ProvenanceTest, theRecordExplainsItselfAndNamesTheAuthor) {
   const auto yaml = sample().toYaml();
-  EXPECT_TRUE(yaml.contains("gpg --verify"));
-  EXPECT_TRUE(yaml.contains("author: \"Ada Lovelace\""));
-  EXPECT_TRUE(yaml.contains("email: \"ada@example.org\""));
+  EXPECT_TRUE(yaml.contains("author\tAda Lovelace\n"));
+  EXPECT_TRUE(yaml.contains("email\tada@example.org\n"));
   // And what it covers, so a reader with the bytes can tell whether the record
   // is about what arrived with it.
-  EXPECT_TRUE(yaml.contains("content_length: 4096"));
-  EXPECT_TRUE(yaml.contains("content_sha256:"));
+  EXPECT_TRUE(yaml.contains("content_length\t4096\n"));
+  EXPECT_TRUE(yaml.contains("content_sha256\t"));
 }
 
 TEST(ProvenanceTest, everyFieldComesBackOutAgain) {
@@ -282,7 +280,7 @@ TEST(ProvenanceTest, theSealCarriesTheContentAndTheRecordUnderOneHash) {
   other.author.name   = "Someone Else";
   other.author.email  = "else@example.org";
   const auto elsewise = xanadu::sealLocalSpool(store, mine, "primedia", "",
-                                             xanadu::signProvenance(other));
+                                               xanadu::signProvenance(other));
   EXPECT_NE(elsewise.hash, sealed.hash);
 }
 
@@ -301,7 +299,8 @@ TEST(ProvenanceTest, republishingSealsOnlyWhatIsNewSinceTheLastSeal) {
 
   const auto signed1 = xanadu::signProvenance(signable());
   const auto mine    = xanadu::createMutableKeys();
-  const auto first = xanadu::sealLocalSpool(store, mine, "primedia", "", signed1);
+  const auto first =
+      xanadu::sealLocalSpool(store, mine, "primedia", "", signed1);
 
   const auto firstPrimediaLength = store.primedia().bytes().size();
   const auto firstOpCount        = store.opCount();
@@ -318,7 +317,7 @@ TEST(ProvenanceTest, republishingSealsOnlyWhatIsNewSinceTheLastSeal) {
   const auto signed2 = xanadu::signProvenance(signable());
   const auto second =
       xanadu::sealLocalSpool(store, mine, "primedia", "", signed2, first.scroll,
-                           static_cast<std::uint32_t>(firstOpCount));
+                             static_cast<std::uint32_t>(firstOpCount));
 
   // The first segment is carried forward untouched -- its bytes are not read
   // or rehashed again -- and exactly one new segment is added for what was
@@ -358,12 +357,13 @@ TEST(ProvenanceTest, resealingWithNothingNewAddsNoNewSegments) {
 
   const auto signed1 = xanadu::signProvenance(signable());
   const auto mine    = xanadu::createMutableKeys();
-  const auto first = xanadu::sealLocalSpool(store, mine, "primedia", "", signed1);
+  const auto first =
+      xanadu::sealLocalSpool(store, mine, "primedia", "", signed1);
 
   const auto signed2 = xanadu::signProvenance(signable());
   const auto second =
       xanadu::sealLocalSpool(store, mine, "primedia", "", signed2, first.scroll,
-                           static_cast<std::uint32_t>(store.opCount()));
+                             static_cast<std::uint32_t>(store.opCount()));
 
   EXPECT_EQ(second.scroll.segments, first.scroll.segments);
   EXPECT_FALSE(second.opsSegment.has_value());
@@ -527,7 +527,7 @@ TEST(ProvenanceTest, anOpRefIsRefusedByADocumentItDoesNotName) {
   // A name this history does not hold, under the right scroll, is equally not
   // an answer.
   const xanadu::GlobalOpRef unheardOf{said.scroll,
-                                    xanadu::MicroversionId::parse("9")};
+                                      xanadu::MicroversionId::parse("9")};
   EXPECT_FALSE(xanadu::localiseOpRef(mine, unheardOf, became).has_value());
 
   // State zero is not produced by an operation, so no index names it.
@@ -630,14 +630,14 @@ TEST(ProvenanceTest, sealingWithoutASignedRecordIsRefused) {
   static_cast<void>(store.insert(MicroversionId{}, 0, "Written here first."));
   const auto mine = xanadu::createMutableKeys();
 
-  EXPECT_THROW(
-      static_cast<void>(xanadu::sealLocalSpool(store, mine, "primedia", "", {})),
-      std::runtime_error);
+  EXPECT_THROW(static_cast<void>(
+                   xanadu::sealLocalSpool(store, mine, "primedia", "", {})),
+               std::runtime_error);
   // Half of one is no better: a record with no signature over it is a claim
   // anybody could have written.
   SignedProvenance halfway;
   halfway.yaml = sample().toYaml();
-  EXPECT_THROW(static_cast<void>(
-                   xanadu::sealLocalSpool(store, mine, "primedia", "", halfway)),
+  EXPECT_THROW(static_cast<void>(xanadu::sealLocalSpool(store, mine, "primedia",
+                                                        "", halfway)),
                std::runtime_error);
 }

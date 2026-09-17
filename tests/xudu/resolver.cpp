@@ -672,8 +672,9 @@ TEST_F(SealedScrollTest, resealingDoesNotDisturbAnAddressAlreadyHandedOut) {
   ASSERT_NE(resealed.hex(), std::string{xudu_test::singleFileHash})
       << "the two packagings have to be genuinely different torrents";
 
-  store.addSegment(id, xanadu::ScrollSegment{0, xudu_test::singleFileText.size(),
-                                           resealed, 0, 0, "resealed.txt"});
+  store.addSegment(id,
+                   xanadu::ScrollSegment{0, xudu_test::singleFileText.size(),
+                                         resealed, 0, 0, "resealed.txt"});
 
   // The carrier moved...
   ASSERT_EQ(store.scroll(id)->segments.size(), 1U);
@@ -739,14 +740,14 @@ TEST_F(TorrentDataTest, aTorrentNamedAfterItsOwnFirstFileStillResolves) {
   const std::string record  = "author: \"somebody\"\n";
   const std::array<xanadu::TorrentContent, 2> files{
       xanadu::TorrentContent{"spool", content},
-      xanadu::TorrentContent{"AUTHORSHIP.yaml", record},
+      xanadu::TorrentContent{"AUTHORSHIP.tsv", record},
   };
   const auto made = xanadu::makeTorrent(files, "spool");
 
   const auto laid = dir / "sealed";
   std::filesystem::create_directories(laid / "spool");
   write(laid / "spool" / "spool", content);
-  write(laid / "spool" / "AUTHORSHIP.yaml", record);
+  write(laid / "spool" / "AUTHORSHIP.tsv", record);
 
   DirectoryContentSource sealed;
   // The directory above, where "spool" is a directory rather than the file.
