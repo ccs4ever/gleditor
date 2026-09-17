@@ -266,6 +266,32 @@ private:
   void rebuildStrands(RenderState &state);
   /// Ask the pages where the anchors are, for strands that do not know yet.
   void resolveAnchors(RenderState &state);
+  /**
+   * @brief Ask every document to build the pages behind a beam whose ribbon
+   *        might cross the viewport, ahead of the rest.
+   *
+   * See design/priority-page-building.md's Stage 1. A no-op for a strand
+   * whose endpoints are both already resolved -- only an endpoint still
+   * waiting on its page names anything worth pushing.
+   */
+  void updatePriorityOffsets(RenderState &state,
+                             const glm::mat4 &viewProjection) const;
+  /**
+   * @brief Whether a ribbon between two approximate world points could cross
+   *        the viewport.
+   *
+   * @param inflateWorld How far the box is grown in every direction beyond
+   *        the segment itself, to absorb the error an approximate anchor (one
+   *        that names a page rather than a point on it) can carry.
+   *
+   * Conservative like outsideFrustum() itself, which this is built on: only
+   * says no when every corner of the inflated box falls outside the same clip
+   * plane.
+   */
+  [[nodiscard]] static bool ribbonMaybeOnScreen(const glm::mat4 &viewProjection,
+                                                const glm::vec3 &a,
+                                                const glm::vec3 &b,
+                                                float inflateWorld);
   /// Bring the far document of @p strand alongside the near one, lined up so
   /// that both ends of the link are level with each other.
   void align(const Strand &strand, RenderState &state, ch::Timeline &timeline);

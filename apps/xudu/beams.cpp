@@ -17,6 +17,7 @@
 
 #include <gleditor/animation.hpp>
 #include <gleditor/caret.hpp>
+#include <gleditor/draw_budget.hpp>
 #include <gleditor/paths.hpp>
 #include <gleditor/render/constants.hpp>
 #include <gleditor/render_state.hpp>
@@ -519,6 +520,106 @@ void LinkBeams::drawMarginAnchorLane(const Edge &edge,
 bool LinkBeams::onScreen(const glm::mat4 &viewProjection,
                          const glm::vec3 &point) {
   return gleditor::spatial::onScreen(viewProjection, point);
+}
+
+bool LinkBeams::ribbonMaybeOnScreen(const glm::mat4 &viewProjection,
+                                    const glm::vec3 &a, const glm::vec3 &b,
+                                    const float inflateWorld) {
+  const glm::vec3 mid((a.x + b.x) * 0.5F, (a.y + b.y) * 0.5F,
+                      (a.z + b.z) * 0.5F);
+  const glm::vec3 halfExtent(std::abs(a.x - b.x) * 0.5F + inflateWorld,
+                             std::abs(a.y - b.y) * 0.5F + inflateWorld,
+                             std::abs(a.z - b.z) * 0.5F + inflateWorld);
+  // outsideFrustum() wants its box's z corners at {0, depth} rather than
+  // symmetric about the centre, so the model translation is shifted back by
+  // halfExtent.z to make the box actually centred on mid.
+  glm::mat4 model(1.0F);
+  model[3] = glm::vec4(mid.x, mid.y, mid.z - halfExtent.z, 1.0F);
+  return !outsideFrustum(viewProjection * model, halfExtent.x, halfExtent.y,
+                         halfExtent.z * 2.0F);
+}
+
+void LinkBeams::updatePriorityOffsets(RenderState &state,
+                                      const glm::mat4 &viewProjection) const {
+  // "About a page height" is approximateAnchorFor()'s own contract for how
+  // far its world point can be from the page's actual, unbuilt content --
+  // see its doc comment on Doc.
+  const float inflateWorld =
+      (gleditor::letterPage.heightPx + Doc::pageGapPx) * Doc::pixelsToWorld;
+
+  std::vector<std::vector<std::uint32_t>> perDocOffsets(state.docs.size());
+
+  const auto approxWorldFor =
+      [&state](const LinkEnd &end, const std::optional<Doc::Anchor> &exact,
+               const std::optional<CellAnchor> &cellAnchor)
+      -> std::optional<glm::vec3> {
+    if (end.isCell()) {
+      return cellAnchor ? std::optional(cellAnchor->position) : std::nullopt;
+    }
+    if (end.doc >= state.docs.size() || nullptr == state.docs[end.doc]) {
+      return std::nullopt;
+    }
+    const auto &doc = *state.docs[end.doc];
+    if (exact) {
+      return doc.worldPoint(*exact);
+    }
+    const auto approx = doc.approximateAnchorFor(end.start);
+    return approx ? doc.worldPoint(*approx) : std::nullopt;
+  };
+
+  // Shared between strands and transclusion strands: both carry the same
+  // from/to/*Anchor/*CellAnchor fields, just on two different struct types.
+  const auto considerStrand = [&](const auto &strand) {
+    const bool fromNeeds = strand.from.isDocument() && !strand.fromAnchor;
+    const bool toNeeds   = strand.to.isDocument() && !strand.toAnchor;
+    if (!fromNeeds && !toNeeds) {
+      // Both ends already resolved (or neither is a document end) -- nothing
+      // this strand could ask a document to prioritise.
+      return;
+    }
+
+    const auto fromPos =
+        approxWorldFor(strand.from, strand.fromAnchor, strand.fromCellAnchor);
+    const auto toPos =
+        approxWorldFor(strand.to, strand.toAnchor, strand.toCellAnchor);
+
+    if (fromPos && toPos) {
+      if (!ribbonMaybeOnScreen(viewProjection, *fromPos, *toPos,
+                               inflateWorld)) {
+        return;
+      }
+    } else if (!((strand.to.isCell() && !toPos && fromPos) ||
+                 (strand.from.isCell() && !fromPos && toPos))) {
+      // Neither a ribbon to test nor the cell-not-placed-yet fallback below
+      // applies -- nothing resolvable to say yet (e.g. this document has not
+      // shaped anything at all).
+      return;
+    }
+    // A cell end that has not been placed reaches here with only the
+    // document end resolved: see design/priority-page-building.md's "Cell
+    // endpoints" section. There is no ribbon to test, so the strand is
+    // treated as possibly crossing and its document end is pushed anyway.
+
+    if (fromNeeds) {
+      perDocOffsets[strand.from.doc].push_back(strand.from.start);
+    }
+    if (toNeeds) {
+      perDocOffsets[strand.to.doc].push_back(strand.to.start);
+    }
+  };
+
+  for (const auto &strand : strands) {
+    considerStrand(strand);
+  }
+  for (const auto &tStrand : transclusionStrands) {
+    considerStrand(tStrand);
+  }
+
+  for (std::size_t d = 0; d < state.docs.size(); ++d) {
+    if (state.docs[d]) {
+      state.docs[d]->setPriorityOffsets(perDocOffsets[d]);
+    }
+  }
 }
 
 void LinkBeams::align(const Strand &strand, RenderState &state,
@@ -1223,6 +1324,7 @@ void LinkBeams::drawFrame(gleditor::FrameContext &ctx) {
   if (docTransformsChanged || topologyChanged || strandsRebuilt || unsettled ||
       !strands.empty() || !transclusionStrands.empty()) {
     resolveAnchors(state);
+    updatePriorityOffsets(state, ctx.viewProjection);
 
     beams->clear();
     bool moved        = false;
