@@ -333,6 +333,21 @@ void Spanfilade::placeTransclusions(
     std::vector<TransclusionPair> &pairs) const {
   pairs.clear();
 
+  // Precompute allowed cells for each manifold view if radius is constrained
+  std::vector<std::unordered_set<zigzag::CellRef>> allowedCellSets;
+  if (ctx.cellRadius >= 0 && !ctx.manifoldViews.empty()) {
+    allowedCellSets.resize(ctx.manifoldViews.size());
+    for (std::size_t mIdx = 0; mIdx < ctx.manifoldViews.size(); ++mIdx) {
+      if (ctx.manifoldViews[mIdx]) {
+        const auto focus      = (mIdx < ctx.manifoldFoci.size())
+                                    ? ctx.manifoldFoci[mIdx]
+                                    : zigzag::noCell;
+        allowedCellSets[mIdx] = ctx.manifoldViews[mIdx]->cellsWithinRadiusSet(
+            focus, ctx.cellRadius);
+      }
+    }
+  }
+
   std::map<std::pair<std::pair<std::uint8_t, std::uint32_t>,
                      std::pair<std::uint8_t, std::uint32_t>>,
            std::vector<TransclusionPair>>
@@ -342,11 +357,37 @@ void Spanfilade::placeTransclusions(
     const auto &pieces = enfilade.entries();
     for (std::size_t i = 0; i < pieces.size(); ++i) {
       const auto &pI = pieces[i];
+      if (pI.isCell() && !allowedCellSets.empty() &&
+          pI.docId < allowedCellSets.size()) {
+        const auto *m   = (pI.docId < ctx.manifoldViews.size())
+                              ? ctx.manifoldViews[pI.docId]
+                              : nullptr;
+        const auto refI = (m && pI.cellDense < m->cells().size())
+                              ? m->cells()[pI.cellDense].birthOp
+                              : static_cast<zigzag::CellRef>(pI.cellDense);
+        if (!allowedCellSets[pI.docId].contains(refI)) {
+          continue;
+        }
+      }
+
       for (std::size_t j = i + 1; j < pieces.size(); ++j) {
         const auto &pJ = pieces[j];
         if (pJ.start >= pI.end()) {
           break;
         }
+        if (pJ.isCell() && !allowedCellSets.empty() &&
+            pJ.docId < allowedCellSets.size()) {
+          const auto *m   = (pJ.docId < ctx.manifoldViews.size())
+                                ? ctx.manifoldViews[pJ.docId]
+                                : nullptr;
+          const auto refJ = (m && pJ.cellDense < m->cells().size())
+                                ? m->cells()[pJ.cellDense].birthOp
+                                : static_cast<zigzag::CellRef>(pJ.cellDense);
+          if (!allowedCellSets[pJ.docId].contains(refJ)) {
+            continue;
+          }
+        }
+
         if (pI.isCell() == pJ.isCell()) {
           if (!pI.isCell() && pI.docId == pJ.docId) {
             continue;

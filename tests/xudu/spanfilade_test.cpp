@@ -223,4 +223,121 @@ TEST(SpanfiladeTest, MultiScrollIsolation) {
   EXPECT_TRUE(hits99.empty());
 }
 
+TEST(SpanfiladeTest, CachedSpanfiladeDifferentialAndSignatureTest) {
+  Store store;
+  auto at = store.sliceGenesis(MicroversionId{});
+
+  at            = store.makeCell(at, "d.1");
+  const auto d1 = store.cellRefOf(at);
+
+  const auto vDoc = store.insert(at, 0, "0123456789abcdefghijklmnopqrstuvwxyz");
+  const auto doc0 = store.rebuild(vDoc);
+  ASSERT_FALSE(doc0.pieces().empty());
+  const auto docSpan = doc0.pieces().front();
+
+  // Document 1 transcludes part of document 0
+  const auto vDoc1 = store.transclude(vDoc, 0, vDoc, 10, 15);
+  const auto doc1  = store.rebuild(vDoc1);
+
+  // Cell 1 quotes docSpan
+  at               = store.makeCell(vDoc1, "placeholder1");
+  const auto cell1 = store.cellRefOf(at);
+  at               = store.spliceCellSpan(at, cell1, 0, 12, docSpan);
+
+  // Intermediate cell 2
+  at               = store.makeCell(at, "cell2");
+  const auto cell2 = store.cellRefOf(at);
+
+  // Distant cell 3 quotes docSpan
+  at               = store.makeCell(at, "placeholder3");
+  const auto cell3 = store.cellRefOf(at);
+  at               = store.spliceCellSpan(at, cell3, 0, 12, docSpan);
+
+  const auto homeCell = store.homeCell();
+
+  // Link along d.1: homeCell -> cell1 -> cell2 -> (chain...) -> cell3
+  at = store.setLink(at, homeCell, d1, zigzag::DimVector::POS, cell1);
+  at = store.setLink(at, cell1, d1, zigzag::DimVector::POS, cell2);
+
+  auto prev = cell2;
+  for (int i = 0; i < 3; ++i) {
+    at                      = store.makeCell(at, "chain");
+    const auto intermediate = store.cellRefOf(at);
+    at   = store.setLink(at, prev, d1, zigzag::DimVector::POS, intermediate);
+    prev = intermediate;
+  }
+  at = store.setLink(at, prev, d1, zigzag::DimVector::POS, cell3);
+
+  const auto manifold = store.rebuildManifold(at);
+
+  // 1) Context with radius 2 from cell1: cell3 is at distance 5, so it must be
+  // pruned
+  const xanadu::UniversalViewContext ctxPruned{
+      .docViews      = {&doc0, &doc1},
+      .manifoldViews = {&manifold},
+      .manifoldFoci  = {cell1},
+      .cellRadius    = 2,
+  };
+
+  std::vector<TransclusionPair> referencePruned;
+  xanadu::placeTransclusions(ctxPruned, referencePruned);
+  ASSERT_FALSE(referencePruned.empty());
+
+  // Fresh Spanfilade
+  auto freshPruned = Spanfilade::fromContext(ctxPruned);
+  std::vector<TransclusionPair> freshPrunedPairs;
+  freshPruned.placeTransclusions(ctxPruned, freshPrunedPairs);
+  EXPECT_EQ(freshPrunedPairs, referencePruned);
+
+  // Cached Spanfilade re-evaluated
+  auto cachedSpanfilade = Spanfilade::fromContext(ctxPruned);
+  std::vector<TransclusionPair> cachedPrunedPairs;
+  cachedSpanfilade.placeTransclusions(ctxPruned, cachedPrunedPairs);
+  EXPECT_EQ(cachedPrunedPairs, referencePruned);
+
+  // Verify cell3 was pruned
+  for (const auto &pair : cachedPrunedPairs) {
+    if (pair.from.isCell()) {
+      EXPECT_NE(pair.from.cell(), cell3);
+    }
+    if (pair.to.isCell()) {
+      EXPECT_NE(pair.to.cell(), cell3);
+    }
+  }
+
+  // 2) Context with radius 10: cell3 is included
+  const xanadu::UniversalViewContext ctxIncluded{
+      .docViews      = {&doc0, &doc1},
+      .manifoldViews = {&manifold},
+      .manifoldFoci  = {cell1},
+      .cellRadius    = 10,
+  };
+
+  std::vector<TransclusionPair> referenceIncluded;
+  xanadu::placeTransclusions(ctxIncluded, referenceIncluded);
+  ASSERT_GT(referenceIncluded.size(), referencePruned.size());
+
+  auto freshIncluded = Spanfilade::fromContext(ctxIncluded);
+  std::vector<TransclusionPair> freshIncludedPairs;
+  freshIncluded.placeTransclusions(ctxIncluded, freshIncludedPairs);
+  EXPECT_EQ(freshIncludedPairs, referenceIncluded);
+
+  // Cached Spanfilade with ctxIncluded
+  cachedSpanfilade = Spanfilade::fromContext(ctxIncluded);
+  std::vector<TransclusionPair> cachedIncludedPairs;
+  cachedSpanfilade.placeTransclusions(ctxIncluded, cachedIncludedPairs);
+  EXPECT_EQ(cachedIncludedPairs, referenceIncluded);
+
+  // Verify cell3 is present
+  bool foundCell3 = false;
+  for (const auto &pair : cachedIncludedPairs) {
+    if ((pair.from.isCell() && pair.from.cell() == cell3) ||
+        (pair.to.isCell() && pair.to.cell() == cell3)) {
+      foundCell3 = true;
+      break;
+    }
+  }
+  EXPECT_TRUE(foundCell3);
+}
+
 } // namespace

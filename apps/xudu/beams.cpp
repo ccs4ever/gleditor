@@ -114,6 +114,27 @@ void LinkBeams::rebuildStrands(RenderState &state) {
     versions.push_back(&views[i].pieces);
   }
 
+  SpanfiladeCacheSignature currentSig;
+  const auto activeDocCount = std::min(views.size(), state.docs.size());
+  currentSig.docVersions.reserve(activeDocCount);
+  currentSig.docPieceCounts.reserve(activeDocCount);
+  for (std::size_t i = 0; i < activeDocCount; i++) {
+    currentSig.docVersions.push_back(views[i].version);
+    currentSig.docPieceCounts.push_back(views[i].pieces.pieces().size());
+  }
+  currentSig.manifoldViews = manifoldViews_;
+  currentSig.manifoldCellCounts.reserve(manifoldViews_.size());
+  currentSig.manifoldFoldedThrough.reserve(manifoldViews_.size());
+  for (const auto *m : manifoldViews_) {
+    currentSig.manifoldCellCounts.push_back(m ? m->cellCount() : 0);
+    currentSig.manifoldFoldedThrough.push_back(m ? m->foldedThrough() : 0);
+  }
+  currentSig.manifoldFoci = manifoldFoci_;
+  currentSig.cellRadius   = cellRadius_;
+
+  const bool spanfiladeValid =
+      spanfiladeClean_ && (currentSig == spanfiladeSignature_);
+
   std::vector<LinkedPair> placed;
   std::vector<HalfLink> unplaced;
   if (!manifoldViews_.empty()) {
@@ -121,6 +142,7 @@ void LinkBeams::rebuildStrands(RenderState &state) {
     uctx.docViews      = versions;
     uctx.manifoldViews = manifoldViews_;
     uctx.manifoldFoci  = manifoldFoci_;
+    uctx.cellRadius    = cellRadius_;
     placeLinks(session.store().links(), uctx, placed, unplaced);
     strands.clear();
     strands.reserve(placed.size());
@@ -142,9 +164,14 @@ void LinkBeams::rebuildStrands(RenderState &state) {
     std::vector<TransclusionPair> tPairs;
     // Spanfilade is the canonical interval index for shared primedia. Keep
     // discovery in the same path for document/cell contexts so beam staging
-    // cannot diverge from the reference implementation.
-    const auto spanfilade = xanadu::enfilade::Spanfilade::fromContext(uctx);
-    spanfilade.placeTransclusions(uctx, tPairs);
+    // cannot diverge from the reference implementation. Reuse cached
+    // Spanfilade when topological signatures match.
+    if (!spanfiladeValid) {
+      cachedSpanfilade_    = xanadu::enfilade::Spanfilade::fromContext(uctx);
+      spanfiladeSignature_ = std::move(currentSig);
+      spanfiladeClean_     = true;
+    }
+    cachedSpanfilade_.placeTransclusions(uctx, tPairs);
     transclusionStrands.clear();
     transclusionStrands.reserve(tPairs.size());
     for (const auto &tp : tPairs) {
@@ -180,8 +207,12 @@ void LinkBeams::rebuildStrands(RenderState &state) {
     }
 
     std::vector<TransclusionPair> tPairs;
-    const auto spanfilade = xanadu::enfilade::Spanfilade::fromViews(versions);
-    spanfilade.placeTransclusions(versions, tPairs);
+    if (!spanfiladeValid) {
+      cachedSpanfilade_    = xanadu::enfilade::Spanfilade::fromViews(versions);
+      spanfiladeSignature_ = std::move(currentSig);
+      spanfiladeClean_     = true;
+    }
+    cachedSpanfilade_.placeTransclusions(versions, tPairs);
     transclusionStrands.clear();
     transclusionStrands.reserve(tPairs.size());
     for (const auto &tp : tPairs) {

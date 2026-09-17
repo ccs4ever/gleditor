@@ -39,6 +39,7 @@
 #include <gleditor/pick_observer.hpp>
 #include <gleditor/renderer.hpp>
 
+#include "common/xanadu/enfilade/spanfilade.hpp"
 #include "common/xanadu/system_docs.hpp"
 #include "xudu/core/anchor_lanes.hpp"
 #include "xudu/core/link_layout.hpp"
@@ -111,9 +112,27 @@ public:
 
   void setManifoldViews(std::vector<const zigzag::Manifold *> views,
                         std::vector<zigzag::CellRef> foci = {}) {
-    manifoldViews_ = std::move(views);
-    manifoldFoci_  = std::move(foci);
-    strandsRebuilt = true;
+    manifoldViews_   = std::move(views);
+    manifoldFoci_    = std::move(foci);
+    strandsRebuilt   = true;
+    spanfiladeClean_ = false;
+  }
+
+  void setCellRadius(const int radius) noexcept {
+    if (cellRadius_ != radius) {
+      cellRadius_      = radius;
+      strandsRebuilt   = true;
+      spanfiladeClean_ = false;
+    }
+  }
+  [[nodiscard]] int cellRadius() const noexcept { return cellRadius_; }
+
+  [[nodiscard]] const xanadu::enfilade::Spanfilade &
+  cachedSpanfilade() const noexcept {
+    return cachedSpanfilade_;
+  }
+  [[nodiscard]] bool isSpanfiladeClean() const noexcept {
+    return spanfiladeClean_;
   }
 
   void deviceReady(render::RenderDevice &device,
@@ -502,6 +521,23 @@ private:
    */
   void recordFirstBeamCrossing(const gleditor::FrameContext &ctx,
                                const Edge &nearEdge, const Edge &farEdge);
+
+  struct SpanfiladeCacheSignature {
+    std::vector<MicroversionId> docVersions;
+    std::vector<std::size_t> docPieceCounts;
+    std::vector<const zigzag::Manifold *> manifoldViews;
+    std::vector<std::size_t> manifoldCellCounts;
+    std::vector<std::uint32_t> manifoldFoldedThrough;
+    std::vector<zigzag::CellRef> manifoldFoci;
+    int cellRadius{3};
+
+    bool operator==(const SpanfiladeCacheSignature &) const = default;
+  };
+
+  xanadu::enfilade::Spanfilade cachedSpanfilade_;
+  SpanfiladeCacheSignature spanfiladeSignature_{};
+  bool spanfiladeClean_{false};
+  int cellRadius_{3};
 };
 
 } // namespace xudu
