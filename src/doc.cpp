@@ -527,15 +527,61 @@ Doc::boxFor(const std::uint32_t globalOffset) const {
   return std::nullopt;
 }
 
+void Doc::refreshPageIndexFilade() const {
+  std::vector<gleditor::enfilade::LayoutEntry> entriesSnapshot;
+  {
+    std::lock_guard lock(shapingMutex);
+    if (pageEntries.size() > pageIndexFiladeBuiltFor) {
+      entriesSnapshot = pageEntries;
+    }
+  }
+  if (entriesSnapshot.empty()) {
+    return;
+  }
+  pageIndexFiladeBuiltFor = entriesSnapshot.size();
+  pageIndexFilade         = gleditor::enfilade::Layoutfilade::buildFromEntries(
+      std::move(entriesSnapshot));
+}
+
+std::optional<std::uint32_t>
+Doc::pageIndexForOffset(const std::uint32_t globalOffset) const {
+  refreshPageIndexFilade();
+  const auto hit = pageIndexFilade.findEntryAtByte(globalOffset);
+  if (!hit) {
+    return std::nullopt;
+  }
+  return static_cast<std::uint32_t>(hit->entryIndex);
+}
+
+std::optional<Doc::Anchor>
+Doc::approximateAnchorFor(const std::uint32_t globalOffset) const {
+  const auto pageIndex = pageIndexForOffset(globalOffset);
+  if (!pageIndex) {
+    return std::nullopt;
+  }
+  return Anchor{*pageIndex, 0.0F, 0.0F, 0.0F};
+}
+
 std::optional<glm::vec3> Doc::worldPoint(const std::uint32_t pageIndex,
                                          const float posX,
                                          const float posY) const {
-  if (pageIndex >= pages.size()) {
+  if (pageIndex < pages.size()) {
+    const auto point = modelMatrix() * pages[pageIndex].getModel() *
+                       glm::vec4(posX, posY, 0.0F, 1.0F);
+    return glm::vec3(point);
+  }
+  // Shaped but not yet built into a Page object -- approximate from
+  // pageIndexFilade instead of failing outright, so a caller deciding which
+  // pages are worth building sooner can still place a point near one that
+  // has not been built yet. posX/posY are ignored: only the page's own
+  // cumulative Y is known without shaping it (see approximateAnchorFor()).
+  refreshPageIndexFilade();
+  const auto hit = pageIndexFilade.findEntryByIndex(pageIndex);
+  if (!hit) {
     return std::nullopt;
   }
-  const auto point = modelMatrix() * pages[pageIndex].getModel() *
-                     glm::vec4(posX, posY, 0.0F, 1.0F);
-  return glm::vec3(point);
+  const glm::vec3 approxLocal(0.0F, -hit->startYPx * pixelsToWorld, 0.0F);
+  return glm::vec3(modelMatrix() * glm::vec4(approxLocal, 1.0F));
 }
 
 void Doc::animateArrival(ch::Timeline &timeline) {
@@ -1101,7 +1147,16 @@ Doc::Doc(const RendererRef &renderer, render::RenderDevice *device,
          const glm::mat4 &model, [[maybe_unused]] const Private _priv)
     : Drawable(model), renderer(renderer),
       pool(std::make_unique<BufferPool>(device, sizeof(VBORow),
-                                        initialPoolRows)) {}
+                                        initialPoolRows)),
+      // Matches Drawable's own model translation, the same resting place
+      // animateArrival() will later use as its own target -- so a Doc that
+      // never goes through the normal open-document arrival animation
+      // (every test that calls Doc::create() directly, notably) still has a
+      // real position rather than ch::Output<glm::vec3>'s uninitialized
+      // default. animateArrival() overwrites this with its own starting
+      // point regardless, so this changes nothing for a Doc opened the
+      // normal way.
+      position(glm::vec3(model[3])) {}
 
 Doc::Doc(const RendererRef &renderer, render::RenderDevice *device,
          const glm::mat4 &model, const gleditor::TextSource &source,
@@ -1157,10 +1212,14 @@ void Doc::load(const gleditor::TextSource &source) {
   {
     std::lock_guard lock(shapingMutex);
     pendingShapings.clear();
-    pageHeightsPx.clear();
+    pageEntries.clear();
   }
   pageIndexFilade         = gleditor::enfilade::Layoutfilade{};
   pageIndexFiladeBuiltFor = 0;
+  // Byte offsets into the text this load() is replacing; a load wholesale
+  // replaces that text, so an offset from before it means nothing (and may
+  // not even be in bounds) against the new one.
+  priorityOffsets.clear();
   // A load replaces the document wholesale, so whatever the previous content
   // had already finished laying out says nothing about this one: without
   // resetting these, isFullyLoaded() would keep answering as of the old text,
@@ -1188,7 +1247,10 @@ void Doc::makePages() {
       std::lock_guard lock(shapingMutex);
       pendingShapings.push_back(PendingShaping{
           std::move(shaping), static_cast<std::uint32_t>(tSize)});
-      pageHeightsPx.push_back(heightPx);
+      pageEntries.push_back(gleditor::enfilade::LayoutEntry{
+          .byteLength = consumed,
+          .heightPx   = heightPx + pageGapPx,
+      });
     }
     tSize += consumed;
   }
@@ -1196,38 +1258,18 @@ void Doc::makePages() {
 }
 
 std::chrono::milliseconds Doc::buildBudgetForThisCall() {
-  // pageHeightsPx accumulates independently of pendingShapings (which
+  // pageEntries accumulates independently of pendingShapings (which
   // buildPendingPages() below drains), so it reflects every page shaped so
-  // far regardless of GPU-build progress -- rebuilding the filade from it is
-  // how "which page is the camera near" can stay current even while most of
+  // far regardless of GPU-build progress -- refreshing the filade from it is
+  // how "which page is near a target" can stay current even while most of
   // that backlog is still waiting to become a Page.
-  std::vector<float> heightsSnapshot;
-  {
-    std::lock_guard lock(shapingMutex);
-    if (pageHeightsPx.size() > pageIndexFiladeBuiltFor) {
-      heightsSnapshot = pageHeightsPx;
-    }
-  }
-  if (!heightsSnapshot.empty()) {
-    std::vector<gleditor::enfilade::LayoutEntry> entries;
-    entries.reserve(heightsSnapshot.size());
-    for (const auto heightPx : heightsSnapshot) {
-      entries.push_back(gleditor::enfilade::LayoutEntry{
-          .heightPx = heightPx + pageGapPx,
-      });
-    }
-    pageIndexFilade =
-        gleditor::enfilade::Layoutfilade::buildFromEntries(std::move(entries));
-    pageIndexFiladeBuiltFor = heightsSnapshot.size();
+  refreshPageIndexFilade();
+
+  if (pageIndexFilade.empty()) {
+    return render::kPageBuildFrameBudget;
   }
 
-  if (pageIndexFilade.empty() || nullptr == renderer) {
-    return render::kPageBuildFrameBudget;
-  }
-  const auto appState = renderer->appState();
-  if (nullptr == appState) {
-    return render::kPageBuildFrameBudget;
-  }
+  std::optional<std::size_t> targetIndex;
 
   // The camera is one shared, global, free-moving 3D point (AppState::view),
   // not a per-document scroll offset -- projected into this document's own
@@ -1237,14 +1279,37 @@ std::chrono::milliseconds Doc::buildBudgetForThisCall() {
   // considered; a document positioned well outside the camera's actual view
   // frustum simply "catches up" for no visual benefit, which costs nothing
   // else this function's own per-call budget already bounds.
-  float cameraWorldY = 0.0F;
-  {
-    std::lock_guard viewLock(appState->view);
-    cameraWorldY = appState->view.pos.y;
+  if (nullptr != renderer) {
+    if (const auto appState = renderer->appState(); nullptr != appState) {
+      float cameraWorldY = 0.0F;
+      {
+        std::lock_guard viewLock(appState->view);
+        cameraWorldY = appState->view.pos.y;
+      }
+      const float distancePx =
+          (currentPosition().y - cameraWorldY) / pixelsToWorld;
+      if (const auto hit = pageIndexFilade.findEntryAtY(distancePx)) {
+        targetIndex = hit->entryIndex;
+      }
+    }
   }
-  const float distancePx = (currentPosition().y - cameraWorldY) / pixelsToWorld;
-  const auto hit         = pageIndexFilade.findEntryAtY(distancePx);
-  if (!hit || hit->entryIndex <= pages.size()) {
+
+  // Priority offsets -- pages a beam touches, pushed by an external caller
+  // via setPriorityOffsets() -- hurry the loader towards whichever named
+  // page is furthest behind build progress. Furthest rather than nearest:
+  // building is still strictly sequential/in-order (see
+  // design/priority-page-building.md), so reaching the furthest target
+  // reaches every nearer one along the way, and a lone budget can only chase
+  // one direction at a time regardless.
+  for (const auto offset : priorityOffsets) {
+    if (const auto hit = pageIndexFilade.findEntryAtByte(offset)) {
+      if (!targetIndex || hit->entryIndex > *targetIndex) {
+        targetIndex = hit->entryIndex;
+      }
+    }
+  }
+
+  if (!targetIndex || *targetIndex <= pages.size()) {
     return render::kPageBuildFrameBudget;
   }
   return render::kPageBuildFrameBudget * render::kPageBuildCatchUpMultiplier;

@@ -4,16 +4,21 @@
  * when the background shaping thread has produced a large backlog before the
  * render thread ever asks for pages -- the regression covered by
  * design/kjv-load-blocking-regression.md -- and widens that budget when the
- * camera is looking at a page well past what has been built so far.
+ * camera, or a page named by setPriorityOffsets(), is well past what has
+ * been built so far (design/priority-page-building.md's Stage 1).
  */
 #include <gmock/gmock.h>
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <chrono>
+#include <cstdint>
 #include <memory>
 #include <string>
+#include <vector>
 
 #include <glm/ext/matrix_float4x4.hpp>
+#include <glm/geometric.hpp>
 
 #include <gleditor/doc.hpp>
 #include <gleditor/render/constants.hpp>
@@ -155,6 +160,100 @@ TEST_F(DocPageBudgetTest, CatchesUpFasterWhenTheCameraIsAheadOfBuildProgress) {
   EXPECT_GT(catchUpCallPages, normalPacePages * 2)
       << "camera looking far past build progress should let one call build "
          "noticeably more pages than the established plain-budget rate";
+}
+
+TEST_F(DocPageBudgetTest, PriorityOffsetFarAheadEngagesCatchUpToo) {
+  doc->makePages();
+
+  // Same baseline reasoning as the camera test above: the very first call's
+  // one-time warm-up cost lands here rather than skewing the comparison.
+  doc->buildPendingPages(*state);
+  const auto normalPacePages = doc->numPages();
+  ASSERT_GT(normalPacePages, 0U);
+
+  // Push a priority offset near the very end of the document, as LinkBeams
+  // would for a beam whose far end lands on a late page -- with the camera
+  // left exactly where it was (near the start), so any acceleration
+  // observed can only be attributed to the priority offset, not the camera.
+  doc->setPriorityOffsets(std::vector<std::uint32_t>{
+      static_cast<std::uint32_t>(doc->contents().size() - 1)});
+
+  doc->buildPendingPages(*state);
+  const auto catchUpCallPages = doc->numPages() - normalPacePages;
+
+  EXPECT_GT(catchUpCallPages, normalPacePages * 2)
+      << "a priority offset far past build progress should let one call "
+         "build noticeably more pages than the established plain-budget "
+         "rate, the same way the camera does";
+}
+
+TEST_F(DocPageBudgetTest, PageIndexForOffsetAnswersBeforeAnyPageIsBuilt) {
+  doc->makePages();
+
+  // Nothing has been built yet -- anchorFor() answers nullopt for every
+  // offset here, which is exactly the gap pageIndexForOffset() exists to
+  // close (see its own doc comment on Doc).
+  ASSERT_EQ(doc->numPages(), 0U);
+  ASSERT_FALSE(doc->anchorFor(0).has_value());
+
+  const auto earlyPage = doc->pageIndexForOffset(0);
+  const auto lateOffset =
+      static_cast<std::uint32_t>(doc->contents().size() - 1);
+  const auto latePage = doc->pageIndexForOffset(lateOffset);
+
+  ASSERT_TRUE(earlyPage.has_value());
+  ASSERT_TRUE(latePage.has_value());
+  EXPECT_EQ(*earlyPage, 0U);
+  EXPECT_GT(*latePage, *earlyPage)
+      << "a byte offset near the end of the document should resolve to a "
+         "later page than one at the start";
+
+  // Cross-checked against the same offsets once building actually catches
+  // up, so a wrong pageIndexFilade entry (rather than a coincidentally
+  // plausible-looking one) would still be caught.
+  while (!doc->isFullyLoaded()) {
+    doc->buildPendingPages(*state);
+  }
+  const auto builtEarly = doc->anchorFor(0);
+  const auto builtLate  = doc->anchorFor(lateOffset);
+  ASSERT_TRUE(builtEarly.has_value());
+  ASSERT_TRUE(builtLate.has_value());
+  EXPECT_EQ(builtEarly->pageIndex, *earlyPage);
+  EXPECT_EQ(builtLate->pageIndex, *latePage);
+}
+
+TEST_F(DocPageBudgetTest, ApproximateAnchorAgreesWithAnchorOncePageIsBuilt) {
+  doc->makePages();
+  while (!doc->isFullyLoaded()) {
+    doc->buildPendingPages(*state);
+  }
+
+  // Comfortably past the first page, so this is not trivially "both name
+  // page 0".
+  const auto offset = std::min<std::uint32_t>(
+      20000U, static_cast<std::uint32_t>(doc->contents().size() / 2));
+
+  const auto exact  = doc->anchorFor(offset);
+  const auto approx = doc->approximateAnchorFor(offset);
+  ASSERT_TRUE(exact.has_value());
+  ASSERT_TRUE(approx.has_value());
+  EXPECT_EQ(exact->pageIndex, approx->pageIndex)
+      << "approximateAnchorFor() named a different page than anchorFor()";
+
+  const auto exactWorld  = doc->worldPoint(*exact);
+  const auto approxWorld = doc->worldPoint(*approx);
+  ASSERT_TRUE(exactWorld.has_value());
+  ASSERT_TRUE(approxWorld.has_value());
+
+  // "About a page height" per approximateAnchorFor()'s own contract,
+  // checked against the same page geometry the fixture's documents actually
+  // use (Letter, Fixed -- MemoryTextSource does not override pageSize()),
+  // with room to spare rather than a value guessed independently of it.
+  const float onePageHeightWorld =
+      (gleditor::letterPage.heightPx + Doc::pageGapPx) * Doc::pixelsToWorld;
+  EXPECT_LT(glm::distance(*exactWorld, *approxWorld), onePageHeightWorld * 1.5F)
+      << "approximateAnchorFor()'s point should land within about one page "
+         "height of anchorFor()'s exact one";
 }
 
 } // namespace

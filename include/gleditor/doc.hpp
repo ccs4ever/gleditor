@@ -17,6 +17,7 @@
 #include <memory>
 #include <mutex>
 #include <optional>
+#include <span>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -425,9 +426,11 @@ private:
   [[nodiscard]] std::vector<int> lineBreaksAround(std::uint32_t at) const;
   /// How much of render::kPageBuildFrameBudget this buildPendingPages() call
   /// gets: the plain budget, or render::kPageBuildCatchUpMultiplier times it
-  /// when the camera is looking at a page index well past pages.size() (see
-  /// pageIndexFilade). Rebuilds pageIndexFilade first if pageHeightsPx has
-  /// grown since the last call.
+  /// when the camera, or a page named in priorityOffsets, is well past
+  /// pages.size() (see pageIndexFilade). Whichever target is furthest behind
+  /// wins, since building is still sequential/in-order -- reaching the
+  /// furthest one reaches every nearer one along the way. Rebuilds
+  /// pageIndexFilade first if pageEntries has grown since the last call.
   [[nodiscard]] std::chrono::milliseconds buildBudgetForThisCall();
   // token to keep anything other than Doc::create from using our constructor
   struct Private {
@@ -673,12 +676,22 @@ public:
   void makePages(RenderState &state);
   /// Build any pending shaped pages on the render thread in page order, up to
   /// render::kPageBuildFrameBudget worth of wall-clock time -- or
-  /// render::kPageBuildCatchUpMultiplier times that, when the camera is
-  /// looking at a page index well past what has been built so far (see
-  /// pageIndexFilade). Whatever is left stays queued in document order for
-  /// the next call. Returns true when all pages have been built and shaping
-  /// is complete.
+  /// render::kPageBuildCatchUpMultiplier times that, when the camera or a
+  /// page named by setPriorityOffsets() is well past what has been built so
+  /// far (see buildBudgetForThisCall()). Whatever is left stays queued in
+  /// document order for the next call. Returns true when all pages have been
+  /// built and shaping is complete.
   bool buildPendingPages(RenderState &state);
+  /// Byte offsets this document should build the pages for ahead of the
+  /// rest, after the viewport's own pages -- see buildBudgetForThisCall().
+  /// Replaced wholesale each time it is set; an empty span (the default) is
+  /// "no opinion", which is what every caller that has none (apps/gleditor)
+  /// leaves it at. Render thread only. Knows nothing about what a beam is --
+  /// LinkBeams (xudu) is what decides which offsets to push, since library
+  /// code cannot depend on apps/.
+  void setPriorityOffsets(std::span<const std::uint32_t> offsets) {
+    priorityOffsets.assign(offsets.begin(), offsets.end());
+  }
   /// Append every visible page's draw to @p batches.
   /// @param viewProjection projection * view; the document's own model matrix
   ///        is applied on top of it here.
@@ -848,6 +861,15 @@ public:
    *
    * Includes any movement still in progress, so a point taken from this
    * follows the document rather than its resting place.
+   *
+   * @p pageIndex need not be built yet: every caller that has one got it
+   * from anchorFor()/boxFor(), which only ever name a built page, but
+   * approximateAnchorFor() can name one that has only been shaped -- for
+   * that case, @p x and @p y are ignored and the point returned is the
+   * page's approximate top-left corner from pageIndexFilade rather than an
+   * exact position from the (nonexistent) Page object, since only the
+   * former is known without shaping the page. nullopt only once
+   * @p pageIndex names a page that has not even been shaped.
    */
   [[nodiscard]] std::optional<glm::vec3> worldPoint(std::uint32_t pageIndex,
                                                     float x, float y) const;
@@ -977,28 +999,49 @@ public:
     PageShaping shaping;
     std::uint32_t textOffset{};
   };
-  std::mutex shapingMutex;
+  /// mutable: locked from pageIndexForOffset()/worldPoint(), both logically
+  /// read-only queries that only happen to need to refresh the mutable cache
+  /// below on demand.
+  mutable std::mutex shapingMutex;
   std::vector<PendingShaping> pendingShapings;
   std::atomic<bool> shapingComplete{false};
 
   /// One entry per page whose shaping has completed, appended by makePages()
   /// under shapingMutex -- independent of pendingShapings, which
   /// buildPendingPages() drains and so cannot be used to answer "how many
-  /// pages exist so far" once some have already been built. Heights only
-  /// (layout pixels, page height without the inter-page gap); a page's text
-  /// content and byte offset are not needed to answer "which page index is
-  /// at this Y", only its height is.
-  std::vector<float> pageHeightsPx;
-  /// A page-granularity index over pageHeightsPx, rebuilt lazily in
-  /// buildPendingPages() whenever pageHeightsPx has grown since the last
-  /// rebuild. Lets a viewport Y coordinate be turned into a page index in
-  /// O(log N) without walking pages built so far, which is the whole point:
-  /// unlike pages itself, this reflects every page that has been *shaped*,
-  /// including ones not yet built into GPU resources.
-  gleditor::enfilade::Layoutfilade pageIndexFilade;
+  /// pages exist so far" once some have already been built. heightPx already
+  /// includes the inter-page gap (see pageGapPx); byteLength is the page's
+  /// own text length, which is what lets pageIndexForOffset() answer "which
+  /// page holds this byte" the same way findEntryAtY() answers "which page
+  /// is at this Y" -- both from the same entries, without needing the page's
+  /// Page object (i.e. built) at all.
+  std::vector<gleditor::enfilade::LayoutEntry> pageEntries;
+  /// A page-granularity index over pageEntries -- lets a viewport Y
+  /// coordinate or a byte offset be turned into a page index in O(log N)
+  /// without walking pages built so far, which is the whole point: unlike
+  /// pages itself, this reflects every page that has been *shaped*,
+  /// including ones not yet built into GPU resources. mutable: it is a cache
+  /// derived entirely from pageEntries, refreshed on demand by
+  /// refreshPageIndexFilade() from any of buildBudgetForThisCall(),
+  /// pageIndexForOffset(), or worldPoint()'s unbuilt-page fallback --
+  /// whichever happens to be asked first -- not something a caller of any of
+  /// those logically-const queries needs to know is happening.
+  mutable gleditor::enfilade::Layoutfilade pageIndexFilade;
   /// How many entries pageIndexFilade was last built from, so a call that
   /// finds nothing new shaped since the last one can skip the rebuild.
-  std::size_t pageIndexFiladeBuiltFor{0};
+  mutable std::size_t pageIndexFiladeBuiltFor{0};
+  /// Rebuilds pageIndexFilade from pageEntries if it has grown since the
+  /// last call. Const because refreshing this cache changes no logical
+  /// state a caller can observe other than through pageIndexFilade itself.
+  void refreshPageIndexFilade() const;
+  /// Byte offsets an external caller (LinkBeams, prioritising the pages a
+  /// beam touches) has asked this document to hurry towards, alongside
+  /// wherever the camera is looking. Re-resolved against pageIndexFilade on
+  /// every buildBudgetForThisCall() call rather than resolved once here,
+  /// since an offset pushed before its page has even been shaped yet would
+  /// otherwise be silently dropped instead of picked up once shaping
+  /// catches up to it. Render thread only.
+  std::vector<std::uint32_t> priorityOffsets;
 
   friend class Page;
 };
