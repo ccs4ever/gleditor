@@ -372,6 +372,8 @@ private:
   /// Whether the step being carried out is waiting for work it scheduled --
   /// the reflow an edit causes -- rather than for a picking answer.
   bool awaitingSettle{};
+  /// A scripted capture waits until endFrame(), when the target can be read.
+  std::optional<std::string> pendingScriptCapture;
   /// Wall time of each settled frame, of collecting its page draws, and of
   /// handing them to the device. Gathered only when --benchmark asked for it.
   std::vector<std::chrono::nanoseconds> benchFrame;

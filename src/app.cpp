@@ -298,6 +298,10 @@ readAutomationScript(const int argc, const char *const *const argv) {
       step.x = x;
       step.y = y;
       script.push_back(std::move(step));
+    } else if ("--capture" == option) {
+      Step step{Step::Kind::Capture};
+      step.text = value;
+      script.push_back(std::move(step));
     } else if ("--type" == option) {
       Step step{Step::Kind::Type};
       std::tie(step.decorations, step.text) = parseTypeValue(value);
@@ -324,8 +328,8 @@ readAutomationScript(const int argc, const char *const *const argv) {
     }
   };
 
-  static constexpr std::array scripted = {"--pick",   "--click", "--type",
-                                          "--select", "--do",    "--key"};
+  static constexpr std::array scripted = {
+      "--pick", "--click", "--capture", "--type", "--select", "--do", "--key"};
   for (int i = 1; i < argc; i++) {
     if (nullptr == argv[i]) {
       continue;
@@ -694,6 +698,12 @@ void addCommonArguments(argparse::ArgumentParser &parser, const bool detailed) {
              "out, every document loaded, and every animation finished -- so a "
              "capture shows the finished result rather than the middle of a "
              "fade.");
+  automation(parser.add_argument("--capture").append(),
+             "write the frame at this scripted point as a PPM; repeatable",
+             "Capture the frame after every preceding scripted action. Unlike "
+             "--screenshot, this may capture a live animation or video. "
+             "Repeatable and ordered with --click, --type and other scripted "
+             "actions.");
   automation(
       parser.add_argument("--record-frames").default_value(0).scan<'i', int>(),
       "capture N consecutive settled frames and exit",

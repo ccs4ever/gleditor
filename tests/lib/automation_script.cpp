@@ -78,6 +78,17 @@ TEST(AutomationScript, takesAValueJoinedByAnEqualsSign) {
   EXPECT_EQ(script[2].to, 9U);
 }
 
+TEST(AutomationScript, capturesAtThePointItWasWritten) {
+  const auto script = scriptOf(
+      {"--capture", "before.ppm", "--click", "7,8", "--capture=after.ppm"});
+  ASSERT_EQ(script.size(), 3U);
+  EXPECT_EQ(script[0].kind, Kind::Capture);
+  EXPECT_EQ(script[0].text, "before.ppm");
+  EXPECT_EQ(script[1].kind, Kind::Click);
+  EXPECT_EQ(script[2].kind, Kind::Capture);
+  EXPECT_EQ(script[2].text, "after.ppm");
+}
+
 TEST(AutomationScript, ignoresEverythingThatIsNotAnAutomationOption) {
   const auto script =
       scriptOf({"--font", "Serif 12", "file.txt", "--profile", "--click", "1,2",

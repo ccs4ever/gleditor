@@ -447,6 +447,17 @@ bool Renderer::update(RenderState &state, const bool settled) {
 
   device->endFrame();
 
+  if (pendingScriptCapture.has_value()) {
+    writeScreenshot(device->captureColorTarget(), *pendingScriptCapture);
+    pendingScriptCapture.reset();
+    nextStep++;
+    // A live video remains busy by design, so --profile cannot wait for the
+    // usual idle condition after its final deliberately-live capture.
+    if (this->state->profiling && scriptFinished()) {
+      this->state->alive = false;
+    }
+  }
+
   // Capture after the frame is complete: the colour target still holds its
   // contents, and reading a finished frame avoids interrupting one that the
   // device has already begun submitting.
@@ -669,6 +680,9 @@ void Renderer::advanceScript(RenderState &state) {
   using Kind       = AppState::AutomationStep::Kind;
 
   switch (step.kind) {
+  case Kind::Capture:
+    pendingScriptCapture = step.text;
+    return;
   case Kind::Pick:
     // Answered on a later frame; collectPickingResults() reports it and moves
     // the script on.

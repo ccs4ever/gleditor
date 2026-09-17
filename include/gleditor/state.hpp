@@ -67,14 +67,16 @@ struct AppState {
       Select,  ///< Select a byte range of the first document.
       Command, ///< Run a bound command by name.
       Press,   ///< A key a modal takes: tab, enter, escape and friends.
+      Capture, ///< Write the frame drawn for this point in the script.
     };
     Kind kind{};
     int x{}; ///< Pick and click: the pixel.
     int y{};
     std::uint32_t from{}; ///< Select: document-global byte offsets.
     std::uint32_t to{};
-    std::string text;    ///< Type: the UTF-8 to insert. Command: which command.
-    gleditor::Key key{}; ///< Press: which key.
+    /// Type: UTF-8 to insert. Command: name. Capture: PPM path.
+    std::string text;
+    gleditor::Key key{};      ///< Press: which key.
     gleditor::KeyMods mods{}; ///< Press: held with it.
     /// Type: decorations named by a "[comma,separated,names]" prefix on
     /// --type's value, stripped from text above. Zero -- the default, and
