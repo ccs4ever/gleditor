@@ -18,6 +18,7 @@
 #include <vector>
 
 #include "common/xanadu/store.hpp"
+#include "common/xanadu/store_loader.hpp"
 #include "common/xanadu/user_permascroll.hpp"
 #include "common/xanadu/vortex/vortex_core.hpp"
 #include "common/xanadu/vortex/vortex_vm.hpp"
@@ -300,7 +301,7 @@ int main(int argc, char *argv[]) {
   xanadu::Store store(permascroll);
   if (!inputStore.empty() &&
       std::filesystem::exists(inputStore + "/ops.nodes")) {
-    store.load(inputStore);
+    xanadu::loadStore(store, inputStore);
   }
 
   // Batch Mode (expression or file provided)

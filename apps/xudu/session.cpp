@@ -34,6 +34,7 @@
 #include "common/xanadu/format_resolver.hpp"
 #include "common/xanadu/link_layout.hpp"
 #include "common/xanadu/provenance.hpp"
+#include "common/xanadu/store_loader.hpp"
 
 namespace xudu {
 
@@ -52,8 +53,7 @@ constexpr std::uint32_t kCollaboratorColors[] = {
 
 Session::Session(std::string aStorePath,
                  std::shared_ptr<UserPermascroll> scroll) {
-  auto primaryStore = std::make_unique<Store>(std::move(scroll));
-  primaryStore->load(aStorePath);
+  auto primaryStore = xanadu::loadStore(aStorePath, std::move(scroll));
   primaryStore->setContentSource(&contentSource);
   stores.push_back(
       StoreEntry{std::move(primaryStore), std::move(aStorePath), false});
@@ -713,7 +713,14 @@ Session::importFileToTemporaryStore(const std::string &filePath) {
   auto perma    = (stores.empty() || !stores[0].store)
                       ? nullptr
                       : stores[0].store->userPermascrollPtr();
-  auto newStore = std::make_unique<Store>(perma);
+  auto newStore = xanadu::importFileStore(filePath, perma, tempDir);
+  const auto imported = newStore->currentVersions().empty()
+                            ? MicroversionId{}
+                            : newStore->currentVersions().front();
+  const auto idx = addStore(std::move(newStore), tempDir.string(), true);
+  return {idx, imported};
+#if 0
+  auto legacyStore = std::make_unique<Store>(perma);
   const gleditor::FileTextSource source(filePath);
   // Piece by piece rather than one whole-file insert(), the same way and for
   // the same reason as the very first --import (see main.cpp): a plain file
@@ -780,14 +787,14 @@ Session::importFileToTemporaryStore(const std::string &filePath) {
 
   const auto idx = addStore(std::move(newStore), tempDir.string(), true);
   return {idx, imported};
+#endif
 }
 
 std::size_t Session::loadAuxiliaryStore(const std::string &aPath) {
   auto perma    = (stores.empty() || !stores[0].store)
                       ? nullptr
                       : stores[0].store->userPermascrollPtr();
-  auto newStore = std::make_unique<Store>(perma);
-  newStore->load(aPath);
+  auto newStore = xanadu::loadStore(aPath, perma);
   return addStore(std::move(newStore), aPath, false);
 }
 

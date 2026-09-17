@@ -3,6 +3,7 @@
  * @brief Multi-store connection topology and coordinate manager for VQL.
  */
 #include "common/xanadu/multi_store.hpp"
+#include "common/xanadu/store_loader.hpp"
 
 #include <algorithm>
 #include <cstdint>
@@ -192,9 +193,9 @@ CellRef MultiStoreCoordinator::addStore(std::string_view label,
 CellRef MultiStoreCoordinator::loadAndAddStore(
     std::string_view label, std::string_view role, const std::string &path,
     std::shared_ptr<xanadu::UserPermascroll> userPermascroll) {
-  auto loadedStore = std::make_shared<xanadu::Store>(userPermascroll);
-  loadedStore->load(path);
-  CellRef storeCell   = addStore(label, role, loadedStore);
+  auto loadedUnique = xanadu::loadStore(path, std::move(userPermascroll));
+  std::shared_ptr<xanadu::Store> loadedStore(std::move(loadedUnique));
+  CellRef storeCell   = addStore(label, role, std::move(loadedStore));
   stores_.back().path = path;
   return storeCell;
 }

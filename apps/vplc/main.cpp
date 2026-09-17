@@ -15,6 +15,7 @@
 #include <string>
 
 #include "common/xanadu/store.hpp"
+#include "common/xanadu/store_loader.hpp"
 #include "common/xanadu/user_permascroll.hpp"
 #include "common/xanadu/vortex/vortex_core.hpp"
 #include "common/xanadu/vortex/vortex_vm.hpp"
@@ -146,7 +147,7 @@ int main(int argc, char *argv[]) {
     auto permascroll = std::make_shared<xanadu::UserPermascroll>();
     xanadu::Store store(permascroll);
     if (std::filesystem::exists(outPath + "/ops.nodes")) {
-      store.load(outPath);
+      xanadu::loadStore(store, outPath);
     }
     compiler.exportToStore(store);
     store.save(outPath);

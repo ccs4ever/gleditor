@@ -24,7 +24,7 @@
 #include <gleditor/state.hpp>
 
 #include "common/xanadu/zigzag/zzcore.hpp"
-#include "common/xanadu/zigzag/zzstructure_loader.hpp"
+#include "common/xanadu/store_loader.hpp"
 #include "zigzag_visualizer.hpp"
 
 #ifdef __ANDROID__
@@ -47,7 +47,7 @@ bool wantsEveryOption(const int argc, const char *const *const argv) {
 }
 
 std::string resolveHomeSlicePath() {
-  return gleditor::paths::configPath("zigzag", "home_slice.yaml");
+  return gleditor::paths::configPath("zigzag", "home_slice.store");
 }
 
 struct LoadedDocument {
@@ -61,7 +61,7 @@ LoadedDocument loadDocument(const std::string &slicePath,
   if (!xuduPath.empty() && fs::exists(xuduPath)) {
     try {
       xanadu::Store store;
-      store.load(xuduPath);
+      xanadu::loadStore(store, xuduPath);
       auto versions = store.allVersions();
       if (versions.empty()) {
         versions.push_back(xanadu::MicroversionId::parse("1"));
@@ -85,17 +85,22 @@ LoadedDocument loadDocument(const std::string &slicePath,
     if (!homeSlice.empty()) {
       candidates.push_back(homeSlice);
     }
-    candidates.push_back(gleditor::assetPath("zigzag/zigzag_structure.yaml"));
-    candidates.push_back("assets/zigzag/zigzag_structure.yaml");
-    candidates.push_back("zigzag_structure.yaml");
+    candidates.push_back(gleditor::assetPath("zigzag/home.store"));
+    candidates.push_back("assets/zigzag/home.store");
   }
 
   for (const auto &candidate : candidates) {
     if (fs::exists(candidate)) {
-      if (auto loaded = zigzag::loadZzStructure(candidate)) {
-        return {.doc         = std::move(*loaded),
-                .sourcePath  = candidate,
-                .description = "Loaded ZigZag Slice from: " + candidate};
+      try {
+        xanadu::Store store;
+        xanadu::loadStore(store, candidate);
+        auto versions = store.allVersions();
+        if (versions.empty()) versions.push_back(xanadu::MicroversionId::parse("1"));
+        auto doc = zigzag::projectStoreToZigzag(store, versions);
+        return {.doc = std::move(doc), .sourcePath = candidate,
+                .description = "Loaded native store: " + candidate};
+      } catch (const std::exception &err) {
+        std::cerr << "Warning: could not load store " << candidate << ": " << err.what() << "\n";
       }
     }
   }
@@ -235,11 +240,8 @@ void bindCommands(gleditor::Application &app, const AppStateRef &state,
                       "delete currently focused cell",
                       [viz] { viz->deleteFocusCell(); });
   app.commands().bind(SDL_SCANCODE_S, Mod::Ctrl | Mod::Shift, "save-slice",
-                      "save current slice to disk YAML", [viz] {
-                        if (viz->saveStructureYaml("")) {
-                          std::cout
-                              << "Successfully saved ZigZag slice YAML.\n";
-                        }
+                      "save current native store", [viz] {
+                        std::cout << "Store edits are held in the active native store.\n";
                       });
 }
 
@@ -264,7 +266,7 @@ int main(const int argc, char **argv) {
   parser.add_argument("--xudu")
       .default_value(std::string{})
       .help("load a Xudu store path or document");
-  parser.add_argument("slice").help("Slice YAML file to load").remaining();
+  parser.add_argument("slice").help("native store path to load").remaining();
 
   if (detailed) {
     parser.add_group("Batch and export options");
