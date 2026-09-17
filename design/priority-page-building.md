@@ -536,9 +536,17 @@ leaves radial_menu's angled borders, which are never axis-aligned, untouched). D
 from 1.4852% (max delta 172) to 0.5756% (max delta 69) -- comfortably under the 1% limit, and the
 residual is the ordinary antialiasing variance the tolerance exists for. Getting past that first
 failure for the first time also reached a stage of `compare-backends.sh` this plan had never actually
-exercised before: growing the Vulkan glyph atlas past 256x256 crashes deterministically with a RADV
-`context is lost` GPU error on this machine, reproduced on every retry. Genuine and unrelated to
-Stage 5 or to the fixes above -- filed as its own issue rather than chased down here.
+exercised before: growing the Vulkan glyph atlas past 256x256 crashed deterministically with a RADV
+`context is lost` GPU error on this machine, on every retry. Genuine and unrelated to Stage 5, but
+fixed in the same pass once Vulkan validation layers (installed separately, not part of this repo's
+own tooling) pinned it down precisely: `GlyphCache::reallocate()` destroyed the old atlas texture
+immediately, but glyph placement is reachable both before a frame begins
+(`Doc::buildPendingPages()`) and mid-frame (`Canvas::addText()` for UI chrome -- the doc-switcher tab
+bar, the floating toolbar -- which runs after `beginFrame()`); growing mid-frame destroyed a texture
+already bound into that frame's descriptor set and referenced by an open secondary command buffer.
+`DeviceVK::destroyTexture()` now defers the actual destruction to a pending queue, drained by
+`waitIdle()` once no frame is open -- see `src/render/vulkan/device_vk*.cpp` and its own commit for
+the full account.
 
 A manual `kjv.txt` run (4.4 MB, 1261 pages) with `--profile`:
 
