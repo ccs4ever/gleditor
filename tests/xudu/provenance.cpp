@@ -120,17 +120,15 @@ private:
 
 } // namespace
 
-// The record is meant to be read by a person deciding whether to believe it,
-// so it says what it is and how to check it before it says anything else.
+// The record is deterministic TSV so it can be signed and compared bytewise.
 TEST(ProvenanceTest, theRecordExplainsItselfAndNamesTheAuthor) {
   const auto yaml = sample().toYaml();
-  EXPECT_TRUE(yaml.contains("gpg --verify"));
-  EXPECT_TRUE(yaml.contains("author: \"Ada Lovelace\""));
-  EXPECT_TRUE(yaml.contains("email: \"ada@example.org\""));
+  EXPECT_TRUE(yaml.contains("author\tAda Lovelace\n"));
+  EXPECT_TRUE(yaml.contains("email\tada@example.org\n"));
   // And what it covers, so a reader with the bytes can tell whether the record
   // is about what arrived with it.
-  EXPECT_TRUE(yaml.contains("content_length: 4096"));
-  EXPECT_TRUE(yaml.contains("content_sha256:"));
+  EXPECT_TRUE(yaml.contains("content_length\t4096\n"));
+  EXPECT_TRUE(yaml.contains("content_sha256\t"));
 }
 
 TEST(ProvenanceTest, everyFieldComesBackOutAgain) {
@@ -301,7 +299,8 @@ TEST(ProvenanceTest, republishingSealsOnlyWhatIsNewSinceTheLastSeal) {
 
   const auto signed1 = xudu::signProvenance(signable());
   const auto mine    = xudu::createMutableKeys();
-  const auto first = xudu::sealLocalSpool(store, mine, "primedia", "", signed1);
+  const auto first =
+      xudu::sealLocalSpool(store, mine, "primedia", "", signed1);
 
   const auto firstPrimediaLength = store.primedia().bytes().size();
   const auto firstOpCount        = store.opCount();
@@ -358,7 +357,8 @@ TEST(ProvenanceTest, resealingWithNothingNewAddsNoNewSegments) {
 
   const auto signed1 = xudu::signProvenance(signable());
   const auto mine    = xudu::createMutableKeys();
-  const auto first = xudu::sealLocalSpool(store, mine, "primedia", "", signed1);
+  const auto first =
+      xudu::sealLocalSpool(store, mine, "primedia", "", signed1);
 
   const auto signed2 = xudu::signProvenance(signable());
   const auto second =

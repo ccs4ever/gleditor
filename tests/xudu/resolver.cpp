@@ -736,17 +736,17 @@ TEST_F(TorrentDataTest, aMultiFileTorrentIsFoundFromEitherDirectory) {
 // and then fails to read anything out of it.
 TEST_F(TorrentDataTest, aTorrentNamedAfterItsOwnFirstFileStillResolves) {
   const std::string content = "the content that was sealed";
-  const std::string record  = "author: \"somebody\"\n";
+  const std::string record  = "author\tsomebody\n";
   const std::array<xudu::TorrentContent, 2> files{
       xudu::TorrentContent{"spool", content},
-      xudu::TorrentContent{"AUTHORSHIP.yaml", record},
+      xudu::TorrentContent{"AUTHORSHIP.tsv", record},
   };
   const auto made = xudu::makeTorrent(files, "spool");
 
   const auto laid = dir / "sealed";
   std::filesystem::create_directories(laid / "spool");
   write(laid / "spool" / "spool", content);
-  write(laid / "spool" / "AUTHORSHIP.yaml", record);
+  write(laid / "spool" / "AUTHORSHIP.tsv", record);
 
   DirectoryContentSource sealed;
   // The directory above, where "spool" is a directory rather than the file.

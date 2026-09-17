@@ -270,8 +270,8 @@ private:
 
 /// Names the sealed files carry inside a torrent, so a reader knows what to
 /// look for and a writer cannot spell them differently.
-inline constexpr auto provenanceFileName = "AUTHORSHIP.yaml";
-inline constexpr auto provenanceSigName  = "AUTHORSHIP.yaml.asc";
+inline constexpr auto provenanceFileName = "AUTHORSHIP.tsv";
+inline constexpr auto provenanceSigName  = "AUTHORSHIP.tsv.asc";
 inline constexpr auto sealedContentName  = "primedia";
 /// The operations, in the compact binary encoding rather than the array of
 /// nodes a store keeps locally: this one crosses machines, and a node is a
