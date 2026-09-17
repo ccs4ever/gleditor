@@ -298,7 +298,11 @@ TEST(UserPermascrollTest, readingWhileAnotherThreadAppendsNeverSeesAHalfSpan) {
   std::atomic<int> readsChecked{0};
 
   std::thread reader([&] {
-    while (reading.load(std::memory_order_acquire)) {
+    bool keepGoing = true;
+    while (keepGoing) {
+      if (!reading.load(std::memory_order_acquire)) {
+        keepGoing = false;
+      }
       const auto have = published.load(std::memory_order_acquire);
       for (int i = 0; i < have; i++) {
         // Only spans the appender has already published are read, which is the
