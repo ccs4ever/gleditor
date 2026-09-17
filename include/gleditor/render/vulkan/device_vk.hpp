@@ -466,6 +466,30 @@ private:
   std::unordered_map<std::uint32_t, PipelineRecord> pipelines;
   std::uint32_t nextHandleId{1};
   bool initialised{};
+
+  /**
+   * @brief Textures destroyed while a frame was open, held until it is safe
+   *        to actually free them.
+   *
+   * A texture's VkImageView can already be bound into this frame's
+   * descriptor set and referenced by a secondary command buffer opened
+   * earlier in it -- glyph atlas growth triggered by Canvas::addText() for UI
+   * chrome (the tab bar, the floating toolbar) runs after beginFrame(), not
+   * only from Doc::buildPendingPages() before it. destroyTexture() cannot
+   * safely call vkDestroy* on such a texture: the command buffer holding the
+   * reference is still being recorded, and Vulkan requires every resource a
+   * command buffer references to outlive it until it is retired. Queuing the
+   * raw handles here and freeing them once waitIdle() has confirmed nothing
+   * is in flight -- which every path that could plausibly submit and
+   * complete this frame's work already calls before this can matter again --
+   * defers the free rather than the reallocation, so a still-open frame keeps
+   * sampling the old atlas without knowing it was ever replaced.
+   */
+  std::vector<TextureRecord> pendingTextureDestroys;
+  /// Actually destroy everything queued in pendingTextureDestroys. Only
+  /// safe to call once nothing on the device is still executing -- see
+  /// waitIdle(), the only caller.
+  void drainPendingTextureDestroys();
 };
 
 } // namespace render::vulkan
