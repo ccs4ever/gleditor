@@ -541,8 +541,11 @@ void Doc::collect(std::vector<render::GlyphBatch> &batches,
     return;
   }
   const auto docTransform = viewProjection * modelMatrix();
-  for (const auto &page : pages) {
-    page.collect(batches, docTransform, opacity(), budget, stats);
+  for (const auto &pageSlot : pages) {
+    if (!pageSlot) {
+      continue;
+    }
+    pageSlot->collect(batches, docTransform, opacity(), budget, stats);
   }
 }
 
@@ -553,12 +556,15 @@ glm::mat4 Doc::modelMatrix() const {
 std::optional<Doc::Anchor>
 Doc::anchorFor(const std::uint32_t globalOffset) const {
   for (std::size_t i = 0; i < pages.size(); i++) {
+    if (!pages[i]) {
+      continue;
+    }
     // Asked page by page rather than by searching, because the same call
     // decides whether the offset is on the page and where -- and the deciding
     // half is answered without shaping anything.
     Anchor anchor{static_cast<std::uint32_t>(i), 0.0F, 0.0F, 0.0F};
-    if (pages[i].caretGeometry(globalOffset, anchor.x, anchor.y,
-                               anchor.height)) {
+    if (pages[i]->caretGeometry(globalOffset, anchor.x, anchor.y,
+                                anchor.height)) {
       return anchor;
     }
   }
@@ -568,9 +574,12 @@ Doc::anchorFor(const std::uint32_t globalOffset) const {
 std::optional<Doc::BoxRect>
 Doc::boxFor(const std::uint32_t globalOffset) const {
   for (std::size_t i = 0; i < pages.size(); i++) {
+    if (!pages[i]) {
+      continue;
+    }
     BoxRect rect{static_cast<std::uint32_t>(i), 0.0F, 0.0F, 0.0F, 0.0F};
-    if (pages[i].boxGeometry(globalOffset, rect.x, rect.y, rect.width,
-                             rect.height)) {
+    if (pages[i]->boxGeometry(globalOffset, rect.x, rect.y, rect.width,
+                              rect.height)) {
       return rect;
     }
   }
@@ -615,8 +624,8 @@ Doc::approximateAnchorFor(const std::uint32_t globalOffset) const {
 std::optional<glm::vec3> Doc::worldPoint(const std::uint32_t pageIndex,
                                          const float posX,
                                          const float posY) const {
-  if (pageIndex < pages.size()) {
-    const auto point = modelMatrix() * pages[pageIndex].getModel() *
+  if (pageIndex < pages.size() && pages[pageIndex].has_value()) {
+    const auto point = modelMatrix() * pages[pageIndex]->getModel() *
                        glm::vec4(posX, posY, 0.0F, 1.0F);
     return glm::vec3(point);
   }
@@ -754,8 +763,11 @@ Page::highlightFor(const std::uint32_t selStart, const std::uint32_t selEnd,
 void Doc::highlightsFor(const std::uint32_t selStart,
                         const std::uint32_t selEnd, const std::uint32_t colour,
                         std::vector<render::HighlightRange> &out) const {
-  for (const auto &page : pages) {
-    if (auto range = page.highlightFor(selStart, selEnd, colour)) {
+  for (const auto &pageSlot : pages) {
+    if (!pageSlot) {
+      continue;
+    }
+    if (auto range = pageSlot->highlightFor(selStart, selEnd, colour)) {
       out.push_back(*range);
     }
   }
@@ -783,15 +795,18 @@ void Doc::drawCaret(RenderState &state, const glm::mat4 &viewProjection,
   if (!caret.active() || caret.documentIndex() != docIndex) {
     return;
   }
-  for (const auto &pageOn : pages) {
+  for (const auto &pageSlot : pages) {
+    if (!pageSlot) {
+      continue;
+    }
     float posX   = 0.0F;
     float posY   = 0.0F;
     float height = 0.0F;
-    if (!pageOn.caretGeometry(caret.byteOffset(), posX, posY, height)) {
+    if (!pageSlot->caretGeometry(caret.byteOffset(), posX, posY, height)) {
       continue;
     }
     caret.setGeometry(posX, posY, height);
-    caret.draw(state, viewProjection * modelMatrix() * pageOn.getModel());
+    caret.draw(state, viewProjection * modelMatrix() * pageSlot->getModel());
     return;
   }
 }
@@ -963,11 +978,14 @@ std::vector<int> Doc::lineBreaksAround(const std::uint32_t at) const {
   }
   std::size_t firstPage = 0;
   for (std::size_t i = 0; i < pages.size(); i++) {
-    if (at >= pages[i].baseOffset()) {
+    if (pages[i] && at >= pages[i]->baseOffset()) {
       firstPage = i;
     }
   }
-  return lineStartsFromShaping(pages[firstPage].ensureShaping());
+  if (!pages[firstPage]) {
+    return {};
+  }
+  return lineStartsFromShaping(pages[firstPage]->ensureShaping());
 }
 
 void Doc::scheduleReflow(RenderState &state, const std::uint32_t at,
@@ -977,15 +995,15 @@ void Doc::scheduleReflow(RenderState &state, const std::uint32_t at,
   // construction: text ahead of an edit cannot reflow.
   std::size_t firstPage = 0;
   for (std::size_t i = 0; i < pages.size(); i++) {
-    if (at >= pages[i].baseOffset()) {
+    if (pages[i] && at >= pages[i]->baseOffset()) {
       firstPage = i;
     }
   }
-  if (pages.empty()) {
+  if (pages.empty() || !pages[firstPage]) {
     return;
   }
 
-  const auto oldConsumed = pages[firstPage].textLength();
+  const auto oldConsumed = pages[firstPage]->textLength();
 
   auto self = getPtr();
   renderer->run([self, &state, firstPage, at, delta, oldStarts, oldConsumed] {
@@ -1063,6 +1081,10 @@ void Doc::reflowFrom(RenderState &state, const std::size_t firstPage,
                      const std::uint32_t at, const std::int32_t delta,
                      const std::vector<int> &oldStarts,
                      const std::uint32_t oldConsumed) {
+  // See ensurePagesBuiltThrough()'s own comment: everything below assumes
+  // pages[firstPage] itself, and everything before it, already exist.
+  ensurePagesBuiltThrough(state, firstPage + 1);
+
   // Lay the edited page out again and see how far the damage reaches.
   //
   // Pagination re-syncs as soon as a page ends where it used to, shifted by
@@ -1077,7 +1099,7 @@ void Doc::reflowFrom(RenderState &state, const std::size_t firstPage,
   // than going below zero, and would match at a wildly wrong page.
   const auto shift = static_cast<std::int64_t>(delta);
   std::vector<std::pair<std::uint32_t, PageShaping>> rebuilt;
-  auto offset     = pages[firstPage].baseOffset();
+  auto offset     = pages[firstPage]->baseOffset();
   auto pageCursor = firstPage;
   auto scope      = ReflowScope::Document;
 
@@ -1095,7 +1117,7 @@ void Doc::reflowFrom(RenderState &state, const std::size_t firstPage,
       if (static_cast<std::int64_t>(consumed) ==
           static_cast<std::int64_t>(oldConsumed) + shift) {
         const auto relativeAt =
-            static_cast<int>(at - pages[firstPage].baseOffset());
+            static_cast<int>(at - pages[firstPage]->baseOffset());
         scope = sameLineBreaks(oldStarts, lineStartsFromShaping(shaping),
                                relativeAt, static_cast<int>(delta))
                     ? ReflowScope::Line
@@ -1112,8 +1134,13 @@ void Doc::reflowFrom(RenderState &state, const std::size_t firstPage,
     if (pageCursor >= pages.size()) {
       break; // ran past the pages that existed; the tail is being rebuilt.
     }
-    if (static_cast<std::int64_t>(offset) ==
-        static_cast<std::int64_t>(pages[pageCursor].baseOffset()) + shift) {
+    // pages[pageCursor] is expected to already be built here -- nothing
+    // before Stage 3 builds out of order -- but a missing one simply never
+    // re-syncs early rather than dereferencing a gap.
+    if (pages[pageCursor] &&
+        static_cast<std::int64_t>(offset) ==
+            static_cast<std::int64_t>(pages[pageCursor]->baseOffset()) +
+                shift) {
       break; // re-synced further down.
     }
   }
@@ -1129,7 +1156,8 @@ void Doc::reflowFrom(RenderState &state, const std::size_t firstPage,
   std::vector<BufferPool::Allocation> inherited;
   inherited.reserve(replaced - firstPage);
   for (std::size_t i = firstPage; i < replaced; i++) {
-    inherited.push_back(pages[i].allocation());
+    inherited.push_back(pages[i] ? pages[i]->allocation()
+                                 : BufferPool::Allocation{});
   }
   // Any page that has no successor gives its rows back for good.
   for (std::size_t i = rebuilt.size(); i < inherited.size(); i++) {
@@ -1141,14 +1169,17 @@ void Doc::reflowFrom(RenderState &state, const std::size_t firstPage,
   std::vector<Page> tail;
   tail.reserve(pages.size() - tailFrom);
   for (std::size_t i = tailFrom; i < pages.size(); i++) {
-    tail.push_back(std::move(pages[i]));
+    // Guaranteed built: everything past firstPage was dense before this
+    // reflow started (nothing before Stage 3 builds out of order), and
+    // ensurePagesBuiltThrough() above only had to cover up to firstPage.
+    tail.push_back(std::move(*pages[i]));
   }
   pages.erase(pages.begin() + static_cast<std::ptrdiff_t>(firstPage),
               pages.end());
 
   float currentTopY = 0.0F;
   if (firstPage > 0 && firstPage <= pages.size()) {
-    const auto &prevPage        = pages[firstPage - 1];
+    const auto &prevPage        = *pages[firstPage - 1];
     const float prevCenterY     = prevPage.getModel()[3][1];
     const float prevHeightWorld = prevPage.heightPixels() * pixelsToWorld;
     const float prevBottomY     = prevCenterY - (prevHeightWorld / 2.0F);
@@ -1165,10 +1196,8 @@ void Doc::reflowFrom(RenderState &state, const std::size_t firstPage,
     glm::mat4 trans =
         glm::translate(glm::mat4(1.0F), glm::vec3(0.0F, centerY, 0.0F));
     trans = glm::scale(trans, glm::vec3(pixelsToWorld, pixelsToWorld, 1.0F));
-    pages.emplace_back(getPtr(), state, trans, std::move(shaping), base,
-                       static_cast<std::uint32_t>(index),
-                       i < inherited.size() ? inherited[i]
-                                            : BufferPool::Allocation{});
+    placePageAt(state, index, std::move(shaping), base, trans,
+               i < inherited.size() ? inherited[i] : BufferPool::Allocation{});
 
     currentTopY =
         (centerY - (pageHeightWorld / 2.0F)) - (pageGapPx * pixelsToWorld);
@@ -1298,8 +1327,15 @@ void Doc::makePages() {
     const auto heightPx = pageBoxFor(shaping).height;
     {
       std::lock_guard lock(shapingMutex);
-      pendingShapings.push_back(PendingShaping{
-          std::move(shaping), static_cast<std::uint32_t>(tSize)});
+      // This page's true index is exactly how many entries already exist:
+      // makePages() always shapes strictly in document order, and this
+      // entry and its pendingShapings counterpart are recorded together
+      // under the same lock, so the two never drift apart.
+      const auto pageIndex =
+          static_cast<std::uint32_t>(pageEntries.size());
+      pendingShapings.emplace(
+          pageIndex, PendingShaping{std::move(shaping),
+                                    static_cast<std::uint32_t>(tSize)});
       pageEntries.push_back(gleditor::enfilade::LayoutEntry{
           .byteLength = consumed,
           .heightPx   = heightPx + pageGapPx,
@@ -1372,19 +1408,17 @@ bool Doc::buildPendingPages(RenderState &state) {
   if (fullyLoaded) {
     return true;
   }
-  std::vector<PendingShaping> toBuild;
+  std::map<std::uint32_t, PendingShaping> toBuild;
   {
     std::lock_guard lock(shapingMutex);
     toBuild.swap(pendingShapings);
   }
-  float currentTopY = 0.0F;
-  if (!pages.empty()) {
-    const auto &lastPage        = pages.back();
-    const float lastCenterY     = lastPage.getModel()[3][1];
-    const float lastHeightWorld = lastPage.heightPixels() * pixelsToWorld;
-    const float lastBottomY     = lastCenterY - (lastHeightWorld / 2.0F);
-    currentTopY                 = lastBottomY - (pageGapPx * pixelsToWorld);
-  }
+
+  // Every key in toBuild was recorded alongside its pageEntries entry under
+  // the same lock (see makePages()), so the filade already knows each one's
+  // Y position without needing pages.back() -- which would not mean
+  // anything to chain from once a page can be built out of order (Stage 3).
+  refreshPageIndexFilade();
 
   // Bounded so that a backlog the background shaping thread got ahead on --
   // whether from a slow render-thread startup or simply outpacing this loop
@@ -1396,40 +1430,42 @@ bool Doc::buildPendingPages(RenderState &state) {
   // that gap faster instead of waiting behind every page before it.
   const auto buildBudget = buildBudgetForThisCall();
   const auto buildStart  = std::chrono::steady_clock::now();
-  std::size_t built      = 0;
-  for (auto &[shaping, textOffset] : toBuild) {
-    const auto numPages         = pages.size();
-    const float pageHeightPx    = pageBoxFor(shaping).height;
+  auto it                = toBuild.begin();
+  for (; it != toBuild.end(); ++it) {
+    const auto trueIndex = it->first;
+    auto &entry          = it->second;
+    // Always present: see the comment above the refreshPageIndexFilade()
+    // call.
+    const auto hit              = pageIndexFilade.findEntryByIndex(trueIndex);
+    const float startYPx        = hit ? hit->startYPx : 0.0F;
+    const float pageHeightPx    = pageBoxFor(entry.shaping).height;
     const float pageHeightWorld = pageHeightPx * pixelsToWorld;
-    const float centerY         = currentTopY - (pageHeightWorld / 2.0F);
+    const float topYWorld       = -startYPx * pixelsToWorld;
+    const float centerY         = topYWorld - (pageHeightWorld / 2.0F);
 
     glm::mat4 trans =
         glm::translate(glm::mat4(1.0F), glm::vec3(0.0F, centerY, 0.0F));
     trans = glm::scale(trans, glm::vec3(pixelsToWorld, pixelsToWorld, 1.0F));
-    pages.emplace_back(getPtr(), state, trans, std::move(shaping), textOffset,
-                       static_cast<std::uint32_t>(numPages));
-    ++built;
-
-    currentTopY =
-        (centerY - (pageHeightWorld / 2.0F)) - (pageGapPx * pixelsToWorld);
+    placePageAt(state, trueIndex, std::move(entry.shaping), entry.textOffset,
+               trans);
 
     // Always build at least one page per call even if it alone exceeds the
     // budget, so a single expensive page (e.g. one that grows the glyph
     // atlas) cannot stall progress -- checked after building rather than
     // before, since the cost being budgeted is the build that just ran.
     if (std::chrono::steady_clock::now() - buildStart >= buildBudget) {
+      ++it;
       break;
     }
   }
 
-  if (built < toBuild.size()) {
-    // Whatever this call didn't get to goes back in front of anything the
-    // background thread has appended since the swap above, preserving the
-    // document order buildPendingPages()'s own stacking math (currentTopY)
-    // and the glyph-atlas insertion order both depend on.
+  if (it != toBuild.end()) {
+    // Whatever this call didn't get to goes back, merged with anything the
+    // background thread has appended since the swap above -- keys never
+    // collide, since every one names a page index this call either built or
+    // never reached.
     std::lock_guard lock(shapingMutex);
-    pendingShapings.insert(pendingShapings.begin(),
-                           std::make_move_iterator(toBuild.begin()) + built,
+    pendingShapings.insert(std::make_move_iterator(it),
                            std::make_move_iterator(toBuild.end()));
     return false;
   }
@@ -1447,10 +1483,10 @@ bool Doc::buildPendingPages(RenderState &state) {
 
 void Doc::newPage(RenderState &state, PageShaping aShaping,
                   const std::uint32_t textOffset) {
-  const auto numPages = this->pages.size();
-  float currentTopY   = 0.0F;
-  if (!pages.empty()) {
-    const auto &prevPage        = pages.back();
+  const auto index   = pages.size();
+  float currentTopY  = 0.0F;
+  if (!pages.empty() && pages.back()) {
+    const auto &prevPage        = *pages.back();
     const float prevCenterY     = prevPage.getModel()[3][1];
     const float prevHeightWorld = prevPage.heightPixels() * pixelsToWorld;
     const float prevBottomY     = prevCenterY - (prevHeightWorld / 2.0F);
@@ -1463,6 +1499,69 @@ void Doc::newPage(RenderState &state, PageShaping aShaping,
   glm::mat4 trans =
       glm::translate(glm::mat4(1.0F), glm::vec3(0.0F, centerY, 0.0F));
   trans = glm::scale(trans, glm::vec3(pixelsToWorld, pixelsToWorld, 1.0F));
-  pages.emplace_back(this->getPtr(), state, trans, std::move(aShaping),
-                     textOffset, static_cast<std::uint32_t>(numPages));
+  placePageAt(state, index, std::move(aShaping), textOffset, trans);
+}
+
+void Doc::placePageAt(RenderState &state, const std::size_t index,
+                      PageShaping shaping, const std::uint32_t textOffset,
+                      const glm::mat4 &trans,
+                      const BufferPool::Allocation &inherited) {
+  if (pages.size() <= index) {
+    pages.resize(index + 1);
+  }
+  // Page's constructor takes its model by mutable reference.
+  glm::mat4 transCopy = trans;
+  pages[index].emplace(getPtr(), state, transCopy, std::move(shaping),
+                       textOffset, static_cast<std::uint32_t>(index),
+                       inherited);
+}
+
+void Doc::ensurePagesBuiltThrough(RenderState &state,
+                                  const std::size_t exclusiveEnd) {
+  if (pages.size() < exclusiveEnd) {
+    pages.resize(exclusiveEnd);
+  }
+  bool anyMissing = false;
+  for (std::size_t i = 0; i < exclusiveEnd; i++) {
+    if (!pages[i]) {
+      anyMissing = true;
+      break;
+    }
+  }
+  if (!anyMissing) {
+    return;
+  }
+
+  refreshPageIndexFilade();
+  for (std::size_t i = 0; i < exclusiveEnd; i++) {
+    if (pages[i]) {
+      continue;
+    }
+    const auto hit = pageIndexFilade.findEntryByIndex(i);
+    if (!hit) {
+      // Not even shaped yet -- nothing this guard can do; buildPendingPages()
+      // will fill it in once the background loader reaches it.
+      continue;
+    }
+    auto shaping                = layoutFrom(hit->startByte);
+    const float pageHeightPx    = pageBoxFor(shaping).height;
+    const float pageHeightWorld = pageHeightPx * pixelsToWorld;
+    const float topYWorld       = -hit->startYPx * pixelsToWorld;
+    const float centerY         = topYWorld - (pageHeightWorld / 2.0F);
+
+    glm::mat4 trans =
+        glm::translate(glm::mat4(1.0F), glm::vec3(0.0F, centerY, 0.0F));
+    trans = glm::scale(trans, glm::vec3(pixelsToWorld, pixelsToWorld, 1.0F));
+    placePageAt(state, i, std::move(shaping), hit->startByte, trans);
+    {
+      std::lock_guard lock(shapingMutex);
+      pendingShapings.erase(static_cast<std::uint32_t>(i));
+    }
+  }
+}
+
+std::size_t Doc::builtPageCount() const {
+  return static_cast<std::size_t>(std::count_if(
+      pages.begin(), pages.end(),
+      [](const std::optional<Page> &slot) { return slot.has_value(); }));
 }

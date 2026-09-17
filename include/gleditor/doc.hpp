@@ -14,6 +14,7 @@
 #include <gleditor/renderer.hpp>
 #include <glm/ext/matrix_float4x4.hpp>
 #include <glm/ext/vector_float3.hpp>
+#include <map>
 #include <memory>
 #include <mutex>
 #include <optional>
@@ -32,6 +33,9 @@
 class Caret;
 class Doc;
 struct RenderState;
+// Test-only friend: constructs a gap in Doc::pages directly, since nothing
+// production does yet -- see design/priority-page-building.md's Stage 2.
+class DocGapTest;
 
 namespace render {
 class RenderDevice;
@@ -330,7 +334,17 @@ const char *reflowScopeName(ReflowScope scope);
 
 class Doc : public Drawable, public std::enable_shared_from_this<Doc> {
 private:
-  std::vector<Page> pages;
+  /**
+   * @brief Built pages, indexed by their true page number.
+   *
+   * A slot is nullopt for a page that has been *shaped* (see pageEntries)
+   * but not yet built into GPU resources -- the gap Stage 3 needs once
+   * something actually builds out of order. Nothing does yet: every
+   * production path here still fills this in strict document order, so a
+   * missing slot only ever means "not reached yet", never "skipped". See
+   * design/priority-page-building.md's Stage 2.
+   */
+  std::vector<std::optional<Page>> pages;
   /**
    * @brief Pages whose shaping is currently being kept, oldest first.
    *
@@ -430,6 +444,43 @@ private:
   /// The line breaks of the page an edit at @p at lands on, as they are before
   /// it is made. Must be called before the text is changed.
   [[nodiscard]] std::vector<int> lineBreaksAround(std::uint32_t at) const;
+  /**
+   * @brief Place a built page at its true index, growing @ref pages if
+   *        @p index reaches past its current extent.
+   *
+   * The one place every page actually gets built, so buildPendingPages(),
+   * newPage(), reflowFrom() and the gap-filling guard below all agree on how
+   * a slot is filled -- and so that none of them has to know whether @p
+   * index is "the next one" or one further out than @ref pages currently
+   * reaches. @p trans is the page's already-computed model transform: each
+   * caller derives it its own way (a chain from the previous page, or a
+   * lookup in pageIndexFilade), since that is the one part Stage 2
+   * deliberately leaves caller-specific -- see
+   * design/priority-page-building.md's Stage 2.
+   */
+  void placePageAt(RenderState &state, std::size_t index, PageShaping shaping,
+                   std::uint32_t textOffset, const glm::mat4 &trans,
+                   const BufferPool::Allocation &inherited = {});
+  /**
+   * @brief Synchronously build every unbuilt page in [0, exclusiveEnd).
+   *
+   * reflowFrom() assumes 0..firstPage already exist -- it reads
+   * pages[firstPage]'s current offset to know where to restart layout, and
+   * walks backward from it to find prior pages' rows to inherit. That is
+   * true unconditionally today, since nothing yet builds out of order; once
+   * something does (Stage 3), an edit landing on a page nothing has built
+   * yet -- unreachable by clicking, since a click requires the page drawn,
+   * but reachable by an automation script typing at an arbitrary offset --
+   * would otherwise dereference a gap. A page's shaping is always
+   * reproducible from its own start offset (Page::ensureShaping()'s own
+   * contract), and pageIndexFilade already knows every shaped page's start
+   * offset and Y position, so this needs nothing pendingShapings still
+   * holds. A page not even shaped yet (still racing the background loader)
+   * is left alone; only buildPendingPages() can do anything about that, and
+   * reflowFrom() calling this for an offset that far ahead would be a bug
+   * elsewhere, not something to paper over here.
+   */
+  void ensurePagesBuiltThrough(RenderState &state, std::size_t exclusiveEnd);
   /// How much of render::kPageBuildFrameBudget this buildPendingPages() call
   /// gets: the plain budget, or render::kPageBuildCatchUpMultiplier times it
   /// when the camera, or a page named in priorityOffsets, is well past
@@ -763,7 +814,9 @@ public:
   void setDocIndex(const std::uint32_t index) { docIndex = index; }
   [[nodiscard]] std::uint32_t documentIndex() const { return docIndex; }
   [[nodiscard]] const Page *page(const std::size_t index) const {
-    return index < pages.size() ? &pages[index] : nullptr;
+    return (index < pages.size() && pages[index].has_value())
+               ? &*pages[index]
+               : nullptr;
   }
 
   /// The measured coordinate frame of one built page.
@@ -906,7 +959,30 @@ public:
   void highlightsFor(std::uint32_t selStart, std::uint32_t selEnd,
                      std::uint32_t colour,
                      std::vector<render::HighlightRange> &out) const;
-  [[nodiscard]] size_t numPages() const { return pages.size(); }
+  /**
+   * @brief How many pages this document is known to have so far.
+   *
+   * Every page *shaped* (see pageEntries), whether or not it has been built
+   * into GPU resources yet -- grows as the background shaping thread makes
+   * progress, final once isFullyLoaded(). "How many exist" and "how many
+   * are built" stop being the same number once building can fall behind
+   * shaping (which it always could -- see design/kjv-load-blocking-regression.md)
+   * or, once Stage 3 turns on priority ordering, build ahead of it; this
+   * answers the former, which is what every production caller (picking's
+   * loop bound in src/a11y/documents.cpp, and the "has this document
+   * produced anything at all" checks in src/renderer.cpp) actually wants.
+   * For "how many are built", see builtPageCount().
+   */
+  [[nodiscard]] std::size_t numPages() const {
+    const std::lock_guard lock(shapingMutex);
+    return pageEntries.size();
+  }
+  /// How many pages have actually been built into GPU resources -- may be
+  /// fewer than numPages() while a backlog is still being worked through,
+  /// and (once Stage 3 turns on priority ordering) does not have to name a
+  /// prefix: a page a beam pointed at can be built before an earlier one
+  /// nothing yet needs.
+  [[nodiscard]] std::size_t builtPageCount() const;
   /// Width of this document's page in world units.
   [[nodiscard]] float pageWidthWorld() const {
     return pageGeometry.widthPx * pixelsToWorld;
@@ -1009,7 +1085,12 @@ public:
   /// read-only queries that only happen to need to refresh the mutable cache
   /// below on demand.
   mutable std::mutex shapingMutex;
-  std::vector<PendingShaping> pendingShapings;
+  /// Shaped pages not yet built, keyed by true page index rather than kept
+  /// as a FIFO -- a std::map keeps ascending key order for free, which is
+  /// exactly the order buildPendingPages() still drains in (Stage 2 does
+  /// not reorder anything), and is what lets Stage 3 later pull a
+  /// out-of-order key without the container itself needing to change again.
+  std::map<std::uint32_t, PendingShaping> pendingShapings;
   std::atomic<bool> shapingComplete{false};
 
   /// One entry per page whose shaping has completed, appended by makePages()
@@ -1050,6 +1131,7 @@ public:
   std::vector<std::uint32_t> priorityOffsets;
 
   friend class Page;
+  friend class DocGapTest;
 };
 
 #endif // GLEDITOR_DOC_H

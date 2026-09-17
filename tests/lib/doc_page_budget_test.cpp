@@ -98,7 +98,7 @@ TEST_F(DocPageBudgetTest,
   EXPECT_FALSE(doneAfterFirstCall)
       << "the whole backlog was built in a single call -- the per-call "
          "budget stopped taking effect";
-  EXPECT_GT(doc->numPages(), 0U);
+  EXPECT_GT(doc->builtPageCount(), 0U);
 
   // A generous multiple of the configured budget: real per-page cost varies
   // (this call always builds at least one page even if it alone exceeds the
@@ -108,7 +108,7 @@ TEST_F(DocPageBudgetTest,
       << "a single buildPendingPages() call took far longer than its "
          "budget -- likely the whole backlog got built in one call again";
 
-  const auto firstCallPages = doc->numPages();
+  const auto firstCallPages = doc->builtPageCount();
 
   std::size_t calls = 1;
   while (!doc->isFullyLoaded()) {
@@ -120,7 +120,7 @@ TEST_F(DocPageBudgetTest,
   EXPECT_GT(calls, 1U) << "the whole document finished in one call -- this "
                           "document was not large enough to exercise the "
                           "per-call budget";
-  EXPECT_GT(doc->numPages(), firstCallPages)
+  EXPECT_GT(doc->builtPageCount(), firstCallPages)
       << "later calls made no further progress";
 }
 
@@ -134,7 +134,7 @@ TEST_F(DocPageBudgetTest, CatchesUpFasterWhenTheCameraIsAheadOfBuildProgress) {
   // pays, so that cost lands in the baseline rather than skewing the
   // comparison below.
   doc->buildPendingPages(*state);
-  const auto normalPacePages = doc->numPages();
+  const auto normalPacePages = doc->builtPageCount();
   ASSERT_GT(normalPacePages, 0U);
 
   // Move the camera deep into this document's own stacking direction
@@ -151,7 +151,7 @@ TEST_F(DocPageBudgetTest, CatchesUpFasterWhenTheCameraIsAheadOfBuildProgress) {
   }
 
   doc->buildPendingPages(*state);
-  const auto catchUpCallPages = doc->numPages() - normalPacePages;
+  const auto catchUpCallPages = doc->builtPageCount() - normalPacePages;
 
   // A conservative fraction of render::kPageBuildCatchUpMultiplier: comfortably
   // more than a warm cache alone would explain, comfortably less than the
@@ -168,7 +168,7 @@ TEST_F(DocPageBudgetTest, PriorityOffsetFarAheadEngagesCatchUpToo) {
   // Same baseline reasoning as the camera test above: the very first call's
   // one-time warm-up cost lands here rather than skewing the comparison.
   doc->buildPendingPages(*state);
-  const auto normalPacePages = doc->numPages();
+  const auto normalPacePages = doc->builtPageCount();
   ASSERT_GT(normalPacePages, 0U);
 
   // Push a priority offset near the very end of the document, as LinkBeams
@@ -179,7 +179,7 @@ TEST_F(DocPageBudgetTest, PriorityOffsetFarAheadEngagesCatchUpToo) {
       static_cast<std::uint32_t>(doc->contents().size() - 1)});
 
   doc->buildPendingPages(*state);
-  const auto catchUpCallPages = doc->numPages() - normalPacePages;
+  const auto catchUpCallPages = doc->builtPageCount() - normalPacePages;
 
   EXPECT_GT(catchUpCallPages, normalPacePages * 2)
       << "a priority offset far past build progress should let one call "
@@ -193,7 +193,7 @@ TEST_F(DocPageBudgetTest, PageIndexForOffsetAnswersBeforeAnyPageIsBuilt) {
   // Nothing has been built yet -- anchorFor() answers nullopt for every
   // offset here, which is exactly the gap pageIndexForOffset() exists to
   // close (see its own doc comment on Doc).
-  ASSERT_EQ(doc->numPages(), 0U);
+  ASSERT_EQ(doc->builtPageCount(), 0U);
   ASSERT_FALSE(doc->anchorFor(0).has_value());
 
   const auto earlyPage = doc->pageIndexForOffset(0);
