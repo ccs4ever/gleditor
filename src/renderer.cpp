@@ -416,12 +416,22 @@ bool Renderer::update(RenderState &state, const bool settled) {
   // asynchronous, so this only queues it; the answer is collected below on a
   // later frame.
   //
-  // Only frames whose document pages are built are queried: a frame drawn
-  // while pages are still being built would answer for a document that is not
-  // there yet, which for --pick means reporting an empty tag and exiting.
-  // When an edit has scheduled a reflow, the script waits for the reflow to
-  // settle before taking the next step.
-  if (!docsLoading(state)) {
+  // Only settled frames are queried: a frame drawn while pages are still
+  // being built would answer for a document that is not there yet, which for
+  // --pick means reporting an empty tag and exiting -- but building alone
+  // (docsLoading()) is not enough. A document's own arrival animation eases
+  // its position and opacity into place over docArrival seconds
+  // (Doc::animateArrival()), moving where its content actually sits on
+  // screen; querying before that finishes made --pick's answer depend on
+  // real wall-clock timing (how many render iterations happened to run
+  // before the query landed), varying between otherwise-identical runs even
+  // though the final settled frame is always the same. settled already
+  // means !hasPendingWork() (which includes the arrival animation) and
+  // !docsLoading(state) together, matching advanceScript()'s own doc
+  // comment ("One step per settled frame at most"). When an edit has
+  // scheduled a reflow, the script waits for the reflow to settle before
+  // taking the next step.
+  if (settled) {
     if (awaitingSettle) {
       if (settled) {
         // The frame this step's work was scheduled on has been and gone, and

@@ -48,8 +48,16 @@ else
 fi
 
 # Pixels the picking query is compared at. The first is page background, the
-# rest land on glyphs, so agreement covers both tag kinds.
-PICK_PIXELS="200,240 300,265 420,265 250,305 400,345"
+# rest land on glyphs, so agreement covers both tag kinds. Chosen by scanning
+# the actual rendered frame rather than guessed -- the previous coordinates
+# had drifted off both the page and the text entirely (three landed on kind
+# 0, empty space, and the other two on kind 2, page background, so this
+# check had stopped exercising glyph picking at all), and were verified
+# stable across repeated runs before being picked: a pixel merely inside a
+# glyph's bounding box can still land just outside its ink on some runs, as
+# the camera's settled sub-pixel position is not perfectly identical between
+# separate process invocations (see the cluster-field tolerance below).
+PICK_PIXELS="500,300 175,320 295,340 185,350 215,360"
 
 # The notification overlay is drawn in window pixels through an orthographic
 # projection rather than the document camera, so it exercises a transform the
