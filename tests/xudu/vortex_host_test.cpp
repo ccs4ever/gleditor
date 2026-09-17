@@ -227,3 +227,66 @@ TEST(VortexHostTest, VQLCompilationPromotionToStore) {
       updatedManifold.linked(targetCell, spinDim, DimVector::POS);
   EXPECT_EQ(linkedToTarget, promoted->cells.front());
 }
+
+TEST(VortexHostTest, VQLQuickNavigationEvaluation) {
+  VortexHost host;
+  auto &arena = host.arena();
+
+  CellRef root  = arena.makeCell("Start");
+  CellRef child = arena.makeCell("Child");
+  DimRef d1     = host.core().mintDimension("d.1");
+  arena.link(root, d1, DimVector::POS, child);
+
+  // Navigate relative to root: "/d.1"
+  auto target = host.navigatePath("/d.1", root);
+  ASSERT_TRUE(target.has_value());
+  EXPECT_EQ(*target, child);
+
+  // Navigation with non-existent path
+  auto missing = host.navigatePath("/d.missing", root);
+  EXPECT_FALSE(missing.has_value());
+}
+
+TEST(VortexHostTest, VQLOneTimeScriptExecution) {
+  VortexHost host;
+  auto &arena = host.arena();
+
+  CellRef root = arena.makeCell("Origin");
+  auto res     = host.executeScript("weave { /d.step%Child }", root);
+  EXPECT_TRUE(res.success) << res.message;
+  EXPECT_FALSE(res.affectedCells.empty());
+
+  DimRef stepDim = host.core().dims().step;
+  CellRef child  = arena.linked(root, stepDim, DimVector::POS);
+  EXPECT_NE(child, noCell);
+}
+
+TEST(VortexHostTest, VQLMacroRegistrationAndSystemStorePersistence) {
+  Store store;
+  initializeSystemStore(store, SystemDocKind::Keymap);
+  auto parent = store.primaryCurrentVersion();
+
+  VortexHost host;
+  // Save a macro to the store
+  parent = host.saveMacroToStore("hop-child", "/d.1[0]", "Ctrl+J", store);
+  EXPECT_EQ(host.getMacro("hop-child"), "/d.1[0]");
+
+  // A second host can load macros from the store
+  VortexHost host2;
+  EXPECT_EQ(host2.getMacro("hop-child"), std::nullopt);
+  host2.loadMacrosFromStore(store);
+  EXPECT_EQ(host2.getMacro("hop-child"), "/d.1[0]");
+
+  // Set up a cell to test macro dispatch
+  auto &arena   = host2.arena();
+  CellRef root  = arena.makeCell("Root");
+  CellRef child = arena.makeCell("Dest");
+  DimRef d1     = host2.core().mintDimension("d.1");
+  arena.link(root, d1, DimVector::POS, child);
+
+  ViewAxisBinding axes{};
+  CellRef newFocus = noCell;
+  bool handled     = host2.dispatchAction("hop-child", root, axes, newFocus);
+  EXPECT_TRUE(handled);
+  EXPECT_EQ(newFocus, child);
+}

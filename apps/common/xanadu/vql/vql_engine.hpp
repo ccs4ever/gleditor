@@ -103,7 +103,8 @@ private:
   void executeActionClause(const ActionClause &action,
                            std::vector<zigzag::CellRef> &accumulatedResults);
 
-  void executeEffectClause(const EffectClause &eff);
+  void executeEffectClause(const EffectClause &eff,
+                           std::vector<zigzag::CellRef> &accumulatedResults);
 
   zigzag::CellRef cellFromValue(const zigzag::vortex::CellValue &val);
 

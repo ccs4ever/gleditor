@@ -5,8 +5,10 @@
 #include "common/xanadu/vortex/vortex_host.hpp"
 
 #include <algorithm>
+#include <format>
 #include <iostream>
 
+#include "common/xanadu/vql/parser.hpp"
 #include "common/xanadu/zigzag/dimension_registry.hpp"
 
 namespace zigzag::vortex {
@@ -130,11 +132,16 @@ bool VortexHost::dispatchAction(std::string_view actionName, CellRef focusCell,
 
   auto macroIt = macroRegistry_.find(std::string(actionName));
   if (macroIt != macroRegistry_.end()) {
-    auto results = vqlEngine_.execute(macroIt->second);
-    if (!results.empty()) {
-      newFocusOut = results.back();
+    auto target = navigatePath(macroIt->second, focusCell);
+    if (target.has_value() && *target != noCell) {
+      newFocusOut = *target;
+      return true;
     }
-    return true;
+    auto res = executeScript(macroIt->second, focusCell);
+    if (res.success && !res.affectedCells.empty()) {
+      newFocusOut = res.affectedCells.back();
+    }
+    return res.success;
   }
 
   auto customIt = customActionRoutines_.find(std::string(actionName));
@@ -306,10 +313,111 @@ std::optional<zigzag::Promoted> VortexHost::promoteAndAttachToStore(
 std::vector<CellRef>
 VortexHost::executeVQL(std::string_view queryOrWeave,
                        const std::vector<CellRef> &contextCells) {
-  if (contextCells.empty()) {
-    return vqlEngine_.execute(queryOrWeave);
+  try {
+    xanadu::vql::Parser parser(queryOrWeave);
+    auto expr = parser.parseQuery();
+    if (std::holds_alternative<xanadu::vql::PathExpression>(expr.expr)) {
+      return vqlEngine_.evaluatePath(
+          std::get<xanadu::vql::PathExpression>(expr.expr), contextCells);
+    }
+    return vqlEngine_.execute(expr);
+  } catch (const std::exception &err) {
+    std::cerr << "VortexHost::executeVQL error: " << err.what() << "\n";
+    return {};
   }
-  return vqlEngine_.execute(queryOrWeave);
+}
+
+std::optional<CellRef> VortexHost::navigatePath(std::string_view pathExpr,
+                                                CellRef currentFocus) {
+  try {
+    std::string query(pathExpr);
+    while (!query.empty() &&
+           std::isspace(static_cast<unsigned char>(query.front()))) {
+      query.erase(query.begin());
+    }
+    while (!query.empty() &&
+           std::isspace(static_cast<unsigned char>(query.back()))) {
+      query.pop_back();
+    }
+    if (query.empty()) {
+      return std::nullopt;
+    }
+
+    xanadu::vql::Parser parser(query);
+    auto expr = parser.parseQuery();
+    std::vector<CellRef> results;
+    if (std::holds_alternative<xanadu::vql::PathExpression>(expr.expr)) {
+      std::vector<CellRef> ctx;
+      if (currentFocus != noCell) {
+        ctx.push_back(currentFocus);
+      }
+      results = vqlEngine_.evaluatePath(
+          std::get<xanadu::vql::PathExpression>(expr.expr), ctx);
+    } else {
+      results = vqlEngine_.execute(expr);
+    }
+    if (!results.empty() && results.front() != noCell) {
+      return results.front();
+    }
+  } catch (const std::exception &err) {
+    std::cerr << "VortexHost::navigatePath error: " << err.what() << "\n";
+  }
+  return std::nullopt;
+}
+
+VortexHost::ScriptResult VortexHost::executeScript(std::string_view script,
+                                                   CellRef contextCell,
+                                                   xanadu::Store *store) {
+  ScriptResult res;
+  try {
+    std::string query(script);
+    while (!query.empty() &&
+           std::isspace(static_cast<unsigned char>(query.front()))) {
+      query.erase(query.begin());
+    }
+    while (!query.empty() &&
+           std::isspace(static_cast<unsigned char>(query.back()))) {
+      query.pop_back();
+    }
+    if (query.empty()) {
+      res.message = "Empty script";
+      return res;
+    }
+
+    if (contextCell != noCell) {
+      vqlEngine_.setVariable(".", contextCell);
+    }
+    xanadu::vql::Parser parser(query);
+    auto expr = parser.parseQuery();
+    std::vector<CellRef> cells;
+    if (std::holds_alternative<xanadu::vql::PathExpression>(expr.expr)) {
+      std::vector<CellRef> ctx;
+      if (contextCell != noCell) {
+        ctx.push_back(contextCell);
+      }
+      cells = vqlEngine_.evaluatePath(
+          std::get<xanadu::vql::PathExpression>(expr.expr), ctx);
+    } else {
+      cells = vqlEngine_.execute(expr);
+    }
+
+    res.affectedCells = cells;
+    res.success       = true;
+    res.message = std::format("Executed VQL ({} cells affected)", cells.size());
+
+    if (store && !cells.empty()) {
+      for (CellRef c : cells) {
+        if (zigzag::isEphemeral(c)) {
+          static_cast<void>(zigzag::promote(
+              *store, store->primaryCurrentVersion(), arena_, c));
+        }
+      }
+    }
+  } catch (const std::exception &err) {
+    res.success = false;
+    res.message = std::string("VQL Script Error: ") + err.what();
+  }
+  return res;
 }
 
 bool VortexHost::defineMacro(std::string_view name, std::string_view vqlExpr,
@@ -319,8 +427,28 @@ bool VortexHost::defineMacro(std::string_view name, std::string_view vqlExpr,
   if (persistStore) {
     try {
       auto parent = persistStore->primaryCurrentVersion();
-      xanadu::setSetting(*persistStore, parent, "macro." + std::string(name),
-                         std::string(vqlExpr));
+      if (persistStore->homeCell() == noCell) {
+        parent = xanadu::initializeSystemStoreGenesis(
+            *persistStore, xanadu::SystemDocKind::Keymap, parent);
+      } else {
+        auto groupsDim = zigzag::DimensionRegistry::instance().get(
+            *persistStore, xanadu::kDimGroups);
+        auto m = persistStore->rebuildManifold(parent);
+        if (groupsDim == noCell || m.linked(persistStore->homeCell(), groupsDim,
+                                            DimVector::POS) == noCell) {
+          parent = xanadu::initializeSystemStoreGenesis(
+              *persistStore, xanadu::SystemDocKind::Keymap, parent);
+        }
+      }
+      xanadu::SettingSpec spec{
+          .name    = "macro." + std::string(name),
+          .notes   = "User macro: " + std::string(name),
+          .schemas = {{{"string"}, {std::string{vqlExpr}}}}};
+      parent = xanadu::ensureSetting(*persistStore, parent, spec);
+      parent = xanadu::setSetting(*persistStore, parent,
+                                  "macro." + std::string(name),
+                                  std::string(vqlExpr));
+      persistStore->repointCurrentVersion(parent);
       return true;
     } catch (const std::exception &err) {
       std::cerr << "VortexHost: failed to persist macro " << name << ": "
@@ -329,6 +457,57 @@ bool VortexHost::defineMacro(std::string_view name, std::string_view vqlExpr,
     }
   }
   return true;
+}
+
+void VortexHost::loadMacrosFromStore(const xanadu::Store &keymapStore) {
+  if (keymapStore.opCount() == 0 || keymapStore.homeCell() == noCell) {
+    return;
+  }
+  const auto model = xanadu::SystemStoreModel::fromStore(keymapStore);
+  for (const auto &s : model.settings()) {
+    if (s.name.starts_with("macro.")) {
+      std::string macroName     = s.name.substr(6);
+      macroRegistry_[macroName] = s.value.asString(0);
+    }
+  }
+}
+
+xanadu::MicroversionId VortexHost::saveMacroToStore(
+    std::string_view macroName, std::string_view vqlExpr,
+    std::string_view keyBinding, xanadu::Store &keymapStore) {
+  macroRegistry_[std::string(macroName)] = std::string(vqlExpr);
+  auto parent                            = keymapStore.primaryCurrentVersion();
+  if (keymapStore.homeCell() == noCell) {
+    parent = xanadu::initializeSystemStoreGenesis(
+        keymapStore, xanadu::SystemDocKind::Keymap, parent);
+  } else {
+    auto groupsDim = zigzag::DimensionRegistry::instance().get(
+        keymapStore, xanadu::kDimGroups);
+    auto m = keymapStore.rebuildManifold(parent);
+    if (groupsDim == noCell ||
+        m.linked(keymapStore.homeCell(), groupsDim, DimVector::POS) == noCell) {
+      parent = xanadu::initializeSystemStoreGenesis(
+          keymapStore, xanadu::SystemDocKind::Keymap, parent);
+    }
+  }
+  xanadu::SettingSpec spec{.name    = "macro." + std::string(macroName),
+                           .notes   = "User macro: " + std::string(macroName),
+                           .schemas = {{{"string"}, {std::string{vqlExpr}}}}};
+  parent = xanadu::ensureSetting(keymapStore, parent, spec);
+  parent =
+      xanadu::setSetting(keymapStore, parent, "macro." + std::string(macroName),
+                         std::string(vqlExpr));
+  if (!keyBinding.empty()) {
+    xanadu::SettingSpec bindSpec{
+        .name    = std::string(macroName),
+        .notes   = "Key binding for macro " + std::string(macroName),
+        .schemas = {{{"string"}, {std::string{keyBinding}}}}};
+    parent = xanadu::ensureSetting(keymapStore, parent, bindSpec);
+    parent = xanadu::setSetting(keymapStore, parent, macroName,
+                                std::string(keyBinding));
+  }
+  keymapStore.repointCurrentVersion(parent);
+  return parent;
 }
 
 std::optional<std::string> VortexHost::getMacro(std::string_view name) const {

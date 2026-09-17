@@ -164,7 +164,14 @@ VQLEngine::resolveAnchor(const AnchorNode &anchor,
   }
 
   case AnchorKind::Context:
-    results = contextCells;
+    if (!contextCells.empty()) {
+      results = contextCells;
+    } else {
+      auto it = env_.find(".");
+      if (it != env_.end()) {
+        results = it->second;
+      }
+    }
     break;
 
   case AnchorKind::Create: {
@@ -888,7 +895,8 @@ void VQLEngine::executeActionClause(
       }
     }
   } else if (std::holds_alternative<EffectClause>(action.clause)) {
-    executeEffectClause(std::get<EffectClause>(action.clause));
+    executeEffectClause(std::get<EffectClause>(action.clause),
+                        accumulatedResults);
   } else if (std::holds_alternative<ConditionalClause>(action.clause)) {
     const auto &cond = std::get<ConditionalClause>(action.clause);
     if (evaluatePredicate(cond.condition, zigzag::noCell)) {
@@ -903,18 +911,26 @@ void VQLEngine::executeActionClause(
   }
 }
 
-void VQLEngine::executeEffectClause(const EffectClause &eff) {
+void VQLEngine::executeEffectClause(
+    const EffectClause &eff, std::vector<zigzag::CellRef> &accumulatedResults) {
   for (const auto &item : eff.items) {
     if (std::holds_alternative<PathExpression>(item.item)) {
-      evaluatePath(std::get<PathExpression>(item.item));
+      auto res = evaluatePath(std::get<PathExpression>(item.item));
+      accumulatedResults.insert(accumulatedResults.end(), res.begin(),
+                                res.end());
     } else if (std::holds_alternative<LetClause>(item.item)) {
       const auto &lc = std::get<LetClause>(item.item);
       if (std::holds_alternative<PathExpression>(lc.target)) {
         env_[lc.varName] = evaluatePath(std::get<PathExpression>(lc.target));
+        accumulatedResults.insert(accumulatedResults.end(),
+                                  env_[lc.varName].begin(),
+                                  env_[lc.varName].end());
       } else {
         auto val =
             evaluateValueExpr(std::get<ValueExpr>(lc.target), zigzag::noCell);
-        env_[lc.varName] = {cellFromValue(val)};
+        auto c           = cellFromValue(val);
+        env_[lc.varName] = {c};
+        accumulatedResults.push_back(c);
       }
     } else {
       const auto &p =
@@ -924,7 +940,7 @@ void VQLEngine::executeEffectClause(const EffectClause &eff) {
       for (zigzag::CellRef c : inCells) {
         env_[p.first.varName] = {c};
         if (p.second) {
-          executeEffectClause(*p.second);
+          executeEffectClause(*p.second, accumulatedResults);
         }
       }
     }

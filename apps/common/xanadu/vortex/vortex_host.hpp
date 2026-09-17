@@ -154,6 +154,12 @@ public:
                           const xanadu::MicroversionId &parent);
 
   // -- Stage 3: Interactive VQL Execution & Macro Persistence -----------------
+  struct ScriptResult {
+    bool success{false};
+    std::string message;
+    std::vector<CellRef> affectedCells;
+  };
+
   /**
    * @brief Executes an arbitrary VQL query or weave statement.
    */
@@ -162,11 +168,38 @@ public:
              const std::vector<CellRef> &contextCells = {});
 
   /**
+   * @brief Evaluates a VQL path relative to currentFocus (or ##), returning the
+   * destination cell if reached.
+   */
+  std::optional<CellRef> navigatePath(std::string_view pathExpr,
+                                      CellRef currentFocus);
+
+  /**
+   * @brief Runs an arbitrary VQL script or weave block, promoting created cells
+   * into store if provided.
+   */
+  ScriptResult executeScript(std::string_view script, CellRef contextCell,
+                             xanadu::Store *store = nullptr);
+
+  /**
    * @brief Persists a named macro into the active sovereign Store
    * (system://keymap).
    */
   bool defineMacro(std::string_view name, std::string_view vqlExpr,
                    xanadu::Store *persistStore = nullptr);
+
+  /**
+   * @brief Loads all macro definitions ("macro.*") from system://keymap.
+   */
+  void loadMacrosFromStore(const xanadu::Store &keymapStore);
+
+  /**
+   * @brief Saves a macro definition to keymapStore with microversion tracking.
+   */
+  xanadu::MicroversionId saveMacroToStore(std::string_view macroName,
+                                          std::string_view vqlExpr,
+                                          std::string_view keyBinding,
+                                          xanadu::Store &keymapStore);
 
   [[nodiscard]] std::optional<std::string>
   getMacro(std::string_view name) const;
