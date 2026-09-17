@@ -59,7 +59,7 @@ protected:
 };
 
 TEST_F(MediaWidgetSpeedTest, CyclePlaybackRatesByPicking) {
-  constexpr std::uint32_t tagBase = 0x8000U;
+  const std::uint32_t tagBase = widget->tagBase();
 
   EXPECT_FLOAT_EQ(widget->playbackRate(), 1.0F);
 
@@ -96,7 +96,7 @@ TEST_F(MediaWidgetSpeedTest, SetPlaybackRateDirectly) {
 }
 
 TEST_F(MediaWidgetSpeedTest, AccessibilityPerformActionOnSpeedButton) {
-  constexpr std::uint32_t tagBase = 0x8000U;
+  const std::uint32_t tagBase = widget->tagBase();
   const auto speedNodeId =
       static_cast<std::uint64_t>(tagBase + MediaWidget::tagSpeed);
 

@@ -45,9 +45,10 @@ constexpr std::uint32_t progressBar  = 0x5C8DFFFFU; // Elapsed progress
 constexpr std::uint32_t videoAreaBg  = 0x0E1116FFU; // Video frame background
 
 // The low twelve picking bits are fixed media-control IDs. Starting widget
-// identity at 0x100 keeps its packed high-bit namespace clear of the radial
-// menu's legacy 0x8000 tags.
-constexpr std::uint32_t firstMediaWidgetId = 0x100U;
+// identity at 1 keeps its packed 16-bit namespace (0x1000, 0x2000...) clear
+// of zero and the radial menu's legacy 0x8000 tags while fitting in VBORow's
+// 16-bit cluster field.
+constexpr std::uint32_t firstMediaWidgetId = 1U;
 std::atomic<std::uint32_t> nextMediaWidgetId{firstMediaWidgetId};
 
 std::string formatTime(const float totalSeconds) {
