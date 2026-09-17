@@ -51,6 +51,26 @@ std::string manyPagesOfText() {
   return out;
 }
 
+/// Several times manyPagesOfText()'s own size. The Stage 3 priority-order
+/// tests need to observe a page built directly *and* a page between it and
+/// the viewport left unbuilt in the very same call -- meaningless once a
+/// single (possibly catch-up-widened) budgeted call can finish the whole
+/// backlog, which a warm glyph/font cache (this fixture's text is identical
+/// across every test in the same process, and later tests inherit earlier
+/// ones' warm-up) can do to manyPagesOfText()'s own ~100 pages easily. This
+/// gives enough headroom that it cannot, regardless of cache state.
+std::string manyManyPagesOfText() {
+  const std::string paragraph =
+      "The quick brown fox jumps over the lazy dog. Pack my box with five "
+      "dozen liquor jugs. How vexingly quick daft zebras jump!\n\n";
+  std::string out;
+  out.reserve(3U * 1024U * 1024U);
+  while (out.size() < 3U * 1024U * 1024U) {
+    out += paragraph;
+  }
+  return out;
+}
+
 class DocPageBudgetTest : public testing::Test {
 protected:
   std::unique_ptr<NiceMock<MockRenderDevice>> device;
@@ -124,67 +144,102 @@ TEST_F(DocPageBudgetTest,
       << "later calls made no further progress";
 }
 
-TEST_F(DocPageBudgetTest, CatchesUpFasterWhenTheCameraIsAheadOfBuildProgress) {
+TEST_F(DocPageBudgetTest, ViewportPriorityBuildsTheTargetPageDirectly) {
+  doc = Doc::create(renderer, device.get(), glm::mat4(1.0F),
+                    MemoryTextSource(manyManyPagesOfText(), "priority-test"));
   doc->makePages();
 
-  // First call: camera at its default position, which resolves near the
-  // start of a document positioned at the world origin (as this fixture's
-  // is), so this establishes the plain per-call rate -- including whatever
-  // one-time warm-up cost (font/glyph-cache misses) the very first call
-  // pays, so that cost lands in the baseline rather than skewing the
-  // comparison below.
-  doc->buildPendingPages(*state);
-  const auto normalPacePages = doc->builtPageCount();
-  ASSERT_GT(normalPacePages, 0U);
+  // A late offset, and the page it resolves to via pageIndexFilade -- valid
+  // even before anything is built (see
+  // PageIndexForOffsetAnswersBeforeAnyPageIsBuilt below).
+  const auto lateOffset =
+      static_cast<std::uint32_t>(doc->contents().size() - 1);
+  const auto lateIndex = doc->pageIndexForOffset(lateOffset);
+  ASSERT_TRUE(lateIndex.has_value());
 
-  // Move the camera deep into this document's own stacking direction
-  // (increasingly negative local Y is further into the document -- see
-  // Doc::buildBudgetForThisCall()), simulating having scrolled far ahead of
-  // load progress before the page there has actually been built, then make
-  // the very next call on the *same* document -- so it benefits from
-  // exactly the same warmed-up glyph cache and font lookups the first call
-  // already paid for, isolating the catch-up budget as the only remaining
-  // variable between the two page counts.
+  // Move the camera to look directly at that page -- approximateAnchorFor()
+  // + worldPoint() resolve the same document-local world Y
+  // Doc::viewportPriorityRange() reads the camera against.
+  const auto lateAnchor = doc->approximateAnchorFor(lateOffset);
+  ASSERT_TRUE(lateAnchor.has_value());
+  const auto lateWorld = doc->worldPoint(*lateAnchor);
+  ASSERT_TRUE(lateWorld.has_value());
   {
     const std::lock_guard<std::mutex> lock(appState->view);
-    appState->view.pos.y = -1'000'000.0F;
+    appState->view.pos.y = lateWorld->y;
   }
 
   doc->buildPendingPages(*state);
-  const auto catchUpCallPages = doc->builtPageCount() - normalPacePages;
 
-  // A conservative fraction of render::kPageBuildCatchUpMultiplier: comfortably
-  // more than a warm cache alone would explain, comfortably less than the
-  // full configured multiplier, so this does not have to track that
-  // constant's exact value.
-  EXPECT_GT(catchUpCallPages, normalPacePages * 2)
-      << "camera looking far past build progress should let one call build "
-         "noticeably more pages than the established plain-budget rate";
+  // Stage 3's P0 tier (design/priority-page-building.md): the page the
+  // camera is looking at is built directly, rather than waiting behind
+  // every page before it in document order.
+  EXPECT_NE(doc->page(*lateIndex), nullptr)
+      << "camera parked on a late page should have built it in the very "
+         "next call";
+  // And it did not simply build the whole backlog to get there -- otherwise
+  // this would not distinguish targeted priority from finishing early.
+  EXPECT_LT(doc->builtPageCount(), doc->numPages());
 }
 
-TEST_F(DocPageBudgetTest, PriorityOffsetFarAheadEngagesCatchUpToo) {
+TEST_F(DocPageBudgetTest, PriorityOffsetComesRightAfterTheViewport) {
+  doc = Doc::create(renderer, device.get(), glm::mat4(1.0F),
+                    MemoryTextSource(manyManyPagesOfText(), "priority-test"));
   doc->makePages();
 
-  // Same baseline reasoning as the camera test above: the very first call's
-  // one-time warm-up cost lands here rather than skewing the comparison.
-  doc->buildPendingPages(*state);
-  const auto normalPacePages = doc->builtPageCount();
-  ASSERT_GT(normalPacePages, 0U);
-
-  // Push a priority offset near the very end of the document, as LinkBeams
-  // would for a beam whose far end lands on a late page -- with the camera
-  // left exactly where it was (near the start), so any acceleration
-  // observed can only be attributed to the priority offset, not the camera.
-  doc->setPriorityOffsets(std::vector<std::uint32_t>{
-      static_cast<std::uint32_t>(doc->contents().size() - 1)});
+  // Camera stays at its default position, which resolves near the start of
+  // a document positioned at the world origin (as this fixture's is) -- so
+  // its own viewport-range pages are the ones near page 0.
+  const auto lateOffset =
+      static_cast<std::uint32_t>(doc->contents().size() - 1);
+  const auto lateIndex = doc->pageIndexForOffset(lateOffset);
+  ASSERT_TRUE(lateIndex.has_value());
+  doc->setPriorityOffsets(std::vector<std::uint32_t>{lateOffset});
 
   doc->buildPendingPages(*state);
-  const auto catchUpCallPages = doc->builtPageCount() - normalPacePages;
 
-  EXPECT_GT(catchUpCallPages, normalPacePages * 2)
-      << "a priority offset far past build progress should let one call "
-         "build noticeably more pages than the established plain-budget "
-         "rate, the same way the camera does";
+  // P0 (the viewport, near the start) wins...
+  EXPECT_NE(doc->page(0), nullptr)
+      << "the viewport's own pages should still be built first";
+  // ...P1 (the priority offset) comes right after...
+  EXPECT_NE(doc->page(*lateIndex), nullptr)
+      << "a priority offset far past build progress should have built its "
+         "page directly, the same way the camera does";
+  // ...and a page between the two -- neither in the viewport nor named by
+  // any priority offset -- is still a gap. Otherwise this call simply built
+  // everything, which would not distinguish reordering from finishing the
+  // backlog.
+  EXPECT_EQ(doc->page(*lateIndex / 2), nullptr)
+      << "a page between the viewport and the priority target should still "
+         "be unbuilt";
+}
+
+TEST_F(DocPageBudgetTest,
+       DegeneratesToDocumentOrderWithNoPriorityAndAParkedCamera) {
+  doc->makePages();
+
+  // Default camera, no priority offsets pushed: build order should be
+  // indistinguishable from Stage 2's, which was indistinguishable from
+  // before Stage 0 -- see design/priority-page-building.md's "degeneration"
+  // test.
+  std::size_t calls = 0;
+  while (!doc->isFullyLoaded()) {
+    ASSERT_LT(calls, 10000U) << "buildPendingPages() never finished";
+    doc->buildPendingPages(*state);
+    ++calls;
+
+    // The signature of ascending document order: every built page forms a
+    // contiguous prefix [0, builtPageCount()) with no gap anywhere in it,
+    // checked after every call so a reordering that only shows up
+    // transiently cannot slip past a check made once at the end.
+    const auto built = doc->builtPageCount();
+    for (std::size_t i = 0; i < built; ++i) {
+      EXPECT_NE(doc->page(i), nullptr)
+          << "page " << i
+          << " should already be built -- pages were built out of order "
+             "despite no priority offsets and a parked default camera";
+    }
+  }
 }
 
 TEST_F(DocPageBudgetTest, PageIndexForOffsetAnswersBeforeAnyPageIsBuilt) {

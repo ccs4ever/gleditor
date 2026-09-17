@@ -73,6 +73,21 @@ inline constexpr std::chrono::milliseconds kPageBuildFrameBudget{8};
  */
 inline constexpr int kPageBuildCatchUpMultiplier = 6;
 
+/**
+ * @brief How far Doc::viewportPriorityRange() widens beyond the camera's
+ * exact visible height, as a fraction of that height.
+ *
+ * A page's priority for Stage 3's build order (see
+ * design/priority-page-building.md) should not blink on the instant its top
+ * pixel crosses the frustum edge: a reader scrolling steadily reaches the
+ * next page before this function's own per-call cadence would otherwise have
+ * caught up to it. Expressed as a fraction of the viewport itself rather
+ * than a fixed page-pixel count, so it scales with zoom and field of view
+ * the same way the viewport it pads does, instead of becoming
+ * disproportionately large at a tight zoom or invisible at a wide one.
+ */
+inline constexpr float kViewportPriorityMarginFraction = 0.25F;
+
 } // namespace render
 
 #endif // GLEDITOR_RENDER_CONSTANTS_HPP

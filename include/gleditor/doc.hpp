@@ -485,10 +485,44 @@ private:
   /// gets: the plain budget, or render::kPageBuildCatchUpMultiplier times it
   /// when the camera, or a page named in priorityOffsets, is well past
   /// pages.size() (see pageIndexFilade). Whichever target is furthest behind
-  /// wins, since building is still sequential/in-order -- reaching the
-  /// furthest one reaches every nearer one along the way. Rebuilds
-  /// pageIndexFilade first if pageEntries has grown since the last call.
+  /// wins: with priority ordering (Stage 3) reaching toward the furthest
+  /// target still reaches every page nearer to it that the current selection
+  /// order would otherwise have built anyway. Rebuilds pageIndexFilade first
+  /// if pageEntries has grown since the last call.
   [[nodiscard]] std::chrono::milliseconds buildBudgetForThisCall();
+
+  /// What buildBudgetForThisCall() and viewportPriorityRange() both need to
+  /// know about the camera, read under AppState::view's lock once rather
+  /// than twice.
+  struct CameraInfo {
+    /// Camera Y, projected into this document's own page-pixel stacking
+    /// coordinate -- the same quantity Layoutfilade's Y queries are in.
+    float pagePixelY{};
+    /// This document's perpendicular distance from the camera, along the
+    /// camera's own look direction. Not clamped: negative means the
+    /// document is behind the camera.
+    float distanceToDoc{};
+    float fovDegrees{};
+  };
+  /// nullopt when there is no renderer/appState to ask -- every Doc a test
+  /// constructs directly without going through the normal open-document path.
+  [[nodiscard]] std::optional<CameraInfo> cameraInfo() const;
+
+  /**
+   * @brief The page-index range currently "in the viewport": P0 in Stage 3's
+   *        build priority order (design/priority-page-building.md).
+   *
+   * Camera Y ± half the frustum's visible height at this document's distance
+   * from the camera -- the same perspective-correct
+   * `2 * distance * tan(fov / 2)` formula src/app.cpp's touch panning uses --
+   * widened by render::kViewportPriorityMarginFraction so a page about to
+   * scroll into view is already built rather than popping in at the edge.
+   *
+   * nullopt when there is no camera to ask (see cameraInfo()), nothing has
+   * been shaped yet, or this document is behind the camera.
+   */
+  [[nodiscard]] std::optional<gleditor::enfilade::VisibleRange>
+  viewportPriorityRange() const;
   // token to keep anything other than Doc::create from using our constructor
   struct Private {
     explicit Private() = default;
@@ -731,21 +765,26 @@ public:
   void load(const gleditor::TextSource &source);
   void makePages();
   void makePages(RenderState &state);
-  /// Build any pending shaped pages on the render thread in page order, up to
+  /// Build any pending shaped pages on the render thread, up to
   /// render::kPageBuildFrameBudget worth of wall-clock time -- or
   /// render::kPageBuildCatchUpMultiplier times that, when the camera or a
   /// page named by setPriorityOffsets() is well past what has been built so
-  /// far (see buildBudgetForThisCall()). Whatever is left stays queued in
-  /// document order for the next call. Returns true when all pages have been
-  /// built and shaping is complete.
+  /// far (see buildBudgetForThisCall()). Picked in priority order (Stage 3 of
+  /// design/priority-page-building.md): pages in viewportPriorityRange()
+  /// first, then priorityOffsets' pages, then the lowest remaining index --
+  /// which is exactly document order whenever the first two tiers have
+  /// nothing left to add, so a document with a parked default camera and no
+  /// priority offsets still loads top to bottom. Whatever the budget did not
+  /// reach stays queued for the next call. Returns true when all pages have
+  /// been built and shaping is complete.
   bool buildPendingPages(RenderState &state);
   /// Byte offsets this document should build the pages for ahead of the
-  /// rest, after the viewport's own pages -- see buildBudgetForThisCall().
-  /// Replaced wholesale each time it is set; an empty span (the default) is
-  /// "no opinion", which is what every caller that has none (apps/gleditor)
-  /// leaves it at. Render thread only. Knows nothing about what a beam is --
-  /// LinkBeams (xudu) is what decides which offsets to push, since library
-  /// code cannot depend on apps/.
+  /// rest, after the viewport's own pages -- see buildBudgetForThisCall() and
+  /// buildPendingPages(). Replaced wholesale each time it is set; an empty
+  /// span (the default) is "no opinion", which is what every caller that has
+  /// none (apps/gleditor) leaves it at. Render thread only. Knows nothing
+  /// about what a beam is -- LinkBeams (xudu) is what decides which offsets
+  /// to push, since library code cannot depend on apps/.
   void setPriorityOffsets(std::span<const std::uint32_t> offsets) {
     priorityOffsets.assign(offsets.begin(), offsets.end());
   }

@@ -6,7 +6,7 @@ budget) landed with the Tier 1/Tier 2 work in
 this note assumes its vocabulary (`Doc::buildPendingPages()`, `pageIndexFilade`,
 `render::kPageBuildFrameBudget`).
 
-**Status: Stages 0-2 are done** — see their sections below, each marked "(done)". Stages 3-5 are not
+**Status: Stages 0-3 are done** — see their sections below, each marked "(done)". Stages 4-5 are not
 started.
 
 ## Goal
@@ -332,17 +332,64 @@ Shipped and soaking before Stage 3. The risk here was concentrated in picking an
 are far easier to trust when the only variable was the container rather than the container *and* the
 order.
 
-### Stage 3 — turn on priority ordering
+### Stage 3 — turn on priority ordering (done)
 
-`buildPendingPages()` picks its next page as: P0 (viewport range, from camera Y ± half a viewport,
-inflated by a margin), then P1 (`setPriorityOffsets()`'s pages), then P2 (lowest unbuilt index),
-until the budget is spent. The budget logic itself is unchanged — Stage 3 decides *what* to build,
-the existing multiplier decides *how much*.
+`buildPendingPages()` picks its pages as: P0 (`Doc::viewportPriorityRange()`'s indices, ascending),
+then P1 (`setPriorityOffsets()`'s pages, ascending), then P2 (everything else, ascending), until the
+budget is spent. Selection happens once per call, up front: the current backlog (`pendingShapings`,
+swapped out under `shapingMutex` as before) is walked into a single ordered key list — P0's range
+via `pendingShapings.lower_bound()` so an empty or distant viewport costs nothing beyond one lookup,
+P1 via `pageIndexFilade.findEntryAtByte()` per pushed offset, P2 by iterating whatever neither tier
+already queued — deduplicated against a `std::unordered_set` so a page inside more than one tier is
+only built once, in its highest-priority tier. The budget logic itself is unchanged — Stage 3
+decides *what* to build, `buildBudgetForThisCall()`'s existing multiplier still decides *how much*,
+with one fix Stage 2's gap-tolerant `pages` made necessary: its "is the target already built" check
+used to compare `*targetIndex <= pages.size()`, which stopped meaning "already built" the moment a
+page could be built out of order (a P0 build far from the front grows `pages.size()` without
+building everything before it). It now asks `page(*targetIndex) != nullptr` directly.
 
-**Tests**: with the camera parked on a late page, that page is among the first built; with a
-priority offset pushed for a late page and the camera at the start, viewport pages still win and the
-priority page comes next; **the degeneration test** — fixed default camera, no priority offsets,
-build sequence is exactly document order.
+`Doc::viewportPriorityRange()` answers P0: camera Y projected into this document's own page-pixel
+coordinate (`Doc::cameraInfo()`, factored out of `buildBudgetForThisCall()`'s own camera code so
+both functions read `AppState::view` once), ± half the frustum's visible height at this document's
+distance from the camera (`2 * distance * tan(fov / 2)`, the same perspective-correct formula
+`src/app.cpp`'s touch panning already uses), widened by `render::kViewportPriorityMarginFraction`
+(25% of the viewport's own height, so a page about to scroll into view is already built rather than
+popping in at the edge) and resolved to a page-index range via `Layoutfilade::visibleRange()` — no
+new tree-walking code needed, since Stage 1's filade already answers exactly this shape of query.
+
+**Tests** (`tests/lib/doc_page_budget_test.cpp`): `ViewportPriorityBuildsTheTargetPageDirectly`
+parks the camera on a late page and confirms it is built in the very next call, without the whole
+backlog having been built to get there. `PriorityOffsetComesRightAfterTheViewport` leaves the camera
+at the default position, pushes a priority offset for a late page, and confirms both the viewport's
+own pages (P0) and the priority page (P1) are built while a page *between* them — in neither tier —
+is still a gap, which is what actually distinguishes reordering from simply finishing the backlog
+faster. `DegeneratesToDocumentOrderWithNoPriorityAndAParkedCamera` is the degeneration test: with a
+default camera and no priority offsets, every built page forms a contiguous prefix
+`[0, builtPageCount())` after every single call until the document finishes loading — the exact
+signature of ascending document order, checked after every call rather than once at the end so a
+reordering that only shows up transiently cannot slip past.
+
+The two Stage 1 catch-up tests (`CatchesUpFasterWhenTheCameraIsAheadOfBuildProgress` and
+`PriorityOffsetFarAheadEngagesCatchUpToo`) asserted a *bigger sequential batch* got built once the
+camera or a priority offset moved far ahead — true before Stage 3, when catching up meant extending
+the same contiguous run faster. Once selection targets the page directly instead, that assertion
+stopped holding (a targeted build reaches the target in a handful of pages, not hundreds) despite
+the underlying property working *better* than before, so both were renamed and rewritten to assert
+the stronger, more direct thing Stage 3 actually guarantees: the named page itself gets built.
+
+The two priority-order tests need far more pages than the rest of this file's fixture text
+(`manyManyPagesOfText()`, several times `manyPagesOfText()`'s size) to stay meaningful regardless of
+how warm the process-wide glyph/font cache already is by the time they run: a warm cache made the
+original 512 KB fixture (~100 pages) finish entirely within one catch-up-widened call in some test
+orderings, which would make "a page between the two tiers is still unbuilt" trivially true for the
+wrong reason.
+
+**Verified**: the full `gleditor_test`/`xudu_test`/`zigzag_test` suites pass (the same pre-existing,
+load-sensitive `ArrayfiladeBenchmarkTest` case aside), `compare-backends.sh`'s `opengl`/`opengles`
+frames stay byte-identical, and a manual `kjv.txt` run still renders its first page in well under a
+second with `--profile`, confirming the degeneration path (no camera movement, no priority offsets
+-- exactly how a freshly opened document is framed) still behaves like Stages 0-2 for the scenario
+that motivated this whole plan.
 
 ### Stage 4 — close the loop
 

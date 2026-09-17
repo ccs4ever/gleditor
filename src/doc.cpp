@@ -21,12 +21,13 @@
 #include <limits>
 #include <memory> // for __shared_ptr_access, shared...
 #include <mutex>
-#include <span>        // for span
-#include <stdexcept>   // for logic_error
-#include <string>      // for char_traits, basic_string
-#include <string_view> // for string_view
-#include <utility>     // for move
-#include <vector>      // for vector
+#include <span>          // for span
+#include <stdexcept>     // for logic_error
+#include <string>        // for char_traits, basic_string
+#include <string_view>   // for string_view
+#include <unordered_set> // for unordered_set
+#include <utility>       // for move
+#include <vector>        // for vector
 
 #include <fontconfig/fontconfig.h>
 #include <gleditor/caret.hpp>            // for Caret
@@ -36,7 +37,9 @@
 #include <gleditor/text/font.hpp>        // for FontManager
 #include <gleditor/text/layout.hpp>      // for TextLayout
 #include <gleditor/utf8.hpp>             // for validateUtf8, makeValidUtf8
+#include <glm/geometric.hpp>             // for dot, normalize
 #include <glm/gtx/string_cast.hpp>
+#include <glm/trigonometric.hpp> // for radians
 
 namespace {
 
@@ -1345,6 +1348,67 @@ void Doc::makePages() {
   shapingComplete.store(true, std::memory_order_release);
 }
 
+std::optional<Doc::CameraInfo> Doc::cameraInfo() const {
+  if (nullptr == renderer) {
+    return std::nullopt;
+  }
+  const auto appState = renderer->appState();
+  if (nullptr == appState) {
+    return std::nullopt;
+  }
+  glm::vec3 pos{};
+  glm::vec3 front{};
+  float fov = 0.0F;
+  {
+    std::lock_guard viewLock(appState->view);
+    pos   = appState->view.pos;
+    front = appState->view.front;
+    fov   = appState->view.fov;
+  }
+  CameraInfo info;
+  // The camera is one shared, global, free-moving 3D point, not a
+  // per-document scroll offset -- projected into this document's own
+  // stacking coordinate the same way page Y positions already are: relative
+  // to this Doc's own world position, in the same pixelsToWorld-scaled units
+  // buildPendingPages() stacks pages in.
+  info.pagePixelY = (currentPosition().y - pos.y) / pixelsToWorld;
+  // Perpendicular distance from the camera to this document, along the
+  // camera's own look direction -- the same projection src/app.cpp's touch
+  // panning uses to turn pixel motion into world units at the camera's
+  // current zoom.
+  info.distanceToDoc = glm::dot(currentPosition() - pos, glm::normalize(front));
+  info.fovDegrees    = fov;
+  return info;
+}
+
+std::optional<gleditor::enfilade::VisibleRange>
+Doc::viewportPriorityRange() const {
+  refreshPageIndexFilade();
+  if (pageIndexFilade.empty()) {
+    return std::nullopt;
+  }
+  const auto cam = cameraInfo();
+  // Behind the camera (or coincident with it): the perspective formula below
+  // divides by nothing useful, and there is no meaningful "visible height" to
+  // report.
+  if (!cam || cam->distanceToDoc <= 0.0F) {
+    return std::nullopt;
+  }
+
+  // Perspective-correct viewport height at this document's distance from the
+  // camera: the frustum is 2*distance*tan(fov/2) world units tall there.
+  const float visibleHeightWorld =
+      2.0F * cam->distanceToDoc *
+      std::tan(glm::radians(cam->fovDegrees) * 0.5F);
+  const float halfViewportPx = (visibleHeightWorld / pixelsToWorld) / 2.0F;
+  const float marginPx =
+      halfViewportPx * render::kViewportPriorityMarginFraction;
+
+  return pageIndexFilade.visibleRange(
+      cam->pagePixelY - halfViewportPx - marginPx,
+      cam->pagePixelY + halfViewportPx + marginPx);
+}
+
 std::chrono::milliseconds Doc::buildBudgetForThisCall() {
   // pageEntries accumulates independently of pendingShapings (which
   // buildPendingPages() below drains), so it reflects every page shaped so
@@ -1359,36 +1423,21 @@ std::chrono::milliseconds Doc::buildBudgetForThisCall() {
 
   std::optional<std::size_t> targetIndex;
 
-  // The camera is one shared, global, free-moving 3D point (AppState::view),
-  // not a per-document scroll offset -- projected into this document's own
-  // stacking coordinate the same way page Y positions already are: relative
-  // to this Doc's own world position, in the same pixelsToWorld-scaled units
-  // buildPendingPages() below stacks pages in. x/z and view direction are not
-  // considered; a document positioned well outside the camera's actual view
-  // frustum simply "catches up" for no visual benefit, which costs nothing
-  // else this function's own per-call budget already bounds.
-  if (nullptr != renderer) {
-    if (const auto appState = renderer->appState(); nullptr != appState) {
-      float cameraWorldY = 0.0F;
-      {
-        std::lock_guard viewLock(appState->view);
-        cameraWorldY = appState->view.pos.y;
-      }
-      const float distancePx =
-          (currentPosition().y - cameraWorldY) / pixelsToWorld;
-      if (const auto hit = pageIndexFilade.findEntryAtY(distancePx)) {
-        targetIndex = hit->entryIndex;
-      }
+  // x/z and view direction are not considered here: a document positioned
+  // well outside the camera's actual view frustum simply "catches up" for no
+  // visual benefit, which costs nothing else this function's own per-call
+  // budget already bounds.
+  if (const auto cam = cameraInfo()) {
+    if (const auto hit = pageIndexFilade.findEntryAtY(cam->pagePixelY)) {
+      targetIndex = hit->entryIndex;
     }
   }
 
   // Priority offsets -- pages a beam touches, pushed by an external caller
   // via setPriorityOffsets() -- hurry the loader towards whichever named
-  // page is furthest behind build progress. Furthest rather than nearest:
-  // building is still strictly sequential/in-order (see
-  // design/priority-page-building.md), so reaching the furthest target
-  // reaches every nearer one along the way, and a lone budget can only chase
-  // one direction at a time regardless.
+  // page is furthest behind build progress. Furthest rather than nearest, so
+  // that widening the budget helps regardless of which tier of
+  // buildPendingPages()'s own priority order ends up reaching it first.
   for (const auto offset : priorityOffsets) {
     if (const auto hit = pageIndexFilade.findEntryAtByte(offset)) {
       if (!targetIndex || hit->entryIndex > *targetIndex) {
@@ -1397,7 +1446,11 @@ std::chrono::milliseconds Doc::buildBudgetForThisCall() {
     }
   }
 
-  if (!targetIndex || *targetIndex <= pages.size()) {
+  // Whether the target itself is already built -- not merely a lower index
+  // than pages.size(), since a page far out of order (a viewport-priority
+  // build while the camera was elsewhere, say) can grow pages well past any
+  // particular unbuilt index once Stage 3 lets building skip ahead.
+  if (!targetIndex || nullptr != page(*targetIndex)) {
     return render::kPageBuildFrameBudget;
   }
   return render::kPageBuildFrameBudget * render::kPageBuildCatchUpMultiplier;
@@ -1419,6 +1472,44 @@ bool Doc::buildPendingPages(RenderState &state) {
   // anything to chain from once a page can be built out of order (Stage 3).
   refreshPageIndexFilade();
 
+  // Priority order (Stage 3 of design/priority-page-building.md): P0 (the
+  // viewport range) ascending, then P1 (priorityOffsets' pages) ascending,
+  // then P2 (everything else) ascending. Degenerates to exactly document
+  // order whenever P0 and P1 have nothing left in toBuild to add -- a parked
+  // default camera and no priority offsets builds top to bottom, same as
+  // before Stage 3.
+  std::vector<std::uint32_t> orderedKeys;
+  orderedKeys.reserve(toBuild.size());
+  std::unordered_set<std::uint32_t> queued;
+  const auto queueKey = [&](const std::uint32_t key) {
+    if (queued.insert(key).second) {
+      orderedKeys.push_back(key);
+    }
+  };
+  const auto queueRange = [&](const std::size_t lo, const std::size_t hi) {
+    // toBuild is ordered by key, so walking from lower_bound(lo) costs
+    // nothing beyond the pages actually in range plus one past it.
+    for (auto rangeIt = toBuild.lower_bound(static_cast<std::uint32_t>(lo));
+         rangeIt != toBuild.end() && rangeIt->first <= hi; ++rangeIt) {
+      queueKey(rangeIt->first);
+    }
+  };
+
+  if (const auto viewport = viewportPriorityRange()) {
+    queueRange(viewport->firstEntryIndex, viewport->lastEntryIndex);
+  }
+  for (const auto offset : priorityOffsets) {
+    if (const auto hit = pageIndexFilade.findEntryAtByte(offset)) {
+      const auto key = static_cast<std::uint32_t>(hit->entryIndex);
+      if (toBuild.contains(key)) {
+        queueKey(key);
+      }
+    }
+  }
+  for (const auto &[key, unused] : toBuild) {
+    queueKey(key);
+  }
+
   // Bounded so that a backlog the background shaping thread got ahead on --
   // whether from a slow render-thread startup or simply outpacing this loop
   // -- gets spread back out over several frames instead of built in one
@@ -1429,10 +1520,12 @@ bool Doc::buildPendingPages(RenderState &state) {
   // that gap faster instead of waiting behind every page before it.
   const auto buildBudget = buildBudgetForThisCall();
   const auto buildStart  = std::chrono::steady_clock::now();
-  auto it                = toBuild.begin();
-  for (; it != toBuild.end(); ++it) {
-    const auto trueIndex = it->first;
-    auto &entry          = it->second;
+  for (const auto trueIndex : orderedKeys) {
+    const auto found = toBuild.find(trueIndex);
+    if (found == toBuild.end()) {
+      continue; // Queued twice across tiers; already built below.
+    }
+    auto &entry = found->second;
     // Always present: see the comment above the refreshPageIndexFilade()
     // call.
     const auto hit              = pageIndexFilade.findEntryByIndex(trueIndex);
@@ -1447,25 +1540,25 @@ bool Doc::buildPendingPages(RenderState &state) {
     trans = glm::scale(trans, glm::vec3(pixelsToWorld, pixelsToWorld, 1.0F));
     placePageAt(state, trueIndex, std::move(entry.shaping), entry.textOffset,
                 trans);
+    toBuild.erase(found);
 
     // Always build at least one page per call even if it alone exceeds the
     // budget, so a single expensive page (e.g. one that grows the glyph
     // atlas) cannot stall progress -- checked after building rather than
     // before, since the cost being budgeted is the build that just ran.
     if (std::chrono::steady_clock::now() - buildStart >= buildBudget) {
-      ++it;
       break;
     }
   }
 
-  if (it != toBuild.end()) {
+  if (!toBuild.empty()) {
     // Whatever this call didn't get to goes back, merged with anything the
     // background thread has appended since the swap above -- keys never
     // collide, since every one names a page index this call either built or
-    // never reached.
+    // never reached, and merge() splices nodes rather than copying each
+    // still-large PageShaping.
     std::lock_guard lock(shapingMutex);
-    pendingShapings.insert(std::make_move_iterator(it),
-                           std::make_move_iterator(toBuild.end()));
+    pendingShapings.merge(toBuild);
     return false;
   }
 
