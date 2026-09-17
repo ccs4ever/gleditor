@@ -7,6 +7,7 @@
 #include <algorithm>
 #include <cstring>
 #include <format>
+#include <optional>
 #include <queue>
 #include <set>
 #include <utility>
@@ -33,6 +34,8 @@ void UnifiedTransclusionEngine::syncTo(const xanadu::MicroversionId &version) {
   manifold_          = store_.rebuildManifold(version);
   head_              = version;
   lastSyncedOpIndex_ = store_.segmentedOps().indexOf(version);
+  lastStoreOpCount_  = static_cast<std::uint32_t>(store_.segmentedOps().size());
+  dirtyFormatCells_.clear();
   clearShapingCache();
   updateFormatFlags();
 }
@@ -57,20 +60,44 @@ void UnifiedTransclusionEngine::syncIncremental() {
   for (auto idx = lastSyncedOpIndex_ + 1; idx <= total; idx++) {
     if (const auto *const node = ops.get(idx); nullptr != node) {
       manifold_.applyStructure(idx, *node);
+      if (node->kind == xanadu::OpKind::Structure) {
+        dirtyFormatCells_.insert(idx);
+        if (node->sourceOpIndex != zigzag::noCell && node->sourceOpIndex != 0) {
+          dirtyFormatCells_.insert(node->sourceOpIndex);
+        }
+        if (node->to != zigzag::noCell && node->to != 0) {
+          dirtyFormatCells_.insert(node->to);
+        }
+      }
     }
   }
   lastSyncedOpIndex_ = total;
   if (total > 0) {
     head_ = ops.idOf(total);
   }
-  updateFormatFlags();
+  lastStoreOpCount_ = total;
+
+  const auto currentFormatLinks = countFormatLinks();
+  if (currentFormatLinks != lastFormatLinkCount_) {
+    updateFormatFlags();
+  } else if (!dirtyFormatCells_.empty()) {
+    const xanadu::FormatResolver resolver(store_);
+    for (const auto cell : dirtyFormatCells_) {
+      if (manifold_.contains(cell)) {
+        const auto flags = resolver.computeCellFormatFlags(manifold_, cell);
+        manifold_.setFormatFlags(cell, flags);
+      }
+    }
+    dirtyFormatCells_.clear();
+  }
 }
 
 void UnifiedTransclusionEngine::ensureSliceBegun() {
   if (zigzag::noCell != store_.homeCell()) {
     return;
   }
-  syncTo(store_.sliceGenesis(head_));
+  head_ = store_.sliceGenesis(head_);
+  syncIncremental();
 }
 
 DimRef UnifiedTransclusionEngine::dimensionFor(const std::string_view name) {
@@ -84,7 +111,8 @@ CellRef UnifiedTransclusionEngine::addCell(const std::string_view text) {
   // Minting, where this used to be filing: a cell cannot exist without the
   // operation that names it, so adding one is recording one.
   ensureSliceBegun();
-  syncTo(store_.makeCell(head_, text));
+  head_ = store_.makeCell(head_, text);
+  syncIncremental();
   return store_.cellRefOf(head_);
 }
 
@@ -94,7 +122,8 @@ void UnifiedTransclusionEngine::updateCellText(const CellRef cell,
     return;
   }
   ensureSliceBegun();
-  syncTo(store_.setCellText(head_, cell, text, &manifold_));
+  head_ = store_.setCellText(head_, cell, text, &manifold_);
+  syncIncremental();
 }
 
 void UnifiedTransclusionEngine::setCold(const CellRef cell, ColdCell cold) {
@@ -183,7 +212,8 @@ void UnifiedTransclusionEngine::linkCells(const CellRef a, const CellRef b,
   // One operation, not two writes. The reciprocal edge is what the fold means
   // by a link rather than a second thing to remember to set -- which is what
   // the four-line pos-then-neg dance this replaces kept getting right by hand.
-  syncTo(store_.setLink(head_, a, dim, dir, b, &manifold_));
+  head_ = store_.setLink(head_, a, dim, dir, b, &manifold_);
+  syncIncremental();
 }
 
 void UnifiedTransclusionEngine::linkCells(const CellRef a, const CellRef b,
@@ -544,17 +574,21 @@ UnifiedTransclusionEngine::stageVisibleCells(
                               ? req.focusCellId
                               : manifold_.cells().front().birthOp;
 
-  // Breadth-first collection along requested spatial dimensions
-  std::set<CellID> visited;
-  std::queue<std::pair<CellID, int>> queue;
-  queue.push({startId, 0});
-  visited.insert(startId);
+  // Breadth-first collection along requested spatial dimensions reusing scratch
+  // buffers
+  traversalScratch_.visitedList.clear();
+  traversalScratch_.visitedSet.clear();
+  traversalScratch_.queue.clear();
+
+  traversalScratch_.queue.push_back({startId, 0});
+  traversalScratch_.visitedSet.insert(startId);
+  traversalScratch_.visitedList.push_back(startId);
 
   const int maxRadius = std::max({req.radiusX, req.radiusY, req.radiusZ, 1});
 
-  while (!queue.empty()) {
-    const auto [currId, dist] = queue.front();
-    queue.pop();
+  std::size_t queueHead = 0;
+  while (queueHead < traversalScratch_.queue.size()) {
+    const auto [currId, dist] = traversalScratch_.queue[queueHead++];
 
     if (dist >= maxRadius) {
       continue;
@@ -566,10 +600,11 @@ UnifiedTransclusionEngine::stageVisibleCells(
     }
 
     const auto checkNeighbor = [&](const CellID neighbor) {
-      if (neighbor != 0 && !visited.contains(neighbor) &&
+      if (neighbor != 0 &&
+          traversalScratch_.visitedSet.insert(neighbor).second &&
           findCell(static_cast<CellRef>(neighbor))) {
-        visited.insert(neighbor);
-        queue.push({neighbor, dist + 1});
+        traversalScratch_.visitedList.push_back(neighbor);
+        traversalScratch_.queue.push_back({neighbor, dist + 1});
       }
     };
 
@@ -582,10 +617,12 @@ UnifiedTransclusionEngine::stageVisibleCells(
     }
   }
 
-  // Layout and stage glyph quads for all visited cells
-  const xanadu::FormatResolver formatResolver(store_);
+  // Layout and stage glyph quads for all visited cells.
+  // Lazily construct FormatResolver only if at least one visited cell has
+  // formatFlags != 0.
+  std::optional<xanadu::FormatResolver> formatResolver;
 
-  for (const CellID cid : visited) {
+  for (const CellID cid : traversalScratch_.visitedList) {
     const std::string text = resolveCellText(cid);
     if (text.empty()) {
       continue;
@@ -602,9 +639,13 @@ UnifiedTransclusionEngine::stageVisibleCells(
     if (__builtin_expect(cell && cell->formatFlags == 0, 1)) {
       // Fast path: standard font, no formatting lookups, zero allocations
     } else {
-      // Slow path: resolve exact DecoratedRange via FormatResolver
+      // Slow path: resolve exact DecoratedRange via FormatResolver constructed
+      // on demand
+      if (!formatResolver) {
+        formatResolver.emplace(store_);
+      }
       auto formatRes =
-          formatResolver.resolveCell(manifold_, static_cast<CellRef>(cid));
+          formatResolver->resolveCell(manifold_, static_cast<CellRef>(cid));
       opts.decoratedRanges = std::move(formatRes.decoratedRanges);
       opts.blockStyles     = std::move(formatRes.blockStyles);
     }
@@ -687,9 +728,23 @@ void UnifiedTransclusionEngine::clearShapingCache() noexcept {
   shapingCache_.clear();
 }
 
+std::size_t UnifiedTransclusionEngine::countFormatLinks() const noexcept {
+  std::size_t count = 0;
+  for (const auto &[_, link] : store_.links()) {
+    if (link.type == xanadu::LinkType::Format) {
+      ++count;
+    }
+  }
+  return count;
+}
+
 void UnifiedTransclusionEngine::updateFormatFlags() {
   const xanadu::FormatResolver resolver(store_);
   resolver.updateManifoldFormatFlags(manifold_);
+  lastFormatLinkCount_ = countFormatLinks();
+  lastStoreOpCount_ = static_cast<std::uint32_t>(store_.segmentedOps().size());
+  dirtyFormatCells_.clear();
+  ++formatRescanCount_;
 }
 
 } // namespace zigzag

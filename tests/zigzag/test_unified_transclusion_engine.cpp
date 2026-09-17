@@ -549,6 +549,75 @@ TEST(UnifiedTransclusionEngineTest, FormatFlagsFastPathAndDecoratedStaging) {
   EXPECT_GT(batch.instanceCount, 0U);
 }
 
+TEST(UnifiedTransclusionEngineTest,
+     IncrementalFormatCacheNoFullRescanOnUnrelatedEdits) {
+  StagingRig rig;
+  ASSERT_NE(rig.font, nullptr);
+
+  const auto initialRescans = rig.engine.formatRescanCount();
+
+  // 1) Add an italic formatted cell
+  const auto italicCell = rig.engine.addCell("Italic cell");
+  const auto spans      = rig.engine.manifold().contentOf(italicCell);
+  ASSERT_FALSE(spans.empty());
+
+  xudu::Link italicLink;
+  italicLink.type = xudu::LinkType::Format;
+  italicLink.left = std::vector<xudu::PrimediaSpan>(spans.begin(), spans.end());
+  italicLink.right.push_back(
+      xudu::vocabularySpanFor(xudu::FormatAttribute::Italic));
+  rig.store.addLink(rig.engine.head(), italicLink);
+
+  rig.engine.syncIncremental();
+  EXPECT_EQ(rig.engine.formatRescanCount(), initialRescans + 1);
+
+  const auto *slot1 = rig.engine.manifold().slot(italicCell);
+  ASSERT_NE(slot1, nullptr);
+  const auto italicBit =
+      1U << static_cast<std::uint8_t>(xudu::FormatAttribute::Italic);
+  EXPECT_EQ(slot1->formatFlags, italicBit);
+
+  // 2) Perform unrelated edits: add unformatted cells, link on d.1, insert
+  // store text
+  const auto plain1 = rig.engine.addCell("Plain cell 1");
+  const auto plain2 = rig.engine.addCell("Plain cell 2");
+  rig.engine.linkCells(plain1, plain2, DimOrdinal::D1);
+  static_cast<void>(
+      rig.store.insert(rig.engine.head(), 0, "Unrelated text in doc"));
+
+  rig.engine.syncIncremental();
+
+  // Assert NO full format rescan occurred on unrelated edits!
+  EXPECT_EQ(rig.engine.formatRescanCount(), initialRescans + 1);
+
+  // Existing formatting is strictly preserved
+  const auto *slot1After = rig.engine.manifold().slot(italicCell);
+  ASSERT_NE(slot1After, nullptr);
+  EXPECT_EQ(slot1After->formatFlags, italicBit);
+
+  const auto *slotPlain1 = rig.engine.manifold().slot(plain1);
+  ASSERT_NE(slotPlain1, nullptr);
+  EXPECT_EQ(slotPlain1->formatFlags, 0U);
+
+  // 3) Staging unformatted cells directly exercises zero-allocation fast path
+  const auto reqPlain = UnifiedTransclusionEngine::RenderSliceRequest{
+      .focusCellId = plain1, .radiusX = 1, .radiusY = 1, .radiusZ = 1};
+  const auto batchPlain =
+      rig.engine.stageVisibleCells(reqPlain, rig.font, *rig.glyphCache);
+  EXPECT_GT(batchPlain.instanceCount, 0U);
+
+  // 4) Adding a new format link properly triggers full format rescan
+  xudu::Link boldLink;
+  boldLink.type = xudu::LinkType::Format;
+  boldLink.left = std::vector<xudu::PrimediaSpan>(spans.begin(), spans.end());
+  boldLink.right.push_back(
+      xudu::vocabularySpanFor(xudu::FormatAttribute::Bold));
+  rig.store.addLink(rig.engine.head(), boldLink);
+
+  rig.engine.syncIncremental();
+  EXPECT_EQ(rig.engine.formatRescanCount(), initialRescans + 2);
+}
+
 // SubSpanTransclusionLinksOnDimTransclude was here. It asserted that syncing a
 // Transclude operation wove the quoting cell onto the master's d.transclude
 // rank -- which buildCellFromOp() did by inventing cells for text operations

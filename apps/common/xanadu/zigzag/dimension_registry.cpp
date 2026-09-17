@@ -209,8 +209,14 @@ DimRef DimensionRegistry::getOrCreate(xanadu::Store &store,
   const auto minted = store.makeDimension(head, dimName.name(), &manifold);
   head              = minted.version;
   store.repointCurrentVersion(head);
-  manifold = store.rebuildManifold(head);
-  manifold.setStore(&store);
+  auto newManifold = store.rebuildManifold(head);
+  newManifold.setStore(&store);
+  for (const auto &c : manifold.cells()) {
+    if (c.formatFlags != 0) {
+      newManifold.setFormatFlags(c.birthOp, c.formatFlags);
+    }
+  }
+  manifold = std::move(newManifold);
   registerDim(store, dimName, minted.dim);
   return minted.dim;
 }

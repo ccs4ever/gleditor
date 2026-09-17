@@ -14,6 +14,7 @@
 #include <string>
 #include <string_view>
 #include <unordered_map>
+#include <unordered_set>
 #include <vector>
 
 #include "common/xanadu/compact_op.hpp"
@@ -291,6 +292,10 @@ public:
   /// Synchronize cached formatFlags across manifold cells from store links.
   void updateFormatFlags();
 
+  [[nodiscard]] std::uint64_t formatRescanCount() const noexcept {
+    return formatRescanCount_;
+  }
+
 private:
   /// Mint the two genesis cells if this store has none, so that a dimension has
   /// a d.dims rank to go on.
@@ -384,6 +389,20 @@ private:
   /// be mistaken for the derived dimension.
   mutable std::uint32_t nextEphemeralId_{16};
   mutable CellSlot ephemeralCellSlotDummy_{};
+
+  [[nodiscard]] std::size_t countFormatLinks() const noexcept;
+
+  struct TraversalScratch {
+    std::vector<CellID> visitedList;
+    std::unordered_set<CellID> visitedSet;
+    std::vector<std::pair<CellID, int>> queue;
+  };
+  mutable TraversalScratch traversalScratch_;
+
+  std::size_t lastFormatLinkCount_{0};
+  std::uint32_t lastStoreOpCount_{0};
+  std::unordered_set<CellRef> dirtyFormatCells_;
+  std::uint64_t formatRescanCount_{0};
 };
 
 } // namespace zigzag
