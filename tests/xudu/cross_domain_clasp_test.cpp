@@ -5,6 +5,7 @@
  */
 #include <gtest/gtest.h>
 
+#include "common/xanadu/kinetic_tether.hpp"
 #include "xudu/core/link_layout.hpp"
 #include "xudu/core/ops.hpp"
 #include "xudu/core/pouch_zone.hpp"
@@ -125,4 +126,87 @@ TEST(CrossDomainClaspTest, PouchManagerCellPartitionDrop) {
   EXPECT_EQ(stagingZone->items().size(), 1U);
   EXPECT_EQ(stagingZone->items().front().itemId, i2.itemId);
   EXPECT_EQ(stagingZone->items().front().originCell, 102U);
+}
+
+TEST(CrossDomainClaspTest, TetherPayloadCrossDomainCellMetadata) {
+  TetherPayload payload;
+  EXPECT_EQ(payload.originKind, PouchOriginKind::Document);
+  EXPECT_EQ(payload.originCell, 0U);
+  EXPECT_EQ(payload.originSliceIndex, 0U);
+  EXPECT_TRUE(payload.originRankCoord.empty());
+
+  payload.originKind       = PouchOriginKind::ZigzagCell;
+  payload.originCell       = 42U;
+  payload.originSliceIndex = 1U;
+  payload.originRankCoord  = "d.1: #5";
+
+  EXPECT_EQ(payload.originKind, PouchOriginKind::ZigzagCell);
+  EXPECT_EQ(payload.originCell, 42U);
+  EXPECT_EQ(payload.originSliceIndex, 1U);
+  EXPECT_EQ(payload.originRankCoord, "d.1: #5");
+}
+
+TEST(CrossDomainClaspTest,
+     PouchManagerCellDropHomesteadAndTowardBilateralForge) {
+  PouchManager pm;
+  const PrimediaSpan docSpan{.scroll = 0, .start = 100, .length = 20};
+  const PrimediaSpan cellSpan{.scroll = 1, .start = 500, .length = 35};
+
+  const auto docItem  = pm.dropSpan("to_link_left", docSpan, "Doc quote",
+                                    MicroversionId{}, 0, 10, 30);
+  const auto cellItem = pm.dropCell("to_link_right", cellSpan, "Cell node", 88,
+                                    "d.concept: #7", 0);
+
+  EXPECT_EQ(docItem.originKind, PouchOriginKind::Document);
+  EXPECT_EQ(cellItem.originKind, PouchOriginKind::ZigzagCell);
+  EXPECT_EQ(cellItem.originCell, 88U);
+  EXPECT_EQ(cellItem.originRankCoord, "d.concept: #7");
+
+  // Forge bilateral clasp in store
+  Store store;
+  const auto v0 =
+      store.insert(MicroversionId{}, 0, "Host document content here");
+  Link clasp;
+  clasp.type  = LinkType::Quotation;
+  clasp.owner = "curator";
+  clasp.tier  = ProminenceTier::Curated;
+  clasp.left  = {docItem.span};
+  clasp.right = {cellItem.span};
+
+  const auto v1 = store.addLink(v0, clasp);
+  EXPECT_NE(v1, v0);
+
+  const auto &links = store.links();
+  ASSERT_FALSE(links.empty());
+  const auto &forged = links.rbegin()->second;
+  EXPECT_EQ(forged.type, LinkType::Quotation);
+  EXPECT_EQ(forged.tier, ProminenceTier::Curated);
+  ASSERT_EQ(forged.left.size(), 1U);
+  ASSERT_EQ(forged.right.size(), 1U);
+  EXPECT_EQ(forged.left[0].start, 100U);
+  EXPECT_EQ(forged.left[0].length, 20U);
+  EXPECT_EQ(forged.right[0].start, 500U);
+  EXPECT_EQ(forged.right[0].length, 35U);
+}
+
+TEST(CrossDomainClaspTest, PouchManagerCrossDomainCellSpanPreservation) {
+  PouchManager pm;
+  const PrimediaSpan s1{.scroll = 3, .start = 1000, .length = 50};
+  const PrimediaSpan s2{.scroll = 3, .start = 2000, .length = 80};
+
+  pm.dropCell("to_link_left", s1, "Cell Span 1", 201, "d.time: #10", 0);
+  pm.dropCell("to_link_left", s2, "Cell Span 2", 202, "d.time: #11", 0);
+
+  const auto *zone = pm.zoneById("to_link_left");
+  ASSERT_NE(zone, nullptr);
+  ASSERT_EQ(zone->items().size(), 2U);
+
+  const auto allSpans = zone->allSpans();
+  ASSERT_EQ(allSpans.size(), 2U);
+  EXPECT_EQ(allSpans[0].scroll, 3U);
+  EXPECT_EQ(allSpans[0].start, 1000U);
+  EXPECT_EQ(allSpans[0].length, 50U);
+  EXPECT_EQ(allSpans[1].scroll, 3U);
+  EXPECT_EQ(allSpans[1].start, 2000U);
+  EXPECT_EQ(allSpans[1].length, 80U);
 }

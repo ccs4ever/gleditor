@@ -24,6 +24,8 @@ bool BridgeCoordinator::attach(xanadu::ZigzagPresentationSurface &surface) {
   surface_ = &surface;
   surface_->setBridgeInvalidationCallback(
       [this](const std::uint64_t) { dirty_ = true; });
+  surface_->setCellActivationCallback(
+      [this](const zigzag::CellRef cell) { activateCell(cell); });
   renderer_->addFrameContributor(surface_->frameContributor());
   renderer_->addPickObserver(surface_->pickObserver());
   accessibility_.addSource(surface_->accessibilitySource());
@@ -45,6 +47,31 @@ void BridgeCoordinator::connectSatelloidNavigation(SatelloidOverlay &overlay) {
       });
 }
 
+void BridgeCoordinator::onDocumentLinkActivated(const zigzag::CellRef cell) {
+  if (surface_ != nullptr) {
+    surface_->focusCell(cell);
+    dirty_ = true;
+  }
+  if (satelloidOverlay_ != nullptr) {
+    satelloidOverlay_->triggerPulse(cell);
+  }
+}
+
+void BridgeCoordinator::activateCell(const zigzag::CellRef cell) {
+  if (surface_ == nullptr) {
+    return;
+  }
+  const auto &manifold = surface_->manifold();
+  const auto spans     = manifold.contentOf(cell);
+  PrimediaSpan primarySpan{};
+  if (!spans.empty()) {
+    primarySpan = spans.front();
+  }
+  if (documentFocusHandler_) {
+    documentFocusHandler_(cell, primarySpan);
+  }
+}
+
 void BridgeCoordinator::detach() noexcept {
   if (surface_ == nullptr) {
     return;
@@ -56,7 +83,9 @@ void BridgeCoordinator::detach() noexcept {
     satelloidOverlay_ = nullptr;
   }
   cellActivationHandler_ = {};
+  documentFocusHandler_  = {};
   surface->setBridgeInvalidationCallback({});
+  surface->setCellActivationCallback({});
   renderer_->removeFrameContributor(surface->frameContributor());
   renderer_->removePickObserver(surface->pickObserver());
   accessibility_.removeSource(surface->accessibilitySource());

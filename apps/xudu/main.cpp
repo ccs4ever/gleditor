@@ -81,6 +81,7 @@
 #include "xudu/wireframe_hull.hpp"
 
 using gleditor::Mod;
+using xanadu::PouchOriginKind;
 using xudu::Author;
 using xudu::Config;
 using xudu::HoleReason;
@@ -484,6 +485,92 @@ public:
         }
       }
     });
+  }
+
+  void focusSpan(const zigzag::CellRef cell, const PrimediaSpan &span) {
+    renderer->runWithState([this, cell, span](RenderState &rState) {
+      if (session.views().empty()) {
+        return;
+      }
+      if (span.length > 0) {
+        for (std::size_t docIdx = 0; docIdx < session.views().size();
+             ++docIdx) {
+          const auto &vInfo = session.views()[docIdx];
+          const auto &st    = session.store(vInfo.storeIndex);
+          const auto ver    = st.rebuild(vInfo.version);
+          const auto occs   = ver.occurrencesOf(span);
+          if (!occs.empty()) {
+            const auto &occ   = occs.front();
+            auto *const caret = renderer->editCaret();
+            if (caret) {
+              caret->placeAt(static_cast<std::uint32_t>(docIdx), occ.start);
+              caret->extendTo(occ.end);
+            }
+            if (docIdx < rState.docs.size() && rState.docs[docIdx]) {
+              const auto &doc = rState.docs[docIdx];
+              if (const auto anch = doc->anchorFor(occ.start)) {
+                if (const auto wp =
+                        doc->worldPoint(anch->pageIndex, anch->x, anch->y)) {
+                  if (state) {
+                    std::scoped_lock locker(state->view);
+                    state->view.pos.x = wp->x;
+                    state->view.pos.y = wp->y;
+                  }
+                }
+              }
+            }
+            return;
+          }
+        }
+      }
+
+      for (std::size_t docIdx = 0; docIdx < session.views().size(); ++docIdx) {
+        const auto &vInfo = session.views()[docIdx];
+        const auto &st    = session.store(vInfo.storeIndex);
+        for (const auto &[linkId, link] : st.links()) {
+          for (const auto &lSpan : link.left) {
+            const auto occs = st.rebuild(vInfo.version).occurrencesOf(lSpan);
+            if (!occs.empty()) {
+              auto *const caret = renderer->editCaret();
+              if (caret) {
+                caret->placeAt(static_cast<std::uint32_t>(docIdx),
+                               occs.front().start);
+                caret->extendTo(occs.front().end);
+              }
+              return;
+            }
+          }
+        }
+      }
+    });
+  }
+
+  void focusSpan(const std::size_t docIndex, const std::uint32_t charStart,
+                 const std::uint32_t charEnd) {
+    renderer->runWithState(
+        [this, docIndex, charStart, charEnd](RenderState &rState) {
+          if (docIndex >= session.views().size()) {
+            return;
+          }
+          auto *const caret = renderer->editCaret();
+          if (caret) {
+            caret->placeAt(static_cast<std::uint32_t>(docIndex), charStart);
+            caret->extendTo(charEnd);
+          }
+          if (docIndex < rState.docs.size() && rState.docs[docIndex]) {
+            const auto &doc = rState.docs[docIndex];
+            if (const auto anch = doc->anchorFor(charStart)) {
+              if (const auto wp =
+                      doc->worldPoint(anch->pageIndex, anch->x, anch->y)) {
+                if (state) {
+                  std::scoped_lock locker(state->view);
+                  state->view.pos.x = wp->x;
+                  state->view.pos.y = wp->y;
+                }
+              }
+            }
+          }
+        });
   }
 
   void back() {
@@ -2393,199 +2480,6 @@ int main(const int argc, char **argv) {
           views.spawnTranscludedDocument(payload, sx, sy);
         });
 
-    state->mouseDownHandler = [&kineticTetherEngine, &session, renderer,
-                               state](const int mx, const int my,
-                                      const std::uint8_t button) -> bool {
-      if (button != 1) {
-        return false;
-      }
-      const auto modState = SDL_GetModState();
-      const bool altHeld  = (0 != (modState & SDL_KMOD_ALT));
-      bool dragStarted    = false;
-
-      renderer->runWithState([&kineticTetherEngine, &session, &dragStarted, mx,
-                              my, state, altHeld](RenderState &rState) {
-        auto *const caret = rState.caret;
-        if (!caret || !caret->hasSelection()) {
-          return;
-        }
-        const auto selStart = caret->selectionStart();
-        const auto selEnd   = caret->selectionEnd();
-        const auto docIdx   = caret->documentIndex();
-        if (docIdx >= session->views().size() || selEnd <= selStart) {
-          return;
-        }
-
-        const auto &openView = session->views()[docIdx];
-        const auto &st       = session->store(openView.storeIndex);
-        const auto ver       = st.rebuild(openView.version);
-        const auto spans     = ver.spansFor(selStart, selEnd - selStart);
-        if (spans.empty()) {
-          return;
-        }
-        const auto text = st.textOf(openView.version);
-        std::string preview;
-        if (selStart < text.size()) {
-          preview = text.substr(selStart, std::min(selEnd - selStart, 40U));
-        }
-
-        const float screenX = static_cast<float>(mx);
-        const float screenY = static_cast<float>(state->view.screenHeight - my);
-
-        TetherPayload payload{
-            .span            = spans.front(),
-            .previewText     = std::move(preview),
-            .originVersion   = openView.version,
-            .originDocIndex  = docIdx,
-            .originCharStart = selStart,
-            .originCharEnd   = selEnd,
-            .originScreenPos = glm::vec2(screenX, screenY),
-        };
-
-        if (altHeld) {
-          kineticTetherEngine.startDrag(std::move(payload), screenX, screenY);
-          dragStarted = true;
-        }
-      });
-
-      return dragStarted;
-    };
-
-    state->mouseMotionHandler = [&kineticTetherEngine, &session, renderer,
-                                 state](const int mx, const int my,
-                                        const std::uint32_t buttons) -> bool {
-      const float screenX = static_cast<float>(mx);
-      const float screenY = static_cast<float>(state->view.screenHeight - my);
-
-      if (kineticTetherEngine.isDragging()) {
-        kineticTetherEngine.updateDrag(screenX, screenY);
-        return true;
-      }
-
-      if (0 != (buttons & SDL_BUTTON_LMASK)) {
-        const auto modState = SDL_GetModState();
-        if (0 != (modState & SDL_KMOD_ALT)) {
-          renderer->runWithState([&kineticTetherEngine, &session, screenX,
-                                  screenY](RenderState &rState) {
-            auto *const caret = rState.caret;
-            if (!caret || !caret->hasSelection()) {
-              return;
-            }
-            const auto selStart = caret->selectionStart();
-            const auto selEnd   = caret->selectionEnd();
-            const auto docIdx   = caret->documentIndex();
-            if (docIdx >= session->views().size() || selEnd <= selStart) {
-              return;
-            }
-            const auto &openView = session->views()[docIdx];
-            const auto &st       = session->store(openView.storeIndex);
-            const auto ver       = st.rebuild(openView.version);
-            const auto spans     = ver.spansFor(selStart, selEnd - selStart);
-            if (spans.empty()) {
-              return;
-            }
-            const auto text = st.textOf(openView.version);
-            std::string preview;
-            if (selStart < text.size()) {
-              preview = text.substr(selStart, std::min(selEnd - selStart, 40U));
-            }
-            TetherPayload payload{
-                .span            = spans.front(),
-                .previewText     = std::move(preview),
-                .originVersion   = openView.version,
-                .originDocIndex  = docIdx,
-                .originCharStart = selStart,
-                .originCharEnd   = selEnd,
-                .originScreenPos = glm::vec2(screenX, screenY),
-            };
-            kineticTetherEngine.startDrag(std::move(payload), screenX, screenY);
-          });
-          if (kineticTetherEngine.isDragging()) {
-            return true;
-          }
-        }
-      }
-
-      return false;
-    };
-
-    state->mouseUpHandler =
-        [&pouchDrawer, &kineticTetherEngine, &session, renderer,
-         state](const int mx, const int my, const std::uint8_t button) -> bool {
-      if (button != 1) { // 1 = SDL_BUTTON_LEFT
-        return false;
-      }
-      const float screenX = static_cast<float>(mx);
-      const float screenY = static_cast<float>(state->view.screenHeight - my);
-
-      // 1. If kinetic tether is currently dragging:
-      if (kineticTetherEngine.isDragging()) {
-        if (pouchDrawer.isOpen() && pouchDrawer.currentWidth() >= 50.0F) {
-          const bool hitZone =
-              (pouchDrawer.zoneAt(screenX, screenY) != nullptr);
-          const bool hitLeft =
-              pouchDrawer.forge().containsLeft(screenX, screenY);
-          const bool hitRight =
-              pouchDrawer.forge().containsRight(screenX, screenY);
-          if (hitZone || hitLeft || hitRight) {
-            const auto &payload = kineticTetherEngine.payload();
-            pouchDrawer.handleGhostDrop(
-                payload.span, payload.previewText, payload.originVersion,
-                screenX, screenY, payload.originDocIndex,
-                payload.originCharStart, payload.originCharEnd);
-            kineticTetherEngine.cancelDrag();
-            return true;
-          }
-        }
-        kineticTetherEngine.endDrag(screenX, screenY);
-        return true;
-      }
-
-      // 2. Direct drop into open pouch drawer from selection:
-      if (!pouchDrawer.isOpen() || pouchDrawer.currentWidth() < 50.0F) {
-        return false;
-      }
-      const bool hitZone  = (pouchDrawer.zoneAt(screenX, screenY) != nullptr);
-      const bool hitLeft  = pouchDrawer.forge().containsLeft(screenX, screenY);
-      const bool hitRight = pouchDrawer.forge().containsRight(screenX, screenY);
-
-      if (!hitZone && !hitLeft && !hitRight) {
-        return false;
-      }
-
-      renderer->runWithState([&pouchDrawer, &session, screenX,
-                              screenY](RenderState &rState) {
-        auto *const caret = rState.caret;
-        if (!caret || !caret->hasSelection()) {
-          return;
-        }
-        const auto selStart = caret->selectionStart();
-        const auto selEnd   = caret->selectionEnd();
-        const auto docIdx   = caret->documentIndex();
-        if (docIdx >= session->views().size()) {
-          return;
-        }
-        const auto &openView = session->views()[docIdx];
-        const auto &st       = session->store(openView.storeIndex);
-        const auto ver       = st.rebuild(openView.version);
-        if (selEnd <= selStart) {
-          return;
-        }
-        const auto spans = ver.spansFor(selStart, selEnd - selStart);
-        if (spans.empty()) {
-          return;
-        }
-        const auto text = st.textOf(openView.version);
-        std::string preview;
-        if (selStart < text.size()) {
-          preview = text.substr(selStart, std::min(selEnd - selStart, 40U));
-        }
-        pouchDrawer.handleGhostDrop(spans.front(), preview, openView.version,
-                                    screenX, screenY, docIdx, selStart, selEnd);
-      });
-      return true;
-    };
-
     docSwitcher->setCloseHandler([&views](const std::uint32_t docIndex) {
       views.closeDocument(docIndex);
     });
@@ -2694,6 +2588,10 @@ int main(const int argc, char **argv) {
     xudu::BridgeCoordinator bridgeCoordinator(links, renderer,
                                               *state->accessibility);
     bridgeCoordinator.connectSatelloidNavigation(satelloidOverlay);
+    bridgeCoordinator.setDocumentFocusHandler(
+        [&views](const zigzag::CellRef cell, const PrimediaSpan &span) {
+          views.focusSpan(cell, span);
+        });
     bridgeCoordinator.attach(*zigzagPresentation);
 #endif
     links.setOpener([&views](const MicroversionId &version) {
@@ -2799,6 +2697,220 @@ int main(const int argc, char **argv) {
     renderer->addPickObserver(&map);
     renderer->addPickObserver(&pouchDrawer);
     renderer->addPickObserver(&swarmTelescope);
+
+    state->mouseDownHandler = [&kineticTetherEngine, &session, renderer, state
+#ifdef XUZZ_BUILD
+                               ,
+                               zigzagPresentation
+#endif
+    ](const int mx, const int my, const std::uint8_t button) -> bool {
+      if (button != 1) {
+        return false;
+      }
+      const auto modState = SDL_GetModState();
+      const bool altHeld  = (0 != (modState & SDL_KMOD_ALT));
+      bool dragStarted    = false;
+
+      renderer->runWithState([&kineticTetherEngine, &session, renderer,
+                              &dragStarted, mx, my, state, altHeld
+#ifdef XUZZ_BUILD
+                              ,
+                              zigzagPresentation
+#endif
+      ](RenderState &rState) {
+        auto *const caret = rState.caret;
+        if (caret && caret->hasSelection()) {
+          const auto selStart = caret->selectionStart();
+          const auto selEnd   = caret->selectionEnd();
+          const auto docIdx   = caret->documentIndex();
+          if (docIdx < session->views().size() && selEnd > selStart) {
+            const auto &openView = session->views()[docIdx];
+            const auto &st       = session->store(openView.storeIndex);
+            const auto ver       = st.rebuild(openView.version);
+            const auto spans     = ver.spansFor(selStart, selEnd - selStart);
+            if (!spans.empty()) {
+              const auto text = st.textOf(openView.version);
+              std::string preview;
+              if (selStart < text.size()) {
+                preview =
+                    text.substr(selStart, std::min(selEnd - selStart, 40U));
+              }
+
+              const float screenX = static_cast<float>(mx);
+              const float screenY =
+                  static_cast<float>(state->view.screenHeight - my);
+
+              TetherPayload payload{
+                  .span            = spans.front(),
+                  .previewText     = std::move(preview),
+                  .originVersion   = openView.version,
+                  .originDocIndex  = docIdx,
+                  .originCharStart = selStart,
+                  .originCharEnd   = selEnd,
+                  .originScreenPos = glm::vec2(screenX, screenY),
+                  .originKind      = PouchOriginKind::Document,
+              };
+
+              if (altHeld) {
+                kineticTetherEngine.startDrag(std::move(payload), screenX,
+                                              screenY);
+                dragStarted = true;
+                return;
+              }
+            }
+          }
+        }
+
+#ifdef XUZZ_BUILD
+        if (altHeld && zigzagPresentation) {
+          const float screenX = static_cast<float>(mx);
+          const float screenY =
+              static_cast<float>(state->view.screenHeight - my);
+          std::optional<zigzag::CellRef> cellTarget;
+          if (renderer->lastPick && renderer->lastPick->semanticTarget &&
+              renderer->lastPick->semanticTarget->cellRef) {
+            cellTarget = static_cast<zigzag::CellRef>(
+                *renderer->lastPick->semanticTarget->cellRef);
+          } else {
+            cellTarget = zigzagPresentation->focusCell();
+          }
+
+          if (cellTarget && !zigzag::isEphemeral(*cellTarget)) {
+            const auto cellRef   = *cellTarget;
+            const auto &manifold = zigzagPresentation->manifold();
+            const auto spans     = manifold.contentOf(cellRef);
+            if (!spans.empty()) {
+              const auto &bridgeStore = session->store(0);
+              const auto preview      = manifold.textOf(cellRef, bridgeStore);
+              const std::string rankCoord = "d.1: #" + std::to_string(cellRef);
+              TetherPayload payload{
+                  .span            = spans.front(),
+                  .previewText     = preview,
+                  .originVersion   = bridgeStore.primaryCurrentVersion(),
+                  .originDocIndex  = 0,
+                  .originCharStart = 0,
+                  .originCharEnd =
+                      static_cast<std::uint32_t>(spans.front().length),
+                  .originScreenPos  = glm::vec2(screenX, screenY),
+                  .originKind       = PouchOriginKind::ZigzagCell,
+                  .originCell       = cellRef,
+                  .originSliceIndex = 0,
+                  .originRankCoord  = rankCoord,
+              };
+              kineticTetherEngine.startDrag(std::move(payload), screenX,
+                                            screenY);
+              dragStarted = true;
+              return;
+            }
+          }
+        }
+#endif
+      });
+
+      return dragStarted;
+    };
+
+    state->mouseMotionHandler = [&kineticTetherEngine, &pouchDrawer, state](
+                                    const int mx, const int my,
+                                    const std::uint32_t /*buttons*/) -> bool {
+      const float screenX = static_cast<float>(mx);
+      const float screenY = static_cast<float>(state->view.screenHeight - my);
+
+      if (kineticTetherEngine.isDragging()) {
+        kineticTetherEngine.updateDrag(screenX, screenY);
+        if (pouchDrawer.isOpen()) {
+          const auto &payload = kineticTetherEngine.payload();
+          pouchDrawer.forge().setDragGuide(payload.originScreenPos.x,
+                                           payload.originScreenPos.y, screenX,
+                                           screenY, true);
+        }
+        return true;
+      }
+      pouchDrawer.forge().setDragGuide(0.0F, 0.0F, 0.0F, 0.0F, false);
+      return false;
+    };
+
+    state->mouseUpHandler =
+        [&pouchDrawer, &kineticTetherEngine, &session, renderer,
+         state](const int mx, const int my, const std::uint8_t button) -> bool {
+      if (button != 1) { // 1 = SDL_BUTTON_LEFT
+        return false;
+      }
+      const float screenX = static_cast<float>(mx);
+      const float screenY = static_cast<float>(state->view.screenHeight - my);
+      pouchDrawer.forge().setDragGuide(0.0F, 0.0F, 0.0F, 0.0F, false);
+
+      // 1. If kinetic tether is currently dragging:
+      if (kineticTetherEngine.isDragging()) {
+        if (pouchDrawer.isOpen() && pouchDrawer.currentWidth() >= 50.0F) {
+          const bool hitZone =
+              (pouchDrawer.zoneAt(screenX, screenY) != nullptr);
+          const bool hitLeft =
+              pouchDrawer.forge().containsLeft(screenX, screenY);
+          const bool hitRight =
+              pouchDrawer.forge().containsRight(screenX, screenY);
+          if (hitZone || hitLeft || hitRight) {
+            const auto &payload = kineticTetherEngine.payload();
+            if (payload.originKind == PouchOriginKind::ZigzagCell) {
+              pouchDrawer.handleCellDrop(payload.span, payload.previewText,
+                                         payload.originCell,
+                                         payload.originRankCoord, screenX,
+                                         screenY, payload.originSliceIndex);
+            } else {
+              pouchDrawer.handleGhostDrop(
+                  payload.span, payload.previewText, payload.originVersion,
+                  screenX, screenY, payload.originDocIndex,
+                  payload.originCharStart, payload.originCharEnd);
+            }
+            kineticTetherEngine.cancelDrag();
+            return true;
+          }
+        }
+        kineticTetherEngine.endDrag(screenX, screenY);
+        return true;
+      }
+
+      // 2. Direct drop into open pouch drawer from selection:
+      if (!pouchDrawer.isOpen() || pouchDrawer.currentWidth() < 50.0F) {
+        return false;
+      }
+      const bool hitZone  = (pouchDrawer.zoneAt(screenX, screenY) != nullptr);
+      const bool hitLeft  = pouchDrawer.forge().containsLeft(screenX, screenY);
+      const bool hitRight = pouchDrawer.forge().containsRight(screenX, screenY);
+
+      if (!hitZone && !hitLeft && !hitRight) {
+        return false;
+      }
+
+      renderer->runWithState([&pouchDrawer, &session, screenX,
+                              screenY](RenderState &rState) {
+        auto *const caret = rState.caret;
+        if (!caret || !caret->hasSelection()) {
+          return;
+        }
+        const auto selStart = caret->selectionStart();
+        const auto selEnd   = caret->selectionEnd();
+        const auto docIdx   = caret->documentIndex();
+        if (docIdx >= session->views().size() || selEnd <= selStart) {
+          return;
+        }
+        const auto &openView = session->views()[docIdx];
+        const auto &st       = session->store(openView.storeIndex);
+        const auto ver       = st.rebuild(openView.version);
+        const auto spans     = ver.spansFor(selStart, selEnd - selStart);
+        if (spans.empty()) {
+          return;
+        }
+        const auto text = st.textOf(openView.version);
+        std::string preview;
+        if (selStart < text.size()) {
+          preview = text.substr(selStart, std::min(selEnd - selStart, 40U));
+        }
+        pouchDrawer.handleGhostDrop(spans.front(), preview, openView.version,
+                                    screenX, screenY, docIdx, selStart, selEnd);
+      });
+      return true;
+    };
     if (asked.empty() && read.empty() && alongside.empty() &&
         extraImports.empty()) {
       const auto &primaryStore = session->store(0);
@@ -2953,6 +3065,19 @@ int main(const int argc, char **argv) {
         std::string(xanadu::settings::kKeymapZigzagBundleCycle),
         "cycle active dimension bundle forward", [zigzagPresentation] {
           zigzagPresentation->cycleDimensionBundle(true);
+        });
+    app.commands().registerAction(
+        std::string(xanadu::settings::kKeymapConfirmAction),
+        "activate focused Zigzag cell or execute Omnibar / Palette",
+        [zigzagPresentation, &bridgeCoordinator] {
+          if (zigzagPresentation->isCommandBarVisible()) {
+            zigzagPresentation->executeCommandBar();
+          } else if (zigzagPresentation->isPaletteVisible()) {
+            zigzagPresentation->paletteCloneSelectedToFocus();
+            zigzagPresentation->setPaletteVisible(false);
+          } else {
+            bridgeCoordinator.activateCell(zigzagPresentation->focusCell());
+          }
         });
 #endif
     quiet || std::cout << "commands:\n" << app.commands().helpText();

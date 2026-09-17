@@ -996,3 +996,34 @@ TEST(ZigzagVisualizerTest, ModalInputInterceptionAndTextEntry) {
   EXPECT_FALSE(viz.isPaletteVisible());
   EXPECT_FALSE(viz.grabbing());
 }
+
+TEST(ZigzagVisualizerTest, CellActivationCallbackAndReturnKeyDispatch) {
+  ZigzagVisualizer viz("Sans 12");
+  xanadu::ZigzagPresentationSurface &surface = viz;
+
+  zigzag::CellRef activatedCell = 0;
+  surface.setCellActivationCallback(
+      [&](const zigzag::CellRef cell) { activatedCell = cell; });
+
+  // 1. Direct activateCell on surface
+  surface.activateCell(42);
+  EXPECT_EQ(activatedCell, 42U);
+
+  // 2. Direct activateCell on visualizer
+  viz.activateCell(99);
+  EXPECT_EQ(activatedCell, 99U);
+
+  // 3. Key::Return when no modal is grabbing
+  const auto focusId = viz.focusCellId();
+  EXPECT_FALSE(viz.grabbing());
+  EXPECT_TRUE(viz.keyPressed(gleditor::Key::Return, gleditor::KeyMods::None));
+  EXPECT_EQ(activatedCell, focusId);
+
+  // 4. When command bar is visible, Return executes command bar and does NOT
+  // trigger cell activation
+  viz.setCommandBarVisible(true);
+  EXPECT_TRUE(viz.grabbing());
+  activatedCell = 0;
+  EXPECT_TRUE(viz.keyPressed(gleditor::Key::Return, gleditor::KeyMods::None));
+  EXPECT_EQ(activatedCell, 0U);
+}

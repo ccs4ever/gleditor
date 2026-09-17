@@ -29,6 +29,8 @@ class BridgeCoordinator {
 public:
   using CellActivationHandler =
       std::function<void(zigzag::CellRef cell, bool altHeld)>;
+  using DocumentFocusHandler =
+      std::function<void(zigzag::CellRef cell, const PrimediaSpan &span)>;
 
   BridgeCoordinator(LinkBeams &links, RendererRef renderer,
                     gleditor::a11y::Publisher &accessibility) noexcept;
@@ -44,6 +46,16 @@ public:
   void setCellActivationHandler(CellActivationHandler handler) {
     cellActivationHandler_ = std::move(handler);
   }
+  void setDocumentFocusHandler(DocumentFocusHandler handler) {
+    documentFocusHandler_ = std::move(handler);
+  }
+
+  /// Activate a cell in Zigzag, resolving its span and notifying Xudu to focus.
+  void activateCell(zigzag::CellRef cell);
+
+  /// Notify that a document link to a Zigzag cell was activated.
+  void onDocumentLinkActivated(zigzag::CellRef cell);
+
   /// Remove registrations and clear LinkBeams' cross-domain state.
   void detach() noexcept;
   /// Apply a changed surface revision at a host state-update boundary.
@@ -64,6 +76,7 @@ private:
   bool dirty_{false};
   SatelloidOverlay *satelloidOverlay_{nullptr};
   CellActivationHandler cellActivationHandler_;
+  DocumentFocusHandler documentFocusHandler_;
 };
 
 } // namespace xudu

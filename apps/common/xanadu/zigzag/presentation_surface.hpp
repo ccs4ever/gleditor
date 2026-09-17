@@ -28,13 +28,16 @@ namespace xanadu {
  */
 class ZigzagPresentationSurface {
 public:
-  using InvalidationCallback = std::function<void(std::uint64_t revision)>;
+  using InvalidationCallback   = std::function<void(std::uint64_t revision)>;
+  using CellActivationCallback = std::function<void(zigzag::CellRef cell)>;
 
   virtual ~ZigzagPresentationSurface() = default;
 
   [[nodiscard]] virtual const zigzag::Manifold &manifold() const noexcept = 0;
   [[nodiscard]] virtual zigzag::CellRef focusCell() const noexcept        = 0;
   virtual void focusCell(zigzag::CellRef cell)                            = 0;
+  virtual void activateCell(zigzag::CellRef cell)                         = 0;
+  virtual void setCellActivationCallback(CellActivationCallback callback) = 0;
   [[nodiscard]] virtual int cellRadius() const noexcept                   = 0;
   virtual void setCellRadius(int radius) noexcept                         = 0;
 

@@ -14,6 +14,7 @@
 
 #include "microversion.hpp"
 #include "ops.hpp"
+#include "pouch_zone.hpp"
 
 namespace xanadu {
 
@@ -40,6 +41,12 @@ struct TetherPayload {
   std::uint32_t originCharStart{0};
   std::uint32_t originCharEnd{0};
   glm::vec2 originScreenPos{0.0F, 0.0F};
+
+  // Cross-domain cell metadata
+  PouchOriginKind originKind{PouchOriginKind::Document};
+  std::uint32_t originCell{0};
+  std::uint32_t originSliceIndex{0};
+  std::string originRankCoord;
 };
 
 /**

@@ -42,7 +42,9 @@ void PouchDrawer::setOpen(const bool open, const bool animated) noexcept {
 }
 
 bool PouchDrawer::busy() const {
-  return std::abs(currentSlideWidth_ - targetSlideWidth_) > 0.5F;
+  return std::abs(currentSlideWidth_ - targetSlideWidth_) > 0.5F ||
+         (forgeWidget_.burstProgress() > 0.0F &&
+          forgeWidget_.burstProgress() < 1.0F);
 }
 
 void PouchDrawer::layout(const float screenWidth, const float screenHeight) {
@@ -236,6 +238,7 @@ void PouchDrawer::drawFrame(gleditor::FrameContext &ctx) {
                    0xFFFFFFFF, 0);
 
   // 3. Clasp Assembly Bench
+  forgeWidget_.update(0.016F);
   forgeWidget_.draw(*canvas_, ctx.state);
 
   // 4. Partitioned Drop Zones

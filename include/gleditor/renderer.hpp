@@ -245,6 +245,10 @@ public:
   [[nodiscard]] virtual Caret *editCaret() { return nullptr; }
   [[nodiscard]] virtual ch::Timeline *animTimeline() { return nullptr; }
 
+  /// Most recent completed picking result, kept so that interactive callers can
+  /// consult it without polling the device themselves.
+  std::optional<render::PickingResult> lastPick;
+
   /**
    * @brief World units between the resting places of adjacent documents.
    *
@@ -351,9 +355,6 @@ private:
    */
   std::vector<std::shared_ptr<Doc>> fadingDocs;
 
-  /// Most recent completed picking result, kept so that interactive callers can
-  /// consult it without polling the device themselves.
-  std::optional<render::PickingResult> lastPick;
   std::uint64_t nextPickRequestId{1};
   std::unordered_map<std::uint64_t, render::PickScene> pickScenes;
   /// Last tag reported to the log, so that hovering over one object does not

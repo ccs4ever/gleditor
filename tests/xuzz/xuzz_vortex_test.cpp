@@ -16,6 +16,7 @@
 #include "common/xanadu/vortex/vortex_stdlib.hpp"
 #include "common/xanadu/vortex/vortex_vm.hpp"
 #include "common/xanadu/zigzag/arena_manifold.hpp"
+#include "common/xanadu/zigzag/presentation_surface.hpp"
 #include <gleditor/modal_input.hpp>
 
 namespace {
@@ -46,6 +47,61 @@ public:
 
   [[nodiscard]] std::optional<gleditor::InputArea> textArea() const override {
     return area_;
+  }
+};
+
+class MockSurface : public xanadu::ZigzagPresentationSurface {
+public:
+  zigzag::Manifold manifold_;
+  zigzag::CellRef focus_{zigzag::noCell};
+  int radius_{3};
+  std::uint64_t rev_{1};
+  InvalidationCallback invalidationCb_;
+  CellActivationCallback activationCb_;
+
+  [[nodiscard]] const zigzag::Manifold &manifold() const noexcept override {
+    return manifold_;
+  }
+  [[nodiscard]] zigzag::CellRef focusCell() const noexcept override {
+    return focus_;
+  }
+  void focusCell(const zigzag::CellRef cell) override {
+    focus_ = cell;
+    ++rev_;
+    if (invalidationCb_) {
+      invalidationCb_(rev_);
+    }
+  }
+  void activateCell(const zigzag::CellRef cell) override {
+    if (activationCb_) {
+      activationCb_(cell);
+    }
+  }
+  void setCellActivationCallback(CellActivationCallback callback) override {
+    activationCb_ = std::move(callback);
+  }
+  [[nodiscard]] int cellRadius() const noexcept override { return radius_; }
+  void setCellRadius(const int radius) noexcept override { radius_ = radius; }
+  [[nodiscard]] std::optional<xanadu::CellAnchor>
+  cellAnchor(zigzag::CellRef) const override {
+    return std::nullopt;
+  }
+  [[nodiscard]] std::uint64_t bridgeRevision() const noexcept override {
+    return rev_;
+  }
+  void setBridgeInvalidationCallback(InvalidationCallback callback) override {
+    invalidationCb_ = std::move(callback);
+  }
+  [[nodiscard]] gleditor::FrameContributor *
+  frameContributor() noexcept override {
+    return nullptr;
+  }
+  [[nodiscard]] gleditor::PickObserver *pickObserver() noexcept override {
+    return nullptr;
+  }
+  [[nodiscard]] gleditor::a11y::Source *
+  accessibilitySource() noexcept override {
+    return nullptr;
   }
 };
 
@@ -169,4 +225,53 @@ TEST(XuzzSovereignKeymapTest, SovereignKeymapGovernance) {
   for (const auto &[act, combo] : kmCfg.bindings) {
     EXPECT_FALSE(combo.empty()) << "Action " << act << " has empty binding";
   }
+}
+
+TEST(XuzzBridgeTest,
+     PresentationSurfaceCellActivationAndDocumentFocusCoordination) {
+  xanadu::Store store;
+  const auto g  = store.sliceGenesis(xanadu::MicroversionId{});
+  const auto v1 = store.makeCell(g, "Intertwingled Span");
+  const auto c1 = store.cellRefOf(v1);
+
+  MockSurface surface;
+  surface.manifold_ = store.rebuildManifold(v1);
+  surface.focusCell(c1);
+
+  zigzag::CellRef lastFocusedCell = 0;
+  xanadu::PrimediaSpan lastFocusedSpan{};
+
+  auto docFocusHandler = [&](const zigzag::CellRef cell,
+                             const xanadu::PrimediaSpan &span) {
+    lastFocusedCell = cell;
+    lastFocusedSpan = span;
+  };
+
+  surface.setCellActivationCallback([&](const zigzag::CellRef cell) {
+    const auto spans = surface.manifold().contentOf(cell);
+    xanadu::PrimediaSpan primary{};
+    if (!spans.empty()) {
+      primary = spans.front();
+    }
+    docFocusHandler(cell, primary);
+  });
+
+  // 1. Activate cell -> triggers activation callback -> resolves span ->
+  // notifies document focus
+  surface.activateCell(c1);
+  EXPECT_EQ(lastFocusedCell, c1);
+  const auto contentSpans = surface.manifold_.contentOf(c1);
+  ASSERT_FALSE(contentSpans.empty());
+  EXPECT_EQ(lastFocusedSpan.start, contentSpans.front().start);
+  EXPECT_EQ(lastFocusedSpan.length, contentSpans.front().length);
+
+  // 2. Document link activated: far end points to a Zigzag cell -> focus cell
+  // in surface
+  const auto v2                = store.makeCell(v1, "Far Link Anchor");
+  const auto c2                = store.cellRefOf(v2);
+  auto onDocumentLinkActivated = [&](const zigzag::CellRef cell) {
+    surface.focusCell(cell);
+  };
+  onDocumentLinkActivated(c2);
+  EXPECT_EQ(surface.focusCell(), c2);
 }

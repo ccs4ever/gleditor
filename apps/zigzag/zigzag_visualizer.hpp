@@ -363,6 +363,12 @@ public:
   void focusCell(const CellRef cell) override {
     navigateFocusTo(static_cast<CellID>(cell));
   }
+  void activateCell(const CellRef cell) override;
+  void setCellActivationCallback(
+      xanadu::ZigzagPresentationSurface::CellActivationCallback callback)
+      override {
+    cellActivationCallback_ = std::move(callback);
+  }
   [[nodiscard]] int cellRadius() const noexcept override {
     return scene_.neighborhood_radius;
   }
@@ -479,6 +485,8 @@ private:
 
   DimensionBundle dimension_bundle_{DimensionBundle::Custom};
   std::shared_ptr<vortex::VortexHost> vortex_host_{nullptr};
+  xanadu::ZigzagPresentationSurface::CellActivationCallback
+      cellActivationCallback_;
 
   bool paletteVisible_{false};
   std::size_t paletteSelectedIndex_{0};

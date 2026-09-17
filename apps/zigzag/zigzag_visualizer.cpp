@@ -1909,6 +1909,10 @@ bool ZigzagVisualizer::keyPressed(const gleditor::Key key,
       return false;
     }
   }
+  if (key == gleditor::Key::Return) {
+    activateCell(static_cast<CellRef>(accursed_cell_focus_));
+    return true;
+  }
   return false;
 }
 
@@ -1938,6 +1942,12 @@ std::optional<gleditor::InputArea> ZigzagVisualizer::textArea() const {
     };
   }
   return std::nullopt;
+}
+
+void ZigzagVisualizer::activateCell(const CellRef cell) {
+  if (cellActivationCallback_) {
+    cellActivationCallback_(cell);
+  }
 }
 
 std::optional<xanadu::CellAnchor>
