@@ -514,9 +514,19 @@ it.
 
 **Verified**: the full `gleditor_test` (514/514, the two new tests above included)/`xudu_test`
 (944/944, excluding the pre-existing unrelated `AnimationTransclusionTest` hang)/`zigzag_test`
-(90/90) suites pass, and `compare-backends.sh`'s `opengl`/`opengles` frames stay byte-identical (the
-same pre-existing, unrelated ~1.4% Vulkan/stale-SPIR-V mismatch as every prior stage). A manual
-`kjv.txt` run (4.4 MB, 1261 pages) with `--profile`:
+(90/90) suites pass, and `compare-backends.sh`'s `opengl`/`opengles` frames stay byte-identical --
+the hard requirement per "Determinism is a hard constraint" above. Vulkan still shows the same
+pre-existing ~1.4% mismatch against `opengl` this plan has seen at every prior stage; earlier notes
+in this repo attributed that to stale `image.vert/frag.spv` (now fixed in the Makefile -- `SPIRV` is
+derived from `$(wildcard assets/shaders/*.glsl)` rather than a hand-maintained list that had silently
+stopped including them), but rebuilding fresh SPIR-V and rerunning left the exact same byte counts:
+`quick_brown_fox.txt` (the default `compare-backends.sh` sample) draws no images at all, so that bug,
+real as it was, was never this one. Diffing the two frames pixel-by-pixel instead shows the mismatch
+concentrated in a handful of thin, edge-aligned horizontal bars landing on a different scanline
+between the two rasterisers by exactly one pixel row (not a uniform shift -- most of the frame is
+byte-identical) -- a genuine small Vulkan/OpenGL rasterisation rounding difference, still
+undiagnosed and unrelated to this plan's Stage 5 work. A manual `kjv.txt` run (4.4 MB, 1261 pages)
+with `--profile`:
 
 ```text
 [TIMING] First page rendered: 353.78 ms (docs in render: 1)
