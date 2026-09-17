@@ -171,22 +171,19 @@ public:
   void toggleViewMode();
 
   // -- Dimension Bundles ---------------------------------------------------
-  enum class DimensionBundle : std::uint8_t {
-    Custom    = 0, ///< Manual / unbundled dimensions
-    Execution = 1, ///< X: d.spin, Y: d.step, Z: d.branch
-    Scope     = 2, ///< X: d.lexical, Y: d.dynamic, Z: d.env
-    Contract  = 3, ///< X: d.require, Y: d.ensure, Z: d.invariant
-    Logic     = 4, ///< X: d.clause, Y: d.predicate, Z: d.var
-    Stdlib    = 5, ///< X: d.stdlib, Y: d.symbol, Z: d.version
-  };
+  using DimensionBundle = zigzag::DimensionBundle;
 
   void setDimensionBundle(DimensionBundle bundle);
   void cycleDimensionBundle(bool forward = true);
   [[nodiscard]] DimensionBundle dimensionBundle() const noexcept {
     return dimension_bundle_;
   }
-  static std::string dimensionBundleName(DimensionBundle bundle);
-  static ViewAxisBinding dimensionBundleAxes(DimensionBundle bundle);
+  static std::string dimensionBundleName(DimensionBundle bundle) {
+    return zigzag::dimensionBundleName(bundle);
+  }
+  static ViewAxisBinding dimensionBundleAxes(DimensionBundle bundle) {
+    return zigzag::dimensionBundleAxes(bundle);
+  }
 
   // -- Vortex Runtime & UI Integration --------------------------------------
   void attachVortexHost(std::shared_ptr<vortex::VortexHost> host);
@@ -329,6 +326,7 @@ public:
   }
   bool deleteFocusCell();
   void updateFocusCellText(std::string text);
+  bool saveStore(const std::string &filePath = {}) const;
   bool saveStructureYaml(const std::string &filePath) const;
 
   [[nodiscard]] bool isProtected(CellRef id) const;

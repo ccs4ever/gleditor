@@ -2,6 +2,7 @@
  * @file test_visualizer.cpp
  * @brief Unit tests for ZigzagVisualizer navigation and state management.
  */
+#include <filesystem>
 #include <gtest/gtest.h>
 
 #include <gleditor/doc.hpp>
@@ -864,4 +865,74 @@ TEST(ZigzagVisualizerTest, CommandOmnibarMacroDefinitionAndDispatch) {
   const bool handled = viz.dispatchAction("hop-first");
   EXPECT_TRUE(handled);
   EXPECT_NE(viz.focusCellId(), root);
+}
+
+TEST(ZigzagVisualizerTest, LivingKeymapActionDispatching) {
+  ZigzagVisualizer viz("Sans 12");
+  const auto initialFocus = viz.focusCellId();
+  ASSERT_NE(initialFocus, 0U);
+
+  // swap-xy
+  const auto origX = viz.currentView().x_dimension;
+  const auto origY = viz.currentView().y_dimension;
+  EXPECT_TRUE(viz.dispatchAction("swap-xy"));
+  EXPECT_EQ(viz.currentView().x_dimension, origY);
+  EXPECT_EQ(viz.currentView().y_dimension, origX);
+
+  // cycle-dims-forward
+  EXPECT_TRUE(viz.dispatchAction("cycle-dims-forward"));
+
+  // duplicate-focus-cell
+  EXPECT_TRUE(viz.dispatchAction("duplicate-focus-cell"));
+  const auto dupFocus = viz.focusCellId();
+  EXPECT_NE(dupFocus, initialFocus);
+
+  // jump-home
+  EXPECT_TRUE(viz.dispatchAction("jump-home"));
+  EXPECT_EQ(viz.focusCellId(), viz.engine()->manifold().home());
+}
+
+TEST(ZigzagVisualizerTest, CommandOmnibarViewAndLibraryCommands) {
+  ZigzagVisualizer viz("Sans 12");
+
+  // :view command
+  viz.setCommandBarVisible(true);
+  viz.setCommandBarText(":view d.1 d.2 d.3");
+  EXPECT_TRUE(viz.executeCommandBar());
+  EXPECT_EQ(viz.currentView().x_dimension, "d.1");
+  EXPECT_EQ(viz.currentView().y_dimension, "d.2");
+  EXPECT_EQ(viz.currentView().z_dimension, "d.3");
+  EXPECT_FALSE(viz.commandBarFeedbackIsError());
+
+  // :call std:ui/view
+  viz.setCommandBarText(":call std:ui/view d.spin d.step d.branch");
+  EXPECT_TRUE(viz.executeCommandBar());
+  EXPECT_EQ(viz.currentView().x_dimension, "d.spin");
+  EXPECT_EQ(viz.currentView().y_dimension, "d.step");
+  EXPECT_EQ(viz.currentView().z_dimension, "d.branch");
+  EXPECT_FALSE(viz.commandBarFeedbackIsError());
+
+  // :save command to temporary store
+  namespace fs = std::filesystem;
+  auto tmpDir  = fs::temp_directory_path() / "zigzag_viz_store_test";
+  fs::create_directories(tmpDir);
+  auto savePath = (tmpDir / "test.store").string();
+
+  viz.setCommandBarText(":save " + savePath);
+  EXPECT_TRUE(viz.executeCommandBar());
+  EXPECT_TRUE(fs::exists(savePath));
+  EXPECT_FALSE(viz.commandBarFeedbackIsError());
+
+  // :export-lib and :import-lib
+  auto libPath = (tmpDir / "lib.store").string();
+  viz.setCommandBarText(":export-lib std:ui " + libPath);
+  EXPECT_TRUE(viz.executeCommandBar());
+  EXPECT_TRUE(fs::exists(libPath));
+  EXPECT_FALSE(viz.commandBarFeedbackIsError());
+
+  viz.setCommandBarText(":import-lib " + libPath);
+  EXPECT_TRUE(viz.executeCommandBar());
+  EXPECT_FALSE(viz.commandBarFeedbackIsError());
+
+  fs::remove_all(tmpDir);
 }

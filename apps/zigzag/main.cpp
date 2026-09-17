@@ -77,6 +77,26 @@ LoadedDocument loadDocument(const std::string &slicePath,
     }
   }
 
+  if (!slicePath.empty() && fs::exists(slicePath)) {
+    try {
+      xanadu::Store store;
+      store.load(slicePath);
+      auto versions = store.allVersions();
+      if (versions.empty()) {
+        versions.push_back(xanadu::MicroversionId::parse("1"));
+      }
+      auto doc = zigzag::projectStoreToZigzag(store, versions);
+      return {.doc        = std::move(doc),
+              .sourcePath = slicePath,
+              .description =
+                  "Loaded sovereign Store into ZigZag Hypermesh from: " +
+                  slicePath + " (" + std::to_string(versions.size()) +
+                  " versions)"};
+    } catch (...) {
+      // Fall through to slice candidates
+    }
+  }
+
   std::vector<std::string> candidates;
   if (!slicePath.empty()) {
     candidates.push_back(slicePath);
@@ -255,13 +275,29 @@ void bindCommands(gleditor::Application &app, const AppStateRef &state,
   // Dimension swapping and cycling
   app.commands().bind(SDL_SCANCODE_SPACE, "swap-xy",
                       "swap X and Y dimension bindings",
-                      [viz] { viz->swapDimensions(0, 1); });
+                      [viz] { viz->dispatchAction("swap-xy"); });
   app.commands().bind(SDL_SCANCODE_TAB, "cycle-dims-forward",
                       "cycle active dimension bindings forward",
-                      [viz] { viz->cycleDimensions(true); });
+                      [viz] { viz->dispatchAction("cycle-dims-forward"); });
   app.commands().bind(SDL_SCANCODE_TAB, Mod::Shift, "cycle-dims-backward",
                       "cycle active dimension bindings backward",
-                      [viz] { viz->cycleDimensions(false); });
+                      [viz] { viz->dispatchAction("cycle-dims-backward"); });
+
+  // Navigation jumping
+  app.commands().bind(SDL_SCANCODE_HOME, "jump-home", "jump focus to home cell",
+                      [viz] { viz->dispatchAction("jump-home"); });
+  app.commands().bind(SDL_SCANCODE_HOME, Mod::Ctrl, "hop-head",
+                      "hop to head of current rank along X dimension",
+                      [viz] { viz->dispatchAction("hop-head"); });
+  app.commands().bind(SDL_SCANCODE_END, Mod::Ctrl, "hop-tail",
+                      "hop to tail of current rank along X dimension",
+                      [viz] { viz->dispatchAction("hop-tail"); });
+
+  // Duplication
+  app.commands().bind(SDL_SCANCODE_C, Mod::Ctrl | Mod::Shift,
+                      "duplicate-focus-cell",
+                      "duplicate focused cell along d.clone",
+                      [viz] { viz->dispatchAction("duplicate-focus-cell"); });
 
   // Xudu convergence operations
   app.commands().bind(SDL_SCANCODE_R, "rasterize-print",
@@ -306,11 +342,10 @@ void bindCommands(gleditor::Application &app, const AppStateRef &state,
   app.commands().bind(SDL_SCANCODE_BACKSPACE, "delete-focus-cell-bksp",
                       "delete currently focused cell",
                       [viz] { viz->dispatchAction("delete-focus-cell"); });
-  app.commands().bind(SDL_SCANCODE_S, Mod::Ctrl | Mod::Shift, "save-slice",
-                      "save current slice to disk YAML", [viz] {
-                        if (viz->saveStructureYaml("")) {
-                          std::cout
-                              << "Successfully saved ZigZag slice YAML.\n";
+  app.commands().bind(SDL_SCANCODE_S, Mod::Ctrl | Mod::Shift, "save-store",
+                      "save current slice to sovereign store", [viz] {
+                        if (viz->saveStore("")) {
+                          std::cout << "Successfully saved ZigZag store.\n";
                         }
                       });
 }
@@ -336,7 +371,7 @@ int main(const int argc, char **argv) {
   parser.add_argument("--xudu")
       .default_value(std::string{})
       .help("load a Xudu store path or document");
-  parser.add_argument("slice").help("Slice YAML file to load").remaining();
+  parser.add_argument("slice").help("Slice or Store file to load").remaining();
 
   if (detailed) {
     parser.add_group("Batch and export options");

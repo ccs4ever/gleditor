@@ -523,13 +523,21 @@ void ZigzagVisualizer::updateFocusCellText(std::string text) {
   invalidateAccessibility();
 }
 
-bool ZigzagVisualizer::saveStructureYaml(const std::string &filePath) const {
+bool ZigzagVisualizer::saveStore(const std::string &filePath) const {
   const auto savePath = filePath.empty() ? current_slice_path_ : filePath;
-  if (savePath.empty()) {
+  if (savePath.empty() || !engine_) {
     return false;
   }
-  const auto doc = document();
-  return saveZzStructure(doc, savePath);
+  try {
+    engine_->store().save(savePath);
+    return true;
+  } catch (...) {
+    return false;
+  }
+}
+
+bool ZigzagVisualizer::saveStructureYaml(const std::string &filePath) const {
+  return saveStore(filePath);
 }
 
 std::size_t ZigzagVisualizer::operationCount() const {
@@ -1913,62 +1921,6 @@ void ZigzagVisualizer::cycleDimensionBundle(const bool forward) {
   setDimensionBundle(static_cast<DimensionBundle>(current));
 }
 
-std::string ZigzagVisualizer::dimensionBundleName(DimensionBundle bundle) {
-  switch (bundle) {
-  case DimensionBundle::Custom:
-    return "Custom";
-  case DimensionBundle::Execution:
-    return "Execution";
-  case DimensionBundle::Scope:
-    return "Scope";
-  case DimensionBundle::Contract:
-    return "Contract";
-  case DimensionBundle::Logic:
-    return "Logic";
-  case DimensionBundle::Stdlib:
-    return "Stdlib";
-  }
-  return "Custom";
-}
-
-ViewAxisBinding ZigzagVisualizer::dimensionBundleAxes(DimensionBundle bundle) {
-  switch (bundle) {
-  case DimensionBundle::Execution:
-    return ViewAxisBinding{
-        .x_dimension = "d.spin",
-        .y_dimension = "d.step",
-        .z_dimension = "d.branch",
-    };
-  case DimensionBundle::Scope:
-    return ViewAxisBinding{
-        .x_dimension = "d.lexical",
-        .y_dimension = "d.dynamic",
-        .z_dimension = "d.env",
-    };
-  case DimensionBundle::Contract:
-    return ViewAxisBinding{
-        .x_dimension = "d.require",
-        .y_dimension = "d.ensure",
-        .z_dimension = "d.invariant",
-    };
-  case DimensionBundle::Logic:
-    return ViewAxisBinding{
-        .x_dimension = "d.clause",
-        .y_dimension = "d.predicate",
-        .z_dimension = "d.var",
-    };
-  case DimensionBundle::Stdlib:
-    return ViewAxisBinding{
-        .x_dimension = "d.stdlib",
-        .y_dimension = "d.symbol",
-        .z_dimension = "d.version",
-    };
-  case DimensionBundle::Custom:
-  default:
-    return {};
-  }
-}
-
 void ZigzagVisualizer::attachVortexHost(
     std::shared_ptr<vortex::VortexHost> host) {
   vortex_host_ = std::move(host);
@@ -1986,17 +1938,31 @@ void ZigzagVisualizer::ensureVortexHost() {
     vortex_host_ = std::make_shared<vortex::VortexHost>(&engine_->manifold());
     if (store_) {
       vortex_host_->bindStore(store_);
+    } else {
+      vortex_host_->bindStore(&engine_->store());
     }
   }
 }
 
 bool ZigzagVisualizer::dispatchAction(std::string_view actionName) {
+  if (!vortex_host_) {
+    ensureVortexHost();
+  }
   if (vortex_host_ && accursed_cell_focus_ != 0) {
     if (vortex_host_->hasCustomAction(actionName)) {
-      CellRef newFocus = zigzag::noCell;
+      CellRef newFocus   = zigzag::noCell;
+      const auto oldView = current_view_;
       if (vortex_host_->dispatchAction(
               actionName, static_cast<CellRef>(accursed_cell_focus_),
               current_view_, newFocus)) {
+        if (engine_) {
+          engine_->syncIncremental();
+        }
+        if (oldView != current_view_) {
+          dimension_bundle_ = DimensionBundle::Custom;
+          rebuildActiveViewTopology();
+          invalidateAccessibility();
+        }
         if (newFocus != zigzag::noCell &&
             newFocus != static_cast<CellRef>(accursed_cell_focus_)) {
           navigateFocusTo(static_cast<CellID>(newFocus));
@@ -2175,6 +2141,108 @@ bool ZigzagVisualizer::dispatchAction(std::string_view actionName) {
                                    current_view_, dummy);
     }
     return ok;
+  }
+  if (actionName == "duplicate-focus-cell") {
+    if (vortex_host_ && accursed_cell_focus_ != 0) {
+      CellRef newFocus = zigzag::noCell;
+      if (vortex_host_->dispatchAction(
+              actionName, static_cast<CellRef>(accursed_cell_focus_),
+              current_view_, newFocus)) {
+        if (newFocus != zigzag::noCell) {
+          navigateFocusTo(static_cast<CellID>(newFocus));
+          return true;
+        }
+      }
+    }
+    return false;
+  }
+  if (actionName == "hop-head") {
+    if (vortex_host_ && accursed_cell_focus_ != 0) {
+      CellRef newFocus = zigzag::noCell;
+      if (vortex_host_->dispatchAction(
+              actionName, static_cast<CellRef>(accursed_cell_focus_),
+              current_view_, newFocus)) {
+        if (newFocus != zigzag::noCell) {
+          navigateFocusTo(static_cast<CellID>(newFocus));
+          return true;
+        }
+      }
+    }
+    return true;
+  }
+  if (actionName == "hop-tail") {
+    if (vortex_host_ && accursed_cell_focus_ != 0) {
+      CellRef newFocus = zigzag::noCell;
+      if (vortex_host_->dispatchAction(
+              actionName, static_cast<CellRef>(accursed_cell_focus_),
+              current_view_, newFocus)) {
+        if (newFocus != zigzag::noCell) {
+          navigateFocusTo(static_cast<CellID>(newFocus));
+          return true;
+        }
+      }
+    }
+    return true;
+  }
+  if (actionName == "jump-home") {
+    if (vortex_host_) {
+      CellRef newFocus = zigzag::noCell;
+      if (vortex_host_->dispatchAction(
+              actionName, static_cast<CellRef>(accursed_cell_focus_),
+              current_view_, newFocus)) {
+        if (newFocus != zigzag::noCell) {
+          navigateFocusTo(static_cast<CellID>(newFocus));
+          return true;
+        }
+      }
+    }
+    if (engine_) {
+      navigateFocusTo(engine_->manifold().home());
+      return true;
+    }
+    return false;
+  }
+  if (actionName == "swap-xy") {
+    if (vortex_host_) {
+      CellRef dummy = zigzag::noCell;
+      vortex_host_->dispatchAction(actionName,
+                                   static_cast<CellRef>(accursed_cell_focus_),
+                                   current_view_, dummy);
+      dimension_bundle_ = DimensionBundle::Custom;
+      rebuildActiveViewTopology();
+      invalidateAccessibility();
+      return true;
+    }
+    swapDimensions(0, 1);
+    return true;
+  }
+  if (actionName == "cycle-dims-forward") {
+    if (vortex_host_) {
+      CellRef dummy = zigzag::noCell;
+      vortex_host_->dispatchAction(actionName,
+                                   static_cast<CellRef>(accursed_cell_focus_),
+                                   current_view_, dummy);
+      dimension_bundle_ = DimensionBundle::Custom;
+      rebuildActiveViewTopology();
+      invalidateAccessibility();
+      return true;
+    }
+    cycleDimensions(true);
+    return true;
+  }
+  if (actionName == "cycle-dims-backward") {
+    if (vortex_host_) {
+      CellRef dummy = zigzag::noCell;
+      vortex_host_->dispatchAction(actionName,
+                                   static_cast<CellRef>(accursed_cell_focus_),
+                                   current_view_, dummy);
+      dimension_bundle_ = DimensionBundle::Custom;
+      rebuildActiveViewTopology();
+      invalidateAccessibility();
+      return true;
+    }
+    cycleDimensions(false);
+    return true;
   }
   return false;
 }
@@ -2490,7 +2558,176 @@ bool ZigzagVisualizer::executeCommandBar() {
     return false;
   }
 
-  // 1. Command mode (:macro ...)
+  // 1. View configuration (:view <dimX> [dimY] [dimZ])
+  if (text.starts_with(":view ") || text.starts_with(":view\t")) {
+    std::string_view rest = text.substr(6);
+    std::vector<std::string> dims;
+    std::istringstream iss{std::string(rest)};
+    std::string d;
+    while (iss >> d) {
+      dims.push_back(d);
+    }
+    if (dims.empty()) {
+      commandBarFeedback_        = "Usage: :view <dimX> [dimY] [dimZ]";
+      commandBarFeedbackIsError_ = true;
+      return false;
+    }
+    std::string dimX = dims.size() > 0 ? dims[0] : "";
+    std::string dimY = dims.size() > 1 ? dims[1] : "";
+    std::string dimZ = dims.size() > 2 ? dims[2] : "";
+    if (vortex_host_) {
+      vortex_host_->setView(current_view_, dimX, dimY, dimZ);
+    } else {
+      if (!dimX.empty()) current_view_.x_dimension = dimX;
+      if (!dimY.empty()) current_view_.y_dimension = dimY;
+      if (!dimZ.empty()) current_view_.z_dimension = dimZ;
+    }
+    dimension_bundle_ = DimensionBundle::Custom;
+    rebuildActiveViewTopology();
+    invalidateAccessibility();
+    commandBarFeedback_ = "Set view dimensions: " + current_view_.x_dimension +
+                          ", " + current_view_.y_dimension + ", " +
+                          current_view_.z_dimension;
+    commandBarFeedbackIsError_ = false;
+    return true;
+  }
+
+  // 2. Direct routine invocation (:call <fn> [args...])
+  if (text.starts_with(":call ") || text.starts_with(":call\t")) {
+    std::string_view rest = text.substr(6);
+    std::istringstream iss{std::string(rest)};
+    std::string fnPath;
+    if (!(iss >> fnPath)) {
+      commandBarFeedback_        = "Usage: :call <module/symbol> [args...]";
+      commandBarFeedbackIsError_ = true;
+      return false;
+    }
+    std::vector<vortex::CellValue> args;
+    std::string argStr;
+    while (iss >> argStr) {
+      try {
+        if (argStr.find('.') != std::string::npos) {
+          args.push_back(std::stod(argStr));
+        } else {
+          args.push_back(static_cast<std::int64_t>(std::stoll(argStr)));
+        }
+      } catch (...) {
+        args.push_back(argStr);
+      }
+    }
+    if (fnPath == "std:ui/view") {
+      std::string dimX =
+          args.size() > 0 && std::holds_alternative<std::string>(args[0])
+              ? std::get<std::string>(args[0])
+              : "";
+      std::string dimY =
+          args.size() > 1 && std::holds_alternative<std::string>(args[1])
+              ? std::get<std::string>(args[1])
+              : "";
+      std::string dimZ =
+          args.size() > 2 && std::holds_alternative<std::string>(args[2])
+              ? std::get<std::string>(args[2])
+              : "";
+      if (vortex_host_) {
+        vortex_host_->setView(current_view_, dimX, dimY, dimZ);
+      } else {
+        if (!dimX.empty()) current_view_.x_dimension = dimX;
+        if (!dimY.empty()) current_view_.y_dimension = dimY;
+        if (!dimZ.empty()) current_view_.z_dimension = dimZ;
+      }
+      dimension_bundle_ = DimensionBundle::Custom;
+      rebuildActiveViewTopology();
+      invalidateAccessibility();
+      commandBarFeedback_        = "View updated via std:ui/view";
+      commandBarFeedbackIsError_ = false;
+      return true;
+    }
+    if (vortex_host_) {
+      auto res = vortex_host_->stdlib().call(fnPath, args);
+      commandBarFeedback_ =
+          "Called " + fnPath + " -> " + std::to_string(res.size()) + " results";
+      commandBarFeedbackIsError_ = false;
+      return true;
+    }
+    commandBarFeedback_        = "No vortex host attached";
+    commandBarFeedbackIsError_ = true;
+    return false;
+  }
+
+  // 3. Sovereign Library export (:export-lib <module> <path>)
+  if (text.starts_with(":export-lib ") || text.starts_with(":export-lib\t")) {
+    std::string_view rest = text.substr(12);
+    std::istringstream iss{std::string(rest)};
+    std::string modName, destPath;
+    if (!(iss >> modName >> destPath)) {
+      commandBarFeedback_        = "Usage: :export-lib <module> <path>";
+      commandBarFeedbackIsError_ = true;
+      return false;
+    }
+    if (vortex_host_ && vortex_host_->exportLibrary(modName, destPath)) {
+      commandBarFeedback_ = "Exported library " + modName + " to " + destPath;
+      commandBarFeedbackIsError_ = false;
+      return true;
+    }
+    commandBarFeedback_        = "Failed to export library " + modName;
+    commandBarFeedbackIsError_ = true;
+    return false;
+  }
+
+  // 4. Sovereign Library import (:import-lib <path>)
+  if (text.starts_with(":import-lib ") || text.starts_with(":import-lib\t")) {
+    std::string_view rest = text.substr(12);
+    std::string srcPath   = std::string(rest);
+    while (!srcPath.empty() &&
+           std::isspace(static_cast<unsigned char>(srcPath.front()))) {
+      srcPath.erase(srcPath.begin());
+    }
+    while (!srcPath.empty() &&
+           std::isspace(static_cast<unsigned char>(srcPath.back()))) {
+      srcPath.pop_back();
+    }
+    if (srcPath.empty()) {
+      commandBarFeedback_        = "Usage: :import-lib <path>";
+      commandBarFeedbackIsError_ = true;
+      return false;
+    }
+    if (vortex_host_ && vortex_host_->importLibrary(srcPath)) {
+      commandBarFeedback_        = "Imported library from " + srcPath;
+      commandBarFeedbackIsError_ = false;
+      return true;
+    }
+    commandBarFeedback_        = "Failed to import library from " + srcPath;
+    commandBarFeedbackIsError_ = true;
+    return false;
+  }
+
+  // 5. Sovereign store save (:save [path])
+  if (text == ":save" || text.starts_with(":save ") ||
+      text.starts_with(":save\t")) {
+    std::string path;
+    if (text.size() > 5) {
+      path = std::string(text.substr(6));
+      while (!path.empty() &&
+             std::isspace(static_cast<unsigned char>(path.front()))) {
+        path.erase(path.begin());
+      }
+      while (!path.empty() &&
+             std::isspace(static_cast<unsigned char>(path.back()))) {
+        path.pop_back();
+      }
+    }
+    if (saveStore(path)) {
+      commandBarFeedback_ =
+          "Saved store to " + (path.empty() ? current_slice_path_ : path);
+      commandBarFeedbackIsError_ = false;
+      return true;
+    }
+    commandBarFeedback_        = "Failed to save store";
+    commandBarFeedbackIsError_ = true;
+    return false;
+  }
+
+  // 6. Command mode (:macro ...)
   if (text.starts_with(":macro ") || text.starts_with(":macro\t")) {
     std::string_view rest = text.substr(7);
     while (!rest.empty() &&
