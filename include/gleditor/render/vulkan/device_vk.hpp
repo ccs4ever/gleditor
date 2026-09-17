@@ -185,6 +185,15 @@ private:
     /// One descriptor set per frame in flight, so updating the set for a new
     /// frame cannot disturb a frame the GPU is still reading.
     std::array<VkDescriptorSet, framesInFlight> sets{};
+    /// Texture each frame's set is currently written to point at. A set
+    /// without VK_DESCRIPTOR_BINDING_UPDATE_AFTER_BIND_BIT must not change
+    /// between when a secondary command buffer binds it and when that buffer
+    /// is submitted, so bindAtlasTexture() checks this before writing --
+    /// several image placements sharing one atlas texture, or repeated glyph
+    /// draws, must not re-issue an identical update that would retroactively
+    /// invalidate a secondary already recorded (and possibly already closed)
+    /// earlier this same frame.
+    std::array<TextureHandle, framesInFlight> boundTextures{};
   };
 
   /**
