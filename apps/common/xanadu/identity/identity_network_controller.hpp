@@ -59,8 +59,6 @@ inline constexpr int kExtOracleVoteMsgId     = 3;
 inline constexpr int kExtOracleVerifyMsgId   = 4;
 inline constexpr int kExtTranscopyrightMsgId = 5;
 
-inline constexpr std::uint8_t kBtMsgExtended = 20;
-
 /// How long an invoice stands. Short, because the challenge inside it is
 /// single-use and held in memory until spent: a long window is an author
 /// holding open state for readers who wandered off.

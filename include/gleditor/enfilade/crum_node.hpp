@@ -22,6 +22,11 @@
 
 namespace gleditor::enfilade {
 
+/// Bytes in one CPU cache line on every architecture this project targets.
+/// Enfilade routing nodes are `alignas`ed to it so a descent touches exactly
+/// one cache line per node rather than splitting across two.
+inline constexpr std::size_t kCacheLineBytes = 64;
+
 /**
  * @brief Concept defining an Enfilade Displacement Monoid (Dsp).
  *
@@ -75,7 +80,7 @@ concept EnfiladeAction =
  * @tparam B The maximum branching factor (default 8).
  */
 template <typename Dsp, typename Wid, std::size_t B = 8>
-struct alignas(64) CrumNode {
+struct alignas(kCacheLineBytes) CrumNode {
   static constexpr std::size_t BranchingFactor = B;
 
   std::array<Dsp, B> dsps{}; ///< Relative displacements into child frames.

@@ -100,10 +100,12 @@ FontFace::FontFace(FT_Library ftLib, const std::string &fontPath,
   }
 
   // Populate scaled typographic metrics (in pixels)
-  metrics_.ascent = static_cast<float>(face_->size->metrics.ascender) / 64.0F;
+  metrics_.ascent =
+      static_cast<float>(face_->size->metrics.ascender) / kFixed26Dot6Scale;
   metrics_.descent =
-      -static_cast<float>(face_->size->metrics.descender) / 64.0F;
-  metrics_.lineHeight = static_cast<float>(face_->size->metrics.height) / 64.0F;
+      -static_cast<float>(face_->size->metrics.descender) / kFixed26Dot6Scale;
+  metrics_.lineHeight =
+      static_cast<float>(face_->size->metrics.height) / kFixed26Dot6Scale;
   if (metrics_.lineHeight <= 0.0F) {
     metrics_.lineHeight = metrics_.ascent + metrics_.descent;
   }
@@ -111,7 +113,8 @@ FontFace::FontFace(FT_Library ftLib, const std::string &fontPath,
   // Space width
   const auto spaceIndex = FT_Get_Char_Index(face_, ' ');
   if (spaceIndex && FT_Load_Glyph(face_, spaceIndex, FT_LOAD_DEFAULT) == 0) {
-    metrics_.spaceWidth = static_cast<float>(face_->glyph->advance.x) / 64.0F;
+    metrics_.spaceWidth =
+        static_cast<float>(face_->glyph->advance.x) / kFixed26Dot6Scale;
   } else {
     metrics_.spaceWidth = metrics_.ascent * 0.5F;
   }

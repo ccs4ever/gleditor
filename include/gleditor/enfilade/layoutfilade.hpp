@@ -141,7 +141,7 @@ static_assert(sizeof(LayoutEntry) == 32,
  * @struct LayoutCrum
  * @brief Routing node in the Layoutfilade tree (branching factor B = 16).
  */
-struct alignas(64) LayoutCrum {
+struct alignas(kCacheLineBytes) LayoutCrum {
   static constexpr std::size_t BranchingFactor = 16;
 
   LayoutDsp dsp{};

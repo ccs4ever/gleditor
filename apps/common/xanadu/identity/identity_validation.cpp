@@ -10,18 +10,17 @@
 #include <libtorrent/hasher.hpp>
 #include <merklecpp.h>
 
+#include "common/xanadu/merkle_domain.hpp"
+
 namespace xanadu::identity {
 
 namespace {
 
-// RFC 6962 section 2.1 domain tags. Leaves and interior nodes must hash into
-// separate domains, or SHA256(l || r) is reachable two ways -- as an interior
-// node, and as a leaf whose content happens to be those 64 bytes -- and a
-// forged proof can pass off a fabricated leaf as a subtree. The same pair is
-// defined in merkle_ledger.cpp: the two trees are separate implementations
-// over separate record types, and neither can borrow the other's tagging.
-constexpr char kLeafDomain     = '\x00';
-constexpr char kInteriorDomain = '\x01';
+// The domain tags are shared (see merkle_domain.hpp); this tree remains a
+// separate implementation over its own record type -- only the fixed RFC
+// 6962 protocol byte is common to both.
+constexpr char kLeafDomain     = kMerkleLeafDomain;
+constexpr char kInteriorDomain = kMerkleInteriorDomain;
 
 void sha256_lt(const merkle::HashT<32> &l, const merkle::HashT<32> &r,
                merkle::HashT<32> &out) {
@@ -455,13 +454,12 @@ EnginePipeline::getActiveOracleQuorum(std::size_t quorumSize,
   // Sort candidates by total weight descending, then by fingerprint ascending
   std::vector<std::pair<Fingerprint, std::uint64_t>> sortedCandidates(
       tallies.begin(), tallies.end());
-  std::sort(sortedCandidates.begin(), sortedCandidates.end(),
-            [](const auto &a, const auto &b) {
-              if (a.second != b.second) {
-                return a.second > b.second; // Higher weight first
-              }
-              return a.first < b.first; // Deterministic tie-break
-            });
+  std::ranges::sort(sortedCandidates, [](const auto &a, const auto &b) {
+    if (a.second != b.second) {
+      return a.second > b.second; // Higher weight first
+    }
+    return a.first < b.first; // Deterministic tie-break
+  });
 
   std::vector<Fingerprint> quorum;
   quorum.reserve(std::min(quorumSize, sortedCandidates.size()));
@@ -475,7 +473,7 @@ bool EnginePipeline::isOracleAuthorized(const Fingerprint &oracle,
                                         std::uint64_t timestamp,
                                         std::size_t quorumSize) const {
   const auto quorum = getActiveOracleQuorum(quorumSize, timestamp);
-  return std::find(quorum.begin(), quorum.end(), oracle) != quorum.end();
+  return std::ranges::find(quorum, oracle) != quorum.end();
 }
 
 std::expected<void, ValidationError>

@@ -12,16 +12,6 @@
 
 namespace zigzag {
 
-namespace {
-
-constexpr auto noDense = std::numeric_limits<std::uint32_t>::max();
-
-/// Dead runs the arena carries before compaction is worth doing. The same
-/// bound Manifold uses, for the same reason.
-constexpr std::size_t compactionSlack = 64;
-
-} // namespace
-
 std::uint32_t ArenaManifold::denseOf(const CellRef ref) const noexcept {
   if (!isEphemeral(ref)) {
     // A base cell, which this arena holds only once it has been shadowed.

@@ -10,17 +10,6 @@
 
 namespace zigzag {
 
-namespace {
-
-constexpr auto noDense = std::numeric_limits<std::uint32_t>::max();
-
-/// Dead runs the arena will carry before compact() is worth doing. Bounded by
-/// a multiple of what is live rather than by an absolute size, so a slice being
-/// built pays a compaction a bounded number of times however large it gets.
-constexpr std::size_t compactionSlack = 64;
-
-} // namespace
-
 std::uint32_t Manifold::denseOf(const CellRef ref) const noexcept {
   if (noCell == ref || isEphemeral(ref)) {
     return noDense;

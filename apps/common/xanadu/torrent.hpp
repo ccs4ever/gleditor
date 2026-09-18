@@ -45,6 +45,11 @@
 
 namespace xanadu {
 
+/// BEP 10 extended-message ID: the BitTorrent peer wire protocol byte that
+/// marks a message as carrying an extension payload rather than a core
+/// protocol message. Shared by every peer-wire writer in this module.
+inline constexpr std::uint8_t kBtMsgExtended = 20;
+
 /// A BitTorrent v1 info hash: the SHA-1 of the bencoded info dictionary.
 struct InfoHash {
   std::array<std::uint8_t, 20> bytes{};

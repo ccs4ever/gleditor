@@ -10,6 +10,11 @@
 
 namespace gleditor::text {
 
+/// FreeType and HarfBuzz both report metrics in 26.6 fixed-point: the low 6
+/// bits are a fractional pixel, so dividing by this converts to a plain
+/// float pixel value.
+inline constexpr float kFixed26Dot6Scale = 64.0F;
+
 /**
  * @brief Scaled typographic metrics for a resolved font at a given pixel size.
  */

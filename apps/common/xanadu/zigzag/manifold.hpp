@@ -18,6 +18,7 @@
 #define ZIGZAG_MANIFOLD_HPP
 
 #include <cstdint>
+#include <limits>
 #include <optional>
 #include <span>
 #include <string>
@@ -40,6 +41,18 @@ class Store;
 namespace zigzag {
 
 // CellRef, DimRef, and noCell are defined in dim_vector.hpp
+
+/// Sentinel "no dense index" value, shared by Manifold and ArenaManifold's
+/// denseOf() -- both keep the same free-list-of-dead-slots design and so
+/// need the same value to mean "not tracked densely."
+inline constexpr auto noDense = std::numeric_limits<std::uint32_t>::max();
+
+/// Dead runs a manifold-shaped structure will carry before compact() is
+/// worth doing. Bounded by a multiple of what is live rather than by an
+/// absolute size, so a slice being built pays a compaction a bounded number
+/// of times however large it gets. The same bound for the same reason in
+/// both Manifold and ArenaManifold.
+inline constexpr std::size_t compactionSlack = 64;
 
 /**
  * @brief The top bit: this cell is derived and no operation backs it.

@@ -49,10 +49,10 @@ ShapedRun shapeText(std::string_view text, const FontFacePtr &font) {
   run.glyphs.reserve(glyphCount);
   for (unsigned int i = 0; i < glyphCount; i++) {
     auto glyphIdx = glyphInfo[i].codepoint;
-    float xAdv    = static_cast<float>(glyphPos[i].x_advance) / 64.0F;
-    float yAdv    = static_cast<float>(glyphPos[i].y_advance) / 64.0F;
-    float xOff    = static_cast<float>(glyphPos[i].x_offset) / 64.0F;
-    float yOff    = static_cast<float>(glyphPos[i].y_offset) / 64.0F;
+    float xAdv = static_cast<float>(glyphPos[i].x_advance) / kFixed26Dot6Scale;
+    float yAdv = static_cast<float>(glyphPos[i].y_advance) / kFixed26Dot6Scale;
+    float xOff = static_cast<float>(glyphPos[i].x_offset) / kFixed26Dot6Scale;
+    float yOff = static_cast<float>(glyphPos[i].y_offset) / kFixed26Dot6Scale;
 
     if (glyphIdx == 0 && glyphInfo[i].cluster < text.size()) {
       const char *p   = text.data() + glyphInfo[i].cluster;
@@ -89,10 +89,10 @@ ShapedRun shapeText(std::string_view text, const FontFacePtr &font) {
               hb_buffer_get_glyph_positions(fbuf, &fCount);
           if (fCount > 0 && fInfo[0].codepoint != 0) {
             glyphIdx = fInfo[0].codepoint;
-            xAdv     = static_cast<float>(fPos[0].x_advance) / 64.0F;
-            yAdv     = static_cast<float>(fPos[0].y_advance) / 64.0F;
-            xOff     = static_cast<float>(fPos[0].x_offset) / 64.0F;
-            yOff     = static_cast<float>(fPos[0].y_offset) / 64.0F;
+            xAdv = static_cast<float>(fPos[0].x_advance) / kFixed26Dot6Scale;
+            yAdv = static_cast<float>(fPos[0].y_advance) / kFixed26Dot6Scale;
+            xOff = static_cast<float>(fPos[0].x_offset) / kFixed26Dot6Scale;
+            yOff = static_cast<float>(fPos[0].y_offset) / kFixed26Dot6Scale;
           }
           hb_buffer_destroy(fbuf);
         }

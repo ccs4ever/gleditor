@@ -15,11 +15,13 @@
 #include <iomanip>
 #include <sstream>
 
+#include "common/xanadu/merkle_domain.hpp"
+
 namespace xanadu::enfilade {
 
 namespace {
 
-constexpr char kInteriorDomain = '\x01';
+constexpr char kInteriorDomain = kMerkleInteriorDomain;
 
 void sha256_receipt(const merkle::HashT<32> &l, const merkle::HashT<32> &r,
                     merkle::HashT<32> &out) {
@@ -98,7 +100,7 @@ std::string PaymentReceipt::canonicalForm() const {
 
 std::array<std::uint8_t, 32> PaymentReceipt::leafHash() const {
   const auto canon           = canonicalForm();
-  constexpr char kLeafDomain = '\x00';
+  constexpr char kLeafDomain = kMerkleLeafDomain;
   libtorrent::hasher256 h;
   h.update(&kLeafDomain, 1);
   h.update(canon.data(), canon.size());
@@ -225,10 +227,10 @@ ScrollHolefilade
 ScrollHolefilade::buildFromEntries(const std::vector<HoleSpanEntry> &entries) {
   ScrollHolefilade filade;
   filade.entries_ = entries;
-  std::sort(filade.entries_.begin(), filade.entries_.end(),
-            [](const HoleSpanEntry &a, const HoleSpanEntry &b) {
-              return a.start < b.start;
-            });
+  std::ranges::sort(filade.entries_,
+                    [](const HoleSpanEntry &a, const HoleSpanEntry &b) {
+                      return a.start < b.start;
+                    });
   filade.buildTree();
   return filade;
 }
@@ -352,9 +354,9 @@ ScrollHolefilade::decomposeSpan(const std::uint64_t queryStart,
     decomposeRecursive(rootIndex_, queryStart, queryEnd, rawSlices);
   }
 
-  std::sort(
-      rawSlices.begin(), rawSlices.end(),
-      [](const HoleSlice &a, const HoleSlice &b) { return a.start < b.start; });
+  std::ranges::sort(rawSlices, [](const HoleSlice &a, const HoleSlice &b) {
+    return a.start < b.start;
+  });
 
   // Reconcile gaps with Clear slices to ensure contiguous, full coverage of
   // query
@@ -478,9 +480,9 @@ bool ScrollHolefilade::verifyAgainstLinearScan(
     });
   }
 
-  std::sort(
-      linearRaw.begin(), linearRaw.end(),
-      [](const HoleSlice &a, const HoleSlice &b) { return a.start < b.start; });
+  std::ranges::sort(linearRaw, [](const HoleSlice &a, const HoleSlice &b) {
+    return a.start < b.start;
+  });
 
   std::vector<HoleSlice> linearReconciled;
   auto currentOffset = queryStart;

@@ -446,7 +446,6 @@ static constexpr const char *kExtLiveOpName       = "xudu_live_op";
 static constexpr int kExtLiveOpMsgId              = 1;
 static constexpr const char *kExtScrollSealedName = "xudu_scroll_sealed";
 static constexpr int kExtScrollSealedMsgId        = 2;
-static constexpr std::uint8_t kBtMsgExtended      = 20;
 
 class XuduPeerPlugin : public lt::peer_plugin,
                        public std::enable_shared_from_this<XuduPeerPlugin> {

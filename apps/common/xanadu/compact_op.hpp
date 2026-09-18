@@ -11,17 +11,21 @@
 #include <stdexcept>
 #include <string>
 
+#include <gleditor/enfilade/crum_node.hpp>
+
 #include "ops.hpp"
 #include "spool.hpp"
 
 namespace xanadu {
+
+using gleditor::enfilade::kCacheLineBytes;
 
 /**
  * @struct CompactOpNode
  * @brief 64-byte cache-line aligned operation node in contiguous virtual
  * memory.
  */
-struct alignas(64) CompactOpNode {
+struct alignas(kCacheLineBytes) CompactOpNode {
   // Tree topology & metadata (8 bytes)
   //
   // Only the edge pointing *up* lives here. firstChildIndex and
@@ -141,9 +145,9 @@ struct alignas(64) CompactOpNode {
   bool operator==(const CompactOpNode &) const = default;
 };
 
-static_assert(sizeof(CompactOpNode) == 64,
+static_assert(sizeof(CompactOpNode) == kCacheLineBytes,
               "CompactOpNode must be exactly 64 bytes (1 cache line)");
-static_assert(alignof(CompactOpNode) == 64,
+static_assert(alignof(CompactOpNode) == kCacheLineBytes,
               "CompactOpNode must be cache-line aligned");
 // alignas(64) would round a 56-byte struct up to 64 on its own, so the size
 // assertion above cannot by itself catch a field going missing. This one can:

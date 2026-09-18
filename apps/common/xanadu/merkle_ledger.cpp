@@ -19,17 +19,14 @@
 #include <sstream>
 #include <stdexcept>
 
+#include "merkle_domain.hpp"
+
 namespace xanadu {
 
 namespace {
 
-// RFC 6962 section 2.1 domain tags. Leaves and interior nodes must hash into
-// separate domains, or SHA256(l || r) is reachable two ways -- as an interior
-// node, and as a leaf whose content happens to be those 64 bytes -- and a
-// forged proof can pass off a fabricated leaf as a subtree. The tags are the
-// whole defence, so they are named here rather than spelled inline twice.
-constexpr char kLeafDomain     = '\x00';
-constexpr char kInteriorDomain = '\x01';
+constexpr char kLeafDomain     = kMerkleLeafDomain;
+constexpr char kInteriorDomain = kMerkleInteriorDomain;
 
 void sha256_lt(const merkle::HashT<32> &l, const merkle::HashT<32> &r,
                merkle::HashT<32> &out) {

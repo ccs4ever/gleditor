@@ -217,7 +217,7 @@ struct HoleSlice {
  * @brief Routing node in the Holefilade B-enfilade tree (branching factor B =
  * 16).
  */
-struct alignas(64) HoleCrum {
+struct alignas(kCacheLineBytes) HoleCrum {
   static constexpr std::size_t BranchingFactor = 16;
 
   HoleDsp dsp{};

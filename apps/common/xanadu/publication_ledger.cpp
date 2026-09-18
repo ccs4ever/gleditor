@@ -17,12 +17,14 @@
 #include <sstream>
 #include <stdexcept>
 
+#include "merkle_domain.hpp"
+
 namespace xanadu {
 
 namespace {
 
-constexpr char kLeafDomain     = '\x00';
-constexpr char kInteriorDomain = '\x01';
+constexpr char kLeafDomain     = kMerkleLeafDomain;
+constexpr char kInteriorDomain = kMerkleInteriorDomain;
 
 void sha256_pub(const merkle::HashT<32> &l, const merkle::HashT<32> &r,
                 merkle::HashT<32> &out) {
