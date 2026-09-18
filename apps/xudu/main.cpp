@@ -1229,7 +1229,11 @@ public:
       default:
         break;
       }
-      choiceField.options.push_back("⚙ " + uri + " — " + desc);
+      std::string option = "⚙ ";
+      option += uri;
+      option += " — ";
+      option += desc;
+      choiceField.options.push_back(std::move(option));
       choiceField.optionValues.push_back(uri);
     }
 

@@ -344,6 +344,7 @@ VplView VPLEngine::evalIndexing(const IndexingExpr &expr) {
   // Vector index (e.g. W[⍋≢¨W])
   auto idxCells = idxView.collectCells(arena());
   std::vector<std::int64_t> indices;
+  indices.reserve(idxCells.size());
   for (zigzag::CellRef ic : idxCells) {
     indices.push_back(cellValueInt(ic));
   }
@@ -817,6 +818,7 @@ VplView VPLEngine::applyMonadicVerb(TokenKind verb, const VplView &arg) {
 
   auto cells = arg.collectCells(arena());
   std::vector<double> vals;
+  vals.reserve(cells.size());
   for (zigzag::CellRef c : cells) {
     vals.push_back(computeMonadicScalar(verb, cellValueDouble(c)));
   }
@@ -941,6 +943,7 @@ VplView VPLEngine::applyDyadicVerb(TokenKind verb, const VplView &left,
   if (verb == TokenKind::Transpose) {
     auto pCells = left.collectCells(arena());
     std::vector<std::size_t> perm;
+    perm.reserve(pCells.size());
     for (zigzag::CellRef pc : pCells) {
       perm.push_back(static_cast<std::size_t>(cellValueInt(pc)));
     }
@@ -1053,6 +1056,7 @@ VplView VPLEngine::applyDyadicVerb(TokenKind verb, const VplView &left,
       std::int64_t l = left.scalarInt();
       auto rCells    = right.collectCells(arena());
       std::vector<std::int64_t> vals;
+      vals.reserve(rCells.size());
       for (zigzag::CellRef rc : rCells) {
         vals.push_back(static_cast<std::int64_t>(computeDyadicScalar(
             verb, static_cast<double>(l), cellValueDouble(rc))));
@@ -1064,6 +1068,7 @@ VplView VPLEngine::applyDyadicVerb(TokenKind verb, const VplView &left,
                                  : static_cast<double>(left.scalarInt());
     auto rCells = right.collectCells(arena());
     std::vector<double> vals;
+    vals.reserve(rCells.size());
     for (zigzag::CellRef rc : rCells) {
       vals.push_back(computeDyadicScalar(verb, l, cellValueDouble(rc)));
     }
@@ -1077,6 +1082,7 @@ VplView VPLEngine::applyDyadicVerb(TokenKind verb, const VplView &left,
       std::int64_t r = right.scalarInt();
       auto lCells    = left.collectCells(arena());
       std::vector<std::int64_t> vals;
+      vals.reserve(lCells.size());
       for (zigzag::CellRef lc : lCells) {
         vals.push_back(static_cast<std::int64_t>(computeDyadicScalar(
             verb, cellValueDouble(lc), static_cast<double>(r))));
@@ -1088,6 +1094,7 @@ VplView VPLEngine::applyDyadicVerb(TokenKind verb, const VplView &left,
                                   : static_cast<double>(right.scalarInt());
     auto lCells = left.collectCells(arena());
     std::vector<double> vals;
+    vals.reserve(lCells.size());
     for (zigzag::CellRef lc : lCells) {
       vals.push_back(computeDyadicScalar(verb, cellValueDouble(lc), r));
     }
@@ -1101,6 +1108,7 @@ VplView VPLEngine::applyDyadicVerb(TokenKind verb, const VplView &left,
   std::size_t count = std::min(lCells.size(), rCells.size());
   if (isInt) {
     std::vector<std::int64_t> vals;
+    vals.reserve(count);
     for (std::size_t i = 0; i < count; ++i) {
       vals.push_back(static_cast<std::int64_t>(computeDyadicScalar(
           verb, cellValueDouble(lCells[i]), cellValueDouble(rCells[i]))));
@@ -1109,6 +1117,7 @@ VplView VPLEngine::applyDyadicVerb(TokenKind verb, const VplView &left,
                     left.axes().empty() ? defaultDim() : left.axes()[0].dim);
   }
   std::vector<double> vals;
+  vals.reserve(count);
   for (std::size_t i = 0; i < count; ++i) {
     vals.push_back(computeDyadicScalar(verb, cellValueDouble(lCells[i]),
                                        cellValueDouble(rCells[i])));

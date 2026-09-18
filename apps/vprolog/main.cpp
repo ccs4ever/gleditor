@@ -224,7 +224,9 @@ void runREPL(Compiler &compiler, std::vector<Clause> &clauses) {
                 auto it             = sol.formatted.find(varName);
                 std::string val =
                     (it != sol.formatted.end()) ? it->second : "_";
-                out += varName + " = " + val;
+                out += varName;
+                out += " = ";
+                out += val;
               }
               std::cout << out;
 
@@ -396,7 +398,9 @@ int main(int argc, char *argv[]) {
               const auto &varName = query.variables[vi].first;
               auto it             = sol.formatted.find(varName);
               std::string val = (it != sol.formatted.end()) ? it->second : "_";
-              out += varName + " = " + val;
+              out += varName;
+              out += " = ";
+              out += val;
             }
             std::cout << out;
             if (i + 1 < solutions.size()) {

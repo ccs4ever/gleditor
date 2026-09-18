@@ -195,7 +195,10 @@ void bindCommands(gleditor::Application &app, const AppStateRef &state,
   if (!config.keymap.empty()) {
     std::string keymapText;
     for (const auto &[name, chord] : config.keymap) {
-      keymapText += name + ": \"" + chord + "\"\n";
+      keymapText += name;
+      keymapText += ": \"";
+      keymapText += chord;
+      keymapText += "\"\n";
     }
     app.commands().rebindFromText(keymapText);
   }

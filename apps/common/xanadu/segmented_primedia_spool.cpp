@@ -16,7 +16,7 @@ namespace xanadu {
 
 namespace {
 constexpr std::size_t defaultPrimediaReservation =
-    512uz * 1024 * 1024; // 512 MB
+    512UZ * 1024 * 1024; // 512 MB
 }
 
 SegmentedPrimediaSpool::SegmentedPrimediaSpool() {

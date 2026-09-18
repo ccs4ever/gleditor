@@ -25,9 +25,9 @@ namespace xanadu::identity {
 // Maximum allowed sizes to prevent memory exhaustion and DoS attacks
 inline constexpr std::size_t kMaxEmailLength        = 254; // RFC 5321 limit
 inline constexpr std::size_t kMaxIdentityNameLength = 128;
-inline constexpr std::size_t kMaxArmoredKeyLength   = 16uz * 1024; // 16 KB max
+inline constexpr std::size_t kMaxArmoredKeyLength   = 16UZ * 1024; // 16 KB max
 inline constexpr std::size_t kMaxSmtpChallengeToken = 64;
-inline constexpr std::size_t kMaxPayloadBytes = 64uz * 1024; // 64 KB per frame
+inline constexpr std::size_t kMaxPayloadBytes = 64UZ * 1024; // 64 KB per frame
 
 // Constant-time memory comparison helper to resist timing side-channel attacks
 template <std::size_t N>

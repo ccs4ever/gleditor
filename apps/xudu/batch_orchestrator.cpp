@@ -374,8 +374,13 @@ BatchOrchestrator::execute(Session &session,
       const auto argument =
           space == std::string::npos ? std::string{} : line.substr(space + 1);
       const auto fail = [&](const std::string &reason) {
-        throw std::runtime_error("structure script " + scriptPath + ":" +
-                                 std::to_string(lineNumber) + ": " + reason);
+        std::string message = "structure script ";
+        message += scriptPath;
+        message += ":";
+        message += std::to_string(lineNumber);
+        message += ": ";
+        message += reason;
+        throw std::runtime_error(message);
       };
 
       if (command == "genesis") {

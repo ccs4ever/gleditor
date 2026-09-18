@@ -90,6 +90,7 @@ std::vector<gleditor::KnownSource>
 MediaManager::collectKnownSources([[maybe_unused]] const Store *store,
                                   [[maybe_unused]] const Swarm *swarm) const {
   std::vector<gleditor::KnownSource> sources;
+  sources.reserve(staged_.size());
 
   // 1. Add locally staged assets
   for (const auto &staged : staged_) {

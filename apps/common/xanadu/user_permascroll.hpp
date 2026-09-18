@@ -83,7 +83,7 @@ public:
     MutableKeys deviceKeys;               ///< Active BEP 46 keypair
     std::string deviceId{"main"}; ///< Device identifier for subscroll salting
     std::size_t segmentAlignmentBytes{
-        64uz * 1024}; ///< 64 KiB alignment for BitTorrent/mmap
+        64UZ * 1024}; ///< 64 KiB alignment for BitTorrent/mmap
   };
 
   UserPermascroll();

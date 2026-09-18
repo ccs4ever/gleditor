@@ -421,8 +421,10 @@ bool solveQueryHelper(VortexStdLib &stdlib, VortexCore &core,
         auto mark            = core.arena().mark();
         CellRef mCell        = core.arena().makeCell(modName);
         CellRef fCell        = core.arena().makeCell(symName);
-        std::string fullPath = modName + "/" + symName;
-        CellRef pCell        = core.arena().makeCell(fullPath);
+        std::string fullPath = modName;
+        fullPath += "/";
+        fullPath += symName;
+        CellRef pCell = core.arena().makeCell(fullPath);
         if (stdlib.unify(goalArgs[0], mCell) &&
             stdlib.unify(goalArgs[1], fCell) &&
             stdlib.unify(goalArgs[2], pCell)) {
@@ -475,8 +477,10 @@ bool solveQueryHelper(VortexStdLib &stdlib, VortexCore &core,
     for (const auto &modName : stdlib.modules()) {
       for (const auto &symName : stdlib.symbolsInModule(modName)) {
         if (solutionsCount >= maxSolutions || cutToFrame > 0) break;
-        std::string fullPath = modName + "/" + symName;
-        CellRef entryOp      = stdlib.resolve(fullPath);
+        std::string fullPath = modName;
+        fullPath += "/";
+        fullPath += symName;
+        CellRef entryOp = stdlib.resolve(fullPath);
         if (entryOp == noCell) continue;
 
         CellRef curOp        = entryOp;
@@ -519,8 +523,10 @@ bool solveQueryHelper(VortexStdLib &stdlib, VortexCore &core,
     for (const auto &modName : stdlib.modules()) {
       for (const auto &symName : stdlib.symbolsInModule(modName)) {
         if (solutionsCount >= maxSolutions || cutToFrame > 0) break;
-        std::string fullPath = modName + "/" + symName;
-        CellRef entryOp      = stdlib.resolve(fullPath);
+        std::string fullPath = modName;
+        fullPath += "/";
+        fullPath += symName;
+        CellRef entryOp = stdlib.resolve(fullPath);
         if (entryOp == noCell) continue;
 
         CellRef curOp     = entryOp;
@@ -588,8 +594,10 @@ bool solveQueryHelper(VortexStdLib &stdlib, VortexCore &core,
     for (const auto &modName : stdlib.modules()) {
       for (const auto &symName : stdlib.symbolsInModule(modName)) {
         if (solutionsCount >= maxSolutions || cutToFrame > 0) break;
-        std::string fullPath = modName + "/" + symName;
-        CellRef entryOp      = stdlib.resolve(fullPath);
+        std::string fullPath = modName;
+        fullPath += "/";
+        fullPath += symName;
+        CellRef entryOp = stdlib.resolve(fullPath);
         if (entryOp == noCell) continue;
 
         // Input wing
@@ -835,6 +843,7 @@ bool solveQueryHelper(VortexStdLib &stdlib, VortexCore &core,
           auto mark        = core.arena().mark();
           CellRef nameCell = core.arena().makeCell(s.name);
           std::vector<CellRef> typeCells;
+          typeCells.reserve(alt.expectedTypes.size());
           for (const auto &t : alt.expectedTypes) {
             typeCells.push_back(core.arena().makeCell(t));
           }

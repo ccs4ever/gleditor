@@ -2524,7 +2524,9 @@ std::vector<std::string> ZigzagVisualizer::paletteItems() const {
   if (vortex_host_) {
     for (const auto &mod : vortex_host_->availableModules()) {
       for (const auto &sym : vortex_host_->symbolsInModule(mod)) {
-        std::string full = mod + "/" + sym;
+        std::string full = mod;
+        full += "/";
+        full += sym;
         if (std::find(items.begin(), items.end(), full) == items.end()) {
           items.push_back(full);
         }

@@ -385,6 +385,7 @@ int main(int argc, char *argv[]) {
                 << "\n";
     } else if (format == "view" || format == "grid") {
       std::vector<xanadu::vql::ViewDimension> vdims;
+      vdims.reserve(viewDimNames.size());
       for (const auto &dname : viewDimNames) {
         vdims.push_back(
             {.name = dname, .dim = coordinator.resolveDimension(dname)});
