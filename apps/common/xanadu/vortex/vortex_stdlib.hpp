@@ -102,16 +102,16 @@ public:
 
   // -- Module 4: std:functional -----------------------------------------------
   CellRef map(CellRef head, DimRef inDim, DimRef outDim,
-              std::function<CellValue(const CellValue &)> fn);
+              const std::function<CellValue(const CellValue &)> &fn);
   CellRef map(CellRef head, DimRef inDim, DimRef outDim, CellRef fnOp);
 
   CellRef filter(CellRef head, DimRef inDim, DimRef outDim,
-                 std::function<bool(const CellValue &)> pred);
+                 const std::function<bool(const CellValue &)> &pred);
   CellRef filter(CellRef head, DimRef inDim, DimRef outDim, CellRef predOp);
 
-  CellValue
-  fold(CellRef head, DimRef inDim, CellValue initial,
-       std::function<CellValue(const CellValue &, const CellValue &)> fn);
+  CellValue fold(
+      CellRef head, DimRef inDim, CellValue initial,
+      const std::function<CellValue(const CellValue &, const CellValue &)> &fn);
   CellValue fold(CellRef head, DimRef inDim, CellValue initial, CellRef fnOp);
 
   CellRef zip(CellRef headA, CellRef headB, DimRef dimA, DimRef dimB,

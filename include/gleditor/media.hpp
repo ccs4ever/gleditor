@@ -129,7 +129,7 @@ public:
   MediaPlayer(MediaPlayer &&)                 = delete;
   MediaPlayer &operator=(MediaPlayer &&)      = delete;
 
-  bool load(MediaResourcePtr resource);
+  bool load(const MediaResourcePtr &resource);
   void unload();
 
   bool play();

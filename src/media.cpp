@@ -268,7 +268,7 @@ struct MediaPlayer::Impl {
 
   static void videoFormatCleanup([[maybe_unused]] void *opaque) {}
 
-  bool load(MediaResourcePtr res) {
+  bool load(const MediaResourcePtr &res) {
     releaseMedia();
     currentResource = res;
     if (!res || !res->isValid()) {
@@ -630,8 +630,8 @@ MediaPlayer::MediaPlayer(const bool dummyAudio)
 
 MediaPlayer::~MediaPlayer() = default;
 
-bool MediaPlayer::load(MediaResourcePtr resource) {
-  return impl->load(std::move(resource));
+bool MediaPlayer::load(const MediaResourcePtr &resource) {
+  return impl->load(resource);
 }
 
 void MediaPlayer::unload() { impl->releaseMedia(); }

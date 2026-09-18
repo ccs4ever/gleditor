@@ -177,22 +177,22 @@ void MediaWidget::setPlayer(std::shared_ptr<MediaPlayer> aPlayer) {
   revision_++;
 }
 
-bool MediaWidget::load(MediaResourcePtr resource) {
+bool MediaWidget::load(const MediaResourcePtr &resource) {
   if (player_ != nullptr && resource != nullptr) {
     if (title_.empty()) {
       title_ = resource->name();
     }
     revision_++;
-    return player_->load(std::move(resource));
+    return player_->load(resource);
   }
   return false;
 }
 
-bool MediaWidget::loadFragment(MediaResourcePtr resource,
+bool MediaWidget::loadFragment(const MediaResourcePtr &resource,
                                const ByteRange &fragment,
                                const std::uint64_t containerLength) {
   pendingFragment_.reset();
-  if (!load(std::move(resource))) {
+  if (!load(resource)) {
     return false;
   }
   if (containerLength > 0 && fragment.length < containerLength) {

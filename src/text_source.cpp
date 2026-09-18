@@ -511,7 +511,7 @@ std::vector<ContentPiece> FileTextSource::pieces() const {
   return piecesCache;
 }
 
-PdfTextSource::PdfTextSource(std::string path) : label(path) {
+PdfTextSource::PdfTextSource(const std::string &path) : label(path) {
   loadPdfFile(path);
 }
 

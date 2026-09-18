@@ -13,8 +13,9 @@ GroundingModal::GroundingModal(std::string fontName)
     : form_(std::move(fontName)) {}
 
 void GroundingModal::openForQuote(std::string quoteSnippet,
-                                  std::vector<KnownSource> knownSources,
-                                  OnGrounded onGrounded, OnReject onReject) {
+                                  const std::vector<KnownSource> &knownSources,
+                                  OnGrounded onGrounded,
+                                  const OnReject &onReject) {
   std::vector<Form::Field> fields;
 
   // Field 0: Drop-down choice of cached/known sources
@@ -110,8 +111,9 @@ void GroundingModal::openForQuote(std::string quoteSnippet,
 }
 
 void GroundingModal::openForBinary(std::vector<std::uint8_t> excerptBytes,
-                                   std::vector<KnownSource> knownSources,
-                                   OnGrounded onGrounded, OnReject onReject) {
+                                   const std::vector<KnownSource> &knownSources,
+                                   OnGrounded onGrounded,
+                                   const OnReject &onReject) {
   std::vector<Form::Field> fields;
 
   Form::Field choiceField;

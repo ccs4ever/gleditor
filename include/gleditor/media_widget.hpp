@@ -59,7 +59,7 @@ public:
   void setPlaybackRate(float rate);
   [[nodiscard]] float playbackRate() const;
 
-  bool load(MediaResourcePtr resource);
+  bool load(const MediaResourcePtr &resource);
 
   /**
    * @brief Load @p resource as before, then constrain playback to
@@ -80,7 +80,7 @@ public:
    * case of a span that already covers its whole container) behaves exactly
    * like load(): nothing is deferred and no range is ever applied.
    */
-  bool loadFragment(MediaResourcePtr resource, const ByteRange &fragment,
+  bool loadFragment(const MediaResourcePtr &resource, const ByteRange &fragment,
                     std::uint64_t containerLength);
 
   // -- Document Attachment & Positioning --------------------------------------

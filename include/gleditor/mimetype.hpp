@@ -22,7 +22,8 @@ namespace gleditor {
 class MimeType {
 public:
   MimeType();
-  MimeType(std::string type, std::string subtype, std::string parameters = "");
+  MimeType(const std::string &type, const std::string &subtype,
+           const std::string &parameters = "");
   explicit MimeType(std::string_view fullType);
 
   [[nodiscard]] const std::string &type() const { return type_; }

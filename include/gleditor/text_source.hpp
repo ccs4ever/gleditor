@@ -256,7 +256,7 @@ private:
 /// forcedBreaks.
 class PdfTextSource : public TextSource {
 public:
-  explicit PdfTextSource(std::string path);
+  explicit PdfTextSource(const std::string &path);
   PdfTextSource(const char *data, std::size_t size, std::string aName = {});
 
   [[nodiscard]] std::string text() const override { return buffer; }

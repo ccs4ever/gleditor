@@ -315,12 +315,13 @@ public:
   }
 
   // -- In-App Interactive Cell & Dimension Editing --------------------------
-  CellID createCell(std::string text = "", std::string role = "text");
-  bool insertConnectedCell(std::string text, const DimID &dimension,
+  CellID createCell(const std::string &text = "",
+                    const std::string &role = "text");
+  bool insertConnectedCell(const std::string &text, const DimID &dimension,
                            DimVector dir = DimVector::POS);
-  bool insertConnectedCell(std::string text, const DimID &dimension,
+  bool insertConnectedCell(const std::string &text, const DimID &dimension,
                            bool positive) {
-    return insertConnectedCell(std::move(text), dimension,
+    return insertConnectedCell(text, dimension,
                                positive ? DimVector::POS : DimVector::NEG);
   }
   bool linkFocusAlong(const DimID &dimension, CellID targetId,
@@ -335,7 +336,7 @@ public:
                             positive ? DimVector::POS : DimVector::NEG);
   }
   bool deleteFocusCell();
-  void updateFocusCellText(std::string text);
+  void updateFocusCellText(const std::string &text);
   bool saveStore(const std::string &filePath = {}) const;
   bool saveStructureYaml(const std::string &filePath) const;
 

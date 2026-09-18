@@ -37,15 +37,15 @@ public:
    * Rejects paste if dismissed (Escape), left empty, or unmatched.
    */
   void openForQuote(std::string quoteSnippet,
-                    std::vector<KnownSource> knownSources,
-                    OnGrounded onGrounded, OnReject onReject);
+                    const std::vector<KnownSource> &knownSources,
+                    OnGrounded onGrounded, const OnReject &onReject);
 
   /**
    * @brief Present modal to ground a binary excerpt in a parent source.
    */
   void openForBinary(std::vector<std::uint8_t> excerptBytes,
-                     std::vector<KnownSource> knownSources,
-                     OnGrounded onGrounded, OnReject onReject);
+                     const std::vector<KnownSource> &knownSources,
+                     OnGrounded onGrounded, const OnReject &onReject);
 
 private:
   Form form_;

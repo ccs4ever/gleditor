@@ -76,8 +76,8 @@ const MimeType MimeType::OctetStream{"application", "octet-stream"};
 
 MimeType::MimeType() : type_("application"), subtype_("octet-stream") {}
 
-MimeType::MimeType(std::string type, std::string subtype,
-                   std::string parameters)
+MimeType::MimeType(const std::string &type, const std::string &subtype,
+                   const std::string &parameters)
     : type_(toLower(trim(type))), subtype_(toLower(trim(subtype))),
       parameters_(trim(parameters)) {}
 

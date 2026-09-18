@@ -73,13 +73,14 @@ public:
   /// Registers an on-disk or in-memory xanadu::Store.
   /// Folds the store's manifold and imports it into the composite arena.
   CellRef addStore(std::string_view label, std::string_view role,
-                   std::shared_ptr<xanadu::Store> store,
+                   const std::shared_ptr<xanadu::Store> &store,
                    const xanadu::MicroversionId &version = {});
 
   /// Loads a store from directory path and registers it.
-  CellRef loadAndAddStore(
-      std::string_view label, std::string_view role, const std::string &path,
-      std::shared_ptr<xanadu::UserPermascroll> userPermascroll = nullptr);
+  CellRef loadAndAddStore(std::string_view label, std::string_view role,
+                          const std::string &path,
+                          const std::shared_ptr<xanadu::UserPermascroll>
+                              &userPermascroll = nullptr);
 
   // -- Navigation & Resolution ------------------------------------------------
 

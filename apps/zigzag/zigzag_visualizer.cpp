@@ -313,7 +313,8 @@ ZzStructureDocument ZigzagVisualizer::document() const {
   return doc;
 }
 
-CellID ZigzagVisualizer::createCell(std::string text, std::string role) {
+CellID ZigzagVisualizer::createCell(const std::string &text,
+                                    const std::string &role) {
   if (!engine_) {
     return 0;
   }
@@ -331,11 +332,11 @@ CellID ZigzagVisualizer::createCell(std::string text, std::string role) {
   return newId;
 }
 
-bool ZigzagVisualizer::insertConnectedCell(std::string text,
+bool ZigzagVisualizer::insertConnectedCell(const std::string &text,
                                            const DimID &dimension,
                                            const DimVector dir) {
   if (!engine_ || accursed_cell_focus_ == 0) {
-    createCell(std::move(text));
+    createCell(text);
     return true;
   }
   if (dimension == "d.dims") {
@@ -345,7 +346,7 @@ bool ZigzagVisualizer::insertConnectedCell(std::string text,
   if (isEphemeral(focus)) {
     return false;
   }
-  const auto newId  = static_cast<CellRef>(createCell(std::move(text)));
+  const auto newId  = static_cast<CellRef>(createCell(text));
   const auto dimRef = engine_->dimensionFor(dimension);
 
   const auto oldNeighbor = engine_->manifold().linked(focus, dimRef, dir);
@@ -506,7 +507,7 @@ bool ZigzagVisualizer::deleteFocusCell() {
   return true;
 }
 
-void ZigzagVisualizer::updateFocusCellText(std::string text) {
+void ZigzagVisualizer::updateFocusCellText(const std::string &text) {
   if (!engine_ || accursed_cell_focus_ == 0) {
     return;
   }

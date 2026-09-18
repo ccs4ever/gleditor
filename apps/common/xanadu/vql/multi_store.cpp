@@ -153,10 +153,10 @@ CellRef MultiStoreCoordinator::importManifold(const zigzag::Manifold &source,
   return sourceToDest.empty() ? noCell : sourceToDest.begin()->second;
 }
 
-CellRef MultiStoreCoordinator::addStore(std::string_view label,
-                                        std::string_view role,
-                                        std::shared_ptr<xanadu::Store> store,
-                                        const xanadu::MicroversionId &version) {
+CellRef
+MultiStoreCoordinator::addStore(std::string_view label, std::string_view role,
+                                const std::shared_ptr<xanadu::Store> &store,
+                                const xanadu::MicroversionId &version) {
   if (!store) {
     throw std::invalid_argument("store must not be null");
   }
@@ -191,7 +191,7 @@ CellRef MultiStoreCoordinator::addStore(std::string_view label,
 
 CellRef MultiStoreCoordinator::loadAndAddStore(
     std::string_view label, std::string_view role, const std::string &path,
-    std::shared_ptr<xanadu::UserPermascroll> userPermascroll) {
+    const std::shared_ptr<xanadu::UserPermascroll> &userPermascroll) {
   auto loadedStore = std::make_shared<xanadu::Store>(userPermascroll);
   loadedStore->load(path);
   CellRef storeCell   = addStore(label, role, loadedStore);

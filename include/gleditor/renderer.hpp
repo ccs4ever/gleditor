@@ -181,7 +181,7 @@ public:
     if (std::this_thread::get_id() == renderThreadId) {
       fun();
     } else {
-      renderQueue.push(RenderItemRun(fun));
+      renderQueue.push(RenderItemRun(std::move(fun)));
     }
   }
   /**

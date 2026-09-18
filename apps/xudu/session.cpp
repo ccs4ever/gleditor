@@ -133,7 +133,7 @@ MicroversionId Session::insertText(const std::uint32_t docIndex,
 MicroversionId Session::insertMedia(const std::uint32_t docIndex,
                                     const std::uint32_t at,
                                     std::string_view bytes,
-                                    std::string mimeType,
+                                    const std::string &mimeType,
                                     std::string filePath) {
   if (docIndex >= open.size()) {
     return MicroversionId{};

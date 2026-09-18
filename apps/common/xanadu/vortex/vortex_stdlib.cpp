@@ -2244,8 +2244,9 @@ CellRef VortexStdLib::createFormatCurrencyPipeline() {
 }
 
 // -- Module 4: std:functional -------------------------------------------------
-CellRef VortexStdLib::map(CellRef head, DimRef inDim, DimRef outDim,
-                          std::function<CellValue(const CellValue &)> fn) {
+CellRef
+VortexStdLib::map(CellRef head, DimRef inDim, DimRef outDim,
+                  const std::function<CellValue(const CellValue &)> &fn) {
   if (head == noCell) return noCell;
   CellRef resHead = noCell;
   CellRef resTail = noCell;
@@ -2277,8 +2278,9 @@ CellRef VortexStdLib::map(CellRef head, DimRef inDim, DimRef outDim,
   });
 }
 
-CellRef VortexStdLib::filter(CellRef head, DimRef inDim, DimRef outDim,
-                             std::function<bool(const CellValue &)> pred) {
+CellRef
+VortexStdLib::filter(CellRef head, DimRef inDim, DimRef outDim,
+                     const std::function<bool(const CellValue &)> &pred) {
   if (head == noCell) return noCell;
   CellRef resHead = noCell;
   CellRef resTail = noCell;
@@ -2314,8 +2316,8 @@ CellRef VortexStdLib::filter(CellRef head, DimRef inDim, DimRef outDim,
 
 CellValue VortexStdLib::fold(
     CellRef head, DimRef inDim, CellValue initial,
-    std::function<CellValue(const CellValue &, const CellValue &)> fn) {
-  CellValue acc     = initial;
+    const std::function<CellValue(const CellValue &, const CellValue &)> &fn) {
+  CellValue acc     = std::move(initial);
   CellRef cur       = head;
   std::size_t limit = core_.arena().cellCount() + 1;
   while (cur != noCell && limit-- > 0) {
@@ -2327,7 +2329,7 @@ CellValue VortexStdLib::fold(
 
 CellValue VortexStdLib::fold(CellRef head, DimRef inDim, CellValue initial,
                              CellRef fnOp) {
-  return fold(head, inDim, initial,
+  return fold(head, inDim, std::move(initial),
               [this, fnOp](const CellValue &acc, const CellValue &item) {
                 auto res = call(fnOp, {acc, item});
                 return res.empty() ? acc : res[0];
@@ -3236,8 +3238,8 @@ bool VortexStdLib::solve(CellRef goal,
                          std::function<bool(const LogicSolution &)> onSolution,
                          std::span<const CellRef> customPredicates,
                          std::size_t maxSolutions) {
-  return solve(std::span<const CellRef>{&goal, 1}, onSolution, customPredicates,
-               maxSolutions);
+  return solve(std::span<const CellRef>{&goal, 1}, std::move(onSolution),
+               customPredicates, maxSolutions);
 }
 
 bool VortexStdLib::solve(std::span<const CellRef> goals,
@@ -3290,8 +3292,8 @@ bool VortexStdLib::solve(std::span<const CellRef> goals,
     activeGoals.push_back(ActiveGoal{.term = g, .cutFrame = topLevelFrame});
   }
   return solveQueryHelper(*this, core_, std::move(activeGoals), candidatePreds,
-                          queryVars, onSolution, solCount, maxSolutions, 0,
-                          nextFrameId, cutToFrame);
+                          queryVars, std::move(onSolution), solCount,
+                          maxSolutions, 0, nextFrameId, cutToFrame);
 }
 
 // -- Module 9: sys:array ----------------------------------------------------

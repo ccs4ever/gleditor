@@ -197,8 +197,8 @@ bool UnifiedTransclusionEngine::unlockTranscopyright(const CellRef cell) {
                                                      tc.currencySymbol)) {
     return false;
   }
-  auto &cold            = cold_[cell];
-  cold.resolutionStatus = xanadu::ResolutionStatus::VerifiedBytes;
+  auto &coldEntry            = cold_[cell];
+  coldEntry.resolutionStatus = xanadu::ResolutionStatus::VerifiedBytes;
   shapingCache_.clear();
   return true;
 }
