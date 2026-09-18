@@ -97,6 +97,15 @@ public:
   }
 
   /**
+   * @brief Register or rebind an action: if an action with @p name already
+   * exists, updates its key binding, help description, and callable; otherwise
+   * appends it as a new command.
+   */
+  void registerOrRebindAction(std::string name, std::string help,
+                              std::function<void()> run, int scancode = 0,
+                              Mod mods = Mod::None);
+
+  /**
    * @brief Run the command bound to @p scancode with @p mods.
    *
    * Bindings are tried in the order they were added, and the first whose key

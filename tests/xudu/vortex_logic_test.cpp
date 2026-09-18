@@ -10,6 +10,8 @@
 #include <string>
 #include <vector>
 
+#include "common/xanadu/system_docs.hpp"
+#include "xudu/core/store.hpp"
 #include "xudu/core/vortex.hpp"
 #include "xudu/core/vortex_stdlib.hpp"
 #include "zigzag/core/arena_manifold.hpp"
@@ -435,6 +437,142 @@ TEST(VortexLogicTest, HighThroughputResolutionBenchmark) {
             << std::endl;
 
   EXPECT_GT(opsSec, 10000.0);
+}
+
+TEST(VortexLogicTest, HypermediaSettingPredicates) {
+  LogicHarness h;
+  xanadu::Store store;
+  store.setSystem(true);
+  xanadu::initializeSystemStore(store, xanadu::SystemDocKind::Settings);
+
+  h.stdlib.setBoundStore(&store);
+  EXPECT_EQ(h.stdlib.boundStore(), &store);
+
+  // 1. Query setting_shape(Key, Shape)
+  CellRef kFont =
+      h.core.arena().makeCell(std::string(xanadu::settings::kFontSize));
+  CellRef sVar      = h.stdlib.makeVar("Shape");
+  CellRef goalShape = h.stdlib.makeTerm("setting_shape", {kFont, sVar});
+  auto shapeSols    = h.stdlib.solveQuery(goalShape);
+  ASSERT_FALSE(shapeSols.empty());
+  EXPECT_EQ(shapeSols[0].formatted["Shape"], "[float]");
+
+  // 2. Query setting_default(Key, Def)
+  CellRef defVar  = h.stdlib.makeVar("Def");
+  CellRef goalDef = h.stdlib.makeTerm("setting_default", {kFont, defVar});
+  auto defSols    = h.stdlib.solveQuery(goalDef);
+  ASSERT_FALSE(defSols.empty());
+  EXPECT_FALSE(defSols[0].formatted["Def"].empty());
+
+  // 3. Query setting(Key, Val) with bound key
+  CellRef valVar      = h.stdlib.makeVar("Val");
+  CellRef goalSetting = h.stdlib.makeTerm("setting", {kFont, valVar});
+  auto settingSols    = h.stdlib.solveQuery(goalSetting);
+  ASSERT_FALSE(settingSols.empty());
+  EXPECT_FALSE(settingSols[0].formatted["Val"].empty());
+
+  // 4. Query all settings: setting(Key, Val)
+  CellRef keyVar  = h.stdlib.makeVar("K");
+  CellRef vVar2   = h.stdlib.makeVar("V");
+  CellRef goalAll = h.stdlib.makeTerm("setting", {keyVar, vVar2});
+  auto allSols    = h.stdlib.solveQuery(goalAll);
+  EXPECT_GE(allSols.size(), 5u);
+}
+
+TEST(VortexLogicTest, HypermediaManifoldPredicates) {
+  LogicHarness h;
+
+  CellRef c1 = h.core.arena().makeScalarCell(static_cast<std::int64_t>(100));
+  CellRef c2 = h.core.arena().makeScalarCell(static_cast<std::int64_t>(200));
+  DimRef d1  = h.core.arena().makeCell("d.test");
+
+  h.core.arena().link(c1, d1, zigzag::DimVector::POS, c2);
+
+  // 1. Query cell_value(CellId, Val) for c1
+  CellRef c1Ref  = h.core.arena().makeScalarCell(static_cast<std::int64_t>(c1));
+  CellRef valVar = h.stdlib.makeVar("Val");
+  CellRef goalVal = h.stdlib.makeTerm("cell_value", {c1Ref, valVar});
+  auto valSols    = h.stdlib.solveQuery(goalVal);
+  ASSERT_FALSE(valSols.empty());
+  EXPECT_EQ(valSols[0].formatted["Val"], "100");
+
+  // 2. Query cell_link(From, Dim, Dir, To)
+  CellRef fromRef =
+      h.core.arena().makeScalarCell(static_cast<std::int64_t>(c1));
+  CellRef toVar  = h.stdlib.makeVar("To");
+  CellRef dimVar = h.stdlib.makeVar("Dim");
+  CellRef dirVar = h.stdlib.makeVar("Dir");
+  CellRef goalLink =
+      h.stdlib.makeTerm("cell_link", {fromRef, dimVar, dirVar, toVar});
+  auto linkSols = h.stdlib.solveQuery(goalLink);
+  ASSERT_FALSE(linkSols.empty());
+  EXPECT_EQ(linkSols[0].formatted["Dir"], "pos");
+  EXPECT_EQ(linkSols[0].formatted["To"], std::to_string(c2));
+
+  // 3. Query bridge_edge(U, Dim, V)
+  CellRef uVar       = h.stdlib.makeVar("U");
+  CellRef vVar       = h.stdlib.makeVar("V");
+  CellRef dRef       = h.core.arena().makeCell("d.test");
+  CellRef goalBridge = h.stdlib.makeTerm("bridge_edge", {uVar, dRef, vVar});
+  auto bridgeSols    = h.stdlib.solveQuery(goalBridge);
+  ASSERT_FALSE(bridgeSols.empty());
+  EXPECT_EQ(bridgeSols[0].formatted["U"], std::to_string(c1));
+  EXPECT_EQ(bridgeSols[0].formatted["V"], std::to_string(c2));
+
+  // 4. Query cell_span(CellId, Span)
+  CellRef cellWithSpan = h.core.arena().makeCell(xanadu::PrimediaSpan{
+      .scroll = 1,
+      .start  = 42,
+      .length = 10,
+  });
+  CellRef cSpanRef =
+      h.core.arena().makeScalarCell(static_cast<std::int64_t>(cellWithSpan));
+  CellRef spVar    = h.stdlib.makeVar("Span");
+  CellRef goalSpan = h.stdlib.makeTerm("cell_span", {cSpanRef, spVar});
+  auto spanSols    = h.stdlib.solveQuery(goalSpan);
+  ASSERT_FALSE(spanSols.empty());
+  EXPECT_EQ(spanSols[0].formatted["Span"], "[42,10]");
+}
+
+TEST(VortexLogicTest, HypermediaTransclusionAndXanalinkPredicates) {
+  LogicHarness h;
+  xanadu::Store store;
+
+  // Insert transclusion op
+  const auto v0 = store.insert(xanadu::MicroversionId{}, 0,
+                               "Alpha Beta Gamma Delta Epsilon");
+  store.transclude(xanadu::MicroversionId{}, 0, v0, 6, 10);
+
+  // Insert a xanalink
+  xanadu::Link link;
+  link.id    = 1;
+  link.type  = xanadu::LinkType::Comment;
+  link.left  = {xanadu::PrimediaSpan{.scroll = 1, .start = 100, .length = 15}};
+  link.right = {xanadu::PrimediaSpan{.scroll = 1, .start = 200, .length = 30}};
+  store.addLink(store.primaryCurrentVersion(), link);
+
+  h.stdlib.setBoundStore(&store);
+
+  // 1. Solve transclude(OriginDoc, OriginSpan, TargetDoc)
+  CellRef oDoc           = h.stdlib.makeVar("ODoc");
+  CellRef oSpan          = h.stdlib.makeVar("OSpan");
+  CellRef tDoc           = h.stdlib.makeVar("TDoc");
+  CellRef goalTransclude = h.stdlib.makeTerm("transclude", {oDoc, oSpan, tDoc});
+  auto transSols         = h.stdlib.solveQuery(goalTransclude);
+  ASSERT_FALSE(transSols.empty());
+  EXPECT_EQ(transSols[0].formatted["ODoc"], "store");
+  EXPECT_EQ(transSols[0].formatted["TDoc"], "active");
+
+  // 2. Solve xanalink(FromSpan, LinkType, ToSpan)
+  CellRef fromSpan = h.stdlib.makeVar("FromSpan");
+  CellRef lType    = h.stdlib.makeVar("Type");
+  CellRef toSpan   = h.stdlib.makeVar("ToSpan");
+  CellRef goalXanalink =
+      h.stdlib.makeTerm("xanalink", {fromSpan, lType, toSpan});
+  auto xanaSols = h.stdlib.solveQuery(goalXanalink);
+  ASSERT_FALSE(xanaSols.empty());
+  EXPECT_EQ(xanaSols[0].formatted["FromSpan"], "[100,15]");
+  EXPECT_EQ(xanaSols[0].formatted["ToSpan"], "[200,30]");
 }
 
 } // namespace

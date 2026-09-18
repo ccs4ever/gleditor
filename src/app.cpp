@@ -366,6 +366,25 @@ void CommandTable::bind(const int scancode, const Mod mods, std::string name,
                              .run      = std::move(run)});
 }
 
+void CommandTable::registerOrRebindAction(std::string name, std::string help,
+                                          std::function<void()> run,
+                                          const int scancode, const Mod mods) {
+  const auto found = std::ranges::find_if(
+      bindings, [&](const Command &cmd) { return cmd.name == name; });
+  if (found != bindings.end()) {
+    found->scancode = scancode;
+    found->mods     = mods;
+    if (!help.empty()) {
+      found->help = std::move(help);
+    }
+    if (run) {
+      found->run = std::move(run);
+    }
+  } else {
+    bind(scancode, mods, std::move(name), std::move(help), std::move(run));
+  }
+}
+
 bool CommandTable::run(const std::string_view name) const {
   const auto found = std::ranges::find_if(
       bindings, [name](const Command &one) { return one.name == name; });

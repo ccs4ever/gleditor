@@ -8,6 +8,7 @@
 #include <format>
 #include <iostream>
 
+#include "common/xanadu/system_docs.hpp"
 #include "common/xanadu/vql/parser.hpp"
 #include "common/xanadu/zigzag/dimension_registry.hpp"
 
@@ -56,7 +57,7 @@ VortexHostConfig VortexHostConfig::fromStore(const xanadu::Store &store) {
 
 VortexHost::VortexHost(const Manifold *baseManifold)
     : arena_(baseManifold), core_(arena_), vm_(core_), stdlib_(core_, vm_),
-      vqlEngine_(core_), vqlCompiler_(core_, vm_) {
+      vqlEngine_(core_), vqlCompiler_(core_, vm_), vplEngine_(core_) {
   initHostServices();
 }
 
@@ -69,24 +70,25 @@ void VortexHost::initHostServices() {
   }
 
   // Register native Vortex routines for keymap actions
-  registerActionRoutine("swap-xy", stdlib_.resolve("std:ui/swap_axes"));
-  registerActionRoutine("cycle-dims-forward",
-                        stdlib_.resolve("std:ui/cycle_dims_forward"));
-  registerActionRoutine("cycle-dims-backward",
-                        stdlib_.resolve("std:ui/cycle_dims_backward"));
-  registerActionRoutine("bundle-execution",
-                        stdlib_.resolve("std:ui/bundle_execution"));
-  registerActionRoutine("bundle-scope", stdlib_.resolve("std:ui/bundle_scope"));
-  registerActionRoutine("bundle-contract",
-                        stdlib_.resolve("std:ui/bundle_contract"));
-  registerActionRoutine("bundle-logic", stdlib_.resolve("std:ui/bundle_logic"));
-  registerActionRoutine("bundle-stdlib",
-                        stdlib_.resolve("std:ui/bundle_stdlib"));
-  registerActionRoutine("hop-head", stdlib_.resolve("std:nav/hop_head"));
-  registerActionRoutine("hop-tail", stdlib_.resolve("std:nav/hop_tail"));
-  registerActionRoutine("jump-home", stdlib_.resolve("std:nav/jump_home"));
-  registerActionRoutine("duplicate-focus-cell",
-                        stdlib_.resolve("std:zigzag/duplicate"));
+  auto regPair = [&](std::string_view legacy, std::string_view canonical) {
+    CellRef op = stdlib_.resolve(canonical);
+    if (op != noCell) {
+      registerActionRoutine(legacy, op);
+      registerActionRoutine(canonical, op);
+    }
+  };
+  regPair("swap-xy", "std:ui/swap_axes");
+  regPair("cycle-dims-forward", "std:ui/cycle_dims_forward");
+  regPair("cycle-dims-backward", "std:ui/cycle_dims_backward");
+  regPair("bundle-execution", "std:ui/bundle_execution");
+  regPair("bundle-scope", "std:ui/bundle_scope");
+  regPair("bundle-contract", "std:ui/bundle_contract");
+  regPair("bundle-logic", "std:ui/bundle_logic");
+  regPair("bundle-stdlib", "std:ui/bundle_stdlib");
+  regPair("hop-head", "std:nav/hop_head");
+  regPair("hop-tail", "std:nav/hop_tail");
+  regPair("jump-home", "std:nav/jump_home");
+  regPair("duplicate-focus-cell", "std:zigzag/duplicate");
 }
 
 void VortexHost::bindManifold(const Manifold *baseManifold) {
@@ -96,6 +98,8 @@ void VortexHost::bindManifold(const Manifold *baseManifold) {
 
 void VortexHost::bindStore(xanadu::Store *store) {
   boundStore_ = store;
+  stdlib_.setBoundStore(store);
+  vplEngine_.setStore(store);
   if (boundStore_) {
     loadConfigFromStore(*boundStore_);
   }
@@ -154,9 +158,13 @@ bool VortexHost::dispatchAction(std::string_view actionName, CellRef focusCell,
 
 bool VortexHost::dispatchAction(std::string_view actionName, CellRef focusCell,
                                 ViewAxisBinding &axes, CellRef &newFocusOut) {
-  newFocusOut = focusCell;
+  newFocusOut                      = focusCell;
+  const std::string_view canonical = xanadu::canonicalKeymapAction(actionName);
 
   auto macroIt = macroRegistry_.find(std::string(actionName));
+  if (macroIt == macroRegistry_.end() && canonical != actionName) {
+    macroIt = macroRegistry_.find(std::string(canonical));
+  }
   if (macroIt != macroRegistry_.end()) {
     auto target = navigatePath(macroIt->second, focusCell);
     if (target.has_value() && *target != noCell) {
@@ -171,92 +179,107 @@ bool VortexHost::dispatchAction(std::string_view actionName, CellRef focusCell,
   }
 
   auto customIt = customActionRoutines_.find(std::string(actionName));
+  if (customIt == customActionRoutines_.end() && canonical != actionName) {
+    customIt = customActionRoutines_.find(std::string(canonical));
+  }
   if (customIt != customActionRoutines_.end() && customIt->second != noCell) {
     CellRef cursor = vm_.spawnCursor(customIt->second, actionName);
     static_cast<void>(vm_.run(cursor, 1000));
   }
 
+  // Application action delegate hook (e.g. apps/xudu, apps/zigzag)
+  if (appActionDelegate_ &&
+      appActionDelegate_(canonical, focusCell, axes, newFocusOut)) {
+    return true;
+  }
+
   // Navigation actions
-  if (actionName == "step-x-pos") {
+  if (actionName == "step-x-pos" || canonical == "std:nav/step_x_pos") {
     newFocusOut = stdlib_.zzStep(focusCell, resolveDimRef(axes.x_dimension),
                                  DimVector::POS);
     return true;
   }
-  if (actionName == "step-x-neg") {
+  if (actionName == "step-x-neg" || canonical == "std:nav/step_x_neg") {
     newFocusOut = stdlib_.zzStep(focusCell, resolveDimRef(axes.x_dimension),
                                  DimVector::NEG);
     return true;
   }
-  if (actionName == "step-y-pos") {
+  if (actionName == "step-y-pos" || canonical == "std:nav/step_y_pos") {
     newFocusOut = stdlib_.zzStep(focusCell, resolveDimRef(axes.y_dimension),
                                  DimVector::POS);
     return true;
   }
-  if (actionName == "step-y-neg") {
+  if (actionName == "step-y-neg" || canonical == "std:nav/step_y_neg") {
     newFocusOut = stdlib_.zzStep(focusCell, resolveDimRef(axes.y_dimension),
                                  DimVector::NEG);
     return true;
   }
-  if (actionName == "step-z-pos") {
+  if (actionName == "step-z-pos" || canonical == "std:nav/step_z_pos") {
     newFocusOut = stdlib_.zzStep(focusCell, resolveDimRef(axes.z_dimension),
                                  DimVector::POS);
     return true;
   }
-  if (actionName == "step-z-neg") {
+  if (actionName == "step-z-neg" || canonical == "std:nav/step_z_neg") {
     newFocusOut = stdlib_.zzStep(focusCell, resolveDimRef(axes.z_dimension),
                                  DimVector::NEG);
     return true;
   }
-  if (actionName == "hop-head" || actionName == "std:nav/hop_head") {
+  if (actionName == "hop-head" || canonical == "std:nav/hop_head") {
     newFocusOut = stdlib_.hopHead(focusCell, resolveDimRef(axes.x_dimension));
     return true;
   }
-  if (actionName == "hop-tail" || actionName == "std:nav/hop_tail") {
+  if (actionName == "hop-tail" || canonical == "std:nav/hop_tail") {
     newFocusOut = stdlib_.hopTail(focusCell, resolveDimRef(axes.x_dimension));
     return true;
   }
-  if (actionName == "jump-home" || actionName == "std:nav/jump_home") {
+  if (actionName == "jump-home" || canonical == "std:nav/jump_home") {
     newFocusOut = stdlib_.jumpHome();
     return true;
   }
 
   // Editing actions
-  if (actionName == "insert-cell-x-pos") {
+  if (actionName == "insert-cell-x-pos" ||
+      canonical == "std:zigzag/insert_cell_x_pos") {
     newFocusOut = stdlib_.zzInsert(focusCell, resolveDimRef(axes.x_dimension),
                                    DimVector::POS, "New Cell");
     return true;
   }
-  if (actionName == "insert-cell-x-neg") {
+  if (actionName == "insert-cell-x-neg" ||
+      canonical == "std:zigzag/insert_cell_x_neg") {
     newFocusOut = stdlib_.zzInsert(focusCell, resolveDimRef(axes.x_dimension),
                                    DimVector::NEG, "New Cell");
     return true;
   }
-  if (actionName == "insert-cell-y-pos") {
+  if (actionName == "insert-cell-y-pos" ||
+      canonical == "std:zigzag/insert_cell_y_pos") {
     newFocusOut = stdlib_.zzInsert(focusCell, resolveDimRef(axes.y_dimension),
                                    DimVector::POS, "New Cell");
     return true;
   }
-  if (actionName == "insert-cell-y-neg") {
+  if (actionName == "insert-cell-y-neg" ||
+      canonical == "std:zigzag/insert_cell_y_neg") {
     newFocusOut = stdlib_.zzInsert(focusCell, resolveDimRef(axes.y_dimension),
                                    DimVector::NEG, "New Cell");
     return true;
   }
-  if (actionName == "unlink-x-pos") {
+  if (actionName == "unlink-x-pos" || canonical == "std:zigzag/unlink_x_pos") {
     stdlib_.zzUnlink(focusCell, resolveDimRef(axes.x_dimension),
                      DimVector::POS);
     return true;
   }
-  if (actionName == "unlink-x-neg") {
+  if (actionName == "unlink-x-neg" || canonical == "std:zigzag/unlink_x_neg") {
     stdlib_.zzUnlink(focusCell, resolveDimRef(axes.x_dimension),
                      DimVector::NEG);
     return true;
   }
-  if (actionName == "delete-focus-cell") {
+  if (actionName == "delete-focus-cell" ||
+      canonical == "std:zigzag/delete_focus_cell" ||
+      canonical == "std:zigzag/delete_focus_cell_bksp") {
     stdlib_.zzDelete(focusCell);
     return true;
   }
   if (actionName == "duplicate-focus-cell" ||
-      actionName == "std:zigzag/duplicate") {
+      canonical == "std:zigzag/duplicate") {
     newFocusOut = stdlib_.zzDuplicate(focusCell);
     if (boundStore_ && newFocusOut != noCell &&
         zigzag::isEphemeral(newFocusOut)) {
@@ -274,48 +297,81 @@ bool VortexHost::dispatchAction(std::string_view actionName, CellRef focusCell,
 
   // UI actions
   if (actionName.starts_with("view ") ||
-      actionName.starts_with("std:ui/view ")) {
-    std::string_view rest = actionName.substr(actionName.find(' ') + 1);
+      actionName.starts_with("std:ui/view ") ||
+      canonical.starts_with("std:ui/view ")) {
+    std::string_view target = actionName;
+    if (!target.starts_with("view ") && !target.starts_with("std:ui/view ")) {
+      target = canonical;
+    }
+    std::string_view rest = target.substr(target.find(' ') + 1);
     std::istringstream iss{std::string(rest)};
     std::string dx, dy, dz;
     iss >> dx >> dy >> dz;
     setView(axes, dx, dy, dz);
     return true;
   }
-  if (actionName == "swap-xy" || actionName == "std:ui/swap_axes") {
+  if (actionName == "swap-xy" || canonical == "std:ui/swap_axes") {
     stdlib_.swapAxes(axes);
     return true;
   }
   if (actionName == "cycle-dims-forward" ||
-      actionName == "std:ui/cycle_dims_forward") {
+      canonical == "std:ui/cycle_dims_forward") {
     stdlib_.cycleDims(axes, true);
     return true;
   }
   if (actionName == "cycle-dims-backward" ||
-      actionName == "std:ui/cycle_dims_backward") {
+      canonical == "std:ui/cycle_dims_backward") {
     stdlib_.cycleDims(axes, false);
     return true;
   }
   if (actionName == "bundle-execution" ||
-      actionName == "std:ui/bundle_execution") {
+      canonical == "std:ui/bundle_execution") {
     stdlib_.applyBundle(axes, DimensionBundle::Execution);
     return true;
   }
-  if (actionName == "bundle-scope" || actionName == "std:ui/bundle_scope") {
+  if (actionName == "bundle-scope" || canonical == "std:ui/bundle_scope") {
     stdlib_.applyBundle(axes, DimensionBundle::Scope);
     return true;
   }
   if (actionName == "bundle-contract" ||
-      actionName == "std:ui/bundle_contract") {
+      canonical == "std:ui/bundle_contract") {
     stdlib_.applyBundle(axes, DimensionBundle::Contract);
     return true;
   }
-  if (actionName == "bundle-logic" || actionName == "std:ui/bundle_logic") {
+  if (actionName == "bundle-logic" || canonical == "std:ui/bundle_logic") {
     stdlib_.applyBundle(axes, DimensionBundle::Logic);
     return true;
   }
-  if (actionName == "bundle-stdlib" || actionName == "std:ui/bundle_stdlib") {
+  if (actionName == "bundle-stdlib" || canonical == "std:ui/bundle_stdlib") {
     stdlib_.applyBundle(axes, DimensionBundle::Stdlib);
+    return true;
+  }
+  if (actionName == "bundle-cycle" || canonical == "std:ui/bundle_cycle") {
+    DimensionBundle next = DimensionBundle::Execution;
+    if (axes.x_dimension == "d.spin" && axes.y_dimension == "d.step") {
+      next = DimensionBundle::Scope;
+    } else if (axes.x_dimension == "d.lexical" &&
+               axes.y_dimension == "d.dynamic") {
+      next = DimensionBundle::Contract;
+    } else if (axes.x_dimension == "d.require" &&
+               axes.y_dimension == "d.ensure") {
+      next = DimensionBundle::Logic;
+    } else if (axes.x_dimension == "d.clause" &&
+               axes.y_dimension == "d.predicate") {
+      next = DimensionBundle::Stdlib;
+    }
+    stdlib_.applyBundle(axes, next);
+    return true;
+  }
+
+  // Stdlib fallback: check if standard library has a registered routine cell
+  CellRef stdlibOp = stdlib_.resolve(canonical);
+  if (stdlibOp == noCell && canonical != actionName) {
+    stdlibOp = stdlib_.resolve(actionName);
+  }
+  if (stdlibOp != noCell) {
+    CellRef cursor = vm_.spawnCursor(stdlibOp, canonical);
+    static_cast<void>(vm_.run(cursor, 1000));
     return true;
   }
 
@@ -519,24 +575,60 @@ VortexHost::ScriptResult VortexHost::executeScript(std::string_view script,
                                                    xanadu::Store *store) {
   ScriptResult res;
   try {
-    std::string query(script);
-    while (!query.empty() &&
-           std::isspace(static_cast<unsigned char>(query.front()))) {
-      query.erase(query.begin());
+    std::string_view trimmed = script;
+    while (!trimmed.empty() &&
+           std::isspace(static_cast<unsigned char>(trimmed.front()))) {
+      trimmed.remove_prefix(1);
     }
-    while (!query.empty() &&
-           std::isspace(static_cast<unsigned char>(query.back()))) {
-      query.pop_back();
+    while (!trimmed.empty() &&
+           std::isspace(static_cast<unsigned char>(trimmed.back()))) {
+      trimmed.remove_suffix(1);
     }
-    if (query.empty()) {
+    if (trimmed.empty()) {
       res.message = "Empty script";
+      return res;
+    }
+
+    if (trimmed.starts_with(')') || trimmed.starts_with(":vpl ") ||
+        trimmed.starts_with("vpl:")) {
+      res = executeVPL(trimmed);
+      if (store && !res.affectedCells.empty()) {
+        for (CellRef c : res.affectedCells) {
+          if (zigzag::isEphemeral(c)) {
+            static_cast<void>(zigzag::promote(
+                *store, store->primaryCurrentVersion(), arena_, c));
+          }
+        }
+      }
+      return res;
+    }
+
+    if (trimmed.starts_with(":logic ") || trimmed.starts_with(":query ") ||
+        trimmed.starts_with(":solve ") || trimmed.starts_with("?- ")) {
+      std::string_view q = trimmed;
+      if (trimmed.starts_with(":logic ")) {
+        q.remove_prefix(7);
+      } else if (trimmed.starts_with(":query ")) {
+        q.remove_prefix(7);
+      } else if (trimmed.starts_with(":solve ")) {
+        q.remove_prefix(7);
+      }
+      auto solutions = solveLogic(q);
+      res.success    = !solutions.empty();
+      res.message =
+          std::format("Logic query returned {} solution(s)", solutions.size());
+      for (const auto &sol : solutions) {
+        for (const auto &[name, cell] : sol.bindings) {
+          res.affectedCells.push_back(cell);
+        }
+      }
       return res;
     }
 
     if (contextCell != noCell) {
       vqlEngine_.setVariable(".", contextCell);
     }
-    xanadu::vql::Parser parser(query);
+    xanadu::vql::Parser parser(trimmed);
     auto expr = parser.parseQuery();
     std::vector<CellRef> cells;
     if (std::holds_alternative<xanadu::vql::PathExpression>(expr.expr)) {
@@ -564,9 +656,84 @@ VortexHost::ScriptResult VortexHost::executeScript(std::string_view script,
     }
   } catch (const std::exception &err) {
     res.success = false;
-    res.message = std::string("VQL Script Error: ") + err.what();
+    res.message = std::string("Script Error: ") + err.what();
   }
   return res;
+}
+
+VortexHost::ScriptResult VortexHost::executeVPL(std::string_view expr) {
+  ScriptResult res;
+  try {
+    std::string_view trimmed = expr;
+    while (!trimmed.empty() &&
+           std::isspace(static_cast<unsigned char>(trimmed.front()))) {
+      trimmed.remove_prefix(1);
+    }
+    while (!trimmed.empty() &&
+           std::isspace(static_cast<unsigned char>(trimmed.back()))) {
+      trimmed.remove_suffix(1);
+    }
+    if (trimmed.starts_with(":vpl ")) {
+      trimmed.remove_prefix(5);
+    } else if (trimmed.starts_with("vpl:")) {
+      trimmed.remove_prefix(4);
+    } else if (trimmed.starts_with(')')) {
+      trimmed.remove_prefix(1);
+    }
+    while (!trimmed.empty() &&
+           std::isspace(static_cast<unsigned char>(trimmed.front()))) {
+      trimmed.remove_prefix(1);
+    }
+    if (trimmed.empty()) {
+      res.message = "Empty VPL expression";
+      return res;
+    }
+
+    auto view         = vplEngine_.evaluate(trimmed);
+    res.affectedCells = view.collectCells(arena_);
+    res.success       = true;
+    if (view.isScalar()) {
+      if (view.isString()) {
+        res.message = std::format("VPL Result: \"{}\"", view.scalarString());
+      } else if (view.isFloat()) {
+        res.message = std::format("VPL Result: {}", view.scalarFloat());
+      } else {
+        res.message = std::format("VPL Result: {}", view.scalarInt());
+      }
+    } else {
+      auto sh              = view.shape(arena_);
+      std::string shapeStr = "[";
+      for (std::size_t i = 0; i < sh.size(); ++i) {
+        if (i > 0) {
+          shapeStr += ", ";
+        }
+        shapeStr += std::to_string(sh[i]);
+      }
+      shapeStr += "]";
+      res.message = std::format("VPL Result: shape {} ({} cells)", shapeStr,
+                                res.affectedCells.size());
+    }
+  } catch (const std::exception &err) {
+    res.success = false;
+    res.message = std::string("VPL Error: ") + err.what();
+  }
+  return res;
+}
+
+std::vector<LogicSolution> VortexHost::solveLogic(std::string_view goalQuery,
+                                                  std::size_t maxSolutions) {
+  try {
+    xanadu::vprolog::Compiler compiler(core_);
+    auto query = compiler.compileQuery(goalQuery);
+    if (query.goals.empty()) {
+      return {};
+    }
+    return stdlib_.solveQuery(query.goals, compiler.customPredicates(),
+                              maxSolutions);
+  } catch (const std::exception &err) {
+    std::cerr << "VortexHost::solveLogic error: " << err.what() << "\n";
+    return {};
+  }
 }
 
 bool VortexHost::defineMacro(std::string_view name, std::string_view vqlExpr,

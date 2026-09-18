@@ -131,6 +131,34 @@ TEST(CommandTableTest, rebindSingleAction) {
   EXPECT_FALSE(table.bindingFor("nonexistent").has_value());
 }
 
+TEST(CommandTableTest, registerOrRebindAction) {
+  CommandTable table;
+  int ran = 0;
+
+  // 1. Initial register without key
+  table.registerOrRebindAction("save", "save doc", [&ran] { ran += 1; });
+  EXPECT_FALSE(table.dispatch(keyA, Mod::None));
+  EXPECT_TRUE(table.run("save"));
+  EXPECT_EQ(ran, 1);
+
+  // 2. Rebind with key
+  table.registerOrRebindAction(
+      "save", "save doc updated", [&ran] { ran += 10; }, keyA, Mod::Ctrl);
+  EXPECT_TRUE(table.dispatch(keyA, Mod::Ctrl));
+  EXPECT_EQ(ran, 11);
+
+  const auto b = table.bindingFor("save");
+  ASSERT_TRUE(b.has_value());
+  EXPECT_EQ(b->first, keyA);
+  EXPECT_EQ(b->second, Mod::Ctrl);
+
+  // 3. Register a new action with key
+  table.registerOrRebindAction(
+      "quit", "quit app", [&ran] { ran += 100; }, keyB, Mod::None);
+  EXPECT_TRUE(table.dispatch(keyB, Mod::None));
+  EXPECT_EQ(ran, 111);
+}
+
 TEST(CommandTableTest, rebindFromText) {
   CommandTable table;
   int newDocRan  = 0;
