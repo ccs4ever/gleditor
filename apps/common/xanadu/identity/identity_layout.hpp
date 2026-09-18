@@ -73,7 +73,7 @@ struct Fingerprint {
   }
 
   [[nodiscard]] std::string toString() const {
-    return std::string(hex.data(), hex.size());
+    return {hex.data(), hex.size()};
   }
 
   [[nodiscard]] static std::optional<Fingerprint>

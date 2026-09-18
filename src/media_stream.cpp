@@ -39,8 +39,7 @@ std::string MediaStream::readString(const std::uint64_t offset,
   if (bytes.empty()) {
     return {};
   }
-  return std::string(reinterpret_cast<const char *>(bytes.data()),
-                     bytes.size());
+  return {reinterpret_cast<const char *>(bytes.data()), bytes.size()};
 }
 
 // -- MemoryMediaStream --------------------------------------------------------

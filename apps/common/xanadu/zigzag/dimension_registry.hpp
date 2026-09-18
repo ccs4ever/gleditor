@@ -73,6 +73,9 @@ class DimensionRegistry {
 public:
   static DimensionRegistry &instance() noexcept;
 
+  DimensionRegistry(const DimensionRegistry &)            = delete;
+  DimensionRegistry &operator=(const DimensionRegistry &) = delete;
+
   /// Intern a dimension string name for fast O(1) comparison.
   InternedDimName intern(std::string_view name);
 
@@ -140,10 +143,8 @@ public:
   void clear() noexcept;
 
 private:
-  DimensionRegistry()                                     = default;
-  ~DimensionRegistry()                                    = default;
-  DimensionRegistry(const DimensionRegistry &)            = delete;
-  DimensionRegistry &operator=(const DimensionRegistry &) = delete;
+  DimensionRegistry()  = default;
+  ~DimensionRegistry() = default;
 
   mutable std::mutex mutex_;
 

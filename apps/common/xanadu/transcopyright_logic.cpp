@@ -66,7 +66,7 @@ std::string TranscopyrightLogic::formatCost(const std::uint64_t cost,
     char buf[32];
     std::snprintf(buf, sizeof(buf), "%.1f %.*s", xu,
                   static_cast<int>(symbol.size()), symbol.data());
-    return std::string(buf);
+    return {buf};
   }
   return std::to_string(cost) + " " + std::string(symbol);
 }
