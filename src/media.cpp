@@ -248,9 +248,15 @@ struct MediaPlayer::Impl {
     }
   }
 
+  // width/height are only read here, but this function's address is handed
+  // to libvlc_video_set_format_callbacks(), which requires this exact
+  // non-const signature -- constifying them to match how they're used
+  // locally would stop the pointer from matching what libvlc expects.
+  // NOLINTBEGIN(readability-non-const-parameter)
   static unsigned videoFormatSetup(void **opaque, char *chroma, unsigned *width,
                                    unsigned *height, unsigned *pitches,
                                    unsigned *lines) {
+    // NOLINTEND(readability-non-const-parameter)
     auto *self = static_cast<Impl *>(*opaque);
     // libvlc's chroma is a raw 4-byte FourCC, not a C-string -- it must NOT
     // be null-terminated, or the fifth byte would corrupt whatever follows.
