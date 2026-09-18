@@ -42,6 +42,11 @@ ZigzagVisualizer::ZigzagVisualizer(std::string aFontName)
 
 ZigzagVisualizer::~ZigzagVisualizer() = default;
 
+// PresentationSurface::setCellRadius is noexcept by interface contract
+// (apps/common/xanadu/zigzag/presentation_surface.hpp); the only realistic
+// throw source in the rebuild it triggers is allocation failure, which
+// terminating on is the same outcome any other noexcept function has.
+// NOLINTNEXTLINE(bugprone-exception-escape)
 void ZigzagVisualizer::setCellRadius(const int radius) noexcept {
   const int clamped = std::max(1, radius);
   if (scene_.neighborhood_radius == clamped) {

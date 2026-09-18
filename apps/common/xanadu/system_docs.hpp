@@ -428,6 +428,10 @@ struct SettingValue {
   std::vector<CellValue> elements;
   std::vector<zigzag::CellRef> valueCells;
 
+  // Every std::get below is guarded by the holds_alternative check
+  // immediately preceding it, so bad_variant_access can never actually
+  // fire; only std::stod's already-caught throw could otherwise escape.
+  // NOLINTNEXTLINE(bugprone-exception-escape)
   [[nodiscard]] double asDouble(const std::size_t idx = 0,
                                 const double fallback = 0.0) const noexcept {
     if (idx >= elements.size()) {
@@ -453,8 +457,11 @@ struct SettingValue {
     return fallback;
   }
 
+  // Every std::get below is guarded by the holds_alternative check
+  // immediately preceding it, so bad_variant_access can never actually
+  // fire; only std::stoll's already-caught throw could otherwise escape.
   [[nodiscard]] std::int64_t
-  asInt64(const std::size_t idx       = 0,
+  asInt64(const std::size_t idx       = 0, // NOLINT(bugprone-exception-escape)
           const std::int64_t fallback = 0) const noexcept {
     if (idx >= elements.size()) {
       return fallback;
@@ -479,6 +486,9 @@ struct SettingValue {
     return fallback;
   }
 
+  // Every std::get below is guarded by the holds_alternative check
+  // immediately preceding it, so bad_variant_access can never actually fire.
+  // NOLINTNEXTLINE(bugprone-exception-escape)
   [[nodiscard]] bool asBool(const std::size_t idx = 0,
                             const bool fallback   = false) const noexcept {
     if (idx >= elements.size()) {

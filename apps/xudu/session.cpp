@@ -250,8 +250,26 @@ MicroversionId Session::transcludeText(const std::uint32_t destDocIndex,
                     static_cast<std::uint32_t>(queryText.size()));
 }
 
+// Both catches below block every path out of flushUncommitted(); the only
+// residual throw source is bad_alloc from formatting the diagnostic itself,
+// the same unavoidable risk any other noexcept-adjacent code accepts.
+// NOLINTNEXTLINE(bugprone-exception-escape)
 Session::~Session() {
-  flushUncommitted();
+  try {
+    flushUncommitted();
+  } catch (const std::exception &err) {
+    // A throwing destructor risks std::terminate() if this runs during
+    // unwinding from another exception, so the flush's own failure is
+    // reported and swallowed rather than propagated.
+    std::cerr << std::format(
+        "xudu [warning]: failed to flush uncommitted edits on session "
+        "teardown: {}\n",
+        err.what());
+  } catch (...) {
+    // Same reasoning as above, for a throw that isn't std::exception-derived.
+    std::cerr << "xudu [warning]: failed to flush uncommitted edits on "
+                 "session teardown (non-standard exception)\n";
+  }
   for (const auto &entry : stores) {
     if (entry.isTemporary && !entry.path.empty()) {
       std::error_code ec;

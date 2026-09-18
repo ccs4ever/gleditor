@@ -137,6 +137,10 @@ std::vector<std::string> reorderArgs(int argc, char *argv[]) {
 
 } // namespace
 
+// Catches std::exception and reports it; anything else (a real bug, not a
+// user-facing failure) is deliberately left to terminate with a backtrace
+// rather than be swallowed into a generic error message.
+// NOLINTNEXTLINE(bugprone-exception-escape)
 int main(int argc, char *argv[]) {
   argparse::ArgumentParser program("vquery", "1.0.0");
 

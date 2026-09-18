@@ -12,4 +12,7 @@
 #include "../xudu/main.cpp"
 #undef main
 
+// Forwards to xudu's own main, whose catch(std::exception) is the
+// deliberate boundary documented there.
+// NOLINTNEXTLINE(bugprone-exception-escape)
 int main(const int argc, char **argv) { return xuzz_xudu_main(argc, argv); }

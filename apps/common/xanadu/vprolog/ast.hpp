@@ -38,10 +38,15 @@ struct Number {
   [[nodiscard]] bool isFloat() const noexcept {
     return std::holds_alternative<double>(value);
   }
+  // Each std::get is chosen by isFloat(), which is the same
+  // holds_alternative<double> check that guarantees it, so
+  // bad_variant_access can never actually fire.
+  // NOLINTNEXTLINE(bugprone-exception-escape)
   [[nodiscard]] std::int64_t asInt() const noexcept {
     return isFloat() ? static_cast<std::int64_t>(std::get<double>(value))
                      : std::get<std::int64_t>(value);
   }
+  // NOLINTNEXTLINE(bugprone-exception-escape)
   [[nodiscard]] double asFloat() const noexcept {
     return isFloat() ? std::get<double>(value)
                      : static_cast<double>(std::get<std::int64_t>(value));

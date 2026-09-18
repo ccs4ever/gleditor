@@ -1880,6 +1880,11 @@ void bindCommands(gleditor::Application &app, const AppStateRef &state,
 
 } // namespace
 
+// Catches std::exception and reports it; anything else (a real bug, not a
+// user-facing failure) is deliberately left to terminate with a backtrace
+// rather than be swallowed into a generic error message. apps/xuzz/main.cpp
+// reuses this exact main under a renamed entry point.
+// NOLINTNEXTLINE(bugprone-exception-escape)
 int main(const int argc, char **argv) {
   gleditor::initLocale();
 
