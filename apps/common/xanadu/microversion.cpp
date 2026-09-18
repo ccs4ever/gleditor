@@ -223,7 +223,7 @@ MicroversionId MicroversionId::branch(const std::uint32_t ordinal) const {
   // spilled one holds exactly its own segments and no spare capacity.
   branched.takeStorageFor(mine.size() + 1);
   std::copy(mine.begin(), mine.end(), branched.data());
-  branched.data()[mine.size()] = Segment{ordinal, 1};
+  branched.data()[mine.size()] = Segment{.branch = ordinal, .number = 1};
   return branched;
 }
 

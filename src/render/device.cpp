@@ -54,11 +54,11 @@ void configureBackendWindowAttributes(const Backend backend) {
 }
 
 bool backendCompiledIn(const Backend backend) {
-  switch (backend) { // NOLINT(bugprone-branch-clone)
+  switch (backend) {
   // OpenGL/OpenGLES's shared `return true;` happens to match Vulkan's own
   // when GLEDITOR_ENABLE_VULKAN is defined; the two can't be merged since
   // Vulkan's body is itself conditional on that #ifdef.
-  case Backend::OpenGL:
+  case Backend::OpenGL: // NOLINT(bugprone-branch-clone)
   case Backend::OpenGLES:
     return true;
   case Backend::Vulkan:

@@ -82,10 +82,9 @@ void TranscopyrightOverlay::drawFrame(gleditor::FrameContext &ctx) {
 
   const auto width  = static_cast<float>(ctx.screenWidth);
   const auto height = static_cast<float>(ctx.screenHeight);
-  const auto
-      ortho = // NOLINTNEXTLINE(readability-suspicious-call-argument) -- correct
-              // left,right,bottom,top order for a screen-space projection
-      glm::ortho(0.0F, width, 0.0F, height, -1.0F, 1.0F);
+  // Correct left,right,bottom,top order for a screen-space projection.
+  const auto ortho = glm::ortho( // NOLINT(readability-suspicious-call-argument)
+      0.0F, width, 0.0F, height, -1.0F, 1.0F);
 
   canvas_->clear();
   activeBadges_.clear();

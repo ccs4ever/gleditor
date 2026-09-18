@@ -55,8 +55,8 @@ TimeRange fragmentTimeRange(const ByteRange &fragment,
       static_cast<float>(std::min(fragment.start, containerLength));
   const auto end =
       static_cast<float>(std::min(fragment.end(), containerLength));
-  return TimeRange{(start / total) * durationSeconds,
-                   (end / total) * durationSeconds};
+  return TimeRange{.startSeconds = (start / total) * durationSeconds,
+                   .endSeconds   = (end / total) * durationSeconds};
 }
 
 // -- MediaResource ------------------------------------------------------------
@@ -668,8 +668,8 @@ float MediaPlayer::progressFraction() const { return impl->progressFraction(); }
 
 void MediaPlayer::setTimeRange(const float startSeconds,
                                const float endSeconds) {
-  impl->timeRange = TimeRange{std::max(0.0F, startSeconds),
-                              std::max(startSeconds, endSeconds)};
+  impl->timeRange = TimeRange{.startSeconds = std::max(0.0F, startSeconds),
+                              .endSeconds = std::max(startSeconds, endSeconds)};
   if (impl->positionSeconds() < impl->timeRange->startSeconds ||
       impl->positionSeconds() > impl->timeRange->endSeconds) {
     impl->seek(impl->timeRange->startSeconds);
@@ -678,7 +678,7 @@ void MediaPlayer::setTimeRange(const float startSeconds,
 
 void MediaPlayer::setByteRange(const std::uint64_t startByte,
                                const std::uint64_t length) {
-  impl->byteRange = ByteRange{startByte, length};
+  impl->byteRange = ByteRange{.start = startByte, .length = length};
 }
 
 void MediaPlayer::clearRange() {

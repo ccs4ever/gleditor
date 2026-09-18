@@ -42,9 +42,9 @@
 // Android build points this at "opengles" instead; everywhere else the
 // desktop default of plain OpenGL is unchanged.
 #ifndef GLEDITOR_DEFAULT_BACKEND
-// NOLINTNEXTLINE(cppcoreguidelines-macro-usage) -- the #ifndef above is the
-// point: this is a build-time -D override (see the Android build note
-// above), which a constexpr constant can't be.
+// The #ifndef above is the point: a build-time -D override (the Android
+// build note above), which a constexpr constant can't be.
+// NOLINTNEXTLINE(cppcoreguidelines-macro-usage)
 #define GLEDITOR_DEFAULT_BACKEND "opengl"
 #endif
 
