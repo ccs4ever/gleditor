@@ -1248,7 +1248,13 @@ MicroversionId ensureSetting(Store &store, const MicroversionId &parent,
   if (known == nullptr) {
     folded = store.rebuildManifold(cur);
   }
-  zigzag::Manifold localM   = (known != nullptr) ? *known : folded.value();
+  // folded is unconditionally assigned just above whenever known == nullptr
+  // (the only time this branch is taken), and rebuildManifold() never
+  // returns an empty optional.
+  zigzag::Manifold localM =
+      (known != nullptr)
+          ? *known
+          : folded.value(); // NOLINT(bugprone-unchecked-optional-access)
   const auto varsDim        = getOrMakeDim(store, cur, localM, kDimVars);
   const auto valuesDim      = getOrMakeDim(store, cur, localM, kDimValues);
   const auto groupsDim      = getOrMakeDim(store, cur, localM, kDimGroups);

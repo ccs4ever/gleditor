@@ -592,6 +592,9 @@ Doc::anchorFor(const std::uint32_t globalOffset) const {
                   .x         = 0.0F,
                   .y         = 0.0F,
                   .height    = 0.0F};
+    // pages[i] was just checked truthy above; re-indexing here reaches the
+    // same slot since nothing in this loop body mutates pages.
+    // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
     if (pages[i]->caretGeometry(globalOffset, anchor.x, anchor.y,
                                 anchor.height)) {
       return anchor;
@@ -611,6 +614,9 @@ Doc::boxFor(const std::uint32_t globalOffset) const {
                  .y         = 0.0F,
                  .width     = 0.0F,
                  .height    = 0.0F};
+    // pages[i] was just checked truthy above; re-indexing here reaches the
+    // same slot since nothing in this loop body mutates pages.
+    // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
     if (pages[i]->boxGeometry(globalOffset, rect.x, rect.y, rect.width,
                               rect.height)) {
       return rect;
@@ -658,6 +664,8 @@ std::optional<glm::vec3> Doc::worldPoint(const std::uint32_t pageIndex,
                                          const float posX,
                                          const float posY) const {
   if (pageIndex < pages.size() && pages[pageIndex].has_value()) {
+    // Re-indexing pages[pageIndex] here reaches the same slot just checked.
+    // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
     const auto point = modelMatrix() * pages[pageIndex]->getModel() *
                        glm::vec4(posX, posY, 0.0F, 1.0F);
     return glm::vec3(point);
@@ -1011,6 +1019,9 @@ std::vector<int> Doc::lineBreaksAround(const std::uint32_t at) const {
   }
   std::size_t firstPage = 0;
   for (std::size_t i = 0; i < pages.size(); i++) {
+    // pages[i] is re-indexed after the truthiness check in the same &&
+    // expression, reaching the same slot.
+    // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
     if (pages[i] && at >= pages[i]->baseOffset()) {
       firstPage = i;
     }
@@ -1018,6 +1029,8 @@ std::vector<int> Doc::lineBreaksAround(const std::uint32_t at) const {
   if (!pages[firstPage]) {
     return {};
   }
+  // Re-indexing pages[firstPage] here reaches the same slot just checked.
+  // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
   return lineStartsFromShaping(pages[firstPage]->ensureShaping());
 }
 
@@ -1028,6 +1041,9 @@ void Doc::scheduleReflow(RenderState &state, const std::uint32_t at,
   // construction: text ahead of an edit cannot reflow.
   std::size_t firstPage = 0;
   for (std::size_t i = 0; i < pages.size(); i++) {
+    // pages[i] is re-indexed after the truthiness check in the same &&
+    // expression, reaching the same slot.
+    // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
     if (pages[i] && at >= pages[i]->baseOffset()) {
       firstPage = i;
     }
@@ -1036,6 +1052,8 @@ void Doc::scheduleReflow(RenderState &state, const std::uint32_t at,
     return;
   }
 
+  // Re-indexing pages[firstPage] here reaches the same slot just checked.
+  // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
   const auto oldConsumed = pages[firstPage]->textLength();
 
   auto self = getPtr();
@@ -1132,6 +1150,8 @@ void Doc::reflowFrom(RenderState &state, const std::size_t firstPage,
   // than going below zero, and would match at a wildly wrong page.
   const auto shift = static_cast<std::int64_t>(delta);
   std::vector<std::pair<std::uint32_t, PageShaping>> rebuilt;
+  // pages[firstPage] is guaranteed built by ensurePagesBuiltThrough() above.
+  // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
   auto offset     = pages[firstPage]->baseOffset();
   auto pageCursor = firstPage;
   auto scope      = ReflowScope::Document;
@@ -1149,8 +1169,10 @@ void Doc::reflowFrom(RenderState &state, const std::size_t firstPage,
       // shifted by what the edit added or took away.
       if (static_cast<std::int64_t>(consumed) ==
           static_cast<std::int64_t>(oldConsumed) + shift) {
-        const auto relativeAt =
-            static_cast<int>(at - pages[firstPage]->baseOffset());
+        // pages[firstPage] is guaranteed built by ensurePagesBuiltThrough().
+        // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
+        const auto pageBase   = pages[firstPage]->baseOffset();
+        const auto relativeAt = static_cast<int>(at - pageBase);
         scope = sameLineBreaks(oldStarts, lineStartsFromShaping(shaping),
                                relativeAt, static_cast<int>(delta))
                     ? ReflowScope::Line
@@ -1170,11 +1192,14 @@ void Doc::reflowFrom(RenderState &state, const std::size_t firstPage,
     // pages[pageCursor] is expected to already be built here -- nothing
     // before Stage 3 builds out of order -- but a missing one simply never
     // re-syncs early rather than dereferencing a gap.
-    if (pages[pageCursor] &&
-        static_cast<std::int64_t>(offset) ==
-            static_cast<std::int64_t>(pages[pageCursor]->baseOffset()) +
-                shift) {
-      break; // re-synced further down.
+    if (pages[pageCursor]) {
+      // Guarded by the truthiness check just above.
+      // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
+      const auto cursorBase = pages[pageCursor]->baseOffset();
+      if (static_cast<std::int64_t>(offset) ==
+          static_cast<std::int64_t>(cursorBase) + shift) {
+        break; // re-synced further down.
+      }
     }
   }
 
@@ -1189,6 +1214,9 @@ void Doc::reflowFrom(RenderState &state, const std::size_t firstPage,
   std::vector<BufferPool::Allocation> inherited;
   inherited.reserve(replaced - firstPage);
   for (std::size_t i = firstPage; i < replaced; i++) {
+    // pages[i] is re-indexed in the ternary's true branch, reaching the
+    // same slot just checked truthy.
+    // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
     inherited.push_back(pages[i] ? pages[i]->allocation()
                                  : BufferPool::Allocation{});
   }
@@ -1205,6 +1233,7 @@ void Doc::reflowFrom(RenderState &state, const std::size_t firstPage,
     // Guaranteed built: everything past firstPage was dense before this
     // reflow started (nothing before Stage 3 builds out of order), and
     // ensurePagesBuiltThrough() above only had to cover up to firstPage.
+    // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
     tail.push_back(std::move(*pages[i]));
   }
   pages.erase(pages.begin() + static_cast<std::ptrdiff_t>(firstPage),
@@ -1212,6 +1241,9 @@ void Doc::reflowFrom(RenderState &state, const std::size_t firstPage,
 
   float currentTopY = 0.0F;
   if (firstPage > 0 && firstPage <= pages.size()) {
+    // Guaranteed built: pages are dense from index 0, and
+    // ensurePagesBuiltThrough() above covered up to firstPage.
+    // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
     const auto &prevPage        = *pages[firstPage - 1];
     const float prevCenterY     = prevPage.getModel()[3][1];
     const float prevHeightWorld = prevPage.heightPixels() * pixelsToWorld;
@@ -1644,6 +1676,9 @@ void Doc::newPage(RenderState &state, PageShaping aShaping,
   const auto index  = pages.size();
   float currentTopY = 0.0F;
   if (!pages.empty() && pages.back()) {
+    // pages.back() is re-invoked after the truthiness check; nothing
+    // mutates pages between the two calls.
+    // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
     const auto &prevPage        = *pages.back();
     const float prevCenterY     = prevPage.getModel()[3][1];
     const float prevHeightWorld = prevPage.heightPixels() * pixelsToWorld;

@@ -417,6 +417,9 @@ void extractPdfDocument(const poppler::document &doc, PDFDoc *coreDoc,
                                    .mimeType       = "image/png",
                                    .pageBreakAfter = isLastOnPage};
       if (pageImages[imgIdx].ref.has_value()) {
+        // Re-indexing pageImages[imgIdx] here reaches the same slot just
+        // checked.
+        // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
         const auto &refKey = *pageImages[imgIdx].ref;
         const auto found   = firstPieceIndexForRef.find(refKey);
         if (found != firstPieceIndexForRef.end()) {

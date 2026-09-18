@@ -870,6 +870,9 @@ public:
   void setDocIndex(const std::uint32_t index) { docIndex = index; }
   [[nodiscard]] std::uint32_t documentIndex() const { return docIndex; }
   [[nodiscard]] const Page *page(const std::size_t index) const {
+    // The has_value() check and the dereference both index the same
+    // pages[index] slot, evaluated left-to-right with no mutation between.
+    // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
     return (index < pages.size() && pages[index].has_value()) ? &*pages[index]
                                                               : nullptr;
   }

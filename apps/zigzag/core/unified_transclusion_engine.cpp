@@ -176,19 +176,19 @@ bool UnifiedTransclusionEngine::unlockTranscopyright(const CellRef cell) {
   if (spans.empty()) {
     return false;
   }
-  const auto &span = spans.front();
-  const auto res   = store_.resolve(span);
+  const auto &span       = spans.front();
+  const auto res         = store_.resolve(span);
+  const auto *const cold = coldOf(cell);
   if (res.status != xanadu::ResolutionStatus::TranscopyrightLocked ||
       !res.lockInfo.has_value()) {
-    const auto *const cold = coldOf(cell);
     if (!cold || !cold->transcopyrightInfo.has_value() ||
         cold->resolutionStatus !=
             xanadu::ResolutionStatus::TranscopyrightLocked) {
       return false;
     }
   }
-  const auto &tc = res.lockInfo.has_value() ? *res.lockInfo
-                                            : *coldOf(cell)->transcopyrightInfo;
+  const auto &tc =
+      res.lockInfo.has_value() ? *res.lockInfo : *cold->transcopyrightInfo;
   const auto cek =
       xanadu::TranscopyrightLogic::deriveDeterministicTestCek(tc.keyId);
   const auto count = span.length > 0 ? span.length : 1U;

@@ -658,15 +658,27 @@ AsciiVisualizer::renderCellInspection(const zigzag::ArenaManifold &manifold,
   case xanadu::ValueKind::None:
     oss << "None (string/untyped)\n";
     break;
-  case xanadu::ValueKind::Double:
-    oss << "Double (" << *manifold.asDouble(cell) << ")\n";
+  // valueKindOf and asDouble/asInt64/asBool both read the same cell slot's
+  // valueKind field (arena_manifold.cpp), so a case matching the kind
+  // guarantees the corresponding accessor returns a value.
+  case xanadu::ValueKind::Double: {
+    // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
+    const auto doubleVal = *manifold.asDouble(cell);
+    oss << "Double (" << doubleVal << ")\n";
     break;
-  case xanadu::ValueKind::Int64:
-    oss << "Int64 (" << *manifold.asInt64(cell) << ")\n";
+  }
+  case xanadu::ValueKind::Int64: {
+    // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
+    const auto int64Val = *manifold.asInt64(cell);
+    oss << "Int64 (" << int64Val << ")\n";
     break;
-  case xanadu::ValueKind::Bool:
-    oss << "Bool (" << (*manifold.asBool(cell) ? "true" : "false") << ")\n";
+  }
+  case xanadu::ValueKind::Bool: {
+    // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
+    const auto boolVal = *manifold.asBool(cell);
+    oss << "Bool (" << (boolVal ? "true" : "false") << ")\n";
     break;
+  }
   }
 
   std::string text = manifold.textOf(cell);

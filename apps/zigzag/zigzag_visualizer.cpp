@@ -1244,6 +1244,9 @@ bool ZigzagVisualizer::picked(const render::PickingResult &pick,
       pick.semanticTarget->microversion != engine_->head().str()) {
     return false;
   }
+  // De Morgan's law on the negated guard above: reaching here means
+  // pick.semanticTarget->cellRef has a value.
+  // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
   const auto targetId = static_cast<CellRef>(*pick.semanticTarget->cellRef);
   if (!isEphemeral(targetId) && engine_->findCell(targetId)) {
     navigateFocusTo(targetId);

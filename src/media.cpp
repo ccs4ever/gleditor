@@ -613,6 +613,9 @@ struct MediaPlayer::Impl {
           seek(timeRange->startSeconds);
         } else {
           pause();
+          // timeRange is a member checked truthy in the guard above;
+          // neither pause() nor seek() touches it.
+          // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
           seek(timeRange->startSeconds);
         }
       }

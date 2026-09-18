@@ -96,7 +96,10 @@ FormatResolver::resolveSpans(const std::span<const PrimediaSpan> spans) const {
             result.blockStyles.push_back(gleditor::BlockStyleRange{
                 .start = extent.start,
                 .end   = extent.end,
-                .align = *link.align,
+                // link is const-bound with no reassignment since the
+                // link.align guard above; findOccurrences doesn't touch it.
+                .align =
+                    *link.align, // NOLINT(bugprone-unchecked-optional-access)
             });
           }
         }

@@ -531,10 +531,13 @@ CellRef VQLCompiler::compilePathExpression(const PathExpression &path,
 
     // Range Clamp [start, end]
     if (step.rangeClamp.has_value() && !nextStream.empty()) {
-      const auto &clamp = *step.rangeClamp;
-      auto total        = static_cast<std::int64_t>(nextStream.size());
-      std::int64_t s    = clamp.start;
-      std::int64_t e    = clamp.end.value_or(s);
+      // step is a const-bound reference with no reassignment since the
+      // has_value() check just above.
+      const auto &clamp =
+          *step.rangeClamp; // NOLINT(bugprone-unchecked-optional-access)
+      auto total     = static_cast<std::int64_t>(nextStream.size());
+      std::int64_t s = clamp.start;
+      std::int64_t e = clamp.end.value_or(s);
 
       std::int64_t from = (s < 0) ? (total + s) : (s - 1);
       std::int64_t to   = (e < 0) ? (total + e) : (e - 1);
