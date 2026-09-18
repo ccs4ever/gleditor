@@ -191,7 +191,8 @@ struct alignas(8) CompactTransclusionPair {
     };
   }
   [[nodiscard]] PrimediaSpan span() const noexcept {
-    return PrimediaSpan{scrollId, spanStart, length};
+    return PrimediaSpan{
+        .scroll = scrollId, .start = spanStart, .length = length};
   }
 
   [[nodiscard]] static CompactTransclusionPair

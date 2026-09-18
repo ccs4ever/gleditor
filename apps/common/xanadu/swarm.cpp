@@ -1,5 +1,6 @@
 #include "swarm.hpp"
 
+#include <algorithm>
 #include <stdexcept>
 
 #include <algorithm>
@@ -161,7 +162,7 @@ struct SwarmContentSource::Impl {
   std::map<DhtTarget, PendingName> names;
   /// When the outstanding names were last asked about, so that re-asking is
   /// periodic rather than as fast as the session can be pumped.
-  std::chrono::steady_clock::time_point lastNameQuery{};
+  std::chrono::steady_clock::time_point lastNameQuery;
   /// Handlers registered for incoming live operations from collaborative peers.
   std::vector<LiveOpHandler> liveOpHandlers;
   /// Live operations queued across active swarms.
@@ -342,7 +343,7 @@ struct SwarmContentSource::Impl {
     }
     if (!found->second.best.has_value() ||
         alert.seq > found->second.best->sequence) {
-      found->second.best = MutablePointer{*hash, alert.seq};
+      found->second.best = MutablePointer{.hash = *hash, .sequence = alert.seq};
     }
   }
 
@@ -783,7 +784,8 @@ std::optional<MutablePointer>
 SwarmContentSource::resolveMutable(const MutableLink &link,
                                    const std::chrono::milliseconds timeout) {
   const auto target = link.target();
-  impl->names.insert_or_assign(target, PendingName{link, std::nullopt});
+  impl->names.insert_or_assign(target,
+                               PendingName{.link = link, .best = std::nullopt});
   // Asked immediately as well as on every pump, so a name that the DHT can
   // already answer costs one round trip rather than one polling interval.
   impl->lastNameQuery = {};

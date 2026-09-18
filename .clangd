@@ -21,4 +21,26 @@ Diagnostics:
       - cppcoreguidelines-pro-type-union-access
       - bugprone-easily-swappable-parameters
       - readability-identifier-length
+      # See the grouped rationale in .clang-tidy above this file's own list --
+      # a YAML block-scalar value there can't carry per-line comments, so the
+      # full explanation for each of these lives there instead.
+      - cppcoreguidelines-pro-type-const-cast # required by C APIs (e.g. LMDB)
+      - cppcoreguidelines-pro-type-reinterpret-cast # binary wire formats
+      - cppcoreguidelines-pro-bounds-pointer-arithmetic # mmap'd arenas/spools
+      - cppcoreguidelines-pro-bounds-constant-array-index # runtime-indexed fixed arrays
+      - cppcoreguidelines-pro-bounds-array-to-pointer-decay # C array/pointer interop
+      - cppcoreguidelines-pro-type-vararg # POSIX C APIs (open(), etc.)
+      - readability-implicit-bool-conversion # if (ptr), std::isdigit() as bool
+      - readability-math-missing-parentheses # ordinary * vs + precedence
+      - cppcoreguidelines-non-private-member-variables-in-classes # protected-access pattern
+      - cppcoreguidelines-avoid-const-or-ref-data-members # non-owning back-references
+      - cppcoreguidelines-avoid-non-const-global-variables # module-local mutexes/caches
+      - readability-braces-around-statements # this codebase's single-line guard clauses
+      - cppcoreguidelines-special-member-functions # needs per-class judgment, not a sweep
+      - cppcoreguidelines-use-enum-class # could change callers' implicit conversions
+      - modernize-avoid-c-arrays # std::array migration is a dedicated future pass
+      - cppcoreguidelines-avoid-c-arrays # same as above
+      - readability-function-cognitive-complexity # refactoring backlog, not a defect
+      - portability-avoid-pragma-once # portable on every compiler this project targets
+      - performance-enum-size # micro-optimization, no safe auto-fix
     FastCheckFilter: Loose

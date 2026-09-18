@@ -28,7 +28,7 @@ struct UncommittedEntry {
   std::uint32_t at{0};
   std::string text; ///< Inserted text, or captured erased text for delete
   std::uint32_t length{0}; ///< Length in bytes
-  std::chrono::steady_clock::time_point timestamp{};
+  std::chrono::steady_clock::time_point timestamp;
 };
 
 struct CompactedOp {

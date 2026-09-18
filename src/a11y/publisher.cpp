@@ -120,7 +120,8 @@ void Publisher::addSource(Source *const source,
     return;
   }
   const std::scoped_lock locker(sourcesGuard);
-  sources.push_back(Registered{source, owner.value_or(nextOwner)});
+  sources.push_back(
+      Registered{.source = source, .owner = owner.value_or(nextOwner)});
   if (!owner) {
     nextOwner++;
   }
@@ -197,11 +198,13 @@ void Publisher::rebuild(const int width, const int height) {
     auto &root    = tree.nodes[rootIndex];
     root.label    = windowTitle;
     root.children = std::move(topLevel);
-    root.bounds =
-        Rect{0.0, 0.0, static_cast<double>(width), static_cast<double>(height)};
-    built     = std::move(tree);
-    builtFrom = revision;
-    everBuilt = true;
+    root.bounds   = Rect{.left   = 0.0,
+                         .top    = 0.0,
+                         .right  = static_cast<double>(width),
+                         .bottom = static_cast<double>(height)};
+    built         = std::move(tree);
+    builtFrom     = revision;
+    everBuilt     = true;
   }
 }
 

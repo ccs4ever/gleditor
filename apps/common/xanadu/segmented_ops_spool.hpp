@@ -238,8 +238,8 @@ public:
 
   SegmentedOpsSpool(const SegmentedOpsSpool &)            = delete;
   SegmentedOpsSpool &operator=(const SegmentedOpsSpool &) = delete;
-  SegmentedOpsSpool(SegmentedOpsSpool &&) noexcept;
-  SegmentedOpsSpool &operator=(SegmentedOpsSpool &&) noexcept;
+  SegmentedOpsSpool(SegmentedOpsSpool && /*other*/) noexcept;
+  SegmentedOpsSpool &operator=(SegmentedOpsSpool && /*other*/) noexcept;
 
   /**
    * @brief Append a new operation to the active segment.

@@ -106,8 +106,8 @@ public:
   MerkleLedger();
   ~MerkleLedger();
 
-  MerkleLedger(const MerkleLedger &);
-  MerkleLedger &operator=(const MerkleLedger &);
+  MerkleLedger(const MerkleLedger & /*other*/);
+  MerkleLedger &operator=(const MerkleLedger & /*other*/);
   MerkleLedger(MerkleLedger &&) noexcept;
   MerkleLedger &operator=(MerkleLedger &&) noexcept;
 
@@ -169,7 +169,7 @@ public:
   [[nodiscard]] static MerkleLedger fromYaml(std::string_view yaml);
 
   /// Save ledger YAML to a file on disk.
-  bool saveToFile(const std::string &path) const;
+  [[nodiscard]] bool saveToFile(const std::string &path) const;
 
   /// Load ledger YAML from a file on disk.
   [[nodiscard]] static std::optional<MerkleLedger>

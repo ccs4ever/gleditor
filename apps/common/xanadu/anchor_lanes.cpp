@@ -24,7 +24,8 @@ std::vector<AnchorLane>
 assignAnchorLanes(const std::vector<AnchorExtent> &extents,
                   const int laneLimit) {
   const int limit = std::max(1, laneLimit);
-  std::vector<AnchorLane> out(extents.size(), AnchorLane{0, 1});
+  std::vector<AnchorLane> out(extents.size(),
+                              AnchorLane{.lane = 0, .lanes = 1});
   if (extents.empty()) {
     return out;
   }

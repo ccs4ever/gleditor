@@ -39,8 +39,8 @@ std::string toLower(const std::string_view s) {
 struct ThreadLocalMagic {
   magic_t cookie{nullptr};
 
-  ThreadLocalMagic() {
-    cookie = magic_open(MAGIC_MIME_TYPE);
+  ThreadLocalMagic() : cookie(magic_open(MAGIC_MIME_TYPE)) {
+
     if (nullptr != cookie) {
       if (0 != magic_load(cookie, nullptr)) {
         magic_close(cookie);
@@ -111,14 +111,13 @@ MimeType MimeType::parse(const std::string_view raw) {
 
   const auto slashPos = essencePart.find('/');
   if (std::string_view::npos == slashPos) {
-    return MimeType(toLower(trim(essencePart)), "",
-                    std::string(trim(paramPart)));
+    return {toLower(trim(essencePart)), "", std::string(trim(paramPart))};
   }
 
   const std::string type    = toLower(trim(essencePart.substr(0, slashPos)));
   const std::string subtype = toLower(trim(essencePart.substr(slashPos + 1)));
 
-  return MimeType(type, subtype, std::string(trim(paramPart)));
+  return {type, subtype, std::string(trim(paramPart))};
 }
 
 MimeType MimeDetector::detectBuffer(const std::span<const std::uint8_t> bytes) {

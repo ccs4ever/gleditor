@@ -31,8 +31,9 @@ auto GlyphPalette::getBestLane(const Rect &charBox) {
   if (lanes.cend() != val || availHeight() < charBox.height) {
     return val + 0;
   }
-  lanes.emplace_back(Offset{std::to_underlying(usedHeight)},
-                     Rect{paletteDims.width, charBox.height});
+  lanes.emplace_back(
+      Offset{std::to_underlying(usedHeight)},
+      Rect{.width = paletteDims.width, .height = charBox.height});
   usedHeight = Length{std::to_underlying(usedHeight) +
                       std::to_underlying(charBox.height)};
   return std::prev(lanes.end());
@@ -66,10 +67,11 @@ GlyphPalette::put(const Rect &charBox, const std::span<const std::byte> data) {
   // growth only ever adds room above and to the right -- so the shader divides
   // by the texture's size at sampling time instead.
   return make_optional(TextureCoords{
-      PointF{static_cast<float>(std::to_underlying(x)),
-             static_cast<float>(std::to_underlying(y))},
-      RectF{static_cast<float>(std::to_underlying(charBox.width)),
-            static_cast<float>(std::to_underlying(charBox.height))}});
+      .topLeft = PointF{.x = static_cast<float>(std::to_underlying(x)),
+                        .y = static_cast<float>(std::to_underlying(y))},
+      .box     = RectF{
+          .width  = static_cast<float>(std::to_underlying(charBox.width)),
+          .height = static_cast<float>(std::to_underlying(charBox.height))}});
 }
 
 void GlyphPalette::grow(const Rect &newDims,

@@ -21,6 +21,7 @@
 #include <string>
 #include <string_view>
 #include <unordered_map>
+#include <utility>
 #include <vector>
 
 #include "common/xanadu/enfilade/crum_node.hpp"
@@ -100,7 +101,7 @@ struct HoleWid {
     if (isEmpty() || start >= end) {
       return false;
     }
-    return !(end <= minOffset || start >= maxOffset);
+    return end > minOffset && start < maxOffset;
   }
 
   bool operator==(const HoleWid &) const = default;
@@ -153,7 +154,7 @@ struct HoleSpanEntry {
   std::uint16_t flags{0};
   std::uint32_t priceAtomicUnits{0}; ///< Nano-xu per span or per byte
   bool flatFee{true};
-  identity::Fingerprint authorWallet{};
+  identity::Fingerprint authorWallet;
   std::array<std::uint8_t, 32> keyId{};
   std::array<std::uint8_t, 32> contentCommitment{};
 
@@ -190,7 +191,7 @@ struct HoleSlice {
   HoleReason reason{HoleReason::Withheld};
   std::uint64_t costAtomicUnits{0};
   bool requiresPayment{false};
-  identity::Fingerprint authorWallet{};
+  identity::Fingerprint authorWallet;
   std::array<std::uint8_t, 32> keyId{};
   std::array<std::uint8_t, 32> contentCommitment{};
 
@@ -308,7 +309,7 @@ public:
   [[nodiscard]] std::uint64_t microcentsOwed(const PrimediaSpan &span) const;
 
   [[nodiscard]] bool hasScroll(ScrollId scroll) const noexcept {
-    return scrolls_.find(scroll) != scrolls_.end();
+    return scrolls_.contains(scroll);
   }
 
   [[nodiscard]] const ScrollHolefilade *
@@ -334,11 +335,11 @@ struct PaymentReceipt {
   std::uint64_t offset{0};
   std::uint64_t length{0};
   std::uint64_t amountAtomicUnits{0}; ///< Nano-xu settled
-  identity::Fingerprint payerWallet{};
-  identity::Fingerprint payeeWallet{};
+  identity::Fingerprint payerWallet;
+  identity::Fingerprint payeeWallet;
   std::array<std::uint8_t, 32> keyId{};
   std::uint64_t timestamp{0};
-  std::string signature{}; ///< Ed25519 signature
+  std::string signature; ///< Ed25519 signature
   std::uint64_t sequence{0};
 
   [[nodiscard]] std::string canonicalForm() const;

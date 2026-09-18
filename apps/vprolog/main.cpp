@@ -93,10 +93,10 @@ void printGrid(Compiler &compiler) {
     return;
   }
   std::vector<xanadu::vql::ViewDimension> viewDims = {
-      {"d.clause", compiler.core().dims().clause},
-      {"d.grab", compiler.core().dims().grab},
-      {"d.spin", compiler.core().dims().spin},
-      {"d.step", compiler.core().dims().step}};
+      {.name = "d.clause", .dim = compiler.core().dims().clause},
+      {.name = "d.grab", .dim = compiler.core().dims().grab},
+      {.name = "d.spin", .dim = compiler.core().dims().spin},
+      {.name = "d.step", .dim = compiler.core().dims().step}};
 
   std::vector<CellRef> cellsToInspect;
   for (CellRef pred : preds) {
@@ -255,7 +255,7 @@ void runREPL(Compiler &compiler, std::vector<Clause> &clauses) {
 std::vector<std::string> reorderArgs(int argc, char *argv[]) {
   std::vector<std::string> options;
   std::vector<std::string> positionals;
-  options.push_back(argv[0]);
+  options.emplace_back(argv[0]);
 
   const std::vector<std::string> valueOptions = {
       "-e", "--eval", "-q", "--query", "-m", "--max-solutions"};
@@ -281,7 +281,7 @@ std::vector<std::string> reorderArgs(int argc, char *argv[]) {
     if (isValueOpt) {
       options.push_back(arg);
       if (i + 1 < argc) {
-        options.push_back(argv[++i]);
+        options.emplace_back(argv[++i]);
       }
     } else if (arg.starts_with("-")) {
       options.push_back(arg);
@@ -365,7 +365,7 @@ int main(int argc, char *argv[]) {
     printListing(loadedClauses);
   }
 
-  std::string evalQuery = program.get<std::string>("-e");
+  auto evalQuery = program.get<std::string>("-e");
   if (evalQuery.empty()) {
     evalQuery = program.get<std::string>("-q");
   }

@@ -5,6 +5,7 @@
  */
 #include "common/xanadu/enfilade/holefilade.hpp"
 
+#include <algorithm>
 #include <libtorrent/hasher.hpp>
 #include <merklecpp.h>
 

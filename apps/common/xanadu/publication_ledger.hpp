@@ -68,8 +68,8 @@ public:
   PublicationLedger();
   ~PublicationLedger();
 
-  PublicationLedger(const PublicationLedger &);
-  PublicationLedger &operator=(const PublicationLedger &);
+  PublicationLedger(const PublicationLedger & /*other*/);
+  PublicationLedger &operator=(const PublicationLedger & /*other*/);
   PublicationLedger(PublicationLedger &&) noexcept;
   PublicationLedger &operator=(PublicationLedger &&) noexcept;
 
@@ -130,7 +130,7 @@ public:
   [[nodiscard]] static PublicationLedger fromYaml(std::string_view yaml);
 
   /// Save to file.
-  bool saveToFile(const std::string &path) const;
+  [[nodiscard]] bool saveToFile(const std::string &path) const;
 
   /// Load from file.
   [[nodiscard]] static std::optional<PublicationLedger>

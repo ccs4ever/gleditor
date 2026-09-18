@@ -14,14 +14,21 @@ EdlSlice EdlSlice::subSlice(const std::uint32_t offsetInSlice,
                             const std::uint32_t count) const {
   switch (kind) {
   case SliceKind::Source:
-    return EdlSlice{SliceKind::Source, count, sourceOffset + offsetInSlice,
-                    PrimediaSpan{}};
+    return EdlSlice{.kind         = SliceKind::Source,
+                    .length       = count,
+                    .sourceOffset = sourceOffset + offsetInSlice,
+                    .span         = PrimediaSpan{}};
   case SliceKind::Primedia:
-    return EdlSlice{SliceKind::Primedia, count, 0,
-                    span.slice(offsetInSlice, count)};
+    return EdlSlice{.kind         = SliceKind::Primedia,
+                    .length       = count,
+                    .sourceOffset = 0,
+                    .span         = span.slice(offsetInSlice, count)};
   case SliceKind::Break:
-    return EdlSlice{SliceKind::Break, 0, 0,
-                    PrimediaSpan{breakMarkerScroll, 0, 0}};
+    return EdlSlice{.kind         = SliceKind::Break,
+                    .length       = 0,
+                    .sourceOffset = 0,
+                    .span         = PrimediaSpan{
+                        .scroll = breakMarkerScroll, .start = 0, .length = 0}};
   }
   return {};
 }
@@ -60,7 +67,10 @@ void join(EdlSlice &first, const EdlSlice &second) noexcept {
 EdlTransform::EdlTransform(const std::uint32_t inputLength)
     : inputLength_(inputLength), outputLength_(inputLength) {
   if (inputLength > 0) {
-    slices_.push_back(EdlSlice{SliceKind::Source, inputLength, 0, {}});
+    slices_.push_back(EdlSlice{.kind         = SliceKind::Source,
+                               .length       = inputLength,
+                               .sourceOffset = 0,
+                               .span         = {}});
   }
 }
 
@@ -164,8 +174,10 @@ void EdlTransform::insert(const std::uint32_t at, const PrimediaSpan &span) {
   if (span.empty() && span.scroll != breakMarkerScroll) {
     return;
   }
-  const EdlSlice slice{SliceKind::Primedia,
-                       static_cast<std::uint32_t>(span.length), 0, span};
+  const EdlSlice slice{.kind         = SliceKind::Primedia,
+                       .length       = static_cast<std::uint32_t>(span.length),
+                       .sourceOffset = 0,
+                       .span         = span};
   insertSlices(at, {slice});
 }
 
@@ -175,19 +187,28 @@ void EdlTransform::insertSpans(const std::uint32_t at,
   slices.reserve(spans.size());
   for (const auto &span : spans) {
     if (span.scroll == breakMarkerScroll) {
-      slices.push_back(EdlSlice{SliceKind::Break, 0, 0, span});
+      slices.push_back(EdlSlice{.kind         = SliceKind::Break,
+                                .length       = 0,
+                                .sourceOffset = 0,
+                                .span         = span});
     } else if (!span.empty()) {
-      slices.push_back(EdlSlice{SliceKind::Primedia,
-                                static_cast<std::uint32_t>(span.length), 0,
-                                span});
+      slices.push_back(
+          EdlSlice{.kind         = SliceKind::Primedia,
+                   .length       = static_cast<std::uint32_t>(span.length),
+                   .sourceOffset = 0,
+                   .span         = span});
     }
   }
   insertSlices(at, slices);
 }
 
 void EdlTransform::insertBreak(const std::uint32_t at) {
-  const EdlSlice slice{SliceKind::Break, 0, 0,
-                       PrimediaSpan{breakMarkerScroll, 0, 0}};
+  const EdlSlice slice{
+      .kind         = SliceKind::Break,
+      .length       = 0,
+      .sourceOffset = 0,
+      .span =
+          PrimediaSpan{.scroll = breakMarkerScroll, .start = 0, .length = 0}};
   insertSlices(at, {slice});
 }
 

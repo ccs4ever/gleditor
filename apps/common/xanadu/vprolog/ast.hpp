@@ -7,6 +7,7 @@
 
 #include <cstdint>
 #include <memory>
+#include <ranges>
 #include <string>
 #include <string_view>
 #include <variant>
@@ -136,10 +137,10 @@ inline bool List::operator==(const List &other) const {
 inline Term Term::canonicalizeList() const {
   if (const auto *list = asList()) {
     Term result = list->tail ? *list->tail : Term(Atom{"[]"});
-    for (auto it = list->elements.rbegin(); it != list->elements.rend(); ++it) {
+    for (const auto &element : std::views::reverse(list->elements)) {
       Compound c;
       c.functor = ".";
-      c.args.push_back(it->canonicalizeList());
+      c.args.push_back(element.canonicalizeList());
       c.args.push_back(std::move(result));
       result = Term(std::move(c));
     }
@@ -151,7 +152,7 @@ inline Term Term::canonicalizeList() const {
     for (const auto &arg : comp->args) {
       c.args.push_back(arg.canonicalizeList());
     }
-    return Term(std::move(c));
+    return {std::move(c)};
   }
   return *this;
 }

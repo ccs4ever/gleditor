@@ -1164,7 +1164,15 @@ CPPCHECK       := $(shell command -v cppcheck 2>/dev/null)
 MDFORMAT_EXTENSIONS := --extensions gfm --extensions dollarmath --extensions frontmatter
 MDFORMAT_FLAGS      := $(MDFORMAT_EXTENSIONS) --wrap 100
 
-TIDY_FILES              ?= '^(src|apps)/'
+# run-clang-tidy matches this against each file's *absolute* path (it
+# resolves every compile_commands.json entry before filtering), so an
+# anchored '^(src|apps)/' never matches anything -- silently analyzing 0
+# files rather than failing loudly. A plain '.*/(src|apps)/' fixes that but
+# is too permissive: thirdparty/Choreograph's own src/ subdirectory then
+# matches too, applying -fix to a vendored submodule's checkout, which must
+# never be hand-edited. The negative lookahead excludes any path with
+# "thirdparty" in it before the (src|apps) segment.
+TIDY_FILES              ?= '^(?!.*thirdparty).*/(src|apps)/'
 TIDY_CHECKS             ?=
 TIDY_WARNINGS_AS_ERRORS ?=
 TIDY_HEADER_FILTER      ?= '^(include|src|apps)/'

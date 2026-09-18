@@ -64,7 +64,7 @@ namespace paths {
       nullptr != home && '\0' != home[0]) {
     return home;
   }
-#if defined(_WIN32)
+#ifdef _WIN32
   if (const auto *userProfile = std::getenv("USERPROFILE");
       nullptr != userProfile && '\0' != userProfile[0]) {
     return userProfile;

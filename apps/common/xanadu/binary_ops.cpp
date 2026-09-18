@@ -117,8 +117,8 @@ bool readMicroversionId(std::istream &in, MicroversionId &id) {
     if (!readVarint(in, num)) {
       return false;
     }
-    segs.push_back(
-        MicroversionId::Segment{branch, static_cast<std::uint32_t>(num)});
+    segs.push_back(MicroversionId::Segment{
+        .branch = branch, .number = static_cast<std::uint32_t>(num)});
   }
   id = MicroversionId(segs);
   return true;
@@ -294,7 +294,10 @@ void readBinaryOpsSpool(std::istream &in, std::vector<OpRecord> &ops) {
     Op op;
     op.parent = produces.parent();
 
-    std::uint64_t v1 = 0, v2 = 0, v3 = 0, v4 = 0;
+    std::uint64_t v1 = 0;
+    std::uint64_t v2 = 0;
+    std::uint64_t v3 = 0;
+    std::uint64_t v4 = 0;
 
     switch (kindCode) {
     case BinInsert:
@@ -430,7 +433,7 @@ void readBinaryOpsSpool(std::istream &in, std::vector<OpRecord> &ops) {
                                std::to_string(tag));
     }
 
-    ops.push_back(OpRecord{produces, op});
+    ops.push_back(OpRecord{.produces = produces, .op = op});
     lastProduces = produces;
   }
 }
@@ -505,7 +508,7 @@ void readOsmicTextOpsSpool(std::istream &in, std::vector<OpRecord> &ops) {
     } else {
       throw std::runtime_error("unknown operation \"" + kind + "\"");
     }
-    ops.push_back(OpRecord{produces, op});
+    ops.push_back(OpRecord{.produces = produces, .op = op});
   }
 }
 

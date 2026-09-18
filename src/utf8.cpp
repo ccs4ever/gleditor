@@ -99,15 +99,15 @@ std::string makeValidUtf8(const std::string_view text) {
       i += 2;
     } else if ((b0 & 0xF0) == 0xE0 && i + 2 < len &&
                (bytes[i + 1] & 0xC0) == 0x80 && (bytes[i + 2] & 0xC0) == 0x80 &&
-               !(b0 == 0xE0 && bytes[i + 1] < 0xA0) &&
-               !(b0 == 0xED && bytes[i + 1] > 0x9F)) {
+               (b0 != 0xE0 || bytes[i + 1] >= 0xA0) &&
+               (b0 != 0xED || bytes[i + 1] <= 0x9F)) {
       result.append(text.substr(i, 3));
       i += 3;
     } else if ((b0 & 0xF8) == 0xF0 && i + 3 < len &&
                (bytes[i + 1] & 0xC0) == 0x80 && (bytes[i + 2] & 0xC0) == 0x80 &&
                (bytes[i + 3] & 0xC0) == 0x80 &&
-               !(b0 == 0xF0 && bytes[i + 1] < 0x90) &&
-               !(b0 == 0xF4 && bytes[i + 1] > 0x8F)) {
+               (b0 != 0xF0 || bytes[i + 1] >= 0x90) &&
+               (b0 != 0xF4 || bytes[i + 1] <= 0x8F)) {
       result.append(text.substr(i, 4));
       i += 4;
     } else {

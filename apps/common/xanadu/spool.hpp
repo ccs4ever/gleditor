@@ -42,7 +42,7 @@ inline constexpr ScrollId vocabularyScroll = breakMarkerScroll - 1;
 inline constexpr ScrollId scratchScroll = breakMarkerScroll - 2;
 
 /// Whether @p scroll is one of the reserved ids rather than a real scroll.
-[[nodiscard]] inline constexpr bool isReservedScroll(const ScrollId scroll) {
+[[nodiscard]] constexpr bool isReservedScroll(const ScrollId scroll) {
   return breakMarkerScroll == scroll || vocabularyScroll == scroll ||
          scratchScroll == scroll;
 }
@@ -65,18 +65,23 @@ struct PrimediaSpan {
 
   [[nodiscard]] PrimediaSpan intersect(const PrimediaSpan &other) const {
     if (scroll != other.scroll) {
-      return {scroll, start, 0};
+      return {.scroll = scroll, .start = start, .length = 0};
     }
     const auto from = std::max(start, other.start);
     const auto to   = std::min(end(), other.end());
-    return to > from ? PrimediaSpan{scroll, from, to - from}
-                     : PrimediaSpan{scroll, from, 0};
+    return to > from
+               ? PrimediaSpan{.scroll = scroll,
+                              .start  = from,
+                              .length = to - from}
+               : PrimediaSpan{.scroll = scroll, .start = from, .length = 0};
   }
 
   [[nodiscard]] PrimediaSpan slice(const std::uint64_t offset,
                                    const std::uint64_t count) const {
     const auto from = std::min(offset, length);
-    return {scroll, start + from, std::min(count, length - from)};
+    return {.scroll = scroll,
+            .start  = start + from,
+            .length = std::min(count, length - from)};
   }
 
   bool operator==(const PrimediaSpan &) const = default;

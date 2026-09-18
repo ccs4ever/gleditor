@@ -7,6 +7,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <numbers>
 #include <utility>
 
 #include <gleditor/spatial.hpp>
@@ -172,9 +173,11 @@ void SatelloidOverlay::drawFrame(gleditor::FrameContext &ctx) {
 
       constexpr int kRingSegments = 16;
       for (int i = 0; i < kRingSegments; ++i) {
-        const float theta1 = 2.0F * 3.14159265F * static_cast<float>(i) /
+        const float theta1 = 2.0F * std::numbers::pi_v<float> *
+                             static_cast<float>(i) /
                              static_cast<float>(kRingSegments);
-        const float theta2 = 2.0F * 3.14159265F * static_cast<float>(i + 1) /
+        const float theta2 = 2.0F * std::numbers::pi_v<float> *
+                             static_cast<float>(i + 1) /
                              static_cast<float>(kRingSegments);
         const float x1     = cx + r * std::cos(theta1);
         const float y1     = cy + r * std::sin(theta1);
@@ -191,7 +194,7 @@ void SatelloidOverlay::drawFrame(gleditor::FrameContext &ctx) {
 }
 
 bool SatelloidOverlay::picked(const render::PickingResult &pick,
-                              RenderState &) {
+                              RenderState & /*state*/) {
   if (render::tagKindOverlay != pick.tag.kind ||
       pick.tag.clusterIndex < kTagSatelloidBase) {
     return false;

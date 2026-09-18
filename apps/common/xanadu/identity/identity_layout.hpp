@@ -93,7 +93,7 @@ struct Fingerprint {
       }
       const auto uc =
           static_cast<char>(std::toupper(static_cast<unsigned char>(c)));
-      if (!((uc >= '0' && uc <= '9') || (uc >= 'A' && uc <= 'F'))) {
+      if ((uc < '0' || uc > '9') && (uc < 'A' || uc > 'F')) {
         return std::nullopt; // Invalid hex character
       }
       fp.hex[outIdx++] = uc;
@@ -289,14 +289,14 @@ enum class ValidationError : std::uint8_t {
 
 /// A single verified identity record in the Merkle ledger.
 struct IdentityEntry {
-  Fingerprint fingerprint{};
+  Fingerprint fingerprint;
   std::string email;
   std::string identityName;
   std::string publicKeyArmored;
   std::uint64_t timestamp{};
   std::uint64_t sequence{};
   bool revoked{false};
-  Signature64 signature{};
+  Signature64 signature;
 
   [[nodiscard]] bool isValid() const noexcept {
     return fingerprint.isValid() && !email.empty() &&
@@ -310,11 +310,11 @@ struct IdentityEntry {
 
 /// A weighted consensus vote endorsing an Oracle candidate.
 struct VoteEntry {
-  Fingerprint voterFingerprint{};
-  Fingerprint candidateOracle{};
+  Fingerprint voterFingerprint;
+  Fingerprint candidateOracle;
   std::uint64_t timestamp{};
   std::uint64_t sequence{};
-  Signature64 signature{};
+  Signature64 signature;
 
   [[nodiscard]] bool isValid() const noexcept {
     return voterFingerprint.isValid() && candidateOracle.isValid() &&
@@ -328,8 +328,8 @@ struct VoteEntry {
 struct BlockHeader {
   std::uint64_t blockIndex{};
   std::uint64_t timestamp{};
-  Hash32 previousHash{};
-  Hash32 merkleRoot{};
+  Hash32 previousHash;
+  Hash32 merkleRoot;
   std::uint32_t identityCount{};
   std::uint32_t voteCount{};
 
@@ -343,12 +343,12 @@ struct BlockHeader {
 /// Attestation token issued by a verified Oracle confirming an SMTP
 /// verification.
 struct OracleAttestation {
-  Fingerprint oracleFingerprint{};
-  Fingerprint targetFingerprint{};
+  Fingerprint oracleFingerprint;
+  Fingerprint targetFingerprint;
   std::string verifiedEmail;
   std::uint64_t issuedTimestamp{};
   std::uint64_t expiresTimestamp{};
-  Signature64 oracleSignature{};
+  Signature64 oracleSignature;
 
   [[nodiscard]] bool isValid() const noexcept {
     return oracleFingerprint.isValid() && targetFingerprint.isValid() &&
@@ -361,7 +361,7 @@ struct OracleAttestation {
 
 /// Cryptographic authentication challenge sent across the wire.
 struct PeerChallenge {
-  Hash32 nonce{};
+  Hash32 nonce;
   std::uint64_t timestamp{};
 
   [[nodiscard]] bool isValid() const noexcept { return !nonce.isZero(); }
@@ -370,14 +370,14 @@ struct PeerChallenge {
 
 /// Response to a PeerChallenge containing detached signature over the nonce.
 struct PeerChallengeResponse {
-  Hash32 nonce{};
-  Fingerprint claimedIdentity{};
+  Hash32 nonce;
+  Fingerprint claimedIdentity;
   /// The Ed25519 device key the signature is by. Carried so the verifier
   /// knows which key to check against -- but on its own it proves nothing,
   /// since a peer picks it freely. What decides the question is whether the
   /// claimed identity ever delegated to this key.
   std::array<std::uint8_t, 32> devicePublicKey{};
-  Signature64 signature{};
+  Signature64 signature;
 
   [[nodiscard]] bool isValid() const noexcept {
     return !nonce.isZero() && claimedIdentity.isValid() && !signature.isZero();
@@ -387,7 +387,7 @@ struct PeerChallengeResponse {
 
 /// Audit proof path element for Merkle tree inclusion verification.
 struct MerkleProofElement {
-  Hash32 hash{};
+  Hash32 hash;
   bool isLeft{false};
 
   [[nodiscard]] bool operator==(const MerkleProofElement &) const = default;
@@ -397,8 +397,8 @@ struct MerkleProofElement {
 struct LedgerMerkleProof {
   std::size_t leafIndex{};
   std::size_t maxIndex{};
-  Hash32 leafHash{};
-  Hash32 rootHash{};
+  Hash32 leafHash;
+  Hash32 rootHash;
   std::vector<MerkleProofElement> path;
 
   [[nodiscard]] bool verify(const Hash32 &expectedRoot) const;
@@ -423,7 +423,7 @@ struct IdentityResponseMsg {
 
 /// BEP 10 Identity Query request payload.
 struct IdentityQueryMsg {
-  Fingerprint targetFingerprint{};
+  Fingerprint targetFingerprint;
   std::string targetEmail;
 
   [[nodiscard]] bool isValid() const noexcept {
@@ -445,12 +445,12 @@ struct HashcashStamp {
 
 /// BEP 10 Email Verification Request payload sent to an Oracle.
 struct EmailVerifyRequestMsg {
-  Fingerprint requesterFingerprint{};
+  Fingerprint requesterFingerprint;
   std::string targetEmail;
   std::uint64_t timestamp{};
   std::uint64_t powNonce{0};
   std::uint8_t difficultyBits{kDefaultHashcashDifficulty};
-  Signature64 requesterSignature{};
+  Signature64 requesterSignature;
 
   [[nodiscard]] bool isValid() const noexcept {
     return requesterFingerprint.isValid() && !targetEmail.empty() &&
@@ -462,7 +462,7 @@ struct EmailVerifyRequestMsg {
 
 /// BEP 10 Transcopyright Invoice Query message.
 struct TcInvoiceQueryMsg {
-  Hash32 keyId{};
+  Hash32 keyId;
   std::uint64_t requestedBytes{0};
 
   [[nodiscard]] bool isValid() const noexcept { return !keyId.isZero(); }
@@ -471,13 +471,13 @@ struct TcInvoiceQueryMsg {
 
 /// BEP 10 Transcopyright Invoice Response message.
 struct TcInvoiceResponseMsg {
-  Hash32 keyId{};
+  Hash32 keyId;
   std::uint64_t priceAtomicUnits{0};
   bool flatFee{false};
   std::string currencySymbol{"XU"};
-  Fingerprint authorWallet{};
-  PubKey32 authorPubKey{};
-  Hash32 paymentChallenge{};
+  Fingerprint authorWallet;
+  PubKey32 authorPubKey;
+  Hash32 paymentChallenge;
   std::uint64_t expiresTimestamp{0};
 
   [[nodiscard]] bool isValid() const noexcept {
@@ -489,13 +489,13 @@ struct TcInvoiceResponseMsg {
 
 /// BEP 10 Transcopyright Micropayment Settlement Request message.
 struct TcSettleRequestMsg {
-  Hash32 keyId{};
-  Hash32 paymentChallenge{};
+  Hash32 keyId;
+  Hash32 paymentChallenge;
   std::uint64_t amountAtomicUnits{0};
-  Fingerprint payerWallet{};
-  PubKey32 payerPubKey{}; // X25519 public key for KEM CEK delivery
-  Signature64 paymentProofSignature{};
-  std::string micropaymentTicket{};
+  Fingerprint payerWallet;
+  PubKey32 payerPubKey; // X25519 public key for KEM CEK delivery
+  Signature64 paymentProofSignature;
+  std::string micropaymentTicket;
 
   [[nodiscard]] bool isValid() const noexcept {
     return !keyId.isZero() && !payerPubKey.isZero() && payerWallet.isValid();
@@ -505,9 +505,9 @@ struct TcSettleRequestMsg {
 
 /// BEP 10 Transcopyright CEK Key Delivery message.
 struct TcKeyDeliveryMsg {
-  Hash32 keyId{};
-  std::vector<std::uint8_t> wrappedCek{}; // 104-byte KEM payload
-  Signature64 authorSignature{};
+  Hash32 keyId;
+  std::vector<std::uint8_t> wrappedCek; // 104-byte KEM payload
+  Signature64 authorSignature;
 
   [[nodiscard]] bool isValid() const noexcept {
     return !keyId.isZero() && !wrappedCek.empty();

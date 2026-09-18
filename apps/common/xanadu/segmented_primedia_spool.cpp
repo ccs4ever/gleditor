@@ -6,8 +6,9 @@
 #include <stdexcept>
 #include <sys/stat.h>
 #include <unistd.h>
+#include <utility>
 
-#if defined(_WIN32)
+#ifdef _WIN32
 #include <io.h> // _commit
 #endif
 
@@ -89,7 +90,7 @@ PrimediaSpan SegmentedPrimediaSpool::append(const std::string_view bytes) {
   // itself published and needs no ordering to see it.
   const auto start = totalBytes.load(std::memory_order_relaxed);
   if (bytes.empty()) {
-    return PrimediaSpan{localScroll, start, 0};
+    return PrimediaSpan{.scroll = localScroll, .start = start, .length = 0};
   }
   const auto nextTotal = start + bytes.size();
   if (!ensureCommitted(nextTotal)) {
@@ -101,7 +102,8 @@ PrimediaSpan SegmentedPrimediaSpool::append(const std::string_view bytes) {
   // the store first, a reader could see the size and read bytes nobody had
   // written yet -- which is the whole reason this is not a plain assignment.
   totalBytes.store(nextTotal, std::memory_order_release);
-  return PrimediaSpan{localScroll, start, bytes.size()};
+  return PrimediaSpan{
+      .scroll = localScroll, .start = start, .length = bytes.size()};
 }
 
 std::string SegmentedPrimediaSpool::read(const PrimediaSpan &span) const {
@@ -317,7 +319,7 @@ bool SegmentedPrimediaSpool::flush() {
   }
   // MinGW's io.h has no fsync(); _commit() is its file-durability
   // equivalent.
-#if defined(_WIN32)
+#ifdef _WIN32
   ::_commit(activeFd);
 #else
   ::fsync(activeFd);

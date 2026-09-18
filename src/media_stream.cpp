@@ -47,7 +47,7 @@ std::string MediaStream::readString(const std::uint64_t offset,
 
 MemoryMediaStream::MemoryMediaStream(std::vector<std::byte> bytes)
     : storage(std::make_shared<const std::vector<std::byte>>(std::move(bytes))),
-      range(ByteRange{0, storage->size()}) {}
+      range(ByteRange{.start = 0, .length = storage->size()}) {}
 
 MemoryMediaStream::MemoryMediaStream(const std::string_view text)
     : storage([text]() {
@@ -57,7 +57,7 @@ MemoryMediaStream::MemoryMediaStream(const std::string_view text)
         }
         return vec;
       }()),
-      range(ByteRange{0, storage->size()}) {}
+      range(ByteRange{.start = 0, .length = storage->size()}) {}
 
 MemoryMediaStream::MemoryMediaStream(
     std::shared_ptr<const std::vector<std::byte>> buffer,
@@ -66,7 +66,7 @@ MemoryMediaStream::MemoryMediaStream(
   const auto bufSize = storage ? storage->size() : 0;
   const auto from    = std::min<std::uint64_t>(offset, bufSize);
   const auto count   = std::min<std::uint64_t>(length, bufSize - from);
-  range              = ByteRange{from, count};
+  range              = ByteRange{.start = from, .length = count};
 }
 
 std::size_t MemoryMediaStream::read(const std::uint64_t offset,
@@ -112,7 +112,8 @@ std::uint64_t queryFileSize(const std::string &filePath) {
 } // namespace
 
 FileMediaStream::FileMediaStream(std::string filePath)
-    : path_(std::move(filePath)), range(ByteRange{0, queryFileSize(path_)}) {}
+    : path_(std::move(filePath)),
+      range(ByteRange{.start = 0, .length = queryFileSize(path_)}) {}
 
 FileMediaStream::FileMediaStream(std::string filePath,
                                  const std::uint64_t fileOffset,
@@ -121,7 +122,7 @@ FileMediaStream::FileMediaStream(std::string filePath,
   const auto total = queryFileSize(path_);
   const auto from  = std::min(fileOffset, total);
   const auto count = std::min(length, total - from);
-  range            = ByteRange{from, count};
+  range            = ByteRange{.start = from, .length = count};
 }
 
 std::size_t FileMediaStream::read(const std::uint64_t offset,
@@ -158,7 +159,8 @@ FileMediaStream::subspan(const std::uint64_t offset,
 
 CallbackMediaStream::CallbackMediaStream(ReadCallback callback,
                                          const std::uint64_t streamSize)
-    : readCb(std::move(callback)), range(ByteRange{0, streamSize}) {}
+    : readCb(std::move(callback)),
+      range(ByteRange{.start = 0, .length = streamSize}) {}
 
 CallbackMediaStream::CallbackMediaStream(ReadCallback callback,
                                          const std::uint64_t streamSize,
@@ -167,7 +169,7 @@ CallbackMediaStream::CallbackMediaStream(ReadCallback callback,
     : readCb(std::move(callback)) {
   const auto from  = std::min(baseOffset, streamSize);
   const auto count = std::min(length, streamSize - from);
-  range            = ByteRange{from, count};
+  range            = ByteRange{.start = from, .length = count};
 }
 
 std::size_t CallbackMediaStream::read(const std::uint64_t offset,

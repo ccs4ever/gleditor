@@ -19,7 +19,7 @@ struct ParsedFontSpec {
 
 ParsedFontSpec parseFontSpec(const std::string &spec) {
   if (spec.empty()) {
-    return {"Monospace", 16.0};
+    return {.family = "Monospace", .pointSize = 16.0};
   }
 
   // Find last space which usually separates family from size
@@ -29,14 +29,14 @@ ParsedFontSpec parseFontSpec(const std::string &spec) {
       std::size_t idx = 0;
       double sz       = std::stod(spec.substr(lastSpace + 1), &idx);
       if (idx == spec.size() - (lastSpace + 1) && sz > 0.0) {
-        return {spec.substr(0, lastSpace), sz};
+        return {.family = spec.substr(0, lastSpace), .pointSize = sz};
       }
     } catch (...) {
       // Not a number; treat entire string as family
     }
   }
 
-  return {spec, 16.0};
+  return {.family = spec, .pointSize = 16.0};
 }
 
 std::string resolveFontPath(const std::string &spec) {

@@ -702,7 +702,7 @@ void IdentityTorrentPlugin::broadcastIdentity(const IdentityEntry &entry,
 IdentityNetworkController::IdentityNetworkController() = default;
 
 IdentityNetworkController::IdentityNetworkController(Options options)
-    : options_(std::move(options)) {}
+    : options_(options) {}
 
 IdentityNetworkController::~IdentityNetworkController() = default;
 

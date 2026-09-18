@@ -169,7 +169,7 @@ UserPermascroll::~UserPermascroll() {
 }
 
 PrimediaSpan UserPermascroll::append(const std::string_view text) {
-  std::lock_guard lock(appendMutex_);
+  std::scoped_lock lock(appendMutex_);
   return spool_.append(text);
 }
 
@@ -208,31 +208,31 @@ std::uint64_t UserPermascroll::size() const { return spool_.size(); }
 std::string_view UserPermascroll::bytes() const { return spool_.bytes(); }
 
 void UserPermascroll::adopt(const std::string_view data) {
-  std::lock_guard lock(appendMutex_);
+  std::scoped_lock lock(appendMutex_);
   spool_.adopt(data);
 }
 
 void UserPermascroll::clear() {
-  std::lock_guard lock(appendMutex_);
+  std::scoped_lock lock(appendMutex_);
   spool_.clear();
   sealedBytes_ = 0;
   currentScroll_.segments.clear();
 }
 
 Scroll UserPermascroll::currentScroll() const {
-  std::lock_guard lock(appendMutex_);
+  std::scoped_lock lock(appendMutex_);
   return currentScroll_;
 }
 
 std::string UserPermascroll::globalScrollKey() const {
-  std::lock_guard lock(appendMutex_);
+  std::scoped_lock lock(appendMutex_);
   return scrollKey(currentScroll_);
 }
 
 std::optional<ScrollSegment> UserPermascroll::sealIncremental(
     const std::filesystem::path &outputDir, const SignedProvenance &provenance,
     const std::vector<PublishedHoleRecord> &holes) {
-  std::lock_guard lock(appendMutex_);
+  std::scoped_lock lock(appendMutex_);
 
   const auto allBytes = spool_.bytes();
   if (allBytes.size() <= sealedBytes_) {
@@ -273,12 +273,15 @@ std::optional<ScrollSegment> UserPermascroll::sealIncremental(
   }
 
   std::vector<TorrentContent> files;
-  files.push_back(TorrentContent{sealedContentName, wirePayload});
+  files.push_back(
+      TorrentContent{.path = sealedContentName, .data = wirePayload});
   if (!provenance.yaml.empty()) {
-    files.push_back(TorrentContent{provenanceFileName, provenance.yaml});
+    files.push_back(
+        TorrentContent{.path = provenanceFileName, .data = provenance.yaml});
   }
   if (!provenance.signature.empty()) {
-    files.push_back(TorrentContent{provenanceSigName, provenance.signature});
+    files.push_back(TorrentContent{.path = provenanceSigName,
+                                   .data = provenance.signature});
   }
 
   auto made = makeTorrent(files, currentScroll_.salt);
@@ -309,7 +312,7 @@ std::optional<ScrollSegment> UserPermascroll::sealIncremental(
 }
 
 bool UserPermascroll::flush() {
-  std::lock_guard lock(appendMutex_);
+  std::scoped_lock lock(appendMutex_);
   return spool_.flush();
 }
 
@@ -323,7 +326,7 @@ PermascrollRegistry &PermascrollRegistry::instance() {
 std::shared_ptr<UserPermascroll>
 PermascrollRegistry::getOrCreate(const identity::Fingerprint &fingerprint,
                                  const std::filesystem::path &customBaseDir) {
-  std::lock_guard lock(registryMutex_);
+  std::scoped_lock lock(registryMutex_);
   const auto key = fingerprint.toString();
   auto it        = registry_.find(key);
   if (it != registry_.end()) {
@@ -344,7 +347,7 @@ PermascrollRegistry::getOrCreate(const identity::Fingerprint &fingerprint,
 }
 
 std::shared_ptr<UserPermascroll> PermascrollRegistry::defaultUser() {
-  std::lock_guard lock(registryMutex_);
+  std::scoped_lock lock(registryMutex_);
   if (!defaultUser_) {
     UserPermascroll::Config config;
     config.storageDir = resolveDefaultStorageDir("default");
@@ -354,7 +357,7 @@ std::shared_ptr<UserPermascroll> PermascrollRegistry::defaultUser() {
 }
 
 void PermascrollRegistry::clear() {
-  std::lock_guard lock(registryMutex_);
+  std::scoped_lock lock(registryMutex_);
   registry_.clear();
   defaultUser_.reset();
 }

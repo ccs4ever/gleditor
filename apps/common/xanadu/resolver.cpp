@@ -57,7 +57,8 @@ InfoHash DirectoryContentSource::add(const std::string_view torrentFile,
     }
   }
 
-  held.insert_or_assign(hash, Held{std::move(meta), std::move(dataRoot)});
+  held.insert_or_assign(
+      hash, Held{.meta = std::move(meta), .root = std::move(dataRoot)});
   return hash;
 }
 
@@ -116,8 +117,8 @@ VerifiedPieceCache::KeyHash::operator()(const Key &key) const noexcept {
 std::optional<std::string>
 VerifiedPieceCache::get(const InfoHash &torrent,
                         const std::size_t piece) const {
-  const std::lock_guard lock(guard);
-  const auto found = index.find(Key{torrent, piece});
+  const std::scoped_lock lock(guard);
+  const auto found = index.find(Key{.torrent = torrent, .piece = piece});
   if (found == index.end()) {
     counters.misses++;
     return std::nullopt;
@@ -129,8 +130,8 @@ VerifiedPieceCache::get(const InfoHash &torrent,
 
 void VerifiedPieceCache::put(const InfoHash &torrent, const std::size_t piece,
                              const std::string &bytes) {
-  const std::lock_guard lock(guard);
-  const Key key{torrent, piece};
+  const std::scoped_lock lock(guard);
+  const Key key{.torrent = torrent, .piece = piece};
   if (const auto found = index.find(key); found != index.end()) {
     entries.splice(entries.begin(), entries, found->second);
     return;
@@ -157,20 +158,20 @@ void VerifiedPieceCache::evictDownToBudget() {
 }
 
 void VerifiedPieceCache::clear() {
-  const std::lock_guard lock(guard);
+  const std::scoped_lock lock(guard);
   entries.clear();
   index.clear();
   bytesHeld = 0;
 }
 
 void VerifiedPieceCache::setBudgetBytes(const std::size_t bytes) {
-  const std::lock_guard lock(guard);
+  const std::scoped_lock lock(guard);
   budgetBytes = bytes;
   evictDownToBudget();
 }
 
 VerifiedPieceCache::Stats VerifiedPieceCache::stats() const {
-  const std::lock_guard lock(guard);
+  const std::scoped_lock lock(guard);
   auto out   = counters;
   out.pieces = index.size();
   out.bytes  = bytesHeld;

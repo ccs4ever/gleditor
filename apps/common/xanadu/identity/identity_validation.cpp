@@ -4,6 +4,7 @@
  */
 #include "identity_validation.hpp"
 
+#include <algorithm>
 #include <bit>
 #include <cstring>
 #include <libtorrent/hasher.hpp>

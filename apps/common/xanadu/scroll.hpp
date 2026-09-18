@@ -154,9 +154,9 @@ struct TranscopyrightDescriptor {
   bool flatFee{true};
 
   /// Author settlement destination (40-char OpenPGP v4 fingerprint)
-  identity::Fingerprint authorWallet{};
+  identity::Fingerprint authorWallet;
   /// 32-byte Ed25519 PubKey
-  identity::PubKey32 authorPubKey{};
+  identity::PubKey32 authorPubKey;
 
   /// 32-byte Blake3/SHA-256 identifier of the Content Encryption Key (CEK)
   std::array<std::uint8_t, 32> keyId{};
@@ -187,7 +187,7 @@ struct PublishedHoleRecord {
   std::uint64_t at{};
   std::uint64_t length{};
   HoleReason reason{HoleReason::Withheld};
-  std::optional<TranscopyrightDescriptor> transcopyright{};
+  std::optional<TranscopyrightDescriptor> transcopyright;
 
   /// Cryptographic commitment (Blake3 / SHA-256 Merkle root) over the withheld
   /// cleartext
@@ -226,7 +226,7 @@ struct ScrollSegment {
   std::string mimeType{"text/plain;charset=utf-8"};
 
   SegmentKind kind{SegmentKind::Plain};
-  std::optional<PublishedHoleRecord> holeRecord{};
+  std::optional<PublishedHoleRecord> holeRecord;
 
   [[nodiscard]] std::uint64_t end() const noexcept { return at + length; }
   [[nodiscard]] bool covers(const std::uint64_t offset) const noexcept {

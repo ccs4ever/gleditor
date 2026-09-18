@@ -58,11 +58,14 @@ PrimediaSpan vocabularySpanFor(const FormatAttribute attribute) {
   for (const auto candidate : allFormatAttributes) {
     const std::string_view name = formatAttributeName(candidate);
     if (candidate == attribute) {
-      return PrimediaSpan{vocabularyScroll, offset, name.size()};
+      return PrimediaSpan{
+          .scroll = vocabularyScroll, .start = offset, .length = name.size()};
     }
     offset += name.size();
   }
-  return PrimediaSpan{vocabularyScroll, 0, 0}; // unreachable: enum exhausted
+  return PrimediaSpan{.scroll = vocabularyScroll,
+                      .start  = 0,
+                      .length = 0}; // unreachable: enum exhausted
 }
 
 std::optional<std::string> readVocabulary(const PrimediaSpan &span) {

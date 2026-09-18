@@ -96,12 +96,12 @@ enum class TokenKind : std::uint16_t {
 
 struct Token {
   TokenKind kind{TokenKind::EndOfFile};
-  std::string_view text{};
+  std::string_view text;
   SourceLocation location{};
   double floatValue{0.0};
   std::int64_t intValue{0};
   bool isFloat{false};
-  std::string stringValue{};
+  std::string stringValue;
 };
 
 [[nodiscard]] constexpr std::string_view

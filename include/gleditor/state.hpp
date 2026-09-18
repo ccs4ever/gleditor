@@ -268,8 +268,9 @@ struct AppState {
   void showDialog(const render::DiagnosticSeverity severity, std::string title,
                   std::string message) {
     const std::scoped_lock locker(dialogMutex);
-    dialogs.push_back(
-        PendingDialog{severity, std::move(title), std::move(message)});
+    dialogs.push_back(PendingDialog{.severity = severity,
+                                    .title    = std::move(title),
+                                    .message  = std::move(message)});
   }
   struct ViewPerspective : public std::mutex {
     int screenWidth  = 800;

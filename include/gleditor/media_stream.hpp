@@ -48,13 +48,14 @@ struct ByteRange {
   [[nodiscard]] constexpr ByteRange intersect(const ByteRange &other) const {
     const auto from = std::max(start, other.start);
     const auto to   = std::min(end(), other.end());
-    return to > from ? ByteRange{from, to - from} : ByteRange{from, 0};
+    return to > from ? ByteRange{.start = from, .length = to - from}
+                     : ByteRange{.start = from, .length = 0};
   }
 
   [[nodiscard]] constexpr ByteRange slice(const std::uint64_t offset,
                                           const std::uint64_t count) const {
     const auto from = std::min(offset, length);
-    return {start + from, std::min(count, length - from)};
+    return {.start = start + from, .length = std::min(count, length - from)};
   }
 
   constexpr bool operator==(const ByteRange &) const = default;

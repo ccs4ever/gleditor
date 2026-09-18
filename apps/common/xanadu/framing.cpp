@@ -13,8 +13,9 @@ PageStackExtent pageStackExtent(const std::vector<float> &pageHeightsWorld,
     return {};
   }
   const auto lastIndex = pageHeightsWorld.size() - 1;
-  return PageStackExtent{pageHeightsWorld.front() / 2.0F,
-                         -(pageGapWorld * static_cast<float>(lastIndex)) -
+  return PageStackExtent{.topWorld = pageHeightsWorld.front() / 2.0F,
+                         .bottomWorld =
+                             -(pageGapWorld * static_cast<float>(lastIndex)) -
                              (pageHeightsWorld.back() / 2.0F)};
 }
 

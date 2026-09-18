@@ -365,9 +365,9 @@ inline constexpr std::uint32_t tagDocBits  = 14;
 inline constexpr std::uint32_t tagPageBits = 14;
 
 /// Pack the identity word written to Doc::VBORow::tag[0].
-inline constexpr std::uint32_t packTagIdentity(const std::uint32_t kind,
-                                               const std::uint32_t docIndex,
-                                               const std::uint32_t pageIndex) {
+constexpr std::uint32_t packTagIdentity(const std::uint32_t kind,
+                                        const std::uint32_t docIndex,
+                                        const std::uint32_t pageIndex) {
   return ((kind & ((1U << tagKindBits) - 1U)) << (tagDocBits + tagPageBits)) |
          ((docIndex & ((1U << tagDocBits) - 1U)) << tagPageBits) |
          (pageIndex & ((1U << tagPageBits) - 1U));

@@ -55,7 +55,8 @@ struct Config {
    *        settings file is a passphrase somebody else can read.
    */
   [[nodiscard]] SigningOptions signing(std::string passphrase = {}) const {
-    return SigningOptions{gpgHome, std::move(passphrase)};
+    return SigningOptions{.gpgHome    = gpgHome,
+                          .passphrase = std::move(passphrase)};
   }
 };
 

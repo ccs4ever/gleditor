@@ -65,8 +65,9 @@ bool startsWith(const std::string &str,
 
 namespace gleditor {
 
-MagicMimeDetector::MagicMimeDetector() {
-  cookie = magic_open(MAGIC_MIME_TYPE | MAGIC_SYMLINK);
+MagicMimeDetector::MagicMimeDetector()
+    : cookie(magic_open(MAGIC_MIME_TYPE | MAGIC_SYMLINK)) {
+
   if (cookie != nullptr) {
     if (magic_load(static_cast<magic_t>(cookie), nullptr) != 0) {
       magic_close(static_cast<magic_t>(cookie));
@@ -99,19 +100,19 @@ std::string MagicMimeDetector::identifyFile(const std::string &path) const {
 }
 
 bool MagicMimeDetector::isAudioMime(const std::string_view mime) {
-  return mime.find("audio/") != std::string_view::npos;
+  return mime.contains("audio/");
 }
 
 bool MagicMimeDetector::isVideoMime(const std::string_view mime) {
-  return mime.find("video/") != std::string_view::npos;
+  return mime.contains("video/");
 }
 
 bool MagicMimeDetector::isImageMime(const std::string_view mime) {
-  return mime.find("image/") != std::string_view::npos;
+  return mime.contains("image/");
 }
 
 bool MagicMimeDetector::isPdfMime(const std::string_view mime) {
-  return mime.find("application/pdf") != std::string_view::npos;
+  return mime.contains("application/pdf");
 }
 
 bool MagicMimeDetector::isMediaMime(const std::string_view mime) {
@@ -173,8 +174,8 @@ std::string encodeRgbAsPng(const std::vector<unsigned char> &rgb,
   std::string png;
   if (SDL_IOStream *io = SDL_IOFromDynamicMem(); nullptr != io) {
     if (IMG_SavePNG_IO(surface, io, false)) {
-      const auto size  = SDL_GetIOSize(io);
-      auto *const data = static_cast<const char *>(SDL_GetPointerProperty(
+      const auto size        = SDL_GetIOSize(io);
+      const auto *const data = static_cast<const char *>(SDL_GetPointerProperty(
           SDL_GetIOProperties(io), SDL_PROP_IOSTREAM_DYNAMIC_MEMORY_POINTER,
           nullptr));
       if (nullptr != data && size > 0) {
@@ -311,7 +312,7 @@ private:
       png = decodeOne(str, width, height, colorMap);
     }
     if (!png.empty()) {
-      byPage[currentPage].push_back(PdfPageImage{png, refKey});
+      byPage[currentPage].push_back(PdfPageImage{.png = png, .ref = refKey});
     }
   }
 
@@ -408,11 +409,13 @@ void extractPdfDocument(const poppler::document &doc, PDFDoc *coreDoc,
                 << " yielded neither text nor images -- ingesting as empty\n";
     }
 
-    outPieces.push_back(gleditor::ContentPiece{str, {}, pageImages.empty()});
+    outPieces.push_back(gleditor::ContentPiece{
+        .bytes = str, .mimeType = {}, .pageBreakAfter = pageImages.empty()});
     for (std::size_t imgIdx = 0; imgIdx < pageImages.size(); ++imgIdx) {
       const bool isLastOnPage = (imgIdx + 1 == pageImages.size());
-      gleditor::ContentPiece piece{pageImages[imgIdx].png, "image/png",
-                                   isLastOnPage};
+      gleditor::ContentPiece piece{.bytes          = pageImages[imgIdx].png,
+                                   .mimeType       = "image/png",
+                                   .pageBreakAfter = isLastOnPage};
       if (pageImages[imgIdx].ref.has_value()) {
         const auto &refKey = *pageImages[imgIdx].ref;
         const auto found   = firstPieceIndexForRef.find(refKey);
@@ -483,8 +486,9 @@ void FileTextSource::ensureLoaded() const {
     const MagicMimeDetector magic;
     const auto mime = magic.identifyBuffer(content.data(), content.size());
     piecesCache     = {ContentPiece{
-        content, MagicMimeDetector::isMediaMime(mime) ? mime : std::string{},
-        false}};
+        .bytes    = content,
+        .mimeType = MagicMimeDetector::isMediaMime(mime) ? mime : std::string{},
+        .pageBreakAfter = false}};
   }
   loaded = true;
 }

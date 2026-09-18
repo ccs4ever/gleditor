@@ -38,12 +38,36 @@ render::VertexLayout Beams::layout() {
   render::VertexLayout out;
   out.stride     = sizeof(Row);
   out.attributes = {
-      {"beamFrom", 0, AttributeType::Float, 3, offsetof(Row, from)},
-      {"beamWidth", 1, AttributeType::Float, 1, offsetof(Row, width)},
-      {"beamTo", 2, AttributeType::Float, 3, offsetof(Row, to)},
-      {"beamColour", 3, AttributeType::UnsignedInt, 1, offsetof(Row, colour)},
-      {"beamTag", 4, AttributeType::UnsignedInt, 1, offsetof(Row, tag)},
-      {"beamAlong", 5, AttributeType::Float, 2, offsetof(Row, along)},
+      {.name       = "beamFrom",
+       .location   = 0,
+       .type       = AttributeType::Float,
+       .components = 3,
+       .offset     = offsetof(Row, from)},
+      {.name       = "beamWidth",
+       .location   = 1,
+       .type       = AttributeType::Float,
+       .components = 1,
+       .offset     = offsetof(Row, width)},
+      {.name       = "beamTo",
+       .location   = 2,
+       .type       = AttributeType::Float,
+       .components = 3,
+       .offset     = offsetof(Row, to)},
+      {.name       = "beamColour",
+       .location   = 3,
+       .type       = AttributeType::UnsignedInt,
+       .components = 1,
+       .offset     = offsetof(Row, colour)},
+      {.name       = "beamTag",
+       .location   = 4,
+       .type       = AttributeType::UnsignedInt,
+       .components = 1,
+       .offset     = offsetof(Row, tag)},
+      {.name       = "beamAlong",
+       .location   = 5,
+       .type       = AttributeType::Float,
+       .components = 2,
+       .offset     = offsetof(Row, along)},
   };
   return out;
 }
@@ -75,12 +99,12 @@ void Beams::clear() { rows.clear(); }
 void Beams::add(const glm::vec3 &from, const glm::vec3 &to, const float width,
                 const std::uint32_t colour, const std::uint32_t tag,
                 const float alongFrom, const float alongTo) {
-  rows.push_back(Row{{from.x, from.y, from.z},
-                     width,
-                     {to.x, to.y, to.z},
-                     colour,
-                     tag,
-                     {alongFrom, alongTo}});
+  rows.push_back(Row{.from   = {from.x, from.y, from.z},
+                     .width  = width,
+                     .to     = {to.x, to.y, to.z},
+                     .colour = colour,
+                     .tag    = tag,
+                     .along  = {alongFrom, alongTo}});
 }
 
 void Beams::addPath(const std::span<const glm::vec3> through, const float width,
@@ -132,7 +156,8 @@ void Beams::draw(RenderState &state, const glm::mat4 &transform,
   // it filled in whether or not the shader reads from it. Binding the atlas is
   // what fills it.
   state.device->bindAtlasTexture(state.glyphCache.textureHandle());
-  const render::DrawUniforms uniforms{toArray(transform), opacity, identity};
+  const render::DrawUniforms uniforms{
+      .mvp = toArray(transform), .opacity = opacity, .identity = identity};
   state.device->drawGlyphs(uniforms, pool->buffer(), pool->byteOffset(backing),
                            committedRows);
 }

@@ -274,7 +274,7 @@ struct Predicate {
   PredicateOp op{PredicateOp::Equal};
   double numericThreshold{0.0};
   double numericUpperBound{0.0}; ///< For PredicateOp::Between.
-  std::string textValue{};
+  std::string textValue;
   std::uint64_t textHash{0};
   std::uint64_t bloomMask{0};
 
@@ -354,19 +354,16 @@ struct Predicate {
     case PredicateOp::LessThanOrEqual:
       return wid.minScalar <= numericThreshold;
     case PredicateOp::Equal:
-      return !(numericThreshold < wid.minScalar ||
-               numericThreshold > wid.maxScalar);
+      return numericThreshold >= wid.minScalar &&
+             numericThreshold <= wid.maxScalar;
     case PredicateOp::NotEqual:
-      return !(wid.minScalar == numericThreshold &&
-               wid.maxScalar == numericThreshold);
+      return wid.minScalar != numericThreshold ||
+             wid.maxScalar != numericThreshold;
     case PredicateOp::Between:
-      return !(wid.maxScalar < numericThreshold ||
-               wid.minScalar > numericUpperBound);
+      return wid.maxScalar >= numericThreshold &&
+             wid.minScalar <= numericUpperBound;
     case PredicateOp::TextEqual:
-      if (0 != bloomMask && (wid.bloomFilter & bloomMask) != bloomMask) {
-        return false;
-      }
-      return true;
+      return !(0 != bloomMask && (wid.bloomFilter & bloomMask) != bloomMask);
     }
     return true;
   }
@@ -518,12 +515,12 @@ private:
                     const std::array<std::int64_t, MaxValence> &sliceMax,
                     std::vector<ArrayCellEntry> &slicedLeaves) const;
 
-  std::optional<ArrayCellEntry>
+  [[nodiscard]] std::optional<ArrayCellEntry>
   subscriptSubtree(std::uint32_t nodeIdx, const ArrayDsp &cumDsp,
                    const std::array<std::int64_t, MaxValence> &coords) const;
 
-  std::vector<Crum> nodes_{};
-  std::vector<ArrayCellEntry> leaves_{};
+  std::vector<Crum> nodes_;
+  std::vector<ArrayCellEntry> leaves_;
   std::uint32_t rootIndex_{0};
   std::uint8_t valence_{1};
   ArrayWid cachedRootSummary_{};

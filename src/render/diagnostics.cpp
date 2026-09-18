@@ -54,7 +54,7 @@ void DiagnosticSink::record(const DiagnosticSeverity severity,
       // the rest; a driver that has already queued a screenful is not made
       // clearer by the thirty-third message.
       if (undrained.size() < maxUndrained) {
-        undrained.push_back(Diagnostic{severity, text});
+        undrained.push_back(Diagnostic{.severity = severity, .message = text});
       }
       shouldLog = logging;
     }

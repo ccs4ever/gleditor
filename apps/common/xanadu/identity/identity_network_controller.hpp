@@ -44,7 +44,7 @@ namespace xanadu::identity {
  * the author's machine except wrapped under a paying reader's public key.
  */
 struct TranscopyrightOffer {
-  Hash32 keyId{};
+  Hash32 keyId;
   xanadu::TranscopyrightDescriptor descriptor{};
   crypto::Key32 cek{};
 };
@@ -175,7 +175,7 @@ private:
   /// CEK readable here and nowhere else.
   struct PendingPurchase {
     crypto::X25519KeyPair kemKeys{};
-    Fingerprint payerWallet{};
+    Fingerprint payerWallet;
     std::string ticket;
     TcInvoiceResponseMsg invoice{};
   };

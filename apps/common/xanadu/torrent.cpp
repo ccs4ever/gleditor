@@ -239,7 +239,9 @@ Metainfo Metainfo::parse(const std::string_view torrentFile) {
       throw std::runtime_error("torrent: \"length\" is negative");
     }
     meta.entries.push_back(
-        TorrentFile{meta.torrentName, static_cast<std::uint64_t>(length), 0});
+        TorrentFile{.path   = meta.torrentName,
+                    .length = static_cast<std::uint64_t>(length),
+                    .offset = 0});
     offset = static_cast<std::uint64_t>(length);
   } else {
     for (const auto &entry : require(info, "files", "info").asList()) {
@@ -255,7 +257,9 @@ Metainfo Metainfo::parse(const std::string_view torrentFile) {
         path += part.asString();
       }
       meta.entries.push_back(
-          TorrentFile{path, static_cast<std::uint64_t>(length), offset});
+          TorrentFile{.path   = path,
+                      .length = static_cast<std::uint64_t>(length),
+                      .offset = offset});
       offset += static_cast<std::uint64_t>(length);
     }
   }

@@ -18,7 +18,9 @@ Parser::Parser(std::string_view source) : lexer_(source) {
   current_ = lexer_.nextToken();
 }
 
-Parser::Parser(Lexer lexer) : lexer_(lexer) { current_ = lexer_.nextToken(); }
+Parser::Parser(Lexer lexer) : lexer_(std::move(lexer)) {
+  current_ = lexer_.nextToken();
+}
 
 Token Parser::currentToken() { return current_; }
 
@@ -41,7 +43,7 @@ Token Parser::advance() {
   return prev;
 }
 
-bool Parser::check(TokenKind kind) { return current_.kind == kind; }
+bool Parser::check(TokenKind kind) const { return current_.kind == kind; }
 
 bool Parser::match(TokenKind kind) {
   if (check(kind)) {
@@ -515,9 +517,9 @@ ExecutionBlock Parser::parseExecutionBlock() {
 
   while (check(TokenKind::KwFor) || check(TokenKind::KwLet)) {
     if (check(TokenKind::KwFor)) {
-      bindings.push_back(parseForClause());
+      bindings.emplace_back(parseForClause());
     } else {
-      bindings.push_back(parseLetClause());
+      bindings.emplace_back(parseLetClause());
     }
   }
 

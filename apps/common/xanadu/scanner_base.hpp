@@ -26,14 +26,14 @@ struct ScannedNumber {
   bool isFloat{false};
   std::int64_t intValue{0};
   double floatValue{0.0};
-  std::string_view text{};
+  std::string_view text;
 };
 
 struct ScannedString {
   bool success{false};
-  std::string value{};
-  std::string_view text{};
-  std::string errorMessage{};
+  std::string value;
+  std::string_view text;
+  std::string errorMessage;
 };
 
 class ScannerBase {

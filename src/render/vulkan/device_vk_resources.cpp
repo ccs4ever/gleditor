@@ -11,6 +11,7 @@
 #include <fstream>
 #include <stdexcept>
 #include <string>
+#include <utility>
 #include <vector>
 
 namespace render::vulkan {
@@ -287,8 +288,9 @@ TextureHandle DeviceVK::createTextureArray(const int size, const int layers,
   info.sType       = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
   info.imageType   = VK_IMAGE_TYPE_2D;
   info.format      = vkFormat;
-  info.extent      = {static_cast<std::uint32_t>(size),
-                      static_cast<std::uint32_t>(size), 1};
+  info.extent      = {.width  = static_cast<std::uint32_t>(size),
+                      .height = static_cast<std::uint32_t>(size),
+                      .depth  = 1};
   info.mipLevels   = static_cast<std::uint32_t>(record.levels);
   info.arrayLayers = static_cast<std::uint32_t>(layers);
   info.samples     = VK_SAMPLE_COUNT_1_BIT;
@@ -319,15 +321,18 @@ TextureHandle DeviceVK::createTextureArray(const int size, const int layers,
   viewInfo.image            = record.image;
   viewInfo.viewType         = VK_IMAGE_VIEW_TYPE_2D_ARRAY;
   viewInfo.format           = vkFormat;
-  viewInfo.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0,
-                               static_cast<std::uint32_t>(record.levels), 0,
-                               static_cast<std::uint32_t>(layers)};
+  viewInfo.subresourceRange = {
+      .aspectMask     = VK_IMAGE_ASPECT_COLOR_BIT,
+      .baseMipLevel   = 0,
+      .levelCount     = static_cast<std::uint32_t>(record.levels),
+      .baseArrayLayer = 0,
+      .layerCount     = static_cast<std::uint32_t>(layers)};
   check(vkCreateImageView(device, &viewInfo, nullptr, &record.view),
         "vkCreateImageView (atlas)");
 
   // Move the whole array to the layout the shader samples from once, up front;
   // uploads transition individual layers in and out of it as needed.
-  const auto commands = beginOneShot();
+  auto *const commands = beginOneShot();
   VkImageMemoryBarrier barrier{};
   barrier.sType               = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
   barrier.oldLayout           = VK_IMAGE_LAYOUT_UNDEFINED;
@@ -335,11 +340,14 @@ TextureHandle DeviceVK::createTextureArray(const int size, const int layers,
   barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
   barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
   barrier.image               = record.image;
-  barrier.subresourceRange    = {VK_IMAGE_ASPECT_COLOR_BIT, 0,
-                                 static_cast<std::uint32_t>(record.levels), 0,
-                                 static_cast<std::uint32_t>(layers)};
-  barrier.srcAccessMask       = 0;
-  barrier.dstAccessMask       = VK_ACCESS_SHADER_READ_BIT;
+  barrier.subresourceRange = {.aspectMask   = VK_IMAGE_ASPECT_COLOR_BIT,
+                              .baseMipLevel = 0,
+                              .levelCount =
+                                  static_cast<std::uint32_t>(record.levels),
+                              .baseArrayLayer = 0,
+                              .layerCount = static_cast<std::uint32_t>(layers)};
+  barrier.srcAccessMask    = 0;
+  barrier.dstAccessMask    = VK_ACCESS_SHADER_READ_BIT;
   vkCmdPipelineBarrier(commands, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
                        VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT, 0, 0, nullptr, 0,
                        nullptr, 1, &barrier);
@@ -377,7 +385,7 @@ void DeviceVK::generateMipmaps(const TextureHandle texture) {
   }
 
   ensureIdleForMutation();
-  const auto commands = beginOneShot();
+  auto *const commands = beginOneShot();
 
   VkImageMemoryBarrier barrier{};
   barrier.sType               = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
@@ -385,20 +393,23 @@ void DeviceVK::generateMipmaps(const TextureHandle texture) {
   barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
   barrier.image               = record.image;
 
-  const auto transition = [&](const std::uint32_t level,
-                              const VkImageLayout from, const VkImageLayout to,
-                              const VkAccessFlags srcAccess,
-                              const VkAccessFlags dstAccess,
-                              const VkPipelineStageFlags srcStage,
-                              const VkPipelineStageFlags dstStage) {
-    barrier.oldLayout        = from;
-    barrier.newLayout        = to;
-    barrier.srcAccessMask    = srcAccess;
-    barrier.dstAccessMask    = dstAccess;
-    barrier.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, level, 1, 0, layers};
-    vkCmdPipelineBarrier(commands, srcStage, dstStage, 0, 0, nullptr, 0,
-                         nullptr, 1, &barrier);
-  };
+  const auto transition =
+      [&](const std::uint32_t level, const VkImageLayout from,
+          const VkImageLayout to, const VkAccessFlags srcAccess,
+          const VkAccessFlags dstAccess, const VkPipelineStageFlags srcStage,
+          const VkPipelineStageFlags dstStage) {
+        barrier.oldLayout        = from;
+        barrier.newLayout        = to;
+        barrier.srcAccessMask    = srcAccess;
+        barrier.dstAccessMask    = dstAccess;
+        barrier.subresourceRange = {.aspectMask     = VK_IMAGE_ASPECT_COLOR_BIT,
+                                    .baseMipLevel   = level,
+                                    .levelCount     = 1,
+                                    .baseArrayLayer = 0,
+                                    .layerCount     = layers};
+        vkCmdPipelineBarrier(commands, srcStage, dstStage, 0, 0, nullptr, 0,
+                             nullptr, 1, &barrier);
+      };
 
   // Level zero holds the uploaded glyphs and is being sampled; the rest hold
   // whatever the last generation left and are about to be overwritten.
@@ -418,10 +429,16 @@ void DeviceVK::generateMipmaps(const TextureHandle texture) {
                VK_PIPELINE_STAGE_TRANSFER_BIT);
 
     VkImageBlit blit{};
-    blit.srcSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, level - 1, 0, layers};
-    blit.srcOffsets[1]  = {extent, extent, 1};
-    blit.dstSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, level, 0, layers};
-    blit.dstOffsets[1]  = {next, next, 1};
+    blit.srcSubresource = {.aspectMask     = VK_IMAGE_ASPECT_COLOR_BIT,
+                           .mipLevel       = level - 1,
+                           .baseArrayLayer = 0,
+                           .layerCount     = layers};
+    blit.srcOffsets[1]  = {.x = extent, .y = extent, .z = 1};
+    blit.dstSubresource = {.aspectMask     = VK_IMAGE_ASPECT_COLOR_BIT,
+                           .mipLevel       = level,
+                           .baseArrayLayer = 0,
+                           .layerCount     = layers};
+    blit.dstOffsets[1]  = {.x = next, .y = next, .z = 1};
     vkCmdBlitImage(commands, record.image, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
                    record.image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &blit,
                    VK_FILTER_LINEAR);
@@ -440,9 +457,12 @@ void DeviceVK::generateMipmaps(const TextureHandle texture) {
   barrier.newLayout        = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
   barrier.srcAccessMask    = VK_ACCESS_TRANSFER_READ_BIT;
   barrier.dstAccessMask    = VK_ACCESS_SHADER_READ_BIT;
-  barrier.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0,
-                              static_cast<std::uint32_t>(record.levels), 0,
-                              layers};
+  barrier.subresourceRange = {.aspectMask   = VK_IMAGE_ASPECT_COLOR_BIT,
+                              .baseMipLevel = 0,
+                              .levelCount =
+                                  static_cast<std::uint32_t>(record.levels),
+                              .baseArrayLayer = 0,
+                              .layerCount     = layers};
   vkCmdPipelineBarrier(commands, VK_PIPELINE_STAGE_TRANSFER_BIT,
                        VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT, 0, 0, nullptr, 0,
                        nullptr, 1, &barrier);
@@ -506,15 +526,19 @@ void DeviceVK::updateTextureLayer(const TextureHandle texture, const int layer,
     const auto chunk = stagingStream->allocate(expected, 4);
     std::memcpy(chunk.ptr, data.data(), expected);
 
-    const auto commands = beginOneShot();
+    auto *const commands = beginOneShot();
 
     VkImageMemoryBarrier barrier{};
     barrier.sType               = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
     barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
     barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
     barrier.image               = it->second.image;
-    barrier.subresourceRange    = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1,
-                                   static_cast<std::uint32_t>(layer), 1};
+    barrier.subresourceRange    = {.aspectMask   = VK_IMAGE_ASPECT_COLOR_BIT,
+                                   .baseMipLevel = 0,
+                                   .levelCount   = 1,
+                                   .baseArrayLayer =
+                                       static_cast<std::uint32_t>(layer),
+                                   .layerCount = 1};
 
     barrier.oldLayout     = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
     barrier.newLayout     = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
@@ -528,11 +552,15 @@ void DeviceVK::updateTextureLayer(const TextureHandle texture, const int layer,
     region.bufferOffset      = static_cast<VkDeviceSize>(chunk.offset);
     region.bufferRowLength   = 0; // tightly packed
     region.bufferImageHeight = 0;
-    region.imageSubresource  = {VK_IMAGE_ASPECT_COLOR_BIT, 0,
-                                static_cast<std::uint32_t>(layer), 1};
-    region.imageOffset       = {xOffset, yOffset, 0};
-    region.imageExtent       = {static_cast<std::uint32_t>(width),
-                                static_cast<std::uint32_t>(height), 1};
+    region.imageSubresource  = {.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
+                                .mipLevel   = 0,
+                                .baseArrayLayer =
+                                    static_cast<std::uint32_t>(layer),
+                                .layerCount = 1};
+    region.imageOffset       = {.x = xOffset, .y = yOffset, .z = 0};
+    region.imageExtent       = {.width  = static_cast<std::uint32_t>(width),
+                                .height = static_cast<std::uint32_t>(height),
+                                .depth  = 1};
     vkCmdCopyBufferToImage(commands, stagingStream->vkBuffer(),
                            it->second.image,
                            VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &region);
@@ -556,15 +584,19 @@ void DeviceVK::updateTextureLayer(const TextureHandle texture, const int layer,
                                     VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
   std::memcpy(staging.mapped, data.data(), expected);
 
-  const auto commands = beginOneShot();
+  auto *const commands = beginOneShot();
 
   VkImageMemoryBarrier barrier{};
   barrier.sType               = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
   barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
   barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
   barrier.image               = it->second.image;
-  barrier.subresourceRange    = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1,
-                                 static_cast<std::uint32_t>(layer), 1};
+  barrier.subresourceRange    = {.aspectMask   = VK_IMAGE_ASPECT_COLOR_BIT,
+                                 .baseMipLevel = 0,
+                                 .levelCount   = 1,
+                                 .baseArrayLayer =
+                                     static_cast<std::uint32_t>(layer),
+                                 .layerCount = 1};
 
   barrier.oldLayout     = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
   barrier.newLayout     = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
@@ -578,11 +610,15 @@ void DeviceVK::updateTextureLayer(const TextureHandle texture, const int layer,
   region.bufferOffset      = 0;
   region.bufferRowLength   = 0; // tightly packed
   region.bufferImageHeight = 0;
-  region.imageSubresource  = {VK_IMAGE_ASPECT_COLOR_BIT, 0,
-                              static_cast<std::uint32_t>(layer), 1};
-  region.imageOffset       = {xOffset, yOffset, 0};
-  region.imageExtent       = {static_cast<std::uint32_t>(width),
-                              static_cast<std::uint32_t>(height), 1};
+  region.imageSubresource  = {.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
+                              .mipLevel   = 0,
+                              .baseArrayLayer =
+                                  static_cast<std::uint32_t>(layer),
+                              .layerCount = 1};
+  region.imageOffset       = {.x = xOffset, .y = yOffset, .z = 0};
+  region.imageExtent       = {.width  = static_cast<std::uint32_t>(width),
+                              .height = static_cast<std::uint32_t>(height),
+                              .depth  = 1};
   vkCmdCopyBufferToImage(commands, staging.buffer, it->second.image,
                          VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &region);
 
@@ -653,10 +689,18 @@ PipelineHandle DeviceVK::createPipeline(const PipelineDesc &desc) {
   // per-draw change costs no descriptor traffic and a recorded frame can hold a
   // different one for every draw.
   const std::array<VkDescriptorSetLayoutBinding, 2> bindings = {
-      VkDescriptorSetLayoutBinding{0, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 1,
-                                   VK_SHADER_STAGE_FRAGMENT_BIT, nullptr},
-      VkDescriptorSetLayoutBinding{1, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-                                   1, VK_SHADER_STAGE_FRAGMENT_BIT, nullptr}};
+      VkDescriptorSetLayoutBinding{.binding = 0,
+                                   .descriptorType =
+                                       VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,
+                                   .descriptorCount = 1,
+                                   .stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT,
+                                   .pImmutableSamplers = nullptr},
+      VkDescriptorSetLayoutBinding{
+          .binding            = 1,
+          .descriptorType     = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+          .descriptorCount    = 1,
+          .stageFlags         = VK_SHADER_STAGE_FRAGMENT_BIT,
+          .pImmutableSamplers = nullptr}};
 
   VkDescriptorSetLayoutCreateInfo setLayoutInfo{};
   setLayoutInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
@@ -680,9 +724,9 @@ PipelineHandle DeviceVK::createPipeline(const PipelineDesc &desc) {
   check(vkCreatePipelineLayout(device, &layoutInfo, nullptr, &record.layout),
         "vkCreatePipelineLayout");
 
-  const auto vertModule = createShaderModule(
+  auto *const vertModule = createShaderModule(
       readSpirv(desc.spirvDir + "/" + desc.shaderName + ".vert.spv"));
-  const auto fragModule = createShaderModule(
+  auto *const fragModule = createShaderModule(
       readSpirv(desc.spirvDir + "/" + desc.shaderName + ".frag.spv"));
 
   std::array<VkPipelineShaderStageCreateInfo, 2> stages{};
@@ -706,9 +750,10 @@ PipelineHandle DeviceVK::createPipeline(const PipelineDesc &desc) {
   attributes.reserve(desc.layout.attributes.size());
   for (const auto &attribute : desc.layout.attributes) {
     attributes.push_back(VkVertexInputAttributeDescription{
-        attribute.location, 0,
-        attributeFormat(attribute.type, attribute.components),
-        attribute.offset});
+        .location = attribute.location,
+        .binding  = 0,
+        .format   = attributeFormat(attribute.type, attribute.components),
+        .offset   = attribute.offset});
   }
 
   VkPipelineVertexInputStateCreateInfo vertexInput{};

@@ -61,7 +61,7 @@ GifDecoder::decode(const std::span<const std::uint8_t> bytes) {
     return nullptr;
   }
 
-  MemoryReader reader{bytes.data(), bytes.size(), 0};
+  MemoryReader reader{.data = bytes.data(), .size = bytes.size(), .offset = 0};
   int err                = 0;
   GifFileType *const gif = DGifOpen(&reader, gifMemoryRead, &err);
   if (nullptr == gif) {
@@ -175,9 +175,9 @@ const GifFrame &GifDecoder::frameAt(const float seconds) const noexcept {
   }
 
   // Linear scan or binary search through frame timestamps
-  for (std::size_t i = 0; i < frames_.size(); ++i) {
-    if (seconds < frames_[i].timestampSeconds + frames_[i].durationSeconds) {
-      return frames_[i];
+  for (const auto &frame : frames_) {
+    if (seconds < frame.timestampSeconds + frame.durationSeconds) {
+      return frame;
     }
   }
   return frames_.back();

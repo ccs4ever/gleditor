@@ -60,7 +60,8 @@ struct alignas(64) CompactOpNode {
   std::uint64_t value{0};
 
   [[nodiscard]] PrimediaSpan span() const {
-    return PrimediaSpan{scrollId, spanStart, spanLength};
+    return PrimediaSpan{
+        .scroll = scrollId, .start = spanStart, .length = spanLength};
   }
 
   void setSpan(const PrimediaSpan &s) {

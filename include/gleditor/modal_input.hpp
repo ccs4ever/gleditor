@@ -22,6 +22,7 @@
 #include <algorithm>
 #include <cstdint>
 #include <optional>
+#include <ranges>
 #include <string>
 #include <utility>
 #include <vector>
@@ -147,8 +148,8 @@ public:
   void remove(ModalInput *modal) { std::erase(modals_, modal); }
 
   [[nodiscard]] bool grabbing() const override {
-    for (auto it = modals_.rbegin(); it != modals_.rend(); ++it) {
-      if (*it != nullptr && (*it)->grabbing()) {
+    for (auto *modal : std::views::reverse(modals_)) {
+      if (modal != nullptr && modal->grabbing()) {
         return true;
       }
     }
@@ -156,27 +157,27 @@ public:
   }
 
   bool keyPressed(const Key key, const KeyMods mods) override {
-    for (auto it = modals_.rbegin(); it != modals_.rend(); ++it) {
-      if (*it != nullptr && (*it)->grabbing()) {
-        return (*it)->keyPressed(key, mods);
+    for (auto &modal : std::views::reverse(modals_)) {
+      if (modal != nullptr && modal->grabbing()) {
+        return modal->keyPressed(key, mods);
       }
     }
     return false;
   }
 
   void textTyped(const std::string &utf8) override {
-    for (auto it = modals_.rbegin(); it != modals_.rend(); ++it) {
-      if (*it != nullptr && (*it)->grabbing()) {
-        (*it)->textTyped(utf8);
+    for (auto &modal : std::views::reverse(modals_)) {
+      if (modal != nullptr && modal->grabbing()) {
+        modal->textTyped(utf8);
         return;
       }
     }
   }
 
   [[nodiscard]] std::optional<InputArea> textArea() const override {
-    for (auto it = modals_.rbegin(); it != modals_.rend(); ++it) {
-      if (*it != nullptr && (*it)->grabbing()) {
-        return (*it)->textArea();
+    for (auto *modal : std::views::reverse(modals_)) {
+      if (modal != nullptr && modal->grabbing()) {
+        return modal->textArea();
       }
     }
     return std::nullopt;

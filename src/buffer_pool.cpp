@@ -145,7 +145,10 @@ BufferPool::Allocation BufferPool::reserve(const std::uint32_t rows) {
   // does not cost a move. See slackFor.
   const auto room = rows + slackFor(rows);
   const Allocation allocation{nextAllocationId++};
-  placements.emplace(allocation.id, Placement{takeRun(room), rows, room, {}});
+  placements.emplace(allocation.id, Placement{.rowOffset = takeRun(room),
+                                              .rowCount  = rows,
+                                              .roomRows  = room,
+                                              .erased    = {}});
   return allocation;
 }
 

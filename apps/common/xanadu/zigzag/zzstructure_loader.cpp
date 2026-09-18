@@ -28,7 +28,8 @@ using zzcore::ExplicitLink;
 
 std::unexpected<LoadError> fail(const LoadError::Kind kind, std::string message,
                                 std::string path) {
-  return std::unexpected(LoadError{kind, std::move(message), std::move(path)});
+  return std::unexpected(LoadError{
+      .kind = kind, .message = std::move(message), .path = std::move(path)});
 }
 
 std::string str(const c4::csubstr s) {
@@ -172,10 +173,16 @@ Cell readCell(const ryml::ConstNodeRef &cellNode,
 
     cell.dimensions[dimName] = links;
     if (links.pos != 0) {
-      explicitLinks.push_back({cell.id, dimName, DimVector::POS, links.pos});
+      explicitLinks.push_back({.from      = cell.id,
+                               .dimension = dimName,
+                               .dir       = DimVector::POS,
+                               .target    = links.pos});
     }
     if (links.neg != 0) {
-      explicitLinks.push_back({cell.id, dimName, DimVector::NEG, links.neg});
+      explicitLinks.push_back({.from      = cell.id,
+                               .dimension = dimName,
+                               .dir       = DimVector::NEG,
+                               .target    = links.neg});
     }
   }
 
@@ -287,7 +294,7 @@ void readSceneMeta(const ryml::ConstNodeRef &structure,
 void reportDiagnostics(const Diagnostics &diagnostics,
                        const std::string_view path) {
   for (const auto &entry : diagnostics.entries()) {
-    const auto prefix =
+    const auto *const prefix =
         entry.severity == zzcore::Severity::Error ? "error" : "warning";
     std::cerr << std::format("zzstructure [{}]: {} ({})\n", prefix,
                              entry.message, path);

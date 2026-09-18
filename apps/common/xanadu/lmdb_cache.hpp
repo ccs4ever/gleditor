@@ -172,8 +172,9 @@ public:
       return false;
     }
 
-    const auto pkey = PieceKey{hash.bytes, piece_index};
-    MDB_val k{sizeof(pkey), const_cast<PieceKey *>(&pkey)};
+    const auto pkey = PieceKey{.hash = hash.bytes, .piece_index = piece_index};
+    MDB_val k{.mv_size = sizeof(pkey),
+              .mv_data = const_cast<PieceKey *>(&pkey)};
 
     // Check if piece already exists: if so, copy buffer and increment refcount
     MDB_val existing_v{};
@@ -183,7 +184,7 @@ public:
       std::memcpy(buf.data(), existing_v.mv_data, existing_v.mv_size);
       auto *hdr = reinterpret_cast<TextHeader *>(buf.data());
       hdr->ref_count += initial_ref_count;
-      MDB_val update_v{buf.size(), buf.data()};
+      MDB_val update_v{.mv_size = buf.size(), .mv_data = buf.data()};
       mdb_put(txn, dbi_pieces_, &k, &update_v, 0);
       return mdb_txn_commit(txn) == MDB_SUCCESS;
     }
@@ -194,7 +195,7 @@ public:
     hdr->length    = static_cast<std::uint32_t>(bytes.size());
     std::memcpy(buffer.data() + sizeof(TextHeader), bytes.data(), bytes.size());
 
-    MDB_val v{buffer.size(), buffer.data()};
+    MDB_val v{.mv_size = buffer.size(), .mv_data = buffer.data()};
     if (mdb_put(txn, dbi_pieces_, &k, &v, 0) != MDB_SUCCESS) {
       mdb_txn_abort(txn);
       return false;
@@ -214,8 +215,9 @@ public:
       return false;
     }
 
-    const auto pkey = PieceKey{hash.bytes, piece_index};
-    MDB_val k{sizeof(pkey), const_cast<PieceKey *>(&pkey)};
+    const auto pkey = PieceKey{.hash = hash.bytes, .piece_index = piece_index};
+    MDB_val k{.mv_size = sizeof(pkey),
+              .mv_data = const_cast<PieceKey *>(&pkey)};
     MDB_val v{};
 
     if (mdb_get(txn, dbi_pieces_, &k, &v) == MDB_SUCCESS &&
@@ -241,8 +243,9 @@ public:
     if (mdb_txn_begin(env_, nullptr, MDB_RDONLY, &txn) != MDB_SUCCESS) {
       return 0;
     }
-    const auto pkey = PieceKey{hash.bytes, piece_index};
-    MDB_val k{sizeof(pkey), const_cast<PieceKey *>(&pkey)};
+    const auto pkey = PieceKey{.hash = hash.bytes, .piece_index = piece_index};
+    MDB_val k{.mv_size = sizeof(pkey),
+              .mv_data = const_cast<PieceKey *>(&pkey)};
     MDB_val v{};
     std::uint32_t count = 0;
     if (mdb_get(txn, dbi_pieces_, &k, &v) == MDB_SUCCESS &&
@@ -267,13 +270,20 @@ public:
       return false;
     }
 
-    const auto vkey = VSpanKey{static_cast<std::uint32_t>(span.scroll), 0,
-                               span.start, span.length};
-    MDB_val k{sizeof(vkey), const_cast<VSpanKey *>(&vkey)};
+    const auto vkey =
+        VSpanKey{.scroll_id = static_cast<std::uint32_t>(span.scroll),
+                 .padding   = 0,
+                 .start     = span.start,
+                 .length    = span.length};
+    MDB_val k{.mv_size = sizeof(vkey),
+              .mv_data = const_cast<VSpanKey *>(&vkey)};
 
-    const auto vrec =
-        VSpanRecord{hash.bytes, piece_index, chunk_offset, length};
-    MDB_val v{sizeof(vrec), const_cast<VSpanRecord *>(&vrec)};
+    const auto vrec = VSpanRecord{.hash         = hash.bytes,
+                                  .piece_index  = piece_index,
+                                  .chunk_offset = chunk_offset,
+                                  .length       = length};
+    MDB_val v{.mv_size = sizeof(vrec),
+              .mv_data = const_cast<VSpanRecord *>(&vrec)};
 
     if (mdb_put(txn, dbi_vspans_, &k, &v, 0) != MDB_SUCCESS) {
       mdb_txn_abort(txn);
@@ -293,9 +303,13 @@ public:
       return false;
     }
 
-    const auto vkey = VSpanKey{static_cast<std::uint32_t>(span.scroll), 0,
-                               span.start, span.length};
-    MDB_val k{sizeof(vkey), const_cast<VSpanKey *>(&vkey)};
+    const auto vkey =
+        VSpanKey{.scroll_id = static_cast<std::uint32_t>(span.scroll),
+                 .padding   = 0,
+                 .start     = span.start,
+                 .length    = span.length};
+    MDB_val k{.mv_size = sizeof(vkey),
+              .mv_data = const_cast<VSpanKey *>(&vkey)};
     MDB_val v{};
 
     if (mdb_get(txn, dbi_vspans_, &k, &v) == MDB_SUCCESS &&
@@ -327,9 +341,12 @@ public:
 
     // 1. Fetch parent virtual record (copy by value!)
     const auto parent_k =
-        VSpanKey{static_cast<std::uint32_t>(parent_span.scroll), 0,
-                 parent_span.start, parent_span.length};
-    MDB_val pk{sizeof(parent_k), const_cast<VSpanKey *>(&parent_k)};
+        VSpanKey{.scroll_id = static_cast<std::uint32_t>(parent_span.scroll),
+                 .padding   = 0,
+                 .start     = parent_span.start,
+                 .length    = parent_span.length};
+    MDB_val pk{.mv_size = sizeof(parent_k),
+               .mv_data = const_cast<VSpanKey *>(&parent_k)};
     MDB_val pv{};
     if (mdb_get(txn, dbi_vspans_, &pk, &pv) != MDB_SUCCESS ||
         pv.mv_size != sizeof(VSpanRecord)) {
@@ -339,8 +356,10 @@ public:
     const auto parent_rec = *static_cast<const VSpanRecord *>(pv.mv_data);
 
     // 2. Increment backing piece ref_count (copy buffer!)
-    const auto pkey = PieceKey{parent_rec.hash, parent_rec.piece_index};
-    MDB_val piecek{sizeof(pkey), const_cast<PieceKey *>(&pkey)};
+    const auto pkey = PieceKey{.hash        = parent_rec.hash,
+                               .piece_index = parent_rec.piece_index};
+    MDB_val piecek{.mv_size = sizeof(pkey),
+                   .mv_data = const_cast<PieceKey *>(&pkey)};
     MDB_val piecev{};
     if (mdb_get(txn, dbi_pieces_, &piecek, &piecev) != MDB_SUCCESS ||
         piecev.mv_size < sizeof(TextHeader)) {
@@ -351,7 +370,7 @@ public:
     std::memcpy(piece_buf.data(), piecev.mv_data, piecev.mv_size);
     auto *hdr = reinterpret_cast<TextHeader *>(piece_buf.data());
     hdr->ref_count++;
-    MDB_val update_v{piece_buf.size(), piece_buf.data()};
+    MDB_val update_v{.mv_size = piece_buf.size(), .mv_data = piece_buf.data()};
     mdb_put(txn, dbi_pieces_, &piecek, &update_v, 0);
 
     // 3. Register subspan record with calculated offset
@@ -359,13 +378,20 @@ public:
         static_cast<std::uint32_t>(subspan.start - parent_span.start);
     const auto new_offset = parent_rec.chunk_offset + offset_delta;
     const auto sub_rec =
-        VSpanRecord{parent_rec.hash, parent_rec.piece_index, new_offset,
-                    static_cast<std::uint32_t>(subspan.length)};
+        VSpanRecord{.hash         = parent_rec.hash,
+                    .piece_index  = parent_rec.piece_index,
+                    .chunk_offset = new_offset,
+                    .length       = static_cast<std::uint32_t>(subspan.length)};
 
-    const auto sub_k = VSpanKey{static_cast<std::uint32_t>(subspan.scroll), 0,
-                                subspan.start, subspan.length};
-    MDB_val subk_val{sizeof(sub_k), const_cast<VSpanKey *>(&sub_k)};
-    MDB_val subv_val{sizeof(sub_rec), const_cast<VSpanRecord *>(&sub_rec)};
+    const auto sub_k =
+        VSpanKey{.scroll_id = static_cast<std::uint32_t>(subspan.scroll),
+                 .padding   = 0,
+                 .start     = subspan.start,
+                 .length    = subspan.length};
+    MDB_val subk_val{.mv_size = sizeof(sub_k),
+                     .mv_data = const_cast<VSpanKey *>(&sub_k)};
+    MDB_val subv_val{.mv_size = sizeof(sub_rec),
+                     .mv_data = const_cast<VSpanRecord *>(&sub_rec)};
 
     if (mdb_put(txn, dbi_vspans_, &subk_val, &subv_val, 0) != MDB_SUCCESS) {
       mdb_txn_abort(txn);
@@ -388,12 +414,19 @@ public:
       return false;
     }
 
-    const auto ext_k = ExtSpanKey{hash.bytes, 0, stream_offset, length};
-    MDB_val k{sizeof(ext_k), const_cast<ExtSpanKey *>(&ext_k)};
+    const auto ext_k = ExtSpanKey{.hash          = hash.bytes,
+                                  .padding       = 0,
+                                  .stream_offset = stream_offset,
+                                  .length        = length};
+    MDB_val k{.mv_size = sizeof(ext_k),
+              .mv_data = const_cast<ExtSpanKey *>(&ext_k)};
 
-    const auto vrec = VSpanRecord{hash.bytes, piece_index, chunk_offset,
-                                  static_cast<std::uint32_t>(length)};
-    MDB_val v{sizeof(vrec), const_cast<VSpanRecord *>(&vrec)};
+    const auto vrec = VSpanRecord{.hash         = hash.bytes,
+                                  .piece_index  = piece_index,
+                                  .chunk_offset = chunk_offset,
+                                  .length = static_cast<std::uint32_t>(length)};
+    MDB_val v{.mv_size = sizeof(vrec),
+              .mv_data = const_cast<VSpanRecord *>(&vrec)};
 
     if (mdb_put(txn, dbi_ext_spans_, &k, &v, 0) != MDB_SUCCESS) {
       mdb_txn_abort(txn);
@@ -415,8 +448,12 @@ public:
       return false;
     }
 
-    const auto ext_k = ExtSpanKey{hash.bytes, 0, stream_offset, length};
-    MDB_val k{sizeof(ext_k), const_cast<ExtSpanKey *>(&ext_k)};
+    const auto ext_k = ExtSpanKey{.hash          = hash.bytes,
+                                  .padding       = 0,
+                                  .stream_offset = stream_offset,
+                                  .length        = length};
+    MDB_val k{.mv_size = sizeof(ext_k),
+              .mv_data = const_cast<ExtSpanKey *>(&ext_k)};
     MDB_val v{};
 
     if (mdb_get(txn, dbi_ext_spans_, &k, &v) == MDB_SUCCESS &&
@@ -457,9 +494,13 @@ public:
       return false;
     }
 
-    const auto vkey = VSpanKey{static_cast<std::uint32_t>(span.scroll), 0,
-                               span.start, span.length};
-    MDB_val k{sizeof(vkey), const_cast<VSpanKey *>(&vkey)};
+    const auto vkey =
+        VSpanKey{.scroll_id = static_cast<std::uint32_t>(span.scroll),
+                 .padding   = 0,
+                 .start     = span.start,
+                 .length    = span.length};
+    MDB_val k{.mv_size = sizeof(vkey),
+              .mv_data = const_cast<VSpanKey *>(&vkey)};
     MDB_val v{};
 
     if (mdb_get(txn, dbi_vspans_, &k, &v) != MDB_SUCCESS ||
@@ -469,8 +510,10 @@ public:
     }
 
     const auto *vrec = static_cast<const VSpanRecord *>(v.mv_data);
-    const auto pkey  = PieceKey{vrec->hash, vrec->piece_index};
-    MDB_val piece_k{sizeof(pkey), const_cast<PieceKey *>(&pkey)};
+    const auto pkey =
+        PieceKey{.hash = vrec->hash, .piece_index = vrec->piece_index};
+    MDB_val piece_k{.mv_size = sizeof(pkey),
+                    .mv_data = const_cast<PieceKey *>(&pkey)};
     MDB_val piece_v{};
 
     if (mdb_get(txn, dbi_pieces_, &piece_k, &piece_v) != MDB_SUCCESS ||
@@ -515,8 +558,12 @@ public:
       return false;
     }
 
-    const auto ext_k = ExtSpanKey{hash.bytes, 0, stream_offset, length};
-    MDB_val k{sizeof(ext_k), const_cast<ExtSpanKey *>(&ext_k)};
+    const auto ext_k = ExtSpanKey{.hash          = hash.bytes,
+                                  .padding       = 0,
+                                  .stream_offset = stream_offset,
+                                  .length        = length};
+    MDB_val k{.mv_size = sizeof(ext_k),
+              .mv_data = const_cast<ExtSpanKey *>(&ext_k)};
     MDB_val v{};
 
     if (mdb_get(txn, dbi_ext_spans_, &k, &v) != MDB_SUCCESS ||
@@ -526,8 +573,10 @@ public:
     }
 
     const auto *vrec = static_cast<const VSpanRecord *>(v.mv_data);
-    const auto pkey  = PieceKey{vrec->hash, vrec->piece_index};
-    MDB_val piece_k{sizeof(pkey), const_cast<PieceKey *>(&pkey)};
+    const auto pkey =
+        PieceKey{.hash = vrec->hash, .piece_index = vrec->piece_index};
+    MDB_val piece_k{.mv_size = sizeof(pkey),
+                    .mv_data = const_cast<PieceKey *>(&pkey)};
     MDB_val piece_v{};
 
     if (mdb_get(txn, dbi_pieces_, &piece_k, &piece_v) != MDB_SUCCESS ||
@@ -562,9 +611,13 @@ public:
       return false;
     }
 
-    const auto vkey = VSpanKey{static_cast<std::uint32_t>(span.scroll), 0,
-                               span.start, span.length};
-    MDB_val k{sizeof(vkey), const_cast<VSpanKey *>(&vkey)};
+    const auto vkey =
+        VSpanKey{.scroll_id = static_cast<std::uint32_t>(span.scroll),
+                 .padding   = 0,
+                 .start     = span.start,
+                 .length    = span.length};
+    MDB_val k{.mv_size = sizeof(vkey),
+              .mv_data = const_cast<VSpanKey *>(&vkey)};
     MDB_val v{};
 
     if (mdb_get(txn, dbi_vspans_, &k, &v) != MDB_SUCCESS ||
@@ -577,8 +630,10 @@ public:
     mdb_del(txn, dbi_vspans_, &k, nullptr);
 
     // Decrement piece ref_count
-    const auto pkey = PieceKey{vrec.hash, vrec.piece_index};
-    MDB_val piece_k{sizeof(pkey), const_cast<PieceKey *>(&pkey)};
+    const auto pkey =
+        PieceKey{.hash = vrec.hash, .piece_index = vrec.piece_index};
+    MDB_val piece_k{.mv_size = sizeof(pkey),
+                    .mv_data = const_cast<PieceKey *>(&pkey)};
     MDB_val piece_v{};
 
     if (mdb_get(txn, dbi_pieces_, &piece_k, &piece_v) == MDB_SUCCESS &&
@@ -591,7 +646,8 @@ public:
         mdb_del(txn, dbi_pieces_, &piece_k, nullptr);
       } else {
         hdr->ref_count--;
-        MDB_val update_v{piece_buf.size(), piece_buf.data()};
+        MDB_val update_v{.mv_size = piece_buf.size(),
+                         .mv_data = piece_buf.data()};
         mdb_put(txn, dbi_pieces_, &piece_k, &update_v, 0);
       }
     }
@@ -611,8 +667,12 @@ public:
       return false;
     }
 
-    const auto ext_k = ExtSpanKey{hash.bytes, 0, stream_offset, length};
-    MDB_val k{sizeof(ext_k), const_cast<ExtSpanKey *>(&ext_k)};
+    const auto ext_k = ExtSpanKey{.hash          = hash.bytes,
+                                  .padding       = 0,
+                                  .stream_offset = stream_offset,
+                                  .length        = length};
+    MDB_val k{.mv_size = sizeof(ext_k),
+              .mv_data = const_cast<ExtSpanKey *>(&ext_k)};
     MDB_val v{};
 
     if (mdb_get(txn, dbi_ext_spans_, &k, &v) != MDB_SUCCESS ||
@@ -625,8 +685,10 @@ public:
     mdb_del(txn, dbi_ext_spans_, &k, nullptr);
 
     // Decrement piece ref_count
-    const auto pkey = PieceKey{vrec.hash, vrec.piece_index};
-    MDB_val piece_k{sizeof(pkey), const_cast<PieceKey *>(&pkey)};
+    const auto pkey =
+        PieceKey{.hash = vrec.hash, .piece_index = vrec.piece_index};
+    MDB_val piece_k{.mv_size = sizeof(pkey),
+                    .mv_data = const_cast<PieceKey *>(&pkey)};
     MDB_val piece_v{};
 
     if (mdb_get(txn, dbi_pieces_, &piece_k, &piece_v) == MDB_SUCCESS &&
@@ -638,7 +700,8 @@ public:
         mdb_del(txn, dbi_pieces_, &piece_k, nullptr);
       } else {
         hdr->ref_count--;
-        MDB_val update_v{piece_buf.size(), piece_buf.data()};
+        MDB_val update_v{.mv_size = piece_buf.size(),
+                         .mv_data = piece_buf.data()};
         mdb_put(txn, dbi_pieces_, &piece_k, &update_v, 0);
       }
     }
@@ -655,8 +718,9 @@ public:
     if (mdb_txn_begin(env_, nullptr, 0, &txn) != MDB_SUCCESS) {
       return false;
     }
-    const auto pkey = PieceKey{hash.bytes, piece_index};
-    MDB_val k{sizeof(pkey), const_cast<PieceKey *>(&pkey)};
+    const auto pkey = PieceKey{.hash = hash.bytes, .piece_index = piece_index};
+    MDB_val k{.mv_size = sizeof(pkey),
+              .mv_data = const_cast<PieceKey *>(&pkey)};
     const int rc = mdb_del(txn, dbi_pieces_, &k, nullptr);
     if (rc != MDB_SUCCESS) {
       mdb_txn_abort(txn);
@@ -713,8 +777,10 @@ public:
       return false;
     }
 
-    MDB_val k{keyId.size(), const_cast<std::uint8_t *>(keyId.data())};
-    MDB_val v{sizeof(record), const_cast<CekRecord *>(&record)};
+    MDB_val k{.mv_size = keyId.size(),
+              .mv_data = const_cast<std::uint8_t *>(keyId.data())};
+    MDB_val v{.mv_size = sizeof(record),
+              .mv_data = const_cast<CekRecord *>(&record)};
 
     if (mdb_put(txn, dbi_ceks_, &k, &v, 0) != MDB_SUCCESS) {
       mdb_txn_abort(txn);
@@ -734,7 +800,8 @@ public:
       return false;
     }
 
-    MDB_val k{keyId.size(), const_cast<std::uint8_t *>(keyId.data())};
+    MDB_val k{.mv_size = keyId.size(),
+              .mv_data = const_cast<std::uint8_t *>(keyId.data())};
     MDB_val v{};
 
     if (mdb_get(txn, dbi_ceks_, &k, &v) != MDB_SUCCESS ||
@@ -764,7 +831,8 @@ public:
       return false;
     }
 
-    MDB_val k{keyId.size(), const_cast<std::uint8_t *>(keyId.data())};
+    MDB_val k{.mv_size = keyId.size(),
+              .mv_data = const_cast<std::uint8_t *>(keyId.data())};
     if (mdb_del(txn, dbi_ceks_, &k, nullptr) != MDB_SUCCESS) {
       mdb_txn_abort(txn);
       return false;

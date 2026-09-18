@@ -104,16 +104,16 @@ public:
   [[nodiscard]] bool busy() const override { return false; }
 
   /// Evaluate quadratic Bezier arc at parameter t in [0, 1].
-  [[nodiscard]] static inline glm::vec3 evaluateBezier(const glm::vec3 &origin,
-                                                       const glm::vec3 &control,
-                                                       const glm::vec3 &flying,
-                                                       const float t) noexcept {
+  [[nodiscard]] static glm::vec3 evaluateBezier(const glm::vec3 &origin,
+                                                const glm::vec3 &control,
+                                                const glm::vec3 &flying,
+                                                const float t) noexcept {
     return gleditor::spatial::evaluateQuadraticBezier(origin, control, flying,
                                                       t);
   }
 
   /// Compute arched 3D control point dipping into depth.
-  [[nodiscard]] static inline glm::vec3
+  [[nodiscard]] static glm::vec3
   computeControlPoint(const glm::vec3 &origin, const glm::vec3 &flying,
                       const float depthOffset = 15.0F) noexcept {
     glm::vec3 mid = 0.5F * (origin + flying);

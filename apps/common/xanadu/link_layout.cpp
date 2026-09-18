@@ -150,14 +150,21 @@ void placeLinks(const std::map<std::uint64_t, Link> &links,
         if (left.isCell() && right.isCell() && left.cell() == right.cell()) {
           continue;
         }
-        between.push_back(LinkedPair{id, link.type, link.tier, left, right});
+        between.push_back(LinkedPair{.link = id,
+                                     .type = link.type,
+                                     .tier = link.tier,
+                                     .from = left,
+                                     .to   = right});
       }
     }
 
     if (lefts.empty() != rights.empty()) {
-      leaving.push_back(HalfLink{id, link.type, link.tier,
-                                 lefts.empty() ? rights.front() : lefts.front(),
-                                 lefts.empty() ? link.left : link.right});
+      leaving.push_back(
+          HalfLink{.link      = id,
+                   .type      = link.type,
+                   .tier      = link.tier,
+                   .here      = lefts.empty() ? rights.front() : lefts.front(),
+                   .elsewhere = lefts.empty() ? link.left : link.right});
     }
   }
 }
@@ -298,7 +305,8 @@ void placeTransclusions(const UniversalViewContext &ctx,
                     static_cast<zigzag::CellRef>(pV.targetId), startV, endV,
                     pV.spanIndex);
 
-      const PrimediaSpan sharedSpan{pU.span.scroll, sharedStart, sharedLen};
+      const PrimediaSpan sharedSpan{
+          .scroll = pU.span.scroll, .start = sharedStart, .length = sharedLen};
       const auto bucketKey = std::make_pair(
           std::make_pair(static_cast<std::uint8_t>(pU.kind), pU.targetId),
           std::make_pair(static_cast<std::uint8_t>(pV.kind), pV.targetId));
@@ -556,7 +564,9 @@ std::uint32_t linkColourWithInstanceShift(const std::uint64_t linkId,
   const float x = c * (1.0F - std::abs(std::fmod(newH * 6.0F, 2.0F) - 1.0F));
   const float m = v - c;
 
-  float newR = 0.0F, newG = 0.0F, newB = 0.0F;
+  float newR        = 0.0F;
+  float newG        = 0.0F;
+  float newB        = 0.0F;
   const int hSector = static_cast<int>(newH * 6.0F) % 6;
   switch (hSector) {
   case 0:

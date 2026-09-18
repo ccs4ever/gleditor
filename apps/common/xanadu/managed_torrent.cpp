@@ -4,6 +4,7 @@
  */
 #include "managed_torrent.hpp"
 
+#include <algorithm>
 #include <gleditor/paths.hpp>
 #include <libtorrent/add_torrent_params.hpp>
 #include <libtorrent/alert_types.hpp>
@@ -137,7 +138,7 @@ struct SystemTorrentManager::Impl {
 };
 
 SystemTorrentManager::SystemTorrentManager()
-    : SystemTorrentManager(Options{defaultCacheRoot()}) {}
+    : SystemTorrentManager(Options{.cacheRoot = defaultCacheRoot()}) {}
 
 SystemTorrentManager::SystemTorrentManager(Options options)
     : impl_(std::make_unique<Impl>()) {

@@ -134,7 +134,8 @@ void Version::insertSpans(const std::uint32_t at,
 
 void Version::insertBreak(const std::uint32_t at) {
   const auto where = splitAt(std::min(at, length()));
-  const PrimediaSpan marker{breakMarkerScroll, 0, 0};
+  const PrimediaSpan marker{
+      .scroll = breakMarkerScroll, .start = 0, .length = 0};
   runs.insert(runs.begin() + static_cast<std::ptrdiff_t>(where), marker);
   // Merge with a marker already sitting on either side, the same seams
   // insertSpans() checks for a batch of real pieces.
@@ -279,9 +280,9 @@ std::vector<Extent> Version::occurrencesOf(const PrimediaSpan &span) const {
       // Where the shared part sits within this piece, carried back out into
       // the version's own coordinates.
       const auto into = static_cast<std::uint32_t>(shared.start - run.start);
-      found.push_back(
-          Extent{seen + into,
-                 seen + into + static_cast<std::uint32_t>(shared.length)});
+      found.push_back(Extent{.start = seen + into,
+                             .end = seen + into +
+                                    static_cast<std::uint32_t>(shared.length)});
     }
     seen += static_cast<std::uint32_t>(run.length);
   }

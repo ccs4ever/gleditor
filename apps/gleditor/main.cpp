@@ -265,8 +265,8 @@ int main(const int argc, char **argv) {
   }
 
   try {
-    const std::string configPath = parser.get<std::string>("--config");
-    const auto editorConfig      = gleditor::loadEditorConfig(configPath);
+    const auto configPath   = parser.get<std::string>("--config");
+    const auto editorConfig = gleditor::loadEditorConfig(configPath);
     if (!parser.is_used("--font") &&
         !editorConfig.settings.fontFamily.empty()) {
       state->defaultFontName =

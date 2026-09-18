@@ -19,6 +19,7 @@
 #include <cstring>
 #include <fstream>
 #include <iostream>
+#include <utility>
 
 namespace gleditor {
 
@@ -136,7 +137,7 @@ ImageResource ImageCache::put(const std::string &id,
     return {};
   }
 
-  std::lock_guard<std::mutex> lock(mutex_);
+  std::scoped_lock lock(mutex_);
   if (const auto it = cache_.find(id); it != cache_.end()) {
     return it->second;
   }
@@ -230,7 +231,7 @@ ImageResource ImageCache::put(const std::string &id,
     }
   }
 
-  const float atlasF = static_cast<float>(atlasSize_);
+  const auto atlasF = static_cast<float>(atlasSize_);
   ImageResource res{
       .id      = id,
       .width   = image.width,
@@ -249,7 +250,7 @@ ImageResource ImageCache::put(const std::string &id,
 
 std::optional<ImageResource> ImageCache::loadFile(const std::string &filePath) {
   {
-    std::lock_guard<std::mutex> lock(mutex_);
+    std::scoped_lock lock(mutex_);
     if (const auto it = cache_.find(filePath); it != cache_.end()) {
       return it->second;
     }
@@ -268,7 +269,7 @@ ImageCache::loadBuffer(const std::string &id,
                        const std::span<const std::uint8_t> bytes,
                        const MimeType &mime) {
   {
-    std::lock_guard<std::mutex> lock(mutex_);
+    std::scoped_lock lock(mutex_);
     if (const auto it = cache_.find(id); it != cache_.end()) {
       return it->second;
     }
@@ -283,7 +284,7 @@ ImageCache::loadBuffer(const std::string &id,
 }
 
 std::optional<ImageResource> ImageCache::find(const std::string &id) const {
-  std::lock_guard<std::mutex> lock(mutex_);
+  std::scoped_lock lock(mutex_);
   if (const auto it = cache_.find(id); it != cache_.end()) {
     return it->second;
   }

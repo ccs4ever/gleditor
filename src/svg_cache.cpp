@@ -37,14 +37,14 @@ std::mutex initMutex;
 int initRefCount = 0;
 
 void thorvgRef() {
-  const std::lock_guard<std::mutex> lock(initMutex);
+  const std::scoped_lock lock(initMutex);
   if (0 == initRefCount++) {
     tvg::Initializer::init();
   }
 }
 
 void thorvgUnref() {
-  const std::lock_guard<std::mutex> lock(initMutex);
+  const std::scoped_lock lock(initMutex);
   if (0 == --initRefCount) {
     tvg::Initializer::term();
   }
@@ -180,7 +180,7 @@ SvgCache::SvgCache(render::RenderDevice *const device) : device_(device) {
 }
 
 SvgCache::~SvgCache() {
-  const std::lock_guard<std::mutex> lock(mutex_);
+  const std::scoped_lock lock(mutex_);
   if (nullptr != device_) {
     for (const auto &[id, res] : cache_) {
       if (res.texture.valid()) {
@@ -244,7 +244,7 @@ SvgCache::rasterize(const std::span<const std::uint8_t> bytes,
     return std::nullopt;
   }
 
-  const float texSizeF = static_cast<float>(texSize);
+  const auto texSizeF = static_cast<float>(texSize);
   return ImageResource{
       .id      = {}, // filled in by loadBuffer() once it knows the cache key
       .width   = pixelW,
@@ -262,7 +262,7 @@ std::optional<ImageResource>
 SvgCache::loadBuffer(const std::string &id,
                      const std::span<const std::uint8_t> bytes) {
   {
-    const std::lock_guard<std::mutex> lock(mutex_);
+    const std::scoped_lock lock(mutex_);
     if (const auto it = cache_.find(id); cache_.end() != it) {
       return it->second;
     }
@@ -278,7 +278,7 @@ SvgCache::loadBuffer(const std::string &id,
   }
   resource->id = id;
 
-  const std::lock_guard<std::mutex> lock(mutex_);
+  const std::scoped_lock lock(mutex_);
   // The render thread is the only caller (see design doc), so a race here
   // cannot actually happen -- guarded anyway rather than leaking a texture
   // if that ever changes.
@@ -291,7 +291,7 @@ SvgCache::loadBuffer(const std::string &id,
 }
 
 std::optional<ImageResource> SvgCache::find(const std::string &id) const {
-  const std::lock_guard<std::mutex> lock(mutex_);
+  const std::scoped_lock lock(mutex_);
   if (const auto it = cache_.find(id); cache_.end() != it) {
     return it->second;
   }

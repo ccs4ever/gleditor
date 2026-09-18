@@ -194,7 +194,7 @@ parseToast(const std::string &argument) {
  * other platform pays for it.
  */
 constexpr std::uint64_t accessibilityWindowFlags() {
-#if defined(_WIN32)
+#ifdef _WIN32
   return SDL_WINDOW_HIDDEN;
 #else
   return 0;
@@ -294,24 +294,25 @@ readAutomationScript(const int argc, const char *const *const argv) {
                              const std::string &value) {
     if ("--pick" == option || "--click" == option) {
       const auto [x, y] = parsePair(value, option, "X,Y");
-      Step step{"--pick" == option ? Step::Kind::Pick : Step::Kind::Click};
+      Step step{.kind =
+                    "--pick" == option ? Step::Kind::Pick : Step::Kind::Click};
       step.x = x;
       step.y = y;
       script.push_back(std::move(step));
     } else if ("--capture" == option) {
-      Step step{Step::Kind::Capture};
+      Step step{.kind = Step::Kind::Capture};
       step.text = value;
       script.push_back(std::move(step));
     } else if ("--type" == option) {
-      Step step{Step::Kind::Type};
+      Step step{.kind = Step::Kind::Type};
       std::tie(step.decorations, step.text) = parseTypeValue(value);
       script.push_back(std::move(step));
     } else if ("--do" == option) {
-      Step step{Step::Kind::Command};
+      Step step{.kind = Step::Kind::Command};
       step.text = value;
       script.push_back(std::move(step));
     } else if ("--key" == option) {
-      Step step{Step::Kind::Press};
+      Step step{.kind = Step::Kind::Press};
       if (const auto named = keyNamed(value); named) {
         step.key  = named->first;
         step.mods = named->second;
@@ -321,7 +322,7 @@ readAutomationScript(const int argc, const char *const *const argv) {
       }
     } else if ("--select" == option) {
       const auto [from, to] = parsePair(value, option, "START,END");
-      Step step{Step::Kind::Select};
+      Step step{.kind = Step::Kind::Select};
       step.from = static_cast<std::uint32_t>(from);
       step.to   = static_cast<std::uint32_t>(to);
       script.push_back(std::move(step));
@@ -358,8 +359,11 @@ readAutomationScript(const int argc, const char *const *const argv) {
 
 void CommandTable::bind(const int scancode, const Mod mods, std::string name,
                         std::string help, std::function<void()> run) {
-  bindings.push_back(Command{scancode, mods, std::move(name), std::move(help),
-                             std::move(run)});
+  bindings.push_back(Command{.scancode = scancode,
+                             .mods     = mods,
+                             .name     = std::move(name),
+                             .help     = std::move(help),
+                             .run      = std::move(run)});
 }
 
 bool CommandTable::run(const std::string_view name) const {
@@ -954,7 +958,7 @@ int Application::run() {
                       : "not in this build")
               << "\n";
   }
-#if defined(_WIN32)
+#ifdef _WIN32
   SDL_ShowWindow(window.window);
 #endif
 
@@ -1057,14 +1061,14 @@ int Application::run() {
     }
     placementTold = now;
     publisher->setWindowBounds(
-        gleditor::a11y::Rect{static_cast<double>(now.outerLeft),
-                             static_cast<double>(now.outerTop),
-                             static_cast<double>(now.outerRight),
-                             static_cast<double>(now.outerBottom)},
-        gleditor::a11y::Rect{static_cast<double>(now.innerLeft),
-                             static_cast<double>(now.innerTop),
-                             static_cast<double>(now.innerRight),
-                             static_cast<double>(now.innerBottom)});
+        gleditor::a11y::Rect{.left   = static_cast<double>(now.outerLeft),
+                             .top    = static_cast<double>(now.outerTop),
+                             .right  = static_cast<double>(now.outerRight),
+                             .bottom = static_cast<double>(now.outerBottom)},
+        gleditor::a11y::Rect{.left   = static_cast<double>(now.innerLeft),
+                             .top    = static_cast<double>(now.innerTop),
+                             .right  = static_cast<double>(now.innerRight),
+                             .bottom = static_cast<double>(now.innerBottom)});
   };
   reportPlacement();
 
@@ -1237,7 +1241,7 @@ int Application::run() {
           break;
         }
 
-        const std::lock_guard locker(state->view);
+        const std::scoped_lock locker(state->view);
         const float perPixel = worldPerPixel(state->view);
         // constexpr float pixelsPerTick = 48.0F;
         constexpr float pixelsPerTick = 180.0F;
@@ -1273,7 +1277,7 @@ int Application::run() {
           break;
         }
         const auto id = sdl::fingerId(evt);
-        const std::lock_guard locker(state->view);
+        const std::scoped_lock locker(state->view);
         if (!fingerAId) {
           fingerAId           = id;
           fingerAX            = evt.tfinger.x;
@@ -1315,7 +1319,7 @@ int Application::run() {
           break;
         }
 
-        const std::lock_guard locker(state->view);
+        const std::scoped_lock locker(state->view);
         if (fingerAId && fingerBId) {
           const float spread =
               pixelSpread(state->view, fingerAX, fingerAY, fingerBX, fingerBY);
@@ -1397,7 +1401,7 @@ int Application::run() {
             } else {
               if (!touchWasMultiFinger &&
                   (nullptr == state->modal || !state->modal->grabbing())) {
-                const std::lock_guard locker(state->view);
+                const std::scoped_lock locker(state->view);
                 const int nowX = static_cast<int>(
                     evt.tfinger.x *
                     static_cast<float>(state->view.screenWidth));

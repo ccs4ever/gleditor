@@ -164,7 +164,8 @@ MicroversionId MicroversionId::parse(const std::string_view text) {
       throw std::invalid_argument("microversion \"" + std::string{text} +
                                   "\": segments are numbered from one");
     }
-    parsed.push_back(Segment{branch, static_cast<std::uint32_t>(number)});
+    parsed.push_back(Segment{.branch = branch,
+                             .number = static_cast<std::uint32_t>(number)});
   }
 
   return MicroversionId{parsed};
@@ -204,7 +205,7 @@ MicroversionId MicroversionId::parent() const {
 MicroversionId MicroversionId::next() const {
   const auto mine = segments();
   if (mine.empty()) {
-    const Segment first{noBranch, 1};
+    const Segment first{.branch = noBranch, .number = 1};
     return MicroversionId{std::span{&first, 1}};
   }
   MicroversionId further{mine};
@@ -231,10 +232,10 @@ std::vector<MicroversionId> MicroversionId::path() const {
     // Every state this segment passes through, from its first to the one the
     // name stops at. A branch restarts the count at one, which is exactly what
     // makes the name enough to replay from.
-    prefix.push_back(Segment{segment.branch, 0});
+    prefix.push_back(Segment{.branch = segment.branch, .number = 0});
     for (std::uint32_t number = 1; number <= segment.number; number++) {
       prefix.back().number = number;
-      steps.push_back(MicroversionId{prefix});
+      steps.emplace_back(prefix);
     }
   }
   return steps;

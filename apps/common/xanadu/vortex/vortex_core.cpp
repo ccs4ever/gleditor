@@ -3,6 +3,7 @@
 #include <bit>
 #include <cctype>
 #include <iostream>
+#include <utility>
 
 #include "common/xanadu/scalar.hpp"
 
@@ -152,8 +153,8 @@ std::optional<CellRef> VortexCore::value(CellRef cell, std::int64_t offset,
       arena_.setContent(master, {});
     } else {
       // String Splice
-      const std::string &replStr = std::get<std::string>(repl);
-      std::string current        = arena_.textOf(master);
+      const auto &replStr      = std::get<std::string>(repl);
+      std::string current      = arena_.textOf(master);
       const auto [from, count] = resolve_range(current.size(), offset, length);
       current.replace(from, count, replStr);
       const auto span = arena_.intern(current);
@@ -267,8 +268,8 @@ bool VortexCore::evaluateTruthiness(const CellValue &val) {
   if (std::holds_alternative<std::int64_t>(val)) {
     return std::get<std::int64_t>(val) != 0;
   }
-  const std::string &s = std::get<std::string>(val);
-  std::string lower    = s;
+  const auto &s     = std::get<std::string>(val);
+  std::string lower = s;
   for (char &c : lower) {
     c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
   }

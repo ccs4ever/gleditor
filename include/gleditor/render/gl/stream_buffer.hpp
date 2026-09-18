@@ -43,7 +43,7 @@ class StreamBufferGL : public render::IStreamBuffer {
 public:
   StreamBufferGL(const GLApi &glApi, const GLenum target,
                  const std::size_t capacityBytes)
-      : api(glApi), targetKind(target), capacity(capacityBytes), head(0) {
+      : api(glApi), targetKind(target), capacity(capacityBytes) {
     if (0 == capacity) {
       throw std::invalid_argument("StreamBufferGL: capacity cannot be zero");
     }
@@ -55,7 +55,7 @@ public:
     api.BindBuffer(targetKind, 0);
   }
 
-  ~StreamBufferGL() {
+  ~StreamBufferGL() override {
     waitAll();
     if (0 != bufferId) {
       api.DeleteBuffers(1, &bufferId);
@@ -92,7 +92,7 @@ public:
   MappedChunk allocate(const std::size_t size,
                        const std::size_t alignment = 64) override {
     if (0 == size) {
-      return {nullptr, head};
+      return {.ptr = nullptr, .offset = head};
     }
     if (size > capacity) {
       throw std::runtime_error(
@@ -126,7 +126,7 @@ public:
 
     const auto allocOffset = head;
     head += size;
-    return {ptr, allocOffset};
+    return {.ptr = ptr, .offset = allocOffset};
   }
 
   /// Explicitly flush the mapped chunk range and insert a fence sync.
@@ -141,9 +141,10 @@ public:
     api.UnmapBuffer(targetKind);
     api.BindBuffer(targetKind, 0);
 
-    const auto fence = api.FenceSync(GL_SYNC_GPU_COMMANDS_COMPLETE, 0);
+    auto *const fence = api.FenceSync(GL_SYNC_GPU_COMMANDS_COMPLETE, 0);
     if (nullptr != fence) {
-      syncs.push_back(SyncSegment{fence, offset, size});
+      syncs.push_back(
+          SyncSegment{.sync = fence, .offset = offset, .size = size});
     }
   }
 

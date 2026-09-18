@@ -31,10 +31,12 @@ struct Diagnostic {
 class Diagnostics {
 public:
   void warn(std::string message) {
-    entries_.push_back({Severity::Warning, std::move(message)});
+    entries_.push_back(
+        {.severity = Severity::Warning, .message = std::move(message)});
   }
   void error(std::string message) {
-    entries_.push_back({Severity::Error, std::move(message)});
+    entries_.push_back(
+        {.severity = Severity::Error, .message = std::move(message)});
   }
 
   [[nodiscard]] const std::vector<Diagnostic> &entries() const {

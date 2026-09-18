@@ -175,8 +175,8 @@ struct DimensionMeta {
 
 /// Global scene appearance.
 struct SceneMeta {
-  RgbColor background{0.05F, 0.05F, 0.07F};
-  RgbColor focus_color{0.956F, 0.773F, 0.259F};
+  RgbColor background{.r = 0.05F, .g = 0.05F, .b = 0.07F};
+  RgbColor focus_color{.r = 0.956F, .g = 0.773F, .b = 0.259F};
   float focus_scale       = 1.4F;
   float cell_radius       = 0.35F;
   float layout_speed      = 12.0F;

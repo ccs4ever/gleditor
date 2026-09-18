@@ -583,7 +583,7 @@ DecodeIndex buildAvIndex(std::span<const std::uint8_t> bytes,
   DecodeIndex result;
   result.format = format;
 
-  MemoryReader reader{bytes.data(), bytes.size()};
+  MemoryReader reader{.data = bytes.data(), .size = bytes.size()};
   auto handle = openMemoryFormat(reader);
   if (!handle.has_value()) {
     return result;
@@ -607,9 +607,9 @@ DecodeIndex buildAvIndex(std::span<const std::uint8_t> bytes,
     if (nullptr == entry) {
       break;
     }
-    result.seekPoints.push_back(
-        SeekPoint{static_cast<std::uint64_t>(entry->timestamp),
-                  static_cast<std::uint64_t>(entry->pos)});
+    result.seekPoints.push_back(SeekPoint{
+        .uncompressedPosition = static_cast<std::uint64_t>(entry->timestamp),
+        .compressedByteOffset = static_cast<std::uint64_t>(entry->pos)});
   }
   result.durableIndex       = !result.seekPoints.empty();
   result.uncompressedExtent = result.seekPoints.size();
@@ -620,7 +620,7 @@ DecodeIndex buildAvIndex(std::span<const std::uint8_t> bytes,
 
 std::optional<std::pair<std::uint32_t, std::uint32_t>>
 peekVideoSize(const std::span<const std::uint8_t> videoBytes) {
-  MemoryReader reader{videoBytes.data(), videoBytes.size()};
+  MemoryReader reader{.data = videoBytes.data(), .size = videoBytes.size()};
   auto handle = openMemoryFormat(reader);
   if (!handle.has_value()) {
     return std::nullopt;
@@ -703,8 +703,10 @@ DecodeIndex buildZstdIndex(const std::span<const std::uint8_t> bytes) {
   result.seekPoints.reserve(frameCount);
   for (unsigned i = 0; i < frameCount; ++i) {
     result.seekPoints.push_back(
-        SeekPoint{ZSTD_seekable_getFrameDecompressedOffset(handle.zs, i),
-                  ZSTD_seekable_getFrameCompressedOffset(handle.zs, i)});
+        SeekPoint{.uncompressedPosition =
+                      ZSTD_seekable_getFrameDecompressedOffset(handle.zs, i),
+                  .compressedByteOffset =
+                      ZSTD_seekable_getFrameCompressedOffset(handle.zs, i)});
   }
   if (frameCount > 0) {
     result.uncompressedExtent =
@@ -740,10 +742,11 @@ reencodeZstdSeekable(const std::span<const std::uint8_t> zstdBytes,
   }
   std::vector<std::uint8_t> decompressed;
   std::vector<std::uint8_t> ioBuf(1U << 17);
-  ZSTD_inBuffer din{zstdBytes.data(), zstdBytes.size(), 0};
+  ZSTD_inBuffer din{
+      .src = zstdBytes.data(), .size = zstdBytes.size(), .pos = 0};
   bool decodeOk = true;
   do {
-    ZSTD_outBuffer dout{ioBuf.data(), ioBuf.size(), 0};
+    ZSTD_outBuffer dout{.dst = ioBuf.data(), .size = ioBuf.size(), .pos = 0};
     if (ZSTD_isError(ZSTD_decompressStream(dstream, &dout, &din))) {
       decodeOk = false;
       break;
@@ -766,10 +769,11 @@ reencodeZstdSeekable(const std::span<const std::uint8_t> zstdBytes,
     return std::nullopt;
   }
   std::vector<std::uint8_t> result;
-  ZSTD_inBuffer cin{decompressed.data(), decompressed.size(), 0};
+  ZSTD_inBuffer cin{
+      .src = decompressed.data(), .size = decompressed.size(), .pos = 0};
   bool compressOk = true;
   while (compressOk && cin.pos < cin.size) {
-    ZSTD_outBuffer cout{ioBuf.data(), ioBuf.size(), 0};
+    ZSTD_outBuffer cout{.dst = ioBuf.data(), .size = ioBuf.size(), .pos = 0};
     if (ZSTD_isError(ZSTD_seekable_compressStream(cstream, &cout, &cin))) {
       compressOk = false;
       break;
@@ -780,7 +784,7 @@ reencodeZstdSeekable(const std::span<const std::uint8_t> zstdBytes,
   if (compressOk) {
     std::size_t remaining;
     do {
-      ZSTD_outBuffer cout{ioBuf.data(), ioBuf.size(), 0};
+      ZSTD_outBuffer cout{.dst = ioBuf.data(), .size = ioBuf.size(), .pos = 0};
       remaining = ZSTD_seekable_endStream(cstream, &cout);
       if (ZSTD_isError(remaining)) {
         compressOk = false;
@@ -905,7 +909,9 @@ protected:
         if (FLAC__STREAM_METADATA_SEEKPOINT_PLACEHOLDER == pt.sample_number) {
           continue;
         }
-        rawSeekPoints.push_back(SeekPoint{pt.sample_number, pt.stream_offset});
+        rawSeekPoints.push_back(
+            SeekPoint{.uncompressedPosition = pt.sample_number,
+                      .compressedByteOffset = pt.stream_offset});
       }
     }
   }
@@ -981,7 +987,8 @@ DecodeIndex buildFlacIndex(const std::span<const std::uint8_t> bytes) {
     result.seekPoints.reserve(decoder.rawSeekPoints.size());
     for (const auto &pt : decoder.rawSeekPoints) {
       result.seekPoints.push_back(SeekPoint{
-          pt.uncompressedPosition, audioStartOffset + pt.compressedByteOffset});
+          .uncompressedPosition = pt.uncompressedPosition,
+          .compressedByteOffset = audioStartOffset + pt.compressedByteOffset});
     }
     result.durableIndex = true;
   }
@@ -1085,7 +1092,10 @@ tmsize_t tiffReaderRead(thandle_t handle, void *buf, const tmsize_t size) {
   reader->pos += toRead;
   return static_cast<tmsize_t>(toRead);
 }
-tmsize_t tiffReaderWrite(thandle_t, void *, tmsize_t) { return -1; }
+tmsize_t tiffReaderWrite(thandle_t /*unused*/, void * /*unused*/,
+                         tmsize_t /*unused*/) {
+  return -1;
+}
 toff_t tiffReaderSeek(thandle_t handle, const toff_t offset, const int whence) {
   auto *const reader  = static_cast<MemoryTiffReader *>(handle);
   std::int64_t newPos = 0;
@@ -1102,7 +1112,7 @@ toff_t tiffReaderSeek(thandle_t handle, const toff_t offset, const int whence) {
   reader->pos = static_cast<std::size_t>(newPos);
   return static_cast<toff_t>(reader->pos);
 }
-int tiffReaderClose(thandle_t) { return 0; }
+int tiffReaderClose(thandle_t /*unused*/) { return 0; }
 toff_t tiffReaderSize(thandle_t handle) {
   return static_cast<toff_t>(
       static_cast<MemoryTiffReader *>(handle)->bytes.size());
@@ -1115,7 +1125,10 @@ struct MemoryTiffWriter {
   std::size_t pos{0};
 };
 
-tmsize_t tiffWriterRead(thandle_t, void *, tmsize_t) { return -1; }
+tmsize_t tiffWriterRead(thandle_t /*unused*/, void * /*unused*/,
+                        tmsize_t /*unused*/) {
+  return -1;
+}
 tmsize_t tiffWriterWrite(thandle_t handle, void *buf, const tmsize_t size) {
   auto *const writer      = static_cast<MemoryTiffWriter *>(handle);
   const auto sizeUnsigned = static_cast<std::size_t>(size);
@@ -1142,7 +1155,7 @@ toff_t tiffWriterSeek(thandle_t handle, const toff_t offset, const int whence) {
   writer->pos = static_cast<std::size_t>(newPos);
   return static_cast<toff_t>(writer->pos);
 }
-int tiffWriterClose(thandle_t) { return 0; }
+int tiffWriterClose(thandle_t /*unused*/) { return 0; }
 toff_t tiffWriterSize(thandle_t handle) {
   return static_cast<toff_t>(
       static_cast<MemoryTiffWriter *>(handle)->data.size());
@@ -1192,7 +1205,7 @@ DecodeIndex buildTiffIndex(const std::span<const std::uint8_t> bytes) {
   DecodeIndex result;
   result.format = DecodeIndexFormat::Tiff;
 
-  MemoryTiffReader reader{bytes};
+  MemoryTiffReader reader{.bytes = bytes};
   auto handle = openMemoryTiffForRead(reader);
   if (!handle.has_value()) {
     return result;
@@ -1223,7 +1236,8 @@ DecodeIndex buildTiffIndex(const std::span<const std::uint8_t> bytes) {
   result.seekPoints.reserve(numStrips);
   for (std::uint32_t i = 0; i < numStrips; ++i) {
     result.seekPoints.push_back(SeekPoint{
-        static_cast<std::uint64_t>(i) * rowsPerStrip, stripOffsets[i]});
+        .uncompressedPosition = static_cast<std::uint64_t>(i) * rowsPerStrip,
+        .compressedByteOffset = stripOffsets[i]});
   }
   result.durableIndex = true;
   return result;
@@ -1234,13 +1248,14 @@ DecodeIndex buildTiffIndex(const std::span<const std::uint8_t> bytes) {
 std::optional<std::vector<std::uint8_t>>
 reencodeTiffSeekable(const std::span<const std::uint8_t> tiffBytes,
                      const std::uint32_t rowsPerStrip) {
-  MemoryTiffReader reader{tiffBytes};
+  MemoryTiffReader reader{.bytes = tiffBytes};
   auto srcHandle = openMemoryTiffForRead(reader);
   if (!srcHandle.has_value()) {
     return std::nullopt;
   }
 
-  std::uint32_t width = 0, height = 0;
+  std::uint32_t width  = 0;
+  std::uint32_t height = 0;
   TIFFGetField(srcHandle->tif, TIFFTAG_IMAGEWIDTH, &width);
   TIFFGetField(srcHandle->tif, TIFFTAG_IMAGELENGTH, &height);
   if (0 == width || 0 == height) {
@@ -1439,7 +1454,7 @@ DecodeIndex buildGifIndex(const std::span<const std::uint8_t> bytes) {
   DecodeIndex index;
   index.format = DecodeIndexFormat::Gif;
 
-  GifMemorySource src{bytes.data(), bytes.size(), 0};
+  GifMemorySource src{.data = bytes.data(), .size = bytes.size(), .offset = 0};
   int err   = 0;
   auto *gif = DGifOpen(&src, gifMemoryRead, &err);
   if (nullptr == gif) {

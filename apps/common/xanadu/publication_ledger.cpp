@@ -332,7 +332,7 @@ PublicationLedger PublicationLedger::fromYaml(std::string_view yaml) {
     }
     const auto content = line.substr(trimmed);
 
-    if (content.rfind("- info_hash:", 0) == 0) {
+    if (content.starts_with("- info_hash:")) {
       if (inEntry) {
         ledger.appendPublication(std::move(cur));
         cur = PublicationEntry{};
@@ -346,7 +346,7 @@ PublicationLedger PublicationLedger::fromYaml(std::string_view yaml) {
       }
     } else if (inEntry) {
       auto extractQuoted = [&](std::string_view prefix) -> std::string {
-        if (content.rfind(prefix, 0) == 0) {
+        if (content.starts_with(prefix)) {
           const auto q1 = content.find('"');
           const auto q2 = content.rfind('"');
           if (q1 != std::string::npos && q2 != std::string::npos && q2 > q1) {
@@ -356,39 +356,39 @@ PublicationLedger PublicationLedger::fromYaml(std::string_view yaml) {
         return {};
       };
 
-      if (content.rfind("bep46_uri:", 0) == 0) {
+      if (content.starts_with("bep46_uri:")) {
         cur.bep46Uri = extractQuoted("bep46_uri:");
-      } else if (content.rfind("title:", 0) == 0) {
+      } else if (content.starts_with("title:")) {
         cur.title = extractQuoted("title:");
-      } else if (content.rfind("author_name:", 0) == 0) {
+      } else if (content.starts_with("author_name:")) {
         cur.authorName = extractQuoted("author_name:");
-      } else if (content.rfind("author_fingerprint:", 0) == 0) {
+      } else if (content.starts_with("author_fingerprint:")) {
         cur.authorFingerprint = extractQuoted("author_fingerprint:");
-      } else if (content.rfind("abstract:", 0) == 0) {
+      } else if (content.starts_with("abstract:")) {
         cur.abstractText = extractQuoted("abstract:");
-      } else if (content.rfind("timestamp:", 0) == 0) {
+      } else if (content.starts_with("timestamp:")) {
         cur.timestamp = std::strtoull(content.substr(10).c_str(), nullptr, 10);
-      } else if (content.rfind("sequence:", 0) == 0) {
+      } else if (content.starts_with("sequence:")) {
         cur.sequence = std::strtoull(content.substr(9).c_str(), nullptr, 10);
-      } else if (content.rfind("total_bytes:", 0) == 0) {
+      } else if (content.starts_with("total_bytes:")) {
         cur.totalBytes = std::strtoull(content.substr(12).c_str(), nullptr, 10);
-      } else if (content.rfind("microversions:", 0) == 0) {
+      } else if (content.starts_with("microversions:")) {
         cur.microversions = static_cast<std::uint32_t>(
             std::strtoul(content.substr(14).c_str(), nullptr, 10));
-      } else if (content.rfind("has_transcopyright:", 0) == 0) {
-        cur.hasTranscopyright = (content.find("true") != std::string::npos);
-      } else if (content.rfind("transcopyright_terms:", 0) == 0) {
+      } else if (content.starts_with("has_transcopyright:")) {
+        cur.hasTranscopyright = (content.contains("true"));
+      } else if (content.starts_with("transcopyright_terms:")) {
         cur.transcopyrightTerms = extractQuoted("transcopyright_terms:");
-      } else if (content.rfind("merkle_root:", 0) == 0) {
+      } else if (content.starts_with("merkle_root:")) {
         const auto hex = extractQuoted("merkle_root:");
         if (const auto opt = fromHex32(hex)) {
           cur.merkleRoot = *opt;
         }
-      } else if (content.rfind("signature:", 0) == 0) {
+      } else if (content.starts_with("signature:")) {
         cur.signature = extractQuoted("signature:");
-      } else if (content.rfind("topics:", 0) == 0) {
+      } else if (content.starts_with("topics:")) {
         inTopics = true;
-      } else if (inTopics && content.rfind("- \"", 0) == 0) {
+      } else if (inTopics && content.starts_with("- \"")) {
         const auto q1 = content.find('"');
         const auto q2 = content.rfind('"');
         if (q1 != std::string::npos && q2 != std::string::npos && q2 > q1) {
@@ -429,10 +429,11 @@ MadeTorrent PublicationLedger::sealToTorrent(std::string_view name,
                                              std::uint64_t pieceLength) const {
   std::vector<TorrentContent> files;
   const auto yamlStr = toYaml();
-  files.push_back(TorrentContent{"PUBLICATION_LEDGER.yaml", yamlStr});
+  files.push_back(
+      TorrentContent{.path = "PUBLICATION_LEDGER.yaml", .data = yamlStr});
 
   const auto rootStr = rootHex() + "\n";
-  files.push_back(TorrentContent{"ROOT.hex", rootStr});
+  files.push_back(TorrentContent{.path = "ROOT.hex", .data = rootStr});
 
   return makeTorrent(files, std::string(name), pieceLength);
 }

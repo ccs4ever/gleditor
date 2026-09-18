@@ -21,6 +21,7 @@
 #include <concepts>
 #include <cstddef>
 #include <cstdint>
+#include <ranges>
 #include <type_traits>
 #include <utility>
 #include <vector>
@@ -128,8 +129,7 @@ public:
         }
       }
     } else {
-      for (auto it = heapBuf.rbegin(); it != heapBuf.rend(); ++it) {
-        const auto idx         = *it;
+      for (unsigned int idx : std::views::reverse(heapBuf)) {
         const auto *const node = getNode(idx);
         if (nullptr != node) {
           if constexpr (std::is_same_v<

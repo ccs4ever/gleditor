@@ -63,7 +63,7 @@ struct ExecutionResult {
   bool success{true};
   ContractViolationKind contractViolation{ContractViolationKind::None};
   CellRef failingClause{noCell};
-  std::string errorMessage{};
+  std::string errorMessage;
 };
 
 /**

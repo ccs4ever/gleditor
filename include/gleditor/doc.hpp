@@ -427,7 +427,6 @@ private:
   /// Record that page @p pageIndex has shaped itself again.
   void keepLayoutOf(std::uint32_t pageIndex) const;
 
-private:
   /**
    * @brief Rebuild the pages an edit disturbed. Render thread only.
    * @param delta Bytes the document grew by, negative for a removal. Every
@@ -1029,7 +1028,7 @@ public:
    * actually wants. For "how many are built", see builtPageCount().
    */
   [[nodiscard]] std::size_t numPages() const {
-    const std::lock_guard lock(shapingMutex);
+    const std::scoped_lock lock(shapingMutex);
     return pageEntries.size();
   }
   /// How many pages have actually been built into GPU resources -- may be

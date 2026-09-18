@@ -4,8 +4,9 @@
 
 namespace xanadu {
 
-MagicMimeDetector::MagicMimeDetector() {
-  cookie = magic_open(MAGIC_MIME_TYPE | MAGIC_SYMLINK);
+MagicMimeDetector::MagicMimeDetector()
+    : cookie(magic_open(MAGIC_MIME_TYPE | MAGIC_SYMLINK)) {
+
   if (cookie != nullptr) {
     if (magic_load(static_cast<magic_t>(cookie), nullptr) != 0) {
       magic_close(static_cast<magic_t>(cookie));
@@ -38,19 +39,19 @@ std::string MagicMimeDetector::identifyFile(const std::string &path) const {
 }
 
 bool MagicMimeDetector::isAudioMime(const std::string_view mime) {
-  return mime.find("audio/") != std::string_view::npos;
+  return mime.contains("audio/");
 }
 
 bool MagicMimeDetector::isVideoMime(const std::string_view mime) {
-  return mime.find("video/") != std::string_view::npos;
+  return mime.contains("video/");
 }
 
 bool MagicMimeDetector::isImageMime(const std::string_view mime) {
-  return mime.find("image/") != std::string_view::npos;
+  return mime.contains("image/");
 }
 
 bool MagicMimeDetector::isPdfMime(const std::string_view mime) {
-  return mime.find("application/pdf") != std::string_view::npos;
+  return mime.contains("application/pdf");
 }
 
 bool MagicMimeDetector::isMediaMime(const std::string_view mime) {

@@ -86,7 +86,7 @@ struct BlockStyleRange {
   /// nullopt -- the common case -- leaves the box's own placement alone.
   /// Exists so a style range can say "float this figure right" without the
   /// box specification itself carrying that decision.
-  std::optional<BoxPlacement> placement{};
+  std::optional<BoxPlacement> placement;
 
   [[nodiscard]] bool operator==(const BlockStyleRange &) const = default;
 };

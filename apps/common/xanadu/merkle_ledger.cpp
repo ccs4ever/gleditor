@@ -199,7 +199,7 @@ std::optional<MerkleProof> MerkleProof::fromYaml(std::string_view y) {
     } else if (e.key == "path" && e.value.size() >= 66) {
       const bool isLeft = (e.value[0] == 'L');
       if (const auto h = fromHex32(std::string_view(e.value).substr(2))) {
-        proof.path.push_back(Element{*h, isLeft});
+        proof.path.push_back(Element{.hash = *h, .isLeft = isLeft});
       }
     }
   }
@@ -452,10 +452,10 @@ MadeTorrent MerkleLedger::sealToTorrent(std::string_view name,
     }
   }
 
-  files.push_back(TorrentContent{"LEDGER.yaml", ledgerYaml});
-  files.push_back(TorrentContent{"ROOT.hex", rootHexStr});
+  files.push_back(TorrentContent{.path = "LEDGER.yaml", .data = ledgerYaml});
+  files.push_back(TorrentContent{.path = "ROOT.hex", .data = rootHexStr});
   if (!keysConcat.empty()) {
-    files.push_back(TorrentContent{"KEYS.pub", keysConcat});
+    files.push_back(TorrentContent{.path = "KEYS.pub", .data = keysConcat});
   }
 
   return makeTorrent(files, std::string(name), pieceLength);

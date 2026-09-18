@@ -39,61 +39,61 @@ struct PrefixOp {
 std::optional<InfixOp> getInfixOp(TokenKind kind) {
   switch (kind) {
   case TokenKind::Neck:
-    return InfixOp{1200, Assoc::XFX, ":-"};
+    return InfixOp{.prec = 1200, .assoc = Assoc::XFX, .name = ":-"};
   case TokenKind::Semicolon:
-    return InfixOp{1100, Assoc::XFY, ";"};
+    return InfixOp{.prec = 1100, .assoc = Assoc::XFY, .name = ";"};
   case TokenKind::Arrow:
-    return InfixOp{1050, Assoc::XFY, "->"};
+    return InfixOp{.prec = 1050, .assoc = Assoc::XFY, .name = "->"};
   case TokenKind::Comma:
-    return InfixOp{1000, Assoc::XFY, ","};
+    return InfixOp{.prec = 1000, .assoc = Assoc::XFY, .name = ","};
   case TokenKind::Equal:
-    return InfixOp{700, Assoc::XFX, "="};
+    return InfixOp{.prec = 700, .assoc = Assoc::XFX, .name = "="};
   case TokenKind::NotEqual:
-    return InfixOp{700, Assoc::XFX, "\\="};
+    return InfixOp{.prec = 700, .assoc = Assoc::XFX, .name = "\\="};
   case TokenKind::StrictEqual:
-    return InfixOp{700, Assoc::XFX, "=="};
+    return InfixOp{.prec = 700, .assoc = Assoc::XFX, .name = "=="};
   case TokenKind::StrictNotEqual:
-    return InfixOp{700, Assoc::XFX, "\\=="};
+    return InfixOp{.prec = 700, .assoc = Assoc::XFX, .name = "\\=="};
   case TokenKind::Univ:
-    return InfixOp{700, Assoc::XFX, "=.."};
+    return InfixOp{.prec = 700, .assoc = Assoc::XFX, .name = "=.."};
   case TokenKind::Is:
-    return InfixOp{700, Assoc::XFX, "is"};
+    return InfixOp{.prec = 700, .assoc = Assoc::XFX, .name = "is"};
   case TokenKind::EqualArith:
-    return InfixOp{700, Assoc::XFX, "=:="};
+    return InfixOp{.prec = 700, .assoc = Assoc::XFX, .name = "=:="};
   case TokenKind::NotEqualArith:
-    return InfixOp{700, Assoc::XFX, "=\\="};
+    return InfixOp{.prec = 700, .assoc = Assoc::XFX, .name = "=\\="};
   case TokenKind::Less:
-    return InfixOp{700, Assoc::XFX, "<"};
+    return InfixOp{.prec = 700, .assoc = Assoc::XFX, .name = "<"};
   case TokenKind::Greater:
-    return InfixOp{700, Assoc::XFX, ">"};
+    return InfixOp{.prec = 700, .assoc = Assoc::XFX, .name = ">"};
   case TokenKind::LessEqual:
-    return InfixOp{700, Assoc::XFX, "=<"};
+    return InfixOp{.prec = 700, .assoc = Assoc::XFX, .name = "=<"};
   case TokenKind::GreaterEqual:
-    return InfixOp{700, Assoc::XFX, ">="};
+    return InfixOp{.prec = 700, .assoc = Assoc::XFX, .name = ">="};
   case TokenKind::Plus:
-    return InfixOp{500, Assoc::YFX, "+"};
+    return InfixOp{.prec = 500, .assoc = Assoc::YFX, .name = "+"};
   case TokenKind::Minus:
-    return InfixOp{500, Assoc::YFX, "-"};
+    return InfixOp{.prec = 500, .assoc = Assoc::YFX, .name = "-"};
   case TokenKind::BitAnd:
-    return InfixOp{500, Assoc::YFX, "/\\"};
+    return InfixOp{.prec = 500, .assoc = Assoc::YFX, .name = "/\\"};
   case TokenKind::BitOr:
-    return InfixOp{500, Assoc::YFX, "\\/"};
+    return InfixOp{.prec = 500, .assoc = Assoc::YFX, .name = "\\/"};
   case TokenKind::Star:
-    return InfixOp{400, Assoc::YFX, "*"};
+    return InfixOp{.prec = 400, .assoc = Assoc::YFX, .name = "*"};
   case TokenKind::Slash:
-    return InfixOp{400, Assoc::YFX, "/"};
+    return InfixOp{.prec = 400, .assoc = Assoc::YFX, .name = "/"};
   case TokenKind::IntDiv:
-    return InfixOp{400, Assoc::YFX, "//"};
+    return InfixOp{.prec = 400, .assoc = Assoc::YFX, .name = "//"};
   case TokenKind::Mod:
-    return InfixOp{400, Assoc::YFX, "mod"};
+    return InfixOp{.prec = 400, .assoc = Assoc::YFX, .name = "mod"};
   case TokenKind::Rem:
-    return InfixOp{400, Assoc::YFX, "rem"};
+    return InfixOp{.prec = 400, .assoc = Assoc::YFX, .name = "rem"};
   case TokenKind::BitShiftLeft:
-    return InfixOp{400, Assoc::YFX, "<<"};
+    return InfixOp{.prec = 400, .assoc = Assoc::YFX, .name = "<<"};
   case TokenKind::BitShiftRight:
-    return InfixOp{400, Assoc::YFX, ">>"};
+    return InfixOp{.prec = 400, .assoc = Assoc::YFX, .name = ">>"};
   case TokenKind::Power:
-    return InfixOp{200, Assoc::XFX, "**"};
+    return InfixOp{.prec = 200, .assoc = Assoc::XFX, .name = "**"};
   default:
     return std::nullopt;
   }
@@ -102,15 +102,15 @@ std::optional<InfixOp> getInfixOp(TokenKind kind) {
 std::optional<PrefixOp> getPrefixOp(TokenKind kind) {
   switch (kind) {
   case TokenKind::Neck:
-    return PrefixOp{1200, Assoc::FX, ":-"};
+    return PrefixOp{.prec = 1200, .assoc = Assoc::FX, .name = ":-"};
   case TokenKind::Query:
-    return PrefixOp{1200, Assoc::FX, "?-"};
+    return PrefixOp{.prec = 1200, .assoc = Assoc::FX, .name = "?-"};
   case TokenKind::Not:
-    return PrefixOp{900, Assoc::FY, "\\+"};
+    return PrefixOp{.prec = 900, .assoc = Assoc::FY, .name = "\\+"};
   case TokenKind::Minus:
-    return PrefixOp{200, Assoc::FY, "-"};
+    return PrefixOp{.prec = 200, .assoc = Assoc::FY, .name = "-"};
   case TokenKind::Plus:
-    return PrefixOp{200, Assoc::FY, "+"};
+    return PrefixOp{.prec = 200, .assoc = Assoc::FY, .name = "+"};
   default:
     return std::nullopt;
   }
@@ -223,7 +223,8 @@ Term Parser::parseTerm(int maxPrecedence) {
     int rightPrec =
         (prefOp->assoc == Assoc::FY) ? prefOp->prec : prefOp->prec - 1;
     Term operand = parseTerm(rightPrec);
-    left         = Term(Compound{std::string(prefOp->name), {operand}});
+    left =
+        Term(Compound{.functor = std::string(prefOp->name), .args = {operand}});
   } else {
     left = parsePrimary();
   }
@@ -246,7 +247,8 @@ Term Parser::parseTerm(int maxPrecedence) {
     }
 
     Term right = parseTerm(rightPrec);
-    left       = Term(Compound{std::string(infOp->name), {left, right}});
+    left       = Term(
+        Compound{.functor = std::string(infOp->name), .args = {left, right}});
   }
 
   return left;
@@ -266,7 +268,8 @@ Term Parser::parsePrimary() {
       advance(); // Consume '('
       std::vector<Term> args = parseArgumentList();
       expect(TokenKind::CloseParen, "Expected ')' after arguments");
-      return Term(Compound{std::string(tok.stringValue), std::move(args)});
+      return Term(Compound{.functor = std::string(tok.stringValue),
+                           .args    = std::move(args)});
     }
     return Term(Atom{std::string(tok.stringValue)});
   }
@@ -285,7 +288,7 @@ Term Parser::parsePrimary() {
   case TokenKind::OpenBrace: {
     Term inner = parseTerm(1200);
     expect(TokenKind::CloseBrace, "Expected '}' after block term");
-    return Term(Compound{"{}", {inner}});
+    return Term(Compound{.functor = "{}", .args = {inner}});
   }
   default:
     throw ParseError(std::string("Unexpected token '") + std::string(tok.text) +
@@ -326,13 +329,13 @@ Term Parser::parseList() {
     if (match(TokenKind::Pipe)) {
       tail = std::make_shared<Term>(parseTerm(999));
       expect(TokenKind::CloseBracket, "Expected ']' after list tail");
-      return Term(List{std::move(elements), tail});
+      return Term(List{.elements = std::move(elements), .tail = tail});
     }
     break;
   }
 
   expect(TokenKind::CloseBracket, "Expected ']' at end of list");
-  return Term(List{std::move(elements), nullptr});
+  return Term(List{.elements = std::move(elements), .tail = nullptr});
 }
 
 Term Parser::parseParenthesized() {

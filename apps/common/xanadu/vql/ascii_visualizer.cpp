@@ -156,7 +156,7 @@ std::string AsciiVisualizer::renderCellConnections(
         zigzag::CellRef curr = q.front();
         q.pop();
         auto [cx, cy] = posMap[curr];
-        if (cy > compMaxY) compMaxY = cy;
+        compMaxY      = std::max(cy, compMaxY);
 
         // Explore along dimX
         if (dimX != zigzag::noCell) {

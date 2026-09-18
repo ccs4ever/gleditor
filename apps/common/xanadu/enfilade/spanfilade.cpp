@@ -61,8 +61,9 @@ void ScrollSpanfilade::bulkLoad(std::vector<SpanEntry> newEntries) {
       const auto entryIdx = static_cast<uint32_t>(i + j);
       leaf.children[j]    = entryIdx;
       leaf.dsps[j]        = SpanDsp{0};
-      leaf.wids[j] =
-          SpanWid{entries_[entryIdx].start, entries_[entryIdx].end(), 1};
+      leaf.wids[j]        = SpanWid{.minStart = entries_[entryIdx].start,
+                                    .maxEnd   = entries_[entryIdx].end(),
+                                    .count    = 1};
     }
 
     const auto nodeIdx = static_cast<uint32_t>(nodes_.size());
@@ -304,7 +305,7 @@ std::vector<Extent> Spanfilade::occurrencesOf(const PrimediaSpan &span,
       const auto extentStart = entry.docOffset + into;
       const auto extentEnd =
           extentStart + static_cast<std::uint32_t>(sharedLen);
-      found.push_back(Extent{extentStart, extentEnd});
+      found.push_back(Extent{.start = extentStart, .end = extentEnd});
     }
   }
 
@@ -460,7 +461,8 @@ void Spanfilade::placeTransclusions(
           endPtV = UniversalLinkEnd::forCell(refV, startV, endV, pV.spanIndex);
         }
 
-        const PrimediaSpan sharedSpan{scrollId, sharedStart, sharedLen};
+        const PrimediaSpan sharedSpan{
+            .scroll = scrollId, .start = sharedStart, .length = sharedLen};
         const auto bucketKey =
             std::make_pair(std::make_pair(endPtU.kind, endPtU.targetId),
                            std::make_pair(endPtV.kind, endPtV.targetId));

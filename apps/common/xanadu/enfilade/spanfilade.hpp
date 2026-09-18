@@ -29,6 +29,7 @@
 #include <memory>
 #include <unordered_map>
 #include <unordered_set>
+#include <utility>
 #include <vector>
 
 #include "common/xanadu/enfilade/crum_node.hpp"
@@ -79,8 +80,9 @@ struct SpanWid {
     if (other.isEmpty()) {
       return *this;
     }
-    return SpanWid{std::min(minStart, other.minStart),
-                   std::max(maxEnd, other.maxEnd), count + other.count};
+    return SpanWid{.minStart = std::min(minStart, other.minStart),
+                   .maxEnd   = std::max(maxEnd, other.maxEnd),
+                   .count    = count + other.count};
   }
 
   [[nodiscard]] bool overlaps(const uint64_t start,
@@ -88,7 +90,7 @@ struct SpanWid {
     if (isEmpty() || start >= end) {
       return false;
     }
-    return !(end <= minStart || start >= maxEnd);
+    return end > minStart && start < maxEnd;
   }
 
   bool operator==(const SpanWid &) const = default;

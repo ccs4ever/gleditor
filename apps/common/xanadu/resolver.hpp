@@ -57,9 +57,9 @@ enum class ResolutionStatus : std::uint8_t {
 /// Result of resolving a span, including text or lock/hole metadata.
 struct ResolveResult {
   ResolutionStatus status{ResolutionStatus::VerifiedBytes};
-  std::string text{};
-  std::optional<TranscopyrightDescriptor> lockInfo{};
-  std::optional<PublishedHoleRecord> holeRecord{};
+  std::string text;
+  std::optional<TranscopyrightDescriptor> lockInfo;
+  std::optional<PublishedHoleRecord> holeRecord;
 
   [[nodiscard]] bool isVerified() const noexcept {
     return status == ResolutionStatus::VerifiedBytes;

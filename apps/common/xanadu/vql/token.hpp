@@ -81,11 +81,11 @@ enum class TokenKind : std::uint8_t {
 
 struct Token {
   TokenKind kind{TokenKind::EndOfFile};
-  std::string_view text{};
+  std::string_view text;
   SourceLocation loc{};
   std::int64_t intValue{0};
   double floatValue{0.0};
-  std::string stringValue{};
+  std::string stringValue;
 
   [[nodiscard]] bool is(TokenKind k) const noexcept { return kind == k; }
 };

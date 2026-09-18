@@ -65,7 +65,7 @@ SwarmCatalog::search(std::string_view query,
 
   for (auto &&res : results) {
     if (*category == CatalogCategory::RecentLocal) {
-      if (res.entry.bep46Uri.find("local") != std::string::npos ||
+      if (res.entry.bep46Uri.contains("local") ||
           res.entry.authorFingerprint.empty()) {
         filtered.push_back(std::move(res));
       }

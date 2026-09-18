@@ -139,9 +139,10 @@ std::optional<PrimediaSpan> decodeLocalSpan(const bencode::Value &value) {
       scroll->asInteger() < 0) {
     return std::nullopt;
   }
-  return PrimediaSpan{static_cast<ScrollId>(scroll->asInteger()),
-                      static_cast<std::uint64_t>(start->asInteger()),
-                      static_cast<std::uint64_t>(length->asInteger())};
+  return PrimediaSpan{.scroll = static_cast<ScrollId>(scroll->asInteger()),
+                      .start  = static_cast<std::uint64_t>(start->asInteger()),
+                      .length =
+                          static_cast<std::uint64_t>(length->asInteger())};
 }
 
 bencode::List encodeLocalSpans(const std::vector<PrimediaSpan> &spans) {

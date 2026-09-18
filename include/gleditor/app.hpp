@@ -106,7 +106,7 @@ public:
    *
    * @return Whether anything was bound.
    */
-  bool dispatch(int scancode, Mod mods) const;
+  [[nodiscard]] bool dispatch(int scancode, Mod mods) const;
 
   /**
    * @brief Run the command called @p name.
@@ -117,7 +117,7 @@ public:
    *
    * @return Whether anything is called that.
    */
-  bool run(std::string_view name) const;
+  [[nodiscard]] bool run(std::string_view name) const;
 
   /**
    * @brief Rebind an existing command named @p name to a new key combination.

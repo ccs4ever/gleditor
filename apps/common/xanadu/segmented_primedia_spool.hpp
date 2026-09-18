@@ -38,8 +38,9 @@ public:
 
   SegmentedPrimediaSpool(const SegmentedPrimediaSpool &)            = delete;
   SegmentedPrimediaSpool &operator=(const SegmentedPrimediaSpool &) = delete;
-  SegmentedPrimediaSpool(SegmentedPrimediaSpool &&) noexcept;
-  SegmentedPrimediaSpool &operator=(SegmentedPrimediaSpool &&) noexcept;
+  SegmentedPrimediaSpool(SegmentedPrimediaSpool && /*other*/) noexcept;
+  SegmentedPrimediaSpool &
+  operator=(SegmentedPrimediaSpool && /*other*/) noexcept;
 
   /**
    * @brief Append bytes to the active primedia segment.

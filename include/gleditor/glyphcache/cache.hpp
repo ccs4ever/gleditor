@@ -70,7 +70,7 @@ using FontPtr = text::FontFacePtr;
  */
 class FontMapKeyAdapter {
 private:
-  FontPtr font_{};
+  FontPtr font_;
   std::string key_;
   std::size_t hash_{};
 

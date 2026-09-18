@@ -44,8 +44,7 @@ public:
       const VkBufferUsageFlags usage = VK_BUFFER_USAGE_TRANSFER_SRC_BIT |
                                        VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT |
                                        VK_BUFFER_USAGE_VERTEX_BUFFER_BIT)
-      : device(dev), memoryProperties(memProperties), capacity(capacityBytes),
-        head(0) {
+      : device(dev), memoryProperties(memProperties), capacity(capacityBytes) {
     if (0 == capacity) {
       throw std::invalid_argument("StreamBufferVK: capacity cannot be zero");
     }
@@ -152,7 +151,7 @@ public:
   MappedChunkVK allocate(const std::size_t size,
                          const std::size_t alignment = 64) {
     if (0 == size) {
-      return {static_cast<std::byte *>(mapped) + head, head};
+      return {.ptr = static_cast<std::byte *>(mapped) + head, .offset = head};
     }
     if (size > capacity) {
       throw std::runtime_error(
@@ -173,7 +172,8 @@ public:
 
     const auto allocOffset = head;
     head += size;
-    return {static_cast<std::byte *>(mapped) + allocOffset, allocOffset};
+    return {.ptr    = static_cast<std::byte *>(mapped) + allocOffset,
+            .offset = allocOffset};
   }
 
   /// Register a fence guarding the chunk range [offset, offset + size).
@@ -182,7 +182,8 @@ public:
     if (0 == size || VK_NULL_HANDLE == fence) {
       return;
     }
-    syncs.push_back(SyncSegmentVK{fence, offset, size});
+    syncs.push_back(
+        SyncSegmentVK{.fence = fence, .offset = offset, .size = size});
   }
 
   /// Wait on all outstanding sync fences and release tracking.

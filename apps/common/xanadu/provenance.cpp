@@ -23,7 +23,7 @@
 #include <utility>
 #include <vector>
 
-#if defined(_WIN32)
+#ifdef _WIN32
 // NOMINMAX: windows.h's own min/max macros would otherwise shadow
 // std::max below, and silently pick the wrong one. MinGW predefines this
 // already; MSVC, if this is ever built with it, does not.
@@ -39,7 +39,6 @@
 #include <sys/wait.h>
 #include <unistd.h>
 
-extern char **environ;
 #endif
 
 #include <openssl/sha.h>
@@ -66,7 +65,7 @@ struct Ran {
   }
 };
 
-#if defined(_WIN32)
+#ifdef _WIN32
 
 /**
  * @brief An argv element, converted to UTF-16 and quoted as one token of a
@@ -320,7 +319,7 @@ public:
   Scratch(const std::string &suffix, const std::string_view contents) {
     static int counter = 0;
     path               = std::filesystem::temp_directory_path() /
-#if defined(_WIN32)
+#ifdef _WIN32
            std::format("xudu-{}-{}{}", _getpid(), counter++, suffix);
 #else
            std::format("xudu-{}-{}{}", getpid(), counter++, suffix);
@@ -502,7 +501,8 @@ std::vector<SigningKey> signingKeys(const SigningOptions &where) {
       continue;
     }
     if ("fpr" == fields[0] && canSign && fields.size() > 9) {
-      keys.push_back(SigningKey{fields[9], {}, false});
+      keys.push_back(SigningKey{
+          .fingerprint = fields[9], .identity = {}, .preferred = false});
       continue;
     }
     if ("uid" == fields[0] && !keys.empty() && keys.back().identity.empty() &&

@@ -42,8 +42,7 @@ public:
         isFloat_(isFloat) {}
 
   ScalarExpr(SourceLocation loc, std::int64_t val)
-      : AstNode(loc), floatVal_(static_cast<double>(val)), intVal_(val),
-        isFloat_(false) {}
+      : AstNode(loc), floatVal_(static_cast<double>(val)), intVal_(val) {}
 
   ScalarExpr(SourceLocation loc, std::string strVal)
       : AstNode(loc), stringVal_(std::move(strVal)), isString_(true) {}
@@ -61,7 +60,7 @@ public:
 private:
   double floatVal_{0.0};
   std::int64_t intVal_{0};
-  std::string stringVal_{};
+  std::string stringVal_;
   bool isFloat_{false};
   bool isString_{false};
 };

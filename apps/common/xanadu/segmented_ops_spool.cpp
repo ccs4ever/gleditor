@@ -11,7 +11,7 @@
 #include <sys/stat.h>
 #include <unistd.h>
 
-#if defined(_WIN32)
+#ifdef _WIN32
 #include <io.h> // _commit
 #endif
 
@@ -120,7 +120,8 @@ readSegmentShape(const int fd, const std::uint64_t fileSize, std::string &why) {
     why = "holds more operations than an index can name";
     return std::nullopt;
   }
-  return SegmentShape{header, static_cast<std::uint32_t>(present)};
+  return SegmentShape{.header = header,
+                      .nodes  = static_cast<std::uint32_t>(present)};
 }
 
 /// The header a segment starting at @p firstOpIndex and holding @p nodeCount
@@ -180,7 +181,7 @@ SpoolExhausted::SpoolExhausted(const std::uint32_t heldOps,
 SegmentedOpsSpool::SegmentedOpsSpool(const std::size_t reservationBytes)
     : reservationBytes(reservationBytes) {
   reserveArena();
-  indexLookup.push_back(MicroversionId{}); // Index 0 represents state zero
+  indexLookup.emplace_back(); // Index 0 represents state zero
   tree.emplace_back();
 }
 
@@ -205,7 +206,7 @@ SegmentedOpsSpool::SegmentedOpsSpool(SegmentedOpsSpool &&other) noexcept
   // -- so the index-0 sentinel the constructor promised has to be put back,
   // or the next append() on the moved-from object would misfile everything
   // one slot short of where idOf() expects to find it.
-  other.indexLookup.push_back(MicroversionId{});
+  other.indexLookup.emplace_back();
   other.tree.emplace_back();
 }
 
@@ -232,7 +233,7 @@ SegmentedOpsSpool::operator=(SegmentedOpsSpool &&other) noexcept {
     other.activeFd         = -1;
     other.activeStartIndex = 1;
     other.activeFlushedOps = 0;
-    other.indexLookup.push_back(MicroversionId{});
+    other.indexLookup.emplace_back();
     other.tree.emplace_back();
   }
   return *this;
@@ -707,7 +708,7 @@ bool SegmentedOpsSpool::flush() {
   if (activeFd >= 0 && !activePath.empty()) {
     // MinGW's io.h has no fsync(); _commit() is its file-durability
     // equivalent.
-#if defined(_WIN32)
+#ifdef _WIN32
     ::_commit(activeFd);
 #else
     ::fsync(activeFd);
@@ -754,7 +755,7 @@ void SegmentedOpsSpool::clear() {
   }
   segmentList.clear();
   indexLookup.clear();
-  indexLookup.push_back(MicroversionId{});
+  indexLookup.emplace_back();
   tree.clear();
   tree.emplace_back();
   idHashSlots.clear();

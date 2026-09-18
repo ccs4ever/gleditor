@@ -108,7 +108,7 @@ inline std::optional<Color3> parseHexColor(const std::string_view text,
     const auto channel3 = [&](const std::size_t i) {
       return static_cast<float>(nibble(hex[i]) * 17U) / 255.0F;
     };
-    return Color3{channel3(0), channel3(1), channel3(2)};
+    return Color3{.r = channel3(0), .g = channel3(1), .b = channel3(2)};
   }
 
   if (hex.size() != 6) {
@@ -125,7 +125,7 @@ inline std::optional<Color3> parseHexColor(const std::string_view text,
            255.0F;
   };
 
-  return Color3{channel6(0), channel6(2), channel6(4)};
+  return Color3{.r = channel6(0), .g = channel6(2), .b = channel6(4)};
 }
 
 /**

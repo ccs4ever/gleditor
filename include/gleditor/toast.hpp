@@ -66,7 +66,7 @@ public:
    * @param aFontName Pango font description the text is laid out with.
    */
   ToastOverlay(render::RenderDevice *aDevice, std::string aFontName);
-  ~ToastOverlay();
+  ~ToastOverlay() override;
 
   ToastOverlay(const ToastOverlay &)            = delete;
   ToastOverlay &operator=(const ToastOverlay &) = delete;

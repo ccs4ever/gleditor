@@ -70,8 +70,9 @@ public:
    * the machine might allow.
    */
   [[nodiscard]] DeviceCapabilities capabilities() const override {
-    return DeviceCapabilities{recorders.parallelism() > 1,
-                              recorders.parallelism()};
+    return DeviceCapabilities{.parallelCommandRecording =
+                                  recorders.parallelism() > 1,
+                              .recordingThreads = recorders.parallelism()};
   }
 
   void initialize(AutoSDLWindow &window) override;
@@ -272,7 +273,7 @@ private:
         return std::numeric_limits<double>::infinity();
       }
       auto sorted = samples;
-      const auto middle =
+      auto *const middle =
           sorted.begin() + static_cast<std::ptrdiff_t>(count / 2);
       std::nth_element(sorted.begin(), middle,
                        sorted.begin() + static_cast<std::ptrdiff_t>(count));

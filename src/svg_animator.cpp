@@ -2,6 +2,7 @@
  * @file svg_animator.cpp
  * @brief Vector animation and animated SVG (SMIL) playback engine via ThorVG.
  */
+#include <algorithm>
 #include <gleditor/color.hpp>
 #include <gleditor/svg_animator.hpp>
 
@@ -31,14 +32,14 @@ std::mutex initMutex;
 int initRefCount = 0;
 
 void thorvgRef() {
-  const std::lock_guard<std::mutex> lock(initMutex);
+  const std::scoped_lock lock(initMutex);
   if (0 == initRefCount++) {
     tvg::Initializer::init();
   }
 }
 
 void thorvgUnref() {
-  const std::lock_guard<std::mutex> lock(initMutex);
+  const std::scoped_lock lock(initMutex);
   if (0 == --initRefCount) {
     tvg::Initializer::term();
   }
@@ -147,8 +148,12 @@ std::string formatHexColor(float r, float g, float b) {
 
 std::string interpolateValue(std::string_view fromStr, std::string_view toStr,
                              float progress) {
-  float r1 = 0.0F, g1 = 0.0F, b1 = 0.0F;
-  float r2 = 0.0F, g2 = 0.0F, b2 = 0.0F;
+  float r1 = 0.0F;
+  float g1 = 0.0F;
+  float b1 = 0.0F;
+  float r2 = 0.0F;
+  float g2 = 0.0F;
+  float b2 = 0.0F;
   if (parseHexColor(fromStr, r1, g1, b1) && parseHexColor(toStr, r2, g2, b2)) {
     return formatHexColor(r1 + (r2 - r1) * progress, g1 + (g2 - g1) * progress,
                           b1 + (b2 - b1) * progress);
@@ -327,7 +332,7 @@ std::unique_ptr<SvgNode> parseXml(std::string_view xml) {
           // <!-- comment -->
           i += 4;
           while (i + 2 < len &&
-                 !(xml[i] == '-' && xml[i + 1] == '-' && xml[i + 2] == '>')) {
+                 (xml[i] != '-' || xml[i + 1] != '-' || xml[i + 2] != '>')) {
             ++i;
           }
           i = std::min(i + 3, len);
@@ -344,7 +349,7 @@ std::unique_ptr<SvgNode> parseXml(std::string_view xml) {
       }
       if (i + 1 < len && xml[i + 1] == '?') {
         // <?xml ... ?>
-        while (i + 1 < len && !(xml[i] == '?' && xml[i + 1] == '>')) {
+        while (i + 1 < len && (xml[i] != '?' || xml[i + 1] != '>')) {
           ++i;
         }
         i = std::min(i + 2, len);
@@ -703,15 +708,11 @@ bool SvgAnimator::isAnimated(std::span<const std::uint8_t> bytes) {
   // <animateTransform>, etc.)
   const std::string_view sv(reinterpret_cast<const char *>(bytes.data()),
                             bytes.size());
-  if (sv.find("<svg") != std::string_view::npos ||
-      sv.find("<SVG") != std::string_view::npos) {
-    if (sv.find("<animate") != std::string_view::npos ||
-        sv.find("<animateTransform") != std::string_view::npos ||
-        sv.find("<animateMotion") != std::string_view::npos ||
-        sv.find("<animateColor") != std::string_view::npos ||
-        sv.find("<set ") != std::string_view::npos ||
-        sv.find("<set\t") != std::string_view::npos ||
-        sv.find("<set\n") != std::string_view::npos) {
+  if (sv.contains("<svg") || sv.contains("<SVG")) {
+    if (sv.contains("<animate") || sv.contains("<animateTransform") ||
+        sv.contains("<animateMotion") || sv.contains("<animateColor") ||
+        sv.contains("<set ") || sv.contains("<set\t") ||
+        sv.contains("<set\n")) {
       return true;
     }
   }
@@ -801,7 +802,8 @@ SvgAnimator::load(std::span<const std::uint8_t> bytes) {
                                    static_cast<std::uint32_t>(bytes.size()),
                                    "svg+xml", nullptr, true);
     if (tvg::Result::Success == res) {
-      float w = 0.0F, h = 0.0F;
+      float w = 0.0F;
+      float h = 0.0F;
       picture->size(&w, &h);
       width  = static_cast<int>(std::round(w));
       height = static_cast<int>(std::round(h));

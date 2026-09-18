@@ -50,8 +50,8 @@ public:
   EnginePipeline();
   ~EnginePipeline();
 
-  EnginePipeline(const EnginePipeline &);
-  EnginePipeline &operator=(const EnginePipeline &);
+  EnginePipeline(const EnginePipeline & /*other*/);
+  EnginePipeline &operator=(const EnginePipeline & /*other*/);
   EnginePipeline(EnginePipeline &&) noexcept;
   EnginePipeline &operator=(EnginePipeline &&) noexcept;
 
@@ -183,8 +183,8 @@ public:
   HashcashEngine();
   ~HashcashEngine();
 
-  HashcashEngine(const HashcashEngine &);
-  HashcashEngine &operator=(const HashcashEngine &);
+  HashcashEngine(const HashcashEngine & /*other*/);
+  HashcashEngine &operator=(const HashcashEngine & /*other*/);
   HashcashEngine(HashcashEngine &&) noexcept;
   HashcashEngine &operator=(HashcashEngine &&) noexcept;
 

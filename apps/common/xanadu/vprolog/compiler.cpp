@@ -190,7 +190,7 @@ CompiledQuery Compiler::compileQuery(const Clause &queryClause) {
   for (const auto &name : varNames) {
     auto it = varMap.find(name);
     if (it != varMap.end()) {
-      result.variables.push_back({name, it->second});
+      result.variables.emplace_back(name, it->second);
     }
   }
 

@@ -18,17 +18,20 @@
 namespace common::yaml {
 
 inline void rymlErrorHandler(const c4::csubstr msg,
-                             const c4::yml::ErrorDataBasic &, void *) {
+                             const c4::yml::ErrorDataBasic & /*unused*/,
+                             void * /*unused*/) {
   throw std::runtime_error(std::string{msg.str, msg.len});
 }
 
 inline void rymlParseErrorHandler(const c4::csubstr msg,
-                                  const c4::yml::ErrorDataParse &, void *) {
+                                  const c4::yml::ErrorDataParse & /*unused*/,
+                                  void * /*unused*/) {
   throw std::runtime_error(std::string{msg.str, msg.len});
 }
 
 inline void rymlVisitErrorHandler(const c4::csubstr msg,
-                                  const c4::yml::ErrorDataVisit &, void *) {
+                                  const c4::yml::ErrorDataVisit & /*unused*/,
+                                  void * /*unused*/) {
   throw std::runtime_error(std::string{msg.str, msg.len});
 }
 
@@ -38,8 +41,8 @@ inline void rymlVisitErrorHandler(const c4::csubstr msg,
  */
 struct ScopedCallbacks {
   c4::yml::Callbacks prev;
-  ScopedCallbacks() {
-    prev = c4::yml::get_callbacks();
+  ScopedCallbacks() : prev(c4::yml::get_callbacks()) {
+
     c4::yml::Callbacks cb;
     cb.m_error_basic = rymlErrorHandler;
     cb.m_error_parse = rymlParseErrorHandler;

@@ -136,7 +136,7 @@ extractPaddedCoverage(const std::span<const unsigned char> surface,
                            ? static_cast<float>(static_cast<double>(totalInk) /
                                                 (255.0 * totalPixels))
                            : 0.0F;
-  return PaddedCoverage{std::move(padded), meanInk};
+  return PaddedCoverage{.data = std::move(padded), .meanInk = meanInk};
 }
 
 /// Paint rows [top, top + thickness) of a width * height, stride-wide 8-bit
@@ -186,7 +186,7 @@ resolveRealVariant(const FontPtr &font,
   const bool wantBold   = decorations.contains(Decoration::Bold);
   const bool wantItalic = decorations.contains(Decoration::Italic);
   if (!wantBold && !wantItalic) {
-    return {font, decorations};
+    return {.font = font, .stillSynthetic = decorations};
   }
 
   auto spec = std::format("{} {:.1f}", font->family(), font->pointSize());
@@ -203,10 +203,10 @@ resolveRealVariant(const FontPtr &font,
   } catch (const std::exception &error) {
     std::cerr << "glyph cache: could not resolve \"" << spec
               << "\", synthesising instead: " << error.what() << "\n";
-    return {font, decorations};
+    return {.font = font, .stillSynthetic = decorations};
   }
   if (!candidate || nullptr == candidate->face()) {
-    return {font, decorations};
+    return {.font = font, .stillSynthetic = decorations};
   }
 
   const auto flags     = candidate->face()->style_flags;
@@ -216,7 +216,7 @@ resolveRealVariant(const FontPtr &font,
     // Fontconfig matched something -- it always does -- but not a file that
     // actually carries either style bit asked for. Switching to it would
     // change nothing but the shaping metrics, to no benefit.
-    return {font, decorations};
+    return {.font = font, .stillSynthetic = decorations};
   }
 
   auto remaining = decorations;
@@ -226,7 +226,7 @@ resolveRealVariant(const FontPtr &font,
   if (gotItalic) {
     remaining.erase(Decoration::Italic);
   }
-  return {candidate, std::move(remaining)};
+  return {.font = candidate, .stillSynthetic = std::move(remaining)};
 }
 
 } // namespace
@@ -276,8 +276,8 @@ auto GlyphCache::getBestPalette(const Rect &charBox) {
   if (palettes.size() < static_cast<unsigned long>(layerCount)) {
     // Layers are handed out in creation order; the palette keeps its own index
     // so that sorting the vector cannot detach a palette from its layer.
-    palettes.emplace_back(Rect{Length{size}, Length{size}}, device, texture,
-                          static_cast<int>(palettes.size()));
+    palettes.emplace_back(Rect{.width = Length{size}, .height = Length{size}},
+                          device, texture, static_cast<int>(palettes.size()));
     // The sort moves the new palette somewhere unpredictable -- palettes with
     // equal fill compare equivalent and std::sort is not stable -- so look it
     // up again rather than assuming it is still the last element.
@@ -322,7 +322,7 @@ void GlyphCache::reallocate(const int newSize, const int newLayers) {
   // from y = 0 and fill right from x = 0, so a larger layer is room added
   // beyond what is used, never a shuffle of what is there.
   for (auto &palette : palettes) {
-    palette.grow(Rect{Length{size}, Length{size}}, texture);
+    palette.grow(Rect{.width = Length{size}, .height = Length{size}}, texture);
   }
   for (const auto &placed : placements) {
     device->updateTextureLayer(texture, placed.layer, placed.x, placed.y,
@@ -368,8 +368,12 @@ GlyphCache::addToCache(const std::string &chr, const FontPtr &font,
                        const std::unordered_set<Decoration> &decorations) {
   if (!font || chr.empty()) {
     const auto empty =
-        Sizes{TextureCoords{}, Rect{Length{0}, Length{0}}, 0, 0.0F};
-    glyphs[chr][keyFor(font)].push_back(DecoratedSizes{decorations, empty});
+        Sizes{.texCoords = TextureCoords{},
+              .dims      = Rect{.width = Length{0}, .height = Length{0}},
+              .layer     = 0,
+              .ink       = 0.0F};
+    glyphs[chr][keyFor(font)].push_back(
+        DecoratedSizes{.decorations = decorations, .sizes = empty});
     return empty;
   }
 
@@ -395,15 +399,21 @@ GlyphCache::addToCache(const std::string &chr, const FontPtr &font,
   if (0 == glyphCount) {
     hb_buffer_destroy(buf);
     const auto empty =
-        Sizes{TextureCoords{}, Rect{Length{0}, Length{0}}, 0, 0.0F};
-    glyphs[chr][keyFor(font)].push_back(DecoratedSizes{decorations, empty});
+        Sizes{.texCoords = TextureCoords{},
+              .dims      = Rect{.width = Length{0}, .height = Length{0}},
+              .layer     = 0,
+              .ink       = 0.0F};
+    glyphs[chr][keyFor(font)].push_back(
+        DecoratedSizes{.decorations = decorations, .sizes = empty});
     return empty;
   }
 
   FT_Face face = useFont->face();
   int penX     = 0;
-  int minX = 0, maxX = 0;
-  int minY = 0, maxY = 0;
+  int minX     = 0;
+  int maxX     = 0;
+  int minY     = 0;
+  int maxY     = 0;
 
   struct RenderedGlyph {
     FT_BitmapGlyph bitmapGlyph{};
@@ -487,7 +497,7 @@ GlyphCache::addToCache(const std::string &chr, const FontPtr &font,
       FT_Done_Glyph(glyph);
       continue;
     }
-    auto bg    = reinterpret_cast<FT_BitmapGlyph>(glyph);
+    auto *bg   = reinterpret_cast<FT_BitmapGlyph>(glyph);
     int gx     = penX + offX + bg->left;
     int gy     = offY + bg->top;
     int right  = gx + static_cast<int>(bg->bitmap.width);
@@ -498,7 +508,7 @@ GlyphCache::addToCache(const std::string &chr, const FontPtr &font,
     maxY = rendered.empty() ? gy : std::max(maxY, gy);
     minY = rendered.empty() ? bottom : std::min(minY, bottom);
 
-    rendered.push_back({bg, gx, gy});
+    rendered.push_back({.bitmapGlyph = bg, .x = gx, .y = gy});
     if (advX == 0 && bg->bitmap.width > 0) {
       advX = static_cast<int>(bg->bitmap.width);
     }
@@ -523,13 +533,15 @@ GlyphCache::addToCache(const std::string &chr, const FontPtr &font,
     width = penX > 0 ? penX : 0;
   }
 
-  const auto extents = Rect{Length{width}, Length{height}};
+  const auto extents = Rect{.width = Length{width}, .height = Length{height}};
   if (0 == width) {
     for (auto &r : rendered) {
       FT_Done_Glyph(reinterpret_cast<FT_Glyph>(r.bitmapGlyph));
     }
-    const auto empty = Sizes{TextureCoords{}, extents, 0, 0.0F};
-    glyphs[chr][keyFor(font)].push_back(DecoratedSizes{decorations, empty});
+    const auto empty = Sizes{
+        .texCoords = TextureCoords{}, .dims = extents, .layer = 0, .ink = 0.0F};
+    glyphs[chr][keyFor(font)].push_back(
+        DecoratedSizes{.decorations = decorations, .sizes = empty});
     return empty;
   }
 
@@ -539,7 +551,7 @@ GlyphCache::addToCache(const std::string &chr, const FontPtr &font,
 
   const int xShift = minX < 0 ? -minX : 0;
   for (auto &r : rendered) {
-    auto bg  = r.bitmapGlyph;
+    auto *bg = r.bitmapGlyph;
     int dstX = r.x + xShift;
     int dstY = baselineY - r.y;
 
@@ -618,8 +630,8 @@ GlyphCache::addToCache(const std::string &chr, const FontPtr &font,
   // palette packs the padded box and knows nothing about the padding; the
   // texture coordinates handed back to the shader are narrowed to the glyph
   // itself below, so nothing downstream sees the border either.
-  const auto padded = Rect{Length{width + (2 * glyphPadding)},
-                           Length{height + (2 * glyphPadding)}};
+  const auto padded = Rect{.width  = Length{width + (2 * glyphPadding)},
+                           .height = Length{height + (2 * glyphPadding)}};
   makeRoomFor(padded);
   const auto palette = getBestPalette(padded);
   if (palettes.end() == palette) {
@@ -634,24 +646,30 @@ GlyphCache::addToCache(const std::string &chr, const FontPtr &font,
   }
   const auto inked = paddedCoverage.meanInk;
   // Remembered so that growing the atlas can put it back exactly here.
-  placements.push_back(Placement{
-      palette->layerIndex(), static_cast<int>(placed->topLeft.x),
-      static_cast<int>(placed->topLeft.y), std::to_underlying(padded.width),
-      std::to_underlying(padded.height), std::move(paddedCoverage.data)});
+  placements.push_back(Placement{.layer  = palette->layerIndex(),
+                                 .x      = static_cast<int>(placed->topLeft.x),
+                                 .y      = static_cast<int>(placed->topLeft.y),
+                                 .width  = std::to_underlying(padded.width),
+                                 .height = std::to_underlying(padded.height),
+                                 .coverage = std::move(paddedCoverage.data)});
 
   // Narrow the placed rectangle from the padded box to the glyph inside it.
   // Texels, so that growing the atlas leaves this glyph where it is; the
   // shader divides by the texture's own size when it samples.
-  const auto inner =
-      TextureCoords{PointF{placed->topLeft.x + glyphPadding,
-                           placed->topLeft.y + glyphPadding},
-                    RectF{placed->box.width - (2 * glyphPadding),
-                          placed->box.height - (2 * glyphPadding)}};
+  const auto inner = TextureCoords{
+      .topLeft = PointF{.x = placed->topLeft.x + glyphPadding,
+                        .y = placed->topLeft.y + glyphPadding},
+      .box     = RectF{.width  = placed->box.width - (2 * glyphPadding),
+                       .height = placed->box.height - (2 * glyphPadding)}};
 
-  const auto sizes = Sizes{inner, extents, palette->layerIndex(), inked};
+  const auto sizes = Sizes{.texCoords = inner,
+                           .dims      = extents,
+                           .layer     = palette->layerIndex(),
+                           .ink       = inked};
   // Level zero moved, so the chain below it is stale until it is rebuilt.
   atlasDirty = true;
-  glyphs[chr][keyFor(font)].push_back(DecoratedSizes{decorations, sizes});
+  glyphs[chr][keyFor(font)].push_back(
+      DecoratedSizes{.decorations = decorations, .sizes = sizes});
   return sizes;
 }
 

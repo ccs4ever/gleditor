@@ -209,7 +209,8 @@ public:
    * existing, independent meaning regardless of what pieces() returns.
    */
   [[nodiscard]] virtual std::vector<ContentPiece> pieces() const {
-    return {ContentPiece{text(), {}, false}};
+    return {
+        ContentPiece{.bytes = text(), .mimeType = {}, .pageBreakAfter = false}};
   }
 };
 

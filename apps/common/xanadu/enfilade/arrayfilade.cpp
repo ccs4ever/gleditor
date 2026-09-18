@@ -4,6 +4,7 @@
  */
 #include "common/xanadu/enfilade/arrayfilade.hpp"
 
+#include <algorithm>
 #include <cmath>
 #include <limits>
 #include <queue>

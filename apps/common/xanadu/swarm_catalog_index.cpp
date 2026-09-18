@@ -204,7 +204,7 @@ struct SwarmCatalogIndex::Impl {
     }
   }
 
-  void initSchema() {
+  void initSchema() const {
     static constexpr const char *kSchema = R"(
       CREATE VIRTUAL TABLE IF NOT EXISTS publications_fts USING fts5(
           infoHash UNINDEXED,

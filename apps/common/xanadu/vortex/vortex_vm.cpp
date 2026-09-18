@@ -50,7 +50,7 @@ CellRef resolveCell(const std::vector<CellRef> &inCells,
     }
   }
   if (idx < inputs.size()) {
-    CellRef c = static_cast<CellRef>(toInt(inputs[idx]));
+    auto c = static_cast<CellRef>(toInt(inputs[idx]));
     if (arena.contains(c)) {
       return c;
     }
@@ -165,7 +165,7 @@ void VortexVM::enableMemoization(CellRef opcode, std::string_view memoKey) {
 }
 
 bool VortexVM::isMemoized(CellRef opcode) const {
-  return memoizedOps_.find(opcode) != memoizedOps_.end();
+  return memoizedOps_.contains(opcode);
 }
 
 std::string VortexVM::getMemoKey(CellRef opcode) const {
@@ -307,13 +307,13 @@ ExecutionResult VortexVM::executeOpcodeBody(
     if (inputs.size() >= 2) {
       if (std::holds_alternative<std::string>(inputs[0]) &&
           std::holds_alternative<std::string>(inputs[1])) {
-        outputs.push_back(std::get<std::string>(inputs[0]) +
-                          std::get<std::string>(inputs[1]));
+        outputs.emplace_back(std::get<std::string>(inputs[0]) +
+                             std::get<std::string>(inputs[1]));
       } else if (std::holds_alternative<double>(inputs[0]) ||
                  std::holds_alternative<double>(inputs[1])) {
-        outputs.push_back(toDouble(inputs[0]) + toDouble(inputs[1]));
+        outputs.emplace_back(toDouble(inputs[0]) + toDouble(inputs[1]));
       } else {
-        outputs.push_back(toInt(inputs[0]) + toInt(inputs[1]));
+        outputs.emplace_back(toInt(inputs[0]) + toInt(inputs[1]));
       }
     } else if (inputs.size() == 1) {
       outputs.push_back(inputs[0]);
@@ -324,12 +324,12 @@ ExecutionResult VortexVM::executeOpcodeBody(
     if (inputs.size() >= 2) {
       if (std::holds_alternative<double>(inputs[0]) ||
           std::holds_alternative<double>(inputs[1])) {
-        outputs.push_back(toDouble(inputs[0]) - toDouble(inputs[1]));
+        outputs.emplace_back(toDouble(inputs[0]) - toDouble(inputs[1]));
       } else {
-        outputs.push_back(toInt(inputs[0]) - toInt(inputs[1]));
+        outputs.emplace_back(toInt(inputs[0]) - toInt(inputs[1]));
       }
     } else if (inputs.size() == 1) {
-      outputs.push_back(-toInt(inputs[0]));
+      outputs.emplace_back(-toInt(inputs[0]));
     }
     break;
   }
@@ -337,9 +337,9 @@ ExecutionResult VortexVM::executeOpcodeBody(
     if (inputs.size() >= 2) {
       if (std::holds_alternative<double>(inputs[0]) ||
           std::holds_alternative<double>(inputs[1])) {
-        outputs.push_back(toDouble(inputs[0]) * toDouble(inputs[1]));
+        outputs.emplace_back(toDouble(inputs[0]) * toDouble(inputs[1]));
       } else {
-        outputs.push_back(toInt(inputs[0]) * toInt(inputs[1]));
+        outputs.emplace_back(toInt(inputs[0]) * toInt(inputs[1]));
       }
     }
     break;
@@ -348,13 +348,13 @@ ExecutionResult VortexVM::executeOpcodeBody(
     if (inputs.size() >= 2) {
       double b = toDouble(inputs[1]);
       if (b == 0.0) {
-        outputs.push_back(0.0);
+        outputs.emplace_back(0.0);
       } else if (std::holds_alternative<double>(inputs[0]) ||
                  std::holds_alternative<double>(inputs[1])) {
-        outputs.push_back(toDouble(inputs[0]) / b);
+        outputs.emplace_back(toDouble(inputs[0]) / b);
       } else {
         std::int64_t ib = toInt(inputs[1]);
-        outputs.push_back(ib != 0 ? toInt(inputs[0]) / ib : 0);
+        outputs.emplace_back(ib != 0 ? toInt(inputs[0]) / ib : 0);
       }
     }
     break;
@@ -364,11 +364,11 @@ ExecutionResult VortexVM::executeOpcodeBody(
       std::int64_t a = toInt(inputs[0]);
       std::int64_t b = toInt(inputs[1]);
       if (b != 0) {
-        outputs.push_back(a / b);
-        outputs.push_back(a % b);
+        outputs.emplace_back(a / b);
+        outputs.emplace_back(a % b);
       } else {
-        outputs.push_back(static_cast<std::int64_t>(0));
-        outputs.push_back(static_cast<std::int64_t>(0));
+        outputs.emplace_back(static_cast<std::int64_t>(0));
+        outputs.emplace_back(static_cast<std::int64_t>(0));
       }
     }
     break;
@@ -376,29 +376,29 @@ ExecutionResult VortexVM::executeOpcodeBody(
   case OpcodeKind::Mod: {
     if (inputs.size() >= 2) {
       std::int64_t b = toInt(inputs[1]);
-      outputs.push_back(b != 0 ? toInt(inputs[0]) % b : 0);
+      outputs.emplace_back(b != 0 ? toInt(inputs[0]) % b : 0);
     }
     break;
   }
   case OpcodeKind::Neg: {
     if (!inputs.empty()) {
       if (std::holds_alternative<double>(inputs[0])) {
-        outputs.push_back(-toDouble(inputs[0]));
+        outputs.emplace_back(-toDouble(inputs[0]));
       } else {
-        outputs.push_back(-toInt(inputs[0]));
+        outputs.emplace_back(-toInt(inputs[0]));
       }
     }
     break;
   }
   case OpcodeKind::Eq: {
     if (inputs.size() >= 2) {
-      outputs.push_back(inputs[0] == inputs[1]);
+      outputs.emplace_back(inputs[0] == inputs[1]);
     }
     break;
   }
   case OpcodeKind::Neq: {
     if (inputs.size() >= 2) {
-      outputs.push_back(inputs[0] != inputs[1]);
+      outputs.emplace_back(inputs[0] != inputs[1]);
     }
     break;
   }
@@ -406,10 +406,10 @@ ExecutionResult VortexVM::executeOpcodeBody(
     if (inputs.size() >= 2) {
       if (std::holds_alternative<std::string>(inputs[0]) &&
           std::holds_alternative<std::string>(inputs[1])) {
-        outputs.push_back(std::get<std::string>(inputs[0]) <
-                          std::get<std::string>(inputs[1]));
+        outputs.emplace_back(std::get<std::string>(inputs[0]) <
+                             std::get<std::string>(inputs[1]));
       } else {
-        outputs.push_back(toDouble(inputs[0]) < toDouble(inputs[1]));
+        outputs.emplace_back(toDouble(inputs[0]) < toDouble(inputs[1]));
       }
     }
     break;
@@ -418,10 +418,10 @@ ExecutionResult VortexVM::executeOpcodeBody(
     if (inputs.size() >= 2) {
       if (std::holds_alternative<std::string>(inputs[0]) &&
           std::holds_alternative<std::string>(inputs[1])) {
-        outputs.push_back(std::get<std::string>(inputs[0]) <=
-                          std::get<std::string>(inputs[1]));
+        outputs.emplace_back(std::get<std::string>(inputs[0]) <=
+                             std::get<std::string>(inputs[1]));
       } else {
-        outputs.push_back(toDouble(inputs[0]) <= toDouble(inputs[1]));
+        outputs.emplace_back(toDouble(inputs[0]) <= toDouble(inputs[1]));
       }
     }
     break;
@@ -430,10 +430,10 @@ ExecutionResult VortexVM::executeOpcodeBody(
     if (inputs.size() >= 2) {
       if (std::holds_alternative<std::string>(inputs[0]) &&
           std::holds_alternative<std::string>(inputs[1])) {
-        outputs.push_back(std::get<std::string>(inputs[0]) >
-                          std::get<std::string>(inputs[1]));
+        outputs.emplace_back(std::get<std::string>(inputs[0]) >
+                             std::get<std::string>(inputs[1]));
       } else {
-        outputs.push_back(toDouble(inputs[0]) > toDouble(inputs[1]));
+        outputs.emplace_back(toDouble(inputs[0]) > toDouble(inputs[1]));
       }
     }
     break;
@@ -442,31 +442,31 @@ ExecutionResult VortexVM::executeOpcodeBody(
     if (inputs.size() >= 2) {
       if (std::holds_alternative<std::string>(inputs[0]) &&
           std::holds_alternative<std::string>(inputs[1])) {
-        outputs.push_back(std::get<std::string>(inputs[0]) >=
-                          std::get<std::string>(inputs[1]));
+        outputs.emplace_back(std::get<std::string>(inputs[0]) >=
+                             std::get<std::string>(inputs[1]));
       } else {
-        outputs.push_back(toDouble(inputs[0]) >= toDouble(inputs[1]));
+        outputs.emplace_back(toDouble(inputs[0]) >= toDouble(inputs[1]));
       }
     }
     break;
   }
   case OpcodeKind::And: {
     if (inputs.size() >= 2) {
-      outputs.push_back(VortexCore::evaluateTruthiness(inputs[0]) &&
-                        VortexCore::evaluateTruthiness(inputs[1]));
+      outputs.emplace_back(VortexCore::evaluateTruthiness(inputs[0]) &&
+                           VortexCore::evaluateTruthiness(inputs[1]));
     }
     break;
   }
   case OpcodeKind::Or: {
     if (inputs.size() >= 2) {
-      outputs.push_back(VortexCore::evaluateTruthiness(inputs[0]) ||
-                        VortexCore::evaluateTruthiness(inputs[1]));
+      outputs.emplace_back(VortexCore::evaluateTruthiness(inputs[0]) ||
+                           VortexCore::evaluateTruthiness(inputs[1]));
     }
     break;
   }
   case OpcodeKind::Not: {
     if (!inputs.empty()) {
-      outputs.push_back(!VortexCore::evaluateTruthiness(inputs[0]));
+      outputs.emplace_back(!VortexCore::evaluateTruthiness(inputs[0]));
     }
     break;
   }
@@ -485,9 +485,9 @@ ExecutionResult VortexVM::executeOpcodeBody(
       }
       if (c != noCell) {
         auto res = core_.link(c, d, neg, tgt);
-        outputs.push_back(res ? *res : noCell);
+        outputs.emplace_back(res ? *res : noCell);
       } else {
-        outputs.push_back(noCell);
+        outputs.emplace_back(noCell);
       }
     }
     break;
@@ -500,9 +500,9 @@ ExecutionResult VortexVM::executeOpcodeBody(
       bool neg  = inputs.size() >= 3 && toInt(inputs[2]) < 0;
       if (c != noCell) {
         auto res = core_.breakLink(c, d, neg);
-        outputs.push_back(res ? *res : noCell);
+        outputs.emplace_back(res ? *res : noCell);
       } else {
-        outputs.push_back(noCell);
+        outputs.emplace_back(noCell);
       }
     }
     break;
@@ -518,13 +518,13 @@ ExecutionResult VortexVM::executeOpcodeBody(
         if (!outCells.empty()) {
           CellRef fresh = outCells[0];
           core_.link(c, d, neg, fresh);
-          outputs.push_back(fresh);
+          outputs.emplace_back(fresh);
         } else {
           auto res = core_.newCell(c, d, neg);
-          outputs.push_back(res ? *res : noCell);
+          outputs.emplace_back(res ? *res : noCell);
         }
       } else {
-        outputs.push_back(noCell);
+        outputs.emplace_back(noCell);
       }
     }
     break;
@@ -540,9 +540,9 @@ ExecutionResult VortexVM::executeOpcodeBody(
                                           : std::nullopt;
       if (c != noCell) {
         auto res = core_.value(c, off, len, repl);
-        outputs.push_back(res ? *res : noCell);
+        outputs.emplace_back(res ? *res : noCell);
       } else {
-        outputs.push_back(noCell);
+        outputs.emplace_back(noCell);
       }
     }
     break;
@@ -555,9 +555,9 @@ ExecutionResult VortexVM::executeOpcodeBody(
       std::int64_t len = toInt(inputs[2]);
       if (c != noCell) {
         auto res = core_.splice(c, off, len, inputs[3]);
-        outputs.push_back(res ? *res : noCell);
+        outputs.emplace_back(res ? *res : noCell);
       } else {
-        outputs.push_back(noCell);
+        outputs.emplace_back(noCell);
       }
     }
     break;
@@ -584,9 +584,9 @@ ExecutionResult VortexVM::executeOpcodeBody(
           }
           cloneTail = next;
         }
-        outputs.push_back(cloneCell);
+        outputs.emplace_back(cloneCell);
       } else {
-        outputs.push_back(noCell);
+        outputs.emplace_back(noCell);
       }
     }
     break;
@@ -662,7 +662,7 @@ ExecutionResult VortexVM::executeOpcodeBody(
         core_.arena().link(varCell, core_.dims().vars, false, firstVar);
         core_.arena().link(cursor, core_.dims().vars, false, varCell);
       }
-      outputs.push_back(valCell);
+      outputs.emplace_back(valCell);
     }
     break;
   }
@@ -688,25 +688,27 @@ ExecutionResult VortexVM::executeOpcodeBody(
         curVar = core_.arena().linked(curVar, core_.dims().vars, false);
       }
       if (!found) {
-        outputs.push_back(false);
+        outputs.emplace_back(false);
       }
     }
     break;
   }
   case OpcodeKind::Assert: {
     if (inputs.empty() || !VortexCore::evaluateTruthiness(inputs[0])) {
-      return ExecutionResult{false, ContractViolationKind::None, opcode,
-                             "Assertion failed"};
+      return ExecutionResult{.success           = false,
+                             .contractViolation = ContractViolationKind::None,
+                             .failingClause     = opcode,
+                             .errorMessage      = "Assertion failed"};
     }
     break;
   }
   case OpcodeKind::Abs: {
     if (!inputs.empty()) {
       if (std::holds_alternative<double>(inputs[0])) {
-        outputs.push_back(std::abs(std::get<double>(inputs[0])));
+        outputs.emplace_back(std::abs(std::get<double>(inputs[0])));
       } else {
         std::int64_t v = toInt(inputs[0]);
-        outputs.push_back(v < 0 ? -v : v);
+        outputs.emplace_back(v < 0 ? -v : v);
       }
     }
     break;
@@ -715,9 +717,10 @@ ExecutionResult VortexVM::executeOpcodeBody(
     if (inputs.size() >= 2) {
       if (std::holds_alternative<double>(inputs[0]) ||
           std::holds_alternative<double>(inputs[1])) {
-        outputs.push_back(std::min(toDouble(inputs[0]), toDouble(inputs[1])));
+        outputs.emplace_back(
+            std::min(toDouble(inputs[0]), toDouble(inputs[1])));
       } else {
-        outputs.push_back(std::min(toInt(inputs[0]), toInt(inputs[1])));
+        outputs.emplace_back(std::min(toInt(inputs[0]), toInt(inputs[1])));
       }
     }
     break;
@@ -726,9 +729,10 @@ ExecutionResult VortexVM::executeOpcodeBody(
     if (inputs.size() >= 2) {
       if (std::holds_alternative<double>(inputs[0]) ||
           std::holds_alternative<double>(inputs[1])) {
-        outputs.push_back(std::max(toDouble(inputs[0]), toDouble(inputs[1])));
+        outputs.emplace_back(
+            std::max(toDouble(inputs[0]), toDouble(inputs[1])));
       } else {
-        outputs.push_back(std::max(toInt(inputs[0]), toInt(inputs[1])));
+        outputs.emplace_back(std::max(toInt(inputs[0]), toInt(inputs[1])));
       }
     }
     break;
@@ -741,12 +745,12 @@ ExecutionResult VortexVM::executeOpcodeBody(
         double v  = toDouble(inputs[0]);
         double lo = toDouble(inputs[1]);
         double hi = toDouble(inputs[2]);
-        outputs.push_back(std::clamp(v, lo, hi));
+        outputs.emplace_back(std::clamp(v, lo, hi));
       } else {
         std::int64_t v  = toInt(inputs[0]);
         std::int64_t lo = toInt(inputs[1]);
         std::int64_t hi = toInt(inputs[2]);
-        outputs.push_back(std::clamp(v, lo, hi));
+        outputs.emplace_back(std::clamp(v, lo, hi));
       }
     }
     break;
@@ -758,10 +762,10 @@ ExecutionResult VortexVM::executeOpcodeBody(
                               : std::to_string(toInt(inputs[0]));
       std::size_t start = s.find_first_not_of(" \t\n\r");
       if (start == std::string::npos) {
-        outputs.push_back(std::string{});
+        outputs.emplace_back(std::string{});
       } else {
         std::size_t end = s.find_last_not_of(" \t\n\r");
-        outputs.push_back(s.substr(start, end - start + 1));
+        outputs.emplace_back(s.substr(start, end - start + 1));
       }
     }
     break;
@@ -774,7 +778,7 @@ ExecutionResult VortexVM::executeOpcodeBody(
       for (char &c : s) {
         c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
       }
-      outputs.push_back(s);
+      outputs.emplace_back(s);
     }
     break;
   }
@@ -786,7 +790,7 @@ ExecutionResult VortexVM::executeOpcodeBody(
       for (char &c : s) {
         c = static_cast<char>(std::toupper(static_cast<unsigned char>(c)));
       }
-      outputs.push_back(s);
+      outputs.emplace_back(s);
     }
     break;
   }
@@ -800,9 +804,9 @@ ExecutionResult VortexVM::executeOpcodeBody(
                         .grab  = core_.dims().grab,
                         .step  = core_.dims().step,
                         .vars  = core_.dims().vars};
-      outputs.push_back(vlog.unify(a, b));
+      outputs.emplace_back(vlog.unify(a, b));
     } else {
-      outputs.push_back(false);
+      outputs.emplace_back(false);
     }
     break;
   }
@@ -815,9 +819,9 @@ ExecutionResult VortexVM::executeOpcodeBody(
                         .grab  = core_.dims().grab,
                         .step  = core_.dims().step,
                         .vars  = core_.dims().vars};
-      outputs.push_back(vlog.isUnbound(c));
+      outputs.emplace_back(vlog.isUnbound(c));
     } else {
-      outputs.push_back(false);
+      outputs.emplace_back(false);
     }
     break;
   }
@@ -828,7 +832,7 @@ ExecutionResult VortexVM::executeOpcodeBody(
                       .step  = core_.dims().step,
                       .vars  = core_.dims().vars};
     CellRef var = vlog.makeVar();
-    outputs.push_back(static_cast<std::int64_t>(var));
+    outputs.emplace_back(static_cast<std::int64_t>(var));
     break;
   }
   case OpcodeKind::MakeTerm: {
@@ -859,7 +863,7 @@ ExecutionResult VortexVM::executeOpcodeBody(
       }
       prev = arg;
     }
-    outputs.push_back(static_cast<std::int64_t>(term));
+    outputs.emplace_back(static_cast<std::int64_t>(term));
     break;
   }
   case OpcodeKind::Deref: {
@@ -871,9 +875,9 @@ ExecutionResult VortexVM::executeOpcodeBody(
                         .grab  = core_.dims().grab,
                         .step  = core_.dims().step,
                         .vars  = core_.dims().vars};
-      outputs.push_back(static_cast<std::int64_t>(vlog.deref(c)));
+      outputs.emplace_back(static_cast<std::int64_t>(vlog.deref(c)));
     } else {
-      outputs.push_back(static_cast<std::int64_t>(noCell));
+      outputs.emplace_back(static_cast<std::int64_t>(noCell));
     }
     break;
   }
@@ -883,15 +887,18 @@ ExecutionResult VortexVM::executeOpcodeBody(
       altOp = static_cast<CellRef>(toInt(inputs[0]));
     }
     pushChoicePoint(cursor, altOp);
-    outputs.push_back(true);
+    outputs.emplace_back(true);
     break;
   }
   case OpcodeKind::Fail: {
     if (backtrack(cursor)) {
       jumped = true;
     } else {
-      return ExecutionResult{false, ContractViolationKind::None, opcode,
-                             "Logic failure: no remaining choice points"};
+      return ExecutionResult{.success           = false,
+                             .contractViolation = ContractViolationKind::None,
+                             .failingClause     = opcode,
+                             .errorMessage =
+                                 "Logic failure: no remaining choice points"};
     }
     break;
   }
@@ -902,7 +909,7 @@ ExecutionResult VortexVM::executeOpcodeBody(
           static_cast<std::size_t>(std::max<std::int64_t>(0, toInt(inputs[0])));
     }
     cut(barrier);
-    outputs.push_back(true);
+    outputs.emplace_back(true);
     break;
   }
   case OpcodeKind::Halt:
@@ -910,28 +917,39 @@ ExecutionResult VortexVM::executeOpcodeBody(
   default:
     break;
   }
-  return ExecutionResult{true, ContractViolationKind::None, noCell, ""};
+  return ExecutionResult{.success           = true,
+                         .contractViolation = ContractViolationKind::None,
+                         .failingClause     = noCell,
+                         .errorMessage      = ""};
 }
 
 ExecutionResult VortexVM::step(CellRef cursor) {
   CellRef op = getCursorOpcode(cursor);
   if (op == noCell) {
-    return ExecutionResult{true, ContractViolationKind::None, noCell,
-                           "Finished"};
+    return ExecutionResult{.success           = true,
+                           .contractViolation = ContractViolationKind::None,
+                           .failingClause     = noCell,
+                           .errorMessage      = "Finished"};
   }
 
   auto kindOpt    = getOpcodeKind(op);
   OpcodeKind kind = kindOpt ? *kindOpt : OpcodeKind::Nop;
   if (kind == OpcodeKind::Halt) {
-    return ExecutionResult{true, ContractViolationKind::None, noCell, "Halted"};
+    return ExecutionResult{.success           = true,
+                           .contractViolation = ContractViolationKind::None,
+                           .failingClause     = noCell,
+                           .errorMessage      = "Halted"};
   }
 
   // 1. Precondition Evaluation (-d.contract)
   std::vector<CellRef> preconds = core_.preconditionsOf(op);
   for (CellRef clause : preconds) {
     if (!evaluateCondition(clause, {}, {})) {
-      return ExecutionResult{false, ContractViolationKind::Precondition, clause,
-                             "Precondition violation: assertion failed"};
+      return ExecutionResult{
+          .success           = false,
+          .contractViolation = ContractViolationKind::Precondition,
+          .failingClause     = clause,
+          .errorMessage      = "Precondition violation: assertion failed"};
     }
   }
 
@@ -1007,9 +1025,11 @@ ExecutionResult VortexVM::step(CellRef cursor) {
   std::vector<CellRef> postconds = core_.postconditionsOf(op);
   for (CellRef clause : postconds) {
     if (!evaluateCondition(clause, oldInputs, finalOutputs)) {
-      return ExecutionResult{false, ContractViolationKind::Postcondition,
-                             clause,
-                             "Postcondition violation: assertion failed"};
+      return ExecutionResult{
+          .success           = false,
+          .contractViolation = ContractViolationKind::Postcondition,
+          .failingClause     = clause,
+          .errorMessage      = "Postcondition violation: assertion failed"};
     }
   }
 
@@ -1026,28 +1046,37 @@ ExecutionResult VortexVM::step(CellRef cursor) {
     setCursorOpcode(cursor, nextOp);
   }
 
-  return ExecutionResult{true, ContractViolationKind::None, noCell, ""};
+  return ExecutionResult{.success           = true,
+                         .contractViolation = ContractViolationKind::None,
+                         .failingClause     = noCell,
+                         .errorMessage      = ""};
 }
 
 ExecutionResult VortexVM::run(CellRef cursor, std::size_t maxCycles) {
   for (std::size_t i = 0; i < maxCycles; ++i) {
     CellRef op = getCursorOpcode(cursor);
     if (op == noCell) {
-      return ExecutionResult{true, ContractViolationKind::None, noCell,
-                             "Finished"};
+      return ExecutionResult{.success           = true,
+                             .contractViolation = ContractViolationKind::None,
+                             .failingClause     = noCell,
+                             .errorMessage      = "Finished"};
     }
     auto kind = getOpcodeKind(op);
     if (kind && *kind == OpcodeKind::Halt) {
-      return ExecutionResult{true, ContractViolationKind::None, noCell,
-                             "Halted"};
+      return ExecutionResult{.success           = true,
+                             .contractViolation = ContractViolationKind::None,
+                             .failingClause     = noCell,
+                             .errorMessage      = "Halted"};
     }
     auto res = step(cursor);
     if (!res.success) {
       return res;
     }
   }
-  return ExecutionResult{false, ContractViolationKind::None, noCell,
-                         "Exceeded max cycles"};
+  return ExecutionResult{.success           = false,
+                         .contractViolation = ContractViolationKind::None,
+                         .failingClause     = noCell,
+                         .errorMessage      = "Exceeded max cycles"};
 }
 
 std::size_t VortexVM::stepScheduler() {

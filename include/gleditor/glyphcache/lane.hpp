@@ -95,7 +95,7 @@ public:
           "Character width too large or small to hold in lane");
     }
     const auto ret =
-        Point{Offset{std::to_underlying(usedWidth)}, paletteYOffset};
+        Point{.x = Offset{std::to_underlying(usedWidth)}, .y = paletteYOffset};
     // std::cout << "put usedWidth: " << usedWidth << "\n";
     usedWidth =
         Length{std::to_underlying(usedWidth) + std::to_underlying(charWidth)};

@@ -73,18 +73,18 @@ struct EffectClause;
 // -- Literals and Value Expressions ------------------------------------------
 
 struct ScalarLiteral {
-  std::variant<std::string, double, std::int64_t, bool> value{};
+  std::variant<std::string, double, std::int64_t, bool> value;
 };
 
 struct ValueExpr {
   std::variant<std::shared_ptr<PathExpression>, ScalarLiteral,
                std::string /*VariableRef*/, std::shared_ptr<FunctionInvocation>>
-      kind{};
+      kind;
 };
 
 struct FunctionInvocation {
-  std::string name{};
-  std::vector<ValueExpr> args{};
+  std::string name;
+  std::vector<ValueExpr> args;
 };
 
 // -- Boolean & Predicate Logic -----------------------------------------------
@@ -99,20 +99,20 @@ struct PredicateTest {
   std::variant<std::shared_ptr<PathExpression>, bool /*ContextDot*/,
                std::shared_ptr<ValueExpr> /*ExtendedTruthiness*/,
                std::shared_ptr<FunctionInvocation>>
-      kind{};
+      kind;
 };
 
 struct BooleanFactor {
   bool negated{false};
-  std::variant<ComparisonExpr, PredicateTest> test{};
+  std::variant<ComparisonExpr, PredicateTest> test;
 };
 
 struct BooleanTerm {
-  std::vector<BooleanFactor> factors{}; ///< AND conjunction
+  std::vector<BooleanFactor> factors; ///< AND conjunction
 };
 
 struct BooleanExpr {
-  std::vector<BooleanTerm> terms{}; ///< OR disjunction
+  std::vector<BooleanTerm> terms; ///< OR disjunction
 };
 
 // -- Path Steps & Creation ----------------------------------------------------
@@ -120,7 +120,7 @@ struct BooleanExpr {
 struct CreateValue {
   enum class Kind : std::uint8_t { Empty, Literal, Expression };
   Kind kind{Kind::Empty};
-  std::string literal{};
+  std::string literal;
   std::shared_ptr<ValueExpr> expr{nullptr};
 };
 
@@ -128,7 +128,7 @@ struct CreateValue {
 
 struct AnchorNode {
   AnchorKind kind{AnchorKind::Home};
-  std::string name{};
+  std::string name;
   std::uint64_t cellId{0};
   bool derefMaster{false}; ///< Suffixed with ">"
   std::optional<CreateValue> createValue{std::nullopt};
@@ -140,10 +140,10 @@ struct RangeClamp {
 };
 
 struct SignedDimensionStep {
-  std::string dimName{};
+  std::string dimName;
   zigzag::DimVector direction{zigzag::DimVector::POS};
   Placement placement{Placement::Default};
-  std::vector<CreateValue> creates{};
+  std::vector<CreateValue> creates;
 };
 
 struct MacroDimensionGroup;
@@ -153,15 +153,15 @@ using StepSelector =
                  FunctionInvocation>;
 
 struct PathStep {
-  StepSelector selector{};
+  StepSelector selector;
   bool derefMaster{false}; ///< Suffixed with ">"
-  std::vector<BooleanExpr> predicates{};
+  std::vector<BooleanExpr> predicates;
   std::optional<RangeClamp> rangeClamp{std::nullopt};
   YieldMode yieldMode{YieldMode::Default};
 };
 
 struct MacroDimensionGroup {
-  std::vector<PathStep> steps{};
+  std::vector<PathStep> steps;
   Repetition repetition{Repetition::Once};
 };
 
@@ -171,47 +171,47 @@ struct CloneOperand {
 };
 
 struct CloneTail {
-  std::vector<CloneOperand> operands{};
+  std::vector<CloneOperand> operands;
 };
 
 struct PathExpression {
   AnchorNode anchor{};
-  std::vector<PathStep> steps{};
+  std::vector<PathStep> steps;
   std::optional<CloneTail> cloneTail{std::nullopt};
 };
 
 // -- FLWOR & Action Clauses --------------------------------------------------
 
 struct FieldWeave {
-  std::vector<PathStep> steps{};
+  std::vector<PathStep> steps;
 };
 
 struct ReturnItem {
-  std::variant<PathExpression, FieldWeave> item{};
+  std::variant<PathExpression, FieldWeave> item;
 };
 
 struct ReturnClause {
-  std::vector<ReturnItem> items{};
+  std::vector<ReturnItem> items;
 };
 
 struct ForClause {
-  std::string varName{};
+  std::string varName;
   PathExpression inPath{};
 };
 
 struct LetClause {
-  std::string varName{};
-  std::variant<PathExpression, ValueExpr> target{};
+  std::string varName;
+  std::variant<PathExpression, ValueExpr> target;
 };
 
 struct EffectItem {
   std::variant<LetClause, PathExpression,
                std::pair<ForClause, std::shared_ptr<EffectClause>>>
-      item{};
+      item;
 };
 
 struct EffectClause {
-  std::vector<EffectItem> items{};
+  std::vector<EffectItem> items;
 };
 
 struct ConditionalClause {
@@ -221,7 +221,7 @@ struct ConditionalClause {
 };
 
 struct ActionClause {
-  std::variant<ReturnClause, EffectClause, ConditionalClause> clause{};
+  std::variant<ReturnClause, EffectClause, ConditionalClause> clause;
 };
 
 struct WhereClause {
@@ -229,13 +229,13 @@ struct WhereClause {
 };
 
 struct ExecutionBlock {
-  std::vector<std::variant<ForClause, LetClause>> bindings{};
+  std::vector<std::variant<ForClause, LetClause>> bindings;
   std::optional<WhereClause> where{std::nullopt};
   ActionClause action{};
 };
 
 struct QueryExpression {
-  std::variant<ExecutionBlock, PathExpression> expr{};
+  std::variant<ExecutionBlock, PathExpression> expr;
 };
 
 } // namespace xanadu::vql

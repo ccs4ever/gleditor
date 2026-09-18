@@ -87,7 +87,7 @@ public:
   [[nodiscard]] std::string encode() const;
 
 private:
-  friend Value decode(std::string_view, std::size_t &);
+  friend Value decode(std::string_view /*input*/, std::size_t & /*pos*/);
 
   Kind valueKind{Kind::Integer};
   std::int64_t number{};
