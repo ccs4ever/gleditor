@@ -425,7 +425,7 @@ private:
   [[nodiscard]] PageShaping layoutFrom(std::uint32_t offset) const;
 
   /// Record that page @p pageIndex has shaped itself again.
-  void keepLayoutOf(std::uint32_t pageIndex) const;
+  static void keepLayoutOf(std::uint32_t pageIndex);
 
   /**
    * @brief Rebuild the pages an edit disturbed. Render thread only.

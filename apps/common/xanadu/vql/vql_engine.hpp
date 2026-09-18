@@ -91,8 +91,8 @@ private:
   zigzag::vortex::CellValue evaluateValueExpr(const ValueExpr &expr,
                                               zigzag::CellRef context);
 
-  bool compareValues(const zigzag::vortex::CellValue &left, CompOp op,
-                     const zigzag::vortex::CellValue &right);
+  static bool compareValues(const zigzag::vortex::CellValue &left, CompOp op,
+                            const zigzag::vortex::CellValue &right);
 
   // Execution Block & FLWOR
   std::vector<zigzag::CellRef> executeBlock(const ExecutionBlock &block);

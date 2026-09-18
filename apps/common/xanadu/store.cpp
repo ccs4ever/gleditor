@@ -1179,8 +1179,7 @@ std::vector<const Link *> Store::linksTouching(const PrimediaSpan &span) const {
   return found;
 }
 
-std::optional<FormatAttribute>
-Store::formatAttributeOf(const Link &link) const {
+std::optional<FormatAttribute> Store::formatAttributeOf(const Link &link) {
   if (LinkType::Format != link.type || link.right.empty()) {
     return std::nullopt;
   }

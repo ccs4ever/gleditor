@@ -339,7 +339,7 @@ bool Page::contains(const std::uint32_t globalOffset) const {
   return globalOffset >= textOffset && globalOffset <= textOffset + textBytes;
 }
 
-void Doc::keepLayoutOf(const std::uint32_t pageIndex) const { (void)pageIndex; }
+void Doc::keepLayoutOf(const std::uint32_t pageIndex) { (void)pageIndex; }
 
 std::string_view Page::pageText() const {
   const std::string_view whole{doc->contents()};

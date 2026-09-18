@@ -44,7 +44,7 @@ struct ChronoDsp {
     return ChronoDsp{deltaOps + other.deltaOps};
   }
   [[nodiscard]] bool isIdentity() const noexcept { return 0 == deltaOps; }
-  [[nodiscard]] EdlTransform act(const EdlTransform &w) const noexcept {
+  [[nodiscard]] static EdlTransform act(const EdlTransform &w) noexcept {
     return w;
   }
   bool operator==(const ChronoDsp &) const = default;

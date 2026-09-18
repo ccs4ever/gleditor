@@ -37,8 +37,9 @@ public:
   [[nodiscard]] bool busy() const override;
 
 private:
-  void drawTether(gleditor::Canvas &canvas, RenderState &state,
-                  const glm::vec2 &p0, const glm::vec2 &p1, bool detached);
+  static void drawTether(gleditor::Canvas &canvas, RenderState &state,
+                         const glm::vec2 &p0, const glm::vec2 &p1,
+                         bool detached);
   void drawBlueprintQuad(gleditor::Canvas &canvas, RenderState &state,
                          const glm::vec2 &pos, bool detached);
 

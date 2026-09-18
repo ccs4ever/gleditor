@@ -50,7 +50,7 @@ struct LayoutDsp {
     return 0 == deltaBytes && 0.0F == deltaYPx && 0 == deltaLines;
   }
 
-  [[nodiscard]] LayoutWid act(const LayoutWid &w) const noexcept;
+  [[nodiscard]] static LayoutWid act(const LayoutWid &w) noexcept;
 
   bool operator==(const LayoutDsp &) const = default;
 };
@@ -84,7 +84,7 @@ struct LayoutWid {
   bool operator==(const LayoutWid &) const = default;
 };
 
-inline LayoutWid LayoutDsp::act(const LayoutWid &w) const noexcept {
+inline LayoutWid LayoutDsp::act(const LayoutWid &w) noexcept {
   // Extent/metric properties are translation-invariant.
   return w;
 }

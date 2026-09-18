@@ -270,11 +270,11 @@ public:
   std::size_t gcSweep();
 
   // -- Module 12: std:ui ------------------------------------------------------
-  void swapAxes(ViewAxisBinding &axes);
-  void cycleDims(ViewAxisBinding &axes, bool forward = true);
-  void applyBundle(ViewAxisBinding &axes, DimensionBundle bundle);
-  void setView(ViewAxisBinding &axes, std::string_view dimX,
-               std::string_view dimY, std::string_view dimZ);
+  static void swapAxes(ViewAxisBinding &axes);
+  static void cycleDims(ViewAxisBinding &axes, bool forward = true);
+  static void applyBundle(ViewAxisBinding &axes, DimensionBundle bundle);
+  static void setView(ViewAxisBinding &axes, std::string_view dimX,
+                      std::string_view dimY, std::string_view dimZ);
 
   // -- Module 13: std:nav -----------------------------------------------------
   CellRef hopHead(CellRef cursor, DimRef dim);
@@ -293,13 +293,13 @@ public:
   CellRef bridgeDocToCell(xanadu::Store &store, std::uint32_t docOffset,
                           std::uint32_t length);
   /// Queries transcopyright royalty for a Zigzag cell.
-  std::optional<xanadu::TranscopyrightDescriptor>
+  static std::optional<xanadu::TranscopyrightDescriptor>
   bridgeCellRoyalty(const xanadu::ZigzagPresentationSurface &surface,
                     CellRef cell);
   /// Unlocks a transcopyright-locked Zigzag cell, paying royalty via state
   /// channel.
-  bool bridgeCellUnlock(xanadu::ZigzagPresentationSurface &surface,
-                        CellRef cell);
+  static bool bridgeCellUnlock(xanadu::ZigzagPresentationSurface &surface,
+                               CellRef cell);
 
   // -- Sovereign Store Library Packaging (Zero YAML) --------------------------
   bool exportModuleToStore(std::string_view modulePath,

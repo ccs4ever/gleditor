@@ -586,8 +586,8 @@ public:
    * right end some other program wrote and this one does not recognise reads
    * as unformatted rather than guessed at.
    */
-  [[nodiscard]] std::optional<FormatAttribute>
-  formatAttributeOf(const Link &link) const;
+  [[nodiscard]] static std::optional<FormatAttribute>
+  formatAttributeOf(const Link &link);
 
   // -- the hypertime map ----------------------------------------------------
 

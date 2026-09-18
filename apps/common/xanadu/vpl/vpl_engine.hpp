@@ -78,7 +78,7 @@ public:
 
 private:
   // Node evaluation helpers
-  VplView evalScalar(const ScalarExpr &expr);
+  static VplView evalScalar(const ScalarExpr &expr);
   VplView evalVector(const VectorExpr &expr);
   VplView evalDimension(const DimensionExpr &expr);
   VplView evalIdentifier(const IdentifierExpr &expr);
