@@ -277,13 +277,9 @@ PathStep Parser::parsePathStep(bool requireSlash) {
   std::optional<RangeClamp> clamp;
 
   while (check(TokenKind::OpenBracket)) {
-    Token next   = peekToken();
-    bool isClamp = false;
-    if (next.is(TokenKind::IntegerLiteral)) {
-      isClamp = true;
-    } else if ((next.is(TokenKind::Minus) || next.is(TokenKind::Plus))) {
-      isClamp = true;
-    }
+    Token next         = peekToken();
+    const bool isClamp = next.is(TokenKind::IntegerLiteral) ||
+                         next.is(TokenKind::Minus) || next.is(TokenKind::Plus);
 
     if (isClamp) {
       clamp = parseRangeClamp();

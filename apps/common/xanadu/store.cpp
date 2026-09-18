@@ -701,10 +701,7 @@ Store::diffVersions(const std::vector<MicroversionId> &versions) const {
           (it != addressPresence.end()) ? it->second.size() : 1;
       charSharings[c] = shareCount;
 
-      if (K <= 1) {
-        charKinds[c] = DiffKind::Universal;
-        sv.universalChars++;
-      } else if (shareCount == K) {
+      if (K <= 1 || shareCount == K) {
         charKinds[c] = DiffKind::Universal;
         sv.universalChars++;
       } else if (shareCount > 1) {

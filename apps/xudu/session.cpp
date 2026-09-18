@@ -1550,12 +1550,12 @@ Session::mediaSpansFor(const MicroversionId &version,
       info.isAudio   = gleditor::MagicMimeDetector::isAudioMime(stretch.mime);
       info.isVideo   = gleditor::MagicMimeDetector::isVideoMime(stretch.mime);
       info.isImage   = gleditor::MagicMimeDetector::isImageMime(stretch.mime);
-      if (info.mime == "image/gif" && gleditor::isAnimatedGif(containerSpan)) {
-        info.isAnimation = true;
-        info.isImage     = false;
-      } else if (gleditor::MimeType{info.mime} ==
-                     gleditor::MimeType::ImageSvg &&
-                 gleditor::SvgAnimator::isAnimated(containerSpan)) {
+      const bool isAnimatedGif =
+          info.mime == "image/gif" && gleditor::isAnimatedGif(containerSpan);
+      const bool isAnimatedSvg =
+          gleditor::MimeType{info.mime} == gleditor::MimeType::ImageSvg &&
+          gleditor::SvgAnimator::isAnimated(containerSpan);
+      if (isAnimatedGif || isAnimatedSvg) {
         info.isAnimation = true;
         info.isImage     = false;
       }

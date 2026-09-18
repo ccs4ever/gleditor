@@ -80,11 +80,7 @@ void Lexer::skipWhitespaceAndComments() {
           column_ += 2;
           break;
         }
-        if (peekChar() == '\n') {
-          advanceChar();
-        } else {
-          advanceChar();
-        }
+        advanceChar();
       }
       continue;
     }

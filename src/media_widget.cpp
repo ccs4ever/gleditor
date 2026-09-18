@@ -141,7 +141,10 @@ void MediaWidget::initClickables() {
         float nextRate  = 1.0F;
         if (cur < 0.4F) {
           nextRate = 0.5F;
-        } else if (cur < 0.9F) {
+          // A 6-way speed cycle (0.5, 1.0, 1.5, 2.0, 0.25, back to 1.0);
+          // this step and the final else below both land on 1.0F, which is
+          // coincidence of the cycle's values, not a copy-paste duplicate.
+        } else if (cur < 0.9F) { // NOLINT(bugprone-branch-clone)
           nextRate = 1.0F;
         } else if (cur < 1.4F) {
           nextRate = 1.5F;

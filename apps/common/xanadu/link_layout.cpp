@@ -490,7 +490,9 @@ std::uint32_t linkColour(const LinkType type, const ProminenceTier tier) {
   case LinkType::Quotation:
     rgb = 0x7FE0A800U;
     break;
-  case LinkType::Other:
+  case LinkType::Other: // NOLINT(bugprone-branch-clone)
+    // Deliberately the same neutral grey as the default and LinkType::Format
+    // below: an unclassified link type has nothing more specific to say.
     rgb = 0xCFCFCF00U;
     break;
   case LinkType::Format:

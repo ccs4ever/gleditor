@@ -608,11 +608,11 @@ VortexHost::ScriptResult VortexHost::executeScript(std::string_view script,
     if (trimmed.starts_with(":logic ") || trimmed.starts_with(":query ") ||
         trimmed.starts_with(":solve ") || trimmed.starts_with("?- ")) {
       std::string_view q = trimmed;
-      if (trimmed.starts_with(":logic ")) {
-        q.remove_prefix(7);
-      } else if (trimmed.starts_with(":query ")) {
-        q.remove_prefix(7);
-      } else if (trimmed.starts_with(":solve ")) {
+      if (trimmed.starts_with(":logic ") || trimmed.starts_with(":query ") ||
+          trimmed.starts_with(":solve ")) {
+        // All three command prefixes happen to be 7 characters; "?- " (the
+        // fourth form checked above) is Prolog's own query syntax and is
+        // left in place rather than stripped.
         q.remove_prefix(7);
       }
       auto solutions = solveLogic(q);
