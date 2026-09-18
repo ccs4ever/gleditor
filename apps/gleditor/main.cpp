@@ -304,6 +304,12 @@ int main(const int argc, char **argv) {
                            const std::uint32_t activeDocIndex) {
           using ButtonId = gleditor::FloatingToolbar3D::ButtonId;
           switch (btn) {
+          case ButtonId::None:
+            // The toolbar's own accessibility group node maps to this (see
+            // FloatingToolbar3D::performAction's nodeId >= barId check,
+            // which includes the bar's own id, not just its buttons'), so
+            // this is reachable and correctly a no-op rather than a button.
+            break;
           case ButtonId::NewDoc:
             renderer->push(RenderItemNewDoc());
             break;

@@ -93,9 +93,10 @@ public:
       std::vector<gleditor::DecoratedRange> aDecoratedRanges    = {},
       std::shared_ptr<const render::PickSemanticTarget> aTarget = {})
       : contents(std::move(aText)), id(std::move(aVersion)),
-        breaks(std::move(aBreaks)), mediaBoxes(std::move(aBoxes)),
+        target(std::move(aTarget)), breaks(std::move(aBreaks)),
+        mediaBoxes(std::move(aBoxes)),
         mediaBlockStyles(std::move(aBlockStyles)), customName(std::move(aName)),
-        ranges(std::move(aDecoratedRanges)), target(std::move(aTarget)) {}
+        ranges(std::move(aDecoratedRanges)) {}
 
   [[nodiscard]] std::string text() const override { return contents; }
   [[nodiscard]] std::string name() const override {
