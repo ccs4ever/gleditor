@@ -365,3 +365,94 @@ TEST(VortexHostTest, SovereignLibraryPackaging) {
 
   fs::remove_all(tmpDir);
 }
+
+TEST(VortexHostTest, VPLEngineExecution) {
+  VortexHost host;
+  auto res = host.executeVPL("1 + 2");
+  EXPECT_TRUE(res.success) << res.message;
+  EXPECT_THAT(res.message, testing::HasSubstr("3"));
+
+  auto resScriptParen = host.executeScript(") 10 + 20");
+  EXPECT_TRUE(resScriptParen.success) << resScriptParen.message;
+  EXPECT_THAT(resScriptParen.message, testing::HasSubstr("30"));
+
+  auto resScriptVpl = host.executeScript(":vpl 7 * 6");
+  EXPECT_TRUE(resScriptVpl.success) << resScriptVpl.message;
+  EXPECT_THAT(resScriptVpl.message, testing::HasSubstr("42"));
+}
+
+TEST(VortexHostTest, LogicSolvingAndOmnibarQueries) {
+  Store store;
+  initializeSystemStore(store, SystemDocKind::Settings);
+  auto parent = store.primaryCurrentVersion();
+  SettingSpec spec{
+      .name    = "fontSize",
+      .notes   = "Font size in px",
+      .schemas = {{{"integer"}, {std::int64_t{14}}}},
+  };
+  parent = ensureSetting(store, parent, spec);
+  store.repointCurrentVersion(parent);
+
+  VortexHost host;
+  host.bindStore(&store);
+
+  auto solutions = host.solveLogic("setting('fontSize', Val)");
+  EXPECT_FALSE(solutions.empty());
+
+  auto res = host.executeScript(":logic setting('fontSize', Val)");
+  EXPECT_TRUE(res.success) << res.message;
+  EXPECT_FALSE(res.affectedCells.empty());
+
+  auto resQ = host.executeScript("?- setting('fontSize', Val)");
+  EXPECT_TRUE(resQ.success) << resQ.message;
+}
+
+TEST(VortexHostTest, AppActionDelegateAndCanonicalDispatch) {
+  VortexHost host;
+  auto &arena  = host.arena();
+  CellRef root = arena.makeCell("Root");
+
+  ViewAxisBinding axes{
+      .x_dimension = "d.1", .y_dimension = "d.2", .z_dimension = "d.3"};
+  CellRef newFocus = noCell;
+
+  std::string lastInterceptedAction;
+  host.setAppActionDelegate([&](std::string_view action, CellRef /*focus*/,
+                                ViewAxisBinding & /*axes*/, CellRef &focusOut) {
+    lastInterceptedAction = std::string(action);
+    if (action == "std:xudu/custom_save") {
+      focusOut = root;
+      return true;
+    }
+    return false;
+  });
+
+  // Custom action handled by delegate
+  EXPECT_TRUE(
+      host.dispatchAction("std:xudu/custom_save", noCell, axes, newFocus));
+  EXPECT_EQ(newFocus, root);
+  EXPECT_EQ(lastInterceptedAction, "std:xudu/custom_save");
+
+  // Canonical mapping invoked for legacy action to delegate
+  host.dispatchAction("save", noCell, axes, newFocus);
+  EXPECT_EQ(lastInterceptedAction, "std:xudu/save");
+
+  // Canonical navigation dispatch
+  DimRef d1  = host.core().mintDimension("d.1");
+  CellRef c2 = arena.makeCell("C2");
+  arena.link(root, d1, DimVector::POS, c2);
+
+  EXPECT_TRUE(host.dispatchAction("std:nav/step_x_pos", root, axes, newFocus));
+  EXPECT_EQ(newFocus, c2);
+
+  // Canonical UI bundle cycle
+  EXPECT_TRUE(host.dispatchAction("std:ui/bundle_cycle", root, axes, newFocus));
+  EXPECT_EQ(axes.x_dimension, "d.spin");
+  EXPECT_EQ(axes.y_dimension, "d.step");
+  EXPECT_TRUE(host.dispatchAction("std:ui/bundle_cycle", root, axes, newFocus));
+  EXPECT_EQ(axes.x_dimension, "d.lexical");
+  EXPECT_EQ(axes.y_dimension, "d.dynamic");
+
+  // Fallback to stdlib resolution for sovereign stdlib action
+  EXPECT_TRUE(host.dispatchAction("std:xudu/quit", root, axes, newFocus));
+}

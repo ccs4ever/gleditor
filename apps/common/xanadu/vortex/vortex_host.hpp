@@ -21,6 +21,8 @@
 #include "common/xanadu/vortex/vortex_core.hpp"
 #include "common/xanadu/vortex/vortex_stdlib.hpp"
 #include "common/xanadu/vortex/vortex_vm.hpp"
+#include "common/xanadu/vpl/vpl_engine.hpp"
+#include "common/xanadu/vprolog/compiler.hpp"
 #include "common/xanadu/vql/compiler.hpp"
 #include "common/xanadu/vql/vql_engine.hpp"
 #include "common/xanadu/zigzag/arena_manifold.hpp"
@@ -28,6 +30,10 @@
 #include "common/xanadu/zigzag/zzstructure.hpp"
 
 namespace zigzag::vortex {
+
+using AppActionDelegate =
+    std::function<bool(std::string_view action, CellRef focusCell,
+                       ViewAxisBinding &axes, CellRef &newFocusOut)>;
 
 struct VortexHostConfig {
   std::size_t schedulerCycleBudget{1000};
@@ -78,6 +84,19 @@ public:
   }
   [[nodiscard]] xanadu::vql::VQLCompiler &vqlCompiler() noexcept {
     return vqlCompiler_;
+  }
+  [[nodiscard]] const xanadu::vpl::VPLEngine &vplEngine() const noexcept {
+    return vplEngine_;
+  }
+  [[nodiscard]] xanadu::vpl::VPLEngine &vplEngine() noexcept {
+    return vplEngine_;
+  }
+
+  void setAppActionDelegate(AppActionDelegate delegate) {
+    appActionDelegate_ = std::move(delegate);
+  }
+  [[nodiscard]] const AppActionDelegate &appActionDelegate() const noexcept {
+    return appActionDelegate_;
   }
 
   // -- Configuration ----------------------------------------------------------
@@ -189,8 +208,20 @@ public:
    * @brief Runs an arbitrary VQL script or weave block, promoting created cells
    * into store if provided.
    */
-  ScriptResult executeScript(std::string_view script, CellRef contextCell,
+  ScriptResult executeScript(std::string_view script,
+                             CellRef contextCell  = noCell,
                              xanadu::Store *store = nullptr);
+
+  /**
+   * @brief Evaluates an arbitrary VPL expression and formats the array view.
+   */
+  ScriptResult executeVPL(std::string_view expr);
+
+  /**
+   * @brief Solves a first-order logic goal query using VProlog and Vlog.
+   */
+  std::vector<LogicSolution> solveLogic(std::string_view goalQuery,
+                                        std::size_t maxSolutions = 50);
 
   /**
    * @brief Persists a named macro into the active sovereign Store
@@ -226,7 +257,9 @@ private:
   VortexStdLib stdlib_;
   xanadu::vql::VQLEngine vqlEngine_;
   xanadu::vql::VQLCompiler vqlCompiler_;
+  xanadu::vpl::VPLEngine vplEngine_;
 
+  AppActionDelegate appActionDelegate_{};
   xanadu::Store *boundStore_{nullptr};
   VortexHostConfig config_{};
   CellRef gcCursor_{noCell};
