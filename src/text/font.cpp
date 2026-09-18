@@ -31,7 +31,7 @@ ParsedFontSpec parseFontSpec(const std::string &spec) {
       if (idx == spec.size() - (lastSpace + 1) && sz > 0.0) {
         return {.family = spec.substr(0, lastSpace), .pointSize = sz};
       }
-    } catch (...) {
+    } catch (...) { // NOLINT(bugprone-empty-catch)
       // Not a number; treat entire string as family
     }
   }

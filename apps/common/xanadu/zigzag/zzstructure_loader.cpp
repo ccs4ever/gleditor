@@ -220,6 +220,8 @@ void readDimensionMeta(const ryml::ConstNodeRef &structure,
       try {
         entry["spacing"] >> meta.spacing;
       } catch (...) {
+        diagnostics.warn(std::format(
+            "dimension {} spacing is not a number -- using default", dimName));
       }
     }
 
@@ -252,6 +254,7 @@ void readSceneMeta(const ryml::ConstNodeRef &structure,
     try {
       sceneNode["focus_scale"] >> doc.scene.focus_scale;
     } catch (...) {
+      diagnostics.warn("scene focus_scale is not a number -- using default");
     }
   }
   if (sceneNode.has_child("cell_radius") &&
@@ -259,6 +262,7 @@ void readSceneMeta(const ryml::ConstNodeRef &structure,
     try {
       sceneNode["cell_radius"] >> doc.scene.cell_radius;
     } catch (...) {
+      diagnostics.warn("scene cell_radius is not a number -- using default");
     }
   }
   if (sceneNode.has_child("layout_speed") &&
@@ -266,6 +270,7 @@ void readSceneMeta(const ryml::ConstNodeRef &structure,
     try {
       sceneNode["layout_speed"] >> doc.scene.layout_speed;
     } catch (...) {
+      diagnostics.warn("scene layout_speed is not a number -- using default");
     }
   }
   if (sceneNode.has_child("alpha_speed") &&
@@ -273,6 +278,7 @@ void readSceneMeta(const ryml::ConstNodeRef &structure,
     try {
       sceneNode["alpha_speed"] >> doc.scene.alpha_speed;
     } catch (...) {
+      diagnostics.warn("scene alpha_speed is not a number -- using default");
     }
   }
   if (sceneNode.has_child("border_thickness") &&
@@ -280,6 +286,8 @@ void readSceneMeta(const ryml::ConstNodeRef &structure,
     try {
       sceneNode["border_thickness"] >> doc.scene.border_thickness;
     } catch (...) {
+      diagnostics.warn(
+          "scene border_thickness is not a number -- using default");
     }
   }
   if (sceneNode.has_child("neighborhood_radius") &&
@@ -287,6 +295,8 @@ void readSceneMeta(const ryml::ConstNodeRef &structure,
     try {
       sceneNode["neighborhood_radius"] >> doc.scene.neighborhood_radius;
     } catch (...) {
+      diagnostics.warn(
+          "scene neighborhood_radius is not a number -- using default");
     }
   }
 }

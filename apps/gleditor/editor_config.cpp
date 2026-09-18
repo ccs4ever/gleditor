@@ -163,7 +163,7 @@ EditorConfig parseEditorConfig(const std::string_view yamlText) {
         cfg.userNotes = stripQuotes(std::string_view{v.data(), v.size()});
       }
     }
-  } catch (const std::exception &) {
+  } catch (const std::exception &) { // NOLINT(bugprone-empty-catch)
     // Return fallback cfg on error
   }
 

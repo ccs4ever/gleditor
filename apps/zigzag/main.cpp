@@ -93,7 +93,7 @@ LoadedDocument loadDocument(const std::string &slicePath,
                   "Loaded sovereign Store into ZigZag Hypermesh from: " +
                   slicePath + " (" + std::to_string(versions.size()) +
                   " versions)"};
-    } catch (...) {
+    } catch (...) { // NOLINT(bugprone-empty-catch)
       // Fall through to slice candidates
     }
   }
@@ -137,7 +137,7 @@ std::unique_ptr<xanadu::Store> loadOrCreateKeymapStore() {
     try {
       sysStore->load(dir.string());
       opened = true;
-    } catch (...) {
+    } catch (...) { // NOLINT(bugprone-empty-catch)
       // Recreate if unreadable
     }
   }

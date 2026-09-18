@@ -460,8 +460,8 @@ namespace {
 /// decodeImageBuffer() convention) rather than requiring a file path the
 /// way tools/decode-index-spike.cpp's own AvContext did.
 struct MemoryReader {
-  const std::uint8_t *data;
-  std::size_t size;
+  const std::uint8_t *data{nullptr};
+  std::size_t size{0};
   std::size_t pos{0};
 };
 

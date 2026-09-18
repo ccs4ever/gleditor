@@ -631,7 +631,9 @@ void IdentityPeerPlugin::isolateAndDisconnect(std::string_view reason) {
     try {
       controller_->quarantinePeer(pc_.remote().address().to_string() + ":" +
                                   std::to_string(pc_.remote().port()));
-    } catch (...) {
+    } catch (...) { // NOLINT(bugprone-empty-catch)
+      // Best-effort during teardown: the connection may already be gone,
+      // and this path must not itself throw while isolating a peer.
     }
   }
   if (!live) {
@@ -641,7 +643,9 @@ void IdentityPeerPlugin::isolateAndDisconnect(std::string_view reason) {
     const auto ec = boost::system::errc::make_error_code(
         boost::system::errc::permission_denied);
     pc_.disconnect(ec, libtorrent::operation_t::bittorrent);
-  } catch (...) {
+  } catch (...) { // NOLINT(bugprone-empty-catch)
+    // Same as above: already isolating, so a disconnect failure here is
+    // nothing further to do about.
   }
 }
 

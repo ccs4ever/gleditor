@@ -39,15 +39,17 @@ DecodedImage surfaceToDecodedImage(SDL_Surface *surface) {
   DecodedImage result;
   result.width  = rgbaSurface->w;
   result.height = rgbaSurface->h;
-  result.rgba.resize(
-      static_cast<std::size_t>(result.width * result.height * 4));
+  result.rgba.resize(static_cast<std::size_t>(result.width) *
+                     static_cast<std::size_t>(result.height) * 4);
 
   const auto *const srcPixels =
       static_cast<const std::uint8_t *>(rgbaSurface->pixels);
   for (int y = 0; y < result.height; ++y) {
     std::memcpy(result.rgba.data() +
-                    (static_cast<std::size_t>(y * result.width) * 4),
-                srcPixels + (y * rgbaSurface->pitch),
+                    (static_cast<std::size_t>(y) *
+                     static_cast<std::size_t>(result.width) * 4),
+                srcPixels + (static_cast<std::size_t>(y) *
+                             static_cast<std::size_t>(rgbaSurface->pitch)),
                 static_cast<std::size_t>(result.width) * 4);
   }
 

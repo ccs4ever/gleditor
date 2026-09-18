@@ -15,7 +15,8 @@
 namespace xanadu {
 
 namespace {
-constexpr std::size_t defaultPrimediaReservation = 512 * 1024 * 1024; // 512 MB
+constexpr std::size_t defaultPrimediaReservation =
+    512uz * 1024 * 1024; // 512 MB
 }
 
 SegmentedPrimediaSpool::SegmentedPrimediaSpool() {
@@ -160,7 +161,7 @@ bool SegmentedPrimediaSpool::addSealedSegment(
   if (fd < 0) {
     return false;
   }
-  struct stat st;
+  struct stat st{};
   if (::fstat(fd, &st) < 0 || st.st_size <= 0) {
     ::close(fd);
     return false;
@@ -237,7 +238,7 @@ bool SegmentedPrimediaSpool::openActiveSegment(
   // -- the active segment is the one that grows, and a shared file mapping
   // cannot be extended in place the way appending needs.
   activeStart = totalBytes.load(std::memory_order_relaxed);
-  struct stat st;
+  struct stat st{};
   if (::fstat(activeFd, &st) < 0) {
     ::close(activeFd);
     activeFd = -1;

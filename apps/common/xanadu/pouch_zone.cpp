@@ -354,7 +354,8 @@ void PouchManager::loadManifest() {
             .auraColor       = aura,
             .heightWeight    = weight,
         });
-      } catch (...) {
+      } catch (...) { // NOLINT(bugprone-empty-catch)
+        // A malformed entry is skipped rather than failing the whole load.
       }
     }
   }

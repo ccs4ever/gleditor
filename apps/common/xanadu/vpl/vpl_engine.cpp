@@ -1192,7 +1192,8 @@ double VPLEngine::cellValueDouble(zigzag::CellRef cell) const {
   if (!s.empty()) {
     try {
       return std::stod(s);
-    } catch (...) {
+    } catch (...) { // NOLINT(bugprone-empty-catch)
+      // Not a number; fall through to the 0.0 default below.
     }
   }
   return 0.0;
@@ -1208,7 +1209,8 @@ std::int64_t VPLEngine::cellValueInt(zigzag::CellRef cell) const {
   if (!s.empty()) {
     try {
       return std::stoll(s);
-    } catch (...) {
+    } catch (...) { // NOLINT(bugprone-empty-catch)
+      // Not a number; fall through to the 0 default below.
     }
   }
   return 0;

@@ -449,9 +449,9 @@ Page::offsetForCluster(const std::uint32_t clusterIndex,
 
   // Walk that many characters into the cluster. The byte length of a
   // character varies, so the boundary cannot be computed arithmetically.
-  auto offset = static_cast<std::size_t>(cluster.byteStart);
-  const auto end =
-      static_cast<std::size_t>(cluster.byteStart + cluster.byteLength);
+  auto offset     = static_cast<std::size_t>(cluster.byteStart);
+  const auto end  = static_cast<std::size_t>(cluster.byteStart) +
+                    static_cast<std::size_t>(cluster.byteLength);
   const auto text = pageText();
   for (std::uint32_t taken = 0; taken < steps && offset < end;) {
     offset++;

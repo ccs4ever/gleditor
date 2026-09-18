@@ -823,7 +823,8 @@ SvgAnimator::load(std::span<const std::uint8_t> bytes) {
       try {
         width  = std::stoi(wStr);
         height = std::stoi(hStr);
-      } catch (...) {
+      } catch (...) { // NOLINT(bugprone-empty-catch)
+        // Not numeric; fall through to the viewBox fallback below.
       }
     }
     if (width <= 0 || height <= 0) {

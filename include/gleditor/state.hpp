@@ -276,11 +276,11 @@ struct AppState {
     int screenWidth  = 800;
     int screenHeight = 600;
     float fov        = 5.0;
-    glm::vec3 pos;
-    glm::vec3 front;
-    glm::vec3 upward;
-    float speed = 60.0;
-    ViewPerspective() { resetPos(); }
+    glm::vec3 pos{0.0F, 0.0F, 1000.0F};
+    glm::vec3 front{0.0F, 0.0F, -1.0F};
+    glm::vec3 upward{0.0F, 1.0F, 0.0F};
+    float speed       = 60.0;
+    ViewPerspective() = default;
     void resetPos() {
       pos    = glm::vec3(0.0F, 0.0F, 1000.0F);
       front  = glm::vec3(0.0F, 0.0F, -1.0F);

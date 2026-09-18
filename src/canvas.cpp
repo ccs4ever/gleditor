@@ -44,9 +44,9 @@ std::array<float, 16> toArray(const glm::mat4 &mat) {
  * assets/shaders/image.vert.glsl.
  */
 struct ImageRow {
-  std::array<float, 2> pos;  ///< Centre of the quad, model space.
-  std::array<float, 2> size; ///< Width, height, in layout pixels.
-  std::array<float, 4> uv;   ///< u0, v0 (bottom left), u1, v1 (top right).
+  std::array<float, 2> pos{};  ///< Centre of the quad, model space.
+  std::array<float, 2> size{}; ///< Width, height, in layout pixels.
+  std::array<float, 4> uv{};   ///< u0, v0 (bottom left), u1, v1 (top right).
   std::uint32_t layer{};
   std::uint32_t tint{}; ///< Packed RGBA8.
   /// Picking index; the kind half of the tag is hardcoded in the vertex

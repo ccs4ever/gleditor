@@ -173,7 +173,7 @@ SpoolExhausted::SpoolExhausted(const std::uint32_t heldOps,
           "operations spool is full at " + std::to_string(capacityOps) +
           " operations (" +
           std::to_string((static_cast<std::uint64_t>(capacityOps) + 1U) *
-                         sizeof(CompactOpNode) / (1024U * 1024U)) +
+                         sizeof(CompactOpNode) / (1024UL * 1024UL)) +
           " MiB of reserved address space); it holds " +
           std::to_string(heldOps)),
       heldOps_(heldOps), capacityOps_(capacityOps) {}
@@ -560,7 +560,7 @@ bool SegmentedOpsSpool::addSealedSegment(const std::filesystem::path &path) {
   if (fd < 0) {
     return false;
   }
-  struct stat st;
+  struct stat st{};
   if (::fstat(fd, &st) < 0 || st.st_size < 0) {
     ::close(fd);
     return false;
@@ -607,7 +607,7 @@ bool SegmentedOpsSpool::openActiveSegment(const std::filesystem::path &path) {
   if (fd < 0) {
     return false;
   }
-  struct stat st;
+  struct stat st{};
   if (::fstat(fd, &st) < 0 || st.st_size < 0) {
     ::close(fd);
     return false;

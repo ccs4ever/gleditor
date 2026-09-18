@@ -561,7 +561,8 @@ GlyphCache::addToCache(const std::string &chr, const FontPtr &font,
         continue;
       }
       const unsigned char *srcRow =
-          bg->bitmap.buffer + (row * bg->bitmap.pitch);
+          bg->bitmap.buffer + (static_cast<std::size_t>(row) *
+                               static_cast<std::size_t>(bg->bitmap.pitch));
       unsigned char *dstRow =
           data.data() + (static_cast<std::size_t>(curDstY) * stride);
 

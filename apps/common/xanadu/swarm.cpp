@@ -48,19 +48,28 @@ InfoHash fromLt(const lt::sha1_hash &hash) {
 
 /// libtorrent keeps its keys as arrays of char; these carry no meaning beyond
 /// the reinterpretation, and exist so the conversion is written once.
+///
+/// lt::dht::public_key/secret_key/signature are libtorrent system-header
+/// types this project can't add a default member initializer to; each is
+/// fully overwritten below by a same-size std::ranges::copy of its own
+/// source array (32/64/64 bytes, matching PublicKey/SecretKey/Signature's
+/// own bytes exactly), so the default-constructed `out` is never read.
 lt::dht::public_key toLt(const PublicKey &key) {
+  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
   lt::dht::public_key out;
   std::ranges::copy(key.bytes, out.bytes.begin());
   return out;
 }
 
 lt::dht::secret_key toLt(const SecretKey &key) {
+  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
   lt::dht::secret_key out;
   std::ranges::copy(key.bytes, out.bytes.begin());
   return out;
 }
 
 lt::dht::signature toLt(const Signature &signature) {
+  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
   lt::dht::signature out;
   std::ranges::copy(signature.bytes, out.bytes.begin());
   return out;
@@ -269,7 +278,7 @@ struct SwarmContentSource::Impl {
       for (const auto &peer : swarm.wantedPeers) {
         try {
           swarm.handle.connect_peer(peer);
-        } catch (const std::exception &) {
+        } catch (const std::exception &) { // NOLINT(bugprone-empty-catch)
           // Still not ready, or the peer is not there yet. Either way this is
           // tried again on the next pump rather than being fatal.
         }

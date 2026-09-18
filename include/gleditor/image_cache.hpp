@@ -32,7 +32,8 @@ struct DecodedImage {
 
   [[nodiscard]] bool valid() const {
     return width > 0 && height > 0 &&
-           rgba.size() >= static_cast<std::size_t>(width * height * 4);
+           rgba.size() >= static_cast<std::size_t>(width) *
+                              static_cast<std::size_t>(height) * 4;
   }
 
   [[nodiscard]] float aspectRatio() const {

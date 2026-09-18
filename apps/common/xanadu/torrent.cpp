@@ -421,7 +421,7 @@ std::vector<std::uint32_t> parseSelectOnly(const std::string_view text) {
             selected.push_back(index);
           }
         }
-      } catch (const std::exception &) {
+      } catch (const std::exception &) { // NOLINT(bugprone-empty-catch)
         // A malformed selector narrows nothing rather than failing the whole
         // link: the info hash is the part that matters and it is still good.
       }
