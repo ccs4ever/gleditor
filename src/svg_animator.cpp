@@ -588,7 +588,7 @@ public:
     }
 
     rgbaOut.resize(static_cast<std::size_t>(width_) * height_);
-    std::fill(rgbaOut.begin(), rgbaOut.end(), 0U);
+    std::ranges::fill(rgbaOut, 0U);
 
     const auto targetRes = canvas->target(
         rgbaOut.data(), static_cast<std::uint32_t>(width_),
@@ -656,7 +656,7 @@ public:
       return false;
     }
     rgbaOut.resize(static_cast<std::size_t>(width_) * height_);
-    std::fill(rgbaOut.begin(), rgbaOut.end(), 0U);
+    std::ranges::fill(rgbaOut, 0U);
 
     canvas->target(rgbaOut.data(), static_cast<std::uint32_t>(width_),
                    static_cast<std::uint32_t>(width_),

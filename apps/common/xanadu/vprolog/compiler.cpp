@@ -159,8 +159,8 @@ CompiledQuery Compiler::compileQuery(const Clause &queryClause) {
 
   std::function<void(const Term &)> collectNames = [&](const Term &t) {
     if (const auto *v = t.asVar()) {
-      if (!v->isAnonymous && std::find(varNames.begin(), varNames.end(),
-                                       v->name) == varNames.end()) {
+      if (!v->isAnonymous &&
+          std::ranges::find(varNames, v->name) == varNames.end()) {
         varNames.push_back(v->name);
       }
     } else if (const auto *c = t.asCompound()) {

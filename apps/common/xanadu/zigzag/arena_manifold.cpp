@@ -292,7 +292,7 @@ void ArenaManifold::setContentAt(
     cell.spanOffset = static_cast<std::uint32_t>(content_.size());
     content_.resize(content_.size() + spans.size());
   }
-  std::copy(spans.begin(), spans.end(), content_.begin() + cell.spanOffset);
+  std::ranges::copy(spans, content_.begin() + cell.spanOffset);
   cell.spanCount = static_cast<std::uint16_t>(spans.size());
   liveContent_ += cell.spanCount;
 

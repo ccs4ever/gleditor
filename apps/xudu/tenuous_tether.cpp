@@ -43,8 +43,8 @@ void TenuousTetherOverlay::removeTether(const std::size_t targetId,
 void TenuousTetherOverlay::clear() { tethers_.clear(); }
 
 bool TenuousTetherOverlay::hasActiveTethers() const noexcept {
-  return std::any_of(tethers_.begin(), tethers_.end(),
-                     [](const FlyingTetherAnchor &t) { return t.active; });
+  return std::ranges::any_of(
+      tethers_, [](const FlyingTetherAnchor &t) { return t.active; });
 }
 
 void TenuousTetherOverlay::deviceReady(render::RenderDevice &device,

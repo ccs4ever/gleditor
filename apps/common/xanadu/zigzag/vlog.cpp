@@ -42,11 +42,10 @@ CellRef Vlog::makeTerm(const std::string_view functor,
   std::vector<CellRef> seen;
   for (const CellRef arg : args) {
     CellRef actualArg = arg;
-    if (noCell != arg &&
-        (std::find(seen.begin(), seen.end(), arg) != seen.end() ||
-         noCell != m.linked(arg, grab, DimVector::NEG) ||
-         noCell != m.linked(arg, step, DimVector::NEG) ||
-         noCell != m.linked(arg, step, DimVector::POS))) {
+    if (noCell != arg && (std::ranges::find(seen, arg) != seen.end() ||
+                          noCell != m.linked(arg, grab, DimVector::NEG) ||
+                          noCell != m.linked(arg, step, DimVector::NEG) ||
+                          noCell != m.linked(arg, step, DimVector::POS))) {
       actualArg = m.makeCell();
       m.link(endOfRank(arg, clone, DimVector::POS), clone, DimVector::POS,
              actualArg);
@@ -73,7 +72,7 @@ std::vector<CellRef> Vlog::argumentsOf(const CellRef ref) const {
   CellRef arg          = m.linked(actual, grab, DimVector::POS);
   for (std::size_t steps = 0; noCell != arg && steps <= m.cellCount();
        steps++) {
-    if (std::find(args.begin(), args.end(), arg) != args.end()) {
+    if (std::ranges::find(args, arg) != args.end()) {
       break;
     }
     args.push_back(arg);

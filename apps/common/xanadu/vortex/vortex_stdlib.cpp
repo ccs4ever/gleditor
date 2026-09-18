@@ -3404,7 +3404,7 @@ CellRef VortexStdLib::arrayReverse(CellRef origin, DimRef dim) {
   if (cells.empty()) {
     return noCell;
   }
-  std::reverse(cells.begin(), cells.end());
+  std::ranges::reverse(cells);
   CellRef head = noCell;
   CellRef prev = noCell;
   for (CellRef c : cells) {

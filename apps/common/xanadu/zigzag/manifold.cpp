@@ -112,7 +112,7 @@ void Manifold::setContent(const std::uint32_t dense,
     cell.spanOffset = static_cast<std::uint32_t>(content.size());
     content.resize(content.size() + spans.size());
   }
-  std::copy(spans.begin(), spans.end(), content.begin() + cell.spanOffset);
+  std::ranges::copy(spans, content.begin() + cell.spanOffset);
   cell.spanCount = static_cast<std::uint16_t>(spans.size());
   liveContent += cell.spanCount;
 

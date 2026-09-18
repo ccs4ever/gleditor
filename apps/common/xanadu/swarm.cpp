@@ -93,10 +93,8 @@ MutableKeys createMutableKeys() {
   const auto [publicKey, secretKey] =
       lt::dht::ed25519_create_keypair(lt::dht::ed25519_create_seed());
   MutableKeys keys;
-  std::copy(publicKey.bytes.begin(), publicKey.bytes.end(),
-            keys.publicKey.bytes.begin());
-  std::copy(secretKey.bytes.begin(), secretKey.bytes.end(),
-            keys.secretKey.bytes.begin());
+  std::ranges::copy(publicKey.bytes, keys.publicKey.bytes.begin());
+  std::ranges::copy(secretKey.bytes, keys.secretKey.bytes.begin());
   return keys;
 }
 
@@ -105,7 +103,7 @@ Signature signMutableItem(const std::string_view buffer,
   const auto signed_ = lt::dht::ed25519_sign(
       spanOf(buffer), toLt(keys.publicKey), toLt(keys.secretKey));
   Signature out;
-  std::copy(signed_.bytes.begin(), signed_.bytes.end(), out.bytes.begin());
+  std::ranges::copy(signed_.bytes, out.bytes.begin());
   return out;
 }
 
@@ -322,7 +320,7 @@ struct SwarmContentSource::Impl {
    */
   void recordMutableItem(const lt::dht_mutable_item_alert &alert) {
     MutableLink answered;
-    std::copy(alert.key.begin(), alert.key.end(), answered.key.bytes.begin());
+    std::ranges::copy(alert.key, answered.key.bytes.begin());
     answered.salt = alert.salt;
 
     const auto found = names.find(answered.target());
@@ -339,8 +337,7 @@ struct SwarmContentSource::Impl {
     // therefore the one the publisher signed.
     const auto encoded = encodedValueOf(alert.item);
     Signature signature;
-    std::copy(alert.signature.begin(), alert.signature.end(),
-              signature.bytes.begin());
+    std::ranges::copy(alert.signature, signature.bytes.begin());
     if (!verifyMutableItem(mutableSigningBuffer(alert.salt, alert.seq, encoded),
                            signature, answered.key)) {
       return;
@@ -840,8 +837,7 @@ void SwarmContentSource::publishMutable(const MutableKeys &keys,
         // and a signature over anything else is a signature over nothing.
         const auto signed_ = signMutableItem(
             mutableSigningBuffer(itemSalt, seq, encodedValueOf(value)), keys);
-        std::copy(signed_.bytes.begin(), signed_.bytes.end(),
-                  signature.begin());
+        std::ranges::copy(signed_.bytes, signature.begin());
       },
       salt);
   impl->pump();

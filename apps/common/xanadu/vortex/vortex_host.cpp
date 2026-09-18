@@ -846,7 +846,7 @@ std::vector<std::string> VortexHost::listMacros() const {
   for (const auto &[name, _] : macroRegistry_) {
     names.push_back(name);
   }
-  std::sort(names.begin(), names.end());
+  std::ranges::sort(names);
   return names;
 }
 

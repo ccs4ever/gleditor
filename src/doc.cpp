@@ -1009,13 +1009,17 @@ void Doc::addObserver(gleditor::DocumentObserver *const observer) {
   if (nullptr == observer) {
     return;
   }
-  if (std::find(observers.begin(), observers.end(), observer) ==
-      observers.end()) {
+  if (std::ranges::find(observers, observer) == observers.end()) {
     observers.push_back(observer);
   }
 }
 
 void Doc::removeObserver(gleditor::DocumentObserver *const observer) {
+  // std::ranges::remove returns a subrange (its .begin() is the new logical
+  // end), not the plain iterator std::remove returns -- erase() needs that
+  // iterator, so this stays the pre-ranges algorithm. See the
+  // modernize-use-ranges note in .clang-tidy.
+  // NOLINTNEXTLINE(modernize-use-ranges)
   observers.erase(std::remove(observers.begin(), observers.end(), observer),
                   observers.end());
 }

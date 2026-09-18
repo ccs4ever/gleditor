@@ -311,7 +311,7 @@ VQLEngine::traverseDimension(const SignedDimensionStep &dimStep,
       }
 
       if (dir == zigzag::DimVector::NEG) {
-        std::reverse(rankCells.begin(), rankCells.end());
+        std::ranges::reverse(rankCells);
       }
       results.insert(results.end(), rankCells.begin(), rankCells.end());
       break;

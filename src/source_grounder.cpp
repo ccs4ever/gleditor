@@ -128,6 +128,11 @@ std::optional<SubspanMatch> SourceGrounder::locateBinarySubspan(
     return std::nullopt;
   }
 
+  // std::ranges::search returns a subrange, not the plain iterator
+  // std::search returns -- comparing that subrange against
+  // parentBytes.end() below wouldn't compile, so this stays the pre-ranges
+  // algorithm. See the modernize-use-ranges note in .clang-tidy.
+  // NOLINTNEXTLINE(modernize-use-ranges)
   const auto it = std::search(parentBytes.begin(), parentBytes.end(),
                               excerptBytes.begin(), excerptBytes.end());
   if (it == parentBytes.end()) {

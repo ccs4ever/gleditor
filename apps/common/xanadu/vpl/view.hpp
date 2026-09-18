@@ -10,6 +10,7 @@
 #ifndef COMMON_XANADU_VPL_VIEW_HPP
 #define COMMON_XANADU_VPL_VIEW_HPP
 
+#include <algorithm>
 #include <cstdint>
 #include <optional>
 #include <span>
@@ -130,9 +131,9 @@ public:
    * allocations. Monadic transpose reverses the axis list.
    */
   void transpose() {
-    std::reverse(axes_.begin(), axes_.end());
+    std::ranges::reverse(axes_);
     if (!extents_.empty()) {
-      std::reverse(extents_.begin(), extents_.end());
+      std::ranges::reverse(extents_);
     }
   }
 

@@ -1120,8 +1120,8 @@ std::vector<PublishedHoleRecord> Session::collectWithheldHoles() const {
     return holes;
   }
 
-  std::sort(holes.begin(), holes.end(),
-            [](const auto &a, const auto &b) { return a.at < b.at; });
+  std::ranges::sort(holes,
+                    [](const auto &a, const auto &b) { return a.at < b.at; });
 
   std::vector<PublishedHoleRecord> merged;
   merged.reserve(holes.size());

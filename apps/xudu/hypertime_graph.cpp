@@ -457,8 +457,7 @@ void HypertimeGraph::drawFrame(gleditor::FrameContext &ctx) {
     const auto &n    = nodes_[i];
     const bool isCur = (n.id == current_);
     const bool isComp =
-        std::find(comparedVersions_.begin(), comparedVersions_.end(), n.id) !=
-        comparedVersions_.end();
+        std::ranges::find(comparedVersions_, n.id) != comparedVersions_.end();
 
     canvas_->setTag(render::tagKindOverlay,
                     kTagNodeBase + static_cast<std::uint32_t>(i));
@@ -721,8 +720,7 @@ bool HypertimeGraph::picked(const render::PickingResult &pick,
 }
 
 void HypertimeGraph::toggleComparison(const MicroversionId &id) {
-  const auto it =
-      std::find(comparedVersions_.begin(), comparedVersions_.end(), id);
+  const auto it = std::ranges::find(comparedVersions_, id);
   if (it != comparedVersions_.end()) {
     comparedVersions_.erase(it);
   } else {

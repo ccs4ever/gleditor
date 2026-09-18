@@ -2536,7 +2536,7 @@ std::vector<std::string> ZigzagVisualizer::paletteItems() const {
         std::string full = mod;
         full += "/";
         full += sym;
-        if (std::find(items.begin(), items.end(), full) == items.end()) {
+        if (std::ranges::find(items, full) == items.end()) {
           items.push_back(full);
         }
       }

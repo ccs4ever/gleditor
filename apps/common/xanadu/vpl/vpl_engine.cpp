@@ -777,11 +777,10 @@ VplView VPLEngine::applyMonadicVerb(TokenKind verb, const VplView &arg) {
   if (verb == TokenKind::GradeUp) {
     auto cells = arg.collectCells(arena());
     std::vector<std::size_t> indices(cells.size());
-    std::iota(indices.begin(), indices.end(), 0);
-    std::stable_sort(
-        indices.begin(), indices.end(), [&](std::size_t a, std::size_t b) {
-          return cellValueDouble(cells[a]) < cellValueDouble(cells[b]);
-        });
+    std::ranges::iota(indices, 0);
+    std::ranges::stable_sort(indices, [&](std::size_t a, std::size_t b) {
+      return cellValueDouble(cells[a]) < cellValueDouble(cells[b]);
+    });
     std::vector<std::int64_t> idx64(indices.begin(), indices.end());
     return mintRank(idx64, defaultDim());
   }
@@ -790,11 +789,10 @@ VplView VPLEngine::applyMonadicVerb(TokenKind verb, const VplView &arg) {
   if (verb == TokenKind::GradeDown) {
     auto cells = arg.collectCells(arena());
     std::vector<std::size_t> indices(cells.size());
-    std::iota(indices.begin(), indices.end(), 0);
-    std::stable_sort(
-        indices.begin(), indices.end(), [&](std::size_t a, std::size_t b) {
-          return cellValueDouble(cells[a]) > cellValueDouble(cells[b]);
-        });
+    std::ranges::iota(indices, 0);
+    std::ranges::stable_sort(indices, [&](std::size_t a, std::size_t b) {
+      return cellValueDouble(cells[a]) > cellValueDouble(cells[b]);
+    });
     std::vector<std::int64_t> idx64(indices.begin(), indices.end());
     return mintRank(idx64, defaultDim());
   }
