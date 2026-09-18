@@ -181,9 +181,10 @@ void TensionLayoutEngine::computeForces(const std::vector<TensionBody> &state,
 
     const float kSpring =
         far.isCell() ? params_.kSatelloidAlign : params_.kAlign;
-    const float gap = c.targetGap > 0.0F ? c.targetGap
-                                         : (far.isCell() ? params_.satelloidGap
-                                                         : params_.defaultGap);
+    float gap = c.targetGap;
+    if (gap <= 0.0F) {
+      gap = far.isCell() ? params_.satelloidGap : params_.defaultGap;
+    }
 
     // Collinear target position for far body
     const float targetX =

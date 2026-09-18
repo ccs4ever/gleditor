@@ -225,9 +225,12 @@ void FloatingToolbar3D::drawFrame(FrameContext &ctx) {
     const float btnW   = std::max(24.0F, metrics.width + btnPaddingX * 2.0F);
 
     const std::uint32_t bgCol = def.active ? btnActiveBg : btnDefaultBg;
-    const std::uint32_t txtCol =
-        def.active ? textActive
-                   : (def.label == "+ New" ? 0x38BDF8FFU : textPrimary);
+    std::uint32_t txtCol      = textPrimary;
+    if (def.active) {
+      txtCol = textActive;
+    } else if (def.label == "+ New") {
+      txtCol = 0x38BDF8FFU;
+    }
 
     canvas->setTag(render::tagKindOverlay, static_cast<std::uint32_t>(def.id));
     canvas->addRect(curX, curY, btnW, btnHeight, bgCol);

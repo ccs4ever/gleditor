@@ -270,11 +270,12 @@ std::string Publisher::describe(const Tree &tree) {
   }
   describeFrom(out, tree, tree.root(), 0);
   const auto *const focused = tree.find(tree.focus);
-  out << "focus: "
-      << (nullptr == focused ? "(none)"
-                             : (focused->label.empty() ? roleName(focused->role)
-                                                       : focused->label))
-      << "\n";
+  std::string focusLabel    = "(none)";
+  if (nullptr != focused) {
+    focusLabel =
+        focused->label.empty() ? roleName(focused->role) : focused->label;
+  }
+  out << "focus: " << focusLabel << "\n";
   return out.str();
 }
 

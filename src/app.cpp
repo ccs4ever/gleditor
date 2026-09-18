@@ -973,12 +973,13 @@ int Application::run() {
     // that refused; and one that opened is reporting whether or not anybody is
     // listening yet. Without this line all three look identical from outside,
     // which is how the Windows path went untested for as long as it did.
-    std::cout << "accessibility: "
-              << (opened ? "reporting to the platform"
-                  : gleditor::a11y::platformAvailable()
-                      ? "no adapter -- the platform declined"
-                      : "not in this build")
-              << "\n";
+    const char *status = "not in this build";
+    if (opened) {
+      status = "reporting to the platform";
+    } else if (gleditor::a11y::platformAvailable()) {
+      status = "no adapter -- the platform declined";
+    }
+    std::cout << "accessibility: " << status << "\n";
   }
 #ifdef _WIN32
   SDL_ShowWindow(window.window);
@@ -1117,14 +1118,14 @@ int Application::run() {
         std::cerr << dialog.title << ": " << dialog.message << "\n";
         continue;
       }
-      static_cast<void>(sdl::showMessageBox(
-          window.window,
-          render::DiagnosticSeverity::Error == dialog.severity
-              ? sdl::MessageKind::Error
-          : render::DiagnosticSeverity::Warning == dialog.severity
-              ? sdl::MessageKind::Warning
-              : sdl::MessageKind::Info,
-          dialog.title, dialog.message, {"OK"}));
+      sdl::MessageKind kind = sdl::MessageKind::Info;
+      if (render::DiagnosticSeverity::Error == dialog.severity) {
+        kind = sdl::MessageKind::Error;
+      } else if (render::DiagnosticSeverity::Warning == dialog.severity) {
+        kind = sdl::MessageKind::Warning;
+      }
+      static_cast<void>(sdl::showMessageBox(window.window, kind, dialog.title,
+                                            dialog.message, {"OK"}));
     }
   };
 

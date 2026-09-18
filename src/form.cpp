@@ -404,12 +404,18 @@ void Form::step(const int by) {
     if (0 == count) {
       return;
     }
-    highlight = by < 0 ? (0 == highlight ? count - 1 : highlight - 1)
-                       : (highlight + 1) % count;
+    if (by < 0) {
+      highlight = 0 == highlight ? count - 1 : highlight - 1;
+    } else {
+      highlight = (highlight + 1) % count;
+    }
     return;
   }
-  focus = by < 0 ? (0 == focus ? fields.size() - 1 : focus - 1)
-                 : (focus + 1) % fields.size();
+  if (by < 0) {
+    focus = 0 == focus ? fields.size() - 1 : focus - 1;
+  } else {
+    focus = (focus + 1) % fields.size();
+  }
   caret = fields[focus].value.size();
 }
 
@@ -517,9 +523,11 @@ bool Form::keyPressed(const Key key, const KeyMods mods) {
         // Through the options without opening the list, for somebody who knows
         // what is in it.
         const auto count = here.options.size();
-        here.chosen = Key::Left == key
-                          ? (0 == here.chosen ? count - 1 : here.chosen - 1)
-                          : (here.chosen + 1) % count;
+        if (Key::Left == key) {
+          here.chosen = 0 == here.chosen ? count - 1 : here.chosen - 1;
+        } else {
+          here.chosen = (here.chosen + 1) % count;
+        }
         return true;
       }
       if (Kind::Toggle == here.kind) {

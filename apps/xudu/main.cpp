@@ -860,10 +860,11 @@ public:
         return;
       }
       auto *const caret = renderer->editCaret();
-      const auto which = nullptr != caret && caret->active() &&
-                                 caret->documentIndex() < session.views().size()
-                             ? caret->documentIndex()
-                             : (switcher ? switcher->activeDocIndex() : 0U);
+      auto which        = switcher ? switcher->activeDocIndex() : 0U;
+      if (nullptr != caret && caret->active() &&
+          caret->documentIndex() < session.views().size()) {
+        which = caret->documentIndex();
+      }
       if (which >= session.views().size()) {
         session.saveAll();
         return;
@@ -943,10 +944,11 @@ public:
         return;
       }
       auto *const caret = renderer->editCaret();
-      const auto which  = nullptr != caret && caret->active() &&
-                                  caret->documentIndex() < rState.docs.size()
-                              ? caret->documentIndex()
-                              : (switcher ? switcher->activeDocIndex() : 0U);
+      auto which        = switcher ? switcher->activeDocIndex() : 0U;
+      if (nullptr != caret && caret->active() &&
+          caret->documentIndex() < rState.docs.size()) {
+        which = caret->documentIndex();
+      }
       if (which < rState.docs.size()) {
         closeDocument(which);
       }
@@ -2252,11 +2254,14 @@ int main(const int argc, char **argv) {
       const auto root = parser.get<std::string>("--torrent-data");
       for (const auto &file :
            parser.get<std::vector<std::string>>("--torrent")) {
-        const auto hash = xudu::MutableLink::looksLikeMutableLink(file)
-                              ? session->addName(file)
-                          : xudu::MagnetLink::looksLikeMagnet(file)
-                              ? session->addMagnet(file)
-                              : session->addTorrent(file, root);
+        xudu::InfoHash hash;
+        if (xudu::MutableLink::looksLikeMutableLink(file)) {
+          hash = session->addName(file);
+        } else if (xudu::MagnetLink::looksLikeMagnet(file)) {
+          hash = session->addMagnet(file);
+        } else {
+          hash = session->addTorrent(file, root);
+        }
         available.push_back(hash);
         if (const auto *const meta = session->content().metainfo(hash);
             nullptr != meta) {
@@ -2391,9 +2396,13 @@ int main(const int argc, char **argv) {
 
     asked = parser.get<std::string>("--version-id");
     if (opening.isZero()) {
-      opening = asked.empty()
-                    ? (read.empty() ? session->store(0).latest() : read.front())
-                    : MicroversionId::parse(asked);
+      if (!asked.empty()) {
+        opening = MicroversionId::parse(asked);
+      } else if (!read.empty()) {
+        opening = read.front();
+      } else {
+        opening = session->store(0).latest();
+      }
     }
     alongside = parser.get<std::string>("--alongside");
     publishAs = parser.get<std::string>("--publish");

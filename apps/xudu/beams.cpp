@@ -1514,12 +1514,12 @@ void LinkBeams::drawFrame(gleditor::FrameContext &ctx) {
         continue;
       }
 
-      const std::size_t docSpan =
-          (strand.from.isDocument() && strand.to.isDocument())
-              ? (strand.from.doc > strand.to.doc
-                     ? (strand.from.doc - strand.to.doc)
-                     : (strand.to.doc - strand.from.doc))
-              : 1;
+      std::size_t docSpan = 1;
+      if (strand.from.isDocument() && strand.to.isDocument()) {
+        docSpan = strand.from.doc > strand.to.doc
+                      ? (strand.from.doc - strand.to.doc)
+                      : (strand.to.doc - strand.from.doc);
+      }
 
       const float fromOpacity =
           strand.from.isCell() ? 1.0F
@@ -1671,12 +1671,12 @@ void LinkBeams::drawFrame(gleditor::FrameContext &ctx) {
         continue;
       }
 
-      const std::size_t docSpan =
-          (tStrand.from.isDocument() && tStrand.to.isDocument())
-              ? (tStrand.from.doc > tStrand.to.doc
-                     ? (tStrand.from.doc - tStrand.to.doc)
-                     : (tStrand.to.doc - tStrand.from.doc))
-              : 1;
+      std::size_t docSpan = 1;
+      if (tStrand.from.isDocument() && tStrand.to.isDocument()) {
+        docSpan = tStrand.from.doc > tStrand.to.doc
+                      ? (tStrand.from.doc - tStrand.to.doc)
+                      : (tStrand.to.doc - tStrand.from.doc);
+      }
 
       const float fromOpacity =
           tStrand.from.isCell()

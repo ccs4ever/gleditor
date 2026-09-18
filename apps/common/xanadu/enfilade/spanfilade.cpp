@@ -135,11 +135,7 @@ void ScrollSpanfilade::stabNode(const uint32_t nodeIdx, const int64_t parentDsp,
       if (entryIdx < entries_.size()) {
         const auto &entry = entries_[entryIdx];
         const auto eStart =
-            (effectiveDsp >= 0)
-                ? (entry.start + static_cast<uint64_t>(effectiveDsp))
-                : (entry.start > static_cast<uint64_t>(-effectiveDsp)
-                       ? entry.start - static_cast<uint64_t>(-effectiveDsp)
-                       : static_cast<uint64_t>(0));
+            detail::shiftClampingToZero(entry.start, effectiveDsp);
         const auto eEnd = eStart + entry.length;
         if (std::max(qStart, eStart) < std::min(qEnd, eEnd)) {
           results.push_back(entry);

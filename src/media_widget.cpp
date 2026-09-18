@@ -581,10 +581,12 @@ void MediaWidget::drawFrame(FrameContext &ctx) {
     canvas_->addLine(btnX, btnY + btnH, btnX + btnW, btnY + btnH, 1.0F,
                      buttonBorder);
     const std::string label = ctrl.getLabel ? ctrl.getLabel() : ctrl.id;
-    const float textOffset =
-        (ctrl.tagOffset == tagVolume || ctrl.tagOffset == tagPlay)
-            ? 7.0F
-            : (ctrl.tagOffset == tagSpeed ? 4.0F : 10.0F);
+    float textOffset        = 10.0F;
+    if (ctrl.tagOffset == tagVolume || ctrl.tagOffset == tagPlay) {
+      textOffset = 7.0F;
+    } else if (ctrl.tagOffset == tagSpeed) {
+      textOffset = 4.0F;
+    }
     canvas_->addText(ctx.state, btnX + textOffset, btnY + btnH - 6.0F, label,
                      buttonText, buttonBg);
     btnX += btnW + 6.0F;

@@ -758,12 +758,18 @@ bool VQLEngine::compareValues(const zigzag::vortex::CellValue &left, CompOp op,
   }
 
   // String comparison fallback
-  std::string lStr = std::holds_alternative<std::string>(left)
-                         ? std::get<std::string>(left)
-                         : (leftNum ? std::to_string(lD) : "");
-  std::string rStr = std::holds_alternative<std::string>(right)
-                         ? std::get<std::string>(right)
-                         : (rightNum ? std::to_string(rD) : "");
+  std::string lStr;
+  if (std::holds_alternative<std::string>(left)) {
+    lStr = std::get<std::string>(left);
+  } else if (leftNum) {
+    lStr = std::to_string(lD);
+  }
+  std::string rStr;
+  if (std::holds_alternative<std::string>(right)) {
+    rStr = std::get<std::string>(right);
+  } else if (rightNum) {
+    rStr = std::to_string(rD);
+  }
 
   switch (op) {
   case CompOp::Equal:

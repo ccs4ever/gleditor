@@ -2007,9 +2007,10 @@ std::vector<CellValue> VortexStdLib::call(CellRef fnOp,
           args.empty() ? noCell : static_cast<CellRef>(toInt64(args[0]));
       DimRef dim =
           args.size() > 1 ? static_cast<DimRef>(toInt64(args[1])) : noCell;
-      DimVector dir = args.size() > 2 ? (toInt64(args[2]) < 0 ? DimVector::NEG
-                                                              : DimVector::POS)
-                                      : DimVector::POS;
+      DimVector dir = DimVector::POS;
+      if (args.size() > 2 && toInt64(args[2]) < 0) {
+        dir = DimVector::NEG;
+      }
       return {static_cast<std::int64_t>(zzStep(cursor, dim, dir))};
     }
     if (opName == "#ZZ_INSERT") {
@@ -2017,9 +2018,10 @@ std::vector<CellValue> VortexStdLib::call(CellRef fnOp,
           args.empty() ? noCell : static_cast<CellRef>(toInt64(args[0]));
       DimRef dim =
           args.size() > 1 ? static_cast<DimRef>(toInt64(args[1])) : noCell;
-      DimVector dir = args.size() > 2 ? (toInt64(args[2]) < 0 ? DimVector::NEG
-                                                              : DimVector::POS)
-                                      : DimVector::POS;
+      DimVector dir = DimVector::POS;
+      if (args.size() > 2 && toInt64(args[2]) < 0) {
+        dir = DimVector::NEG;
+      }
       std::string text =
           args.size() > 3 && std::holds_alternative<std::string>(args[3])
               ? std::get<std::string>(args[3])
@@ -2031,9 +2033,10 @@ std::vector<CellValue> VortexStdLib::call(CellRef fnOp,
           args.empty() ? noCell : static_cast<CellRef>(toInt64(args[0]));
       DimRef dim =
           args.size() > 1 ? static_cast<DimRef>(toInt64(args[1])) : noCell;
-      DimVector dir = args.size() > 2 ? (toInt64(args[2]) < 0 ? DimVector::NEG
-                                                              : DimVector::POS)
-                                      : DimVector::POS;
+      DimVector dir = DimVector::POS;
+      if (args.size() > 2 && toInt64(args[2]) < 0) {
+        dir = DimVector::NEG;
+      }
       return {static_cast<std::int64_t>(zzUnlink(cursor, dim, dir))};
     }
     if (opName == "#ZZ_LINK") {
@@ -2043,9 +2046,10 @@ std::vector<CellValue> VortexStdLib::call(CellRef fnOp,
           args.size() > 1 ? static_cast<CellRef>(toInt64(args[1])) : noCell;
       DimRef dim =
           args.size() > 2 ? static_cast<DimRef>(toInt64(args[2])) : noCell;
-      DimVector dir = args.size() > 3 ? (toInt64(args[3]) < 0 ? DimVector::NEG
-                                                              : DimVector::POS)
-                                      : DimVector::POS;
+      DimVector dir = DimVector::POS;
+      if (args.size() > 3 && toInt64(args[3]) < 0) {
+        dir = DimVector::NEG;
+      }
       return {static_cast<std::int64_t>(zzLink(cellA, cellB, dim, dir))};
     }
     if (opName == "#ZZ_DELETE") {
@@ -4101,9 +4105,10 @@ CellRef VortexStdLib::importModuleFromStore(const xanadu::Store &srcStore) {
       }
     }
   }
-  return firstModuleCell != noCell
-             ? firstModuleCell
-             : (cellMapping.empty() ? noCell : cellMapping.begin()->second);
+  if (firstModuleCell != noCell) {
+    return firstModuleCell;
+  }
+  return cellMapping.empty() ? noCell : cellMapping.begin()->second;
 }
 
 CellRef VortexStdLib::bridgeDocText(const xanadu::Store &store) {

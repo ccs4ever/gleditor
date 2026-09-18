@@ -146,7 +146,10 @@ void unfilterRow(const std::uint8_t filterType, std::vector<std::uint8_t> &row,
   for (std::size_t i = 0; i < row.size(); ++i) {
     const int a = (i >= bpp) ? row[i - bpp] : 0;
     const int b = prevRow.empty() ? 0 : prevRow[i];
-    const int c = (i >= bpp) ? (prevRow.empty() ? 0 : prevRow[i - bpp]) : 0;
+    int c       = 0;
+    if (i >= bpp && !prevRow.empty()) {
+      c = prevRow[i - bpp];
+    }
     switch (filterType) {
     case 0: // None
       break;

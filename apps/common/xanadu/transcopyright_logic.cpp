@@ -147,25 +147,28 @@ TranscopyrightLogic::inspectHoles(const Store &st, const Version &version,
         continue;
       }
 
-      const auto reason =
-          res.holeRecord
-              ? res.holeRecord->reason
-              : (segment.holeRecord
-                     ? segment.holeRecord->reason
-                     : (res.status == ResolutionStatus::TranscopyrightLocked
-                            ? HoleReason::TranscopyrightLock
-                            : HoleReason::Withheld));
+      HoleReason reason{};
+      if (res.holeRecord) {
+        reason = res.holeRecord->reason;
+      } else if (segment.holeRecord) {
+        reason = segment.holeRecord->reason;
+      } else if (res.status == ResolutionStatus::TranscopyrightLocked) {
+        reason = HoleReason::TranscopyrightLock;
+      } else {
+        reason = HoleReason::Withheld;
+      }
       const auto colour =
           (res.status == ResolutionStatus::TranscopyrightLocked ||
            reason == HoleReason::TranscopyrightLock)
               ? kTranscopyrightColour
               : colourForHole(reason);
 
-      const auto lockDescriptor =
-          res.lockInfo.has_value()
-              ? res.lockInfo
-              : (segment.holeRecord ? segment.holeRecord->transcopyright
-                                    : std::nullopt);
+      std::optional<TranscopyrightDescriptor> lockDescriptor;
+      if (res.lockInfo.has_value()) {
+        lockDescriptor = res.lockInfo;
+      } else if (segment.holeRecord) {
+        lockDescriptor = segment.holeRecord->transcopyright;
+      }
 
       for (const auto &extent : version.occurrencesOf(piece)) {
         const auto docCharStart =

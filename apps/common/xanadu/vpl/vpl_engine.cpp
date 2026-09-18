@@ -1002,12 +1002,12 @@ VplView VPLEngine::applyDyadicVerb(TokenKind verb, const VplView &left,
 
   // ∊ (Member)
   if (verb == TokenKind::Member) {
-    auto rightCells = right.collectCells(arena());
-    double targetVal =
-        left.isScalar()
-            ? (left.isFloat() ? left.scalarFloat()
-                              : static_cast<double>(left.scalarInt()))
-            : 0.0;
+    auto rightCells  = right.collectCells(arena());
+    double targetVal = 0.0;
+    if (left.isScalar()) {
+      targetVal = left.isFloat() ? left.scalarFloat()
+                                 : static_cast<double>(left.scalarInt());
+    }
     bool found = false;
     for (zigzag::CellRef rc : rightCells) {
       if (cellValueDouble(rc) == targetVal) {

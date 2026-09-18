@@ -1907,8 +1907,10 @@ void Session::markDecorated(const std::size_t docIndex, const std::uint32_t at,
     }
   }
 
-  const auto effLen =
-      (end > start) ? (end - start) : (length > 0 ? length : 1U);
+  std::uint32_t effLen = length > 0 ? length : 1U;
+  if (end > start) {
+    effLen = end - start;
+  }
   const auto content =
       st.rebuild(open[docIndex].version).spansFor(start, effLen);
   if (content.empty()) {
@@ -1972,8 +1974,10 @@ void Session::setAlignment(const std::size_t docIndex, const std::uint32_t at,
     }
   }
 
-  const auto effLen =
-      (end > start) ? (end - start) : (length > 0 ? length : 1U);
+  std::uint32_t effLen = length > 0 ? length : 1U;
+  if (end > start) {
+    effLen = end - start;
+  }
   const auto content =
       st.rebuild(open[docIndex].version).spansFor(start, effLen);
   if (content.empty()) {

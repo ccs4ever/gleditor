@@ -232,6 +232,21 @@ std::filesystem::path systemDocDirectory(const SystemDocKind kind) {
 
 namespace {
 
+// A zero parent means "start from whatever the store already points at, or
+// genesis if it has no current version yet" -- the shared fallback every
+// ensure*() entry point needs before it can decide whether genesis has to
+// run first.
+MicroversionId resolveStartingVersion(const Store &store,
+                                      const MicroversionId &parent) {
+  if (!parent.isZero()) {
+    return parent;
+  }
+  if (store.currentVersions().empty()) {
+    return MicroversionId{};
+  }
+  return store.currentVersions().front();
+}
+
 std::vector<std::string> splitTokens(const std::string_view str,
                                      const char delim) {
   std::vector<std::string> tokens;
@@ -1142,10 +1157,7 @@ std::vector<SettingSpec> defaultSettingSpecs(const SystemDocKind kind) {
 MicroversionId initializeSystemStoreGenesis(Store &store,
                                             const SystemDocKind kind,
                                             const MicroversionId &parent) {
-  auto cur = parent.isZero() ? (store.currentVersions().empty()
-                                    ? MicroversionId{}
-                                    : store.currentVersions().front())
-                             : parent;
+  auto cur = resolveStartingVersion(store, parent);
   if (store.homeCell() == zigzag::noCell) {
     cur = store.sliceGenesis(cur);
   }
@@ -1236,10 +1248,7 @@ MicroversionId initializeSystemStoreGenesis(Store &store,
 MicroversionId ensureSetting(Store &store, const MicroversionId &parent,
                              const SettingSpec &spec,
                              const zigzag::Manifold *const known) {
-  auto cur = parent.isZero() ? (store.currentVersions().empty()
-                                    ? MicroversionId{}
-                                    : store.currentVersions().front())
-                             : parent;
+  auto cur = resolveStartingVersion(store, parent);
   if (store.homeCell() == zigzag::noCell) {
     cur = initializeSystemStoreGenesis(store, SystemDocKind::Layout, cur);
   }
@@ -1495,10 +1504,7 @@ MicroversionId ensureSetting(Store &store, const MicroversionId &parent,
 
 MicroversionId ensureAllSettings(Store &store, const MicroversionId &parent,
                                  const SystemDocKind kind) {
-  auto cur = parent.isZero() ? (store.currentVersions().empty()
-                                    ? MicroversionId{}
-                                    : store.currentVersions().front())
-                             : parent;
+  auto cur = resolveStartingVersion(store, parent);
   if (store.homeCell() == zigzag::noCell) {
     cur = initializeSystemStoreGenesis(store, kind, cur);
   }

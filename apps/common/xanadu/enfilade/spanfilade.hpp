@@ -96,20 +96,29 @@ struct SpanWid {
   bool operator==(const SpanWid &) const = default;
 };
 
+namespace detail {
+// Shifts a coordinate by delta, clamping to 0 instead of wrapping when a
+// negative delta's magnitude exceeds value -- a span displaced further
+// negward than its own position has no negative-coordinate meaning here.
+[[nodiscard]] inline uint64_t
+shiftClampingToZero(const uint64_t value, const int64_t delta) noexcept {
+  if (delta >= 0) {
+    return value + static_cast<uint64_t>(delta);
+  }
+  const auto magnitude = static_cast<uint64_t>(-delta);
+  if (value <= magnitude) {
+    return 0ULL;
+  }
+  return value - magnitude;
+}
+} // namespace detail
+
 inline SpanWid SpanDsp::act(const SpanWid &w) const noexcept {
   if (w.isEmpty() || 0 == delta) {
     return w;
   }
-  const auto newMin = (delta >= 0)
-                          ? (w.minStart + static_cast<uint64_t>(delta))
-                          : (w.minStart > static_cast<uint64_t>(-delta)
-                                 ? w.minStart - static_cast<uint64_t>(-delta)
-                                 : 0ULL);
-  const auto newMax = (delta >= 0)
-                          ? (w.maxEnd + static_cast<uint64_t>(delta))
-                          : (w.maxEnd > static_cast<uint64_t>(-delta)
-                                 ? w.maxEnd - static_cast<uint64_t>(-delta)
-                                 : 0ULL);
+  const auto newMin = detail::shiftClampingToZero(w.minStart, delta);
+  const auto newMax = detail::shiftClampingToZero(w.maxEnd, delta);
   return SpanWid{.minStart = newMin, .maxEnd = newMax, .count = w.count};
 }
 

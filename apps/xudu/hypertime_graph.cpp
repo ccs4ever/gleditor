@@ -309,10 +309,10 @@ void HypertimeGraph::layout(RenderState & /*unused*/, const float screenW,
   // Build edges: versions with parent.isZero() connect from Genesis (index 0).
   for (std::size_t i = 1; i < nodes_.size(); ++i) {
     const auto &parent = nodes_[i].id.parent();
-    const auto pIdx =
-        parent.isZero()
-            ? 0U
-            : (nodeIndices.contains(parent) ? nodeIndices[parent] : 0U);
+    std::size_t pIdx   = 0U;
+    if (!parent.isZero() && nodeIndices.contains(parent)) {
+      pIdx = nodeIndices[parent];
+    }
     childrenMap[nodes_[pIdx].id].push_back(i);
 
     GraphEdge edge;
@@ -472,16 +472,28 @@ void HypertimeGraph::drawFrame(gleditor::FrameContext &ctx) {
                0xFFD700FF, 1.5F);
     }
 
+    const auto pickByState = [isCur, isComp](const std::uint32_t curVal,
+                                             const std::uint32_t compVal,
+                                             const std::uint32_t defaultVal) {
+      if (isCur) {
+        return curVal;
+      }
+      if (isComp) {
+        return compVal;
+      }
+      return defaultVal;
+    };
+
     const std::uint32_t fillCol =
-        isCur ? 0x064E3BFF : (isComp ? 0x78350FFF : 0x1E293BFF);
+        pickByState(0x064E3BFF, 0x78350FFF, 0x1E293BFF);
     const std::uint32_t borderCol =
-        isCur ? 0x10B981FF : (isComp ? 0xF59E0BFF : 0x64748BFF);
+        pickByState(0x10B981FF, 0xF59E0BFF, 0x64748BFF);
     drawDisc(*canvas_, n.x, n.y, n.radius, fillCol, borderCol, 1.5F);
 
     const std::string letterStr(1, n.opLetter);
     const auto m = canvas_->measureText(letterStr);
     const std::uint32_t letterCol =
-        isCur ? 0x6EE7B7FF : (isComp ? 0xFDE68AFF : 0xF1F5F9FF);
+        pickByState(0x6EE7B7FF, 0xFDE68AFF, 0xF1F5F9FF);
     canvas_->addText(ctx.state, n.x - m.width * 0.5F,
                      n.y + m.height * 0.5F - 2.0F, letterStr, letterCol, 0);
 

@@ -22,12 +22,15 @@ namespace {
 /// to be describable, and refusing to describe it would lose the whole
 /// document rather than one character of it.
 std::size_t characterAt(const std::string_view text, const std::size_t at) {
-  const auto lead         = static_cast<unsigned char>(text[at]);
-  const std::size_t bytes = lead < 0x80U   ? 1U
-                            : lead < 0xC0U ? 1U
-                            : lead < 0xE0U ? 2U
-                            : lead < 0xF0U ? 3U
-                                           : 4U;
+  const auto lead   = static_cast<unsigned char>(text[at]);
+  std::size_t bytes = 4U;
+  if (lead < 0x80U || lead < 0xC0U) {
+    bytes = 1U;
+  } else if (lead < 0xE0U) {
+    bytes = 2U;
+  } else if (lead < 0xF0U) {
+    bytes = 3U;
+  }
   // A sequence running off the end is as long as what is left of the string.
   return std::min(bytes, text.size() - at);
 }
