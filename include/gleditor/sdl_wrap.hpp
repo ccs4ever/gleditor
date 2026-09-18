@@ -12,12 +12,18 @@
 /// A function-like macro rather than a constexpr helper because it declares
 /// deleted special member functions, which must be written as actual member
 /// declarations inside the class body -- a function cannot inject those.
+// Type names a class, not a value, at every use below -- wrapping it in
+// parentheses (as bugprone-macro-parentheses' fix would) turns
+// "Type &operator=(...)" into "(Type) &operator=(...)", which doesn't
+// compile.
+// NOLINTBEGIN(bugprone-macro-parentheses)
 // NOLINTNEXTLINE(cppcoreguidelines-macro-usage)
 #define GLEDITOR_NON_COPYABLE(Type)                                            \
   Type(const Type &)            = delete;                                      \
   Type &operator=(const Type &) = delete;                                      \
   Type(Type &&)                 = delete;                                      \
   Type &operator=(Type &&)      = delete
+// NOLINTEND(bugprone-macro-parentheses)
 
 struct AutoSDL {
   std::uint32_t flags;
